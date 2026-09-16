@@ -1,7 +1,8 @@
 """真盘 IO、原子写入、备份/还原与盘枚举。"""
 import os, sys, glob, re, time, errno, hashlib, subprocess
 
-from .common import SECTOR, fmt_gb
+from .common import SECTOR, fmt_gb, restore_cmd
+from .sectors import looks_nopwd
 
 def _raw_path(disk):
     return f'/dev/rdisk{disk}'
@@ -186,6 +187,16 @@ def migrate_backup_names(bak_dir):
     return renamed
 
 
+def backup_is_nopwd(path, device_id):
+    """备份文件是否为免密状态快照(按内容检测, 与文件名无关)。"""
+    try:
+        with open(path, 'rb') as f:
+            data = f.read(14 * SECTOR)
+        return looks_nopwd(lambda lba: data[lba*SECTOR:(lba+1)*SECTOR], device_id)
+    except OSError:
+        return False
+
+
 def backup_disk(disk, device_id, n=14):
     bak_dir = backup_dir()
     os.makedirs(bak_dir, exist_ok=True)
@@ -196,14 +207,19 @@ def backup_disk(disk, device_id, n=14):
     vid, pid = _usb_vid_pid(disk)
     onlyid = _disk_label_id(disk)
     onlyid_part = f'_onlyid{onlyid}' if onlyid else ''
-    base = f'disk{disk}_{secs}_vid{vid}_pid{pid}_{device_id}{onlyid_part}_{ts}'
+    # 免密状态快照打 _nopwd 标: 区别于加密原盘备份, 防止还原时拿错
+    state_part = '_nopwd' if looks_nopwd(lambda lba: data[lba*SECTOR:(lba+1)*SECTOR],
+                                         device_id) else ''
+    base = f'disk{disk}_{secs}_vid{vid}_pid{pid}_{device_id}{onlyid_part}{state_part}_{ts}'
     path = os.path.join(bak_dir, base + '.bin')
     with open(path, 'wb') as f:
         f.write(data)
     with open(path + '.md5', 'w') as f:
         f.write(hashlib.md5(data).hexdigest() + '\n')
     print(f'备份: {path}')
-    print(f'还原: python3 -m nopwd --restore "{path}"')
+    if state_part:
+        print('注意: 本份备份为【免密状态】快照 — 还原它不会回到加密原盘。')
+    print(f'还原: {restore_cmd(path, disk=disk, apply=True)}')
     return path
 
 def find_backups(disk, device_id=None):
@@ -244,8 +260,9 @@ def find_backups(disk, device_id=None):
 # ══════════════════════════════════════════════════════════════════
 # 4. 盘枚举 + 快照读取
 # ══════════════════════════════════════════════════════════════════
-def list_usb_disks():
-    """枚举外部 USB 整盘 → [(disk号, 字节数, vid, pid)]; 系统盘(disk<2)不进入候选。"""
+def list_external_disks():
+    """枚举全部外接整盘(disk≥2) → [(disk号, 字节数, vid, pid, 总线协议)]。
+    非USB盘 vid/pid='xxxx'; 系统盘(disk<2)与虚拟盘(DMG等)不进入。"""
     import plistlib
     disks = []
     try:
@@ -265,11 +282,19 @@ def list_usb_disks():
                 ['diskutil', 'info', '-plist', name], timeout=10))
         except Exception:
             continue
-        if not info.get('WholeDisk') or info.get('Internal') or info.get('BusProtocol') != 'USB':
+        if not info.get('WholeDisk') or info.get('Internal'):
             continue
+        if info.get('VirtualOrPhysical') == 'Virtual':
+            continue                                   # DMG 等虚拟盘, 非物理介质
+        proto = info.get('BusProtocol') or '?'
         size = info.get('TotalSize') or info.get('DiskSize') or info.get('Size') or 0
-        disks.append((n, size, *_usb_vid_pid(n)))
+        vid, pid = _usb_vid_pid(n) if proto == 'USB' else ('xxxx', 'xxxx')
+        disks.append((n, size, vid, pid, proto))
     return disks
+
+def list_usb_disks():
+    """本工具可操作的外接 USB 整盘子集(供 auto_pick_disk)。"""
+    return [d for d in list_external_disks() if d[4] == 'USB']
 
 def auto_pick_disk():
     """自动选定 USB 盘: 唯一候选直接用, 多个交互选择。返回 disk 号。"""

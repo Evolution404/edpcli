@@ -5,10 +5,24 @@
 ## 快速使用（Makefile）
 
 ```bash
-make test      # 测试套件（不碰真盘）
-make run       # 预览改造（dry-run，自动检测 USB 盘；ARGS="--disk 4" 指定盘号）
-make apply     # 实际写入（自动备份 → 原子写入 → 读回校验）
-make restore   # 列出本盘匹配的备份
+make test                        # 测试套件（不碰真盘）
+make list                        # 列出外接盘：编号/容量/接口/cems 识别/备份份数
+make run                         # 预览改造（dry-run，自动检测 USB 盘）
+make run DISK=4                  # 预览指定盘
+make apply                       # 实际写入（自动备份 → 原子写入 → 读回校验）
+make apply DISK=4 SIZE=100       # 指定盘 + Share 100GB
+make apply FORCE=1               # 盘已是免密盘仍强制重写（默认拒绝；也可 make apply -- --force，
+                                 #   注意 make apply --force 无效 —— --force 会被 make 当作自己的选项）
+make restore                     # 列出本盘匹配的备份（唯一备份时命令直填路径）
+make restore RESTORE=<备份.bin>  # 还原预检（MD5 校验 + 预览）
+make restore RESTORE=<备份.bin> APPLY=1   # 还原写入
+```
+
+任意参数原样透传（`--` 之后的内容直接交给工具；不加 `--` 的话 `--disk` 会被
+make 当成自己的选项吞掉）：
+
+```bash
+make run -- --disk 4 --size 100
 ```
 
 等价的原始命令（`python3 -m nopwd`）：
@@ -20,6 +34,7 @@ sudo python3 -m nopwd --disk 4           # 也可手动指定盘号
 sudo python3 -m nopwd --restore          # 列出本盘匹配的备份，不写入
 sudo python3 -m nopwd --restore <备份.bin>          # 还原预检（MD5 校验 + 预览）
 sudo python3 -m nopwd --restore <备份.bin> --apply  # 还原写入（YES 确认后执行）
+python3 -m nopwd --list           # 列出外接盘（sudo 下可多显示 cems 识别/备份）
 python3 -m nopwd --dir <快照目录> --id <device_id> [--out <输出目录>]  # 离线验证
 ```
 
@@ -83,6 +98,19 @@ USB 盘硬件不提供跨扇区事务，`--apply` / `--restore` 的写入按四�
    `--restore` 从备份文件还原（写前 `backup_disk` 已先落盘一份备份）。
 
 每次写入均检查 `pwrite` 完整返回值（短写会静默丢数据）。
+
+## 重复 --apply 的行为（幂等 + 防误操作）
+
+对已改造的免密盘再次 `--apply`：转换是幂等的（四个扇区产物与首次逐字节一致，
+实测三种型号），重写无害 —— 但工具默认**拒绝**：
+
+- **检测**：LBA6（0x1CA 模板值，部分型号无区分度）/ MBR（分区1 type=0x07@63）/
+  LBA12（解密后 entry0=Share@63+enc=1，entry1=Encrypt 指针 active=1，entry2 已清零）
+  三处信号须同时成立。主信号是 LBA12 表结构：加密原盘恒为 3 条 EDPF
+  （aigo 原盘 entry0 也是 type=2@63，故不能只看 type/start）。
+- 拒绝时提示加 `--force`（make：`FORCE=1`）；强制重写时自动备份的文件名含
+  `_nopwd_` 段，`--restore` 列表中该项标注 `[免密状态]` —— 还原它不会回到
+  加密原盘，加密原盘备份是更早时间戳那份。备份打标按**内容**检测（与文件名无关）。
 
 ## 内置加密算法（逆向 cemsusbregsiter.dll / sectormanage64.dll）
 

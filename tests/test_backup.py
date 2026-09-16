@@ -80,19 +80,21 @@ class TestFindBackups(unittest.TestCase):
         open(fake, 'wb').write(load_disk_image('lexar'))
         for p in (real, fake):
             open(p + '.md5', 'w').write('\n')
-        for m in self.ctx(): m.start()
+        patches = self.ctx()                    # start/stop 必须同一组, 否则泄漏
+        for m in patches: m.start()
         try:
             found = diskio.find_backups(99, NETAC_ID)
         finally:
-            for m in self.ctx(): m.stop()
+            for m in patches: m.stop()
         self.assertEqual(found, [real])
 
     def test_no_match_returns_empty(self):
-        for m in self.ctx(): m.start()
+        patches = self.ctx()
+        for m in patches: m.start()
         try:
             self.assertEqual(diskio.find_backups(99, NETAC_ID), [])
         finally:
-            for m in self.ctx(): m.stop()
+            for m in patches: m.stop()
 
 @unittest.skipIf(fixture_bin('netac') is None, '真实备份不可用')
 class TestBackupDisk(unittest.TestCase):

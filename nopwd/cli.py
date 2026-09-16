@@ -1,24 +1,61 @@
 """命令行入口。
 
 用法:
+  列出外接盘(不写入):   python3 -m nopwd --list   # sudo 可多显示 cems 识别/备份
   离线(快照目录, 供验证): python3 -m nopwd --dir <快照目录> --id <device_id> [--out <目录>]
   真盘 dry-run:          sudo python3 -m nopwd [--disk N] [--size GB]  # N 缺省自动检测 USB 盘
   真盘写入:             sudo python3 -m nopwd --apply
   列出本盘备份(不写入): sudo python3 -m nopwd --restore
   还原预检(不写入):     sudo python3 -m nopwd --restore <备份.bin>
   还原写入(须 --apply): sudo python3 -m nopwd --restore <备份.bin> --apply
-  (Makefile 提供 make run / make apply / make restore 等快捷目标)
+  (Makefile 提供 make list / run / apply / restore 等快捷目标)
 
 实测记录(2026-08-27, 均内网免密成功): aigo U335 128G / aigo U320 32G /
 Kingston DT3.0 64G (每盘改前自动备份, 可随时 --restore 还原)。
 """
 import os, sys, argparse, hashlib, subprocess, time
 
-from .common import SECTOR, fmt_gb
-from .sectors import convert
+from .common import SECTOR, fmt_gb, restore_cmd, apply_cmd, via_make
+from .sectors import convert, looks_nopwd
 from .identify import identify
-from .diskio import (backup_disk, find_backups, atomic_write_sectors, read_lba_file,
-                     read_lba_disk, _disk_total_sectors, _usb_vid_pid, auto_pick_disk)
+from .diskio import (backup_disk, backup_is_nopwd, find_backups, atomic_write_sectors,
+                     read_lba_file, read_lba_disk, list_external_disks, _disk_label_id,
+                     _disk_total_sectors, _usb_vid_pid, auto_pick_disk)
+
+def scan_disks():
+    """外接盘一览数据: 编号/容量/接口; USB 盘再尽力识别 cems 身份与备份份数。
+    未 sudo 时 raw 设备无读权限 → denied=True(基本列仍可显示)。"""
+    rows = []
+    for n, size, vid, pid, proto in list_external_disks():
+        row = dict(disk=n, size=size, vid=vid, pid=pid, proto=proto,
+                   device_id=None, onlyid=None, n_baks=0, denied=False)
+        if proto == 'USB':
+            try:
+                did, _, _ = identify(n)
+                row['device_id'] = did
+                row['onlyid'] = _disk_label_id(n)
+                if did:
+                    row['n_baks'] = len(find_backups(n, did))
+            except OSError:
+                row['denied'] = True
+        rows.append(row)
+    return rows
+
+def print_disk_table(rows):
+    w = max(len(str(r['disk'])) for r in rows) if rows else 1
+    print(f'外接盘 {len(rows)} 个:' if rows else '未检测到外接盘。')
+    for r in rows:
+        head = f"  disk{r['disk']:<{w}}  {fmt_gb(r['size']):>8}  {r['proto']}"
+        if r['proto'] != 'USB':
+            print(f'{head}  (非USB, 本工具不支持)')
+        elif r['denied']:
+            print(f'{head} {r["vid"]}:{r["pid"]}  (加 sudo 可识别 cems 盘/备份)')
+        elif not r['device_id']:
+            print(f'{head} {r["vid"]}:{r["pid"]}  非cems盘')
+        else:
+            oid = f'  onlyid={r["onlyid"]}' if r['onlyid'] else ''
+            baks = f'  备份{r["n_baks"]}份' if r['n_baks'] else '  无备份'
+            print(f'{head} {r["vid"]}:{r["pid"]}  cems盘{oid}{baks}')
 
 def main():
     ap = argparse.ArgumentParser(
@@ -30,9 +67,17 @@ def main():
     ap.add_argument('--size', type=float, help='Share 大小 GB(默认占满到 Encrypt 前)')
     ap.add_argument('--out', help='输出改造后扇区目录(离线模式)')
     ap.add_argument('--apply', action='store_true', help='真盘实际写入(默认 dry-run)')
+    ap.add_argument('--force', action='store_true',
+                    help='已改造(免密)盘仍强制重写(默认拒绝, 实测重写幂等无害)')
     ap.add_argument('--restore', nargs='?', const='AUTO', metavar='[BIN]',
                     help='从备份还原 LBA0-13(不带值=自动匹配本盘最新备份)')
+    ap.add_argument('--list', action='store_true',
+                    help='列出外接盘: 编号/容量/接口/cems识别/备份(sudo 更全)')
     args = ap.parse_args()
+
+    if args.list:                                   # 只看盘, 不选盘不写盘
+        print_disk_table(scan_disks())
+        return
 
     if args.disk is None and not args.dir:
         args.disk = auto_pick_disk()
@@ -49,8 +94,11 @@ def main():
             print(f'disk{args.disk} 匹配备份 {len(baks)} 个(新→旧):')
             for b in baks:
                 mt = time.strftime('%Y-%m-%d %H:%M', time.localtime(os.path.getmtime(b)))
-                print(f'  {mt}  {b}')
-            print(f'\n还原执行: python3 -m nopwd --disk {args.disk} --restore "<上面任一路径>" --apply')
+                tag = '  [免密状态]' if backup_is_nopwd(b, did) else ''
+                print(f'  {mt}{tag}  {b}')
+            # 唯一备份直接把路径填进命令, 多个才用占位符
+            path_hint = baks[0] if len(baks) == 1 else '<上面任一路径>'
+            print(f'\n还原执行: {restore_cmd(path_hint, disk=args.disk, apply=True)}')
             return
         data = open(path, 'rb').read()
         if len(data) != 14 * SECTOR:
@@ -61,7 +109,18 @@ def main():
             if want != got:
                 sys.exit(f'错误: 备份 MD5 不符(期望 {want}, 实际 {got}) — 文件损坏?')
             print(f'MD5 校验通过: {got}')
+        try:
+            did_now, _, _ = identify(args.disk)
+            nopwd_snap = did_now and backup_is_nopwd(path, did_now)
+        except OSError:
+            nopwd_snap = False
         if not args.apply:
+            note = ('\n注意: 该备份为【免密状态】快照 — 还原后仍是免密盘, 不会回到加密原盘。'
+                    if nopwd_snap else '')
+            print(f'[dry-run] 将还原 {path} → disk{args.disk} LBA0-13 ({len(data)}B)。确认后加 --apply。{note}')
+            return
+        if nopwd_snap:
+            print('注意: 该备份为【免密状态】快照 — 还原后仍是免密盘, 不会回到加密原盘。')
             print(f'[dry-run] 将还原 {path} → disk{args.disk} LBA0-13 ({len(data)}B)。确认后加 --apply。')
             return
         if input(f'还原 {path} → disk{args.disk} LBA0-13? 输入 YES: ').strip() != 'YES':
@@ -108,9 +167,23 @@ def main():
     else:
         print('\n备份 : 尚无; --apply 时自动创建首个备份')
 
+    already = looks_nopwd(lambda lba: read_lba_disk(args.disk, lba), did)
+    if already:
+        print('\n提示: 该盘已是改造后的免密盘 — 再次写入只会重写相同内容(实测幂等)。')
     if not args.apply:
-        print('操作 : 以上为预览(dry-run), 未写盘。执行写入: sudo python3 -m nopwd --apply (或 sudo make apply)')
+        tail = ''
+        if already:
+            how = 'FORCE=1' if via_make() else '--force'
+            tail = f'(该盘已是免密盘, 须加 {how})'
+        print(f'操作 : 以上为预览(dry-run), 未写盘。执行写入: {apply_cmd(args.disk)}{tail}')
         return
+    if already and not args.force:
+        sys.exit('错误: 该盘已是免密盘, 拒绝重复写入(重写内容相同, 实测幂等无害)。'
+                 f'确需重写: {apply_cmd(args.disk, force=True)}')
+    if already:
+        print('--force: 继续重写。本次自动备份将标记为免密状态(文件名含 _nopwd); '
+              '加密原盘备份是更早时间戳那份。')
+
     backup_disk(args.disk, did)
     if input(f'将改写 disk{args.disk} LBA0/6/7/12/9。输入 YES: ').strip() != 'YES':
         sys.exit('已取消(未写盘)')

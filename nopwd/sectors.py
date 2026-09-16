@@ -109,7 +109,41 @@ def convert_lba12(raw, crc_key, share_sectors):
     return enc, bytes(dec)
 
 # ══════════════════════════════════════════════════════════════════
-# 3. 主转换
+# 3. 已改造(免密)盘检测
+# ══════════════════════════════════════════════════════════════════
+def looks_nopwd(read_fn, device_id):
+    """已是免密盘? LBA6 / MBR / LBA12 三处信号须同时成立(缺一即否):
+      LBA6  解密后 0x1CA 已是免密模板值 128480 (辅助信号: 实测 netac/lexar
+            原盘本就=128480 无区分度, 仅 aigo 原盘=20417 不同)
+      MBR   分区1 = type=0x07 @LBA63 带 55AA (原盘实测为 0x0e)
+      LBA12 以 device_id 派生 key 解密后: entry0=Share(type2,@63,active=1,enc=1),
+            entry1=Encrypt指针(type4,active=1), entry2 区已清零 (主信号:
+            原盘恒为 3 条 EDPF, entry0 enc=0, entry2 type4/active=0;
+            注意 aigo 原盘 entry0 也是 type=2@63, 故不能只看 type/start)"""
+    dec6 = lba6_decode(read_fn(6))
+    if struct.unpack_from('<I', dec6, 0x1CA)[0] != NOPWD_LBA6_1CA:
+        return False
+    mbr = read_fn(0)
+    if not (mbr[0x1BE + 4] == 0x07
+            and struct.unpack_from('<I', mbr, 0x1BE + 8)[0] == 63
+            and mbr[0x1FE:0x200] == b'\x55\xaa'):
+        return False
+    crc = crc32_bare(device_id.encode())
+    dec12 = a6b0_full(read_fn(12)[:EDPF_ENC_LEN], struct.pack('<I', crc), 0)
+    if dec12[:4] != b'EDPF':
+        return False
+    e0, e1 = dec12[0:E12], dec12[E12:2*E12]
+    ok_e0 = (struct.unpack_from('<I', e0, 0x0c)[0] == 2       # type=Share
+             and struct.unpack_from('<I', e0, 0x10)[0] == 1   # active
+             and struct.unpack_from('<I', e0, 0x14)[0] == 1   # enc 使能
+             and struct.unpack_from('<Q', e0, 0x18)[0] == 63)
+    ok_e1 = (e1[:4] == b'EDPF'
+             and struct.unpack_from('<I', e1, 0x0c)[0] == 4   # Encrypt/IIR 指针
+             and struct.unpack_from('<I', e1, 0x10)[0] == 1)  # active
+    return ok_e0 and ok_e1 and not any(dec12[2*E12:3*E12])
+
+# ══════════════════════════════════════════════════════════════════
+# 4. 主转换
 # ══════════════════════════════════════════════════════════════════
 def convert(read_fn, device_id, size_gb=None, verbose=True):
     crc = crc32_bare(device_id.encode())
