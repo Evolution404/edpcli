@@ -13,6 +13,9 @@
     其余扇区(LBA4/8/11 及全零保留区)一律不动
   三条铁律: EDPF 表尾终止符必须保留(LBA7@0xC0/LBA12@0x120);
             LBA12 尾部144B(0x170-0x200)不可清零; 不发明原盘没有的状态。
+  写入原子性(2026-09-16): 硬件无跨扇区事务, 以"单fd全程持有 + LBA0最后写 +
+  逐扇读回校验 + 失败自动回滚"逼近全有或全无 — 要么全部扇区写好且校验通过,
+  要么自动滚回写前原状(仅回滚本身也失败时才报中间态并指引 --restore)。
   分区参数按实际物理盘计算: Encrypt 从原盘 LBA12 type=4 读取, Share 占满其前。
 
 加密算法(逆向 cemsusbregsiter.dll / sectormanage64.dll 得到, 均内置于本文件):
@@ -34,7 +37,7 @@
 实测记录(2026-08-27, 均内网免密成功): aigo U335 128G / aigo U320 32G /
 Kingston DT3.0 64G (每盘改前自动备份, 可随时 --restore 还原)。
 """
-import os, sys, struct, argparse, glob, hashlib, subprocess, re, time
+import os, sys, struct, argparse, glob, hashlib, subprocess, re, time, errno
 
 SECTOR = 512
 LBA6_K0 = 0x4DAA            # LBA6 SAFE6 固定滚动 XOR key(跨盘通用)
@@ -389,25 +392,77 @@ def convert(read_fn, device_id, size_gb=None, verbose=True):
 # ══════════════════════════════════════════════════════════════════
 # 9. 真盘 IO + 备份/恢复
 # ══════════════════════════════════════════════════════════════════
+def _raw_path(disk):
+    return f'/dev/rdisk{disk}'
+
 def read_lba_disk(disk, lba):
-    fd = os.open(f'/dev/rdisk{disk}', os.O_RDONLY)
+    fd = os.open(_raw_path(disk), os.O_RDONLY)
     try:
         return os.pread(fd, SECTOR, lba * SECTOR)
     finally:
         os.close(fd)
 
-def write_lba_disk(disk, lba, data):
-    if len(data) != SECTOR: sys.exit(f'内部错误: 写入非 512 对齐 ({len(data)})')
-    # EBUSY(16) 重试: 写 LBA0 改 MBR 会触发 macOS 重扫/挂载新分区, 短暂独占 raw 设备
-    for i in range(15):  # 0.2s × 15 ≈ 3s
+def open_rdwr(disk, wait_s=10.0):
+    """以 O_RDWR 打开 raw 设备, 成功后由调用方持有到全部写完校验完。
+    EBUSY(16) 多发生在写 LBA0 改 MBR 后 macOS 重扫/挂载的瞬间; 单 fd 全程
+    持有、不再中途重开后, 该窗口即不复存在(旧版逐扇重开曾实测撞 EBUSY)。"""
+    deadline = time.monotonic() + wait_s
+    while True:
         try:
-            fd = os.open(f'/dev/rdisk{disk}', os.O_RDWR)
-            break
+            return os.open(_raw_path(disk), os.O_RDWR)
         except OSError as e:
-            if e.errno != 16 or i == 14: raise
+            if e.errno != errno.EBUSY or time.monotonic() >= deadline:
+                raise
             time.sleep(0.2)
+
+def pwrite_full(fd, data, offset):
+    """写满 data(处理短写; pwrite<=0 视为失败)。旧版不查返回值, 短写会静默丢数据。"""
+    mv, off = memoryview(data), offset
+    while len(mv):
+        n = os.pwrite(fd, mv, off)
+        if n <= 0:
+            raise OSError(errno.EIO, f'pwrite 未写完(offset {off:#x}, 剩 {len(mv)}B)')
+        mv, off = mv[n:], off + n
+
+def _write_and_verify(fd, sectors, order):
+    """按 order 逐扇写入 sectors={lba:512B}, 全部写完后逐扇读回比对。"""
+    for lba in order:
+        pwrite_full(fd, sectors[lba], lba * SECTOR)
+    for lba in sorted(sectors):
+        if os.pread(fd, SECTOR, lba * SECTOR) != sectors[lba]:
+            raise OSError(errno.EIO, f'LBA{lba} 读回校验不符')
+
+def atomic_write_sectors(disk, patch):
+    """全有或全无写盘(patch={lba:512B 新内容})。
+
+    USB 盘硬件没有跨扇区事务, 严格原子不可得; 本函数以四层逼近:
+      1) 单 fd 打开后全程持有 → 不存在中途重开撞 EBUSY/系统重扫的窗口;
+      2) LBA0(唯一改 MBR 的扇区)最后写 → 未到它之前系统视角的 MBR 仍是旧的;
+      3) 写完逐扇读回校验, 落盘与否以读回为准;
+      4) 任一失败 → 以写前内存镜像自动回滚全部扇区并再校验。
+    回滚成功 → 盘仍为写前状态, 可安全重试; 回滚失败 → 明确报告中间态,
+    指引重插后用 --restore 从备份文件还原(写前 backup_disk 已落盘一份)。"""
+    order = [l for l in sorted(patch) if l != 0] + ([0] if 0 in patch else [])
+    fd = open_rdwr(disk)
     try:
-        return os.pwrite(fd, data, lba * SECTOR)
+        mirror = {l: os.pread(fd, SECTOR, l * SECTOR) for l in patch}
+        try:
+            _write_and_verify(fd, patch, order)
+        except OSError as e:
+            print(f'!! 写入失败: {e}', file=sys.stderr)
+            print('!! 自动回滚到本次写前状态 ...', file=sys.stderr)
+            for i in range(3):
+                try:
+                    _write_and_verify(fd, mirror, order)
+                    break
+                except OSError as e2:
+                    if i == 2:
+                        sys.exit(f'错误: 回滚亦失败({e2}) — 盘处于中间状态! '
+                                 f'请重插后立即 sudo python3 {os.path.basename(__file__)} '
+                                 f'--restore 从备份还原。')
+                    time.sleep(0.5)
+            sys.exit('错误: 已完整回滚, 盘仍为写前状态(未改造)。'
+                     '可换 USB 口/线后重试, 或 --restore 走还原流程。')
     finally:
         os.close(fd)
 
@@ -662,9 +717,9 @@ def main():
         if input(f'还原 {path} → disk{args.disk} LBA0-13? 输入 YES: ').strip() != 'YES':
             sys.exit('已取消')
         subprocess.run(['diskutil', 'unmountDisk', 'force', f'disk{args.disk}'], capture_output=True)
-        for lba in range(14):
-            write_lba_disk(args.disk, lba, data[lba*SECTOR:(lba+1)*SECTOR])
-        print('已还原。请拔出重插。')
+        atomic_write_sectors(args.disk,
+                             {lba: data[lba*SECTOR:(lba+1)*SECTOR] for lba in range(14)})
+        print('已还原, 读回校验通过。请拔出重插。')
         return
 
     if args.dir:                                    # ── 离线模式 ──
@@ -710,15 +765,14 @@ def main():
     if input(f'将改写 disk{args.disk} LBA0/6/7/12/9。输入 YES: ').strip() != 'YES':
         sys.exit('已取消(未写盘)')
     subprocess.run(['diskutil', 'unmountDisk', 'force', f'disk{args.disk}'], capture_output=True)
-    # LBA0 最后写: 它是唯一改 MBR 的扇区, 写后 macOS 重扫/挂载会短暂锁盘(EBUSY),
-    # 放最后则没有后续写会被波及(2026-08-28 实测 LBA9 曾在旧写序下撞 EBUSY)
-    writes = [(6, 'lba6'), (7, 'lba7'), (12, 'lba12')]
+    # 写序由 atomic_write_sectors 保证: LBA0(唯一改 MBR 的扇区)最后写 —
+    # 写它才触发 macOS 重扫/挂载; 且单 fd 全程持有, 不再存在中途重开窗口
+    writes = {6: result['lba6'], 7: result['lba7'], 12: result['lba12']}
     if result['lba9'] is not None:
-        writes.append((9, 'lba9'))
-    writes.append((0, 'lba0'))
-    for lba, key in writes:
-        write_lba_disk(args.disk, lba, result[key])
-    print('已写入。请拔出 U 盘重新插入, 数据区格式化 exFAT/NTFS 即得免密可写区。')
+        writes[9] = result['lba9']
+    writes[0] = result['lba0']
+    atomic_write_sectors(args.disk, writes)
+    print('已写入, 读回校验通过。请拔出 U 盘重新插入, 数据区格式化 exFAT/NTFS 即得免密可写区。')
 
 
 if __name__ == '__main__':

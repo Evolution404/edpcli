@@ -47,6 +47,20 @@ device_id 自动识别（SCSI INQUIRY + 传输模式 → Windows InstanceId 中�
 三条铁律：EDPF 表尾终止符不清零；LBA12 尾部 144B 不清零；除必要字段外不发明
 原盘没有的状态。分区参数全部按实际物理盘计算（Encrypt 取自原盘 LBA12 type=4）。
 
+## 原子写入（全有或全无）
+
+USB 盘硬件不提供跨扇区事务，`--apply` / `--restore` 的写入按四层逼近原子语义：
+
+1. **单 fd 全程持有** — 打开一次 `/dev/rdiskN` 直到全部写完、校验完，不再逐扇
+   重开（旧版中途重开会撞 EBUSY，留下半写状态）；
+2. **LBA0 最后写** — 唯一改 MBR 的扇区，写它才触发 macOS 重扫/挂载；
+3. **逐扇读回校验** — 全部写完后 `pread` 比对，落盘与否以读回为准；
+4. **失败自动回滚** — 任一步失败，用写前内存镜像回滚全部扇区并再校验。
+   回滚成功 = 盘仍为原状可安全重试；回滚失败 = 明确报告中间态并指引
+   `--restore` 从备份文件还原（写前 `backup_disk` 已先落盘一份备份）。
+
+每次写入均检查 `pwrite` 完整返回值（旧版不查，短写会静默丢数据）。
+
 ## 内置加密算法（逆向 cemsusbregsiter.dll / sectormanage64.dll）
 
 - CRC32 bare：init=0、poly 0xEDB88320、无 final-xor
