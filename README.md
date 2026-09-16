@@ -1,28 +1,51 @@
-# nopwd_tool — cems 加密 U 盘 → 无密码盘（独立版）
+# nopwd_tool — cems 加密 U 盘 → 无密码盘
 
-单文件 `nopwd.py`，仅依赖 Python 3 标准库，无任何外部依赖。
+仅依赖 Python 3 标准库，无任何外部依赖。
 
-## 用法
+## 快速使用（Makefile）
 
 ```bash
-# 真盘改造（先 dry-run 看清将写入什么）
-sudo python3 nopwd.py                    # 自动检测 USB 盘，dry-run
-sudo python3 nopwd.py --apply            # 实际写入（自动备份 LBA0-13 到 ./backup/）
-sudo python3 nopwd.py --disk 4           # 也可手动指定盘号
-
-# 还原（先列出本盘匹配的备份，不写入）
-sudo python3 nopwd.py --restore
-# 还原预检（MD5 校验 + 预览，不写入）
-sudo python3 nopwd.py --restore <备份.bin>
-# 实际写入还原（必须 --apply，YES 确认后执行）
-sudo python3 nopwd.py --restore <备份.bin> --apply
-
-# 可选参数
-#   --size 100     Share 数据区大小 GB（默认占满到加密区之前）
-
-# 离线验证（对快照目录跑，不碰真盘）
-python3 nopwd.py --dir <快照目录> --id <device_id> [--out <输出目录>]
+make test      # 测试套件（不碰真盘）
+make run       # 预览改造（dry-run，自动检测 USB 盘；ARGS="--disk 4" 指定盘号）
+make apply     # 实际写入（自动备份 → 原子写入 → 读回校验）
+make restore   # 列出本盘匹配的备份
 ```
+
+等价的原始命令（`python3 -m nopwd`）：
+
+```bash
+sudo python3 -m nopwd                    # 自动检测 USB 盘，dry-run
+sudo python3 -m nopwd --apply            # 实际写入（自动备份 LBA0-13 到 backup/）
+sudo python3 -m nopwd --disk 4           # 也可手动指定盘号
+sudo python3 -m nopwd --restore          # 列出本盘匹配的备份，不写入
+sudo python3 -m nopwd --restore <备份.bin>          # 还原预检（MD5 校验 + 预览）
+sudo python3 -m nopwd --restore <备份.bin> --apply  # 还原写入（YES 确认后执行）
+python3 -m nopwd --dir <快照目录> --id <device_id> [--out <输出目录>]  # 离线验证
+```
+
+可选参数：`--size 100`（Share 数据区大小 GB，默认占满到加密区之前）。
+
+备份目录：环境变量 `NOPWD_BACKUP_DIR` 显式优先，缺省 `./backup`（相对当前目录）。
+Makefile 已把它固定为仓库 `backup/`。
+
+## 代码结构
+
+```
+nopwd/
+  common.py    公共常量（SECTOR）与容量显示
+  crypto.py    逆向 cemsusbregsiter.dll / sectormanage64.dll 得到的加密原语
+  sectors.py   扇区格式与转换（MBR / SAFE6 / EDPF），convert() 主编排
+  identify.py  device_id 识别（ioreg INQUIRY + 传输模式，LBA7 magic 判真）
+  diskio.py    真盘 IO、原子写入、备份/还原、盘枚举
+  cli.py       命令行入口（python3 -m nopwd）
+tests/         unittest 测试套件（make test）
+```
+
+分层无环：`common → crypto → sectors / diskio → identify → cli`。
+测试以**拆包前单文件版对真实盘备份的实测输出为金标**（三种型号 × 默认尺寸 +
+`--size` 路径的输出扇区 md5、CRC/K0、布局参数），锁死重构的行为零漂移；
+另覆盖原子写入三态（成功 / 中途失败自动回滚 / 读回不符回滚）、备份命名迁移、
+同型号他盘剔除（LBA4 终验）、CLI 端到端。真实备份缺位时相关用例自动跳过。
 
 device_id 自动识别（SCSI INQUIRY + 传输模式 → Windows InstanceId 中间段，
 两个候选用 LBA7 解出 EDPF magic 判真），无需手工输入。
@@ -59,7 +82,7 @@ USB 盘硬件不提供跨扇区事务，`--apply` / `--restore` 的写入按四�
    回滚成功 = 盘仍为原状可安全重试；回滚失败 = 明确报告中间态并指引
    `--restore` 从备份文件还原（写前 `backup_disk` 已先落盘一份备份）。
 
-每次写入均检查 `pwrite` 完整返回值（旧版不查，短写会静默丢数据）。
+每次写入均检查 `pwrite` 完整返回值（短写会静默丢数据）。
 
 ## 内置加密算法（逆向 cemsusbregsiter.dll / sectormanage64.dll）
 
