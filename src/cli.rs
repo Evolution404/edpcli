@@ -1,8 +1,9 @@
 //! 命令行入口: 子命令解析、自动提权、交互提示、各处理器。
 //!
 //! 用法:
+//!   nopwd                                     打印用法(裸命令不做任何动作)
 //!   nopwd list                                列出外接盘(不写入, 不提权)
-//!   nopwd run    [--disk N] [--size GB]       预览 dry-run(裸 nopwd 同义; 自动提权)
+//!   nopwd run    [--disk N] [--size GB]       预览 dry-run(自动提权)
 //!   nopwd apply  [--disk N] [--size GB] [--force] [--yes]   实际写入
 //!   nopwd restore [<备份.bin>] [--disk N] [--yes]           还原(缺省交互选择)
 //!   nopwd convert --dir <快照目录> --id <device_id> [--size GB] [--out <目录>]
@@ -101,7 +102,7 @@ pub fn print_usage() {
 
 子命令:
   list                              列出外接盘: 编号/容量/接口/cems识别/备份(无需 sudo)
-  run    [--disk N] [--size GB]     真盘预览 dry-run(缺省子命令; 需管理员, 自动 sudo)
+  run    [--disk N] [--size GB]     真盘预览 dry-run(需管理员, 自动 sudo)
   apply  [--disk N] [--size GB] [--force] [--yes]
                                    真盘实际写入(自动备份 LBA0-13 → 备份目录)
   restore [<备份.bin>] [--disk N] [--yes]
@@ -159,7 +160,7 @@ fn flag_name(a: &str) -> &str {
 pub fn parse_args(argv: &[String]) -> Result<Parsed, String> {
     let args: Vec<&String> = argv.iter().filter(|a| a.as_str() != ELEVATED_FLAG).collect();
     let Some(first) = args.first() else {
-        return Ok(Parsed::Run(DiskOpts::default())); // 裸 nopwd = run
+        return Ok(Parsed::Help); // 裸 nopwd: 打印用法, 不做任何动作
     };
     let rest: Vec<String> = args[1..].iter().map(|s| (*s).clone()).collect();
     match first.as_str() {
@@ -798,7 +799,8 @@ mod tests {
 
     #[test]
     fn parse_bare_and_subcommands() {
-        assert!(matches!(parse_args(&[]).unwrap(), Parsed::Run(_)));
+        // 裸 nopwd = 打印用法, 不进入任何需要提权的流程
+        assert!(matches!(parse_args(&[]).unwrap(), Parsed::Help));
         assert!(matches!(parse_args(&["help".into()]).unwrap(), Parsed::Help));
         assert!(matches!(parse_args(&["version".into()]).unwrap(), Parsed::Version));
         match parse_args(&["apply".into(), "--disk".into(), "6".into(), "--force".into(), "--yes".into()]).unwrap() {

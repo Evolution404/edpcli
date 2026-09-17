@@ -7,7 +7,7 @@
 ```bash
 cargo build --release            # 或 cargo install --path . 装入 ~/.cargo/bin
 ./target/release/nopwd list      # 列出外接盘：编号/容量/接口/cems 识别/备份份数（免 sudo）
-./target/release/nopwd run       # 预览改造（dry-run；缺省子命令，裸 nopwd 同义；自动检测 USB 盘）
+./target/release/nopwd run       # 预览改造（dry-run，自动检测 USB 盘）
 nopwd run --disk 4               # 指定盘（接受 4 / /dev/disk4 / /dev/rdisk4）
 nopwd apply                      # 实际写入（自动备份 → 原子写入 → 读回校验）
 nopwd apply --disk 4 --size 100  # 指定盘 + Share 100GB
