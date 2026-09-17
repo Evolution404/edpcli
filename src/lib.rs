@@ -19,4 +19,5 @@ pub mod completion;
 pub mod backup_catalog;
 pub mod backup_cli;
 pub mod disk_scan;
+pub mod cli_args;
 pub(crate) mod inspect_cli;
