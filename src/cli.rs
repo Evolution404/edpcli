@@ -87,7 +87,13 @@ pub struct DiskOpts {
 
 pub enum Parsed {
     List { backup_dir: Option<String> },
-    Backup { action: BackupAction, keep: usize, yes: bool, backup_dir: Option<String> },
+    Backup {
+        action: BackupAction,
+        keep: usize,
+        yes: bool,
+        onlyid: Option<String>,
+        backup_dir: Option<String>,
+    },
     Run(DiskOpts),
     Apply { opts: DiskOpts, force: bool, yes: bool },
     Restore { bin: Option<String>, disk: Option<u32>, yes: bool, backup_dir: Option<String> },
@@ -133,10 +139,11 @@ pub fn print_usage() {
     println!();
     println!("{}", bold("备份管理:"));
     for (n, d) in [
-        ("backup list", "跨盘分组总览 + 大小/MD5 健康检查"),
-        ("backup verify [备份.bin]", "校验全部或单份备份(7168 字节 + MD5)"),
-        ("backup prune [--keep N] [--yes]", "清理旧免密快照；默认仅预览，每盘默认保留最新 2 份"),
-        ("backup rm <路径|文件名>... [--yes]", "手动删除；默认预览并要求输入 YES"),
+        ("backup list [--onlyid ID]", "跨盘总览，或只查看指定盘；显示编号 + 真实文件名"),
+        ("backup verify [备份.bin] [--onlyid ID]", "校验全部、指定盘或单份备份(7168 字节 + MD5)"),
+        ("backup prune [--onlyid ID] [--keep N] [--yes]", "按策略清理全部盘或指定盘的旧免密快照"),
+        ("backup rm --onlyid ID [编号|范围]...", "按盘编号删除；无编号时进入交互选择"),
+        ("backup rm <路径|文件名>... [--yes]", "按文件精确删除；默认预览并要求输入 YES"),
     ] {
         println!("{}", flag(n, d));
     }
@@ -147,6 +154,7 @@ pub fn print_usage() {
         ("--size <GB>", "Share 大小(默认占满到 Encrypt 前)"),
         ("--force", "已改造(免密)盘仍强制重写(默认拒绝)"),
         ("--yes", "免交互(自动确认一切 YES 提示)"),
+        ("--onlyid <ID>", "backup 子命令按物理盘 onlyid 筛选"),
         ("--backup-dir <目录>", "备份目录(默认 $NOPWD_BACKUP_DIR、~/.nopwd.conf 或 ./backup)"),
     ] {
         println!("{}", flag(n, d));
@@ -192,6 +200,14 @@ fn parse_keep(s: &str) -> Result<usize, String> {
         .map_err(|_| format!("错误: --keep 超出范围: {}", s))
 }
 
+fn parse_onlyid(s: &str) -> Result<String, String> {
+    let digits = s.strip_prefix('-').unwrap_or(s);
+    if digits.is_empty() || !digits.bytes().all(|b| b.is_ascii_digit()) {
+        return Err(format!("错误: --onlyid 须为整数形式, 得到 {}", s));
+    }
+    Ok(s.to_string())
+}
+
 fn flag_name(a: &str) -> &str {
     a.split('=').next().unwrap_or(a)
 }
@@ -223,6 +239,7 @@ pub fn parse_args(argv: &[String]) -> Result<Parsed, String> {
             };
             let tail = &rest[1..];
             let mut backup_dir = None;
+            let mut onlyid = None;
             let mut keep = 2usize;
             let mut yes = false;
             let action = match action_name {
@@ -231,6 +248,10 @@ pub fn parse_args(argv: &[String]) -> Result<Parsed, String> {
                     while i < tail.len() {
                         match flag_name(&tail[i]) {
                             "--backup-dir" => backup_dir = Some(take_value(tail, &mut i, "--backup-dir")?),
+                            "--onlyid" => {
+                                let v = take_value(tail, &mut i, "--onlyid")?;
+                                onlyid = Some(parse_onlyid(&v)?);
+                            }
                             other => return Err(format!("错误: backup list 不认识选项 {}", other)),
                         }
                         i += 1;
@@ -245,6 +266,10 @@ pub fn parse_args(argv: &[String]) -> Result<Parsed, String> {
                         if a.starts_with('-') && a != "-" {
                             match flag_name(a) {
                                 "--backup-dir" => backup_dir = Some(take_value(tail, &mut i, "--backup-dir")?),
+                                "--onlyid" => {
+                                    let v = take_value(tail, &mut i, "--onlyid")?;
+                                    onlyid = Some(parse_onlyid(&v)?);
+                                }
                                 other => return Err(format!("错误: backup verify 不认识选项 {}", other)),
                             }
                         } else if target.is_none() {
@@ -253,6 +278,9 @@ pub fn parse_args(argv: &[String]) -> Result<Parsed, String> {
                             return Err(format!("错误: backup verify 只接受一个备份文件参数({})", a));
                         }
                         i += 1;
+                    }
+                    if target.is_some() && onlyid.is_some() {
+                        return Err("错误: backup verify 的单文件参数与 --onlyid 不能同时使用".into());
                     }
                     BackupAction::Verify { target }
                 }
@@ -266,6 +294,10 @@ pub fn parse_args(argv: &[String]) -> Result<Parsed, String> {
                             }
                             "--yes" => yes = true,
                             "--backup-dir" => backup_dir = Some(take_value(tail, &mut i, "--backup-dir")?),
+                            "--onlyid" => {
+                                let v = take_value(tail, &mut i, "--onlyid")?;
+                                onlyid = Some(parse_onlyid(&v)?);
+                            }
                             other => return Err(format!("错误: backup prune 不认识选项 {}", other)),
                         }
                         i += 1;
@@ -280,6 +312,11 @@ pub fn parse_args(argv: &[String]) -> Result<Parsed, String> {
                         if a.starts_with('-') && a != "-" {
                             match flag_name(a) {
                                 "--yes" => yes = true,
+                                "--backup-dir" => backup_dir = Some(take_value(tail, &mut i, "--backup-dir")?),
+                                "--onlyid" => {
+                                    let v = take_value(tail, &mut i, "--onlyid")?;
+                                    onlyid = Some(parse_onlyid(&v)?);
+                                }
                                 other => return Err(format!("错误: backup rm 不认识选项 {}", other)),
                             }
                         } else {
@@ -287,14 +324,17 @@ pub fn parse_args(argv: &[String]) -> Result<Parsed, String> {
                         }
                         i += 1;
                     }
-                    if targets.is_empty() {
+                    if targets.is_empty() && onlyid.is_none() {
                         return Err("错误: backup rm 至少需要一个路径或文件名".into());
+                    }
+                    if targets.is_empty() && onlyid.is_some() && yes {
+                        return Err("错误: backup rm --onlyid 配合 --yes 时必须显式给出编号或范围".into());
                     }
                     BackupAction::Rm { targets }
                 }
                 other => return Err(format!("错误: 未知 backup 动作: {} (可用 list / verify / prune / rm)", other)),
             };
-            Ok(Parsed::Backup { action, keep, yes, backup_dir })
+            Ok(Parsed::Backup { action, keep, yes, onlyid, backup_dir })
         }
         "run" | "apply" => {
             let is_apply = first.as_str() == "apply";
@@ -942,16 +982,114 @@ fn canonical_entry_path(path: &Path) -> PathBuf {
     fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
 }
 
-pub fn backup_list(backup_dir: &Path) -> i32 {
+fn backup_entry_onlyid(entry: &BackupEntry) -> Option<&str> {
+    entry.meta.as_ref()?.onlyid.as_deref()
+}
+
+fn entries_for_onlyid<'a>(
+    entries: &'a [BackupEntry],
+    onlyid: Option<&str>,
+) -> Result<Vec<&'a BackupEntry>, String> {
+    let selected: Vec<&BackupEntry> = match onlyid {
+        Some(id) => entries
+            .iter()
+            .filter(|entry| backup_entry_onlyid(entry) == Some(id))
+            .collect(),
+        None => entries.iter().collect(),
+    };
+    if let Some(id) = onlyid {
+        if selected.is_empty() {
+            return Err(format!("未找到 onlyid={} 的备份", id));
+        }
+    }
+    Ok(selected)
+}
+
+fn sorted_backup_refs(mut entries: Vec<&BackupEntry>) -> Vec<&BackupEntry> {
+    entries.sort_by(|a, b| b.mtime.cmp(&a.mtime).then_with(|| a.path.cmp(&b.path)));
+    entries
+}
+
+fn backup_file_name(entry: &BackupEntry) -> &str {
+    entry
+        .path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("<无效文件名>")
+}
+
+fn print_numbered_backup_entries(entries: &[&BackupEntry]) {
+    let clock = SystemClock;
+    let width = entries.len().max(1).to_string().len();
+    for (idx, entry) in entries.iter().enumerate() {
+        let time = clock.fmt_human(entry.mtime);
+        println!(
+            "  [{}] {}   {}   {}",
+            crate::ui::pad_left(&(idx + 1).to_string(), width),
+            crate::ui::pad_to(&time, 16),
+            crate::ui::pad_to(backup_kind(entry), 12),
+            backup_health(entry)
+        );
+        println!("      └─ {}", crate::ui::dim(backup_file_name(entry)));
+    }
+}
+
+fn parse_backup_selection_tokens(tokens: &[String], max: usize) -> Result<Vec<usize>, String> {
+    let mut selected = std::collections::BTreeSet::new();
+    for token in tokens {
+        for raw in token.split(',') {
+            let part = raw.trim();
+            if part.is_empty() {
+                return Err("备份编号不能为空".into());
+            }
+            if let Some((left, right)) = part.split_once('-') {
+                if right.contains('-') {
+                    return Err(format!("无法解析备份范围: {}", part));
+                }
+                let start = left
+                    .parse::<usize>()
+                    .map_err(|_| format!("无法解析备份编号: {}", left))?;
+                let end = right
+                    .parse::<usize>()
+                    .map_err(|_| format!("无法解析备份编号: {}", right))?;
+                if start == 0 || end == 0 || start > end || end > max {
+                    return Err(format!("备份范围超出 1-{}: {}", max, part));
+                }
+                selected.extend(start..=end);
+            } else {
+                let idx = part
+                    .parse::<usize>()
+                    .map_err(|_| format!("无法解析备份编号: {}", part))?;
+                if idx == 0 || idx > max {
+                    return Err(format!("备份编号超出 1-{}: {}", max, part));
+                }
+                selected.insert(idx);
+            }
+        }
+    }
+    if selected.is_empty() {
+        return Err("至少选择一份备份".into());
+    }
+    Ok(selected.into_iter().collect())
+}
+
+pub fn backup_list(backup_dir: &Path, onlyid: Option<&str>) -> i32 {
     let entries = diskio::scan_backup_dir(backup_dir);
-    println!("备份目录 {} · {} 份", backup_dir.display(), entries.len());
-    if entries.is_empty() {
+    let selected = match entries_for_onlyid(&entries, onlyid) {
+        Ok(v) => v,
+        Err(msg) => {
+            eprintln!("{}", crate::ui::red(&format!("错误: {}", msg)));
+            return EXIT_BACKUP;
+        }
+    };
+    println!("备份目录 {} · {} 份", backup_dir.display(), selected.len());
+    if selected.is_empty() {
         return EXIT_OK;
     }
 
     let mut groups: BTreeMap<String, Vec<&BackupEntry>> = BTreeMap::new();
     let mut unknown = Vec::new();
-    for entry in &entries {
+    for entry in selected {
         if let Some(key) = diskio::backup_group_key(entry) {
             groups.entry(key).or_default().push(entry);
         } else {
@@ -965,7 +1103,6 @@ pub fn backup_list(backup_dir: &Path) -> i32 {
         bm.cmp(&am)
     });
 
-    let clock = SystemClock;
     for mut group in grouped {
         group.sort_by(|a, b| b.mtime.cmp(&a.mtime).then_with(|| a.path.cmp(&b.path)));
         let meta = group[0].meta.as_ref().expect("已按 meta 分组");
@@ -974,16 +1111,14 @@ pub fn backup_list(backup_dir: &Path) -> i32 {
             None => crate::ui::yellow("未知盘"),
         };
         println!();
-        println!("{} · {} · {}", backup_model_name(meta), backup_capacity(meta), identity);
-        for entry in group {
-            let time = clock.fmt_human(entry.mtime);
-            println!(
-                "  └─ {}   {}   {}",
-                crate::ui::pad_to(&time, 16),
-                crate::ui::pad_to(backup_kind(entry), 12),
-                backup_health(entry)
-            );
-        }
+        println!(
+            "{} · {} · {} · {} 份",
+            backup_model_name(meta),
+            backup_capacity(meta),
+            identity,
+            group.len()
+        );
+        print_numbered_backup_entries(&group);
     }
     if !unknown.is_empty() {
         println!();
@@ -995,7 +1130,7 @@ pub fn backup_list(backup_dir: &Path) -> i32 {
     EXIT_OK
 }
 
-pub fn backup_verify(backup_dir: &Path, target: Option<&str>) -> i32 {
+pub fn backup_verify(backup_dir: &Path, onlyid: Option<&str>, target: Option<&str>) -> i32 {
     let entries = diskio::scan_backup_dir(backup_dir);
     let selected: Vec<&BackupEntry> = if let Some(target) = target {
         let path = match canonical_backup_target(backup_dir, target) {
@@ -1010,6 +1145,14 @@ pub fn backup_verify(backup_dir: &Path, target: Option<&str>) -> i32 {
             return EXIT_BACKUP;
         };
         vec![entry]
+    } else if let Some(id) = onlyid {
+        match entries_for_onlyid(&entries, Some(id)) {
+            Ok(v) => v,
+            Err(msg) => {
+                eprintln!("{}", crate::ui::red(&format!("错误: {}", msg)));
+                return EXIT_BACKUP;
+            }
+        }
     } else {
         if !backup_dir.is_dir() {
             eprintln!("{}", crate::ui::red(&format!("错误: 备份目录不存在: {}", backup_dir.display())));
@@ -1064,18 +1207,26 @@ fn delete_backup_pair(path: &Path) -> Result<(), String> {
     Ok(())
 }
 
-pub fn backup_prune(backup_dir: &Path, keep: usize, yes: bool) -> i32 {
+pub fn backup_prune(backup_dir: &Path, onlyid: Option<&str>, keep: usize, yes: bool) -> i32 {
     if !backup_dir.is_dir() {
         eprintln!("{}", crate::ui::red(&format!("错误: 备份目录不存在: {}", backup_dir.display())));
         return EXIT_BACKUP;
     }
     let entries = diskio::scan_backup_dir(backup_dir);
-    let candidates = diskio::prune_candidates(&entries, keep);
+    let selected_refs = match entries_for_onlyid(&entries, onlyid) {
+        Ok(v) => v,
+        Err(msg) => {
+            eprintln!("{}", crate::ui::red(&format!("错误: {}", msg)));
+            return EXIT_BACKUP;
+        }
+    };
+    let selected: Vec<BackupEntry> = selected_refs.into_iter().cloned().collect();
+    let candidates = diskio::prune_candidates(&selected, keep);
     let candidate_set: std::collections::BTreeSet<PathBuf> =
         candidates.iter().map(|p| canonical_entry_path(p)).collect();
 
-    let originals = entries.iter().filter(|e| e.meta.is_some() && !e.is_nopwd).count();
-    let snapshots = entries.iter().filter(|e| e.meta.is_some() && e.is_nopwd).count();
+    let originals = selected.iter().filter(|e| e.meta.is_some() && !e.is_nopwd).count();
+    let snapshots = selected.iter().filter(|e| e.meta.is_some() && e.is_nopwd).count();
     let keep_snapshots = snapshots.saturating_sub(candidates.len());
     if candidates.is_empty() {
         println!("无需清理：当前策略不会删除任何备份。");
@@ -1088,7 +1239,7 @@ pub fn backup_prune(backup_dir: &Path, keep: usize, yes: bool) -> i32 {
         candidates.len(), keep
     );
     for path in &candidates {
-        let model = entries
+        let model = selected
             .iter()
             .find(|e| canonical_entry_path(&e.path) == canonical_entry_path(path))
             .and_then(|e| e.meta.as_ref())
@@ -1100,12 +1251,15 @@ pub fn backup_prune(backup_dir: &Path, keep: usize, yes: bool) -> i32 {
     println!();
     println!("保留: 加密原盘 {} 份 · 免密快照 {} 份", originals, keep_snapshots);
     if !yes {
-        println!("确认执行: nopwd backup prune --yes");
+        match onlyid {
+            Some(id) => println!("确认执行: nopwd backup prune --onlyid {} --keep {} --yes", id, keep),
+            None => println!("确认执行: nopwd backup prune --keep {} --yes", keep),
+        }
         return EXIT_OK;
     }
 
     let mut failed = 0usize;
-    for entry in &entries {
+    for entry in &selected {
         if candidate_set.contains(&canonical_entry_path(&entry.path)) {
             if let Err(msg) = delete_backup_pair(&entry.path) {
                 failed += 1;
@@ -1123,6 +1277,7 @@ pub fn backup_prune(backup_dir: &Path, keep: usize, yes: bool) -> i32 {
 
 pub fn backup_rm(
     backup_dir: &Path,
+    onlyid: Option<&str>,
     targets: &[String],
     yes: bool,
     prompt: &mut dyn Prompter,
@@ -1132,20 +1287,78 @@ pub fn backup_rm(
         return EXIT_BACKUP;
     }
     let entries = diskio::scan_backup_dir(backup_dir);
-    let mut resolved = Vec::new();
-    for target in targets {
-        match canonical_backup_target(backup_dir, target) {
-            Ok(path) => {
-                if !resolved.contains(&path) {
-                    resolved.push(path);
-                }
-            }
+    let mut numbered_index: BTreeMap<PathBuf, usize> = BTreeMap::new();
+    let mut selected_group_len = None;
+    let mut resolved = if let Some(id) = onlyid {
+        let group = match entries_for_onlyid(&entries, Some(id)) {
+            Ok(v) => sorted_backup_refs(v),
             Err(msg) => {
                 eprintln!("{}", crate::ui::red(&format!("错误: {}", msg)));
                 return EXIT_BACKUP;
             }
+        };
+        selected_group_len = Some(group.len());
+        for (idx, entry) in group.iter().enumerate() {
+            numbered_index.insert(canonical_entry_path(&entry.path), idx + 1);
         }
-    }
+
+        let indices = if targets.is_empty() {
+            let meta = group[0].meta.as_ref().expect("onlyid 分组必须有元数据");
+            println!(
+                "{} · {} · onlyid={} · {} 份",
+                backup_model_name(meta),
+                backup_capacity(meta),
+                id,
+                group.len()
+            );
+            print_numbered_backup_entries(&group);
+            loop {
+                let input = prompt.prompt_line("选择要删除的备份 [如 2 / 1,3 / 2-3，回车取消]: ");
+                let input = input.trim();
+                if input.is_empty() {
+                    eprintln!("已取消");
+                    return EXIT_CANCELLED;
+                }
+                match parse_backup_selection_tokens(&[input.to_string()], group.len()) {
+                    Ok(v) => break v,
+                    Err(msg) => eprintln!("{}", crate::ui::red(&format!("错误: {}", msg))),
+                }
+            }
+        } else {
+            match parse_backup_selection_tokens(targets, group.len()) {
+                Ok(v) => v,
+                Err(msg) => {
+                    eprintln!("{}", crate::ui::red(&format!("错误: {}", msg)));
+                    return EXIT_USAGE;
+                }
+            }
+        };
+        indices
+            .into_iter()
+            .map(|idx| canonical_entry_path(&group[idx - 1].path))
+            .collect::<Vec<_>>()
+    } else {
+        if targets.is_empty() {
+            eprintln!("{}", crate::ui::red("错误: backup rm 至少需要一个路径或文件名"));
+            return EXIT_USAGE;
+        }
+        let mut paths = Vec::new();
+        for target in targets {
+            match canonical_backup_target(backup_dir, target) {
+                Ok(path) => {
+                    if !paths.contains(&path) {
+                        paths.push(path);
+                    }
+                }
+                Err(msg) => {
+                    eprintln!("{}", crate::ui::red(&format!("错误: {}", msg)));
+                    return EXIT_BACKUP;
+                }
+            }
+        }
+        paths
+    };
+    resolved.dedup();
 
     let mut total_per_group: BTreeMap<String, usize> = BTreeMap::new();
     let mut deleting_per_group: BTreeMap<String, usize> = BTreeMap::new();
@@ -1174,9 +1387,24 @@ pub fn backup_rm(
         let entry = entries.iter().find(|e| canonical_entry_path(&e.path) == *path);
         let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("<无效文件名>");
         match entry {
+            Some(e) if onlyid.is_some() => {
+                let idx = numbered_index.get(path).copied().unwrap_or(0);
+                let time = SystemClock.fmt_human(e.mtime);
+                println!(
+                    "  [{}] {}   {}   {}",
+                    idx,
+                    time,
+                    backup_kind(e),
+                    backup_health(e)
+                );
+                println!("      └─ {}", crate::ui::dim(name));
+            }
             Some(e) => println!("  {}   {}   {}", name, backup_kind(e), backup_health(e)),
             None => println!("  {}   {}", name, crate::ui::yellow("未识别")),
         }
+    }
+    if let Some(total) = selected_group_len {
+        println!("删除后该盘仍保留 {} 份备份。", total.saturating_sub(resolved.len()));
     }
     if !yes && !prompt.confirm_yes("输入 YES 确认删除: ") {
         eprintln!("已取消");
@@ -1228,15 +1456,17 @@ pub fn run() -> i32 {
             print!("{}", print_disk_table(&scan_disks(&runner, &bak, &read_disk)));
             EXIT_OK
         }
-        Parsed::Backup { action, keep, yes, backup_dir } => {
+        Parsed::Backup { action, keep, yes, onlyid, backup_dir } => {
             let bak = diskio::resolve_backup_dir(backup_dir.as_deref());
             match action {
-                BackupAction::List => backup_list(&bak),
-                BackupAction::Verify { target } => backup_verify(&bak, target.as_deref()),
-                BackupAction::Prune => backup_prune(&bak, keep, yes),
+                BackupAction::List => backup_list(&bak, onlyid.as_deref()),
+                BackupAction::Verify { target } => {
+                    backup_verify(&bak, onlyid.as_deref(), target.as_deref())
+                }
+                BackupAction::Prune => backup_prune(&bak, onlyid.as_deref(), keep, yes),
                 BackupAction::Rm { targets } => {
                     let mut prompt = StdPrompter;
-                    backup_rm(&bak, &targets, yes, &mut prompt)
+                    backup_rm(&bak, onlyid.as_deref(), &targets, yes, &mut prompt)
                 }
             }
         }
@@ -1427,6 +1657,8 @@ mod tests {
         match parse_args(&[
             "backup".into(),
             "prune".into(),
+            "--onlyid".into(),
+            "1402259934".into(),
             "--keep".into(),
             "0".into(),
             "--yes".into(),
@@ -1434,27 +1666,62 @@ mod tests {
         ])
         .unwrap()
         {
-            Parsed::Backup { action: BackupAction::Prune, keep, yes, backup_dir } => {
+            Parsed::Backup { action: BackupAction::Prune, keep, yes, backup_dir, onlyid } => {
                 assert_eq!(keep, 0);
                 assert!(yes);
                 assert_eq!(backup_dir.as_deref(), Some("/tmp/bak"));
+                assert_eq!(onlyid.as_deref(), Some("1402259934"));
             }
             _ => panic!("应解析为 backup prune"),
         }
-        match parse_args(&["backup".into(), "verify".into(), "x.bin".into()]).unwrap() {
-            Parsed::Backup { action: BackupAction::Verify { target }, keep, yes, .. } => {
-                assert_eq!(target.as_deref(), Some("x.bin"));
+        match parse_args(&[
+            "backup".into(),
+            "verify".into(),
+            "--onlyid=-1833210541".into(),
+        ])
+        .unwrap()
+        {
+            Parsed::Backup { action: BackupAction::Verify { target }, keep, yes, onlyid, .. } => {
+                assert_eq!(target, None);
                 assert_eq!(keep, 2);
                 assert!(!yes);
+                assert_eq!(onlyid.as_deref(), Some("-1833210541"));
             }
             _ => panic!("应解析为 backup verify"),
         }
-        match parse_args(&["backup".into(), "rm".into(), "a.bin".into(), "b.bin".into(), "--yes".into()]).unwrap() {
-            Parsed::Backup { action: BackupAction::Rm { targets }, yes, .. } => {
-                assert_eq!(targets, vec!["a.bin", "b.bin"]);
+        match parse_args(&[
+            "backup".into(),
+            "rm".into(),
+            "--onlyid".into(),
+            "1402259934".into(),
+            "2".into(),
+            "3-4".into(),
+            "--yes".into(),
+            "--backup-dir".into(),
+            "/tmp/bak".into(),
+        ])
+        .unwrap()
+        {
+            Parsed::Backup { action: BackupAction::Rm { targets }, yes, onlyid, backup_dir, .. } => {
+                assert_eq!(targets, vec!["2", "3-4"]);
                 assert!(yes);
+                assert_eq!(onlyid.as_deref(), Some("1402259934"));
+                assert_eq!(backup_dir.as_deref(), Some("/tmp/bak"));
             }
             _ => panic!("应解析为 backup rm"),
+        }
+        match parse_args(&[
+            "backup".into(),
+            "list".into(),
+            "--onlyid".into(),
+            "1987718388".into(),
+        ])
+        .unwrap()
+        {
+            Parsed::Backup { action: BackupAction::List, onlyid, .. } => {
+                assert_eq!(onlyid.as_deref(), Some("1987718388"));
+            }
+            _ => panic!("应解析为 backup list"),
         }
     }
 
@@ -1468,15 +1735,56 @@ mod tests {
         assert!(parse_args(&["apply".into(), "--size".into(), "-3".into()]).is_err()); // 负 size
         assert!(parse_args(&["restore".into(), "a.bin".into(), "b.bin".into()]).is_err()); // 两个位置参数
         assert!(parse_args(&["backup".into()]).is_err()); // 缺动作
-        assert!(parse_args(&["backup".into(), "rm".into()]).is_err()); // rm 缺目标
+        assert!(parse_args(&["backup".into(), "rm".into()]).is_err()); // 无 onlyid 时 rm 缺目标
+        assert!(parse_args(&[
+            "backup".into(),
+            "rm".into(),
+            "--onlyid".into(),
+            "1402259934".into(),
+            "--yes".into(),
+        ])
+        .is_err()); // --yes 不能在无编号时进入交互选择
         assert!(parse_args(&["backup".into(), "prune".into(), "--keep".into(), "-1".into()]).is_err());
         assert!(parse_args(&["backup".into(), "verify".into(), "a.bin".into(), "b.bin".into()]).is_err());
+        assert!(parse_args(&[
+            "backup".into(),
+            "verify".into(),
+            "a.bin".into(),
+            "--onlyid".into(),
+            "1".into(),
+        ])
+        .is_err());
+        assert!(parse_args(&[
+            "backup".into(),
+            "list".into(),
+            "--onlyid".into(),
+            "abc".into(),
+        ])
+        .is_err());
         assert!(parse_args(&["backup".into(), "list".into(), "--yes".into()]).is_err());
         // 哨兵旗标被剥离
         assert!(matches!(
             parse_args(&["apply".into(), "--disk".into(), "6".into(), "--_elevated".into()]).unwrap(),
             Parsed::Apply { .. }
         ));
+    }
+
+    #[test]
+    fn backup_selection_accepts_numbers_commas_and_ranges() {
+        assert_eq!(
+            parse_backup_selection_tokens(&["1,3".into(), "2-4".into()], 5).unwrap(),
+            vec![1, 2, 3, 4]
+        );
+        assert_eq!(
+            parse_backup_selection_tokens(&["2".into(), "2".into()], 3).unwrap(),
+            vec![2]
+        );
+        for bad in ["0", "4", "3-2", "1-4", "x", "1--2", "1,"] {
+            assert!(
+                parse_backup_selection_tokens(&[bad.into()], 3).is_err(),
+                "应拒绝 {bad}"
+            );
+        }
     }
 
     #[test]
