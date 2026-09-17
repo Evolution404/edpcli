@@ -201,7 +201,63 @@ pub fn looks_nopwd(read: ReadFn, device_id: &str) -> NopwdResult<bool> {
 }
 
 // ══════════════════════════════════════════════════════════════════
-// 4. 主转换
+// 4. LBA12 EDPF 分区表解析(供 list 展示)
+// ══════════════════════════════════════════════════════════════════
+#[derive(Debug, Clone)]
+pub struct EdpfPartition {
+    pub ptype: u32,
+    pub active: u32,
+    pub enc: u32,
+    pub start_lba: u64,
+    pub size_bytes: u64, // entry 0x28 为字节数(与 convert 的 enc_size 同源)
+}
+
+impl EdpfPartition {
+    pub fn type_name(&self) -> &'static str {
+        match self.ptype {
+            1 => "Boot",
+            2 => "Share",
+            4 => "Encrypt",
+            _ => "?",
+        }
+    }
+    pub fn end_lba(&self) -> u64 {
+        if self.size_bytes >= SECTOR as u64 {
+            self.start_lba + self.size_bytes / SECTOR as u64 - 1
+        } else {
+            self.start_lba
+        }
+    }
+}
+
+/// 以 device_id 解密 LBA12 并解析 EDPF 分区表(至多 3 条, 遇非 EDPF entry 即止)。
+/// 解不出 EDPF magic(非 cems 盘/盘未识别)返回 None。
+pub fn parse_lba12(raw12: &[u8], device_id: &str) -> Option<Vec<EdpfPartition>> {
+    let crc = crc32_bare(device_id.as_bytes());
+    let key = crc.to_le_bytes();
+    let dec = a6b0_full(&raw12[..EDPF_ENC_LEN], &key, 0);
+    if dec[..4] != *b"EDPF" {
+        return None;
+    }
+    let mut out = Vec::new();
+    for i in 0..3 {
+        let e = ent(&dec, i, E12);
+        if &e[..4] != b"EDPF" {
+            break;
+        }
+        out.push(EdpfPartition {
+            ptype: u32_at(e, 0x0c),
+            active: u32_at(e, 0x10),
+            enc: u32_at(e, 0x14),
+            start_lba: u64_at(e, 0x18),
+            size_bytes: u64_at(e, 0x28),
+        });
+    }
+    Some(out)
+}
+
+// ══════════════════════════════════════════════════════════════════
+// 5. 主转换
 // ══════════════════════════════════════════════════════════════════
 #[derive(Debug)]
 pub struct ConvertResult {

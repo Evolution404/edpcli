@@ -6,8 +6,8 @@ mod common;
 use common::*;
 use nopwd::common::SECTOR;
 use nopwd::crypto::{a6b0_full, crc32_bare, xor_rolling};
-use nopwd::sectors::{convert, find_type_entry, looks_nopwd, make_entry, E12, E7, EDPF_ENC_LEN,
-                     PWD_CRC};
+use nopwd::sectors::{convert, find_type_entry, looks_nopwd, make_entry, parse_lba12, E12, E7,
+                     EDPF_ENC_LEN, PWD_CRC};
 
 fn u32_at(b: &[u8], off: usize) -> u32 {
     u32::from_le_bytes(b[off..off + 4].try_into().unwrap())
@@ -164,6 +164,35 @@ fn make_entry_fields() {
     assert_eq!(u64_at(&e, 0x28), 12345 * SECTOR as u64);
     assert_eq!(u32_at(&e, 0x30), PWD_CRC); // CRC32("0000aaaa")
     assert_eq!(&e[0x34..], &src[0x34..]); // 其余字段原样保留
+}
+
+// ══════════════════════════════════════════════════════════════════
+// LBA12 EDPF 分区表解析(供 list 展示)
+// ══════════════════════════════════════════════════════════════════
+#[test]
+fn parse_lba12_original_and_converted() {
+    if !have_all_fixtures() {
+        eprintln!("跳过: 真实备份不可用");
+        return;
+    }
+    for key in KEYS {
+        // 原盘: 恒 3 条 EDPF; type=4 entry 的 start/size 与金标布局一致
+        let data = load_disk_image(key).unwrap();
+        let (_, did) = fixture(key).unwrap();
+        let parts = parse_lba12(&data[12 * SECTOR..13 * SECTOR], did).unwrap();
+        assert_eq!(parts.len(), 3, "{}", key);
+        let g = golden(key);
+        let enc = parts.iter().find(|p| p.ptype == 4).unwrap();
+        assert_eq!(enc.start_lba, g.enc_start, "{}", key);
+        assert_eq!(enc.size_bytes, g.enc_size, "{}", key);
+    }
+    // 转换后: 2 条 — Share@63(激活) + Encrypt 指针; 错误 id 解不出 → None
+    let (img, did) = converted_image("netac").unwrap();
+    let parts = parse_lba12(&img[12 * SECTOR..13 * SECTOR], &did).unwrap();
+    assert_eq!(parts.len(), 2);
+    assert_eq!((parts[0].ptype, parts[0].start_lba, parts[0].active), (2, 63, 1));
+    assert_eq!(parts[1].ptype, 4);
+    assert!(parse_lba12(&img[12 * SECTOR..13 * SECTOR], "disk&ven_bogus&prod_x").is_none());
 }
 
 // ══════════════════════════════════════════════════════════════════

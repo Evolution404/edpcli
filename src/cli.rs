@@ -20,7 +20,7 @@ use crate::diskio::{self, backup_disk, backup_is_nopwd, find_backups, raw_path, 
                     FileDev, SectorDev, Clock, SystemClock};
 use crate::elevate::{self, ELEVATED_FLAG};
 use crate::identify::identify;
-use crate::sectors::{convert, looks_nopwd};
+use crate::sectors::{convert, looks_nopwd, parse_lba12, EdpfPartition};
 use crate::sysinfo::{self, CmdRunner, SysRunner};
 
 const OPEN_WAIT: std::time::Duration = std::time::Duration::from_secs(10);
@@ -101,7 +101,7 @@ pub fn print_usage() {
 用法: nopwd <子命令> [选项]
 
 子命令:
-  list                              列出外接盘: 编号/容量/接口/cems识别/备份(无需 sudo)
+  list                              列出外接盘: 编号/容量/接口/cems识别/免密检测/EDPF分区/备份(sudo 下更全)
   run    [--disk N] [--size GB]     真盘预览 dry-run(需管理员, 自动 sudo)
   apply  [--disk N] [--size GB] [--force] [--yes]
                                    真盘实际写入(自动备份 LBA0-13 → 备份目录)
@@ -278,10 +278,12 @@ pub struct Row {
     pub onlyid: Option<String>,
     pub n_baks: usize,
     pub denied: bool,
+    pub is_nopwd: bool,
+    pub partitions: Option<Vec<EdpfPartition>>,
 }
 
-/// 外接盘一览数据: 编号/容量/接口; USB 盘再尽力识别 cems 身份与备份份数。
-/// 未 sudo 时 raw 设备无读权限 → denied=true(基本列仍可显示)。
+/// 外接盘一览数据: 编号/容量/接口; USB 盘再尽力识别 cems 身份、免密状态、
+/// EDPF 分区与备份份数。未 sudo 时 raw 设备无读权限 → denied=true(基本列仍可显示)。
 pub fn scan_disks(
     runner: &dyn CmdRunner,
     backup_dir: &Path,
@@ -299,6 +301,8 @@ pub fn scan_disks(
             onlyid: None,
             n_baks: 0,
             denied: false,
+            is_nopwd: false,
+            partitions: None,
         };
         if d.proto == "USB" {
             let probe = (|| -> io::Result<()> {
@@ -308,6 +312,15 @@ pub fn scan_disks(
                 let lba4 = read_disk(d.n, 4)?;
                 row.onlyid = diskio::lba4_label_id_from(&lba4[..32]);
                 if let Some(did) = &id.device_id {
+                    // 三信号免密检测 + LBA12 EDPF 分区表
+                    let read = |lba: u32| {
+                        read_disk(d.n, lba)
+                            .map_err(|e| NopwdError::new(EXIT_IO, format!("错误: {}", e)))
+                    };
+                    row.is_nopwd = looks_nopwd(&read, did)
+                        .map_err(|e| io::Error::new(io::ErrorKind::Other, e.msg))?;
+                    let lba12 = read_disk(d.n, 12)?;
+                    row.partitions = parse_lba12(&lba12, did);
                     let tag: [u8; 16] = lba4[..16].try_into().unwrap();
                     let facts = DiskFacts {
                         disk: d.n,
@@ -346,9 +359,29 @@ pub fn print_disk_table(rows: &[Row]) -> String {
         } else if r.device_id.is_none() {
             out.push_str(&format!("{} {}:{}  非cems盘\n", head, r.vid, r.pid));
         } else {
+            let nopwd_tag = if r.is_nopwd { "[免密]" } else { "" };
             let oid = r.onlyid.as_ref().map(|o| format!("  onlyid={}", o)).unwrap_or_default();
             let baks = if r.n_baks > 0 { format!("  备份{}份", r.n_baks) } else { "  无备份".to_string() };
-            out.push_str(&format!("{} {}:{}  cems盘{}{}\n", head, r.vid, r.pid, oid, baks));
+            out.push_str(&format!(
+                "{} {}:{}  cems盘{}{}{}\n",
+                head, r.vid, r.pid, nopwd_tag, oid, baks
+            ));
+            if let Some(parts) = &r.partitions {
+                let pad = " ".repeat(w + 8); // 与 head 的容量列对齐("  disk"+w+2 之后)
+                let items: Vec<String> = parts
+                    .iter()
+                    .map(|p| {
+                        format!(
+                            "{} LBA {}~{} {}",
+                            p.type_name(),
+                            group_digits(p.start_lba),
+                            group_digits(p.end_lba()),
+                            fmt_gb(p.size_bytes)
+                        )
+                    })
+                    .collect();
+                out.push_str(&format!("{}EDPF(LBA12): {}\n", pad, items.join(" · ")));
+            }
         }
     }
     out
@@ -854,28 +887,40 @@ mod tests {
 
     #[test]
     fn disk_table_rendering() {
+        let parts = vec![
+            EdpfPartition { ptype: 1, active: 1, enc: 0, start_lba: 32, size_bytes: 16_384 },
+            EdpfPartition { ptype: 2, active: 1, enc: 1, start_lba: 63, size_bytes: 59_750_819_680 },
+            EdpfPartition { ptype: 4, active: 0, enc: 1, start_lba: 116_707_328, size_bytes: 3_143_761_920 },
+        ];
         let rows = vec![
             Row {
                 disk: 4, size: 64_000_000_000, vid: "0951".into(), pid: "1666".into(),
                 proto: "USB".into(), device_id: None, onlyid: None, n_baks: 0, denied: false,
+                is_nopwd: false, partitions: None,
             },
             Row {
                 disk: 6, size: 62_914_560_000, vid: "0dd8".into(), pid: "2005".into(),
                 proto: "USB".into(), device_id: Some("disk&ven_netac&prod_onlydisk".into()),
                 onlyid: Some("1402259934".into()), n_baks: 3, denied: false,
+                is_nopwd: true, partitions: Some(parts),
             },
             Row {
                 disk: 7, size: 500_107_862_016, vid: "xxxx".into(), pid: "xxxx".into(),
                 proto: "Thunderbolt".into(), device_id: None, onlyid: None, n_baks: 0, denied: false,
+                is_nopwd: false, partitions: None,
             },
         ];
         let out = print_disk_table(&rows);
         let lines: Vec<&str> = out.lines().collect();
         assert_eq!(lines[0], "外接盘 3 个:");
         assert!(lines[1].contains("disk4") && lines[1].contains("非cems盘"));
-        assert!(lines[2].contains("disk6") && lines[2].contains("cems盘"));
+        assert!(lines[2].contains("disk6") && lines[2].contains("cems盘[免密]"));
         assert!(lines[2].contains("onlyid=1402259934") && lines[2].contains("备份3份"));
-        assert!(lines[3].contains("disk7") && lines[3].contains("非USB"));
+        // EDPF 分区行: 与容量列对齐, 含类型名/LBA 范围/大小
+        assert!(lines[3].contains("EDPF(LBA12):"), "{}", lines[3]);
+        assert!(lines[3].contains("Share LBA 63~116,700,881 59.75GB"), "{}", lines[3]);
+        assert!(lines[3].contains("Encrypt LBA 116,707,328~122,847,487 3.14GB"), "{}", lines[3]);
+        assert!(lines[4].contains("disk7") && lines[4].contains("非USB"));
         assert_eq!(print_disk_table(&[]).trim(), "未检测到外接盘。");
     }
 }

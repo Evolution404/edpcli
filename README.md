@@ -6,7 +6,7 @@
 
 ```bash
 cargo build --release            # 或 cargo install --path . 装入 ~/.cargo/bin
-./target/release/nopwd list      # 列出外接盘：编号/容量/接口/cems 识别/备份份数（免 sudo）
+./target/release/nopwd list      # 列出外接盘：编号/容量/接口/cems 识别/免密检测/EDPF 分区/备份份数（免 sudo，sudo 下更全）
 ./target/release/nopwd run       # 预览改造（dry-run，自动检测 USB 盘）
 nopwd run --disk 4               # 指定盘（接受 4 / /dev/disk4 / /dev/rdisk4）
 nopwd apply                      # 实际写入（自动备份 → 原子写入 → 读回校验）
@@ -15,6 +15,17 @@ nopwd apply --force              # 盘已是免密盘仍强制重写（默认拒
 nopwd restore                    # 交互还原：列出本盘备份（新→旧，免密快照标注）→ 选择 → YES → 写入
 nopwd restore <备份.bin> --yes   # 脚本化还原（自动确认）
 nopwd convert --dir <快照目录> --id <device_id> [--out <目录>]   # 离线验证（不碰真盘）
+```
+
+`list` 效果（sudo 下 cems 盘认示三信号免密检测 `[免密]` 标记，并解密 LBA12
+展示 EDPF 分区表——类型/LBA 范围/定义大小；原盘 3 条 Boot·Share·Encrypt，
+转换后 2 条）：
+
+```
+$ nopwd list
+外接盘 1 个:
+  disk26  125.83GB  USB 3535:6300  cems盘[免密]  onlyid=1987718388  备份2份
+          EDPF(LBA12): Share LBA 63~243,116,059 124.48GB · Encrypt LBA 243,116,060~245,734,654 1.34GB
 ```
 
 - **自动提权**：`run` / `apply` / `restore` 需要裸盘读写，非 root 时自动以 `sudo`

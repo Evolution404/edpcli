@@ -76,6 +76,24 @@ fn scan_and_print_all_row_kinds() {
     assert!(out.contains("disk4") && out.contains("非cems盘"), "{}", out);
     assert!(out.contains("disk6") && out.contains("cems盘") && out.contains("无备份"), "{}", out);
     assert!(out.contains("disk7") && out.contains("非USB"), "{}", out);
+    // 原盘数据: 非免密 + EDPF 3 条(含 Boot/Share/Encrypt)
+    let row6 = rows.iter().find(|r| r.disk == 6).unwrap();
+    assert!(!row6.is_nopwd);
+    let parts = row6.partitions.as_ref().unwrap();
+    assert_eq!(parts.len(), 3);
+    assert!(out.contains("EDPF(LBA12):"), "{}", out);
+
+    // 免密盘镜像: [免密] 标记 + EDPF 2 条
+    let (conv, _) = converted_image("netac").unwrap();
+    let read_conv = |_disk: u32, lba: u32| -> std::io::Result<Vec<u8>> {
+        Ok(conv[lba as usize * SECTOR..(lba as usize + 1) * SECTOR].to_vec())
+    };
+    let rows2 = scan_disks(&runner, &bak.0, &read_conv);
+    let out2 = print_disk_table(&rows2);
+    assert!(out2.contains("cems盘[免密]"), "{}", out2);
+    let row6b = rows2.iter().find(|r| r.disk == 6).unwrap();
+    assert!(row6b.is_nopwd);
+    assert_eq!(row6b.partitions.as_ref().unwrap().len(), 2);
 
     // 读盘全被拒(未 sudo) → denied 降级行
     let read_denied = |_disk: u32, _lba: u32| -> std::io::Result<Vec<u8>> {
