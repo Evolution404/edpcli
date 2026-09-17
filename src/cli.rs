@@ -321,6 +321,25 @@ fn flag_name(a: &str) -> &str {
     a.split('=').next().unwrap_or(a)
 }
 
+fn set_once<T>(slot: &mut Option<T>, value: T, flag: &str) -> Result<(), String> {
+    if slot.is_some() {
+        return Err(format!("错误: {} 重复指定", flag));
+    }
+    *slot = Some(value);
+    Ok(())
+}
+
+fn set_switch(slot: &mut bool, raw: &str, flag: &str) -> Result<(), String> {
+    if raw != flag {
+        return Err(format!("错误: {} 是布尔旗标，不接受参数值: {}", flag, raw));
+    }
+    if *slot {
+        return Err(format!("错误: {} 重复指定", flag));
+    }
+    *slot = true;
+    Ok(())
+}
+
 pub fn parse_args(argv: &[String]) -> Result<Parsed, String> {
     let args: Vec<&String> = argv.iter().filter(|a| a.as_str() != ELEVATED_FLAG).collect();
     let Some(first) = args.first() else {
@@ -358,10 +377,11 @@ pub fn parse_args(argv: &[String]) -> Result<Parsed, String> {
                 match flag_name(&rest[i]) {
                     "--onlyid" => {
                         let v = take_value(&rest, &mut i, "--onlyid")?;
-                        onlyid = Some(parse_onlyid(&v)?);
+                        set_once(&mut onlyid, parse_onlyid(&v)?, "--onlyid")?;
                     }
                     "--backup-dir" => {
-                        backup_dir = Some(take_value(&rest, &mut i, "--backup-dir")?);
+                        let v = take_value(&rest, &mut i, "--backup-dir")?;
+                        set_once(&mut backup_dir, v, "--backup-dir")?;
                     }
                     other => return Err(format!("错误: __complete 不认识选项 {}", other)),
                 }
@@ -377,7 +397,10 @@ pub fn parse_args(argv: &[String]) -> Result<Parsed, String> {
             let mut i = 0;
             while i < rest.len() {
                 match flag_name(&rest[i]) {
-                    "--backup-dir" => backup_dir = Some(take_value(&rest, &mut i, "--backup-dir")?),
+                    "--backup-dir" => {
+                        let v = take_value(&rest, &mut i, "--backup-dir")?;
+                        set_once(&mut backup_dir, v, "--backup-dir")?;
+                    }
                     other => return Err(format!("错误: list 不认识选项 {}", other)),
                 }
                 i += 1;
@@ -396,15 +419,16 @@ pub fn parse_args(argv: &[String]) -> Result<Parsed, String> {
                     match flag_name(a) {
                         "--disk" => {
                             let v = take_value(&rest, &mut i, "--disk")?;
-                            opts.disk = Some(parse_disk_spec(&v)?);
+                            set_once(&mut opts.disk, parse_disk_spec(&v)?, "--disk")?;
                         }
                         "--backup" | "--image" => {
                             let flag = flag_name(a).to_string();
-                            opts.backup = Some(take_value(&rest, &mut i, &flag)?);
+                            let v = take_value(&rest, &mut i, &flag)?;
+                            set_once(&mut opts.backup, v, "--backup/--image")?;
                         }
                         "--onlyid" => {
                             let v = take_value(&rest, &mut i, "--onlyid")?;
-                            opts.onlyid = Some(parse_onlyid(&v)?);
+                            set_once(&mut opts.onlyid, parse_onlyid(&v)?, "--onlyid")?;
                         }
                         "--index" => {
                             let v = take_value(&rest, &mut i, "--index")?;
@@ -412,18 +436,31 @@ pub fn parse_args(argv: &[String]) -> Result<Parsed, String> {
                             if n == 0 {
                                 return Err("错误: --index 从 1 开始".into());
                             }
-                            opts.index = Some(n);
+                            set_once(&mut opts.index, n, "--index")?;
                         }
-                        "--raw" => opts.raw = true,
-                        "--hex" => opts.hex = true,
-                        "--export" => opts.export = Some(take_value(&rest, &mut i, "--export")?),
-                        "--id" => opts.device_id = Some(take_value(&rest, &mut i, "--id")?),
+                        "--raw" => set_switch(&mut opts.raw, a, "--raw")?,
+                        "--hex" => set_switch(&mut opts.hex, a, "--hex")?,
+                        "--export" => {
+                            let v = take_value(&rest, &mut i, "--export")?;
+                            set_once(&mut opts.export, v, "--export")?;
+                        }
+                        "--id" => {
+                            let v = take_value(&rest, &mut i, "--id")?;
+                            set_once(&mut opts.device_id, v, "--id")?;
+                        }
                         "--backup-dir" => {
-                            opts.backup_dir = Some(take_value(&rest, &mut i, "--backup-dir")?)
+                            let v = take_value(&rest, &mut i, "--backup-dir")?;
+                            set_once(&mut opts.backup_dir, v, "--backup-dir")?;
                         }
                         other => return Err(format!("错误: inspect 不认识选项 {}", other)),
                     }
-                } else if let Ok(lba) = a.parse::<u32>() {
+                } else if !a.is_empty() && a.bytes().all(|b| b.is_ascii_digit()) {
+                    let lba = a
+                        .parse::<u32>()
+                        .map_err(|_| format!("错误: inspect LBA 仅支持 0-13, 得到 {}", a))?;
+                    if lba > 13 {
+                        return Err(format!("错误: inspect LBA 仅支持 0-13, 得到 {}", a));
+                    }
                     opts.lbas.push(lba);
                 } else if opts.backup.is_none() {
                     // 最常见的离线查看不应强迫用户记 --backup：
@@ -461,17 +498,20 @@ pub fn parse_args(argv: &[String]) -> Result<Parsed, String> {
             };
             let mut backup_dir = None;
             let mut onlyid = None;
-            let mut keep = 2usize;
+            let mut keep = None;
             let mut yes = false;
             let action = match action_name {
                 "list" => {
                     let mut i = 0;
                     while i < tail.len() {
                         match flag_name(&tail[i]) {
-                            "--backup-dir" => backup_dir = Some(take_value(tail, &mut i, "--backup-dir")?),
+                            "--backup-dir" => {
+                                let v = take_value(tail, &mut i, "--backup-dir")?;
+                                set_once(&mut backup_dir, v, "--backup-dir")?;
+                            }
                             "--onlyid" => {
                                 let v = take_value(tail, &mut i, "--onlyid")?;
-                                onlyid = Some(parse_onlyid(&v)?);
+                                set_once(&mut onlyid, parse_onlyid(&v)?, "--onlyid")?;
                             }
                             other => return Err(format!("错误: backup list 不认识选项 {}", other)),
                         }
@@ -487,10 +527,13 @@ pub fn parse_args(argv: &[String]) -> Result<Parsed, String> {
                         let a = tail[i].as_str();
                         if a.starts_with('-') && a != "-" {
                             match flag_name(a) {
-                                "--backup-dir" => backup_dir = Some(take_value(tail, &mut i, "--backup-dir")?),
+                                "--backup-dir" => {
+                                    let v = take_value(tail, &mut i, "--backup-dir")?;
+                                    set_once(&mut backup_dir, v, "--backup-dir")?;
+                                }
                                 "--onlyid" => {
                                     let v = take_value(tail, &mut i, "--onlyid")?;
-                                    onlyid = Some(parse_onlyid(&v)?);
+                                    set_once(&mut onlyid, parse_onlyid(&v)?, "--onlyid")?;
                                 }
                                 "--index" => {
                                     let v = take_value(tail, &mut i, "--index")?;
@@ -500,7 +543,7 @@ pub fn parse_args(argv: &[String]) -> Result<Parsed, String> {
                                     if n == 0 {
                                         return Err("错误: --index 从 1 开始".into());
                                     }
-                                    index = Some(n);
+                                    set_once(&mut index, n, "--index")?;
                                 }
                                 other => return Err(format!("错误: backup verify 不认识选项 {}", other)),
                             }
@@ -528,13 +571,16 @@ pub fn parse_args(argv: &[String]) -> Result<Parsed, String> {
                         match flag_name(&tail[i]) {
                             "--keep" => {
                                 let v = take_value(tail, &mut i, "--keep")?;
-                                keep = parse_keep(&v)?;
+                                set_once(&mut keep, parse_keep(&v)?, "--keep")?;
                             }
-                            "--yes" => yes = true,
-                            "--backup-dir" => backup_dir = Some(take_value(tail, &mut i, "--backup-dir")?),
+                            "--yes" => set_switch(&mut yes, &tail[i], "--yes")?,
+                            "--backup-dir" => {
+                                let v = take_value(tail, &mut i, "--backup-dir")?;
+                                set_once(&mut backup_dir, v, "--backup-dir")?;
+                            }
                             "--onlyid" => {
                                 let v = take_value(tail, &mut i, "--onlyid")?;
-                                onlyid = Some(parse_onlyid(&v)?);
+                                set_once(&mut onlyid, parse_onlyid(&v)?, "--onlyid")?;
                             }
                             other => return Err(format!("错误: backup prune 不认识选项 {}", other)),
                         }
@@ -549,11 +595,14 @@ pub fn parse_args(argv: &[String]) -> Result<Parsed, String> {
                         let a = tail[i].as_str();
                         if a.starts_with('-') && a != "-" {
                             match flag_name(a) {
-                                "--yes" => yes = true,
-                                "--backup-dir" => backup_dir = Some(take_value(tail, &mut i, "--backup-dir")?),
+                                "--yes" => set_switch(&mut yes, a, "--yes")?,
+                                "--backup-dir" => {
+                                    let v = take_value(tail, &mut i, "--backup-dir")?;
+                                    set_once(&mut backup_dir, v, "--backup-dir")?;
+                                }
                                 "--onlyid" => {
                                     let v = take_value(tail, &mut i, "--onlyid")?;
-                                    onlyid = Some(parse_onlyid(&v)?);
+                                    set_once(&mut onlyid, parse_onlyid(&v)?, "--onlyid")?;
                                 }
                                 other => return Err(format!("错误: backup rm 不认识选项 {}", other)),
                             }
@@ -572,7 +621,13 @@ pub fn parse_args(argv: &[String]) -> Result<Parsed, String> {
                 }
                 other => return Err(format!("错误: 未知 backup 动作: {} (可用 list / verify / prune / rm)", other)),
             };
-            Ok(Parsed::Backup { action, keep, yes, onlyid, backup_dir })
+            Ok(Parsed::Backup {
+                action,
+                keep: keep.unwrap_or(2),
+                yes,
+                onlyid,
+                backup_dir,
+            })
         }
         "run" | "apply" => {
             let is_apply = first.as_str() == "apply";
@@ -587,17 +642,18 @@ pub fn parse_args(argv: &[String]) -> Result<Parsed, String> {
                 match flag_name(&rest[i]) {
                     "--disk" => {
                         let v = take_value(&rest, &mut i, "--disk")?;
-                        opts.disk = Some(parse_disk_spec(&v)?);
+                        set_once(&mut opts.disk, parse_disk_spec(&v)?, "--disk")?;
                     }
                     "--size" => {
                         let v = take_value(&rest, &mut i, "--size")?;
-                        opts.size = Some(parse_size(&v)?);
+                        set_once(&mut opts.size, parse_size(&v)?, "--size")?;
                     }
                     "--backup-dir" => {
-                        opts.backup_dir = Some(take_value(&rest, &mut i, "--backup-dir")?);
+                        let v = take_value(&rest, &mut i, "--backup-dir")?;
+                        set_once(&mut opts.backup_dir, v, "--backup-dir")?;
                     }
-                    "--force" if is_apply => force = true,
-                    "--yes" if is_apply => yes = true,
+                    "--force" if is_apply => set_switch(&mut force, &rest[i], "--force")?,
+                    "--yes" if is_apply => set_switch(&mut yes, &rest[i], "--yes")?,
                     "--force" | "--yes" => {
                         return Err(format!("错误: {} 只用于 apply", flag_name(&rest[i])))
                     }
@@ -626,10 +682,13 @@ pub fn parse_args(argv: &[String]) -> Result<Parsed, String> {
                     match flag_name(a) {
                         "--disk" => {
                             let v = take_value(&rest, &mut i, "--disk")?;
-                            disk = Some(parse_disk_spec(&v)?);
+                            set_once(&mut disk, parse_disk_spec(&v)?, "--disk")?;
                         }
-                        "--yes" => yes = true,
-                        "--backup-dir" => backup_dir = Some(take_value(&rest, &mut i, "--backup-dir")?),
+                        "--yes" => set_switch(&mut yes, a, "--yes")?,
+                        "--backup-dir" => {
+                            let v = take_value(&rest, &mut i, "--backup-dir")?;
+                            set_once(&mut backup_dir, v, "--backup-dir")?;
+                        }
                         other => return Err(format!("错误: restore 不认识选项 {}", other)),
                     }
                 } else if bin.is_none() {
@@ -652,13 +711,22 @@ pub fn parse_args(argv: &[String]) -> Result<Parsed, String> {
             let mut i = 0;
             while i < rest.len() {
                 match flag_name(&rest[i]) {
-                    "--dir" => dir = Some(take_value(&rest, &mut i, "--dir")?),
-                    "--id" => id = Some(take_value(&rest, &mut i, "--id")?),
+                    "--dir" => {
+                        let v = take_value(&rest, &mut i, "--dir")?;
+                        set_once(&mut dir, v, "--dir")?;
+                    }
+                    "--id" => {
+                        let v = take_value(&rest, &mut i, "--id")?;
+                        set_once(&mut id, v, "--id")?;
+                    }
                     "--size" => {
                         let v = take_value(&rest, &mut i, "--size")?;
-                        size = Some(parse_size(&v)?);
+                        set_once(&mut size, parse_size(&v)?, "--size")?;
                     }
-                    "--out" => out = Some(take_value(&rest, &mut i, "--out")?),
+                    "--out" => {
+                        let v = take_value(&rest, &mut i, "--out")?;
+                        set_once(&mut out, v, "--out")?;
+                    }
                     other => return Err(format!("错误: convert 不认识选项 {}", other)),
                 }
                 i += 1;
@@ -1651,6 +1719,70 @@ mod tests {
             parse_args(&["apply".into(), "--disk".into(), "6".into(), "--_elevated".into()]).unwrap(),
             Parsed::Apply { .. }
         ));
+    }
+
+    #[test]
+    fn boolean_flags_reject_inline_values() {
+        for argv in [
+            vec!["apply", "--yes=no"],
+            vec!["apply", "--force=false"],
+            vec!["backup", "prune", "--yes=0"],
+            vec!["backup", "rm", "--onlyid", "1402259934", "1", "--yes=no"],
+            vec!["restore", "backup.bin", "--yes=false"],
+            vec!["inspect", "--raw=true"],
+            vec!["inspect", "--hex=1"],
+        ] {
+            let args: Vec<String> = argv.into_iter().map(str::to_string).collect();
+            let err = parse_args(&args).err().expect("布尔旗标带值必须报错");
+            assert!(err.contains("不接受参数值"), "{err}");
+        }
+    }
+
+    #[test]
+    fn boolean_flags_reject_duplicates() {
+        for argv in [
+            vec!["apply", "--yes", "--yes"],
+            vec!["apply", "--force", "--force"],
+            vec!["backup", "prune", "--yes", "--yes"],
+            vec!["restore", "backup.bin", "--yes", "--yes"],
+            vec!["inspect", "--raw", "--raw"],
+            vec!["inspect", "--hex", "--hex"],
+        ] {
+            let args: Vec<String> = argv.into_iter().map(str::to_string).collect();
+            let err = parse_args(&args).err().expect("布尔旗标重复必须报错");
+            assert!(err.contains("重复"), "{err}");
+        }
+    }
+
+    #[test]
+    fn inspect_lba_is_limited_to_zero_through_thirteen() {
+        for bad in ["14", "99", "4294967295"] {
+            let args = vec!["inspect".to_string(), bad.to_string()];
+            let err = parse_args(&args).err().expect("inspect 不应接受 LBA0-13 之外的扇区");
+            assert!(err.contains("LBA") && err.contains("0-13"), "{err}");
+        }
+        for good in ["0", "4", "13"] {
+            let args = vec!["inspect".to_string(), good.to_string()];
+            assert!(parse_args(&args).is_ok(), "LBA{good} 应被接受");
+        }
+    }
+
+    #[test]
+    fn single_value_flags_reject_duplicates() {
+        for argv in [
+            vec!["apply", "--disk", "4", "--disk", "6"],
+            vec!["apply", "--size", "10", "--size", "20"],
+            vec!["restore", "--disk=4", "--disk=6"],
+            vec!["backup", "--onlyid", "1", "--onlyid", "2"],
+            vec!["backup", "prune", "--keep", "1", "--keep", "2"],
+            vec!["inspect", "--onlyid", "1", "--onlyid", "2"],
+            vec!["inspect", "--index", "1", "--index", "2"],
+            vec!["convert", "--dir", "a", "--dir", "b", "--id", "x"],
+        ] {
+            let args: Vec<String> = argv.into_iter().map(str::to_string).collect();
+            let err = parse_args(&args).err().expect("单值旗标重复必须报错");
+            assert!(err.contains("重复"), "{err}");
+        }
     }
 
     #[test]
