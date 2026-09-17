@@ -11,7 +11,10 @@ use std::process::Command;
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use crate::common::{NopwdError, NopwdResult, SECTOR, EXIT_INTERMEDIATE, EXIT_IO, EXIT_ROLLED_BACK};
+use crate::common::{
+    NopwdError, NopwdResult, SECTOR, EXIT_BACKUP, EXIT_INTERMEDIATE, EXIT_IO,
+    EXIT_ROLLED_BACK,
+};
 use crate::md5::md5_hex;
 use crate::sectors::looks_nopwd;
 
@@ -21,6 +24,25 @@ pub fn raw_path(disk: u32) -> String {
 
 fn io_err(e: io::Error) -> NopwdError {
     NopwdError::new(EXIT_IO, format!("错误: {}", e))
+}
+
+fn validate_backup_device_id(device_id: &str) -> NopwdResult<()> {
+    let safe = device_id.starts_with("disk&ven_")
+        && device_id.len() <= 128
+        && device_id.bytes().all(|b| {
+            b.is_ascii_alphanumeric() || matches!(b, b'_' | b'&' | b'.' | b'-')
+        });
+    if safe {
+        Ok(())
+    } else {
+        Err(NopwdError::new(
+            EXIT_BACKUP,
+            format!(
+                "错误: device_id 含不安全的备份文件名字符或长度异常，拒绝创建备份: {:?}",
+                device_id
+            ),
+        ))
+    }
 }
 
 fn write_new_synced(path: &Path, data: &[u8], label: &str) -> NopwdResult<()> {
@@ -955,6 +977,7 @@ pub fn backup_disk(
     bak_dir: &Path,
     clock: &dyn Clock,
 ) -> NopwdResult<(PathBuf, bool)> {
+    validate_backup_device_id(device_id)?;
     fs::create_dir_all(bak_dir).map_err(io_err)?;
     let ts = clock.fmt_ts(clock.now_epoch());
     let secs = facts.total_sectors.map(|s| s.to_string()).unwrap_or_else(|| "unknown".into());

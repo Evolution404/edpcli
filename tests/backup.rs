@@ -187,6 +187,34 @@ fn backup_written_with_md5_and_onlyid() {
 }
 
 #[test]
+fn backup_rejects_device_id_with_path_separators_before_creating_files() {
+    let Some(data) = load_disk_image("netac") else {
+        eprintln!("跳过: 真实备份不可用");
+        return;
+    };
+    let tmp = TmpDir::new("backup_device_id_path_escape");
+    let bak = tmp.0.join("bak");
+    fs::create_dir_all(&bak).unwrap();
+    // 旧实现会把 device_id 原样拼进文件名。预建第一层目录后，`/../../` 可逃出 bak。
+    fs::create_dir_all(bak.join("disk99_122880000_vid0dd8_pid2005_disk&ven_bad")).unwrap();
+    let result = backup_disk(
+        &netac_facts(),
+        &data,
+        "disk&ven_bad/../../escaped",
+        &bak,
+        &FixedClock,
+    );
+    assert!(result.is_err(), "不安全 device_id 必须在路径构造前拒绝");
+    let escaped = fs::read_dir(&tmp.0)
+        .unwrap()
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|path| path.extension().and_then(|e| e.to_str()) == Some("bin"))
+        .collect::<Vec<_>>();
+    assert!(escaped.is_empty(), "备份目录外不得生成文件: {escaped:?}");
+}
+
+#[test]
 fn creating_new_backup_does_not_rename_existing_history() {
     let Some(data) = load_disk_image("netac") else {
         eprintln!("跳过: 真实备份不可用");

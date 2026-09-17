@@ -126,6 +126,9 @@ nopwd backup rm     <路径|文件名>... [--yes] [--backup-dir D]
 - 备份归属盘以文件内容 LBA4 的 onlyid 为权威；即使文件名被手工改错 onlyid，
   `list / inspect / rm / completion` 仍按真实 LBA4 归组。`.md5` 同时兼容纯摘要和
   标准 `HASH  filename` 格式，`verify` 与 `restore` 使用同一解析规则。
+- 自动备份文件名中的 `device_id` 在落盘前执行严格安全字符校验；硬件返回的
+  vendor/product 字符串若包含 `/`、控制字符或异常长度会直接拒绝创建备份，避免
+  通过文件名路径分隔符写出备份目录。
 - `prune`：默认**只预览、不删除**；只有显式 `--yes` 才执行。加密原盘备份永不
   自动删除；每盘免密状态快照默认保留最新 2 份，可用 `--keep N` 调整，`--keep 0`
   允许清光免密快照，但前提是该盘仍有加密原盘备份；加 `--onlyid ID` 时策略只
