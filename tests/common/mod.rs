@@ -197,6 +197,10 @@ pub fn diskutil_list_plist(disks: &[&str]) -> String {
 pub fn netac_runner(disk: u32) -> FakeRunner {
     let mut m = HashMap::new();
     m.insert(format!("diskutil info -plist disk{}", disk), diskutil_info_plist(62_914_560_000));
+    m.insert(
+        format!("diskutil unmountDisk force disk{}", disk),
+        "Unmount of all volumes on disk was successful".into(),
+    );
     m.insert("ioreg -r -c IOSCSITargetDevice -l".into(), ioreg_scsi(disk, "Netac  ", "OnlyDisk", "1.00"));
     m.insert("ioreg -r -c IOUSBHostDevice -l".into(), ioreg_usb(disk, 0x0DD8, 0x2005));
     FakeRunner { canned: m }

@@ -288,12 +288,14 @@ pub fn list_usb_disks(runner: &dyn CmdRunner) -> Vec<ExtDisk> {
         .collect()
 }
 
-/// 强制卸载整盘(写入前; 结果忽略 — 卸不掉时写回校验会兜底)。
-pub fn unmount_disk(runner: &dyn CmdRunner, disk: u32) {
-    let _ = runner.check_output(
+/// 强制卸载整盘。写盘流程必须确认卸载成功后才能重新以 O_RDWR 打开设备。
+pub fn unmount_disk(runner: &dyn CmdRunner, disk: u32) -> io::Result<()> {
+    runner
+        .check_output(
         &["diskutil", "unmountDisk", "force", &format!("disk{}", disk)],
         Duration::from_secs(60),
-    );
+        )
+        .map(|_| ())
 }
 
 #[cfg(test)]

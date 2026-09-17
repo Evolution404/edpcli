@@ -714,6 +714,7 @@ pub fn disk_menu_str(disks: &[sysinfo::ExtDisk]) -> String {
 // ══════════════════════════════════════════════════════════════════
 fn read_image(dev: &mut dyn SectorDev) -> NopwdResult<Vec<u8>> {
     let mut img = Vec::with_capacity(14 * SECTOR);
+    // 镜像布局必须严格保持 LBA0→13 的连续顺序；后续所有固定偏移都依赖此契约。
     for lba in 0..14u32 {
         let sector = dev
             .read_sector(lba)
@@ -732,6 +733,57 @@ fn read_image(dev: &mut dyn SectorDev) -> NopwdResult<Vec<u8>> {
         img.extend_from_slice(&sector);
     }
     Ok(img)
+}
+
+/// `reopen_rdwr` 会重新打开 `/dev/rdiskN`。确认期间既可能换盘，也可能有别的程序
+/// 改动同一块盘的元数据。自动备份保存的是确认前 LBA0-13，因此第一笔写入前必须
+/// 再读一次并逐扇区比对，保证“当前状态 == 刚刚备份的状态”。
+fn verify_reopened_snapshot(dev: &mut dyn SectorDev, expected: &[u8]) -> NopwdResult<()> {
+    if expected.len() != 14 * SECTOR {
+        return Err(err(EXIT_IO, "错误: 内部预写快照长度异常"));
+    }
+    // 先核身份，再核其余元数据；换盘时不要被 LBA0 的差异抢先掩盖诊断。
+    for lba in std::iter::once(4u32).chain((0..14u32).filter(|&lba| lba != 4)) {
+        let actual = dev
+            .read_sector(lba)
+            .map_err(|e| err(EXIT_IO, format!("错误: 重开后读取 LBA{} 失败: {}", lba, e)))?;
+        if actual.len() != SECTOR {
+            return Err(err(
+                EXIT_IO,
+                format!(
+                    "错误: 重开后 LBA{} 读取 {}B，预期完整扇区 {}B",
+                    lba,
+                    actual.len(),
+                    SECTOR
+                ),
+            ));
+        }
+        let start = lba as usize * SECTOR;
+        let before = &expected[start..start + SECTOR];
+        if actual != before {
+            if lba == 4 {
+                let expected_id =
+                    diskio::lba4_label_id_from(before).unwrap_or_else(|| "未知".into());
+                let actual_id =
+                    diskio::lba4_label_id_from(&actual).unwrap_or_else(|| "未知".into());
+                return Err(err(
+                    EXIT_TARGET,
+                    format!(
+                        "错误: 设备身份在确认/卸载期间发生变化(expected onlyid={}, actual onlyid={})，疑似换盘或重枚举，拒绝写入",
+                        expected_id, actual_id
+                    ),
+                ));
+            }
+            return Err(err(
+                EXIT_TARGET,
+                format!(
+                    "错误: 设备元数据在备份/确认期间发生变化(LBA{})，拒绝基于过期快照写入",
+                    lba
+                ),
+            ));
+        }
+    }
+    Ok(())
 }
 
 pub(crate) fn guard_system_disk(disk: u32) -> NopwdResult<()> {
@@ -862,11 +914,13 @@ pub fn apply_flow(
     if !ctx.prompt.confirm_yes(&crate::ui::bold(&format!("将改写 disk{} LBA0/6/7/12/9。输入 YES: ", disk))) {
         return Err(err(EXIT_CANCELLED, "已取消(未写盘)"));
     }
-    sysinfo::unmount_disk(ctx.runner, disk);
+    sysinfo::unmount_disk(ctx.runner, disk)
+        .map_err(|e| err(EXIT_IO, format!("错误: 无法卸载 disk{}: {}", disk, e)))?;
     // 卸载后才切 O_RDWR(挂载态打开读写会撞 EBUSY); 写序由 atomic_write_sectors
     // 保证: LBA0(唯一改 MBR 的扇区)最后写, 单 fd 全程持有到写完校验完
     dev.reopen_rdwr(OPEN_WAIT)
         .map_err(|e| err(EXIT_IO, format!("错误: 无法以读写打开 {}: {}", raw_path(disk), e)))?;
+    verify_reopened_snapshot(dev, &img)?;
     let mut writes: BTreeMap<u32, Vec<u8>> = BTreeMap::new();
     writes.insert(6, result.lba6);
     writes.insert(7, result.lba7);
@@ -1046,9 +1100,11 @@ pub fn restore_flow(
     if !ctx.prompt.confirm_yes(&crate::ui::bold(&format!("  → disk{} LBA0-13? 输入 YES: ", disk))) {
         return Err(err(EXIT_CANCELLED, "已取消"));
     }
-    sysinfo::unmount_disk(ctx.runner, disk);
+    sysinfo::unmount_disk(ctx.runner, disk)
+        .map_err(|e| err(EXIT_IO, format!("错误: 无法卸载 disk{}: {}", disk, e)))?;
     dev.reopen_rdwr(OPEN_WAIT)
         .map_err(|e| err(EXIT_IO, format!("错误: 无法以读写打开 {}: {}", raw_path(disk), e)))?;
+    verify_reopened_snapshot(dev, &img)?;
     let writes: BTreeMap<u32, Vec<u8>> = (0..14u32)
         .map(|lba| (lba, data[lba as usize * SECTOR..(lba as usize + 1) * SECTOR].to_vec()))
         .collect();
@@ -1332,6 +1388,33 @@ mod tests {
         let err = read_image(&mut ShortSectorDev).unwrap_err();
         assert_eq!(err.code, EXIT_IO);
         assert!(err.msg.contains("512B"), "{}", err.msg);
+    }
+
+    struct PatternSectorDev;
+
+    impl SectorDev for PatternSectorDev {
+        fn read_sector(&mut self, lba: u32) -> io::Result<Vec<u8>> {
+            Ok(vec![lba as u8; SECTOR])
+        }
+
+        fn write_sector(&mut self, _lba: u32, _data: &[u8]) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn read_image_preserves_lba_zero_to_thirteen_order() {
+        let image = read_image(&mut PatternSectorDev).unwrap();
+        assert_eq!(image.len(), 14 * SECTOR);
+        for lba in 0..14usize {
+            assert!(
+                image[lba * SECTOR..(lba + 1) * SECTOR]
+                    .iter()
+                    .all(|&byte| byte == lba as u8),
+                "LBA{} 在拼接镜像中的位置错误",
+                lba
+            );
+        }
     }
 
     #[test]

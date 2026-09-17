@@ -12,6 +12,7 @@ use common::*;
 use nopwd::cli::{apply_flow, restore_flow, Ctx};
 use nopwd::common::{SECTOR, EXIT_ALREADY_NOPWD, EXIT_BACKUP, EXIT_CANCELLED, EXIT_OK, EXIT_TARGET};
 use nopwd::diskio::FileDev;
+use nopwd::diskio::SectorDev;
 
 // ══════════════════════════════════════════════════════════════════
 // 子进程测试(真二进制)
@@ -101,6 +102,45 @@ impl nopwd::diskio::Clock for FixedClockForCli {
     fn now_epoch(&self) -> i64 { 1789603200 }
     fn fmt_ts(&self, _e: i64) -> String { "20260917_000000".into() }
     fn fmt_human(&self, _e: i64) -> String { "2026-09-17 00:00".into() }
+}
+
+struct SwapOnReopenDev {
+    before: Vec<u8>,
+    after: Vec<u8>,
+    switched: bool,
+    writes: usize,
+}
+
+impl SwapOnReopenDev {
+    fn new(before: Vec<u8>, after: Vec<u8>) -> Self {
+        Self {
+            before,
+            after,
+            switched: false,
+            writes: 0,
+        }
+    }
+
+    fn active(&self) -> &[u8] {
+        if self.switched { &self.after } else { &self.before }
+    }
+}
+
+impl SectorDev for SwapOnReopenDev {
+    fn read_sector(&mut self, lba: u32) -> std::io::Result<Vec<u8>> {
+        let start = lba as usize * SECTOR;
+        Ok(self.active()[start..start + SECTOR].to_vec())
+    }
+
+    fn write_sector(&mut self, _lba: u32, _data: &[u8]) -> std::io::Result<()> {
+        self.writes += 1;
+        Ok(())
+    }
+
+    fn reopen_rdwr(&mut self, _wait: std::time::Duration) -> std::io::Result<()> {
+        self.switched = true;
+        Ok(())
+    }
 }
 
 fn assert_lbas(img: &[u8], expect: &[u8], lbas: &[usize]) {
@@ -570,6 +610,117 @@ fn apply_system_disk_guard_in_flow() {
     let mut prompt = ScriptPrompter::yes();
     let mut dev = FileDev::open_rdwr(img.to_str().unwrap(), std::time::Duration::from_secs(1)).unwrap();
     let e = apply_flow(true, false, 1, None, &mut ctx(&runner, &mut prompt, &tmp.0), &mut dev).unwrap_err();
-    assert_eq!(e.code, EXIT_TARGET);
+    assert_eq!(e.code, EXIT_TARGET, "{}", e.msg);
     assert!(e.msg.contains("系统盘"), "{}", e.msg);
+}
+
+#[test]
+fn apply_refuses_if_disk_identity_changes_after_reopen() {
+    let (Some(netac), Some(lexar)) = (load_disk_image("netac"), load_disk_image("lexar")) else {
+        eprintln!("跳过: 真实备份不可用");
+        return;
+    };
+    let runner = netac_runner(6);
+    let tmp = TmpDir::new("apply_swap_after_reopen");
+    let mut prompt = ScriptPrompter::yes();
+    let mut dev = SwapOnReopenDev::new(netac, lexar);
+
+    let e = apply_flow(
+        true,
+        false,
+        6,
+        None,
+        &mut ctx(&runner, &mut prompt, &tmp.0),
+        &mut dev,
+    )
+    .unwrap_err();
+    assert_eq!(e.code, EXIT_TARGET, "{}", e.msg);
+    assert!(e.msg.contains("身份") || e.msg.contains("换盘"), "{}", e.msg);
+    assert_eq!(dev.writes, 0, "身份变化必须在第一笔写入前拦截");
+}
+
+#[test]
+fn restore_refuses_if_disk_identity_changes_after_reopen() {
+    let (Some(netac), Some(lexar)) = (load_disk_image("netac"), load_disk_image("lexar")) else {
+        eprintln!("跳过: 真实备份不可用");
+        return;
+    };
+    let runner = netac_runner(6);
+    let tmp = TmpDir::new("restore_swap_after_reopen");
+    let backup = tmp.0.join(
+        "disk6_122880000_vid0dd8_pid2005_disk&ven_netac&prod_onlydisk_onlyid1402259934_20260917_120000.bin",
+    );
+    fs::write(&backup, &netac).unwrap();
+    fs::write(
+        format!("{}.md5", backup.display()),
+        format!("{}\n", md5(&netac)),
+    )
+    .unwrap();
+    let mut prompt = ScriptPrompter::yes();
+    let mut dev = SwapOnReopenDev::new(netac, lexar);
+
+    let e = restore_flow(
+        Some(backup.to_string_lossy().into_owned()),
+        6,
+        &mut ctx(&runner, &mut prompt, &tmp.0),
+        &mut dev,
+    )
+    .unwrap_err();
+    assert_eq!(e.code, EXIT_TARGET);
+    assert!(e.msg.contains("身份") || e.msg.contains("换盘"), "{}", e.msg);
+    assert_eq!(dev.writes, 0, "身份变化必须在第一笔写入前拦截");
+}
+
+#[test]
+fn apply_refuses_when_unmount_fails_before_reopen_or_write() {
+    let Some(netac) = load_disk_image("netac") else {
+        eprintln!("跳过: 真实备份不可用");
+        return;
+    };
+    let mut runner = netac_runner(6);
+    runner.canned.remove("diskutil unmountDisk force disk6");
+    let tmp = TmpDir::new("apply_unmount_failure");
+    let mut prompt = ScriptPrompter::yes();
+    let mut dev = SwapOnReopenDev::new(netac.clone(), netac);
+
+    let e = apply_flow(
+        true,
+        false,
+        6,
+        None,
+        &mut ctx(&runner, &mut prompt, &tmp.0),
+        &mut dev,
+    )
+    .unwrap_err();
+    assert_eq!(e.code, nopwd::common::EXIT_IO);
+    assert!(e.msg.contains("卸载"), "{}", e.msg);
+    assert!(!dev.switched, "卸载失败后不得 reopen");
+    assert_eq!(dev.writes, 0, "卸载失败后不得写盘");
+}
+
+#[test]
+fn apply_refuses_if_metadata_changes_after_backup_before_write() {
+    let Some(netac) = load_disk_image("netac") else {
+        eprintln!("跳过: 真实备份不可用");
+        return;
+    };
+    let mut changed = netac.clone();
+    changed[6 * SECTOR + 100] ^= 0x5a; // LBA4 身份不变，仅其它元数据变化
+    let runner = netac_runner(6);
+    let tmp = TmpDir::new("apply_metadata_changed_after_backup");
+    let mut prompt = ScriptPrompter::yes();
+    let mut dev = SwapOnReopenDev::new(netac, changed);
+
+    let e = apply_flow(
+        true,
+        false,
+        6,
+        None,
+        &mut ctx(&runner, &mut prompt, &tmp.0),
+        &mut dev,
+    )
+    .unwrap_err();
+    assert_eq!(e.code, EXIT_TARGET);
+    assert!(e.msg.contains("LBA6") || e.msg.contains("变化"), "{}", e.msg);
+    assert_eq!(dev.writes, 0, "确认后的元数据变化必须在第一笔写入前拦截");
 }
