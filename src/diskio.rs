@@ -282,17 +282,43 @@ fn utc_parts(epoch: i64) -> (i64, u32, u32, u32, u32, u32) {
 // ══════════════════════════════════════════════════════════════════
 // 3. 备份/还原
 // ══════════════════════════════════════════════════════════════════
+/// 相对路径按 CWD 绝对化(跨 sudo 重执行时 CWD 不变的假设下仍更确定)。
+pub fn absolutize_backup_dir(p: PathBuf) -> PathBuf {
+    if p.is_absolute() {
+        p
+    } else {
+        std::env::current_dir()
+            .unwrap_or_else(|_| PathBuf::from("/"))
+            .join(p)
+    }
+}
+
 /// 备份目录: --backup-dir 旗标 > $NOPWD_BACKUP_DIR > CWD/backup。
 pub fn resolve_backup_dir(flag: Option<&str>) -> PathBuf {
     if let Some(f) = flag {
-        return PathBuf::from(f);
+        return absolutize_backup_dir(PathBuf::from(f));
     }
     if let Ok(env) = std::env::var("NOPWD_BACKUP_DIR") {
         if !env.is_empty() {
-            return PathBuf::from(env);
+            return absolutize_backup_dir(PathBuf::from(env));
         }
     }
-    std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")).join("backup")
+    std::env::current_dir()
+        .unwrap_or_else(|_| PathBuf::from("."))
+        .join("backup")
+}
+
+/// 自动提权时的环境桥接: sudo 默认清环境变量(env_reset), $NOPWD_BACKUP_DIR
+/// 过不去 — 父进程把它解析为绝对路径, 以显式旗标并入重执行 argv(旗标优先于 env)。
+/// 返回应追加的参数(空 = 无需追加)。
+pub fn backup_dir_argv_suffix(env_val: Option<String>) -> Vec<String> {
+    match env_val.filter(|v| !v.is_empty()) {
+        Some(v) => {
+            let p = absolutize_backup_dir(PathBuf::from(&v));
+            vec!["--backup-dir".to_string(), p.to_string_lossy().into_owned()]
+        }
+        None => vec![],
+    }
 }
 
 /// 备份命名所需盘事实(由 sysinfo/LBA4 预先收集, 测试可注入)。
@@ -682,6 +708,21 @@ mod tests {
         assert_eq!(read_lba_file(&d, 12), vec![b'c'; SECTOR]);
         assert_eq!(read_lba_file(&d, 9), vec![0u8; SECTOR]); // 缺失→全零
         let _ = fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn backup_dir_argv_suffix_bridges_env() {
+        // sudo env_reset 会清环境变量 — env 值须转为显式旗标(绝对路径)随 argv 过界
+        let abs = backup_dir_argv_suffix(Some("/Users/x/.nopwd-backup".into()));
+        assert_eq!(abs, vec!["--backup-dir".to_string(), "/Users/x/.nopwd-backup".into()]);
+        // 相对值按 CWD 绝对化
+        let rel = backup_dir_argv_suffix(Some("bk".into()));
+        assert_eq!(rel.len(), 2);
+        assert!(rel[1].starts_with('/'), "{}", rel[1]);
+        assert!(rel[1].ends_with("/bk"), "{}", rel[1]);
+        // 未设/空值 → 不追加
+        assert!(backup_dir_argv_suffix(None).is_empty());
+        assert!(backup_dir_argv_suffix(Some(String::new())).is_empty());
     }
 
     #[test]

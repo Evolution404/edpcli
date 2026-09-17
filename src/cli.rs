@@ -728,6 +728,10 @@ fn real_flow(
     }
     if !elevate::is_root() {
         let mut argv: Vec<String> = std::env::args().skip(1).collect();
+        // sudo 清环境变量: $NOPWD_BACKUP_DIR 转显式旗标随 argv 过界(未显式给旗标时)
+        if backup_dir_flag.is_none() {
+            argv.extend(diskio::backup_dir_argv_suffix(std::env::var("NOPWD_BACKUP_DIR").ok()));
+        }
         if disk_opt.is_none() {
             let mut sp = StdPrompter;
             match auto_pick_disk(runner, &mut sp) {

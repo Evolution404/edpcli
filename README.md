@@ -21,6 +21,8 @@ nopwd convert --dir <快照目录> --id <device_id> [--out <目录>]   # 离线�
   重执行自身（选定盘号并入参数，交互提示正常工作）；`list` / `convert` 永不提权。
 - `--yes` 免交互；多块 USB 盘时自动弹编号选择；系统盘（disk<2）一律拒绝。
 - 备份目录：`--backup-dir` > 环境变量 `NOPWD_BACKUP_DIR` > `./backup`。
+  自动提权时 sudo 会清环境变量，父进程会把 `$NOPWD_BACKUP_DIR` 解析为绝对路径
+  并以显式 `--backup-dir` 旗标传给提权后的子进程，环境变量无需额外配置即生效。
 
 ### 从 v2（Python 版）迁移
 
