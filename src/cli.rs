@@ -476,8 +476,10 @@ pub fn apply_flow(
         return Err(err(EXIT_CANCELLED, "已取消(未写盘)"));
     }
     sysinfo::unmount_disk(ctx.runner, disk);
-    // 写序由 atomic_write_sectors 保证: LBA0(唯一改 MBR 的扇区)最后写 —
-    // 写它才触发 macOS 重扫/挂载; 且单 fd 全程持有, 不再存在中途重开窗口
+    // 卸载后才切 O_RDWR(挂载态打开读写会撞 EBUSY); 写序由 atomic_write_sectors
+    // 保证: LBA0(唯一改 MBR 的扇区)最后写, 单 fd 全程持有到写完校验完
+    dev.reopen_rdwr(OPEN_WAIT)
+        .map_err(|e| err(EXIT_IO, format!("错误: 无法以读写打开 {}: {}", raw_path(disk), e)))?;
     let mut writes: BTreeMap<u32, Vec<u8>> = BTreeMap::new();
     writes.insert(6, result.lba6);
     writes.insert(7, result.lba7);
@@ -584,6 +586,8 @@ pub fn restore_flow(
         return Err(err(EXIT_CANCELLED, "已取消"));
     }
     sysinfo::unmount_disk(ctx.runner, disk);
+    dev.reopen_rdwr(OPEN_WAIT)
+        .map_err(|e| err(EXIT_IO, format!("错误: 无法以读写打开 {}: {}", raw_path(disk), e)))?;
     let writes: BTreeMap<u32, Vec<u8>> = (0..14u32)
         .map(|lba| (lba, data[lba as usize * SECTOR..(lba as usize + 1) * SECTOR].to_vec()))
         .collect();
@@ -759,10 +763,10 @@ fn real_flow(
         eprintln!("{}", e.msg);
         return e.code;
     }
-    let mut dev = match FileDev::open_rdwr(&raw_path(n), OPEN_WAIT) {
+    let mut dev = match FileDev::open_rdonly(&raw_path(n)) {
         Ok(d) => d,
         Err(e) => {
-            eprintln!("错误: 无法以读写打开 {}: {} (加 sudo?)", raw_path(n), e);
+            eprintln!("错误: 无法打开 {}: {} (加 sudo?)", raw_path(n), e);
             return EXIT_IO;
         }
     };

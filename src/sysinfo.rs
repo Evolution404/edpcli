@@ -81,14 +81,20 @@ impl CmdRunner for SysRunner {
 // ══════════════════════════════════════════════════════════════════
 // ioreg 文本解析(无 regex; ioreg 输出行结构化, 逐行扫描)
 // ══════════════════════════════════════════════════════════════════
-/// 按 `+-o <class>` 行切块。嵌套其他类的 `+-o` 行属于父块内容 —
-/// `BSD Name` 就在子节点里, 这是 Python `re.split(r'(?=^\s*\+-o CLS)', …)` 的行为。
+/// 按 ioreg 节点行切块: 行以 `+-o` 开头且携带 `<class <cls>,`。
+/// 真实输出的节点名常是产品名(如 `+-o USB DISK@01200000  <class IOUSBHostDevice, …>`),
+/// 不能按 `+-o <类名>` 前缀切 — 那样永远切不出块(Python 版因此退化为整段输出
+/// 当单一块, 多 USB 设备时会拿错 idVendor; 按类标记切块同时修复了这一点)。
+/// 嵌套其他类的 `+-o` 行属于父块内容 — `BSD Name` 就在子节点里。
+/// 无块起点时整段输出作为单一候选块(与 Python re.split 行为一致)。
 pub fn split_class_blocks<'a>(out: &'a str, cls: &str) -> Vec<&'a str> {
-    let prefix = format!("+-o {}", cls);
+    let c1 = format!("<class {},", cls);
+    let c2 = format!("<class {}>", cls);
     let mut starts: Vec<usize> = Vec::new();
     let mut off = 0usize;
     for line in out.lines() {
-        if line.trim_start().starts_with(&prefix) {
+        let t = line.trim_start();
+        if t.starts_with("+-o") && (line.contains(&c1) || line.contains(&c2)) {
             starts.push(off);
         }
         off += line.len() + 1;
@@ -100,37 +106,75 @@ pub fn split_class_blocks<'a>(out: &'a str, cls: &str) -> Vec<&'a str> {
     if let Some(&last) = starts.last() {
         blocks.push(&out[last..]);
     }
+    if blocks.is_empty() && !out.trim().is_empty() {
+        blocks.push(out);
+    }
     blocks
 }
 
-/// 块内找 `"Key" = "value"` 形式的字符串字段(允许 = 两边空白)。
+/// 块内找 `"Key" = "value"` 形式的字符串字段(块内任意位置, 允许 = 两边空白)。
+/// 等价 Python `re.search(r'"Key"\s*=\s*"([^"]*)"', block)` — ioreg 属性行
+/// 带树形前缀(`|   "Key" = …`), 不能按行首匹配。
 pub fn block_str_field(block: &str, key: &str) -> Option<String> {
     let quoted_key = format!("\"{}\"", key);
-    for line in block.lines() {
-        let t = line.trim_start();
-        let Some(rest) = t.strip_prefix(&quoted_key) else { continue };
-        let Some(rest) = rest.trim_start().strip_prefix('=') else { continue };
-        let rest = rest.trim_start();
-        let Some(rest) = rest.strip_prefix('"') else { continue };
-        if let Some(end) = rest.find('"') {
-            return Some(rest[..end].to_string());
+    let bytes = block.as_bytes();
+    let mut from = 0usize;
+    while let Some(p) = block[from..].find(&quoted_key) {
+        let mut i = from + p + quoted_key.len();
+        while i < bytes.len() && bytes[i].is_ascii_whitespace() {
+            i += 1;
         }
+        if i >= bytes.len() || bytes[i] != b'=' {
+            from += p + 1;
+            continue;
+        }
+        i += 1;
+        while i < bytes.len() && bytes[i].is_ascii_whitespace() {
+            i += 1;
+        }
+        if i >= bytes.len() || bytes[i] != b'"' {
+            from += p + 1;
+            continue;
+        }
+        i += 1;
+        let vstart = i;
+        while i < bytes.len() && bytes[i] != b'"' {
+            i += 1;
+        }
+        if i < bytes.len() {
+            return Some(block[vstart..i].to_string());
+        }
+        from += p + 1;
     }
     None
 }
 
-/// 块内找 `"Key" = 1234` 形式的无引号十进制整数字段。
+/// 块内找 `"Key" = 1234` 形式的无引号十进制整数字段(块内任意位置)。
 pub fn block_int_field(block: &str, key: &str) -> Option<i64> {
     let quoted_key = format!("\"{}\"", key);
-    for line in block.lines() {
-        let t = line.trim_start();
-        let Some(rest) = t.strip_prefix(&quoted_key) else { continue };
-        let Some(rest) = rest.trim_start().strip_prefix('=') else { continue };
-        let rest = rest.trim_start();
-        let digits: String = rest.chars().take_while(|c| c.is_ascii_digit()).collect();
-        if !digits.is_empty() {
-            return digits.parse().ok();
+    let bytes = block.as_bytes();
+    let mut from = 0usize;
+    while let Some(p) = block[from..].find(&quoted_key) {
+        let mut i = from + p + quoted_key.len();
+        while i < bytes.len() && bytes[i].is_ascii_whitespace() {
+            i += 1;
         }
+        if i >= bytes.len() || bytes[i] != b'=' {
+            from += p + 1;
+            continue;
+        }
+        i += 1;
+        while i < bytes.len() && bytes[i].is_ascii_whitespace() {
+            i += 1;
+        }
+        let dstart = i;
+        while i < bytes.len() && bytes[i].is_ascii_digit() {
+            i += 1;
+        }
+        if i > dstart {
+            return block[dstart..i].parse().ok();
+        }
+        from += p + 1;
     }
     None
 }
@@ -344,23 +388,20 @@ mod tests {
 
     #[test]
     fn ioreg_block_split_keeps_nested_children() {
-        // BSD Name 在 IOSCSITargetDevice 的子节点里; 子节点的其他 +-o 行不是块边界
+        // 真实树形: 竖线前缀、@0 节点名; BSD Name 在子节点里, 子节点的其他 +-o 行不是块边界
         let out = "\
-+-o IOSCSITargetDevice <class IOSCSITargetDevice>\n\
-    {\n\
-      \"IOPropertyMatch\" = \"x\"\n\
-    +-o IOSCSILogicalUnitNub <class IOSCSILogicalUnitNub>\n\
-      {\n\
-        \"BSD Name\" = \"disk6\"\n\
-        \"Vendor Identification\" = \"Netac  \"\n\
-        \"Product Identification\" = \"OnlyDisk\"\n\
-        \"Product Revision Level\" = \"1.00\"\n\
-      }\n\
-    }\n\
-+-o IOSCSITargetDevice <class IOSCSITargetDevice>\n\
-    {\n\
-      \"BSD Name\" = \"disk9\"\n\
-    }\n";
++-o IOSCSITargetDevice@0  <class IOSCSITargetDevice, id 0x100002b0e, retain 8>\n\
+  |   \"IOPropertyMatch\" = \"x\"\n\
+  +-o IOSCSILogicalUnitNub@0  <class IOSCSILogicalUnitNub, id 0x100002b11>\n\
+    |   \"Vendor Identification\" = \"Netac  \"\n\
+    |   \"Product Identification\" = \"OnlyDisk\"\n\
+    |   \"Product Revision Level\" = \"1.00\"\n\
+    +-o Netac OnlyDisk Media  <class IOMedia, id 0x100002b17>\n\
+      |   \"BSD Name\" = \"disk6\"\n\
++-o IOSCSITargetDevice@0  <class IOSCSITargetDevice, id 0x100002b9e>\n\
+  |   \"Nothing here\" = \"y\"\n\
+  +-o Other Media  <class IOMedia, id 0x100002b99>\n\
+    |   \"BSD Name\" = \"disk9\"\n";
         let blocks = split_class_blocks(out, "IOSCSITargetDevice");
         assert_eq!(blocks.len(), 2);
         assert!(blocks[0].contains("\"BSD Name\" = \"disk6\""));
@@ -375,15 +416,43 @@ mod tests {
 
     #[test]
     fn ioreg_int_fields_unquoted_decimal() {
+        // 真实格式: 属性行带树形前缀, 字段在行中任意位置
         let block = "\
-  +-o IOUSBHostDevice <class IOUSBHostDevice>\n\
-    {\n\
-      \"idVendor\" = 3352\n\
-      \"idProduct\" = 8197\n\
-      \"BSD Name\" = \"disk6\"\n\
-    }";
++-o IOUSBHostDevice  <class IOUSBHostDevice, id 0x100002af0, retain 15>\n\
+  |   \"idVendor\" = 3352\n\
+  |   \"idProduct\" = 8197\n\
+  |   \"USB Product Name\" = \"Mass Storage\"\n\
+  +-o Some Media  <class IOMedia>\n\
+    |   \"BSD Name\" = \"disk6\"\n";
         assert_eq!(block_int_field(block, "idVendor"), Some(3352));
         assert_eq!(block_int_field(block, "idProduct"), Some(8197));
+        assert_eq!(block_str_field(block, "USB Product Name").as_deref(), Some("Mass Storage"));
+    }
+
+    #[test]
+    fn ioreg_product_named_usb_root_blocks() {
+        // 真实 U 盘: IOUSBHostDevice 根节点名是产品名(USB DISK@…), 类只在 <class …> 里;
+        // 多个 USB 设备时按类标记切块, 各取各的 idVendor
+        let out = "\
++-o Keyboard Tal@14100000  <class IOUSBHostDevice, id 0x100002a01, retain 14>\n\
+  |   \"idVendor\" = 1452\n\
+  |   \"idProduct\" = 610\n\
+  |   \"Product\" = \"Apple Internal Keyboard\"\n\
++-o USB DISK@01200000  <class IOUSBHostDevice, id 0x100002af0, retain 15>\n\
+  |   \"idVendor\" = 13621\n\
+  |   \"idProduct\" = 25344\n\
+  +-o IOUSBMassStorageInterfaceNub  <class IOUSBMassStorageInterfaceNub, id 0x100002b04>\n\
+    +-o USB DISK Media  <class IOMedia, id 0x100002b17>\n\
+      |   \"BSD Name\" = \"disk6\"\n";
+        let blocks = split_class_blocks(out, "IOUSBHostDevice");
+        assert_eq!(blocks.len(), 2); // 键盘 + U 盘各一块
+        assert!(blocks[0].contains("Keyboard"));
+        assert!(blocks[1].contains("\"BSD Name\" = \"disk6\""));
+        assert_eq!(block_int_field(blocks[1], "idVendor"), Some(13621)); // 0x3535
+        assert_eq!(block_int_field(blocks[1], "idProduct"), Some(25344)); // 0x6300
+        // 无块起点时整段输出为单一块(Python re.split 兜底行为)
+        let no_root = "  |   \"idVendor\" = 1\n  |   \"BSD Name\" = \"disk6\"\n";
+        assert_eq!(split_class_blocks(no_root, "IOUSBHostDevice").len(), 1);
     }
 
     #[test]

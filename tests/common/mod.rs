@@ -162,17 +162,18 @@ impl nopwd::sysinfo::CmdRunner for FakeRunner {
     }
 }
 
-/// ioreg SCSI 类罐头输出(vendor/product 决定生成的 device_id 候选)。
+/// ioreg SCSI 类罐头输出(真实树形格式: 竖线前缀 + @0 节点名; vendor/product 决定 device_id 候选)。
+/// 根节点与被查询类同名(查询 IOSCSITargetDevice 时 ioreg -r -c 即返回此形状)。
 pub fn ioreg_scsi(disk: u32, vendor: &str, product: &str, rev: &str) -> String {
     format!(
-        "+-o IOSCSITargetDevice <class IOSCSITargetDevice>\n    {{\n      \"IOPropertyMatch\" = \"x\"\n    +-o IOSCSILogicalUnitNub <class IOSCSILogicalUnitNub>\n      {{\n        \"BSD Name\" = \"disk{d}\"\n        \"Vendor Identification\" = \"{v}\"\n        \"Product Identification\" = \"{p}\"\n        \"Product Revision Level\" = \"{r}\"\n      }}\n    }}\n",
+        "+-o IOSCSITargetDevice@0  <class IOSCSITargetDevice, id 0x100002b0e, registered, matched, active, retain 8>\n  |   \"IOPropertyMatch\" = \"x\"\n  +-o IOSCSILogicalUnitNub@0  <class IOSCSILogicalUnitNub, id 0x100002b11, retain 10>\n    |   \"Vendor Identification\" = \"{v}\"\n    |   \"Product Identification\" = \"{p}\"\n    |   \"Product Revision Level\" = \"{r}\"\n    +-o IOBlockStorageServices  <class IOBlockStorageServices, id 0x100002b14>\n      +-o {v} {p} Media  <class IOMedia, id 0x100002b17, registered, matched, active, retain 12>\n        |   \"BSD Name\" = \"disk{d}\"\n",
         d = disk, v = vendor, p = product, r = rev
     )
 }
 
 pub fn ioreg_usb(disk: u32, vid: i64, pid: i64) -> String {
     format!(
-        "+-o IOUSBHostDevice <class IOUSBHostDevice>\n    {{\n      \"idVendor\" = {v}\n      \"idProduct\" = {p}\n      \"BSD Name\" = \"disk{d}\"\n    }}\n",
+        "+-o IOUSBHostDevice  <class IOUSBHostDevice, id 0x100002af0, registered, matched, active, busy 0, retain 15>\n  |   \"idVendor\" = {v}\n  |   \"idProduct\" = {p}\n  |   \"USB Product Name\" = \"Mass Storage\"\n  +-o IOUSBMassStorageInterfaceNub  <class IOUSBMassStorageInterfaceNub>\n    +-o IOUSBMassStorageDriverNub  <class IOUSBMassStorageDriverNub>\n      +-o IOUSBMassStorageDriver  <class IOUSBMassStorageDriver>\n        +-o IOSCSILogicalUnitNub@0  <class IOSCSILogicalUnitNub>\n          +-o {v} {p} Media  <class IOMedia>\n            |   \"BSD Name\" = \"disk{d}\"\n",
         v = vid, p = pid, d = disk
     )
 }

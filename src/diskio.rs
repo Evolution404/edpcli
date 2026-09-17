@@ -28,35 +28,59 @@ fn io_err(e: io::Error) -> NopwdError {
 pub trait SectorDev {
     fn read_sector(&mut self, lba: u32) -> io::Result<Vec<u8>>;
     fn write_sector(&mut self, lba: u32, data: &[u8]) -> io::Result<()>;
+    /// 写阶段前切换为 O_RDWR(卸载后调用)。默认无操作 — 测试镜像本就可写。
+    fn reopen_rdwr(&mut self, _wait: Duration) -> io::Result<()> {
+        Ok(())
+    }
 }
 
-/// 打开镜像/raw 设备文件; O_RDWR, EBUSY(16) 时 0.2s 重试至多 wait_s。
-/// EBUSY 多发生在写 LBA0 改 MBR 后 macOS 重扫/挂载的瞬间; 单 fd 全程持有、
-/// 不再中途重开后, 该窗口即不复存在(旧版逐扇重开曾实测撞 EBUSY)。
+/// 打开镜像/raw 设备文件。流程以只读打开(挂载态可读); 写阶段经 reopen_rdwr
+/// 在卸载后切换为 O_RDWR — 与 Python 版时序一致(dry-run 从不需要写权限,
+/// O_RDWR 的 EBUSY 重试只发生在卸载之后)。
 pub struct FileDev {
+    path: String,
     file: File,
+    writable: bool,
 }
 
-impl FileDev {
-    pub fn open_rdwr(path: &str, wait_s: Duration) -> io::Result<Self> {
-        let deadline = Instant::now() + wait_s;
-        loop {
-            match OpenOptions::new().read(true).write(true).open(path) {
-                Ok(file) => return Ok(FileDev { file }),
-                Err(e) => {
-                    // EBUSY=16(macOS); 不用 ErrorKind — 其映射跨 Rust 版本有变
-                    if e.raw_os_error() == Some(16) && Instant::now() < deadline {
-                        thread::sleep(Duration::from_millis(200));
-                    } else {
-                        return Err(e);
-                    }
+fn try_open_rdwr(path: &str, wait: Duration) -> io::Result<File> {
+    let deadline = Instant::now() + wait;
+    loop {
+        match OpenOptions::new().read(true).write(true).open(path) {
+            Ok(file) => return Ok(file),
+            Err(e) => {
+                // EBUSY=16(macOS); 不用 ErrorKind — 其映射跨 Rust 版本有变
+                if e.raw_os_error() == Some(16) && Instant::now() < deadline {
+                    thread::sleep(Duration::from_millis(200));
+                } else {
+                    return Err(e);
                 }
             }
         }
     }
+}
 
+impl FileDev {
     pub fn open_rdonly(path: &str) -> io::Result<Self> {
-        Ok(FileDev { file: File::open(path)? })
+        Ok(FileDev { path: path.to_string(), file: File::open(path)?, writable: false })
+    }
+
+    pub fn open_rdwr(path: &str, wait: Duration) -> io::Result<Self> {
+        Ok(FileDev { path: path.to_string(), file: try_open_rdwr(path, wait)?, writable: true })
+    }
+
+    /// 切换为 O_RDWR(应在卸载后调用)。已可写则不重开, 保持单 fd 全程持有。
+    pub fn reopen_rdwr(&mut self, wait: Duration) -> io::Result<()> {
+        if self.writable {
+            return Ok(());
+        }
+        self.file = try_open_rdwr(&self.path, wait)?;
+        self.writable = true;
+        Ok(())
+    }
+
+    pub fn path(&self) -> &str {
+        &self.path
     }
 }
 
@@ -82,6 +106,10 @@ pub fn pwrite_loop(
 }
 
 impl SectorDev for FileDev {
+    fn reopen_rdwr(&mut self, wait: Duration) -> io::Result<()> {
+        FileDev::reopen_rdwr(self, wait)
+    }
+
     fn read_sector(&mut self, lba: u32) -> io::Result<Vec<u8>> {
         let mut buf = vec![0u8; SECTOR];
         let mut filled = 0usize;
@@ -100,6 +128,12 @@ impl SectorDev for FileDev {
     }
 
     fn write_sector(&mut self, lba: u32, data: &[u8]) -> io::Result<()> {
+        if !self.writable {
+            return Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                format!("{} 以只读打开(未到写阶段)", self.path),
+            ));
+        }
         let base = lba as u64 * SECTOR as u64;
         let file = &self.file;
         pwrite_loop(|buf, off| file.write_at(buf, off), data, base)
