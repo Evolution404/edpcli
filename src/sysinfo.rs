@@ -62,7 +62,7 @@ impl CmdRunner for SysRunner {
                     }
                 }
                 Err(RecvTimeoutError::Disconnected) => {
-                    return Err(io::Error::new(ErrorKind::Other, "读取输出失败"))
+                    return Err(io::Error::other("读取输出失败"))
                 }
             }
         };
@@ -70,10 +70,7 @@ impl CmdRunner for SysRunner {
         if status.success() {
             Ok(output)
         } else {
-            Err(io::Error::new(
-                ErrorKind::Other,
-                format!("{} 退出码 {:?}", cmd[0], status.code()),
-            ))
+            Err(io::Error::other(format!("{} 退出码 {:?}", cmd[0], status.code())))
         }
     }
 }
@@ -310,7 +307,7 @@ mod tests {
             self.outputs
                 .get(&cmd.join(" "))
                 .cloned()
-                .ok_or_else(|| io::Error::new(ErrorKind::Other, format!("无罐头: {}", cmd.join(" "))))
+                .ok_or_else(|| io::Error::other(format!("无罐头: {}", cmd.join(" "))))
         }
     }
 

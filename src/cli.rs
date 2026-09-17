@@ -722,7 +722,7 @@ pub fn scan_disks(
                             .map_err(|e| NopwdError::new(EXIT_IO, format!("错误: {}", e)))
                     };
                     row.is_nopwd = looks_nopwd(&read, did)
-                        .map_err(|e| io::Error::new(io::ErrorKind::Other, e.msg))?;
+                        .map_err(|e| io::Error::other(e.msg))?;
                     let lba12 = read_disk(d.n, 12)?;
                     row.partitions = parse_lba12(&lba12, did);
                     let tag: [u8; 16] = lba4[..16].try_into().unwrap();
@@ -2029,8 +2029,7 @@ fn inspect_disk_flow(runner: &SysRunner, mut opts: InspectOpts) -> i32 {
     let raw7 = diskio::read_lba(&path, 7).ok();
     let id = raw7
         .as_deref()
-        .map(|r| identify(runner, n, r).device_id)
-        .flatten();
+        .and_then(|r| identify(runner, n, r).device_id);
     let (vid, pid) = sysinfo::usb_vid_pid(runner, n);
     let size_bytes = sysinfo::disk_total_sectors(runner, n).and_then(|s| s.checked_mul(SECTOR as u64));
     let onlyid = diskio::read_lba(&path, 4)

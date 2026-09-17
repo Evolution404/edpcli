@@ -1,5 +1,6 @@
 //! CLI 端到端: 子进程(离线 convert / 用法错误 / 系统盘防护)
 //! + 进程内 apply/restore 流程(防重复写入守卫、写扇集合、还原交互)。
+//!
 //! 全部不碰真盘。
 
 mod common;
@@ -10,7 +11,7 @@ use std::process::Command;
 use common::*;
 use nopwd::cli::{apply_flow, restore_flow, Ctx};
 use nopwd::common::{SECTOR, EXIT_ALREADY_NOPWD, EXIT_BACKUP, EXIT_CANCELLED, EXIT_OK, EXIT_TARGET};
-use nopwd::diskio::{FileDev, SectorDev};
+use nopwd::diskio::FileDev;
 
 // ══════════════════════════════════════════════════════════════════
 // 子进程测试(真二进制)
@@ -86,12 +87,6 @@ fn usage_errors_exit_two() {
 // ══════════════════════════════════════════════════════════════════
 // 进程内流程测试(apply 守卫 / restore)
 // ══════════════════════════════════════════════════════════════════
-fn dev_on(tmp: &TmpDir, data: &[u8], name: &str) -> FileDev {
-    let p = tmp.0.join(name);
-    fs::write(&p, data).unwrap();
-    FileDev::open_rdwr(p.to_str().unwrap(), std::time::Duration::from_secs(1)).unwrap()
-}
-
 fn ctx<'a>(runner: &'a FakeRunner, prompt: &'a mut dyn nopwd::cli::Prompter, bak: &'a std::path::Path) -> Ctx<'a> {
     Ctx {
         runner,
@@ -201,7 +196,7 @@ fn apply_original_disk_not_blocked_and_dry_run_no_write() {
 
 #[test]
 fn apply_cancel_at_prompt_leaves_disk_untouched() {
-    let Some((conv, _)) = converted_image("netac") else {
+    let Some((_conv, _)) = converted_image("netac") else {
         eprintln!("跳过: 真实备份不可用");
         return;
     };
@@ -209,7 +204,7 @@ fn apply_cancel_at_prompt_leaves_disk_untouched() {
     let tmp = TmpDir::new("apply_cancel");
     let bak = tmp.0.join("bak");
     let img_path = tmp.0.join("disk.img");
-    fs::write(&img_path, &load_disk_image("netac").unwrap()).unwrap(); // 原盘 → 不会被拒
+    fs::write(&img_path, load_disk_image("netac").unwrap()).unwrap(); // 原盘 → 不会被拒
     let orig = fs::read(&img_path).unwrap();
     let mut prompt = ScriptPrompter { inputs: vec!["no".into()], idx: 0 };
     let mut dev = FileDev::open_rdwr(img_path.to_str().unwrap(), std::time::Duration::from_secs(1)).unwrap();

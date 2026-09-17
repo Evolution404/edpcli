@@ -52,7 +52,7 @@ impl SectorDev for FlakyDev {
     fn write_sector(&mut self, lba: u32, data: &[u8]) -> std::io::Result<()> {
         self.calls += 1;
         if self.fail_on.contains(&self.calls) {
-            return Err(std::io::Error::new(std::io::ErrorKind::Other, "注入的写入失败"));
+            return Err(std::io::Error::other("注入的写入失败"));
         }
         self.inner.write_sector(lba, data)
     }

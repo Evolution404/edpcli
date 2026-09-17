@@ -158,7 +158,7 @@ impl nopwd::sysinfo::CmdRunner for FakeRunner {
         self.canned
             .get(&cmd.join(" "))
             .cloned()
-            .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::Other, format!("无罐头: {}", cmd.join(" "))))
+            .ok_or_else(|| std::io::Error::other(format!("无罐头: {}", cmd.join(" "))))
     }
 }
 

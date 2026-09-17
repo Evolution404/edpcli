@@ -39,7 +39,7 @@ fn part_type_name(t: u32) -> &'static str {
 // ══════════════════════════════════════════════════════════════════
 // 1. EDPF entry 工具
 // ══════════════════════════════════════════════════════════════════
-fn ent<'a>(dec: &'a [u8], i: usize, stride: usize) -> &'a [u8] {
+fn ent(dec: &[u8], i: usize, stride: usize) -> &[u8] {
     &dec[i * stride..(i + 1) * stride]
 }
 

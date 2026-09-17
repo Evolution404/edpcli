@@ -95,10 +95,11 @@ pub fn pwrite_loop(
     while written < data.len() {
         let n = attempt(&data[written..], base + written as u64)?;
         if n == 0 {
-            return Err(io::Error::new(
-                io::ErrorKind::Other,
-                format!("pwrite 未写完(offset {:#x}, 剩 {}B)", base + written as u64, data.len() - written),
-            ));
+            return Err(io::Error::other(format!(
+                "pwrite 未写完(offset {:#x}, 剩 {}B)",
+                base + written as u64,
+                data.len() - written
+            )));
         }
         written += n;
     }
@@ -158,7 +159,7 @@ fn write_and_verify(
     }
     for &lba in sectors.keys() {
         if dev.read_sector(lba)? != sectors[&lba] {
-            return Err(io::Error::new(io::ErrorKind::Other, format!("LBA{} 读回校验不符", lba)));
+            return Err(io::Error::other(format!("LBA{} 读回校验不符", lba)));
         }
     }
     Ok(())
@@ -171,6 +172,7 @@ fn write_and_verify(
 ///   2) LBA0(唯一改 MBR 的扇区)最后写 → 未到它之前系统视角的 MBR 仍是旧的;
 ///   3) 写完逐扇读回校验, 落盘与否以读回为准;
 ///   4) 任一失败 → 以写前内存镜像自动回滚全部扇区并再校验。
+///
 /// 回滚成功 → EXIT_ROLLED_BACK(盘仍为写前状态, 可安全重试);
 /// 回滚失败 → EXIT_INTERMEDIATE(中间态, 指引重插后 nopwd restore 从备份还原)。
 pub fn atomic_write_sectors(
@@ -247,7 +249,10 @@ impl Clock for SystemClock {
     }
 }
 
-fn date_fmt(epoch: i64, fmt: &str, utc: fn((i64, u32, u32, u32, u32, u32)) -> String) -> String {
+type UtcParts = (i64, u32, u32, u32, u32, u32);
+type UtcFormatter = fn(UtcParts) -> String;
+
+fn date_fmt(epoch: i64, fmt: &str, utc: UtcFormatter) -> String {
     let date_fmt_str = format!("+{}", fmt);
     if let Ok(out) = Command::new("/bin/date").arg("-r").arg(epoch.to_string()).arg(&date_fmt_str).output() {
         if out.status.success() {
@@ -262,7 +267,7 @@ fn date_fmt(epoch: i64, fmt: &str, utc: fn((i64, u32, u32, u32, u32, u32)) -> St
 }
 
 /// Howard Hinnant civil_from_days: epoch → (年,月,日,时,分,秒) (UTC)。
-fn utc_parts(epoch: i64) -> (i64, u32, u32, u32, u32, u32) {
+fn utc_parts(epoch: i64) -> UtcParts {
     let days = epoch.div_euclid(86400);
     let secs = epoch.rem_euclid(86400);
     let (h, mi, s) = (secs / 3600, (secs % 3600) / 60, secs % 60);

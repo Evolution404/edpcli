@@ -8,7 +8,6 @@ use common::*;
 use nopwd::cli::{print_disk_table, scan_disks};
 use nopwd::common::SECTOR;
 use nopwd::identify::identify;
-use nopwd::sysinfo::CmdRunner;
 
 #[test]
 fn identify_picks_edpf_verified_candidate() {
