@@ -243,6 +243,137 @@ fn restore_explicit_nopwd_backup_blocked() {
 }
 
 #[test]
+fn restore_detects_nopwd_from_backup_name_when_current_device_id_is_unavailable() {
+    let Some((conv, _)) = converted_image("netac") else {
+        eprintln!("跳过: 真实备份不可用");
+        return;
+    };
+    let Some(original) = load_disk_image("netac") else {
+        eprintln!("跳过: 真实备份不可用");
+        return;
+    };
+    let mut runner = netac_runner(26);
+    runner.canned.remove("ioreg -r -c IOSCSITargetDevice -l");
+
+    let tmp = TmpDir::new("restore_nopwd_without_current_did");
+    let bakfile = tmp.0.join(
+        "disk26_122880000_vid0dd8_pid2005_disk&ven_netac&prod_onlydisk_onlyid1402259934_nopwd_20260917_120000.bin",
+    );
+    fs::write(&bakfile, &conv).unwrap();
+    fs::write(
+        format!("{}.md5", bakfile.display()),
+        format!("{}\n", md5(&conv)),
+    )
+    .unwrap();
+
+    let img_path = tmp.0.join("disk.img");
+    fs::write(&img_path, &original).unwrap();
+    let mut prompt = ScriptPrompter::yes();
+    let mut dev = FileDev::open_rdwr(
+        img_path.to_str().unwrap(),
+        std::time::Duration::from_secs(1),
+    )
+    .unwrap();
+
+    let code = restore_flow(
+        Some(bakfile.to_string_lossy().into_owned()),
+        26,
+        &mut ctx(&runner, &mut prompt, &tmp.0),
+        &mut dev,
+    )
+    .unwrap();
+    assert_eq!(code, EXIT_OK);
+    assert_eq!(
+        fs::read(&img_path).unwrap(),
+        original,
+        "即使当前盘 device_id 识别失败，也必须从备份文件名识别免密快照并拒绝写入"
+    );
+}
+
+#[test]
+fn restore_refuses_unknown_backup_identity_when_device_id_is_unavailable() {
+    let Some((conv, _)) = converted_image("netac") else {
+        eprintln!("跳过: 真实备份不可用");
+        return;
+    };
+    let Some(original) = load_disk_image("netac") else {
+        eprintln!("跳过: 真实备份不可用");
+        return;
+    };
+    let mut runner = netac_runner(26);
+    runner.canned.remove("ioreg -r -c IOSCSITargetDevice -l");
+
+    let tmp = TmpDir::new("restore_unknown_did");
+    let bakfile = tmp.0.join("renamed.bin");
+    fs::write(&bakfile, &conv).unwrap();
+    fs::write(
+        format!("{}.md5", bakfile.display()),
+        format!("{}\n", md5(&conv)),
+    )
+    .unwrap();
+    let img_path = tmp.0.join("disk.img");
+    fs::write(&img_path, &original).unwrap();
+    let mut prompt = ScriptPrompter::yes();
+    let mut dev = FileDev::open_rdwr(
+        img_path.to_str().unwrap(),
+        std::time::Duration::from_secs(1),
+    )
+    .unwrap();
+
+    let e = restore_flow(
+        Some(bakfile.to_string_lossy().into_owned()),
+        26,
+        &mut ctx(&runner, &mut prompt, &tmp.0),
+        &mut dev,
+    )
+    .unwrap_err();
+    assert_eq!(e.code, EXIT_BACKUP);
+    assert!(e.msg.contains("device_id") || e.msg.contains("身份"), "{}", e.msg);
+    assert_eq!(fs::read(&img_path).unwrap(), original);
+}
+
+#[test]
+fn restore_refuses_when_current_disk_identity_tag_is_zero() {
+    let Some(original) = load_disk_image("netac") else {
+        eprintln!("跳过: 真实备份不可用");
+        return;
+    };
+    let runner = netac_runner(26);
+    let tmp = TmpDir::new("restore_zero_current_identity");
+    let bakfile = tmp.0.join(
+        "disk26_122880000_vid0dd8_pid2005_disk&ven_netac&prod_onlydisk_onlyid1402259934_20260917_120000.bin",
+    );
+    fs::write(&bakfile, &original).unwrap();
+    fs::write(
+        format!("{}.md5", bakfile.display()),
+        format!("{}\n", md5(&original)),
+    )
+    .unwrap();
+
+    let mut current = original.clone();
+    current[4 * SECTOR..4 * SECTOR + 16].fill(0);
+    let img_path = tmp.0.join("disk.img");
+    fs::write(&img_path, &current).unwrap();
+    let mut prompt = ScriptPrompter::yes();
+    let mut dev = FileDev::open_rdwr(
+        img_path.to_str().unwrap(),
+        std::time::Duration::from_secs(1),
+    )
+    .unwrap();
+
+    let e = restore_flow(
+        Some(bakfile.to_string_lossy().into_owned()),
+        26,
+        &mut ctx(&runner, &mut prompt, &tmp.0),
+        &mut dev,
+    )
+    .unwrap_err();
+    assert_eq!(e.code, EXIT_BACKUP);
+    assert!(e.msg.contains("身份"), "{}", e.msg);
+    assert_eq!(fs::read(&img_path).unwrap(), current);
+}
+
+#[test]
 fn restore_picker_selects_newest_and_writes() {
     let Some(orig) = load_disk_image("netac") else {
         eprintln!("跳过: 真实备份不可用");

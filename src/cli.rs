@@ -897,6 +897,12 @@ pub fn restore_flow(
     let label_id = diskio::lba4_label_id_from(lba4);
     let tag16 = diskio::lba4_tag16_from(lba4)
         .ok_or_else(|| err(EXIT_IO, "错误: LBA4 缺少 16B 身份标签"))?;
+    if tag16.iter().all(|&b| b == 0) {
+        return Err(err(
+            EXIT_BACKUP,
+            "错误: 当前盘 LBA4 身份标签为空，无法确认备份归属，拒绝还原",
+        ));
+    }
 
     let path: PathBuf = match bin {
         Some(p) => PathBuf::from(p),
@@ -986,7 +992,28 @@ pub fn restore_flow(
             ),
         ));
     }
-    let nopwd_snap = did.as_ref().map(|d| backup_is_nopwd(&path, d)).unwrap_or(false);
+    let backup_meta = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .and_then(diskio::parse_backup_name);
+    let tagged_nopwd = backup_meta
+        .as_ref()
+        .map(|meta| meta.tagged_nopwd)
+        .unwrap_or(false);
+    let detection_did = did
+        .as_deref()
+        .or_else(|| backup_meta.as_ref().map(|meta| meta.device_id.as_str()));
+    let nopwd_snap = if tagged_nopwd {
+        true
+    } else {
+        let Some(device_id) = detection_did else {
+            return Err(err(
+                EXIT_BACKUP,
+                "错误: 当前盘与备份文件名都无法提供 device_id，无法确认备份是否为免密状态，拒绝还原",
+            ));
+        };
+        diskio::image_is_nopwd(&data, device_id)
+    };
     if nopwd_snap {
         println!(
             "{}",

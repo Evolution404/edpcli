@@ -498,6 +498,12 @@ pub fn backup_label_id(path: &Path) -> Option<String> {
 /// 备份文件是否为免密状态快照(按内容检测, 与文件名无关)。
 pub fn backup_is_nopwd(path: &Path, device_id: &str) -> bool {
     let Ok(data) = fs::read(path) else { return false };
+    image_is_nopwd(&data, device_id)
+}
+
+/// 已在内存中的 LBA0-13 镜像是否为免密状态。
+/// 供扫描、restore、备份创建共用，避免上层重复构造扇区闭包或二次读文件。
+pub fn image_is_nopwd(data: &[u8], device_id: &str) -> bool {
     if data.len() < 14 * SECTOR {
         return false;
     }
@@ -787,12 +793,7 @@ pub fn scan_backup_dir(dir: &Path) -> Vec<BackupEntry> {
             .map(|d| md5_status(&path, d))
             .unwrap_or(Md5Status::Mismatch);
         let is_nopwd = match (&meta, &data) {
-            (Some(m), Some(d)) if d.len() >= 14 * SECTOR => {
-                let read = |lba: u32| -> NopwdResult<Vec<u8>> {
-                    Ok(d[lba as usize * SECTOR..(lba as usize + 1) * SECTOR].to_vec())
-                };
-                looks_nopwd(&read, &m.device_id).unwrap_or(false)
-            }
+            (Some(m), Some(d)) => image_is_nopwd(d, &m.device_id),
             _ => false,
         };
         entries.push(BackupEntry {
@@ -925,12 +926,7 @@ pub fn backup_disk(
         .map(|o| format!("_onlyid{}", o))
         .unwrap_or_default();
     // 免密状态快照打 _nopwd 标: 区别于加密原盘备份, 防止还原时拿错
-    let is_nopwd = {
-        let read = |lba: u32| -> NopwdResult<Vec<u8>> {
-            Ok(data[lba as usize * SECTOR..(lba as usize + 1) * SECTOR].to_vec())
-        };
-        looks_nopwd(&read, device_id).unwrap_or(false)
-    };
+    let is_nopwd = image_is_nopwd(data, device_id);
     let state_part = if is_nopwd { "_nopwd" } else { "" };
     let base = format!(
         "disk{}_{}_vid{}_pid{}_{}{}{}_{}",
