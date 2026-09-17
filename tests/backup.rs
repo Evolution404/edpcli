@@ -437,6 +437,38 @@ fn prune_policy_keeps_originals_latest_snapshots_and_last_backup() {
 }
 
 #[test]
+fn prune_uses_backup_name_time_before_filesystem_mtime() {
+    let entries = vec![
+        fake_entry(
+            "disk6_122880000_vid0dd8_pid2005_disk&ven_netac&prod_onlydisk_onlyidA_nopwd_20260910_120000.bin",
+            "A",
+            300,
+            true,
+        ),
+        fake_entry(
+            "disk6_122880000_vid0dd8_pid2005_disk&ven_netac&prod_onlydisk_onlyidA_nopwd_20260911_120000.bin",
+            "A",
+            200,
+            true,
+        ),
+        fake_entry(
+            "disk6_122880000_vid0dd8_pid2005_disk&ven_netac&prod_onlydisk_onlyidA_nopwd_20260912_120000.bin",
+            "A",
+            100,
+            true,
+        ),
+    ];
+
+    let candidates = prune_candidates(&entries, 2);
+    assert_eq!(candidates.len(), 1);
+    assert!(
+        candidates[0].to_string_lossy().contains("20260910_120000"),
+        "应删除文件名时间最旧的一份，而不是 mtime 最旧的一份: {:?}",
+        candidates
+    );
+}
+
+#[test]
 fn verify_and_prune_preview_exit_contract() {
     let Some(original) = load_disk_image("netac") else {
         eprintln!("跳过: 真实备份不可用");

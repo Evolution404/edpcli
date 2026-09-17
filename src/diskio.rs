@@ -1,6 +1,7 @@
 //! 真盘 IO、原子写入、备份/还原与快照读取。
 //! 扇区设备抽象为 SectorDev — 这就是 Python 版 `_raw_path` 的 mock 点(升为参数)。
 
+use std::cmp::Ordering;
 use std::collections::BTreeMap;
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read, Seek, SeekFrom, Write};
@@ -572,6 +573,65 @@ pub fn ts_suffix_pos(name: &str) -> Option<usize> {
     }
 }
 
+/// 备份文件名尾部 `_YYYYMMDD_HHMMSS.bin` 转为可直接比较的 YYYYMMDDHHMMSS 数值。
+/// 这是备份真实创建时间；文件系统 mtime 可能因复制/touch 改变，只作为旧文件兜底。
+pub fn backup_name_time_key(path: &Path) -> Option<u64> {
+    let name = path.file_name()?.to_str()?;
+    let pos = ts_suffix_pos(name)?;
+    let end = name.len().checked_sub(4)?;
+    let stamp = name.get(pos + 1..end)?;
+    let mut digits = String::with_capacity(14);
+    for ch in stamp.bytes() {
+        if ch == b'_' {
+            continue;
+        }
+        if !ch.is_ascii_digit() {
+            return None;
+        }
+        digits.push(ch as char);
+    }
+    if digits.len() != 14 {
+        return None;
+    }
+    digits.parse().ok()
+}
+
+pub fn backup_name_time_human(path: &Path) -> Option<String> {
+    let name = path.file_name()?.to_str()?;
+    let pos = ts_suffix_pos(name)?;
+    let end = name.len().checked_sub(4)?;
+    let stamp = name.get(pos + 1..end)?;
+    if stamp.len() != 15 {
+        return None;
+    }
+    Some(format!(
+        "{}-{}-{} {}:{}",
+        &stamp[0..4],
+        &stamp[4..6],
+        &stamp[6..8],
+        &stamp[9..11],
+        &stamp[11..13]
+    ))
+}
+
+/// `sort_by` 可直接使用的“最新备份优先”比较器。
+/// 两边都有文件名时间时完全忽略 mtime；无法解析旧命名时才退回 mtime。
+pub fn cmp_backup_newest_first(a: &BackupEntry, b: &BackupEntry) -> Ordering {
+    match (backup_name_time_key(&a.path), backup_name_time_key(&b.path)) {
+        (Some(at), Some(bt)) => bt.cmp(&at).then_with(|| a.path.cmp(&b.path)),
+        (Some(_), None) => Ordering::Less,
+        (None, Some(_)) => Ordering::Greater,
+        (None, None) => b
+            .mtime
+            .cmp(&a.mtime)
+            .then_with(|| a.path.cmp(&b.path)),
+    }
+}
+
+pub fn backup_display_time(path: &Path, mtime: i64) -> String {
+    backup_name_time_human(path).unwrap_or_else(|| SystemClock.fmt_human(mtime))
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BackupMeta {
     pub disk: u32,
@@ -744,11 +804,7 @@ pub fn scan_backup_dir(dir: &Path) -> Vec<BackupEntry> {
             size_ok,
         });
     }
-    entries.sort_by(|a, b| {
-        b.mtime
-            .cmp(&a.mtime)
-            .then_with(|| a.path.file_name().cmp(&b.path.file_name()))
-    });
+    entries.sort_by(cmp_backup_newest_first);
     entries
 }
 
@@ -768,7 +824,8 @@ pub fn backup_group_key(entry: &BackupEntry) -> Option<String> {
 
 /// `backup prune` 的纯策略层：
 /// - 加密原盘备份从不成为候选；
-/// - 每盘只对已按内容确认的免密快照按 mtime 新→旧保留 `keep` 份；
+/// - 每盘只对已按内容确认的免密快照按备份文件名时间新→旧保留 `keep` 份；
+///   仅旧命名无法解析时间时才回退文件系统 mtime；
 /// - 若该盘组没有任何加密原盘备份，则至少保留最新 1 份快照，防止清到零份。
 pub fn prune_candidates(entries: &[BackupEntry], keep: usize) -> Vec<PathBuf> {
     let mut groups: BTreeMap<String, Vec<&BackupEntry>> = BTreeMap::new();
@@ -782,11 +839,7 @@ pub fn prune_candidates(entries: &[BackupEntry], keep: usize) -> Vec<PathBuf> {
     for group in groups.values() {
         let has_original = group.iter().any(|e| !e.is_nopwd);
         let mut snaps: Vec<&BackupEntry> = group.iter().copied().filter(|e| e.is_nopwd).collect();
-        snaps.sort_by(|a, b| {
-            b.mtime
-                .cmp(&a.mtime)
-                .then_with(|| a.path.file_name().cmp(&b.path.file_name()))
-        });
+        snaps.sort_by(|a, b| cmp_backup_newest_first(a, b));
         let preserve = if has_original { keep } else { keep.max(1) };
         let mut deletable: Vec<&BackupEntry> = snaps.into_iter().skip(preserve).collect();
         // 候选清单按最旧→较新展示/删除，便于人工核对；保留判定仍严格按最新优先。
@@ -994,9 +1047,12 @@ pub fn find_backups(
             });
         }
         out.sort_by(|a, b| {
-            mtime_epoch(b)
-                .cmp(&mtime_epoch(a))
-                .then_with(|| a.file_name().cmp(&b.file_name()))
+            match (backup_name_time_key(a), backup_name_time_key(b)) {
+                (Some(at), Some(bt)) => bt.cmp(&at).then_with(|| a.cmp(b)),
+                (Some(_), None) => Ordering::Less,
+                (None, Some(_)) => Ordering::Greater,
+                (None, None) => mtime_epoch(b).cmp(&mtime_epoch(a)).then_with(|| a.cmp(b)),
+            }
         });
         out.dedup();
         return out;

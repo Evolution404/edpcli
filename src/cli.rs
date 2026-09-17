@@ -810,7 +810,12 @@ pub fn apply_flow(
         println!("\n{}  本盘已有 {} 份(写入时会自动再备份):", crate::ui::bold("备份"), baks.len());
         let entries: Vec<(String, bool)> = baks
             .iter()
-            .map(|b| (ctx.clock.fmt_human(diskio::mtime_epoch(b)), backup_is_nopwd(b, &did)))
+            .map(|b| {
+                (
+                    diskio::backup_display_time(b, diskio::mtime_epoch(b)),
+                    backup_is_nopwd(b, &did),
+                )
+            })
             .collect();
         print!("{}", backup_menu_str(&entries));
     } else {
@@ -916,7 +921,7 @@ pub fn restore_flow(
                 .iter()
                 .map(|b| {
                     (
-                        ctx.clock.fmt_human(diskio::mtime_epoch(b)),
+                        diskio::backup_display_time(b, diskio::mtime_epoch(b)),
                         did.as_ref().map(|d| backup_is_nopwd(b, d)).unwrap_or(false),
                     )
                 })
@@ -1113,10 +1118,9 @@ fn backup_health(entry: &BackupEntry) -> String {
 }
 
 fn print_numbered_backup_entries(entries: &[&BackupEntry]) {
-    let clock = SystemClock;
     let width = entries.len().max(1).to_string().len();
     for (idx, entry) in entries.iter().enumerate() {
-        let time = clock.fmt_human(entry.mtime);
+        let time = diskio::backup_display_time(&entry.path, entry.mtime);
         println!(
             "  [{}] {}   {}   {}",
             crate::ui::pad_left(&(idx + 1).to_string(), width),
@@ -1162,8 +1166,11 @@ fn print_inspect_backup_sources(entries: &[BackupEntry]) -> bool {
     });
     println!("{}", crate::ui::bold("可查看的备份盘:"));
     for (id, mut group) in groups {
-        group.sort_by(|a, b| b.mtime.cmp(&a.mtime).then_with(|| a.path.cmp(&b.path)));
-        let latest = group.first().map(|e| SystemClock.fmt_human(e.mtime)).unwrap_or_default();
+        group.sort_by(|a, b| diskio::cmp_backup_newest_first(a, b));
+        let latest = group
+            .first()
+            .map(|e| diskio::backup_display_time(&e.path, e.mtime))
+            .unwrap_or_default();
         let model = group
             .first()
             .and_then(|e| e.meta.as_ref())
@@ -1566,7 +1573,7 @@ pub fn backup_rm(
         match entry {
             Some(e) if onlyid.is_some() => {
                 let idx = numbered_index.get(path).copied().unwrap_or(0);
-                let time = SystemClock.fmt_human(e.mtime);
+                let time = diskio::backup_display_time(&e.path, e.mtime);
                 println!(
                     "  [{}] {}   {}   {}",
                     idx,

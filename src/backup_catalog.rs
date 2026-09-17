@@ -32,7 +32,8 @@ impl BackupCatalog {
         &self.entries
     }
 
-    /// 某 onlyid 下的备份，固定按 mtime 新→旧；mtime 相同按路径稳定排序。
+    /// 某 onlyid 下的备份，固定按文件名中的备份创建时间新→旧；
+    /// 仅无法解析旧命名时回退 mtime。
     pub fn onlyid_group(&self, onlyid: &str) -> Result<Vec<&BackupEntry>, String> {
         let mut group: Vec<&BackupEntry> = self
             .entries
@@ -66,18 +67,24 @@ impl BackupCatalog {
 
     /// onlyid 候选按该盘最新备份时间新→旧排序，供 UI 与补全共同使用。
     pub fn onlyid_values(&self) -> Vec<String> {
-        let mut latest: BTreeMap<String, i64> = BTreeMap::new();
+        let mut latest: BTreeMap<String, &BackupEntry> = BTreeMap::new();
         for entry in &self.entries {
             let Some(id) = entry.meta.as_ref().and_then(|m| m.onlyid.as_ref()) else {
                 continue;
             };
             latest
                 .entry(id.clone())
-                .and_modify(|mtime| *mtime = (*mtime).max(entry.mtime))
-                .or_insert(entry.mtime);
+                .and_modify(|current| {
+                    if diskio::cmp_backup_newest_first(entry, current).is_lt() {
+                        *current = entry;
+                    }
+                })
+                .or_insert(entry);
         }
-        let mut values: Vec<(String, i64)> = latest.into_iter().collect();
-        values.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+        let mut values: Vec<(String, &BackupEntry)> = latest.into_iter().collect();
+        values.sort_by(|a, b| {
+            diskio::cmp_backup_newest_first(a.1, b.1).then_with(|| a.0.cmp(&b.0))
+        });
         values.into_iter().map(|(id, _)| id).collect()
     }
 
@@ -109,7 +116,7 @@ impl BackupCatalog {
 }
 
 pub fn sort_newest_first(entries: &mut Vec<&BackupEntry>) {
-    entries.sort_by(|a, b| b.mtime.cmp(&a.mtime).then_with(|| a.path.cmp(&b.path)));
+    entries.sort_by(|a, b| diskio::cmp_backup_newest_first(a, b));
 }
 
 pub fn canonical_entry_path(path: &Path) -> PathBuf {

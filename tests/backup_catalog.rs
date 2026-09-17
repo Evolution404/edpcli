@@ -22,7 +22,8 @@ fn copied_catalog() -> Option<(TmpDir, BackupCatalog)> {
     )
     .unwrap();
 
-    // 同一 onlyid 制造第二份、更新 mtime，用于锁死“新→旧”编号。
+    // 同一 onlyid 制造第二份，并故意让 mtime 与文件名时间相反。
+    // 备份真实创建时间来自文件名；复制/touch 不应改变 [1][2] 编号。
     let second_name = name
         .to_string_lossy()
         .replace("_20260910_172300.bin", "_20260911_172300.bin");
@@ -33,8 +34,8 @@ fn copied_catalog() -> Option<(TmpDir, BackupCatalog)> {
         format!("{}\n", md5_hex(&data)),
     )
     .unwrap();
-    set_mtime(&first, 1_789_000_000);
-    set_mtime(&second, 1_789_100_000);
+    set_mtime(&first, 1_789_100_000); // 文件名较旧，但 mtime 较新
+    set_mtime(&second, 1_789_000_000); // 文件名较新，但 mtime 较旧
 
     let catalog = BackupCatalog::load(&tmp.0);
     Some((tmp, catalog))
