@@ -1105,17 +1105,24 @@ pub fn restore_flow(
         return Err(err(EXIT_BACKUP, format!("错误: 备份大小 {} ≠ {}", data.len(), 14 * SECTOR)));
     }
     let md5_path = PathBuf::from(format!("{}.md5", path.display()));
-    if md5_path.exists() {
-        let want = std::fs::read_to_string(&md5_path)
-            .map_err(|e| err(EXIT_BACKUP, format!("错误: 无法读取 {}: {}", md5_path.display(), e)))?
-            .trim()
-            .to_string();
-        let got = crate::md5::md5_hex(&data);
-        if want != got {
-            return Err(err(EXIT_BACKUP, format!("错误: 备份 MD5 不符(期望 {}, 实际 {}) — 文件损坏?", want, got)));
-        }
-        println!("{}  {}", crate::ui::green("MD5 校验通过"), got);
+    if !md5_path.is_file() {
+        return Err(err(
+            EXIT_BACKUP,
+            format!("错误: 备份缺少校验文件 {}，拒绝还原", md5_path.display()),
+        ));
     }
+    let want = std::fs::read_to_string(&md5_path)
+        .map_err(|e| err(EXIT_BACKUP, format!("错误: 无法读取 {}: {}", md5_path.display(), e)))?
+        .trim()
+        .to_string();
+    let got = crate::md5::md5_hex(&data);
+    if want != got {
+        return Err(err(
+            EXIT_BACKUP,
+            format!("错误: 备份 MD5 不符(期望 {}, 实际 {}) — 文件损坏?", want, got),
+        ));
+    }
+    println!("{}  {}", crate::ui::green("MD5 校验通过"), got);
 
     // 显式路径也必须执行与交互选择相同的“同一物理盘”终验。device_id/容量/VID/PID
     // 对同型号盘并不唯一，LBA4 前 16B 才是现有备份体系使用的最终身份标签。

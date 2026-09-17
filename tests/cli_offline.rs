@@ -309,6 +309,33 @@ fn restore_md5_mismatch_rejected() {
 }
 
 #[test]
+fn restore_missing_md5_is_rejected() {
+    let Some(orig) = load_disk_image("netac") else {
+        eprintln!("跳过: 真实备份不可用");
+        return;
+    };
+    let runner = netac_runner(26);
+    let tmp = TmpDir::new("restore_missing_md5");
+    let bakfile = tmp.0.join("missing-md5.bin");
+    fs::write(&bakfile, &orig).unwrap();
+    let img_path = tmp.0.join("disk.img");
+    fs::write(&img_path, &orig).unwrap();
+    let mut prompt = ScriptPrompter::yes();
+    let mut dev =
+        FileDev::open_rdwr(img_path.to_str().unwrap(), std::time::Duration::from_secs(1)).unwrap();
+    let err = restore_flow(
+        Some(bakfile.to_string_lossy().into_owned()),
+        26,
+        &mut ctx(&runner, &mut prompt, &tmp.0),
+        &mut dev,
+    )
+    .unwrap_err();
+    assert_eq!(err.code, EXIT_BACKUP);
+    assert!(err.msg.contains(".md5"), "{}", err.msg);
+    assert_eq!(fs::read(&img_path).unwrap(), orig);
+}
+
+#[test]
 fn restore_explicit_backup_from_other_disk_is_rejected() {
     let (Some(current), Some(other)) = (load_disk_image("netac"), load_disk_image("lexar")) else {
         eprintln!("跳过: 真实备份不可用");
