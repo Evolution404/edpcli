@@ -255,8 +255,8 @@ device_id 自动识别（SCSI INQUIRY + 传输模式 → Windows InstanceId 中�
 **LBA4 labelOnlyId（每盘随机唯一）终验** —— 同型号多块盘（device_id/容量
 全同）也不会拿错备份。备份文件名含显式 `onlyid<labelOnlyId>` 段，人眼即可区分：
 `disk{N}_{扇区数}_vid{}_pid{}_{device_id}_onlyid{labelOnlyId}[_nopwd]_{时间戳}.bin`。
-工具在创建新备份或扫描还原备份时，也会读取历史 `.bin` 自身的 LBA4，自动把旧
-`_lid..._` 或缺少 onlyid 的文件名迁移为 `_onlyid..._`，并同步重命名 `.md5`。
+历史 `_lid..._` 或缺少 onlyid 的备份不再被扫描过程改名；工具只读解析其文件名，
+并以内存中读取到的 `.bin` 自身 LBA4 补齐/覆盖 onlyid 后参与分组和终验。
 
 ## 改造内容（5 个扇区，其余一律不动）
 

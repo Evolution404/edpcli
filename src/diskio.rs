@@ -602,52 +602,6 @@ pub fn image_is_nopwd(data: &[u8], device_id: &str) -> bool {
     looks_nopwd(&read, device_id).unwrap_or(false)
 }
 
-fn has_onlyid(name: &str) -> bool {
-    // `_onlyid-?\d+_` 存在?
-    let b = name.as_bytes();
-    let mut i = 0;
-    while let Some(p) = name[i..].find("_onlyid") {
-        let mut j = i + p + 7;
-        if b.get(j) == Some(&b'-') {
-            j += 1;
-        }
-        let dstart = j;
-        while j < b.len() && b[j].is_ascii_digit() {
-            j += 1;
-        }
-        if j > dstart && b.get(j) == Some(&b'_') {
-            return true;
-        }
-        i = i + p + 1;
-    }
-    false
-}
-
-fn replace_lid(name: &str, onlyid: &str) -> Option<String> {
-    // 把首个 `_lid-?\d+_` 段替换为 `_onlyid{id}_`
-    let b = name.as_bytes();
-    let mut i = 0;
-    while let Some(p) = name[i..].find("_lid") {
-        let mut j = i + p + 4;
-        if b.get(j) == Some(&b'-') {
-            j += 1;
-        }
-        let dstart = j;
-        while j < b.len() && b[j].is_ascii_digit() {
-            j += 1;
-        }
-        if j > dstart && b.get(j) == Some(&b'_') {
-            let mut out = String::with_capacity(name.len() + 8);
-            out.push_str(&name[..i + p]);
-            out.push_str(&format!("_onlyid{}_", onlyid));
-            out.push_str(&name[j..]);
-            return Some(out);
-        }
-        i = i + p + 1;
-    }
-    None
-}
-
 pub fn ts_suffix_pos(name: &str) -> Option<usize> {
     // 尾部 `_\d{8}_\d{6}.bin` 的 '_' 位置
     if !name.ends_with(".bin") {
@@ -963,84 +917,6 @@ pub fn prune_candidates(entries: &[BackupEntry], keep: usize) -> Vec<PathBuf> {
         out.extend(deletable.into_iter().map(|e| e.path.clone()));
     }
     out
-}
-
-/// 把历史备份文件名统一为 `_onlyid<labelOnlyId>_`，并同步改名 .md5。
-///
-/// 兼容早期 `_lid..._` 命名以及完全没有 onlyid 段的历史备份。onlyid 始终
-/// 从该备份自身的 LBA4 读取，避免依赖当前磁盘或按型号猜测。
-pub fn migrate_backup_names(bak_dir: &Path) -> Vec<(PathBuf, PathBuf)> {
-    if !bak_dir.is_dir() {
-        return vec![];
-    }
-    let mut renamed = Vec::new();
-    let Ok(entries) = fs::read_dir(bak_dir) else { return vec![] };
-    let mut bins: Vec<PathBuf> = entries
-        .flatten()
-        .map(|e| e.path())
-        .filter(|p| p.extension().map(|e| e == "bin").unwrap_or(false))
-        .collect();
-    bins.sort(); // 确定性
-    for path in bins {
-        let name = match path.file_name().and_then(|n| n.to_str()) {
-            Some(n) => n.to_string(),
-            None => continue,
-        };
-        if has_onlyid(&name) {
-            continue;
-        }
-        let onlyid = match backup_label_id(&path) {
-            Some(o) => o,
-            None => continue,
-        };
-        let new_name = if let Some(n) = replace_lid(&name, &onlyid) {
-            n
-        } else if let Some(pos) = ts_suffix_pos(&name) {
-            format!("{}_onlyid{}{}", &name[..pos], onlyid, &name[pos..])
-        } else {
-            continue;
-        };
-        let new_path = bak_dir.join(&new_name);
-        let old_md5 = bak_dir.join(format!("{}.md5", name));
-        let new_md5 = bak_dir.join(format!("{}.md5", new_name));
-        if new_path.exists() || new_md5.exists() {
-            println!(
-                "警告: 历史备份改名目标已存在，跳过: {}{}",
-                new_path.display(),
-                if new_md5.exists() { "（或对应 .md5）" } else { "" }
-            );
-            continue;
-        }
-        match fs::rename(&path, &new_path) {
-            Ok(()) => {
-                if old_md5.exists() {
-                    if let Err(e) = fs::rename(&old_md5, &new_md5) {
-                        let rollback = fs::rename(&new_path, &path);
-                        match rollback {
-                            Ok(()) => println!(
-                                "警告: 历史备份 .md5 改名失败，已回滚 .bin: {} ({})",
-                                old_md5.display(),
-                                e
-                            ),
-                            Err(rollback_err) => println!(
-                                "严重: 历史备份 .md5 改名失败且 .bin 回滚失败: {} ({})；回滚错误: {}",
-                                old_md5.display(),
-                                e,
-                                rollback_err
-                            ),
-                        }
-                        continue;
-                    }
-                }
-                renamed.push((path, new_path));
-            }
-            Err(e) => {
-                println!("警告: 历史备份无法改名: {} ({})", path.display(), e);
-                continue;
-            }
-        }
-    }
-    renamed
 }
 
 /// 备份 LBA0-13 到备份目录, 附 .md5 sidecar。

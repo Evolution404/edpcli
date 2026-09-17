@@ -1,4 +1,4 @@
-//! 备份/还原体系测试: 命名迁移、按盘匹配(LBA4 终验)、备份落盘、免密打标。
+//! 备份/还原体系测试: 历史命名解析、按盘匹配(LBA4 终验)、备份落盘、免密打标。
 //! 全部纯文件系统操作 + 注入 DiskFacts/FixedClock, 不碰真盘。
 
 mod common;
@@ -7,8 +7,8 @@ use std::fs;
 
 use common::*;
 use nopwd::common::SECTOR;
-use nopwd::diskio::{backup_disk, backup_is_nopwd, find_backups, migrate_backup_names,
-                    backup_label_id, parse_backup_name, scan_backup_dir, BackupMeta,
+use nopwd::diskio::{backup_disk, backup_is_nopwd, find_backups, backup_label_id,
+                    parse_backup_name, scan_backup_dir, BackupMeta,
                     prune_candidates, BackupEntry, Md5Status, DiskFacts};
 use nopwd::diskio::Clock;
 use nopwd::cli::{backup_list, backup_prune, backup_rm, backup_verify};
@@ -48,91 +48,6 @@ fn real_backup_label_id() {
     if let Some(neg) = neg_id_bin() {
         assert_eq!(backup_label_id(&neg).as_deref(), Some("-1833210541"));
     }
-}
-
-#[test]
-fn migrate_old_lid_and_no_id_names() {
-    let Some(data) = load_disk_image("netac") else {
-        eprintln!("跳过: 真实备份不可用");
-        return;
-    };
-    let tmp = TmpDir::new("migrate");
-    let old1 = write_backup(
-        &tmp.0,
-        "disk6_122880000_vid0dd8_pid2005_disk&ven_netac&prod_onlydisk_lid1402259934_20250101_000000.bin",
-        &data,
-    );
-    let old2 = write_backup(
-        &tmp.0,
-        "disk6_122880000_vid0dd8_pid2005_disk&ven_netac&prod_onlydisk_20250101_010101.bin",
-        &data,
-    );
-    migrate_backup_names(&tmp.0);
-    assert!(!old1.exists());
-    assert!(!old2.exists());
-    let bins: Vec<String> = fs::read_dir(&tmp.0)
-        .unwrap()
-        .flatten()
-        .map(|e| e.file_name().to_string_lossy().into_owned())
-        .filter(|n| n.ends_with(".bin"))
-        .collect();
-    assert_eq!(bins.len(), 2);
-    assert!(bins.iter().all(|n| n.contains("_onlyid1402259934_")), "{:?}", bins);
-    // .md5 同步改名
-    let md5s: Vec<String> = fs::read_dir(&tmp.0)
-        .unwrap()
-        .flatten()
-        .map(|e| e.file_name().to_string_lossy().into_owned())
-        .filter(|n| n.ends_with(".md5"))
-        .collect();
-    assert_eq!(md5s.len(), 2);
-    // 幂等: 第二次应无变化
-    let before: Vec<String> = fs::read_dir(&tmp.0)
-        .unwrap()
-        .flatten()
-        .map(|e| e.file_name().to_string_lossy().into_owned())
-        .collect();
-    migrate_backup_names(&tmp.0);
-    let after: Vec<String> = fs::read_dir(&tmp.0)
-        .unwrap()
-        .flatten()
-        .map(|e| e.file_name().to_string_lossy().into_owned())
-        .collect();
-    let mut b = before;
-    let mut a = after;
-    b.sort();
-    a.sort();
-    assert_eq!(b, a);
-}
-
-#[test]
-fn migrate_never_overwrites_existing_md5_target() {
-    let Some(data) = load_disk_image("netac") else {
-        eprintln!("跳过: 真实备份不可用");
-        return;
-    };
-    let tmp = TmpDir::new("migrate_md5_collision");
-    let old = write_backup(
-        &tmp.0,
-        "disk6_122880000_vid0dd8_pid2005_disk&ven_netac&prod_onlydisk_20250101_010101.bin",
-        &data,
-    );
-    let target_name = "disk6_122880000_vid0dd8_pid2005_disk&ven_netac&prod_onlydisk_onlyid1402259934_20250101_010101.bin";
-    let target_md5 = tmp.0.join(format!("{}.md5", target_name));
-    fs::write(&target_md5, "DO-NOT-OVERWRITE\n").unwrap();
-
-    let renamed = migrate_backup_names(&tmp.0);
-    assert!(renamed.is_empty());
-    assert!(old.exists(), "存在 sidecar 目标冲突时原 .bin 必须保持原位");
-    assert!(
-        std::path::PathBuf::from(format!("{}.md5", old.display())).exists(),
-        "原 .md5 必须保持原位"
-    );
-    assert_eq!(
-        fs::read_to_string(&target_md5).unwrap(),
-        "DO-NOT-OVERWRITE\n",
-        "迁移不得覆盖已存在的目标 .md5"
-    );
 }
 
 #[test]
