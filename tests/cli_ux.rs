@@ -184,3 +184,33 @@ fn contradictory_inspect_flags_fail_with_focused_help() {
     assert!(stdout.contains("用法: nopwd inspect"));
     assert!(!stdout.contains("cems 加密 U 盘"));
 }
+
+#[test]
+fn piping_output_to_head_does_not_panic_on_broken_pipe() {
+    let Some(tmp) = two_netac_backups() else {
+        eprintln!("跳过: 真实备份不可用");
+        return;
+    };
+    let file = fs::read_dir(&tmp.0)
+        .unwrap()
+        .flatten()
+        .map(|e| e.path())
+        .find(|p| p.extension().and_then(|e| e.to_str()) == Some("bin"))
+        .unwrap();
+    let bin = env!("CARGO_BIN_EXE_nopwd");
+    let script = format!(
+        "\"{}\" inspect \"{}\" --hex | head -n 1 >/dev/null",
+        bin,
+        file.display()
+    );
+    let out = Command::new("/bin/sh")
+        .arg("-c")
+        .arg(script)
+        .output()
+        .expect("run nopwd through head");
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        !stderr.contains("Broken pipe") && !stderr.contains("panicked at"),
+        "管道提前关闭不应触发 Rust panic: {stderr}"
+    );
+}
