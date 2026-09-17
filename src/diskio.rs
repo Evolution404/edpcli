@@ -511,7 +511,7 @@ fn replace_lid(name: &str, onlyid: &str) -> Option<String> {
     None
 }
 
-fn ts_suffix_pos(name: &str) -> Option<usize> {
+pub fn ts_suffix_pos(name: &str) -> Option<usize> {
     // 尾部 `_\d{8}_\d{6}.bin` 的 '_' 位置
     if !name.ends_with(".bin") {
         return None;
@@ -531,6 +531,177 @@ fn ts_suffix_pos(name: &str) -> Option<usize> {
     } else {
         None
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BackupMeta {
+    pub disk: u32,
+    pub secs: Option<u64>,
+    pub vid: String,
+    pub pid: String,
+    pub device_id: String,
+    pub onlyid: Option<String>,
+    pub tagged_nopwd: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Md5Status {
+    Ok,
+    Mismatch,
+    NoSidecar,
+}
+
+#[derive(Debug, Clone)]
+pub struct BackupEntry {
+    pub meta: Option<BackupMeta>,
+    pub path: PathBuf,
+    pub mtime: i64,
+    pub is_nopwd: bool,
+    pub md5_ok: Md5Status,
+    pub size_ok: bool,
+}
+
+fn strip_numeric_suffix<'a>(s: &'a str, marker: &str) -> Option<(&'a str, String)> {
+    let pos = s.rfind(marker)?;
+    let value = &s[pos + marker.len()..];
+    let bytes = value.as_bytes();
+    if bytes.is_empty() {
+        return None;
+    }
+    let start = usize::from(bytes.first() == Some(&b'-'));
+    if start == bytes.len() || !bytes[start..].iter().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    Some((&s[..pos], value.to_string()))
+}
+
+/// 解析本工具备份文件名。device_id 自身含 `&` / `_`，因此不能按 `_` 粗暴 split；
+/// 固定锚点只使用 disk/secs/vid/pid 与尾部时间戳/状态/onlyid。
+pub fn parse_backup_name(name: &str) -> Option<BackupMeta> {
+    let ts_pos = ts_suffix_pos(name)?;
+    let stem_before_ts = &name[..ts_pos];
+    let after_disk = stem_before_ts.strip_prefix("disk")?;
+    let disk_end = after_disk.find('_')?;
+    let disk_s = &after_disk[..disk_end];
+    if disk_s.is_empty() || !disk_s.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    let disk = disk_s.parse::<u32>().ok()?;
+    let rest = &after_disk[disk_end + 1..];
+
+    let vid_pos = rest.find("_vid")?;
+    let secs_s = &rest[..vid_pos];
+    let secs = if secs_s == "unknown" {
+        None
+    } else if !secs_s.is_empty() && secs_s.bytes().all(|b| b.is_ascii_digit()) {
+        Some(secs_s.parse::<u64>().ok()?)
+    } else {
+        return None;
+    };
+
+    let after_vid = &rest[vid_pos + 4..];
+    let pid_pos = after_vid.find("_pid")?;
+    let vid = &after_vid[..pid_pos];
+    if vid.is_empty() || !vid.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return None;
+    }
+    let after_pid = &after_vid[pid_pos + 4..];
+    let device_pos = after_pid.find('_')?;
+    let pid = &after_pid[..device_pos];
+    if pid.is_empty() || !pid.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return None;
+    }
+
+    let mut tail = &after_pid[device_pos + 1..];
+    let tagged_nopwd = tail.ends_with("_nopwd");
+    if tagged_nopwd {
+        tail = &tail[..tail.len() - "_nopwd".len()];
+    }
+    let (device_id, onlyid) = match strip_numeric_suffix(tail, "_onlyid") {
+        Some((did, id)) => (did, Some(id)),
+        None => (tail, None),
+    };
+    if !device_id.starts_with("disk&ven_") {
+        return None;
+    }
+
+    Some(BackupMeta {
+        disk,
+        secs,
+        vid: vid.to_string(),
+        pid: pid.to_string(),
+        device_id: device_id.to_string(),
+        onlyid,
+        tagged_nopwd,
+    })
+}
+
+fn md5_status(path: &Path, data: &[u8]) -> Md5Status {
+    let sidecar = PathBuf::from(format!("{}.md5", path.display()));
+    if !sidecar.exists() {
+        return Md5Status::NoSidecar;
+    }
+    let Ok(expected) = fs::read_to_string(sidecar) else {
+        return Md5Status::Mismatch;
+    };
+    let Some(expected) = expected.split_whitespace().next() else {
+        return Md5Status::Mismatch;
+    };
+    if expected.eq_ignore_ascii_case(&md5_hex(data)) {
+        Md5Status::Ok
+    } else {
+        Md5Status::Mismatch
+    }
+}
+
+/// 扫描备份目录并给出跨盘管理所需的完整元数据。扫描前沿用 restore 的历史
+/// 命名迁移，保证旧 `_lid` / 无 onlyid 命名先尽力归一；未识别 `.bin` 仍保留在结果中。
+pub fn scan_backup_dir(dir: &Path) -> Vec<BackupEntry> {
+    if !dir.is_dir() {
+        return Vec::new();
+    }
+    let _ = migrate_backup_names(dir);
+    let Ok(read_dir) = fs::read_dir(dir) else {
+        return Vec::new();
+    };
+    let mut entries = Vec::new();
+    for item in read_dir.flatten() {
+        let path = item.path();
+        if path.extension().and_then(|e| e.to_str()) != Some("bin") {
+            continue;
+        }
+        let name = path.file_name().and_then(|n| n.to_str()).unwrap_or_default();
+        let meta = parse_backup_name(name);
+        let data = fs::read(&path).ok();
+        let size_ok = data.as_ref().map(|d| d.len() == 14 * SECTOR).unwrap_or(false);
+        let md5_ok = data
+            .as_ref()
+            .map(|d| md5_status(&path, d))
+            .unwrap_or(Md5Status::Mismatch);
+        let is_nopwd = match (&meta, &data) {
+            (Some(m), Some(d)) if d.len() >= 14 * SECTOR => {
+                let read = |lba: u32| -> NopwdResult<Vec<u8>> {
+                    Ok(d[lba as usize * SECTOR..(lba as usize + 1) * SECTOR].to_vec())
+                };
+                looks_nopwd(&read, &m.device_id).unwrap_or(false)
+            }
+            _ => false,
+        };
+        entries.push(BackupEntry {
+            meta,
+            path: path.clone(),
+            mtime: mtime_epoch(&path),
+            is_nopwd,
+            md5_ok,
+            size_ok,
+        });
+    }
+    entries.sort_by(|a, b| {
+        b.mtime
+            .cmp(&a.mtime)
+            .then_with(|| a.path.file_name().cmp(&b.path.file_name()))
+    });
+    entries
 }
 
 /// 把历史备份文件名统一为 `_onlyid<labelOnlyId>_`，并同步改名 .md5。

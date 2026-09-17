@@ -7,7 +7,8 @@ use std::fs;
 
 use common::*;
 use nopwd::diskio::{backup_disk, backup_is_nopwd, find_backups, migrate_backup_names,
-                    backup_label_id, DiskFacts};
+                    backup_label_id, parse_backup_name, scan_backup_dir, BackupMeta,
+                    Md5Status, DiskFacts};
 use nopwd::diskio::Clock;
 
 struct FixedClock;
@@ -174,4 +175,110 @@ fn backup_tagging_by_content() {
     let short = tmp.0.join("short.bin");
     fs::write(&short, vec![0u8; 100]).unwrap();
     assert!(!backup_is_nopwd(&short, &did));
+}
+
+#[test]
+fn parse_backup_name_modern_nopwd_legacy_and_invalid() {
+    let modern = parse_backup_name(
+        "disk26_245760000_vid3535_pid6300_disk&ven_aigo&prod_u335&rev_pmap_onlyid1987718388_20260917_224100.bin",
+    )
+    .unwrap();
+    assert_eq!(
+        modern,
+        BackupMeta {
+            disk: 26,
+            secs: Some(245760000),
+            vid: "3535".into(),
+            pid: "6300".into(),
+            device_id: "disk&ven_aigo&prod_u335&rev_pmap".into(),
+            onlyid: Some("1987718388".into()),
+            tagged_nopwd: false,
+        }
+    );
+
+    let nopwd = parse_backup_name(
+        "disk6_unknown_vid0dd8_pid2005_disk&ven_netac&prod_onlydisk_onlyid-1402259934_nopwd_20260910_172433.bin",
+    )
+    .unwrap();
+    assert_eq!(nopwd.secs, None);
+    assert_eq!(nopwd.onlyid.as_deref(), Some("-1402259934"));
+    assert!(nopwd.tagged_nopwd);
+
+    // 无 onlyid 的历史命名仍可解析；scan 时 migrate 会尽力从 LBA4 补齐。
+    let legacy = parse_backup_name(
+        "disk4_61440000_vid3535_pid6300_disk&ven_aigo&prod_u320_20260827_172228.bin",
+    )
+    .unwrap();
+    assert_eq!(legacy.onlyid, None);
+    assert_eq!(legacy.device_id, "disk&ven_aigo&prod_u320");
+
+    for bad in [
+        "other.bin",
+        "diskx_61440000_vid3535_pid6300_disk&ven_aigo&prod_u320_20260827_172228.bin",
+        "disk4_bad_vid3535_pid6300_disk&ven_aigo&prod_u320_20260827_172228.bin",
+        "disk4_61440000_vidzzzz_pid6300_disk&ven_aigo&prod_u320_20260827_172228.bin",
+        "disk4_61440000_vid3535_pid6300_not-a-device_20260827_172228.bin",
+        "disk4_61440000_vid3535_pid6300_disk&ven_aigo&prod_u320_badtime.bin",
+    ] {
+        assert!(parse_backup_name(bad).is_none(), "应拒绝: {bad}");
+    }
+}
+
+#[test]
+fn scan_backup_dir_reports_ok_mismatch_missing_and_unrecognized() {
+    let Some(original) = load_disk_image("netac") else {
+        eprintln!("跳过: 真实备份不可用");
+        return;
+    };
+    let Some((converted, _)) = converted_image("netac") else {
+        eprintln!("跳过: 真实备份不可用");
+        return;
+    };
+    let tmp = TmpDir::new("scan_backup");
+
+    let ok = write_backup(
+        &tmp.0,
+        "disk6_122880000_vid0dd8_pid2005_disk&ven_netac&prod_onlydisk_onlyid1402259934_20260910_172300.bin",
+        &original,
+    );
+    let damaged = write_backup(
+        &tmp.0,
+        "disk6_122880000_vid0dd8_pid2005_disk&ven_netac&prod_onlydisk_onlyid1402259934_20260910_172301.bin",
+        &original,
+    );
+    fs::write(format!("{}.md5", damaged.display()), "00000000000000000000000000000000\n").unwrap();
+    let missing = tmp.0.join(
+        "disk6_122880000_vid0dd8_pid2005_disk&ven_netac&prod_onlydisk_onlyid1402259934_nopwd_20260910_172302.bin",
+    );
+    fs::write(&missing, &converted).unwrap();
+    let odd = tmp.0.join("other.bin");
+    fs::write(&odd, &original).unwrap();
+    fs::write(format!("{}.md5", odd.display()), format!("{}\n", md5(&original))).unwrap();
+
+    let entries = scan_backup_dir(&tmp.0);
+    assert_eq!(entries.len(), 4);
+    let by_name = |name: &str| {
+        entries
+            .iter()
+            .find(|e| e.path.file_name().unwrap().to_string_lossy() == name)
+            .unwrap()
+    };
+    let ok_e = by_name(ok.file_name().unwrap().to_str().unwrap());
+    assert_eq!(ok_e.md5_ok, Md5Status::Ok);
+    assert!(ok_e.size_ok);
+    assert!(!ok_e.is_nopwd);
+    assert!(ok_e.meta.is_some());
+
+    let damaged_e = by_name(damaged.file_name().unwrap().to_str().unwrap());
+    assert_eq!(damaged_e.md5_ok, Md5Status::Mismatch);
+    assert!(damaged_e.size_ok);
+
+    let missing_e = by_name(missing.file_name().unwrap().to_str().unwrap());
+    assert_eq!(missing_e.md5_ok, Md5Status::NoSidecar);
+    assert!(missing_e.is_nopwd);
+
+    let odd_e = by_name("other.bin");
+    assert!(odd_e.meta.is_none());
+    assert!(!odd_e.is_nopwd);
+    assert_eq!(odd_e.md5_ok, Md5Status::Ok);
 }
