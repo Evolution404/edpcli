@@ -192,6 +192,46 @@ fn sync_failure_enters_rollback_before_reporting_success() {
 }
 
 #[test]
+fn rejects_non_sector_sized_patch_before_any_write() {
+    let Some(im) = setup() else {
+        eprintln!("跳过: 真实备份不可用");
+        return;
+    };
+    let mut malformed = BTreeMap::new();
+    malformed.insert(6u32, vec![0xAA; SECTOR + 1]);
+    let mut dev = FileDev::open_rdwr(
+        im.path.to_str().unwrap(),
+        std::time::Duration::from_secs(1),
+    )
+    .unwrap();
+
+    let e = atomic_write_sectors(&mut dev, &malformed).unwrap_err();
+    assert_eq!(e.code, nopwd::common::EXIT_IO, "{}", e.msg);
+    assert!(e.msg.contains("512B") || e.msg.contains("扇区"), "{}", e.msg);
+    assert_eq!(img_bytes(&im.path), im.base, "非法 patch 必须在第一笔写入前拒绝");
+}
+
+#[test]
+fn rejects_patch_outside_metadata_lba_range_before_any_write() {
+    let tmp = TmpDir::new("atomic_lba_range");
+    let path = tmp.0.join("disk.img");
+    let base = vec![0u8; 15 * SECTOR];
+    fs::write(&path, &base).unwrap();
+    let mut malformed = BTreeMap::new();
+    malformed.insert(14u32, vec![0xAA; SECTOR]);
+    let mut dev = FileDev::open_rdwr(
+        path.to_str().unwrap(),
+        std::time::Duration::from_secs(1),
+    )
+    .unwrap();
+
+    let e = atomic_write_sectors(&mut dev, &malformed).unwrap_err();
+    assert_eq!(e.code, nopwd::common::EXIT_IO, "{}", e.msg);
+    assert!(e.msg.contains("0-13") || e.msg.contains("LBA14"), "{}", e.msg);
+    assert_eq!(img_bytes(&path), base, "LBA0-13 之外必须在第一笔写入前拒绝");
+}
+
+#[test]
 fn pwrite_loop_handles_short_writes() {
     // 每次只写一半: 循环必须把 512B 写满(Python TestPwriteFull 等价)
     let tmp = TmpDir::new("pwrite");

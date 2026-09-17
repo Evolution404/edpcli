@@ -270,6 +270,25 @@ pub fn atomic_write_sectors(
     dev: &mut dyn SectorDev,
     patch: &BTreeMap<u32, Vec<u8>>,
 ) -> NopwdResult<()> {
+    for (&lba, data) in patch {
+        if lba > 13 {
+            return Err(NopwdError::new(
+                EXIT_IO,
+                format!("错误: 原子写仅允许元数据 LBA0-13，收到 LBA{}", lba),
+            ));
+        }
+        if data.len() != SECTOR {
+            return Err(NopwdError::new(
+                EXIT_IO,
+                format!(
+                    "错误: LBA{} 写入数据长度 {}B，必须恰好为一个扇区 {}B",
+                    lba,
+                    data.len(),
+                    SECTOR
+                ),
+            ));
+        }
+    }
     let mut order: Vec<u32> = patch.keys().copied().filter(|&l| l != 0).collect();
     order.sort_unstable();
     if patch.contains_key(&0) {
