@@ -87,6 +87,8 @@ disk14 匹配备份 3 个(新→旧):
   重执行自身（选定盘号并入参数，交互提示正常工作）；`list` / `backup` / `convert`
   以及 `inspect --backup/--onlyid` 永不提权。
 - `--yes` 免交互；多块 USB 盘时自动弹编号选择；系统盘（disk<2）一律拒绝。
+- `restore` 无论交互选择还是显式传入备份路径，写入前都以 LBA4 唯一身份标签终验当前盘；
+  另一块物理盘的备份即使大小和 MD5 都正确也会被拒绝，防止同型号/误选文件串盘还原。
 - 备份目录（四级优先）：`--backup-dir` 旗标 > 环境变量 `NOPWD_BACKUP_DIR` >
   `~/.nopwd.conf` 的 `backup_dir = 路径` > `./backup`。
   - 自动提权时 sudo 会清环境变量，父进程把 `$NOPWD_BACKUP_DIR` 解析为绝对路径

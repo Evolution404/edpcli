@@ -1061,7 +1061,7 @@ pub fn restore_flow(
                 total_sectors: sysinfo::disk_total_sectors(runner, disk),
                 vid,
                 pid,
-                label_id,
+                label_id: label_id.clone(),
             };
             let baks = find_backups(&ctx.backup_dir, &facts, did.as_deref(), Some(tag16));
             if baks.is_empty() {
@@ -1115,6 +1115,23 @@ pub fn restore_flow(
             return Err(err(EXIT_BACKUP, format!("错误: 备份 MD5 不符(期望 {}, 实际 {}) — 文件损坏?", want, got)));
         }
         println!("{}  {}", crate::ui::green("MD5 校验通过"), got);
+    }
+
+    // 显式路径也必须执行与交互选择相同的“同一物理盘”终验。device_id/容量/VID/PID
+    // 对同型号盘并不唯一，LBA4 前 16B 才是现有备份体系使用的最终身份标签。
+    let backup_lba4 = &data[4 * SECTOR..5 * SECTOR];
+    let backup_tag16 = diskio::lba4_tag16_from(backup_lba4)
+        .ok_or_else(|| err(EXIT_BACKUP, "错误: 备份 LBA4 缺少 16B 身份标签"))?;
+    if tag16.iter().any(|&b| b != 0) && backup_tag16 != tag16 {
+        let current_id = label_id.as_deref().unwrap_or("未知");
+        let backup_id = diskio::lba4_label_id_from(backup_lba4).unwrap_or_else(|| "未知".into());
+        return Err(err(
+            EXIT_BACKUP,
+            format!(
+                "错误: 备份属于另一块盘(current onlyid={}, backup onlyid={})，拒绝还原",
+                current_id, backup_id
+            ),
+        ));
     }
     let nopwd_snap = did.as_ref().map(|d| backup_is_nopwd(&path, d)).unwrap_or(false);
     if nopwd_snap {
