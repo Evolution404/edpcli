@@ -55,6 +55,9 @@ pub fn yellow(s: &str) -> String {
 pub fn cyan(s: &str) -> String {
     wrap("36", s)
 }
+pub fn magenta(s: &str) -> String {
+    wrap("35", s)
+}
 
 // ══════════════════════════════════════════════════════════════════
 // 显示宽度(East Asian Width 简化版: CJK=2, 零宽=0, 其余=1)

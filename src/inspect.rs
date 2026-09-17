@@ -1,0 +1,767 @@
+//! 只读扇区检查器：把物理盘与备份镜像统一成同一套“解密 → 结构解析 → 字段高亮”视图。
+//! 本模块不做任何写盘动作，也不负责提权；CLI 只在物理盘来源时请求裸盘读取权限。
+
+use std::collections::BTreeSet;
+use std::io::Write;
+use std::process::{Command, Stdio};
+
+use crate::common::SECTOR;
+use crate::crypto::{a6b0_full, crc32_bare, lba6_checksum, lba6_decode, xor_rolling};
+use crate::diskio::BackupMeta;
+use crate::sectors::EDPF_ENC_LEN;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum FieldStyle {
+    Magic,
+    Text,
+    Identity,
+    Address,
+    Size,
+    Flag,
+    Checksum,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SectorField {
+    pub start: usize,
+    pub end: usize,
+    pub label: String,
+    pub value: String,
+    pub style: FieldStyle,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct InspectMeta {
+    pub device_id: Option<String>,
+    pub vid: Option<String>,
+    pub pid: Option<String>,
+    pub size_bytes: Option<u64>,
+    pub onlyid: Option<String>,
+}
+
+impl InspectMeta {
+    pub fn from_backup_meta(meta: &BackupMeta) -> Self {
+        Self {
+            device_id: Some(meta.device_id.clone()),
+            vid: Some(meta.vid.clone()),
+            pid: Some(meta.pid.clone()),
+            size_bytes: meta.secs.and_then(|s| s.checked_mul(SECTOR as u64)),
+            onlyid: meta.onlyid.clone(),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct SectorView {
+    pub lba: u32,
+    pub raw: Vec<u8>,
+    pub decoded: Vec<u8>,
+    pub method: String,
+    pub fields: Vec<SectorField>,
+    pub notes: Vec<String>,
+}
+
+fn u16_at(b: &[u8], off: usize) -> Option<u16> {
+    Some(u16::from_le_bytes(b.get(off..off + 2)?.try_into().ok()?))
+}
+
+fn u32_at(b: &[u8], off: usize) -> Option<u32> {
+    Some(u32::from_le_bytes(b.get(off..off + 4)?.try_into().ok()?))
+}
+
+fn u64_at(b: &[u8], off: usize) -> Option<u64> {
+    Some(u64::from_le_bytes(b.get(off..off + 8)?.try_into().ok()?))
+}
+
+fn field(
+    start: usize,
+    end: usize,
+    label: impl Into<String>,
+    value: impl Into<String>,
+    style: FieldStyle,
+) -> SectorField {
+    SectorField { start, end, label: label.into(), value: value.into(), style }
+}
+
+fn ptype_name(t: u32) -> &'static str {
+    match t {
+        1 => "Boot",
+        2 => "Share",
+        4 => "Encrypt",
+        _ => "未知",
+    }
+}
+
+fn mbr_type_name(t: u8) -> &'static str {
+    match t {
+        0x00 => "空",
+        0x01 => "FAT12",
+        0x04 | 0x06 | 0x0e => "FAT16",
+        0x07 => "NTFS/exFAT",
+        0x0b | 0x0c => "FAT32",
+        0xee => "GPT Protective",
+        0xef => "EFI",
+        _ => "其他",
+    }
+}
+
+fn human_bytes(v: u64) -> String {
+    if v >= 1_000_000_000 {
+        format!("{:.2} GB", v as f64 / 1_000_000_000.0)
+    } else if v >= 1_000_000 {
+        format!("{:.2} MB", v as f64 / 1_000_000.0)
+    } else if v >= 1_000 {
+        format!("{:.2} KB", v as f64 / 1_000.0)
+    } else {
+        format!("{} B", v)
+    }
+}
+
+fn c_string_bytes(b: &[u8]) -> &[u8] {
+    let end = b.iter().position(|&x| x == 0).unwrap_or(b.len());
+    &b[..end]
+}
+
+fn c_field_end(b: &[u8], start: usize, end: usize) -> usize {
+    let slice = &b[start..end];
+    match slice.iter().position(|&x| x == 0) {
+        Some(pos) => start + pos + 1,
+        None => end,
+    }
+}
+
+fn decode_gbk(b: &[u8]) -> Option<String> {
+    let mut child = Command::new("iconv")
+        .args(["-f", "GBK", "-t", "UTF-8"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .ok()?;
+    child.stdin.as_mut()?.write_all(b).ok()?;
+    let output = child.wait_with_output().ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    String::from_utf8(output.stdout).ok()
+}
+
+fn text_value(b: &[u8]) -> String {
+    let b = c_string_bytes(b);
+    if b.is_empty() {
+        return "<空>".into();
+    }
+    if b.iter().all(|x| (0x20..=0x7e).contains(x)) {
+        return String::from_utf8_lossy(b).into_owned();
+    }
+    if let Ok(s) = std::str::from_utf8(b) {
+        return s.to_string();
+    }
+    if let Some(s) = decode_gbk(b) {
+        if !s.is_empty() {
+            return s;
+        }
+    }
+    let ascii: String = b
+        .iter()
+        .map(|&x| if (0x20..=0x7e).contains(&x) { x as char } else { '·' })
+        .collect();
+    format!("{}  [hex:{}]", ascii, b.iter().map(|x| format!("{:02X}", x)).collect::<String>())
+}
+
+fn crc_key(meta: &InspectMeta) -> Option<(u32, [u8; 4])> {
+    let did = meta.device_id.as_deref()?;
+    let crc = crc32_bare(did.as_bytes());
+    Some((crc, crc.to_le_bytes()))
+}
+
+fn lba7_k0(crc: u32) -> u32 {
+    (crc & 0xffff) ^ (crc >> 16)
+}
+
+fn parse_mbr(decoded: &[u8], fields: &mut Vec<SectorField>, notes: &mut Vec<String>) {
+    if decoded.len() < SECTOR {
+        return;
+    }
+    let sig_ok = decoded[0x1fe..0x200] == [0x55, 0xaa];
+    fields.push(field(
+        0x1fe,
+        0x200,
+        "MBR 签名",
+        if sig_ok { "55 AA ✓" } else { "签名异常 ✗" },
+        FieldStyle::Magic,
+    ));
+    for i in 0..4 {
+        let off = 0x1be + i * 16;
+        let ptype = decoded[off + 4];
+        let start = u32_at(decoded, off + 8).unwrap_or(0);
+        let secs = u32_at(decoded, off + 12).unwrap_or(0);
+        fields.push(field(
+            off + 4,
+            off + 5,
+            "分区类型",
+            format!("P{} 0x{:02X} {}", i + 1, ptype, mbr_type_name(ptype)),
+            FieldStyle::Flag,
+        ));
+        fields.push(field(
+            off + 8,
+            off + 12,
+            "起始 LBA",
+            format!("P{} {}", i + 1, start),
+            FieldStyle::Address,
+        ));
+        fields.push(field(
+            off + 12,
+            off + 16,
+            "大小",
+            format!("P{} {} 扇区 / {}", i + 1, secs, human_bytes(secs as u64 * SECTOR as u64)),
+            FieldStyle::Size,
+        ));
+    }
+    notes.push("MBR 分区表位于 +0x1BE..+0x1FD。".into());
+}
+
+fn lba4_serial(raw: &[u8]) -> Option<(u32, usize, usize)> {
+    let max = raw.len().min(64);
+    let b = &raw[..max];
+    for i in 0..b.len().saturating_sub(6) {
+        if b.get(i..i + 3) != Some(b"$$$") {
+            continue;
+        }
+        let mut j = i + 3;
+        while j < b.len() && b[j].is_ascii_digit() {
+            j += 1;
+        }
+        if j > i + 3 && b.get(j..j + 3) == Some(b"$$$") {
+            let s = std::str::from_utf8(&b[i + 3..j]).ok()?.parse::<u32>().ok()?;
+            return Some((s, i, j + 3));
+        }
+    }
+    None
+}
+
+fn decode_lba4(raw: &[u8]) -> Option<(Vec<u8>, u32, u32, usize, usize)> {
+    let (serial, hs, he) = lba4_serial(raw)?;
+    let k0 = (serial & 0xffff) ^ (serial >> 16);
+    let mut dec = raw.to_vec();
+    if raw.len() >= 0x18 {
+        let region = &raw[0x18..];
+        let x = xor_rolling(region, k0);
+        dec[0x18..].copy_from_slice(&x);
+        for (i, &v) in region.iter().enumerate() {
+            if v == 0 {
+                dec[0x18 + i] = 0;
+            }
+        }
+    }
+    Some((dec, serial, k0, hs, he))
+}
+
+fn parse_lba6(raw: &[u8], meta: &InspectMeta, fields: &mut Vec<SectorField>, notes: &mut Vec<String>) -> Vec<u8> {
+    let dec = lba6_decode(raw);
+    let label_end = c_field_end(&dec, 0x000, 0x040);
+    let user_end = c_field_end(&dec, 0x050, 0x070);
+    let serial_end = c_field_end(&dec, 0x070, 0x080);
+    fields.push(field(0x000, label_end, "标签", text_value(&dec[0x000..label_end]), FieldStyle::Text));
+    fields.push(field(0x050, user_end, "用户", text_value(&dec[0x050..user_end]), FieldStyle::Text));
+    fields.push(field(0x070, serial_end, "序列", text_value(&dec[0x070..serial_end]), FieldStyle::Identity));
+    if let Some((crc, _)) = crc_key(meta) {
+        let stored = u32_at(&dec, 0x100).unwrap_or(0);
+        fields.push(field(
+            0x100,
+            0x104,
+            "device_id CRC32",
+            format!("0x{stored:08X} / 期望 0x{crc:08X} {}", if stored == crc { "✓" } else { "✗" }),
+            FieldStyle::Checksum,
+        ));
+        let stored2 = u32_at(&dec, 0x104).unwrap_or(0);
+        let want2 = crc.wrapping_shl(1);
+        fields.push(field(
+            0x104,
+            0x108,
+            "CRC32<<1",
+            format!("0x{stored2:08X} / 期望 0x{want2:08X} {}", if stored2 == want2 { "✓" } else { "✗" }),
+            FieldStyle::Checksum,
+        ));
+    }
+    if let Some(pos) = dec[0x188..0x1c0].windows(6).position(|w| w == b"!SAFE6") {
+        fields.push(field(
+            0x188,
+            0x188 + pos + 6,
+            "SAFE6 标识",
+            text_value(&dec[0x188..0x188 + pos + 6]),
+            FieldStyle::Magic,
+        ));
+    }
+    fields.push(field(0x1c0, 0x1c8, "GLAB 前缀", text_value(&dec[0x1c0..0x1c8]), FieldStyle::Magic));
+    let v1ca = u32_at(&dec, 0x1ca).unwrap_or(0);
+    fields.push(field(0x1ca, 0x1ce, "模板值", format!("{} (0x{v1ca:08X})", v1ca), FieldStyle::Flag));
+    let flagv = dec[0x1f0];
+    fields.push(field(
+        0x1f0,
+        0x1f1,
+        "注册标志",
+        format!("0x{flagv:02X} {}", if flagv == 1 { "SAFE6 已注册" } else { "未注册/其他" }),
+        FieldStyle::Flag,
+    ));
+    let stored = u32_at(raw, 0x1fc).unwrap_or(0);
+    let calc = lba6_checksum(&raw[..0x1fc]);
+    fields.push(field(
+        0x1fc,
+        0x200,
+        "校验和",
+        format!("0x{stored:08X} / 计算 0x{calc:08X} {}", if stored == calc { "✓" } else { "✗" }),
+        FieldStyle::Checksum,
+    ));
+    notes.push("LBA6：前 508B 使用 rolling XOR K0=0x4DAA，最后 4B 校验和保持明文。".into());
+    dec
+}
+
+fn old_hash(data: &[u8]) -> u32 {
+    let mut total = 0u32;
+    for chunk in data.chunks(4) {
+        let mut tmp = [0u8; 4];
+        tmp[..chunk.len()].copy_from_slice(chunk);
+        total = total.wrapping_add(u32::from_le_bytes(tmp));
+    }
+    total
+}
+
+fn parse_edpf(dec: &[u8], stride: usize, fields: &mut Vec<SectorField>, notes: &mut Vec<String>) {
+    let max = dec.len() / stride;
+    let mut count = 0usize;
+    for idx in 0..max.min(8) {
+        let base = idx * stride;
+        let e = &dec[base..base + stride];
+        if e.get(..4) != Some(b"EDPF") {
+            break;
+        }
+        count += 1;
+        let ptype = u32_at(e, 0x0c).unwrap_or(0);
+        let active = u32_at(e, 0x10).unwrap_or(0);
+        let enc = u32_at(e, 0x14).unwrap_or(0);
+        let start = u64_at(e, 0x18).unwrap_or(0);
+        let bps = u64_at(e, 0x20).unwrap_or(0);
+        let size = u64_at(e, 0x28).unwrap_or(0);
+        fields.push(field(base, base + 4, "EDPF magic", format!("Entry[{idx}] EDPF"), FieldStyle::Magic));
+        fields.push(field(
+            base + 0x0c,
+            base + 0x10,
+            "类型",
+            format!("Entry[{idx}] {} ({ptype})", ptype_name(ptype)),
+            FieldStyle::Flag,
+        ));
+        fields.push(field(
+            base + 0x10,
+            base + 0x18,
+            "状态",
+            format!("Entry[{idx}] active={active} enc={enc}"),
+            FieldStyle::Flag,
+        ));
+        fields.push(field(
+            base + 0x18,
+            base + 0x20,
+            "起始 LBA",
+            format!("Entry[{idx}] {start}"),
+            FieldStyle::Address,
+        ));
+        fields.push(field(
+            base + 0x20,
+            base + 0x28,
+            "扇区字节",
+            format!("Entry[{idx}] {bps}"),
+            FieldStyle::Size,
+        ));
+        fields.push(field(
+            base + 0x28,
+            base + 0x30,
+            "大小",
+            format!("Entry[{idx}] {size} B / {}", human_bytes(size)),
+            FieldStyle::Size,
+        ));
+        let key_end = if stride >= 0x60 { 0x48 } else { 0x40 };
+        if e[0x30..key_end].iter().any(|&b| b != 0) {
+            let value = if stride == 0x40 && key_end == 0x40 {
+                let pwd_crc = u32_at(e, 0x30).unwrap_or(0);
+                let key_crc = u32_at(e, 0x34).unwrap_or(0);
+                let wrapped = &e[0x38..0x40];
+                let known = b"0000aaaa";
+                if crc32_bare(known) == pwd_crc {
+                    let h = old_hash(known);
+                    let lo = u32_at(wrapped, 0).unwrap_or(0) ^ h;
+                    let hi = u32_at(wrapped, 4).unwrap_or(0) ^ h;
+                    let mut key8 = Vec::with_capacity(8);
+                    key8.extend_from_slice(&lo.to_le_bytes());
+                    key8.extend_from_slice(&hi.to_le_bytes());
+                    format!(
+                        "Entry[{idx}] pwd_crc=0x{pwd_crc:08X} key_crc=0x{key_crc:08X} key8={} {}",
+                        key8.iter().map(|x| format!("{:02x}", x)).collect::<String>(),
+                        if crc32_bare(&key8) == key_crc { "✓" } else { "✗" }
+                    )
+                } else {
+                    format!("Entry[{idx}] {}", e[0x30..key_end].iter().map(|x| format!("{:02x}", x)).collect::<String>())
+                }
+            } else {
+                format!("Entry[{idx}] {}", e[0x30..key_end].iter().map(|x| format!("{:02x}", x)).collect::<String>())
+            };
+            fields.push(field(base + 0x30, base + key_end, "Key/Hash", value, FieldStyle::Identity));
+        }
+    }
+    notes.push(format!("EDPF：检测到 {count} 条记录，entry stride=0x{stride:X}。"));
+}
+
+fn parse_llgb(dec: &[u8], fields: &mut Vec<SectorField>, notes: &mut Vec<String>) {
+    let mut cursor = 0usize;
+    let mut count = 0usize;
+    while cursor < dec.len() {
+        let Some(rel) = dec[cursor..].iter().position(|&b| b == b'<') else { break };
+        let start = cursor + rel;
+        if dec.get(start + 1) == Some(&b'/') {
+            cursor = start + 2;
+            continue;
+        }
+        let Some(gt_rel) = dec[start..].iter().position(|&b| b == b'>') else { break };
+        let gt = start + gt_rel;
+        let tag = text_value(&dec[start + 1..gt]);
+        let close = dec[gt + 1..]
+            .windows(2)
+            .position(|w| w == b"</")
+            .map(|r| gt + 1 + r)
+            .or_else(|| {
+                dec[gt + 1..]
+                    .windows(2)
+                    .position(|w| w == [0, 0])
+                    .map(|r| gt + 1 + r)
+            })
+            .unwrap_or(dec.len());
+        let body = &dec[gt + 1..close];
+        let mut parts = Vec::new();
+        let mut part_start = 0usize;
+        let mut p = 0usize;
+        while p + 1 < body.len() {
+            if body[p] == b'|' && body[p + 1] == b'|' {
+                if p > part_start {
+                    parts.push(text_value(&body[part_start..p]));
+                }
+                p += 2;
+                part_start = p;
+            } else {
+                p += 1;
+            }
+        }
+        if part_start < body.len() {
+            parts.push(text_value(&body[part_start..]));
+        }
+        let display_end = if dec.get(close..close + 2) == Some(b"</") {
+            dec[close..]
+                .iter()
+                .position(|&b| b == b'>')
+                .map(|r| close + r + 1)
+                .unwrap_or(close)
+        } else {
+            close
+        };
+        fields.push(field(
+            start,
+            display_end.min(dec.len()),
+            "LLGB 标签",
+            format!("[{tag}] {}", parts.join(" | ")),
+            FieldStyle::Text,
+        ));
+        count += 1;
+        cursor = display_end.saturating_add(1);
+    }
+    if count > 0 {
+        notes.push(format!("LLGB：解析到 {count} 个标签。"));
+    }
+}
+
+fn parse_sapf(dec: &[u8], fields: &mut Vec<SectorField>, notes: &mut Vec<String>) {
+    if dec.get(0x100..0x104) != Some(b"SAPF") {
+        return;
+    }
+    fields.push(field(0x100, 0x104, "SAPF magic", "SAPF", FieldStyle::Magic));
+    let ver = u16_at(dec, 0x104).unwrap_or(0);
+    let count = u16_at(dec, 0x106).unwrap_or(0) as usize;
+    fields.push(field(0x104, 0x108, "SAPF 头", format!("version=0x{ver:04X} count={count}"), FieldStyle::Flag));
+    for i in 0..count.min(8) {
+        let off = 0x108 + i * 0x10;
+        if off + 0x10 > dec.len() {
+            break;
+        }
+        let ptype = dec[off];
+        let flags = dec[off + 1];
+        let start = u32_at(dec, off + 4).unwrap_or(0);
+        let secs = u32_at(dec, off + 8).unwrap_or(0);
+        fields.push(field(off, off + 2, "SAPF 类型", format!("Part[{i}] type=0x{ptype:02X} flags=0x{flags:02X}"), FieldStyle::Flag));
+        fields.push(field(off + 4, off + 8, "起始 LBA", format!("Part[{i}] {start}"), FieldStyle::Address));
+        fields.push(field(
+            off + 8,
+            off + 12,
+            "大小",
+            format!("Part[{i}] {secs} 扇区 / {}", human_bytes(secs as u64 * SECTOR as u64)),
+            FieldStyle::Size,
+        ));
+    }
+    notes.push(format!("SAPF：version=0x{ver:04X}，记录数={count}。"));
+}
+
+fn padded4(s: &str) -> [u8; 4] {
+    let mut out = [0u8; 4];
+    let b = s.as_bytes();
+    let n = b.len().min(4);
+    out[..n].copy_from_slice(&b[..n]);
+    out
+}
+
+fn chs_capacity(size: u64) -> u64 {
+    const UNIT: u64 = 255 * 63 * 512;
+    size / UNIT * UNIT
+}
+
+fn decode_lba11(raw: &[u8], meta: &InspectMeta) -> Option<(Vec<u8>, String)> {
+    if raw.len() != SECTOR {
+        return None;
+    }
+    let vid = meta.vid.as_deref()?;
+    let pid = meta.pid.as_deref()?;
+    let size = meta.size_bytes?;
+    let rand = &raw[..0x100];
+    let cipher = &raw[0x100..0x200];
+    let mut candidates = vec![(size, "DiskSize")];
+    let chs = chs_capacity(size);
+    if chs != size {
+        candidates.push((chs, "CHS"));
+    }
+    for (sz, source) in candidates {
+        let mut buf = Vec::with_capacity(0x100 + 16);
+        buf.extend_from_slice(rand);
+        buf.extend_from_slice(&padded4(vid));
+        buf.extend_from_slice(&padded4(pid));
+        buf.extend_from_slice(&sz.to_le_bytes());
+        let crc = crc32_bare(&buf);
+        let pt = a6b0_full(cipher, &crc.to_le_bytes(), 0);
+        if pt.get(..4) == Some(b"PDKB") {
+            let mut dec = rand.to_vec();
+            dec.extend_from_slice(&pt);
+            return Some((dec, format!("A6B0 key=CRC32(rand+VID+PID+{source})=0x{crc:08X} → PDKB ✓")));
+        }
+    }
+    None
+}
+
+pub fn analyze_sector(lba: u32, raw: &[u8], meta: &InspectMeta) -> SectorView {
+    if raw.len() != SECTOR {
+        return SectorView {
+            lba,
+            raw: raw.to_vec(),
+            decoded: raw.to_vec(),
+            method: format!("RAW（短读：{}B，应为 {}B）", raw.len(), SECTOR),
+            fields: vec![],
+            notes: vec!["扇区长度异常，停止结构化解析。".into()],
+        };
+    }
+    let mut fields = Vec::new();
+    let mut notes = Vec::new();
+    let mut decoded = raw.to_vec();
+    let method = match lba {
+        0 => {
+            parse_mbr(&decoded, &mut fields, &mut notes);
+            "RAW + MBR 结构解析".into()
+        }
+        4 => {
+            if let Some((d, serial, k0, hs, he)) = decode_lba4(raw) {
+                decoded = d;
+                fields.push(field(hs, he, "labelOnlyId", format!("{} (0x{serial:08X})", serial), FieldStyle::Identity));
+                if decoded.get(0x39..0x3d) == Some(b"LLGB") {
+                    fields.push(field(0x39, 0x3d, "LLGB magic", "LLGB", FieldStyle::Magic));
+                }
+                notes.push("LBA4 的 0x18 以后按 labelOnlyId 派生 K0 做 rolling XOR；原始 0 填充保持为 0。".into());
+                format!("XOR K0=0x{k0:04X} from labelOnlyId={serial}")
+            } else {
+                "RAW（未找到 $$$<onlyid>$$$）".into()
+            }
+        }
+        6 => {
+            decoded = parse_lba6(raw, meta, &mut fields, &mut notes);
+            "XOR K0=0x4DAA (SAFE6)".into()
+        }
+        7 => {
+            if let Some((crc, _)) = crc_key(meta) {
+                let k0 = lba7_k0(crc);
+                decoded = xor_rolling(raw, k0);
+                if decoded.get(..4) == Some(b"EDPF") {
+                    parse_edpf(&decoded, 0x40, &mut fields, &mut notes);
+                }
+                format!("XOR K0=0x{k0:04X} from CRC32(device_id)=0x{crc:08X}")
+            } else {
+                "RAW（缺 device_id，无法解 LBA7）".into()
+            }
+        }
+        8 => {
+            if let Some((crc, key)) = crc_key(meta) {
+                decoded = a6b0_full(&raw[..EDPF_ENC_LEN], &key, 0);
+                decoded.resize(SECTOR, 0);
+                if decoded.get(..4) == Some(b"LLGB") || decoded.contains(&b'<') {
+                    parse_llgb(&decoded, &mut fields, &mut notes);
+                }
+                format!("A6B0 前 {}B，key=CRC32(device_id)=0x{crc:08X}", EDPF_ENC_LEN)
+            } else {
+                "RAW（缺 device_id，无法解 LBA8）".into()
+            }
+        }
+        9 => {
+            if let Some((crc, key)) = crc_key(meta) {
+                let mut d = a6b0_full(&raw[..0x80], &key, 0);
+                d.resize(0x100, 0);
+                d.extend(raw[0x100..0x120].iter().map(|b| b ^ 0x88));
+                d.resize(SECTOR, 0);
+                decoded = d;
+                parse_sapf(&decoded, &mut fields, &mut notes);
+                format!("A6B0 0x000..0x07F + XOR 0x88 @0x100..0x11F，CRC=0x{crc:08X}")
+            } else {
+                "RAW（缺 device_id，无法解 LBA9）".into()
+            }
+        }
+        10 => {
+            notes.push(if raw.iter().all(|&b| b == 0) { "LBA10 全零。".into() } else { "LBA10 存在非零数据。".into() });
+            "RAW（保留扇区）".into()
+        }
+        11 => {
+            if let Some((d, m)) = decode_lba11(raw, meta) {
+                decoded = d;
+                fields.push(field(0x100, 0x104, "PDKB magic", "PDKB", FieldStyle::Magic));
+                fields.push(field(0x104, 0x200, "PDKB device_id", text_value(&decoded[0x104..0x200]), FieldStyle::Identity));
+                m
+            } else {
+                "RAW（缺 VID/PID/容量或 PDKB 解密未通过）".into()
+            }
+        }
+        12 => {
+            if let Some((crc, key)) = crc_key(meta) {
+                let mut d = a6b0_full(&raw[..EDPF_ENC_LEN], &key, 0);
+                d.extend_from_slice(&raw[EDPF_ENC_LEN..]);
+                decoded = d;
+                if decoded.get(..4) == Some(b"EDPF") {
+                    parse_edpf(&decoded[..EDPF_ENC_LEN], 0x60, &mut fields, &mut notes);
+                }
+                notes.push("LBA12 尾部 144B 未加密，检查器保持原字节，不对其做 AES。".into());
+                format!("A6B0 前 {}B + 尾部 144B RAW，CRC=0x{crc:08X}", EDPF_ENC_LEN)
+            } else {
+                "RAW（缺 device_id，无法解 LBA12）".into()
+            }
+        }
+        _ => "RAW（无已知结构解析器）".into(),
+    };
+
+    SectorView { lba, raw: raw.to_vec(), decoded, method, fields, notes }
+}
+
+fn style_name(style: FieldStyle) -> &'static str {
+    match style {
+        FieldStyle::Magic => "魔数/签名",
+        FieldStyle::Text => "文本",
+        FieldStyle::Identity => "身份/密钥",
+        FieldStyle::Address => "地址/LBA",
+        FieldStyle::Size => "大小",
+        FieldStyle::Flag => "类型/标志",
+        FieldStyle::Checksum => "校验",
+    }
+}
+
+fn paint(style: FieldStyle, text: &str, bad: bool) -> String {
+    match style {
+        FieldStyle::Magic => crate::ui::bold_cyan(text),
+        FieldStyle::Text => crate::ui::cyan(text),
+        FieldStyle::Identity => crate::ui::yellow(text),
+        FieldStyle::Address => crate::ui::green(text),
+        FieldStyle::Size => crate::ui::magenta(text),
+        FieldStyle::Flag => crate::ui::yellow(text),
+        FieldStyle::Checksum if bad => crate::ui::red(text),
+        FieldStyle::Checksum => crate::ui::green(text),
+    }
+}
+
+fn byte_style(fields: &[SectorField], idx: usize) -> Option<(FieldStyle, bool)> {
+    fields
+        .iter()
+        .find(|f| idx >= f.start && idx < f.end)
+        .map(|f| (f.style, f.value.contains('✗')))
+}
+
+/// 16B/行字段感知 hex。`raw_mode=true` 时不对加密态字节套用解密字段颜色，避免误导。
+pub fn render_hex(view: &SectorView, raw_mode: bool) -> String {
+    let data = if raw_mode { &view.raw } else { &view.decoded };
+    let fields: &[SectorField] = if raw_mode { &[] } else { &view.fields };
+    let mut out = String::new();
+    out.push_str(&format!("LBA{} {} hex ({}B)\n", view.lba, if raw_mode { "RAW" } else { "解码" }, data.len()));
+    for (line_no, line) in data.chunks(16).enumerate() {
+        let base = line_no * 16;
+        out.push_str(&format!("  +0x{base:03X}: "));
+        for i in 0..16 {
+            if i == 8 {
+                out.push(' ');
+            }
+            if let Some(&b) = line.get(i) {
+                let token = format!("{b:02X}");
+                if let Some((style, bad)) = byte_style(fields, base + i) {
+                    out.push_str(&paint(style, &token, bad));
+                } else {
+                    out.push_str(&token);
+                }
+            } else {
+                out.push_str("  ");
+            }
+            out.push(' ');
+        }
+        out.push(' ');
+        for &b in line {
+            out.push(if (0x20..=0x7e).contains(&b) { b as char } else { '.' });
+        }
+        out.push('\n');
+    }
+    if !raw_mode && !view.fields.is_empty() {
+        let styles: BTreeSet<FieldStyle> = view.fields.iter().map(|f| f.style).collect();
+        out.push_str("  字段图例: ");
+        let mut first = true;
+        for s in styles {
+            if !first {
+                out.push_str(" · ");
+            }
+            first = false;
+            out.push_str(&paint(s, style_name(s), false));
+        }
+        out.push('\n');
+    }
+    out
+}
+
+pub fn render_fields(view: &SectorView) -> String {
+    if view.fields.is_empty() {
+        return String::new();
+    }
+    let mut out = String::new();
+    out.push_str("  结构化字段:\n");
+    for f in &view.fields {
+        let range = if f.end == f.start + 1 {
+            format!("+0x{:03X}", f.start)
+        } else {
+            format!("+0x{:03X}..0x{:03X}", f.start, f.end.saturating_sub(1))
+        };
+        let label = crate::ui::pad_to(&f.label, 18);
+        let value = paint(f.style, &f.value, f.value.contains('✗'));
+        out.push_str(&format!("    {}  {}  {}\n", crate::ui::pad_to(&range, 18), label, value));
+    }
+    out
+}
+
+pub fn overview_line(view: &SectorView) -> String {
+    let nz = view.raw.iter().filter(|&&b| b != 0).count();
+    let head: String = view
+        .raw
+        .iter()
+        .take(12)
+        .map(|&b| if (0x20..=0x7e).contains(&b) { b as char } else { '.' })
+        .collect();
+    format!("LBA{:>2}  {:>3}/512  {:<12}  {}", view.lba, nz, head, view.method)
+}

@@ -43,7 +43,7 @@ pub fn ensure_elevated(argv: &[String]) {
         }
     }
     cmd.arg(ELEVATED_FLAG);
-    println!("需要管理员权限(裸盘读写): 以 sudo 重运行 …");
+    println!("需要管理员权限(裸盘访问): 以 sudo 重运行 …");
     let status = match cmd.status() {
         Ok(s) => s,
         Err(e) => {

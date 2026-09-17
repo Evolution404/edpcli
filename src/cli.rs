@@ -21,6 +21,7 @@ use crate::diskio::{self, backup_disk, backup_is_nopwd, find_backups, raw_path, 
                     BackupEntry, BackupMeta, Md5Status, FileDev, SectorDev, Clock, SystemClock};
 use crate::elevate::{self, ELEVATED_FLAG};
 use crate::identify::identify;
+use crate::inspect::{self, InspectMeta};
 use crate::sectors::{convert, looks_nopwd, parse_lba12, EdpfPartition};
 use crate::sysinfo::{self, CmdRunner, SysRunner};
 
@@ -85,6 +86,20 @@ pub struct DiskOpts {
     pub backup_dir: Option<String>,
 }
 
+#[derive(Default)]
+pub struct InspectOpts {
+    pub disk: Option<u32>,
+    pub backup: Option<String>,
+    pub onlyid: Option<String>,
+    pub index: Option<usize>,
+    pub lbas: Vec<u32>,
+    pub raw: bool,
+    pub hex: bool,
+    pub export: Option<String>,
+    pub device_id: Option<String>,
+    pub backup_dir: Option<String>,
+}
+
 pub enum Parsed {
     List { backup_dir: Option<String> },
     Backup {
@@ -94,6 +109,7 @@ pub enum Parsed {
         onlyid: Option<String>,
         backup_dir: Option<String>,
     },
+    Inspect(InspectOpts),
     Run(DiskOpts),
     Apply { opts: DiskOpts, force: bool, yes: bool },
     Restore { bin: Option<String>, disk: Option<u32>, yes: bool, backup_dir: Option<String> },
@@ -130,11 +146,24 @@ pub fn print_usage() {
         ("apply", "真盘实际写入(自动备份 → 原子写入 → 读回校验)"),
         ("restore", "从备份还原 LBA0-13(缺省交互选择本盘备份)"),
         ("backup", "跨盘备份管理(list / verify / prune / rm，全程不提权)"),
+        ("inspect", "只读查看物理 U 盘或备份文件的扇区结构/解密字段/高亮 hex"),
         ("convert", "离线转换(不碰真盘): --dir <快照> --id <device_id>"),
         ("version", "显示版本"),
         ("help", "显示本帮助"),
     ] {
         println!("{}", cmd(n, d));
+    }
+    println!();
+    println!("{}", bold("扇区检查:"));
+    for (n, d) in [
+        ("inspect [LBA...] [--disk N]", "查看物理盘；未给 --disk 时自动选择 USB 盘"),
+        ("inspect [LBA...] --backup <文件>", "查看备份/镜像；裸文件名按备份目录解析"),
+        ("inspect [LBA...] --onlyid ID --index N", "按 backup list 的盘内编号查看某份备份"),
+        ("inspect ... --hex", "在结构化字段后显示解密后的 512B 字段高亮 hex"),
+        ("inspect ... --raw", "显示原始扇区 hex，不套用解密字段颜色"),
+        ("inspect ... --export DIR", "导出所查看 LBA 的 raw/decoded .bin 与 .hex"),
+    ] {
+        println!("{}", flag(n, d));
     }
     println!();
     println!("{}", bold("备份管理:"));
@@ -155,6 +184,8 @@ pub fn print_usage() {
         ("--force", "已改造(免密)盘仍强制重写(默认拒绝)"),
         ("--yes", "免交互(自动确认一切 YES 提示)"),
         ("--onlyid <ID>", "backup 子命令按物理盘 onlyid 筛选"),
+        ("--index <N>", "inspect --onlyid 选择该盘第 N 份备份(与 backup list 编号一致)"),
+        ("--id <device_id>", "inspect 备份/镜像无法自动识别时手动提供 device_id"),
         ("--backup-dir <目录>", "备份目录(默认 $NOPWD_BACKUP_DIR、~/.nopwd.conf 或 ./backup)"),
     ] {
         println!("{}", flag(n, d));
@@ -232,6 +263,64 @@ pub fn parse_args(argv: &[String]) -> Result<Parsed, String> {
                 i += 1;
             }
             Ok(Parsed::List { backup_dir })
+        }
+        "inspect" => {
+            let mut opts = InspectOpts::default();
+            let mut i = 0;
+            while i < rest.len() {
+                let a = rest[i].as_str();
+                if a.starts_with('-') && a != "-" {
+                    match flag_name(a) {
+                        "--disk" => {
+                            let v = take_value(&rest, &mut i, "--disk")?;
+                            opts.disk = Some(parse_disk_spec(&v)?);
+                        }
+                        "--backup" | "--image" => {
+                            let flag = flag_name(a).to_string();
+                            opts.backup = Some(take_value(&rest, &mut i, &flag)?);
+                        }
+                        "--onlyid" => {
+                            let v = take_value(&rest, &mut i, "--onlyid")?;
+                            opts.onlyid = Some(parse_onlyid(&v)?);
+                        }
+                        "--index" => {
+                            let v = take_value(&rest, &mut i, "--index")?;
+                            let n = v.parse::<usize>().map_err(|_| format!("错误: --index 须为正整数, 得到 {}", v))?;
+                            if n == 0 {
+                                return Err("错误: --index 从 1 开始".into());
+                            }
+                            opts.index = Some(n);
+                        }
+                        "--raw" => opts.raw = true,
+                        "--hex" => opts.hex = true,
+                        "--export" => opts.export = Some(take_value(&rest, &mut i, "--export")?),
+                        "--id" => opts.device_id = Some(take_value(&rest, &mut i, "--id")?),
+                        "--backup-dir" => {
+                            opts.backup_dir = Some(take_value(&rest, &mut i, "--backup-dir")?)
+                        }
+                        other => return Err(format!("错误: inspect 不认识选项 {}", other)),
+                    }
+                } else {
+                    let lba = a
+                        .parse::<u32>()
+                        .map_err(|_| format!("错误: inspect LBA 须为非负整数, 得到 {}", a))?;
+                    opts.lbas.push(lba);
+                }
+                i += 1;
+            }
+            let source_count = usize::from(opts.disk.is_some())
+                + usize::from(opts.backup.is_some())
+                + usize::from(opts.onlyid.is_some());
+            if source_count > 1 {
+                return Err("错误: inspect 的 --disk / --backup / --onlyid 三种来源只能选一种".into());
+            }
+            if opts.index.is_some() && opts.onlyid.is_none() {
+                return Err("错误: --index 只能与 inspect --onlyid 一起使用".into());
+            }
+            if opts.onlyid.is_some() && opts.index.is_none() {
+                return Err("错误: inspect --onlyid 需要同时指定 --index N".into());
+            }
+            Ok(Parsed::Inspect(opts))
         }
         "backup" => {
             let Some(action_name) = rest.first().map(String::as_str) else {
@@ -1427,7 +1516,291 @@ pub fn backup_rm(
 }
 
 // ══════════════════════════════════════════════════════════════════
-// 6. 入口
+// 6. 扇区检查器（物理盘只读 / 备份永不提权）
+// ══════════════════════════════════════════════════════════════════
+
+fn resolve_inspect_file(backup_dir: &Path, target: &str) -> Result<PathBuf, String> {
+    let raw = Path::new(target);
+    let candidate = if raw.components().count() == 1 {
+        backup_dir.join(raw)
+    } else if raw.is_absolute() {
+        raw.to_path_buf()
+    } else {
+        std::env::current_dir().unwrap_or_default().join(raw)
+    };
+    let path = fs::canonicalize(&candidate)
+        .map_err(|e| format!("文件不存在或不可访问 {}: {}", candidate.display(), e))?;
+    if !path.is_file() {
+        return Err(format!("不是普通文件: {}", path.display()));
+    }
+    Ok(path)
+}
+
+fn plain_hex(data: &[u8]) -> String {
+    let mut out = String::new();
+    for (line_no, line) in data.chunks(16).enumerate() {
+        let base = line_no * 16;
+        out.push_str(&format!("+0x{base:03X}: "));
+        for i in 0..16 {
+            if i == 8 {
+                out.push(' ');
+            }
+            if let Some(&b) = line.get(i) {
+                out.push_str(&format!("{b:02X} "));
+            } else {
+                out.push_str("   ");
+            }
+        }
+        out.push(' ');
+        for &b in line {
+            out.push(if (0x20..=0x7e).contains(&b) { b as char } else { '.' });
+        }
+        out.push('\n');
+    }
+    out
+}
+
+fn export_inspect_view(dir: &Path, view: &inspect::SectorView) -> io::Result<()> {
+    fs::create_dir_all(dir)?;
+    let base = format!("LBA{:02}", view.lba);
+    fs::write(dir.join(format!("{base}_raw.bin")), &view.raw)?;
+    fs::write(dir.join(format!("{base}_decoded.bin")), &view.decoded)?;
+    fs::write(dir.join(format!("{base}_raw.hex")), plain_hex(&view.raw))?;
+    fs::write(dir.join(format!("{base}_decoded.hex")), plain_hex(&view.decoded))?;
+    Ok(())
+}
+
+fn print_inspect_meta(meta: &InspectMeta) {
+    let mut parts = Vec::new();
+    if let Some(id) = &meta.onlyid {
+        parts.push(format!("onlyid={id}"));
+    }
+    if let (Some(v), Some(p)) = (&meta.vid, &meta.pid) {
+        parts.push(format!("USB {v}:{p}"));
+    }
+    if let Some(size) = meta.size_bytes {
+        parts.push(crate::common::fmt_gb(size));
+    }
+    if !parts.is_empty() {
+        println!("{}  {}", crate::ui::bold("设备"), parts.join(" · "));
+    }
+    if let Some(did) = &meta.device_id {
+        println!("{}  {}", crate::ui::bold("device_id"), did);
+    } else {
+        println!(
+            "{}",
+            crate::ui::yellow("device_id 未识别：LBA7/8/9/12 只能显示 RAW；可用 --id 手动指定")
+        );
+    }
+}
+
+fn render_inspect_source<F>(
+    source_label: &str,
+    meta: &InspectMeta,
+    opts: &InspectOpts,
+    mut read: F,
+) -> i32
+where
+    F: FnMut(u32) -> io::Result<Vec<u8>>,
+{
+    println!("{}  {}", crate::ui::bold("来源"), source_label);
+    print_inspect_meta(meta);
+
+    let export_dir = opts.export.as_deref().map(PathBuf::from);
+    if opts.lbas.is_empty() {
+        println!();
+        println!("{}", crate::ui::bold("LBA 0-13 概览:"));
+        for lba in 0..14u32 {
+            match read(lba) {
+                Ok(raw) => {
+                    let view = inspect::analyze_sector(lba, &raw, meta);
+                    println!("  {}", inspect::overview_line(&view));
+                    if let Some(dir) = &export_dir {
+                        if let Err(e) = export_inspect_view(dir, &view) {
+                            eprintln!("{}", crate::ui::red(&format!("错误: 导出 LBA{lba} 失败: {e}")));
+                            return EXIT_IO;
+                        }
+                    }
+                }
+                Err(e) => {
+                    eprintln!("{}", crate::ui::red(&format!("错误: 读取 LBA{lba} 失败: {e}")));
+                    return EXIT_IO;
+                }
+            }
+        }
+        println!();
+        println!(
+            "{}",
+            crate::ui::dim("指定 LBA 可展开结构化字段，例如: nopwd inspect 6 7 12 --disk N --hex")
+        );
+        if let Some(dir) = &export_dir {
+            println!("{}  {}", crate::ui::green("已导出"), dir.display());
+        }
+        return EXIT_OK;
+    }
+
+    for &lba in &opts.lbas {
+        let raw = match read(lba) {
+            Ok(raw) => raw,
+            Err(e) => {
+                eprintln!("{}", crate::ui::red(&format!("错误: 读取 LBA{lba} 失败: {e}")));
+                return EXIT_IO;
+            }
+        };
+        let view = inspect::analyze_sector(lba, &raw, meta);
+        println!();
+        println!("{}  {}", crate::ui::bold(&format!("LBA{lba}")), view.method);
+        let fields = inspect::render_fields(&view);
+        if !fields.is_empty() {
+            print!("{}", fields);
+        }
+        for note in &view.notes {
+            println!("  {} {}", crate::ui::dim("└─"), crate::ui::dim(note));
+        }
+        if opts.raw {
+            print!("{}", inspect::render_hex(&view, true));
+        } else if opts.hex || view.fields.is_empty() {
+            print!("{}", inspect::render_hex(&view, false));
+        }
+        if let Some(dir) = &export_dir {
+            if let Err(e) = export_inspect_view(dir, &view) {
+                eprintln!("{}", crate::ui::red(&format!("错误: 导出 LBA{lba} 失败: {e}")));
+                return EXIT_IO;
+            }
+        }
+    }
+    if let Some(dir) = &export_dir {
+        println!();
+        println!("{}  {}", crate::ui::green("已导出"), dir.display());
+    }
+    EXIT_OK
+}
+
+fn inspect_backup_flow(opts: InspectOpts) -> i32 {
+    let bak = diskio::resolve_backup_dir(opts.backup_dir.as_deref());
+    let (path, parsed_meta, source_label) = if let Some(id) = opts.onlyid.as_deref() {
+        let entries = diskio::scan_backup_dir(&bak);
+        let group = match entries_for_onlyid(&entries, Some(id)) {
+            Ok(v) => sorted_backup_refs(v),
+            Err(msg) => {
+                eprintln!("{}", crate::ui::red(&format!("错误: {msg}")));
+                return EXIT_BACKUP;
+            }
+        };
+        let idx = opts.index.expect("parse_args 已保证 --onlyid 有 --index");
+        let Some(entry) = group.get(idx - 1) else {
+            eprintln!(
+                "{}",
+                crate::ui::red(&format!("错误: onlyid={id} 只有 {} 份备份，没有编号 [{idx}]", group.len()))
+            );
+            return EXIT_BACKUP;
+        };
+        (
+            entry.path.clone(),
+            entry.meta.clone(),
+            format!("backup onlyid={id} [{idx}] · {}", backup_file_name(entry)),
+        )
+    } else {
+        let target = opts.backup.as_deref().expect("backup flow 必有文件来源");
+        let path = match resolve_inspect_file(&bak, target) {
+            Ok(p) => p,
+            Err(msg) => {
+                eprintln!("{}", crate::ui::red(&format!("错误: {msg}")));
+                return EXIT_BACKUP;
+            }
+        };
+        let meta = path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .and_then(diskio::parse_backup_name);
+        let label = path.display().to_string();
+        (path, meta, label)
+    };
+    let mut meta = parsed_meta
+        .as_ref()
+        .map(InspectMeta::from_backup_meta)
+        .unwrap_or_default();
+    if let Some(did) = &opts.device_id {
+        meta.device_id = Some(did.clone());
+    }
+    let path_s = path.to_string_lossy().into_owned();
+    render_inspect_source(&source_label, &meta, &opts, |lba| diskio::read_lba(&path_s, lba))
+}
+
+fn inspect_disk_flow(runner: &SysRunner, mut opts: InspectOpts) -> i32 {
+    if let Some(n) = opts.disk {
+        if let Err(e) = guard_system_disk(n) {
+            eprintln!("{}", crate::ui::red(&e.msg));
+            return e.code;
+        }
+    }
+    if !elevate::is_root() {
+        let mut argv: Vec<String> = std::env::args().skip(1).collect();
+        if opts.disk.is_none() {
+            let mut prompt = StdPrompter;
+            let n = match auto_pick_disk(runner, &mut prompt) {
+                Ok(n) => n,
+                Err(e) => {
+                    eprintln!("{}", crate::ui::red(&e.msg));
+                    return e.code;
+                }
+            };
+            argv.push("--disk".into());
+            argv.push(n.to_string());
+        }
+        elevate::ensure_elevated(&argv);
+        unreachable!();
+    }
+    let n = match opts.disk {
+        Some(n) => n,
+        None => {
+            let mut prompt = StdPrompter;
+            match auto_pick_disk(runner, &mut prompt) {
+                Ok(n) => n,
+                Err(e) => {
+                    eprintln!("{}", crate::ui::red(&e.msg));
+                    return e.code;
+                }
+            }
+        }
+    };
+    opts.disk = Some(n);
+    let path = raw_path(n);
+    let raw7 = diskio::read_lba(&path, 7).ok();
+    let id = raw7
+        .as_deref()
+        .map(|r| identify(runner, n, r).device_id)
+        .flatten();
+    let (vid, pid) = sysinfo::usb_vid_pid(runner, n);
+    let size_bytes = sysinfo::disk_total_sectors(runner, n).and_then(|s| s.checked_mul(SECTOR as u64));
+    let onlyid = diskio::read_lba(&path, 4)
+        .ok()
+        .and_then(|b| diskio::lba4_label_id_from(&b[..b.len().min(32)]));
+    let mut meta = InspectMeta {
+        device_id: id,
+        vid: (vid != "xxxx").then_some(vid),
+        pid: (pid != "xxxx").then_some(pid),
+        size_bytes,
+        onlyid,
+    };
+    if let Some(did) = &opts.device_id {
+        meta.device_id = Some(did.clone());
+    }
+    render_inspect_source(&format!("物理盘 disk{n} ({path})"), &meta, &opts, |lba| {
+        diskio::read_lba(&path, lba)
+    })
+}
+
+fn inspect_flow(runner: &SysRunner, opts: InspectOpts) -> i32 {
+    if opts.backup.is_some() || opts.onlyid.is_some() {
+        inspect_backup_flow(opts)
+    } else {
+        inspect_disk_flow(runner, opts)
+    }
+}
+
+// ══════════════════════════════════════════════════════════════════
+// 7. 入口
 // ══════════════════════════════════════════════════════════════════
 pub fn run() -> i32 {
     let argv: Vec<String> = std::env::args().skip(1).collect();
@@ -1470,6 +1843,7 @@ pub fn run() -> i32 {
                 }
             }
         }
+        Parsed::Inspect(opts) => inspect_flow(&runner, opts),
         Parsed::Convert { dir, id, size, out } => match dir {
             Some(d) => convert_flow(d, id, size, out),
             None => {
@@ -1655,6 +2029,49 @@ mod tests {
             _ => panic!(),
         }
         match parse_args(&[
+            "inspect".into(),
+            "6".into(),
+            "7".into(),
+            "12".into(),
+            "--onlyid".into(),
+            "1987718388".into(),
+            "--index".into(),
+            "2".into(),
+            "--hex".into(),
+            "--backup-dir".into(),
+            "/tmp/bak".into(),
+        ])
+        .unwrap()
+        {
+            Parsed::Inspect(opts) => {
+                assert_eq!(opts.lbas, vec![6, 7, 12]);
+                assert_eq!(opts.onlyid.as_deref(), Some("1987718388"));
+                assert_eq!(opts.index, Some(2));
+                assert!(opts.hex);
+                assert_eq!(opts.backup_dir.as_deref(), Some("/tmp/bak"));
+            }
+            _ => panic!("应解析为 inspect"),
+        }
+        match parse_args(&[
+            "inspect".into(),
+            "9".into(),
+            "--backup".into(),
+            "x.bin".into(),
+            "--raw".into(),
+            "--id".into(),
+            "disk&ven_x&prod_y".into(),
+        ])
+        .unwrap()
+        {
+            Parsed::Inspect(opts) => {
+                assert_eq!(opts.backup.as_deref(), Some("x.bin"));
+                assert_eq!(opts.lbas, vec![9]);
+                assert!(opts.raw);
+                assert_eq!(opts.device_id.as_deref(), Some("disk&ven_x&prod_y"));
+            }
+            _ => panic!("应解析为 inspect backup"),
+        }
+        match parse_args(&[
             "backup".into(),
             "prune".into(),
             "--onlyid".into(),
@@ -1762,6 +2179,28 @@ mod tests {
         ])
         .is_err());
         assert!(parse_args(&["backup".into(), "list".into(), "--yes".into()]).is_err());
+        assert!(parse_args(&[
+            "inspect".into(),
+            "--disk".into(),
+            "4".into(),
+            "--backup".into(),
+            "x.bin".into(),
+        ])
+        .is_err());
+        assert!(parse_args(&[
+            "inspect".into(),
+            "--onlyid".into(),
+            "1402259934".into(),
+        ])
+        .is_err());
+        assert!(parse_args(&[
+            "inspect".into(),
+            "--backup".into(),
+            "x.bin".into(),
+            "--index".into(),
+            "1".into(),
+        ])
+        .is_err());
         // 哨兵旗标被剥离
         assert!(matches!(
             parse_args(&["apply".into(), "--disk".into(), "6".into(), "--_elevated".into()]).unwrap(),

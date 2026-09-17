@@ -14,3 +14,4 @@ pub mod diskio;
 pub mod elevate;
 pub mod ui;
 pub mod cli;
+pub mod inspect;
