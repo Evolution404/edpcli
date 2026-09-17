@@ -14,10 +14,14 @@ nopwd apply --disk 4 --size 100  # 指定盘 + Share 100GB
 nopwd apply --force              # 盘已是免密盘仍强制重写（默认拒绝）
 nopwd restore                    # 交互还原：列出本盘备份（新→旧，免密快照标注）→ 选择 → YES → 写入
 nopwd restore <备份.bin> --yes   # 脚本化还原（自动确认）
-nopwd backup list                # 跨盘分组总览 + 大小/MD5 健康状态
+nopwd backup list                # 跨盘分组总览；每份显示编号 + 真实文件名
+nopwd backup list --onlyid ID    # 只查看某一物理盘
 nopwd backup verify              # 全量校验备份（7168 字节 + MD5）
+nopwd backup verify --onlyid ID  # 只校验某一物理盘
 nopwd backup prune               # 按策略预览旧免密快照（默认不删除）
-nopwd backup rm <备份.bin>       # 预览后输入 YES 手动删除；--yes 跳过确认
+nopwd backup rm --onlyid ID      # 显示该盘编号列表 → 选择 → YES 删除
+nopwd backup rm --onlyid ID 2-3  # 按编号/范围删除；加 --yes 可脚本化
+nopwd backup rm <备份.bin>       # 仍支持按文件名/路径精确删除
 nopwd convert --dir <快照目录> --id <device_id> [--out <目录>]   # 离线验证（不碰真盘）
 ```
 
@@ -65,27 +69,35 @@ disk14 匹配备份 3 个(新→旧):
 **不会自动 sudo，也不会碰 `/dev/disk*` / `/dev/rdisk*`**：
 
 ```bash
-nopwd backup list  [--backup-dir D]
-nopwd backup verify [<备份.bin>] [--backup-dir D]
-nopwd backup prune  [--keep N] [--yes] [--backup-dir D]
-nopwd backup rm <路径|文件名>... [--yes]
+nopwd backup list   [--onlyid ID] [--backup-dir D]
+nopwd backup verify [<备份.bin>] [--onlyid ID] [--backup-dir D]
+nopwd backup prune  [--onlyid ID] [--keep N] [--yes] [--backup-dir D]
+nopwd backup rm     --onlyid ID [编号|范围]... [--yes] [--backup-dir D]
+nopwd backup rm     <路径|文件名>... [--yes] [--backup-dir D]
 ```
 
 - `list`：按物理盘分组显示全部 `.bin`；优先以 `onlyid` 分组，历史文件缺 onlyid
   时回退 `(device_id, 总扇区数)` 并标记为未知盘。每份备份同时检查固定大小
   `14 × 512 = 7168B` 与 `.md5` sidecar；正常为绿色 `MD5 ✓`，摘要损坏为红色，
-  缺 sidecar 为黄色。无法解析为本工具命名的 `.bin` 仍以灰色“未识别”列出。
-- `verify`：无参数校验目录内全部 `.bin`，带文件名/路径时只校验该份。大小不符、
+  缺 sidecar 为黄色。每盘内部按新→旧编号 `[1] [2] ...`，下一行始终显示真实
+  文件名；`--onlyid ID` 只显示指定物理盘。无法解析为本工具命名的 `.bin` 仍以
+  灰色“未识别”列出。
+- `verify`：无参数校验目录内全部 `.bin`，`--onlyid ID` 只校验指定盘，带文件名/
+  路径时只校验该份（单文件与 `--onlyid` 不能同时使用）。大小不符、
   MD5 不符、缺 `.md5`、文件不存在均返回退出码 5；全部正常返回 0。
 - `prune`：默认**只预览、不删除**；只有显式 `--yes` 才执行。加密原盘备份永不
   自动删除；每盘免密状态快照默认保留最新 2 份，可用 `--keep N` 调整，`--keep 0`
-  允许清光免密快照，但前提是该盘仍有加密原盘备份。
+  允许清光免密快照，但前提是该盘仍有加密原盘备份；加 `--onlyid ID` 时策略只
+  作用于该盘。
 - **安全底线**：任何可识别盘组都不允许被清到 0 份备份。若某盘没有加密原盘
   备份，则即使 `--keep 0` 也会强制保留最新 1 份免密快照；`backup rm` 手动删除
   同样执行这条保护，不能把该盘最后一份备份删掉。
-- `rm`：裸文件名按当前备份目录解析；绝对/相对路径也必须最终落在当前备份目录
-  内，否则拒绝。默认先显示类型/健康状态并要求输入 `YES`，`--yes` 才免确认；
-  删除时 `.bin` 与对应 `.md5` 同步处理。
+- `rm`：人工操作优先用 `--onlyid ID`。不给编号时先展示该盘新→旧列表并进入选择器，
+  支持 `2`、`1,3`、`2-4`；直接给编号/范围时按当前列表解析。确认页再次显示编号、
+  时间、类型、健康状态和真实文件名，并提示删除后还剩几份。`--yes` 只有在已经
+  显式给出编号/范围时才允许使用，避免无选择目标的非交互误删。原有文件名/路径
+  精确删除仍保留：裸文件名按当前备份目录解析，绝对/相对路径也必须最终落在当前
+  备份目录内，否则拒绝。删除时 `.bin` 与对应 `.md5` 同步处理。
 - 文件即使是 root 属主，只要备份目录本身对当前用户可写，仍可由普通用户删除；
   若目录由 root 持有且不可写，命令返回退出码 5，并明确提示检查目录属主/权限，
   必要时再手动使用 `sudo rm`。`nopwd backup` 自身不会提权。
