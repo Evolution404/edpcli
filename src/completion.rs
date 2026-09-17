@@ -3,8 +3,9 @@
 //! 保持零依赖：zsh/bash/fish 脚本只负责上下文判断；onlyid、备份编号、
 //! 备份文件名和物理盘号由隐藏的 `nopwd __complete ...` 实时提供。
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 
+use crate::backup_catalog::BackupCatalog;
 use crate::diskio;
 use crate::sysinfo::{self, CmdRunner};
 
@@ -36,34 +37,21 @@ pub fn dynamic_values(
     match kind {
         "onlyid" => {
             let dir = diskio::resolve_backup_dir(backup_dir_flag);
-            let entries = diskio::scan_backup_dir(&dir);
-            let mut latest: BTreeMap<String, i64> = BTreeMap::new();
-            for entry in entries {
-                let Some(id) = entry.meta.as_ref().and_then(|m| m.onlyid.clone()) else {
-                    continue;
-                };
-                latest
-                    .entry(id)
-                    .and_modify(|mtime| *mtime = (*mtime).max(entry.mtime))
-                    .or_insert(entry.mtime);
-            }
-            let mut values: Vec<(String, i64)> = latest.into_iter().collect();
-            values.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
-            values.into_iter().map(|(id, _)| id).collect()
+            BackupCatalog::load(&dir).onlyid_values()
         }
         "index" => {
             let Some(id) = onlyid else { return vec![] };
             let dir = diskio::resolve_backup_dir(backup_dir_flag);
-            let count = diskio::scan_backup_dir(&dir)
-                .into_iter()
-                .filter(|entry| entry.meta.as_ref().and_then(|m| m.onlyid.as_deref()) == Some(id))
-                .count();
+            let count = BackupCatalog::load(&dir)
+                .onlyid_group(id)
+                .map(|group| group.len())
+                .unwrap_or(0);
             (1..=count).map(|n| n.to_string()).collect()
         }
         "backup-file" => {
             let dir = diskio::resolve_backup_dir(backup_dir_flag);
             let mut names = BTreeSet::new();
-            for entry in diskio::scan_backup_dir(&dir) {
+            for entry in BackupCatalog::load(&dir).entries() {
                 if let Some(name) = entry.path.file_name().and_then(|n| n.to_str()) {
                     names.insert(name.to_string());
                 }

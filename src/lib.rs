@@ -16,3 +16,4 @@ pub mod ui;
 pub mod cli;
 pub mod inspect;
 pub mod completion;
+pub mod backup_catalog;
