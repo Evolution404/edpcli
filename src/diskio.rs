@@ -704,6 +704,50 @@ pub fn scan_backup_dir(dir: &Path) -> Vec<BackupEntry> {
     entries
 }
 
+/// 同一物理盘的备份分组键。现代命名优先使用 onlyid；历史/缺失 onlyid 时退化为
+/// (device_id, total sectors)。未识别文件不参与自动清理策略。
+pub fn backup_group_key(entry: &BackupEntry) -> Option<String> {
+    let meta = entry.meta.as_ref()?;
+    Some(match &meta.onlyid {
+        Some(id) => format!("onlyid:{id}"),
+        None => format!(
+            "legacy:{}:{}",
+            meta.device_id,
+            meta.secs.map(|v| v.to_string()).unwrap_or_else(|| "unknown".into())
+        ),
+    })
+}
+
+/// `backup prune` 的纯策略层：
+/// - 加密原盘备份从不成为候选；
+/// - 每盘只对已按内容确认的免密快照按 mtime 新→旧保留 `keep` 份；
+/// - 若该盘组没有任何加密原盘备份，则至少保留最新 1 份快照，防止清到零份。
+pub fn prune_candidates(entries: &[BackupEntry], keep: usize) -> Vec<PathBuf> {
+    let mut groups: BTreeMap<String, Vec<&BackupEntry>> = BTreeMap::new();
+    for entry in entries {
+        if let Some(key) = backup_group_key(entry) {
+            groups.entry(key).or_default().push(entry);
+        }
+    }
+
+    let mut out = Vec::new();
+    for group in groups.values() {
+        let has_original = group.iter().any(|e| !e.is_nopwd);
+        let mut snaps: Vec<&BackupEntry> = group.iter().copied().filter(|e| e.is_nopwd).collect();
+        snaps.sort_by(|a, b| {
+            b.mtime
+                .cmp(&a.mtime)
+                .then_with(|| a.path.file_name().cmp(&b.path.file_name()))
+        });
+        let preserve = if has_original { keep } else { keep.max(1) };
+        let mut deletable: Vec<&BackupEntry> = snaps.into_iter().skip(preserve).collect();
+        // 候选清单按最旧→较新展示/删除，便于人工核对；保留判定仍严格按最新优先。
+        deletable.reverse();
+        out.extend(deletable.into_iter().map(|e| e.path.clone()));
+    }
+    out
+}
+
 /// 把历史备份文件名统一为 `_onlyid<labelOnlyId>_`，并同步改名 .md5。
 ///
 /// 兼容早期 `_lid..._` 命名以及完全没有 onlyid 段的历史备份。onlyid 始终

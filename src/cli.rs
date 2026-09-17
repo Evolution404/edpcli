@@ -12,12 +12,13 @@
 //! Kingston DT3.0 64G (每盘改前自动备份, 可随时 nopwd restore 还原)。
 
 use std::collections::BTreeMap;
+use std::fs;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 
 use crate::common::*;
 use crate::diskio::{self, backup_disk, backup_is_nopwd, find_backups, raw_path, DiskFacts,
-                    FileDev, SectorDev, Clock, SystemClock};
+                    BackupEntry, BackupMeta, Md5Status, FileDev, SectorDev, Clock, SystemClock};
 use crate::elevate::{self, ELEVATED_FLAG};
 use crate::identify::identify;
 use crate::sectors::{convert, looks_nopwd, parse_lba12, EdpfPartition};
@@ -86,12 +87,20 @@ pub struct DiskOpts {
 
 pub enum Parsed {
     List { backup_dir: Option<String> },
+    Backup { action: BackupAction, keep: usize, yes: bool, backup_dir: Option<String> },
     Run(DiskOpts),
     Apply { opts: DiskOpts, force: bool, yes: bool },
     Restore { bin: Option<String>, disk: Option<u32>, yes: bool, backup_dir: Option<String> },
     Convert { dir: Option<String>, id: Option<String>, size: Option<f64>, out: Option<String> },
     Version,
     Help,
+}
+
+pub enum BackupAction {
+    List,
+    Verify { target: Option<String> },
+    Prune,
+    Rm { targets: Vec<String> },
 }
 
 pub fn print_usage() {
@@ -114,11 +123,22 @@ pub fn print_usage() {
         ("run", "真盘预览 dry-run(需管理员, 自动 sudo)"),
         ("apply", "真盘实际写入(自动备份 → 原子写入 → 读回校验)"),
         ("restore", "从备份还原 LBA0-13(缺省交互选择本盘备份)"),
+        ("backup", "跨盘备份管理(list / verify / prune / rm，全程不提权)"),
         ("convert", "离线转换(不碰真盘): --dir <快照> --id <device_id>"),
         ("version", "显示版本"),
         ("help", "显示本帮助"),
     ] {
         println!("{}", cmd(n, d));
+    }
+    println!();
+    println!("{}", bold("备份管理:"));
+    for (n, d) in [
+        ("backup list", "跨盘分组总览 + 大小/MD5 健康检查"),
+        ("backup verify [备份.bin]", "校验全部或单份备份(7168 字节 + MD5)"),
+        ("backup prune [--keep N] [--yes]", "清理旧免密快照；默认仅预览，每盘默认保留最新 2 份"),
+        ("backup rm <路径|文件名>... [--yes]", "手动删除；默认预览并要求输入 YES"),
+    ] {
+        println!("{}", flag(n, d));
     }
     println!();
     println!("{}", bold("选项:"));
@@ -164,6 +184,14 @@ fn parse_size(s: &str) -> Result<f64, String> {
     }
 }
 
+fn parse_keep(s: &str) -> Result<usize, String> {
+    if s.is_empty() || !s.bytes().all(|b| b.is_ascii_digit()) {
+        return Err(format!("错误: --keep 须为大于等于 0 的整数, 得到 {}", s));
+    }
+    s.parse::<usize>()
+        .map_err(|_| format!("错误: --keep 超出范围: {}", s))
+}
+
 fn flag_name(a: &str) -> &str {
     a.split('=').next().unwrap_or(a)
 }
@@ -188,6 +216,85 @@ pub fn parse_args(argv: &[String]) -> Result<Parsed, String> {
                 i += 1;
             }
             Ok(Parsed::List { backup_dir })
+        }
+        "backup" => {
+            let Some(action_name) = rest.first().map(String::as_str) else {
+                return Err("错误: backup 缺少动作(list / verify / prune / rm)".into());
+            };
+            let tail = &rest[1..];
+            let mut backup_dir = None;
+            let mut keep = 2usize;
+            let mut yes = false;
+            let action = match action_name {
+                "list" => {
+                    let mut i = 0;
+                    while i < tail.len() {
+                        match flag_name(&tail[i]) {
+                            "--backup-dir" => backup_dir = Some(take_value(tail, &mut i, "--backup-dir")?),
+                            other => return Err(format!("错误: backup list 不认识选项 {}", other)),
+                        }
+                        i += 1;
+                    }
+                    BackupAction::List
+                }
+                "verify" => {
+                    let mut target = None;
+                    let mut i = 0;
+                    while i < tail.len() {
+                        let a = tail[i].as_str();
+                        if a.starts_with('-') && a != "-" {
+                            match flag_name(a) {
+                                "--backup-dir" => backup_dir = Some(take_value(tail, &mut i, "--backup-dir")?),
+                                other => return Err(format!("错误: backup verify 不认识选项 {}", other)),
+                            }
+                        } else if target.is_none() {
+                            target = Some(a.to_string());
+                        } else {
+                            return Err(format!("错误: backup verify 只接受一个备份文件参数({})", a));
+                        }
+                        i += 1;
+                    }
+                    BackupAction::Verify { target }
+                }
+                "prune" => {
+                    let mut i = 0;
+                    while i < tail.len() {
+                        match flag_name(&tail[i]) {
+                            "--keep" => {
+                                let v = take_value(tail, &mut i, "--keep")?;
+                                keep = parse_keep(&v)?;
+                            }
+                            "--yes" => yes = true,
+                            "--backup-dir" => backup_dir = Some(take_value(tail, &mut i, "--backup-dir")?),
+                            other => return Err(format!("错误: backup prune 不认识选项 {}", other)),
+                        }
+                        i += 1;
+                    }
+                    BackupAction::Prune
+                }
+                "rm" => {
+                    let mut targets = Vec::new();
+                    let mut i = 0;
+                    while i < tail.len() {
+                        let a = tail[i].as_str();
+                        if a.starts_with('-') && a != "-" {
+                            match flag_name(a) {
+                                "--yes" => yes = true,
+                                other => return Err(format!("错误: backup rm 不认识选项 {}", other)),
+                            }
+                        } else {
+                            targets.push(a.to_string());
+                        }
+                        i += 1;
+                    }
+                    if targets.is_empty() {
+                        return Err("错误: backup rm 至少需要一个路径或文件名".into());
+                    }
+                    BackupAction::Rm { targets }
+                }
+                other => return Err(format!("错误: 未知 backup 动作: {} (可用 list / verify / prune / rm)", other)),
+            };
+            Ok(Parsed::Backup { action, keep, yes, backup_dir })
         }
         "run" | "apply" => {
             let is_apply = first.as_str() == "apply";
@@ -752,7 +859,347 @@ pub fn convert_flow(dir: String, id: Option<String>, size: Option<f64>, out: Opt
 }
 
 // ══════════════════════════════════════════════════════════════════
-// 5. 入口
+// 5. 备份管理(永不提权)
+// ══════════════════════════════════════════════════════════════════
+
+fn backup_model_name(meta: &BackupMeta) -> String {
+    let mut vendor = None;
+    let mut product = None;
+    let mut revision = None;
+    for part in meta.device_id.split('&') {
+        if let Some(v) = part.strip_prefix("ven_") {
+            vendor = Some(v.replace('_', " "));
+        } else if let Some(v) = part.strip_prefix("prod_") {
+            product = Some(v.replace('_', " "));
+        } else if let Some(v) = part.strip_prefix("rev_") {
+            revision = Some(v.replace('_', " "));
+        }
+    }
+    let mut out = match (vendor, product) {
+        (Some(v), Some(p)) => format!("{} {}", v, p),
+        (Some(v), None) => v,
+        _ => meta.device_id.clone(),
+    };
+    if let Some(r) = revision {
+        out.push_str(&format!(" ({})", r));
+    }
+    out
+}
+
+fn backup_capacity(meta: &BackupMeta) -> String {
+    meta.secs
+        .and_then(|s| s.checked_mul(SECTOR as u64))
+        .map(crate::common::fmt_gb)
+        .unwrap_or_else(|| "容量未知".into())
+}
+
+fn backup_kind(entry: &BackupEntry) -> &'static str {
+    if entry.is_nopwd || entry.meta.as_ref().map(|m| m.tagged_nopwd).unwrap_or(false) {
+        "[免密状态]"
+    } else {
+        "[加密原盘]"
+    }
+}
+
+fn backup_health(entry: &BackupEntry) -> String {
+    if !entry.size_ok {
+        return crate::ui::red(&format!("大小 ✗ (应为 {}B)", 14 * SECTOR));
+    }
+    match entry.md5_ok {
+        Md5Status::Ok => crate::ui::green("MD5 ✓"),
+        Md5Status::Mismatch => crate::ui::red("MD5 ✗ 损坏"),
+        Md5Status::NoSidecar => crate::ui::yellow("(缺 .md5)"),
+    }
+}
+
+fn backup_is_healthy(entry: &BackupEntry) -> bool {
+    entry.size_ok && entry.md5_ok == Md5Status::Ok
+}
+
+fn canonical_backup_target(backup_dir: &Path, target: &str) -> Result<PathBuf, String> {
+    let root = fs::canonicalize(backup_dir)
+        .map_err(|e| format!("备份目录不可访问 {}: {}", backup_dir.display(), e))?;
+    let raw = Path::new(target);
+    let candidate = if raw.components().count() == 1 {
+        backup_dir.join(raw)
+    } else if raw.is_absolute() {
+        raw.to_path_buf()
+    } else {
+        std::env::current_dir().unwrap_or_default().join(raw)
+    };
+    let path = fs::canonicalize(&candidate)
+        .map_err(|e| format!("备份文件不存在或不可访问 {}: {}", candidate.display(), e))?;
+    if !path.starts_with(&root) {
+        return Err(format!("拒绝访问备份目录之外的路径: {}", path.display()));
+    }
+    if path.extension().and_then(|e| e.to_str()) != Some("bin") {
+        return Err(format!("目标不是 .bin 备份: {}", path.display()));
+    }
+    Ok(path)
+}
+
+fn canonical_entry_path(path: &Path) -> PathBuf {
+    fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
+}
+
+pub fn backup_list(backup_dir: &Path) -> i32 {
+    let entries = diskio::scan_backup_dir(backup_dir);
+    println!("备份目录 {} · {} 份", backup_dir.display(), entries.len());
+    if entries.is_empty() {
+        return EXIT_OK;
+    }
+
+    let mut groups: BTreeMap<String, Vec<&BackupEntry>> = BTreeMap::new();
+    let mut unknown = Vec::new();
+    for entry in &entries {
+        if let Some(key) = diskio::backup_group_key(entry) {
+            groups.entry(key).or_default().push(entry);
+        } else {
+            unknown.push(entry);
+        }
+    }
+    let mut grouped: Vec<Vec<&BackupEntry>> = groups.into_values().collect();
+    grouped.sort_by(|a, b| {
+        let am = a.iter().map(|e| e.mtime).max().unwrap_or(0);
+        let bm = b.iter().map(|e| e.mtime).max().unwrap_or(0);
+        bm.cmp(&am)
+    });
+
+    let clock = SystemClock;
+    for mut group in grouped {
+        group.sort_by(|a, b| b.mtime.cmp(&a.mtime).then_with(|| a.path.cmp(&b.path)));
+        let meta = group[0].meta.as_ref().expect("已按 meta 分组");
+        let identity = match &meta.onlyid {
+            Some(id) => format!("onlyid={}", id),
+            None => crate::ui::yellow("未知盘"),
+        };
+        println!();
+        println!("{} · {} · {}", backup_model_name(meta), backup_capacity(meta), identity);
+        for entry in group {
+            let time = clock.fmt_human(entry.mtime);
+            println!(
+                "  └─ {}   {}   {}",
+                crate::ui::pad_to(&time, 16),
+                crate::ui::pad_to(backup_kind(entry), 12),
+                backup_health(entry)
+            );
+        }
+    }
+    if !unknown.is_empty() {
+        println!();
+        for entry in unknown {
+            let name = entry.path.file_name().and_then(|n| n.to_str()).unwrap_or("<无效文件名>");
+            println!("  └─ {}   {}", crate::ui::dim(name), crate::ui::dim("未识别(非本工具命名)"));
+        }
+    }
+    EXIT_OK
+}
+
+pub fn backup_verify(backup_dir: &Path, target: Option<&str>) -> i32 {
+    let entries = diskio::scan_backup_dir(backup_dir);
+    let selected: Vec<&BackupEntry> = if let Some(target) = target {
+        let path = match canonical_backup_target(backup_dir, target) {
+            Ok(p) => p,
+            Err(msg) => {
+                eprintln!("{}", crate::ui::red(&format!("错误: {}", msg)));
+                return EXIT_BACKUP;
+            }
+        };
+        let Some(entry) = entries.iter().find(|e| canonical_entry_path(&e.path) == path) else {
+            eprintln!("{}", crate::ui::red("错误: 目标不是可扫描的 .bin 备份"));
+            return EXIT_BACKUP;
+        };
+        vec![entry]
+    } else {
+        if !backup_dir.is_dir() {
+            eprintln!("{}", crate::ui::red(&format!("错误: 备份目录不存在: {}", backup_dir.display())));
+            return EXIT_BACKUP;
+        }
+        entries.iter().collect()
+    };
+
+    if selected.is_empty() {
+        println!("没有可校验的 .bin 备份。");
+        return EXIT_OK;
+    }
+    let mut bad = 0usize;
+    for entry in selected {
+        let name = entry.path.file_name().and_then(|n| n.to_str()).unwrap_or("<无效文件名>");
+        if backup_is_healthy(entry) {
+            println!("{}  {}", crate::ui::green("✓"), name);
+        } else {
+            bad += 1;
+            println!("{}  {}  {}", crate::ui::red("✗"), name, backup_health(entry));
+        }
+    }
+    if bad == 0 {
+        println!("校验通过。");
+        EXIT_OK
+    } else {
+        eprintln!("{}", crate::ui::red(&format!("校验失败: {} 份备份异常。", bad)));
+        EXIT_BACKUP
+    }
+}
+
+fn delete_backup_pair(path: &Path) -> Result<(), String> {
+    if let Err(e) = fs::remove_file(path) {
+        let suffix = if e.kind() == io::ErrorKind::PermissionDenied {
+            "；备份目录可能由 root 持有且不可写，可检查目录属主/权限，必要时使用 sudo rm 手动删除"
+        } else {
+            ""
+        };
+        return Err(format!("删除失败 {}: {}{}", path.display(), e, suffix));
+    }
+    let sidecar = PathBuf::from(format!("{}.md5", path.display()));
+    if sidecar.exists() {
+        if let Err(e) = fs::remove_file(&sidecar) {
+            let suffix = if e.kind() == io::ErrorKind::PermissionDenied {
+                "；备份目录可能由 root 持有且不可写，可检查目录属主/权限，必要时使用 sudo rm 手动删除"
+            } else {
+                ""
+            };
+            return Err(format!("已删除 .bin，但删除校验文件失败 {}: {}{}", sidecar.display(), e, suffix));
+        }
+    }
+    Ok(())
+}
+
+pub fn backup_prune(backup_dir: &Path, keep: usize, yes: bool) -> i32 {
+    if !backup_dir.is_dir() {
+        eprintln!("{}", crate::ui::red(&format!("错误: 备份目录不存在: {}", backup_dir.display())));
+        return EXIT_BACKUP;
+    }
+    let entries = diskio::scan_backup_dir(backup_dir);
+    let candidates = diskio::prune_candidates(&entries, keep);
+    let candidate_set: std::collections::BTreeSet<PathBuf> =
+        candidates.iter().map(|p| canonical_entry_path(p)).collect();
+
+    let originals = entries.iter().filter(|e| e.meta.is_some() && !e.is_nopwd).count();
+    let snapshots = entries.iter().filter(|e| e.meta.is_some() && e.is_nopwd).count();
+    let keep_snapshots = snapshots.saturating_sub(candidates.len());
+    if candidates.is_empty() {
+        println!("无需清理：当前策略不会删除任何备份。");
+        println!("保留: 加密原盘 {} 份 · 免密快照 {} 份", originals, keep_snapshots);
+        return EXIT_OK;
+    }
+
+    println!(
+        "将删除 {} 个免密状态快照(每盘保留最新 {} 份, 加密原盘永不自动删除):",
+        candidates.len(), keep
+    );
+    for path in &candidates {
+        let model = entries
+            .iter()
+            .find(|e| canonical_entry_path(&e.path) == canonical_entry_path(path))
+            .and_then(|e| e.meta.as_ref())
+            .map(backup_model_name)
+            .unwrap_or_else(|| "未知盘".into());
+        let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("<无效文件名>");
+        println!("  {}   {}", name, model);
+    }
+    println!();
+    println!("保留: 加密原盘 {} 份 · 免密快照 {} 份", originals, keep_snapshots);
+    if !yes {
+        println!("确认执行: nopwd backup prune --yes");
+        return EXIT_OK;
+    }
+
+    let mut failed = 0usize;
+    for entry in &entries {
+        if candidate_set.contains(&canonical_entry_path(&entry.path)) {
+            if let Err(msg) = delete_backup_pair(&entry.path) {
+                failed += 1;
+                eprintln!("{}", crate::ui::red(&format!("错误: {}", msg)));
+            }
+        }
+    }
+    if failed == 0 {
+        println!("{}", crate::ui::green(&format!("已删除 {} 份免密状态快照。", candidates.len())));
+        EXIT_OK
+    } else {
+        EXIT_BACKUP
+    }
+}
+
+pub fn backup_rm(
+    backup_dir: &Path,
+    targets: &[String],
+    yes: bool,
+    prompt: &mut dyn Prompter,
+) -> i32 {
+    if !backup_dir.is_dir() {
+        eprintln!("{}", crate::ui::red(&format!("错误: 备份目录不存在: {}", backup_dir.display())));
+        return EXIT_BACKUP;
+    }
+    let entries = diskio::scan_backup_dir(backup_dir);
+    let mut resolved = Vec::new();
+    for target in targets {
+        match canonical_backup_target(backup_dir, target) {
+            Ok(path) => {
+                if !resolved.contains(&path) {
+                    resolved.push(path);
+                }
+            }
+            Err(msg) => {
+                eprintln!("{}", crate::ui::red(&format!("错误: {}", msg)));
+                return EXIT_BACKUP;
+            }
+        }
+    }
+
+    let mut total_per_group: BTreeMap<String, usize> = BTreeMap::new();
+    let mut deleting_per_group: BTreeMap<String, usize> = BTreeMap::new();
+    for entry in &entries {
+        if let Some(key) = diskio::backup_group_key(entry) {
+            *total_per_group.entry(key.clone()).or_default() += 1;
+            let ep = canonical_entry_path(&entry.path);
+            if resolved.contains(&ep) {
+                *deleting_per_group.entry(key).or_default() += 1;
+            }
+        }
+    }
+    for (key, deleting) in &deleting_per_group {
+        let total = total_per_group.get(key).copied().unwrap_or(0);
+        if *deleting >= total && total > 0 {
+            eprintln!(
+                "{}",
+                crate::ui::red("错误: 安全保护拒绝删除——该盘将被清到零份备份；至少保留 1 份。")
+            );
+            return EXIT_BACKUP;
+        }
+    }
+
+    println!("将删除 {} 份备份:", resolved.len());
+    for path in &resolved {
+        let entry = entries.iter().find(|e| canonical_entry_path(&e.path) == *path);
+        let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("<无效文件名>");
+        match entry {
+            Some(e) => println!("  {}   {}   {}", name, backup_kind(e), backup_health(e)),
+            None => println!("  {}   {}", name, crate::ui::yellow("未识别")),
+        }
+    }
+    if !yes && !prompt.confirm_yes("输入 YES 确认删除: ") {
+        eprintln!("已取消");
+        return EXIT_CANCELLED;
+    }
+
+    let mut failed = 0usize;
+    for path in &resolved {
+        if let Err(msg) = delete_backup_pair(path) {
+            failed += 1;
+            eprintln!("{}", crate::ui::red(&format!("错误: {}", msg)));
+        }
+    }
+    if failed == 0 {
+        println!("{}", crate::ui::green(&format!("已删除 {} 份备份。", resolved.len())));
+        EXIT_OK
+    } else {
+        EXIT_BACKUP
+    }
+}
+
+// ══════════════════════════════════════════════════════════════════
+// 6. 入口
 // ══════════════════════════════════════════════════════════════════
 pub fn run() -> i32 {
     let argv: Vec<String> = std::env::args().skip(1).collect();
@@ -780,6 +1227,18 @@ pub fn run() -> i32 {
             let read_disk = |disk: u32, lba: u32| diskio::read_lba(&raw_path(disk), lba);
             print!("{}", print_disk_table(&scan_disks(&runner, &bak, &read_disk)));
             EXIT_OK
+        }
+        Parsed::Backup { action, keep, yes, backup_dir } => {
+            let bak = diskio::resolve_backup_dir(backup_dir.as_deref());
+            match action {
+                BackupAction::List => backup_list(&bak),
+                BackupAction::Verify { target } => backup_verify(&bak, target.as_deref()),
+                BackupAction::Prune => backup_prune(&bak, keep, yes),
+                BackupAction::Rm { targets } => {
+                    let mut prompt = StdPrompter;
+                    backup_rm(&bak, &targets, yes, &mut prompt)
+                }
+            }
         }
         Parsed::Convert { dir, id, size, out } => match dir {
             Some(d) => convert_flow(d, id, size, out),
@@ -965,6 +1424,38 @@ mod tests {
             }
             _ => panic!(),
         }
+        match parse_args(&[
+            "backup".into(),
+            "prune".into(),
+            "--keep".into(),
+            "0".into(),
+            "--yes".into(),
+            "--backup-dir=/tmp/bak".into(),
+        ])
+        .unwrap()
+        {
+            Parsed::Backup { action: BackupAction::Prune, keep, yes, backup_dir } => {
+                assert_eq!(keep, 0);
+                assert!(yes);
+                assert_eq!(backup_dir.as_deref(), Some("/tmp/bak"));
+            }
+            _ => panic!("应解析为 backup prune"),
+        }
+        match parse_args(&["backup".into(), "verify".into(), "x.bin".into()]).unwrap() {
+            Parsed::Backup { action: BackupAction::Verify { target }, keep, yes, .. } => {
+                assert_eq!(target.as_deref(), Some("x.bin"));
+                assert_eq!(keep, 2);
+                assert!(!yes);
+            }
+            _ => panic!("应解析为 backup verify"),
+        }
+        match parse_args(&["backup".into(), "rm".into(), "a.bin".into(), "b.bin".into(), "--yes".into()]).unwrap() {
+            Parsed::Backup { action: BackupAction::Rm { targets }, yes, .. } => {
+                assert_eq!(targets, vec!["a.bin", "b.bin"]);
+                assert!(yes);
+            }
+            _ => panic!("应解析为 backup rm"),
+        }
     }
 
     #[test]
@@ -976,6 +1467,11 @@ mod tests {
         assert!(parse_args(&["run".into(), "--force".into()]).is_err()); // force 仅 apply
         assert!(parse_args(&["apply".into(), "--size".into(), "-3".into()]).is_err()); // 负 size
         assert!(parse_args(&["restore".into(), "a.bin".into(), "b.bin".into()]).is_err()); // 两个位置参数
+        assert!(parse_args(&["backup".into()]).is_err()); // 缺动作
+        assert!(parse_args(&["backup".into(), "rm".into()]).is_err()); // rm 缺目标
+        assert!(parse_args(&["backup".into(), "prune".into(), "--keep".into(), "-1".into()]).is_err());
+        assert!(parse_args(&["backup".into(), "verify".into(), "a.bin".into(), "b.bin".into()]).is_err());
+        assert!(parse_args(&["backup".into(), "list".into(), "--yes".into()]).is_err());
         // 哨兵旗标被剥离
         assert!(matches!(
             parse_args(&["apply".into(), "--disk".into(), "6".into(), "--_elevated".into()]).unwrap(),

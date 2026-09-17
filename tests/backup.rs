@@ -8,8 +8,9 @@ use std::fs;
 use common::*;
 use nopwd::diskio::{backup_disk, backup_is_nopwd, find_backups, migrate_backup_names,
                     backup_label_id, parse_backup_name, scan_backup_dir, BackupMeta,
-                    Md5Status, DiskFacts};
+                    prune_candidates, BackupEntry, Md5Status, DiskFacts};
 use nopwd::diskio::Clock;
+use nopwd::cli::{backup_prune, backup_rm, backup_verify};
 
 struct FixedClock;
 impl Clock for FixedClock {
@@ -281,4 +282,147 @@ fn scan_backup_dir_reports_ok_mismatch_missing_and_unrecognized() {
     assert!(odd_e.meta.is_none());
     assert!(!odd_e.is_nopwd);
     assert_eq!(odd_e.md5_ok, Md5Status::Ok);
+}
+
+fn fake_entry(name: &str, onlyid: &str, mtime: i64, is_nopwd: bool) -> BackupEntry {
+    BackupEntry {
+        meta: Some(BackupMeta {
+            disk: 6,
+            secs: Some(122880000),
+            vid: "0dd8".into(),
+            pid: "2005".into(),
+            device_id: "disk&ven_netac&prod_onlydisk".into(),
+            onlyid: Some(onlyid.into()),
+            tagged_nopwd: is_nopwd,
+        }),
+        path: std::path::PathBuf::from(name),
+        mtime,
+        is_nopwd,
+        md5_ok: Md5Status::Ok,
+        size_ok: true,
+    }
+}
+
+#[test]
+fn prune_policy_keeps_originals_latest_snapshots_and_last_backup() {
+    let entries = vec![
+        fake_entry("a-original.bin", "A", 1, false),
+        fake_entry("a-n1.bin", "A", 10, true),
+        fake_entry("a-n2.bin", "A", 20, true),
+        fake_entry("a-n3.bin", "A", 30, true),
+        fake_entry("b-n1.bin", "B", 10, true),
+        fake_entry("b-n2.bin", "B", 20, true),
+        fake_entry("b-n3.bin", "B", 30, true),
+    ];
+
+    let keep2: Vec<String> = prune_candidates(&entries, 2)
+        .into_iter()
+        .map(|p| p.to_string_lossy().into_owned())
+        .collect();
+    assert_eq!(keep2, vec!["a-n1.bin", "b-n1.bin"]);
+
+    let keep0: Vec<String> = prune_candidates(&entries, 0)
+        .into_iter()
+        .map(|p| p.to_string_lossy().into_owned())
+        .collect();
+    // A 有原盘，可清光免密快照；B 没原盘，最老两份可删但最新一份强制保留。
+    assert_eq!(keep0, vec!["a-n1.bin", "a-n2.bin", "a-n3.bin", "b-n1.bin", "b-n2.bin"]);
+}
+
+#[test]
+fn verify_and_prune_preview_exit_contract() {
+    let Some(original) = load_disk_image("netac") else {
+        eprintln!("跳过: 真实备份不可用");
+        return;
+    };
+    let Some((converted, _)) = converted_image("netac") else {
+        eprintln!("跳过: 真实备份不可用");
+        return;
+    };
+    let tmp = TmpDir::new("verify_prune");
+    let original_path = write_backup(
+        &tmp.0,
+        "disk6_122880000_vid0dd8_pid2005_disk&ven_netac&prod_onlydisk_onlyid1402259934_20260910_170000.bin",
+        &original,
+    );
+    for (i, ts) in ["170001", "170002", "170003"].iter().enumerate() {
+        let name = format!(
+            "disk6_122880000_vid0dd8_pid2005_disk&ven_netac&prod_onlydisk_onlyid1402259934_nopwd_20260910_{ts}.bin"
+        );
+        let p = write_backup(&tmp.0, &name, &converted);
+        // 在不引入 filetime 依赖的前提下，文件名只用于断言预览不删除；策略本身的 mtime
+        // 排序由上面的纯函数用例覆盖。
+        assert!(p.exists(), "snapshot {i}");
+    }
+
+    assert_eq!(backup_verify(&tmp.0, None), 0);
+    assert_eq!(backup_verify(&tmp.0, Some(original_path.file_name().unwrap().to_str().unwrap())), 0);
+
+    let bad = tmp.0.join(
+        "disk6_122880000_vid0dd8_pid2005_disk&ven_netac&prod_onlydisk_onlyid1402259934_20260910_170010.bin",
+    );
+    fs::write(&bad, &original).unwrap(); // 故意缺 .md5
+    assert_eq!(backup_verify(&tmp.0, None), 5);
+
+    let before = fs::read_dir(&tmp.0).unwrap().count();
+    assert_eq!(backup_prune(&tmp.0, 2, false), 0);
+    let after = fs::read_dir(&tmp.0).unwrap().count();
+    assert_eq!(before, after, "prune 预览绝不能删除文件");
+}
+
+#[test]
+fn rm_cancel_yes_missing_and_last_backup_guard() {
+    let Some(original) = load_disk_image("netac") else {
+        eprintln!("跳过: 真实备份不可用");
+        return;
+    };
+    let tmp = TmpDir::new("rm_backup");
+    let first = write_backup(
+        &tmp.0,
+        "disk6_122880000_vid0dd8_pid2005_disk&ven_netac&prod_onlydisk_onlyid1402259934_20260910_170000.bin",
+        &original,
+    );
+    let second = write_backup(
+        &tmp.0,
+        "disk6_122880000_vid0dd8_pid2005_disk&ven_netac&prod_onlydisk_onlyid1402259934_20260910_170001.bin",
+        &original,
+    );
+
+    let mut deny = ScriptPrompter { inputs: vec!["NO".into()], idx: 0 };
+    assert_eq!(
+        backup_rm(
+            &tmp.0,
+            &[first.file_name().unwrap().to_string_lossy().into_owned()],
+            false,
+            &mut deny,
+        ),
+        130
+    );
+    assert!(first.exists());
+
+    let mut unused = ScriptPrompter::yes();
+    assert_eq!(
+        backup_rm(
+            &tmp.0,
+            &[first.file_name().unwrap().to_string_lossy().into_owned()],
+            true,
+            &mut unused,
+        ),
+        0
+    );
+    assert!(!first.exists());
+    assert!(!std::path::PathBuf::from(format!("{}.md5", first.display())).exists());
+
+    // 安全底线：同盘只剩 second 时，手动 rm 也不能清到零份。
+    assert_eq!(
+        backup_rm(
+            &tmp.0,
+            &[second.file_name().unwrap().to_string_lossy().into_owned()],
+            true,
+            &mut unused,
+        ),
+        5
+    );
+    assert!(second.exists());
+    assert_eq!(backup_rm(&tmp.0, &["missing.bin".into()], true, &mut unused), 5);
 }
