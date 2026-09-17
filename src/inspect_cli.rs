@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 
 use crate::backup_catalog::{self, BackupCatalog};
 use crate::backup_cli::{print_inspect_backup_sources, print_onlyid_backup_choices};
-use crate::cli::{auto_pick_disk, guard_system_disk, InspectOpts, StdPrompter};
+use crate::cli::{auto_pick_disk, guard_usb_disk, InspectOpts, StdPrompter};
 use crate::common::{EXIT_BACKUP, EXIT_IO, EXIT_OK, EXIT_TARGET, EXIT_USAGE, SECTOR};
 use crate::diskio::{self, raw_path};
 use crate::elevate;
@@ -262,7 +262,7 @@ fn inspect_backup_flow(opts: InspectOpts) -> i32 {
 
 fn inspect_disk_flow(runner: &SysRunner, mut opts: InspectOpts) -> i32 {
     if let Some(n) = opts.disk {
-        if let Err(e) = guard_system_disk(n) {
+        if let Err(e) = guard_usb_disk(runner, n) {
             eprintln!("{}", crate::ui::red(&e.msg));
             return e.code;
         }

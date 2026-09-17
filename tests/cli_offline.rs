@@ -615,6 +615,45 @@ fn apply_system_disk_guard_in_flow() {
 }
 
 #[test]
+fn apply_refuses_explicit_non_usb_whole_disk() {
+    let Some(netac) = load_disk_image("netac") else {
+        eprintln!("跳过: 真实备份不可用");
+        return;
+    };
+    let mut runner = netac_runner(6);
+    runner
+        .canned
+        .insert("diskutil list -plist".into(), diskutil_list_plist(&["disk6"]));
+    runner.canned.insert(
+        "diskutil info -plist disk6".into(),
+        diskutil_info_plist(62_914_560_000)
+            .replace("<string>USB</string>", "<string>Thunderbolt</string>"),
+    );
+    let tmp = TmpDir::new("apply_non_usb_guard");
+    let img_path = tmp.0.join("disk.img");
+    fs::write(&img_path, &netac).unwrap();
+    let mut prompt = ScriptPrompter::yes();
+    let mut dev = FileDev::open_rdwr(
+        img_path.to_str().unwrap(),
+        std::time::Duration::from_secs(1),
+    )
+    .unwrap();
+
+    let e = apply_flow(
+        false,
+        false,
+        6,
+        None,
+        &mut ctx(&runner, &mut prompt, &tmp.0),
+        &mut dev,
+    )
+    .unwrap_err();
+    assert_eq!(e.code, EXIT_TARGET, "{}", e.msg);
+    assert!(e.msg.contains("USB") || e.msg.contains("外接"), "{}", e.msg);
+    assert_eq!(fs::read(&img_path).unwrap(), netac);
+}
+
+#[test]
 fn apply_refuses_if_disk_identity_changes_after_reopen() {
     let (Some(netac), Some(lexar)) = (load_disk_image("netac"), load_disk_image("lexar")) else {
         eprintln!("跳过: 真实备份不可用");

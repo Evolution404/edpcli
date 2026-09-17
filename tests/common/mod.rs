@@ -196,6 +196,11 @@ pub fn diskutil_list_plist(disks: &[&str]) -> String {
 /// netac 盘的罐头环境(识别/容量/VID:PID 都指向 netac 事实)。
 pub fn netac_runner(disk: u32) -> FakeRunner {
     let mut m = HashMap::new();
+    let disk_name = format!("disk{}", disk);
+    m.insert(
+        "diskutil list -plist".into(),
+        diskutil_list_plist(&[disk_name.as_str()]),
+    );
     m.insert(format!("diskutil info -plist disk{}", disk), diskutil_info_plist(62_914_560_000));
     m.insert(
         format!("diskutil unmountDisk force disk{}", disk),

@@ -203,6 +203,20 @@ pub(crate) fn guard_system_disk(disk: u32) -> NopwdResult<()> {
     Ok(())
 }
 
+pub(crate) fn guard_usb_disk(runner: &dyn CmdRunner, disk: u32) -> NopwdResult<()> {
+    guard_system_disk(disk)?;
+    if sysinfo::list_usb_disks(runner).iter().any(|d| d.n == disk) {
+        return Ok(());
+    }
+    Err(err(
+        EXIT_TARGET,
+        format!(
+            "错误: disk{} 当前不是可操作的外接 USB 整盘（要求 WholeDisk=true、Internal=false、非虚拟盘、BusProtocol=USB），拒绝裸盘操作",
+            disk
+        ),
+    ))
+}
+
 pub(crate) fn auto_pick_disk(
     runner: &dyn CmdRunner,
     prompt: &mut dyn Prompter,
@@ -240,7 +254,7 @@ pub fn apply_flow(
     ctx: &mut Ctx,
     dev: &mut dyn SectorDev,
 ) -> NopwdResult<i32> {
-    guard_system_disk(disk)?;
+    guard_usb_disk(ctx.runner, disk)?;
     let runner = ctx.runner;
 
     let secs = sysinfo::disk_total_sectors(runner, disk);
@@ -354,7 +368,7 @@ pub fn restore_flow(
     ctx: &mut Ctx,
     dev: &mut dyn SectorDev,
 ) -> NopwdResult<i32> {
-    guard_system_disk(disk)?;
+    guard_usb_disk(ctx.runner, disk)?;
     let runner = ctx.runner;
 
     let img = read_image(dev)?;
@@ -687,7 +701,7 @@ fn real_flow(
         FlowKind::Apply { yes: true, .. } | FlowKind::Restore { yes: true, .. }
     );
     if let Some(n) = disk_opt {
-        if let Err(e) = guard_system_disk(n) {
+        if let Err(e) = guard_usb_disk(runner, n) {
             eprintln!("{}", crate::ui::red(&e.msg));
             return e.code;
         }
@@ -747,7 +761,7 @@ fn real_flow(
             }
         },
     };
-    if let Err(e) = guard_system_disk(n) {
+    if let Err(e) = guard_usb_disk(runner, n) {
         eprintln!("{}", crate::ui::red(&e.msg));
         return e.code;
     }
