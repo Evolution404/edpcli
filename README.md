@@ -24,16 +24,35 @@ nopwd convert --dir <快照目录> --id <device_id> [--out <目录>]   # 离线�
 ```
 $ nopwd list
 外接盘 1 个:
-  disk26  125.83GB  USB 3535:6300  cems盘[免密]  onlyid=1987718388  备份2份
-          EDPF(LBA12): Share LBA 63~243,116,059 124.48GB · Encrypt LBA 243,116,060~245,734,654 1.34GB
+  disk14  125.83GB  USB           3535:6300      cems盘 [免密]
+                    └─ EDPF: Share 124.48GB (LBA 63~243,116,059) · Encrypt 1.34GB (LBA 243,116,060~245,734,654)
+                       onlyid=1987718388 · 备份 3 份
 ```
+
+`restore` 交互选单（带序号，免密快照/加密原盘双侧标记）：
+
+```
+$ nopwd restore
+disk14 匹配备份 3 个(新→旧):
+  1)  2026-09-17 22:41   [加密原盘]
+  2)  2026-09-16 23:36   [免密状态]
+  3)  2026-08-27 22:25   [加密原盘]
+选择 [1-3] (回车取消):
+```
+
+终端输出带语义色（错误红/成功绿/警告黄/标记绿/降级灰/help 着色），
+管道重定向或设置 `NO_COLOR` 时自动降级为纯文本。
 
 - **自动提权**：`run` / `apply` / `restore` 需要裸盘读写，非 root 时自动以 `sudo`
   重执行自身（选定盘号并入参数，交互提示正常工作）；`list` / `convert` 永不提权。
 - `--yes` 免交互；多块 USB 盘时自动弹编号选择；系统盘（disk<2）一律拒绝。
-- 备份目录：`--backup-dir` > 环境变量 `NOPWD_BACKUP_DIR` > `./backup`。
-  自动提权时 sudo 会清环境变量，父进程会把 `$NOPWD_BACKUP_DIR` 解析为绝对路径
-  并以显式 `--backup-dir` 旗标传给提权后的子进程，环境变量无需额外配置即生效。
+- 备份目录（四级优先）：`--backup-dir` 旗标 > 环境变量 `NOPWD_BACKUP_DIR` >
+  `~/.nopwd.conf` 的 `backup_dir = 路径` > `./backup`。
+  - 自动提权时 sudo 会清环境变量，父进程把 `$NOPWD_BACKUP_DIR` 解析为绝对路径
+    并以显式 `--backup-dir` 旗标传给提权后的子进程，环境变量无需额外配置即生效。
+  - **手动 `sudo nopwd …` 时 shell 环境变量必丢**（sudo `env_reset`，无法恢复），
+    此时配置文件生效（sudo 下读发起用户 home 的 `~/.nopwd.conf`）；若四级都
+    未命中会给出黄色提示。**建议养成不手动加 sudo 的习惯**——工具会自动提权。
 
 ### 从 v2（Python 版）迁移
 

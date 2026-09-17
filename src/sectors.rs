@@ -286,7 +286,7 @@ pub fn convert(
     let k0 = (crc & 0xFFFF) ^ (crc >> 16);
     let crc_key = crc.to_le_bytes();
     if verbose {
-        println!("标识 : {}  (CRC32 0x{:08X}, K0 0x{:04X})", device_id, crc, k0);
+        println!("{}  {}  (CRC32 0x{:08X}, K0 0x{:04X})", crate::ui::bold("标识"), device_id, crc, k0);
     }
 
     let raw12 = read(12)?;
@@ -313,17 +313,22 @@ pub fn convert(
         ));
     }
     if verbose {
+        use crate::ui::{bold, disp_width as disp_w, pad_left, pad_to};
         let enc_end = enc_start + enc_size / SECTOR as u64 - 1;
-        println!(
-            "布局 : Share   LBA 63 ~ {}   {}  明文数据区, 系统直接挂载读写",
-            group_digits(63 + share - 1),
-            fmt_gb(share * SECTOR as u64)
+        let share_range = format!("LBA 63 ~ {}", group_digits(63 + share - 1));
+        let enc_range = format!("LBA {} ~ {}", group_digits(enc_start), group_digits(enc_end));
+        let rangew = disp_w(&share_range).max(disp_w(&enc_range));
+        println!("{}  {}  {}  {}  明文数据区, 系统直接挂载读写",
+            bold("布局"),
+            pad_to("Share", 9),
+            pad_left(&share_range, rangew),
+            pad_left(&fmt_gb(share * SECTOR as u64), 9),
         );
-        println!(
-            "       Encrypt LBA {} ~ {}   {}  原样保留不动",
-            group_digits(enc_start),
-            group_digits(enc_end),
-            fmt_gb(enc_size)
+        println!("{}  {}  {}  {}  原样保留不动",
+            " ".repeat(4),
+            pad_to("Encrypt", 9),
+            pad_left(&enc_range, rangew),
+            pad_left(&fmt_gb(enc_size), 9),
         );
     }
 
@@ -342,17 +347,22 @@ pub fn convert(
     };
 
     if verbose {
+        use crate::ui::{bold, dim, pad_to};
         println!();
-        println!("将写入 5 个扇区");
-        println!("  LBA0   MBR    → 单分区(type=07) 指向 Share: @LBA63 × {} 扇", group_digits(share));
-        println!("  LBA6   盘标签 → 按免密盘模板改写(0x1CA=128480, 清25B), 重算校验和");
-        println!("  LBA7   分区表 → 2 条目: Share@63 + Encrypt");
-        println!("  LBA12  分区表 → 2 条目: Share@63 + Encrypt");
+        println!("{}", bold("将写入 5 个扇区:"));
+        let row = |lba: &str, name: &str, desc: &str, d: bool| {
+            let line = format!("  {}  {}  {}", pad_to(lba, 6), pad_to(name, 8), desc);
+            if d { dim(&line) } else { line }
+        };
+        println!("{}", row("LBA0", "MBR", &format!("单分区(type=07) 指向 Share: @LBA63 × {} 扇", group_digits(share)), false));
+        println!("{}", row("LBA6", "盘标签", "0x1CA=128480, 清 25B, 重算校验和", false));
+        println!("{}", row("LBA7", "分区表", "2 条目: Share@63 + Encrypt", false));
+        println!("{}", row("LBA12", "分区表", "2 条目: Share@63 + Encrypt", false));
+        println!("{}", row("LBA9", "临时区", if new9.is_some() { "清零(当前存在)" } else { "已是零, 不写" }, new9.is_none()));
         println!(
-            "  LBA9   临时区 → {}",
-            if new9.is_some() { "清零(当前存在)" } else { "已是零, 不写" }
+            "{}",
+            dim("不动   LBA4/8/11(盘身份) · 其余保留扇区 · 表尾终止符 · LBA12 尾部144B · 盘尾区域")
         );
-        println!("不改动 : LBA4/8/11(盘身份) · 其余保留扇区 · 表尾终止符 · LBA12 尾部144B · 盘尾区域");
     }
 
     Ok(ConvertResult {

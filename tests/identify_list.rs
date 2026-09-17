@@ -61,7 +61,7 @@ fn scan_and_print_all_row_kinds() {
     );
     // disk6 = netac cems 盘; disk4 = 假 vendor → 非cems
     m.insert("ioreg -r -c IOSCSITargetDevice -l".to_string(), ioreg_scsi(6, "Netac  ", "OnlyDisk", "1.00"));
-    m.insert("ioreg -r -c IOUSBHostDevice -l".to_string(), ioreg_usb(6, 3352, 8197));
+    m.insert("ioreg -r -c IOUSBHostDevice -l".to_string(), ioreg_usb(6, 0x0DD8, 0x2005));
     let runner = FakeRunner { canned: m };
 
     let read_ok = |disk: u32, lba: u32| -> std::io::Result<Vec<u8>> {
@@ -81,7 +81,7 @@ fn scan_and_print_all_row_kinds() {
     assert!(!row6.is_nopwd);
     let parts = row6.partitions.as_ref().unwrap();
     assert_eq!(parts.len(), 3);
-    assert!(out.contains("EDPF(LBA12):"), "{}", out);
+    assert!(out.contains("└─ EDPF:"), "{}", out);
 
     // 免密盘镜像: [免密] 标记 + EDPF 2 条
     let (conv, _) = converted_image("netac").unwrap();
@@ -90,7 +90,7 @@ fn scan_and_print_all_row_kinds() {
     };
     let rows2 = scan_disks(&runner, &bak.0, &read_conv);
     let out2 = print_disk_table(&rows2);
-    assert!(out2.contains("cems盘[免密]"), "{}", out2);
+    assert!(out2.contains("[免密]"), "{}", out2);
     let row6b = rows2.iter().find(|r| r.disk == 6).unwrap();
     assert!(row6b.is_nopwd);
     assert_eq!(row6b.partitions.as_ref().unwrap().len(), 2);

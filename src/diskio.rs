@@ -293,19 +293,105 @@ pub fn absolutize_backup_dir(p: PathBuf) -> PathBuf {
     }
 }
 
-/// 备份目录: --backup-dir 旗标 > $NOPWD_BACKUP_DIR > CWD/backup。
-pub fn resolve_backup_dir(flag: Option<&str>) -> PathBuf {
-    if let Some(f) = flag {
-        return absolutize_backup_dir(PathBuf::from(f));
+pub const CONF_NAME: &str = ".nopwd.conf";
+
+fn absolutize_with(p: PathBuf, cwd: &Path) -> PathBuf {
+    if p.is_absolute() {
+        p
+    } else {
+        cwd.join(p)
     }
-    if let Ok(env) = std::env::var("NOPWD_BACKUP_DIR") {
-        if !env.is_empty() {
-            return absolutize_backup_dir(PathBuf::from(env));
+}
+
+/// 四级优先级的纯逻辑: 旗标 > env > 配置文件 > cwd/backup(相对值按 cwd 绝对化)。
+/// 环境读取留在 resolve_backup_dir 薄包装里, 便于单测。
+pub fn resolve_backup_dir_impl(
+    flag: Option<&str>,
+    env_val: Option<String>,
+    conf_val: Option<String>,
+    cwd: PathBuf,
+) -> PathBuf {
+    if let Some(f) = flag {
+        return absolutize_with(PathBuf::from(f), &cwd);
+    }
+    if let Some(v) = env_val.filter(|v| !v.is_empty()) {
+        return absolutize_with(PathBuf::from(v), &cwd);
+    }
+    if let Some(v) = conf_val.filter(|v| !v.is_empty()) {
+        return absolutize_with(PathBuf::from(v), &cwd);
+    }
+    cwd.join("backup")
+}
+
+/// sudo 下发起用户的用户名(sudo 设置, 可信; 形如系统用户名才接受)。
+pub fn sudo_user() -> Option<String> {
+    let u = std::env::var("SUDO_USER").ok()?;
+    let ok = !u.is_empty()
+        && u.chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '.' | '-'));
+    ok.then_some(u)
+}
+
+/// 发起用户 home(经 shell `~user` 展开; std 无 getpwnam)。
+pub fn sudo_user_home() -> Option<PathBuf> {
+    let u = sudo_user()?;
+    let out = std::process::Command::new("/bin/sh")
+        .arg("-c")
+        .arg(format!("echo ~{}", u))
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let s = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    if s.is_empty() || s.starts_with('~') {
+        None
+    } else {
+        Some(PathBuf::from(s))
+    }
+}
+
+/// `key = value` 配置解析: 取 backup_dir 值; `#` 注释, 未知键忽略, 坏行跳过。
+pub fn parse_conf_backup_dir(content: &str) -> Option<String> {
+    for line in content.lines() {
+        let l = line.trim();
+        if l.is_empty() || l.starts_with('#') {
+            continue;
+        }
+        if let Some((k, v)) = l.split_once('=') {
+            if k.trim() == "backup_dir" {
+                let v = v.trim();
+                if !v.is_empty() {
+                    return Some(v.to_string());
+                }
+            }
         }
     }
-    std::env::current_dir()
-        .unwrap_or_else(|_| PathBuf::from("."))
-        .join("backup")
+    None
+}
+
+/// 读取用户配置中的备份目录。
+/// 定位: sudo 下(手动或自动)读发起用户 home 的 .nopwd.conf — sudo 会剥掉
+/// shell 环境变量($NOPWD_BACKUP_DIR 过不去), 磁盘文件是唯一能穿界的载体;
+/// 非 root 读 $HOME。
+pub fn conf_backup_dir() -> Option<String> {
+    let home = match sudo_user() {
+        Some(_) => sudo_user_home()?,
+        None => PathBuf::from(std::env::var("HOME").ok()?),
+    };
+    let content = std::fs::read_to_string(home.join(CONF_NAME)).ok()?;
+    parse_conf_backup_dir(&content)
+}
+
+/// 备份目录: --backup-dir 旗标 > $NOPWD_BACKUP_DIR > ~/.nopwd.conf 的
+/// backup_dir > CWD/backup。
+pub fn resolve_backup_dir(flag: Option<&str>) -> PathBuf {
+    resolve_backup_dir_impl(
+        flag,
+        std::env::var("NOPWD_BACKUP_DIR").ok(),
+        conf_backup_dir(),
+        std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
+    )
 }
 
 /// 自动提权时的环境桥接: sudo 默认清环境变量(env_reset), $NOPWD_BACKUP_DIR
@@ -540,9 +626,12 @@ pub fn backup_disk(
     // sidecar 命名与 Python 版一致: <备份.bin>.md5
     let md5_path = PathBuf::from(format!("{}.md5", path.display()));
     fs::write(&md5_path, format!("{}\n", md5_hex(data))).map_err(io_err)?;
-    println!("备份: {}", path.display());
+    println!("{}  {}", crate::ui::green("备份"), path.display());
     if is_nopwd {
-        println!("注意: 本份备份为【免密状态】快照 — 还原它不会回到加密原盘。");
+        println!(
+            "{}",
+            crate::ui::yellow("注意: 本份备份为【免密状态】快照 — 还原它不会回到加密原盘。")
+        );
     }
     Ok((path, is_nopwd))
 }
@@ -708,6 +797,60 @@ mod tests {
         assert_eq!(read_lba_file(&d, 12), vec![b'c'; SECTOR]);
         assert_eq!(read_lba_file(&d, 9), vec![0u8; SECTOR]); // 缺失→全零
         let _ = fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn backup_dir_priority_and_conf_parse() {
+        let cwd = PathBuf::from("/w");
+        // 四级优先: 旗标 > env > conf > CWD 兜底
+        assert_eq!(
+            resolve_backup_dir_impl(Some("/f"), Some("/e".into()), Some("/c".into()), cwd.clone()),
+            PathBuf::from("/f")
+        );
+        assert_eq!(
+            resolve_backup_dir_impl(None, Some("/e".into()), Some("/c".into()), cwd.clone()),
+            PathBuf::from("/e")
+        );
+        assert_eq!(
+            resolve_backup_dir_impl(None, None, Some("/c".into()), cwd.clone()),
+            PathBuf::from("/c")
+        );
+        assert_eq!(
+            resolve_backup_dir_impl(None, None, None, cwd.clone()),
+            PathBuf::from("/w/backup")
+        );
+        // env 空串视同未设 → conf 兜底
+        assert_eq!(
+            resolve_backup_dir_impl(None, Some(String::new()), Some("/c".into()), cwd.clone()),
+            PathBuf::from("/c")
+        );
+        // 相对值按 cwd 绝对化
+        assert_eq!(
+            resolve_backup_dir_impl(None, Some("bk".into()), None, cwd.clone()),
+            PathBuf::from("/w/bk")
+        );
+        // conf 解析: 注释/坏行/空值/未知键
+        assert_eq!(
+            parse_conf_backup_dir("# 注释\nbackup_dir = /Users/x/.nopwd-backup\n"),
+            Some("/Users/x/.nopwd-backup".to_string())
+        );
+        assert_eq!(parse_conf_backup_dir("backup_dir=/a/b"), Some("/a/b".to_string()));
+        assert_eq!(parse_conf_backup_dir("backup_dir =   \n"), None); // 空值
+        assert_eq!(parse_conf_backup_dir("other = 1\nnoise\n"), None);
+        assert_eq!(parse_conf_backup_dir(""), None);
+    }
+
+    #[test]
+    fn sudo_user_name_validated() {
+        // 形如系统用户名才接受(防 shell 插值注入)
+        assert!(sudo_user().is_some() || std::env::var("SUDO_USER").is_err());
+        // 直接验证判定逻辑(无 SUDO_USER 环境时)
+        let ok = |s: &str| {
+            !s.is_empty()
+                && s.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '.' | '-'))
+        };
+        assert!(ok("zhangyuxi") && ok("a.b-c_1"));
+        assert!(!ok("") && !ok("x; rm") && !ok("$(cmd)"));
     }
 
     #[test]

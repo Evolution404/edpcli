@@ -95,31 +95,42 @@ pub enum Parsed {
 }
 
 pub fn print_usage() {
-    print!(
-        "cems 加密 U 盘 → 无密码盘(纯 Rust 标准库, 零依赖) v{}
-
-用法: nopwd <子命令> [选项]
-
-子命令:
-  list                              列出外接盘: 编号/容量/接口/cems识别/免密检测/EDPF分区/备份(sudo 下更全)
-  run    [--disk N] [--size GB]     真盘预览 dry-run(需管理员, 自动 sudo)
-  apply  [--disk N] [--size GB] [--force] [--yes]
-                                   真盘实际写入(自动备份 LBA0-13 → 备份目录)
-  restore [<备份.bin>] [--disk N] [--yes]
-                                   从备份还原 LBA0-13(缺省交互选择本盘备份)
-  convert --dir <快照目录> --id <device_id> [--size GB] [--out <目录>]
-                                   离线转换(不碰真盘)
-  version | help
-
-选项:
-  --disk <N|/dev/diskN|/dev/rdiskN>  真盘号(缺省自动检测外部 USB 盘; 须 disk2+)
-  --size <GB>                        Share 大小(默认占满到 Encrypt 前)
-  --force                            已改造(免密)盘仍强制重写(默认拒绝)
-  --yes                              免交互(自动确认一切 YES 提示)
-  --backup-dir <目录>                备份目录(默认 $NOPWD_BACKUP_DIR 或 ./backup)
-",
-        env!("CARGO_PKG_VERSION")
+    use crate::ui::{bold, bold_cyan, pad_to, yellow};
+    let cmd = |name: &str, desc: &str| format!("  {}  {}", bold_cyan(&pad_to(name, 8)), desc);
+    let flag = |name: &str, desc: &str| format!("  {}  {}", yellow(&pad_to(name, 33)), desc);
+    println!(
+        "{}",
+        bold(&format!(
+            "cems 加密 U 盘 → 无密码盘(纯 Rust 标准库, 零依赖) v{}",
+            env!("CARGO_PKG_VERSION")
+        ))
     );
+    println!();
+    println!("{}", bold("用法: nopwd <子命令> [选项]"));
+    println!();
+    println!("{}", bold("子命令:"));
+    for (n, d) in [
+        ("list", "列出外接盘: 编号/容量/接口/cems识别/免密检测/EDPF分区/备份(sudo 下更全)"),
+        ("run", "真盘预览 dry-run(需管理员, 自动 sudo)"),
+        ("apply", "真盘实际写入(自动备份 → 原子写入 → 读回校验)"),
+        ("restore", "从备份还原 LBA0-13(缺省交互选择本盘备份)"),
+        ("convert", "离线转换(不碰真盘): --dir <快照> --id <device_id>"),
+        ("version", "显示版本"),
+        ("help", "显示本帮助"),
+    ] {
+        println!("{}", cmd(n, d));
+    }
+    println!();
+    println!("{}", bold("选项:"));
+    for (n, d) in [
+        ("--disk <N|/dev/diskN|/dev/rdiskN>", "真盘号(缺省自动检测外部 USB 盘; 须 disk2+)"),
+        ("--size <GB>", "Share 大小(默认占满到 Encrypt 前)"),
+        ("--force", "已改造(免密)盘仍强制重写(默认拒绝)"),
+        ("--yes", "免交互(自动确认一切 YES 提示)"),
+        ("--backup-dir <目录>", "备份目录(默认 $NOPWD_BACKUP_DIR、~/.nopwd.conf 或 ./backup)"),
+    ] {
+        println!("{}", flag(n, d));
+    }
 }
 
 /// 取旗标值: 支持 `--flag 值` 与 `--flag=值`。
@@ -343,6 +354,7 @@ pub fn scan_disks(
 }
 
 pub fn print_disk_table(rows: &[Row]) -> String {
+    use crate::ui::{bold, dim, green, pad_left, pad_to};
     let mut out = String::new();
     if rows.is_empty() {
         out.push_str("未检测到外接盘。\n");
@@ -351,38 +363,83 @@ pub fn print_disk_table(rows: &[Row]) -> String {
     out.push_str(&format!("外接盘 {} 个:\n", rows.len()));
     let w = rows.iter().map(|r| r.disk.to_string().len()).max().unwrap_or(1);
     for r in rows {
-        let head = format!("  disk{:<w$}  {:>8}  {}", r.disk, fmt_gb(r.size), r.proto, w = w);
+        let name = pad_to(&format!("disk{}", r.disk), w + 4);
+        let head = format!(
+            "  {}  {}  {}  {}",
+            bold(&name),
+            pad_left(&fmt_gb(r.size), 8),
+            pad_to(&r.proto, 12),
+            pad_to(&format!("{}:{}", r.vid, r.pid), 13),
+        );
+        let detail_pad = " ".repeat(2 + (w + 4) + 2 + 8 + 2 + 1); // 对齐到容量列附近
         if r.proto != "USB" {
-            out.push_str(&format!("{}  (非USB, 本工具不支持)\n", head));
+            out.push_str(&format!("{}  {}\n", head, dim("(非USB, 本工具不支持)")));
         } else if r.denied {
-            out.push_str(&format!("{} {}:{}  (加 sudo 可识别 cems 盘/备份)\n", head, r.vid, r.pid));
+            out.push_str(&format!("{}  {}\n", head, dim("(加 sudo 可识别 cems 盘/备份)")));
         } else if r.device_id.is_none() {
-            out.push_str(&format!("{} {}:{}  非cems盘\n", head, r.vid, r.pid));
+            out.push_str(&format!("{}  {}\n", head, dim("非cems盘")));
         } else {
-            let nopwd_tag = if r.is_nopwd { "[免密]" } else { "" };
-            let oid = r.onlyid.as_ref().map(|o| format!("  onlyid={}", o)).unwrap_or_default();
-            let baks = if r.n_baks > 0 { format!("  备份{}份", r.n_baks) } else { "  无备份".to_string() };
-            out.push_str(&format!(
-                "{} {}:{}  cems盘{}{}{}\n",
-                head, r.vid, r.pid, nopwd_tag, oid, baks
-            ));
+            let nopwd_tag = if r.is_nopwd { format!(" {}", green("[免密]")) } else { String::new() };
+            out.push_str(&format!("{}  cems盘{}\n", head, nopwd_tag));
+            let mut details: Vec<String> = Vec::new();
             if let Some(parts) = &r.partitions {
-                let pad = " ".repeat(w + 8); // 与 head 的容量列对齐("  disk"+w+2 之后)
                 let items: Vec<String> = parts
                     .iter()
                     .map(|p| {
                         format!(
-                            "{} LBA {}~{} {}",
+                            "{} {} ({})",
                             p.type_name(),
-                            group_digits(p.start_lba),
-                            group_digits(p.end_lba()),
-                            fmt_gb(p.size_bytes)
+                            fmt_gb(p.size_bytes),
+                            format_args!("LBA {}~{}", group_digits(p.start_lba), group_digits(p.end_lba()))
                         )
                     })
                     .collect();
-                out.push_str(&format!("{}EDPF(LBA12): {}\n", pad, items.join(" · ")));
+                details.push(format!("└─ EDPF: {}", items.join(" · ")));
+            }
+            let mut meta = Vec::new();
+            if let Some(o) = &r.onlyid {
+                meta.push(format!("onlyid={}", o));
+            }
+            meta.push(if r.n_baks > 0 { format!("备份 {} 份", r.n_baks) } else { "无备份".to_string() });
+            details.push(format!("   {}", meta.join(" · ")));
+            for d in details {
+                out.push_str(&format!("{}{}\n", detail_pad, d));
             }
         }
+    }
+    out
+}
+
+/// restore 选单条目(时间已格式化 + 是否免密快照)。
+pub fn backup_menu_str(entries: &[(String, bool)]) -> String {
+    use crate::ui::{green, pad_to};
+    let mut out = String::new();
+    for (i, (time, is_nopwd)) in entries.iter().enumerate() {
+        let tag = if *is_nopwd {
+            green("[免密状态]")
+        } else {
+            "[加密原盘]".to_string()
+        };
+        out.push_str(&format!("  {})  {}   {}\n", i + 1, time, tag));
+    }
+    let _ = pad_to; // (对齐保留给后续扩展)
+    out
+}
+
+/// 多 USB 盘选单。
+pub fn disk_menu_str(disks: &[sysinfo::ExtDisk]) -> String {
+    use crate::ui::{bold, pad_left, pad_to};
+    let w = disks.iter().map(|d| format!("disk{}", d.n).len()).max().unwrap_or(1);
+    let mut out = String::new();
+    for (i, d) in disks.iter().enumerate() {
+        out.push_str(&format!(
+            "  {})  {}  {}  {}:{}\n",
+            i + 1,
+            bold(&pad_to(&format!("disk{}", d.n), w + 2)),
+            pad_left(&fmt_gb(d.size), 8),
+            d.vid,
+            d.pid
+        ));
     }
     out
 }
@@ -414,11 +471,9 @@ fn auto_pick_disk(runner: &dyn CmdRunner, prompt: &mut dyn Prompter) -> NopwdRes
         return Ok(disks[0].n);
     }
     println!("检测到多个 USB 盘:");
-    for (i, d) in disks.iter().enumerate() {
-        println!("  {}) disk{}  {}  {}:{}", i + 1, d.n, fmt_gb(d.size), d.vid, d.pid);
-    }
+    print!("{}", disk_menu_str(&disks));
     loop {
-        let c = prompt.prompt_line(&format!("选择 [1-{}] (回车取消): ", disks.len()));
+        let c = prompt.prompt_line(&crate::ui::bold(&format!("选择 [1-{}] (回车取消): ", disks.len())));
         let c = c.trim();
         if c.is_empty() {
             return Err(err(EXIT_CANCELLED, "已取消"));
@@ -428,7 +483,7 @@ fn auto_pick_disk(runner: &dyn CmdRunner, prompt: &mut dyn Prompter) -> NopwdRes
                 return Ok(disks[n - 1].n);
             }
         }
-        println!("无效输入");
+        println!("{}", crate::ui::yellow("无效输入"));
     }
 }
 
@@ -450,7 +505,7 @@ pub fn apply_flow(
         Some(s) => fmt_gb(s * SECTOR as u64),
         None => "unknown 扇".to_string(),
     };
-    println!("盘   : disk{}  {}  USB {}:{}", disk, sz, vid, pid);
+    println!("{}  disk{} · {} · USB {}:{}", crate::ui::bold("盘"), disk, sz, vid, pid);
 
     let img = read_image(dev)?;
     let id = identify(runner, disk, &img[7 * SECTOR..8 * SECTOR]);
@@ -471,23 +526,29 @@ pub fn apply_flow(
 
     let baks = find_backups(&ctx.backup_dir, &facts, Some(&did), Some(tag16));
     if !baks.is_empty() {
-        println!("\n备份 : 本盘已有 {} 份(写入时会自动再备份):", baks.len());
-        for b in &baks {
-            let t = ctx.clock.fmt_human(diskio::mtime_epoch(b));
-            let base = b.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-            println!("  {}  {}", t, base);
-        }
+        println!("\n{}  本盘已有 {} 份(写入时会自动再备份):", crate::ui::bold("备份"), baks.len());
+        let entries: Vec<(String, bool)> = baks
+            .iter()
+            .map(|b| (ctx.clock.fmt_human(diskio::mtime_epoch(b)), backup_is_nopwd(b, &did)))
+            .collect();
+        print!("{}", backup_menu_str(&entries));
     } else {
-        println!("\n备份 : 尚无; 写入时自动创建首个备份");
+        println!("\n{}  尚无; 写入时自动创建首个备份", crate::ui::bold("备份"));
     }
 
     let already = looks_nopwd(&read, &did)?;
     if already {
-        println!("\n提示: 该盘已是改造后的免密盘 — 再次写入只会重写相同内容(实测幂等)。");
+        println!("\n{}", crate::ui::yellow("提示: 该盘已是改造后的免密盘 — 再次写入只会重写相同内容(实测幂等)。"));
     }
     if !apply {
         let tail = if already { " (该盘已是免密盘, 须加 --force)" } else { "" };
-        println!("操作 : 以上为预览(dry-run), 未写盘。执行写入: nopwd apply --disk {}{}", disk, tail);
+        println!(
+            "{}",
+            crate::ui::dim(&format!(
+                "操作  以上为预览(dry-run), 未写盘。执行写入: nopwd apply --disk {}{}",
+                disk, tail
+            ))
+        );
         return Ok(EXIT_OK);
     }
     if already && !force {
@@ -500,13 +561,16 @@ pub fn apply_flow(
         ));
     }
     if already {
-        println!("--force: 继续重写。本次自动备份将标记为免密状态(文件名含 _nopwd); 加密原盘备份是更早时间戳那份。");
+        println!(
+            "{}",
+            crate::ui::yellow("--force: 继续重写。本次自动备份将标记为免密状态(文件名含 _nopwd); 加密原盘备份是更早时间戳那份。")
+        );
     }
 
     let (bpath, _nopwd) = backup_disk(&facts, &img, &did, &ctx.backup_dir, ctx.clock)?;
-    println!("还原: nopwd restore \"{}\" --disk {} --yes", bpath.display(), disk);
+    println!("{}  nopwd restore \"{}\" --disk {} --yes", crate::ui::bold("还原"), bpath.display(), disk);
 
-    if !ctx.prompt.confirm_yes(&format!("将改写 disk{} LBA0/6/7/12/9。输入 YES: ", disk)) {
+    if !ctx.prompt.confirm_yes(&crate::ui::bold(&format!("将改写 disk{} LBA0/6/7/12/9。输入 YES: ", disk))) {
         return Err(err(EXIT_CANCELLED, "已取消(未写盘)"));
     }
     sysinfo::unmount_disk(ctx.runner, disk);
@@ -523,7 +587,10 @@ pub fn apply_flow(
     }
     writes.insert(0, result.lba0);
     diskio::atomic_write_sectors(dev, &writes)?;
-    println!("已写入, 读回校验通过。请拔出 U 盘重新插入, 数据区格式化 exFAT/NTFS 即得免密可写区。");
+    println!(
+        "{}",
+        crate::ui::green("已写入, 读回校验通过。请拔出 U 盘重新插入, 数据区格式化 exFAT/NTFS 即得免密可写区。")
+    );
     Ok(EXIT_OK)
 }
 
@@ -562,16 +629,18 @@ pub fn restore_flow(
                 ));
             }
             println!("disk{} 匹配备份 {} 个(新→旧):", disk, baks.len());
-            for b in &baks {
-                let mt = ctx.clock.fmt_human(diskio::mtime_epoch(b));
-                let tag = match &did {
-                    Some(d) if backup_is_nopwd(b, d) => "  [免密状态]",
-                    _ => "",
-                };
-                println!("  {}{}  {}", mt, tag, b.display());
-            }
+            let entries: Vec<(String, bool)> = baks
+                .iter()
+                .map(|b| {
+                    (
+                        ctx.clock.fmt_human(diskio::mtime_epoch(b)),
+                        did.as_ref().map(|d| backup_is_nopwd(b, d)).unwrap_or(false),
+                    )
+                })
+                .collect();
+            print!("{}", backup_menu_str(&entries));
             let sel = loop {
-                let c = ctx.prompt.prompt_line(&format!("选择 [1-{}] (回车取消): ", baks.len()));
+                let c = ctx.prompt.prompt_line(&crate::ui::bold(&format!("选择 [1-{}] (回车取消): ", baks.len())));
                 let c = c.trim();
                 if c.is_empty() {
                     return Err(err(EXIT_CANCELLED, "已取消"));
@@ -581,7 +650,7 @@ pub fn restore_flow(
                         break baks[n - 1].clone();
                     }
                 }
-                println!("无效输入");
+                println!("{}", crate::ui::yellow("无效输入"));
             };
             sel
         }
@@ -603,20 +672,31 @@ pub fn restore_flow(
         if want != got {
             return Err(err(EXIT_BACKUP, format!("错误: 备份 MD5 不符(期望 {}, 实际 {}) — 文件损坏?", want, got)));
         }
-        println!("MD5 校验通过: {}", got);
+        println!("{}  {}", crate::ui::green("MD5 校验通过"), got);
     }
     let nopwd_snap = did.as_ref().map(|d| backup_is_nopwd(&path, d)).unwrap_or(false);
     if nopwd_snap {
-        println!("注意: 该备份为【免密状态】快照 — 还原后仍是免密盘, 不会回到加密原盘。");
         println!(
-            "[dry-run] 将还原 {} → disk{} LBA0-13 ({}B) — 未写入(免密快照不作还原)。",
-            path.display(),
-            disk,
-            data.len()
+            "{}",
+            crate::ui::yellow("注意: 该备份为【免密状态】快照 — 还原后仍是免密盘, 不会回到加密原盘。")
+        );
+        println!(
+            "{}",
+            crate::ui::dim(&format!(
+                "[dry-run] 将还原 {} → disk{} LBA0-13 ({}B) — 未写入(免密快照不作还原)。",
+                path.display(),
+                disk,
+                data.len()
+            ))
         );
         return Ok(EXIT_OK);
     }
-    if !ctx.prompt.confirm_yes(&format!("还原 {} → disk{} LBA0-13? 输入 YES: ", path.display(), disk)) {
+    println!(
+        "{}  {}",
+        crate::ui::bold("还原"),
+        crate::ui::truncate_mid(&path.display().to_string(), 64)
+    );
+    if !ctx.prompt.confirm_yes(&crate::ui::bold(&format!("  → disk{} LBA0-13? 输入 YES: ", disk))) {
         return Err(err(EXIT_CANCELLED, "已取消"));
     }
     sysinfo::unmount_disk(ctx.runner, disk);
@@ -626,7 +706,7 @@ pub fn restore_flow(
         .map(|lba| (lba, data[lba as usize * SECTOR..(lba as usize + 1) * SECTOR].to_vec()))
         .collect();
     diskio::atomic_write_sectors(dev, &writes)?;
-    println!("已还原, 读回校验通过。请拔出重插。");
+    println!("{}", crate::ui::green("已还原, 读回校验通过。请拔出重插。"));
     Ok(EXIT_OK)
 }
 
@@ -641,7 +721,7 @@ pub fn convert_flow(dir: String, id: Option<String>, size: Option<f64>, out: Opt
     let result = match convert(&read, &id, size, true) {
         Ok(r) => r,
         Err(e) => {
-            eprintln!("{}", e.msg);
+            eprintln!("{}", crate::ui::red(&e.msg));
             return e.code;
         }
     };
@@ -679,7 +759,7 @@ pub fn run() -> i32 {
     let parsed = match parse_args(&argv) {
         Ok(p) => p,
         Err(msg) => {
-            eprintln!("{}", msg);
+            eprintln!("{}", crate::ui::red(&msg));
             eprintln!();
             print_usage();
             return EXIT_USAGE;
@@ -756,7 +836,7 @@ fn real_flow(
     );
     if let Some(n) = disk_opt {
         if let Err(e) = guard_system_disk(n) {
-            eprintln!("{}", e.msg);
+            eprintln!("{}", crate::ui::red(&e.msg));
             return e.code;
         }
     }
@@ -774,7 +854,7 @@ fn real_flow(
                     argv.push(n.to_string());
                 }
                 Err(e) => {
-                    eprintln!("{}", e.msg);
+                    eprintln!("{}", crate::ui::red(&e.msg));
                     return e.code;
                 }
             }
@@ -783,6 +863,24 @@ fn real_flow(
         unreachable!();
     }
     let bak = diskio::resolve_backup_dir(backup_dir_flag.as_deref());
+    // 手动 sudo 提醒: shell 环境已被 sudo 剥掉(env 过不了界), 且旗标/配置
+    // 都没命中时, 明确告知备份去向与两种正确做法。自动提权的子进程带哨兵, 不提示。
+    let has_sentinel = std::env::args().any(|a| a == ELEVATED_FLAG);
+    if !has_sentinel
+        && diskio::sudo_user().is_some()
+        && backup_dir_flag.is_none()
+        && std::env::var("NOPWD_BACKUP_DIR").unwrap_or_default().is_empty()
+        && diskio::conf_backup_dir().is_none()
+    {
+        let cwd_bak = std::env::current_dir().unwrap_or_default().join("backup");
+        eprintln!(
+            "{}",
+            crate::ui::yellow(&format!(
+                "注意: 手动 sudo 会丢失 shell 环境变量($NOPWD_BACKUP_DIR 未生效), 备份将落在 {}。建议直接 nopwd <子命令>(自动提权), 或在 ~/.nopwd.conf 写 backup_dir 固定目录",
+                cwd_bak.display()
+            ))
+        );
+    }
     let mut std_prompter = StdPrompter;
     let mut always = AlwaysYes(StdPrompter); // 无状态, 独立实例
     let prompter: &mut dyn Prompter = if yes { &mut always } else { &mut std_prompter };
@@ -792,13 +890,13 @@ fn real_flow(
         None => match auto_pick_disk(runner, &mut *ctx.prompt) {
             Ok(n) => n,
             Err(e) => {
-                eprintln!("{}", e.msg);
+                eprintln!("{}", crate::ui::red(&e.msg));
                 return e.code;
             }
         },
     };
     if let Err(e) = guard_system_disk(n) {
-        eprintln!("{}", e.msg);
+        eprintln!("{}", crate::ui::red(&e.msg));
         return e.code;
     }
     let mut dev = match FileDev::open_rdonly(&raw_path(n)) {
@@ -820,7 +918,7 @@ fn finish(r: NopwdResult<i32>) -> i32 {
     match r {
         Ok(code) => code,
         Err(e) => {
-            eprintln!("{}", e.msg);
+            eprintln!("{}", crate::ui::red(&e.msg));
             e.code
         }
     }
@@ -913,14 +1011,37 @@ mod tests {
         let out = print_disk_table(&rows);
         let lines: Vec<&str> = out.lines().collect();
         assert_eq!(lines[0], "外接盘 3 个:");
-        assert!(lines[1].contains("disk4") && lines[1].contains("非cems盘"));
-        assert!(lines[2].contains("disk6") && lines[2].contains("cems盘[免密]"));
-        assert!(lines[2].contains("onlyid=1402259934") && lines[2].contains("备份3份"));
-        // EDPF 分区行: 与容量列对齐, 含类型名/LBA 范围/大小
-        assert!(lines[3].contains("EDPF(LBA12):"), "{}", lines[3]);
-        assert!(lines[3].contains("Share LBA 63~116,700,881 59.75GB"), "{}", lines[3]);
-        assert!(lines[3].contains("Encrypt LBA 116,707,328~122,847,487 3.14GB"), "{}", lines[3]);
-        assert!(lines[4].contains("disk7") && lines[4].contains("非USB"));
+        let disk4_line = lines.iter().find(|l| l.contains("disk4")).unwrap();
+        assert!(disk4_line.contains("非cems盘"));
+        let disk6_line = lines.iter().find(|l| l.contains("disk6")).unwrap();
+        assert!(disk6_line.contains("cems盘") && disk6_line.contains("[免密]"));
+        // EDPF 明细行: 类型 + 大小 + LBA 范围
+        let edpf = lines.iter().find(|l| l.contains("EDPF")).unwrap();
+        assert!(edpf.contains("Share 59.75GB (LBA 63~116,700,881)"), "{}", edpf);
+        assert!(edpf.contains("Encrypt 3.14GB (LBA 116,707,328~122,847,487)"), "{}", edpf);
+        assert!(edpf.contains("Boot 0.00GB (LBA 32~63)"), "{}", edpf);
+        let meta = lines.iter().find(|l| l.contains("onlyid")).unwrap();
+        assert!(meta.contains("onlyid=1402259934") && meta.contains("备份 3 份"));
+        let disk7_line = lines.iter().find(|l| l.contains("disk7")).unwrap();
+        assert!(disk7_line.contains("非USB"));
         assert_eq!(print_disk_table(&[]).trim(), "未检测到外接盘。");
+    }
+
+    #[test]
+    fn menus_are_numbered() {
+        use crate::sysinfo::ExtDisk;
+        let disks = vec![
+            ExtDisk { n: 4, size: 64_000_000_000, vid: "0951".into(), pid: "1666".into(), proto: "USB".into() },
+            ExtDisk { n: 6, size: 62_914_560_000, vid: "0dd8".into(), pid: "2005".into(), proto: "USB".into() },
+        ];
+        let m = disk_menu_str(&disks);
+        assert!(m.contains("1)") && m.contains("2)"), "{}", m);
+        assert!(m.contains("disk4") && m.contains("64.00GB") && m.contains("0951:1666"));
+
+        let b = backup_menu_str(&[("2026-09-16 23:36".into(), true), ("2026-08-27 22:25".into(), false)]);
+        assert!(b.contains("1)  2026-09-16 23:36"), "{}", b);
+        assert!(b.contains("[免密状态]"));
+        assert!(b.contains("2)  2026-08-27 22:25"));
+        assert!(b.contains("[加密原盘]"));
     }
 }

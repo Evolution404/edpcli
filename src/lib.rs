@@ -12,4 +12,5 @@ pub mod identify;
 pub mod sysinfo;
 pub mod diskio;
 pub mod elevate;
+pub mod ui;
 pub mod cli;
