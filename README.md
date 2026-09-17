@@ -15,21 +15,46 @@ nopwd apply --disk 4 --size 100  # 指定盘 + Share 100GB
 nopwd apply --force              # 盘已是免密盘仍强制重写（默认拒绝）
 nopwd restore                    # 交互还原：列出本盘备份（新→旧，免密快照标注）→ 选择 → YES → 写入
 nopwd restore <备份.bin> --yes   # 脚本化还原（自动确认）
-nopwd backup list                # 跨盘分组总览；每份显示编号 + 真实文件名
+nopwd backup                     # 默认就是 list：跨盘分组总览
+nopwd backup list                # 显式写法；每份显示编号 + 真实文件名
 nopwd backup list --onlyid ID    # 只查看某一物理盘
 nopwd backup verify              # 全量校验备份（7168 字节 + MD5）
-nopwd backup verify --onlyid ID  # 只校验某一物理盘
+nopwd backup verify --onlyid ID  # 校验某一物理盘全部备份
+nopwd backup verify --onlyid ID --index 2  # 只校验该盘第 2 份
 nopwd backup prune               # 按策略预览旧免密快照（默认不删除）
 nopwd backup rm --onlyid ID      # 显示该盘编号列表 → 选择 → YES 删除
 nopwd backup rm --onlyid ID 2-3  # 按编号/范围删除；加 --yes 可脚本化
 nopwd backup rm <备份.bin>       # 仍支持按文件名/路径精确删除
-nopwd inspect                    # 自动选择当前 USB 盘，概览 LBA0-13（只读）
+nopwd inspect                    # 有 U 盘则只读查看；没插盘则列出可离线查看的备份盘
 nopwd inspect 6 7 12 --disk 14  # 展开物理盘指定扇区的结构化字段
 nopwd inspect 7 12 --disk 14 --hex  # 追加字段感知高亮 hex
+nopwd inspect --onlyid ID        # 先列出该盘有哪些 [1][2]... 可选备份
 nopwd inspect --onlyid ID --index 2 # 按 backup list 编号查看某份备份
-nopwd inspect 11 12 --backup <备份.bin> --hex  # 直接查看备份/镜像，不提权
+nopwd inspect <备份.bin> 11 12 --hex          # 文件可直接作位置参数，不提权
+nopwd inspect 11 12 --backup <备份.bin> --hex # 仍支持显式 --backup
+nopwd completion zsh             # 生成 zsh Tab 补全（bash/fish 同理）
 nopwd convert --dir <快照目录> --id <device_id> [--out <目录>]   # 离线验证（不碰真盘）
 ```
+
+### Tab 补全
+
+补全不是静态命令表：`onlyid`、`--index`、备份文件名、当前物理盘号和 LBA0-13
+都会由 `nopwd` 实时提供候选。
+
+```bash
+# zsh（当前 shell）
+eval "$(nopwd completion zsh)"
+
+# bash（当前 shell）
+eval "$(nopwd completion bash)"
+
+# fish（当前 shell）
+nopwd completion fish | source
+```
+
+长期启用时，把对应命令放入 `~/.zshrc` / `~/.bashrc` / fish 配置即可。
+子命令内部也支持聚焦帮助，例如 `nopwd inspect --help`、`nopwd backup --help`；
+参数写错时只打印当前子命令的短帮助，不再刷整页全局教程。
 
 `list` 效果（sudo 下 cems 盘认示三信号免密检测 `[免密]` 标记，并解密 LBA12
 展示 EDPF 分区表——类型/LBA 范围/定义大小；原盘 3 条 Boot·Share·Encrypt，
@@ -76,8 +101,8 @@ disk14 匹配备份 3 个(新→旧):
 **不会自动 sudo，也不会碰 `/dev/disk*` / `/dev/rdisk*`**：
 
 ```bash
-nopwd backup list   [--onlyid ID] [--backup-dir D]
-nopwd backup verify [<备份.bin>] [--onlyid ID] [--backup-dir D]
+nopwd backup [list] [--onlyid ID] [--backup-dir D]
+nopwd backup verify [<备份.bin>] [--onlyid ID] [--index N] [--backup-dir D]
 nopwd backup prune  [--onlyid ID] [--keep N] [--yes] [--backup-dir D]
 nopwd backup rm     --onlyid ID [编号|范围]... [--yes] [--backup-dir D]
 nopwd backup rm     <路径|文件名>... [--yes] [--backup-dir D]
@@ -89,7 +114,8 @@ nopwd backup rm     <路径|文件名>... [--yes] [--backup-dir D]
   缺 sidecar 为黄色。每盘内部按新→旧编号 `[1] [2] ...`，下一行始终显示真实
   文件名；`--onlyid ID` 只显示指定物理盘。无法解析为本工具命名的 `.bin` 仍以
   灰色“未识别”列出。
-- `verify`：无参数校验目录内全部 `.bin`，`--onlyid ID` 只校验指定盘，带文件名/
+- `verify`：无参数校验目录内全部 `.bin`，`--onlyid ID` 只校验指定盘，继续加
+  `--index N` 可只校验该盘第 N 份；带文件名/
   路径时只校验该份（单文件与 `--onlyid` 不能同时使用）。大小不符、
   MD5 不符、缺 `.md5`、文件不存在均返回退出码 5；全部正常返回 0。
 - `prune`：默认**只预览、不删除**；只有显式 `--yes` 才执行。加密原盘备份永不
@@ -115,22 +141,29 @@ nopwd backup rm     <路径|文件名>... [--yes] [--backup-dir D]
 但不照搬原脚本的大段无差别 hex 输出。物理盘与备份文件共用同一套解析器：
 
 ```bash
-nopwd inspect                              # 当前 USB 盘 LBA0-13 概览
+nopwd inspect                              # 当前 USB 盘；无盘时列出可查看的备份盘
 nopwd inspect 0 4 6 7 8 9 11 12 --disk 14
 nopwd inspect 7 12 --disk 14 --hex        # 解码后高亮 hex
 nopwd inspect 7 --disk 14 --raw           # 只看盘上原始密文/原始字节
+nopwd inspect --onlyid 1987718388          # 先列出 [1][2]...，不报用法错误
 nopwd inspect --onlyid 1987718388 --index 2
+nopwd inspect backup.bin 7 12 --hex        # --backup 可省略
 nopwd inspect 6 7 11 12 --onlyid 1987718388 --index 2 --hex
 nopwd inspect 7 12 --backup backup.bin --id 'disk&ven_...' --hex
 nopwd inspect 6 7 12 --backup backup.bin --export ./metadata-out
 ```
 
-- **来源统一**：不指定备份来源时查看物理 USB 盘，缺 `--disk` 会复用现有 USB 盘选择器；
+- **来源统一**：不指定备份来源时优先查看物理 USB 盘；若当前没有外接 USB 盘，则直接
+  列出备份目录中可用的 `onlyid`、型号、份数和最新时间，引导继续离线查看，而不是只报
+  “未检测到外接盘”。缺 `--disk` 时会复用现有 USB 盘选择器；
   该路径仅做 `pread`/只读打开，不卸载、不写盘。`--backup` 支持任意备份/镜像路径，
-  裸文件名按备份目录解析；`--onlyid ID --index N` 与 `backup list` 的 `[N]` 编号完全一致。
-- **默认先看概览**：未指定 LBA 时只扫描 LBA0-13，显示每扇区非零字节数、前导字符与
+  裸文件名按备份目录解析，也可直接写成位置参数 `nopwd inspect backup.bin ...`；
+  `--onlyid ID` 单独使用时先展示可选备份，`--onlyid ID --index N` 与 `backup list` 的
+  `[N]` 编号完全一致。
+- **默认先看概览**：未指定 LBA 且未要求 `--hex/--raw` 时只扫描 LBA0-13，显示每扇区非零字节数、前导字符与
   已知解密方式，不直接打印 14×512B。指定 LBA 后显示结构化字段；无已知字段的扇区
-  会自动退化为 hex。
+  会自动退化为 hex。若明确加了 `--hex` 或 `--raw` 却没写 LBA，则按直觉展开全部 LBA0-13，
+  不会悄悄忽略旗标；`--hex` 与 `--raw` 不能同时使用。
 - **字段感知 hex**：`--hex` 显示解码后的 16B/行 hex，并按语义给已知字段着色：
   魔数/签名、文本、身份/密钥、地址/LBA、大小、类型/标志、校验分别使用不同语义色；
   校验失败使用红色。`--raw` 改看盘上原始 512B，不对密文套用解码字段颜色。
@@ -180,6 +213,7 @@ src/
   sysinfo.rs   diskutil/ioreg 查询（CmdRunner 抽象，测试注入罐头输出）
   diskio.rs    扇区设备抽象(SectorDev)、原子写入、备份/还原、备份元数据扫描/清理策略、快照读取
   inspect.rs   只读扇区解密/结构解析/字段感知 hex 渲染（物理盘与备份共用）
+  completion.rs zsh/bash/fish 补全脚本 + onlyid/编号/盘号等动态候选
   md5.rs       MD5（备份 sidecar）
   plist.rs     极简 XML plist 解析（diskutil -plist 输出）
   elevate.rs   自动提权（sudo 重执行自身）
