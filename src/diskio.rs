@@ -873,6 +873,12 @@ pub fn scan_backup_dir(dir: &Path) -> Vec<BackupEntry> {
     };
     let mut entries = Vec::new();
     for item in read_dir.flatten() {
+        let Ok(file_type) = item.file_type() else {
+            continue;
+        };
+        if !file_type.is_file() {
+            continue;
+        }
         let path = item.path();
         if path.extension().and_then(|e| e.to_str()) != Some("bin") {
             continue;
@@ -1036,11 +1042,20 @@ pub fn backup_disk(
     clock: &dyn Clock,
 ) -> NopwdResult<(PathBuf, bool)> {
     validate_backup_device_id(device_id)?;
+    if data.len() != 14 * SECTOR {
+        return Err(NopwdError::new(
+            EXIT_BACKUP,
+            format!(
+                "错误: 备份镜像长度 {}B，必须恰好为 {}B（LBA0-13）",
+                data.len(),
+                14 * SECTOR
+            ),
+        ));
+    }
     fs::create_dir_all(bak_dir).map_err(io_err)?;
     let ts = clock.fmt_ts(clock.now_epoch());
     let secs = facts.total_sectors.map(|s| s.to_string()).unwrap_or_else(|| "unknown".into());
-    let onlyid_part = facts
-        .label_id
+    let onlyid_part = lba4_label_id_from(&data[4 * SECTOR..5 * SECTOR])
         .as_ref()
         .map(|o| format!("_onlyid{}", o))
         .unwrap_or_default();
@@ -1141,12 +1156,19 @@ pub fn find_backups(
         for pat in pats {
             let Ok(entries) = fs::read_dir(bak_dir) else { continue };
             for entry in entries.flatten() {
-                let name = entry.file_name().to_string_lossy().into_owned();
-                if name.ends_with(".md5") {
+                let Ok(file_type) = entry.file_type() else {
+                    continue;
+                };
+                if !file_type.is_file() {
                     continue;
                 }
+                let path = entry.path();
+                if path.extension().and_then(|e| e.to_str()) != Some("bin") {
+                    continue;
+                }
+                let name = entry.file_name().to_string_lossy().into_owned();
                 if wildcard_match(pat, &name) {
-                    out.push(entry.path());
+                    out.push(path);
                 }
             }
         }

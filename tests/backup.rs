@@ -6,6 +6,7 @@ mod common;
 use std::fs;
 
 use common::*;
+use nopwd::common::SECTOR;
 use nopwd::diskio::{backup_disk, backup_is_nopwd, find_backups, migrate_backup_names,
                     backup_label_id, parse_backup_name, scan_backup_dir, BackupMeta,
                     prune_candidates, BackupEntry, Md5Status, DiskFacts};
@@ -184,6 +185,76 @@ fn backup_written_with_md5_and_onlyid() {
     let my_tag: [u8; 16] = data[4 * 512..4 * 512 + 16].try_into().unwrap();
     let found = find_backups(&tmp.0, &netac_facts(), Some("disk&ven_netac&prod_onlydisk"), Some(my_tag));
     assert_eq!(found, vec![path]);
+}
+
+#[test]
+fn backup_rejects_incomplete_lba_image_before_creating_files() {
+    let Some(mut data) = load_disk_image("netac") else {
+        eprintln!("跳过: 真实备份不可用");
+        return;
+    };
+    data.pop();
+    let tmp = TmpDir::new("backup_short_image");
+    let result = backup_disk(
+        &netac_facts(),
+        &data,
+        "disk&ven_netac&prod_onlydisk",
+        &tmp.0,
+        &FixedClock,
+    );
+    assert!(result.is_err(), "备份输入必须恰好为 LBA0-13 共 7168B");
+    assert_eq!(fs::read_dir(&tmp.0).map(|it| it.count()).unwrap_or(0), 0);
+}
+
+#[test]
+fn backup_filename_onlyid_is_derived_from_lba4_content() {
+    let Some(data) = load_disk_image("netac") else {
+        eprintln!("跳过: 真实备份不可用");
+        return;
+    };
+    let tmp = TmpDir::new("backup_content_onlyid");
+    let mut facts = netac_facts();
+    facts.label_id = Some("999999999".into());
+    let (path, _) = backup_disk(
+        &facts,
+        &data,
+        "disk&ven_netac&prod_onlydisk",
+        &tmp.0,
+        &FixedClock,
+    )
+    .unwrap();
+    let name = path.file_name().unwrap().to_string_lossy();
+    assert!(name.contains("_onlyid1402259934_"), "{name}");
+    assert!(!name.contains("_onlyid999999999_"), "{name}");
+}
+
+#[test]
+fn find_backups_ignores_matching_non_bin_files() {
+    let Some(data) = load_disk_image("netac") else {
+        eprintln!("跳过: 真实备份不可用");
+        return;
+    };
+    let tmp = TmpDir::new("find_only_bin");
+    let bin = write_backup(
+        &tmp.0,
+        "disk6_122880000_vid0dd8_pid2005_disk&ven_netac&prod_onlydisk_onlyid1402259934_20260910_172300.bin",
+        &data,
+    );
+    fs::write(
+        tmp.0.join(
+            "disk6_122880000_vid0dd8_pid2005_disk&ven_netac&prod_onlydisk_onlyid1402259934_20260910_172301.txt",
+        ),
+        &data,
+    )
+    .unwrap();
+    let tag: [u8; 16] = data[4 * SECTOR..4 * SECTOR + 16].try_into().unwrap();
+    let found = find_backups(
+        &tmp.0,
+        &netac_facts(),
+        Some("disk&ven_netac&prod_onlydisk"),
+        Some(tag),
+    );
+    assert_eq!(found, vec![bin]);
 }
 
 #[test]
