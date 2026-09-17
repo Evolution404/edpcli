@@ -3,7 +3,7 @@
 
 use std::collections::BTreeMap;
 use std::fs::{self, File, OpenOptions};
-use std::io::{self, Read, Seek, SeekFrom};
+use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::os::unix::fs::FileExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -20,6 +20,35 @@ pub fn raw_path(disk: u32) -> String {
 
 fn io_err(e: io::Error) -> NopwdError {
     NopwdError::new(EXIT_IO, format!("错误: {}", e))
+}
+
+fn write_new_synced(path: &Path, data: &[u8], label: &str) -> NopwdResult<()> {
+    let mut file = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(path)
+        .map_err(|e| {
+            if e.kind() == io::ErrorKind::AlreadyExists {
+                NopwdError::new(
+                    EXIT_IO,
+                    format!("错误: {}已存在，拒绝覆盖: {}", label, path.display()),
+                )
+            } else {
+                io_err(e)
+            }
+        })?;
+    if let Err(e) = file.write_all(data).and_then(|_| file.sync_all()) {
+        drop(file);
+        let _ = fs::remove_file(path);
+        return Err(io_err(e));
+    }
+    Ok(())
+}
+
+fn sync_dir(dir: &Path) -> NopwdResult<()> {
+    File::open(dir)
+        .and_then(|file| file.sync_all())
+        .map_err(io_err)
 }
 
 // ══════════════════════════════════════════════════════════════════
@@ -855,10 +884,16 @@ pub fn backup_disk(
         facts.disk, secs, facts.vid, facts.pid, device_id, onlyid_part, state_part, ts
     );
     let path = bak_dir.join(format!("{}.bin", base));
-    fs::write(&path, data).map_err(io_err)?;
+    write_new_synced(&path, data, "备份文件")?;
     // sidecar 命名与 Python 版一致: <备份.bin>.md5
     let md5_path = PathBuf::from(format!("{}.md5", path.display()));
-    fs::write(&md5_path, format!("{}\n", md5_hex(data))).map_err(io_err)?;
+    let md5_data = format!("{}\n", md5_hex(data));
+    if let Err(e) = write_new_synced(&md5_path, md5_data.as_bytes(), "备份校验文件") {
+        let _ = fs::remove_file(&path);
+        return Err(e);
+    }
+    // 两个目录项也持久化后才允许调用方继续进入真实盘写入阶段。
+    sync_dir(bak_dir)?;
     println!("{}  {}", crate::ui::green("备份"), path.display());
     if is_nopwd {
         println!(

@@ -186,6 +186,45 @@ fn creating_new_backup_does_not_rename_existing_history() {
 }
 
 #[test]
+fn backup_collision_never_overwrites_existing_file() {
+    let Some(original) = load_disk_image("netac") else {
+        eprintln!("跳过: 真实备份不可用");
+        return;
+    };
+    let tmp = TmpDir::new("backup_collision");
+    let (path, _) = backup_disk(
+        &netac_facts(),
+        &original,
+        "disk&ven_netac&prod_onlydisk",
+        &tmp.0,
+        &FixedClock,
+    )
+    .unwrap();
+    let first = fs::read(&path).unwrap();
+
+    // 保持同一时间戳和同一“加密原盘”状态，只改一个与识别无关的保留扇区字节。
+    let mut second = original.clone();
+    second[2 * 512 + 17] ^= 0x5A;
+    let err = backup_disk(
+        &netac_facts(),
+        &second,
+        "disk&ven_netac&prod_onlydisk",
+        &tmp.0,
+        &FixedClock,
+    )
+    .unwrap_err();
+
+    assert!(err.msg.contains("已存在") || err.msg.contains("exists"), "{}", err.msg);
+    assert_eq!(fs::read(&path).unwrap(), first, "同名备份绝不能被静默覆盖");
+    assert_eq!(
+        fs::read_to_string(format!("{}.md5", path.display()))
+            .unwrap()
+            .trim(),
+        md5(&first)
+    );
+}
+
+#[test]
 fn backup_tagging_by_content() {
     let Some((conv, did)) = converted_image("netac") else {
         eprintln!("跳过: 真实备份不可用");
