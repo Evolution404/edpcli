@@ -5,6 +5,7 @@ use std::cmp::Ordering;
 use std::collections::BTreeMap;
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read, Seek, SeekFrom, Write};
+use std::os::unix::io::AsRawFd;
 use std::os::unix::fs::FileExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -80,6 +81,10 @@ fn sync_dir(dir: &Path) -> NopwdResult<()> {
 pub trait SectorDev {
     fn read_sector(&mut self, lba: u32) -> io::Result<Vec<u8>>;
     fn write_sector(&mut self, lba: u32, data: &[u8]) -> io::Result<()>;
+    /// 将此前写入提交到设备/介质。测试假件默认无操作；真实 FileDev 覆盖实现。
+    fn sync(&mut self) -> io::Result<()> {
+        Ok(())
+    }
     /// 写阶段前切换为 O_RDWR(卸载后调用)。默认无操作 — 测试镜像本就可写。
     fn reopen_rdwr(&mut self, _wait: Duration) -> io::Result<()> {
         Ok(())
@@ -191,6 +196,38 @@ impl SectorDev for FileDev {
         let file = &self.file;
         pwrite_loop(|buf, off| file.write_at(buf, off), data, base)
     }
+
+    fn sync(&mut self) -> io::Result<()> {
+        if self.path.starts_with("/dev/rdisk") {
+            sync_raw_disk_cache(&self.file)
+        } else {
+            self.file.sync_all()
+        }
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn sync_raw_disk_cache(file: &File) -> io::Result<()> {
+    use std::os::raw::c_ulong;
+
+    extern "C" {
+        fn ioctl(fd: i32, request: c_ulong, ...) -> i32;
+    }
+
+    // macOS SDK <sys/disk.h>: DKIOCSYNCHRONIZECACHE = _IO('d', 22)
+    // <sys/ioccom.h>: _IO = 0x20000000 | (group << 8) | number.
+    const DKIOCSYNCHRONIZECACHE: c_ulong = 0x2000_6416;
+    let rc = unsafe { ioctl(file.as_raw_fd(), DKIOCSYNCHRONIZECACHE) };
+    if rc == 0 {
+        Ok(())
+    } else {
+        Err(io::Error::last_os_error())
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn sync_raw_disk_cache(file: &File) -> io::Result<()> {
+    file.sync_all()
 }
 
 /// 单扇区便捷读(Python read_lba_disk 等价: 每次独立打开)。
@@ -209,6 +246,8 @@ fn write_and_verify(
     for &lba in order {
         dev.write_sector(lba, &sectors[&lba])?;
     }
+    // 读回前先把写缓存提交到介质；否则紧随其后的 pread 可能只验证到内核缓存。
+    dev.sync()?;
     for &lba in sectors.keys() {
         if dev.read_sector(lba)? != sectors[&lba] {
             return Err(io::Error::other(format!("LBA{} 读回校验不符", lba)));

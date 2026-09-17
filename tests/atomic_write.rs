@@ -56,6 +56,9 @@ impl SectorDev for FlakyDev {
         }
         self.inner.write_sector(lba, data)
     }
+    fn sync(&mut self) -> std::io::Result<()> {
+        self.inner.sync()
+    }
 }
 
 /// 包装 FileDev: 写入扇区数达到阈值后, LBA12 的读回返回全零(模拟"读回与写入不符")。
@@ -64,6 +67,29 @@ struct TamperReadDev {
     written: u32,
     threshold: u32,
     tampered: bool,
+}
+
+struct SyncFailOnceDev {
+    inner: FileDev,
+    sync_calls: u32,
+}
+
+impl SectorDev for SyncFailOnceDev {
+    fn read_sector(&mut self, lba: u32) -> std::io::Result<Vec<u8>> {
+        self.inner.read_sector(lba)
+    }
+
+    fn write_sector(&mut self, lba: u32, data: &[u8]) -> std::io::Result<()> {
+        self.inner.write_sector(lba, data)
+    }
+
+    fn sync(&mut self) -> std::io::Result<()> {
+        self.sync_calls += 1;
+        if self.sync_calls == 1 {
+            return Err(std::io::Error::other("注入的持久化失败"));
+        }
+        self.inner.sync()
+    }
 }
 
 impl SectorDev for TamperReadDev {
@@ -77,6 +103,9 @@ impl SectorDev for TamperReadDev {
     fn write_sector(&mut self, lba: u32, data: &[u8]) -> std::io::Result<()> {
         self.written += 1;
         self.inner.write_sector(lba, data)
+    }
+    fn sync(&mut self) -> std::io::Result<()> {
+        self.inner.sync()
     }
 }
 
@@ -139,6 +168,27 @@ fn rollback_failure_reports_intermediate() {
     let e = atomic_write_sectors(&mut dev, &im.patch).unwrap_err();
     assert_eq!(e.code, EXIT_INTERMEDIATE, "{}", e.msg);
     assert!(e.msg.contains("中间状态"), "{}", e.msg);
+}
+
+#[test]
+fn sync_failure_enters_rollback_before_reporting_success() {
+    let Some(im) = setup() else {
+        eprintln!("跳过: 真实备份不可用");
+        return;
+    };
+    let inner = FileDev::open_rdwr(
+        im.path.to_str().unwrap(),
+        std::time::Duration::from_secs(1),
+    )
+    .unwrap();
+    let mut dev = SyncFailOnceDev {
+        inner,
+        sync_calls: 0,
+    };
+    let e = atomic_write_sectors(&mut dev, &im.patch).unwrap_err();
+    assert_eq!(e.code, EXIT_ROLLED_BACK, "{}", e.msg);
+    assert!(dev.sync_calls >= 2, "正写 sync 失败后回滚也必须再次 sync");
+    assert_eq!(img_bytes(&im.path), im.base);
 }
 
 #[test]
