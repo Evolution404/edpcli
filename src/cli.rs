@@ -24,7 +24,7 @@ use crate::diskio::{self, backup_disk, backup_is_nopwd, find_backups, raw_path, 
 use crate::elevate::{self, ELEVATED_FLAG};
 use crate::identify::identify;
 use crate::inspect::{self, InspectMeta};
-use crate::sectors::{convert, looks_nopwd, parse_lba12, EdpfPartition};
+use crate::sectors::{convert, looks_nopwd};
 use crate::sysinfo::{self, CmdRunner, SysRunner};
 
 const OPEN_WAIT: std::time::Duration = std::time::Duration::from_secs(10);
@@ -673,166 +673,7 @@ pub fn parse_args(argv: &[String]) -> Result<Parsed, String> {
 // ══════════════════════════════════════════════════════════════════
 // 3. 外接盘一览
 // ══════════════════════════════════════════════════════════════════
-pub struct Row {
-    pub disk: u32,
-    pub size: u64,
-    pub vid: String,
-    pub pid: String,
-    pub proto: String,
-    pub device_id: Option<String>,
-    pub onlyid: Option<String>,
-    pub n_baks: usize,
-    pub denied: bool,
-    pub probe_error: Option<String>,
-    pub is_nopwd: bool,
-    pub partitions: Option<Vec<EdpfPartition>>,
-}
-
-/// 外接盘一览数据: 编号/容量/接口; USB 盘再尽力识别 cems 身份、免密状态、
-/// EDPF 分区与备份份数。未 sudo 时 raw 设备无读权限 → denied=true(基本列仍可显示)。
-pub fn scan_disks(
-    runner: &dyn CmdRunner,
-    backup_dir: &Path,
-    read_disk: &dyn Fn(u32, u32) -> io::Result<Vec<u8>>,
-) -> Vec<Row> {
-    let mut rows = Vec::new();
-    for d in sysinfo::list_external_disks(runner) {
-        let mut row = Row {
-            disk: d.n,
-            size: d.size,
-            vid: d.vid.clone(),
-            pid: d.pid.clone(),
-            proto: d.proto.clone(),
-            device_id: None,
-            onlyid: None,
-            n_baks: 0,
-            denied: false,
-            probe_error: None,
-            is_nopwd: false,
-            partitions: None,
-        };
-        if d.proto == "USB" {
-            let probe = (|| -> io::Result<()> {
-                let read_exact = |lba: u32| -> io::Result<Vec<u8>> {
-                    let data = read_disk(d.n, lba)?;
-                    if data.len() != SECTOR {
-                        return Err(io::Error::new(
-                            io::ErrorKind::UnexpectedEof,
-                            format!(
-                                "disk{} LBA{} 读取 {}B，预期 {}B",
-                                d.n,
-                                lba,
-                                data.len(),
-                                SECTOR
-                            ),
-                        ));
-                    }
-                    Ok(data)
-                };
-                let lba7 = read_exact(7)?;
-                let id = identify(runner, d.n, &lba7);
-                row.device_id = id.device_id.clone();
-                let lba4 = read_exact(4)?;
-                row.onlyid = diskio::lba4_label_id_from(&lba4);
-                if let Some(did) = &id.device_id {
-                    // 三信号免密检测 + LBA12 EDPF 分区表
-                    let read = |lba: u32| {
-                        read_exact(lba)
-                            .map_err(|e| NopwdError::new(EXIT_IO, format!("错误: {}", e)))
-                    };
-                    row.is_nopwd = looks_nopwd(&read, did)
-                        .map_err(|e| io::Error::other(e.msg))?;
-                    let lba12 = read_exact(12)?;
-                    row.partitions = parse_lba12(&lba12, did);
-                    let tag = diskio::lba4_tag16_from(&lba4).ok_or_else(|| {
-                        io::Error::new(io::ErrorKind::UnexpectedEof, "LBA4 缺少 16B 身份标签")
-                    })?;
-                    let facts = DiskFacts {
-                        disk: d.n,
-                        total_sectors: sysinfo::disk_total_sectors(runner, d.n),
-                        vid: d.vid.clone(),
-                        pid: d.pid.clone(),
-                        label_id: row.onlyid.clone(),
-                    };
-                    row.n_baks = find_backups(backup_dir, &facts, Some(did), Some(tag)).len();
-                }
-                Ok(())
-            })();
-            if let Err(e) = probe {
-                if e.kind() == io::ErrorKind::PermissionDenied {
-                    row.denied = true;
-                } else {
-                    row.probe_error = Some(e.to_string());
-                }
-            }
-        }
-        rows.push(row);
-    }
-    rows
-}
-
-pub fn print_disk_table(rows: &[Row]) -> String {
-    use crate::ui::{bold, dim, green, pad_left, pad_to};
-    let mut out = String::new();
-    if rows.is_empty() {
-        out.push_str("未检测到外接盘。\n");
-        return out;
-    }
-    out.push_str(&format!("外接盘 {} 个:\n", rows.len()));
-    let w = rows.iter().map(|r| r.disk.to_string().len()).max().unwrap_or(1);
-    for r in rows {
-        let name = pad_to(&format!("disk{}", r.disk), w + 4);
-        let head = format!(
-            "  {}  {}  {}  {}",
-            bold(&name),
-            pad_left(&fmt_gb(r.size), 8),
-            pad_to(&r.proto, 12),
-            pad_to(&format!("{}:{}", r.vid, r.pid), 13),
-        );
-        let detail_pad = " ".repeat(2 + (w + 4) + 2 + 8 + 2 + 1); // 对齐到容量列附近
-        if r.proto != "USB" {
-            out.push_str(&format!("{}  {}\n", head, dim("(非USB, 本工具不支持)")));
-        } else if r.denied {
-            out.push_str(&format!("{}  {}\n", head, dim("(加 sudo 可识别 cems 盘/备份)")));
-        } else if let Some(error) = &r.probe_error {
-            out.push_str(&format!(
-                "{}  {}\n",
-                head,
-                crate::ui::yellow(&format!("读取异常: {}", error))
-            ));
-        } else if r.device_id.is_none() {
-            out.push_str(&format!("{}  {}\n", head, dim("非cems盘")));
-        } else {
-            let nopwd_tag = if r.is_nopwd { format!(" {}", green("[免密]")) } else { String::new() };
-            out.push_str(&format!("{}  cems盘{}\n", head, nopwd_tag));
-            let mut details: Vec<String> = Vec::new();
-            if let Some(parts) = &r.partitions {
-                let items: Vec<String> = parts
-                    .iter()
-                    .map(|p| {
-                        format!(
-                            "{} {} ({})",
-                            p.type_name(),
-                            fmt_gb(p.size_bytes),
-                            format_args!("LBA {}~{}", group_digits(p.start_lba), group_digits(p.end_lba()))
-                        )
-                    })
-                    .collect();
-                details.push(format!("└─ EDPF: {}", items.join(" · ")));
-            }
-            let mut meta = Vec::new();
-            if let Some(o) = &r.onlyid {
-                meta.push(format!("onlyid={}", o));
-            }
-            meta.push(if r.n_baks > 0 { format!("备份 {} 份", r.n_baks) } else { "无备份".to_string() });
-            details.push(format!("   {}", meta.join(" · ")));
-            for d in details {
-                out.push_str(&format!("{}{}\n", detail_pad, d));
-            }
-        }
-    }
-    out
-}
+pub use crate::disk_scan::{print_disk_table, scan_disks, Row};
 
 /// restore 选单条目(时间已格式化 + 是否免密快照)。
 pub fn backup_menu_str(entries: &[(String, bool)]) -> String {
@@ -2308,6 +2149,7 @@ fn finish(r: NopwdResult<i32>) -> i32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::sectors::EdpfPartition;
 
     struct ShortSectorDev;
 

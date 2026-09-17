@@ -17,3 +17,4 @@ pub mod cli;
 pub mod inspect;
 pub mod completion;
 pub mod backup_catalog;
+pub mod disk_scan;
