@@ -744,28 +744,46 @@ pub fn parse_backup_name(name: &str) -> Option<BackupMeta> {
     })
 }
 
-fn md5_status(path: &Path, data: &[u8]) -> Md5Status {
-    let sidecar = PathBuf::from(format!("{}.md5", path.display()));
+pub fn md5_sidecar_path(path: &Path) -> PathBuf {
+    PathBuf::from(format!("{}.md5", path.display()))
+}
+
+/// 读取 `<备份.bin>.md5` 的首个摘要 token。
+/// 同时兼容本工具的“仅摘要”格式与标准 `md5sum` 风格的 `HASH  filename`。
+pub fn read_backup_md5(path: &Path) -> io::Result<Option<String>> {
+    let sidecar = md5_sidecar_path(path);
     if !sidecar.exists() {
-        return Md5Status::NoSidecar;
+        return Ok(None);
     }
-    let Ok(expected) = fs::read_to_string(sidecar) else {
-        return Md5Status::Mismatch;
+    let content = fs::read_to_string(&sidecar)?;
+    let Some(expected) = content.split_whitespace().next() else {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("{} 为空", sidecar.display()),
+        ));
     };
-    let Some(expected) = expected.split_whitespace().next() else {
-        return Md5Status::Mismatch;
-    };
-    if expected.eq_ignore_ascii_case(&md5_hex(data)) {
-        Md5Status::Ok
-    } else {
-        Md5Status::Mismatch
+    if expected.len() != 32 || !expected.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("{} 不含合法 32 位 MD5", sidecar.display()),
+        ));
+    }
+    Ok(Some(expected.to_ascii_lowercase()))
+}
+
+fn md5_status(path: &Path, data: &[u8]) -> Md5Status {
+    match read_backup_md5(path) {
+        Ok(None) => Md5Status::NoSidecar,
+        Ok(Some(expected)) if expected == md5_hex(data) => Md5Status::Ok,
+        Ok(Some(_)) | Err(_) => Md5Status::Mismatch,
     }
 }
 
 /// 扫描备份目录并给出跨盘管理所需的完整元数据。
 ///
-/// 扫描必须是只读操作：旧 `_lid` 直接解析；完全没有 onlyid 的历史文件从其自身
-/// LBA4 在内存中补齐 onlyid，不改名、不移动 `.bin/.md5`。未识别 `.bin` 仍保留。
+/// 扫描必须是只读操作：文件名仅用于解析设备信息；只要备份内容可读且包含完整
+/// LBA4，onlyid 始终以 LBA4 为权威（即使文件名声称了另一个 onlyid）。旧 `_lid`
+/// 与无 onlyid 文件因此都无需改名即可正确归组。未识别 `.bin` 仍保留。
 pub fn scan_backup_dir(dir: &Path) -> Vec<BackupEntry> {
     if !dir.is_dir() {
         return Vec::new();
@@ -781,12 +799,12 @@ pub fn scan_backup_dir(dir: &Path) -> Vec<BackupEntry> {
         }
         let name = path.file_name().and_then(|n| n.to_str()).unwrap_or_default();
         let mut meta = parse_backup_name(name);
-        if let Some(m) = meta.as_mut() {
-            if m.onlyid.is_none() {
-                m.onlyid = backup_label_id(&path);
+        let data = fs::read(&path).ok();
+        if let (Some(m), Some(d)) = (meta.as_mut(), data.as_ref()) {
+            if d.len() >= 5 * SECTOR {
+                m.onlyid = lba4_label_id_from(&d[4 * SECTOR..5 * SECTOR]);
             }
         }
-        let data = fs::read(&path).ok();
         let size_ok = data.as_ref().map(|d| d.len() == 14 * SECTOR).unwrap_or(false);
         let md5_ok = data
             .as_ref()
@@ -886,16 +904,36 @@ pub fn migrate_backup_names(bak_dir: &Path) -> Vec<(PathBuf, PathBuf)> {
             continue;
         };
         let new_path = bak_dir.join(&new_name);
-        if new_path.exists() {
-            println!("警告: 历史备份改名目标已存在，跳过: {}", new_path.display());
+        let old_md5 = bak_dir.join(format!("{}.md5", name));
+        let new_md5 = bak_dir.join(format!("{}.md5", new_name));
+        if new_path.exists() || new_md5.exists() {
+            println!(
+                "警告: 历史备份改名目标已存在，跳过: {}{}",
+                new_path.display(),
+                if new_md5.exists() { "（或对应 .md5）" } else { "" }
+            );
             continue;
         }
         match fs::rename(&path, &new_path) {
             Ok(()) => {
-                let old_md5 = bak_dir.join(format!("{}.md5", name));
-                let new_md5 = bak_dir.join(format!("{}.md5", new_name));
                 if old_md5.exists() {
-                    let _ = fs::rename(&old_md5, &new_md5);
+                    if let Err(e) = fs::rename(&old_md5, &new_md5) {
+                        let rollback = fs::rename(&new_path, &path);
+                        match rollback {
+                            Ok(()) => println!(
+                                "警告: 历史备份 .md5 改名失败，已回滚 .bin: {} ({})",
+                                old_md5.display(),
+                                e
+                            ),
+                            Err(rollback_err) => println!(
+                                "严重: 历史备份 .md5 改名失败且 .bin 回滚失败: {} ({})；回滚错误: {}",
+                                old_md5.display(),
+                                e,
+                                rollback_err
+                            ),
+                        }
+                        continue;
+                    }
                 }
                 renamed.push((path, new_path));
             }
@@ -935,7 +973,7 @@ pub fn backup_disk(
     let path = bak_dir.join(format!("{}.bin", base));
     write_new_synced(&path, data, "备份文件")?;
     // sidecar 命名与 Python 版一致: <备份.bin>.md5
-    let md5_path = PathBuf::from(format!("{}.md5", path.display()));
+    let md5_path = md5_sidecar_path(&path);
     let md5_data = format!("{}\n", md5_hex(data));
     if let Err(e) = write_new_synced(&md5_path, md5_data.as_bytes(), "备份校验文件") {
         let _ = fs::remove_file(&path);

@@ -123,6 +123,9 @@ nopwd backup rm     <路径|文件名>... [--yes] [--backup-dir D]
   MD5 不符、缺 `.md5`、文件不存在均返回退出码 5；全部正常返回 0。
 - 备份“新→旧”顺序以文件名中的 `_YYYYMMDD_HHMMSS` 创建时间为准；复制、`touch`
   等导致的文件系统 mtime 变化不会改变 `[1][2]...` 编号或 `prune` 的保留判断。
+- 备份归属盘以文件内容 LBA4 的 onlyid 为权威；即使文件名被手工改错 onlyid，
+  `list / inspect / rm / completion` 仍按真实 LBA4 归组。`.md5` 同时兼容纯摘要和
+  标准 `HASH  filename` 格式，`verify` 与 `restore` 使用同一解析规则。
 - `prune`：默认**只预览、不删除**；只有显式 `--yes` 才执行。加密原盘备份永不
   自动删除；每盘免密状态快照默认保留最新 2 份，可用 `--keep N` 调整，`--keep 0`
   允许清光免密快照，但前提是该盘仍有加密原盘备份；加 `--onlyid ID` 时策略只

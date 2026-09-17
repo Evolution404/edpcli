@@ -440,6 +440,47 @@ fn restore_md5_mismatch_rejected() {
 }
 
 #[test]
+fn restore_accepts_standard_md5_sidecar_format_case_insensitively() {
+    let Some(orig) = load_disk_image("netac") else {
+        eprintln!("跳过: 真实备份不可用");
+        return;
+    };
+    let runner = netac_runner(26);
+    let tmp = TmpDir::new("restore_md5_standard_format");
+    let bakfile = tmp.0.join(
+        "disk26_122880000_vid0dd8_pid2005_disk&ven_netac&prod_onlydisk_onlyid1402259934_20260917_120000.bin",
+    );
+    fs::write(&bakfile, &orig).unwrap();
+    fs::write(
+        format!("{}.md5", bakfile.display()),
+        format!(
+            "{}  {}\n",
+            md5(&orig).to_uppercase(),
+            bakfile.file_name().unwrap().to_string_lossy()
+        ),
+    )
+    .unwrap();
+    let img_path = tmp.0.join("disk.img");
+    fs::write(&img_path, &orig).unwrap();
+    let mut prompt = ScriptPrompter::yes();
+    let mut dev = FileDev::open_rdwr(
+        img_path.to_str().unwrap(),
+        std::time::Duration::from_secs(1),
+    )
+    .unwrap();
+
+    let code = restore_flow(
+        Some(bakfile.to_string_lossy().into_owned()),
+        26,
+        &mut ctx(&runner, &mut prompt, &tmp.0),
+        &mut dev,
+    )
+    .unwrap();
+    assert_eq!(code, EXIT_OK);
+    assert_eq!(fs::read(&img_path).unwrap(), orig);
+}
+
+#[test]
 fn restore_missing_md5_is_rejected() {
     let Some(orig) = load_disk_image("netac") else {
         eprintln!("跳过: 真实备份不可用");

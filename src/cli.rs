@@ -956,17 +956,22 @@ pub fn restore_flow(
     if data.len() != 14 * SECTOR {
         return Err(err(EXIT_BACKUP, format!("错误: 备份大小 {} ≠ {}", data.len(), 14 * SECTOR)));
     }
-    let md5_path = PathBuf::from(format!("{}.md5", path.display()));
-    if !md5_path.is_file() {
-        return Err(err(
-            EXIT_BACKUP,
-            format!("错误: 备份缺少校验文件 {}，拒绝还原", md5_path.display()),
-        ));
-    }
-    let want = std::fs::read_to_string(&md5_path)
-        .map_err(|e| err(EXIT_BACKUP, format!("错误: 无法读取 {}: {}", md5_path.display(), e)))?
-        .trim()
-        .to_string();
+    let md5_path = diskio::md5_sidecar_path(&path);
+    let want = match diskio::read_backup_md5(&path) {
+        Ok(Some(expected)) => expected,
+        Ok(None) => {
+            return Err(err(
+                EXIT_BACKUP,
+                format!("错误: 备份缺少校验文件 {}，拒绝还原", md5_path.display()),
+            ));
+        }
+        Err(e) => {
+            return Err(err(
+                EXIT_BACKUP,
+                format!("错误: 无法读取有效校验 {}: {}", md5_path.display(), e),
+            ));
+        }
+    };
     let got = crate::md5::md5_hex(&data);
     if want != got {
         return Err(err(
@@ -1186,14 +1191,21 @@ fn print_inspect_backup_sources(entries: &[BackupEntry]) -> bool {
         return false;
     }
     let mut groups: Vec<(String, Vec<&BackupEntry>)> = groups.into_iter().collect();
+    for (_, group) in &mut groups {
+        backup_catalog::sort_newest_first(group);
+    }
     groups.sort_by(|a, b| {
-        let am = a.1.iter().map(|e| e.mtime).max().unwrap_or(0);
-        let bm = b.1.iter().map(|e| e.mtime).max().unwrap_or(0);
-        bm.cmp(&am).then_with(|| a.0.cmp(&b.0))
+        match (a.1.first(), b.1.first()) {
+            (Some(ae), Some(be)) => {
+                diskio::cmp_backup_newest_first(ae, be).then_with(|| a.0.cmp(&b.0))
+            }
+            (Some(_), None) => std::cmp::Ordering::Less,
+            (None, Some(_)) => std::cmp::Ordering::Greater,
+            (None, None) => a.0.cmp(&b.0),
+        }
     });
     println!("{}", crate::ui::bold("可查看的备份盘:"));
-    for (id, mut group) in groups {
-        group.sort_by(|a, b| diskio::cmp_backup_newest_first(a, b));
+    for (id, group) in groups {
         let latest = group
             .first()
             .map(|e| diskio::backup_display_time(&e.path, e.mtime))
@@ -1283,14 +1295,19 @@ pub fn backup_list(backup_dir: &Path, onlyid: Option<&str>) -> i32 {
         }
     }
     let mut grouped: Vec<Vec<&BackupEntry>> = groups.into_values().collect();
+    for group in &mut grouped {
+        backup_catalog::sort_newest_first(group);
+    }
     grouped.sort_by(|a, b| {
-        let am = a.iter().map(|e| e.mtime).max().unwrap_or(0);
-        let bm = b.iter().map(|e| e.mtime).max().unwrap_or(0);
-        bm.cmp(&am)
+        match (a.first(), b.first()) {
+            (Some(ae), Some(be)) => diskio::cmp_backup_newest_first(ae, be),
+            (Some(_), None) => std::cmp::Ordering::Less,
+            (None, Some(_)) => std::cmp::Ordering::Greater,
+            (None, None) => std::cmp::Ordering::Equal,
+        }
     });
 
-    for mut group in grouped {
-        backup_catalog::sort_newest_first(&mut group);
+    for group in grouped {
         let Some(meta) = group.first().and_then(|entry| entry.meta.as_ref()) else {
             continue;
         };

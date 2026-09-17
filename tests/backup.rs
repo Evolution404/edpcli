@@ -105,6 +105,36 @@ fn migrate_old_lid_and_no_id_names() {
 }
 
 #[test]
+fn migrate_never_overwrites_existing_md5_target() {
+    let Some(data) = load_disk_image("netac") else {
+        eprintln!("跳过: 真实备份不可用");
+        return;
+    };
+    let tmp = TmpDir::new("migrate_md5_collision");
+    let old = write_backup(
+        &tmp.0,
+        "disk6_122880000_vid0dd8_pid2005_disk&ven_netac&prod_onlydisk_20250101_010101.bin",
+        &data,
+    );
+    let target_name = "disk6_122880000_vid0dd8_pid2005_disk&ven_netac&prod_onlydisk_onlyid1402259934_20250101_010101.bin";
+    let target_md5 = tmp.0.join(format!("{}.md5", target_name));
+    fs::write(&target_md5, "DO-NOT-OVERWRITE\n").unwrap();
+
+    let renamed = migrate_backup_names(&tmp.0);
+    assert!(renamed.is_empty());
+    assert!(old.exists(), "存在 sidecar 目标冲突时原 .bin 必须保持原位");
+    assert!(
+        std::path::PathBuf::from(format!("{}.md5", old.display())).exists(),
+        "原 .md5 必须保持原位"
+    );
+    assert_eq!(
+        fs::read_to_string(&target_md5).unwrap(),
+        "DO-NOT-OVERWRITE\n",
+        "迁移不得覆盖已存在的目标 .md5"
+    );
+}
+
+#[test]
 fn find_backups_lba4_final_filter() {
     let (Some(netac), Some(lexar), Some(real_bin)) =
         (load_disk_image("netac"), load_disk_image("lexar"), fixture_bin("netac"))
@@ -391,6 +421,31 @@ fn scan_is_read_only_and_infers_missing_onlyid_in_memory() {
     );
 }
 
+#[test]
+fn scan_prefers_lba4_identity_over_filename_onlyid() {
+    let Some(original) = load_disk_image("netac") else {
+        eprintln!("跳过: 真实备份不可用");
+        return;
+    };
+    let tmp = TmpDir::new("scan_onlyid_content_wins");
+    let path = write_backup(
+        &tmp.0,
+        "disk6_122880000_vid0dd8_pid2005_disk&ven_netac&prod_onlydisk_onlyid999999999_20260917_120000.bin",
+        &original,
+    );
+
+    let entries = scan_backup_dir(&tmp.0);
+    let entry = entries
+        .iter()
+        .find(|entry| entry.path == path)
+        .expect("应扫描到测试备份");
+    assert_eq!(
+        entry.meta.as_ref().and_then(|meta| meta.onlyid.as_deref()),
+        Some("1402259934"),
+        "备份归属必须以自身 LBA4 为准，不能信任被改过的文件名"
+    );
+}
+
 fn fake_entry(name: &str, onlyid: &str, mtime: i64, is_nopwd: bool) -> BackupEntry {
     BackupEntry {
         meta: Some(BackupMeta {
@@ -581,7 +636,9 @@ fn rm_cancel_yes_missing_and_last_backup_guard() {
 
 #[test]
 fn onlyid_filter_and_numbered_rm_follow_newest_first_order() {
-    let Some(original) = load_disk_image("netac") else {
+    let (Some(original), Some(other_disk)) =
+        (load_disk_image("netac"), load_disk_image("lexar"))
+    else {
         eprintln!("跳过: 真实备份不可用");
         return;
     };
@@ -602,7 +659,7 @@ fn onlyid_filter_and_numbered_rm_follow_newest_first_order() {
     let other = write_backup(
         &tmp.0,
         "disk6_122880000_vid0dd8_pid2005_disk&ven_netac&prod_onlydisk_onlyid999999999_20260910_170004.bin",
-        &original,
+        &other_disk,
     );
     set_mtime(&other, 1_700_000_004);
 
@@ -612,7 +669,7 @@ fn onlyid_filter_and_numbered_rm_follow_newest_first_order() {
     assert_eq!(backup_verify(&tmp.0, Some("404"), None), 5);
     assert_eq!(backup_prune(&tmp.0, Some(id), 2, false), 0);
 
-    // 编号按 mtime 新→旧，所以 [2] 是 paths[1]。
+    // 编号按文件名创建时间新→旧，所以 [2] 是 paths[1]。
     let mut unused = ScriptPrompter::yes();
     assert_eq!(
         backup_rm(&tmp.0, Some(id), &["2".into()], true, &mut unused),
