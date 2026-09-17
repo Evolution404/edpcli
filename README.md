@@ -1,6 +1,7 @@
 # nopwd_tool — cems 加密 U 盘 → 无密码盘
 
-纯 Rust 标准库实现，**零外部依赖**，单二进制 `nopwd`（macOS）。
+Rust 标准库实现，**零第三方 Rust crate**，单二进制 `nopwd`（macOS；复用系统自带
+`diskutil` / `ioreg` / `sudo` / `iconv` 等工具）。
 
 ## 快速使用
 
@@ -22,6 +23,11 @@ nopwd backup prune               # 按策略预览旧免密快照（默认不删
 nopwd backup rm --onlyid ID      # 显示该盘编号列表 → 选择 → YES 删除
 nopwd backup rm --onlyid ID 2-3  # 按编号/范围删除；加 --yes 可脚本化
 nopwd backup rm <备份.bin>       # 仍支持按文件名/路径精确删除
+nopwd inspect                    # 自动选择当前 USB 盘，概览 LBA0-13（只读）
+nopwd inspect 6 7 12 --disk 14  # 展开物理盘指定扇区的结构化字段
+nopwd inspect 7 12 --disk 14 --hex  # 追加字段感知高亮 hex
+nopwd inspect --onlyid ID --index 2 # 按 backup list 编号查看某份备份
+nopwd inspect 11 12 --backup <备份.bin> --hex  # 直接查看备份/镜像，不提权
 nopwd convert --dir <快照目录> --id <device_id> [--out <目录>]   # 离线验证（不碰真盘）
 ```
 
@@ -51,9 +57,10 @@ disk14 匹配备份 3 个(新→旧):
 终端输出带语义色（错误红/成功绿/警告黄/标记绿/降级灰/help 着色），
 管道重定向或设置 `NO_COLOR` 时自动降级为纯文本。
 
-- **自动提权**：`run` / `apply` / `restore` 需要裸盘读写，非 root 时自动以 `sudo`
+- **自动提权**：`run` / `apply` / `restore` 需要裸盘读写，`inspect` 查看物理盘时需要裸盘只读；
+  非 root 时自动以 `sudo`
   重执行自身（选定盘号并入参数，交互提示正常工作）；`list` / `backup` / `convert`
-  永不提权。
+  以及 `inspect --backup/--onlyid` 永不提权。
 - `--yes` 免交互；多块 USB 盘时自动弹编号选择；系统盘（disk<2）一律拒绝。
 - 备份目录（四级优先）：`--backup-dir` 旗标 > 环境变量 `NOPWD_BACKUP_DIR` >
   `~/.nopwd.conf` 的 `backup_dir = 路径` > `./backup`。
@@ -102,6 +109,42 @@ nopwd backup rm     <路径|文件名>... [--yes] [--backup-dir D]
   若目录由 root 持有且不可写，命令返回退出码 5，并明确提示检查目录属主/权限，
   必要时再手动使用 `sudo rm`。`nopwd backup` 自身不会提权。
 
+## 扇区检查器
+
+`nopwd inspect` 将原 `analyze/scripts/read_metadata.py` 的核心能力整合进正式 CLI，
+但不照搬原脚本的大段无差别 hex 输出。物理盘与备份文件共用同一套解析器：
+
+```bash
+nopwd inspect                              # 当前 USB 盘 LBA0-13 概览
+nopwd inspect 0 4 6 7 8 9 11 12 --disk 14
+nopwd inspect 7 12 --disk 14 --hex        # 解码后高亮 hex
+nopwd inspect 7 --disk 14 --raw           # 只看盘上原始密文/原始字节
+nopwd inspect --onlyid 1987718388 --index 2
+nopwd inspect 6 7 11 12 --onlyid 1987718388 --index 2 --hex
+nopwd inspect 7 12 --backup backup.bin --id 'disk&ven_...' --hex
+nopwd inspect 6 7 12 --backup backup.bin --export ./metadata-out
+```
+
+- **来源统一**：不指定备份来源时查看物理 USB 盘，缺 `--disk` 会复用现有 USB 盘选择器；
+  该路径仅做 `pread`/只读打开，不卸载、不写盘。`--backup` 支持任意备份/镜像路径，
+  裸文件名按备份目录解析；`--onlyid ID --index N` 与 `backup list` 的 `[N]` 编号完全一致。
+- **默认先看概览**：未指定 LBA 时只扫描 LBA0-13，显示每扇区非零字节数、前导字符与
+  已知解密方式，不直接打印 14×512B。指定 LBA 后显示结构化字段；无已知字段的扇区
+  会自动退化为 hex。
+- **字段感知 hex**：`--hex` 显示解码后的 16B/行 hex，并按语义给已知字段着色：
+  魔数/签名、文本、身份/密钥、地址/LBA、大小、类型/标志、校验分别使用不同语义色；
+  校验失败使用红色。`--raw` 改看盘上原始 512B，不对密文套用解码字段颜色。
+- **结构解析**：LBA0 MBR；LBA4 labelOnlyId；LBA6 SAFE6（GBK 标签/用户、CRC、注册标志、
+  校验和）；LBA7 EDPF 64B entry；LBA8 LLGB；LBA9 SAPF；LBA11 DRKB/PDKB；
+  LBA12 EDPF 96B entry。未知 LBA 保持 RAW。
+- **备份比旧脚本更完整**：现代备份文件名本身已有 `device_id / VID / PID / 容量 / onlyid`，
+  检查器会直接使用这些元数据，所以 LBA11 的 PDKB **在备份文件上也可解密**，不再只限
+  当前硬件盘。旧/任意镜像若缺 device_id，可用 `--id` 手动补充。
+- **LBA12 按已验证真实格式显示**：只对前 368B 做 A6B0 解密，尾部 144B 保持原始字节；
+  不沿用旧脚本把整扇区都作为 AES 数据展示的方式。
+- **导出**：`--export DIR` 为所查看扇区同时写出 `_raw.bin/.hex` 与
+  `_decoded.bin/.hex`；未指定 LBA 时导出 LBA0-13 全部。hex 导出始终无 ANSI 色码。
+
 ### 从 v2（Python 版）迁移
 
 | v2 | v3 |
@@ -136,6 +179,7 @@ src/
   identify.rs  device_id 识别（ioreg INQUIRY + 传输模式，LBA7 magic 判真）
   sysinfo.rs   diskutil/ioreg 查询（CmdRunner 抽象，测试注入罐头输出）
   diskio.rs    扇区设备抽象(SectorDev)、原子写入、备份/还原、备份元数据扫描/清理策略、快照读取
+  inspect.rs   只读扇区解密/结构解析/字段感知 hex 渲染（物理盘与备份共用）
   md5.rs       MD5（备份 sidecar）
   plist.rs     极简 XML plist 解析（diskutil -plist 输出）
   elevate.rs   自动提权（sudo 重执行自身）
