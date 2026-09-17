@@ -205,7 +205,7 @@ pub(crate) fn guard_system_disk(disk: u32) -> NopwdResult<()> {
 
 pub(crate) fn guard_usb_disk(runner: &dyn CmdRunner, disk: u32) -> NopwdResult<()> {
     guard_system_disk(disk)?;
-    if sysinfo::list_usb_disks(runner).iter().any(|d| d.n == disk) {
+    if sysinfo::usb_disk(runner, disk).is_some() {
         return Ok(());
     }
     Err(err(

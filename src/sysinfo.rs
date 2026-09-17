@@ -230,6 +230,46 @@ fn whole_disk_number(name: &str) -> Option<u32> {
 }
 
 /// 枚举全部外接整盘(disk≥2)。系统盘(disk<2)、分区、内部盘与虚拟盘(DMG)不进入。
+fn external_disk_info(runner: &dyn CmdRunner, n: u32) -> Option<ExtDisk> {
+    if n < 2 {
+        return None;
+    }
+    let name = format!("disk{}", n);
+    let info_out = runner
+        .check_output(&["diskutil", "info", "-plist", &name], DISKUTIL_TIMEOUT)
+        .ok()?;
+    let info = plist::parse(&info_out).ok()?;
+    let whole = info.get("WholeDisk").and_then(|v| v.as_bool()).unwrap_or(false);
+    let internal = info.get("Internal").and_then(|v| v.as_bool()).unwrap_or(false);
+    if !whole || internal {
+        return None;
+    }
+    if info.get("VirtualOrPhysical").and_then(|v| v.as_str()) == Some("Virtual") {
+        return None;
+    }
+    let proto = info
+        .get("BusProtocol")
+        .and_then(|v| v.as_str())
+        .unwrap_or("?")
+        .to_string();
+    let size = ["TotalSize", "DiskSize", "Size"]
+        .iter()
+        .find_map(|k| info.get(k).and_then(|v| v.as_int()).filter(|&v| v != 0))
+        .unwrap_or(0) as u64;
+    let (vid, pid) = if proto == "USB" {
+        usb_vid_pid(runner, n)
+    } else {
+        ("xxxx".into(), "xxxx".into())
+    };
+    Some(ExtDisk {
+        n,
+        size,
+        vid,
+        pid,
+        proto,
+    })
+}
+
 pub fn list_external_disks(runner: &dyn CmdRunner) -> Vec<ExtDisk> {
     let out = match runner.check_output(&["diskutil", "list", "-plist"], DISKUTIL_TIMEOUT) {
         Ok(o) => o,
@@ -240,44 +280,14 @@ pub fn list_external_disks(runner: &dyn CmdRunner) -> Vec<ExtDisk> {
         Err(_) => return vec![],
     };
     let empty: Vec<plist::Plist> = Vec::new();
-    let all = p.get("AllDisks").and_then(|a| a.as_arr()).unwrap_or(&empty);
-    let mut disks = Vec::new();
-    for name in all.iter().filter_map(|d| d.as_str()) {
-        let Some(n) = whole_disk_number(name) else { continue };
-        if n < 2 {
-            continue; // 系统盘防护
-        }
-        let Ok(info_out) = runner.check_output(&["diskutil", "info", "-plist", name], DISKUTIL_TIMEOUT)
-        else {
-            continue;
-        };
-        let Ok(info) = plist::parse(&info_out) else { continue };
-        let whole = info.get("WholeDisk").and_then(|v| v.as_bool()).unwrap_or(false);
-        let internal = info.get("Internal").and_then(|v| v.as_bool()).unwrap_or(false);
-        if !whole || internal {
-            continue;
-        }
-        if info.get("VirtualOrPhysical").and_then(|v| v.as_str()) == Some("Virtual") {
-            continue; // DMG 等虚拟盘, 非物理介质
-        }
-        let proto = info
-            .get("BusProtocol")
-            .and_then(|v| v.as_str())
-            .unwrap_or("?")
-            .to_string();
-        // Python: TotalSize or DiskSize or Size or 0 (0 视同缺失, 逐级回退)
-        let size = ["TotalSize", "DiskSize", "Size"]
-            .iter()
-            .find_map(|k| info.get(k).and_then(|v| v.as_int()).filter(|&v| v != 0))
-            .unwrap_or(0) as u64;
-        let (vid, pid) = if proto == "USB" {
-            usb_vid_pid(runner, n)
-        } else {
-            ("xxxx".into(), "xxxx".into())
-        };
-        disks.push(ExtDisk { n, size, vid, pid, proto });
-    }
-    disks
+    p.get("AllDisks")
+        .and_then(|a| a.as_arr())
+        .unwrap_or(&empty)
+        .iter()
+        .filter_map(|d| d.as_str())
+        .filter_map(whole_disk_number)
+        .filter_map(|n| external_disk_info(runner, n))
+        .collect()
 }
 
 /// 本工具可操作的外接 USB 整盘子集(供自动选盘)。
@@ -286,6 +296,12 @@ pub fn list_usb_disks(runner: &dyn CmdRunner) -> Vec<ExtDisk> {
         .into_iter()
         .filter(|d| d.proto == "USB")
         .collect()
+}
+
+/// 直接核验一个显式盘号是否为可操作的外接 USB 整盘。
+/// 不先枚举所有磁盘，供安全门禁高频调用，减少额外 `diskutil info` 子进程。
+pub fn usb_disk(runner: &dyn CmdRunner, disk: u32) -> Option<ExtDisk> {
+    external_disk_info(runner, disk).filter(|d| d.proto == "USB")
 }
 
 /// 强制卸载整盘。写盘流程必须确认卸载成功后才能重新以 O_RDWR 打开设备。
