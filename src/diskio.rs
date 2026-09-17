@@ -709,6 +709,8 @@ pub struct BackupEntry {
     pub is_nopwd: bool,
     pub md5_ok: Md5Status,
     pub size_ok: bool,
+    /// 扫描时实际 `.bin` 内容摘要；删除前用于确认同名文件未被替换/改写。
+    pub content_md5: Option<String>,
 }
 
 fn strip_numeric_suffix<'a>(s: &'a str, marker: &str) -> Option<(&'a str, String)> {
@@ -797,8 +799,16 @@ pub fn md5_sidecar_path(path: &Path) -> PathBuf {
 /// 同时兼容本工具的“仅摘要”格式与标准 `md5sum` 风格的 `HASH  filename`。
 pub fn read_backup_md5(path: &Path) -> io::Result<Option<String>> {
     let sidecar = md5_sidecar_path(path);
-    if !sidecar.exists() {
-        return Ok(None);
+    let metadata = match fs::symlink_metadata(&sidecar) {
+        Ok(metadata) => metadata,
+        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(e) => return Err(e),
+    };
+    if !metadata.file_type().is_file() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("{} 不是普通校验文件", sidecar.display()),
+        ));
     }
     let content = fs::read_to_string(&sidecar)?;
     let Some(expected) = content.split_whitespace().next() else {
@@ -851,6 +861,7 @@ pub fn scan_backup_dir(dir: &Path) -> Vec<BackupEntry> {
         let name = path.file_name().and_then(|n| n.to_str()).unwrap_or_default();
         let mut meta = parse_backup_name(name);
         let data = fs::read(&path).ok();
+        let content_md5 = data.as_ref().map(|d| md5_hex(d));
         if let (Some(m), Some(d)) = (meta.as_mut(), data.as_ref()) {
             if d.len() >= 5 * SECTOR {
                 m.onlyid = lba4_label_id_from(&d[4 * SECTOR..5 * SECTOR]);
@@ -872,6 +883,7 @@ pub fn scan_backup_dir(dir: &Path) -> Vec<BackupEntry> {
             is_nopwd,
             md5_ok,
             size_ok,
+            content_md5,
         });
     }
     entries.sort_by(cmp_backup_newest_first);

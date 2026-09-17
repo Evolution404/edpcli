@@ -404,6 +404,35 @@ fn scan_backup_dir_reports_ok_mismatch_missing_and_unrecognized() {
 }
 
 #[test]
+fn md5_sidecar_symlink_is_not_followed() {
+    use std::os::unix::fs::symlink;
+
+    let Some(data) = load_disk_image("netac") else {
+        eprintln!("跳过: 真实备份不可用");
+        return;
+    };
+    let tmp = TmpDir::new("md5_symlink");
+    let backup = write_backup(
+        &tmp.0,
+        "disk6_122880000_vid0dd8_pid2005_disk&ven_netac&prod_onlydisk_onlyid1402259934_20260910_170000.bin",
+        &data,
+    );
+    let sidecar = std::path::PathBuf::from(format!("{}.md5", backup.display()));
+    fs::remove_file(&sidecar).unwrap();
+    let outside = tmp.0.parent().unwrap().join(format!(
+        "nopwd_outside_md5_{}_{}",
+        std::process::id(),
+        md5(&data)
+    ));
+    fs::write(&outside, format!("{}\n", md5(&data))).unwrap();
+    symlink(&outside, &sidecar).unwrap();
+
+    assert_eq!(backup_verify(&tmp.0, None, None), 5);
+    assert!(outside.exists(), "校验不能修改符号链接目标");
+    let _ = fs::remove_file(outside);
+}
+
+#[test]
 fn scan_is_read_only_and_infers_missing_onlyid_in_memory() {
     let Some(original) = load_disk_image("netac") else {
         eprintln!("跳过: 真实备份不可用");
@@ -476,6 +505,7 @@ fn fake_entry(name: &str, onlyid: &str, mtime: i64, is_nopwd: bool) -> BackupEnt
         is_nopwd,
         md5_ok: Md5Status::Ok,
         size_ok: true,
+        content_md5: None,
     }
 }
 
@@ -646,6 +676,60 @@ fn rm_cancel_yes_missing_and_last_backup_guard() {
         backup_rm(&tmp.0, None, &["missing.bin".into()], true, &mut unused),
         5
     );
+}
+
+struct ReplaceBeforeConfirm {
+    path: std::path::PathBuf,
+    replacement: Vec<u8>,
+}
+
+impl nopwd::cli::Prompter for ReplaceBeforeConfirm {
+    fn prompt_line(&mut self, _msg: &str) -> String {
+        String::new()
+    }
+
+    fn confirm_yes(&mut self, _msg: &str) -> bool {
+        fs::write(&self.path, &self.replacement).unwrap();
+        true
+    }
+}
+
+#[test]
+fn rm_refuses_if_confirmed_backup_is_replaced_before_delete() {
+    let (Some(original), Some(replacement)) =
+        (load_disk_image("netac"), load_disk_image("lexar"))
+    else {
+        eprintln!("跳过: 真实备份不可用");
+        return;
+    };
+    let tmp = TmpDir::new("rm_replaced_after_confirm_view");
+    let victim = write_backup(
+        &tmp.0,
+        "disk6_122880000_vid0dd8_pid2005_disk&ven_netac&prod_onlydisk_onlyid1402259934_20260910_170000.bin",
+        &original,
+    );
+    let _keep = write_backup(
+        &tmp.0,
+        "disk6_122880000_vid0dd8_pid2005_disk&ven_netac&prod_onlydisk_onlyid1402259934_20260910_170001.bin",
+        &original,
+    );
+    let mut prompt = ReplaceBeforeConfirm {
+        path: victim.clone(),
+        replacement: replacement.clone(),
+    };
+
+    assert_eq!(
+        backup_rm(
+            &tmp.0,
+            None,
+            &[victim.file_name().unwrap().to_string_lossy().into_owned()],
+            false,
+            &mut prompt,
+        ),
+        5
+    );
+    assert!(victim.exists(), "确认后被替换的同名文件不得删除");
+    assert_eq!(fs::read(&victim).unwrap(), replacement);
 }
 
 #[test]

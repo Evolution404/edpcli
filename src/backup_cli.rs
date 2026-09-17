@@ -344,7 +344,29 @@ pub(crate) fn backup_verify_select(
     }
 }
 
-fn delete_backup_pair(path: &Path) -> Result<(), String> {
+fn delete_backup_pair(entry: &BackupEntry) -> Result<(), String> {
+    let path = &entry.path;
+    let metadata = fs::symlink_metadata(path)
+        .map_err(|e| format!("删除前无法重新检查 {}: {}", path.display(), e))?;
+    if !metadata.file_type().is_file() {
+        return Err(format!(
+            "删除前目标已不再是普通文件，拒绝删除: {}",
+            path.display()
+        ));
+    }
+    let expected = entry
+        .content_md5
+        .as_deref()
+        .ok_or_else(|| format!("扫描时无法取得内容摘要，拒绝删除: {}", path.display()))?;
+    let current = fs::read(path)
+        .map_err(|e| format!("删除前无法重新读取 {}: {}", path.display(), e))?;
+    let actual = crate::md5::md5_hex(&current);
+    if actual != expected {
+        return Err(format!(
+            "备份在扫描/确认后内容已变化，拒绝删除同名新文件: {}",
+            path.display()
+        ));
+    }
     if let Err(e) = fs::remove_file(path) {
         let suffix = if e.kind() == io::ErrorKind::PermissionDenied {
             "；备份目录可能由 root 持有且不可写，可检查目录属主/权限，必要时使用 sudo rm 手动删除"
@@ -457,7 +479,7 @@ pub fn backup_prune(backup_dir: &Path, onlyid: Option<&str>, keep: usize, yes: b
     let mut failed = 0usize;
     for entry in &selected {
         if candidate_set.contains(&backup_catalog::canonical_entry_path(&entry.path)) {
-            if let Err(msg) = delete_backup_pair(&entry.path) {
+            if let Err(msg) = delete_backup_pair(entry) {
                 failed += 1;
                 eprintln!("{}", crate::ui::red(&format!("错误: {}", msg)));
             }
@@ -560,6 +582,23 @@ pub fn backup_rm(
     };
     resolved.dedup();
 
+    // 在任何交互确认之前固定“用户看到的那批条目”。确认后删除时直接用这些
+    // 扫描快照做内容复核，不能重新按可能已被替换的路径去解释目标。
+    let mut to_delete = Vec::with_capacity(resolved.len());
+    for path in &resolved {
+        let Some(entry) = entries
+            .iter()
+            .find(|e| backup_catalog::canonical_entry_path(&e.path) == *path)
+        else {
+            eprintln!(
+                "{}",
+                crate::ui::red(&format!("错误: 删除目标已不在扫描快照中: {}", path.display()))
+            );
+            return EXIT_BACKUP;
+        };
+        to_delete.push(entry.clone());
+    }
+
     let mut total_per_group: BTreeMap<String, usize> = BTreeMap::new();
     let mut deleting_per_group: BTreeMap<String, usize> = BTreeMap::new();
     for entry in entries {
@@ -585,29 +624,30 @@ pub fn backup_rm(
     }
 
     println!("将删除 {} 份备份:", resolved.len());
-    for path in &resolved {
-        let entry = entries
-            .iter()
-            .find(|e| backup_catalog::canonical_entry_path(&e.path) == *path);
+    for (path, entry) in resolved.iter().zip(&to_delete) {
         let name = path
             .file_name()
             .and_then(|n| n.to_str())
             .unwrap_or("<无效文件名>");
-        match entry {
-            Some(e) if onlyid.is_some() => {
+        match onlyid {
+            Some(_) => {
                 let idx = numbered_index.get(path).copied().unwrap_or(0);
-                let time = diskio::backup_display_time(&e.path, e.mtime);
+                let time = diskio::backup_display_time(&entry.path, entry.mtime);
                 println!(
                     "  [{}] {}   {}   {}",
                     idx,
                     time,
-                    backup_kind(e),
-                    backup_health(e)
+                    backup_kind(entry),
+                    backup_health(entry)
                 );
                 println!("      └─ {}", crate::ui::dim(name));
             }
-            Some(e) => println!("  {}   {}   {}", name, backup_kind(e), backup_health(e)),
-            None => println!("  {}   {}", name, crate::ui::yellow("未识别")),
+            None => println!(
+                "  {}   {}   {}",
+                name,
+                backup_kind(entry),
+                backup_health(entry)
+            ),
         }
     }
     if let Some(total) = selected_group_len {
@@ -622,8 +662,8 @@ pub fn backup_rm(
     }
 
     let mut failed = 0usize;
-    for path in &resolved {
-        if let Err(msg) = delete_backup_pair(path) {
+    for entry in &to_delete {
+        if let Err(msg) = delete_backup_pair(entry) {
             failed += 1;
             eprintln!("{}", crate::ui::red(&format!("错误: {}", msg)));
         }
