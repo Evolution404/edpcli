@@ -39,7 +39,10 @@ impl CmdRunner for SysRunner {
             .stderr(Stdio::null())
             .spawn()
             .map_err(|e| io::Error::new(e.kind(), format!("无法启动 {}: {}", cmd[0], e)))?;
-        let mut stdout = child.stdout.take().unwrap();
+        let mut stdout = child
+            .stdout
+            .take()
+            .ok_or_else(|| io::Error::other(format!("{} 未提供 stdout 管道", cmd[0])))?;
         let (tx, rx) = mpsc::channel();
         thread::spawn(move || {
             use std::io::Read;

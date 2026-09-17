@@ -101,6 +101,21 @@ fn scan_and_print_all_row_kinds() {
     let rows2 = scan_disks(&runner, &bak.0, &read_denied);
     let out2 = print_disk_table(&rows2);
     assert!(out2.contains("sudo 可识别"), "{}", out2);
+
+    // 抽象读层若意外返回短扇区，list 也必须降级为不可读，不能切片 panic。
+    let read_short = |_disk: u32, lba: u32| -> std::io::Result<Vec<u8>> {
+        if lba == 4 {
+            Ok(vec![0u8; 8])
+        } else {
+            Ok(netac[lba as usize * SECTOR..(lba as usize + 1) * SECTOR].to_vec())
+        }
+    };
+    let rows3 = scan_disks(&runner, &bak.0, &read_short);
+    let row6c = rows3.iter().find(|r| r.disk == 6).unwrap();
+    assert!(!row6c.denied, "短读不是权限错误，不应误导用户去 sudo");
+    assert!(row6c.probe_error.as_deref().unwrap_or("").contains("预期 512B"));
+    let out3 = print_disk_table(&rows3);
+    assert!(out3.contains("读取异常"), "{}", out3);
 }
 
 #[test]

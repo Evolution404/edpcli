@@ -683,6 +683,7 @@ pub struct Row {
     pub onlyid: Option<String>,
     pub n_baks: usize,
     pub denied: bool,
+    pub probe_error: Option<String>,
     pub is_nopwd: bool,
     pub partitions: Option<Vec<EdpfPartition>>,
 }
@@ -706,27 +707,46 @@ pub fn scan_disks(
             onlyid: None,
             n_baks: 0,
             denied: false,
+            probe_error: None,
             is_nopwd: false,
             partitions: None,
         };
         if d.proto == "USB" {
             let probe = (|| -> io::Result<()> {
-                let lba7 = read_disk(d.n, 7)?;
+                let read_exact = |lba: u32| -> io::Result<Vec<u8>> {
+                    let data = read_disk(d.n, lba)?;
+                    if data.len() != SECTOR {
+                        return Err(io::Error::new(
+                            io::ErrorKind::UnexpectedEof,
+                            format!(
+                                "disk{} LBA{} 读取 {}B，预期 {}B",
+                                d.n,
+                                lba,
+                                data.len(),
+                                SECTOR
+                            ),
+                        ));
+                    }
+                    Ok(data)
+                };
+                let lba7 = read_exact(7)?;
                 let id = identify(runner, d.n, &lba7);
                 row.device_id = id.device_id.clone();
-                let lba4 = read_disk(d.n, 4)?;
-                row.onlyid = diskio::lba4_label_id_from(&lba4[..32]);
+                let lba4 = read_exact(4)?;
+                row.onlyid = diskio::lba4_label_id_from(&lba4);
                 if let Some(did) = &id.device_id {
                     // 三信号免密检测 + LBA12 EDPF 分区表
                     let read = |lba: u32| {
-                        read_disk(d.n, lba)
+                        read_exact(lba)
                             .map_err(|e| NopwdError::new(EXIT_IO, format!("错误: {}", e)))
                     };
                     row.is_nopwd = looks_nopwd(&read, did)
                         .map_err(|e| io::Error::other(e.msg))?;
-                    let lba12 = read_disk(d.n, 12)?;
+                    let lba12 = read_exact(12)?;
                     row.partitions = parse_lba12(&lba12, did);
-                    let tag: [u8; 16] = lba4[..16].try_into().unwrap();
+                    let tag = diskio::lba4_tag16_from(&lba4).ok_or_else(|| {
+                        io::Error::new(io::ErrorKind::UnexpectedEof, "LBA4 缺少 16B 身份标签")
+                    })?;
                     let facts = DiskFacts {
                         disk: d.n,
                         total_sectors: sysinfo::disk_total_sectors(runner, d.n),
@@ -738,8 +758,12 @@ pub fn scan_disks(
                 }
                 Ok(())
             })();
-            if probe.is_err() {
-                row.denied = true;
+            if let Err(e) = probe {
+                if e.kind() == io::ErrorKind::PermissionDenied {
+                    row.denied = true;
+                } else {
+                    row.probe_error = Some(e.to_string());
+                }
             }
         }
         rows.push(row);
@@ -770,6 +794,12 @@ pub fn print_disk_table(rows: &[Row]) -> String {
             out.push_str(&format!("{}  {}\n", head, dim("(非USB, 本工具不支持)")));
         } else if r.denied {
             out.push_str(&format!("{}  {}\n", head, dim("(加 sudo 可识别 cems 盘/备份)")));
+        } else if let Some(error) = &r.probe_error {
+            out.push_str(&format!(
+                "{}  {}\n",
+                head,
+                crate::ui::yellow(&format!("读取异常: {}", error))
+            ));
         } else if r.device_id.is_none() {
             out.push_str(&format!("{}  {}\n", head, dim("非cems盘")));
         } else {
@@ -844,7 +874,21 @@ pub fn disk_menu_str(disks: &[sysinfo::ExtDisk]) -> String {
 fn read_image(dev: &mut dyn SectorDev) -> NopwdResult<Vec<u8>> {
     let mut img = Vec::with_capacity(14 * SECTOR);
     for lba in 0..14u32 {
-        img.extend_from_slice(&dev.read_sector(lba).map_err(|e| err(EXIT_IO, format!("错误: {}", e)))?);
+        let sector = dev
+            .read_sector(lba)
+            .map_err(|e| err(EXIT_IO, format!("错误: {}", e)))?;
+        if sector.len() != SECTOR {
+            return Err(err(
+                EXIT_IO,
+                format!(
+                    "错误: LBA{} 读取 {}B，预期完整扇区 {}B",
+                    lba,
+                    sector.len(),
+                    SECTOR
+                ),
+            ));
+        }
+        img.extend_from_slice(&sector);
     }
     Ok(img)
 }
@@ -909,9 +953,11 @@ pub fn apply_flow(
             return Err(err(EXIT_TARGET, "错误: 无法识别 device_id(LBA7 两候选均未解出 EDPF); 可插好盘重试"))
         }
     };
-    let label_id = diskio::lba4_label_id_from(&img[4 * SECTOR..4 * SECTOR + 32]);
+    let lba4 = &img[4 * SECTOR..5 * SECTOR];
+    let label_id = diskio::lba4_label_id_from(lba4);
     let facts = DiskFacts { disk, total_sectors: secs, vid, pid, label_id };
-    let tag16: [u8; 16] = img[4 * SECTOR..4 * SECTOR + 16].try_into().unwrap();
+    let tag16 = diskio::lba4_tag16_from(lba4)
+        .ok_or_else(|| err(EXIT_IO, "错误: LBA4 缺少 16B 身份标签"))?;
 
     let read = |lba: u32| -> NopwdResult<Vec<u8>> {
         Ok(img[lba as usize * SECTOR..(lba as usize + 1) * SECTOR].to_vec())
@@ -1001,8 +1047,10 @@ pub fn restore_flow(
     let img = read_image(dev)?;
     let id = identify(runner, disk, &img[7 * SECTOR..8 * SECTOR]);
     let did = id.device_id;
-    let label_id = diskio::lba4_label_id_from(&img[4 * SECTOR..4 * SECTOR + 32]);
-    let tag16: [u8; 16] = img[4 * SECTOR..4 * SECTOR + 16].try_into().unwrap();
+    let lba4 = &img[4 * SECTOR..5 * SECTOR];
+    let label_id = diskio::lba4_label_id_from(lba4);
+    let tag16 = diskio::lba4_tag16_from(lba4)
+        .ok_or_else(|| err(EXIT_IO, "错误: LBA4 缺少 16B 身份标签"))?;
 
     let path: PathBuf = match bin {
         Some(p) => PathBuf::from(p),
@@ -1343,8 +1391,10 @@ pub fn backup_list(backup_dir: &Path, onlyid: Option<&str>) -> i32 {
     });
 
     for mut group in grouped {
-        group.sort_by(|a, b| b.mtime.cmp(&a.mtime).then_with(|| a.path.cmp(&b.path)));
-        let meta = group[0].meta.as_ref().expect("已按 meta 分组");
+        backup_catalog::sort_newest_first(&mut group);
+        let Some(meta) = group.first().and_then(|entry| entry.meta.as_ref()) else {
+            continue;
+        };
         let identity = match &meta.onlyid {
             Some(id) => format!("onlyid={}", id),
             None => crate::ui::yellow("未知盘"),
@@ -2235,6 +2285,25 @@ fn finish(r: NopwdResult<i32>) -> i32 {
 mod tests {
     use super::*;
 
+    struct ShortSectorDev;
+
+    impl SectorDev for ShortSectorDev {
+        fn read_sector(&mut self, _lba: u32) -> io::Result<Vec<u8>> {
+            Ok(vec![0u8; SECTOR - 1])
+        }
+
+        fn write_sector(&mut self, _lba: u32, _data: &[u8]) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn read_image_rejects_short_sector_without_panicking() {
+        let err = read_image(&mut ShortSectorDev).unwrap_err();
+        assert_eq!(err.code, EXIT_IO);
+        assert!(err.msg.contains("512B"), "{}", err.msg);
+    }
+
     #[test]
     fn parse_bare_and_subcommands() {
         // 裸 nopwd = 打印用法, 不进入任何需要提权的流程
@@ -2500,17 +2569,20 @@ mod tests {
             Row {
                 disk: 4, size: 64_000_000_000, vid: "0951".into(), pid: "1666".into(),
                 proto: "USB".into(), device_id: None, onlyid: None, n_baks: 0, denied: false,
+                probe_error: None,
                 is_nopwd: false, partitions: None,
             },
             Row {
                 disk: 6, size: 62_914_560_000, vid: "0dd8".into(), pid: "2005".into(),
                 proto: "USB".into(), device_id: Some("disk&ven_netac&prod_onlydisk".into()),
                 onlyid: Some("1402259934".into()), n_baks: 3, denied: false,
+                probe_error: None,
                 is_nopwd: true, partitions: Some(parts),
             },
             Row {
                 disk: 7, size: 500_107_862_016, vid: "xxxx".into(), pid: "xxxx".into(),
                 proto: "Thunderbolt".into(), device_id: None, onlyid: None, n_baks: 0, denied: false,
+                probe_error: None,
                 is_nopwd: false, partitions: None,
             },
         ];

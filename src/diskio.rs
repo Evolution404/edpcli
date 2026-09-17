@@ -447,6 +447,11 @@ pub fn lba4_label_id_from(head: &[u8]) -> Option<String> {
     Some(String::from_utf8_lossy(&head[dstart..i]).into_owned())
 }
 
+/// LBA4 前 16B 身份标签。短扇区安全返回 None，调用方不得假设读取层一定给满 512B。
+pub fn lba4_tag16_from(raw: &[u8]) -> Option<[u8; 16]> {
+    raw.get(..16)?.try_into().ok()
+}
+
 fn read_bytes_at(path: &Path, offset: u64, n: usize) -> io::Result<Vec<u8>> {
     let mut f = File::open(path)?;
     f.seek(SeekFrom::Start(offset))?;
