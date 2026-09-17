@@ -230,6 +230,10 @@ Rust 时即以此验证**字节级零漂移**（差分对齐：双实现离线�
 （成功 / 中途失败自动回滚 / 读回不符回滚）、备份命名迁移、同型号他盘剔除
 （LBA4 终验）、CLI 端到端。真实备份缺位时相关用例自动跳过。
 
+CI 在 macOS 上固定执行 `cargo test --all-targets`、`cargo clippy --all-targets -- -D warnings`
+和 release 构建；另用 Rust 1.75.0 执行 `cargo check --all-targets`，确保 `rust-version = "1.75"`
+的最低版本承诺持续成立。
+
 device_id 自动识别（SCSI INQUIRY + 传输模式 → Windows InstanceId 中间段，
 两个候选用 LBA7 解出 EDPF magic 判真），无需手工输入。
 
