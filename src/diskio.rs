@@ -624,7 +624,10 @@ pub fn parse_backup_name(name: &str) -> Option<BackupMeta> {
     }
     let (device_id, onlyid) = match strip_numeric_suffix(tail, "_onlyid") {
         Some((did, id)) => (did, Some(id)),
-        None => (tail, None),
+        None => match strip_numeric_suffix(tail, "_lid") {
+            Some((did, id)) => (did, Some(id)),
+            None => (tail, None),
+        },
     };
     if !device_id.starts_with("disk&ven_") {
         return None;
@@ -659,13 +662,14 @@ fn md5_status(path: &Path, data: &[u8]) -> Md5Status {
     }
 }
 
-/// 扫描备份目录并给出跨盘管理所需的完整元数据。扫描前沿用 restore 的历史
-/// 命名迁移，保证旧 `_lid` / 无 onlyid 命名先尽力归一；未识别 `.bin` 仍保留在结果中。
+/// 扫描备份目录并给出跨盘管理所需的完整元数据。
+///
+/// 扫描必须是只读操作：旧 `_lid` 直接解析；完全没有 onlyid 的历史文件从其自身
+/// LBA4 在内存中补齐 onlyid，不改名、不移动 `.bin/.md5`。未识别 `.bin` 仍保留。
 pub fn scan_backup_dir(dir: &Path) -> Vec<BackupEntry> {
     if !dir.is_dir() {
         return Vec::new();
     }
-    let _ = migrate_backup_names(dir);
     let Ok(read_dir) = fs::read_dir(dir) else {
         return Vec::new();
     };
@@ -676,7 +680,12 @@ pub fn scan_backup_dir(dir: &Path) -> Vec<BackupEntry> {
             continue;
         }
         let name = path.file_name().and_then(|n| n.to_str()).unwrap_or_default();
-        let meta = parse_backup_name(name);
+        let mut meta = parse_backup_name(name);
+        if let Some(m) = meta.as_mut() {
+            if m.onlyid.is_none() {
+                m.onlyid = backup_label_id(&path);
+            }
+        }
         let data = fs::read(&path).ok();
         let size_ok = data.as_ref().map(|d| d.len() == 14 * SECTOR).unwrap_or(false);
         let md5_ok = data
@@ -821,7 +830,6 @@ pub fn backup_disk(
     clock: &dyn Clock,
 ) -> NopwdResult<(PathBuf, bool)> {
     fs::create_dir_all(bak_dir).map_err(io_err)?;
-    migrate_backup_names(bak_dir);
     let ts = clock.fmt_ts(clock.now_epoch());
     let secs = facts.total_sectors.map(|s| s.to_string()).unwrap_or_else(|| "unknown".into());
     let onlyid_part = facts
@@ -911,7 +919,6 @@ pub fn find_backups(
     if !bak_dir.is_dir() {
         return vec![];
     }
-    let _ = migrate_backup_names(bak_dir);
     let secs = facts.total_sectors.map(|s| s.to_string()).unwrap_or_else(|| "unknown".into());
     let mut tiers: Vec<Vec<String>> = Vec::new();
     if let Some(did) = device_id {

@@ -157,6 +157,35 @@ fn backup_written_with_md5_and_onlyid() {
 }
 
 #[test]
+fn creating_new_backup_does_not_rename_existing_history() {
+    let Some(data) = load_disk_image("netac") else {
+        eprintln!("跳过: 真实备份不可用");
+        return;
+    };
+    let tmp = TmpDir::new("backup_no_implicit_migrate");
+    let legacy = write_backup(
+        &tmp.0,
+        "disk6_122880000_vid0dd8_pid2005_disk&ven_netac&prod_onlydisk_20250101_010101.bin",
+        &data,
+    );
+    let legacy_md5 = std::path::PathBuf::from(format!("{}.md5", legacy.display()));
+
+    let (new_path, _) = backup_disk(
+        &netac_facts(),
+        &data,
+        "disk&ven_netac&prod_onlydisk",
+        &tmp.0,
+        &FixedClock,
+    )
+    .unwrap();
+
+    assert!(legacy.exists(), "创建新备份不应重命名历史 .bin");
+    assert!(legacy_md5.exists(), "创建新备份不应重命名历史 .md5");
+    assert!(new_path.exists());
+    assert_ne!(new_path, legacy);
+}
+
+#[test]
 fn backup_tagging_by_content() {
     let Some((conv, did)) = converted_image("netac") else {
         eprintln!("跳过: 真实备份不可用");
@@ -205,13 +234,20 @@ fn parse_backup_name_modern_nopwd_legacy_and_invalid() {
     assert_eq!(nopwd.onlyid.as_deref(), Some("-1402259934"));
     assert!(nopwd.tagged_nopwd);
 
-    // 无 onlyid 的历史命名仍可解析；scan 时 migrate 会尽力从 LBA4 补齐。
+    // 无 onlyid 的历史命名仍可解析；scan 只在内存中从 LBA4 补齐。
     let legacy = parse_backup_name(
         "disk4_61440000_vid3535_pid6300_disk&ven_aigo&prod_u320_20260827_172228.bin",
     )
     .unwrap();
     assert_eq!(legacy.onlyid, None);
     assert_eq!(legacy.device_id, "disk&ven_aigo&prod_u320");
+
+    let lid = parse_backup_name(
+        "disk6_122880000_vid0dd8_pid2005_disk&ven_netac&prod_onlydisk_lid1402259934_20250101_000000.bin",
+    )
+    .unwrap();
+    assert_eq!(lid.onlyid.as_deref(), Some("1402259934"));
+    assert_eq!(lid.device_id, "disk&ven_netac&prod_onlydisk");
 
     for bad in [
         "other.bin",
@@ -282,6 +318,38 @@ fn scan_backup_dir_reports_ok_mismatch_missing_and_unrecognized() {
     assert!(odd_e.meta.is_none());
     assert!(!odd_e.is_nopwd);
     assert_eq!(odd_e.md5_ok, Md5Status::Ok);
+}
+
+#[test]
+fn scan_is_read_only_and_infers_missing_onlyid_in_memory() {
+    let Some(original) = load_disk_image("netac") else {
+        eprintln!("跳过: 真实备份不可用");
+        return;
+    };
+    let tmp = TmpDir::new("scan_read_only");
+    let legacy = write_backup(
+        &tmp.0,
+        "disk6_122880000_vid0dd8_pid2005_disk&ven_netac&prod_onlydisk_20250101_010101.bin",
+        &original,
+    );
+    let legacy_md5 = std::path::PathBuf::from(format!("{}.md5", legacy.display()));
+
+    let entries = scan_backup_dir(&tmp.0);
+    assert_eq!(entries.len(), 1);
+    assert!(legacy.exists(), "扫描不应重命名 .bin");
+    assert!(legacy_md5.exists(), "扫描不应重命名 .md5");
+    assert_eq!(entries[0].path, legacy);
+    assert_eq!(
+        entries[0].meta.as_ref().and_then(|m| m.onlyid.as_deref()),
+        Some("1402259934")
+    );
+    assert!(
+        fs::read_dir(&tmp.0)
+            .unwrap()
+            .flatten()
+            .all(|e| !e.file_name().to_string_lossy().contains("_onlyid1402259934_")),
+        "只读扫描不能产生迁移后的新文件名"
+    );
 }
 
 fn fake_entry(name: &str, onlyid: &str, mtime: i64, is_nopwd: bool) -> BackupEntry {
