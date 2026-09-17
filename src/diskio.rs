@@ -289,6 +289,17 @@ pub fn atomic_write_sectors(
             ));
         }
     }
+    if patch.is_empty() {
+        return Ok(());
+    }
+    // 在第一笔写入前先验证设备支持持久化屏障。若 raw USB 控制器不支持
+    // DKIOCSYNCHRONIZECACHE，应在 0 写入状态下失败，而不是写完后才发现。
+    dev.sync().map_err(|e| {
+        NopwdError::new(
+            EXIT_IO,
+            format!("错误: 写前介质缓存同步预检失败，拒绝开始写入: {}", e),
+        )
+    })?;
     let mut order: Vec<u32> = patch.keys().copied().filter(|&l| l != 0).collect();
     order.sort_unstable();
     if patch.contains_key(&0) {

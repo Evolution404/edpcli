@@ -69,23 +69,26 @@ struct TamperReadDev {
     tampered: bool,
 }
 
-struct SyncFailOnceDev {
+struct SyncFailDev {
     inner: FileDev,
     sync_calls: u32,
+    fail_on: u32,
+    writes: u32,
 }
 
-impl SectorDev for SyncFailOnceDev {
+impl SectorDev for SyncFailDev {
     fn read_sector(&mut self, lba: u32) -> std::io::Result<Vec<u8>> {
         self.inner.read_sector(lba)
     }
 
     fn write_sector(&mut self, lba: u32, data: &[u8]) -> std::io::Result<()> {
+        self.writes += 1;
         self.inner.write_sector(lba, data)
     }
 
     fn sync(&mut self) -> std::io::Result<()> {
         self.sync_calls += 1;
-        if self.sync_calls == 1 {
+        if self.sync_calls == self.fail_on {
             return Err(std::io::Error::other("注入的持久化失败"));
         }
         self.inner.sync()
@@ -181,13 +184,38 @@ fn sync_failure_enters_rollback_before_reporting_success() {
         std::time::Duration::from_secs(1),
     )
     .unwrap();
-    let mut dev = SyncFailOnceDev {
+    let mut dev = SyncFailDev {
         inner,
         sync_calls: 0,
+        fail_on: 2, // 第 1 次为写前能力预检，第 2 次是正写后的持久化
+        writes: 0,
     };
     let e = atomic_write_sectors(&mut dev, &im.patch).unwrap_err();
     assert_eq!(e.code, EXIT_ROLLED_BACK, "{}", e.msg);
-    assert!(dev.sync_calls >= 2, "正写 sync 失败后回滚也必须再次 sync");
+    assert!(dev.sync_calls >= 3, "正写 sync 失败后回滚也必须再次 sync");
+    assert_eq!(img_bytes(&im.path), im.base);
+}
+
+#[test]
+fn unsupported_sync_is_rejected_before_any_write() {
+    let Some(im) = setup() else {
+        eprintln!("跳过: 真实备份不可用");
+        return;
+    };
+    let inner = FileDev::open_rdwr(
+        im.path.to_str().unwrap(),
+        std::time::Duration::from_secs(1),
+    )
+    .unwrap();
+    let mut dev = SyncFailDev {
+        inner,
+        sync_calls: 0,
+        fail_on: 1,
+        writes: 0,
+    };
+    let e = atomic_write_sectors(&mut dev, &im.patch).unwrap_err();
+    assert_eq!(e.code, nopwd::common::EXIT_IO, "{}", e.msg);
+    assert_eq!(dev.writes, 0, "sync 能力预检失败时不得开始写入");
     assert_eq!(img_bytes(&im.path), im.base);
 }
 
