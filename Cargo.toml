@@ -1,0 +1,19 @@
+[package]
+name = "nopwd"
+version = "3.0.0"
+edition = "2021"
+rust-version = "1.75"
+description = "cems 加密 U 盘 → 无密码盘(纯 Rust 标准库, 零依赖)"
+license = "MIT"
+publish = false
+
+[lib]
+name = "nopwd"
+path = "src/lib.rs"
+
+[[bin]]
+name = "nopwd"
+path = "src/main.rs"
+
+[profile.release]
+strip = true
