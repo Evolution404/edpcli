@@ -17,6 +17,7 @@ use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 
 use crate::common::*;
+use crate::completion::{self, Shell};
 use crate::diskio::{self, backup_disk, backup_is_nopwd, find_backups, raw_path, DiskFacts,
                     BackupEntry, BackupMeta, Md5Status, FileDev, SectorDev, Clock, SystemClock};
 use crate::elevate::{self, ELEVATED_FLAG};
@@ -114,13 +115,19 @@ pub enum Parsed {
     Apply { opts: DiskOpts, force: bool, yes: bool },
     Restore { bin: Option<String>, disk: Option<u32>, yes: bool, backup_dir: Option<String> },
     Convert { dir: Option<String>, id: Option<String>, size: Option<f64>, out: Option<String> },
+    Completion { shell: Shell },
+    InternalComplete {
+        kind: String,
+        onlyid: Option<String>,
+        backup_dir: Option<String>,
+    },
     Version,
-    Help,
+    Help { topic: Option<String> },
 }
 
 pub enum BackupAction {
     List,
-    Verify { target: Option<String> },
+    Verify { target: Option<String>, index: Option<usize> },
     Prune,
     Rm { targets: Vec<String> },
 }
@@ -148,6 +155,7 @@ pub fn print_usage() {
         ("backup", "跨盘备份管理(list / verify / prune / rm，全程不提权)"),
         ("inspect", "只读查看物理 U 盘或备份文件的扇区结构/解密字段/高亮 hex"),
         ("convert", "离线转换(不碰真盘): --dir <快照> --id <device_id>"),
+        ("completion", "生成 zsh / bash / fish Tab 补全脚本"),
         ("version", "显示版本"),
         ("help", "显示本帮助"),
     ] {
@@ -157,7 +165,8 @@ pub fn print_usage() {
     println!("{}", bold("扇区检查:"));
     for (n, d) in [
         ("inspect [LBA...] [--disk N]", "查看物理盘；未给 --disk 时自动选择 USB 盘"),
-        ("inspect [LBA...] --backup <文件>", "查看备份/镜像；裸文件名按备份目录解析"),
+        ("inspect [LBA...] [备份.bin]", "查看备份/镜像；也可显式使用 --backup <文件>"),
+        ("inspect --onlyid ID", "先列出该盘可选备份；再用 --index N 选择"),
         ("inspect [LBA...] --onlyid ID --index N", "按 backup list 的盘内编号查看某份备份"),
         ("inspect ... --hex", "在结构化字段后显示解密后的 512B 字段高亮 hex"),
         ("inspect ... --raw", "显示原始扇区 hex，不套用解密字段颜色"),
@@ -169,7 +178,7 @@ pub fn print_usage() {
     println!("{}", bold("备份管理:"));
     for (n, d) in [
         ("backup list [--onlyid ID]", "跨盘总览，或只查看指定盘；显示编号 + 真实文件名"),
-        ("backup verify [备份.bin] [--onlyid ID]", "校验全部、指定盘或单份备份(7168 字节 + MD5)"),
+        ("backup verify [备份.bin] [--onlyid ID] [--index N]", "校验全部、指定盘、指定编号或单份备份"),
         ("backup prune [--onlyid ID] [--keep N] [--yes]", "按策略清理全部盘或指定盘的旧免密快照"),
         ("backup rm --onlyid ID [编号|范围]...", "按盘编号删除；无编号时进入交互选择"),
         ("backup rm <路径|文件名>... [--yes]", "按文件精确删除；默认预览并要求输入 YES"),
@@ -183,12 +192,80 @@ pub fn print_usage() {
         ("--size <GB>", "Share 大小(默认占满到 Encrypt 前)"),
         ("--force", "已改造(免密)盘仍强制重写(默认拒绝)"),
         ("--yes", "免交互(自动确认一切 YES 提示)"),
-        ("--onlyid <ID>", "backup 子命令按物理盘 onlyid 筛选"),
-        ("--index <N>", "inspect --onlyid 选择该盘第 N 份备份(与 backup list 编号一致)"),
+        ("--onlyid <ID>", "backup / inspect 按物理盘 onlyid 筛选"),
+        ("--index <N>", "inspect / backup verify 选择该盘第 N 份备份"),
         ("--id <device_id>", "inspect 备份/镜像无法自动识别时手动提供 device_id"),
         ("--backup-dir <目录>", "备份目录(默认 $NOPWD_BACKUP_DIR、~/.nopwd.conf 或 ./backup)"),
     ] {
         println!("{}", flag(n, d));
+    }
+    println!();
+    println!("{}", bold("Tab 补全:"));
+    println!("  zsh   eval \"$(nopwd completion zsh)\"");
+    println!("  bash  eval \"$(nopwd completion bash)\"");
+    println!("  fish  nopwd completion fish | source");
+}
+
+fn print_topic_help(topic: &str) {
+    use crate::ui::{bold, bold_cyan, dim};
+    match topic {
+        "inspect" => {
+            println!("{}", bold("用法: nopwd inspect [LBA...] [来源] [选项]"));
+            println!();
+            println!("{}", bold("来源（选一种；不指定时查看当前物理 USB 盘）:"));
+            println!("  {}", bold_cyan("--disk N                         当前物理盘"));
+            println!("  {}", bold_cyan("<备份.bin> / --backup <文件>     备份文件或镜像"));
+            println!("  {}", bold_cyan("--onlyid ID                      先列出该盘可选备份"));
+            println!("  {}", bold_cyan("--onlyid ID --index N            查看该盘第 N 份备份"));
+            println!();
+            println!("{}", bold("常用:"));
+            println!("  nopwd inspect --onlyid 1987718388");
+            println!("  nopwd inspect --onlyid 1987718388 --index 1");
+            println!("  nopwd inspect 6 7 12 --onlyid 1987718388 --index 1 --hex");
+            println!("  nopwd inspect backup.bin 7 12 --hex");
+            println!("  nopwd inspect 6 7 12 --disk 4 --hex");
+            println!();
+            println!("{}", dim("不指定 LBA 时显示 LBA0-13 概览；--hex 展开解密视图，--raw 查看盘上原始字节。"));
+        }
+        "backup" => {
+            println!("{}", bold("用法: nopwd backup [动作] [选项]"));
+            println!();
+            println!("{}", bold("默认动作: list（因此 nopwd backup 可直接列出全部备份）"));
+            println!("  {}", bold_cyan("backup [list] [--onlyid ID]          查看备份"));
+            println!("  {}", bold_cyan("backup verify [文件] [--onlyid ID] [--index N] 校验备份"));
+            println!("  {}", bold_cyan("backup prune [--onlyid ID]          预览策略清理"));
+            println!("  {}", bold_cyan("backup rm --onlyid ID [编号|范围]   选择并删除备份"));
+            println!();
+            println!("{}", bold("常用:"));
+            println!("  nopwd backup");
+            println!("  nopwd backup --onlyid 1987718388");
+            println!("  nopwd backup rm --onlyid 1987718388");
+        }
+        "completion" => {
+            println!("{}", bold("用法: nopwd completion <zsh|bash|fish>"));
+            println!();
+            println!("动态补全包括: 子命令、旗标、onlyid、备份编号、备份文件名、物理盘号和 LBA0-13。" );
+            println!();
+            println!("zsh : eval \"$(nopwd completion zsh)\"");
+            println!("bash: eval \"$(nopwd completion bash)\"");
+            println!("fish: nopwd completion fish | source");
+        }
+        "restore" => {
+            println!("{}", bold("用法: nopwd restore [备份.bin] [--disk N] [--yes] [--backup-dir D]"));
+            println!("不指定备份文件时，会自动列出当前物理盘匹配的备份并让你选择。" );
+        }
+        "run" => println!("{}", bold("用法: nopwd run [--disk N] [--size GB] [--backup-dir D]")),
+        "apply" => println!("{}", bold("用法: nopwd apply [--disk N] [--size GB] [--force] [--yes] [--backup-dir D]")),
+        "list" => println!("{}", bold("用法: nopwd list [--backup-dir D]")),
+        "convert" => println!("{}", bold("用法: nopwd convert --dir <快照目录> --id <device_id> [--size GB] [--out DIR]")),
+        _ => print_usage(),
+    }
+}
+
+fn print_help(topic: Option<&str>) {
+    match topic {
+        Some(topic) => print_topic_help(topic),
+        None => print_usage(),
     }
 }
 
@@ -246,13 +323,55 @@ fn flag_name(a: &str) -> &str {
 pub fn parse_args(argv: &[String]) -> Result<Parsed, String> {
     let args: Vec<&String> = argv.iter().filter(|a| a.as_str() != ELEVATED_FLAG).collect();
     let Some(first) = args.first() else {
-        return Ok(Parsed::Help); // 裸 nopwd: 打印用法, 不做任何动作
+        return Ok(Parsed::Help { topic: None }); // 裸 nopwd: 打印用法, 不做任何动作
     };
     let rest: Vec<String> = args[1..].iter().map(|s| (*s).clone()).collect();
     match first.as_str() {
-        "-h" | "--help" | "help" => Ok(Parsed::Help),
+        "-h" | "--help" => Ok(Parsed::Help { topic: None }),
+        "help" => {
+            if rest.len() > 1 {
+                return Err("错误: help 最多接受一个子命令名称".into());
+            }
+            Ok(Parsed::Help { topic: rest.first().cloned() })
+        }
         "-V" | "--version" | "version" => Ok(Parsed::Version),
+        "completion" => {
+            if rest.is_empty() || rest.iter().any(|a| a == "-h" || a == "--help") {
+                return Ok(Parsed::Help { topic: Some("completion".into()) });
+            }
+            if rest.len() != 1 {
+                return Err("错误: completion 只接受一个 shell: zsh / bash / fish".into());
+            }
+            let shell = Shell::parse(&rest[0])
+                .ok_or_else(|| format!("错误: 不支持的 shell: {} (可用 zsh / bash / fish)", rest[0]))?;
+            Ok(Parsed::Completion { shell })
+        }
+        "__complete" => {
+            let Some(kind) = rest.first().cloned() else {
+                return Err("错误: __complete 缺少候选类型".into());
+            };
+            let mut onlyid = None;
+            let mut backup_dir = None;
+            let mut i = 1usize;
+            while i < rest.len() {
+                match flag_name(&rest[i]) {
+                    "--onlyid" => {
+                        let v = take_value(&rest, &mut i, "--onlyid")?;
+                        onlyid = Some(parse_onlyid(&v)?);
+                    }
+                    "--backup-dir" => {
+                        backup_dir = Some(take_value(&rest, &mut i, "--backup-dir")?);
+                    }
+                    other => return Err(format!("错误: __complete 不认识选项 {}", other)),
+                }
+                i += 1;
+            }
+            Ok(Parsed::InternalComplete { kind, onlyid, backup_dir })
+        }
         "list" => {
+            if rest.iter().any(|a| a == "-h" || a == "--help") {
+                return Ok(Parsed::Help { topic: Some("list".into()) });
+            }
             let mut backup_dir = None;
             let mut i = 0;
             while i < rest.len() {
@@ -265,6 +384,9 @@ pub fn parse_args(argv: &[String]) -> Result<Parsed, String> {
             Ok(Parsed::List { backup_dir })
         }
         "inspect" => {
+            if rest.iter().any(|a| a == "-h" || a == "--help") {
+                return Ok(Parsed::Help { topic: Some("inspect".into()) });
+            }
             let mut opts = InspectOpts::default();
             let mut i = 0;
             while i < rest.len() {
@@ -300,11 +422,14 @@ pub fn parse_args(argv: &[String]) -> Result<Parsed, String> {
                         }
                         other => return Err(format!("错误: inspect 不认识选项 {}", other)),
                     }
-                } else {
-                    let lba = a
-                        .parse::<u32>()
-                        .map_err(|_| format!("错误: inspect LBA 须为非负整数, 得到 {}", a))?;
+                } else if let Ok(lba) = a.parse::<u32>() {
                     opts.lbas.push(lba);
+                } else if opts.backup.is_none() {
+                    // 最常见的离线查看不应强迫用户记 --backup：
+                    // `nopwd inspect backup.bin 7 12` 与显式 --backup 等价。
+                    opts.backup = Some(a.to_string());
+                } else {
+                    return Err(format!("错误: inspect 多余的位置参数: {}", a));
                 }
                 i += 1;
             }
@@ -314,19 +439,25 @@ pub fn parse_args(argv: &[String]) -> Result<Parsed, String> {
             if source_count > 1 {
                 return Err("错误: inspect 的 --disk / --backup / --onlyid 三种来源只能选一种".into());
             }
+            if opts.raw && opts.hex {
+                return Err("错误: inspect 的 --raw 与 --hex 语义相反，不能同时使用".into());
+            }
             if opts.index.is_some() && opts.onlyid.is_none() {
                 return Err("错误: --index 只能与 inspect --onlyid 一起使用".into());
-            }
-            if opts.onlyid.is_some() && opts.index.is_none() {
-                return Err("错误: inspect --onlyid 需要同时指定 --index N".into());
             }
             Ok(Parsed::Inspect(opts))
         }
         "backup" => {
-            let Some(action_name) = rest.first().map(String::as_str) else {
-                return Err("错误: backup 缺少动作(list / verify / prune / rm)".into());
+            if rest.iter().any(|a| a == "-h" || a == "--help") || rest.first().map(String::as_str) == Some("help") {
+                return Ok(Parsed::Help { topic: Some("backup".into()) });
+            }
+            // 人工使用时 `nopwd backup` 的自然含义就是“看看有哪些备份”。
+            // 若第一个 token 是旗标，也按省略 `list` 处理，例如 `nopwd backup --onlyid ID`。
+            let (action_name, tail): (&str, &[String]) = match rest.first() {
+                None => ("list", &rest[..]),
+                Some(s) if s.starts_with('-') => ("list", &rest[..]),
+                Some(s) => (s.as_str(), &rest[1..]),
             };
-            let tail = &rest[1..];
             let mut backup_dir = None;
             let mut onlyid = None;
             let mut keep = 2usize;
@@ -349,6 +480,7 @@ pub fn parse_args(argv: &[String]) -> Result<Parsed, String> {
                 }
                 "verify" => {
                     let mut target = None;
+                    let mut index = None;
                     let mut i = 0;
                     while i < tail.len() {
                         let a = tail[i].as_str();
@@ -358,6 +490,16 @@ pub fn parse_args(argv: &[String]) -> Result<Parsed, String> {
                                 "--onlyid" => {
                                     let v = take_value(tail, &mut i, "--onlyid")?;
                                     onlyid = Some(parse_onlyid(&v)?);
+                                }
+                                "--index" => {
+                                    let v = take_value(tail, &mut i, "--index")?;
+                                    let n = v
+                                        .parse::<usize>()
+                                        .map_err(|_| format!("错误: --index 须为正整数, 得到 {}", v))?;
+                                    if n == 0 {
+                                        return Err("错误: --index 从 1 开始".into());
+                                    }
+                                    index = Some(n);
                                 }
                                 other => return Err(format!("错误: backup verify 不认识选项 {}", other)),
                             }
@@ -371,7 +513,13 @@ pub fn parse_args(argv: &[String]) -> Result<Parsed, String> {
                     if target.is_some() && onlyid.is_some() {
                         return Err("错误: backup verify 的单文件参数与 --onlyid 不能同时使用".into());
                     }
-                    BackupAction::Verify { target }
+                    if index.is_some() && onlyid.is_none() {
+                        return Err("错误: backup verify --index 只能与 --onlyid 一起使用".into());
+                    }
+                    if target.is_some() && index.is_some() {
+                        return Err("错误: backup verify 的单文件参数与 --index 不能同时使用".into());
+                    }
+                    BackupAction::Verify { target, index }
                 }
                 "prune" => {
                     let mut i = 0;
@@ -427,6 +575,9 @@ pub fn parse_args(argv: &[String]) -> Result<Parsed, String> {
         }
         "run" | "apply" => {
             let is_apply = first.as_str() == "apply";
+            if rest.iter().any(|a| a == "-h" || a == "--help") {
+                return Ok(Parsed::Help { topic: Some(first.to_string()) });
+            }
             let mut opts = DiskOpts::default();
             let mut force = false;
             let mut yes = false;
@@ -460,6 +611,9 @@ pub fn parse_args(argv: &[String]) -> Result<Parsed, String> {
             }
         }
         "restore" => {
+            if rest.iter().any(|a| a == "-h" || a == "--help") {
+                return Ok(Parsed::Help { topic: Some("restore".into()) });
+            }
             let mut bin: Option<String> = None;
             let mut disk = None;
             let mut yes = false;
@@ -487,6 +641,9 @@ pub fn parse_args(argv: &[String]) -> Result<Parsed, String> {
             Ok(Parsed::Restore { bin, disk, yes, backup_dir })
         }
         "convert" => {
+            if rest.iter().any(|a| a == "-h" || a == "--help") {
+                return Ok(Parsed::Help { topic: Some("convert".into()) });
+            }
             let mut dir = None;
             let mut id = None;
             let mut size = None;
@@ -1123,6 +1280,60 @@ fn print_numbered_backup_entries(entries: &[&BackupEntry]) {
     }
 }
 
+fn print_onlyid_backup_choices(id: &str, group: &[&BackupEntry]) {
+    if let Some(meta) = group.first().and_then(|e| e.meta.as_ref()) {
+        println!(
+            "{} · {} · onlyid={} · {} 份",
+            backup_model_name(meta),
+            backup_capacity(meta),
+            id,
+            group.len()
+        );
+    } else {
+        println!("onlyid={} · {} 份", id, group.len());
+    }
+    print_numbered_backup_entries(group);
+}
+
+fn print_inspect_backup_sources(entries: &[BackupEntry]) -> bool {
+    let mut groups: BTreeMap<String, Vec<&BackupEntry>> = BTreeMap::new();
+    for entry in entries {
+        let Some(id) = entry.meta.as_ref().and_then(|m| m.onlyid.as_ref()) else {
+            continue;
+        };
+        groups.entry(id.clone()).or_default().push(entry);
+    }
+    if groups.is_empty() {
+        return false;
+    }
+    let mut groups: Vec<(String, Vec<&BackupEntry>)> = groups.into_iter().collect();
+    groups.sort_by(|a, b| {
+        let am = a.1.iter().map(|e| e.mtime).max().unwrap_or(0);
+        let bm = b.1.iter().map(|e| e.mtime).max().unwrap_or(0);
+        bm.cmp(&am).then_with(|| a.0.cmp(&b.0))
+    });
+    println!("{}", crate::ui::bold("可查看的备份盘:"));
+    for (id, mut group) in groups {
+        group.sort_by(|a, b| b.mtime.cmp(&a.mtime).then_with(|| a.path.cmp(&b.path)));
+        let latest = group.first().map(|e| SystemClock.fmt_human(e.mtime)).unwrap_or_default();
+        let model = group
+            .first()
+            .and_then(|e| e.meta.as_ref())
+            .map(backup_model_name)
+            .unwrap_or_else(|| "未知型号".into());
+        println!(
+            "  {}  {} · {} 份 · 最新 {}",
+            crate::ui::bold_cyan(&format!("onlyid={}", id)),
+            model,
+            group.len(),
+            latest
+        );
+    }
+    println!();
+    println!("{}", crate::ui::dim("查看某盘: nopwd inspect --onlyid <ID>"));
+    true
+}
+
 fn parse_backup_selection_tokens(tokens: &[String], max: usize) -> Result<Vec<usize>, String> {
     let mut selected = std::collections::BTreeSet::new();
     for token in tokens {
@@ -1220,6 +1431,15 @@ pub fn backup_list(backup_dir: &Path, onlyid: Option<&str>) -> i32 {
 }
 
 pub fn backup_verify(backup_dir: &Path, onlyid: Option<&str>, target: Option<&str>) -> i32 {
+    backup_verify_select(backup_dir, onlyid, target, None)
+}
+
+fn backup_verify_select(
+    backup_dir: &Path,
+    onlyid: Option<&str>,
+    target: Option<&str>,
+    index: Option<usize>,
+) -> i32 {
     let entries = diskio::scan_backup_dir(backup_dir);
     let selected: Vec<&BackupEntry> = if let Some(target) = target {
         let path = match canonical_backup_target(backup_dir, target) {
@@ -1236,6 +1456,25 @@ pub fn backup_verify(backup_dir: &Path, onlyid: Option<&str>, target: Option<&st
         vec![entry]
     } else if let Some(id) = onlyid {
         match entries_for_onlyid(&entries, Some(id)) {
+            Ok(v) if index.is_some() => {
+                let group = sorted_backup_refs(v);
+                let idx = index.unwrap();
+                let Some(entry) = group.get(idx - 1) else {
+                    eprintln!(
+                        "{}",
+                        crate::ui::red(&format!(
+                            "错误: onlyid={} 只有 {} 份备份，没有编号 [{}]",
+                            id,
+                            group.len(),
+                            idx
+                        ))
+                    );
+                    println!();
+                    print_onlyid_backup_choices(id, &group);
+                    return EXIT_BACKUP;
+                };
+                vec![*entry]
+            }
             Ok(v) => v,
             Err(msg) => {
                 eprintln!("{}", crate::ui::red(&format!("错误: {}", msg)));
@@ -1392,15 +1631,7 @@ pub fn backup_rm(
         }
 
         let indices = if targets.is_empty() {
-            let meta = group[0].meta.as_ref().expect("onlyid 分组必须有元数据");
-            println!(
-                "{} · {} · onlyid={} · {} 份",
-                backup_model_name(meta),
-                backup_capacity(meta),
-                id,
-                group.len()
-            );
-            print_numbered_backup_entries(&group);
+            print_onlyid_backup_choices(id, &group);
             loop {
                 let input = prompt.prompt_line("选择要删除的备份 [如 2 / 1,3 / 2-3，回车取消]: ");
                 let input = input.trim();
@@ -1607,7 +1838,7 @@ where
     print_inspect_meta(meta);
 
     let export_dir = opts.export.as_deref().map(PathBuf::from);
-    if opts.lbas.is_empty() {
+    if opts.lbas.is_empty() && !opts.raw && !opts.hex {
         println!();
         println!("{}", crate::ui::bold("LBA 0-13 概览:"));
         for lba in 0..14u32 {
@@ -1639,7 +1870,13 @@ where
         return EXIT_OK;
     }
 
-    for &lba in &opts.lbas {
+    // 用户显式要求 --hex / --raw 时不能悄悄忽略旗标：未给 LBA 就展开全部 0-13。
+    let detailed_lbas: Vec<u32> = if opts.lbas.is_empty() {
+        (0..14u32).collect()
+    } else {
+        opts.lbas.clone()
+    };
+    for &lba in &detailed_lbas {
         let raw = match read(lba) {
             Ok(raw) => raw,
             Err(e) => {
@@ -1684,15 +1921,38 @@ fn inspect_backup_flow(opts: InspectOpts) -> i32 {
             Ok(v) => sorted_backup_refs(v),
             Err(msg) => {
                 eprintln!("{}", crate::ui::red(&format!("错误: {msg}")));
+                if print_inspect_backup_sources(&entries) {
+                    println!();
+                }
                 return EXIT_BACKUP;
             }
         };
-        let idx = opts.index.expect("parse_args 已保证 --onlyid 有 --index");
+        let Some(idx) = opts.index else {
+            print_onlyid_backup_choices(id, &group);
+            println!();
+            println!(
+                "{}",
+                crate::ui::bold(&format!(
+                    "继续查看: nopwd inspect --onlyid {} --index N [LBA...] [--hex]",
+                    id
+                ))
+            );
+            println!(
+                "{}",
+                crate::ui::dim(&format!(
+                    "例如最新一份: nopwd inspect --onlyid {} --index 1",
+                    id
+                ))
+            );
+            return EXIT_OK;
+        };
         let Some(entry) = group.get(idx - 1) else {
             eprintln!(
                 "{}",
                 crate::ui::red(&format!("错误: onlyid={id} 只有 {} 份备份，没有编号 [{idx}]", group.len()))
             );
+            println!();
+            print_onlyid_backup_choices(id, &group);
             return EXIT_BACKUP;
         };
         (
@@ -1795,6 +2055,19 @@ fn inspect_flow(runner: &SysRunner, opts: InspectOpts) -> i32 {
     if opts.backup.is_some() || opts.onlyid.is_some() {
         inspect_backup_flow(opts)
     } else {
+        if opts.disk.is_none() && sysinfo::list_usb_disks(runner).is_empty() {
+            let bak = diskio::resolve_backup_dir(opts.backup_dir.as_deref());
+            let entries = diskio::scan_backup_dir(&bak);
+            if print_inspect_backup_sources(&entries) {
+                println!(
+                    "{}",
+                    crate::ui::yellow("未检测到外接 USB 盘；上面是当前可离线查看的备份。")
+                );
+                return EXIT_OK;
+            }
+            eprintln!("{}", crate::ui::red("错误: 未检测到外接 USB 盘，备份目录中也没有可查看的备份。"));
+            return EXIT_TARGET;
+        }
         inspect_disk_flow(runner, opts)
     }
 }
@@ -1808,15 +2081,39 @@ pub fn run() -> i32 {
         Ok(p) => p,
         Err(msg) => {
             eprintln!("{}", crate::ui::red(&msg));
-            eprintln!();
-            print_usage();
+            // 参数写错时只展示当前子命令的短帮助，避免每次都刷整页全局教程。
+            if argv.first().map(String::as_str) != Some("__complete") {
+                eprintln!();
+                let topic = argv.first().map(String::as_str).filter(|cmd| {
+                    matches!(
+                        *cmd,
+                        "list" | "run" | "apply" | "restore" | "backup" | "inspect" | "convert" | "completion"
+                    )
+                });
+                print_help(topic);
+            }
             return EXIT_USAGE;
         }
     };
     let runner = SysRunner;
     match parsed {
-        Parsed::Help => {
-            print_usage();
+        Parsed::Help { topic } => {
+            print_help(topic.as_deref());
+            EXIT_OK
+        }
+        Parsed::Completion { shell } => {
+            print!("{}", completion::script(shell));
+            EXIT_OK
+        }
+        Parsed::InternalComplete { kind, onlyid, backup_dir } => {
+            for value in completion::dynamic_values(
+                &kind,
+                onlyid.as_deref(),
+                backup_dir.as_deref(),
+                &runner,
+            ) {
+                println!("{}", value);
+            }
             EXIT_OK
         }
         Parsed::Version => {
@@ -1833,8 +2130,8 @@ pub fn run() -> i32 {
             let bak = diskio::resolve_backup_dir(backup_dir.as_deref());
             match action {
                 BackupAction::List => backup_list(&bak, onlyid.as_deref()),
-                BackupAction::Verify { target } => {
-                    backup_verify(&bak, onlyid.as_deref(), target.as_deref())
+                BackupAction::Verify { target, index } => {
+                    backup_verify_select(&bak, onlyid.as_deref(), target.as_deref(), index)
                 }
                 BackupAction::Prune => backup_prune(&bak, onlyid.as_deref(), keep, yes),
                 BackupAction::Rm { targets } => {
@@ -1994,8 +2291,8 @@ mod tests {
     #[test]
     fn parse_bare_and_subcommands() {
         // 裸 nopwd = 打印用法, 不进入任何需要提权的流程
-        assert!(matches!(parse_args(&[]).unwrap(), Parsed::Help));
-        assert!(matches!(parse_args(&["help".into()]).unwrap(), Parsed::Help));
+        assert!(matches!(parse_args(&[]).unwrap(), Parsed::Help { topic: None }));
+        assert!(matches!(parse_args(&["help".into()]).unwrap(), Parsed::Help { topic: None }));
         assert!(matches!(parse_args(&["version".into()]).unwrap(), Parsed::Version));
         match parse_args(&["apply".into(), "--disk".into(), "6".into(), "--force".into(), "--yes".into()]).unwrap() {
             Parsed::Apply { opts, force, yes } => {
@@ -2095,11 +2392,14 @@ mod tests {
             "backup".into(),
             "verify".into(),
             "--onlyid=-1833210541".into(),
+            "--index".into(),
+            "2".into(),
         ])
         .unwrap()
         {
-            Parsed::Backup { action: BackupAction::Verify { target }, keep, yes, onlyid, .. } => {
+            Parsed::Backup { action: BackupAction::Verify { target, index }, keep, yes, onlyid, .. } => {
                 assert_eq!(target, None);
+                assert_eq!(index, Some(2));
                 assert_eq!(keep, 2);
                 assert!(!yes);
                 assert_eq!(onlyid.as_deref(), Some("-1833210541"));
@@ -2151,7 +2451,10 @@ mod tests {
         assert!(parse_args(&["run".into(), "--force".into()]).is_err()); // force 仅 apply
         assert!(parse_args(&["apply".into(), "--size".into(), "-3".into()]).is_err()); // 负 size
         assert!(parse_args(&["restore".into(), "a.bin".into(), "b.bin".into()]).is_err()); // 两个位置参数
-        assert!(parse_args(&["backup".into()]).is_err()); // 缺动作
+        assert!(matches!(
+            parse_args(&["backup".into()]).unwrap(),
+            Parsed::Backup { action: BackupAction::List, .. }
+        )); // 裸 backup = list
         assert!(parse_args(&["backup".into(), "rm".into()]).is_err()); // 无 onlyid 时 rm 缺目标
         assert!(parse_args(&[
             "backup".into(),
@@ -2187,16 +2490,29 @@ mod tests {
             "x.bin".into(),
         ])
         .is_err());
-        assert!(parse_args(&[
+        assert!(matches!(parse_args(&[
             "inspect".into(),
             "--onlyid".into(),
             "1402259934".into(),
-        ])
-        .is_err());
+        ]).unwrap(), Parsed::Inspect(_))); // 缺 index 时进入备份选择视图
         assert!(parse_args(&[
             "inspect".into(),
             "--backup".into(),
             "x.bin".into(),
+            "--index".into(),
+            "1".into(),
+        ])
+        .is_err());
+        assert!(parse_args(&[
+            "inspect".into(),
+            "7".into(),
+            "--raw".into(),
+            "--hex".into(),
+        ])
+        .is_err());
+        assert!(parse_args(&[
+            "backup".into(),
+            "verify".into(),
             "--index".into(),
             "1".into(),
         ])
