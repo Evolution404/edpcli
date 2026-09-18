@@ -817,9 +817,27 @@ enum FlowKind {
     Restore { bin: Option<String>, yes: bool },
 }
 
+fn pin_disk_selector_for_elevation(argv: &mut Vec<String>, selector: String) {
+    for i in 0..argv.len() {
+        if argv[i] == "--disk" {
+            if let Some(value) = argv.get_mut(i + 1) {
+                *value = selector;
+                return;
+            }
+            break;
+        }
+        if argv[i].starts_with("--disk=") {
+            argv[i] = format!("--disk={selector}");
+            return;
+        }
+    }
+    argv.push("--disk".into());
+    argv.push(selector);
+}
+
 /// run/apply/restore 的公共外壳:
 ///   1) 显式目标的系统盘拒绝无需管理员权限，提权前先判；
-///   2) 未提权且未给 --disk：先以用户身份选盘，把平台原生目标选择器并入重执行参数；
+///   2) 未提权时把目标统一固定为平台原生选择器；未给 --disk 时先以用户身份选盘；
 ///   3) 提权路径：（必要时交互选盘）→ 打开平台裸盘设备 → 执行流程。
 fn real_flow(
     runner: &SysRunner,
@@ -846,19 +864,23 @@ fn real_flow(
                 std::env::var("EDPCLI_BACKUP_DIR").ok(),
             ));
         }
-        if disk_opt.is_none() {
-            let mut sp = StdPrompter;
-            match auto_pick_disk(runner, &mut sp) {
-                Ok(n) => {
-                    argv.push("--disk".into());
-                    argv.push(crate::platform::disk_selector_value(n));
-                }
-                Err(e) => {
-                    eprintln!("{}", crate::ui::red(&e.msg));
-                    return e.code;
+        let pinned_disk = match disk_opt {
+            Some(n) => n,
+            None => {
+                let mut sp = StdPrompter;
+                match auto_pick_disk(runner, &mut sp) {
+                    Ok(n) => n,
+                    Err(e) => {
+                        eprintln!("{}", crate::ui::red(&e.msg));
+                        return e.code;
+                    }
                 }
             }
-        }
+        };
+        pin_disk_selector_for_elevation(
+            &mut argv,
+            crate::platform::disk_selector_value(pinned_disk),
+        );
         elevate::ensure_elevated(&argv); // 内部以子进程退出码结束, 不返回
         unreachable!();
     }
@@ -1213,6 +1235,32 @@ mod tests {
             }
             _ => panic!("应解析为 meta backup"),
         }
+    }
+
+    #[test]
+    fn elevation_reexec_pins_explicit_disk_to_platform_selector() {
+        let selector = crate::platform::disk_selector_value(6);
+
+        let mut split = vec![
+            "apply".to_string(),
+            "--disk".to_string(),
+            "6".to_string(),
+            "--yes".to_string(),
+        ];
+        pin_disk_selector_for_elevation(&mut split, selector.clone());
+        assert_eq!(split[2], selector);
+        assert_eq!(
+            split.iter().filter(|arg| arg.as_str() == "--disk").count(),
+            1
+        );
+
+        let mut inline = vec!["run".to_string(), "--disk=6".to_string()];
+        pin_disk_selector_for_elevation(&mut inline, selector.clone());
+        assert_eq!(inline[1], format!("--disk={selector}"));
+
+        let mut automatic = vec!["restore".to_string(), "--yes".to_string()];
+        pin_disk_selector_for_elevation(&mut automatic, selector.clone());
+        assert_eq!(automatic, vec!["restore", "--yes", "--disk", &selector]);
     }
 
     #[test]

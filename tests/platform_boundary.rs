@@ -24,9 +24,12 @@ const FORBIDDEN_OS_DETAILS: &[&str] = &[
     "ioreg",
     "sudo",
     "/dev/rdisk",
+    "/dev/disk",
+    "/sys/",
     "physicaldrive",
     "sysfs",
     "powershell",
+    "systemdrive",
 ];
 
 #[test]
