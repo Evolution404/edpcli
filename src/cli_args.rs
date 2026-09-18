@@ -30,6 +30,16 @@ pub struct InspectOpts {
     pub backup_dir: Option<String>,
 }
 
+#[derive(Default)]
+pub struct MetaInfoOpts {
+    pub disk: Option<u32>,
+    pub backup: Option<String>,
+    pub onlyid: Option<String>,
+    pub index: Option<usize>,
+    pub device_id: Option<String>,
+    pub backup_dir: Option<String>,
+}
+
 pub enum Parsed {
     List { backup_dir: Option<String> },
     Backup {
@@ -40,6 +50,7 @@ pub enum Parsed {
         backup_dir: Option<String>,
     },
     Inspect(InspectOpts),
+    MetaInfo(MetaInfoOpts),
     Run(DiskOpts),
     Apply { opts: DiskOpts, force: bool, yes: bool },
     Restore { bin: Option<String>, disk: Option<u32>, yes: bool, backup_dir: Option<String> },
@@ -83,12 +94,23 @@ pub fn print_usage() {
         ("restore", "从备份还原 LBA0-13(缺省交互选择本盘备份)"),
         ("backup", "跨盘备份管理(list / verify / prune / rm，全程不提权)"),
         ("inspect", "只读查看物理 U 盘或备份文件的扇区结构/解密字段/高亮 hex"),
+        ("metainfo", "汇总查看 U 盘/备份的身份、Dept/User、SAFE6 与分区元信息（别名 meta）"),
         ("convert", "离线转换(不碰真盘): --dir <快照> --id <device_id>"),
         ("completion", "生成 zsh / bash / fish Tab 补全脚本"),
         ("version", "显示版本"),
         ("help", "显示本帮助"),
     ] {
         println!("{}", cmd(n, d));
+    }
+    println!();
+    println!("{}", bold("元信息查看:"));
+    for (n, d) in [
+        ("metainfo / meta", "查看当前 U 盘元信息"),
+        ("meta <onlyid>", "直接查看该盘最新 [1] 备份"),
+        ("meta <onlyid> <N>", "查看该盘第 N 份备份"),
+        ("meta <备份.bin>", "直接查看指定备份文件"),
+    ] {
+        println!("{}", flag(n, d));
     }
     println!();
     println!("{}", bold("扇区检查:"));
@@ -123,7 +145,7 @@ pub fn print_usage() {
         ("--yes", "免交互(自动确认一切 YES 提示)"),
         ("--onlyid <ID>", "backup / inspect 按物理盘 onlyid 筛选"),
         ("--index <N>", "inspect / backup verify 选择该盘第 N 份备份"),
-        ("--id <device_id>", "inspect 备份/镜像无法自动识别时手动提供 device_id"),
+        ("--id <device_id>", "inspect / metainfo 备份或镜像无法自动识别时手动提供 device_id"),
         ("--backup-dir <目录>", "备份目录(默认 $NOPWD_BACKUP_DIR、~/.nopwd.conf 或 ./backup)"),
     ] {
         println!("{}", flag(n, d));
@@ -155,6 +177,19 @@ fn print_topic_help(topic: &str) {
             println!("  nopwd inspect 6 7 12 --disk 4 --hex");
             println!();
             println!("{}", dim("不指定 LBA 时显示 LBA0-13 概览；--hex 展开解密视图，--raw 查看盘上原始字节。"));
+        }
+        "metainfo" | "meta" => {
+            println!("{}", bold("用法: nopwd metainfo [onlyid [N] | 备份.bin] [选项]"));
+            println!("{}", bold("别名: nopwd meta"));
+            println!();
+            println!("{}", bold("常用:"));
+            println!("  nopwd meta");
+            println!("  nopwd meta 1987718388");
+            println!("  nopwd meta 1987718388 2");
+            println!("  nopwd meta backup.bin");
+            println!("  nopwd metainfo --disk 4");
+            println!();
+            println!("{}", dim("onlyid 不写编号时默认查看最新 [1]；输出汇总 onlyid/device_id/Dept/User/SAFE6/分区等元信息。"));
         }
         "backup" => {
             println!("{}", bold("用法: nopwd backup [动作] [选项]"));
@@ -412,6 +447,103 @@ pub fn parse_args(argv: &[String]) -> Result<Parsed, String> {
                 return Err("错误: --index 只能与 inspect --onlyid 一起使用".into());
             }
             Ok(Parsed::Inspect(opts))
+        }
+        "metainfo" | "meta" => {
+            if rest.iter().any(|a| a == "-h" || a == "--help") {
+                return Ok(Parsed::Help { topic: Some("metainfo".into()) });
+            }
+            let mut opts = MetaInfoOpts::default();
+            let mut positionals = Vec::new();
+            let mut i = 0usize;
+            while i < rest.len() {
+                let a = rest[i].as_str();
+                let signed_numeric = a
+                    .strip_prefix('-')
+                    .map(|digits| !digits.is_empty() && digits.bytes().all(|b| b.is_ascii_digit()))
+                    .unwrap_or(false);
+                if a.starts_with('-') && a != "-" && !signed_numeric {
+                    match flag_name(a) {
+                        "--disk" => {
+                            let v = take_value(&rest, &mut i, "--disk")?;
+                            set_once(&mut opts.disk, parse_disk_spec(&v)?, "--disk")?;
+                        }
+                        "--backup" | "--image" => {
+                            let flag = flag_name(a).to_string();
+                            let v = take_value(&rest, &mut i, &flag)?;
+                            set_once(&mut opts.backup, v, "--backup/--image")?;
+                        }
+                        "--onlyid" => {
+                            let v = take_value(&rest, &mut i, "--onlyid")?;
+                            set_once(&mut opts.onlyid, parse_onlyid(&v)?, "--onlyid")?;
+                        }
+                        "--index" => {
+                            let v = take_value(&rest, &mut i, "--index")?;
+                            let n = v.parse::<usize>().map_err(|_| format!("错误: --index 须为正整数, 得到 {}", v))?;
+                            if n == 0 {
+                                return Err("错误: --index 从 1 开始".into());
+                            }
+                            set_once(&mut opts.index, n, "--index")?;
+                        }
+                        "--id" => {
+                            let v = take_value(&rest, &mut i, "--id")?;
+                            set_once(&mut opts.device_id, v, "--id")?;
+                        }
+                        "--backup-dir" => {
+                            let v = take_value(&rest, &mut i, "--backup-dir")?;
+                            set_once(&mut opts.backup_dir, v, "--backup-dir")?;
+                        }
+                        other => return Err(format!("错误: metainfo 不认识选项 {}", other)),
+                    }
+                } else {
+                    positionals.push(a.to_string());
+                }
+                i += 1;
+            }
+            if !positionals.is_empty() {
+                if opts.disk.is_some() || opts.backup.is_some() || opts.onlyid.is_some() {
+                    return Err("错误: metainfo 的位置参数不能与 --disk/--backup/--onlyid 混用".into());
+                }
+                match positionals.as_slice() {
+                    [one]
+                        if one
+                            .strip_prefix('-')
+                            .unwrap_or(one)
+                            .bytes()
+                            .all(|b| b.is_ascii_digit()) =>
+                    {
+                        opts.onlyid = Some(parse_onlyid(one)?);
+                    }
+                    [one] => opts.backup = Some(one.clone()),
+                    [id, index]
+                        if id
+                            .strip_prefix('-')
+                            .unwrap_or(id)
+                            .bytes()
+                            .all(|b| b.is_ascii_digit())
+                            && index.bytes().all(|b| b.is_ascii_digit()) =>
+                    {
+                        opts.onlyid = Some(parse_onlyid(id)?);
+                        let n = index
+                            .parse::<usize>()
+                            .map_err(|_| format!("错误: 备份编号须为正整数, 得到 {}", index))?;
+                        if n == 0 {
+                            return Err("错误: 备份编号从 1 开始".into());
+                        }
+                        opts.index = Some(n);
+                    }
+                    _ => return Err("错误: metainfo 位置参数仅支持 <onlyid> [编号] 或 <备份.bin>".into()),
+                }
+            }
+            let source_count = usize::from(opts.disk.is_some())
+                + usize::from(opts.backup.is_some())
+                + usize::from(opts.onlyid.is_some());
+            if source_count > 1 {
+                return Err("错误: metainfo 的 --disk / --backup / --onlyid 三种来源只能选一种".into());
+            }
+            if opts.index.is_some() && opts.onlyid.is_none() {
+                return Err("错误: --index 只能与 metainfo --onlyid 一起使用".into());
+            }
+            Ok(Parsed::MetaInfo(opts))
         }
         "backup" => {
             if rest.iter().any(|a| a == "-h" || a == "--help") || rest.first().map(String::as_str) == Some("help") {

@@ -13,6 +13,7 @@ use crate::backup_catalog::{self, BackupCatalog};
 use crate::cli::Prompter;
 use crate::common::{EXIT_BACKUP, EXIT_CANCELLED, EXIT_OK, EXIT_USAGE, SECTOR};
 use crate::diskio::{self, BackupEntry, BackupMeta, Md5Status};
+use crate::metainfo;
 
 fn backup_model_name(meta: &BackupMeta) -> String {
     let mut vendor = None;
@@ -64,6 +65,24 @@ fn backup_health(entry: &BackupEntry) -> String {
     }
 }
 
+fn ownership_summary(entry: &BackupEntry) -> Option<(Option<String>, Option<String>)> {
+    let ownership = metainfo::backup_ownership(entry)?;
+    (ownership.dept.is_some() || ownership.user.is_some())
+        .then_some((ownership.dept, ownership.user))
+}
+
+fn print_ownership(entry: &BackupEntry, indent: &str) {
+    let Some((dept, user)) = ownership_summary(entry) else {
+        return;
+    };
+    if let Some(dept) = dept {
+        println!("{}{}  {}", indent, crate::ui::dim("Dept"), crate::ui::dim(&dept));
+    }
+    if let Some(user) = user {
+        println!("{}{}  {}", indent, crate::ui::dim("User"), crate::ui::dim(&user));
+    }
+}
+
 fn print_numbered_backup_entries(entries: &[&BackupEntry]) {
     let width = entries.len().max(1).to_string().len();
     for (idx, entry) in entries.iter().enumerate() {
@@ -91,10 +110,13 @@ pub(crate) fn print_onlyid_backup_choices(id: &str, group: &[&BackupEntry]) {
     } else {
         println!("onlyid={} · {} 份", id, group.len());
     }
+    if let Some(entry) = group.first() {
+        print_ownership(entry, "  ");
+    }
     print_numbered_backup_entries(group);
 }
 
-pub(crate) fn print_inspect_backup_sources(entries: &[BackupEntry]) -> bool {
+pub(crate) fn print_backup_sources(entries: &[BackupEntry], hint: &str) -> bool {
     let mut groups: BTreeMap<String, Vec<&BackupEntry>> = BTreeMap::new();
     for entry in entries {
         let Some(id) = entry.meta.as_ref().and_then(|m| m.onlyid.as_ref()) else {
@@ -135,9 +157,12 @@ pub(crate) fn print_inspect_backup_sources(entries: &[BackupEntry]) -> bool {
             group.len(),
             latest
         );
+        if let Some(entry) = group.first() {
+            print_ownership(entry, "      ");
+        }
     }
     println!();
-    println!("{}", crate::ui::dim("查看某盘: nopwd inspect --onlyid <ID>"));
+    println!("{}", crate::ui::dim(hint));
     true
 }
 
@@ -237,6 +262,9 @@ pub fn backup_list(backup_dir: &Path, onlyid: Option<&str>) -> i32 {
             identity,
             group.len()
         );
+        if let Some(entry) = group.first() {
+            print_ownership(entry, "  ");
+        }
         print_numbered_backup_entries(&group);
     }
     if !unknown.is_empty() {

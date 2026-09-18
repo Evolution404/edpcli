@@ -111,7 +111,7 @@ _nopwd() {
   _nopwd_flag_value --backup-dir; bak="$REPLY"
 
   if (( CURRENT == 2 )); then
-    compadd -- list run apply restore backup inspect convert completion version help
+    compadd -- list run apply restore backup inspect metainfo meta convert completion version help
     return
   fi
 
@@ -158,6 +158,20 @@ _nopwd() {
         _files
       fi
       ;;
+    metainfo|meta)
+      if [[ "$cur" == -* ]]; then
+        compadd -- --disk --backup --onlyid --index --id --backup-dir --help
+      elif (( CURRENT == 3 )); then
+        if [[ -n "$bak" ]]; then _nopwd_dynamic onlyid --backup-dir "$bak"; else _nopwd_dynamic onlyid; fi
+        _files
+      elif (( CURRENT == 4 )) && [[ "${words[3]}" == <-> || "${words[3]}" == -<-> ]]; then
+        if [[ -n "$bak" ]]; then
+          _nopwd_dynamic index --onlyid "${words[3]}" --backup-dir "$bak"
+        else
+          _nopwd_dynamic index --onlyid "${words[3]}"
+        fi
+      fi
+      ;;
     run)     [[ "$cur" == -* ]] && compadd -- --disk --size --backup-dir --help ;;
     apply)   [[ "$cur" == -* ]] && compadd -- --disk --size --force --yes --backup-dir --help ;;
     restore) [[ "$cur" == -* ]] && compadd -- --disk --yes --backup-dir --help ;;
@@ -167,7 +181,7 @@ _nopwd() {
       (( CURRENT == 3 )) && compadd -- zsh bash fish
       ;;
     help)
-      (( CURRENT == 3 )) && compadd -- list run apply restore backup inspect convert completion
+      (( CURRENT == 3 )) && compadd -- list run apply restore backup inspect metainfo meta convert completion
       ;;
   esac
 }
@@ -198,7 +212,7 @@ _nopwd() {
   _nopwd_flag_value --backup-dir; bak="$NOPWD_VALUE"
 
   if (( COMP_CWORD == 1 )); then
-    COMPREPLY=( $(compgen -W 'list run apply restore backup inspect convert completion version help' -- "$cur") )
+    COMPREPLY=( $(compgen -W 'list run apply restore backup inspect metainfo meta convert completion version help' -- "$cur") )
     return
   fi
   case "$prev" in
@@ -238,13 +252,24 @@ _nopwd() {
         vals="$(nopwd __complete lba 2>/dev/null)"
       fi
       COMPREPLY=( $(compgen -W "$vals" -- "$cur") $(compgen -f -- "$cur") ) ;;
+    metainfo|meta)
+      if [[ "$cur" == -* ]]; then
+        vals='--disk --backup --onlyid --index --id --backup-dir --help'
+        COMPREPLY=( $(compgen -W "$vals" -- "$cur") )
+      elif (( COMP_CWORD == 2 )); then
+        vals="$(nopwd __complete onlyid ${bak:+--backup-dir "$bak"} 2>/dev/null)"
+        COMPREPLY=( $(compgen -W "$vals" -- "$cur") $(compgen -f -- "$cur") )
+      elif (( COMP_CWORD == 3 )) && [[ "${COMP_WORDS[2]}" =~ ^-?[0-9]+$ ]]; then
+        vals="$(nopwd __complete index --onlyid "${COMP_WORDS[2]}" ${bak:+--backup-dir "$bak"} 2>/dev/null)"
+        COMPREPLY=( $(compgen -W "$vals" -- "$cur") )
+      fi ;;
     run) vals='--disk --size --backup-dir --help'; COMPREPLY=( $(compgen -W "$vals" -- "$cur") ) ;;
     apply) vals='--disk --size --force --yes --backup-dir --help'; COMPREPLY=( $(compgen -W "$vals" -- "$cur") ) ;;
     restore) vals='--disk --yes --backup-dir --help'; COMPREPLY=( $(compgen -W "$vals" -- "$cur") $(compgen -f -- "$cur") ) ;;
     convert) vals='--dir --id --size --out --help'; COMPREPLY=( $(compgen -W "$vals" -- "$cur") ) ;;
     list) vals='--backup-dir --help'; COMPREPLY=( $(compgen -W "$vals" -- "$cur") ) ;;
     completion) COMPREPLY=( $(compgen -W 'zsh bash fish' -- "$cur") ) ;;
-    help) COMPREPLY=( $(compgen -W 'list run apply restore backup inspect convert completion' -- "$cur") ) ;;
+    help) COMPREPLY=( $(compgen -W 'list run apply restore backup inspect metainfo meta convert completion' -- "$cur") ) ;;
   esac
 }
 
@@ -287,18 +312,35 @@ function __nopwd_indices
     end
 end
 
+function __nopwd_meta_positionals
+    set -l tokens (commandline -opc)
+    set -l bak (__nopwd_flag_value --backup-dir)
+    if test (count $tokens) -eq 2
+        __nopwd_onlyids
+        return
+    end
+    if test (count $tokens) -eq 3; and string match -qr '^-?[0-9]+$' -- $tokens[3]
+        if test -n "$bak"
+            nopwd __complete index --onlyid "$tokens[3]" --backup-dir "$bak" 2>/dev/null
+        else
+            nopwd __complete index --onlyid "$tokens[3]" 2>/dev/null
+        end
+    end
+end
+
 complete -c nopwd -f
-complete -c nopwd -n '__fish_use_subcommand' -a 'list run apply restore backup inspect convert completion version help'
+complete -c nopwd -n '__fish_use_subcommand' -a 'list run apply restore backup inspect metainfo meta convert completion version help'
 complete -c nopwd -n '__fish_seen_subcommand_from backup' -a 'list verify prune rm'
-complete -c nopwd -n '__fish_seen_subcommand_from inspect backup' -l onlyid -r -a '(__nopwd_onlyids)'
-complete -c nopwd -n '__fish_seen_subcommand_from inspect backup' -l index -r -a '(__nopwd_indices)'
-complete -c nopwd -n '__fish_seen_subcommand_from inspect run apply restore' -l disk -r -a '(nopwd __complete disk 2>/dev/null)'
-complete -c nopwd -n '__fish_seen_subcommand_from inspect' -l backup -r -a '(nopwd __complete backup-file 2>/dev/null)'
+complete -c nopwd -n '__fish_seen_subcommand_from metainfo meta' -a '(__nopwd_meta_positionals)'
+complete -c nopwd -n '__fish_seen_subcommand_from inspect backup metainfo meta' -l onlyid -r -a '(__nopwd_onlyids)'
+complete -c nopwd -n '__fish_seen_subcommand_from inspect backup metainfo meta' -l index -r -a '(__nopwd_indices)'
+complete -c nopwd -n '__fish_seen_subcommand_from inspect metainfo meta run apply restore' -l disk -r -a '(nopwd __complete disk 2>/dev/null)'
+complete -c nopwd -n '__fish_seen_subcommand_from inspect metainfo meta' -l backup -r -a '(nopwd __complete backup-file 2>/dev/null)'
 complete -c nopwd -n '__fish_seen_subcommand_from inspect' -l raw
 complete -c nopwd -n '__fish_seen_subcommand_from inspect' -l hex
 complete -c nopwd -n '__fish_seen_subcommand_from inspect' -l export -r
-complete -c nopwd -n '__fish_seen_subcommand_from inspect convert' -l id -r
-complete -c nopwd -n '__fish_seen_subcommand_from backup inspect list run apply restore' -l backup-dir -r
+complete -c nopwd -n '__fish_seen_subcommand_from inspect metainfo meta convert' -l id -r
+complete -c nopwd -n '__fish_seen_subcommand_from backup inspect metainfo meta list run apply restore' -l backup-dir -r
 complete -c nopwd -n '__fish_seen_subcommand_from backup apply restore' -l yes
 complete -c nopwd -n '__fish_seen_subcommand_from backup' -l keep -r
 complete -c nopwd -n '__fish_seen_subcommand_from run apply convert' -l size -r

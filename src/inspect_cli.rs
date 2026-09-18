@@ -8,7 +8,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 use crate::backup_catalog::{self, BackupCatalog};
-use crate::backup_cli::{print_inspect_backup_sources, print_onlyid_backup_choices};
+use crate::backup_cli::{print_backup_sources, print_onlyid_backup_choices};
 use crate::cli::{auto_pick_disk, guard_usb_disk, InspectOpts, StdPrompter};
 use crate::common::{EXIT_BACKUP, EXIT_IO, EXIT_OK, EXIT_TARGET, EXIT_USAGE, SECTOR};
 use crate::diskio::{self, raw_path};
@@ -17,7 +17,7 @@ use crate::identify::identify;
 use crate::inspect::{self, InspectMeta};
 use crate::sysinfo::{self, SysRunner};
 
-fn resolve_inspect_file(backup_dir: &Path, target: &str) -> Result<PathBuf, String> {
+pub(crate) fn resolve_inspect_file(backup_dir: &Path, target: &str) -> Result<PathBuf, String> {
     let raw = Path::new(target);
     let candidate = if raw.components().count() == 1 {
         backup_dir.join(raw)
@@ -195,7 +195,10 @@ fn inspect_backup_flow(opts: InspectOpts) -> i32 {
             Ok(group) => group,
             Err(msg) => {
                 eprintln!("{}", crate::ui::red(&format!("错误: {msg}")));
-                if print_inspect_backup_sources(catalog.entries()) {
+                if print_backup_sources(
+                    catalog.entries(),
+                    "查看某盘: nopwd inspect --onlyid <ID>",
+                ) {
                     println!();
                 }
                 return EXIT_BACKUP;
@@ -337,7 +340,7 @@ pub(crate) fn inspect_flow(runner: &SysRunner, opts: InspectOpts) -> i32 {
         if opts.disk.is_none() && sysinfo::list_usb_disks(runner).is_empty() {
             let bak = diskio::resolve_backup_dir(opts.backup_dir.as_deref());
             let entries = diskio::scan_backup_dir(&bak);
-            if print_inspect_backup_sources(&entries) {
+            if print_backup_sources(&entries, "查看某盘: nopwd inspect --onlyid <ID>") {
                 println!(
                     "{}",
                     crate::ui::yellow("未检测到外接 USB 盘；上面是当前可离线查看的备份。")

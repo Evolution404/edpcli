@@ -64,7 +64,64 @@ fn bare_backup_defaults_to_list_and_accepts_onlyid_without_action() {
         let stdout = String::from_utf8_lossy(&out.stdout);
         assert!(stdout.contains("备份目录"));
         assert!(stdout.contains("onlyid=1402259934"));
+        assert!(stdout.contains("Dept"), "备份列表应直接显示 Dept: {stdout}");
+        assert!(stdout.contains("User"), "备份列表应直接显示 User: {stdout}");
     }
+}
+
+#[test]
+fn metainfo_has_short_positional_backup_syntax_and_defaults_to_latest() {
+    let Some(tmp) = two_netac_backups() else {
+        eprintln!("跳过: 真实备份不可用");
+        return;
+    };
+
+    let latest = Command::new(env!("CARGO_BIN_EXE_nopwd"))
+        .env("NO_COLOR", "1")
+        .args(["meta", "1402259934", "--backup-dir"])
+        .arg(&tmp.0)
+        .output()
+        .unwrap();
+    assert_eq!(latest.status.code(), Some(0), "{}", String::from_utf8_lossy(&latest.stderr));
+    let stdout = String::from_utf8_lossy(&latest.stdout);
+    assert!(stdout.contains("backup onlyid=1402259934 [1]"), "{stdout}");
+    assert!(stdout.contains("Dept"), "{stdout}");
+    assert!(stdout.contains("User"), "{stdout}");
+    assert!(stdout.contains("onlyid"), "{stdout}");
+    assert!(stdout.contains("device_id"), "{stdout}");
+
+    let second = Command::new(env!("CARGO_BIN_EXE_nopwd"))
+        .env("NO_COLOR", "1")
+        .args(["metainfo", "1402259934", "2", "--backup-dir"])
+        .arg(&tmp.0)
+        .output()
+        .unwrap();
+    assert_eq!(second.status.code(), Some(0), "{}", String::from_utf8_lossy(&second.stderr));
+    assert!(String::from_utf8_lossy(&second.stdout).contains("backup onlyid=1402259934 [2]"));
+}
+
+#[test]
+fn metainfo_accepts_backup_file_directly() {
+    let Some(tmp) = two_netac_backups() else {
+        eprintln!("跳过: 真实备份不可用");
+        return;
+    };
+    let file = fs::read_dir(&tmp.0)
+        .unwrap()
+        .flatten()
+        .map(|e| e.path())
+        .find(|p| p.extension().and_then(|e| e.to_str()) == Some("bin"))
+        .unwrap();
+    let out = Command::new(env!("CARGO_BIN_EXE_nopwd"))
+        .env("NO_COLOR", "1")
+        .arg("meta")
+        .arg(&file)
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(0), "{}", String::from_utf8_lossy(&out.stderr));
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.contains("Dept"), "{stdout}");
+    assert!(stdout.contains("User"), "{stdout}");
 }
 
 #[test]
@@ -73,6 +130,7 @@ fn focused_help_works_inside_subcommands() {
         ["inspect", "--help"].as_slice(),
         ["backup", "--help"].as_slice(),
         ["completion", "--help"].as_slice(),
+        ["meta", "--help"].as_slice(),
     ] {
         let out = Command::new(env!("CARGO_BIN_EXE_nopwd"))
             .env("NO_COLOR", "1")
@@ -102,6 +160,7 @@ fn completion_scripts_and_dynamic_values_are_available() {
         assert!(stdout.contains("__complete"), "{shell} completion should use dynamic provider");
         assert!(stdout.contains("inspect"));
         assert!(stdout.contains("backup"));
+        assert!(stdout.contains("metainfo") || stdout.contains("meta"));
     }
 
     let onlyids = Command::new(env!("CARGO_BIN_EXE_nopwd"))

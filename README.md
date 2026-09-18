@@ -30,6 +30,10 @@ nopwd inspect 6 7 12 --disk 14  # 展开物理盘指定扇区的结构化字段
 nopwd inspect 7 12 --disk 14 --hex  # 追加字段感知高亮 hex
 nopwd inspect --onlyid ID        # 先列出该盘有哪些 [1][2]... 可选备份
 nopwd inspect --onlyid ID --index 2 # 按 backup list 编号查看某份备份
+nopwd meta                       # 当前 U 盘关键信息；无盘时列出可查看的备份盘
+nopwd meta 1987718388            # 直接看该 onlyid 最新 [1] 备份
+nopwd meta 1987718388 2          # 直接看第 2 份备份
+nopwd meta backup.bin            # 直接看指定备份
 nopwd inspect <备份.bin> 11 12 --hex          # 文件可直接作位置参数，不提权
 nopwd inspect 11 12 --backup <备份.bin> --hex # 仍支持显式 --backup
 nopwd completion zsh             # 生成 zsh Tab 补全（bash/fish 同理）
@@ -198,6 +202,27 @@ nopwd inspect 6 7 12 --backup backup.bin --export ./metadata-out
   不沿用旧脚本把整扇区都作为 AES 数据展示的方式。
 - **导出**：`--export DIR` 为所查看扇区同时写出 `_raw.bin/.hex` 与
   `_decoded.bin/.hex`；未指定 LBA 时导出 LBA0-13 全部。hex 导出始终无 ANSI 色码。
+
+## 元信息查看
+
+日常查看设备/备份信息不需要再记 `inspect --onlyid ... --index ... 8`。`metainfo`
+（短别名 `meta`）直接把多个扇区的关键信息汇总成一张元信息卡片：
+
+```bash
+nopwd meta                         # 当前物理 U 盘
+nopwd meta 1987718388              # 该 onlyid 最新 [1] 备份
+nopwd meta 1987718388 2            # 第 2 份备份
+nopwd meta backup.bin              # 指定备份/镜像
+nopwd metainfo --disk 4            # 显式物理盘
+```
+
+输出包括 `onlyid / device_id / device_id CRC32 / VID:PID / 容量 / PDKB device_id`，
+以及 LBA8 的 `Dept / User / Label / Rmark / GLab / Autonum`、LBA6 SAFE6 信息和
+LBA7/LBA12 分区摘要。`meta <onlyid>` **默认选择最新 `[1]`**，只有查看历史备份时
+才需要追加编号。`meta`、`metainfo`、onlyid、备份编号、物理盘号均纳入 Tab 补全。
+
+`nopwd backup` / `nopwd backup list` 的每个 onlyid 分组也会直接显示最新备份解析出的
+`Dept` 和 `User`，因此浏览备份时不需要再进入扇区检查器确认归属。
 
 ### 从 v2（Python 版）迁移
 

@@ -17,7 +17,9 @@ use std::path::{Path, PathBuf};
 
 pub use crate::backup_cli::{backup_list, backup_prune, backup_rm, backup_verify};
 use crate::backup_cli::backup_verify_select;
-pub use crate::cli_args::{parse_args, print_usage, BackupAction, DiskOpts, InspectOpts, Parsed};
+pub use crate::cli_args::{
+    parse_args, print_usage, BackupAction, DiskOpts, InspectOpts, MetaInfoOpts, Parsed,
+};
 use crate::cli_args::print_help;
 use crate::common::*;
 use crate::completion;
@@ -26,6 +28,7 @@ use crate::diskio::{self, backup_disk, backup_is_nopwd, find_backups, raw_path, 
 use crate::elevate::{self, ELEVATED_FLAG};
 use crate::identify::identify;
 use crate::inspect_cli::inspect_flow;
+use crate::metainfo_cli::metainfo_flow;
 use crate::sectors::{convert, looks_nopwd};
 use crate::sysinfo::{self, CmdRunner, SysRunner};
 
@@ -647,6 +650,7 @@ pub fn run() -> i32 {
             }
         }
         Parsed::Inspect(opts) => inspect_flow(&runner, opts),
+        Parsed::MetaInfo(opts) => metainfo_flow(&runner, opts),
         Parsed::Convert { dir, id, size, out } => match dir {
             Some(d) => convert_flow(d, id, size, out),
             None => {
@@ -992,6 +996,40 @@ mod tests {
                 assert_eq!(onlyid.as_deref(), Some("1987718388"));
             }
             _ => panic!("应解析为 backup list"),
+        }
+        match parse_args(&["meta".into(), "1987718388".into()]).unwrap() {
+            Parsed::MetaInfo(opts) => {
+                assert_eq!(opts.onlyid.as_deref(), Some("1987718388"));
+                assert_eq!(opts.index, None);
+            }
+            _ => panic!("应解析为 meta onlyid"),
+        }
+        match parse_args(&[
+            "metainfo".into(),
+            "-1615488206".into(),
+            "2".into(),
+        ])
+        .unwrap()
+        {
+            Parsed::MetaInfo(opts) => {
+                assert_eq!(opts.onlyid.as_deref(), Some("-1615488206"));
+                assert_eq!(opts.index, Some(2));
+            }
+            _ => panic!("应解析为负数 onlyid 的 metainfo"),
+        }
+        match parse_args(&[
+            "meta".into(),
+            "backup.bin".into(),
+            "--id".into(),
+            "disk&ven_x&prod_y".into(),
+        ])
+        .unwrap()
+        {
+            Parsed::MetaInfo(opts) => {
+                assert_eq!(opts.backup.as_deref(), Some("backup.bin"));
+                assert_eq!(opts.device_id.as_deref(), Some("disk&ven_x&prod_y"));
+            }
+            _ => panic!("应解析为 meta backup"),
         }
     }
 
