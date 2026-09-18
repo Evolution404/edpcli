@@ -245,8 +245,7 @@ fn decode_mount_field(input: &str) -> String {
     String::from_utf8_lossy(&out).into_owned()
 }
 
-fn mounted_points_for_devices(devices: &HashSet<String>) -> io::Result<Vec<String>> {
-    let text = std::fs::read_to_string("/proc/self/mountinfo")?;
+fn mounted_points_from_text(devices: &HashSet<String>, text: &str) -> Vec<String> {
     let mut points = Vec::new();
     for line in text.lines() {
         let fields: Vec<&str> = line.split_whitespace().collect();
@@ -256,7 +255,12 @@ fn mounted_points_for_devices(devices: &HashSet<String>) -> io::Result<Vec<Strin
     }
     points.sort_by_key(|path| std::cmp::Reverse(path.len()));
     points.dedup();
-    Ok(points)
+    points
+}
+
+fn mounted_points_for_devices(devices: &HashSet<String>) -> io::Result<Vec<String>> {
+    let text = std::fs::read_to_string("/proc/self/mountinfo")?;
+    Ok(mounted_points_from_text(devices, &text))
 }
 
 pub(super) fn is_system_disk(_runner: &dyn CmdRunner, disk: u32) -> bool {
@@ -499,6 +503,33 @@ mod tests {
     fn mountinfo_escapes_are_decoded() {
         assert_eq!(decode_mount_field(r"/media/My\040USB"), "/media/My USB");
         assert_eq!(decode_mount_field(r"/tmp/a\134b"), r"/tmp/a\b");
+    }
+
+    #[test]
+    fn mountinfo_contract_matches_major_minor_and_detects_root() {
+        let devices = HashSet::from(["8:1".to_string(), "253:0".to_string()]);
+        let text = "\
+24 1 8:1 / / rw,relatime - ext4 /dev/sda1 rw\n\
+25 24 8:1 /data /mnt/My\\040USB rw,relatime - ext4 /dev/sda1 rw\n\
+26 1 7:0 / /snap/core rw - squashfs /dev/loop0 ro\n\
+27 1 253:0 / /crypt rw - ext4 /dev/dm-0 rw\n";
+        let points = mounted_points_from_text(&devices, text);
+        assert!(points.contains(&"/".to_string()));
+        assert!(points.contains(&"/mnt/My USB".to_string()));
+        assert!(points.contains(&"/crypt".to_string()));
+        assert!(!points.contains(&"/snap/core".to_string()));
+    }
+
+    #[test]
+    fn mountinfo_contract_deduplicates_same_mountpoint() {
+        let devices = HashSet::from(["8:16".to_string()]);
+        let text = "\
+31 1 8:16 / /media/test rw - ext4 /dev/sdb rw\n\
+32 1 8:16 / /media/test rw - ext4 /dev/sdb rw\n";
+        assert_eq!(
+            mounted_points_from_text(&devices, text),
+            vec!["/media/test"]
+        );
     }
 
     #[test]

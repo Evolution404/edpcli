@@ -23,11 +23,12 @@ use windows_sys::Win32::Foundation::{
 use windows_sys::Win32::Security::{
     GetTokenInformation, TokenElevation, TOKEN_ELEVATION, TOKEN_QUERY,
 };
+#[cfg(feature = "ci-virtual-disk")]
+use windows_sys::Win32::Storage::FileSystem::{BusTypeFileBackedVirtual, BusTypeVirtual};
 use windows_sys::Win32::Storage::FileSystem::{
-    BusTypeFileBackedVirtual, BusTypeUsb, BusTypeVirtual, CreateFileW, FindFirstVolumeW,
-    FindNextVolumeW, FindVolumeClose, GetVolumeNameForVolumeMountPointW, GetVolumePathNameW,
-    FILE_ATTRIBUTE_NORMAL, FILE_SHARE_READ, FILE_SHARE_WRITE, IOCTL_VOLUME_GET_VOLUME_DISK_EXTENTS,
-    OPEN_EXISTING,
+    BusTypeUsb, CreateFileW, FindFirstVolumeW, FindNextVolumeW, FindVolumeClose,
+    GetVolumeNameForVolumeMountPointW, GetVolumePathNameW, FILE_ATTRIBUTE_NORMAL, FILE_SHARE_READ,
+    FILE_SHARE_WRITE, IOCTL_VOLUME_GET_VOLUME_DISK_EXTENTS, OPEN_EXISTING,
 };
 use windows_sys::Win32::System::Ioctl::{
     PropertyStandardQuery, StorageDeviceProperty, DISK_GEOMETRY_EX, FSCTL_DISMOUNT_VOLUME,
@@ -159,6 +160,7 @@ struct WinDiskProbe {
     size: u64,
     removable: bool,
     usb: bool,
+    #[cfg(feature = "ci-virtual-disk")]
     bus_type: i32,
     vendor: String,
     product: String,
@@ -430,6 +432,7 @@ fn query_disk(disk: u32) -> io::Result<WinDiskProbe> {
         size: geometry.DiskSize as u64,
         removable: descriptor.RemovableMedia,
         usb: descriptor.BusType == BusTypeUsb,
+        #[cfg(feature = "ci-virtual-disk")]
         bus_type: descriptor.BusType,
         vendor: descriptor_string(bytes, descriptor.VendorIdOffset),
         product: descriptor_string(bytes, descriptor.ProductIdOffset),
@@ -879,6 +882,54 @@ mod tests {
     #[test]
     fn transport_is_preserved_when_vid_pid_are_unavailable() {
         let ids = vec![r"UASPSTOR\Disk&Ven_aigo&Prod_U335&Rev_PMAP".to_string()];
+        assert_eq!(
+            usb_identity_from_instance_chain(&ids),
+            Some(UsbIdentity {
+                vid: None,
+                pid: None,
+                transport: NativeTransport::Uas,
+            })
+        );
+    }
+
+    #[test]
+    fn bot_transport_is_detected_from_usbstor_chain() {
+        let ids = vec![
+            r"SCSI\Disk&Ven_Netac&Prod_OnlyDisk".to_string(),
+            r"USBSTOR\Disk&Ven_Netac&Prod_OnlyDisk".to_string(),
+            r"USB\VID_0D18&PID_2005\ABC".to_string(),
+        ];
+        assert_eq!(
+            usb_identity_from_instance_chain(&ids),
+            Some(UsbIdentity {
+                vid: Some(0x0d18),
+                pid: Some(0x2005),
+                transport: NativeTransport::Bot,
+            })
+        );
+    }
+
+    #[test]
+    fn uas_wins_over_bot_when_both_appear_in_parent_chain() {
+        let ids = vec![
+            r"USBSTOR\Disk&Ven_aigo&Prod_U335".to_string(),
+            r"UASPSTOR\Disk&Ven_aigo&Prod_U335".to_string(),
+            r"USB\VID_3535&PID_6300\123".to_string(),
+        ];
+        assert_eq!(
+            usb_identity_from_instance_chain(&ids)
+                .expect("USB identity")
+                .transport,
+            NativeTransport::Uas
+        );
+    }
+
+    #[test]
+    fn malformed_vid_pid_do_not_destroy_transport_signal() {
+        let ids = vec![
+            r"UASPSTOR\Disk&Ven_aigo&Prod_U335".to_string(),
+            r"USB\VID_ZZZZ&PID_12\123".to_string(),
+        ];
         assert_eq!(
             usb_identity_from_instance_chain(&ids),
             Some(UsbIdentity {

@@ -502,6 +502,56 @@ mod selector_tests {
     }
 
     #[test]
+    fn ioreg_parser_keeps_nested_children_inside_parent_block() {
+        let out = "\
++-o IOSCSITargetDevice@0  <class IOSCSITargetDevice, id 0x100002b0e, retain 8>\n\
+  |   \"IOPropertyMatch\" = \"x\"\n\
+  +-o IOSCSILogicalUnitNub@0  <class IOSCSILogicalUnitNub, id 0x100002b11>\n\
+    |   \"Vendor Identification\" = \"Netac  \"\n\
+    |   \"Product Identification\" = \"OnlyDisk\"\n\
+    |   \"Product Revision Level\" = \"1.00\"\n\
+    +-o Netac OnlyDisk Media  <class IOMedia, id 0x100002b17>\n\
+      |   \"BSD Name\" = \"disk6\"\n\
++-o IOSCSITargetDevice@0  <class IOSCSITargetDevice, id 0x100002b9e>\n\
+  |   \"Nothing here\" = \"y\"\n\
+  +-o Other Media  <class IOMedia, id 0x100002b99>\n\
+    |   \"BSD Name\" = \"disk9\"\n";
+        let blocks = split_class_blocks(out, "IOSCSITargetDevice");
+        assert_eq!(blocks.len(), 2);
+        assert!(blocks[0].contains("\"BSD Name\" = \"disk6\""));
+        assert_eq!(
+            block_str_field(blocks[0], "Vendor Identification").as_deref(),
+            Some("Netac  ")
+        );
+        assert_eq!(block_int_field(blocks[0], "idVendor"), None);
+        assert_eq!(block_str_field(blocks[1], "Vendor Identification"), None);
+    }
+
+    #[test]
+    fn ioreg_parser_reads_decimal_fields_and_product_named_roots() {
+        let out = "\
++-o Keyboard Tal@14100000  <class IOUSBHostDevice, id 0x100002a01, retain 14>\n\
+  |   \"idVendor\" = 1452\n\
+  |   \"idProduct\" = 610\n\
++-o USB DISK@01200000  <class IOUSBHostDevice, id 0x100002af0, retain 15>\n\
+  |   \"idVendor\" = 13621\n\
+  |   \"idProduct\" = 25344\n\
+  |   \"USB Product Name\" = \"Mass Storage\"\n\
+  +-o USB DISK Media  <class IOMedia, id 0x100002b17>\n\
+    |   \"BSD Name\" = \"disk6\"\n";
+        let blocks = split_class_blocks(out, "IOUSBHostDevice");
+        assert_eq!(blocks.len(), 2);
+        assert_eq!(block_int_field(blocks[1], "idVendor"), Some(13621));
+        assert_eq!(block_int_field(blocks[1], "idProduct"), Some(25344));
+        assert_eq!(
+            block_str_field(blocks[1], "USB Product Name").as_deref(),
+            Some("Mass Storage")
+        );
+        let no_root = "  |   \"idVendor\" = 1\n  |   \"BSD Name\" = \"disk6\"\n";
+        assert_eq!(split_class_blocks(no_root, "IOUSBHostDevice").len(), 1);
+    }
+
+    #[test]
     fn system_disk_uses_apfs_physical_store_not_fixed_disk_number() {
         let runner = RootInfoRunner {
             plist: r#"<plist><dict>
