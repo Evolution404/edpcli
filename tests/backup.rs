@@ -505,6 +505,7 @@ fn fake_entry(name: &str, onlyid: &str, mtime: i64, is_nopwd: bool) -> BackupEnt
         is_nopwd,
         md5_ok: Md5Status::Ok,
         size_ok: true,
+        lba8: None,
         content_md5: None,
     }
 }

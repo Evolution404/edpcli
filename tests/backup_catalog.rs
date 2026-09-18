@@ -5,6 +5,7 @@ use std::fs;
 use common::*;
 use edpcli::backup_catalog::BackupCatalog;
 use edpcli::md5::md5_hex;
+use edpcli::metainfo::backup_ownership;
 
 fn copied_catalog() -> Option<(TmpDir, BackupCatalog)> {
     let Some(src) = fixture_bin("netac") else {
@@ -77,4 +78,26 @@ fn onlyid_values_are_unique_and_sorted_by_latest_backup() {
     };
     assert_eq!(catalog.onlyid_values(), vec!["1402259934"]);
     assert!(catalog.onlyid_group("404").is_err());
+}
+
+#[test]
+fn ownership_uses_lba8_cached_during_catalog_scan() {
+    let Some((_tmp, catalog)) = copied_catalog() else {
+        return;
+    };
+    let entry = catalog.onlyid_index("1402259934", 1).unwrap();
+    assert!(entry.lba8.is_some());
+
+    // 扫描完成后移除源文件；归属信息仍应从 BackupEntry 的内存 LBA8 得到，
+    // 证明 backup list 不会为了 Dept/User 再次打开同一个 .bin。
+    fs::remove_file(&entry.path).unwrap();
+    let ownership = backup_ownership(entry).expect("缓存 LBA8 应可解析归属信息");
+    assert!(
+        ownership
+            .dept
+            .as_deref()
+            .unwrap_or_default()
+            .contains("泰州供电公司")
+    );
+    assert_eq!(ownership.user.as_deref(), Some("宋旭琳"));
 }

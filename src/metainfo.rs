@@ -152,11 +152,8 @@ where
 pub fn backup_ownership(entry: &BackupEntry) -> Option<OwnershipInfo> {
     let meta = entry.meta.as_ref()?;
     let inspect_meta = InspectMeta::from_backup_meta(meta);
-    let raw = diskio::read_lba(entry.path.to_str()?, 8).ok()?;
-    if raw.len() != SECTOR {
-        return None;
-    }
-    let view = inspect::analyze_sector(8, &raw, &inspect_meta);
+    let raw = entry.lba8.as_ref()?;
+    let view = inspect::analyze_sector(8, raw, &inspect_meta);
     Some(OwnershipInfo {
         glab: child_value(&view, "GLab"),
         dept: child_value(&view, "Dept"),

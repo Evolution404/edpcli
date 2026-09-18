@@ -707,6 +707,8 @@ pub struct BackupEntry {
     pub is_nopwd: bool,
     pub md5_ok: Md5Status,
     pub size_ok: bool,
+    /// 扫描时缓存的 LBA8 原始 512B；用于列表/元信息展示，避免随后再次打开同一备份。
+    pub lba8: Option<[u8; SECTOR]>,
     /// 扫描时实际 `.bin` 内容摘要；删除前用于确认同名文件未被替换/改写。
     pub content_md5: Option<String>,
 }
@@ -859,6 +861,10 @@ pub fn scan_backup_dir(dir: &Path) -> Vec<BackupEntry> {
         let name = path.file_name().and_then(|n| n.to_str()).unwrap_or_default();
         let mut meta = parse_backup_name(name);
         let data = fs::read(&path).ok();
+        let lba8 = data.as_ref().and_then(|d| {
+            d.get(8 * SECTOR..9 * SECTOR)
+                .and_then(|raw| raw.try_into().ok())
+        });
         let content_md5 = data.as_ref().map(|d| md5_hex(d));
         if let (Some(m), Some(d)) = (meta.as_mut(), data.as_ref()) {
             if d.len() >= 5 * SECTOR {
@@ -881,6 +887,7 @@ pub fn scan_backup_dir(dir: &Path) -> Vec<BackupEntry> {
             is_nopwd,
             md5_ok,
             size_ok,
+            lba8,
             content_md5,
         });
     }
