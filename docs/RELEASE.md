@@ -83,6 +83,25 @@ PATCH 递增，不能复用旧 tag。
 - 另设 `latest` 兼容性工作流用于提前发现未来操作系统或 Rust stable 的兼容问题，但它不改变
   正式 Release 的构建基线。
 
+## 发布供应链材料
+
+每个正式 Release 除三平台二进制和 SHA-256 sidecar 外，还自动附带：
+
+- CycloneDX 1.5 SBOM：`edpcli-vX.Y.Z-sbom.cdx.json`；
+- 完整 `Cargo.lock`；
+- `cargo metadata --locked` JSON；
+- `rustc -Vv` 工具链记录；
+- `release-manifest.json`：记录 tag、commit、固定 Runner、Rust 版本、每个发布资产的大小和
+  SHA-256。
+
+GitHub Actions 均锁到不可变 commit SHA，避免同名 action tag 被上游移动后悄然改变构建。
+
+GitHub 官方 artifact attestation 对私有/内部仓库要求 GitHub Enterprise Cloud；当前仓库
+不能把这一能力作为必过门禁，因此不配置一个注定失败的 attestation job。如果仓库未来迁移
+到满足条件的套餐，应按 GitHub 官方 `actions/attest` 流程增加 `id-token: write` 与
+`attestations: write` 后再启用。Apple Developer ID notarization 和 Windows Authenticode
+同样需要外部签名证书；在证书存在之前，发布流程以 checksum + SBOM + manifest 保证可核验性。
+
 ## 无物理 Linux/Windows 机器时的验收口径
 
 GitHub-hosted Runner 没有真实 EDP USB 硬件，因此不能声称完成真实 USB 总线硬件在环验证。
