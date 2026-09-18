@@ -40,6 +40,7 @@ pub enum Parsed {
     List {
         backup_dir: Option<String>,
     },
+    Tui,
     Backup {
         action: BackupAction,
         keep: usize,
@@ -99,6 +100,7 @@ pub fn usage_text() -> String {
 用法: edpcli [命令] [选项]\n\n\
 常用:\n\
   list      查看当前插入的 U 盘\n\
+  tui       交互式 TUI（Vim 键位）\n\
   info      查看 U 盘或备份详细信息\n\
   apply     预览或执行 U 盘改造\n\
   backup    创建、查看、校验、恢复和清理备份\n\
@@ -151,6 +153,7 @@ fn print_topic_help(topic: &str) {
             println!("fish: edpcli completion fish | source");
         }
         "list" => println!("{}", bold("用法: edpcli list [--backup-dir D]")),
+        "tui" => println!("{}", bold("用法: edpcli tui")),
         "convert" => println!(
             "{}",
             bold("用法: edpcli convert --dir <快照目录> --id <device_id> [--size GB] [--out DIR]")
@@ -304,6 +307,17 @@ pub fn parse_args(argv: &[String]) -> Result<Parsed, String> {
                 i += 1;
             }
             Ok(Parsed::InternalComplete { kind, backup_dir })
+        }
+        "tui" => {
+            if rest.iter().any(|a| a == "-h" || a == "--help") {
+                return Ok(Parsed::Help {
+                    topic: Some("tui".into()),
+                });
+            }
+            if !rest.is_empty() {
+                return Err("错误: tui 不接受位置参数或选项".into());
+            }
+            Ok(Parsed::Tui)
         }
         "list" => {
             if rest.iter().any(|a| a == "-h" || a == "--help") {
