@@ -236,7 +236,10 @@ pub(crate) fn auto_pick_disk(
     runner: &dyn CmdRunner,
     prompt: &mut dyn Prompter,
 ) -> EdpCliResult<u32> {
-    let disks = sysinfo::list_usb_disks(runner);
+    let disks: Vec<_> = sysinfo::list_usb_disks(runner)
+        .into_iter()
+        .filter(|disk| !crate::platform::is_system_disk(runner, disk.n))
+        .collect();
     if disks.is_empty() {
         return Err(err(
             EXIT_TARGET,
