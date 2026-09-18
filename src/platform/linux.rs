@@ -23,6 +23,28 @@ pub(super) fn raw_disk_path(disk: u32) -> String {
         .unwrap_or_else(|| format!("/dev/edpcli-invalid-disk{disk}"))
 }
 
+pub(super) fn parse_disk_selector(value: &str) -> Result<u32, String> {
+    if !value.is_empty() && value.bytes().all(|b| b.is_ascii_digit()) {
+        return value
+            .parse::<u32>()
+            .map_err(|_| format!("磁盘编号超出范围: {value}"));
+    }
+    let name = value.strip_prefix("/dev/").unwrap_or(value);
+    linux_block_names()
+        .iter()
+        .position(|candidate| candidate == name)
+        .map(|index| index as u32 + 2)
+        .ok_or_else(|| format!("无法解析 Linux 整盘选择器: {value}"))
+}
+
+pub(super) const fn disk_selector_syntax() -> &'static str {
+    "--disk <N|/dev/sdX|/dev/nvmeXnY>"
+}
+
+pub(super) fn disk_selector_value(disk: u32) -> String {
+    raw_disk_path(disk)
+}
+
 pub(super) fn is_elevated() -> bool {
     unsafe { libc::geteuid() == 0 }
 }

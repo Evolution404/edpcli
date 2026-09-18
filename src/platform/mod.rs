@@ -72,6 +72,19 @@ pub fn raw_disk_path(disk: u32) -> String {
     imp::raw_disk_path(disk)
 }
 
+pub fn parse_disk_selector(value: &str) -> Result<u32, String> {
+    imp::parse_disk_selector(value)
+}
+
+pub fn disk_selector_syntax() -> &'static str {
+    imp::disk_selector_syntax()
+}
+
+/// 重新提权/重执行时使用平台原生选择器，避免把 Linux 当前枚举序号跨进程固化。
+pub fn disk_selector_value(disk: u32) -> String {
+    imp::disk_selector_value(disk)
+}
+
 pub fn is_elevated() -> bool {
     imp::is_elevated()
 }

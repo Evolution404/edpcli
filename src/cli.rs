@@ -734,7 +734,7 @@ fn real_flow(
             match auto_pick_disk(runner, &mut sp) {
                 Ok(n) => {
                     argv.push("--disk".into());
-                    argv.push(n.to_string());
+                    argv.push(crate::platform::disk_selector_value(n));
                 }
                 Err(e) => {
                     eprintln!("{}", crate::ui::red(&e.msg));
@@ -871,11 +871,12 @@ mod tests {
             }
             _ => panic!("应解析为 Apply"),
         }
-        // --disk=4 与 /dev/rdisk4 形式
+        // --disk=4 与平台原生路径形式
         match parse_args(&["run".into(), "--disk=4".into()]).unwrap() {
             Parsed::Run(o) => assert_eq!(o.disk, Some(4)),
             _ => panic!(),
         }
+        #[cfg(target_os = "macos")]
         match parse_args(&["run".into(), "--disk".into(), "/dev/rdisk4".into()]).unwrap() {
             Parsed::Run(o) => assert_eq!(o.disk, Some(4)),
             _ => panic!(),

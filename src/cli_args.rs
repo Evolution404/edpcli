@@ -139,7 +139,7 @@ pub fn print_usage() {
     println!();
     println!("{}", bold("选项:"));
     for (n, d) in [
-        ("--disk <N|/dev/diskN|/dev/rdiskN>", "真盘号(缺省自动检测外部 USB 盘; 须 disk2+)"),
+        (crate::platform::disk_selector_syntax(), "真盘选择器(缺省自动检测外部 USB 整盘)"),
         ("--size <GB>", "Share 大小(默认占满到 Encrypt 前)"),
         ("--force", "已改造(免密)盘仍强制重写(默认拒绝)"),
         ("--yes", "免交互(自动确认一切 YES 提示)"),
@@ -246,15 +246,14 @@ fn take_value(args: &[String], i: &mut usize, flag: &str) -> Result<String, Stri
 }
 
 fn parse_disk_spec(s: &str) -> Result<u32, String> {
-    let n = s
-        .strip_prefix("/dev/rdisk")
-        .or_else(|| s.strip_prefix("/dev/disk"))
-        .unwrap_or(s);
-    if !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()) {
-        n.parse::<u32>().map_err(|_| format!("错误: --disk {} 超出范围", s))
-    } else {
-        Err(format!("错误: --disk 无法解析: {} (接受 4 / /dev/disk4 / /dev/rdisk4)", s))
-    }
+    crate::platform::parse_disk_selector(s).map_err(|error| {
+        format!(
+            "错误: --disk {}: {}；本平台接受 {}",
+            s,
+            error,
+            crate::platform::disk_selector_syntax()
+        )
+    })
 }
 
 fn parse_size(s: &str) -> Result<f64, String> {

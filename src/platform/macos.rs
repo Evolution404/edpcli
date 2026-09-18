@@ -26,6 +26,26 @@ pub(super) fn raw_disk_path(disk: u32) -> String {
     format!("/dev/rdisk{disk}")
 }
 
+pub(super) fn parse_disk_selector(value: &str) -> Result<u32, String> {
+    let n = value
+        .strip_prefix("/dev/rdisk")
+        .or_else(|| value.strip_prefix("/dev/disk"))
+        .unwrap_or(value);
+    if !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()) {
+        n.parse::<u32>().map_err(|_| format!("磁盘编号超出范围: {value}"))
+    } else {
+        Err(format!("无法解析 macOS 磁盘选择器: {value}"))
+    }
+}
+
+pub(super) const fn disk_selector_syntax() -> &'static str {
+    "--disk <N|/dev/diskN|/dev/rdiskN>"
+}
+
+pub(super) fn disk_selector_value(disk: u32) -> String {
+    format!("/dev/disk{disk}")
+}
+
 pub(super) fn is_elevated() -> bool {
     unsafe { libc::geteuid() == 0 }
 }
@@ -236,4 +256,17 @@ pub(super) fn run_elevated(exe: &Path, argv: &[String], sentinel: &str) -> io::R
     cmd.arg(sentinel);
     let status = cmd.status()?;
     Ok(status.code().unwrap_or(crate::common::EXIT_IO))
+}
+
+#[cfg(test)]
+mod selector_tests {
+    use super::*;
+
+    #[test]
+    fn parses_native_macos_disk_selectors() {
+        assert_eq!(parse_disk_selector("4").unwrap(), 4);
+        assert_eq!(parse_disk_selector("/dev/disk4").unwrap(), 4);
+        assert_eq!(parse_disk_selector("/dev/rdisk4").unwrap(), 4);
+        assert!(parse_disk_selector("/dev/disk4s1").is_err());
+    }
 }

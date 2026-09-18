@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::ffi::{c_void, OsStr};
 use std::fs::File;
 use std::io;
@@ -16,7 +17,8 @@ use windows_sys::Win32::Devices::DeviceAndDriverInstallation::{
     SP_DEVICE_INTERFACE_DETAIL_DATA_W, SP_DEVINFO_DATA,
 };
 use windows_sys::Win32::Foundation::{
-    CloseHandle, GENERIC_READ, GENERIC_WRITE, HANDLE, INVALID_HANDLE_VALUE,
+    CloseHandle, GetLastError, ERROR_NO_MORE_FILES, GENERIC_READ, GENERIC_WRITE, HANDLE,
+    INVALID_HANDLE_VALUE,
 };
 use windows_sys::Win32::Security::{
     GetTokenInformation, TokenElevation, TOKEN_ELEVATION, TOKEN_QUERY,
@@ -24,7 +26,7 @@ use windows_sys::Win32::Security::{
 use windows_sys::Win32::Storage::FileSystem::{
     CreateFileW, FindFirstVolumeW, FindNextVolumeW, FindVolumeClose, BusTypeUsb,
     FILE_ATTRIBUTE_NORMAL, FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING,
-    IOCTL_VOLUME_GET_VOLUME_DISK_EXTENTS,
+    GetVolumeNameForVolumeMountPointW, GetVolumePathNameW, IOCTL_VOLUME_GET_VOLUME_DISK_EXTENTS,
 };
 use windows_sys::Win32::System::IO::DeviceIoControl;
 use windows_sys::Win32::System::Ioctl::{
@@ -36,11 +38,10 @@ use windows_sys::Win32::System::Ioctl::{
 use windows_sys::Win32::System::Threading::{
     GetCurrentProcess, GetExitCodeProcess, OpenProcessToken, WaitForSingleObject, INFINITE,
 };
+use windows_sys::Win32::System::SystemInformation::GetWindowsDirectoryW;
 use windows_sys::Win32::UI::Shell::{
     ShellExecuteExW, SHELLEXECUTEINFOW, SEE_MASK_NOCLOSEPROCESS,
 };
-
-const MAX_PHYSICAL_DRIVES: u32 = 64;
 
 pub(super) const fn kind() -> PlatformKind {
     PlatformKind::Windows
@@ -122,6 +123,34 @@ pub(super) fn raw_disk_path(disk: u32) -> String {
     physical_path(disk)
 }
 
+pub(super) fn parse_disk_selector(value: &str) -> Result<u32, String> {
+    if !value.is_empty() && value.bytes().all(|b| b.is_ascii_digit()) {
+        return value
+            .parse::<u32>()
+            .map_err(|_| format!("磁盘编号超出范围: {value}"));
+    }
+    let lower = value.to_ascii_lowercase();
+    for prefix in [r"\\.\physicaldrive", "physicaldrive"] {
+        if lower.starts_with(prefix) {
+            let suffix = &value[prefix.len()..];
+            if !suffix.is_empty() && suffix.bytes().all(|b| b.is_ascii_digit()) {
+                return suffix
+                    .parse::<u32>()
+                    .map_err(|_| format!("磁盘编号超出范围: {value}"));
+            }
+        }
+    }
+    Err(format!("无法解析 Windows PhysicalDrive 选择器: {value}"))
+}
+
+pub(super) const fn disk_selector_syntax() -> &'static str {
+    r"--disk <N|PhysicalDriveN|\\.\PhysicalDriveN>"
+}
+
+pub(super) fn disk_selector_value(disk: u32) -> String {
+    physical_path(disk)
+}
+
 #[derive(Debug, Clone)]
 struct WinDiskProbe {
     size: u64,
@@ -142,8 +171,8 @@ impl Drop for DevInfoSet {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct UsbIdentity {
-    vid: u16,
-    pid: u16,
+    vid: Option<u16>,
+    pid: Option<u16>,
     transport: NativeTransport,
 }
 
@@ -167,11 +196,13 @@ fn usb_identity_from_instance_chain(ids: &[String]) -> Option<UsbIdentity> {
             transport = NativeTransport::Bot;
         }
     }
-    Some(UsbIdentity {
-        vid: vid?,
-        pid: pid?,
-        transport,
-    })
+    (vid.is_some() || pid.is_some() || transport != NativeTransport::Unknown).then_some(
+        UsbIdentity {
+            vid,
+            pid,
+            transport,
+        },
+    )
 }
 
 fn devinst_id(devinst: u32) -> Option<String> {
@@ -216,7 +247,7 @@ fn interface_device_number(path: &str) -> Option<u32> {
     Some(number.DeviceNumber)
 }
 
-fn setupapi_usb_identity(disk: u32) -> Option<UsbIdentity> {
+fn setupapi_disk_map() -> Vec<(u32, Option<UsbIdentity>)> {
     let set = unsafe {
         SetupDiGetClassDevsW(
             &GUID_DEVINTERFACE_DISK,
@@ -226,9 +257,10 @@ fn setupapi_usb_identity(disk: u32) -> Option<UsbIdentity> {
         )
     };
     if set == -1isize {
-        return None;
+        return vec![];
     }
     let set = DevInfoSet(set);
+    let mut disks = BTreeMap::<u32, Option<UsbIdentity>>::new();
 
     for index in 0..256u32 {
         let mut interface = SP_DEVICE_INTERFACE_DATA {
@@ -294,12 +326,25 @@ fn setupapi_usb_identity(disk: u32) -> Option<UsbIdentity> {
         let path_slice = unsafe { std::slice::from_raw_parts(path_ptr, max_chars) };
         let path_len = path_slice.iter().position(|&c| c == 0).unwrap_or(max_chars);
         let path = String::from_utf16_lossy(&path_slice[..path_len]);
-        if interface_device_number(&path) != Some(disk) {
+        let Some(disk) = interface_device_number(&path) else {
             continue;
+        };
+        let identity = usb_identity_from_instance_chain(&devinst_chain(devinfo.DevInst));
+        match disks.get_mut(&disk) {
+            Some(existing) if existing.is_none() && identity.is_some() => *existing = identity,
+            Some(_) => {}
+            None => {
+                disks.insert(disk, identity);
+            }
         }
-        return usb_identity_from_instance_chain(&devinst_chain(devinfo.DevInst));
     }
-    None
+    disks.into_iter().collect()
+}
+
+fn setupapi_usb_identity(disk: u32) -> Option<UsbIdentity> {
+    setupapi_disk_map()
+        .into_iter()
+        .find_map(|(number, identity)| (number == disk).then_some(identity).flatten())
 }
 
 fn descriptor_string(bytes: &[u8], offset: u32) -> String {
@@ -387,8 +432,8 @@ pub(super) fn hardware_probe(disk: u32) -> Option<HardwareProbe> {
     let probe = query_disk(disk).ok()?;
     let usb = setupapi_usb_identity(disk);
     Some(HardwareProbe {
-        vid: usb.map(|id| id.vid),
-        pid: usb.map(|id| id.pid),
+        vid: usb.and_then(|id| id.vid),
+        pid: usb.and_then(|id| id.pid),
         transport: usb.map(|id| id.transport).unwrap_or(NativeTransport::Unknown),
         inquiry: (!probe.vendor.is_empty()).then_some(InquiryInfo {
             vendor: probe.vendor,
@@ -399,21 +444,23 @@ pub(super) fn hardware_probe(disk: u32) -> Option<HardwareProbe> {
 }
 
 pub(super) fn list_external_disks(_runner: &dyn CmdRunner) -> Vec<ExtDisk> {
-    (0..MAX_PHYSICAL_DRIVES)
-        .filter_map(|disk| {
+    setupapi_disk_map()
+        .into_iter()
+        .filter_map(|(disk, usb)| {
             let probe = query_disk(disk).ok()?;
             if !probe.usb && !probe.removable {
                 return None;
             }
-            let usb = setupapi_usb_identity(disk);
             Some(ExtDisk {
                 n: disk,
                 size: probe.size,
                 vid: usb
-                    .map(|id| format!("{:04x}", id.vid))
+                    .and_then(|id| id.vid)
+                    .map(|vid| format!("{vid:04x}"))
                     .unwrap_or_else(|| "xxxx".into()),
                 pid: usb
-                    .map(|id| format!("{:04x}", id.pid))
+                    .and_then(|id| id.pid)
+                    .map(|pid| format!("{pid:04x}"))
                     .unwrap_or_else(|| "xxxx".into()),
                 proto: if probe.usb { "USB".into() } else { "Removable".into() },
             })
@@ -426,9 +473,18 @@ pub(super) fn disk_total_sectors(_runner: &dyn CmdRunner, disk: u32) -> Option<u
 }
 
 pub(super) fn usb_vid_pid(_runner: &dyn CmdRunner, disk: u32) -> (String, String) {
-    setupapi_usb_identity(disk)
-        .map(|id| (format!("{:04x}", id.vid), format!("{:04x}", id.pid)))
-        .unwrap_or_else(|| ("xxxx".into(), "xxxx".into()))
+    let Some(identity) = setupapi_usb_identity(disk) else {
+        return ("xxxx".into(), "xxxx".into());
+    };
+    let vid = identity
+        .vid
+        .map(|value| format!("{value:04x}"))
+        .unwrap_or_else(|| "xxxx".into());
+    let pid = identity
+        .pid
+        .map(|value| format!("{value:04x}"))
+        .unwrap_or_else(|| "xxxx".into());
+    (vid, pid)
 }
 
 fn volume_extents(handle: HANDLE) -> io::Result<Vec<u32>> {
@@ -471,7 +527,12 @@ fn enumerate_volumes() -> io::Result<Vec<String>> {
         }
         let ok = unsafe { FindNextVolumeW(find, buffer.as_mut_ptr(), buffer.len() as u32) };
         if ok == 0 {
-            break;
+            let error = unsafe { GetLastError() };
+            if error == ERROR_NO_MORE_FILES {
+                break;
+            }
+            unsafe { FindVolumeClose(find) };
+            return Err(io::Error::from_raw_os_error(error as i32));
         }
     }
     unsafe { FindVolumeClose(find) };
@@ -482,14 +543,53 @@ fn volume_open_path(volume_name: &str) -> String {
     volume_name.trim_end_matches('\\').to_string()
 }
 
+fn windows_volume_name() -> Option<String> {
+    let mut windows_dir = vec![0u16; 32768];
+    let n = unsafe { GetWindowsDirectoryW(windows_dir.as_mut_ptr(), windows_dir.len() as u32) };
+    if n == 0 || n as usize >= windows_dir.len() {
+        return None;
+    }
+    windows_dir.truncate(n as usize);
+    windows_dir.push(0);
+
+    let mut mount = vec![0u16; 32768];
+    let ok = unsafe {
+        GetVolumePathNameW(
+            windows_dir.as_ptr(),
+            mount.as_mut_ptr(),
+            mount.len() as u32,
+        )
+    };
+    if ok == 0 {
+        return None;
+    }
+    let mount_len = mount.iter().position(|&c| c == 0)?;
+    mount.truncate(mount_len + 1);
+
+    let mut volume = vec![0u16; 32768];
+    let ok = unsafe {
+        GetVolumeNameForVolumeMountPointW(
+            mount.as_ptr(),
+            volume.as_mut_ptr(),
+            volume.len() as u32,
+        )
+    };
+    if ok == 0 {
+        return None;
+    }
+    let len = volume.iter().position(|&c| c == 0)?;
+    Some(String::from_utf16_lossy(&volume[..len]))
+}
+
 fn system_disk_numbers() -> Vec<u32> {
-    // SystemDrive 是 Windows 自身设置的进程环境变量（典型值 C:）。
-    // 这里仅用于额外 fail-closed 保护；真正写盘仍要求 USB 外接盘 + LBA 身份复核。
-    let Some(system_drive) = std::env::var_os("SystemDrive") else {
+    let Some(volume) = windows_volume_name() else {
         return vec![];
     };
-    let path = format!(r"\\.\{}", system_drive.to_string_lossy());
-    let Ok(handle) = open_handle(&path, 0, FILE_SHARE_READ | FILE_SHARE_WRITE) else {
+    let Ok(handle) = open_handle(
+        &volume_open_path(&volume),
+        0,
+        FILE_SHARE_READ | FILE_SHARE_WRITE,
+    ) else {
         return vec![];
     };
     volume_extents(handle.get()).unwrap_or_default()
@@ -523,19 +623,34 @@ pub(super) fn prepare_write(_runner: &dyn CmdRunner, disk: u32) -> io::Result<Wr
     let mut locked = Vec::new();
     for volume in enumerate_volumes()? {
         let path = volume_open_path(&volume);
-        let Ok(handle) = open_handle(
-            &path,
-            GENERIC_READ | GENERIC_WRITE,
-            FILE_SHARE_READ | FILE_SHARE_WRITE,
-        ) else {
-            continue;
-        };
-        let Ok(extents) = volume_extents(handle.get()) else {
-            continue;
-        };
+        // 先用 access=0 查询归属，避免“打不开读写就跳过”造成目标卷漏锁。
+        let query = open_handle(&path, 0, FILE_SHARE_READ | FILE_SHARE_WRITE).map_err(|error| {
+            io::Error::new(
+                error.kind(),
+                format!("无法查询卷 {volume} 的磁盘归属: {error}"),
+            )
+        })?;
+        let extents = volume_extents(query.get()).map_err(|error| {
+            io::Error::new(
+                error.kind(),
+                format!("无法读取卷 {volume} 的 disk extents: {error}"),
+            )
+        })?;
         if !extents.contains(&disk) {
             continue;
         }
+        drop(query);
+        let handle = open_handle(
+            &path,
+            GENERIC_READ | GENERIC_WRITE,
+            FILE_SHARE_READ | FILE_SHARE_WRITE,
+        )
+        .map_err(|error| {
+            io::Error::new(
+                error.kind(),
+                format!("目标卷 {volume} 无法以读写方式打开: {error}"),
+            )
+        })?;
         device_io(handle.get(), FSCTL_LOCK_VOLUME, None, None).map_err(|error| {
             io::Error::new(
                 error.kind(),
@@ -695,10 +810,32 @@ mod tests {
         assert_eq!(
             usb_identity_from_instance_chain(&ids),
             Some(UsbIdentity {
-                vid: 0x3535,
-                pid: 0x6300,
+                vid: Some(0x3535),
+                pid: Some(0x6300),
                 transport: NativeTransport::Uas,
             })
         );
+    }
+
+    #[test]
+    fn transport_is_preserved_when_vid_pid_are_unavailable() {
+        let ids = vec![r"UASPSTOR\Disk&Ven_aigo&Prod_U335&Rev_PMAP".to_string()];
+        assert_eq!(
+            usb_identity_from_instance_chain(&ids),
+            Some(UsbIdentity {
+                vid: None,
+                pid: None,
+                transport: NativeTransport::Uas,
+            })
+        );
+    }
+
+    #[test]
+    fn parses_windows_disk_selectors_case_insensitively() {
+        assert_eq!(parse_disk_selector("7").unwrap(), 7);
+        assert_eq!(parse_disk_selector("PhysicalDrive12").unwrap(), 12);
+        assert_eq!(parse_disk_selector(r"\\.\physicaldrive3").unwrap(), 3);
+        assert!(parse_disk_selector("C:").is_err());
+        assert!(parse_disk_selector("PhysicalDrive").is_err());
     }
 }
