@@ -743,15 +743,9 @@ pub fn run() -> i32 {
             print!("{}", completion::script(shell));
             EXIT_OK
         }
-        Parsed::InternalComplete {
-            kind,
-            onlyid,
-            backup_dir,
-        } => {
+        Parsed::InternalComplete { kind, backup_dir } => {
             let probe = ReadProbeCache::new(&runner);
-            for value in
-                completion::dynamic_values(&kind, onlyid.as_deref(), backup_dir.as_deref(), &probe)
-            {
+            for value in completion::dynamic_values(&kind, backup_dir.as_deref(), &probe) {
                 println!("{}", value);
             }
             EXIT_OK

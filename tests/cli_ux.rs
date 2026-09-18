@@ -174,36 +174,37 @@ fn completion_scripts_and_dynamic_values_are_available() {
         );
         assert!(stdout.contains("inspect"));
         assert!(stdout.contains("backup"));
-        assert!(stdout.contains("metainfo") || stdout.contains("meta"));
+        assert!(stdout.contains("info"));
+        assert!(stdout.contains("backup create"));
+        assert!(stdout.contains("backup restore"));
+        assert!(!stdout.contains("--onlyid"), "{shell} leaked v1 --onlyid");
+        assert!(!stdout.contains("--index"), "{shell} leaked v1 --index");
+        assert!(!stdout.contains("metainfo"), "{shell} leaked v1 metainfo");
     }
 
-    let onlyids = Command::new(env!("CARGO_BIN_EXE_edpcli"))
-        .args(["__complete", "onlyid", "--backup-dir"])
+    let numbers = Command::new(env!("CARGO_BIN_EXE_edpcli"))
+        .args(["__complete", "backup-number", "--backup-dir"])
         .arg(&tmp.0)
         .output()
         .unwrap();
-    assert_eq!(onlyids.status.code(), Some(0));
-    assert!(String::from_utf8_lossy(&onlyids.stdout)
-        .lines()
-        .any(|s| s == "1402259934"));
-
-    let indices = Command::new(env!("CARGO_BIN_EXE_edpcli"))
-        .args([
-            "__complete",
-            "index",
-            "--onlyid",
-            "1402259934",
-            "--backup-dir",
-        ])
-        .arg(&tmp.0)
-        .output()
-        .unwrap();
-    assert_eq!(indices.status.code(), Some(0));
-    let lines: Vec<_> = String::from_utf8_lossy(&indices.stdout)
+    assert_eq!(numbers.status.code(), Some(0));
+    let lines: Vec<_> = String::from_utf8_lossy(&numbers.stdout)
         .lines()
         .map(str::to_string)
         .collect();
     assert_eq!(lines, vec!["1", "2"]);
+
+    let files = Command::new(env!("CARGO_BIN_EXE_edpcli"))
+        .args(["__complete", "backup-file", "--backup-dir"])
+        .arg(&tmp.0)
+        .output()
+        .unwrap();
+    assert_eq!(files.status.code(), Some(0));
+    let file_lines: Vec<_> = String::from_utf8_lossy(&files.stdout)
+        .lines()
+        .map(str::to_string)
+        .collect();
+    assert_eq!(file_lines.len(), 2);
 }
 
 #[test]

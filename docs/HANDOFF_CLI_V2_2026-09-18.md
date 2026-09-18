@@ -53,7 +53,7 @@ Phase 2 本地门禁：
 - `cargo test --all-targets`：PASS；
 - `cargo clippy --all-targets -- -D warnings`：PASS。
 
-旧 completion 仍有 v1 补全词，这是 Phase 8 的明确清理项，不属于执行兼容路径。
+completion 的旧 v1 补全词已在 Phase 8 全部清理。
 
 ### Phase 3：info — 已完成
 
@@ -172,6 +172,31 @@ Phase 7 本地门禁：
 - inspect CLI：3/3 PASS；
 - CLI UX：10/10 PASS。
 
+### Phase 8：completion / 文档 / 技术债清理 — 已完成
+
+- zsh / bash / fish completion 已与 v2 parser 对齐：
+  - 一级命令仅保留 `list/info/apply/backup/inspect/convert/completion/version/help`；
+  - backup 子命令仅保留 `create/list/restore/verify/delete/prune`；
+  - 动态候选改为物理盘、全局备份编号、备份文件名、LBA0-13；
+  - 用户级 onlyid/index 动态补全已删除；
+- `__complete` 内部协议同步删除 onlyid/index 输入，只保留 v2 所需动态候选；
+- README 与 `docs/USAGE.md` 已全面重写为 v2 工作流，不再教授旧 CLI grammar；
+- 新增 `tests/cli_v2_surface_guard.rs`，自动检查：
+  - README / USAGE 不重新出现已删除的 v1 命令与参数；
+  - 全局/子命令 help 不暴露旧 grammar；
+  - 三种 shell completion 不暴露旧 grammar；
+  - 用户文档必须包含 v2 核心任务命令；
+- 全仓旧 grammar 审计后，剩余命中仅限 parser 的明确迁移错误提示和“旧语法必须拒绝”
+  的负向测试，不存在兼容执行路径。
+
+Phase 8 本地门禁：
+
+- `cargo fmt --all -- --check`：PASS；
+- `cargo test --test cli_v2_surface_guard`：PASS；
+- completion 定向测试：PASS；
+- `cargo test --all-targets`：PASS；
+- `cargo clippy --all-targets -- -D warnings`：PASS。
+
 ## 下一位 AI 从这里开始
 
 1. 先读：
@@ -179,10 +204,10 @@ Phase 7 本地门禁：
    - `docs/RELEASE.md`
    - `docs/USAGE.md`
 2. 检查 `git status --short --branch`，禁止 reset/clean。
-3. 从 **Phase 8 completion / 文档 / 技术债清理** 继续，仍须测试先行；不要削弱 selector pinning、系统盘
-   fail-closed 或 onlyid 防串盘。
-4. Phase 8 必须让 zsh/bash/fish completion 与 v2 grammar 完全一致，删除动态 onlyid/index
-   用户补全；全面重写 README/USAGE，并增加旧 grammar 门禁防止后续重新引入。
+3. 从 **Phase 9 v2 发布验收** 继续；先完成本地全量复验，再把 `Cargo.toml`
+   升到 `2.0.0` 并同步锁文件/版本断言。
+4. push 后必须等 PR 的 6 架构 CI + 4 套 virtual-disk HIL 全绿；随后才能合并 main、
+   复验 main、打 `v2.0.0` tag、验收 7 个 Release 包并在本机安装 macOS arm64 包。
 5. 小 commit、及时 push，阶段完成后更新本交接文档。
 
 ## 已冻结的关键决策

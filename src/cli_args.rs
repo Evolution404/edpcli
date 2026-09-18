@@ -65,7 +65,6 @@ pub enum Parsed {
     },
     InternalComplete {
         kind: String,
-        onlyid: Option<String>,
         backup_dir: Option<String>,
     },
     Version {
@@ -230,14 +229,6 @@ fn parse_lbas(s: &str) -> Result<Vec<u32>, String> {
     Ok(out)
 }
 
-fn parse_onlyid(s: &str) -> Result<String, String> {
-    let digits = s.strip_prefix('-').unwrap_or(s);
-    if digits.is_empty() || !digits.bytes().all(|b| b.is_ascii_digit()) {
-        return Err(format!("错误: --onlyid 须为整数形式, 得到 {}", s));
-    }
-    Ok(s.to_string())
-}
-
 fn flag_name(a: &str) -> &str {
     a.split('=').next().unwrap_or(a)
 }
@@ -300,15 +291,10 @@ pub fn parse_args(argv: &[String]) -> Result<Parsed, String> {
             let Some(kind) = rest.first().cloned() else {
                 return Err("错误: __complete 缺少候选类型".into());
             };
-            let mut onlyid = None;
             let mut backup_dir = None;
             let mut i = 1usize;
             while i < rest.len() {
                 match flag_name(&rest[i]) {
-                    "--onlyid" => {
-                        let v = take_value(&rest, &mut i, "--onlyid")?;
-                        set_once(&mut onlyid, parse_onlyid(&v)?, "--onlyid")?;
-                    }
                     "--backup-dir" => {
                         let v = take_value(&rest, &mut i, "--backup-dir")?;
                         set_once(&mut backup_dir, v, "--backup-dir")?;
@@ -317,11 +303,7 @@ pub fn parse_args(argv: &[String]) -> Result<Parsed, String> {
                 }
                 i += 1;
             }
-            Ok(Parsed::InternalComplete {
-                kind,
-                onlyid,
-                backup_dir,
-            })
+            Ok(Parsed::InternalComplete { kind, backup_dir })
         }
         "list" => {
             if rest.iter().any(|a| a == "-h" || a == "--help") {
