@@ -20,6 +20,23 @@ edpcli inspect    高级：检查底层 LBA/hex 数据
 [`docs/USAGE.md`](docs/USAGE.md)。版本策略和 Release 门禁见
 [`docs/RELEASE.md`](docs/RELEASE.md)。
 
+## 安装 / 升级
+
+macOS Apple Silicon 推荐直接从 GitHub 最新正式 Release 安装，并先校验 SHA-256：
+
+```bash
+tmp="$(mktemp -d)" && cd "$tmp"
+gh release download --repo Evolution404/edpcli \
+  --pattern 'edpcli-v*-macos-arm64.tar.gz' \
+  --pattern 'edpcli-v*-macos-arm64.tar.gz.sha256'
+shasum -a 256 -c edpcli-v*-macos-arm64.tar.gz.sha256
+tar -xzf edpcli-v*-macos-arm64.tar.gz
+sudo install -m 0755 edpcli /usr/local/bin/edpcli
+edpcli version
+```
+
+其他平台/架构的安装命令见 [`docs/USAGE.md`](docs/USAGE.md)。
+
 ## 快速使用
 
 ```bash

@@ -88,7 +88,13 @@ fn v2_surface_contains_required_task_commands() {
 
 #[test]
 fn package_version_is_cli_v2_major() {
-    assert_eq!(env!("CARGO_PKG_VERSION"), "2.0.0");
+    assert_eq!(
+        env!("CARGO_PKG_VERSION")
+            .split('.')
+            .next()
+            .expect("package version major"),
+        "2"
+    );
 }
 
 #[test]
