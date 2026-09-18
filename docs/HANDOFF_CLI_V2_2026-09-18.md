@@ -197,6 +197,25 @@ Phase 8 本地门禁：
 - `cargo test --all-targets`：PASS；
 - `cargo clippy --all-targets -- -D warnings`：PASS。
 
+### Phase 9：v2 发布验收 — 进行中
+
+- `Cargo.toml` / `Cargo.lock` 已同步升级到 `2.0.0`；
+- 新增版本门禁，测试要求 `CARGO_PKG_VERSION == 2.0.0`；
+- 版本升级后的本地发布前门禁：
+  - `cargo fmt --all -- --check`：PASS；
+  - `cargo test --all-targets`：PASS；
+  - `cargo clippy --all-targets -- -D warnings`：PASS；
+  - `cargo build --release`：PASS；
+  - release 二进制 `--version` / `version`：确认输出 `2.0.0`、macOS arm64、
+    `aarch64-apple-darwin`、Rust 1.98.1。
+- 当前剩余发布门禁：
+  1. 提交并 push 版本升级，clean rebuild 验证构建 Git 身份；
+  2. PR #6 的 6 架构 Rust CI + 4 套 virtual-disk HIL 全绿；
+  3. 合并 main 后复验 main；
+  4. 创建并 push `v2.0.0` tag；
+  5. 验收 7 个 Release 包、SHA-256、SBOM、manifest 和各架构；
+  6. 本机安装正式 macOS arm64 包并 smoke `version/list/info/backup list`。
+
 ## 下一位 AI 从这里开始
 
 1. 先读：
@@ -204,8 +223,7 @@ Phase 8 本地门禁：
    - `docs/RELEASE.md`
    - `docs/USAGE.md`
 2. 检查 `git status --short --branch`，禁止 reset/clean。
-3. 从 **Phase 9 v2 发布验收** 继续；先完成本地全量复验，再把 `Cargo.toml`
-   升到 `2.0.0` 并同步锁文件/版本断言。
+3. 继续 **Phase 9 v2 发布验收**；版本已升到 `2.0.0` 且本地门禁已通过。
 4. push 后必须等 PR 的 6 架构 CI + 4 套 virtual-disk HIL 全绿；随后才能合并 main、
    复验 main、打 `v2.0.0` tag、验收 7 个 Release 包并在本机安装 macOS arm64 包。
 5. 小 commit、及时 push，阶段完成后更新本交接文档。

@@ -85,3 +85,8 @@ fn v2_surface_contains_required_task_commands() {
         assert!(usage.contains(required), "USAGE missing {required}");
     }
 }
+
+#[test]
+fn package_version_is_cli_v2_major() {
+    assert_eq!(env!("CARGO_PKG_VERSION"), "2.0.0");
+}
