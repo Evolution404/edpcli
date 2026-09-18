@@ -12,7 +12,6 @@
 //! 实测记录(2026-08-27, 均内网免密成功): aigo U335 128G / aigo U320 32G /
 //! Kingston DT3.0 64G (每盘改前自动备份, 可随时 edpcli backup restore 还原)。
 
-use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
@@ -833,21 +832,12 @@ pub(crate) fn argv_with_backup_dir_for_elevation(backup_dir_flag: Option<&str>) 
 }
 
 fn list_needs_elevation(rows: &[Row], elevated: bool, has_sentinel: bool) -> bool {
-    rows.iter().any(|row| row.denied) && !elevated && !has_sentinel
+    crate::application::device_scan_needs_elevation(rows, elevated, has_sentinel)
 }
 
 fn list_flow(runner: &SysRunner, backup_dir_flag: Option<String>) -> i32 {
     let bak = diskio::resolve_backup_dir(backup_dir_flag.as_deref());
-    // 一次 list 扫描中每个物理盘只打开一个只读 fd；disk_scan 内部再按 LBA 缓存，
-    // 因此既避免重复 open，也避免同一扇区被重复读取。这里只用于只读展示路径。
-    let devices = RefCell::new(diskio::ReadOnlyDiskPool::new(|disk| {
-        FileDev::open_rdonly(&raw_path(disk))
-    }));
-    let read_disk = |disk: u32, lba: u32| -> io::Result<Vec<u8>> {
-        devices.borrow_mut().read_sector(disk, lba)
-    };
-    let probe = ReadProbeCache::new(runner);
-    let rows = scan_disks(&probe, &bak, &read_disk);
+    let rows = crate::application::scan_device_dashboard(runner, &bak);
 
     // 先无特权只读探测；只有真实遇到 PermissionDenied 才自动请求平台管理员授权。
     // 无外接盘时不会无意义弹授权提示；需要权限时由平台层负责交互并重执行自身。
