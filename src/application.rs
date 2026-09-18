@@ -91,7 +91,6 @@ pub fn scan_backup_workspace(root: &Path) -> Vec<BackupWorkspaceItem> {
         .collect()
 }
 
-
 /// Convert a resolved disk number into the platform-native selector before crossing a
 /// privilege/re-exec boundary. Frontends must not encode platform device paths themselves.
 pub fn pin_disk_selector(disk: u32) -> String {
