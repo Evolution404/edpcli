@@ -1,0 +1,107 @@
+use std::fs;
+use std::path::PathBuf;
+use std::process::Command;
+use std::time::{SystemTime, UNIX_EPOCH};
+
+use edpcli::common::{EXIT_OK, EXIT_TARGET, SECTOR};
+
+fn run(args: &[&str]) -> std::process::Output {
+    Command::new(env!("CARGO_BIN_EXE_edpcli"))
+        .args(args)
+        .output()
+        .expect("run edpcli")
+}
+
+fn assert_invalid_target_is_rejected_before_write(args: &[&str]) {
+    let output = run(args);
+    assert_eq!(
+        output.status.code(),
+        Some(EXIT_TARGET),
+        "args={args:?}\nstdout={}\nstderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+struct TempDir(PathBuf);
+
+impl TempDir {
+    fn new(label: &str) -> Self {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!(
+            "edpcli-platform-matrix-{label}-{}-{nonce}",
+            std::process::id()
+        ));
+        fs::create_dir_all(&path).expect("create temp dir");
+        Self(path)
+    }
+}
+
+impl Drop for TempDir {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.0);
+    }
+}
+
+fn synthetic_backup(dir: &TempDir) -> PathBuf {
+    let path = dir.0.join(
+        "disk6_123456_vid3535_pid6300_disk&ven_aigo&prod_u335_onlyid1987718388_20260918_120000.bin",
+    );
+    let data = vec![0u8; 14 * SECTOR];
+    fs::write(&path, &data).expect("write backup");
+    fs::write(
+        edpcli::diskio::md5_sidecar_path(&path),
+        format!("{}\n", edpcli::md5::md5_hex(&data)),
+    )
+    .expect("write md5");
+    path
+}
+
+fn assert_ok(output: std::process::Output, context: &str) {
+    assert_eq!(
+        output.status.code(),
+        Some(EXIT_OK),
+        "{context}\nstdout={}\nstderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn list_is_read_only_and_available_on_every_platform() {
+    assert_ok(run(&["list"]), "list");
+}
+
+#[test]
+fn meta_inspect_and_backup_work_offline_on_every_platform() {
+    let dir = TempDir::new("offline");
+    let backup = synthetic_backup(&dir);
+    let backup_s = backup.to_str().expect("utf8 backup path");
+    let dir_s = dir.0.to_str().expect("utf8 backup dir");
+
+    assert_ok(run(&["meta", backup_s]), "meta backup");
+    assert_ok(run(&["inspect", backup_s, "8"]), "inspect backup");
+    assert_ok(
+        run(&["backup", "verify", backup_s, "--backup-dir", dir_s]),
+        "backup verify",
+    );
+}
+
+#[test]
+fn apply_rejects_nonexistent_explicit_disk_on_every_platform() {
+    assert_invalid_target_is_rejected_before_write(&[
+        "apply",
+        "--disk",
+        "4294967295",
+        "--force",
+        "--yes",
+    ]);
+}
+
+#[test]
+fn restore_rejects_nonexistent_explicit_disk_on_every_platform() {
+    assert_invalid_target_is_rejected_before_write(&["restore", "--disk", "4294967295", "--yes"]);
+}

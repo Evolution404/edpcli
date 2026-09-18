@@ -22,7 +22,10 @@ pub struct EdpCliError {
 
 impl EdpCliError {
     pub fn new(code: i32, msg: impl Into<String>) -> Self {
-        Self { code, msg: msg.into() }
+        Self {
+            code,
+            msg: msg.into(),
+        }
     }
 }
 
@@ -42,7 +45,7 @@ pub fn group_digits(n: u64) -> String {
     let len = bytes.len();
     let mut out = String::with_capacity(len + len / 3);
     for (i, b) in bytes.iter().enumerate() {
-        if i > 0 && (len - i) % 3 == 0 {
+        if i > 0 && (len - i).is_multiple_of(3) {
             out.push(',');
         }
         out.push(*b as char);
@@ -62,7 +65,11 @@ pub fn py_round_half_even(x: f64) -> i64 {
     } else {
         // 恰为 .5: 取偶数邻域
         let lo = floor as i64;
-        if lo % 2 == 0 { lo } else { lo + 1 }
+        if lo % 2 == 0 {
+            lo
+        } else {
+            lo + 1
+        }
     }
 }
 

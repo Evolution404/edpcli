@@ -7,7 +7,7 @@ use std::collections::BTreeMap;
 use std::fs;
 
 use common::*;
-use edpcli::common::{SECTOR, EXIT_INTERMEDIATE, EXIT_ROLLED_BACK};
+use edpcli::common::{EXIT_INTERMEDIATE, EXIT_ROLLED_BACK, SECTOR};
 use edpcli::diskio::{atomic_write_sectors, pwrite_loop, FileDev, SectorDev};
 
 struct Image {
@@ -31,7 +31,12 @@ fn setup() -> Option<Image> {
     ]
     .into_iter()
     .collect();
-    Some(Image { tmp, path, base, patch })
+    Some(Image {
+        tmp,
+        path,
+        base,
+        patch,
+    })
 }
 
 fn img_bytes(path: &std::path::Path) -> Vec<u8> {
@@ -118,16 +123,23 @@ fn success_writes_all_and_verifies() {
         eprintln!("跳过: 真实备份不可用");
         return;
     };
-    let mut dev = FileDev::open_rdwr(im.path.to_str().unwrap(), std::time::Duration::from_secs(1)).unwrap();
+    let mut dev =
+        FileDev::open_rdwr(im.path.to_str().unwrap(), std::time::Duration::from_secs(1)).unwrap();
     atomic_write_sectors(&mut dev, &im.patch).unwrap();
     let got = img_bytes(&im.path);
     assert_eq!(&got[0..SECTOR], &im.patch[&0][..]);
     for lba in [6u32, 7, 12] {
-        assert_eq!(&got[lba as usize * SECTOR..(lba as usize + 1) * SECTOR], &im.patch[&lba][..]);
+        assert_eq!(
+            &got[lba as usize * SECTOR..(lba as usize + 1) * SECTOR],
+            &im.patch[&lba][..]
+        );
     }
     // 未列入的扇区一律不动
     assert_eq!(&got[SECTOR..6 * SECTOR], &im.base[SECTOR..6 * SECTOR]);
-    assert_eq!(&got[8 * SECTOR..12 * SECTOR], &im.base[8 * SECTOR..12 * SECTOR]);
+    assert_eq!(
+        &got[8 * SECTOR..12 * SECTOR],
+        &im.base[8 * SECTOR..12 * SECTOR]
+    );
 }
 
 #[test]
@@ -136,8 +148,13 @@ fn midway_failure_rolls_back() {
         eprintln!("跳过: 真实备份不可用");
         return;
     };
-    let inner = FileDev::open_rdwr(im.path.to_str().unwrap(), std::time::Duration::from_secs(1)).unwrap();
-    let mut dev = FlakyDev { inner, fail_on: vec![3], calls: 0 }; // 第 3 次写(LBA12)失败
+    let inner =
+        FileDev::open_rdwr(im.path.to_str().unwrap(), std::time::Duration::from_secs(1)).unwrap();
+    let mut dev = FlakyDev {
+        inner,
+        fail_on: vec![3],
+        calls: 0,
+    }; // 第 3 次写(LBA12)失败
     let e = atomic_write_sectors(&mut dev, &im.patch).unwrap_err();
     assert_eq!(e.code, EXIT_ROLLED_BACK, "{}", e.msg);
     assert!(e.msg.contains("回滚"), "{}", e.msg);
@@ -150,9 +167,15 @@ fn verify_failure_rolls_back() {
         eprintln!("跳过: 真实备份不可用");
         return;
     };
-    let inner = FileDev::open_rdwr(im.path.to_str().unwrap(), std::time::Duration::from_secs(1)).unwrap();
+    let inner =
+        FileDev::open_rdwr(im.path.to_str().unwrap(), std::time::Duration::from_secs(1)).unwrap();
     // 校验阶段(4 扇已写完)对 LBA12 返回错误数据
-    let mut dev = TamperReadDev { inner, written: 0, threshold: 4, tampered: false };
+    let mut dev = TamperReadDev {
+        inner,
+        written: 0,
+        threshold: 4,
+        tampered: false,
+    };
     let e = atomic_write_sectors(&mut dev, &im.patch).unwrap_err();
     assert_eq!(e.code, EXIT_ROLLED_BACK, "{}", e.msg);
     assert!(e.msg.contains("回滚"), "{}", e.msg);
@@ -166,8 +189,13 @@ fn rollback_failure_reports_intermediate() {
         return;
     };
     // 正写与回滚写全部失败 → 中间态(退出码 6)
-    let inner = FileDev::open_rdwr(im.path.to_str().unwrap(), std::time::Duration::from_secs(1)).unwrap();
-    let mut dev = FlakyDev { inner, fail_on: vec![1, 2, 3, 4], calls: 0 };
+    let inner =
+        FileDev::open_rdwr(im.path.to_str().unwrap(), std::time::Duration::from_secs(1)).unwrap();
+    let mut dev = FlakyDev {
+        inner,
+        fail_on: vec![1, 2, 3, 4],
+        calls: 0,
+    };
     let e = atomic_write_sectors(&mut dev, &im.patch).unwrap_err();
     assert_eq!(e.code, EXIT_INTERMEDIATE, "{}", e.msg);
     assert!(e.msg.contains("中间状态"), "{}", e.msg);
@@ -179,11 +207,8 @@ fn sync_failure_enters_rollback_before_reporting_success() {
         eprintln!("跳过: 真实备份不可用");
         return;
     };
-    let inner = FileDev::open_rdwr(
-        im.path.to_str().unwrap(),
-        std::time::Duration::from_secs(1),
-    )
-    .unwrap();
+    let inner =
+        FileDev::open_rdwr(im.path.to_str().unwrap(), std::time::Duration::from_secs(1)).unwrap();
     let mut dev = SyncFailDev {
         inner,
         sync_calls: 0,
@@ -202,11 +227,8 @@ fn unsupported_sync_is_rejected_before_any_write() {
         eprintln!("跳过: 真实备份不可用");
         return;
     };
-    let inner = FileDev::open_rdwr(
-        im.path.to_str().unwrap(),
-        std::time::Duration::from_secs(1),
-    )
-    .unwrap();
+    let inner =
+        FileDev::open_rdwr(im.path.to_str().unwrap(), std::time::Duration::from_secs(1)).unwrap();
     let mut dev = SyncFailDev {
         inner,
         sync_calls: 0,
@@ -227,16 +249,21 @@ fn rejects_non_sector_sized_patch_before_any_write() {
     };
     let mut malformed = BTreeMap::new();
     malformed.insert(6u32, vec![0xAA; SECTOR + 1]);
-    let mut dev = FileDev::open_rdwr(
-        im.path.to_str().unwrap(),
-        std::time::Duration::from_secs(1),
-    )
-    .unwrap();
+    let mut dev =
+        FileDev::open_rdwr(im.path.to_str().unwrap(), std::time::Duration::from_secs(1)).unwrap();
 
     let e = atomic_write_sectors(&mut dev, &malformed).unwrap_err();
     assert_eq!(e.code, edpcli::common::EXIT_IO, "{}", e.msg);
-    assert!(e.msg.contains("512B") || e.msg.contains("扇区"), "{}", e.msg);
-    assert_eq!(img_bytes(&im.path), im.base, "非法 patch 必须在第一笔写入前拒绝");
+    assert!(
+        e.msg.contains("512B") || e.msg.contains("扇区"),
+        "{}",
+        e.msg
+    );
+    assert_eq!(
+        img_bytes(&im.path),
+        im.base,
+        "非法 patch 必须在第一笔写入前拒绝"
+    );
 }
 
 #[test]
@@ -247,15 +274,16 @@ fn rejects_patch_outside_metadata_lba_range_before_any_write() {
     fs::write(&path, &base).unwrap();
     let mut malformed = BTreeMap::new();
     malformed.insert(14u32, vec![0xAA; SECTOR]);
-    let mut dev = FileDev::open_rdwr(
-        path.to_str().unwrap(),
-        std::time::Duration::from_secs(1),
-    )
-    .unwrap();
+    let mut dev =
+        FileDev::open_rdwr(path.to_str().unwrap(), std::time::Duration::from_secs(1)).unwrap();
 
     let e = atomic_write_sectors(&mut dev, &malformed).unwrap_err();
     assert_eq!(e.code, edpcli::common::EXIT_IO, "{}", e.msg);
-    assert!(e.msg.contains("0-13") || e.msg.contains("LBA14"), "{}", e.msg);
+    assert!(
+        e.msg.contains("0-13") || e.msg.contains("LBA14"),
+        "{}",
+        e.msg
+    );
     assert_eq!(img_bytes(&path), base, "LBA0-13 之外必须在第一笔写入前拒绝");
 }
 
@@ -267,15 +295,13 @@ fn pwrite_loop_handles_short_writes() {
     fs::write(&p, vec![0u8; 14 * SECTOR]).unwrap();
     {
         use std::fs::OpenOptions;
-        use std::os::unix::fs::FileExt;
-        let f = OpenOptions::new().write(true).open(&p).unwrap();
-        let mut pos: usize = 0;
+        use std::io::{Seek, SeekFrom, Write};
+        let mut f = OpenOptions::new().write(true).open(&p).unwrap();
         pwrite_loop(
-            |buf, _off| {
+            |buf, off| {
                 let n = (buf.len() / 2).max(1);
-                f.write_at(&buf[..n], 6 * SECTOR as u64 + pos as u64)?;
-                pos += n;
-                Ok(n)
+                f.seek(SeekFrom::Start(off))?;
+                f.write(&buf[..n])
             },
             &vec![0xAA; SECTOR],
             6 * SECTOR as u64,

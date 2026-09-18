@@ -16,7 +16,11 @@ fn two_netac_backups() -> Option<TmpDir> {
         let dst = tmp.0.join(name);
         fs::copy(&src, &dst).unwrap();
         let data = fs::read(&dst).unwrap();
-        fs::write(format!("{}.md5", dst.display()), format!("{}\n", md5_hex(&data))).unwrap();
+        fs::write(
+            format!("{}.md5", dst.display()),
+            format!("{}\n", md5_hex(&data)),
+        )
+        .unwrap();
     }
     Some(tmp)
 }
@@ -29,16 +33,16 @@ fn inspect_onlyid_without_index_lists_choices_instead_of_usage_error() {
     };
     let out = Command::new(env!("CARGO_BIN_EXE_edpcli"))
         .env("NO_COLOR", "1")
-        .args([
-            "inspect",
-            "--onlyid",
-            "1402259934",
-            "--backup-dir",
-        ])
+        .args(["inspect", "--onlyid", "1402259934", "--backup-dir"])
         .arg(&tmp.0)
         .output()
         .expect("run inspect picker hint");
-    assert_eq!(out.status.code(), Some(0), "{}", String::from_utf8_lossy(&out.stderr));
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(stdout.contains("onlyid=1402259934"));
     assert!(stdout.contains("[1]"));
@@ -60,7 +64,12 @@ fn bare_backup_defaults_to_list_and_accepts_onlyid_without_action() {
         let mut cmd = Command::new(env!("CARGO_BIN_EXE_edpcli"));
         cmd.env("NO_COLOR", "1").args(args).arg(&tmp.0);
         let out = cmd.output().expect("run backup default list");
-        assert_eq!(out.status.code(), Some(0), "{}", String::from_utf8_lossy(&out.stderr));
+        assert_eq!(
+            out.status.code(),
+            Some(0),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
         let stdout = String::from_utf8_lossy(&out.stdout);
         assert!(stdout.contains("备份目录"));
         assert!(stdout.contains("onlyid=1402259934"));
@@ -82,7 +91,12 @@ fn metainfo_has_short_positional_backup_syntax_and_defaults_to_latest() {
         .arg(&tmp.0)
         .output()
         .unwrap();
-    assert_eq!(latest.status.code(), Some(0), "{}", String::from_utf8_lossy(&latest.stderr));
+    assert_eq!(
+        latest.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&latest.stderr)
+    );
     let stdout = String::from_utf8_lossy(&latest.stdout);
     assert!(stdout.contains("backup onlyid=1402259934 [1]"), "{stdout}");
     assert!(stdout.contains("Dept"), "{stdout}");
@@ -96,7 +110,12 @@ fn metainfo_has_short_positional_backup_syntax_and_defaults_to_latest() {
         .arg(&tmp.0)
         .output()
         .unwrap();
-    assert_eq!(second.status.code(), Some(0), "{}", String::from_utf8_lossy(&second.stderr));
+    assert_eq!(
+        second.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&second.stderr)
+    );
     assert!(String::from_utf8_lossy(&second.stdout).contains("backup onlyid=1402259934 [2]"));
 }
 
@@ -118,7 +137,12 @@ fn metainfo_accepts_backup_file_directly() {
         .arg(&file)
         .output()
         .unwrap();
-    assert_eq!(out.status.code(), Some(0), "{}", String::from_utf8_lossy(&out.stderr));
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(stdout.contains("Dept"), "{stdout}");
     assert!(stdout.contains("User"), "{stdout}");
@@ -137,7 +161,12 @@ fn focused_help_works_inside_subcommands() {
             .args(args)
             .output()
             .expect("run focused help");
-        assert_eq!(out.status.code(), Some(0), "{}", String::from_utf8_lossy(&out.stderr));
+        assert_eq!(
+            out.status.code(),
+            Some(0),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
         let stdout = String::from_utf8_lossy(&out.stdout);
         assert!(stdout.contains("用法:"));
         assert!(!stdout.contains("错误:"));
@@ -157,7 +186,10 @@ fn completion_scripts_and_dynamic_values_are_available() {
             .expect("render completion");
         assert_eq!(out.status.code(), Some(0));
         let stdout = String::from_utf8_lossy(&out.stdout);
-        assert!(stdout.contains("__complete"), "{shell} completion should use dynamic provider");
+        assert!(
+            stdout.contains("__complete"),
+            "{shell} completion should use dynamic provider"
+        );
         assert!(stdout.contains("inspect"));
         assert!(stdout.contains("backup"));
         assert!(stdout.contains("metainfo") || stdout.contains("meta"));
@@ -169,7 +201,9 @@ fn completion_scripts_and_dynamic_values_are_available() {
         .output()
         .unwrap();
     assert_eq!(onlyids.status.code(), Some(0));
-    assert!(String::from_utf8_lossy(&onlyids.stdout).lines().any(|s| s == "1402259934"));
+    assert!(String::from_utf8_lossy(&onlyids.stdout)
+        .lines()
+        .any(|s| s == "1402259934"));
 
     let indices = Command::new(env!("CARGO_BIN_EXE_edpcli"))
         .args([
@@ -183,7 +217,10 @@ fn completion_scripts_and_dynamic_values_are_available() {
         .output()
         .unwrap();
     assert_eq!(indices.status.code(), Some(0));
-    let lines: Vec<_> = String::from_utf8_lossy(&indices.stdout).lines().map(str::to_string).collect();
+    let lines: Vec<_> = String::from_utf8_lossy(&indices.stdout)
+        .lines()
+        .map(str::to_string)
+        .collect();
     assert_eq!(lines, vec!["1", "2"]);
 }
 
@@ -207,7 +244,12 @@ fn positional_backup_path_and_numbered_verify_follow_same_ux() {
         .arg("7")
         .output()
         .unwrap();
-    assert_eq!(inspect.status.code(), Some(0), "{}", String::from_utf8_lossy(&inspect.stderr));
+    assert_eq!(
+        inspect.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&inspect.stderr)
+    );
     assert!(String::from_utf8_lossy(&inspect.stdout).contains("EDPF magic"));
 
     let verify = Command::new(env!("CARGO_BIN_EXE_edpcli"))
@@ -224,7 +266,12 @@ fn positional_backup_path_and_numbered_verify_follow_same_ux() {
         .arg(&tmp.0)
         .output()
         .unwrap();
-    assert_eq!(verify.status.code(), Some(0), "{}", String::from_utf8_lossy(&verify.stderr));
+    assert_eq!(
+        verify.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&verify.stderr)
+    );
     let stdout = String::from_utf8_lossy(&verify.stdout);
     assert_eq!(stdout.lines().filter(|l| l.starts_with('✓')).count(), 1);
 }
@@ -244,6 +291,7 @@ fn contradictory_inspect_flags_fail_with_focused_help() {
     assert!(!stdout.contains("cems 加密 U 盘"));
 }
 
+#[cfg(unix)]
 #[test]
 fn piping_output_to_head_does_not_panic_on_broken_pipe() {
     let Some(tmp) = two_netac_backups() else {

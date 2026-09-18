@@ -1,11 +1,11 @@
 //! 外接盘发现、cems 只读探测与列表渲染。
 //!
-//! 这里集中 `diskutil/ioreg + LBA4/7/12` 的只读探测逻辑，顶层 CLI 只负责路由。
+//! 这里集中平台设备信息 + LBA4/7/12 的只读探测逻辑，顶层 CLI 只负责路由。
 
 use std::io;
 use std::path::Path;
 
-use crate::common::{fmt_gb, group_digits, EdpCliError, SECTOR, EXIT_IO};
+use crate::common::{fmt_gb, group_digits, EdpCliError, EXIT_IO, SECTOR};
 use crate::diskio::{self, find_backups, DiskFacts};
 use crate::identify::identify;
 use crate::sectors::{looks_nopwd, parse_lba12, EdpfPartition};
@@ -27,7 +27,7 @@ pub struct Row {
 }
 
 /// 外接盘一览数据: 编号/容量/接口; USB 盘再尽力识别 cems 身份、免密状态、
-/// EDPF 分区与备份份数。权限不足和读取异常分开记录，避免错误提示用户去 sudo。
+/// EDPF 分区与备份份数。权限不足和读取异常分开记录。
 pub fn scan_disks(
     runner: &dyn CmdRunner,
     backup_dir: &Path,
@@ -77,8 +77,7 @@ pub fn scan_disks(
                         read_exact(lba)
                             .map_err(|e| EdpCliError::new(EXIT_IO, format!("错误: {}", e)))
                     };
-                    row.is_nopwd = looks_nopwd(&read, did)
-                        .map_err(|e| io::Error::other(e.msg))?;
+                    row.is_nopwd = looks_nopwd(&read, did).map_err(|e| io::Error::other(e.msg))?;
                     let lba12 = read_exact(12)?;
                     row.partitions = parse_lba12(&lba12, did);
                     let tag = diskio::lba4_tag16_from(&lba4).ok_or_else(|| {
@@ -122,7 +121,7 @@ pub fn print_disk_table(rows: &[Row]) -> String {
             let (status, tone) = if row.proto != "USB" {
                 ("非 USB / 不支持".to_string(), Tone::Dim)
             } else if row.denied {
-                ("需 sudo 才能识别".to_string(), Tone::Dim)
+                ("需管理员权限才能识别".to_string(), Tone::Dim)
             } else if let Some(error) = &row.probe_error {
                 (format!("读取异常: {}", error), Tone::Yellow)
             } else if row.device_id.is_none() {
@@ -137,7 +136,11 @@ pub fn print_disk_table(rows: &[Row]) -> String {
                 TableCell::right(fmt_gb(row.size), Tone::Magenta),
                 TableCell::left(
                     row.proto.clone(),
-                    if row.proto == "USB" { Tone::Green } else { Tone::Dim },
+                    if row.proto == "USB" {
+                        Tone::Green
+                    } else {
+                        Tone::Dim
+                    },
                 ),
                 TableCell::left(format!("{}:{}", row.vid, row.pid), Tone::Yellow),
                 TableCell::left(status, tone),
@@ -150,7 +153,8 @@ pub fn print_disk_table(rows: &[Row]) -> String {
     ));
 
     for row in rows {
-        if row.proto == "USB" && !row.denied && row.probe_error.is_none() && row.device_id.is_some() {
+        if row.proto == "USB" && !row.denied && row.probe_error.is_none() && row.device_id.is_some()
+        {
             let mut details = Vec::new();
             if let Some(parts) = &row.partitions {
                 let items: Vec<String> = parts
@@ -177,7 +181,10 @@ pub fn print_disk_table(rows: &[Row]) -> String {
                 "无备份".to_string()
             });
             details.push(format!("   {}", meta.join(" · ")));
-            out.push_str(&format!("  {}\n", crate::ui::bold(&format!("disk{} 详情", row.disk))));
+            out.push_str(&format!(
+                "  {}\n",
+                crate::ui::bold(&format!("disk{} 详情", row.disk))
+            ));
             for detail in details {
                 out.push_str(&format!("    {}\n", dim(&detail)));
             }

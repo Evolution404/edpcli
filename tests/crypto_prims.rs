@@ -46,7 +46,10 @@ fn wrong_id_does_not_decrypt() {
     };
     let crc = crc32_bare(b"disk&ven_bogus&prod_x");
     let k0 = (crc & 0xFFFF) ^ (crc >> 16);
-    assert_ne!(&xor_rolling(&data[7 * SECTOR..8 * SECTOR], k0)[..4], b"EDPF");
+    assert_ne!(
+        &xor_rolling(&data[7 * SECTOR..8 * SECTOR], k0)[..4],
+        b"EDPF"
+    );
 }
 
 #[test]

@@ -54,7 +54,9 @@ pub fn load_disk_image(key: &str) -> Option<Vec<u8>> {
     fs::read(fixture_bin(key)?).ok()
 }
 
-pub fn read_fn_of(data: &[u8]) -> impl Fn(u32) -> Result<Vec<u8>, edpcli::common::EdpCliError> + '_ {
+pub fn read_fn_of(
+    data: &[u8],
+) -> impl Fn(u32) -> Result<Vec<u8>, edpcli::common::EdpCliError> + '_ {
     move |lba| Ok(data[lba as usize * SECTOR..(lba as usize + 1) * SECTOR].to_vec())
 }
 
@@ -75,28 +77,52 @@ pub struct Golden {
 pub fn golden(key: &str) -> Golden {
     match key {
         "netac" => Golden {
-            share: 116707265, enc_start: 116707328, enc_size: 3143761920,
-            crc: 0xF1A78819, k0: 0x79BE, lba9_none: false,
-            lba0: "fd76dc67f22b770b9083c1d048188726", lba6: "7088f76eb9cd19bf10e3d98d4a6049c2",
-            lba7: "ff53ab1c18053c783250d0b8c1a9283f", lba12: "c36f05a29d9877a25681051594c557ce",
+            share: 116707265,
+            enc_start: 116707328,
+            enc_size: 3143761920,
+            crc: 0xF1A78819,
+            k0: 0x79BE,
+            lba9_none: false,
+            lba0: "fd76dc67f22b770b9083c1d048188726",
+            lba6: "7088f76eb9cd19bf10e3d98d4a6049c2",
+            lba7: "ff53ab1c18053c783250d0b8c1a9283f",
+            lba12: "c36f05a29d9877a25681051594c557ce",
         },
         "lexar" => Golden {
-            share: 231423937, enc_start: 231424000, enc_size: 6234963968,
-            crc: 0x6BBAEEFB, k0: 0x8541, lba9_none: false,
-            lba0: "18c2b6e793f78329bf159b3726632070", lba6: "56f8012133790126707c79af0ca0e662",
-            lba7: "59fe2195d7c80d9c73c0fd98876bb0a5", lba12: "7ec3ddb9ac51c246ec7fb4742b8689cc",
+            share: 231423937,
+            enc_start: 231424000,
+            enc_size: 6234963968,
+            crc: 0x6BBAEEFB,
+            k0: 0x8541,
+            lba9_none: false,
+            lba0: "18c2b6e793f78329bf159b3726632070",
+            lba6: "56f8012133790126707c79af0ca0e662",
+            lba7: "59fe2195d7c80d9c73c0fd98876bb0a5",
+            lba12: "7ec3ddb9ac51c246ec7fb4742b8689cc",
         },
         "aigo" => Golden {
-            share: 243115997, enc_start: 243116060, enc_size: 1340720640,
-            crc: 0x2EEB4CE1, k0: 0x620A, lba9_none: true,
-            lba0: "52e8a2a54bfe646b236ee0f84d79d32d", lba6: "769de2441ba38f39e03297c3d928ec71",
-            lba7: "02d920e71c328dc4df5b206fa51f232c", lba12: "f865701657d7bd000752574546d50b4e",
+            share: 243115997,
+            enc_start: 243116060,
+            enc_size: 1340720640,
+            crc: 0x2EEB4CE1,
+            k0: 0x620A,
+            lba9_none: true,
+            lba0: "52e8a2a54bfe646b236ee0f84d79d32d",
+            lba6: "769de2441ba38f39e03297c3d928ec71",
+            lba7: "02d920e71c328dc4df5b206fa51f232c",
+            lba12: "f865701657d7bd000752574546d50b4e",
         },
         "aigo_size50" => Golden {
-            share: 97656248, enc_start: 243116060,
-            enc_size: 0, crc: 0, k0: 0, lba9_none: true,
-            lba0: "2a0fabe2b49e644867befdec33bdf9d7", lba6: "769de2441ba38f39e03297c3d928ec71",
-            lba7: "42a2778336ead2a313f2bdfe6e3352c2", lba12: "c8fc3272ede87ba259a4d4e4d99f08fa",
+            share: 97656248,
+            enc_start: 243116060,
+            enc_size: 0,
+            crc: 0,
+            k0: 0,
+            lba9_none: true,
+            lba0: "2a0fabe2b49e644867befdec33bdf9d7",
+            lba6: "769de2441ba38f39e03297c3d928ec71",
+            lba7: "42a2778336ead2a313f2bdfe6e3352c2",
+            lba12: "c8fc3272ede87ba259a4d4e4d99f08fa",
         },
         _ => panic!("未知金标键 {}", key),
     }
@@ -108,7 +134,12 @@ pub fn converted_image(key: &str) -> Option<(Vec<u8>, String)> {
     let (_, did) = fixture(key)?;
     let r = convert(&read_fn_of(&data), did, None, false).ok()?;
     let mut conv = data.clone();
-    for (lba, sector) in [(0usize, &r.lba0), (6, &r.lba6), (7, &r.lba7), (12, &r.lba12)] {
+    for (lba, sector) in [
+        (0usize, &r.lba0),
+        (6, &r.lba6),
+        (7, &r.lba7),
+        (12, &r.lba12),
+    ] {
         conv[lba * SECTOR..(lba + 1) * SECTOR].copy_from_slice(sector);
     }
     conv[9 * SECTOR..10 * SECTOR].fill(0);
@@ -186,10 +217,20 @@ pub fn diskutil_info_plist(total_size: i64) -> String {
 }
 
 pub fn diskutil_list_plist(disks: &[&str]) -> String {
-    let items: String = disks.iter().map(|d| format!("<string>{}</string>", d)).collect();
+    let items: String = disks
+        .iter()
+        .map(|d| format!("<string>{}</string>", d))
+        .collect();
     format!(
         "<plist version=\"1.0\"><dict><key>AllDisks</key><array>{}</array></dict></plist>",
         items
+    )
+}
+
+pub fn diskutil_root_plist(physical_disk: u32) -> String {
+    format!(
+        "<plist version=\"1.0\"><dict><key>FilesystemType</key><string>apfs</string><key>APFSPhysicalStores</key><array><dict><key>APFSPhysicalStore</key><string>disk{}s2</string></dict></array></dict></plist>",
+        physical_disk
     )
 }
 
@@ -198,16 +239,29 @@ pub fn netac_runner(disk: u32) -> FakeRunner {
     let mut m = HashMap::new();
     let disk_name = format!("disk{}", disk);
     m.insert(
+        "diskutil info -plist /".into(),
+        diskutil_root_plist(if disk == 1 { 1 } else { 0 }),
+    );
+    m.insert(
         "diskutil list -plist".into(),
         diskutil_list_plist(&[disk_name.as_str()]),
     );
-    m.insert(format!("diskutil info -plist disk{}", disk), diskutil_info_plist(62_914_560_000));
+    m.insert(
+        format!("diskutil info -plist disk{}", disk),
+        diskutil_info_plist(62_914_560_000),
+    );
     m.insert(
         format!("diskutil unmountDisk force disk{}", disk),
         "Unmount of all volumes on disk was successful".into(),
     );
-    m.insert("ioreg -r -c IOSCSITargetDevice -l".into(), ioreg_scsi(disk, "Netac  ", "OnlyDisk", "1.00"));
-    m.insert("ioreg -r -c IOUSBHostDevice -l".into(), ioreg_usb(disk, 0x0DD8, 0x2005));
+    m.insert(
+        "ioreg -r -c IOSCSITargetDevice -l".into(),
+        ioreg_scsi(disk, "Netac  ", "OnlyDisk", "1.00"),
+    );
+    m.insert(
+        "ioreg -r -c IOUSBHostDevice -l".into(),
+        ioreg_usb(disk, 0x0DD8, 0x2005),
+    );
     FakeRunner { canned: m }
 }
 
@@ -219,7 +273,10 @@ pub struct ScriptPrompter {
 
 impl ScriptPrompter {
     pub fn yes() -> Self {
-        ScriptPrompter { inputs: vec!["YES".into()], idx: 0 }
+        ScriptPrompter {
+            inputs: vec!["YES".into()],
+            idx: 0,
+        }
     }
 }
 
@@ -238,5 +295,6 @@ impl edpcli::cli::Prompter for ScriptPrompter {
 pub fn set_mtime(path: &std::path::Path, epoch: i64) {
     let f = fs::OpenOptions::new().write(true).open(path).unwrap();
     let t = std::time::UNIX_EPOCH + std::time::Duration::from_secs(epoch as u64);
-    f.set_times(std::fs::FileTimes::new().set_modified(t)).unwrap();
+    f.set_times(std::fs::FileTimes::new().set_modified(t))
+        .unwrap();
 }

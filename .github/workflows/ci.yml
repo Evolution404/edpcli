@@ -13,10 +13,17 @@ concurrency:
 
 jobs:
   quality:
-    name: Test, Clippy, Release
-    runs-on: macos-latest
+    name: ${{ matrix.os }} / test-clippy-release
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - macos-latest
+          - ubuntu-latest
+          - windows-latest
+    runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Install stable Rust
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -27,13 +34,3 @@ jobs:
         run: cargo clippy --all-targets -- -D warnings
       - name: Build release binary
         run: cargo build --release
-
-  msrv:
-    name: Rust 1.75 compatibility
-    runs-on: macos-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Install Rust 1.75.0
-        uses: dtolnay/rust-toolchain@1.75.0
-      - name: Check all targets on MSRV
-        run: cargo check --all-targets

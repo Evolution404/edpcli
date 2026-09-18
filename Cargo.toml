@@ -2,8 +2,8 @@
 name = "edpcli"
 version = "3.0.0"
 edition = "2021"
-rust-version = "1.75"
-description = "EDP/cems U 盘管理 CLI（识别、元信息、备份、恢复与免密转换；纯 Rust 标准库，零依赖）"
+rust-version = "1.98"
+description = "EDP/cems U 盘管理 CLI（识别、元信息、备份、恢复与免密转换）"
 license = "MIT"
 publish = false
 
@@ -17,3 +17,26 @@ path = "src/main.rs"
 
 [profile.release]
 strip = true
+
+[dependencies]
+encoding_rs = "0.8"
+libc = "0.2"
+time = { version = "0.3", features = ["local-offset"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2-core-foundation = { version = "0.3.2", default-features = false, features = ["std", "CFNumber", "CFString"] }
+objc2-io-kit = { version = "0.3.2", default-features = false, features = ["std", "libc"] }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+windows-sys = { version = "0.61.2", features = [
+    "Win32_Devices_DeviceAndDriverInstallation",
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_Storage_FileSystem",
+    "Win32_System_IO",
+    "Win32_System_Ioctl",
+    "Win32_System_Registry",
+    "Win32_System_SystemInformation",
+    "Win32_System_Threading",
+    "Win32_UI_Shell",
+] }

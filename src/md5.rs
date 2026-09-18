@@ -11,10 +11,9 @@ const K: [u32; 64] = [
     0x6fa87e4f, 0xfe2ce6e0, 0xa3014314, 0x4e0811a1, 0xf7537e82, 0xbd3af235, 0x2ad7d2bb, 0xeb86d391,
 ];
 const S: [u32; 64] = [
-    7, 12, 17, 22, 7, 12, 17, 22, 7, 12, 17, 22, 7, 12, 17, 22,
-    5, 9, 14, 20, 5, 9, 14, 20, 5, 9, 14, 20, 5, 9, 14, 20,
-    4, 11, 16, 23, 4, 11, 16, 23, 4, 11, 16, 23, 4, 11, 16, 23,
-    6, 10, 15, 21, 6, 10, 15, 21, 6, 10, 15, 21, 6, 10, 15, 21,
+    7, 12, 17, 22, 7, 12, 17, 22, 7, 12, 17, 22, 7, 12, 17, 22, 5, 9, 14, 20, 5, 9, 14, 20, 5, 9,
+    14, 20, 5, 9, 14, 20, 4, 11, 16, 23, 4, 11, 16, 23, 4, 11, 16, 23, 4, 11, 16, 23, 6, 10, 15,
+    21, 6, 10, 15, 21, 6, 10, 15, 21, 6, 10, 15, 21,
 ];
 
 /// 一次性计算并输出小写 hex(Python `hashlib.md5(b).hexdigest()` 等价)。
@@ -42,10 +41,18 @@ fn md5(data: &[u8]) -> [u8; 16] {
     }
     msg.extend_from_slice(&bit_len.to_le_bytes());
 
-    for chunk in msg.chunks_exact(64) {
+    let (chunks, remainder) = msg.as_chunks::<64>();
+    debug_assert!(remainder.is_empty());
+    for chunk in chunks {
         let mut m = [0u32; 16];
         for (i, w) in m.iter_mut().enumerate() {
-            *w = u32::from_le_bytes(chunk[i * 4..i * 4 + 4].try_into().unwrap());
+            let start = i * 4;
+            *w = u32::from_le_bytes([
+                chunk[start],
+                chunk[start + 1],
+                chunk[start + 2],
+                chunk[start + 3],
+            ]);
         }
         let (mut a, mut b, mut c, mut d) = (a0, b0, c0, d0);
         for i in 0..64 {
@@ -58,10 +65,7 @@ fn md5(data: &[u8]) -> [u8; 16] {
             let tmp = d;
             d = c;
             c = b;
-            let x = a
-                .wrapping_add(f)
-                .wrapping_add(K[i])
-                .wrapping_add(m[g]);
+            let x = a.wrapping_add(f).wrapping_add(K[i]).wrapping_add(m[g]);
             b = b.wrapping_add(x.rotate_left(S[i]));
             a = tmp;
         }
@@ -88,7 +92,10 @@ mod tests {
         assert_eq!(md5_hex(b""), "d41d8cd98f00b204e9800998ecf8427e");
         assert_eq!(md5_hex(b"a"), "0cc175b9c0f1b6a831c399e269772661");
         assert_eq!(md5_hex(b"abc"), "900150983cd24fb0d6963f7d28e17f72");
-        assert_eq!(md5_hex(b"message digest"), "f96b697d7cb7938d525a2f31aaf161d0");
+        assert_eq!(
+            md5_hex(b"message digest"),
+            "f96b697d7cb7938d525a2f31aaf161d0"
+        );
         assert_eq!(
             md5_hex(b"abcdefghijklmnopqrstuvwxyz"),
             "c3fcd3d76192e4007dfb496cca67e13b"

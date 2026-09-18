@@ -1,25 +1,26 @@
-//! edpcli — EDP/cems U 盘管理 CLI（识别、元信息、备份、恢复与免密转换；纯 Rust 标准库，零依赖）。
+//! edpcli — EDP/cems U 盘管理 CLI（识别、元信息、备份、恢复与免密转换）。
 //!
-//! 分层(与原 Python 版一致, 无环): common → crypto → sectors / diskio → identify → cli。
-//! macOS 耦合面收在 sysinfo(diskutil/ioreg) 与 diskio(/dev/rdiskN)。
+//! 分层: common → platform / crypto → sectors / diskio → identify → cli。
+//! 操作系统差异统一收敛在 platform；业务核心不得直接依赖 macOS/Linux/Windows API。
 
-pub mod common;
-pub mod md5;
-pub mod plist;
-pub mod crypto;
-pub mod sectors;
-pub mod identify;
-pub mod sysinfo;
-pub mod diskio;
-pub mod elevate;
-pub mod ui;
-pub mod cli;
-pub mod inspect;
-pub mod metainfo;
-pub mod completion;
 pub mod backup_catalog;
 pub mod backup_cli;
-pub mod disk_scan;
+pub mod cli;
 pub mod cli_args;
+pub mod common;
+pub mod completion;
+pub mod crypto;
+pub mod disk_scan;
+pub mod diskio;
+pub mod elevate;
+pub mod identify;
+pub mod inspect;
 pub(crate) mod inspect_cli;
+pub mod md5;
+pub mod metainfo;
 pub(crate) mod metainfo_cli;
+pub mod platform;
+pub mod plist;
+pub mod sectors;
+pub mod sysinfo;
+pub mod ui;

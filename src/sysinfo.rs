@@ -1,32 +1,27 @@
-//! macOS 系统信息: diskutil(-plist) / ioreg 查询。
-//! 全部子进程调用收在 CmdRunner 之后 — 这是测试注入罐头输出的缝
-//! (Python 版以 mock.patch(subprocess.check_output) 达成同一目的)。
+//! 跨平台系统探测门面与可注入命令执行器。
+//! 操作系统细节由 `platform` 实现；业务层只依赖这里的统一接口。
 
+use std::cell::{Cell, RefCell};
+use std::collections::HashMap;
 use std::io::{self, ErrorKind};
 use std::process::{Command, Stdio};
 use std::sync::mpsc::{self, RecvTimeoutError};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use crate::plist;
-
-const DISKUTIL_TIMEOUT: Duration = Duration::from_secs(10);
-const IOREG_TIMEOUT: Duration = Duration::from_secs(15);
-
-/// 外接整盘信息: (盘号, 字节数, vid, pid, 总线协议)。
-#[derive(Debug, Clone)]
-pub struct ExtDisk {
-    pub n: u32,
-    pub size: u64,
-    pub vid: String,
-    pub pid: String,
-    pub proto: String,
-}
+pub use crate::platform::ExtDisk;
+use crate::platform::HardwareProbe;
 
 /// 子进程执行抽象: 成功返回 stdout 文本(非零退出/超时/启动失败均为 Err)。
 /// 等价 Python subprocess.check_output(text=True, errors='ignore', timeout=…)。
 pub trait CmdRunner {
     fn check_output(&self, cmd: &[&str], timeout: Duration) -> io::Result<String>;
+
+    /// 可选的原生硬件探测。测试 runner 默认没有 native backend；
+    /// production `SysRunner` 由当前平台实现提供。
+    fn hardware_probe(&self, _disk: u32) -> Option<HardwareProbe> {
+        None
+    }
 }
 
 pub struct SysRunner;
@@ -73,14 +68,114 @@ impl CmdRunner for SysRunner {
         if status.success() {
             Ok(output)
         } else {
-            Err(io::Error::other(format!("{} 退出码 {:?}", cmd[0], status.code())))
+            Err(io::Error::other(format!(
+                "{} 退出码 {:?}",
+                cmd[0],
+                status.code()
+            )))
+        }
+    }
+
+    fn hardware_probe(&self, disk: u32) -> Option<HardwareProbe> {
+        crate::platform::hardware_probe(disk)
+    }
+}
+
+#[derive(Clone)]
+enum CachedOutput {
+    Ok(String),
+    Err(ErrorKind, String),
+}
+
+impl CachedOutput {
+    fn from_result(result: &io::Result<String>) -> Self {
+        match result {
+            Ok(value) => Self::Ok(value.clone()),
+            Err(error) => Self::Err(error.kind(), error.to_string()),
+        }
+    }
+
+    fn into_result(self) -> io::Result<String> {
+        match self {
+            Self::Ok(value) => Ok(value),
+            Self::Err(kind, message) => Err(io::Error::new(kind, message)),
         }
     }
 }
 
-// ══════════════════════════════════════════════════════════════════
-// ioreg 文本解析(无 regex; ioreg 输出行结构化, 逐行扫描)
-// ══════════════════════════════════════════════════════════════════
+/// 单次只读命令会话内的系统探测缓存。
+///
+/// 只缓存由当前平台明确标记为纯查询的命令；有副作用命令永远直通。
+/// 该类型只用于 list/meta/inspect/completion；apply/restore 的安全终验继续使用
+/// fresh `SysRunner`，避免缓存掩盖换盘或设备状态变化。
+pub struct ReadProbeCache<'a> {
+    inner: &'a dyn CmdRunner,
+    cache: RefCell<HashMap<String, CachedOutput>>,
+    hardware: RefCell<HashMap<u32, Option<HardwareProbe>>>,
+    hits: Cell<usize>,
+    misses: Cell<usize>,
+}
+
+impl<'a> ReadProbeCache<'a> {
+    pub fn new(inner: &'a dyn CmdRunner) -> Self {
+        Self {
+            inner,
+            cache: RefCell::new(HashMap::new()),
+            hardware: RefCell::new(HashMap::new()),
+            hits: Cell::new(0),
+            misses: Cell::new(0),
+        }
+    }
+
+    fn cacheable(cmd: &[&str]) -> bool {
+        crate::platform::probe_command_cacheable(cmd)
+    }
+
+    fn key(cmd: &[&str], timeout: Duration) -> String {
+        format!("{}\0{}", cmd.join("\0"), timeout.as_millis())
+    }
+
+    #[cfg(all(test, target_os = "macos"))]
+    fn hits(&self) -> usize {
+        self.hits.get()
+    }
+
+    #[cfg(all(test, target_os = "macos"))]
+    fn misses(&self) -> usize {
+        self.misses.get()
+    }
+}
+
+impl CmdRunner for ReadProbeCache<'_> {
+    fn check_output(&self, cmd: &[&str], timeout: Duration) -> io::Result<String> {
+        if !Self::cacheable(cmd) {
+            return self.inner.check_output(cmd, timeout);
+        }
+        let key = Self::key(cmd, timeout);
+        if let Some(value) = self.cache.borrow().get(&key).cloned() {
+            self.hits.set(self.hits.get() + 1);
+            return value.into_result();
+        }
+        self.misses.set(self.misses.get() + 1);
+        let result = self.inner.check_output(cmd, timeout);
+        self.cache
+            .borrow_mut()
+            .insert(key, CachedOutput::from_result(&result));
+        result
+    }
+
+    fn hardware_probe(&self, disk: u32) -> Option<HardwareProbe> {
+        if let Some(value) = self.hardware.borrow().get(&disk).cloned() {
+            return value;
+        }
+        let value = self.inner.hardware_probe(disk);
+        self.hardware.borrow_mut().insert(disk, value.clone());
+        value
+    }
+}
+
+// 以下解析器仅保留给历史罐头测试；生产平台解析已收敛到 platform/macos.rs。
+#[cfg(test)]
 /// 按 ioreg 节点行切块: 行以 `+-o` 开头且携带 `<class <cls>,`。
 /// 真实输出的节点名常是产品名(如 `+-o USB DISK@01200000  <class IOUSBHostDevice, …>`),
 /// 不能按 `+-o <类名>` 前缀切 — 那样永远切不出块(Python 版因此退化为整段输出
@@ -112,6 +207,7 @@ pub fn split_class_blocks<'a>(out: &'a str, cls: &str) -> Vec<&'a str> {
     blocks
 }
 
+#[cfg(test)]
 /// 块内找 `"Key" = "value"` 形式的字符串字段(块内任意位置, 允许 = 两边空白)。
 /// 等价 Python `re.search(r'"Key"\s*=\s*"([^"]*)"', block)` — ioreg 属性行
 /// 带树形前缀(`|   "Key" = …`), 不能按行首匹配。
@@ -149,6 +245,7 @@ pub fn block_str_field(block: &str, key: &str) -> Option<String> {
     None
 }
 
+#[cfg(test)]
 /// 块内找 `"Key" = 1234` 形式的无引号十进制整数字段(块内任意位置)。
 pub fn block_int_field(block: &str, key: &str) -> Option<i64> {
     let quoted_key = format!("\"{}\"", key);
@@ -179,115 +276,26 @@ pub fn block_int_field(block: &str, key: &str) -> Option<i64> {
     None
 }
 
-fn bsd_name_marker(disk: u32) -> String {
-    format!("\"BSD Name\" = \"disk{}\"", disk)
-}
-
-/// 盘总扇区数(diskutil DiskSize/512); 失败/缺失返回 None(显示为 unknown)。
+/// 当前平台整盘总扇区数；失败/缺失返回 None。
 pub fn disk_total_sectors(runner: &dyn CmdRunner, disk: u32) -> Option<u64> {
-    let out = runner
-        .check_output(&["diskutil", "info", "-plist", &format!("disk{}", disk)], DISKUTIL_TIMEOUT)
-        .ok()?;
-    let p = plist::parse(&out).ok()?;
-    // Python: info.get('DiskSize') or info.get('TotalSize') or 0; if ds: — 0 视同缺失
-    let ds = ["DiskSize", "TotalSize"]
-        .iter()
-        .find_map(|k| p.get(k).and_then(|v| v.as_int()).filter(|&v| v != 0))?;
-    Some(ds as u64 / crate::common::SECTOR as u64)
+    crate::platform::disk_total_sectors(runner, disk)
 }
 
 /// USB VID/PID(hex4); 失败返回 ("xxxx","xxxx")。
 pub fn usb_vid_pid(runner: &dyn CmdRunner, disk: u32) -> (String, String) {
-    let out = match runner.check_output(&["ioreg", "-r", "-c", "IOUSBHostDevice", "-l"], IOREG_TIMEOUT) {
-        Ok(o) => o,
-        Err(_) => return ("xxxx".into(), "xxxx".into()),
-    };
-    let want = bsd_name_marker(disk);
-    for b in split_class_blocks(&out, "IOUSBHostDevice") {
-        if !b.contains(&want) {
-            continue;
-        }
-        if let (Some(v), Some(p)) = (
-            block_int_field(b, "idVendor"),
-            block_int_field(b, "idProduct"),
-        ) {
-            return (format!("{:04x}", v), format!("{:04x}", p));
+    if let Some(probe) = runner.hardware_probe(disk) {
+        if let (Some(vid), Some(pid)) = (probe.vid, probe.pid) {
+            return (format!("{vid:04x}"), format!("{pid:04x}"));
         }
     }
-    ("xxxx".into(), "xxxx".into())
+    crate::platform::usb_vid_pid(runner, disk)
 }
 
 // ══════════════════════════════════════════════════════════════════
 // 外接盘枚举
 // ══════════════════════════════════════════════════════════════════
-/// `disk<纯数字>` 解析为盘号(排除 disk4s1 等分区)。
-fn whole_disk_number(name: &str) -> Option<u32> {
-    let rest = name.strip_prefix("disk")?;
-    if rest.is_empty() || !rest.bytes().all(|b| b.is_ascii_digit()) {
-        return None;
-    }
-    rest.parse().ok()
-}
-
-/// 枚举全部外接整盘(disk≥2)。系统盘(disk<2)、分区、内部盘与虚拟盘(DMG)不进入。
-fn external_disk_info(runner: &dyn CmdRunner, n: u32) -> Option<ExtDisk> {
-    if n < 2 {
-        return None;
-    }
-    let name = format!("disk{}", n);
-    let info_out = runner
-        .check_output(&["diskutil", "info", "-plist", &name], DISKUTIL_TIMEOUT)
-        .ok()?;
-    let info = plist::parse(&info_out).ok()?;
-    let whole = info.get("WholeDisk").and_then(|v| v.as_bool()).unwrap_or(false);
-    let internal = info.get("Internal").and_then(|v| v.as_bool()).unwrap_or(false);
-    if !whole || internal {
-        return None;
-    }
-    if info.get("VirtualOrPhysical").and_then(|v| v.as_str()) == Some("Virtual") {
-        return None;
-    }
-    let proto = info
-        .get("BusProtocol")
-        .and_then(|v| v.as_str())
-        .unwrap_or("?")
-        .to_string();
-    let size = ["TotalSize", "DiskSize", "Size"]
-        .iter()
-        .find_map(|k| info.get(k).and_then(|v| v.as_int()).filter(|&v| v != 0))
-        .unwrap_or(0) as u64;
-    let (vid, pid) = if proto == "USB" {
-        usb_vid_pid(runner, n)
-    } else {
-        ("xxxx".into(), "xxxx".into())
-    };
-    Some(ExtDisk {
-        n,
-        size,
-        vid,
-        pid,
-        proto,
-    })
-}
-
 pub fn list_external_disks(runner: &dyn CmdRunner) -> Vec<ExtDisk> {
-    let out = match runner.check_output(&["diskutil", "list", "-plist"], DISKUTIL_TIMEOUT) {
-        Ok(o) => o,
-        Err(_) => return vec![],
-    };
-    let p = match plist::parse(&out) {
-        Ok(p) => p,
-        Err(_) => return vec![],
-    };
-    let empty: Vec<plist::Plist> = Vec::new();
-    p.get("AllDisks")
-        .and_then(|a| a.as_arr())
-        .unwrap_or(&empty)
-        .iter()
-        .filter_map(|d| d.as_str())
-        .filter_map(whole_disk_number)
-        .filter_map(|n| external_disk_info(runner, n))
-        .collect()
+    crate::platform::list_external_disks(runner)
 }
 
 /// 本工具可操作的外接 USB 整盘子集(供自动选盘)。
@@ -299,30 +307,32 @@ pub fn list_usb_disks(runner: &dyn CmdRunner) -> Vec<ExtDisk> {
 }
 
 /// 直接核验一个显式盘号是否为可操作的外接 USB 整盘。
-/// 不先枚举所有磁盘，供安全门禁高频调用，减少额外 `diskutil info` 子进程。
 pub fn usb_disk(runner: &dyn CmdRunner, disk: u32) -> Option<ExtDisk> {
-    external_disk_info(runner, disk).filter(|d| d.proto == "USB")
+    list_external_disks(runner)
+        .into_iter()
+        .find(|item| item.n == disk && item.proto == "USB")
 }
 
 /// 强制卸载整盘。写盘流程必须确认卸载成功后才能重新以 O_RDWR 打开设备。
-pub fn unmount_disk(runner: &dyn CmdRunner, disk: u32) -> io::Result<()> {
-    runner
-        .check_output(
-        &["diskutil", "unmountDisk", "force", &format!("disk{}", disk)],
-        Duration::from_secs(60),
-        )
-        .map(|_| ())
+pub fn prepare_write(runner: &dyn CmdRunner, disk: u32) -> io::Result<crate::platform::WriteGuard> {
+    crate::platform::prepare_write(runner, disk)
 }
 
 #[cfg(test)]
 mod tests {
+    use std::cell::Cell;
+
     use super::*;
+    use crate::platform::{HardwareProbe, NativeTransport};
+    #[cfg(target_os = "macos")]
     use std::collections::HashMap;
 
     /// 罐头 CmdRunner: (子命令前缀) → 预置输出。
+    #[cfg(target_os = "macos")]
     struct FakeRunner {
         outputs: HashMap<String, String>,
     }
+    #[cfg(target_os = "macos")]
     impl CmdRunner for FakeRunner {
         fn check_output(&self, cmd: &[&str], _t: Duration) -> io::Result<String> {
             self.outputs
@@ -334,9 +344,11 @@ mod tests {
 
     // 与 Python test_list.py 相同的 8 盘矩阵: disk4=USB(未识别), disk6=USB(cems),
     // disk7=Thunderbolt, disk0/1=系统盘, disk8=DMG虚拟盘
+    #[cfg(target_os = "macos")]
     fn plist_str(s: &str) -> String {
         format!("<string>{}</string>", s)
     }
+    #[cfg(target_os = "macos")]
     fn fake_diskutil() -> FakeRunner {
         let list = format!(
             "<plist version=\"1.0\"><dict><key>AllDisks</key><array>{}</array></dict></plist>",
@@ -384,11 +396,18 @@ mod tests {
         );
         m.insert(
             "diskutil info -plist disk8".to_string(),
-            info("disk8", "Disk Image", false, "<key>VirtualOrPhysical</key><string>Virtual</string>", 1_000_000_000),
+            info(
+                "disk8",
+                "Disk Image",
+                false,
+                "<key>VirtualOrPhysical</key><string>Virtual</string>",
+                1_000_000_000,
+            ),
         );
         FakeRunner { outputs: m }
     }
 
+    #[cfg(target_os = "macos")]
     #[test]
     fn enumeration_filters_and_protocol() {
         let runner = fake_diskutil();
@@ -396,9 +415,15 @@ mod tests {
         assert_eq!(disks.iter().map(|d| d.n).collect::<Vec<_>>(), vec![4, 6, 7]);
         assert_eq!(disks[0].proto, "USB");
         assert_eq!(disks[2].proto, "Thunderbolt");
-        assert_eq!((disks[2].vid.as_str(), disks[2].pid.as_str()), ("xxxx", "xxxx")); // 非USB 无 VID/PID
-        // USB 盘走 ioreg 查 VID/PID(罐头里没有 ioreg → 回退 xxxx)
-        assert_eq!((disks[0].vid.as_str(), disks[0].pid.as_str()), ("xxxx", "xxxx"));
+        assert_eq!(
+            (disks[2].vid.as_str(), disks[2].pid.as_str()),
+            ("xxxx", "xxxx")
+        ); // 非USB 无 VID/PID
+           // USB 盘走 ioreg 查 VID/PID(罐头里没有 ioreg → 回退 xxxx)
+        assert_eq!(
+            (disks[0].vid.as_str(), disks[0].pid.as_str()),
+            ("xxxx", "xxxx")
+        );
 
         let usb = list_usb_disks(&runner);
         assert_eq!(usb.iter().map(|d| d.n).collect::<Vec<_>>(), vec![4, 6]);
@@ -444,7 +469,10 @@ mod tests {
     |   \"BSD Name\" = \"disk6\"\n";
         assert_eq!(block_int_field(block, "idVendor"), Some(3352));
         assert_eq!(block_int_field(block, "idProduct"), Some(8197));
-        assert_eq!(block_str_field(block, "USB Product Name").as_deref(), Some("Mass Storage"));
+        assert_eq!(
+            block_str_field(block, "USB Product Name").as_deref(),
+            Some("Mass Storage")
+        );
     }
 
     #[test]
@@ -468,11 +496,12 @@ mod tests {
         assert!(blocks[1].contains("\"BSD Name\" = \"disk6\""));
         assert_eq!(block_int_field(blocks[1], "idVendor"), Some(13621)); // 0x3535
         assert_eq!(block_int_field(blocks[1], "idProduct"), Some(25344)); // 0x6300
-        // 无块起点时整段输出为单一块(Python re.split 兜底行为)
+                                                                          // 无块起点时整段输出为单一块(Python re.split 兜底行为)
         let no_root = "  |   \"idVendor\" = 1\n  |   \"BSD Name\" = \"disk6\"\n";
         assert_eq!(split_class_blocks(no_root, "IOUSBHostDevice").len(), 1);
     }
 
+    #[cfg(target_os = "macos")]
     #[test]
     fn disk_total_sectors_prefers_disksize() {
         let mut m = HashMap::new();
@@ -482,5 +511,106 @@ mod tests {
         );
         let runner = FakeRunner { outputs: m };
         assert_eq!(disk_total_sectors(&runner, 6), Some(62914560000 / 512));
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn read_probe_cache_reuses_ioreg_snapshot_across_disks() {
+        let out = "\
++-o USB A@00100000  <class IOUSBHostDevice, id 0x1>\n\
+  |   \"idVendor\" = 13621\n\
+  |   \"idProduct\" = 25344\n\
+  +-o A Media  <class IOMedia>\n\
+    |   \"BSD Name\" = \"disk4\"\n\
++-o USB B@00200000  <class IOUSBHostDevice, id 0x2>\n\
+  |   \"idVendor\" = 3352\n\
+  |   \"idProduct\" = 8197\n\
+  +-o B Media  <class IOMedia>\n\
+    |   \"BSD Name\" = \"disk6\"\n";
+        let mut outputs = HashMap::new();
+        outputs.insert(
+            "ioreg -r -c IOUSBHostDevice -l".to_string(),
+            out.to_string(),
+        );
+        let runner = FakeRunner { outputs };
+        let cached = ReadProbeCache::new(&runner);
+
+        assert_eq!(usb_vid_pid(&cached, 4), ("3535".into(), "6300".into()));
+        assert_eq!(usb_vid_pid(&cached, 6), ("0d18".into(), "2005".into()));
+        assert_eq!(cached.misses(), 1, "同一 ioreg class 只应实际执行一次");
+        assert_eq!(cached.hits(), 1);
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn read_probe_cache_reuses_failed_queries() {
+        let runner = FakeRunner {
+            outputs: HashMap::new(),
+        };
+        let cached = ReadProbeCache::new(&runner);
+        assert_eq!(usb_vid_pid(&cached, 4), ("xxxx".into(), "xxxx".into()));
+        assert_eq!(usb_vid_pid(&cached, 6), ("xxxx".into(), "xxxx".into()));
+        assert_eq!(cached.misses(), 1);
+        assert_eq!(cached.hits(), 1, "失败结果也应缓存，避免重复启动同一查询");
+    }
+
+    #[test]
+    fn usb_vid_pid_prefers_native_probe_without_ioreg() {
+        struct NativeRunner {
+            calls: Cell<usize>,
+        }
+        impl CmdRunner for NativeRunner {
+            fn check_output(&self, _cmd: &[&str], _timeout: Duration) -> io::Result<String> {
+                self.calls.set(self.calls.get() + 1);
+                Err(io::Error::other("native path should not call ioreg"))
+            }
+
+            fn hardware_probe(&self, _disk: u32) -> Option<HardwareProbe> {
+                Some(HardwareProbe {
+                    vid: Some(0x3535),
+                    pid: Some(0x6300),
+                    transport: NativeTransport::Uas,
+                    inquiry: None,
+                })
+            }
+        }
+
+        let runner = NativeRunner {
+            calls: Cell::new(0),
+        };
+        assert_eq!(usb_vid_pid(&runner, 6), ("3535".into(), "6300".into()));
+        assert_eq!(runner.calls.get(), 0);
+    }
+
+    #[test]
+    fn read_probe_cache_reuses_native_hardware_probe_per_disk() {
+        struct NativeCountingRunner {
+            calls: Cell<usize>,
+        }
+        impl CmdRunner for NativeCountingRunner {
+            fn check_output(&self, _cmd: &[&str], _timeout: Duration) -> io::Result<String> {
+                Err(io::Error::other("not used"))
+            }
+
+            fn hardware_probe(&self, disk: u32) -> Option<HardwareProbe> {
+                self.calls.set(self.calls.get() + 1);
+                Some(HardwareProbe {
+                    vid: Some(disk as u16),
+                    pid: Some(0x2005),
+                    transport: NativeTransport::Bot,
+                    inquiry: None,
+                })
+            }
+        }
+
+        let inner = NativeCountingRunner {
+            calls: Cell::new(0),
+        };
+        let cached = ReadProbeCache::new(&inner);
+        assert_eq!(cached.hardware_probe(6).unwrap().vid, Some(6));
+        assert_eq!(cached.hardware_probe(6).unwrap().vid, Some(6));
+        assert_eq!(inner.calls.get(), 1, "同一 disk 的 IOKit 探测应只执行一次");
+        assert_eq!(cached.hardware_probe(7).unwrap().vid, Some(7));
+        assert_eq!(inner.calls.get(), 2, "不同 disk 必须独立探测");
     }
 }

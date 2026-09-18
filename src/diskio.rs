@@ -5,22 +5,18 @@ use std::cmp::Ordering;
 use std::collections::BTreeMap;
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read, Seek, SeekFrom, Write};
-use std::os::unix::io::AsRawFd;
-use std::os::unix::fs::FileExt;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use crate::common::{
-    EdpCliError, EdpCliResult, SECTOR, EXIT_BACKUP, EXIT_INTERMEDIATE, EXIT_IO,
-    EXIT_ROLLED_BACK,
+    EdpCliError, EdpCliResult, EXIT_BACKUP, EXIT_INTERMEDIATE, EXIT_IO, EXIT_ROLLED_BACK, SECTOR,
 };
 use crate::md5::md5_hex;
 use crate::sectors::looks_nopwd;
 
 pub fn raw_path(disk: u32) -> String {
-    format!("/dev/rdisk{}", disk)
+    crate::platform::raw_disk_path(disk)
 }
 
 fn io_err(e: io::Error) -> EdpCliError {
@@ -30,9 +26,9 @@ fn io_err(e: io::Error) -> EdpCliError {
 fn validate_backup_device_id(device_id: &str) -> EdpCliResult<()> {
     let safe = device_id.starts_with("disk&ven_")
         && device_id.len() <= 128
-        && device_id.bytes().all(|b| {
-            b.is_ascii_alphanumeric() || matches!(b, b'_' | b'&' | b'.' | b'-')
-        });
+        && device_id
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'&' | b'.' | b'-'));
     if safe {
         Ok(())
     } else {
@@ -70,9 +66,7 @@ fn write_new_synced(path: &Path, data: &[u8], label: &str) -> EdpCliResult<()> {
 }
 
 fn sync_dir(dir: &Path) -> EdpCliResult<()> {
-    File::open(dir)
-        .and_then(|file| file.sync_all())
-        .map_err(io_err)
+    crate::platform::sync_directory(dir).map_err(io_err)
 }
 
 // ══════════════════════════════════════════════════════════════════
@@ -106,8 +100,7 @@ fn try_open_rdwr(path: &str, wait: Duration) -> io::Result<File> {
         match OpenOptions::new().read(true).write(true).open(path) {
             Ok(file) => return Ok(file),
             Err(e) => {
-                // EBUSY=16(macOS); 不用 ErrorKind — 其映射跨 Rust 版本有变
-                if e.raw_os_error() == Some(16) && Instant::now() < deadline {
+                if crate::platform::raw_busy_error(&e) && Instant::now() < deadline {
                     thread::sleep(Duration::from_millis(200));
                 } else {
                     return Err(e);
@@ -119,11 +112,19 @@ fn try_open_rdwr(path: &str, wait: Duration) -> io::Result<File> {
 
 impl FileDev {
     pub fn open_rdonly(path: &str) -> io::Result<Self> {
-        Ok(FileDev { path: path.to_string(), file: File::open(path)?, writable: false })
+        Ok(FileDev {
+            path: path.to_string(),
+            file: File::open(path)?,
+            writable: false,
+        })
     }
 
     pub fn open_rdwr(path: &str, wait: Duration) -> io::Result<Self> {
-        Ok(FileDev { path: path.to_string(), file: try_open_rdwr(path, wait)?, writable: true })
+        Ok(FileDev {
+            path: path.to_string(),
+            file: try_open_rdwr(path, wait)?,
+            writable: true,
+        })
     }
 
     /// 切换为 O_RDWR(应在卸载后调用)。已可写则不重开, 保持单 fd 全程持有。
@@ -170,18 +171,15 @@ impl SectorDev for FileDev {
 
     fn read_sector(&mut self, lba: u32) -> io::Result<Vec<u8>> {
         let mut buf = vec![0u8; SECTOR];
-        let mut filled = 0usize;
         let base = lba as u64 * SECTOR as u64;
-        while filled < SECTOR {
-            let n = self.file.read_at(&mut buf[filled..], base + filled as u64)?;
-            if n == 0 {
-                return Err(io::Error::new(
-                    io::ErrorKind::UnexpectedEof,
-                    format!("LBA{} 读取提前 EOF", lba),
-                ));
+        self.file.seek(SeekFrom::Start(base))?;
+        self.file.read_exact(&mut buf).map_err(|error| {
+            if error.kind() == io::ErrorKind::UnexpectedEof {
+                io::Error::new(error.kind(), format!("LBA{} 读取提前 EOF", lba))
+            } else {
+                error
             }
-            filled += n;
-        }
+        })?;
         Ok(buf)
     }
 
@@ -193,41 +191,17 @@ impl SectorDev for FileDev {
             ));
         }
         let base = lba as u64 * SECTOR as u64;
-        let file = &self.file;
-        pwrite_loop(|buf, off| file.write_at(buf, off), data, base)
+        self.file.seek(SeekFrom::Start(base))?;
+        self.file.write_all(data)
     }
 
     fn sync(&mut self) -> io::Result<()> {
-        if self.path.starts_with("/dev/rdisk") {
-            sync_raw_disk_cache(&self.file)
+        if crate::platform::is_raw_device_path(&self.path) {
+            crate::platform::sync_raw_device(&self.file)
         } else {
             self.file.sync_all()
         }
     }
-}
-
-#[cfg(target_os = "macos")]
-fn sync_raw_disk_cache(file: &File) -> io::Result<()> {
-    use std::os::raw::c_ulong;
-
-    extern "C" {
-        fn ioctl(fd: i32, request: c_ulong, ...) -> i32;
-    }
-
-    // macOS SDK <sys/disk.h>: DKIOCSYNCHRONIZECACHE = _IO('d', 22)
-    // <sys/ioccom.h>: _IO = 0x20000000 | (group << 8) | number.
-    const DKIOCSYNCHRONIZECACHE: c_ulong = 0x2000_6416;
-    let rc = unsafe { ioctl(file.as_raw_fd(), DKIOCSYNCHRONIZECACHE) };
-    if rc == 0 {
-        Ok(())
-    } else {
-        Err(io::Error::last_os_error())
-    }
-}
-
-#[cfg(not(target_os = "macos"))]
-fn sync_raw_disk_cache(file: &File) -> io::Result<()> {
-    file.sync_all()
 }
 
 /// 单扇区便捷读(Python read_lba_disk 等价: 每次独立打开)。
@@ -339,7 +313,7 @@ pub fn atomic_write_sectors(
 }
 
 // ══════════════════════════════════════════════════════════════════
-// 2. 时钟(本地时间; 真实现借 /bin/date, 测试注入 FixedClock)
+// 2. 时钟(本地时间; 进程内换算, 测试注入 FixedClock)
 // ══════════════════════════════════════════════════════════════════
 pub trait Clock {
     fn now_epoch(&self) -> i64;
@@ -359,32 +333,31 @@ impl Clock for SystemClock {
             .unwrap_or(0)
     }
     fn fmt_ts(&self, epoch: i64) -> String {
-        date_fmt(epoch, "%Y%m%d_%H%M%S", |(y, mo, d, h, mi, s)| {
-            format!("{:04}{:02}{:02}_{:02}{:02}{:02}", y, mo, d, h, mi, s)
-        })
+        let (y, mo, d, h, mi, s) = local_parts(epoch);
+        format!("{y:04}{mo:02}{d:02}_{h:02}{mi:02}{s:02}")
     }
     fn fmt_human(&self, epoch: i64) -> String {
-        date_fmt(epoch, "%Y-%m-%d %H:%M", |(y, mo, d, h, mi, _)| {
-            format!("{:04}-{:02}-{:02} {:02}:{:02}", y, mo, d, h, mi)
-        })
+        let (y, mo, d, h, mi, _) = local_parts(epoch);
+        format!("{y:04}-{mo:02}-{d:02} {h:02}:{mi:02}")
     }
 }
 
 type UtcParts = (i64, u32, u32, u32, u32, u32);
-type UtcFormatter = fn(UtcParts) -> String;
 
-fn date_fmt(epoch: i64, fmt: &str, utc: UtcFormatter) -> String {
-    let date_fmt_str = format!("+{}", fmt);
-    if let Ok(out) = Command::new("/bin/date").arg("-r").arg(epoch.to_string()).arg(&date_fmt_str).output() {
-        if out.status.success() {
-            let s = String::from_utf8_lossy(&out.stdout).trim().to_string();
-            if !s.is_empty() {
-                return s;
-            }
-        }
-    }
-    // 兜底: UTC 换算(date 不可用时; 文件名场景仍保唯一性)
-    utc(utc_parts(epoch))
+fn local_parts(epoch: i64) -> UtcParts {
+    let Ok(utc) = time::OffsetDateTime::from_unix_timestamp(epoch) else {
+        return utc_parts(epoch);
+    };
+    let offset = time::UtcOffset::local_offset_at(utc).unwrap_or(time::UtcOffset::UTC);
+    let local = utc.to_offset(offset);
+    (
+        local.year() as i64,
+        u8::from(local.month()) as u32,
+        local.day() as u32,
+        local.hour() as u32,
+        local.minute() as u32,
+        local.second() as u32,
+    )
 }
 
 /// Howard Hinnant civil_from_days: epoch → (年,月,日,时,分,秒) (UTC)。
@@ -408,7 +381,7 @@ fn utc_parts(epoch: i64) -> UtcParts {
 // ══════════════════════════════════════════════════════════════════
 // 3. 备份/还原
 // ══════════════════════════════════════════════════════════════════
-/// 相对路径按 CWD 绝对化(跨 sudo 重执行时 CWD 不变的假设下仍更确定)。
+/// 相对路径按 CWD 绝对化（跨提权重执行时也保持确定）。
 pub fn absolutize_backup_dir(p: PathBuf) -> PathBuf {
     if p.is_absolute() {
         p
@@ -449,34 +422,6 @@ pub fn resolve_backup_dir_impl(
     cwd.join("backup")
 }
 
-/// sudo 下发起用户的用户名(sudo 设置, 可信; 形如系统用户名才接受)。
-pub fn sudo_user() -> Option<String> {
-    let u = std::env::var("SUDO_USER").ok()?;
-    let ok = !u.is_empty()
-        && u.chars()
-            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '.' | '-'));
-    ok.then_some(u)
-}
-
-/// 发起用户 home(经 shell `~user` 展开; std 无 getpwnam)。
-pub fn sudo_user_home() -> Option<PathBuf> {
-    let u = sudo_user()?;
-    let out = std::process::Command::new("/bin/sh")
-        .arg("-c")
-        .arg(format!("echo ~{}", u))
-        .output()
-        .ok()?;
-    if !out.status.success() {
-        return None;
-    }
-    let s = String::from_utf8_lossy(&out.stdout).trim().to_string();
-    if s.is_empty() || s.starts_with('~') {
-        None
-    } else {
-        Some(PathBuf::from(s))
-    }
-}
-
 /// `key = value` 配置解析: 取 backup_dir 值; `#` 注释, 未知键忽略, 坏行跳过。
 pub fn parse_conf_backup_dir(content: &str) -> Option<String> {
     for line in content.lines() {
@@ -496,15 +441,9 @@ pub fn parse_conf_backup_dir(content: &str) -> Option<String> {
     None
 }
 
-/// 读取用户配置中的备份目录。
-/// 定位: sudo 下(手动或自动)读发起用户 home 的 .edpcli.conf — sudo 会剥掉
-/// shell 环境变量($EDPCLI_BACKUP_DIR 过不去), 磁盘文件是唯一能穿界的载体;
-/// 非 root 读 $HOME。
+/// 读取发起用户配置中的备份目录；用户 home 的平台差异由 platform 层处理。
 pub fn conf_backup_dir() -> Option<String> {
-    let home = match sudo_user() {
-        Some(_) => sudo_user_home()?,
-        None => PathBuf::from(std::env::var("HOME").ok()?),
-    };
+    let home = crate::platform::invoking_user_home()?;
     let content = std::fs::read_to_string(home.join(CONF_NAME)).ok()?;
     parse_conf_backup_dir(&content)
 }
@@ -520,8 +459,8 @@ pub fn resolve_backup_dir(flag: Option<&str>) -> PathBuf {
     )
 }
 
-/// 自动提权时的环境桥接: sudo 默认清环境变量(env_reset), $EDPCLI_BACKUP_DIR
-/// 过不去 — 父进程把它解析为绝对路径, 以显式旗标并入重执行 argv(旗标优先于 env)。
+/// 自动提权时的环境桥接：父进程把备份目录解析为绝对路径，以显式旗标并入
+/// 重执行 argv（旗标优先于子进程环境）。
 /// 返回应追加的参数(空 = 无需追加)。
 pub fn backup_dir_argv_suffix(env_val: Option<String>) -> Vec<String> {
     match env_val.filter(|v| !v.is_empty()) {
@@ -583,12 +522,16 @@ fn read_bytes_at(path: &Path, offset: u64, n: usize) -> io::Result<Vec<u8>> {
 
 /// 直接从备份快照的 LBA4 读取 labelOnlyId，不依赖当前插入的真盘。
 pub fn backup_label_id(path: &Path) -> Option<String> {
-    read_bytes_at(path, 4 * SECTOR as u64, 32).ok().and_then(|b| lba4_label_id_from(&b))
+    read_bytes_at(path, 4 * SECTOR as u64, 32)
+        .ok()
+        .and_then(|b| lba4_label_id_from(&b))
 }
 
 /// 备份文件是否为免密状态快照(按内容检测, 与文件名无关)。
 pub fn backup_is_nopwd(path: &Path, device_id: &str) -> bool {
-    let Ok(data) = fs::read(path) else { return false };
+    let Ok(data) = fs::read(path) else {
+        return false;
+    };
     image_is_nopwd(&data, device_id)
 }
 
@@ -598,7 +541,9 @@ pub fn image_is_nopwd(data: &[u8], device_id: &str) -> bool {
     if data.len() < 14 * SECTOR {
         return false;
     }
-    let read = |lba: u32| -> EdpCliResult<Vec<u8>> { Ok(data[lba as usize * SECTOR..(lba as usize + 1) * SECTOR].to_vec()) };
+    let read = |lba: u32| -> EdpCliResult<Vec<u8>> {
+        Ok(data[lba as usize * SECTOR..(lba as usize + 1) * SECTOR].to_vec())
+    };
     looks_nopwd(&read, device_id).unwrap_or(false)
 }
 
@@ -672,10 +617,7 @@ pub fn cmp_backup_newest_first(a: &BackupEntry, b: &BackupEntry) -> Ordering {
         (Some(at), Some(bt)) => bt.cmp(&at).then_with(|| a.path.cmp(&b.path)),
         (Some(_), None) => Ordering::Less,
         (None, Some(_)) => Ordering::Greater,
-        (None, None) => b
-            .mtime
-            .cmp(&a.mtime)
-            .then_with(|| a.path.cmp(&b.path)),
+        (None, None) => b.mtime.cmp(&a.mtime).then_with(|| a.path.cmp(&b.path)),
     }
 }
 
@@ -709,6 +651,8 @@ pub struct BackupEntry {
     pub is_nopwd: bool,
     pub md5_ok: Md5Status,
     pub size_ok: bool,
+    /// 扫描时缓存的 LBA8 原始 512B；用于列表/元信息展示，避免随后再次打开同一备份。
+    pub lba8: Option<[u8; SECTOR]>,
     /// 扫描时实际 `.bin` 内容摘要；删除前用于确认同名文件未被替换/改写。
     pub content_md5: Option<String>,
 }
@@ -858,16 +802,26 @@ pub fn scan_backup_dir(dir: &Path) -> Vec<BackupEntry> {
         if path.extension().and_then(|e| e.to_str()) != Some("bin") {
             continue;
         }
-        let name = path.file_name().and_then(|n| n.to_str()).unwrap_or_default();
+        let name = path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or_default();
         let mut meta = parse_backup_name(name);
         let data = fs::read(&path).ok();
+        let lba8 = data.as_ref().and_then(|d| {
+            d.get(8 * SECTOR..9 * SECTOR)
+                .and_then(|raw| raw.try_into().ok())
+        });
         let content_md5 = data.as_ref().map(|d| md5_hex(d));
         if let (Some(m), Some(d)) = (meta.as_mut(), data.as_ref()) {
             if d.len() >= 5 * SECTOR {
                 m.onlyid = lba4_label_id_from(&d[4 * SECTOR..5 * SECTOR]);
             }
         }
-        let size_ok = data.as_ref().map(|d| d.len() == 14 * SECTOR).unwrap_or(false);
+        let size_ok = data
+            .as_ref()
+            .map(|d| d.len() == 14 * SECTOR)
+            .unwrap_or(false);
         let md5_ok = data
             .as_ref()
             .map(|d| md5_status(&path, d))
@@ -883,6 +837,7 @@ pub fn scan_backup_dir(dir: &Path) -> Vec<BackupEntry> {
             is_nopwd,
             md5_ok,
             size_ok,
+            lba8,
             content_md5,
         });
     }
@@ -899,7 +854,9 @@ pub fn backup_group_key(entry: &BackupEntry) -> Option<String> {
         None => format!(
             "legacy:{}:{}",
             meta.device_id,
-            meta.secs.map(|v| v.to_string()).unwrap_or_else(|| "unknown".into())
+            meta.secs
+                .map(|v| v.to_string())
+                .unwrap_or_else(|| "unknown".into())
         ),
     })
 }
@@ -953,7 +910,10 @@ pub fn backup_disk(
     }
     fs::create_dir_all(bak_dir).map_err(io_err)?;
     let ts = clock.fmt_ts(clock.now_epoch());
-    let secs = facts.total_sectors.map(|s| s.to_string()).unwrap_or_else(|| "unknown".into());
+    let secs = facts
+        .total_sectors
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| "unknown".into());
     let onlyid_part = lba4_label_id_from(&data[4 * SECTOR..5 * SECTOR])
         .as_ref()
         .map(|o| format!("_onlyid{}", o))
@@ -1041,19 +1001,33 @@ pub fn find_backups(
     if !bak_dir.is_dir() {
         return vec![];
     }
-    let secs = facts.total_sectors.map(|s| s.to_string()).unwrap_or_else(|| "unknown".into());
+    let secs = facts
+        .total_sectors
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| "unknown".into());
     let mut tiers: Vec<Vec<String>> = Vec::new();
     if let Some(did) = device_id {
         tiers.push(vec![
             format!("disk*_{}_vid{}_pid{}_{}_*", secs, facts.vid, facts.pid, did),
-            format!("disk*_{}_vid{}_pid{}_{}_*", secs, facts.vid, facts.pid, did.replace('&', "_")),
+            format!(
+                "disk*_{}_vid{}_pid{}_{}_*",
+                secs,
+                facts.vid,
+                facts.pid,
+                did.replace('&', "_")
+            ),
         ]);
     }
-    tiers.push(vec![format!("disk*_{}_vid{}_pid{}_*", secs, facts.vid, facts.pid)]); // 兜底(识别失败时)
+    tiers.push(vec![format!(
+        "disk*_{}_vid{}_pid{}_*",
+        secs, facts.vid, facts.pid
+    )]); // 兜底(识别失败时)
     for pats in &tiers {
         let mut out: Vec<PathBuf> = Vec::new();
         for pat in pats {
-            let Ok(entries) = fs::read_dir(bak_dir) else { continue };
+            let Ok(entries) = fs::read_dir(bak_dir) else {
+                continue;
+            };
             for entry in entries.flatten() {
                 let Ok(file_type) = entry.file_type() else {
                     continue;
@@ -1082,14 +1056,14 @@ pub fn find_backups(
                     .unwrap_or(false)
             });
         }
-        out.sort_by(|a, b| {
-            match (backup_name_time_key(a), backup_name_time_key(b)) {
+        out.sort_by(
+            |a, b| match (backup_name_time_key(a), backup_name_time_key(b)) {
                 (Some(at), Some(bt)) => bt.cmp(&at).then_with(|| a.cmp(b)),
                 (Some(_), None) => Ordering::Less,
                 (None, Some(_)) => Ordering::Greater,
                 (None, None) => mtime_epoch(b).cmp(&mtime_epoch(a)).then_with(|| a.cmp(b)),
-            }
-        });
+            },
+        );
         out.dedup();
         return out;
     }
@@ -1122,9 +1096,17 @@ mod tests {
 
     #[test]
     fn label_id_positive_negative_malformed() {
-        let pos: Vec<u8> = b"$$$1402259934$$$".iter().chain([0u8; 18].iter()).copied().collect();
+        let pos: Vec<u8> = b"$$$1402259934$$$"
+            .iter()
+            .chain([0u8; 18].iter())
+            .copied()
+            .collect();
         assert_eq!(lba4_label_id_from(&pos), Some("1402259934".to_string()));
-        let neg: Vec<u8> = b"$$$-1833210541$$$".iter().chain([0u8; 15].iter()).copied().collect();
+        let neg: Vec<u8> = b"$$$-1833210541$$$"
+            .iter()
+            .chain([0u8; 15].iter())
+            .copied()
+            .collect();
         assert_eq!(lba4_label_id_from(&neg), Some("-1833210541".to_string()));
         assert_eq!(lba4_label_id_from(b""), None);
         assert_eq!(lba4_label_id_from(&[0u8; 32]), None);
@@ -1136,8 +1118,10 @@ mod tests {
     #[test]
     fn wildcard_only_star() {
         assert!(wildcard_match("a*c*", "abc"));
-        assert!(wildcard_match("disk*_122880000_vid0dd8_pid2005_x_*.bin",
-            "disk6_122880000_vid0dd8_pid2005_x_onlyid1402259934_20260910_172300.bin"));
+        assert!(wildcard_match(
+            "disk*_122880000_vid0dd8_pid2005_x_*.bin",
+            "disk6_122880000_vid0dd8_pid2005_x_onlyid1402259934_20260910_172300.bin"
+        ));
         assert!(!wildcard_match("disk*_999_*", "disk6_122880000_x"));
         assert!(wildcard_match("abc", "abc"));
         assert!(!wildcard_match("abc", "abcd"));
@@ -1163,7 +1147,12 @@ mod tests {
         let cwd = PathBuf::from("/w");
         // 四级优先: 旗标 > env > conf > CWD 兜底
         assert_eq!(
-            resolve_backup_dir_impl(Some("/f"), Some("/e".into()), Some("/c".into()), cwd.clone()),
+            resolve_backup_dir_impl(
+                Some("/f"),
+                Some("/e".into()),
+                Some("/c".into()),
+                cwd.clone()
+            ),
             PathBuf::from("/f")
         );
         assert_eq!(
@@ -1193,35 +1182,37 @@ mod tests {
             parse_conf_backup_dir("# 注释\nbackup_dir = /Users/x/.edpcli-backup\n"),
             Some("/Users/x/.edpcli-backup".to_string())
         );
-        assert_eq!(parse_conf_backup_dir("backup_dir=/a/b"), Some("/a/b".to_string()));
+        assert_eq!(
+            parse_conf_backup_dir("backup_dir=/a/b"),
+            Some("/a/b".to_string())
+        );
         assert_eq!(parse_conf_backup_dir("backup_dir =   \n"), None); // 空值
         assert_eq!(parse_conf_backup_dir("other = 1\nnoise\n"), None);
         assert_eq!(parse_conf_backup_dir(""), None);
     }
 
     #[test]
-    fn sudo_user_name_validated() {
-        // 形如系统用户名才接受(防 shell 插值注入)
-        assert!(sudo_user().is_some() || std::env::var("SUDO_USER").is_err());
-        // 直接验证判定逻辑(无 SUDO_USER 环境时)
-        let ok = |s: &str| {
-            !s.is_empty()
-                && s.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '.' | '-'))
-        };
-        assert!(ok("zhangyuxi") && ok("a.b-c_1"));
-        assert!(!ok("") && !ok("x; rm") && !ok("$(cmd)"));
+    fn platform_user_home_is_available_for_current_session() {
+        assert!(crate::platform::invoking_user_home().is_some());
     }
 
     #[test]
     fn backup_dir_argv_suffix_bridges_env() {
-        // sudo env_reset 会清环境变量 — env 值须转为显式旗标(绝对路径)随 argv 过界
-        let abs = backup_dir_argv_suffix(Some("/Users/x/.edpcli-backup".into()));
-        assert_eq!(abs, vec!["--backup-dir".to_string(), "/Users/x/.edpcli-backup".into()]);
+        // 提权边界不依赖环境继承：env 值须转为显式旗标（绝对路径）随 argv 过界。
+        let absolute_dir = std::env::temp_dir().join("edpcli-absolute-backup");
+        let abs = backup_dir_argv_suffix(Some(absolute_dir.to_string_lossy().into_owned()));
+        assert_eq!(abs.len(), 2);
+        assert_eq!(abs[0], "--backup-dir");
+        assert_eq!(PathBuf::from(&abs[1]), absolute_dir);
         // 相对值按 CWD 绝对化
         let rel = backup_dir_argv_suffix(Some("bk".into()));
         assert_eq!(rel.len(), 2);
-        assert!(rel[1].starts_with('/'), "{}", rel[1]);
-        assert!(rel[1].ends_with("/bk"), "{}", rel[1]);
+        let rel_path = PathBuf::from(&rel[1]);
+        assert!(rel_path.is_absolute(), "{}", rel[1]);
+        assert_eq!(
+            rel_path.file_name().and_then(|name| name.to_str()),
+            Some("bk")
+        );
         // 未设/空值 → 不追加
         assert!(backup_dir_argv_suffix(None).is_empty());
         assert!(backup_dir_argv_suffix(Some(String::new())).is_empty());
@@ -1237,15 +1228,20 @@ mod tests {
 
     struct FixedClock;
     impl Clock for FixedClock {
-        fn now_epoch(&self) -> i64 { 1789660800 }
-        fn fmt_ts(&self, epoch: i64) -> String { format!("fixed_{}", epoch) }
-        fn fmt_human(&self, epoch: i64) -> String { format!("h_{}", epoch) }
+        fn now_epoch(&self) -> i64 {
+            1789660800
+        }
+        fn fmt_ts(&self, epoch: i64) -> String {
+            format!("fixed_{}", epoch)
+        }
+        fn fmt_human(&self, epoch: i64) -> String {
+            format!("h_{}", epoch)
+        }
     }
 
     #[test]
-    fn clock_fmt_uses_date_cmd() {
+    fn clock_fmt_uses_local_time_without_system_date_process() {
         let c = SystemClock;
-        // /bin/date 在 macOS 必在; 校验格式形状
         let ts = c.fmt_ts(1789660800);
         assert_eq!(ts.len(), 15, "{}", ts); // YYYYmmdd_HHMMSS
         let h = c.fmt_human(1789660800);

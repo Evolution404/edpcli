@@ -1,7 +1,21 @@
 # edpcli — EDP/cems U 盘管理 CLI
 
-Rust 标准库实现，**零第三方 Rust crate**，单二进制 `edpcli`（macOS；复用系统自带
-`diskutil` / `ioreg` / `sudo` / `iconv` 等工具）。
+Rust 单二进制 `edpcli`，支持 **macOS / Linux / Windows**。协议、扇区转换、备份、检查器、
+元信息与安全策略共用同一业务核心；设备枚举、裸盘路径、系统盘识别、提权、卸载/锁卷和
+硬件探测统一收敛在 `src/platform/`。
+
+- macOS：IOKit 原生读取 USB VID/PID、UAS/BOT 与 SCSI inquiry；属性缺失时才回退
+  `ioreg`。整盘信息/卸载使用 `diskutil`，提权使用 `sudo`。
+- Linux：通过 sysfs 与 `/proc/self/mountinfo` 原生识别块设备、USB 与系统盘关系，写前
+  使用 `umount2` 卸载；提权使用 `sudo`。
+- Windows：使用 SetupAPI / Storage IOCTL 原生获取 PhysicalDrive、VID/PID、UAS/BOT、
+  容量与系统卷映射；写前对目标卷执行 `FSCTL_LOCK_VOLUME + FSCTL_DISMOUNT_VOLUME`，
+  提权使用 UAC，不依赖 PowerShell。
+
+GBK 解码、本地时间和用户目录等通用能力均在进程内实现；业务层不直接出现上述 OS 细节。
+
+完整安装、三平台 `--disk` 写法、首次使用流程、备份/还原和发布说明见
+[`docs/USAGE.md`](docs/USAGE.md)。
 
 ## 快速使用
 
@@ -9,7 +23,7 @@ Rust 标准库实现，**零第三方 Rust crate**，单二进制 `edpcli`（mac
 cargo build --release            # 或 cargo install --path . 装入 ~/.cargo/bin
 ./target/release/edpcli list      # 列出外接盘：编号/容量/接口/cems 识别/免密检测/EDPF 分区/备份份数（免 sudo，sudo 下更全）
 ./target/release/edpcli run       # 预览改造（dry-run，自动检测 USB 盘）
-edpcli run --disk 4               # 指定盘（接受 4 / /dev/disk4 / /dev/rdisk4）
+edpcli run --disk 4               # 指定盘；也接受当前平台原生整盘路径/名称
 edpcli apply                      # 实际写入（自动备份 → 原子写入 → 读回校验）
 edpcli apply --disk 4 --size 100  # 指定盘 + Share 100GB
 edpcli apply --force              # 盘已是免密盘仍强制重写（默认拒绝）
@@ -86,26 +100,28 @@ disk14 匹配备份 3 个(新→旧):
 终端输出带语义色（错误红/成功绿/警告黄/标记绿/降级灰/help 着色），
 管道重定向或设置 `NO_COLOR` 时自动降级为纯文本。
 
-- **自动提权**：`run` / `apply` / `restore` 需要裸盘读写，`inspect` 查看物理盘时需要裸盘只读；
-  非 root 时自动以 `sudo`
-  重执行自身（选定盘号并入参数，交互提示正常工作）；`list` / `backup` / `convert`
-  以及 `inspect --backup/--onlyid` 永不提权。
-- `--yes` 免交互；多块 USB 盘时自动弹编号选择；系统盘（disk<2）一律拒绝。
+- **自动提权**：`run` / `apply` / `restore` 需要裸盘读写，`inspect` / `meta` 查看物理盘时
+  需要裸盘只读；macOS/Linux 通过 `sudo`，Windows 通过 UAC 重执行自身。跨提权边界时
+  会把抽象盘号固定为平台原生 selector，避免 Linux 枚举序号在重执行后漂移；`list` /
+  `backup` / `convert` 以及离线 `inspect` / `meta` 永不提权。
+- `--yes` 免交互；多块 USB 盘时自动弹编号选择。系统盘不再依赖固定盘号猜测：macOS
+  根据 `/` 的 APFS PhysicalStore，Linux 根据根文件系统设备链，Windows 根据系统卷
+  disk extents 原生确认；任一平台无法确认系统盘身份时均 fail-closed，禁止写盘。
 - `restore` 无论交互选择还是显式传入备份路径，写入前都以 LBA4 唯一身份标签终验当前盘；
   另一块物理盘的备份即使大小和 MD5 都正确也会被拒绝，防止同型号/误选文件串盘还原。
   同时要求对应 `.md5` 存在且校验通过；缺 sidecar 或摘要不符都不会进入写盘阶段。
 - 备份目录（四级优先）：`--backup-dir` 旗标 > 环境变量 `EDPCLI_BACKUP_DIR` >
   `~/.edpcli.conf` 的 `backup_dir = 路径` > `./backup`。
-  - 自动提权时 sudo 会清环境变量，父进程把 `$EDPCLI_BACKUP_DIR` 解析为绝对路径
-    并以显式 `--backup-dir` 旗标传给提权后的子进程，环境变量无需额外配置即生效。
-  - **手动 `sudo edpcli …` 时 shell 环境变量必丢**（sudo `env_reset`，无法恢复），
-    此时配置文件生效（sudo 下读发起用户 home 的 `~/.edpcli.conf`）；若四级都
-    未命中会给出黄色提示。**建议养成不手动加 sudo 的习惯**——工具会自动提权。
+  - macOS/Linux 自动提权时 `sudo` 可能清环境变量，父进程会把 `$EDPCLI_BACKUP_DIR`
+    解析为绝对路径并以显式 `--backup-dir` 旗标传给提权后的子进程。
+  - macOS/Linux **手动 `sudo edpcli …`** 时 shell 环境变量可能因 `env_reset` 丢失，
+    此时配置文件按发起用户 home 解析；若四级都未命中会给出黄色提示。通常直接运行
+    `edpcli` 即可，由工具按平台自动提权。
 
 ## 备份管理
 
 `edpcli backup` 提供跨盘总览、校验、策略清理与手动删除，全部只访问备份目录，
-**不会自动 sudo，也不会碰 `/dev/disk*` / `/dev/rdisk*`**：
+**不会自动提权，也不会访问任何平台的物理裸盘设备**：
 
 ```bash
 edpcli backup [list] [--onlyid ID] [--backup-dir D]
@@ -253,16 +269,17 @@ LBA7/LBA12 分区摘要。`meta <onlyid>` **默认选择最新 `[1]`**，只有�
 ```
 src/
   common.rs    公共常量、容量显示、Python 兼容舍入(银行家)、退出码契约
+  platform/    macOS / Linux / Windows OS 依赖层（枚举、selector、提权、系统盘、锁卷/卸载、硬件探测）
   crypto.rs    逆向 cemsusbregsiter.dll / sectormanage64.dll 得到的加密原语
   sectors.rs   扇区格式与转换（MBR / SAFE6 / EDPF），convert() 主编排
-  identify.rs  device_id 识别（ioreg INQUIRY + 传输模式，LBA7 magic 判真）
-  sysinfo.rs   diskutil/ioreg 查询（CmdRunner 抽象，测试注入罐头输出）
+  identify.rs  device_id 识别（统一 HardwareProbe + LBA7 magic 判真）
+  sysinfo.rs   跨平台系统探测门面与可注入 CmdRunner
   diskio.rs    扇区设备抽象(SectorDev)、原子写入、备份/还原、备份元数据扫描/清理策略、快照读取
   inspect.rs   只读扇区解密/结构解析/字段感知 hex 渲染（物理盘与备份共用）
   completion.rs zsh/bash/fish 补全脚本 + onlyid/编号/盘号等动态候选
   md5.rs       MD5（备份 sidecar）
   plist.rs     极简 XML plist 解析（diskutil -plist 输出）
-  elevate.rs   自动提权（sudo 重执行自身）
+  elevate.rs   跨平台自动提权入口（具体机制由 platform 实现）
   cli.rs       子命令解析与各处理器（Ctx 注入，进程内可测）
 tests/         集成测试（cargo test；金标 + 原子写三态 + 备份体系 + CLI）
 backup/        真实盘备份（兼测试夹具，提交入库）
@@ -276,9 +293,10 @@ Rust 时即以此验证**字节级零漂移**（差分对齐：双实现离线�
 （成功 / 中途失败自动回滚 / 读回不符回滚）、备份命名迁移、同型号他盘剔除
 （LBA4 终验）、CLI 端到端。真实备份缺位时相关用例自动跳过。
 
-CI 在 macOS 上固定执行 `cargo test --all-targets`、`cargo clippy --all-targets -- -D warnings`
-和 release 构建；另用 Rust 1.75.0 执行 `cargo check --all-targets`，确保 `rust-version = "1.75"`
-的最低版本承诺持续成立。
+CI 使用 `macos-latest / ubuntu-latest / windows-latest` 三平台矩阵，固定执行
+`cargo test --all-targets`、`cargo clippy --all-targets -- -D warnings` 和 release 构建。
+另外有平台边界门禁，禁止业务层重新出现 `diskutil/ioreg/sudo`、`/dev/*`、sysfs、
+`PhysicalDrive`、PowerShell 等 OS 细节。项目最低 Rust 版本为 `rust-version = "1.98"`。
 
 device_id 自动识别（SCSI INQUIRY + 传输模式 → Windows InstanceId 中间段，
 两个候选用 LBA7 解出 EDPF magic 判真），无需手工输入。
@@ -308,17 +326,17 @@ device_id 自动识别（SCSI INQUIRY + 传输模式 → Windows InstanceId 中�
 USB 盘硬件不提供跨扇区事务，`apply` / `restore` 的写入按七层逼近原子语义：
 
 1. **重开前后状态终验** — 写前备份并确认后，必须先成功卸载；重新以 O_RDWR 打开
-   `/dev/rdiskN` 后，再读 LBA0-13 与刚备份的写前快照逐扇比对。换盘、重枚举或同盘
-   元数据在确认期间发生变化都在第一笔写入前拒绝；
+   当前平台裸盘设备后，再读 LBA0-13 与刚备份的写前快照逐扇比对。换盘、重枚举或
+   同盘元数据在确认期间发生变化都在第一笔写入前拒绝；
 2. **目标类型终验** — 真盘 `run / apply / restore / inspect --disk` 即使显式传了
-   `--disk N`，也必须由 `diskutil` 确认为外接、非虚拟、WholeDisk 且 BusProtocol=USB；
-   `disk2+` 只作为最低盘号保护，不再被视为“外接 U 盘”的充分条件；
-3. **单 fd 全程持有** — 打开一次 `/dev/rdiskN` 直到全部写完、校验完，不再逐扇
+   `--disk N`，也必须由平台层重新确认为外接 USB 整盘；系统盘身份、卸载/锁卷状态
+   任一无法确认均直接拒绝；
+3. **单 fd 全程持有** — 打开一次平台裸盘句柄直到全部写完、校验完，不再逐扇
    重开（旧版中途重开会撞 EBUSY，留下半写状态）；
-4. **LBA0 最后写** — 唯一改 MBR 的扇区，写它才触发 macOS 重扫/挂载；
-5. **介质缓存同步** — 每轮写入后先调用 `sync()`；真实 `/dev/rdiskN` 使用 macOS
-   `DKIOCSYNCHRONIZECACHE`，普通镜像文件使用 `sync_all()`，同步成功后才进入读回；
-   事务开始前还会先做一次同步能力预检，不支持该屏障的设备在第一笔写入前拒绝；
+4. **LBA0 最后写** — 唯一改 MBR 的扇区最后提交，降低系统重扫/重新挂载干扰事务的窗口；
+5. **介质缓存同步** — 每轮写入后执行平台同步屏障；macOS 裸盘使用
+   `DKIOCSYNCHRONIZECACHE`，Linux/Windows 与普通镜像文件使用对应文件同步能力，
+   同步成功后才进入读回；事务开始前还会先做一次同步能力预检；
 6. **逐扇读回校验** — 缓存同步完成后逐扇读回比对，避免只验证到内核写缓存；
 7. **失败自动回滚** — 任一步失败，用写前内存镜像回滚全部扇区并再次同步、校验。
    回滚成功 = 盘仍为原状可安全重试（退出码 7）；回滚失败 = 明确报告中间态并

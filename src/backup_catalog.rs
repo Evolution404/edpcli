@@ -38,9 +38,7 @@ impl BackupCatalog {
         let mut group: Vec<&BackupEntry> = self
             .entries
             .iter()
-            .filter(|entry| {
-                entry.meta.as_ref().and_then(|m| m.onlyid.as_deref()) == Some(onlyid)
-            })
+            .filter(|entry| entry.meta.as_ref().and_then(|m| m.onlyid.as_deref()) == Some(onlyid))
             .collect();
         if group.is_empty() {
             return Err(format!("未找到 onlyid={} 的备份", onlyid));
@@ -82,9 +80,8 @@ impl BackupCatalog {
                 .or_insert(entry);
         }
         let mut values: Vec<(String, &BackupEntry)> = latest.into_iter().collect();
-        values.sort_by(|a, b| {
-            diskio::cmp_backup_newest_first(a.1, b.1).then_with(|| a.0.cmp(&b.0))
-        });
+        values
+            .sort_by(|a, b| diskio::cmp_backup_newest_first(a.1, b.1).then_with(|| a.0.cmp(&b.0)));
         values.into_iter().map(|(id, _)| id).collect()
     }
 

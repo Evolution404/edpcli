@@ -50,7 +50,10 @@ impl Plist {
 }
 
 pub fn parse(text: &str) -> Result<Plist, String> {
-    let mut p = Px { s: text.as_bytes(), pos: 0 };
+    let mut p = Px {
+        s: text.as_bytes(),
+        pos: 0,
+    };
     p.skip_prolog();
     let v = p.parse_value()?;
     Ok(v)
@@ -204,7 +207,9 @@ impl<'a> Px<'a> {
                 if self_closing {
                     return Ok(Plist::Str(String::new()));
                 }
-                Ok(Plist::Str(decode_entities(&self.read_text_until_close("string")?)))
+                Ok(Plist::Str(decode_entities(
+                    &self.read_text_until_close("string")?,
+                )))
             }
             "integer" => {
                 if self_closing {
@@ -255,10 +260,17 @@ fn decode_entities(raw: &[u8]) -> String {
                     "quot" => Some('"'.to_string()),
                     "apos" => Some('\''.to_string()),
                     _ => {
-                        if let Some(hex) = ent.strip_prefix("#x").or_else(|| ent.strip_prefix("#X")) {
-                            u32::from_str_radix(hex, 16).ok().and_then(char::from_u32).map(|c| c.to_string())
+                        if let Some(hex) = ent.strip_prefix("#x").or_else(|| ent.strip_prefix("#X"))
+                        {
+                            u32::from_str_radix(hex, 16)
+                                .ok()
+                                .and_then(char::from_u32)
+                                .map(|c| c.to_string())
                         } else if let Some(dec) = ent.strip_prefix('#') {
-                            dec.parse::<u32>().ok().and_then(char::from_u32).map(|c| c.to_string())
+                            dec.parse::<u32>()
+                                .ok()
+                                .and_then(char::from_u32)
+                                .map(|c| c.to_string())
                         } else {
                             None
                         }
@@ -343,11 +355,17 @@ mod tests {
 	<key>DeviceName</key><string>Netac &amp; Co</string>
 </dict></plist>"#;
         let v = parse(xml).unwrap();
-        assert_eq!(v.get("DiskSize").and_then(|x| x.as_int()), Some(62_914_560_000));
+        assert_eq!(
+            v.get("DiskSize").and_then(|x| x.as_int()),
+            Some(62_914_560_000)
+        );
         assert_eq!(v.get("WholeDisk").and_then(|x| x.as_bool()), Some(true));
         assert_eq!(v.get("Internal").and_then(|x| x.as_bool()), Some(false));
         assert_eq!(v.get("BusProtocol").and_then(|x| x.as_str()), Some("USB"));
-        assert_eq!(v.get("DeviceName").and_then(|x| x.as_str()), Some("Netac & Co"));
+        assert_eq!(
+            v.get("DeviceName").and_then(|x| x.as_str()),
+            Some("Netac & Co")
+        );
     }
 
     #[test]
