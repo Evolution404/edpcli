@@ -853,8 +853,8 @@ fn list_flow(runner: &SysRunner, backup_dir_flag: Option<String>) -> i32 {
     let probe = ReadProbeCache::new(runner);
     let rows = scan_disks(&probe, &bak, &read_disk);
 
-    // 先无特权只读探测；只有真实遇到 PermissionDenied 才自动请求提权。
-    // 无外接盘时不会无意义弹密码/UAC，用户也不需要手工再跑 sudo。
+    // 先无特权只读探测；只有真实遇到 PermissionDenied 才自动请求平台管理员授权。
+    // 无外接盘时不会无意义弹授权提示；需要权限时由平台层负责交互并重执行自身。
     let has_sentinel = std::env::args().any(|arg| arg == ELEVATED_FLAG);
     if list_needs_elevation(&rows, elevate::is_root(), has_sentinel) {
         println!("检测到外接盘，但读取身份、姓名和部门等裸盘信息需要管理员权限。");
