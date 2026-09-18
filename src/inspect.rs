@@ -174,7 +174,9 @@ fn c_field_end(b: &[u8], start: usize, end: usize) -> usize {
 
 fn decode_gbk(b: &[u8]) -> Option<String> {
     let mut child = Command::new("iconv")
-        .args(["-f", "GBK", "-t", "UTF-8"])
+        // 旧 LLGB 固定长度文本偶尔会在末尾截断一个 GBK 双字节字符。
+        // `-c` 只丢弃无法转换的残缺尾字节，保留此前全部可读文本，避免整段退化成 hex。
+        .args(["-c", "-f", "GBK", "-t", "UTF-8"])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
@@ -182,7 +184,9 @@ fn decode_gbk(b: &[u8]) -> Option<String> {
         .ok()?;
     child.stdin.as_mut()?.write_all(b).ok()?;
     let output = child.wait_with_output().ok()?;
-    if !output.status.success() {
+    // macOS iconv 遇到末尾残缺 GBK 时会返回非 0，但 stdout 已包含此前完整可读文本。
+    // 对展示型元数据应保留这部分，而不是整段退化成 hex。
+    if !output.status.success() && output.stdout.is_empty() {
         return None;
     }
     String::from_utf8(output.stdout).ok()
@@ -323,7 +327,9 @@ fn parse_lba6(raw: &[u8], meta: &InspectMeta, fields: &mut Vec<SectorField>, not
     let label_end = c_field_end(&dec, 0x000, 0x040);
     let user_end = c_field_end(&dec, 0x050, 0x070);
     let serial_end = c_field_end(&dec, 0x070, 0x080);
-    fields.push(field(0x000, label_end, "标签", text_value(&dec[0x000..label_end]), FieldStyle::Text));
+    let label = text_value(&dec[0x000..label_end]);
+    let label = label.strip_prefix("*^$@").unwrap_or(&label).to_string();
+    fields.push(field(0x000, label_end, "标签", label, FieldStyle::Text));
     fields.push(field(0x050, user_end, "用户", text_value(&dec[0x050..user_end]), FieldStyle::Text));
     fields.push(field(0x070, serial_end, "序列", text_value(&dec[0x070..serial_end]), FieldStyle::Identity));
     if let Some((crc, _)) = crc_key(meta) {
@@ -569,12 +575,14 @@ fn parse_llgb(dec: &[u8], fields: &mut Vec<SectorField>, notes: &mut Vec<String>
             .into_iter()
             .map(|part| {
                 if let Some((key, value)) = part.split_once('=') {
+                    let value = value.trim();
+                    let value = value.strip_prefix("*^$@").unwrap_or(value);
                     FieldChild {
                         label: key.trim().to_string(),
-                        value: if value.trim().is_empty() {
+                        value: if value.is_empty() {
                             "<空>".into()
                         } else {
-                            value.trim().to_string()
+                            value.to_string()
                         },
                     }
                 } else {
@@ -1047,4 +1055,21 @@ pub fn overview_line(view: &SectorView) -> String {
         .map(|&b| if (0x20..=0x7e).contains(&b) { b as char } else { '.' })
         .collect();
     format!("LBA{:>2}  {:>3}/512  {:<12}  {}", view.lba, nz, head, view.method)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn truncated_legacy_gbk_keeps_readable_prefix() {
+        let mut raw = b"Dept=*^$@".to_vec();
+        raw.extend_from_slice(&[
+            0xBD, 0xAD, 0xCB, 0xD5, 0xCA, 0xA1, 0xB5, 0xE7, 0xC1, 0xA6, 0xD3, 0xD0,
+            0xCF, 0xDE, 0xB9, 0xAB, 0xCB, 0xBE, 0x2F, 0xBD,
+        ]);
+        let decoded = text_value(&raw);
+        assert!(decoded.starts_with("Dept=*^$@江苏省电力有限公司/"), "{decoded}");
+        assert!(!decoded.contains("[hex:"), "{decoded}");
+    }
 }
