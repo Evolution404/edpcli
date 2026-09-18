@@ -38,9 +38,11 @@ jobs:
         with:
           toolchain: 1.98.1
           components: clippy
+      - name: Rustfmt
+        run: cargo fmt --all -- --check
       - name: Test all targets
-        run: cargo test --all-targets
+        run: cargo test --all-targets --locked
       - name: Clippy is warning-free
-        run: cargo clippy --all-targets -- -D warnings
+        run: cargo clippy --all-targets --locked -- -D warnings
       - name: Build release binary
-        run: cargo build --release
+        run: cargo build --release --locked
