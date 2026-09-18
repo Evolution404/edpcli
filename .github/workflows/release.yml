@@ -13,7 +13,7 @@ jobs:
     name: macOS universal
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Install stable Rust
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -39,7 +39,7 @@ jobs:
           tar -C dist -czf "package/${artifact}" edpcli
           (cd package && shasum -a 256 "${artifact}" > "${artifact}.sha256")
       - name: Upload macOS artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: release-macos
           path: package/*
@@ -49,7 +49,7 @@ jobs:
     name: Linux x86_64
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Install stable Rust
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -70,7 +70,7 @@ jobs:
           tar -C dist -czf "package/${artifact}" edpcli
           (cd package && sha256sum "${artifact}" > "${artifact}.sha256")
       - name: Upload Linux artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: release-linux
           path: package/*
@@ -80,7 +80,7 @@ jobs:
     name: Windows x86_64
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Install stable Rust
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -101,7 +101,7 @@ jobs:
           $hash = (Get-FileHash "package\$artifact" -Algorithm SHA256).Hash.ToLowerInvariant()
           "$hash  $artifact" | Set-Content -Encoding ascii "package\$artifact.sha256"
       - name: Upload Windows artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: release-windows
           path: package/*
@@ -115,7 +115,7 @@ jobs:
       - windows
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           pattern: release-*
           path: release-assets
