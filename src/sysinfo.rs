@@ -106,7 +106,7 @@ impl CachedOutput {
 /// 单次只读命令会话内的系统探测缓存。
 ///
 /// 只缓存由当前平台明确标记为纯查询的命令；有副作用命令永远直通。
-/// 该类型只用于 list/meta/inspect/completion；apply/restore 的安全终验继续使用
+/// 该类型只用于 list/info/inspect/completion；apply/restore 的安全终验继续使用
 /// fresh `SysRunner`，避免缓存掩盖换盘或设备状态变化。
 pub struct ReadProbeCache<'a> {
     inner: &'a dyn CmdRunner,

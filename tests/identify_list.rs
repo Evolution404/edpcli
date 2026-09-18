@@ -88,7 +88,9 @@ fn scan_and_print_all_row_kinds() {
     );
     let runner = FakeRunner { canned: m };
 
+    let read_calls = std::cell::RefCell::new(Vec::<(u32, u32)>::new());
     let read_ok = |disk: u32, lba: u32| -> std::io::Result<Vec<u8>> {
+        read_calls.borrow_mut().push((disk, lba));
         // disk6 读 netac 夹具; disk4 也读 netac(ioreg 是 Bogus → 识别不出, 与数据无关)
         let _ = disk;
         Ok(netac[lba as usize * SECTOR..(lba as usize + 1) * SECTOR].to_vec())
@@ -124,10 +126,21 @@ fn scan_and_print_all_row_kinds() {
     let parts = row6.partitions.as_ref().unwrap();
     assert_eq!(parts.len(), 3);
     assert!(out.contains("└─ EDPF:"), "{}", out);
+    assert_eq!(
+        read_calls
+            .borrow()
+            .iter()
+            .filter(|&&(disk, lba)| disk == 6 && lba == 12)
+            .count(),
+        1,
+        "list 同一次设备扫描不应重复读取 LBA12"
+    );
 
     // 免密盘镜像: [免密] 标记 + EDPF 2 条
     let (conv, _) = converted_image("netac").unwrap();
+    let converted_read_calls = std::cell::RefCell::new(Vec::<(u32, u32)>::new());
     let read_conv = |_disk: u32, lba: u32| -> std::io::Result<Vec<u8>> {
+        converted_read_calls.borrow_mut().push((6, lba));
         Ok(conv[lba as usize * SECTOR..(lba as usize + 1) * SECTOR].to_vec())
     };
     let rows2 = scan_disks(&runner, &bak.0, &read_conv);
@@ -136,6 +149,15 @@ fn scan_and_print_all_row_kinds() {
     let row6b = rows2.iter().find(|r| r.disk == 6).unwrap();
     assert!(row6b.is_nopwd);
     assert_eq!(row6b.partitions.as_ref().unwrap().len(), 2);
+    assert_eq!(
+        converted_read_calls
+            .borrow()
+            .iter()
+            .filter(|&&(_disk, lba)| lba == 12)
+            .count(),
+        1,
+        "免密盘 list 扫描也不应为状态判断和分区展示重复读取 LBA12"
+    );
 
     // 读盘全被拒（权限不足）→ denied 降级行
     let read_denied = |_disk: u32, _lba: u32| -> std::io::Result<Vec<u8>> {

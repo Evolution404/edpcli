@@ -85,6 +85,69 @@ pub trait SectorDev {
     }
 }
 
+/// 只读展示/诊断路径的扇区缓存。
+///
+/// `info` / `inspect` 可能先读取身份扇区，再由摘要/渲染阶段请求同一 LBA。
+/// 这些路径不承担写入前后的新鲜度校验，因此可以在一次命令会话内复用已读数据，
+/// 避免重复访问同一裸盘扇区。apply/restore 的安全复核不得使用该缓存。
+pub struct SectorReadCache<'a> {
+    dev: &'a mut dyn SectorDev,
+    cache: BTreeMap<u32, Vec<u8>>,
+}
+
+impl<'a> SectorReadCache<'a> {
+    pub fn new(dev: &'a mut dyn SectorDev) -> Self {
+        Self {
+            dev,
+            cache: BTreeMap::new(),
+        }
+    }
+
+    pub fn read_sector(&mut self, lba: u32) -> io::Result<Vec<u8>> {
+        if let Some(data) = self.cache.get(&lba) {
+            return Ok(data.clone());
+        }
+        let data = self.dev.read_sector(lba)?;
+        self.cache.insert(lba, data.clone());
+        Ok(data)
+    }
+}
+
+/// `list` 等只读多盘扫描使用的设备池：同一 disk 在一次命令会话内只打开一次。
+/// 写盘流程不得复用该类型，避免跨安全检查持有旧设备句柄。
+pub(crate) struct ReadOnlyDiskPool<F, D>
+where
+    F: FnMut(u32) -> io::Result<D>,
+    D: SectorDev,
+{
+    open: F,
+    devices: BTreeMap<u32, D>,
+}
+
+impl<F, D> ReadOnlyDiskPool<F, D>
+where
+    F: FnMut(u32) -> io::Result<D>,
+    D: SectorDev,
+{
+    pub(crate) fn new(open: F) -> Self {
+        Self {
+            open,
+            devices: BTreeMap::new(),
+        }
+    }
+
+    pub(crate) fn read_sector(&mut self, disk: u32, lba: u32) -> io::Result<Vec<u8>> {
+        if !self.devices.contains_key(&disk) {
+            let dev = (self.open)(disk)?;
+            self.devices.insert(disk, dev);
+        }
+        self.devices
+            .get_mut(&disk)
+            .expect("刚插入的只读设备必须存在")
+            .read_sector(lba)
+    }
+}
+
 /// 打开镜像/raw 设备文件。流程以只读打开(挂载态可读); 写阶段经 reopen_rdwr
 /// 在卸载后切换为 O_RDWR — 与 Python 版时序一致(dry-run 从不需要写权限,
 /// O_RDWR 的 EBUSY 重试只发生在卸载之后)。
@@ -770,10 +833,10 @@ pub fn read_backup_md5(path: &Path) -> io::Result<Option<String>> {
     Ok(Some(expected.to_ascii_lowercase()))
 }
 
-fn md5_status(path: &Path, data: &[u8]) -> Md5Status {
+fn md5_status(path: &Path, digest: &str) -> Md5Status {
     match read_backup_md5(path) {
         Ok(None) => Md5Status::NoSidecar,
-        Ok(Some(expected)) if expected == md5_hex(data) => Md5Status::Ok,
+        Ok(Some(expected)) if expected == digest => Md5Status::Ok,
         Ok(Some(_)) | Err(_) => Md5Status::Mismatch,
     }
 }
@@ -822,9 +885,9 @@ pub fn scan_backup_dir(dir: &Path) -> Vec<BackupEntry> {
             .as_ref()
             .map(|d| d.len() == 14 * SECTOR)
             .unwrap_or(false);
-        let md5_ok = data
-            .as_ref()
-            .map(|d| md5_status(&path, d))
+        let md5_ok = content_md5
+            .as_deref()
+            .map(|digest| md5_status(&path, digest))
             .unwrap_or(Md5Status::Mismatch);
         let is_nopwd = match (&meta, &data) {
             (Some(m), Some(d)) => image_is_nopwd(d, &m.device_id),
@@ -843,6 +906,41 @@ pub fn scan_backup_dir(dir: &Path) -> Vec<BackupEntry> {
     }
     entries.sort_by(cmp_backup_newest_first);
     entries
+}
+
+/// Shell completion 专用的轻量备份索引。
+///
+/// 这里只判断普通 `.bin` 文件以及文件名是否符合本工具备份命名；绝不读取备份内容、
+/// 计算 MD5 或解析 LBA。完整健康状态仍由 `scan_backup_dir` 负责。
+pub fn scan_backup_names(dir: &Path) -> Vec<PathBuf> {
+    let Ok(read_dir) = fs::read_dir(dir) else {
+        return Vec::new();
+    };
+    let mut paths: Vec<PathBuf> = read_dir
+        .flatten()
+        .filter_map(|entry| {
+            let file_type = entry.file_type().ok()?;
+            if !file_type.is_file() {
+                return None;
+            }
+            let path = entry.path();
+            if path.extension().and_then(|ext| ext.to_str()) != Some("bin") {
+                return None;
+            }
+            let name = path.file_name()?.to_str()?;
+            parse_backup_name(name)?;
+            Some(path)
+        })
+        .collect();
+    paths.sort_by(
+        |a, b| match (backup_name_time_key(a), backup_name_time_key(b)) {
+            (Some(at), Some(bt)) => bt.cmp(&at).then_with(|| a.cmp(b)),
+            (Some(_), None) => Ordering::Less,
+            (None, Some(_)) => Ordering::Greater,
+            (None, None) => a.cmp(b),
+        },
+    );
+    paths
 }
 
 /// 同一物理盘的备份分组键。现代命名优先使用 onlyid；历史/缺失 onlyid 时退化为
@@ -1001,6 +1099,23 @@ pub fn find_backups(
     if !bak_dir.is_dir() {
         return vec![];
     }
+    let Ok(entries) = fs::read_dir(bak_dir) else {
+        return vec![];
+    };
+    let files: Vec<(String, PathBuf)> = entries
+        .flatten()
+        .filter_map(|entry| {
+            let file_type = entry.file_type().ok()?;
+            if !file_type.is_file() {
+                return None;
+            }
+            let path = entry.path();
+            if path.extension().and_then(|e| e.to_str()) != Some("bin") {
+                return None;
+            }
+            Some((entry.file_name().to_string_lossy().into_owned(), path))
+        })
+        .collect();
     let secs = facts
         .total_sectors
         .map(|s| s.to_string())
@@ -1023,28 +1138,11 @@ pub fn find_backups(
         secs, facts.vid, facts.pid
     )]); // 兜底(识别失败时)
     for pats in &tiers {
-        let mut out: Vec<PathBuf> = Vec::new();
-        for pat in pats {
-            let Ok(entries) = fs::read_dir(bak_dir) else {
-                continue;
-            };
-            for entry in entries.flatten() {
-                let Ok(file_type) = entry.file_type() else {
-                    continue;
-                };
-                if !file_type.is_file() {
-                    continue;
-                }
-                let path = entry.path();
-                if path.extension().and_then(|e| e.to_str()) != Some("bin") {
-                    continue;
-                }
-                let name = entry.file_name().to_string_lossy().into_owned();
-                if wildcard_match(pat, &name) {
-                    out.push(path);
-                }
-            }
-        }
+        let mut out: Vec<PathBuf> = files
+            .iter()
+            .filter(|(name, _)| pats.iter().any(|pat| wildcard_match(pat, name)))
+            .map(|(_, path)| path.clone())
+            .collect();
         if out.is_empty() {
             continue;
         }
@@ -1064,7 +1162,6 @@ pub fn find_backups(
                 (None, None) => mtime_epoch(b).cmp(&mtime_epoch(a)).then_with(|| a.cmp(b)),
             },
         );
-        out.dedup();
         return out;
     }
     Vec::new()
@@ -1093,6 +1190,76 @@ pub fn read_lba_file(dir: &Path, lba: u32) -> Vec<u8> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    struct CountingSectorDev {
+        reads: usize,
+    }
+
+    impl SectorDev for CountingSectorDev {
+        fn reopen_rdwr(&mut self, _wait: Duration) -> io::Result<()> {
+            Err(io::Error::other("not used"))
+        }
+
+        fn read_sector(&mut self, lba: u32) -> io::Result<Vec<u8>> {
+            self.reads += 1;
+            Ok(vec![lba as u8; SECTOR])
+        }
+
+        fn write_sector(&mut self, _lba: u32, _data: &[u8]) -> io::Result<()> {
+            Err(io::Error::other("not used"))
+        }
+
+        fn sync(&mut self) -> io::Result<()> {
+            Err(io::Error::other("not used"))
+        }
+    }
+
+    #[test]
+    fn sector_read_cache_reuses_info_prefetch_during_summary() {
+        let mut dev = CountingSectorDev { reads: 0 };
+        {
+            let mut cache = SectorReadCache::new(&mut dev);
+            // physical info 会先为 device_id / onlyid 预读 7、4，随后 summary
+            // 请求 0、4、6、7、8、11、12。预读扇区不得再次访问底层。
+            assert_eq!(cache.read_sector(7).unwrap(), vec![7u8; SECTOR]);
+            assert_eq!(cache.read_sector(4).unwrap(), vec![4u8; SECTOR]);
+            for lba in [0, 4, 6, 7, 8, 11, 12] {
+                assert_eq!(cache.read_sector(lba).unwrap(), vec![lba as u8; SECTOR]);
+            }
+        }
+        assert_eq!(
+            dev.reads, 7,
+            "info 预读 + summary 共涉及 7 个唯一 LBA，不应重复访问 LBA4/LBA7"
+        );
+    }
+
+    #[test]
+    fn read_only_disk_pool_opens_each_disk_once() {
+        use std::cell::Cell;
+
+        struct DiskDev(u32);
+        impl SectorDev for DiskDev {
+            fn read_sector(&mut self, lba: u32) -> io::Result<Vec<u8>> {
+                Ok(vec![(self.0 + lba) as u8; SECTOR])
+            }
+
+            fn write_sector(&mut self, _lba: u32, _data: &[u8]) -> io::Result<()> {
+                Err(io::Error::other("read-only test device"))
+            }
+        }
+
+        let opens = Cell::new(0usize);
+        let mut pool = ReadOnlyDiskPool::new(|disk| {
+            opens.set(opens.get() + 1);
+            Ok(DiskDev(disk))
+        });
+
+        assert_eq!(pool.read_sector(6, 7).unwrap()[0], 13);
+        assert_eq!(pool.read_sector(6, 12).unwrap()[0], 18);
+        assert_eq!(pool.read_sector(7, 7).unwrap()[0], 14);
+        assert_eq!(pool.read_sector(6, 4).unwrap()[0], 10);
+        assert_eq!(opens.get(), 2, "同一物理盘在一次 list 会话内只应打开一次");
+    }
 
     #[test]
     fn label_id_positive_negative_malformed() {

@@ -9,7 +9,7 @@ use std::path::Path;
 
 use crate::common::SECTOR;
 use crate::crypto::crc32_bare;
-use crate::diskio::{self, BackupEntry};
+use crate::diskio::{self, BackupEntry, FileDev, SectorDev};
 use crate::inspect::{self, InspectMeta, SectorView};
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -414,5 +414,6 @@ pub fn render_with_source(summary: &MetaInfoSummary, source: Option<&str>) -> St
 
 pub fn summarize_backup(path: &Path, meta: &InspectMeta) -> io::Result<MetaInfoSummary> {
     let path = path.to_string_lossy().into_owned();
-    summarize(meta, |lba| diskio::read_lba(&path, lba))
+    let mut dev = FileDev::open_rdonly(&path)?;
+    summarize(meta, |lba| dev.read_sector(lba))
 }

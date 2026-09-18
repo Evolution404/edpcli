@@ -43,24 +43,19 @@ fn copied_catalog() -> Option<(TmpDir, BackupCatalog)> {
 }
 
 #[test]
-fn onlyid_index_is_one_based_and_newest_first() {
+fn catalog_order_prefers_backup_name_time_over_filesystem_mtime() {
     let Some((_tmp, catalog)) = copied_catalog() else {
         return;
     };
-    let group = catalog.onlyid_group("1402259934").unwrap();
-    assert_eq!(group.len(), 2);
-    assert!(group[0].path.to_string_lossy().contains("20260911_172300"));
-    assert!(group[1].path.to_string_lossy().contains("20260910_172300"));
-    assert_eq!(
-        catalog.onlyid_index("1402259934", 1).unwrap().path,
-        group[0].path
-    );
-    assert_eq!(
-        catalog.onlyid_index("1402259934", 2).unwrap().path,
-        group[1].path
-    );
-    assert!(catalog.onlyid_index("1402259934", 0).is_err());
-    assert!(catalog.onlyid_index("1402259934", 3).is_err());
+    assert_eq!(catalog.entries().len(), 2);
+    assert!(catalog.entries()[0]
+        .path
+        .to_string_lossy()
+        .contains("20260911_172300"));
+    assert!(catalog.entries()[1]
+        .path
+        .to_string_lossy()
+        .contains("20260910_172300"));
 }
 
 #[test]
@@ -82,20 +77,11 @@ fn target_resolution_is_confined_to_backup_root() {
 }
 
 #[test]
-fn onlyid_values_are_unique_and_sorted_by_latest_backup() {
-    let Some((_tmp, catalog)) = copied_catalog() else {
-        return;
-    };
-    assert_eq!(catalog.onlyid_values(), vec!["1402259934"]);
-    assert!(catalog.onlyid_group("404").is_err());
-}
-
-#[test]
 fn ownership_uses_lba8_cached_during_catalog_scan() {
     let Some((_tmp, catalog)) = copied_catalog() else {
         return;
     };
-    let entry = catalog.onlyid_index("1402259934", 1).unwrap();
+    let entry = &catalog.entries()[0];
     assert!(entry.lba8.is_some());
 
     // 扫描完成后移除源文件；归属信息仍应从 BackupEntry 的内存 LBA8 得到，

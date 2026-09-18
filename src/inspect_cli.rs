@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 
 use crate::cli::{InspectOpts, StdPrompter};
 use crate::common::{EXIT_BACKUP, EXIT_IO, EXIT_OK, EXIT_USAGE, SECTOR};
-use crate::diskio::{self, raw_path};
+use crate::diskio::{self, raw_path, FileDev, SectorReadCache};
 use crate::elevate;
 use crate::identify::identify;
 use crate::inspect::{self, InspectMeta};
@@ -233,9 +233,18 @@ fn inspect_backup_flow(opts: InspectOpts) -> i32 {
         meta.device_id = Some(did.clone());
     }
     let path_s = path.to_string_lossy().into_owned();
-    render_inspect_source(&source_label, &meta, &opts, |lba| {
-        diskio::read_lba(&path_s, lba)
-    })
+    let mut dev = match FileDev::open_rdonly(&path_s) {
+        Ok(dev) => dev,
+        Err(e) => {
+            eprintln!(
+                "{}",
+                crate::ui::red(&format!("错误: 无法打开 {}: {e}", path.display()))
+            );
+            return EXIT_IO;
+        }
+    };
+    let mut reader = SectorReadCache::new(&mut dev);
+    render_inspect_source(&source_label, &meta, &opts, |lba| reader.read_sector(lba))
 }
 
 fn inspect_disk_flow(runner: &dyn CmdRunner, mut opts: InspectOpts) -> i32 {
@@ -264,14 +273,26 @@ fn inspect_disk_flow(runner: &dyn CmdRunner, mut opts: InspectOpts) -> i32 {
     };
     opts.disk = Some(n);
     let path = raw_path(n);
-    let raw7 = diskio::read_lba(&path, 7).ok();
+    let mut dev = match FileDev::open_rdonly(&path) {
+        Ok(dev) => dev,
+        Err(e) => {
+            eprintln!(
+                "{}",
+                crate::ui::red(&format!("错误: 无法只读打开 disk{n}: {e}"))
+            );
+            return EXIT_IO;
+        }
+    };
+    let mut reader = SectorReadCache::new(&mut dev);
+    let raw7 = reader.read_sector(7).ok();
     let id = raw7
         .as_deref()
         .and_then(|r| identify(runner, n, r).device_id);
     let (vid, pid) = sysinfo::usb_vid_pid(runner, n);
     let size_bytes =
         sysinfo::disk_total_sectors(runner, n).and_then(|s| s.checked_mul(SECTOR as u64));
-    let onlyid = diskio::read_lba(&path, 4)
+    let onlyid = reader
+        .read_sector(4)
         .ok()
         .and_then(|b| diskio::lba4_label_id_from(&b[..b.len().min(32)]));
     let mut meta = InspectMeta {
@@ -285,7 +306,7 @@ fn inspect_disk_flow(runner: &dyn CmdRunner, mut opts: InspectOpts) -> i32 {
         meta.device_id = Some(did.clone());
     }
     render_inspect_source(&format!("物理盘 disk{n} ({path})"), &meta, &opts, |lba| {
-        diskio::read_lba(&path, lba)
+        reader.read_sector(lba)
     })
 }
 

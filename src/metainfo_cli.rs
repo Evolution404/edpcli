@@ -3,9 +3,11 @@
 //! 备份文件可直接作位置参数；当前盘由设备选择器确定。底层解析继续复用
 //! inspect/metainfo，不维护第二套协议算法。
 
-use crate::cli::{auto_pick_disk, guard_usb_disk, InfoOpts, StdPrompter};
+use crate::cli::{
+    argv_with_backup_dir_for_elevation, auto_pick_disk, guard_usb_disk, InfoOpts, StdPrompter,
+};
 use crate::common::{EXIT_BACKUP, EXIT_IO, EXIT_OK, SECTOR};
-use crate::diskio::{self, find_backups, raw_path, DiskFacts};
+use crate::diskio::{self, find_backups, raw_path, DiskFacts, FileDev, SectorReadCache};
 use crate::elevate;
 use crate::identify::identify;
 use crate::inspect::InspectMeta;
@@ -100,7 +102,10 @@ fn disk_flow(runner: &dyn CmdRunner, mut opts: InfoOpts) -> i32 {
         }
     }
     if !elevate::is_root() {
-        let mut argv: Vec<String> = std::env::args().skip(1).collect();
+        // 与 list/apply/backup create 一致：自动提权不能依赖提权后的环境变量继承。
+        // 当 backup_dir 来自 EDPCLI_BACKUP_DIR 时，将其转为显式 --backup-dir 跨过提权边界，
+        // 否则 info 提权前后可能显示不同的备份数量。
+        let mut argv = argv_with_backup_dir_for_elevation(opts.backup_dir.as_deref());
         if opts.disk.is_none() {
             let mut prompt = StdPrompter;
             let n = match auto_pick_disk(runner, &mut prompt) {
@@ -136,7 +141,18 @@ fn disk_flow(runner: &dyn CmdRunner, mut opts: InfoOpts) -> i32 {
     }
 
     let path = raw_path(n);
-    let raw7 = diskio::read_lba(&path, 7).ok();
+    let mut dev = match FileDev::open_rdonly(&path) {
+        Ok(dev) => dev,
+        Err(e) => {
+            eprintln!(
+                "{}",
+                crate::ui::red(&format!("错误: 无法只读打开 disk{n}: {e}"))
+            );
+            return EXIT_IO;
+        }
+    };
+    let mut reader = SectorReadCache::new(&mut dev);
+    let raw7 = reader.read_sector(7).ok();
     let auto_device_id = raw7
         .as_deref()
         .and_then(|raw| identify(runner, n, raw).device_id);
@@ -144,7 +160,7 @@ fn disk_flow(runner: &dyn CmdRunner, mut opts: InfoOpts) -> i32 {
     let (vid, pid) = sysinfo::usb_vid_pid(runner, n);
     let total_sectors = sysinfo::disk_total_sectors(runner, n);
     let size_bytes = total_sectors.and_then(|s| s.checked_mul(SECTOR as u64));
-    let raw4 = diskio::read_lba(&path, 4).ok();
+    let raw4 = reader.read_sector(4).ok();
     let onlyid = raw4.as_deref().and_then(diskio::lba4_label_id_from);
     let inspect_meta = InspectMeta {
         device_id: device_id.clone(),
@@ -153,7 +169,7 @@ fn disk_flow(runner: &dyn CmdRunner, mut opts: InfoOpts) -> i32 {
         size_bytes,
         onlyid: onlyid.clone(),
     };
-    let summary = match metainfo::summarize(&inspect_meta, |lba| diskio::read_lba(&path, lba)) {
+    let summary = match metainfo::summarize(&inspect_meta, |lba| reader.read_sector(lba)) {
         Ok(summary) => summary,
         Err(e) => {
             eprintln!(

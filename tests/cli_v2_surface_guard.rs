@@ -90,3 +90,14 @@ fn v2_surface_contains_required_task_commands() {
 fn package_version_is_cli_v2_major() {
     assert_eq!(env!("CARGO_PKG_VERSION"), "2.0.0");
 }
+
+#[test]
+fn completion_does_not_load_full_backup_catalog() {
+    let source = manifest_file("src/completion.rs");
+    for heavyweight in ["BackupCatalog", "BackupSelector"] {
+        assert!(
+            !source.contains(heavyweight),
+            "completion 不应为了 Tab 补全加载完整备份目录模型: {heavyweight}"
+        );
+    }
+}

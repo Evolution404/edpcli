@@ -2,6 +2,8 @@
 //!
 //! 这里集中平台设备信息 + LBA4/7/12 的只读探测逻辑，顶层 CLI 只负责路由。
 
+use std::cell::RefCell;
+use std::collections::BTreeMap;
 use std::io;
 use std::path::Path;
 
@@ -57,7 +59,11 @@ pub fn scan_disks(
         };
         if d.proto == "USB" {
             let probe = (|| -> io::Result<()> {
+                let sector_cache = RefCell::new(BTreeMap::<u32, Vec<u8>>::new());
                 let read_exact = |lba: u32| -> io::Result<Vec<u8>> {
+                    if let Some(data) = sector_cache.borrow().get(&lba).cloned() {
+                        return Ok(data);
+                    }
                     let data = read_disk(d.n, lba)?;
                     if data.len() != SECTOR {
                         return Err(io::Error::new(
@@ -71,6 +77,7 @@ pub fn scan_disks(
                             ),
                         ));
                     }
+                    sector_cache.borrow_mut().insert(lba, data.clone());
                     Ok(data)
                 };
                 let lba7 = read_exact(7)?;

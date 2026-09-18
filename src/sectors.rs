@@ -38,6 +38,26 @@ fn part_type_name(t: u32) -> &'static str {
     }
 }
 
+fn require_sector(raw: &[u8], label: &str) -> EdpCliResult<()> {
+    if raw.len() == SECTOR {
+        return Ok(());
+    }
+    Err(EdpCliError::new(
+        EXIT_TARGET,
+        format!(
+            "错误: {label} 长度为 {}B，预期完整扇区 {}B",
+            raw.len(),
+            SECTOR
+        ),
+    ))
+}
+
+fn read_sector(read: ReadFn, lba: u32) -> EdpCliResult<Vec<u8>> {
+    let raw = read(lba)?;
+    require_sector(&raw, &format!("LBA{lba}"))?;
+    Ok(raw)
+}
+
 // ══════════════════════════════════════════════════════════════════
 // 1. EDPF entry 工具
 // ══════════════════════════════════════════════════════════════════
@@ -53,6 +73,22 @@ fn u64_at(b: &[u8], off: usize) -> u64 {
 }
 
 pub fn find_type_entry(dec: &[u8], stride: usize, ptype: u32) -> EdpCliResult<usize> {
+    let Some(required) = stride.checked_mul(3) else {
+        return Err(EdpCliError::new(
+            EXIT_TARGET,
+            "错误: EDPF entry stride 溢出",
+        ));
+    };
+    if stride == 0 || dec.len() < required {
+        return Err(EdpCliError::new(
+            EXIT_TARGET,
+            format!(
+                "错误: EDPF 数据不足: {}B，至少需要 {}B",
+                dec.len(),
+                required
+            ),
+        ));
+    }
     for i in 0..3 {
         let e = ent(dec, i, stride);
         if &e[..4] == b"EDPF" && u32_at(e, 0x0c) == ptype {
@@ -89,6 +125,7 @@ pub fn make_entry(src_e: &[u8], ptype: u32, start: u64, size: u64) -> Vec<u8> {
 // 2. 单扇区转换
 // ══════════════════════════════════════════════════════════════════
 pub fn convert_lba0(raw: &[u8], share_sectors: u64) -> EdpCliResult<Vec<u8>> {
+    require_sector(raw, "LBA0")?;
     let mut out = raw.to_vec();
     for i in 0..4 {
         out[0x1BE + i * 16..0x1BE + (i + 1) * 16].fill(0);
@@ -107,6 +144,7 @@ pub fn convert_lba0(raw: &[u8], share_sectors: u64) -> EdpCliResult<Vec<u8>> {
 }
 
 pub fn convert_lba6(raw: &[u8]) -> EdpCliResult<(Vec<u8>, Vec<u8>)> {
+    require_sector(raw, "LBA6")?;
     let mut dec = lba6_decode(raw);
     if dec[0x188..0x190] == [0u8; 8] {
         return Err(EdpCliError::new(
@@ -128,6 +166,7 @@ pub fn convert_lba6(raw: &[u8]) -> EdpCliResult<(Vec<u8>, Vec<u8>)> {
 }
 
 pub fn convert_lba7(raw: &[u8], k0: u32, share_sectors: u64) -> EdpCliResult<(Vec<u8>, Vec<u8>)> {
+    require_sector(raw, "LBA7")?;
     let mut dec = xor_rolling(raw, k0);
     if dec[..4] != *b"EDPF" {
         return Err(EdpCliError::new(
@@ -156,6 +195,7 @@ pub fn convert_lba12(
     crc_key: &[u8],
     share_sectors: u64,
 ) -> EdpCliResult<(Vec<u8>, Vec<u8>)> {
+    require_sector(raw, "LBA12")?;
     let mut dec = a6b0_full(&raw[..EDPF_ENC_LEN], crc_key, 0);
     if dec[..4] != *b"EDPF" {
         return Err(EdpCliError::new(
@@ -200,11 +240,12 @@ fn hex4(b: &[u8]) -> String {
 ///         原盘恒为 3 条 EDPF, entry0 enc=0, entry2 type4/active=0;
 ///         注意 aigo 原盘 entry0 也是 type=2@63, 故不能只看 type/start)
 pub fn looks_nopwd(read: ReadFn, device_id: &str) -> EdpCliResult<bool> {
-    let dec6 = lba6_decode(&read(6)?);
+    let raw6 = read_sector(read, 6)?;
+    let dec6 = lba6_decode(&raw6);
     if u32_at(&dec6, 0x1CA) != NOPWD_LBA6_1CA {
         return Ok(false);
     }
-    let mbr = read(0)?;
+    let mbr = read_sector(read, 0)?;
     if !(mbr[0x1BE + 4] == 0x07
         && u32_at(&mbr, 0x1BE + 8) == 63
         && mbr[0x1FE..0x200] == [0x55, 0xAA])
@@ -213,7 +254,8 @@ pub fn looks_nopwd(read: ReadFn, device_id: &str) -> EdpCliResult<bool> {
     }
     let crc = crc32_bare(device_id.as_bytes());
     let crc_key = crc.to_le_bytes();
-    let dec12 = a6b0_full(&read(12)?[..EDPF_ENC_LEN], &crc_key, 0);
+    let raw12 = read_sector(read, 12)?;
+    let dec12 = a6b0_full(&raw12[..EDPF_ENC_LEN], &crc_key, 0);
     if dec12[..4] != *b"EDPF" {
         return Ok(false);
     }
@@ -260,6 +302,9 @@ impl EdpfPartition {
 /// 以 device_id 解密 LBA12 并解析 EDPF 分区表(至多 3 条, 遇非 EDPF entry 即止)。
 /// 解不出 EDPF magic(非 cems 盘/盘未识别)返回 None。
 pub fn parse_lba12(raw12: &[u8], device_id: &str) -> Option<Vec<EdpfPartition>> {
+    if raw12.len() != SECTOR {
+        return None;
+    }
     let crc = crc32_bare(device_id.as_bytes());
     let key = crc.to_le_bytes();
     let dec = a6b0_full(&raw12[..EDPF_ENC_LEN], &key, 0);
@@ -322,7 +367,7 @@ pub fn convert(
         );
     }
 
-    let raw12 = read(12)?;
+    let raw12 = read_sector(read, 12)?;
     let dec12 = a6b0_full(&raw12[..EDPF_ENC_LEN], &crc_key, 0);
     if dec12[..4] != *b"EDPF" {
         return Err(EdpCliError::new(
@@ -385,13 +430,13 @@ pub fn convert(
     }
 
     let (new12, plain12) = convert_lba12(&raw12, &crc_key, share)?;
-    let raw7 = read(7)?;
+    let raw7 = read_sector(read, 7)?;
     let (new7, plain7) = convert_lba7(&raw7, k0, share)?;
-    let raw0 = read(0)?;
+    let raw0 = read_sector(read, 0)?;
     let new0 = convert_lba0(&raw0, share)?;
-    let raw6 = read(6)?;
+    let raw6 = read_sector(read, 6)?;
     let (new6, _dec6) = convert_lba6(&raw6)?;
-    let raw9 = read(9)?;
+    let raw9 = read_sector(read, 9)?;
     let new9 = if raw9.iter().any(|&b| b != 0) {
         Some(vec![0u8; SECTOR])
     } else {

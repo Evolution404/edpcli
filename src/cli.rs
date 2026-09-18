@@ -12,6 +12,7 @@
 //! 实测记录(2026-08-27, 均内网免密成功): aigo U335 128G / aigo U320 32G /
 //! Kingston DT3.0 64G (每盘改前自动备份, 可随时 edpcli backup restore 还原)。
 
+use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
@@ -821,7 +822,7 @@ enum FlowKind {
     Restore { bin: Option<String>, yes: bool },
 }
 
-fn argv_with_backup_dir_for_elevation(backup_dir_flag: Option<&str>) -> Vec<String> {
+pub(crate) fn argv_with_backup_dir_for_elevation(backup_dir_flag: Option<&str>) -> Vec<String> {
     let mut argv: Vec<String> = std::env::args().skip(1).collect();
     if backup_dir_flag.is_none() {
         argv.extend(diskio::backup_dir_argv_suffix(
@@ -837,7 +838,14 @@ fn list_needs_elevation(rows: &[Row], elevated: bool, has_sentinel: bool) -> boo
 
 fn list_flow(runner: &SysRunner, backup_dir_flag: Option<String>) -> i32 {
     let bak = diskio::resolve_backup_dir(backup_dir_flag.as_deref());
-    let read_disk = |disk: u32, lba: u32| diskio::read_lba(&raw_path(disk), lba);
+    // 一次 list 扫描中每个物理盘只打开一个只读 fd；disk_scan 内部再按 LBA 缓存，
+    // 因此既避免重复 open，也避免同一扇区被重复读取。这里只用于只读展示路径。
+    let devices = RefCell::new(diskio::ReadOnlyDiskPool::new(|disk| {
+        FileDev::open_rdonly(&raw_path(disk))
+    }));
+    let read_disk = |disk: u32, lba: u32| -> io::Result<Vec<u8>> {
+        devices.borrow_mut().read_sector(disk, lba)
+    };
     let probe = ReadProbeCache::new(runner);
     let rows = scan_disks(&probe, &bak, &read_disk);
 
