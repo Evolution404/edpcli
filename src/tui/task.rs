@@ -6,6 +6,7 @@
 use std::path::PathBuf;
 use std::sync::mpsc::{self, Receiver, Sender};
 
+use crate::application::BackupWorkspaceItem;
 use crate::disk_scan::Row;
 use crate::sysinfo::SysRunner;
 
@@ -37,12 +38,17 @@ enum WorkerResult {
         generation: u64,
         rows: Vec<Row>,
     },
+    Backups {
+        generation: u64,
+        rows: Vec<BackupWorkspaceItem>,
+    },
 }
 
 pub struct TaskHub {
     tx: Sender<WorkerResult>,
     rx: Receiver<WorkerResult>,
     device_generation: GenerationGate,
+    backup_generation: GenerationGate,
 }
 
 impl Default for TaskHub {
@@ -58,6 +64,7 @@ impl TaskHub {
             tx,
             rx,
             device_generation: GenerationGate::new(),
+            backup_generation: GenerationGate::new(),
         }
     }
 
@@ -72,6 +79,16 @@ impl TaskHub {
         generation
     }
 
+    pub fn request_backup_scan(&mut self, backup_dir: PathBuf) -> u64 {
+        let generation = self.backup_generation.begin();
+        let tx = self.tx.clone();
+        std::thread::spawn(move || {
+            let rows = crate::application::scan_backup_workspace(&backup_dir);
+            let _ = tx.send(WorkerResult::Backups { generation, rows });
+        });
+        generation
+    }
+
     /// Drain ready worker messages without waiting. Only the current generation is accepted.
     pub fn poll_devices(&mut self) -> Option<Vec<Row>> {
         let mut latest = None;
@@ -82,6 +99,23 @@ impl TaskHub {
                 {
                     latest = Some(rows);
                 }
+                WorkerResult::Devices { .. } => {}
+                WorkerResult::Backups { .. } => {}
+            }
+        }
+        latest
+    }
+
+    pub fn poll_backups(&mut self) -> Option<Vec<BackupWorkspaceItem>> {
+        let mut latest = None;
+        while let Ok(message) = self.rx.try_recv() {
+            match message {
+                WorkerResult::Backups { generation, rows }
+                    if self.backup_generation.is_current(generation) =>
+                {
+                    latest = Some(rows);
+                }
+                WorkerResult::Backups { .. } => {}
                 WorkerResult::Devices { .. } => {}
             }
         }

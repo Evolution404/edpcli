@@ -8,7 +8,7 @@ use ratatui::{
     Frame,
 };
 
-use super::state::{AppState, InputMode};
+use super::state::{AppState, InputMode, Workspace};
 
 fn device_status(row: &crate::disk_scan::Row) -> String {
     if row.proto != "USB" {
@@ -67,6 +67,56 @@ fn draw_devices(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState
     frame.render_stateful_widget(table, area, &mut table_state);
 }
 
+fn draw_backups(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState) {
+    let rows = state.backups().iter().map(|backup| {
+        let health = if !backup.size_ok {
+            "大小异常".to_string()
+        } else {
+            match backup.md5_status {
+                crate::diskio::Md5Status::Ok => "MD5 ✓".to_string(),
+                crate::diskio::Md5Status::Mismatch => "MD5 ✗".to_string(),
+                crate::diskio::Md5Status::NoSidecar => "缺 MD5".to_string(),
+            }
+        };
+        TableRow::new(vec![
+            Cell::from(backup.index.to_string()),
+            Cell::from(backup.display_time.clone()),
+            Cell::from(if backup.is_nopwd { "免密状态" } else { "加密原盘" }),
+            Cell::from(backup.user.clone().unwrap_or_else(|| "—".into())),
+            Cell::from(backup.dept.clone().unwrap_or_else(|| "—".into())),
+            Cell::from(backup.onlyid.clone().unwrap_or_else(|| "—".into())),
+            Cell::from(health),
+        ])
+    });
+    let header = TableRow::new(["#", "时间", "状态", "姓名", "部门", "onlyid", "健康"])
+        .style(Style::default().add_modifier(Modifier::BOLD));
+    let title = if state.backup_scan_pending() {
+        "备份 · 扫描中…"
+    } else {
+        "备份"
+    };
+    let table = Table::new(
+        rows,
+        [
+            Constraint::Length(5),
+            Constraint::Length(17),
+            Constraint::Length(10),
+            Constraint::Length(14),
+            Constraint::Min(18),
+            Constraint::Length(14),
+            Constraint::Length(10),
+        ],
+    )
+    .header(header)
+    .block(Block::default().borders(Borders::ALL).title(title))
+    .row_highlight_style(Style::default().add_modifier(Modifier::REVERSED));
+    let mut table_state = TableState::default();
+    if state.item_count() > 0 {
+        table_state.select(Some(state.selected()));
+    }
+    frame.render_stateful_widget(table, area, &mut table_state);
+}
+
 pub fn draw(frame: &mut Frame, state: &AppState) {
     let area = frame.area();
     let chunks = Layout::default()
@@ -97,15 +147,18 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
             .wrap(Wrap { trim: true });
             frame.render_widget(help, chunks[1]);
         }
-        _ => draw_devices(frame, chunks[1], state),
+        _ => match state.workspace() {
+            Workspace::Devices => draw_devices(frame, chunks[1], state),
+            Workspace::Backups => draw_backups(frame, chunks[1], state),
+        },
     }
 
     let status = if state.is_critical_operation() {
         "关键写盘阶段：q / Esc / Ctrl-C 将延迟到安全检查点"
-    } else if state.device_scan_pending() {
+    } else if state.active_scan_pending() {
         "后台扫描中；界面可继续操作"
     } else {
-        "j/k 移动  r 刷新  ? 帮助  : 命令  / 搜索  q 退出"
+        "h/l 工作区  j/k 移动  r 刷新  ? 帮助  : 命令  / 搜索  q 退出"
     };
     frame.render_widget(Paragraph::new(status), chunks[2]);
 }

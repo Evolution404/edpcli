@@ -76,11 +76,16 @@ fn run_loop() -> io::Result<()> {
     let mut tasks = TaskHub::new();
     let backup_dir = crate::diskio::resolve_backup_dir(None);
     tasks.request_device_scan(backup_dir.clone());
+    tasks.request_backup_scan(backup_dir.clone());
     state.set_device_scan_pending(true);
+    state.set_backup_scan_pending(true);
 
     loop {
         if let Some(rows) = tasks.poll_devices() {
             state.replace_devices(rows);
+        }
+        if let Some(rows) = tasks.poll_backups() {
+            state.replace_backups(rows);
         }
         session.terminal.draw(|frame| render::draw(frame, &state))?;
         if !ct_event::poll(Duration::from_millis(100))? {
@@ -91,8 +96,16 @@ fn run_loop() -> io::Result<()> {
             ct_event::Event::Key(key) => {
                 if let Some(command) = keys.map(key) {
                     if command == NavCommand::Refresh {
-                        tasks.request_device_scan(backup_dir.clone());
-                        state.set_device_scan_pending(true);
+                        match state.workspace() {
+                            state::Workspace::Devices => {
+                                tasks.request_device_scan(backup_dir.clone());
+                                state.set_device_scan_pending(true);
+                            }
+                            state::Workspace::Backups => {
+                                tasks.request_backup_scan(backup_dir.clone());
+                                state.set_backup_scan_pending(true);
+                            }
+                        }
                         continue;
                     }
                     let viewport_height = session.terminal.size()?.height.saturating_sub(5) as usize;

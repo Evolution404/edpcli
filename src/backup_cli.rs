@@ -14,7 +14,6 @@ use crate::cli::Prompter;
 use crate::common::{EXIT_BACKUP, EXIT_CANCELLED, EXIT_OK, SECTOR};
 use crate::diskio::{self, BackupEntry, BackupMeta, Md5Status};
 use crate::metainfo;
-use crate::selectors::BackupSelector;
 
 fn backup_model_name(meta: &BackupMeta) -> String {
     let mut vendor = None;
@@ -138,7 +137,7 @@ fn print_global_numbered_backup_entries(
 }
 
 pub fn backup_list(backup_dir: &Path) -> i32 {
-    let selector = BackupSelector::load(backup_dir);
+    let selector = crate::application::load_backup_selector(backup_dir);
     let catalog = selector.catalog();
     let global_index: BTreeMap<PathBuf, usize> = selector
         .numbered()
@@ -212,7 +211,7 @@ pub fn backup_list(backup_dir: &Path) -> i32 {
 }
 
 pub fn backup_verify(backup_dir: &Path, target: Option<&str>) -> i32 {
-    let selector = BackupSelector::load(backup_dir);
+    let selector = crate::application::load_backup_selector(backup_dir);
     let catalog = selector.catalog();
     let selected: Vec<&BackupEntry> = if let Some(target) = target {
         match selector.resolve_one(target) {
@@ -326,7 +325,7 @@ pub fn backup_prune(backup_dir: &Path, keep: usize, yes: bool) -> i32 {
         );
         return EXIT_BACKUP;
     }
-    let selector = BackupSelector::load(backup_dir);
+    let selector = crate::application::load_backup_selector(backup_dir);
     let selected_refs: Vec<&BackupEntry> = selector.catalog().entries().iter().collect();
     let selected: Vec<BackupEntry> = selected_refs.into_iter().cloned().collect();
     let candidates = diskio::prune_candidates(&selected, keep);
@@ -417,7 +416,7 @@ pub fn backup_delete(
         );
         return EXIT_BACKUP;
     }
-    let selector = BackupSelector::load(backup_dir);
+    let selector = crate::application::load_backup_selector(backup_dir);
     let entries = selector.catalog().entries();
     let numbered = selector.numbered();
     if numbered.is_empty() {

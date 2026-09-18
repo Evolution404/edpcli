@@ -4,6 +4,12 @@
 //! without a real terminal and keeps critical-operation policy independent from crossterm.
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Workspace {
+    Devices,
+    Backups,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum InputMode {
     Normal,
     Search,
@@ -39,8 +45,11 @@ pub enum StateEffect {
 }
 
 pub struct AppState {
+    workspace: Workspace,
     devices: Vec<crate::disk_scan::Row>,
+    backups: Vec<crate::application::BackupWorkspaceItem>,
     device_scan_pending: bool,
+    backup_scan_pending: bool,
     selected: usize,
     item_count: usize,
     input_mode: InputMode,
@@ -57,14 +66,21 @@ impl Default for AppState {
 impl AppState {
     pub const fn new() -> Self {
         Self {
+            workspace: Workspace::Devices,
             devices: Vec::new(),
+            backups: Vec::new(),
             device_scan_pending: false,
+            backup_scan_pending: false,
             selected: 0,
             item_count: 0,
             input_mode: InputMode::Normal,
             critical_operation: false,
             exit_pending: false,
         }
+    }
+
+    pub const fn workspace(&self) -> Workspace {
+        self.workspace
     }
 
     pub fn devices(&self) -> &[crate::disk_scan::Row] {
@@ -75,14 +91,56 @@ impl AppState {
         self.device_scan_pending
     }
 
+    pub const fn backup_scan_pending(&self) -> bool {
+        self.backup_scan_pending
+    }
+
+    pub const fn active_scan_pending(&self) -> bool {
+        match self.workspace {
+            Workspace::Devices => self.device_scan_pending,
+            Workspace::Backups => self.backup_scan_pending,
+        }
+    }
+
     pub fn set_device_scan_pending(&mut self, pending: bool) {
         self.device_scan_pending = pending;
     }
 
     pub fn replace_devices(&mut self, devices: Vec<crate::disk_scan::Row>) {
         self.devices = devices;
-        self.set_item_count(self.devices.len());
         self.device_scan_pending = false;
+        if self.workspace == Workspace::Devices {
+            self.set_item_count(self.devices.len());
+        }
+    }
+
+    pub fn backups(&self) -> &[crate::application::BackupWorkspaceItem] {
+        &self.backups
+    }
+
+    pub fn set_backup_scan_pending(&mut self, pending: bool) {
+        self.backup_scan_pending = pending;
+    }
+
+    pub fn replace_backups(&mut self, backups: Vec<crate::application::BackupWorkspaceItem>) {
+        self.backups = backups;
+        self.backup_scan_pending = false;
+        if self.workspace == Workspace::Backups {
+            self.set_item_count(self.backups.len());
+        }
+    }
+
+    fn switch_workspace(&mut self, workspace: Workspace) {
+        if self.workspace == workspace {
+            return;
+        }
+        self.workspace = workspace;
+        self.selected = 0;
+        let count = match workspace {
+            Workspace::Devices => self.devices.len(),
+            Workspace::Backups => self.backups.len(),
+        };
+        self.set_item_count(count);
     }
 
     pub const fn selected(&self) -> usize {
@@ -174,9 +232,9 @@ impl AppState {
             NavCommand::Search => self.input_mode = InputMode::Search,
             NavCommand::CommandPalette => self.input_mode = InputMode::Command,
             NavCommand::Help => self.input_mode = InputMode::Help,
+            NavCommand::Left => self.switch_workspace(Workspace::Devices),
+            NavCommand::Right => self.switch_workspace(Workspace::Backups),
             NavCommand::Refresh
-            | NavCommand::Left
-            | NavCommand::Right
             | NavCommand::NextMatch
             | NavCommand::PreviousMatch
             | NavCommand::Escape
