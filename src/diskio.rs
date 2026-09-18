@@ -1180,13 +1180,17 @@ mod tests {
     #[test]
     fn backup_dir_argv_suffix_bridges_env() {
         // sudo env_reset 会清环境变量 — env 值须转为显式旗标(绝对路径)随 argv 过界
-        let abs = backup_dir_argv_suffix(Some("/Users/x/.edpcli-backup".into()));
-        assert_eq!(abs, vec!["--backup-dir".to_string(), "/Users/x/.edpcli-backup".into()]);
+        let absolute_dir = std::env::temp_dir().join("edpcli-absolute-backup");
+        let abs = backup_dir_argv_suffix(Some(absolute_dir.to_string_lossy().into_owned()));
+        assert_eq!(abs.len(), 2);
+        assert_eq!(abs[0], "--backup-dir");
+        assert_eq!(PathBuf::from(&abs[1]), absolute_dir);
         // 相对值按 CWD 绝对化
         let rel = backup_dir_argv_suffix(Some("bk".into()));
         assert_eq!(rel.len(), 2);
-        assert!(rel[1].starts_with('/'), "{}", rel[1]);
-        assert!(rel[1].ends_with("/bk"), "{}", rel[1]);
+        let rel_path = PathBuf::from(&rel[1]);
+        assert!(rel_path.is_absolute(), "{}", rel[1]);
+        assert_eq!(rel_path.file_name().and_then(|name| name.to_str()), Some("bk"));
         // 未设/空值 → 不追加
         assert!(backup_dir_argv_suffix(None).is_empty());
         assert!(backup_dir_argv_suffix(Some(String::new())).is_empty());

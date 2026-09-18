@@ -133,12 +133,12 @@ impl<'a> ReadProbeCache<'a> {
         format!("{}\0{}", cmd.join("\0"), timeout.as_millis())
     }
 
-    #[cfg(test)]
+    #[cfg(all(test, target_os = "macos"))]
     fn hits(&self) -> usize {
         self.hits.get()
     }
 
-    #[cfg(test)]
+    #[cfg(all(test, target_os = "macos"))]
     fn misses(&self) -> usize {
         self.misses.get()
     }
@@ -322,12 +322,15 @@ mod tests {
 
     use super::*;
     use crate::platform::{HardwareProbe, NativeTransport};
+    #[cfg(target_os = "macos")]
     use std::collections::HashMap;
 
     /// 罐头 CmdRunner: (子命令前缀) → 预置输出。
+    #[cfg(target_os = "macos")]
     struct FakeRunner {
         outputs: HashMap<String, String>,
     }
+    #[cfg(target_os = "macos")]
     impl CmdRunner for FakeRunner {
         fn check_output(&self, cmd: &[&str], _t: Duration) -> io::Result<String> {
             self.outputs
@@ -493,6 +496,7 @@ mod tests {
         assert_eq!(disk_total_sectors(&runner, 6), Some(62914560000 / 512));
     }
 
+    #[cfg(target_os = "macos")]
     #[test]
     fn read_probe_cache_reuses_ioreg_snapshot_across_disks() {
         let out = "\
@@ -520,6 +524,7 @@ mod tests {
         assert_eq!(cached.hits(), 1);
     }
 
+    #[cfg(target_os = "macos")]
     #[test]
     fn read_probe_cache_reuses_failed_queries() {
         let runner = FakeRunner {
