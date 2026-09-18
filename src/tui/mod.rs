@@ -277,6 +277,9 @@ fn run_loop(resume: Option<state::WriteIntent>) -> io::Result<LoopExit> {
             state.set_backup_scan_pending(false);
             state.set_notice(message);
         }
+        if let Some(message) = updates.write_progress {
+            state.set_write_progress(message);
+        }
         if let Some(result) = updates.write {
             state.finish_write(result);
         }

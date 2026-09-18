@@ -21,6 +21,27 @@ const OPEN_WAIT: std::time::Duration = std::time::Duration::from_secs(10);
 pub trait Prompter {
     fn prompt_line(&mut self, msg: &str) -> String;
     fn confirm_yes(&mut self, msg: &str) -> bool;
+
+    fn output(&mut self, msg: &str) {
+        let mut stdout = std::io::stdout();
+        let _ = std::io::Write::write_all(&mut stdout, msg.as_bytes());
+        let _ = std::io::Write::flush(&mut stdout);
+    }
+}
+
+macro_rules! output {
+    ($ctx:expr, $($arg:tt)*) => {{
+        let message = format!($($arg)*);
+        $ctx.prompt.output(&message);
+    }};
+}
+
+macro_rules! outputln {
+    ($ctx:expr, $($arg:tt)*) => {{
+        let mut message = format!($($arg)*);
+        message.push('\n');
+        $ctx.prompt.output(&message);
+    }};
 }
 
 pub struct Ctx<'a> {
@@ -163,7 +184,7 @@ pub fn apply_flow(
         Some(s) => fmt_gb(s * SECTOR as u64),
         None => "unknown 扇".to_string(),
     };
-    println!(
+    outputln!(ctx, 
         "{}  disk{} · {} · USB {}:{}",
         crate::ui::bold("盘"),
         disk,
@@ -202,7 +223,7 @@ pub fn apply_flow(
 
     let baks = find_backups(&ctx.backup_dir, &facts, Some(&did), Some(tag16));
     if !baks.is_empty() {
-        println!(
+        outputln!(ctx, 
             "\n{}  本盘已有 {} 份(写入时会自动再备份):",
             crate::ui::bold("备份"),
             baks.len()
@@ -216,9 +237,9 @@ pub fn apply_flow(
                 )
             })
             .collect();
-        print!("{}", crate::ui::backup_menu_str(&entries));
+        output!(ctx, "{}", crate::ui::backup_menu_str(&entries));
     } else {
-        println!(
+        outputln!(ctx, 
             "\n{}  尚无; 写入时自动创建首个备份",
             crate::ui::bold("备份")
         );
@@ -226,7 +247,7 @@ pub fn apply_flow(
 
     let already = looks_nopwd(&read, &did)?;
     if already {
-        println!(
+        outputln!(ctx, 
             "\n{}",
             crate::ui::yellow(
                 "提示: 该盘已是改造后的免密盘 — 再次写入只会重写相同内容(实测幂等)。"
@@ -239,7 +260,7 @@ pub fn apply_flow(
         } else {
             ""
         };
-        println!(
+        outputln!(ctx, 
             "{}",
             crate::ui::dim(&format!(
                 "操作  以上为预览(dry-run), 未写盘。执行写入: edpcli apply --disk {}{}",
@@ -258,14 +279,25 @@ pub fn apply_flow(
         ));
     }
     if already {
-        println!(
+        outputln!(ctx, 
             "{}",
             crate::ui::yellow("--force: 继续重写。本次自动备份将标记为免密状态(文件名含 _nopwd); 加密原盘备份是更早时间戳那份。")
         );
     }
 
-    let (bpath, _nopwd) = create_backup(&facts, &img, &did, &ctx.backup_dir, ctx.clock)?;
-    println!(
+    let (bpath, backup_is_nopwd) =
+        create_backup(&facts, &img, &did, &ctx.backup_dir, ctx.clock)?;
+    outputln!(ctx, "{}  {}", crate::ui::green("备份"), bpath.display());
+    if backup_is_nopwd {
+        outputln!(
+            ctx,
+            "{}",
+            crate::ui::yellow(
+                "注意: 本份备份为【免密状态】快照 — 还原它不会回到加密原盘。"
+            )
+        );
+    }
+    outputln!(ctx, 
         "{}  edpcli backup restore \"{}\" --disk {} --yes",
         crate::ui::bold("还原"),
         bpath.display(),
@@ -298,7 +330,7 @@ pub fn apply_flow(
     }
     writes.insert(0, result.lba0);
     diskio::atomic_write_sectors(dev, &writes)?;
-    println!(
+    outputln!(ctx, 
         "{}",
         crate::ui::green(
             "已写入, 读回校验通过。请拔出 U 盘重新插入, 数据区格式化 exFAT/NTFS 即得免密可写区。"
@@ -333,7 +365,18 @@ pub fn backup_create_flow(
         pid,
         label_id: diskio::lba4_label_id_from(&img[4 * SECTOR..5 * SECTOR]),
     };
-    create_backup(&facts, &img, &device_id, &ctx.backup_dir, ctx.clock)
+    let created = create_backup(&facts, &img, &device_id, &ctx.backup_dir, ctx.clock)?;
+    outputln!(ctx, "{}  {}", crate::ui::green("备份"), created.0.display());
+    if created.1 {
+        outputln!(
+            ctx,
+            "{}",
+            crate::ui::yellow(
+                "注意: 本份备份为【免密状态】快照 — 还原它不会回到加密原盘。"
+            )
+        );
+    }
+    Ok(created)
 }
 
 /// restore 主流程: bin=None 时交互列出本盘备份并选择。
@@ -382,7 +425,7 @@ pub fn restore_flow(
                     ),
                 ));
             }
-            println!(
+            outputln!(ctx, 
                 "disk{} · onlyid={} 匹配备份 {} 个:",
                 disk,
                 onlyid,
@@ -395,7 +438,7 @@ pub fn restore_flow(
                 } else {
                     "加密原盘"
                 };
-                println!(
+                outputln!(ctx, 
                     "  [{}] {}   {}   {}",
                     index,
                     time,
@@ -415,7 +458,7 @@ pub fn restore_flow(
                 }
                 match view.resolve_one(input) {
                     Ok(entry) => break entry.path.clone(),
-                    Err(message) => println!("{}", crate::ui::yellow(&message)),
+                    Err(message) => outputln!(ctx, "{}", crate::ui::yellow(&message)),
                 }
             }
         }
@@ -466,7 +509,7 @@ pub fn restore_flow(
             ),
         ));
     }
-    println!("{}  {}", crate::ui::green("MD5 校验通过"), got);
+    outputln!(ctx, "{}  {}", crate::ui::green("MD5 校验通过"), got);
 
     // 显式路径也必须执行与交互选择相同的“同一物理盘”终验。device_id/容量/VID/PID
     // 对同型号盘并不唯一，LBA4 前 16B 才是现有备份体系使用的最终身份标签。
@@ -507,13 +550,13 @@ pub fn restore_flow(
         diskio::image_is_nopwd(&data, device_id)
     };
     if nopwd_snap {
-        println!(
+        outputln!(ctx, 
             "{}",
             crate::ui::yellow(
                 "注意: 该备份为【免密状态】快照 — 还原后仍是免密盘, 不会回到加密原盘。"
             )
         );
-        println!(
+        outputln!(ctx, 
             "{}",
             crate::ui::dim(&format!(
                 "[dry-run] 将还原 {} → disk{} LBA0-13 ({}B) — 未写入(免密快照不作还原)。",
@@ -524,7 +567,7 @@ pub fn restore_flow(
         );
         return Ok(EXIT_OK);
     }
-    println!(
+    outputln!(ctx, 
         "{}  {}",
         crate::ui::bold("还原"),
         crate::ui::truncate_mid(&path.display().to_string(), 64)
@@ -553,7 +596,7 @@ pub fn restore_flow(
         })
         .collect();
     diskio::atomic_write_sectors(dev, &writes)?;
-    println!("{}", crate::ui::green("已还原, 读回校验通过。请拔出重插。"));
+    outputln!(ctx, "{}", crate::ui::green("已还原, 读回校验通过。请拔出重插。"));
     Ok(EXIT_OK)
 }
 

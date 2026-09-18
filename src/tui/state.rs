@@ -449,6 +449,14 @@ impl AppState {
         Some(intent)
     }
 
+    pub fn set_write_progress(&mut self, message: String) {
+        if let Some(wizard) = self.wizard.as_mut() {
+            if wizard.stage == WizardStage::Running {
+                wizard.message = Some(message);
+            }
+        }
+    }
+
     pub fn finish_write(&mut self, result: Result<(), String>) {
         self.critical_operation = false;
         if let Some(wizard) = self.wizard.as_mut() {

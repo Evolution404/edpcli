@@ -46,6 +46,9 @@ enum WorkerResult {
     Write {
         result: Result<(), String>,
     },
+    WriteProgress {
+        message: String,
+    },
     Inspect {
         generation: u64,
         result: Result<InspectWorkspace, String>,
@@ -65,9 +68,41 @@ pub struct TaskUpdates {
     pub devices: Option<Vec<Row>>,
     pub backups: Option<Vec<BackupWorkspaceItem>>,
     pub write: Option<Result<(), String>>,
+    pub write_progress: Option<String>,
     pub inspect: Option<Result<InspectWorkspace, String>>,
     pub device_error: Option<String>,
     pub backup_error: Option<String>,
+}
+
+fn strip_ansi(input: &str) -> String {
+    let mut out = String::with_capacity(input.len());
+    let mut chars = input.chars().peekable();
+    while let Some(ch) = chars.next() {
+        if ch == '\u{1b}' && chars.peek() == Some(&'[') {
+            let _ = chars.next();
+            for next in chars.by_ref() {
+                if ('@'..='~').contains(&next) {
+                    break;
+                }
+            }
+        } else {
+            out.push(ch);
+        }
+    }
+    out
+}
+
+fn progress_summary(input: &str) -> String {
+    let plain = strip_ansi(input);
+    plain
+        .lines()
+        .rev()
+        .find(|line| !line.trim().is_empty())
+        .unwrap_or("写盘安全链执行中")
+        .trim()
+        .chars()
+        .take(160)
+        .collect()
 }
 
 fn panic_message(payload: Box<dyn std::any::Any + Send>) -> String {
@@ -184,7 +219,9 @@ impl TaskHub {
         let tx = self.tx.clone();
         std::thread::spawn(move || {
             let result = catch_unwind(AssertUnwindSafe(|| {
-            struct ConfirmedPrompter;
+            struct ConfirmedPrompter {
+                tx: Sender<WorkerResult>,
+            }
             impl crate::application::write::Prompter for ConfirmedPrompter {
                 fn prompt_line(&mut self, _msg: &str) -> String {
                     String::new()
@@ -192,6 +229,12 @@ impl TaskHub {
 
                 fn confirm_yes(&mut self, _msg: &str) -> bool {
                     true
+                }
+
+                fn output(&mut self, msg: &str) {
+                    let _ = self.tx.send(WorkerResult::WriteProgress {
+                        message: progress_summary(msg),
+                    });
                 }
             }
 
@@ -202,7 +245,7 @@ impl TaskHub {
                 let path = crate::diskio::raw_path(intent.disk);
                 let mut dev = crate::diskio::FileDev::open_rdonly(&path)
                     .map_err(|error| format!("错误: 无法只读打开 {path}: {error}"))?;
-                let mut prompt = ConfirmedPrompter;
+                let mut prompt = ConfirmedPrompter { tx: tx.clone() };
                 let mut ctx = crate::application::write::Ctx {
                     runner: &runner,
                     clock: &crate::diskio::SystemClock,
@@ -264,6 +307,9 @@ impl TaskHub {
                 WorkerResult::Write { result } => {
                     updates.write = Some(result);
                 }
+                WorkerResult::WriteProgress { message } => {
+                    updates.write_progress = Some(message);
+                }
                 WorkerResult::Inspect { generation, result }
                     if self.inspect_generation.is_current(generation) =>
                 {
@@ -280,6 +326,7 @@ impl TaskHub {
                     updates.backup_error = Some(message);
                 }
                 WorkerResult::Inspect { .. }
+                | WorkerResult::WriteProgress { .. }
                 | WorkerResult::Devices { .. }
                 | WorkerResult::Backups { .. }
                 | WorkerResult::DeviceError { .. }
