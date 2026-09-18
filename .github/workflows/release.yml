@@ -1,0 +1,133 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  macos:
+    name: macOS universal
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install stable Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+      - name: Test and lint
+        run: |
+          cargo test --all-targets
+          cargo clippy --all-targets -- -D warnings
+      - name: Build universal release binary
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo build --release --target aarch64-apple-darwin
+          cargo build --release --target x86_64-apple-darwin
+          mkdir -p dist package
+          lipo -create \
+            target/aarch64-apple-darwin/release/edpcli \
+            target/x86_64-apple-darwin/release/edpcli \
+            -output dist/edpcli
+          chmod 0755 dist/edpcli
+          artifact="edpcli-${GITHUB_REF_NAME}-macos-universal.tar.gz"
+          tar -C dist -czf "package/${artifact}" edpcli
+          (cd package && shasum -a 256 "${artifact}" > "${artifact}.sha256")
+      - name: Upload macOS artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-macos
+          path: package/*
+          if-no-files-found: error
+
+  linux:
+    name: Linux x86_64
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install stable Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - name: Test and lint
+        run: |
+          cargo test --all-targets
+          cargo clippy --all-targets -- -D warnings
+      - name: Build Linux release binary
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo build --release
+          mkdir -p dist package
+          cp target/release/edpcli dist/edpcli
+          chmod 0755 dist/edpcli
+          artifact="edpcli-${GITHUB_REF_NAME}-linux-x86_64.tar.gz"
+          tar -C dist -czf "package/${artifact}" edpcli
+          (cd package && sha256sum "${artifact}" > "${artifact}.sha256")
+      - name: Upload Linux artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-linux
+          path: package/*
+          if-no-files-found: error
+
+  windows:
+    name: Windows x86_64
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install stable Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - name: Test and lint
+        run: |
+          cargo test --all-targets
+          cargo clippy --all-targets -- -D warnings
+      - name: Build Windows release binary
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          cargo build --release
+          New-Item -ItemType Directory -Force -Path dist, package | Out-Null
+          Copy-Item target\release\edpcli.exe dist\edpcli.exe
+          $artifact = "edpcli-$env:GITHUB_REF_NAME-windows-x86_64.zip"
+          Compress-Archive -Path dist\edpcli.exe -DestinationPath "package\$artifact"
+          $hash = (Get-FileHash "package\$artifact" -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  $artifact" | Set-Content -Encoding ascii "package\$artifact.sha256"
+      - name: Upload Windows artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-windows
+          path: package/*
+          if-no-files-found: error
+
+  publish:
+    name: Publish GitHub Release
+    needs:
+      - macos
+      - linux
+      - windows
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: release-*
+          path: release-assets
+          merge-multiple: true
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh release create "${GITHUB_REF_NAME}" release-assets/* \
+            --repo "${GITHUB_REPOSITORY}" \
+            --verify-tag \
+            --title "edpcli ${GITHUB_REF_NAME}" \
+            --generate-notes

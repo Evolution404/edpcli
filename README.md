@@ -14,6 +14,9 @@ Rust 单二进制 `edpcli`，支持 **macOS / Linux / Windows**。协议、扇�
 
 GBK 解码、本地时间和用户目录等通用能力均在进程内实现；业务层不直接出现上述 OS 细节。
 
+完整安装、三平台 `--disk` 写法、首次使用流程、备份/还原和发布说明见
+[`docs/USAGE.md`](docs/USAGE.md)。
+
 ## 快速使用
 
 ```bash
