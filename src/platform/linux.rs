@@ -257,7 +257,7 @@ fn mounted_points_for_devices(devices: &HashSet<String>) -> io::Result<Vec<Strin
     Ok(points)
 }
 
-pub(super) fn is_system_disk(disk: u32) -> bool {
+pub(super) fn is_system_disk(_runner: &dyn CmdRunner, disk: u32) -> bool {
     let Some(name) = block_name(disk) else {
         return true;
     };
@@ -460,6 +460,16 @@ mod tests {
 
     #[test]
     fn invalid_selector_is_fail_closed_for_system_disk_check() {
-        assert!(is_system_disk(u32::MAX));
+        struct NoopRunner;
+        impl CmdRunner for NoopRunner {
+            fn check_output(
+                &self,
+                _cmd: &[&str],
+                _timeout: std::time::Duration,
+            ) -> io::Result<String> {
+                Err(io::Error::other("unused"))
+            }
+        }
+        assert!(is_system_disk(&NoopRunner, u32::MAX));
     }
 }

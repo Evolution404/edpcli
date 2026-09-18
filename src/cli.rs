@@ -211,15 +211,15 @@ fn verify_reopened_snapshot(dev: &mut dyn SectorDev, expected: &[u8]) -> EdpCliR
     Ok(())
 }
 
-pub(crate) fn guard_system_disk(disk: u32) -> EdpCliResult<()> {
-    if crate::platform::is_system_disk(disk) {
+pub(crate) fn guard_system_disk(runner: &dyn CmdRunner, disk: u32) -> EdpCliResult<()> {
+    if crate::platform::is_system_disk(runner, disk) {
         return Err(err(EXIT_TARGET, format!("错误: 拒绝系统盘 disk{}", disk)));
     }
     Ok(())
 }
 
 pub(crate) fn guard_usb_disk(runner: &dyn CmdRunner, disk: u32) -> EdpCliResult<()> {
-    guard_system_disk(disk)?;
+    guard_system_disk(runner, disk)?;
     if sysinfo::usb_disk(runner, disk).is_some() {
         return Ok(());
     }

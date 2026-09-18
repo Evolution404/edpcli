@@ -132,8 +132,8 @@ pub fn fallback_hardware_probe(
     imp::fallback_hardware_probe(runner, disk)
 }
 
-pub fn is_system_disk(disk: u32) -> bool {
-    imp::is_system_disk(disk)
+pub fn is_system_disk(runner: &dyn crate::sysinfo::CmdRunner, disk: u32) -> bool {
+    imp::is_system_disk(runner, disk)
 }
 
 pub fn list_external_disks(runner: &dyn crate::sysinfo::CmdRunner) -> Vec<ExtDisk> {

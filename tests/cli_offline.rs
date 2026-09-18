@@ -87,8 +87,15 @@ fn offline_requires_id() {
 
 #[test]
 fn system_disk_refused_without_elevation() {
-    // 系统盘拒绝发生在提权之前: 无 sudo 提示, 直接退出码 3
-    let r = bin().args(["run", "--disk", "1"]).output().unwrap();
+    // 系统盘拒绝发生在提权之前: 无 sudo 提示, 直接退出码 3。
+    let runner = edpcli::sysinfo::SysRunner;
+    let system_disk = (0..128u32)
+        .find(|&disk| edpcli::platform::is_system_disk(&runner, disk))
+        .expect("macOS system disk");
+    let r = bin()
+        .args(["run", "--disk", &system_disk.to_string()])
+        .output()
+        .unwrap();
     assert_eq!(r.status.code(), Some(3));
     let stderr = String::from_utf8_lossy(&r.stderr);
     assert!(stderr.contains("系统盘"), "{}", stderr);
@@ -763,7 +770,7 @@ fn restore_no_backup_found() {
 
 #[test]
 fn apply_system_disk_guard_in_flow() {
-    // 流程内部的系统盘防护(disk < 2)
+    // 流程内部按根文件系统实际 PhysicalStore 防护，而不是固定盘号。
     let runner = netac_runner(1);
     let tmp = TmpDir::new("guard");
     let img = tmp.0.join("d.img");

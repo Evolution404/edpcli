@@ -227,10 +227,21 @@ pub fn diskutil_list_plist(disks: &[&str]) -> String {
     )
 }
 
+pub fn diskutil_root_plist(physical_disk: u32) -> String {
+    format!(
+        "<plist version=\"1.0\"><dict><key>FilesystemType</key><string>apfs</string><key>APFSPhysicalStores</key><array><dict><key>APFSPhysicalStore</key><string>disk{}s2</string></dict></array></dict></plist>",
+        physical_disk
+    )
+}
+
 /// netac 盘的罐头环境(识别/容量/VID:PID 都指向 netac 事实)。
 pub fn netac_runner(disk: u32) -> FakeRunner {
     let mut m = HashMap::new();
     let disk_name = format!("disk{}", disk);
+    m.insert(
+        "diskutil info -plist /".into(),
+        diskutil_root_plist(if disk == 1 { 1 } else { 0 }),
+    );
     m.insert(
         "diskutil list -plist".into(),
         diskutil_list_plist(&[disk_name.as_str()]),

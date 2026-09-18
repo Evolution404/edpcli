@@ -615,7 +615,7 @@ fn system_disk_numbers() -> Vec<u32> {
     volume_extents(handle.get()).unwrap_or_default()
 }
 
-pub(super) fn is_system_disk(disk: u32) -> bool {
+pub(super) fn is_system_disk(_runner: &dyn CmdRunner, disk: u32) -> bool {
     let system = system_disk_numbers();
     // 无法确定系统卷映射时 fail-closed，不能把未知盘当成安全目标。
     system.is_empty() || system.contains(&disk)
@@ -633,8 +633,8 @@ impl Drop for WriteGuard {
     }
 }
 
-pub(super) fn prepare_write(_runner: &dyn CmdRunner, disk: u32) -> io::Result<WriteGuard> {
-    if is_system_disk(disk) {
+pub(super) fn prepare_write(runner: &dyn CmdRunner, disk: u32) -> io::Result<WriteGuard> {
+    if is_system_disk(runner, disk) {
         return Err(io::Error::new(
             io::ErrorKind::PermissionDenied,
             "目标磁盘承载 Windows 系统卷或系统卷映射不可确认，拒绝写盘",

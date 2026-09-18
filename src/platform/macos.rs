@@ -290,8 +290,64 @@ pub(super) fn fallback_hardware_probe(runner: &dyn CmdRunner, disk: u32) -> Opti
         })
 }
 
-pub(super) fn is_system_disk(disk: u32) -> bool {
-    disk < 2
+fn whole_disk_number(identifier: &str) -> Option<u32> {
+    let rest = identifier.strip_prefix("disk")?;
+    let digits: String = rest.chars().take_while(|ch| ch.is_ascii_digit()).collect();
+    if digits.is_empty() {
+        return None;
+    }
+    digits.parse().ok()
+}
+
+fn system_disk_numbers(runner: &dyn CmdRunner) -> Option<Vec<u32>> {
+    let out = runner
+        .check_output(&["diskutil", "info", "-plist", "/"], DISKUTIL_TIMEOUT)
+        .ok()?;
+    let info = plist::parse(&out).ok()?;
+
+    if let Some(stores) = info
+        .get("APFSPhysicalStores")
+        .and_then(|value| value.as_arr())
+    {
+        if stores.is_empty() {
+            return None;
+        }
+        let mut disks = Vec::new();
+        for store in stores {
+            let identifier = store.get("APFSPhysicalStore")?.as_str()?;
+            let disk = whole_disk_number(identifier)?;
+            if !disks.contains(&disk) {
+                disks.push(disk);
+            }
+        }
+        return (!disks.is_empty()).then_some(disks);
+    }
+
+    let filesystem = info
+        .get("FilesystemType")
+        .and_then(|value| value.as_str())
+        .unwrap_or_default();
+    if filesystem.eq_ignore_ascii_case("apfs") {
+        // APFS 根卷却无法得到 PhysicalStores 时，无法确认实际物理承载盘。
+        return None;
+    }
+
+    let identifier = info
+        .get("ParentWholeDisk")
+        .and_then(|value| value.as_str())
+        .or_else(|| {
+            info.get("DeviceIdentifier")
+                .and_then(|value| value.as_str())
+        })?;
+    Some(vec![whole_disk_number(identifier)?])
+}
+
+pub(super) fn is_system_disk(runner: &dyn CmdRunner, disk: u32) -> bool {
+    let Some(system_disks) = system_disk_numbers(runner) else {
+        // 无法确认根文件系统实际落在哪块物理盘时，一律按系统盘处理。
+        return true;
+    };
+    system_disks.contains(&disk)
 }
 
 fn disk_info(runner: &dyn CmdRunner, disk: u32) -> Option<plist::Plist> {
@@ -329,9 +385,6 @@ pub(super) fn usb_vid_pid(runner: &dyn CmdRunner, disk: u32) -> (String, String)
 }
 
 fn external_disk_info(runner: &dyn CmdRunner, disk: u32) -> Option<ExtDisk> {
-    if disk < 2 {
-        return None;
-    }
     let info = disk_info(runner, disk)?;
     let whole = info
         .get("WholeDisk")
@@ -391,6 +444,12 @@ pub(super) fn list_external_disks(runner: &dyn CmdRunner) -> Vec<ExtDisk> {
 }
 
 pub(super) fn prepare_write(runner: &dyn CmdRunner, disk: u32) -> io::Result<WriteGuard> {
+    if is_system_disk(runner, disk) {
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            "目标磁盘承载 macOS 根文件系统或系统盘身份不可确认，拒绝写盘",
+        ));
+    }
     runner
         .check_output(
             &["diskutil", "unmountDisk", "force", &format!("disk{disk}")],
@@ -420,11 +479,53 @@ pub(super) fn run_elevated(exe: &Path, argv: &[String], sentinel: &str) -> io::R
 mod selector_tests {
     use super::*;
 
+    struct RootInfoRunner {
+        plist: String,
+    }
+
+    impl CmdRunner for RootInfoRunner {
+        fn check_output(&self, cmd: &[&str], _timeout: std::time::Duration) -> io::Result<String> {
+            if cmd == ["diskutil", "info", "-plist", "/"] {
+                Ok(self.plist.clone())
+            } else {
+                Err(io::Error::other("unexpected command"))
+            }
+        }
+    }
+
     #[test]
     fn parses_native_macos_disk_selectors() {
         assert_eq!(parse_disk_selector("4").unwrap(), 4);
         assert_eq!(parse_disk_selector("/dev/disk4").unwrap(), 4);
         assert_eq!(parse_disk_selector("/dev/rdisk4").unwrap(), 4);
         assert!(parse_disk_selector("/dev/disk4s1").is_err());
+    }
+
+    #[test]
+    fn system_disk_uses_apfs_physical_store_not_fixed_disk_number() {
+        let runner = RootInfoRunner {
+            plist: r#"<plist><dict>
+                <key>FilesystemType</key><string>apfs</string>
+                <key>ParentWholeDisk</key><string>disk9</string>
+                <key>APFSPhysicalStores</key><array>
+                    <dict><key>APFSPhysicalStore</key><string>disk6s2</string></dict>
+                </array>
+            </dict></plist>"#
+                .into(),
+        };
+        assert!(is_system_disk(&runner, 6));
+        assert!(!is_system_disk(&runner, 0));
+    }
+
+    #[test]
+    fn system_disk_detection_fails_closed_when_apfs_store_is_unknown() {
+        let runner = RootInfoRunner {
+            plist: r#"<plist><dict>
+                <key>FilesystemType</key><string>apfs</string>
+                <key>ParentWholeDisk</key><string>disk9</string>
+            </dict></plist>"#
+                .into(),
+        };
+        assert!(is_system_disk(&runner, 6));
     }
 }
