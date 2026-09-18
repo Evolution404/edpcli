@@ -1,6 +1,6 @@
 [package]
 name = "edpcli"
-version = "3.0.0"
+version = "1.0.0"
 edition = "2021"
 rust-version = "1.98"
 description = "EDP/cems U 盘管理 CLI（识别、元信息、备份、恢复与免密转换）"

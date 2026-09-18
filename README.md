@@ -17,6 +17,9 @@ GBK 解码、本地时间和用户目录等通用能力均在进程内实现；�
 完整安装、三平台 `--disk` 写法、首次使用流程、备份/还原和发布说明见
 [`docs/USAGE.md`](docs/USAGE.md)。
 
+版本号从 `1.0.0` 正式起算；后续由维护 AI 按 SemVer 根据实际变更自主决定 PATCH / MINOR /
+MAJOR，并必须遵守 [`docs/RELEASE.md`](docs/RELEASE.md)，避免后续维护过程中遗忘版本策略。
+
 ## 快速使用
 
 ```bash
