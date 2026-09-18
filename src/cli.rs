@@ -13,7 +13,9 @@
 //! Kingston DT3.0 64G (每盘改前自动备份, 可随时 edpcli backup restore 还原)。
 
 use std::io::{self, Write};
-use std::path::{Path, PathBuf};
+use std::path::Path;
+#[cfg(test)]
+use std::path::PathBuf;
 
 pub use crate::backup_cli::{backup_delete, backup_list, backup_prune, backup_verify};
 use crate::cli_args::print_help;
@@ -22,13 +24,17 @@ pub use crate::cli_args::{
 };
 use crate::common::*;
 use crate::completion;
-use crate::diskio::{self, raw_path, FileDev, SectorDev, SystemClock};
+use crate::diskio::{self, raw_path, FileDev, SystemClock};
+#[cfg(test)]
+use crate::diskio::SectorDev;
 use crate::elevate::{self, ELEVATED_FLAG};
 use crate::inspect_cli::inspect_flow;
 use crate::metainfo_cli::info_flow;
 use crate::sectors::convert;
 use crate::selectors::DeviceSelector;
-use crate::sysinfo::{self, CmdRunner, ReadProbeCache, SysRunner};
+use crate::sysinfo::{ReadProbeCache, SysRunner};
+#[cfg(test)]
+use crate::sysinfo::{self, CmdRunner};
 
 // ══════════════════════════════════════════════════════════════════
 // 1. 交互提示抽象(测试注入)
@@ -36,9 +42,9 @@ use crate::sysinfo::{self, CmdRunner, ReadProbeCache, SysRunner};
 pub use crate::application::write::{
     apply_flow, backup_create_flow, restore_flow, ApplyMode, Ctx, Prompter,
 };
-pub(crate) use crate::application::write::{
-    auto_pick_disk, guard_system_disk, guard_usb_disk, read_image, verify_reopened_snapshot,
-};
+pub(crate) use crate::application::write::{auto_pick_disk, guard_usb_disk};
+#[cfg(test)]
+pub(crate) use crate::application::write::read_image;
 pub use crate::ui::{backup_menu_str, disk_menu_str};
 
 pub struct StdPrompter;

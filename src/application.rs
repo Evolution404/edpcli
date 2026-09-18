@@ -1,11 +1,11 @@
-pub mod write;
-
 //! Application/service boundary shared by the CLI and interactive frontends.
 //!
 //! This layer owns task-oriented, UI-neutral operations. Frontends may schedule these
 //! operations however they need, but must not reimplement device discovery or raw-disk
 //! safety policy.
 
+
+pub mod write;
 use std::cell::RefCell;
 use std::io;
 use std::path::Path;
