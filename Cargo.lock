@@ -25,6 +25,7 @@ name = "edpcli"
 version = "3.0.0"
 dependencies = [
  "encoding_rs",
+ "libc",
  "time",
 ]
 

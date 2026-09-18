@@ -3,8 +3,11 @@
 
 use std::cmp::Ordering;
 use std::collections::BTreeMap;
+use std::ffi::{CStr, CString, OsStr};
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read, Seek, SeekFrom, Write};
+use std::mem::MaybeUninit;
+use std::os::unix::ffi::OsStrExt;
 use std::os::unix::io::AsRawFd;
 use std::os::unix::fs::FileExt;
 use std::path::{Path, PathBuf};
@@ -456,23 +459,43 @@ pub fn sudo_user() -> Option<String> {
     ok.then_some(u)
 }
 
-/// 发起用户 home(经 shell `~user` 展开; std 无 getpwnam)。
+fn user_home(name: &str) -> Option<PathBuf> {
+    let name = CString::new(name).ok()?;
+    let mut pwd = MaybeUninit::<libc::passwd>::uninit();
+    let mut result = std::ptr::null_mut();
+    let mut buf = vec![0u8; 4096];
+
+    loop {
+        let rc = unsafe {
+            libc::getpwnam_r(
+                name.as_ptr(),
+                pwd.as_mut_ptr(),
+                buf.as_mut_ptr().cast(),
+                buf.len(),
+                &mut result,
+            )
+        };
+        if rc == 0 {
+            if result.is_null() {
+                return None;
+            }
+            let pwd = unsafe { pwd.assume_init() };
+            if pwd.pw_dir.is_null() {
+                return None;
+            }
+            let bytes = unsafe { CStr::from_ptr(pwd.pw_dir) }.to_bytes();
+            return Some(PathBuf::from(OsStr::from_bytes(bytes)));
+        }
+        if rc != libc::ERANGE || buf.len() >= 1024 * 1024 {
+            return None;
+        }
+        buf.resize(buf.len() * 2, 0);
+    }
+}
+
+/// 发起用户 home：直接查询 POSIX 用户数据库，不启动 shell。
 pub fn sudo_user_home() -> Option<PathBuf> {
-    let u = sudo_user()?;
-    let out = std::process::Command::new("/bin/sh")
-        .arg("-c")
-        .arg(format!("echo ~{}", u))
-        .output()
-        .ok()?;
-    if !out.status.success() {
-        return None;
-    }
-    let s = String::from_utf8_lossy(&out.stdout).trim().to_string();
-    if s.is_empty() || s.starts_with('~') {
-        None
-    } else {
-        Some(PathBuf::from(s))
-    }
+    user_home(&sudo_user()?)
 }
 
 /// `key = value` 配置解析: 取 backup_dir 值; `#` 注释, 未知键忽略, 坏行跳过。
@@ -1215,6 +1238,13 @@ mod tests {
         };
         assert!(ok("zhangyuxi") && ok("a.b-c_1"));
         assert!(!ok("") && !ok("x; rm") && !ok("$(cmd)"));
+    }
+
+    #[test]
+    fn user_home_uses_posix_database_without_shell() {
+        let user = std::env::var("USER").expect("测试环境应有 USER");
+        let home = user_home(&user).expect("当前用户应存在于 POSIX 用户数据库");
+        assert_eq!(home, PathBuf::from(std::env::var("HOME").unwrap()));
     }
 
     #[test]
