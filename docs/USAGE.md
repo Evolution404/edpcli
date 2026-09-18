@@ -24,7 +24,28 @@
 每个包都有独立 SHA-256；发布清单还包含 manifest / SBOM。macOS Apple Silicon 推荐安装
 arm64 包，Universal 仅用于同一二进制兼容两类 Mac 的场景。
 
-macOS / Linux 示例：
+### 从 GitHub Release 安装 / 升级（推荐）
+
+安装了 GitHub CLI (`gh`) 后，macOS Apple Silicon 可直接下载 **最新正式 Release**、校验
+SHA-256 并安装：
+
+```bash
+tmp="$(mktemp -d)" && cd "$tmp"
+gh release download --repo Evolution404/edpcli \
+  --pattern 'edpcli-v*-macos-arm64.tar.gz' \
+  --pattern 'edpcli-v*-macos-arm64.tar.gz.sha256'
+shasum -a 256 -c edpcli-v*-macos-arm64.tar.gz.sha256
+tar -xzf edpcli-v*-macos-arm64.tar.gz
+sudo install -m 0755 edpcli /usr/local/bin/edpcli
+edpcli version
+```
+
+这是安装和升级的统一命令；再次执行会从 GitHub 最新正式 Release 下载并覆盖旧版。
+Intel Mac 将 `macos-arm64` 改为 `macos-x86_64`；需要通用二进制时改为
+`macos-universal`。Linux 同理选择 `linux-arm64` 或 `linux-x86_64`，并将校验命令改为
+`sha256sum -c ...sha256`。
+
+如果已经手工下载了 Release 包，macOS / Linux 可直接安装：
 
 ```bash
 tar -xzf edpcli-vX.Y.Z-macos-arm64.tar.gz
