@@ -98,6 +98,18 @@ GitHub-hosted Runner 没有真实 EDP USB 硬件，因此不能声称完成真�
 硬件验证”。如果未来具备实体 Linux/Windows 主机，应新增真实 USB HIL，而不是删除现有
 虚拟磁盘测试。
 
+当前 `Virtual Disk HIL` workflow 的实际覆盖为：
+
+- Linux：创建临时磁盘镜像 → loop 整盘 → MBR 分区 → ext4 → 挂载 marker → 产品
+  `prepare_write` 执行 `umount2` → 对真实 `/dev/loopN` 做 LBA0-13 原子写/同步/读回 →
+  bit-for-bit 恢复 → 重新挂载并验证 marker；
+- Windows：创建临时 VHDX → MBR/NTFS/盘符 → 写 marker → 产品 `prepare_write` 执行
+  volume extent 归属确认、`FSCTL_LOCK_VOLUME`、`FSCTL_DISMOUNT_VOLUME` → 对真实
+  `\\.\PhysicalDriveN` 做 LBA0-13 原子写/同步/读回 → bit-for-bit 恢复 → detach/reattach
+  VHDX 并验证 marker；
+- CI 专用入口编译期默认关闭；Linux 只接受 `/dev/loopN`，Windows 只接受系统 API 返回
+  `BusTypeVirtual` / `BusTypeFileBackedVirtual` 的磁盘，因此测试入口不能指向真实 USB 盘。
+
 ## 发布步骤
 
 标准流程：

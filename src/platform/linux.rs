@@ -4,6 +4,8 @@ use std::fs::File;
 use std::io;
 use std::mem::MaybeUninit;
 use std::os::unix::ffi::OsStrExt;
+#[cfg(feature = "ci-virtual-disk")]
+use std::os::unix::fs::FileTypeExt;
 use std::path::Path;
 use std::path::PathBuf;
 use std::process::Command;
@@ -397,10 +399,8 @@ pub(super) fn list_external_disks(runner: &dyn CmdRunner) -> Vec<ExtDisk> {
         .collect()
 }
 
-pub(super) fn prepare_write(_runner: &dyn CmdRunner, disk: u32) -> io::Result<WriteGuard> {
-    let name = block_name(disk)
-        .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "Linux 块设备不存在"))?;
-    let devices = disk_device_numbers(&name)?;
+fn prepare_write_for_block_name(name: &str) -> io::Result<WriteGuard> {
+    let devices = disk_device_numbers(name)?;
     if devices.is_empty() {
         return Err(io::Error::other(
             "无法确认 Linux 块设备 major:minor，拒绝写盘",
@@ -429,6 +429,49 @@ pub(super) fn prepare_write(_runner: &dyn CmdRunner, disk: u32) -> io::Result<Wr
         )));
     }
     Ok(WriteGuard)
+}
+
+pub(super) fn prepare_write(_runner: &dyn CmdRunner, disk: u32) -> io::Result<WriteGuard> {
+    let name = block_name(disk)
+        .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "Linux 块设备不存在"))?;
+    prepare_write_for_block_name(&name)
+}
+
+#[cfg(feature = "ci-virtual-disk")]
+pub(super) fn ci_prepare_virtual_write(path: &str) -> io::Result<WriteGuard> {
+    let name = path.strip_prefix("/dev/").ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            "CI 虚拟磁盘只允许 /dev/loopN",
+        )
+    })?;
+    let Some(index) = name.strip_prefix("loop") else {
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            "CI 虚拟磁盘只允许 /dev/loopN",
+        ));
+    };
+    if index.is_empty() || !index.bytes().all(|b| b.is_ascii_digit()) {
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            "CI 虚拟磁盘只允许 /dev/loopN 整盘",
+        ));
+    }
+    let metadata = std::fs::metadata(path)?;
+    if !metadata.file_type().is_block_device() {
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            "CI 虚拟磁盘目标不是块设备",
+        ));
+    }
+    let class = std::path::Path::new("/sys/class/block").join(name);
+    if class.join("partition").exists() {
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            "CI 虚拟磁盘必须选择 loop 整盘而不是分区",
+        ));
+    }
+    prepare_write_for_block_name(name)
 }
 
 pub(super) const fn elevation_label() -> &'static str {

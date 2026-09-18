@@ -24,9 +24,10 @@ use windows_sys::Win32::Security::{
     GetTokenInformation, TokenElevation, TOKEN_ELEVATION, TOKEN_QUERY,
 };
 use windows_sys::Win32::Storage::FileSystem::{
-    BusTypeUsb, CreateFileW, FindFirstVolumeW, FindNextVolumeW, FindVolumeClose,
-    GetVolumeNameForVolumeMountPointW, GetVolumePathNameW, FILE_ATTRIBUTE_NORMAL, FILE_SHARE_READ,
-    FILE_SHARE_WRITE, IOCTL_VOLUME_GET_VOLUME_DISK_EXTENTS, OPEN_EXISTING,
+    BusTypeFileBackedVirtual, BusTypeUsb, BusTypeVirtual, CreateFileW, FindFirstVolumeW,
+    FindNextVolumeW, FindVolumeClose, GetVolumeNameForVolumeMountPointW, GetVolumePathNameW,
+    FILE_ATTRIBUTE_NORMAL, FILE_SHARE_READ, FILE_SHARE_WRITE, IOCTL_VOLUME_GET_VOLUME_DISK_EXTENTS,
+    OPEN_EXISTING,
 };
 use windows_sys::Win32::System::Ioctl::{
     PropertyStandardQuery, StorageDeviceProperty, DISK_GEOMETRY_EX, FSCTL_DISMOUNT_VOLUME,
@@ -158,6 +159,7 @@ struct WinDiskProbe {
     size: u64,
     removable: bool,
     usb: bool,
+    bus_type: i32,
     vendor: String,
     product: String,
     revision: String,
@@ -428,6 +430,7 @@ fn query_disk(disk: u32) -> io::Result<WinDiskProbe> {
         size: geometry.DiskSize as u64,
         removable: descriptor.RemovableMedia,
         usb: descriptor.BusType == BusTypeUsb,
+        bus_type: descriptor.BusType,
         vendor: descriptor_string(bytes, descriptor.VendorIdOffset),
         product: descriptor_string(bytes, descriptor.ProductIdOffset),
         revision: descriptor_string(bytes, descriptor.ProductRevisionOffset),
@@ -615,10 +618,14 @@ fn system_disk_numbers() -> Vec<u32> {
     volume_extents(handle.get()).unwrap_or_default()
 }
 
-pub(super) fn is_system_disk(_runner: &dyn CmdRunner, disk: u32) -> bool {
+fn is_system_disk_number(disk: u32) -> bool {
     let system = system_disk_numbers();
     // 无法确定系统卷映射时 fail-closed，不能把未知盘当成安全目标。
     system.is_empty() || system.contains(&disk)
+}
+
+pub(super) fn is_system_disk(_runner: &dyn CmdRunner, disk: u32) -> bool {
+    is_system_disk_number(disk)
 }
 
 pub(super) struct WriteGuard {
@@ -633,8 +640,8 @@ impl Drop for WriteGuard {
     }
 }
 
-pub(super) fn prepare_write(runner: &dyn CmdRunner, disk: u32) -> io::Result<WriteGuard> {
-    if is_system_disk(runner, disk) {
+fn prepare_write_disk(disk: u32) -> io::Result<WriteGuard> {
+    if is_system_disk_number(disk) {
         return Err(io::Error::new(
             io::ErrorKind::PermissionDenied,
             "目标磁盘承载 Windows 系统卷或系统卷映射不可确认，拒绝写盘",
@@ -686,6 +693,27 @@ pub(super) fn prepare_write(runner: &dyn CmdRunner, disk: u32) -> io::Result<Wri
     Ok(WriteGuard {
         locked_volumes: locked,
     })
+}
+
+pub(super) fn prepare_write(_runner: &dyn CmdRunner, disk: u32) -> io::Result<WriteGuard> {
+    prepare_write_disk(disk)
+}
+
+#[cfg(feature = "ci-virtual-disk")]
+pub(super) fn ci_prepare_virtual_write(path: &str) -> io::Result<WriteGuard> {
+    let disk = parse_disk_selector(path)
+        .map_err(|message| io::Error::new(io::ErrorKind::InvalidInput, message))?;
+    let probe = query_disk(disk)?;
+    if probe.bus_type != BusTypeVirtual && probe.bus_type != BusTypeFileBackedVirtual {
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            format!(
+                "CI 虚拟磁盘拒绝非 Virtual/FileBackedVirtual 目标: bus_type={}",
+                probe.bus_type
+            ),
+        ));
+    }
+    prepare_write_disk(disk)
 }
 
 pub(super) fn is_elevated() -> bool {
