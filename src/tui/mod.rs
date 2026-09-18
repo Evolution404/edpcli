@@ -81,10 +81,11 @@ fn run_loop() -> io::Result<()> {
     state.set_backup_scan_pending(true);
 
     loop {
-        if let Some(rows) = tasks.poll_devices() {
+        let updates = tasks.poll();
+        if let Some(rows) = updates.devices {
             state.replace_devices(rows);
         }
-        if let Some(rows) = tasks.poll_backups() {
+        if let Some(rows) = updates.backups {
             state.replace_backups(rows);
         }
         session.terminal.draw(|frame| render::draw(frame, &state))?;

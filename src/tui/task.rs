@@ -44,6 +44,12 @@ enum WorkerResult {
     },
 }
 
+#[derive(Default)]
+pub struct TaskUpdates {
+    pub devices: Option<Vec<Row>>,
+    pub backups: Option<Vec<BackupWorkspaceItem>>,
+}
+
 pub struct TaskHub {
     tx: Sender<WorkerResult>,
     rx: Receiver<WorkerResult>,
@@ -89,36 +95,24 @@ impl TaskHub {
         generation
     }
 
-    /// Drain ready worker messages without waiting. Only the current generation is accepted.
-    pub fn poll_devices(&mut self) -> Option<Vec<Row>> {
-        let mut latest = None;
+    /// Drain all ready messages exactly once so one result kind cannot consume another.
+    pub fn poll(&mut self) -> TaskUpdates {
+        let mut updates = TaskUpdates::default();
         while let Ok(message) = self.rx.try_recv() {
             match message {
                 WorkerResult::Devices { generation, rows }
                     if self.device_generation.is_current(generation) =>
                 {
-                    latest = Some(rows);
+                    updates.devices = Some(rows);
                 }
-                WorkerResult::Devices { .. } => {}
-                WorkerResult::Backups { .. } => {}
-            }
-        }
-        latest
-    }
-
-    pub fn poll_backups(&mut self) -> Option<Vec<BackupWorkspaceItem>> {
-        let mut latest = None;
-        while let Ok(message) = self.rx.try_recv() {
-            match message {
                 WorkerResult::Backups { generation, rows }
                     if self.backup_generation.is_current(generation) =>
                 {
-                    latest = Some(rows);
+                    updates.backups = Some(rows);
                 }
-                WorkerResult::Backups { .. } => {}
-                WorkerResult::Devices { .. } => {}
+                WorkerResult::Devices { .. } | WorkerResult::Backups { .. } => {}
             }
         }
-        latest
+        updates
     }
 }

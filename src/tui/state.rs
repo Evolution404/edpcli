@@ -15,7 +15,6 @@ pub enum InputMode {
     Search,
     Command,
     Help,
-    Refresh,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -35,6 +34,7 @@ pub enum NavCommand {
     Escape,
     Quit,
     Help,
+    Refresh,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
