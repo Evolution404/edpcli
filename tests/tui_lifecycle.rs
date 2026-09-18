@@ -74,3 +74,10 @@ fn repository_locks_tui_dependencies_and_ci_checks_locked_tree() {
     assert!(ci.contains("cargo test --all-targets --locked"));
     assert!(ci.contains("cargo clippy --all-targets --locked -- -D warnings"));
 }
+
+#[test]
+fn background_workers_convert_panics_into_results_instead_of_hanging_ui() {
+    let task = include_str!("../src/tui/task.rs");
+    assert!(task.contains("catch_unwind"));
+    assert!(task.contains("AssertUnwindSafe"));
+}
