@@ -26,6 +26,109 @@ use event::KeyMapper;
 use state::{AppState, NavCommand, StateEffect};
 use task::TaskHub;
 
+
+const RESUME_KIND_FLAG: &str = "--_resume-kind";
+const RESUME_DISK_FLAG: &str = "--_resume-disk";
+const RESUME_BACKUP_FLAG: &str = "--_resume-backup";
+
+/// Serialize a confirmed write intent for an elevated TUI restart.
+///
+/// The disk is converted to the platform-native selector before crossing the privilege boundary;
+/// restore additionally pins the exact backup path. The resumed TUI requires a second explicit YES.
+pub fn resume_argv(intent: &state::WriteIntent) -> Vec<String> {
+    let mut argv = vec![
+        "tui".to_string(),
+        RESUME_KIND_FLAG.to_string(),
+        match intent.kind {
+            state::WriteKind::Apply => "apply".to_string(),
+            state::WriteKind::Restore => "restore".to_string(),
+        },
+        RESUME_DISK_FLAG.to_string(),
+        crate::platform::disk_selector_value(intent.disk),
+    ];
+    if let Some(path) = &intent.backup {
+        argv.push(RESUME_BACKUP_FLAG.to_string());
+        argv.push(path.to_string_lossy().into_owned());
+    }
+    argv
+}
+
+/// Parse the private state used only for an elevated TUI restart.
+///
+/// Any partial, duplicated or contradictory state fails closed. Public TUI invocations with no
+/// private flags return `Ok(None)`.
+pub fn parse_resume_args(argv: &[String]) -> Result<Option<state::WriteIntent>, String> {
+    let mut kind = None;
+    let mut disk = None;
+    let mut backup = None;
+    let mut saw_resume = false;
+
+    let mut i = usize::from(argv.first().is_some_and(|arg| arg == "tui"));
+    while i < argv.len() {
+        let arg = &argv[i];
+        if arg == crate::elevate::ELEVATED_FLAG {
+            i += 1;
+            continue;
+        }
+        let mut take = |flag: &str| -> Result<String, String> {
+            i += 1;
+            if i >= argv.len() {
+                return Err(format!("错误: {flag} 缺少参数值"));
+            }
+            Ok(argv[i].clone())
+        };
+        match arg.as_str() {
+            RESUME_KIND_FLAG => {
+                if kind.is_some() {
+                    return Err(format!("错误: {RESUME_KIND_FLAG} 重复指定"));
+                }
+                saw_resume = true;
+                let value = take(RESUME_KIND_FLAG)?;
+                kind = Some(match value.as_str() {
+                    "apply" => state::WriteKind::Apply,
+                    "restore" => state::WriteKind::Restore,
+                    _ => return Err(format!("错误: 非法 TUI resume kind: {value}")),
+                });
+            }
+            RESUME_DISK_FLAG => {
+                if disk.is_some() {
+                    return Err(format!("错误: {RESUME_DISK_FLAG} 重复指定"));
+                }
+                saw_resume = true;
+                let value = take(RESUME_DISK_FLAG)?;
+                disk = Some(
+                    crate::platform::parse_disk_selector(&value)
+                        .map_err(|error| format!("错误: resume disk {value}: {error}"))?,
+                );
+            }
+            RESUME_BACKUP_FLAG => {
+                if backup.is_some() {
+                    return Err(format!("错误: {RESUME_BACKUP_FLAG} 重复指定"));
+                }
+                saw_resume = true;
+                backup = Some(std::path::PathBuf::from(take(RESUME_BACKUP_FLAG)?));
+            }
+            other => return Err(format!("错误: tui 不认识内部 resume 参数 {other}")),
+        }
+        i += 1;
+    }
+
+    if !saw_resume {
+        return Ok(None);
+    }
+    let kind = kind.ok_or_else(|| format!("错误: 缺少 {RESUME_KIND_FLAG}"))?;
+    let disk = disk.ok_or_else(|| format!("错误: 缺少 {RESUME_DISK_FLAG}"))?;
+    match kind {
+        state::WriteKind::Apply if backup.is_some() => {
+            Err("错误: apply resume 不允许携带备份路径".into())
+        }
+        state::WriteKind::Restore if backup.is_none() => {
+            Err(format!("错误: restore resume 缺少 {RESUME_BACKUP_FLAG}"))
+        }
+        _ => Ok(Some(state::WriteIntent { kind, disk, backup })),
+    }
+}
+
 struct TerminalSession {
     terminal: Terminal<CrosstermBackend<Stdout>>,
 }

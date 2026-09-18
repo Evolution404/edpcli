@@ -314,9 +314,7 @@ pub fn parse_args(argv: &[String]) -> Result<Parsed, String> {
                     topic: Some("tui".into()),
                 });
             }
-            if !rest.is_empty() {
-                return Err("错误: tui 不接受位置参数或选项".into());
-            }
+            crate::tui::parse_resume_args(argv)?;
             Ok(Parsed::Tui)
         }
         "list" => {

@@ -14,8 +14,6 @@
 
 use std::io::{self, Write};
 use std::path::Path;
-#[cfg(test)]
-use std::path::PathBuf;
 
 pub use crate::backup_cli::{backup_delete, backup_list, backup_prune, backup_verify};
 use crate::cli_args::print_help;
@@ -33,8 +31,6 @@ use crate::metainfo_cli::info_flow;
 use crate::sectors::convert;
 use crate::selectors::DeviceSelector;
 use crate::sysinfo::{ReadProbeCache, SysRunner};
-#[cfg(test)]
-use crate::sysinfo::{self, CmdRunner};
 
 // ══════════════════════════════════════════════════════════════════
 // 1. 交互提示抽象(测试注入)
@@ -72,10 +68,6 @@ impl<P: Prompter> Prompter for AlwaysYes<P> {
     fn confirm_yes(&mut self, _msg: &str) -> bool {
         true
     }
-}
-
-fn err(code: i32, msg: impl Into<String>) -> EdpCliError {
-    EdpCliError::new(code, msg)
 }
 
 // ══════════════════════════════════════════════════════════════════
