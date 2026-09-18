@@ -90,36 +90,41 @@ pub use crate::disk_scan::{print_disk_table, scan_disks, Row};
 
 /// restore 选单条目(时间已格式化 + 是否免密快照)。
 pub fn backup_menu_str(entries: &[(String, bool)]) -> String {
-    use crate::ui::{green, pad_to};
-    let mut out = String::new();
-    for (i, (time, is_nopwd)) in entries.iter().enumerate() {
-        let tag = if *is_nopwd {
-            green("[免密状态]")
-        } else {
-            "[加密原盘]".to_string()
-        };
-        out.push_str(&format!("  {})  {}   {}\n", i + 1, time, tag));
-    }
-    let _ = pad_to; // (对齐保留给后续扩展)
-    out
+    let rows = entries
+        .iter()
+        .enumerate()
+        .map(|(i, (time, is_nopwd))| {
+            vec![
+                crate::ui::TableCell::right((i + 1).to_string(), crate::ui::Tone::BoldCyan),
+                crate::ui::TableCell::left(time.clone(), crate::ui::Tone::Plain),
+                crate::ui::TableCell::left(
+                    if *is_nopwd { "免密状态" } else { "加密原盘" },
+                    if *is_nopwd { crate::ui::Tone::Green } else { crate::ui::Tone::Plain },
+                ),
+            ]
+        })
+        .collect::<Vec<_>>();
+    crate::ui::render_table(&["编号", "时间", "状态"], &rows)
 }
 
 /// 多 USB 盘选单。
 pub fn disk_menu_str(disks: &[sysinfo::ExtDisk]) -> String {
-    use crate::ui::{bold, pad_left, pad_to};
-    let w = disks.iter().map(|d| format!("disk{}", d.n).len()).max().unwrap_or(1);
-    let mut out = String::new();
-    for (i, d) in disks.iter().enumerate() {
-        out.push_str(&format!(
-            "  {})  {}  {}  {}:{}\n",
-            i + 1,
-            bold(&pad_to(&format!("disk{}", d.n), w + 2)),
-            pad_left(&fmt_gb(d.size), 8),
-            d.vid,
-            d.pid
-        ));
-    }
-    out
+    let rows = disks
+        .iter()
+        .enumerate()
+        .map(|(i, d)| {
+            vec![
+                crate::ui::TableCell::right((i + 1).to_string(), crate::ui::Tone::BoldCyan),
+                crate::ui::TableCell::left(format!("disk{}", d.n), crate::ui::Tone::Bold),
+                crate::ui::TableCell::right(fmt_gb(d.size), crate::ui::Tone::Magenta),
+                crate::ui::TableCell::left(
+                    format!("{}:{}", d.vid, d.pid),
+                    crate::ui::Tone::Yellow,
+                ),
+            ]
+        })
+        .collect::<Vec<_>>();
+    crate::ui::render_table(&["编号", "设备", "容量", "VID:PID"], &rows)
 }
 
 // ══════════════════════════════════════════════════════════════════
@@ -1231,7 +1236,7 @@ mod tests {
         let lines: Vec<&str> = out.lines().collect();
         assert_eq!(lines[0], "外接盘 3 个:");
         let disk4_line = lines.iter().find(|l| l.contains("disk4")).unwrap();
-        assert!(disk4_line.contains("非cems盘"));
+        assert!(disk4_line.contains("非 cems 盘"));
         let disk6_line = lines.iter().find(|l| l.contains("disk6")).unwrap();
         assert!(disk6_line.contains("cems盘") && disk6_line.contains("[免密]"));
         // EDPF 明细行: 类型 + 大小 + LBA 范围
@@ -1242,7 +1247,7 @@ mod tests {
         let meta = lines.iter().find(|l| l.contains("onlyid")).unwrap();
         assert!(meta.contains("onlyid=1402259934") && meta.contains("备份 3 份"));
         let disk7_line = lines.iter().find(|l| l.contains("disk7")).unwrap();
-        assert!(disk7_line.contains("非USB"));
+        assert!(disk7_line.contains("非 USB") && disk7_line.contains("不支持"));
         assert_eq!(print_disk_table(&[]).trim(), "未检测到外接盘。");
     }
 
@@ -1254,13 +1259,16 @@ mod tests {
             ExtDisk { n: 6, size: 62_914_560_000, vid: "0dd8".into(), pid: "2005".into(), proto: "USB".into() },
         ];
         let m = disk_menu_str(&disks);
-        assert!(m.contains("1)") && m.contains("2)"), "{}", m);
+        assert!(m.contains("编号") && m.contains("设备") && m.contains("VID:PID"), "{}", m);
+        assert!(m.lines().any(|line| line.contains("1") && line.contains("disk4")), "{}", m);
+        assert!(m.lines().any(|line| line.contains("2") && line.contains("disk6")), "{}", m);
         assert!(m.contains("disk4") && m.contains("64.00GB") && m.contains("0951:1666"));
 
         let b = backup_menu_str(&[("2026-09-16 23:36".into(), true), ("2026-08-27 22:25".into(), false)]);
-        assert!(b.contains("1)  2026-09-16 23:36"), "{}", b);
-        assert!(b.contains("[免密状态]"));
-        assert!(b.contains("2)  2026-08-27 22:25"));
-        assert!(b.contains("[加密原盘]"));
+        assert!(b.contains("编号") && b.contains("时间") && b.contains("状态"), "{}", b);
+        assert!(b.lines().any(|line| line.contains("1") && line.contains("2026-09-16 23:36")), "{}", b);
+        assert!(b.contains("免密状态"));
+        assert!(b.lines().any(|line| line.contains("2") && line.contains("2026-08-27 22:25")), "{}", b);
+        assert!(b.contains("加密原盘"));
     }
 }

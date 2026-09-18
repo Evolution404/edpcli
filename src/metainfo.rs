@@ -251,28 +251,66 @@ pub fn render(summary: &MetaInfoSummary) -> String {
     if !summary.partitions.is_empty() {
         out.push('\n');
         out.push_str(&format!("{}\n", crate::ui::bold_cyan("分区摘要")));
-        for part in &summary.partitions {
-            out.push_str(&format!(
-                "  {} {}  ",
-                crate::ui::green(&crate::ui::pad_to(&part.source, 7)),
-                crate::ui::bold_cyan(&crate::ui::pad_to(&part.name, 10)),
-            ));
-            let mut values = Vec::new();
-            if let Some(v) = &part.kind {
-                values.push(crate::ui::yellow(v));
-            }
-            if let Some(v) = &part.status {
-                values.push(crate::ui::yellow(v));
-            }
-            if let Some(v) = &part.start_lba {
-                values.push(crate::ui::green(&format!("start={v}")));
-            }
-            if let Some(v) = &part.size {
-                values.push(crate::ui::magenta(v));
-            }
-            out.push_str(&values.join(" · "));
-            out.push('\n');
-        }
+        let rows = summary
+            .partitions
+            .iter()
+            .map(|part| {
+                let (active, enc) = part
+                    .status
+                    .as_deref()
+                    .map(|status| {
+                        let active = status
+                            .split_whitespace()
+                            .find_map(|token| token.strip_prefix("active="))
+                            .unwrap_or("-");
+                        let enc = status
+                            .split_whitespace()
+                            .find_map(|token| token.strip_prefix("enc="))
+                            .unwrap_or("-");
+                        (active.to_string(), enc.to_string())
+                    })
+                    .unwrap_or_else(|| ("-".into(), "-".into()));
+                let (bytes, human) = part
+                    .size
+                    .as_deref()
+                    .and_then(|size| size.split_once(" / "))
+                    .map(|(bytes, human)| (bytes.to_string(), human.to_string()))
+                    .unwrap_or_else(|| {
+                        (
+                            part.size.clone().unwrap_or_else(|| "-".into()),
+                            "-".into(),
+                        )
+                    });
+                vec![
+                    crate::ui::TableCell::left(part.source.clone(), crate::ui::Tone::Green),
+                    crate::ui::TableCell::left(part.name.clone(), crate::ui::Tone::BoldCyan),
+                    crate::ui::TableCell::left(
+                        part.kind.clone().unwrap_or_else(|| "-".into()),
+                        crate::ui::Tone::Yellow,
+                    ),
+                    crate::ui::TableCell::right(active, crate::ui::Tone::Yellow),
+                    crate::ui::TableCell::right(enc, crate::ui::Tone::Yellow),
+                    crate::ui::TableCell::right(
+                        part.start_lba.clone().unwrap_or_else(|| "-".into()),
+                        crate::ui::Tone::Green,
+                    ),
+                    crate::ui::TableCell::right(
+                        bytes,
+                        crate::ui::Tone::Magenta,
+                    ),
+                    crate::ui::TableCell::right(
+                        human,
+                        crate::ui::Tone::Magenta,
+                    ),
+                ]
+            })
+            .collect::<Vec<_>>();
+        out.push_str(&crate::ui::render_table(
+            &[
+                "来源", "条目", "类型", "Active", "Enc", "起始LBA", "字节数", "容量",
+            ],
+            &rows,
+        ));
     }
     out
 }

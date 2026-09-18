@@ -63,6 +63,124 @@ pub fn magenta(s: &str) -> String {
     wrap("35", s)
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Align {
+    Left,
+    Right,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Tone {
+    Plain,
+    Bold,
+    BoldCyan,
+    Dim,
+    Red,
+    Green,
+    Yellow,
+    Cyan,
+    Magenta,
+}
+
+impl Tone {
+    fn paint(self, s: &str) -> String {
+        match self {
+            Self::Plain => s.to_string(),
+            Self::Bold => bold(s),
+            Self::BoldCyan => bold_cyan(s),
+            Self::Dim => dim(s),
+            Self::Red => red(s),
+            Self::Green => green(s),
+            Self::Yellow => yellow(s),
+            Self::Cyan => cyan(s),
+            Self::Magenta => magenta(s),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TableCell {
+    pub text: String,
+    pub align: Align,
+    pub tone: Tone,
+}
+
+impl TableCell {
+    pub fn left(text: impl Into<String>, tone: Tone) -> Self {
+        Self {
+            text: text.into(),
+            align: Align::Left,
+            tone,
+        }
+    }
+
+    pub fn right(text: impl Into<String>, tone: Tone) -> Self {
+        Self {
+            text: text.into(),
+            align: Align::Right,
+            tone,
+        }
+    }
+}
+
+/// 渲染紧凑终端表格。列宽按未着色文本的可见宽度计算，填充完成后再上色，
+/// 因此 ANSI 与中英文混排都不会破坏列对齐。
+pub fn render_table(headers: &[&str], rows: &[Vec<TableCell>]) -> String {
+    let cols = headers.len().max(rows.iter().map(Vec::len).max().unwrap_or(0));
+    if cols == 0 {
+        return String::new();
+    }
+    let mut widths = vec![0usize; cols];
+    for (idx, header) in headers.iter().enumerate() {
+        widths[idx] = widths[idx].max(disp_width(header));
+    }
+    for row in rows {
+        for (idx, cell) in row.iter().enumerate() {
+            widths[idx] = widths[idx].max(disp_width(&cell.text));
+        }
+    }
+
+    let mut out = String::new();
+    if !headers.is_empty() {
+        out.push_str("  ");
+        for (idx, width) in widths.iter().enumerate() {
+            if idx > 0 {
+                out.push_str("  ");
+            }
+            let header = headers.get(idx).copied().unwrap_or("");
+            out.push_str(&bold_cyan(&pad_to(header, *width)));
+        }
+        out.push('\n');
+        out.push_str("  ");
+        for (idx, width) in widths.iter().enumerate() {
+            if idx > 0 {
+                out.push_str("  ");
+            }
+            out.push_str(&dim(&"─".repeat(*width)));
+        }
+        out.push('\n');
+    }
+
+    for row in rows {
+        out.push_str("  ");
+        for (idx, width) in widths.iter().enumerate() {
+            if idx > 0 {
+                out.push_str("  ");
+            }
+            let cell = row.get(idx);
+            let raw = cell.map(|c| c.text.as_str()).unwrap_or("");
+            let padded = match cell.map(|c| c.align).unwrap_or(Align::Left) {
+                Align::Left => pad_to(raw, *width),
+                Align::Right => pad_left(raw, *width),
+            };
+            let painted = cell.map(|c| c.tone).unwrap_or(Tone::Plain).paint(&padded);
+            out.push_str(&painted);
+        }
+        out.push('\n');
+    }
+    out
+}
+
 // ══════════════════════════════════════════════════════════════════
 // 显示宽度(East Asian Width 简化版: CJK=2, 零宽=0, 其余=1)
 // ══════════════════════════════════════════════════════════════════
@@ -175,6 +293,38 @@ mod tests {
         assert_eq!(pad_left("59.75GB", 8), " 59.75GB"); // 7 列补 1
         assert_eq!(pad_left("1.34GB", 8), "  1.34GB");
         assert_eq!(pad_to("溢出宽度", 4), "溢出宽度"); // 不截断, 由调用方处理
+    }
+
+    #[test]
+    fn table_aligns_cjk_numbers_and_colored_cells() {
+        set_enabled_for_tests(false);
+        let rows = vec![
+            vec![
+                TableCell::left("LBA7", Tone::Green),
+                TableCell::left("Entry[0]", Tone::Cyan),
+                TableCell::left("Boot (1)", Tone::Yellow),
+                TableCell::right("63", Tone::Green),
+                TableCell::right("10.45 MB", Tone::Magenta),
+            ],
+            vec![
+                TableCell::left("LBA12", Tone::Green),
+                TableCell::left("Entry[2]", Tone::Cyan),
+                TableCell::left("加密区", Tone::Yellow),
+                TableCell::right("243116060", Tone::Green),
+                TableCell::right("1.34 GB", Tone::Magenta),
+            ],
+        ];
+        let out = render_table(&["来源", "条目", "类型", "起始LBA", "大小"], &rows);
+        let lines: Vec<&str> = out.lines().collect();
+        assert_eq!(lines.len(), 4);
+        assert_eq!(disp_width(lines[0]), disp_width(lines[1]));
+        assert_eq!(disp_width(lines[2]), disp_width(lines[3]));
+
+        set_enabled_for_tests(true);
+        let colored = render_table(&["来源", "条目", "类型", "起始LBA", "大小"], &rows);
+        assert!(colored.contains("\x1b[32m"));
+        assert!(colored.contains("\x1b[35m"));
+        reset_enabled_for_tests();
     }
 
     #[test]

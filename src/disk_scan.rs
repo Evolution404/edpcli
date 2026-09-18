@@ -109,51 +109,48 @@ pub fn scan_disks(
 }
 
 pub fn print_disk_table(rows: &[Row]) -> String {
-    use crate::ui::{bold, dim, green, pad_left, pad_to};
+    use crate::ui::{dim, render_table, TableCell, Tone};
     let mut out = String::new();
     if rows.is_empty() {
         out.push_str("未检测到外接盘。\n");
         return out;
     }
     out.push_str(&format!("外接盘 {} 个:\n", rows.len()));
-    let width = rows
+    let table_rows = rows
         .iter()
-        .map(|r| r.disk.to_string().len())
-        .max()
-        .unwrap_or(1);
-    for row in rows {
-        let name = pad_to(&format!("disk{}", row.disk), width + 4);
-        let head = format!(
-            "  {}  {}  {}  {}",
-            bold(&name),
-            pad_left(&fmt_gb(row.size), 8),
-            pad_to(&row.proto, 12),
-            pad_to(&format!("{}:{}", row.vid, row.pid), 13),
-        );
-        let detail_pad = " ".repeat(2 + (width + 4) + 2 + 8 + 2 + 1);
-        if row.proto != "USB" {
-            out.push_str(&format!("{}  {}\n", head, dim("(非USB, 本工具不支持)")));
-        } else if row.denied {
-            out.push_str(&format!(
-                "{}  {}\n",
-                head,
-                dim("(加 sudo 可识别 cems 盘/备份)")
-            ));
-        } else if let Some(error) = &row.probe_error {
-            out.push_str(&format!(
-                "{}  {}\n",
-                head,
-                crate::ui::yellow(&format!("读取异常: {}", error))
-            ));
-        } else if row.device_id.is_none() {
-            out.push_str(&format!("{}  {}\n", head, dim("非cems盘")));
-        } else {
-            let nopwd_tag = if row.is_nopwd {
-                format!(" {}", green("[免密]"))
+        .map(|row| {
+            let (status, tone) = if row.proto != "USB" {
+                ("非 USB / 不支持".to_string(), Tone::Dim)
+            } else if row.denied {
+                ("需 sudo 才能识别".to_string(), Tone::Dim)
+            } else if let Some(error) = &row.probe_error {
+                (format!("读取异常: {}", error), Tone::Yellow)
+            } else if row.device_id.is_none() {
+                ("非 cems 盘".to_string(), Tone::Dim)
+            } else if row.is_nopwd {
+                ("cems盘 [免密]".to_string(), Tone::Green)
             } else {
-                String::new()
+                ("cems盘".to_string(), Tone::Plain)
             };
-            out.push_str(&format!("{}  cems盘{}\n", head, nopwd_tag));
+            vec![
+                TableCell::left(format!("disk{}", row.disk), Tone::Bold),
+                TableCell::right(fmt_gb(row.size), Tone::Magenta),
+                TableCell::left(
+                    row.proto.clone(),
+                    if row.proto == "USB" { Tone::Green } else { Tone::Dim },
+                ),
+                TableCell::left(format!("{}:{}", row.vid, row.pid), Tone::Yellow),
+                TableCell::left(status, tone),
+            ]
+        })
+        .collect::<Vec<_>>();
+    out.push_str(&render_table(
+        &["设备", "容量", "总线", "VID:PID", "状态"],
+        &table_rows,
+    ));
+
+    for row in rows {
+        if row.proto == "USB" && !row.denied && row.probe_error.is_none() && row.device_id.is_some() {
             let mut details = Vec::new();
             if let Some(parts) = &row.partitions {
                 let items: Vec<String> = parts
@@ -180,8 +177,9 @@ pub fn print_disk_table(rows: &[Row]) -> String {
                 "无备份".to_string()
             });
             details.push(format!("   {}", meta.join(" · ")));
+            out.push_str(&format!("  {}\n", crate::ui::bold(&format!("disk{} 详情", row.disk))));
             for detail in details {
-                out.push_str(&format!("{}{}\n", detail_pad, detail));
+                out.push_str(&format!("    {}\n", dim(&detail)));
             }
         }
     }

@@ -313,22 +313,33 @@ pub fn convert(
         ));
     }
     if verbose {
-        use crate::ui::{bold, disp_width as disp_w, pad_left, pad_to};
         let enc_end = enc_start + enc_size / SECTOR as u64 - 1;
         let share_range = format!("LBA 63 ~ {}", group_digits(63 + share - 1));
         let enc_range = format!("LBA {} ~ {}", group_digits(enc_start), group_digits(enc_end));
-        let rangew = disp_w(&share_range).max(disp_w(&enc_range));
-        println!("{}  {}  {}  {}  明文数据区, 系统直接挂载读写",
-            bold("布局"),
-            pad_to("Share", 9),
-            pad_left(&share_range, rangew),
-            pad_left(&fmt_gb(share * SECTOR as u64), 9),
-        );
-        println!("{}  {}  {}  {}  原样保留不动",
-            " ".repeat(4),
-            pad_to("Encrypt", 9),
-            pad_left(&enc_range, rangew),
-            pad_left(&fmt_gb(enc_size), 9),
+        println!("{}", crate::ui::bold_cyan("布局"));
+        let rows = vec![
+            vec![
+                crate::ui::TableCell::left("Share", crate::ui::Tone::Green),
+                crate::ui::TableCell::right(share_range, crate::ui::Tone::Green),
+                crate::ui::TableCell::right(
+                    fmt_gb(share * SECTOR as u64),
+                    crate::ui::Tone::Magenta,
+                ),
+                crate::ui::TableCell::left(
+                    "明文数据区，系统直接挂载读写",
+                    crate::ui::Tone::Plain,
+                ),
+            ],
+            vec![
+                crate::ui::TableCell::left("Encrypt", crate::ui::Tone::Yellow),
+                crate::ui::TableCell::right(enc_range, crate::ui::Tone::Green),
+                crate::ui::TableCell::right(fmt_gb(enc_size), crate::ui::Tone::Magenta),
+                crate::ui::TableCell::left("原样保留不动", crate::ui::Tone::Dim),
+            ],
+        ];
+        print!(
+            "{}",
+            crate::ui::render_table(&["区域", "LBA 范围", "大小", "说明"], &rows)
         );
     }
 
@@ -347,21 +358,48 @@ pub fn convert(
     };
 
     if verbose {
-        use crate::ui::{bold, dim, pad_to};
         println!();
-        println!("{}", bold("将写入 5 个扇区:"));
-        let row = |lba: &str, name: &str, desc: &str, d: bool| {
-            let line = format!("  {}  {}  {}", pad_to(lba, 6), pad_to(name, 8), desc);
-            if d { dim(&line) } else { line }
-        };
-        println!("{}", row("LBA0", "MBR", &format!("单分区(type=07) 指向 Share: @LBA63 × {} 扇", group_digits(share)), false));
-        println!("{}", row("LBA6", "盘标签", "0x1CA=128480, 清 25B, 重算校验和", false));
-        println!("{}", row("LBA7", "分区表", "2 条目: Share@63 + Encrypt", false));
-        println!("{}", row("LBA12", "分区表", "2 条目: Share@63 + Encrypt", false));
-        println!("{}", row("LBA9", "临时区", if new9.is_some() { "清零(当前存在)" } else { "已是零, 不写" }, new9.is_none()));
+        println!("{}", crate::ui::bold_cyan("将写入 5 个扇区:"));
+        let rows = vec![
+            vec![
+                crate::ui::TableCell::left("LBA0", crate::ui::Tone::Green),
+                crate::ui::TableCell::left("MBR", crate::ui::Tone::BoldCyan),
+                crate::ui::TableCell::left(
+                    format!("单分区(type=07) 指向 Share: @LBA63 × {} 扇", group_digits(share)),
+                    crate::ui::Tone::Plain,
+                ),
+            ],
+            vec![
+                crate::ui::TableCell::left("LBA6", crate::ui::Tone::Green),
+                crate::ui::TableCell::left("盘标签", crate::ui::Tone::BoldCyan),
+                crate::ui::TableCell::left(
+                    "0x1CA=128480，清 25B，重算校验和",
+                    crate::ui::Tone::Plain,
+                ),
+            ],
+            vec![
+                crate::ui::TableCell::left("LBA7", crate::ui::Tone::Green),
+                crate::ui::TableCell::left("分区表", crate::ui::Tone::BoldCyan),
+                crate::ui::TableCell::left("2 条目: Share@63 + Encrypt", crate::ui::Tone::Plain),
+            ],
+            vec![
+                crate::ui::TableCell::left("LBA12", crate::ui::Tone::Green),
+                crate::ui::TableCell::left("分区表", crate::ui::Tone::BoldCyan),
+                crate::ui::TableCell::left("2 条目: Share@63 + Encrypt", crate::ui::Tone::Plain),
+            ],
+            vec![
+                crate::ui::TableCell::left("LBA9", crate::ui::Tone::Green),
+                crate::ui::TableCell::left("临时区", crate::ui::Tone::BoldCyan),
+                crate::ui::TableCell::left(
+                    if new9.is_some() { "清零(当前存在)" } else { "已是零，不写" },
+                    if new9.is_some() { crate::ui::Tone::Plain } else { crate::ui::Tone::Dim },
+                ),
+            ],
+        ];
+        print!("{}", crate::ui::render_table(&["LBA", "区域", "动作"], &rows));
         println!(
             "{}",
-            dim("不动   LBA4/8/11(盘身份) · 其余保留扇区 · 表尾终止符 · LBA12 尾部144B · 盘尾区域")
+            crate::ui::dim("不动   LBA4/8/11(盘身份) · 其余保留扇区 · 表尾终止符 · LBA12 尾部144B · 盘尾区域")
         );
     }
 

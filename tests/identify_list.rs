@@ -72,9 +72,9 @@ fn scan_and_print_all_row_kinds() {
     let rows = scan_disks(&runner, &bak.0, &read_ok);
     let out = print_disk_table(&rows);
     assert!(out.contains("外接盘 3 个:"), "{}", out);
-    assert!(out.contains("disk4") && out.contains("非cems盘"), "{}", out);
+    assert!(out.contains("disk4") && out.contains("非 cems 盘"), "{}", out);
     assert!(out.contains("disk6") && out.contains("cems盘") && out.contains("无备份"), "{}", out);
-    assert!(out.contains("disk7") && out.contains("非USB"), "{}", out);
+    assert!(out.contains("disk7") && out.contains("非 USB"), "{}", out);
     // 原盘数据: 非免密 + EDPF 3 条(含 Boot/Share/Encrypt)
     let row6 = rows.iter().find(|r| r.disk == 6).unwrap();
     assert!(!row6.is_nopwd);
@@ -100,7 +100,7 @@ fn scan_and_print_all_row_kinds() {
     };
     let rows2 = scan_disks(&runner, &bak.0, &read_denied);
     let out2 = print_disk_table(&rows2);
-    assert!(out2.contains("sudo 可识别"), "{}", out2);
+    assert!(out2.contains("sudo") && out2.contains("识别"), "{}", out2);
 
     // 抽象读层若意外返回短扇区，list 也必须降级为不可读，不能切片 panic。
     let read_short = |_disk: u32, lba: u32| -> std::io::Result<Vec<u8>> {
