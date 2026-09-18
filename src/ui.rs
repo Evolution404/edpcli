@@ -354,7 +354,6 @@ mod tests {
     }
 }
 
-
 // CLI table renderers retained as presentation-only helpers. Application services never depend on CLI routing.
 /// restore 选单条目(时间已格式化 + 是否免密快照)。
 pub fn backup_menu_str(entries: &[(String, bool)]) -> String {
@@ -392,7 +391,10 @@ pub fn disk_menu_str(disks: &[crate::sysinfo::ExtDisk]) -> String {
             vec![
                 crate::ui::TableCell::right((i + 1).to_string(), crate::ui::Tone::BoldCyan),
                 crate::ui::TableCell::left(format!("disk{}", d.n), crate::ui::Tone::Bold),
-                crate::ui::TableCell::right(crate::common::fmt_gb(d.size), crate::ui::Tone::Magenta),
+                crate::ui::TableCell::right(
+                    crate::common::fmt_gb(d.size),
+                    crate::ui::Tone::Magenta,
+                ),
                 crate::ui::TableCell::left(format!("{}:{}", d.vid, d.pid), crate::ui::Tone::Yellow),
             ]
         })

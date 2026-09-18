@@ -15,7 +15,11 @@ pub struct InspectWorkspace {
     pub views: Vec<SectorView>,
 }
 
-fn analyze_image(source: String, data: &[u8], meta: InspectMeta) -> Result<InspectWorkspace, String> {
+fn analyze_image(
+    source: String,
+    data: &[u8],
+    meta: InspectMeta,
+) -> Result<InspectWorkspace, String> {
     if data.len() != 14 * SECTOR {
         return Err(format!(
             "错误: inspect 镜像长度 {}B，预期 {}B (LBA0-13)",
@@ -29,7 +33,11 @@ fn analyze_image(source: String, data: &[u8], meta: InspectMeta) -> Result<Inspe
             inspect::analyze_sector(lba, &data[start..start + SECTOR], &meta)
         })
         .collect();
-    Ok(InspectWorkspace { source, meta, views })
+    Ok(InspectWorkspace {
+        source,
+        meta,
+        views,
+    })
 }
 
 pub fn load_backup_inspect(path: &Path) -> Result<InspectWorkspace, String> {
@@ -45,10 +53,7 @@ pub fn load_backup_inspect(path: &Path) -> Result<InspectWorkspace, String> {
     analyze_image(path.display().to_string(), &data, meta)
 }
 
-pub fn load_disk_inspect(
-    runner: &dyn CmdRunner,
-    disk: u32,
-) -> Result<InspectWorkspace, String> {
+pub fn load_disk_inspect(runner: &dyn CmdRunner, disk: u32) -> Result<InspectWorkspace, String> {
     crate::application::write::guard_usb_disk(runner, disk).map_err(|error| error.msg)?;
     let path = diskio::raw_path(disk);
     let mut dev = FileDev::open_rdonly(&path)
@@ -71,8 +76,8 @@ pub fn load_disk_inspect(
     let raw7 = &sectors[7 * SECTOR..8 * SECTOR];
     let id = identify(runner, disk, raw7).device_id;
     let (vid, pid) = sysinfo::usb_vid_pid(runner, disk);
-    let size_bytes =
-        sysinfo::disk_total_sectors(runner, disk).and_then(|value| value.checked_mul(SECTOR as u64));
+    let size_bytes = sysinfo::disk_total_sectors(runner, disk)
+        .and_then(|value| value.checked_mul(SECTOR as u64));
     let onlyid = diskio::lba4_label_id_from(&sectors[4 * SECTOR..5 * SECTOR]);
     let meta = InspectMeta {
         device_id: id,

@@ -16,7 +16,11 @@ fn write_safety_primitives_live_only_in_application_service() {
     }
 
     let cli = include_str!("../src/cli.rs");
-    for forbidden in ["sysinfo::prepare_write", ".reopen_rdwr(", "diskio::atomic_write_sectors"] {
+    for forbidden in [
+        "sysinfo::prepare_write",
+        ".reopen_rdwr(",
+        "diskio::atomic_write_sectors",
+    ] {
         assert!(
             !cli.contains(forbidden),
             "CLI must consume the shared write service, found {forbidden}"
@@ -24,7 +28,11 @@ fn write_safety_primitives_live_only_in_application_service() {
     }
 
     let tui = include_str!("../src/tui/mod.rs");
-    for forbidden in ["sysinfo::prepare_write", ".reopen_rdwr(", "diskio::atomic_write_sectors"] {
+    for forbidden in [
+        "sysinfo::prepare_write",
+        ".reopen_rdwr(",
+        "diskio::atomic_write_sectors",
+    ] {
         assert!(
             !tui.contains(forbidden),
             "TUI must consume the shared write service, found {forbidden}"

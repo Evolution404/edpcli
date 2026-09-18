@@ -14,11 +14,8 @@ use std::time::Duration;
 
 use crossterm::{
     cursor::{Hide, Show},
-    event as ct_event,
-    execute,
-    terminal::{
-        disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
-    },
+    event as ct_event, execute,
+    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
 use ratatui::{backend::CrosstermBackend, Terminal};
 
@@ -26,7 +23,6 @@ use crate::common::{EXIT_IO, EXIT_OK, EXIT_USAGE};
 use event::KeyMapper;
 use state::{AppState, NavCommand, StateEffect};
 use task::TaskHub;
-
 
 const RESUME_KIND_FLAG: &str = "--_resume-kind";
 const RESUME_DISK_FLAG: &str = "--_resume-disk";
@@ -358,12 +354,9 @@ fn run_loop(resume: Option<state::WriteIntent>) -> io::Result<LoopExit> {
                                 state.cancel_input();
                                 match command::parse_command(&input) {
                                     Ok(action) => {
-                                        let viewport_height = session
-                                            .terminal
-                                            .size()?
-                                            .height
-                                            .saturating_sub(5)
-                                            as usize;
+                                        let viewport_height =
+                                            session.terminal.size()?.height.saturating_sub(5)
+                                                as usize;
                                         let effect = dispatch_nav_command(
                                             &mut state,
                                             &mut tasks,

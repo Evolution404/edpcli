@@ -4,7 +4,6 @@
 //! operations however they need, but must not reimplement device discovery or raw-disk
 //! safety policy.
 
-
 pub mod inspect;
 pub mod write;
 use std::cell::RefCell;
@@ -41,7 +40,6 @@ pub fn device_scan_needs_elevation(
 ) -> bool {
     rows.iter().any(|row| row.denied) && !elevated && !has_elevation_sentinel
 }
-
 
 /// Stable backup row shared by CLI/TUI read-side views.
 #[derive(Debug, Clone)]

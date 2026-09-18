@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
-use edpcli::tui::{parse_resume_args, resume_argv};
 use edpcli::tui::state::{WriteIntent, WriteKind};
+use edpcli::tui::{parse_resume_args, resume_argv};
 
 #[test]
 fn elevation_resume_argv_pins_apply_disk() {

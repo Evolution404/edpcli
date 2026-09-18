@@ -7,12 +7,12 @@
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
-use crate::backup_catalog::{self, BackupCatalog};
 use crate::application::write::{guard_usb_disk, Prompter};
-use crate::ui::disk_menu_str;
+use crate::backup_catalog::{self, BackupCatalog};
 use crate::common::{EdpCliError, EdpCliResult, EXIT_CANCELLED, EXIT_TARGET};
 use crate::diskio::{self, BackupEntry};
 use crate::sysinfo::{self, CmdRunner, ExtDisk};
+use crate::ui::disk_menu_str;
 
 #[derive(Debug, Clone, Copy)]
 pub struct DeviceSelector {

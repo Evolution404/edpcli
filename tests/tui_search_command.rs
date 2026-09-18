@@ -1,6 +1,6 @@
+use edpcli::disk_scan::Row;
 use edpcli::tui::command::{parse_command, PaletteAction};
 use edpcli::tui::state::{AppState, InputMode, NavCommand};
-use edpcli::disk_scan::Row;
 
 fn device(disk: u32, user: &str, dept: &str) -> Row {
     Row {

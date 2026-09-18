@@ -22,9 +22,9 @@ pub use crate::cli_args::{
 };
 use crate::common::*;
 use crate::completion;
-use crate::diskio::{self, raw_path, FileDev, SystemClock};
 #[cfg(test)]
 use crate::diskio::SectorDev;
+use crate::diskio::{self, raw_path, FileDev, SystemClock};
 use crate::elevate::{self, ELEVATED_FLAG};
 use crate::inspect_cli::inspect_flow;
 use crate::metainfo_cli::info_flow;
@@ -35,12 +35,12 @@ use crate::sysinfo::{ReadProbeCache, SysRunner};
 // ══════════════════════════════════════════════════════════════════
 // 1. 交互提示抽象(测试注入)
 // ══════════════════════════════════════════════════════════════════
+#[cfg(test)]
+pub(crate) use crate::application::write::read_image;
 pub use crate::application::write::{
     apply_flow, backup_create_flow, restore_flow, ApplyMode, Ctx, Prompter,
 };
 pub(crate) use crate::application::write::{auto_pick_disk, guard_usb_disk};
-#[cfg(test)]
-pub(crate) use crate::application::write::read_image;
 pub use crate::ui::{backup_menu_str, disk_menu_str};
 
 pub struct StdPrompter;
@@ -139,7 +139,14 @@ pub fn run() -> i32 {
                 let topic = argv.first().map(String::as_str).filter(|cmd| {
                     matches!(
                         *cmd,
-                        "list" | "tui" | "info" | "apply" | "backup" | "inspect" | "convert" | "completion"
+                        "list"
+                            | "tui"
+                            | "info"
+                            | "apply"
+                            | "backup"
+                            | "inspect"
+                            | "convert"
+                            | "completion"
                     )
                 });
                 print_help(topic);

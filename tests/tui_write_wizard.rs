@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use edpcli::tui::state::{AppState, WriteIntent, WriteKind, WizardStage};
+use edpcli::tui::state::{AppState, WizardStage, WriteIntent, WriteKind};
 
 #[test]
 fn write_wizard_requires_exact_yes_before_entering_critical_stage() {

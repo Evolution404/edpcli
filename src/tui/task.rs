@@ -189,7 +189,10 @@ impl TaskHub {
                 crate::application::inspect::load_disk_inspect(&runner, disk)
             }))
             .unwrap_or_else(|payload| {
-                Err(format!("Inspect worker 异常终止: {}", panic_message(payload)))
+                Err(format!(
+                    "Inspect worker 异常终止: {}",
+                    panic_message(payload)
+                ))
             });
             let _ = tx.send(WorkerResult::Inspect { generation, result });
         });
@@ -204,83 +207,82 @@ impl TaskHub {
                 crate::application::inspect::load_backup_inspect(&path)
             }))
             .unwrap_or_else(|payload| {
-                Err(format!("Inspect worker 异常终止: {}", panic_message(payload)))
+                Err(format!(
+                    "Inspect worker 异常终止: {}",
+                    panic_message(payload)
+                ))
             });
             let _ = tx.send(WorkerResult::Inspect { generation, result });
         });
         generation
     }
 
-    pub fn request_write(
-        &mut self,
-        intent: crate::tui::state::WriteIntent,
-        backup_dir: PathBuf,
-    ) {
+    pub fn request_write(&mut self, intent: crate::tui::state::WriteIntent, backup_dir: PathBuf) {
         let tx = self.tx.clone();
         std::thread::spawn(move || {
             let result = catch_unwind(AssertUnwindSafe(|| {
-            struct ConfirmedPrompter {
-                tx: Sender<WorkerResult>,
-            }
-            impl crate::application::write::Prompter for ConfirmedPrompter {
-                fn prompt_line(&mut self, _msg: &str) -> String {
-                    String::new()
+                struct ConfirmedPrompter {
+                    tx: Sender<WorkerResult>,
                 }
-
-                fn confirm_yes(&mut self, _msg: &str) -> bool {
-                    true
-                }
-
-                fn output(&mut self, msg: &str) {
-                    let _ = self.tx.send(WorkerResult::WriteProgress {
-                        message: progress_summary(msg),
-                    });
-                }
-            }
-
-            let result = (|| -> Result<(), String> {
-                let runner = SysRunner;
-                crate::application::write::guard_usb_disk(&runner, intent.disk)
-                    .map_err(|error| error.msg)?;
-                let path = crate::diskio::raw_path(intent.disk);
-                let mut dev = crate::diskio::FileDev::open_rdonly(&path)
-                    .map_err(|error| format!("错误: 无法只读打开 {path}: {error}"))?;
-                let mut prompt = ConfirmedPrompter { tx: tx.clone() };
-                let mut ctx = crate::application::write::Ctx {
-                    runner: &runner,
-                    clock: &crate::diskio::SystemClock,
-                    prompt: &mut prompt,
-                    backup_dir,
-                };
-                match intent.kind {
-                    crate::tui::state::WriteKind::Apply => {
-                        crate::application::write::apply_flow(
-                            crate::application::write::ApplyMode::Write { force: false },
-                            intent.disk,
-                            None,
-                            &mut ctx,
-                            &mut dev,
-                        )
-                        .map(|_| ())
-                        .map_err(|error| error.msg)
+                impl crate::application::write::Prompter for ConfirmedPrompter {
+                    fn prompt_line(&mut self, _msg: &str) -> String {
+                        String::new()
                     }
-                    crate::tui::state::WriteKind::Restore => {
-                        let backup = intent
-                            .backup
-                            .as_ref()
-                            .ok_or_else(|| "错误: restore 缺少固定备份路径".to_string())?;
-                        crate::application::write::restore_flow(
-                            Some(backup.to_string_lossy().into_owned()),
-                            intent.disk,
-                            &mut ctx,
-                            &mut dev,
-                        )
-                        .map(|_| ())
-                        .map_err(|error| error.msg)
+
+                    fn confirm_yes(&mut self, _msg: &str) -> bool {
+                        true
+                    }
+
+                    fn output(&mut self, msg: &str) {
+                        let _ = self.tx.send(WorkerResult::WriteProgress {
+                            message: progress_summary(msg),
+                        });
                     }
                 }
-            })();
-            result
+
+                let result = (|| -> Result<(), String> {
+                    let runner = SysRunner;
+                    crate::application::write::guard_usb_disk(&runner, intent.disk)
+                        .map_err(|error| error.msg)?;
+                    let path = crate::diskio::raw_path(intent.disk);
+                    let mut dev = crate::diskio::FileDev::open_rdonly(&path)
+                        .map_err(|error| format!("错误: 无法只读打开 {path}: {error}"))?;
+                    let mut prompt = ConfirmedPrompter { tx: tx.clone() };
+                    let mut ctx = crate::application::write::Ctx {
+                        runner: &runner,
+                        clock: &crate::diskio::SystemClock,
+                        prompt: &mut prompt,
+                        backup_dir,
+                    };
+                    match intent.kind {
+                        crate::tui::state::WriteKind::Apply => {
+                            crate::application::write::apply_flow(
+                                crate::application::write::ApplyMode::Write { force: false },
+                                intent.disk,
+                                None,
+                                &mut ctx,
+                                &mut dev,
+                            )
+                            .map(|_| ())
+                            .map_err(|error| error.msg)
+                        }
+                        crate::tui::state::WriteKind::Restore => {
+                            let backup = intent
+                                .backup
+                                .as_ref()
+                                .ok_or_else(|| "错误: restore 缺少固定备份路径".to_string())?;
+                            crate::application::write::restore_flow(
+                                Some(backup.to_string_lossy().into_owned()),
+                                intent.disk,
+                                &mut ctx,
+                                &mut dev,
+                            )
+                            .map(|_| ())
+                            .map_err(|error| error.msg)
+                        }
+                    }
+                })();
+                result
             }))
             .unwrap_or_else(|payload| {
                 Err(format!("写盘 worker 异常终止: {}", panic_message(payload)))
@@ -315,14 +317,16 @@ impl TaskHub {
                 {
                     updates.inspect = Some(result);
                 }
-                WorkerResult::DeviceError { generation, message }
-                    if self.device_generation.is_current(generation) =>
-                {
+                WorkerResult::DeviceError {
+                    generation,
+                    message,
+                } if self.device_generation.is_current(generation) => {
                     updates.device_error = Some(message);
                 }
-                WorkerResult::BackupError { generation, message }
-                    if self.backup_generation.is_current(generation) =>
-                {
+                WorkerResult::BackupError {
+                    generation,
+                    message,
+                } if self.backup_generation.is_current(generation) => {
                     updates.backup_error = Some(message);
                 }
                 WorkerResult::Inspect { .. }

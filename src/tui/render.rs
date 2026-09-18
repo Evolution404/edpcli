@@ -81,7 +81,11 @@ fn draw_backups(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState
         TableRow::new(vec![
             Cell::from(backup.index.to_string()),
             Cell::from(backup.display_time.clone()),
-            Cell::from(if backup.is_nopwd { "免密状态" } else { "加密原盘" }),
+            Cell::from(if backup.is_nopwd {
+                "免密状态"
+            } else {
+                "加密原盘"
+            }),
             Cell::from(backup.user.clone().unwrap_or_else(|| "—".into())),
             Cell::from(backup.dept.clone().unwrap_or_else(|| "—".into())),
             Cell::from(backup.onlyid.clone().unwrap_or_else(|| "—".into())),
@@ -117,8 +121,6 @@ fn draw_backups(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState
     frame.render_stateful_widget(table, area, &mut table_state);
 }
 
-
-
 fn draw_command_palette(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState) {
     let commands = [
         "devices  切到设备",
@@ -130,11 +132,18 @@ fn draw_command_palette(frame: &mut Frame, area: ratatui::layout::Rect, state: &
         "help     帮助",
         "quit/q   退出",
     ];
-    let mut lines = vec![Line::from(format!(":{}", state.input_buffer())), Line::from("")];
+    let mut lines = vec![
+        Line::from(format!(":{}", state.input_buffer())),
+        Line::from(""),
+    ];
     lines.extend(commands.into_iter().map(Line::from));
     frame.render_widget(
         Paragraph::new(lines)
-            .block(Block::default().borders(Borders::ALL).title("Command Palette"))
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title("Command Palette"),
+            )
             .wrap(Wrap { trim: true }),
         area,
     );
@@ -199,10 +208,7 @@ fn draw_inspect(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState
                         field.label, field.value
                     )));
                     for child in &field.children {
-                        lines.push(Line::from(format!(
-                            "  └─ {}  {}",
-                            child.label, child.value
-                        )));
+                        lines.push(Line::from(format!("  └─ {}  {}", child.label, child.value)));
                     }
                 }
             }
@@ -221,13 +227,9 @@ fn draw_inspect(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState
     let scroll = state.inspect_scroll().unwrap_or(0).min(u16::MAX as usize) as u16;
     frame.render_widget(
         Paragraph::new(lines)
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .title(format!(
-                        "Inspect · {mode_label} · h/l 切换视图 · Ctrl-d/u 滚动"
-                    )),
-            )
+            .block(Block::default().borders(Borders::ALL).title(format!(
+                "Inspect · {mode_label} · h/l 切换视图 · Ctrl-d/u 滚动"
+            )))
             .wrap(Wrap { trim: false })
             .scroll((scroll, 0)),
         area,
@@ -243,7 +245,10 @@ fn draw_wizard(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState)
         WriteKind::Restore => "Restore 备份还原",
     };
     let mut lines = vec![
-        Line::from(Span::styled(operation, Style::default().add_modifier(Modifier::BOLD))),
+        Line::from(Span::styled(
+            operation,
+            Style::default().add_modifier(Modifier::BOLD),
+        )),
         Line::from(format!("目标: disk{}", wizard.disk)),
     ];
     if let Some(path) = &wizard.backup {
@@ -258,7 +263,9 @@ fn draw_wizard(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState)
             lines.push(Line::from(format!("> {}", wizard.confirmation)));
         }
         WizardStage::Running => {
-            lines.push(Line::from("关键写盘阶段进行中；q / Esc / Ctrl-C 不会中断当前事务。"));
+            lines.push(Line::from(
+                "关键写盘阶段进行中；q / Esc / Ctrl-C 不会中断当前事务。",
+            ));
         }
         WizardStage::Result => {
             lines.push(Line::from("操作已到达安全结束点；Esc 返回。"));
@@ -298,26 +305,26 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
     } else if state.wizard().is_some() {
         draw_wizard(frame, chunks[1], state);
     } else {
-    match state.input_mode() {
-        InputMode::Command => {
-            draw_command_palette(frame, chunks[1], state);
+        match state.input_mode() {
+            InputMode::Command => {
+                draw_command_palette(frame, chunks[1], state);
+            }
+            InputMode::Help => {
+                let help = Paragraph::new(vec![
+                    Line::from("Vim 键位"),
+                    Line::from("j/k/h/l 移动   gg/G 首/尾   Ctrl-d/u 半页"),
+                    Line::from("/ 搜索   n/N 匹配   : 命令   Esc 返回   q 退出   ? 帮助"),
+                    Line::from("r 刷新设备"),
+                ])
+                .block(Block::default().borders(Borders::ALL).title("帮助"))
+                .wrap(Wrap { trim: true });
+                frame.render_widget(help, chunks[1]);
+            }
+            _ => match state.workspace() {
+                Workspace::Devices => draw_devices(frame, chunks[1], state),
+                Workspace::Backups => draw_backups(frame, chunks[1], state),
+            },
         }
-        InputMode::Help => {
-            let help = Paragraph::new(vec![
-                Line::from("Vim 键位"),
-                Line::from("j/k/h/l 移动   gg/G 首/尾   Ctrl-d/u 半页"),
-                Line::from("/ 搜索   n/N 匹配   : 命令   Esc 返回   q 退出   ? 帮助"),
-                Line::from("r 刷新设备"),
-            ])
-            .block(Block::default().borders(Borders::ALL).title("帮助"))
-            .wrap(Wrap { trim: true });
-            frame.render_widget(help, chunks[1]);
-        }
-        _ => match state.workspace() {
-            Workspace::Devices => draw_devices(frame, chunks[1], state),
-            Workspace::Backups => draw_backups(frame, chunks[1], state),
-        },
-    }
     }
 
     let status = if state.is_critical_operation() {

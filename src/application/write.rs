@@ -81,7 +81,10 @@ pub(crate) fn read_image(dev: &mut dyn SectorDev) -> EdpCliResult<Vec<u8>> {
 /// `reopen_rdwr` 会重新打开平台裸盘设备。确认期间既可能换盘，也可能有别的程序
 /// 改动同一块盘的元数据。自动备份保存的是确认前 LBA0-13，因此第一笔写入前必须
 /// 再读一次并逐扇区比对，保证“当前状态 == 刚刚备份的状态”。
-pub(crate) fn verify_reopened_snapshot(dev: &mut dyn SectorDev, expected: &[u8]) -> EdpCliResult<()> {
+pub(crate) fn verify_reopened_snapshot(
+    dev: &mut dyn SectorDev,
+    expected: &[u8],
+) -> EdpCliResult<()> {
     if expected.len() != 14 * SECTOR {
         return Err(err(EXIT_IO, "错误: 内部预写快照长度异常"));
     }
@@ -184,7 +187,8 @@ pub fn apply_flow(
         Some(s) => fmt_gb(s * SECTOR as u64),
         None => "unknown 扇".to_string(),
     };
-    outputln!(ctx,
+    outputln!(
+        ctx,
         "{}  disk{} · {} · USB {}:{}",
         crate::ui::bold("盘"),
         disk,
@@ -223,7 +227,8 @@ pub fn apply_flow(
 
     let baks = find_backups(&ctx.backup_dir, &facts, Some(&did), Some(tag16));
     if !baks.is_empty() {
-        outputln!(ctx,
+        outputln!(
+            ctx,
             "\n{}  本盘已有 {} 份(写入时会自动再备份):",
             crate::ui::bold("备份"),
             baks.len()
@@ -239,7 +244,8 @@ pub fn apply_flow(
             .collect();
         output!(ctx, "{}", crate::ui::backup_menu_str(&entries));
     } else {
-        outputln!(ctx,
+        outputln!(
+            ctx,
             "\n{}  尚无; 写入时自动创建首个备份",
             crate::ui::bold("备份")
         );
@@ -247,7 +253,8 @@ pub fn apply_flow(
 
     let already = looks_nopwd(&read, &did)?;
     if already {
-        outputln!(ctx,
+        outputln!(
+            ctx,
             "\n{}",
             crate::ui::yellow(
                 "提示: 该盘已是改造后的免密盘 — 再次写入只会重写相同内容(实测幂等)。"
@@ -260,7 +267,8 @@ pub fn apply_flow(
         } else {
             ""
         };
-        outputln!(ctx,
+        outputln!(
+            ctx,
             "{}",
             crate::ui::dim(&format!(
                 "操作  以上为预览(dry-run), 未写盘。执行写入: edpcli apply --disk {}{}",
@@ -285,19 +293,17 @@ pub fn apply_flow(
         );
     }
 
-    let (bpath, backup_is_nopwd) =
-        create_backup(&facts, &img, &did, &ctx.backup_dir, ctx.clock)?;
+    let (bpath, backup_is_nopwd) = create_backup(&facts, &img, &did, &ctx.backup_dir, ctx.clock)?;
     outputln!(ctx, "{}  {}", crate::ui::green("备份"), bpath.display());
     if backup_is_nopwd {
         outputln!(
             ctx,
             "{}",
-            crate::ui::yellow(
-                "注意: 本份备份为【免密状态】快照 — 还原它不会回到加密原盘。"
-            )
+            crate::ui::yellow("注意: 本份备份为【免密状态】快照 — 还原它不会回到加密原盘。")
         );
     }
-    outputln!(ctx,
+    outputln!(
+        ctx,
         "{}  edpcli backup restore \"{}\" --disk {} --yes",
         crate::ui::bold("还原"),
         bpath.display(),
@@ -330,7 +336,8 @@ pub fn apply_flow(
     }
     writes.insert(0, result.lba0);
     diskio::atomic_write_sectors(dev, &writes)?;
-    outputln!(ctx,
+    outputln!(
+        ctx,
         "{}",
         crate::ui::green(
             "已写入, 读回校验通过。请拔出 U 盘重新插入, 数据区格式化 exFAT/NTFS 即得免密可写区。"
@@ -371,9 +378,7 @@ pub fn backup_create_flow(
         outputln!(
             ctx,
             "{}",
-            crate::ui::yellow(
-                "注意: 本份备份为【免密状态】快照 — 还原它不会回到加密原盘。"
-            )
+            crate::ui::yellow("注意: 本份备份为【免密状态】快照 — 还原它不会回到加密原盘。")
         );
     }
     Ok(created)
@@ -425,7 +430,8 @@ pub fn restore_flow(
                     ),
                 ));
             }
-            outputln!(ctx,
+            outputln!(
+                ctx,
                 "disk{} · onlyid={} 匹配备份 {} 个:",
                 disk,
                 onlyid,
@@ -438,7 +444,8 @@ pub fn restore_flow(
                 } else {
                     "加密原盘"
                 };
-                outputln!(ctx,
+                outputln!(
+                    ctx,
                     "  [{}] {}   {}   {}",
                     index,
                     time,
@@ -550,13 +557,15 @@ pub fn restore_flow(
         diskio::image_is_nopwd(&data, device_id)
     };
     if nopwd_snap {
-        outputln!(ctx,
+        outputln!(
+            ctx,
             "{}",
             crate::ui::yellow(
                 "注意: 该备份为【免密状态】快照 — 还原后仍是免密盘, 不会回到加密原盘。"
             )
         );
-        outputln!(ctx,
+        outputln!(
+            ctx,
             "{}",
             crate::ui::dim(&format!(
                 "[dry-run] 将还原 {} → disk{} LBA0-13 ({}B) — 未写入(免密快照不作还原)。",
@@ -567,7 +576,8 @@ pub fn restore_flow(
         );
         return Ok(EXIT_OK);
     }
-    outputln!(ctx,
+    outputln!(
+        ctx,
         "{}  {}",
         crate::ui::bold("还原"),
         crate::ui::truncate_mid(&path.display().to_string(), 64)
@@ -596,8 +606,10 @@ pub fn restore_flow(
         })
         .collect();
     diskio::atomic_write_sectors(dev, &writes)?;
-    outputln!(ctx, "{}", crate::ui::green("已还原, 读回校验通过。请拔出重插。"));
+    outputln!(
+        ctx,
+        "{}",
+        crate::ui::green("已还原, 读回校验通过。请拔出重插。")
+    );
     Ok(EXIT_OK)
 }
-
-

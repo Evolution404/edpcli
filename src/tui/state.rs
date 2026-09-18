@@ -3,8 +3,6 @@
 //! The state layer never performs I/O. That makes navigation and cancellation semantics testable
 //! without a real terminal and keeps critical-operation policy independent from crossterm.
 
-
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum InspectMode {
     Fields,
@@ -273,7 +271,11 @@ impl AppState {
                             row.onlyid.as_deref().unwrap_or_default(),
                             row.user.as_deref().unwrap_or_default(),
                             row.dept.as_deref().unwrap_or_default(),
-                            if row.is_nopwd { "nopwd 免密" } else { "encrypted 加密" }
+                            if row.is_nopwd {
+                                "nopwd 免密"
+                            } else {
+                                "encrypted 加密"
+                            }
                         );
                         if text.to_ascii_lowercase().contains(&self.search_query) {
                             self.search_matches.push(index);
@@ -366,9 +368,9 @@ impl AppState {
     }
 
     pub fn inspect_selected_lba(&self) -> Option<u32> {
-        self.inspect.as_ref().and_then(|inspect| {
-            (inspect.item_count > 0).then_some(inspect.selected as u32)
-        })
+        self.inspect
+            .as_ref()
+            .and_then(|inspect| (inspect.item_count > 0).then_some(inspect.selected as u32))
     }
 
     pub fn inspect_mode(&self) -> Option<InspectMode> {
@@ -658,13 +660,10 @@ impl AppState {
                     inspect.scroll = 0;
                 }
                 NavCommand::HalfPageDown => {
-                    inspect.scroll = inspect
-                        .scroll
-                        .saturating_add((viewport_height / 2).max(1));
+                    inspect.scroll = inspect.scroll.saturating_add((viewport_height / 2).max(1));
                 }
                 NavCommand::HalfPageUp => {
-                    inspect.scroll =
-                        inspect.scroll.saturating_sub((viewport_height / 2).max(1));
+                    inspect.scroll = inspect.scroll.saturating_sub((viewport_height / 2).max(1));
                 }
                 NavCommand::Left => {
                     inspect.mode = match inspect.mode {
@@ -685,11 +684,11 @@ impl AppState {
                 NavCommand::Search => {
                     self.input_buffer.clear();
                     self.input_mode = InputMode::Search;
-                },
+                }
                 NavCommand::CommandPalette => {
                     self.input_buffer.clear();
                     self.input_mode = InputMode::Command;
-                },
+                }
                 NavCommand::Help => self.input_mode = InputMode::Help,
                 NavCommand::Quit => return StateEffect::ExitRequested,
                 NavCommand::Escape
@@ -719,10 +718,7 @@ impl AppState {
             NavCommand::HalfPageDown => {
                 if self.item_count > 0 {
                     let delta = (viewport_height / 2).max(1);
-                    self.selected = self
-                        .selected
-                        .saturating_add(delta)
-                        .min(self.item_count - 1);
+                    self.selected = self.selected.saturating_add(delta).min(self.item_count - 1);
                 }
             }
             NavCommand::HalfPageUp => {
@@ -730,13 +726,13 @@ impl AppState {
                 self.selected = self.selected.saturating_sub(delta);
             }
             NavCommand::Search => {
-                    self.input_buffer.clear();
-                    self.input_mode = InputMode::Search;
-                },
+                self.input_buffer.clear();
+                self.input_mode = InputMode::Search;
+            }
             NavCommand::CommandPalette => {
-                    self.input_buffer.clear();
-                    self.input_mode = InputMode::Command;
-                },
+                self.input_buffer.clear();
+                self.input_mode = InputMode::Command;
+            }
             NavCommand::Help => self.input_mode = InputMode::Help,
             NavCommand::Left => self.switch_workspace(Workspace::Devices),
             NavCommand::Right => self.switch_workspace(Workspace::Backups),

@@ -15,7 +15,11 @@ pub enum PaletteAction {
 }
 
 pub fn parse_command(input: &str) -> Result<PaletteAction, String> {
-    let command = input.trim().trim_start_matches(':').trim().to_ascii_lowercase();
+    let command = input
+        .trim()
+        .trim_start_matches(':')
+        .trim()
+        .to_ascii_lowercase();
     match command.as_str() {
         "devices" | "device" | "d" => Ok(PaletteAction::Devices),
         "backups" | "backup" | "b" => Ok(PaletteAction::Backups),

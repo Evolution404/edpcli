@@ -59,8 +59,5 @@ fn selected_backup_path_is_stable_for_restore_intent() {
     state.navigate(NavCommand::Down, 20);
 
     assert_eq!(state.selected_device_disk(), Some(7));
-    assert_eq!(
-        state.selected_backup_path(),
-        Some(PathBuf::from("two.bin"))
-    );
+    assert_eq!(state.selected_backup_path(), Some(PathBuf::from("two.bin")));
 }
