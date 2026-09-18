@@ -20,8 +20,6 @@ pub struct DiskOpts {
 pub struct InspectOpts {
     pub disk: Option<u32>,
     pub backup: Option<String>,
-    pub(crate) onlyid: Option<String>,
-    pub(crate) index: Option<usize>,
     pub lbas: Vec<u32>,
     pub raw: bool,
     pub hex: bool,
@@ -34,8 +32,6 @@ pub struct InspectOpts {
 pub struct SourceOpts {
     pub disk: Option<u32>,
     pub backup: Option<String>,
-    pub(crate) onlyid: Option<String>,
-    pub(crate) index: Option<usize>,
     pub device_id: Option<String>,
     pub backup_dir: Option<String>,
 }

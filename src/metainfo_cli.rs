@@ -3,8 +3,7 @@
 //! 备份文件可直接作位置参数；当前盘由设备选择器确定。底层解析继续复用
 //! inspect/metainfo，不维护第二套协议算法。
 
-use crate::backup_catalog::{self, BackupCatalog};
-use crate::backup_cli::{print_backup_sources, print_onlyid_backup_choices};
+use crate::backup_cli::print_backup_sources;
 use crate::cli::{auto_pick_disk, guard_usb_disk, MetaInfoOpts, StdPrompter};
 use crate::common::{EXIT_BACKUP, EXIT_IO, EXIT_OK, EXIT_TARGET, SECTOR};
 use crate::diskio::{self, raw_path};
@@ -13,6 +12,7 @@ use crate::identify::identify;
 use crate::inspect::InspectMeta;
 use crate::inspect_cli::resolve_inspect_file;
 use crate::metainfo;
+use crate::selectors::DeviceSelector;
 use crate::sysinfo::{self, CmdRunner};
 
 fn print_summary(source: &str, summary: &metainfo::MetaInfoSummary) {
@@ -27,54 +27,22 @@ fn print_summary(source: &str, summary: &metainfo::MetaInfoSummary) {
 
 fn backup_flow(opts: MetaInfoOpts) -> i32 {
     let bak = diskio::resolve_backup_dir(opts.backup_dir.as_deref());
-    let (path, parsed_meta, source_label) = if let Some(id) = opts.onlyid.as_deref() {
-        let catalog = BackupCatalog::load(&bak);
-        let group = match catalog.onlyid_group(id) {
-            Ok(group) => group,
-            Err(msg) => {
-                eprintln!("{}", crate::ui::red(&format!("错误: {msg}")));
-                let _ =
-                    print_backup_sources(catalog.entries(), "查看元信息: edpcli info <备份.bin>");
-                return EXIT_BACKUP;
-            }
-        };
-        let idx = opts.index.unwrap_or(1);
-        let entry = match catalog.onlyid_index(id, idx) {
-            Ok(entry) => entry,
-            Err(msg) => {
-                eprintln!("{}", crate::ui::red(&format!("错误: {msg}")));
-                println!();
-                print_onlyid_backup_choices(id, &group);
-                return EXIT_BACKUP;
-            }
-        };
-        (
-            entry.path.clone(),
-            entry.meta.clone(),
-            format!(
-                "backup onlyid={id} [{idx}] · {}",
-                backup_catalog::file_name(entry)
-            ),
-        )
-    } else {
-        let Some(target) = opts.backup.as_deref() else {
-            eprintln!("{}", crate::ui::red("错误: info 缺少备份来源"));
-            return EXIT_BACKUP;
-        };
-        let path = match resolve_inspect_file(&bak, target) {
-            Ok(path) => path,
-            Err(msg) => {
-                eprintln!("{}", crate::ui::red(&format!("错误: {msg}")));
-                return EXIT_BACKUP;
-            }
-        };
-        let meta = path
-            .file_name()
-            .and_then(|name| name.to_str())
-            .and_then(diskio::parse_backup_name);
-        let label = path.display().to_string();
-        (path, meta, label)
+    let Some(target) = opts.backup.as_deref() else {
+        eprintln!("{}", crate::ui::red("错误: info 缺少备份来源"));
+        return EXIT_BACKUP;
     };
+    let path = match resolve_inspect_file(&bak, target) {
+        Ok(path) => path,
+        Err(msg) => {
+            eprintln!("{}", crate::ui::red(&format!("错误: {msg}")));
+            return EXIT_BACKUP;
+        }
+    };
+    let parsed_meta = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .and_then(diskio::parse_backup_name);
+    let source_label = path.display().to_string();
 
     let mut inspect_meta = parsed_meta
         .as_ref()
@@ -119,8 +87,7 @@ fn disk_flow(runner: &dyn CmdRunner, mut opts: MetaInfoOpts) -> i32 {
                     return e.code;
                 }
             };
-            argv.push("--disk".into());
-            argv.push(crate::platform::disk_selector_value(n));
+            DeviceSelector::new(None).pin_argv(&mut argv, n);
         }
         elevate::ensure_elevated(&argv);
         unreachable!();
@@ -179,7 +146,7 @@ fn disk_flow(runner: &dyn CmdRunner, mut opts: MetaInfoOpts) -> i32 {
 }
 
 pub(crate) fn metainfo_flow(runner: &dyn CmdRunner, opts: MetaInfoOpts) -> i32 {
-    if opts.backup.is_some() || opts.onlyid.is_some() {
+    if opts.backup.is_some() {
         return backup_flow(opts);
     }
     if opts.disk.is_none() && sysinfo::list_usb_disks(runner).is_empty() {

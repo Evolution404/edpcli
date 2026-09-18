@@ -14,6 +14,7 @@ use crate::cli::Prompter;
 use crate::common::{EXIT_BACKUP, EXIT_CANCELLED, EXIT_OK, EXIT_USAGE, SECTOR};
 use crate::diskio::{self, BackupEntry, BackupMeta, Md5Status};
 use crate::metainfo;
+use crate::selectors::BackupSelector;
 
 fn backup_model_name(meta: &BackupMeta) -> String {
     let mut vendor = None;
@@ -100,6 +101,31 @@ fn print_numbered_backup_entries(entries: &[&BackupEntry]) {
         println!(
             "  [{}] {}   {}   {}",
             crate::ui::pad_left(&(idx + 1).to_string(), width),
+            crate::ui::pad_to(&time, 16),
+            crate::ui::pad_to(backup_kind(entry), 12),
+            backup_health(entry)
+        );
+        println!(
+            "      └─ {}",
+            crate::ui::dim(backup_catalog::file_name(entry))
+        );
+    }
+}
+
+fn print_global_numbered_backup_entries(
+    entries: &[&BackupEntry],
+    global_index: &BTreeMap<PathBuf, usize>,
+) {
+    let width = global_index.len().max(1).to_string().len();
+    for entry in entries {
+        let Some(index) = global_index.get(&backup_catalog::canonical_entry_path(&entry.path))
+        else {
+            continue;
+        };
+        let time = diskio::backup_display_time(&entry.path, entry.mtime);
+        println!(
+            "  [{}] {}   {}   {}",
+            crate::ui::pad_left(&index.to_string(), width),
             crate::ui::pad_to(&time, 16),
             crate::ui::pad_to(backup_kind(entry), 12),
             backup_health(entry)
@@ -220,7 +246,14 @@ pub(crate) fn parse_backup_selection_tokens(
 }
 
 pub fn backup_list(backup_dir: &Path, onlyid: Option<&str>) -> i32 {
-    let catalog = BackupCatalog::load(backup_dir);
+    let selector = BackupSelector::load(backup_dir);
+    let catalog = selector.catalog();
+    let global_index: BTreeMap<PathBuf, usize> = selector
+        .numbered()
+        .into_iter()
+        .enumerate()
+        .map(|(index, entry)| (backup_catalog::canonical_entry_path(&entry.path), index + 1))
+        .collect();
     let selected: Vec<&BackupEntry> = if let Some(id) = onlyid {
         match catalog.onlyid_group(id) {
             Ok(group) => group,
@@ -276,7 +309,11 @@ pub fn backup_list(backup_dir: &Path, onlyid: Option<&str>) -> i32 {
         if let Some(entry) = group.first() {
             print_ownership(entry, "  ");
         }
-        print_numbered_backup_entries(&group);
+        if onlyid.is_some() {
+            print_numbered_backup_entries(&group);
+        } else {
+            print_global_numbered_backup_entries(&group, &global_index);
+        }
     }
     if !unknown.is_empty() {
         println!();

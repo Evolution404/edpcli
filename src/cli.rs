@@ -33,6 +33,7 @@ use crate::identify::identify;
 use crate::inspect_cli::inspect_flow;
 use crate::metainfo_cli::metainfo_flow;
 use crate::sectors::{convert, looks_nopwd};
+use crate::selectors::DeviceSelector;
 use crate::sysinfo::{self, CmdRunner, ReadProbeCache, SysRunner};
 
 const OPEN_WAIT: std::time::Duration = std::time::Duration::from_secs(10);
@@ -237,37 +238,7 @@ pub(crate) fn auto_pick_disk(
     runner: &dyn CmdRunner,
     prompt: &mut dyn Prompter,
 ) -> EdpCliResult<u32> {
-    let disks: Vec<_> = sysinfo::list_usb_disks(runner)
-        .into_iter()
-        .filter(|disk| !crate::platform::is_system_disk(runner, disk.n))
-        .collect();
-    if disks.is_empty() {
-        return Err(err(
-            EXIT_TARGET,
-            "错误: 未检测到外部 USB 盘。插入后重试, 或 --disk N 手动指定。",
-        ));
-    }
-    if disks.len() == 1 {
-        return Ok(disks[0].n);
-    }
-    println!("检测到多个 USB 盘:");
-    print!("{}", disk_menu_str(&disks));
-    loop {
-        let c = prompt.prompt_line(&crate::ui::bold(&format!(
-            "选择 [1-{}] (回车取消): ",
-            disks.len()
-        )));
-        let c = c.trim();
-        if c.is_empty() {
-            return Err(err(EXIT_CANCELLED, "已取消"));
-        }
-        if let Ok(n) = c.parse::<usize>() {
-            if (1..=disks.len()).contains(&n) {
-                return Ok(disks[n - 1].n);
-            }
-        }
-        println!("{}", crate::ui::yellow("无效输入"));
-    }
+    DeviceSelector::new(None).resolve(runner, prompt)
 }
 
 /// run/apply 共用主流程(apply=false 即 dry-run)。disk 为已选定并通过系统盘防护的盘号。
@@ -806,24 +777,6 @@ enum FlowKind {
     Restore { bin: Option<String>, yes: bool },
 }
 
-fn pin_disk_selector_for_elevation(argv: &mut Vec<String>, selector: String) {
-    for i in 0..argv.len() {
-        if argv[i] == "--disk" {
-            if let Some(value) = argv.get_mut(i + 1) {
-                *value = selector;
-                return;
-            }
-            break;
-        }
-        if argv[i].starts_with("--disk=") {
-            argv[i] = format!("--disk={selector}");
-            return;
-        }
-    }
-    argv.push("--disk".into());
-    argv.push(selector);
-}
-
 fn argv_with_backup_dir_for_elevation(backup_dir_flag: Option<&str>) -> Vec<String> {
     let mut argv: Vec<String> = std::env::args().skip(1).collect();
     if backup_dir_flag.is_none() {
@@ -895,10 +848,7 @@ fn real_flow(
                 }
             }
         };
-        pin_disk_selector_for_elevation(
-            &mut argv,
-            crate::platform::disk_selector_value(pinned_disk),
-        );
+        DeviceSelector::new(disk_opt).pin_argv(&mut argv, pinned_disk);
         elevate::ensure_elevated(&argv); // 内部以子进程退出码结束, 不返回
         unreachable!();
     }
@@ -1204,7 +1154,7 @@ mod tests {
             "6".to_string(),
             "--yes".to_string(),
         ];
-        pin_disk_selector_for_elevation(&mut split, selector.clone());
+        DeviceSelector::new(Some(6)).pin_argv(&mut split, 6);
         assert_eq!(split[2], selector);
         assert_eq!(
             split.iter().filter(|arg| arg.as_str() == "--disk").count(),
@@ -1216,7 +1166,7 @@ mod tests {
             "--dry-run".to_string(),
             "--disk=6".to_string(),
         ];
-        pin_disk_selector_for_elevation(&mut inline, selector.clone());
+        DeviceSelector::new(Some(6)).pin_argv(&mut inline, 6);
         assert_eq!(inline[2], format!("--disk={selector}"));
 
         let mut automatic = vec![
@@ -1224,7 +1174,7 @@ mod tests {
             "restore".to_string(),
             "--yes".to_string(),
         ];
-        pin_disk_selector_for_elevation(&mut automatic, selector.clone());
+        DeviceSelector::new(None).pin_argv(&mut automatic, 6);
         assert_eq!(
             automatic,
             vec!["backup", "restore", "--yes", "--disk", &selector]

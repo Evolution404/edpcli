@@ -33,6 +33,28 @@ v1.1.0 仍是当前正式发布版本；按计划尚未提前修改 `Cargo.toml`
 arm64/x86_64 + macOS Universal Release、6 架构 CI、4 套 Linux/Windows virtual-disk HIL
 仍是安全基线，不得回退。
 
+### Phase 2：统一 DeviceSelector / BackupSelector — 已完成
+
+- 新增 `src/selectors.rs`：
+  - `DeviceSelector` 统一显式 `--disk`、单盘自动选、多盘交互选择；
+  - 提权重执行统一通过 `DeviceSelector::pin_argv` 固定为平台原生 selector；
+  - 实际 resolve 仍调用既有 USB 整盘/系统盘 fail-closed 门禁；
+  - `BackupSelector` 统一备份全局稳定编号、文件路径、范围、多选；
+  - 恢复场景可通过内部 `for_onlyid` 视图按当前盘身份过滤，onlyid 不再作为用户选择语法。
+- `backup list` 在全目录视图下改为全局稳定编号，不再每个 onlyid 分组从 [1] 重新计数。
+- parser 已无法触达的 `InspectOpts/SourceOpts.onlyid/index` 字段及 info/inspect 旧选择分支已删除。
+- apply/restore 公共外壳、info、inspect 的提权前 pinning 已统一走 `DeviceSelector`。
+- 新增 `tests/selectors.rs`，覆盖显式/单盘/多盘选择、native selector pinning、
+  全局备份编号、范围解析和内部身份过滤。
+
+Phase 2 本地门禁：
+
+- `cargo fmt --all -- --check`：PASS；
+- `cargo test --all-targets`：PASS；
+- `cargo clippy --all-targets -- -D warnings`：PASS。
+
+旧 completion 仍有 v1 补全词，这是 Phase 8 的明确清理项，不属于执行兼容路径。
+
 ## 下一位 AI 从这里开始
 
 1. 先读：
@@ -40,9 +62,9 @@ arm64/x86_64 + macOS Universal Release、6 架构 CI、4 套 Linux/Windows virtu
    - `docs/RELEASE.md`
    - `docs/USAGE.md`
 2. 检查 `git status --short --branch`，禁止 reset/clean。
-3. 从 **Phase 2 DeviceSelector / BackupSelector** 继续，仍须测试先行；不要削弱 selector
-   pinning、系统盘 fail-closed 或 onlyid 防串盘。
-4. Phase 3 再正式收口 `info` service 和当前临时保留的内部 `MetaInfoOpts` 命名；
+3. 从 **Phase 3 info** 继续，仍须测试先行；不要削弱 selector pinning、系统盘
+   fail-closed 或 onlyid 防串盘。
+4. Phase 3 正式收口 `info` service 和当前临时保留的内部 `MetaInfoOpts` 命名；
    Phase 5 才接通 `backup create` 执行层。
 5. 小 commit、及时 push，阶段完成后更新本交接文档。
 
