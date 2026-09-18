@@ -161,9 +161,16 @@ where
         for note in &view.notes {
             println!("  {} {}", crate::ui::dim("└─"), crate::ui::dim(note));
         }
+        if view.fields.is_empty() && !opts.raw && !opts.hex {
+            println!(
+                "  {} {}",
+                crate::ui::dim("└─"),
+                crate::ui::dim("未检测到可结构化展示的已知字段；如需查看字节内容请加 --hex。")
+            );
+        }
         if opts.raw {
             print!("{}", inspect::render_hex(&view, true));
-        } else if opts.hex || view.fields.is_empty() {
+        } else if opts.hex {
             print!("{}", inspect::render_hex(&view, false));
         }
         if let Some(dir) = &export_dir {

@@ -28,6 +28,14 @@ pub struct SectorField {
     pub label: String,
     pub value: String,
     pub style: FieldStyle,
+    pub group: Option<String>,
+    pub children: Vec<FieldChild>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FieldChild {
+    pub label: String,
+    pub value: String,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -80,7 +88,41 @@ fn field(
     value: impl Into<String>,
     style: FieldStyle,
 ) -> SectorField {
-    SectorField { start, end, label: label.into(), value: value.into(), style }
+    SectorField {
+        start,
+        end,
+        label: label.into(),
+        value: value.into(),
+        style,
+        group: None,
+        children: Vec::new(),
+    }
+}
+
+fn grouped_field(
+    start: usize,
+    end: usize,
+    group: impl Into<String>,
+    label: impl Into<String>,
+    value: impl Into<String>,
+    style: FieldStyle,
+) -> SectorField {
+    let mut f = field(start, end, label, value, style);
+    f.group = Some(group.into());
+    f
+}
+
+fn field_with_children(
+    start: usize,
+    end: usize,
+    group: impl Into<String>,
+    label: impl Into<String>,
+    children: Vec<FieldChild>,
+    style: FieldStyle,
+) -> SectorField {
+    let mut f = grouped_field(start, end, group, label, "", style);
+    f.children = children;
+    f
 }
 
 fn ptype_name(t: u32) -> &'static str {
@@ -191,34 +233,53 @@ fn parse_mbr(decoded: &[u8], fields: &mut Vec<SectorField>, notes: &mut Vec<Stri
         if sig_ok { "55 AA ✓" } else { "签名异常 ✗" },
         FieldStyle::Magic,
     ));
+    let mut empty_slots = Vec::new();
     for i in 0..4 {
         let off = 0x1be + i * 16;
         let ptype = decoded[off + 4];
         let start = u32_at(decoded, off + 8).unwrap_or(0);
         let secs = u32_at(decoded, off + 12).unwrap_or(0);
-        fields.push(field(
+        if ptype == 0 && start == 0 && secs == 0 {
+            empty_slots.push(i + 1);
+            continue;
+        }
+        let group = format!("分区 P{}", i + 1);
+        fields.push(grouped_field(
             off + 4,
             off + 5,
+            group.clone(),
             "分区类型",
-            format!("P{} 0x{:02X} {}", i + 1, ptype, mbr_type_name(ptype)),
+            format!("0x{:02X} {}", ptype, mbr_type_name(ptype)),
             FieldStyle::Flag,
         ));
-        fields.push(field(
+        fields.push(grouped_field(
             off + 8,
             off + 12,
+            group.clone(),
             "起始 LBA",
-            format!("P{} {}", i + 1, start),
+            start.to_string(),
             FieldStyle::Address,
         ));
-        fields.push(field(
+        fields.push(grouped_field(
             off + 12,
             off + 16,
+            group,
             "大小",
-            format!("P{} {} 扇区 / {}", i + 1, secs, human_bytes(secs as u64 * SECTOR as u64)),
+            format!("{} 扇区 / {}", secs, human_bytes(secs as u64 * SECTOR as u64)),
             FieldStyle::Size,
         ));
     }
     notes.push("MBR 分区表位于 +0x1BE..+0x1FD。".into());
+    if !empty_slots.is_empty() {
+        notes.push(format!(
+            "空分区槽位: {}。",
+            empty_slots
+                .into_iter()
+                .map(|i| format!("P{i}"))
+                .collect::<Vec<_>>()
+                .join("、")
+        ));
+    }
 }
 
 fn lba4_serial(raw: &[u8]) -> Option<(u32, usize, usize)> {
@@ -343,49 +404,65 @@ fn parse_edpf(dec: &[u8], stride: usize, fields: &mut Vec<SectorField>, notes: &
         let start = u64_at(e, 0x18).unwrap_or(0);
         let bps = u64_at(e, 0x20).unwrap_or(0);
         let size = u64_at(e, 0x28).unwrap_or(0);
-        fields.push(field(base, base + 4, "EDPF magic", format!("Entry[{idx}] EDPF"), FieldStyle::Magic));
-        fields.push(field(
+        let group = format!("Entry[{idx}]");
+        fields.push(grouped_field(base, base + 4, group.clone(), "EDPF magic", "EDPF", FieldStyle::Magic));
+        fields.push(grouped_field(
             base + 0x0c,
             base + 0x10,
+            group.clone(),
             "类型",
-            format!("Entry[{idx}] {} ({ptype})", ptype_name(ptype)),
+            format!("{} ({ptype})", ptype_name(ptype)),
             FieldStyle::Flag,
         ));
-        fields.push(field(
+        fields.push(grouped_field(
             base + 0x10,
             base + 0x18,
+            group.clone(),
             "状态",
-            format!("Entry[{idx}] active={active} enc={enc}"),
+            format!("active={active}  enc={enc}"),
             FieldStyle::Flag,
         ));
-        fields.push(field(
+        fields.push(grouped_field(
             base + 0x18,
             base + 0x20,
+            group.clone(),
             "起始 LBA",
-            format!("Entry[{idx}] {start}"),
+            start.to_string(),
             FieldStyle::Address,
         ));
-        fields.push(field(
+        fields.push(grouped_field(
             base + 0x20,
             base + 0x28,
+            group.clone(),
             "扇区字节",
-            format!("Entry[{idx}] {bps}"),
+            bps.to_string(),
             FieldStyle::Size,
         ));
-        fields.push(field(
+        fields.push(grouped_field(
             base + 0x28,
             base + 0x30,
+            group.clone(),
             "大小",
-            format!("Entry[{idx}] {size} B / {}", human_bytes(size)),
+            format!("{size} B / {}", human_bytes(size)),
             FieldStyle::Size,
         ));
         let key_end = if stride >= 0x60 { 0x48 } else { 0x40 };
         if e[0x30..key_end].iter().any(|&b| b != 0) {
-            let value = if stride == 0x40 && key_end == 0x40 {
+            let children = if stride == 0x40 && key_end == 0x40 {
                 let pwd_crc = u32_at(e, 0x30).unwrap_or(0);
                 let key_crc = u32_at(e, 0x34).unwrap_or(0);
                 let wrapped = &e[0x38..0x40];
                 let known = b"0000aaaa";
+                let mut children = vec![
+                    FieldChild {
+                        label: "pwd_crc".into(),
+                        value: format!("0x{pwd_crc:08X}"),
+                    },
+                    FieldChild {
+                        label: "key_crc".into(),
+                        value: format!("0x{key_crc:08X}"),
+                    },
+                ];
                 if crc32_bare(known) == pwd_crc {
                     let h = old_hash(known);
                     let lo = u32_at(wrapped, 0).unwrap_or(0) ^ h;
@@ -393,18 +470,45 @@ fn parse_edpf(dec: &[u8], stride: usize, fields: &mut Vec<SectorField>, notes: &
                     let mut key8 = Vec::with_capacity(8);
                     key8.extend_from_slice(&lo.to_le_bytes());
                     key8.extend_from_slice(&hi.to_le_bytes());
-                    format!(
-                        "Entry[{idx}] pwd_crc=0x{pwd_crc:08X} key_crc=0x{key_crc:08X} key8={} {}",
-                        key8.iter().map(|x| format!("{:02x}", x)).collect::<String>(),
-                        if crc32_bare(&key8) == key_crc { "✓" } else { "✗" }
-                    )
+                    children.push(FieldChild {
+                        label: "key8".into(),
+                        value: key8.iter().map(|x| format!("{:02x}", x)).collect::<String>(),
+                    });
+                    children.push(FieldChild {
+                        label: "key8 CRC".into(),
+                        value: if crc32_bare(&key8) == key_crc {
+                            "✓".into()
+                        } else {
+                            "✗".into()
+                        },
+                    });
                 } else {
-                    format!("Entry[{idx}] {}", e[0x30..key_end].iter().map(|x| format!("{:02x}", x)).collect::<String>())
+                    children.push(FieldChild {
+                        label: "raw".into(),
+                        value: e[0x30..key_end]
+                            .iter()
+                            .map(|x| format!("{:02x}", x))
+                            .collect::<String>(),
+                    });
                 }
+                children
             } else {
-                format!("Entry[{idx}] {}", e[0x30..key_end].iter().map(|x| format!("{:02x}", x)).collect::<String>())
+                vec![FieldChild {
+                    label: "Hash".into(),
+                    value: e[0x30..key_end]
+                        .iter()
+                        .map(|x| format!("{:02x}", x))
+                        .collect::<String>(),
+                }]
             };
-            fields.push(field(base + 0x30, base + key_end, "Key/Hash", value, FieldStyle::Identity));
+            fields.push(field_with_children(
+                base + 0x30,
+                base + key_end,
+                group,
+                "密钥信息",
+                children,
+                FieldStyle::Identity,
+            ));
         }
     }
     notes.push(format!("EDPF：检测到 {count} 条记录，entry stride=0x{stride:X}。"));
@@ -461,11 +565,32 @@ fn parse_llgb(dec: &[u8], fields: &mut Vec<SectorField>, notes: &mut Vec<String>
         } else {
             close
         };
-        fields.push(field(
+        let children = parts
+            .into_iter()
+            .map(|part| {
+                if let Some((key, value)) = part.split_once('=') {
+                    FieldChild {
+                        label: key.trim().to_string(),
+                        value: if value.trim().is_empty() {
+                            "<空>".into()
+                        } else {
+                            value.trim().to_string()
+                        },
+                    }
+                } else {
+                    FieldChild {
+                        label: "值".into(),
+                        value: part,
+                    }
+                }
+            })
+            .collect();
+        fields.push(field_with_children(
             start,
             display_end.min(dec.len()),
-            "LLGB 标签",
-            format!("[{tag}] {}", parts.join(" | ")),
+            format!("[{tag}]"),
+            "",
+            children,
             FieldStyle::Text,
         ));
         count += 1;
@@ -493,13 +618,29 @@ fn parse_sapf(dec: &[u8], fields: &mut Vec<SectorField>, notes: &mut Vec<String>
         let flags = dec[off + 1];
         let start = u32_at(dec, off + 4).unwrap_or(0);
         let secs = u32_at(dec, off + 8).unwrap_or(0);
-        fields.push(field(off, off + 2, "SAPF 类型", format!("Part[{i}] type=0x{ptype:02X} flags=0x{flags:02X}"), FieldStyle::Flag));
-        fields.push(field(off + 4, off + 8, "起始 LBA", format!("Part[{i}] {start}"), FieldStyle::Address));
-        fields.push(field(
+        let group = format!("Part[{i}]");
+        fields.push(grouped_field(
+            off,
+            off + 2,
+            group.clone(),
+            "类型/标志",
+            format!("type=0x{ptype:02X}  flags=0x{flags:02X}"),
+            FieldStyle::Flag,
+        ));
+        fields.push(grouped_field(
+            off + 4,
+            off + 8,
+            group.clone(),
+            "起始 LBA",
+            start.to_string(),
+            FieldStyle::Address,
+        ));
+        fields.push(grouped_field(
             off + 8,
             off + 12,
+            group,
             "大小",
-            format!("Part[{i}] {secs} 扇区 / {}", human_bytes(secs as u64 * SECTOR as u64)),
+            format!("{secs} 扇区 / {}", human_bytes(secs as u64 * SECTOR as u64)),
             FieldStyle::Size,
         ));
     }
@@ -617,7 +758,11 @@ pub fn analyze_sector(lba: u32, raw: &[u8], meta: &InspectMeta) -> SectorView {
                 d.extend(raw[0x100..0x120].iter().map(|b| b ^ 0x88));
                 d.resize(SECTOR, 0);
                 decoded = d;
+                let before = fields.len();
                 parse_sapf(&decoded, &mut fields, &mut notes);
+                if fields.len() == before {
+                    notes.push("未检测到 SAPF 结构。".into());
+                }
                 format!("A6B0 0x000..0x07F + XOR 0x88 @0x100..0x11F，CRC=0x{crc:08X}")
             } else {
                 "RAW（缺 device_id，无法解 LBA9）".into()
@@ -742,17 +887,155 @@ pub fn render_fields(view: &SectorView) -> String {
     }
     let mut out = String::new();
     out.push_str("  结构化字段:\n");
+    let mut current_group: Option<&str> = None;
     for f in &view.fields {
+        let group = f.group.as_deref();
+        if group != current_group {
+            if current_group.is_some() && group.is_some() {
+                out.push('\n');
+            }
+            current_group = group;
+            if let Some(group_name) = group {
+                let (start, end) = view
+                    .fields
+                    .iter()
+                    .filter(|candidate| candidate.group.as_deref() == Some(group_name))
+                    .fold((usize::MAX, 0usize), |(min_start, max_end), candidate| {
+                        (min_start.min(candidate.start), max_end.max(candidate.end))
+                    });
+                let range = format!("+0x{start:03X}..0x{:03X}", end.saturating_sub(1));
+                out.push_str(&format!(
+                    "    {}  {}\n",
+                    crate::ui::bold_cyan(group_name),
+                    crate::ui::dim(&range)
+                ));
+            }
+        }
         let range = if f.end == f.start + 1 {
             format!("+0x{:03X}", f.start)
         } else {
             format!("+0x{:03X}..0x{:03X}", f.start, f.end.saturating_sub(1))
         };
-        let label = crate::ui::pad_to(&f.label, 18);
-        let value = paint(f.style, &f.value, f.value.contains('✗'));
-        out.push_str(&format!("    {}  {}  {}\n", crate::ui::pad_to(&range, 18), label, value));
+        if !f.value.is_empty() {
+            let indent = if group.is_some() { "      " } else { "    " };
+            let prefix = format!(
+                "{}{}  {}  ",
+                indent,
+                crate::ui::pad_to(&range, 18),
+                crate::ui::pad_to(&f.label, 18)
+            );
+            let chunks = wrap_value(&f.value, 64);
+            for (idx, chunk) in chunks.iter().enumerate() {
+                if idx == 0 {
+                    out.push_str(&prefix);
+                } else {
+                    out.push_str(&" ".repeat(6 + 18 + 2 + 18 + 2));
+                }
+                if chunk == "<空>" {
+                    out.push_str(&crate::ui::dim(chunk));
+                } else {
+                    out.push_str(&paint(f.style, chunk, f.value.contains('✗')));
+                }
+                out.push('\n');
+            }
+        }
+        if !f.children.is_empty() {
+            let child_indent = if f.label.is_empty() { "      " } else { "        " };
+            if !f.label.is_empty() {
+                out.push_str(&format!(
+                    "      {}  {}\n",
+                    crate::ui::pad_to(&f.label, 12),
+                    crate::ui::dim(&range)
+                ));
+            }
+            let mut empty_labels = Vec::new();
+            for child in &f.children {
+                if child.value == "<空>" {
+                    empty_labels.push(child.label.as_str());
+                    continue;
+                }
+                let child_value = wrap_value(&child.value, 72);
+                for (idx, chunk) in child_value.iter().enumerate() {
+                    if idx == 0 {
+                        out.push_str(&format!(
+                            "{}{}  {}\n",
+                            child_indent,
+                            crate::ui::pad_to(&child.label, 12),
+                            if chunk == "<空>" {
+                                crate::ui::dim(chunk)
+                            } else {
+                                paint(f.style, chunk, chunk.contains('✗'))
+                            }
+                        ));
+                    } else {
+                        let rendered = if chunk == "<空>" {
+                            crate::ui::dim(chunk)
+                        } else {
+                            paint(f.style, chunk, chunk.contains('✗'))
+                        };
+                        out.push_str(&format!(
+                            "{}{}  {}\n",
+                            child_indent,
+                            " ".repeat(12),
+                            rendered
+                        ));
+                    }
+                }
+            }
+            if !empty_labels.is_empty() {
+                out.push_str(&format!(
+                    "{}{}  {}\n",
+                    child_indent,
+                    crate::ui::pad_to("空字段", 12),
+                    crate::ui::dim(&empty_labels.join(" · "))
+                ));
+            }
+        }
     }
     out
+}
+
+fn wrap_value(value: &str, max_chars: usize) -> Vec<String> {
+    if value.chars().count() <= max_chars {
+        return vec![value.to_string()];
+    }
+    let mut lines = Vec::new();
+    let mut current = String::new();
+    let mut current_len = 0usize;
+    for token in value.split_whitespace() {
+        let token_len = token.chars().count();
+        if current_len > 0 && current_len + 1 + token_len > max_chars {
+            lines.push(current);
+            current = String::new();
+            current_len = 0;
+        }
+        if !current.is_empty() {
+            current.push(' ');
+            current_len += 1;
+        }
+        if token_len <= max_chars {
+            current.push_str(token);
+            current_len += token_len;
+            continue;
+        }
+        for ch in token.chars() {
+            if current_len == max_chars {
+                lines.push(current);
+                current = String::new();
+                current_len = 0;
+            }
+            current.push(ch);
+            current_len += 1;
+        }
+    }
+    if !current.is_empty() {
+        lines.push(current);
+    }
+    if lines.is_empty() {
+        vec![String::new()]
+    } else {
+        lines
+    }
 }
 
 pub fn overview_line(view: &SectorView) -> String {

@@ -75,3 +75,30 @@ fn inspect_onlyid_index_matches_backup_list_and_exports() {
         assert!(export.join(name).exists(), "missing export {name}");
     }
 }
+
+#[test]
+fn known_lba_without_structure_does_not_dump_hex_unless_requested() {
+    let (Some((name, _)), Some(data)) = (fixture("aigo"), load_disk_image("aigo")) else {
+        eprintln!("跳过: 真实备份不可用");
+        return;
+    };
+    let tmp = TmpDir::new("inspect_no_auto_hex");
+    let target = tmp.0.join(name);
+    fs::write(&target, data).unwrap();
+
+    let out = Command::new(env!("CARGO_BIN_EXE_nopwd"))
+        .args(["inspect", target.to_str().unwrap(), "9"])
+        .output()
+        .unwrap();
+    assert!(out.status.success());
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.contains("未检测到") || stdout.contains("未识别"), "{stdout}");
+    assert!(!stdout.contains("+0x000:"), "未指定 --hex 时不应自动刷 hex: {stdout}");
+
+    let out_hex = Command::new(env!("CARGO_BIN_EXE_nopwd"))
+        .args(["inspect", target.to_str().unwrap(), "9", "--hex"])
+        .output()
+        .unwrap();
+    let stdout_hex = String::from_utf8_lossy(&out_hex.stdout);
+    assert!(stdout_hex.contains("+0x000:"), "--hex 应明确展开: {stdout_hex}");
+}

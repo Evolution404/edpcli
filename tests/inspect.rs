@@ -2,7 +2,7 @@ mod common;
 
 use common::*;
 use nopwd::diskio::parse_backup_name;
-use nopwd::inspect::{analyze_sector, render_hex, FieldStyle, InspectMeta};
+use nopwd::inspect::{analyze_sector, render_fields, render_hex, FieldStyle, InspectMeta};
 
 fn meta_for(key: &str) -> InspectMeta {
     let (name, _) = fixture(key).expect("fixture metadata");
@@ -60,5 +60,98 @@ fn hex_renderer_has_offsets_and_field_legend_without_color() {
     assert!(out.contains("+0x1F0:"));
     assert!(out.contains("字段图例"));
     assert!(!out.contains("\x1b["));
+    nopwd::ui::reset_enabled_for_tests();
+}
+
+#[test]
+fn lba8_llgb_fields_render_as_vertical_key_value_rows() {
+    nopwd::ui::set_enabled_for_tests(false);
+    let data = load_disk_image("aigo").expect("aigo fixture");
+    let meta = meta_for("aigo");
+    let view = analyze_sector(8, &data[8 * 512..9 * 512], &meta);
+    let out = render_fields(&view);
+
+    assert!(out.contains("[ELABEL]"), "{out}");
+    assert!(out.contains("GLab"), "{out}");
+    assert!(out.contains("Dept"), "{out}");
+    assert!(out.contains("输电运检中心"), "{out}");
+    assert!(out.contains("User"), "{out}");
+    assert!(out.contains("张玉玺"), "{out}");
+    assert!(out.contains("Label"), "{out}");
+    assert!(out.contains("江苏电力!SAFE6"), "{out}");
+    assert!(out.contains("空字段"), "空值字段应压缩成摘要: {out}");
+    assert!(out.contains("Indus") && out.contains("VOLC2"), "{out}");
+    assert!(
+        !out.lines().any(|line| line.contains("GLab=") && line.contains("Dept=")),
+        "LLGB 子字段不应再拼成一行: {out}"
+    );
+    nopwd::ui::reset_enabled_for_tests();
+}
+
+#[test]
+fn repeated_structures_render_as_groups_instead_of_repeating_prefixes() {
+    nopwd::ui::set_enabled_for_tests(false);
+    let data = load_disk_image("netac").expect("netac fixture");
+    let meta = meta_for("netac");
+
+    let edpf = render_fields(&analyze_sector(7, &data[7 * 512..8 * 512], &meta));
+    assert!(edpf.contains("Entry[0]"), "{edpf}");
+    assert!(edpf.contains("Entry[1]"), "{edpf}");
+    assert_eq!(edpf.matches("Entry[0]").count(), 1, "Entry 标题应只显示一次: {edpf}");
+
+    let mbr = render_fields(&analyze_sector(0, &data[..512], &meta));
+    assert!(mbr.contains("分区 P1"), "{mbr}");
+    assert_eq!(mbr.matches("P1").count(), 1, "P1 标题应只显示一次: {mbr}");
+    nopwd::ui::reset_enabled_for_tests();
+}
+
+#[test]
+fn structured_output_keeps_known_sector_lines_readable() {
+    nopwd::ui::set_enabled_for_tests(false);
+    let data = load_disk_image("aigo").expect("aigo fixture");
+    let meta = meta_for("aigo");
+    for lba in [0u32, 4, 6, 7, 8, 9, 11, 12] {
+        let start = lba as usize * 512;
+        let out = render_fields(&analyze_sector(lba, &data[start..start + 512], &meta));
+        for line in out.lines() {
+            assert!(
+                line.chars().count() <= 120,
+                "LBA{lba} 结构化输出行过长({}): {line}",
+                line.chars().count()
+            );
+        }
+    }
+    nopwd::ui::reset_enabled_for_tests();
+}
+
+#[test]
+fn edpf_key_material_renders_as_separate_rows() {
+    nopwd::ui::set_enabled_for_tests(false);
+    let data = load_disk_image("netac").expect("netac fixture");
+    let meta = meta_for("netac");
+    let out = render_fields(&analyze_sector(7, &data[7 * 512..8 * 512], &meta));
+    assert!(out.contains("pwd_crc"), "{out}");
+    assert!(out.contains("key_crc"), "{out}");
+    assert!(out.contains("key8"), "{out}");
+    assert!(out.contains("密钥信息"), "{out}");
+    assert!(
+        !out.lines().any(|line| {
+            line.contains("pwd_crc") && line.contains("key_crc") && line.contains("key8")
+        }),
+        "密钥字段不应挤在同一行: {out}"
+    );
+    nopwd::ui::reset_enabled_for_tests();
+}
+
+#[test]
+fn mbr_empty_partition_slots_are_summarized_not_expanded() {
+    nopwd::ui::set_enabled_for_tests(false);
+    let data = load_disk_image("aigo").expect("aigo fixture");
+    let meta = meta_for("aigo");
+    let view = analyze_sector(0, &data[..512], &meta);
+    let out = render_fields(&view);
+    assert!(out.contains("分区 P1"), "{out}");
+    assert!(!out.contains("分区 P2"), "空分区不应展开: {out}");
+    assert!(view.notes.iter().any(|note| note.contains("空分区")), "{:?}", view.notes);
     nopwd::ui::reset_enabled_for_tests();
 }
