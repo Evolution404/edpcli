@@ -130,6 +130,27 @@ raw I/O、备份格式、目录扫描和原子写入。
 - 与 E 项的 sector cache 叠加后，同一盘既不会重复 open，也不会重复读取同一 LBA；
 - 仅作用于只读 list 路径，不改变 apply/restore 的 reopen/新鲜度安全语义。
 
+### I. Shell completion 改为 metadata-only 轻量索引
+
+提交：`ac2f77b perf: make shell completion metadata-only`
+
+- 旧实现的 `backup-number` / `backup-file` 补全依赖完整 `BackupCatalog`，会读取每份 `.bin`、
+  计算 MD5 并解析内容；
+- 新实现只扫描普通 `.bin` 文件名并校验备份命名格式，不打开备份内容；
+- `backup-number` 仅使用可识别备份数量，`backup-file` 仅返回文件名；
+- 新增源码级性能门禁：`completion.rs` 禁止重新依赖 `BackupCatalog` / `BackupSelector`；
+- 正常 `backup list/verify/delete` 仍使用完整健康扫描，未削弱校验语义。
+
+### J. 固化只读 I/O 性能契约
+
+提交：`538d50c test: lock read-only io performance contracts`
+
+- 抽出仅供只读扫描使用的 `ReadOnlyDiskPool`，测试锁定同一物理盘在一次 `list` 会话内只打开一次；
+- `SectorReadCache` 测试改为真实 `info` 访问序列：先预读 LBA7/LBA4，再请求
+  LBA0/4/6/7/8/11/12，底层实际读取固定为 7 个唯一 LBA；
+- 已有 `identify_list` 测试继续锁定同一次设备扫描中 LBA12 不得重复读取；
+- 这些缓存/池均明确只属于展示和诊断路径，apply/restore 安全终验不使用。
+
 ## 本轮审计后暂不实施的候选
 
 - **机械拆大文件**：`cli.rs` / `diskio.rs` / `inspect.rs` 仍较大，但当前没有足够证据证明单纯拆文件
@@ -162,7 +183,7 @@ raw I/O、备份格式、目录扫描和原子写入。
 4. Phase D：全量 fmt/test/clippy，6 架构 CI + 4 HIL 验收；
 5. 根据最终变更按 `docs/RELEASE.md` 决定是否需要新版本；审计 PR 本身不预先升版本。
 
-当前 A-H 已完成。最终变更均保持 CLI/API/备份格式兼容；如果用户要求正式
+当前 A-J 已完成。最终变更均保持 CLI/API/备份格式兼容；如果用户要求正式
 发布，按 `docs/RELEASE.md` 应作为 **PATCH** 版本递增，即 `2.0.1`。仅审计/PR 阶段不提前改版本。
 
 ## 安全红线
