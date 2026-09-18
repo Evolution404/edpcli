@@ -113,6 +113,41 @@ impl<'a> SectorReadCache<'a> {
     }
 }
 
+/// `list` 等只读多盘扫描使用的设备池：同一 disk 在一次命令会话内只打开一次。
+/// 写盘流程不得复用该类型，避免跨安全检查持有旧设备句柄。
+pub(crate) struct ReadOnlyDiskPool<F, D>
+where
+    F: FnMut(u32) -> io::Result<D>,
+    D: SectorDev,
+{
+    open: F,
+    devices: BTreeMap<u32, D>,
+}
+
+impl<F, D> ReadOnlyDiskPool<F, D>
+where
+    F: FnMut(u32) -> io::Result<D>,
+    D: SectorDev,
+{
+    pub(crate) fn new(open: F) -> Self {
+        Self {
+            open,
+            devices: BTreeMap::new(),
+        }
+    }
+
+    pub(crate) fn read_sector(&mut self, disk: u32, lba: u32) -> io::Result<Vec<u8>> {
+        if !self.devices.contains_key(&disk) {
+            let dev = (self.open)(disk)?;
+            self.devices.insert(disk, dev);
+        }
+        self.devices
+            .get_mut(&disk)
+            .expect("刚插入的只读设备必须存在")
+            .read_sector(lba)
+    }
+}
+
 /// 打开镜像/raw 设备文件。流程以只读打开(挂载态可读); 写阶段经 reopen_rdwr
 /// 在卸载后切换为 O_RDWR — 与 Python 版时序一致(dry-run 从不需要写权限,
 /// O_RDWR 的 EBUSY 重试只发生在卸载之后)。
@@ -1180,15 +1215,50 @@ mod tests {
     }
 
     #[test]
-    fn sector_read_cache_reuses_read_only_sector_data() {
+    fn sector_read_cache_reuses_info_prefetch_during_summary() {
         let mut dev = CountingSectorDev { reads: 0 };
         {
             let mut cache = SectorReadCache::new(&mut dev);
-            assert_eq!(cache.read_sector(7).unwrap(), vec![7u8; SECTOR]);
+            // physical info 会先为 device_id / onlyid 预读 7、4，随后 summary
+            // 请求 0、4、6、7、8、11、12。预读扇区不得再次访问底层。
             assert_eq!(cache.read_sector(7).unwrap(), vec![7u8; SECTOR]);
             assert_eq!(cache.read_sector(4).unwrap(), vec![4u8; SECTOR]);
+            for lba in [0, 4, 6, 7, 8, 11, 12] {
+                assert_eq!(cache.read_sector(lba).unwrap(), vec![lba as u8; SECTOR]);
+            }
         }
-        assert_eq!(dev.reads, 2, "同一 LBA 的只读展示查询只应访问底层一次");
+        assert_eq!(
+            dev.reads, 7,
+            "info 预读 + summary 共涉及 7 个唯一 LBA，不应重复访问 LBA4/LBA7"
+        );
+    }
+
+    #[test]
+    fn read_only_disk_pool_opens_each_disk_once() {
+        use std::cell::Cell;
+
+        struct DiskDev(u32);
+        impl SectorDev for DiskDev {
+            fn read_sector(&mut self, lba: u32) -> io::Result<Vec<u8>> {
+                Ok(vec![(self.0 + lba) as u8; SECTOR])
+            }
+
+            fn write_sector(&mut self, _lba: u32, _data: &[u8]) -> io::Result<()> {
+                Err(io::Error::other("read-only test device"))
+            }
+        }
+
+        let opens = Cell::new(0usize);
+        let mut pool = ReadOnlyDiskPool::new(|disk| {
+            opens.set(opens.get() + 1);
+            Ok(DiskDev(disk))
+        });
+
+        assert_eq!(pool.read_sector(6, 7).unwrap()[0], 13);
+        assert_eq!(pool.read_sector(6, 12).unwrap()[0], 18);
+        assert_eq!(pool.read_sector(7, 7).unwrap()[0], 14);
+        assert_eq!(pool.read_sector(6, 4).unwrap()[0], 10);
+        assert_eq!(opens.get(), 2, "同一物理盘在一次 list 会话内只应打开一次");
     }
 
     #[test]

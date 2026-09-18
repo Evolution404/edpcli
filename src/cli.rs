@@ -840,16 +840,11 @@ fn list_flow(runner: &SysRunner, backup_dir_flag: Option<String>) -> i32 {
     let bak = diskio::resolve_backup_dir(backup_dir_flag.as_deref());
     // 一次 list 扫描中每个物理盘只打开一个只读 fd；disk_scan 内部再按 LBA 缓存，
     // 因此既避免重复 open，也避免同一扇区被重复读取。这里只用于只读展示路径。
-    let devices = RefCell::new(BTreeMap::<u32, FileDev>::new());
+    let devices = RefCell::new(diskio::ReadOnlyDiskPool::new(|disk| {
+        FileDev::open_rdonly(&raw_path(disk))
+    }));
     let read_disk = |disk: u32, lba: u32| -> io::Result<Vec<u8>> {
-        let mut devices = devices.borrow_mut();
-        let dev = match devices.entry(disk) {
-            std::collections::btree_map::Entry::Occupied(entry) => entry.into_mut(),
-            std::collections::btree_map::Entry::Vacant(entry) => {
-                entry.insert(FileDev::open_rdonly(&raw_path(disk))?)
-            }
-        };
-        dev.read_sector(lba)
+        devices.borrow_mut().read_sector(disk, lba)
     };
     let probe = ReadProbeCache::new(runner);
     let rows = scan_disks(&probe, &bak, &read_disk);
