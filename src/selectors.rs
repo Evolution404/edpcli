@@ -115,7 +115,30 @@ impl BackupSelector {
         numbered_entries(self.catalog.entries(), None)
     }
 
+    pub fn numbered_with_indices(&self) -> Vec<(usize, &BackupEntry)> {
+        self.numbered()
+            .into_iter()
+            .enumerate()
+            .map(|(index, entry)| (index + 1, entry))
+            .collect()
+    }
+
     pub fn resolve_one(&self, target: &str) -> Result<&BackupEntry, String> {
+        resolve_one(&self.catalog, target, None)
+    }
+
+    /// 恢复命令的选择语义：
+    /// - 数字目标是 backup list 的全局编号，必须先按当前盘 onlyid 过滤；
+    /// - 显式文件/路径只做备份根目录约束，介质归属由 restore 随后的 LBA4 16B
+    ///   身份终验决定，不能因用户重命名过备份文件而提前误拒绝。
+    pub fn resolve_restore_target(
+        &self,
+        target: &str,
+        onlyid: &str,
+    ) -> Result<&BackupEntry, String> {
+        if !target.is_empty() && target.bytes().all(|byte| byte.is_ascii_digit()) {
+            return resolve_one(&self.catalog, target, Some(onlyid));
+        }
         resolve_one(&self.catalog, target, None)
     }
 
@@ -139,6 +162,14 @@ pub struct BackupSelectorView<'a> {
 impl BackupSelectorView<'_> {
     pub fn numbered(&self) -> Vec<&BackupEntry> {
         numbered_entries(self.selector.catalog.entries(), Some(self.onlyid))
+    }
+
+    pub fn numbered_with_indices(&self) -> Vec<(usize, &BackupEntry)> {
+        self.selector
+            .numbered_with_indices()
+            .into_iter()
+            .filter(|(_, entry)| matches_onlyid(entry, Some(self.onlyid)))
+            .collect()
     }
 
     pub fn resolve_one(&self, target: &str) -> Result<&BackupEntry, String> {
@@ -222,14 +253,18 @@ fn resolve_one<'a>(
 ) -> Result<&'a BackupEntry, String> {
     if !target.contains(',') && !target.contains('-') && target.bytes().all(|b| b.is_ascii_digit())
     {
-        let entries = numbered_entries(catalog.entries(), onlyid);
+        let entries = numbered_entries(catalog.entries(), None);
         let index = target
             .parse::<usize>()
             .map_err(|_| format!("无法解析备份编号: {target}"))?;
         if index == 0 || index > entries.len() {
             return Err(format!("备份编号超出 1-{}: {target}", entries.len()));
         }
-        return Ok(entries[index - 1]);
+        let entry = entries[index - 1];
+        if !matches_onlyid(entry, onlyid) {
+            return Err(format!("备份编号 [{index}] 不属于当前目标盘，拒绝选择"));
+        }
+        return Ok(entry);
     }
     let entry = catalog.resolve_target(target)?;
     if !matches_onlyid(entry, onlyid) {
@@ -246,13 +281,16 @@ fn resolve_many<'a>(
     targets: &[String],
     onlyid: Option<&str>,
 ) -> Result<Vec<&'a BackupEntry>, String> {
-    let numbered = numbered_entries(catalog.entries(), onlyid);
+    let numbered = numbered_entries(catalog.entries(), None);
     let mut paths = BTreeSet::<PathBuf>::new();
     let mut out = Vec::new();
     for target in targets {
         if numeric_selection(target) {
             for index in parse_indices(std::slice::from_ref(target), numbered.len())? {
                 let entry = numbered[index - 1];
+                if !matches_onlyid(entry, onlyid) {
+                    return Err(format!("备份编号 [{index}] 不属于当前目标盘，拒绝选择"));
+                }
                 let canonical = backup_catalog::canonical_entry_path(&entry.path);
                 if paths.insert(canonical) {
                     out.push(entry);

@@ -16,8 +16,7 @@ use std::collections::BTreeMap;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 
-use crate::backup_cli::backup_verify_select;
-pub use crate::backup_cli::{backup_list, backup_prune, backup_rm, backup_verify};
+pub use crate::backup_cli::{backup_delete, backup_list, backup_prune, backup_verify};
 use crate::cli_args::print_help;
 pub use crate::cli_args::{
     parse_args, print_usage, BackupAction, DiskOpts, InfoOpts, InspectOpts, Parsed,
@@ -33,7 +32,7 @@ use crate::identify::identify;
 use crate::inspect_cli::inspect_flow;
 use crate::metainfo_cli::info_flow;
 use crate::sectors::{convert, looks_nopwd};
-use crate::selectors::DeviceSelector;
+use crate::selectors::{BackupSelector, DeviceSelector};
 use crate::sysinfo::{self, CmdRunner, ReadProbeCache, SysRunner};
 
 const OPEN_WAIT: std::time::Duration = std::time::Duration::from_secs(10);
@@ -465,52 +464,70 @@ pub fn restore_flow(
         ));
     }
 
-    let path: PathBuf = match bin {
-        Some(p) => PathBuf::from(p),
-        None => {
-            let (vid, pid) = sysinfo::usb_vid_pid(runner, disk);
-            let facts = DiskFacts {
-                disk,
-                total_sectors: sysinfo::disk_total_sectors(runner, disk),
-                vid,
-                pid,
-                label_id: label_id.clone(),
-            };
-            let baks = find_backups(&ctx.backup_dir, &facts, did.as_deref(), Some(tag16));
-            if baks.is_empty() {
+    let selector = BackupSelector::load(&ctx.backup_dir);
+    let path: PathBuf = match (bin, label_id.as_deref()) {
+        (Some(target), Some(onlyid)) => selector
+            .resolve_restore_target(&target, onlyid)
+            .map(|entry| entry.path.clone())
+            .map_err(|message| err(EXIT_BACKUP, format!("错误: {message}")))?,
+        (Some(target), None) => selector
+            .resolve_one(&target)
+            .map(|entry| entry.path.clone())
+            .map_err(|message| err(EXIT_BACKUP, format!("错误: {message}")))?,
+        (None, Some(onlyid)) => {
+            let view = selector.for_onlyid(onlyid);
+            let choices = view.numbered_with_indices();
+            if choices.is_empty() {
                 return Err(err(
                     EXIT_BACKUP,
-                    "错误: 备份目录未找到本盘备份; 可 edpcli backup restore <备份.bin> 显式指定",
+                    format!(
+                        "错误: 备份目录未找到本盘备份 (onlyid={}); 可先执行 edpcli backup create",
+                        onlyid
+                    ),
                 ));
             }
-            println!("disk{} 匹配备份 {} 个(新→旧):", disk, baks.len());
-            let entries: Vec<(String, bool)> = baks
-                .iter()
-                .map(|b| {
-                    (
-                        diskio::backup_display_time(b, diskio::mtime_epoch(b)),
-                        did.as_ref().map(|d| backup_is_nopwd(b, d)).unwrap_or(false),
-                    )
-                })
-                .collect();
-            print!("{}", backup_menu_str(&entries));
-            let sel = loop {
-                let c = ctx.prompt.prompt_line(&crate::ui::bold(&format!(
-                    "选择 [1-{}] (回车取消): ",
-                    baks.len()
-                )));
-                let c = c.trim();
-                if c.is_empty() {
+            println!(
+                "disk{} · onlyid={} 匹配备份 {} 个:",
+                disk,
+                onlyid,
+                choices.len()
+            );
+            for (index, entry) in &choices {
+                let time = diskio::backup_display_time(&entry.path, entry.mtime);
+                let state = if entry.is_nopwd {
+                    "免密状态"
+                } else {
+                    "加密原盘"
+                };
+                println!(
+                    "  [{}] {}   {}   {}",
+                    index,
+                    time,
+                    state,
+                    entry
+                        .path
+                        .file_name()
+                        .and_then(|name| name.to_str())
+                        .unwrap_or("<无效文件名>")
+                );
+            }
+            loop {
+                let input = ctx.prompt.prompt_line("选择全局备份编号 (回车取消): ");
+                let input = input.trim();
+                if input.is_empty() {
                     return Err(err(EXIT_CANCELLED, "已取消"));
                 }
-                if let Ok(n) = c.parse::<usize>() {
-                    if (1..=baks.len()).contains(&n) {
-                        break baks[n - 1].clone();
-                    }
+                match view.resolve_one(input) {
+                    Ok(entry) => break entry.path.clone(),
+                    Err(message) => println!("{}", crate::ui::yellow(&message)),
                 }
-                println!("{}", crate::ui::yellow("无效输入"));
-            };
-            sel
+            }
+        }
+        (None, None) => {
+            return Err(err(
+                EXIT_BACKUP,
+                "错误: 当前盘无法读取 onlyid，无法安全筛选可恢复备份，拒绝交互还原",
+            ));
         }
     };
 
@@ -757,10 +774,8 @@ pub fn run() -> i32 {
             let bak = diskio::resolve_backup_dir(backup_dir.as_deref());
             match action {
                 BackupAction::Create { disk } => backup_create_real_flow(&runner, disk, backup_dir),
-                BackupAction::List => backup_list(&bak, None),
-                BackupAction::Verify { target } => {
-                    backup_verify_select(&bak, None, target.as_deref(), None)
-                }
+                BackupAction::List => backup_list(&bak),
+                BackupAction::Verify { target } => backup_verify(&bak, target.as_deref()),
                 BackupAction::Restore { target, disk } => real_flow(
                     &runner,
                     disk,
@@ -768,10 +783,10 @@ pub fn run() -> i32 {
                     backup_dir,
                     FlowKind::Restore { bin: target, yes },
                 ),
-                BackupAction::Prune => backup_prune(&bak, None, keep, yes),
+                BackupAction::Prune => backup_prune(&bak, keep, yes),
                 BackupAction::Delete { targets } => {
                     let mut prompt = StdPrompter;
-                    backup_rm(&bak, None, &targets, yes, &mut prompt)
+                    backup_delete(&bak, &targets, yes, &mut prompt)
                 }
             }
         }
@@ -1464,25 +1479,6 @@ mod tests {
             let args: Vec<String> = argv.into_iter().map(str::to_string).collect();
             let err = parse_args(&args).err().expect("单值旗标重复必须报错");
             assert!(err.contains("重复"), "{err}");
-        }
-    }
-
-    #[test]
-    fn backup_selection_accepts_numbers_commas_and_ranges() {
-        assert_eq!(
-            crate::backup_cli::parse_backup_selection_tokens(&["1,3".into(), "2-4".into()], 5)
-                .unwrap(),
-            vec![1, 2, 3, 4]
-        );
-        assert_eq!(
-            crate::backup_cli::parse_backup_selection_tokens(&["2".into(), "2".into()], 3).unwrap(),
-            vec![2]
-        );
-        for bad in ["0", "4", "3-2", "1-4", "x", "1--2", "1,"] {
-            assert!(
-                crate::backup_cli::parse_backup_selection_tokens(&[bad.into()], 3).is_err(),
-                "应拒绝 {bad}"
-            );
         }
     }
 

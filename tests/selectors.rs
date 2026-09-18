@@ -144,4 +144,24 @@ fn backup_selector_supports_ranges_and_internal_identity_filtering() {
         Some("1402259934")
     );
     assert!(netac.resolve_one("2").is_err());
+
+    let global = selector.numbered();
+    let aigo_global_index = global
+        .iter()
+        .position(|entry| {
+            entry.meta.as_ref().and_then(|meta| meta.onlyid.as_deref()) == Some("1987718388")
+        })
+        .map(|index| index + 1)
+        .expect("aigo backup");
+    let aigo = selector.for_onlyid("1987718388");
+    let selected = aigo
+        .resolve_one(&aigo_global_index.to_string())
+        .expect("filtered restore selector must preserve global numbering");
+    assert_eq!(
+        selected
+            .meta
+            .as_ref()
+            .and_then(|meta| meta.onlyid.as_deref()),
+        Some("1987718388")
+    );
 }

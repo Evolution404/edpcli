@@ -430,6 +430,51 @@ fn backup_create_is_read_only_and_matches_apply_automatic_backup() {
 }
 
 #[test]
+fn restore_numeric_target_uses_backup_selector_and_current_disk_identity() {
+    let Some(orig) = load_disk_image("netac") else {
+        eprintln!("跳过: 真实备份不可用");
+        return;
+    };
+    let Some(source) = fixture_bin("netac") else {
+        eprintln!("跳过: 真实备份不可用");
+        return;
+    };
+    let runner = netac_runner(6);
+    let tmp = TmpDir::new("restore_numeric_selector");
+    let backup_dir = tmp.0.join("bak");
+    fs::create_dir_all(&backup_dir).unwrap();
+    let target = backup_dir.join(source.file_name().unwrap());
+    fs::copy(&source, &target).unwrap();
+    let data = fs::read(&target).unwrap();
+    fs::write(
+        format!("{}.md5", target.display()),
+        format!("{}\n", md5(&data)),
+    )
+    .unwrap();
+
+    let mut prompt = ScriptPrompter {
+        inputs: vec!["NO".into()],
+        idx: 0,
+    };
+    let mut dev = SwapOnReopenDev::new(orig.clone(), orig);
+    let error = restore_flow(
+        Some("1".into()),
+        6,
+        &mut ctx(&runner, &mut prompt, &backup_dir),
+        &mut dev,
+    )
+    .unwrap_err();
+
+    assert_eq!(
+        error.code, EXIT_CANCELLED,
+        "编号 1 应先由 BackupSelector 解析为当前盘备份，再进入恢复确认"
+    );
+    assert_eq!(prompt.idx, 1);
+    assert!(!dev.switched);
+    assert_eq!(dev.writes, 0);
+}
+
+#[test]
 fn apply_cancel_at_prompt_leaves_disk_untouched() {
     let Some((_conv, _)) = converted_image("netac") else {
         eprintln!("跳过: 真实备份不可用");

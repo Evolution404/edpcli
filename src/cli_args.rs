@@ -458,7 +458,7 @@ pub fn parse_args(argv: &[String]) -> Result<Parsed, String> {
                 });
             }
             // 人工使用时 `edpcli backup` 的自然含义就是“看看有哪些备份”。
-            // 若第一个 token 是旗标，也按省略 `list` 处理，例如 `edpcli backup --onlyid ID`。
+            // 若第一个 token 是旗标，也按省略 `list` 处理。
             let (action_name, tail): (&str, &[String]) = match rest.first() {
                 None => ("list", &rest[..]),
                 Some(s) if s.starts_with('-') => ("list", &rest[..]),

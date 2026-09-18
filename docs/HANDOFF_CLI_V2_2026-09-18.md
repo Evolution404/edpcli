@@ -125,6 +125,31 @@ Phase 5 本地门禁：
 - 搜索旧内部 `backup_disk`：0 命中；
 - `backup create` 只读/同源格式定向测试：PASS。
 
+### Phase 6：backup restore / verify / delete / prune 统一 — 已完成
+
+- `backup list` 的编号已成为唯一全局稳定编号，verify/delete/restore 的数字选择全部与
+  list 使用同一 `BackupSelector`；
+- `backup verify 1`、`backup delete 1,3` 等不再经过旧 onlyid/index 解析分支；
+- `backup delete` 无参数时会展示全局编号并进入交互多选，同时保留：
+  - 备份根目录路径约束；
+  - 删除前内容摘要二次复核；
+  - 同一物理盘至少保留 1 份备份的保护；
+- `backup prune` 已移除旧 onlyid 用户筛选路径，继续按每盘分组策略清理；
+- `backup restore <全局编号>` 会先按当前盘 onlyid 过滤该全局编号，编号指向其他盘时拒绝；
+- `backup restore <备份文件>` 允许用户重命名过的合法备份进入既有内容校验链，
+  最终仍以当前盘与备份 LBA4 16B 身份标签做防串盘硬终验；
+- restore 的 MD5、免密快照阻断、reopen 后身份复核、prepare_write、原子写入/回滚路径
+  均保持原安全语义；
+- 已删除旧 `backup_rm`、`backup_verify_select`、盘内编号解析与 onlyid 删除选择器实现。
+
+Phase 6 本地门禁：
+
+- `cargo fmt --all -- --check`：PASS；
+- `cargo test --all-targets`：PASS；
+- `cargo clippy --all-targets -- -D warnings`：PASS；
+- restore 定向回归：27/27 PASS；
+- backup / CLI UX / selectors 定向回归全部 PASS。
+
 ## 下一位 AI 从这里开始
 
 1. 先读：
@@ -132,10 +157,10 @@ Phase 5 本地门禁：
    - `docs/RELEASE.md`
    - `docs/USAGE.md`
 2. 检查 `git status --short --branch`，禁止 reset/clean。
-3. 从 **Phase 6 backup restore/verify/delete/prune 统一** 继续，仍须测试先行；不要削弱 selector pinning、系统盘
+3. 从 **Phase 7 inspect 收口** 继续，仍须测试先行；不要削弱 selector pinning、系统盘
    fail-closed 或 onlyid 防串盘。
-4. Phase 6 重点把 restore/verify/delete 真正改为统一 `BackupSelector` 语义，
-   删除残余盘内编号/旧 onlyid UI 路径，同时保留恢复前 onlyid/物理盘身份终验。
+4. Phase 7 删除 inspect 内部残余的 onlyid/index/无盘猜备份路径，确保用户级 LBA 只能通过
+   `--lba` 指定，同时保留 raw/hex/export 与离线备份文件检查能力。
 5. 小 commit、及时 push，阶段完成后更新本交接文档。
 
 ## 已冻结的关键决策

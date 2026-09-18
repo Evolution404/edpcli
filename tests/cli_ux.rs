@@ -1,7 +1,8 @@
 mod common;
 
 use std::fs;
-use std::process::Command;
+use std::io::Write;
+use std::process::{Command, Stdio};
 
 use common::*;
 use edpcli::md5::md5_hex;
@@ -249,6 +250,71 @@ fn positional_backup_path_and_numbered_verify_follow_same_ux() {
     );
     let stdout = String::from_utf8_lossy(&verify.stdout);
     assert_eq!(stdout.lines().filter(|l| l.starts_with('✓')).count(), 1);
+
+    let numbered = Command::new(env!("CARGO_BIN_EXE_edpcli"))
+        .env("NO_COLOR", "1")
+        .args(["backup", "verify", "1", "--backup-dir"])
+        .arg(&tmp.0)
+        .output()
+        .unwrap();
+    assert_eq!(
+        numbered.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&numbered.stderr)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&numbered.stdout)
+            .lines()
+            .filter(|line| line.starts_with('✓'))
+            .count(),
+        1,
+        "编号 1 必须与 backup list 的全局编号指向同一份备份"
+    );
+}
+
+#[test]
+fn backup_delete_without_target_uses_global_interactive_selector() {
+    let Some(tmp) = two_netac_backups() else {
+        eprintln!("跳过: 真实备份不可用");
+        return;
+    };
+    let before = fs::read_dir(&tmp.0)
+        .unwrap()
+        .flatten()
+        .filter(|entry| entry.path().extension().and_then(|ext| ext.to_str()) == Some("bin"))
+        .count();
+    assert_eq!(before, 2);
+
+    let mut child = Command::new(env!("CARGO_BIN_EXE_edpcli"))
+        .env("NO_COLOR", "1")
+        .args(["backup", "delete", "--backup-dir"])
+        .arg(&tmp.0)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn backup delete picker");
+    child
+        .stdin
+        .as_mut()
+        .expect("stdin")
+        .write_all(b"1\nYES\n")
+        .unwrap();
+    let out = child.wait_with_output().unwrap();
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "stdout={}\nstderr={}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let after = fs::read_dir(&tmp.0)
+        .unwrap()
+        .flatten()
+        .filter(|entry| entry.path().extension().and_then(|ext| ext.to_str()) == Some("bin"))
+        .count();
+    assert_eq!(after, 1, "交互删除应删除所选全局编号且保留至少一份");
 }
 
 #[test]
