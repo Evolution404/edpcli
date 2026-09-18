@@ -67,9 +67,7 @@ fn write_new_synced(path: &Path, data: &[u8], label: &str) -> EdpCliResult<()> {
 }
 
 fn sync_dir(dir: &Path) -> EdpCliResult<()> {
-    File::open(dir)
-        .and_then(|file| file.sync_all())
-        .map_err(io_err)
+    crate::platform::sync_directory(dir).map_err(io_err)
 }
 
 // ══════════════════════════════════════════════════════════════════
@@ -458,7 +456,7 @@ pub fn parse_conf_backup_dir(content: &str) -> Option<String> {
 pub fn conf_backup_dir() -> Option<String> {
     let home = match sudo_user() {
         Some(_) => sudo_user_home()?,
-        None => PathBuf::from(std::env::var("HOME").ok()?),
+        None => crate::platform::invoking_user_home()?,
     };
     let content = std::fs::read_to_string(home.join(CONF_NAME)).ok()?;
     parse_conf_backup_dir(&content)

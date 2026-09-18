@@ -4,11 +4,16 @@ mod common;
 
 use std::process::Command;
 
+#[cfg(target_os = "macos")]
 use common::*;
+#[cfg(target_os = "macos")]
 use edpcli::cli::{print_disk_table, scan_disks};
+#[cfg(target_os = "macos")]
 use edpcli::common::SECTOR;
+#[cfg(target_os = "macos")]
 use edpcli::identify::identify;
 
+#[cfg(target_os = "macos")]
 #[test]
 fn identify_picks_edpf_verified_candidate() {
     let Some(data) = load_disk_image("netac") else {
@@ -23,6 +28,7 @@ fn identify_picks_edpf_verified_candidate() {
     assert_eq!(r.k0, Some(0x79BE));
 }
 
+#[cfg(target_os = "macos")]
 #[test]
 fn identify_no_candidate_matches() {
     let Some(data) = load_disk_image("netac") else {
@@ -43,6 +49,7 @@ fn identify_no_candidate_matches() {
     assert!(r2.device_id.is_none());
 }
 
+#[cfg(target_os = "macos")]
 #[test]
 fn scan_and_print_all_row_kinds() {
     let Some(netac) = load_disk_image("netac") else {
@@ -131,9 +138,11 @@ fn list_cli_smoke_exit_zero() {
 }
 
 // FakeRunner 辅助
+#[cfg(target_os = "macos")]
 trait RemoveScsi {
     fn canned_remove_scsi(self) -> FakeRunner;
 }
+#[cfg(target_os = "macos")]
 impl RemoveScsi for FakeRunner {
     fn canned_remove_scsi(mut self) -> FakeRunner {
         self.canned.remove("ioreg -r -c IOSCSITargetDevice -l");

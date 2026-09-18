@@ -3,6 +3,8 @@
 //!
 //! 全部不碰真盘。
 
+#![cfg(target_os = "macos")]
+
 mod common;
 
 use std::fs;

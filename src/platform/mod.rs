@@ -37,6 +37,15 @@ pub struct HardwareProbe {
     pub inquiry: Option<InquiryInfo>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExtDisk {
+    pub n: u32,
+    pub size: u64,
+    pub vid: String,
+    pub pid: String,
+    pub proto: String,
+}
+
 #[cfg(target_os = "macos")]
 mod macos;
 #[cfg(target_os = "linux")]
@@ -79,8 +88,34 @@ pub fn sync_raw_device(file: &File) -> io::Result<()> {
     imp::sync_raw_device(file)
 }
 
+pub fn sync_directory(path: &std::path::Path) -> io::Result<()> {
+    imp::sync_directory(path)
+}
+
 pub fn hardware_probe(disk: u32) -> Option<HardwareProbe> {
     imp::hardware_probe(disk)
+}
+
+pub fn list_external_disks(runner: &dyn crate::sysinfo::CmdRunner) -> Vec<ExtDisk> {
+    imp::list_external_disks(runner)
+}
+
+pub fn disk_total_sectors(
+    runner: &dyn crate::sysinfo::CmdRunner,
+    disk: u32,
+) -> Option<u64> {
+    imp::disk_total_sectors(runner, disk)
+}
+
+pub fn usb_vid_pid(
+    runner: &dyn crate::sysinfo::CmdRunner,
+    disk: u32,
+) -> (String, String) {
+    imp::usb_vid_pid(runner, disk)
+}
+
+pub fn unmount_disk(runner: &dyn crate::sysinfo::CmdRunner, disk: u32) -> io::Result<()> {
+    imp::unmount_disk(runner, disk)
 }
 
 pub fn elevation_label() -> &'static str {

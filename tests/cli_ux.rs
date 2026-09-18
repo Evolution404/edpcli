@@ -244,6 +244,7 @@ fn contradictory_inspect_flags_fail_with_focused_help() {
     assert!(!stdout.contains("cems 加密 U 盘"));
 }
 
+#[cfg(unix)]
 #[test]
 fn piping_output_to_head_does_not_panic_on_broken_pipe() {
     let Some(tmp) = two_netac_backups() else {

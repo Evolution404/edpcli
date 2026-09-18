@@ -1,11 +1,15 @@
 //! device_id 识别 (macOS ioreg INQUIRY + 传输模式; LBA7 EDPF magic 判真)。
 
+#[cfg(target_os = "macos")]
 use std::time::Duration;
 
 use crate::crypto::{crc32_bare, xor_rolling};
 use crate::platform::{HardwareProbe, NativeTransport};
-use crate::sysinfo::{block_str_field, split_class_blocks, CmdRunner};
+use crate::sysinfo::CmdRunner;
+#[cfg(target_os = "macos")]
+use crate::sysinfo::{block_str_field, split_class_blocks};
 
+#[cfg(target_os = "macos")]
 const IOREG_TIMEOUT: Duration = Duration::from_secs(15);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -31,6 +35,7 @@ pub fn build_device_id(vendor: &str, product: &str, revision: &str, transport: T
     base
 }
 
+#[cfg(target_os = "macos")]
 fn ioreg_fields(
     runner: &dyn CmdRunner,
     cls: &str,
@@ -55,6 +60,16 @@ fn ioreg_fields(
     vec![]
 }
 
+#[cfg(not(target_os = "macos"))]
+fn ioreg_fields(
+    _runner: &dyn CmdRunner,
+    _cls: &str,
+    _disk: u32,
+    _keys: &[&str],
+) -> Vec<(String, String)> {
+    vec![]
+}
+
 fn transport_from_native(probe: &HardwareProbe) -> Transport {
     match probe.transport {
         NativeTransport::Uas => Transport::Uas,
@@ -63,6 +78,7 @@ fn transport_from_native(probe: &HardwareProbe) -> Transport {
     }
 }
 
+#[cfg(target_os = "macos")]
 fn detect_transport_ioreg(runner: &dyn CmdRunner, disk: u32) -> Transport {
     let mut present: Vec<&str> = Vec::new();
     for cls in [
@@ -85,6 +101,11 @@ fn detect_transport_ioreg(runner: &dyn CmdRunner, disk: u32) -> Transport {
     } else {
         Transport::Unknown
     }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn detect_transport_ioreg(_runner: &dyn CmdRunner, _disk: u32) -> Transport {
+    Transport::Unknown
 }
 
 pub fn detect_transport(runner: &dyn CmdRunner, disk: u32) -> Transport {
@@ -180,6 +201,7 @@ pub fn identify(runner: &dyn CmdRunner, disk: u32, lba7: &[u8]) -> IdentifyResul
 mod tests {
     use std::cell::Cell;
     use std::io;
+    use std::time::Duration;
 
     use super::*;
     use crate::platform::{HardwareProbe, InquiryInfo, NativeTransport};

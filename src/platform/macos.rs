@@ -8,7 +8,13 @@ use std::path::PathBuf;
 use std::path::Path;
 use std::process::Command;
 
-use super::{HardwareProbe, PlatformKind};
+use super::{ExtDisk, HardwareProbe, PlatformKind};
+use crate::common::SECTOR;
+use crate::plist;
+use crate::sysinfo::{block_int_field, split_class_blocks, CmdRunner};
+
+const DISKUTIL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+const IOREG_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(15);
 
 pub(super) const fn kind() -> PlatformKind {
     PlatformKind::MacOS
@@ -94,8 +100,119 @@ pub(super) fn sync_raw_device(file: &File) -> io::Result<()> {
     }
 }
 
+pub(super) fn sync_directory(path: &Path) -> io::Result<()> {
+    File::open(path)?.sync_all()
+}
+
 pub(super) fn hardware_probe(disk: u32) -> Option<HardwareProbe> {
     crate::native_probe::probe_disk(disk)
+}
+
+fn disk_info(runner: &dyn CmdRunner, disk: u32) -> Option<plist::Plist> {
+    let name = format!("disk{disk}");
+    let out = runner
+        .check_output(&["diskutil", "info", "-plist", &name], DISKUTIL_TIMEOUT)
+        .ok()?;
+    plist::parse(&out).ok()
+}
+
+pub(super) fn disk_total_sectors(runner: &dyn CmdRunner, disk: u32) -> Option<u64> {
+    let info = disk_info(runner, disk)?;
+    let bytes = ["DiskSize", "TotalSize", "Size"]
+        .iter()
+        .find_map(|key| info.get(key).and_then(|v| v.as_int()).filter(|&v| v > 0))?;
+    Some(bytes as u64 / SECTOR as u64)
+}
+
+pub(super) fn usb_vid_pid(runner: &dyn CmdRunner, disk: u32) -> (String, String) {
+    if let Some(probe) = hardware_probe(disk) {
+        if let (Some(vid), Some(pid)) = (probe.vid, probe.pid) {
+            return (format!("{vid:04x}"), format!("{pid:04x}"));
+        }
+    }
+    let Ok(out) = runner.check_output(
+        &["ioreg", "-r", "-c", "IOUSBHostDevice", "-l"],
+        IOREG_TIMEOUT,
+    ) else {
+        return ("xxxx".into(), "xxxx".into());
+    };
+    let marker = format!("\"BSD Name\" = \"disk{disk}\"");
+    for block in split_class_blocks(&out, "IOUSBHostDevice") {
+        if block.contains(&marker) {
+            if let (Some(vid), Some(pid)) = (
+                block_int_field(block, "idVendor"),
+                block_int_field(block, "idProduct"),
+            ) {
+                return (format!("{vid:04x}"), format!("{pid:04x}"));
+            }
+        }
+    }
+    ("xxxx".into(), "xxxx".into())
+}
+
+fn external_disk_info(runner: &dyn CmdRunner, disk: u32) -> Option<ExtDisk> {
+    if disk < 2 {
+        return None;
+    }
+    let info = disk_info(runner, disk)?;
+    let whole = info.get("WholeDisk").and_then(|v| v.as_bool()).unwrap_or(false);
+    let internal = info.get("Internal").and_then(|v| v.as_bool()).unwrap_or(false);
+    let virtual_disk = info.get("VirtualOrPhysical").and_then(|v| v.as_str()) == Some("Virtual");
+    if !whole || internal || virtual_disk {
+        return None;
+    }
+    let proto = info
+        .get("BusProtocol")
+        .and_then(|v| v.as_str())
+        .unwrap_or("?")
+        .to_string();
+    let size = ["TotalSize", "DiskSize", "Size"]
+        .iter()
+        .find_map(|key| info.get(key).and_then(|v| v.as_int()).filter(|&v| v > 0))
+        .unwrap_or(0) as u64;
+    let (vid, pid) = if proto == "USB" {
+        usb_vid_pid(runner, disk)
+    } else {
+        ("xxxx".into(), "xxxx".into())
+    };
+    Some(ExtDisk {
+        n: disk,
+        size,
+        vid,
+        pid,
+        proto,
+    })
+}
+
+pub(super) fn list_external_disks(runner: &dyn CmdRunner) -> Vec<ExtDisk> {
+    let Ok(out) = runner.check_output(&["diskutil", "list", "-plist"], DISKUTIL_TIMEOUT) else {
+        return vec![];
+    };
+    let Ok(list) = plist::parse(&out) else {
+        return vec![];
+    };
+    list.get("AllDisks")
+        .and_then(|v| v.as_arr())
+        .into_iter()
+        .flatten()
+        .filter_map(|value| value.as_str())
+        .filter_map(|name| {
+            let rest = name.strip_prefix("disk")?;
+            (!rest.is_empty() && rest.bytes().all(|b| b.is_ascii_digit()))
+                .then(|| rest.parse::<u32>().ok())
+                .flatten()
+        })
+        .filter_map(|disk| external_disk_info(runner, disk))
+        .collect()
+}
+
+pub(super) fn unmount_disk(runner: &dyn CmdRunner, disk: u32) -> io::Result<()> {
+    runner
+        .check_output(
+            &["diskutil", "unmountDisk", "force", &format!("disk{disk}")],
+            DISKUTIL_TIMEOUT,
+        )
+        .map(|_| ())
 }
 
 pub(super) const fn elevation_label() -> &'static str {

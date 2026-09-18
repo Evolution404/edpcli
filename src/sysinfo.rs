@@ -11,20 +11,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use crate::platform::HardwareProbe;
-use crate::plist;
-
-const DISKUTIL_TIMEOUT: Duration = Duration::from_secs(10);
-const IOREG_TIMEOUT: Duration = Duration::from_secs(15);
-
-/// 外接整盘信息: (盘号, 字节数, vid, pid, 总线协议)。
-#[derive(Debug, Clone)]
-pub struct ExtDisk {
-    pub n: u32,
-    pub size: u64,
-    pub vid: String,
-    pub pid: String,
-    pub proto: String,
-}
+pub use crate::platform::ExtDisk;
 
 /// 子进程执行抽象: 成功返回 stdout 文本(非零退出/超时/启动失败均为 Err)。
 /// 等价 Python subprocess.check_output(text=True, errors='ignore', timeout=…)。
@@ -286,21 +273,9 @@ pub fn block_int_field(block: &str, key: &str) -> Option<i64> {
     None
 }
 
-fn bsd_name_marker(disk: u32) -> String {
-    format!("\"BSD Name\" = \"disk{}\"", disk)
-}
-
-/// 盘总扇区数(diskutil DiskSize/512); 失败/缺失返回 None(显示为 unknown)。
+/// 当前平台整盘总扇区数；失败/缺失返回 None。
 pub fn disk_total_sectors(runner: &dyn CmdRunner, disk: u32) -> Option<u64> {
-    let out = runner
-        .check_output(&["diskutil", "info", "-plist", &format!("disk{}", disk)], DISKUTIL_TIMEOUT)
-        .ok()?;
-    let p = plist::parse(&out).ok()?;
-    // Python: info.get('DiskSize') or info.get('TotalSize') or 0; if ds: — 0 视同缺失
-    let ds = ["DiskSize", "TotalSize"]
-        .iter()
-        .find_map(|k| p.get(k).and_then(|v| v.as_int()).filter(|&v| v != 0))?;
-    Some(ds as u64 / crate::common::SECTOR as u64)
+    crate::platform::disk_total_sectors(runner, disk)
 }
 
 /// USB VID/PID(hex4); 失败返回 ("xxxx","xxxx")。
@@ -310,96 +285,14 @@ pub fn usb_vid_pid(runner: &dyn CmdRunner, disk: u32) -> (String, String) {
             return (format!("{vid:04x}"), format!("{pid:04x}"));
         }
     }
-    let out = match runner.check_output(&["ioreg", "-r", "-c", "IOUSBHostDevice", "-l"], IOREG_TIMEOUT) {
-        Ok(o) => o,
-        Err(_) => return ("xxxx".into(), "xxxx".into()),
-    };
-    let want = bsd_name_marker(disk);
-    for b in split_class_blocks(&out, "IOUSBHostDevice") {
-        if !b.contains(&want) {
-            continue;
-        }
-        if let (Some(v), Some(p)) = (
-            block_int_field(b, "idVendor"),
-            block_int_field(b, "idProduct"),
-        ) {
-            return (format!("{:04x}", v), format!("{:04x}", p));
-        }
-    }
-    ("xxxx".into(), "xxxx".into())
+    crate::platform::usb_vid_pid(runner, disk)
 }
 
 // ══════════════════════════════════════════════════════════════════
 // 外接盘枚举
 // ══════════════════════════════════════════════════════════════════
-/// `disk<纯数字>` 解析为盘号(排除 disk4s1 等分区)。
-fn whole_disk_number(name: &str) -> Option<u32> {
-    let rest = name.strip_prefix("disk")?;
-    if rest.is_empty() || !rest.bytes().all(|b| b.is_ascii_digit()) {
-        return None;
-    }
-    rest.parse().ok()
-}
-
-/// 枚举全部外接整盘(disk≥2)。系统盘(disk<2)、分区、内部盘与虚拟盘(DMG)不进入。
-fn external_disk_info(runner: &dyn CmdRunner, n: u32) -> Option<ExtDisk> {
-    if n < 2 {
-        return None;
-    }
-    let name = format!("disk{}", n);
-    let info_out = runner
-        .check_output(&["diskutil", "info", "-plist", &name], DISKUTIL_TIMEOUT)
-        .ok()?;
-    let info = plist::parse(&info_out).ok()?;
-    let whole = info.get("WholeDisk").and_then(|v| v.as_bool()).unwrap_or(false);
-    let internal = info.get("Internal").and_then(|v| v.as_bool()).unwrap_or(false);
-    if !whole || internal {
-        return None;
-    }
-    if info.get("VirtualOrPhysical").and_then(|v| v.as_str()) == Some("Virtual") {
-        return None;
-    }
-    let proto = info
-        .get("BusProtocol")
-        .and_then(|v| v.as_str())
-        .unwrap_or("?")
-        .to_string();
-    let size = ["TotalSize", "DiskSize", "Size"]
-        .iter()
-        .find_map(|k| info.get(k).and_then(|v| v.as_int()).filter(|&v| v != 0))
-        .unwrap_or(0) as u64;
-    let (vid, pid) = if proto == "USB" {
-        usb_vid_pid(runner, n)
-    } else {
-        ("xxxx".into(), "xxxx".into())
-    };
-    Some(ExtDisk {
-        n,
-        size,
-        vid,
-        pid,
-        proto,
-    })
-}
-
 pub fn list_external_disks(runner: &dyn CmdRunner) -> Vec<ExtDisk> {
-    let out = match runner.check_output(&["diskutil", "list", "-plist"], DISKUTIL_TIMEOUT) {
-        Ok(o) => o,
-        Err(_) => return vec![],
-    };
-    let p = match plist::parse(&out) {
-        Ok(p) => p,
-        Err(_) => return vec![],
-    };
-    let empty: Vec<plist::Plist> = Vec::new();
-    p.get("AllDisks")
-        .and_then(|a| a.as_arr())
-        .unwrap_or(&empty)
-        .iter()
-        .filter_map(|d| d.as_str())
-        .filter_map(whole_disk_number)
-        .filter_map(|n| external_disk_info(runner, n))
-        .collect()
+    crate::platform::list_external_disks(runner)
 }
 
 /// 本工具可操作的外接 USB 整盘子集(供自动选盘)。
@@ -413,17 +306,14 @@ pub fn list_usb_disks(runner: &dyn CmdRunner) -> Vec<ExtDisk> {
 /// 直接核验一个显式盘号是否为可操作的外接 USB 整盘。
 /// 不先枚举所有磁盘，供安全门禁高频调用，减少额外 `diskutil info` 子进程。
 pub fn usb_disk(runner: &dyn CmdRunner, disk: u32) -> Option<ExtDisk> {
-    external_disk_info(runner, disk).filter(|d| d.proto == "USB")
+    list_external_disks(runner)
+        .into_iter()
+        .find(|item| item.n == disk && item.proto == "USB")
 }
 
 /// 强制卸载整盘。写盘流程必须确认卸载成功后才能重新以 O_RDWR 打开设备。
 pub fn unmount_disk(runner: &dyn CmdRunner, disk: u32) -> io::Result<()> {
-    runner
-        .check_output(
-        &["diskutil", "unmountDisk", "force", &format!("disk{}", disk)],
-        Duration::from_secs(60),
-        )
-        .map(|_| ())
+    crate::platform::unmount_disk(runner, disk)
 }
 
 #[cfg(test)]
@@ -449,9 +339,11 @@ mod tests {
 
     // 与 Python test_list.py 相同的 8 盘矩阵: disk4=USB(未识别), disk6=USB(cems),
     // disk7=Thunderbolt, disk0/1=系统盘, disk8=DMG虚拟盘
+    #[cfg(target_os = "macos")]
     fn plist_str(s: &str) -> String {
         format!("<string>{}</string>", s)
     }
+    #[cfg(target_os = "macos")]
     fn fake_diskutil() -> FakeRunner {
         let list = format!(
             "<plist version=\"1.0\"><dict><key>AllDisks</key><array>{}</array></dict></plist>",
@@ -504,6 +396,7 @@ mod tests {
         FakeRunner { outputs: m }
     }
 
+    #[cfg(target_os = "macos")]
     #[test]
     fn enumeration_filters_and_protocol() {
         let runner = fake_diskutil();
@@ -588,6 +481,7 @@ mod tests {
         assert_eq!(split_class_blocks(no_root, "IOUSBHostDevice").len(), 1);
     }
 
+    #[cfg(target_os = "macos")]
     #[test]
     fn disk_total_sectors_prefers_disksize() {
         let mut m = HashMap::new();
