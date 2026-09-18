@@ -13,6 +13,10 @@
 2026-09-18 经用户明确要求，项目版本线从此前的 `3.0.0` 重新起算为 `1.0.0`。这是一次
 明确授权的版本线重置，不应被后续 AI 当作一般惯例重复执行。
 
+2026-09-18 起，正式发布架构矩阵固定为：macOS arm64、macOS x86_64、macOS Universal、
+Linux arm64、Linux x86_64、Windows arm64、Windows x86_64。新增/删除正式架构属于对公开
+发布能力的变更，按 SemVer 决定版本级别；当前首次加入 Linux/Windows arm64 使用 `1.1.0`。
+
 ## 后续版本号由维护 AI 自主决定
 
 以后每次正式发布，维护 AI 根据本次变更自行选择 SemVer 版本，不需要为了普通版本升级再次
@@ -66,20 +70,22 @@ PATCH 递增，不能复用旧 tag。
 3. `cargo fmt --all -- --check` 通过；
 4. `cargo test --all-targets` 通过；
 5. `cargo clippy --all-targets -- -D warnings` 通过；
-6. 固定版本 Runner 的 macOS / Linux / Windows CI 全绿；
-7. 虚拟磁盘 HIL-lite 门禁全绿；
+6. 固定版本 Runner 的 macOS / Linux / Windows arm64 + x86_64 六架构 CI 全绿；
+7. Linux / Windows arm64 + x86_64 虚拟磁盘 HIL-lite 门禁全绿；
 8. tag 与 `Cargo.toml` 版本完全一致；
-9. 三平台 Release 产物全部生成；
+9. 三平台 arm64/x86_64 以及 macOS Universal 共七套 Release 产物全部生成；
 10. 三个平台的 SHA-256 sidecar 独立校验通过；
 11. macOS Universal 包确认同时包含 `arm64` 与 `x86_64`；
-12. Linux 包确认是预期 ELF 架构，Windows 包确认是预期 PE 架构。
+12. Linux 两个包分别确认是预期 ELF arm64/x86_64，Windows 两个包分别确认是预期 PE
+    arm64/x86_64。
 
 如果任一平台构建或验收失败，不创建残缺的正式 Release。
 
 ## Rust 与 Runner 基线
 
 - Release Rust 工具链固定为 `rust-toolchain.toml` 中指定的版本；当前为 `1.98.1`。
-- 正式 CI / Release 使用固定系统镜像，避免 `*-latest` 静默切换导致同一个版本不可复现。
+- 正式 CI / Release 使用固定系统镜像和原生 CPU 架构 Runner，避免 `*-latest` 静默切换，
+  也避免把交叉编译成功误当成目标平台原生验证成功。
 - 另设 `latest` 兼容性工作流用于提前发现未来操作系统或 Rust stable 的兼容问题，但它不改变
   正式 Release 的构建基线。
 
@@ -117,7 +123,8 @@ GitHub-hosted Runner 没有真实 EDP USB 硬件，因此不能声称完成真�
 硬件验证”。如果未来具备实体 Linux/Windows 主机，应新增真实 USB HIL，而不是删除现有
 虚拟磁盘测试。
 
-当前 `Virtual Disk HIL` workflow 的实际覆盖为：
+当前 `Virtual Disk HIL` workflow 在 Linux/Windows 的 arm64 与 x86_64 Runner 上分别执行，
+实际覆盖为：
 
 - Linux：创建临时磁盘镜像 → loop 整盘 → MBR 分区 → ext4 → 挂载 marker → 产品
   `prepare_write` 执行 `umount2` → 对真实 `/dev/loopN` 做 LBA0-13 原子写/同步/读回 →

@@ -10,17 +10,24 @@
 
 ## 1. 下载与安装
 
-每个 `v*` tag 都会由 GitHub Actions 自动构建并发布三套产物：
+每个 `v*` tag 都会由 GitHub Actions 在对应原生架构 Runner 上构建并发布七套二进制产物：
 
 | 平台 | Release 产物 | 架构 |
 |---|---|---|
-| macOS | `edpcli-vX.Y.Z-macos-universal.tar.gz` | Apple Silicon + Intel Universal |
+| macOS | `edpcli-vX.Y.Z-macos-arm64.tar.gz` | Apple Silicon arm64 |
+| macOS | `edpcli-vX.Y.Z-macos-x86_64.tar.gz` | Intel x86_64 |
+| macOS | `edpcli-vX.Y.Z-macos-universal.tar.gz` | arm64 + x86_64 Universal |
+| Linux | `edpcli-vX.Y.Z-linux-arm64.tar.gz` | arm64 |
 | Linux | `edpcli-vX.Y.Z-linux-x86_64.tar.gz` | x86_64 |
+| Windows | `edpcli-vX.Y.Z-windows-arm64.zip` | arm64 |
 | Windows | `edpcli-vX.Y.Z-windows-x86_64.zip` | x86_64 |
 
 每个压缩包旁都有同名 `.sha256` 文件，可在安装前核对下载完整性。
 
 ### macOS
+
+Apple Silicon 优先下载 `macos-arm64`，Intel Mac 下载 `macos-x86_64`。`macos-universal`
+同时包含两个架构，适合需要同一文件兼容两类 Mac 的场景，但体积约为单架构包的两倍。
 
 ```bash
 tar -xzf edpcli-vX.Y.Z-macos-universal.tar.gz
@@ -34,6 +41,8 @@ edpcli --version
 
 ### Linux
 
+ARM64 Linux 下载 `linux-arm64`，Intel/AMD 64 位 Linux 下载 `linux-x86_64`。
+
 ```bash
 tar -xzf edpcli-vX.Y.Z-linux-x86_64.tar.gz
 chmod +x edpcli
@@ -43,13 +52,18 @@ edpcli --version
 
 ### Windows
 
-解压 `edpcli-vX.Y.Z-windows-x86_64.zip`，将 `edpcli.exe` 放到固定目录，并把该目录加入
+Windows on ARM 下载 `windows-arm64`，Intel/AMD 64 位 Windows 下载 `windows-x86_64`。
+解压对应 zip，将 `edpcli.exe` 放到固定目录，并把该目录加入
 `PATH`。随后在 PowerShell 或 Windows Terminal 中验证：
 
 ```powershell
 edpcli.exe --version
+edpcli.exe version
 edpcli.exe list
 ```
+
+`--version` 保持单行，便于脚本读取；`version` 输出完整构建信息，包括版本、平台、架构、
+目标 triple、UTC 编译时间、Git commit、Rust 编译器与构建类型。
 
 需要裸盘权限的命令会由程序请求 UAC 提权，不要求手工先用管理员终端启动。
 
@@ -244,9 +258,10 @@ edpcli completion fish | source
 
 仓库有两套 GitHub Actions：
 
-- `Rust CI`：每次 push / PR 在 macOS、Linux、Windows 上执行全量测试、clippy 与 release build。
-- `Release`：推送 `v*` tag 后重新执行发布级测试，并自动构建 macOS Universal、Linux x86_64、
-  Windows x86_64 三套压缩包及 SHA-256，全部成功后创建同 tag 的 GitHub Release。
+- `Rust CI`：每次 push / PR 在 macOS/Linux/Windows 的 arm64 与 x86_64 六个原生 Runner 上
+  执行全量测试、clippy 与 release build。
+- `Release`：推送 `v*` tag 后重新执行发布级测试，构建三平台各自的 arm64/x86_64 包，
+  并额外由两个原生 macOS 包生成 Universal 包；每个压缩包都有独立 SHA-256。
 
 正式发布前还会校验 tag 与 `Cargo.toml` 版本一致；任一平台构建失败都不会创建不完整的
 Release。版本号升级规则、发布门禁和无物理 Linux/Windows 主机时的验收口径见

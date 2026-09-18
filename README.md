@@ -20,6 +20,10 @@ GBK 解码、本地时间和用户目录等通用能力均在进程内实现；�
 版本号从 `1.0.0` 正式起算；后续由维护 AI 按 SemVer 根据实际变更自主决定 PATCH / MINOR /
 MAJOR，并必须遵守 [`docs/RELEASE.md`](docs/RELEASE.md)，避免后续维护过程中遗忘版本策略。
 
+正式 Release 同时提供 macOS/Linux/Windows 的 `arm64` 与 `x86_64` 原生包；macOS 额外提供
+Universal 包。`edpcli version` 可查看当前二进制的目标平台、架构、编译时间、Git commit、
+Rust 版本和构建类型，`edpcli --version` 继续保持兼容脚本的单行版本输出。
+
 ## 快速使用
 
 ```bash
