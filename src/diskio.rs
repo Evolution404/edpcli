@@ -8,7 +8,6 @@ use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::os::unix::io::AsRawFd;
 use std::os::unix::fs::FileExt;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -339,7 +338,7 @@ pub fn atomic_write_sectors(
 }
 
 // ══════════════════════════════════════════════════════════════════
-// 2. 时钟(本地时间; 真实现借 /bin/date, 测试注入 FixedClock)
+// 2. 时钟(本地时间; 进程内换算, 测试注入 FixedClock)
 // ══════════════════════════════════════════════════════════════════
 pub trait Clock {
     fn now_epoch(&self) -> i64;
@@ -359,32 +358,31 @@ impl Clock for SystemClock {
             .unwrap_or(0)
     }
     fn fmt_ts(&self, epoch: i64) -> String {
-        date_fmt(epoch, "%Y%m%d_%H%M%S", |(y, mo, d, h, mi, s)| {
-            format!("{:04}{:02}{:02}_{:02}{:02}{:02}", y, mo, d, h, mi, s)
-        })
+        let (y, mo, d, h, mi, s) = local_parts(epoch);
+        format!("{y:04}{mo:02}{d:02}_{h:02}{mi:02}{s:02}")
     }
     fn fmt_human(&self, epoch: i64) -> String {
-        date_fmt(epoch, "%Y-%m-%d %H:%M", |(y, mo, d, h, mi, _)| {
-            format!("{:04}-{:02}-{:02} {:02}:{:02}", y, mo, d, h, mi)
-        })
+        let (y, mo, d, h, mi, _) = local_parts(epoch);
+        format!("{y:04}-{mo:02}-{d:02} {h:02}:{mi:02}")
     }
 }
 
 type UtcParts = (i64, u32, u32, u32, u32, u32);
-type UtcFormatter = fn(UtcParts) -> String;
 
-fn date_fmt(epoch: i64, fmt: &str, utc: UtcFormatter) -> String {
-    let date_fmt_str = format!("+{}", fmt);
-    if let Ok(out) = Command::new("/bin/date").arg("-r").arg(epoch.to_string()).arg(&date_fmt_str).output() {
-        if out.status.success() {
-            let s = String::from_utf8_lossy(&out.stdout).trim().to_string();
-            if !s.is_empty() {
-                return s;
-            }
-        }
-    }
-    // 兜底: UTC 换算(date 不可用时; 文件名场景仍保唯一性)
-    utc(utc_parts(epoch))
+fn local_parts(epoch: i64) -> UtcParts {
+    let Ok(utc) = time::OffsetDateTime::from_unix_timestamp(epoch) else {
+        return utc_parts(epoch);
+    };
+    let offset = time::UtcOffset::local_offset_at(utc).unwrap_or(time::UtcOffset::UTC);
+    let local = utc.to_offset(offset);
+    (
+        local.year() as i64,
+        u8::from(local.month()) as u32,
+        local.day() as u32,
+        local.hour() as u32,
+        local.minute() as u32,
+        local.second() as u32,
+    )
 }
 
 /// Howard Hinnant civil_from_days: epoch → (年,月,日,时,分,秒) (UTC)。
@@ -1243,9 +1241,8 @@ mod tests {
     }
 
     #[test]
-    fn clock_fmt_uses_date_cmd() {
+    fn clock_fmt_uses_local_time_without_system_date_process() {
         let c = SystemClock;
-        // /bin/date 在 macOS 必在; 校验格式形状
         let ts = c.fmt_ts(1789660800);
         assert_eq!(ts.len(), 15, "{}", ts); // YYYYmmdd_HHMMSS
         let h = c.fmt_human(1789660800);

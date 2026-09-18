@@ -2,8 +2,8 @@
 name = "edpcli"
 version = "3.0.0"
 edition = "2021"
-rust-version = "1.75"
-description = "EDP/cems U 盘管理 CLI（识别、元信息、备份、恢复与免密转换；纯 Rust 标准库，零依赖）"
+rust-version = "1.98"
+description = "EDP/cems U 盘管理 CLI（识别、元信息、备份、恢复与免密转换）"
 license = "MIT"
 publish = false
 
@@ -17,3 +17,7 @@ path = "src/main.rs"
 
 [profile.release]
 strip = true
+
+[dependencies]
+encoding_rs = "0.8"
+time = { version = "0.3", features = ["local-offset"] }

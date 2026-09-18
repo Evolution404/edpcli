@@ -1,7 +1,8 @@
 # edpcli — EDP/cems U 盘管理 CLI
 
-Rust 标准库实现，**零第三方 Rust crate**，单二进制 `edpcli`（macOS；复用系统自带
-`diskutil` / `ioreg` / `sudo` / `iconv` 等工具）。
+Rust 单二进制 `edpcli`（macOS）。核心协议与数据处理在进程内完成；允许使用成熟 Rust
+crate 减少系统命令依赖。当前保留 `diskutil` / `ioreg` / `sudo` 处理 macOS 设备枚举、
+硬件属性和提权，GBK 解码与本地时间格式化已不再启动 `iconv` / `/bin/date` 子进程。
 
 ## 快速使用
 
@@ -276,9 +277,9 @@ Rust 时即以此验证**字节级零漂移**（差分对齐：双实现离线�
 （成功 / 中途失败自动回滚 / 读回不符回滚）、备份命名迁移、同型号他盘剔除
 （LBA4 终验）、CLI 端到端。真实备份缺位时相关用例自动跳过。
 
-CI 在 macOS 上固定执行 `cargo test --all-targets`、`cargo clippy --all-targets -- -D warnings`
-和 release 构建；另用 Rust 1.75.0 执行 `cargo check --all-targets`，确保 `rust-version = "1.75"`
-的最低版本承诺持续成立。
+CI 在 macOS stable Rust 上固定执行 `cargo test --all-targets`、
+`cargo clippy --all-targets -- -D warnings` 和 release 构建。项目最低 Rust 版本同步当前
+stable 基线为 `rust-version = "1.98"`，不再维护旧编译器兼容分支。
 
 device_id 自动识别（SCSI INQUIRY + 传输模式 → Windows InstanceId 中间段，
 两个候选用 LBA7 解出 EDPF magic 判真），无需手工输入。

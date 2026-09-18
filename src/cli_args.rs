@@ -79,7 +79,7 @@ pub fn print_usage() {
     println!(
         "{}",
         bold(&format!(
-            "edpcli — EDP/cems U 盘管理 CLI（纯 Rust 标准库，零依赖） v{}",
+            "edpcli — EDP/cems U 盘管理 CLI v{}",
             env!("CARGO_PKG_VERSION")
         ))
     );

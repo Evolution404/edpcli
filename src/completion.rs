@@ -1,6 +1,6 @@
 //! Shell Tab 补全脚本与动态候选提供器。
 //!
-//! 保持零依赖：zsh/bash/fish 脚本只负责上下文判断；onlyid、备份编号、
+//! 补全脚本自身不依赖外部补全框架：zsh/bash/fish 只负责上下文判断；onlyid、备份编号、
 //! 备份文件名和物理盘号由隐藏的 `edpcli __complete ...` 实时提供。
 
 use std::collections::BTreeSet;

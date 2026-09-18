@@ -230,7 +230,9 @@ pub fn a7f0_encrypt(data: &[u8], key_raw: &[u8], counter: u32) -> [u8; 16] {
 pub fn a6b0_full(data: &[u8], key: &[u8], initial_counter: u32) -> Vec<u8> {
     let mut out = Vec::with_capacity(data.len());
     let mut ctr = initial_counter;
-    for blk in data.chunks_exact(16) {
+    let (blocks, remainder) = data.as_chunks::<16>();
+    debug_assert!(remainder.is_empty(), "A6B0 输入长度必须是 16 的倍数");
+    for blk in blocks {
         out.extend_from_slice(&a6b0_decrypt(blk, key, ctr));
         ctr = ctr.wrapping_add(16);
     }
@@ -241,7 +243,9 @@ pub fn a6b0_full(data: &[u8], key: &[u8], initial_counter: u32) -> Vec<u8> {
 pub fn a7f0_full(data: &[u8], key: &[u8], initial_counter: u32) -> Vec<u8> {
     let mut out = Vec::with_capacity(data.len());
     let mut ctr = initial_counter;
-    for blk in data.chunks_exact(16) {
+    let (blocks, remainder) = data.as_chunks::<16>();
+    debug_assert!(remainder.is_empty(), "a7f0 输入长度必须是 16 的倍数");
+    for blk in blocks {
         out.extend_from_slice(&a7f0_encrypt(blk, key, ctr));
         ctr = ctr.wrapping_add(16);
     }

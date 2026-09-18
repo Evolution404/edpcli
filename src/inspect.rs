@@ -2,8 +2,8 @@
 //! 本模块不做任何写盘动作，也不负责提权；CLI 只在物理盘来源时请求裸盘读取权限。
 
 use std::collections::BTreeSet;
-use std::io::Write;
-use std::process::{Command, Stdio};
+
+use encoding_rs::GBK;
 
 use crate::common::SECTOR;
 use crate::crypto::{a6b0_full, crc32_bare, lba6_checksum, lba6_decode, xor_rolling};
@@ -173,23 +173,15 @@ fn c_field_end(b: &[u8], start: usize, end: usize) -> usize {
 }
 
 fn decode_gbk(b: &[u8]) -> Option<String> {
-    let mut child = Command::new("iconv")
-        // 旧 LLGB 固定长度文本偶尔会在末尾截断一个 GBK 双字节字符。
-        // `-c` 只丢弃无法转换的残缺尾字节，保留此前全部可读文本，避免整段退化成 hex。
-        .args(["-c", "-f", "GBK", "-t", "UTF-8"])
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()
-        .ok()?;
-    child.stdin.as_mut()?.write_all(b).ok()?;
-    let output = child.wait_with_output().ok()?;
-    // macOS iconv 遇到末尾残缺 GBK 时会返回非 0，但 stdout 已包含此前完整可读文本。
-    // 对展示型元数据应保留这部分，而不是整段退化成 hex。
-    if !output.status.success() && output.stdout.is_empty() {
-        return None;
-    }
-    String::from_utf8(output.stdout).ok()
+    let (decoded, had_errors) = GBK.decode_without_bom_handling(b);
+    let value = if had_errors {
+        // 旧 LLGB 固定长度字段偶尔会截断一个 GBK 双字节字符。旧实现的
+        // `iconv -c` 会丢弃坏字节但保留可读前缀；这里保持相同语义。
+        decoded.replace('\u{FFFD}', "")
+    } else {
+        decoded.into_owned()
+    };
+    (!value.is_empty()).then_some(value)
 }
 
 fn text_value(b: &[u8]) -> String {
