@@ -85,6 +85,34 @@ pub trait SectorDev {
     }
 }
 
+/// 只读展示/诊断路径的扇区缓存。
+///
+/// `info` / `inspect` 可能先读取身份扇区，再由摘要/渲染阶段请求同一 LBA。
+/// 这些路径不承担写入前后的新鲜度校验，因此可以在一次命令会话内复用已读数据，
+/// 避免重复访问同一裸盘扇区。apply/restore 的安全复核不得使用该缓存。
+pub struct SectorReadCache<'a> {
+    dev: &'a mut dyn SectorDev,
+    cache: BTreeMap<u32, Vec<u8>>,
+}
+
+impl<'a> SectorReadCache<'a> {
+    pub fn new(dev: &'a mut dyn SectorDev) -> Self {
+        Self {
+            dev,
+            cache: BTreeMap::new(),
+        }
+    }
+
+    pub fn read_sector(&mut self, lba: u32) -> io::Result<Vec<u8>> {
+        if let Some(data) = self.cache.get(&lba) {
+            return Ok(data.clone());
+        }
+        let data = self.dev.read_sector(lba)?;
+        self.cache.insert(lba, data.clone());
+        Ok(data)
+    }
+}
+
 /// 打开镜像/raw 设备文件。流程以只读打开(挂载态可读); 写阶段经 reopen_rdwr
 /// 在卸载后切换为 O_RDWR — 与 Python 版时序一致(dry-run 从不需要写权限,
 /// O_RDWR 的 EBUSY 重试只发生在卸载之后)。
@@ -1092,6 +1120,41 @@ pub fn read_lba_file(dir: &Path, lba: u32) -> Vec<u8> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    struct CountingSectorDev {
+        reads: usize,
+    }
+
+    impl SectorDev for CountingSectorDev {
+        fn reopen_rdwr(&mut self, _wait: Duration) -> io::Result<()> {
+            Err(io::Error::other("not used"))
+        }
+
+        fn read_sector(&mut self, lba: u32) -> io::Result<Vec<u8>> {
+            self.reads += 1;
+            Ok(vec![lba as u8; SECTOR])
+        }
+
+        fn write_sector(&mut self, _lba: u32, _data: &[u8]) -> io::Result<()> {
+            Err(io::Error::other("not used"))
+        }
+
+        fn sync(&mut self) -> io::Result<()> {
+            Err(io::Error::other("not used"))
+        }
+    }
+
+    #[test]
+    fn sector_read_cache_reuses_read_only_sector_data() {
+        let mut dev = CountingSectorDev { reads: 0 };
+        {
+            let mut cache = SectorReadCache::new(&mut dev);
+            assert_eq!(cache.read_sector(7).unwrap(), vec![7u8; SECTOR]);
+            assert_eq!(cache.read_sector(7).unwrap(), vec![7u8; SECTOR]);
+            assert_eq!(cache.read_sector(4).unwrap(), vec![4u8; SECTOR]);
+        }
+        assert_eq!(dev.reads, 2, "同一 LBA 的只读展示查询只应访问底层一次");
+    }
 
     #[test]
     fn label_id_positive_negative_malformed() {

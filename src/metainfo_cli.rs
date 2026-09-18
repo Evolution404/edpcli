@@ -5,7 +5,7 @@
 
 use crate::cli::{auto_pick_disk, guard_usb_disk, InfoOpts, StdPrompter};
 use crate::common::{EXIT_BACKUP, EXIT_IO, EXIT_OK, SECTOR};
-use crate::diskio::{self, find_backups, raw_path, DiskFacts};
+use crate::diskio::{self, find_backups, raw_path, DiskFacts, FileDev, SectorReadCache};
 use crate::elevate;
 use crate::identify::identify;
 use crate::inspect::InspectMeta;
@@ -136,7 +136,18 @@ fn disk_flow(runner: &dyn CmdRunner, mut opts: InfoOpts) -> i32 {
     }
 
     let path = raw_path(n);
-    let raw7 = diskio::read_lba(&path, 7).ok();
+    let mut dev = match FileDev::open_rdonly(&path) {
+        Ok(dev) => dev,
+        Err(e) => {
+            eprintln!(
+                "{}",
+                crate::ui::red(&format!("错误: 无法只读打开 disk{n}: {e}"))
+            );
+            return EXIT_IO;
+        }
+    };
+    let mut reader = SectorReadCache::new(&mut dev);
+    let raw7 = reader.read_sector(7).ok();
     let auto_device_id = raw7
         .as_deref()
         .and_then(|raw| identify(runner, n, raw).device_id);
@@ -144,7 +155,7 @@ fn disk_flow(runner: &dyn CmdRunner, mut opts: InfoOpts) -> i32 {
     let (vid, pid) = sysinfo::usb_vid_pid(runner, n);
     let total_sectors = sysinfo::disk_total_sectors(runner, n);
     let size_bytes = total_sectors.and_then(|s| s.checked_mul(SECTOR as u64));
-    let raw4 = diskio::read_lba(&path, 4).ok();
+    let raw4 = reader.read_sector(4).ok();
     let onlyid = raw4.as_deref().and_then(diskio::lba4_label_id_from);
     let inspect_meta = InspectMeta {
         device_id: device_id.clone(),
@@ -153,7 +164,7 @@ fn disk_flow(runner: &dyn CmdRunner, mut opts: InfoOpts) -> i32 {
         size_bytes,
         onlyid: onlyid.clone(),
     };
-    let summary = match metainfo::summarize(&inspect_meta, |lba| diskio::read_lba(&path, lba)) {
+    let summary = match metainfo::summarize(&inspect_meta, |lba| reader.read_sector(lba)) {
         Ok(summary) => summary,
         Err(e) => {
             eprintln!(
