@@ -23,5 +23,6 @@ pub(crate) mod metainfo_cli;
 pub mod platform;
 pub mod plist;
 pub mod sectors;
+pub mod selectors;
 pub mod sysinfo;
 pub mod ui;

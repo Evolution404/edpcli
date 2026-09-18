@@ -47,6 +47,7 @@ pub struct MetaInfoSummary {
     pub safe6_register: Option<String>,
     pub safe6_checksum: Option<String>,
     pub pdkb_device_id: Option<String>,
+    pub is_nopwd: Option<bool>,
     pub partitions: Vec<PartitionInfo>,
 }
 
@@ -96,6 +97,7 @@ pub fn summarize<F>(base: &InspectMeta, mut read: F) -> io::Result<MetaInfoSumma
 where
     F: FnMut(u32) -> io::Result<Vec<u8>>,
 {
+    let raw0 = read(0)?;
     let raw4 = read(4)?;
     let raw6 = read(6)?;
     let raw7 = read(7)?;
@@ -103,6 +105,7 @@ where
     let raw11 = read(11)?;
     let raw12 = read(12)?;
     for (lba, raw) in [
+        (0, &raw0),
         (4, &raw4),
         (6, &raw6),
         (7, &raw7),
@@ -133,6 +136,19 @@ where
     let mut partition_rows = partitions(&v7, "LBA7");
     partition_rows.extend(partitions(&v12, "LBA12"));
 
+    let is_nopwd = base.device_id.as_deref().and_then(|device_id| {
+        let snapshot = |lba| match lba {
+            0 => Ok(raw0.clone()),
+            6 => Ok(raw6.clone()),
+            12 => Ok(raw12.clone()),
+            _ => Err(crate::common::EdpCliError::new(
+                crate::common::EXIT_IO,
+                format!("错误: info 免密判断不应读取 LBA{lba}"),
+            )),
+        };
+        crate::sectors::looks_nopwd(&snapshot, device_id).ok()
+    });
+
     Ok(MetaInfoSummary {
         onlyid,
         device_id: base.device_id.clone(),
@@ -154,6 +170,7 @@ where
         safe6_register: field_value(&v6, "注册标志"),
         safe6_checksum: field_value(&v6, "校验和"),
         pdkb_device_id: field_value(&v11, "PDKB device_id"),
+        is_nopwd,
         partitions: partition_rows,
     })
 }
@@ -181,8 +198,12 @@ pub fn ownership_from_lba8(raw: &[u8], inspect_meta: &InspectMeta) -> Option<Own
 }
 
 pub fn render(summary: &MetaInfoSummary) -> String {
+    render_with_source(summary, None)
+}
+
+pub fn render_with_source(summary: &MetaInfoSummary, source: Option<&str>) -> String {
     let mut out = String::new();
-    out.push_str(&format!("{}\n", crate::ui::bold_cyan("身份信息")));
+    out.push_str(&format!("{}\n", crate::ui::bold_cyan("设备")));
     let row = |out: &mut String, key: &str, value: Option<&str>, paint: fn(&str) -> String| {
         if let Some(value) = value.filter(|v| !v.is_empty()) {
             out.push_str(&format!(
@@ -192,6 +213,7 @@ pub fn render(summary: &MetaInfoSummary) -> String {
             ));
         }
     };
+    row(&mut out, "来源", source, crate::ui::cyan);
     row(
         &mut out,
         "onlyid",
@@ -232,7 +254,7 @@ pub fn render(summary: &MetaInfoSummary) -> String {
     );
 
     out.push('\n');
-    out.push_str(&format!("{}\n", crate::ui::bold_cyan("归属信息")));
+    out.push_str(&format!("{}\n", crate::ui::bold_cyan("身份")));
     row(
         &mut out,
         "Dept",
@@ -277,7 +299,21 @@ pub fn render(summary: &MetaInfoSummary) -> String {
     }
 
     out.push('\n');
-    out.push_str(&format!("{}\n", crate::ui::bold_cyan("SAFE6")));
+    out.push_str(&format!("{}\n", crate::ui::bold_cyan("状态")));
+    row(
+        &mut out,
+        "EDP/cems",
+        summary.device_id.as_ref().map(|_| "已识别"),
+        crate::ui::green,
+    );
+    row(
+        &mut out,
+        "免密",
+        summary
+            .is_nopwd
+            .map(|value| if value { "是" } else { "否" }),
+        crate::ui::green,
+    );
     row(
         &mut out,
         "标签",

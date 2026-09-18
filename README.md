@@ -1,387 +1,129 @@
 # edpcli — EDP/cems U 盘管理 CLI
 
-Rust 单二进制 `edpcli`，支持 **macOS / Linux / Windows**。协议、扇区转换、备份、检查器、
-元信息与安全策略共用同一业务核心；设备枚举、裸盘路径、系统盘识别、提权、卸载/锁卷和
-硬件探测统一收敛在 `src/platform/`。
+Rust 单二进制工具，支持 **macOS / Linux / Windows**。三平台共享同一套 EDP/cems
+识别、备份、元信息、扇区检查、转换与安全写入核心；操作系统差异统一收敛在
+`src/platform/`。
 
-- macOS：IOKit 原生读取 USB VID/PID、UAS/BOT 与 SCSI inquiry；属性缺失时才回退
-  `ioreg`。整盘信息/卸载使用 `diskutil`，提权使用 `sudo`。
-- Linux：通过 sysfs 与 `/proc/self/mountinfo` 原生识别块设备、USB 与系统盘关系，写前
-  使用 `umount2` 卸载；提权使用 `sudo`。
-- Windows：使用 SetupAPI / Storage IOCTL 原生获取 PhysicalDrive、VID/PID、UAS/BOT、
-  容量与系统卷映射；写前对目标卷执行 `FSCTL_LOCK_VOLUME + FSCTL_DISMOUNT_VOLUME`，
-  提权使用 UAC，不依赖 PowerShell。
+CLI v2 的日常工作流只有五类任务：
 
-GBK 解码、本地时间和用户目录等通用能力均在进程内实现；业务层不直接出现上述 OS 细节。
+```text
+edpcli list       查看当前插入的 U 盘
+edpcli info       查看 U 盘或备份详细信息
+edpcli apply      预览或执行 U 盘改造
+edpcli backup     创建、查看、校验、恢复和清理备份
+edpcli inspect    高级：检查底层 LBA/hex 数据
+```
 
-完整安装、三平台 `--disk` 写法、首次使用流程、备份/还原和发布说明见
-[`docs/USAGE.md`](docs/USAGE.md)。
+无参数 `edpcli` 等价于 `edpcli list`。
 
-版本号从 `1.0.0` 正式起算；后续由维护 AI 按 SemVer 根据实际变更自主决定 PATCH / MINOR /
-MAJOR，并必须遵守 [`docs/RELEASE.md`](docs/RELEASE.md)，避免后续维护过程中遗忘版本策略。
-
-正式 Release 同时提供 macOS/Linux/Windows 的 `arm64` 与 `x86_64` 原生包；macOS 额外提供
-Universal 包。`edpcli version` 可查看当前二进制的目标平台、架构、编译时间、Git commit、
-Rust 版本和构建类型，`edpcli --version` 继续保持兼容脚本的单行版本输出。
+完整安装、跨平台 selector、备份恢复和发布说明见
+[`docs/USAGE.md`](docs/USAGE.md)。版本策略和 Release 门禁见
+[`docs/RELEASE.md`](docs/RELEASE.md)。
 
 ## 快速使用
 
 ```bash
-cargo build --release            # 或 cargo install --path . 装入 ~/.cargo/bin
-./target/release/edpcli list      # 列出外接盘：编号/容量/接口/姓名/部门/cems/免密/EDPF/备份；需要时自动请求管理员权限
-./target/release/edpcli run       # 预览改造（dry-run，自动检测 USB 盘）
-edpcli run --disk 4               # 指定盘；也接受当前平台原生整盘路径/名称
-edpcli apply                      # 实际写入（自动备份 → 原子写入 → 读回校验）
-edpcli apply --disk 4 --size 100  # 指定盘 + Share 100GB
-edpcli apply --force              # 盘已是免密盘仍强制重写（默认拒绝）
-edpcli restore                    # 交互还原：列出本盘备份（新→旧，免密快照标注）→ 选择 → YES → 写入
-edpcli restore <备份.bin> --yes   # 脚本化还原（自动确认）
-edpcli backup                     # 默认就是 list：跨盘分组总览
-edpcli backup list                # 显式写法；每份显示编号 + 真实文件名
-edpcli backup list --onlyid ID    # 只查看某一物理盘
-edpcli backup verify              # 全量校验备份（7168 字节 + MD5）
-edpcli backup verify --onlyid ID  # 校验某一物理盘全部备份
-edpcli backup verify --onlyid ID --index 2  # 只校验该盘第 2 份
-edpcli backup prune               # 按策略预览旧免密快照（默认不删除）
-edpcli backup rm --onlyid ID      # 显示该盘编号列表 → 选择 → YES 删除
-edpcli backup rm --onlyid ID 2-3  # 按编号/范围删除；加 --yes 可脚本化
-edpcli backup rm <备份.bin>       # 仍支持按文件名/路径精确删除
-edpcli inspect                    # 有 U 盘则只读查看；没插盘则列出可离线查看的备份盘
-edpcli inspect 6 7 12 --disk 14  # 展开物理盘指定扇区的结构化字段
-edpcli inspect 7 12 --disk 14 --hex  # 追加字段感知高亮 hex
-edpcli inspect --onlyid ID        # 先列出该盘有哪些 [1][2]... 可选备份
-edpcli inspect --onlyid ID --index 2 # 按 backup list 编号查看某份备份
-edpcli meta                       # 当前 U 盘关键信息；无盘时列出可查看的备份盘
-edpcli meta 1987718388            # 直接看该 onlyid 最新 [1] 备份
-edpcli meta 1987718388 2          # 直接看第 2 份备份
-edpcli meta backup.bin            # 直接看指定备份
-edpcli inspect <备份.bin> 11 12 --hex          # 文件可直接作位置参数，不提权
-edpcli inspect 11 12 --backup <备份.bin> --hex # 仍支持显式 --backup
-edpcli completion zsh             # 生成 zsh Tab 补全（bash/fish 同理）
-edpcli convert --dir <快照目录> --id <device_id> [--out <目录>]   # 离线验证（不碰真盘）
+edpcli
+edpcli list
+edpcli info
+edpcli info --disk 4
+edpcli info backup.bin
+
+edpcli apply --dry-run
+edpcli apply --dry-run --disk 4
+edpcli apply --disk 4
+edpcli apply --disk 4 --size 100
+edpcli apply --disk 4 --force
+
+edpcli backup create
+edpcli backup create --disk 4
+edpcli backup list
+edpcli backup restore
+edpcli backup restore 2 --disk 4
+edpcli backup verify
+edpcli backup verify 2
+edpcli backup delete
+edpcli backup delete 2,4,5
+edpcli backup prune --keep 2
+
+edpcli inspect --lba 7
+edpcli inspect --disk 4 --lba 6,7,12 --hex
+edpcli inspect backup.bin --lba 7,12 --hex
+edpcli inspect backup.bin --lba 7 --raw
+
+edpcli convert --dir ./snapshot --id 'disk&ven_aigo&prod_u335' --out ./converted
+edpcli version
 ```
 
-### Tab 补全
+## 备份
 
-补全不是静态命令表：`onlyid`、`--index`、备份文件名、当前物理盘号和 LBA0-13
-都会由 `edpcli` 实时提供候选。
+`backup create` 与 `apply` 写前自动备份共用同一个 `create_backup` service：
+
+- 固定读取 LBA0-13，共 7168B；
+- 使用相同的 onlyid、device_id、VID/PID、容量元数据；
+- 使用相同命名和 `_nopwd` 状态标记；
+- 写出相同 MD5 sidecar；
+- 使用 create-new 防覆盖、fsync 和目录持久化；
+- 独立备份路径只读 U 盘，不卸载、不锁卷、不 reopen 为读写、不写任何扇区。
+
+`backup list` 使用统一的全局展示编号。相同编号语义用于 `verify`、`delete`
+以及恢复时的备份选择；恢复仍会按当前物理盘身份过滤并以 LBA4 身份标签终验，避免同型号
+U 盘串盘。
+
+## 写盘安全
+
+`apply` 与 `backup restore` 的真实写盘路径保持以下 fail-closed 门禁：
+
+- 目标必须是外接 USB 整盘；
+- 系统盘身份无法确认时拒绝继续；
+- 提权前固定平台原生 selector；
+- 写前读取 LBA0-13，并在 apply 时先创建自动备份；
+- 写入前卸载/锁定目标卷；
+- reopen 后再次核对介质和写前元数据；
+- 原子写入、sync、逐扇读回校验；
+- 任一写入失败自动回滚，回滚结果有独立退出码；
+- 恢复备份必须通过大小、MD5 与当前盘 LBA4 身份终验。
+
+`edpcli apply --dry-run` 复用真实识别和布局计算，但不会创建备份、请求写入确认、
+卸载/锁卷、reopen 或写入扇区。
+
+## 平台实现
+
+- **macOS**：IOKit/IORegistry 获取 USB、UAS/BOT 与 SCSI 信息，`diskutil` 处理整盘信息
+  和写前卸载，管理员权限由 CLI 自己请求。
+- **Linux**：sysfs 与 `/proc/self/mountinfo` 识别块设备和系统盘关系，写前使用原生
+  卸载逻辑，管理员权限由 CLI 自己请求。
+- **Windows**：SetupAPI / Storage IOCTL 获取 PhysicalDrive 与系统卷关系，写前执行
+  volume lock/dismount，通过 UAC 重执行。
+
+业务层有平台边界门禁，禁止重新直接依赖 OS 专用命令、设备路径或 PowerShell。
+
+## Shell 补全
 
 ```bash
-# zsh（当前 shell）
+# zsh
 eval "$(edpcli completion zsh)"
 
-# bash（当前 shell）
+# bash
 eval "$(edpcli completion bash)"
 
-# fish（当前 shell）
+# fish
 edpcli completion fish | source
 ```
 
-长期启用时，把对应命令放入 `~/.zshrc` / `~/.bashrc` / fish 配置即可。
-子命令内部也支持聚焦帮助，例如 `edpcli inspect --help`、`edpcli backup --help`；
-参数写错时只打印当前子命令的短帮助，不再刷整页全局教程。
+补全会动态提供当前物理盘、备份全局编号、备份文件名和 LBA0-13，并与 CLI v2 parser
+使用同一命令模型。
 
-`list` 效果（sudo 下 cems 盘认示三信号免密检测 `[免密]` 标记，并解密 LBA12
-展示 EDPF 分区表——类型/LBA 范围/定义大小；原盘 3 条 Boot·Share·Encrypt，
-转换后 2 条）：
+## 开发与验证
 
-```
-$ edpcli list
-外接盘 1 个:
-  disk14  125.83GB  USB           3535:6300      cems盘 [免密]
-                    └─ EDPF: Share 124.48GB (LBA 63~243,116,059) · Encrypt 1.34GB (LBA 243,116,060~245,734,654)
-                       onlyid=1987718388 · 备份 3 份
-```
-
-`restore` 交互选单（带序号，免密快照/加密原盘双侧标记）：
-
-```
-$ edpcli restore
-disk14 匹配备份 3 个(新→旧):
-  1)  2026-09-17 22:41   [加密原盘]
-  2)  2026-09-16 23:36   [免密状态]
-  3)  2026-08-27 22:25   [加密原盘]
-选择 [1-3] (回车取消):
-```
-
-终端输出带语义色（错误红/成功绿/警告黄/标记绿/降级灰/help 着色），
-管道重定向或设置 `NO_COLOR` 时自动降级为纯文本。
-
-- **自动提权**：`run` / `apply` / `restore` 需要裸盘读写，`inspect` / `meta` 查看物理盘时
-  需要裸盘只读；`list` 会先无特权扫描，若读取裸盘身份、姓名或部门时实际遇到权限不足，
-  也会自动进入平台授权流程。macOS/Linux 在当前终端直接出现管理员密码提示，Windows 通过
-  UAC 重执行自身；不要求用户退出后再手工重跑命令。跨提权边界时会把抽象盘号固定为平台
-  原生 selector，避免 Linux 枚举序号在重执行后漂移。`backup` / `convert` 以及离线
-  `inspect` / `meta` 永不提权。
-- `--yes` 免交互；多块 USB 盘时自动弹编号选择。系统盘不再依赖固定盘号猜测：macOS
-  根据 `/` 的 APFS PhysicalStore，Linux 根据根文件系统设备链，Windows 根据系统卷
-  disk extents 原生确认；任一平台无法确认系统盘身份时均 fail-closed，禁止写盘。
-- `restore` 无论交互选择还是显式传入备份路径，写入前都以 LBA4 唯一身份标签终验当前盘；
-  另一块物理盘的备份即使大小和 MD5 都正确也会被拒绝，防止同型号/误选文件串盘还原。
-  同时要求对应 `.md5` 存在且校验通过；缺 sidecar 或摘要不符都不会进入写盘阶段。
-- 备份目录（四级优先）：`--backup-dir` 旗标 > 环境变量 `EDPCLI_BACKUP_DIR` >
-  `~/.edpcli.conf` 的 `backup_dir = 路径` > `./backup`。
-  - macOS/Linux 自动提权时 `sudo` 可能清环境变量，父进程会把 `$EDPCLI_BACKUP_DIR`
-    解析为绝对路径并以显式 `--backup-dir` 旗标传给提权后的子进程。
-  - 不建议手工预先进入管理员会话。直接运行 `edpcli` 即可，由工具按平台在确有需要时
-    请求授权，并把已经解析好的备份目录显式传给提权后的子进程。
-
-## 备份管理
-
-`edpcli backup` 提供跨盘总览、校验、策略清理与手动删除，全部只访问备份目录，
-**不会自动提权，也不会访问任何平台的物理裸盘设备**：
+项目工具链由 `rust-toolchain.toml` 固定。常用门禁：
 
 ```bash
-edpcli backup [list] [--onlyid ID] [--backup-dir D]
-edpcli backup verify [<备份.bin>] [--onlyid ID] [--index N] [--backup-dir D]
-edpcli backup prune  [--onlyid ID] [--keep N] [--yes] [--backup-dir D]
-edpcli backup rm     --onlyid ID [编号|范围]... [--yes] [--backup-dir D]
-edpcli backup rm     <路径|文件名>... [--yes] [--backup-dir D]
+cargo fmt --all -- --check
+cargo test --all-targets
+cargo clippy --all-targets -- -D warnings
 ```
 
-- `list`：按物理盘分组显示全部 `.bin`；优先以 `onlyid` 分组，历史文件缺 onlyid
-  时回退 `(device_id, 总扇区数)` 并标记为未知盘。每份备份同时检查固定大小
-  `14 × 512 = 7168B` 与 `.md5` sidecar；正常为绿色 `MD5 ✓`，摘要损坏为红色，
-  缺 sidecar 为黄色。每盘内部按新→旧编号 `[1] [2] ...`，下一行始终显示真实
-  文件名；`--onlyid ID` 只显示指定物理盘。无法解析为本工具命名的 `.bin` 仍以
-  灰色“未识别”列出。
-- `verify`：无参数校验目录内全部 `.bin`，`--onlyid ID` 只校验指定盘，继续加
-  `--index N` 可只校验该盘第 N 份；带文件名/
-  路径时只校验该份（单文件与 `--onlyid` 不能同时使用）。大小不符、
-  MD5 不符、缺 `.md5`、文件不存在均返回退出码 5；全部正常返回 0。
-- 备份“新→旧”顺序以文件名中的 `_YYYYMMDD_HHMMSS` 创建时间为准；复制、`touch`
-  等导致的文件系统 mtime 变化不会改变 `[1][2]...` 编号或 `prune` 的保留判断。
-- 备份归属盘以文件内容 LBA4 的 onlyid 为权威；即使文件名被手工改错 onlyid，
-  `list / inspect / rm / completion` 仍按真实 LBA4 归组。`.md5` 同时兼容纯摘要和
-  标准 `HASH  filename` 格式，`verify` 与 `restore` 使用同一解析规则。
-- 自动备份文件名中的 `device_id` 在落盘前执行严格安全字符校验；硬件返回的
-  vendor/product 字符串若包含 `/`、控制字符或异常长度会直接拒绝创建备份，避免
-  通过文件名路径分隔符写出备份目录。
-- 自动备份输入必须恰好为 LBA0-13 共 7168B；文件名中的 onlyid 始终从这份备份
-  自身的 LBA4 重新解析，不信任调用方缓存的身份字段。自动扫描/还原候选只接受
-  备份目录中的普通 `.bin` 文件，符号链接及其它扩展名不会进入候选；`.md5`
-  sidecar 也必须是普通文件，不跟随符号链接读取目录外内容。
-- `prune`：默认**只预览、不删除**；只有显式 `--yes` 才执行。加密原盘备份永不
-  自动删除；每盘免密状态快照默认保留最新 2 份，可用 `--keep N` 调整，`--keep 0`
-  允许清光免密快照，但前提是该盘仍有加密原盘备份；加 `--onlyid ID` 时策略只
-  作用于该盘。
-- **安全底线**：任何可识别盘组都不允许被清到 0 份备份。若某盘没有加密原盘
-  备份，则即使 `--keep 0` 也会强制保留最新 1 份免密快照；`backup rm` 手动删除
-  同样执行这条保护，不能把该盘最后一份备份删掉。
-- `rm`：人工操作优先用 `--onlyid ID`。不给编号时先展示该盘新→旧列表并进入选择器，
-  支持 `2`、`1,3`、`2-4`；直接给编号/范围时按当前列表解析。确认页再次显示编号、
-  时间、类型、健康状态和真实文件名，并提示删除后还剩几份。`--yes` 只有在已经
-  显式给出编号/范围时才允许使用，避免无选择目标的非交互误删。原有文件名/路径
-  精确删除仍保留：裸文件名按当前备份目录解析，绝对/相对路径也必须最终落在当前
-  备份目录内，否则拒绝。删除前还会重新核对 `.bin` 内容摘要与扫描/确认时一致，
-  防止确认期间同名文件被替换后误删新文件；删除时 `.bin` 与对应 `.md5` 同步处理。
-- 文件即使是 root 属主，只要备份目录本身对当前用户可写，仍可由普通用户删除；
-  若目录由 root 持有且不可写，命令返回退出码 5，并明确提示检查目录属主/权限，
-  必要时再手动使用 `sudo rm`。`edpcli backup` 自身不会提权。
-
-## 扇区检查器
-
-`edpcli inspect` 将原 `analyze/scripts/read_metadata.py` 的核心能力整合进正式 CLI，
-但不照搬原脚本的大段无差别 hex 输出。物理盘与备份文件共用同一套解析器：
-
-```bash
-edpcli inspect                              # 当前 USB 盘；无盘时列出可查看的备份盘
-edpcli inspect 0 4 6 7 8 9 11 12 --disk 14
-edpcli inspect 7 12 --disk 14 --hex        # 解码后高亮 hex
-edpcli inspect 7 --disk 14 --raw           # 只看盘上原始密文/原始字节
-edpcli inspect --onlyid 1987718388          # 先列出 [1][2]...，不报用法错误
-edpcli inspect --onlyid 1987718388 --index 2
-edpcli inspect backup.bin 7 12 --hex        # --backup 可省略
-edpcli inspect 6 7 11 12 --onlyid 1987718388 --index 2 --hex
-edpcli inspect 7 12 --backup backup.bin --id 'disk&ven_...' --hex
-edpcli inspect 6 7 12 --backup backup.bin --export ./metadata-out
-```
-
-- **来源统一**：不指定备份来源时优先查看物理 USB 盘；若当前没有外接 USB 盘，则直接
-  列出备份目录中可用的 `onlyid`、型号、份数和最新时间，引导继续离线查看，而不是只报
-  “未检测到外接盘”。缺 `--disk` 时会复用现有 USB 盘选择器；
-  该路径仅做 `pread`/只读打开，不卸载、不写盘。`--backup` 支持任意备份/镜像路径，
-  裸文件名按备份目录解析，也可直接写成位置参数 `edpcli inspect backup.bin ...`；
-  `--onlyid ID` 单独使用时先展示可选备份，`--onlyid ID --index N` 与 `backup list` 的
-  `[N]` 编号完全一致。
-- **默认先看概览**：未指定 LBA 且未要求 `--hex/--raw` 时只扫描 LBA0-13，显示每扇区非零字节数、前导字符与
-  已知解密方式，不直接打印 14×512B。指定 LBA 后优先显示结构化字段；若该扇区没有检测到
-  已知结构，只给出简短说明并提示使用 `--hex`，不会自动刷满 512B。若明确加了 `--hex`
-  或 `--raw` 却没写 LBA，则按直觉展开全部 LBA0-13，
-  不会悄悄忽略旗标；`--hex` 与 `--raw` 不能同时使用。
-- **层级化结构展示**：重复记录按 `Entry[n] / Part[n] / 分区 Pn` 分组，不再在每一行重复
-  前缀；LBA8 LLGB 的 `GLab / Dept / User / Label / Rmark` 等子字段逐行展示，空字段合并成
-  一行摘要；EDPF 的 `pwd_crc / key_crc / key8 / Hash` 独立成“密钥信息”子块。长值自动换行，
-  避免结构化输出横向撑满终端。
-- **字段感知 hex**：`--hex` 显示解码后的 16B/行 hex，并按语义给已知字段着色：
-  魔数/签名、文本、身份/密钥、地址/LBA、大小、类型/标志、校验分别使用不同语义色；
-  校验失败使用红色。`--raw` 改看盘上原始 512B，不对密文套用解码字段颜色。
-- **结构解析**：LBA0 MBR；LBA4 labelOnlyId；LBA6 SAFE6（GBK 标签/用户、CRC、注册标志、
-  校验和）；LBA7 EDPF 64B entry；LBA8 LLGB；LBA9 SAPF；LBA11 DRKB/PDKB；
-  LBA12 EDPF 96B entry。未知 LBA 保持 RAW。
-- **备份比旧脚本更完整**：现代备份文件名本身已有 `device_id / VID / PID / 容量 / onlyid`，
-  检查器会直接使用这些元数据，所以 LBA11 的 PDKB **在备份文件上也可解密**，不再只限
-  当前硬件盘。旧/任意镜像若缺 device_id，可用 `--id` 手动补充。
-- **LBA12 按已验证真实格式显示**：只对前 368B 做 A6B0 解密，尾部 144B 保持原始字节；
-  不沿用旧脚本把整扇区都作为 AES 数据展示的方式。
-- **导出**：`--export DIR` 为所查看扇区同时写出 `_raw.bin/.hex` 与
-  `_decoded.bin/.hex`；未指定 LBA 时导出 LBA0-13 全部。hex 导出始终无 ANSI 色码。
-
-## 元信息查看
-
-日常查看设备/备份信息不需要再记 `inspect --onlyid ... --index ... 8`。`metainfo`
-（短别名 `meta`）直接把多个扇区的关键信息汇总成一张元信息卡片：
-
-```bash
-edpcli meta                         # 当前物理 U 盘
-edpcli meta 1987718388              # 该 onlyid 最新 [1] 备份
-edpcli meta 1987718388 2            # 第 2 份备份
-edpcli meta backup.bin              # 指定备份/镜像
-edpcli metainfo --disk 4            # 显式物理盘
-```
-
-输出包括 `onlyid / device_id / device_id CRC32 / VID:PID / 容量 / PDKB device_id`，
-以及 LBA8 的 `Dept / User / Label / Rmark / GLab / Autonum`、LBA6 SAFE6 信息和
-LBA7/LBA12 分区摘要。`meta <onlyid>` **默认选择最新 `[1]`**，只有查看历史备份时
-才需要追加编号。`meta`、`metainfo`、onlyid、备份编号、物理盘号均纳入 Tab 补全。
-
-`edpcli backup` / `edpcli backup list` 的每个 onlyid 分组也会直接显示最新备份解析出的
-`Dept` 和 `User`，因此浏览备份时不需要再进入扇区检查器确认归属。
-
-### 从 v2（Python 版）迁移
-
-| v2 | v3 |
-|---|---|
-| `sudo python3 -m edpcli --list` | `edpcli list` |
-| `sudo python3 -m edpcli [--disk N]` | `edpcli run [--disk N]` |
-| `sudo python3 -m edpcli --apply --force` | `edpcli apply --force` |
-| `--restore` → 复制路径 → `--restore <bin> --apply` 三步 | `edpcli restore` 一条命令交互完成 |
-| `make apply FORCE=1`（make 吃 flag 的坑已消失） | Makefile 已移除 |
-
-### 退出码（脚本可区分失败类型）
-
-| 码 | 含义 |
-|---|---|
-| 0 | 成功（含 dry-run/预览） |
-| 1 | 运行时 IO 错误 |
-| 2 | 用法错误（未知旗标/缺参数/参数非法） |
-| 3 | 目标不可用（非 cems 盘/识别失败/size 越界/系统盘） |
-| 4 | 已免密盘拒绝重复写入（需 `--force`） |
-| 5 | 备份问题（无匹配/大小或 MD5 异常/缺 sidecar/删除失败/安全保护拒绝） |
-| 6 | 写失败且回滚失败（中间态，需人工处理） |
-| 7 | 写失败但已完整回滚（可安全重试） |
-| 130 | 用户取消 |
-
-## 代码结构
-
-```
-src/
-  common.rs    公共常量、容量显示、Python 兼容舍入(银行家)、退出码契约
-  platform/    macOS / Linux / Windows OS 依赖层（枚举、selector、提权、系统盘、锁卷/卸载、硬件探测）
-  crypto.rs    逆向 cemsusbregsiter.dll / sectormanage64.dll 得到的加密原语
-  sectors.rs   扇区格式与转换（MBR / SAFE6 / EDPF），convert() 主编排
-  identify.rs  device_id 识别（统一 HardwareProbe + LBA7 magic 判真）
-  sysinfo.rs   跨平台系统探测门面与可注入 CmdRunner
-  diskio.rs    扇区设备抽象(SectorDev)、原子写入、备份/还原、备份元数据扫描/清理策略、快照读取
-  inspect.rs   只读扇区解密/结构解析/字段感知 hex 渲染（物理盘与备份共用）
-  completion.rs zsh/bash/fish 补全脚本 + onlyid/编号/盘号等动态候选
-  md5.rs       MD5（备份 sidecar）
-  plist.rs     极简 XML plist 解析（diskutil -plist 输出）
-  elevate.rs   跨平台自动提权入口（具体机制由 platform 实现）
-  cli.rs       子命令解析与各处理器（Ctx 注入，进程内可测）
-tests/         集成测试（cargo test；金标 + 原子写三态 + 备份体系 + CLI）
-backup/        真实盘备份（兼测试夹具，提交入库）
-```
-
-分层无环：`common → crypto → sectors / diskio → identify → cli`。
-测试以**单文件版对真实盘备份的实测输出为金标**（三种型号 × 默认尺寸 + `--size`
-路径的输出扇区 md5、CRC/K0、布局参数），锁死重构的行为零漂移 —— v2→v3 重写为
-Rust 时即以此验证**字节级零漂移**（差分对齐：双实现离线产物逐字节 cmp 全一致，
-含 `--size 1/1.5/2/7.5/10/32/50/50.5/60/63.9` 舍入矩阵）。另覆盖原子写入三态
-（成功 / 中途失败自动回滚 / 读回不符回滚）、备份命名迁移、同型号他盘剔除
-（LBA4 终验）、CLI 端到端。真实备份缺位时相关用例自动跳过。
-
-CI 使用 `macos-latest / ubuntu-latest / windows-latest` 三平台矩阵，固定执行
-`cargo test --all-targets`、`cargo clippy --all-targets -- -D warnings` 和 release 构建。
-另外有平台边界门禁，禁止业务层重新出现 `diskutil/ioreg/sudo`、`/dev/*`、sysfs、
-`PhysicalDrive`、PowerShell 等 OS 细节。项目最低 Rust 版本为 `rust-version = "1.98"`。
-
-device_id 自动识别（SCSI INQUIRY + 传输模式 → Windows InstanceId 中间段，
-两个候选用 LBA7 解出 EDPF magic 判真），无需手工输入。
-
-备份匹配（`edpcli restore`）按 总扇区+VID/PID+device_id 分层匹配，并以
-**LBA4 labelOnlyId（每盘随机唯一）终验** —— 同型号多块盘（device_id/容量
-全同）也不会拿错备份。备份文件名含显式 `onlyid<labelOnlyId>` 段，人眼即可区分：
-`disk{N}_{扇区数}_vid{}_pid{}_{device_id}_onlyid{labelOnlyId}[_nopwd]_{时间戳}.bin`。
-历史 `_lid..._` 或缺少 onlyid 的备份不再被扫描过程改名；工具只读解析其文件名，
-并以内存中读取到的 `.bin` 自身 LBA4 补齐/覆盖 onlyid 后参与分组和终验。
-
-## 改造内容（5 个扇区，其余一律不动）
-
-| 扇区 | 改动 |
-|---|---|
-| LBA0 | MBR 分区1 → type=0x07 @63 × Share 扇数（数据区直挂） |
-| LBA6 | 0x1CA=128,480；0x1D4-0x1ED 清零；身份保留；校验和重算 |
-| LBA7 | EDPF 2 条版本 2：Share@63 + 原 type4 指针原样；**表尾终止符@0xC0 保留** |
-| LBA12 | EDPF 2 条版本 2：Share@63 + Encrypt(原盘真实位置)；**终止符@0x120 与尾部 144B 保留** |
-| LBA9 | 非零则清零（EETU） |
-
-三条铁律：EDPF 表尾终止符不清零；LBA12 尾部 144B 不清零；除必要字段外不发明
-原盘没有的状态。分区参数全部按实际物理盘计算（Encrypt 取自原盘 LBA12 type=4）。
-
-## 原子写入（全有或全无）
-
-USB 盘硬件不提供跨扇区事务，`apply` / `restore` 的写入按七层逼近原子语义：
-
-1. **重开前后状态终验** — 写前备份并确认后，必须先成功卸载；重新以 O_RDWR 打开
-   当前平台裸盘设备后，再读 LBA0-13 与刚备份的写前快照逐扇比对。换盘、重枚举或
-   同盘元数据在确认期间发生变化都在第一笔写入前拒绝；
-2. **目标类型终验** — 真盘 `run / apply / restore / inspect --disk` 即使显式传了
-   `--disk N`，也必须由平台层重新确认为外接 USB 整盘；系统盘身份、卸载/锁卷状态
-   任一无法确认均直接拒绝；
-3. **单 fd 全程持有** — 打开一次平台裸盘句柄直到全部写完、校验完，不再逐扇
-   重开（旧版中途重开会撞 EBUSY，留下半写状态）；
-4. **LBA0 最后写** — 唯一改 MBR 的扇区最后提交，降低系统重扫/重新挂载干扰事务的窗口；
-5. **介质缓存同步** — 每轮写入后执行平台同步屏障；macOS 裸盘使用
-   `DKIOCSYNCHRONIZECACHE`，Linux/Windows 与普通镜像文件使用对应文件同步能力，
-   同步成功后才进入读回；事务开始前还会先做一次同步能力预检；
-6. **逐扇读回校验** — 缓存同步完成后逐扇读回比对，避免只验证到内核写缓存；
-7. **失败自动回滚** — 任一步失败，用写前内存镜像回滚全部扇区并再次同步、校验。
-   回滚成功 = 盘仍为原状可安全重试（退出码 7）；回滚失败 = 明确报告中间态并
-   指引 `edpcli restore` 从备份文件还原（写前已先落盘一份备份）（退出码 6）。
-
-事务入口只接受 LBA0-13 且每项必须恰好 512B；越界 LBA 或非整扇区数据在第一笔
-写入前直接拒绝。每次实际写入仍检查短写（`pwrite` 循环写满，0 视为失败）。
-
-## 重复 apply 的行为（幂等 + 防误操作）
-
-对已改造的免密盘再次 `apply`：转换是幂等的（四个扇区产物与首次逐字节一致，
-实测三种型号），重写无害 —— 但工具默认**拒绝**：
-
-- **检测**：LBA6（0x1CA 模板值，部分型号无区分度）/ MBR（分区1 type=0x07@63）/
-  LBA12（解密后 entry0=Share@63+enc=1，entry1=Encrypt 指针 active=1，entry2 已清零）
-  三处信号须同时成立。主信号是 LBA12 表结构：加密原盘恒为 3 条 EDPF
-  （aigo 原盘 entry0 也是 type=2@63，故不能只看 type/start）。
-- 拒绝时提示加 `--force`（退出码 4）；强制重写时自动备份的文件名含
-  `_nopwd_` 段，`restore` 列表中该项标注 `[免密状态]` —— 还原它不会回到
-  加密原盘，加密原盘备份是更早时间戳那份。备份打标按**内容**检测（与文件名无关）。
-
-## 内置加密算法（逆向 cemsusbregsiter.dll / sectormanage64.dll）
-
-- CRC32 bare：init=0、poly 0xEDB88320、无 final-xor
-- LBA7：K0 = low16^high16(CRC32(device_id))，16 位字滚动 XOR
-- LBA12：key = CRC32×4 ^ "EDPSECDISK200709"，AES-128 变体（counter=块号×16），仅前 368B
-- LBA6：固定 K0=0x4DAA 滚动 XOR；校验和 = 密文 CRC32(bare) ×10 轮 ((v>>15)+(v<<1))
-
-## 实测记录
-
-2026-08-27 内网实测免密成功：aigo U335 128G / aigo U320 32G / Kingston DT3.0 64G。
-每盘改前自动备份，`restore` 可完整还原。
-
-v3（Rust 重写，2026-09-17）：金标零漂移验证 + 差分对齐（双实现产物逐字节一致）
-后替换 v2；v2 代码见 git 标签 `python-final`。
-
-2026-09-17 v3 真机验证（aigo U335 128G, disk26）全链路通过：`run` 识别/预览 →
-`restore` 原盘备份还原（dd 14 扇区与备份逐字节一致）→ `apply` 重新转换（真盘
-LBA0/6/7/9/12 md5 与金标逐项一致）→ 三信号检出免密盘 → 重复 `apply` 拒绝
-（exit 4）→ `--force` 重写幂等 + 备份正确打 `_nopwd` 标。
+CI 在 macOS、Linux、Windows 的 arm64 / x86_64 六个目标上执行测试、clippy 和构建；
+Linux/Windows 另有 arm64 / x86_64 virtual-disk HIL。正式 Release 同时发布六个原生包，
+macOS 额外发布 Universal 包。

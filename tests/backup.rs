@@ -6,11 +6,11 @@ mod common;
 use std::fs;
 
 use common::*;
-use edpcli::cli::{backup_list, backup_prune, backup_rm, backup_verify};
+use edpcli::cli::{backup_delete, backup_list, backup_prune, backup_verify};
 use edpcli::common::SECTOR;
 use edpcli::diskio::Clock;
 use edpcli::diskio::{
-    backup_disk, backup_is_nopwd, backup_label_id, find_backups, parse_backup_name,
+    backup_is_nopwd, backup_label_id, create_backup, find_backups, parse_backup_name,
     prune_candidates, scan_backup_dir, BackupEntry, BackupMeta, DiskFacts, Md5Status,
 };
 
@@ -107,7 +107,7 @@ fn backup_written_with_md5_and_onlyid() {
         return;
     };
     let tmp = TmpDir::new("backup");
-    let (path, is_nopwd) = backup_disk(
+    let (path, is_nopwd) = create_backup(
         &netac_facts(),
         &data,
         "disk&ven_netac&prod_onlydisk",
@@ -141,7 +141,7 @@ fn backup_rejects_incomplete_lba_image_before_creating_files() {
     };
     data.pop();
     let tmp = TmpDir::new("backup_short_image");
-    let result = backup_disk(
+    let result = create_backup(
         &netac_facts(),
         &data,
         "disk&ven_netac&prod_onlydisk",
@@ -161,7 +161,7 @@ fn backup_filename_onlyid_is_derived_from_lba4_content() {
     let tmp = TmpDir::new("backup_content_onlyid");
     let mut facts = netac_facts();
     facts.label_id = Some("999999999".into());
-    let (path, _) = backup_disk(
+    let (path, _) = create_backup(
         &facts,
         &data,
         "disk&ven_netac&prod_onlydisk",
@@ -214,7 +214,7 @@ fn backup_rejects_device_id_with_path_separators_before_creating_files() {
     fs::create_dir_all(&bak).unwrap();
     // 旧实现会把 device_id 原样拼进文件名。预建第一层目录后，`/../../` 可逃出 bak。
     fs::create_dir_all(bak.join("disk99_122880000_vid0dd8_pid2005_disk&ven_bad")).unwrap();
-    let result = backup_disk(
+    let result = create_backup(
         &netac_facts(),
         &data,
         "disk&ven_bad/../../escaped",
@@ -245,7 +245,7 @@ fn creating_new_backup_does_not_rename_existing_history() {
     );
     let legacy_md5 = std::path::PathBuf::from(format!("{}.md5", legacy.display()));
 
-    let (new_path, _) = backup_disk(
+    let (new_path, _) = create_backup(
         &netac_facts(),
         &data,
         "disk&ven_netac&prod_onlydisk",
@@ -267,7 +267,7 @@ fn backup_collision_never_overwrites_existing_file() {
         return;
     };
     let tmp = TmpDir::new("backup_collision");
-    let (path, _) = backup_disk(
+    let (path, _) = create_backup(
         &netac_facts(),
         &original,
         "disk&ven_netac&prod_onlydisk",
@@ -280,7 +280,7 @@ fn backup_collision_never_overwrites_existing_file() {
     // 保持同一时间戳和同一“加密原盘”状态，只改一个与识别无关的保留扇区字节。
     let mut second = original.clone();
     second[2 * 512 + 17] ^= 0x5A;
-    let err = backup_disk(
+    let err = create_backup(
         &netac_facts(),
         &second,
         "disk&ven_netac&prod_onlydisk",
@@ -311,7 +311,7 @@ fn backup_tagging_by_content() {
     };
     let tmp = TmpDir::new("tagging");
     // 免密状态镜像 → 文件名含 _nopwd + 返回标记
-    let (path, is_nopwd) = backup_disk(&netac_facts(), &conv, &did, &tmp.0, &FixedClock).unwrap();
+    let (path, is_nopwd) = create_backup(&netac_facts(), &conv, &did, &tmp.0, &FixedClock).unwrap();
     let name = path.file_name().unwrap().to_string_lossy().into_owned();
     assert!(name.contains("_nopwd"), "{}", name);
     assert!(is_nopwd);
@@ -474,7 +474,7 @@ fn md5_sidecar_symlink_is_not_followed() {
     fs::write(&outside, format!("{}\n", md5(&data))).unwrap();
     symlink(&outside, &sidecar).unwrap();
 
-    assert_eq!(backup_verify(&tmp.0, None, None), 5);
+    assert_eq!(backup_verify(&tmp.0, None), 5);
     assert!(outside.exists(), "校验不能修改符号链接目标");
     let _ = fs::remove_file(outside);
 }
@@ -644,11 +644,10 @@ fn verify_and_prune_preview_exit_contract() {
         assert!(p.exists(), "snapshot {i}");
     }
 
-    assert_eq!(backup_verify(&tmp.0, None, None), 0);
+    assert_eq!(backup_verify(&tmp.0, None), 0);
     assert_eq!(
         backup_verify(
             &tmp.0,
-            None,
             Some(original_path.file_name().unwrap().to_str().unwrap()),
         ),
         0
@@ -658,16 +657,16 @@ fn verify_and_prune_preview_exit_contract() {
         "disk6_122880000_vid0dd8_pid2005_disk&ven_netac&prod_onlydisk_onlyid1402259934_20260910_170010.bin",
     );
     fs::write(&bad, &original).unwrap(); // 故意缺 .md5
-    assert_eq!(backup_verify(&tmp.0, None, None), 5);
+    assert_eq!(backup_verify(&tmp.0, None), 5);
 
     let before = fs::read_dir(&tmp.0).unwrap().count();
-    assert_eq!(backup_prune(&tmp.0, None, 2, false), 0);
+    assert_eq!(backup_prune(&tmp.0, 2, false), 0);
     let after = fs::read_dir(&tmp.0).unwrap().count();
     assert_eq!(before, after, "prune 预览绝不能删除文件");
 }
 
 #[test]
-fn rm_cancel_yes_missing_and_last_backup_guard() {
+fn delete_cancel_yes_missing_and_last_backup_guard() {
     let Some(original) = load_disk_image("netac") else {
         eprintln!("跳过: 真实备份不可用");
         return;
@@ -689,9 +688,8 @@ fn rm_cancel_yes_missing_and_last_backup_guard() {
         idx: 0,
     };
     assert_eq!(
-        backup_rm(
+        backup_delete(
             &tmp.0,
-            None,
             &[first.file_name().unwrap().to_string_lossy().into_owned()],
             false,
             &mut deny,
@@ -702,9 +700,8 @@ fn rm_cancel_yes_missing_and_last_backup_guard() {
 
     let mut unused = ScriptPrompter::yes();
     assert_eq!(
-        backup_rm(
+        backup_delete(
             &tmp.0,
-            None,
             &[first.file_name().unwrap().to_string_lossy().into_owned()],
             true,
             &mut unused,
@@ -714,11 +711,10 @@ fn rm_cancel_yes_missing_and_last_backup_guard() {
     assert!(!first.exists());
     assert!(!std::path::PathBuf::from(format!("{}.md5", first.display())).exists());
 
-    // 安全底线：同盘只剩 second 时，手动 rm 也不能清到零份。
+    // 安全底线：同盘只剩 second 时，手动 delete 也不能清到零份。
     assert_eq!(
-        backup_rm(
+        backup_delete(
             &tmp.0,
-            None,
             &[second.file_name().unwrap().to_string_lossy().into_owned()],
             true,
             &mut unused,
@@ -727,7 +723,7 @@ fn rm_cancel_yes_missing_and_last_backup_guard() {
     );
     assert!(second.exists());
     assert_eq!(
-        backup_rm(&tmp.0, None, &["missing.bin".into()], true, &mut unused),
+        backup_delete(&tmp.0, &["missing.bin".into()], true, &mut unused),
         5
     );
 }
@@ -749,7 +745,7 @@ impl edpcli::cli::Prompter for ReplaceBeforeConfirm {
 }
 
 #[test]
-fn rm_refuses_if_confirmed_backup_is_replaced_before_delete() {
+fn delete_refuses_if_confirmed_backup_is_replaced_before_delete() {
     let (Some(original), Some(replacement)) = (load_disk_image("netac"), load_disk_image("lexar"))
     else {
         eprintln!("跳过: 真实备份不可用");
@@ -772,9 +768,8 @@ fn rm_refuses_if_confirmed_backup_is_replaced_before_delete() {
     };
 
     assert_eq!(
-        backup_rm(
+        backup_delete(
             &tmp.0,
-            None,
             &[victim.file_name().unwrap().to_string_lossy().into_owned()],
             false,
             &mut prompt,
@@ -786,14 +781,13 @@ fn rm_refuses_if_confirmed_backup_is_replaced_before_delete() {
 }
 
 #[test]
-fn onlyid_filter_and_numbered_rm_follow_newest_first_order() {
+fn global_numbered_delete_follows_backup_list_order() {
     let (Some(original), Some(other_disk)) = (load_disk_image("netac"), load_disk_image("lexar"))
     else {
         eprintln!("跳过: 真实备份不可用");
         return;
     };
     let tmp = TmpDir::new("onlyid_numbered_rm");
-    let id = "1402259934";
     let names = [
         "disk6_122880000_vid0dd8_pid2005_disk&ven_netac&prod_onlydisk_onlyid1402259934_20260910_170001.bin",
         "disk6_122880000_vid0dd8_pid2005_disk&ven_netac&prod_onlydisk_onlyid1402259934_20260910_170002.bin",
@@ -805,7 +799,7 @@ fn onlyid_filter_and_numbered_rm_follow_newest_first_order() {
         set_mtime(&p, 1_700_000_001 + i as i64);
         paths.push(p);
     }
-    // 另一个 onlyid 的备份不应被筛选或删除。
+    // 另一个盘的备份参与同一全局编号。
     let other = write_backup(
         &tmp.0,
         "disk6_122880000_vid0dd8_pid2005_disk&ven_netac&prod_onlydisk_onlyid999999999_20260910_170004.bin",
@@ -813,18 +807,13 @@ fn onlyid_filter_and_numbered_rm_follow_newest_first_order() {
     );
     set_mtime(&other, 1_700_000_004);
 
-    assert_eq!(backup_list(&tmp.0, Some(id)), 0);
-    assert_eq!(backup_list(&tmp.0, Some("404")), 5);
-    assert_eq!(backup_verify(&tmp.0, Some(id), None), 0);
-    assert_eq!(backup_verify(&tmp.0, Some("404"), None), 5);
-    assert_eq!(backup_prune(&tmp.0, Some(id), 2, false), 0);
+    assert_eq!(backup_list(&tmp.0), 0);
+    assert_eq!(backup_verify(&tmp.0, Some("3")), 0);
+    assert_eq!(backup_prune(&tmp.0, 2, false), 0);
 
-    // 编号按文件名创建时间新→旧，所以 [2] 是 paths[1]。
+    // 全局编号按创建时间新→旧：other=[1], paths[2]=[2], paths[1]=[3], paths[0]=[4]。
     let mut unused = ScriptPrompter::yes();
-    assert_eq!(
-        backup_rm(&tmp.0, Some(id), &["2".into()], true, &mut unused),
-        0
-    );
+    assert_eq!(backup_delete(&tmp.0, &["3".into()], true, &mut unused), 0);
     assert!(paths[0].exists());
     assert!(!paths[1].exists());
     assert!(paths[2].exists());
@@ -832,7 +821,7 @@ fn onlyid_filter_and_numbered_rm_follow_newest_first_order() {
 }
 
 #[test]
-fn onlyid_rm_without_selector_enters_picker_then_confirms() {
+fn delete_without_target_enters_global_picker_then_confirms() {
     let Some(original) = load_disk_image("netac") else {
         eprintln!("跳过: 真实备份不可用");
         return;
@@ -855,10 +844,7 @@ fn onlyid_rm_without_selector_enters_picker_then_confirms() {
         inputs: vec!["2".into(), "YES".into()],
         idx: 0,
     };
-    assert_eq!(
-        backup_rm(&tmp.0, Some("1402259934"), &[], false, &mut prompt),
-        0
-    );
+    assert_eq!(backup_delete(&tmp.0, &[], false, &mut prompt), 0);
     assert!(!older.exists());
     assert!(newer.exists());
 }

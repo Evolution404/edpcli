@@ -11,7 +11,7 @@ use std::fs;
 use std::process::Command;
 
 use common::*;
-use edpcli::cli::{apply_flow, restore_flow, Ctx};
+use edpcli::cli::{apply_flow, backup_create_flow, restore_flow, ApplyMode, Ctx};
 use edpcli::common::{
     EXIT_ALREADY_NOPWD, EXIT_BACKUP, EXIT_CANCELLED, EXIT_OK, EXIT_TARGET, SECTOR,
 };
@@ -93,7 +93,7 @@ fn system_disk_refused_without_elevation() {
         .find(|&disk| edpcli::platform::is_system_disk(&runner, disk))
         .expect("macOS system disk");
     let r = bin()
-        .args(["run", "--disk", &system_disk.to_string()])
+        .args(["apply", "--dry-run", "--disk", &system_disk.to_string()])
         .output()
         .unwrap();
     assert_eq!(r.status.code(), Some(3));
@@ -218,8 +218,7 @@ fn apply_refuses_without_force() {
     )
     .unwrap();
     let e = apply_flow(
-        true,
-        false,
+        ApplyMode::Write { force: false },
         6,
         None,
         &mut ctx(&runner, &mut prompt, &bak),
@@ -252,8 +251,7 @@ fn apply_force_writes_same_sectors_and_tags_backup() {
     )
     .unwrap();
     let code = apply_flow(
-        true,
-        true,
+        ApplyMode::Write { force: true },
         6,
         None,
         &mut ctx(&runner, &mut prompt, &bak),
@@ -296,8 +294,7 @@ fn apply_original_disk_not_blocked_and_dry_run_no_write() {
     )
     .unwrap();
     let code = apply_flow(
-        true,
-        false,
+        ApplyMode::Write { force: false },
         6,
         None,
         &mut ctx(&runner, &mut prompt, &bak),
@@ -317,8 +314,7 @@ fn apply_original_disk_not_blocked_and_dry_run_no_write() {
     let mut dev2 =
         FileDev::open_rdwr(img2.to_str().unwrap(), std::time::Duration::from_secs(1)).unwrap();
     let code2 = apply_flow(
-        false,
-        false,
+        ApplyMode::DryRun,
         6,
         None,
         &mut ctx(&runner, &mut prompt2, &tmp2.0.join("bak2")),
@@ -327,6 +323,155 @@ fn apply_original_disk_not_blocked_and_dry_run_no_write() {
     .unwrap();
     assert_eq!(code2, EXIT_OK);
     assert_eq!(fs::read(&img2).unwrap(), orig);
+}
+
+#[test]
+fn dry_run_never_enters_backup_prompt_reopen_or_write_phase() {
+    let Some(orig) = load_disk_image("netac") else {
+        eprintln!("跳过: 真实备份不可用");
+        return;
+    };
+    let runner = netac_runner(6);
+    let tmp = TmpDir::new("apply_dry_side_effect_contract");
+    let backup_dir = tmp.0.join("bak");
+    let mut prompt = ScriptPrompter {
+        inputs: vec![],
+        idx: 0,
+    };
+    let mut dev = SwapOnReopenDev::new(orig.clone(), orig);
+
+    let code = apply_flow(
+        ApplyMode::DryRun,
+        6,
+        None,
+        &mut ctx(&runner, &mut prompt, &backup_dir),
+        &mut dev,
+    )
+    .unwrap();
+
+    assert_eq!(code, EXIT_OK);
+    assert_eq!(prompt.idx, 0, "dry-run 不得进入确认提示");
+    assert!(!backup_dir.exists(), "dry-run 不得创建备份目录或备份文件");
+    assert!(!dev.switched, "dry-run 不得 reopen 为读写");
+    assert_eq!(dev.writes, 0, "dry-run 不得执行任何扇区写入");
+}
+
+#[test]
+fn backup_create_is_read_only_and_matches_apply_automatic_backup() {
+    let Some(orig) = load_disk_image("netac") else {
+        eprintln!("跳过: 真实备份不可用");
+        return;
+    };
+
+    // 手动 backup create 的 runner 故意删除卸载命令：只读路径若误入
+    // prepare_write/unmount，此测试会立即失败。
+    let mut readonly_runner = netac_runner(6);
+    readonly_runner
+        .canned
+        .remove("diskutil unmountDisk force disk6");
+    let tmp = TmpDir::new("backup_create_readonly");
+    let manual_dir = tmp.0.join("manual");
+    let auto_dir = tmp.0.join("auto");
+    let mut manual_prompt = ScriptPrompter {
+        inputs: vec![],
+        idx: 0,
+    };
+    let mut manual_dev = SwapOnReopenDev::new(orig.clone(), orig.clone());
+    let (manual_path, manual_nopwd) = backup_create_flow(
+        6,
+        &mut ctx(&readonly_runner, &mut manual_prompt, &manual_dir),
+        &mut manual_dev,
+    )
+    .unwrap();
+
+    assert!(!manual_nopwd);
+    assert_eq!(manual_prompt.idx, 0, "backup create 不应要求写盘确认");
+    assert!(!manual_dev.switched, "backup create 不得 reopen 为读写");
+    assert_eq!(manual_dev.writes, 0, "backup create 不得写 U 盘");
+    assert_eq!(fs::read(&manual_path).unwrap(), orig);
+
+    // apply 写前自动备份：同一时间、同一设备事实、同一 LBA0-13 输入，应生成
+    // 完全相同的文件名/内容/MD5；随后在确认处取消，避免进入任何真写阶段。
+    let apply_runner = netac_runner(6);
+    let mut apply_prompt = ScriptPrompter {
+        inputs: vec!["NO".into()],
+        idx: 0,
+    };
+    let mut apply_dev = SwapOnReopenDev::new(orig.clone(), orig);
+    let error = apply_flow(
+        ApplyMode::Write { force: false },
+        6,
+        None,
+        &mut ctx(&apply_runner, &mut apply_prompt, &auto_dir),
+        &mut apply_dev,
+    )
+    .unwrap_err();
+    assert_eq!(error.code, EXIT_CANCELLED);
+
+    let auto_path = fs::read_dir(&auto_dir)
+        .unwrap()
+        .flatten()
+        .map(|entry| entry.path())
+        .find(|path| path.extension().and_then(|ext| ext.to_str()) == Some("bin"))
+        .expect("apply 应生成写前自动备份");
+    assert_eq!(
+        manual_path.file_name(),
+        auto_path.file_name(),
+        "手动备份与 apply 自动备份必须使用同一命名规则"
+    );
+    assert_eq!(
+        fs::read(&manual_path).unwrap(),
+        fs::read(&auto_path).unwrap()
+    );
+    assert_eq!(
+        fs::read_to_string(format!("{}.md5", manual_path.display())).unwrap(),
+        fs::read_to_string(format!("{}.md5", auto_path.display())).unwrap()
+    );
+}
+
+#[test]
+fn restore_numeric_target_uses_backup_selector_and_current_disk_identity() {
+    let Some(orig) = load_disk_image("netac") else {
+        eprintln!("跳过: 真实备份不可用");
+        return;
+    };
+    let Some(source) = fixture_bin("netac") else {
+        eprintln!("跳过: 真实备份不可用");
+        return;
+    };
+    let runner = netac_runner(6);
+    let tmp = TmpDir::new("restore_numeric_selector");
+    let backup_dir = tmp.0.join("bak");
+    fs::create_dir_all(&backup_dir).unwrap();
+    let target = backup_dir.join(source.file_name().unwrap());
+    fs::copy(&source, &target).unwrap();
+    let data = fs::read(&target).unwrap();
+    fs::write(
+        format!("{}.md5", target.display()),
+        format!("{}\n", md5(&data)),
+    )
+    .unwrap();
+
+    let mut prompt = ScriptPrompter {
+        inputs: vec!["NO".into()],
+        idx: 0,
+    };
+    let mut dev = SwapOnReopenDev::new(orig.clone(), orig);
+    let error = restore_flow(
+        Some("1".into()),
+        6,
+        &mut ctx(&runner, &mut prompt, &backup_dir),
+        &mut dev,
+    )
+    .unwrap_err();
+
+    assert_eq!(
+        error.code, EXIT_CANCELLED,
+        "编号 1 应先由 BackupSelector 解析为当前盘备份，再进入恢复确认"
+    );
+    assert_eq!(prompt.idx, 1);
+    assert!(!dev.switched);
+    assert_eq!(dev.writes, 0);
 }
 
 #[test]
@@ -351,8 +496,7 @@ fn apply_cancel_at_prompt_leaves_disk_untouched() {
     )
     .unwrap();
     let e = apply_flow(
-        true,
-        false,
+        ApplyMode::Write { force: false },
         6,
         None,
         &mut ctx(&runner, &mut prompt, &bak),
@@ -779,8 +923,7 @@ fn apply_system_disk_guard_in_flow() {
     let mut dev =
         FileDev::open_rdwr(img.to_str().unwrap(), std::time::Duration::from_secs(1)).unwrap();
     let e = apply_flow(
-        true,
-        false,
+        ApplyMode::Write { force: false },
         1,
         None,
         &mut ctx(&runner, &mut prompt, &tmp.0),
@@ -818,8 +961,7 @@ fn apply_refuses_explicit_non_usb_whole_disk() {
     .unwrap();
 
     let e = apply_flow(
-        false,
-        false,
+        ApplyMode::DryRun,
         6,
         None,
         &mut ctx(&runner, &mut prompt, &tmp.0),
@@ -843,8 +985,7 @@ fn apply_refuses_if_disk_identity_changes_after_reopen() {
     let mut dev = SwapOnReopenDev::new(netac, lexar);
 
     let e = apply_flow(
-        true,
-        false,
+        ApplyMode::Write { force: false },
         6,
         None,
         &mut ctx(&runner, &mut prompt, &tmp.0),
@@ -909,8 +1050,7 @@ fn apply_refuses_when_unmount_fails_before_reopen_or_write() {
     let mut dev = SwapOnReopenDev::new(netac.clone(), netac);
 
     let e = apply_flow(
-        true,
-        false,
+        ApplyMode::Write { force: false },
         6,
         None,
         &mut ctx(&runner, &mut prompt, &tmp.0),
@@ -937,8 +1077,7 @@ fn apply_refuses_if_metadata_changes_after_backup_before_write() {
     let mut dev = SwapOnReopenDev::new(netac, changed);
 
     let e = apply_flow(
-        true,
-        false,
+        ApplyMode::Write { force: false },
         6,
         None,
         &mut ctx(&runner, &mut prompt, &tmp.0),

@@ -13,8 +13,9 @@ fn inspect_backup_file_is_offline_and_renders_structured_hex() {
     };
     let out = Command::new(env!("CARGO_BIN_EXE_edpcli"))
         .env("NO_COLOR", "1")
-        .args(["inspect", "7", "--backup"])
+        .arg("inspect")
         .arg(&path)
+        .args(["--lba", "7"])
         .arg("--hex")
         .output()
         .expect("run edpcli inspect");
@@ -33,7 +34,7 @@ fn inspect_backup_file_is_offline_and_renders_structured_hex() {
 }
 
 #[test]
-fn inspect_onlyid_index_matches_backup_list_and_exports() {
+fn inspect_backup_file_exports_selected_lbas() {
     let Some(path) = fixture_bin("netac") else {
         eprintln!("跳过: 真实备份不可用");
         return;
@@ -49,21 +50,14 @@ fn inspect_onlyid_index_matches_backup_list_and_exports() {
     let export = tmp.0.join("out");
     let out = Command::new(env!("CARGO_BIN_EXE_edpcli"))
         .env("NO_COLOR", "1")
-        .args([
-            "inspect",
-            "11",
-            "12",
-            "--onlyid",
-            "1402259934",
-            "--index",
-            "1",
-            "--backup-dir",
-        ])
+        .arg("inspect")
+        .arg(&copied)
+        .args(["--lba", "11,12", "--backup-dir"])
         .arg(&tmp.0)
         .arg("--export")
         .arg(&export)
         .output()
-        .expect("run edpcli inspect onlyid");
+        .expect("run edpcli inspect backup");
     assert_eq!(
         out.status.code(),
         Some(0),
@@ -71,7 +65,7 @@ fn inspect_onlyid_index_matches_backup_list_and_exports() {
         String::from_utf8_lossy(&out.stderr)
     );
     let stdout = String::from_utf8_lossy(&out.stdout);
-    assert!(stdout.contains("onlyid=1402259934 [1]"));
+    assert!(stdout.contains("onlyid=1402259934"));
     assert!(stdout.contains("PDKB"));
     assert!(stdout.contains("尾部 144B RAW"));
     for name in [
@@ -97,7 +91,7 @@ fn known_lba_without_structure_does_not_dump_hex_unless_requested() {
     fs::write(&target, data).unwrap();
 
     let out = Command::new(env!("CARGO_BIN_EXE_edpcli"))
-        .args(["inspect", target.to_str().unwrap(), "9"])
+        .args(["inspect", target.to_str().unwrap(), "--lba", "9"])
         .output()
         .unwrap();
     assert!(out.status.success());
@@ -112,7 +106,7 @@ fn known_lba_without_structure_does_not_dump_hex_unless_requested() {
     );
 
     let out_hex = Command::new(env!("CARGO_BIN_EXE_edpcli"))
-        .args(["inspect", target.to_str().unwrap(), "9", "--hex"])
+        .args(["inspect", target.to_str().unwrap(), "--lba", "9", "--hex"])
         .output()
         .unwrap();
     let stdout_hex = String::from_utf8_lossy(&out_hex.stdout);

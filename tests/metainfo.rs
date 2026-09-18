@@ -36,11 +36,11 @@ fn aigo_summary_contains_identity_and_ownership() {
 
     edpcli::ui::set_enabled_for_tests(false);
     let out = render(&summary);
-    assert!(out.contains("身份信息"));
-    assert!(out.contains("归属信息"));
+    assert!(out.contains("设备"));
+    assert!(out.contains("身份"));
     assert!(out.contains("Dept"));
     assert!(out.contains("User"));
-    assert!(out.contains("SAFE6"));
+    assert!(out.contains("状态"));
     assert!(out.contains("分区摘要"));
     edpcli::ui::reset_enabled_for_tests();
 }
@@ -71,7 +71,9 @@ fn render_uses_semantic_colors_and_no_color_remains_plain() {
 
     edpcli::ui::set_enabled_for_tests(true);
     let colored = render(&summary);
-    assert!(colored.contains("\x1b[1;36m身份信息\x1b[0m"), "{colored:?}");
+    assert!(colored.contains("\x1b[1;36m设备\x1b[0m"), "{colored:?}");
+    assert!(colored.contains("\x1b[1;36m身份\x1b[0m"), "{colored:?}");
+    assert!(colored.contains("\x1b[1;36m状态\x1b[0m"), "{colored:?}");
     assert!(colored.contains("\x1b[33m1987718388\x1b[0m"), "{colored:?}");
     assert!(
         colored.contains("\x1b[36m输电运检中心\x1b[0m"),
@@ -86,7 +88,9 @@ fn render_uses_semantic_colors_and_no_color_remains_plain() {
     edpcli::ui::set_enabled_for_tests(false);
     let plain = render(&summary);
     assert!(!plain.contains("\x1b["));
-    assert!(plain.contains("身份信息"));
+    assert!(plain.contains("设备"));
+    assert!(plain.contains("身份"));
+    assert!(plain.contains("状态"));
     assert!(plain.contains("输电运检中心"));
     edpcli::ui::reset_enabled_for_tests();
 }

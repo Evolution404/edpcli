@@ -9,11 +9,12 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
-use crate::backup_catalog::{self, BackupCatalog};
+use crate::backup_catalog;
 use crate::cli::Prompter;
-use crate::common::{EXIT_BACKUP, EXIT_CANCELLED, EXIT_OK, EXIT_USAGE, SECTOR};
+use crate::common::{EXIT_BACKUP, EXIT_CANCELLED, EXIT_OK, SECTOR};
 use crate::diskio::{self, BackupEntry, BackupMeta, Md5Status};
 use crate::metainfo;
+use crate::selectors::BackupSelector;
 
 fn backup_model_name(meta: &BackupMeta) -> String {
     let mut vendor = None;
@@ -111,127 +112,41 @@ fn print_numbered_backup_entries(entries: &[&BackupEntry]) {
     }
 }
 
-pub(crate) fn print_onlyid_backup_choices(id: &str, group: &[&BackupEntry]) {
-    if let Some(meta) = group.first().and_then(|e| e.meta.as_ref()) {
-        println!(
-            "{} · {} · onlyid={} · {} 份",
-            backup_model_name(meta),
-            backup_capacity(meta),
-            id,
-            group.len()
-        );
-    } else {
-        println!("onlyid={} · {} 份", id, group.len());
-    }
-    if let Some(entry) = group.first() {
-        print_ownership(entry, "  ");
-    }
-    print_numbered_backup_entries(group);
-}
-
-pub(crate) fn print_backup_sources(entries: &[BackupEntry], hint: &str) -> bool {
-    let mut groups: BTreeMap<String, Vec<&BackupEntry>> = BTreeMap::new();
+fn print_global_numbered_backup_entries(
+    entries: &[&BackupEntry],
+    global_index: &BTreeMap<PathBuf, usize>,
+) {
+    let width = global_index.len().max(1).to_string().len();
     for entry in entries {
-        let Some(id) = entry.meta.as_ref().and_then(|m| m.onlyid.as_ref()) else {
+        let Some(index) = global_index.get(&backup_catalog::canonical_entry_path(&entry.path))
+        else {
             continue;
         };
-        groups.entry(id.clone()).or_default().push(entry);
-    }
-    if groups.is_empty() {
-        return false;
-    }
-    let mut groups: Vec<(String, Vec<&BackupEntry>)> = groups.into_iter().collect();
-    for (_, group) in &mut groups {
-        backup_catalog::sort_newest_first(group);
-    }
-    groups.sort_by(|a, b| match (a.1.first(), b.1.first()) {
-        (Some(ae), Some(be)) => diskio::cmp_backup_newest_first(ae, be).then_with(|| a.0.cmp(&b.0)),
-        (Some(_), None) => std::cmp::Ordering::Less,
-        (None, Some(_)) => std::cmp::Ordering::Greater,
-        (None, None) => a.0.cmp(&b.0),
-    });
-    println!("{}", crate::ui::bold("可查看的备份盘:"));
-    for (id, group) in groups {
-        let latest = group
-            .first()
-            .map(|e| diskio::backup_display_time(&e.path, e.mtime))
-            .unwrap_or_default();
-        let model = group
-            .first()
-            .and_then(|e| e.meta.as_ref())
-            .map(backup_model_name)
-            .unwrap_or_else(|| "未知型号".into());
+        let time = diskio::backup_display_time(&entry.path, entry.mtime);
         println!(
-            "  {}  {} · {} 份 · 最新 {}",
-            crate::ui::bold_cyan(&format!("onlyid={}", id)),
-            model,
-            group.len(),
-            latest
+            "  [{}] {}   {}   {}",
+            crate::ui::pad_left(&index.to_string(), width),
+            crate::ui::pad_to(&time, 16),
+            crate::ui::pad_to(backup_kind(entry), 12),
+            backup_health(entry)
         );
-        if let Some(entry) = group.first() {
-            print_ownership(entry, "      ");
-        }
+        println!(
+            "      └─ {}",
+            crate::ui::dim(backup_catalog::file_name(entry))
+        );
     }
-    println!();
-    println!("{}", crate::ui::dim(hint));
-    true
 }
 
-pub(crate) fn parse_backup_selection_tokens(
-    tokens: &[String],
-    max: usize,
-) -> Result<Vec<usize>, String> {
-    let mut selected = BTreeSet::new();
-    for token in tokens {
-        for raw in token.split(',') {
-            let part = raw.trim();
-            if part.is_empty() {
-                return Err("备份编号不能为空".into());
-            }
-            if let Some((left, right)) = part.split_once('-') {
-                if right.contains('-') {
-                    return Err(format!("无法解析备份范围: {}", part));
-                }
-                let start = left
-                    .parse::<usize>()
-                    .map_err(|_| format!("无法解析备份编号: {}", left))?;
-                let end = right
-                    .parse::<usize>()
-                    .map_err(|_| format!("无法解析备份编号: {}", right))?;
-                if start == 0 || end == 0 || start > end || end > max {
-                    return Err(format!("备份范围超出 1-{}: {}", max, part));
-                }
-                selected.extend(start..=end);
-            } else {
-                let idx = part
-                    .parse::<usize>()
-                    .map_err(|_| format!("无法解析备份编号: {}", part))?;
-                if idx == 0 || idx > max {
-                    return Err(format!("备份编号超出 1-{}: {}", max, part));
-                }
-                selected.insert(idx);
-            }
-        }
-    }
-    if selected.is_empty() {
-        return Err("至少选择一份备份".into());
-    }
-    Ok(selected.into_iter().collect())
-}
-
-pub fn backup_list(backup_dir: &Path, onlyid: Option<&str>) -> i32 {
-    let catalog = BackupCatalog::load(backup_dir);
-    let selected: Vec<&BackupEntry> = if let Some(id) = onlyid {
-        match catalog.onlyid_group(id) {
-            Ok(group) => group,
-            Err(msg) => {
-                eprintln!("{}", crate::ui::red(&format!("错误: {}", msg)));
-                return EXIT_BACKUP;
-            }
-        }
-    } else {
-        catalog.entries().iter().collect()
-    };
+pub fn backup_list(backup_dir: &Path) -> i32 {
+    let selector = BackupSelector::load(backup_dir);
+    let catalog = selector.catalog();
+    let global_index: BTreeMap<PathBuf, usize> = selector
+        .numbered()
+        .into_iter()
+        .enumerate()
+        .map(|(index, entry)| (backup_catalog::canonical_entry_path(&entry.path), index + 1))
+        .collect();
+    let selected: Vec<&BackupEntry> = catalog.entries().iter().collect();
     println!("备份目录 {} · {} 份", backup_dir.display(), selected.len());
     if selected.is_empty() {
         return EXIT_OK;
@@ -276,7 +191,7 @@ pub fn backup_list(backup_dir: &Path, onlyid: Option<&str>) -> i32 {
         if let Some(entry) = group.first() {
             print_ownership(entry, "  ");
         }
-        print_numbered_backup_entries(&group);
+        print_global_numbered_backup_entries(&group, &global_index);
     }
     if !unknown.is_empty() {
         println!();
@@ -296,45 +211,15 @@ pub fn backup_list(backup_dir: &Path, onlyid: Option<&str>) -> i32 {
     EXIT_OK
 }
 
-pub fn backup_verify(backup_dir: &Path, onlyid: Option<&str>, target: Option<&str>) -> i32 {
-    backup_verify_select(backup_dir, onlyid, target, None)
-}
-
-pub(crate) fn backup_verify_select(
-    backup_dir: &Path,
-    onlyid: Option<&str>,
-    target: Option<&str>,
-    index: Option<usize>,
-) -> i32 {
-    let catalog = BackupCatalog::load(backup_dir);
+pub fn backup_verify(backup_dir: &Path, target: Option<&str>) -> i32 {
+    let selector = BackupSelector::load(backup_dir);
+    let catalog = selector.catalog();
     let selected: Vec<&BackupEntry> = if let Some(target) = target {
-        match catalog.resolve_target(target) {
+        match selector.resolve_one(target) {
             Ok(entry) => vec![entry],
             Err(msg) => {
                 eprintln!("{}", crate::ui::red(&format!("错误: {}", msg)));
                 return EXIT_BACKUP;
-            }
-        }
-    } else if let Some(id) = onlyid {
-        if let Some(idx) = index {
-            match catalog.onlyid_index(id, idx) {
-                Ok(entry) => vec![entry],
-                Err(msg) => {
-                    eprintln!("{}", crate::ui::red(&format!("错误: {}", msg)));
-                    if let Ok(group) = catalog.onlyid_group(id) {
-                        println!();
-                        print_onlyid_backup_choices(id, &group);
-                    }
-                    return EXIT_BACKUP;
-                }
-            }
-        } else {
-            match catalog.onlyid_group(id) {
-                Ok(group) => group,
-                Err(msg) => {
-                    eprintln!("{}", crate::ui::red(&format!("错误: {}", msg)));
-                    return EXIT_BACKUP;
-                }
             }
         }
     } else {
@@ -433,7 +318,7 @@ fn delete_backup_pair(entry: &BackupEntry) -> Result<(), String> {
     Ok(())
 }
 
-pub fn backup_prune(backup_dir: &Path, onlyid: Option<&str>, keep: usize, yes: bool) -> i32 {
+pub fn backup_prune(backup_dir: &Path, keep: usize, yes: bool) -> i32 {
     if !backup_dir.is_dir() {
         eprintln!(
             "{}",
@@ -441,18 +326,8 @@ pub fn backup_prune(backup_dir: &Path, onlyid: Option<&str>, keep: usize, yes: b
         );
         return EXIT_BACKUP;
     }
-    let catalog = BackupCatalog::load(backup_dir);
-    let selected_refs: Vec<&BackupEntry> = if let Some(id) = onlyid {
-        match catalog.onlyid_group(id) {
-            Ok(group) => group,
-            Err(msg) => {
-                eprintln!("{}", crate::ui::red(&format!("错误: {}", msg)));
-                return EXIT_BACKUP;
-            }
-        }
-    } else {
-        catalog.entries().iter().collect()
-    };
+    let selector = BackupSelector::load(backup_dir);
+    let selected_refs: Vec<&BackupEntry> = selector.catalog().entries().iter().collect();
     let selected: Vec<BackupEntry> = selected_refs.into_iter().cloned().collect();
     let candidates = diskio::prune_candidates(&selected, keep);
     let candidate_set: BTreeSet<PathBuf> = candidates
@@ -505,13 +380,7 @@ pub fn backup_prune(backup_dir: &Path, onlyid: Option<&str>, keep: usize, yes: b
         originals, keep_snapshots
     );
     if !yes {
-        match onlyid {
-            Some(id) => println!(
-                "确认执行: edpcli backup prune --onlyid {} --keep {} --yes",
-                id, keep
-            ),
-            None => println!("确认执行: edpcli backup prune --keep {} --yes", keep),
-        }
+        println!("确认执行: edpcli backup prune --keep {} --yes", keep);
         return EXIT_OK;
     }
 
@@ -535,9 +404,8 @@ pub fn backup_prune(backup_dir: &Path, onlyid: Option<&str>, keep: usize, yes: b
     }
 }
 
-pub fn backup_rm(
+pub fn backup_delete(
     backup_dir: &Path,
-    onlyid: Option<&str>,
     targets: &[String],
     yes: bool,
     prompt: &mut dyn Prompter,
@@ -549,96 +417,51 @@ pub fn backup_rm(
         );
         return EXIT_BACKUP;
     }
-    let catalog = BackupCatalog::load(backup_dir);
-    let entries = catalog.entries();
-    let mut numbered_index: BTreeMap<PathBuf, usize> = BTreeMap::new();
-    let mut selected_group_len = None;
-    let mut resolved = if let Some(id) = onlyid {
-        let group = match catalog.onlyid_group(id) {
-            Ok(group) => group,
+    let selector = BackupSelector::load(backup_dir);
+    let entries = selector.catalog().entries();
+    let numbered = selector.numbered();
+    if numbered.is_empty() {
+        println!("没有可删除的备份。");
+        return EXIT_OK;
+    }
+    let numbered_index: BTreeMap<PathBuf, usize> = numbered
+        .iter()
+        .enumerate()
+        .map(|(index, entry)| (backup_catalog::canonical_entry_path(&entry.path), index + 1))
+        .collect();
+
+    let selected = if targets.is_empty() {
+        println!("请选择要删除的备份:");
+        print_numbered_backup_entries(&numbered);
+        loop {
+            let input = prompt.prompt_line("选择 [如 2 / 1,3 / 2-4，回车取消]: ");
+            let input = input.trim();
+            if input.is_empty() {
+                eprintln!("已取消");
+                return EXIT_CANCELLED;
+            }
+            match selector.resolve_many(&[input.to_string()]) {
+                Ok(entries) => break entries,
+                Err(msg) => eprintln!("{}", crate::ui::red(&format!("错误: {}", msg))),
+            }
+        }
+    } else {
+        match selector.resolve_many(targets) {
+            Ok(entries) => entries,
             Err(msg) => {
                 eprintln!("{}", crate::ui::red(&format!("错误: {}", msg)));
                 return EXIT_BACKUP;
             }
-        };
-        selected_group_len = Some(group.len());
-        for (idx, entry) in group.iter().enumerate() {
-            numbered_index.insert(backup_catalog::canonical_entry_path(&entry.path), idx + 1);
         }
-
-        let indices = if targets.is_empty() {
-            print_onlyid_backup_choices(id, &group);
-            loop {
-                let input = prompt.prompt_line("选择要删除的备份 [如 2 / 1,3 / 2-3，回车取消]: ");
-                let input = input.trim();
-                if input.is_empty() {
-                    eprintln!("已取消");
-                    return EXIT_CANCELLED;
-                }
-                match parse_backup_selection_tokens(&[input.to_string()], group.len()) {
-                    Ok(v) => break v,
-                    Err(msg) => eprintln!("{}", crate::ui::red(&format!("错误: {}", msg))),
-                }
-            }
-        } else {
-            match parse_backup_selection_tokens(targets, group.len()) {
-                Ok(v) => v,
-                Err(msg) => {
-                    eprintln!("{}", crate::ui::red(&format!("错误: {}", msg)));
-                    return EXIT_USAGE;
-                }
-            }
-        };
-        indices
-            .into_iter()
-            .map(|idx| backup_catalog::canonical_entry_path(&group[idx - 1].path))
-            .collect::<Vec<_>>()
-    } else {
-        if targets.is_empty() {
-            eprintln!(
-                "{}",
-                crate::ui::red("错误: backup rm 至少需要一个路径或文件名")
-            );
-            return EXIT_USAGE;
-        }
-        let mut paths = Vec::new();
-        for target in targets {
-            match catalog.resolve_target(target) {
-                Ok(entry) => {
-                    let path = backup_catalog::canonical_entry_path(&entry.path);
-                    if !paths.contains(&path) {
-                        paths.push(path);
-                    }
-                }
-                Err(msg) => {
-                    eprintln!("{}", crate::ui::red(&format!("错误: {}", msg)));
-                    return EXIT_BACKUP;
-                }
-            }
-        }
-        paths
     };
-    resolved.dedup();
 
     // 在任何交互确认之前固定“用户看到的那批条目”。确认后删除时直接用这些
     // 扫描快照做内容复核，不能重新按可能已被替换的路径去解释目标。
-    let mut to_delete = Vec::with_capacity(resolved.len());
-    for path in &resolved {
-        let Some(entry) = entries
-            .iter()
-            .find(|e| backup_catalog::canonical_entry_path(&e.path) == *path)
-        else {
-            eprintln!(
-                "{}",
-                crate::ui::red(&format!(
-                    "错误: 删除目标已不在扫描快照中: {}",
-                    path.display()
-                ))
-            );
-            return EXIT_BACKUP;
-        };
-        to_delete.push(entry.clone());
-    }
+    let to_delete: Vec<BackupEntry> = selected.into_iter().cloned().collect();
+    let resolved: Vec<PathBuf> = to_delete
+        .iter()
+        .map(|entry| backup_catalog::canonical_entry_path(&entry.path))
+        .collect();
 
     let mut total_per_group: BTreeMap<String, usize> = BTreeMap::new();
     let mut deleting_per_group: BTreeMap<String, usize> = BTreeMap::new();
@@ -668,32 +491,16 @@ pub fn backup_rm(
             .file_name()
             .and_then(|n| n.to_str())
             .unwrap_or("<无效文件名>");
-        match onlyid {
-            Some(_) => {
-                let idx = numbered_index.get(path).copied().unwrap_or(0);
-                let time = diskio::backup_display_time(&entry.path, entry.mtime);
-                println!(
-                    "  [{}] {}   {}   {}",
-                    idx,
-                    time,
-                    backup_kind(entry),
-                    backup_health(entry)
-                );
-                println!("      └─ {}", crate::ui::dim(name));
-            }
-            None => println!(
-                "  {}   {}   {}",
-                name,
-                backup_kind(entry),
-                backup_health(entry)
-            ),
-        }
-    }
-    if let Some(total) = selected_group_len {
+        let idx = numbered_index.get(path).copied().unwrap_or(0);
+        let time = diskio::backup_display_time(&entry.path, entry.mtime);
         println!(
-            "删除后该盘仍保留 {} 份备份。",
-            total.saturating_sub(resolved.len())
+            "  [{}] {}   {}   {}",
+            idx,
+            time,
+            backup_kind(entry),
+            backup_health(entry)
         );
+        println!("      └─ {}", crate::ui::dim(name));
     }
     if !yes && !prompt.confirm_yes("输入 YES 确认删除: ") {
         eprintln!("已取消");

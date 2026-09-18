@@ -239,7 +239,7 @@ fn write_and_verify(
 ///   4) 任一失败 → 以写前内存镜像自动回滚全部扇区并再校验。
 ///
 /// 回滚成功 → EXIT_ROLLED_BACK(盘仍为写前状态, 可安全重试);
-/// 回滚失败 → EXIT_INTERMEDIATE(中间态, 指引重插后 edpcli restore 从备份还原)。
+/// 回滚失败 → EXIT_INTERMEDIATE(中间态, 指引重插后 edpcli backup restore 从备份还原)。
 pub fn atomic_write_sectors(
     dev: &mut dyn SectorDev,
     patch: &BTreeMap<u32, Vec<u8>>,
@@ -293,14 +293,14 @@ pub fn atomic_write_sectors(
                     Ok(()) => {
                         return Err(EdpCliError::new(
                             EXIT_ROLLED_BACK,
-                            "错误: 已完整回滚, 盘仍为写前状态(未改造)。可换 USB 口/线后重试, 或 edpcli restore 走还原流程。",
+                            "错误: 已完整回滚, 盘仍为写前状态(未改造)。可换 USB 口/线后重试, 或 edpcli backup restore 走还原流程。",
                         ))
                     }
                     Err(e2) => {
                         if i == 2 {
                             return Err(EdpCliError::new(
                                 EXIT_INTERMEDIATE,
-                                format!("错误: 回滚亦失败({}) — 盘处于中间状态! 请重插后立即 edpcli restore 从备份还原。", e2),
+                                format!("错误: 回滚亦失败({}) — 盘处于中间状态! 请重插后立即 edpcli backup restore 从备份还原。", e2),
                             ));
                         }
                         thread::sleep(Duration::from_millis(500));
@@ -890,7 +890,7 @@ pub fn prune_candidates(entries: &[BackupEntry], keep: usize) -> Vec<PathBuf> {
 
 /// 备份 LBA0-13 到备份目录, 附 .md5 sidecar。
 /// 返回 (备份路径, 是否免密状态快照); `还原:` 提示由 CLI 打印。
-pub fn backup_disk(
+pub fn create_backup(
     facts: &DiskFacts,
     data: &[u8],
     device_id: &str,

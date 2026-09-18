@@ -1,79 +1,71 @@
-//! `edpcli metainfo` / `edpcli meta` 的来源选择与输出层。
+//! `edpcli info` 的来源选择与输出层。
 //!
-//! 目标是“少打命令、直接看关键信息”：当前盘直接查看；onlyid 默认最新 [1]；
-//! 备份文件可直接作位置参数。底层解析继续复用 inspect/metainfo，不维护第二套算法。
+//! 备份文件可直接作位置参数；当前盘由设备选择器确定。底层解析继续复用
+//! inspect/metainfo，不维护第二套协议算法。
 
-use crate::backup_catalog::{self, BackupCatalog};
-use crate::backup_cli::{print_backup_sources, print_onlyid_backup_choices};
-use crate::cli::{auto_pick_disk, guard_usb_disk, MetaInfoOpts, StdPrompter};
-use crate::common::{EXIT_BACKUP, EXIT_IO, EXIT_OK, EXIT_TARGET, SECTOR};
-use crate::diskio::{self, raw_path};
+use crate::cli::{auto_pick_disk, guard_usb_disk, InfoOpts, StdPrompter};
+use crate::common::{EXIT_BACKUP, EXIT_IO, EXIT_OK, SECTOR};
+use crate::diskio::{self, find_backups, raw_path, DiskFacts};
 use crate::elevate;
 use crate::identify::identify;
 use crate::inspect::InspectMeta;
 use crate::inspect_cli::resolve_inspect_file;
 use crate::metainfo;
+use crate::selectors::DeviceSelector;
 use crate::sysinfo::{self, CmdRunner};
 
-fn print_summary(source: &str, summary: &metainfo::MetaInfoSummary) {
-    println!(
-        "{}  {}",
-        crate::ui::bold_cyan("来源"),
-        crate::ui::cyan(source)
-    );
-    println!();
-    print!("{}", metainfo::render(summary));
+enum BackupSummary<'a> {
+    File(&'a std::path::Path),
+    Device(&'a [std::path::PathBuf]),
 }
 
-fn backup_flow(opts: MetaInfoOpts) -> i32 {
+fn print_summary(source: &str, summary: &metainfo::MetaInfoSummary, backups: BackupSummary<'_>) {
+    print!("{}", metainfo::render_with_source(summary, Some(source)));
+    println!();
+    println!("{}", crate::ui::bold_cyan("备份"));
+    match backups {
+        BackupSummary::File(path) => {
+            println!(
+                "  {}  {}",
+                crate::ui::dim(&crate::ui::pad_to("当前文件", 18)),
+                path.display()
+            );
+        }
+        BackupSummary::Device(paths) => {
+            println!(
+                "  {}  {}",
+                crate::ui::dim(&crate::ui::pad_to("匹配备份", 18)),
+                paths.len()
+            );
+            if let Some(latest) = paths.first() {
+                println!(
+                    "  {}  {}",
+                    crate::ui::dim(&crate::ui::pad_to("最新备份", 18)),
+                    diskio::backup_display_time(latest, diskio::mtime_epoch(latest))
+                );
+            }
+        }
+    }
+}
+
+fn backup_flow(opts: InfoOpts) -> i32 {
     let bak = diskio::resolve_backup_dir(opts.backup_dir.as_deref());
-    let (path, parsed_meta, source_label) = if let Some(id) = opts.onlyid.as_deref() {
-        let catalog = BackupCatalog::load(&bak);
-        let group = match catalog.onlyid_group(id) {
-            Ok(group) => group,
-            Err(msg) => {
-                eprintln!("{}", crate::ui::red(&format!("错误: {msg}")));
-                let _ = print_backup_sources(catalog.entries(), "查看元信息: edpcli meta <onlyid>");
-                return EXIT_BACKUP;
-            }
-        };
-        let idx = opts.index.unwrap_or(1);
-        let entry = match catalog.onlyid_index(id, idx) {
-            Ok(entry) => entry,
-            Err(msg) => {
-                eprintln!("{}", crate::ui::red(&format!("错误: {msg}")));
-                println!();
-                print_onlyid_backup_choices(id, &group);
-                return EXIT_BACKUP;
-            }
-        };
-        (
-            entry.path.clone(),
-            entry.meta.clone(),
-            format!(
-                "backup onlyid={id} [{idx}] · {}",
-                backup_catalog::file_name(entry)
-            ),
-        )
-    } else {
-        let Some(target) = opts.backup.as_deref() else {
-            eprintln!("{}", crate::ui::red("错误: metainfo 缺少备份来源"));
-            return EXIT_BACKUP;
-        };
-        let path = match resolve_inspect_file(&bak, target) {
-            Ok(path) => path,
-            Err(msg) => {
-                eprintln!("{}", crate::ui::red(&format!("错误: {msg}")));
-                return EXIT_BACKUP;
-            }
-        };
-        let meta = path
-            .file_name()
-            .and_then(|name| name.to_str())
-            .and_then(diskio::parse_backup_name);
-        let label = path.display().to_string();
-        (path, meta, label)
+    let Some(target) = opts.backup.as_deref() else {
+        eprintln!("{}", crate::ui::red("错误: info 缺少备份来源"));
+        return EXIT_BACKUP;
     };
+    let path = match resolve_inspect_file(&bak, target) {
+        Ok(path) => path,
+        Err(msg) => {
+            eprintln!("{}", crate::ui::red(&format!("错误: {msg}")));
+            return EXIT_BACKUP;
+        }
+    };
+    let parsed_meta = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .and_then(diskio::parse_backup_name);
+    let source_label = path.display().to_string();
 
     let mut inspect_meta = parsed_meta
         .as_ref()
@@ -96,11 +88,11 @@ fn backup_flow(opts: MetaInfoOpts) -> i32 {
             return EXIT_IO;
         }
     };
-    print_summary(&source_label, &summary);
+    print_summary(&source_label, &summary, BackupSummary::File(&path));
     EXIT_OK
 }
 
-fn disk_flow(runner: &dyn CmdRunner, mut opts: MetaInfoOpts) -> i32 {
+fn disk_flow(runner: &dyn CmdRunner, mut opts: InfoOpts) -> i32 {
     if let Some(n) = opts.disk {
         if let Err(e) = guard_usb_disk(runner, n) {
             eprintln!("{}", crate::ui::red(&e.msg));
@@ -118,8 +110,7 @@ fn disk_flow(runner: &dyn CmdRunner, mut opts: MetaInfoOpts) -> i32 {
                     return e.code;
                 }
             };
-            argv.push("--disk".into());
-            argv.push(crate::platform::disk_selector_value(n));
+            DeviceSelector::new(None).pin_argv(&mut argv, n);
         }
         elevate::ensure_elevated(&argv);
         unreachable!();
@@ -151,17 +142,16 @@ fn disk_flow(runner: &dyn CmdRunner, mut opts: MetaInfoOpts) -> i32 {
         .and_then(|raw| identify(runner, n, raw).device_id);
     let device_id = opts.device_id.clone().or(auto_device_id);
     let (vid, pid) = sysinfo::usb_vid_pid(runner, n);
-    let size_bytes =
-        sysinfo::disk_total_sectors(runner, n).and_then(|s| s.checked_mul(SECTOR as u64));
-    let onlyid = diskio::read_lba(&path, 4)
-        .ok()
-        .and_then(|raw| diskio::lba4_label_id_from(&raw));
+    let total_sectors = sysinfo::disk_total_sectors(runner, n);
+    let size_bytes = total_sectors.and_then(|s| s.checked_mul(SECTOR as u64));
+    let raw4 = diskio::read_lba(&path, 4).ok();
+    let onlyid = raw4.as_deref().and_then(diskio::lba4_label_id_from);
     let inspect_meta = InspectMeta {
-        device_id,
-        vid: (vid != "xxxx").then_some(vid),
-        pid: (pid != "xxxx").then_some(pid),
+        device_id: device_id.clone(),
+        vid: (vid != "xxxx").then_some(vid.clone()),
+        pid: (pid != "xxxx").then_some(pid.clone()),
         size_bytes,
-        onlyid,
+        onlyid: onlyid.clone(),
     };
     let summary = match metainfo::summarize(&inspect_meta, |lba| diskio::read_lba(&path, lba)) {
         Ok(summary) => summary,
@@ -173,30 +163,27 @@ fn disk_flow(runner: &dyn CmdRunner, mut opts: MetaInfoOpts) -> i32 {
             return EXIT_IO;
         }
     };
-    print_summary(&format!("物理盘 disk{n} ({path})"), &summary);
+    let facts = DiskFacts {
+        disk: n,
+        total_sectors,
+        vid,
+        pid,
+        label_id: onlyid,
+    };
+    let tag16 = raw4.as_deref().and_then(diskio::lba4_tag16_from);
+    let backup_dir = diskio::resolve_backup_dir(opts.backup_dir.as_deref());
+    let backups = find_backups(&backup_dir, &facts, device_id.as_deref(), tag16);
+    print_summary(
+        &format!("物理盘 disk{n} ({path})"),
+        &summary,
+        BackupSummary::Device(&backups),
+    );
     EXIT_OK
 }
 
-pub(crate) fn metainfo_flow(runner: &dyn CmdRunner, opts: MetaInfoOpts) -> i32 {
-    if opts.backup.is_some() || opts.onlyid.is_some() {
+pub(crate) fn info_flow(runner: &dyn CmdRunner, opts: InfoOpts) -> i32 {
+    if opts.backup.is_some() {
         return backup_flow(opts);
-    }
-    if opts.disk.is_none() && sysinfo::list_usb_disks(runner).is_empty() {
-        let bak = diskio::resolve_backup_dir(opts.backup_dir.as_deref());
-        let entries = diskio::scan_backup_dir(&bak);
-        if print_backup_sources(&entries, "查看最新元信息: edpcli meta <onlyid>") {
-            println!();
-            println!(
-                "{}",
-                crate::ui::yellow("未检测到外接 USB 盘；上面是可直接用 meta 查看元信息的备份盘。")
-            );
-            return EXIT_OK;
-        }
-        eprintln!(
-            "{}",
-            crate::ui::red("错误: 未检测到外接 USB 盘，备份目录中也没有可查看的备份。")
-        );
-        return EXIT_TARGET;
     }
     disk_flow(runner, opts)
 }
