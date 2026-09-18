@@ -46,6 +46,8 @@ pub struct ExtDisk {
     pub proto: String,
 }
 
+pub struct WriteGuard(imp::WriteGuard);
+
 #[cfg(target_os = "macos")]
 mod macos;
 #[cfg(target_os = "linux")]
@@ -96,6 +98,11 @@ pub fn hardware_probe(disk: u32) -> Option<HardwareProbe> {
     imp::hardware_probe(disk)
 }
 
+
+pub fn is_system_disk(disk: u32) -> bool {
+    imp::is_system_disk(disk)
+}
+
 pub fn list_external_disks(runner: &dyn crate::sysinfo::CmdRunner) -> Vec<ExtDisk> {
     imp::list_external_disks(runner)
 }
@@ -114,8 +121,11 @@ pub fn usb_vid_pid(
     imp::usb_vid_pid(runner, disk)
 }
 
-pub fn unmount_disk(runner: &dyn crate::sysinfo::CmdRunner, disk: u32) -> io::Result<()> {
-    imp::unmount_disk(runner, disk)
+pub fn prepare_write(
+    runner: &dyn crate::sysinfo::CmdRunner,
+    disk: u32,
+) -> io::Result<WriteGuard> {
+    imp::prepare_write(runner, disk).map(WriteGuard)
 }
 
 pub fn elevation_label() -> &'static str {

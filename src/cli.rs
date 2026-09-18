@@ -205,8 +205,8 @@ fn verify_reopened_snapshot(dev: &mut dyn SectorDev, expected: &[u8]) -> EdpCliR
 }
 
 pub(crate) fn guard_system_disk(disk: u32) -> EdpCliResult<()> {
-    if disk < 2 {
-        return Err(err(EXIT_TARGET, format!("错误: 拒绝系统盘 disk{}(须 disk2+)", disk)));
+    if crate::platform::is_system_disk(disk) {
+        return Err(err(EXIT_TARGET, format!("错误: 拒绝系统盘 disk{}", disk)));
     }
     Ok(())
 }
@@ -346,7 +346,7 @@ pub fn apply_flow(
     if !ctx.prompt.confirm_yes(&crate::ui::bold(&format!("将改写 disk{} LBA0/6/7/12/9。输入 YES: ", disk))) {
         return Err(err(EXIT_CANCELLED, "已取消(未写盘)"));
     }
-    sysinfo::unmount_disk(ctx.runner, disk)
+    let _write_guard = sysinfo::prepare_write(ctx.runner, disk)
         .map_err(|e| err(EXIT_IO, format!("错误: 无法卸载 disk{}: {}", disk, e)))?;
     // 卸载后才切 O_RDWR(挂载态打开读写会撞 EBUSY); 写序由 atomic_write_sectors
     // 保证: LBA0(唯一改 MBR 的扇区)最后写, 单 fd 全程持有到写完校验完
@@ -532,7 +532,7 @@ pub fn restore_flow(
     if !ctx.prompt.confirm_yes(&crate::ui::bold(&format!("  → disk{} LBA0-13? 输入 YES: ", disk))) {
         return Err(err(EXIT_CANCELLED, "已取消"));
     }
-    sysinfo::unmount_disk(ctx.runner, disk)
+    let _write_guard = sysinfo::prepare_write(ctx.runner, disk)
         .map_err(|e| err(EXIT_IO, format!("错误: 无法卸载 disk{}: {}", disk, e)))?;
     dev.reopen_rdwr(OPEN_WAIT)
         .map_err(|e| err(EXIT_IO, format!("错误: 无法以读写打开 {}: {}", raw_path(disk), e)))?;

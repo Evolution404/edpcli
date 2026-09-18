@@ -20,6 +20,8 @@ pub(super) const fn kind() -> PlatformKind {
     PlatformKind::MacOS
 }
 
+pub(super) struct WriteGuard;
+
 pub(super) fn raw_disk_path(disk: u32) -> String {
     format!("/dev/rdisk{disk}")
 }
@@ -106,6 +108,10 @@ pub(super) fn sync_directory(path: &Path) -> io::Result<()> {
 
 pub(super) fn hardware_probe(disk: u32) -> Option<HardwareProbe> {
     crate::native_probe::probe_disk(disk)
+}
+
+pub(super) fn is_system_disk(disk: u32) -> bool {
+    disk < 2
 }
 
 fn disk_info(runner: &dyn CmdRunner, disk: u32) -> Option<plist::Plist> {
@@ -206,13 +212,13 @@ pub(super) fn list_external_disks(runner: &dyn CmdRunner) -> Vec<ExtDisk> {
         .collect()
 }
 
-pub(super) fn unmount_disk(runner: &dyn CmdRunner, disk: u32) -> io::Result<()> {
+pub(super) fn prepare_write(runner: &dyn CmdRunner, disk: u32) -> io::Result<WriteGuard> {
     runner
         .check_output(
             &["diskutil", "unmountDisk", "force", &format!("disk{disk}")],
             DISKUTIL_TIMEOUT,
         )
-        .map(|_| ())
+        .map(|_| WriteGuard)
 }
 
 pub(super) const fn elevation_label() -> &'static str {

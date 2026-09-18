@@ -312,8 +312,8 @@ pub fn usb_disk(runner: &dyn CmdRunner, disk: u32) -> Option<ExtDisk> {
 }
 
 /// 强制卸载整盘。写盘流程必须确认卸载成功后才能重新以 O_RDWR 打开设备。
-pub fn unmount_disk(runner: &dyn CmdRunner, disk: u32) -> io::Result<()> {
-    crate::platform::unmount_disk(runner, disk)
+pub fn prepare_write(runner: &dyn CmdRunner, disk: u32) -> io::Result<crate::platform::WriteGuard> {
+    crate::platform::prepare_write(runner, disk)
 }
 
 #[cfg(test)]

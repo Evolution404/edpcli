@@ -12,6 +12,8 @@ pub(super) const fn kind() -> PlatformKind {
     PlatformKind::Windows
 }
 
+pub(super) struct WriteGuard;
+
 pub(super) fn raw_disk_path(disk: u32) -> String {
     format!(r"\\.\PhysicalDrive{disk}")
 }
@@ -46,6 +48,10 @@ pub(super) fn sync_directory(_path: &Path) -> io::Result<()> {
 
 pub(super) fn hardware_probe(_disk: u32) -> Option<HardwareProbe> {
     None
+}
+
+pub(super) fn is_system_disk(_disk: u32) -> bool {
+    true
 }
 
 const POWERSHELL_TIMEOUT: Duration = Duration::from_secs(15);
@@ -107,7 +113,7 @@ pub(super) fn usb_vid_pid(runner: &dyn CmdRunner, disk: u32) -> (String, String)
         .unwrap_or_else(|| ("xxxx".into(), "xxxx".into()))
 }
 
-pub(super) fn unmount_disk(_runner: &dyn CmdRunner, _disk: u32) -> io::Result<()> {
+pub(super) fn prepare_write(_runner: &dyn CmdRunner, _disk: u32) -> io::Result<WriteGuard> {
     Err(io::Error::new(
         io::ErrorKind::Unsupported,
         "Windows 写盘卸载 backend 尚未启用；为避免写挂载磁盘已拒绝操作",
