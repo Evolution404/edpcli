@@ -204,6 +204,33 @@ fn find_backups_ignores_matching_non_bin_files() {
 }
 
 #[test]
+fn find_backups_prefers_device_id_tier_before_generic_fallback() {
+    let tmp = TmpDir::new("find_tier_priority");
+    let mut data = vec![0u8; 14 * SECTOR];
+    let tag: [u8; 16] = *b"0123456789ABCDEF";
+    data[4 * SECTOR..4 * SECTOR + 16].copy_from_slice(&tag);
+
+    let exact = write_backup(
+        &tmp.0,
+        "disk6_122880000_vid0dd8_pid2005_disk&ven_netac&prod_onlydisk_onlyid1_20260910_172300.bin",
+        &data,
+    );
+    let _generic_only = write_backup(
+        &tmp.0,
+        "disk6_122880000_vid0dd8_pid2005_disk&ven_other&prod_other_onlyid1_20260910_172301.bin",
+        &data,
+    );
+
+    let found = find_backups(
+        &tmp.0,
+        &netac_facts(),
+        Some("disk&ven_netac&prod_onlydisk"),
+        Some(tag),
+    );
+    assert_eq!(found, vec![exact]);
+}
+
+#[test]
 fn backup_rejects_device_id_with_path_separators_before_creating_files() {
     let Some(data) = load_disk_image("netac") else {
         eprintln!("跳过: 真实备份不可用");

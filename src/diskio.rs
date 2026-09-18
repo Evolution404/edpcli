@@ -1001,6 +1001,23 @@ pub fn find_backups(
     if !bak_dir.is_dir() {
         return vec![];
     }
+    let Ok(entries) = fs::read_dir(bak_dir) else {
+        return vec![];
+    };
+    let files: Vec<(String, PathBuf)> = entries
+        .flatten()
+        .filter_map(|entry| {
+            let file_type = entry.file_type().ok()?;
+            if !file_type.is_file() {
+                return None;
+            }
+            let path = entry.path();
+            if path.extension().and_then(|e| e.to_str()) != Some("bin") {
+                return None;
+            }
+            Some((entry.file_name().to_string_lossy().into_owned(), path))
+        })
+        .collect();
     let secs = facts
         .total_sectors
         .map(|s| s.to_string())
@@ -1023,28 +1040,11 @@ pub fn find_backups(
         secs, facts.vid, facts.pid
     )]); // 兜底(识别失败时)
     for pats in &tiers {
-        let mut out: Vec<PathBuf> = Vec::new();
-        for pat in pats {
-            let Ok(entries) = fs::read_dir(bak_dir) else {
-                continue;
-            };
-            for entry in entries.flatten() {
-                let Ok(file_type) = entry.file_type() else {
-                    continue;
-                };
-                if !file_type.is_file() {
-                    continue;
-                }
-                let path = entry.path();
-                if path.extension().and_then(|e| e.to_str()) != Some("bin") {
-                    continue;
-                }
-                let name = entry.file_name().to_string_lossy().into_owned();
-                if wildcard_match(pat, &name) {
-                    out.push(path);
-                }
-            }
-        }
+        let mut out: Vec<PathBuf> = files
+            .iter()
+            .filter(|(name, _)| pats.iter().any(|pat| wildcard_match(pat, name)))
+            .map(|(_, path)| path.clone())
+            .collect();
         if out.is_empty() {
             continue;
         }
@@ -1064,7 +1064,6 @@ pub fn find_backups(
                 (None, None) => mtime_epoch(b).cmp(&mtime_epoch(a)).then_with(|| a.cmp(b)),
             },
         );
-        out.dedup();
         return out;
     }
     Vec::new()
