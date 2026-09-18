@@ -51,7 +51,11 @@ fn plain_hex(data: &[u8]) -> String {
         }
         out.push(' ');
         for &b in line {
-            out.push(if (0x20..=0x7e).contains(&b) { b as char } else { '.' });
+            out.push(if (0x20..=0x7e).contains(&b) {
+                b as char
+            } else {
+                '.'
+            });
         }
         out.push('\n');
     }
@@ -64,7 +68,10 @@ fn export_inspect_view(dir: &Path, view: &inspect::SectorView) -> io::Result<()>
     fs::write(dir.join(format!("{base}_raw.bin")), &view.raw)?;
     fs::write(dir.join(format!("{base}_decoded.bin")), &view.decoded)?;
     fs::write(dir.join(format!("{base}_raw.hex")), plain_hex(&view.raw))?;
-    fs::write(dir.join(format!("{base}_decoded.hex")), plain_hex(&view.decoded))?;
+    fs::write(
+        dir.join(format!("{base}_decoded.hex")),
+        plain_hex(&view.decoded),
+    )?;
     Ok(())
 }
 
@@ -115,13 +122,19 @@ where
                     println!("  {}", inspect::overview_line(&view));
                     if let Some(dir) = &export_dir {
                         if let Err(e) = export_inspect_view(dir, &view) {
-                            eprintln!("{}", crate::ui::red(&format!("错误: 导出 LBA{lba} 失败: {e}")));
+                            eprintln!(
+                                "{}",
+                                crate::ui::red(&format!("错误: 导出 LBA{lba} 失败: {e}"))
+                            );
                             return EXIT_IO;
                         }
                     }
                 }
                 Err(e) => {
-                    eprintln!("{}", crate::ui::red(&format!("错误: 读取 LBA{lba} 失败: {e}")));
+                    eprintln!(
+                        "{}",
+                        crate::ui::red(&format!("错误: 读取 LBA{lba} 失败: {e}"))
+                    );
                     return EXIT_IO;
                 }
             }
@@ -147,7 +160,10 @@ where
         let raw = match read(lba) {
             Ok(raw) => raw,
             Err(e) => {
-                eprintln!("{}", crate::ui::red(&format!("错误: 读取 LBA{lba} 失败: {e}")));
+                eprintln!(
+                    "{}",
+                    crate::ui::red(&format!("错误: 读取 LBA{lba} 失败: {e}"))
+                );
                 return EXIT_IO;
             }
         };
@@ -175,7 +191,10 @@ where
         }
         if let Some(dir) = &export_dir {
             if let Err(e) = export_inspect_view(dir, &view) {
-                eprintln!("{}", crate::ui::red(&format!("错误: 导出 LBA{lba} 失败: {e}")));
+                eprintln!(
+                    "{}",
+                    crate::ui::red(&format!("错误: 导出 LBA{lba} 失败: {e}"))
+                );
                 return EXIT_IO;
             }
         }
@@ -195,10 +214,8 @@ fn inspect_backup_flow(opts: InspectOpts) -> i32 {
             Ok(group) => group,
             Err(msg) => {
                 eprintln!("{}", crate::ui::red(&format!("错误: {msg}")));
-                if print_backup_sources(
-                    catalog.entries(),
-                    "查看某盘: edpcli inspect --onlyid <ID>",
-                ) {
+                if print_backup_sources(catalog.entries(), "查看某盘: edpcli inspect --onlyid <ID>")
+                {
                     println!();
                 }
                 return EXIT_BACKUP;
@@ -267,7 +284,9 @@ fn inspect_backup_flow(opts: InspectOpts) -> i32 {
         meta.device_id = Some(did.clone());
     }
     let path_s = path.to_string_lossy().into_owned();
-    render_inspect_source(&source_label, &meta, &opts, |lba| diskio::read_lba(&path_s, lba))
+    render_inspect_source(&source_label, &meta, &opts, |lba| {
+        diskio::read_lba(&path_s, lba)
+    })
 }
 
 fn inspect_disk_flow(runner: &dyn CmdRunner, mut opts: InspectOpts) -> i32 {
@@ -289,7 +308,7 @@ fn inspect_disk_flow(runner: &dyn CmdRunner, mut opts: InspectOpts) -> i32 {
                 }
             };
             argv.push("--disk".into());
-            argv.push(n.to_string());
+            argv.push(crate::platform::disk_selector_value(n));
         }
         elevate::ensure_elevated(&argv);
         unreachable!();
@@ -308,13 +327,18 @@ fn inspect_disk_flow(runner: &dyn CmdRunner, mut opts: InspectOpts) -> i32 {
         }
     };
     opts.disk = Some(n);
+    if let Err(e) = guard_usb_disk(runner, n) {
+        eprintln!("{}", crate::ui::red(&e.msg));
+        return e.code;
+    }
     let path = raw_path(n);
     let raw7 = diskio::read_lba(&path, 7).ok();
     let id = raw7
         .as_deref()
         .and_then(|r| identify(runner, n, r).device_id);
     let (vid, pid) = sysinfo::usb_vid_pid(runner, n);
-    let size_bytes = sysinfo::disk_total_sectors(runner, n).and_then(|s| s.checked_mul(SECTOR as u64));
+    let size_bytes =
+        sysinfo::disk_total_sectors(runner, n).and_then(|s| s.checked_mul(SECTOR as u64));
     let onlyid = diskio::read_lba(&path, 4)
         .ok()
         .and_then(|b| diskio::lba4_label_id_from(&b[..b.len().min(32)]));
@@ -347,10 +371,12 @@ pub(crate) fn inspect_flow(runner: &dyn CmdRunner, opts: InspectOpts) -> i32 {
                 );
                 return EXIT_OK;
             }
-            eprintln!("{}", crate::ui::red("错误: 未检测到外接 USB 盘，备份目录中也没有可查看的备份。"));
+            eprintln!(
+                "{}",
+                crate::ui::red("错误: 未检测到外接 USB 盘，备份目录中也没有可查看的备份。")
+            );
             return EXIT_TARGET;
         }
         inspect_disk_flow(runner, opts)
     }
 }
-

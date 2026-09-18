@@ -76,10 +76,20 @@ fn print_ownership(entry: &BackupEntry, indent: &str) {
         return;
     };
     if let Some(dept) = dept {
-        println!("{}{}  {}", indent, crate::ui::dim("Dept"), crate::ui::dim(&dept));
+        println!(
+            "{}{}  {}",
+            indent,
+            crate::ui::dim("Dept"),
+            crate::ui::dim(&dept)
+        );
     }
     if let Some(user) = user {
-        println!("{}{}  {}", indent, crate::ui::dim("User"), crate::ui::dim(&user));
+        println!(
+            "{}{}  {}",
+            indent,
+            crate::ui::dim("User"),
+            crate::ui::dim(&user)
+        );
     }
 }
 
@@ -94,7 +104,10 @@ fn print_numbered_backup_entries(entries: &[&BackupEntry]) {
             crate::ui::pad_to(backup_kind(entry), 12),
             backup_health(entry)
         );
-        println!("      └─ {}", crate::ui::dim(backup_catalog::file_name(entry)));
+        println!(
+            "      └─ {}",
+            crate::ui::dim(backup_catalog::file_name(entry))
+        );
     }
 }
 
@@ -132,9 +145,7 @@ pub(crate) fn print_backup_sources(entries: &[BackupEntry], hint: &str) -> bool 
         backup_catalog::sort_newest_first(group);
     }
     groups.sort_by(|a, b| match (a.1.first(), b.1.first()) {
-        (Some(ae), Some(be)) => {
-            diskio::cmp_backup_newest_first(ae, be).then_with(|| a.0.cmp(&b.0))
-        }
+        (Some(ae), Some(be)) => diskio::cmp_backup_newest_first(ae, be).then_with(|| a.0.cmp(&b.0)),
         (Some(_), None) => std::cmp::Ordering::Less,
         (None, Some(_)) => std::cmp::Ordering::Greater,
         (None, None) => a.0.cmp(&b.0),
@@ -386,8 +397,8 @@ fn delete_backup_pair(entry: &BackupEntry) -> Result<(), String> {
         .content_md5
         .as_deref()
         .ok_or_else(|| format!("扫描时无法取得内容摘要，拒绝删除: {}", path.display()))?;
-    let current = fs::read(path)
-        .map_err(|e| format!("删除前无法重新读取 {}: {}", path.display(), e))?;
+    let current =
+        fs::read(path).map_err(|e| format!("删除前无法重新读取 {}: {}", path.display(), e))?;
     let actual = crate::md5::md5_hex(&current);
     if actual != expected {
         return Err(format!(
@@ -558,8 +569,7 @@ pub fn backup_rm(
         let indices = if targets.is_empty() {
             print_onlyid_backup_choices(id, &group);
             loop {
-                let input =
-                    prompt.prompt_line("选择要删除的备份 [如 2 / 1,3 / 2-3，回车取消]: ");
+                let input = prompt.prompt_line("选择要删除的备份 [如 2 / 1,3 / 2-3，回车取消]: ");
                 let input = input.trim();
                 if input.is_empty() {
                     eprintln!("已取消");
@@ -620,7 +630,10 @@ pub fn backup_rm(
         else {
             eprintln!(
                 "{}",
-                crate::ui::red(&format!("错误: 删除目标已不在扫描快照中: {}", path.display()))
+                crate::ui::red(&format!(
+                    "错误: 删除目标已不在扫描快照中: {}",
+                    path.display()
+                ))
             );
             return EXIT_BACKUP;
         };
@@ -643,9 +656,7 @@ pub fn backup_rm(
         if *deleting >= total && total > 0 {
             eprintln!(
                 "{}",
-                crate::ui::red(
-                    "错误: 安全保护拒绝删除——该盘将被清到零份备份；至少保留 1 份。",
-                )
+                crate::ui::red("错误: 安全保护拒绝删除——该盘将被清到零份备份；至少保留 1 份。",)
             );
             return EXIT_BACKUP;
         }

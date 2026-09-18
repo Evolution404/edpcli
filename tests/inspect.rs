@@ -18,14 +18,23 @@ fn lba7_and_lba12_decode_to_edpf_with_semantic_fields() {
     let v7 = analyze_sector(7, &data[7 * 512..8 * 512], &meta);
     assert_eq!(&v7.decoded[..4], b"EDPF");
     assert!(v7.method.contains("XOR"));
-    assert!(v7.fields.iter().any(|f| f.label == "类型" && f.value.contains("Share")));
-    assert!(v7.fields.iter().any(|f| f.label == "起始 LBA" && f.style == FieldStyle::Address));
+    assert!(v7
+        .fields
+        .iter()
+        .any(|f| f.label == "类型" && f.value.contains("Share")));
+    assert!(v7
+        .fields
+        .iter()
+        .any(|f| f.label == "起始 LBA" && f.style == FieldStyle::Address));
 
     let v12 = analyze_sector(12, &data[12 * 512..13 * 512], &meta);
     assert_eq!(&v12.decoded[..4], b"EDPF");
     assert_eq!(&v12.decoded[368..], &data[12 * 512 + 368..13 * 512]);
     assert!(v12.method.contains("前 368B"));
-    assert!(v12.fields.iter().any(|f| f.label == "大小" && f.style == FieldStyle::Size));
+    assert!(v12
+        .fields
+        .iter()
+        .any(|f| f.label == "大小" && f.style == FieldStyle::Size));
 }
 
 #[test]
@@ -36,7 +45,10 @@ fn lba6_reports_safe6_checksum_and_identity_fields() {
     assert_eq!(v.decoded.len(), 512);
     assert!(v.method.contains("SAFE6"));
     assert!(v.fields.iter().any(|f| f.label == "device_id CRC32"));
-    assert!(v.fields.iter().any(|f| f.label == "校验和" && f.style == FieldStyle::Checksum));
+    assert!(v
+        .fields
+        .iter()
+        .any(|f| f.label == "校验和" && f.style == FieldStyle::Checksum));
 }
 
 #[test]
@@ -82,7 +94,8 @@ fn lba8_llgb_fields_render_as_vertical_key_value_rows() {
     assert!(out.contains("空字段"), "空值字段应压缩成摘要: {out}");
     assert!(out.contains("Indus") && out.contains("VOLC2"), "{out}");
     assert!(
-        !out.lines().any(|line| line.contains("GLab=") && line.contains("Dept=")),
+        !out.lines()
+            .any(|line| line.contains("GLab=") && line.contains("Dept=")),
         "LLGB 子字段不应再拼成一行: {out}"
     );
     edpcli::ui::reset_enabled_for_tests();
@@ -97,7 +110,11 @@ fn repeated_structures_render_as_groups_instead_of_repeating_prefixes() {
     let edpf = render_fields(&analyze_sector(7, &data[7 * 512..8 * 512], &meta));
     assert!(edpf.contains("Entry[0]"), "{edpf}");
     assert!(edpf.contains("Entry[1]"), "{edpf}");
-    assert_eq!(edpf.matches("Entry[0]").count(), 1, "Entry 标题应只显示一次: {edpf}");
+    assert_eq!(
+        edpf.matches("Entry[0]").count(),
+        1,
+        "Entry 标题应只显示一次: {edpf}"
+    );
 
     let mbr = render_fields(&analyze_sector(0, &data[..512], &meta));
     assert!(mbr.contains("分区 P1"), "{mbr}");
@@ -152,6 +169,10 @@ fn mbr_empty_partition_slots_are_summarized_not_expanded() {
     let out = render_fields(&view);
     assert!(out.contains("分区 P1"), "{out}");
     assert!(!out.contains("分区 P2"), "空分区不应展开: {out}");
-    assert!(view.notes.iter().any(|note| note.contains("空分区")), "{:?}", view.notes);
+    assert!(
+        view.notes.iter().any(|note| note.contains("空分区")),
+        "{:?}",
+        view.notes
+    );
     edpcli::ui::reset_enabled_for_tests();
 }

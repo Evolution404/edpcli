@@ -202,9 +202,19 @@ fn text_value(b: &[u8]) -> String {
     }
     let ascii: String = b
         .iter()
-        .map(|&x| if (0x20..=0x7e).contains(&x) { x as char } else { '·' })
+        .map(|&x| {
+            if (0x20..=0x7e).contains(&x) {
+                x as char
+            } else {
+                '·'
+            }
+        })
         .collect();
-    format!("{}  [hex:{}]", ascii, b.iter().map(|x| format!("{:02X}", x)).collect::<String>())
+    format!(
+        "{}  [hex:{}]",
+        ascii,
+        b.iter().map(|x| format!("{:02X}", x)).collect::<String>()
+    )
 }
 
 fn crc_key(meta: &InspectMeta) -> Option<(u32, [u8; 4])> {
@@ -226,7 +236,11 @@ fn parse_mbr(decoded: &[u8], fields: &mut Vec<SectorField>, notes: &mut Vec<Stri
         0x1fe,
         0x200,
         "MBR 签名",
-        if sig_ok { "55 AA ✓" } else { "签名异常 ✗" },
+        if sig_ok {
+            "55 AA ✓"
+        } else {
+            "签名异常 ✗"
+        },
         FieldStyle::Magic,
     ));
     let mut empty_slots = Vec::new();
@@ -261,7 +275,11 @@ fn parse_mbr(decoded: &[u8], fields: &mut Vec<SectorField>, notes: &mut Vec<Stri
             off + 16,
             group,
             "大小",
-            format!("{} 扇区 / {}", secs, human_bytes(secs as u64 * SECTOR as u64)),
+            format!(
+                "{} 扇区 / {}",
+                secs,
+                human_bytes(secs as u64 * SECTOR as u64)
+            ),
             FieldStyle::Size,
         ));
     }
@@ -290,7 +308,10 @@ fn lba4_serial(raw: &[u8]) -> Option<(u32, usize, usize)> {
             j += 1;
         }
         if j > i + 3 && b.get(j..j + 3) == Some(b"$$$") {
-            let s = std::str::from_utf8(&b[i + 3..j]).ok()?.parse::<u32>().ok()?;
+            let s = std::str::from_utf8(&b[i + 3..j])
+                .ok()?
+                .parse::<u32>()
+                .ok()?;
             return Some((s, i, j + 3));
         }
     }
@@ -314,7 +335,12 @@ fn decode_lba4(raw: &[u8]) -> Option<(Vec<u8>, u32, u32, usize, usize)> {
     Some((dec, serial, k0, hs, he))
 }
 
-fn parse_lba6(raw: &[u8], meta: &InspectMeta, fields: &mut Vec<SectorField>, notes: &mut Vec<String>) -> Vec<u8> {
+fn parse_lba6(
+    raw: &[u8],
+    meta: &InspectMeta,
+    fields: &mut Vec<SectorField>,
+    notes: &mut Vec<String>,
+) -> Vec<u8> {
     let dec = lba6_decode(raw);
     let label_end = c_field_end(&dec, 0x000, 0x040);
     let user_end = c_field_end(&dec, 0x050, 0x070);
@@ -322,15 +348,30 @@ fn parse_lba6(raw: &[u8], meta: &InspectMeta, fields: &mut Vec<SectorField>, not
     let label = text_value(&dec[0x000..label_end]);
     let label = label.strip_prefix("*^$@").unwrap_or(&label).to_string();
     fields.push(field(0x000, label_end, "标签", label, FieldStyle::Text));
-    fields.push(field(0x050, user_end, "用户", text_value(&dec[0x050..user_end]), FieldStyle::Text));
-    fields.push(field(0x070, serial_end, "序列", text_value(&dec[0x070..serial_end]), FieldStyle::Identity));
+    fields.push(field(
+        0x050,
+        user_end,
+        "用户",
+        text_value(&dec[0x050..user_end]),
+        FieldStyle::Text,
+    ));
+    fields.push(field(
+        0x070,
+        serial_end,
+        "序列",
+        text_value(&dec[0x070..serial_end]),
+        FieldStyle::Identity,
+    ));
     if let Some((crc, _)) = crc_key(meta) {
         let stored = u32_at(&dec, 0x100).unwrap_or(0);
         fields.push(field(
             0x100,
             0x104,
             "device_id CRC32",
-            format!("0x{stored:08X} / 期望 0x{crc:08X} {}", if stored == crc { "✓" } else { "✗" }),
+            format!(
+                "0x{stored:08X} / 期望 0x{crc:08X} {}",
+                if stored == crc { "✓" } else { "✗" }
+            ),
             FieldStyle::Checksum,
         ));
         let stored2 = u32_at(&dec, 0x104).unwrap_or(0);
@@ -339,7 +380,10 @@ fn parse_lba6(raw: &[u8], meta: &InspectMeta, fields: &mut Vec<SectorField>, not
             0x104,
             0x108,
             "CRC32<<1",
-            format!("0x{stored2:08X} / 期望 0x{want2:08X} {}", if stored2 == want2 { "✓" } else { "✗" }),
+            format!(
+                "0x{stored2:08X} / 期望 0x{want2:08X} {}",
+                if stored2 == want2 { "✓" } else { "✗" }
+            ),
             FieldStyle::Checksum,
         ));
     }
@@ -352,15 +396,34 @@ fn parse_lba6(raw: &[u8], meta: &InspectMeta, fields: &mut Vec<SectorField>, not
             FieldStyle::Magic,
         ));
     }
-    fields.push(field(0x1c0, 0x1c8, "GLAB 前缀", text_value(&dec[0x1c0..0x1c8]), FieldStyle::Magic));
+    fields.push(field(
+        0x1c0,
+        0x1c8,
+        "GLAB 前缀",
+        text_value(&dec[0x1c0..0x1c8]),
+        FieldStyle::Magic,
+    ));
     let v1ca = u32_at(&dec, 0x1ca).unwrap_or(0);
-    fields.push(field(0x1ca, 0x1ce, "模板值", format!("{} (0x{v1ca:08X})", v1ca), FieldStyle::Flag));
+    fields.push(field(
+        0x1ca,
+        0x1ce,
+        "模板值",
+        format!("{} (0x{v1ca:08X})", v1ca),
+        FieldStyle::Flag,
+    ));
     let flagv = dec[0x1f0];
     fields.push(field(
         0x1f0,
         0x1f1,
         "注册标志",
-        format!("0x{flagv:02X} {}", if flagv == 1 { "SAFE6 已注册" } else { "未注册/其他" }),
+        format!(
+            "0x{flagv:02X} {}",
+            if flagv == 1 {
+                "SAFE6 已注册"
+            } else {
+                "未注册/其他"
+            }
+        ),
         FieldStyle::Flag,
     ));
     let stored = u32_at(raw, 0x1fc).unwrap_or(0);
@@ -369,7 +432,10 @@ fn parse_lba6(raw: &[u8], meta: &InspectMeta, fields: &mut Vec<SectorField>, not
         0x1fc,
         0x200,
         "校验和",
-        format!("0x{stored:08X} / 计算 0x{calc:08X} {}", if stored == calc { "✓" } else { "✗" }),
+        format!(
+            "0x{stored:08X} / 计算 0x{calc:08X} {}",
+            if stored == calc { "✓" } else { "✗" }
+        ),
         FieldStyle::Checksum,
     ));
     notes.push("LBA6：前 508B 使用 rolling XOR K0=0x4DAA，最后 4B 校验和保持明文。".into());
@@ -403,7 +469,14 @@ fn parse_edpf(dec: &[u8], stride: usize, fields: &mut Vec<SectorField>, notes: &
         let bps = u64_at(e, 0x20).unwrap_or(0);
         let size = u64_at(e, 0x28).unwrap_or(0);
         let group = format!("Entry[{idx}]");
-        fields.push(grouped_field(base, base + 4, group.clone(), "EDPF magic", "EDPF", FieldStyle::Magic));
+        fields.push(grouped_field(
+            base,
+            base + 4,
+            group.clone(),
+            "EDPF magic",
+            "EDPF",
+            FieldStyle::Magic,
+        ));
         fields.push(grouped_field(
             base + 0x0c,
             base + 0x10,
@@ -470,7 +543,10 @@ fn parse_edpf(dec: &[u8], stride: usize, fields: &mut Vec<SectorField>, notes: &
                     key8.extend_from_slice(&hi.to_le_bytes());
                     children.push(FieldChild {
                         label: "key8".into(),
-                        value: key8.iter().map(|x| format!("{:02x}", x)).collect::<String>(),
+                        value: key8
+                            .iter()
+                            .map(|x| format!("{:02x}", x))
+                            .collect::<String>(),
                     });
                     children.push(FieldChild {
                         label: "key8 CRC".into(),
@@ -509,20 +585,26 @@ fn parse_edpf(dec: &[u8], stride: usize, fields: &mut Vec<SectorField>, notes: &
             ));
         }
     }
-    notes.push(format!("EDPF：检测到 {count} 条记录，entry stride=0x{stride:X}。"));
+    notes.push(format!(
+        "EDPF：检测到 {count} 条记录，entry stride=0x{stride:X}。"
+    ));
 }
 
 fn parse_llgb(dec: &[u8], fields: &mut Vec<SectorField>, notes: &mut Vec<String>) {
     let mut cursor = 0usize;
     let mut count = 0usize;
     while cursor < dec.len() {
-        let Some(rel) = dec[cursor..].iter().position(|&b| b == b'<') else { break };
+        let Some(rel) = dec[cursor..].iter().position(|&b| b == b'<') else {
+            break;
+        };
         let start = cursor + rel;
         if dec.get(start + 1) == Some(&b'/') {
             cursor = start + 2;
             continue;
         }
-        let Some(gt_rel) = dec[start..].iter().position(|&b| b == b'>') else { break };
+        let Some(gt_rel) = dec[start..].iter().position(|&b| b == b'>') else {
+            break;
+        };
         let gt = start + gt_rel;
         let tag = text_value(&dec[start + 1..gt]);
         let close = dec[gt + 1..]
@@ -608,7 +690,13 @@ fn parse_sapf(dec: &[u8], fields: &mut Vec<SectorField>, notes: &mut Vec<String>
     fields.push(field(0x100, 0x104, "SAPF magic", "SAPF", FieldStyle::Magic));
     let ver = u16_at(dec, 0x104).unwrap_or(0);
     let count = u16_at(dec, 0x106).unwrap_or(0) as usize;
-    fields.push(field(0x104, 0x108, "SAPF 头", format!("version=0x{ver:04X} count={count}"), FieldStyle::Flag));
+    fields.push(field(
+        0x104,
+        0x108,
+        "SAPF 头",
+        format!("version=0x{ver:04X} count={count}"),
+        FieldStyle::Flag,
+    ));
     for i in 0..count.min(8) {
         let off = 0x108 + i * 0x10;
         if off + 0x10 > dec.len() {
@@ -685,7 +773,10 @@ fn decode_lba11(raw: &[u8], meta: &InspectMeta) -> Option<(Vec<u8>, String)> {
         if pt.get(..4) == Some(b"PDKB") {
             let mut dec = rand.to_vec();
             dec.extend_from_slice(&pt);
-            return Some((dec, format!("A6B0 key=CRC32(rand+VID+PID+{source})=0x{crc:08X} → PDKB ✓")));
+            return Some((
+                dec,
+                format!("A6B0 key=CRC32(rand+VID+PID+{source})=0x{crc:08X} → PDKB ✓"),
+            ));
         }
     }
     None
@@ -713,11 +804,20 @@ pub fn analyze_sector(lba: u32, raw: &[u8], meta: &InspectMeta) -> SectorView {
         4 => {
             if let Some((d, serial, k0, hs, he)) = decode_lba4(raw) {
                 decoded = d;
-                fields.push(field(hs, he, "labelOnlyId", format!("{} (0x{serial:08X})", serial), FieldStyle::Identity));
+                fields.push(field(
+                    hs,
+                    he,
+                    "labelOnlyId",
+                    format!("{} (0x{serial:08X})", serial),
+                    FieldStyle::Identity,
+                ));
                 if decoded.get(0x39..0x3d) == Some(b"LLGB") {
                     fields.push(field(0x39, 0x3d, "LLGB magic", "LLGB", FieldStyle::Magic));
                 }
-                notes.push("LBA4 的 0x18 以后按 labelOnlyId 派生 K0 做 rolling XOR；原始 0 填充保持为 0。".into());
+                notes.push(
+                    "LBA4 的 0x18 以后按 labelOnlyId 派生 K0 做 rolling XOR；原始 0 填充保持为 0。"
+                        .into(),
+                );
                 format!("XOR K0=0x{k0:04X} from labelOnlyId={serial}")
             } else {
                 "RAW（未找到 $$$<onlyid>$$$）".into()
@@ -746,7 +846,10 @@ pub fn analyze_sector(lba: u32, raw: &[u8], meta: &InspectMeta) -> SectorView {
                 if decoded.get(..4) == Some(b"LLGB") || decoded.contains(&b'<') {
                     parse_llgb(&decoded, &mut fields, &mut notes);
                 }
-                format!("A6B0 前 {}B，key=CRC32(device_id)=0x{crc:08X}", EDPF_ENC_LEN)
+                format!(
+                    "A6B0 前 {}B，key=CRC32(device_id)=0x{crc:08X}",
+                    EDPF_ENC_LEN
+                )
             } else {
                 "RAW（缺 device_id，无法解 LBA8）".into()
             }
@@ -769,14 +872,24 @@ pub fn analyze_sector(lba: u32, raw: &[u8], meta: &InspectMeta) -> SectorView {
             }
         }
         10 => {
-            notes.push(if raw.iter().all(|&b| b == 0) { "LBA10 全零。".into() } else { "LBA10 存在非零数据。".into() });
+            notes.push(if raw.iter().all(|&b| b == 0) {
+                "LBA10 全零。".into()
+            } else {
+                "LBA10 存在非零数据。".into()
+            });
             "RAW（保留扇区）".into()
         }
         11 => {
             if let Some((d, m)) = decode_lba11(raw, meta) {
                 decoded = d;
                 fields.push(field(0x100, 0x104, "PDKB magic", "PDKB", FieldStyle::Magic));
-                fields.push(field(0x104, 0x200, "PDKB device_id", text_value(&decoded[0x104..0x200]), FieldStyle::Identity));
+                fields.push(field(
+                    0x104,
+                    0x200,
+                    "PDKB device_id",
+                    text_value(&decoded[0x104..0x200]),
+                    FieldStyle::Identity,
+                ));
                 m
             } else {
                 "RAW（缺 VID/PID/容量或 PDKB 解密未通过）".into()
@@ -799,7 +912,14 @@ pub fn analyze_sector(lba: u32, raw: &[u8], meta: &InspectMeta) -> SectorView {
         _ => "RAW（无已知结构解析器）".into(),
     };
 
-    SectorView { lba, raw: raw.to_vec(), decoded, method, fields, notes }
+    SectorView {
+        lba,
+        raw: raw.to_vec(),
+        decoded,
+        method,
+        fields,
+        notes,
+    }
 }
 
 fn style_name(style: FieldStyle) -> &'static str {
@@ -839,7 +959,12 @@ pub fn render_hex(view: &SectorView, raw_mode: bool) -> String {
     let data = if raw_mode { &view.raw } else { &view.decoded };
     let fields: &[SectorField] = if raw_mode { &[] } else { &view.fields };
     let mut out = String::new();
-    out.push_str(&format!("LBA{} {} hex ({}B)\n", view.lba, if raw_mode { "RAW" } else { "解码" }, data.len()));
+    out.push_str(&format!(
+        "LBA{} {} hex ({}B)\n",
+        view.lba,
+        if raw_mode { "RAW" } else { "解码" },
+        data.len()
+    ));
     for (line_no, line) in data.chunks(16).enumerate() {
         let base = line_no * 16;
         out.push_str(&format!("  +0x{base:03X}: "));
@@ -861,7 +986,11 @@ pub fn render_hex(view: &SectorView, raw_mode: bool) -> String {
         }
         out.push(' ');
         for &b in line {
-            out.push(if (0x20..=0x7e).contains(&b) { b as char } else { '.' });
+            out.push(if (0x20..=0x7e).contains(&b) {
+                b as char
+            } else {
+                '.'
+            });
         }
         out.push('\n');
     }
@@ -940,7 +1069,11 @@ pub fn render_fields(view: &SectorView) -> String {
             }
         }
         if !f.children.is_empty() {
-            let child_indent = if f.label.is_empty() { "      " } else { "        " };
+            let child_indent = if f.label.is_empty() {
+                "      "
+            } else {
+                "        "
+            };
             if !f.label.is_empty() {
                 out.push_str(&format!(
                     "      {}  {}\n",
@@ -1044,9 +1177,18 @@ pub fn overview_line(view: &SectorView) -> String {
         .raw
         .iter()
         .take(12)
-        .map(|&b| if (0x20..=0x7e).contains(&b) { b as char } else { '.' })
+        .map(|&b| {
+            if (0x20..=0x7e).contains(&b) {
+                b as char
+            } else {
+                '.'
+            }
+        })
         .collect();
-    format!("LBA{:>2}  {:>3}/512  {:<12}  {}", view.lba, nz, head, view.method)
+    format!(
+        "LBA{:>2}  {:>3}/512  {:<12}  {}",
+        view.lba, nz, head, view.method
+    )
 }
 
 #[cfg(test)]
@@ -1057,11 +1199,14 @@ mod tests {
     fn truncated_legacy_gbk_keeps_readable_prefix() {
         let mut raw = b"Dept=*^$@".to_vec();
         raw.extend_from_slice(&[
-            0xBD, 0xAD, 0xCB, 0xD5, 0xCA, 0xA1, 0xB5, 0xE7, 0xC1, 0xA6, 0xD3, 0xD0,
-            0xCF, 0xDE, 0xB9, 0xAB, 0xCB, 0xBE, 0x2F, 0xBD,
+            0xBD, 0xAD, 0xCB, 0xD5, 0xCA, 0xA1, 0xB5, 0xE7, 0xC1, 0xA6, 0xD3, 0xD0, 0xCF, 0xDE,
+            0xB9, 0xAB, 0xCB, 0xBE, 0x2F, 0xBD,
         ]);
         let decoded = text_value(&raw);
-        assert!(decoded.starts_with("Dept=*^$@江苏省电力有限公司/"), "{decoded}");
+        assert!(
+            decoded.starts_with("Dept=*^$@江苏省电力有限公司/"),
+            "{decoded}"
+        );
         assert!(!decoded.contains("[hex:"), "{decoded}");
     }
 }

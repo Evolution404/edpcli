@@ -51,8 +51,14 @@ fn onlyid_index_is_one_based_and_newest_first() {
     assert_eq!(group.len(), 2);
     assert!(group[0].path.to_string_lossy().contains("20260911_172300"));
     assert!(group[1].path.to_string_lossy().contains("20260910_172300"));
-    assert_eq!(catalog.onlyid_index("1402259934", 1).unwrap().path, group[0].path);
-    assert_eq!(catalog.onlyid_index("1402259934", 2).unwrap().path, group[1].path);
+    assert_eq!(
+        catalog.onlyid_index("1402259934", 1).unwrap().path,
+        group[0].path
+    );
+    assert_eq!(
+        catalog.onlyid_index("1402259934", 2).unwrap().path,
+        group[1].path
+    );
     assert!(catalog.onlyid_index("1402259934", 0).is_err());
     assert!(catalog.onlyid_index("1402259934", 3).is_err());
 }
@@ -62,7 +68,11 @@ fn target_resolution_is_confined_to_backup_root() {
     let Some((tmp, catalog)) = copied_catalog() else {
         return;
     };
-    let name = catalog.entries()[0].path.file_name().unwrap().to_string_lossy();
+    let name = catalog.entries()[0]
+        .path
+        .file_name()
+        .unwrap()
+        .to_string_lossy();
     let entry = catalog.resolve_target(&name).unwrap();
     assert!(entry.path.starts_with(&tmp.0));
 
@@ -92,12 +102,10 @@ fn ownership_uses_lba8_cached_during_catalog_scan() {
     // 证明 backup list 不会为了 Dept/User 再次打开同一个 .bin。
     fs::remove_file(&entry.path).unwrap();
     let ownership = backup_ownership(entry).expect("缓存 LBA8 应可解析归属信息");
-    assert!(
-        ownership
-            .dept
-            .as_deref()
-            .unwrap_or_default()
-            .contains("泰州供电公司")
-    );
+    assert!(ownership
+        .dept
+        .as_deref()
+        .unwrap_or_default()
+        .contains("泰州供电公司"));
     assert_eq!(ownership.user.as_deref(), Some("宋旭琳"));
 }

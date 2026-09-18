@@ -5,8 +5,8 @@
 
 use std::fs::File;
 use std::io;
-use std::path::PathBuf;
 use std::path::Path;
+use std::path::PathBuf;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PlatformKind {
@@ -50,19 +50,19 @@ pub struct WriteGuard {
     _inner: imp::WriteGuard,
 }
 
+#[cfg(target_os = "linux")]
+mod linux;
 #[cfg(target_os = "macos")]
 mod macos;
 #[cfg(target_os = "macos")]
 mod macos_native;
-#[cfg(target_os = "linux")]
-mod linux;
 #[cfg(target_os = "windows")]
 mod windows;
 
-#[cfg(target_os = "macos")]
-use macos as imp;
 #[cfg(target_os = "linux")]
 use linux as imp;
+#[cfg(target_os = "macos")]
+use macos as imp;
 #[cfg(target_os = "windows")]
 use windows as imp;
 
@@ -132,7 +132,6 @@ pub fn fallback_hardware_probe(
     imp::fallback_hardware_probe(runner, disk)
 }
 
-
 pub fn is_system_disk(disk: u32) -> bool {
     imp::is_system_disk(disk)
 }
@@ -141,24 +140,15 @@ pub fn list_external_disks(runner: &dyn crate::sysinfo::CmdRunner) -> Vec<ExtDis
     imp::list_external_disks(runner)
 }
 
-pub fn disk_total_sectors(
-    runner: &dyn crate::sysinfo::CmdRunner,
-    disk: u32,
-) -> Option<u64> {
+pub fn disk_total_sectors(runner: &dyn crate::sysinfo::CmdRunner, disk: u32) -> Option<u64> {
     imp::disk_total_sectors(runner, disk)
 }
 
-pub fn usb_vid_pid(
-    runner: &dyn crate::sysinfo::CmdRunner,
-    disk: u32,
-) -> (String, String) {
+pub fn usb_vid_pid(runner: &dyn crate::sysinfo::CmdRunner, disk: u32) -> (String, String) {
     imp::usb_vid_pid(runner, disk)
 }
 
-pub fn prepare_write(
-    runner: &dyn crate::sysinfo::CmdRunner,
-    disk: u32,
-) -> io::Result<WriteGuard> {
+pub fn prepare_write(runner: &dyn crate::sysinfo::CmdRunner, disk: u32) -> io::Result<WriteGuard> {
     imp::prepare_write(runner, disk).map(|inner| WriteGuard { _inner: inner })
 }
 

@@ -87,7 +87,11 @@ fn backup_flow(opts: MetaInfoOpts) -> i32 {
         Err(e) => {
             eprintln!(
                 "{}",
-                crate::ui::red(&format!("错误: 读取备份元信息失败 {}: {}", path.display(), e))
+                crate::ui::red(&format!(
+                    "错误: 读取备份元信息失败 {}: {}",
+                    path.display(),
+                    e
+                ))
             );
             return EXIT_IO;
         }
@@ -115,7 +119,7 @@ fn disk_flow(runner: &dyn CmdRunner, mut opts: MetaInfoOpts) -> i32 {
                 }
             };
             argv.push("--disk".into());
-            argv.push(n.to_string());
+            argv.push(crate::platform::disk_selector_value(n));
         }
         elevate::ensure_elevated(&argv);
         unreachable!();
@@ -147,7 +151,8 @@ fn disk_flow(runner: &dyn CmdRunner, mut opts: MetaInfoOpts) -> i32 {
         .and_then(|raw| identify(runner, n, raw).device_id);
     let device_id = opts.device_id.clone().or(auto_device_id);
     let (vid, pid) = sysinfo::usb_vid_pid(runner, n);
-    let size_bytes = sysinfo::disk_total_sectors(runner, n).and_then(|s| s.checked_mul(SECTOR as u64));
+    let size_bytes =
+        sysinfo::disk_total_sectors(runner, n).and_then(|s| s.checked_mul(SECTOR as u64));
     let onlyid = diskio::read_lba(&path, 4)
         .ok()
         .and_then(|raw| diskio::lba4_label_id_from(&raw));
@@ -161,7 +166,10 @@ fn disk_flow(runner: &dyn CmdRunner, mut opts: MetaInfoOpts) -> i32 {
     let summary = match metainfo::summarize(&inspect_meta, |lba| diskio::read_lba(&path, lba)) {
         Ok(summary) => summary,
         Err(e) => {
-            eprintln!("{}", crate::ui::red(&format!("错误: 读取 disk{n} 元信息失败: {e}")));
+            eprintln!(
+                "{}",
+                crate::ui::red(&format!("错误: 读取 disk{n} 元信息失败: {e}"))
+            );
             return EXIT_IO;
         }
     };

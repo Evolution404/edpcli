@@ -12,10 +12,12 @@
 //!             LBA12 尾部144B(0x170-0x200)不可清零; 不发明原盘没有的状态。
 //!   分区参数按实际物理盘计算: Encrypt 从原盘 LBA12 type=4 读取, Share 占满其前。
 
-use crate::common::{fmt_gb, group_digits, py_round_half_even, EdpCliError, EdpCliResult, SECTOR,
-                    EXIT_TARGET};
-use crate::crypto::{a6b0_full, a7f0_full, crc32_bare, lba6_checksum, lba6_decode, xor_rolling,
-                    LBA6_K0};
+use crate::common::{
+    fmt_gb, group_digits, py_round_half_even, EdpCliError, EdpCliResult, EXIT_TARGET, SECTOR,
+};
+use crate::crypto::{
+    a6b0_full, a7f0_full, crc32_bare, lba6_checksum, lba6_decode, xor_rolling, LBA6_K0,
+};
 
 pub const EDPF_ENC_LEN: usize = 368; // LBA12 前 368B A6B0 加密, 后 144B 不加密
 pub const E7: usize = 0x40; // entry stride: LBA7=64B
@@ -59,7 +61,11 @@ pub fn find_type_entry(dec: &[u8], stride: usize, ptype: u32) -> EdpCliResult<us
     }
     Err(EdpCliError::new(
         EXIT_TARGET,
-        format!("错误: EDPF 中未找到 type={}({}) entry", ptype, part_type_name(ptype)),
+        format!(
+            "错误: EDPF 中未找到 type={}({}) entry",
+            ptype,
+            part_type_name(ptype)
+        ),
     ))
 }
 
@@ -90,7 +96,10 @@ pub fn convert_lba0(raw: &[u8], share_sectors: u64) -> EdpCliResult<Vec<u8>> {
     out[0x1BE + 4] = 0x07;
     out[0x1BE + 8..0x1BE + 12].copy_from_slice(&63u32.to_le_bytes());
     let n = u32::try_from(share_sectors).map_err(|_| {
-        EdpCliError::new(EXIT_TARGET, format!("错误: Share 扇区数 {} 溢出 MBR u32 字段", share_sectors))
+        EdpCliError::new(
+            EXIT_TARGET,
+            format!("错误: Share 扇区数 {} 溢出 MBR u32 字段", share_sectors),
+        )
     })?;
     out[0x1BE + 12..0x1BE + 16].copy_from_slice(&n.to_le_bytes());
     out[0x1FE..0x200].copy_from_slice(&[0x55, 0xAA]);
@@ -100,7 +109,10 @@ pub fn convert_lba0(raw: &[u8], share_sectors: u64) -> EdpCliResult<Vec<u8>> {
 pub fn convert_lba6(raw: &[u8]) -> EdpCliResult<(Vec<u8>, Vec<u8>)> {
     let mut dec = lba6_decode(raw);
     if dec[0x188..0x190] == [0u8; 8] {
-        return Err(EdpCliError::new(EXIT_TARGET, "错误: LBA6 解密后 0x188 magic 为零 — 非法 SAFE6"));
+        return Err(EdpCliError::new(
+            EXIT_TARGET,
+            "错误: LBA6 解密后 0x188 magic 为零 — 非法 SAFE6",
+        ));
     }
     dec[0x1CA..0x1CE].copy_from_slice(&NOPWD_LBA6_1CA.to_le_bytes());
     let (lo, hi) = LBA6_CLEAR;
@@ -120,7 +132,10 @@ pub fn convert_lba7(raw: &[u8], k0: u32, share_sectors: u64) -> EdpCliResult<(Ve
     if dec[..4] != *b"EDPF" {
         return Err(EdpCliError::new(
             EXIT_TARGET,
-            format!("错误: LBA7 解密后非 EDPF magic({}) — device_id/K0 不符", hex4(&dec[..4])),
+            format!(
+                "错误: LBA7 解密后非 EDPF magic({}) — device_id/K0 不符",
+                hex4(&dec[..4])
+            ),
         ));
     }
     let src = ent(&dec, find_type_entry(&dec, E7, 4)?, E7).to_vec();
@@ -132,16 +147,23 @@ pub fn convert_lba7(raw: &[u8], k0: u32, share_sectors: u64) -> EdpCliResult<(Ve
     };
     dec[E7..2 * E7].copy_from_slice(&make_entry(&src, 4, s1, z1));
     dec[2 * E7..3 * E7].fill(0); // entry2 区清零(3条→2条)
-    // 0xC0 表尾终止符及之后不动
+                                 // 0xC0 表尾终止符及之后不动
     Ok((xor_rolling(&dec, k0), dec))
 }
 
-pub fn convert_lba12(raw: &[u8], crc_key: &[u8], share_sectors: u64) -> EdpCliResult<(Vec<u8>, Vec<u8>)> {
+pub fn convert_lba12(
+    raw: &[u8],
+    crc_key: &[u8],
+    share_sectors: u64,
+) -> EdpCliResult<(Vec<u8>, Vec<u8>)> {
     let mut dec = a6b0_full(&raw[..EDPF_ENC_LEN], crc_key, 0);
     if dec[..4] != *b"EDPF" {
         return Err(EdpCliError::new(
             EXIT_TARGET,
-            format!("错误: LBA12 解密后非 EDPF magic({}) — device_id/CRC 不符", hex4(&dec[..4])),
+            format!(
+                "错误: LBA12 解密后非 EDPF magic({}) — device_id/CRC 不符",
+                hex4(&dec[..4])
+            ),
         ));
     }
     let src = ent(&dec, find_type_entry(&dec, E12, 4)?, E12).to_vec();
@@ -150,11 +172,14 @@ pub fn convert_lba12(raw: &[u8], crc_key: &[u8], share_sectors: u64) -> EdpCliRe
     let (s1, z1) = (u64_at(&src, 0x18), u64_at(&src, 0x28));
     dec[E12..2 * E12].copy_from_slice(&make_entry(&src, 4, s1, z1));
     dec[2 * E12..3 * E12].fill(0); // entry2 区清零
-    // 0x120 表尾终止符区不动; 尾部 144B 从原盘密文原样拼接
+                                   // 0x120 表尾终止符区不动; 尾部 144B 从原盘密文原样拼接
     let mut enc = a7f0_full(&dec, crc_key, 0);
     enc.extend_from_slice(&raw[EDPF_ENC_LEN..SECTOR]);
     if a6b0_full(&enc[..EDPF_ENC_LEN], crc_key, 0) != dec {
-        return Err(EdpCliError::new(EXIT_TARGET, "错误: LBA12 A6B0/a7f0 往返自检失败"));
+        return Err(EdpCliError::new(
+            EXIT_TARGET,
+            "错误: LBA12 A6B0/a7f0 往返自检失败",
+        ));
     }
     Ok((enc, dec))
 }
@@ -180,7 +205,9 @@ pub fn looks_nopwd(read: ReadFn, device_id: &str) -> EdpCliResult<bool> {
         return Ok(false);
     }
     let mbr = read(0)?;
-    if !(mbr[0x1BE + 4] == 0x07 && u32_at(&mbr, 0x1BE + 8) == 63 && mbr[0x1FE..0x200] == [0x55, 0xAA])
+    if !(mbr[0x1BE + 4] == 0x07
+        && u32_at(&mbr, 0x1BE + 8) == 63
+        && mbr[0x1FE..0x200] == [0x55, 0xAA])
     {
         return Ok(false);
     }
@@ -286,7 +313,13 @@ pub fn convert(
     let k0 = (crc & 0xFFFF) ^ (crc >> 16);
     let crc_key = crc.to_le_bytes();
     if verbose {
-        println!("{}  {}  (CRC32 0x{:08X}, K0 0x{:04X})", crate::ui::bold("标识"), device_id, crc, k0);
+        println!(
+            "{}  {}  (CRC32 0x{:08X}, K0 0x{:04X})",
+            crate::ui::bold("标识"),
+            device_id,
+            crc,
+            k0
+        );
     }
 
     let raw12 = read(12)?;
@@ -294,7 +327,10 @@ pub fn convert(
     if dec12[..4] != *b"EDPF" {
         return Err(EdpCliError::new(
             EXIT_TARGET,
-            format!("错误: LBA12 解密后非 EDPF({}) — device_id 不符或非 cems 盘", hex4(&dec12[..4])),
+            format!(
+                "错误: LBA12 解密后非 EDPF({}) — device_id 不符或非 cems 盘",
+                hex4(&dec12[..4])
+            ),
         ));
     }
     let enc_e = ent(&dec12, find_type_entry(&dec12, E12, 4)?, E12);
@@ -309,13 +345,21 @@ pub fn convert(
     if 63 + share > enc_start {
         return Err(EdpCliError::new(
             EXIT_TARGET,
-            format!("错误: Share@63+{} 越过 Encrypt@{}", group_digits(share), group_digits(enc_start)),
+            format!(
+                "错误: Share@63+{} 越过 Encrypt@{}",
+                group_digits(share),
+                group_digits(enc_start)
+            ),
         ));
     }
     if verbose {
         let enc_end = enc_start + enc_size / SECTOR as u64 - 1;
         let share_range = format!("LBA 63 ~ {}", group_digits(63 + share - 1));
-        let enc_range = format!("LBA {} ~ {}", group_digits(enc_start), group_digits(enc_end));
+        let enc_range = format!(
+            "LBA {} ~ {}",
+            group_digits(enc_start),
+            group_digits(enc_end)
+        );
         println!("{}", crate::ui::bold_cyan("布局"));
         let rows = vec![
             vec![
@@ -325,10 +369,7 @@ pub fn convert(
                     fmt_gb(share * SECTOR as u64),
                     crate::ui::Tone::Magenta,
                 ),
-                crate::ui::TableCell::left(
-                    "明文数据区，系统直接挂载读写",
-                    crate::ui::Tone::Plain,
-                ),
+                crate::ui::TableCell::left("明文数据区，系统直接挂载读写", crate::ui::Tone::Plain),
             ],
             vec![
                 crate::ui::TableCell::left("Encrypt", crate::ui::Tone::Yellow),
@@ -365,7 +406,10 @@ pub fn convert(
                 crate::ui::TableCell::left("LBA0", crate::ui::Tone::Green),
                 crate::ui::TableCell::left("MBR", crate::ui::Tone::BoldCyan),
                 crate::ui::TableCell::left(
-                    format!("单分区(type=07) 指向 Share: @LBA63 × {} 扇", group_digits(share)),
+                    format!(
+                        "单分区(type=07) 指向 Share: @LBA63 × {} 扇",
+                        group_digits(share)
+                    ),
                     crate::ui::Tone::Plain,
                 ),
             ],
@@ -391,15 +435,28 @@ pub fn convert(
                 crate::ui::TableCell::left("LBA9", crate::ui::Tone::Green),
                 crate::ui::TableCell::left("临时区", crate::ui::Tone::BoldCyan),
                 crate::ui::TableCell::left(
-                    if new9.is_some() { "清零(当前存在)" } else { "已是零，不写" },
-                    if new9.is_some() { crate::ui::Tone::Plain } else { crate::ui::Tone::Dim },
+                    if new9.is_some() {
+                        "清零(当前存在)"
+                    } else {
+                        "已是零，不写"
+                    },
+                    if new9.is_some() {
+                        crate::ui::Tone::Plain
+                    } else {
+                        crate::ui::Tone::Dim
+                    },
                 ),
             ],
         ];
-        print!("{}", crate::ui::render_table(&["LBA", "区域", "动作"], &rows));
+        print!(
+            "{}",
+            crate::ui::render_table(&["LBA", "区域", "动作"], &rows)
+        );
         println!(
             "{}",
-            crate::ui::dim("不动   LBA4/8/11(盘身份) · 其余保留扇区 · 表尾终止符 · LBA12 尾部144B · 盘尾区域")
+            crate::ui::dim(
+                "不动   LBA4/8/11(盘身份) · 其余保留扇区 · 表尾终止符 · LBA12 尾部144B · 盘尾区域"
+            )
         );
     }
 

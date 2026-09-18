@@ -6,8 +6,9 @@ mod common;
 use common::*;
 use edpcli::common::SECTOR;
 use edpcli::crypto::{a6b0_full, crc32_bare, xor_rolling};
-use edpcli::sectors::{convert, find_type_entry, looks_nopwd, make_entry, parse_lba12, E12, E7,
-                     EDPF_ENC_LEN, PWD_CRC};
+use edpcli::sectors::{
+    convert, find_type_entry, looks_nopwd, make_entry, parse_lba12, E12, E7, EDPF_ENC_LEN, PWD_CRC,
+};
 
 fn u32_at(b: &[u8], off: usize) -> u32 {
     u32::from_le_bytes(b[off..off + 4].try_into().unwrap())
@@ -102,7 +103,10 @@ fn iron_rules_terminators_and_tail_preserved() {
         &data[12 * SECTOR + 0x120..12 * SECTOR + EDPF_ENC_LEN]
     );
     // 尾部 144B 原盘密文原样拼接
-    assert_eq!(&r.lba12[EDPF_ENC_LEN..], &data[12 * SECTOR + EDPF_ENC_LEN..13 * SECTOR]);
+    assert_eq!(
+        &r.lba12[EDPF_ENC_LEN..],
+        &data[12 * SECTOR + EDPF_ENC_LEN..13 * SECTOR]
+    );
 }
 
 #[test]
@@ -190,7 +194,10 @@ fn parse_lba12_original_and_converted() {
     let (img, did) = converted_image("netac").unwrap();
     let parts = parse_lba12(&img[12 * SECTOR..13 * SECTOR], &did).unwrap();
     assert_eq!(parts.len(), 2);
-    assert_eq!((parts[0].ptype, parts[0].start_lba, parts[0].active), (2, 63, 1));
+    assert_eq!(
+        (parts[0].ptype, parts[0].start_lba, parts[0].active),
+        (2, 63, 1)
+    );
     assert_eq!(parts[1].ptype, 4);
     assert!(parse_lba12(&img[12 * SECTOR..13 * SECTOR], "disk&ven_bogus&prod_x").is_none());
 }

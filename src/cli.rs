@@ -15,16 +15,18 @@ use std::collections::BTreeMap;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 
-pub use crate::backup_cli::{backup_list, backup_prune, backup_rm, backup_verify};
 use crate::backup_cli::backup_verify_select;
+pub use crate::backup_cli::{backup_list, backup_prune, backup_rm, backup_verify};
+use crate::cli_args::print_help;
 pub use crate::cli_args::{
     parse_args, print_usage, BackupAction, DiskOpts, InspectOpts, MetaInfoOpts, Parsed,
 };
-use crate::cli_args::print_help;
 use crate::common::*;
 use crate::completion;
-use crate::diskio::{self, backup_disk, backup_is_nopwd, find_backups, raw_path, DiskFacts,
-                    FileDev, SectorDev, Clock, SystemClock};
+use crate::diskio::{
+    self, backup_disk, backup_is_nopwd, find_backups, raw_path, Clock, DiskFacts, FileDev,
+    SectorDev, SystemClock,
+};
 use crate::elevate::{self, ELEVATED_FLAG};
 use crate::identify::identify;
 use crate::inspect_cli::inspect_flow;
@@ -98,8 +100,16 @@ pub fn backup_menu_str(entries: &[(String, bool)]) -> String {
                 crate::ui::TableCell::right((i + 1).to_string(), crate::ui::Tone::BoldCyan),
                 crate::ui::TableCell::left(time.clone(), crate::ui::Tone::Plain),
                 crate::ui::TableCell::left(
-                    if *is_nopwd { "免密状态" } else { "加密原盘" },
-                    if *is_nopwd { crate::ui::Tone::Green } else { crate::ui::Tone::Plain },
+                    if *is_nopwd {
+                        "免密状态"
+                    } else {
+                        "加密原盘"
+                    },
+                    if *is_nopwd {
+                        crate::ui::Tone::Green
+                    } else {
+                        crate::ui::Tone::Plain
+                    },
                 ),
             ]
         })
@@ -117,10 +127,7 @@ pub fn disk_menu_str(disks: &[sysinfo::ExtDisk]) -> String {
                 crate::ui::TableCell::right((i + 1).to_string(), crate::ui::Tone::BoldCyan),
                 crate::ui::TableCell::left(format!("disk{}", d.n), crate::ui::Tone::Bold),
                 crate::ui::TableCell::right(fmt_gb(d.size), crate::ui::Tone::Magenta),
-                crate::ui::TableCell::left(
-                    format!("{}:{}", d.vid, d.pid),
-                    crate::ui::Tone::Yellow,
-                ),
+                crate::ui::TableCell::left(format!("{}:{}", d.vid, d.pid), crate::ui::Tone::Yellow),
             ]
         })
         .collect::<Vec<_>>();
@@ -231,7 +238,10 @@ pub(crate) fn auto_pick_disk(
 ) -> EdpCliResult<u32> {
     let disks = sysinfo::list_usb_disks(runner);
     if disks.is_empty() {
-        return Err(err(EXIT_TARGET, "错误: 未检测到外部 USB 盘。插入后重试, 或 --disk N 手动指定。"));
+        return Err(err(
+            EXIT_TARGET,
+            "错误: 未检测到外部 USB 盘。插入后重试, 或 --disk N 手动指定。",
+        ));
     }
     if disks.len() == 1 {
         return Ok(disks[0].n);
@@ -239,7 +249,10 @@ pub(crate) fn auto_pick_disk(
     println!("检测到多个 USB 盘:");
     print!("{}", disk_menu_str(&disks));
     loop {
-        let c = prompt.prompt_line(&crate::ui::bold(&format!("选择 [1-{}] (回车取消): ", disks.len())));
+        let c = prompt.prompt_line(&crate::ui::bold(&format!(
+            "选择 [1-{}] (回车取消): ",
+            disks.len()
+        )));
         let c = c.trim();
         if c.is_empty() {
             return Err(err(EXIT_CANCELLED, "已取消"));
@@ -271,19 +284,35 @@ pub fn apply_flow(
         Some(s) => fmt_gb(s * SECTOR as u64),
         None => "unknown 扇".to_string(),
     };
-    println!("{}  disk{} · {} · USB {}:{}", crate::ui::bold("盘"), disk, sz, vid, pid);
+    println!(
+        "{}  disk{} · {} · USB {}:{}",
+        crate::ui::bold("盘"),
+        disk,
+        sz,
+        vid,
+        pid
+    );
 
     let img = read_image(dev)?;
     let id = identify(runner, disk, &img[7 * SECTOR..8 * SECTOR]);
     let did = match id.device_id {
         Some(d) => d,
         None => {
-            return Err(err(EXIT_TARGET, "错误: 无法识别 device_id(LBA7 两候选均未解出 EDPF); 可插好盘重试"))
+            return Err(err(
+                EXIT_TARGET,
+                "错误: 无法识别 device_id(LBA7 两候选均未解出 EDPF); 可插好盘重试",
+            ))
         }
     };
     let lba4 = &img[4 * SECTOR..5 * SECTOR];
     let label_id = diskio::lba4_label_id_from(lba4);
-    let facts = DiskFacts { disk, total_sectors: secs, vid, pid, label_id };
+    let facts = DiskFacts {
+        disk,
+        total_sectors: secs,
+        vid,
+        pid,
+        label_id,
+    };
     let tag16 = diskio::lba4_tag16_from(lba4)
         .ok_or_else(|| err(EXIT_IO, "错误: LBA4 缺少 16B 身份标签"))?;
 
@@ -294,7 +323,11 @@ pub fn apply_flow(
 
     let baks = find_backups(&ctx.backup_dir, &facts, Some(&did), Some(tag16));
     if !baks.is_empty() {
-        println!("\n{}  本盘已有 {} 份(写入时会自动再备份):", crate::ui::bold("备份"), baks.len());
+        println!(
+            "\n{}  本盘已有 {} 份(写入时会自动再备份):",
+            crate::ui::bold("备份"),
+            baks.len()
+        );
         let entries: Vec<(String, bool)> = baks
             .iter()
             .map(|b| {
@@ -306,15 +339,27 @@ pub fn apply_flow(
             .collect();
         print!("{}", backup_menu_str(&entries));
     } else {
-        println!("\n{}  尚无; 写入时自动创建首个备份", crate::ui::bold("备份"));
+        println!(
+            "\n{}  尚无; 写入时自动创建首个备份",
+            crate::ui::bold("备份")
+        );
     }
 
     let already = looks_nopwd(&read, &did)?;
     if already {
-        println!("\n{}", crate::ui::yellow("提示: 该盘已是改造后的免密盘 — 再次写入只会重写相同内容(实测幂等)。"));
+        println!(
+            "\n{}",
+            crate::ui::yellow(
+                "提示: 该盘已是改造后的免密盘 — 再次写入只会重写相同内容(实测幂等)。"
+            )
+        );
     }
     if !apply {
-        let tail = if already { " (该盘已是免密盘, 须加 --force)" } else { "" };
+        let tail = if already {
+            " (该盘已是免密盘, 须加 --force)"
+        } else {
+            ""
+        };
         println!(
             "{}",
             crate::ui::dim(&format!(
@@ -341,17 +386,29 @@ pub fn apply_flow(
     }
 
     let (bpath, _nopwd) = backup_disk(&facts, &img, &did, &ctx.backup_dir, ctx.clock)?;
-    println!("{}  edpcli restore \"{}\" --disk {} --yes", crate::ui::bold("还原"), bpath.display(), disk);
+    println!(
+        "{}  edpcli restore \"{}\" --disk {} --yes",
+        crate::ui::bold("还原"),
+        bpath.display(),
+        disk
+    );
 
-    if !ctx.prompt.confirm_yes(&crate::ui::bold(&format!("将改写 disk{} LBA0/6/7/12/9。输入 YES: ", disk))) {
+    if !ctx.prompt.confirm_yes(&crate::ui::bold(&format!(
+        "将改写 disk{} LBA0/6/7/12/9。输入 YES: ",
+        disk
+    ))) {
         return Err(err(EXIT_CANCELLED, "已取消(未写盘)"));
     }
     let _write_guard = sysinfo::prepare_write(ctx.runner, disk)
         .map_err(|e| err(EXIT_IO, format!("错误: 无法卸载 disk{}: {}", disk, e)))?;
     // 卸载后才切 O_RDWR(挂载态打开读写会撞 EBUSY); 写序由 atomic_write_sectors
     // 保证: LBA0(唯一改 MBR 的扇区)最后写, 单 fd 全程持有到写完校验完
-    dev.reopen_rdwr(OPEN_WAIT)
-        .map_err(|e| err(EXIT_IO, format!("错误: 无法以读写打开 {}: {}", raw_path(disk), e)))?;
+    dev.reopen_rdwr(OPEN_WAIT).map_err(|e| {
+        err(
+            EXIT_IO,
+            format!("错误: 无法以读写打开 {}: {}", raw_path(disk), e),
+        )
+    })?;
     verify_reopened_snapshot(dev, &img)?;
     let mut writes: BTreeMap<u32, Vec<u8>> = BTreeMap::new();
     writes.insert(6, result.lba6);
@@ -364,7 +421,9 @@ pub fn apply_flow(
     diskio::atomic_write_sectors(dev, &writes)?;
     println!(
         "{}",
-        crate::ui::green("已写入, 读回校验通过。请拔出 U 盘重新插入, 数据区格式化 exFAT/NTFS 即得免密可写区。")
+        crate::ui::green(
+            "已写入, 读回校验通过。请拔出 U 盘重新插入, 数据区格式化 exFAT/NTFS 即得免密可写区。"
+        )
     );
     Ok(EXIT_OK)
 }
@@ -423,7 +482,10 @@ pub fn restore_flow(
                 .collect();
             print!("{}", backup_menu_str(&entries));
             let sel = loop {
-                let c = ctx.prompt.prompt_line(&crate::ui::bold(&format!("选择 [1-{}] (回车取消): ", baks.len())));
+                let c = ctx.prompt.prompt_line(&crate::ui::bold(&format!(
+                    "选择 [1-{}] (回车取消): ",
+                    baks.len()
+                )));
                 let c = c.trim();
                 if c.is_empty() {
                     return Err(err(EXIT_CANCELLED, "已取消"));
@@ -440,10 +502,17 @@ pub fn restore_flow(
     };
 
     // 显式备份文件的预检 + 写入
-    let data = std::fs::read(&path)
-        .map_err(|e| err(EXIT_BACKUP, format!("错误: 无法读取备份 {}: {}", path.display(), e)))?;
+    let data = std::fs::read(&path).map_err(|e| {
+        err(
+            EXIT_BACKUP,
+            format!("错误: 无法读取备份 {}: {}", path.display(), e),
+        )
+    })?;
     if data.len() != 14 * SECTOR {
-        return Err(err(EXIT_BACKUP, format!("错误: 备份大小 {} ≠ {}", data.len(), 14 * SECTOR)));
+        return Err(err(
+            EXIT_BACKUP,
+            format!("错误: 备份大小 {} ≠ {}", data.len(), 14 * SECTOR),
+        ));
     }
     let md5_path = diskio::md5_sidecar_path(&path);
     let want = match diskio::read_backup_md5(&path) {
@@ -465,7 +534,10 @@ pub fn restore_flow(
     if want != got {
         return Err(err(
             EXIT_BACKUP,
-            format!("错误: 备份 MD5 不符(期望 {}, 实际 {}) — 文件损坏?", want, got),
+            format!(
+                "错误: 备份 MD5 不符(期望 {}, 实际 {}) — 文件损坏?",
+                want, got
+            ),
         ));
     }
     println!("{}  {}", crate::ui::green("MD5 校验通过"), got);
@@ -511,7 +583,9 @@ pub fn restore_flow(
     if nopwd_snap {
         println!(
             "{}",
-            crate::ui::yellow("注意: 该备份为【免密状态】快照 — 还原后仍是免密盘, 不会回到加密原盘。")
+            crate::ui::yellow(
+                "注意: 该备份为【免密状态】快照 — 还原后仍是免密盘, 不会回到加密原盘。"
+            )
         );
         println!(
             "{}",
@@ -529,16 +603,28 @@ pub fn restore_flow(
         crate::ui::bold("还原"),
         crate::ui::truncate_mid(&path.display().to_string(), 64)
     );
-    if !ctx.prompt.confirm_yes(&crate::ui::bold(&format!("  → disk{} LBA0-13? 输入 YES: ", disk))) {
+    if !ctx.prompt.confirm_yes(&crate::ui::bold(&format!(
+        "  → disk{} LBA0-13? 输入 YES: ",
+        disk
+    ))) {
         return Err(err(EXIT_CANCELLED, "已取消"));
     }
     let _write_guard = sysinfo::prepare_write(ctx.runner, disk)
         .map_err(|e| err(EXIT_IO, format!("错误: 无法卸载 disk{}: {}", disk, e)))?;
-    dev.reopen_rdwr(OPEN_WAIT)
-        .map_err(|e| err(EXIT_IO, format!("错误: 无法以读写打开 {}: {}", raw_path(disk), e)))?;
+    dev.reopen_rdwr(OPEN_WAIT).map_err(|e| {
+        err(
+            EXIT_IO,
+            format!("错误: 无法以读写打开 {}: {}", raw_path(disk), e),
+        )
+    })?;
     verify_reopened_snapshot(dev, &img)?;
     let writes: BTreeMap<u32, Vec<u8>> = (0..14u32)
-        .map(|lba| (lba, data[lba as usize * SECTOR..(lba as usize + 1) * SECTOR].to_vec()))
+        .map(|lba| {
+            (
+                lba,
+                data[lba as usize * SECTOR..(lba as usize + 1) * SECTOR].to_vec(),
+            )
+        })
         .collect();
     diskio::atomic_write_sectors(dev, &writes)?;
     println!("{}", crate::ui::green("已还原, 读回校验通过。请拔出重插。"));
@@ -546,7 +632,12 @@ pub fn restore_flow(
 }
 
 /// 离线转换(不碰真盘)。
-pub fn convert_flow(dir: String, id: Option<String>, size: Option<f64>, out: Option<String>) -> i32 {
+pub fn convert_flow(
+    dir: String,
+    id: Option<String>,
+    size: Option<f64>,
+    out: Option<String>,
+) -> i32 {
     let Some(id) = id else {
         eprintln!("错误: 离线模式需 --id <device_id>");
         return EXIT_USAGE;
@@ -565,9 +656,12 @@ pub fn convert_flow(dir: String, id: Option<String>, size: Option<f64>, out: Opt
             eprintln!("错误: 无法创建输出目录 {}: {}", out, e);
             return EXIT_IO;
         }
-        for (lba, data) in
-            [(0u32, &result.lba0), (6, &result.lba6), (7, &result.lba7), (12, &result.lba12)]
-        {
+        for (lba, data) in [
+            (0u32, &result.lba0),
+            (6, &result.lba6),
+            (7, &result.lba7),
+            (12, &result.lba12),
+        ] {
             let p = Path::new(&out).join(format!("LBA{:02}.bin", lba));
             if let Err(e) = std::fs::write(&p, data) {
                 eprintln!("错误: 无法写入 {}: {}", p.display(), e);
@@ -601,7 +695,14 @@ pub fn run() -> i32 {
                 let topic = argv.first().map(String::as_str).filter(|cmd| {
                     matches!(
                         *cmd,
-                        "list" | "run" | "apply" | "restore" | "backup" | "inspect" | "convert" | "completion"
+                        "list"
+                            | "run"
+                            | "apply"
+                            | "restore"
+                            | "backup"
+                            | "inspect"
+                            | "convert"
+                            | "completion"
                     )
                 });
                 print_help(topic);
@@ -619,14 +720,15 @@ pub fn run() -> i32 {
             print!("{}", completion::script(shell));
             EXIT_OK
         }
-        Parsed::InternalComplete { kind, onlyid, backup_dir } => {
+        Parsed::InternalComplete {
+            kind,
+            onlyid,
+            backup_dir,
+        } => {
             let probe = ReadProbeCache::new(&runner);
-            for value in completion::dynamic_values(
-                &kind,
-                onlyid.as_deref(),
-                backup_dir.as_deref(),
-                &probe,
-            ) {
+            for value in
+                completion::dynamic_values(&kind, onlyid.as_deref(), backup_dir.as_deref(), &probe)
+            {
                 println!("{}", value);
             }
             EXIT_OK
@@ -639,10 +741,19 @@ pub fn run() -> i32 {
             let bak = diskio::resolve_backup_dir(backup_dir.as_deref());
             let read_disk = |disk: u32, lba: u32| diskio::read_lba(&raw_path(disk), lba);
             let probe = ReadProbeCache::new(&runner);
-            print!("{}", print_disk_table(&scan_disks(&probe, &bak, &read_disk)));
+            print!(
+                "{}",
+                print_disk_table(&scan_disks(&probe, &bak, &read_disk))
+            );
             EXIT_OK
         }
-        Parsed::Backup { action, keep, yes, onlyid, backup_dir } => {
+        Parsed::Backup {
+            action,
+            keep,
+            yes,
+            onlyid,
+            backup_dir,
+        } => {
             let bak = diskio::resolve_backup_dir(backup_dir.as_deref());
             match action {
                 BackupAction::List => backup_list(&bak, onlyid.as_deref()),
@@ -685,7 +796,12 @@ pub fn run() -> i32 {
             opts.backup_dir,
             FlowKind::Apply { force, yes },
         ),
-        Parsed::Restore { bin, disk, yes, backup_dir } => real_flow(
+        Parsed::Restore {
+            bin,
+            disk,
+            yes,
+            backup_dir,
+        } => real_flow(
             &runner,
             disk,
             None,
@@ -726,7 +842,9 @@ fn real_flow(
         let mut argv: Vec<String> = std::env::args().skip(1).collect();
         // 不依赖提权后的环境继承：备份目录转为显式旗标随 argv 过界。
         if backup_dir_flag.is_none() {
-            argv.extend(diskio::backup_dir_argv_suffix(std::env::var("EDPCLI_BACKUP_DIR").ok()));
+            argv.extend(diskio::backup_dir_argv_suffix(
+                std::env::var("EDPCLI_BACKUP_DIR").ok(),
+            ));
         }
         if disk_opt.is_none() {
             let mut sp = StdPrompter;
@@ -751,7 +869,9 @@ fn real_flow(
     if !has_sentinel
         && crate::platform::has_elevation_origin()
         && backup_dir_flag.is_none()
-        && std::env::var("EDPCLI_BACKUP_DIR").unwrap_or_default().is_empty()
+        && std::env::var("EDPCLI_BACKUP_DIR")
+            .unwrap_or_default()
+            .is_empty()
         && diskio::conf_backup_dir().is_none()
     {
         let cwd_bak = std::env::current_dir().unwrap_or_default().join("backup");
@@ -766,7 +886,12 @@ fn real_flow(
     let mut std_prompter = StdPrompter;
     let mut always = AlwaysYes(StdPrompter); // 无状态, 独立实例
     let prompter: &mut dyn Prompter = if yes { &mut always } else { &mut std_prompter };
-    let mut ctx = Ctx { runner, clock: &SystemClock, prompt: prompter, backup_dir: bak };
+    let mut ctx = Ctx {
+        runner,
+        clock: &SystemClock,
+        prompt: prompter,
+        backup_dir: bak,
+    };
     let n = match disk_opt {
         Some(n) => n,
         None => match auto_pick_disk(runner, &mut *ctx.prompt) {
@@ -860,10 +985,27 @@ mod tests {
     #[test]
     fn parse_bare_and_subcommands() {
         // 裸 edpcli = 打印用法, 不进入任何需要提权的流程
-        assert!(matches!(parse_args(&[]).unwrap(), Parsed::Help { topic: None }));
-        assert!(matches!(parse_args(&["help".into()]).unwrap(), Parsed::Help { topic: None }));
-        assert!(matches!(parse_args(&["version".into()]).unwrap(), Parsed::Version));
-        match parse_args(&["apply".into(), "--disk".into(), "6".into(), "--force".into(), "--yes".into()]).unwrap() {
+        assert!(matches!(
+            parse_args(&[]).unwrap(),
+            Parsed::Help { topic: None }
+        ));
+        assert!(matches!(
+            parse_args(&["help".into()]).unwrap(),
+            Parsed::Help { topic: None }
+        ));
+        assert!(matches!(
+            parse_args(&["version".into()]).unwrap(),
+            Parsed::Version
+        ));
+        match parse_args(&[
+            "apply".into(),
+            "--disk".into(),
+            "6".into(),
+            "--force".into(),
+            "--yes".into(),
+        ])
+        .unwrap()
+        {
             Parsed::Apply { opts, force, yes } => {
                 assert_eq!(opts.disk, Some(6));
                 assert!(force && yes);
@@ -875,7 +1017,15 @@ mod tests {
             Parsed::Run(o) => assert_eq!(o.disk, Some(4)),
             _ => panic!(),
         }
-        match parse_args(&["restore".into(), "b.bin".into(), "--disk".into(), "6".into(), "--yes".into()]).unwrap() {
+        match parse_args(&[
+            "restore".into(),
+            "b.bin".into(),
+            "--disk".into(),
+            "6".into(),
+            "--yes".into(),
+        ])
+        .unwrap()
+        {
             Parsed::Restore { bin, disk, yes, .. } => {
                 assert_eq!(bin.as_deref(), Some("b.bin"));
                 assert_eq!(disk, Some(6));
@@ -883,7 +1033,15 @@ mod tests {
             }
             _ => panic!(),
         }
-        match parse_args(&["convert".into(), "--dir".into(), "d".into(), "--id".into(), "i".into()]).unwrap() {
+        match parse_args(&[
+            "convert".into(),
+            "--dir".into(),
+            "d".into(),
+            "--id".into(),
+            "i".into(),
+        ])
+        .unwrap()
+        {
             Parsed::Convert { dir, id, .. } => {
                 assert_eq!(dir.as_deref(), Some("d"));
                 assert_eq!(id.as_deref(), Some("i"));
@@ -945,7 +1103,13 @@ mod tests {
         ])
         .unwrap()
         {
-            Parsed::Backup { action: BackupAction::Prune, keep, yes, backup_dir, onlyid } => {
+            Parsed::Backup {
+                action: BackupAction::Prune,
+                keep,
+                yes,
+                backup_dir,
+                onlyid,
+            } => {
                 assert_eq!(keep, 0);
                 assert!(yes);
                 assert_eq!(backup_dir.as_deref(), Some("/tmp/bak"));
@@ -962,7 +1126,13 @@ mod tests {
         ])
         .unwrap()
         {
-            Parsed::Backup { action: BackupAction::Verify { target, index }, keep, yes, onlyid, .. } => {
+            Parsed::Backup {
+                action: BackupAction::Verify { target, index },
+                keep,
+                yes,
+                onlyid,
+                ..
+            } => {
                 assert_eq!(target, None);
                 assert_eq!(index, Some(2));
                 assert_eq!(keep, 2);
@@ -984,7 +1154,13 @@ mod tests {
         ])
         .unwrap()
         {
-            Parsed::Backup { action: BackupAction::Rm { targets }, yes, onlyid, backup_dir, .. } => {
+            Parsed::Backup {
+                action: BackupAction::Rm { targets },
+                yes,
+                onlyid,
+                backup_dir,
+                ..
+            } => {
                 assert_eq!(targets, vec!["2", "3-4"]);
                 assert!(yes);
                 assert_eq!(onlyid.as_deref(), Some("1402259934"));
@@ -1000,7 +1176,11 @@ mod tests {
         ])
         .unwrap()
         {
-            Parsed::Backup { action: BackupAction::List, onlyid, .. } => {
+            Parsed::Backup {
+                action: BackupAction::List,
+                onlyid,
+                ..
+            } => {
                 assert_eq!(onlyid.as_deref(), Some("1987718388"));
             }
             _ => panic!("应解析为 backup list"),
@@ -1012,13 +1192,7 @@ mod tests {
             }
             _ => panic!("应解析为 meta onlyid"),
         }
-        match parse_args(&[
-            "metainfo".into(),
-            "-1615488206".into(),
-            "2".into(),
-        ])
-        .unwrap()
-        {
+        match parse_args(&["metainfo".into(), "-1615488206".into(), "2".into()]).unwrap() {
             Parsed::MetaInfo(opts) => {
                 assert_eq!(opts.onlyid.as_deref(), Some("-1615488206"));
                 assert_eq!(opts.index, Some(2));
@@ -1052,7 +1226,10 @@ mod tests {
         assert!(parse_args(&["restore".into(), "a.bin".into(), "b.bin".into()]).is_err()); // 两个位置参数
         assert!(matches!(
             parse_args(&["backup".into()]).unwrap(),
-            Parsed::Backup { action: BackupAction::List, .. }
+            Parsed::Backup {
+                action: BackupAction::List,
+                ..
+            }
         )); // 裸 backup = list
         assert!(parse_args(&["backup".into(), "rm".into()]).is_err()); // 无 onlyid 时 rm 缺目标
         assert!(parse_args(&[
@@ -1063,8 +1240,20 @@ mod tests {
             "--yes".into(),
         ])
         .is_err()); // --yes 不能在无编号时进入交互选择
-        assert!(parse_args(&["backup".into(), "prune".into(), "--keep".into(), "-1".into()]).is_err());
-        assert!(parse_args(&["backup".into(), "verify".into(), "a.bin".into(), "b.bin".into()]).is_err());
+        assert!(parse_args(&[
+            "backup".into(),
+            "prune".into(),
+            "--keep".into(),
+            "-1".into()
+        ])
+        .is_err());
+        assert!(parse_args(&[
+            "backup".into(),
+            "verify".into(),
+            "a.bin".into(),
+            "b.bin".into()
+        ])
+        .is_err());
         assert!(parse_args(&[
             "backup".into(),
             "verify".into(),
@@ -1089,11 +1278,10 @@ mod tests {
             "x.bin".into(),
         ])
         .is_err());
-        assert!(matches!(parse_args(&[
-            "inspect".into(),
-            "--onlyid".into(),
-            "1402259934".into(),
-        ]).unwrap(), Parsed::Inspect(_))); // 缺 index 时进入备份选择视图
+        assert!(matches!(
+            parse_args(&["inspect".into(), "--onlyid".into(), "1402259934".into(),]).unwrap(),
+            Parsed::Inspect(_)
+        )); // 缺 index 时进入备份选择视图
         assert!(parse_args(&[
             "inspect".into(),
             "--backup".into(),
@@ -1102,13 +1290,9 @@ mod tests {
             "1".into(),
         ])
         .is_err());
-        assert!(parse_args(&[
-            "inspect".into(),
-            "7".into(),
-            "--raw".into(),
-            "--hex".into(),
-        ])
-        .is_err());
+        assert!(
+            parse_args(&["inspect".into(), "7".into(), "--raw".into(), "--hex".into(),]).is_err()
+        );
         assert!(parse_args(&[
             "backup".into(),
             "verify".into(),
@@ -1118,7 +1302,13 @@ mod tests {
         .is_err());
         // 哨兵旗标被剥离
         assert!(matches!(
-            parse_args(&["apply".into(), "--disk".into(), "6".into(), "--_elevated".into()]).unwrap(),
+            parse_args(&[
+                "apply".into(),
+                "--disk".into(),
+                "6".into(),
+                "--_elevated".into()
+            ])
+            .unwrap(),
             Parsed::Apply { .. }
         ));
     }
@@ -1160,7 +1350,9 @@ mod tests {
     fn inspect_lba_is_limited_to_zero_through_thirteen() {
         for bad in ["14", "99", "4294967295"] {
             let args = vec!["inspect".to_string(), bad.to_string()];
-            let err = parse_args(&args).err().expect("inspect 不应接受 LBA0-13 之外的扇区");
+            let err = parse_args(&args)
+                .err()
+                .expect("inspect 不应接受 LBA0-13 之外的扇区");
             assert!(err.contains("LBA") && err.contains("0-13"), "{err}");
         }
         for good in ["0", "4", "13"] {
@@ -1195,8 +1387,7 @@ mod tests {
             vec![1, 2, 3, 4]
         );
         assert_eq!(
-            crate::backup_cli::parse_backup_selection_tokens(&["2".into(), "2".into()], 3)
-                .unwrap(),
+            crate::backup_cli::parse_backup_selection_tokens(&["2".into(), "2".into()], 3).unwrap(),
             vec![2]
         );
         for bad in ["0", "4", "3-2", "1-4", "x", "1--2", "1,"] {
@@ -1210,29 +1401,70 @@ mod tests {
     #[test]
     fn disk_table_rendering() {
         let parts = vec![
-            EdpfPartition { ptype: 1, active: 1, enc: 0, start_lba: 32, size_bytes: 16_384 },
-            EdpfPartition { ptype: 2, active: 1, enc: 1, start_lba: 63, size_bytes: 59_750_819_680 },
-            EdpfPartition { ptype: 4, active: 0, enc: 1, start_lba: 116_707_328, size_bytes: 3_143_761_920 },
+            EdpfPartition {
+                ptype: 1,
+                active: 1,
+                enc: 0,
+                start_lba: 32,
+                size_bytes: 16_384,
+            },
+            EdpfPartition {
+                ptype: 2,
+                active: 1,
+                enc: 1,
+                start_lba: 63,
+                size_bytes: 59_750_819_680,
+            },
+            EdpfPartition {
+                ptype: 4,
+                active: 0,
+                enc: 1,
+                start_lba: 116_707_328,
+                size_bytes: 3_143_761_920,
+            },
         ];
         let rows = vec![
             Row {
-                disk: 4, size: 64_000_000_000, vid: "0951".into(), pid: "1666".into(),
-                proto: "USB".into(), device_id: None, onlyid: None, n_baks: 0, denied: false,
+                disk: 4,
+                size: 64_000_000_000,
+                vid: "0951".into(),
+                pid: "1666".into(),
+                proto: "USB".into(),
+                device_id: None,
+                onlyid: None,
+                n_baks: 0,
+                denied: false,
                 probe_error: None,
-                is_nopwd: false, partitions: None,
+                is_nopwd: false,
+                partitions: None,
             },
             Row {
-                disk: 6, size: 62_914_560_000, vid: "0dd8".into(), pid: "2005".into(),
-                proto: "USB".into(), device_id: Some("disk&ven_netac&prod_onlydisk".into()),
-                onlyid: Some("1402259934".into()), n_baks: 3, denied: false,
+                disk: 6,
+                size: 62_914_560_000,
+                vid: "0dd8".into(),
+                pid: "2005".into(),
+                proto: "USB".into(),
+                device_id: Some("disk&ven_netac&prod_onlydisk".into()),
+                onlyid: Some("1402259934".into()),
+                n_baks: 3,
+                denied: false,
                 probe_error: None,
-                is_nopwd: true, partitions: Some(parts),
+                is_nopwd: true,
+                partitions: Some(parts),
             },
             Row {
-                disk: 7, size: 500_107_862_016, vid: "xxxx".into(), pid: "xxxx".into(),
-                proto: "Thunderbolt".into(), device_id: None, onlyid: None, n_baks: 0, denied: false,
+                disk: 7,
+                size: 500_107_862_016,
+                vid: "xxxx".into(),
+                pid: "xxxx".into(),
+                proto: "Thunderbolt".into(),
+                device_id: None,
+                onlyid: None,
+                n_baks: 0,
+                denied: false,
                 probe_error: None,
-                is_nopwd: false, partitions: None,
+                is_nopwd: false,
+                partitions: None,
             },
         ];
         let out = print_disk_table(&rows);
@@ -1244,8 +1476,16 @@ mod tests {
         assert!(disk6_line.contains("cems盘") && disk6_line.contains("[免密]"));
         // EDPF 明细行: 类型 + 大小 + LBA 范围
         let edpf = lines.iter().find(|l| l.contains("EDPF")).unwrap();
-        assert!(edpf.contains("Share 59.75GB (LBA 63~116,700,881)"), "{}", edpf);
-        assert!(edpf.contains("Encrypt 3.14GB (LBA 116,707,328~122,847,487)"), "{}", edpf);
+        assert!(
+            edpf.contains("Share 59.75GB (LBA 63~116,700,881)"),
+            "{}",
+            edpf
+        );
+        assert!(
+            edpf.contains("Encrypt 3.14GB (LBA 116,707,328~122,847,487)"),
+            "{}",
+            edpf
+        );
         assert!(edpf.contains("Boot 0.00GB (LBA 32~63)"), "{}", edpf);
         let meta = lines.iter().find(|l| l.contains("onlyid")).unwrap();
         assert!(meta.contains("onlyid=1402259934") && meta.contains("备份 3 份"));
@@ -1258,20 +1498,63 @@ mod tests {
     fn menus_are_numbered() {
         use crate::sysinfo::ExtDisk;
         let disks = vec![
-            ExtDisk { n: 4, size: 64_000_000_000, vid: "0951".into(), pid: "1666".into(), proto: "USB".into() },
-            ExtDisk { n: 6, size: 62_914_560_000, vid: "0dd8".into(), pid: "2005".into(), proto: "USB".into() },
+            ExtDisk {
+                n: 4,
+                size: 64_000_000_000,
+                vid: "0951".into(),
+                pid: "1666".into(),
+                proto: "USB".into(),
+            },
+            ExtDisk {
+                n: 6,
+                size: 62_914_560_000,
+                vid: "0dd8".into(),
+                pid: "2005".into(),
+                proto: "USB".into(),
+            },
         ];
         let m = disk_menu_str(&disks);
-        assert!(m.contains("编号") && m.contains("设备") && m.contains("VID:PID"), "{}", m);
-        assert!(m.lines().any(|line| line.contains("1") && line.contains("disk4")), "{}", m);
-        assert!(m.lines().any(|line| line.contains("2") && line.contains("disk6")), "{}", m);
+        assert!(
+            m.contains("编号") && m.contains("设备") && m.contains("VID:PID"),
+            "{}",
+            m
+        );
+        assert!(
+            m.lines()
+                .any(|line| line.contains("1") && line.contains("disk4")),
+            "{}",
+            m
+        );
+        assert!(
+            m.lines()
+                .any(|line| line.contains("2") && line.contains("disk6")),
+            "{}",
+            m
+        );
         assert!(m.contains("disk4") && m.contains("64.00GB") && m.contains("0951:1666"));
 
-        let b = backup_menu_str(&[("2026-09-16 23:36".into(), true), ("2026-08-27 22:25".into(), false)]);
-        assert!(b.contains("编号") && b.contains("时间") && b.contains("状态"), "{}", b);
-        assert!(b.lines().any(|line| line.contains("1") && line.contains("2026-09-16 23:36")), "{}", b);
+        let b = backup_menu_str(&[
+            ("2026-09-16 23:36".into(), true),
+            ("2026-08-27 22:25".into(), false),
+        ]);
+        assert!(
+            b.contains("编号") && b.contains("时间") && b.contains("状态"),
+            "{}",
+            b
+        );
+        assert!(
+            b.lines()
+                .any(|line| line.contains("1") && line.contains("2026-09-16 23:36")),
+            "{}",
+            b
+        );
         assert!(b.contains("免密状态"));
-        assert!(b.lines().any(|line| line.contains("2") && line.contains("2026-08-27 22:25")), "{}", b);
+        assert!(
+            b.lines()
+                .any(|line| line.contains("2") && line.contains("2026-08-27 22:25")),
+            "{}",
+            b
+        );
         assert!(b.contains("加密原盘"));
     }
 }

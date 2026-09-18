@@ -6,13 +6,13 @@
 use std::collections::BTreeMap;
 use std::ffi::CString;
 
+use crate::platform::{HardwareProbe, InquiryInfo, NativeTransport};
 use objc2_core_foundation::{CFDictionary, CFNumber, CFNumberType, CFRetained, CFString};
 use objc2_io_kit::{
-    kIOMainPortDefault, kIOReturnSuccess, kIOServicePlane, IOBSDNameMatching,
-    IOObjectCopyClass, IOObjectRelease, IORegistryEntryCreateCFProperty,
-    IORegistryEntryGetParentEntry, IOServiceGetMatchingService, IO_OBJECT_NULL,
+    kIOMainPortDefault, kIOReturnSuccess, kIOServicePlane, IOBSDNameMatching, IOObjectCopyClass,
+    IOObjectRelease, IORegistryEntryCreateCFProperty, IORegistryEntryGetParentEntry,
+    IOServiceGetMatchingService, IO_OBJECT_NULL,
 };
-use crate::platform::{HardwareProbe, InquiryInfo, NativeTransport};
 
 #[derive(Debug, Clone, Default)]
 struct NodeSnapshot {
@@ -47,12 +47,8 @@ impl IoObject {
         let value = unsafe { IORegistryEntryCreateCFProperty(self.0, Some(&key), None, 0) }?;
         let number = value.downcast_ref::<CFNumber>()?;
         let mut out = 0i64;
-        let ok = unsafe {
-            number.value(
-                CFNumberType::SInt64Type,
-                std::ptr::addr_of_mut!(out).cast(),
-            )
-        };
+        let ok =
+            unsafe { number.value(CFNumberType::SInt64Type, std::ptr::addr_of_mut!(out).cast()) };
         ok.then_some(out)
     }
 
@@ -78,7 +74,10 @@ impl IoObject {
 
         let strings = STRING_KEYS
             .into_iter()
-            .filter_map(|key| self.property_string(key).map(|value| (key.to_string(), value)))
+            .filter_map(|key| {
+                self.property_string(key)
+                    .map(|value| (key.to_string(), value))
+            })
             .collect();
         let integers = INTEGER_KEYS
             .into_iter()
@@ -206,11 +205,18 @@ mod tests {
         usb.integers.insert("idVendor".into(), 0x3535);
         usb.integers.insert("idProduct".into(), 0x6300);
         let mut target = node("IOSCSITargetDevice");
-        target.strings.insert("Vendor Identification".into(), "AIGO    ".into());
-        target.strings.insert("Product Identification".into(), "U335".into());
-        target.strings.insert("Product Revision Level".into(), "PMAP".into());
+        target
+            .strings
+            .insert("Vendor Identification".into(), "AIGO    ".into());
+        target
+            .strings
+            .insert("Product Identification".into(), "U335".into());
+        target
+            .strings
+            .insert("Product Revision Level".into(), "PMAP".into());
         let mut lun = node("IOSCSILogicalUnitNub");
-        lun.strings.insert("Vendor Identification".into(), "WRONG".into());
+        lun.strings
+            .insert("Vendor Identification".into(), "WRONG".into());
 
         let summary = summarize_nodes(&[
             usb,

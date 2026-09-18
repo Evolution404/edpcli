@@ -4,8 +4,8 @@ use std::io;
 use std::mem::MaybeUninit;
 use std::os::unix::ffi::OsStrExt;
 use std::os::unix::io::AsRawFd;
-use std::path::PathBuf;
 use std::path::Path;
+use std::path::PathBuf;
 use std::process::Command;
 
 use super::{ExtDisk, HardwareProbe, InquiryInfo, NativeTransport, PlatformKind};
@@ -32,7 +32,8 @@ pub(super) fn parse_disk_selector(value: &str) -> Result<u32, String> {
         .or_else(|| value.strip_prefix("/dev/disk"))
         .unwrap_or(value);
     if !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()) {
-        n.parse::<u32>().map_err(|_| format!("磁盘编号超出范围: {value}"))
+        n.parse::<u32>()
+            .map_err(|_| format!("磁盘编号超出范围: {value}"))
     } else {
         Err(format!("无法解析 macOS 磁盘选择器: {value}"))
     }
@@ -229,11 +230,7 @@ fn block_int_field(block: &str, key: &str) -> Option<i64> {
     None
 }
 
-fn ioreg_block(
-    runner: &dyn CmdRunner,
-    class: &str,
-    disk: u32,
-) -> Option<String> {
+fn ioreg_block(runner: &dyn CmdRunner, class: &str, disk: u32) -> Option<String> {
     let out = runner
         .check_output(&["ioreg", "-r", "-c", class, "-l"], IOREG_TIMEOUT)
         .ok()?;
@@ -244,10 +241,7 @@ fn ioreg_block(
         .map(str::to_string)
 }
 
-pub(super) fn fallback_hardware_probe(
-    runner: &dyn CmdRunner,
-    disk: u32,
-) -> Option<HardwareProbe> {
+pub(super) fn fallback_hardware_probe(runner: &dyn CmdRunner, disk: u32) -> Option<HardwareProbe> {
     let usb_block = ioreg_block(runner, "IOUSBHostDevice", disk);
     let vid = usb_block
         .as_deref()
@@ -287,16 +281,13 @@ pub(super) fn fallback_hardware_probe(
         })
     });
 
-    (vid.is_some()
-        || pid.is_some()
-        || transport != NativeTransport::Unknown
-        || inquiry.is_some())
-    .then_some(HardwareProbe {
-        vid,
-        pid,
-        transport,
-        inquiry,
-    })
+    (vid.is_some() || pid.is_some() || transport != NativeTransport::Unknown || inquiry.is_some())
+        .then_some(HardwareProbe {
+            vid,
+            pid,
+            transport,
+            inquiry,
+        })
 }
 
 pub(super) fn is_system_disk(disk: u32) -> bool {
@@ -342,8 +333,14 @@ fn external_disk_info(runner: &dyn CmdRunner, disk: u32) -> Option<ExtDisk> {
         return None;
     }
     let info = disk_info(runner, disk)?;
-    let whole = info.get("WholeDisk").and_then(|v| v.as_bool()).unwrap_or(false);
-    let internal = info.get("Internal").and_then(|v| v.as_bool()).unwrap_or(false);
+    let whole = info
+        .get("WholeDisk")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    let internal = info
+        .get("Internal")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
     let virtual_disk = info.get("VirtualOrPhysical").and_then(|v| v.as_str()) == Some("Virtual");
     if !whole || internal || virtual_disk {
         return None;

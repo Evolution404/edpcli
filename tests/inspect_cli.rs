@@ -18,7 +18,12 @@ fn inspect_backup_file_is_offline_and_renders_structured_hex() {
         .arg("--hex")
         .output()
         .expect("run edpcli inspect");
-    assert_eq!(out.status.code(), Some(0), "{}", String::from_utf8_lossy(&out.stderr));
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(stdout.contains("来源"));
     assert!(stdout.contains("LBA7"));
@@ -59,7 +64,12 @@ fn inspect_onlyid_index_matches_backup_list_and_exports() {
         .arg(&export)
         .output()
         .expect("run edpcli inspect onlyid");
-    assert_eq!(out.status.code(), Some(0), "{}", String::from_utf8_lossy(&out.stderr));
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(stdout.contains("onlyid=1402259934 [1]"));
     assert!(stdout.contains("PDKB"));
@@ -92,13 +102,22 @@ fn known_lba_without_structure_does_not_dump_hex_unless_requested() {
         .unwrap();
     assert!(out.status.success());
     let stdout = String::from_utf8_lossy(&out.stdout);
-    assert!(stdout.contains("未检测到") || stdout.contains("未识别"), "{stdout}");
-    assert!(!stdout.contains("+0x000:"), "未指定 --hex 时不应自动刷 hex: {stdout}");
+    assert!(
+        stdout.contains("未检测到") || stdout.contains("未识别"),
+        "{stdout}"
+    );
+    assert!(
+        !stdout.contains("+0x000:"),
+        "未指定 --hex 时不应自动刷 hex: {stdout}"
+    );
 
     let out_hex = Command::new(env!("CARGO_BIN_EXE_edpcli"))
         .args(["inspect", target.to_str().unwrap(), "9", "--hex"])
         .output()
         .unwrap();
     let stdout_hex = String::from_utf8_lossy(&out_hex.stdout);
-    assert!(stdout_hex.contains("+0x000:"), "--hex 应明确展开: {stdout_hex}");
+    assert!(
+        stdout_hex.contains("+0x000:"),
+        "--hex 应明确展开: {stdout_hex}"
+    );
 }

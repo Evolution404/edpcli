@@ -15,7 +15,12 @@ fn norm(s: &str) -> String {
     s.trim_end_matches(' ').replace(' ', "_").to_lowercase()
 }
 
-pub fn build_device_id(vendor: &str, product: &str, revision: &str, transport: Transport) -> String {
+pub fn build_device_id(
+    vendor: &str,
+    product: &str,
+    revision: &str,
+    transport: Transport,
+) -> String {
     // Windows InstanceId 中间段: BOT(usbstor)含 &rev_, UAS(uaspstor)通常不含。
     let base = format!("disk&ven_{}&prod_{}", norm(vendor), norm(product));
     if transport == Transport::Bot {
@@ -126,10 +131,18 @@ pub fn identify(runner: &dyn CmdRunner, disk: u32, lba7: &[u8]) -> IdentifyResul
         let crc = crc32_bare(c.as_bytes());
         let k0 = (crc & 0xFFFF) ^ (crc >> 16);
         if xor_rolling(lba7, k0)[..4] == *b"EDPF" {
-            return IdentifyResult { device_id: Some(c), crc: Some(crc), k0: Some(k0) };
+            return IdentifyResult {
+                device_id: Some(c),
+                crc: Some(crc),
+                k0: Some(k0),
+            };
         }
     }
-    IdentifyResult { device_id: None, crc: None, k0: None }
+    IdentifyResult {
+        device_id: None,
+        crc: None,
+        k0: None,
+    }
 }
 
 #[cfg(test)]
@@ -149,7 +162,9 @@ mod tests {
     impl CmdRunner for NativeOnlyRunner {
         fn check_output(&self, _cmd: &[&str], _timeout: Duration) -> io::Result<String> {
             self.subprocess_calls.set(self.subprocess_calls.get() + 1);
-            Err(io::Error::other("native path should not spawn fallback subprocesses"))
+            Err(io::Error::other(
+                "native path should not spawn fallback subprocesses",
+            ))
         }
 
         fn hardware_probe(&self, _disk: u32) -> Option<HardwareProbe> {
@@ -174,8 +189,14 @@ mod tests {
             build_device_id("AIGO", "U335", "PMAP", Transport::Uas),
             "disk&ven_aigo&prod_u335"
         );
-        assert_eq!(build_device_id("V", "P", "", Transport::Bot), "disk&ven_v&prod_p");
-        assert_eq!(build_device_id("V", "P", "R1", Transport::Unknown), "disk&ven_v&prod_p");
+        assert_eq!(
+            build_device_id("V", "P", "", Transport::Bot),
+            "disk&ven_v&prod_p"
+        );
+        assert_eq!(
+            build_device_id("V", "P", "R1", Transport::Unknown),
+            "disk&ven_v&prod_p"
+        );
     }
 
     #[test]

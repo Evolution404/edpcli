@@ -5,8 +5,8 @@
 //! 对齐规则: 中文占 2 列, Rust 按字符数填充会错位 — 所有混排列对齐必须
 //! 经 disp_width/pad_to/pad_left; 着色须在填充之后(ANSI 码会破坏宽度计算)。
 
-use std::io::IsTerminal;
 use std::cell::Cell;
+use std::io::IsTerminal;
 
 thread_local! {
     // 测试会并行运行；颜色强制开关必须线程隔离，避免一个测试把另一个测试的
@@ -126,7 +126,9 @@ impl TableCell {
 /// 渲染紧凑终端表格。列宽按未着色文本的可见宽度计算，填充完成后再上色，
 /// 因此 ANSI 与中英文混排都不会破坏列对齐。
 pub fn render_table(headers: &[&str], rows: &[Vec<TableCell>]) -> String {
-    let cols = headers.len().max(rows.iter().map(Vec::len).max().unwrap_or(0));
+    let cols = headers
+        .len()
+        .max(rows.iter().map(Vec::len).max().unwrap_or(0));
     if cols == 0 {
         return String::new();
     }

@@ -41,7 +41,9 @@ pub struct MetaInfoOpts {
 }
 
 pub enum Parsed {
-    List { backup_dir: Option<String> },
+    List {
+        backup_dir: Option<String>,
+    },
     Backup {
         action: BackupAction,
         keep: usize,
@@ -52,24 +54,47 @@ pub enum Parsed {
     Inspect(InspectOpts),
     MetaInfo(MetaInfoOpts),
     Run(DiskOpts),
-    Apply { opts: DiskOpts, force: bool, yes: bool },
-    Restore { bin: Option<String>, disk: Option<u32>, yes: bool, backup_dir: Option<String> },
-    Convert { dir: Option<String>, id: Option<String>, size: Option<f64>, out: Option<String> },
-    Completion { shell: Shell },
+    Apply {
+        opts: DiskOpts,
+        force: bool,
+        yes: bool,
+    },
+    Restore {
+        bin: Option<String>,
+        disk: Option<u32>,
+        yes: bool,
+        backup_dir: Option<String>,
+    },
+    Convert {
+        dir: Option<String>,
+        id: Option<String>,
+        size: Option<f64>,
+        out: Option<String>,
+    },
+    Completion {
+        shell: Shell,
+    },
     InternalComplete {
         kind: String,
         onlyid: Option<String>,
         backup_dir: Option<String>,
     },
     Version,
-    Help { topic: Option<String> },
+    Help {
+        topic: Option<String>,
+    },
 }
 
 pub enum BackupAction {
     List,
-    Verify { target: Option<String>, index: Option<usize> },
+    Verify {
+        target: Option<String>,
+        index: Option<usize>,
+    },
     Prune,
-    Rm { targets: Vec<String> },
+    Rm {
+        targets: Vec<String>,
+    },
 }
 
 pub fn print_usage() {
@@ -88,14 +113,29 @@ pub fn print_usage() {
     println!();
     println!("{}", bold("子命令:"));
     for (n, d) in [
-        ("list", "列出外接盘: 编号/容量/接口/cems识别/免密检测/EDPF分区/备份（管理员权限下信息更全）"),
+        (
+            "list",
+            "列出外接盘: 编号/容量/接口/cems识别/免密检测/EDPF分区/备份（管理员权限下信息更全）",
+        ),
         ("run", "真盘预览 dry-run（需管理员权限，可自动提权）"),
         ("apply", "真盘实际写入(自动备份 → 原子写入 → 读回校验)"),
         ("restore", "从备份还原 LBA0-13(缺省交互选择本盘备份)"),
-        ("backup", "跨盘备份管理(list / verify / prune / rm，全程不提权)"),
-        ("inspect", "只读查看物理 U 盘或备份文件的扇区结构/解密字段/高亮 hex"),
-        ("metainfo", "汇总查看 U 盘/备份的身份、Dept/User、SAFE6 与分区元信息（别名 meta）"),
-        ("convert", "离线转换(不碰真盘): --dir <快照> --id <device_id>"),
+        (
+            "backup",
+            "跨盘备份管理(list / verify / prune / rm，全程不提权)",
+        ),
+        (
+            "inspect",
+            "只读查看物理 U 盘或备份文件的扇区结构/解密字段/高亮 hex",
+        ),
+        (
+            "metainfo",
+            "汇总查看 U 盘/备份的身份、Dept/User、SAFE6 与分区元信息（别名 meta）",
+        ),
+        (
+            "convert",
+            "离线转换(不碰真盘): --dir <快照> --id <device_id>",
+        ),
         ("completion", "生成 zsh / bash / fish Tab 补全脚本"),
         ("version", "显示版本"),
         ("help", "显示本帮助"),
@@ -115,38 +155,80 @@ pub fn print_usage() {
     println!();
     println!("{}", bold("扇区检查:"));
     for (n, d) in [
-        ("inspect [LBA...] [--disk N]", "查看物理盘；未给 --disk 时自动选择 USB 盘"),
-        ("inspect [LBA...] [备份.bin]", "查看备份/镜像；也可显式使用 --backup <文件>"),
-        ("inspect --onlyid ID", "先列出该盘可选备份；再用 --index N 选择"),
-        ("inspect [LBA...] --onlyid ID --index N", "按 backup list 的盘内编号查看某份备份"),
-        ("inspect ... --hex", "在结构化字段后显示解密后的 512B 字段高亮 hex"),
+        (
+            "inspect [LBA...] [--disk N]",
+            "查看物理盘；未给 --disk 时自动选择 USB 盘",
+        ),
+        (
+            "inspect [LBA...] [备份.bin]",
+            "查看备份/镜像；也可显式使用 --backup <文件>",
+        ),
+        (
+            "inspect --onlyid ID",
+            "先列出该盘可选备份；再用 --index N 选择",
+        ),
+        (
+            "inspect [LBA...] --onlyid ID --index N",
+            "按 backup list 的盘内编号查看某份备份",
+        ),
+        (
+            "inspect ... --hex",
+            "在结构化字段后显示解密后的 512B 字段高亮 hex",
+        ),
         ("inspect ... --raw", "显示原始扇区 hex，不套用解密字段颜色"),
-        ("inspect ... --export DIR", "导出所查看 LBA 的 raw/decoded .bin 与 .hex"),
+        (
+            "inspect ... --export DIR",
+            "导出所查看 LBA 的 raw/decoded .bin 与 .hex",
+        ),
     ] {
         println!("{}", flag(n, d));
     }
     println!();
     println!("{}", bold("备份管理:"));
     for (n, d) in [
-        ("backup list [--onlyid ID]", "跨盘总览，或只查看指定盘；显示编号 + 真实文件名"),
-        ("backup verify [备份.bin] [--onlyid ID] [--index N]", "校验全部、指定盘、指定编号或单份备份"),
-        ("backup prune [--onlyid ID] [--keep N] [--yes]", "按策略清理全部盘或指定盘的旧免密快照"),
-        ("backup rm --onlyid ID [编号|范围]...", "按盘编号删除；无编号时进入交互选择"),
-        ("backup rm <路径|文件名>... [--yes]", "按文件精确删除；默认预览并要求输入 YES"),
+        (
+            "backup list [--onlyid ID]",
+            "跨盘总览，或只查看指定盘；显示编号 + 真实文件名",
+        ),
+        (
+            "backup verify [备份.bin] [--onlyid ID] [--index N]",
+            "校验全部、指定盘、指定编号或单份备份",
+        ),
+        (
+            "backup prune [--onlyid ID] [--keep N] [--yes]",
+            "按策略清理全部盘或指定盘的旧免密快照",
+        ),
+        (
+            "backup rm --onlyid ID [编号|范围]...",
+            "按盘编号删除；无编号时进入交互选择",
+        ),
+        (
+            "backup rm <路径|文件名>... [--yes]",
+            "按文件精确删除；默认预览并要求输入 YES",
+        ),
     ] {
         println!("{}", flag(n, d));
     }
     println!();
     println!("{}", bold("选项:"));
     for (n, d) in [
-        (crate::platform::disk_selector_syntax(), "真盘选择器(缺省自动检测外部 USB 整盘)"),
+        (
+            crate::platform::disk_selector_syntax(),
+            "真盘选择器(缺省自动检测外部 USB 整盘)",
+        ),
         ("--size <GB>", "Share 大小(默认占满到 Encrypt 前)"),
         ("--force", "已改造(免密)盘仍强制重写(默认拒绝)"),
         ("--yes", "免交互(自动确认一切 YES 提示)"),
         ("--onlyid <ID>", "backup / inspect 按物理盘 onlyid 筛选"),
         ("--index <N>", "inspect / backup verify 选择该盘第 N 份备份"),
-        ("--id <device_id>", "inspect / metainfo 备份或镜像无法自动识别时手动提供 device_id"),
-        ("--backup-dir <目录>", "备份目录(默认 $EDPCLI_BACKUP_DIR、~/.edpcli.conf 或 ./backup)"),
+        (
+            "--id <device_id>",
+            "inspect / metainfo 备份或镜像无法自动识别时手动提供 device_id",
+        ),
+        (
+            "--backup-dir <目录>",
+            "备份目录(默认 $EDPCLI_BACKUP_DIR、~/.edpcli.conf 或 ./backup)",
+        ),
     ] {
         println!("{}", flag(n, d));
     }
@@ -164,10 +246,22 @@ fn print_topic_help(topic: &str) {
             println!("{}", bold("用法: edpcli inspect [LBA...] [来源] [选项]"));
             println!();
             println!("{}", bold("来源（选一种；不指定时查看当前物理 USB 盘）:"));
-            println!("  {}", bold_cyan("--disk N                         当前物理盘"));
-            println!("  {}", bold_cyan("<备份.bin> / --backup <文件>     备份文件或镜像"));
-            println!("  {}", bold_cyan("--onlyid ID                      先列出该盘可选备份"));
-            println!("  {}", bold_cyan("--onlyid ID --index N            查看该盘第 N 份备份"));
+            println!(
+                "  {}",
+                bold_cyan("--disk N                         当前物理盘")
+            );
+            println!(
+                "  {}",
+                bold_cyan("<备份.bin> / --backup <文件>     备份文件或镜像")
+            );
+            println!(
+                "  {}",
+                bold_cyan("--onlyid ID                      先列出该盘可选备份")
+            );
+            println!(
+                "  {}",
+                bold_cyan("--onlyid ID --index N            查看该盘第 N 份备份")
+            );
             println!();
             println!("{}", bold("常用:"));
             println!("  edpcli inspect --onlyid 1987718388");
@@ -176,10 +270,16 @@ fn print_topic_help(topic: &str) {
             println!("  edpcli inspect backup.bin 7 12 --hex");
             println!("  edpcli inspect 6 7 12 --disk 4 --hex");
             println!();
-            println!("{}", dim("不指定 LBA 时显示 LBA0-13 概览；--hex 展开解密视图，--raw 查看盘上原始字节。"));
+            println!(
+                "{}",
+                dim("不指定 LBA 时显示 LBA0-13 概览；--hex 展开解密视图，--raw 查看盘上原始字节。")
+            );
         }
         "metainfo" | "meta" => {
-            println!("{}", bold("用法: edpcli metainfo [onlyid [N] | 备份.bin] [选项]"));
+            println!(
+                "{}",
+                bold("用法: edpcli metainfo [onlyid [N] | 备份.bin] [选项]")
+            );
             println!("{}", bold("别名: edpcli meta"));
             println!();
             println!("{}", bold("常用:"));
@@ -194,11 +294,26 @@ fn print_topic_help(topic: &str) {
         "backup" => {
             println!("{}", bold("用法: edpcli backup [动作] [选项]"));
             println!();
-            println!("{}", bold("默认动作: list（因此 edpcli backup 可直接列出全部备份）"));
-            println!("  {}", bold_cyan("backup [list] [--onlyid ID]          查看备份"));
-            println!("  {}", bold_cyan("backup verify [文件] [--onlyid ID] [--index N] 校验备份"));
-            println!("  {}", bold_cyan("backup prune [--onlyid ID]          预览策略清理"));
-            println!("  {}", bold_cyan("backup rm --onlyid ID [编号|范围]   选择并删除备份"));
+            println!(
+                "{}",
+                bold("默认动作: list（因此 edpcli backup 可直接列出全部备份）")
+            );
+            println!(
+                "  {}",
+                bold_cyan("backup [list] [--onlyid ID]          查看备份")
+            );
+            println!(
+                "  {}",
+                bold_cyan("backup verify [文件] [--onlyid ID] [--index N] 校验备份")
+            );
+            println!(
+                "  {}",
+                bold_cyan("backup prune [--onlyid ID]          预览策略清理")
+            );
+            println!(
+                "  {}",
+                bold_cyan("backup rm --onlyid ID [编号|范围]   选择并删除备份")
+            );
             println!();
             println!("{}", bold("常用:"));
             println!("  edpcli backup");
@@ -208,20 +323,34 @@ fn print_topic_help(topic: &str) {
         "completion" => {
             println!("{}", bold("用法: edpcli completion <zsh|bash|fish>"));
             println!();
-            println!("动态补全包括: 子命令、旗标、onlyid、备份编号、备份文件名、物理盘号和 LBA0-13。" );
+            println!(
+                "动态补全包括: 子命令、旗标、onlyid、备份编号、备份文件名、物理盘号和 LBA0-13。"
+            );
             println!();
             println!("zsh : eval \"$(edpcli completion zsh)\"");
             println!("bash: eval \"$(edpcli completion bash)\"");
             println!("fish: edpcli completion fish | source");
         }
         "restore" => {
-            println!("{}", bold("用法: edpcli restore [备份.bin] [--disk N] [--yes] [--backup-dir D]"));
-            println!("不指定备份文件时，会自动列出当前物理盘匹配的备份并让你选择。" );
+            println!(
+                "{}",
+                bold("用法: edpcli restore [备份.bin] [--disk N] [--yes] [--backup-dir D]")
+            );
+            println!("不指定备份文件时，会自动列出当前物理盘匹配的备份并让你选择。");
         }
-        "run" => println!("{}", bold("用法: edpcli run [--disk N] [--size GB] [--backup-dir D]")),
-        "apply" => println!("{}", bold("用法: edpcli apply [--disk N] [--size GB] [--force] [--yes] [--backup-dir D]")),
+        "run" => println!(
+            "{}",
+            bold("用法: edpcli run [--disk N] [--size GB] [--backup-dir D]")
+        ),
+        "apply" => println!(
+            "{}",
+            bold("用法: edpcli apply [--disk N] [--size GB] [--force] [--yes] [--backup-dir D]")
+        ),
         "list" => println!("{}", bold("用法: edpcli list [--backup-dir D]")),
-        "convert" => println!("{}", bold("用法: edpcli convert --dir <快照目录> --id <device_id> [--size GB] [--out DIR]")),
+        "convert" => println!(
+            "{}",
+            bold("用法: edpcli convert --dir <快照目录> --id <device_id> [--size GB] [--out DIR]")
+        ),
         _ => print_usage(),
     }
 }
@@ -303,7 +432,10 @@ fn set_switch(slot: &mut bool, raw: &str, flag: &str) -> Result<(), String> {
 }
 
 pub fn parse_args(argv: &[String]) -> Result<Parsed, String> {
-    let args: Vec<&String> = argv.iter().filter(|a| a.as_str() != ELEVATED_FLAG).collect();
+    let args: Vec<&String> = argv
+        .iter()
+        .filter(|a| a.as_str() != ELEVATED_FLAG)
+        .collect();
     let Some(first) = args.first() else {
         return Ok(Parsed::Help { topic: None }); // 裸 edpcli: 打印用法, 不做任何动作
     };
@@ -314,18 +446,23 @@ pub fn parse_args(argv: &[String]) -> Result<Parsed, String> {
             if rest.len() > 1 {
                 return Err("错误: help 最多接受一个子命令名称".into());
             }
-            Ok(Parsed::Help { topic: rest.first().cloned() })
+            Ok(Parsed::Help {
+                topic: rest.first().cloned(),
+            })
         }
         "-V" | "--version" | "version" => Ok(Parsed::Version),
         "completion" => {
             if rest.is_empty() || rest.iter().any(|a| a == "-h" || a == "--help") {
-                return Ok(Parsed::Help { topic: Some("completion".into()) });
+                return Ok(Parsed::Help {
+                    topic: Some("completion".into()),
+                });
             }
             if rest.len() != 1 {
                 return Err("错误: completion 只接受一个 shell: zsh / bash / fish".into());
             }
-            let shell = Shell::parse(&rest[0])
-                .ok_or_else(|| format!("错误: 不支持的 shell: {} (可用 zsh / bash / fish)", rest[0]))?;
+            let shell = Shell::parse(&rest[0]).ok_or_else(|| {
+                format!("错误: 不支持的 shell: {} (可用 zsh / bash / fish)", rest[0])
+            })?;
             Ok(Parsed::Completion { shell })
         }
         "__complete" => {
@@ -349,11 +486,17 @@ pub fn parse_args(argv: &[String]) -> Result<Parsed, String> {
                 }
                 i += 1;
             }
-            Ok(Parsed::InternalComplete { kind, onlyid, backup_dir })
+            Ok(Parsed::InternalComplete {
+                kind,
+                onlyid,
+                backup_dir,
+            })
         }
         "list" => {
             if rest.iter().any(|a| a == "-h" || a == "--help") {
-                return Ok(Parsed::Help { topic: Some("list".into()) });
+                return Ok(Parsed::Help {
+                    topic: Some("list".into()),
+                });
             }
             let mut backup_dir = None;
             let mut i = 0;
@@ -371,7 +514,9 @@ pub fn parse_args(argv: &[String]) -> Result<Parsed, String> {
         }
         "inspect" => {
             if rest.iter().any(|a| a == "-h" || a == "--help") {
-                return Ok(Parsed::Help { topic: Some("inspect".into()) });
+                return Ok(Parsed::Help {
+                    topic: Some("inspect".into()),
+                });
             }
             let mut opts = InspectOpts::default();
             let mut i = 0;
@@ -394,7 +539,9 @@ pub fn parse_args(argv: &[String]) -> Result<Parsed, String> {
                         }
                         "--index" => {
                             let v = take_value(&rest, &mut i, "--index")?;
-                            let n = v.parse::<usize>().map_err(|_| format!("错误: --index 须为正整数, 得到 {}", v))?;
+                            let n = v
+                                .parse::<usize>()
+                                .map_err(|_| format!("错误: --index 须为正整数, 得到 {}", v))?;
                             if n == 0 {
                                 return Err("错误: --index 从 1 开始".into());
                             }
@@ -437,7 +584,9 @@ pub fn parse_args(argv: &[String]) -> Result<Parsed, String> {
                 + usize::from(opts.backup.is_some())
                 + usize::from(opts.onlyid.is_some());
             if source_count > 1 {
-                return Err("错误: inspect 的 --disk / --backup / --onlyid 三种来源只能选一种".into());
+                return Err(
+                    "错误: inspect 的 --disk / --backup / --onlyid 三种来源只能选一种".into(),
+                );
             }
             if opts.raw && opts.hex {
                 return Err("错误: inspect 的 --raw 与 --hex 语义相反，不能同时使用".into());
@@ -449,7 +598,9 @@ pub fn parse_args(argv: &[String]) -> Result<Parsed, String> {
         }
         "metainfo" | "meta" => {
             if rest.iter().any(|a| a == "-h" || a == "--help") {
-                return Ok(Parsed::Help { topic: Some("metainfo".into()) });
+                return Ok(Parsed::Help {
+                    topic: Some("metainfo".into()),
+                });
             }
             let mut opts = MetaInfoOpts::default();
             let mut positionals = Vec::new();
@@ -477,7 +628,9 @@ pub fn parse_args(argv: &[String]) -> Result<Parsed, String> {
                         }
                         "--index" => {
                             let v = take_value(&rest, &mut i, "--index")?;
-                            let n = v.parse::<usize>().map_err(|_| format!("错误: --index 须为正整数, 得到 {}", v))?;
+                            let n = v
+                                .parse::<usize>()
+                                .map_err(|_| format!("错误: --index 须为正整数, 得到 {}", v))?;
                             if n == 0 {
                                 return Err("错误: --index 从 1 开始".into());
                             }
@@ -500,7 +653,9 @@ pub fn parse_args(argv: &[String]) -> Result<Parsed, String> {
             }
             if !positionals.is_empty() {
                 if opts.disk.is_some() || opts.backup.is_some() || opts.onlyid.is_some() {
-                    return Err("错误: metainfo 的位置参数不能与 --disk/--backup/--onlyid 混用".into());
+                    return Err(
+                        "错误: metainfo 的位置参数不能与 --disk/--backup/--onlyid 混用".into(),
+                    );
                 }
                 match positionals.as_slice() {
                     [one]
@@ -530,14 +685,20 @@ pub fn parse_args(argv: &[String]) -> Result<Parsed, String> {
                         }
                         opts.index = Some(n);
                     }
-                    _ => return Err("错误: metainfo 位置参数仅支持 <onlyid> [编号] 或 <备份.bin>".into()),
+                    _ => {
+                        return Err(
+                            "错误: metainfo 位置参数仅支持 <onlyid> [编号] 或 <备份.bin>".into(),
+                        )
+                    }
                 }
             }
             let source_count = usize::from(opts.disk.is_some())
                 + usize::from(opts.backup.is_some())
                 + usize::from(opts.onlyid.is_some());
             if source_count > 1 {
-                return Err("错误: metainfo 的 --disk / --backup / --onlyid 三种来源只能选一种".into());
+                return Err(
+                    "错误: metainfo 的 --disk / --backup / --onlyid 三种来源只能选一种".into(),
+                );
             }
             if opts.index.is_some() && opts.onlyid.is_none() {
                 return Err("错误: --index 只能与 metainfo --onlyid 一起使用".into());
@@ -545,8 +706,12 @@ pub fn parse_args(argv: &[String]) -> Result<Parsed, String> {
             Ok(Parsed::MetaInfo(opts))
         }
         "backup" => {
-            if rest.iter().any(|a| a == "-h" || a == "--help") || rest.first().map(String::as_str) == Some("help") {
-                return Ok(Parsed::Help { topic: Some("backup".into()) });
+            if rest.iter().any(|a| a == "-h" || a == "--help")
+                || rest.first().map(String::as_str) == Some("help")
+            {
+                return Ok(Parsed::Help {
+                    topic: Some("backup".into()),
+                });
             }
             // 人工使用时 `edpcli backup` 的自然含义就是“看看有哪些备份”。
             // 若第一个 token 是旗标，也按省略 `list` 处理，例如 `edpcli backup --onlyid ID`。
@@ -596,31 +761,40 @@ pub fn parse_args(argv: &[String]) -> Result<Parsed, String> {
                                 }
                                 "--index" => {
                                     let v = take_value(tail, &mut i, "--index")?;
-                                    let n = v
-                                        .parse::<usize>()
-                                        .map_err(|_| format!("错误: --index 须为正整数, 得到 {}", v))?;
+                                    let n = v.parse::<usize>().map_err(|_| {
+                                        format!("错误: --index 须为正整数, 得到 {}", v)
+                                    })?;
                                     if n == 0 {
                                         return Err("错误: --index 从 1 开始".into());
                                     }
                                     set_once(&mut index, n, "--index")?;
                                 }
-                                other => return Err(format!("错误: backup verify 不认识选项 {}", other)),
+                                other => {
+                                    return Err(format!("错误: backup verify 不认识选项 {}", other))
+                                }
                             }
                         } else if target.is_none() {
                             target = Some(a.to_string());
                         } else {
-                            return Err(format!("错误: backup verify 只接受一个备份文件参数({})", a));
+                            return Err(format!(
+                                "错误: backup verify 只接受一个备份文件参数({})",
+                                a
+                            ));
                         }
                         i += 1;
                     }
                     if target.is_some() && onlyid.is_some() {
-                        return Err("错误: backup verify 的单文件参数与 --onlyid 不能同时使用".into());
+                        return Err(
+                            "错误: backup verify 的单文件参数与 --onlyid 不能同时使用".into()
+                        );
                     }
                     if index.is_some() && onlyid.is_none() {
                         return Err("错误: backup verify --index 只能与 --onlyid 一起使用".into());
                     }
                     if target.is_some() && index.is_some() {
-                        return Err("错误: backup verify 的单文件参数与 --index 不能同时使用".into());
+                        return Err(
+                            "错误: backup verify 的单文件参数与 --index 不能同时使用".into()
+                        );
                     }
                     BackupAction::Verify { target, index }
                 }
@@ -641,7 +815,9 @@ pub fn parse_args(argv: &[String]) -> Result<Parsed, String> {
                                 let v = take_value(tail, &mut i, "--onlyid")?;
                                 set_once(&mut onlyid, parse_onlyid(&v)?, "--onlyid")?;
                             }
-                            other => return Err(format!("错误: backup prune 不认识选项 {}", other)),
+                            other => {
+                                return Err(format!("错误: backup prune 不认识选项 {}", other))
+                            }
                         }
                         i += 1;
                     }
@@ -663,7 +839,9 @@ pub fn parse_args(argv: &[String]) -> Result<Parsed, String> {
                                     let v = take_value(tail, &mut i, "--onlyid")?;
                                     set_once(&mut onlyid, parse_onlyid(&v)?, "--onlyid")?;
                                 }
-                                other => return Err(format!("错误: backup rm 不认识选项 {}", other)),
+                                other => {
+                                    return Err(format!("错误: backup rm 不认识选项 {}", other))
+                                }
                             }
                         } else {
                             targets.push(a.to_string());
@@ -674,11 +852,18 @@ pub fn parse_args(argv: &[String]) -> Result<Parsed, String> {
                         return Err("错误: backup rm 至少需要一个路径或文件名".into());
                     }
                     if targets.is_empty() && onlyid.is_some() && yes {
-                        return Err("错误: backup rm --onlyid 配合 --yes 时必须显式给出编号或范围".into());
+                        return Err(
+                            "错误: backup rm --onlyid 配合 --yes 时必须显式给出编号或范围".into(),
+                        );
                     }
                     BackupAction::Rm { targets }
                 }
-                other => return Err(format!("错误: 未知 backup 动作: {} (可用 list / verify / prune / rm)", other)),
+                other => {
+                    return Err(format!(
+                        "错误: 未知 backup 动作: {} (可用 list / verify / prune / rm)",
+                        other
+                    ))
+                }
             };
             Ok(Parsed::Backup {
                 action,
@@ -691,7 +876,9 @@ pub fn parse_args(argv: &[String]) -> Result<Parsed, String> {
         "run" | "apply" => {
             let is_apply = first.as_str() == "apply";
             if rest.iter().any(|a| a == "-h" || a == "--help") {
-                return Ok(Parsed::Help { topic: Some(first.to_string()) });
+                return Ok(Parsed::Help {
+                    topic: Some(first.to_string()),
+                });
             }
             let mut opts = DiskOpts::default();
             let mut force = false;
@@ -728,7 +915,9 @@ pub fn parse_args(argv: &[String]) -> Result<Parsed, String> {
         }
         "restore" => {
             if rest.iter().any(|a| a == "-h" || a == "--help") {
-                return Ok(Parsed::Help { topic: Some("restore".into()) });
+                return Ok(Parsed::Help {
+                    topic: Some("restore".into()),
+                });
             }
             let mut bin: Option<String> = None;
             let mut disk = None;
@@ -757,11 +946,18 @@ pub fn parse_args(argv: &[String]) -> Result<Parsed, String> {
                 }
                 i += 1;
             }
-            Ok(Parsed::Restore { bin, disk, yes, backup_dir })
+            Ok(Parsed::Restore {
+                bin,
+                disk,
+                yes,
+                backup_dir,
+            })
         }
         "convert" => {
             if rest.iter().any(|a| a == "-h" || a == "--help") {
-                return Ok(Parsed::Help { topic: Some("convert".into()) });
+                return Ok(Parsed::Help {
+                    topic: Some("convert".into()),
+                });
             }
             let mut dir = None;
             let mut id = None;
@@ -792,8 +988,12 @@ pub fn parse_args(argv: &[String]) -> Result<Parsed, String> {
             }
             Ok(Parsed::Convert { dir, id, size, out })
         }
-        other if other.starts_with('-') => Err(format!("错误: 未知选项 {} (首个参数应为子命令)", other)),
-        other => Err(format!("错误: 未知子命令: {} (edpcli help 查看用法)", other)),
+        other if other.starts_with('-') => {
+            Err(format!("错误: 未知选项 {} (首个参数应为子命令)", other))
+        }
+        other => Err(format!(
+            "错误: 未知子命令: {} (edpcli help 查看用法)",
+            other
+        )),
     }
 }
-

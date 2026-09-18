@@ -6,18 +6,25 @@ mod common;
 use std::fs;
 
 use common::*;
-use edpcli::common::SECTOR;
-use edpcli::diskio::{backup_disk, backup_is_nopwd, find_backups, backup_label_id,
-                    parse_backup_name, scan_backup_dir, BackupMeta,
-                    prune_candidates, BackupEntry, Md5Status, DiskFacts};
-use edpcli::diskio::Clock;
 use edpcli::cli::{backup_list, backup_prune, backup_rm, backup_verify};
+use edpcli::common::SECTOR;
+use edpcli::diskio::Clock;
+use edpcli::diskio::{
+    backup_disk, backup_is_nopwd, backup_label_id, find_backups, parse_backup_name,
+    prune_candidates, scan_backup_dir, BackupEntry, BackupMeta, DiskFacts, Md5Status,
+};
 
 struct FixedClock;
 impl Clock for FixedClock {
-    fn now_epoch(&self) -> i64 { 1789603200 }
-    fn fmt_ts(&self, _epoch: i64) -> String { "20260917_000000".into() }
-    fn fmt_human(&self, _epoch: i64) -> String { "2026-09-17 00:00".into() }
+    fn now_epoch(&self) -> i64 {
+        1789603200
+    }
+    fn fmt_ts(&self, _epoch: i64) -> String {
+        "20260917_000000".into()
+    }
+    fn fmt_human(&self, _epoch: i64) -> String {
+        "2026-09-17 00:00".into()
+    }
 }
 
 fn netac_facts() -> DiskFacts {
@@ -52,9 +59,11 @@ fn real_backup_label_id() {
 
 #[test]
 fn find_backups_lba4_final_filter() {
-    let (Some(netac), Some(lexar), Some(real_bin)) =
-        (load_disk_image("netac"), load_disk_image("lexar"), fixture_bin("netac"))
-    else {
+    let (Some(netac), Some(lexar), Some(real_bin)) = (
+        load_disk_image("netac"),
+        load_disk_image("lexar"),
+        fixture_bin("netac"),
+    ) else {
         eprintln!("跳过: 真实备份不可用");
         return;
     };
@@ -71,12 +80,23 @@ fn find_backups_lba4_final_filter() {
         &lexar,
     );
     let my_tag: [u8; 16] = netac[4 * 512..4 * 512 + 16].try_into().unwrap();
-    let found = find_backups(&tmp.0, &netac_facts(), Some("disk&ven_netac&prod_onlydisk"), Some(my_tag));
+    let found = find_backups(
+        &tmp.0,
+        &netac_facts(),
+        Some("disk&ven_netac&prod_onlydisk"),
+        Some(my_tag),
+    );
     assert_eq!(found, vec![real.clone()]);
 
     // 空目录 → 空
     let empty = TmpDir::new("find_empty");
-    assert!(find_backups(&empty.0, &netac_facts(), Some("disk&ven_netac&prod_onlydisk"), None).is_empty());
+    assert!(find_backups(
+        &empty.0,
+        &netac_facts(),
+        Some("disk&ven_netac&prod_onlydisk"),
+        None
+    )
+    .is_empty());
     let _ = real_bin;
 }
 
@@ -87,8 +107,14 @@ fn backup_written_with_md5_and_onlyid() {
         return;
     };
     let tmp = TmpDir::new("backup");
-    let (path, is_nopwd) =
-        backup_disk(&netac_facts(), &data, "disk&ven_netac&prod_onlydisk", &tmp.0, &FixedClock).unwrap();
+    let (path, is_nopwd) = backup_disk(
+        &netac_facts(),
+        &data,
+        "disk&ven_netac&prod_onlydisk",
+        &tmp.0,
+        &FixedClock,
+    )
+    .unwrap();
     let name = path.file_name().unwrap().to_string_lossy().into_owned();
     assert!(name.contains("_onlyid1402259934_"), "{}", name);
     assert!(!is_nopwd); // 原盘备份不打 _nopwd
@@ -98,7 +124,12 @@ fn backup_written_with_md5_and_onlyid() {
     assert_eq!(md5_content.trim(), md5(&data));
     // 备份可被 find_backups 找回
     let my_tag: [u8; 16] = data[4 * 512..4 * 512 + 16].try_into().unwrap();
-    let found = find_backups(&tmp.0, &netac_facts(), Some("disk&ven_netac&prod_onlydisk"), Some(my_tag));
+    let found = find_backups(
+        &tmp.0,
+        &netac_facts(),
+        Some("disk&ven_netac&prod_onlydisk"),
+        Some(my_tag),
+    );
     assert_eq!(found, vec![path]);
 }
 
@@ -258,7 +289,11 @@ fn backup_collision_never_overwrites_existing_file() {
     )
     .unwrap_err();
 
-    assert!(err.msg.contains("已存在") || err.msg.contains("exists"), "{}", err.msg);
+    assert!(
+        err.msg.contains("已存在") || err.msg.contains("exists"),
+        "{}",
+        err.msg
+    );
     assert_eq!(fs::read(&path).unwrap(), first, "同名备份绝不能被静默覆盖");
     assert_eq!(
         fs::read_to_string(format!("{}.md5", path.display()))
@@ -283,7 +318,10 @@ fn backup_tagging_by_content() {
     // backup_is_nopwd 按内容检测(与文件名无关)
     assert!(backup_is_nopwd(&path, &did));
     assert!(!backup_is_nopwd(&path, "disk&ven_bogus&prod_x"));
-    assert!(!backup_is_nopwd(std::path::Path::new("/nonexistent.bin"), &did));
+    assert!(!backup_is_nopwd(
+        std::path::Path::new("/nonexistent.bin"),
+        &did
+    ));
     // 短文件安全返回 false
     let short = tmp.0.join("short.bin");
     fs::write(&short, vec![0u8; 100]).unwrap();
@@ -366,14 +404,22 @@ fn scan_backup_dir_reports_ok_mismatch_missing_and_unrecognized() {
         "disk6_122880000_vid0dd8_pid2005_disk&ven_netac&prod_onlydisk_onlyid1402259934_20260910_172301.bin",
         &original,
     );
-    fs::write(format!("{}.md5", damaged.display()), "00000000000000000000000000000000\n").unwrap();
+    fs::write(
+        format!("{}.md5", damaged.display()),
+        "00000000000000000000000000000000\n",
+    )
+    .unwrap();
     let missing = tmp.0.join(
         "disk6_122880000_vid0dd8_pid2005_disk&ven_netac&prod_onlydisk_onlyid1402259934_nopwd_20260910_172302.bin",
     );
     fs::write(&missing, &converted).unwrap();
     let odd = tmp.0.join("other.bin");
     fs::write(&odd, &original).unwrap();
-    fs::write(format!("{}.md5", odd.display()), format!("{}\n", md5(&original))).unwrap();
+    fs::write(
+        format!("{}.md5", odd.display()),
+        format!("{}\n", md5(&original)),
+    )
+    .unwrap();
 
     let entries = scan_backup_dir(&tmp.0);
     assert_eq!(entries.len(), 4);
@@ -457,10 +503,10 @@ fn scan_is_read_only_and_infers_missing_onlyid_in_memory() {
         Some("1402259934")
     );
     assert!(
-        fs::read_dir(&tmp.0)
-            .unwrap()
-            .flatten()
-            .all(|e| !e.file_name().to_string_lossy().contains("_onlyid1402259934_")),
+        fs::read_dir(&tmp.0).unwrap().flatten().all(|e| !e
+            .file_name()
+            .to_string_lossy()
+            .contains("_onlyid1402259934_")),
         "只读扫描不能产生迁移后的新文件名"
     );
 }
@@ -534,7 +580,10 @@ fn prune_policy_keeps_originals_latest_snapshots_and_last_backup() {
         .map(|p| p.to_string_lossy().into_owned())
         .collect();
     // A 有原盘，可清光免密快照；B 没原盘，最老两份可删但最新一份强制保留。
-    assert_eq!(keep0, vec!["a-n1.bin", "a-n2.bin", "a-n3.bin", "b-n1.bin", "b-n2.bin"]);
+    assert_eq!(
+        keep0,
+        vec!["a-n1.bin", "a-n2.bin", "a-n3.bin", "b-n1.bin", "b-n2.bin"]
+    );
 }
 
 #[test]
@@ -635,7 +684,10 @@ fn rm_cancel_yes_missing_and_last_backup_guard() {
         &original,
     );
 
-    let mut deny = ScriptPrompter { inputs: vec!["NO".into()], idx: 0 };
+    let mut deny = ScriptPrompter {
+        inputs: vec!["NO".into()],
+        idx: 0,
+    };
     assert_eq!(
         backup_rm(
             &tmp.0,
@@ -698,8 +750,7 @@ impl edpcli::cli::Prompter for ReplaceBeforeConfirm {
 
 #[test]
 fn rm_refuses_if_confirmed_backup_is_replaced_before_delete() {
-    let (Some(original), Some(replacement)) =
-        (load_disk_image("netac"), load_disk_image("lexar"))
+    let (Some(original), Some(replacement)) = (load_disk_image("netac"), load_disk_image("lexar"))
     else {
         eprintln!("跳过: 真实备份不可用");
         return;
@@ -736,8 +787,7 @@ fn rm_refuses_if_confirmed_backup_is_replaced_before_delete() {
 
 #[test]
 fn onlyid_filter_and_numbered_rm_follow_newest_first_order() {
-    let (Some(original), Some(other_disk)) =
-        (load_disk_image("netac"), load_disk_image("lexar"))
+    let (Some(original), Some(other_disk)) = (load_disk_image("netac"), load_disk_image("lexar"))
     else {
         eprintln!("跳过: 真实备份不可用");
         return;

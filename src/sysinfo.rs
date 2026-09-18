@@ -9,8 +9,8 @@ use std::sync::mpsc::{self, RecvTimeoutError};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use crate::platform::HardwareProbe;
 pub use crate::platform::ExtDisk;
+use crate::platform::HardwareProbe;
 
 /// 子进程执行抽象: 成功返回 stdout 文本(非零退出/超时/启动失败均为 Err)。
 /// 等价 Python subprocess.check_output(text=True, errors='ignore', timeout=…)。
@@ -68,7 +68,11 @@ impl CmdRunner for SysRunner {
         if status.success() {
             Ok(output)
         } else {
-            Err(io::Error::other(format!("{} 退出码 {:?}", cmd[0], status.code())))
+            Err(io::Error::other(format!(
+                "{} 退出码 {:?}",
+                cmd[0],
+                status.code()
+            )))
         }
     }
 
@@ -392,7 +396,13 @@ mod tests {
         );
         m.insert(
             "diskutil info -plist disk8".to_string(),
-            info("disk8", "Disk Image", false, "<key>VirtualOrPhysical</key><string>Virtual</string>", 1_000_000_000),
+            info(
+                "disk8",
+                "Disk Image",
+                false,
+                "<key>VirtualOrPhysical</key><string>Virtual</string>",
+                1_000_000_000,
+            ),
         );
         FakeRunner { outputs: m }
     }
@@ -405,9 +415,15 @@ mod tests {
         assert_eq!(disks.iter().map(|d| d.n).collect::<Vec<_>>(), vec![4, 6, 7]);
         assert_eq!(disks[0].proto, "USB");
         assert_eq!(disks[2].proto, "Thunderbolt");
-        assert_eq!((disks[2].vid.as_str(), disks[2].pid.as_str()), ("xxxx", "xxxx")); // 非USB 无 VID/PID
-        // USB 盘走 ioreg 查 VID/PID(罐头里没有 ioreg → 回退 xxxx)
-        assert_eq!((disks[0].vid.as_str(), disks[0].pid.as_str()), ("xxxx", "xxxx"));
+        assert_eq!(
+            (disks[2].vid.as_str(), disks[2].pid.as_str()),
+            ("xxxx", "xxxx")
+        ); // 非USB 无 VID/PID
+           // USB 盘走 ioreg 查 VID/PID(罐头里没有 ioreg → 回退 xxxx)
+        assert_eq!(
+            (disks[0].vid.as_str(), disks[0].pid.as_str()),
+            ("xxxx", "xxxx")
+        );
 
         let usb = list_usb_disks(&runner);
         assert_eq!(usb.iter().map(|d| d.n).collect::<Vec<_>>(), vec![4, 6]);
@@ -453,7 +469,10 @@ mod tests {
     |   \"BSD Name\" = \"disk6\"\n";
         assert_eq!(block_int_field(block, "idVendor"), Some(3352));
         assert_eq!(block_int_field(block, "idProduct"), Some(8197));
-        assert_eq!(block_str_field(block, "USB Product Name").as_deref(), Some("Mass Storage"));
+        assert_eq!(
+            block_str_field(block, "USB Product Name").as_deref(),
+            Some("Mass Storage")
+        );
     }
 
     #[test]
@@ -477,7 +496,7 @@ mod tests {
         assert!(blocks[1].contains("\"BSD Name\" = \"disk6\""));
         assert_eq!(block_int_field(blocks[1], "idVendor"), Some(13621)); // 0x3535
         assert_eq!(block_int_field(blocks[1], "idProduct"), Some(25344)); // 0x6300
-        // 无块起点时整段输出为单一块(Python re.split 兜底行为)
+                                                                          // 无块起点时整段输出为单一块(Python re.split 兜底行为)
         let no_root = "  |   \"idVendor\" = 1\n  |   \"BSD Name\" = \"disk6\"\n";
         assert_eq!(split_class_blocks(no_root, "IOUSBHostDevice").len(), 1);
     }

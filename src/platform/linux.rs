@@ -152,7 +152,9 @@ fn linux_block_names() -> &'static [String] {
 }
 
 fn block_name(disk: u32) -> Option<String> {
-    linux_block_names().get(disk.checked_sub(2)? as usize).cloned()
+    linux_block_names()
+        .get(disk.checked_sub(2)? as usize)
+        .cloned()
 }
 
 fn disk_device_numbers(name: &str) -> io::Result<HashSet<String>> {
@@ -162,9 +164,13 @@ fn disk_device_numbers(name: &str) -> io::Result<HashSet<String>> {
     for entry in std::fs::read_dir("/sys/class/block")? {
         let entry = entry?;
         let entry_name = entry.file_name();
-        let Some(entry_name) = entry_name.to_str() else { continue };
+        let Some(entry_name) = entry_name.to_str() else {
+            continue;
+        };
         let entry_path = format!("/sys/class/block/{entry_name}");
-        let Ok(real) = std::fs::canonicalize(&entry_path) else { continue };
+        let Ok(real) = std::fs::canonicalize(&entry_path) else {
+            continue;
+        };
         let is_parent = entry_name == name;
         let is_partition = std::path::Path::new(&entry_path).join("partition").exists()
             && real.starts_with(&parent);
@@ -221,12 +227,12 @@ fn decode_mount_field(input: &str) -> String {
     let mut out = Vec::with_capacity(bytes.len());
     let mut i = 0usize;
     while i < bytes.len() {
-        if bytes[i] == b'\\' && i + 3 < bytes.len()
+        if bytes[i] == b'\\'
+            && i + 3 < bytes.len()
             && bytes[i + 1..i + 4].iter().all(|b| matches!(b, b'0'..=b'7'))
         {
-            let value = (bytes[i + 1] - b'0') * 64
-                + (bytes[i + 2] - b'0') * 8
-                + (bytes[i + 3] - b'0');
+            let value =
+                (bytes[i + 1] - b'0') * 64 + (bytes[i + 2] - b'0') * 8 + (bytes[i + 3] - b'0');
             out.push(value);
             i += 4;
         } else {
@@ -252,7 +258,9 @@ fn mounted_points_for_devices(devices: &HashSet<String>) -> io::Result<Vec<Strin
 }
 
 pub(super) fn is_system_disk(disk: u32) -> bool {
-    let Some(name) = block_name(disk) else { return true };
+    let Some(name) = block_name(disk) else {
+        return true;
+    };
     let Ok(devices) = disk_device_numbers(&name) else {
         return true;
     };
@@ -263,7 +271,9 @@ pub(super) fn is_system_disk(disk: u32) -> bool {
 }
 
 fn read_trim(path: impl AsRef<std::path::Path>) -> Option<String> {
-    std::fs::read_to_string(path).ok().map(|s| s.trim().to_string())
+    std::fs::read_to_string(path)
+        .ok()
+        .map(|s| s.trim().to_string())
 }
 
 fn usb_ancestor(name: &str) -> Option<std::path::PathBuf> {
@@ -304,7 +314,9 @@ fn usb_transport(name: &str) -> NativeTransport {
 
 pub(super) fn hardware_probe(disk: u32) -> Option<HardwareProbe> {
     let name = block_name(disk)?;
-    let device = std::path::Path::new("/sys/class/block").join(&name).join("device");
+    let device = std::path::Path::new("/sys/class/block")
+        .join(&name)
+        .join("device");
     let vendor = read_trim(device.join("vendor")).unwrap_or_default();
     let product = read_trim(device.join("model")).unwrap_or_default();
     let revision = read_trim(device.join("rev")).unwrap_or_default();
@@ -339,7 +351,9 @@ pub(super) fn fallback_hardware_probe(
 
 pub(super) fn disk_total_sectors(_runner: &dyn CmdRunner, disk: u32) -> Option<u64> {
     let name = block_name(disk)?;
-    read_trim(format!("/sys/class/block/{name}/size"))?.parse().ok()
+    read_trim(format!("/sys/class/block/{name}/size"))?
+        .parse()
+        .ok()
 }
 
 pub(super) fn usb_vid_pid(_runner: &dyn CmdRunner, disk: u32) -> (String, String) {
@@ -373,7 +387,11 @@ pub(super) fn list_external_disks(runner: &dyn CmdRunner) -> Vec<ExtDisk> {
                 size: sectors.saturating_mul(SECTOR as u64),
                 vid,
                 pid,
-                proto: if usb { "USB".into() } else { "Removable".into() },
+                proto: if usb {
+                    "USB".into()
+                } else {
+                    "Removable".into()
+                },
             })
         })
         .collect()
@@ -384,11 +402,16 @@ pub(super) fn prepare_write(_runner: &dyn CmdRunner, disk: u32) -> io::Result<Wr
         .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "Linux 块设备不存在"))?;
     let devices = disk_device_numbers(&name)?;
     if devices.is_empty() {
-        return Err(io::Error::other("无法确认 Linux 块设备 major:minor，拒绝写盘"));
+        return Err(io::Error::other(
+            "无法确认 Linux 块设备 major:minor，拒绝写盘",
+        ));
     }
     let mounted = mounted_points_for_devices(&devices)?;
     if mounted.iter().any(|point| point == "/") {
-        return Err(io::Error::new(io::ErrorKind::PermissionDenied, "目标磁盘承载根文件系统，拒绝卸载"));
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            "目标磁盘承载根文件系统，拒绝卸载",
+        ));
     }
     for mountpoint in mounted {
         let path = CString::new(mountpoint.as_bytes())

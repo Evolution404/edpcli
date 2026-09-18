@@ -22,7 +22,10 @@ pub struct EdpCliError {
 
 impl EdpCliError {
     pub fn new(code: i32, msg: impl Into<String>) -> Self {
-        Self { code, msg: msg.into() }
+        Self {
+            code,
+            msg: msg.into(),
+        }
     }
 }
 
@@ -62,7 +65,11 @@ pub fn py_round_half_even(x: f64) -> i64 {
     } else {
         // 恰为 .5: 取偶数邻域
         let lo = floor as i64;
-        if lo % 2 == 0 { lo } else { lo + 1 }
+        if lo % 2 == 0 {
+            lo
+        } else {
+            lo + 1
+        }
     }
 }
 

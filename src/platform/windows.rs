@@ -11,10 +11,10 @@ use super::{ExtDisk, HardwareProbe, InquiryInfo, NativeTransport, PlatformKind};
 use crate::common::SECTOR;
 use crate::sysinfo::CmdRunner;
 use windows_sys::Win32::Devices::DeviceAndDriverInstallation::{
-    CM_Get_Device_IDW, CM_Get_Parent, SetupDiDestroyDeviceInfoList,
-    SetupDiEnumDeviceInterfaces, SetupDiGetClassDevsW, SetupDiGetDeviceInterfaceDetailW,
-    CR_SUCCESS, DIGCF_DEVICEINTERFACE, DIGCF_PRESENT, HDEVINFO, SP_DEVICE_INTERFACE_DATA,
-    SP_DEVICE_INTERFACE_DETAIL_DATA_W, SP_DEVINFO_DATA,
+    CM_Get_Device_IDW, CM_Get_Parent, SetupDiDestroyDeviceInfoList, SetupDiEnumDeviceInterfaces,
+    SetupDiGetClassDevsW, SetupDiGetDeviceInterfaceDetailW, CR_SUCCESS, DIGCF_DEVICEINTERFACE,
+    DIGCF_PRESENT, HDEVINFO, SP_DEVICE_INTERFACE_DATA, SP_DEVICE_INTERFACE_DETAIL_DATA_W,
+    SP_DEVINFO_DATA,
 };
 use windows_sys::Win32::Foundation::{
     CloseHandle, GetLastError, ERROR_NO_MORE_FILES, GENERIC_READ, GENERIC_WRITE, HANDLE,
@@ -24,31 +24,33 @@ use windows_sys::Win32::Security::{
     GetTokenInformation, TokenElevation, TOKEN_ELEVATION, TOKEN_QUERY,
 };
 use windows_sys::Win32::Storage::FileSystem::{
-    CreateFileW, FindFirstVolumeW, FindNextVolumeW, FindVolumeClose, BusTypeUsb,
-    FILE_ATTRIBUTE_NORMAL, FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING,
-    GetVolumeNameForVolumeMountPointW, GetVolumePathNameW, IOCTL_VOLUME_GET_VOLUME_DISK_EXTENTS,
+    BusTypeUsb, CreateFileW, FindFirstVolumeW, FindNextVolumeW, FindVolumeClose,
+    GetVolumeNameForVolumeMountPointW, GetVolumePathNameW, FILE_ATTRIBUTE_NORMAL, FILE_SHARE_READ,
+    FILE_SHARE_WRITE, IOCTL_VOLUME_GET_VOLUME_DISK_EXTENTS, OPEN_EXISTING,
 };
-use windows_sys::Win32::System::IO::DeviceIoControl;
 use windows_sys::Win32::System::Ioctl::{
-    DISK_GEOMETRY_EX, FSCTL_DISMOUNT_VOLUME, FSCTL_LOCK_VOLUME, FSCTL_UNLOCK_VOLUME,
-    GUID_DEVINTERFACE_DISK, IOCTL_DISK_GET_DRIVE_GEOMETRY_EX, IOCTL_STORAGE_GET_DEVICE_NUMBER,
-    IOCTL_STORAGE_QUERY_PROPERTY, PropertyStandardQuery, STORAGE_DEVICE_DESCRIPTOR,
-    STORAGE_DEVICE_NUMBER, STORAGE_PROPERTY_QUERY, StorageDeviceProperty, VOLUME_DISK_EXTENTS,
+    PropertyStandardQuery, StorageDeviceProperty, DISK_GEOMETRY_EX, FSCTL_DISMOUNT_VOLUME,
+    FSCTL_LOCK_VOLUME, FSCTL_UNLOCK_VOLUME, GUID_DEVINTERFACE_DISK,
+    IOCTL_DISK_GET_DRIVE_GEOMETRY_EX, IOCTL_STORAGE_GET_DEVICE_NUMBER,
+    IOCTL_STORAGE_QUERY_PROPERTY, STORAGE_DEVICE_DESCRIPTOR, STORAGE_DEVICE_NUMBER,
+    STORAGE_PROPERTY_QUERY, VOLUME_DISK_EXTENTS,
 };
+use windows_sys::Win32::System::SystemInformation::GetWindowsDirectoryW;
 use windows_sys::Win32::System::Threading::{
     GetCurrentProcess, GetExitCodeProcess, OpenProcessToken, WaitForSingleObject, INFINITE,
 };
-use windows_sys::Win32::System::SystemInformation::GetWindowsDirectoryW;
-use windows_sys::Win32::UI::Shell::{
-    ShellExecuteExW, SHELLEXECUTEINFOW, SEE_MASK_NOCLOSEPROCESS,
-};
+use windows_sys::Win32::System::IO::DeviceIoControl;
+use windows_sys::Win32::UI::Shell::{ShellExecuteExW, SEE_MASK_NOCLOSEPROCESS, SHELLEXECUTEINFOW};
 
 pub(super) const fn kind() -> PlatformKind {
     PlatformKind::Windows
 }
 
 fn wide(value: &str) -> Vec<u16> {
-    OsStr::new(value).encode_wide().chain(std::iter::once(0)).collect()
+    OsStr::new(value)
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect()
 }
 
 struct OwnedHandle(HANDLE);
@@ -295,7 +297,9 @@ fn setupapi_disk_map() -> Vec<(u32, Option<UsbIdentity>)> {
             continue;
         }
         let mut storage = vec![0u64; (required as usize).div_ceil(size_of::<u64>())];
-        let detail = storage.as_mut_ptr().cast::<SP_DEVICE_INTERFACE_DETAIL_DATA_W>();
+        let detail = storage
+            .as_mut_ptr()
+            .cast::<SP_DEVICE_INTERFACE_DETAIL_DATA_W>();
         unsafe {
             (*detail).cbSize = size_of::<SP_DEVICE_INTERFACE_DETAIL_DATA_W>() as u32;
         }
@@ -388,7 +392,9 @@ fn query_disk(disk: u32) -> io::Result<WinDiskProbe> {
         ));
     }
     let descriptor = unsafe {
-        &*(descriptor_words.as_ptr().cast::<STORAGE_DEVICE_DESCRIPTOR>())
+        &*(descriptor_words
+            .as_ptr()
+            .cast::<STORAGE_DEVICE_DESCRIPTOR>())
     };
     let bytes = unsafe {
         std::slice::from_raw_parts(
@@ -434,7 +440,9 @@ pub(super) fn hardware_probe(disk: u32) -> Option<HardwareProbe> {
     Some(HardwareProbe {
         vid: usb.and_then(|id| id.vid),
         pid: usb.and_then(|id| id.pid),
-        transport: usb.map(|id| id.transport).unwrap_or(NativeTransport::Unknown),
+        transport: usb
+            .map(|id| id.transport)
+            .unwrap_or(NativeTransport::Unknown),
         inquiry: (!probe.vendor.is_empty()).then_some(InquiryInfo {
             vendor: probe.vendor,
             product: probe.product,
@@ -469,14 +477,20 @@ pub(super) fn list_external_disks(_runner: &dyn CmdRunner) -> Vec<ExtDisk> {
                     .and_then(|id| id.pid)
                     .map(|pid| format!("{pid:04x}"))
                     .unwrap_or_else(|| "xxxx".into()),
-                proto: if probe.usb { "USB".into() } else { "Removable".into() },
+                proto: if probe.usb {
+                    "USB".into()
+                } else {
+                    "Removable".into()
+                },
             })
         })
         .collect()
 }
 
 pub(super) fn disk_total_sectors(_runner: &dyn CmdRunner, disk: u32) -> Option<u64> {
-    query_disk(disk).ok().map(|probe| probe.size / SECTOR as u64)
+    query_disk(disk)
+        .ok()
+        .map(|probe| probe.size / SECTOR as u64)
 }
 
 pub(super) fn usb_vid_pid(_runner: &dyn CmdRunner, disk: u32) -> (String, String) {
@@ -506,15 +520,23 @@ fn volume_extents(handle: HANDLE) -> io::Result<Vec<u32>> {
         )),
     )? as usize;
     if returned < size_of::<VOLUME_DISK_EXTENTS>() {
-        return Err(io::Error::new(io::ErrorKind::InvalidData, "卷 extent 返回过短"));
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "卷 extent 返回过短",
+        ));
     }
     let extents = unsafe { &*(words.as_ptr().cast::<VOLUME_DISK_EXTENTS>()) };
     let count = extents.NumberOfDiskExtents as usize;
     let required = size_of::<u32>()
-        .saturating_add(count.saturating_mul(size_of::<windows_sys::Win32::System::Ioctl::DISK_EXTENT>()))
+        .saturating_add(
+            count.saturating_mul(size_of::<windows_sys::Win32::System::Ioctl::DISK_EXTENT>()),
+        )
         .saturating_add(8);
     if count == 0 || required > returned + 8 || required > words.len() * size_of::<u64>() {
-        return Err(io::Error::new(io::ErrorKind::InvalidData, "卷 extent 数量异常"));
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "卷 extent 数量异常",
+        ));
     }
     let slice = unsafe { std::slice::from_raw_parts(extents.Extents.as_ptr(), count) };
     Ok(slice.iter().map(|extent| extent.DiskNumber).collect())
@@ -560,13 +582,8 @@ fn windows_volume_name() -> Option<String> {
     windows_dir.push(0);
 
     let mut mount = vec![0u16; 32768];
-    let ok = unsafe {
-        GetVolumePathNameW(
-            windows_dir.as_ptr(),
-            mount.as_mut_ptr(),
-            mount.len() as u32,
-        )
-    };
+    let ok =
+        unsafe { GetVolumePathNameW(windows_dir.as_ptr(), mount.as_mut_ptr(), mount.len() as u32) };
     if ok == 0 {
         return None;
     }
@@ -575,11 +592,7 @@ fn windows_volume_name() -> Option<String> {
 
     let mut volume = vec![0u16; 32768];
     let ok = unsafe {
-        GetVolumeNameForVolumeMountPointW(
-            mount.as_ptr(),
-            volume.as_mut_ptr(),
-            volume.len() as u32,
-        )
+        GetVolumeNameForVolumeMountPointW(mount.as_ptr(), volume.as_mut_ptr(), volume.len() as u32)
     };
     if ok == 0 {
         return None;
@@ -659,10 +672,7 @@ pub(super) fn prepare_write(_runner: &dyn CmdRunner, disk: u32) -> io::Result<Wr
             )
         })?;
         device_io(handle.get(), FSCTL_LOCK_VOLUME, None, None).map_err(|error| {
-            io::Error::new(
-                error.kind(),
-                format!("无法锁定卷 {volume}: {error}"),
-            )
+            io::Error::new(error.kind(), format!("无法锁定卷 {volume}: {error}"))
         })?;
         if let Err(error) = device_io(handle.get(), FSCTL_DISMOUNT_VOLUME, None, None) {
             let _ = device_io(handle.get(), FSCTL_UNLOCK_VOLUME, None, None);
@@ -769,7 +779,13 @@ pub(super) fn run_elevated(exe: &Path, argv: &[String], sentinel: &str) -> io::R
         .cloned()
         .collect();
     args.push(sentinel.to_string());
-    let params = wide(&args.iter().map(|arg| quote_windows_arg(arg)).collect::<Vec<_>>().join(" "));
+    let params = wide(
+        &args
+            .iter()
+            .map(|arg| quote_windows_arg(arg))
+            .collect::<Vec<_>>()
+            .join(" "),
+    );
 
     let mut info = SHELLEXECUTEINFOW {
         cbSize: size_of::<SHELLEXECUTEINFOW>() as u32,

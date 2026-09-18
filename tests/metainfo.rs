@@ -22,7 +22,10 @@ fn aigo_summary_contains_identity_and_ownership() {
     .unwrap();
 
     assert_eq!(summary.onlyid.as_deref(), Some("1987718388"));
-    assert_eq!(summary.device_id.as_deref(), Some("disk&ven_aigo&prod_u335&rev_pmap"));
+    assert_eq!(
+        summary.device_id.as_deref(),
+        Some("disk&ven_aigo&prod_u335&rev_pmap")
+    );
     assert_eq!(summary.device_crc32.as_deref(), Some("0x2EEB4CE1"));
     assert_eq!(summary.ownership.dept.as_deref(), Some("输电运检中心"));
     assert_eq!(summary.ownership.user.as_deref(), Some("张玉玺"));
@@ -70,9 +73,15 @@ fn render_uses_semantic_colors_and_no_color_remains_plain() {
     let colored = render(&summary);
     assert!(colored.contains("\x1b[1;36m身份信息\x1b[0m"), "{colored:?}");
     assert!(colored.contains("\x1b[33m1987718388\x1b[0m"), "{colored:?}");
-    assert!(colored.contains("\x1b[36m输电运检中心\x1b[0m"), "{colored:?}");
+    assert!(
+        colored.contains("\x1b[36m输电运检中心\x1b[0m"),
+        "{colored:?}"
+    );
     assert!(colored.contains("\x1b[35m125.83GB\x1b[0m"), "{colored:?}");
-    assert!(colored.contains("\x1b[32m0x980E9B2F / 计算 0x980E9B2F ✓\x1b[0m"), "{colored:?}");
+    assert!(
+        colored.contains("\x1b[32m0x980E9B2F / 计算 0x980E9B2F ✓\x1b[0m"),
+        "{colored:?}"
+    );
 
     edpcli::ui::set_enabled_for_tests(false);
     let plain = render(&summary);

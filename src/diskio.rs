@@ -10,8 +10,7 @@ use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use crate::common::{
-    EdpCliError, EdpCliResult, SECTOR, EXIT_BACKUP, EXIT_INTERMEDIATE, EXIT_IO,
-    EXIT_ROLLED_BACK,
+    EdpCliError, EdpCliResult, EXIT_BACKUP, EXIT_INTERMEDIATE, EXIT_IO, EXIT_ROLLED_BACK, SECTOR,
 };
 use crate::md5::md5_hex;
 use crate::sectors::looks_nopwd;
@@ -27,9 +26,9 @@ fn io_err(e: io::Error) -> EdpCliError {
 fn validate_backup_device_id(device_id: &str) -> EdpCliResult<()> {
     let safe = device_id.starts_with("disk&ven_")
         && device_id.len() <= 128
-        && device_id.bytes().all(|b| {
-            b.is_ascii_alphanumeric() || matches!(b, b'_' | b'&' | b'.' | b'-')
-        });
+        && device_id
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'&' | b'.' | b'-'));
     if safe {
         Ok(())
     } else {
@@ -113,11 +112,19 @@ fn try_open_rdwr(path: &str, wait: Duration) -> io::Result<File> {
 
 impl FileDev {
     pub fn open_rdonly(path: &str) -> io::Result<Self> {
-        Ok(FileDev { path: path.to_string(), file: File::open(path)?, writable: false })
+        Ok(FileDev {
+            path: path.to_string(),
+            file: File::open(path)?,
+            writable: false,
+        })
     }
 
     pub fn open_rdwr(path: &str, wait: Duration) -> io::Result<Self> {
-        Ok(FileDev { path: path.to_string(), file: try_open_rdwr(path, wait)?, writable: true })
+        Ok(FileDev {
+            path: path.to_string(),
+            file: try_open_rdwr(path, wait)?,
+            writable: true,
+        })
     }
 
     /// 切换为 O_RDWR(应在卸载后调用)。已可写则不重开, 保持单 fd 全程持有。
@@ -515,12 +522,16 @@ fn read_bytes_at(path: &Path, offset: u64, n: usize) -> io::Result<Vec<u8>> {
 
 /// 直接从备份快照的 LBA4 读取 labelOnlyId，不依赖当前插入的真盘。
 pub fn backup_label_id(path: &Path) -> Option<String> {
-    read_bytes_at(path, 4 * SECTOR as u64, 32).ok().and_then(|b| lba4_label_id_from(&b))
+    read_bytes_at(path, 4 * SECTOR as u64, 32)
+        .ok()
+        .and_then(|b| lba4_label_id_from(&b))
 }
 
 /// 备份文件是否为免密状态快照(按内容检测, 与文件名无关)。
 pub fn backup_is_nopwd(path: &Path, device_id: &str) -> bool {
-    let Ok(data) = fs::read(path) else { return false };
+    let Ok(data) = fs::read(path) else {
+        return false;
+    };
     image_is_nopwd(&data, device_id)
 }
 
@@ -530,7 +541,9 @@ pub fn image_is_nopwd(data: &[u8], device_id: &str) -> bool {
     if data.len() < 14 * SECTOR {
         return false;
     }
-    let read = |lba: u32| -> EdpCliResult<Vec<u8>> { Ok(data[lba as usize * SECTOR..(lba as usize + 1) * SECTOR].to_vec()) };
+    let read = |lba: u32| -> EdpCliResult<Vec<u8>> {
+        Ok(data[lba as usize * SECTOR..(lba as usize + 1) * SECTOR].to_vec())
+    };
     looks_nopwd(&read, device_id).unwrap_or(false)
 }
 
@@ -604,10 +617,7 @@ pub fn cmp_backup_newest_first(a: &BackupEntry, b: &BackupEntry) -> Ordering {
         (Some(at), Some(bt)) => bt.cmp(&at).then_with(|| a.path.cmp(&b.path)),
         (Some(_), None) => Ordering::Less,
         (None, Some(_)) => Ordering::Greater,
-        (None, None) => b
-            .mtime
-            .cmp(&a.mtime)
-            .then_with(|| a.path.cmp(&b.path)),
+        (None, None) => b.mtime.cmp(&a.mtime).then_with(|| a.path.cmp(&b.path)),
     }
 }
 
@@ -792,7 +802,10 @@ pub fn scan_backup_dir(dir: &Path) -> Vec<BackupEntry> {
         if path.extension().and_then(|e| e.to_str()) != Some("bin") {
             continue;
         }
-        let name = path.file_name().and_then(|n| n.to_str()).unwrap_or_default();
+        let name = path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or_default();
         let mut meta = parse_backup_name(name);
         let data = fs::read(&path).ok();
         let lba8 = data.as_ref().and_then(|d| {
@@ -805,7 +818,10 @@ pub fn scan_backup_dir(dir: &Path) -> Vec<BackupEntry> {
                 m.onlyid = lba4_label_id_from(&d[4 * SECTOR..5 * SECTOR]);
             }
         }
-        let size_ok = data.as_ref().map(|d| d.len() == 14 * SECTOR).unwrap_or(false);
+        let size_ok = data
+            .as_ref()
+            .map(|d| d.len() == 14 * SECTOR)
+            .unwrap_or(false);
         let md5_ok = data
             .as_ref()
             .map(|d| md5_status(&path, d))
@@ -838,7 +854,9 @@ pub fn backup_group_key(entry: &BackupEntry) -> Option<String> {
         None => format!(
             "legacy:{}:{}",
             meta.device_id,
-            meta.secs.map(|v| v.to_string()).unwrap_or_else(|| "unknown".into())
+            meta.secs
+                .map(|v| v.to_string())
+                .unwrap_or_else(|| "unknown".into())
         ),
     })
 }
@@ -892,7 +910,10 @@ pub fn backup_disk(
     }
     fs::create_dir_all(bak_dir).map_err(io_err)?;
     let ts = clock.fmt_ts(clock.now_epoch());
-    let secs = facts.total_sectors.map(|s| s.to_string()).unwrap_or_else(|| "unknown".into());
+    let secs = facts
+        .total_sectors
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| "unknown".into());
     let onlyid_part = lba4_label_id_from(&data[4 * SECTOR..5 * SECTOR])
         .as_ref()
         .map(|o| format!("_onlyid{}", o))
@@ -980,19 +1001,33 @@ pub fn find_backups(
     if !bak_dir.is_dir() {
         return vec![];
     }
-    let secs = facts.total_sectors.map(|s| s.to_string()).unwrap_or_else(|| "unknown".into());
+    let secs = facts
+        .total_sectors
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| "unknown".into());
     let mut tiers: Vec<Vec<String>> = Vec::new();
     if let Some(did) = device_id {
         tiers.push(vec![
             format!("disk*_{}_vid{}_pid{}_{}_*", secs, facts.vid, facts.pid, did),
-            format!("disk*_{}_vid{}_pid{}_{}_*", secs, facts.vid, facts.pid, did.replace('&', "_")),
+            format!(
+                "disk*_{}_vid{}_pid{}_{}_*",
+                secs,
+                facts.vid,
+                facts.pid,
+                did.replace('&', "_")
+            ),
         ]);
     }
-    tiers.push(vec![format!("disk*_{}_vid{}_pid{}_*", secs, facts.vid, facts.pid)]); // 兜底(识别失败时)
+    tiers.push(vec![format!(
+        "disk*_{}_vid{}_pid{}_*",
+        secs, facts.vid, facts.pid
+    )]); // 兜底(识别失败时)
     for pats in &tiers {
         let mut out: Vec<PathBuf> = Vec::new();
         for pat in pats {
-            let Ok(entries) = fs::read_dir(bak_dir) else { continue };
+            let Ok(entries) = fs::read_dir(bak_dir) else {
+                continue;
+            };
             for entry in entries.flatten() {
                 let Ok(file_type) = entry.file_type() else {
                     continue;
@@ -1021,14 +1056,14 @@ pub fn find_backups(
                     .unwrap_or(false)
             });
         }
-        out.sort_by(|a, b| {
-            match (backup_name_time_key(a), backup_name_time_key(b)) {
+        out.sort_by(
+            |a, b| match (backup_name_time_key(a), backup_name_time_key(b)) {
                 (Some(at), Some(bt)) => bt.cmp(&at).then_with(|| a.cmp(b)),
                 (Some(_), None) => Ordering::Less,
                 (None, Some(_)) => Ordering::Greater,
                 (None, None) => mtime_epoch(b).cmp(&mtime_epoch(a)).then_with(|| a.cmp(b)),
-            }
-        });
+            },
+        );
         out.dedup();
         return out;
     }
@@ -1061,9 +1096,17 @@ mod tests {
 
     #[test]
     fn label_id_positive_negative_malformed() {
-        let pos: Vec<u8> = b"$$$1402259934$$$".iter().chain([0u8; 18].iter()).copied().collect();
+        let pos: Vec<u8> = b"$$$1402259934$$$"
+            .iter()
+            .chain([0u8; 18].iter())
+            .copied()
+            .collect();
         assert_eq!(lba4_label_id_from(&pos), Some("1402259934".to_string()));
-        let neg: Vec<u8> = b"$$$-1833210541$$$".iter().chain([0u8; 15].iter()).copied().collect();
+        let neg: Vec<u8> = b"$$$-1833210541$$$"
+            .iter()
+            .chain([0u8; 15].iter())
+            .copied()
+            .collect();
         assert_eq!(lba4_label_id_from(&neg), Some("-1833210541".to_string()));
         assert_eq!(lba4_label_id_from(b""), None);
         assert_eq!(lba4_label_id_from(&[0u8; 32]), None);
@@ -1075,8 +1118,10 @@ mod tests {
     #[test]
     fn wildcard_only_star() {
         assert!(wildcard_match("a*c*", "abc"));
-        assert!(wildcard_match("disk*_122880000_vid0dd8_pid2005_x_*.bin",
-            "disk6_122880000_vid0dd8_pid2005_x_onlyid1402259934_20260910_172300.bin"));
+        assert!(wildcard_match(
+            "disk*_122880000_vid0dd8_pid2005_x_*.bin",
+            "disk6_122880000_vid0dd8_pid2005_x_onlyid1402259934_20260910_172300.bin"
+        ));
         assert!(!wildcard_match("disk*_999_*", "disk6_122880000_x"));
         assert!(wildcard_match("abc", "abc"));
         assert!(!wildcard_match("abc", "abcd"));
@@ -1102,7 +1147,12 @@ mod tests {
         let cwd = PathBuf::from("/w");
         // 四级优先: 旗标 > env > conf > CWD 兜底
         assert_eq!(
-            resolve_backup_dir_impl(Some("/f"), Some("/e".into()), Some("/c".into()), cwd.clone()),
+            resolve_backup_dir_impl(
+                Some("/f"),
+                Some("/e".into()),
+                Some("/c".into()),
+                cwd.clone()
+            ),
             PathBuf::from("/f")
         );
         assert_eq!(
@@ -1132,7 +1182,10 @@ mod tests {
             parse_conf_backup_dir("# 注释\nbackup_dir = /Users/x/.edpcli-backup\n"),
             Some("/Users/x/.edpcli-backup".to_string())
         );
-        assert_eq!(parse_conf_backup_dir("backup_dir=/a/b"), Some("/a/b".to_string()));
+        assert_eq!(
+            parse_conf_backup_dir("backup_dir=/a/b"),
+            Some("/a/b".to_string())
+        );
         assert_eq!(parse_conf_backup_dir("backup_dir =   \n"), None); // 空值
         assert_eq!(parse_conf_backup_dir("other = 1\nnoise\n"), None);
         assert_eq!(parse_conf_backup_dir(""), None);
@@ -1156,7 +1209,10 @@ mod tests {
         assert_eq!(rel.len(), 2);
         let rel_path = PathBuf::from(&rel[1]);
         assert!(rel_path.is_absolute(), "{}", rel[1]);
-        assert_eq!(rel_path.file_name().and_then(|name| name.to_str()), Some("bk"));
+        assert_eq!(
+            rel_path.file_name().and_then(|name| name.to_str()),
+            Some("bk")
+        );
         // 未设/空值 → 不追加
         assert!(backup_dir_argv_suffix(None).is_empty());
         assert!(backup_dir_argv_suffix(Some(String::new())).is_empty());
@@ -1172,9 +1228,15 @@ mod tests {
 
     struct FixedClock;
     impl Clock for FixedClock {
-        fn now_epoch(&self) -> i64 { 1789660800 }
-        fn fmt_ts(&self, epoch: i64) -> String { format!("fixed_{}", epoch) }
-        fn fmt_human(&self, epoch: i64) -> String { format!("h_{}", epoch) }
+        fn now_epoch(&self) -> i64 {
+            1789660800
+        }
+        fn fmt_ts(&self, epoch: i64) -> String {
+            format!("fixed_{}", epoch)
+        }
+        fn fmt_human(&self, epoch: i64) -> String {
+            format!("h_{}", epoch)
+        }
     }
 
     #[test]

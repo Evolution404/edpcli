@@ -1,7 +1,7 @@
 //! Shell Tab 补全脚本与动态候选提供器。
 //!
 //! 补全脚本自身不依赖外部补全框架：zsh/bash/fish 只负责上下文判断；onlyid、备份编号、
-//! 备份文件名和物理盘号由隐藏的 `edpcli __complete ...` 实时提供。
+//! 备份文件名和物理盘选择器由隐藏的 `edpcli __complete ...` 实时提供。
 
 use std::collections::BTreeSet;
 
@@ -60,7 +60,7 @@ pub fn dynamic_values(
         }
         "disk" => sysinfo::list_usb_disks(runner)
             .into_iter()
-            .map(|d| d.n.to_string())
+            .map(|d| crate::platform::disk_selector_value(d.n))
             .collect(),
         "lba" => (0..14).map(|n| n.to_string()).collect(),
         _ => vec![],
