@@ -81,7 +81,49 @@ edpcli list
 `list` 不写盘。程序先无特权读取；只有实际遇到裸盘权限不足时才自动请求管理员权限，
 无盘时不会无意义弹提权。
 
-### 2.2 查看详细信息
+### 2.2 交互式 TUI
+
+```bash
+edpcli tui
+```
+
+TUI 是 CLI v2 的交互前端，不是第二套业务实现。无参数 `edpcli` 仍等价于
+`edpcli list`，因此旧脚本不会因为新增 TUI 改变行为。TUI 必须运行在交互式 TTY；
+管道和重定向场景请继续直接使用 CLI 子命令。
+
+常用键位：
+
+| 键位 | 行为 |
+|---|---|
+| `j / k` | 上 / 下选择 |
+| `h / l` | 切换设备/备份工作区；Inspect 中切换字段/decoded hex/raw hex |
+| `gg / G` | 首项 / 末项 |
+| `Ctrl-d / Ctrl-u` | 列表半页移动；Inspect hex 中滚动 |
+| `/` | 搜索当前设备、备份或 Inspect 内容 |
+| `n / N` | 下一个 / 上一个搜索匹配 |
+| `:` | 打开 command palette |
+| `i` | Inspect 当前设备或备份 |
+| `a` | Apply 安全向导 |
+| `R` | Restore 当前选中备份 |
+| `Esc` | 返回上一层 / 取消输入 |
+| `q` | 退出 |
+| `?` | 帮助 |
+
+Command palette 只接受任务语义，例如 `:devices`、`:backups`、`:inspect`、
+`:apply`、`:restore`、`:refresh`、`:help`、`:q`；它不会把输入传给 shell。
+
+设备和备份扫描、Inspect LBA0-13 读取全部在后台执行，旧 generation 的扫描结果会被丢弃，
+不会覆盖更新的刷新请求。Apply / Restore 则进入明确的安全向导：
+
+1. 固定当前目标 disk；Restore 同时固定精确备份路径；
+2. 输入 `YES` 后才允许继续；
+3. 如需管理员权限，先正常退出 alternate screen，再通过平台提权重新进入 TUI；
+4. 提权后的 TUI 会显示已固定目标，并再次要求 `YES`；
+5. 关键写盘阶段复用与 CLI 完全相同的系统盘保护、USB 整盘确认、写前备份、卸载/锁卷、
+   reopen 身份复核、atomic write、sync/readback 和 rollback；
+6. 关键阶段内 `q`、`Esc`、`Ctrl-C` 不会杀掉写盘 worker，而是在安全结束点后再退出。
+
+### 2.3 查看详细信息
 
 ```bash
 edpcli info
@@ -100,7 +142,7 @@ edpcli info backup.bin
 输出分为 **设备 / 身份 / 状态 / 备份** 四块，包括 onlyid、device_id、Dept、User、
 SAFE6、分区和当前盘匹配备份数量。
 
-### 2.3 先预览改造
+### 2.4 先预览改造
 
 ```bash
 edpcli apply --dry-run
@@ -116,7 +158,7 @@ dry-run 会执行完整目标识别、device_id 判定和分区布局计算，�
 - 不 reopen 为读写；
 - 不写任何扇区。
 
-### 2.4 执行改造
+### 2.5 执行改造
 
 ```bash
 edpcli apply
@@ -140,7 +182,7 @@ edpcli apply --disk 4 --force --yes
 
 `--force` 只用于明确允许重复改造已免密盘；`--yes` 用于脚本化确认。
 
-### 2.5 管理备份
+### 2.6 管理备份
 
 ```bash
 edpcli backup create
@@ -364,8 +406,8 @@ edpcli completion fish | source
 
 ```bash
 cargo fmt --all -- --check
-cargo test --all-targets
-cargo clippy --all-targets -- -D warnings
+cargo test --all-targets --locked
+cargo clippy --all-targets --locked -- -D warnings
 ```
 
 GitHub Actions 在 macOS/Linux/Windows 的 arm64、x86_64 六个目标执行完整测试、clippy

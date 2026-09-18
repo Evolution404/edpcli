@@ -397,3 +397,17 @@ CI 必须覆盖 macOS / Linux / Windows：
 - fmt/test/clippy 全绿；
 - 文档与帮助完整；
 - 正式发布前才升级到 v2.1.0。
+
+
+## 实施状态
+
+截至 2026-09-19，Phase 0–7 的代码路径已经完成，当前进入最终 CI/HIL 收口：
+
+- application/service 已成为 CLI/TUI 共用边界；
+- Device dashboard 与 Backup workspace 使用后台 generation worker；
+- Apply/Restore 通过共享 write service，提权重启固定 disk/backup，关键阶段延迟退出；
+- Inspect 复用领域 analyzer，支持字段、decoded/raw hex、搜索与滚动；
+- `/`、`n/N`、`:` command palette 已实现；
+- TTY、resize、terminal RAII、worker panic containment、非阻塞与大列表状态门禁已加入；
+- CI 增加 rustfmt、locked test/clippy/build；
+- 实现阶段仍保持 `2.0.1`，只有最终 CI/HIL 全绿并进入正式发布时才升级 `2.1.0`。
