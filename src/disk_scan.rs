@@ -1,6 +1,6 @@
 //! 外接盘发现、cems 只读探测与列表渲染。
 //!
-//! 这里集中 `diskutil/ioreg + LBA4/7/12` 的只读探测逻辑，顶层 CLI 只负责路由。
+//! 这里集中平台设备信息 + LBA4/7/12 的只读探测逻辑，顶层 CLI 只负责路由。
 
 use std::io;
 use std::path::Path;
@@ -27,7 +27,7 @@ pub struct Row {
 }
 
 /// 外接盘一览数据: 编号/容量/接口; USB 盘再尽力识别 cems 身份、免密状态、
-/// EDPF 分区与备份份数。权限不足和读取异常分开记录，避免错误提示用户去 sudo。
+/// EDPF 分区与备份份数。权限不足和读取异常分开记录。
 pub fn scan_disks(
     runner: &dyn CmdRunner,
     backup_dir: &Path,
@@ -122,7 +122,7 @@ pub fn print_disk_table(rows: &[Row]) -> String {
             let (status, tone) = if row.proto != "USB" {
                 ("非 USB / 不支持".to_string(), Tone::Dim)
             } else if row.denied {
-                ("需 sudo 才能识别".to_string(), Tone::Dim)
+                ("需管理员权限才能识别".to_string(), Tone::Dim)
             } else if let Some(error) = &row.probe_error {
                 (format!("读取异常: {}", error), Tone::Yellow)
             } else if row.device_id.is_none() {

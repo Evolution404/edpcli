@@ -1,6 +1,5 @@
-//! macOS 系统信息: diskutil(-plist) / ioreg 查询。
-//! 全部子进程调用收在 CmdRunner 之后 — 这是测试注入罐头输出的缝
-//! (Python 版以 mock.patch(subprocess.check_output) 达成同一目的)。
+//! 跨平台系统探测门面与可注入命令执行器。
+//! 操作系统细节由 `platform` 实现；业务层只依赖这里的统一接口。
 
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
@@ -18,8 +17,8 @@ pub use crate::platform::ExtDisk;
 pub trait CmdRunner {
     fn check_output(&self, cmd: &[&str], timeout: Duration) -> io::Result<String>;
 
-    /// 可选的原生 IOKit 硬件探测。测试 runner 默认没有 native backend；
-    /// production `SysRunner` 覆盖实现，业务层在 None 时再回退旧 ioreg 文本路径。
+    /// 可选的原生硬件探测。测试 runner 默认没有 native backend；
+    /// production `SysRunner` 由当前平台实现提供。
     fn hardware_probe(&self, _disk: u32) -> Option<HardwareProbe> {
         None
     }
@@ -102,7 +101,7 @@ impl CachedOutput {
 
 /// 单次只读命令会话内的系统探测缓存。
 ///
-/// 只缓存纯查询：`diskutil list/info` 与 `ioreg`。卸载等有副作用命令永远直通。
+/// 只缓存由当前平台明确标记为纯查询的命令；有副作用命令永远直通。
 /// 该类型只用于 list/meta/inspect/completion；apply/restore 的安全终验继续使用
 /// fresh `SysRunner`，避免缓存掩盖换盘或设备状态变化。
 pub struct ReadProbeCache<'a> {
@@ -125,8 +124,7 @@ impl<'a> ReadProbeCache<'a> {
     }
 
     fn cacheable(cmd: &[&str]) -> bool {
-        matches!(cmd, ["ioreg", ..])
-            || matches!(cmd, ["diskutil", "list", ..] | ["diskutil", "info", ..])
+        crate::platform::probe_command_cacheable(cmd)
     }
 
     fn key(cmd: &[&str], timeout: Duration) -> String {
@@ -172,9 +170,8 @@ impl CmdRunner for ReadProbeCache<'_> {
     }
 }
 
-// ══════════════════════════════════════════════════════════════════
-// ioreg 文本解析(无 regex; ioreg 输出行结构化, 逐行扫描)
-// ══════════════════════════════════════════════════════════════════
+// 以下解析器仅保留给历史罐头测试；生产平台解析已收敛到 platform/macos.rs。
+#[cfg(test)]
 /// 按 ioreg 节点行切块: 行以 `+-o` 开头且携带 `<class <cls>,`。
 /// 真实输出的节点名常是产品名(如 `+-o USB DISK@01200000  <class IOUSBHostDevice, …>`),
 /// 不能按 `+-o <类名>` 前缀切 — 那样永远切不出块(Python 版因此退化为整段输出
@@ -206,6 +203,7 @@ pub fn split_class_blocks<'a>(out: &'a str, cls: &str) -> Vec<&'a str> {
     blocks
 }
 
+#[cfg(test)]
 /// 块内找 `"Key" = "value"` 形式的字符串字段(块内任意位置, 允许 = 两边空白)。
 /// 等价 Python `re.search(r'"Key"\s*=\s*"([^"]*)"', block)` — ioreg 属性行
 /// 带树形前缀(`|   "Key" = …`), 不能按行首匹配。
@@ -243,6 +241,7 @@ pub fn block_str_field(block: &str, key: &str) -> Option<String> {
     None
 }
 
+#[cfg(test)]
 /// 块内找 `"Key" = 1234` 形式的无引号十进制整数字段(块内任意位置)。
 pub fn block_int_field(block: &str, key: &str) -> Option<i64> {
     let quoted_key = format!("\"{}\"", key);
@@ -304,7 +303,6 @@ pub fn list_usb_disks(runner: &dyn CmdRunner) -> Vec<ExtDisk> {
 }
 
 /// 直接核验一个显式盘号是否为可操作的外接 USB 整盘。
-/// 不先枚举所有磁盘，供安全门禁高频调用，减少额外 `diskutil info` 子进程。
 pub fn usb_disk(runner: &dyn CmdRunner, disk: u32) -> Option<ExtDisk> {
     list_external_disks(runner)
         .into_iter()

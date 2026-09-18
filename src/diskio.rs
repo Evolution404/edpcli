@@ -374,7 +374,7 @@ fn utc_parts(epoch: i64) -> UtcParts {
 // ══════════════════════════════════════════════════════════════════
 // 3. 备份/还原
 // ══════════════════════════════════════════════════════════════════
-/// 相对路径按 CWD 绝对化(跨 sudo 重执行时 CWD 不变的假设下仍更确定)。
+/// 相对路径按 CWD 绝对化（跨提权重执行时也保持确定）。
 pub fn absolutize_backup_dir(p: PathBuf) -> PathBuf {
     if p.is_absolute() {
         p
@@ -415,21 +415,6 @@ pub fn resolve_backup_dir_impl(
     cwd.join("backup")
 }
 
-/// sudo 下发起用户的用户名(sudo 设置, 可信; 形如系统用户名才接受)。
-pub fn sudo_user() -> Option<String> {
-    let u = std::env::var("SUDO_USER").ok()?;
-    let ok = !u.is_empty()
-        && u.chars()
-            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '.' | '-'));
-    ok.then_some(u)
-}
-
-/// 发起用户 home：交给平台层解析 sudo / shell / Windows 用户语义。
-pub fn sudo_user_home() -> Option<PathBuf> {
-    sudo_user()?;
-    crate::platform::invoking_user_home()
-}
-
 /// `key = value` 配置解析: 取 backup_dir 值; `#` 注释, 未知键忽略, 坏行跳过。
 pub fn parse_conf_backup_dir(content: &str) -> Option<String> {
     for line in content.lines() {
@@ -449,15 +434,9 @@ pub fn parse_conf_backup_dir(content: &str) -> Option<String> {
     None
 }
 
-/// 读取用户配置中的备份目录。
-/// 定位: sudo 下(手动或自动)读发起用户 home 的 .edpcli.conf — sudo 会剥掉
-/// shell 环境变量($EDPCLI_BACKUP_DIR 过不去), 磁盘文件是唯一能穿界的载体;
-/// 非 root 读 $HOME。
+/// 读取发起用户配置中的备份目录；用户 home 的平台差异由 platform 层处理。
 pub fn conf_backup_dir() -> Option<String> {
-    let home = match sudo_user() {
-        Some(_) => sudo_user_home()?,
-        None => crate::platform::invoking_user_home()?,
-    };
+    let home = crate::platform::invoking_user_home()?;
     let content = std::fs::read_to_string(home.join(CONF_NAME)).ok()?;
     parse_conf_backup_dir(&content)
 }
@@ -473,8 +452,8 @@ pub fn resolve_backup_dir(flag: Option<&str>) -> PathBuf {
     )
 }
 
-/// 自动提权时的环境桥接: sudo 默认清环境变量(env_reset), $EDPCLI_BACKUP_DIR
-/// 过不去 — 父进程把它解析为绝对路径, 以显式旗标并入重执行 argv(旗标优先于 env)。
+/// 自动提权时的环境桥接：父进程把备份目录解析为绝对路径，以显式旗标并入
+/// 重执行 argv（旗标优先于子进程环境）。
 /// 返回应追加的参数(空 = 无需追加)。
 pub fn backup_dir_argv_suffix(env_val: Option<String>) -> Vec<String> {
     match env_val.filter(|v| !v.is_empty()) {
@@ -1160,26 +1139,13 @@ mod tests {
     }
 
     #[test]
-    fn sudo_user_name_validated() {
-        // 形如系统用户名才接受(防 shell 插值注入)
-        assert!(sudo_user().is_some() || std::env::var("SUDO_USER").is_err());
-        // 直接验证判定逻辑(无 SUDO_USER 环境时)
-        let ok = |s: &str| {
-            !s.is_empty()
-                && s.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '.' | '-'))
-        };
-        assert!(ok("zhangyuxi") && ok("a.b-c_1"));
-        assert!(!ok("") && !ok("x; rm") && !ok("$(cmd)"));
-    }
-
-    #[test]
     fn platform_user_home_is_available_for_current_session() {
         assert!(crate::platform::invoking_user_home().is_some());
     }
 
     #[test]
     fn backup_dir_argv_suffix_bridges_env() {
-        // sudo env_reset 会清环境变量 — env 值须转为显式旗标(绝对路径)随 argv 过界
+        // 提权边界不依赖环境继承：env 值须转为显式旗标（绝对路径）随 argv 过界。
         let absolute_dir = std::env::temp_dir().join("edpcli-absolute-backup");
         let abs = backup_dir_argv_suffix(Some(absolute_dir.to_string_lossy().into_owned()));
         assert_eq!(abs.len(), 2);

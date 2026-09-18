@@ -101,13 +101,13 @@ fn scan_and_print_all_row_kinds() {
     assert!(row6b.is_nopwd);
     assert_eq!(row6b.partitions.as_ref().unwrap().len(), 2);
 
-    // 读盘全被拒(未 sudo) → denied 降级行
+    // 读盘全被拒（权限不足）→ denied 降级行
     let read_denied = |_disk: u32, _lba: u32| -> std::io::Result<Vec<u8>> {
         Err(std::io::Error::new(std::io::ErrorKind::PermissionDenied, "denied"))
     };
     let rows2 = scan_disks(&runner, &bak.0, &read_denied);
     let out2 = print_disk_table(&rows2);
-    assert!(out2.contains("sudo") && out2.contains("识别"), "{}", out2);
+    assert!(out2.contains("管理员权限") && out2.contains("识别"), "{}", out2);
 
     // 抽象读层若意外返回短扇区，list 也必须降级为不可读，不能切片 panic。
     let read_short = |_disk: u32, lba: u32| -> std::io::Result<Vec<u8>> {
@@ -119,7 +119,7 @@ fn scan_and_print_all_row_kinds() {
     };
     let rows3 = scan_disks(&runner, &bak.0, &read_short);
     let row6c = rows3.iter().find(|r| r.disk == 6).unwrap();
-    assert!(!row6c.denied, "短读不是权限错误，不应误导用户去 sudo");
+    assert!(!row6c.denied, "短读不是权限错误，不应误导用户去提权");
     assert!(row6c.probe_error.as_deref().unwrap_or("").contains("预期 512B"));
     let out3 = print_disk_table(&rows3);
     assert!(out3.contains("读取异常"), "{}", out3);
@@ -127,7 +127,7 @@ fn scan_and_print_all_row_kinds() {
 
 #[test]
 fn list_cli_smoke_exit_zero() {
-    // 本机 diskutil 真跑: 无论有没有插盘, 都应正常退出并给出可辨认输出
+    // 本机平台探测真跑：无论有没有插盘，都应正常退出并给出可辨认输出。
     let out = Command::new(env!("CARGO_BIN_EXE_edpcli"))
         .arg("list")
         .output()

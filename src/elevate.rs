@@ -1,6 +1,5 @@
-//! 自动提权: 需要裸盘读写的子命令在非 root 时以 sudo 重新执行自身。
-//! 状态经 argv 传递(不依赖环境变量, sudo 会清环境); 继承 stdio 使
-//! sudo 密码与 YES 确认提示都能交互; `--_elevated` 哨兵防异常 sudoers 配置下的重入循环。
+//! 自动提权：需要裸盘读写的子命令在权限不足时由平台层重新执行自身。
+//! 状态经 argv 传递，不依赖提权后的环境继承；`--_elevated` 哨兵防异常重入循环。
 
 /// 内部哨兵旗标(追加到重执行 argv 末尾; 参数解析层识别并剥离)。
 pub const ELEVATED_FLAG: &str = "--_elevated";
@@ -9,14 +8,14 @@ pub fn is_root() -> bool {
     crate::platform::is_elevated()
 }
 
-/// 非 root 时: 打印提示并以 sudo 重执行自身(继承 stdio), 以子进程退出码结束进程。
-/// 已带哨兵却仍非 root → 拒绝(sudo 未生效, 避免循环)。
+/// 权限不足时：打印提示并通过平台层重执行自身，以子进程退出码结束进程。
+/// 已带哨兵却仍未提权 → 拒绝，避免循环。
 pub fn ensure_elevated(argv: &[String]) {
     if is_root() {
         return;
     }
     if argv.contains(&ELEVATED_FLAG.to_string()) {
-        eprintln!("错误: sudo 未授予 root 权限, 终止以避免循环。请检查 sudoers 配置。");
+        eprintln!("错误: 管理员权限未生效，终止以避免循环。请检查本平台的提权配置。");
         std::process::exit(crate::common::EXIT_IO);
     }
     let exe = match std::env::current_exe() {

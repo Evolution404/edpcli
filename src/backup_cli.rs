@@ -397,7 +397,7 @@ fn delete_backup_pair(entry: &BackupEntry) -> Result<(), String> {
     }
     if let Err(e) = fs::remove_file(path) {
         let suffix = if e.kind() == io::ErrorKind::PermissionDenied {
-            "；备份目录可能由 root 持有且不可写，可检查目录属主/权限，必要时使用 sudo rm 手动删除"
+            "；备份目录可能由管理员账户持有且不可写，可检查目录属主/权限，必要时以管理员权限手动删除"
         } else {
             ""
         };
@@ -407,7 +407,7 @@ fn delete_backup_pair(entry: &BackupEntry) -> Result<(), String> {
     if sidecar.exists() {
         if let Err(e) = fs::remove_file(&sidecar) {
             let suffix = if e.kind() == io::ErrorKind::PermissionDenied {
-                "；备份目录可能由 root 持有且不可写，可检查目录属主/权限，必要时使用 sudo rm 手动删除"
+                "；备份目录可能由管理员账户持有且不可写，可检查目录属主/权限，必要时以管理员权限手动删除"
             } else {
                 ""
             };

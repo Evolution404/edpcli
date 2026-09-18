@@ -1,10 +1,13 @@
+use std::collections::HashSet;
+use std::ffi::{CStr, CString};
 use std::fs::File;
 use std::io;
-use std::path::PathBuf;
+use std::mem::MaybeUninit;
+use std::os::unix::ffi::OsStrExt;
 use std::path::Path;
+use std::path::PathBuf;
 use std::process::Command;
-use std::collections::HashSet;
-use std::ffi::CString;
+use std::sync::OnceLock;
 
 use super::{ExtDisk, HardwareProbe, InquiryInfo, NativeTransport, PlatformKind};
 use crate::common::SECTOR;
@@ -49,8 +52,62 @@ pub(super) fn is_elevated() -> bool {
     unsafe { libc::geteuid() == 0 }
 }
 
+fn sudo_user() -> Option<String> {
+    let user = std::env::var("SUDO_USER").ok()?;
+    let valid = !user.is_empty()
+        && user
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '.' | '-'));
+    valid.then_some(user)
+}
+
+fn user_home(name: &str) -> Option<PathBuf> {
+    let name = CString::new(name).ok()?;
+    let mut pwd = MaybeUninit::<libc::passwd>::uninit();
+    let mut result = std::ptr::null_mut();
+    let mut buf = vec![0u8; 4096];
+    loop {
+        let rc = unsafe {
+            libc::getpwnam_r(
+                name.as_ptr(),
+                pwd.as_mut_ptr(),
+                buf.as_mut_ptr().cast(),
+                buf.len(),
+                &mut result,
+            )
+        };
+        if rc == 0 {
+            if result.is_null() {
+                return None;
+            }
+            let pwd = unsafe { pwd.assume_init() };
+            if pwd.pw_dir.is_null() {
+                return None;
+            }
+            let bytes = unsafe { CStr::from_ptr(pwd.pw_dir) }.to_bytes();
+            return Some(PathBuf::from(std::ffi::OsStr::from_bytes(bytes)));
+        }
+        if rc != libc::ERANGE || buf.len() >= 1024 * 1024 {
+            return None;
+        }
+        buf.resize(buf.len() * 2, 0);
+    }
+}
+
 pub(super) fn invoking_user_home() -> Option<PathBuf> {
-    std::env::var_os("HOME").map(PathBuf::from)
+    if let Some(user) = sudo_user() {
+        user_home(&user)
+    } else {
+        std::env::var_os("HOME").map(PathBuf::from)
+    }
+}
+
+pub(super) fn has_elevation_origin() -> bool {
+    sudo_user().is_some()
+}
+
+pub(super) fn probe_command_cacheable(_cmd: &[&str]) -> bool {
+    false
 }
 
 pub(super) fn is_raw_device_path(path: &str) -> bool {
@@ -69,41 +126,41 @@ pub(super) fn sync_directory(path: &Path) -> io::Result<()> {
     File::open(path)?.sync_all()
 }
 
-fn linux_block_names() -> Vec<String> {
-    let mut names: Vec<String> = std::fs::read_dir("/sys/class/block")
-        .ok()
-        .into_iter()
-        .flatten()
-        .flatten()
-        .filter_map(|entry| entry.file_name().into_string().ok())
-        .filter(|name| {
-            !name.starts_with("loop")
-                && !name.starts_with("ram")
-                && !name.starts_with("zram")
-                && !name.starts_with("dm-")
-                && !std::path::Path::new("/sys/class/block")
-                    .join(name)
-                    .join("partition")
-                    .exists()
-        })
-        .collect();
-    names.sort();
-    names
+fn linux_block_names() -> &'static [String] {
+    static NAMES: OnceLock<Vec<String>> = OnceLock::new();
+    NAMES.get_or_init(|| {
+        let mut names: Vec<String> = std::fs::read_dir("/sys/class/block")
+            .ok()
+            .into_iter()
+            .flatten()
+            .flatten()
+            .filter_map(|entry| entry.file_name().into_string().ok())
+            .filter(|name| {
+                !name.starts_with("loop")
+                    && !name.starts_with("ram")
+                    && !name.starts_with("zram")
+                    && !name.starts_with("dm-")
+                    && !std::path::Path::new("/sys/class/block")
+                        .join(name)
+                        .join("partition")
+                        .exists()
+            })
+            .collect();
+        names.sort();
+        names
+    })
 }
 
 fn block_name(disk: u32) -> Option<String> {
     linux_block_names().get(disk.checked_sub(2)? as usize).cloned()
 }
 
-fn disk_device_numbers(name: &str) -> HashSet<String> {
-    let Ok(parent) = std::fs::canonicalize(format!("/sys/class/block/{name}")) else {
-        return HashSet::new();
-    };
+fn disk_device_numbers(name: &str) -> io::Result<HashSet<String>> {
+    let parent = std::fs::canonicalize(format!("/sys/class/block/{name}"))?;
     let mut devices = HashSet::new();
-    let Ok(entries) = std::fs::read_dir("/sys/class/block") else {
-        return devices;
-    };
-    for entry in entries.flatten() {
+    let mut related_names = HashSet::new();
+    for entry in std::fs::read_dir("/sys/class/block")? {
+        let entry = entry?;
         let entry_name = entry.file_name();
         let Some(entry_name) = entry_name.to_str() else { continue };
         let entry_path = format!("/sys/class/block/{entry_name}");
@@ -112,12 +169,51 @@ fn disk_device_numbers(name: &str) -> HashSet<String> {
         let is_partition = std::path::Path::new(&entry_path).join("partition").exists()
             && real.starts_with(&parent);
         if is_parent || is_partition {
-            if let Some(dev) = read_trim(std::path::Path::new(&entry_path).join("dev")) {
-                devices.insert(dev);
+            related_names.insert(entry_name.to_string());
+        }
+    }
+
+    // 根文件系统可能位于 dm-crypt/LVM/md 等 holder 上。递归纳入 holder，
+    // 避免底层物理盘被误判成“非系统盘”。
+    let mut pending: Vec<String> = related_names.iter().cloned().collect();
+    while let Some(current) = pending.pop() {
+        let holders = std::path::Path::new("/sys/class/block")
+            .join(&current)
+            .join("holders");
+        let Ok(entries) = std::fs::read_dir(&holders) else {
+            continue;
+        };
+        for entry in entries {
+            let entry = entry?;
+            let Some(holder) = entry.file_name().to_str().map(str::to_string) else {
+                continue;
+            };
+            if related_names.insert(holder.clone()) {
+                pending.push(holder);
             }
         }
     }
-    devices
+
+    for related in related_names {
+        let dev_path = std::path::Path::new("/sys/class/block")
+            .join(&related)
+            .join("dev");
+        let dev = std::fs::read_to_string(&dev_path).map_err(|error| {
+            io::Error::new(
+                error.kind(),
+                format!("无法读取 {}: {error}", dev_path.display()),
+            )
+        })?;
+        let dev = dev.trim();
+        if dev.is_empty() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("{} 的 major:minor 为空", related),
+            ));
+        }
+        devices.insert(dev.to_string());
+    }
+    Ok(devices)
 }
 
 fn decode_mount_field(input: &str) -> String {
@@ -141,10 +237,8 @@ fn decode_mount_field(input: &str) -> String {
     String::from_utf8_lossy(&out).into_owned()
 }
 
-fn mounted_points_for_devices(devices: &HashSet<String>) -> Vec<String> {
-    let Ok(text) = std::fs::read_to_string("/proc/self/mountinfo") else {
-        return vec![];
-    };
+fn mounted_points_for_devices(devices: &HashSet<String>) -> io::Result<Vec<String>> {
+    let text = std::fs::read_to_string("/proc/self/mountinfo")?;
     let mut points = Vec::new();
     for line in text.lines() {
         let fields: Vec<&str> = line.split_whitespace().collect();
@@ -154,13 +248,18 @@ fn mounted_points_for_devices(devices: &HashSet<String>) -> Vec<String> {
     }
     points.sort_by_key(|path| std::cmp::Reverse(path.len()));
     points.dedup();
-    points
+    Ok(points)
 }
 
 pub(super) fn is_system_disk(disk: u32) -> bool {
     let Some(name) = block_name(disk) else { return true };
-    let devices = disk_device_numbers(&name);
-    mounted_points_for_devices(&devices).iter().any(|point| point == "/")
+    let Ok(devices) = disk_device_numbers(&name) else {
+        return true;
+    };
+    let Ok(points) = mounted_points_for_devices(&devices) else {
+        return true;
+    };
+    points.iter().any(|point| point == "/")
 }
 
 fn read_trim(path: impl AsRef<std::path::Path>) -> Option<String> {
@@ -179,6 +278,30 @@ fn usb_ancestor(name: &str) -> Option<std::path::PathBuf> {
     }
 }
 
+fn usb_transport(name: &str) -> NativeTransport {
+    let Ok(mut path) = std::fs::canonicalize(format!("/sys/class/block/{name}/device")) else {
+        return NativeTransport::Unknown;
+    };
+    loop {
+        if let Ok(driver) = std::fs::canonicalize(path.join("driver")) {
+            if let Some(driver) = driver
+                .file_name()
+                .map(|value| value.to_string_lossy().to_ascii_lowercase())
+            {
+                if driver == "uas" || driver.contains("uas") {
+                    return NativeTransport::Uas;
+                }
+                if driver == "usb-storage" || driver.contains("usb_storage") {
+                    return NativeTransport::Bot;
+                }
+            }
+        }
+        if !path.pop() {
+            return NativeTransport::Unknown;
+        }
+    }
+}
+
 pub(super) fn hardware_probe(disk: u32) -> Option<HardwareProbe> {
     let name = block_name(disk)?;
     let device = std::path::Path::new("/sys/class/block").join(&name).join("device");
@@ -189,14 +312,10 @@ pub(super) fn hardware_probe(disk: u32) -> Option<HardwareProbe> {
     let parse_hex = |value: Option<String>| u16::from_str_radix(value?.trim(), 16).ok();
     let vid = parse_hex(usb.as_ref().and_then(|p| read_trim(p.join("idVendor"))));
     let pid = parse_hex(usb.as_ref().and_then(|p| read_trim(p.join("idProduct"))));
-    let driver = std::fs::canonicalize(device.join("driver"))
-        .ok()
-        .and_then(|p| p.file_name().map(|n| n.to_string_lossy().to_ascii_lowercase()));
-    let transport = match driver.as_deref() {
-        Some(value) if value.contains("uas") => NativeTransport::Uas,
-        Some(value) if value.contains("usb") => NativeTransport::Bot,
-        _ if usb.is_some() => NativeTransport::Unknown,
-        _ => NativeTransport::Unknown,
+    let transport = if usb.is_some() {
+        usb_transport(&name)
+    } else {
+        NativeTransport::Unknown
     };
     let inquiry = (!vendor.is_empty()).then_some(InquiryInfo {
         vendor,
@@ -209,6 +328,13 @@ pub(super) fn hardware_probe(disk: u32) -> Option<HardwareProbe> {
         transport,
         inquiry,
     })
+}
+
+pub(super) fn fallback_hardware_probe(
+    _runner: &dyn CmdRunner,
+    _disk: u32,
+) -> Option<HardwareProbe> {
+    None
 }
 
 pub(super) fn disk_total_sectors(_runner: &dyn CmdRunner, disk: u32) -> Option<u64> {
@@ -228,7 +354,8 @@ pub(super) fn usb_vid_pid(_runner: &dyn CmdRunner, disk: u32) -> (String, String
 
 pub(super) fn list_external_disks(runner: &dyn CmdRunner) -> Vec<ExtDisk> {
     linux_block_names()
-        .into_iter()
+        .iter()
+        .cloned()
         .enumerate()
         .filter_map(|(index, name)| {
             let disk = index as u32 + 2;
@@ -255,14 +382,15 @@ pub(super) fn list_external_disks(runner: &dyn CmdRunner) -> Vec<ExtDisk> {
 pub(super) fn prepare_write(_runner: &dyn CmdRunner, disk: u32) -> io::Result<WriteGuard> {
     let name = block_name(disk)
         .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "Linux 块设备不存在"))?;
-    let devices = disk_device_numbers(&name);
+    let devices = disk_device_numbers(&name)?;
     if devices.is_empty() {
         return Err(io::Error::other("无法确认 Linux 块设备 major:minor，拒绝写盘"));
     }
-    if mounted_points_for_devices(&devices).iter().any(|point| point == "/") {
+    let mounted = mounted_points_for_devices(&devices)?;
+    if mounted.iter().any(|point| point == "/") {
         return Err(io::Error::new(io::ErrorKind::PermissionDenied, "目标磁盘承载根文件系统，拒绝卸载"));
     }
-    for mountpoint in mounted_points_for_devices(&devices) {
+    for mountpoint in mounted {
         let path = CString::new(mountpoint.as_bytes())
             .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "挂载点包含 NUL"))?;
         let rc = unsafe { libc::umount2(path.as_ptr(), 0) };
@@ -270,7 +398,7 @@ pub(super) fn prepare_write(_runner: &dyn CmdRunner, disk: u32) -> io::Result<Wr
             return Err(io::Error::last_os_error());
         }
     }
-    let remaining = mounted_points_for_devices(&devices);
+    let remaining = mounted_points_for_devices(&devices)?;
     if !remaining.is_empty() {
         return Err(io::Error::other(format!(
             "卸载后仍有挂载点: {}",

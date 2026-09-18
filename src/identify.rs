@@ -1,16 +1,8 @@
-//! device_id 识别 (macOS ioreg INQUIRY + 传输模式; LBA7 EDPF magic 判真)。
-
-#[cfg(target_os = "macos")]
-use std::time::Duration;
+//! device_id 识别（平台硬件探测 + LBA7 EDPF magic 判真）。
 
 use crate::crypto::{crc32_bare, xor_rolling};
 use crate::platform::{HardwareProbe, NativeTransport};
 use crate::sysinfo::CmdRunner;
-#[cfg(target_os = "macos")]
-use crate::sysinfo::{block_str_field, split_class_blocks};
-
-#[cfg(target_os = "macos")]
-const IOREG_TIMEOUT: Duration = Duration::from_secs(15);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Transport {
@@ -35,77 +27,12 @@ pub fn build_device_id(vendor: &str, product: &str, revision: &str, transport: T
     base
 }
 
-#[cfg(target_os = "macos")]
-fn ioreg_fields(
-    runner: &dyn CmdRunner,
-    cls: &str,
-    disk: u32,
-    keys: &[&str],
-) -> Vec<(String, String)> {
-    // 失败(无权限/超时/无该类) → 空, 调用方按缺失处理
-    let Ok(out) = runner.check_output(&["ioreg", "-r", "-c", cls, "-l"], IOREG_TIMEOUT) else {
-        return vec![];
-    };
-    let want = format!("\"BSD Name\" = \"disk{}\"", disk);
-    for b in split_class_blocks(&out, cls) {
-        if !b.contains(&want) {
-            continue;
-        }
-        // 首个含 BSD Name 的块; 只取存在的键
-        return keys
-            .iter()
-            .filter_map(|k| block_str_field(b, k).map(|v| (k.to_string(), v)))
-            .collect();
-    }
-    vec![]
-}
-
-#[cfg(not(target_os = "macos"))]
-fn ioreg_fields(
-    _runner: &dyn CmdRunner,
-    _cls: &str,
-    _disk: u32,
-    _keys: &[&str],
-) -> Vec<(String, String)> {
-    vec![]
-}
-
 fn transport_from_native(probe: &HardwareProbe) -> Transport {
     match probe.transport {
         NativeTransport::Uas => Transport::Uas,
         NativeTransport::Bot => Transport::Bot,
         NativeTransport::Unknown => Transport::Unknown,
     }
-}
-
-#[cfg(target_os = "macos")]
-fn detect_transport_ioreg(runner: &dyn CmdRunner, disk: u32) -> Transport {
-    let mut present: Vec<&str> = Vec::new();
-    for cls in [
-        "IOUSBMassStorageUASDriver",
-        "IOUSBMassStorageInterfaceNub",
-        "IOUSBMassStorageDriver",
-    ] {
-        if let Ok(out) = runner.check_output(&["ioreg", "-r", "-c", cls, "-l"], IOREG_TIMEOUT) {
-            if out.contains(&format!("\"BSD Name\" = \"disk{}\"", disk)) {
-                present.push(cls);
-            }
-        }
-    }
-    if present.contains(&"IOUSBMassStorageUASDriver") {
-        Transport::Uas
-    } else if present.contains(&"IOUSBMassStorageInterfaceNub")
-        || present.contains(&"IOUSBMassStorageDriver")
-    {
-        Transport::Bot
-    } else {
-        Transport::Unknown
-    }
-}
-
-#[cfg(not(target_os = "macos"))]
-fn detect_transport_ioreg(_runner: &dyn CmdRunner, _disk: u32) -> Transport {
-    Transport::Unknown
 }
 
 pub fn detect_transport(runner: &dyn CmdRunner, disk: u32) -> Transport {
@@ -115,7 +42,10 @@ pub fn detect_transport(runner: &dyn CmdRunner, disk: u32) -> Transport {
             return transport;
         }
     }
-    detect_transport_ioreg(runner, disk)
+    crate::platform::fallback_hardware_probe(runner, disk)
+        .as_ref()
+        .map(transport_from_native)
+        .unwrap_or(Transport::Unknown)
 }
 
 fn push_candidate_pair(
@@ -142,13 +72,35 @@ fn push_candidate_pair(
 pub fn generate_candidates(runner: &dyn CmdRunner, disk: u32) -> Vec<String> {
     let mut cs: Vec<String> = Vec::new();
     let native = runner.hardware_probe(disk);
+    let fallback = native
+        .as_ref()
+        .is_none_or(|probe| {
+            probe.transport == NativeTransport::Unknown
+                || probe
+                    .inquiry
+                    .as_ref()
+                    .is_none_or(|inquiry| inquiry.vendor.is_empty())
+        })
+        .then(|| crate::platform::fallback_hardware_probe(runner, disk))
+        .flatten();
     let transport = native
         .as_ref()
         .map(transport_from_native)
         .filter(|transport| *transport != Transport::Unknown)
-        .unwrap_or_else(|| detect_transport_ioreg(runner, disk));
+        .or_else(|| {
+            fallback
+                .as_ref()
+                .map(transport_from_native)
+                .filter(|transport| *transport != Transport::Unknown)
+        })
+        .unwrap_or(Transport::Unknown);
 
-    if let Some(inquiry) = native.as_ref().and_then(|probe| probe.inquiry.as_ref()) {
+    let inquiry = native
+        .as_ref()
+        .and_then(|probe| probe.inquiry.as_ref())
+        .filter(|inquiry| !inquiry.vendor.is_empty())
+        .or_else(|| fallback.as_ref().and_then(|probe| probe.inquiry.as_ref()));
+    if let Some(inquiry) = inquiry {
         if !inquiry.vendor.is_empty() {
             push_candidate_pair(
                 &mut cs,
@@ -157,23 +109,6 @@ pub fn generate_candidates(runner: &dyn CmdRunner, disk: u32) -> Vec<String> {
                 &inquiry.revision,
                 transport,
             );
-            return cs;
-        }
-    }
-
-    for cls in ["IOSCSITargetDevice", "IOSCSILogicalUnitNub", "IOSCSIPeripheralDeviceNub"] {
-        let d = ioreg_fields(
-            runner,
-            cls,
-            disk,
-            &["Vendor Identification", "Product Identification", "Product Revision Level"],
-        );
-        let get = |k: &str| d.iter().find(|(dk, _)| dk == k).map(|(_, v)| v.clone());
-        if let Some(v) = get("Vendor Identification").filter(|v| !v.is_empty()) {
-            let p = get("Product Identification").unwrap_or_default();
-            let rev = get("Product Revision Level").unwrap_or_default();
-            push_candidate_pair(&mut cs, &v, &p, &rev, transport);
-            break; // 首个给出 Vendor 的类即止
         }
     }
     cs
@@ -214,7 +149,7 @@ mod tests {
     impl CmdRunner for NativeOnlyRunner {
         fn check_output(&self, _cmd: &[&str], _timeout: Duration) -> io::Result<String> {
             self.subprocess_calls.set(self.subprocess_calls.get() + 1);
-            Err(io::Error::other("native path should not spawn ioreg"))
+            Err(io::Error::other("native path should not spawn fallback subprocesses"))
         }
 
         fn hardware_probe(&self, _disk: u32) -> Option<HardwareProbe> {
@@ -244,7 +179,7 @@ mod tests {
     }
 
     #[test]
-    fn native_probe_builds_candidates_without_ioreg() {
+    fn native_probe_builds_candidates_without_fallback_subprocess() {
         let runner = NativeOnlyRunner {
             probe: HardwareProbe {
                 vid: Some(0x3535),

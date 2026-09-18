@@ -153,7 +153,7 @@ fn read_image(dev: &mut dyn SectorDev) -> EdpCliResult<Vec<u8>> {
     Ok(img)
 }
 
-/// `reopen_rdwr` 会重新打开 `/dev/rdiskN`。确认期间既可能换盘，也可能有别的程序
+/// `reopen_rdwr` 会重新打开平台裸盘设备。确认期间既可能换盘，也可能有别的程序
 /// 改动同一块盘的元数据。自动备份保存的是确认前 LBA0-13，因此第一笔写入前必须
 /// 再读一次并逐扇区比对，保证“当前状态 == 刚刚备份的状态”。
 fn verify_reopened_snapshot(dev: &mut dyn SectorDev, expected: &[u8]) -> EdpCliResult<()> {
@@ -702,10 +702,9 @@ enum FlowKind {
 }
 
 /// run/apply/restore 的公共外壳:
-///   1) 显式盘号的系统盘拒绝不需要 root, 提权前先判;
-///   2) 非 root 且未给 --disk: 先以用户身份选盘(只查 diskutil, 无需权限),
-///      把选定盘号并入 sudo 重执行参数, 子进程不再重复选盘;
-///   3) root 路径: (必要时交互选盘)→ 以读写打开 rdisk → 执行流程。
+///   1) 显式目标的系统盘拒绝无需管理员权限，提权前先判；
+///   2) 未提权且未给 --disk：先以用户身份选盘，把平台原生目标选择器并入重执行参数；
+///   3) 提权路径：（必要时交互选盘）→ 打开平台裸盘设备 → 执行流程。
 fn real_flow(
     runner: &SysRunner,
     disk_opt: Option<u32>,
@@ -725,7 +724,7 @@ fn real_flow(
     }
     if !elevate::is_root() {
         let mut argv: Vec<String> = std::env::args().skip(1).collect();
-        // sudo 清环境变量: $EDPCLI_BACKUP_DIR 转显式旗标随 argv 过界(未显式给旗标时)
+        // 不依赖提权后的环境继承：备份目录转为显式旗标随 argv 过界。
         if backup_dir_flag.is_none() {
             argv.extend(diskio::backup_dir_argv_suffix(std::env::var("EDPCLI_BACKUP_DIR").ok()));
         }
@@ -746,11 +745,11 @@ fn real_flow(
         unreachable!();
     }
     let bak = diskio::resolve_backup_dir(backup_dir_flag.as_deref());
-    // 手动 sudo 提醒: shell 环境已被 sudo 剥掉(env 过不了界), 且旗标/配置
-    // 都没命中时, 明确告知备份去向与两种正确做法。自动提权的子进程带哨兵, 不提示。
+    // 手动管理员会话且旗标/配置都未命中时，明确告知备份去向。
+    // 自动提权的子进程带哨兵，不重复提示。
     let has_sentinel = std::env::args().any(|a| a == ELEVATED_FLAG);
     if !has_sentinel
-        && diskio::sudo_user().is_some()
+        && crate::platform::has_elevation_origin()
         && backup_dir_flag.is_none()
         && std::env::var("EDPCLI_BACKUP_DIR").unwrap_or_default().is_empty()
         && diskio::conf_backup_dir().is_none()
@@ -759,7 +758,7 @@ fn real_flow(
         eprintln!(
             "{}",
             crate::ui::yellow(&format!(
-                "注意: 手动 sudo 会丢失 shell 环境变量($EDPCLI_BACKUP_DIR 未生效), 备份将落在 {}。建议直接 edpcli <子命令>(自动提权), 或在 ~/.edpcli.conf 写 backup_dir 固定目录",
+                "注意: 当前管理员会话未继承 $EDPCLI_BACKUP_DIR，备份将落在 {}。建议直接 edpcli <子命令>（自动提权），或在 ~/.edpcli.conf 写 backup_dir 固定目录",
                 cwd_bak.display()
             ))
         );
@@ -785,7 +784,7 @@ fn real_flow(
     let mut dev = match FileDev::open_rdonly(&raw_path(n)) {
         Ok(d) => d,
         Err(e) => {
-            eprintln!("错误: 无法打开 {}: {} (加 sudo?)", raw_path(n), e);
+            eprintln!("错误: 无法打开 {}: {}（需要管理员权限？）", raw_path(n), e);
             return EXIT_IO;
         }
     };
@@ -873,11 +872,6 @@ mod tests {
         }
         // --disk=4 与平台原生路径形式
         match parse_args(&["run".into(), "--disk=4".into()]).unwrap() {
-            Parsed::Run(o) => assert_eq!(o.disk, Some(4)),
-            _ => panic!(),
-        }
-        #[cfg(target_os = "macos")]
-        match parse_args(&["run".into(), "--disk".into(), "/dev/rdisk4".into()]).unwrap() {
             Parsed::Run(o) => assert_eq!(o.disk, Some(4)),
             _ => panic!(),
         }

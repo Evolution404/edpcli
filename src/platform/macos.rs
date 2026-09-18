@@ -8,10 +8,10 @@ use std::path::PathBuf;
 use std::path::Path;
 use std::process::Command;
 
-use super::{ExtDisk, HardwareProbe, PlatformKind};
+use super::{ExtDisk, HardwareProbe, InquiryInfo, NativeTransport, PlatformKind};
 use crate::common::SECTOR;
 use crate::plist;
-use crate::sysinfo::{block_int_field, split_class_blocks, CmdRunner};
+use crate::sysinfo::CmdRunner;
 
 const DISKUTIL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
 const IOREG_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(15);
@@ -100,6 +100,15 @@ pub(super) fn invoking_user_home() -> Option<PathBuf> {
     }
 }
 
+pub(super) fn has_elevation_origin() -> bool {
+    sudo_user().is_some()
+}
+
+pub(super) fn probe_command_cacheable(cmd: &[&str]) -> bool {
+    matches!(cmd, ["ioreg", ..])
+        || matches!(cmd, ["diskutil", "list", ..] | ["diskutil", "info", ..])
+}
+
 pub(super) fn is_raw_device_path(path: &str) -> bool {
     path.starts_with("/dev/rdisk")
 }
@@ -127,7 +136,167 @@ pub(super) fn sync_directory(path: &Path) -> io::Result<()> {
 }
 
 pub(super) fn hardware_probe(disk: u32) -> Option<HardwareProbe> {
-    crate::native_probe::probe_disk(disk)
+    super::macos_native::probe_disk(disk)
+}
+
+fn split_class_blocks<'a>(out: &'a str, class: &str) -> Vec<&'a str> {
+    let marker_with_fields = format!("<class {class},");
+    let marker_bare = format!("<class {class}>");
+    let mut starts = Vec::new();
+    let mut offset = 0usize;
+    for line in out.lines() {
+        let trimmed = line.trim_start();
+        if trimmed.starts_with("+-o")
+            && (line.contains(&marker_with_fields) || line.contains(&marker_bare))
+        {
+            starts.push(offset);
+        }
+        offset += line.len() + 1;
+    }
+    let mut blocks = Vec::new();
+    for pair in starts.windows(2) {
+        blocks.push(&out[pair[0]..pair[1]]);
+    }
+    if let Some(&last) = starts.last() {
+        blocks.push(&out[last..]);
+    }
+    if blocks.is_empty() && !out.trim().is_empty() {
+        blocks.push(out);
+    }
+    blocks
+}
+
+fn block_str_field(block: &str, key: &str) -> Option<String> {
+    let quoted_key = format!("\"{key}\"");
+    let bytes = block.as_bytes();
+    let mut from = 0usize;
+    while let Some(position) = block[from..].find(&quoted_key) {
+        let mut index = from + position + quoted_key.len();
+        while index < bytes.len() && bytes[index].is_ascii_whitespace() {
+            index += 1;
+        }
+        if index >= bytes.len() || bytes[index] != b'=' {
+            from += position + 1;
+            continue;
+        }
+        index += 1;
+        while index < bytes.len() && bytes[index].is_ascii_whitespace() {
+            index += 1;
+        }
+        if index >= bytes.len() || bytes[index] != b'"' {
+            from += position + 1;
+            continue;
+        }
+        index += 1;
+        let value_start = index;
+        while index < bytes.len() && bytes[index] != b'"' {
+            index += 1;
+        }
+        if index < bytes.len() {
+            return Some(block[value_start..index].to_string());
+        }
+        from += position + 1;
+    }
+    None
+}
+
+fn block_int_field(block: &str, key: &str) -> Option<i64> {
+    let quoted_key = format!("\"{key}\"");
+    let bytes = block.as_bytes();
+    let mut from = 0usize;
+    while let Some(position) = block[from..].find(&quoted_key) {
+        let mut index = from + position + quoted_key.len();
+        while index < bytes.len() && bytes[index].is_ascii_whitespace() {
+            index += 1;
+        }
+        if index >= bytes.len() || bytes[index] != b'=' {
+            from += position + 1;
+            continue;
+        }
+        index += 1;
+        while index < bytes.len() && bytes[index].is_ascii_whitespace() {
+            index += 1;
+        }
+        let digits_start = index;
+        while index < bytes.len() && bytes[index].is_ascii_digit() {
+            index += 1;
+        }
+        if index > digits_start {
+            return block[digits_start..index].parse().ok();
+        }
+        from += position + 1;
+    }
+    None
+}
+
+fn ioreg_block(
+    runner: &dyn CmdRunner,
+    class: &str,
+    disk: u32,
+) -> Option<String> {
+    let out = runner
+        .check_output(&["ioreg", "-r", "-c", class, "-l"], IOREG_TIMEOUT)
+        .ok()?;
+    let marker = format!("\"BSD Name\" = \"disk{disk}\"");
+    split_class_blocks(&out, class)
+        .into_iter()
+        .find(|block| block.contains(&marker))
+        .map(str::to_string)
+}
+
+pub(super) fn fallback_hardware_probe(
+    runner: &dyn CmdRunner,
+    disk: u32,
+) -> Option<HardwareProbe> {
+    let usb_block = ioreg_block(runner, "IOUSBHostDevice", disk);
+    let vid = usb_block
+        .as_deref()
+        .and_then(|block| block_int_field(block, "idVendor"))
+        .and_then(|value| u16::try_from(value).ok());
+    let pid = usb_block
+        .as_deref()
+        .and_then(|block| block_int_field(block, "idProduct"))
+        .and_then(|value| u16::try_from(value).ok());
+
+    let transport = if ioreg_block(runner, "IOUSBMassStorageUASDriver", disk).is_some() {
+        NativeTransport::Uas
+    } else if ioreg_block(runner, "IOUSBMassStorageInterfaceNub", disk).is_some()
+        || ioreg_block(runner, "IOUSBMassStorageDriver", disk).is_some()
+    {
+        NativeTransport::Bot
+    } else {
+        NativeTransport::Unknown
+    };
+
+    let inquiry = [
+        "IOSCSITargetDevice",
+        "IOSCSILogicalUnitNub",
+        "IOSCSIPeripheralDeviceNub",
+    ]
+    .into_iter()
+    .find_map(|class| {
+        let block = ioreg_block(runner, class, disk)?;
+        let vendor = block_str_field(&block, "Vendor Identification")?;
+        if vendor.is_empty() {
+            return None;
+        }
+        Some(InquiryInfo {
+            vendor,
+            product: block_str_field(&block, "Product Identification").unwrap_or_default(),
+            revision: block_str_field(&block, "Product Revision Level").unwrap_or_default(),
+        })
+    });
+
+    (vid.is_some()
+        || pid.is_some()
+        || transport != NativeTransport::Unknown
+        || inquiry.is_some())
+    .then_some(HardwareProbe {
+        vid,
+        pid,
+        transport,
+        inquiry,
+    })
 }
 
 pub(super) fn is_system_disk(disk: u32) -> bool {
@@ -156,22 +325,14 @@ pub(super) fn usb_vid_pid(runner: &dyn CmdRunner, disk: u32) -> (String, String)
             return (format!("{vid:04x}"), format!("{pid:04x}"));
         }
     }
-    let Ok(out) = runner.check_output(
-        &["ioreg", "-r", "-c", "IOUSBHostDevice", "-l"],
-        IOREG_TIMEOUT,
-    ) else {
+    let Some(block) = ioreg_block(runner, "IOUSBHostDevice", disk) else {
         return ("xxxx".into(), "xxxx".into());
     };
-    let marker = format!("\"BSD Name\" = \"disk{disk}\"");
-    for block in split_class_blocks(&out, "IOUSBHostDevice") {
-        if block.contains(&marker) {
-            if let (Some(vid), Some(pid)) = (
-                block_int_field(block, "idVendor"),
-                block_int_field(block, "idProduct"),
-            ) {
-                return (format!("{vid:04x}"), format!("{pid:04x}"));
-            }
-        }
+    if let (Some(vid), Some(pid)) = (
+        block_int_field(&block, "idVendor"),
+        block_int_field(&block, "idProduct"),
+    ) {
+        return (format!("{vid:04x}"), format!("{pid:04x}"));
     }
     ("xxxx".into(), "xxxx".into())
 }

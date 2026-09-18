@@ -443,6 +443,13 @@ pub(super) fn hardware_probe(disk: u32) -> Option<HardwareProbe> {
     })
 }
 
+pub(super) fn fallback_hardware_probe(
+    _runner: &dyn CmdRunner,
+    _disk: u32,
+) -> Option<HardwareProbe> {
+    None
+}
+
 pub(super) fn list_external_disks(_runner: &dyn CmdRunner) -> Vec<ExtDisk> {
     setupapi_disk_map()
         .into_iter()
@@ -694,6 +701,14 @@ pub(super) fn is_elevated() -> bool {
 
 pub(super) fn invoking_user_home() -> Option<PathBuf> {
     std::env::var_os("USERPROFILE").map(PathBuf::from)
+}
+
+pub(super) fn has_elevation_origin() -> bool {
+    false
+}
+
+pub(super) fn probe_command_cacheable(_cmd: &[&str]) -> bool {
+    false
 }
 
 pub(super) fn is_raw_device_path(path: &str) -> bool {

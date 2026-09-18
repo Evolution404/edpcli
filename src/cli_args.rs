@@ -88,8 +88,8 @@ pub fn print_usage() {
     println!();
     println!("{}", bold("子命令:"));
     for (n, d) in [
-        ("list", "列出外接盘: 编号/容量/接口/cems识别/免密检测/EDPF分区/备份(sudo 下更全)"),
-        ("run", "真盘预览 dry-run(需管理员, 自动 sudo)"),
+        ("list", "列出外接盘: 编号/容量/接口/cems识别/免密检测/EDPF分区/备份（管理员权限下信息更全）"),
+        ("run", "真盘预览 dry-run（需管理员权限，可自动提权）"),
         ("apply", "真盘实际写入(自动备份 → 原子写入 → 读回校验)"),
         ("restore", "从备份还原 LBA0-13(缺省交互选择本盘备份)"),
         ("backup", "跨盘备份管理(list / verify / prune / rm，全程不提权)"),

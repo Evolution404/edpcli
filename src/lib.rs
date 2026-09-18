@@ -6,8 +6,6 @@
 pub mod common;
 pub mod md5;
 pub mod platform;
-#[cfg(target_os = "macos")]
-pub(crate) mod native_probe;
 pub mod plist;
 pub mod crypto;
 pub mod sectors;

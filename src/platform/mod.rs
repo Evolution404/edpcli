@@ -52,6 +52,8 @@ pub struct WriteGuard {
 
 #[cfg(target_os = "macos")]
 mod macos;
+#[cfg(target_os = "macos")]
+mod macos_native;
 #[cfg(target_os = "linux")]
 mod linux;
 #[cfg(target_os = "windows")]
@@ -93,6 +95,14 @@ pub fn invoking_user_home() -> Option<PathBuf> {
     imp::invoking_user_home()
 }
 
+pub fn has_elevation_origin() -> bool {
+    imp::has_elevation_origin()
+}
+
+pub fn probe_command_cacheable(cmd: &[&str]) -> bool {
+    imp::probe_command_cacheable(cmd)
+}
+
 pub fn is_raw_device_path(path: &str) -> bool {
     imp::is_raw_device_path(path)
 }
@@ -111,6 +121,15 @@ pub fn sync_directory(path: &std::path::Path) -> io::Result<()> {
 
 pub fn hardware_probe(disk: u32) -> Option<HardwareProbe> {
     imp::hardware_probe(disk)
+}
+
+/// 平台原生探测缺字段时的兼容探测。仅平台实现知道具体 OS 工具或 API；
+/// 业务层只消费统一的 `HardwareProbe`。
+pub fn fallback_hardware_probe(
+    runner: &dyn crate::sysinfo::CmdRunner,
+    disk: u32,
+) -> Option<HardwareProbe> {
+    imp::fallback_hardware_probe(runner, disk)
 }
 
 
