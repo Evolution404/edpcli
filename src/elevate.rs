@@ -8,14 +8,7 @@ use std::process::Command;
 pub const ELEVATED_FLAG: &str = "--_elevated";
 
 pub fn is_root() -> bool {
-    // std 无 geteuid; 一次廉价子进程判定
-    Command::new("id")
-        .arg("-u")
-        .output()
-        .ok()
-        .filter(|o| o.status.success())
-        .map(|o| String::from_utf8_lossy(&o.stdout).trim() == "0")
-        .unwrap_or(false)
+    unsafe { libc::geteuid() == 0 }
 }
 
 /// 非 root 时: 打印提示并以 sudo 重执行自身(继承 stdio), 以子进程退出码结束进程。
