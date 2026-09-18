@@ -597,7 +597,7 @@ pub fn backup_rm(
         if targets.is_empty() {
             eprintln!(
                 "{}",
-                crate::ui::red("错误: backup rm 至少需要一个路径或文件名")
+                crate::ui::red("错误: backup delete 至少需要一个路径或文件名")
             );
             return EXIT_USAGE;
         }

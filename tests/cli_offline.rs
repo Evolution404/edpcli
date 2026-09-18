@@ -93,7 +93,7 @@ fn system_disk_refused_without_elevation() {
         .find(|&disk| edpcli::platform::is_system_disk(&runner, disk))
         .expect("macOS system disk");
     let r = bin()
-        .args(["run", "--disk", &system_disk.to_string()])
+        .args(["apply", "--dry-run", "--disk", &system_disk.to_string()])
         .output()
         .unwrap();
     assert_eq!(r.status.code(), Some(3));

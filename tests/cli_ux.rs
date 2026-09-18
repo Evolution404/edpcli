@@ -26,7 +26,7 @@ fn two_netac_backups() -> Option<TmpDir> {
 }
 
 #[test]
-fn inspect_onlyid_without_index_lists_choices_instead_of_usage_error() {
+fn removed_inspect_onlyid_ui_is_rejected_with_focused_help() {
     let Some(tmp) = two_netac_backups() else {
         eprintln!("跳过: 真实备份不可用");
         return;
@@ -36,30 +36,28 @@ fn inspect_onlyid_without_index_lists_choices_instead_of_usage_error() {
         .args(["inspect", "--onlyid", "1402259934", "--backup-dir"])
         .arg(&tmp.0)
         .output()
-        .expect("run inspect picker hint");
+        .expect("run removed inspect syntax");
     assert_eq!(
         out.status.code(),
-        Some(0),
+        Some(2),
         "{}",
         String::from_utf8_lossy(&out.stderr)
     );
     let stdout = String::from_utf8_lossy(&out.stdout);
-    assert!(stdout.contains("onlyid=1402259934"));
-    assert!(stdout.contains("[1]"));
-    assert!(stdout.contains("[2]"));
-    assert!(stdout.contains("--index N"));
-    assert!(!stdout.contains("用法: edpcli <子命令>"));
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("--onlyid"));
+    assert!(stdout.contains("用法: edpcli inspect"));
 }
 
 #[test]
-fn bare_backup_defaults_to_list_and_accepts_onlyid_without_action() {
+fn bare_backup_defaults_to_global_list() {
     let Some(tmp) = two_netac_backups() else {
         eprintln!("跳过: 真实备份不可用");
         return;
     };
     for args in [
         vec!["backup", "--backup-dir"],
-        vec!["backup", "--onlyid", "1402259934", "--backup-dir"],
+        vec!["backup", "list", "--backup-dir"],
     ] {
         let mut cmd = Command::new(env!("CARGO_BIN_EXE_edpcli"));
         cmd.env("NO_COLOR", "1").args(args).arg(&tmp.0);
@@ -79,48 +77,26 @@ fn bare_backup_defaults_to_list_and_accepts_onlyid_without_action() {
 }
 
 #[test]
-fn metainfo_has_short_positional_backup_syntax_and_defaults_to_latest() {
+fn old_meta_commands_return_v2_migration_hint() {
     let Some(tmp) = two_netac_backups() else {
         eprintln!("跳过: 真实备份不可用");
         return;
     };
-
-    let latest = Command::new(env!("CARGO_BIN_EXE_edpcli"))
-        .env("NO_COLOR", "1")
-        .args(["meta", "1402259934", "--backup-dir"])
-        .arg(&tmp.0)
-        .output()
-        .unwrap();
-    assert_eq!(
-        latest.status.code(),
-        Some(0),
-        "{}",
-        String::from_utf8_lossy(&latest.stderr)
-    );
-    let stdout = String::from_utf8_lossy(&latest.stdout);
-    assert!(stdout.contains("backup onlyid=1402259934 [1]"), "{stdout}");
-    assert!(stdout.contains("Dept"), "{stdout}");
-    assert!(stdout.contains("User"), "{stdout}");
-    assert!(stdout.contains("onlyid"), "{stdout}");
-    assert!(stdout.contains("device_id"), "{stdout}");
-
-    let second = Command::new(env!("CARGO_BIN_EXE_edpcli"))
-        .env("NO_COLOR", "1")
-        .args(["metainfo", "1402259934", "2", "--backup-dir"])
-        .arg(&tmp.0)
-        .output()
-        .unwrap();
-    assert_eq!(
-        second.status.code(),
-        Some(0),
-        "{}",
-        String::from_utf8_lossy(&second.stderr)
-    );
-    assert!(String::from_utf8_lossy(&second.stdout).contains("backup onlyid=1402259934 [2]"));
+    for old in ["meta", "metainfo"] {
+        let out = Command::new(env!("CARGO_BIN_EXE_edpcli"))
+            .env("NO_COLOR", "1")
+            .arg(old)
+            .args(["--backup-dir"])
+            .arg(&tmp.0)
+            .output()
+            .unwrap();
+        assert_eq!(out.status.code(), Some(2));
+        assert!(String::from_utf8_lossy(&out.stderr).contains("edpcli info"));
+    }
 }
 
 #[test]
-fn metainfo_accepts_backup_file_directly() {
+fn info_accepts_backup_file_directly() {
     let Some(tmp) = two_netac_backups() else {
         eprintln!("跳过: 真实备份不可用");
         return;
@@ -133,7 +109,7 @@ fn metainfo_accepts_backup_file_directly() {
         .unwrap();
     let out = Command::new(env!("CARGO_BIN_EXE_edpcli"))
         .env("NO_COLOR", "1")
-        .arg("meta")
+        .arg("info")
         .arg(&file)
         .output()
         .unwrap();
@@ -154,7 +130,8 @@ fn focused_help_works_inside_subcommands() {
         ["inspect", "--help"].as_slice(),
         ["backup", "--help"].as_slice(),
         ["completion", "--help"].as_slice(),
-        ["meta", "--help"].as_slice(),
+        ["info", "--help"].as_slice(),
+        ["apply", "--help"].as_slice(),
     ] {
         let out = Command::new(env!("CARGO_BIN_EXE_edpcli"))
             .env("NO_COLOR", "1")
@@ -241,7 +218,7 @@ fn positional_backup_path_and_numbered_verify_follow_same_ux() {
         .env("NO_COLOR", "1")
         .arg("inspect")
         .arg(&file)
-        .arg("7")
+        .args(["--lba", "7"])
         .output()
         .unwrap();
     assert_eq!(
@@ -254,15 +231,9 @@ fn positional_backup_path_and_numbered_verify_follow_same_ux() {
 
     let verify = Command::new(env!("CARGO_BIN_EXE_edpcli"))
         .env("NO_COLOR", "1")
-        .args([
-            "backup",
-            "verify",
-            "--onlyid",
-            "1402259934",
-            "--index",
-            "1",
-            "--backup-dir",
-        ])
+        .args(["backup", "verify"])
+        .arg(&file)
+        .args(["--backup-dir"])
         .arg(&tmp.0)
         .output()
         .unwrap();
@@ -280,7 +251,7 @@ fn positional_backup_path_and_numbered_verify_follow_same_ux() {
 fn contradictory_inspect_flags_fail_with_focused_help() {
     let out = Command::new(env!("CARGO_BIN_EXE_edpcli"))
         .env("NO_COLOR", "1")
-        .args(["inspect", "7", "--raw", "--hex"])
+        .args(["inspect", "--lba", "7", "--raw", "--hex"])
         .output()
         .unwrap();
     assert_eq!(out.status.code(), Some(2));

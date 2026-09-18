@@ -7,7 +7,31 @@
 
 ## 当前状态
 
-本 PR 只冻结设计与实施计划，**尚未开始功能实现**。v1.1.0 已发布并验证；当前三平台 arm64/x86_64 + macOS Universal Release、6 架构 CI、4 套 Linux/Windows virtual-disk HIL 均为既有基线，不得回退。
+CLI v2 已进入实现阶段。
+
+### Phase 1：Parser / help 新模型 — 已完成
+
+- 裸 `edpcli` 已改为等价 `edpcli list`；
+- 新增 `info` grammar，旧 `meta/metainfo` 不再进入执行路径，只返回迁移提示；
+- `run` 已从 parser 删除，`apply --dry-run` 成为唯一 dry-run CLI；
+- 顶层 `restore` 已删除，迁移到 `backup restore`；
+- `backup` grammar 已切换为 `create/list/restore/verify/delete/prune`，`backup rm` 只返回迁移提示；
+- `inspect` 已要求显式 `--lba 6,7,12`，不再接受裸数字 LBA，也不再接受用户级 `--onlyid/--index`；
+- 主帮助已收敛为 v2 一级命令；旧 parser enum 分支 `Parsed::Run/Restore/MetaInfo`、`BackupAction::Rm` 已删除；
+- 新增 `tests/cli_v2_parser.rs` 锁定 v2 grammar 与旧语法拒绝行为；
+- 现有 CLI/离线/inspect/跨平台测试已迁到 v2 语法。
+
+Phase 1 本地门禁：
+
+- `cargo fmt --all -- --check`：PASS；
+- `cargo test --all-targets`：PASS；
+- `cargo clippy --all-targets -- -D warnings`：PASS；
+- 搜索 `Parsed::Run|Parsed::Restore|Parsed::MetaInfo|BackupAction::Rm`：0 命中；
+- 用户可见旧语法只剩 parser 中有意保留的 `backup rm -> backup delete` 迁移错误提示。
+
+v1.1.0 仍是当前正式发布版本；按计划尚未提前修改 `Cargo.toml` 版本。既有三平台
+arm64/x86_64 + macOS Universal Release、6 架构 CI、4 套 Linux/Windows virtual-disk HIL
+仍是安全基线，不得回退。
 
 ## 下一位 AI 从这里开始
 
@@ -16,8 +40,11 @@
    - `docs/RELEASE.md`
    - `docs/USAGE.md`
 2. 检查 `git status --short --branch`，禁止 reset/clean。
-3. 从 **Phase 1 Parser/help** 开始，必须测试先行；不要直接大改底层磁盘逻辑。
-4. 小 commit、及时 push，阶段完成后更新本交接文档。
+3. 从 **Phase 2 DeviceSelector / BackupSelector** 继续，仍须测试先行；不要削弱 selector
+   pinning、系统盘 fail-closed 或 onlyid 防串盘。
+4. Phase 3 再正式收口 `info` service 和当前临时保留的内部 `MetaInfoOpts` 命名；
+   Phase 5 才接通 `backup create` 执行层。
+5. 小 commit、及时 push，阶段完成后更新本交接文档。
 
 ## 已冻结的关键决策
 

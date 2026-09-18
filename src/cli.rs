@@ -1,15 +1,16 @@
 //! 命令行入口: 子命令解析、自动提权、交互提示、各处理器。
 //!
 //! 用法:
-//!   edpcli                                     打印用法(裸命令不做任何动作)
-//!   edpcli list                                列出外接盘(不写入, 不提权)
-//!   edpcli run    [--disk N] [--size GB]       预览 dry-run(自动提权)
-//!   edpcli apply  [--disk N] [--size GB] [--force] [--yes]   实际写入
-//!   edpcli restore [<备份.bin>] [--disk N] [--yes]           还原(缺省交互选择)
+//!   edpcli                                     等价于 list
+//!   edpcli list                                列出外接盘(只读)
+//!   edpcli info [备份.bin] [--disk N]          查看设备/备份详情
+//!   edpcli apply --dry-run [--disk N]          预览改造
+//!   edpcli apply [--disk N] [--force] [--yes]  实际写入
+//!   edpcli backup restore [备份] [--disk N]    还原
 //!   edpcli convert --dir <快照目录> --id <device_id> [--size GB] [--out <目录>]
 //!
 //! 实测记录(2026-08-27, 均内网免密成功): aigo U335 128G / aigo U320 32G /
-//! Kingston DT3.0 64G (每盘改前自动备份, 可随时 edpcli restore 还原)。
+//! Kingston DT3.0 64G (每盘改前自动备份, 可随时 edpcli backup restore 还原)。
 
 use std::collections::BTreeMap;
 use std::io::{self, Write};
@@ -19,7 +20,7 @@ use crate::backup_cli::backup_verify_select;
 pub use crate::backup_cli::{backup_list, backup_prune, backup_rm, backup_verify};
 use crate::cli_args::print_help;
 pub use crate::cli_args::{
-    parse_args, print_usage, BackupAction, DiskOpts, InspectOpts, MetaInfoOpts, Parsed,
+    parse_args, print_usage, BackupAction, DiskOpts, InspectOpts, MetaInfoOpts, Parsed, SourceOpts,
 };
 use crate::common::*;
 use crate::completion;
@@ -390,7 +391,7 @@ pub fn apply_flow(
 
     let (bpath, _nopwd) = backup_disk(&facts, &img, &did, &ctx.backup_dir, ctx.clock)?;
     println!(
-        "{}  edpcli restore \"{}\" --disk {} --yes",
+        "{}  edpcli backup restore \"{}\" --disk {} --yes",
         crate::ui::bold("还原"),
         bpath.display(),
         disk
@@ -470,7 +471,7 @@ pub fn restore_flow(
             if baks.is_empty() {
                 return Err(err(
                     EXIT_BACKUP,
-                    "错误: 备份目录未找到本盘备份; 可 edpcli restore <备份.bin> 显式指定",
+                    "错误: 备份目录未找到本盘备份; 可 edpcli backup restore <备份.bin> 显式指定",
                 ));
             }
             println!("disk{} 匹配备份 {} 个(新→旧):", disk, baks.len());
@@ -698,14 +699,7 @@ pub fn run() -> i32 {
                 let topic = argv.first().map(String::as_str).filter(|cmd| {
                     matches!(
                         *cmd,
-                        "list"
-                            | "run"
-                            | "apply"
-                            | "restore"
-                            | "backup"
-                            | "inspect"
-                            | "convert"
-                            | "completion"
+                        "list" | "info" | "apply" | "backup" | "inspect" | "convert" | "completion"
                     )
                 });
                 print_help(topic);
@@ -749,19 +743,29 @@ pub fn run() -> i32 {
             action,
             keep,
             yes,
-            onlyid,
             backup_dir,
         } => {
             let bak = diskio::resolve_backup_dir(backup_dir.as_deref());
             match action {
-                BackupAction::List => backup_list(&bak, onlyid.as_deref()),
-                BackupAction::Verify { target, index } => {
-                    backup_verify_select(&bak, onlyid.as_deref(), target.as_deref(), index)
+                BackupAction::Create { .. } => {
+                    eprintln!("错误: backup create 尚未接入执行层");
+                    EXIT_USAGE
                 }
-                BackupAction::Prune => backup_prune(&bak, onlyid.as_deref(), keep, yes),
-                BackupAction::Rm { targets } => {
+                BackupAction::List => backup_list(&bak, None),
+                BackupAction::Verify { target } => {
+                    backup_verify_select(&bak, None, target.as_deref(), None)
+                }
+                BackupAction::Restore { target, disk } => real_flow(
+                    &runner,
+                    disk,
+                    None,
+                    backup_dir,
+                    FlowKind::Restore { bin: target, yes },
+                ),
+                BackupAction::Prune => backup_prune(&bak, None, keep, yes),
+                BackupAction::Delete { targets } => {
                     let mut prompt = StdPrompter;
-                    backup_rm(&bak, onlyid.as_deref(), &targets, yes, &mut prompt)
+                    backup_rm(&bak, None, &targets, yes, &mut prompt)
                 }
             }
         }
@@ -769,7 +773,7 @@ pub fn run() -> i32 {
             let probe = ReadProbeCache::new(&runner);
             inspect_flow(&probe, opts)
         }
-        Parsed::MetaInfo(opts) => {
+        Parsed::Info(opts) => {
             let probe = ReadProbeCache::new(&runner);
             metainfo_flow(&probe, opts)
         }
@@ -780,32 +784,19 @@ pub fn run() -> i32 {
                 EXIT_USAGE
             }
         },
-        Parsed::Run(opts) => real_flow(
-            &runner,
-            opts.disk,
-            opts.size,
-            opts.backup_dir,
-            FlowKind::Dry,
-        ),
-        Parsed::Apply { opts, force, yes } => real_flow(
-            &runner,
-            opts.disk,
-            opts.size,
-            opts.backup_dir,
-            FlowKind::Apply { force, yes },
-        ),
-        Parsed::Restore {
-            bin,
-            disk,
+        Parsed::Apply {
+            opts,
+            dry_run,
+            force,
             yes,
-            backup_dir,
-        } => real_flow(
-            &runner,
-            disk,
-            None,
-            backup_dir,
-            FlowKind::Restore { bin, yes },
-        ),
+        } => {
+            let flow = if dry_run {
+                FlowKind::Dry
+            } else {
+                FlowKind::Apply { force, yes }
+            };
+            real_flow(&runner, opts.disk, opts.size, opts.backup_dir, flow)
+        }
     }
 }
 
@@ -1033,10 +1024,9 @@ mod tests {
 
     #[test]
     fn parse_bare_and_subcommands() {
-        // 裸 edpcli = 打印用法, 不进入任何需要提权的流程
         assert!(matches!(
             parse_args(&[]).unwrap(),
-            Parsed::Help { topic: None }
+            Parsed::List { backup_dir: None }
         ));
         assert!(matches!(
             parse_args(&["help".into()]).unwrap(),
@@ -1055,32 +1045,37 @@ mod tests {
         ])
         .unwrap()
         {
-            Parsed::Apply { opts, force, yes } => {
+            Parsed::Apply {
+                opts,
+                dry_run,
+                force,
+                yes,
+            } => {
                 assert_eq!(opts.disk, Some(6));
+                assert!(!dry_run);
                 assert!(force && yes);
             }
             _ => panic!("应解析为 Apply"),
         }
-        // --disk=4 与平台原生路径形式
-        match parse_args(&["run".into(), "--disk=4".into()]).unwrap() {
-            Parsed::Run(o) => assert_eq!(o.disk, Some(4)),
-            _ => panic!(),
-        }
         match parse_args(&[
-            "restore".into(),
-            "b.bin".into(),
+            "apply".into(),
+            "--dry-run".into(),
             "--disk".into(),
-            "6".into(),
-            "--yes".into(),
+            "4".into(),
         ])
         .unwrap()
         {
-            Parsed::Restore { bin, disk, yes, .. } => {
-                assert_eq!(bin.as_deref(), Some("b.bin"));
-                assert_eq!(disk, Some(6));
-                assert!(yes);
+            Parsed::Apply { opts, dry_run, .. } => {
+                assert_eq!(opts.disk, Some(4));
+                assert!(dry_run);
             }
-            _ => panic!(),
+            _ => panic!("应解析为 apply --dry-run"),
+        }
+        match parse_args(&["info".into(), "backup.bin".into()]).unwrap() {
+            Parsed::Info(opts) => {
+                assert_eq!(opts.backup.as_deref(), Some("backup.bin"));
+            }
+            _ => panic!("应解析为 info"),
         }
         match parse_args(&[
             "convert".into(),
@@ -1099,13 +1094,8 @@ mod tests {
         }
         match parse_args(&[
             "inspect".into(),
-            "6".into(),
-            "7".into(),
-            "12".into(),
-            "--onlyid".into(),
-            "1987718388".into(),
-            "--index".into(),
-            "2".into(),
+            "--lba".into(),
+            "6,7,12".into(),
             "--hex".into(),
             "--backup-dir".into(),
             "/tmp/bak".into(),
@@ -1114,8 +1104,6 @@ mod tests {
         {
             Parsed::Inspect(opts) => {
                 assert_eq!(opts.lbas, vec![6, 7, 12]);
-                assert_eq!(opts.onlyid.as_deref(), Some("1987718388"));
-                assert_eq!(opts.index, Some(2));
                 assert!(opts.hex);
                 assert_eq!(opts.backup_dir.as_deref(), Some("/tmp/bak"));
             }
@@ -1123,9 +1111,9 @@ mod tests {
         }
         match parse_args(&[
             "inspect".into(),
-            "9".into(),
-            "--backup".into(),
             "x.bin".into(),
+            "--lba".into(),
+            "9".into(),
             "--raw".into(),
             "--id".into(),
             "disk&ven_x&prod_y".into(),
@@ -1143,8 +1131,6 @@ mod tests {
         match parse_args(&[
             "backup".into(),
             "prune".into(),
-            "--onlyid".into(),
-            "1402259934".into(),
             "--keep".into(),
             "0".into(),
             "--yes".into(),
@@ -1157,46 +1143,30 @@ mod tests {
                 keep,
                 yes,
                 backup_dir,
-                onlyid,
             } => {
                 assert_eq!(keep, 0);
                 assert!(yes);
                 assert_eq!(backup_dir.as_deref(), Some("/tmp/bak"));
-                assert_eq!(onlyid.as_deref(), Some("1402259934"));
             }
             _ => panic!("应解析为 backup prune"),
         }
-        match parse_args(&[
-            "backup".into(),
-            "verify".into(),
-            "--onlyid=-1833210541".into(),
-            "--index".into(),
-            "2".into(),
-        ])
-        .unwrap()
-        {
+        match parse_args(&["backup".into(), "verify".into(), "2".into()]).unwrap() {
             Parsed::Backup {
-                action: BackupAction::Verify { target, index },
+                action: BackupAction::Verify { target },
                 keep,
                 yes,
-                onlyid,
                 ..
             } => {
-                assert_eq!(target, None);
-                assert_eq!(index, Some(2));
+                assert_eq!(target.as_deref(), Some("2"));
                 assert_eq!(keep, 2);
                 assert!(!yes);
-                assert_eq!(onlyid.as_deref(), Some("-1833210541"));
             }
             _ => panic!("应解析为 backup verify"),
         }
         match parse_args(&[
             "backup".into(),
-            "rm".into(),
-            "--onlyid".into(),
-            "1402259934".into(),
-            "2".into(),
-            "3-4".into(),
+            "delete".into(),
+            "2,3,4".into(),
             "--yes".into(),
             "--backup-dir".into(),
             "/tmp/bak".into(),
@@ -1204,64 +1174,24 @@ mod tests {
         .unwrap()
         {
             Parsed::Backup {
-                action: BackupAction::Rm { targets },
+                action: BackupAction::Delete { targets },
                 yes,
-                onlyid,
                 backup_dir,
                 ..
             } => {
-                assert_eq!(targets, vec!["2", "3-4"]);
+                assert_eq!(targets, vec!["2,3,4"]);
                 assert!(yes);
-                assert_eq!(onlyid.as_deref(), Some("1402259934"));
                 assert_eq!(backup_dir.as_deref(), Some("/tmp/bak"));
             }
-            _ => panic!("应解析为 backup rm"),
+            _ => panic!("应解析为 backup delete"),
         }
-        match parse_args(&[
-            "backup".into(),
-            "list".into(),
-            "--onlyid".into(),
-            "1987718388".into(),
-        ])
-        .unwrap()
-        {
+        assert!(matches!(
+            parse_args(&["backup".into(), "create".into(), "--disk=4".into()]).unwrap(),
             Parsed::Backup {
-                action: BackupAction::List,
-                onlyid,
+                action: BackupAction::Create { disk: Some(4) },
                 ..
-            } => {
-                assert_eq!(onlyid.as_deref(), Some("1987718388"));
             }
-            _ => panic!("应解析为 backup list"),
-        }
-        match parse_args(&["meta".into(), "1987718388".into()]).unwrap() {
-            Parsed::MetaInfo(opts) => {
-                assert_eq!(opts.onlyid.as_deref(), Some("1987718388"));
-                assert_eq!(opts.index, None);
-            }
-            _ => panic!("应解析为 meta onlyid"),
-        }
-        match parse_args(&["metainfo".into(), "-1615488206".into(), "2".into()]).unwrap() {
-            Parsed::MetaInfo(opts) => {
-                assert_eq!(opts.onlyid.as_deref(), Some("-1615488206"));
-                assert_eq!(opts.index, Some(2));
-            }
-            _ => panic!("应解析为负数 onlyid 的 metainfo"),
-        }
-        match parse_args(&[
-            "meta".into(),
-            "backup.bin".into(),
-            "--id".into(),
-            "disk&ven_x&prod_y".into(),
-        ])
-        .unwrap()
-        {
-            Parsed::MetaInfo(opts) => {
-                assert_eq!(opts.backup.as_deref(), Some("backup.bin"));
-                assert_eq!(opts.device_id.as_deref(), Some("disk&ven_x&prod_y"));
-            }
-            _ => panic!("应解析为 meta backup"),
-        }
+        ));
     }
 
     #[test]
@@ -1281,13 +1211,24 @@ mod tests {
             1
         );
 
-        let mut inline = vec!["run".to_string(), "--disk=6".to_string()];
+        let mut inline = vec![
+            "apply".to_string(),
+            "--dry-run".to_string(),
+            "--disk=6".to_string(),
+        ];
         pin_disk_selector_for_elevation(&mut inline, selector.clone());
-        assert_eq!(inline[1], format!("--disk={selector}"));
+        assert_eq!(inline[2], format!("--disk={selector}"));
 
-        let mut automatic = vec!["restore".to_string(), "--yes".to_string()];
+        let mut automatic = vec![
+            "backup".to_string(),
+            "restore".to_string(),
+            "--yes".to_string(),
+        ];
         pin_disk_selector_for_elevation(&mut automatic, selector.clone());
-        assert_eq!(automatic, vec!["restore", "--yes", "--disk", &selector]);
+        assert_eq!(
+            automatic,
+            vec!["backup", "restore", "--yes", "--disk", &selector]
+        );
     }
 
     #[test]
@@ -1334,28 +1275,22 @@ mod tests {
     #[test]
     fn parse_usage_errors() {
         assert!(parse_args(&["bogus".into()]).is_err());
-        assert!(parse_args(&["run".into(), "--nope".into()]).is_err());
-        assert!(parse_args(&["run".into(), "--disk".into()]).is_err()); // 缺值
-        assert!(parse_args(&["run".into(), "--disk".into(), "x".into()]).is_err()); // 非数字
-        assert!(parse_args(&["run".into(), "--force".into()]).is_err()); // force 仅 apply
-        assert!(parse_args(&["apply".into(), "--size".into(), "-3".into()]).is_err()); // 负 size
-        assert!(parse_args(&["restore".into(), "a.bin".into(), "b.bin".into()]).is_err()); // 两个位置参数
+        assert!(parse_args(&["run".into()]).is_err());
+        assert!(parse_args(&["restore".into()]).is_err());
+        assert!(parse_args(&["meta".into()]).is_err());
+        assert!(parse_args(&["apply".into(), "--disk".into()]).is_err());
+        assert!(parse_args(&["apply".into(), "--disk".into(), "x".into()]).is_err());
+        assert!(parse_args(&["apply".into(), "--size".into(), "-3".into()]).is_err());
+        assert!(parse_args(&["apply".into(), "--dry-run".into(), "--force".into()]).is_err());
         assert!(matches!(
             parse_args(&["backup".into()]).unwrap(),
             Parsed::Backup {
                 action: BackupAction::List,
                 ..
             }
-        )); // 裸 backup = list
-        assert!(parse_args(&["backup".into(), "rm".into()]).is_err()); // 无 onlyid 时 rm 缺目标
-        assert!(parse_args(&[
-            "backup".into(),
-            "rm".into(),
-            "--onlyid".into(),
-            "1402259934".into(),
-            "--yes".into(),
-        ])
-        .is_err()); // --yes 不能在无编号时进入交互选择
+        ));
+        assert!(parse_args(&["backup".into(), "rm".into()]).is_err());
+        assert!(parse_args(&["backup".into(), "delete".into(), "--yes".into(),]).is_err());
         assert!(parse_args(&[
             "backup".into(),
             "prune".into(),
@@ -1390,25 +1325,18 @@ mod tests {
             "inspect".into(),
             "--disk".into(),
             "4".into(),
-            "--backup".into(),
             "x.bin".into(),
         ])
         .is_err());
-        assert!(matches!(
-            parse_args(&["inspect".into(), "--onlyid".into(), "1402259934".into(),]).unwrap(),
-            Parsed::Inspect(_)
-        )); // 缺 index 时进入备份选择视图
+        assert!(parse_args(&["inspect".into(), "--onlyid".into(), "1402259934".into(),]).is_err());
         assert!(parse_args(&[
             "inspect".into(),
-            "--backup".into(),
-            "x.bin".into(),
-            "--index".into(),
-            "1".into(),
+            "--lba".into(),
+            "7".into(),
+            "--raw".into(),
+            "--hex".into(),
         ])
         .is_err());
-        assert!(
-            parse_args(&["inspect".into(), "7".into(), "--raw".into(), "--hex".into(),]).is_err()
-        );
         assert!(parse_args(&[
             "backup".into(),
             "verify".into(),
@@ -1434,9 +1362,10 @@ mod tests {
         for argv in [
             vec!["apply", "--yes=no"],
             vec!["apply", "--force=false"],
+            vec!["apply", "--dry-run=false"],
             vec!["backup", "prune", "--yes=0"],
-            vec!["backup", "rm", "--onlyid", "1402259934", "1", "--yes=no"],
-            vec!["restore", "backup.bin", "--yes=false"],
+            vec!["backup", "delete", "1", "--yes=no"],
+            vec!["backup", "restore", "backup.bin", "--yes=false"],
             vec!["inspect", "--raw=true"],
             vec!["inspect", "--hex=1"],
         ] {
@@ -1451,8 +1380,9 @@ mod tests {
         for argv in [
             vec!["apply", "--yes", "--yes"],
             vec!["apply", "--force", "--force"],
+            vec!["apply", "--dry-run", "--dry-run"],
             vec!["backup", "prune", "--yes", "--yes"],
-            vec!["restore", "backup.bin", "--yes", "--yes"],
+            vec!["backup", "restore", "backup.bin", "--yes", "--yes"],
             vec!["inspect", "--raw", "--raw"],
             vec!["inspect", "--hex", "--hex"],
         ] {
@@ -1465,14 +1395,14 @@ mod tests {
     #[test]
     fn inspect_lba_is_limited_to_zero_through_thirteen() {
         for bad in ["14", "99", "4294967295"] {
-            let args = vec!["inspect".to_string(), bad.to_string()];
+            let args = vec!["inspect".to_string(), "--lba".to_string(), bad.to_string()];
             let err = parse_args(&args)
                 .err()
                 .expect("inspect 不应接受 LBA0-13 之外的扇区");
             assert!(err.contains("LBA") && err.contains("0-13"), "{err}");
         }
         for good in ["0", "4", "13"] {
-            let args = vec!["inspect".to_string(), good.to_string()];
+            let args = vec!["inspect".to_string(), "--lba".to_string(), good.to_string()];
             assert!(parse_args(&args).is_ok(), "LBA{good} 应被接受");
         }
     }
@@ -1482,11 +1412,11 @@ mod tests {
         for argv in [
             vec!["apply", "--disk", "4", "--disk", "6"],
             vec!["apply", "--size", "10", "--size", "20"],
-            vec!["restore", "--disk=4", "--disk=6"],
-            vec!["backup", "--onlyid", "1", "--onlyid", "2"],
+            vec!["backup", "restore", "--disk=4", "--disk=6"],
+            vec!["backup", "create", "--disk=4", "--disk=6"],
             vec!["backup", "prune", "--keep", "1", "--keep", "2"],
-            vec!["inspect", "--onlyid", "1", "--onlyid", "2"],
-            vec!["inspect", "--index", "1", "--index", "2"],
+            vec!["info", "--disk", "4", "--disk", "6"],
+            vec!["inspect", "--lba", "1", "--lba", "2"],
             vec!["convert", "--dir", "a", "--dir", "b", "--id", "x"],
         ] {
             let args: Vec<String> = argv.into_iter().map(str::to_string).collect();

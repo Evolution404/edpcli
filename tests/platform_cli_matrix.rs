@@ -98,14 +98,14 @@ fn dash_version_stays_single_line_for_script_compatibility() {
 }
 
 #[test]
-fn meta_inspect_and_backup_work_offline_on_every_platform() {
+fn info_inspect_and_backup_work_offline_on_every_platform() {
     let dir = TempDir::new("offline");
     let backup = synthetic_backup(&dir);
     let backup_s = backup.to_str().expect("utf8 backup path");
     let dir_s = dir.0.to_str().expect("utf8 backup dir");
 
-    assert_ok(run(&["meta", backup_s]), "meta backup");
-    assert_ok(run(&["inspect", backup_s, "8"]), "inspect backup");
+    assert_ok(run(&["info", backup_s]), "info backup");
+    assert_ok(run(&["inspect", backup_s, "--lba", "8"]), "inspect backup");
     assert_ok(
         run(&["backup", "verify", backup_s, "--backup-dir", dir_s]),
         "backup verify",
@@ -125,5 +125,11 @@ fn apply_rejects_nonexistent_explicit_disk_on_every_platform() {
 
 #[test]
 fn restore_rejects_nonexistent_explicit_disk_on_every_platform() {
-    assert_invalid_target_is_rejected_before_write(&["restore", "--disk", "4294967295", "--yes"]);
+    assert_invalid_target_is_rejected_before_write(&[
+        "backup",
+        "restore",
+        "--disk",
+        "4294967295",
+        "--yes",
+    ]);
 }

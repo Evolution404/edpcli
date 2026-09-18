@@ -142,7 +142,9 @@ where
         println!();
         println!(
             "{}",
-            crate::ui::dim("指定 LBA 可展开结构化字段，例如: edpcli inspect 6 7 12 --disk N --hex")
+            crate::ui::dim(
+                "指定 LBA 可展开结构化字段，例如: edpcli inspect --disk N --lba 6,7,12 --hex"
+            )
         );
         if let Some(dir) = &export_dir {
             println!("{}  {}", crate::ui::green("已导出"), dir.display());
