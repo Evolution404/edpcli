@@ -798,10 +798,10 @@ pub fn read_backup_md5(path: &Path) -> io::Result<Option<String>> {
     Ok(Some(expected.to_ascii_lowercase()))
 }
 
-fn md5_status(path: &Path, data: &[u8]) -> Md5Status {
+fn md5_status(path: &Path, digest: &str) -> Md5Status {
     match read_backup_md5(path) {
         Ok(None) => Md5Status::NoSidecar,
-        Ok(Some(expected)) if expected == md5_hex(data) => Md5Status::Ok,
+        Ok(Some(expected)) if expected == digest => Md5Status::Ok,
         Ok(Some(_)) | Err(_) => Md5Status::Mismatch,
     }
 }
@@ -850,9 +850,9 @@ pub fn scan_backup_dir(dir: &Path) -> Vec<BackupEntry> {
             .as_ref()
             .map(|d| d.len() == 14 * SECTOR)
             .unwrap_or(false);
-        let md5_ok = data
-            .as_ref()
-            .map(|d| md5_status(&path, d))
+        let md5_ok = content_md5
+            .as_deref()
+            .map(|digest| md5_status(&path, digest))
             .unwrap_or(Md5Status::Mismatch);
         let is_nopwd = match (&meta, &data) {
             (Some(m), Some(d)) => image_is_nopwd(d, &m.device_id),
