@@ -197,7 +197,7 @@ Phase 8 本地门禁：
 - `cargo test --all-targets`：PASS；
 - `cargo clippy --all-targets -- -D warnings`：PASS。
 
-### Phase 9：v2 发布验收 — 进行中
+### Phase 9：v2 发布验收 — 已完成
 
 - `Cargo.toml` / `Cargo.lock` 已同步升级到 `2.0.0`；
 - 新增版本门禁，测试要求 `CARGO_PKG_VERSION == 2.0.0`；
@@ -208,25 +208,46 @@ Phase 8 本地门禁：
   - `cargo build --release`：PASS；
   - release 二进制 `--version` / `version`：确认输出 `2.0.0`、macOS arm64、
     `aarch64-apple-darwin`、Rust 1.98.1。
-- 当前剩余发布门禁：
-  1. 提交并 push 版本升级，clean rebuild 验证构建 Git 身份；
-  2. PR #6 的 6 架构 Rust CI + 4 套 virtual-disk HIL 全绿；
-  3. 合并 main 后复验 main；
-  4. 创建并 push `v2.0.0` tag；
-  5. 验收 7 个 Release 包、SHA-256、SBOM、manifest 和各架构；
-  6. 本机安装正式 macOS arm64 包并 smoke `version/list/info/backup list`。
+- PR #6 已合并，merge commit：
+  `4a0fef23bbb41472ff1251a52fc858baff782818`；
+- PR 与 main 的 6 架构 Rust CI、Linux/Windows arm64+x86_64 四套 virtual-disk HIL
+  均全绿；
+- main 合并后再次完成本地 fmt/test/clippy/release build 全量复验；
+- 已创建并发布 tag `v2.0.0`，tag 指向上述 merge commit；
+- GitHub Release 已发布成功，共 19 个资产：
+  - 7 个正式二进制包；
+  - 7 个对应 SHA-256 sidecar；
+  - Cargo.lock / cargo metadata / Rust toolchain / CycloneDX SBOM / release manifest；
+- 独立下载 Release 资产复验：
+  - 7/7 SHA-256 sidecar 全部通过；
+  - macOS arm64 = `arm64`；
+  - macOS x86_64 = `x86_64`；
+  - macOS Universal = `x86_64 + arm64`；
+  - Linux ELF machine：arm64 = 183，x86_64 = 62；
+  - Windows PE machine：arm64 = `0xAA64`，x86_64 = `0x8664`；
+  - manifest 中 18 个被记录资产的 size + SHA-256 全部重新计算一致；
+  - manifest tag = `v2.0.0`，commit = `4a0fef23bbb41472ff1251a52fc858baff782818`；
+  - cargo metadata / SBOM / release manifest JSON 均通过解析；
+- 已使用 **GitHub Release 的 macOS arm64 正式包** 覆盖安装到
+  `~/.cargo/bin/edpcli`：
+  - 安装后二进制版本 = `2.0.0`；
+  - 架构 = `arm64`；
+  - Git = `4a0fef23bbb4`；
+  - 安装文件 SHA-256 与 Release 解包二进制完全一致；
+  - `version` / `list` / 离线 `info` / `backup list` smoke 全部 PASS。
 
-## 下一位 AI 从这里开始
+## 后续维护从这里开始
 
 1. 先读：
    - `docs/CLI_V2_REDESIGN_PLAN.md`
    - `docs/RELEASE.md`
    - `docs/USAGE.md`
 2. 检查 `git status --short --branch`，禁止 reset/clean。
-3. 继续 **Phase 9 v2 发布验收**；版本已升到 `2.0.0` 且本地门禁已通过。
-4. push 后必须等 PR 的 6 架构 CI + 4 套 virtual-disk HIL 全绿；随后才能合并 main、
-   复验 main、打 `v2.0.0` tag、验收 7 个 Release 包并在本机安装 macOS arm64 包。
-5. 小 commit、及时 push，阶段完成后更新本交接文档。
+3. CLI v2 重构与 `v2.0.0` 发布已经全部完成，不要重复执行 Phase 1-9。
+4. 后续功能/修复按 `docs/RELEASE.md` 自主决定 PATCH / MINOR / MAJOR；不得复用
+   `v2.0.0` tag。
+5. 继续保持测试先行、小 commit、及时 push；不得削弱本文件记录的安全红线与 CLI
+   v2 surface guard。
 
 ## 已冻结的关键决策
 
