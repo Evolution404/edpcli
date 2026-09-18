@@ -6,7 +6,7 @@
 use std::path::PathBuf;
 use std::sync::mpsc::{self, Receiver, Sender};
 
-use crate::application::BackupWorkspaceItem;
+use crate::application::{inspect::InspectWorkspace, BackupWorkspaceItem};
 use crate::disk_scan::Row;
 use crate::sysinfo::SysRunner;
 
@@ -45,6 +45,10 @@ enum WorkerResult {
     Write {
         result: Result<(), String>,
     },
+    Inspect {
+        generation: u64,
+        result: Result<InspectWorkspace, String>,
+    },
 }
 
 #[derive(Default)]
@@ -52,6 +56,7 @@ pub struct TaskUpdates {
     pub devices: Option<Vec<Row>>,
     pub backups: Option<Vec<BackupWorkspaceItem>>,
     pub write: Option<Result<(), String>>,
+    pub inspect: Option<Result<InspectWorkspace, String>>,
 }
 
 pub struct TaskHub {
@@ -59,6 +64,7 @@ pub struct TaskHub {
     rx: Receiver<WorkerResult>,
     device_generation: GenerationGate,
     backup_generation: GenerationGate,
+    inspect_generation: GenerationGate,
 }
 
 impl Default for TaskHub {
@@ -75,6 +81,7 @@ impl TaskHub {
             rx,
             device_generation: GenerationGate::new(),
             backup_generation: GenerationGate::new(),
+            inspect_generation: GenerationGate::new(),
         }
     }
 
@@ -95,6 +102,27 @@ impl TaskHub {
         std::thread::spawn(move || {
             let rows = crate::application::scan_backup_workspace(&backup_dir);
             let _ = tx.send(WorkerResult::Backups { generation, rows });
+        });
+        generation
+    }
+
+    pub fn request_inspect_disk(&mut self, disk: u32) -> u64 {
+        let generation = self.inspect_generation.begin();
+        let tx = self.tx.clone();
+        std::thread::spawn(move || {
+            let runner = SysRunner;
+            let result = crate::application::inspect::load_disk_inspect(&runner, disk);
+            let _ = tx.send(WorkerResult::Inspect { generation, result });
+        });
+        generation
+    }
+
+    pub fn request_inspect_backup(&mut self, path: PathBuf) -> u64 {
+        let generation = self.inspect_generation.begin();
+        let tx = self.tx.clone();
+        std::thread::spawn(move || {
+            let result = crate::application::inspect::load_backup_inspect(&path);
+            let _ = tx.send(WorkerResult::Inspect { generation, result });
         });
         generation
     }
@@ -181,7 +209,14 @@ impl TaskHub {
                 WorkerResult::Write { result } => {
                     updates.write = Some(result);
                 }
-                WorkerResult::Devices { .. } | WorkerResult::Backups { .. } => {}
+                WorkerResult::Inspect { generation, result }
+                    if self.inspect_generation.is_current(generation) =>
+                {
+                    updates.inspect = Some(result);
+                }
+                WorkerResult::Inspect { .. }
+                | WorkerResult::Devices { .. }
+                | WorkerResult::Backups { .. } => {}
             }
         }
         updates

@@ -202,6 +202,15 @@ fn run_loop(resume: Option<state::WriteIntent>) -> io::Result<LoopExit> {
         if let Some(result) = updates.write {
             state.finish_write(result);
         }
+        if let Some(result) = updates.inspect {
+            match result {
+                Ok(workspace) => state.replace_inspect(workspace),
+                Err(message) => {
+                    state.set_inspect_pending(false);
+                    state.set_notice(message);
+                }
+            }
+        }
         session.terminal.draw(|frame| render::draw(frame, &state))?;
         if !ct_event::poll(Duration::from_millis(100))? {
             continue;
@@ -252,6 +261,23 @@ fn run_loop(resume: Option<state::WriteIntent>) -> io::Result<LoopExit> {
                                 state::Workspace::Backups => {
                                     tasks.request_backup_scan(backup_dir.clone());
                                     state.set_backup_scan_pending(true);
+                                }
+                            }
+                            continue;
+                        }
+                        NavCommand::OpenInspect => {
+                            match state.workspace() {
+                                state::Workspace::Devices => {
+                                    if let Some(disk) = state.selected_device_disk() {
+                                        tasks.request_inspect_disk(disk);
+                                        state.set_inspect_pending(true);
+                                    }
+                                }
+                                state::Workspace::Backups => {
+                                    if let Some(path) = state.selected_backup_path() {
+                                        tasks.request_inspect_backup(path);
+                                        state.set_inspect_pending(true);
+                                    }
                                 }
                             }
                             continue;

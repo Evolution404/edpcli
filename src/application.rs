@@ -5,6 +5,7 @@
 //! safety policy.
 
 
+pub mod inspect;
 pub mod write;
 use std::cell::RefCell;
 use std::io;

@@ -8,7 +8,7 @@ use ratatui::{
     Frame,
 };
 
-use super::state::{AppState, InputMode, WizardStage, Workspace, WriteKind};
+use super::state::{AppState, InputMode, InspectMode, WizardStage, Workspace, WriteKind};
 
 fn device_status(row: &crate::disk_scan::Row) -> String {
     if row.proto != "USB" {
@@ -118,6 +118,97 @@ fn draw_backups(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState
 }
 
 
+
+fn plain_hex_lines(data: &[u8]) -> Vec<Line<'static>> {
+    data.chunks(16)
+        .enumerate()
+        .map(|(line_no, chunk)| {
+            let offset = line_no * 16;
+            let mut hex = String::new();
+            let mut ascii = String::new();
+            for i in 0..16 {
+                if i == 8 {
+                    hex.push(' ');
+                }
+                if let Some(byte) = chunk.get(i) {
+                    hex.push_str(&format!("{byte:02X} "));
+                    ascii.push(if (0x20..=0x7e).contains(byte) {
+                        *byte as char
+                    } else {
+                        '.'
+                    });
+                } else {
+                    hex.push_str("   ");
+                }
+            }
+            Line::from(format!("+0x{offset:03X}: {hex} {ascii}"))
+        })
+        .collect()
+}
+
+fn draw_inspect(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState) {
+    let Some(workspace) = state.inspect_data() else {
+        return;
+    };
+    let Some(lba) = state.inspect_selected_lba() else {
+        return;
+    };
+    let Some(view) = workspace.views.get(lba as usize) else {
+        return;
+    };
+    let mode = state.inspect_mode().unwrap_or(InspectMode::Fields);
+    let mut lines = vec![
+        Line::from(format!("来源: {}", workspace.source)),
+        Line::from(format!("LBA{} · {}", view.lba, view.method)),
+        Line::from(""),
+    ];
+    match mode {
+        InspectMode::Fields => {
+            if view.fields.is_empty() {
+                lines.push(Line::from("未检测到已知结构化字段。"));
+            } else {
+                for field in &view.fields {
+                    let group = field
+                        .group
+                        .as_deref()
+                        .map(|value| format!("{value} · "))
+                        .unwrap_or_default();
+                    lines.push(Line::from(format!(
+                        "{group}{}  {}",
+                        field.label, field.value
+                    )));
+                    for child in &field.children {
+                        lines.push(Line::from(format!(
+                            "  └─ {}  {}",
+                            child.label, child.value
+                        )));
+                    }
+                }
+            }
+            for note in &view.notes {
+                lines.push(Line::from(format!("注: {note}")));
+            }
+        }
+        InspectMode::DecodedHex => lines.extend(plain_hex_lines(&view.decoded)),
+        InspectMode::RawHex => lines.extend(plain_hex_lines(&view.raw)),
+    }
+    let mode_label = match mode {
+        InspectMode::Fields => "字段",
+        InspectMode::DecodedHex => "Decoded Hex",
+        InspectMode::RawHex => "Raw Hex",
+    };
+    frame.render_widget(
+        Paragraph::new(lines)
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title(format!("Inspect · {mode_label} · h/l 切换视图")),
+            )
+            .wrap(Wrap { trim: false }),
+        area,
+    );
+}
+
 fn draw_wizard(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState) {
     let Some(wizard) = state.wizard() else {
         return;
@@ -177,7 +268,9 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
     .block(Block::default().borders(Borders::ALL));
     frame.render_widget(title, chunks[0]);
 
-    if state.wizard().is_some() {
+    if state.inspect_data().is_some() {
+        draw_inspect(frame, chunks[1], state);
+    } else if state.wizard().is_some() {
         draw_wizard(frame, chunks[1], state);
     } else {
     match state.input_mode() {
@@ -201,10 +294,12 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
 
     let status = if state.is_critical_operation() {
         "关键写盘阶段：q / Esc / Ctrl-C 将延迟到安全检查点"
+    } else if state.inspect_pending() {
+        "后台读取 Inspect 数据中；界面可继续响应"
     } else if state.active_scan_pending() {
         "后台扫描中；界面可继续操作"
     } else {
-        "h/l 工作区  j/k 移动  a Apply  R Restore  r 刷新  ? 帮助  : 命令  / 搜索  q 退出"
+        "h/l 工作区  j/k 移动  i Inspect  a Apply  R Restore  r 刷新  ? 帮助  : 命令  / 搜索  q 退出"
     };
     frame.render_widget(Paragraph::new(status), chunks[2]);
 }

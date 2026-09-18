@@ -4,6 +4,21 @@
 //! without a real terminal and keeps critical-operation policy independent from crossterm.
 
 
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InspectMode {
+    Fields,
+    DecodedHex,
+    RawHex,
+}
+
+#[derive(Debug, Clone)]
+pub struct InspectState {
+    selected: usize,
+    item_count: usize,
+    mode: InspectMode,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WriteKind {
     Apply,
@@ -68,6 +83,7 @@ pub enum NavCommand {
     Refresh,
     BeginApply,
     BeginRestore,
+    OpenInspect,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -90,6 +106,10 @@ pub struct AppState {
     exit_pending: bool,
     wizard: Option<WizardState>,
     pinned_disk: Option<u32>,
+    inspect: Option<InspectState>,
+    inspect_data: Option<crate::application::inspect::InspectWorkspace>,
+    inspect_pending: bool,
+    notice: Option<String>,
 }
 
 impl Default for AppState {
@@ -113,7 +133,70 @@ impl AppState {
             exit_pending: false,
             wizard: None,
             pinned_disk: None,
+            inspect: None,
+            inspect_data: None,
+            inspect_pending: false,
+            notice: None,
         }
+    }
+
+    pub fn inspect_data(&self) -> Option<&crate::application::inspect::InspectWorkspace> {
+        self.inspect_data.as_ref()
+    }
+
+    pub const fn inspect_pending(&self) -> bool {
+        self.inspect_pending
+    }
+
+    pub fn notice(&self) -> Option<&str> {
+        self.notice.as_deref()
+    }
+
+    pub fn set_notice(&mut self, message: impl Into<String>) {
+        self.notice = Some(message.into());
+    }
+
+    pub fn clear_notice(&mut self) {
+        self.notice = None;
+    }
+
+    pub fn set_inspect_pending(&mut self, pending: bool) {
+        self.inspect_pending = pending;
+        if pending {
+            self.notice = Some("正在后台读取 LBA0-13…".into());
+        }
+    }
+
+    pub fn open_inspect(&mut self, item_count: usize) {
+        self.inspect = Some(InspectState {
+            selected: 0,
+            item_count,
+            mode: InspectMode::Fields,
+        });
+    }
+
+    pub fn replace_inspect(&mut self, workspace: crate::application::inspect::InspectWorkspace) {
+        let count = workspace.views.len();
+        self.inspect_data = Some(workspace);
+        self.inspect_pending = false;
+        self.notice = None;
+        self.open_inspect(count);
+    }
+
+    pub fn inspect_selected_lba(&self) -> Option<u32> {
+        self.inspect.as_ref().and_then(|inspect| {
+            (inspect.item_count > 0).then_some(inspect.selected as u32)
+        })
+    }
+
+    pub fn inspect_mode(&self) -> Option<InspectMode> {
+        self.inspect.as_ref().map(|inspect| inspect.mode)
+    }
+
+    pub fn close_inspect(&mut self) {
+        self.inspect = None;
+        self.inspect_data = None;
+        self.inspect_pending = false;
     }
 
     pub fn wizard(&self) -> Option<&WizardState> {
@@ -328,6 +411,10 @@ impl AppState {
         }
 
         if command == NavCommand::Escape {
+            if self.inspect.is_some() {
+                self.close_inspect();
+                return StateEffect::None;
+            }
             if self.wizard.is_some() {
                 self.wizard = None;
                 return StateEffect::None;
@@ -341,6 +428,57 @@ impl AppState {
 
         if command == NavCommand::Quit {
             return StateEffect::ExitRequested;
+        }
+
+        if let Some(inspect) = self.inspect.as_mut() {
+            match command {
+                NavCommand::Up => inspect.selected = inspect.selected.saturating_sub(1),
+                NavCommand::Down => {
+                    if inspect.item_count > 0 {
+                        inspect.selected = (inspect.selected + 1).min(inspect.item_count - 1);
+                    }
+                }
+                NavCommand::Top => inspect.selected = 0,
+                NavCommand::Bottom => inspect.selected = inspect.item_count.saturating_sub(1),
+                NavCommand::HalfPageDown => {
+                    if inspect.item_count > 0 {
+                        inspect.selected = inspect
+                            .selected
+                            .saturating_add((viewport_height / 2).max(1))
+                            .min(inspect.item_count - 1);
+                    }
+                }
+                NavCommand::HalfPageUp => {
+                    inspect.selected =
+                        inspect.selected.saturating_sub((viewport_height / 2).max(1));
+                }
+                NavCommand::Left => {
+                    inspect.mode = match inspect.mode {
+                        InspectMode::Fields => InspectMode::Fields,
+                        InspectMode::DecodedHex => InspectMode::Fields,
+                        InspectMode::RawHex => InspectMode::DecodedHex,
+                    };
+                }
+                NavCommand::Right => {
+                    inspect.mode = match inspect.mode {
+                        InspectMode::Fields => InspectMode::DecodedHex,
+                        InspectMode::DecodedHex => InspectMode::RawHex,
+                        InspectMode::RawHex => InspectMode::RawHex,
+                    };
+                }
+                NavCommand::Search => self.input_mode = InputMode::Search,
+                NavCommand::CommandPalette => self.input_mode = InputMode::Command,
+                NavCommand::Help => self.input_mode = InputMode::Help,
+                NavCommand::Quit => return StateEffect::ExitRequested,
+                NavCommand::Escape
+                | NavCommand::Refresh
+                | NavCommand::BeginApply
+                | NavCommand::BeginRestore
+                | NavCommand::OpenInspect
+                | NavCommand::NextMatch
+                | NavCommand::PreviousMatch => {}
+            }
+            return StateEffect::None;
         }
 
         match command {
@@ -377,6 +515,7 @@ impl AppState {
             NavCommand::Refresh
             | NavCommand::BeginApply
             | NavCommand::BeginRestore
+            | NavCommand::OpenInspect
             | NavCommand::NextMatch
             | NavCommand::PreviousMatch
             | NavCommand::Escape
