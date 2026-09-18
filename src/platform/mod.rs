@@ -46,7 +46,9 @@ pub struct ExtDisk {
     pub proto: String,
 }
 
-pub struct WriteGuard(imp::WriteGuard);
+pub struct WriteGuard {
+    _inner: imp::WriteGuard,
+}
 
 #[cfg(target_os = "macos")]
 mod macos;
@@ -125,7 +127,7 @@ pub fn prepare_write(
     runner: &dyn crate::sysinfo::CmdRunner,
     disk: u32,
 ) -> io::Result<WriteGuard> {
-    imp::prepare_write(runner, disk).map(WriteGuard)
+    imp::prepare_write(runner, disk).map(|inner| WriteGuard { _inner: inner })
 }
 
 pub fn elevation_label() -> &'static str {
