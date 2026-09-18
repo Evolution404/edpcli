@@ -79,7 +79,9 @@ pub enum Parsed {
         onlyid: Option<String>,
         backup_dir: Option<String>,
     },
-    Version,
+    Version {
+        detailed: bool,
+    },
     Help {
         topic: Option<String>,
     },
@@ -115,7 +117,7 @@ pub fn print_usage() {
     for (n, d) in [
         (
             "list",
-            "列出外接盘: 编号/容量/接口/cems识别/免密检测/EDPF分区/备份（管理员权限下信息更全）",
+            "列出外接盘: 编号/容量/接口/姓名/部门/cems识别/免密/EDPF分区/备份；需要时自动提权",
         ),
         ("run", "真盘预览 dry-run（需管理员权限，可自动提权）"),
         ("apply", "真盘实际写入(自动备份 → 原子写入 → 读回校验)"),
@@ -137,7 +139,10 @@ pub fn print_usage() {
             "离线转换(不碰真盘): --dir <快照> --id <device_id>",
         ),
         ("completion", "生成 zsh / bash / fish Tab 补全脚本"),
-        ("version", "显示版本"),
+        (
+            "version",
+            "显示版本、平台、架构、编译时间、Git 与 Rust 构建信息",
+        ),
         ("help", "显示本帮助"),
     ] {
         println!("{}", cmd(n, d));
@@ -450,7 +455,8 @@ pub fn parse_args(argv: &[String]) -> Result<Parsed, String> {
                 topic: rest.first().cloned(),
             })
         }
-        "-V" | "--version" | "version" => Ok(Parsed::Version),
+        "-V" | "--version" => Ok(Parsed::Version { detailed: false }),
+        "version" => Ok(Parsed::Version { detailed: true }),
         "completion" => {
             if rest.is_empty() || rest.iter().any(|a| a == "-h" || a == "--help") {
                 return Ok(Parsed::Help {

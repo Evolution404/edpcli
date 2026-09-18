@@ -162,7 +162,14 @@ pub fn backup_ownership(entry: &BackupEntry) -> Option<OwnershipInfo> {
     let meta = entry.meta.as_ref()?;
     let inspect_meta = InspectMeta::from_backup_meta(meta);
     let raw = entry.lba8.as_ref()?;
-    let view = inspect::analyze_sector(8, raw, &inspect_meta);
+    ownership_from_lba8(raw, &inspect_meta)
+}
+
+pub fn ownership_from_lba8(raw: &[u8], inspect_meta: &InspectMeta) -> Option<OwnershipInfo> {
+    if raw.len() != SECTOR {
+        return None;
+    }
+    let view = inspect::analyze_sector(8, raw, inspect_meta);
     Some(OwnershipInfo {
         glab: child_value(&view, "GLab"),
         dept: child_value(&view, "Dept"),

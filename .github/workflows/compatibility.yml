@@ -10,14 +10,23 @@ permissions:
 
 jobs:
   latest:
-    name: ${{ matrix.os }} / latest stable
+    name: ${{ matrix.label }} / latest stable Rust
     strategy:
       fail-fast: false
       matrix:
-        os:
-          - macos-latest
-          - ubuntu-latest
-          - windows-latest
+        include:
+          - os: macos-latest
+            label: macos-arm64
+          - os: macos-15-intel
+            label: macos-x86_64
+          - os: ubuntu-24.04-arm
+            label: linux-arm64
+          - os: ubuntu-latest
+            label: linux-x86_64
+          - os: windows-11-vs2026-arm
+            label: windows-arm64
+          - os: windows-latest
+            label: windows-x86_64
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

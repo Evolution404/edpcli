@@ -20,11 +20,15 @@ GBK 解码、本地时间和用户目录等通用能力均在进程内实现；�
 版本号从 `1.0.0` 正式起算；后续由维护 AI 按 SemVer 根据实际变更自主决定 PATCH / MINOR /
 MAJOR，并必须遵守 [`docs/RELEASE.md`](docs/RELEASE.md)，避免后续维护过程中遗忘版本策略。
 
+正式 Release 同时提供 macOS/Linux/Windows 的 `arm64` 与 `x86_64` 原生包；macOS 额外提供
+Universal 包。`edpcli version` 可查看当前二进制的目标平台、架构、编译时间、Git commit、
+Rust 版本和构建类型，`edpcli --version` 继续保持兼容脚本的单行版本输出。
+
 ## 快速使用
 
 ```bash
 cargo build --release            # 或 cargo install --path . 装入 ~/.cargo/bin
-./target/release/edpcli list      # 列出外接盘：编号/容量/接口/cems 识别/免密检测/EDPF 分区/备份份数（免 sudo，sudo 下更全）
+./target/release/edpcli list      # 列出外接盘：编号/容量/接口/姓名/部门/cems/免密/EDPF/备份；需要时自动请求管理员权限
 ./target/release/edpcli run       # 预览改造（dry-run，自动检测 USB 盘）
 edpcli run --disk 4               # 指定盘；也接受当前平台原生整盘路径/名称
 edpcli apply                      # 实际写入（自动备份 → 原子写入 → 读回校验）
@@ -104,9 +108,11 @@ disk14 匹配备份 3 个(新→旧):
 管道重定向或设置 `NO_COLOR` 时自动降级为纯文本。
 
 - **自动提权**：`run` / `apply` / `restore` 需要裸盘读写，`inspect` / `meta` 查看物理盘时
-  需要裸盘只读；macOS/Linux 通过 `sudo`，Windows 通过 UAC 重执行自身。跨提权边界时
-  会把抽象盘号固定为平台原生 selector，避免 Linux 枚举序号在重执行后漂移；`list` /
-  `backup` / `convert` 以及离线 `inspect` / `meta` 永不提权。
+  需要裸盘只读；`list` 会先无特权扫描，若读取裸盘身份、姓名或部门时实际遇到权限不足，
+  也会自动进入平台授权流程。macOS/Linux 在当前终端直接出现管理员密码提示，Windows 通过
+  UAC 重执行自身；不要求用户退出后再手工重跑命令。跨提权边界时会把抽象盘号固定为平台
+  原生 selector，避免 Linux 枚举序号在重执行后漂移。`backup` / `convert` 以及离线
+  `inspect` / `meta` 永不提权。
 - `--yes` 免交互；多块 USB 盘时自动弹编号选择。系统盘不再依赖固定盘号猜测：macOS
   根据 `/` 的 APFS PhysicalStore，Linux 根据根文件系统设备链，Windows 根据系统卷
   disk extents 原生确认；任一平台无法确认系统盘身份时均 fail-closed，禁止写盘。
@@ -117,9 +123,8 @@ disk14 匹配备份 3 个(新→旧):
   `~/.edpcli.conf` 的 `backup_dir = 路径` > `./backup`。
   - macOS/Linux 自动提权时 `sudo` 可能清环境变量，父进程会把 `$EDPCLI_BACKUP_DIR`
     解析为绝对路径并以显式 `--backup-dir` 旗标传给提权后的子进程。
-  - macOS/Linux **手动 `sudo edpcli …`** 时 shell 环境变量可能因 `env_reset` 丢失，
-    此时配置文件按发起用户 home 解析；若四级都未命中会给出黄色提示。通常直接运行
-    `edpcli` 即可，由工具按平台自动提权。
+  - 不建议手工预先进入管理员会话。直接运行 `edpcli` 即可，由工具按平台在确有需要时
+    请求授权，并把已经解析好的备份目录显式传给提权后的子进程。
 
 ## 备份管理
 

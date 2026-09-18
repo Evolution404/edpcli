@@ -46,9 +46,13 @@ def main() -> None:
         "commit": args.commit,
         "rustToolchain": "1.98.1",
         "releaseRunners": {
-            "macOS": "macos-15",
-            "Linux": "ubuntu-24.04",
-            "Windows": "windows-2025",
+            "macOS-arm64": "macos-15",
+            "macOS-x86_64": "macos-15-intel",
+            "macOS-universal": "merged from native arm64 + x86_64 artifacts on macos-15",
+            "Linux-arm64": "ubuntu-24.04-arm",
+            "Linux-x86_64": "ubuntu-24.04",
+            "Windows-arm64": "windows-11-vs2026-arm",
+            "Windows-x86_64": "windows-2025",
         },
         "assets": assets,
     }

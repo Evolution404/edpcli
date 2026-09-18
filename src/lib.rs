@@ -5,6 +5,7 @@
 
 pub mod backup_catalog;
 pub mod backup_cli;
+pub mod build_info;
 pub mod cli;
 pub mod cli_args;
 pub mod common;
