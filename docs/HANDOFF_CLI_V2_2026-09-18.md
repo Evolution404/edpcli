@@ -150,6 +150,28 @@ Phase 6 本地门禁：
 - restore 定向回归：27/27 PASS；
 - backup / CLI UX / selectors 定向回归全部 PASS。
 
+### Phase 7：inspect 收口 — 已完成
+
+- inspect 用户级 LBA 选择已固定为显式 `--lba 6,7,12`，裸数字位置参数继续由 parser
+  直接拒绝；
+- 执行层已删除无盘时扫描备份目录并“猜备份来源”的旧行为：
+  - 指定备份文件时走离线 backup source；
+  - 未指定备份文件时只走 `DeviceSelector`；
+  - `--backup-dir` 仅作为显式相对备份文件的目录解析上下文，不会自行切换来源；
+- 物理盘 inspect 在提权前即由 `DeviceSelector` 完成单盘自动选/多盘交互/系统盘及非 USB
+  整盘拒绝，并把目标 pin 到平台原生 selector；
+- raw / hex / export / `--id` 高级离线识别能力保持不变；
+- 删除 inspect 对备份盘列表提示函数的依赖，并清理旧 onlyid/index 命名残留测试。
+
+Phase 7 本地门禁：
+
+- `cargo fmt --all -- --check`：PASS；
+- `cargo test --all-targets`：PASS；
+- `cargo clippy --all-targets -- -D warnings`：PASS；
+- v2 parser：8/8 PASS；
+- inspect CLI：3/3 PASS；
+- CLI UX：10/10 PASS。
+
 ## 下一位 AI 从这里开始
 
 1. 先读：
@@ -157,10 +179,10 @@ Phase 6 本地门禁：
    - `docs/RELEASE.md`
    - `docs/USAGE.md`
 2. 检查 `git status --short --branch`，禁止 reset/clean。
-3. 从 **Phase 7 inspect 收口** 继续，仍须测试先行；不要削弱 selector pinning、系统盘
+3. 从 **Phase 8 completion / 文档 / 技术债清理** 继续，仍须测试先行；不要削弱 selector pinning、系统盘
    fail-closed 或 onlyid 防串盘。
-4. Phase 7 删除 inspect 内部残余的 onlyid/index/无盘猜备份路径，确保用户级 LBA 只能通过
-   `--lba` 指定，同时保留 raw/hex/export 与离线备份文件检查能力。
+4. Phase 8 必须让 zsh/bash/fish completion 与 v2 grammar 完全一致，删除动态 onlyid/index
+   用户补全；全面重写 README/USAGE，并增加旧 grammar 门禁防止后续重新引入。
 5. 小 commit、及时 push，阶段完成后更新本交接文档。
 
 ## 已冻结的关键决策

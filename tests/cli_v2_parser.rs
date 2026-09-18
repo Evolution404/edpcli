@@ -93,6 +93,26 @@ fn inspect_requires_explicit_lba_flag() {
 }
 
 #[test]
+fn inspect_backup_dir_alone_never_selects_a_backup_source() {
+    match parse_args(&args(&[
+        "inspect",
+        "--backup-dir",
+        "/tmp/backups",
+        "--lba",
+        "7",
+    ]))
+    .expect("inspect device source")
+    {
+        Parsed::Inspect(opts) => {
+            assert!(opts.backup.is_none());
+            assert_eq!(opts.backup_dir.as_deref(), Some("/tmp/backups"));
+            assert_eq!(opts.lbas, vec![7]);
+        }
+        _ => panic!("expected inspect"),
+    }
+}
+
+#[test]
 fn removed_v1_grammar_returns_migration_errors_not_compatibility_paths() {
     for (argv, replacement) in [
         (&["run"][..], "apply --dry-run"),

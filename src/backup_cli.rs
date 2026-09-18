@@ -137,54 +137,6 @@ fn print_global_numbered_backup_entries(
     }
 }
 
-pub(crate) fn print_backup_sources(entries: &[BackupEntry], hint: &str) -> bool {
-    let mut groups: BTreeMap<String, Vec<&BackupEntry>> = BTreeMap::new();
-    for entry in entries {
-        let Some(id) = entry.meta.as_ref().and_then(|m| m.onlyid.as_ref()) else {
-            continue;
-        };
-        groups.entry(id.clone()).or_default().push(entry);
-    }
-    if groups.is_empty() {
-        return false;
-    }
-    let mut groups: Vec<(String, Vec<&BackupEntry>)> = groups.into_iter().collect();
-    for (_, group) in &mut groups {
-        backup_catalog::sort_newest_first(group);
-    }
-    groups.sort_by(|a, b| match (a.1.first(), b.1.first()) {
-        (Some(ae), Some(be)) => diskio::cmp_backup_newest_first(ae, be).then_with(|| a.0.cmp(&b.0)),
-        (Some(_), None) => std::cmp::Ordering::Less,
-        (None, Some(_)) => std::cmp::Ordering::Greater,
-        (None, None) => a.0.cmp(&b.0),
-    });
-    println!("{}", crate::ui::bold("可查看的备份盘:"));
-    for (id, group) in groups {
-        let latest = group
-            .first()
-            .map(|e| diskio::backup_display_time(&e.path, e.mtime))
-            .unwrap_or_default();
-        let model = group
-            .first()
-            .and_then(|e| e.meta.as_ref())
-            .map(backup_model_name)
-            .unwrap_or_else(|| "未知型号".into());
-        println!(
-            "  {}  {} · {} 份 · 最新 {}",
-            crate::ui::bold_cyan(&format!("onlyid={}", id)),
-            model,
-            group.len(),
-            latest
-        );
-        if let Some(entry) = group.first() {
-            print_ownership(entry, "      ");
-        }
-    }
-    println!();
-    println!("{}", crate::ui::dim(hint));
-    true
-}
-
 pub fn backup_list(backup_dir: &Path) -> i32 {
     let selector = BackupSelector::load(backup_dir);
     let catalog = selector.catalog();

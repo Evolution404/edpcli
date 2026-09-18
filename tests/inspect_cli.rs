@@ -34,7 +34,7 @@ fn inspect_backup_file_is_offline_and_renders_structured_hex() {
 }
 
 #[test]
-fn inspect_onlyid_index_matches_backup_list_and_exports() {
+fn inspect_backup_file_exports_selected_lbas() {
     let Some(path) = fixture_bin("netac") else {
         eprintln!("跳过: 真实备份不可用");
         return;
@@ -57,7 +57,7 @@ fn inspect_onlyid_index_matches_backup_list_and_exports() {
         .arg("--export")
         .arg(&export)
         .output()
-        .expect("run edpcli inspect onlyid");
+        .expect("run edpcli inspect backup");
     assert_eq!(
         out.status.code(),
         Some(0),
