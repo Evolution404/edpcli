@@ -1,3 +1,5 @@
+pub mod write;
+
 //! Application/service boundary shared by the CLI and interactive frontends.
 //!
 //! This layer owns task-oriented, UI-neutral operations. Frontends may schedule these
