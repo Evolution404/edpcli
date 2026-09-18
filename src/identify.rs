@@ -3,6 +3,7 @@
 use std::time::Duration;
 
 use crate::crypto::{crc32_bare, xor_rolling};
+use crate::native_probe::{HardwareProbe, NativeTransport};
 use crate::sysinfo::{block_str_field, split_class_blocks, CmdRunner};
 
 const IOREG_TIMEOUT: Duration = Duration::from_secs(15);
@@ -54,7 +55,15 @@ fn ioreg_fields(
     vec![]
 }
 
-pub fn detect_transport(runner: &dyn CmdRunner, disk: u32) -> Transport {
+fn transport_from_native(probe: &HardwareProbe) -> Transport {
+    match probe.transport {
+        NativeTransport::Uas => Transport::Uas,
+        NativeTransport::Bot => Transport::Bot,
+        NativeTransport::Unknown => Transport::Unknown,
+    }
+}
+
+fn detect_transport_ioreg(runner: &dyn CmdRunner, disk: u32) -> Transport {
     let mut present: Vec<&str> = Vec::new();
     for cls in [
         "IOUSBMassStorageUASDriver",
@@ -78,9 +87,59 @@ pub fn detect_transport(runner: &dyn CmdRunner, disk: u32) -> Transport {
     }
 }
 
+pub fn detect_transport(runner: &dyn CmdRunner, disk: u32) -> Transport {
+    if let Some(probe) = runner.hardware_probe(disk) {
+        let transport = transport_from_native(&probe);
+        if transport != Transport::Unknown {
+            return transport;
+        }
+    }
+    detect_transport_ioreg(runner, disk)
+}
+
+fn push_candidate_pair(
+    cs: &mut Vec<String>,
+    vendor: &str,
+    product: &str,
+    revision: &str,
+    transport: Transport,
+) {
+    let long_id = build_device_id(vendor, product, revision, Transport::Bot);
+    let short_id = build_device_id(vendor, product, revision, Transport::Uas);
+    let ordered = if transport == Transport::Uas {
+        [short_id, long_id]
+    } else {
+        [long_id, short_id]
+    };
+    for candidate in ordered {
+        if !candidate.is_empty() && !cs.contains(&candidate) {
+            cs.push(candidate);
+        }
+    }
+}
+
 pub fn generate_candidates(runner: &dyn CmdRunner, disk: u32) -> Vec<String> {
     let mut cs: Vec<String> = Vec::new();
-    let transport = detect_transport(runner, disk);
+    let native = runner.hardware_probe(disk);
+    let transport = native
+        .as_ref()
+        .map(transport_from_native)
+        .filter(|transport| *transport != Transport::Unknown)
+        .unwrap_or_else(|| detect_transport_ioreg(runner, disk));
+
+    if let Some(inquiry) = native.as_ref().and_then(|probe| probe.inquiry.as_ref()) {
+        if !inquiry.vendor.is_empty() {
+            push_candidate_pair(
+                &mut cs,
+                &inquiry.vendor,
+                &inquiry.product,
+                &inquiry.revision,
+                transport,
+            );
+            return cs;
+        }
+    }
+
     for cls in ["IOSCSITargetDevice", "IOSCSILogicalUnitNub", "IOSCSIPeripheralDeviceNub"] {
         let d = ioreg_fields(
             runner,
@@ -92,18 +151,7 @@ pub fn generate_candidates(runner: &dyn CmdRunner, disk: u32) -> Vec<String> {
         if let Some(v) = get("Vendor Identification").filter(|v| !v.is_empty()) {
             let p = get("Product Identification").unwrap_or_default();
             let rev = get("Product Revision Level").unwrap_or_default();
-            let long_id = build_device_id(&v, &p, &rev, Transport::Bot);
-            let short_id = build_device_id(&v, &p, &rev, Transport::Uas);
-            let ordered: Vec<String> = if transport == Transport::Uas {
-                vec![short_id, long_id]
-            } else {
-                vec![long_id, short_id]
-            };
-            for c in ordered {
-                if !c.is_empty() && !cs.contains(&c) {
-                    cs.push(c);
-                }
-            }
+            push_candidate_pair(&mut cs, &v, &p, &rev, transport);
             break; // 首个给出 Vendor 的类即止
         }
     }
@@ -130,7 +178,27 @@ pub fn identify(runner: &dyn CmdRunner, disk: u32, lba7: &[u8]) -> IdentifyResul
 
 #[cfg(test)]
 mod tests {
+    use std::cell::Cell;
+    use std::io;
+
     use super::*;
+    use crate::native_probe::{HardwareProbe, InquiryInfo, NativeTransport};
+
+    struct NativeOnlyRunner {
+        probe: HardwareProbe,
+        subprocess_calls: Cell<usize>,
+    }
+
+    impl CmdRunner for NativeOnlyRunner {
+        fn check_output(&self, _cmd: &[&str], _timeout: Duration) -> io::Result<String> {
+            self.subprocess_calls.set(self.subprocess_calls.get() + 1);
+            Err(io::Error::other("native path should not spawn ioreg"))
+        }
+
+        fn hardware_probe(&self, _disk: u32) -> Option<HardwareProbe> {
+            Some(self.probe.clone())
+        }
+    }
 
     #[test]
     fn norm_trailing_space_lower_underscore() {
@@ -151,5 +219,30 @@ mod tests {
         );
         assert_eq!(build_device_id("V", "P", "", Transport::Bot), "disk&ven_v&prod_p");
         assert_eq!(build_device_id("V", "P", "R1", Transport::Unknown), "disk&ven_v&prod_p");
+    }
+
+    #[test]
+    fn native_probe_builds_candidates_without_ioreg() {
+        let runner = NativeOnlyRunner {
+            probe: HardwareProbe {
+                vid: Some(0x3535),
+                pid: Some(0x6300),
+                transport: NativeTransport::Bot,
+                inquiry: Some(InquiryInfo {
+                    vendor: "AIGO    ".into(),
+                    product: "U335".into(),
+                    revision: "PMAP".into(),
+                }),
+            },
+            subprocess_calls: Cell::new(0),
+        };
+        assert_eq!(
+            generate_candidates(&runner, 6),
+            vec![
+                "disk&ven_aigo&prod_u335&rev_pmap".to_string(),
+                "disk&ven_aigo&prod_u335".to_string(),
+            ]
+        );
+        assert_eq!(runner.subprocess_calls.get(), 0);
     }
 }

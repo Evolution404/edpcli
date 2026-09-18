@@ -1,8 +1,10 @@
 # edpcli — EDP/cems U 盘管理 CLI
 
 Rust 单二进制 `edpcli`（macOS）。核心协议与数据处理在进程内完成；允许使用成熟 Rust
-crate 减少系统命令依赖。当前保留 `diskutil` / `ioreg` / `sudo` 处理 macOS 设备枚举、
-硬件属性和提权，GBK 解码与本地时间格式化已不再启动 `iconv` / `/bin/date` 子进程。
+crate 减少系统命令依赖。USB VID/PID、UAS/BOT 与 SCSI inquiry 优先通过 IOKit framework
+原生读取，正常路径不再启动 `ioreg`；仅在 IOKit 属性缺失时保留 `ioreg` 兼容 fallback。
+当前仍保留 `diskutil` 负责整盘枚举/属性与卸载，`sudo` 负责提权。GBK 解码、本地时间、
+用户 home 与 root 判定均已改为进程内实现，不再启动 `iconv`、`/bin/date`、shell 或 `id`。
 
 ## 快速使用
 

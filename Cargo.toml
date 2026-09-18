@@ -21,4 +21,6 @@ strip = true
 [dependencies]
 encoding_rs = "0.8"
 libc = "0.2"
+objc2-core-foundation = { version = "0.3.2", default-features = false, features = ["std", "CFNumber", "CFString"] }
+objc2-io-kit = { version = "0.3.2", default-features = false, features = ["std", "libc"] }
 time = { version = "0.3", features = ["local-offset"] }

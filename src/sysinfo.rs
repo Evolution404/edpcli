@@ -10,6 +10,7 @@ use std::sync::mpsc::{self, RecvTimeoutError};
 use std::thread;
 use std::time::{Duration, Instant};
 
+use crate::native_probe::HardwareProbe;
 use crate::plist;
 
 const DISKUTIL_TIMEOUT: Duration = Duration::from_secs(10);
@@ -29,6 +30,12 @@ pub struct ExtDisk {
 /// 等价 Python subprocess.check_output(text=True, errors='ignore', timeout=…)。
 pub trait CmdRunner {
     fn check_output(&self, cmd: &[&str], timeout: Duration) -> io::Result<String>;
+
+    /// 可选的原生 IOKit 硬件探测。测试 runner 默认没有 native backend；
+    /// production `SysRunner` 覆盖实现，业务层在 None 时再回退旧 ioreg 文本路径。
+    fn hardware_probe(&self, _disk: u32) -> Option<HardwareProbe> {
+        None
+    }
 }
 
 pub struct SysRunner;
@@ -78,6 +85,10 @@ impl CmdRunner for SysRunner {
             Err(io::Error::other(format!("{} 退出码 {:?}", cmd[0], status.code())))
         }
     }
+
+    fn hardware_probe(&self, disk: u32) -> Option<HardwareProbe> {
+        crate::native_probe::probe_disk(disk)
+    }
 }
 
 #[derive(Clone)]
@@ -110,6 +121,7 @@ impl CachedOutput {
 pub struct ReadProbeCache<'a> {
     inner: &'a dyn CmdRunner,
     cache: RefCell<HashMap<String, CachedOutput>>,
+    hardware: RefCell<HashMap<u32, Option<HardwareProbe>>>,
     hits: Cell<usize>,
     misses: Cell<usize>,
 }
@@ -119,6 +131,7 @@ impl<'a> ReadProbeCache<'a> {
         Self {
             inner,
             cache: RefCell::new(HashMap::new()),
+            hardware: RefCell::new(HashMap::new()),
             hits: Cell::new(0),
             misses: Cell::new(0),
         }
@@ -160,6 +173,15 @@ impl CmdRunner for ReadProbeCache<'_> {
             .borrow_mut()
             .insert(key, CachedOutput::from_result(&result));
         result
+    }
+
+    fn hardware_probe(&self, disk: u32) -> Option<HardwareProbe> {
+        if let Some(value) = self.hardware.borrow().get(&disk).cloned() {
+            return value;
+        }
+        let value = self.inner.hardware_probe(disk);
+        self.hardware.borrow_mut().insert(disk, value.clone());
+        value
     }
 }
 
@@ -283,6 +305,11 @@ pub fn disk_total_sectors(runner: &dyn CmdRunner, disk: u32) -> Option<u64> {
 
 /// USB VID/PID(hex4); 失败返回 ("xxxx","xxxx")。
 pub fn usb_vid_pid(runner: &dyn CmdRunner, disk: u32) -> (String, String) {
+    if let Some(probe) = runner.hardware_probe(disk) {
+        if let (Some(vid), Some(pid)) = (probe.vid, probe.pid) {
+            return (format!("{vid:04x}"), format!("{pid:04x}"));
+        }
+    }
     let out = match runner.check_output(&["ioreg", "-r", "-c", "IOUSBHostDevice", "-l"], IOREG_TIMEOUT) {
         Ok(o) => o,
         Err(_) => return ("xxxx".into(), "xxxx".into()),
@@ -401,7 +428,10 @@ pub fn unmount_disk(runner: &dyn CmdRunner, disk: u32) -> io::Result<()> {
 
 #[cfg(test)]
 mod tests {
+    use std::cell::Cell;
+
     use super::*;
+    use crate::native_probe::{HardwareProbe, NativeTransport};
     use std::collections::HashMap;
 
     /// 罐头 CmdRunner: (子命令前缀) → 预置输出。
@@ -606,5 +636,65 @@ mod tests {
         assert_eq!(usb_vid_pid(&cached, 6), ("xxxx".into(), "xxxx".into()));
         assert_eq!(cached.misses(), 1);
         assert_eq!(cached.hits(), 1, "失败结果也应缓存，避免重复启动同一查询");
+    }
+
+    #[test]
+    fn usb_vid_pid_prefers_native_probe_without_ioreg() {
+        struct NativeRunner {
+            calls: Cell<usize>,
+        }
+        impl CmdRunner for NativeRunner {
+            fn check_output(&self, _cmd: &[&str], _timeout: Duration) -> io::Result<String> {
+                self.calls.set(self.calls.get() + 1);
+                Err(io::Error::other("native path should not call ioreg"))
+            }
+
+            fn hardware_probe(&self, _disk: u32) -> Option<HardwareProbe> {
+                Some(HardwareProbe {
+                    vid: Some(0x3535),
+                    pid: Some(0x6300),
+                    transport: NativeTransport::Uas,
+                    inquiry: None,
+                })
+            }
+        }
+
+        let runner = NativeRunner {
+            calls: Cell::new(0),
+        };
+        assert_eq!(usb_vid_pid(&runner, 6), ("3535".into(), "6300".into()));
+        assert_eq!(runner.calls.get(), 0);
+    }
+
+    #[test]
+    fn read_probe_cache_reuses_native_hardware_probe_per_disk() {
+        struct NativeCountingRunner {
+            calls: Cell<usize>,
+        }
+        impl CmdRunner for NativeCountingRunner {
+            fn check_output(&self, _cmd: &[&str], _timeout: Duration) -> io::Result<String> {
+                Err(io::Error::other("not used"))
+            }
+
+            fn hardware_probe(&self, disk: u32) -> Option<HardwareProbe> {
+                self.calls.set(self.calls.get() + 1);
+                Some(HardwareProbe {
+                    vid: Some(disk as u16),
+                    pid: Some(0x2005),
+                    transport: NativeTransport::Bot,
+                    inquiry: None,
+                })
+            }
+        }
+
+        let inner = NativeCountingRunner {
+            calls: Cell::new(0),
+        };
+        let cached = ReadProbeCache::new(&inner);
+        assert_eq!(cached.hardware_probe(6).unwrap().vid, Some(6));
+        assert_eq!(cached.hardware_probe(6).unwrap().vid, Some(6));
+        assert_eq!(inner.calls.get(), 1, "同一 disk 的 IOKit 探测应只执行一次");
+        assert_eq!(cached.hardware_probe(7).unwrap().vid, Some(7));
+        assert_eq!(inner.calls.get(), 2, "不同 disk 必须独立探测");
     }
 }
