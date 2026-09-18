@@ -3,11 +3,7 @@
 //! v2 只动态提供物理盘、全局备份编号、备份文件名与 LBA0-13。用户级 onlyid/index
 //! 已退出 CLI grammar，补全层不得重新暴露。
 
-use std::collections::BTreeSet;
-
-use crate::backup_catalog::BackupCatalog;
 use crate::diskio;
-use crate::selectors::BackupSelector;
 use crate::sysinfo::{self, CmdRunner};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -37,18 +33,15 @@ pub fn dynamic_values(
     match kind {
         "backup-number" => {
             let dir = diskio::resolve_backup_dir(backup_dir_flag);
-            let count = BackupSelector::load(&dir).numbered().len();
+            let count = diskio::scan_backup_names(&dir).len();
             (1..=count).map(|n| n.to_string()).collect()
         }
         "backup-file" => {
             let dir = diskio::resolve_backup_dir(backup_dir_flag);
-            let mut names = BTreeSet::new();
-            for entry in BackupCatalog::load(&dir).entries() {
-                if let Some(name) = entry.path.file_name().and_then(|n| n.to_str()) {
-                    names.insert(name.to_string());
-                }
-            }
-            names.into_iter().collect()
+            diskio::scan_backup_names(&dir)
+                .into_iter()
+                .filter_map(|path| path.file_name()?.to_str().map(str::to_string))
+                .collect()
         }
         "disk" => sysinfo::list_usb_disks(runner)
             .into_iter()

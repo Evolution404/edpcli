@@ -873,6 +873,41 @@ pub fn scan_backup_dir(dir: &Path) -> Vec<BackupEntry> {
     entries
 }
 
+/// Shell completion 专用的轻量备份索引。
+///
+/// 这里只判断普通 `.bin` 文件以及文件名是否符合本工具备份命名；绝不读取备份内容、
+/// 计算 MD5 或解析 LBA。完整健康状态仍由 `scan_backup_dir` 负责。
+pub fn scan_backup_names(dir: &Path) -> Vec<PathBuf> {
+    let Ok(read_dir) = fs::read_dir(dir) else {
+        return Vec::new();
+    };
+    let mut paths: Vec<PathBuf> = read_dir
+        .flatten()
+        .filter_map(|entry| {
+            let file_type = entry.file_type().ok()?;
+            if !file_type.is_file() {
+                return None;
+            }
+            let path = entry.path();
+            if path.extension().and_then(|ext| ext.to_str()) != Some("bin") {
+                return None;
+            }
+            let name = path.file_name()?.to_str()?;
+            parse_backup_name(name)?;
+            Some(path)
+        })
+        .collect();
+    paths.sort_by(
+        |a, b| match (backup_name_time_key(a), backup_name_time_key(b)) {
+            (Some(at), Some(bt)) => bt.cmp(&at).then_with(|| a.cmp(b)),
+            (Some(_), None) => Ordering::Less,
+            (None, Some(_)) => Ordering::Greater,
+            (None, None) => a.cmp(b),
+        },
+    );
+    paths
+}
+
 /// 同一物理盘的备份分组键。现代命名优先使用 onlyid；历史/缺失 onlyid 时退化为
 /// (device_id, total sectors)。未识别文件不参与自动清理策略。
 pub fn backup_group_key(entry: &BackupEntry) -> Option<String> {
