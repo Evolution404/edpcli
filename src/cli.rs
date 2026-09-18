@@ -821,7 +821,7 @@ enum FlowKind {
     Restore { bin: Option<String>, yes: bool },
 }
 
-fn argv_with_backup_dir_for_elevation(backup_dir_flag: Option<&str>) -> Vec<String> {
+pub(crate) fn argv_with_backup_dir_for_elevation(backup_dir_flag: Option<&str>) -> Vec<String> {
     let mut argv: Vec<String> = std::env::args().skip(1).collect();
     if backup_dir_flag.is_none() {
         argv.extend(diskio::backup_dir_argv_suffix(

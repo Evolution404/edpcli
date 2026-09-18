@@ -3,7 +3,9 @@
 //! 备份文件可直接作位置参数；当前盘由设备选择器确定。底层解析继续复用
 //! inspect/metainfo，不维护第二套协议算法。
 
-use crate::cli::{auto_pick_disk, guard_usb_disk, InfoOpts, StdPrompter};
+use crate::cli::{
+    argv_with_backup_dir_for_elevation, auto_pick_disk, guard_usb_disk, InfoOpts, StdPrompter,
+};
 use crate::common::{EXIT_BACKUP, EXIT_IO, EXIT_OK, SECTOR};
 use crate::diskio::{self, find_backups, raw_path, DiskFacts, FileDev, SectorReadCache};
 use crate::elevate;
@@ -100,7 +102,10 @@ fn disk_flow(runner: &dyn CmdRunner, mut opts: InfoOpts) -> i32 {
         }
     }
     if !elevate::is_root() {
-        let mut argv: Vec<String> = std::env::args().skip(1).collect();
+        // 与 list/apply/backup create 一致：自动提权不能依赖 sudo/UAC 继承环境变量。
+        // 当 backup_dir 来自 EDPCLI_BACKUP_DIR 时，将其转为显式 --backup-dir 跨过提权边界，
+        // 否则 info 提权前后可能显示不同的备份数量。
+        let mut argv = argv_with_backup_dir_for_elevation(opts.backup_dir.as_deref());
         if opts.disk.is_none() {
             let mut prompt = StdPrompter;
             let n = match auto_pick_disk(runner, &mut prompt) {
