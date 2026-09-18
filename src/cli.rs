@@ -241,15 +241,24 @@ pub(crate) fn auto_pick_disk(
     DeviceSelector::new(None).resolve(runner, prompt)
 }
 
-/// run/apply 共用主流程(apply=false 即 dry-run)。disk 为已选定并通过系统盘防护的盘号。
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ApplyMode {
+    DryRun,
+    Write { force: bool },
+}
+
+/// apply 的预览/真写共用主流程。disk 为已选定并通过系统盘防护的盘号。
 pub fn apply_flow(
-    apply: bool,
-    force: bool,
+    mode: ApplyMode,
     disk: u32,
     size_gb: Option<f64>,
     ctx: &mut Ctx,
     dev: &mut dyn SectorDev,
 ) -> EdpCliResult<i32> {
+    let (apply, force) = match mode {
+        ApplyMode::DryRun => (false, false),
+        ApplyMode::Write { force } => (true, force),
+    };
     guard_usb_disk(ctx.runner, disk)?;
     let runner = ctx.runner;
 
@@ -811,7 +820,7 @@ fn list_flow(runner: &SysRunner, backup_dir_flag: Option<String>) -> i32 {
     EXIT_OK
 }
 
-/// run/apply/restore 的公共外壳:
+/// apply/backup restore 的公共外壳:
 ///   1) 显式目标的系统盘拒绝无需管理员权限，提权前先判；
 ///   2) 未提权时把目标统一固定为平台原生选择器；未给 --disk 时先以用户身份选盘；
 ///   3) 提权路径：（必要时交互选盘）→ 打开平台裸盘设备 → 执行流程。
@@ -904,8 +913,10 @@ fn real_flow(
         }
     };
     let r = match kind {
-        FlowKind::Dry => apply_flow(false, false, n, size, &mut ctx, &mut dev),
-        FlowKind::Apply { force, .. } => apply_flow(true, force, n, size, &mut ctx, &mut dev),
+        FlowKind::Dry => apply_flow(ApplyMode::DryRun, n, size, &mut ctx, &mut dev),
+        FlowKind::Apply { force, .. } => {
+            apply_flow(ApplyMode::Write { force }, n, size, &mut ctx, &mut dev)
+        }
         FlowKind::Restore { bin, .. } => restore_flow(bin, n, &mut ctx, &mut dev),
     };
     finish(r)

@@ -77,6 +77,25 @@ Phase 3 本地门禁：
 - `cargo clippy --all-targets -- -D warnings`：PASS；
 - 搜索 `MetaInfoOpts|SourceOpts|Parsed::MetaInfo|metainfo_flow`：0 命中。
 
+### Phase 4：apply --dry-run — 已完成
+
+- `run` 已彻底退出执行模型，`apply --dry-run` 与真写共用同一识别/转换主流程；
+- 内部执行模式由两个布尔参数收敛为显式 `ApplyMode::DryRun` /
+  `ApplyMode::Write { force }`，避免调用方把预览/真写或 force 语义传反；
+- 新增 dry-run 副作用契约测试，明确锁定：
+  - 不创建备份目录/备份文件；
+  - 不进入 YES 确认；
+  - 不 reopen 为读写；
+  - 不执行任何扇区写入；
+- 原有转换结果、系统盘 fail-closed、USB 整盘校验及真写原子写入/回滚路径保持不变。
+
+Phase 4 本地门禁：
+
+- `cargo fmt --all -- --check`：PASS；
+- `cargo test --all-targets`：PASS；
+- `cargo clippy --all-targets -- -D warnings`：PASS；
+- `tests/cli_offline.rs` 新增 dry-run 无写阶段副作用测试：PASS。
+
 ## 下一位 AI 从这里开始
 
 1. 先读：
@@ -84,9 +103,9 @@ Phase 3 本地门禁：
    - `docs/RELEASE.md`
    - `docs/USAGE.md`
 2. 检查 `git status --short --branch`，禁止 reset/clean。
-3. 从 **Phase 4 apply --dry-run** 继续，仍须测试先行；不要削弱 selector pinning、系统盘
+3. 从 **Phase 5 backup create** 继续，仍须测试先行；不要削弱 selector pinning、系统盘
    fail-closed 或 onlyid 防串盘。
-4. Phase 5 接通 `backup create` 执行层时，必须与 apply 写前自动备份共用同一个
+4. 接通 `backup create` 执行层时，必须与 apply 写前自动备份共用同一个
    backup service，且独立备份路径不得调用 prepare_write/unmount/写盘。
 5. 小 commit、及时 push，阶段完成后更新本交接文档。
 

@@ -11,7 +11,7 @@ use std::fs;
 use std::process::Command;
 
 use common::*;
-use edpcli::cli::{apply_flow, restore_flow, Ctx};
+use edpcli::cli::{apply_flow, restore_flow, ApplyMode, Ctx};
 use edpcli::common::{
     EXIT_ALREADY_NOPWD, EXIT_BACKUP, EXIT_CANCELLED, EXIT_OK, EXIT_TARGET, SECTOR,
 };
@@ -218,8 +218,7 @@ fn apply_refuses_without_force() {
     )
     .unwrap();
     let e = apply_flow(
-        true,
-        false,
+        ApplyMode::Write { force: false },
         6,
         None,
         &mut ctx(&runner, &mut prompt, &bak),
@@ -252,8 +251,7 @@ fn apply_force_writes_same_sectors_and_tags_backup() {
     )
     .unwrap();
     let code = apply_flow(
-        true,
-        true,
+        ApplyMode::Write { force: true },
         6,
         None,
         &mut ctx(&runner, &mut prompt, &bak),
@@ -296,8 +294,7 @@ fn apply_original_disk_not_blocked_and_dry_run_no_write() {
     )
     .unwrap();
     let code = apply_flow(
-        true,
-        false,
+        ApplyMode::Write { force: false },
         6,
         None,
         &mut ctx(&runner, &mut prompt, &bak),
@@ -317,8 +314,7 @@ fn apply_original_disk_not_blocked_and_dry_run_no_write() {
     let mut dev2 =
         FileDev::open_rdwr(img2.to_str().unwrap(), std::time::Duration::from_secs(1)).unwrap();
     let code2 = apply_flow(
-        false,
-        false,
+        ApplyMode::DryRun,
         6,
         None,
         &mut ctx(&runner, &mut prompt2, &tmp2.0.join("bak2")),
@@ -327,6 +323,37 @@ fn apply_original_disk_not_blocked_and_dry_run_no_write() {
     .unwrap();
     assert_eq!(code2, EXIT_OK);
     assert_eq!(fs::read(&img2).unwrap(), orig);
+}
+
+#[test]
+fn dry_run_never_enters_backup_prompt_reopen_or_write_phase() {
+    let Some(orig) = load_disk_image("netac") else {
+        eprintln!("跳过: 真实备份不可用");
+        return;
+    };
+    let runner = netac_runner(6);
+    let tmp = TmpDir::new("apply_dry_side_effect_contract");
+    let backup_dir = tmp.0.join("bak");
+    let mut prompt = ScriptPrompter {
+        inputs: vec![],
+        idx: 0,
+    };
+    let mut dev = SwapOnReopenDev::new(orig.clone(), orig);
+
+    let code = apply_flow(
+        ApplyMode::DryRun,
+        6,
+        None,
+        &mut ctx(&runner, &mut prompt, &backup_dir),
+        &mut dev,
+    )
+    .unwrap();
+
+    assert_eq!(code, EXIT_OK);
+    assert_eq!(prompt.idx, 0, "dry-run 不得进入确认提示");
+    assert!(!backup_dir.exists(), "dry-run 不得创建备份目录或备份文件");
+    assert!(!dev.switched, "dry-run 不得 reopen 为读写");
+    assert_eq!(dev.writes, 0, "dry-run 不得执行任何扇区写入");
 }
 
 #[test]
@@ -351,8 +378,7 @@ fn apply_cancel_at_prompt_leaves_disk_untouched() {
     )
     .unwrap();
     let e = apply_flow(
-        true,
-        false,
+        ApplyMode::Write { force: false },
         6,
         None,
         &mut ctx(&runner, &mut prompt, &bak),
@@ -779,8 +805,7 @@ fn apply_system_disk_guard_in_flow() {
     let mut dev =
         FileDev::open_rdwr(img.to_str().unwrap(), std::time::Duration::from_secs(1)).unwrap();
     let e = apply_flow(
-        true,
-        false,
+        ApplyMode::Write { force: false },
         1,
         None,
         &mut ctx(&runner, &mut prompt, &tmp.0),
@@ -818,8 +843,7 @@ fn apply_refuses_explicit_non_usb_whole_disk() {
     .unwrap();
 
     let e = apply_flow(
-        false,
-        false,
+        ApplyMode::DryRun,
         6,
         None,
         &mut ctx(&runner, &mut prompt, &tmp.0),
@@ -843,8 +867,7 @@ fn apply_refuses_if_disk_identity_changes_after_reopen() {
     let mut dev = SwapOnReopenDev::new(netac, lexar);
 
     let e = apply_flow(
-        true,
-        false,
+        ApplyMode::Write { force: false },
         6,
         None,
         &mut ctx(&runner, &mut prompt, &tmp.0),
@@ -909,8 +932,7 @@ fn apply_refuses_when_unmount_fails_before_reopen_or_write() {
     let mut dev = SwapOnReopenDev::new(netac.clone(), netac);
 
     let e = apply_flow(
-        true,
-        false,
+        ApplyMode::Write { force: false },
         6,
         None,
         &mut ctx(&runner, &mut prompt, &tmp.0),
@@ -937,8 +959,7 @@ fn apply_refuses_if_metadata_changes_after_backup_before_write() {
     let mut dev = SwapOnReopenDev::new(netac, changed);
 
     let e = apply_flow(
-        true,
-        false,
+        ApplyMode::Write { force: false },
         6,
         None,
         &mut ctx(&runner, &mut prompt, &tmp.0),
