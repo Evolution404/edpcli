@@ -55,7 +55,8 @@ edpcli.exe list
 
 ### 从源码构建
 
-需要 Rust 1.98 或更新版本：
+项目正式构建工具链固定在 `rust-toolchain.toml`；当前为 Rust 1.98.1。进入仓库后 rustup
+会自动选择该版本：
 
 ```bash
 git clone git@github.com:Evolution404/edpcli.git
@@ -247,5 +248,6 @@ edpcli completion fish | source
 - `Release`：推送 `v*` tag 后重新执行发布级测试，并自动构建 macOS Universal、Linux x86_64、
   Windows x86_64 三套压缩包及 SHA-256，全部成功后创建同 tag 的 GitHub Release。
 
-因此正式发布只需要在已经全绿的 `main` 上创建并推送版本 tag；任一平台构建失败都不会
-创建不完整的 Release。
+正式发布前还会校验 tag 与 `Cargo.toml` 版本一致；任一平台构建失败都不会创建不完整的
+Release。版本号升级规则、发布门禁和无物理 Linux/Windows 主机时的验收口径见
+[`RELEASE.md`](RELEASE.md)。

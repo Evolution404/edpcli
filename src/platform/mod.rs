@@ -152,6 +152,18 @@ pub fn prepare_write(runner: &dyn crate::sysinfo::CmdRunner, disk: u32) -> io::R
     imp::prepare_write(runner, disk).map(|inner| WriteGuard { _inner: inner })
 }
 
+/// CI 专用虚拟磁盘写前准备。
+///
+/// 该入口只在显式启用 `ci-virtual-disk` feature 且目标平台为 Linux/Windows 时存在；
+/// Linux 实现只接受 `/dev/loopN`，Windows 实现只接受系统 API 标记为虚拟总线的 VHD。
+#[cfg(all(
+    feature = "ci-virtual-disk",
+    any(target_os = "linux", target_os = "windows")
+))]
+pub fn ci_prepare_virtual_write(path: &str) -> io::Result<WriteGuard> {
+    imp::ci_prepare_virtual_write(path).map(|inner| WriteGuard { _inner: inner })
+}
+
 pub fn elevation_label() -> &'static str {
     imp::elevation_label()
 }

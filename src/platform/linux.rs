@@ -4,6 +4,8 @@ use std::fs::File;
 use std::io;
 use std::mem::MaybeUninit;
 use std::os::unix::ffi::OsStrExt;
+#[cfg(feature = "ci-virtual-disk")]
+use std::os::unix::fs::FileTypeExt;
 use std::path::Path;
 use std::path::PathBuf;
 use std::process::Command;
@@ -243,8 +245,7 @@ fn decode_mount_field(input: &str) -> String {
     String::from_utf8_lossy(&out).into_owned()
 }
 
-fn mounted_points_for_devices(devices: &HashSet<String>) -> io::Result<Vec<String>> {
-    let text = std::fs::read_to_string("/proc/self/mountinfo")?;
+fn mounted_points_from_text(devices: &HashSet<String>, text: &str) -> Vec<String> {
     let mut points = Vec::new();
     for line in text.lines() {
         let fields: Vec<&str> = line.split_whitespace().collect();
@@ -254,7 +255,12 @@ fn mounted_points_for_devices(devices: &HashSet<String>) -> io::Result<Vec<Strin
     }
     points.sort_by_key(|path| std::cmp::Reverse(path.len()));
     points.dedup();
-    Ok(points)
+    points
+}
+
+fn mounted_points_for_devices(devices: &HashSet<String>) -> io::Result<Vec<String>> {
+    let text = std::fs::read_to_string("/proc/self/mountinfo")?;
+    Ok(mounted_points_from_text(devices, &text))
 }
 
 pub(super) fn is_system_disk(_runner: &dyn CmdRunner, disk: u32) -> bool {
@@ -397,10 +403,8 @@ pub(super) fn list_external_disks(runner: &dyn CmdRunner) -> Vec<ExtDisk> {
         .collect()
 }
 
-pub(super) fn prepare_write(_runner: &dyn CmdRunner, disk: u32) -> io::Result<WriteGuard> {
-    let name = block_name(disk)
-        .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "Linux 块设备不存在"))?;
-    let devices = disk_device_numbers(&name)?;
+fn prepare_write_for_block_name(name: &str) -> io::Result<WriteGuard> {
+    let devices = disk_device_numbers(name)?;
     if devices.is_empty() {
         return Err(io::Error::other(
             "无法确认 Linux 块设备 major:minor，拒绝写盘",
@@ -431,6 +435,49 @@ pub(super) fn prepare_write(_runner: &dyn CmdRunner, disk: u32) -> io::Result<Wr
     Ok(WriteGuard)
 }
 
+pub(super) fn prepare_write(_runner: &dyn CmdRunner, disk: u32) -> io::Result<WriteGuard> {
+    let name = block_name(disk)
+        .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "Linux 块设备不存在"))?;
+    prepare_write_for_block_name(&name)
+}
+
+#[cfg(feature = "ci-virtual-disk")]
+pub(super) fn ci_prepare_virtual_write(path: &str) -> io::Result<WriteGuard> {
+    let name = path.strip_prefix("/dev/").ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            "CI 虚拟磁盘只允许 /dev/loopN",
+        )
+    })?;
+    let Some(index) = name.strip_prefix("loop") else {
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            "CI 虚拟磁盘只允许 /dev/loopN",
+        ));
+    };
+    if index.is_empty() || !index.bytes().all(|b| b.is_ascii_digit()) {
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            "CI 虚拟磁盘只允许 /dev/loopN 整盘",
+        ));
+    }
+    let metadata = std::fs::metadata(path)?;
+    if !metadata.file_type().is_block_device() {
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            "CI 虚拟磁盘目标不是块设备",
+        ));
+    }
+    let class = std::path::Path::new("/sys/class/block").join(name);
+    if class.join("partition").exists() {
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            "CI 虚拟磁盘必须选择 loop 整盘而不是分区",
+        ));
+    }
+    prepare_write_for_block_name(name)
+}
+
 pub(super) const fn elevation_label() -> &'static str {
     "sudo"
 }
@@ -456,6 +503,33 @@ mod tests {
     fn mountinfo_escapes_are_decoded() {
         assert_eq!(decode_mount_field(r"/media/My\040USB"), "/media/My USB");
         assert_eq!(decode_mount_field(r"/tmp/a\134b"), r"/tmp/a\b");
+    }
+
+    #[test]
+    fn mountinfo_contract_matches_major_minor_and_detects_root() {
+        let devices = HashSet::from(["8:1".to_string(), "253:0".to_string()]);
+        let text = "\
+24 1 8:1 / / rw,relatime - ext4 /dev/sda1 rw\n\
+25 24 8:1 /data /mnt/My\\040USB rw,relatime - ext4 /dev/sda1 rw\n\
+26 1 7:0 / /snap/core rw - squashfs /dev/loop0 ro\n\
+27 1 253:0 / /crypt rw - ext4 /dev/dm-0 rw\n";
+        let points = mounted_points_from_text(&devices, text);
+        assert!(points.contains(&"/".to_string()));
+        assert!(points.contains(&"/mnt/My USB".to_string()));
+        assert!(points.contains(&"/crypt".to_string()));
+        assert!(!points.contains(&"/snap/core".to_string()));
+    }
+
+    #[test]
+    fn mountinfo_contract_deduplicates_same_mountpoint() {
+        let devices = HashSet::from(["8:16".to_string()]);
+        let text = "\
+31 1 8:16 / /media/test rw - ext4 /dev/sdb rw\n\
+32 1 8:16 / /media/test rw - ext4 /dev/sdb rw\n";
+        assert_eq!(
+            mounted_points_from_text(&devices, text),
+            vec!["/media/test"]
+        );
     }
 
     #[test]

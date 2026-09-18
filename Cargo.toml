@@ -1,6 +1,6 @@
 [package]
 name = "edpcli"
-version = "3.0.0"
+version = "1.0.0"
 edition = "2021"
 rust-version = "1.98"
 description = "EDP/cems U 盘管理 CLI（识别、元信息、备份、恢复与免密转换）"
@@ -14,6 +14,12 @@ path = "src/lib.rs"
 [[bin]]
 name = "edpcli"
 path = "src/main.rs"
+
+[features]
+default = []
+# 仅供 CI 在 GitHub-hosted Runner 的临时 loop/VHD 上做 HIL-lite。
+# 正式 Release 永不启用；平台实现还会再次验证目标确实是虚拟块设备。
+ci-virtual-disk = []
 
 [profile.release]
 strip = true
