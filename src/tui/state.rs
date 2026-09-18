@@ -3,6 +3,37 @@
 //! The state layer never performs I/O. That makes navigation and cancellation semantics testable
 //! without a real terminal and keeps critical-operation policy independent from crossterm.
 
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WriteKind {
+    Apply,
+    Restore,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WizardStage {
+    Confirm,
+    Running,
+    Result,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WriteIntent {
+    pub kind: WriteKind,
+    pub disk: u32,
+    pub backup: Option<std::path::PathBuf>,
+}
+
+#[derive(Debug, Clone)]
+pub struct WizardState {
+    pub stage: WizardStage,
+    pub kind: WriteKind,
+    pub disk: u32,
+    pub backup: Option<std::path::PathBuf>,
+    pub confirmation: String,
+    pub message: Option<String>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Workspace {
     Devices,
@@ -35,6 +66,8 @@ pub enum NavCommand {
     Quit,
     Help,
     Refresh,
+    BeginApply,
+    BeginRestore,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -55,6 +88,7 @@ pub struct AppState {
     input_mode: InputMode,
     critical_operation: bool,
     exit_pending: bool,
+    wizard: Option<WizardState>,
 }
 
 impl Default for AppState {
@@ -76,6 +110,84 @@ impl AppState {
             input_mode: InputMode::Normal,
             critical_operation: false,
             exit_pending: false,
+            wizard: None,
+        }
+    }
+
+    pub fn wizard(&self) -> Option<&WizardState> {
+        self.wizard.as_ref()
+    }
+
+    pub fn begin_write_wizard(
+        &mut self,
+        kind: WriteKind,
+        disk: u32,
+        backup: Option<std::path::PathBuf>,
+    ) {
+        self.input_mode = InputMode::Normal;
+        self.wizard = Some(WizardState {
+            stage: WizardStage::Confirm,
+            kind,
+            disk,
+            backup,
+            confirmation: String::new(),
+            message: None,
+        });
+    }
+
+    pub fn push_wizard_confirmation(&mut self, ch: char) {
+        if let Some(wizard) = self.wizard.as_mut() {
+            if wizard.stage == WizardStage::Confirm && wizard.confirmation.len() < 16 {
+                wizard.confirmation.push(ch);
+                wizard.message = None;
+            }
+        }
+    }
+
+    pub fn backspace_wizard_confirmation(&mut self) {
+        if let Some(wizard) = self.wizard.as_mut() {
+            if wizard.stage == WizardStage::Confirm {
+                wizard.confirmation.pop();
+                wizard.message = None;
+            }
+        }
+    }
+
+    pub fn clear_wizard_confirmation(&mut self) {
+        if let Some(wizard) = self.wizard.as_mut() {
+            wizard.confirmation.clear();
+            wizard.message = None;
+        }
+    }
+
+    pub fn submit_wizard_confirmation(&mut self) -> Option<WriteIntent> {
+        let wizard = self.wizard.as_mut()?;
+        if wizard.stage != WizardStage::Confirm {
+            return None;
+        }
+        if wizard.confirmation != "YES" {
+            wizard.message = Some("必须精确输入 YES 才会进入写盘阶段".to_string());
+            return None;
+        }
+        let intent = WriteIntent {
+            kind: wizard.kind,
+            disk: wizard.disk,
+            backup: wizard.backup.clone(),
+        };
+        wizard.stage = WizardStage::Running;
+        wizard.message = Some("关键写盘阶段进行中，不可中断".to_string());
+        self.critical_operation = true;
+        Some(intent)
+    }
+
+    pub fn finish_write(&mut self, result: Result<(), String>) {
+        self.critical_operation = false;
+        if let Some(wizard) = self.wizard.as_mut() {
+            wizard.stage = WizardStage::Result;
+            wizard.message = Some(match result {
+                Ok(()) => "操作完成，安全链全部通过".to_string(),
+                Err(message) => message,
+            });
         }
     }
 
@@ -192,6 +304,10 @@ impl AppState {
         }
 
         if command == NavCommand::Escape {
+            if self.wizard.is_some() {
+                self.wizard = None;
+                return StateEffect::None;
+            }
             if self.input_mode != InputMode::Normal {
                 self.input_mode = InputMode::Normal;
                 return StateEffect::None;
@@ -235,6 +351,8 @@ impl AppState {
             NavCommand::Left => self.switch_workspace(Workspace::Devices),
             NavCommand::Right => self.switch_workspace(Workspace::Backups),
             NavCommand::Refresh
+            | NavCommand::BeginApply
+            | NavCommand::BeginRestore
             | NavCommand::NextMatch
             | NavCommand::PreviousMatch
             | NavCommand::Escape

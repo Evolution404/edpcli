@@ -8,7 +8,7 @@ use ratatui::{
     Frame,
 };
 
-use super::state::{AppState, InputMode, Workspace};
+use super::state::{AppState, InputMode, WizardStage, Workspace, WriteKind};
 
 fn device_status(row: &crate::disk_scan::Row) -> String {
     if row.proto != "USB" {
@@ -117,6 +117,48 @@ fn draw_backups(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState
     frame.render_stateful_widget(table, area, &mut table_state);
 }
 
+
+fn draw_wizard(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState) {
+    let Some(wizard) = state.wizard() else {
+        return;
+    };
+    let operation = match wizard.kind {
+        WriteKind::Apply => "Apply 免密转换",
+        WriteKind::Restore => "Restore 备份还原",
+    };
+    let mut lines = vec![
+        Line::from(Span::styled(operation, Style::default().add_modifier(Modifier::BOLD))),
+        Line::from(format!("目标: disk{}", wizard.disk)),
+    ];
+    if let Some(path) = &wizard.backup {
+        lines.push(Line::from(format!("备份: {}", path.display())));
+    }
+    lines.push(Line::from(
+        "安全链：系统盘/USB整盘检查 → selector pinning → 写前保护 → 卸载/锁卷 → reopen复核 → atomic write → sync/readback/rollback",
+    ));
+    match wizard.stage {
+        WizardStage::Confirm => {
+            lines.push(Line::from("确认后进入关键写盘阶段。请输入 YES："));
+            lines.push(Line::from(format!("> {}", wizard.confirmation)));
+        }
+        WizardStage::Running => {
+            lines.push(Line::from("关键写盘阶段进行中；q / Esc / Ctrl-C 不会中断当前事务。"));
+        }
+        WizardStage::Result => {
+            lines.push(Line::from("操作已到达安全结束点；Esc 返回。"));
+        }
+    }
+    if let Some(message) = &wizard.message {
+        lines.push(Line::from(message.clone()));
+    }
+    frame.render_widget(
+        Paragraph::new(lines)
+            .block(Block::default().borders(Borders::ALL).title("安全向导"))
+            .wrap(Wrap { trim: true }),
+        area,
+    );
+}
+
 pub fn draw(frame: &mut Frame, state: &AppState) {
     let area = frame.area();
     let chunks = Layout::default()
@@ -135,6 +177,9 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
     .block(Block::default().borders(Borders::ALL));
     frame.render_widget(title, chunks[0]);
 
+    if state.wizard().is_some() {
+        draw_wizard(frame, chunks[1], state);
+    } else {
     match state.input_mode() {
         InputMode::Help => {
             let help = Paragraph::new(vec![
@@ -152,13 +197,14 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
             Workspace::Backups => draw_backups(frame, chunks[1], state),
         },
     }
+    }
 
     let status = if state.is_critical_operation() {
         "关键写盘阶段：q / Esc / Ctrl-C 将延迟到安全检查点"
     } else if state.active_scan_pending() {
         "后台扫描中；界面可继续操作"
     } else {
-        "h/l 工作区  j/k 移动  r 刷新  ? 帮助  : 命令  / 搜索  q 退出"
+        "h/l 工作区  j/k 移动  a Apply  R Restore  r 刷新  ? 帮助  : 命令  / 搜索  q 退出"
     };
     frame.render_widget(Paragraph::new(status), chunks[2]);
 }

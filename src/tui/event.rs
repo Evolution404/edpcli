@@ -51,6 +51,8 @@ impl KeyMapper {
             KeyCode::Char('N') => Some(NavCommand::PreviousMatch),
             KeyCode::Char(':') => Some(NavCommand::CommandPalette),
             KeyCode::Char('?') => Some(NavCommand::Help),
+            KeyCode::Char('a') => Some(NavCommand::BeginApply),
+            KeyCode::Char('R') => Some(NavCommand::BeginRestore),
             KeyCode::Char('r') => Some(NavCommand::Refresh),
             KeyCode::Char('q') => Some(NavCommand::Quit),
             KeyCode::Esc => Some(NavCommand::Escape),
