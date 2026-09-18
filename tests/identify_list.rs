@@ -111,6 +111,16 @@ fn scan_and_print_all_row_kinds() {
     // 原盘数据: 非免密 + EDPF 3 条(含 Boot/Share/Encrypt)
     let row6 = rows.iter().find(|r| r.disk == 6).unwrap();
     assert!(!row6.is_nopwd);
+    assert_eq!(row6.user.as_deref(), Some("宋旭琳"));
+    assert!(
+        row6.dept
+            .as_deref()
+            .unwrap_or_default()
+            .contains("泰州供电公司"),
+        "dept={:?}",
+        row6.dept
+    );
+    assert!(out.contains("姓名") && out.contains("部门") && out.contains("宋旭琳"));
     let parts = row6.partitions.as_ref().unwrap();
     assert_eq!(parts.len(), 3);
     assert!(out.contains("└─ EDPF:"), "{}", out);
@@ -167,6 +177,8 @@ fn list_cli_smoke_exit_zero() {
     // 本机平台探测真跑：无论有没有插盘，都应正常退出并给出可辨认输出。
     let out = Command::new(env!("CARGO_BIN_EXE_edpcli"))
         .arg("list")
+        // 测试不能弹 sudo/UAC；内部哨兵只阻止自动提权重入，不改变只读扫描。
+        .arg("--_elevated")
         .output()
         .expect("运行 edpcli 二进制");
     assert_eq!(

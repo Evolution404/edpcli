@@ -102,8 +102,11 @@ selector，防止重枚举后数字编号漂移。
 edpcli list
 ```
 
-`list` 只读、不提权、不写盘。它会显示外接盘、容量、USB VID:PID、cems 识别、免密状态、
-onlyid、EDPF 分区摘要和已有备份数量。
+`list` 只读、不写盘。它会显示外接盘、容量、USB VID:PID、LBA8 中解析出的姓名/部门、
+cems 识别、免密状态、onlyid、EDPF 分区摘要和已有备份数量。程序先做无特权只读探测；
+如果实际读取裸盘时遇到权限不足，会由 edpcli 自己请求管理员权限并自动重新执行 `list`：
+macOS/Linux 直接进入 `sudo` 密码交互，Windows 触发 UAC，不需要用户再手工运行
+`sudo edpcli list`。
 
 ### 第二步：查看元信息
 

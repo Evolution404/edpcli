@@ -8,6 +8,8 @@ use std::path::Path;
 use crate::common::{fmt_gb, group_digits, EdpCliError, EXIT_IO, SECTOR};
 use crate::diskio::{self, find_backups, DiskFacts};
 use crate::identify::identify;
+use crate::inspect::InspectMeta;
+use crate::metainfo;
 use crate::sectors::{looks_nopwd, parse_lba12, EdpfPartition};
 use crate::sysinfo::{self, CmdRunner};
 
@@ -19,6 +21,8 @@ pub struct Row {
     pub proto: String,
     pub device_id: Option<String>,
     pub onlyid: Option<String>,
+    pub dept: Option<String>,
+    pub user: Option<String>,
     pub n_baks: usize,
     pub denied: bool,
     pub probe_error: Option<String>,
@@ -43,6 +47,8 @@ pub fn scan_disks(
             proto: d.proto.clone(),
             device_id: None,
             onlyid: None,
+            dept: None,
+            user: None,
             n_baks: 0,
             denied: false,
             probe_error: None,
@@ -73,6 +79,19 @@ pub fn scan_disks(
                 let lba4 = read_exact(4)?;
                 row.onlyid = diskio::lba4_label_id_from(&lba4);
                 if let Some(did) = &id.device_id {
+                    if let Ok(lba8) = read_exact(8) {
+                        let meta = InspectMeta {
+                            device_id: Some(did.clone()),
+                            vid: Some(d.vid.clone()),
+                            pid: Some(d.pid.clone()),
+                            size_bytes: Some(d.size),
+                            onlyid: row.onlyid.clone(),
+                        };
+                        if let Some(ownership) = metainfo::ownership_from_lba8(&lba8, &meta) {
+                            row.dept = ownership.dept;
+                            row.user = ownership.user;
+                        }
+                    }
                     let read = |lba: u32| {
                         read_exact(lba)
                             .map_err(|e| EdpCliError::new(EXIT_IO, format!("错误: {}", e)))
@@ -108,7 +127,7 @@ pub fn scan_disks(
 }
 
 pub fn print_disk_table(rows: &[Row]) -> String {
-    use crate::ui::{dim, render_table, TableCell, Tone};
+    use crate::ui::{dim, render_table, truncate_mid, TableCell, Tone};
     let mut out = String::new();
     if rows.is_empty() {
         out.push_str("未检测到外接盘。\n");
@@ -143,12 +162,36 @@ pub fn print_disk_table(rows: &[Row]) -> String {
                     },
                 ),
                 TableCell::left(format!("{}:{}", row.vid, row.pid), Tone::Yellow),
+                TableCell::left(
+                    row.user
+                        .as_deref()
+                        .filter(|value| !value.is_empty())
+                        .map(|value| truncate_mid(value, 14))
+                        .unwrap_or_else(|| "—".to_string()),
+                    if row.user.is_some() {
+                        Tone::Cyan
+                    } else {
+                        Tone::Dim
+                    },
+                ),
+                TableCell::left(
+                    row.dept
+                        .as_deref()
+                        .filter(|value| !value.is_empty())
+                        .map(|value| truncate_mid(value, 28))
+                        .unwrap_or_else(|| "—".to_string()),
+                    if row.dept.is_some() {
+                        Tone::Cyan
+                    } else {
+                        Tone::Dim
+                    },
+                ),
                 TableCell::left(status, tone),
             ]
         })
         .collect::<Vec<_>>();
     out.push_str(&render_table(
-        &["设备", "容量", "总线", "VID:PID", "状态"],
+        &["设备", "容量", "总线", "VID:PID", "姓名", "部门", "状态"],
         &table_rows,
     ));
 

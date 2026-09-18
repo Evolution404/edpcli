@@ -744,16 +744,7 @@ pub fn run() -> i32 {
             }
             EXIT_OK
         }
-        Parsed::List { backup_dir } => {
-            let bak = diskio::resolve_backup_dir(backup_dir.as_deref());
-            let read_disk = |disk: u32, lba: u32| diskio::read_lba(&raw_path(disk), lba);
-            let probe = ReadProbeCache::new(&runner);
-            print!(
-                "{}",
-                print_disk_table(&scan_disks(&probe, &bak, &read_disk))
-            );
-            EXIT_OK
-        }
+        Parsed::List { backup_dir } => list_flow(&runner, backup_dir),
         Parsed::Backup {
             action,
             keep,
@@ -842,6 +833,40 @@ fn pin_disk_selector_for_elevation(argv: &mut Vec<String>, selector: String) {
     argv.push(selector);
 }
 
+fn argv_with_backup_dir_for_elevation(backup_dir_flag: Option<&str>) -> Vec<String> {
+    let mut argv: Vec<String> = std::env::args().skip(1).collect();
+    if backup_dir_flag.is_none() {
+        argv.extend(diskio::backup_dir_argv_suffix(
+            std::env::var("EDPCLI_BACKUP_DIR").ok(),
+        ));
+    }
+    argv
+}
+
+fn list_needs_elevation(rows: &[Row], elevated: bool, has_sentinel: bool) -> bool {
+    rows.iter().any(|row| row.denied) && !elevated && !has_sentinel
+}
+
+fn list_flow(runner: &SysRunner, backup_dir_flag: Option<String>) -> i32 {
+    let bak = diskio::resolve_backup_dir(backup_dir_flag.as_deref());
+    let read_disk = |disk: u32, lba: u32| diskio::read_lba(&raw_path(disk), lba);
+    let probe = ReadProbeCache::new(runner);
+    let rows = scan_disks(&probe, &bak, &read_disk);
+
+    // 先无特权只读探测；只有真实遇到 PermissionDenied 才自动请求提权。
+    // 无外接盘时不会无意义弹密码/UAC，用户也不需要手工再跑 sudo。
+    let has_sentinel = std::env::args().any(|arg| arg == ELEVATED_FLAG);
+    if list_needs_elevation(&rows, elevate::is_root(), has_sentinel) {
+        println!("检测到外接盘，但读取身份、姓名和部门等裸盘信息需要管理员权限。");
+        let argv = argv_with_backup_dir_for_elevation(backup_dir_flag.as_deref());
+        elevate::ensure_elevated(&argv);
+        unreachable!();
+    }
+
+    print!("{}", print_disk_table(&rows));
+    EXIT_OK
+}
+
 /// run/apply/restore 的公共外壳:
 ///   1) 显式目标的系统盘拒绝无需管理员权限，提权前先判；
 ///   2) 未提权时把目标统一固定为平台原生选择器；未给 --disk 时先以用户身份选盘；
@@ -864,13 +889,8 @@ fn real_flow(
         }
     }
     if !elevate::is_root() {
-        let mut argv: Vec<String> = std::env::args().skip(1).collect();
         // 不依赖提权后的环境继承：备份目录转为显式旗标随 argv 过界。
-        if backup_dir_flag.is_none() {
-            argv.extend(diskio::backup_dir_argv_suffix(
-                std::env::var("EDPCLI_BACKUP_DIR").ok(),
-            ));
-        }
+        let mut argv = argv_with_backup_dir_for_elevation(backup_dir_flag.as_deref());
         let pinned_disk = match disk_opt {
             Some(n) => n,
             None => {
@@ -1271,6 +1291,47 @@ mod tests {
     }
 
     #[test]
+    fn list_requests_elevation_only_for_permission_denied_rows() {
+        let base = Row {
+            disk: 6,
+            size: 62_914_560_000,
+            vid: "0dd8".into(),
+            pid: "2005".into(),
+            proto: "USB".into(),
+            device_id: None,
+            onlyid: None,
+            dept: None,
+            user: None,
+            n_baks: 0,
+            denied: false,
+            probe_error: None,
+            is_nopwd: false,
+            partitions: None,
+        };
+        assert!(!list_needs_elevation(
+            std::slice::from_ref(&base),
+            false,
+            false
+        ));
+
+        let denied = Row {
+            denied: true,
+            ..base
+        };
+        assert!(list_needs_elevation(
+            std::slice::from_ref(&denied),
+            false,
+            false
+        ));
+        assert!(!list_needs_elevation(
+            std::slice::from_ref(&denied),
+            true,
+            false
+        ));
+        assert!(!list_needs_elevation(&[denied], false, true));
+    }
+
+    #[test]
     fn parse_usage_errors() {
         assert!(parse_args(&["bogus".into()]).is_err());
         assert!(parse_args(&["run".into(), "--nope".into()]).is_err());
@@ -1487,6 +1548,8 @@ mod tests {
                 proto: "USB".into(),
                 device_id: None,
                 onlyid: None,
+                dept: None,
+                user: None,
                 n_baks: 0,
                 denied: false,
                 probe_error: None,
@@ -1501,6 +1564,8 @@ mod tests {
                 proto: "USB".into(),
                 device_id: Some("disk&ven_netac&prod_onlydisk".into()),
                 onlyid: Some("1402259934".into()),
+                dept: Some("国网江苏省电力有限公司泰州供电公司".into()),
+                user: Some("宋旭琳".into()),
                 n_baks: 3,
                 denied: false,
                 probe_error: None,
@@ -1515,6 +1580,8 @@ mod tests {
                 proto: "Thunderbolt".into(),
                 device_id: None,
                 onlyid: None,
+                dept: None,
+                user: None,
                 n_baks: 0,
                 denied: false,
                 probe_error: None,
@@ -1528,7 +1595,14 @@ mod tests {
         let disk4_line = lines.iter().find(|l| l.contains("disk4")).unwrap();
         assert!(disk4_line.contains("非 cems 盘"));
         let disk6_line = lines.iter().find(|l| l.contains("disk6")).unwrap();
-        assert!(disk6_line.contains("cems盘") && disk6_line.contains("[免密]"));
+        assert!(
+            disk6_line.contains("cems盘")
+                && disk6_line.contains("[免密]")
+                && disk6_line.contains("宋旭琳")
+                && disk6_line.contains("泰州供电公司"),
+            "{}",
+            disk6_line
+        );
         // EDPF 明细行: 类型 + 大小 + LBA 范围
         let edpf = lines.iter().find(|l| l.contains("EDPF")).unwrap();
         assert!(
