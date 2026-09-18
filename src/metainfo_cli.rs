@@ -13,7 +13,7 @@ use crate::identify::identify;
 use crate::inspect::InspectMeta;
 use crate::inspect_cli::resolve_inspect_file;
 use crate::metainfo;
-use crate::sysinfo::{self, SysRunner};
+use crate::sysinfo::{self, CmdRunner};
 
 fn print_summary(source: &str, summary: &metainfo::MetaInfoSummary) {
     println!(
@@ -96,7 +96,7 @@ fn backup_flow(opts: MetaInfoOpts) -> i32 {
     EXIT_OK
 }
 
-fn disk_flow(runner: &SysRunner, mut opts: MetaInfoOpts) -> i32 {
+fn disk_flow(runner: &dyn CmdRunner, mut opts: MetaInfoOpts) -> i32 {
     if let Some(n) = opts.disk {
         if let Err(e) = guard_usb_disk(runner, n) {
             eprintln!("{}", crate::ui::red(&e.msg));
@@ -169,7 +169,7 @@ fn disk_flow(runner: &SysRunner, mut opts: MetaInfoOpts) -> i32 {
     EXIT_OK
 }
 
-pub(crate) fn metainfo_flow(runner: &SysRunner, opts: MetaInfoOpts) -> i32 {
+pub(crate) fn metainfo_flow(runner: &dyn CmdRunner, opts: MetaInfoOpts) -> i32 {
     if opts.backup.is_some() || opts.onlyid.is_some() {
         return backup_flow(opts);
     }

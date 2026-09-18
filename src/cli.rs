@@ -30,7 +30,7 @@ use crate::identify::identify;
 use crate::inspect_cli::inspect_flow;
 use crate::metainfo_cli::metainfo_flow;
 use crate::sectors::{convert, looks_nopwd};
-use crate::sysinfo::{self, CmdRunner, SysRunner};
+use crate::sysinfo::{self, CmdRunner, ReadProbeCache, SysRunner};
 
 const OPEN_WAIT: std::time::Duration = std::time::Duration::from_secs(10);
 
@@ -620,11 +620,12 @@ pub fn run() -> i32 {
             EXIT_OK
         }
         Parsed::InternalComplete { kind, onlyid, backup_dir } => {
+            let probe = ReadProbeCache::new(&runner);
             for value in completion::dynamic_values(
                 &kind,
                 onlyid.as_deref(),
                 backup_dir.as_deref(),
-                &runner,
+                &probe,
             ) {
                 println!("{}", value);
             }
@@ -637,7 +638,8 @@ pub fn run() -> i32 {
         Parsed::List { backup_dir } => {
             let bak = diskio::resolve_backup_dir(backup_dir.as_deref());
             let read_disk = |disk: u32, lba: u32| diskio::read_lba(&raw_path(disk), lba);
-            print!("{}", print_disk_table(&scan_disks(&runner, &bak, &read_disk)));
+            let probe = ReadProbeCache::new(&runner);
+            print!("{}", print_disk_table(&scan_disks(&probe, &bak, &read_disk)));
             EXIT_OK
         }
         Parsed::Backup { action, keep, yes, onlyid, backup_dir } => {
@@ -654,8 +656,14 @@ pub fn run() -> i32 {
                 }
             }
         }
-        Parsed::Inspect(opts) => inspect_flow(&runner, opts),
-        Parsed::MetaInfo(opts) => metainfo_flow(&runner, opts),
+        Parsed::Inspect(opts) => {
+            let probe = ReadProbeCache::new(&runner);
+            inspect_flow(&probe, opts)
+        }
+        Parsed::MetaInfo(opts) => {
+            let probe = ReadProbeCache::new(&runner);
+            metainfo_flow(&probe, opts)
+        }
         Parsed::Convert { dir, id, size, out } => match dir {
             Some(d) => convert_flow(d, id, size, out),
             None => {

@@ -2,6 +2,8 @@
 //! 全部子进程调用收在 CmdRunner 之后 — 这是测试注入罐头输出的缝
 //! (Python 版以 mock.patch(subprocess.check_output) 达成同一目的)。
 
+use std::cell::{Cell, RefCell};
+use std::collections::HashMap;
 use std::io::{self, ErrorKind};
 use std::process::{Command, Stdio};
 use std::sync::mpsc::{self, RecvTimeoutError};
@@ -75,6 +77,89 @@ impl CmdRunner for SysRunner {
         } else {
             Err(io::Error::other(format!("{} 退出码 {:?}", cmd[0], status.code())))
         }
+    }
+}
+
+#[derive(Clone)]
+enum CachedOutput {
+    Ok(String),
+    Err(ErrorKind, String),
+}
+
+impl CachedOutput {
+    fn from_result(result: &io::Result<String>) -> Self {
+        match result {
+            Ok(value) => Self::Ok(value.clone()),
+            Err(error) => Self::Err(error.kind(), error.to_string()),
+        }
+    }
+
+    fn into_result(self) -> io::Result<String> {
+        match self {
+            Self::Ok(value) => Ok(value),
+            Self::Err(kind, message) => Err(io::Error::new(kind, message)),
+        }
+    }
+}
+
+/// 单次只读命令会话内的系统探测缓存。
+///
+/// 只缓存纯查询：`diskutil list/info` 与 `ioreg`。卸载等有副作用命令永远直通。
+/// 该类型只用于 list/meta/inspect/completion；apply/restore 的安全终验继续使用
+/// fresh `SysRunner`，避免缓存掩盖换盘或设备状态变化。
+pub struct ReadProbeCache<'a> {
+    inner: &'a dyn CmdRunner,
+    cache: RefCell<HashMap<String, CachedOutput>>,
+    hits: Cell<usize>,
+    misses: Cell<usize>,
+}
+
+impl<'a> ReadProbeCache<'a> {
+    pub fn new(inner: &'a dyn CmdRunner) -> Self {
+        Self {
+            inner,
+            cache: RefCell::new(HashMap::new()),
+            hits: Cell::new(0),
+            misses: Cell::new(0),
+        }
+    }
+
+    fn cacheable(cmd: &[&str]) -> bool {
+        matches!(cmd, ["ioreg", ..])
+            || matches!(cmd, ["diskutil", "list", ..] | ["diskutil", "info", ..])
+    }
+
+    fn key(cmd: &[&str], timeout: Duration) -> String {
+        format!("{}\0{}", cmd.join("\0"), timeout.as_millis())
+    }
+
+    #[cfg(test)]
+    fn hits(&self) -> usize {
+        self.hits.get()
+    }
+
+    #[cfg(test)]
+    fn misses(&self) -> usize {
+        self.misses.get()
+    }
+}
+
+impl CmdRunner for ReadProbeCache<'_> {
+    fn check_output(&self, cmd: &[&str], timeout: Duration) -> io::Result<String> {
+        if !Self::cacheable(cmd) {
+            return self.inner.check_output(cmd, timeout);
+        }
+        let key = Self::key(cmd, timeout);
+        if let Some(value) = self.cache.borrow().get(&key).cloned() {
+            self.hits.set(self.hits.get() + 1);
+            return value.into_result();
+        }
+        self.misses.set(self.misses.get() + 1);
+        let result = self.inner.check_output(cmd, timeout);
+        self.cache
+            .borrow_mut()
+            .insert(key, CachedOutput::from_result(&result));
+        result
     }
 }
 
@@ -482,5 +567,44 @@ mod tests {
         );
         let runner = FakeRunner { outputs: m };
         assert_eq!(disk_total_sectors(&runner, 6), Some(62914560000 / 512));
+    }
+
+    #[test]
+    fn read_probe_cache_reuses_ioreg_snapshot_across_disks() {
+        let out = "\
++-o USB A@00100000  <class IOUSBHostDevice, id 0x1>\n\
+  |   \"idVendor\" = 13621\n\
+  |   \"idProduct\" = 25344\n\
+  +-o A Media  <class IOMedia>\n\
+    |   \"BSD Name\" = \"disk4\"\n\
++-o USB B@00200000  <class IOUSBHostDevice, id 0x2>\n\
+  |   \"idVendor\" = 3352\n\
+  |   \"idProduct\" = 8197\n\
+  +-o B Media  <class IOMedia>\n\
+    |   \"BSD Name\" = \"disk6\"\n";
+        let mut outputs = HashMap::new();
+        outputs.insert(
+            "ioreg -r -c IOUSBHostDevice -l".to_string(),
+            out.to_string(),
+        );
+        let runner = FakeRunner { outputs };
+        let cached = ReadProbeCache::new(&runner);
+
+        assert_eq!(usb_vid_pid(&cached, 4), ("3535".into(), "6300".into()));
+        assert_eq!(usb_vid_pid(&cached, 6), ("0d18".into(), "2005".into()));
+        assert_eq!(cached.misses(), 1, "同一 ioreg class 只应实际执行一次");
+        assert_eq!(cached.hits(), 1);
+    }
+
+    #[test]
+    fn read_probe_cache_reuses_failed_queries() {
+        let runner = FakeRunner {
+            outputs: HashMap::new(),
+        };
+        let cached = ReadProbeCache::new(&runner);
+        assert_eq!(usb_vid_pid(&cached, 4), ("xxxx".into(), "xxxx".into()));
+        assert_eq!(usb_vid_pid(&cached, 6), ("xxxx".into(), "xxxx".into()));
+        assert_eq!(cached.misses(), 1);
+        assert_eq!(cached.hits(), 1, "失败结果也应缓存，避免重复启动同一查询");
     }
 }

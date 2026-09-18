@@ -15,7 +15,7 @@ use crate::diskio::{self, raw_path};
 use crate::elevate;
 use crate::identify::identify;
 use crate::inspect::{self, InspectMeta};
-use crate::sysinfo::{self, SysRunner};
+use crate::sysinfo::{self, CmdRunner};
 
 pub(crate) fn resolve_inspect_file(backup_dir: &Path, target: &str) -> Result<PathBuf, String> {
     let raw = Path::new(target);
@@ -270,7 +270,7 @@ fn inspect_backup_flow(opts: InspectOpts) -> i32 {
     render_inspect_source(&source_label, &meta, &opts, |lba| diskio::read_lba(&path_s, lba))
 }
 
-fn inspect_disk_flow(runner: &SysRunner, mut opts: InspectOpts) -> i32 {
+fn inspect_disk_flow(runner: &dyn CmdRunner, mut opts: InspectOpts) -> i32 {
     if let Some(n) = opts.disk {
         if let Err(e) = guard_usb_disk(runner, n) {
             eprintln!("{}", crate::ui::red(&e.msg));
@@ -333,7 +333,7 @@ fn inspect_disk_flow(runner: &SysRunner, mut opts: InspectOpts) -> i32 {
     })
 }
 
-pub(crate) fn inspect_flow(runner: &SysRunner, opts: InspectOpts) -> i32 {
+pub(crate) fn inspect_flow(runner: &dyn CmdRunner, opts: InspectOpts) -> i32 {
     if opts.backup.is_some() || opts.onlyid.is_some() {
         inspect_backup_flow(opts)
     } else {
