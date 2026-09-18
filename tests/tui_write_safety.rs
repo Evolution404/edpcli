@@ -41,3 +41,18 @@ fn critical_exit_contract_covers_ctrl_c_through_quit_intent() {
     assert!(state.contains("ExitDeferred"));
     assert!(state.contains("critical_operation"));
 }
+
+#[test]
+fn shared_write_service_does_not_print_directly_into_tui_terminal() {
+    let service = include_str!("../src/application/write.rs");
+    assert!(!service.contains("println!("));
+    assert!(!service.contains("print!("));
+    assert!(service.contains(".output("));
+
+    let diskio = include_str!("../src/diskio.rs");
+    let atomic = diskio
+        .split("pub fn atomic_write_sectors")
+        .nth(1)
+        .expect("atomic write source");
+    assert!(!atomic.contains("eprintln!(\"!! 写入失败"));
+}
