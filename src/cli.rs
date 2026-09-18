@@ -20,7 +20,7 @@ use crate::backup_cli::backup_verify_select;
 pub use crate::backup_cli::{backup_list, backup_prune, backup_rm, backup_verify};
 use crate::cli_args::print_help;
 pub use crate::cli_args::{
-    parse_args, print_usage, BackupAction, DiskOpts, InspectOpts, MetaInfoOpts, Parsed, SourceOpts,
+    parse_args, print_usage, BackupAction, DiskOpts, InfoOpts, InspectOpts, Parsed,
 };
 use crate::common::*;
 use crate::completion;
@@ -31,7 +31,7 @@ use crate::diskio::{
 use crate::elevate::{self, ELEVATED_FLAG};
 use crate::identify::identify;
 use crate::inspect_cli::inspect_flow;
-use crate::metainfo_cli::metainfo_flow;
+use crate::metainfo_cli::info_flow;
 use crate::sectors::{convert, looks_nopwd};
 use crate::selectors::DeviceSelector;
 use crate::sysinfo::{self, CmdRunner, ReadProbeCache, SysRunner};
@@ -746,7 +746,7 @@ pub fn run() -> i32 {
         }
         Parsed::Info(opts) => {
             let probe = ReadProbeCache::new(&runner);
-            metainfo_flow(&probe, opts)
+            info_flow(&probe, opts)
         }
         Parsed::Convert { dir, id, size, out } => match dir {
             Some(d) => convert_flow(d, id, size, out),

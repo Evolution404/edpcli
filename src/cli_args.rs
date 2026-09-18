@@ -29,15 +29,12 @@ pub struct InspectOpts {
 }
 
 #[derive(Default)]
-pub struct SourceOpts {
+pub struct InfoOpts {
     pub disk: Option<u32>,
     pub backup: Option<String>,
     pub device_id: Option<String>,
     pub backup_dir: Option<String>,
 }
-
-// Phase 1 只切换 CLI grammar；元信息 service 在 Phase 3 收口时一并改名。
-pub type MetaInfoOpts = SourceOpts;
 
 pub enum Parsed {
     List {
@@ -50,7 +47,7 @@ pub enum Parsed {
         backup_dir: Option<String>,
     },
     Inspect(InspectOpts),
-    Info(SourceOpts),
+    Info(InfoOpts),
     Apply {
         opts: DiskOpts,
         dry_run: bool,
@@ -417,7 +414,7 @@ pub fn parse_args(argv: &[String]) -> Result<Parsed, String> {
                     topic: Some("info".into()),
                 });
             }
-            let mut opts = SourceOpts::default();
+            let mut opts = InfoOpts::default();
             let mut i = 0usize;
             while i < rest.len() {
                 let a = rest[i].as_str();

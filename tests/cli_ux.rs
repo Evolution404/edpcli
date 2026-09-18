@@ -120,6 +120,10 @@ fn info_accepts_backup_file_directly() {
         String::from_utf8_lossy(&out.stderr)
     );
     let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.contains("设备"), "{stdout}");
+    assert!(stdout.contains("身份"), "{stdout}");
+    assert!(stdout.contains("状态"), "{stdout}");
+    assert!(stdout.contains("备份"), "{stdout}");
     assert!(stdout.contains("Dept"), "{stdout}");
     assert!(stdout.contains("User"), "{stdout}");
 }

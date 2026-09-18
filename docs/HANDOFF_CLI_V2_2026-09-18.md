@@ -55,6 +55,28 @@ Phase 2 本地门禁：
 
 旧 completion 仍有 v1 补全词，这是 Phase 8 的明确清理项，不属于执行兼容路径。
 
+### Phase 3：info — 已完成
+
+- parser/执行层统一使用 `InfoOpts` / `Parsed::Info`，临时 `SourceOpts` /
+  `MetaInfoOpts` alias 已删除；
+- `info` 未指定来源时只走统一设备选择器：单盘自动选、多盘交互、无盘直接提示插入设备，
+  不再自动扫描备份目录猜测来源；
+- `info <备份.bin>` 继续复用现有 metainfo 协议解析，但输出已经收敛为：
+  - 设备；
+  - 身份；
+  - 状态（含 EDP/cems、免密、SAFE6、分区）；
+  - 备份；
+- 物理盘 info 会按当前盘身份统计匹配备份数量并显示最新备份时间；
+- 备份文件 info 会明确显示当前备份文件；
+- metainfo summary 新增基于既有 `looks_nopwd` 的只读免密判断，不新增协议算法。
+
+Phase 3 本地门禁：
+
+- `cargo fmt --all -- --check`：PASS；
+- `cargo test --all-targets`：PASS；
+- `cargo clippy --all-targets -- -D warnings`：PASS；
+- 搜索 `MetaInfoOpts|SourceOpts|Parsed::MetaInfo|metainfo_flow`：0 命中。
+
 ## 下一位 AI 从这里开始
 
 1. 先读：
@@ -62,10 +84,10 @@ Phase 2 本地门禁：
    - `docs/RELEASE.md`
    - `docs/USAGE.md`
 2. 检查 `git status --short --branch`，禁止 reset/clean。
-3. 从 **Phase 3 info** 继续，仍须测试先行；不要削弱 selector pinning、系统盘
+3. 从 **Phase 4 apply --dry-run** 继续，仍须测试先行；不要削弱 selector pinning、系统盘
    fail-closed 或 onlyid 防串盘。
-4. Phase 3 正式收口 `info` service 和当前临时保留的内部 `MetaInfoOpts` 命名；
-   Phase 5 才接通 `backup create` 执行层。
+4. Phase 5 接通 `backup create` 执行层时，必须与 apply 写前自动备份共用同一个
+   backup service，且独立备份路径不得调用 prepare_write/unmount/写盘。
 5. 小 commit、及时 push，阶段完成后更新本交接文档。
 
 ## 已冻结的关键决策
