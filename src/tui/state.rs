@@ -186,15 +186,6 @@ impl AppState {
         let Some(&target) = self.search_matches.get(match_index) else {
             return;
         };
-        if command == NavCommand::NextMatch {
-            self.cycle_search(false);
-            return StateEffect::None;
-        }
-        if command == NavCommand::PreviousMatch {
-            self.cycle_search(true);
-            return StateEffect::None;
-        }
-
         if let Some(inspect) = self.inspect.as_mut() {
             inspect.selected = target.min(inspect.item_count.saturating_sub(1));
         } else {
@@ -635,6 +626,15 @@ impl AppState {
 
         if command == NavCommand::Quit {
             return StateEffect::ExitRequested;
+        }
+
+        if command == NavCommand::NextMatch {
+            self.cycle_search(false);
+            return StateEffect::None;
+        }
+        if command == NavCommand::PreviousMatch {
+            self.cycle_search(true);
+            return StateEffect::None;
         }
 
         if let Some(inspect) = self.inspect.as_mut() {
