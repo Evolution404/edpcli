@@ -7,7 +7,8 @@ use common::*;
 use edpcli::common::SECTOR;
 use edpcli::crypto::{a6b0_full, crc32_bare, xor_rolling};
 use edpcli::sectors::{
-    convert, find_type_entry, looks_nopwd, make_entry, parse_lba12, E12, E7, EDPF_ENC_LEN, PWD_CRC,
+    convert, convert_lba0, convert_lba12, convert_lba6, convert_lba7, find_type_entry, looks_nopwd,
+    make_entry, parse_lba12, E12, E7, EDPF_ENC_LEN, PWD_CRC,
 };
 
 fn u32_at(b: &[u8], off: usize) -> u32 {
@@ -19,6 +20,20 @@ fn u64_at(b: &[u8], off: usize) -> u64 {
 
 fn have_all_fixtures() -> bool {
     KEYS.iter().all(|k| fixture_bin(k).is_some())
+}
+
+#[test]
+fn short_sector_inputs_fail_closed_instead_of_panicking() {
+    let short = vec![0u8; SECTOR - 1];
+    assert!(convert_lba0(&short, 1).is_err());
+    assert!(convert_lba6(&short).is_err());
+    assert!(convert_lba7(&short, 0, 1).is_err());
+    assert!(convert_lba12(&short, &[0u8; 4], 1).is_err());
+    assert!(parse_lba12(&short, "disk&ven_test&prod_test").is_none());
+
+    let read = |_lba: u32| Ok(short.clone());
+    assert!(looks_nopwd(&read, "disk&ven_test&prod_test").is_err());
+    assert!(convert(&read, "disk&ven_test&prod_test", None, false).is_err());
 }
 
 #[test]
