@@ -90,3 +90,16 @@ pub fn scan_backup_workspace(root: &Path) -> Vec<BackupWorkspaceItem> {
         })
         .collect()
 }
+
+
+/// Convert a resolved disk number into the platform-native selector before crossing a
+/// privilege/re-exec boundary. Frontends must not encode platform device paths themselves.
+pub fn pin_disk_selector(disk: u32) -> String {
+    crate::platform::disk_selector_value(disk)
+}
+
+/// Parse a selector previously pinned by `pin_disk_selector`.
+pub fn parse_pinned_disk_selector(value: &str) -> Result<u32, String> {
+    crate::platform::parse_disk_selector(value)
+        .map_err(|error| format!("错误: resume disk {value}: {error}"))
+}

@@ -41,7 +41,7 @@ pub fn resume_argv(intent: &state::WriteIntent) -> Vec<String> {
             state::WriteKind::Restore => "restore".to_string(),
         },
         RESUME_DISK_FLAG.to_string(),
-        crate::platform::disk_selector_value(intent.disk),
+        crate::application::pin_disk_selector(intent.disk),
     ];
     if let Some(path) = &intent.backup {
         argv.push(RESUME_BACKUP_FLAG.to_string());
@@ -93,10 +93,7 @@ pub fn parse_resume_args(argv: &[String]) -> Result<Option<state::WriteIntent>, 
                 }
                 saw_resume = true;
                 let value = take(RESUME_DISK_FLAG)?;
-                disk = Some(
-                    crate::platform::parse_disk_selector(&value)
-                        .map_err(|error| format!("错误: resume disk {value}: {error}"))?,
-                );
+                disk = Some(crate::application::parse_pinned_disk_selector(&value)?);
             }
             RESUME_BACKUP_FLAG => {
                 if backup.is_some() {
