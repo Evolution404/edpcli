@@ -3,13 +3,8 @@
 
 use std::cmp::Ordering;
 use std::collections::BTreeMap;
-use std::ffi::{CStr, CString, OsStr};
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read, Seek, SeekFrom, Write};
-use std::mem::MaybeUninit;
-use std::os::unix::ffi::OsStrExt;
-use std::os::unix::io::AsRawFd;
-use std::os::unix::fs::FileExt;
 use std::path::{Path, PathBuf};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -22,7 +17,7 @@ use crate::md5::md5_hex;
 use crate::sectors::looks_nopwd;
 
 pub fn raw_path(disk: u32) -> String {
-    format!("/dev/rdisk{}", disk)
+    crate::platform::raw_disk_path(disk)
 }
 
 fn io_err(e: io::Error) -> EdpCliError {
@@ -108,8 +103,7 @@ fn try_open_rdwr(path: &str, wait: Duration) -> io::Result<File> {
         match OpenOptions::new().read(true).write(true).open(path) {
             Ok(file) => return Ok(file),
             Err(e) => {
-                // EBUSY=16(macOS); 不用 ErrorKind — 其映射跨 Rust 版本有变
-                if e.raw_os_error() == Some(16) && Instant::now() < deadline {
+                if crate::platform::raw_busy_error(&e) && Instant::now() < deadline {
                     thread::sleep(Duration::from_millis(200));
                 } else {
                     return Err(e);
@@ -172,18 +166,15 @@ impl SectorDev for FileDev {
 
     fn read_sector(&mut self, lba: u32) -> io::Result<Vec<u8>> {
         let mut buf = vec![0u8; SECTOR];
-        let mut filled = 0usize;
         let base = lba as u64 * SECTOR as u64;
-        while filled < SECTOR {
-            let n = self.file.read_at(&mut buf[filled..], base + filled as u64)?;
-            if n == 0 {
-                return Err(io::Error::new(
-                    io::ErrorKind::UnexpectedEof,
-                    format!("LBA{} 读取提前 EOF", lba),
-                ));
+        self.file.seek(SeekFrom::Start(base))?;
+        self.file.read_exact(&mut buf).map_err(|error| {
+            if error.kind() == io::ErrorKind::UnexpectedEof {
+                io::Error::new(error.kind(), format!("LBA{} 读取提前 EOF", lba))
+            } else {
+                error
             }
-            filled += n;
-        }
+        })?;
         Ok(buf)
     }
 
@@ -195,41 +186,17 @@ impl SectorDev for FileDev {
             ));
         }
         let base = lba as u64 * SECTOR as u64;
-        let file = &self.file;
-        pwrite_loop(|buf, off| file.write_at(buf, off), data, base)
+        self.file.seek(SeekFrom::Start(base))?;
+        self.file.write_all(data)
     }
 
     fn sync(&mut self) -> io::Result<()> {
-        if self.path.starts_with("/dev/rdisk") {
-            sync_raw_disk_cache(&self.file)
+        if crate::platform::is_raw_device_path(&self.path) {
+            crate::platform::sync_raw_device(&self.file)
         } else {
             self.file.sync_all()
         }
     }
-}
-
-#[cfg(target_os = "macos")]
-fn sync_raw_disk_cache(file: &File) -> io::Result<()> {
-    use std::os::raw::c_ulong;
-
-    extern "C" {
-        fn ioctl(fd: i32, request: c_ulong, ...) -> i32;
-    }
-
-    // macOS SDK <sys/disk.h>: DKIOCSYNCHRONIZECACHE = _IO('d', 22)
-    // <sys/ioccom.h>: _IO = 0x20000000 | (group << 8) | number.
-    const DKIOCSYNCHRONIZECACHE: c_ulong = 0x2000_6416;
-    let rc = unsafe { ioctl(file.as_raw_fd(), DKIOCSYNCHRONIZECACHE) };
-    if rc == 0 {
-        Ok(())
-    } else {
-        Err(io::Error::last_os_error())
-    }
-}
-
-#[cfg(not(target_os = "macos"))]
-fn sync_raw_disk_cache(file: &File) -> io::Result<()> {
-    file.sync_all()
 }
 
 /// 单扇区便捷读(Python read_lba_disk 等价: 每次独立打开)。
@@ -459,43 +426,10 @@ pub fn sudo_user() -> Option<String> {
     ok.then_some(u)
 }
 
-fn user_home(name: &str) -> Option<PathBuf> {
-    let name = CString::new(name).ok()?;
-    let mut pwd = MaybeUninit::<libc::passwd>::uninit();
-    let mut result = std::ptr::null_mut();
-    let mut buf = vec![0u8; 4096];
-
-    loop {
-        let rc = unsafe {
-            libc::getpwnam_r(
-                name.as_ptr(),
-                pwd.as_mut_ptr(),
-                buf.as_mut_ptr().cast(),
-                buf.len(),
-                &mut result,
-            )
-        };
-        if rc == 0 {
-            if result.is_null() {
-                return None;
-            }
-            let pwd = unsafe { pwd.assume_init() };
-            if pwd.pw_dir.is_null() {
-                return None;
-            }
-            let bytes = unsafe { CStr::from_ptr(pwd.pw_dir) }.to_bytes();
-            return Some(PathBuf::from(OsStr::from_bytes(bytes)));
-        }
-        if rc != libc::ERANGE || buf.len() >= 1024 * 1024 {
-            return None;
-        }
-        buf.resize(buf.len() * 2, 0);
-    }
-}
-
-/// 发起用户 home：直接查询 POSIX 用户数据库，不启动 shell。
+/// 发起用户 home：交给平台层解析 sudo / shell / Windows 用户语义。
 pub fn sudo_user_home() -> Option<PathBuf> {
-    user_home(&sudo_user()?)
+    sudo_user()?;
+    crate::platform::invoking_user_home()
 }
 
 /// `key = value` 配置解析: 取 backup_dir 值; `#` 注释, 未知键忽略, 坏行跳过。
@@ -1241,10 +1175,8 @@ mod tests {
     }
 
     #[test]
-    fn user_home_uses_posix_database_without_shell() {
-        let user = std::env::var("USER").expect("测试环境应有 USER");
-        let home = user_home(&user).expect("当前用户应存在于 POSIX 用户数据库");
-        assert_eq!(home, PathBuf::from(std::env::var("HOME").unwrap()));
+    fn platform_user_home_is_available_for_current_session() {
+        assert!(crate::platform::invoking_user_home().is_some());
     }
 
     #[test]

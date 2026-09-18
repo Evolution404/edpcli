@@ -3,7 +3,7 @@
 use std::time::Duration;
 
 use crate::crypto::{crc32_bare, xor_rolling};
-use crate::native_probe::{HardwareProbe, NativeTransport};
+use crate::platform::{HardwareProbe, NativeTransport};
 use crate::sysinfo::{block_str_field, split_class_blocks, CmdRunner};
 
 const IOREG_TIMEOUT: Duration = Duration::from_secs(15);
@@ -182,7 +182,7 @@ mod tests {
     use std::io;
 
     use super::*;
-    use crate::native_probe::{HardwareProbe, InquiryInfo, NativeTransport};
+    use crate::platform::{HardwareProbe, InquiryInfo, NativeTransport};
 
     struct NativeOnlyRunner {
         probe: HardwareProbe,

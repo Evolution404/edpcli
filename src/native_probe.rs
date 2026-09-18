@@ -12,28 +12,7 @@ use objc2_io_kit::{
     IOObjectCopyClass, IOObjectRelease, IORegistryEntryCreateCFProperty,
     IORegistryEntryGetParentEntry, IOServiceGetMatchingService, IO_OBJECT_NULL,
 };
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum NativeTransport {
-    Uas,
-    Bot,
-    Unknown,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct InquiryInfo {
-    pub vendor: String,
-    pub product: String,
-    pub revision: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct HardwareProbe {
-    pub vid: Option<u16>,
-    pub pid: Option<u16>,
-    pub transport: NativeTransport,
-    pub inquiry: Option<InquiryInfo>,
-}
+use crate::platform::{HardwareProbe, InquiryInfo, NativeTransport};
 
 #[derive(Debug, Clone, Default)]
 struct NodeSnapshot {

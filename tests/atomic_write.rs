@@ -267,15 +267,13 @@ fn pwrite_loop_handles_short_writes() {
     fs::write(&p, vec![0u8; 14 * SECTOR]).unwrap();
     {
         use std::fs::OpenOptions;
-        use std::os::unix::fs::FileExt;
-        let f = OpenOptions::new().write(true).open(&p).unwrap();
-        let mut pos: usize = 0;
+        use std::io::{Seek, SeekFrom, Write};
+        let mut f = OpenOptions::new().write(true).open(&p).unwrap();
         pwrite_loop(
-            |buf, _off| {
+            |buf, off| {
                 let n = (buf.len() / 2).max(1);
-                f.write_at(&buf[..n], 6 * SECTOR as u64 + pos as u64)?;
-                pos += n;
-                Ok(n)
+                f.seek(SeekFrom::Start(off))?;
+                f.write(&buf[..n])
             },
             &vec![0xAA; SECTOR],
             6 * SECTOR as u64,

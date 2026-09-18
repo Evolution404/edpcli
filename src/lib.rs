@@ -1,10 +1,12 @@
 //! edpcli — EDP/cems U 盘管理 CLI（识别、元信息、备份、恢复与免密转换）。
 //!
-//! 分层(与原 Python 版一致, 无环): common → crypto → sectors / diskio → identify → cli。
-//! macOS 耦合面收在 sysinfo(diskutil/ioreg) 与 diskio(/dev/rdiskN)。
+//! 分层: common → platform / crypto → sectors / diskio → identify → cli。
+//! 操作系统差异统一收敛在 platform；业务核心不得直接依赖 macOS/Linux/Windows API。
 
 pub mod common;
 pub mod md5;
+pub mod platform;
+#[cfg(target_os = "macos")]
 pub(crate) mod native_probe;
 pub mod plist;
 pub mod crypto;

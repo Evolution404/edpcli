@@ -403,6 +403,7 @@ fn scan_backup_dir_reports_ok_mismatch_missing_and_unrecognized() {
     assert_eq!(odd_e.md5_ok, Md5Status::Ok);
 }
 
+#[cfg(unix)]
 #[test]
 fn md5_sidecar_symlink_is_not_followed() {
     use std::os::unix::fs::symlink;

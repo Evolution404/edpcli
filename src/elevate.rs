@@ -2,13 +2,11 @@
 //! 状态经 argv 传递(不依赖环境变量, sudo 会清环境); 继承 stdio 使
 //! sudo 密码与 YES 确认提示都能交互; `--_elevated` 哨兵防异常 sudoers 配置下的重入循环。
 
-use std::process::Command;
-
 /// 内部哨兵旗标(追加到重执行 argv 末尾; 参数解析层识别并剥离)。
 pub const ELEVATED_FLAG: &str = "--_elevated";
 
 pub fn is_root() -> bool {
-    unsafe { libc::geteuid() == 0 }
+    crate::platform::is_elevated()
 }
 
 /// 非 root 时: 打印提示并以 sudo 重执行自身(继承 stdio), 以子进程退出码结束进程。
@@ -28,23 +26,18 @@ pub fn ensure_elevated(argv: &[String]) {
             std::process::exit(crate::common::EXIT_IO);
         }
     };
-    let mut cmd = Command::new("sudo");
-    cmd.arg(&exe);
-    for a in argv {
-        if a != ELEVATED_FLAG {
-            cmd.arg(a);
-        }
-    }
-    cmd.arg(ELEVATED_FLAG);
-    println!("需要管理员权限(裸盘访问): 以 sudo 重运行 …");
-    let status = match cmd.status() {
-        Ok(s) => s,
+    println!(
+        "需要管理员权限(裸盘访问): 通过 {} 重新启动 …",
+        crate::platform::elevation_label()
+    );
+    let code = match crate::platform::run_elevated(&exe, argv, ELEVATED_FLAG) {
+        Ok(code) => code,
         Err(e) => {
-            eprintln!("错误: 无法启动 sudo: {}", e);
+            eprintln!("错误: 无法获取管理员权限: {}", e);
             std::process::exit(crate::common::EXIT_IO);
         }
     };
-    std::process::exit(status.code().unwrap_or(crate::common::EXIT_IO));
+    std::process::exit(code);
 }
 
 /// 构建重执行 argv(测试用): 原参数 + 哨兵, 不含已在其中的哨兵重复。

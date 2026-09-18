@@ -10,7 +10,7 @@ use std::sync::mpsc::{self, RecvTimeoutError};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use crate::native_probe::HardwareProbe;
+use crate::platform::HardwareProbe;
 use crate::plist;
 
 const DISKUTIL_TIMEOUT: Duration = Duration::from_secs(10);
@@ -87,7 +87,7 @@ impl CmdRunner for SysRunner {
     }
 
     fn hardware_probe(&self, disk: u32) -> Option<HardwareProbe> {
-        crate::native_probe::probe_disk(disk)
+        crate::platform::hardware_probe(disk)
     }
 }
 
@@ -431,7 +431,7 @@ mod tests {
     use std::cell::Cell;
 
     use super::*;
-    use crate::native_probe::{HardwareProbe, NativeTransport};
+    use crate::platform::{HardwareProbe, NativeTransport};
     use std::collections::HashMap;
 
     /// 罐头 CmdRunner: (子命令前缀) → 预置输出。
