@@ -79,7 +79,9 @@ pub enum Parsed {
         onlyid: Option<String>,
         backup_dir: Option<String>,
     },
-    Version,
+    Version {
+        detailed: bool,
+    },
     Help {
         topic: Option<String>,
     },
@@ -137,7 +139,10 @@ pub fn print_usage() {
             "离线转换(不碰真盘): --dir <快照> --id <device_id>",
         ),
         ("completion", "生成 zsh / bash / fish Tab 补全脚本"),
-        ("version", "显示版本"),
+        (
+            "version",
+            "显示版本、平台、架构、编译时间、Git 与 Rust 构建信息",
+        ),
         ("help", "显示本帮助"),
     ] {
         println!("{}", cmd(n, d));
@@ -450,7 +455,8 @@ pub fn parse_args(argv: &[String]) -> Result<Parsed, String> {
                 topic: rest.first().cloned(),
             })
         }
-        "-V" | "--version" | "version" => Ok(Parsed::Version),
+        "-V" | "--version" => Ok(Parsed::Version { detailed: false }),
+        "version" => Ok(Parsed::Version { detailed: true }),
         "completion" => {
             if rest.is_empty() || rest.iter().any(|a| a == "-h" || a == "--help") {
                 return Ok(Parsed::Help {

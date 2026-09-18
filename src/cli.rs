@@ -736,8 +736,12 @@ pub fn run() -> i32 {
             }
             EXIT_OK
         }
-        Parsed::Version => {
-            println!("edpcli {}", env!("CARGO_PKG_VERSION"));
+        Parsed::Version { detailed } => {
+            if detailed {
+                println!("{}", crate::build_info::detailed());
+            } else {
+                println!("{}", crate::build_info::short());
+            }
             EXIT_OK
         }
         Parsed::List { backup_dir } => {
@@ -1020,7 +1024,7 @@ mod tests {
         ));
         assert!(matches!(
             parse_args(&["version".into()]).unwrap(),
-            Parsed::Version
+            Parsed::Version { detailed: true }
         ));
         match parse_args(&[
             "apply".into(),

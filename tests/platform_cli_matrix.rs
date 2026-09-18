@@ -76,6 +76,28 @@ fn list_is_read_only_and_available_on_every_platform() {
 }
 
 #[test]
+fn detailed_version_reports_native_build_identity_on_every_platform() {
+    let output = run(&["version"]);
+    assert_eq!(output.status.code(), Some(EXIT_OK), "version failed");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains(&format!("edpcli {}", env!("CARGO_PKG_VERSION"))));
+    assert!(stdout.contains(&format!("目标: {}", env!("EDPCLI_BUILD_TARGET"))));
+    assert!(stdout.contains("构建时间:"));
+    assert!(stdout.contains("Git:"));
+    assert!(stdout.contains("Rust:"));
+}
+
+#[test]
+fn dash_version_stays_single_line_for_script_compatibility() {
+    let output = run(&["--version"]);
+    assert_eq!(output.status.code(), Some(EXIT_OK), "--version failed");
+    assert_eq!(
+        String::from_utf8_lossy(&output.stdout),
+        format!("edpcli {}\n", env!("CARGO_PKG_VERSION"))
+    );
+}
+
+#[test]
 fn meta_inspect_and_backup_work_offline_on_every_platform() {
     let dir = TempDir::new("offline");
     let backup = synthetic_backup(&dir);
