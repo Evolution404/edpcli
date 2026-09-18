@@ -269,6 +269,14 @@ fn run_loop(resume: Option<state::WriteIntent>) -> io::Result<LoopExit> {
         if let Some(rows) = updates.backups {
             state.replace_backups(rows);
         }
+        if let Some(message) = updates.device_error {
+            state.set_device_scan_pending(false);
+            state.set_notice(message);
+        }
+        if let Some(message) = updates.backup_error {
+            state.set_backup_scan_pending(false);
+            state.set_notice(message);
+        }
         if let Some(result) = updates.write {
             state.finish_write(result);
         }

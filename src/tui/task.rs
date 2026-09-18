@@ -3,6 +3,7 @@
 //! Blocking device discovery is always executed on a worker thread. Generations make refreshes
 //! race-safe: a slow old scan can never overwrite a newer request.
 
+use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::path::PathBuf;
 use std::sync::mpsc::{self, Receiver, Sender};
 
@@ -49,6 +50,14 @@ enum WorkerResult {
         generation: u64,
         result: Result<InspectWorkspace, String>,
     },
+    DeviceError {
+        generation: u64,
+        message: String,
+    },
+    BackupError {
+        generation: u64,
+        message: String,
+    },
 }
 
 #[derive(Default)]
@@ -57,6 +66,18 @@ pub struct TaskUpdates {
     pub backups: Option<Vec<BackupWorkspaceItem>>,
     pub write: Option<Result<(), String>>,
     pub inspect: Option<Result<InspectWorkspace, String>>,
+    pub device_error: Option<String>,
+    pub backup_error: Option<String>,
+}
+
+fn panic_message(payload: Box<dyn std::any::Any + Send>) -> String {
+    if let Some(message) = payload.downcast_ref::<&str>() {
+        (*message).to_string()
+    } else if let Some(message) = payload.downcast_ref::<String>() {
+        message.clone()
+    } else {
+        "未知 panic payload".to_string()
+    }
 }
 
 pub struct TaskHub {
@@ -89,9 +110,18 @@ impl TaskHub {
         let generation = self.device_generation.begin();
         let tx = self.tx.clone();
         std::thread::spawn(move || {
-            let runner = SysRunner;
-            let rows = crate::application::scan_device_dashboard(&runner, &backup_dir);
-            let _ = tx.send(WorkerResult::Devices { generation, rows });
+            let outcome = catch_unwind(AssertUnwindSafe(|| {
+                let runner = SysRunner;
+                crate::application::scan_device_dashboard(&runner, &backup_dir)
+            }));
+            let message = match outcome {
+                Ok(rows) => WorkerResult::Devices { generation, rows },
+                Err(payload) => WorkerResult::DeviceError {
+                    generation,
+                    message: format!("设备扫描异常终止: {}", panic_message(payload)),
+                },
+            };
+            let _ = tx.send(message);
         });
         generation
     }
@@ -100,8 +130,17 @@ impl TaskHub {
         let generation = self.backup_generation.begin();
         let tx = self.tx.clone();
         std::thread::spawn(move || {
-            let rows = crate::application::scan_backup_workspace(&backup_dir);
-            let _ = tx.send(WorkerResult::Backups { generation, rows });
+            let outcome = catch_unwind(AssertUnwindSafe(|| {
+                crate::application::scan_backup_workspace(&backup_dir)
+            }));
+            let message = match outcome {
+                Ok(rows) => WorkerResult::Backups { generation, rows },
+                Err(payload) => WorkerResult::BackupError {
+                    generation,
+                    message: format!("备份扫描异常终止: {}", panic_message(payload)),
+                },
+            };
+            let _ = tx.send(message);
         });
         generation
     }
@@ -110,8 +149,13 @@ impl TaskHub {
         let generation = self.inspect_generation.begin();
         let tx = self.tx.clone();
         std::thread::spawn(move || {
-            let runner = SysRunner;
-            let result = crate::application::inspect::load_disk_inspect(&runner, disk);
+            let result = catch_unwind(AssertUnwindSafe(|| {
+                let runner = SysRunner;
+                crate::application::inspect::load_disk_inspect(&runner, disk)
+            }))
+            .unwrap_or_else(|payload| {
+                Err(format!("Inspect worker 异常终止: {}", panic_message(payload)))
+            });
             let _ = tx.send(WorkerResult::Inspect { generation, result });
         });
         generation
@@ -121,7 +165,12 @@ impl TaskHub {
         let generation = self.inspect_generation.begin();
         let tx = self.tx.clone();
         std::thread::spawn(move || {
-            let result = crate::application::inspect::load_backup_inspect(&path);
+            let result = catch_unwind(AssertUnwindSafe(|| {
+                crate::application::inspect::load_backup_inspect(&path)
+            }))
+            .unwrap_or_else(|payload| {
+                Err(format!("Inspect worker 异常终止: {}", panic_message(payload)))
+            });
             let _ = tx.send(WorkerResult::Inspect { generation, result });
         });
         generation
@@ -134,6 +183,7 @@ impl TaskHub {
     ) {
         let tx = self.tx.clone();
         std::thread::spawn(move || {
+            let result = catch_unwind(AssertUnwindSafe(|| {
             struct ConfirmedPrompter;
             impl crate::application::write::Prompter for ConfirmedPrompter {
                 fn prompt_line(&mut self, _msg: &str) -> String {
@@ -187,6 +237,11 @@ impl TaskHub {
                     }
                 }
             })();
+            result
+            }))
+            .unwrap_or_else(|payload| {
+                Err(format!("写盘 worker 异常终止: {}", panic_message(payload)))
+            });
             let _ = tx.send(WorkerResult::Write { result });
         });
     }
@@ -214,9 +269,21 @@ impl TaskHub {
                 {
                     updates.inspect = Some(result);
                 }
+                WorkerResult::DeviceError { generation, message }
+                    if self.device_generation.is_current(generation) =>
+                {
+                    updates.device_error = Some(message);
+                }
+                WorkerResult::BackupError { generation, message }
+                    if self.backup_generation.is_current(generation) =>
+                {
+                    updates.backup_error = Some(message);
+                }
                 WorkerResult::Inspect { .. }
                 | WorkerResult::Devices { .. }
-                | WorkerResult::Backups { .. } => {}
+                | WorkerResult::Backups { .. }
+                | WorkerResult::DeviceError { .. }
+                | WorkerResult::BackupError { .. } => {}
             }
         }
         updates
