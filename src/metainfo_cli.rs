@@ -16,7 +16,11 @@ use crate::metainfo;
 use crate::sysinfo::{self, SysRunner};
 
 fn print_summary(source: &str, summary: &metainfo::MetaInfoSummary) {
-    println!("{}  {}", crate::ui::bold("来源"), source);
+    println!(
+        "{}  {}",
+        crate::ui::bold_cyan("来源"),
+        crate::ui::cyan(source)
+    );
     println!();
     print!("{}", metainfo::render(summary));
 }

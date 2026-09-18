@@ -55,3 +55,29 @@ fn netac_summary_reads_long_department_name() {
     assert!(dept.contains("泰州供电公司"), "{dept}");
     assert_eq!(summary.ownership.user.as_deref(), Some("宋旭琳"));
 }
+
+#[test]
+fn render_uses_semantic_colors_and_no_color_remains_plain() {
+    let data = load_disk_image("aigo").expect("aigo fixture");
+    let meta = meta_for("aigo");
+    let summary = summarize(&meta, |lba| {
+        let start = lba as usize * 512;
+        Ok(data[start..start + 512].to_vec())
+    })
+    .unwrap();
+
+    nopwd::ui::set_enabled_for_tests(true);
+    let colored = render(&summary);
+    assert!(colored.contains("\x1b[1;36m身份信息\x1b[0m"), "{colored:?}");
+    assert!(colored.contains("\x1b[33m1987718388\x1b[0m"), "{colored:?}");
+    assert!(colored.contains("\x1b[36m输电运检中心\x1b[0m"), "{colored:?}");
+    assert!(colored.contains("\x1b[35m125.83GB\x1b[0m"), "{colored:?}");
+    assert!(colored.contains("\x1b[32m0x980E9B2F / 计算 0x980E9B2F ✓\x1b[0m"), "{colored:?}");
+
+    nopwd::ui::set_enabled_for_tests(false);
+    let plain = render(&summary);
+    assert!(!plain.contains("\x1b["));
+    assert!(plain.contains("身份信息"));
+    assert!(plain.contains("输电运检中心"));
+    nopwd::ui::reset_enabled_for_tests();
+}

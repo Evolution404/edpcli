@@ -6,12 +6,16 @@
 //! 经 disp_width/pad_to/pad_left; 着色须在填充之后(ANSI 码会破坏宽度计算)。
 
 use std::io::IsTerminal;
-use std::sync::atomic::{AtomicI8, Ordering};
+use std::cell::Cell;
 
-static OVERRIDE: AtomicI8 = AtomicI8::new(-1); // -1=自动 0=关 1=开
+thread_local! {
+    // 测试会并行运行；颜色强制开关必须线程隔离，避免一个测试把另一个测试的
+    // render 输出从中途切成有色/无色。生产默认始终为 -1(自动检测终端)。
+    static OVERRIDE: Cell<i8> = const { Cell::new(-1) }; // -1=自动 0=关 1=开
+}
 
 pub fn enabled() -> bool {
-    match OVERRIDE.load(Ordering::Relaxed) {
+    match OVERRIDE.with(Cell::get) {
         0 => false,
         1 => true,
         _ => std::io::stdout().is_terminal() && std::env::var_os("NO_COLOR").is_none(),
@@ -19,11 +23,11 @@ pub fn enabled() -> bool {
 }
 
 pub fn set_enabled_for_tests(v: bool) {
-    OVERRIDE.store(if v { 1 } else { 0 }, Ordering::Relaxed);
+    OVERRIDE.with(|value| value.set(if v { 1 } else { 0 }));
 }
 
 pub fn reset_enabled_for_tests() {
-    OVERRIDE.store(-1, Ordering::Relaxed);
+    OVERRIDE.with(|value| value.set(-1));
 }
 
 fn wrap(code: &str, s: &str) -> String {

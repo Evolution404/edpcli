@@ -169,70 +169,109 @@ pub fn backup_ownership(entry: &BackupEntry) -> Option<OwnershipInfo> {
 
 pub fn render(summary: &MetaInfoSummary) -> String {
     let mut out = String::new();
-    out.push_str(&format!("{}\n", crate::ui::bold("身份信息")));
-    let row = |out: &mut String, key: &str, value: Option<&str>| {
+    out.push_str(&format!("{}\n", crate::ui::bold_cyan("身份信息")));
+    let row = |out: &mut String,
+               key: &str,
+               value: Option<&str>,
+               paint: fn(&str) -> String| {
         if let Some(value) = value.filter(|v| !v.is_empty()) {
-            out.push_str(&format!("  {}  {}\n", crate::ui::pad_to(key, 18), value));
+            out.push_str(&format!(
+                "  {}  {}\n",
+                crate::ui::dim(&crate::ui::pad_to(key, 18)),
+                paint(value)
+            ));
         }
     };
-    row(&mut out, "onlyid", summary.onlyid.as_deref());
-    row(&mut out, "device_id", summary.device_id.as_deref());
-    row(&mut out, "device_id CRC32", summary.device_crc32.as_deref());
+    row(&mut out, "onlyid", summary.onlyid.as_deref(), crate::ui::yellow);
+    row(&mut out, "device_id", summary.device_id.as_deref(), crate::ui::yellow);
+    row(
+        &mut out,
+        "device_id CRC32",
+        summary.device_crc32.as_deref(),
+        crate::ui::yellow,
+    );
     if let (Some(vid), Some(pid)) = (&summary.vid, &summary.pid) {
-        out.push_str(&format!("  {}  {}:{}\n", crate::ui::pad_to("USB VID:PID", 18), vid, pid));
+        out.push_str(&format!(
+            "  {}  {}\n",
+            crate::ui::dim(&crate::ui::pad_to("USB VID:PID", 18)),
+            crate::ui::yellow(&format!("{vid}:{pid}"))
+        ));
     }
     if let Some(size) = summary.size_bytes {
         out.push_str(&format!(
             "  {}  {}\n",
-            crate::ui::pad_to("容量", 18),
-            crate::common::fmt_gb(size)
+            crate::ui::dim(&crate::ui::pad_to("容量", 18)),
+            crate::ui::magenta(&crate::common::fmt_gb(size))
         ));
     }
-    row(&mut out, "PDKB device_id", summary.pdkb_device_id.as_deref());
+    row(
+        &mut out,
+        "PDKB device_id",
+        summary.pdkb_device_id.as_deref(),
+        crate::ui::yellow,
+    );
 
     out.push('\n');
-    out.push_str(&format!("{}\n", crate::ui::bold("归属信息")));
-    row(&mut out, "Dept", summary.ownership.dept.as_deref());
-    row(&mut out, "User", summary.ownership.user.as_deref());
-    row(&mut out, "Label", summary.ownership.label.as_deref());
-    row(&mut out, "Rmark", summary.ownership.rmark.as_deref());
-    row(&mut out, "GLab", summary.ownership.glab.as_deref());
-    row(&mut out, "Autonum", summary.ownership.autonum.as_deref());
+    out.push_str(&format!("{}\n", crate::ui::bold_cyan("归属信息")));
+    row(&mut out, "Dept", summary.ownership.dept.as_deref(), crate::ui::cyan);
+    row(&mut out, "User", summary.ownership.user.as_deref(), crate::ui::cyan);
+    row(&mut out, "Label", summary.ownership.label.as_deref(), crate::ui::cyan);
+    row(&mut out, "Rmark", summary.ownership.rmark.as_deref(), crate::ui::cyan);
+    row(&mut out, "GLab", summary.ownership.glab.as_deref(), crate::ui::yellow);
+    row(
+        &mut out,
+        "Autonum",
+        summary.ownership.autonum.as_deref(),
+        crate::ui::yellow,
+    );
     if summary.ownership.dept.is_none() && summary.ownership.user.is_none() {
         out.push_str(&format!("  {}\n", crate::ui::dim("LBA8 未解析到 Dept/User。")));
     }
 
     out.push('\n');
-    out.push_str(&format!("{}\n", crate::ui::bold("SAFE6")));
-    row(&mut out, "标签", summary.safe6_label.as_deref());
-    row(&mut out, "用户", summary.safe6_user.as_deref());
-    row(&mut out, "序列", summary.safe6_serial.as_deref());
-    row(&mut out, "注册", summary.safe6_register.as_deref());
-    row(&mut out, "校验", summary.safe6_checksum.as_deref());
+    out.push_str(&format!("{}\n", crate::ui::bold_cyan("SAFE6")));
+    row(&mut out, "标签", summary.safe6_label.as_deref(), crate::ui::cyan);
+    row(&mut out, "用户", summary.safe6_user.as_deref(), crate::ui::cyan);
+    row(&mut out, "序列", summary.safe6_serial.as_deref(), crate::ui::yellow);
+    row(
+        &mut out,
+        "注册",
+        summary.safe6_register.as_deref(),
+        crate::ui::yellow,
+    );
+    if let Some(checksum) = summary.safe6_checksum.as_deref() {
+        let paint = if checksum.contains('✗') {
+            crate::ui::red
+        } else {
+            crate::ui::green
+        };
+        row(&mut out, "校验", Some(checksum), paint);
+    }
 
     if !summary.partitions.is_empty() {
         out.push('\n');
-        out.push_str(&format!("{}\n", crate::ui::bold("分区摘要")));
+        out.push_str(&format!("{}\n", crate::ui::bold_cyan("分区摘要")));
         for part in &summary.partitions {
+            out.push_str(&format!(
+                "  {} {}  ",
+                crate::ui::green(&crate::ui::pad_to(&part.source, 7)),
+                crate::ui::bold_cyan(&crate::ui::pad_to(&part.name, 10)),
+            ));
             let mut values = Vec::new();
             if let Some(v) = &part.kind {
-                values.push(v.clone());
+                values.push(crate::ui::yellow(v));
             }
             if let Some(v) = &part.status {
-                values.push(v.clone());
+                values.push(crate::ui::yellow(v));
             }
             if let Some(v) = &part.start_lba {
-                values.push(format!("start={v}"));
+                values.push(crate::ui::green(&format!("start={v}")));
             }
             if let Some(v) = &part.size {
-                values.push(v.clone());
+                values.push(crate::ui::magenta(v));
             }
-            out.push_str(&format!(
-                "  {} {}  {}\n",
-                crate::ui::pad_to(&part.source, 7),
-                crate::ui::pad_to(&part.name, 10),
-                values.join(" · ")
-            ));
+            out.push_str(&values.join(" · "));
+            out.push('\n');
         }
     }
     out
