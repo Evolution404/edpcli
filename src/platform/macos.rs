@@ -367,7 +367,9 @@ pub(super) fn disk_total_sectors(runner: &dyn CmdRunner, disk: u32) -> Option<u6
 }
 
 pub(super) fn usb_vid_pid(runner: &dyn CmdRunner, disk: u32) -> (String, String) {
-    if let Some(probe) = hardware_probe(disk) {
+    // 原生探测必须通过 CmdRunner 注入边界进入，不能在 fallback 层重新直接访问 IOKit。
+    // 这样 FakeRunner/ReadProbeCache 才能完全隔离真实机器上恰好插入的 USB 设备。
+    if let Some(probe) = runner.hardware_probe(disk) {
         if let (Some(vid), Some(pid)) = (probe.vid, probe.pid) {
             return (format!("{vid:04x}"), format!("{pid:04x}"));
         }
