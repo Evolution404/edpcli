@@ -1,7 +1,7 @@
 //! 备份目录领域模型。
 //!
-//! CLI、inspect 与 shell completion 都必须通过这里解释 onlyid、盘内编号和备份路径，
-//! 避免各自重复排序/解析后产生“同一个 [N] 指向不同文件”的行为漂移。
+//! CLI、inspect 与 shell completion 共享这里的目录扫描/路径解释；用户可见的全局稳定编号
+//! 统一由 `BackupSelector` 生成，避免各命令各自排序后产生“同一个 [N] 指向不同文件”的漂移。
 
 use std::fs;
 use std::path::{Path, PathBuf};
