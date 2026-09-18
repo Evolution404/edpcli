@@ -54,6 +54,10 @@ fn main() {
     println!("cargo:rerun-if-changed=src");
     println!("cargo:rerun-if-changed=Cargo.toml");
     println!("cargo:rerun-if-changed=Cargo.lock");
+    println!("cargo:rerun-if-changed=.git/HEAD");
+    if let Some(symbolic_ref) = command_output("git", &["symbolic-ref", "-q", "HEAD"]) {
+        println!("cargo:rerun-if-changed=.git/{symbolic_ref}");
+    }
     println!("cargo:rerun-if-env-changed=SOURCE_DATE_EPOCH");
 
     let target = env::var("TARGET").unwrap_or_else(|_| "unknown".into());
