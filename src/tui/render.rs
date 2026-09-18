@@ -218,14 +218,18 @@ fn draw_inspect(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState
         InspectMode::DecodedHex => "Decoded Hex",
         InspectMode::RawHex => "Raw Hex",
     };
+    let scroll = state.inspect_scroll().unwrap_or(0).min(u16::MAX as usize) as u16;
     frame.render_widget(
         Paragraph::new(lines)
             .block(
                 Block::default()
                     .borders(Borders::ALL)
-                    .title(format!("Inspect · {mode_label} · h/l 切换视图")),
+                    .title(format!(
+                        "Inspect · {mode_label} · h/l 切换视图 · Ctrl-d/u 滚动"
+                    )),
             )
-            .wrap(Wrap { trim: false }),
+            .wrap(Wrap { trim: false })
+            .scroll((scroll, 0)),
         area,
     );
 }

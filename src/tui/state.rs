@@ -17,6 +17,7 @@ pub struct InspectState {
     selected: usize,
     item_count: usize,
     mode: InspectMode,
+    scroll: usize,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -243,6 +244,11 @@ impl AppState {
                     .collect();
                 text.push(' ');
                 text.push_str(&ascii);
+                text.push(' ');
+                for byte in &view.raw {
+                    text.push_str(&format!("{byte:02x}"));
+                    text.push(' ');
+                }
                 if text.to_ascii_lowercase().contains(&self.search_query) {
                     self.search_matches.push(index);
                 }
@@ -354,6 +360,7 @@ impl AppState {
             selected: 0,
             item_count,
             mode: InspectMode::Fields,
+            scroll: 0,
         });
     }
 
@@ -375,6 +382,10 @@ impl AppState {
 
     pub fn inspect_mode(&self) -> Option<InspectMode> {
         self.inspect.as_ref().map(|inspect| inspect.mode)
+    }
+
+    pub fn inspect_scroll(&self) -> Option<usize> {
+        self.inspect.as_ref().map(|inspect| inspect.scroll)
     }
 
     pub fn close_inspect(&mut self) {
@@ -628,25 +639,32 @@ impl AppState {
 
         if let Some(inspect) = self.inspect.as_mut() {
             match command {
-                NavCommand::Up => inspect.selected = inspect.selected.saturating_sub(1),
+                NavCommand::Up => {
+                    inspect.selected = inspect.selected.saturating_sub(1);
+                    inspect.scroll = 0;
+                }
                 NavCommand::Down => {
                     if inspect.item_count > 0 {
                         inspect.selected = (inspect.selected + 1).min(inspect.item_count - 1);
+                        inspect.scroll = 0;
                     }
                 }
-                NavCommand::Top => inspect.selected = 0,
-                NavCommand::Bottom => inspect.selected = inspect.item_count.saturating_sub(1),
+                NavCommand::Top => {
+                    inspect.selected = 0;
+                    inspect.scroll = 0;
+                }
+                NavCommand::Bottom => {
+                    inspect.selected = inspect.item_count.saturating_sub(1);
+                    inspect.scroll = 0;
+                }
                 NavCommand::HalfPageDown => {
-                    if inspect.item_count > 0 {
-                        inspect.selected = inspect
-                            .selected
-                            .saturating_add((viewport_height / 2).max(1))
-                            .min(inspect.item_count - 1);
-                    }
+                    inspect.scroll = inspect
+                        .scroll
+                        .saturating_add((viewport_height / 2).max(1));
                 }
                 NavCommand::HalfPageUp => {
-                    inspect.selected =
-                        inspect.selected.saturating_sub((viewport_height / 2).max(1));
+                    inspect.scroll =
+                        inspect.scroll.saturating_sub((viewport_height / 2).max(1));
                 }
                 NavCommand::Left => {
                     inspect.mode = match inspect.mode {
@@ -654,6 +672,7 @@ impl AppState {
                         InspectMode::DecodedHex => InspectMode::Fields,
                         InspectMode::RawHex => InspectMode::DecodedHex,
                     };
+                    inspect.scroll = 0;
                 }
                 NavCommand::Right => {
                     inspect.mode = match inspect.mode {
@@ -661,6 +680,7 @@ impl AppState {
                         InspectMode::DecodedHex => InspectMode::RawHex,
                         InspectMode::RawHex => InspectMode::RawHex,
                     };
+                    inspect.scroll = 0;
                 }
                 NavCommand::Search => {
                     self.input_buffer.clear();
