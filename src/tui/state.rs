@@ -89,6 +89,7 @@ pub struct AppState {
     critical_operation: bool,
     exit_pending: bool,
     wizard: Option<WizardState>,
+    pinned_disk: Option<u32>,
 }
 
 impl Default for AppState {
@@ -111,6 +112,7 @@ impl AppState {
             critical_operation: false,
             exit_pending: false,
             wizard: None,
+            pinned_disk: None,
         }
     }
 
@@ -219,6 +221,12 @@ impl AppState {
     }
 
     pub fn replace_devices(&mut self, devices: Vec<crate::disk_scan::Row>) {
+        if self
+            .pinned_disk
+            .is_some_and(|disk| !devices.iter().any(|row| row.disk == disk))
+        {
+            self.pinned_disk = None;
+        }
         self.devices = devices;
         self.device_scan_pending = false;
         if self.workspace == Workspace::Devices {
@@ -228,6 +236,19 @@ impl AppState {
 
     pub fn backups(&self) -> &[crate::application::BackupWorkspaceItem] {
         &self.backups
+    }
+
+    pub fn selected_device_disk(&self) -> Option<u32> {
+        match self.workspace {
+            Workspace::Devices => self.devices.get(self.selected).map(|row| row.disk),
+            Workspace::Backups => self.pinned_disk,
+        }
+    }
+
+    pub fn selected_backup_path(&self) -> Option<std::path::PathBuf> {
+        (self.workspace == Workspace::Backups)
+            .then(|| self.backups.get(self.selected).map(|row| row.path.clone()))
+            .flatten()
     }
 
     pub fn set_backup_scan_pending(&mut self, pending: bool) {
@@ -245,6 +266,9 @@ impl AppState {
     fn switch_workspace(&mut self, workspace: Workspace) {
         if self.workspace == workspace {
             return;
+        }
+        if self.workspace == Workspace::Devices && workspace == Workspace::Backups {
+            self.pinned_disk = self.devices.get(self.selected).map(|row| row.disk);
         }
         self.workspace = workspace;
         self.selected = 0;

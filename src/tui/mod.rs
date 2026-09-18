@@ -172,9 +172,17 @@ fn is_interactive_terminal() -> bool {
     io::stdin().is_terminal() && io::stdout().is_terminal()
 }
 
-fn run_loop() -> io::Result<()> {
+enum LoopExit {
+    Done,
+    Elevate(state::WriteIntent),
+}
+
+fn run_loop(resume: Option<state::WriteIntent>) -> io::Result<LoopExit> {
     let mut session = TerminalSession::enter()?;
     let mut state = AppState::new();
+    if let Some(intent) = resume {
+        state.begin_write_wizard(intent.kind, intent.disk, intent.backup);
+    }
     let mut keys = KeyMapper::new();
     let mut tasks = TaskHub::new();
     let backup_dir = crate::diskio::resolve_backup_dir(None);
@@ -191,6 +199,9 @@ fn run_loop() -> io::Result<()> {
         if let Some(rows) = updates.backups {
             state.replace_backups(rows);
         }
+        if let Some(result) = updates.write {
+            state.finish_write(result);
+        }
         session.terminal.draw(|frame| render::draw(frame, &state))?;
         if !ct_event::poll(Duration::from_millis(100))? {
             continue;
@@ -198,19 +209,72 @@ fn run_loop() -> io::Result<()> {
 
         match ct_event::read()? {
             ct_event::Event::Key(key) => {
-                if let Some(command) = keys.map(key) {
-                    if command == NavCommand::Refresh {
-                        match state.workspace() {
-                            state::Workspace::Devices => {
-                                tasks.request_device_scan(backup_dir.clone());
-                                state.set_device_scan_pending(true);
-                            }
-                            state::Workspace::Backups => {
-                                tasks.request_backup_scan(backup_dir.clone());
-                                state.set_backup_scan_pending(true);
-                            }
+                if state
+                    .wizard()
+                    .is_some_and(|wizard| wizard.stage == state::WizardStage::Confirm)
+                {
+                    match key.code {
+                        ct_event::KeyCode::Char(ch)
+                            if !key.modifiers.contains(ct_event::KeyModifiers::CONTROL) =>
+                        {
+                            state.push_wizard_confirmation(ch);
+                            continue;
                         }
-                        continue;
+                        ct_event::KeyCode::Backspace => {
+                            state.backspace_wizard_confirmation();
+                            continue;
+                        }
+                        ct_event::KeyCode::Enter => {
+                            if let Some(intent) = state.submit_wizard_confirmation() {
+                                if !crate::elevate::is_root() {
+                                    return Ok(LoopExit::Elevate(intent));
+                                }
+                                tasks.request_write(intent, backup_dir.clone());
+                            }
+                            continue;
+                        }
+                        ct_event::KeyCode::Esc => {
+                            let _ = state.navigate(NavCommand::Escape, 1);
+                            continue;
+                        }
+                        _ => {}
+                    }
+                }
+
+                if let Some(command) = keys.map(key) {
+                    match command {
+                        NavCommand::Refresh => {
+                            match state.workspace() {
+                                state::Workspace::Devices => {
+                                    tasks.request_device_scan(backup_dir.clone());
+                                    state.set_device_scan_pending(true);
+                                }
+                                state::Workspace::Backups => {
+                                    tasks.request_backup_scan(backup_dir.clone());
+                                    state.set_backup_scan_pending(true);
+                                }
+                            }
+                            continue;
+                        }
+                        NavCommand::BeginApply => {
+                            if let Some(disk) = state.selected_device_disk() {
+                                state.begin_write_wizard(state::WriteKind::Apply, disk, None);
+                            }
+                            continue;
+                        }
+                        NavCommand::BeginRestore => {
+                            if let (Some(disk), Some(backup)) =
+                                (state.selected_device_disk(), state.selected_backup_path())
+                            {
+                                state.begin_write_wizard(
+                                    state::WriteKind::Restore,
+                                    disk,
+                                    Some(backup),
+                                );
+                            }
+                            continue;
+                        }
+                        _ => {}
                     }
                     let viewport_height = session.terminal.size()?.height.saturating_sub(5) as usize;
                     match state.navigate(command, viewport_height) {
@@ -227,7 +291,7 @@ fn run_loop() -> io::Result<()> {
             break;
         }
     }
-    Ok(())
+    Ok(LoopExit::Done)
 }
 
 /// Run the interactive TUI only when both stdin and stdout are terminals.
@@ -237,8 +301,22 @@ pub fn run() -> i32 {
         return EXIT_USAGE;
     }
 
-    match run_loop() {
-        Ok(()) => EXIT_OK,
+    let argv: Vec<String> = std::env::args().skip(1).collect();
+    let resume = match parse_resume_args(&argv) {
+        Ok(value) => value,
+        Err(message) => {
+            eprintln!("{message}");
+            return EXIT_USAGE;
+        }
+    };
+
+    match run_loop(resume) {
+        Ok(LoopExit::Done) => EXIT_OK,
+        Ok(LoopExit::Elevate(intent)) => {
+            let argv = resume_argv(&intent);
+            crate::elevate::ensure_elevated(&argv);
+            unreachable!()
+        }
         Err(error) => {
             eprintln!("错误: TUI 终端初始化或事件循环失败: {error}");
             EXIT_IO

@@ -42,12 +42,16 @@ enum WorkerResult {
         generation: u64,
         rows: Vec<BackupWorkspaceItem>,
     },
+    Write {
+        result: Result<(), String>,
+    },
 }
 
 #[derive(Default)]
 pub struct TaskUpdates {
     pub devices: Option<Vec<Row>>,
     pub backups: Option<Vec<BackupWorkspaceItem>>,
+    pub write: Option<Result<(), String>>,
 }
 
 pub struct TaskHub {
@@ -95,6 +99,70 @@ impl TaskHub {
         generation
     }
 
+    pub fn request_write(
+        &mut self,
+        intent: crate::tui::state::WriteIntent,
+        backup_dir: PathBuf,
+    ) {
+        let tx = self.tx.clone();
+        std::thread::spawn(move || {
+            struct ConfirmedPrompter;
+            impl crate::application::write::Prompter for ConfirmedPrompter {
+                fn prompt_line(&mut self, _msg: &str) -> String {
+                    String::new()
+                }
+
+                fn confirm_yes(&mut self, _msg: &str) -> bool {
+                    true
+                }
+            }
+
+            let result = (|| -> Result<(), String> {
+                let runner = SysRunner;
+                crate::application::write::guard_usb_disk(&runner, intent.disk)
+                    .map_err(|error| error.msg)?;
+                let path = crate::diskio::raw_path(intent.disk);
+                let mut dev = crate::diskio::FileDev::open_rdonly(&path)
+                    .map_err(|error| format!("错误: 无法只读打开 {path}: {error}"))?;
+                let mut prompt = ConfirmedPrompter;
+                let mut ctx = crate::application::write::Ctx {
+                    runner: &runner,
+                    clock: &crate::diskio::SystemClock,
+                    prompt: &mut prompt,
+                    backup_dir,
+                };
+                match intent.kind {
+                    crate::tui::state::WriteKind::Apply => {
+                        crate::application::write::apply_flow(
+                            crate::application::write::ApplyMode::Write { force: false },
+                            intent.disk,
+                            None,
+                            &mut ctx,
+                            &mut dev,
+                        )
+                        .map(|_| ())
+                        .map_err(|error| error.msg)
+                    }
+                    crate::tui::state::WriteKind::Restore => {
+                        let backup = intent
+                            .backup
+                            .as_ref()
+                            .ok_or_else(|| "错误: restore 缺少固定备份路径".to_string())?;
+                        crate::application::write::restore_flow(
+                            Some(backup.to_string_lossy().into_owned()),
+                            intent.disk,
+                            &mut ctx,
+                            &mut dev,
+                        )
+                        .map(|_| ())
+                        .map_err(|error| error.msg)
+                    }
+                }
+            })();
+            let _ = tx.send(WorkerResult::Write { result });
+        });
+    }
+
     /// Drain all ready messages exactly once so one result kind cannot consume another.
     pub fn poll(&mut self) -> TaskUpdates {
         let mut updates = TaskUpdates::default();
@@ -109,6 +177,9 @@ impl TaskHub {
                     if self.backup_generation.is_current(generation) =>
                 {
                     updates.backups = Some(rows);
+                }
+                WorkerResult::Write { result } => {
+                    updates.write = Some(result);
                 }
                 WorkerResult::Devices { .. } | WorkerResult::Backups { .. } => {}
             }
