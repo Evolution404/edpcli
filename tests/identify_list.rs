@@ -5,9 +5,9 @@ mod common;
 use std::process::Command;
 
 use common::*;
-use nopwd::cli::{print_disk_table, scan_disks};
-use nopwd::common::SECTOR;
-use nopwd::identify::identify;
+use edpcli::cli::{print_disk_table, scan_disks};
+use edpcli::common::SECTOR;
+use edpcli::identify::identify;
 
 #[test]
 fn identify_picks_edpf_verified_candidate() {
@@ -121,10 +121,10 @@ fn scan_and_print_all_row_kinds() {
 #[test]
 fn list_cli_smoke_exit_zero() {
     // 本机 diskutil 真跑: 无论有没有插盘, 都应正常退出并给出可辨认输出
-    let out = Command::new(env!("CARGO_BIN_EXE_nopwd"))
+    let out = Command::new(env!("CARGO_BIN_EXE_edpcli"))
         .arg("list")
         .output()
-        .expect("运行 nopwd 二进制");
+        .expect("运行 edpcli 二进制");
     assert_eq!(out.status.code(), Some(0), "{}", String::from_utf8_lossy(&out.stderr));
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(stdout.contains("外接盘") || stdout.contains("未检测到外接盘"), "{}", stdout);

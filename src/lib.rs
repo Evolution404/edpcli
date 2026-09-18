@@ -1,4 +1,4 @@
-//! cems 加密 U 盘 → 无密码盘(纯 Rust 标准库, 零依赖)。
+//! edpcli — EDP/cems U 盘管理 CLI（识别、元信息、备份、恢复与免密转换；纯 Rust 标准库，零依赖）。
 //!
 //! 分层(与原 Python 版一致, 无环): common → crypto → sectors / diskio → identify → cli。
 //! macOS 耦合面收在 sysinfo(diskutil/ioreg) 与 diskio(/dev/rdiskN)。

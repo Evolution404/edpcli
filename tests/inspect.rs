@@ -1,8 +1,8 @@
 mod common;
 
 use common::*;
-use nopwd::diskio::parse_backup_name;
-use nopwd::inspect::{analyze_sector, render_fields, render_hex, FieldStyle, InspectMeta};
+use edpcli::diskio::parse_backup_name;
+use edpcli::inspect::{analyze_sector, render_fields, render_hex, FieldStyle, InspectMeta};
 
 fn meta_for(key: &str) -> InspectMeta {
     let (name, _) = fixture(key).expect("fixture metadata");
@@ -51,7 +51,7 @@ fn lba11_can_decrypt_from_backup_filename_metadata() {
 
 #[test]
 fn hex_renderer_has_offsets_and_field_legend_without_color() {
-    nopwd::ui::set_enabled_for_tests(false);
+    edpcli::ui::set_enabled_for_tests(false);
     let data = load_disk_image("netac").expect("netac fixture");
     let meta = meta_for("netac");
     let v = analyze_sector(7, &data[7 * 512..8 * 512], &meta);
@@ -60,12 +60,12 @@ fn hex_renderer_has_offsets_and_field_legend_without_color() {
     assert!(out.contains("+0x1F0:"));
     assert!(out.contains("字段图例"));
     assert!(!out.contains("\x1b["));
-    nopwd::ui::reset_enabled_for_tests();
+    edpcli::ui::reset_enabled_for_tests();
 }
 
 #[test]
 fn lba8_llgb_fields_render_as_vertical_key_value_rows() {
-    nopwd::ui::set_enabled_for_tests(false);
+    edpcli::ui::set_enabled_for_tests(false);
     let data = load_disk_image("aigo").expect("aigo fixture");
     let meta = meta_for("aigo");
     let view = analyze_sector(8, &data[8 * 512..9 * 512], &meta);
@@ -85,12 +85,12 @@ fn lba8_llgb_fields_render_as_vertical_key_value_rows() {
         !out.lines().any(|line| line.contains("GLab=") && line.contains("Dept=")),
         "LLGB 子字段不应再拼成一行: {out}"
     );
-    nopwd::ui::reset_enabled_for_tests();
+    edpcli::ui::reset_enabled_for_tests();
 }
 
 #[test]
 fn repeated_structures_render_as_groups_instead_of_repeating_prefixes() {
-    nopwd::ui::set_enabled_for_tests(false);
+    edpcli::ui::set_enabled_for_tests(false);
     let data = load_disk_image("netac").expect("netac fixture");
     let meta = meta_for("netac");
 
@@ -102,12 +102,12 @@ fn repeated_structures_render_as_groups_instead_of_repeating_prefixes() {
     let mbr = render_fields(&analyze_sector(0, &data[..512], &meta));
     assert!(mbr.contains("分区 P1"), "{mbr}");
     assert_eq!(mbr.matches("P1").count(), 1, "P1 标题应只显示一次: {mbr}");
-    nopwd::ui::reset_enabled_for_tests();
+    edpcli::ui::reset_enabled_for_tests();
 }
 
 #[test]
 fn structured_output_keeps_known_sector_lines_readable() {
-    nopwd::ui::set_enabled_for_tests(false);
+    edpcli::ui::set_enabled_for_tests(false);
     let data = load_disk_image("aigo").expect("aigo fixture");
     let meta = meta_for("aigo");
     for lba in [0u32, 4, 6, 7, 8, 9, 11, 12] {
@@ -121,12 +121,12 @@ fn structured_output_keeps_known_sector_lines_readable() {
             );
         }
     }
-    nopwd::ui::reset_enabled_for_tests();
+    edpcli::ui::reset_enabled_for_tests();
 }
 
 #[test]
 fn edpf_key_material_renders_as_separate_rows() {
-    nopwd::ui::set_enabled_for_tests(false);
+    edpcli::ui::set_enabled_for_tests(false);
     let data = load_disk_image("netac").expect("netac fixture");
     let meta = meta_for("netac");
     let out = render_fields(&analyze_sector(7, &data[7 * 512..8 * 512], &meta));
@@ -140,12 +140,12 @@ fn edpf_key_material_renders_as_separate_rows() {
         }),
         "密钥字段不应挤在同一行: {out}"
     );
-    nopwd::ui::reset_enabled_for_tests();
+    edpcli::ui::reset_enabled_for_tests();
 }
 
 #[test]
 fn mbr_empty_partition_slots_are_summarized_not_expanded() {
-    nopwd::ui::set_enabled_for_tests(false);
+    edpcli::ui::set_enabled_for_tests(false);
     let data = load_disk_image("aigo").expect("aigo fixture");
     let meta = meta_for("aigo");
     let view = analyze_sector(0, &data[..512], &meta);
@@ -153,5 +153,5 @@ fn mbr_empty_partition_slots_are_summarized_not_expanded() {
     assert!(out.contains("分区 P1"), "{out}");
     assert!(!out.contains("分区 P2"), "空分区不应展开: {out}");
     assert!(view.notes.iter().any(|note| note.contains("空分区")), "{:?}", view.notes);
-    nopwd::ui::reset_enabled_for_tests();
+    edpcli::ui::reset_enabled_for_tests();
 }

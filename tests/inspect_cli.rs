@@ -11,13 +11,13 @@ fn inspect_backup_file_is_offline_and_renders_structured_hex() {
         eprintln!("跳过: 真实备份不可用");
         return;
     };
-    let out = Command::new(env!("CARGO_BIN_EXE_nopwd"))
+    let out = Command::new(env!("CARGO_BIN_EXE_edpcli"))
         .env("NO_COLOR", "1")
         .args(["inspect", "7", "--backup"])
         .arg(&path)
         .arg("--hex")
         .output()
-        .expect("run nopwd inspect");
+        .expect("run edpcli inspect");
     assert_eq!(out.status.code(), Some(0), "{}", String::from_utf8_lossy(&out.stderr));
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(stdout.contains("来源"));
@@ -42,7 +42,7 @@ fn inspect_onlyid_index_matches_backup_list_and_exports() {
         fs::copy(src_md5, format!("{}.md5", copied.display())).unwrap();
     }
     let export = tmp.0.join("out");
-    let out = Command::new(env!("CARGO_BIN_EXE_nopwd"))
+    let out = Command::new(env!("CARGO_BIN_EXE_edpcli"))
         .env("NO_COLOR", "1")
         .args([
             "inspect",
@@ -58,7 +58,7 @@ fn inspect_onlyid_index_matches_backup_list_and_exports() {
         .arg("--export")
         .arg(&export)
         .output()
-        .expect("run nopwd inspect onlyid");
+        .expect("run edpcli inspect onlyid");
     assert_eq!(out.status.code(), Some(0), "{}", String::from_utf8_lossy(&out.stderr));
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(stdout.contains("onlyid=1402259934 [1]"));
@@ -86,7 +86,7 @@ fn known_lba_without_structure_does_not_dump_hex_unless_requested() {
     let target = tmp.0.join(name);
     fs::write(&target, data).unwrap();
 
-    let out = Command::new(env!("CARGO_BIN_EXE_nopwd"))
+    let out = Command::new(env!("CARGO_BIN_EXE_edpcli"))
         .args(["inspect", target.to_str().unwrap(), "9"])
         .output()
         .unwrap();
@@ -95,7 +95,7 @@ fn known_lba_without_structure_does_not_dump_hex_unless_requested() {
     assert!(stdout.contains("未检测到") || stdout.contains("未识别"), "{stdout}");
     assert!(!stdout.contains("+0x000:"), "未指定 --hex 时不应自动刷 hex: {stdout}");
 
-    let out_hex = Command::new(env!("CARGO_BIN_EXE_nopwd"))
+    let out_hex = Command::new(env!("CARGO_BIN_EXE_edpcli"))
         .args(["inspect", target.to_str().unwrap(), "9", "--hex"])
         .output()
         .unwrap();

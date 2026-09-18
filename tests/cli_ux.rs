@@ -4,7 +4,7 @@ use std::fs;
 use std::process::Command;
 
 use common::*;
-use nopwd::md5::md5_hex;
+use edpcli::md5::md5_hex;
 
 fn two_netac_backups() -> Option<TmpDir> {
     let src = fixture_bin("netac")?;
@@ -27,7 +27,7 @@ fn inspect_onlyid_without_index_lists_choices_instead_of_usage_error() {
         eprintln!("跳过: 真实备份不可用");
         return;
     };
-    let out = Command::new(env!("CARGO_BIN_EXE_nopwd"))
+    let out = Command::new(env!("CARGO_BIN_EXE_edpcli"))
         .env("NO_COLOR", "1")
         .args([
             "inspect",
@@ -44,7 +44,7 @@ fn inspect_onlyid_without_index_lists_choices_instead_of_usage_error() {
     assert!(stdout.contains("[1]"));
     assert!(stdout.contains("[2]"));
     assert!(stdout.contains("--index N"));
-    assert!(!stdout.contains("用法: nopwd <子命令>"));
+    assert!(!stdout.contains("用法: edpcli <子命令>"));
 }
 
 #[test]
@@ -57,7 +57,7 @@ fn bare_backup_defaults_to_list_and_accepts_onlyid_without_action() {
         vec!["backup", "--backup-dir"],
         vec!["backup", "--onlyid", "1402259934", "--backup-dir"],
     ] {
-        let mut cmd = Command::new(env!("CARGO_BIN_EXE_nopwd"));
+        let mut cmd = Command::new(env!("CARGO_BIN_EXE_edpcli"));
         cmd.env("NO_COLOR", "1").args(args).arg(&tmp.0);
         let out = cmd.output().expect("run backup default list");
         assert_eq!(out.status.code(), Some(0), "{}", String::from_utf8_lossy(&out.stderr));
@@ -76,7 +76,7 @@ fn metainfo_has_short_positional_backup_syntax_and_defaults_to_latest() {
         return;
     };
 
-    let latest = Command::new(env!("CARGO_BIN_EXE_nopwd"))
+    let latest = Command::new(env!("CARGO_BIN_EXE_edpcli"))
         .env("NO_COLOR", "1")
         .args(["meta", "1402259934", "--backup-dir"])
         .arg(&tmp.0)
@@ -90,7 +90,7 @@ fn metainfo_has_short_positional_backup_syntax_and_defaults_to_latest() {
     assert!(stdout.contains("onlyid"), "{stdout}");
     assert!(stdout.contains("device_id"), "{stdout}");
 
-    let second = Command::new(env!("CARGO_BIN_EXE_nopwd"))
+    let second = Command::new(env!("CARGO_BIN_EXE_edpcli"))
         .env("NO_COLOR", "1")
         .args(["metainfo", "1402259934", "2", "--backup-dir"])
         .arg(&tmp.0)
@@ -112,7 +112,7 @@ fn metainfo_accepts_backup_file_directly() {
         .map(|e| e.path())
         .find(|p| p.extension().and_then(|e| e.to_str()) == Some("bin"))
         .unwrap();
-    let out = Command::new(env!("CARGO_BIN_EXE_nopwd"))
+    let out = Command::new(env!("CARGO_BIN_EXE_edpcli"))
         .env("NO_COLOR", "1")
         .arg("meta")
         .arg(&file)
@@ -132,7 +132,7 @@ fn focused_help_works_inside_subcommands() {
         ["completion", "--help"].as_slice(),
         ["meta", "--help"].as_slice(),
     ] {
-        let out = Command::new(env!("CARGO_BIN_EXE_nopwd"))
+        let out = Command::new(env!("CARGO_BIN_EXE_edpcli"))
             .env("NO_COLOR", "1")
             .args(args)
             .output()
@@ -151,7 +151,7 @@ fn completion_scripts_and_dynamic_values_are_available() {
         return;
     };
     for shell in ["zsh", "bash", "fish"] {
-        let out = Command::new(env!("CARGO_BIN_EXE_nopwd"))
+        let out = Command::new(env!("CARGO_BIN_EXE_edpcli"))
             .args(["completion", shell])
             .output()
             .expect("render completion");
@@ -163,7 +163,7 @@ fn completion_scripts_and_dynamic_values_are_available() {
         assert!(stdout.contains("metainfo") || stdout.contains("meta"));
     }
 
-    let onlyids = Command::new(env!("CARGO_BIN_EXE_nopwd"))
+    let onlyids = Command::new(env!("CARGO_BIN_EXE_edpcli"))
         .args(["__complete", "onlyid", "--backup-dir"])
         .arg(&tmp.0)
         .output()
@@ -171,7 +171,7 @@ fn completion_scripts_and_dynamic_values_are_available() {
     assert_eq!(onlyids.status.code(), Some(0));
     assert!(String::from_utf8_lossy(&onlyids.stdout).lines().any(|s| s == "1402259934"));
 
-    let indices = Command::new(env!("CARGO_BIN_EXE_nopwd"))
+    let indices = Command::new(env!("CARGO_BIN_EXE_edpcli"))
         .args([
             "__complete",
             "index",
@@ -200,7 +200,7 @@ fn positional_backup_path_and_numbered_verify_follow_same_ux() {
         .find(|p| p.extension().and_then(|e| e.to_str()) == Some("bin"))
         .unwrap();
 
-    let inspect = Command::new(env!("CARGO_BIN_EXE_nopwd"))
+    let inspect = Command::new(env!("CARGO_BIN_EXE_edpcli"))
         .env("NO_COLOR", "1")
         .arg("inspect")
         .arg(&file)
@@ -210,7 +210,7 @@ fn positional_backup_path_and_numbered_verify_follow_same_ux() {
     assert_eq!(inspect.status.code(), Some(0), "{}", String::from_utf8_lossy(&inspect.stderr));
     assert!(String::from_utf8_lossy(&inspect.stdout).contains("EDPF magic"));
 
-    let verify = Command::new(env!("CARGO_BIN_EXE_nopwd"))
+    let verify = Command::new(env!("CARGO_BIN_EXE_edpcli"))
         .env("NO_COLOR", "1")
         .args([
             "backup",
@@ -231,7 +231,7 @@ fn positional_backup_path_and_numbered_verify_follow_same_ux() {
 
 #[test]
 fn contradictory_inspect_flags_fail_with_focused_help() {
-    let out = Command::new(env!("CARGO_BIN_EXE_nopwd"))
+    let out = Command::new(env!("CARGO_BIN_EXE_edpcli"))
         .env("NO_COLOR", "1")
         .args(["inspect", "7", "--raw", "--hex"])
         .output()
@@ -240,7 +240,7 @@ fn contradictory_inspect_flags_fail_with_focused_help() {
     let stdout = String::from_utf8_lossy(&out.stdout);
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(stderr.contains("不能同时使用"));
-    assert!(stdout.contains("用法: nopwd inspect"));
+    assert!(stdout.contains("用法: edpcli inspect"));
     assert!(!stdout.contains("cems 加密 U 盘"));
 }
 
@@ -256,7 +256,7 @@ fn piping_output_to_head_does_not_panic_on_broken_pipe() {
         .map(|e| e.path())
         .find(|p| p.extension().and_then(|e| e.to_str()) == Some("bin"))
         .unwrap();
-    let bin = env!("CARGO_BIN_EXE_nopwd");
+    let bin = env!("CARGO_BIN_EXE_edpcli");
     let script = format!(
         "\"{}\" inspect \"{}\" --hex | head -n 1 >/dev/null",
         bin,
@@ -266,7 +266,7 @@ fn piping_output_to_head_does_not_panic_on_broken_pipe() {
         .arg("-c")
         .arg(script)
         .output()
-        .expect("run nopwd through head");
+        .expect("run edpcli through head");
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(
         !stderr.contains("Broken pipe") && !stderr.contains("panicked at"),

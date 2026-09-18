@@ -12,7 +12,7 @@
 //!             LBA12 尾部144B(0x170-0x200)不可清零; 不发明原盘没有的状态。
 //!   分区参数按实际物理盘计算: Encrypt 从原盘 LBA12 type=4 读取, Share 占满其前。
 
-use crate::common::{fmt_gb, group_digits, py_round_half_even, NopwdError, NopwdResult, SECTOR,
+use crate::common::{fmt_gb, group_digits, py_round_half_even, EdpCliError, EdpCliResult, SECTOR,
                     EXIT_TARGET};
 use crate::crypto::{a6b0_full, a7f0_full, crc32_bare, lba6_checksum, lba6_decode, xor_rolling,
                     LBA6_K0};
@@ -25,7 +25,7 @@ pub const NOPWD_LBA6_1CA: u32 = 128480; // 免密盘 LBA6 0x1CA 模板默认值
 pub const LBA6_CLEAR: (usize, usize) = (0x1D4, 0x1ED); // LBA6 清零区间(含 0x1EC)
 
 /// 扇区读取抽象(lba → 512B), 真盘/镜像/备份文件各提供实现。
-pub type ReadFn<'a> = &'a dyn Fn(u32) -> NopwdResult<Vec<u8>>;
+pub type ReadFn<'a> = &'a dyn Fn(u32) -> EdpCliResult<Vec<u8>>;
 
 fn part_type_name(t: u32) -> &'static str {
     match t {
@@ -50,14 +50,14 @@ fn u64_at(b: &[u8], off: usize) -> u64 {
     u64::from_le_bytes(b[off..off + 8].try_into().unwrap())
 }
 
-pub fn find_type_entry(dec: &[u8], stride: usize, ptype: u32) -> NopwdResult<usize> {
+pub fn find_type_entry(dec: &[u8], stride: usize, ptype: u32) -> EdpCliResult<usize> {
     for i in 0..3 {
         let e = ent(dec, i, stride);
         if &e[..4] == b"EDPF" && u32_at(e, 0x0c) == ptype {
             return Ok(i);
         }
     }
-    Err(NopwdError::new(
+    Err(EdpCliError::new(
         EXIT_TARGET,
         format!("错误: EDPF 中未找到 type={}({}) entry", ptype, part_type_name(ptype)),
     ))
@@ -82,7 +82,7 @@ pub fn make_entry(src_e: &[u8], ptype: u32, start: u64, size: u64) -> Vec<u8> {
 // ══════════════════════════════════════════════════════════════════
 // 2. 单扇区转换
 // ══════════════════════════════════════════════════════════════════
-pub fn convert_lba0(raw: &[u8], share_sectors: u64) -> NopwdResult<Vec<u8>> {
+pub fn convert_lba0(raw: &[u8], share_sectors: u64) -> EdpCliResult<Vec<u8>> {
     let mut out = raw.to_vec();
     for i in 0..4 {
         out[0x1BE + i * 16..0x1BE + (i + 1) * 16].fill(0);
@@ -90,17 +90,17 @@ pub fn convert_lba0(raw: &[u8], share_sectors: u64) -> NopwdResult<Vec<u8>> {
     out[0x1BE + 4] = 0x07;
     out[0x1BE + 8..0x1BE + 12].copy_from_slice(&63u32.to_le_bytes());
     let n = u32::try_from(share_sectors).map_err(|_| {
-        NopwdError::new(EXIT_TARGET, format!("错误: Share 扇区数 {} 溢出 MBR u32 字段", share_sectors))
+        EdpCliError::new(EXIT_TARGET, format!("错误: Share 扇区数 {} 溢出 MBR u32 字段", share_sectors))
     })?;
     out[0x1BE + 12..0x1BE + 16].copy_from_slice(&n.to_le_bytes());
     out[0x1FE..0x200].copy_from_slice(&[0x55, 0xAA]);
     Ok(out)
 }
 
-pub fn convert_lba6(raw: &[u8]) -> NopwdResult<(Vec<u8>, Vec<u8>)> {
+pub fn convert_lba6(raw: &[u8]) -> EdpCliResult<(Vec<u8>, Vec<u8>)> {
     let mut dec = lba6_decode(raw);
     if dec[0x188..0x190] == [0u8; 8] {
-        return Err(NopwdError::new(EXIT_TARGET, "错误: LBA6 解密后 0x188 magic 为零 — 非法 SAFE6"));
+        return Err(EdpCliError::new(EXIT_TARGET, "错误: LBA6 解密后 0x188 magic 为零 — 非法 SAFE6"));
     }
     dec[0x1CA..0x1CE].copy_from_slice(&NOPWD_LBA6_1CA.to_le_bytes());
     let (lo, hi) = LBA6_CLEAR;
@@ -110,15 +110,15 @@ pub fn convert_lba6(raw: &[u8]) -> NopwdResult<(Vec<u8>, Vec<u8>)> {
     let mut new = cipher;
     new.extend_from_slice(&csum.to_le_bytes());
     if lba6_decode(&new)[..0x1FC] != dec[..0x1FC] {
-        return Err(NopwdError::new(EXIT_TARGET, "错误: LBA6 往返自检失败"));
+        return Err(EdpCliError::new(EXIT_TARGET, "错误: LBA6 往返自检失败"));
     }
     Ok((new, dec))
 }
 
-pub fn convert_lba7(raw: &[u8], k0: u32, share_sectors: u64) -> NopwdResult<(Vec<u8>, Vec<u8>)> {
+pub fn convert_lba7(raw: &[u8], k0: u32, share_sectors: u64) -> EdpCliResult<(Vec<u8>, Vec<u8>)> {
     let mut dec = xor_rolling(raw, k0);
     if dec[..4] != *b"EDPF" {
-        return Err(NopwdError::new(
+        return Err(EdpCliError::new(
             EXIT_TARGET,
             format!("错误: LBA7 解密后非 EDPF magic({}) — device_id/K0 不符", hex4(&dec[..4])),
         ));
@@ -136,10 +136,10 @@ pub fn convert_lba7(raw: &[u8], k0: u32, share_sectors: u64) -> NopwdResult<(Vec
     Ok((xor_rolling(&dec, k0), dec))
 }
 
-pub fn convert_lba12(raw: &[u8], crc_key: &[u8], share_sectors: u64) -> NopwdResult<(Vec<u8>, Vec<u8>)> {
+pub fn convert_lba12(raw: &[u8], crc_key: &[u8], share_sectors: u64) -> EdpCliResult<(Vec<u8>, Vec<u8>)> {
     let mut dec = a6b0_full(&raw[..EDPF_ENC_LEN], crc_key, 0);
     if dec[..4] != *b"EDPF" {
-        return Err(NopwdError::new(
+        return Err(EdpCliError::new(
             EXIT_TARGET,
             format!("错误: LBA12 解密后非 EDPF magic({}) — device_id/CRC 不符", hex4(&dec[..4])),
         ));
@@ -154,7 +154,7 @@ pub fn convert_lba12(raw: &[u8], crc_key: &[u8], share_sectors: u64) -> NopwdRes
     let mut enc = a7f0_full(&dec, crc_key, 0);
     enc.extend_from_slice(&raw[EDPF_ENC_LEN..SECTOR]);
     if a6b0_full(&enc[..EDPF_ENC_LEN], crc_key, 0) != dec {
-        return Err(NopwdError::new(EXIT_TARGET, "错误: LBA12 A6B0/a7f0 往返自检失败"));
+        return Err(EdpCliError::new(EXIT_TARGET, "错误: LBA12 A6B0/a7f0 往返自检失败"));
     }
     Ok((enc, dec))
 }
@@ -174,7 +174,7 @@ fn hex4(b: &[u8]) -> String {
 ///         entry1=Encrypt指针(type4,active=1), entry2 区已清零 (主信号:
 ///         原盘恒为 3 条 EDPF, entry0 enc=0, entry2 type4/active=0;
 ///         注意 aigo 原盘 entry0 也是 type=2@63, 故不能只看 type/start)
-pub fn looks_nopwd(read: ReadFn, device_id: &str) -> NopwdResult<bool> {
+pub fn looks_nopwd(read: ReadFn, device_id: &str) -> EdpCliResult<bool> {
     let dec6 = lba6_decode(&read(6)?);
     if u32_at(&dec6, 0x1CA) != NOPWD_LBA6_1CA {
         return Ok(false);
@@ -281,7 +281,7 @@ pub fn convert(
     device_id: &str,
     size_gb: Option<f64>,
     verbose: bool,
-) -> NopwdResult<ConvertResult> {
+) -> EdpCliResult<ConvertResult> {
     let crc = crc32_bare(device_id.as_bytes());
     let k0 = (crc & 0xFFFF) ^ (crc >> 16);
     let crc_key = crc.to_le_bytes();
@@ -292,7 +292,7 @@ pub fn convert(
     let raw12 = read(12)?;
     let dec12 = a6b0_full(&raw12[..EDPF_ENC_LEN], &crc_key, 0);
     if dec12[..4] != *b"EDPF" {
-        return Err(NopwdError::new(
+        return Err(EdpCliError::new(
             EXIT_TARGET,
             format!("错误: LBA12 解密后非 EDPF({}) — device_id 不符或非 cems 盘", hex4(&dec12[..4])),
         ));
@@ -307,7 +307,7 @@ pub fn convert(
         enc_start - 63
     };
     if 63 + share > enc_start {
-        return Err(NopwdError::new(
+        return Err(EdpCliError::new(
             EXIT_TARGET,
             format!("错误: Share@63+{} 越过 Encrypt@{}", group_digits(share), group_digits(enc_start)),
         ));

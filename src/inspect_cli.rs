@@ -1,4 +1,4 @@
-//! `nopwd inspect` 的来源解析、展示与导出层。
+//! `edpcli inspect` 的来源解析、展示与导出层。
 //!
 //! 扇区结构解析仍由 `inspect.rs` 负责；这里只处理物理盘/备份来源、onlyid 编号选择、
 //! 展示模式和导出，避免 `cli.rs` 直接承担 inspect 业务流程。
@@ -129,7 +129,7 @@ where
         println!();
         println!(
             "{}",
-            crate::ui::dim("指定 LBA 可展开结构化字段，例如: nopwd inspect 6 7 12 --disk N --hex")
+            crate::ui::dim("指定 LBA 可展开结构化字段，例如: edpcli inspect 6 7 12 --disk N --hex")
         );
         if let Some(dir) = &export_dir {
             println!("{}  {}", crate::ui::green("已导出"), dir.display());
@@ -197,7 +197,7 @@ fn inspect_backup_flow(opts: InspectOpts) -> i32 {
                 eprintln!("{}", crate::ui::red(&format!("错误: {msg}")));
                 if print_backup_sources(
                     catalog.entries(),
-                    "查看某盘: nopwd inspect --onlyid <ID>",
+                    "查看某盘: edpcli inspect --onlyid <ID>",
                 ) {
                     println!();
                 }
@@ -210,14 +210,14 @@ fn inspect_backup_flow(opts: InspectOpts) -> i32 {
             println!(
                 "{}",
                 crate::ui::bold(&format!(
-                    "继续查看: nopwd inspect --onlyid {} --index N [LBA...] [--hex]",
+                    "继续查看: edpcli inspect --onlyid {} --index N [LBA...] [--hex]",
                     id
                 ))
             );
             println!(
                 "{}",
                 crate::ui::dim(&format!(
-                    "例如最新一份: nopwd inspect --onlyid {} --index 1",
+                    "例如最新一份: edpcli inspect --onlyid {} --index 1",
                     id
                 ))
             );
@@ -340,7 +340,7 @@ pub(crate) fn inspect_flow(runner: &SysRunner, opts: InspectOpts) -> i32 {
         if opts.disk.is_none() && sysinfo::list_usb_disks(runner).is_empty() {
             let bak = diskio::resolve_backup_dir(opts.backup_dir.as_deref());
             let entries = diskio::scan_backup_dir(&bak);
-            if print_backup_sources(&entries, "查看某盘: nopwd inspect --onlyid <ID>") {
+            if print_backup_sources(&entries, "查看某盘: edpcli inspect --onlyid <ID>") {
                 println!(
                     "{}",
                     crate::ui::yellow("未检测到外接 USB 盘；上面是当前可离线查看的备份。")

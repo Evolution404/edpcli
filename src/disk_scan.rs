@@ -5,7 +5,7 @@
 use std::io;
 use std::path::Path;
 
-use crate::common::{fmt_gb, group_digits, NopwdError, SECTOR, EXIT_IO};
+use crate::common::{fmt_gb, group_digits, EdpCliError, SECTOR, EXIT_IO};
 use crate::diskio::{self, find_backups, DiskFacts};
 use crate::identify::identify;
 use crate::sectors::{looks_nopwd, parse_lba12, EdpfPartition};
@@ -75,7 +75,7 @@ pub fn scan_disks(
                 if let Some(did) = &id.device_id {
                     let read = |lba: u32| {
                         read_exact(lba)
-                            .map_err(|e| NopwdError::new(EXIT_IO, format!("错误: {}", e)))
+                            .map_err(|e| EdpCliError::new(EXIT_IO, format!("错误: {}", e)))
                     };
                     row.is_nopwd = looks_nopwd(&read, did)
                         .map_err(|e| io::Error::other(e.msg))?;

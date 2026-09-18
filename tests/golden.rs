@@ -4,9 +4,9 @@
 mod common;
 
 use common::*;
-use nopwd::common::SECTOR;
-use nopwd::crypto::{a6b0_full, crc32_bare, xor_rolling};
-use nopwd::sectors::{convert, find_type_entry, looks_nopwd, make_entry, parse_lba12, E12, E7,
+use edpcli::common::SECTOR;
+use edpcli::crypto::{a6b0_full, crc32_bare, xor_rolling};
+use edpcli::sectors::{convert, find_type_entry, looks_nopwd, make_entry, parse_lba12, E12, E7,
                      EDPF_ENC_LEN, PWD_CRC};
 
 fn u32_at(b: &[u8], off: usize) -> u32 {
@@ -70,7 +70,7 @@ fn convert_golden_size_overflow_rejected() {
     };
     let (_, did) = fixture("netac").unwrap();
     let e = convert(&read_fn_of(&data), did, Some(100.0), false).unwrap_err();
-    assert_eq!(e.code, nopwd::common::EXIT_TARGET);
+    assert_eq!(e.code, edpcli::common::EXIT_TARGET);
     assert!(e.msg.contains("越过"), "{}", e.msg);
 }
 
@@ -81,7 +81,7 @@ fn convert_golden_wrong_device_id_rejected() {
         return;
     };
     let e = convert(&read_fn_of(&data), "disk&ven_bogus&prod_x", None, false).unwrap_err();
-    assert_eq!(e.code, nopwd::common::EXIT_TARGET);
+    assert_eq!(e.code, edpcli::common::EXIT_TARGET);
     assert!(e.msg.contains("EDPF"), "{}", e.msg);
 }
 

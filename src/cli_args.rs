@@ -79,12 +79,12 @@ pub fn print_usage() {
     println!(
         "{}",
         bold(&format!(
-            "cems 加密 U 盘 → 无密码盘(纯 Rust 标准库, 零依赖) v{}",
+            "edpcli — EDP/cems U 盘管理 CLI（纯 Rust 标准库，零依赖） v{}",
             env!("CARGO_PKG_VERSION")
         ))
     );
     println!();
-    println!("{}", bold("用法: nopwd <子命令> [选项]"));
+    println!("{}", bold("用法: edpcli <子命令> [选项]"));
     println!();
     println!("{}", bold("子命令:"));
     for (n, d) in [
@@ -146,22 +146,22 @@ pub fn print_usage() {
         ("--onlyid <ID>", "backup / inspect 按物理盘 onlyid 筛选"),
         ("--index <N>", "inspect / backup verify 选择该盘第 N 份备份"),
         ("--id <device_id>", "inspect / metainfo 备份或镜像无法自动识别时手动提供 device_id"),
-        ("--backup-dir <目录>", "备份目录(默认 $NOPWD_BACKUP_DIR、~/.nopwd.conf 或 ./backup)"),
+        ("--backup-dir <目录>", "备份目录(默认 $EDPCLI_BACKUP_DIR、~/.edpcli.conf 或 ./backup)"),
     ] {
         println!("{}", flag(n, d));
     }
     println!();
     println!("{}", bold("Tab 补全:"));
-    println!("  zsh   eval \"$(nopwd completion zsh)\"");
-    println!("  bash  eval \"$(nopwd completion bash)\"");
-    println!("  fish  nopwd completion fish | source");
+    println!("  zsh   eval \"$(edpcli completion zsh)\"");
+    println!("  bash  eval \"$(edpcli completion bash)\"");
+    println!("  fish  edpcli completion fish | source");
 }
 
 fn print_topic_help(topic: &str) {
     use crate::ui::{bold, bold_cyan, dim};
     match topic {
         "inspect" => {
-            println!("{}", bold("用法: nopwd inspect [LBA...] [来源] [选项]"));
+            println!("{}", bold("用法: edpcli inspect [LBA...] [来源] [选项]"));
             println!();
             println!("{}", bold("来源（选一种；不指定时查看当前物理 USB 盘）:"));
             println!("  {}", bold_cyan("--disk N                         当前物理盘"));
@@ -170,58 +170,58 @@ fn print_topic_help(topic: &str) {
             println!("  {}", bold_cyan("--onlyid ID --index N            查看该盘第 N 份备份"));
             println!();
             println!("{}", bold("常用:"));
-            println!("  nopwd inspect --onlyid 1987718388");
-            println!("  nopwd inspect --onlyid 1987718388 --index 1");
-            println!("  nopwd inspect 6 7 12 --onlyid 1987718388 --index 1 --hex");
-            println!("  nopwd inspect backup.bin 7 12 --hex");
-            println!("  nopwd inspect 6 7 12 --disk 4 --hex");
+            println!("  edpcli inspect --onlyid 1987718388");
+            println!("  edpcli inspect --onlyid 1987718388 --index 1");
+            println!("  edpcli inspect 6 7 12 --onlyid 1987718388 --index 1 --hex");
+            println!("  edpcli inspect backup.bin 7 12 --hex");
+            println!("  edpcli inspect 6 7 12 --disk 4 --hex");
             println!();
             println!("{}", dim("不指定 LBA 时显示 LBA0-13 概览；--hex 展开解密视图，--raw 查看盘上原始字节。"));
         }
         "metainfo" | "meta" => {
-            println!("{}", bold("用法: nopwd metainfo [onlyid [N] | 备份.bin] [选项]"));
-            println!("{}", bold("别名: nopwd meta"));
+            println!("{}", bold("用法: edpcli metainfo [onlyid [N] | 备份.bin] [选项]"));
+            println!("{}", bold("别名: edpcli meta"));
             println!();
             println!("{}", bold("常用:"));
-            println!("  nopwd meta");
-            println!("  nopwd meta 1987718388");
-            println!("  nopwd meta 1987718388 2");
-            println!("  nopwd meta backup.bin");
-            println!("  nopwd metainfo --disk 4");
+            println!("  edpcli meta");
+            println!("  edpcli meta 1987718388");
+            println!("  edpcli meta 1987718388 2");
+            println!("  edpcli meta backup.bin");
+            println!("  edpcli metainfo --disk 4");
             println!();
             println!("{}", dim("onlyid 不写编号时默认查看最新 [1]；输出汇总 onlyid/device_id/Dept/User/SAFE6/分区等元信息。"));
         }
         "backup" => {
-            println!("{}", bold("用法: nopwd backup [动作] [选项]"));
+            println!("{}", bold("用法: edpcli backup [动作] [选项]"));
             println!();
-            println!("{}", bold("默认动作: list（因此 nopwd backup 可直接列出全部备份）"));
+            println!("{}", bold("默认动作: list（因此 edpcli backup 可直接列出全部备份）"));
             println!("  {}", bold_cyan("backup [list] [--onlyid ID]          查看备份"));
             println!("  {}", bold_cyan("backup verify [文件] [--onlyid ID] [--index N] 校验备份"));
             println!("  {}", bold_cyan("backup prune [--onlyid ID]          预览策略清理"));
             println!("  {}", bold_cyan("backup rm --onlyid ID [编号|范围]   选择并删除备份"));
             println!();
             println!("{}", bold("常用:"));
-            println!("  nopwd backup");
-            println!("  nopwd backup --onlyid 1987718388");
-            println!("  nopwd backup rm --onlyid 1987718388");
+            println!("  edpcli backup");
+            println!("  edpcli backup --onlyid 1987718388");
+            println!("  edpcli backup rm --onlyid 1987718388");
         }
         "completion" => {
-            println!("{}", bold("用法: nopwd completion <zsh|bash|fish>"));
+            println!("{}", bold("用法: edpcli completion <zsh|bash|fish>"));
             println!();
             println!("动态补全包括: 子命令、旗标、onlyid、备份编号、备份文件名、物理盘号和 LBA0-13。" );
             println!();
-            println!("zsh : eval \"$(nopwd completion zsh)\"");
-            println!("bash: eval \"$(nopwd completion bash)\"");
-            println!("fish: nopwd completion fish | source");
+            println!("zsh : eval \"$(edpcli completion zsh)\"");
+            println!("bash: eval \"$(edpcli completion bash)\"");
+            println!("fish: edpcli completion fish | source");
         }
         "restore" => {
-            println!("{}", bold("用法: nopwd restore [备份.bin] [--disk N] [--yes] [--backup-dir D]"));
+            println!("{}", bold("用法: edpcli restore [备份.bin] [--disk N] [--yes] [--backup-dir D]"));
             println!("不指定备份文件时，会自动列出当前物理盘匹配的备份并让你选择。" );
         }
-        "run" => println!("{}", bold("用法: nopwd run [--disk N] [--size GB] [--backup-dir D]")),
-        "apply" => println!("{}", bold("用法: nopwd apply [--disk N] [--size GB] [--force] [--yes] [--backup-dir D]")),
-        "list" => println!("{}", bold("用法: nopwd list [--backup-dir D]")),
-        "convert" => println!("{}", bold("用法: nopwd convert --dir <快照目录> --id <device_id> [--size GB] [--out DIR]")),
+        "run" => println!("{}", bold("用法: edpcli run [--disk N] [--size GB] [--backup-dir D]")),
+        "apply" => println!("{}", bold("用法: edpcli apply [--disk N] [--size GB] [--force] [--yes] [--backup-dir D]")),
+        "list" => println!("{}", bold("用法: edpcli list [--backup-dir D]")),
+        "convert" => println!("{}", bold("用法: edpcli convert --dir <快照目录> --id <device_id> [--size GB] [--out DIR]")),
         _ => print_usage(),
     }
 }
@@ -306,7 +306,7 @@ fn set_switch(slot: &mut bool, raw: &str, flag: &str) -> Result<(), String> {
 pub fn parse_args(argv: &[String]) -> Result<Parsed, String> {
     let args: Vec<&String> = argv.iter().filter(|a| a.as_str() != ELEVATED_FLAG).collect();
     let Some(first) = args.first() else {
-        return Ok(Parsed::Help { topic: None }); // 裸 nopwd: 打印用法, 不做任何动作
+        return Ok(Parsed::Help { topic: None }); // 裸 edpcli: 打印用法, 不做任何动作
     };
     let rest: Vec<String> = args[1..].iter().map(|s| (*s).clone()).collect();
     match first.as_str() {
@@ -427,7 +427,7 @@ pub fn parse_args(argv: &[String]) -> Result<Parsed, String> {
                     opts.lbas.push(lba);
                 } else if opts.backup.is_none() {
                     // 最常见的离线查看不应强迫用户记 --backup：
-                    // `nopwd inspect backup.bin 7 12` 与显式 --backup 等价。
+                    // `edpcli inspect backup.bin 7 12` 与显式 --backup 等价。
                     opts.backup = Some(a.to_string());
                 } else {
                     return Err(format!("错误: inspect 多余的位置参数: {}", a));
@@ -549,8 +549,8 @@ pub fn parse_args(argv: &[String]) -> Result<Parsed, String> {
             if rest.iter().any(|a| a == "-h" || a == "--help") || rest.first().map(String::as_str) == Some("help") {
                 return Ok(Parsed::Help { topic: Some("backup".into()) });
             }
-            // 人工使用时 `nopwd backup` 的自然含义就是“看看有哪些备份”。
-            // 若第一个 token 是旗标，也按省略 `list` 处理，例如 `nopwd backup --onlyid ID`。
+            // 人工使用时 `edpcli backup` 的自然含义就是“看看有哪些备份”。
+            // 若第一个 token 是旗标，也按省略 `list` 处理，例如 `edpcli backup --onlyid ID`。
             let (action_name, tail): (&str, &[String]) = match rest.first() {
                 None => ("list", &rest[..]),
                 Some(s) if s.starts_with('-') => ("list", &rest[..]),
@@ -794,7 +794,7 @@ pub fn parse_args(argv: &[String]) -> Result<Parsed, String> {
             Ok(Parsed::Convert { dir, id, size, out })
         }
         other if other.starts_with('-') => Err(format!("错误: 未知选项 {} (首个参数应为子命令)", other)),
-        other => Err(format!("错误: 未知子命令: {} (nopwd help 查看用法)", other)),
+        other => Err(format!("错误: 未知子命令: {} (edpcli help 查看用法)", other)),
     }
 }
 

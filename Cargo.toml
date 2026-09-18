@@ -1,18 +1,18 @@
 [package]
-name = "nopwd"
+name = "edpcli"
 version = "3.0.0"
 edition = "2021"
 rust-version = "1.75"
-description = "cems 加密 U 盘 → 无密码盘(纯 Rust 标准库, 零依赖)"
+description = "EDP/cems U 盘管理 CLI（识别、元信息、备份、恢复与免密转换；纯 Rust 标准库，零依赖）"
 license = "MIT"
 publish = false
 
 [lib]
-name = "nopwd"
+name = "edpcli"
 path = "src/lib.rs"
 
 [[bin]]
-name = "nopwd"
+name = "edpcli"
 path = "src/main.rs"
 
 [profile.release]

@@ -4,9 +4,9 @@
 mod common;
 
 use common::*;
-use nopwd::common::SECTOR;
-use nopwd::crypto::{a6b0_full, crc32_bare, xor_rolling};
-use nopwd::sectors::EDPF_ENC_LEN;
+use edpcli::common::SECTOR;
+use edpcli::crypto::{a6b0_full, crc32_bare, xor_rolling};
+use edpcli::sectors::EDPF_ENC_LEN;
 
 #[test]
 fn lba12_decrypts_to_edpf() {

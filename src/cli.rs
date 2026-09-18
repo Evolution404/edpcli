@@ -1,15 +1,15 @@
 //! 命令行入口: 子命令解析、自动提权、交互提示、各处理器。
 //!
 //! 用法:
-//!   nopwd                                     打印用法(裸命令不做任何动作)
-//!   nopwd list                                列出外接盘(不写入, 不提权)
-//!   nopwd run    [--disk N] [--size GB]       预览 dry-run(自动提权)
-//!   nopwd apply  [--disk N] [--size GB] [--force] [--yes]   实际写入
-//!   nopwd restore [<备份.bin>] [--disk N] [--yes]           还原(缺省交互选择)
-//!   nopwd convert --dir <快照目录> --id <device_id> [--size GB] [--out <目录>]
+//!   edpcli                                     打印用法(裸命令不做任何动作)
+//!   edpcli list                                列出外接盘(不写入, 不提权)
+//!   edpcli run    [--disk N] [--size GB]       预览 dry-run(自动提权)
+//!   edpcli apply  [--disk N] [--size GB] [--force] [--yes]   实际写入
+//!   edpcli restore [<备份.bin>] [--disk N] [--yes]           还原(缺省交互选择)
+//!   edpcli convert --dir <快照目录> --id <device_id> [--size GB] [--out <目录>]
 //!
 //! 实测记录(2026-08-27, 均内网免密成功): aigo U335 128G / aigo U320 32G /
-//! Kingston DT3.0 64G (每盘改前自动备份, 可随时 nopwd restore 还原)。
+//! Kingston DT3.0 64G (每盘改前自动备份, 可随时 edpcli restore 还原)。
 
 use std::collections::BTreeMap;
 use std::io::{self, Write};
@@ -79,8 +79,8 @@ pub struct Ctx<'a> {
     pub backup_dir: PathBuf,
 }
 
-fn err(code: i32, msg: impl Into<String>) -> NopwdError {
-    NopwdError::new(code, msg)
+fn err(code: i32, msg: impl Into<String>) -> EdpCliError {
+    EdpCliError::new(code, msg)
 }
 
 // ══════════════════════════════════════════════════════════════════
@@ -130,7 +130,7 @@ pub fn disk_menu_str(disks: &[sysinfo::ExtDisk]) -> String {
 // ══════════════════════════════════════════════════════════════════
 // 4. 真盘流程
 // ══════════════════════════════════════════════════════════════════
-fn read_image(dev: &mut dyn SectorDev) -> NopwdResult<Vec<u8>> {
+fn read_image(dev: &mut dyn SectorDev) -> EdpCliResult<Vec<u8>> {
     let mut img = Vec::with_capacity(14 * SECTOR);
     // 镜像布局必须严格保持 LBA0→13 的连续顺序；后续所有固定偏移都依赖此契约。
     for lba in 0..14u32 {
@@ -156,7 +156,7 @@ fn read_image(dev: &mut dyn SectorDev) -> NopwdResult<Vec<u8>> {
 /// `reopen_rdwr` 会重新打开 `/dev/rdiskN`。确认期间既可能换盘，也可能有别的程序
 /// 改动同一块盘的元数据。自动备份保存的是确认前 LBA0-13，因此第一笔写入前必须
 /// 再读一次并逐扇区比对，保证“当前状态 == 刚刚备份的状态”。
-fn verify_reopened_snapshot(dev: &mut dyn SectorDev, expected: &[u8]) -> NopwdResult<()> {
+fn verify_reopened_snapshot(dev: &mut dyn SectorDev, expected: &[u8]) -> EdpCliResult<()> {
     if expected.len() != 14 * SECTOR {
         return Err(err(EXIT_IO, "错误: 内部预写快照长度异常"));
     }
@@ -204,14 +204,14 @@ fn verify_reopened_snapshot(dev: &mut dyn SectorDev, expected: &[u8]) -> NopwdRe
     Ok(())
 }
 
-pub(crate) fn guard_system_disk(disk: u32) -> NopwdResult<()> {
+pub(crate) fn guard_system_disk(disk: u32) -> EdpCliResult<()> {
     if disk < 2 {
         return Err(err(EXIT_TARGET, format!("错误: 拒绝系统盘 disk{}(须 disk2+)", disk)));
     }
     Ok(())
 }
 
-pub(crate) fn guard_usb_disk(runner: &dyn CmdRunner, disk: u32) -> NopwdResult<()> {
+pub(crate) fn guard_usb_disk(runner: &dyn CmdRunner, disk: u32) -> EdpCliResult<()> {
     guard_system_disk(disk)?;
     if sysinfo::usb_disk(runner, disk).is_some() {
         return Ok(());
@@ -228,7 +228,7 @@ pub(crate) fn guard_usb_disk(runner: &dyn CmdRunner, disk: u32) -> NopwdResult<(
 pub(crate) fn auto_pick_disk(
     runner: &dyn CmdRunner,
     prompt: &mut dyn Prompter,
-) -> NopwdResult<u32> {
+) -> EdpCliResult<u32> {
     let disks = sysinfo::list_usb_disks(runner);
     if disks.is_empty() {
         return Err(err(EXIT_TARGET, "错误: 未检测到外部 USB 盘。插入后重试, 或 --disk N 手动指定。"));
@@ -261,7 +261,7 @@ pub fn apply_flow(
     size_gb: Option<f64>,
     ctx: &mut Ctx,
     dev: &mut dyn SectorDev,
-) -> NopwdResult<i32> {
+) -> EdpCliResult<i32> {
     guard_usb_disk(ctx.runner, disk)?;
     let runner = ctx.runner;
 
@@ -287,7 +287,7 @@ pub fn apply_flow(
     let tag16 = diskio::lba4_tag16_from(lba4)
         .ok_or_else(|| err(EXIT_IO, "错误: LBA4 缺少 16B 身份标签"))?;
 
-    let read = |lba: u32| -> NopwdResult<Vec<u8>> {
+    let read = |lba: u32| -> EdpCliResult<Vec<u8>> {
         Ok(img[lba as usize * SECTOR..(lba as usize + 1) * SECTOR].to_vec())
     };
     let result = convert(&read, &did, size_gb, true)?;
@@ -318,7 +318,7 @@ pub fn apply_flow(
         println!(
             "{}",
             crate::ui::dim(&format!(
-                "操作  以上为预览(dry-run), 未写盘。执行写入: nopwd apply --disk {}{}",
+                "操作  以上为预览(dry-run), 未写盘。执行写入: edpcli apply --disk {}{}",
                 disk, tail
             ))
         );
@@ -328,7 +328,7 @@ pub fn apply_flow(
         return Err(err(
             EXIT_ALREADY_NOPWD,
             format!(
-                "错误: 该盘已是免密盘, 拒绝重复写入(重写内容相同, 实测幂等无害)。确需重写: nopwd apply --disk {} --force",
+                "错误: 该盘已是免密盘, 拒绝重复写入(重写内容相同, 实测幂等无害)。确需重写: edpcli apply --disk {} --force",
                 disk
             ),
         ));
@@ -341,7 +341,7 @@ pub fn apply_flow(
     }
 
     let (bpath, _nopwd) = backup_disk(&facts, &img, &did, &ctx.backup_dir, ctx.clock)?;
-    println!("{}  nopwd restore \"{}\" --disk {} --yes", crate::ui::bold("还原"), bpath.display(), disk);
+    println!("{}  edpcli restore \"{}\" --disk {} --yes", crate::ui::bold("还原"), bpath.display(), disk);
 
     if !ctx.prompt.confirm_yes(&crate::ui::bold(&format!("将改写 disk{} LBA0/6/7/12/9。输入 YES: ", disk))) {
         return Err(err(EXIT_CANCELLED, "已取消(未写盘)"));
@@ -375,7 +375,7 @@ pub fn restore_flow(
     disk: u32,
     ctx: &mut Ctx,
     dev: &mut dyn SectorDev,
-) -> NopwdResult<i32> {
+) -> EdpCliResult<i32> {
     guard_usb_disk(ctx.runner, disk)?;
     let runner = ctx.runner;
 
@@ -408,7 +408,7 @@ pub fn restore_flow(
             if baks.is_empty() {
                 return Err(err(
                     EXIT_BACKUP,
-                    "错误: 备份目录未找到本盘备份; 可 nopwd restore <备份.bin> 显式指定",
+                    "错误: 备份目录未找到本盘备份; 可 edpcli restore <备份.bin> 显式指定",
                 ));
             }
             println!("disk{} 匹配备份 {} 个(新→旧):", disk, baks.len());
@@ -552,7 +552,7 @@ pub fn convert_flow(dir: String, id: Option<String>, size: Option<f64>, out: Opt
         return EXIT_USAGE;
     };
     let d = Path::new(&dir);
-    let read = |lba: u32| -> NopwdResult<Vec<u8>> { Ok(diskio::read_lba_file(d, lba)) };
+    let read = |lba: u32| -> EdpCliResult<Vec<u8>> { Ok(diskio::read_lba_file(d, lba)) };
     let result = match convert(&read, &id, size, true) {
         Ok(r) => r,
         Err(e) => {
@@ -631,7 +631,7 @@ pub fn run() -> i32 {
             EXIT_OK
         }
         Parsed::Version => {
-            println!("nopwd {}", env!("CARGO_PKG_VERSION"));
+            println!("edpcli {}", env!("CARGO_PKG_VERSION"));
             EXIT_OK
         }
         Parsed::List { backup_dir } => {
@@ -717,9 +717,9 @@ fn real_flow(
     }
     if !elevate::is_root() {
         let mut argv: Vec<String> = std::env::args().skip(1).collect();
-        // sudo 清环境变量: $NOPWD_BACKUP_DIR 转显式旗标随 argv 过界(未显式给旗标时)
+        // sudo 清环境变量: $EDPCLI_BACKUP_DIR 转显式旗标随 argv 过界(未显式给旗标时)
         if backup_dir_flag.is_none() {
-            argv.extend(diskio::backup_dir_argv_suffix(std::env::var("NOPWD_BACKUP_DIR").ok()));
+            argv.extend(diskio::backup_dir_argv_suffix(std::env::var("EDPCLI_BACKUP_DIR").ok()));
         }
         if disk_opt.is_none() {
             let mut sp = StdPrompter;
@@ -744,14 +744,14 @@ fn real_flow(
     if !has_sentinel
         && diskio::sudo_user().is_some()
         && backup_dir_flag.is_none()
-        && std::env::var("NOPWD_BACKUP_DIR").unwrap_or_default().is_empty()
+        && std::env::var("EDPCLI_BACKUP_DIR").unwrap_or_default().is_empty()
         && diskio::conf_backup_dir().is_none()
     {
         let cwd_bak = std::env::current_dir().unwrap_or_default().join("backup");
         eprintln!(
             "{}",
             crate::ui::yellow(&format!(
-                "注意: 手动 sudo 会丢失 shell 环境变量($NOPWD_BACKUP_DIR 未生效), 备份将落在 {}。建议直接 nopwd <子命令>(自动提权), 或在 ~/.nopwd.conf 写 backup_dir 固定目录",
+                "注意: 手动 sudo 会丢失 shell 环境变量($EDPCLI_BACKUP_DIR 未生效), 备份将落在 {}。建议直接 edpcli <子命令>(自动提权), 或在 ~/.edpcli.conf 写 backup_dir 固定目录",
                 cwd_bak.display()
             ))
         );
@@ -789,7 +789,7 @@ fn real_flow(
     finish(r)
 }
 
-fn finish(r: NopwdResult<i32>) -> i32 {
+fn finish(r: EdpCliResult<i32>) -> i32 {
     match r {
         Ok(code) => code,
         Err(e) => {
@@ -852,7 +852,7 @@ mod tests {
 
     #[test]
     fn parse_bare_and_subcommands() {
-        // 裸 nopwd = 打印用法, 不进入任何需要提权的流程
+        // 裸 edpcli = 打印用法, 不进入任何需要提权的流程
         assert!(matches!(parse_args(&[]).unwrap(), Parsed::Help { topic: None }));
         assert!(matches!(parse_args(&["help".into()]).unwrap(), Parsed::Help { topic: None }));
         assert!(matches!(parse_args(&["version".into()]).unwrap(), Parsed::Version));

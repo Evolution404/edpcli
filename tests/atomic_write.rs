@@ -7,8 +7,8 @@ use std::collections::BTreeMap;
 use std::fs;
 
 use common::*;
-use nopwd::common::{SECTOR, EXIT_INTERMEDIATE, EXIT_ROLLED_BACK};
-use nopwd::diskio::{atomic_write_sectors, pwrite_loop, FileDev, SectorDev};
+use edpcli::common::{SECTOR, EXIT_INTERMEDIATE, EXIT_ROLLED_BACK};
+use edpcli::diskio::{atomic_write_sectors, pwrite_loop, FileDev, SectorDev};
 
 struct Image {
     #[allow(dead_code)] // 仅为 Drop 清理保留
@@ -214,7 +214,7 @@ fn unsupported_sync_is_rejected_before_any_write() {
         writes: 0,
     };
     let e = atomic_write_sectors(&mut dev, &im.patch).unwrap_err();
-    assert_eq!(e.code, nopwd::common::EXIT_IO, "{}", e.msg);
+    assert_eq!(e.code, edpcli::common::EXIT_IO, "{}", e.msg);
     assert_eq!(dev.writes, 0, "sync 能力预检失败时不得开始写入");
     assert_eq!(img_bytes(&im.path), im.base);
 }
@@ -234,7 +234,7 @@ fn rejects_non_sector_sized_patch_before_any_write() {
     .unwrap();
 
     let e = atomic_write_sectors(&mut dev, &malformed).unwrap_err();
-    assert_eq!(e.code, nopwd::common::EXIT_IO, "{}", e.msg);
+    assert_eq!(e.code, edpcli::common::EXIT_IO, "{}", e.msg);
     assert!(e.msg.contains("512B") || e.msg.contains("扇区"), "{}", e.msg);
     assert_eq!(img_bytes(&im.path), im.base, "非法 patch 必须在第一笔写入前拒绝");
 }
@@ -254,7 +254,7 @@ fn rejects_patch_outside_metadata_lba_range_before_any_write() {
     .unwrap();
 
     let e = atomic_write_sectors(&mut dev, &malformed).unwrap_err();
-    assert_eq!(e.code, nopwd::common::EXIT_IO, "{}", e.msg);
+    assert_eq!(e.code, edpcli::common::EXIT_IO, "{}", e.msg);
     assert!(e.msg.contains("0-13") || e.msg.contains("LBA14"), "{}", e.msg);
     assert_eq!(img_bytes(&path), base, "LBA0-13 之外必须在第一笔写入前拒绝");
 }

@@ -15,18 +15,18 @@ pub const EXIT_CANCELLED: i32 = 130; // 用户取消(空选择/未输 YES)
 
 /// 工具级错误: message 走 stderr, code 走 process::exit。
 #[derive(Debug)]
-pub struct NopwdError {
+pub struct EdpCliError {
     pub code: i32,
     pub msg: String,
 }
 
-impl NopwdError {
+impl EdpCliError {
     pub fn new(code: i32, msg: impl Into<String>) -> Self {
         Self { code, msg: msg.into() }
     }
 }
 
-pub type NopwdResult<T> = Result<T, NopwdError>;
+pub type EdpCliResult<T> = Result<T, EdpCliError>;
 
 /// 容量显示: GB(10^9) 两位小数, 四舍五入(纯整数运算, 与 macOS 显示一致)。
 /// Python 版为 `(b+5e6)//1e7/100` 再 `:.2f`; 本实现整数路径可证逐位等价。

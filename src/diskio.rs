@@ -13,7 +13,7 @@ use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use crate::common::{
-    NopwdError, NopwdResult, SECTOR, EXIT_BACKUP, EXIT_INTERMEDIATE, EXIT_IO,
+    EdpCliError, EdpCliResult, SECTOR, EXIT_BACKUP, EXIT_INTERMEDIATE, EXIT_IO,
     EXIT_ROLLED_BACK,
 };
 use crate::md5::md5_hex;
@@ -23,11 +23,11 @@ pub fn raw_path(disk: u32) -> String {
     format!("/dev/rdisk{}", disk)
 }
 
-fn io_err(e: io::Error) -> NopwdError {
-    NopwdError::new(EXIT_IO, format!("错误: {}", e))
+fn io_err(e: io::Error) -> EdpCliError {
+    EdpCliError::new(EXIT_IO, format!("错误: {}", e))
 }
 
-fn validate_backup_device_id(device_id: &str) -> NopwdResult<()> {
+fn validate_backup_device_id(device_id: &str) -> EdpCliResult<()> {
     let safe = device_id.starts_with("disk&ven_")
         && device_id.len() <= 128
         && device_id.bytes().all(|b| {
@@ -36,7 +36,7 @@ fn validate_backup_device_id(device_id: &str) -> NopwdResult<()> {
     if safe {
         Ok(())
     } else {
-        Err(NopwdError::new(
+        Err(EdpCliError::new(
             EXIT_BACKUP,
             format!(
                 "错误: device_id 含不安全的备份文件名字符或长度异常，拒绝创建备份: {:?}",
@@ -46,14 +46,14 @@ fn validate_backup_device_id(device_id: &str) -> NopwdResult<()> {
     }
 }
 
-fn write_new_synced(path: &Path, data: &[u8], label: &str) -> NopwdResult<()> {
+fn write_new_synced(path: &Path, data: &[u8], label: &str) -> EdpCliResult<()> {
     let mut file = OpenOptions::new()
         .write(true)
         .create_new(true)
         .open(path)
         .map_err(|e| {
             if e.kind() == io::ErrorKind::AlreadyExists {
-                NopwdError::new(
+                EdpCliError::new(
                     EXIT_IO,
                     format!("错误: {}已存在，拒绝覆盖: {}", label, path.display()),
                 )
@@ -69,7 +69,7 @@ fn write_new_synced(path: &Path, data: &[u8], label: &str) -> NopwdResult<()> {
     Ok(())
 }
 
-fn sync_dir(dir: &Path) -> NopwdResult<()> {
+fn sync_dir(dir: &Path) -> EdpCliResult<()> {
     File::open(dir)
         .and_then(|file| file.sync_all())
         .map_err(io_err)
@@ -265,20 +265,20 @@ fn write_and_verify(
 ///   4) 任一失败 → 以写前内存镜像自动回滚全部扇区并再校验。
 ///
 /// 回滚成功 → EXIT_ROLLED_BACK(盘仍为写前状态, 可安全重试);
-/// 回滚失败 → EXIT_INTERMEDIATE(中间态, 指引重插后 nopwd restore 从备份还原)。
+/// 回滚失败 → EXIT_INTERMEDIATE(中间态, 指引重插后 edpcli restore 从备份还原)。
 pub fn atomic_write_sectors(
     dev: &mut dyn SectorDev,
     patch: &BTreeMap<u32, Vec<u8>>,
-) -> NopwdResult<()> {
+) -> EdpCliResult<()> {
     for (&lba, data) in patch {
         if lba > 13 {
-            return Err(NopwdError::new(
+            return Err(EdpCliError::new(
                 EXIT_IO,
                 format!("错误: 原子写仅允许元数据 LBA0-13，收到 LBA{}", lba),
             ));
         }
         if data.len() != SECTOR {
-            return Err(NopwdError::new(
+            return Err(EdpCliError::new(
                 EXIT_IO,
                 format!(
                     "错误: LBA{} 写入数据长度 {}B，必须恰好为一个扇区 {}B",
@@ -295,7 +295,7 @@ pub fn atomic_write_sectors(
     // 在第一笔写入前先验证设备支持持久化屏障。若 raw USB 控制器不支持
     // DKIOCSYNCHRONIZECACHE，应在 0 写入状态下失败，而不是写完后才发现。
     dev.sync().map_err(|e| {
-        NopwdError::new(
+        EdpCliError::new(
             EXIT_IO,
             format!("错误: 写前介质缓存同步预检失败，拒绝开始写入: {}", e),
         )
@@ -317,16 +317,16 @@ pub fn atomic_write_sectors(
             for i in 0..3 {
                 match write_and_verify(dev, &mirror, &order) {
                     Ok(()) => {
-                        return Err(NopwdError::new(
+                        return Err(EdpCliError::new(
                             EXIT_ROLLED_BACK,
-                            "错误: 已完整回滚, 盘仍为写前状态(未改造)。可换 USB 口/线后重试, 或 nopwd restore 走还原流程。",
+                            "错误: 已完整回滚, 盘仍为写前状态(未改造)。可换 USB 口/线后重试, 或 edpcli restore 走还原流程。",
                         ))
                     }
                     Err(e2) => {
                         if i == 2 {
-                            return Err(NopwdError::new(
+                            return Err(EdpCliError::new(
                                 EXIT_INTERMEDIATE,
-                                format!("错误: 回滚亦失败({}) — 盘处于中间状态! 请重插后立即 nopwd restore 从备份还原。", e2),
+                                format!("错误: 回滚亦失败({}) — 盘处于中间状态! 请重插后立即 edpcli restore 从备份还原。", e2),
                             ));
                         }
                         thread::sleep(Duration::from_millis(500));
@@ -419,7 +419,7 @@ pub fn absolutize_backup_dir(p: PathBuf) -> PathBuf {
     }
 }
 
-pub const CONF_NAME: &str = ".nopwd.conf";
+pub const CONF_NAME: &str = ".edpcli.conf";
 
 fn absolutize_with(p: PathBuf, cwd: &Path) -> PathBuf {
     if p.is_absolute() {
@@ -497,8 +497,8 @@ pub fn parse_conf_backup_dir(content: &str) -> Option<String> {
 }
 
 /// 读取用户配置中的备份目录。
-/// 定位: sudo 下(手动或自动)读发起用户 home 的 .nopwd.conf — sudo 会剥掉
-/// shell 环境变量($NOPWD_BACKUP_DIR 过不去), 磁盘文件是唯一能穿界的载体;
+/// 定位: sudo 下(手动或自动)读发起用户 home 的 .edpcli.conf — sudo 会剥掉
+/// shell 环境变量($EDPCLI_BACKUP_DIR 过不去), 磁盘文件是唯一能穿界的载体;
 /// 非 root 读 $HOME。
 pub fn conf_backup_dir() -> Option<String> {
     let home = match sudo_user() {
@@ -509,18 +509,18 @@ pub fn conf_backup_dir() -> Option<String> {
     parse_conf_backup_dir(&content)
 }
 
-/// 备份目录: --backup-dir 旗标 > $NOPWD_BACKUP_DIR > ~/.nopwd.conf 的
+/// 备份目录: --backup-dir 旗标 > $EDPCLI_BACKUP_DIR > ~/.edpcli.conf 的
 /// backup_dir > CWD/backup。
 pub fn resolve_backup_dir(flag: Option<&str>) -> PathBuf {
     resolve_backup_dir_impl(
         flag,
-        std::env::var("NOPWD_BACKUP_DIR").ok(),
+        std::env::var("EDPCLI_BACKUP_DIR").ok(),
         conf_backup_dir(),
         std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
     )
 }
 
-/// 自动提权时的环境桥接: sudo 默认清环境变量(env_reset), $NOPWD_BACKUP_DIR
+/// 自动提权时的环境桥接: sudo 默认清环境变量(env_reset), $EDPCLI_BACKUP_DIR
 /// 过不去 — 父进程把它解析为绝对路径, 以显式旗标并入重执行 argv(旗标优先于 env)。
 /// 返回应追加的参数(空 = 无需追加)。
 pub fn backup_dir_argv_suffix(env_val: Option<String>) -> Vec<String> {
@@ -598,7 +598,7 @@ pub fn image_is_nopwd(data: &[u8], device_id: &str) -> bool {
     if data.len() < 14 * SECTOR {
         return false;
     }
-    let read = |lba: u32| -> NopwdResult<Vec<u8>> { Ok(data[lba as usize * SECTOR..(lba as usize + 1) * SECTOR].to_vec()) };
+    let read = |lba: u32| -> EdpCliResult<Vec<u8>> { Ok(data[lba as usize * SECTOR..(lba as usize + 1) * SECTOR].to_vec()) };
     looks_nopwd(&read, device_id).unwrap_or(false)
 }
 
@@ -939,10 +939,10 @@ pub fn backup_disk(
     device_id: &str,
     bak_dir: &Path,
     clock: &dyn Clock,
-) -> NopwdResult<(PathBuf, bool)> {
+) -> EdpCliResult<(PathBuf, bool)> {
     validate_backup_device_id(device_id)?;
     if data.len() != 14 * SECTOR {
-        return Err(NopwdError::new(
+        return Err(EdpCliError::new(
             EXIT_BACKUP,
             format!(
                 "错误: 备份镜像长度 {}B，必须恰好为 {}B（LBA0-13）",
@@ -1148,7 +1148,7 @@ mod tests {
 
     #[test]
     fn read_lba_file_naming() {
-        let d = std::env::temp_dir().join(format!("nopwd_test_{}_lbafile", std::process::id()));
+        let d = std::env::temp_dir().join(format!("edpcli_test_{}_lbafile", std::process::id()));
         fs::create_dir_all(&d).unwrap();
         fs::write(d.join("LBA7.bin"), vec![b'7'; SECTOR]).unwrap();
         fs::write(d.join("LBA12.bin"), vec![b'c'; SECTOR]).unwrap();
@@ -1190,8 +1190,8 @@ mod tests {
         );
         // conf 解析: 注释/坏行/空值/未知键
         assert_eq!(
-            parse_conf_backup_dir("# 注释\nbackup_dir = /Users/x/.nopwd-backup\n"),
-            Some("/Users/x/.nopwd-backup".to_string())
+            parse_conf_backup_dir("# 注释\nbackup_dir = /Users/x/.edpcli-backup\n"),
+            Some("/Users/x/.edpcli-backup".to_string())
         );
         assert_eq!(parse_conf_backup_dir("backup_dir=/a/b"), Some("/a/b".to_string()));
         assert_eq!(parse_conf_backup_dir("backup_dir =   \n"), None); // 空值
@@ -1215,8 +1215,8 @@ mod tests {
     #[test]
     fn backup_dir_argv_suffix_bridges_env() {
         // sudo env_reset 会清环境变量 — env 值须转为显式旗标(绝对路径)随 argv 过界
-        let abs = backup_dir_argv_suffix(Some("/Users/x/.nopwd-backup".into()));
-        assert_eq!(abs, vec!["--backup-dir".to_string(), "/Users/x/.nopwd-backup".into()]);
+        let abs = backup_dir_argv_suffix(Some("/Users/x/.edpcli-backup".into()));
+        assert_eq!(abs, vec!["--backup-dir".to_string(), "/Users/x/.edpcli-backup".into()]);
         // 相对值按 CWD 绝对化
         let rel = backup_dir_argv_suffix(Some("bk".into()));
         assert_eq!(rel.len(), 2);

@@ -1,7 +1,7 @@
 //! Shell Tab 补全脚本与动态候选提供器。
 //!
 //! 保持零依赖：zsh/bash/fish 脚本只负责上下文判断；onlyid、备份编号、
-//! 备份文件名和物理盘号由隐藏的 `nopwd __complete ...` 实时提供。
+//! 备份文件名和物理盘号由隐藏的 `edpcli __complete ...` 实时提供。
 
 use std::collections::BTreeSet;
 
@@ -75,14 +75,14 @@ pub fn script(shell: Shell) -> &'static str {
     }
 }
 
-const ZSH: &str = r#"#compdef nopwd
+const ZSH: &str = r#"#compdef edpcli
 
-# `eval "$(nopwd completion zsh)"` 在尚未初始化 completion system 的干净 zsh
+# `eval "$(edpcli completion zsh)"` 在尚未初始化 completion system 的干净 zsh
 # 里也应直接可用，而不是要求用户先知道 compinit。
 autoload -Uz compinit
 (( $+functions[compdef] )) || compinit
 
-_nopwd_flag_value() {
+_edpcli_flag_value() {
   local flag="$1" i
   REPLY=""
   for (( i=2; i <= ${#words}; i++ )); do
@@ -94,21 +94,21 @@ _nopwd_flag_value() {
   done
 }
 
-_nopwd_dynamic() {
+_edpcli_dynamic() {
   local kind="$1"; shift
   local -a vals
-  vals=("${(@f)$(command nopwd __complete "$kind" "$@" 2>/dev/null)}")
+  vals=("${(@f)$(command edpcli __complete "$kind" "$@" 2>/dev/null)}")
   (( ${#vals} )) && compadd -- $vals
 }
 
-_nopwd() {
+_edpcli() {
   local cur prev cmd action id bak
   cur="${words[CURRENT]}"
   prev="${words[CURRENT-1]}"
   cmd="${words[2]}"
   action="${words[3]}"
-  _nopwd_flag_value --onlyid; id="$REPLY"
-  _nopwd_flag_value --backup-dir; bak="$REPLY"
+  _edpcli_flag_value --onlyid; id="$REPLY"
+  _edpcli_flag_value --backup-dir; bak="$REPLY"
 
   if (( CURRENT == 2 )); then
     compadd -- list run apply restore backup inspect metainfo meta convert completion version help
@@ -117,17 +117,17 @@ _nopwd() {
 
   case "$prev" in
     --onlyid)
-      if [[ -n "$bak" ]]; then _nopwd_dynamic onlyid --backup-dir "$bak"; else _nopwd_dynamic onlyid; fi
+      if [[ -n "$bak" ]]; then _edpcli_dynamic onlyid --backup-dir "$bak"; else _edpcli_dynamic onlyid; fi
       return ;;
     --index)
       if [[ -n "$id" ]]; then
-        if [[ -n "$bak" ]]; then _nopwd_dynamic index --onlyid "$id" --backup-dir "$bak"; else _nopwd_dynamic index --onlyid "$id"; fi
+        if [[ -n "$bak" ]]; then _edpcli_dynamic index --onlyid "$id" --backup-dir "$bak"; else _edpcli_dynamic index --onlyid "$id"; fi
       fi
       return ;;
     --disk)
-      _nopwd_dynamic disk; return ;;
+      _edpcli_dynamic disk; return ;;
     --backup|--image)
-      if [[ -n "$bak" ]]; then _nopwd_dynamic backup-file --backup-dir "$bak"; else _nopwd_dynamic backup-file; fi
+      if [[ -n "$bak" ]]; then _edpcli_dynamic backup-file --backup-dir "$bak"; else _edpcli_dynamic backup-file; fi
       _files
       return ;;
     --backup-dir|--export|--dir|--out)
@@ -154,7 +154,7 @@ _nopwd() {
       if [[ "$cur" == -* ]]; then
         compadd -- --disk --backup --onlyid --index --raw --hex --export --id --backup-dir --help
       else
-        _nopwd_dynamic lba
+        _edpcli_dynamic lba
         _files
       fi
       ;;
@@ -162,13 +162,13 @@ _nopwd() {
       if [[ "$cur" == -* ]]; then
         compadd -- --disk --backup --onlyid --index --id --backup-dir --help
       elif (( CURRENT == 3 )); then
-        if [[ -n "$bak" ]]; then _nopwd_dynamic onlyid --backup-dir "$bak"; else _nopwd_dynamic onlyid; fi
+        if [[ -n "$bak" ]]; then _edpcli_dynamic onlyid --backup-dir "$bak"; else _edpcli_dynamic onlyid; fi
         _files
       elif (( CURRENT == 4 )) && [[ "${words[3]}" == <-> || "${words[3]}" == -<-> ]]; then
         if [[ -n "$bak" ]]; then
-          _nopwd_dynamic index --onlyid "${words[3]}" --backup-dir "$bak"
+          _edpcli_dynamic index --onlyid "${words[3]}" --backup-dir "$bak"
         else
-          _nopwd_dynamic index --onlyid "${words[3]}"
+          _edpcli_dynamic index --onlyid "${words[3]}"
         fi
       fi
       ;;
@@ -186,30 +186,30 @@ _nopwd() {
   esac
 }
 
-compdef _nopwd nopwd
+compdef _edpcli edpcli
 "#;
 
-const BASH: &str = r#"_nopwd_flag_value() {
+const BASH: &str = r#"_edpcli_flag_value() {
   local flag="$1" i
-  NOPWD_VALUE=""
+  EDPCLI_VALUE=""
   for (( i=1; i<${#COMP_WORDS[@]}; i++ )); do
     if [[ "${COMP_WORDS[i]}" == "$flag" && $((i+1)) -lt ${#COMP_WORDS[@]} ]]; then
-      NOPWD_VALUE="${COMP_WORDS[i+1]}"
+      EDPCLI_VALUE="${COMP_WORDS[i+1]}"
     elif [[ "${COMP_WORDS[i]}" == ${flag}=* ]]; then
-      NOPWD_VALUE="${COMP_WORDS[i]#${flag}=}"
+      EDPCLI_VALUE="${COMP_WORDS[i]#${flag}=}"
     fi
   done
 }
 
-_nopwd() {
+_edpcli() {
   local cur prev cmd action id bak vals
   COMPREPLY=()
   cur="${COMP_WORDS[COMP_CWORD]}"
   prev="${COMP_WORDS[COMP_CWORD-1]}"
   cmd="${COMP_WORDS[1]}"
   action="${COMP_WORDS[2]}"
-  _nopwd_flag_value --onlyid; id="$NOPWD_VALUE"
-  _nopwd_flag_value --backup-dir; bak="$NOPWD_VALUE"
+  _edpcli_flag_value --onlyid; id="$EDPCLI_VALUE"
+  _edpcli_flag_value --backup-dir; bak="$EDPCLI_VALUE"
 
   if (( COMP_CWORD == 1 )); then
     COMPREPLY=( $(compgen -W 'list run apply restore backup inspect metainfo meta convert completion version help' -- "$cur") )
@@ -217,16 +217,16 @@ _nopwd() {
   fi
   case "$prev" in
     --onlyid)
-      vals="$(nopwd __complete onlyid ${bak:+--backup-dir "$bak"} 2>/dev/null)"
+      vals="$(edpcli __complete onlyid ${bak:+--backup-dir "$bak"} 2>/dev/null)"
       COMPREPLY=( $(compgen -W "$vals" -- "$cur") ); return ;;
     --index)
-      vals="$(nopwd __complete index ${id:+--onlyid "$id"} ${bak:+--backup-dir "$bak"} 2>/dev/null)"
+      vals="$(edpcli __complete index ${id:+--onlyid "$id"} ${bak:+--backup-dir "$bak"} 2>/dev/null)"
       COMPREPLY=( $(compgen -W "$vals" -- "$cur") ); return ;;
     --disk)
-      vals="$(nopwd __complete disk 2>/dev/null)"
+      vals="$(edpcli __complete disk 2>/dev/null)"
       COMPREPLY=( $(compgen -W "$vals" -- "$cur") ); return ;;
     --backup|--image)
-      vals="$(nopwd __complete backup-file ${bak:+--backup-dir "$bak"} 2>/dev/null)"
+      vals="$(edpcli __complete backup-file ${bak:+--backup-dir "$bak"} 2>/dev/null)"
       COMPREPLY=( $(compgen -W "$vals" -- "$cur") $(compgen -f -- "$cur") ); return ;;
     --backup-dir|--export|--dir|--out)
       COMPREPLY=( $(compgen -d -- "$cur") ); return ;;
@@ -249,7 +249,7 @@ _nopwd() {
       if [[ "$cur" == -* ]]; then
         vals='--disk --backup --onlyid --index --raw --hex --export --id --backup-dir --help'
       else
-        vals="$(nopwd __complete lba 2>/dev/null)"
+        vals="$(edpcli __complete lba 2>/dev/null)"
       fi
       COMPREPLY=( $(compgen -W "$vals" -- "$cur") $(compgen -f -- "$cur") ) ;;
     metainfo|meta)
@@ -257,10 +257,10 @@ _nopwd() {
         vals='--disk --backup --onlyid --index --id --backup-dir --help'
         COMPREPLY=( $(compgen -W "$vals" -- "$cur") )
       elif (( COMP_CWORD == 2 )); then
-        vals="$(nopwd __complete onlyid ${bak:+--backup-dir "$bak"} 2>/dev/null)"
+        vals="$(edpcli __complete onlyid ${bak:+--backup-dir "$bak"} 2>/dev/null)"
         COMPREPLY=( $(compgen -W "$vals" -- "$cur") $(compgen -f -- "$cur") )
       elif (( COMP_CWORD == 3 )) && [[ "${COMP_WORDS[2]}" =~ ^-?[0-9]+$ ]]; then
-        vals="$(nopwd __complete index --onlyid "${COMP_WORDS[2]}" ${bak:+--backup-dir "$bak"} 2>/dev/null)"
+        vals="$(edpcli __complete index --onlyid "${COMP_WORDS[2]}" ${bak:+--backup-dir "$bak"} 2>/dev/null)"
         COMPREPLY=( $(compgen -W "$vals" -- "$cur") )
       fi ;;
     run) vals='--disk --size --backup-dir --help'; COMPREPLY=( $(compgen -W "$vals" -- "$cur") ) ;;
@@ -273,10 +273,10 @@ _nopwd() {
   esac
 }
 
-complete -F _nopwd nopwd
+complete -F _edpcli edpcli
 "#;
 
-const FISH: &str = r#"function __nopwd_flag_value
+const FISH: &str = r#"function __edpcli_flag_value
     set -l flag $argv[1]
     set -l tokens (commandline -opc)
     for i in (seq (count $tokens))
@@ -291,63 +291,63 @@ const FISH: &str = r#"function __nopwd_flag_value
     end
 end
 
-function __nopwd_onlyids
-    set -l bak (__nopwd_flag_value --backup-dir)
+function __edpcli_onlyids
+    set -l bak (__edpcli_flag_value --backup-dir)
     if test -n "$bak"
-        nopwd __complete onlyid --backup-dir "$bak" 2>/dev/null
+        edpcli __complete onlyid --backup-dir "$bak" 2>/dev/null
     else
-        nopwd __complete onlyid 2>/dev/null
+        edpcli __complete onlyid 2>/dev/null
     end
 end
 
-function __nopwd_indices
-    set -l id (__nopwd_flag_value --onlyid)
-    set -l bak (__nopwd_flag_value --backup-dir)
+function __edpcli_indices
+    set -l id (__edpcli_flag_value --onlyid)
+    set -l bak (__edpcli_flag_value --backup-dir)
     if test -n "$id"
         if test -n "$bak"
-            nopwd __complete index --onlyid "$id" --backup-dir "$bak" 2>/dev/null
+            edpcli __complete index --onlyid "$id" --backup-dir "$bak" 2>/dev/null
         else
-            nopwd __complete index --onlyid "$id" 2>/dev/null
+            edpcli __complete index --onlyid "$id" 2>/dev/null
         end
     end
 end
 
-function __nopwd_meta_positionals
+function __edpcli_meta_positionals
     set -l tokens (commandline -opc)
-    set -l bak (__nopwd_flag_value --backup-dir)
+    set -l bak (__edpcli_flag_value --backup-dir)
     if test (count $tokens) -eq 2
-        __nopwd_onlyids
+        __edpcli_onlyids
         return
     end
     if test (count $tokens) -eq 3; and string match -qr '^-?[0-9]+$' -- $tokens[3]
         if test -n "$bak"
-            nopwd __complete index --onlyid "$tokens[3]" --backup-dir "$bak" 2>/dev/null
+            edpcli __complete index --onlyid "$tokens[3]" --backup-dir "$bak" 2>/dev/null
         else
-            nopwd __complete index --onlyid "$tokens[3]" 2>/dev/null
+            edpcli __complete index --onlyid "$tokens[3]" 2>/dev/null
         end
     end
 end
 
-complete -c nopwd -f
-complete -c nopwd -n '__fish_use_subcommand' -a 'list run apply restore backup inspect metainfo meta convert completion version help'
-complete -c nopwd -n '__fish_seen_subcommand_from backup' -a 'list verify prune rm'
-complete -c nopwd -n '__fish_seen_subcommand_from metainfo meta' -a '(__nopwd_meta_positionals)'
-complete -c nopwd -n '__fish_seen_subcommand_from inspect backup metainfo meta' -l onlyid -r -a '(__nopwd_onlyids)'
-complete -c nopwd -n '__fish_seen_subcommand_from inspect backup metainfo meta' -l index -r -a '(__nopwd_indices)'
-complete -c nopwd -n '__fish_seen_subcommand_from inspect metainfo meta run apply restore' -l disk -r -a '(nopwd __complete disk 2>/dev/null)'
-complete -c nopwd -n '__fish_seen_subcommand_from inspect metainfo meta' -l backup -r -a '(nopwd __complete backup-file 2>/dev/null)'
-complete -c nopwd -n '__fish_seen_subcommand_from inspect' -l raw
-complete -c nopwd -n '__fish_seen_subcommand_from inspect' -l hex
-complete -c nopwd -n '__fish_seen_subcommand_from inspect' -l export -r
-complete -c nopwd -n '__fish_seen_subcommand_from inspect metainfo meta convert' -l id -r
-complete -c nopwd -n '__fish_seen_subcommand_from backup inspect metainfo meta list run apply restore' -l backup-dir -r
-complete -c nopwd -n '__fish_seen_subcommand_from backup apply restore' -l yes
-complete -c nopwd -n '__fish_seen_subcommand_from backup' -l keep -r
-complete -c nopwd -n '__fish_seen_subcommand_from run apply convert' -l size -r
-complete -c nopwd -n '__fish_seen_subcommand_from apply' -l force
-complete -c nopwd -n '__fish_seen_subcommand_from convert' -l dir -r
-complete -c nopwd -n '__fish_seen_subcommand_from convert' -l out -r
-complete -c nopwd -n '__fish_seen_subcommand_from completion' -a 'zsh bash fish'
+complete -c edpcli -f
+complete -c edpcli -n '__fish_use_subcommand' -a 'list run apply restore backup inspect metainfo meta convert completion version help'
+complete -c edpcli -n '__fish_seen_subcommand_from backup' -a 'list verify prune rm'
+complete -c edpcli -n '__fish_seen_subcommand_from metainfo meta' -a '(__edpcli_meta_positionals)'
+complete -c edpcli -n '__fish_seen_subcommand_from inspect backup metainfo meta' -l onlyid -r -a '(__edpcli_onlyids)'
+complete -c edpcli -n '__fish_seen_subcommand_from inspect backup metainfo meta' -l index -r -a '(__edpcli_indices)'
+complete -c edpcli -n '__fish_seen_subcommand_from inspect metainfo meta run apply restore' -l disk -r -a '(edpcli __complete disk 2>/dev/null)'
+complete -c edpcli -n '__fish_seen_subcommand_from inspect metainfo meta' -l backup -r -a '(edpcli __complete backup-file 2>/dev/null)'
+complete -c edpcli -n '__fish_seen_subcommand_from inspect' -l raw
+complete -c edpcli -n '__fish_seen_subcommand_from inspect' -l hex
+complete -c edpcli -n '__fish_seen_subcommand_from inspect' -l export -r
+complete -c edpcli -n '__fish_seen_subcommand_from inspect metainfo meta convert' -l id -r
+complete -c edpcli -n '__fish_seen_subcommand_from backup inspect metainfo meta list run apply restore' -l backup-dir -r
+complete -c edpcli -n '__fish_seen_subcommand_from backup apply restore' -l yes
+complete -c edpcli -n '__fish_seen_subcommand_from backup' -l keep -r
+complete -c edpcli -n '__fish_seen_subcommand_from run apply convert' -l size -r
+complete -c edpcli -n '__fish_seen_subcommand_from apply' -l force
+complete -c edpcli -n '__fish_seen_subcommand_from convert' -l dir -r
+complete -c edpcli -n '__fish_seen_subcommand_from convert' -l out -r
+complete -c edpcli -n '__fish_seen_subcommand_from completion' -a 'zsh bash fish'
 "#;
 
 #[cfg(test)]

@@ -17,5 +17,5 @@ fn restore_default_sigpipe() {}
 
 fn main() {
     restore_default_sigpipe();
-    std::process::exit(nopwd::cli::run());
+    std::process::exit(edpcli::cli::run());
 }

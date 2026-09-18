@@ -331,7 +331,7 @@ mod tests {
     fn truncate_keeps_ends() {
         assert_eq!(truncate_mid("abcdefghij", 7), "abc…hij"); // 首尾各 3 + … = 7 列
         assert_eq!(truncate_mid("短", 7), "短");
-        let long = "/Users/zhangyuxi/.nopwd-backup/disk4_245760000.bin";
+        let long = "/Users/zhangyuxi/.edpcli-backup/disk4_245760000.bin";
         let t = truncate_mid(long, 20);
         assert!(t.starts_with("/Users") && t.contains('…') && t.ends_with(".bin"));
         assert!(disp_width(&t) <= 20);

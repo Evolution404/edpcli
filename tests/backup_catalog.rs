@@ -3,8 +3,8 @@ mod common;
 use std::fs;
 
 use common::*;
-use nopwd::backup_catalog::BackupCatalog;
-use nopwd::md5::md5_hex;
+use edpcli::backup_catalog::BackupCatalog;
+use edpcli::md5::md5_hex;
 
 fn copied_catalog() -> Option<(TmpDir, BackupCatalog)> {
     let Some(src) = fixture_bin("netac") else {

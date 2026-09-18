@@ -6,12 +6,12 @@ mod common;
 use std::fs;
 
 use common::*;
-use nopwd::common::SECTOR;
-use nopwd::diskio::{backup_disk, backup_is_nopwd, find_backups, backup_label_id,
+use edpcli::common::SECTOR;
+use edpcli::diskio::{backup_disk, backup_is_nopwd, find_backups, backup_label_id,
                     parse_backup_name, scan_backup_dir, BackupMeta,
                     prune_candidates, BackupEntry, Md5Status, DiskFacts};
-use nopwd::diskio::Clock;
-use nopwd::cli::{backup_list, backup_prune, backup_rm, backup_verify};
+use edpcli::diskio::Clock;
+use edpcli::cli::{backup_list, backup_prune, backup_rm, backup_verify};
 
 struct FixedClock;
 impl Clock for FixedClock {
@@ -420,7 +420,7 @@ fn md5_sidecar_symlink_is_not_followed() {
     let sidecar = std::path::PathBuf::from(format!("{}.md5", backup.display()));
     fs::remove_file(&sidecar).unwrap();
     let outside = tmp.0.parent().unwrap().join(format!(
-        "nopwd_outside_md5_{}_{}",
+        "edpcli_outside_md5_{}_{}",
         std::process::id(),
         md5(&data)
     ));
@@ -683,7 +683,7 @@ struct ReplaceBeforeConfirm {
     replacement: Vec<u8>,
 }
 
-impl nopwd::cli::Prompter for ReplaceBeforeConfirm {
+impl edpcli::cli::Prompter for ReplaceBeforeConfirm {
     fn prompt_line(&mut self, _msg: &str) -> String {
         String::new()
     }

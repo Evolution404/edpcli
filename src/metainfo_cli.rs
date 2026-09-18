@@ -1,4 +1,4 @@
-//! `nopwd metainfo` / `nopwd meta` 的来源选择与输出层。
+//! `edpcli metainfo` / `edpcli meta` 的来源选择与输出层。
 //!
 //! 目标是“少打命令、直接看关键信息”：当前盘直接查看；onlyid 默认最新 [1]；
 //! 备份文件可直接作位置参数。底层解析继续复用 inspect/metainfo，不维护第二套算法。
@@ -33,7 +33,7 @@ fn backup_flow(opts: MetaInfoOpts) -> i32 {
             Ok(group) => group,
             Err(msg) => {
                 eprintln!("{}", crate::ui::red(&format!("错误: {msg}")));
-                let _ = print_backup_sources(catalog.entries(), "查看元信息: nopwd meta <onlyid>");
+                let _ = print_backup_sources(catalog.entries(), "查看元信息: edpcli meta <onlyid>");
                 return EXIT_BACKUP;
             }
         };
@@ -176,7 +176,7 @@ pub(crate) fn metainfo_flow(runner: &SysRunner, opts: MetaInfoOpts) -> i32 {
     if opts.disk.is_none() && sysinfo::list_usb_disks(runner).is_empty() {
         let bak = diskio::resolve_backup_dir(opts.backup_dir.as_deref());
         let entries = diskio::scan_backup_dir(&bak);
-        if print_backup_sources(&entries, "查看最新元信息: nopwd meta <onlyid>") {
+        if print_backup_sources(&entries, "查看最新元信息: edpcli meta <onlyid>") {
             println!();
             println!(
                 "{}",

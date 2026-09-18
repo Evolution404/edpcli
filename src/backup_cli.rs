@@ -1,4 +1,4 @@
-//! `nopwd backup` 命令的呈现与操作层。
+//! `edpcli backup` 命令的呈现与操作层。
 //!
 //! 备份目录的数据解释统一交给 `BackupCatalog`；本模块只负责 CLI 渲染、交互选择、
 //! 校验/清理/删除动作。这样 `cli.rs` 不再承载备份领域细节，inspect 也只依赖两个
@@ -496,10 +496,10 @@ pub fn backup_prune(backup_dir: &Path, onlyid: Option<&str>, keep: usize, yes: b
     if !yes {
         match onlyid {
             Some(id) => println!(
-                "确认执行: nopwd backup prune --onlyid {} --keep {} --yes",
+                "确认执行: edpcli backup prune --onlyid {} --keep {} --yes",
                 id, keep
             ),
-            None => println!("确认执行: nopwd backup prune --keep {} --yes", keep),
+            None => println!("确认执行: edpcli backup prune --keep {} --yes", keep),
         }
         return EXIT_OK;
     }

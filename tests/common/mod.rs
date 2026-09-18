@@ -6,9 +6,9 @@ use std::fs;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU32, Ordering};
 
-use nopwd::common::SECTOR;
-use nopwd::md5::md5_hex;
-use nopwd::sectors::convert;
+use edpcli::common::SECTOR;
+use edpcli::md5::md5_hex;
+use edpcli::sectors::convert;
 
 pub const BAK_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/backup");
 
@@ -54,7 +54,7 @@ pub fn load_disk_image(key: &str) -> Option<Vec<u8>> {
     fs::read(fixture_bin(key)?).ok()
 }
 
-pub fn read_fn_of(data: &[u8]) -> impl Fn(u32) -> Result<Vec<u8>, nopwd::common::NopwdError> + '_ {
+pub fn read_fn_of(data: &[u8]) -> impl Fn(u32) -> Result<Vec<u8>, edpcli::common::EdpCliError> + '_ {
     move |lba| Ok(data[lba as usize * SECTOR..(lba as usize + 1) * SECTOR].to_vec())
 }
 
@@ -123,7 +123,7 @@ static COUNTER: AtomicU32 = AtomicU32::new(0);
 impl TmpDir {
     pub fn new(tag: &str) -> Self {
         let d = std::env::temp_dir().join(format!(
-            "nopwd_test_{}_{}_{tag}",
+            "edpcli_test_{}_{}_{tag}",
             std::process::id(),
             COUNTER.fetch_add(1, Ordering::SeqCst)
         ));
@@ -153,7 +153,7 @@ pub struct FakeRunner {
     pub canned: HashMap<String, String>,
 }
 
-impl nopwd::sysinfo::CmdRunner for FakeRunner {
+impl edpcli::sysinfo::CmdRunner for FakeRunner {
     fn check_output(&self, cmd: &[&str], _t: Duration) -> std::io::Result<String> {
         self.canned
             .get(&cmd.join(" "))
@@ -223,7 +223,7 @@ impl ScriptPrompter {
     }
 }
 
-impl nopwd::cli::Prompter for ScriptPrompter {
+impl edpcli::cli::Prompter for ScriptPrompter {
     fn prompt_line(&mut self, _msg: &str) -> String {
         let s = self.inputs.get(self.idx).cloned().unwrap_or_default();
         self.idx += 1;

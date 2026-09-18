@@ -1,9 +1,9 @@
 mod common;
 
 use common::*;
-use nopwd::diskio::parse_backup_name;
-use nopwd::inspect::InspectMeta;
-use nopwd::metainfo::{render, summarize};
+use edpcli::diskio::parse_backup_name;
+use edpcli::inspect::InspectMeta;
+use edpcli::metainfo::{render, summarize};
 
 fn meta_for(key: &str) -> InspectMeta {
     let (name, _) = fixture(key).expect("fixture metadata");
@@ -31,7 +31,7 @@ fn aigo_summary_contains_identity_and_ownership() {
     assert_eq!(summary.safe6_user.as_deref(), Some("张玉玺"));
     assert!(!summary.partitions.is_empty());
 
-    nopwd::ui::set_enabled_for_tests(false);
+    edpcli::ui::set_enabled_for_tests(false);
     let out = render(&summary);
     assert!(out.contains("身份信息"));
     assert!(out.contains("归属信息"));
@@ -39,7 +39,7 @@ fn aigo_summary_contains_identity_and_ownership() {
     assert!(out.contains("User"));
     assert!(out.contains("SAFE6"));
     assert!(out.contains("分区摘要"));
-    nopwd::ui::reset_enabled_for_tests();
+    edpcli::ui::reset_enabled_for_tests();
 }
 
 #[test]
@@ -66,7 +66,7 @@ fn render_uses_semantic_colors_and_no_color_remains_plain() {
     })
     .unwrap();
 
-    nopwd::ui::set_enabled_for_tests(true);
+    edpcli::ui::set_enabled_for_tests(true);
     let colored = render(&summary);
     assert!(colored.contains("\x1b[1;36m身份信息\x1b[0m"), "{colored:?}");
     assert!(colored.contains("\x1b[33m1987718388\x1b[0m"), "{colored:?}");
@@ -74,10 +74,10 @@ fn render_uses_semantic_colors_and_no_color_remains_plain() {
     assert!(colored.contains("\x1b[35m125.83GB\x1b[0m"), "{colored:?}");
     assert!(colored.contains("\x1b[32m0x980E9B2F / 计算 0x980E9B2F ✓\x1b[0m"), "{colored:?}");
 
-    nopwd::ui::set_enabled_for_tests(false);
+    edpcli::ui::set_enabled_for_tests(false);
     let plain = render(&summary);
     assert!(!plain.contains("\x1b["));
     assert!(plain.contains("身份信息"));
     assert!(plain.contains("输电运检中心"));
-    nopwd::ui::reset_enabled_for_tests();
+    edpcli::ui::reset_enabled_for_tests();
 }

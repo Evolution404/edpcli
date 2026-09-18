@@ -9,16 +9,16 @@ use std::fs;
 use std::process::Command;
 
 use common::*;
-use nopwd::cli::{apply_flow, restore_flow, Ctx};
-use nopwd::common::{SECTOR, EXIT_ALREADY_NOPWD, EXIT_BACKUP, EXIT_CANCELLED, EXIT_OK, EXIT_TARGET};
-use nopwd::diskio::FileDev;
-use nopwd::diskio::SectorDev;
+use edpcli::cli::{apply_flow, restore_flow, Ctx};
+use edpcli::common::{SECTOR, EXIT_ALREADY_NOPWD, EXIT_BACKUP, EXIT_CANCELLED, EXIT_OK, EXIT_TARGET};
+use edpcli::diskio::FileDev;
+use edpcli::diskio::SectorDev;
 
 // ══════════════════════════════════════════════════════════════════
 // 子进程测试(真二进制)
 // ══════════════════════════════════════════════════════════════════
 fn bin() -> Command {
-    Command::new(env!("CARGO_BIN_EXE_nopwd"))
+    Command::new(env!("CARGO_BIN_EXE_edpcli"))
 }
 
 #[test]
@@ -88,7 +88,7 @@ fn usage_errors_exit_two() {
 // ══════════════════════════════════════════════════════════════════
 // 进程内流程测试(apply 守卫 / restore)
 // ══════════════════════════════════════════════════════════════════
-fn ctx<'a>(runner: &'a FakeRunner, prompt: &'a mut dyn nopwd::cli::Prompter, bak: &'a std::path::Path) -> Ctx<'a> {
+fn ctx<'a>(runner: &'a FakeRunner, prompt: &'a mut dyn edpcli::cli::Prompter, bak: &'a std::path::Path) -> Ctx<'a> {
     Ctx {
         runner,
         clock: &FixedClockForCli,
@@ -98,7 +98,7 @@ fn ctx<'a>(runner: &'a FakeRunner, prompt: &'a mut dyn nopwd::cli::Prompter, bak
 }
 
 struct FixedClockForCli;
-impl nopwd::diskio::Clock for FixedClockForCli {
+impl edpcli::diskio::Clock for FixedClockForCli {
     fn now_epoch(&self) -> i64 { 1789603200 }
     fn fmt_ts(&self, _e: i64) -> String { "20260917_000000".into() }
     fn fmt_human(&self, _e: i64) -> String { "2026-09-17 00:00".into() }
@@ -165,7 +165,7 @@ fn apply_refuses_without_force() {
     let mut dev = FileDev::open_rdwr(img_path.to_str().unwrap(), std::time::Duration::from_secs(1)).unwrap();
     let e = apply_flow(true, false, 6, None, &mut ctx(&runner, &mut prompt, &bak), &mut dev).unwrap_err();
     assert_eq!(e.code, EXIT_ALREADY_NOPWD);
-    assert!(e.msg.contains("nopwd apply --disk 6 --force"), "{}", e.msg);
+    assert!(e.msg.contains("edpcli apply --disk 6 --force"), "{}", e.msg);
     // 未备份未写盘: 镜像逐字节未动, 备份目录空
     assert_eq!(fs::read(&img_path).unwrap(), conv);
     assert!(fs::read_dir(&bak).unwrap().count() == 0);
@@ -731,7 +731,7 @@ fn apply_refuses_when_unmount_fails_before_reopen_or_write() {
         &mut dev,
     )
     .unwrap_err();
-    assert_eq!(e.code, nopwd::common::EXIT_IO);
+    assert_eq!(e.code, edpcli::common::EXIT_IO);
     assert!(e.msg.contains("卸载"), "{}", e.msg);
     assert!(!dev.switched, "卸载失败后不得 reopen");
     assert_eq!(dev.writes, 0, "卸载失败后不得写盘");
