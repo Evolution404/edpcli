@@ -6,6 +6,7 @@
 pub mod event;
 pub mod render;
 pub mod state;
+pub mod task;
 
 use std::io::{self, IsTerminal, Stdout};
 use std::time::Duration;
@@ -22,7 +23,8 @@ use ratatui::{backend::CrosstermBackend, Terminal};
 
 use crate::common::{EXIT_IO, EXIT_OK, EXIT_USAGE};
 use event::KeyMapper;
-use state::{AppState, StateEffect};
+use state::{AppState, NavCommand, StateEffect};
+use task::TaskHub;
 
 struct TerminalSession {
     terminal: Terminal<CrosstermBackend<Stdout>>,
@@ -71,8 +73,15 @@ fn run_loop() -> io::Result<()> {
     let mut session = TerminalSession::enter()?;
     let mut state = AppState::new();
     let mut keys = KeyMapper::new();
+    let mut tasks = TaskHub::new();
+    let backup_dir = crate::diskio::resolve_backup_dir(None);
+    tasks.request_device_scan(backup_dir.clone());
+    state.set_device_scan_pending(true);
 
     loop {
+        if let Some(rows) = tasks.poll_devices() {
+            state.replace_devices(rows);
+        }
         session.terminal.draw(|frame| render::draw(frame, &state))?;
         if !ct_event::poll(Duration::from_millis(100))? {
             continue;
@@ -81,6 +90,11 @@ fn run_loop() -> io::Result<()> {
         match ct_event::read()? {
             ct_event::Event::Key(key) => {
                 if let Some(command) = keys.map(key) {
+                    if command == NavCommand::Refresh {
+                        tasks.request_device_scan(backup_dir.clone());
+                        state.set_device_scan_pending(true);
+                        continue;
+                    }
                     let viewport_height = session.terminal.size()?.height.saturating_sub(5) as usize;
                     match state.navigate(command, viewport_height) {
                         StateEffect::ExitRequested => break,

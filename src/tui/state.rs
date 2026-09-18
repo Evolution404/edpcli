@@ -9,6 +9,7 @@ pub enum InputMode {
     Search,
     Command,
     Help,
+    Refresh,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -37,8 +38,9 @@ pub enum StateEffect {
     ExitDeferred,
 }
 
-#[derive(Debug, Clone)]
 pub struct AppState {
+    devices: Vec<crate::disk_scan::Row>,
+    device_scan_pending: bool,
     selected: usize,
     item_count: usize,
     input_mode: InputMode,
@@ -55,12 +57,32 @@ impl Default for AppState {
 impl AppState {
     pub const fn new() -> Self {
         Self {
+            devices: Vec::new(),
+            device_scan_pending: false,
             selected: 0,
             item_count: 0,
             input_mode: InputMode::Normal,
             critical_operation: false,
             exit_pending: false,
         }
+    }
+
+    pub fn devices(&self) -> &[crate::disk_scan::Row] {
+        &self.devices
+    }
+
+    pub const fn device_scan_pending(&self) -> bool {
+        self.device_scan_pending
+    }
+
+    pub fn set_device_scan_pending(&mut self, pending: bool) {
+        self.device_scan_pending = pending;
+    }
+
+    pub fn replace_devices(&mut self, devices: Vec<crate::disk_scan::Row>) {
+        self.devices = devices;
+        self.set_item_count(self.devices.len());
+        self.device_scan_pending = false;
     }
 
     pub const fn selected(&self) -> usize {
@@ -152,7 +174,8 @@ impl AppState {
             NavCommand::Search => self.input_mode = InputMode::Search,
             NavCommand::CommandPalette => self.input_mode = InputMode::Command,
             NavCommand::Help => self.input_mode = InputMode::Help,
-            NavCommand::Left
+            NavCommand::Refresh
+            | NavCommand::Left
             | NavCommand::Right
             | NavCommand::NextMatch
             | NavCommand::PreviousMatch
