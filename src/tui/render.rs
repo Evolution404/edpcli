@@ -119,6 +119,27 @@ fn draw_backups(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState
 
 
 
+fn draw_command_palette(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState) {
+    let commands = [
+        "devices  切到设备",
+        "backups  切到备份",
+        "inspect  打开 Inspect",
+        "apply    Apply 安全向导",
+        "restore  Restore 安全向导",
+        "refresh  刷新当前工作区",
+        "help     帮助",
+        "quit/q   退出",
+    ];
+    let mut lines = vec![Line::from(format!(":{}", state.input_buffer())), Line::from("")];
+    lines.extend(commands.into_iter().map(Line::from));
+    frame.render_widget(
+        Paragraph::new(lines)
+            .block(Block::default().borders(Borders::ALL).title("Command Palette"))
+            .wrap(Wrap { trim: true }),
+        area,
+    );
+}
+
 fn plain_hex_lines(data: &[u8]) -> Vec<Line<'static>> {
     data.chunks(16)
         .enumerate()
@@ -274,6 +295,9 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
         draw_wizard(frame, chunks[1], state);
     } else {
     match state.input_mode() {
+        InputMode::Command => {
+            draw_command_palette(frame, chunks[1], state);
+        }
         InputMode::Help => {
             let help = Paragraph::new(vec![
                 Line::from("Vim 键位"),
@@ -293,13 +317,21 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
     }
 
     let status = if state.is_critical_operation() {
-        "关键写盘阶段：q / Esc / Ctrl-C 将延迟到安全检查点"
+        "关键写盘阶段：q / Esc / Ctrl-C 将延迟到安全检查点".to_string()
+    } else if state.input_mode() == InputMode::Search {
+        format!("/{}", state.input_buffer())
+    } else if state.input_mode() == InputMode::Command {
+        format!(":{}", state.input_buffer())
+    } else if let Some(message) = state.notice() {
+        message.to_string()
+    } else if let Some(search) = state.search_status() {
+        format!("{search}  ·  n/N 下一个/上一个")
     } else if state.inspect_pending() {
-        "后台读取 Inspect 数据中；界面可继续响应"
+        "后台读取 Inspect 数据中；界面可继续响应".to_string()
     } else if state.active_scan_pending() {
-        "后台扫描中；界面可继续操作"
+        "后台扫描中；界面可继续操作".to_string()
     } else {
-        "h/l 工作区  j/k 移动  i Inspect  a Apply  R Restore  r 刷新  ? 帮助  : 命令  / 搜索  q 退出"
+        "h/l 工作区  j/k 移动  i Inspect  a Apply  R Restore  r 刷新  ? 帮助  : 命令  / 搜索  q 退出".to_string()
     };
     frame.render_widget(Paragraph::new(status), chunks[2]);
 }

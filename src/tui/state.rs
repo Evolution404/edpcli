@@ -110,6 +110,10 @@ pub struct AppState {
     inspect_data: Option<crate::application::inspect::InspectWorkspace>,
     inspect_pending: bool,
     notice: Option<String>,
+    input_buffer: String,
+    search_query: String,
+    search_matches: Vec<usize>,
+    search_cursor: usize,
 }
 
 impl Default for AppState {
@@ -137,7 +141,185 @@ impl AppState {
             inspect_data: None,
             inspect_pending: false,
             notice: None,
+            input_buffer: String::new(),
+            search_query: String::new(),
+            search_matches: Vec::new(),
+            search_cursor: 0,
         }
+    }
+
+    pub fn input_buffer(&self) -> &str {
+        &self.input_buffer
+    }
+
+    pub fn push_input_char(&mut self, ch: char) {
+        if matches!(self.input_mode, InputMode::Search | InputMode::Command)
+            && self.input_buffer.chars().count() < 256
+            && !ch.is_control()
+        {
+            self.input_buffer.push(ch);
+        }
+    }
+
+    pub fn backspace_input(&mut self) {
+        if matches!(self.input_mode, InputMode::Search | InputMode::Command) {
+            self.input_buffer.pop();
+        }
+    }
+
+    pub fn take_input(&mut self) -> String {
+        std::mem::take(&mut self.input_buffer)
+    }
+
+    pub fn cancel_input(&mut self) {
+        self.input_buffer.clear();
+        self.input_mode = InputMode::Normal;
+    }
+
+    fn clear_search_matches(&mut self) {
+        self.search_matches.clear();
+        self.search_cursor = 0;
+    }
+
+    fn activate_search_match(&mut self, match_index: usize) {
+        let Some(&target) = self.search_matches.get(match_index) else {
+            return;
+        };
+        if command == NavCommand::NextMatch {
+            self.cycle_search(false);
+            return StateEffect::None;
+        }
+        if command == NavCommand::PreviousMatch {
+            self.cycle_search(true);
+            return StateEffect::None;
+        }
+
+        if let Some(inspect) = self.inspect.as_mut() {
+            inspect.selected = target.min(inspect.item_count.saturating_sub(1));
+        } else {
+            self.selected = target.min(self.item_count.saturating_sub(1));
+        }
+    }
+
+    pub fn submit_search(&mut self) -> usize {
+        self.search_query = self.input_buffer.trim().to_ascii_lowercase();
+        self.input_buffer.clear();
+        self.input_mode = InputMode::Normal;
+        self.search_matches.clear();
+        self.search_cursor = 0;
+        if self.search_query.is_empty() {
+            return 0;
+        }
+
+        if let Some(workspace) = &self.inspect_data {
+            for (index, view) in workspace.views.iter().enumerate() {
+                let mut text = format!("lba{} {}", view.lba, view.method);
+                for field in &view.fields {
+                    text.push(' ');
+                    text.push_str(&field.label);
+                    text.push(' ');
+                    text.push_str(&field.value);
+                    for child in &field.children {
+                        text.push(' ');
+                        text.push_str(&child.label);
+                        text.push(' ');
+                        text.push_str(&child.value);
+                    }
+                }
+                for note in &view.notes {
+                    text.push(' ');
+                    text.push_str(note);
+                }
+                let ascii: String = view
+                    .raw
+                    .iter()
+                    .map(|byte| {
+                        if (0x20..=0x7e).contains(byte) {
+                            *byte as char
+                        } else {
+                            ' '
+                        }
+                    })
+                    .collect();
+                text.push(' ');
+                text.push_str(&ascii);
+                if text.to_ascii_lowercase().contains(&self.search_query) {
+                    self.search_matches.push(index);
+                }
+            }
+        } else {
+            match self.workspace {
+                Workspace::Devices => {
+                    for (index, row) in self.devices.iter().enumerate() {
+                        let text = format!(
+                            "disk{} {} {} {}:{} {} {} {}",
+                            row.disk,
+                            row.device_id.as_deref().unwrap_or_default(),
+                            row.onlyid.as_deref().unwrap_or_default(),
+                            row.vid,
+                            row.pid,
+                            row.user.as_deref().unwrap_or_default(),
+                            row.dept.as_deref().unwrap_or_default(),
+                            row.proto
+                        );
+                        if text.to_ascii_lowercase().contains(&self.search_query) {
+                            self.search_matches.push(index);
+                        }
+                    }
+                }
+                Workspace::Backups => {
+                    for (index, row) in self.backups.iter().enumerate() {
+                        let text = format!(
+                            "{} {} {} {} {} {}",
+                            row.file_name,
+                            row.display_time,
+                            row.onlyid.as_deref().unwrap_or_default(),
+                            row.user.as_deref().unwrap_or_default(),
+                            row.dept.as_deref().unwrap_or_default(),
+                            if row.is_nopwd { "nopwd 免密" } else { "encrypted 加密" }
+                        );
+                        if text.to_ascii_lowercase().contains(&self.search_query) {
+                            self.search_matches.push(index);
+                        }
+                    }
+                }
+            }
+        }
+        if !self.search_matches.is_empty() {
+            self.activate_search_match(0);
+        }
+        self.search_matches.len()
+    }
+
+    fn cycle_search(&mut self, reverse: bool) {
+        if self.search_matches.is_empty() {
+            return;
+        }
+        if reverse {
+            self.search_cursor = if self.search_cursor == 0 {
+                self.search_matches.len() - 1
+            } else {
+                self.search_cursor - 1
+            };
+        } else {
+            self.search_cursor = (self.search_cursor + 1) % self.search_matches.len();
+        }
+        self.activate_search_match(self.search_cursor);
+    }
+
+    pub fn search_status(&self) -> Option<String> {
+        (!self.search_query.is_empty()).then(|| {
+            format!(
+                "/{}  {}/{}",
+                self.search_query,
+                if self.search_matches.is_empty() {
+                    0
+                } else {
+                    self.search_cursor + 1
+                },
+                self.search_matches.len()
+            )
+        })
     }
 
     pub fn inspect_data(&self) -> Option<&crate::application::inspect::InspectWorkspace> {
@@ -176,6 +358,8 @@ impl AppState {
     }
 
     pub fn replace_inspect(&mut self, workspace: crate::application::inspect::InspectWorkspace) {
+        self.clear_search_matches();
+        self.search_query.clear();
         let count = workspace.views.len();
         self.inspect_data = Some(workspace);
         self.inspect_pending = false;
@@ -304,6 +488,8 @@ impl AppState {
     }
 
     pub fn replace_devices(&mut self, devices: Vec<crate::disk_scan::Row>) {
+        self.clear_search_matches();
+        self.search_query.clear();
         if self
             .pinned_disk
             .is_some_and(|disk| !devices.iter().any(|row| row.disk == disk))
@@ -339,6 +525,8 @@ impl AppState {
     }
 
     pub fn replace_backups(&mut self, backups: Vec<crate::application::BackupWorkspaceItem>) {
+        self.clear_search_matches();
+        self.search_query.clear();
         self.backups = backups;
         self.backup_scan_pending = false;
         if self.workspace == Workspace::Backups {
@@ -420,7 +608,7 @@ impl AppState {
                 return StateEffect::None;
             }
             if self.input_mode != InputMode::Normal {
-                self.input_mode = InputMode::Normal;
+                self.cancel_input();
                 return StateEffect::None;
             }
             return StateEffect::ExitRequested;
@@ -466,8 +654,14 @@ impl AppState {
                         InspectMode::RawHex => InspectMode::RawHex,
                     };
                 }
-                NavCommand::Search => self.input_mode = InputMode::Search,
-                NavCommand::CommandPalette => self.input_mode = InputMode::Command,
+                NavCommand::Search => {
+                    self.input_buffer.clear();
+                    self.input_mode = InputMode::Search;
+                },
+                NavCommand::CommandPalette => {
+                    self.input_buffer.clear();
+                    self.input_mode = InputMode::Command;
+                },
                 NavCommand::Help => self.input_mode = InputMode::Help,
                 NavCommand::Quit => return StateEffect::ExitRequested,
                 NavCommand::Escape
@@ -507,8 +701,14 @@ impl AppState {
                 let delta = (viewport_height / 2).max(1);
                 self.selected = self.selected.saturating_sub(delta);
             }
-            NavCommand::Search => self.input_mode = InputMode::Search,
-            NavCommand::CommandPalette => self.input_mode = InputMode::Command,
+            NavCommand::Search => {
+                    self.input_buffer.clear();
+                    self.input_mode = InputMode::Search;
+                },
+            NavCommand::CommandPalette => {
+                    self.input_buffer.clear();
+                    self.input_mode = InputMode::Command;
+                },
             NavCommand::Help => self.input_mode = InputMode::Help,
             NavCommand::Left => self.switch_workspace(Workspace::Devices),
             NavCommand::Right => self.switch_workspace(Workspace::Backups),

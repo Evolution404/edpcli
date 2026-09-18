@@ -3,6 +3,7 @@
 //! Business work is delegated to `crate::application`; this module owns only terminal lifecycle,
 //! event dispatch and rendering.
 
+pub mod command;
 pub mod event;
 pub mod render;
 pub mod state;
@@ -177,6 +178,75 @@ enum LoopExit {
     Elevate(state::WriteIntent),
 }
 
+fn dispatch_nav_command(
+    state: &mut AppState,
+    tasks: &mut TaskHub,
+    command: NavCommand,
+    backup_dir: &std::path::Path,
+    viewport_height: usize,
+) -> StateEffect {
+    match command {
+        NavCommand::Refresh => {
+            match state.workspace() {
+                state::Workspace::Devices => {
+                    tasks.request_device_scan(backup_dir.to_path_buf());
+                    state.set_device_scan_pending(true);
+                }
+                state::Workspace::Backups => {
+                    tasks.request_backup_scan(backup_dir.to_path_buf());
+                    state.set_backup_scan_pending(true);
+                }
+            }
+            StateEffect::None
+        }
+        NavCommand::OpenInspect => {
+            match state.workspace() {
+                state::Workspace::Devices => {
+                    if let Some(disk) = state.selected_device_disk() {
+                        tasks.request_inspect_disk(disk);
+                        state.set_inspect_pending(true);
+                    }
+                }
+                state::Workspace::Backups => {
+                    if let Some(path) = state.selected_backup_path() {
+                        tasks.request_inspect_backup(path);
+                        state.set_inspect_pending(true);
+                    }
+                }
+            }
+            StateEffect::None
+        }
+        NavCommand::BeginApply => {
+            if let Some(disk) = state.selected_device_disk() {
+                state.begin_write_wizard(state::WriteKind::Apply, disk, None);
+            }
+            StateEffect::None
+        }
+        NavCommand::BeginRestore => {
+            if let (Some(disk), Some(backup)) =
+                (state.selected_device_disk(), state.selected_backup_path())
+            {
+                state.begin_write_wizard(state::WriteKind::Restore, disk, Some(backup));
+            }
+            StateEffect::None
+        }
+        _ => state.navigate(command, viewport_height),
+    }
+}
+
+fn palette_action_to_nav(action: command::PaletteAction) -> NavCommand {
+    match action {
+        command::PaletteAction::Devices => NavCommand::Left,
+        command::PaletteAction::Backups => NavCommand::Right,
+        command::PaletteAction::Inspect => NavCommand::OpenInspect,
+        command::PaletteAction::Apply => NavCommand::BeginApply,
+        command::PaletteAction::Restore => NavCommand::BeginRestore,
+        command::PaletteAction::Refresh => NavCommand::Refresh,
+        command::PaletteAction::Help => NavCommand::Help,
+        command::PaletteAction::Quit => NavCommand::Quit,
+    }
+}
+
 fn run_loop(resume: Option<state::WriteIntent>) -> io::Result<LoopExit> {
     let mut session = TerminalSession::enter()?;
     let mut state = AppState::new();
@@ -250,60 +320,69 @@ fn run_loop(resume: Option<state::WriteIntent>) -> io::Result<LoopExit> {
                     }
                 }
 
-                if let Some(command) = keys.map(key) {
-                    match command {
-                        NavCommand::Refresh => {
-                            match state.workspace() {
-                                state::Workspace::Devices => {
-                                    tasks.request_device_scan(backup_dir.clone());
-                                    state.set_device_scan_pending(true);
-                                }
-                                state::Workspace::Backups => {
-                                    tasks.request_backup_scan(backup_dir.clone());
-                                    state.set_backup_scan_pending(true);
-                                }
-                            }
+                if matches!(
+                    state.input_mode(),
+                    state::InputMode::Search | state::InputMode::Command
+                ) {
+                    match key.code {
+                        ct_event::KeyCode::Char(ch)
+                            if !key.modifiers.contains(ct_event::KeyModifiers::CONTROL) =>
+                        {
+                            state.push_input_char(ch);
                             continue;
                         }
-                        NavCommand::OpenInspect => {
-                            match state.workspace() {
-                                state::Workspace::Devices => {
-                                    if let Some(disk) = state.selected_device_disk() {
-                                        tasks.request_inspect_disk(disk);
-                                        state.set_inspect_pending(true);
+                        ct_event::KeyCode::Backspace => {
+                            state.backspace_input();
+                            continue;
+                        }
+                        ct_event::KeyCode::Esc => {
+                            let _ = state.navigate(NavCommand::Escape, 1);
+                            continue;
+                        }
+                        ct_event::KeyCode::Enter => {
+                            if state.input_mode() == state::InputMode::Search {
+                                state.submit_search();
+                            } else {
+                                let input = state.take_input();
+                                state.cancel_input();
+                                match command::parse_command(&input) {
+                                    Ok(action) => {
+                                        let viewport_height = session
+                                            .terminal
+                                            .size()?
+                                            .height
+                                            .saturating_sub(5)
+                                            as usize;
+                                        let effect = dispatch_nav_command(
+                                            &mut state,
+                                            &mut tasks,
+                                            palette_action_to_nav(action),
+                                            &backup_dir,
+                                            viewport_height,
+                                        );
+                                        if effect == StateEffect::ExitRequested {
+                                            break;
+                                        }
                                     }
+                                    Err(message) => state.set_notice(message),
                                 }
-                                state::Workspace::Backups => {
-                                    if let Some(path) = state.selected_backup_path() {
-                                        tasks.request_inspect_backup(path);
-                                        state.set_inspect_pending(true);
-                                    }
-                                }
-                            }
-                            continue;
-                        }
-                        NavCommand::BeginApply => {
-                            if let Some(disk) = state.selected_device_disk() {
-                                state.begin_write_wizard(state::WriteKind::Apply, disk, None);
-                            }
-                            continue;
-                        }
-                        NavCommand::BeginRestore => {
-                            if let (Some(disk), Some(backup)) =
-                                (state.selected_device_disk(), state.selected_backup_path())
-                            {
-                                state.begin_write_wizard(
-                                    state::WriteKind::Restore,
-                                    disk,
-                                    Some(backup),
-                                );
                             }
                             continue;
                         }
                         _ => {}
                     }
-                    let viewport_height = session.terminal.size()?.height.saturating_sub(5) as usize;
-                    match state.navigate(command, viewport_height) {
+                }
+
+                if let Some(command) = keys.map(key) {
+                    let viewport_height =
+                        session.terminal.size()?.height.saturating_sub(5) as usize;
+                    match dispatch_nav_command(
+                        &mut state,
+                        &mut tasks,
+                        command,
+                        &backup_dir,
+                        viewport_height,
+                    ) {
                         StateEffect::ExitRequested => break,
                         StateEffect::ExitDeferred | StateEffect::None => {}
                     }
