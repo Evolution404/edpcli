@@ -96,6 +96,35 @@ Phase 4 本地门禁：
 - `cargo clippy --all-targets -- -D warnings`：PASS；
 - `tests/cli_offline.rs` 新增 dry-run 无写阶段副作用测试：PASS。
 
+### Phase 5：backup create — 已完成
+
+- `backup create [--disk N]` 已接入真实执行层：
+  - 单盘自动选、多盘走统一 `DeviceSelector`；
+  - 显式目标在提权前继续执行系统盘/USB 整盘 fail-closed；
+  - 裸盘权限不足时由 CLI 自身提权并把目标 pin 到平台原生 selector；
+  - 提权后始终以只读方式打开目标盘；
+- 原 `backup_disk(...)` 已收敛并重命名为唯一 `create_backup(...)` service；
+  `apply` 写前自动备份与独立 `backup create` 现在明确共用：
+  - 相同 LBA0-13 输入；
+  - 相同 onlyid/device_id/VID/PID/容量元数据；
+  - 相同文件命名与 `_nopwd` 标记；
+  - 相同 MD5 sidecar；
+  - 相同 create-new 碰撞保护；
+  - 相同 fsync + 目录持久化策略；
+- 新增只读契约测试：测试 runner 故意不提供卸载命令，`backup create` 仍成功，
+  且无确认、无 reopen、无扇区写入；
+- 新增同源格式测试：手动备份与 apply 自动备份在同一时间/同一设备事实下生成
+  相同文件名、7168B 内容和 MD5；
+- 新增跨平台 CLI 门禁：`backup create --disk <不存在目标>` 在所有平台均在写前拒绝。
+
+Phase 5 本地门禁：
+
+- `cargo fmt --all -- --check`：PASS；
+- `cargo test --all-targets`：PASS；
+- `cargo clippy --all-targets -- -D warnings`：PASS；
+- 搜索旧内部 `backup_disk`：0 命中；
+- `backup create` 只读/同源格式定向测试：PASS。
+
 ## 下一位 AI 从这里开始
 
 1. 先读：
@@ -103,10 +132,10 @@ Phase 4 本地门禁：
    - `docs/RELEASE.md`
    - `docs/USAGE.md`
 2. 检查 `git status --short --branch`，禁止 reset/clean。
-3. 从 **Phase 5 backup create** 继续，仍须测试先行；不要削弱 selector pinning、系统盘
+3. 从 **Phase 6 backup restore/verify/delete/prune 统一** 继续，仍须测试先行；不要削弱 selector pinning、系统盘
    fail-closed 或 onlyid 防串盘。
-4. 接通 `backup create` 执行层时，必须与 apply 写前自动备份共用同一个
-   backup service，且独立备份路径不得调用 prepare_write/unmount/写盘。
+4. Phase 6 重点把 restore/verify/delete 真正改为统一 `BackupSelector` 语义，
+   删除残余盘内编号/旧 onlyid UI 路径，同时保留恢复前 onlyid/物理盘身份终验。
 5. 小 commit、及时 push，阶段完成后更新本交接文档。
 
 ## 已冻结的关键决策

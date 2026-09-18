@@ -890,7 +890,7 @@ pub fn prune_candidates(entries: &[BackupEntry], keep: usize) -> Vec<PathBuf> {
 
 /// 备份 LBA0-13 到备份目录, 附 .md5 sidecar。
 /// 返回 (备份路径, 是否免密状态快照); `还原:` 提示由 CLI 打印。
-pub fn backup_disk(
+pub fn create_backup(
     facts: &DiskFacts,
     data: &[u8],
     device_id: &str,

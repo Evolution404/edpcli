@@ -25,7 +25,7 @@ pub use crate::cli_args::{
 use crate::common::*;
 use crate::completion;
 use crate::diskio::{
-    self, backup_disk, backup_is_nopwd, find_backups, raw_path, Clock, DiskFacts, FileDev,
+    self, backup_is_nopwd, create_backup, find_backups, raw_path, Clock, DiskFacts, FileDev,
     SectorDev, SystemClock,
 };
 use crate::elevate::{self, ELEVATED_FLAG};
@@ -369,7 +369,7 @@ pub fn apply_flow(
         );
     }
 
-    let (bpath, _nopwd) = backup_disk(&facts, &img, &did, &ctx.backup_dir, ctx.clock)?;
+    let (bpath, _nopwd) = create_backup(&facts, &img, &did, &ctx.backup_dir, ctx.clock)?;
     println!(
         "{}  edpcli backup restore \"{}\" --disk {} --yes",
         crate::ui::bold("还原"),
@@ -410,6 +410,35 @@ pub fn apply_flow(
         )
     );
     Ok(EXIT_OK)
+}
+
+/// 为当前已选定 U 盘创建 LBA0-13 备份。
+///
+/// 这是纯只读介质路径：只读取身份和 LBA0-13，然后把快照交给与 apply 写前备份完全相同的
+/// `create_backup` service。此函数不得调用 prepare_write、reopen_rdwr 或任何扇区写入。
+pub fn backup_create_flow(
+    disk: u32,
+    ctx: &mut Ctx,
+    dev: &mut dyn SectorDev,
+) -> EdpCliResult<(PathBuf, bool)> {
+    guard_usb_disk(ctx.runner, disk)?;
+    let img = read_image(dev)?;
+    let id = identify(ctx.runner, disk, &img[7 * SECTOR..8 * SECTOR]);
+    let device_id = id.device_id.ok_or_else(|| {
+        err(
+            EXIT_TARGET,
+            "错误: 无法识别 device_id(LBA7 两候选均未解出 EDPF)，拒绝创建无法归属的备份",
+        )
+    })?;
+    let (vid, pid) = sysinfo::usb_vid_pid(ctx.runner, disk);
+    let facts = DiskFacts {
+        disk,
+        total_sectors: sysinfo::disk_total_sectors(ctx.runner, disk),
+        vid,
+        pid,
+        label_id: diskio::lba4_label_id_from(&img[4 * SECTOR..5 * SECTOR]),
+    };
+    create_backup(&facts, &img, &device_id, &ctx.backup_dir, ctx.clock)
 }
 
 /// restore 主流程: bin=None 时交互列出本盘备份并选择。
@@ -727,10 +756,7 @@ pub fn run() -> i32 {
         } => {
             let bak = diskio::resolve_backup_dir(backup_dir.as_deref());
             match action {
-                BackupAction::Create { .. } => {
-                    eprintln!("错误: backup create 尚未接入执行层");
-                    EXIT_USAGE
-                }
+                BackupAction::Create { disk } => backup_create_real_flow(&runner, disk, backup_dir),
                 BackupAction::List => backup_list(&bak, None),
                 BackupAction::Verify { target } => {
                     backup_verify_select(&bak, None, target.as_deref(), None)
@@ -818,6 +844,61 @@ fn list_flow(runner: &SysRunner, backup_dir_flag: Option<String>) -> i32 {
 
     print!("{}", print_disk_table(&rows));
     EXIT_OK
+}
+
+fn backup_create_real_flow(
+    runner: &SysRunner,
+    disk_opt: Option<u32>,
+    backup_dir_flag: Option<String>,
+) -> i32 {
+    if let Some(disk) = disk_opt {
+        if let Err(error) = guard_usb_disk(runner, disk) {
+            eprintln!("{}", crate::ui::red(&error.msg));
+            return error.code;
+        }
+    }
+
+    if !elevate::is_root() {
+        let mut prompt = StdPrompter;
+        let disk = match DeviceSelector::new(disk_opt).resolve(runner, &mut prompt) {
+            Ok(disk) => disk,
+            Err(error) => {
+                eprintln!("{}", crate::ui::red(&error.msg));
+                return error.code;
+            }
+        };
+        let mut argv = argv_with_backup_dir_for_elevation(backup_dir_flag.as_deref());
+        DeviceSelector::new(disk_opt).pin_argv(&mut argv, disk);
+        elevate::ensure_elevated(&argv);
+        unreachable!();
+    }
+
+    let mut prompt = StdPrompter;
+    let disk = match DeviceSelector::new(disk_opt).resolve(runner, &mut prompt) {
+        Ok(disk) => disk,
+        Err(error) => {
+            eprintln!("{}", crate::ui::red(&error.msg));
+            return error.code;
+        }
+    };
+    let mut dev = match FileDev::open_rdonly(&raw_path(disk)) {
+        Ok(dev) => dev,
+        Err(error) => {
+            eprintln!(
+                "错误: 无法只读打开 {}: {}（需要管理员权限？）",
+                raw_path(disk),
+                error
+            );
+            return EXIT_IO;
+        }
+    };
+    let mut ctx = Ctx {
+        runner,
+        clock: &SystemClock,
+        prompt: &mut prompt,
+        backup_dir: diskio::resolve_backup_dir(backup_dir_flag.as_deref()),
+    };
+    finish(backup_create_flow(disk, &mut ctx, &mut dev).map(|_| EXIT_OK))
 }
 
 /// apply/backup restore 的公共外壳:

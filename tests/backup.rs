@@ -10,7 +10,7 @@ use edpcli::cli::{backup_list, backup_prune, backup_rm, backup_verify};
 use edpcli::common::SECTOR;
 use edpcli::diskio::Clock;
 use edpcli::diskio::{
-    backup_disk, backup_is_nopwd, backup_label_id, find_backups, parse_backup_name,
+    backup_is_nopwd, backup_label_id, create_backup, find_backups, parse_backup_name,
     prune_candidates, scan_backup_dir, BackupEntry, BackupMeta, DiskFacts, Md5Status,
 };
 
@@ -107,7 +107,7 @@ fn backup_written_with_md5_and_onlyid() {
         return;
     };
     let tmp = TmpDir::new("backup");
-    let (path, is_nopwd) = backup_disk(
+    let (path, is_nopwd) = create_backup(
         &netac_facts(),
         &data,
         "disk&ven_netac&prod_onlydisk",
@@ -141,7 +141,7 @@ fn backup_rejects_incomplete_lba_image_before_creating_files() {
     };
     data.pop();
     let tmp = TmpDir::new("backup_short_image");
-    let result = backup_disk(
+    let result = create_backup(
         &netac_facts(),
         &data,
         "disk&ven_netac&prod_onlydisk",
@@ -161,7 +161,7 @@ fn backup_filename_onlyid_is_derived_from_lba4_content() {
     let tmp = TmpDir::new("backup_content_onlyid");
     let mut facts = netac_facts();
     facts.label_id = Some("999999999".into());
-    let (path, _) = backup_disk(
+    let (path, _) = create_backup(
         &facts,
         &data,
         "disk&ven_netac&prod_onlydisk",
@@ -214,7 +214,7 @@ fn backup_rejects_device_id_with_path_separators_before_creating_files() {
     fs::create_dir_all(&bak).unwrap();
     // 旧实现会把 device_id 原样拼进文件名。预建第一层目录后，`/../../` 可逃出 bak。
     fs::create_dir_all(bak.join("disk99_122880000_vid0dd8_pid2005_disk&ven_bad")).unwrap();
-    let result = backup_disk(
+    let result = create_backup(
         &netac_facts(),
         &data,
         "disk&ven_bad/../../escaped",
@@ -245,7 +245,7 @@ fn creating_new_backup_does_not_rename_existing_history() {
     );
     let legacy_md5 = std::path::PathBuf::from(format!("{}.md5", legacy.display()));
 
-    let (new_path, _) = backup_disk(
+    let (new_path, _) = create_backup(
         &netac_facts(),
         &data,
         "disk&ven_netac&prod_onlydisk",
@@ -267,7 +267,7 @@ fn backup_collision_never_overwrites_existing_file() {
         return;
     };
     let tmp = TmpDir::new("backup_collision");
-    let (path, _) = backup_disk(
+    let (path, _) = create_backup(
         &netac_facts(),
         &original,
         "disk&ven_netac&prod_onlydisk",
@@ -280,7 +280,7 @@ fn backup_collision_never_overwrites_existing_file() {
     // 保持同一时间戳和同一“加密原盘”状态，只改一个与识别无关的保留扇区字节。
     let mut second = original.clone();
     second[2 * 512 + 17] ^= 0x5A;
-    let err = backup_disk(
+    let err = create_backup(
         &netac_facts(),
         &second,
         "disk&ven_netac&prod_onlydisk",
@@ -311,7 +311,7 @@ fn backup_tagging_by_content() {
     };
     let tmp = TmpDir::new("tagging");
     // 免密状态镜像 → 文件名含 _nopwd + 返回标记
-    let (path, is_nopwd) = backup_disk(&netac_facts(), &conv, &did, &tmp.0, &FixedClock).unwrap();
+    let (path, is_nopwd) = create_backup(&netac_facts(), &conv, &did, &tmp.0, &FixedClock).unwrap();
     let name = path.file_name().unwrap().to_string_lossy().into_owned();
     assert!(name.contains("_nopwd"), "{}", name);
     assert!(is_nopwd);
