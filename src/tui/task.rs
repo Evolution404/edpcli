@@ -286,13 +286,13 @@ impl TaskHub {
     pub fn request_backup_delete(
         &mut self,
         path: PathBuf,
-        expected_md5: String,
+        expected_sha256: String,
         backup_dir: PathBuf,
     ) {
         let tx = self.tx.clone();
         std::thread::spawn(move || {
             let result = catch_unwind(AssertUnwindSafe(|| {
-                crate::application::delete_backup_exact(&backup_dir, &path, &expected_md5)
+                crate::application::delete_backup_exact(&backup_dir, &path, &expected_sha256)
             }))
             .unwrap_or_else(|payload| {
                 Err(format!(

@@ -1,5 +1,5 @@
 //! 真实盘密文可解性测试(Python test_crypto.py::TestAgainstRealDisks)
-//! + md5 对仓库 .md5 sidecar 的实数据校验。
+//! + sha256 对仓库 .sha256 sidecar 的实数据校验。
 
 mod common;
 
@@ -53,14 +53,14 @@ fn wrong_id_does_not_decrypt() {
 }
 
 #[test]
-fn md5_matches_committed_sidecars() {
-    // Rust MD5 实现对全部已提交备份的实数据校验(sidecar 由 Python hashlib 生成)
+fn sha256_matches_committed_sidecars() {
+    // Rust SHA-256 实现对全部已提交备份的实数据校验(sidecar 由 Python hashlib 生成)
     let mut checked = 0;
     for key in KEYS {
         let Some(p) = fixture_bin(key) else { continue };
         let data = std::fs::read(&p).unwrap();
-        let want = std::fs::read_to_string(format!("{}.md5", p.display())).unwrap();
-        assert_eq!(md5(&data), want.trim(), "{}", p.display());
+        let want = std::fs::read_to_string(format!("{}.sha256", p.display())).unwrap();
+        assert_eq!(sha256(&data), want.trim(), "{}", p.display());
         checked += 1;
     }
     assert!(checked > 0, "仓库 backup/ 夹具缺失");

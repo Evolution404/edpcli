@@ -167,7 +167,7 @@ edpcli backup create --disk 2
   - 同一命名规则；
   - 同一 LBA0-12 数据格式；
   - 同一 onlyid/device_id/VID/PID/容量元数据；
-  - 同一 MD5 sidecar；
+  - 同一 SHA-256 sidecar；
   - 同一碰撞保护；
   - 同一目录解析规则；
   - 同一 fsync/目录持久化策略。
@@ -206,7 +206,7 @@ edpcli backup restore backup.bin
 1. 选择/自动确定目标物理盘；
 2. 自动按当前盘 onlyid/身份过滤可用备份；
 3. 交互选择备份；
-4. 校验大小、MD5、onlyid 和当前物理盘身份；
+4. 校验大小、SHA-256、onlyid 和当前物理盘身份；
 5. 用户确认；
 6. 执行现有 restore 原子写入流程。
 
@@ -464,7 +464,7 @@ edpcli help apply
 4. `info` 单盘自动选、多盘选择、备份文件；
 5. `apply --dry-run` 零写入；
 6. `apply` 写前备份仍存在；
-7. `backup create` 对当前盘直接生成 6656B + MD5；
+7. `backup create` 对当前盘直接生成 6656B + SHA-256；
 8. `backup create` 与 apply 自动备份格式/命名元数据一致；
 9. `backup create` 权限不足自动提权，但永不调用写盘 prepare/unmount；
 10. `backup restore` 只显示/接受属于当前盘的备份；

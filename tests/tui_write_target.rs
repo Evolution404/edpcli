@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use edpcli::application::BackupWorkspaceItem;
 use edpcli::disk_scan::Row;
-use edpcli::diskio::Md5Status;
+use edpcli::diskio::Sha256Status;
 use edpcli::tui::state::{AppState, NavCommand};
 
 fn device(disk: u32) -> Row {
@@ -34,9 +34,11 @@ fn backup(index: usize, name: &str) -> BackupWorkspaceItem {
         user: None,
         dept: None,
         is_nopwd: false,
-        md5_status: Md5Status::Ok,
+        sha256_status: Sha256Status::Ok,
         size_ok: true,
-        content_md5: Some("0123456789abcdef0123456789abcdef".into()),
+        content_sha256: Some(
+            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef".into(),
+        ),
     }
 }
 

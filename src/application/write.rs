@@ -492,33 +492,33 @@ pub fn restore_flow(
             format!("错误: 备份大小 {} ≠ {}", data.len(), METADATA_IMAGE_LEN),
         ));
     }
-    let md5_path = diskio::md5_sidecar_path(&path);
-    let want = match diskio::read_backup_md5(&path) {
+    let sha256_path = diskio::sha256_sidecar_path(&path);
+    let want = match diskio::read_backup_sha256(&path) {
         Ok(Some(expected)) => expected,
         Ok(None) => {
             return Err(err(
                 EXIT_BACKUP,
-                format!("错误: 备份缺少校验文件 {}，拒绝还原", md5_path.display()),
+                format!("错误: 备份缺少校验文件 {}，拒绝还原", sha256_path.display()),
             ));
         }
         Err(e) => {
             return Err(err(
                 EXIT_BACKUP,
-                format!("错误: 无法读取有效校验 {}: {}", md5_path.display(), e),
+                format!("错误: 无法读取有效校验 {}: {}", sha256_path.display(), e),
             ));
         }
     };
-    let got = crate::md5::md5_hex(&data);
+    let got = crate::sha256::sha256_hex(&data);
     if want != got {
         return Err(err(
             EXIT_BACKUP,
             format!(
-                "错误: 备份 MD5 不符(期望 {}, 实际 {}) — 文件损坏?",
+                "错误: 备份 SHA-256 不符(期望 {}, 实际 {}) — 文件损坏?",
                 want, got
             ),
         ));
     }
-    outputln!(ctx, "{}  {}", crate::ui::green("MD5 校验通过"), got);
+    outputln!(ctx, "{}  {}", crate::ui::green("SHA-256 校验通过"), got);
 
     // 显式路径也必须执行与交互选择相同的“同一物理盘”终验。device_id/容量/VID/PID
     // 对同型号盘并不唯一，LBA4 前 16B 才是现有备份体系使用的最终身份标签。

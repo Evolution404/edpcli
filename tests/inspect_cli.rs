@@ -43,9 +43,9 @@ fn inspect_backup_file_exports_selected_lbas() {
     let name = path.file_name().unwrap();
     let copied = tmp.0.join(name);
     fs::copy(&path, &copied).unwrap();
-    let src_md5 = format!("{}.md5", path.display());
-    if std::path::Path::new(&src_md5).exists() {
-        fs::copy(src_md5, format!("{}.md5", copied.display())).unwrap();
+    let src_sha256 = format!("{}.sha256", path.display());
+    if std::path::Path::new(&src_sha256).exists() {
+        fs::copy(src_sha256, format!("{}.sha256", copied.display())).unwrap();
     }
     let export = tmp.0.join("out");
     let out = Command::new(env!("CARGO_BIN_EXE_edpcli"))

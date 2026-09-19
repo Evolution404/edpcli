@@ -63,7 +63,7 @@ fn offline_convert_matches_golden() {
     );
     let g = golden("netac");
     for (lba, want) in [(0u32, g.lba0), (6, g.lba6), (7, g.lba7), (12, g.lba12)] {
-        let got = md5(&fs::read(out.join(format!("LBA{:02}.bin", lba))).unwrap());
+        let got = sha256(&fs::read(out.join(format!("LBA{:02}.bin", lba))).unwrap());
         assert_eq!(got, want, "LBA{}", lba);
     }
     // netac LBA9 非零 → 清零产物
@@ -392,7 +392,7 @@ fn backup_create_is_read_only_and_matches_apply_automatic_backup() {
     assert_eq!(fs::read(&manual_path).unwrap(), orig);
 
     // apply 写前自动备份：同一时间、同一设备事实、同一 LBA0-12 输入，应生成
-    // 完全相同的文件名/内容/MD5；随后在确认处取消，避免进入任何真写阶段。
+    // 完全相同的文件名/内容/SHA-256；随后在确认处取消，避免进入任何真写阶段。
     let apply_runner = netac_runner(6);
     let mut apply_prompt = ScriptPrompter {
         inputs: vec!["NO".into()],
@@ -425,8 +425,8 @@ fn backup_create_is_read_only_and_matches_apply_automatic_backup() {
         fs::read(&auto_path).unwrap()
     );
     assert_eq!(
-        fs::read_to_string(format!("{}.md5", manual_path.display())).unwrap(),
-        fs::read_to_string(format!("{}.md5", auto_path.display())).unwrap()
+        fs::read_to_string(format!("{}.sha256", manual_path.display())).unwrap(),
+        fs::read_to_string(format!("{}.sha256", auto_path.display())).unwrap()
     );
 }
 
@@ -448,8 +448,8 @@ fn restore_numeric_target_uses_backup_selector_and_current_disk_identity() {
     fs::copy(&source, &target).unwrap();
     let data = fs::read(&target).unwrap();
     fs::write(
-        format!("{}.md5", target.display()),
-        format!("{}\n", md5(&data)),
+        format!("{}.sha256", target.display()),
+        format!("{}\n", sha256(&data)),
     )
     .unwrap();
 
@@ -519,7 +519,11 @@ fn restore_explicit_nopwd_backup_blocked() {
     // 当前盘是免密盘(conv), 备份也是免密快照 → 硬拦截不写入
     let bakfile = tmp.0.join("conv.bin");
     fs::write(&bakfile, &conv).unwrap();
-    fs::write(tmp.0.join("conv.bin.md5"), format!("{}\n", md5(&conv))).unwrap();
+    fs::write(
+        tmp.0.join("conv.bin.sha256"),
+        format!("{}\n", sha256(&conv)),
+    )
+    .unwrap();
     let img_path = tmp.0.join("disk.img");
     let original = load_disk_image("netac").unwrap();
     fs::write(&img_path, &original).unwrap();
@@ -560,8 +564,8 @@ fn restore_detects_nopwd_from_backup_name_when_current_device_id_is_unavailable(
     );
     fs::write(&bakfile, &conv).unwrap();
     fs::write(
-        format!("{}.md5", bakfile.display()),
-        format!("{}\n", md5(&conv)),
+        format!("{}.sha256", bakfile.display()),
+        format!("{}\n", sha256(&conv)),
     )
     .unwrap();
 
@@ -606,8 +610,8 @@ fn restore_refuses_unknown_backup_identity_when_device_id_is_unavailable() {
     let bakfile = tmp.0.join("renamed.bin");
     fs::write(&bakfile, &conv).unwrap();
     fs::write(
-        format!("{}.md5", bakfile.display()),
-        format!("{}\n", md5(&conv)),
+        format!("{}.sha256", bakfile.display()),
+        format!("{}\n", sha256(&conv)),
     )
     .unwrap();
     let img_path = tmp.0.join("disk.img");
@@ -648,8 +652,8 @@ fn restore_refuses_when_current_disk_identity_tag_is_zero() {
     );
     fs::write(&bakfile, &original).unwrap();
     fs::write(
-        format!("{}.md5", bakfile.display()),
-        format!("{}\n", md5(&original)),
+        format!("{}.sha256", bakfile.display()),
+        format!("{}\n", sha256(&original)),
     )
     .unwrap();
 
@@ -695,14 +699,14 @@ fn restore_picker_selects_newest_and_writes() {
     let newer = bak.join("disk26_122880000_vid0dd8_pid2005_disk&ven_netac&prod_onlydisk_onlyid1402259934_nopwd_20260916_230000.bin");
     fs::write(&older, &orig).unwrap();
     fs::write(
-        format!("{}.md5", older.display()),
-        format!("{}\n", md5(&orig)),
+        format!("{}.sha256", older.display()),
+        format!("{}\n", sha256(&orig)),
     )
     .unwrap();
     fs::write(&newer, &conv).unwrap();
     fs::write(
-        format!("{}.md5", newer.display()),
-        format!("{}\n", md5(&conv)),
+        format!("{}.sha256", newer.display()),
+        format!("{}\n", sha256(&conv)),
     )
     .unwrap();
     set_mtime(&older, 1_700_000_000);
@@ -739,17 +743,17 @@ fn restore_picker_selects_newest_and_writes() {
 }
 
 #[test]
-fn restore_md5_mismatch_rejected() {
+fn restore_sha256_mismatch_rejected() {
     let Some(orig) = load_disk_image("netac") else {
         eprintln!("跳过: 真实备份不可用");
         return;
     };
     let runner = netac_runner(26);
-    let tmp = TmpDir::new("restore_md5");
+    let tmp = TmpDir::new("restore_sha256");
     let bakfile = tmp.0.join("broken.bin");
     fs::write(&bakfile, &orig).unwrap();
     fs::write(
-        tmp.0.join("broken.bin.md5"),
+        tmp.0.join("broken.bin.sha256"),
         "deadbeefdeadbeefdeadbeefdeadbeef\n",
     )
     .unwrap();
@@ -769,26 +773,26 @@ fn restore_md5_mismatch_rejected() {
     )
     .unwrap_err();
     assert_eq!(e.code, EXIT_BACKUP);
-    assert!(e.msg.contains("MD5"), "{}", e.msg);
+    assert!(e.msg.contains("SHA-256"), "{}", e.msg);
 }
 
 #[test]
-fn restore_accepts_standard_md5_sidecar_format_case_insensitively() {
+fn restore_accepts_standard_sha256_sidecar_format_case_insensitively() {
     let Some(orig) = load_disk_image("netac") else {
         eprintln!("跳过: 真实备份不可用");
         return;
     };
     let runner = netac_runner(26);
-    let tmp = TmpDir::new("restore_md5_standard_format");
+    let tmp = TmpDir::new("restore_sha256_standard_format");
     let bakfile = tmp.0.join(
         "disk26_122880000_vid0dd8_pid2005_disk&ven_netac&prod_onlydisk_onlyid1402259934_20260917_120000.bin",
     );
     fs::write(&bakfile, &orig).unwrap();
     fs::write(
-        format!("{}.md5", bakfile.display()),
+        format!("{}.sha256", bakfile.display()),
         format!(
             "{}  {}\n",
-            md5(&orig).to_uppercase(),
+            sha256(&orig).to_uppercase(),
             bakfile.file_name().unwrap().to_string_lossy()
         ),
     )
@@ -814,14 +818,14 @@ fn restore_accepts_standard_md5_sidecar_format_case_insensitively() {
 }
 
 #[test]
-fn restore_missing_md5_is_rejected() {
+fn restore_missing_sha256_is_rejected() {
     let Some(orig) = load_disk_image("netac") else {
         eprintln!("跳过: 真实备份不可用");
         return;
     };
     let runner = netac_runner(26);
-    let tmp = TmpDir::new("restore_missing_md5");
-    let bakfile = tmp.0.join("missing-md5.bin");
+    let tmp = TmpDir::new("restore_missing_sha256");
+    let bakfile = tmp.0.join("missing-sha256.bin");
     fs::write(&bakfile, &orig).unwrap();
     let img_path = tmp.0.join("disk.img");
     fs::write(&img_path, &orig).unwrap();
@@ -839,7 +843,7 @@ fn restore_missing_md5_is_rejected() {
     )
     .unwrap_err();
     assert_eq!(err.code, EXIT_BACKUP);
-    assert!(err.msg.contains(".md5"), "{}", err.msg);
+    assert!(err.msg.contains(".sha256"), "{}", err.msg);
     assert_eq!(fs::read(&img_path).unwrap(), orig);
 }
 
@@ -854,8 +858,8 @@ fn restore_explicit_backup_from_other_disk_is_rejected() {
     let bakfile = tmp.0.join("other-disk.bin");
     fs::write(&bakfile, &other).unwrap();
     fs::write(
-        tmp.0.join("other-disk.bin.md5"),
-        format!("{}\n", md5(&other)),
+        tmp.0.join("other-disk.bin.sha256"),
+        format!("{}\n", sha256(&other)),
     )
     .unwrap();
 
@@ -1015,8 +1019,8 @@ fn restore_refuses_if_disk_identity_changes_after_reopen() {
     );
     fs::write(&backup, &netac).unwrap();
     fs::write(
-        format!("{}.md5", backup.display()),
-        format!("{}\n", md5(&netac)),
+        format!("{}.sha256", backup.display()),
+        format!("{}\n", sha256(&netac)),
     )
     .unwrap();
     let mut prompt = ScriptPrompter::yes();

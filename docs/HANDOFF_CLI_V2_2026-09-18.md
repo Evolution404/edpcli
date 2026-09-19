@@ -108,13 +108,13 @@ Phase 4 本地门禁：
   - 相同 LBA0-12 输入；
   - 相同 onlyid/device_id/VID/PID/容量元数据；
   - 相同文件命名与 `_nopwd` 标记；
-  - 相同 MD5 sidecar；
+  - 相同 SHA-256 sidecar；
   - 相同 create-new 碰撞保护；
   - 相同 fsync + 目录持久化策略；
 - 新增只读契约测试：测试 runner 故意不提供卸载命令，`backup create` 仍成功，
   且无确认、无 reopen、无扇区写入；
 - 新增同源格式测试：手动备份与 apply 自动备份在同一时间/同一设备事实下生成
-  相同文件名、6656B 内容和 MD5；
+  相同文件名、6656B 内容和 SHA-256；
 - 新增跨平台 CLI 门禁：`backup create --disk <不存在目标>` 在所有平台均在写前拒绝。
 
 Phase 5 本地门禁：
@@ -138,7 +138,7 @@ Phase 5 本地门禁：
 - `backup restore <全局编号>` 会先按当前盘 onlyid 过滤该全局编号，编号指向其他盘时拒绝；
 - `backup restore <备份文件>` 允许用户重命名过的合法备份进入既有内容校验链，
   最终仍以当前盘与备份 LBA4 16B 身份标签做防串盘硬终验；
-- restore 的 MD5、免密快照阻断、reopen 后身份复核、prepare_write、原子写入/回滚路径
+- restore 的 SHA-256、免密快照阻断、reopen 后身份复核、prepare_write、原子写入/回滚路径
   均保持原安全语义；
 - 已删除旧 `backup_rm`、`backup_verify_select`、盘内编号解析与 onlyid 删除选择器实现。
 

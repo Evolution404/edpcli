@@ -53,10 +53,10 @@ fn synthetic_backup(dir: &TempDir) -> PathBuf {
     let data = vec![0u8; METADATA_IMAGE_LEN];
     fs::write(&path, &data).expect("write backup");
     fs::write(
-        edpcli::diskio::md5_sidecar_path(&path),
-        format!("{}\n", edpcli::md5::md5_hex(&data)),
+        edpcli::diskio::sha256_sidecar_path(&path),
+        format!("{}\n", edpcli::sha256::sha256_hex(&data)),
     )
-    .expect("write md5");
+    .expect("write sha256");
     path
 }
 

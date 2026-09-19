@@ -53,10 +53,10 @@ fn convert_golden_default_all_disks() {
         assert_eq!(r.crc, g.crc, "{}", key);
         assert_eq!(r.k0, g.k0, "{}", key);
         assert_eq!(r.lba9.is_none(), g.lba9_none, "{}", key);
-        assert_eq!(md5(&r.lba0), g.lba0, "{} LBA0", key);
-        assert_eq!(md5(&r.lba6), g.lba6, "{} LBA6", key);
-        assert_eq!(md5(&r.lba7), g.lba7, "{} LBA7", key);
-        assert_eq!(md5(&r.lba12), g.lba12, "{} LBA12", key);
+        assert_eq!(sha256(&r.lba0), g.lba0, "{} LBA0", key);
+        assert_eq!(sha256(&r.lba6), g.lba6, "{} LBA6", key);
+        assert_eq!(sha256(&r.lba7), g.lba7, "{} LBA7", key);
+        assert_eq!(sha256(&r.lba12), g.lba12, "{} LBA12", key);
     }
 }
 
@@ -71,10 +71,10 @@ fn convert_golden_size_gb_path() {
     let g = golden("aigo_size50");
     assert_eq!(r.share, g.share); // 8 扇对齐: 97,656,248
     assert_eq!(r.enc_start, g.enc_start);
-    assert_eq!(md5(&r.lba0), g.lba0, "LBA0");
-    assert_eq!(md5(&r.lba6), g.lba6, "LBA6");
-    assert_eq!(md5(&r.lba7), g.lba7, "LBA7");
-    assert_eq!(md5(&r.lba12), g.lba12, "LBA12");
+    assert_eq!(sha256(&r.lba0), g.lba0, "LBA0");
+    assert_eq!(sha256(&r.lba6), g.lba6, "LBA6");
+    assert_eq!(sha256(&r.lba7), g.lba7, "LBA7");
+    assert_eq!(sha256(&r.lba12), g.lba12, "LBA12");
 }
 
 #[test]
