@@ -168,6 +168,26 @@ fn is_interactive_terminal() -> bool {
     io::stdin().is_terminal() && io::stdout().is_terminal()
 }
 
+fn startup_elevation_argv(argv: &[String], elevated: bool) -> Option<Vec<String>> {
+    if elevated {
+        return None;
+    }
+    if argv.first().is_some_and(|arg| arg == "tui") {
+        Some(argv.to_vec())
+    } else {
+        // bare `edpcli` 由 cli 层路由到 TUI；跨越 sudo/UAC 边界时显式补上
+        // `tui`，避免 elevated child 因只剩内部哨兵而回落到普通 CLI 解析。
+        Some(vec!["tui".to_string()])
+    }
+}
+
+fn ensure_elevated_before_tui(argv: &[String]) {
+    if let Some(elevation_argv) = startup_elevation_argv(argv, crate::elevate::is_root()) {
+        crate::elevate::ensure_elevated(&elevation_argv);
+        unreachable!();
+    }
+}
+
 enum LoopExit {
     Done,
     Elevate(state::WriteIntent),
@@ -429,6 +449,12 @@ pub fn run() -> i32 {
     }
 
     let argv: Vec<String> = std::env::args().skip(1).collect();
+
+    // 在进入 raw mode / alternate screen 之前获取管理员权限。这样 macOS/Linux
+    // 直接在普通终端显示 sudo 密码提示，Windows 直接走 UAC；授权后一次进入
+    // 完整能力 TUI，不再等到写盘确认时退出界面再重启。
+    ensure_elevated_before_tui(&argv);
+
     let resume = match parse_resume_args(&argv) {
         Ok(value) => value,
         Err(message) => {
@@ -458,5 +484,18 @@ mod tests {
     #[test]
     fn tty_gate_is_purely_a_terminal_capability_check() {
         let _ = is_interactive_terminal();
+    }
+
+    #[test]
+    fn bare_tui_route_becomes_explicit_across_the_elevation_boundary() {
+        assert_eq!(
+            startup_elevation_argv(&[], false),
+            Some(vec!["tui".to_string()])
+        );
+        assert_eq!(
+            startup_elevation_argv(&["tui".to_string()], false),
+            Some(vec!["tui".to_string()])
+        );
+        assert_eq!(startup_elevation_argv(&[], true), None);
     }
 }
