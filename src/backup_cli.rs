@@ -5,8 +5,6 @@
 //! 明确的选择视图接口。
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::fs;
-use std::io;
 use std::path::{Path, PathBuf};
 
 use crate::backup_catalog;
