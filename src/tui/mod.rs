@@ -242,12 +242,33 @@ fn dispatch_nav_command(
                 (state.selected_device_disk(), state.selected_backup_path())
             {
                 state.begin_write_wizard(state::WriteKind::Restore, disk, Some(backup));
+            } else {
+                state.set_notice("恢复需要先在设备页选定目标 U 盘，再进入备份页选择备份。");
             }
             StateEffect::None
         }
         NavCommand::BeginBackupCreate => {
             if let Some(disk) = state.selected_device_disk() {
                 state.begin_write_wizard(state::WriteKind::BackupCreate, disk, None);
+            } else {
+                state.set_notice("创建备份需要先在设备页选定 U 盘。");
+            }
+            StateEffect::None
+        }
+        NavCommand::VerifyBackup => {
+            if let Some(path) = state.selected_backup_path() {
+                state.set_notice("正在后台校验当前备份…");
+                tasks.request_backup_verify(path, backup_dir.to_path_buf());
+            } else {
+                state.set_notice("当前没有可校验的备份。");
+            }
+            StateEffect::None
+        }
+        NavCommand::BeginBackupDelete => {
+            if let Some((path, expected_md5)) = state.selected_backup_delete_target() {
+                state.begin_backup_delete(path, expected_md5);
+            } else {
+                state.set_notice("当前备份缺少可固定的内容摘要，拒绝删除。");
             }
             StateEffect::None
         }
@@ -263,6 +284,8 @@ fn palette_action_to_nav(action: command::PaletteAction) -> NavCommand {
         command::PaletteAction::Apply => NavCommand::BeginApply,
         command::PaletteAction::Restore => NavCommand::BeginRestore,
         command::PaletteAction::BackupCreate => NavCommand::BeginBackupCreate,
+        command::PaletteAction::BackupVerify => NavCommand::VerifyBackup,
+        command::PaletteAction::BackupDelete => NavCommand::BeginBackupDelete,
         command::PaletteAction::Refresh => NavCommand::Refresh,
         command::PaletteAction::Help => NavCommand::Help,
         command::PaletteAction::Quit => NavCommand::Quit,
@@ -313,6 +336,20 @@ fn run_loop(resume: Option<state::WriteIntent>) -> io::Result<LoopExit> {
                 state.set_backup_scan_pending(true);
             }
         }
+        if let Some(result) = updates.backup_verify {
+            match result {
+                Ok(()) => state.set_notice("当前备份校验通过：大小与 MD5 正常。"),
+                Err(message) => state.set_notice(message),
+            }
+        }
+        if let Some(result) = updates.backup_delete {
+            let refresh_backups = result.is_ok();
+            state.finish_backup_delete(result);
+            if refresh_backups {
+                tasks.request_backup_scan(backup_dir.clone());
+                state.set_backup_scan_pending(true);
+            }
+        }
         if let Some(result) = updates.inspect {
             match result {
                 Ok(workspace) => state.replace_inspect(workspace),
@@ -329,6 +366,41 @@ fn run_loop(resume: Option<state::WriteIntent>) -> io::Result<LoopExit> {
 
         match ct_event::read()? {
             ct_event::Event::Key(key) => {
+                if state
+                    .backup_delete()
+                    .is_some_and(|delete| delete.stage == state::WizardStage::Confirm)
+                {
+                    match key.code {
+                        ct_event::KeyCode::Char(ch)
+                            if !key.modifiers.contains(ct_event::KeyModifiers::CONTROL) =>
+                        {
+                            state.push_backup_delete_confirmation(ch);
+                            continue;
+                        }
+                        ct_event::KeyCode::Backspace => {
+                            state.backspace_backup_delete_confirmation();
+                            continue;
+                        }
+                        ct_event::KeyCode::Enter => {
+                            if let Some((path, expected_md5)) =
+                                state.submit_backup_delete_confirmation()
+                            {
+                                tasks.request_backup_delete(
+                                    path,
+                                    expected_md5,
+                                    backup_dir.clone(),
+                                );
+                            }
+                            continue;
+                        }
+                        ct_event::KeyCode::Esc => {
+                            let _ = state.navigate(NavCommand::Escape, 1);
+                            continue;
+                        }
+                        _ => {}
+                    }
+                }
+
                 if state
                     .wizard()
                     .is_some_and(|wizard| wizard.stage == state::WizardStage::Confirm)
