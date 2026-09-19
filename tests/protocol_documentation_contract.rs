@@ -131,10 +131,13 @@ fn documentation_keeps_the_official_provisioning_chain_and_strict_rules() {
         "GPT_Partition",
         "overflow_marker(0x40245E2A)",
         "m_autoid / Autonum",
-        "NUL 后真实槽尾大量非零",
+        "同一个空字符串至少出现2种不同且非零的 post-NUL backing",
+        "同一个空 Office 字符串至少出现3种不同且非零的 post-NUL backing",
         "LBA3 opaque manufacturer/MP sector",
         "LBA8 static version/writeTime/reserved header",
         "LBA6 C-string slots have profile-dependent post-NUL backing bytes",
+        "writer-uninitialized backing",
+        "strcpy_s@0x1B9B0",
         "legacy MBR partition-table fragment",
         "LBA4 current writer machine-code node layout",
         "LBA12 v0x0206 hidden default-password file-key wrapping",
@@ -166,6 +169,10 @@ fn documentation_keeps_the_official_provisioning_chain_and_strict_rules() {
     assert!(
         DOC.contains("| LBA2 | 0 | 512 | 0 | 0.0% |"),
         "LBA2 GPT profile must remain PARTIAL until a positive real GPT sample exists"
+    );
+    assert!(
+        DOC.contains("| LBA6 | 300 | 212 | 0 | 58.6% |"),
+        "LBA6 progress must retain the closed autoid and Office post-NUL backing semantics"
     );
     assert!(
         DOC.contains("| LBA7 | 490 | 22 | 0 | 95.7% |"),

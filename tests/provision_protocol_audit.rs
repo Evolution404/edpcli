@@ -547,6 +547,7 @@ fn lba6_offset_1ca_is_inside_gserial_slot_not_a_standalone_state_field() {
 fn lba6_autoid_matches_lba8_autonum_but_fixed_slot_tail_is_not_semantic_padding() {
     let mut checked = 0usize;
     let mut saw_nonzero_after_nul = false;
+    let mut empty_autoid_backing = std::collections::BTreeSet::new();
 
     for entry in fs::read_dir(FIXTURE_DIR).expect("protocol fixtures") {
         let path = entry.expect("backup entry").path();
@@ -567,6 +568,9 @@ fn lba6_autoid_matches_lba8_autonum_but_fixed_slot_tail_is_not_semantic_padding(
         let autoid = &slot[..nul];
         if nul < slot.len() && slot[nul + 1..].iter().any(|byte| *byte != 0) {
             saw_nonzero_after_nul = true;
+        }
+        if autoid.is_empty() && nul < slot.len() {
+            empty_autoid_backing.insert(slot[nul + 1..].to_vec());
         }
 
         let inspect_meta = InspectMeta {
@@ -591,6 +595,10 @@ fn lba6_autoid_matches_lba8_autonum_but_fixed_slot_tail_is_not_semantic_padding(
     assert!(
         saw_nonzero_after_nul,
         "real fixtures must preserve evidence that bytes after the m_autoid NUL are not semantic zero padding"
+    );
+    assert!(
+        empty_autoid_backing.len() >= 2,
+        "the same empty m_autoid string must retain multiple distinct post-NUL backing profiles"
     );
 }
 
@@ -617,6 +625,7 @@ fn lba6_owner_office_and_label_slots_have_official_fixed_storage_boundaries() {
     let mut owner_tail = false;
     let mut office_tail = false;
     let mut label_tail = false;
+    let mut empty_office_backing = std::collections::BTreeSet::new();
 
     for entry in fs::read_dir(FIXTURE_DIR).expect("protocol fixtures") {
         let path = entry.expect("backup entry").path();
@@ -641,6 +650,13 @@ fn lba6_owner_office_and_label_slots_have_official_fixed_storage_boundaries() {
             if let Some(nul) = slot.iter().position(|byte| *byte == 0) {
                 *seen_tail |= slot[nul + 1..].iter().any(|byte| *byte != 0);
             }
+        }
+        let office_nul = office
+            .iter()
+            .position(|byte| *byte == 0)
+            .unwrap_or(office.len());
+        if office_nul == 0 {
+            empty_office_backing.insert(office[1..].to_vec());
         }
 
         let inspect_meta = InspectMeta {
@@ -669,6 +685,10 @@ fn lba6_owner_office_and_label_slots_have_official_fixed_storage_boundaries() {
     assert!(
         owner_tail && office_tail && label_tail,
         "real fixtures must preserve post-NUL backing evidence in all three fixed storage slots"
+    );
+    assert!(
+        empty_office_backing.len() >= 3,
+        "the same empty m_UsbOffice string must retain multiple distinct post-NUL backing profiles"
     );
 }
 

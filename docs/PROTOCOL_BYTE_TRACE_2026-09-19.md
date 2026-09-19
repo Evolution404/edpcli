@@ -371,7 +371,7 @@ post-XOR 写回 `+0x45/+0x46`。历史 raw-zero 实盘仅作为兼容读取 prof
 | LBA3 | 0 | 512 | 0 | 0.0% |
 | LBA4 | 36 | 476 | 0 | 7.0% |
 | LBA5 | 512 | 0 | 0 | 100.0% |
-| LBA6 | 220 | 292 | 0 | 43.0% |
+| LBA6 | 300 | 212 | 0 | 58.6% |
 | LBA7 | 490 | 22 | 0 | 95.7% |
 | LBA8 | 86 | 426 | 0 | 16.8% |
 | LBA9 | 54 | 458 | 0 | 10.5% |
@@ -382,8 +382,8 @@ post-XOR 写回 `+0x45/+0x46`。历史 raw-zero 实盘仅作为兼容读取 prof
 
 当前总计：
 
-- **COMPLETE：2409B / 6656B = 36.2%**
-- **PARTIAL：4247B / 6656B = 63.8%**
+- **COMPLETE：2489B / 6656B = 37.4%**
+- **PARTIAL：4167B / 6656B = 62.6%**
 - **UNKNOWN：0B / 6656B = 0.0%**
 
 LBA11 已完整闭合为 512B COMPLETE。此前卡住的后半 252B 不是“某型号盘偶尔使用
@@ -448,8 +448,8 @@ DWARF 中恢复出的原始声明文件/行号与本地函数地址：
 | LBA6 | 0x000–0x03F | PARTIAL | Dept slot | `BuildSector6` 从 UsbWriteParam/UsbLabelParam 写入 | `ReadSector6` 取回 | 多盘真实部门字段可解析 | 上游业务来源明确，所有字节语义仍未逐个闭合 |
 | LBA6 | 0x040–0x04F | COMPLETE | UsbMainBSec static template material | Windows `sub_10013FD0` 先从 `UsbMainBSec@0x100E7220` 复制整扇；Linux `BuildSector6@0x1CAAC` 同样从 `UsbMainBSec@0x22BB40` 复制 sector_size；本16B没有后续 overlay | Windows `sub_100152A0` 与 Linux `ReadSector6@0x1E2CC` 都在字段解析前对 raw `+0x000..0x1FB` 计算并校验 SAFE6 checksum，不匹配即拒绝；字段 parser 不另解释本段 | 严格22份原始盘解密后22/22精确等于官方模板 `f0 ac 3c 00 74 fc bb 07 00 b4 0e cd 10 eb f2 88`；CI含独立SanDisk锁定 | fixed producer + whole-sector integrity consumer + real-device evidence，无已知 profile 分叉，16B COMPLETE |
 | LBA6 | 0x050–0x06F | PARTIAL | User/Owner fixed 32B slot | Windows/Linux `BuildSector6` 在 owner 长度<32时固定复制 `UsbWriteParam.m_usbowner[0..32]`；长 owner 在本槽写 `0x40245E2A` marker + 前28B，continuation 落到 LBA9+0x100 | Windows/Linux `ReadSector6` 检查 marker；普通路径按C字符串恢复 `UsbLabelParam.m_usbowner`，长值从 LBA9 continuation 重组 | committed原始夹具的 LBA6 C-string 与 LBA8 `User=` 一致；实盘在首个NUL后存在非零 backing bytes | 32B物理边界和字符串/overflow语义闭合，但 post-NUL backing 不具稳定字段语义，整体PARTIAL |
-| LBA6 | 0x070–0x07F | PARTIAL | m_autoid / Autonum fixed copy slot | `BuildSector6@diskfile.cpp:672` 固定复制 writer `m_autoid[16]` | `ReadSector6@diskfile.cpp:1005` 以 C 字符串复制到 `UsbLabelParam.m_autoid`；`BuildSector8` 再序列化为 `Autonum=` | 22/22 LBA6 C-string 与 LBA8 Autonum 完全相同；但 NUL 后真实槽尾大量非零 | 字符串语义已闭合，固定槽尾不是协议零 padding，整16B仍不能算 COMPLETE |
-| LBA6 | 0x080–0x0BF | PARTIAL | m_UsbOffice fixed 64B slot | Windows `sub_10013FD0` / Linux `BuildSector6` 都固定复制 `UsbWriteParam.m_UsbOffice[64]` 到 `out+0x80` | Linux `ReadSector6@0x1E6A3..` 明确 `strcpy_s(UsbLabelParam.m_UsbOffice,64,decoded+0x80)`；Windows reader 同构 | 22份原始盘存在空/非空 Office C-string，并保留多种 post-NUL backing profile；CI门禁保留非零尾反例 | 物理槽与 C-string consumer 已定界；post-NUL backing 未闭合，PARTIAL |
+| LBA6 | 0x070–0x07F | COMPLETE | `m_autoid[16]` / Autonum fixed slot, including nonsemantic post-NUL backing | Linux DWARF 定义 `UsbWriteParam.m_autoid char[16]@+0x259`；`UsbWriteParam(UsbLabelParam&)@0x1C362` 调自带 `strcpy_s@0x1B9B0`，该实现只复制到首个 NUL、**不清剩余 capacity**，且构造器入口没有先 memset 整对象；`BuildSector6` 随后固定 memcpy 完整16B 到 `LBA6+0x70` | `ReadSector6` 只用 `strcpy_s(...,16,decoded+0x70)` 消费首个 NUL 前的 C-string；`BuildSector8` 将该字符串序列化为 `Autonum=`；同时 LBA6 前508B checksum 覆盖并保护包括 post-NUL backing 在内的全部物理字节 | 22/22 LBA6 C-string 与 LBA8 Autonum 相同；committed originals 中同一个空字符串至少出现2种不同且非零的 post-NUL backing，直接证明尾字节不属于隐藏字符串语义 | 16B 的逐字节行为已闭合：前缀是 C-string，NUL 后是明确的 **writer-uninitialized backing**；值不固定是协议实现行为本身，不是未知字段，因此整槽 COMPLETE |
+| LBA6 | 0x080–0x0BF | COMPLETE | `m_UsbOffice[64]` fixed slot, including nonsemantic post-NUL backing | Linux DWARF 定义 `UsbWriteParam.m_UsbOffice char[64]@+0x198`；copy-constructor 用同一个不清尾 `strcpy_s@0x1B9B0` 写该数组且不预清对象；Windows/Linux `BuildSector6` 再固定复制完整64B到 `out+0x80` | Linux `ReadSector6@0x1E6A3..` 明确 `strcpy_s(UsbLabelParam.m_UsbOffice,64,decoded+0x80)`，只解释首个 NUL 前字符串；Windows reader 同构；整扇 checksum 仍覆盖这64B的全部物理值 | 22份原始盘存在空/非空 Office；committed originals 中同一个空 Office 字符串至少出现3种不同且非零的 post-NUL backing profile，排除隐藏字段/固定 padding 解释 | 64B 槽同样是 **writer-uninitialized backing**：producer bug、C-string consumer、完整性消费和多实盘 profile 均闭合；post-NUL 值允许不稳定但无第二业务字段语义，故整槽 COMPLETE |
 | LBA6 | 0x0C0–0x0FF | COMPLETE | UsbMainBSec static bootstrap/template material | Windows/Linux BuildSector6 均先整扇复制官方 `UsbMainBSec`，本64B后续无字段覆盖 | 两端 ReadSector6 的 SAFE6 checksum 在字段解析前覆盖整个前508B；本64B无独立业务字段读取 | 严格22份原始盘22/22逐字节等于官方模板；CI含独立SanDisk精确锁定 | fixed producer + checksum consumer + 22盘闭合，64B COMPLETE |
 | LBA6 | 0x100–0x103 | PARTIAL | `CLabelManage::m_crcUsbID[0]` = CRC32(device_id) | Linux DWARF 明确 `m_crcUsbID[2]@CLabelManage+0x24`；Linux ctor/`Init` 都执行 `CRC32(0,m_strUID.c_str(),m_strUID.length()) -> +0x24`；Windows `sub_10013D20/sub_10013B80` 同构；两端 `BuildSector6` 都把该数组8B复制到扇区 +0x100 | 同一个运行时成员 `m_crcUsbID[0]` 是 LBA7 rolling-XOR 与 LBA8/LBA12 加解密的4B key；但 current `ReadSector6` 不读取持久化在 LBA6 的这份副本，Windows current CheckLabel 的物理副本检查又位于不可达 legacy fallback | 严格22份含独立SanDisk：22/22 `u32(+0x100)==CRC32(device_id)` 且全部非零；CI门禁 `lba6_crc_usb_id_pair_is_device_id_crc_and_doubled_guard` | 字段名、producer、值算法、同源运行时用途均闭合；但缺对“LBA6这4B副本”的活跃 consumer，严格口径仍 PARTIAL |
 | LBA6 | 0x104–0x107 | PARTIAL | `CLabelManage::m_crcUsbID[1]` = 2 × CRC32(device_id) mod 2^32 | Linux ctor/`Init` 直接 `m_crcUsbID[1]=m_crcUsbID[0]*2`；Windows两套构造路径同样 `object+0x48=object+0x44<<1`；`BuildSector6` 连续复制8B | Windows `CheckLabel/sub_100152A0`、`cemsudisk`、`vrvaud_c` 都保留 `+0x100!=0 && +0x104==(+0x100<<1)` 的 legacy 一致性校验，并可映射到 `ERROR_USBVERSIONNOMATCH(11)`/`ERROR_SYSLABELMISTMATCH(13)`；但三处 current 构建均被恒真 `if(1)`/机器码 `mov 1; test; je` 隔离，当前不可达 | 严格22份：22/22 `u32(+0x104)==u32(+0x100).wrapping_mul(2)`；独立SanDisk同样吻合 | 可以命名为 doubled CRC guard / legacy compatibility check material，但当前没有活跃 consumer，保持 PARTIAL，不把死代码当 COMPLETE 证据 |
