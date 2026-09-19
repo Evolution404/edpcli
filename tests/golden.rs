@@ -256,9 +256,8 @@ fn looks_nopwd_wrong_device_id_negative() {
 
 #[test]
 fn looks_nopwd_core_signals_required() {
-    // MBR / LBA12 任一恢复原盘即判否(主信号)。
-    // LBA6 0x1CA 实测仅部分型号有区分度(netac/lexar 原盘本就=128480,
-    // aigo 原盘=20417), 有区分度的型号恢复 LBA6 也须判否。
+    // MBR / LBA12 任一恢复原盘即判否。LBA6 +0x1CA 位于 GSerial 固定槽内，
+    // 不是独立 nopwd 状态字段，因此恢复原盘 LBA6 不应改变检测结果。
     let (Some((img, did)), Some(orig_netac), Some((img_a, did_a)), Some(orig_aigo)) = (
         converted_image("netac"),
         load_disk_image("netac"),
@@ -281,7 +280,7 @@ fn looks_nopwd_core_signals_required() {
     let mut mixed_a = img_a;
     mixed_a[6 * SECTOR..7 * SECTOR].copy_from_slice(&orig_aigo[6 * SECTOR..7 * SECTOR]);
     assert!(
-        !looks_nopwd(&read_fn_of(&mixed_a), &did_a).unwrap(),
-        "aigo LBA6 恢复原盘后仍误判为免密"
+        looks_nopwd(&read_fn_of(&mixed_a), &did_a).unwrap(),
+        "LBA6 GSerial/BeiZhu 槽不应参与 nopwd 状态判定"
     );
 }

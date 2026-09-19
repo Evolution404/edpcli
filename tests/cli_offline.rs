@@ -305,7 +305,7 @@ fn apply_original_disk_not_blocked_and_dry_run_no_write() {
     assert_eq!(code, EXIT_OK);
     let after = fs::read(&img_path).unwrap();
     assert_lbas(&after, &orig, &[1, 2, 3, 4, 5, 8, 10, 11]); // 非目标扇区不动
-                                                             // 5 个目标扇区 == 合成免密镜像(注意 netac 的 LBA6 转换是恒等: 0x1CA 原本即 128480)
+                                                             // 5 个目标扇区 == 合成免密镜像；LBA6 仍保留历史兼容补丁。
     assert_lbas(&after, &conv, &[0, 6, 7, 9, 12]);
     // dry-run: 不写盘
     let tmp2 = TmpDir::new("apply_dry");

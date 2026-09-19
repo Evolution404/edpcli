@@ -37,11 +37,16 @@ LBA12 必须继续按“**结构已知 != 语义已知**”的严格口径推进
   所以 `+0x02/+0x05` 属于对应密码状态组，但准确语义仍需追。
 
 下一位 AI 优先顺序：
-1. 追 `NeedDisturb(+0x10)` 在旧版挂载库/驱动中的真正消费路径；
-2. 追 pass-info `+0x02/+0x05/+0x0A/+0x0B..0x0D` 的初始化和运行时消费者；
-3. 追 LBA4 `onlyID2Nd` 的生成源（对象 `+0x55C`）；
-4. 追 LBA6 `0x1C0..0x1ED` 的格式代际字段；
-5. 再回到 LBA8/LBA9/LBA10 未闭合区域。
+1. LBA6 当前 writer 边界已闭合：`0x1C0..0x1CF=GSerial`、
+   `0x1D0..0x1DF=BeiZhu`、`0x1E0..0x1EF=模板/旧版扩展`、
+   `0x1F0..0x1F3=m_encrypt`；继续只追 2/22 旧格式非零扩展来源。
+   `+0x1CA` 已证实位于 GSerial 槽内，不得再当独立状态字段。
+2. 继续追 LBA8 LLGB/EKTF 的动态字段和 writer 来源；
+3. 继续追 LBA12 `NeedDisturb(+0x10)` 的旧版正向消费者，以及 pass-info
+   `+0x0A/+0x0C/+0x0D` 的跨组件消费；
+4. LBA4 `OnllyID2Nd/HSerialCRC[5]` 已恢复官方结构；继续追非当前 writer
+   profile 的 HSerialCRC 上游；
+5. 回到 LBA0/LBA3/LBA7/LBA11 的剩余非 canonical / 代际差异。
 
 每得到一批闭合结论，都要同时更新
 `docs/PROVISION_PROTOCOL_AUDIT_2026-09-19.md` 和

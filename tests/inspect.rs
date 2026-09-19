@@ -50,6 +50,24 @@ fn lba6_reports_safe6_checksum_and_identity_fields() {
         .fields
         .iter()
         .any(|f| f.label == "校验和" && f.style == FieldStyle::Checksum));
+    assert!(v
+        .fields
+        .iter()
+        .any(|f| f.label == "m_usbGSerial 槽" && f.start == 0x1c0 && f.end == 0x1d0));
+    assert!(v
+        .fields
+        .iter()
+        .any(|f| f.label == "BeiZhu 槽" && f.start == 0x1d0 && f.end == 0x1e0));
+    assert!(v
+        .fields
+        .iter()
+        .any(|f| f.label == "模板/版本扩展区" && f.start == 0x1e0 && f.end == 0x1f0));
+    assert!(v
+        .fields
+        .iter()
+        .any(|f| f.label == "m_encrypt" && f.start == 0x1f0 && f.end == 0x1f4));
+    assert!(!v.fields.iter().any(|f| f.label == "模板值"));
+    assert!(!v.fields.iter().any(|f| f.label == "注册标志"));
 }
 
 #[test]

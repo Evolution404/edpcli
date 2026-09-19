@@ -72,6 +72,14 @@ fn generated_image_is_structurally_complete_nopwd_metadata() {
     assert_eq!(&lba4.decoded[0x39..0x3d], b"LLGB");
 
     let lba6 = analyze_sector(6, sector(bytes, 6), &meta);
+    assert_eq!(&lba6.decoded[0x1c0..0x1c8], b"322CA28A");
+    assert_eq!(lba6.decoded[0x1c8], 0);
+    assert!(lba6.decoded[0x1c9..0x1d0].iter().all(|byte| *byte == 0));
+    assert!(lba6.decoded[0x1d0..0x1f0].iter().all(|byte| *byte == 0));
+    assert_eq!(
+        u32::from_le_bytes(lba6.decoded[0x1f0..0x1f4].try_into().unwrap()),
+        1
+    );
     assert!(lba6
         .fields
         .iter()

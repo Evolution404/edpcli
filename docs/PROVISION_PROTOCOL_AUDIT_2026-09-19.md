@@ -91,7 +91,56 @@ Windows `sub_10013fd0` 与 Linux `CLabelManage::BuildSector6(UsbWriteParam&, cha
 - `0x1F0..0x1F3 <- m_encrypt`（低字节布尔值扩成 DWORD）；
 - `0x1E0..0x1EF` 当前 writer 没有显式覆盖，只能来自模板或其它版本/宿主后处理。
 
-真实参考样本也支持这种拆分：多数样本 `0x1E0..0x1EF` 保持模板零，但 Aigo U335 的旧形态在 `0x1E0..0x1EC` 存在非零分区相关材料。因此旧实现把 `0x1D4..0x1ED` 整体称为一个“未知清零区”过粗；新盘 Provision 必须分别建模 `GSerial`、`BeiZhu` 与 `0x1E0..0x1EF` 版本扩展区。
+进一步核对 Windows 静态 `UsbMainBSec` 模板后，旧的
+`0x1CA=128480` 解释可以撤销：
+
+- 模板 `+0x1BE..+0x1CD` 本身就是标准 16B MBR partition entry：
+  `status=0, type=0x07, start_lba=63, sector_count=128480`；
+- 模板 `+0x1FE..+0x1FF = 55 AA`，并含标准 MBR boot code / 错误文本；
+- 因而模板 `+0x1CA` 恰好只是这个 MBR entry 的 `sector_count` 字段位置；
+- 但 BuildSector6 随后会把 `0x1C0..0x1CF` 整个 16B 区覆盖成
+  `m_usbGSerial[0..14] + NUL`。所以最终盘面上的 `+0x1CA`
+  已不再是模板 MBR 字段，而只是 **GSerial 固定槽内第 10..13 字节**。
+
+22 份原始参考样本进一步直接否定“`+0x1CA` 是独立状态 DWORD”：
+
+- 14/22：`u32@+0x1CA = 128480`；
+- 2/22：`u32@+0x1CA = 20417`；
+- 6/22：`u32@+0x1CA = 0x34314437`，小端字节就是字符串
+  `"7D14"`，来自 `"322CA28A-D7D144"` 的中间四个 ASCII 字节。
+
+因此同一 offset 同时出现“模板几何值 / 另一几何值 / ASCII 文本”不是协议多态，
+而是**错误地把字符串槽中的四个字节当整数解释**。
+
+当前 reader 也支持这个结论：
+
+- Linux `ReadSector6` 把 `sector+0x1C0` 当 C 字符串，用于 GSerial 前缀匹配；
+- `sector+0x1D0` 直接按字符串读回 `UsbLabelParam.BeiZhu`；
+- 没有把 `+0x1CA` 作为整数读取，也没有发现 `0x1E0..0x1EF`
+  的当前业务消费者。
+
+Windows 新注册路径还解释了为何 NUL 后会出现看似“有规律”的尾字节：
+`RegsiterUsb` 的本地写参数对象没有先整体清零，`sub_100139f0`
+使用 strcpy_s 风格函数只复制到 NUL，而 BuildSector6 随后固定复制 15B
+GSerial / 15B BeiZhu。**NUL 后尾字节没有稳定业务语义，可能保留对象尾部残值。**
+因此它们不能继续拆成“模板值”“状态值”等伪字段。
+
+全量原始样本当前分布：
+
+- GSerial C 字符串：
+  - 16/22 为 `"322CA28A"`；
+  - 6/22 为 `"322CA28A-D7D144"`；
+  - 在可解析 LLGB 的样本中都与 LBA8 GLab 前缀一致；
+- `0x1E0..0x1EF`：20/22 为模板零，2/22（Aigo U335 旧形态 +
+  SanDisk 原始盘）存在旧格式非零材料；
+- `u32@0x1F0`：22/22 均为 1；官方 writer 字段名是 `m_encrypt`，
+  不能再标成“注册标志”。
+
+因此旧免密转换器里的 `0x1CA=128480`、`0x1D4..0x1EC=0`
+只能保留为**历史兼容 patch recipe**，不能再进入新盘 Provision 的协议模型。
+新盘 canonical profile 现在按当前 writer 边界确定性生成：
+`GSerial="322CA28A" + NUL + zero tail`、空 BeiZhu、`0x1E0..0x1EF=0`、
+`m_encrypt=1`；不模拟 writer 的未初始化尾字节。
 
 ### LBA8：加密长度由 LLGB +0x04 决定，不是固定 368B
 

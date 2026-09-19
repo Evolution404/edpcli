@@ -3,7 +3,8 @@
 //!
 //! 原理(2026-08-27 定案, 内网实测成功):
 //!     LBA0  : MBR 分区1 → type=0x07 @63 × Share扇数(数据区直挂, 系统原生挂载)
-//!     LBA6  : 0x1CA=128,480 + 0x1D4-0x1ED 清零, 身份字段保留, 重算校验和
+//!     LBA6  : 保留历史兼容补丁并重算校验和（逆向已确认 0x1CA/0x1D4
+//!             分别落在 GSerial/BeiZhu 固定槽内，不是独立协议字段）
 //!     LBA7  : EDPF 2条版本2 [Share@63, type4指针(原盘保留)] + 表尾终止符保留
 //!     LBA12 : EDPF 2条版本2 + 表尾终止符保留 + 尾部144B原盘保留
 //!     LBA9  : 非零则清零(EETU)
@@ -23,8 +24,11 @@ pub const EDPF_ENC_LEN: usize = 368; // LBA12 前 368B A6B0 加密, 后 144B 不
 pub const E7: usize = 0x40; // entry stride: LBA7=64B
 pub const E12: usize = 0x60; // entry stride: LBA12=96B
 pub const PWD_CRC: u32 = 0x0429735D; // CRC32_bare("0000aaaa") 免密盘默认密码
-pub const NOPWD_LBA6_1CA: u32 = 128480; // 免密盘 LBA6 0x1CA 模板默认值
-pub const LBA6_CLEAR: (usize, usize) = (0x1D4, 0x1ED); // LBA6 清零区间(含 0x1EC)
+                                     // Legacy in-place conversion recipe only. Reverse audit shows +0x1CA is inside
+                                     // the fixed m_usbGSerial slot, while +0x1D4 is inside BeiZhu; neither is a
+                                     // standalone SAFE6 state field. New-disk Provision must not use these values.
+pub const NOPWD_LBA6_1CA: u32 = 128480;
+pub const LBA6_CLEAR: (usize, usize) = (0x1D4, 0x1ED);
 
 /// 扇区读取抽象(lba → 512B), 真盘/镜像/备份文件各提供实现。
 pub type ReadFn<'a> = &'a dyn Fn(u32) -> EdpCliResult<Vec<u8>>;
@@ -231,20 +235,13 @@ fn hex4(b: &[u8]) -> String {
 // ══════════════════════════════════════════════════════════════════
 // 3. 已改造(免密)盘检测
 // ══════════════════════════════════════════════════════════════════
-/// 已是免密盘? LBA6 / MBR / LBA12 三处信号须同时成立(缺一即否):
-///   LBA6  解密后 0x1CA 已是免密模板值 128480 (辅助信号: 实测 netac/lexar
-///         原盘本就=128480 无区分度, 仅 aigo 原盘=20417 不同)
-///   MBR   分区1 = type=0x07 @LBA63 带 55AA (原盘实测为 0x0e)
+/// 已是免密盘? 由 MBR + LBA12 两处独立主信号共同确认:
+///   MBR   分区1 = type=0x07 @LBA63 带 55AA
 ///   LBA12 以 device_id 派生 key 解密后: entry0=Share(type2,@63,active=1,enc=1),
 ///         entry1=Encrypt指针(type4,active=1), entry2 区已清零 (主信号:
 ///         原盘恒为 3 条 EDPF, entry0 enc=0, entry2 type4/active=0;
 ///         注意 aigo 原盘 entry0 也是 type=2@63, 故不能只看 type/start)
 pub fn looks_nopwd(read: ReadFn, device_id: &str) -> EdpCliResult<bool> {
-    let raw6 = read_sector(read, 6)?;
-    let dec6 = lba6_decode(&raw6);
-    if u32_at(&dec6, 0x1CA) != NOPWD_LBA6_1CA {
-        return Ok(false);
-    }
     let mbr = read_sector(read, 0)?;
     if !(mbr[0x1BE + 4] == 0x07
         && u32_at(&mbr, 0x1BE + 8) == 63
@@ -462,7 +459,7 @@ pub fn convert(
                 crate::ui::TableCell::left("LBA6", crate::ui::Tone::Green),
                 crate::ui::TableCell::left("盘标签", crate::ui::Tone::BoldCyan),
                 crate::ui::TableCell::left(
-                    "0x1CA=128480，清 25B，重算校验和",
+                    "兼容旧免密改造补丁，重算 SAFE6 校验和",
                     crate::ui::Tone::Plain,
                 ),
             ],

@@ -227,6 +227,19 @@ fn hex_bytes(bytes: &[u8]) -> String {
         .join(" ")
 }
 
+fn fixed_c_slot_value(bytes: &[u8]) -> String {
+    let nul = bytes.iter().position(|byte| *byte == 0);
+    let text_end = nul.unwrap_or(bytes.len());
+    let text = text_value(&bytes[..text_end]);
+    let tail_start = nul.map_or(bytes.len(), |index| index + 1);
+    let tail = &bytes[tail_start..];
+    if tail.iter().any(|byte| *byte != 0) {
+        format!("{text}；NUL 后原始字节={}", hex_bytes(tail))
+    } else {
+        text
+    }
+}
+
 fn lba7_k0(crc: u32) -> u32 {
     (crc & 0xffff) ^ (crc >> 16)
 }
@@ -410,32 +423,31 @@ fn parse_lba6(
     }
     fields.push(field(
         0x1c0,
-        0x1c8,
-        "GLAB 前缀",
-        text_value(&dec[0x1c0..0x1c8]),
-        FieldStyle::Magic,
+        0x1d0,
+        "m_usbGSerial 槽",
+        fixed_c_slot_value(&dec[0x1c0..0x1d0]),
+        FieldStyle::Identity,
     ));
-    let v1ca = u32_at(&dec, 0x1ca).unwrap_or(0);
     fields.push(field(
-        0x1ca,
-        0x1ce,
-        "模板值",
-        format!("{} (0x{v1ca:08X})", v1ca),
+        0x1d0,
+        0x1e0,
+        "BeiZhu 槽",
+        fixed_c_slot_value(&dec[0x1d0..0x1e0]),
+        FieldStyle::Text,
+    ));
+    fields.push(field(
+        0x1e0,
+        0x1f0,
+        "模板/版本扩展区",
+        hex_bytes(&dec[0x1e0..0x1f0]),
         FieldStyle::Flag,
     ));
-    let flagv = dec[0x1f0];
+    let encrypt = u32_at(&dec, 0x1f0).unwrap_or(0);
     fields.push(field(
         0x1f0,
-        0x1f1,
-        "注册标志",
-        format!(
-            "0x{flagv:02X} {}",
-            if flagv == 1 {
-                "SAFE6 已注册"
-            } else {
-                "未注册/其他"
-            }
-        ),
+        0x1f4,
+        "m_encrypt",
+        format!("{encrypt} (0x{encrypt:08X})"),
         FieldStyle::Flag,
     ));
     let stored = u32_at(raw, 0x1fc).unwrap_or(0);
@@ -450,7 +462,9 @@ fn parse_lba6(
         ),
         FieldStyle::Checksum,
     ));
-    notes.push("LBA6：前 508B 使用 rolling XOR K0=0x4DAA，最后 4B 校验和保持明文。".into());
+    notes.push(
+        "LBA6：前 508B 使用 rolling XOR K0=0x4DAA，最后 4B 校验和保持明文。当前 writer 把 0x1C0..0x1CF / 0x1D0..0x1DF 分别作为固定 16B GSerial / BeiZhu 槽；NUL 后字节不能按独立字段解释。".into(),
+    );
     dec
 }
 

@@ -6,6 +6,9 @@ pub struct ProvisionProfile {
     version: u32,
     glab: &'static str,
     autonum: &'static str,
+    safe6_gserial: &'static str,
+    safe6_beizhu: &'static str,
+    safe6_encrypt: bool,
     lba4_profile_word: [u8; 4],
     lba7_material: [u8; 16],
     lba12_material: [u8; 24],
@@ -20,6 +23,9 @@ impl ProvisionProfile {
             version: 1,
             glab: "322CA28A-D7D1448B-DCE2CED9",
             autonum: "YD000001",
+            safe6_gserial: "322CA28A",
+            safe6_beizhu: "",
+            safe6_encrypt: true,
             lba4_profile_word: [0x78, 0xad, 0x17, 0xa0],
             lba7_material: [
                 0x5d, 0x73, 0x29, 0x04, 0x97, 0xbc, 0x69, 0xf1, 0xec, 0x0f, 0x75, 0x79, 0xe4, 0xdb,
@@ -48,6 +54,18 @@ impl ProvisionProfile {
 
     pub fn autonum(&self) -> &'static str {
         self.autonum
+    }
+
+    pub(crate) fn safe6_gserial(&self) -> &'static str {
+        self.safe6_gserial
+    }
+
+    pub(crate) fn safe6_beizhu(&self) -> &'static str {
+        self.safe6_beizhu
+    }
+
+    pub(crate) fn safe6_encrypt(&self) -> bool {
+        self.safe6_encrypt
     }
 
     pub(crate) fn lba4_profile_word(&self) -> [u8; 4] {

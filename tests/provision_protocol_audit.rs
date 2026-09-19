@@ -9,7 +9,7 @@ use std::fs;
 
 use common::FIXTURE_DIR;
 use edpcli::common::{METADATA_IMAGE_LEN, SECTOR};
-use edpcli::crypto::{a6b0_full, a7f0_full, crc32_bare, xor_rolling};
+use edpcli::crypto::{a6b0_full, a7f0_full, crc32_bare, lba6_decode, xor_rolling};
 use edpcli::diskio::{parse_backup_name, BackupMeta};
 use edpcli::inspect::InspectMeta;
 use edpcli::metainfo::ownership_from_lba8;
@@ -76,6 +76,38 @@ const NETAC_B: &str =
     "disk6_122880000_vid0dd8_pid2005_disk&ven_netac&prod_onlydisk_onlyid3069787975_20260910_172525.bin";
 const LEXAR: &str =
     "disk4_243625984_vid21c4_pid0cd1_disk&ven_lexar&prod_usb_flash_drive_onlyid3164177653_20260827_221910.bin";
+
+#[test]
+fn lba6_offset_1ca_is_inside_gserial_slot_not_a_standalone_state_field() {
+    let mut values = std::collections::BTreeSet::new();
+    for entry in fs::read_dir(FIXTURE_DIR).expect("protocol fixtures") {
+        let path = entry.expect("backup entry").path();
+        if path.extension().and_then(|ext| ext.to_str()) != Some("bin") {
+            continue;
+        }
+        let name = path.file_name().unwrap().to_str().unwrap();
+        if parse_reference_backup_name(name).is_none() {
+            continue;
+        }
+        let image = fs::read(&path).expect("fixture bytes");
+        let plain = lba6_decode(sector(&image, 6));
+        assert_eq!(
+            &plain[0x1c0..0x1c8],
+            b"322CA28A",
+            "unexpected GSerial prefix: {name}"
+        );
+        values.insert(u32_le(&plain, 0x1ca));
+    }
+
+    assert!(values.contains(&20_417));
+    assert!(values.contains(&128_480));
+    assert!(
+        values
+            .iter()
+            .any(|value| ![20_417, 128_480].contains(value)),
+        "real fixtures must retain an ASCII-overlap value at +0x1CA"
+    );
+}
 
 #[test]
 fn committed_blank_sector_evidence_matches_real_images() {

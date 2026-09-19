@@ -2,7 +2,6 @@ use encoding_rs::GBK;
 
 use crate::common::SECTOR;
 use crate::crypto::{a7f0_full, crc32_bare, lba6_checksum, xor_rolling, LBA6_K0};
-use crate::sectors::{LBA6_CLEAR, NOPWD_LBA6_1CA};
 
 use super::{ProvisionImage, ProvisionSpec, PROVISION_IMAGE_LEN};
 
@@ -148,11 +147,19 @@ fn build_lba6(spec: &ProvisionSpec) -> Result<[u8; SECTOR], String> {
     let crc = crc32_bare(spec.target().device_id().as_bytes());
     put_u32(&mut plain, 0x100, crc);
     put_u32(&mut plain, 0x104, crc.wrapping_shl(1));
-    plain[0x1c0..0x1c8].copy_from_slice(&spec.profile().glab().as_bytes()[..8]);
-    put_u32(&mut plain, 0x1ca, NOPWD_LBA6_1CA);
-    let (clear_start, clear_end) = LBA6_CLEAR;
-    plain[clear_start..clear_end].fill(0);
-    plain[0x1f0] = 1;
+    let gserial = spec.profile().safe6_gserial().as_bytes();
+    let beizhu = spec.profile().safe6_beizhu().as_bytes();
+    if gserial.len() > 15 || beizhu.len() > 15 {
+        return Err("SAFE6 GSerial/BeiZhu exceeds 15-byte on-disk slot".into());
+    }
+    plain[0x1c0..0x1d0].fill(0);
+    plain[0x1c0..0x1c0 + gserial.len()].copy_from_slice(gserial);
+    plain[0x1d0..0x1e0].fill(0);
+    plain[0x1d0..0x1d0 + beizhu.len()].copy_from_slice(beizhu);
+    // The current Windows/Linux writer leaves this template extension region
+    // untouched. Its canonical UsbMainBSec bytes are zero.
+    plain[0x1e0..0x1f0].fill(0);
+    put_u32(&mut plain, 0x1f0, u32::from(spec.profile().safe6_encrypt()));
 
     let encrypted = xor_rolling(&plain[..0x1fc], LBA6_K0);
     let checksum = lba6_checksum(&encrypted);
