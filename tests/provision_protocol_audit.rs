@@ -168,6 +168,28 @@ fn lba6_autoid_matches_lba8_autonum_but_fixed_slot_tail_is_not_semantic_padding(
 }
 
 #[test]
+fn lba6_legacy_beizhu_and_extension_keep_opaque_bytes_after_the_c_string() {
+    const LEGACY_AIGO: &str =
+        "disk4_245760000_vid3535_pid6300_disk&ven_aigo&prod_u335&rev_pmap_onlyid1987718388_20260827_191701.bin";
+    let image = load(LEGACY_AIGO);
+    let plain = lba6_decode(sector(&image, 6));
+
+    assert_eq!(&plain[0x1d0..0x1d4], &[0xc6, 0xd5, 0xcd, 0xa8]);
+    assert_eq!(plain[0x1d4], 0);
+    assert!(
+        plain[0x1d5..0x1e0].iter().any(|byte| *byte != 0),
+        "legacy BeiZhu slot must retain the observed nonzero backing bytes after its NUL"
+    );
+    assert_eq!(
+        &plain[0x1e0..0x1f0],
+        &[
+            0xc1, 0xff, 0x07, 0xef, 0xff, 0xff, 0x1c, 0xa8, 0x7d, 0x0e, 0xe3, 0xf4, 0x27, 0x00,
+            0x00, 0x00,
+        ]
+    );
+}
+
+#[test]
 fn committed_blank_sector_evidence_matches_real_images() {
     let mut checked = 0usize;
     let mut manufacturing_marks = 0usize;

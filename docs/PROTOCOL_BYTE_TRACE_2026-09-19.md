@@ -205,11 +205,26 @@ GSerial/BeiZhu 则直接按 C 字符串读回。注意 `UsbLabelParam` **没有*
 
 因此：
 
-- GSerial / BeiZhu 的 producer+consumer 可完整闭合；
+- GSerial / BeiZhu 的 **C 字符串语义**可以闭合，但固定 16B 物理槽不能整体计
+  COMPLETE：writer 固定复制输入对象的前 15B 再补第 16B NUL，consumer 只按
+  C 字符串读取；输入对象在 NUL 后的 backing bytes 并没有稳定生成语义；
 - Dept/User 虽字段含义明确，但“本槽 + overflow extension”必须作为一个整体继续追，
   不能仅看到 `0x000..0x03F` 或 `0x050..0x06F` 就把整槽算 COMPLETE；
 - `m_encrypt @ sector+0x1F0` 当前只有 producer 和 22/22=1，reader 没有对应输出字段，
   仍保持 PARTIAL。
+
+22份原始盘进一步给出了不能把两个 16B 字符串槽整体标 COMPLETE 的直接反例：
+
+- GSerial：16/22 的 C 字符串为 `"322CA28A"`，6/22 为
+  `"322CA28A-D7D144"`；前一组 **16/16 都在 NUL 后仍有非零字节**；
+- BeiZhu：20/22 为空、2/22 为 GBK `"普通"`；总计 **8/22 在首个 NUL 后仍有
+  非零 backing bytes**；
+- 两份旧 profile（Aigo U335、SanDisk）还同时在 `+0x1E0..0x1EF`
+  留有非零旧扩展，而当前 reader 完全不消费这 16B。
+
+**LBA6 C-string slots keep opaque post-NUL tails**。因此本轮主动回撤此前对
+`+0x1C0..0x1DF` 的过度 COMPLETE 认定。这里是
+“字符串含义已知 + 固定槽尾未闭合”的 PARTIAL，而不是 32B 完整字段。
 
 #### m_autoid / Autonum：字符串语义闭合，但固定 16B 槽不能整体升级
 
@@ -264,7 +279,7 @@ BuildSector8(label):
 | LBA3 | 0 | 512 | 0 | 0.0% |
 | LBA4 | 36 | 39 | 437 | 7.0% |
 | LBA5 | 512 | 0 | 0 | 100.0% |
-| LBA6 | 36 | 124 | 352 | 7.0% |
+| LBA6 | 4 | 156 | 352 | 0.8% |
 | LBA7 | 155 | 51 | 306 | 30.3% |
 | LBA8 | 86 | 324 | 102 | 16.8% |
 | LBA9 | 52 | 104 | 356 | 10.2% |
@@ -275,8 +290,8 @@ BuildSector8(label):
 
 当前总计：
 
-- **COMPLETE：1611B / 6656B = 24.2%**
-- **PARTIAL：3020B / 6656B = 45.4%**
+- **COMPLETE：1579B / 6656B = 23.7%**
+- **PARTIAL：3052B / 6656B = 45.9%**
 - **UNKNOWN：2025B / 6656B = 30.4%**
 
 LBA11 本轮从 8B COMPLETE 提升到 260B COMPLETE。没有因为“能解开第二半扇”就把其余 252B 也冒进标完成：旧 Aigo U335 `rev_pmap` 为什么选择 CHS 容量参与密钥，而其它 21 份使用 DiskSize，上游选择逻辑尚未闭合。
@@ -333,9 +348,9 @@ DWARF 中恢复出的原始声明文件/行号与本地函数地址：
 | LBA6 | 0x050–0x05F | PARTIAL | User slot | writer 固定槽写入 | reader 取回 | 多盘真实姓名可解析 | 槽边界明确 |
 | LBA6 | 0x070–0x07F | PARTIAL | m_autoid / Autonum fixed copy slot | `BuildSector6@diskfile.cpp:672` 固定复制 writer `m_autoid[16]` | `ReadSector6@diskfile.cpp:1005` 以 C 字符串复制到 `UsbLabelParam.m_autoid`；`BuildSector8` 再序列化为 `Autonum=` | 22/22 LBA6 C-string 与 LBA8 Autonum 完全相同；但 NUL 后真实槽尾大量非零 | 字符串语义已闭合，固定槽尾不是协议零 padding，整16B仍不能算 COMPLETE |
 | LBA6 | 0x100–0x107 | PARTIAL | device-id CRC材料 | writer 写 CRC32 及派生值 | inspect/reader 可验证 | 22盘可交叉 | 第二DWORD业务语义未闭合 |
-| LBA6 | 0x1C0–0x1CF | COMPLETE | m_usbGSerial | Windows/Linux `BuildSector6` 固定复制 15B+NUL | Linux `ReadSector6` 按C字符串匹配 GSerial | 22盘与 LBA8 GLab 前缀交叉 | 完成 |
-| LBA6 | 0x1D0–0x1DF | COMPLETE | BeiZhu | Windows/Linux writer 固定复制 15B+NUL | Linux `ReadSector6` 直接读回 BeiZhu | 22盘 | 完成 |
-| LBA6 | 0x1E0–0x1EF | PARTIAL | 模板/旧版扩展 | current writer不显式覆盖 | current reader无业务读取 | 20零/2旧版非零 | 旧 profile 未闭合 |
+| LBA6 | 0x1C0–0x1CF | PARTIAL | m_usbGSerial C-string slot + opaque post-NUL backing bytes | Windows/Linux `BuildSector6` 都先清零临时16B，再固定复制输入对象前15B；输入对象 NUL 后字节可被一并带入 | Linux `ReadSector6` 只按C字符串匹配 GSerial，NUL 后不消费 | 22盘中16份短值 `322CA28A` 全部在NUL后仍有非零字节；6份长值为 `322CA28A-D7D144` | 字符串语义闭合，但物理16B槽尾 producer/consumer 不闭合 |
+| LBA6 | 0x1D0–0x1DF | PARTIAL | BeiZhu C-string slot + opaque post-NUL backing bytes | Windows/Linux writer 同样固定复制输入对象前15B再补末字节NUL | Linux `ReadSector6` 只以 C 字符串读回 BeiZhu | 22盘：20空、2份GBK“普通”；8/22首个NUL后仍有非零字节 | 字符串语义闭合，不得把剩余物理字节当 padding/字段 |
+| LBA6 | 0x1E0–0x1EF | PARTIAL | current-template zero / legacy opaque extension | current `BuildSector6` 不显式覆盖；Linux `UsbMainBSec@0x22BB40` 模板对应 `+0x1E0..0x1EF` 为16B零 | current `ReadSector6` 无业务读取 | 20/22原始盘为零；2份旧profile非零，Aigo=`c1 ff 07 ef ff ff 1c a8 7d 0e e3 f4 27 00 00 00`，SanDisk=`c1 ff 07 ef ff ff b2 8a 05 0e 77 3c 4c 00 00 00` | current profile边界已知，但旧 producer/consumer 未找到，保持PARTIAL |
 | LBA6 | 0x1F0–0x1F3 | PARTIAL | m_encrypt | 官方 writer 字段名/写入已知 | 最终行为消费者未完全闭合 | 22/22=1 | 固定值不足以完成 |
 | LBA6 | 0x1FC–0x1FF | COMPLETE | SAFE6 checksum | writer 对前508B计算 checksum | reader/inspect 校验 | 22/22 校验通过 | 完成 |
 | LBA7 | 0x000–0x0BF | PARTIAL | 3×64B EDPF 区 | BuildSector7/注册 writer | 多处 reader/登录/挂载 | 22盘 | 逐字段状态见详细审计 |
