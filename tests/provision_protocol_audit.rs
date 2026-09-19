@@ -1695,6 +1695,48 @@ fn lba9_eetu_final_two_reverse_bytes_are_writer_zero_padding() {
 }
 
 #[test]
+fn real_eppe_samples_keep_the_current_writer_zero_tail() {
+    let mut checked = 0usize;
+    for entry in fs::read_dir(FIXTURE_DIR).expect("protocol fixtures") {
+        let path = entry.expect("backup entry").path();
+        if path.extension().and_then(|ext| ext.to_str()) != Some("bin") {
+            continue;
+        }
+        let name = path.file_name().unwrap().to_str().unwrap();
+        let Some(meta) = parse_reference_backup_name(name) else {
+            continue;
+        };
+        let image = fs::read(&path).expect("fixture bytes");
+        let raw = &sector(&image, 9)[0x180..0x200];
+        if raw.iter().all(|byte| *byte == 0) {
+            continue;
+        }
+
+        let crc = crc32_bare(meta.device_id.as_bytes());
+        let plain = a6b0_full(raw, &crc.to_le_bytes(), 0);
+        if &plain[..4] != b"EPPE" {
+            continue;
+        }
+
+        let min_pass_len = u32_le(&plain, 0x04);
+        assert!(
+            (6..=19).contains(&min_pass_len),
+            "EPPE minimum password length escaped the official writer range: {name}"
+        );
+        assert!(
+            plain[0x08..].iter().all(|byte| *byte == 0),
+            "current EPPE writer-zero tail changed: {name}"
+        );
+        checked += 1;
+    }
+
+    assert!(
+        checked >= 2,
+        "committed protocol fixtures unexpectedly lost EPPE coverage: {checked}"
+    );
+}
+
+#[test]
 fn real_sandisk_lba10_contains_share_and_encrypt_volume_labels() {
     let crc = crc32_bare(SANDISK_DEVICE_ID.as_bytes());
     let plain = a6b0_full(&SANDISK_LBA10[..0x80], &crc.to_le_bytes(), 0);
