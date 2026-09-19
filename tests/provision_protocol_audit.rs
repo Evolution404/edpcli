@@ -589,6 +589,56 @@ fn lba6_autoid_matches_lba8_autonum_but_fixed_slot_tail_is_not_semantic_padding(
     );
 }
 
+fn assert_lba6_crc_usb_id_pair(lba6_raw: &[u8], device_id: &str, label: &str) {
+    let lba6 = lba6_decode(lba6_raw);
+    let crc = crc32_bare(device_id.as_bytes());
+    assert_ne!(
+        crc, 0,
+        "fixture unexpectedly has a zero device-id CRC: {label}"
+    );
+    assert_eq!(
+        u32_le(&lba6, 0x100),
+        crc,
+        "LBA6 m_crcUsbID[0] must be CRC32(device_id): {label}"
+    );
+    assert_eq!(
+        u32_le(&lba6, 0x104),
+        crc.wrapping_mul(2),
+        "LBA6 m_crcUsbID[1] must be the doubled CRC guard: {label}"
+    );
+}
+
+#[test]
+fn lba6_crc_usb_id_pair_is_device_id_crc_and_doubled_guard() {
+    let mut checked = 0usize;
+    for entry in fs::read_dir(FIXTURE_DIR).expect("protocol fixtures") {
+        let path = entry.expect("backup entry").path();
+        if path.extension().and_then(|ext| ext.to_str()) != Some("bin") {
+            continue;
+        }
+        let name = path.file_name().unwrap().to_str().unwrap();
+        let Some(meta) = parse_reference_backup_name(name) else {
+            continue;
+        };
+        let image = fs::read(&path).expect("fixture bytes");
+        assert_lba6_crc_usb_id_pair(sector(&image, 6), &meta.device_id, name);
+        checked += 1;
+    }
+
+    assert!(
+        checked >= MIN_PROTOCOL_FIXTURES,
+        "protocol audit unexpectedly lost LBA6 crcUsbID fixtures"
+    );
+
+    let sandisk_lba6 = decode_hex_fixture(SANDISK_LBA6_HEX);
+    assert_eq!(sandisk_lba6.len(), SECTOR);
+    assert_lba6_crc_usb_id_pair(
+        &sandisk_lba6,
+        SANDISK_DEVICE_ID,
+        "independent SanDisk original",
+    );
+}
+
 fn assert_lba6_legacy_mbr_type4_fragment_matches_lba12(
     lba6_raw: &[u8],
     lba12_raw: &[u8],

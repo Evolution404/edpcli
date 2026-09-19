@@ -478,6 +478,115 @@ Linux DWARF/机器码继续把这条链闭合到字符串语义：
 CI 已增加真实夹具门禁：一方面要求 LBA6 C-string == LBA8 Autonum，另一方面
 必须保留至少一个“NUL 后非零”的真实反例，防止未来实现把尾部错误归零/语义化。
 
+### LBA6 `+0x100..0x107`：官方 `m_crcUsbID[2]` 与 doubled guard 已恢复
+
+此前这里仅记为“device-id CRC材料”，第二 DWORD 没有正式含义。本轮直接用
+Linux DWARF、Linux/Windows producer、Windows legacy check 与严格22份实盘把结构恢复到：
+
+```text
+CLabelManage:
+  +0x24  DWORD m_crcUsbID[0] = CRC32(device_id)
+  +0x28  DWORD m_crcUsbID[1] = m_crcUsbID[0] * 2 mod 2^32
+
+LBA6:
+  +0x100..0x103 = m_crcUsbID[0]
+  +0x104..0x107 = m_crcUsbID[1]
+```
+
+Linux 官方 DWARF 在 `diskfile.h:204` 明确给出：
+
+```text
+CLabelManage +0x24 : unsigned int m_crcUsbID[2]
+```
+
+producer 不是推测，而是两条 Linux 初始化路径都逐指令一致：
+
+- `CLabelManage::CLabelManage(...) @ 0x1C538`：
+  - `memset(this+0x24, 0, 8)`；
+  - `CRC32(0, m_strUID.c_str(), m_strUID.length()) -> this+0x24`；
+  - `this+0x28 = this+0x24 * 2`；
+- `CLabelManage::Init(...) @ 0x1C76E` 重复同一套 `CRC32 -> doubled DWORD` 算法；
+- `BuildSector6@diskfile.cpp:710` 执行 `memcpy(out+0x100, this+0x24, 8)`。
+
+Windows current producer 与 Linux 独立对齐：
+
+- `sub_10013D20` 清零 `object+0x44..+0x4B`；
+- `object+0x44 = CRC32(device-id string)`；
+- `object+0x48 = object+0x44 << 1`；
+- `sub_10013B80` 的另一条构造路径完全同构；
+- `BuildSector6/sub_10013FD0` 执行 `memcpy(out+0x100, object+0x44, 8)`。
+
+第一 DWORD 还是整个标签族的实际密钥源，而不只是“写在 LBA6 里的编号”：
+
+- Linux `BuildSector7` 读取 `this+0x24`，折叠高低16位生成 old-table rolling-XOR key；
+- `EncryptSector8Data` 直接把 `this+0x24` 作为4B key；
+- `BuildSector12`/`ReadSector12` 也以 `this+0x24` 作为4B加解密 key；
+- `ReadSector8` 两个入口同样从 `this+0x24` 取 key。
+
+因此 `m_crcUsbID[0]` 可以闭合为**由 device-id 派生的主标签加解密/rolling key material**。
+但这里必须区分“运行时成员的用途”与“LBA6 持久化副本的 consumer”：
+Linux `ReadSector6` 当前并不读取 `+0x100/+0x104`，所以不能因为同源成员被其它 builder
+使用，就把 LBA6 这8B的物理副本直接升 COMPLETE。
+
+第二 DWORD 的历史用途也找到了。Windows current
+`CheckLabel/sub_100152A0` 的尾部分支保留：
+
+```text
+if u32(lba6+0x100) != 0 &&
+   u32(lba6+0x104) == (u32(lba6+0x100) << 1):
+    result = 13
+else:
+    result = 11
+```
+
+Linux DWARF 的官方错误枚举给出：
+
+```text
+11 = ERROR_USBVERSIONNOMATCH
+13 = ERROR_SYSLABELMISTMATCH
+```
+
+同一倍增判断还复制在 `cemsudisk` 与 `vrvaud_c` 的 SAFE6 parser 中，说明
+`m_crcUsbID[1]` 的确是历史上的 **doubled CRC consistency guard**，不是随机派生值。
+
+但本轮同时回到 PE 机器码复核可达性，避免把反编译伪代码误当 current consumer。
+`cemsusbregsiter.dll` 在该判断前实际是：
+
+```text
+mov edx, 1
+test edx, edx
+je   legacy_crc_pair_check
+```
+
+因此 current binary 永远走 `if(1)` 的正常解析分支，CRC pair check 不可达；
+`cemsudisk` 与 `vrvaud_c` 同一份逻辑也都保留为
+`if (1) { ... } else { crc pair check }`。全仓精确搜索没有第四处可达的
+`+0x104 == +0x100*2` 检查。Windows `modfilesyscheck.dll` 则只读取/解析
+LBA12，不读取 LBA6。
+
+另一个看似相关的 `vrvaud_c object+0x100/+0x104` 可达分支已排除：
+`CUDiskRoamControl::SetPolicy` 明确把它们分别设置为 `StartPolicy` 状态与
+`RoamSwitch`，只是对象偏移碰巧相同，与 SAFE6 无关。
+
+严格22份原始参考重新独立计算：
+
+- 22/22 `u32(LBA6+0x100) == CRC32(device_id)`；
+- 22/22 第一 DWORD 非零；
+- 22/22 `u32(LBA6+0x104) == u32(LBA6+0x100) * 2 mod 2^32`；
+- 独立 SanDisk 原始 LBA6 也满足两式。
+
+新增回归门禁：
+
+- `lba6_crc_usb_id_pair_is_device_id_crc_and_doubled_guard`。
+
+因此本轮**命名和算法已经闭合，但 COMPLETE 字节数不增加**：
+
+- `+0x100..103`：PARTIAL，原因仅剩“LBA6副本没有活跃 consumer”；
+- `+0x104..107`：PARTIAL，已知 doubled guard 的 historical consumer，
+  但 current 三个同源实现中的该判断均不可达。
+
+禁止后续仅凭死代码或“同源成员用于其它扇区加密”把这8B升级 COMPLETE。
+
 ### LBA8：加密长度由 LLGB +0x04 决定，不是固定 368B
 
 - 当前 22/22 参考样本均满足：
