@@ -259,8 +259,8 @@ BuildSector8(label):
 | LBA | COMPLETE | PARTIAL | UNKNOWN | 严格完成率 |
 |---:|---:|---:|---:|---:|
 | LBA0 | 66 | 446 | 0 | 12.9% |
-| LBA1 | 0 | 0 | 512 | 0.0% |
-| LBA2 | 0 | 0 | 512 | 0.0% |
+| LBA1 | 0 | 512 | 0 | 0.0% |
+| LBA2 | 0 | 512 | 0 | 0.0% |
 | LBA3 | 0 | 0 | 512 | 0.0% |
 | LBA4 | 36 | 39 | 437 | 7.0% |
 | LBA5 | 512 | 0 | 0 | 100.0% |
@@ -276,8 +276,8 @@ BuildSector8(label):
 当前总计：
 
 - **COMPLETE：1535B / 6656B = 23.1%**
-- **PARTIAL：1560B / 6656B = 23.4%**
-- **UNKNOWN：3561B / 6656B = 53.5%**
+- **PARTIAL：2584B / 6656B = 38.8%**
+- **UNKNOWN：2537B / 6656B = 38.1%**
 
 LBA11 本轮从 8B COMPLETE 提升到 260B COMPLETE。没有因为“能解开第二半扇”就把其余 252B 也冒进标完成：旧 Aigo U335 `rev_pmap` 为什么选择 CHS 容量参与密钥，而其它 21 份使用 DiskSize，上游选择逻辑尚未闭合。
 
@@ -318,8 +318,8 @@ DWARF 中恢复出的原始声明文件/行号与本地函数地址：
 | LBA0 | 0x000–0x1BD | PARTIAL | MBR bootstrap | Windows `UsbMainBSec` 静态模板存在 | BIOS/MBR 标准启动语义已知，但 EDP 为什么选该 bootstrap 未闭合 | 22盘均可解析 MBR | 不计完成 |
 | LBA0 | 0x1BE–0x1FD | COMPLETE | 4×MBR partition entry | `UsbMainBSec` 模板；SAPF 恢复项也直接写回此处 | `UDiskLabelRepair.dll::Repair0Sector` 直接恢复该 64B 区域 | 22/22 可按标准 MBR 解码 | 分区表边界和消费闭合 |
 | LBA0 | 0x1FE–0x1FF | COMPLETE | MBR 55AA | 官方模板直接写 `55 AA` | MBR 校验/修复链检查签名 | 22/22 | 完成 |
-| LBA1 | 0x000–0x1FF | UNKNOWN | 未知/当前多为零 | 待查 | 待查 | 当前参考多为零 | 全零不等于完成 |
-| LBA2 | 0x000–0x1FF | UNKNOWN | 未知/当前多为零 | 待查 | 待查 | 当前参考多为零 | 全零不等于完成 |
+| LBA1 | 0x000–0x1FF | PARTIAL | optional GPT_Header profile | Linux官方 `CLabelManage::BuildSector1_Gpt@diskfile.cpp:1458` 构造完整512B `GPT_Header`，计算 partition-table CRC 与 header CRC | Windows `IsAllowRegisterCommonLabel/sub_1002ab70` 在 protective MBR 命中后，以 sector_size 跳到 LBA1，检查 `EFI PART` 与 `header_lba@+0x18==1` | 22/22原始 SAFE6 参考整扇全零；缺正向 GPT 实盘 | producer/consumer/结构已知，但当前真实参考未启用 GPT profile，因此不升 COMPLETE |
+| LBA2 | 0x000–0x1FF | PARTIAL | optional GPT partition-entry sector | Linux官方 `BuildSector2_Gpt@diskfile.cpp:1493` 生成128B `GPT_Partition` entry（type GUID/partition GUID/start/end/attr/name） | Windows GPT parser 从 `metadata+2*sector_size` 即 LBA2 起，按每扇4个×128B entry解析；注册检查可连续解析多扇 | 22/22原始 SAFE6 参考整扇全零；缺正向 GPT 实盘 | GPT table用途和entry边界已知，但 profile 的实际已注册盘样本缺失，因此保持PARTIAL |
 | LBA3 | 0x000–0x1FF | UNKNOWN | 厂商制造标记/空 | 待查 | 待查 | 21零 + 1 Kingston `this is mp mark` | 用途未闭合 |
 | LBA4 | 0x000–0x017 | COMPLETE | `$$$onlyid$$$` clear header | 当前注册 writer 根据 main onlyid 格式化 | 识别/解码链从此恢复 onlyid | 22/22 | 完成 |
 | LBA4 | 0x018–0x01B | COMPLETE | OnlyIdXor8 | current writer: `main_onlyid ^ 0x88888888` | restore-info 读取该字段 | 22盘 current/legacy 可解 | 完成 |
@@ -732,6 +732,113 @@ WriteSectorData(buffer, count=13)
 如果未来发现非零原始 LBA5，这个结论不会失效：只要 writer 仍 preserve、
 probe 仍原样写回，非零内容同样符合协议。CI 对当前原始夹具的“全零”断言只用于
 防止样本集被悄悄替换，不把全零编码成生成规则。
+
+### 4.5 LBA1/LBA2：官方 GPT profile 已恢复，但当前22盘没有正向样本
+
+旧文档把 LBA1/LBA2 简写成“保留/全零”。重新验证后，这个描述不完整。
+
+Linux 官方库直接保留三套 GPT builder：
+
+```text
+CLabelManage::BuildSector0_Gpt @ diskfile.cpp:1445
+CLabelManage::BuildSector1_Gpt @ diskfile.cpp:1458
+CLabelManage::BuildSector2_Gpt @ diskfile.cpp:1493
+```
+
+DWARF 恢复出的核心结构：
+
+```text
+GPT_Header       size = 0x200 (512B)
+  +0x00 signature[8]       "EFI PART"
+  +0x08 version
+  +0x0C headersize
+  +0x10 headercrc32
+  +0x14 reserve
+  +0x18 header_lba
+  +0x20 backup_lba
+  +0x28 pation_first_lba
+  +0x30 pation_last_lba
+  +0x38 guid[16]
+  +0x48 pation_table_first
+  +0x50 pation_table_entries
+  +0x54 pation_table_size
+  +0x58 pation_table_crc
+  +0x5C notuse[420]
+
+GPT_Partition    size = 0x80 (128B)
+  +0x00 pationtype[16]
+  +0x10 pationid[16]
+  +0x20 pation_start
+  +0x28 pation_end
+  +0x30 pation_attr
+  +0x38 pation_name[72]
+```
+
+`BuildSector1_Gpt` 的机器码明确执行：
+
+```text
+header = gpt_header template
+header.backup_lba = total_lba - 1
+header.pation_last_lba = backup_lba - 0x21
+header.pation_table_crc = CRC32(partition_table_bytes)
+
+tmp = header[0x00..0x5B]
+tmp.headercrc32 = 0
+header.headercrc32 = CRC32(tmp)
+
+copy full 512B header to LBA1 output
+```
+
+`BuildSector2_Gpt` 则按128B GPT entry模板写 type GUID、partition GUID、
+起止 LBA 等字段。
+
+#### Windows consumer 重新验证
+
+`CUsbRegsiter::IsAllowRegisterCommonLabel -> sub_1002ab70`：
+
+```text
+inspect LBA0 protective MBR
+if first partition start == 1 and size == 0xFFFFFFFF:
+    lba1 = metadata + sector_size
+    require lba1[0:8] == "EFI PART"
+    require u64(lba1+0x18) == 1
+    return GPT
+```
+
+随后 GPT 分支把 `metadata + 2*sector_size`，也就是 LBA2，交给
+`sub_1002b2f0`。该 parser 的双层循环为：
+
+```text
+for sector in 0..sector_count:
+    base = lba2 + sector * sector_size
+    for entry in 0..4:
+        p = base + entry * 0x80
+        if type_guid is nonzero/recognized:
+            consume pation_start @ +0x20
+            consume pation_end   @ +0x28
+            consume pation_attr  @ +0x30
+```
+
+因此 LBA1/LBA2 不是“永远没用的保留零扇区”，而是存在正式 GPT profile。
+
+#### 实盘限制
+
+22份当前原始 SAFE6 参考复核：
+
+- LBA1：22/22 整扇全零；
+- LBA2：22/22 整扇全零；
+- 两者 SHA-256 均为零扇区
+  `076a27c79e5ace2a3d47f9dd2e83e4ff6ea8872b3c2218f66c92b89b55f36560`。
+
+这只能说明当前参考盘没有启用 GPT metadata profile，不能反证官方 GPT builder。
+由于缺少至少一份**真实、原始、已启用 GPT profile 的实盘**，本账本把：
+
+- LBA1：512B UNKNOWN → **512B PARTIAL**；
+- LBA2：512B UNKNOWN → **512B PARTIAL**；
+- COMPLETE 不增加。
+
+这也是“旧文档可参考但必须重验”的典型例子：原来的“全零/保留”观察本身没错，
+但遗漏了官方可选 profile。
 
 ## 5. LBA11 完整 producer / consumer 追踪
 

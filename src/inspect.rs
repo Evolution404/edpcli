@@ -873,6 +873,86 @@ pub fn analyze_sector(lba: u32, raw: &[u8], meta: &InspectMeta) -> SectorView {
             parse_mbr(&decoded, &mut fields, &mut notes);
             "RAW + MBR 结构解析".into()
         }
+        1 => {
+            if decoded.get(..8) == Some(b"EFI PART") {
+                fields.push(field(
+                    0x00,
+                    0x08,
+                    "GPT signature",
+                    "EFI PART",
+                    FieldStyle::Magic,
+                ));
+                if let Some(value) = u32_at(&decoded, 0x08) {
+                    fields.push(field(
+                        0x08,
+                        0x0c,
+                        "GPT version",
+                        format!("0x{value:08X}"),
+                        FieldStyle::Flag,
+                    ));
+                }
+                if let Some(value) = u32_at(&decoded, 0x0c) {
+                    fields.push(field(
+                        0x0c,
+                        0x10,
+                        "GPT header size",
+                        value.to_string(),
+                        FieldStyle::Size,
+                    ));
+                }
+                if let Some(value) = u32_at(&decoded, 0x10) {
+                    fields.push(field(
+                        0x10,
+                        0x14,
+                        "GPT header CRC32",
+                        format!("0x{value:08X}"),
+                        FieldStyle::Checksum,
+                    ));
+                }
+                if let Some(value) = u64_at(&decoded, 0x18) {
+                    fields.push(field(
+                        0x18,
+                        0x20,
+                        "GPT header LBA",
+                        value.to_string(),
+                        FieldStyle::Address,
+                    ));
+                }
+                if let Some(value) = u64_at(&decoded, 0x20) {
+                    fields.push(field(
+                        0x20,
+                        0x28,
+                        "GPT backup LBA",
+                        value.to_string(),
+                        FieldStyle::Address,
+                    ));
+                }
+                if let Some(value) = u64_at(&decoded, 0x48) {
+                    fields.push(field(
+                        0x48,
+                        0x50,
+                        "GPT partition table first LBA",
+                        value.to_string(),
+                        FieldStyle::Address,
+                    ));
+                }
+                notes.push(
+                    "官方 BuildSector1_Gpt 生成完整 512B GPT_Header；Windows 注册检查在 protective MBR 命中后会读取 LBA1 的 “EFI PART” 和 header_lba。当前22份原始 SAFE6 参考均未启用该 profile，LBA1 全零，因此本扇区仍是 PARTIAL 而非 COMPLETE。".into(),
+                );
+                "RAW + GPT_Header 结构解析".into()
+            } else {
+                notes.push(
+                    "当前 LBA1 未检测到 GPT header。官方 Linux 库存在 BuildSector1_Gpt，Windows GPT 注册检查会把 LBA1 作为 GPT header 消费；当前22份原始参考均全零，缺少正向 GPT 实盘。".into(),
+                );
+                "RAW（当前样本未启用 GPT LBA1 profile）".into()
+            }
+        }
+        2 => {
+            notes.push(
+                "官方 Linux BuildSector2_Gpt 生成 0x80B GPT_Partition entry；Windows GPT 注册检查从 LBA2 起按每扇4个×128B entry 解析分区表。当前22份原始 SAFE6 参考 LBA2 均全零，缺少正向 GPT 实盘，因此只定为 PARTIAL。".into(),
+            );
+            "RAW（GPT partition-table profile；当前参考未启用）".into()
+        }
         4 => {
             if let Some((d, serial, serial_text, k0, hs, he)) = decode_lba4(raw) {
                 decoded = d;

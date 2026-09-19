@@ -101,6 +101,44 @@ fn lba5_is_reported_as_an_opaque_write_protection_probe_sector() {
 }
 
 #[test]
+fn lba1_recognizes_the_official_gpt_header_profile() {
+    let mut raw = [0u8; 512];
+    raw[..8].copy_from_slice(b"EFI PART");
+    raw[0x08..0x0c].copy_from_slice(&0x0001_0000u32.to_le_bytes());
+    raw[0x0c..0x10].copy_from_slice(&92u32.to_le_bytes());
+    raw[0x10..0x14].copy_from_slice(&0x1234_5678u32.to_le_bytes());
+    raw[0x18..0x20].copy_from_slice(&1u64.to_le_bytes());
+    raw[0x20..0x28].copy_from_slice(&999u64.to_le_bytes());
+    raw[0x48..0x50].copy_from_slice(&2u64.to_le_bytes());
+
+    let view = analyze_sector(1, &raw, &InspectMeta::default());
+    assert!(view.method.contains("GPT_Header"));
+    assert!(view
+        .fields
+        .iter()
+        .any(|field| field.label == "GPT signature" && field.value == "EFI PART"));
+    assert!(view
+        .fields
+        .iter()
+        .any(|field| { field.label == "GPT partition table first LBA" && field.value == "2" }));
+    assert!(view.notes.iter().any(|note| {
+        note.contains("BuildSector1_Gpt")
+            && note.contains("当前22份原始")
+            && note.contains("PARTIAL")
+    }));
+}
+
+#[test]
+fn lba2_reports_the_official_gpt_partition_table_profile_without_claiming_completion() {
+    let raw = [0u8; 512];
+    let view = analyze_sector(2, &raw, &InspectMeta::default());
+    assert!(view.method.contains("GPT partition-table profile"));
+    assert!(view.notes.iter().any(|note| {
+        note.contains("BuildSector2_Gpt") && note.contains("4个×128B") && note.contains("PARTIAL")
+    }));
+}
+
+#[test]
 fn lba4_zero_ciphertext_byte_is_decrypted_unless_whole_short_gap_is_unwritten() {
     let onlyid = 949_028_302u32;
     let k0 = (onlyid & 0xffff) ^ (onlyid >> 16);

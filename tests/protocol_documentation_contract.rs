@@ -54,7 +54,7 @@ fn strict_progress_covers_exactly_lba0_through_lba12() {
         "strict COMPLETE coverage regressed below the audited baseline: {complete}"
     );
     assert!(
-        unknown <= 3561,
+        unknown <= 2537,
         "UNKNOWN coverage regressed above the audited baseline: {unknown}"
     );
 }
@@ -125,6 +125,10 @@ fn documentation_keeps_the_official_provisioning_chain_and_strict_rules() {
         "opaque preserve / write-protection probe scratch sector",
         "ERROR_WRITE_PROTECT(0x13)",
         "076a27c79e5ace2a3d47f9dd2e83e4ff6ea8872b3c2218f66c92b89b55f36560",
+        "BuildSector1_Gpt",
+        "BuildSector2_Gpt",
+        "GPT_Header",
+        "GPT_Partition",
         "overflow_marker(0x40245E2A)",
         "m_autoid / Autonum",
         "NUL 后真实槽尾大量非零",
@@ -137,4 +141,12 @@ fn documentation_keeps_the_official_provisioning_chain_and_strict_rules() {
             "protocol ledger lost required evidence: {required}"
         );
     }
+    assert!(
+        DOC.contains("| LBA1 | 0 | 512 | 0 | 0.0% |"),
+        "LBA1 GPT profile must remain PARTIAL until a positive real GPT sample exists"
+    );
+    assert!(
+        DOC.contains("| LBA2 | 0 | 512 | 0 | 0.0% |"),
+        "LBA2 GPT profile must remain PARTIAL until a positive real GPT sample exists"
+    );
 }

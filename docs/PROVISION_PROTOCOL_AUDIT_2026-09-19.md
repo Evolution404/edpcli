@@ -717,8 +717,8 @@ Windows `edpediskctrl.dll` 同时给出读端和写端：
 | LBA | 完成 | 部分已知 | 未知 | 严格完成率 | 当前计数依据 |
 |---:|---:|---:|---:|---:|---|
 | 0 | 66B | 446B | 0B | 12.9% | 64B 标准 MBR partition table + 55AA 完成；bootstrap 446B 来源未闭合 |
-| 1 | 0B | 0B | 512B | 0% | 只知道当前参考集全零，不知道协议用途 |
-| 2 | 0B | 0B | 512B | 0% | 同上 |
+| 1 | 0B | 512B | 0B | 0% | 官方 BuildSector1_Gpt + GPT_Header(512B) 结构 + Windows `EFI PART` / `header_lba` consumer 已闭合；22/22当前原始SAFE6盘全零，缺正向GPT实盘，因此整扇PARTIAL |
+| 2 | 0B | 512B | 0B | 0% | 官方 BuildSector2_Gpt + GPT_Partition(128B) 结构 + Windows 从LBA2起每扇4 entry parser 已闭合；22/22当前原始盘全零，缺正向GPT实盘，因此整扇PARTIAL |
 | 3 | 0B | 0B | 512B | 0% | 有厂商 mp mark 变体，协议用途未闭合 |
 | 4 | 36B | 39B | 437B | 7.0% | onlyid clear header、OnlyIdXor8、LLGB 双锚点完成；第二 ID/HSerial/profile 字段仍不完整；short/full 扩展区大部分未知 |
 | 5 | 512B | 0B | 0B | 100% | 两版 EdpDiskCtrl 均只对 LBA5 执行“读整扇→原样写回→检查 ERROR_WRITE_PROTECT(0x13)”；当前注册 writer 读取既有13扇区后不重建 LBA5，因此 preserve existing bytes；22/22原始盘全零 |
@@ -733,8 +733,8 @@ Windows `edpediskctrl.dll` 同时给出读端和写端：
 总计：
 
 - **完成：1535B / 6656B = 23.1%**
-- **部分已知：1560B / 6656B = 23.4%**
-- **未知：3561B / 6656B = 53.5%**
+- **部分已知：2584B / 6656B = 38.8%**
+- **未知：2537B / 6656B = 38.1%**
 
 这是一组**严格下限**，故意宁可低估，不把“能生成/能解析”冒充成“已经完全理解”。
 后续只有在证据链真正闭合时，字节才能从“未知 → 部分已知 → 完成”升级。
@@ -742,8 +742,8 @@ Windows `edpediskctrl.dll` 同时给出读端和写端：
 | LBA | 状态 | 当前结论 |
 |---|---|---|
 | 0 | 部分闭合 | MBR 分区表和 55AA 已知；全新盘 bootstrap 来源仍追官方写路径 |
-| 1 | canonical 已知 | 当前 22/22 全零 |
-| 2 | canonical 已知 | 当前 22/22 全零 |
+| 1 | GPT profile 部分闭合 | 当前22/22全零；官方 GPT_Header writer/consumer 已知，但缺正向GPT实盘 |
+| 2 | GPT profile 部分闭合 | 当前22/22全零；官方 GPT_Partition writer/consumer 已知，但缺正向GPT实盘 |
 | 3 | canonical 已知 | 21/22 全零，1 份厂商 mp mark；EDP canonical 可零 |
 | 4 | 高度闭合 | onlyid 头、rolling XOR 区、onlyIdXor8、LLGB 双锚点已锁；动态字段生成源继续追 |
 | 5 | canonical 已知 | opaque preserve / 写保护探测 scratch；当前 22/22 全零，但零不是协议固定要求 |
