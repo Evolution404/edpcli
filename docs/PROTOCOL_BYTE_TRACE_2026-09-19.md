@@ -1229,6 +1229,105 @@ if (packed_entry0.NeedDisturb != 0):
 这一具体行为，不是对字段名作“扰码/防篡改”等词义扩张；entry1/entry2
 仍需分别追 consumer，不能因为同名字段而自动升级。
 
+### 6.2 LBA12 +0x38..+0x47：v0x0206 默认密码的 mode2 wrapping 已闭合，但整字段仍 PARTIAL
+
+本轮对 packed entry 的 16B wrapped file-key 做了重新独立审计，
+不再沿用旧脚本结论。
+
+Windows producer：
+
+```text
+CreatePartitions
+  -> generate file_key16
+  -> entry.FileKeyCRC = CRC32_bare(file_key16)
+  -> entry.UserKeyCRC = CRC32_bare(original_password)
+  -> if original_password == "0000aaaa":
+         sub_10040400(password)
+         # 替换为隐藏10B字符串
+  -> md5 = MD5(effective_password)
+  -> if EncryptMode == 2:
+         if GLOBAL/oldSM4 == "1":
+             alternate mode2 implementation
+         else:
+             standard SM4-ECB(file_key16, md5)
+  -> entry.wrapped16 = ciphertext
+```
+
+其中 **LBA12 v0x0206 hidden default-password file-key wrapping** 的
+默认密码替换过程已经从 Windows PE 机器码重新恢复：
+
+```text
+sub_10040400:
+  seed32      = 468b46088b4e048bd02bd13bd37f2183
+                c1098d3c003bf97f028bf98b065750e8
+  key1[i]     = seed[i] XOR seed[i+16]
+  key2[i]     = seed[i] + seed[i+16]  (u8 wrapping)
+  table96     = A6B0_DECRYPT(obfuscated_table96, key1)
+  index16     = A6B0_DECRYPT(obfuscated_index16, key2)
+  password[i] = table96[index16[i]], i=0..9
+```
+
+独立重算结果：
+
+```text
+key1 = 8782cb348b75fdf4d2a028b0d528716b
+key2 = 0794d3448b89fd0ad2b6cac6d9d6716b
+index[0..10] = 38 17 51 4d 0c 05 26 16 2d 0d
+effective_password = "LtSWi[2f)j"
+MD5(effective_password) = 548b072cba7f104d88a446556cc3c432
+```
+
+这个字符串不是从旧文档复制，而是本轮直接由当前 DLL 的机器码常量和
+已验证 A6B0 算法重算得到。用相反的 A7F0 方向时 index 会越界，
+也提供了负向验证。
+
+Windows `sub_100036e0` 所走的 mode2 算法可由以下常量/轮函数确认
+为标准 SM4：
+
+- FK =
+  `A3B1BAC6 56AA3350 677D9197 B27022DC`；
+- CK 从 `00070E15 1C232A31 383F464D ...` 顺序展开；
+- S-box 与标准 SM4 S-box 逐字节一致；
+- key schedule T' 使用 rot13/rot23；
+- round T 使用 rot2/rot10/rot18/rot24；
+- 总计32轮。
+
+Linux consumer：
+
+```text
+CDiskReader::DecryptFileKey
+  -> default input "0000aaaa"
+  -> version == 0x0206 && password == default:
+         GetIniString(password)
+  -> AlgorithmSpace::fileKey_Decrypt
+       mode2:
+         MD5(effective_password)
+         MC_KKSMS4::DecryptBuffer(wrapped16)
+  -> CDiskReader::CheckFileKeyCrc
+       CRC32(file_key16) == entry.FileKeyCRC
+```
+
+22份 original real-device reference set 的只读重算：
+
+- 共 66 条 packed entry；
+- 44 条 type2/type4 为 EncryptMode=2；
+- 其中 43 条 `UserKeyCRC=0x0429735D`；
+- 使用 OpenSSL 3.6.3 标准 SM4-ECB +
+  `MD5("LtSWi[2f)j")` 独立解包：**43/43** FileKeyCRC 校验通过；
+- 唯一非默认 type2 的同盘 type4 仍是默认密码；
+  从 type4 独立解出共享 file-key
+  `eadd58009f9abe0625a1f1f779d4c98b`，
+  CRC=`F7EEA980`，同时精确匹配 type2/type4 保存的 FileKeyCRC；
+- 两条 wrapped16 不同，排除“直接复制同一 wrapped material”。
+
+所以当前实盘使用的
+`v0x0206 + mode2 + oldSM4!="1"` 分支已经闭环。
+
+但是 `+0x38..+0x47` 整体仍记 **PARTIAL**，原因是 Windows producer
+还存在明确的 EncryptMode=1、EncryptMode=3，以及
+`oldSM4=="1"` 的 alternate mode2 分支；严格规则要求已知 profile
+差异也必须全部解释。当前完成度统计因此**不增加 16B×3**。
+
 ## 7. 代码与测试门禁
 
 ### 7.1 CI 实盘子集

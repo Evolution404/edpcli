@@ -765,11 +765,94 @@ LBA12 entry `+0x30..+0x47`：
 - `+0x30..+0x33`：`CRC32_bare(password)`；默认 `"0000aaaa" -> 0x0429735D`。
 - `+0x34..+0x37`：`CRC32_bare(file_key)`。
 - `+0x38..+0x47`：16B wrapped file-key material。
-- 旧 23 份混合集曾得到“22 份符合默认关系、1 份异常”的统计；由于该集合含免密/实验态，该计数现已撤销，不再作为协议证据。
-- `wrapped16 -> file_key -> CRC32(file_key)` 的解包关系本身仍有读端代码闭环；新 22 份参考集的逐样本统计需独立重算后才能重新给出比例。
-- 这只能证明当前样本的**解包关系**，不能证明所有版本的 wrapped-key **生成源**。
-  尤其旧文档中固定字符串 `LtSWi[2f)j` 的来源存在组件间矛盾，因此不得升级为
-  通用 Provision 生成规则。
+- 旧 23 份混合集曾得到的 wrapped-key 统计已撤销；本节只使用
+  **22 份 original real-device reference set**。
+
+本轮已经把 v0x0206 默认密码分支重新从官方 producer/consumer 和 22盘
+独立闭合，形成 **LBA12 v0x0206 hidden default-password file-key wrapping**
+证据链。
+
+Windows producer（`CUsbRegsiter::CreatePartitions / sub_1003db50`）：
+
+1. 在构造 packed 96B entry 前生成一份 16B file-key；
+2. `entry+0x34 = CRC32_bare(file_key16)`；
+3. `entry+0x30 = CRC32_bare(password_before_default_substitution)`；
+4. 当 password 恰为 `"0000aaaa"` 时，先调用
+   `sub_10040400(password)` 把它替换为隐藏 10B 字符串，再执行后续
+   MD5 + file-key 包装；
+5. EncryptMode=2 且配置 `GLOBAL/oldSM4 != "1"` 时走
+   `sub_100036e0 -> sub_100031a0/sub_10003550`，该实现逐常量/轮函数
+   对应标准 SM4（FK/CK、S-box、32轮、key-T' rot13/23、
+   round-T rot2/10/18/24）；
+6. 16B 包装结果写 `entry+0x38..+0x47`。
+
+`sub_10040400` 的隐藏字符串本轮没有沿用旧脚本，而是从当前 Windows DLL
+机器码重新提取：
+
+- 32B seed：
+  `468b46088b4e048bd02bd13bd37f2183c1098d3c003bf97f028bf98b065750e8`；
+- 96B table 和 16B index 全部逐字节从该函数栈初始化恢复；
+- 前16B xor 后16B 得第一轮 A6B0 key：
+  `8782cb348b75fdf4d2a028b0d528716b`；
+- 前16B wrapping-add 后16B 得第二轮 A6B0 key：
+  `0794d3448b89fd0ad2b6cac6d9d6716b`；
+- 解出的 index 前10B为：
+  `38 17 51 4d 0c 05 26 16 2d 0d`；
+- 最终从 decoded table 取值得到：
+  **`LtSWi[2f)j`**；
+- `MD5("LtSWi[2f)j") = 548b072cba7f104d88a446556cc3c432`。
+
+Linux consumer 独立给出同一设计：
+
+- `CDiskReader::DecryptFileKey @ 0xDF50` 先构造 `"0000aaaa"`；
+- pass-info version=`0x0206` 且输入仍为默认密码时，调用
+  `GetIniString(char*) @ 0xCCCC`；
+- `GetIniString` 自身包含与 Windows 对应的 seed/table/index 混淆逻辑，
+  最终覆盖输入前10B；
+- `AlgorithmSpace::fileKey_Decrypt @ 0xC7B4` 对 mode2：
+  `MD5(effective_password)` 后调用 `MC_KKSMS4::DecryptBuffer`；
+- `CDiskReader::CheckFileKeyCrc @ 0xE170` 对解包出的 16B file-key
+  重新 `CRC32`，必须等于 entry 保存的 `FileKeyCRC`。
+
+22份原始盘重新解 LBA12 后共有 66 条 packed entry：
+
+- 22 条 boot/type1 或旧 type2 entry 为 mode0、wrapped key 全零；
+- 44 条 type2/type4 为 **EncryptMode=2**；
+- 其中 43 条 `UserKeyCRC=0x0429735D`，即盘面密码标识仍对应
+  原始默认字符串 `"0000aaaa"`；
+- 另 1 条（Netac onlyid=3274129259 的 type2）为非默认
+  `UserKeyCRC=0x438C9FFC`。
+
+为避免旧分析脚本自证，本轮又使用系统 OpenSSL 3.6.3 的
+**标准 SM4-ECB** 独立解 43 条默认 mode2 wrapped material：
+
+- **43/43** 成功恢复 16B file-key；
+- **43/43** 满足
+  `CRC32_bare(unwrapped_file_key) == entry.FileKeyCRC`；
+- 对唯一非默认 type2 的同一实盘，其 type4 仍使用默认密码；
+  从 type4 独立恢复共享 file-key
+  `eadd58009f9abe0625a1f1f779d4c98b`，
+  得到 `CRC32=0xF7EEA980`，与 type2/type4 两条 entry 的
+  FileKeyCRC 均精确一致；
+- type2/type4 的 wrapped16 不同，证明“同一 file-key +
+  不同 effective password 分别包装”的模型，而不是复制同一密文。
+
+因此，对当前 22份原始盘实际使用的
+`version=0x0206 + EncryptMode=2 + oldSM4!="1"` profile，
+`+0x38..+0x47` 的 producer、consumer、默认密码替换规则和实盘结果
+已经完整闭合。
+
+但 **这 16B 仍保持 PARTIAL，不升级 COMPLETE**。原因不是当前 mode2
+证据不足，而是官方 writer 还存在明确的已知 protocol branches：
+
+- EncryptMode=1；
+- EncryptMode=3；
+- mode2 且 `GLOBAL/oldSM4=="1"` 时走 `sub_10011010` 的另一实现。
+
+严格完成口径要求已知 profile 差异本身也必须解释清楚；在这三条分支
+producer/consumer + 正向样本尚未全部闭合之前，不能把
+`+0x38..+0x47` 整体提升为 COMPLETE，也不能直接把当前 mode2 规则
+写成通用 Provision 生成规则。
 
 ### LBA9/LBA10 的非零形态
 
