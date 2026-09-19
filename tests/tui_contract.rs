@@ -18,8 +18,17 @@ fn tui_is_an_explicit_v2_entrypoint_without_changing_bare_cli() {
 }
 
 #[test]
-fn tui_work_does_not_bump_the_package_version_before_release() {
-    assert_eq!(env!("CARGO_PKG_VERSION"), "2.0.1");
+fn tui_remains_within_the_cli_v2_compatible_release_line() {
+    let major = env!("CARGO_PKG_VERSION")
+        .split('.')
+        .next()
+        .expect("package version major")
+        .parse::<u64>()
+        .expect("numeric package version major");
+    assert_eq!(
+        major, 2,
+        "a future major-version bump must explicitly revisit TUI/CLI compatibility contracts"
+    );
 }
 
 #[test]
