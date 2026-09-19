@@ -606,6 +606,59 @@ LBA7，确认同名 `tagEdpPartionInfo` 存在不能混用的 ABI：
 与定向测试固定这一事实。该样本增加的是“真实 profile 行为”覆盖，不改变
 22份原始生成参考集的计数，也不单凭样本值把 Version/NeedDisturb 升级为 COMPLETE。
 
+### LBA7 entry Version / entry1+entry2 NeedDisturb：producer 已前推，consumer 仍未闭合
+
+本轮直接回到官方机器码，而不是沿用旧结构猜测。
+
+\`cemsusbregsiter.dll::sub_10016490\` 的 old->new 转换循环对三条 entry 逐条执行
+\`0x40 -> 0x60\` 映射，并明确复制 \`old+0x04 -> new+0x04\`（Version）和
+\`old+0x10 -> new+0x10\`（NeedDisturb）。\`edpediskctrl.dll::sub_100125B0\`
+的反向 \`0x60 -> 0x40\` 转换同样逐条复制这两个 DWORD，因此二者都是实际 ABI
+字段，而不是反编译器误识别的洞。
+
+对当前官方 writer \`CUsbRegsiter::CreatePartitions/sub_1003DB50\` 再看机器码：
+
+- 开头先 \`memset(old_table, 0, 0xC0)\`，一次清零完整的 \`3*0x40\` old table；
+- 随后显式写 Flag/PartionCount/PartionType/NeedDisturb/NeedEncrypt/几何/CRC/key；
+- 三条 entry 都没有任何 \`+0x04\` 覆盖写，所以当前 writer 的
+  \`Version@+0x04=0\` 来自整表零初始化；
+- 注册调用者对 CreatePartitions 的 NeedDisturb 参数固定传 \`1\`；
+- entry0、entry1 都显式执行 \`NeedDisturb=1\`；
+- entry2 没有对应覆盖写，因此继承整表清零值 \`0\`。
+
+这解释了当前三分区 profile 的 \`1/1/0\`，但也证明它不是按 PartionType
+定义的恒等规则。新纳入的真实免密 SanDisk 是两条 entry：
+type2/entry0 NeedDisturb=1，type4/entry1 NeedDisturb=1；而标准三分区原盘的
+type4/entry2 NeedDisturb=0。仓库新增
+\`lba7_need_disturb_is_not_a_partition_type_invariant\` 门禁，禁止以后把
+\`type4 -> 0\` 写死。
+
+consumer 侧目前得到的是更严格的“只闭合 entry0”结论：
+
+- 两版 Windows \`vrvaud_c\` 的 \`ReadPartionInfoExNew\` 都会把完整 \`0xC0\`
+  packed old table 读入运行时缓冲；
+- \`NewCheckDisTurbUsb\` 与 \`NewCheckDisTurbUsbEx\` 只对
+  entry0 \`NeedDisturb@+0x10\` 做非零门控；
+- 当前 ydcc build 对应 entry1/entry2 NeedDisturb 的全局槽地址没有直接 xref；
+- Linux \`CLabelManage::GetPartionFromOld\` 也只是把 Version/NeedDisturb
+  从 old ABI 搬到 new ABI；
+- Linux \`libedpedisk.so\` 的 \`PartitionHeader\` 构造函数会携带整条
+  \`tagNewEdpPartionInfo\`，但在已扫描的解密/校验路径里没有找到 entry Version
+  或 NeedDisturb 的业务分支。
+
+旧版 \`EdpEDiskCtrl.dll\` 也再次表明：旧 LBA7 被读出后，协议代际由
+14B pass-info Version 决定/被上层固定为 \`0x64\`，并未发现 entry
+\`Version@+0x04\` 用作版本选择。
+
+实盘复核：22份原始生成参考的实际 EDPF entry \`Version@+0x04\` 全部为0；
+新增真实免密 SanDisk 的两条 entry 同样为0。但“当前值恒0 + writer 零来源”
+仍不能替代一个真实 consumer。
+
+因此本轮不升级任何 COMPLETE 字节：entry Version 与 entry1/entry2
+NeedDisturb 继续 PARTIAL。新增
+\`lba7_entry_version_is_not_partition_count_across_real_profiles\` 门禁，
+专门防止再次把 \`PartionCount@+0x08\` 错读成 Version。
+
 ### LBA7 v0x0064 packed legacy file-key wrapping
 
 旧表 `+0x38..+0x3F` 8B wrapped key 本轮完成 producer-consumer 闭合。
@@ -809,6 +862,19 @@ Windows `ChangePwd/sub_10026050` 进一步证明：
   `CEdpEDiskCtrlInterface::Init`：`m_PassInfo+0x0A -> Init输出+0x11`；
   `EdpEDisk.exe` 在初始化时把应用对象 `+0xA4` 作为该输出结构传入，因此该状态会被
   暴露到应用层，但目前没有找到对对应 `app+0xB5` 的直接读取；
+- 本轮把 `+0x0A` producer 再向上追了一层：当前
+  `CUsbRegsiter::CreatePartitions/sub_1003DB50` 先把完整14B pass-info
+  `memset(..., 0, 0x0E)`，随后机器码
+  `1003E78A..1003E790` 明确执行
+  `tail+0x0A = create_arg1+0x109`；而
+  `WriteNormalULabel -> sub_10046E80` 又明确执行
+  `create_arg1+0x109 = UsbWriteParam+0x7EC`。因此 `+0x0A`
+  是注册/制标请求中的显式1B配置输入，不是未初始化噪声或尾部 padding；
+- 同一个 current CreatePartitions 首次建表路径对 `tail+0x0C/+0x0D`
+  没有任何覆盖写；二者直接继承 14B 全零初始化。结合22份原始参考与新增真实免密
+  SanDisk 都为0，可确认当前 writer 的零来源，但仍不能据此把
+  `ShareBackuppromptPeriod/EncryptBackuppromptPeriod` 升级 COMPLETE：
+  历史非零 producer、单位/取值域和最终 consumer 仍未找到；
 - Linux `CDiskReader::ParseSector12` 把完整 14B pass-info 保存到
   `CDiskReader+0x210`。机器码全模块扫描可找到 `Version @+0x210`
   在 `DecryptFileKey` 中的显式读取，却没有找到
@@ -817,8 +883,10 @@ Windows `ChangePwd/sub_10026050` 进一步证明：
 - 当前 22 份原始参考样本中，`bNoUsbChkPasSafe(+0x0A)` 并非恒零：
   **18/22=0、4/22=1**；且每一份样本的 LBA7/LBA12 取值都逐字节一致。
   因此它明确是会随标签状态变化并跨两份表同步保存的真实字段，绝不能归为 padding；
-- `+0x0C/+0x0D` 当前 Windows 主 DLL、另一版 `out_raw_data/EdpEDiskCtrl.dll`
-  与 Linux `libcemsfilesyscheck.so` 均未找到直接消费者；Linux DWARF 只给出
+- `+0x0C/+0x0D` 当前 Windows 主 DLL、另一版 `out_raw_data/EdpEDiskCtrl.dll`、
+  Linux `libcemsfilesyscheck.so`，以及本轮补扫的 Linux
+  `EdpEDiskQt5/EdpEDiskBack/linuxedpedisk` 客户端路径均未找到直接消费者；
+  Linux DWARF 只给出
   `ShareBackuppromptPeriod/EncryptBackuppromptPeriod` 官方字段名。
   当前 22/22 原始参考样本的两字节均为 0；
 - 与 `+0x0B bResetFileKey` 类似，“真实样本全零”不能推出 padding。

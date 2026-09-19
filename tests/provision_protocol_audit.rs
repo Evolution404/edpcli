@@ -246,6 +246,84 @@ fn authentic_no_password_lba7_is_a_real_two_entry_profile_not_a_generated_refere
 }
 
 #[test]
+fn lba7_entry_version_is_not_partition_count_across_real_profiles() {
+    let mut checked_entries = 0usize;
+    for entry in fs::read_dir(FIXTURE_DIR).expect("protocol fixtures") {
+        let path = entry.expect("backup entry").path();
+        if path.extension().and_then(|ext| ext.to_str()) != Some("bin") {
+            continue;
+        }
+        let name = path.file_name().unwrap().to_str().unwrap();
+        let Some(meta) = parse_reference_backup_name(name) else {
+            continue;
+        };
+        let image = fs::read(&path).expect("fixture bytes");
+        let crc = crc32_bare(meta.device_id.as_bytes());
+        let plain = xor_rolling(sector(&image, 7), (crc & 0xffff) ^ (crc >> 16));
+        let count = u32_le(&plain, 0x08) as usize;
+
+        assert!((2..=3).contains(&count), "unexpected LBA7 count: {name}");
+        for index in 0..count {
+            let base = index * 0x40;
+            assert_eq!(&plain[base..base + 4], b"EDPF", "{name} entry {index}");
+            assert_eq!(
+                u32_le(&plain, base + 0x04),
+                0,
+                "entry Version must stay distinct from PartionCount: {name} entry {index}"
+            );
+            assert_eq!(
+                u32_le(&plain, base + 0x08),
+                count as u32,
+                "PartionCount must be stored at +0x08: {name} entry {index}"
+            );
+            checked_entries += 1;
+        }
+    }
+
+    let raw = decode_hex_fixture(SANDISK_AUTHENTIC_NOPASS_LBA7_HEX);
+    let crc = crc32_bare(SANDISK_AUTHENTIC_NOPASS_DEVICE_ID.as_bytes());
+    let plain = xor_rolling(&raw, (crc & 0xffff) ^ (crc >> 16));
+    assert_eq!(u32_le(&plain, 0x08), 2);
+    for base in [0x00, 0x40] {
+        assert_eq!(u32_le(&plain, base + 0x04), 0);
+        assert_eq!(u32_le(&plain, base + 0x08), 2);
+        checked_entries += 1;
+    }
+
+    assert!(
+        checked_entries >= MIN_PROTOCOL_FIXTURES * 3,
+        "protocol audit unexpectedly lost LBA7 Version evidence"
+    );
+}
+
+#[test]
+fn lba7_need_disturb_is_not_a_partition_type_invariant() {
+    let standard = load(LEXAR);
+    let standard_meta = parse_reference_backup_name(LEXAR).expect("Lexar fixture metadata");
+    let standard_crc = crc32_bare(standard_meta.device_id.as_bytes());
+    let standard_lba7 = xor_rolling(
+        sector(&standard, 7),
+        (standard_crc & 0xffff) ^ (standard_crc >> 16),
+    );
+    assert_eq!(u32_le(&standard_lba7, 0x80 + 0x0c), 4);
+    assert_eq!(
+        u32_le(&standard_lba7, 0x80 + 0x10),
+        0,
+        "standard three-entry type4 profile changed"
+    );
+
+    let raw = decode_hex_fixture(SANDISK_AUTHENTIC_NOPASS_LBA7_HEX);
+    let crc = crc32_bare(SANDISK_AUTHENTIC_NOPASS_DEVICE_ID.as_bytes());
+    let no_password_lba7 = xor_rolling(&raw, (crc & 0xffff) ^ (crc >> 16));
+    assert_eq!(u32_le(&no_password_lba7, 0x40 + 0x0c), 4);
+    assert_eq!(
+        u32_le(&no_password_lba7, 0x40 + 0x10),
+        1,
+        "authentic two-entry type4 profile must remain positive"
+    );
+}
+
+#[test]
 fn lba12_v206_hidden_default_password_wraps_real_mode2_file_keys() {
     const DEFAULT_USER_KEY_CRC: u32 = 0x0429_735d;
     const HIDDEN_PASSWORD_MD5: [u8; 16] = [

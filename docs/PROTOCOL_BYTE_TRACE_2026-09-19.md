@@ -1254,6 +1254,58 @@ for each partition:
     entry.EncryptMode   = mode
 ```
 
+### 6.0 entry Version 与 entry1/entry2 NeedDisturb：producer 已闭合到赋值来源，consumer 仍缺
+
+本轮直接验证 Windows 官方 PE 机器码：
+
+- \`cemsusbregsiter.dll::sub_10016490\` 按 \`0x40 -> 0x60\` 遍历三条 old entry，
+  明确复制 \`Version@+0x04\` 与 \`NeedDisturb@+0x10\`；
+- \`edpediskctrl.dll::sub_100125B0\` 的 \`0x60 -> 0x40\` 反向转换也逐条复制二者；
+- 因此它们确实属于物理 old ABI 字段，而不是 padding。
+
+当前 writer \`CUsbRegsiter::CreatePartitions/sub_1003DB50\` 的真实赋值序列是：
+
+\`\`\`text
+memset(old_table, 0, 3 * 0x40)
+
+# entry Version
+entry0.Version = 0        # 三条都没有 +0x04 覆盖写
+entry1.Version = 0
+entry2.Version = 0
+
+# NeedDisturb
+caller passes need_disturb = 1
+entry0.NeedDisturb = need_disturb
+entry1.NeedDisturb = need_disturb
+entry2.NeedDisturb = 0    # 没有覆盖写，保留 memset
+\`\`\`
+
+这与原始三分区实盘的 \`1/1/0\` 完全一致，也解释了为何不能把 NeedDisturb
+理解成 \`PartionType\` 的函数：新增真实免密 SanDisk 的两条表中，
+type4 位于 entry1，因此其 NeedDisturb=1；标准三分区 type4 位于 entry2，
+NeedDisturb=0。回归测试
+\`lba7_need_disturb_is_not_a_partition_type_invariant\`
+固定这一 profile/位置差异。
+
+consumer 继续向下追踪后的边界：
+
+- 两版官方 \`vrvaud_c\` 都把完整 packed old table 读入缓冲；
+- \`NewCheckDisTurbUsb\` / \`NewCheckDisTurbUsbEx\` 实际只检查
+  entry0 \`NeedDisturb@+0x10\`；
+- 当前 ydcc build 中 entry1/entry2 对应槽没有直接 xref；
+- Linux \`CLabelManage::GetPartionFromOld\` 对 Version/NeedDisturb 只是 ABI 搬运；
+- Linux \`PartitionHeader\` 体系会携带整条 new entry，但已扫描的解密/校验方法没有
+  发现这两个字段参与行为分支；
+- 旧 Windows \`EdpEDiskCtrl\` 读取 old LBA7 后，实际协议代际仍由
+  14B pass-info Version 决定，不依赖 entry \`Version@+0x04\`。
+
+实盘方面，22份原始生成参考的全部有效 entry 与新增真实免密 SanDisk 两条 entry
+均为 \`Version@+0x04=0\`。这足以闭合“当前 writer 为什么是0”和字段物理边界，
+但按本项目 COMPLETE 标准，没有业务 consumer 就不升级：
+entry Version 与 entry1/entry2 NeedDisturb 继续 PARTIAL。
+\`lba7_entry_version_is_not_partition_count_across_real_profiles\`
+同时锁死 \`+0x04 Version\` / \`+0x08 PartionCount\` 的边界，防止旧解析错误复发。
+
 ### 6.1 entry0 NeedDisturb：4B 已完整闭合
 
 Producer：
