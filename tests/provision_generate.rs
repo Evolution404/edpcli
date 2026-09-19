@@ -135,6 +135,11 @@ fn generated_image_is_structurally_complete_nopwd_metadata() {
         2
     );
     assert_eq!(
+        u32::from_le_bytes(lba12.decoded[0x10..0x14].try_into().unwrap()),
+        1,
+        "legacy NewCheckDisTurbUsb fallback consumes entry0 +0x10 and only accepts nonzero"
+    );
+    assert_eq!(
         u32::from_le_bytes(lba12.decoded[0x6c..0x70].try_into().unwrap()),
         4
     );

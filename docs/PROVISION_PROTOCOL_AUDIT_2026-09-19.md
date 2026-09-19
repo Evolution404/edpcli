@@ -325,7 +325,7 @@ Provision 也已按官方 writer 修正：
 | +0x04 | 4 | Version/entry-local field | 部分已知 | Windows writer/样本均多为0；实际消费语义未闭合 |
 | +0x08 | 4 | PartionCount | 已知 | 写端来源 + 当前22/22均等于实际连续条目数 + Linux字段名 |
 | +0x0C | 4 | PartionType | 已知 | 1=Boot / 2=Share / 4=Encrypt；Windows/Linux运行时均消费 |
-| +0x10 | 4 | NeedDisturb | 部分已知 | Linux字段名、Windows写端来源、Windows/Linux主运行时负消费证据已知；仍无正向行为消费者 |
+| +0x10 | 4 | NeedDisturb | 部分已知（entry0兼容行为闭合） | Linux字段名、Windows写端来源；旧版 vrvaud_c 的 NewCheckDisTurbUsb(*) fallback 直接以 entry0 +0x10 非零作为 success 门控；其它 entry/新版主路径的业务作用仍未闭合 |
 | +0x14 | 4 | NeedEncrypt | 已知 | Windows InitDiskInfo/UserLogin 实际消费；0=unencrypted，1=启用透明加密 |
 | +0x18 | 8 | StartSector | 已知 | 写端计算、挂载端使用 |
 | +0x20 | 8 | SectorSize | 已知 | 实盘=512；布局/挂载使用 |
@@ -361,8 +361,7 @@ Provision 也已按官方 writer 修正：
   `There are unencrypted!`；
 - 所以该字段可定性为：0=该分区不启用透明加密，1=启用透明加密。
 
-`NeedDisturb` 目前闭合到“字段名 + 写端来源 + 当前主运行时负消费证据”，
-但仍**没有找到正向行为消费者**：
+`NeedDisturb` 已补到“字段名 + 写端来源 + 正向兼容消费路径”，但这个结论有明确版本边界：
 
 - Windows writer 直接写入 `CreatePartitions(arg2)`；
 - 对已逆向的标准三分区创建分支，写端结果已经按 96B entry 基址重新核对：
@@ -372,7 +371,7 @@ Provision 也已按官方 writer 修正：
 - 排除 edpcli 自生成的 `_nopwd_` 备份后，当前真实参考样本全部与该 writer profile 一致：
   type1=1、type2=1、type4=0；
 - 这说明“真实参考集 + 当前 Windows writer”目前没有冲突，但仍不能把它升级成
-  `PartionType -> NeedDisturb` 的协议恒等式，因为尚未找到真正的运行时消费者；
+  `PartionType -> NeedDisturb` 的协议恒等式；
 - Windows `UserLogin` 真实机器码与 `EdpMountFile` 参数结构已经对齐：
   `NeedEncrypt`、StartSector、PartionSize、FileKey、FileKeyCRC、EncryptMode 会进入挂载参数，
   但 `NeedDisturb` 没有进入当前用户态→挂载库→驱动参数链；
@@ -384,9 +383,31 @@ Provision 也已按官方 writer 修正：
   `PartitionHeader` 构造函数把 `NeedDisturb/NeedEncrypt` 这一 8B 保存到对象
   `+0x50..+0x57`。继续扫描 `PartitionHeader*` 方法后，未找到构造之后对对象
   `+0x50/+0x54` 的业务读取或分支；
-- 因此它可以确认是“真实协议字段 + 已知生成规则”，但**当前运行时行为仍未闭合**。
-  当前证据更接近“被保留/透传的兼容字段”，但不能据此升级为“协议全局无效字段”；
-  禁止按字段名直接翻译为“扰码开关”“激活”“只读”等具体功能。
+- 旧版 `vrvaud_c.m::ReadPartionInfoExNew` 会将解出的 packed EDPF table
+  复制到全局 `0x1020BF40`；同文件 `sub_1003c5d0` 用
+  `base+0x0C+i*0x60` 读取 type 1/2/4，证明该全局区确实是 96B stride 表；
+- 因此 `dword_1020BF50 = base+0x10` 精确落在 **entry0.NeedDisturb**。
+  `NewCheckDisTurbUsb` 和 `NewCheckDisTurbUsbEx` 在
+  `ReadPartionInfoExNew == EDP_SUCCESS` 后都执行：
+  `if (entry0.+0x10 != 0) { out=1; success=1; }`；
+- Windows 10 驱动包的另一套 `vrvaud_c.m` 独立出现同样布局：
+  table base=`0x10172520`、type=`base+0x0C+i*0x60`、
+  判断=`dword_10172530 = base+0x10`；
+- 上层 `AllCheckModeUsb` 会把 `NewCheckDisTurbUsb(*)` 成功结果作为一条
+  独立识别/处理分支继续执行，因此这不是仅复制后从不读取的死字段；
+- 2026-06-29 Aigo U335 的真实客户端日志证明
+  `NewCheckDisTurbUsb -> GetNewTagePartionInfo -> AllCheckModeUsb`
+  是实际运行路径；但该次走的是新版 `GetNewTagePartionInfo` 成功分支，
+  **不能**冒充 fallback `+0x10` 判断的动态实测。
+
+因此能闭合的行为只到：
+**entry0 +0x10 是旧版/兼容 NewCheckDisTurbUsb fallback 的 success 门控位。**
+这仍不足以把字段名翻译为“扰码开关”“防篡改”“激活”“只读”等更具体功能。
+新版主路径和 Linux 主挂载链仍可能只保留/透传该字段。
+
+对 Provision 的直接约束是：canonical Share/entry0 的 `NeedDisturb`
+必须保持非零；新增生成回归锁定 `entry0+0x10 == 1`。
+这条消费者只读 entry0，不能据此推导 type4 的固定取值。
 
 ### LBA12 pass-info：密码状态组进一步闭合
 
@@ -528,7 +549,7 @@ Windows `edpediskctrl.dll` 同时给出读端和写端：
 - LBA4 onlyID2Nd 及关联动态字段的生成源；
 - LBA0 全新盘 bootstrap 的官方来源；
 - LBA6 0x1c0..0x1ed 不同格式代际的准确字段来源。
-- LBA12 NeedDisturb 的真实运行时行为；
+- LBA12 NeedDisturb 在新版主路径中的进一步业务作用（旧版 fallback 门控已闭合）；
 - LBA12 +0x48..+0x57 扩展材料槽在主盘面中的确切用途；
 - LBA12 +0x59..+0x5f 是否仅为所有版本共同 padding；
 - LBA12 表尾 `+0x0A/+0x0C/+0x0D` 的准确跨组件消费语义。

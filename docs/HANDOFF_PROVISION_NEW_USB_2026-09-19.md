@@ -48,8 +48,11 @@ LBA12 必须继续按“**结构已知 != 语义已知**”的严格口径推进
 3. LBA12 实现已统一为整扇 512B 连续 A6B0：inspect / 旧盘 convert /
    Provision builder / validator 均已去掉“368B 密文 + 144B RAW”的实现；
    `0x170` 仅保留为 `EDPF_TABLE_LEN`。旧盘转换 golden 14/14 哈希不变。
-   下一步继续追 `NeedDisturb(+0x10)` 的旧版正向消费者，以及 pass-info
-   `+0x0A/+0x0C/+0x0D` 的跨组件消费；
+   `NeedDisturb(+0x10)` 已找到旧版正向消费者：
+   `NewCheckDisTurbUsb(*)` fallback 直接以 entry0 +0x10 非零作为 success 门控，
+   且两套 Windows 构建独立一致；canonical Share/entry0 必须保持非零。
+   下一步优先追 pass-info `+0x0A/+0x0C/+0x0D` 的跨组件消费，以及
+   NeedDisturb 在新版主路径/其它 entry 中是否还有附加作用；
 4. LBA4 `OnllyID2Nd/HSerialCRC[5]` 已恢复官方结构；继续追非当前 writer
    profile 的 HSerialCRC 上游；
 5. 回到 LBA0/LBA3/LBA7/LBA11 的剩余非 canonical / 代际差异。
