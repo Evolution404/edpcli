@@ -122,7 +122,7 @@ checksum = "7cd812cc2bc1d69d4764bd80df88b4317eaef9e773c75226407d9bc0876b211c"
 
 [[package]]
 name = "edpcli"
-version = "2.1.0"
+version = "2.2.0"
 dependencies = [
  "crossterm",
  "encoding_rs",
