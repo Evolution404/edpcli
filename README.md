@@ -169,7 +169,25 @@ edpcli completion fish | source
 
 ## 开发与验证
 
-项目工具链由 `rust-toolchain.toml` 固定。常用门禁：
+项目工具链由 `rust-toolchain.toml` 固定。首次克隆后安装仓库管理的 Git hook：
+
+```bash
+# macOS / Linux
+./scripts/install-git-hooks.sh
+```
+
+```powershell
+# Windows
+.\\scripts\\install-git-hooks.ps1
+```
+
+安装器会设置 `core.hooksPath=.githooks`。之后每次 `git commit` 前，pre-commit
+会自动对已暂存的 Rust 文件执行 `rustfmt --edition 2021` 并重新暂存；如果同一个 Rust
+文件同时存在已暂存和未暂存修改，则 fail-closed，避免自动格式化把额外改动带进提交。
+通过 GitHub/API 等不会执行本地 hook 的提交路径，仓库 `AGENTS.md` 仍要求在每次提交前
+显式执行 `cargo fmt --all`。
+
+常用门禁：
 
 ```bash
 cargo fmt --all -- --check
@@ -177,6 +195,6 @@ cargo test --all-targets --locked
 cargo clippy --all-targets --locked -- -D warnings
 ```
 
-CI 在 macOS、Linux、Windows 的 arm64 / x86_64 六个目标上执行测试、clippy 和构建；
+CI 继续保留 `cargo fmt --all -- --check` 作为最终兜底，并在 macOS、Linux、Windows 的 arm64 / x86_64 六个目标上执行测试、clippy 和构建；
 Linux/Windows 另有 arm64 / x86_64 virtual-disk HIL。正式 Release 同时发布六个原生包，
 macOS 额外发布 Universal 包。
