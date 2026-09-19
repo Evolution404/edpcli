@@ -385,11 +385,7 @@ fn run_loop(resume: Option<state::WriteIntent>) -> io::Result<LoopExit> {
                             if let Some((path, expected_md5)) =
                                 state.submit_backup_delete_confirmation()
                             {
-                                tasks.request_backup_delete(
-                                    path,
-                                    expected_md5,
-                                    backup_dir.clone(),
-                                );
+                                tasks.request_backup_delete(path, expected_md5, backup_dir.clone());
                             }
                             continue;
                         }
