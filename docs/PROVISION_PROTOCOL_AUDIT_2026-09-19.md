@@ -132,14 +132,102 @@
   - 1 份历史中间态：LBA7=2 / LBA12=3。
 - 因此 `+0x08` 必须命名为 `partition_count` / `PartionCount`；表格式代际不能再从该字段推断。
 
-### LBA12 24B material 的当前拆分
+### LBA12：主运行时盘面是 96B packed entry；不要与 104B 检查结构混用
+
+对 LBA12 的“已知”采用更严格标准：**只知道 offset、长度或结构名，不等于知道字段语义**。
+只有写端来源、读端消费、取值语义至少两项闭合，才计为“已知”；否则一律降为“部分已知”。
+
+主运行时盘面 96B stride 已由两套独立代码闭合：
+
+- Windows `cemsusbregsiter.dll::CreatePartitions` 构造 3 个 `0x60` entry，并把
+  `0x120 = 3 * 0x60` 字节写入 LBA12 entry 区；
+- Linux 挂载库 `libedpedisk.so::EdpDiskLayoutTagePartV2::LayoutParsedata`
+  从物理扇区复制 **0x120B**，随后从物理 `+0x120` 读取 14B 表尾，并验证版本 0x206；
+- `libedpedisk.so::Volume::GetPartitionHeader` 只按 96B entry 复制 `+0x00..+0x5f`，
+  并直接读取 `entry+0x58` 的低 1B 做算法分派。
+
+`libcemsfilesyscheck.so` 的 DWARF 还存在一个 **104B** `tagNewEdpPartionInfo`
+（0x68），其 `BuildSector12(version=0x206)` 会处理 312B = 104×3，并使用
+`+0x138` 表尾。这是文件系统检查/修复组件的扩展结构，不得反向覆盖主盘面的
+96B packed layout。
+
+### LBA12 96B packed entry：当前字段置信度
+
+| 偏移 | 长度 | 当前名称 | 当前置信度 | 证据/限制 |
+|---|---:|---|---|---|
+| +0x00 | 4 | Flag = `EDPF` | 已知 | 写端固定写入；读端判 magic |
+| +0x04 | 4 | Version/entry-local field | 部分已知 | Windows writer/样本均多为0；实际消费语义未闭合 |
+| +0x08 | 4 | PartionCount | 已知 | 写端来源 + 实盘条目数 23/23 + Linux字段名 |
+| +0x0C | 4 | PartionType | 已知 | 1=Boot / 2=Share / 4=Encrypt；Windows/Linux运行时均消费 |
+| +0x10 | 4 | NeedDisturb | 部分已知 | Linux字段名、Windows写端来源已知；主运行时行为仍未闭合 |
+| +0x14 | 4 | NeedEncrypt | 已知 | Windows InitDiskInfo/UserLogin 实际消费；0=unencrypted，1=启用透明加密 |
+| +0x18 | 8 | StartSector | 已知 | 写端计算、挂载端使用 |
+| +0x20 | 8 | SectorSize | 已知 | 实盘=512；布局/挂载使用 |
+| +0x28 | 8 | PartionSize | 已知 | 写端计算、UserLogin/mount 参数实际消费 |
+| +0x30 | 4 | UserKeyCRC | 已知 | 密码校验链消费；默认密码CRC已复算 |
+| +0x34 | 4 | FileKeyCRC | 已知 | 解 wrapped key 后 CRC 校验；Windows UserLogin 明确比较 |
+| +0x38 | 16 | wrapped file-key material | 部分已知 | 读端明确消费；默认样本可独立解包闭合，但通用生成源/非默认分支仍未闭合 |
+| +0x48 | 16 | extension / alternate key-material slot | 部分已知 | Windows writer 当前零初始化且样本全零；扩展 Linux 104B 结构有同类 `EncryptFileKey32`，但 packed 对应关系与用途未完全证明 |
+| +0x58 | 1 | EncryptMode | 已知 | Windows writer/reader + Linux挂载分派；见下方支持矩阵 |
+| +0x59 | 7 | padding/reserved | 部分已知 | 当前 writer 零初始化、样本全零；未证明所有版本都必须为零 |
+
+`EncryptMode` 的枚举由 Linux DWARF 直接给出：
+
+- 0 = `eEncryptAES64`
+- 1 = `eEncryptAES128`
+- 2 = `eEncryptSMS4`
+- 3 = `eEncryptAESOPENSSL`
+
+但**枚举存在不等于每个组件都实际支持**：
+
+- `libedpedisk.so::GetPartitionHeader` 主挂载路径：0→OldEdp，1→AES128，2→SMS4；
+  其它值在该 build 不创建可用 header；
+- `libcemsfilesyscheck.so::fileKey_Decrypt` 当前 build 只实现 mode=1/2；
+- Windows writer 有 1/2/3 的 wrapped-key 写入分支；
+- Windows `UserLogin` 对 mode=3 有“先按3解，CRC失败后按1重试”的兼容路径。
+
+因此不能把“0/1/2/3”简单写成统一跨版本算法支持表。
+
+`NeedEncrypt` 已由 Windows 运行时代码闭合：
+
+- `InitDiskInfo` 在 Share entry 上读取 `entry+0x14` 并保存到运行时状态；
+- `UserLogin` 在 Share 存在但该状态为 0 时直接记录
+  `There are unencrypted!`；
+- 所以该字段可定性为：0=该分区不启用透明加密，1=启用透明加密。
+
+`NeedDisturb` 目前只闭合到“字段名 + 写端来源”：
+
+- Windows writer 直接写入 `CreatePartitions(arg2)`；
+- 当前注册主调用路径传 1，但历史盘样本同时存在 0/1；
+- 尚未找到足够可靠的主运行时消费路径，禁止把它解释成“激活”“只读”或其它具体行为。
+
+按上述严格口径，Windows/Linux 主运行时 96B packed LBA12 当前逐字节进度为：
+
+- **已知 363B / 512B（70.9%）**
+  - 三个 entry 中语义闭合字段：49B/entry，共 147B；
+  - 表尾已闭合字段：6B；
+  - `0x12e..0x1ff`：210B，写端零初始化且主读端不消费，可定性为 post-table zero padding；
+- **部分已知 141B / 512B（27.5%）**
+  - 三个 entry 各 47B：Version、NeedDisturb、wrapped key 的通用生成关系、扩展材料槽、尾部 reserved/padding；
+- **未知 8B / 512B（1.6%）**
+  - 14B 表尾中除版本和两组 retry max/current 之外的 8B 状态/保留位。
+
+这组数字只描述**主运行时 96B packed 格式**；不把 `libcemsfilesyscheck.so`
+的 104B 扩展结构混入统计。
+
+### LBA12 wrapped material 的当前拆分
 
 LBA12 entry `+0x30..+0x47`：
 
 - `+0x30..+0x33`：`CRC32_bare(password)`；默认 `"0000aaaa" -> 0x0429735D`。
 - `+0x34..+0x37`：`CRC32_bare(file_key)`。
-- `+0x38..+0x47`：16B wrapped/salt material。
-- 对默认密码体系，用独立 SM4 实现复算 `salt16 -> file_key -> CRC32(file_key)`，23 份中 22 份完整闭合；唯一异常样本同时存在不同 entry 密码/material，按自定义密码或另一 key-material 分支继续追踪，不强行归入默认路径。
+- `+0x38..+0x47`：16B wrapped file-key material。
+- 对默认样本，用独立 SM4 实现复算 `wrapped16 -> file_key -> CRC32(file_key)`，
+  历史 23 份中 22 份可在观察到的默认关系下闭合；唯一异常样本同时存在不同
+  UserKeyCRC/material。
+- 这只能证明当前样本的**解包关系**，不能证明所有版本的 wrapped-key **生成源**。
+  尤其旧文档中固定字符串 `LtSWi[2f)j` 的来源存在组件间矛盾，因此不得升级为
+  通用 Provision 生成规则。
 
 ### LBA9/LBA10 的非零形态
 
@@ -166,7 +254,7 @@ LBA12 entry `+0x30..+0x47`：
 | 9 | 高度闭合 | EETU/SAPF/EPPE 三块及全零形态已区分 |
 | 10 | 部分闭合 | 可选 EESI 已确认；canonical nopwd 可零 |
 | 11 | 高度闭合 | DRKB/random252/ASCII VID-PID/size/PDKB 链已锁 |
-| 12 | 高度闭合 | 整扇加密、96B EDPF、24B material 拆分已锁；表尾状态和非默认 wrapped-key 分支继续追 |
+| 12 | 中度闭合 | 主运行时 96B packed layout 已锁，但多个标志/扩展材料/表尾状态仅结构已知；禁止把“entry边界已知”当成“entry语义已知” |
 
 ## 尚不能猜测的材料
 
@@ -175,6 +263,10 @@ LBA12 entry `+0x30..+0x47`：
 - LBA4 onlyID2Nd 及关联动态字段的生成源；
 - LBA0 全新盘 bootstrap 的官方来源；
 - LBA6 0x1c0..0x1ed 不同格式代际的准确字段来源。
+- LBA12 NeedDisturb 的真实运行时行为；
+- LBA12 +0x48..+0x57 扩展材料槽在主盘面中的确切用途；
+- LBA12 +0x59..+0x5f 是否仅为所有版本共同 padding；
+- LBA12 表尾 +0x02/+0x05/+0x0a 等状态字节的准确语义。
 
 这些内容不得从当前插入 donor 盘复制，也不得以全零替代。实现中把它们显式建模为
 ProvisionEntropy / ProvisionProfile 材料；纯 builder 只消费已经验证的输入。
@@ -195,5 +287,7 @@ tests/provision_protocol_audit.rs 固化以下事实：
 - LBA11 固定 DRKB magic、ASCII VID/PID CRC 输入和 PDKB 明文结构；
 - LBA12 是完整 512B 连续密文，解密后 144B tail 为零；
 - LBA7/LBA12 `+0x08` 等于连续 EDPF 条目数。
+- LBA12 主运行时格式固定为 96B×3，14B 表尾在 `0x120`；
+- LBA12 `+0x48..+0x57` 与 `+0x59..+0x5f` 当前样本为零，但测试只锁“观察事实”，不把零值升级成已知语义。
 
 Phase 1 以后不得绕过这些门禁，也不得把未知区域重新退化为 donor copy。

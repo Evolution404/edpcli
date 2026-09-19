@@ -393,6 +393,89 @@ fn edpf_offset_08_is_partition_count_in_both_tables() {
 }
 
 #[test]
+fn lba12_main_runtime_layout_is_three_packed_96_byte_entries_plus_tail_at_0x120() {
+    let mut checked = 0usize;
+    for entry in fs::read_dir(FIXTURE_DIR).expect("protocol fixtures") {
+        let path = entry.expect("backup entry").path();
+        if path.extension().and_then(|ext| ext.to_str()) != Some("bin") {
+            continue;
+        }
+        let name = path.file_name().unwrap().to_str().unwrap();
+        let Some(meta) = parse_backup_name(name) else {
+            continue;
+        };
+        let image = fs::read(&path).expect("fixture bytes");
+        let crc = crc32_bare(meta.device_id.as_bytes());
+        let plain = a6b0_full(sector(&image, 12), &crc.to_le_bytes(), 0);
+
+        let count = u32_le(&plain, 8) as usize;
+        assert!((2..=3).contains(&count), "{name}");
+        for index in 0..count {
+            let base = index * 0x60;
+            assert_eq!(&plain[base..base + 4], b"EDPF", "entry {index} {name}");
+        }
+        if count < 3 {
+            let base = count * 0x60;
+            assert!(
+                plain[base..0x120].iter().all(|byte| *byte == 0),
+                "unused packed entries are not zero: {name}"
+            );
+        }
+
+        // The packed Windows/Linux mount format ends after 3 * 0x60 bytes.
+        // The 14-byte table tail begins at 0x120; do not reinterpret 0x120 as
+        // another 104-byte-entry payload from the filesystem-check component.
+        let tail = decode_edpf_tail(&plain[0x120..0x12e]);
+        assert_eq!(u16::from_le_bytes([tail[0], tail[1]]), 0x0206, "{name}");
+        checked += 1;
+    }
+    assert!(
+        checked >= MIN_PROTOCOL_FIXTURES,
+        "protocol audit unexpectedly lost fixtures"
+    );
+}
+
+#[test]
+fn lba12_packed_entry_unresolved_extension_bytes_are_observationally_zero() {
+    let mut checked = 0usize;
+    for entry in fs::read_dir(FIXTURE_DIR).expect("protocol fixtures") {
+        let path = entry.expect("backup entry").path();
+        if path.extension().and_then(|ext| ext.to_str()) != Some("bin") {
+            continue;
+        }
+        let name = path.file_name().unwrap().to_str().unwrap();
+        let Some(meta) = parse_backup_name(name) else {
+            continue;
+        };
+        let image = fs::read(&path).expect("fixture bytes");
+        let crc = crc32_bare(meta.device_id.as_bytes());
+        let plain = a6b0_full(sector(&image, 12), &crc.to_le_bytes(), 0);
+        let count = u32_le(&plain, 8) as usize;
+
+        for index in 0..count {
+            let base = index * 0x60;
+            assert!(
+                plain[base + 0x48..base + 0x58]
+                    .iter()
+                    .all(|byte| *byte == 0),
+                "entry {index} +0x48..+0x57 changed: {name}"
+            );
+            assert!(
+                plain[base + 0x59..base + 0x60]
+                    .iter()
+                    .all(|byte| *byte == 0),
+                "entry {index} +0x59..+0x5f changed: {name}"
+            );
+        }
+        checked += 1;
+    }
+    assert!(
+        checked >= MIN_PROTOCOL_FIXTURES,
+        "protocol audit unexpectedly lost fixtures"
+    );
+}
+
+#[test]
 fn edpf_tail_has_version_and_password_retry_fields_not_a_terminator() {
     let mut checked = 0usize;
     let mut saw_lba7_v64 = false;
