@@ -332,10 +332,12 @@ fn decode_lba4(raw: &[u8]) -> Option<(Vec<u8>, u32, String, u32, usize, usize)> 
         let region = &raw[0x18..];
         let x = xor_rolling(region, k0);
         dec[0x18..].copy_from_slice(&x);
-        for (i, &v) in region.iter().enumerate() {
-            if v == 0 {
-                dec[0x18 + i] = 0;
-            }
+        // Short-form LBA4 leaves the whole extension gap physically unwritten.
+        // Only that *region-level* all-zero condition is special.  A zero byte
+        // inside an actually written rolling-XOR region is valid ciphertext and
+        // must still be decrypted.
+        if raw.len() >= 0x1fc && raw[0x47..0x1fc].iter().all(|byte| *byte == 0) {
+            dec[0x47..0x1fc].fill(0);
         }
     }
     Some((dec, serial, text, k0, hs, he))

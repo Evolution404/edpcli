@@ -1,7 +1,7 @@
 # 新 U 盘 Provision 协议审计（Phase 0）
 
 日期：2026-09-19
-范围：历史审计使用 23 份真实设备前部快照；仓库当前保留 7 份裁剪后的 LBA0–12 协议夹具。全程只读，不对物理 raw disk 写入。
+范围：旧审计集合共 23 份前部快照，但其中混入免密/实验态，不能再统称“23 份真实原盘”。当前生成协议参考集改为 22 份只读样本：`nopwd_tool/backup` 中 21 份非免密完整备份 + 1 份独立 SanDisk 原始加密盘；仓库保留 7 份裁剪后的原始 LBA0–12 协议夹具。全程只读，不对物理 raw disk 写入。
 
 ## 结论
 
@@ -17,9 +17,9 @@
    - 因此新盘可由目标 device_id 纯生成该区域，不复制 donor。
 
 3. 当前提交样本中的空白扇区策略已经有真实样本证据，但“当前样本全零”不等于协议上永远保留。
-   - LBA1、2、5、10：历史 23 份样本均为全零。
-   - LBA3：22 份为全零；唯一非零样本带 Kingston 制造标记 this is mp mark，同型号另一真实样本仍为全零。
-   - 外部逆向资料库 `/Users/zhangyuxi/Desktop/u_disk` 中存在真实非零 LBA10：前 0x80 经 A6B0 解密后为 `EESI`，后 0x180 物理全零。因此 LBA10 是可选设置扇区，不应继续命名为“保留扇区”。
+   - LBA1、2、5：当前 22 份生成协议参考样本全部为全零。
+   - LBA3：21 份为全零；唯一非零样本带 Kingston 制造标记 `this is mp mark`，同型号另一真实样本仍为全零。
+   - LBA10：21/22 全零；唯一非零样本就是独立 SanDisk 原始加密盘，前 0x80 经 A6B0 解密后为 `EESI`，后 0x180 物理全零。因此 LBA10 是可选设置扇区，不应继续命名为“保留扇区”。
    - 官方 `RegsiterUsb` 主路径中的 `0x0d` 已确认是 sector count=13；从 LBA0 开始连续读写，协议范围因此严格为 **LBA0–LBA12**。当前 backup / inspect / Provision / restore 都统一使用这 13 个扇区。
 
 4. LBA8 的 GLAB canonical 值在所有可解码样本中一致：
@@ -40,7 +40,9 @@
 
 ## 逐字节复核新增结论（2026-09-19）
 
-以下结论不是直接采信 `u_disk` 文档，而是先用历史 23 份真实前部镜像重新独立复算，再把关键变体裁剪为当前仓库中的 7 份 LBA0–12 协议夹具；`u_disk` 只作为候选结论和反编译入口。
+以下结论不是直接采信 `u_disk` 文档，而是先用历史真实前部镜像重新独立复算，再把关键变体裁剪为当前仓库中的 LBA0–12 协议夹具；`u_disk` 只作为候选结论和反编译入口。
+
+**证据口径更新（2026-09-19）：免密转换快照是 edpcli/旧工具自己生成的产品态，只能用于产品回归，禁止作为“原始加密标签如何生成”的证据。旧 23 份集合实际由 `nopwd_tool/backup` 的 22 份 + `no_password_disk4` 的 SanDisk 免密快照组成；其中 Aigo U335 `onlyid=2071754312 @ 12:09:32` 也已由 MBR/LBA6/LBA7/LBA12 内容确认是转换后的免密状态。当前生成协议参考集使用 21 份非免密完整备份，再补入独立 SanDisk 原始加密盘，共 22 份。已知局部实验态按 LBA 单独降权，不把一个被改过的扇区用于推导该扇区原始 writer 规则。仓库 `tests/provision_protocol_audit.rs` 同时显式排除 `_nopwd_` 夹具。**
 
 ### LBA4：短版必须按区段解码，不能按单字节 0 特判
 
@@ -48,15 +50,52 @@
 - `0x18..0x46`：有效 rolling-XOR 密文区，必须无条件按 16 位 word 解码；密文字节自然等于 0 也不能跳过。
 - `0x47..0x1fb`：前部短版中可能整段未写而保持物理零；完整版中该区存在密文。
 - `0x1fc..0x1ff`：尾部 rolling-XOR 锚点，解密后为 `LLGB`。
-- 新的“按区段处理”规则对 23/23 样本全部恢复：
+- 新的“按区段处理”规则对当前 22/22 参考样本全部恢复：
   - `0x39..0x3c == "LLGB"`；
   - `0x1fc..0x1ff == "LLGB"`；
   - `u32@0x18 == onlyid ^ 0x88888888`。
-- 现有 `inspect.rs` 的“raw 单字节为 0 就恢复成 0”规则会把真实样本 `onlyid=949028302` 的 `LLGB` 错解为 `\0LGB`，必须修正。
+- 旧 `inspect.rs` 的“raw 单字节为 0 就恢复成 0”规则会把真实样本 `onlyid=949028302` 的 `LLGB` 错解为 `\0LGB`；本轮已改为只在整个 `0x47..0x1fb` 未写区全零时保留该区物理零，修复后当前 22/22 参考样本均恢复双 `LLGB` 锚点。
+
+#### LBA4 `0x18..0x46` 官方结构与第二 ID
+
+Linux DWARF 恢复出 `edpdiskglobal.h::tagEdpPartionRestorInfoNode`，总长 `0x2F`，正好对应 LBA4 `0x18..0x46`：
+
+- `+0x00` / LBA4 `+0x18`：`OnlyIdXor8`，读写两端均闭合为 `onlyid ^ 0x88888888`；
+- `+0x04` / LBA4 `+0x1C`：`OnllyID2Nd`；
+- `+0x08..+0x1B` / LBA4 `+0x20..+0x33`：`HSerialCRC[5]`；
+- `+0x1C` / LBA4 `+0x34`：`SingleUsbFlg`；
+- `+0x1D..+0x20` / LBA4 `+0x35..+0x38`：`MyHardinfo`；
+- `+0x21..+0x24` / LBA4 `+0x39..+0x3C`：`NewLabFlag`，当前样本为 `LLGB`；
+- `+0x25..+0x28` / LBA4 `+0x3D..+0x40`：`Version`；
+- `+0x29..+0x2C` / LBA4 `+0x41..+0x44`：四个 sector 字段；
+- `+0x2D/+0x2E` / LBA4 `+0x45/+0x46`：两个 server flag。
+
+Linux DWARF 同时恢复 `diskfile.h::UsbLabelParam`：`+0x278..+0x28B = HDOnlySerial[5]`，`+0x28C..+0x2AB = szOnlyID[32]`。该结构嵌在 Windows `CUsbRegsiter object+0x2E0`，所以此前把 `object+0x55C` 直接叫作 `onlyID2Nd` 是错误的；`object+0x55C` 实际只是 `HDOnlySerial[1]`。
+
+当前 Windows 新建分支的真实写链是：`object+0x698 -> node.OnllyID2Nd`，而 `object+0x698` 已闭合为 `CoCreateGuid -> GUID raw 16B -> CRC32_bare -> main onlyid`。同时 `object+0x558..0x568 -> HSerialCRC[5]`。因此当前 writer profile 的第二 ID 等于本次新生成的 main onlyid。
+
+当前 22 份参考样本分三组：
+
+- 6/22：`OnllyID2Nd == main onlyid` 且 `HSerialCRC[5] == 0`，完全吻合当前 Windows writer；
+- 14/22：`HSerialCRC[5]` 固定为 `00001D29, 0000007B, 000004DD, 00000079, 0000007C`，跨 Aigo/Lexar/Netac 等厂商复用，但 `OnllyID2Nd` 随标签实例变化；
+- 2/22：另一组高熵 `HSerialCRC[5]`，Aigo/SanDisk 之间部分成员重合。
+
+这直接否定“`HSerialCRC[5]` 必然是当前 U 盘自身唯一序列”的强解释。Linux `libbusManage.so::UserInfo::GetHDiskSerialZ()` 已确认会读取注册主机的硬盘序列并保存到 BusManage 的 `DiskInfo` 缓存，因此它是 `HDOnlySerial/HSerialCRC` 的强候选上游；但尚未找到“主机硬盘序列字符串 -> 5×DWORD”的直接转换调用，当前只能记为候选来源，不能写成已闭合公式。
+
+### LBA6：`0x1C0..0x1EF` 必须拆开
+
+Windows `sub_10013fd0` 与 Linux `CLabelManage::BuildSector6(UsbWriteParam&, char*)` 两套独立 writer 对齐：
+
+- `0x1C0..0x1CF <- m_usbGSerial[0..14] + NUL`；
+- `0x1D0..0x1DF <- BeiZhu[0..14] + NUL`；
+- `0x1F0..0x1F3 <- m_encrypt`（低字节布尔值扩成 DWORD）；
+- `0x1E0..0x1EF` 当前 writer 没有显式覆盖，只能来自模板或其它版本/宿主后处理。
+
+真实参考样本也支持这种拆分：多数样本 `0x1E0..0x1EF` 保持模板零，但 Aigo U335 的旧形态在 `0x1E0..0x1EC` 存在非零分区相关材料。因此旧实现把 `0x1D4..0x1ED` 整体称为一个“未知清零区”过粗；新盘 Provision 必须分别建模 `GSerial`、`BeiZhu` 与 `0x1E0..0x1EF` 版本扩展区。
 
 ### LBA8：加密长度由 LLGB +0x04 决定，不是固定 368B
 
-- 23/23 样本均满足：
+- 当前 22/22 参考样本均满足：
   - `raw[0..round_up_16(u32_le(decoded,+0x04))]` 为 A6B0/A7F0 区；
   - 该长度之后到 512B 为物理零；
   - 解密后 `0x00..0x03 == "LLGB"`。
@@ -64,27 +103,27 @@
 - 因此现有固定 368B (`0x170`) decoder 会：
   - 对短标签多解无意义块；
   - 对长标签截断真实 `VOL/VOLC` 字段。
-- LBA8 `+0x14..+0x17` 与 LBA4 解密后的 `0x35..0x38` 在 23/23 样本逐字节一致，是跨扇区动态字段，不是可固定 profile 常量。
+- LBA8 `+0x14..+0x17` 与 LBA4 解密后的 `0x35..0x38` 在当前 22/22 参考样本逐字节一致，是跨扇区动态字段，不是可固定 profile 常量。
 
 ### LBA11：`DRKB + random252`，VID/PID 是 4 字符 ASCII
 
-- `0x000..0x003 == "DRKB"`：23/23。
+- `0x000..0x003 == "DRKB"`：当前 22/22。
 - `0x004..0x0ff`：252B 运行时随机材料。
 - CRC 输入为：
 
   `DRKB || random252 || VID_ascii4 || PID_ascii4 || size_le64`
 
-- VID/PID 按备份文件中的四位十六进制 ASCII 文本参与 CRC；将 VID/PID 当作数值 little-endian，23 份样本均不能解出 PDKB。
-- 后半 `0x100..0x1ff` 用该 CRC 的 4B little-endian 作为 A6B0 key；解密后 23/23 均为：
+- VID/PID 按备份文件中的四位十六进制 ASCII 文本参与 CRC；将 VID/PID 当作数值 little-endian，当前 22 份参考样本均不能解出 PDKB。
+- 后半 `0x100..0x1ff` 用该 CRC 的 4B little-endian 作为 A6B0 key；解密后当前 22/22 均为：
 
   `PDKB || device_id || 0x00 || zero_padding`
 
-- 22/23 使用物理 DiskSize，1/23 使用 CHS 向下取整容量，因此读端保留 DiskSize→CHS 双候选是必要兼容行为。
+- 当前 21/22 使用物理 DiskSize，1/22 使用 CHS 向下取整容量；唯一 CHS 样本是 Aigo U335 `onlyid=1987718388`。因此读端保留 DiskSize→CHS 双候选是必要兼容行为。
 - Provision entropy 应建模为 `random252`，而不是把完整 256B 当作任意随机值；builder 必须自己写入 `DRKB` magic。
 
 ### LBA12：整扇 512B 是一个连续 A6B0/A7F0 密文
 
-- 对 23/23 样本直接执行 `a6b0_full(raw512, CRC32(device_id), counter=0)`：
+- 对当前 22/22 参考样本直接执行 `a6b0_full(raw512, CRC32(device_id), counter=0)`：
   - `decoded[0..4] == "EDPF"`；
   - `decoded[0x170..0x200] == zero[144]`。
 - 因此旧描述“只加密前 368B，后 144B RAW”错误。
@@ -130,7 +169,7 @@
   - `ShareBackuppromptPeriod`、`EncryptBackuppromptPeriod`：官方字段名已知，但当前主 DLL 未找到直接消费点，需要继续追其它组件。
 - 已闭合：
   - `bResetFileKey`：Windows `ChangePwd` 的强制改密分支会读取它；置位时重新生成 16B file-key 材料，否则保留并解包原 file-key。
-- 历史 23 份 LBA12 样本的尾部形态只有 4 种；`+0x0B..0x0D` 在该样本集均为 0，
+- 当前 22 份参考样本的表尾形态仍只有 4 种；`+0x0B..0x0D` 在该样本集均为 0，
   但这只是观察事实，不能解释成协议恒零。
 
 ### 官方前部写集：固定 13 sectors
@@ -146,10 +185,8 @@
 ### EDPF：+0x08 是 PartionCount，不是 version
 
 - LBA7（0x40 stride）和 LBA12（0x60 stride）均逐样本验证：`u32@entry0+0x08 == 实际连续 EDPF entry 数量`。
-- 23 份样本分布：
-  - 20 份：LBA7=3 / LBA12=3；
-  - 2 份：LBA7=2 / LBA12=2；
-  - 1 份历史中间态：LBA7=2 / LBA12=3。
+- 当前 22 份参考样本：LBA12 为 22/22 三条；LBA7 为 21 份三条、1 份两条。
+- 唯一 LBA7=2 的样本是 Netac `onlyid=949028302 @ 17:24:33`；与同 onlyid 的 17:23:49 / 17:24:20 对比，仅 LBA7 发生变化，其余 LBA0–12 一致，因此它被定性为 LBA7 局部实验/中间态。排除该扇区后，原始 LBA7 参考是 21/21 三条。
 - 因此 `+0x08` 必须命名为 `partition_count` / `PartionCount`；表格式代际不能再从该字段推断。
 
 ### LBA12：主运行时盘面是 96B packed entry；不要与 104B 检查结构混用
@@ -177,7 +214,7 @@
 |---|---:|---|---|---|
 | +0x00 | 4 | Flag = `EDPF` | 已知 | 写端固定写入；读端判 magic |
 | +0x04 | 4 | Version/entry-local field | 部分已知 | Windows writer/样本均多为0；实际消费语义未闭合 |
-| +0x08 | 4 | PartionCount | 已知 | 写端来源 + 实盘条目数 23/23 + Linux字段名 |
+| +0x08 | 4 | PartionCount | 已知 | 写端来源 + 当前22/22均等于实际连续条目数 + Linux字段名 |
 | +0x0C | 4 | PartionType | 已知 | 1=Boot / 2=Share / 4=Encrypt；Windows/Linux运行时均消费 |
 | +0x10 | 4 | NeedDisturb | 部分已知 | Linux字段名、Windows写端来源、Windows/Linux主运行时负消费证据已知；仍无正向行为消费者 |
 | +0x14 | 4 | NeedEncrypt | 已知 | Windows InitDiskInfo/UserLogin 实际消费；0=unencrypted，1=启用透明加密 |
@@ -223,10 +260,10 @@
   - Boot = 1；
   - Share = 1；
   - Encrypt = 0；
-- 但真实盘样本否定了“按 PartionType 固定取值”的更强结论：
-  type1/type2 在当前样本中均为 1，而 type4 同时出现 0 和 1；
-  其中 `aigo U335 nopwd` 样本明确出现 type4=1。说明 writer 的标准分支只是一个 profile，
-  `NeedDisturb` 还受创建模式/其它 profile 输入控制；
+- 排除 edpcli 自生成的 `_nopwd_` 备份后，当前真实参考样本全部与该 writer profile 一致：
+  type1=1、type2=1、type4=0；
+- 这说明“真实参考集 + 当前 Windows writer”目前没有冲突，但仍不能把它升级成
+  `PartionType -> NeedDisturb` 的协议恒等式，因为尚未找到真正的运行时消费者；
 - Windows `UserLogin` 真实机器码与 `EdpMountFile` 参数结构已经对齐：
   `NeedEncrypt`、StartSector、PartionSize、FileKey、FileKeyCRC、EncryptMode 会进入挂载参数，
   但 `NeedDisturb` 没有进入当前用户态→挂载库→驱动参数链；
@@ -269,7 +306,7 @@ Windows `ChangePwd/sub_10026050` 进一步证明：
 - `+0x0A bNoUsbChkPasSafe` 在当前 Windows 主 DLL 中被复制到对外结构的一个独立字节，
   但尚未找到后续策略分支，仍为部分已知；
 - `+0x0C/+0x0D` 当前 Windows 主 DLL 未找到直接消费者；Linux DWARF 只给出
-  `ShareBackuppromptPeriod/EncryptBackuppromptPeriod` 字段名。23 份历史 LBA12 样本
+  `ShareBackuppromptPeriod/EncryptBackuppromptPeriod` 字段名。当前 22 份参考 LBA12 样本
   的 `+0x0B..+0x0D` 均为 0，其中 `+0x0B` 已由非样本代码路径证明绝非 padding；
 - `+0x0A/+0x0C/+0x0D` 必须继续追初始化和跨组件消费者，
   在闭合前不得归类为“保留零字节”。
@@ -306,33 +343,32 @@ LBA12 entry `+0x30..+0x47`：
 - `+0x30..+0x33`：`CRC32_bare(password)`；默认 `"0000aaaa" -> 0x0429735D`。
 - `+0x34..+0x37`：`CRC32_bare(file_key)`。
 - `+0x38..+0x47`：16B wrapped file-key material。
-- 对默认样本，用独立 SM4 实现复算 `wrapped16 -> file_key -> CRC32(file_key)`，
-  历史 23 份中 22 份可在观察到的默认关系下闭合；唯一异常样本同时存在不同
-  UserKeyCRC/material。
+- 旧 23 份混合集曾得到“22 份符合默认关系、1 份异常”的统计；由于该集合含免密/实验态，该计数现已撤销，不再作为协议证据。
+- `wrapped16 -> file_key -> CRC32(file_key)` 的解包关系本身仍有读端代码闭环；新 22 份参考集的逐样本统计需独立重算后才能重新给出比例。
 - 这只能证明当前样本的**解包关系**，不能证明所有版本的 wrapped-key **生成源**。
   尤其旧文档中固定字符串 `LtSWi[2f)j` 的来源存在组件间矛盾，因此不得升级为
   通用 Provision 生成规则。
 
 ### LBA9/LBA10 的非零形态
 
-- LBA9 在当前 23 份样本中分为：
+- LBA9 在当前 22 份参考样本中分为：
   - 14 份：EETU + SAPF；
-  - 7 份：EETU + EPPE；
+  - 6 份：EETU + EPPE；
   - 2 份：全零。
-- `EPPE` 位于 `0x180..0x1ff`，是独立 128B A6B0 区，counter 从 0 重新开始；7/7 解密为 `EPPE 08 00 00 00` 后零填充。
-- LBA10 在当前 23 份提交样本中全零，但 `u_disk` 的真实 SanDisk 样本存在 EESI：仅前 `0x80` A6B0，后 `0x180` 物理零。
+- `EPPE` 位于 `0x180..0x1ff`，是独立 128B A6B0 区，counter 从 0 重新开始；当前 6/6 解密为 `EPPE 08 00 00 00` 后零填充。
+- LBA10 在当前 22 份参考样本中为 21 份全零、1 份 SanDisk EESI；该 EESI 样本仅前 `0x80` 为 A6B0 密文，后 `0x180` 物理零。
 
 ## 当前逐字节地图状态
 
 | LBA | 状态 | 当前结论 |
 |---|---|---|
 | 0 | 部分闭合 | MBR 分区表和 55AA 已知；全新盘 bootstrap 来源仍追官方写路径 |
-| 1 | canonical 已知 | 当前 23/23 全零 |
-| 2 | canonical 已知 | 当前 23/23 全零 |
-| 3 | canonical 已知 | 22/23 全零，1 份厂商 mp mark；EDP canonical 可零 |
+| 1 | canonical 已知 | 当前 22/22 全零 |
+| 2 | canonical 已知 | 当前 22/22 全零 |
+| 3 | canonical 已知 | 21/22 全零，1 份厂商 mp mark；EDP canonical 可零 |
 | 4 | 高度闭合 | onlyid 头、rolling XOR 区、onlyIdXor8、LLGB 双锚点已锁；动态字段生成源继续追 |
-| 5 | canonical 已知 | 当前 23/23 全零 |
-| 6 | 高度闭合 | SAFE6、device CRC、checksum 已锁；0x1c0..0x1ed 存在格式代际差异 |
+| 5 | canonical 已知 | 当前 22/22 全零 |
+| 6 | 高度闭合 | SAFE6、device CRC、checksum 已锁；0x1c0..0x1df 当前 writer 来源已拆分，0x1e0..0x1ef 仍存在版本/宿主差异 |
 | 7 | 高度闭合 | 64B EDPF entry、PartionCount、rolling XOR 已锁；表尾和 key8 生成源继续追 |
 | 8 | 高度闭合 | LLGB/ELABEL + 可变加密长度已锁；动态头字段继续追 |
 | 9 | 高度闭合 | EETU/SAPF/EPPE 三块及全零形态已区分 |
@@ -372,8 +408,8 @@ tests/provision_protocol_audit.rs 固化以下事实：
 - LBA12 是完整 512B 连续密文，解密后 144B tail 为零；
 - LBA7/LBA12 `+0x08` 等于连续 EDPF 条目数。
 - LBA12 主运行时格式固定为 96B×3，14B 表尾在 `0x120`；
-- LBA12 `NeedDisturb` 的真实样本分布按 type1={1}、type2={1}、type4={0,1} 锁定，
-  防止再次把某一个 writer profile 误写成分区类型常量；
+- LBA12 `NeedDisturb` 的真实参考样本分布按 type1={1}、type2={1}、type4={0} 锁定；
+  该门禁只表达“当前真实备份观察事实”，不把它升级成协议恒等式；
 - LBA12 pass-info `bResetFileKey/ShareBackuppromptPeriod/EncryptBackuppromptPeriod`
   在当前提交真实样本中均为 0；该测试只锁样本事实，不把它们归类为 padding；
 - LBA12 `+0x48..+0x57` 与 `+0x59..+0x5f` 当前样本为零，但测试只锁“观察事实”，不把零值升级成已知语义。

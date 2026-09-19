@@ -1,6 +1,7 @@
 mod common;
 
 use common::*;
+use edpcli::crypto::xor_rolling;
 use edpcli::diskio::parse_backup_name;
 use edpcli::inspect::{analyze_sector, render_fields, render_hex, FieldStyle, InspectMeta};
 
@@ -59,6 +60,33 @@ fn lba11_can_decrypt_from_backup_filename_metadata() {
     assert!(v.method.contains("PDKB"), "{}", v.method);
     assert_eq!(&v.decoded[0x100..0x104], b"PDKB");
     assert!(v.fields.iter().any(|f| f.label == "PDKB device_id"));
+}
+
+#[test]
+fn lba4_zero_ciphertext_byte_is_decrypted_unless_whole_short_gap_is_unwritten() {
+    let onlyid = 949_028_302u32;
+    let k0 = (onlyid & 0xffff) ^ (onlyid >> 16);
+    let mut plain = vec![0u8; 512];
+    let header = b"$$$949028302$$$";
+    plain[..header.len()].copy_from_slice(header);
+    plain[0x39..0x3d].copy_from_slice(b"LLGB");
+    plain[0x1fc..0x200].copy_from_slice(b"LLGB");
+
+    // Force a valid ciphertext word to 0x0000. The old decoder incorrectly
+    // treated each zero ciphertext byte as an unwritten byte.
+    let keystream = xor_rolling(&vec![0u8; 512 - 0x18], k0);
+    plain[0x20..0x22].copy_from_slice(&keystream[0x08..0x0a]);
+
+    let mut raw = plain.clone();
+    raw[0x18..].copy_from_slice(&xor_rolling(&plain[0x18..], k0));
+    raw[0x47..0x1fc].fill(0);
+    assert_eq!(&raw[0x20..0x22], &[0, 0]);
+
+    let view = analyze_sector(4, &raw, &InspectMeta::default());
+    assert_eq!(&view.decoded[0x20..0x22], &plain[0x20..0x22]);
+    assert_eq!(&view.decoded[0x39..0x3d], b"LLGB");
+    assert_eq!(&view.decoded[0x1fc..0x200], b"LLGB");
+    assert!(view.decoded[0x47..0x1fc].iter().all(|byte| *byte == 0));
 }
 
 #[test]

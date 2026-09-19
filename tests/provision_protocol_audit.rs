@@ -10,7 +10,7 @@ use std::fs;
 use common::FIXTURE_DIR;
 use edpcli::common::{METADATA_IMAGE_LEN, SECTOR};
 use edpcli::crypto::{a6b0_full, a7f0_full, crc32_bare, xor_rolling};
-use edpcli::diskio::parse_backup_name;
+use edpcli::diskio::{parse_backup_name, BackupMeta};
 use edpcli::inspect::InspectMeta;
 use edpcli::metainfo::ownership_from_lba8;
 
@@ -19,6 +19,14 @@ fn load(name: &str) -> Vec<u8> {
 }
 
 const MIN_PROTOCOL_FIXTURES: usize = 7;
+
+fn parse_reference_backup_name(name: &str) -> Option<BackupMeta> {
+    let meta = parse_backup_name(name)?;
+    if meta.tagged_nopwd {
+        return None;
+    }
+    Some(meta)
+}
 
 fn sector(image: &[u8], lba: usize) -> &[u8] {
     &image[lba * SECTOR..(lba + 1) * SECTOR]
@@ -135,7 +143,7 @@ fn every_committed_lba12_tail_is_encrypted_zeroes_from_device_id() {
             continue;
         }
         let name = path.file_name().unwrap().to_str().unwrap();
-        let Some(meta) = parse_backup_name(name) else {
+        let Some(meta) = parse_reference_backup_name(name) else {
             continue;
         };
         let image = fs::read(&path).expect("fixture bytes");
@@ -160,7 +168,7 @@ fn canonical_glab_is_stable_across_decodable_real_images() {
             continue;
         }
         let name = path.file_name().unwrap().to_str().unwrap();
-        let Some(meta) = parse_backup_name(name) else {
+        let Some(meta) = parse_reference_backup_name(name) else {
             continue;
         };
         let image = fs::read(&path).expect("fixture bytes");
@@ -195,7 +203,7 @@ fn lba4_short_form_must_be_decoded_by_regions_not_by_zero_bytes() {
             continue;
         }
         let name = path.file_name().unwrap().to_str().unwrap();
-        let Some(meta) = parse_backup_name(name) else {
+        let Some(meta) = parse_reference_backup_name(name) else {
             continue;
         };
         let Some(onlyid) = meta.onlyid.as_deref() else {
@@ -234,7 +242,7 @@ fn lba8_encrypted_prefix_length_is_llgb_length_rounded_to_aes_block() {
             continue;
         }
         let name = path.file_name().unwrap().to_str().unwrap();
-        let Some(meta) = parse_backup_name(name) else {
+        let Some(meta) = parse_reference_backup_name(name) else {
             continue;
         };
         let image = fs::read(&path).expect("fixture bytes");
@@ -268,7 +276,7 @@ fn lba11_is_drkb_random252_and_uses_ascii_vid_pid_in_crc_input() {
             continue;
         }
         let name = path.file_name().unwrap().to_str().unwrap();
-        let Some(meta) = parse_backup_name(name) else {
+        let Some(meta) = parse_reference_backup_name(name) else {
             continue;
         };
         let Some(sectors) = meta.secs else {
@@ -334,7 +342,7 @@ fn lba12_is_a_single_512_byte_ciphertext_with_zero_plaintext_tail() {
             continue;
         }
         let name = path.file_name().unwrap().to_str().unwrap();
-        let Some(meta) = parse_backup_name(name) else {
+        let Some(meta) = parse_reference_backup_name(name) else {
             continue;
         };
         let image = fs::read(&path).expect("fixture bytes");
@@ -360,7 +368,7 @@ fn edpf_offset_08_is_partition_count_in_both_tables() {
             continue;
         }
         let name = path.file_name().unwrap().to_str().unwrap();
-        let Some(meta) = parse_backup_name(name) else {
+        let Some(meta) = parse_reference_backup_name(name) else {
             continue;
         };
         let image = fs::read(&path).expect("fixture bytes");
@@ -401,7 +409,7 @@ fn lba12_main_runtime_layout_is_three_packed_96_byte_entries_plus_tail_at_0x120(
             continue;
         }
         let name = path.file_name().unwrap().to_str().unwrap();
-        let Some(meta) = parse_backup_name(name) else {
+        let Some(meta) = parse_reference_backup_name(name) else {
             continue;
         };
         let image = fs::read(&path).expect("fixture bytes");
@@ -436,7 +444,7 @@ fn lba12_main_runtime_layout_is_three_packed_96_byte_entries_plus_tail_at_0x120(
 }
 
 #[test]
-fn lba12_need_disturb_values_are_profile_dependent_not_partition_constants() {
+fn lba12_need_disturb_values_match_all_real_reference_backups() {
     let mut checked = 0usize;
     let mut type1_mask = 0u8;
     let mut type2_mask = 0u8;
@@ -447,7 +455,7 @@ fn lba12_need_disturb_values_are_profile_dependent_not_partition_constants() {
             continue;
         }
         let name = path.file_name().unwrap().to_str().unwrap();
-        let Some(meta) = parse_backup_name(name) else {
+        let Some(meta) = parse_reference_backup_name(name) else {
             continue;
         };
         let image = fs::read(&path).expect("fixture bytes");
@@ -478,10 +486,7 @@ fn lba12_need_disturb_values_are_profile_dependent_not_partition_constants() {
     );
     assert_eq!(type1_mask, 0b10, "type1 NeedDisturb sample set changed");
     assert_eq!(type2_mask, 0b10, "type2 NeedDisturb sample set changed");
-    assert_eq!(
-        type4_mask, 0b11,
-        "type4 must retain both observed NeedDisturb=0 and NeedDisturb=1 profiles"
-    );
+    assert_eq!(type4_mask, 0b01, "type4 NeedDisturb sample set changed");
 }
 
 #[test]
@@ -493,7 +498,7 @@ fn lba12_packed_entry_unresolved_extension_bytes_are_observationally_zero() {
             continue;
         }
         let name = path.file_name().unwrap().to_str().unwrap();
-        let Some(meta) = parse_backup_name(name) else {
+        let Some(meta) = parse_reference_backup_name(name) else {
             continue;
         };
         let image = fs::read(&path).expect("fixture bytes");
@@ -538,7 +543,7 @@ fn edpf_tail_has_version_and_password_retry_fields_not_a_terminator() {
             continue;
         }
         let name = path.file_name().unwrap().to_str().unwrap();
-        let Some(meta) = parse_backup_name(name) else {
+        let Some(meta) = parse_reference_backup_name(name) else {
             continue;
         };
         let image = fs::read(&path).expect("fixture bytes");
@@ -606,7 +611,7 @@ fn lba12_pass_info_reset_key_and_backup_prompt_bytes_are_observationally_zero() 
             continue;
         }
         let name = path.file_name().unwrap().to_str().unwrap();
-        let Some(meta) = parse_backup_name(name) else {
+        let Some(meta) = parse_reference_backup_name(name) else {
             continue;
         };
         let image = fs::read(&path).expect("fixture bytes");
@@ -645,7 +650,7 @@ fn onlyid_text_is_a_signed_or_unsigned_view_of_one_u32_bit_pattern() {
             continue;
         }
         let name = path.file_name().unwrap().to_str().unwrap();
-        let Some(meta) = parse_backup_name(name) else {
+        let Some(meta) = parse_reference_backup_name(name) else {
             continue;
         };
         let Some(text) = meta.onlyid.as_deref() else {
