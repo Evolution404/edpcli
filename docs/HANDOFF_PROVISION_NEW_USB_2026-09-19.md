@@ -28,8 +28,8 @@ producer + 官方 consumer/行为 + 原始实盘验证**同时闭合，才能标
 
 截至本次 LBA11 repair-profile 闭环，严格统计为：
 
-- **COMPLETE：2407 / 6656B = 36.2%**
-- **PARTIAL：4249 / 6656B = 63.8%**
+- **COMPLETE：2409 / 6656B = 36.2%**
+- **PARTIAL：4247 / 6656B = 63.8%**
 - **UNKNOWN：0 / 6656B = 0.0%**
 
 当前各 LBA 严格状态以主账本为唯一准绳，最新关键增量：
@@ -67,9 +67,9 @@ producer + 官方 consumer/行为 + 原始实盘验证**同时闭合，才能标
   但实盘存在 post-NUL 非零 backing，所以只降为 PARTIAL。
   Dept/Owner 长值的 continuation 还确认落在 LBA9+0x80/+0x100，
   解释了先前 LBA9 历史 Dept/backing profile。当前全 LBA0–12 已无 UNKNOWN，
-  但仍有4249B PARTIAL，绝不能把“UNKNOWN=0”当成全部协议完成。
+  目前全局仍有4247B PARTIAL，绝不能把“UNKNOWN=0”当成全部协议完成。
 
-- **LBA7 = 489 COMPLETE / 23 PARTIAL / 0 UNKNOWN = 95.5%**。
+- **LBA7 = 490 COMPLETE / 22 PARTIAL / 0 UNKNOWN = 95.7%**。
   真实物理 LBA7 已锁定为 **3×0x40 packed EDPF + 14B pass-info@+0xC0**，
   不能用 `libcemsfilesyscheck.so` 的 0x48/72B natural ABI 直接解释盘面。
   v0x0064 legacy wrapped key `entry+0x38..0x3F` 已完整闭合：
@@ -83,7 +83,7 @@ producer + 官方 consumer/行为 + 原始实盘验证**同时闭合，才能标
   解密整扇但只返回前0xCE；严格22份原始盘 22/22 解密后这306B全零。
   因此306B由 UNKNOWN 直接升 COMPLETE。复核总账时还发现此前已闭合的
   entry0 `NeedDisturb` 4B（producer + `NewCheckDisTurbUsb(*)` consumer + 22/22实盘）
-  被正文标为 COMPLETE 却漏算进总数，现已纠正。LBA7 已无UNKNOWN，只剩23B PARTIAL。
+  被正文标为 COMPLETE 却漏算进总数，现已纠正。LBA7 已无UNKNOWN。
   本轮又把 entry0 的行为链继续闭合到实际磁盘动作：`SetProtect` 在
   `NewCheckDisTurbUsb(*)` 判定后调用 `sub_1006ff80 -> sub_1006e580`，
   精确覆盖 LBA0 `+0x1BE..+0x1FD` 的64B MBR partition table；静态模板仅含
@@ -91,6 +91,15 @@ producer + 官方 consumer/行为 + 原始实盘验证**同时闭合，才能标
   `sub_1006ffd0 -> sub_1006e9b0`，从 LBA2 读整扇恢复到 LBA0 并刷新磁盘属性。
   因此 entry0 `NeedDisturb` 可明确描述为 **MBR scramble/descramble gate**；
   entry1/entry2 同名字段仍没有独立 consumer，8B继续PARTIAL。
+  最新又从独立 Linux `checkdiskback` 找到 pass-info
+  `bNoUsbChkPasSafe(+0x0A)` 的真实 consumer：
+  `Update_EDPEDISKSHOWPARAM@0x406B70` 执行
+  `pass+0x0A == 1 ? showparam+3=0 : showparam+3=1`；
+  `CreateSafe6TmpPolicyFile` 随后将其写入 CRC/A6B0 加密策略文件，
+  `EdpEDiskBack` 与 `linuxedpedisk` 两套 `Safe6PolicyFile` 独立恢复。
+  22份原始盘为18×0+4×1，且22/22 LBA7/LBA12一致，因此 LBA7/LBA12
+  各1B升级COMPLETE。LBA7现在只剩 **22B PARTIAL**：
+  3×Version(12B)、entry1/2 NeedDisturb(8B)、BackupPromptPeriod(2B)。
 - **LBA8 = 86 COMPLETE / 426 PARTIAL / 0 UNKNOWN = 16.8%**。
   旧账本把22盘当前最大正文之后的102B机械记成 UNKNOWN，这是错误的固定边界模型。
   Windows `sub_100148d0` 与 Linux `BuildSector8@0x1D602` 都只写/加密动态前缀，
@@ -110,7 +119,7 @@ producer + 官方 consumer/行为 + 原始实盘验证**同时闭合，才能标
   6/6 current 均为该格式且 HDSerialInfo/MacInfo=0；16/16 legacy 均
   UsbOnlyInfo为空并保留历史非零 HDSerialInfo。legacy producer/最终 consumer
   尚未闭合，因此 `+0x14..+0x3D` 仍保持PARTIAL。
-- **LBA12 = 393 COMPLETE / 119 PARTIAL / 0 UNKNOWN = 76.8%**。
+- **LBA12 = 394 COMPLETE / 118 PARTIAL / 0 UNKNOWN = 77.0%**。
   主运行时盘面固定为 3×96B packed entry；`Reserved[7]@+0x59..+0x5F`
   已由官方字段名、writer 零来源、negative consumer 和 66/66 原始 entry 闭合。
   v0x0206 默认密码 mode2 wrapping 也已独立闭合：
@@ -176,10 +185,10 @@ producer + 官方 consumer/行为 + 原始实盘验证**同时闭合，才能标
   没有正向原盘，所以整个16B字段仍按严格规则保持 PARTIAL。
 - LBA12 `+0x48..+0x57` 是扩展材料槽；当前66/66原始 entry 为零，但历史用途未闭合。
   相邻 `+0x59..+0x5F` 才是已经 COMPLETE 的 `Reserved[7]`，不要混成一片。
-- pass-info 当前只剩3B语义未闭合：
-  `+0x0A bNoUsbChkPasSafe`、`+0x0C ShareBackuppromptPeriod`、
-  `+0x0D EncryptBackuppromptPeriod`。其中 `+0x0A` 22盘为18×0/4×1，
-  LBA7/LBA12 逐盘一致；Windows Init 已向 EXE 输出，但当前 EXE 没找到最终策略 consumer。
+- pass-info 当前只剩2B语义未闭合：
+  `+0x0C ShareBackuppromptPeriod`、`+0x0D EncryptBackuppromptPeriod`。
+  `+0x0A bNoUsbChkPasSafe` 已由独立 `checkdiskback`
+  `Update_EDPEDISKSHOWPARAM` 的值相关策略映射和两套 Safe6PolicyFile 消费链闭合。
 
 下一位 AI 优先顺序：
 
@@ -201,10 +210,10 @@ producer + 官方 consumer/行为 + 原始实盘验证**同时闭合，才能标
    - inspect 已显示 producer-side physical flags；Provision/validator 已改为 current
      SAFE6 full rolling + post-XOR flags；历史 raw-zero form仍兼容读取。
    后续若继续追 LBA4，应只追这两个字段的**最终业务 consumer**，找到之前仍PARTIAL。
-3. **LBA7 剩余 23B PARTIAL**：
+3. **LBA7 剩余 22B PARTIAL**：
    - 三条 `Version@+0x04`：12B，继续追 producer/consumer/version-switch；
    - entry1/entry2 `NeedDisturb@+0x10`：8B，当前没有 direct xref，继续搜其它组件/历史 build；
-   - pass-info `+0x0A/+0x0C/+0x0D`：3B，继续追跨组件最终 consumer。
+   - pass-info `+0x0C/+0x0D`：2B，继续追跨组件最终 consumer。
    本轮已重新核实两版 `vrvaud_c` 全局 old-table 都是3×0x40 packed，且只有
    entry0 NeedDisturb 有行为 xref；Version、entry1/2 NeedDisturb 在两版均无直接
    consumer。该负证据不能把正式ABI字段升级成 Reserved/COMPLETE。

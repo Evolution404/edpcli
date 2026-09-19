@@ -1378,9 +1378,11 @@ consumer 也闭合：Windows `ReadPartionInfoExEx/sub_10010B40` 会解码完整5
 entry0 `NeedDisturb` 4B：该字段早已由 Windows producer、两版
 `NewCheckDisTurbUsb(*)` active consumer 与22/22原盘闭合为 COMPLETE，但旧总数
 没有加上这4B。因此 LBA7 严格状态应由实际的
-`183 COMPLETE / 23 PARTIAL / 306 UNKNOWN` 更新为
-`489 COMPLETE / 23 PARTIAL / 0 UNKNOWN`。剩余23B为3条 entry Version（12B）、
-entry1/entry2 NeedDisturb（8B）与 pass-info `+0x0A/+0x0C/+0x0D`（3B）。
+`183 COMPLETE / 23 PARTIAL / 306 UNKNOWN` 先更新为
+`489 COMPLETE / 23 PARTIAL / 0 UNKNOWN`；后续又闭合
+`bNoUsbChkPasSafe(+0x0A)` 1B，因此当前为
+`490 COMPLETE / 22 PARTIAL / 0 UNKNOWN`。剩余22B为3条 entry Version（12B）、
+entry1/entry2 NeedDisturb（8B）与 pass-info `+0x0C/+0x0D`（2B）。
 
 ### LBA12：主运行时盘面是 96B packed entry；不要与 104B 检查结构混用
 
@@ -1517,11 +1519,11 @@ Windows `ChangePwd/sub_10026050` 进一步证明：
   再把该 16B 材料按新密码重新包装。若条件不成立，则走“解开原 wrapped key 并校验 CRC”
   的保留旧 file-key 路径。因此 `bResetFileKey` 可闭合为：
   **强制改密时是否同时重新生成 file-key 材料的门控**；
-- `+0x0A bNoUsbChkPasSafe` 在当前 Windows 主 DLL 中被复制到对外结构的一个独立字节，
-  但尚未找到后续策略分支，仍为部分已知。机器码已确认该复制发生在
+- `+0x0A bNoUsbChkPasSafe` 在当前 Windows 主 DLL 中被复制到对外结构的一个独立字节。
+  机器码已确认该复制发生在
   `CEdpEDiskCtrlInterface::Init`：`m_PassInfo+0x0A -> Init输出+0x11`；
   `EdpEDisk.exe` 在初始化时把应用对象 `+0xA4` 作为该输出结构传入，因此该状态会被
-  暴露到应用层，但目前没有找到对对应 `app+0xB5` 的直接读取；
+  暴露到应用层；此前在 Windows 应用本体没有找到对对应 `app+0xB5` 的直接读取；
 - 本轮把 `+0x0A` producer 再向上追了一层：当前
   `CUsbRegsiter::CreatePartitions/sub_1003DB50` 先把完整14B pass-info
   `memset(..., 0, 0x0E)`，随后机器码
@@ -1539,10 +1541,36 @@ Windows `ChangePwd/sub_10026050` 进一步证明：
   `CDiskReader+0x210`。机器码全模块扫描可找到 `Version @+0x210`
   在 `DecryptFileKey` 中的显式读取，却没有找到
   `+0x21A/+0x21C/+0x21D`（分别对应 pass-info
-  `+0x0A/+0x0C/+0x0D`）的直接业务读取。这是“解析后保存但当前模块不消费”的负证据；
+  `+0x0A/+0x0C/+0x0D`）的直接业务读取。这只是
+  **libcemsfilesyscheck.so 单模块**的负证据；其中 +0x0A 后续已在独立
+  `checkdiskback` 找到真实 consumer，不能再写成“全产品不消费”；
 - 当前 22 份原始参考样本中，`bNoUsbChkPasSafe(+0x0A)` 并非恒零：
   **18/22=0、4/22=1**；且每一份样本的 LBA7/LBA12 取值都逐字节一致。
   因此它明确是会随标签状态变化并跨两份表同步保存的真实字段，绝不能归为 padding；
+- 本轮从此前未纳入主审计的独立官方 Linux 可执行文件
+  `checkdiskback` 找到该字段的真实行为 consumer：
+  `Update_EDPEDISKSHOWPARAM(checkdisk::_EDPEDISKSHOWPARAM*,
+  tagEdpPartionPassInfo*) @ 0x406B70` 的首条逻辑就是
+  `cmp byte [pass+0x0A],1; setne [showparam+0x03]`。
+  这不是 memcpy/opaque round-trip，而是根据字段值生成布尔策略位：
+  **bNoUsbChkPasSafe==1 -> showparam+3=0；其它值 -> showparam+3=1**。
+  同函数邻接字节可由日志/赋值交叉定位：
+  showparam+0=`bShowSharePartion`、+1=`bShowEncryptPartion`、
+  +2=`bAutoLogin`、+4=`bForceChgPassShr`、+6=`bOtherDisk`；
+- `CreateSafe6TmpPolicyFile@0x407D50` 在构造 SAFE6 临时策略时明确调用上述
+  `Update_EDPEDISKSHOWPARAM`，随后把整个策略体纳入 CRC 并加密写出。
+  消费端又有两套独立实现：
+  `EdpEDiskBack::Safe6PolicyFile::GetSafe6Policy@0x4100B0` 与
+  `linuxedpedisk::Safe6PolicyFile::GetSafe6Policy@0x41EAA0`，
+  均解密/校验并恢复完整策略参数结构。前者 `BusService::Init` 还把7B
+  show-parameter 尾组写入运行时对象，其中 showparam+3 落到
+  `runtime+0x20041`；相邻日志明确打印 show-share/show-encrypt/auto-login/
+  force-change-password 等策略字段；
+- 因而 `bNoUsbChkPasSafe` 已满足本项目严格 COMPLETE 标准：
+  **显式制标 producer + 值相关行为 consumer + 加密 policy 跨组件传递 +
+  22份原始实盘0/1双值与 LBA7/LBA12 同步证据**。LBA7 `0x0CA` 与
+  LBA12 `0x12A` 各1B均由 PARTIAL 升 COMPLETE；不需要把字段英文名进一步
+  猜成未经证据支持的中文业务标签；
 - `+0x0C/+0x0D` 当前 Windows 主 DLL、另一版 `out_raw_data/EdpEDiskCtrl.dll`、
   Linux `libcemsfilesyscheck.so`，以及本轮补扫的 Linux
   `EdpEDiskQt5/EdpEDiskBack/linuxedpedisk` 客户端路径均未找到直接消费者；
@@ -2257,17 +2285,17 @@ CI 原始夹具同时保留两种 profile。零态表示该 legacy tail 不存�
 | 4 | 36B | 476B | 0B | 7.0% | onlyid clear header、OnlyIdXor8、LLGB 双锚点完成；第二 ID/HSerial/profile 字段仍不完整；`+0x047..+0x1FB` 已由 full writer、reader negative consumer 与 raw-zero/rolling-zero 双实盘 profile 从UNKNOWN降PARTIAL |
 | 5 | 512B | 0B | 0B | 100% | 两版 EdpDiskCtrl 均只对 LBA5 执行“读整扇→原样写回→检查 ERROR_WRITE_PROTECT(0x13)”；当前注册 writer 读取既有13扇区后不重建 LBA5，因此 preserve existing bytes；22/22原始盘全零 |
 | 6 | 220B | 292B | 0B | 43.0% | 原352B UNKNOWN 已按官方 BuildSector6/ReadSector6 全部拆清：216B 为 UsbMainBSec fixed template material（双平台 producer + 前508B checksum consumer + 22/22实盘，升 COMPLETE）；136B 为 Owner/Office/Label fixed storage slots（边界/reader已闭合但 post-NUL backing 多profile，降 PARTIAL）。GSerial/BeiZhu 与 legacy MBR fragment 继续按原严格口径保持 PARTIAL |
-| 7 | 489B | 23B | 0B | 95.5% | 已闭合 entry0 NeedDisturb 4B 此前在总账漏记；加回后再计入 `+0x0CE..+0x1FF` 306B writer-zero区，当前只剩3条 entry Version 12B、entry1/2 NeedDisturb 8B、pass-info剩余3B为PARTIAL |
+| 7 | 490B | 22B | 0B | 95.7% | 在原489B基础上，pass-info `bNoUsbChkPasSafe(+0x0A)` 找到 `checkdiskback::Update_EDPEDISKSHOWPARAM` 值相关行为 consumer，并经 SAFE6 policy 被两套独立客户端恢复，1B升级COMPLETE；当前剩3条 entry Version 12B、entry1/2 NeedDisturb 8B、backup-prompt 2B为PARTIAL |
 | 8 | 86B | 426B | 0B | 16.8% | LLGB magic + logical length + ElabOffset 完成；ToolVersion、Labversion、writeTime 和 Reserved[64] 已闭合。重新按动态边界审计后，`+0x80..+0x1FF` 不再按样本最大长度切成“正文+UNKNOWN尾巴”：writer只拥有动态加密前缀，之后是 preserve-existing backing，因此整段统一PARTIAL、无UNKNOWN |
 | 9 | 54B | 458B | 0B | 10.5% | EETU/EPPE/SAPF三块边界及current preserve范围已拆清：EPPE尾120B为writer-zero但公开API consumer未闭合；+0x080..0x0FF为历史Dept/backing profile，SAPF +0x114..0x11F为profile-dependent backing，+0x120..0x17F为current preserve/ignore，三段均PARTIAL，不再记UNKNOWN |
 | 10 | 36B | 476B | 0B | 7.0% | EESI magic + 两个16B卷标槽完成；+0x04仍缺最终业务语义；+0x28..0x7F 已闭合为未解释的 EESI round-trip payload，+0x80..0x1FF 已闭合 current preserve/ignore 边界，二者均因缺字段/历史profile保持PARTIAL，不再记UNKNOWN |
 | 11 | 512B | 0B | 0B | 100% | normal register path 使用 `DISK_GEOMETRY_EX.DiskSize`；`UDiskLabelRepair` check/rewrite path 使用 `DISK_GEOMETRY` 的 CHS capacity。两条路径的 producer/consumer 与同盘双 profile 实测均闭合 |
-| 12 | 393B | 119B | 0B | 76.8% | 原 372B COMPLETE 基础上，三个 packed entry 的 Reserved[7] 共21B由官方字段名、writer零来源、negative consumer和22盘66/66零值闭合；+0x48扩展槽及其它119B仍PARTIAL |
+| 12 | 394B | 118B | 0B | 77.0% | 原393B基础上，同一 pass-info `bNoUsbChkPasSafe(+0x0A)` 的 producer/consumer/policy传递/22盘双值链闭合，1B升级COMPLETE；+0x48扩展槽、backup-prompt两字节及其它材料仍PARTIAL |
 
 总计：
 
-- **完成：2407B / 6656B = 36.2%**
-- **部分已知：4249B / 6656B = 63.8%**
+- **完成：2409B / 6656B = 36.2%**
+- **部分已知：4247B / 6656B = 63.8%**
 - **未知：0B / 6656B = 0.0%**
 
 这是一组**严格下限**，故意宁可低估，不把“能生成/能解析”冒充成“已经完全理解”。
@@ -2282,12 +2310,12 @@ CI 原始夹具同时保留两种 profile。零态表示该 legacy tail 不存�
 | 4 | 高度闭合 | 整扇已无UNKNOWN；`+0x047..+0x1FB` 已确认 raw-zero / rolling-encrypted-zero 双历史物理表示且22盘语义均为零。`+0x45/+0x46` 已闭合为 `bDataToServer/bConnetServer` post-XOR wire bytes，并证明官方 ReadSector4 不补偿该例外；inspect 已恢复 producer-side flags，Provision 已改为 current SAFE6 full rolling + post-XOR覆盖。两flag因缺最终业务consumer仍PARTIAL |
 | 5 | canonical 已知 | opaque preserve / 写保护探测 scratch；当前 22/22 全零，但零不是协议固定要求 |
 | 6 | 高度闭合 | 整扇已无 UNKNOWN。216B UsbMainBSec static material 已由 Windows/Linux fixed producer、整扇 checksum consumer 与22盘升 COMPLETE；Owner 32B、Office 64B、Label 56B 的物理槽/reader 已闭合到 PARTIAL。GSerial/BeiZhu 的 C-string 与 legacy MBR fragment 继续因 post-NUL/profile/旧 writer 缺口保持 PARTIAL |
-| 7 | 高度闭合 | 物理0x40 packed ABI、PartionCount、rolling XOR、entry0 NeedDisturb compatibility gate、v0x0064 legacy wrapped8均已锁；`+0x0CE..+0x1FF` 306B post-table区已升级COMPLETE，整扇不再有UNKNOWN；只剩23B PARTIAL：3×Version、entry1/2 NeedDisturb、pass-info +0A/+0C/+0D |
+| 7 | 高度闭合 | 物理0x40 packed ABI、PartionCount、rolling XOR、entry0 NeedDisturb compatibility gate、v0x0064 legacy wrapped8均已锁；`bNoUsbChkPasSafe` 已由 checkdiskback SAFE6 policy 行为链闭合；当前只剩22B PARTIAL：3×Version、entry1/2 NeedDisturb、pass-info +0C/+0D |
 | 8 | 高度闭合 | LLGB/ELABEL + 可变加密长度已锁；ToolVersion/Labversion/writeTime/Reserved 已闭合。严格22盘 `logical_end=0x148..0x183`、encrypted prefix=`0x150..0x190`；Windows/Linux writer 都只覆盖动态前缀，后部 preserve-existing，inspect 也只解前缀并保留非零tail。因此旧102B UNKNOWN已纠正为PARTIAL，LBA8现无UNKNOWN；HDSerialInfo/MacInfo/UsbOnlyInfo 与17-key ELABEL最终consumer继续追 |
 | 9 | 高度闭合 | 整扇已无UNKNOWN：EETU首0x80、EPPE末0x80、SAPF 0x100..0x11F及current preserve中间区边界均明确；历史Dept/backing、SAPF尾12B、post-SAPF区与EPPE zero-tail因历史producer/公开API consumer未完全闭合而保持PARTIAL |
 | 10 | 高度闭合 | 整扇 current 存储边界已解释：前0x80为 EESI round-trip payload，后0x180为 EESI setter preserve-existing tail；magic/两个16B文本槽已 COMPLETE，+0x04与+0x28..0x7F仍缺具体业务语义/非零profile |
 | 11 | 完全闭合 | DRKB/random252/ASCII VID-PID/PDKB 全部已锁；exact DiskSize 与 CHS repair 两种真实 wire profile 的 producer/consumer/实盘均闭合 |
-| 12 | 中度闭合 | 主运行时 96B packed layout 已锁，但多个标志/扩展材料/表尾状态仅结构已知；禁止把“entry边界已知”当成“entry语义已知” |
+| 12 | 中度闭合 | 主运行时 96B packed layout 已锁，pass-info `bNoUsbChkPasSafe` 已闭合到 SAFE6 policy 行为；多个标志/扩展材料及 backup-prompt 两字节仍仅结构/算法部分已知 |
 
 ## 尚不能猜测的材料
 
@@ -2296,10 +2324,10 @@ CI 原始夹具同时保留两种 profile。零态表示该 legacy tail 不存�
 - LBA4 onlyID2Nd 及关联动态字段的生成源；
 - LBA0 bootstrap 主体/profile 选择、`+0x1A0 SectorSize` consumer，以及 `+0x1B8` disk signature 的 EDP-side consumer；
 - LBA6 0x1c0..0x1ed 不同格式代际的准确字段来源。
-- LBA7 Version、entry1/entry2 NeedDisturb 与 pass-info `bNoUsbChkPasSafe/BackupPromptPeriod` 的最终消费者；
+- LBA7 Version、entry1/entry2 NeedDisturb 与 pass-info `BackupPromptPeriod` 两字节的最终消费者；
 - LBA12 NeedDisturb 在新版主路径中的进一步业务作用（旧版 fallback 门控已闭合）；
 - LBA12 +0x48..+0x57 扩展材料槽在主盘面中的确切用途；
-- LBA12 表尾 `+0x0A/+0x0C/+0x0D` 的准确跨组件消费语义。
+- LBA12 表尾 `+0x0C/+0x0D` BackupPromptPeriod 的准确跨组件消费语义。
 
 这些内容不得从当前插入 donor 盘复制，也不得以全零替代。实现中把它们显式建模为
 ProvisionEntropy / ProvisionProfile 材料；纯 builder 只消费已经验证的输入。

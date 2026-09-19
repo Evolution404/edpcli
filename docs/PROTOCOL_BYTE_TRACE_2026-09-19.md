@@ -372,18 +372,18 @@ post-XOR 写回 `+0x45/+0x46`。历史 raw-zero 实盘仅作为兼容读取 prof
 | LBA4 | 36 | 476 | 0 | 7.0% |
 | LBA5 | 512 | 0 | 0 | 100.0% |
 | LBA6 | 220 | 292 | 0 | 43.0% |
-| LBA7 | 489 | 23 | 0 | 95.5% |
+| LBA7 | 490 | 22 | 0 | 95.7% |
 | LBA8 | 86 | 426 | 0 | 16.8% |
 | LBA9 | 54 | 458 | 0 | 10.5% |
 | LBA10 | 36 | 476 | 0 | 7.0% |
 | LBA11 | 512 | 0 | 0 | 100.0% |
-| LBA12 | 393 | 119 | 0 | 76.8% |
+| LBA12 | 394 | 118 | 0 | 77.0% |
 <!-- STRICT_PROGRESS_END -->
 
 当前总计：
 
-- **COMPLETE：2407B / 6656B = 36.2%**
-- **PARTIAL：4249B / 6656B = 63.8%**
+- **COMPLETE：2409B / 6656B = 36.2%**
+- **PARTIAL：4247B / 6656B = 63.8%**
 - **UNKNOWN：0B / 6656B = 0.0%**
 
 LBA11 已完整闭合为 512B COMPLETE。此前卡住的后半 252B 不是“某型号盘偶尔使用
@@ -464,7 +464,8 @@ DWARF 中恢复出的原始声明文件/行号与本地函数地址：
 | LBA7 | 0x000–0x0BF | PARTIAL | 3×64B packed EDPF 区 | Windows old-table writer/runtime；Linux natural ABI 仅作字段名参考 | 多处 reader/登录/挂载 | 22盘均按0x40 stride成立 | 逐字段状态见详细审计；不能用 Linux 0x48 natural stride 解析物理 LBA7 |
 | LBA7 | entry0 +0x010–+0x013 | COMPLETE | entry0 `NeedDisturb` MBR scramble/descramble gate | Windows `CreatePartitions` 对 entry0 显式写入调用者传入的 `NeedDisturb=1`；old/new ABI converter 双向保留该DWORD | 两版 Windows `vrvaud_c` 的 `NewCheckDisTurbUsb(*)` 直接检查 packed entry0 `NeedDisturb@+0x10 != 0`；`SetProtect` 在该检查链后调用 `sub_1006ff80 -> sub_1006e580`，把 LBA0 `+0x1BE..+0x1FD` 的64B MBR表替换为静态 scramble 表；`UnsetProtect -> sub_1006ffd0 -> sub_1006e9b0` 则从 LBA2 读整扇恢复到 LBA0 并刷新磁盘属性 | 严格22份 original real-device：22/22 entry0 `NeedDisturb=1`；另有真实免密 SanDisk 两条-entry profile 同样 entry0=1 | 字段不是泛化“防篡改”位，而是驱动侧是否进入系统可见 MBR 分区表 scramble/descramble 流程的门控；静态扰动表只有一条 type=0x04、start_lba=66、sector_count=1 的占位 entry。entry1/entry2 的同名字段仍未找到独立 consumer |
 | LBA7 | 每条entry +0x038–+0x03F | COMPLETE | 8B legacy wrapped file-key | Windows `sub_10028DB0` 以 `fold32(password)` 对两个32位 half 做对称 XOR 包装；`sub_100125B0` 映射回 old 0x40 entry；`SavePartionSector/sub_10028580 -> sub_10010FC0` 写 LBA7 | `sub_10026050` 对 v0x0064 固定解包8B，随后以 `sub_10038840` 计算 CRC32 并比较同 entry `FileKeyCRC(+0x34)`；改密后反向重包 | 22份 original real-device 中全部28条非零 type2/type4 legacy entry 独立复算 28/28 PASS；默认 `fold32("0000aaaa")=0x91919191` | **LBA7 v0x0064 packed legacy file-key wrapping** 已闭合；FileKeyCRC 4B此前已经计入 COMPLETE，本轮仅新增3×8B=24B，禁止重复计数 |
-| LBA7 | 0x0C0–0x0CD | PARTIAL | pass-info | writer/reader 14B结构已恢复；current producer 对 +0A 有显式请求输入，对 +0C/+0D 由14B memset零初始化 | +00..+09/+0B 已有行为 consumer；+0A 在 current 与旧版 `EdpEDiskCtrl` 中都只由 `CEdpEDiskCtrlInterface::Init` 导出到输出结构 +0x11，未见策略判断；+0C/+0D 两代 Windows 与 Linux 均未见读取，旧版仅把两字节一起清零 | 严格22份：+0A=18×0+4×1，且22/22 LBA7/LBA12一致；+0C/+0D=22/22零 | +0A 确认是真实可变配置/状态但最终策略 consumer 未闭合；+0C/+0D 字段名已知但单位/非零 producer/consumer 均缺，继续 PARTIAL |
+| LBA7 | 0x0CA | COMPLETE | pass-info `bNoUsbChkPasSafe` | current Windows `CreatePartitions/sub_1003DB50` 明确从制标请求写 `tail+0x0A`；`WriteNormalULabel/sub_10046E80` 又把 `UsbWriteParam+0x7EC` 传入该请求字段 | 独立 Linux 官方 `checkdiskback::Update_EDPEDISKSHOWPARAM@0x406B70` 直接执行 `cmp byte [pass+0x0A],1; setne showparam+0x03`，随后 `CreateSafe6TmpPolicyFile@0x407D50` 将结果纳入 CRC/加密 SAFE6 policy；独立 `EdpEDiskBack::Safe6PolicyFile::GetSafe6Policy@0x4100B0` 与 `linuxedpedisk::Safe6PolicyFile::GetSafe6Policy@0x41EAA0` 解密并恢复该 policy/runtime 参数 | 严格22份原始盘：18×0、4×1；22/22 LBA7/LBA12 同盘取值一致；CI `pass_info_no_usb_safe_flag_varies_and_matches_between_lba7_and_lba12` 锁定0/1双值与跨扇区一致性 | 字段行为闭合到“值等于1时将 SAFE6 show-policy byte +3 清零，否则置1”，不是仅 opaque round-trip；producer、真实行为 consumer、跨独立客户端传递和实盘双值证据齐全 |
+| LBA7 | 0x0CC–0x0CD | PARTIAL | pass-info `ShareBackuppromptPeriod / EncryptBackuppromptPeriod` | current CreatePartitions 对14B先整体清零且不覆盖这2B | Windows 两版、Linux `libcemsfilesyscheck.so`、新补扫 `checkdiskback`/SAFE6 policy 映射均未发现直接读取；正式字段名来自 DWARF | 严格22份 LBA7/LBA12 均为0 | 单位、非零 producer、历史 profile 和真实业务 consumer仍缺，继续 PARTIAL |
 | LBA7 | 0x0CE–0x1FF | COMPLETE | packed old-table post-table writer-zero region | Windows `edpediskctrl.dll::sub_10010FC0` 先以 `sub_1004D110(...,0,0xFFF)` 明确 memset staging，随后只复制 `0xC0` packed table + `0x0E` pass-info，再对完整512B rolling并写 LBA7；`sub_1004D110` 机器码已复核为 memset 等价实现 | Windows `ReadPartionInfoExEx/sub_10010B40` 解密完整512B，但成功后只复制 `0xC0` table 和 `0x0E` pass-info，完全不返回/解释 `0x0CE..0x1FF`；Linux natural-ABI builder也独立采用“整块清零→写结构→整扇rolling”的同原则，但其表尾在0xE6，只作原则佐证、不用于覆盖Windows物理offset | 严格22份原始生成参考（21 non-converted backup + 独立SanDisk）逐盘解密：22/22 `0x0CE..0x1FF == zero[306]`；CI门禁 `lba7_post_table_plaintext_is_zero_through_sector_end` 锁定 committed original subset | 306B 的 producer零来源、negative consumer、物理边界和原盘均闭合；这里的 COMPLETE 表示 writer-owned zero region，不是靠“样本碰巧全零”推断 |
 | LBA8 | 0x000–0x003 | COMPLETE | LLGB magic | Windows/Linux `BuildSector8` | reader 先检查 LLGB | 22/22 | 完成 |
 | LBA8 | 0x004–0x007 | COMPLETE | logical length | writer=`0x80+strlen(ELABEL)` | decoder决定动态加密前缀 | 22/22吻合 | 完成 |
@@ -502,7 +503,8 @@ DWARF 中恢复出的原始声明文件/行号与本地函数地址：
 | LBA12 | 0x000–0x11F | PARTIAL | 3×96B EDPF | Windows/Linux writer | 登录/挂载/兼容链大量消费 | 22盘 | 字段逐项状态见详细审计 |
 | LBA12 | 0x010–0x013 | COMPLETE | entry0.NeedDisturb compatibility gate | `CUsbRegsiter::CreatePartitions` 写入 entry0；Linux `edpdiskglobal.h:82` 定义字段 | `vrvaud_c::NewCheckDisTurbUsb(*)` fallback 在 `Format.cpp:0x3CE/0x380` 直接以该 DWORD 非零判 success | 22/22原始盘=1；20个entry0 type1、2个type2；7 CI夹具锁定 | 完成的是 entry0 兼容门控行为；其它 entry 的 NeedDisturb 不随之升级 |
 | LBA12 | 每条entry +0x059–+0x05F | COMPLETE | packed Reserved[7] | Windows `CreatePartitions` 对3×96B先 `memset(0,0x120)`，后续只写至 +0x58；Linux DWARF正式字段名 `Reserved[7]` | Windows UserLogin/改密只消费 wrapped16 与 +0x58；Linux decrypt/改密同样不消费 Reserved | 22盘66/66 entry全零；CI原始夹具锁定 | **LBA12 packed Reserved[7] producer/negative-consumer closure**；注意相邻 +0x48..57 仍是扩展 key-material PARTIAL |
-| LBA12 | 0x120–0x12D | PARTIAL | pass-info | writer/reader结构闭合 | 部分字段消费闭合 | 22盘 | 仍有+0A/+0C/+0D |
+| LBA12 | 0x12A | COMPLETE | pass-info `bNoUsbChkPasSafe` | 与 LBA7 同一 current CreatePartitions 请求输入，LBA12 builder 保存同一 pass-info 字节 | `checkdiskback::Update_EDPEDISKSHOWPARAM@0x406B70` 直接比较该字段并生成 SAFE6 show-policy byte +3；policy 经 `CreateSafe6TmpPolicyFile` 加密后被 `EdpEDiskBack` 与 `linuxedpedisk` 两套 `Safe6PolicyFile::GetSafe6Policy` 恢复 | 严格22份18×0+4×1，且22/22与同盘 LBA7 +0x0A相同；CI锁定双值/一致性 | 与 LBA7 同一逻辑字段、同一 producer/consumer 链，1B COMPLETE |
+| LBA12 | 0x12C–0x12D | PARTIAL | pass-info `ShareBackuppromptPeriod / EncryptBackuppromptPeriod` | current writer零初始化且不覆盖 | 已审 Windows/Linux/checkdiskback policy 链均未找到业务读取 | 22/22为0 | 仍缺单位、非零 producer 与历史/外部 consumer |
 | LBA12 | 0x12E–0x16F | COMPLETE | post-table zero initialized padding | writer整块零初始化且不覆写 | 主reader不消费该区 | 22/22解密为零 | producer+negative consumer+实盘闭合 |
 | LBA12 | 0x170–0x1FF | COMPLETE | post-table zero initialized padding / continuous-cipher tail | Windows current `sub_10014F30` 分配 `sector_size+1` 后整块清零，v0x206 只复制 `0x120+0x0E=0x12E` 结构字节，随后加密整扇；Linux `BuildSector12` 同样先把 `sector_size+1` 全零再只复制表/表尾并整扇加密 | Windows `sub_100160B0` 固定解密0x200B，但只复制 `0x120+0x0E` 返回；Linux主reader同样只解释表/表尾，不消费 post-table 区 | 严格22份 + 独立SanDisk 解密后 `0x12E..0x1FF` 全零；既有连续密文门禁同时证明 `0x170..` 不是RAW尾 | 与 `0x12E..0x16F` 同属一个 post-table zero padding 区；此前 PARTIAL 行是主表 stale 状态，总进度表早已把这144B计入 LBA12 的393B COMPLETE，因此本次只纠账、不重复增加总数 |
 <!-- FIELD_LEDGER_END -->
@@ -1620,11 +1622,12 @@ Linux `0x0E6` 偏移混成 Windows packed `0x0CE` 的物理边界。
 由 **UNKNOWN -> COMPLETE**。LBA7 严格状态随之变为：
 
 ```text
-489 COMPLETE / 23 PARTIAL / 0 UNKNOWN = 95.5%
+490 COMPLETE / 22 PARTIAL / 0 UNKNOWN = 95.7%
 ```
 
-这次新增306B COMPLETE；Version、entry1/entry2 NeedDisturb 和 pass-info 剩余3B
-仍保持 PARTIAL，不能被 post-table 区的闭合带着升级。
+post-table 审计当时新增306B COMPLETE；后续又闭合 pass-info
+`bNoUsbChkPasSafe(+0x0A)` 1B。当前 Version、entry1/entry2 NeedDisturb 和
+BackupPromptPeriod 两字节仍保持 PARTIAL，不能被相邻区域的闭合带着升级。
 
 ### 6.3 LBA12 +0x38..+0x47：v0x0206 默认密码的 mode2 wrapping 已闭合，但整字段仍 PARTIAL
 

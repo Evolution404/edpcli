@@ -143,6 +143,8 @@ fn documentation_keeps_the_official_provisioning_chain_and_strict_rules() {
         "LBA0 legacy MBR message-pointer bytes",
         "LBA7 packed 64-byte ABI versus Linux natural 72-byte ABI",
         "LBA7 v0x0064 packed legacy file-key wrapping",
+        "Update_EDPEDISKSHOWPARAM",
+        "bNoUsbChkPasSafe",
         "ReWrite11Sector",
         "IOCTL_DISK_GET_DRIVE_GEOMETRY",
         "Cylinders*TracksPerCylinder*SectorsPerTrack*BytesPerSector",
@@ -164,8 +166,12 @@ fn documentation_keeps_the_official_provisioning_chain_and_strict_rules() {
         "LBA2 GPT profile must remain PARTIAL until a positive real GPT sample exists"
     );
     assert!(
-        DOC.contains("| LBA7 | 489 | 23 | 0 | 95.5% |"),
-        "LBA7 progress must include the already-closed 4-byte entry0 NeedDisturb compatibility gate"
+        DOC.contains("| LBA7 | 490 | 22 | 0 | 95.7% |"),
+        "LBA7 progress must retain entry0 NeedDisturb and the closed bNoUsbChkPasSafe policy byte"
+    );
+    assert!(
+        DOC.contains("| LBA12 | 394 | 118 | 0 | 77.0% |"),
+        "LBA12 progress must retain the closed bNoUsbChkPasSafe policy byte"
     );
     assert!(
         DOC.contains("| LBA11 | 512 | 0 | 0 | 100.0% |"),
