@@ -364,7 +364,7 @@ DWARF 中恢复出的原始声明文件/行号与本地函数地址：
 | LBA6 | 0x1FC–0x1FF | COMPLETE | SAFE6 checksum | writer 对前508B计算 checksum | reader/inspect 校验 | 22/22 校验通过 | 完成 |
 | LBA7 | 0x000–0x0BF | PARTIAL | 3×64B packed EDPF 区 | Windows old-table writer/runtime；Linux natural ABI 仅作字段名参考 | 多处 reader/登录/挂载 | 22盘均按0x40 stride成立 | 逐字段状态见详细审计；不能用 Linux 0x48 natural stride 解析物理 LBA7 |
 | LBA7 | 每条entry +0x038–+0x03F | COMPLETE | 8B legacy wrapped file-key | Windows `sub_10028DB0` 以 `fold32(password)` 对两个32位 half 做对称 XOR 包装；`sub_100125B0` 映射回 old 0x40 entry；`SavePartionSector/sub_10028580 -> sub_10010FC0` 写 LBA7 | `sub_10026050` 对 v0x0064 固定解包8B，随后以 `sub_10038840` 计算 CRC32 并比较同 entry `FileKeyCRC(+0x34)`；改密后反向重包 | 22份 original real-device 中全部28条非零 type2/type4 legacy entry 独立复算 28/28 PASS；默认 `fold32("0000aaaa")=0x91919191` | **LBA7 v0x0064 packed legacy file-key wrapping** 已闭合；FileKeyCRC 4B此前已经计入 COMPLETE，本轮仅新增3×8B=24B，禁止重复计数 |
-| LBA7 | 0x0C0–0x0CD | PARTIAL | pass-info | writer/reader 14B结构已恢复 | 部分字段有行为消费者 | 22盘 LBA7/LBA12 同步 | +0A/+0C/+0D未闭合 |
+| LBA7 | 0x0C0–0x0CD | PARTIAL | pass-info | writer/reader 14B结构已恢复；current producer 对 +0A 有显式请求输入，对 +0C/+0D 由14B memset零初始化 | +00..+09/+0B 已有行为 consumer；+0A 在 current 与旧版 `EdpEDiskCtrl` 中都只由 `CEdpEDiskCtrlInterface::Init` 导出到输出结构 +0x11，未见策略判断；+0C/+0D 两代 Windows 与 Linux 均未见读取，旧版仅把两字节一起清零 | 严格22份：+0A=18×0+4×1，且22/22 LBA7/LBA12一致；+0C/+0D=22/22零 | +0A 确认是真实可变配置/状态但最终策略 consumer 未闭合；+0C/+0D 字段名已知但单位/非零 producer/consumer 均缺，继续 PARTIAL |
 | LBA7 | 0x0CE–0x1FF | UNKNOWN | 表后区域 | 待查 | 待查 | 多数为固定/零 | 未闭合 |
 | LBA8 | 0x000–0x003 | COMPLETE | LLGB magic | Windows/Linux `BuildSector8` | reader 先检查 LLGB | 22/22 | 完成 |
 | LBA8 | 0x004–0x007 | COMPLETE | logical length | writer=`0x80+strlen(ELABEL)` | decoder决定动态加密前缀 | 22/22吻合 | 完成 |
@@ -387,7 +387,7 @@ DWARF 中恢复出的原始声明文件/行号与本地函数地址：
 | LBA9 | 0x184–0x187 | COMPLETE | minimum password length | writer限制6..19 | `ReadMinPassLenInfo` 返回该DWORD | 6/6=8 | 完成 |
 | LBA9 | 其余 | UNKNOWN | 未闭合区域 | 待查 | 待查 | 多profile | 未完成 |
 | LBA10 | 0x000–0x003 | COMPLETE | EESI magic | Set EESI writer | Get EESI reader | 1个SanDisk样本 | 完成 |
-| LBA10 | 0x004–0x007 | PARTIAL | EESI +0x04 | writer原样保存API输入DWORD；reader默认=1并返回 | 独立行为消费者仍未闭合 | 唯一启用实盘=1 | 暂不命名具体业务语义 |
+| LBA10 | 0x004–0x007 | PARTIAL | EESI +0x04 | writer原样保存API输入DWORD；reader默认=1并返回；setter 对完整0x80结构透传，不对该DWORD做特殊处理 | current `UserLogin` 的 EESI 局部结构基址为 `ebp-0x334`：+0x08/+0x18 分别映射到实际使用的 `var_32C/var_31C` 卷标，而 +0x04=`ebp-0x330` 在整个登录函数没有引用；接口 vtable +0x20/+0x24 暴露 Get/Set，但当前收集的 `edpedisk.exe/cemsudisk/vrvaud_c` 均未找到调用方 | 唯一启用SanDisk实盘=1；较旧 `VRV/edp` 构建与中间 `cems/Edp/edpediskctrl.dll` 均无 EESI magic/读写路径，说明该结构是后续新增 profile | 已排除“控制是否应用自定义卷标”这一自然猜测；官方字段名和最终 consumer 仍缺，继续 PARTIAL |
 | LBA10 | 0x008–0x017 | COMPLETE | Share/type2 volume label | `SetEdpEdiskSetInfo` 原样复制调用者结构前0x80并加密写入；默认 reader 初始化为GBK“交换区” | `CEdpDiskControl::UserLogin` 将该槽赋给本地 string；type2 分支直接把其 `c_str()` 传给 `SetVolumeLabelA` | 22份原始参考中唯一启用EESI的SanDisk实盘为GBK“交换区”；已加入512B原始证据夹具 | 16B字段语义、writer、consumer、实盘闭合 |
 | LBA10 | 0x018–0x027 | COMPLETE | Encrypt/type4 volume label | 同上；默认 reader 初始化为GBK“保密区” | `UserLogin` type4 分支直接把该槽对应 string 的 `c_str()` 传给 `SetVolumeLabelA` | 唯一启用SanDisk实盘为GBK“保密区”；另一版 `out_raw_data/EdpEDiskCtrl.dll` 同构复核 | 16B字段完整闭合 |
 | LBA10 | 0x028–0x1FF | UNKNOWN | 保留/其它 | 待查 | 待查 | 当前样本多零 | 未完成 |

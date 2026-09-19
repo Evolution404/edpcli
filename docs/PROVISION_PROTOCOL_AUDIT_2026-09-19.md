@@ -1084,6 +1084,42 @@ Windows `ChangePwd/sub_10026050` 进一步证明：
   `bNoUsbChkPasSafe` 这个字段名本身仍不足以证明具体的密码安全绕过策略；
   在找到实际策略分支前不得把它翻译成“跳过安全检查”等确定行为。
 
+本轮又补做了**跨版本 Windows consumer 审计**，结果进一步收紧而没有升 COMPLETE：
+
+- current `edpediskctrl.dll` 的 pass-info 运行时基址可由已闭合字段反推出：
+  `word_10092A20=Version(+0x00)`、`byte_10092A28=+0x08`、
+  `byte_10092A29=+0x09`，因此剩余三字节精确映射为
+  `0x10092A2A(+0x0A)`、`0x10092A2C(+0x0C)`、`0x10092A2D(+0x0D)`；
+- `+0x0A` 在 current DLL 中只有一个直接 xref：
+  `Init输出+0x11 = pass_info+0x0A`。解析接口对象 vtable 后确认，
+  该代码属于 `CEdpEDiskCtrlInterface::Init`（vtable slot1），不是独立策略函数；
+- current `edpedisk.exe` 在 `CEdpSecDiskAppApp::InitInstance` 中以
+  `app+0xA4` 作为 Init 输出，因此 `+0x0A` 最终落在 `app+0xB5`；
+  全文件扫描没有任何 `app+0xB5` 读取，`app+0xA4` 也只在这次 Init 调用中出现；
+- 旧版 `/VRV/edp/EdpEDiskCtrl.dll` 可独立反推出
+  `pass_info base=0x10063398`：`+0x08=0x100633A0`、
+  `+0x09=A1`、`+0x0A=A2`、`+0x0C/+0x0D=word_100633A4`。
+  该版本同样只把 `+0x0A` 复制到 Init 输出 `+0x11`，没有策略分支；
+  `+0x0C/+0x0D` 只见成对清零，没有读取 xref；
+- 旧 `edpedisk.exe` 同样只把 `app+0xA4` 传给 Init，后续没有消费
+  `app+0xB5`。因此“仅向外暴露、当前宿主未消费”的边界至少跨两代 Windows
+  实现成立，不是单个构建偶然遗漏；
+- `vrvaud_c` 中的 `BackupPromptInfo/BackupStartTime/BackupEndTime`
+  已追到备份 UI 与时间窗口逻辑，但没有任何数据流连接到 pass-info
+  `+0x0C/+0x0D`，禁止仅凭名称相近把两者合并解释。
+
+严格22份再次独立复算：
+
+- `bNoUsbChkPasSafe(+0x0A)`：18份为0、4份为1；
+- 4份非零均是真实 original reference，且均为 LBA7 version 0x0064；
+- 22/22 的 `+0x0A` 在 LBA7/LBA12 两份副本中一致；
+- `+0x0C/+0x0D` 仍是22/22全零。
+
+所以本轮只增强“为什么**不能**升 COMPLETE”的证据：
+`+0x0A` 是显式 producer + 真实可变值 + Init 对外暴露，但缺最终策略 consumer；
+`+0x0C/+0x0D` 有官方字段名和 current-zero producer，却仍缺历史非零 producer、
+单位/取值域与 consumer。
+
 Linux `PartitionHeader::SetPartitionNewPass` 同时给出负证据：
 
 - 新密码只更新 `UserKeyCRC(+0x30)`；
@@ -1411,6 +1447,28 @@ Windows `edpediskctrl.dll` 同时给出读端和写端：
   GBK“保密区”。`UserLogin` 在 type4 分支同样将该槽对应字符串传给
   `SetVolumeLabelA`；
 - `+0x28..0x7f`：当前 SanDisk 实盘为零，尚未发现字段消费者，不能据此命名为 padding。
+
+本轮继续专门追 `+0x04`，排除了一个很自然但错误的解释：
+
+- current `CEdpDiskControl::UserLogin/sub_10022F50` 在栈上建立 EESI 输出结构，
+  结构基址为 `ebp-0x334`，随后调用 `GetEdpEdiskSetInfo(&var_334)`；
+- 因此 `+0x04` 精确对应 `ebp-0x330`，`+0x08` 对应 `var_32C`，
+  `+0x18` 对应 `var_31C`；
+- 登录函数后续明确读取 `var_32C/var_31C`，并把它们送入 type2/type4
+  `SetVolumeLabelA` 路径，但**整个 UserLogin 没有任何 `ebp-0x330` 引用**；
+- 所以 `+0x04` 不控制当前登录路径中“是否使用自定义交换区/保密区卷标”；
+- `SetEdpEdiskSetInfo/sub_10022920 -> sub_1000FC70` 也只是把调用者完整
+  0x80 结构写入，除强制 magic=`EESI` 外不解释/改写 `+0x04`；
+- 接口 vtable slot8/slot9 分别暴露 Get/Set EESI，但在当前收集的
+  `edpedisk.exe`、`cemsudisk`、`vrvaud_c` 和旧 `edpedisk.exe` 中没有找到
+  对这两个槽的外部调用；
+- 较旧 `/VRV/edp/EdpEDiskCtrl.dll` 与 SHA 不同的中间版本
+  `/VRV/cems/Edp/edpediskctrl.dll` 都没有 `0x49534545(EESI)` 读写路径，
+  说明该设置结构属于后续新增功能，不能借旧版行为反推 `+0x04`。
+
+因此 `EESI+0x04` 仍保持 PARTIAL：已知默认值=1、实盘=1、Get/Set 原样透传，
+并明确知道当前卷标 consumer **不读取它**；但尚无官方字段名或独立行为 consumer，
+不得把它命名为 enable/version/volume-label switch。
 
 `UserLogin` 的实际汇编还明确给出对象映射：`+0x08 -> ebp-0x74` 的
 `std::string`，`+0x18 -> ebp-0x54` 的 `std::string`；type2/type4
