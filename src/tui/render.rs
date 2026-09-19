@@ -169,6 +169,16 @@ fn draw_devices(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState
 }
 
 fn draw_backups(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState) {
+    let (table_area, detail_area) = if area.height >= 11 {
+        let parts = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Min(5), Constraint::Length(5)])
+            .split(area);
+        (parts[0], Some(parts[1]))
+    } else {
+        (area, None)
+    };
+
     let rows = state.backups().iter().map(|backup| {
         let health = if !backup.size_ok {
             "大小异常".to_string()
@@ -199,12 +209,13 @@ fn draw_backups(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState
             .style(if backup.is_nopwd { success() } else { accent() }),
             Cell::from(backup.user.as_deref().map(safe).unwrap_or_else(|| "—".into())),
             Cell::from(backup.dept.as_deref().map(safe).unwrap_or_else(|| "—".into())),
-            Cell::from(backup.onlyid.as_deref().map(safe).unwrap_or_else(|| "—".into())).style(secondary()),
+            Cell::from(backup.onlyid.as_deref().map(safe).unwrap_or_else(|| "—".into()))
+                .style(secondary()),
             Cell::from(health).style(health_style),
         ])
     });
-    let header = TableRow::new(["#", "时间", "状态", "姓名", "部门", "onlyid", "健康"])
-        .style(accent());
+    let header =
+        TableRow::new(["#", "时间", "状态", "姓名", "部门", "onlyid", "健康"]).style(accent());
     let title = if state.backup_scan_pending() {
         "备份 · 扫描中…"
     } else {
@@ -234,7 +245,63 @@ fn draw_backups(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState
     if state.item_count() > 0 {
         table_state.select(Some(state.selected()));
     }
-    frame.render_stateful_widget(table, area, &mut table_state);
+    frame.render_stateful_widget(table, table_area, &mut table_state);
+
+    if let (Some(detail_area), Some(backup)) =
+        (detail_area, state.backups().get(state.selected()))
+    {
+        let health = if !backup.size_ok {
+            "大小异常"
+        } else {
+            match backup.md5_status {
+                crate::diskio::Md5Status::Ok => "MD5 ✓",
+                crate::diskio::Md5Status::Mismatch => "MD5 ✗",
+                crate::diskio::Md5Status::NoSidecar => "缺 MD5",
+            }
+        };
+        let detail = Paragraph::new(vec![
+            Line::from(vec![
+                Span::styled("文件: ", accent()),
+                Span::raw(safe(&backup.file_name)),
+            ]),
+            Line::from(vec![
+                Span::styled("状态: ", accent()),
+                Span::styled(
+                    health,
+                    if backup.size_ok && backup.md5_status == crate::diskio::Md5Status::Ok {
+                        success()
+                    } else {
+                        warning()
+                    },
+                ),
+                Span::raw("  ·  "),
+                Span::styled(
+                    if backup.is_nopwd { "免密状态" } else { "加密原盘" },
+                    if backup.is_nopwd { success() } else { accent() },
+                ),
+            ]),
+            Line::from(vec![
+                Span::styled("操作: ", accent()),
+                Span::styled("i 查看", secondary()),
+                Span::raw("  "),
+                Span::styled("v 校验", success()),
+                Span::raw("  "),
+                Span::styled("D 删除", danger()),
+                Span::raw("  "),
+                Span::styled("R 恢复", warning()),
+                Span::raw("  "),
+                Span::styled("b 新建", accent()),
+            ]),
+        ])
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title("当前备份")
+                .title_style(secondary()),
+        )
+        .wrap(Wrap { trim: true });
+        frame.render_widget(detail, detail_area);
+    }
 }
 
 fn draw_command_palette(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState) {
@@ -245,6 +312,8 @@ fn draw_command_palette(frame: &mut Frame, area: ratatui::layout::Rect, state: &
         "apply    Apply 安全向导",
         "restore  Restore 安全向导",
         "backup-create  备份当前设备",
+        "backup-verify  校验当前备份",
+        "backup-delete  删除当前备份",
         "refresh  刷新当前工作区",
         "help     帮助",
         "quit/q   退出",
@@ -358,6 +427,50 @@ fn draw_inspect(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState
     );
 }
 
+fn draw_backup_delete(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState) {
+    let Some(delete) = state.backup_delete() else {
+        return;
+    };
+    let mut lines = vec![
+        Line::from(Span::styled("删除备份", danger())),
+        Line::from(vec![
+            Span::styled("文件: ", accent()),
+            Span::raw(safe(&delete.path.display().to_string())),
+        ]),
+        Line::from("安全规则：固定选中时 MD5 → 删除前重新扫描 → 内容复核 → 至少保留该盘 1 份备份 → 同步删除 .md5"),
+    ];
+    match delete.stage {
+        WizardStage::Confirm => {
+            lines.push(Line::from(Span::styled(
+                "这是不可撤销操作。请输入 YES 确认删除：",
+                warning(),
+            )));
+            lines.push(Line::from(format!("> {}", safe(&delete.confirmation))));
+        }
+        WizardStage::Running => {
+            lines.push(Line::from("正在复核并删除；q / Esc / Ctrl-C 将延迟到安全结束点。"));
+        }
+        WizardStage::Result => {
+            lines.push(Line::from("操作已结束；Esc 返回备份列表。"));
+        }
+    }
+    if let Some(message) = &delete.message {
+        lines.push(Line::from(safe(message)));
+    }
+    frame.render_widget(
+        Paragraph::new(lines)
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .border_style(danger())
+                    .title("危险操作 · 删除备份")
+                    .title_style(danger()),
+            )
+            .wrap(Wrap { trim: true }),
+        area,
+    );
+}
+
 fn draw_wizard(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState) {
     let Some(wizard) = state.wizard() else {
         return;
@@ -431,6 +544,8 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
 
     if state.inspect_data().is_some() {
         draw_inspect(frame, chunks[1], state);
+    } else if state.backup_delete().is_some() {
+        draw_backup_delete(frame, chunks[1], state);
     } else if state.wizard().is_some() {
         draw_wizard(frame, chunks[1], state);
     } else {
@@ -449,10 +564,20 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
                         Span::raw("   Esc 返回   q 退出   ? 帮助"),
                     ]),
                     Line::from(vec![
-                        Span::styled("b", accent()),
-                        Span::raw(" 创建当前设备备份   "),
+                        Span::styled("备份: ", accent()),
+                        Span::styled("i 查看", secondary()),
+                        Span::raw("   "),
+                        Span::styled("v 校验", success()),
+                        Span::raw("   "),
+                        Span::styled("D 删除", danger()),
+                        Span::raw("   "),
+                        Span::styled("R 恢复", warning()),
+                        Span::raw("   "),
+                        Span::styled("b 新建", accent()),
+                    ]),
+                    Line::from(vec![
                         Span::styled("r", accent()),
-                        Span::raw(" 刷新"),
+                        Span::raw(" 刷新当前工作区"),
                     ]),
                 ])
                 .block(
@@ -471,7 +596,9 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
         }
     }
 
-    let status = if state.is_critical_operation() {
+    let status = if state.is_critical_operation() && state.backup_delete().is_some() {
+        "备份删除正在执行：q / Esc / Ctrl-C 将延迟到安全检查点".to_string()
+    } else if state.is_critical_operation() {
         "关键写盘阶段：q / Esc / Ctrl-C 将延迟到安全检查点".to_string()
     } else if state.input_mode() == InputMode::Search {
         format!("/{}", safe(state.input_buffer()))
@@ -486,7 +613,14 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
     } else if state.active_scan_pending() {
         "后台扫描中；界面可继续操作".to_string()
     } else {
-        "h/l 工作区  j/k 移动  i Inspect  b Backup  a Apply  R Restore  r 刷新  ? 帮助  : 命令  / 搜索  q 退出".to_string()
+        match state.workspace() {
+            Workspace::Devices => {
+                "h/l 工作区  j/k 移动  i 查看  b 新建备份  a Apply  r 刷新  ? 帮助  : 命令  / 搜索  q 退出".to_string()
+            }
+            Workspace::Backups => {
+                "h/l 工作区  j/k 移动  i 查看  v 校验  D 删除  R 恢复  b 新建  r 刷新  ? 帮助  : 命令  / 搜索  q 退出".to_string()
+            }
+        }
     };
     frame.render_widget(Paragraph::new(safe(&status)), chunks[2]);
 }
