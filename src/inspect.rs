@@ -358,16 +358,23 @@ fn decode_lba4(raw: &[u8]) -> Option<(Vec<u8>, u32, String, u32, usize, usize)> 
         if raw.len() >= 0x1fc && raw[0x47..0x1fc].iter().all(|byte| *byte == 0) {
             dec[0x47..0x1fc].fill(0);
         }
-        // BuildSector4 in both the official Windows and Linux implementations
-        // performs two byte stores *after* the rolling-XOR loop:
+        // Current SAFE6 BuildSector4 in both the official Windows and Linux
+        // implementations performs two byte stores *after* the rolling-XOR
+        // loop:
         //   wire[0x45] = restore_node.bDataToServer
         //   wire[0x46] = restore_node.bConnetServer
-        // ReadSector4 does not compensate for that exception and therefore its
-        // generic rolling result is not the producer-side flag value.  Inspect
-        // exposes the logical restore-node view, so restore the post-XOR wire
-        // bytes here.  Historical raw-zero extension profiles use the same
-        // exception and remain readable through the region rule above.
-        if raw.len() > 0x46 {
+        // ReadSector4 itself does not compensate for that exception.  Older
+        // restore-node profiles in the real-device set predate this wire rule:
+        // their +0x45/+0x46 bytes are ordinary rolling ciphertext.  The
+        // current writer profile is independently identified by the node
+        // identity shape that is already locked by the protocol audit:
+        // OnllyID2Nd mirrors the main onlyid and HSerialCRC[5] is all zero.
+        let current_post_xor_flags = raw.len() > 0x46
+            && u32_at(&dec, 0x1c) == Some(serial)
+            && dec
+                .get(0x20..0x34)
+                .is_some_and(|hserial| hserial.iter().all(|byte| *byte == 0));
+        if current_post_xor_flags {
             dec[0x45] = raw[0x45];
             dec[0x46] = raw[0x46];
         }
@@ -994,7 +1001,7 @@ pub fn analyze_sector(lba: u32, raw: &[u8], meta: &InspectMeta) -> SectorView {
                     FieldStyle::Flag,
                 ));
                 notes.push(
-                    "LBA4 的 0x18..0x1FF 按 labelOnlyId 派生 K0 做 rolling XOR；历史 raw-zero extension 作为区域级兼容形态保留。官方 Windows/Linux BuildSector4 在 rolling 完成后又把 +0x45 bDataToServer / +0x46 bConnetServer 以明文字节覆盖到盘面，因此 inspect 在 rolling 解码后用这两个物理字节恢复 producer-side restore-node 语义；官方 ReadSector4 本身不会补偿这个例外。"
+                    "LBA4 的 0x18..0x1FF 按 labelOnlyId 派生 K0 做 rolling XOR；历史 raw-zero extension 作为区域级兼容形态保留。官方 current Windows/Linux BuildSector4 在 rolling 完成后又把 +0x45 bDataToServer / +0x46 bConnetServer 以明文字节覆盖到盘面，而 ReadSector4 本身不会补偿。inspect 仅在 current restore profile（OnllyID2Nd=main onlyid 且 HSerialCRC[5]=0）恢复这两个物理字节；legacy profile 保留官方 rolling reader 视图。"
                         .into(),
                 );
                 format!("XOR K0=0x{k0:04X} from labelOnlyId={serial_text}")

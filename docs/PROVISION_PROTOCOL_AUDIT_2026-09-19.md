@@ -154,21 +154,30 @@ reader 也已逐指令复核：
   `0x1E18C..0x1E1D8` 做同一 rolling，再 memcpy 0x2F node，仍只校验
   `OnlyIdXor8`，同样没有补偿 post-XOR store。
 
-所以这里存在一个真实的 producer/reader 非对称：**物理 raw `+0x45/+0x46`
-才是 producer-side server flag 值；generic rolling 后得到的是官方 reader 的
-transformed bytes，不能继续当成 flag 本值。**
+所以这里存在一个真实的 producer/reader 非对称，但必须限制在 **current SAFE6
+writer profile**：current writer 的物理 raw `+0x45/+0x46` 才是 post-XOR
+producer-side flag 值；generic rolling 后得到的是官方 reader 的 transformed
+bytes。legacy restore-node profile 不能反向套用这一 current 规则，因为旧 writer
+尚未定位。
 
 严格22份原始生成参考重新独立复算（21份非转换 backup + 独立 SanDisk）：
 
-- 22/22 physical flags 与 generic rolling 输出不相等；
-- 6/22 current-style：physical=`00 00`，generic 为6组不同非零值；
-- 14/22 legacy：physical 非零，generic=`00 00`；
-- 2/22 legacy（Aigo rev_pmap + SanDisk）：physical 非零，generic=`0B 00`。
+- 22/22 physical bytes 与 generic rolling 输出不相等；
+- 6/22 current-style：同时满足
+  `OnllyID2Nd==main onlyid && HSerialCRC[5]==0`，physical=`00 00`，generic
+  为6组不同非零值；这与当前 Windows `RegsiterUsb` 对 node 整体清零、只赋值到
+  `+0x2C`、再由 BuildSector4 post-XOR 写回两个0字节完全吻合；
+- 14/22 legacy：`OnllyID2Nd!=main onlyid && HSerialCRC[5]!=0`，physical 非零，
+  generic=`00 00`；
+- 2/22 legacy（Aigo rev_pmap + SanDisk）：同属 legacy identity profile，
+  physical 非零，generic=`0B 00`。
 
 实现已经同步修正：
 
-- `src/inspect.rs`：先 rolling 解码并处理历史 raw-zero gap，再把
-  `decoded[0x45/0x46]` 恢复为 `raw[0x45/0x46]`；inspect 现在明确展示
+- `src/inspect.rs`：先 rolling 解码并处理历史 raw-zero gap；仅当 restore node
+  满足 current profile（`OnllyID2Nd==main onlyid && HSerialCRC[5]==0`）时，
+  再把 `decoded[0x45/0x46]` 恢复为 `raw[0x45/0x46]`。legacy profile 保留
+  official ReadSector4 rolling 视图；inspect 继续明确展示
   `bDataToServer / bConnetServer`；
 - `src/provision/generate.rs`：current SAFE6 改为完整
   `+0x18..+0x1FF` full rolling，之后执行相同的2B post-XOR覆盖；
@@ -176,9 +185,17 @@ transformed bytes，不能继续当成 flag 本值。**
   而是精确重建 official full-rolling wire image 并比较；
 - 历史 raw-zero short form 继续由 inspect 兼容读取，不被删除。
 
-这2B仍保持 **PARTIAL**：字段名、producer、reader非对称行为和22盘物理值均已
-闭合，但当前已审 Windows/Linux 上层没有找到对它们的最终业务消费，只发现
-OnlyIdXor8 强校验。按严格规则不能因为“wire value 已搞清”就升 COMPLETE。
+上层 consumer 继续向下追后得到更严格的负边界：Windows
+`ReadRestorInfo/sub_10041290` 自身不修正这2B；`ActiveNormalUDev -> sub_1003CEB0`
+只消费 restore node 的身份材料；`GetUpLoadInformation/sub_10039C30` 会把 node
+作为 API 输出的一部分带出去，但本 DLL 内不读取 `+0x2D/+0x2E`；Linux
+`libcemsfilesyscheck.so` 除 BuildSector4 的两次 post-XOR store 外，也没有其它
+对这两个字段的直接访问。
+
+因此这2B仍保持 **PARTIAL**：字段名、current producer/wire exception、官方
+reader 非对称行为、legacy rolling-reader profile 和22盘分布均已闭合；但 legacy
+非零 profile 的旧 producer 以及最终业务 consumer 仍缺失。按严格规则不能因为
+“current wire value 已搞清”就升 COMPLETE。
 
 #### LBA4 `0x18..0x46` 官方结构与第二 ID
 

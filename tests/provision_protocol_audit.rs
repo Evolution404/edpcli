@@ -1119,7 +1119,7 @@ fn lba4_restore_node_profiles_keep_current_and_legacy_fields_separate() {
 }
 
 #[test]
-fn lba4_server_flags_are_post_xor_wire_bytes_in_real_fixtures() {
+fn lba4_server_flag_wire_rule_is_restore_profile_specific_in_real_fixtures() {
     let mut current_style = 0usize;
     let mut legacy_style = 0usize;
 
@@ -1140,25 +1140,35 @@ fn lba4_server_flags_are_post_xor_wire_bytes_in_real_fixtures() {
         let image = fs::read(&path).expect("fixture bytes");
         let raw = sector(&image, 4);
         let generic = xor_rolling(&raw[0x18..], k0);
-
-        // BuildSector4 writes node+0x2D/+0x2E back to these physical offsets
-        // after rolling-XOR. ReadSector4 itself does not undo that exception,
-        // so a generic rolling decode must not be treated as the flag value.
+        let second_id = u32_le(&generic, 0x04);
+        let hserial = &generic[0x08..0x1c];
+        let current_profile = second_id == bits && hserial.iter().all(|byte| *byte == 0);
         let physical_flags = &raw[0x45..0x47];
         let generic_flags = &generic[0x2d..0x2f];
-        assert_ne!(
-            physical_flags, generic_flags,
-            "fixture unexpectedly stopped exercising the post-XOR flag exception: {name}"
-        );
 
-        if physical_flags == [0, 0] {
+        let inspect_meta = InspectMeta::from_backup_meta(&meta);
+        let view = edpcli::inspect::analyze_sector(4, raw, &inspect_meta);
+
+        if current_profile {
             current_style += 1;
+            assert_eq!(physical_flags, &[0, 0], "{name}");
             assert_ne!(generic_flags, &[0, 0], "{name}");
+            assert_eq!(
+                &view.decoded[0x45..0x47],
+                physical_flags,
+                "current restore profile must expose the official post-XOR wire flags: {name}"
+            );
         } else {
             legacy_style += 1;
+            assert_ne!(physical_flags, generic_flags, "{name}");
             assert!(
                 generic_flags == [0, 0] || generic_flags == [0x0b, 0x00],
                 "unexpected historical reader-transformed flag profile in {name}: {generic_flags:02x?}"
+            );
+            assert_eq!(
+                &view.decoded[0x45..0x47],
+                generic_flags,
+                "legacy restore profile must keep the rolling-decoded flag semantics: {name}"
             );
         }
     }

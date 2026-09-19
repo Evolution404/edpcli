@@ -173,6 +173,7 @@ fn lba4_server_flags_are_restored_from_post_xor_wire_bytes() {
     let header = b"$$$1402259934$$$";
     plain[..header.len()].copy_from_slice(header);
     plain[0x18..0x1c].copy_from_slice(&(onlyid ^ 0x8888_8888).to_le_bytes());
+    plain[0x1c..0x20].copy_from_slice(&onlyid.to_le_bytes());
     plain[0x39..0x3d].copy_from_slice(b"LLGB");
     plain[0x45] = 0xaf;
     plain[0x46] = 0x36;
@@ -224,6 +225,32 @@ fn lba4_current_restore_profile_restores_post_xor_server_flags() {
     assert_eq!(&view.decoded[0x39..0x3d], b"LLGB");
     assert_eq!(&view.decoded[0x1fc..0x200], b"LLGB");
     assert!(raw[0x47..0x1fc].iter().any(|byte| *byte != 0));
+}
+
+#[test]
+fn lba4_legacy_restore_profile_keeps_rolling_decoded_server_flags() {
+    let data = load_disk_image("netac").expect("netac real-device fixture");
+    let meta = meta_for("netac");
+    let raw = &data[4 * 512..5 * 512];
+
+    // This committed original fixture is a legacy restore-node profile:
+    // OnllyID2Nd does not mirror the main onlyid and HSerialCRC[5] is non-zero.
+    // Its physical +0x45/+0x46 bytes are rolling ciphertext, not current-style
+    // post-XOR clear server flags. The historical ReadSector4 view is 00 00.
+    assert_eq!(&raw[0x45..0x47], &[0xaf, 0x36]);
+
+    let view = analyze_sector(4, raw, &meta);
+    assert_ne!(
+        u32::from_le_bytes(view.decoded[0x1c..0x20].try_into().unwrap()),
+        1_402_259_934u32,
+        "fixture unexpectedly stopped exercising the legacy restore-node profile"
+    );
+    assert!(view.decoded[0x20..0x34].iter().any(|byte| *byte != 0));
+    assert_eq!(
+        &view.decoded[0x45..0x47],
+        &[0, 0],
+        "legacy restore-node server flags must remain rolling-decoded"
+    );
 }
 
 #[test]

@@ -205,7 +205,7 @@ producer + 官方 consumer/行为 + 原始实盘验证**同时闭合，才能标
 
 本次交接实际验证：
 
-- `cargo test --test inspect --locked`：**19/19 PASS**；
+- `cargo test --test inspect --locked`：**20/20 PASS**；
 - `cargo test --test provision_generate --locked`：**3/3 PASS**；
 - `cargo test --test provision_validate --locked`：**6/6 PASS**；
 - `cargo test --test provision_protocol_audit --locked`：**48/48 PASS**；
@@ -217,18 +217,20 @@ producer + 官方 consumer/行为 + 原始实盘验证**同时闭合，才能标
 
 - `lba4_short_form_must_be_decoded_by_regions_not_by_zero_bytes` 必须同时覆盖
   raw-zero 与 rolling-encrypted-zero 两种真实物理形态，并保证 semantic gap 为零。
-- `lba4_server_flags_are_post_xor_wire_bytes_in_real_fixtures` 固定真实盘中 physical
-  post-XOR flags 与 generic ReadSector4 rolling 输出的分叉，防止再次把后者误当字段值。
+- `lba4_server_flag_wire_rule_is_restore_profile_specific_in_real_fixtures` 固定真实盘
+  current/legacy 两种 restore profile：current profile 使用官方 post-XOR physical
+  flags；legacy profile 保留 generic ReadSector4 rolling 语义，防止再次把任一单一
+  解码规则强套到全部历史盘。
 - `validator_rejects_historical_lba4_short_form_as_new_media_canonical` 固定“历史 short
   form 可读、但新盘 current SAFE6 必须 full rolling”的生成/兼容边界。
 - `lba7_post_table_plaintext_is_zero_through_sector_end` 固定 packed LBA7 `+0x0CE..+0x1FF`
   为 writer-owned zero region，防止把306B再次退回 UNKNOWN 或误作可携带 payload。
 
 本轮已经修改 `src/inspect.rs`、`src/provision/generate.rs`、
-`src/provision/validate.rs`：inspect 恢复 producer-side post-XOR flags，Provision
-切换到 current SAFE6 full rolling + 两字节覆盖，validator 精确重建并校验 current
-wire profile。后续改动这些路径仍必须同时运行 inspect / provision_generate /
-provision_validate / golden，不能只跑协议审计。
+`src/provision/validate.rs`：inspect 现在按 restore profile 区分 current post-XOR
+flags 与 legacy rolling-reader flags；Provision 使用 current SAFE6 full rolling +
+两字节覆盖；validator 精确重建并校验 current wire profile。后续改动这些路径仍
+必须同时运行 inspect / provision_generate / provision_validate / golden，不能只跑协议审计。
 
 整个分析过程未对真实物理 USB 执行任何 raw write。
 

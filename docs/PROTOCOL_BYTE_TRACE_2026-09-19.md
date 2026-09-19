@@ -299,35 +299,58 @@ reader 则存在一个必须明确记录的非对称行为：
   `0x1E18C..0x1E1D8` 完整 rolling，再 `memcpy(decoded+0x18, 0x2F)`，随后仅
   比较 `OnlyIdXor8 == onlyid ^ 0x88888888`；也没有 post-decode 修正。
 
-因此必须区分：
+因此必须再按 restore-node profile 区分两层语义：
 
-1. **producer-side / wire flag value**：物理 `raw[0x45] / raw[0x46]`；
-2. **official ReadSector4 transformed bytes**：对这两个物理字节再执行 rolling 后的结果。
+1. **current SAFE6 producer-side / wire flag value**：current writer 在 rolling 后把
+   `node+0x2D/+0x2E` 明文覆盖回物理 `raw[0x45]/raw[0x46]`；
+2. **official ReadSector4 transformed bytes**：reader 对物理字节统一执行 rolling，
+   本身不会补偿 current writer 的 post-XOR 例外；
+3. **legacy restore-node profile**：现有旧实盘的 `+0x45/+0x46` 表现为普通 rolling
+   密文，当前未找到对应旧 producer，不能把 current post-XOR 规则反向套用到它们。
 
 严格 22 份 original generation reference set（21份非转换 backup + 独立
 SanDisk 原始加密盘）重新逐盘复算：
 
-- **22/22** 的 physical flags 与 generic rolling-decoded flags 不相等；
-- **6/22 current-style**：physical=`00 00`，generic reader 输出为6组不同非零值；
-- **14/22 legacy**：physical 为非零 profile 值，generic reader 输出=`00 00`；
-- **2/22 legacy 特殊 profile**（Aigo U335 rev_pmap + 独立 SanDisk）：
-  physical 非零，generic reader 输出=`0B 00`。
+- **22/22** 的 physical bytes 与 generic rolling-decoded bytes 不相等；
+- **6/22 current-style**：同时满足
+  `OnllyID2Nd == main onlyid && HSerialCRC[5] == 0`；physical=`00 00`，
+  generic reader 输出为6组不同非零值。该组与当前 Windows producer 的
+  `memset(node,0,0x2F)` + post-XOR store 精确一致；
+- **14/22 legacy**：`OnllyID2Nd != main onlyid && HSerialCRC[5] != 0`，
+  physical 为非零字节，generic reader 输出=`00 00`；
+- **2/22 legacy 特殊 profile**（Aigo U335 rev_pmap + 独立 SanDisk）：同属
+  legacy identity profile，physical 非零，generic reader 输出=`0B 00`。
 
-这组结果与 producer 的 post-XOR store 完全吻合，也证明旧 inspect 把 generic
-rolling 结果当成 server flags 本值是错误模型。`src/inspect.rs` 现改为：
+这组结果证明此前两个极端模型都不对：既不能把 generic rolling 结果对所有盘都当
+server flags 本值，也不能把 physical bytes 对所有盘都当 producer-side flags。
+`src/inspect.rs` 现改为 profile-aware：
 
 ```text
 semantic = rolling_decode(raw[0x18..])
 if historical raw-zero gap:
     semantic[0x47..0x1FB] = 0
-semantic[0x45] = raw[0x45]   # bDataToServer
-semantic[0x46] = raw[0x46]   # bConnetServer
+if semantic.OnllyID2Nd == main_onlyid && semantic.HSerialCRC[5] == 0:
+    # current SAFE6 post-XOR wire exception
+    semantic[0x45] = raw[0x45]   # bDataToServer
+    semantic[0x46] = raw[0x46]   # bConnetServer
+else:
+    # legacy profile: keep official ReadSector4 rolling view
+    keep semantic[0x45..0x47]
 ```
 
-这只是恢复 **producer-side restore-node 语义视图**；它没有伪称官方
-`ReadSector4` 会做同样修正。当前已审 Windows/Linux 上层只强校验
-`OnlyIdXor8`，尚未找到对这两个字段的最终业务读取，因此这 **2B 仍保持
-PARTIAL，不增加 COMPLETE 计数**。
+current profile 的 raw 恢复只代表已闭合的 current producer wire 语义；它没有
+伪称官方 `ReadSector4` 会做同样修正。legacy profile 仍使用 reader 的 rolling
+结果，因为旧 writer 尚未定位。当前已审 Windows/Linux 上层：
+
+- Windows `ReadRestorInfo/sub_10041290` 只负责读取/重试，不修正这2B；
+- `ActiveNormalUDev -> sub_1003CEB0` 不读取 `+0x2D/+0x2E`；
+- `GetUpLoadInformation/sub_10039C30` 会把 restore node 暴露给上层，但本 DLL
+  内只用身份材料，不读取两个 server flag；
+- Linux `libcemsfilesyscheck.so` 除 BuildSector4 的两次 post-XOR store 外，没有
+  对 restore-node `+0x2D/+0x2E` 的直接字段访问。
+
+所以这 **2B 仍保持 PARTIAL，不增加 COMPLETE 计数**：current writer/wire 规则已
+闭合，legacy reader/实盘边界已闭合，但旧 producer 与最终业务 consumer 仍缺失。
 
 同时，current SAFE6 Provision 已从历史 raw-zero short representation 改为官方
 current writer 的 full representation：完整 `+0x18..+0x1FF` rolling，然后再
