@@ -18,6 +18,53 @@ fn tui_is_an_explicit_v2_entrypoint_without_changing_bare_cli() {
 }
 
 #[test]
+fn bare_interactive_terminal_defaults_to_tui_without_breaking_non_tty_cli() {
+    let source = include_str!("../src/cli.rs");
+    assert!(
+        source.contains("should_default_to_tui"),
+        "CLI entrypoint must have an explicit bare-invocation TTY routing policy"
+    );
+    assert!(
+        source.contains("io::stdin().is_terminal()") && source.contains("io::stdout().is_terminal()"),
+        "bare edpcli must gate automatic TUI launch on stdin/stdout terminal capability"
+    );
+    assert!(
+        source.contains("if should_default_to_tui"),
+        "TTY routing must happen before the ordinary argv parser keeps bare CLI as list"
+    );
+}
+
+#[test]
+fn tui_startup_elevates_before_entering_the_alternate_screen() {
+    let source = include_str!("../src/tui/mod.rs");
+    assert!(
+        source.contains("ensure_elevated_before_tui"),
+        "TUI must acquire administrator rights before entering raw/alternate-screen mode"
+    );
+    assert!(
+        source.contains("crate::elevate::ensure_elevated"),
+        "TUI startup must reuse the shared platform elevation path"
+    );
+}
+
+#[test]
+fn tui_theme_uses_the_same_semantic_color_family_as_cli_output() {
+    let source = include_str!("../src/tui/render.rs");
+    for color in [
+        "Color::Cyan",
+        "Color::Green",
+        "Color::Yellow",
+        "Color::Red",
+        "Color::Magenta",
+    ] {
+        assert!(
+            source.contains(color),
+            "TUI semantic palette is missing {color}"
+        );
+    }
+}
+
+#[test]
 fn tui_remains_within_the_cli_v2_compatible_release_line() {
     let major = env!("CARGO_PKG_VERSION")
         .split('.')
