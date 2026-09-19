@@ -128,6 +128,7 @@ fn draw_command_palette(frame: &mut Frame, area: ratatui::layout::Rect, state: &
         "inspect  打开 Inspect",
         "apply    Apply 安全向导",
         "restore  Restore 安全向导",
+        "backup-create  备份当前设备",
         "refresh  刷新当前工作区",
         "help     帮助",
         "quit/q   退出",
@@ -243,6 +244,7 @@ fn draw_wizard(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState)
     let operation = match wizard.kind {
         WriteKind::Apply => "Apply 免密转换",
         WriteKind::Restore => "Restore 备份还原",
+        WriteKind::BackupCreate => "Create Backup 只读备份",
     };
     let mut lines = vec![
         Line::from(Span::styled(
@@ -254,9 +256,14 @@ fn draw_wizard(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState)
     if let Some(path) = &wizard.backup {
         lines.push(Line::from(format!("备份: {}", path.display())));
     }
-    lines.push(Line::from(
-        "安全链：系统盘/USB整盘检查 → selector pinning → 写前保护 → 卸载/锁卷 → reopen复核 → atomic write → sync/readback/rollback",
-    ));
+    lines.push(Line::from(match wizard.kind {
+        WriteKind::BackupCreate => {
+            "只读链：系统盘/USB整盘检查 → selector pinning → 读取 LBA0-13 → create-new 备份/MD5 → fsync；不会卸载或写 U 盘"
+        }
+        WriteKind::Apply | WriteKind::Restore => {
+            "安全链：系统盘/USB整盘检查 → selector pinning → 写前保护 → 卸载/锁卷 → reopen复核 → atomic write → sync/readback/rollback"
+        }
+    }));
     match wizard.stage {
         WizardStage::Confirm => {
             lines.push(Line::from("确认后进入关键写盘阶段。请输入 YES："));
@@ -314,7 +321,7 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
                     Line::from("Vim 键位"),
                     Line::from("j/k/h/l 移动   gg/G 首/尾   Ctrl-d/u 半页"),
                     Line::from("/ 搜索   n/N 匹配   : 命令   Esc 返回   q 退出   ? 帮助"),
-                    Line::from("r 刷新设备"),
+                    Line::from("b 创建当前设备备份   r 刷新"),
                 ])
                 .block(Block::default().borders(Borders::ALL).title("帮助"))
                 .wrap(Wrap { trim: true });
@@ -342,7 +349,7 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
     } else if state.active_scan_pending() {
         "后台扫描中；界面可继续操作".to_string()
     } else {
-        "h/l 工作区  j/k 移动  i Inspect  a Apply  R Restore  r 刷新  ? 帮助  : 命令  / 搜索  q 退出".to_string()
+        "h/l 工作区  j/k 移动  i Inspect  b Backup  a Apply  R Restore  r 刷新  ? 帮助  : 命令  / 搜索  q 退出".to_string()
     };
     frame.render_widget(Paragraph::new(status), chunks[2]);
 }

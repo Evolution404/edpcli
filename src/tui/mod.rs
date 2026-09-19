@@ -39,6 +39,7 @@ pub fn resume_argv(intent: &state::WriteIntent) -> Vec<String> {
         match intent.kind {
             state::WriteKind::Apply => "apply".to_string(),
             state::WriteKind::Restore => "restore".to_string(),
+            state::WriteKind::BackupCreate => "backup-create".to_string(),
         },
         RESUME_DISK_FLAG.to_string(),
         crate::application::pin_disk_selector(intent.disk),
@@ -84,6 +85,7 @@ pub fn parse_resume_args(argv: &[String]) -> Result<Option<state::WriteIntent>, 
                 kind = Some(match value.as_str() {
                     "apply" => state::WriteKind::Apply,
                     "restore" => state::WriteKind::Restore,
+                    "backup-create" => state::WriteKind::BackupCreate,
                     _ => return Err(format!("错误: 非法 TUI resume kind: {value}")),
                 });
             }
@@ -113,8 +115,8 @@ pub fn parse_resume_args(argv: &[String]) -> Result<Option<state::WriteIntent>, 
     let kind = kind.ok_or_else(|| format!("错误: 缺少 {RESUME_KIND_FLAG}"))?;
     let disk = disk.ok_or_else(|| format!("错误: 缺少 {RESUME_DISK_FLAG}"))?;
     match kind {
-        state::WriteKind::Apply if backup.is_some() => {
-            Err("错误: apply resume 不允许携带备份路径".into())
+        state::WriteKind::Apply | state::WriteKind::BackupCreate if backup.is_some() => {
+            Err("错误: 非 Restore resume 不允许携带备份路径".into())
         }
         state::WriteKind::Restore if backup.is_none() => {
             Err(format!("错误: restore resume 缺少 {RESUME_BACKUP_FLAG}"))
@@ -223,6 +225,12 @@ fn dispatch_nav_command(
             }
             StateEffect::None
         }
+        NavCommand::BeginBackupCreate => {
+            if let Some(disk) = state.selected_device_disk() {
+                state.begin_write_wizard(state::WriteKind::BackupCreate, disk, None);
+            }
+            StateEffect::None
+        }
         _ => state.navigate(command, viewport_height),
     }
 }
@@ -234,6 +242,7 @@ fn palette_action_to_nav(action: command::PaletteAction) -> NavCommand {
         command::PaletteAction::Inspect => NavCommand::OpenInspect,
         command::PaletteAction::Apply => NavCommand::BeginApply,
         command::PaletteAction::Restore => NavCommand::BeginRestore,
+        command::PaletteAction::BackupCreate => NavCommand::BeginBackupCreate,
         command::PaletteAction::Refresh => NavCommand::Refresh,
         command::PaletteAction::Help => NavCommand::Help,
         command::PaletteAction::Quit => NavCommand::Quit,
@@ -274,7 +283,15 @@ fn run_loop(resume: Option<state::WriteIntent>) -> io::Result<LoopExit> {
             state.set_write_progress(message);
         }
         if let Some(result) = updates.write {
+            let refresh_backups = result.is_ok()
+                && state
+                    .wizard()
+                    .is_some_and(|wizard| wizard.kind == state::WriteKind::BackupCreate);
             state.finish_write(result);
+            if refresh_backups {
+                tasks.request_backup_scan(backup_dir.clone());
+                state.set_backup_scan_pending(true);
+            }
         }
         if let Some(result) = updates.inspect {
             match result {
@@ -312,7 +329,11 @@ fn run_loop(resume: Option<state::WriteIntent>) -> io::Result<LoopExit> {
                                 if !crate::elevate::is_root() {
                                     return Ok(LoopExit::Elevate(intent));
                                 }
-                                tasks.request_write(intent, backup_dir.clone());
+                                if intent.kind == state::WriteKind::BackupCreate {
+                                    tasks.request_backup_create(intent.disk, backup_dir.clone());
+                                } else {
+                                    tasks.request_write(intent, backup_dir.clone());
+                                }
                             }
                             continue;
                         }

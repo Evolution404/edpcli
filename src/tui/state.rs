@@ -22,6 +22,7 @@ pub struct InspectState {
 pub enum WriteKind {
     Apply,
     Restore,
+    BackupCreate,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -82,6 +83,7 @@ pub enum NavCommand {
     Refresh,
     BeginApply,
     BeginRestore,
+    BeginBackupCreate,
     OpenInspect,
 }
 
@@ -466,6 +468,9 @@ impl AppState {
         if let Some(wizard) = self.wizard.as_mut() {
             wizard.stage = WizardStage::Result;
             wizard.message = Some(match result {
+                Ok(()) if wizard.kind == WriteKind::BackupCreate => {
+                    "备份创建完成；备份列表已刷新".to_string()
+                }
                 Ok(()) => "操作完成，安全链全部通过".to_string(),
                 Err(message) => message,
             });
@@ -695,6 +700,7 @@ impl AppState {
                 | NavCommand::Refresh
                 | NavCommand::BeginApply
                 | NavCommand::BeginRestore
+                | NavCommand::BeginBackupCreate
                 | NavCommand::OpenInspect
                 | NavCommand::NextMatch
                 | NavCommand::PreviousMatch => {}
@@ -739,6 +745,7 @@ impl AppState {
             NavCommand::Refresh
             | NavCommand::BeginApply
             | NavCommand::BeginRestore
+            | NavCommand::BeginBackupCreate
             | NavCommand::OpenInspect
             | NavCommand::NextMatch
             | NavCommand::PreviousMatch

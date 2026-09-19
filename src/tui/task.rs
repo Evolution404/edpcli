@@ -217,6 +217,54 @@ impl TaskHub {
         generation
     }
 
+    pub fn request_backup_create(&mut self, disk: u32, backup_dir: PathBuf) {
+        let tx = self.tx.clone();
+        std::thread::spawn(move || {
+            let result = catch_unwind(AssertUnwindSafe(|| {
+                struct BackupPrompter {
+                    tx: Sender<WorkerResult>,
+                }
+
+                impl crate::application::write::Prompter for BackupPrompter {
+                    fn prompt_line(&mut self, _msg: &str) -> String {
+                        String::new()
+                    }
+
+                    fn confirm_yes(&mut self, _msg: &str) -> bool {
+                        true
+                    }
+
+                    fn output(&mut self, msg: &str) {
+                        let _ = self.tx.send(WorkerResult::WriteProgress {
+                            message: progress_summary(msg),
+                        });
+                    }
+                }
+
+                let runner = SysRunner;
+                crate::application::write::guard_usb_disk(&runner, disk)
+                    .map_err(|error| error.msg)?;
+                let path = crate::diskio::raw_path(disk);
+                let mut dev = crate::diskio::FileDev::open_rdonly(&path)
+                    .map_err(|error| format!("错误: 无法只读打开 {path}: {error}"))?;
+                let mut prompt = BackupPrompter { tx: tx.clone() };
+                let mut ctx = crate::application::write::Ctx {
+                    runner: &runner,
+                    clock: &crate::diskio::SystemClock,
+                    prompt: &mut prompt,
+                    backup_dir,
+                };
+                crate::application::write::backup_create_flow(disk, &mut ctx, &mut dev)
+                    .map(|_| ())
+                    .map_err(|error| error.msg)
+            }))
+            .unwrap_or_else(|payload| {
+                Err(format!("备份 worker 异常终止: {}", panic_message(payload)))
+            });
+            let _ = tx.send(WorkerResult::Write { result });
+        });
+    }
+
     pub fn request_write(&mut self, intent: crate::tui::state::WriteIntent, backup_dir: PathBuf) {
         let tx = self.tx.clone();
         std::thread::spawn(move || {
@@ -279,6 +327,9 @@ impl TaskHub {
                             )
                             .map(|_| ())
                             .map_err(|error| error.msg)
+                        }
+                        crate::tui::state::WriteKind::BackupCreate => {
+                            Err("错误: backup create 必须走只读备份 worker".to_string())
                         }
                     }
                 })();

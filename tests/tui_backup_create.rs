@@ -1,5 +1,5 @@
 use edpcli::tui::command::{parse_command, PaletteAction};
-use edpcli::tui::state::{NavCommand, WriteIntent, WriteKind};
+use edpcli::tui::state::{WriteIntent, WriteKind};
 use edpcli::tui::{parse_resume_args, resume_argv};
 
 #[test]

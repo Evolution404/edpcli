@@ -53,6 +53,7 @@ impl KeyMapper {
             KeyCode::Char('?') => Some(NavCommand::Help),
             KeyCode::Char('i') => Some(NavCommand::OpenInspect),
             KeyCode::Char('a') => Some(NavCommand::BeginApply),
+            KeyCode::Char('b') => Some(NavCommand::BeginBackupCreate),
             KeyCode::Char('R') => Some(NavCommand::BeginRestore),
             KeyCode::Char('r') => Some(NavCommand::Refresh),
             KeyCode::Char('q') => Some(NavCommand::Quit),
