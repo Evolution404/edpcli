@@ -98,6 +98,12 @@ src/provision/validate.rs
 
 禁止为了赶进度把未知区域直接全零或复制 donor 盘身份。
 
+状态：Phase 0 已完成。审计结论与可重复门禁见
+docs/PROVISION_PROTOCOL_AUDIT_2026-09-19.md 和
+tests/provision_protocol_audit.rs。关键结论是：onlyid 暂不自动生成；LBA12 tail
+已证明可由目标 device_id 纯生成；canonical reserved sectors 已锁定；未知生成期
+材料必须进入显式 profile/entropy，禁止 donor copy 或臆造清零。
+
 ## 5. Phase 1 — contract tests + ProvisionSpec/Profile
 
 测试先行，先让旧代码失败。
