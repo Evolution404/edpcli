@@ -871,9 +871,18 @@ Provision 也已按官方 writer 修正：
   `@0x413040` 使用同一公式。两者都把容量按
   `255*63*512 = 0x7D8200` 向下取整。Windows
   `sub_100184C0` 是同构实现。
-- 但当前收集到的三个 build 中，这些 CHS helper 都**没有静态 caller**。
-  旧 `.m` 在 `sub_100184C0` 后面显示的一串所谓 caller 已经由真实机器码
-  复核为 `int3` 对齐区被反编译器误识别，不能作为调用证据。
+- `cemsusbregsiter.dll::sub_100184C0` 在当前注册 build 中确实没有业务 caller，
+  不能用它解释实盘；但本轮从独立官方 `UDiskLabelRepair.dll` 找到真正 active 的
+  CHS writer/reader 链：`CLabelRepair::Repair -> sub_10008820(Check LBA11)`，
+  校验失败后进入 `sub_10008950(ReWrite11Sector) -> sub_10003A40` 重建 LBA11。
+- repair 的物理盘对象由 `sub_10002A20 -> sub_10002FF0` 初始化；后者优先调用
+  `DeviceIoControl(IOCTL_DISK_GET_DRIVE_GEOMETRY=0x70000, out=0x18)`，得到标准
+  `DISK_GEOMETRY`。`sub_10002A20` 再通过 `sub_10019EF0` 计算
+  `Cylinders * TracksPerCylinder * SectorsPerTrack * BytesPerSector`，把64位结果写到
+  `disk_info+0x30/+0x34`。`sub_10019EF0` 机器码已复核为标准64位乘法 helper。
+- `sub_10008820 -> sub_10003BD0` 用同一 `disk_info+0x30/+0x34` 作为 LBA11 KDF
+  容量输入；`sub_10008950 -> sub_10003A40` 重写时也传同一64位 CHS 容量。
+  因此 repair 路径同时给出了 CHS profile 的 active consumer 与 producer。
 - 严格22份原始生成参考仍是 **21/22 exact DiskSize、1/22 CHS-floor**；
   唯一 CHS 参考为 Aigo U335 `onlyid=1987718388`。但本轮新增两个反例把
   “CHS 由设备型号/profile 静态决定”的解释排除了：
@@ -883,10 +892,10 @@ Provision 也已按官方 writer 修正：
     `LBA11.bin/-3/-4` 使用 CHS，而 `LBA11-2.bin` 使用 exact DiskSize。
     这批辅助文件不计入22份 generation reference，只用于证明
     `rev_pmap` 字样/硬件身份本身不能唯一决定 size profile。
-- 因而当前最合理且证据允许的边界是：
-  **current writer = exact DiskSize；历史上确实存在 Windows-size/CHS 兼容 writer
-  profile，但负责选择它的旧调用路径/版本条件尚未找到。**
-  后半 252B 继续 PARTIAL，不因官方 helper 名称存在而提前 COMPLETE。
+- 因而 profile 选择现已闭合到**调用路径**而不是硬件属性：
+  **正常注册 writer/reader = exact `DISK_GEOMETRY_EX.DiskSize`；repair
+  writer/reader = traditional `DISK_GEOMETRY` CHS capacity。**
+  同一 Aigo U335 rev_pmap 的 CHS/exact 双真实捕获正好对应这两条官方路径。
 - 新增回归门禁：
   - `lba11_authentic_sandisk_legacy_profile_still_uses_exact_disk_size`；
   - `lba11_same_rev_pmap_device_has_both_chs_and_exact_size_writer_profiles`。
@@ -894,10 +903,9 @@ Provision 也已按官方 writer 修正：
   original generation reference 统计。
 - 严格完成统计因此更新为：
   - `0x000..0x0FF`：**256B 完成**；
-  - `0x100..0x103`：**4B 完成**（PDKB magic 的 producer 和
-    consumer 强校验均闭合）；
-  - `0x104..0x1FF`：**252B 部分已知**（当前 profile 的
-    `PDKB + UID + zero fill` 已闭合，但历史 CHS profile 的选择条件未闭合）。
+  - `0x100..0x103`：**4B 完成**；
+  - `0x104..0x1FF`：**252B 完成**；
+  - **LBA11 = 512B COMPLETE / 0B PARTIAL / 0B UNKNOWN。**
 - Provision entropy 已同步改成仅接受 `random252`；builder 自己写
   `DRKB`，调用方不再能够把前 4B 协议结构字节当成外部随机材料。
 
@@ -2091,13 +2099,13 @@ CI 原始夹具同时保留两种 profile。零态表示该 legacy tail 不存�
 | 8 | 86B | 324B | 102B | 16.8% | LLGB magic + logical length + ElabOffset 完成；另闭合 ToolVersion、Labversion、writeTime 和 Reserved[64] 共76B；HDSerialInfo/MacInfo/UsbOnlyInfo 与 ELABEL 细项仍部分闭合 |
 | 9 | 54B | 458B | 0B | 10.5% | EETU/EPPE/SAPF三块边界及current preserve范围已拆清：EPPE尾120B为writer-zero但公开API consumer未闭合；+0x080..0x0FF为历史Dept/backing profile，SAPF +0x114..0x11F为profile-dependent backing，+0x120..0x17F为current preserve/ignore，三段均PARTIAL，不再记UNKNOWN |
 | 10 | 36B | 476B | 0B | 7.0% | EESI magic + 两个16B卷标槽完成；+0x04仍缺最终业务语义；+0x28..0x7F 已闭合为未解释的 EESI round-trip payload，+0x80..0x1FF 已闭合 current preserve/ignore 边界，二者均因缺字段/历史profile保持PARTIAL，不再记UNKNOWN |
-| 11 | 260B | 252B | 0B | 50.8% | 前半 DRKB+random252 的 producer/consumer 已双闭合；后半 PDKB magic 4B 也完成；其余当前 DiskSize profile 已闭合，但历史 CHS profile 选择条件仍未解释 |
+| 11 | 512B | 0B | 0B | 100% | normal register path 使用 `DISK_GEOMETRY_EX.DiskSize`；`UDiskLabelRepair` check/rewrite path 使用 `DISK_GEOMETRY` 的 CHS capacity。两条路径的 producer/consumer 与同盘双 profile 实测均闭合 |
 | 12 | 393B | 119B | 0B | 76.8% | 原 372B COMPLETE 基础上，三个 packed entry 的 Reserved[7] 共21B由官方字段名、writer零来源、negative consumer和22盘66/66零值闭合；+0x48扩展槽及其它119B仍PARTIAL |
 
 总计：
 
-- **完成：1939B / 6656B = 29.1%**
-- **部分已知：4263B / 6656B = 64.0%**
+- **完成：2191B / 6656B = 32.9%**
+- **部分已知：4011B / 6656B = 60.3%**
 - **未知：454B / 6656B = 6.8%**
 
 这是一组**严格下限**，故意宁可低估，不把“能生成/能解析”冒充成“已经完全理解”。
@@ -2116,7 +2124,7 @@ CI 原始夹具同时保留两种 profile。零态表示该 legacy tail 不存�
 | 8 | 高度闭合 | LLGB/ELABEL + 可变加密长度已锁；ToolVersion/Labversion/writeTime/Reserved 已闭合，HDSerialInfo/MacInfo/UsbOnlyInfo 继续追 |
 | 9 | 高度闭合 | 整扇已无UNKNOWN：EETU首0x80、EPPE末0x80、SAPF 0x100..0x11F及current preserve中间区边界均明确；历史Dept/backing、SAPF尾12B、post-SAPF区与EPPE zero-tail因历史producer/公开API consumer未完全闭合而保持PARTIAL |
 | 10 | 高度闭合 | 整扇 current 存储边界已解释：前0x80为 EESI round-trip payload，后0x180为 EESI setter preserve-existing tail；magic/两个16B文本槽已 COMPLETE，+0x04与+0x28..0x7F仍缺具体业务语义/非零profile |
-| 11 | 高度闭合 | DRKB/random252/ASCII VID-PID/size/PDKB 链已锁 |
+| 11 | 完全闭合 | DRKB/random252/ASCII VID-PID/PDKB 全部已锁；exact DiskSize 与 CHS repair 两种真实 wire profile 的 producer/consumer/实盘均闭合 |
 | 12 | 中度闭合 | 主运行时 96B packed layout 已锁，但多个标志/扩展材料/表尾状态仅结构已知；禁止把“entry边界已知”当成“entry语义已知” |
 
 ## 尚不能猜测的材料

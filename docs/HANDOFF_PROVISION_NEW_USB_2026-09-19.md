@@ -26,10 +26,10 @@ producer + 官方 consumer/行为 + 原始实盘验证**同时闭合，才能标
 -> BusManageImp::WriteNormalULabel -> CEMSUsbRegsiter.dll::CUsbRegsiter::RegsiterUsb
 -> BuildSector* -> WriteSectorData(count=0x0D)`。
 
-截至本次 LBA7 账本复核，严格统计为：
+截至本次 LBA11 repair-profile 闭环，严格统计为：
 
-- **COMPLETE：1939 / 6656B = 29.1%**
-- **PARTIAL：4263 / 6656B = 64.0%**
+- **COMPLETE：2191 / 6656B = 32.9%**
+- **PARTIAL：4011 / 6656B = 60.3%**
 - **UNKNOWN：454 / 6656B = 6.8%**
 
 当前各 LBA 严格状态以主账本为唯一准绳，最新关键增量：
@@ -78,6 +78,15 @@ producer + 官方 consumer/行为 + 原始实盘验证**同时闭合，才能标
   `"0000aaaa" -> sub_10040400 -> "LtSWi[2f)j"`，
   MD5 后走标准 SM4；43/43 默认 mode2 原始 entry 可独立解包并通过 FileKeyCRC。
   但 mode1/mode3/oldSM4 等已知 profile 缺正向原盘，不得把整个 wrapped16 升 COMPLETE。
+- **LBA11 = 512 COMPLETE / 0 PARTIAL / 0 UNKNOWN = 100%**。
+  正常注册 writer/reader 使用 `DISK_GEOMETRY_EX.DiskSize`；
+  `UDiskLabelRepair.dll::CLabelRepair::Repair` 的 LBA11 检查/重写路径使用
+  `IOCTL_DISK_GET_DRIVE_GEOMETRY` 得到传统 `DISK_GEOMETRY`，按
+  `Cylinders*TracksPerCylinder*SectorsPerTrack*BytesPerSector` 计算 CHS capacity。
+  `sub_10008820 -> sub_10003BD0` 用该容量校验 LBA11，失败后
+  `sub_10008950(ReWrite11Sector) -> sub_10003A40` 用同一容量重建 LBA11；同一
+  Aigo U335 rev_pmap 的 CHS/exact 双真实捕获与两条官方路径吻合。因此后半252B已
+  从 PARTIAL 升 COMPLETE，不再重复追 CHS profile。
 - **LBA0 = 69 COMPLETE / 443 PARTIAL**。
   legacy MBR `+0x1B5..+0x1B7 = 2C 44 63` 已闭合为三个错误消息指针低字节；
   22盘只有 template/cleared 两种 profile。其余 bootstrap/profile 仍未全部解释。
@@ -166,19 +175,16 @@ producer + 官方 consumer/行为 + 原始实盘验证**同时闭合，才能标
    `1D29,7B,4DD,79,7C` 与2份高熵 profile 的生成源仍未知。
    `edpuniqueid` 的 `Drive%dSerialNumber`、`DeviceNumber.dll::EDP_DiskNumber`
    已查过，当前没有建立到五槽 writer 的证据链；不要重复把它们硬接。
-5. **LBA11 rev_pmap / CHS profile**：
-   当前 LBA11 260B COMPLETE、252B PARTIAL；21份使用 DiskSize，1份 Aigo U335
-   `rev_pmap` 使用 CHS 容量。若能闭合“何时选择 CHS”上游条件，潜在可一次提升252B。
-6. **LBA6 legacy +0x1E0..+0x1EF**：
+5. **LBA6 legacy +0x1E0..+0x1EF**：
    20/22零、2份旧格式非零；current template 为零，但旧 producer/consumer未知。
    GSerial/BeiZhu 的 post-NUL 残值已明确是 backing bytes，不要再按 padding。
-7. **LBA8 ELABEL 与动态头剩余字段**：
+6. **LBA8 ELABEL 与动态头剩余字段**：
    static ToolVersion/Labversion/writeTime/Reserved 已 COMPLETE；
    继续为 HDSerialInfo/MacInfo/UsbOnlyInfo 与17-key ELABEL 每个业务字段追最终 consumer。
-8. **LBA10 `+0x04` 与 `+0x28..`**：`+0x04` 目前只有“默认/实盘=1、API原样
+7. **LBA10 `+0x04` 与 `+0x28..`**：`+0x04` 目前只有“默认/实盘=1、API原样
    读写”，没有业务分支 consumer，继续保持 PARTIAL；不要沿用旧文档“版本1/时间戳”
    猜测。两个16B卷标槽已经 COMPLETE，不要重复追。
-9. **LBA0 bootstrap / LBA1-LBA2 GPT 正样本**：LBA0分区表+55AA及3B legacy
+8. **LBA0 bootstrap / LBA1-LBA2 GPT 正样本**：LBA0分区表+55AA及3B legacy
    message pointer 已闭合，
    bootstrap 446B仍 PARTIAL。若能找到真实原始 GPT EDP 盘，可用于把 LBA1/LBA2
    从 PARTIAL 继续细分；在此之前不得以 synthetic builder 输出冒充实盘证据。

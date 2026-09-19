@@ -376,17 +376,22 @@ post-XOR 写回 `+0x45/+0x46`。历史 raw-zero 实盘仅作为兼容读取 prof
 | LBA8 | 86 | 324 | 102 | 16.8% |
 | LBA9 | 54 | 458 | 0 | 10.5% |
 | LBA10 | 36 | 476 | 0 | 7.0% |
-| LBA11 | 260 | 252 | 0 | 50.8% |
+| LBA11 | 512 | 0 | 0 | 100.0% |
 | LBA12 | 393 | 119 | 0 | 76.8% |
 <!-- STRICT_PROGRESS_END -->
 
 当前总计：
 
-- **COMPLETE：1939B / 6656B = 29.1%**
-- **PARTIAL：4263B / 6656B = 64.0%**
+- **COMPLETE：2191B / 6656B = 32.9%**
+- **PARTIAL：4011B / 6656B = 60.3%**
 - **UNKNOWN：454B / 6656B = 6.8%**
 
-LBA11 本轮从 8B COMPLETE 提升到 260B COMPLETE。没有因为“能解开第二半扇”就把其余 252B 也冒进标完成：旧 Aigo U335 `rev_pmap` 为什么选择 CHS 容量参与密钥，而其它 21 份使用 DiskSize，上游选择逻辑尚未闭合。
+LBA11 已完整闭合为 512B COMPLETE。此前卡住的后半 252B 不是“某型号盘偶尔使用
+CHS”的未知 profile，而是来自另一条官方 writer/reader 路径：正常注册 writer 使用
+`DISK_GEOMETRY_EX.DiskSize`；`UDiskLabelRepair` 的 LBA11 检查与重写使用传统
+`DISK_GEOMETRY` 计算 `Cylinders*TracksPerCylinder*SectorsPerTrack*BytesPerSector`
+作为 `ullSize`。同一 Aigo U335 `rev_pmap` 已同时保留 CHS 与 exact DiskSize 两种真实
+捕获，分别匹配这两条官方路径。
 
 ### 3.1 Linux DWARF 原源码索引
 
@@ -488,7 +493,7 @@ DWARF 中恢复出的原始声明文件/行号与本地函数地址：
 | LBA11 | 0x000–0x003 | COMPLETE | DRKB magic | `CDataSecrity::RandBuffer256` 先写 DRKB | `ReadSector11` 首先校验 DRKB | 22/22 | 完成 |
 | LBA11 | 0x004–0x0FF | COMPLETE | random252 | `RandBuffer256`: `srand(time(NULL)); rand()%255` 共252B | `DataEncrypt/DataDecrypt` 将整个 DRKB块纳入 CRC32 密钥输入 | 22/22；均无0xFF；7 CI夹具回归 | 每字节都是密钥扰动材料，来源和消费闭合 |
 | LBA11 | 0x100–0x103 | COMPLETE | PDKB magic（解密后） | `BuildSector11` 构造 PDKB plaintext | `ReadSector11` 解密后必须校验 PDKB | 22/22 | 完成 |
-| LBA11 | 0x104–0x1FF | PARTIAL | 加密的 UID + zero fill | producer: PDKB+4 = `m_strUID`; key=CRC32(DRKB256+VID4+PID4+ullSize8)。current Windows writer 的 ullSize 已逐层追到 `DISK_GEOMETRY_EX.DiskSize`，中间无 CHS 变换；Linux 另保留命名为 `GetWindowsDiskSizeFromLinux` 的 CHS-floor 兼容 helper，但 current build 无静态 caller | consumer: `ReadSector11` 解密并把 PDKB+4 返回 `strDPBack` | 严格22份均 UID 正确；21 DiskSize + 1 CHS。独立 SanDisk legacy/high-entropy profile 仍用 DiskSize；同一 Aigo rev_pmap 的辅助真实采集同时存在 CHS 与 DiskSize 两种 LBA11 | CHS 不是由 `rev_pmap` 字样、设备型号、HSerial high-entropy 或 LBA6 legacy extension 单独决定；历史 writer/路径选择条件仍缺，继续 PARTIAL |
+| LBA11 | 0x104–0x1FF | COMPLETE | 加密的 UID + zero fill | 正常注册 writer：`cemsusbregsiter.dll::sub_10014720` 以 `DISK_GEOMETRY_EX.DiskSize` 为 `ullSize`；repair writer：`UDiskLabelRepair.dll::CLabelRepair::Repair -> sub_10008950(ReWrite11Sector) -> sub_10003A40`，其 `disk_info+0x30/+0x34` 由 `IOCTL_DISK_GET_DRIVE_GEOMETRY(0x70000)` 返回的 `DISK_GEOMETRY` 经 `sub_10019EF0` 64-bit multiply 计算 `Cylinders*TracksPerCylinder*SectorsPerTrack*BytesPerSector` 后生成 LBA11 | 正常 consumer：Windows/Linux `ReadSector11` 以 exact DiskSize 解密；repair consumer：`CLabelRepair::Repair -> sub_10008820 -> sub_10003BD0` 用同一 CHS `disk_info+0x30/+0x34` 校验 LBA11，失败才进入 ReWrite11Sector | 严格22份：21/22 exact DiskSize，1/22 Aigo U335 rev_pmap 为 CHS；另有同一 Aigo rev_pmap 的独立真实 exact-size LBA11 捕获，证明 profile 取决于 writer 路径而非硬件；22/22 解密后 UID 正确且 UID 后全零 | 两种已观测 wire profile 的 producer、consumer、容量算法和实盘均闭合；因此后半252B升级 COMPLETE |
 | LBA12 | 0x000–0x11F | PARTIAL | 3×96B EDPF | Windows/Linux writer | 登录/挂载/兼容链大量消费 | 22盘 | 字段逐项状态见详细审计 |
 | LBA12 | 0x010–0x013 | COMPLETE | entry0.NeedDisturb compatibility gate | `CUsbRegsiter::CreatePartitions` 写入 entry0；Linux `edpdiskglobal.h:82` 定义字段 | `vrvaud_c::NewCheckDisTurbUsb(*)` fallback 在 `Format.cpp:0x3CE/0x380` 直接以该 DWORD 非零判 success | 22/22原始盘=1；20个entry0 type1、2个type2；7 CI夹具锁定 | 完成的是 entry0 兼容门控行为；其它 entry 的 NeedDisturb 不随之升级 |
 | LBA12 | 每条entry +0x059–+0x05F | COMPLETE | packed Reserved[7] | Windows `CreatePartitions` 对3×96B先 `memset(0,0x120)`，后续只写至 +0x58；Linux DWARF正式字段名 `Reserved[7]` | Windows UserLogin/改密只消费 wrapped16 与 +0x58；Linux decrypt/改密同样不消费 Reserved | 22盘66/66 entry全零；CI原始夹具锁定 | **LBA12 packed Reserved[7] producer/negative-consumer closure**；注意相邻 +0x48..57 仍是扩展 key-material PARTIAL |
@@ -1233,17 +1238,39 @@ sub_100186C0 enumerate USB interface
 因此**当前 Windows writer 的 LBA11 KDF 容量输入就是物理
 `DISK_GEOMETRY_EX.DiskSize`**，不是 CHS 推导值。
 
-历史 profile 仍有一个明确缺口：22 份原始样本中的 Aigo U335
-`rev_pmap / onlyid=1987718388` 只有使用
+此前唯一缺口是 Aigo U335 `rev_pmap / onlyid=1987718388` 为什么使用 CHS 容量。
+本轮已从独立官方 repair 组件闭合这条路径：
 
 ```text
-floor(DiskSize / (255*63*512)) * (255*63*512)
+UDiskLabelRepair.dll::CLabelRepair::Repair
+  -> sub_10008820                 # Check LBA11
+       -> sub_10003BD0            # 用 disk_info+0x30/+0x34 解密 PDKB
+  -> if check fails:
+       sub_10008950               # ReWrite11Sector
+         -> sub_10003A40          # 重新生成 DRKB/PDKB LBA11
 ```
 
-才能恢复 PDKB。当前 DLL 中存在 `sub_100184C0`，其常量
-`0x7D8200 == 255*63*512`，算法形态与 CHS 容量换算一致；但在当前 build
-没有发现有效 caller。因此只能证明“历史样本确实使用过 CHS profile”，尚不能证明
-旧 writer **何时/为什么**选择它。
+`disk_info+0x30/+0x34` 的来源为：
+
+```text
+sub_10002A20
+  -> sub_10002FF0
+       DeviceIoControl(IOCTL_DISK_GET_DRIVE_GEOMETRY = 0x70000,
+                       out_size = 0x18)
+  -> DISK_GEOMETRY:
+       Cylinders            @ +0x08/+0x0C (u64 in enclosing object)
+       TracksPerCylinder    @ +0x14
+       SectorsPerTrack      @ +0x18
+       BytesPerSector       @ +0x1C
+  -> sub_10019EF0 64-bit multiply helper
+  -> capacity = Cylinders * TracksPerCylinder * SectorsPerTrack * BytesPerSector
+  -> disk_info+0x30/+0x34
+```
+
+`sub_10019EF0` 的机器码已复核为标准 64-bit multiply helper：返回 `EDX:EAX`，
+不是业务函数。对常见 255/63/512 geometry，这正是此前实盘复算得到的 CHS-floor
+容量。也就是说，**CHS 不是注册 writer 的隐式分支，而是 repair writer/reader 的
+明确容量来源**。
 
 ### 5.5 22份原始实盘验证
 
@@ -1257,12 +1284,14 @@ floor(DiskSize / (255*63*512)) * (255*63*512)
 - 1/22（Aigo U335 `rev_pmap`）使用 CHS 取整容量；
 - 22/22 第一半扇都是 `DRKB + 252B`，随机区没有出现 `0xFF`，符合 `rand()%255`。
 
-因此：
+同一 Aigo U335 `rev_pmap` 的辅助真实采集同时存在 CHS 与 exact DiskSize 两种
+LBA11，进一步证明差异来自 writer path，而不是硬件身份本身。至此两种已观测
+profile 都具备 producer、consumer、容量算法和真实盘验证，因此：
 
-- LBA11 `0x000..0x0FF` 可以升级为 COMPLETE；
-- `0x100..0x103` 的 PDKB magic 可以升级 COMPLETE；
-- `0x104..0x1FF` 暂留 PARTIAL，唯一主要缺口是旧 `rev_pmap`
-  profile 选择 CHS 容量的上游决策来源。
+- LBA11 `0x000..0x0FF`：COMPLETE；
+- `0x100..0x103`：COMPLETE；
+- `0x104..0x1FF`：由 PARTIAL 升级 COMPLETE；
+- **LBA11 整扇 512B = 100% COMPLETE**。
 
 ## 6. LBA7 / LBA12 EDPF 字段 producer-consumer 图
 
@@ -1790,16 +1819,15 @@ reader 只有一个标准SM4解包分支且完全不读取 `oldSM4` 配置。
 
 按“最可能把 PARTIAL 转成 COMPLETE”的收益排序：
 
-1. **LBA11**：追 Aigo U335 `rev_pmap` 为何传入 CHS 容量；闭合后可再提升 252B。
-2. **LBA7 / LBA12**：LBA7 legacy wrapped key8 已闭合；继续逐个追 EDPF 中 Version、NeedDisturb 其它 entry、LBA12 非实盘 mode1/mode3 分支和 pass-info 剩余字段。
-3. **LBA4**：继续寻找旧 `HSerialCRC[5]` 的真正 producer。
-4. **LBA6**：继续追 legacy MBR-underlay writer：已知 `0x1E0..0x1ED`
+1. **LBA7 / LBA12**：LBA7 legacy wrapped key8 已闭合；继续逐个追 EDPF 中 Version、NeedDisturb 其它 entry、LBA12 非实盘 mode1/mode3 分支和 pass-info 剩余字段。
+2. **LBA4**：继续寻找旧 `HSerialCRC[5]` 的真正 producer。
+3. **LBA6**：继续追 legacy MBR-underlay writer：已知 `0x1E0..0x1ED`
    是第3条 MBR entry 幸存区且与 LBA12 type4 对齐，下一步需要找到旧版
    “动态 MBR table -> BuildSector6” producer 或直接读取该 fragment 的 consumer。
-5. **LBA8**：为 17-key ELABEL 的每个业务字段找到最终消费者。
-6. **LBA9/10**：继续追 EETU `reverse[104]`、EESI `+0x04` 及
+4. **LBA8**：为 17-key ELABEL 的每个业务字段找到最终消费者。
+5. **LBA9/10**：继续追 EETU `reverse[104]`、EESI `+0x04` 及
    `+0x28..` 未闭合区；EETU 时间/次数控制和两个16B EESI卷标槽已经完成。
-7. **LBA0/1/2/3**：继续从官方 `RegsiterUsb` 的模板/读取路径向前追；
+6. **LBA0/1/2/3**：继续从官方 `RegsiterUsb` 的模板/读取路径向前追；
    LBA5 的 opaque write-protection probe 用途已经闭合，不再作为未知扇区。
 
 ## 9. 操作安全边界

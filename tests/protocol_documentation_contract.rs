@@ -143,6 +143,9 @@ fn documentation_keeps_the_official_provisioning_chain_and_strict_rules() {
         "LBA0 legacy MBR message-pointer bytes",
         "LBA7 packed 64-byte ABI versus Linux natural 72-byte ABI",
         "LBA7 v0x0064 packed legacy file-key wrapping",
+        "ReWrite11Sector",
+        "IOCTL_DISK_GET_DRIVE_GEOMETRY",
+        "Cylinders*TracksPerCylinder*SectorsPerTrack*BytesPerSector",
         "22/22",
         "不能单独把字段升级为 COMPLETE",
         "禁止把免密转换盘",
@@ -163,5 +166,9 @@ fn documentation_keeps_the_official_provisioning_chain_and_strict_rules() {
     assert!(
         DOC.contains("| LBA7 | 489 | 23 | 0 | 95.5% |"),
         "LBA7 progress must include the already-closed 4-byte entry0 NeedDisturb compatibility gate"
+    );
+    assert!(
+        DOC.contains("| LBA11 | 512 | 0 | 0 | 100.0% |"),
+        "LBA11 must remain fully closed once the CHS repair writer/reader profile is accounted for"
     );
 }
