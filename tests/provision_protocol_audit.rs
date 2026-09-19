@@ -499,6 +499,43 @@ fn committed_blank_sector_evidence_matches_real_images() {
 }
 
 #[test]
+fn lba0_legacy_mbr_message_pointer_bytes_have_only_template_or_cleared_profiles() {
+    let mut template_profile = 0usize;
+    let mut cleared_profile = 0usize;
+
+    for entry in fs::read_dir(FIXTURE_DIR).expect("protocol fixtures") {
+        let path = entry.expect("backup entry").path();
+        if path.extension().and_then(|ext| ext.to_str()) != Some("bin") {
+            continue;
+        }
+        let name = path.file_name().unwrap().to_str().unwrap();
+        if parse_reference_backup_name(name).is_none() {
+            continue;
+        }
+        let image = fs::read(&path).expect("fixture bytes");
+        let bytes = &sector(&image, 0)[0x1b5..0x1b8];
+
+        match bytes {
+            [0x2c, 0x44, 0x63] => template_profile += 1,
+            [0x00, 0x00, 0x00] => cleared_profile += 1,
+            _ => panic!(
+                "unexpected LBA0 legacy MBR message-pointer profile in {name}: {:02x?}",
+                bytes
+            ),
+        }
+    }
+
+    assert!(
+        template_profile > 0,
+        "protocol fixtures lost the legacy MBR message-pointer profile"
+    );
+    assert!(
+        cleared_profile > 0,
+        "protocol fixtures must retain the cleared/preserve-existing profile"
+    );
+}
+
+#[test]
 fn lba3_manufacturing_payload_is_an_opaque_whole_sector_not_just_a_marker_string() {
     const MARKED: &str =
         "disk4_121110528_vid0951_pid1666_disk&ven_kingston&prod_datatraveler_3.0_onlyid2135149925_20260903_121319.bin";

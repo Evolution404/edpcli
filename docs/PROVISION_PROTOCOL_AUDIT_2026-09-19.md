@@ -1064,6 +1064,69 @@ Windows `edpediskctrl.dll` 同时给出读端和写端：
 `out_raw_data/EdpEDiskCtrl.dll` 也存在同构路径。因此两个16B字段的最终运行时
 用途已经闭合为交换区/保密区卷标，不再只是“文本槽候选”。
 
+### LBA0 legacy MBR message-pointer bytes：+0x1B5..+0x1B7 闭合
+
+本轮把原先笼统归为“446B bootstrap”的尾部重新逐字节拆开。
+官方 Windows `UsbMainBSec @ 0x100E7220` 在：
+
+```text
++0x1B5 = 0x2C
++0x1B6 = 0x44
++0x1B7 = 0x63
+```
+
+这三字节不是普通保留值，而是 legacy MBR bootstrap 的三个消息指针低字节。
+消费链可直接由同一官方模板反汇编闭合：
+
+1. 模板开头把源 `0x7C1B` 起的 `0x1E5` 字节复制到 `0x061B`，
+   然后 `retf` 到复制后的代码执行；
+2. 因此原扇区偏移 `X` 在运行时映射为绝对地址 `0x0600 + X`；
+3. copied bootstrap 中三处：
+
+```text
+runtime 0x063A: mov al,[0x07B5]
+runtime 0x0666: mov al,[0x07B6]
+runtime 0x068F: mov al,[0x07B7]
+```
+
+随后固定 `AH=0x07`，所以三个值分别组成：
+
+```text
+0x072C -> 原模板 +0x12C -> "Invalid partition table"
+0x0744 -> 原模板 +0x144 -> "Error loading operating system"
+0x0763 -> 原模板 +0x163 -> "Missing operating system"
+```
+
+producer 侧也明确：`sub_10013FD0` / legacy full-MBR 路径会从
+`0x100E7220` 整体复制 `UsbMainBSec`，因此这三字节随模板固定生成。
+current 注册路径则会清零 `+0x000..+0x18F`，但不覆盖
+`+0x190..+0x1BD`，所以旧模板尾部可能继续保留，即使 bootstrap body
+已经被清掉。
+
+22份 original real-device reference set 的逐盘统计只有两种状态：
+
+- **14/22 = `2C 44 63`**；
+- **8/22 = `00 00 00`**；
+- 无第三种值。
+
+CI 原始夹具同时保留两种 profile。零态表示该 legacy tail 不存在/已清空；
+`2C 44 63` 态的 producer、consumer、目标字符串和实盘都已闭合。
+因此 `+0x1B5..+0x1B7` 共 **3B PARTIAL -> COMPLETE**。
+
+相邻区域不随之升级：
+
+- `+0x1A0..+0x1A3`：legacy `BuildSector0/sub_10013F10` 明确写
+  SectorSize；22盘有4份为512，其余为0，但尚未找到独立 reader/consumer；
+- `+0x1B8..+0x1BB`：已经闭合为标准 MBR disk signature producer：
+  `GetSystemTimePreciseAsFileTime`（fallback `GetSystemTimeAsFileTime`）
+  -> FILETIME 转 Unix seconds -> low32 -> `CREATE_DISK_MBR.Signature`
+  -> `IOCTL_DISK_CREATE_DISK`。22/22 非零、19种值，同一 onlyid 重复备份稳定。
+  Windows drive-layout API 会把它作为 MBR Signature 报告，但当前已审 EDP
+  `IOCTL_DISK_GET_DRIVE_LAYOUT_EX` 调用均未发现业务逻辑读取该值，因此按本项目
+  “EDP consumer 也需闭合”的严格口径继续 PARTIAL；
+- `+0x1BC..+0x1BD`：当前官方模板和22盘均为0，但缺独立 consumer，
+  仍不因全零而升级。
+
 ## 当前逐字节地图状态
 
 ### 严格完成口径（2026-09-19）
@@ -1090,7 +1153,7 @@ Windows `edpediskctrl.dll` 同时给出读端和写端：
 
 | LBA | 完成 | 部分已知 | 未知 | 严格完成率 | 当前计数依据 |
 |---:|---:|---:|---:|---:|---|
-| 0 | 66B | 446B | 0B | 12.9% | 64B 标准 MBR partition table + 55AA 完成；bootstrap 446B 来源未闭合 |
+| 0 | 69B | 443B | 0B | 13.5% | 原64B MBR partition table +55AA基础上，legacy MBR 的3个错误消息指针低字节 `+0x1B5..+0x1B7` producer/consumer/22盘 profile 已闭合；其余443B仍PARTIAL |
 | 1 | 0B | 512B | 0B | 0% | 官方 BuildSector1_Gpt + GPT_Header(512B) 结构 + Windows `EFI PART` / `header_lba` consumer 已闭合；22/22当前原始SAFE6盘全零，缺正向GPT实盘，因此整扇PARTIAL |
 | 2 | 0B | 512B | 0B | 0% | 官方 BuildSector2_Gpt + GPT_Partition(128B) 结构 + Windows 从LBA2起每扇4 entry parser 已闭合；22/22当前原始盘全零，缺正向GPT实盘，因此整扇PARTIAL |
 | 3 | 0B | 512B | 0B | 0% | EDP 注册 writer 对整扇 preserve-existing，当前 Windows/Linux EDP reader 不解析；22份原始盘为21零+1 Kingston MP payload，但厂商 producer/固件 consumer 未闭合 |
@@ -1106,8 +1169,8 @@ Windows `edpediskctrl.dll` 同时给出读端和写端：
 
 总计：
 
-- **完成：1600B / 6656B = 24.0%**
-- **部分已知：3031B / 6656B = 45.5%**
+- **完成：1603B / 6656B = 24.1%**
+- **部分已知：3028B / 6656B = 45.5%**
 - **未知：2025B / 6656B = 30.4%**
 
 这是一组**严格下限**，故意宁可低估，不把“能生成/能解析”冒充成“已经完全理解”。
@@ -1115,7 +1178,7 @@ Windows `edpediskctrl.dll` 同时给出读端和写端：
 
 | LBA | 状态 | 当前结论 |
 |---|---|---|
-| 0 | 部分闭合 | MBR 分区表和 55AA 已知；全新盘 bootstrap 来源仍追官方写路径 |
+| 0 | 部分闭合 | MBR 分区表、55AA、legacy 三个错误消息指针字节已闭合；SectorSize、disk signature 的 EDP-side consumer 与其它 bootstrap/profile 尾部继续追 |
 | 1 | GPT profile 部分闭合 | 当前22/22全零；官方 GPT_Header writer/consumer 已知，但缺正向GPT实盘 |
 | 2 | GPT profile 部分闭合 | 当前22/22全零；官方 GPT_Partition writer/consumer 已知，但缺正向GPT实盘 |
 | 3 | 外部制造区部分闭合 | 21/22 全零，1 份 Kingston MP payload；官方 EDP 注册链原样保留且当前 reader 不解析，厂商生成/消费语义仍未知 |
@@ -1134,7 +1197,7 @@ Windows `edpediskctrl.dll` 同时给出读端和写端：
 - LBA4 中除 onlyid、已知 LLGB 常量之外的生成期动态字节；
 - EDPF wrapped-key 的 mode1/mode3 正向真实盘样本（算法与consumer已闭合，当前22盘均为mode2）；
 - LBA4 onlyID2Nd 及关联动态字段的生成源；
-- LBA0 全新盘 bootstrap 的官方来源；
+- LBA0 bootstrap 主体/profile 选择、`+0x1A0 SectorSize` consumer，以及 `+0x1B8` disk signature 的 EDP-side consumer；
 - LBA6 0x1c0..0x1ed 不同格式代际的准确字段来源。
 - LBA12 NeedDisturb 在新版主路径中的进一步业务作用（旧版 fallback 门控已闭合）；
 - LBA12 +0x48..+0x57 扩展材料槽在主盘面中的确切用途；

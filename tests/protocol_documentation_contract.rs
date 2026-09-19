@@ -139,6 +139,7 @@ fn documentation_keeps_the_official_provisioning_chain_and_strict_rules() {
         "LBA12 v0x0206 hidden default-password file-key wrapping",
         "LBA12 alternate wrapping-mode algorithm map",
         "LBA12 packed Reserved[7] producer/negative-consumer closure",
+        "LBA0 legacy MBR message-pointer bytes",
         "22/22",
         "不能单独把字段升级为 COMPLETE",
         "禁止把免密转换盘",
