@@ -232,7 +232,7 @@ GSerial/BeiZhu 则直接按 C 字符串读回。注意 `UsbLabelParam` **没有*
 32B 完整字段。current writer 的槽尾来自输入对象 backing bytes；两份 legacy
 profile 则能看到被短 C 字符串局部覆盖后的 MBR 几何残留。
 
-#### m_autoid / Autonum：字符串语义闭合，但固定 16B 槽不能整体升级
+#### m_autoid / Autonum：固定 16B 槽已闭合，包括非语义 post-NUL backing
 
 producer：
 
@@ -262,13 +262,17 @@ BuildSector8(label):
 - 分布：`YD000001` 14份、空串6份、`1` 2份；
 - 但固定 16B 槽在第一个 NUL 之后经常保留非零字节，例如
   `YD000001\0\0 73 05 A0 B6 07 EB`；
-- 这与 `UsbWriteParam(UsbLabelParam&)` 只用 `strcpy_s` 写 C 字符串、
-  随后 `BuildSector6` 却固定 `memcpy 16B` 的实现吻合：NUL 后内容不属于
-  `m_autoid` 的字符串语义，可能来自对象旧内容/未定义尾部。
+- 后续进一步反汇编 `strcpy_s@0x1B9B0` 证明它遇到 NUL 后立即停止，
+  **不会清 destination 剩余 capacity**；同时
+  `UsbWriteParam(UsbLabelParam&)@0x1C362` 入口没有整体 memset，
+  随后 `BuildSector6` 又固定 `memcpy 16B`，因此 NUL 后内容的 producer
+  已闭合为 **writer-uninitialized backing**；
+- committed originals 还保留了更强反例：同一个空 autoid 字符串至少存在
+  2种不同且非零的 post-NUL backing，证明这些字节不是第二个隐藏字段。
 
-因此这里**不增加 COMPLETE 字节数**。如果以后要把某个固定 offset 升级 COMPLETE，
-必须先证明该 offset 在所有相关 profile 中都有确定 producer/consumer 语义，
-不能因为字符串本身已闭合就把 NUL 后尾部当作零填充。
+`ReadSector6` 只解释首个 NUL 前字符串，整扇 checksum 又保护完整16B物理值。
+因此这里现在**增加16B COMPLETE**；COMPLETE 表示“每个字节的存储/消费行为已知”，
+并不表示 post-NUL 字节具有固定值。Provision 不需要模拟未初始化内存泄漏。
 
 ### LBA4 `+0x45/+0x46`：post-XOR wire flags 已闭合到 producer / reader 分叉
 
@@ -373,7 +377,7 @@ post-XOR 写回 `+0x45/+0x46`。历史 raw-zero 实盘仅作为兼容读取 prof
 | LBA5 | 512 | 0 | 0 | 100.0% |
 | LBA6 | 300 | 212 | 0 | 58.6% |
 | LBA7 | 490 | 22 | 0 | 95.7% |
-| LBA8 | 86 | 426 | 0 | 16.8% |
+| LBA8 | 92 | 420 | 0 | 18.0% |
 | LBA9 | 54 | 458 | 0 | 10.5% |
 | LBA10 | 36 | 476 | 0 | 7.0% |
 | LBA11 | 512 | 0 | 0 | 100.0% |
@@ -382,8 +386,8 @@ post-XOR 写回 `+0x45/+0x46`。历史 raw-zero 实盘仅作为兼容读取 prof
 
 当前总计：
 
-- **COMPLETE：2489B / 6656B = 37.4%**
-- **PARTIAL：4167B / 6656B = 62.6%**
+- **COMPLETE：2495B / 6656B = 37.5%**
+- **PARTIAL：4161B / 6656B = 62.5%**
 - **UNKNOWN：0B / 6656B = 0.0%**
 
 LBA11 已完整闭合为 512B COMPLETE。此前卡住的后半 252B 不是“某型号盘偶尔使用
@@ -472,7 +476,9 @@ DWARF 中恢复出的原始声明文件/行号与本地函数地址：
 | LBA8 | 0x008–0x00B | COMPLETE | ToolVersion[4] | Windows `sub_100148d0` 与 Linux `BuildSector8@diskfile.cpp:805` 都写固定字节 `01 00 00 01` | `ReadSector8(UsbLabelParam&)` 的语义 parser 不读取该版本戳；`ReadSector8(BYTE*)` 仅把完整解密扇区原样导出 | 22/22原始盘=`01 00 00 01`；CI原始夹具锁定 | 4B writer、reader行为、实盘一致，无已知 profile 分叉 |
 | LBA8 | 0x00C–0x00F | COMPLETE | Labversion | Windows/Linux writer 都固定写 `0x00000222` | 语义 parser 跳过该 DWORD；raw reader 仅原样导出 | 22/22原始盘=`0x222`；CI原始夹具锁定 | 4B 标签版本戳闭合 |
 | LBA8 | 0x010–0x013 | COMPLETE | writeTime | Windows writer 调 `GetTickCount()`；Linux `CLabelManage::GetTickCount@0x1FBAA` 用 `clock_gettime(CLOCK_MONOTONIC)` 转为毫秒并截为32位 | 两个官方 reader 都不把该值用于标签解析/准入；raw reader 只导出原值 | 22/22原始盘均非零且跨标签变化；CI夹具保持多值反例 | 不是墙钟时间，而是制标时单调时钟毫秒计数（32位回绕） |
-| LBA8 | 0x014–0x03D | PARTIAL | HDSerialInfo / MacInfo[6] / UsbOnlyInfo[32] | current Windows `RegsiterUsb@0x1003BD3E..0x1003BD88` 在调用 `sub_100148d0` 前先压入 `object+0x698`（main onlyid），再按值复制完整 `0x2AC` UsbLabelParam；`sub_100148d0@0x10014914..0x1001492E` 明确用该尾随 DWORD 执行 `sprintf("%08x%08x", main_onlyid, 0)` 并写 UsbOnlyInfo。Linux `BuildSector8(char*, UsbLabelParam, unsigned int)` 同样使用第三个 u32 参数生成该串；current HDSerialInfo/MacInfo 为零初始化。legacy producer 仍未闭合 | Windows `sub_10015820` 与 Linux `ReadSector8(UsbLabelParam&)` 只按 ElabOffset 解析 ELABEL，不读取这42B；raw reader 仅 opaque 导出；其它历史消费者未闭合 | 严格22份原始盘按 LBA4 identity profile 分组：6/6 current 均为 `HDSerialInfo=0, MacInfo=0, UsbOnlyInfo=format("%08x%08x", main_onlyid_bits,0)`；16/16 legacy 均 UsbOnlyInfo 空且 HDSerialInfo 为历史非零 profile；MacInfo 22/22为零 | current UsbOnlyInfo producer 已精确闭合且有双 profile 实盘门禁，但 legacy HDSerialInfo producer/最终 consumer 未闭合，整段仍 PARTIAL |
+| LBA8 | 0x014–0x017 | PARTIAL | HDSerialInfo | `tagEdpUsbLableInfo.HDSerialInfo@+0x14`；current Windows/Linux BuildSector8 都从零初始化 header 得到0，但 legacy producer 尚未定位 | semantic ReadSector8 不读取该 DWORD，raw reader只导出 | current identity 6/6为0；legacy 16/16存在历史非零 profile | 已知明确代际分叉但 legacy producer/用途未闭合，继续PARTIAL |
+| LBA8 | 0x018–0x01D | COMPLETE | `MacInfo[6]` reserved/unused MAC slot | Linux DWARF 正式定义 `MacInfo unsigned char[6]@+0x18`；Windows/Linux BuildSector8 都先清零完整 header，Linux 再把仍为0的 DWORD+WORD写到+0x18，current producer明确为6B零 | Windows `sub_10015820` 与 Linux `ReadSector8(UsbLabelParam&)` 均从 ElabOffset 解析 ELABEL，不读取 MacInfo；raw reader仅 opaque 导出，不赋予业务语义 | 严格22份原始盘跨 current/legacy identity **22/22均为6B零**；CI `lba8_current_usb_only_info_is_main_onlyid_hex_while_legacy_profile_keeps_it_empty` 现对全部 profile 锁定 MacInfo=0 | 官方字段边界、显式零 producer、negative semantic consumer 与跨代实盘均闭合，无已知 profile 分叉，6B COMPLETE |
+| LBA8 | 0x01E–0x03D | PARTIAL | UsbOnlyInfo[32] | current Windows `RegsiterUsb -> sub_100148d0` 明确以 main onlyid 执行 `sprintf("%08x%08x", onlyid,0)` 并写32B槽；Linux BuildSector8同构；legacy producer未定位 | semantic reader跳过该槽，raw reader仅 opaque 导出；最终历史 consumer未闭合 | 6/6 current identity匹配 `format("%08x%08x", main_onlyid_bits,0)`；16/16 legacy槽全零 | current producer已闭合，但存在明确 legacy wire profile且旧 producer未找到，因此32B继续PARTIAL |
 | LBA8 | 0x03E–0x03F | COMPLETE | ElabOffset | `BuildSector8@diskfile.cpp:805` 写 `0x0080`；官方结构 `tagEdpUsbLableInfo.ElabOffset@edpdiskglobal.h:413` | `ReadSector8@diskfile.cpp:1102` 读取 WORD 并用 `decoded+ElabOffset` 构造 ELABEL 字符串 | 22/22原始盘=0x80，且22/22都指向 `<ELABEL>`；CI真实夹具锁定 | 2B 寻址语义、producer、consumer、实盘全部闭合 |
 | LBA8 | 0x040–0x07F | COMPLETE | Reserverd[64] | Windows `sub_100148d0` 与 Linux `BuildSector8` 都先零初始化整个 header，再把未被其它赋值覆盖的 64B 原样复制到该区 | `ReadSector8(UsbLabelParam&)` 直接越过该区定位 `ElabOffset` 指向的 ELABEL；raw reader 仅原样导出，不赋予业务语义 | 22/22原始盘解密后64B全零；CI原始夹具锁定 | 官方结构名、零初始化 producer、negative consumer 和实盘全部闭合为 reserved-zero 区 |
 | LBA8 | 0x080–0x1FF | PARTIAL | dynamic ELABEL / encrypted block padding / preserved physical tail | Windows `sub_100148d0` 与 Linux `BuildSector8@0x1D602` 都从 `+0x80` 写 ELABEL，并按 `(logical_len / 16 + 1) * 16` 只加密动态前缀；即 logical_len 恰好16B对齐时仍额外加密一块以覆盖结尾 NUL。两端都**不清零输出扇区的剩余尾部**，current 注册链又是在预读既有13扇区的 backing 上重建，因此 `encrypted_len..` 是 preserve-existing 区 | `ReadSector8(UsbLabelParam&)` 依据 `ElabOffset/logical_len` 解析 ELABEL，不给动态尾部附加字段语义；edpcli inspect 只解密动态前缀并原样保留其后的物理字节；synthetic nonzero-tail 与 16B-aligned logical-length 两个回归分别锁定 tail-preserve 和“对齐长度仍多解一块” | 严格22份原始盘：`logical_end=0x148..0x183`，实际 encrypted prefix=`0x150..0x190`；所有观测尾部当前为零，但零不是协议要求；22/22正文均含17-key ELABEL | 旧账本按样本长度切出102B UNKNOWN 是错误的固定边界模型。协议边界是动态的：同一物理 offset 可随 ELABEL 长度成为正文/加密块padding/保留尾部；三类存储行为均已定界，所以整段384B统一为 PARTIAL、LBA8 不再有 UNKNOWN。inspect 已修正原先普通 round-up 在16B对齐时少解一块的边界错误；每个 ELABEL 键的最终业务 consumer 与历史动态 header profile 尚未全部闭合，故不升 COMPLETE |

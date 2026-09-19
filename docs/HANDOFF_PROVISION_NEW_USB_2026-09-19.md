@@ -28,8 +28,8 @@ producer + 官方 consumer/行为 + 原始实盘验证**同时闭合，才能标
 
 截至本次 LBA11 repair-profile 闭环，严格统计为：
 
-- **COMPLETE：2489 / 6656B = 37.4%**
-- **PARTIAL：4167 / 6656B = 62.6%**
+- **COMPLETE：2495 / 6656B = 37.5%**
+- **PARTIAL：4161 / 6656B = 62.5%**
 - **UNKNOWN：0 / 6656B = 0.0%**
 
 当前各 LBA 严格状态以主账本为唯一准绳，最新关键增量：
@@ -81,7 +81,7 @@ producer + 官方 consumer/行为 + 原始实盘验证**同时闭合，才能标
   Label 仍有56B盘面截断/profile缺口，继续PARTIAL。
   Dept/Owner 长值的 continuation 还确认落在 LBA9+0x80/+0x100，
   并已用 join60/join59 双profile实盘门禁锁定。当前全 LBA0–12 已无 UNKNOWN，
-  目前全局仍有4167B PARTIAL，绝不能把“UNKNOWN=0”当成全部协议完成。
+  目前全局仍有4161B PARTIAL，绝不能把“UNKNOWN=0”当成全部协议完成。
 
 - **LBA7 = 490 COMPLETE / 22 PARTIAL / 0 UNKNOWN = 95.7%**。
   真实物理 LBA7 已锁定为 **3×0x40 packed EDPF + 14B pass-info@+0xC0**，
@@ -114,7 +114,7 @@ producer + 官方 consumer/行为 + 原始实盘验证**同时闭合，才能标
   22份原始盘为18×0+4×1，且22/22 LBA7/LBA12一致，因此 LBA7/LBA12
   各1B升级COMPLETE。LBA7现在只剩 **22B PARTIAL**：
   3×Version(12B)、entry1/2 NeedDisturb(8B)、BackupPromptPeriod(2B)。
-- **LBA8 = 86 COMPLETE / 426 PARTIAL / 0 UNKNOWN = 16.8%**。
+- **LBA8 = 92 COMPLETE / 420 PARTIAL / 0 UNKNOWN = 18.0%**。
   旧账本把22盘当前最大正文之后的102B机械记成 UNKNOWN，这是错误的固定边界模型。
   Windows `sub_100148d0` 与 Linux `BuildSector8@0x1D602` 都只写/加密动态前缀，
   不清零后续输出 backing；严格22盘重新复算得到
@@ -131,8 +131,12 @@ producer + 官方 consumer/行为 + 原始实盘验证**同时闭合，才能标
   后者以 `[ebp+0x2B8]` 执行 `sprintf("%08x%08x", main_onlyid, 0)` 并写
   `LBA8+0x1E UsbOnlyInfo`。严格22份按 LBA4 identity profile 重算：
   6/6 current 均为该格式且 HDSerialInfo/MacInfo=0；16/16 legacy 均
-  UsbOnlyInfo为空并保留历史非零 HDSerialInfo。legacy producer/最终 consumer
-  尚未闭合，因此 `+0x14..+0x3D` 仍保持PARTIAL。
+  UsbOnlyInfo为空并保留历史非零 HDSerialInfo。进一步把42B混合区拆开后，
+  `MacInfo[6]@+0x18..+0x1D` 已满足独立闭合条件：官方字段名明确、
+  Windows/Linux header 都显式零初始化、semantic reader 完全跳过，
+  且 current/legacy 22/22 均为6B零，无已知 profile 分叉，因此6B升COMPLETE。
+  `HDSerialInfo@+0x14..17` 与 `UsbOnlyInfo@+0x1E..3D` 仍因 legacy producer/
+  历史 consumer 缺口保持PARTIAL。
 - **LBA12 = 394 COMPLETE / 118 PARTIAL / 0 UNKNOWN = 77.0%**。
   主运行时盘面固定为 3×96B packed entry；`Reserved[7]@+0x59..+0x5F`
   已由官方字段名、writer 零来源、negative consumer 和 66/66 原始 entry 闭合。

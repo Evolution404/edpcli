@@ -1509,17 +1509,17 @@ fn lba8_current_usb_only_info_is_main_onlyid_hex_while_legacy_profile_keeps_it_e
         let head = a6b0_full(&raw8[..0x80], &crc.to_le_bytes(), 0);
         assert_eq!(&head[..4], b"LLGB", "{name}");
         let logical_len = u32_le(&head, 4) as usize;
-        let encrypted_len = round_up_16(logical_len).min(SECTOR);
+        let encrypted_len = ((logical_len / 16 + 1) * 16).min(SECTOR);
         let lba8 = a6b0_full(&raw8[..encrypted_len], &crc.to_le_bytes(), 0);
         let usb_only = &lba8[0x1e..0x3e];
+        assert!(
+            lba8[0x18..0x1e].iter().all(|byte| *byte == 0),
+            "MacInfo[6] must stay zero across current and legacy original profiles: {name}"
+        );
 
         if current_identity {
             current += 1;
             assert_eq!(u32_le(&lba8, 0x14), 0, "{name}");
-            assert!(
-                lba8[0x18..0x1e].iter().all(|byte| *byte == 0),
-                "current MacInfo must stay zero: {name}"
-            );
             let expected = format!("{bits:08x}00000000");
             assert_eq!(
                 &usb_only[..expected.len()],

@@ -138,6 +138,7 @@ fn documentation_keeps_the_official_provisioning_chain_and_strict_rules() {
         "LBA6 C-string slots have profile-dependent post-NUL backing bytes",
         "writer-uninitialized backing",
         "strcpy_s@0x1B9B0",
+        "MacInfo[6]",
         "legacy MBR partition-table fragment",
         "LBA4 current writer machine-code node layout",
         "LBA12 v0x0206 hidden default-password file-key wrapping",
@@ -177,6 +178,10 @@ fn documentation_keeps_the_official_provisioning_chain_and_strict_rules() {
     assert!(
         DOC.contains("| LBA7 | 490 | 22 | 0 | 95.7% |"),
         "LBA7 progress must retain entry0 NeedDisturb and the closed bNoUsbChkPasSafe policy byte"
+    );
+    assert!(
+        DOC.contains("| LBA8 | 92 | 420 | 0 | 18.0% |"),
+        "LBA8 progress must retain the closed MacInfo[6] header slot"
     );
     assert!(
         DOC.contains("| LBA12 | 394 | 118 | 0 | 77.0% |"),
