@@ -51,6 +51,15 @@ fn chs_capacity(size: u64) -> u64 {
     size / UNIT * UNIT
 }
 
+fn decode_edpf_tail(stored: &[u8]) -> [u8; 14] {
+    assert_eq!(stored.len(), 14);
+    let mut tail: [u8; 14] = stored.try_into().unwrap();
+    tail[0] ^= 0x88;
+    tail[3] ^= 0x88;
+    tail[6] ^= 0x88;
+    tail
+}
+
 const NETAC_A: &str =
     "disk6_122880000_vid0dd8_pid2005_disk&ven_netac&prod_onlydisk_onlyid1402259934_20260910_172300.bin";
 const NETAC_B: &str =
@@ -59,7 +68,7 @@ const LEXAR: &str =
     "disk4_243625984_vid21c4_pid0cd1_disk&ven_lexar&prod_usb_flash_drive_onlyid3164177653_20260827_221910.bin";
 
 #[test]
-fn canonical_reserved_sectors_are_zero_across_committed_real_images() {
+fn committed_blank_sector_evidence_matches_real_images() {
     let mut checked = 0usize;
     let mut manufacturing_marks = 0usize;
     for entry in fs::read_dir(BAK_DIR).expect("backup fixtures") {
@@ -90,6 +99,26 @@ fn canonical_reserved_sectors_are_zero_across_committed_real_images() {
     }
     assert!(checked >= 20, "protocol audit unexpectedly lost fixtures");
     assert_eq!(manufacturing_marks, 1, "LBA3 evidence set changed");
+}
+
+#[test]
+fn lba13_is_zero_in_every_committed_snapshot_but_is_not_proven_protocol_metadata() {
+    let mut checked = 0usize;
+    for entry in fs::read_dir(BAK_DIR).expect("backup fixtures") {
+        let path = entry.expect("backup entry").path();
+        if path.extension().and_then(|ext| ext.to_str()) != Some("bin") {
+            continue;
+        }
+        let image = fs::read(&path).expect("fixture bytes");
+        assert_eq!(image.len(), 14 * SECTOR, "{}", path.display());
+        assert!(
+            sector(&image, 13).iter().all(|byte| *byte == 0),
+            "{} LBA13 is not zero",
+            path.display()
+        );
+        checked += 1;
+    }
+    assert!(checked >= 20, "protocol audit unexpectedly lost fixtures");
 }
 
 #[test]
@@ -355,4 +384,113 @@ fn edpf_offset_08_is_partition_count_in_both_tables() {
         checked += 1;
     }
     assert!(checked >= 20, "protocol audit unexpectedly lost fixtures");
+}
+
+#[test]
+fn edpf_tail_has_version_and_password_retry_fields_not_a_terminator() {
+    let mut checked = 0usize;
+    let mut saw_lba7_v64 = false;
+    let mut saw_lba7_v206 = false;
+    let mut saw_nonzero_retry = false;
+    let mut saw_unknown_state_bit = false;
+
+    for entry in fs::read_dir(BAK_DIR).expect("backup fixtures") {
+        let path = entry.expect("backup entry").path();
+        if path.extension().and_then(|ext| ext.to_str()) != Some("bin") {
+            continue;
+        }
+        let name = path.file_name().unwrap().to_str().unwrap();
+        let Some(meta) = parse_backup_name(name) else {
+            continue;
+        };
+        let image = fs::read(&path).expect("fixture bytes");
+        let crc = crc32_bare(meta.device_id.as_bytes());
+
+        let k0 = (crc & 0xffff) ^ (crc >> 16);
+        let lba7 = xor_rolling(sector(&image, 7), k0);
+        let tail7 = decode_edpf_tail(&lba7[0xc0..0xce]);
+        let version7 = u16::from_le_bytes([tail7[0], tail7[1]]);
+        assert!(matches!(version7, 0x0064 | 0x0206), "LBA7 {name}");
+        saw_lba7_v64 |= version7 == 0x0064;
+        saw_lba7_v206 |= version7 == 0x0206;
+        assert_eq!(tail7[3], 0xff, "LBA7 Share retry max {name}");
+        assert!(tail7[4] <= tail7[3], "LBA7 Share retry count {name}");
+        assert_eq!(tail7[6], 0xff, "LBA7 Encrypt retry max {name}");
+        assert!(tail7[7] <= tail7[6], "LBA7 Encrypt retry count {name}");
+        assert!(tail7[8..10].iter().all(|byte| *byte == 0), "LBA7 {name}");
+        assert!(tail7[11..].iter().all(|byte| *byte == 0), "LBA7 {name}");
+
+        let lba12 = a6b0_full(sector(&image, 12), &crc.to_le_bytes(), 0);
+        let tail12 = decode_edpf_tail(&lba12[0x120..0x12e]);
+        assert_eq!(
+            u16::from_le_bytes([tail12[0], tail12[1]]),
+            0x0206,
+            "LBA12 {name}"
+        );
+        assert_eq!(tail12[3], 0xff, "LBA12 Share retry max {name}");
+        assert!(tail12[4] <= tail12[3], "LBA12 Share retry count {name}");
+        assert_eq!(tail12[6], 0xff, "LBA12 Encrypt retry max {name}");
+        assert!(tail12[7] <= tail12[6], "LBA12 Encrypt retry count {name}");
+        assert!(tail12[8..10].iter().all(|byte| *byte == 0), "LBA12 {name}");
+        assert!(tail12[11..].iter().all(|byte| *byte == 0), "LBA12 {name}");
+
+        saw_nonzero_retry |= tail7[4] != 0 || tail7[7] != 0 || tail12[4] != 0 || tail12[7] != 0;
+        saw_unknown_state_bit |= tail7[2] != 0
+            || tail7[5] != 0
+            || tail7[10] != 0
+            || tail12[2] != 0
+            || tail12[5] != 0
+            || tail12[10] != 0;
+        checked += 1;
+    }
+
+    assert!(checked >= 20, "protocol audit unexpectedly lost fixtures");
+    assert!(
+        saw_lba7_v64 && saw_lba7_v206,
+        "audit lost LBA7 version diversity"
+    );
+    assert!(
+        saw_nonzero_retry,
+        "audit lost a non-zero password retry sample"
+    );
+    assert!(
+        saw_unknown_state_bit,
+        "audit lost unknown tail state-bit evidence"
+    );
+}
+
+#[test]
+fn onlyid_text_is_a_signed_or_unsigned_view_of_one_u32_bit_pattern() {
+    let mut checked = 0usize;
+    let mut saw_negative = false;
+    let mut saw_above_i32_max_as_unsigned = false;
+    for entry in fs::read_dir(BAK_DIR).expect("backup fixtures") {
+        let path = entry.expect("backup entry").path();
+        if path.extension().and_then(|ext| ext.to_str()) != Some("bin") {
+            continue;
+        }
+        let name = path.file_name().unwrap().to_str().unwrap();
+        let Some(meta) = parse_backup_name(name) else {
+            continue;
+        };
+        let Some(text) = meta.onlyid.as_deref() else {
+            continue;
+        };
+        let bits = onlyid_bits(text);
+        if text.starts_with('-') {
+            saw_negative = true;
+            assert_eq!(text.parse::<i32>().unwrap() as u32, bits, "{name}");
+        } else {
+            let unsigned = text.parse::<u32>().unwrap();
+            assert_eq!(unsigned, bits, "{name}");
+            saw_above_i32_max_as_unsigned |= unsigned > i32::MAX as u32;
+        }
+        checked += 1;
+    }
+    assert!(checked >= 20, "protocol audit unexpectedly lost fixtures");
+    assert!(saw_negative, "audit lost signed-decimal onlyid evidence");
+    assert!(
+        saw_above_i32_max_as_unsigned,
+        "audit lost unsigned-decimal onlyid evidence above i32::MAX"
+    );
 }

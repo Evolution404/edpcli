@@ -5,10 +5,11 @@
 
 ## 结论
 
-1. onlyid 不是 device_id / VID / PID / 容量的确定函数。
+1. onlyid 不是 device_id / VID / PID / 容量的确定函数；Windows 官方注册路径已经找到其生成源。
    - 同一 Netac 0dd8:2005、相同容量、相同 device_id 的真实样本存在多个不同 onlyid。
    - 样本同时存在大于 i32::MAX 的十进制文本和负数文本。
-   - 因此 Provision 第一版必须显式接收 onlyid，内部按 32 位位模式解释；在没有新的可验证证据前禁止发明自动生成算法。
+   - `cemsusbregsiter.dll` 的 `RegsiterUsb -> sub_1003d960` 明确执行 `CoCreateGuid()`，随后对 GUID 原始 16B 调用协议同款 `CRC32_bare`，结果写入对象字段 `+0x698`；`sub_10014550` 再把该 32-bit 值格式化进 LBA4 的 `$$$...$$$`。
+   - 因此 Provision 可以自动生成 onlyid：`random GUID 16B -> CRC32_bare -> u32 bit pattern`。为克隆/重建已有标签身份，仍保留显式 onlyid 输入。
 
 2. LBA12 0x170..0x200 的 144B 不是 donor 随机保留区。
    - 对全部已提交真实备份逐字验证：
@@ -19,7 +20,8 @@
    - LBA1、2、5、10、13：仓库 23 份样本均为全零。
    - LBA3：22 份为全零；唯一非零样本带 Kingston 制造标记 this is mp mark，同型号另一真实样本仍为全零。
    - 外部逆向资料库 `/Users/zhangyuxi/Desktop/u_disk` 中存在真实非零 LBA10：前 0x80 经 A6B0 解密后为 `EESI`，后 0x180 物理全零。因此 LBA10 是可选设置扇区，不应继续命名为“保留扇区”。
-   - 第一阶段 nopwd Provision profile 仍可选择 LBA1、2、3、5、10、13 全零，但必须表述为“canonical nopwd policy”，不能表述为协议恒定事实。
+   - **LBA13 需要单独纠错**：官方 `RegsiterUsb` 主路径中的 `0x0d` 是 sector count=13，实际连续读写的是 **LBA0–LBA12**，不是“写 LBA13”。虚拟注册 trace 也明确记录一次 `start=0, count=13` 的前部写入。`sub_100136c0/sub_10013810` 的第 5 参数就是扇区数量。
+   - 因此目前没有证据表明 LBA13 属于 EDP/cems 前部元数据；23/23 为零更合理的解释是原普通盘在分区起始前的间隙本来就是零。Provision 不应主动把 LBA13 写零，而应默认保留原 LBA13。
 
 4. LBA8 的 GLAB canonical 值在所有可解码样本中一致：
    322CA28A-D7D1448B-DCE2CED9。
@@ -89,6 +91,44 @@
 - 因此旧描述“只加密前 368B，后 144B RAW”错误。
 - 过去观察到的 `raw[0x170..] == a7f0_full(zero144, key, initial_counter=0x170)`，正是“整扇连续加密”的自然结果，不是独立 tail 格式。
 
+### onlyid：注册时随机 GUID 的 CRC32，不是硬件 ID
+
+- Windows 官方注册链：
+
+  `CoCreateGuid -> GUID raw 16B -> CRC32_bare -> object+0x698 -> LBA4 $$$onlyid$$$`
+
+- 该路径没有把 VID/PID、device_id、容量或 USB serial 混入 onlyid 生成。
+- 这与真实样本“相同硬件参数存在不同 onlyid”一致。
+- GUID 本身是注册实例随机量；onlyid 只是其 32-bit CRC 压缩结果，不能从 onlyid 唯一恢复原 GUID。
+- 跨平台 Provision 不需要依赖 Windows `CoCreateGuid` API，只需要 16B 高质量随机熵并复用相同 CRC32 算法。
+
+### EDPF 14B 表尾：版本 + 密码错误计数，不是 terminator
+
+- LBA7 表尾起点 `0xC0`，LBA12 表尾起点 `0x120`。
+- 盘上存储前会对 `byte0 / byte3 / byte6` 各 `^ 0x88`；读端执行相反操作恢复结构。
+- 已闭合字段：
+  - `+0x00..01`：表格式版本；LBA7 样本出现 `0x0064/0x0206`，LBA12 为 `0x0206`；
+  - `+0x03`：Share 最大密码错误次数，真实样本均为 `0xff`；
+  - `+0x04`：Share 当前错误次数；代码路径密码错误时 `+1`，成功后清零；
+  - `+0x06`：Encrypt 最大密码错误次数，真实样本均为 `0xff`；
+  - `+0x07`：Encrypt 当前错误次数；代码路径密码错误时 `+1`，成功后清零。
+- `+0x02/+0x05/+0x0A` 在真实样本出现 0/1 变化，目前只能标记为 unknown state byte，禁止提前命名。
+
+### LBA13：当前证据表明它不属于官方前部 metadata write set
+
+- `RegsiterUsb` 分配/读取缓冲长度为 `sector_size * 0x0d`，并调用：
+  - `sub_100136c0(..., count=0x0d)`：从起点读取 13 sectors；
+  - `sub_10013810(..., count=0x0d)`：写回 13 sectors。
+- `sub_100136c0/sub_10013810` 内部都明确以 `count * sector_size` 计算读写长度，因此 `0x0d` 是数量，不是 LBA 编号。
+- 从 start LBA=0 开始，13 sectors 正好覆盖 **LBA0..LBA12**。
+- `u_disk` 的官方 DLL 虚拟注册 trace 也记录：`start=0, count=13 -> LBA0-LBA12`。
+- 现有 23 份备份额外保存了 LBA13 作为审计范围，但 23/23 全零；这只能证明这些盘的原 LBA13 是零，不能证明注册工具曾写过它。
+- 当前 Provision 安全结论：
+  - 仍可读取/备份 LBA0–13 作为 14-sector snapshot；
+  - **协议生成/写入范围先收紧为 LBA0–12**；
+  - LBA13 原样保留，不主动清零；
+  - 若后续找到独立明确写 LBA13 的官方路径，再扩展写集。
+
 ### EDPF：+0x08 是 PartionCount，不是 version
 
 - LBA7（0x40 stride）和 LBA12（0x60 stride）均逐样本验证：`u32@entry0+0x08 == 实际连续 EDPF entry 数量`。
@@ -133,7 +173,7 @@ LBA12 entry `+0x30..+0x47`：
 | 10 | 部分闭合 | 可选 EESI 已确认；canonical nopwd 可零 |
 | 11 | 高度闭合 | DRKB/random252/ASCII VID-PID/size/PDKB 链已锁 |
 | 12 | 高度闭合 | 整扇加密、96B EDPF、24B material 拆分已锁；表尾状态和非默认 wrapped-key 分支继续追 |
-| 13 | canonical 已知 | 当前 23/23 全零 |
+| 13 | 非协议写集候选 | 当前 23/23 全零；官方注册主路径只写 LBA0–12，Provision 暂定保留原值 |
 
 ## 尚不能猜测的材料
 
@@ -162,5 +202,6 @@ tests/provision_protocol_audit.rs 固化以下事实：
 - LBA11 固定 DRKB magic、ASCII VID/PID CRC 输入和 PDKB 明文结构；
 - LBA12 是完整 512B 连续密文，解密后 144B tail 为零；
 - LBA7/LBA12 `+0x08` 等于连续 EDPF 条目数。
+- LBA13 在全部提交快照中为零，但不把该事实升级成“协议要求写零”。
 
 Phase 1 以后不得绕过这些门禁，也不得把未知区域重新退化为 donor copy。

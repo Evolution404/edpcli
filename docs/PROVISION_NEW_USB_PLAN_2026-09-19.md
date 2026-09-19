@@ -7,11 +7,11 @@
 新增“把普通全新 USB 生成成 EDP/cems 元数据盘”的能力。第一阶段目标严格限定为：
 
 - 识别一块普通 USB 整盘；
-- 根据目标盘自身硬件身份、容量和用户输入生成完整 **LBA0–13（14 * 512B）** 元数据镜像；
+- 审计/备份范围继续覆盖 **LBA0–13（14 * 512B snapshot）**；根据官方注册写路径，协议生成与写入范围先收紧为 **LBA0–12（13 sectors）**，LBA13 默认保留原值；
 - 支持离线 plan / image / verify；
 - 最终支持经过完整安全链后写入目标 USB；
 - CLI 与 TUI 共用同一 application/service 和协议 builder；
-- **不自动格式化数据区，不创建/重建文件系统，不写 LBA14 及之后区域。**
+- **不自动格式化数据区，不创建/重建文件系统，不写 LBA13 及之后区域。** 若后续找到独立明确写 LBA13 的官方路径，再扩展写集。
 
 这与现有 `apply` 不同：`apply` 是对已有 cems 盘做保守转换，依赖原盘 LBA0–13 的 type4、reserved bytes、LBA12 尾部 144B 等材料；Provision 必须能够从经过验证的 canonical profile + 目标盘动态身份重新构造。
 
@@ -55,7 +55,9 @@ ProvisionProfile
         ↓
 pure builders
         ↓
-ProvisionImage [LBA0..13]
+ProvisionSnapshot [LBA0..13]
+        ↓
+ProvisionWriteImage [LBA0..12]
         ↓
 ProvisionValidator
         ↓
@@ -93,16 +95,16 @@ src/provision/validate.rs
 6. LBA8 LLGB 的完整编码、User/Dept 等字段边界；
 7. LBA9 新盘应为 zero 还是 canonical SAPF；
 8. LBA11 PDKB 的 random、VID/PID、容量和 device_id 构造闭环；
-9. LBA12 未加密尾部 144B 与其他 reserved bytes 是否可固定为 canonical profile；
-10. LBA1/2/3/5/10/13 的真实策略。
+9. LBA12 后 144B 的真实加密/明文结构，以及其他 reserved bytes 是否可固定为 canonical profile；
+10. LBA1/2/3/5/10/13 的真实策略，以及哪些扇区实际属于官方写集。
 
 禁止为了赶进度把未知区域直接全零或复制 donor 盘身份。
 
-状态：Phase 0 已完成。审计结论与可重复门禁见
+状态：Phase 0 持续加深。审计结论与可重复门禁见
 docs/PROVISION_PROTOCOL_AUDIT_2026-09-19.md 和
-tests/provision_protocol_audit.rs。关键结论是：onlyid 暂不自动生成；LBA12 tail
-已证明可由目标 device_id 纯生成；canonical reserved sectors 已锁定；未知生成期
-材料必须进入显式 profile/entropy，禁止 donor copy 或臆造清零。
+tests/provision_protocol_audit.rs。关键结论是：onlyid 已找到官方自动生成链；LBA12 是
+整扇连续密文；LBA11 为 DRKB+random252；LBA13 不在官方 RegsiterUsb 的 13-sector
+前部写集中；未知生成期材料必须进入显式 profile/entropy，禁止 donor copy 或臆造清零。
 
 ## 5. Phase 1 — contract tests + ProvisionSpec/Profile
 
@@ -115,7 +117,7 @@ tests/provision_protocol_audit.rs。关键结论是：onlyid 暂不自动生成�
 - builder 不访问磁盘、不执行命令；
 - `device_id` 必须来自目标盘硬件 probe；
 - 无法可靠得到 Vendor/Product/Transport 等必要身份时 fail-closed；
-- image 固定为 7168B；
+- audit/backup snapshot 固定为 7168B；protocol write image 固定为 6656B（LBA0–12）；
 - reserved/canonical profile 有显式版本；
 - User/Dept/onlyid 输入边界；
 - CLI v2 既有命令不回归。
@@ -156,7 +158,7 @@ plaintext[0..508]
 
 LBA7：按 `CRC32(device_id)` 派生 K0 做 rolling XOR。
 
-LBA12：前 368B 使用现有 a7f0/A6B0 变体；尾部 144B 使用 Phase 0 锁定的 canonical profile，不能随意清零。
+LBA12：整扇 512B 使用现有 a7f0/A6B0 变体连续加密；解密后的 `0x170..0x1ff` 为 144B zero plaintext。
 
 ### LBA8 LLGB
 
@@ -169,19 +171,19 @@ LBA12：前 368B 使用现有 a7f0/A6B0 变体；尾部 144B 使用 Phase 0 锁�
 - VID
 - PID
 - 容量
-- 256B random
+- 固定 `DRKB` 4B magic + 252B random
 
 生成 key，构造 `PDKB + device_id`，加密后必须能被现有 decoder 反向得到目标 device_id。
 
 ### 其他 LBA
 
-LBA1/2/3/5/9/10/13 只允许使用 Phase 0 已验证的 canonical policy。
+LBA1/2/3/5/9/10 只允许使用 Phase 0 已验证的 canonical policy；LBA13 不由 Provision builder 主动生成，默认保留原盘值。
 
 ## 7. Phase 3 — 全量离线 Validator
 
 `ProvisionImage` 生成后，在任何写盘前必须离线自证：
 
-- 长度精确 7168B；
+- snapshot 长度精确 7168B；待写 image 长度精确 6656B；
 - MBR/布局一致；
 - LBA4 onlyid round-trip；
 - SAFE6 checksum 与 device CRC 一致；
@@ -221,9 +223,9 @@ system disk guard
 → prepare_write / lock / unmount
 → reopen
 → capacity + VID/PID + selector identity recheck
-→ atomic write LBA0–13（LBA0 最后）
+→ atomic write LBA0–12（LBA0 最后，LBA13 不写）
 → sync
-→ readback 14 sectors bit-for-bit
+→ readback LBA0–12 bit-for-bit，并确认 LBA13 与写前一致
 → protocol-level verify
 → failure rollback 原 LBA0–13
 ```
@@ -253,7 +255,7 @@ system disk guard
 → provision
 → readback
 → list/info/inspect/verify
-→ restore 原 14 sectors
+→ restore 原 14-sector snapshot（写路径实际只触碰 LBA0–12）
 → sentinel 完整恢复
 
 ### Windows VHD
