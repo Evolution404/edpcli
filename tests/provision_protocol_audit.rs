@@ -338,6 +338,8 @@ fn lba8_encrypted_prefix_covers_the_elabel_terminating_nul() {
 #[test]
 fn lba11_is_drkb_random252_and_uses_ascii_vid_pid_in_crc_input() {
     let mut checked = 0usize;
+    let mut saw_disk_size = false;
+    let mut saw_chs = false;
     for entry in fs::read_dir(FIXTURE_DIR).expect("protocol fixtures") {
         let path = entry.expect("backup entry").path();
         if path.extension().and_then(|ext| ext.to_str()) != Some("bin") {
@@ -353,12 +355,17 @@ fn lba11_is_drkb_random252_and_uses_ascii_vid_pid_in_crc_input() {
         let image = fs::read(&path).expect("fixture bytes");
         let raw = sector(&image, 11);
         assert_eq!(&raw[..4], b"DRKB", "{name}");
+        assert!(
+            raw[4..0x100].iter().all(|byte| *byte != 0xff),
+            "RandBuffer256 uses rand()%255, so 0xFF is impossible: {name}"
+        );
 
         let rand = &raw[..0x100];
         let cipher = &raw[0x100..];
         let disk_size = sectors * SECTOR as u64;
+        let chs_size = chs_capacity(disk_size);
         let mut decoded = None;
-        for size in [disk_size, chs_capacity(disk_size)] {
+        for (source, size) in [("DiskSize", disk_size), ("CHS", chs_size)] {
             let mut input = Vec::with_capacity(0x110);
             input.extend_from_slice(rand);
             input.extend_from_slice(&padded4_ascii(&meta.vid));
@@ -367,15 +374,27 @@ fn lba11_is_drkb_random252_and_uses_ascii_vid_pid_in_crc_input() {
             let crc = crc32_bare(&input);
             let plain = a6b0_full(cipher, &crc.to_le_bytes(), 0);
             if plain.starts_with(b"PDKB") {
-                decoded = Some(plain);
+                match source {
+                    "DiskSize" => saw_disk_size = true,
+                    "CHS" if chs_size != disk_size => saw_chs = true,
+                    _ => {}
+                }
+                decoded = Some((source, plain));
                 break;
             }
         }
-        let plain = decoded.unwrap_or_else(|| panic!("ASCII VID/PID did not decode PDKB: {name}"));
+        let (source, plain) =
+            decoded.unwrap_or_else(|| panic!("ASCII VID/PID did not decode PDKB: {name}"));
         assert!(plain[4..].starts_with(meta.device_id.as_bytes()), "{name}");
         let end = 4 + meta.device_id.len();
         assert_eq!(plain[end], 0, "{name}");
         assert!(plain[end + 1..].iter().all(|byte| *byte == 0), "{name}");
+        if name.contains("rev_pmap") {
+            assert_eq!(
+                source, "CHS",
+                "legacy rev_pmap fixture must keep the historical CHS key profile"
+            );
+        }
 
         // Numeric little-endian VID/PID is a tempting but incorrect interpretation.
         let vid = u16::from_str_radix(&meta.vid, 16).unwrap();
@@ -398,6 +417,14 @@ fn lba11_is_drkb_random252_and_uses_ascii_vid_pid_in_crc_input() {
     assert!(
         checked >= MIN_PROTOCOL_FIXTURES,
         "protocol audit unexpectedly lost fixtures"
+    );
+    assert!(
+        saw_disk_size,
+        "protocol fixtures lost the normal DiskSize LBA11 profile"
+    );
+    assert!(
+        saw_chs,
+        "protocol fixtures lost the legacy CHS LBA11 profile"
     );
 }
 

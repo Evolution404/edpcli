@@ -6,6 +6,22 @@
 
 基线：已正式发布的 `v2.2.0`，`main@14557e7e54e355c5853479a7220e8ff1f0e5e9e7`。
 
+逐字节逆向的长期主账本：
+`docs/PROTOCOL_BYTE_TRACE_2026-09-19.md`。
+
+后续所有“完成率”必须以主账本的严格口径为准：只有**字段边界 + 官方
+producer + 官方 consumer/行为 + 原始实盘验证**同时闭合，才能标记
+`COMPLETE`；仅样本一致/全零、知道字段名、能解密、能生成、只有 writer
+或只有 reader 都不得升级。CI 的
+`tests/protocol_documentation_contract.rs` 会拦截完成字节回退，以及
+`COMPLETE` 行缺 producer / consumer / 实盘证据。
+
+官方制盘主链已经确认：
+
+`cemssafeudisklabeltool.exe -> usbtoolBusManage.dll::CreateBusManageImp
+-> BusManageImp::WriteNormalULabel -> CEMSUsbRegsiter.dll::CUsbRegsiter::RegsiterUsb
+-> BuildSector* -> WriteSectorData(count=0x0D)`。
+
 目标：让一块普通全新 USB 能生成并安全写入 EDP/cems 前部 metadata。协议、备份、inspect、Provision 统一只处理 **LBA0–12（13 sectors / 6656B）**。第一阶段不格式化数据区，不写 LBA12 之后区域。
 
 先完整阅读 `docs/PROVISION_NEW_USB_PLAN_2026-09-19.md`、`docs/RELEASE.md`，再检查 git 状态。允许连接 Mac，Phase 0 优先用现有备份和真实盘做**只读**协议审计。不要把现有 `apply` 直接改造成 provision；必须先建立纯 `ProvisionSpec/Profile/Image/Validator`。
@@ -23,9 +39,10 @@ LBA12 必须继续按“**结构已知 != 语义已知**”的严格口径推进
 - `+0x58 EncryptMode` 已闭合为 **1 byte**：
   `0=AES64, 1=AES128, 2=SMS4, 3=AESOPENSSL`。Linux 主挂载路径当前只创建
   mode 0/1/2 header；Windows 对 mode 3 有兼容回退。
-- `+0x10 NeedDisturb`：字段名、写端来源、标准三分区写值已闭合：
-  `Boot=1, Share=1, Encrypt=0`；但 Windows 用户态→EdpMountFile→驱动链未发现
-  该字段进入运行时参数，因此**真实行为仍未闭合，禁止按名字猜语义**。
+- `+0x10 NeedDisturb`：字段名、写端来源和旧版兼容 consumer 已闭合到
+  **entry0 的兼容门控行为**：`NewCheckDisTurbUsb(*)` fallback 直接以
+  `entry0+0x10 != 0` 判定 success；新版主路径和其它 entry 的进一步业务作用
+  仍未闭合，禁止按名字翻译成“扰码/激活/防篡改”等更具体语义。
 - `+0x38..0x47` 是 16B wrapped file-key material；`+0x48..0x57` 当前主 writer
   不写、主 reader 不读、历史样本全零，只能定性为未使用扩展槽，不能宣称协议恒零。
 - Linux `SetPartitionNewPass` 只改 `UserKeyCRC(+0x30)` 和 wrapped key

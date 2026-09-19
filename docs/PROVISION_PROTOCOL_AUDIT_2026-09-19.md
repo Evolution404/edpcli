@@ -255,6 +255,28 @@ Provision 也已按官方 writer 修正：
 
 - `0x000..0x003 == "DRKB"`：当前 22/22。
 - `0x004..0x0ff`：252B 运行时随机材料。
+- Linux 官方 DWARF 已恢复 producer / consumer 的原始源码位置：
+  - `CLabelManage::BuildSector11`：
+    `/mnt/git/cross_platform/src/global/src/diskfile.cpp:783`，
+    本地 `libcemsfilesyscheck.so@0x1D350`；
+  - `CLabelManage::ReadSector11`：
+    `diskfile.cpp:1168`，本地 `@0x1F220`；
+  - `CDataSecrity::RandBuffer256`：
+    `/mnt/git/cross_platform/src/global/src/datasecrity.cpp:14`，
+    本地 `@0x20204`；
+  - `CDataSecrity::DataEncrypt`：
+    `datasecrity.cpp:34`，本地 `@0x202D4`；
+  - `CDataSecrity::DataDecrypt`：
+    `datasecrity.cpp:61`，本地 `@0x20476`；
+  - `CLabelManage` 构造器：
+    `diskfile.cpp:576`，本地 `@0x1C538`；构造参数 `pUID`
+    被保存为成员 `m_strUID`。
+- `RandBuffer256` 的实际生成算法已闭合：
+  `srand(time(NULL))`，先写 `DRKB`，随后对 `i=4..255`
+  写 `rand()%255`。因此前 256B 不再是“未知随机 blob”，而是
+  **4B 协议 magic + 252B 明确 PRNG 输出**。
+- `ReadSector11` 会先检查这 4B `DRKB`，随后把完整前 256B
+  原样作为后半区 key 派生输入。因此 random252 的**生成来源和消费用途都闭合**。
 - CRC 输入为：
 
   `DRKB || random252 || VID_ascii4 || PID_ascii4 || size_le64`
@@ -264,8 +286,41 @@ Provision 也已按官方 writer 修正：
 
   `PDKB || device_id || 0x00 || zero_padding`
 
-- 当前 21/22 使用物理 DiskSize，1/22 使用 CHS 向下取整容量；唯一 CHS 样本是 Aigo U335 `onlyid=1987718388`。因此读端保留 DiskSize→CHS 双候选是必要兼容行为。
-- Provision entropy 应建模为 `random252`，而不是把完整 256B 当作任意随机值；builder 必须自己写入 `DRKB` magic。
+- Linux `BuildSector11` 明确先写 `PDKB`，再把
+  `CLabelManage::m_strUID` 复制到 `+0x04`；`m_strUID`
+  来源于构造参数 `pUID`。对应 consumer 解密后检查 `PDKB`，
+  再把 `+0x04` C 字符串赋给输出 `strDPBack`。
+  当前 21 份完整原始备份已逐份复核：
+  **21/21 PDKB 字符串精确等于各自 device_id**；独立 SanDisk
+  已在此前 22 份总审计中独立闭合。
+- Windows 侧存在第二套独立同构实现：
+  - producer `cemsusbregsiter.dll::sub_10014720 @0x10014720`
+    （反编译文件约 L78343）；
+  - random producer `sub_10002B90 @0x10002B90`（约 L82081）；
+  - KDF/encrypt `sub_10002C30 @0x10002C30`（约 L82112）；
+  - consumer `sub_10015F00 @0x10015F00`（约 L93391）。
+  它们分别检查/写入同样的 `DRKB/PDKB`，并使用同一
+  `rand256 || VID4 || PID4 || size8 -> CRC32 -> cipher` 公式。
+- 当前 Windows writer 的 `size8` 来源也已闭合到物理容量：
+  `sub_10019780` 打开 `\\.\PHYSICALDRIVE%d`，调用
+  `DeviceIoControl(..., 0x700A0, ..., 0x28)`，把返回
+  `DISK_GEOMETRY_EX +0x18` 的 64-bit `DiskSize` 写进磁盘信息对象
+  `+0xB0/+0xB4`；`RegsiterUsb` 复制同一字段并传给
+  `sub_10014720`。
+- 但历史 22 份样本仍有 1/22 只能以 CHS 向下取整容量解开：
+  Aigo U335 `onlyid=1987718388`。当前 DLL 中确实存在
+  `sub_100184C0`，常量 `0x7D8200=255*63*512`，形态与 CHS
+  容量换算一致；**当前 build 没有找到它的有效 caller**。
+  所以“历史 CHS profile 如何被选择”仍未闭合，不能据此把后半 256B
+  在跨版本口径下升级为完成。
+- 严格完成统计因此更新为：
+  - `0x000..0x0FF`：**256B 完成**；
+  - `0x100..0x103`：**4B 完成**（PDKB magic 的 producer 和
+    consumer 强校验均闭合）；
+  - `0x104..0x1FF`：**252B 部分已知**（当前 profile 的
+    `PDKB + UID + zero fill` 已闭合，但历史 CHS profile 的选择条件未闭合）。
+- Provision entropy 已同步改成仅接受 `random252`；builder 自己写
+  `DRKB`，调用方不再能够把前 4B 协议结构字节当成外部随机材料。
 
 ### LBA12：整扇 512B 是一个连续 A6B0/A7F0 密文
 
@@ -627,13 +682,13 @@ Windows `edpediskctrl.dll` 同时给出读端和写端：
 | 8 | 8B | 402B | 102B | 1.6% | LLGB magic + logical length 完成；17-key ELABEL 序列化/来源虽已较清楚，但下游语义并未逐字段全部闭合，因此整体只计部分；头部仍有未知区 |
 | 9 | 32B | 124B | 356B | 6.2% | EETU magic、SAPF magic+16B MBR 恢复项、EPPE magic+最小密码长度完成；其它附加材料/空洞/文本区未完全闭合 |
 | 10 | 4B | 36B | 472B | 0.8% | 仅 EESI magic 完成；+0x04 和两个 16B 文本槽仍缺最终业务语义，其余未闭合 |
-| 11 | 8B | 504B | 0B | 1.6% | DRKB/PDKB 两个 magic 完成；random252 的实际熵源、size 分支选择等仍未闭合，因此其余只计部分 |
+| 11 | 260B | 252B | 0B | 50.8% | 前半 DRKB+random252 的 producer/consumer 已双闭合；后半 PDKB magic 4B 也完成；其余当前 DiskSize profile 已闭合，但历史 CHS profile 选择条件仍未解释 |
 | 12 | 368B | 144B | 0B | 71.9% | 147B entry 完成字段 + 11B pass-info 完成字段 + 210B 已证明 writer 零初始化且主 reader 不消费的 post-table padding；其余 144B 仍为部分已知 |
 
 总计：
 
-- **完成：713B / 6656B = 10.7%**
-- **部分已知：1870B / 6656B = 28.1%**
+- **完成：965B / 6656B = 14.5%**
+- **部分已知：1618B / 6656B = 24.3%**
 - **未知：4073B / 6656B = 61.2%**
 
 这是一组**严格下限**，故意宁可低估，不把“能生成/能解析”冒充成“已经完全理解”。

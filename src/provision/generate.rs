@@ -11,16 +11,16 @@ const TYPE4_SECTORS: u64 = 6;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ProvisionEntropy {
-    pdkb_random: [u8; 256],
+    lba11_random252: [u8; 252],
 }
 
 impl ProvisionEntropy {
-    pub fn new(pdkb_random: [u8; 256]) -> Self {
-        Self { pdkb_random }
+    pub fn new(lba11_random252: [u8; 252]) -> Self {
+        Self { lba11_random252 }
     }
 
-    pub fn pdkb_random(&self) -> &[u8; 256] {
-        &self.pdkb_random
+    pub fn lba11_random252(&self) -> &[u8; 252] {
+        &self.lba11_random252
     }
 }
 
@@ -240,8 +240,13 @@ fn build_lba11(spec: &ProvisionSpec, entropy: &ProvisionEntropy) -> Result<[u8; 
     if device_id.len() + 5 > 256 {
         return Err("device_id does not fit PDKB plaintext".into());
     }
+
+    let mut drkb = [0u8; 256];
+    drkb[..4].copy_from_slice(b"DRKB");
+    drkb[4..].copy_from_slice(entropy.lba11_random252());
+
     let mut key_input = Vec::with_capacity(272);
-    key_input.extend_from_slice(entropy.pdkb_random());
+    key_input.extend_from_slice(&drkb);
     key_input.extend_from_slice(spec.target().vid_hex().as_bytes());
     key_input.extend_from_slice(spec.target().pid_hex().as_bytes());
     key_input.extend_from_slice(&(spec.target().total_sectors() * SECTOR as u64).to_le_bytes());
@@ -252,7 +257,7 @@ fn build_lba11(spec: &ProvisionSpec, entropy: &ProvisionEntropy) -> Result<[u8; 
     plain[4..4 + device_id.len()].copy_from_slice(device_id);
     let encrypted = a7f0_full(&plain, &key, 0);
     let mut out = [0u8; SECTOR];
-    out[..256].copy_from_slice(entropy.pdkb_random());
+    out[..256].copy_from_slice(&drkb);
     out[256..].copy_from_slice(&encrypted);
     Ok(out)
 }

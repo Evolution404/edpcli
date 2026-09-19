@@ -45,7 +45,7 @@ fn target() -> TargetIdentity {
 }
 
 fn entropy() -> ProvisionEntropy {
-    let mut random = [0u8; 256];
+    let mut random = [0u8; 252];
     for (index, byte) in random.iter_mut().enumerate() {
         *byte = index as u8;
     }
@@ -142,6 +142,12 @@ fn generated_image_is_structurally_complete_nopwd_metadata() {
     );
 
     let lba11 = analyze_sector(11, sector(bytes, 11), &meta);
+    assert_eq!(&sector(bytes, 11)[..4], b"DRKB");
+    assert_eq!(
+        &sector(bytes, 11)[4..0x100],
+        entropy().lba11_random252(),
+        "LBA11 producer owns the DRKB prefix; entropy supplies only bytes +0x04..+0xFF"
+    );
     assert_eq!(&lba11.decoded[0x100..0x104], b"PDKB");
     assert!(lba11
         .fields
