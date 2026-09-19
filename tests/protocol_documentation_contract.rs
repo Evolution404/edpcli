@@ -50,7 +50,7 @@ fn strict_progress_covers_exactly_lba0_through_lba12() {
     );
     assert_eq!(complete + partial + unknown, 13 * 512);
     assert!(
-        complete >= 965,
+        complete >= 969,
         "strict COMPLETE coverage regressed below the audited baseline: {complete}"
     );
     assert!(

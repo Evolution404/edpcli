@@ -557,6 +557,11 @@ fn lba12_need_disturb_values_match_all_real_reference_backups() {
         let crc = crc32_bare(meta.device_id.as_bytes());
         let plain = a6b0_full(sector(&image, 12), &crc.to_le_bytes(), 0);
         let count = u32_le(&plain, 8) as usize;
+        assert_eq!(
+            u32_le(&plain, 0x10),
+            1,
+            "entry0 NeedDisturb compatibility gate changed: {name}"
+        );
 
         for index in 0..count {
             let base = index * 0x60;

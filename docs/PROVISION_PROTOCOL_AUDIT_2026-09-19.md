@@ -572,17 +572,20 @@ Linux `PartitionHeader::SetPartitionNewPass` 同时给出负证据：
 
 按上述严格口径，Windows/Linux 主运行时 96B packed LBA12 当前逐字节进度为：
 
-- **已知 368B / 512B（71.9%）**
+- **已知 372B / 512B（72.7%）**
   - 三个 entry 中语义闭合字段：49B/entry，共 147B；
+  - entry0 `NeedDisturb(+0x10)`：4B，旧兼容 consumer + 22/22 原始盘已闭合；
   - 表尾行为已闭合字段：11B；
   - `0x12e..0x1ff`：210B，写端零初始化且主读端不消费，可定性为 post-table zero padding；
-- **部分已知 144B / 512B（28.1%）**
-  - 三个 entry 各 47B：Version、NeedDisturb、wrapped key 的通用生成关系、扩展材料槽、尾部 reserved/padding；
+- **部分已知 140B / 512B（27.3%）**
+  - 原三条 entry 的 47B/entry 部分已知区中，entry0 NeedDisturb 4B 已移出；
+    其余仍包括 Version、entry1/2 NeedDisturb、wrapped key 的通用生成关系、
+    扩展材料槽、尾部 reserved/padding；
   - 表尾剩余 3B：`bNoUsbChkPasSafe/ShareBackuppromptPeriod/EncryptBackuppromptPeriod`，
     字段名已知但完整行为未闭合；
 - **未知 0B / 512B（0%）**
   - 当前主运行时格式已经没有“连字段边界/官方名称都不知道”的字节；
-  - 但 144B 仍然不能算语义闭合，Provision 不得据此自行生成。
+  - 但 140B 仍然不能算语义闭合，Provision 不得据此自行生成。
 
 这组数字只描述**主运行时 96B packed 格式**；不把 `libcemsfilesyscheck.so`
 的 104B 扩展结构混入统计。
@@ -683,12 +686,12 @@ Windows `edpediskctrl.dll` 同时给出读端和写端：
 | 9 | 32B | 124B | 356B | 6.2% | EETU magic、SAPF magic+16B MBR 恢复项、EPPE magic+最小密码长度完成；其它附加材料/空洞/文本区未完全闭合 |
 | 10 | 4B | 36B | 472B | 0.8% | 仅 EESI magic 完成；+0x04 和两个 16B 文本槽仍缺最终业务语义，其余未闭合 |
 | 11 | 260B | 252B | 0B | 50.8% | 前半 DRKB+random252 的 producer/consumer 已双闭合；后半 PDKB magic 4B 也完成；其余当前 DiskSize profile 已闭合，但历史 CHS profile 选择条件仍未解释 |
-| 12 | 368B | 144B | 0B | 71.9% | 147B entry 完成字段 + 11B pass-info 完成字段 + 210B 已证明 writer 零初始化且主 reader 不消费的 post-table padding；其余 144B 仍为部分已知 |
+| 12 | 372B | 140B | 0B | 72.7% | 原 147B entry 完成字段基础上，entry0 NeedDisturb 4B 的 producer/兼容 consumer/22盘实测已闭合；另有11B pass-info与210B post-table padding完成；其余140B仍部分已知 |
 
 总计：
 
-- **完成：965B / 6656B = 14.5%**
-- **部分已知：1618B / 6656B = 24.3%**
+- **完成：969B / 6656B = 14.6%**
+- **部分已知：1614B / 6656B = 24.2%**
 - **未知：4073B / 6656B = 61.2%**
 
 这是一组**严格下限**，故意宁可低估，不把“能生成/能解析”冒充成“已经完全理解”。

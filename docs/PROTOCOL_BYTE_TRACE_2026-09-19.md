@@ -145,13 +145,13 @@ WriteNormalULabel(request):
 | LBA9 | 32 | 124 | 356 | 6.2% |
 | LBA10 | 4 | 36 | 472 | 0.8% |
 | LBA11 | 260 | 252 | 0 | 50.8% |
-| LBA12 | 368 | 144 | 0 | 71.9% |
+| LBA12 | 372 | 140 | 0 | 72.7% |
 <!-- STRICT_PROGRESS_END -->
 
 当前总计：
 
-- **COMPLETE：965B / 6656B = 14.5%**
-- **PARTIAL：1618B / 6656B = 24.3%**
+- **COMPLETE：969B / 6656B = 14.6%**
+- **PARTIAL：1614B / 6656B = 24.2%**
 - **UNKNOWN：4073B / 6656B = 61.2%**
 
 LBA11 本轮从 8B COMPLETE 提升到 260B COMPLETE。没有因为“能解开第二半扇”就把其余 252B 也冒进标完成：旧 Aigo U335 `rev_pmap` 为什么选择 CHS 容量参与密钥，而其它 21 份使用 DiskSize，上游选择逻辑尚未闭合。
@@ -236,6 +236,7 @@ DWARF 中恢复出的原始声明文件/行号与本地函数地址：
 | LBA11 | 0x100–0x103 | COMPLETE | PDKB magic（解密后） | `BuildSector11` 构造 PDKB plaintext | `ReadSector11` 解密后必须校验 PDKB | 22/22 | 完成 |
 | LBA11 | 0x104–0x1FF | PARTIAL | 加密的 UID + zero fill | producer: PDKB+4 = `m_strUID`; key=CRC32(DRKB256+VID4+PID4+ullSize8) | consumer: `ReadSector11` 解密并把 PDKB+4 返回 `strDPBack` | 22/22 UID正确；21 DiskSize + 1 CHS | 旧rev_pmap为什么选CHS的上游决策未闭合，因此保守PARTIAL |
 | LBA12 | 0x000–0x11F | PARTIAL | 3×96B EDPF | Windows/Linux writer | 登录/挂载/兼容链大量消费 | 22盘 | 字段逐项状态见详细审计 |
+| LBA12 | 0x010–0x013 | COMPLETE | entry0.NeedDisturb compatibility gate | `CUsbRegsiter::CreatePartitions` 写入 entry0；Linux `edpdiskglobal.h:82` 定义字段 | `vrvaud_c::NewCheckDisTurbUsb(*)` fallback 在 `Format.cpp:0x3CE/0x380` 直接以该 DWORD 非零判 success | 22/22原始盘=1；20个entry0 type1、2个type2；7 CI夹具锁定 | 完成的是 entry0 兼容门控行为；其它 entry 的 NeedDisturb 不随之升级 |
 | LBA12 | 0x120–0x12D | PARTIAL | pass-info | writer/reader结构闭合 | 部分字段消费闭合 | 22盘 | 仍有+0A/+0C/+0D |
 | LBA12 | 0x12E–0x16F | COMPLETE | post-table zero initialized padding | writer整块零初始化且不覆写 | 主reader不消费该区 | 22/22解密为零 | producer+negative consumer+实盘闭合 |
 | LBA12 | 0x170–0x1FF | PARTIAL | continuous-cipher zero plaintext tail | 整扇A6B0 writer | 当前主reader无结构消费 | 22/22解密为零 | 密码学边界已知，但历史用途仍保守PARTIAL |
@@ -440,9 +441,96 @@ floor(DiskSize / (255*63*512)) * (255*63*512)
 - `0x104..0x1FF` 暂留 PARTIAL，唯一主要缺口是旧 `rev_pmap`
   profile 选择 CHS 容量的上游决策来源。
 
-## 6. 代码与测试门禁
+## 6. LBA7 / LBA12 EDPF 字段 producer-consumer 图
 
-### 6.1 CI 实盘子集
+官方结构定义来自 Linux DWARF：
+
+`/mnt/git/.../global/inc/edpdiskglobal.h:76`
+
+```text
+tagEdpPartionInfo
++0x00 Flag
++0x04 Version
++0x08 PartionCount
++0x0C PartionType
++0x10 NeedDisturb
++0x14 NeedEncrypt
++0x18 StartSector        (u64)
++0x20 SectorSize         (u64)
++0x28 PartionSize        (u64)
++0x30 UserKeyCRC
++0x34 FileKeyCRC
++0x38 wrapped key material...
+```
+
+Linux producer/reader 原源码位置：
+
+- `CLabelManage::BuildSector7` → `diskfile.cpp:895`；
+- `CLabelManage::BuildSector12` → `diskfile.cpp:921`；
+- `CLabelManage::ReadSector12` → `diskfile.cpp:1195`。
+
+Windows 当前 producer：
+
+- `cemsusbregsiter.dll::CUsbRegsiter::CreatePartitions`
+  （反编译 `sub_1003db50`，本地约 L120709）；
+- 日志保留的原源码位置：
+  `usbregsiter.cpp:0xE13..0xE15`；
+- 该函数按 `0x60` stride 构造 packed LBA12 entry。
+
+核心伪代码：
+
+```text
+for each partition:
+    entry.Flag          = "EDPF"
+    entry.PartionCount  = total_count
+    entry.PartionType   = type
+    entry.NeedDisturb   = profile value
+    entry.NeedEncrypt   = profile value
+    entry.StartSector   = calculated_start
+    entry.SectorSize    = sector_size
+    entry.PartionSize   = calculated_bytes
+    entry.UserKeyCRC    = CRC32(password)
+    entry.FileKeyCRC    = CRC32(file_key)
+    entry.wrappedKey    = wrap(file_key, password, mode)
+    entry.EncryptMode   = mode
+```
+
+### 6.1 entry0 NeedDisturb：4B 已完整闭合
+
+Producer：
+
+- Windows `CreatePartitions` 生成 packed entry；
+- Linux 官方字段名为 `NeedDisturb @ +0x10`。
+
+Consumer：
+
+- `vrvaud_c.m::NewCheckDisTurbUsb`，原日志位置
+  `Format.cpp:0x3CE`；
+- `ReadPartionInfoExNew` 成功后：
+
+```text
+if (packed_entry0.NeedDisturb != 0):
+    *is_new_tag_disk = 1
+    success = 1
+```
+
+- `NewCheckDisTurbUsbEx` 在 `Format.cpp:0x380` 有同一判断；
+- Windows 10 另一套 `vrvaud_c` 也独立存在同构判断。
+
+原始实盘只读复核：
+
+- 22/22：`entry0.NeedDisturb == 1`；
+- 20/22：entry0 type=1；
+- 2/22：entry0 type=2；
+- 22/22 pass-info version=`0x0206`。
+
+因此这 **4B** 可升级 COMPLETE。注意完成的是“旧兼容识别路径的非零门控”
+这一具体行为，不是对字段名作“扰码/防篡改”等词义扩张；entry1/entry2
+仍需分别追 consumer，不能因为同名字段而自动升级。
+
+## 7. 代码与测试门禁
+
+### 7.1 CI 实盘子集
 
 `tests/provision_protocol_audit.rs` 必须持续验证仓库中的真实原盘夹具：
 
@@ -454,7 +542,7 @@ floor(DiskSize / (255*63*512)) * (255*63*512)
 - PDKB+4 必须与备份 device_id 一致；
 - 数字 little-endian VID/PID 必须不能误解成功。
 
-### 6.2 文档契约测试
+### 7.2 文档契约测试
 
 `tests/protocol_documentation_contract.rs` 负责拦截文档口径回退：
 
@@ -466,7 +554,7 @@ floor(DiskSize / (255*63*512)) * (255*63*512)
 6. 主文档必须保留官方制盘工具链；
 7. 主文档必须明确禁止把“样本全零/只有字段名/能生成”当完成。
 
-## 7. 后续提升顺序
+## 8. 后续提升顺序
 
 按“最可能把 PARTIAL 转成 COMPLETE”的收益排序：
 
@@ -478,7 +566,7 @@ floor(DiskSize / (255*63*512)) * (255*63*512)
 6. **LBA9/10**：继续追 EETU、EESI 文本的最终策略作用。
 7. **LBA0/1/2/3/5**：从官方 `RegsiterUsb` 的 BuildSafe6Label/模板初始化向前追，避免仅凭全零样本猜用途。
 
-## 8. 操作安全边界
+## 9. 操作安全边界
 
 本审计阶段：
 
