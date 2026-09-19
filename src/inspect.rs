@@ -69,10 +69,6 @@ pub struct SectorView {
     pub notes: Vec<String>,
 }
 
-fn u16_at(b: &[u8], off: usize) -> Option<u16> {
-    Some(u16::from_le_bytes(b.get(off..off + 2)?.try_into().ok()?))
-}
-
 fn u32_at(b: &[u8], off: usize) -> Option<u32> {
     Some(u32::from_le_bytes(b.get(off..off + 4)?.try_into().ok()?))
 }
@@ -221,6 +217,14 @@ fn crc_key(meta: &InspectMeta) -> Option<(u32, [u8; 4])> {
     let did = meta.device_id.as_deref()?;
     let crc = crc32_bare(did.as_bytes());
     Some((crc, crc.to_le_bytes()))
+}
+
+fn hex_bytes(bytes: &[u8]) -> String {
+    bytes
+        .iter()
+        .map(|byte| format!("{byte:02X}"))
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 fn lba7_k0(crc: u32) -> u32 {
@@ -696,51 +700,95 @@ fn parse_sapf(dec: &[u8], fields: &mut Vec<SectorField>, notes: &mut Vec<String>
         return;
     }
     fields.push(field(0x100, 0x104, "SAPF magic", "SAPF", FieldStyle::Magic));
-    let ver = u16_at(dec, 0x104).unwrap_or(0);
-    let count = u16_at(dec, 0x106).unwrap_or(0) as usize;
-    fields.push(field(
-        0x104,
-        0x108,
-        "SAPF 头",
-        format!("version=0x{ver:04X} count={count}"),
+    let entry = 0x104;
+    let status = dec[entry];
+    let ptype = dec[entry + 4];
+    let start = u32_at(dec, entry + 8).unwrap_or(0);
+    let secs = u32_at(dec, entry + 12).unwrap_or(0);
+    fields.push(grouped_field(
+        entry,
+        entry + 1,
+        "MBR 恢复表项",
+        "status",
+        format!("0x{status:02X}"),
         FieldStyle::Flag,
     ));
-    for i in 0..count.min(8) {
-        let off = 0x108 + i * 0x10;
-        if off + 0x10 > dec.len() {
-            break;
-        }
-        let ptype = dec[off];
-        let flags = dec[off + 1];
-        let start = u32_at(dec, off + 4).unwrap_or(0);
-        let secs = u32_at(dec, off + 8).unwrap_or(0);
-        let group = format!("Part[{i}]");
-        fields.push(grouped_field(
-            off,
-            off + 2,
-            group.clone(),
-            "类型/标志",
-            format!("type=0x{ptype:02X}  flags=0x{flags:02X}"),
-            FieldStyle::Flag,
-        ));
-        fields.push(grouped_field(
-            off + 4,
-            off + 8,
-            group.clone(),
-            "起始 LBA",
-            start.to_string(),
-            FieldStyle::Address,
-        ));
-        fields.push(grouped_field(
-            off + 8,
-            off + 12,
-            group,
-            "大小",
-            format!("{secs} 扇区 / {}", human_bytes(secs as u64 * SECTOR as u64)),
-            FieldStyle::Size,
+    fields.push(grouped_field(
+        entry + 1,
+        entry + 4,
+        "MBR 恢复表项",
+        "start CHS",
+        hex_bytes(&dec[entry + 1..entry + 4]),
+        FieldStyle::Address,
+    ));
+    fields.push(grouped_field(
+        entry + 4,
+        entry + 5,
+        "MBR 恢复表项",
+        "partition type",
+        format!("0x{ptype:02X}"),
+        FieldStyle::Flag,
+    ));
+    fields.push(grouped_field(
+        entry + 5,
+        entry + 8,
+        "MBR 恢复表项",
+        "end CHS",
+        hex_bytes(&dec[entry + 5..entry + 8]),
+        FieldStyle::Address,
+    ));
+    fields.push(grouped_field(
+        entry + 8,
+        entry + 12,
+        "MBR 恢复表项",
+        "起始 LBA",
+        start.to_string(),
+        FieldStyle::Address,
+    ));
+    fields.push(grouped_field(
+        entry + 12,
+        entry + 16,
+        "MBR 恢复表项",
+        "扇区数",
+        format!("{secs} / {}", human_bytes(secs as u64 * SECTOR as u64)),
+        FieldStyle::Size,
+    ));
+    notes.push(
+        "SAPF：magic 后 +0x04..+0x13 是 16B MBR 分区表项，Windows LBA0 自愈会以此作为第一恢复源。"
+            .into(),
+    );
+    if dec[0x114..0x120].iter().any(|byte| *byte != 0) {
+        notes.push("SAPF +0x14..+0x1F 存在附加材料；字段语义尚未闭合。".into());
+    }
+}
+
+fn parse_eppe(dec: &[u8], fields: &mut Vec<SectorField>, notes: &mut Vec<String>) {
+    if dec.get(0x180..0x184) != Some(b"EPPE") {
+        return;
+    }
+    fields.push(field(0x180, 0x184, "EPPE magic", "EPPE", FieldStyle::Magic));
+    let min_len = u32_at(dec, 0x184).unwrap_or(0);
+    fields.push(field(
+        0x184,
+        0x188,
+        "最小密码长度",
+        min_len.to_string(),
+        FieldStyle::Flag,
+    ));
+    let text_end = c_field_end(dec, 0x188, 0x200);
+    if text_end > 0x188 {
+        fields.push(field(
+            0x188,
+            text_end,
+            "EPPE +0x08 文本槽",
+            text_value(&dec[0x188..text_end]),
+            FieldStyle::Text,
         ));
     }
-    notes.push(format!("SAPF：version=0x{ver:04X}，记录数={count}。"));
+    notes.push(
+        "EPPE：独立 0x80B A6B0 块；SetPassInfoEx 将 +0x04 限定为 6..19，ReadMinPassLenInfo 从同一字段返回最小密码长度。"
+            .into(),
+    );
 }
 
 fn padded4(s: &str) -> [u8; 4] {
@@ -864,17 +912,29 @@ pub fn analyze_sector(lba: u32, raw: &[u8], meta: &InspectMeta) -> SectorView {
         }
         9 => {
             if let Some((crc, key)) = crc_key(meta) {
-                let mut d = a6b0_full(&raw[..0x80], &key, 0);
-                d.resize(0x100, 0);
-                d.extend(raw[0x100..0x120].iter().map(|b| b ^ 0x88));
-                d.resize(SECTOR, 0);
-                decoded = d;
+                decoded = raw.to_vec();
+                let eetu = a6b0_full(&raw[..0x80], &key, 0);
+                decoded[..0x80].copy_from_slice(&eetu);
+                for off in 0x100..0x120 {
+                    decoded[off] = raw[off] ^ 0x88;
+                }
+                if raw[0x180..0x200].iter().any(|byte| *byte != 0) {
+                    let eppe = a6b0_full(&raw[0x180..0x200], &key, 0);
+                    decoded[0x180..0x200].copy_from_slice(&eppe);
+                }
+                if decoded.get(..4) == Some(b"EETU") {
+                    fields.push(field(0x00, 0x04, "EETU magic", "EETU", FieldStyle::Magic));
+                    notes.push(
+                        "EETU：独立 0x80B A6B0 运行时块；WriteTempUseInfo 只读改写该区域。".into(),
+                    );
+                }
                 let before = fields.len();
                 parse_sapf(&decoded, &mut fields, &mut notes);
                 if fields.len() == before {
                     notes.push("未检测到 SAPF 结构。".into());
                 }
-                format!("A6B0 0x000..0x07F + XOR 0x88 @0x100..0x11F，CRC=0x{crc:08X}")
+                parse_eppe(&decoded, &mut fields, &mut notes);
+                format!("A6B0 EETU@0x000/EPPE@0x180 + XOR 0x88 SAPF@0x100，CRC=0x{crc:08X}")
             } else {
                 "RAW（缺 device_id，无法解 LBA9）".into()
             }

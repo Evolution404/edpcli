@@ -355,7 +355,25 @@ LBA12 entry `+0x30..+0x47`：
   - 14 份：EETU + SAPF；
   - 6 份：EETU + EPPE；
   - 2 份：全零。
+- 20 份非零 LBA9 的 EETU 解密结果 **20/20 完全一致**：
+  - `+0x00..+0x03 = "EETU"`；
+  - `+0x14..+0x17 = FF FF FF FF`；
+  - 其余 `0x78` 字节均为 0。
+  目前只闭合了 magic 与读改写边界，`FFFFFFFF` 的业务语义仍未知，禁止按数值猜成
+  “永久”“无效时间”等状态。
 - `EPPE` 位于 `0x180..0x1ff`，是独立 128B A6B0 区，counter 从 0 重新开始；当前 6/6 解密为 `EPPE 08 00 00 00` 后零填充。
+- Windows `cemsusbregsiter.dll::SetPassInfoEx` 对输入 `+0x04` 明确限制为 6..19，
+  构造 `EPPE` 后只覆盖 LBA9 `+0x180..+0x1ff`；Windows
+  `edpediskctrl.dll::ReadPassExInfo` 与 `modfilesyscheck.dll::ReadMinPassLenInfo`
+  均独立读取同一个 0x80B A6B0 区并检查 `EPPE`。后者把 `+0x04` 返回给调用者，
+  因此该 DWORD 可闭合为**最小密码长度**；当前真实样本 6/6 均为 8。
+- SAPF 位于 `+0x100..+0x11f`，整段按字节 `^0x88` 还原。其
+  `+0x04..+0x13` 是一个完整 16B MBR partition entry，但**不是当前 LBA0 分区项的镜像**：
+  当前 14 份 SAPF 样本中 14/14 均与当时 LBA0 `0x1be..0x1cd` 不同。
+- `UDiskLabelRepair.dll::CLabelRepair::Repair` 在 LBA0 无效时先检查 LBA9 SAPF；
+  `Repair0Sector(from sector 9)` 会把 SAPF 的四个 DWORD 直接写到新 MBR
+  `0x1be/0x1c2/0x1c6/0x1ca`，随后写回 sector 0；若该路径失败才尝试尾部备份扇区。
+  因此 SAPF 可闭合为 **LBA0 第一分区项的恢复模板/备份项**，不能再描述成“当前 MBR 副本”。
 - LBA10 在当前 22 份参考样本中为 21 份全零、1 份 SanDisk EESI；该 EESI 样本仅前 `0x80` 为 A6B0 密文，后 `0x180` 物理零。
 
 #### LBA10 EESI：前 0x80B 的读写边界已闭合

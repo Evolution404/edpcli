@@ -118,6 +118,57 @@ fn lba10_decodes_only_the_eesi_head_and_preserves_tail_bytes() {
 }
 
 #[test]
+fn lba9_decodes_independent_eetu_sapf_and_eppe_regions() {
+    let device_id = "disk&ven_test&prod_lba9";
+    let crc = crc32_bare(device_id.as_bytes());
+    let key = crc.to_le_bytes();
+    let mut raw = vec![0u8; 512];
+
+    let mut eetu = [0u8; 0x80];
+    eetu[..4].copy_from_slice(b"EETU");
+    raw[..0x80].copy_from_slice(&a7f0_full(&eetu, &key, 0));
+
+    let mut sapf = [0u8; 0x20];
+    sapf[..4].copy_from_slice(b"SAPF");
+    // One 16-byte MBR partition entry immediately follows the magic.
+    sapf[0x04..0x14].copy_from_slice(&[
+        0x00, 0x01, 0x01, 0x00, 0x0b, 0x46, 0x05, 0x01, 0x3f, 0x00, 0x00, 0x00, 0xc1, 0x4f, 0x00,
+        0x00,
+    ]);
+    for (dst, src) in raw[0x100..0x120].iter_mut().zip(sapf) {
+        *dst = src ^ 0x88;
+    }
+
+    let mut eppe = [0u8; 0x80];
+    eppe[..4].copy_from_slice(b"EPPE");
+    eppe[4..8].copy_from_slice(&8u32.to_le_bytes());
+    raw[0x180..0x200].copy_from_slice(&a7f0_full(&eppe, &key, 0));
+
+    let meta = InspectMeta {
+        device_id: Some(device_id.into()),
+        ..InspectMeta::default()
+    };
+    let view = analyze_sector(9, &raw, &meta);
+
+    assert_eq!(&view.decoded[..4], b"EETU");
+    assert_eq!(&view.decoded[0x100..0x104], b"SAPF");
+    assert_eq!(&view.decoded[0x180..0x184], b"EPPE");
+    assert!(view.fields.iter().any(|field| field.label == "EETU magic"));
+    assert!(view
+        .fields
+        .iter()
+        .any(|field| field.label == "partition type" && field.value == "0x0B"));
+    assert!(view
+        .fields
+        .iter()
+        .any(|field| field.label == "起始 LBA" && field.value == "63"));
+    assert!(view
+        .fields
+        .iter()
+        .any(|field| field.label == "最小密码长度" && field.value == "8"));
+}
+
+#[test]
 fn hex_renderer_has_offsets_and_field_legend_without_color() {
     edpcli::ui::set_enabled_for_tests(false);
     let data = load_disk_image("netac").expect("netac fixture");
