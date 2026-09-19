@@ -101,17 +101,35 @@
 - GUID 本身是注册实例随机量；onlyid 只是其 32-bit CRC 压缩结果，不能从 onlyid 唯一恢复原 GUID。
 - 跨平台 Provision 不需要依赖 Windows `CoCreateGuid` API，只需要 16B 高质量随机熵并复用相同 CRC32 算法。
 
-### EDPF 14B 表尾：版本 + 密码错误计数，不是 terminator
+### EDPF 14B 表尾：完整字段名已恢复，不是 terminator
 
 - LBA7 表尾起点 `0xC0`，LBA12 表尾起点 `0x120`。
 - 盘上存储前会对 `byte0 / byte3 / byte6` 各 `^ 0x88`；读端执行相反操作恢复结构。
-- 已闭合字段：
-  - `+0x00..01`：表格式版本；LBA7 样本出现 `0x0064/0x0206`，LBA12 为 `0x0206`；
-  - `+0x03`：Share 最大密码错误次数，真实样本均为 `0xff`；
-  - `+0x04`：Share 当前错误次数；代码路径密码错误时 `+1`，成功后清零；
-  - `+0x06`：Encrypt 最大密码错误次数，真实样本均为 `0xff`；
-  - `+0x07`：Encrypt 当前错误次数；代码路径密码错误时 `+1`，成功后清零。
-- `+0x02/+0x05/+0x0A` 在真实样本出现 0/1 变化，目前只能标记为 unknown state byte，禁止提前命名。
+- Linux DWARF 恢复出的官方 `tagEdpPartionPassInfo` 恰好为 14B：
+  - `+0x00..01 Version`
+  - `+0x02 IsForceChgPassShr`
+  - `+0x03 MaxAllowSPErrPasTime`
+  - `+0x04 CURSPErrPasTime`
+  - `+0x05 IsForceChgPassEnc`
+  - `+0x06 MaxAllowECErrPasTime`
+  - `+0x07 CURECErrPasTime`
+  - `+0x08 bNoPassSetFlg`
+  - `+0x09 bNoPassNoChkIPFlg`
+  - `+0x0A bNoUsbChkPasSafe`
+  - `+0x0B bResetFileKey`
+  - `+0x0C ShareBackuppromptPeriod`
+  - `+0x0D EncryptBackuppromptPeriod`
+- 已闭合行为：
+  - `Version`：LBA7 样本出现 `0x0064/0x0206`，LBA12 主格式为 `0x0206`；
+  - 两组 `MaxAllow*ErrPasTime/CUR*ErrPasTime`：密码错误计数上限/当前次数；错误时递增，成功后清零；
+  - `IsForceChgPassShr/Enc`：Windows Login 对 type2/type4 分别检查；置 1 时阻止普通登录并进入强制改密码路径；
+  - `bNoPassSetFlg`：Windows `sub_10008280` 把它作为“无密码/自动登录模式”条件；
+  - `bNoPassNoChkIPFlg`：AutoLogin 根据其 0/1 选择是否执行 IP 检查，日志直接打印该字段名。
+- 部分已知：
+  - `bNoUsbChkPasSafe`：Windows 主 DLL 会把它复制到对外/后续参数结构，但具体策略消费点尚未完全闭合；
+  - `bResetFileKey`、`ShareBackuppromptPeriod`、`EncryptBackuppromptPeriod`：官方字段名已知，但当前主 DLL 未找到直接消费点，需要继续追其它组件。
+- 历史 23 份 LBA12 样本的尾部形态只有 4 种；`+0x0B..0x0D` 在该样本集均为 0，
+  但这只是观察事实，不能解释成协议恒零。
 
 ### 官方前部写集：固定 13 sectors
 
@@ -203,14 +221,17 @@
 
 按上述严格口径，Windows/Linux 主运行时 96B packed LBA12 当前逐字节进度为：
 
-- **已知 363B / 512B（70.9%）**
+- **已知 367B / 512B（71.7%）**
   - 三个 entry 中语义闭合字段：49B/entry，共 147B；
-  - 表尾已闭合字段：6B；
+  - 表尾行为已闭合字段：10B；
   - `0x12e..0x1ff`：210B，写端零初始化且主读端不消费，可定性为 post-table zero padding；
-- **部分已知 141B / 512B（27.5%）**
+- **部分已知 145B / 512B（28.3%）**
   - 三个 entry 各 47B：Version、NeedDisturb、wrapped key 的通用生成关系、扩展材料槽、尾部 reserved/padding；
-- **未知 8B / 512B（1.6%）**
-  - 14B 表尾中除版本和两组 retry max/current 之外的 8B 状态/保留位。
+  - 表尾剩余 4B：`bNoUsbChkPasSafe/bResetFileKey/ShareBackuppromptPeriod/EncryptBackuppromptPeriod`，
+    字段名已知但完整行为未闭合；
+- **未知 0B / 512B（0%）**
+  - 当前主运行时格式已经没有“连字段边界/官方名称都不知道”的字节；
+  - 但 145B 仍然不能算语义闭合，Provision 不得据此自行生成。
 
 这组数字只描述**主运行时 96B packed 格式**；不把 `libcemsfilesyscheck.so`
 的 104B 扩展结构混入统计。

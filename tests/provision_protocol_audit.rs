@@ -481,7 +481,7 @@ fn edpf_tail_has_version_and_password_retry_fields_not_a_terminator() {
     let mut saw_lba7_v64 = false;
     let mut saw_lba7_v206 = false;
     let mut saw_nonzero_retry = false;
-    let mut saw_unknown_state_bit = false;
+    let mut saw_policy_flag = false;
 
     for entry in fs::read_dir(FIXTURE_DIR).expect("protocol fixtures") {
         let path = entry.expect("backup entry").path();
@@ -524,7 +524,7 @@ fn edpf_tail_has_version_and_password_retry_fields_not_a_terminator() {
         assert!(tail12[11..].iter().all(|byte| *byte == 0), "LBA12 {name}");
 
         saw_nonzero_retry |= tail7[4] != 0 || tail7[7] != 0 || tail12[4] != 0 || tail12[7] != 0;
-        saw_unknown_state_bit |= tail7[2] != 0
+        saw_policy_flag |= tail7[2] != 0
             || tail7[5] != 0
             || tail7[10] != 0
             || tail12[2] != 0
@@ -545,10 +545,7 @@ fn edpf_tail_has_version_and_password_retry_fields_not_a_terminator() {
         saw_nonzero_retry,
         "audit lost a non-zero password retry sample"
     );
-    assert!(
-        saw_unknown_state_bit,
-        "audit lost unknown tail state-bit evidence"
-    );
+    assert!(saw_policy_flag, "audit lost EDPF tail policy-flag evidence");
 }
 
 #[test]
