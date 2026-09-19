@@ -79,7 +79,6 @@ pub fn is_healthy(entry: &BackupEntry) -> bool {
     entry.size_ok && entry.md5_ok == Md5Status::Ok
 }
 
-
 /// Delete one already-scanned backup entry using content identity, not only its pathname.
 ///
 /// The caller is responsible for higher-level retention policy (for example, keeping at least one
