@@ -110,7 +110,7 @@ pub fn usage_text() -> String {
   completion Shell 补全\n\
   version   版本与构建信息\n\
   help      帮助\n\n\
-无参数 edpcli 等价于 edpcli list。\n",
+交互式终端中无参数 edpcli 默认进入 TUI；管道/重定向等非 TTY 环境仍等价于 edpcli list。\n",
         env!("CARGO_PKG_VERSION")
     )
 }

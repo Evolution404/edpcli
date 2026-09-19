@@ -1,0 +1,34 @@
+#!/bin/sh
+set -eu
+
+repo_root="$(git rev-parse --show-toplevel)"
+cd "$repo_root"
+
+if ! command -v rustfmt >/dev/null 2>&1; then
+    echo "error: rustfmt is required by the edpcli pre-commit hook" >&2
+    echo "install the pinned toolchain/components from rust-toolchain.toml, then retry" >&2
+    exit 1
+fi
+
+staged_rust_files="$(git diff --cached --name-only --diff-filter=ACMR -- '*.rs')"
+if [ -z "$staged_rust_files" ]; then
+    exit 0
+fi
+
+# Re-staging a file with additional unstaged edits would accidentally include those edits.
+# Fail closed instead of silently widening the commit.
+printf '%s\n' "$staged_rust_files" | while IFS= read -r file; do
+    if ! git diff --quiet -- "$file"; then
+        echo "error: partially staged Rust file would be unsafe to auto-format: $file" >&2
+        echo "stage or stash the remaining edits, then commit again" >&2
+        exit 1
+    fi
+done
+
+printf '%s\n' "$staged_rust_files" | while IFS= read -r file; do
+    [ -f "$file" ] || continue
+    rustfmt --edition 2021 "$file"
+    git add -- "$file"
+done
+
+echo "pre-commit: formatted and re-staged Rust files with rustfmt"

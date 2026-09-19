@@ -93,6 +93,12 @@ enum WorkerResult {
         generation: u64,
         message: String,
     },
+    BackupVerify {
+        result: Result<(), String>,
+    },
+    BackupDelete {
+        result: Result<(), String>,
+    },
 }
 
 #[derive(Default)]
@@ -104,6 +110,8 @@ pub struct TaskUpdates {
     pub inspect: Option<Result<InspectWorkspace, String>>,
     pub device_error: Option<String>,
     pub backup_error: Option<String>,
+    pub backup_verify: Option<Result<(), String>>,
+    pub backup_delete: Option<Result<(), String>>,
 }
 
 fn strip_ansi(input: &str) -> String {
@@ -257,6 +265,43 @@ impl TaskHub {
             let _ = tx.send(WorkerResult::Inspect { generation, result });
         });
         generation
+    }
+
+    pub fn request_backup_verify(&mut self, path: PathBuf, backup_dir: PathBuf) {
+        let tx = self.tx.clone();
+        std::thread::spawn(move || {
+            let result = catch_unwind(AssertUnwindSafe(|| {
+                crate::application::verify_backup_exact(&backup_dir, &path)
+            }))
+            .unwrap_or_else(|payload| {
+                Err(format!(
+                    "备份校验 worker 异常终止: {}",
+                    panic_message(payload)
+                ))
+            });
+            let _ = tx.send(WorkerResult::BackupVerify { result });
+        });
+    }
+
+    pub fn request_backup_delete(
+        &mut self,
+        path: PathBuf,
+        expected_md5: String,
+        backup_dir: PathBuf,
+    ) {
+        let tx = self.tx.clone();
+        std::thread::spawn(move || {
+            let result = catch_unwind(AssertUnwindSafe(|| {
+                crate::application::delete_backup_exact(&backup_dir, &path, &expected_md5)
+            }))
+            .unwrap_or_else(|payload| {
+                Err(format!(
+                    "备份删除 worker 异常终止: {}",
+                    panic_message(payload)
+                ))
+            });
+            let _ = tx.send(WorkerResult::BackupDelete { result });
+        });
     }
 
     pub fn request_backup_create(&mut self, disk: u32, backup_dir: PathBuf) {
@@ -429,6 +474,12 @@ impl TaskHub {
                     if self.backup_generation.is_current(generation) {
                         updates.backup_error = Some(message);
                     }
+                }
+                WorkerResult::BackupVerify { result } => {
+                    updates.backup_verify = Some(result);
+                }
+                WorkerResult::BackupDelete { result } => {
+                    updates.backup_delete = Some(result);
                 }
                 WorkerResult::Inspect { .. } => {}
             }

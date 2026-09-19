@@ -5,8 +5,6 @@
 //! 明确的选择视图接口。
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::fs;
-use std::io;
 use std::path::{Path, PathBuf};
 
 use crate::backup_catalog;
@@ -268,53 +266,7 @@ pub fn backup_verify(backup_dir: &Path, target: Option<&str>) -> i32 {
 }
 
 fn delete_backup_pair(entry: &BackupEntry) -> Result<(), String> {
-    let path = &entry.path;
-    let metadata = fs::symlink_metadata(path)
-        .map_err(|e| format!("删除前无法重新检查 {}: {}", path.display(), e))?;
-    if !metadata.file_type().is_file() {
-        return Err(format!(
-            "删除前目标已不再是普通文件，拒绝删除: {}",
-            path.display()
-        ));
-    }
-    let expected = entry
-        .content_md5
-        .as_deref()
-        .ok_or_else(|| format!("扫描时无法取得内容摘要，拒绝删除: {}", path.display()))?;
-    let current =
-        fs::read(path).map_err(|e| format!("删除前无法重新读取 {}: {}", path.display(), e))?;
-    let actual = crate::md5::md5_hex(&current);
-    if actual != expected {
-        return Err(format!(
-            "备份在扫描/确认后内容已变化，拒绝删除同名新文件: {}",
-            path.display()
-        ));
-    }
-    if let Err(e) = fs::remove_file(path) {
-        let suffix = if e.kind() == io::ErrorKind::PermissionDenied {
-            "；备份目录可能由管理员账户持有且不可写，可检查目录属主/权限，必要时以管理员权限手动删除"
-        } else {
-            ""
-        };
-        return Err(format!("删除失败 {}: {}{}", path.display(), e, suffix));
-    }
-    let sidecar = diskio::md5_sidecar_path(path);
-    if sidecar.exists() {
-        if let Err(e) = fs::remove_file(&sidecar) {
-            let suffix = if e.kind() == io::ErrorKind::PermissionDenied {
-                "；备份目录可能由管理员账户持有且不可写，可检查目录属主/权限，必要时以管理员权限手动删除"
-            } else {
-                ""
-            };
-            return Err(format!(
-                "已删除 .bin，但删除校验文件失败 {}: {}{}",
-                sidecar.display(),
-                e,
-                suffix
-            ));
-        }
-    }
-    Ok(())
+    backup_catalog::delete_entry_verified(entry)
 }
 
 pub fn backup_prune(backup_dir: &Path, keep: usize, yes: bool) -> i32 {

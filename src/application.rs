@@ -54,6 +54,7 @@ pub struct BackupWorkspaceItem {
     pub is_nopwd: bool,
     pub md5_status: crate::diskio::Md5Status,
     pub size_ok: bool,
+    pub content_md5: Option<String>,
 }
 
 /// Load the canonical selector used by every backup frontend.
@@ -86,6 +87,7 @@ pub fn scan_backup_workspace(root: &Path) -> Vec<BackupWorkspaceItem> {
                 is_nopwd: entry.is_nopwd,
                 md5_status: entry.md5_ok,
                 size_ok: entry.size_ok,
+                content_md5: entry.content_md5.clone(),
             }
         })
         .collect()
@@ -101,4 +103,62 @@ pub fn pin_disk_selector(disk: u32) -> String {
 pub fn parse_pinned_disk_selector(value: &str) -> Result<u32, String> {
     crate::platform::parse_disk_selector(value)
         .map_err(|error| format!("错误: resume disk {value}: {error}"))
+}
+
+fn scanned_backup_by_path<'a>(
+    selector: &'a crate::selectors::BackupSelector,
+    path: &Path,
+) -> Result<&'a crate::diskio::BackupEntry, String> {
+    let target = crate::backup_catalog::canonical_entry_path(path);
+    selector
+        .catalog()
+        .entries()
+        .iter()
+        .find(|entry| crate::backup_catalog::canonical_entry_path(&entry.path) == target)
+        .ok_or_else(|| format!("备份已不存在或不再属于当前备份目录: {}", path.display()))
+}
+
+/// Verify exactly one backup selected by the TUI against the canonical backup catalog.
+pub fn verify_backup_exact(root: &Path, path: &Path) -> Result<(), String> {
+    let selector = load_backup_selector(root);
+    let entry = scanned_backup_by_path(&selector, path)?;
+    if crate::backup_catalog::is_healthy(entry) {
+        Ok(())
+    } else {
+        Err(format!(
+            "备份校验失败: {}（大小或 MD5 异常）",
+            entry.path.display()
+        ))
+    }
+}
+
+/// Delete one exact backup selected from a prior TUI scan.
+///
+/// The expected MD5 pins the exact bytes that the user selected before confirmation. If the file is
+/// replaced or changed while the confirmation dialog is open, deletion fails closed.
+pub fn delete_backup_exact(root: &Path, path: &Path, expected_md5: &str) -> Result<(), String> {
+    let selector = load_backup_selector(root);
+    let entry = scanned_backup_by_path(&selector, path)?;
+    if entry.content_md5.as_deref() != Some(expected_md5) {
+        return Err(format!(
+            "备份在选择/确认期间已变化，拒绝删除: {}",
+            path.display()
+        ));
+    }
+
+    if let Some(group) = diskio::backup_group_key(entry) {
+        let remaining_in_group = selector
+            .catalog()
+            .entries()
+            .iter()
+            .filter(|candidate| {
+                diskio::backup_group_key(candidate).as_deref() == Some(group.as_str())
+            })
+            .count();
+        if remaining_in_group <= 1 {
+            return Err("安全保护拒绝删除——该盘将被清到零份备份；至少保留 1 份。".into());
+        }
+    }
+
+    crate::backup_catalog::delete_entry_verified(entry)
 }

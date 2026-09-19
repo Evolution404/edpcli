@@ -49,6 +49,15 @@ pub struct WizardState {
     pub message: Option<String>,
 }
 
+#[derive(Debug, Clone)]
+pub struct BackupDeleteState {
+    pub stage: WizardStage,
+    pub path: std::path::PathBuf,
+    pub expected_md5: String,
+    pub confirmation: String,
+    pub message: Option<String>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Workspace {
     Devices,
@@ -84,6 +93,8 @@ pub enum NavCommand {
     BeginApply,
     BeginRestore,
     BeginBackupCreate,
+    BeginBackupDelete,
+    VerifyBackup,
     OpenInspect,
 }
 
@@ -106,6 +117,7 @@ pub struct AppState {
     critical_operation: bool,
     exit_pending: bool,
     wizard: Option<WizardState>,
+    backup_delete: Option<BackupDeleteState>,
     pinned_disk: Option<u32>,
     inspect: Option<InspectState>,
     inspect_data: Option<crate::application::inspect::InspectWorkspace>,
@@ -137,6 +149,7 @@ impl AppState {
             critical_operation: false,
             exit_pending: false,
             wizard: None,
+            backup_delete: None,
             pinned_disk: None,
             inspect: None,
             inspect_data: None,
@@ -477,6 +490,65 @@ impl AppState {
         }
     }
 
+    pub fn backup_delete(&self) -> Option<&BackupDeleteState> {
+        self.backup_delete.as_ref()
+    }
+
+    pub fn begin_backup_delete(&mut self, path: std::path::PathBuf, expected_md5: String) {
+        self.input_mode = InputMode::Normal;
+        self.backup_delete = Some(BackupDeleteState {
+            stage: WizardStage::Confirm,
+            path,
+            expected_md5,
+            confirmation: String::new(),
+            message: None,
+        });
+    }
+
+    pub fn push_backup_delete_confirmation(&mut self, ch: char) {
+        if let Some(delete) = self.backup_delete.as_mut() {
+            if delete.stage == WizardStage::Confirm && delete.confirmation.len() < 16 {
+                delete.confirmation.push(ch);
+                delete.message = None;
+            }
+        }
+    }
+
+    pub fn backspace_backup_delete_confirmation(&mut self) {
+        if let Some(delete) = self.backup_delete.as_mut() {
+            if delete.stage == WizardStage::Confirm {
+                delete.confirmation.pop();
+                delete.message = None;
+            }
+        }
+    }
+
+    pub fn submit_backup_delete_confirmation(&mut self) -> Option<(std::path::PathBuf, String)> {
+        let delete = self.backup_delete.as_mut()?;
+        if delete.stage != WizardStage::Confirm {
+            return None;
+        }
+        if delete.confirmation != "YES" {
+            delete.message = Some("必须精确输入 YES 才会删除备份".to_string());
+            return None;
+        }
+        delete.stage = WizardStage::Running;
+        delete.message = Some("正在复核文件内容并删除备份…".to_string());
+        self.critical_operation = true;
+        Some((delete.path.clone(), delete.expected_md5.clone()))
+    }
+
+    pub fn finish_backup_delete(&mut self, result: Result<(), String>) {
+        self.critical_operation = false;
+        if let Some(delete) = self.backup_delete.as_mut() {
+            delete.stage = WizardStage::Result;
+            delete.message = Some(match result {
+                Ok(()) => "备份已删除；列表已刷新".to_string(),
+                Err(message) => message,
+            });
+        }
+    }
+
     pub const fn workspace(&self) -> Workspace {
         self.workspace
     }
@@ -541,6 +613,14 @@ impl AppState {
         (self.workspace == Workspace::Backups)
             .then(|| self.backups.get(self.selected).map(|row| row.path.clone()))
             .flatten()
+    }
+
+    pub fn selected_backup_delete_target(&self) -> Option<(std::path::PathBuf, String)> {
+        if self.workspace != Workspace::Backups {
+            return None;
+        }
+        let row = self.backups.get(self.selected)?;
+        Some((row.path.clone(), row.content_md5.clone()?))
     }
 
     pub fn set_backup_scan_pending(&mut self, pending: bool) {
@@ -630,6 +710,10 @@ impl AppState {
                 self.wizard = None;
                 return StateEffect::None;
             }
+            if self.backup_delete.is_some() {
+                self.backup_delete = None;
+                return StateEffect::None;
+            }
             if self.input_mode != InputMode::Normal {
                 self.cancel_input();
                 return StateEffect::None;
@@ -707,6 +791,8 @@ impl AppState {
                 | NavCommand::BeginApply
                 | NavCommand::BeginRestore
                 | NavCommand::BeginBackupCreate
+                | NavCommand::BeginBackupDelete
+                | NavCommand::VerifyBackup
                 | NavCommand::OpenInspect
                 | NavCommand::NextMatch
                 | NavCommand::PreviousMatch => {}
@@ -752,6 +838,8 @@ impl AppState {
             | NavCommand::BeginApply
             | NavCommand::BeginRestore
             | NavCommand::BeginBackupCreate
+            | NavCommand::BeginBackupDelete
+            | NavCommand::VerifyBackup
             | NavCommand::OpenInspect
             | NavCommand::NextMatch
             | NavCommand::PreviousMatch

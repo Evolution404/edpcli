@@ -5,9 +5,11 @@
 
 ## 当前版本线
 
-- 当前待发布版本：**2.1.0**。
-- 2.1.0 为向后兼容的 MINOR 发布：新增基于 ratatui + crossterm 的跨平台 Vim 风格 TUI；CLI v2 命令与脚本行为保持兼容。
-- TUI 与 CLI 共用 application/service 和写盘安全链；新增 Device dashboard、Backup workspace、只读 backup create、Apply/Restore 安全向导、Inspect/hex、搜索与 command palette。
+- 当前待发布版本：**2.2.0**。
+- 2.2.0 为向后兼容的 MINOR 发布：交互式 TTY 中裸 `edpcli` 默认进入管理员态 TUI；非 TTY 继续保持 bare=list，不破坏既有脚本。
+- TUI 新增 CLI 同源语义配色、外部元数据终端控制字符防护、启动前 sudo/UAC 提权，以及备份查看/校验/删除/恢复/新建的完整生命周期操作。
+- 备份删除复用 application/service 安全边界：固定选中时 MD5、删除前重新扫描与内容复核、同名替换 fail-closed、至少保留每盘 1 份备份，并同步删除 MD5 sidecar。
+- 仓库新增受控 pre-commit Rust 自动格式化流程；CI 继续保留 `cargo fmt --all -- --check` 作为最终门禁。
 
 - 正式版本线从 **1.0.0** 开始。
 - `Cargo.toml` 中的 `package.version` 是源代码版本的唯一事实源。
