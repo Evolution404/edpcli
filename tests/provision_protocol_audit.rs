@@ -22,6 +22,9 @@ const MIN_PROTOCOL_FIXTURES: usize = 7;
 const SANDISK_LBA10: &[u8; 512] =
     include_bytes!("fixtures/protocol_evidence/sandisk_ultra_usb_3_0_lba10.bin");
 const SANDISK_DEVICE_ID: &str = "disk&ven_sandisk&prod_ultra_usb_3.0&rev_1.00";
+const SANDISK_AUTHENTIC_NOPASS_LBA7_HEX: &str =
+    include_str!("fixtures/protocol_evidence/sandisk_ultra_authentic_no_password_lba7.hex");
+const SANDISK_AUTHENTIC_NOPASS_DEVICE_ID: &str = "disk&ven_sandisk&prod_ultra&rev_1.00";
 
 fn parse_reference_backup_name(name: &str) -> Option<BackupMeta> {
     let meta = parse_backup_name(name)?;
@@ -41,6 +44,18 @@ fn u32_le(bytes: &[u8], off: usize) -> u32 {
 
 fn u64_le(bytes: &[u8], off: usize) -> u64 {
     u64::from_le_bytes(bytes[off..off + 8].try_into().unwrap())
+}
+
+fn decode_hex_fixture(text: &str) -> Vec<u8> {
+    let hex: String = text
+        .chars()
+        .filter(|ch| !ch.is_ascii_whitespace())
+        .collect();
+    assert_eq!(hex.len() % 2, 0, "hex fixture must contain whole bytes");
+    (0..hex.len())
+        .step_by(2)
+        .map(|index| u8::from_str_radix(&hex[index..index + 2], 16).expect("valid fixture hex"))
+        .collect()
 }
 
 fn legacy_password_fold32(password: &[u8]) -> u32 {
@@ -195,6 +210,40 @@ const NETAC_B: &str =
     "disk6_122880000_vid0dd8_pid2005_disk&ven_netac&prod_onlydisk_onlyid3069787975_20260910_172525.bin";
 const LEXAR: &str =
     "disk4_243625984_vid21c4_pid0cd1_disk&ven_lexar&prod_usb_flash_drive_onlyid3164177653_20260827_221910.bin";
+
+#[test]
+fn authentic_no_password_lba7_is_a_real_two_entry_profile_not_a_generated_reference() {
+    let raw = decode_hex_fixture(SANDISK_AUTHENTIC_NOPASS_LBA7_HEX);
+    assert_eq!(raw.len(), SECTOR);
+
+    let crc = crc32_bare(SANDISK_AUTHENTIC_NOPASS_DEVICE_ID.as_bytes());
+    let plain = xor_rolling(&raw, (crc & 0xffff) ^ (crc >> 16));
+
+    assert_eq!(&plain[0x00..0x04], b"EDPF");
+    assert_eq!(
+        u32_le(&plain, 0x04),
+        0,
+        "entry-local Version is not the two-entry count"
+    );
+    assert_eq!(u32_le(&plain, 0x08), 2, "PartionCount is stored at +0x08");
+
+    assert_eq!(u32_le(&plain, 0x0c), 2);
+    assert_eq!(u32_le(&plain, 0x10), 1);
+    assert_eq!(u32_le(&plain, 0x14), 1);
+
+    assert_eq!(&plain[0x40..0x44], b"EDPF");
+    assert_eq!(u32_le(&plain, 0x44), 0);
+    assert_eq!(u32_le(&plain, 0x48), 2);
+    assert_eq!(u32_le(&plain, 0x4c), 4);
+    assert_eq!(u32_le(&plain, 0x50), 1);
+    assert_eq!(u32_le(&plain, 0x54), 1);
+
+    let tail = decode_edpf_tail(&plain[0xc0..0xce]);
+    assert_eq!(u16::from_le_bytes([tail[0], tail[1]]), 0x0064);
+    assert_eq!(tail[0x0a], 0);
+    assert_eq!(tail[0x0c], 0);
+    assert_eq!(tail[0x0d], 0);
+}
 
 #[test]
 fn lba12_v206_hidden_default_password_wraps_real_mode2_file_keys() {

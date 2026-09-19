@@ -42,7 +42,7 @@
 
 以下结论不是直接采信 `u_disk` 文档，而是先用历史真实前部镜像重新独立复算，再把关键变体裁剪为当前仓库中的 LBA0–12 协议夹具；`u_disk` 只作为候选结论和反编译入口。
 
-**证据口径更新（2026-09-19）：免密转换快照是 edpcli/旧工具自己生成的产品态，只能用于产品回归，禁止作为“原始加密标签如何生成”的证据。旧 23 份集合实际由 `nopwd_tool/backup` 的 22 份 + `no_password_disk4` 的 SanDisk 免密快照组成；其中 Aigo U335 `onlyid=2071754312 @ 12:09:32` 也已由 MBR/LBA6/LBA7/LBA12 内容确认是转换后的免密状态。当前生成协议参考集使用 21 份非免密完整备份，再补入独立 SanDisk 原始加密盘，共 22 份。已知局部实验态按 LBA 单独降权，不把一个被改过的扇区用于推导该扇区原始 writer 规则。仓库 `tests/provision_protocol_audit.rs` 同时显式排除 `_nopwd_` 夹具。**
+**证据口径更新（2026-09-19）：`nopwd_tool/backup` 中由 edpcli/旧工具执行免密转换后产生的快照只能用于产品回归，禁止作为“原始加密标签如何生成”的证据。其中 Aigo U335 `onlyid=2071754312 @ 12:09:32` 已由 MBR/LBA6/LBA7/LBA12 内容确认是转换后的免密状态，因此当前“原始生成协议”参考集仍使用其余 21 份非转换完整备份，再补入独立 SanDisk 原始加密盘，共 22 份。另一方面，`/Users/zhangyuxi/Desktop/u_disk/analyze/disk_data/no_password_disk4` 是 2026-08-23 从真实 SanDisk Ultra 免密码 U 盘只读采集的原始设备快照，不是 edpcli 自生成/转换盘；它作为独立的第 23 份**真实设备行为/profile 证据**纳入 LBA7 等观测，但不替代 22 份“原始生成参考”去证明加密制盘 writer 语义。已知局部实验态仍按 LBA 单独降权。仓库 `tests/provision_protocol_audit.rs` 对转换盘继续显式排除，并把该真实免密盘的 LBA7 单独放在 `protocol_evidence` 下，不让它进入原始生成参考循环。**
 
 ### LBA3：EDP preserve-existing，厂商 MP 语义仍未闭合
 
@@ -568,7 +568,9 @@ Provision 也已按官方 writer 修正：
 
 - LBA7（0x40 stride）和 LBA12（0x60 stride）均逐样本验证：`u32@entry0+0x08 == 实际连续 EDPF entry 数量`。
 - 当前 22 份参考样本：LBA12 为 22/22 三条；LBA7 为 21 份三条、1 份两条。
-- 唯一 LBA7=2 的样本是 Netac `onlyid=949028302 @ 17:24:33`；与同 onlyid 的 17:23:49 / 17:24:20 对比，仅 LBA7 发生变化，其余 LBA0–12 一致，因此它被定性为 LBA7 局部实验/中间态。排除该扇区后，原始 LBA7 参考是 21/21 三条。
+- 在这 22 份“原始生成参考”内部，唯一 LBA7=2 的样本仍是 Netac `onlyid=949028302 @ 17:24:33`；与同 onlyid 的 17:23:49 / 17:24:20 对比，仅 LBA7 发生变化，其余 LBA0–12 一致，因此该扇区继续按局部实验/中间态降权。排除它后，原始 LBA7 参考是 21/21 三条。
+- 新纳入的独立真实免密 SanDisk Ultra 则给出**第二个、且是真实在用的两条 entry profile**：entry0=type2、entry1=type4，二者 `NeedDisturb=1`、`NeedEncrypt=1`，`PartionCount=2`。这证明“两条 LBA7”本身不能再被描述成只可能是实验态；它只说明 Netac 那一份不能用于反推原始三分区 writer。
+- 对该真实免密盘重新按 packed 0x40 ABI 逐字段解码时，两个 entry 的 `Version@+0x04` 都是 **0**；目录中旧 `disk4_info.json` 的 `"ver": 2` 来自历史解析器把 `PartionCount@+0x08` 错当成 version，现已由回归门禁明确拦截。
 - 因此 `+0x08` 必须命名为 `partition_count` / `PartionCount`；表格式代际不能再从该字段推断。
 
 ### LBA7 packed 64-byte ABI versus Linux natural 72-byte ABI
@@ -596,6 +598,13 @@ LBA7，确认同名 `tagEdpPartionInfo` 存在不能混用的 ABI：
   也 0/22 合法；
 - 因此 Linux 72B natural ABI 只可用于字段名/源码来源参考，不能直接作为
   Windows 实盘 LBA7 物理 offset。
+
+独立真实免密 SanDisk Ultra 也按同一 device-id CRC/rolling-XOR 重新解密，
+得到 2×0x40 连续 EDPF、合法 `+0xC0` pass-info（Version=0x0064），并且
+两个 entry 的 `Version@+0x04=0`。仓库新增
+`tests/fixtures/protocol_evidence/sandisk_ultra_authentic_no_password_lba7.hex`
+与定向测试固定这一事实。该样本增加的是“真实 profile 行为”覆盖，不改变
+22份原始生成参考集的计数，也不单凭样本值把 Version/NeedDisturb 升级为 COMPLETE。
 
 ### LBA7 v0x0064 packed legacy file-key wrapping
 

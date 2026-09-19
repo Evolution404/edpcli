@@ -1201,6 +1201,27 @@ Windows physical LBA7 packed entry (stride=0x40)
   按 `0x48` stride 则 22/22 都无法得到三条连续 EDPF，`+0xD8` 也无一得到合法
   pass-info。CI 原始夹具另外锁死 `0x40` 三条 entry 与 `+0xC0` 表尾。
 
+这里的“22份”继续特指**原始生成协议参考集**。另有
+`/Users/zhangyuxi/Desktop/u_disk/analyze/disk_data/no_password_disk4`：
+它是 2026-08-23 从真实 SanDisk Ultra 免密码 U 盘只读采集的设备快照，
+不是 edpcli 自生成/免密转换产物。本轮把它作为独立第23份真实行为/profile
+样本纳入复核，但不拿它替代22份原始生成参考。该盘 LBA7 明确为：
+
+```text
+entry0: Version=0, PartionCount=2, PartionType=2, NeedDisturb=1, NeedEncrypt=1
+entry1: Version=0, PartionCount=2, PartionType=4, NeedDisturb=1, NeedEncrypt=1
+pass-info Version=0x0064
+```
+
+因此真实产品确实存在两条 entry 的 LBA7 profile；此前22份参考中的 Netac
+`onlyid=949028302 @ 17:24:33` 仍因同 onlyid 前后只有 LBA7 被改动而作为
+该扇区的局部实验态降权，但不能再把“LBA7=2”本身视为实验态特征。
+此外，`no_password_disk4/info/disk4_info.json` 中旧解析结果
+`"ver": 2` 是把 `PartionCount@+0x08` 错标成 Version；按物理 packed ABI
+重新解码后两个 entry 的 `Version@+0x04` 都为0。仓库
+`protocol_evidence/sandisk_ultra_authentic_no_password_lba7.hex` 回归门禁
+专门拦截这类字段错位。该新增样本不改变当前 COMPLETE/PARTIAL 字节计数。
+
 Linux producer/reader 原源码位置：
 
 - `CLabelManage::BuildSector7` → `diskfile.cpp:895`；
