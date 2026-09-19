@@ -434,12 +434,28 @@ Windows `ChangePwd/sub_10026050` 进一步证明：
   的保留旧 file-key 路径。因此 `bResetFileKey` 可闭合为：
   **强制改密时是否同时重新生成 file-key 材料的门控**；
 - `+0x0A bNoUsbChkPasSafe` 在当前 Windows 主 DLL 中被复制到对外结构的一个独立字节，
-  但尚未找到后续策略分支，仍为部分已知；
-- `+0x0C/+0x0D` 当前 Windows 主 DLL 未找到直接消费者；Linux DWARF 只给出
-  `ShareBackuppromptPeriod/EncryptBackuppromptPeriod` 字段名。当前 22 份参考 LBA12 样本
-  的 `+0x0B..+0x0D` 均为 0，其中 `+0x0B` 已由非样本代码路径证明绝非 padding；
-- `+0x0A/+0x0C/+0x0D` 必须继续追初始化和跨组件消费者，
-  在闭合前不得归类为“保留零字节”。
+  但尚未找到后续策略分支，仍为部分已知。机器码已确认该复制发生在
+  `CEdpEDiskCtrlInterface::Init`：`m_PassInfo+0x0A -> Init输出+0x11`；
+  `EdpEDisk.exe` 在初始化时把应用对象 `+0xA4` 作为该输出结构传入，因此该状态会被
+  暴露到应用层，但目前没有找到对对应 `app+0xB5` 的直接读取；
+- Linux `CDiskReader::ParseSector12` 把完整 14B pass-info 保存到
+  `CDiskReader+0x210`。机器码全模块扫描可找到 `Version @+0x210`
+  在 `DecryptFileKey` 中的显式读取，却没有找到
+  `+0x21A/+0x21C/+0x21D`（分别对应 pass-info
+  `+0x0A/+0x0C/+0x0D`）的直接业务读取。这是“解析后保存但当前模块不消费”的负证据；
+- 当前 22 份原始参考样本中，`bNoUsbChkPasSafe(+0x0A)` 并非恒零：
+  **18/22=0、4/22=1**；且每一份样本的 LBA7/LBA12 取值都逐字节一致。
+  因此它明确是会随标签状态变化并跨两份表同步保存的真实字段，绝不能归为 padding；
+- `+0x0C/+0x0D` 当前 Windows 主 DLL、另一版 `out_raw_data/EdpEDiskCtrl.dll`
+  与 Linux `libcemsfilesyscheck.so` 均未找到直接消费者；Linux DWARF 只给出
+  `ShareBackuppromptPeriod/EncryptBackuppromptPeriod` 官方字段名。
+  当前 22/22 原始参考样本的两字节均为 0；
+- 与 `+0x0B bResetFileKey` 类似，“真实样本全零”不能推出 padding。
+  `+0x0C/+0x0D` 在找到行为消费者、单位和初始化来源前，只能记为
+  **字段边界/官方名称已知，运行时语义未闭合**；
+- `+0x0A` 当前可记为“真实可变状态 + Windows Init 向外暴露”，但
+  `bNoUsbChkPasSafe` 这个字段名本身仍不足以证明具体的密码安全绕过策略；
+  在找到实际策略分支前不得把它翻译成“跳过安全检查”等确定行为。
 
 Linux `PartitionHeader::SetPartitionNewPass` 同时给出负证据：
 

@@ -676,6 +676,50 @@ fn lba12_pass_info_reset_key_and_backup_prompt_bytes_are_observationally_zero() 
 }
 
 #[test]
+fn pass_info_no_usb_safe_flag_varies_and_matches_between_lba7_and_lba12() {
+    let mut checked = 0usize;
+    let mut saw_zero = false;
+    let mut saw_one = false;
+    for entry in fs::read_dir(FIXTURE_DIR).expect("protocol fixtures") {
+        let path = entry.expect("backup entry").path();
+        if path.extension().and_then(|ext| ext.to_str()) != Some("bin") {
+            continue;
+        }
+        let name = path.file_name().unwrap().to_str().unwrap();
+        let Some(meta) = parse_reference_backup_name(name) else {
+            continue;
+        };
+        let image = fs::read(&path).expect("fixture bytes");
+        let crc = crc32_bare(meta.device_id.as_bytes());
+        let lba7 = xor_rolling(sector(&image, 7), (crc & 0xffff) ^ (crc >> 16));
+        let lba12 = a6b0_full(sector(&image, 12), &crc.to_le_bytes(), 0);
+        let tail7 = decode_edpf_tail(&lba7[0xc0..0xce]);
+        let tail12 = decode_edpf_tail(&lba12[0x120..0x12e]);
+
+        assert_eq!(
+            tail7[0x0a], tail12[0x0a],
+            "bNoUsbChkPasSafe diverged between LBA7/LBA12: {name}"
+        );
+        match tail12[0x0a] {
+            0 => saw_zero = true,
+            1 => saw_one = true,
+            value => panic!("unexpected bNoUsbChkPasSafe={value}: {name}"),
+        }
+        assert_eq!(tail7[0x0c], 0, "LBA7 ShareBackuppromptPeriod: {name}");
+        assert_eq!(tail7[0x0d], 0, "LBA7 EncryptBackuppromptPeriod: {name}");
+        assert_eq!(tail12[0x0c], 0, "LBA12 ShareBackuppromptPeriod: {name}");
+        assert_eq!(tail12[0x0d], 0, "LBA12 EncryptBackuppromptPeriod: {name}");
+        checked += 1;
+    }
+
+    assert!(
+        checked >= MIN_PROTOCOL_FIXTURES,
+        "protocol audit unexpectedly lost fixtures"
+    );
+    assert!(saw_zero && saw_one, "audit lost +0x0A value diversity");
+}
+
+#[test]
 fn onlyid_text_is_a_signed_or_unsigned_view_of_one_u32_bit_pattern() {
     let mut checked = 0usize;
     let mut saw_negative = false;

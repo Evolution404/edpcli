@@ -51,8 +51,12 @@ LBA12 必须继续按“**结构已知 != 语义已知**”的严格口径推进
    `NeedDisturb(+0x10)` 已找到旧版正向消费者：
    `NewCheckDisTurbUsb(*)` fallback 直接以 entry0 +0x10 非零作为 success 门控，
    且两套 Windows 构建独立一致；canonical Share/entry0 必须保持非零。
-   下一步优先追 pass-info `+0x0A/+0x0C/+0x0D` 的跨组件消费，以及
-   NeedDisturb 在新版主路径/其它 entry 中是否还有附加作用；
+   pass-info 剩余项也已进一步收窄：`+0x0A` 在 22 份原始样本中
+   18×0 / 4×1，LBA7/LBA12 逐样本一致，并由 Windows
+   `CEdpEDiskCtrlInterface::Init` 导出到输出结构 `+0x11`；但最终策略消费者未闭合。
+   `+0x0C/+0x0D` 22/22 为零，Windows/Linux 当前组件均未找到直接消费者，
+   只能保留官方字段名，不能当 padding。下一步可回到 LBA4 非当前 writer profile
+   的 HSerialCRC 上游，或继续追 NeedDisturb 新版主路径；
 4. LBA4 `OnllyID2Nd/HSerialCRC[5]` 已恢复官方结构；继续追非当前 writer
    profile 的 HSerialCRC 上游；
 5. 回到 LBA0/LBA3/LBA7/LBA11 的剩余非 canonical / 代际差异。
