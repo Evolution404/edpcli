@@ -642,7 +642,7 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
     } else if let Some(message) = state.notice() {
         safe(message)
     } else if let Some(search) = state.search_status() {
-        format!("{}  ·  n/N 下一个/上一个", safe(search))
+        format!("{}  ·  n/N 下一个/上一个", safe(&search))
     } else if state.inspect_pending() {
         "后台读取 Inspect 数据中；界面可继续响应".to_string()
     } else if state.active_scan_pending() {
