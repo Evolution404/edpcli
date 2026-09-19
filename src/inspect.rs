@@ -955,8 +955,47 @@ pub fn analyze_sector(lba: u32, raw: &[u8], meta: &InspectMeta) -> SectorView {
                 }
                 if decoded.get(..4) == Some(b"EETU") {
                     fields.push(field(0x00, 0x04, "EETU magic", "EETU", FieldStyle::Magic));
+                    if let Some(value) = u64_at(&decoded, 0x04) {
+                        fields.push(field(
+                            0x04,
+                            0x0c,
+                            "EETU 开始时间 (ullBTime)",
+                            if value == 0 {
+                                "0（不限制）".into()
+                            } else {
+                                value.to_string()
+                            },
+                            FieldStyle::Flag,
+                        ));
+                    }
+                    if let Some(value) = u64_at(&decoded, 0x0c) {
+                        fields.push(field(
+                            0x0c,
+                            0x14,
+                            "EETU 结束时间 (ullETime)",
+                            if value == 0 {
+                                "0（不限制）".into()
+                            } else {
+                                value.to_string()
+                            },
+                            FieldStyle::Flag,
+                        ));
+                    }
+                    if let Some(value) = u32_at(&decoded, 0x14) {
+                        fields.push(field(
+                            0x14,
+                            0x18,
+                            "EETU 使用次数 (useCount)",
+                            if value == u32::MAX {
+                                "无限（0xFFFFFFFF）".into()
+                            } else {
+                                value.to_string()
+                            },
+                            FieldStyle::Flag,
+                        ));
+                    }
                     notes.push(
-                        "EETU：独立 0x80B A6B0 运行时块；WriteTempUseInfo 只读改写该区域。".into(),
+                        "EETU：tagEdpEDiskTmpUse 独立 0x80B A6B0 运行时块；ullBTime/ullETime 与 time(NULL) 比较，二者都为 0 时不限制时间；useCount=0xFFFFFFFF 表示无限次数，0 表示次数耗尽，其它正值每次检查后减 1 并由 WriteTempUseInfo 回写。reverse[104] 的业务语义仍未闭合。".into(),
                     );
                 }
                 let before = fields.len();

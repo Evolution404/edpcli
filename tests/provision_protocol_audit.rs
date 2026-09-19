@@ -39,6 +39,10 @@ fn u32_le(bytes: &[u8], off: usize) -> u32 {
     u32::from_le_bytes(bytes[off..off + 4].try_into().unwrap())
 }
 
+fn u64_le(bytes: &[u8], off: usize) -> u64 {
+    u64::from_le_bytes(bytes[off..off + 8].try_into().unwrap())
+}
+
 fn onlyid_bits(text: &str) -> u32 {
     if text.starts_with('-') {
         text.parse::<i32>().unwrap() as u32
@@ -578,6 +582,47 @@ fn lba8_elabel_offset_is_0x80_and_points_to_the_elabel_payload() {
     assert!(
         checked >= MIN_PROTOCOL_FIXTURES,
         "protocol audit unexpectedly lost fixtures"
+    );
+}
+
+#[test]
+fn real_eetu_temp_use_limits_match_the_official_unlimited_profile() {
+    let mut checked = 0usize;
+    for entry in fs::read_dir(FIXTURE_DIR).expect("protocol fixtures") {
+        let path = entry.expect("backup entry").path();
+        if path.extension().and_then(|ext| ext.to_str()) != Some("bin") {
+            continue;
+        }
+        let name = path.file_name().unwrap().to_str().unwrap();
+        let Some(meta) = parse_reference_backup_name(name) else {
+            continue;
+        };
+        let image = fs::read(&path).expect("fixture bytes");
+        let raw = &sector(&image, 9)[..0x80];
+        if raw.iter().all(|byte| *byte == 0) {
+            continue;
+        }
+
+        let crc = crc32_bare(meta.device_id.as_bytes());
+        let plain = a6b0_full(raw, &crc.to_le_bytes(), 0);
+        assert_eq!(&plain[..4], b"EETU", "{name}");
+        assert_eq!(u64_le(&plain, 0x04), 0, "ullBTime changed: {name}");
+        assert_eq!(u64_le(&plain, 0x0c), 0, "ullETime changed: {name}");
+        assert_eq!(
+            u32_le(&plain, 0x14),
+            u32::MAX,
+            "useCount unlimited sentinel changed: {name}"
+        );
+        assert!(
+            plain[0x18..0x80].iter().all(|byte| *byte == 0),
+            "current real-reference EETU reverse[104] is observationally zero: {name}"
+        );
+        checked += 1;
+    }
+
+    assert!(
+        checked >= 5,
+        "protocol fixtures unexpectedly lost EETU real-device evidence: {checked}"
     );
 }
 

@@ -50,7 +50,7 @@ fn strict_progress_covers_exactly_lba0_through_lba12() {
     );
     assert_eq!(complete + partial + unknown, 13 * 512);
     assert!(
-        complete >= 1003,
+        complete >= 1023,
         "strict COMPLETE coverage regressed below the audited baseline: {complete}"
     );
     assert!(
@@ -118,6 +118,10 @@ fn documentation_keeps_the_official_provisioning_chain_and_strict_rules() {
         "Share/type2 volume label",
         "Encrypt/type4 volume label",
         "240d04e7c97d300c5081f793d72850d49acbf5408bc0d8cf32de8eef7a5e8f02",
+        "tagEdpEDiskTmpUse",
+        "edpdiskglobal.h:481",
+        "useCount=0xFFFFFFFF",
+        "OutManage switch is off",
         "overflow_marker(0x40245E2A)",
         "m_autoid / Autonum",
         "NUL 后真实槽尾大量非零",

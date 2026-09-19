@@ -155,6 +155,7 @@ fn lba9_decodes_independent_eetu_sapf_and_eppe_regions() {
 
     let mut eetu = [0u8; 0x80];
     eetu[..4].copy_from_slice(b"EETU");
+    eetu[0x14..0x18].copy_from_slice(&u32::MAX.to_le_bytes());
     raw[..0x80].copy_from_slice(&a7f0_full(&eetu, &key, 0));
 
     let mut sapf = [0u8; 0x20];
@@ -183,6 +184,18 @@ fn lba9_decodes_independent_eetu_sapf_and_eppe_regions() {
     assert_eq!(&view.decoded[0x100..0x104], b"SAPF");
     assert_eq!(&view.decoded[0x180..0x184], b"EPPE");
     assert!(view.fields.iter().any(|field| field.label == "EETU magic"));
+    assert!(view.fields.iter().any(|field| {
+        field.label == "EETU 开始时间 (ullBTime)" && field.value == "0（不限制）"
+    }));
+    assert!(view.fields.iter().any(|field| {
+        field.label == "EETU 结束时间 (ullETime)" && field.value == "0（不限制）"
+    }));
+    assert!(view.fields.iter().any(|field| {
+        field.label == "EETU 使用次数 (useCount)" && field.value == "无限（0xFFFFFFFF）"
+    }));
+    assert!(view.notes.iter().any(|note| {
+        note.contains("time(NULL)") && note.contains("0xFFFFFFFF") && note.contains("reverse[104]")
+    }));
     assert!(view
         .fields
         .iter()

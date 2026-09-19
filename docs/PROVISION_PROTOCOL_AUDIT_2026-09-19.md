@@ -634,10 +634,21 @@ LBA12 entry `+0x30..+0x47`：
   - 2 份：全零。
 - 20 份非零 LBA9 的 EETU 解密结果 **20/20 完全一致**：
   - `+0x00..+0x03 = "EETU"`；
-  - `+0x14..+0x17 = FF FF FF FF`；
-  - 其余 `0x78` 字节均为 0。
-  目前只闭合了 magic 与读改写边界，`FFFFFFFF` 的业务语义仍未知，禁止按数值猜成
-  “永久”“无效时间”等状态。
+  - `+0x04..+0x0B = ullBTime = 0`；
+  - `+0x0C..+0x13 = ullETime = 0`；
+  - `+0x14..+0x17 = useCount = FF FF FF FF`；
+  - `+0x18..+0x7F reverse[104] = 0`。
+- 这20B已经重新由官方 producer/consumer 闭合：
+  - Linux DWARF `tagEdpEDiskTmpUse@edpdiskglobal.h:481` 给出正式字段名；
+  - Windows `CUsbRegsiter::SetTempUse` 真实机器码将开始/结束时间字符串解析为
+    两个64位时间值，并把请求 `+0x40` 原样写入 `useCount`；
+  - `BusManageImp::WriteNormalULabel` 的机器码在特殊 OutManage-off 模式明确把
+    临时使用请求次数写为 `0xFFFFFFFF`，普通模式则从业务请求 `+0x947` 取值；
+  - Linux `CheckTempUse` 将 `useCount=0xFFFFFFFF` 当作无限次数哨兵：
+    不递减、不回写；0表示次数耗尽；其它正值减1并回写；
+  - `ullBTime/ullETime` 与 `time(NULL)` 比较，0表示对应时间边界不启用。
+- `reverse[104]` 虽然20/20为0，但 writer 明确允许从请求复制0x66B数据，
+  最终业务 consumer 未闭合，因此仍保持 PARTIAL。
 - `EPPE` 位于 `0x180..0x1ff`，是独立 128B A6B0 区，counter 从 0 重新开始；当前 6/6 解密为 `EPPE 08 00 00 00` 后零填充。
 - Windows `cemsusbregsiter.dll::SetPassInfoEx` 对输入 `+0x04` 明确限制为 6..19，
   构造 `EPPE` 后只覆盖 LBA9 `+0x180..+0x1ff`；Windows
@@ -714,15 +725,15 @@ Windows `edpediskctrl.dll` 同时给出读端和写端：
 | 6 | 36B | 124B | 352B | 7.0% | GSerial 16B、BeiZhu 16B、checksum 4B 完成；若干固定槽/CRC/flag 仅部分闭合，大量模板区仍未知 |
 | 7 | 155B | 51B | 306B | 30.3% | 三个 64B EDPF entry 中 48B/entry 完成，加 11B pass-info；Version/NeedDisturb/key8 等仍部分，表后区域未闭合 |
 | 8 | 10B | 400B | 102B | 2.0% | LLGB magic + logical length + ElabOffset(2B)完成；17-key ELABEL 序列化/来源虽已较清楚，但下游语义并未逐字段全部闭合，因此整体只计部分；头部仍有未知区 |
-| 9 | 32B | 124B | 356B | 6.2% | EETU magic、SAPF magic+16B MBR 恢复项、EPPE magic+最小密码长度完成；其它附加材料/空洞/文本区未完全闭合 |
+| 9 | 52B | 104B | 356B | 10.2% | EETU magic + ullBTime/ullETime/useCount 共24B完成；SAPF magic+16B MBR恢复项、EPPE magic+最小密码长度完成；EETU reverse及其它空洞仍未闭合 |
 | 10 | 36B | 4B | 472B | 7.0% | EESI magic + 两个16B卷标槽完成；+0x04仍缺最终业务语义，其余未闭合 |
 | 11 | 260B | 252B | 0B | 50.8% | 前半 DRKB+random252 的 producer/consumer 已双闭合；后半 PDKB magic 4B 也完成；其余当前 DiskSize profile 已闭合，但历史 CHS profile 选择条件仍未解释 |
 | 12 | 372B | 140B | 0B | 72.7% | 原 147B entry 完成字段基础上，entry0 NeedDisturb 4B 的 producer/兼容 consumer/22盘实测已闭合；另有11B pass-info与210B post-table padding完成；其余140B仍部分已知 |
 
 总计：
 
-- **完成：1003B / 6656B = 15.1%**
-- **部分已知：1580B / 6656B = 23.7%**
+- **完成：1023B / 6656B = 15.4%**
+- **部分已知：1560B / 6656B = 23.4%**
 - **未知：4073B / 6656B = 61.2%**
 
 这是一组**严格下限**，故意宁可低估，不把“能生成/能解析”冒充成“已经完全理解”。

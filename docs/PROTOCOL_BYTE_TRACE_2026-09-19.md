@@ -267,7 +267,7 @@ BuildSector8(label):
 | LBA6 | 36 | 124 | 352 | 7.0% |
 | LBA7 | 155 | 51 | 306 | 30.3% |
 | LBA8 | 10 | 400 | 102 | 2.0% |
-| LBA9 | 32 | 124 | 356 | 6.2% |
+| LBA9 | 52 | 104 | 356 | 10.2% |
 | LBA10 | 36 | 4 | 472 | 7.0% |
 | LBA11 | 260 | 252 | 0 | 50.8% |
 | LBA12 | 372 | 140 | 0 | 72.7% |
@@ -275,8 +275,8 @@ BuildSector8(label):
 
 当前总计：
 
-- **COMPLETE：1003B / 6656B = 15.1%**
-- **PARTIAL：1580B / 6656B = 23.7%**
+- **COMPLETE：1023B / 6656B = 15.4%**
+- **PARTIAL：1560B / 6656B = 23.4%**
 - **UNKNOWN：4073B / 6656B = 61.2%**
 
 LBA11 本轮从 8B COMPLETE 提升到 260B COMPLETE。没有因为“能解开第二半扇”就把其余 252B 也冒进标完成：旧 Aigo U335 `rev_pmap` 为什么选择 CHS 容量参与密钥，而其它 21 份使用 DiskSize，上游选择逻辑尚未闭合。
@@ -348,8 +348,11 @@ DWARF 中恢复出的原始声明文件/行号与本地函数地址：
 | LBA8 | 0x040–0x07F | PARTIAL | LLGB header reserved/其它字段 | writer 零初始化/部分字段 | consumer未逐字段闭合 | 22盘 | 不计完成 |
 | LBA8 | 0x080–logical_end | PARTIAL | 17-key ELABEL | Windows/Linux 同一模板 writer | User/Dept等部分下游已知 | 22/22含17键 | 每个键最终业务消费未全部闭合 |
 | LBA8 | tail | UNKNOWN | 物理零区 | writer只写加密前缀 | 无读取语义 | 22盘为零 | 不把 padding 猜成协议字段 |
-| LBA9 | 0x000–0x003 | COMPLETE | EETU magic | WriteTempUseInfo | ReadTempUseInfo | 20个非零LBA9样本 | magic完成，payload仍未知 |
-| LBA9 | 0x004–0x07F | PARTIAL | EETU payload | writer读改写 | reader存在 | 20/20同形 | `+0x14=FFFFFFFF`语义未闭合 |
+| LBA9 | 0x000–0x003 | COMPLETE | EETU magic | `CUsbRegsiter::SetTempUse` 构造 `EETU`；`WriteTempUseInfo` 可运行时回写 | `ReadTempUseInfo` 必须校验 EETU magic | 20个非零LBA9原始样本 | 完成 |
+| LBA9 | 0x004–0x00B | COMPLETE | ullBTime | Windows `SetTempUse` 从开始时间字符串解析为64位值；空/短字符串保持0 | Linux `CheckTempUse` 与 `time(NULL)` 比较；非零且 now < ullBTime 时拒绝临时使用 | 20/20原始EETU=0；真实CI夹具回归 | 开始时间下界语义闭合，0表示不启用该下界 |
+| LBA9 | 0x00C–0x013 | COMPLETE | ullETime | Windows `SetTempUse` 从结束时间字符串解析为64位值；空/短字符串保持0 | `CheckTempUse` 与 `time(NULL)` 比较；非零且 now > ullETime 时拒绝临时使用 | 20/20原始EETU=0；真实CI夹具回归 | 结束时间上界语义闭合，0表示不启用该上界 |
+| LBA9 | 0x014–0x017 | COMPLETE | useCount | `BusManageImp::WriteNormalULabel` 普通模式从请求 `+0x947` 取次数；特殊 OutManage-off 模式明确写 `0xFFFFFFFF`；`CUsbRegsiter::SetTempUse` 再将 request+0x40 原样写 EETU+0x14 | Linux `CheckTempUse`：`0xFFFFFFFF` 不递减/不回写；0=次数耗尽；其它正值减1并 `WriteTempUseInfo` 回写 | 20/20原始EETU=0xFFFFFFFF；真实CI夹具回归 | 4B 次数控制及无限次数哨兵完全闭合 |
+| LBA9 | 0x018–0x07F | PARTIAL | reverse[104] | Windows `SetTempUse` 从 request+0x44 固定复制0x66B，并保留结构剩余字节 | 当前 Linux `CheckTempUse` 不消费该区；其它消费者未闭合 | 20/20原始EETU该区为零 | producer边界已知，但全零不能替代业务语义 |
 | LBA9 | 0x100–0x103 | COMPLETE | SAPF magic | 旧writer恢复模板 | `UDiskLabelRepair::Repair0Sector` | 14样本 | 完成 |
 | LBA9 | 0x104–0x113 | COMPLETE | MBR恢复entry | writer保存16B entry | repair直接写回 LBA0 0x1BE | 14/14 | 完成 |
 | LBA9 | 0x180–0x183 | COMPLETE | EPPE magic | `SetPassInfoEx` | `ReadPassExInfo` | 6样本 | 完成 |
@@ -501,6 +504,140 @@ SHA-256：
 - `LBA10 +0x18..0x27` 16B → COMPLETE；
 - `+0x04..0x07` 仍保持 PARTIAL；
 - `+0x28..0x1FF` 仍保持 UNKNOWN。
+
+### 4.3 LBA9 EETU：时间窗口 + 使用次数 20B 完整闭环
+
+旧分析只观察到 `+0x14 = FFFFFFFF`，一度把它当成未知 flag/固定值候选。
+重新从 DWARF、Windows producer、Linux consumer 和原始实盘四条线交叉后，
+这段已经可以精确命名。
+
+Linux DWARF 官方结构：
+
+`tagEdpEDiskTmpUse @ edpdiskglobal.h:481`
+
+```text
+size = 0x80
++0x00 flag       int
++0x04 ullBTime   uint64_t
++0x0C ullETime   uint64_t
++0x14 useCount   uint32_t
++0x18 reverse    char[104]
+```
+
+#### Producer：Windows `CUsbRegsiter::SetTempUse`
+
+当前 Windows 二进制的真实机器码（不是反编译器猜测）显示：
+
+```text
+request:
+    +0x00 begin-time string
+    +0x20 end-time string
+    +0x40 use count
+    +0x44 extra/reverse material
+
+EETU = zero[0x80]
+EETU.flag = "EETU"
+
+if begin-time string is present:
+    EETU.ullBTime = parse_time(begin)
+else:
+    EETU.ullBTime = 0
+
+if end-time string is present:
+    EETU.ullETime = parse_time(end)
+else:
+    EETU.ullETime = 0
+
+EETU.useCount = request.useCount
+copy(EETU.reverse, request+0x44, 0x66)
+
+encrypt EETU[0x00..0x7F] with device-id CRC key
+read-modify-write LBA9 first 0x80
+```
+
+日志中保留原源码位置：
+
+- `CUsbRegsiter::SetTempUse`：`usbregsiter.cpp:0x6DF`；
+- 时间解析日志：`usbregsiter.cpp:0x702`；
+- 写入结束：`usbregsiter.cpp:0x70F`；
+- 实际 LBA9 读写 helper 路径：`usbregsiter.cpp:0x735..0x743`。
+
+#### useCount 的上游来源
+
+`BusManageImp::WriteNormalULabel` 的机器码把临时使用本地请求结构的
+`+0x40` 明确初始化为：
+
+```text
+if OutManage switch is off:
+    tempUse.useCount = 0xFFFFFFFF
+    begin = default-empty
+    end   = default-empty
+else:
+    tempUse.useCount = request + 0x947
+    begin = request + 0x907
+    end   = request + 0x927
+
+SetTempUse(&tempUse)
+```
+
+另一条 `BusManageImp::GenloginCfg` 路径同样使用
+`0xFFFFFFFF` 与正常请求次数二选一，进一步排除偶然常量。
+
+#### Consumer：Linux `CheckTempUse`
+
+Linux 运行时直接消费同一结构：
+
+```text
+info = ReadTempUseInfo()
+now = time(NULL)
+
+if info.useCount == 0xFFFFFFFF:
+    # 无限次数，不递减，也不回写
+elif info.useCount == 0:
+    return COUNT_EXHAUSTED
+else:
+    info.useCount -= 1
+    WriteTempUseInfo(info)
+
+if info.ullBTime != 0 or info.ullETime != 0:
+    if info.ullBTime != 0 and now < info.ullBTime:
+        return OUTSIDE_TIME_WINDOW
+    if info.ullETime != 0 and now > info.ullETime:
+        return OUTSIDE_TIME_WINDOW
+
+return OK
+```
+
+因此：
+
+- `ullBTime` 是临时使用开始时间下界；
+- `ullETime` 是临时使用结束时间上界；
+- 两者都为0时不启用时间限制；
+- `useCount=0xFFFFFFFF` 是**无限次数哨兵**；
+- `useCount=0` 表示次数耗尽；
+- 其它正值每次成功检查都会减1并写回。
+
+#### 22份原始实盘验证
+
+全量只读复核：
+
+- 22份原始参考中，20份存在 EETU，2份 LBA9 该区全零；
+- 20/20 EETU：
+  - `ullBTime = 0`；
+  - `ullETime = 0`；
+  - `useCount = 0xFFFFFFFF`；
+  - `reverse[104]` 当前实盘均为0。
+
+CI 中的原始完整夹具也有多份 EETU，新增回归会逐盘解密并固定前三项。
+`reverse[104]` 即使20/20为零，也**不升级 COMPLETE**：官方 producer 明确允许
+从请求复制0x66B附加数据，而当前只缺最终业务 consumer。
+
+本轮因此从 PARTIAL 升级：
+
+- `+0x04..0x0B`：8B；
+- `+0x0C..0x13`：8B；
+- `+0x14..0x17`：4B；
+- 合计 **20B**。
 
 ## 5. LBA11 完整 producer / consumer 追踪
 
@@ -823,8 +960,8 @@ if (packed_entry0.NeedDisturb != 0):
 3. **LBA4**：继续寻找旧 `HSerialCRC[5]` 的真正 producer。
 4. **LBA6**：追 `0x1E0..0x1EF` 两份旧格式非零扩展来源。
 5. **LBA8**：为 17-key ELABEL 的每个业务字段找到最终消费者。
-6. **LBA9/10**：继续追 EETU、EESI `+0x04` 及 `+0x28..` 未闭合区；
-   两个16B EESI卷标槽已经完成，不再作为待办。
+6. **LBA9/10**：继续追 EETU `reverse[104]`、EESI `+0x04` 及
+   `+0x28..` 未闭合区；EETU 时间/次数控制和两个16B EESI卷标槽已经完成。
 7. **LBA0/1/2/3/5**：从官方 `RegsiterUsb` 的 BuildSafe6Label/模板初始化向前追，避免仅凭全零样本猜用途。
 
 ## 9. 操作安全边界
