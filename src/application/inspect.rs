@@ -2,7 +2,7 @@
 
 use std::path::Path;
 
-use crate::common::SECTOR;
+use crate::common::{METADATA_IMAGE_LEN, METADATA_SECTOR_COUNT, SECTOR};
 use crate::diskio::{self, FileDev, SectorReadCache};
 use crate::identify::identify;
 use crate::inspect::{self, InspectMeta, SectorView};
@@ -20,14 +20,14 @@ fn analyze_image(
     data: &[u8],
     meta: InspectMeta,
 ) -> Result<InspectWorkspace, String> {
-    if data.len() != 14 * SECTOR {
+    if data.len() != METADATA_IMAGE_LEN {
         return Err(format!(
-            "错误: inspect 镜像长度 {}B，预期 {}B (LBA0-13)",
+            "错误: inspect 镜像长度 {}B，预期 {}B (LBA0-12)",
             data.len(),
-            14 * SECTOR
+            METADATA_IMAGE_LEN
         ));
     }
-    let views = (0..14u32)
+    let views = (0..METADATA_SECTOR_COUNT as u32)
         .map(|lba| {
             let start = lba as usize * SECTOR;
             inspect::analyze_sector(lba, &data[start..start + SECTOR], &meta)
@@ -59,8 +59,8 @@ pub fn load_disk_inspect(runner: &dyn CmdRunner, disk: u32) -> Result<InspectWor
     let mut dev = FileDev::open_rdonly(&path)
         .map_err(|error| format!("错误: 无法只读打开 disk{disk}: {error}"))?;
     let mut reader = SectorReadCache::new(&mut dev);
-    let mut sectors = Vec::with_capacity(14 * SECTOR);
-    for lba in 0..14u32 {
+    let mut sectors = Vec::with_capacity(METADATA_IMAGE_LEN);
+    for lba in 0..METADATA_SECTOR_COUNT as u32 {
         let raw = reader
             .read_sector(lba)
             .map_err(|error| format!("错误: 读取 disk{disk} LBA{lba} 失败: {error}"))?;

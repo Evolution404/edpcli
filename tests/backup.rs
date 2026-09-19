@@ -7,7 +7,7 @@ use std::fs;
 
 use common::*;
 use edpcli::cli::{backup_delete, backup_list, backup_prune, backup_verify};
-use edpcli::common::SECTOR;
+use edpcli::common::{METADATA_IMAGE_LEN, SECTOR};
 use edpcli::diskio::Clock;
 use edpcli::diskio::{
     backup_is_nopwd, backup_label_id, create_backup, find_backups, parse_backup_name,
@@ -119,7 +119,7 @@ fn backup_written_with_md5_and_onlyid() {
     assert!(name.contains("_onlyid1402259934_"), "{}", name);
     assert!(!is_nopwd); // 原盘备份不打 _nopwd
     assert!(!name.contains("_nopwd"), "{}", name);
-    assert_eq!(fs::read(&path).unwrap(), data); // LBA0-13 全量
+    assert_eq!(fs::read(&path).unwrap(), data); // LBA0-12 全量
     let md5_content = fs::read_to_string(format!("{}.md5", path.display())).unwrap();
     assert_eq!(md5_content.trim(), md5(&data));
     // 备份可被 find_backups 找回
@@ -148,7 +148,10 @@ fn backup_rejects_incomplete_lba_image_before_creating_files() {
         &tmp.0,
         &FixedClock,
     );
-    assert!(result.is_err(), "备份输入必须恰好为 LBA0-13 共 7168B");
+    assert!(
+        result.is_err(),
+        "备份输入必须恰好为 LBA0-12 共 {METADATA_IMAGE_LEN}B"
+    );
     assert_eq!(fs::read_dir(&tmp.0).map(|it| it.count()).unwrap_or(0), 0);
 }
 
@@ -206,7 +209,7 @@ fn find_backups_ignores_matching_non_bin_files() {
 #[test]
 fn find_backups_prefers_device_id_tier_before_generic_fallback() {
     let tmp = TmpDir::new("find_tier_priority");
-    let mut data = vec![0u8; 14 * SECTOR];
+    let mut data = vec![0u8; METADATA_IMAGE_LEN];
     let tag: [u8; 16] = *b"0123456789ABCDEF";
     data[4 * SECTOR..4 * SECTOR + 16].copy_from_slice(&tag);
 

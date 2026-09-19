@@ -99,8 +99,8 @@ fn metadata_rejects_empty_or_unrepresentable_text() {
 }
 
 #[test]
-fn provision_image_is_always_exactly_fourteen_sectors() {
-    assert_eq!(PROVISION_IMAGE_LEN, 14 * 512);
+fn provision_image_is_always_exactly_thirteen_sectors() {
+    assert_eq!(PROVISION_IMAGE_LEN, 13 * 512);
     assert!(ProvisionImage::from_bytes(vec![0u8; PROVISION_IMAGE_LEN]).is_ok());
     assert!(ProvisionImage::from_bytes(vec![0u8; PROVISION_IMAGE_LEN - 1]).is_err());
     assert!(ProvisionImage::from_bytes(vec![0u8; PROVISION_IMAGE_LEN + 1]).is_err());

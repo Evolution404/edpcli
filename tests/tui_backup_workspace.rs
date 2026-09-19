@@ -5,7 +5,7 @@ use edpcli::tui::state::{AppState, NavCommand, Workspace};
 
 #[test]
 fn backup_workspace_uses_one_based_global_selector_indices() {
-    let rows = scan_backup_workspace(std::path::Path::new(common::BAK_DIR));
+    let rows = scan_backup_workspace(std::path::Path::new(common::FIXTURE_DIR));
     for (offset, row) in rows.iter().enumerate() {
         assert_eq!(row.index, offset + 1);
     }

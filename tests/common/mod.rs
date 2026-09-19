@@ -1,4 +1,4 @@
-//! 测试公用: 真实备份夹具定位、金标(与 Python 版逐字一致)、临时目录、免密盘镜像合成。
+//! 测试公用: 真实协议夹具定位、金标(与 Python 版逐字一致)、临时目录、免密盘镜像合成。
 //! 每个集成测试文件各自引入本模块, 未被该文件用到的项不算死代码。
 #![allow(dead_code)]
 
@@ -10,7 +10,7 @@ use edpcli::common::SECTOR;
 use edpcli::md5::md5_hex;
 use edpcli::sectors::convert;
 
-pub const BAK_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/backup");
+pub const FIXTURE_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/protocol");
 
 /// (键, 备份文件名, device_id) — 覆盖三种型号, 含 BOT 带 &rev_ 的 aigo
 pub fn fixture(key: &str) -> Option<(&'static str, &'static str)> {
@@ -37,19 +37,19 @@ pub const KEYS: [&str; 3] = ["netac", "lexar", "aigo"];
 pub const AIGO_NEG_BIN: &str =
     "disk4_1953525168_vid174c_pid55aa_disk&ven_aigo&prod_hd806_onlyid-1833210541_20260903_121552.bin";
 
-/// 备份 bin 的完整路径; 文件不存在返回 None(用例自行跳过)。
+/// 13 扇区协议夹具的完整路径; 文件不存在返回 None(用例自行跳过)。
 pub fn fixture_bin(key: &str) -> Option<PathBuf> {
     let (bin, _) = fixture(key)?;
-    let p = PathBuf::from(BAK_DIR).join(bin);
+    let p = PathBuf::from(FIXTURE_DIR).join(bin);
     p.exists().then_some(p)
 }
 
 pub fn neg_id_bin() -> Option<PathBuf> {
-    let p = PathBuf::from(BAK_DIR).join(AIGO_NEG_BIN);
+    let p = PathBuf::from(FIXTURE_DIR).join(AIGO_NEG_BIN);
     p.exists().then_some(p)
 }
 
-/// 整份 14 扇备份 → 一张"盘"的 LBA0-13 镜像。
+/// 整份 13 扇协议夹具 → 一张"盘"的 LBA0-12 镜像。
 pub fn load_disk_image(key: &str) -> Option<Vec<u8>> {
     fs::read(fixture_bin(key)?).ok()
 }

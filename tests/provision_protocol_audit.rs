@@ -1,22 +1,24 @@
 //! Provision Phase 0 protocol audit.
 //!
-//! These tests intentionally use the committed real-device LBA0-13 snapshots as evidence.
+//! These tests intentionally use curated real-device LBA0-12 protocol fixtures as evidence.
 //! They do not open or mutate a physical disk.
 
 mod common;
 
 use std::fs;
 
-use common::BAK_DIR;
-use edpcli::common::SECTOR;
+use common::FIXTURE_DIR;
+use edpcli::common::{METADATA_IMAGE_LEN, SECTOR};
 use edpcli::crypto::{a6b0_full, a7f0_full, crc32_bare, xor_rolling};
 use edpcli::diskio::parse_backup_name;
 use edpcli::inspect::InspectMeta;
 use edpcli::metainfo::ownership_from_lba8;
 
 fn load(name: &str) -> Vec<u8> {
-    fs::read(std::path::Path::new(BAK_DIR).join(name)).expect("committed protocol fixture")
+    fs::read(std::path::Path::new(FIXTURE_DIR).join(name)).expect("committed protocol fixture")
 }
+
+const MIN_PROTOCOL_FIXTURES: usize = 7;
 
 fn sector(image: &[u8], lba: usize) -> &[u8] {
     &image[lba * SECTOR..(lba + 1) * SECTOR]
@@ -71,14 +73,14 @@ const LEXAR: &str =
 fn committed_blank_sector_evidence_matches_real_images() {
     let mut checked = 0usize;
     let mut manufacturing_marks = 0usize;
-    for entry in fs::read_dir(BAK_DIR).expect("backup fixtures") {
+    for entry in fs::read_dir(FIXTURE_DIR).expect("protocol fixtures") {
         let path = entry.expect("backup entry").path();
         if path.extension().and_then(|ext| ext.to_str()) != Some("bin") {
             continue;
         }
         let image = fs::read(&path).expect("fixture bytes");
-        assert_eq!(image.len(), 14 * SECTOR, "{}", path.display());
-        for lba in [1usize, 2, 5, 10, 13] {
+        assert_eq!(image.len(), METADATA_IMAGE_LEN, "{}", path.display());
+        for lba in [1usize, 2, 5, 10] {
             assert!(
                 sector(&image, lba).iter().all(|byte| *byte == 0),
                 "{} LBA{lba} is not zero",
@@ -97,28 +99,11 @@ fn committed_blank_sector_evidence_matches_real_images() {
         }
         checked += 1;
     }
-    assert!(checked >= 20, "protocol audit unexpectedly lost fixtures");
+    assert!(
+        checked >= MIN_PROTOCOL_FIXTURES,
+        "protocol audit unexpectedly lost fixtures"
+    );
     assert_eq!(manufacturing_marks, 1, "LBA3 evidence set changed");
-}
-
-#[test]
-fn lba13_is_zero_in_every_committed_snapshot_but_is_not_proven_protocol_metadata() {
-    let mut checked = 0usize;
-    for entry in fs::read_dir(BAK_DIR).expect("backup fixtures") {
-        let path = entry.expect("backup entry").path();
-        if path.extension().and_then(|ext| ext.to_str()) != Some("bin") {
-            continue;
-        }
-        let image = fs::read(&path).expect("fixture bytes");
-        assert_eq!(image.len(), 14 * SECTOR, "{}", path.display());
-        assert!(
-            sector(&image, 13).iter().all(|byte| *byte == 0),
-            "{} LBA13 is not zero",
-            path.display()
-        );
-        checked += 1;
-    }
-    assert!(checked >= 20, "protocol audit unexpectedly lost fixtures");
 }
 
 #[test]
@@ -144,7 +129,7 @@ fn lba12_tail_is_profile_material_not_a_global_constant() {
 #[test]
 fn every_committed_lba12_tail_is_encrypted_zeroes_from_device_id() {
     let mut checked = 0usize;
-    for entry in fs::read_dir(BAK_DIR).expect("backup fixtures") {
+    for entry in fs::read_dir(FIXTURE_DIR).expect("protocol fixtures") {
         let path = entry.expect("backup entry").path();
         if path.extension().and_then(|ext| ext.to_str()) != Some("bin") {
             continue;
@@ -154,19 +139,22 @@ fn every_committed_lba12_tail_is_encrypted_zeroes_from_device_id() {
             continue;
         };
         let image = fs::read(&path).expect("fixture bytes");
-        assert_eq!(image.len(), 14 * SECTOR, "{name}");
+        assert_eq!(image.len(), METADATA_IMAGE_LEN, "{name}");
         let crc = crc32_bare(meta.device_id.as_bytes());
         let expected = a7f0_full(&[0u8; 144], &crc.to_le_bytes(), 0x170);
         assert_eq!(&sector(&image, 12)[0x170..], expected.as_slice(), "{name}");
         checked += 1;
     }
-    assert!(checked >= 20, "protocol audit unexpectedly lost fixtures");
+    assert!(
+        checked >= MIN_PROTOCOL_FIXTURES,
+        "protocol audit unexpectedly lost fixtures"
+    );
 }
 
 #[test]
 fn canonical_glab_is_stable_across_decodable_real_images() {
     let mut checked = 0usize;
-    for entry in fs::read_dir(BAK_DIR).expect("backup fixtures") {
+    for entry in fs::read_dir(FIXTURE_DIR).expect("protocol fixtures") {
         let path = entry.expect("backup entry").path();
         if path.extension().and_then(|ext| ext.to_str()) != Some("bin") {
             continue;
@@ -192,13 +180,16 @@ fn canonical_glab_is_stable_across_decodable_real_images() {
         );
         checked += 1;
     }
-    assert!(checked >= 20, "protocol audit unexpectedly lost fixtures");
+    assert!(
+        checked >= MIN_PROTOCOL_FIXTURES,
+        "protocol audit unexpectedly lost fixtures"
+    );
 }
 
 #[test]
 fn lba4_short_form_must_be_decoded_by_regions_not_by_zero_bytes() {
     let mut checked = 0usize;
-    for entry in fs::read_dir(BAK_DIR).expect("backup fixtures") {
+    for entry in fs::read_dir(FIXTURE_DIR).expect("protocol fixtures") {
         let path = entry.expect("backup entry").path();
         if path.extension().and_then(|ext| ext.to_str()) != Some("bin") {
             continue;
@@ -228,13 +219,16 @@ fn lba4_short_form_must_be_decoded_by_regions_not_by_zero_bytes() {
         assert_eq!(u32_le(&decoded, 0x18), bits ^ 0x8888_8888, "{name}");
         checked += 1;
     }
-    assert!(checked >= 20, "protocol audit unexpectedly lost fixtures");
+    assert!(
+        checked >= MIN_PROTOCOL_FIXTURES,
+        "protocol audit unexpectedly lost fixtures"
+    );
 }
 
 #[test]
 fn lba8_encrypted_prefix_length_is_llgb_length_rounded_to_aes_block() {
     let mut checked = 0usize;
-    for entry in fs::read_dir(BAK_DIR).expect("backup fixtures") {
+    for entry in fs::read_dir(FIXTURE_DIR).expect("protocol fixtures") {
         let path = entry.expect("backup entry").path();
         if path.extension().and_then(|ext| ext.to_str()) != Some("bin") {
             continue;
@@ -259,13 +253,16 @@ fn lba8_encrypted_prefix_length_is_llgb_length_rounded_to_aes_block() {
         assert_eq!(round_up_16(llgb_len), encrypted_len, "{name}");
         checked += 1;
     }
-    assert!(checked >= 20, "protocol audit unexpectedly lost fixtures");
+    assert!(
+        checked >= MIN_PROTOCOL_FIXTURES,
+        "protocol audit unexpectedly lost fixtures"
+    );
 }
 
 #[test]
 fn lba11_is_drkb_random252_and_uses_ascii_vid_pid_in_crc_input() {
     let mut checked = 0usize;
-    for entry in fs::read_dir(BAK_DIR).expect("backup fixtures") {
+    for entry in fs::read_dir(FIXTURE_DIR).expect("protocol fixtures") {
         let path = entry.expect("backup entry").path();
         if path.extension().and_then(|ext| ext.to_str()) != Some("bin") {
             continue;
@@ -322,13 +319,16 @@ fn lba11_is_drkb_random252_and_uses_ascii_vid_pid_in_crc_input() {
         }
         checked += 1;
     }
-    assert!(checked >= 20, "protocol audit unexpectedly lost fixtures");
+    assert!(
+        checked >= MIN_PROTOCOL_FIXTURES,
+        "protocol audit unexpectedly lost fixtures"
+    );
 }
 
 #[test]
 fn lba12_is_a_single_512_byte_ciphertext_with_zero_plaintext_tail() {
     let mut checked = 0usize;
-    for entry in fs::read_dir(BAK_DIR).expect("backup fixtures") {
+    for entry in fs::read_dir(FIXTURE_DIR).expect("protocol fixtures") {
         let path = entry.expect("backup entry").path();
         if path.extension().and_then(|ext| ext.to_str()) != Some("bin") {
             continue;
@@ -345,13 +345,16 @@ fn lba12_is_a_single_512_byte_ciphertext_with_zero_plaintext_tail() {
         assert!(plain[0x170..].iter().all(|byte| *byte == 0), "{name}");
         checked += 1;
     }
-    assert!(checked >= 20, "protocol audit unexpectedly lost fixtures");
+    assert!(
+        checked >= MIN_PROTOCOL_FIXTURES,
+        "protocol audit unexpectedly lost fixtures"
+    );
 }
 
 #[test]
 fn edpf_offset_08_is_partition_count_in_both_tables() {
     let mut checked = 0usize;
-    for entry in fs::read_dir(BAK_DIR).expect("backup fixtures") {
+    for entry in fs::read_dir(FIXTURE_DIR).expect("protocol fixtures") {
         let path = entry.expect("backup entry").path();
         if path.extension().and_then(|ext| ext.to_str()) != Some("bin") {
             continue;
@@ -383,7 +386,10 @@ fn edpf_offset_08_is_partition_count_in_both_tables() {
         assert_eq!(u32_le(&lba12, 8) as usize, count12, "LBA12 {name}");
         checked += 1;
     }
-    assert!(checked >= 20, "protocol audit unexpectedly lost fixtures");
+    assert!(
+        checked >= MIN_PROTOCOL_FIXTURES,
+        "protocol audit unexpectedly lost fixtures"
+    );
 }
 
 #[test]
@@ -394,7 +400,7 @@ fn edpf_tail_has_version_and_password_retry_fields_not_a_terminator() {
     let mut saw_nonzero_retry = false;
     let mut saw_unknown_state_bit = false;
 
-    for entry in fs::read_dir(BAK_DIR).expect("backup fixtures") {
+    for entry in fs::read_dir(FIXTURE_DIR).expect("protocol fixtures") {
         let path = entry.expect("backup entry").path();
         if path.extension().and_then(|ext| ext.to_str()) != Some("bin") {
             continue;
@@ -444,7 +450,10 @@ fn edpf_tail_has_version_and_password_retry_fields_not_a_terminator() {
         checked += 1;
     }
 
-    assert!(checked >= 20, "protocol audit unexpectedly lost fixtures");
+    assert!(
+        checked >= MIN_PROTOCOL_FIXTURES,
+        "protocol audit unexpectedly lost fixtures"
+    );
     assert!(
         saw_lba7_v64 && saw_lba7_v206,
         "audit lost LBA7 version diversity"
@@ -464,7 +473,7 @@ fn onlyid_text_is_a_signed_or_unsigned_view_of_one_u32_bit_pattern() {
     let mut checked = 0usize;
     let mut saw_negative = false;
     let mut saw_above_i32_max_as_unsigned = false;
-    for entry in fs::read_dir(BAK_DIR).expect("backup fixtures") {
+    for entry in fs::read_dir(FIXTURE_DIR).expect("protocol fixtures") {
         let path = entry.expect("backup entry").path();
         if path.extension().and_then(|ext| ext.to_str()) != Some("bin") {
             continue;
@@ -487,7 +496,10 @@ fn onlyid_text_is_a_signed_or_unsigned_view_of_one_u32_bit_pattern() {
         }
         checked += 1;
     }
-    assert!(checked >= 20, "protocol audit unexpectedly lost fixtures");
+    assert!(
+        checked >= MIN_PROTOCOL_FIXTURES,
+        "protocol audit unexpectedly lost fixtures"
+    );
     assert!(saw_negative, "audit lost signed-decimal onlyid evidence");
     assert!(
         saw_above_i32_max_as_unsigned,

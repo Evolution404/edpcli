@@ -48,7 +48,7 @@ fn generated_image_is_structurally_complete_nopwd_metadata() {
     let image = generate_image(&spec, &entropy()).unwrap();
     let bytes = image.as_bytes();
 
-    for lba in [1usize, 2, 3, 5, 9, 10, 13] {
+    for lba in [1usize, 2, 3, 5, 9, 10] {
         assert!(sector(bytes, lba).iter().all(|byte| *byte == 0), "LBA{lba}");
     }
 

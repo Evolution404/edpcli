@@ -359,7 +359,7 @@ impl AppState {
     pub fn set_inspect_pending(&mut self, pending: bool) {
         self.inspect_pending = pending;
         if pending {
-            self.notice = Some("正在后台读取 LBA0-13…".into());
+            self.notice = Some("正在后台读取 LBA0-12…".into());
         }
     }
 

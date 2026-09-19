@@ -13,7 +13,8 @@ use std::process::Command;
 use common::*;
 use edpcli::cli::{apply_flow, backup_create_flow, restore_flow, ApplyMode, Ctx};
 use edpcli::common::{
-    EXIT_ALREADY_NOPWD, EXIT_BACKUP, EXIT_CANCELLED, EXIT_OK, EXIT_TARGET, SECTOR,
+    EXIT_ALREADY_NOPWD, EXIT_BACKUP, EXIT_CANCELLED, EXIT_OK, EXIT_TARGET, METADATA_IMAGE_LEN,
+    METADATA_SECTOR_COUNT, SECTOR,
 };
 use edpcli::diskio::FileDev;
 use edpcli::diskio::SectorDev;
@@ -34,7 +35,7 @@ fn offline_convert_matches_golden() {
     let tmp = TmpDir::new("cli_offline");
     let snap = tmp.0.join("snap");
     fs::create_dir_all(&snap).unwrap();
-    for lba in 0..14u32 {
+    for lba in 0..METADATA_SECTOR_COUNT as u32 {
         fs::write(
             snap.join(format!("LBA{:02}.bin", lba)),
             &data[lba as usize * SECTOR..(lba as usize + 1) * SECTOR],
@@ -303,8 +304,8 @@ fn apply_original_disk_not_blocked_and_dry_run_no_write() {
     .unwrap();
     assert_eq!(code, EXIT_OK);
     let after = fs::read(&img_path).unwrap();
-    assert_lbas(&after, &orig, &[1, 2, 3, 4, 5, 8, 10, 11, 13]); // 非目标扇区不动
-                                                                 // 5 个目标扇区 == 合成免密镜像(注意 netac 的 LBA6 转换是恒等: 0x1CA 原本即 128480)
+    assert_lbas(&after, &orig, &[1, 2, 3, 4, 5, 8, 10, 11]); // 非目标扇区不动
+                                                             // 5 个目标扇区 == 合成免密镜像(注意 netac 的 LBA6 转换是恒等: 0x1CA 原本即 128480)
     assert_lbas(&after, &conv, &[0, 6, 7, 9, 12]);
     // dry-run: 不写盘
     let tmp2 = TmpDir::new("apply_dry");
@@ -390,7 +391,7 @@ fn backup_create_is_read_only_and_matches_apply_automatic_backup() {
     assert_eq!(manual_dev.writes, 0, "backup create 不得写 U 盘");
     assert_eq!(fs::read(&manual_path).unwrap(), orig);
 
-    // apply 写前自动备份：同一时间、同一设备事实、同一 LBA0-13 输入，应生成
+    // apply 写前自动备份：同一时间、同一设备事实、同一 LBA0-12 输入，应生成
     // 完全相同的文件名/内容/MD5；随后在确认处取消，避免进入任何真写阶段。
     let apply_runner = netac_runner(6);
     let mut apply_prompt = ScriptPrompter {
@@ -722,7 +723,7 @@ fn restore_picker_selects_newest_and_writes() {
     assert_eq!(code, EXIT_OK);
     assert_eq!(fs::read(&img_path).unwrap(), orig); // 免密快照 → 未写
 
-    // 选择"2"(原盘备份) + YES → 完整写入 14 扇(内容同原盘, 校验写路径无异常)
+    // 选择"2"(原盘备份) + YES → 完整写入 13 扇(内容同原盘, 校验写路径无异常)
     let mut prompt2 = ScriptPrompter {
         inputs: vec!["2".into(), "YES".into()],
         idx: 0,
@@ -918,7 +919,7 @@ fn apply_system_disk_guard_in_flow() {
     let runner = netac_runner(1);
     let tmp = TmpDir::new("guard");
     let img = tmp.0.join("d.img");
-    fs::write(&img, vec![0u8; 14 * SECTOR]).unwrap();
+    fs::write(&img, vec![0u8; METADATA_IMAGE_LEN]).unwrap();
     let mut prompt = ScriptPrompter::yes();
     let mut dev =
         FileDev::open_rdwr(img.to_str().unwrap(), std::time::Duration::from_secs(1)).unwrap();

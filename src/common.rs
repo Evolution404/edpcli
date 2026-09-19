@@ -1,6 +1,9 @@
 //! 公共常量与工具: 扇区大小、容量显示、Python 兼容舍入、退出码契约。
 
 pub const SECTOR: usize = 512;
+pub const METADATA_SECTOR_COUNT: usize = 13;
+pub const METADATA_LAST_LBA: u32 = 12;
+pub const METADATA_IMAGE_LEN: usize = METADATA_SECTOR_COUNT * SECTOR;
 
 /// 退出码契约(脚本可区分失败类型; 原 Python 版一律 exit 1):
 pub const EXIT_OK: i32 = 0; // 成功(含 dry-run/预览)

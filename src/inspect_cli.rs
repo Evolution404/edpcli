@@ -113,8 +113,8 @@ where
     let export_dir = opts.export.as_deref().map(PathBuf::from);
     if opts.lbas.is_empty() && !opts.raw && !opts.hex {
         println!();
-        println!("{}", crate::ui::bold("LBA 0-13 概览:"));
-        for lba in 0..14u32 {
+        println!("{}", crate::ui::bold("LBA 0-12 概览:"));
+        for lba in 0..crate::common::METADATA_SECTOR_COUNT as u32 {
             match read(lba) {
                 Ok(raw) => {
                     let view = inspect::analyze_sector(lba, &raw, meta);
@@ -151,9 +151,9 @@ where
         return EXIT_OK;
     }
 
-    // 用户显式要求 --hex / --raw 时不能悄悄忽略旗标：未给 LBA 就展开全部 0-13。
+    // 用户显式要求 --hex / --raw 时不能悄悄忽略旗标：未给 LBA 就展开全部 0-12。
     let detailed_lbas: Vec<u32> = if opts.lbas.is_empty() {
-        (0..14u32).collect()
+        (0..crate::common::METADATA_SECTOR_COUNT as u32).collect()
     } else {
         opts.lbas.clone()
     };

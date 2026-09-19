@@ -12,7 +12,7 @@ const SNAPSHOT: &str =
     "disk26_245760000_vid3535_pid6300_disk&ven_aigo&prod_u335&rev_pmap_onlyid1987718388_nopwd_20260916_233626.bin";
 
 fn copy_fixture(root: &Path, name: &str) -> PathBuf {
-    let source = Path::new(common::BAK_DIR).join(name);
+    let source = Path::new(common::FIXTURE_DIR).join(name);
     assert!(
         source.is_file(),
         "missing backup fixture {}",

@@ -7,14 +7,16 @@
 mod generate;
 mod profile;
 mod spec;
+mod validate;
 
 pub use generate::{generate_image, ProvisionEntropy};
 pub use profile::ProvisionProfile;
 pub use spec::{OnlyId, ProvisionMetadata, ProvisionSpec, TargetIdentity};
+pub use validate::{ProvisionValidation, ProvisionValidator};
 
-use crate::common::SECTOR;
+use crate::common::METADATA_IMAGE_LEN;
 
-pub const PROVISION_IMAGE_LEN: usize = 14 * SECTOR;
+pub const PROVISION_IMAGE_LEN: usize = METADATA_IMAGE_LEN;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ProvisionImage([u8; PROVISION_IMAGE_LEN]);
