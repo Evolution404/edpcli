@@ -9,10 +9,11 @@ use std::fs;
 
 use common::FIXTURE_DIR;
 use edpcli::common::{METADATA_IMAGE_LEN, SECTOR};
-use edpcli::crypto::{a6b0_full, a7f0_full, crc32_bare, lba6_decode, xor_rolling};
+use edpcli::crypto::{a6b0_full, a7f0_full, crc32_bare, lba6_checksum, lba6_decode, xor_rolling};
 use edpcli::diskio::{parse_backup_name, BackupMeta};
 use edpcli::inspect::InspectMeta;
 use edpcli::metainfo::ownership_from_lba8;
+use encoding_rs::GBK;
 
 fn load(name: &str) -> Vec<u8> {
     fs::read(std::path::Path::new(FIXTURE_DIR).join(name)).expect("committed protocol fixture")
@@ -587,6 +588,138 @@ fn lba6_autoid_matches_lba8_autonum_but_fixed_slot_tail_is_not_semantic_padding(
         saw_nonzero_after_nul,
         "real fixtures must preserve evidence that bytes after the m_autoid NUL are not semantic zero padding"
     );
+}
+
+fn c_string_bytes(slot: &[u8]) -> &[u8] {
+    let end = slot
+        .iter()
+        .position(|byte| *byte == 0)
+        .unwrap_or(slot.len());
+    &slot[..end]
+}
+
+fn gbk_string(slot: &[u8]) -> String {
+    let (text, _, errors) = GBK.decode(c_string_bytes(slot));
+    assert!(
+        !errors,
+        "fixture contains invalid GBK in a protocol string slot"
+    );
+    text.into_owned()
+}
+
+#[test]
+fn lba6_owner_office_and_label_slots_have_official_fixed_storage_boundaries() {
+    let mut checked = 0usize;
+    let mut owner_tail = false;
+    let mut office_tail = false;
+    let mut label_tail = false;
+
+    for entry in fs::read_dir(FIXTURE_DIR).expect("protocol fixtures") {
+        let path = entry.expect("backup entry").path();
+        if path.extension().and_then(|ext| ext.to_str()) != Some("bin") {
+            continue;
+        }
+        let name = path.file_name().unwrap().to_str().unwrap();
+        let Some(meta) = parse_reference_backup_name(name) else {
+            continue;
+        };
+        let image = fs::read(&path).expect("fixture bytes");
+        let plain = lba6_decode(sector(&image, 6));
+
+        let owner = &plain[0x50..0x70];
+        let office = &plain[0x80..0xc0];
+        let label = &plain[0x188..0x1c0];
+        for (slot, seen_tail) in [
+            (owner, &mut owner_tail),
+            (office, &mut office_tail),
+            (label, &mut label_tail),
+        ] {
+            if let Some(nul) = slot.iter().position(|byte| *byte == 0) {
+                *seen_tail |= slot[nul + 1..].iter().any(|byte| *byte != 0);
+            }
+        }
+
+        let inspect_meta = InspectMeta {
+            device_id: Some(meta.device_id.clone()),
+            ..InspectMeta::default()
+        };
+        let ownership =
+            ownership_from_lba8(sector(&image, 8), &inspect_meta).expect("LBA8 ownership");
+        assert_eq!(
+            ownership.user.unwrap_or_default(),
+            gbk_string(owner),
+            "LBA6 32B owner slot and LBA8 User diverged: {name}"
+        );
+        assert_eq!(
+            ownership.label.unwrap_or_default(),
+            gbk_string(label),
+            "LBA6 56B label slot and LBA8 Label diverged: {name}"
+        );
+        checked += 1;
+    }
+
+    assert!(
+        checked >= MIN_PROTOCOL_FIXTURES,
+        "protocol audit unexpectedly lost fixtures"
+    );
+    assert!(
+        owner_tail && office_tail && label_tail,
+        "real fixtures must preserve post-NUL backing evidence in all three fixed storage slots"
+    );
+}
+
+fn assert_lba6_static_template_holes(raw: &[u8], label: &str) {
+    let plain = lba6_decode(raw);
+    let expected_040 = decode_hex_fixture("f0ac3c0074fcbb0700b40ecd10ebf288");
+    let expected_0c0 = decode_hex_fixture(concat!(
+        "0a77237205394608731cb80102bb007c8b4e028b5600cd1373514f744e32e48a",
+        "5600cd13ebe48a560060bbaa55b441cd13723681fb55aa7530f6c101742b6160"
+    ));
+    let expected_108 = decode_hex_fixture(concat!(
+        "76086a0068007c6a016a10b4428bf4cd136161730e4f740b32e48a5600cd13eb",
+        "d661f9c3496e76616c696420706172746974696f6e207461626c65004572726f",
+        "72206c6f6164696e67206f7065726174696e672073797374656d004d69737369",
+        "6e67206f7065726174696e672073797374656d00000000000000000000000000"
+    ));
+    assert_eq!(&plain[0x040..0x050], expected_040.as_slice(), "{label}");
+    assert_eq!(&plain[0x0c0..0x100], expected_0c0.as_slice(), "{label}");
+    assert_eq!(&plain[0x108..0x188], expected_108.as_slice(), "{label}");
+    assert!(
+        plain[0x1f4..0x1fc].iter().all(|byte| *byte == 0),
+        "LBA6 static template zero tail changed: {label}"
+    );
+
+    let stored = u32_le(raw, 0x1fc);
+    let checksum = lba6_checksum(&raw[..0x1fc]);
+    assert!(
+        stored == checksum || stored == checksum.wrapping_shl(1),
+        "LBA6 static template material is no longer covered by the accepted checksum profile: {label}"
+    );
+}
+
+#[test]
+fn lba6_static_usb_main_bsec_holes_are_exact_and_checksum_protected() {
+    let mut checked = 0usize;
+    for entry in fs::read_dir(FIXTURE_DIR).expect("protocol fixtures") {
+        let path = entry.expect("backup entry").path();
+        if path.extension().and_then(|ext| ext.to_str()) != Some("bin") {
+            continue;
+        }
+        let name = path.file_name().unwrap().to_str().unwrap();
+        if parse_reference_backup_name(name).is_none() {
+            continue;
+        }
+        let image = fs::read(&path).expect("fixture bytes");
+        assert_lba6_static_template_holes(sector(&image, 6), name);
+        checked += 1;
+    }
+    assert!(
+        checked >= MIN_PROTOCOL_FIXTURES,
+        "protocol audit unexpectedly lost fixtures"
+    );
+
+    let sandisk = decode_hex_fixture(SANDISK_LBA6_HEX);
+    assert_lba6_static_template_holes(&sandisk, "independent SanDisk original");
 }
 
 fn assert_lba6_crc_usb_id_pair(lba6_raw: &[u8], device_id: &str, label: &str) {

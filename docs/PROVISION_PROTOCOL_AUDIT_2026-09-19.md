@@ -592,6 +592,85 @@ Linux DWARF/机器码继续把这条链闭合到字符串语义：
 CI 已增加真实夹具门禁：一方面要求 LBA6 C-string == LBA8 Autonum，另一方面
 必须保留至少一个“NUL 后非零”的真实反例，防止未来实现把尾部错误归零/语义化。
 
+### LBA6 原352B UNKNOWN 已全部拆清：固定字段槽 + UsbMainBSec 静态模板
+
+本轮从 Windows/Linux 官方 BuildSector6 与 ReadSector6 的真实机器码重新恢复
+物理布局，而不是继续把已命名字段之间的空洞记作 UNKNOWN。
+
+Linux DWARF 明确给出 UsbLabelParam(size=0x2AC) 与
+UsbWriteParam(size=0x299)。与本轮相关的成员为：
+
+- department @ +0x40；
+- owner @ +0xFC；
+- Office[64] @ +0x198；
+- GSerial[64] @ +0x1D8；
+- Label[64] @ +0x218；
+- autoid[16] @ +0x258/+0x259；
+- BeiZhu[16] @ +0x268/+0x289。
+
+Windows sub_10013FD0 首先从 UsbMainBSec@0x100E7220 复制整扇到 LBA6；
+Linux BuildSector6@0x1CAAC 同样先从 UsbMainBSec@0x22BB40 复制 sector_size。
+随后字段 overlay 只覆盖
++0x000..03F、+0x050..06F、+0x070..07F、+0x080..0BF、
++0x100..107、+0x188..1BF、+0x1C0..1CF、+0x1D0..1DF、
++0x1F0..1F3。
+
+因此旧352B UNKNOWN 可严格拆成两类。
+
+第一类是此前账本漏掉的136B fixed storage slots：
+
+- +0x060..06F：原账本只记录 User 前16B，实际 Owner/User 主槽为完整32B
+  +0x050..06F；
+- +0x080..0BF：m_UsbOffice[64]；
+- +0x188..1BF：m_usbLabel 的56B物理主槽。
+
+官方 reader 与之对称：Owner 普通路径按 C 字符串从 decoded+0x50 恢复，
+长值使用 0x40245E2A marker 并从 LBA9+0x100 continuation 重组；
+Office 从 decoded+0x80 读回 64B C-string；Label 从 decoded+0x188
+构造字符串后写回 m_usbLabel[64]。
+
+实盘又证明三段不能整体升 COMPLETE：三种固定槽都有首个 NUL 后仍保留非零
+backing 的真实 profile。CI 新增
+lba6_owner_office_and_label_slots_have_official_fixed_storage_boundaries，
+并锁定 LBA6 Owner C-string == LBA8 User、LBA6 Label C-string == LBA8 Label，
+同时保留 post-NUL 非零反例。因此136B由 UNKNOWN 降为 PARTIAL。
+
+第二类是216B writer-owned static UsbMainBSec material：
+
+- +0x040..04F：16B；
+- +0x0C0..0FF：64B；
+- +0x108..187：128B；
+- +0x1F4..1FB：8B。
+
+这216B满足严格 COMPLETE，而不是因为样本碰巧相同：
+
+1. Windows/Linux BuildSector6 都先复制官方 UsbMainBSec，字段 overlay
+   不触及这四段；
+2. Windows sub_100152A0 与 Linux ReadSector6@0x1E2CC 都在任何字段解析前
+   对 raw +0x000..1FB 整体计算 SAFE6 checksum，不匹配直接拒绝，因此这216B
+   是明确完整性输入；
+3. 正确从 ELF .data 的 UsbMainBSec@0x22BB40 抽取后，四段与 Windows
+   template 以及实盘逐字节一致；
+4. 21份 non-converted 完整 backup + 独立 SanDisk 共22份原始盘全部一致。
+
++0x108..187 还包含 legacy MBR 的 Invalid partition table /
+Error loading operating system / Missing operating system message material；
++0x1F4..1FB 是显式模板零。CI 新增
+lba6_static_usb_main_bsec_holes_are_exact_and_checksum_protected，
+锁定 committed originals + 独立 SanDisk。
+
+因此 LBA6 从 4 COMPLETE / 156 PARTIAL / 352 UNKNOWN 更新为
+220 COMPLETE / 292 PARTIAL / 0 UNKNOWN。
+
+全 LBA0–12 的 UNKNOWN 首次降为0B。这只表示每个物理字节至少已有明确区域/
+存储行为边界；仍有大量 PARTIAL 尚未满足最终业务语义闭环，不能把
+“无 UNKNOWN”写成“协议已经全部完成”。
+
+同时，Dept/Owner overflow 路径获得跨扇区纠偏：BuildSector6 的 out 指针
+指向 LBA6，因此 out + 3*sector_size + 0x80/0x100 实际落在
+LBA9+0x80/+0x100。这给此前 LBA9 Dept/backing 历史 profile 提供了官方
+producer 解释，也证明 LBA6/LBA9 不是互不相关的独立扇区。
+
 ### LBA6 `+0x100..0x107`：官方 `m_crcUsbID[2]` 与 doubled guard 已恢复
 
 此前这里仅记为“device-id CRC材料”，第二 DWORD 没有正式含义。本轮直接用
@@ -2177,7 +2256,7 @@ CI 原始夹具同时保留两种 profile。零态表示该 legacy tail 不存�
 | 3 | 0B | 512B | 0B | 0% | EDP 注册 writer 对整扇 preserve-existing，当前 Windows/Linux EDP reader 不解析；22份原始盘为21零+1 Kingston MP payload，但厂商 producer/固件 consumer 未闭合 |
 | 4 | 36B | 476B | 0B | 7.0% | onlyid clear header、OnlyIdXor8、LLGB 双锚点完成；第二 ID/HSerial/profile 字段仍不完整；`+0x047..+0x1FB` 已由 full writer、reader negative consumer 与 raw-zero/rolling-zero 双实盘 profile 从UNKNOWN降PARTIAL |
 | 5 | 512B | 0B | 0B | 100% | 两版 EdpDiskCtrl 均只对 LBA5 执行“读整扇→原样写回→检查 ERROR_WRITE_PROTECT(0x13)”；当前注册 writer 读取既有13扇区后不重建 LBA5，因此 preserve existing bytes；22/22原始盘全零 |
-| 6 | 4B | 156B | 352B | 0.8% | checksum 4B 完成；GSerial/BeiZhu 的 C-string 语义已知，但固定16B槽跨 current/legacy writer profile 有不同 backing 语义，因此仍 PARTIAL；原所谓“旧 +0x1E0 扩展”已纠正为 legacy MBR partition-table fragment，2/2 非零实盘的 type/start/count 与 LBA12 type4 精确一致，但旧 producer/直接 consumer 尚未闭合 |
+| 6 | 220B | 292B | 0B | 43.0% | 原352B UNKNOWN 已按官方 BuildSector6/ReadSector6 全部拆清：216B 为 UsbMainBSec fixed template material（双平台 producer + 前508B checksum consumer + 22/22实盘，升 COMPLETE）；136B 为 Owner/Office/Label fixed storage slots（边界/reader已闭合但 post-NUL backing 多profile，降 PARTIAL）。GSerial/BeiZhu 与 legacy MBR fragment 继续按原严格口径保持 PARTIAL |
 | 7 | 489B | 23B | 0B | 95.5% | 已闭合 entry0 NeedDisturb 4B 此前在总账漏记；加回后再计入 `+0x0CE..+0x1FF` 306B writer-zero区，当前只剩3条 entry Version 12B、entry1/2 NeedDisturb 8B、pass-info剩余3B为PARTIAL |
 | 8 | 86B | 426B | 0B | 16.8% | LLGB magic + logical length + ElabOffset 完成；ToolVersion、Labversion、writeTime 和 Reserved[64] 已闭合。重新按动态边界审计后，`+0x80..+0x1FF` 不再按样本最大长度切成“正文+UNKNOWN尾巴”：writer只拥有动态加密前缀，之后是 preserve-existing backing，因此整段统一PARTIAL、无UNKNOWN |
 | 9 | 54B | 458B | 0B | 10.5% | EETU/EPPE/SAPF三块边界及current preserve范围已拆清：EPPE尾120B为writer-zero但公开API consumer未闭合；+0x080..0x0FF为历史Dept/backing profile，SAPF +0x114..0x11F为profile-dependent backing，+0x120..0x17F为current preserve/ignore，三段均PARTIAL，不再记UNKNOWN |
@@ -2187,9 +2266,9 @@ CI 原始夹具同时保留两种 profile。零态表示该 legacy tail 不存�
 
 总计：
 
-- **完成：2191B / 6656B = 32.9%**
-- **部分已知：4113B / 6656B = 61.8%**
-- **未知：352B / 6656B = 5.3%**
+- **完成：2407B / 6656B = 36.2%**
+- **部分已知：4249B / 6656B = 63.8%**
+- **未知：0B / 6656B = 0.0%**
 
 这是一组**严格下限**，故意宁可低估，不把“能生成/能解析”冒充成“已经完全理解”。
 后续只有在证据链真正闭合时，字节才能从“未知 → 部分已知 → 完成”升级。
@@ -2202,7 +2281,7 @@ CI 原始夹具同时保留两种 profile。零态表示该 legacy tail 不存�
 | 3 | 外部制造区部分闭合 | 21/22 全零，1 份 Kingston MP payload；官方 EDP 注册链原样保留且当前 reader 不解析，厂商生成/消费语义仍未知 |
 | 4 | 高度闭合 | 整扇已无UNKNOWN；`+0x047..+0x1FB` 已确认 raw-zero / rolling-encrypted-zero 双历史物理表示且22盘语义均为零。`+0x45/+0x46` 已闭合为 `bDataToServer/bConnetServer` post-XOR wire bytes，并证明官方 ReadSector4 不补偿该例外；inspect 已恢复 producer-side flags，Provision 已改为 current SAFE6 full rolling + post-XOR覆盖。两flag因缺最终业务consumer仍PARTIAL |
 | 5 | canonical 已知 | opaque preserve / 写保护探测 scratch；当前 22/22 全零，但零不是协议固定要求 |
-| 6 | 部分闭合 | checksum 已锁；GSerial/BeiZhu 的 C-string 语义闭合，物理槽尾为 profile-dependent backing bytes；`0x1e0..0x1ef` 已识别为 legacy MBR entry3/4 fragment，Aigo/SanDisk 2/2 与 LBA12 type4 几何吻合；current模板零来源闭合，但 legacy writer/直接 consumer 仍缺失 |
+| 6 | 高度闭合 | 整扇已无 UNKNOWN。216B UsbMainBSec static material 已由 Windows/Linux fixed producer、整扇 checksum consumer 与22盘升 COMPLETE；Owner 32B、Office 64B、Label 56B 的物理槽/reader 已闭合到 PARTIAL。GSerial/BeiZhu 的 C-string 与 legacy MBR fragment 继续因 post-NUL/profile/旧 writer 缺口保持 PARTIAL |
 | 7 | 高度闭合 | 物理0x40 packed ABI、PartionCount、rolling XOR、entry0 NeedDisturb compatibility gate、v0x0064 legacy wrapped8均已锁；`+0x0CE..+0x1FF` 306B post-table区已升级COMPLETE，整扇不再有UNKNOWN；只剩23B PARTIAL：3×Version、entry1/2 NeedDisturb、pass-info +0A/+0C/+0D |
 | 8 | 高度闭合 | LLGB/ELABEL + 可变加密长度已锁；ToolVersion/Labversion/writeTime/Reserved 已闭合。严格22盘 `logical_end=0x148..0x183`、encrypted prefix=`0x150..0x190`；Windows/Linux writer 都只覆盖动态前缀，后部 preserve-existing，inspect 也只解前缀并保留非零tail。因此旧102B UNKNOWN已纠正为PARTIAL，LBA8现无UNKNOWN；HDSerialInfo/MacInfo/UsbOnlyInfo 与17-key ELABEL最终consumer继续追 |
 | 9 | 高度闭合 | 整扇已无UNKNOWN：EETU首0x80、EPPE末0x80、SAPF 0x100..0x11F及current preserve中间区边界均明确；历史Dept/backing、SAPF尾12B、post-SAPF区与EPPE zero-tail因历史producer/公开API consumer未完全闭合而保持PARTIAL |

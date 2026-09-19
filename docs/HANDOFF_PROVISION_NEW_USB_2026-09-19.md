@@ -28,9 +28,9 @@ producer + 官方 consumer/行为 + 原始实盘验证**同时闭合，才能标
 
 截至本次 LBA11 repair-profile 闭环，严格统计为：
 
-- **COMPLETE：2191 / 6656B = 32.9%**
-- **PARTIAL：4113 / 6656B = 61.8%**
-- **UNKNOWN：352 / 6656B = 5.3%**
+- **COMPLETE：2407 / 6656B = 36.2%**
+- **PARTIAL：4249 / 6656B = 63.8%**
+- **UNKNOWN：0 / 6656B = 0.0%**
 
 当前各 LBA 严格状态以主账本为唯一准绳，最新关键增量：
 
@@ -55,6 +55,19 @@ producer + 官方 consumer/行为 + 原始实盘验证**同时闭合，才能标
 - **LBA10 = 36 COMPLETE / 476 PARTIAL / 0 UNKNOWN = 7.0%**。
   EESI 前0x80 round-trip payload 与后0x180 current preserve/ignore storage boundary
   已闭合到 PARTIAL；整扇不再有 UNKNOWN。
+
+- **LBA6 = 220 COMPLETE / 292 PARTIAL / 0 UNKNOWN = 43.0%**。
+  原352B UNKNOWN 已全部拆清。Windows sub_10013FD0 与 Linux
+  BuildSector6@0x1CAAC 都先复制官方 UsbMainBSec，再覆盖明确字段；
+  +0x40..4F、+0xC0..FF、+0x108..187、+0x1F4..1FB 共216B没有后续 overlay。
+  Windows sub_100152A0 / Linux ReadSector6 在解析字段前对前508B整体做
+  SAFE6 checksum 准入，严格22份原始盘又22/22逐字节等于官方模板，
+  因而这216B升 COMPLETE。另136B旧 UNKNOWN 已恢复为
+  Owner/User 32B 主槽、Office[64]、Label 56B 主槽；producer/reader边界闭合，
+  但实盘存在 post-NUL 非零 backing，所以只降为 PARTIAL。
+  Dept/Owner 长值的 continuation 还确认落在 LBA9+0x80/+0x100，
+  解释了先前 LBA9 历史 Dept/backing profile。当前全 LBA0–12 已无 UNKNOWN，
+  但仍有4249B PARTIAL，绝不能把“UNKNOWN=0”当成全部协议完成。
 
 - **LBA7 = 489 COMPLETE / 23 PARTIAL / 0 UNKNOWN = 95.5%**。
   真实物理 LBA7 已锁定为 **3×0x40 packed EDPF + 14B pass-info@+0xC0**，
