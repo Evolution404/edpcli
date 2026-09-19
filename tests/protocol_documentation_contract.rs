@@ -113,6 +113,8 @@ fn documentation_keeps_the_official_provisioning_chain_and_strict_rules() {
         "diskfile.cpp:740 / 956",
         "diskfile.cpp:805 / 1102,1143",
         "overflow_marker(0x40245E2A)",
+        "m_autoid / Autonum",
+        "NUL 后真实槽尾大量非零",
         "22/22",
         "不能单独把字段升级为 COMPLETE",
         "禁止把免密转换盘",

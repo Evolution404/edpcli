@@ -192,6 +192,29 @@ GSerial / 15B BeiZhu。**NUL 后尾字节没有稳定业务语义，可能保留
 `GSerial="322CA28A" + NUL + zero tail`、空 BeiZhu、`0x1E0..0x1EF=0`、
 `m_encrypt=1`；不模拟 writer 的未初始化尾字节。
 
+### LBA6 `m_autoid@0x70`：C 字符串闭合，固定槽尾不闭合
+
+Linux DWARF/机器码继续把这条链闭合到字符串语义：
+
+- `UsbLabelParam.m_autoid @ +0x258`；
+- `UsbWriteParam.m_autoid @ +0x259`；
+- `UsbWriteParam(UsbLabelParam&)` 通过 `strcpy_s(..., 16, ...)` 复制字符串；
+- `BuildSector6@diskfile.cpp:672` 固定 `memcpy 16B` 到 LBA6 `0x70..0x7F`；
+- `ReadSector6@diskfile.cpp:1005` 再通过 `strcpy_s(...,16,...)` 把
+  LBA6 `+0x70` 读回 `UsbLabelParam.m_autoid`；
+- `BuildSector8` 把同一 `m_autoid` 序列化为 ELABEL `Autonum=`。
+
+全 22 份原始参考只读复核：
+
+- 22/22 的 LBA6 `+0x70` C 字符串与 LBA8 `Autonum=` 完全一致；
+- 分布为 `YD000001` 14、空串 6、`1` 2；
+- 但第一个 NUL 之后的固定槽尾经常非零，且不同 profile 呈现不同残留形态。
+
+因此 **m_autoid 的 C 字符串语义已经闭合，但物理 16B 槽没有逐字节完全闭合**。
+不能把整个 `0x70..0x7F` 提升 COMPLETE，也不能把 NUL 后内容命名为 padding。
+CI 已增加真实夹具门禁：一方面要求 LBA6 C-string == LBA8 Autonum，另一方面
+必须保留至少一个“NUL 后非零”的真实反例，防止未来实现把尾部错误归零/语义化。
+
 ### LBA8：加密长度由 LLGB +0x04 决定，不是固定 368B
 
 - 当前 22/22 参考样本均满足：

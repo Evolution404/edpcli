@@ -110,6 +110,57 @@ fn lba6_offset_1ca_is_inside_gserial_slot_not_a_standalone_state_field() {
 }
 
 #[test]
+fn lba6_autoid_matches_lba8_autonum_but_fixed_slot_tail_is_not_semantic_padding() {
+    let mut checked = 0usize;
+    let mut saw_nonzero_after_nul = false;
+
+    for entry in fs::read_dir(FIXTURE_DIR).expect("protocol fixtures") {
+        let path = entry.expect("backup entry").path();
+        if path.extension().and_then(|ext| ext.to_str()) != Some("bin") {
+            continue;
+        }
+        let name = path.file_name().unwrap().to_str().unwrap();
+        let Some(meta) = parse_reference_backup_name(name) else {
+            continue;
+        };
+        let image = fs::read(&path).expect("fixture bytes");
+        let lba6 = lba6_decode(sector(&image, 6));
+        let slot = &lba6[0x70..0x80];
+        let nul = slot
+            .iter()
+            .position(|byte| *byte == 0)
+            .unwrap_or(slot.len());
+        let autoid = &slot[..nul];
+        if nul < slot.len() && slot[nul + 1..].iter().any(|byte| *byte != 0) {
+            saw_nonzero_after_nul = true;
+        }
+
+        let inspect_meta = InspectMeta {
+            device_id: Some(meta.device_id.clone()),
+            ..InspectMeta::default()
+        };
+        let ownership =
+            ownership_from_lba8(sector(&image, 8), &inspect_meta).expect("LBA8 ownership");
+        let autonum = ownership.autonum.unwrap_or_default();
+        assert_eq!(
+            autoid,
+            autonum.as_bytes(),
+            "LBA6 m_autoid and LBA8 Autonum diverged: {name}"
+        );
+        checked += 1;
+    }
+
+    assert!(
+        checked >= MIN_PROTOCOL_FIXTURES,
+        "protocol audit unexpectedly lost fixtures"
+    );
+    assert!(
+        saw_nonzero_after_nul,
+        "real fixtures must preserve evidence that bytes after the m_autoid NUL are not semantic zero padding"
+    );
+}
+
+#[test]
 fn committed_blank_sector_evidence_matches_real_images() {
     let mut checked = 0usize;
     let mut manufacturing_marks = 0usize;

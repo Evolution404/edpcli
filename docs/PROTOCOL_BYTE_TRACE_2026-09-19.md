@@ -211,6 +211,44 @@ GSerial/BeiZhu 则直接按 C 字符串读回。注意 `UsbLabelParam` **没有*
 - `m_encrypt @ sector+0x1F0` 当前只有 producer 和 22/22=1，reader 没有对应输出字段，
   仍保持 PARTIAL。
 
+#### m_autoid / Autonum：字符串语义闭合，但固定 16B 槽不能整体升级
+
+producer：
+
+```text
+UsbWriteParam::UsbWriteParam(UsbLabelParam&):
+    strcpy_s(writer.m_autoid /* +0x259 */, 16,
+             label.m_autoid  /* +0x258 */)
+
+BuildSector6:
+    memcpy(sector6 + 0x70, writer.m_autoid, 16)
+```
+
+consumer：
+
+```text
+ReadSector6:
+    strcpy_s(label.m_autoid /* +0x258 */, 16,
+             decoded_sector6 + 0x70)
+
+BuildSector8(label):
+    ELABEL += "Autonum=" + label.m_autoid + "||"
+```
+
+22 份原始实盘只读交叉：
+
+- **22/22**：LBA6 `0x70` 起的 C 字符串 == LBA8 `Autonum=`；
+- 分布：`YD000001` 14份、空串6份、`1` 2份；
+- 但固定 16B 槽在第一个 NUL 之后经常保留非零字节，例如
+  `YD000001\0\0 73 05 A0 B6 07 EB`；
+- 这与 `UsbWriteParam(UsbLabelParam&)` 只用 `strcpy_s` 写 C 字符串、
+  随后 `BuildSector6` 却固定 `memcpy 16B` 的实现吻合：NUL 后内容不属于
+  `m_autoid` 的字符串语义，可能来自对象旧内容/未定义尾部。
+
+因此这里**不增加 COMPLETE 字节数**。如果以后要把某个固定 offset 升级 COMPLETE，
+必须先证明该 offset 在所有相关 profile 中都有确定 producer/consumer 语义，
+不能因为字符串本身已闭合就把 NUL 后尾部当作零填充。
+
 ## 3. 严格逐字节进度
 
 > 每个 LBA 固定 512B；总计 13 × 512 = 6656B。
@@ -293,7 +331,7 @@ DWARF 中恢复出的原始声明文件/行号与本地函数地址：
 | LBA5 | 0x000–0x1FF | UNKNOWN | 未知/当前多为零 | 待查 | 待查 | 当前参考多为零 | 全零不等于完成 |
 | LBA6 | 0x000–0x03F | PARTIAL | Dept slot | `BuildSector6` 从 UsbWriteParam/UsbLabelParam 写入 | `ReadSector6` 取回 | 多盘真实部门字段可解析 | 上游业务来源明确，所有字节语义仍未逐个闭合 |
 | LBA6 | 0x050–0x05F | PARTIAL | User slot | writer 固定槽写入 | reader 取回 | 多盘真实姓名可解析 | 槽边界明确 |
-| LBA6 | 0x070–0x077 | PARTIAL | Autonum | writer 写入 | reader/下游部分闭合 | 22盘有多个 profile | 仍 PARTIAL |
+| LBA6 | 0x070–0x07F | PARTIAL | m_autoid / Autonum fixed copy slot | `BuildSector6@diskfile.cpp:672` 固定复制 writer `m_autoid[16]` | `ReadSector6@diskfile.cpp:1005` 以 C 字符串复制到 `UsbLabelParam.m_autoid`；`BuildSector8` 再序列化为 `Autonum=` | 22/22 LBA6 C-string 与 LBA8 Autonum 完全相同；但 NUL 后真实槽尾大量非零 | 字符串语义已闭合，固定槽尾不是协议零 padding，整16B仍不能算 COMPLETE |
 | LBA6 | 0x100–0x107 | PARTIAL | device-id CRC材料 | writer 写 CRC32 及派生值 | inspect/reader 可验证 | 22盘可交叉 | 第二DWORD业务语义未闭合 |
 | LBA6 | 0x1C0–0x1CF | COMPLETE | m_usbGSerial | Windows/Linux `BuildSector6` 固定复制 15B+NUL | Linux `ReadSector6` 按C字符串匹配 GSerial | 22盘与 LBA8 GLab 前缀交叉 | 完成 |
 | LBA6 | 0x1D0–0x1DF | COMPLETE | BeiZhu | Windows/Linux writer 固定复制 15B+NUL | Linux `ReadSector6` 直接读回 BeiZhu | 22盘 | 完成 |
