@@ -606,9 +606,9 @@ Provision 也已按官方 writer 修正：
 | +0x30 | 4 | UserKeyCRC | 已知 | 密码校验链消费；默认密码CRC已复算 |
 | +0x34 | 4 | FileKeyCRC | 已知 | 解 wrapped key 后 CRC 校验；Windows UserLogin 明确比较 |
 | +0x38 | 16 | wrapped file-key material | 部分已知 | mode1/2/3 writer/reader 算法已映射；22份原始盘的44条加密entry全部为mode2，mode1/3缺正向原盘证据，因此仍PARTIAL |
-| +0x48 | 16 | extension / alternate key-material slot | 部分已知 | Windows writer 当前零初始化且样本全零；扩展 Linux 104B 结构有同类 `EncryptFileKey32`，但 packed 对应关系与用途未完全证明 |
+| +0x48 | 16 | extension / alternate key-material slot | 部分已知 | Windows/Linux 96B runtime 的 v0x206 登录/改密只使用 +0x38..+0x47；Linux 检查组件另有 104B natural-aligned ABI，并把对应扩展材料命名为 `EncryptFileKey32[16]`；22盘当前全零但历史/扩展用途仍未闭合 |
 | +0x58 | 1 | EncryptMode | 已知 | Windows writer/reader + Linux挂载分派；见下方支持矩阵 |
-| +0x59 | 7 | padding/reserved | 部分已知 | 当前 writer 零初始化、样本全零；未证明所有版本都必须为零 |
+| +0x59 | 7 | Reserved[7] | **COMPLETE** | official DWARF 明确命名 Reserved[7]；Windows CreatePartitions 对 3×96B 整表先清零且只写到 +0x58；Windows/Linux runtime 登录/改密不消费该区；22盘 66/66 entry 为零 |
 
 `EncryptMode` 的枚举由 Linux DWARF 直接给出：
 
@@ -738,22 +738,70 @@ Linux `PartitionHeader::SetPartitionNewPass` 同时给出负证据：
 
 因此这些区域不能解释成“密码修改状态缓存”。
 
+### LBA12 packed Reserved[7]：producer / negative-consumer / real-device 闭合
+
+96B packed entry 的 `+0x59..+0x5F` 本轮从 PARTIAL 升为 COMPLETE，
+不是因为“66/66 都是零”，而是四条证据同时闭合：
+
+1. **官方字段定义**
+   Linux DWARF 的 `tagNewEdpPartionInfo` 明确把 EncryptMode 后的 7B
+   命名为 `Reserved[7]`。104B natural-aligned ABI 中它位于
+   `+0x61..+0x67`；96B packed runtime 去掉对齐洞后对应
+   `+0x59..+0x5F`。
+
+2. **writer 零来源**
+   Windows `CUsbRegsiter::CreatePartitions / sub_1003DB50` 开头执行
+   `memset(var_1364, 0, 0x120)`，一次清零完整的
+   **3×96B packed entries**。后续逐字段构造只写到
+   `+0x58 EncryptMode`，没有对 `+0x59..+0x5F` 的覆盖。
+
+3. **negative consumer**
+   Windows `UserLogin` 只从 entry `+0x38` 复制16B wrapped key，
+   从 `+0x58` 读取 EncryptMode；改密码路径 `sub_10026050`
+   同样只读写 `+0x38..+0x47` 并读取 `+0x58`。
+   Linux `CDiskReader::DecryptFileKey` 读取 EncryptMode 后不读取
+   `Reserved[7]`；`libedpedisk.so::SetPartitionNewPass` 对 v0x206
+   也只更新16B wrapped key。
+
+4. **22盘实测**
+   对 22份 original real-device reference set 解密后的全部
+   **66条 EDPF entry** 重算：`+0x59..+0x5F` **66/66 全零**，
+   无任何非零反例。
+
+这里还顺带纠正一个 ABI 易错点：
+
+- `libedpedisk.so::PartitionHeader` 构造函数明确记录
+  `header_size=0x60`，其按值参数是 **96B packed ABI**；
+- `libcemsfilesyscheck.so` DWARF 的同名
+  `tagNewEdpPartionInfo` 是 **104B natural-aligned ABI**，
+  `FileKeyCRC` 前存在4B对齐洞，并含 `EncryptFileKey32[16]`；
+- 同名 C 结构在两个 Linux 组件中**不能按偏移直接混用**。
+
+因此 Reserved[7] 可以闭合，但相邻的 packed `+0x48..+0x57`
+仍保持 PARTIAL：当前96B runtime 不消费/不更新它，22盘也全零，
+但 104B ABI 明确存在扩展 key-material 字段，历史用途尚未闭合。
+
+**LBA12 packed Reserved[7] producer/negative-consumer closure**
+已加入回退门禁，防止以后再次把 `+0x48` 扩展槽与
+`+0x59` reserved 混成一片“全零 padding”。
+
 按上述严格口径，Windows/Linux 主运行时 96B packed LBA12 当前逐字节进度为：
 
-- **已知 372B / 512B（72.7%）**
+- **已知 393B / 512B（76.8%）**
   - 三个 entry 中语义闭合字段：49B/entry，共 147B；
   - entry0 `NeedDisturb(+0x10)`：4B，旧兼容 consumer + 22/22 原始盘已闭合；
+  - 三个 entry 的 `Reserved[7]`：21B，producer + negative consumer + 66/66 entry 实测闭合；
   - 表尾行为已闭合字段：11B；
   - `0x12e..0x1ff`：210B，写端零初始化且主读端不消费，可定性为 post-table zero padding；
-- **部分已知 140B / 512B（27.3%）**
+- **部分已知 119B / 512B（23.2%）**
   - 原三条 entry 的 47B/entry 部分已知区中，entry0 NeedDisturb 4B 已移出；
-    其余仍包括 Version、entry1/2 NeedDisturb、wrapped key 的通用生成关系、
-    扩展材料槽、尾部 reserved/padding；
+    其余仍包括 Version、entry1/2 NeedDisturb、wrapped key 的 mode1/mode3
+    正向样本缺口、扩展材料槽；
   - 表尾剩余 3B：`bNoUsbChkPasSafe/ShareBackuppromptPeriod/EncryptBackuppromptPeriod`，
     字段名已知但完整行为未闭合；
 - **未知 0B / 512B（0%）**
   - 当前主运行时格式已经没有“连字段边界/官方名称都不知道”的字节；
-  - 但 140B 仍然不能算语义闭合，Provision 不得据此自行生成。
+  - 但 119B 仍然不能算语义闭合，Provision 不得据此自行生成。
 
 这组数字只描述**主运行时 96B packed 格式**；不把 `libcemsfilesyscheck.so`
 的 104B 扩展结构混入统计。
@@ -1054,12 +1102,12 @@ Windows `edpediskctrl.dll` 同时给出读端和写端：
 | 9 | 52B | 104B | 356B | 10.2% | EETU magic + ullBTime/ullETime/useCount 共24B完成；SAPF magic+16B MBR恢复项、EPPE magic+最小密码长度完成；EETU reverse及其它空洞仍未闭合 |
 | 10 | 36B | 4B | 472B | 7.0% | EESI magic + 两个16B卷标槽完成；+0x04仍缺最终业务语义，其余未闭合 |
 | 11 | 260B | 252B | 0B | 50.8% | 前半 DRKB+random252 的 producer/consumer 已双闭合；后半 PDKB magic 4B 也完成；其余当前 DiskSize profile 已闭合，但历史 CHS profile 选择条件仍未解释 |
-| 12 | 372B | 140B | 0B | 72.7% | 原 147B entry 完成字段基础上，entry0 NeedDisturb 4B 的 producer/兼容 consumer/22盘实测已闭合；另有11B pass-info与210B post-table padding完成；其余140B仍部分已知 |
+| 12 | 393B | 119B | 0B | 76.8% | 原 372B COMPLETE 基础上，三个 packed entry 的 Reserved[7] 共21B由官方字段名、writer零来源、negative consumer和22盘66/66零值闭合；+0x48扩展槽及其它119B仍PARTIAL |
 
 总计：
 
-- **完成：1579B / 6656B = 23.7%**
-- **部分已知：3052B / 6656B = 45.9%**
+- **完成：1600B / 6656B = 24.0%**
+- **部分已知：3031B / 6656B = 45.5%**
 - **未知：2025B / 6656B = 30.4%**
 
 这是一组**严格下限**，故意宁可低估，不把“能生成/能解析”冒充成“已经完全理解”。
@@ -1090,7 +1138,6 @@ Windows `edpediskctrl.dll` 同时给出读端和写端：
 - LBA6 0x1c0..0x1ed 不同格式代际的准确字段来源。
 - LBA12 NeedDisturb 在新版主路径中的进一步业务作用（旧版 fallback 门控已闭合）；
 - LBA12 +0x48..+0x57 扩展材料槽在主盘面中的确切用途；
-- LBA12 +0x59..+0x5f 是否仅为所有版本共同 padding；
 - LBA12 表尾 `+0x0A/+0x0C/+0x0D` 的准确跨组件消费语义。
 
 这些内容不得从当前插入 donor 盘复制，也不得以全零替代。实现中把它们显式建模为
@@ -1119,6 +1166,6 @@ tests/provision_protocol_audit.rs 固化以下事实：
   该门禁只表达“当前真实备份观察事实”，不把它升级成协议恒等式；
 - LBA12 pass-info `bResetFileKey/ShareBackuppromptPeriod/EncryptBackuppromptPeriod`
   在当前提交真实样本中均为 0；该测试只锁样本事实，不把它们归类为 padding；
-- LBA12 `+0x48..+0x57` 与 `+0x59..+0x5f` 当前样本为零，但测试只锁“观察事实”，不把零值升级成已知语义。
+- LBA12 `+0x48..+0x57` 当前样本为零，但测试只锁“观察事实”，不把零值升级成已知语义；相邻 `+0x59..+0x5F Reserved[7]` 已由 producer/negative-consumer/66条实盘闭合并独立设门禁。
 
 Phase 1 以后不得绕过这些门禁，也不得把未知区域重新退化为 donor copy。

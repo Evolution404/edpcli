@@ -285,13 +285,13 @@ BuildSector8(label):
 | LBA9 | 52 | 104 | 356 | 10.2% |
 | LBA10 | 36 | 4 | 472 | 7.0% |
 | LBA11 | 260 | 252 | 0 | 50.8% |
-| LBA12 | 372 | 140 | 0 | 72.7% |
+| LBA12 | 393 | 119 | 0 | 76.8% |
 <!-- STRICT_PROGRESS_END -->
 
 当前总计：
 
-- **COMPLETE：1579B / 6656B = 23.7%**
-- **PARTIAL：3052B / 6656B = 45.9%**
+- **COMPLETE：1600B / 6656B = 24.0%**
+- **PARTIAL：3031B / 6656B = 45.5%**
 - **UNKNOWN：2025B / 6656B = 30.4%**
 
 LBA11 本轮从 8B COMPLETE 提升到 260B COMPLETE。没有因为“能解开第二半扇”就把其余 252B 也冒进标完成：旧 Aigo U335 `rev_pmap` 为什么选择 CHS 容量参与密钥，而其它 21 份使用 DiskSize，上游选择逻辑尚未闭合。
@@ -387,6 +387,7 @@ DWARF 中恢复出的原始声明文件/行号与本地函数地址：
 | LBA11 | 0x104–0x1FF | PARTIAL | 加密的 UID + zero fill | producer: PDKB+4 = `m_strUID`; key=CRC32(DRKB256+VID4+PID4+ullSize8) | consumer: `ReadSector11` 解密并把 PDKB+4 返回 `strDPBack` | 22/22 UID正确；21 DiskSize + 1 CHS | 旧rev_pmap为什么选CHS的上游决策未闭合，因此保守PARTIAL |
 | LBA12 | 0x000–0x11F | PARTIAL | 3×96B EDPF | Windows/Linux writer | 登录/挂载/兼容链大量消费 | 22盘 | 字段逐项状态见详细审计 |
 | LBA12 | 0x010–0x013 | COMPLETE | entry0.NeedDisturb compatibility gate | `CUsbRegsiter::CreatePartitions` 写入 entry0；Linux `edpdiskglobal.h:82` 定义字段 | `vrvaud_c::NewCheckDisTurbUsb(*)` fallback 在 `Format.cpp:0x3CE/0x380` 直接以该 DWORD 非零判 success | 22/22原始盘=1；20个entry0 type1、2个type2；7 CI夹具锁定 | 完成的是 entry0 兼容门控行为；其它 entry 的 NeedDisturb 不随之升级 |
+| LBA12 | 每条entry +0x059–+0x05F | COMPLETE | packed Reserved[7] | Windows `CreatePartitions` 对3×96B先 `memset(0,0x120)`，后续只写至 +0x58；Linux DWARF正式字段名 `Reserved[7]` | Windows UserLogin/改密只消费 wrapped16 与 +0x58；Linux decrypt/改密同样不消费 Reserved | 22盘66/66 entry全零；CI原始夹具锁定 | **LBA12 packed Reserved[7] producer/negative-consumer closure**；注意相邻 +0x48..57 仍是扩展 key-material PARTIAL |
 | LBA12 | 0x120–0x12D | PARTIAL | pass-info | writer/reader结构闭合 | 部分字段消费闭合 | 22盘 | 仍有+0A/+0C/+0D |
 | LBA12 | 0x12E–0x16F | COMPLETE | post-table zero initialized padding | writer整块零初始化且不覆写 | 主reader不消费该区 | 22/22解密为零 | producer+negative consumer+实盘闭合 |
 | LBA12 | 0x170–0x1FF | PARTIAL | continuous-cipher zero plaintext tail | 整扇A6B0 writer | 当前主reader无结构消费 | 22/22解密为零 | 密码学边界已知，但历史用途仍保守PARTIAL |
@@ -1369,6 +1370,33 @@ reader 只有一个标准SM4解包分支且完全不读取 `oldSM4` 配置。
 因此 `+0x38..+0x47` 整体仍记 **PARTIAL**，但剩余原因已收缩为：
 **22份原始盘没有 mode1/mode3 的正向样本**。当前44条加密entry全部mode2。
 严格完成度统计仍不增加 16B×3，避免用静态算法闭合替代真实盘证据。
+
+### 6.3 LBA12 +0x48..+0x5F：扩展 key-material 与 Reserved[7] 必须分开
+
+两个 Linux 组件使用不同 ABI：`libedpedisk.so` runtime 的
+`tagNewEdpPartionInfo`/header size 明确为 `0x60=96B`；
+`libcemsfilesyscheck.so` 的 DWARF 则是 `sizeof=0x68=104B`，
+其中 `+0x50 EncryptFileKey32[16]`、`+0x60 EncryptMode`、
+`+0x61 Reserved[7]`。同名 C 结构不能按偏移直接混用。
+
+对 Windows 96B packed runtime：
+
+- `CreatePartitions / sub_1003DB50` 首先执行
+  `memset(var_1364, 0, 0x120)`，一次清零完整3×96B entry；
+- 后续 wrapped16 只写 `+0x38..+0x47`，EncryptMode 写 `+0x58`；
+- `UserLogin` 从每条 entry `+0x38` 只复制16B，并从 `+0x58` 读取 mode；
+- `sub_10026050` 改密码同样只读写16B `+0x38..+0x47`；
+- Linux `libedpedisk.so::SetPartitionNewPass @ 0x52520` 对
+  version=0x0206 也只更新16B `+0x38`。
+
+22份 original real-device reference set 的66条 EDPF entry 重新统计：
+`+0x59..+0x5F Reserved[7]` 为 **66/66 全零**。
+这7B同时具备正式字段名、writer零来源、negative consumer 和实盘闭环，
+因此三个 entry 共 **21B PARTIAL -> COMPLETE**。
+
+相邻 `+0x48..+0x57` **不随之升级**：虽然当前22盘也全零且当前
+96B runtime 登录/改密不使用，但104B ABI 明确存在
+`EncryptFileKey32[16]` 扩展材料，历史 producer/consumer 尚未闭合。
 
 ## 7. 代码与测试门禁
 
