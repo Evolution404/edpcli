@@ -524,11 +524,17 @@ impl AppState {
         &self.backups
     }
 
-    pub fn selected_device_disk(&self) -> Option<u32> {
+    pub fn selected_device(&self) -> Option<&crate::disk_scan::Row> {
         match self.workspace {
-            Workspace::Devices => self.devices.get(self.selected).map(|row| row.disk),
-            Workspace::Backups => self.pinned_disk,
+            Workspace::Devices => self.devices.get(self.selected),
+            Workspace::Backups => self
+                .pinned_disk
+                .and_then(|disk| self.devices.iter().find(|row| row.disk == disk)),
         }
+    }
+
+    pub fn selected_device_disk(&self) -> Option<u32> {
+        self.selected_device().map(|row| row.disk)
     }
 
     pub fn selected_backup_path(&self) -> Option<std::path::PathBuf> {

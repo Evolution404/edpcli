@@ -27,6 +27,16 @@ fn device_status(row: &crate::disk_scan::Row) -> String {
 }
 
 fn draw_devices(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState) {
+    let (table_area, detail_area) = if area.height >= 12 {
+        let parts = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Min(5), Constraint::Length(6)])
+            .split(area);
+        (parts[0], Some(parts[1]))
+    } else {
+        (area, None)
+    };
+
     let rows = state.devices().iter().map(|row| {
         TableRow::new(vec![
             Cell::from(format!("disk{}", row.disk)),
@@ -64,7 +74,25 @@ fn draw_devices(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState
     if state.item_count() > 0 {
         table_state.select(Some(state.selected()));
     }
-    frame.render_stateful_widget(table, area, &mut table_state);
+    frame.render_stateful_widget(table, table_area, &mut table_state);
+
+    if let (Some(detail_area), Some(row)) = (detail_area, state.selected_device()) {
+        let onlyid = row.onlyid.as_deref().unwrap_or("—");
+        let device_id = row.device_id.as_deref().unwrap_or("—");
+        let detail = Paragraph::new(vec![
+            Line::from(format!("onlyid: {onlyid}")),
+            Line::from(format!("device_id: {device_id}")),
+            Line::from(format!(
+                "姓名/部门: {} / {}",
+                row.user.as_deref().unwrap_or("—"),
+                row.dept.as_deref().unwrap_or("—")
+            )),
+            Line::from(format!("已有备份: {}  ·  状态: {}", row.n_baks, device_status(row))),
+        ])
+        .block(Block::default().borders(Borders::ALL).title("当前设备详情"))
+        .wrap(Wrap { trim: true });
+        frame.render_widget(detail, detail_area);
+    }
 }
 
 fn draw_backups(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState) {
