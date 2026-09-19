@@ -104,8 +104,7 @@ fn draw_devices(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState
         ])
     });
     let header =
-        TableRow::new(["设备", "容量", "总线", "VID:PID", "姓名", "部门", "状态"])
-            .style(accent());
+        TableRow::new(["设备", "容量", "总线", "VID:PID", "姓名", "部门", "状态"]).style(accent());
     let title = if state.device_scan_pending() {
         "设备 · 扫描中…"
     } else {
