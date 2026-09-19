@@ -348,7 +348,7 @@ pub fn atomic_write_sectors(
     }
     match write_and_verify(dev, patch, &order) {
         Ok(()) => Ok(()),
-        Err(e) => {
+        Err(_write_error) => {
             for i in 0..3 {
                 match write_and_verify(dev, &mirror, &order) {
                     Ok(()) => {

@@ -330,7 +330,6 @@ impl TaskHub {
                     updates.backup_error = Some(message);
                 }
                 WorkerResult::Inspect { .. }
-                | WorkerResult::WriteProgress { .. }
                 | WorkerResult::Devices { .. }
                 | WorkerResult::Backups { .. }
                 | WorkerResult::DeviceError { .. }
