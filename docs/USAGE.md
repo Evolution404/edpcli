@@ -103,6 +103,7 @@ TUI 是 CLI v2 的交互前端，不是第二套业务实现。无参数 `edpcli
 | `n / N` | 下一个 / 上一个搜索匹配 |
 | `:` | 打开 command palette |
 | `i` | Inspect 当前设备或备份 |
+| `b` | 创建当前设备的只读 LBA0-13 备份 |
 | `a` | Apply 安全向导 |
 | `R` | Restore 当前选中备份 |
 | `Esc` | 返回上一层 / 取消输入 |
@@ -110,10 +111,9 @@ TUI 是 CLI v2 的交互前端，不是第二套业务实现。无参数 `edpcli
 | `?` | 帮助 |
 
 Command palette 只接受任务语义，例如 `:devices`、`:backups`、`:inspect`、
-`:apply`、`:restore`、`:refresh`、`:help`、`:q`；它不会把输入传给 shell。
+`:backup-create`、`:apply`、`:restore`、`:refresh`、`:help`、`:q`；它不会把输入传给 shell。
 
-设备和备份扫描、Inspect LBA0-13 读取全部在后台执行，旧 generation 的扫描结果会被丢弃，
-不会覆盖更新的刷新请求。Apply / Restore 则进入明确的安全向导：
+设备和备份扫描、Inspect LBA0-13 读取全部在后台执行；设备/备份扫描还使用 single-flight 去重，连续刷新不会并发堆积同类 worker。旧 generation 的结果不会覆盖更新状态。Backup create 复用现有只读备份 service；Apply / Restore 则进入明确的安全向导：
 
 1. 固定当前目标 disk；Restore 同时固定精确备份路径；
 2. 输入 `YES` 后才允许继续；
