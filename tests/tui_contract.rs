@@ -25,7 +25,8 @@ fn bare_interactive_terminal_defaults_to_tui_without_breaking_non_tty_cli() {
         "CLI entrypoint must have an explicit bare-invocation TTY routing policy"
     );
     assert!(
-        source.contains("io::stdin().is_terminal()") && source.contains("io::stdout().is_terminal()"),
+        source.contains("io::stdin().is_terminal()")
+            && source.contains("io::stdout().is_terminal()"),
         "bare edpcli must gate automatic TUI launch on stdin/stdout terminal capability"
     );
     assert!(
