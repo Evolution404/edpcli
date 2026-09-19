@@ -30,6 +30,29 @@ pub fn reset_enabled_for_tests() {
     OVERRIDE.with(|value| value.set(-1));
 }
 
+/// Neutralize terminal-control bytes in text originating from removable media, backup metadata,
+/// OS probes, paths or other untrusted sources before any frontend renders it.
+///
+/// C0 controls are rendered as visible control pictures (Tab uses ⇥); DEL becomes ␡; C1 controls
+/// become �. Printable Unicode, including CJK, is preserved. This keeps malformed metadata from
+/// injecting ANSI/VT control sequences or changing cursor position inside a ratatui alternate screen.
+pub fn sanitize_terminal_text(input: &str) -> String {
+    let mut out = String::with_capacity(input.len());
+    for ch in input.chars() {
+        match ch {
+            '\t' => out.push('⇥'),
+            '\u{0000}'..='\u{001F}' => {
+                let picture = char::from_u32(0x2400 + ch as u32).unwrap_or('�');
+                out.push(picture);
+            }
+            '\u{007F}' => out.push('␡'),
+            '\u{0080}'..='\u{009F}' => out.push('�'),
+            _ => out.push(ch),
+        }
+    }
+    out
+}
+
 fn wrap(code: &str, s: &str) -> String {
     if enabled() {
         format!("\x1b[{}m{}\x1b[0m", code, s)
