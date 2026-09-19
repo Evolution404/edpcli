@@ -705,7 +705,7 @@ Windows `edpediskctrl.dll` 同时给出读端和写端：
 | 5 | 0B | 0B | 512B | 0% | 只知道当前参考集全零，不知道协议用途 |
 | 6 | 36B | 124B | 352B | 7.0% | GSerial 16B、BeiZhu 16B、checksum 4B 完成；若干固定槽/CRC/flag 仅部分闭合，大量模板区仍未知 |
 | 7 | 155B | 51B | 306B | 30.3% | 三个 64B EDPF entry 中 48B/entry 完成，加 11B pass-info；Version/NeedDisturb/key8 等仍部分，表后区域未闭合 |
-| 8 | 8B | 402B | 102B | 1.6% | LLGB magic + logical length 完成；17-key ELABEL 序列化/来源虽已较清楚，但下游语义并未逐字段全部闭合，因此整体只计部分；头部仍有未知区 |
+| 8 | 10B | 400B | 102B | 2.0% | LLGB magic + logical length + ElabOffset(2B)完成；17-key ELABEL 序列化/来源虽已较清楚，但下游语义并未逐字段全部闭合，因此整体只计部分；头部仍有未知区 |
 | 9 | 32B | 124B | 356B | 6.2% | EETU magic、SAPF magic+16B MBR 恢复项、EPPE magic+最小密码长度完成；其它附加材料/空洞/文本区未完全闭合 |
 | 10 | 4B | 36B | 472B | 0.8% | 仅 EESI magic 完成；+0x04 和两个 16B 文本槽仍缺最终业务语义，其余未闭合 |
 | 11 | 260B | 252B | 0B | 50.8% | 前半 DRKB+random252 的 producer/consumer 已双闭合；后半 PDKB magic 4B 也完成；其余当前 DiskSize profile 已闭合，但历史 CHS profile 选择条件仍未解释 |
@@ -713,8 +713,8 @@ Windows `edpediskctrl.dll` 同时给出读端和写端：
 
 总计：
 
-- **完成：969B / 6656B = 14.6%**
-- **部分已知：1614B / 6656B = 24.2%**
+- **完成：971B / 6656B = 14.6%**
+- **部分已知：1612B / 6656B = 24.2%**
 - **未知：4073B / 6656B = 61.2%**
 
 这是一组**严格下限**，故意宁可低估，不把“能生成/能解析”冒充成“已经完全理解”。

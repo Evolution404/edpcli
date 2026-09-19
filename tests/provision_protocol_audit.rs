@@ -547,6 +547,38 @@ fn edpf_offset_08_is_partition_count_in_both_tables() {
 }
 
 #[test]
+fn lba8_elabel_offset_is_0x80_and_points_to_the_elabel_payload() {
+    let mut checked = 0usize;
+    for entry in fs::read_dir(FIXTURE_DIR).expect("protocol fixtures") {
+        let path = entry.expect("backup entry").path();
+        if path.extension().and_then(|ext| ext.to_str()) != Some("bin") {
+            continue;
+        }
+        let name = path.file_name().unwrap().to_str().unwrap();
+        let Some(meta) = parse_reference_backup_name(name) else {
+            continue;
+        };
+        let image = fs::read(&path).expect("fixture bytes");
+        let crc = crc32_bare(meta.device_id.as_bytes());
+        let plain = a6b0_full(sector(&image, 8), &crc.to_le_bytes(), 0);
+        assert_eq!(&plain[..4], b"LLGB", "{name}");
+
+        let elabel_offset = u16::from_le_bytes(plain[0x3e..0x40].try_into().unwrap()) as usize;
+        assert_eq!(elabel_offset, 0x80, "{name}");
+        assert!(
+            plain[elabel_offset..].starts_with(b"<ELABEL>"),
+            "ElabOffset does not point to ELABEL: {name}"
+        );
+        checked += 1;
+    }
+
+    assert!(
+        checked >= MIN_PROTOCOL_FIXTURES,
+        "protocol audit unexpectedly lost fixtures"
+    );
+}
+
+#[test]
 fn lba12_main_runtime_layout_is_three_packed_96_byte_entries_plus_tail_at_0x120() {
     let mut checked = 0usize;
     for entry in fs::read_dir(FIXTURE_DIR).expect("protocol fixtures") {

@@ -50,7 +50,7 @@ fn strict_progress_covers_exactly_lba0_through_lba12() {
     );
     assert_eq!(complete + partial + unknown, 13 * 512);
     assert!(
-        complete >= 969,
+        complete >= 971,
         "strict COMPLETE coverage regressed below the audited baseline: {complete}"
     );
     assert!(
@@ -112,6 +112,8 @@ fn documentation_keeps_the_official_provisioning_chain_and_strict_rules() {
         "diskfile.cpp:672 / 1005",
         "diskfile.cpp:740 / 956",
         "diskfile.cpp:805 / 1102,1143",
+        "ElabOffset",
+        "edpdiskglobal.h:413",
         "overflow_marker(0x40245E2A)",
         "m_autoid / Autonum",
         "NUL 后真实槽尾大量非零",

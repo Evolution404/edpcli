@@ -266,7 +266,7 @@ BuildSector8(label):
 | LBA5 | 0 | 0 | 512 | 0.0% |
 | LBA6 | 36 | 124 | 352 | 7.0% |
 | LBA7 | 155 | 51 | 306 | 30.3% |
-| LBA8 | 8 | 402 | 102 | 1.6% |
+| LBA8 | 10 | 400 | 102 | 2.0% |
 | LBA9 | 32 | 124 | 356 | 6.2% |
 | LBA10 | 4 | 36 | 472 | 0.8% |
 | LBA11 | 260 | 252 | 0 | 50.8% |
@@ -275,8 +275,8 @@ BuildSector8(label):
 
 当前总计：
 
-- **COMPLETE：969B / 6656B = 14.6%**
-- **PARTIAL：1614B / 6656B = 24.2%**
+- **COMPLETE：971B / 6656B = 14.6%**
+- **PARTIAL：1612B / 6656B = 24.2%**
 - **UNKNOWN：4073B / 6656B = 61.2%**
 
 LBA11 本轮从 8B COMPLETE 提升到 260B COMPLETE。没有因为“能解开第二半扇”就把其余 252B 也冒进标完成：旧 Aigo U335 `rev_pmap` 为什么选择 CHS 容量参与密钥，而其它 21 份使用 DiskSize，上游选择逻辑尚未闭合。
@@ -343,7 +343,9 @@ DWARF 中恢复出的原始声明文件/行号与本地函数地址：
 | LBA7 | 0x0CE–0x1FF | UNKNOWN | 表后区域 | 待查 | 待查 | 多数为固定/零 | 未闭合 |
 | LBA8 | 0x000–0x003 | COMPLETE | LLGB magic | Windows/Linux `BuildSector8` | reader 先检查 LLGB | 22/22 | 完成 |
 | LBA8 | 0x004–0x007 | COMPLETE | logical length | writer=`0x80+strlen(ELABEL)` | decoder决定动态加密前缀 | 22/22吻合 | 完成 |
-| LBA8 | 0x008–0x07F | PARTIAL | LLGB header | writer 多个动态/固定字段 | consumer未逐字段闭合 | 22盘存在稳定结构 | 不计完成 |
+| LBA8 | 0x008–0x03D | PARTIAL | LLGB header 前段 | writer 多个动态/固定字段 | consumer未逐字段闭合 | 22盘存在稳定结构 | 不计完成 |
+| LBA8 | 0x03E–0x03F | COMPLETE | ElabOffset | `BuildSector8@diskfile.cpp:805` 写 `0x0080`；官方结构 `tagEdpUsbLableInfo.ElabOffset@edpdiskglobal.h:413` | `ReadSector8@diskfile.cpp:1102` 读取 WORD 并用 `decoded+ElabOffset` 构造 ELABEL 字符串 | 22/22原始盘=0x80，且22/22都指向 `<ELABEL>`；CI真实夹具锁定 | 2B 寻址语义、producer、consumer、实盘全部闭合 |
+| LBA8 | 0x040–0x07F | PARTIAL | LLGB header reserved/其它字段 | writer 零初始化/部分字段 | consumer未逐字段闭合 | 22盘 | 不计完成 |
 | LBA8 | 0x080–logical_end | PARTIAL | 17-key ELABEL | Windows/Linux 同一模板 writer | User/Dept等部分下游已知 | 22/22含17键 | 每个键最终业务消费未全部闭合 |
 | LBA8 | tail | UNKNOWN | 物理零区 | writer只写加密前缀 | 无读取语义 | 22盘为零 | 不把 padding 猜成协议字段 |
 | LBA9 | 0x000–0x003 | COMPLETE | EETU magic | WriteTempUseInfo | ReadTempUseInfo | 20个非零LBA9样本 | magic完成，payload仍未知 |
@@ -366,6 +368,61 @@ DWARF 中恢复出的原始声明文件/行号与本地函数地址：
 | LBA12 | 0x12E–0x16F | COMPLETE | post-table zero initialized padding | writer整块零初始化且不覆写 | 主reader不消费该区 | 22/22解密为零 | producer+negative consumer+实盘闭合 |
 | LBA12 | 0x170–0x1FF | PARTIAL | continuous-cipher zero plaintext tail | 整扇A6B0 writer | 当前主reader无结构消费 | 22/22解密为零 | 密码学边界已知，但历史用途仍保守PARTIAL |
 <!-- FIELD_LEDGER_END -->
+
+### 4.1 LBA8 ElabOffset：2B 完整闭环
+
+官方结构来自 Linux DWARF：
+
+`tagEdpUsbLableInfo @ edpdiskglobal.h:403`
+
+```text
++0x00 Flag
++0x04 cbSize
++0x08 ToolVersion[4]
++0x0C Labversion
++0x10 writeTime
++0x14 HDSerialInfo
++0x18 MacInfo[6]
++0x1E UsbOnlyInfo[32]
++0x3E ElabOffset   // WORD
++0x40 Reserverd[64]
++0x80 UsbLabel / ELABEL storage begins
+```
+
+producer：
+
+`CLabelManage::BuildSector8 @ diskfile.cpp:805`
+
+```text
+EightSecInfo = zero_initialized()
+EightSecInfo.Flag = "LLGB"
+EightSecInfo.ElabOffset = 0x80
+...
+copy ELABEL string to byte[0x80]
+```
+
+consumer：
+
+`CLabelManage::ReadSector8 @ diskfile.cpp:1102`
+
+```text
+decrypt(sector8)
+if header.Flag != "LLGB":
+    return error
+
+offset = u16(header + 0x3E)
+elabel = C_string(header + offset)
+parse ELABEL key/value pairs
+```
+
+原始实盘验证：
+
+- 22/22：`ElabOffset == 0x0080`；
+- 22/22：`decoded[ElabOffset..]` 以 `<ELABEL>` 开始；
+- CI 真实夹具新增同一断言。
+
+因此 `LBA8 +0x3E..+0x3F` 2B 从 PARTIAL 升级 COMPLETE。
+其它头字段即便已有官方名称，也不会因为与它相邻而自动升级。
 
 ## 5. LBA11 完整 producer / consumer 追踪
 
