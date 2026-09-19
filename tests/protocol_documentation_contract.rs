@@ -135,6 +135,7 @@ fn documentation_keeps_the_official_provisioning_chain_and_strict_rules() {
         "LBA3 opaque manufacturer/MP sector",
         "LBA8 static version/writeTime/reserved header",
         "LBA6 C-string slots keep opaque post-NUL tails",
+        "LBA4 current writer machine-code node layout",
         "22/22",
         "不能单独把字段升级为 COMPLETE",
         "禁止把免密转换盘",

@@ -429,6 +429,71 @@ fn lba4_common_hserial_profile_is_shared_across_different_target_usb_devices() {
 }
 
 #[test]
+fn lba4_restore_node_profiles_keep_current_and_legacy_fields_separate() {
+    const KINGSTON_CURRENT: &str =
+        "disk4_121110528_vid0951_pid1666_disk&ven_kingston&prod_datatraveler_3.0_onlyid2135149925_20260903_121319.bin";
+    const AIGO_CURRENT: &str =
+        "disk4_1953525168_vid174c_pid55aa_disk&ven_aigo&prod_hd806_onlyid-1833210541_20260903_121552.bin";
+
+    let decode = |name: &str| {
+        let image = load(name);
+        let meta = parse_reference_backup_name(name).expect("fixture metadata");
+        let onlyid = meta.onlyid.as_deref().expect("fixture onlyid");
+        let bits = onlyid_bits(onlyid);
+        let k0 = (bits & 0xffff) ^ (bits >> 16);
+        let raw = sector(&image, 4);
+        let mut decoded = raw.to_vec();
+        decoded[0x18..].copy_from_slice(&xor_rolling(&raw[0x18..], k0));
+        if raw[0x47..0x1fc].iter().all(|byte| *byte == 0) {
+            decoded[0x47..0x1fc].fill(0);
+        }
+        (bits, decoded)
+    };
+
+    for name in [KINGSTON_CURRENT, AIGO_CURRENT] {
+        let (main_onlyid, decoded) = decode(name);
+        assert_eq!(
+            u32_le(&decoded, 0x1c),
+            main_onlyid,
+            "current-style OnllyID2Nd must mirror main onlyid: {name}"
+        );
+        assert!(
+            decoded[0x20..0x34].iter().all(|byte| *byte == 0),
+            "current-style HSerialCRC[5] must remain zero: {name}"
+        );
+    }
+
+    for name in [LEXAR, NETAC_A] {
+        let (main_onlyid, decoded) = decode(name);
+        assert_ne!(
+            u32_le(&decoded, 0x1c),
+            main_onlyid,
+            "legacy fixed-HSerial profile must not be collapsed into current writer: {name}"
+        );
+        assert_eq!(
+            &decoded[0x20..0x34],
+            &[
+                0x29, 0x1d, 0x00, 0x00, 0x7b, 0x00, 0x00, 0x00, 0xdd, 0x04, 0x00, 0x00, 0x79, 0x00,
+                0x00, 0x00, 0x7c, 0x00, 0x00, 0x00,
+            ],
+            "legacy HSerialCRC profile changed: {name}"
+        );
+    }
+
+    for name in [KINGSTON_CURRENT, AIGO_CURRENT, LEXAR, NETAC_A] {
+        let (_, decoded) = decode(name);
+        assert_eq!(decoded[0x34], 0, "SingleUsbFlg profile changed: {name}");
+        assert_eq!(&decoded[0x39..0x3d], b"LLGB", "NewLabFlag changed: {name}");
+        assert_eq!(u32_le(&decoded, 0x3d), 1, "restore Version changed: {name}");
+        assert_eq!(
+            &decoded[0x41..0x45],
+            &[0x08, 0x04, 0x0c, 0x01],
+            "restore sector tuple changed: {name}"
+        );
+    }
+}
+
+#[test]
 fn lba8_encrypted_prefix_covers_the_elabel_terminating_nul() {
     let mut checked = 0usize;
     for entry in fs::read_dir(FIXTURE_DIR).expect("protocol fixtures") {

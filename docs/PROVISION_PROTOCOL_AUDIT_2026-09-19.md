@@ -107,11 +107,62 @@ Linux DWARF 同时恢复 `diskfile.h::UsbLabelParam`：`+0x278..+0x28B = HDOnlyS
 
 当前 Windows 新建分支的真实写链是：`object+0x698 -> node.OnllyID2Nd`，而 `object+0x698` 已闭合为 `CoCreateGuid -> GUID raw 16B -> CRC32_bare -> main onlyid`。同时 `object+0x558..0x568 -> HSerialCRC[5]`。因此当前 writer profile 的第二 ID 等于本次新生成的 main onlyid。
 
+这一结论本轮又回到 **PE 机器码**重新核验，避免依赖 Hex-Rays 风格 `.m`
+伪代码的局部漏语句：
+
+- `RegsiterUsb@0x1003BBBB` 先把 0x2F-byte restore node 清零；
+- `0x1003BBD1` 读取 `object+0x698`；
+- `0x1003BBD7` 写入 `ebp-0x3C`，按该 node 的栈基址精确对应
+  **`node+0x04 OnllyID2Nd`**；
+- `0x1003BBF0..0x1003BC79` 依次读取
+  `object+0x558/+55C/+560/+564/+568`，并写到
+  **`node+0x08/+0x0C/+0x10/+0x14/+0x18`**，即五个
+  `HSerialCRC DWORD`；
+- 随后 `sub_10014550(node, object+0x698, LBA4)` 再写
+  `node+0x00 = parsed_main_onlyid ^ 0x88888888`，复制完整 0x2F node，
+  并执行 rolling-XOR。
+
+对应的 `.m` 反编译文本漏掉了 `node+0x04 = object+0x698` 这一条；
+因此后续审计以这里的原始机器码为准。新增回归明确锁定
+**LBA4 current writer machine-code node layout**，避免再次被反编译变量布局误导。
+
+继续向上追 current API 还得到一个重要边界：
+
+- `WriteNormalULabel -> sub_10047690` 会把上层请求写入嵌入的
+  `UsbLabelParam`；
+- 它覆盖的最后几个相关块到 `UsbLabelParam+0x268` 为止；
+- Linux DWARF 已知 `HDOnlySerial[5]` 在
+  `UsbLabelParam+0x278..+0x28B`；
+- current `sub_10047690` **没有任何对 +0x278 这20B的写入**。
+
+所以当前注册接口并不存在“把某个新算出的 5×DWORD HSerial 填进去”的步骤；
+current-style HSerial 为零来自当前对象初始化/未提供输入这一 profile。
+这比“current writer 恰好写零”更精确，但仍不能解释旧盘的非零五元组。
+
 当前 22 份参考样本分三组：
 
 - 6/22：`OnllyID2Nd == main onlyid` 且 `HSerialCRC[5] == 0`，完全吻合当前 Windows writer；
 - 14/22：`HSerialCRC[5]` 固定为 `00001D29, 0000007B, 000004DD, 00000079, 0000007C`，跨 Aigo/Lexar/Netac 等厂商复用，但 `OnllyID2Nd` 随标签实例变化；
 - 2/22：另一组高熵 `HSerialCRC[5]`，Aigo/SanDisk 之间部分成员重合。
+
+同一轮 22份原始盘还重新统计了 restore node 后半：
+
+- `SingleUsbFlg @ LBA4+0x34`：22/22 = 0；
+- `NewLabFlag @ +0x39..0x3C`：22/22 = `LLGB`；
+- `Version @ +0x3D..0x40`：22/22 = 1；
+- 四个 sector byte `+0x41..0x44`：22/22 = `08 04 0C 01`；
+- `MyHardinfo @ +0x35..0x38` 与两个 server flag `+0x45/+0x46`
+  则明显随 profile 变化。
+
+current Windows 机器码确实在 node 清零后显式写入前四项固定值：
+`SingleUsbFlg=0`、`NewLabFlag=LLGB`、`Version=1`、
+`08 04 0C 01`。但是当前 Windows/Linux `ReadSector4` 路径只把整个
+0x2F node 复制给调用者并强校验 `OnlyIdXor8`；尚未找到这些常量字段各自的
+最终业务 consumer。因此即使它们 22/22 一致，仍不升 COMPLETE。
+
+特别是 6份 `HSerialCRC=0 && OnllyID2Nd=main_onlyid` 的 current-style
+实盘，其 server flags 仍分别出现非零变化，说明“current-style HSerial”
+不能进一步推导整个 restore node 都是当前 DLL 的同一静态 profile。
 
 这直接否定“`HSerialCRC[5]` 必然是当前 U 盘自身唯一序列”的强解释：
 
