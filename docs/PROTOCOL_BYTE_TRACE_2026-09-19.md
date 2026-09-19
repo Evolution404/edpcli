@@ -288,7 +288,7 @@ BuildSector8(label):
 | LBA6 | 4 | 156 | 352 | 0.8% |
 | LBA7 | 179 | 27 | 306 | 35.0% |
 | LBA8 | 86 | 324 | 102 | 16.8% |
-| LBA9 | 54 | 222 | 236 | 10.5% |
+| LBA9 | 54 | 458 | 0 | 10.5% |
 | LBA10 | 36 | 476 | 0 | 7.0% |
 | LBA11 | 260 | 252 | 0 | 50.8% |
 | LBA12 | 393 | 119 | 0 | 76.8% |
@@ -297,8 +297,8 @@ BuildSector8(label):
 当前总计：
 
 - **COMPLETE：1629B / 6656B = 24.5%**
-- **PARTIAL：3594B / 6656B = 54.0%**
-- **UNKNOWN：1433B / 6656B = 21.5%**
+- **PARTIAL：3830B / 6656B = 57.5%**
+- **UNKNOWN：1197B / 6656B = 18.0%**
 
 LBA11 本轮从 8B COMPLETE 提升到 260B COMPLETE。没有因为“能解开第二半扇”就把其余 252B 也冒进标完成：旧 Aigo U335 `rev_pmap` 为什么选择 CHS 容量参与密钥，而其它 21 份使用 DiskSize，上游选择逻辑尚未闭合。
 
@@ -385,11 +385,12 @@ DWARF 中恢复出的原始声明文件/行号与本地函数地址：
 | LBA9 | 0x07E–0x07F | COMPLETE | reverse[102..103] zero tail | `SetTempUse` 对 EETU +0x04..+0x7F 先整体清零，随后从 +0x18 只覆盖0x66B，即最后覆盖到 +0x7D；因此 +0x7E/+0x7F 在所有 current writer 路径都保留显式零初始化 | Linux `CheckTempUse` 只读取 ullBTime/ullETime/useCount，对 reverse[104] 完全无业务读取；运行时回写只修改 useCount 并保留其余字节 | 20/20原始EETU均为 `00 00`；CI门禁 `lba9_eetu_final_two_reverse_bytes_are_writer_zero_padding` | 2B 满足 explicit-zero producer + negative consumer + real-device evidence，可严格升 COMPLETE；不得把前102B一起升级 |
 | LBA9 | 0x100–0x103 | COMPLETE | SAPF magic | 旧writer恢复模板 | `UDiskLabelRepair::Repair0Sector` | 14样本 | 完成 |
 | LBA9 | 0x104–0x113 | COMPLETE | MBR恢复entry | writer保存16B entry | repair直接写回 LBA0 0x1BE | 14/14 | 完成 |
-| LBA9 | 0x114–0x17F | UNKNOWN | SAPF trailing region | 当前已闭合 SAPF magic+16B恢复项，但尚未重新证明 trailing 108B 的 producer/consumer 边界 | 未闭合 | 14份SAPF需继续逐字节统计 | 保持UNKNOWN，下一步单独审计，禁止因相邻SAPF字段已知而外推 |
+| LBA9 | 0x114–0x11F | PARTIAL | SAPF decoded trailing/backing 12B | 历史 SAPF producer 尚未定位；current `RegsiterUsb` 先读完整13扇并只重建 LBA4/6/7/8/11/12，LBA9 保留原字节；SAPF reader `sub_10008550` 固定对 `+0x100..+0x11F` 32B 全部 `^0x88` 解码 | `UDiskLabelRepair`/`vrvaud_c` 的已确认行为只用 SAPF magic 与前16B MBR恢复项；未找到这12B的独立业务消费 | 14份真实SAPF中该12B至少5种 decoded profile，既有全零，也有 `0xFFFFFFFE`/`0x77xxxxxx` 等明显 backing/进程残留形态；CI保留零/非零双反例 | 32B SAPF物理/解码边界已知，但这12B不是 canonical zero，也未闭合历史 producer/正式字段；从UNKNOWN降PARTIAL |
+| LBA9 | 0x120–0x17F | PARTIAL | post-SAPF opaque preserved region | current 注册链对 LBA9 全扇 preserve；`SetTempUse` 只覆盖 `+0x000..+0x07F`，`SetPassInfoEx` 只覆盖 `+0x180..+0x1FF`，没有 current writer 覆盖这96B | SAPF repair 只解码/检查 `+0x100..+0x11F`；`vrvaud_c` 快速检查甚至只读 SAPF magic，当前已审组件没有该96B结构入口 | 14/14 SAPF原盘该96B全零；独立SanDisk亦零；但 preserve-existing 语义意味着零不是协议固定要求 | current storage/negative-consumer 边界已知，历史 producer/profile 未知，因此 PARTIAL，不按零升COMPLETE |
 | LBA9 | 0x180–0x183 | COMPLETE | EPPE magic | `SetPassInfoEx` | `ReadPassExInfo` | 6样本 | 完成 |
 | LBA9 | 0x184–0x187 | COMPLETE | minimum password length | writer限制6..19 | `ReadMinPassLenInfo` 返回该DWORD | 6/6=8 | 完成 |
 | LBA9 | 0x188–0x1FF | PARTIAL | EPPE writer-zero tail / public API round-trip remainder | PE机器码 `SetPassInfoEx/sub_1003ADD0`：先校验输入DWORD为6..19，再对 EPPE `+0x04..+0x7F` 124B整体清零，写 magic，随后明确 `EPPE+0x04=*arg0`；因此 `+0x08..+0x7F` 120B 在 current writer 中为显式零 | `modfilesyscheck::ReadMinPassLenInfo` 只消费 magic/+0x04；但 `EdpDiskCtrl::ReadPassExInfo -> CEdpDiskControl::GetPassExInfo` 会把完整0x80B返回公开API调用者，尚无正式结构声明证明这120B是 reserved，也无法排除外部调用者消费 | 严格22份中6份EPPE；6/6 minPassLen=8 且解密后120B全零；CI门禁 `real_eppe_samples_keep_the_current_writer_zero_tail` | producer和当前实盘已闭合，但公开API仍 round-trip 全块，缺正式字段名/完整 consumer 闭环；从UNKNOWN降PARTIAL，不升COMPLETE |
-| LBA9 | 0x080–0x0FF | UNKNOWN | EETU/SAPF之间未闭合区域 | 待查 | 待查 | 多profile | 未完成 |
+| LBA9 | 0x080–0x0FF | PARTIAL | opaque historical/profile material preserved by current runtime | current `RegsiterUsb` 先读完整13扇，`sub_1003db50` 只重建 LBA7/LBA12，LBA9不被注册链改写；`SetTempUse`/`GetTempUse` 只访问首0x80，`SetPassInfoEx`/`GetPassInfoEx` 只访问末0x80，因此该128B在 current 全链路 preserve-existing | 当前收集的注册、临时使用、密码长度、修复及 `vrvaud_c` 路径未发现该128B业务 reader；历史 consumer 尚未找到 | 22份严格参考中8盘非零，仅16/17B有效；其中4份完整Dept样本的16B逐字节等于 LBA8 ELABEL Dept 的 `dept[60:]`，另4份与63B截断GBK Dept 的后续字节吻合；CI保留至少2份非零反例 | 已证明不是A6B0子块/固定零，而是历史字符串 backing/profile材料；current preserve/ignore 行为闭合，历史 producer/消费者未闭合，故从UNKNOWN降PARTIAL |
 | LBA10 | 0x000–0x003 | COMPLETE | EESI magic | Set EESI writer | Get EESI reader | 1个SanDisk样本 | 完成 |
 | LBA10 | 0x004–0x007 | PARTIAL | EESI +0x04 | writer原样保存API输入DWORD；reader默认=1并返回；setter 对完整0x80结构透传，不对该DWORD做特殊处理 | current `UserLogin` 的 EESI 局部结构基址为 `ebp-0x334`：+0x08/+0x18 分别映射到实际使用的 `var_32C/var_31C` 卷标，而 +0x04=`ebp-0x330` 在整个登录函数没有引用；接口 vtable +0x20/+0x24 暴露 Get/Set，但当前收集的 `edpedisk.exe/cemsudisk/vrvaud_c` 均未找到调用方 | 唯一启用SanDisk实盘=1；较旧 `VRV/edp` 构建与中间 `cems/Edp/edpediskctrl.dll` 均无 EESI magic/读写路径，说明该结构是后续新增 profile | 已排除“控制是否应用自定义卷标”这一自然猜测；官方字段名和最终 consumer 仍缺，继续 PARTIAL |
 | LBA10 | 0x008–0x017 | COMPLETE | Share/type2 volume label | `SetEdpEdiskSetInfo` 原样复制调用者结构前0x80并加密写入；默认 reader 初始化为GBK“交换区” | `CEdpDiskControl::UserLogin` 将该槽赋给本地 string；type2 分支直接把其 `c_str()` 传给 `SetVolumeLabelA` | 22份原始参考中唯一启用EESI的SanDisk实盘为GBK“交换区”；已加入512B原始证据夹具 | 16B字段语义、writer、consumer、实盘闭合 |

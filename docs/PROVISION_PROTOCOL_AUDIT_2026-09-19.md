@@ -1629,6 +1629,95 @@ explicit-zero producer + negative consumer + 20/20 原始 EETU 为零三条证�
   `Repair0Sector(from sector 9)` 会把 SAPF 的四个 DWORD 直接写到新 MBR
   `0x1be/0x1c2/0x1c6/0x1ca`，随后写回 sector 0；若该路径失败才尝试尾部备份扇区。
   因此 SAPF 可闭合为 **LBA0 第一分区项的恢复模板/备份项**，不能再描述成“当前 MBR 副本”。
+
+本轮继续把 SAPF 与 LBA9 中间区域按**真实物理边界**拆开，而不是把
+`+0x080..+0x17F` 继续整体记 UNKNOWN。
+
+#### current 注册/runtime 对 LBA9 中间256B的写边界
+
+current `CUsbRegsiter::RegsiterUsb/sub_1003B560` 的机器码/反编译控制流明确：
+
+1. 先从 metadata base 一次读取完整13扇 `LBA0..LBA12` 到工作缓冲；
+2. 注册过程中显式重建 LBA4、LBA6、LBA8、LBA11；
+3. `sub_1003DB50` 只向 `sector_size*7` 与 `sector_size*12` 写入，
+   即只重建 LBA7/LBA12；
+4. `BakupUsbSec/sub_10040940` 只是把现有缓冲复制到尾部备份位置，
+   不修改工作缓冲；
+5. 最后把完整13扇工作缓冲写回。
+
+因此 current 注册路径**不拥有也不重建 LBA9**，只会 preserve-existing。
+运行时两个独立 setter 又进一步把所有权边界锁死：
+
+- `SetTempUse`：read-modify-write LBA9，但只替换 `+0x000..+0x07F`；
+- `SetPassInfoEx`：read-modify-write LBA9，但只替换 `+0x180..+0x1FF`。
+
+对应 getter 也分别只读取首/尾0x80。故 `+0x080..+0x17F` 的256B在
+current 注册、临时使用、密码长度路径中均为 preserve-existing 区。
+
+#### `+0x080..+0x0FF`：历史 Dept/backing profile，不是第四个A6B0块
+
+严格参考中有8盘该128B非零，实际每盘只有16或17B非零。尝试以 device-id CRC
+把它作为独立0x80 A6B0块解密，结果无任何可识别 magic/结构；而原始字节直接呈现
+GBK文本特征。
+
+最关键的跨扇区交叉：
+
+- 4份具有完整76B ELABEL `Dept=` 的真实盘，
+  LBA9 `+0x80` 的16B **逐字节等于 ELABEL Dept 的 `dept[60:]`**；
+- 另4份 ELABEL Dept 在63B位置截断，并停在 GBK“建”的首字节 `BD`；
+  LBA9 `+0x80` 以 `A8` 开头，随后正好是
+  `湖输变电运检中心`，与同一完整部门字符串的后续字节吻合；
+- 这说明该区至少有一类历史 writer/profile 会把长 Dept 的相邻
+  backing/尾段带入 LBA9，而不是独立加密协议块。
+
+旧 producer 的具体 memcpy/对象布局尚未找到，current 组件也没有业务 reader。
+因此128B由 UNKNOWN 降为 **PARTIAL**：current preserve/ignore 行为与真实
+非零 profile 已闭合，但历史生成源/消费者仍缺。
+
+#### SAPF `+0x114..+0x11F`：32B decode 范围内的 profile-dependent backing
+
+`UDiskLabelRepair::sub_10008550` 固定取 LBA9 `+0x100` 起 **0x20B**，
+逐字节 `^0x88` 后再检查 `"SAPF"`。所以 SAPF 的物理解码范围明确是
+`+0x100..+0x11F`，不是只到已闭合的 magic+16B恢复项。
+
+14份真实 SAPF 对最后12B `+0x114..+0x11F` 重新解码后至少出现5种形态：
+
+- 有全零 profile；
+- 也有 `0xFFFFFFFE`；
+- 多组 `0x77xxxxxx` 一类典型32位进程/栈 backing 值；
+- 同一硬件/profile 可重复稳定出现同一组尾值。
+
+这些12B不匹配同盘 LBA0 disk signature，也不匹配当前 MBR partition entry。
+现有修复行为只闭合到 SAPF magic + 16B恢复项，没有这12B的独立业务消费。
+因此它们从 UNKNOWN 降为 **PARTIAL**，并明确标记为
+`SAPF decoded trailing/backing bytes`；禁止再按“全零 reserved”处理。
+
+#### SAPF 后 `+0x120..+0x17F`：current preserve/ignore 区
+
+- SAPF reader只解码到 `+0x11F`；
+- `vrvaud_c` 的快速检查只取 `+0x100` 的4B magic；
+- current `RegsiterUsb` / `SetTempUse` / `SetPassInfoEx` 都不会覆盖
+  `+0x120..+0x17F`；
+- 14/14 SAPF真实盘及独立SanDisk当前都为零。
+
+但 current writer 的真实语义是 preserve-existing，而不是 fixed-zero producer；
+所以这96B同样只从 UNKNOWN 降为 **PARTIAL**，不升 COMPLETE。
+
+新增门禁：
+
+- `lba9_middle_profile_material_must_not_be_canonicalized_to_zero`：
+  - committed真实夹具必须继续保留 `+0x80` 的非零 profile；
+  - SAPF `+0x114..+0x11F` 必须同时保留 zero 与 nonzero 两类真实反例；
+  - committed SAPF 夹具当前 `+0x120..+0x17F` 仍锁定为零观察，
+    但文档明确零不是协议要求。
+
+由此 LBA9 账本变为：
+
+```text
+54 COMPLETE / 458 PARTIAL / 0 UNKNOWN
+```
+
+这次只做 UNKNOWN -> PARTIAL，不增加 COMPLETE。
 - LBA10 在当前 22 份参考样本中为 21 份全零、1 份 SanDisk EESI；该 EESI 样本仅前 `0x80` 为 A6B0 密文，后 `0x180` 物理零。
 
 #### LBA10 EESI：前 0x80B 的读写边界已闭合
@@ -1842,7 +1931,7 @@ CI 原始夹具同时保留两种 profile。零态表示该 legacy tail 不存�
 | 6 | 4B | 156B | 352B | 0.8% | checksum 4B 完成；GSerial/BeiZhu 的 C-string 语义已知，但固定16B槽跨 current/legacy writer profile 有不同 backing 语义，因此仍 PARTIAL；原所谓“旧 +0x1E0 扩展”已纠正为 legacy MBR partition-table fragment，2/2 非零实盘的 type/start/count 与 LBA12 type4 精确一致，但旧 producer/直接 consumer 尚未闭合 |
 | 7 | 179B | 27B | 306B | 35.0% | 原 48B/entry COMPLETE + 11B pass-info 基础上，三条 packed entry 的 legacy wrapped8 共24B由官方解包/重包/写回链和22盘28/28复算闭合；Version/NeedDisturb仍部分，表后区域未闭合 |
 | 8 | 86B | 324B | 102B | 16.8% | LLGB magic + logical length + ElabOffset 完成；另闭合 ToolVersion、Labversion、writeTime 和 Reserved[64] 共76B；HDSerialInfo/MacInfo/UsbOnlyInfo 与 ELABEL 细项仍部分闭合 |
-| 9 | 54B | 222B | 236B | 10.5% | EETU magic + ullBTime/ullETime/useCount 共24B完成；reverse[102..103] 2B COMPLETE；EPPE +0x08..+0x7F 120B 已由 PE writer 明确零初始化且6/6实盘全零，但 GetPassExInfo 公开API会 round-trip 完整0x80B、正式结构/上层consumer未闭合，因此仅 PARTIAL；SAPF trailing 与 0x080..0x0FF 仍UNKNOWN |
+| 9 | 54B | 458B | 0B | 10.5% | EETU/EPPE/SAPF三块边界及current preserve范围已拆清：EPPE尾120B为writer-zero但公开API consumer未闭合；+0x080..0x0FF为历史Dept/backing profile，SAPF +0x114..0x11F为profile-dependent backing，+0x120..0x17F为current preserve/ignore，三段均PARTIAL，不再记UNKNOWN |
 | 10 | 36B | 476B | 0B | 7.0% | EESI magic + 两个16B卷标槽完成；+0x04仍缺最终业务语义；+0x28..0x7F 已闭合为未解释的 EESI round-trip payload，+0x80..0x1FF 已闭合 current preserve/ignore 边界，二者均因缺字段/历史profile保持PARTIAL，不再记UNKNOWN |
 | 11 | 260B | 252B | 0B | 50.8% | 前半 DRKB+random252 的 producer/consumer 已双闭合；后半 PDKB magic 4B 也完成；其余当前 DiskSize profile 已闭合，但历史 CHS profile 选择条件仍未解释 |
 | 12 | 393B | 119B | 0B | 76.8% | 原 372B COMPLETE 基础上，三个 packed entry 的 Reserved[7] 共21B由官方字段名、writer零来源、negative consumer和22盘66/66零值闭合；+0x48扩展槽及其它119B仍PARTIAL |
@@ -1850,8 +1939,8 @@ CI 原始夹具同时保留两种 profile。零态表示该 legacy tail 不存�
 总计：
 
 - **完成：1629B / 6656B = 24.5%**
-- **部分已知：3594B / 6656B = 54.0%**
-- **未知：1433B / 6656B = 21.5%**
+- **部分已知：3830B / 6656B = 57.5%**
+- **未知：1197B / 6656B = 18.0%**
 
 这是一组**严格下限**，故意宁可低估，不把“能生成/能解析”冒充成“已经完全理解”。
 后续只有在证据链真正闭合时，字节才能从“未知 → 部分已知 → 完成”升级。
@@ -1867,7 +1956,7 @@ CI 原始夹具同时保留两种 profile。零态表示该 legacy tail 不存�
 | 6 | 部分闭合 | checksum 已锁；GSerial/BeiZhu 的 C-string 语义闭合，物理槽尾为 profile-dependent backing bytes；`0x1e0..0x1ef` 已识别为 legacy MBR entry3/4 fragment，Aigo/SanDisk 2/2 与 LBA12 type4 几何吻合；current模板零来源闭合，但 legacy writer/直接 consumer 仍缺失 |
 | 7 | 高度闭合 | 物理0x40 packed ABI、PartionCount、rolling XOR、v0x0064 legacy wrapped8 解包/重包/持久化均已锁；继续追 Version、NeedDisturb 其它 entry 和 pass-info 剩余字段 |
 | 8 | 高度闭合 | LLGB/ELABEL + 可变加密长度已锁；ToolVersion/Labversion/writeTime/Reserved 已闭合，HDSerialInfo/MacInfo/UsbOnlyInfo 继续追 |
-| 9 | 高度闭合 | EETU/SAPF/EPPE 三块已分离；EPPE current writer 的120B zero-tail已闭合到 producer+实盘但公开 GetPassExInfo API consumer 边界仍不完整，因此保持PARTIAL；SAPF trailing 与0x080..0x0FF继续追 |
+| 9 | 高度闭合 | 整扇已无UNKNOWN：EETU首0x80、EPPE末0x80、SAPF 0x100..0x11F及current preserve中间区边界均明确；历史Dept/backing、SAPF尾12B、post-SAPF区与EPPE zero-tail因历史producer/公开API consumer未完全闭合而保持PARTIAL |
 | 10 | 高度闭合 | 整扇 current 存储边界已解释：前0x80为 EESI round-trip payload，后0x180为 EESI setter preserve-existing tail；magic/两个16B文本槽已 COMPLETE，+0x04与+0x28..0x7F仍缺具体业务语义/非零profile |
 | 11 | 高度闭合 | DRKB/random252/ASCII VID-PID/size/PDKB 链已锁 |
 | 12 | 中度闭合 | 主运行时 96B packed layout 已锁，但多个标志/扩展材料/表尾状态仅结构已知；禁止把“entry边界已知”当成“entry语义已知” |

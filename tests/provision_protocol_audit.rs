@@ -1737,6 +1737,62 @@ fn real_eppe_samples_keep_the_current_writer_zero_tail() {
 }
 
 #[test]
+fn lba9_middle_profile_material_must_not_be_canonicalized_to_zero() {
+    let mut sapf = 0usize;
+    let mut sapf_zero_tail = 0usize;
+    let mut sapf_nonzero_tail = 0usize;
+    let mut nonzero_middle_gap = 0usize;
+
+    for entry in fs::read_dir(FIXTURE_DIR).expect("protocol fixtures") {
+        let path = entry.expect("backup entry").path();
+        if path.extension().and_then(|ext| ext.to_str()) != Some("bin") {
+            continue;
+        }
+        let name = path.file_name().unwrap().to_str().unwrap();
+        if parse_reference_backup_name(name).is_none() {
+            continue;
+        }
+
+        let image = fs::read(&path).expect("fixture bytes");
+        let lba9 = sector(&image, 9);
+
+        if lba9[0x80..0x100].iter().any(|byte| *byte != 0) {
+            nonzero_middle_gap += 1;
+        }
+
+        let mut sapf_plain = [0u8; 0x20];
+        for (dst, src) in sapf_plain.iter_mut().zip(&lba9[0x100..0x120]) {
+            *dst = *src ^ 0x88;
+        }
+        if &sapf_plain[..4] != b"SAPF" {
+            continue;
+        }
+
+        sapf += 1;
+        if sapf_plain[0x14..].iter().all(|byte| *byte == 0) {
+            sapf_zero_tail += 1;
+        } else {
+            sapf_nonzero_tail += 1;
+        }
+
+        assert!(
+            lba9[0x120..0x180].iter().all(|byte| *byte == 0),
+            "committed SAPF fixture gained post-SAPF bytes: {name}"
+        );
+    }
+
+    assert!(
+        nonzero_middle_gap >= 2,
+        "committed real fixtures lost the nonzero LBA9 +0x80 legacy/profile counterexample"
+    );
+    assert!(sapf >= 3, "committed real fixtures lost SAPF coverage");
+    assert!(
+        sapf_zero_tail >= 1 && sapf_nonzero_tail >= 1,
+        "SAPF decoded +0x14..+0x1f must retain both zero and nonzero real profiles"
+    );
+}
+
+#[test]
 fn real_sandisk_lba10_contains_share_and_encrypt_volume_labels() {
     let crc = crc32_bare(SANDISK_DEVICE_ID.as_bytes());
     let plain = a6b0_full(&SANDISK_LBA10[..0x80], &crc.to_le_bytes(), 0);
