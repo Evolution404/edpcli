@@ -1715,6 +1715,10 @@ fn real_sandisk_lba10_contains_share_and_encrypt_volume_labels() {
         plain[0x28..0x80].iter().all(|byte| *byte == 0),
         "the one enabled real EESI sample has a zero remainder after the two label slots"
     );
+    assert!(
+        SANDISK_LBA10[0x80..].iter().all(|byte| *byte == 0),
+        "the independent enabled EESI sample currently has a zero preserved physical tail"
+    );
 }
 
 #[test]

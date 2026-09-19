@@ -1604,7 +1604,9 @@ Windows `edpediskctrl.dll` 同时给出读端和写端：
 - `+0x18..0x27`：16B **Encrypt/type4 卷标**；reader 默认字符串与实盘均为
   GBK“保密区”。`UserLogin` 在 type4 分支同样将该槽对应字符串传给
   `SetVolumeLabelA`；
-- `+0x28..0x7f`：当前 SanDisk 实盘为零，尚未发现字段消费者，不能据此命名为 padding。
+- `+0x28..0x7f`：当前 SanDisk 实盘为零。虽然尚未发现字段消费者和正式字段名，
+  但它们已经不能继续标 UNKNOWN：Get/Set 两端都把完整0x80B结构 round-trip，
+  所以这88B明确属于 EESI API payload，只是业务语义未解释。
 
 本轮继续专门追 `+0x04`，排除了一个很自然但错误的解释：
 
@@ -1627,6 +1629,69 @@ Windows `edpediskctrl.dll` 同时给出读端和写端：
 因此 `EESI+0x04` 仍保持 PARTIAL：已知默认值=1、实盘=1、Get/Set 原样透传，
 并明确知道当前卷标 consumer **不读取它**；但尚无官方字段名或独立行为 consumer，
 不得把它命名为 enable/version/volume-label switch。
+
+本轮进一步把 LBA10 后续区域从“未知”拆成两个不同的 PARTIAL 边界。
+
+#### `+0x28..0x7F`：EESI 内部未解释 round-trip payload
+
+current `edpediskctrl.dll` 与独立另一版
+`/Users/zhangyuxi/Desktop/u_disk/out_raw_data/EdpEDiskCtrl.dll` 都满足：
+
+```text
+GetEdpEdiskSetInfo:
+    read full LBA10
+    decrypt exactly first 0x80
+    verify "EESI"
+    copy full 0x80 to caller
+
+SetEdpEdiskSetInfo:
+    force input.magic = "EESI"
+    encrypt full input[0x00..0x7F]
+    read existing full LBA10
+    replace only existing[0x00..0x7F]
+    write full LBA10 back
+```
+
+因此 `+0x28..0x7F` 的88B已有确定存储边界和双向 API 行为：
+setter 可以保存调用者提供的这些字节，getter 会原样返回解密后的这些字节。
+current `UserLogin` 对本地 EESI 输出结构只读取 `+0x08/+0x18` 两个卷标，
+没有读取这88B；当前收集到的产品组件也没有外部 vtable Get/Set 调用方。
+
+这足以把88B从 UNKNOWN 降为 **PARTIAL**，但不足以 COMPLETE：
+唯一启用 EESI 的 SanDisk 原盘这88B全零，不能替代字段名、非零 profile
+或行为 consumer。
+
+#### `+0x80..0x1FF`：不属于 EESI 的 opaque preserved physical tail
+
+两版 setter 都明确采用 read-modify-write：
+
+- 先读取完整512B LBA10；
+- 只覆盖前0x80B EESI密文；
+- 后0x180B原样保留；
+- 再写回完整扇区。
+
+两版 getter 也都只解密/返回前0x80B，从不暴露后384B。
+所以后384B不是“EESI padding”，而是**当前 EESI writer 不拥有、
+只负责 preserve-existing 的共存物理尾区**。
+
+严格参考中21/22 LBA10整扇为零；唯一启用EESI的独立SanDisk样本
+`+0x80..0x1FF` 也全零，测试继续锁定该观察。但 preserve-existing 的实现本身说明：
+未来若出现非零历史/其它profile，current setter也会保留它，因此不能根据当前全零
+将其升级为 reserved-zero/padding。
+
+因此 LBA10 的严格账本从：
+
+```text
+36 COMPLETE / 4 PARTIAL / 472 UNKNOWN
+```
+
+调整为：
+
+```text
+36 COMPLETE / 476 PARTIAL / 0 UNKNOWN
+```
+
+这是“UNKNOWN -> PARTIAL”的证据升级，不增加 COMPLETE。
 
 `UserLogin` 的实际汇编还明确给出对象映射：`+0x08 -> ebp-0x74` 的
 `std::string`，`+0x18 -> ebp-0x54` 的 `std::string`；type2/type4
@@ -1733,15 +1798,15 @@ CI 原始夹具同时保留两种 profile。零态表示该 legacy tail 不存�
 | 7 | 179B | 27B | 306B | 35.0% | 原 48B/entry COMPLETE + 11B pass-info 基础上，三条 packed entry 的 legacy wrapped8 共24B由官方解包/重包/写回链和22盘28/28复算闭合；Version/NeedDisturb仍部分，表后区域未闭合 |
 | 8 | 86B | 324B | 102B | 16.8% | LLGB magic + logical length + ElabOffset 完成；另闭合 ToolVersion、Labversion、writeTime 和 Reserved[64] 共76B；HDSerialInfo/MacInfo/UsbOnlyInfo 与 ELABEL 细项仍部分闭合 |
 | 9 | 54B | 102B | 356B | 10.5% | EETU magic + ullBTime/ullETime/useCount 共24B完成；reverse[102..103] 2B 由 writer 显式零初始化、negative consumer 与20/20实盘零值闭合；SAPF magic+16B MBR恢复项、EPPE magic+最小密码长度完成；reverse前102B及其它空洞仍未闭合 |
-| 10 | 36B | 4B | 472B | 7.0% | EESI magic + 两个16B卷标槽完成；+0x04仍缺最终业务语义，其余未闭合 |
+| 10 | 36B | 476B | 0B | 7.0% | EESI magic + 两个16B卷标槽完成；+0x04仍缺最终业务语义；+0x28..0x7F 已闭合为未解释的 EESI round-trip payload，+0x80..0x1FF 已闭合 current preserve/ignore 边界，二者均因缺字段/历史profile保持PARTIAL，不再记UNKNOWN |
 | 11 | 260B | 252B | 0B | 50.8% | 前半 DRKB+random252 的 producer/consumer 已双闭合；后半 PDKB magic 4B 也完成；其余当前 DiskSize profile 已闭合，但历史 CHS profile 选择条件仍未解释 |
 | 12 | 393B | 119B | 0B | 76.8% | 原 372B COMPLETE 基础上，三个 packed entry 的 Reserved[7] 共21B由官方字段名、writer零来源、negative consumer和22盘66/66零值闭合；+0x48扩展槽及其它119B仍PARTIAL |
 
 总计：
 
 - **完成：1629B / 6656B = 24.5%**
-- **部分已知：3002B / 6656B = 45.1%**
-- **未知：2025B / 6656B = 30.4%**
+- **部分已知：3474B / 6656B = 52.2%**
+- **未知：1553B / 6656B = 23.3%**
 
 这是一组**严格下限**，故意宁可低估，不把“能生成/能解析”冒充成“已经完全理解”。
 后续只有在证据链真正闭合时，字节才能从“未知 → 部分已知 → 完成”升级。
@@ -1758,7 +1823,7 @@ CI 原始夹具同时保留两种 profile。零态表示该 legacy tail 不存�
 | 7 | 高度闭合 | 物理0x40 packed ABI、PartionCount、rolling XOR、v0x0064 legacy wrapped8 解包/重包/持久化均已锁；继续追 Version、NeedDisturb 其它 entry 和 pass-info 剩余字段 |
 | 8 | 高度闭合 | LLGB/ELABEL + 可变加密长度已锁；ToolVersion/Labversion/writeTime/Reserved 已闭合，HDSerialInfo/MacInfo/UsbOnlyInfo 继续追 |
 | 9 | 高度闭合 | EETU/SAPF/EPPE 三块及全零形态已区分 |
-| 10 | 高度闭合 | 可选 EESI 前0x80读写边界、magic、两个16B文本槽已闭合；+0x04与+0x28..0x7f业务语义仍待追 |
+| 10 | 高度闭合 | 整扇 current 存储边界已解释：前0x80为 EESI round-trip payload，后0x180为 EESI setter preserve-existing tail；magic/两个16B文本槽已 COMPLETE，+0x04与+0x28..0x7F仍缺具体业务语义/非零profile |
 | 11 | 高度闭合 | DRKB/random252/ASCII VID-PID/size/PDKB 链已锁 |
 | 12 | 中度闭合 | 主运行时 96B packed layout 已锁，但多个标志/扩展材料/表尾状态仅结构已知；禁止把“entry边界已知”当成“entry语义已知” |
 
