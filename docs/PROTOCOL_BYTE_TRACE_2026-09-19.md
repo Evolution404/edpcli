@@ -124,6 +124,93 @@ WriteNormalULabel(request):
 
 这条调用链是后续字段 producer 追踪的根。
 
+### 2.4 官方 cross-platform 源码位置索引
+
+Linux `libcemsfilesyscheck.so` 带 DWARF，可恢复原工程文件和行号。后续字段追踪
+优先以这些位置作为 producer/reader 的源码锚点，再用 Windows 当前实现和实盘
+交叉验证：
+
+| 区域 | Producer | Consumer/reader | 原源码位置 |
+|---|---|---|---|
+| LBA4 | `CLabelManage::BuildSector4` | `CLabelManage::ReadSector4` | `diskfile.cpp:740 / 956` |
+| LBA6 | `CLabelManage::BuildSector6` | `CLabelManage::ReadSector6` | `diskfile.cpp:672 / 1005` |
+| LBA7 | `CLabelManage::BuildSector7` | LBA7/EDPF reader链 | `diskfile.cpp:895` |
+| LBA8 | `CLabelManage::BuildSector8` | `CLabelManage::ReadSector8` | `diskfile.cpp:805 / 1102,1143` |
+| LBA11 | `CLabelManage::BuildSector11` | `CLabelManage::ReadSector11` | `diskfile.cpp:783 / 1168` |
+| LBA12 | `CLabelManage::BuildSector12` | `CLabelManage::ReadSector12` | `diskfile.cpp:921 / 1195` |
+| LBA11随机源 | `CDataSecrity::RandBuffer256` | 作为 DataEncrypt/Decrypt KDF 输入 | `datasecrity.cpp:14` |
+| LBA11加/解密 | `CDataSecrity::DataEncrypt` | `CDataSecrity::DataDecrypt` | `datasecrity.cpp:34 / 61` |
+
+结构定义的主要 DWARF 源位置：
+
+- `tagEdpPartionInfo`：`global/inc/edpdiskglobal.h:76`；
+- `tagNewEdpPartionInfo`：`edpdiskglobal.h:101`；
+- `tagEdpPartionPassInfo`：`edpdiskglobal.h:151`；
+- `UsbLabelParam`：`diskfile.h:125`；
+- `UsbWriteParam`：`diskfile.h:142`。
+
+以上“源码位置”来自 DWARF，本仓库没有复制这些第三方源码；文档只记录定位信息、
+反编译证据和伪代码。
+
+### 2.5 LBA6 producer/reader 伪代码：为什么不能按固定字符串槽粗暴判完成
+
+Linux producer：
+
+`CLabelManage::BuildSector6(UsbWriteParam&, char*) @ diskfile.cpp:672`
+
+机器码已恢复出的关键行为：
+
+```text
+BuildSector6(p, out):
+    out = UsbMainBSec template
+
+    if strlen(p.department) <= 63:
+        memcpy(out+0x000, p.department_buffer, 0x40)
+    else:
+        out+0x000 = overflow_marker(0x40245E2A) + first_60_bytes
+        write remaining bytes into extension area
+
+    if strlen(p.owner) <= 31:
+        memcpy(out+0x050, p.owner_buffer, 0x20)
+    else:
+        out+0x050 = overflow_marker(0x40245E2A) + first_28_bytes
+        write remaining bytes into extension area
+
+    memcpy(out+0x070, p.autoid, 0x10)
+    memcpy(out+0x080, p.office, 0x40)
+    ...
+
+    tmp16 = zero[16]
+    memcpy(tmp16, p.m_usbGSerial, 15)
+    memcpy(out+0x1C0, tmp16, 16)
+
+    tmp16 = zero[16]
+    memcpy(tmp16, p.BeiZhu, 15)
+    memcpy(out+0x1D0, tmp16, 16)
+
+    u32(out+0x1F0) = p.m_encrypt
+
+    rolling_xor(out[0x000..0x1FB])
+    checksum = rol(CRC32(out[0x000..0x1FB]), 10)
+    u32(out+0x1FC) = checksum
+```
+
+Consumer：
+
+`CLabelManage::ReadSector6(char*, UsbLabelParam&) @ diskfile.cpp:1005`
+
+reader 会识别 `0x40245E2A` 溢出 marker，并从扩展位置重建长 Dept/User；
+GSerial/BeiZhu 则直接按 C 字符串读回。注意 `UsbLabelParam` **没有**
+`m_encrypt` 成员；`m_encrypt` 只存在于 writer 的 `UsbWriteParam+0x258`。
+
+因此：
+
+- GSerial / BeiZhu 的 producer+consumer 可完整闭合；
+- Dept/User 虽字段含义明确，但“本槽 + overflow extension”必须作为一个整体继续追，
+  不能仅看到 `0x000..0x03F` 或 `0x050..0x06F` 就把整槽算 COMPLETE；
+- `m_encrypt @ sector+0x1F0` 当前只有 producer 和 22/22=1，reader 没有对应输出字段，
+  仍保持 PARTIAL。
+
 ## 3. 严格逐字节进度
 
 > 每个 LBA 固定 512B；总计 13 × 512 = 6656B。
