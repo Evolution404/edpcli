@@ -5,6 +5,10 @@
 
 ## 当前版本线
 
+- 当前待发布版本：**2.1.0**。
+- 2.1.0 为向后兼容的 MINOR 发布：新增基于 ratatui + crossterm 的跨平台 Vim 风格 TUI；CLI v2 命令与脚本行为保持兼容。
+- TUI 与 CLI 共用 application/service 和写盘安全链；新增 Device dashboard、Backup workspace、只读 backup create、Apply/Restore 安全向导、Inspect/hex、搜索与 command palette。
+
 - 正式版本线从 **1.0.0** 开始。
 - `Cargo.toml` 中的 `package.version` 是源代码版本的唯一事实源。
 - 正式 tag 必须使用 `vMAJOR.MINOR.PATCH`，并且必须与 `Cargo.toml` 完全一致。
