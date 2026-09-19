@@ -276,7 +276,8 @@ Windows `sub_10013fd0` 与 Linux `CLabelManage::BuildSector6(UsbWriteParam&, cha
 - `0x1C0..0x1CF <- m_usbGSerial[0..14] + NUL`；
 - `0x1D0..0x1DF <- BeiZhu[0..14] + NUL`；
 - `0x1F0..0x1F3 <- m_encrypt`（低字节布尔值扩成 DWORD）；
-- `0x1E0..0x1EF` 当前 writer 没有显式覆盖，只能来自模板或其它版本/宿主后处理。
+- `0x1E0..0x1EF` 当前 writer 没有显式覆盖；本轮已证明两份旧 profile
+  的非零内容不是独立扩展字段，而是**旧 MBR partition-table underlay 的残片**。
 
 进一步核对 Windows 静态 `UsbMainBSec` 模板后，旧的
 `0x1CA=128480` 解释可以撤销：
@@ -309,8 +310,14 @@ Windows `sub_10013fd0` 与 Linux `CLabelManage::BuildSector6(UsbWriteParam&, cha
 Windows 新注册路径还解释了为何 NUL 后会出现看似“有规律”的尾字节：
 `RegsiterUsb` 的本地写参数对象没有先整体清零，`sub_100139f0`
 使用 strcpy_s 风格函数只复制到 NUL，而 BuildSector6 随后固定复制 15B
-GSerial / 15B BeiZhu。**NUL 后尾字节没有稳定业务语义，可能保留对象尾部残值。**
-因此它们不能继续拆成“模板值”“状态值”等伪字段。
+GSerial / 15B BeiZhu。current `BuildSector6` 自身则会先把临时16B缓冲清零，
+再从输入槽固定取前15B并覆盖16B，因此 current profile 的 NUL 后物理值取决于
+上游输入槽的 backing bytes，而不是目标扇区 underlay。
+
+旧 profile 必须单独看：两份 legacy 实盘的 post-NUL 字节不是随机残值，
+而是与后续 `+0x1E0` 连成一份结构完整的旧 MBR partition table。也就是说
+“post-NUL backing bytes”是**profile-dependent**：current 路径不能赋予其业务
+字段语义；legacy 两盘却确实保留了 MBR 几何。不能再统一叫“opaque garbage”。
 
 全量原始样本当前分布：
 
@@ -323,8 +330,8 @@ GSerial / 15B BeiZhu。**NUL 后尾字节没有稳定业务语义，可能保留
   - 20/22 为空；
   - 2/22 为 GBK `"普通"`；
   - 全部22份中有 **8/22 在首个 NUL 后仍有非零 backing bytes**；
-- `0x1E0..0x1EF`：20/22 为模板零，2/22（Aigo U335 旧形态 +
-  SanDisk 原始盘）存在旧格式非零材料；
+- `0x1E0..0x1EF`：20/22 为模板零；2/22（Aigo U335 旧形态 +
+  SanDisk 原始盘）保留 legacy MBR partition-table fragment；
 - `u32@0x1F0`：22/22 均为 1；官方 writer 字段名是 `m_encrypt`，
   不能再标成“注册标志”。
 
@@ -346,11 +353,98 @@ SanDisk:
   +0x1E0  c1 ff 07 ef ff ff b2 8a 05 0e 77 3c 4c 00 00 00
 ```
 
-其中 `c6 d5 cd a8` 是 GBK“普通”，随后立即 NUL；后面的二进制字节以及
-`+0x1E0` 的共同前缀/变化材料都没有被 current reader 消费。当前没有找到
-能生成这套旧布局的官方 legacy writer，因此禁止给这些字节命名或升 COMPLETE。
+其中 `c6 d5 cd a8` 是 GBK“普通”，随后立即 NUL。重新按标准 MBR
+`4 × 16B partition entry @ 0x1BE..0x1FD` 对齐后，旧布局可以精确解释：
 
-**LBA6 C-string slots keep opaque post-NUL tails**：基于上述 producer、
+```text
+entry1 = 0x1BE..0x1CD
+entry2 = 0x1CE..0x1DD
+entry3 = 0x1DE..0x1ED
+entry4 = 0x1EE..0x1FD
+
+GSerial 0x1C0..0x1CF
+  -> 覆盖 entry1 bytes[2..15] + entry2 bytes[0..1]
+
+BeiZhu  0x1D0..0x1DF
+  -> 覆盖 entry2 bytes[2..15] + entry3 bytes[0..1]
+
+m_encrypt 0x1F0..0x1F3
+  -> 再覆盖 entry4 bytes[2..5]
+```
+
+因此 `+0x1E0..0x1ED` 正好是**第3条 MBR entry 丢掉前2B后的连续14B**：
+
+- `+0x1E0..1E1 = start CHS 的后2B = C1 FF`；
+- `+0x1E2 = partition type = 0x07`；
+- `+0x1E3..1E5 = end CHS = EF FF FF`；
+- `+0x1E6..1E9 = start_lba`；
+- `+0x1EA..1ED = sector_count`；
+- `+0x1EE..1EF` 已进入第4条 MBR entry，两个旧样本均为 `00 00`。
+
+两块独立真实盘与 LBA12 做交叉后：
+
+```text
+Aigo U335:
+  LBA6 MBR entry3 start_lba    = 243116060
+  LBA6 MBR entry3 sector_count = 2618595
+  LBA12 type4 StartSector      = 243116060
+  LBA12 type4 PartionSize/512  = 2618595
+
+SanDisk:
+  LBA6 MBR entry3 start_lba    = 235244210
+  LBA6 MBR entry3 sector_count = 4996215
+  LBA12 type4 StartSector      = 235244210
+  LBA12 type4 PartionSize/512  = 4996215
+```
+
+两份都是 **type/start/count 全匹配**。而严格22份参考进一步给出关键反例：
+
+- 2/22 legacy fragment 非零，2/2 都与 LBA12 type4 几何精确一致；
+- 20/22 `+0x1E0..1EF` 全零；
+- 这20份的 LBA12 **仍然20/20存在 type4**。
+
+所以这不是“只要存在 type4 就必须写入”的冗余副本，而是**历史 writer/profile
+才保留的 MBR-layout 快照/underlay**。
+
+GSerial/BeiZhu 的 legacy post-NUL 尾也继续支持同一解释：
+
+- 两盘 GSerial 都是 `"322CA28A\0"`，其后的 `u32@+0x1CA=20417`
+  落在 entry1 的 `sector_count` 位置；
+- 两盘 BeiZhu 都是 GBK `"普通\0"`，NUL 后从 `+0x1D5` 继续出现
+  entry2 end-CHS 尾、`start_lba@+0x1D6` 与 `sector_count@+0x1DA`；
+- SanDisk 的 entry1/entry2 surviving geometry 与 LBA12 type1/type2 精确一致；
+- Aigo 旧 MBR 为连续边界 `entry1 count=20417 -> entry2 start=20480`，
+  而 LBA12 新表为 `20418 -> 20481`，呈现明确 ±1 版本差异；type4 边界仍一致。
+  这进一步说明旧 fragment 不是由当前 LBA12 简单复制出来，而是独立的旧布局。
+
+producer/consumer 边界也重新核过：
+
+- current Windows `sub_10013FD0` 与 Linux `BuildSector6` 都从静态
+  `UsbMainBSec` 复制整扇；
+- current Windows 在写 GSerial/BeiZhu 时，对临时缓冲先清零，再复制输入槽
+  前15B并固定覆盖16B；
+- Windows 当前 `UsbMainBSec@0x100E7220` 只发现读取 xref，没有运行时写入；
+- Linux `UsbMainBSec@0x22BB40` 同样只在 current builder 被读取；
+- current `BuildSector0`/Netac/hardware MBR builder 都只构造单条普通分区，
+  不能生成这里的三分区 legacy layout；
+- `UDiskLabelRepair.dll` 的 `CLabelRepair::CheckSafe6LabelExist`
+  直接从 LBA12 解析 type1/2/4，`Repair0Sector/ReCreate0Sector` 从 sector9/
+  backup sector 恢复或重建 LBA0；目前没有发现它直接读取 LBA6 fragment。
+
+因此本轮可以把“legacy opaque extension”这一旧命名**正式撤销**，但仍不能
+把 `+0x1E0..0x1EF` 升 COMPLETE：结构语义与两块实盘已经很强，current-zero
+producer 也闭合，但生成动态 legacy MBR underlay 的旧 writer 以及直接消费该
+LBA6 fragment 的 consumer 仍未找到。
+
+新增回归门禁：
+
+- `lba6_legacy_beizhu_post_nul_bytes_continue_into_mbr_type4_fragment`；
+- `lba6_authentic_sandisk_legacy_mbr_type4_fragment_matches_lba12`；
+- `lba6_legacy_mbr_fragment_is_profile_specific_even_when_lba12_type4_exists`。
+
+第三条门禁明确防止未来把“LBA12 有 type4”错误实现成“新盘必须回填 LBA6 MBR”。
+
+**LBA6 C-string slots have profile-dependent post-NUL backing bytes**：基于上述 producer、
 consumer 和22份原始盘反例，本轮纠正之前的严格账本：
 `+0x1C0..0x1CF` 与 `+0x1D0..0x1DF` 从 COMPLETE 回退为 PARTIAL。
 这是证据标准收紧后的纠错，不是协议理解退步；两段的 C-string 业务语义仍然成立。
@@ -1419,7 +1513,7 @@ CI 原始夹具同时保留两种 profile。零态表示该 legacy tail 不存�
 | 3 | 0B | 512B | 0B | 0% | EDP 注册 writer 对整扇 preserve-existing，当前 Windows/Linux EDP reader 不解析；22份原始盘为21零+1 Kingston MP payload，但厂商 producer/固件 consumer 未闭合 |
 | 4 | 36B | 39B | 437B | 7.0% | onlyid clear header、OnlyIdXor8、LLGB 双锚点完成；第二 ID/HSerial/profile 字段仍不完整；short/full 扩展区大部分未知 |
 | 5 | 512B | 0B | 0B | 100% | 两版 EdpDiskCtrl 均只对 LBA5 执行“读整扇→原样写回→检查 ERROR_WRITE_PROTECT(0x13)”；当前注册 writer 读取既有13扇区后不重建 LBA5，因此 preserve existing bytes；22/22原始盘全零 |
-| 6 | 4B | 156B | 352B | 0.8% | checksum 4B 完成；GSerial/BeiZhu 的 C-string 语义已知但固定16B槽有真实 post-NUL 非零 backing bytes，因此回退PARTIAL；旧 +0x1E0 扩展仍未闭合 |
+| 6 | 4B | 156B | 352B | 0.8% | checksum 4B 完成；GSerial/BeiZhu 的 C-string 语义已知，但固定16B槽跨 current/legacy writer profile 有不同 backing 语义，因此仍 PARTIAL；原所谓“旧 +0x1E0 扩展”已纠正为 legacy MBR partition-table fragment，2/2 非零实盘的 type/start/count 与 LBA12 type4 精确一致，但旧 producer/直接 consumer 尚未闭合 |
 | 7 | 179B | 27B | 306B | 35.0% | 原 48B/entry COMPLETE + 11B pass-info 基础上，三条 packed entry 的 legacy wrapped8 共24B由官方解包/重包/写回链和22盘28/28复算闭合；Version/NeedDisturb仍部分，表后区域未闭合 |
 | 8 | 86B | 324B | 102B | 16.8% | LLGB magic + logical length + ElabOffset 完成；另闭合 ToolVersion、Labversion、writeTime 和 Reserved[64] 共76B；HDSerialInfo/MacInfo/UsbOnlyInfo 与 ELABEL 细项仍部分闭合 |
 | 9 | 52B | 104B | 356B | 10.2% | EETU magic + ullBTime/ullETime/useCount 共24B完成；SAPF magic+16B MBR恢复项、EPPE magic+最小密码长度完成；EETU reverse及其它空洞仍未闭合 |
@@ -1444,7 +1538,7 @@ CI 原始夹具同时保留两种 profile。零态表示该 legacy tail 不存�
 | 3 | 外部制造区部分闭合 | 21/22 全零，1 份 Kingston MP payload；官方 EDP 注册链原样保留且当前 reader 不解析，厂商生成/消费语义仍未知 |
 | 4 | 高度闭合 | onlyid 头、rolling XOR 区、onlyIdXor8、LLGB 双锚点已锁；动态字段生成源继续追 |
 | 5 | canonical 已知 | opaque preserve / 写保护探测 scratch；当前 22/22 全零，但零不是协议固定要求 |
-| 6 | 部分闭合 | checksum 已锁；GSerial/BeiZhu 仅 C-string 语义闭合、物理槽尾有真实残值反例；0x1e0..0x1ef current模板为零但两份旧profile producer/consumer仍缺失 |
+| 6 | 部分闭合 | checksum 已锁；GSerial/BeiZhu 的 C-string 语义闭合，物理槽尾为 profile-dependent backing bytes；`0x1e0..0x1ef` 已识别为 legacy MBR entry3/4 fragment，Aigo/SanDisk 2/2 与 LBA12 type4 几何吻合；current模板零来源闭合，但 legacy writer/直接 consumer 仍缺失 |
 | 7 | 高度闭合 | 物理0x40 packed ABI、PartionCount、rolling XOR、v0x0064 legacy wrapped8 解包/重包/持久化均已锁；继续追 Version、NeedDisturb 其它 entry 和 pass-info 剩余字段 |
 | 8 | 高度闭合 | LLGB/ELABEL + 可变加密长度已锁；ToolVersion/Labversion/writeTime/Reserved 已闭合，HDSerialInfo/MacInfo/UsbOnlyInfo 继续追 |
 | 9 | 高度闭合 | EETU/SAPF/EPPE 三块及全零形态已区分 |

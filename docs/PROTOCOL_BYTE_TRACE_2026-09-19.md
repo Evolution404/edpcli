@@ -221,11 +221,16 @@ GSerial/BeiZhu 则直接按 C 字符串读回。注意 `UsbLabelParam` **没有*
 - BeiZhu：20/22 为空、2/22 为 GBK `"普通"`；总计 **8/22 在首个 NUL 后仍有
   非零 backing bytes**；
 - 两份旧 profile（Aigo U335、SanDisk）还同时在 `+0x1E0..0x1EF`
-  留有非零旧扩展，而当前 reader 完全不消费这 16B。
+  留有非零材料。本轮已证明它不是独立“扩展字段”，而是旧版 MBR
+  partition-table underlay 的幸存片段：`+0x1DE..0x1ED` 原本是第3条
+  16B MBR entry，BeiZhu 覆盖其前2B 后，`+0x1E0..0x1ED` 仍保留
+  CHS/type/start/count；`+0x1EE..0x1EF` 已进入第4条 entry。
 
-**LBA6 C-string slots keep opaque post-NUL tails**。因此本轮主动回撤此前对
+**LBA6 C-string slots have profile-dependent post-NUL backing bytes**。因此本轮主动回撤此前对
 `+0x1C0..0x1DF` 的过度 COMPLETE 认定。这里是
-“字符串含义已知 + 固定槽尾未闭合”的 PARTIAL，而不是 32B 完整字段。
+“字符串含义已知 + 固定槽尾跨 writer profile 未闭合”的 PARTIAL，而不是
+32B 完整字段。current writer 的槽尾来自输入对象 backing bytes；两份 legacy
+profile 则能看到被短 C 字符串局部覆盖后的 MBR 几何残留。
 
 #### m_autoid / Autonum：字符串语义闭合，但固定 16B 槽不能整体升级
 
@@ -352,9 +357,9 @@ DWARF 中恢复出的原始声明文件/行号与本地函数地址：
 | LBA6 | 0x050–0x05F | PARTIAL | User slot | writer 固定槽写入 | reader 取回 | 多盘真实姓名可解析 | 槽边界明确 |
 | LBA6 | 0x070–0x07F | PARTIAL | m_autoid / Autonum fixed copy slot | `BuildSector6@diskfile.cpp:672` 固定复制 writer `m_autoid[16]` | `ReadSector6@diskfile.cpp:1005` 以 C 字符串复制到 `UsbLabelParam.m_autoid`；`BuildSector8` 再序列化为 `Autonum=` | 22/22 LBA6 C-string 与 LBA8 Autonum 完全相同；但 NUL 后真实槽尾大量非零 | 字符串语义已闭合，固定槽尾不是协议零 padding，整16B仍不能算 COMPLETE |
 | LBA6 | 0x100–0x107 | PARTIAL | device-id CRC材料 | writer 写 CRC32 及派生值 | inspect/reader 可验证 | 22盘可交叉 | 第二DWORD业务语义未闭合 |
-| LBA6 | 0x1C0–0x1CF | PARTIAL | m_usbGSerial C-string slot + opaque post-NUL backing bytes | Windows/Linux `BuildSector6` 都先清零临时16B，再固定复制输入对象前15B；输入对象 NUL 后字节可被一并带入 | Linux `ReadSector6` 只按C字符串匹配 GSerial，NUL 后不消费 | 22盘中16份短值 `322CA28A` 全部在NUL后仍有非零字节；6份长值为 `322CA28A-D7D144` | 字符串语义闭合，但物理16B槽尾 producer/consumer 不闭合 |
-| LBA6 | 0x1D0–0x1DF | PARTIAL | BeiZhu C-string slot + opaque post-NUL backing bytes | Windows/Linux writer 同样固定复制输入对象前15B再补末字节NUL | Linux `ReadSector6` 只以 C 字符串读回 BeiZhu | 22盘：20空、2份GBK“普通”；8/22首个NUL后仍有非零字节 | 字符串语义闭合，不得把剩余物理字节当 padding/字段 |
-| LBA6 | 0x1E0–0x1EF | PARTIAL | current-template zero / legacy opaque extension | current `BuildSector6` 不显式覆盖；Linux `UsbMainBSec@0x22BB40` 模板对应 `+0x1E0..0x1EF` 为16B零 | current `ReadSector6` 无业务读取 | 20/22原始盘为零；2份旧profile非零，Aigo=`c1 ff 07 ef ff ff 1c a8 7d 0e e3 f4 27 00 00 00`，SanDisk=`c1 ff 07 ef ff ff b2 8a 05 0e 77 3c 4c 00 00 00` | current profile边界已知，但旧 producer/consumer 未找到，保持PARTIAL |
+| LBA6 | 0x1C0–0x1CF | PARTIAL | m_usbGSerial C-string slot + profile-dependent post-NUL backing bytes | current Windows/Linux `BuildSector6` 都先清零临时16B，再固定复制输入对象前15B；输入对象 NUL 后字节可被一并带入。legacy 两盘则显示短 GSerial 覆盖了旧 MBR entry1/2 的一部分，NUL 后 surviving bytes 继续落在旧 MBR 几何位置 | Linux `ReadSector6` 只按C字符串匹配 GSerial，NUL 后不消费 | 22盘中16份短值 `322CA28A` 全部在NUL后仍有非零字节；6份长值为 `322CA28A-D7D144`；两份 legacy 盘的 `u32@+0x1CA=20417` 恰落在 entry1 sector_count 位置 | 字符串语义闭合，但固定槽尾跨 writer profile 语义不同，整16B仍不能 COMPLETE |
+| LBA6 | 0x1D0–0x1DF | PARTIAL | BeiZhu C-string slot + profile-dependent post-NUL backing bytes | current Windows/Linux writer 同样固定复制输入对象前15B；legacy 两盘中 GBK“普通”+NUL 后的 surviving bytes 与后续 `+0x1E0` 连成旧 MBR entry2/entry3 几何 | Linux `ReadSector6` 只以 C 字符串读回 BeiZhu | 22盘：20空、2份GBK“普通”；8/22首个NUL后仍有非零字节；两份 legacy 盘的 `start_lba@+0x1D6`/`sector_count@+0x1DA` 对应旧 entry2 几何 | 字符串语义闭合；legacy underlay 已识别，但 current/legacy 固定槽物理语义不同，整16B仍 PARTIAL |
+| LBA6 | 0x1E0–0x1EF | PARTIAL | current-template zero / legacy MBR partition-table fragment | current Windows/Linux `BuildSector6` 都从静态 `UsbMainBSec` 起步且不显式覆盖此区；当前模板这里为16B零。legacy 两盘表明旧 writer/profile 曾以动态 MBR table 作为 underlay：第3条 MBR entry 起于 `+0x1DE`，BeiZhu 覆盖前2B 后，`+0x1E0..0x1ED` 仍保留 start-CHS尾、`type=0x07`、end-CHS、start_lba、sector_count；`+0x1EE..0x1EF` 是 entry4 前2B | current `ReadSector6` 无业务读取；`UDiskLabelRepair` 虽有真实 MBR repair/check consumer，但其 SAFE6 判断直接读取 LBA12 并从 sector9/backup 恢复 sector0，未发现直接读取该 LBA6 fragment | 严格22份：20/22 为零且这20份仍全部存在 LBA12 type4；仅 Aigo+SanDisk 2/22 非零，2/2 的 `type/start_lba/sector_count` 都与同盘 LBA12 type4 精确对应。Aigo/SanDisk 分别为 `c1 ff 07 ef ff ff 1c a8 7d 0e e3 f4 27 00 00 00` / `c1 ff 07 ef ff ff b2 8a 05 0e 77 3c 4c 00 00 00` | 已从“opaque extension”纠正为 legacy MBR-layout 残片；current-zero producer闭合、legacy结构语义和实盘交叉已闭合，但旧 writer 与直接 consumer 仍缺，因此不增加 COMPLETE |
 | LBA6 | 0x1F0–0x1F3 | PARTIAL | m_encrypt | 官方 writer 字段名/写入已知 | 最终行为消费者未完全闭合 | 22/22=1 | 固定值不足以完成 |
 | LBA6 | 0x1FC–0x1FF | COMPLETE | SAFE6 checksum | writer 对前508B计算 checksum | reader/inspect 校验 | 22/22 校验通过 | 完成 |
 | LBA7 | 0x000–0x0BF | PARTIAL | 3×64B packed EDPF 区 | Windows old-table writer/runtime；Linux natural ABI 仅作字段名参考 | 多处 reader/登录/挂载 | 22盘均按0x40 stride成立 | 逐字段状态见详细审计；不能用 Linux 0x48 natural stride 解析物理 LBA7 |
@@ -1620,7 +1625,9 @@ reader 只有一个标准SM4解包分支且完全不读取 `oldSM4` 配置。
 1. **LBA11**：追 Aigo U335 `rev_pmap` 为何传入 CHS 容量；闭合后可再提升 252B。
 2. **LBA7 / LBA12**：LBA7 legacy wrapped key8 已闭合；继续逐个追 EDPF 中 Version、NeedDisturb 其它 entry、LBA12 非实盘 mode1/mode3 分支和 pass-info 剩余字段。
 3. **LBA4**：继续寻找旧 `HSerialCRC[5]` 的真正 producer。
-4. **LBA6**：追 `0x1E0..0x1EF` 两份旧格式非零扩展来源。
+4. **LBA6**：继续追 legacy MBR-underlay writer：已知 `0x1E0..0x1ED`
+   是第3条 MBR entry 幸存区且与 LBA12 type4 对齐，下一步需要找到旧版
+   “动态 MBR table -> BuildSector6” producer 或直接读取该 fragment 的 consumer。
 5. **LBA8**：为 17-key ELABEL 的每个业务字段找到最终消费者。
 6. **LBA9/10**：继续追 EETU `reverse[104]`、EESI `+0x04` 及
    `+0x28..` 未闭合区；EETU 时间/次数控制和两个16B EESI卷标槽已经完成。

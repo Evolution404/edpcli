@@ -23,6 +23,10 @@ const SANDISK_LBA10: &[u8; 512] =
     include_bytes!("fixtures/protocol_evidence/sandisk_ultra_usb_3_0_lba10.bin");
 const SANDISK_LBA11_HEX: &str =
     include_str!("fixtures/protocol_evidence/sandisk_ultra_usb_3_0_lba11.hex");
+const SANDISK_LBA6_HEX: &str =
+    include_str!("fixtures/protocol_evidence/sandisk_ultra_usb_3_0_lba6.hex");
+const SANDISK_LBA12_HEX: &str =
+    include_str!("fixtures/protocol_evidence/sandisk_ultra_usb_3_0_lba12.hex");
 const AIGO_REV_PMAP_EXACT_SIZE_LBA11_HEX: &str =
     include_str!("fixtures/protocol_evidence/aigo_u335_rev_pmap_exact_size_lba11.hex");
 const SANDISK_DEVICE_ID: &str = "disk&ven_sandisk&prod_ultra_usb_3.0&rev_1.00";
@@ -585,8 +589,42 @@ fn lba6_autoid_matches_lba8_autonum_but_fixed_slot_tail_is_not_semantic_padding(
     );
 }
 
+fn assert_lba6_legacy_mbr_type4_fragment_matches_lba12(
+    lba6_raw: &[u8],
+    lba12_raw: &[u8],
+    device_id: &str,
+) {
+    let lba6 = lba6_decode(lba6_raw);
+    let crc = crc32_bare(device_id.as_bytes());
+    let lba12 = a6b0_full(lba12_raw, &crc.to_le_bytes(), 0);
+
+    assert_eq!(u32_le(&lba12, 8), 3, "expected three packed LBA12 entries");
+    let type4 = 2 * 0x60;
+    assert_eq!(u32_le(&lba12, type4 + 0x0c), 4);
+
+    // LBA6 +0x1DE is the third 16-byte MBR partition entry. The first two
+    // bytes of that entry were overwritten by the preceding BeiZhu slot,
+    // but +0x1E0 onward still preserves the rest of the entry.
+    assert_eq!(lba6[0x1e2], 0x07, "legacy MBR partition type");
+    assert_eq!(
+        u32_le(&lba6, 0x1e6) as u64,
+        u64_le(&lba12, type4 + 0x18),
+        "legacy MBR start LBA must match the LBA12 type4 partition"
+    );
+    assert_eq!(
+        u32_le(&lba6, 0x1ea) as u64,
+        u64_le(&lba12, type4 + 0x28) / SECTOR as u64,
+        "legacy MBR sector count must match the LBA12 type4 partition size"
+    );
+    assert_eq!(
+        &lba6[0x1ee..0x1f0],
+        &[0, 0],
+        "the final two bytes have already crossed into MBR entry4"
+    );
+}
+
 #[test]
-fn lba6_legacy_beizhu_and_extension_keep_opaque_bytes_after_the_c_string() {
+fn lba6_legacy_beizhu_post_nul_bytes_continue_into_mbr_type4_fragment() {
     const LEGACY_AIGO: &str =
         "disk4_245760000_vid3535_pid6300_disk&ven_aigo&prod_u335&rev_pmap_onlyid1987718388_20260827_191701.bin";
     let image = load(LEGACY_AIGO);
@@ -604,6 +642,71 @@ fn lba6_legacy_beizhu_and_extension_keep_opaque_bytes_after_the_c_string() {
             0xc1, 0xff, 0x07, 0xef, 0xff, 0xff, 0x1c, 0xa8, 0x7d, 0x0e, 0xe3, 0xf4, 0x27, 0x00,
             0x00, 0x00,
         ]
+    );
+    assert_lba6_legacy_mbr_type4_fragment_matches_lba12(
+        sector(&image, 6),
+        sector(&image, 12),
+        "disk&ven_aigo&prod_u335&rev_pmap",
+    );
+}
+
+#[test]
+fn lba6_authentic_sandisk_legacy_mbr_type4_fragment_matches_lba12() {
+    let lba6 = decode_hex_fixture(SANDISK_LBA6_HEX);
+    let lba12 = decode_hex_fixture(SANDISK_LBA12_HEX);
+    assert_eq!(lba6.len(), SECTOR);
+    assert_eq!(lba12.len(), SECTOR);
+    assert_lba6_legacy_mbr_type4_fragment_matches_lba12(&lba6, &lba12, SANDISK_DEVICE_ID);
+}
+
+#[test]
+fn lba6_legacy_mbr_fragment_is_profile_specific_even_when_lba12_type4_exists() {
+    let mut zero_fragment = 0usize;
+    let mut legacy_fragment = 0usize;
+
+    for entry in fs::read_dir(FIXTURE_DIR).expect("protocol fixtures") {
+        let path = entry.expect("backup entry").path();
+        if path.extension().and_then(|ext| ext.to_str()) != Some("bin") {
+            continue;
+        }
+        let name = path.file_name().unwrap().to_str().unwrap();
+        let Some(meta) = parse_reference_backup_name(name) else {
+            continue;
+        };
+        let image = fs::read(&path).expect("fixture bytes");
+        if image.len() < 13 * SECTOR {
+            continue;
+        }
+
+        let crc = crc32_bare(meta.device_id.as_bytes());
+        let lba12 = a6b0_full(sector(&image, 12), &crc.to_le_bytes(), 0);
+        let type4 = 2 * 0x60;
+        assert_eq!(
+            u32_le(&lba12, type4 + 0x0c),
+            4,
+            "committed original fixture lost its type4 partition: {name}"
+        );
+
+        let lba6 = lba6_decode(sector(&image, 6));
+        if lba6[0x1e0..0x1f0].iter().all(|byte| *byte == 0) {
+            zero_fragment += 1;
+        } else {
+            legacy_fragment += 1;
+            assert_lba6_legacy_mbr_type4_fragment_matches_lba12(
+                sector(&image, 6),
+                sector(&image, 12),
+                &meta.device_id,
+            );
+        }
+    }
+
+    assert!(
+        zero_fragment >= 6,
+        "current-style fixtures must prove that LBA12 type4 does not require an LBA6 MBR fragment"
+    );
+    assert!(
+        legacy_fragment >= 1,
+        "committed fixture subset lost the legacy LBA6 MBR fragment profile"
     );
 }
 
