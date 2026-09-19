@@ -358,6 +358,24 @@ LBA12 entry `+0x30..+0x47`：
 - `EPPE` 位于 `0x180..0x1ff`，是独立 128B A6B0 区，counter 从 0 重新开始；当前 6/6 解密为 `EPPE 08 00 00 00` 后零填充。
 - LBA10 在当前 22 份参考样本中为 21 份全零、1 份 SanDisk EESI；该 EESI 样本仅前 `0x80` 为 A6B0 密文，后 `0x180` 物理零。
 
+#### LBA10 EESI：前 0x80B 的读写边界已闭合
+
+Windows `edpediskctrl.dll` 同时给出读端和写端：
+
+- `GetEdpEdiskSetInfo -> sub_1000f930`：定位 LBA10，读取整扇，但只对前 `0x80` 执行 A6B0 解密并检查 `0x49534545 == "EESI"`；成功后也只向调用者返回这 `0x80`。
+- `SetEdpEdiskSetInfo -> sub_1000fc70`：强制写入 `EESI` magic，只加密输入结构前 `0x80`；随后先读取原扇区，只替换前 `0x80`，再把整 512B 写回。
+- 因此 `0x80..0x1ff` **不是 EESI 自身的 padding**。当前 writer 明确保留这 384B 原字节；SanDisk 实盘该区恰好全零只能作为样本事实，不能推导协议恒零。
+
+当前唯一 EESI 实盘解密结果：
+
+- `+0x00..0x03 = EESI`；
+- `+0x04..0x07 = 1`；reader 在初始化输出结构时也把该 DWORD 默认设为 1，但还没有找到独立消费者足以命名其具体业务语义，因此保持 `EESI +0x04`；
+- `+0x08..0x17`：16B 文本槽 A，reader 的默认字符串与实盘均为 GBK“交换区”；
+- `+0x18..0x27`：16B 文本槽 B，reader 的默认字符串与实盘均为 GBK“保密区”；
+- `+0x28..0x7f`：当前 SanDisk 实盘为零，尚未发现字段消费者，不能据此命名为 padding。
+
+`UserLogin` 在 `GetEdpEdiskSetInfo` 成功后会实际读取两个 16B 文本槽，并在非空时分别交给后续字符串状态设置路径，因此两者不是无意义占位；但其最终 UI/策略目标仍需继续追踪，暂不把字段名扩张成“卷标”等更具体语义。
+
 ## 当前逐字节地图状态
 
 | LBA | 状态 | 当前结论 |
@@ -372,7 +390,7 @@ LBA12 entry `+0x30..+0x47`：
 | 7 | 高度闭合 | 64B EDPF entry、PartionCount、rolling XOR 已锁；表尾和 key8 生成源继续追 |
 | 8 | 高度闭合 | LLGB/ELABEL + 可变加密长度已锁；动态头字段继续追 |
 | 9 | 高度闭合 | EETU/SAPF/EPPE 三块及全零形态已区分 |
-| 10 | 部分闭合 | 可选 EESI 已确认；canonical nopwd 可零 |
+| 10 | 高度闭合 | 可选 EESI 前0x80读写边界、magic、两个16B文本槽已闭合；+0x04与+0x28..0x7f业务语义仍待追 |
 | 11 | 高度闭合 | DRKB/random252/ASCII VID-PID/size/PDKB 链已锁 |
 | 12 | 中度闭合 | 主运行时 96B packed layout 已锁，但多个标志/扩展材料/表尾状态仅结构已知；禁止把“entry边界已知”当成“entry语义已知” |
 

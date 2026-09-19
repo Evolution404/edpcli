@@ -880,12 +880,49 @@ pub fn analyze_sector(lba: u32, raw: &[u8], meta: &InspectMeta) -> SectorView {
             }
         }
         10 => {
-            notes.push(if raw.iter().all(|&b| b == 0) {
-                "LBA10 全零。".into()
+            if raw.iter().all(|&b| b == 0) {
+                notes.push("LBA10 全零。".into());
+                "RAW（当前样本为空）".into()
+            } else if let Some((crc, key)) = crc_key(meta) {
+                let head = a6b0_full(&raw[..0x80], &key, 0);
+                if head.get(..4) == Some(b"EESI") {
+                    decoded[..0x80].copy_from_slice(&head);
+                    fields.push(field(0x00, 0x04, "EESI magic", "EESI", FieldStyle::Magic));
+                    if let Some(value) = u32_at(&decoded, 0x04) {
+                        fields.push(field(
+                            0x04,
+                            0x08,
+                            "EESI +0x04",
+                            format!("{} (0x{value:08X})", value),
+                            FieldStyle::Flag,
+                        ));
+                    }
+                    fields.push(field(
+                        0x08,
+                        0x18,
+                        "EESI 文本槽 A",
+                        text_value(&decoded[0x08..0x18]),
+                        FieldStyle::Text,
+                    ));
+                    fields.push(field(
+                        0x18,
+                        0x28,
+                        "EESI 文本槽 B",
+                        text_value(&decoded[0x18..0x28]),
+                        FieldStyle::Text,
+                    ));
+                    notes.push(
+                        "EESI 仅前 0x80B 由读写端加解密；后 0x180B 不属于该结构，writer 读改写时保持原字节。".into(),
+                    );
+                    format!("A6B0 前 0x80B，key=CRC32(device_id)=0x{crc:08X} → EESI ✓")
+                } else {
+                    notes.push("LBA10 非零，但前 0x80B 未解出 EESI。".into());
+                    format!("A6B0 前 0x80B 尝试，CRC=0x{crc:08X}（非 EESI）")
+                }
             } else {
-                "LBA10 存在非零数据。".into()
-            });
-            "RAW（保留扇区）".into()
+                notes.push("LBA10 非零；缺 device_id，无法验证 EESI。".into());
+                "RAW（缺 device_id，无法解 LBA10）".into()
+            }
         }
         11 => {
             if let Some((d, m)) = decode_lba11(raw, meta) {

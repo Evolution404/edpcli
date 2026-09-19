@@ -1,7 +1,7 @@
 mod common;
 
 use common::*;
-use edpcli::crypto::xor_rolling;
+use edpcli::crypto::{a7f0_full, crc32_bare, xor_rolling};
 use edpcli::diskio::parse_backup_name;
 use edpcli::inspect::{analyze_sector, render_fields, render_hex, FieldStyle, InspectMeta};
 
@@ -87,6 +87,34 @@ fn lba4_zero_ciphertext_byte_is_decrypted_unless_whole_short_gap_is_unwritten() 
     assert_eq!(&view.decoded[0x39..0x3d], b"LLGB");
     assert_eq!(&view.decoded[0x1fc..0x200], b"LLGB");
     assert!(view.decoded[0x47..0x1fc].iter().all(|byte| *byte == 0));
+}
+
+#[test]
+fn lba10_decodes_only_the_eesi_head_and_preserves_tail_bytes() {
+    let device_id = "disk&ven_test&prod_eesi";
+    let crc = crc32_bare(device_id.as_bytes());
+    let mut plain = [0u8; 0x80];
+    plain[..4].copy_from_slice(b"EESI");
+    plain[4..8].copy_from_slice(&1u32.to_le_bytes());
+    plain[8..14].copy_from_slice(&[0xbd, 0xbb, 0xbb, 0xbb, 0xc7, 0xf8]);
+    plain[0x18..0x1e].copy_from_slice(&[0xb1, 0xa3, 0xc3, 0xdc, 0xc7, 0xf8]);
+
+    let mut raw = vec![0u8; 512];
+    raw[..0x80].copy_from_slice(&a7f0_full(&plain, &crc.to_le_bytes(), 0));
+    raw[0x80] = 0x5a;
+    let meta = InspectMeta {
+        device_id: Some(device_id.into()),
+        ..InspectMeta::default()
+    };
+
+    let view = analyze_sector(10, &raw, &meta);
+    assert_eq!(&view.decoded[..4], b"EESI");
+    assert_eq!(view.decoded[0x04..0x08], 1u32.to_le_bytes());
+    assert_eq!(view.decoded[0x80], 0x5a);
+    assert!(view.method.contains("前 0x80B"));
+    assert!(view.fields.iter().any(|field| field.label == "EESI magic"));
+    assert!(view.fields.iter().any(|field| field.value == "交换区"));
+    assert!(view.fields.iter().any(|field| field.value == "保密区"));
 }
 
 #[test]
