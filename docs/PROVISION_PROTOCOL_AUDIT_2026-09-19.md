@@ -145,6 +145,59 @@ current-style HSerial 为零来自当前对象初始化/未提供输入这一 pr
 - 14/22：`HSerialCRC[5]` 固定为 `00001D29, 0000007B, 000004DD, 00000079, 0000007C`，跨 Aigo/Lexar/Netac 等厂商复用，但 `OnllyID2Nd` 随标签实例变化；
 - 2/22：另一组高熵 `HSerialCRC[5]`，Aigo/SanDisk 之间部分成员重合。
 
+本轮按严格“21份非转换 backup + 独立 SanDisk 原始加密盘”的 22份生成参考集
+重新做交叉统计，得到一个此前没有单独写死的强约束：
+
+- **6/22**：`OnllyID2Nd == main_onlyid`，同时 `HSerialCRC[5] == 0`；
+- **16/22**：`OnllyID2Nd != main_onlyid`，同时 `HSerialCRC[5] != 0`；
+- 两个条件在当前22份原始生成参考上是 **22/22 双向等价**，没有交叉反例。
+
+这里特别排除了 `nopwd_tool/backup` 中未带 `_nopwd_` 名称、但内容已经确认
+属于免密转换态的 Aigo `onlyid=2071754312 @ 20260828_120932`，并补回独立
+SanDisk 原始加密盘；如果直接扫 backup 目录会得到错误的 7/15 计数。
+
+这进一步说明 `OnllyID2Nd` 与 `HSerialCRC[5]` 至少属于同一代
+restore-node profile，而不是两个可独立任意组合的字段；但“相关”仍不等于
+已经找到旧 producer。
+
+本轮又把 current producer 向结构构造层前推：
+
+- Linux DWARF 明确给出
+  `UsbLabelParam.HDOnlySerial[5] @ +0x278..+0x28B`；
+- Linux `UsbLabelParam::UsbLabelParam()` 在
+  `diskfile.cpp:553..556` 对完整 `0x2AC` 结构执行清零；
+- Linux `UsbWriteParam::UsbWriteParam(UsbLabelParam&)`
+  在 `diskfile.cpp:558..568` 逐项复制单位、部门、姓名、GSerial、Label、
+  AutoID、备注等字段，但**没有复制 +0x278 的 HDOnlySerial[5]**；
+- Linux `CLabelManage::BuildSector4@diskfile.cpp:741..` 接收的是已经构造好的
+  `tagEdpPartionRestorInfoNode*`，只负责把 0x2F-byte node 写入 LBA4、
+  写尾部 LLGB 并执行 rolling-XOR；函数内部**完全不生成 HSerialCRC**。
+
+Windows 与之完全同构：
+
+- `CUsbRegsiter` 内嵌 `UsbLabelParam` 基址是 `this+0x2E0`；
+  因而 `HDOnlySerial@+0x278` 精确对应 `this+0x558..+0x568`；
+- `sub_10047690(request, this+0x2E0)` 填充 current `UsbLabelParam` 时
+  同样跳过 HDOnlySerial 20B；
+- `RegsiterUsb` 进入正式制标前还调用
+  `sub_100139F0(this+0x2E0 -> temp UsbLabelParam)`，该拷贝函数也逐字段复制，
+  **再次跳过 +0x278..+0x28B**；
+- 最终 LBA4 writer 才从 `this+0x558..+0x568` 读取 5×DWORD 写入
+  restore node。也就是说 current 路径从默认构造、请求转换、临时拷贝到
+  最终序列化，均没有任何“计算 HSerial”的步骤。
+
+因此 current profile 的 `HSerialCRC[5]=0` 已经不是单点观察，而是
+**跨 Windows/Linux 两套官方 producer 的零来源闭合**。但是旧16份非零 profile
+使用的“第二 ID + 5×DWORD HSerial”上游注入接口/算法仍未在现存官方构建中找到；
+当前收集的 `usbtoolbusmanage.dll` 上层 `BusManageImp::WriteNormalULabel`
+也未出现主机硬盘序列/DeviceNumber 到这20B的连接。
+
+所以本轮仍不把 `HSerialCRC[5]` 升为 COMPLETE：完成的是 current-zero producer
+和 old/current profile 边界，而不是 legacy 非零 producer + consumer。
+新增门禁 `lba4_current_writer_profile_never_carries_legacy_hserial_material`
+在仓库提交的7份完整原盘子集中固定“current mirror -> zero /
+legacy non-mirror -> nonzero”的关系；22份完整统计继续由本机原始证据集审计。
+
 同一轮 22份原始盘还重新统计了 restore node 后半：
 
 - `SingleUsbFlg @ LBA4+0x34`：22/22 = 0；

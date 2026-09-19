@@ -945,6 +945,61 @@ fn lba4_restore_node_profiles_keep_current_and_legacy_fields_separate() {
 }
 
 #[test]
+fn lba4_current_writer_profile_never_carries_legacy_hserial_material() {
+    let mut current = 0usize;
+    let mut legacy = 0usize;
+    let mut legacy_nonzero = 0usize;
+
+    for entry in fs::read_dir(FIXTURE_DIR).expect("protocol fixtures") {
+        let path = entry.expect("backup entry").path();
+        if path.extension().and_then(|ext| ext.to_str()) != Some("bin") {
+            continue;
+        }
+        let name = path.file_name().unwrap().to_str().unwrap();
+        let Some(meta) = parse_reference_backup_name(name) else {
+            continue;
+        };
+        let Some(onlyid) = meta.onlyid.as_deref() else {
+            continue;
+        };
+        let bits = onlyid_bits(onlyid);
+        let k0 = (bits & 0xffff) ^ (bits >> 16);
+        let raw = sector(&fs::read(&path).expect("fixture bytes"), 4).to_vec();
+        let mut decoded = raw.clone();
+        decoded[0x18..].copy_from_slice(&xor_rolling(&raw[0x18..], k0));
+        if raw[0x47..0x1fc].iter().all(|byte| *byte == 0) {
+            decoded[0x47..0x1fc].fill(0);
+        }
+
+        let second = u32_le(&decoded, 0x1c);
+        let hserial = &decoded[0x20..0x34];
+        if second == bits {
+            current += 1;
+            assert!(
+                hserial.iter().all(|byte| *byte == 0),
+                "current-style restore node unexpectedly carries HSerialCRC material: {name}"
+            );
+        } else {
+            legacy += 1;
+            legacy_nonzero += usize::from(hserial.iter().any(|byte| *byte != 0));
+        }
+    }
+
+    assert!(
+        current >= 2,
+        "committed fixture subset lost current-style LBA4 profiles"
+    );
+    assert!(
+        legacy >= 5,
+        "committed fixture subset lost legacy LBA4 profiles"
+    );
+    assert_eq!(
+        legacy_nonzero, legacy,
+        "every committed legacy LBA4 profile should retain non-zero HSerialCRC evidence"
+    );
+}
+
+#[test]
 fn lba8_encrypted_prefix_covers_the_elabel_terminating_nul() {
     let mut checked = 0usize;
     for entry in fs::read_dir(FIXTURE_DIR).expect("protocol fixtures") {
