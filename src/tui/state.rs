@@ -494,11 +494,7 @@ impl AppState {
         self.backup_delete.as_ref()
     }
 
-    pub fn begin_backup_delete(
-        &mut self,
-        path: std::path::PathBuf,
-        expected_md5: String,
-    ) {
+    pub fn begin_backup_delete(&mut self, path: std::path::PathBuf, expected_md5: String) {
         self.input_mode = InputMode::Normal;
         self.backup_delete = Some(BackupDeleteState {
             stage: WizardStage::Confirm,
@@ -527,9 +523,7 @@ impl AppState {
         }
     }
 
-    pub fn submit_backup_delete_confirmation(
-        &mut self,
-    ) -> Option<(std::path::PathBuf, String)> {
+    pub fn submit_backup_delete_confirmation(&mut self) -> Option<(std::path::PathBuf, String)> {
         let delete = self.backup_delete.as_mut()?;
         if delete.stage != WizardStage::Confirm {
             return None;
