@@ -12,4 +12,39 @@
 
 严格 Phase 0→7，测试先行、小 commit、及时 push。最新 Phase 0 结论包括：onlyid 官方链为 `CoCreateGuid -> CRC32_bare(raw16)`；LBA11 为 `DRKB + random252`；LBA12 是整扇连续 A6B0/A7F0；官方主注册写集固定为 LBA0–12。其余未知 reserved/dynamic bytes 不得猜测或随意清零。CLI/TUI 必须复用 application/service 和现有写盘安全链。
 
+## 当前逆向进度（交接重点）
+
+LBA12 必须继续按“**结构已知 != 语义已知**”的严格口径推进：
+
+- 主运行时盘面固定为 `96B * 3 EDPF entries + 14B pass-info`；不要与
+  `libcemsfilesyscheck.so` 中 104B 扩展结构混用。
+- `+0x14 NeedEncrypt` 已闭合：Windows `InitDiskInfo/UserLogin` 实际消费，
+  `0=不启用透明加密，1=启用透明加密`。
+- `+0x58 EncryptMode` 已闭合为 **1 byte**：
+  `0=AES64, 1=AES128, 2=SMS4, 3=AESOPENSSL`。Linux 主挂载路径当前只创建
+  mode 0/1/2 header；Windows 对 mode 3 有兼容回退。
+- `+0x10 NeedDisturb`：字段名、写端来源、标准三分区写值已闭合：
+  `Boot=1, Share=1, Encrypt=0`；但 Windows 用户态→EdpMountFile→驱动链未发现
+  该字段进入运行时参数，因此**真实行为仍未闭合，禁止按名字猜语义**。
+- `+0x38..0x47` 是 16B wrapped file-key material；`+0x48..0x57` 当前主 writer
+  不写、主 reader 不读、历史样本全零，只能定性为未使用扩展槽，不能宣称协议恒零。
+- Linux `SetPartitionNewPass` 只改 `UserKeyCRC(+0x30)` 和 wrapped key
+  `(+0x38)`，不会触碰 `+0x48..0x57/+0x58/+0x5c..0x5f`。
+- pass-info 14B 已确认两组密码失败次数：
+  `+0x03/+0x04` = Share max/current，
+  `+0x06/+0x07` = Encrypt max/current。
+  改密成功会同步清 `+0x02/+0x04` 或 `+0x05/+0x07`，
+  所以 `+0x02/+0x05` 属于对应密码状态组，但准确语义仍需追。
+
+下一位 AI 优先顺序：
+1. 追 `NeedDisturb(+0x10)` 在旧版挂载库/驱动中的真正消费路径；
+2. 追 pass-info `+0x02/+0x05/+0x0A/+0x0B..0x0D` 的初始化和运行时消费者；
+3. 追 LBA4 `onlyID2Nd` 的生成源（对象 `+0x55C`）；
+4. 追 LBA6 `0x1C0..0x1ED` 的格式代际字段；
+5. 再回到 LBA8/LBA9/LBA10 未闭合区域。
+
+每得到一批闭合结论，都要同时更新
+`docs/PROVISION_PROTOCOL_AUDIT_2026-09-19.md` 和
+`tests/provision_protocol_audit.rs`，并单独小 commit + push。
+
 未经用户再次明确指定某块物理测试 U 盘，不得对真实 raw disk 执行 `provision write`；优先用 Linux loop / Windows VHD HIL 验证写入和 rollback。

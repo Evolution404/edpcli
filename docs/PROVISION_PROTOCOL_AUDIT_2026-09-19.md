@@ -216,8 +216,44 @@
 `NeedDisturb` 目前只闭合到“字段名 + 写端来源”：
 
 - Windows writer 直接写入 `CreatePartitions(arg2)`；
-- 当前注册主调用路径传 1，但历史盘样本同时存在 0/1；
-- 尚未找到足够可靠的主运行时消费路径，禁止把它解释成“激活”“只读”或其它具体行为。
+- 对标准三分区新表，写端结果已经按 96B entry 基址重新核对：
+  - Boot = 1；
+  - Share = 1；
+  - Encrypt = 0；
+- Windows `UserLogin` 真实机器码与 `EdpMountFile` 参数结构已经对齐：
+  `NeedEncrypt`、StartSector、PartionSize、FileKey、FileKeyCRC、EncryptMode 会进入挂载参数，
+  但 `NeedDisturb` 没有进入当前用户态→挂载库→驱动参数链；
+- 因此它可以确认是“真实协议字段 + 已知生成规则”，但**当前运行时行为仍未闭合**。
+  禁止按字段名直接翻译为“扰码开关”“激活”“只读”等具体功能。
+
+### LBA12 pass-info：密码状态组进一步闭合
+
+14B 表尾当前能确认：
+
+- `+0x00..01`：版本；
+- `+0x03`：Share 最大密码错误次数；
+- `+0x04`：Share 当前错误次数；
+- `+0x06`：Encrypt 最大密码错误次数；
+- `+0x07`：Encrypt 当前错误次数。
+
+Windows `ChangePwd/sub_10026050` 进一步证明：
+
+- Share 改密成功时同时清 `tail+0x02` 与 `tail+0x04`；
+- Encrypt 改密成功时同时清 `tail+0x05` 与 `tail+0x07`；
+- 因此 `+0x02` 与 `+0x05` 分别属于 Share/Encrypt 的密码状态组，
+  但其精确定义仍未闭合；
+- 同一函数会检查 `tail+0x0B` 作为额外门控，再决定是否生成新的随机 16B 材料，
+  所以 `+0x0B` 也不是普通 padding；
+- `+0x0A/+0x0B/+0x0C/+0x0D` 必须继续追初始化和消费者，
+  在闭合前不得归类为“保留零字节”。
+
+Linux `PartitionHeader::SetPartitionNewPass` 同时给出负证据：
+
+- 新密码只更新 `UserKeyCRC(+0x30)`；
+- 新版 0x206 表只更新 `wrapped key(+0x38..+0x47)`；
+- 不修改 `+0x48..+0x57`、`+0x58`、`+0x5c..+0x5f`。
+
+因此这些区域不能解释成“密码修改状态缓存”。
 
 按上述严格口径，Windows/Linux 主运行时 96B packed LBA12 当前逐字节进度为：
 
