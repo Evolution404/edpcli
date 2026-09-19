@@ -404,4 +404,3 @@ mod tests {
         let _ = enabled();
     }
 }
-

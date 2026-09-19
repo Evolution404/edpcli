@@ -20,9 +20,9 @@ fn backup_create_resume_pins_only_the_device() {
         backup: None,
     };
     let argv = resume_argv(&intent);
-    assert!(argv.windows(2).any(|pair| {
-        pair[0] == "--_resume-kind" && pair[1] == "backup-create"
-    }));
+    assert!(argv
+        .windows(2)
+        .any(|pair| { pair[0] == "--_resume-kind" && pair[1] == "backup-create" }));
     assert!(!argv.iter().any(|arg| arg == "--_resume-backup"));
 }
 
