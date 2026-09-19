@@ -178,7 +178,7 @@ edpcli completion fish | source
 
 ```powershell
 # Windows
-.\\scripts\\install-git-hooks.ps1
+./scripts/install-git-hooks.ps1
 ```
 
 安装器会设置 `core.hooksPath=.githooks`。之后每次 `git commit` 前，pre-commit
