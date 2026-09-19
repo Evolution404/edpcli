@@ -1323,10 +1323,52 @@ CDiskReader::DecryptFileKey
 所以当前实盘使用的
 `v0x0206 + mode2 + oldSM4!="1"` 分支已经闭环。
 
-但是 `+0x38..+0x47` 整体仍记 **PARTIAL**，原因是 Windows producer
-还存在明确的 EncryptMode=1、EncryptMode=3，以及
-`oldSM4=="1"` 的 alternate mode2 分支；严格规则要求已知 profile
-差异也必须全部解释。当前完成度统计因此**不增加 16B×3**。
+随后继续追完 **LBA12 alternate wrapping-mode algorithm map** 后，
+可以把“其它算法分支未知”这一缺口进一步消掉：
+
+| EncryptMode | Windows writer | Windows reader | Linux当前build | 当前结论 |
+|---:|---|---|---|---|
+| 1 | `sub_10001190`: A7F0, key=MD5(password) | `sub_100384E0`: A6B0 inverse | `fileKey_Decrypt case1 -> Decrypt` | 算法双向闭合；22盘正向样本0 |
+| 2 | `sub_100036E0` 或 `sub_10011010`: 标准SM4-ECB | `sub_10028AB0 case2`: 标准SM4 decrypt | `MC_KKSMS4::DecryptBuffer` | 44条真实entry；已闭合 |
+| 3 | `sub_1000FC10`: AES-128-ECB | `sub_1002F670`: AES-128 inverse；CRC失败后强制mode1重试 | 当前 `fileKey_Decrypt` 无case3 | 算法/兼容行为闭合；22盘正向样本0 |
+
+mode1 的关键固定关系：
+
+```text
+key = MD5(effective_password)
+A7F0 key material = key XOR "EDPSECDISK200709"
+wrapped16 = A7F0(file_key16, key, counter=0)
+
+reader:
+file_key16 = A6B0(wrapped16, key, counter=0)
+CRC32(file_key16) == FileKeyCRC
+```
+
+mode3 则是：
+
+```text
+key = MD5(effective_password)
+wrapped16 = AES-128-ECB-ENC(file_key16, key)
+
+reader:
+file_key16 = AES-128-ECB-DEC(wrapped16, key)
+CRC32(file_key16) == FileKeyCRC
+```
+
+Windows `UserLogin` 还明确实现 mode3 历史 fallback：第一次 mode3 解包
+CRC失败后，以 mode1 重解同一 wrapped16；第二次 CRC 成功则接受。
+对应日志分别为 `EncryptMode == eEncryptAESOPENSSL` 与
+`dwKeyCrcOld == m_epiNewInfos[nIndex].FileKeyCRC`。
+
+`oldSM4=="1"` 也不再视为独立 wire profile。该分支
+`sub_10011010` 与默认 `sub_100036E0` 均逐常量/轮函数对应标准SM4：
+同一 S-box、FK、CK、32轮和同一 block 输入输出语义；Windows mode2
+reader 只有一个标准SM4解包分支且完全不读取 `oldSM4` 配置。
+所以它只是实现选择，不改变盘面格式。
+
+因此 `+0x38..+0x47` 整体仍记 **PARTIAL**，但剩余原因已收缩为：
+**22份原始盘没有 mode1/mode3 的正向样本**。当前44条加密entry全部mode2。
+严格完成度统计仍不增加 16B×3，避免用静态算法闭合替代真实盘证据。
 
 ## 7. 代码与测试门禁
 

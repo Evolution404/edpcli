@@ -605,7 +605,7 @@ Provision 也已按官方 writer 修正：
 | +0x28 | 8 | PartionSize | 已知 | 写端计算、UserLogin/mount 参数实际消费 |
 | +0x30 | 4 | UserKeyCRC | 已知 | 密码校验链消费；默认密码CRC已复算 |
 | +0x34 | 4 | FileKeyCRC | 已知 | 解 wrapped key 后 CRC 校验；Windows UserLogin 明确比较 |
-| +0x38 | 16 | wrapped file-key material | 部分已知 | 读端明确消费；默认样本可独立解包闭合，但通用生成源/非默认分支仍未闭合 |
+| +0x38 | 16 | wrapped file-key material | 部分已知 | mode1/2/3 writer/reader 算法已映射；22份原始盘的44条加密entry全部为mode2，mode1/3缺正向原盘证据，因此仍PARTIAL |
 | +0x48 | 16 | extension / alternate key-material slot | 部分已知 | Windows writer 当前零初始化且样本全零；扩展 Linux 104B 结构有同类 `EncryptFileKey32`，但 packed 对应关系与用途未完全证明 |
 | +0x58 | 1 | EncryptMode | 已知 | Windows writer/reader + Linux挂载分派；见下方支持矩阵 |
 | +0x59 | 7 | padding/reserved | 部分已知 | 当前 writer 零初始化、样本全零；未证明所有版本都必须为零 |
@@ -842,17 +842,115 @@ Linux consumer 独立给出同一设计：
 `+0x38..+0x47` 的 producer、consumer、默认密码替换规则和实盘结果
 已经完整闭合。
 
-但 **这 16B 仍保持 PARTIAL，不升级 COMPLETE**。原因不是当前 mode2
-证据不足，而是官方 writer 还存在明确的已知 protocol branches：
+本轮随后继续把其它算法分支追完，形成
+**LBA12 alternate wrapping-mode algorithm map**。
 
-- EncryptMode=1；
-- EncryptMode=3；
-- mode2 且 `GLOBAL/oldSM4=="1"` 时走 `sub_10011010` 的另一实现。
+#### mode2 的 `oldSM4` 开关不是新的盘面格式
 
-严格完成口径要求已知 profile 差异本身也必须解释清楚；在这三条分支
-producer/consumer + 正向样本尚未全部闭合之前，不能把
-`+0x38..+0x47` 整体提升为 COMPLETE，也不能直接把当前 mode2 规则
-写成通用 Provision 生成规则。
+Windows writer 的两个 mode2 实现分别是：
+
+- `oldSM4=="1" -> sub_10011010`；
+- 其它 -> `sub_100036e0`。
+
+对 `sub_10011010` 再回到机器码/常量逐项核验：
+
+- S-box @ `0x100C6548` 与标准 SM4 256B S-box 完全一致；
+- FK 在内存中以小端 DWORD 保存，解释后仍是
+  `A3B1BAC6 / 56AA3350 / 677D9197 / B27022DC`；
+- CK 同样以小端 DWORD 保存，解释后从
+  `00070E15 / 1C232A31 / 383F464D ...` 开始，完整对应标准32轮 CK；
+- `sub_1000FD90` 是32轮 key expansion；
+- `sub_10010B80` 是标准 round-T；
+- `sub_1000FFA0` 正向使用 round keys；
+- `sub_10010540` 反向使用同一 round keys。
+
+因此 `sub_10011010` 与 `sub_100036e0` 都实现
+**SM4-ECB(16B, MD5(effective_password))**，只是内部实现不同。
+更重要的是 Windows `CEdpDiskControl::UserLogin -> sub_10028AB0`
+在 mode2 只有一条标准 SM4 解包路径，而且完全不读取 `GLOBAL/oldSM4`。
+所以该配置不能代表不同的 wire format；否则同一 reader 无法同时读取两种盘。
+本账本将 `oldSM4` 定性为 **implementation switch, not wire-profile switch**。
+
+#### EncryptMode=1：EDP A7F0/A6B0 16B wrapping
+
+Windows writer：
+
+```text
+effective_password
+  -> MD5 = 16B
+  -> sub_10001190(file_key16, key=MD5)
+  -> wrapped16
+```
+
+`sub_10001190` 的 key 初始化先执行：
+
+```text
+expanded_key_input[i] =
+    MD5[i] XOR "EDPSECDISK200709"[i]
+```
+
+随后使用项目已独立恢复的 A7F0 正向块算法；16B file-key 只有一个 block，
+counter 从0开始。
+
+Windows consumer `sub_10028AB0 case 1`：
+
+- 对输入 password 做 MD5；
+- 调用 `sub_100384E0`；
+- 其 key 初始化同样 XOR `"EDPSECDISK200709"`；
+- 使用与 writer 相反的 A6B0 解包；
+- `UserLogin` 随后 CRC32 16B 明文并比较 `FileKeyCRC`。
+
+Linux `AlgorithmSpace::fileKey_Decrypt case 1` 也执行
+`MD5(password) -> Decrypt(...)`，与同一 A6B0 family 对应。
+
+因此 mode1 的 producer/consumer 算法已经闭合；缺口只剩当前
+22份 original reference set 中**没有任何正向 mode1 packed entry**。
+
+#### EncryptMode=3：标准 AES-128-ECB wrapping + Windows 历史 fallback
+
+Windows writer `sub_1000FC10`：
+
+- key = `MD5(effective_password)`；
+- `sub_1000E0A0(key, 0x80, roundkeys)` 是 AES-128 key schedule；
+- `sub_1000ECA0` 是标准 AES 正向 block transform；
+- 16B file-key 恰好一个 block，因此没有 IV/链模式：
+  **AES-128-ECB(file_key16, MD5(effective_password))**。
+
+Windows consumer `sub_10028AB0 case 3`：
+
+- 对 password 做 MD5；
+- `sub_1002F670 -> sub_1002E7D0/sub_1002F090` 使用 AES-128
+  inverse key schedule / inverse block transform；
+- 解出16B后仍统一由 `UserLogin` 做 FileKeyCRC 校验。
+
+而 `UserLogin` 对 mode3 还有明确的历史兼容分支：
+
+1. 先按 entry 标记的 mode3 解包；
+2. 若 FileKeyCRC 不匹配，日志输出
+   `EncryptMode == eEncryptAESOPENSSL`；
+3. 强制以 **mode1** 再解一次同一 wrapped16；
+4. 若第二次 CRC 匹配则接受，日志
+   `dwKeyCrcOld == m_epiNewInfos[nIndex].FileKeyCRC`。
+
+这说明 mode3 标记历史上可能承载过 mode1-compatible ciphertext；
+Windows reader 明确做了容错，而不是靠猜测。
+
+Linux 当前 `libcemsfilesyscheck.so::fileKey_Decrypt` build 只显式实现
+mode1/mode2，没有 mode3 分支。这是组件能力差异，不应把 mode3
+误写成“Linux 同样支持”。
+
+#### 严格完成状态
+
+22份 original real-device reference set 中：
+
+- 44条需要16B wrapped key 的 type2/type4 entry **全部 EncryptMode=2**；
+- mode1 正向样本：**0**；
+- mode3 正向样本：**0**。
+
+所以 `+0x38..+0x47` 目前的剩余缺口已经从“算法/分支不明”收缩为：
+**mode1/mode3 缺真实正向盘样本**。严格规则要求 producer + consumer +
+real-device evidence 三者都存在，因此这16B仍保持 PARTIAL，
+完成度数字不增加；但 `oldSM4` 不再作为未解释 wire profile。
 
 ### LBA9/LBA10 的非零形态
 
@@ -986,7 +1084,7 @@ Windows `edpediskctrl.dll` 同时给出读端和写端：
 ## 尚不能猜测的材料
 
 - LBA4 中除 onlyid、已知 LLGB 常量之外的生成期动态字节；
-- EDPF wrapped-key 在非默认密码/不同 algo 分支下的完整生成关系；
+- EDPF wrapped-key 的 mode1/mode3 正向真实盘样本（算法与consumer已闭合，当前22盘均为mode2）；
 - LBA4 onlyID2Nd 及关联动态字段的生成源；
 - LBA0 全新盘 bootstrap 的官方来源；
 - LBA6 0x1c0..0x1ed 不同格式代际的准确字段来源。

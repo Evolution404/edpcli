@@ -259,6 +259,59 @@ fn lba12_v206_hidden_default_password_wraps_real_mode2_file_keys() {
 }
 
 #[test]
+fn lba12_reference_fixtures_do_not_invent_unobserved_mode1_or_mode3_profiles() {
+    let mut mode_counts = [0usize; 4];
+    let mut encrypted_entries = 0usize;
+
+    for entry in fs::read_dir(FIXTURE_DIR).expect("protocol fixtures") {
+        let path = entry.expect("backup entry").path();
+        if path.extension().and_then(|ext| ext.to_str()) != Some("bin") {
+            continue;
+        }
+        let name = path.file_name().unwrap().to_str().unwrap();
+        let Some(meta) = parse_reference_backup_name(name) else {
+            continue;
+        };
+        let image = fs::read(&path).expect("fixture bytes");
+        let crc = crc32_bare(meta.device_id.as_bytes());
+        let plain = a6b0_full(sector(&image, 12), &crc.to_le_bytes(), 0);
+
+        for index in 0..3 {
+            let base = index * 0x60;
+            if &plain[base..base + 4] != b"EDPF" {
+                continue;
+            }
+            let mode = plain[base + 0x58] as usize;
+            assert!(
+                mode < mode_counts.len(),
+                "unexpected EncryptMode {mode}: {name}"
+            );
+            mode_counts[mode] += 1;
+            if mode != 0 {
+                encrypted_entries += 1;
+            }
+        }
+    }
+
+    assert!(
+        encrypted_entries >= 12,
+        "protocol fixture set lost encrypted-entry coverage"
+    );
+    assert_eq!(
+        mode_counts[1], 0,
+        "committed original fixtures must not be presented as positive mode1 evidence"
+    );
+    assert_eq!(
+        mode_counts[3], 0,
+        "committed original fixtures must not be presented as positive mode3 evidence"
+    );
+    assert_eq!(
+        mode_counts[2], encrypted_entries,
+        "all encrypted entries in the committed original fixture subset are mode2"
+    );
+}
+
+#[test]
 fn lba6_offset_1ca_is_inside_gserial_slot_not_a_standalone_state_field() {
     let mut values = std::collections::BTreeSet::new();
     for entry in fs::read_dir(FIXTURE_DIR).expect("protocol fixtures") {
