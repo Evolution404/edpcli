@@ -82,6 +82,25 @@ fn lba11_can_decrypt_from_backup_filename_metadata() {
 }
 
 #[test]
+fn lba5_is_reported_as_an_opaque_write_protection_probe_sector() {
+    let raw = [0u8; 512];
+    let view = analyze_sector(5, &raw, &InspectMeta::default());
+    assert!(view.method.contains("写保护探测"));
+    assert!(view.fields.iter().any(|field| {
+        field.start == 0
+            && field.end == 0x200
+            && field.label == "写保护探测 scratch 区"
+            && field.value.contains("内容本身不解析")
+    }));
+    assert!(view.notes.iter().any(|note| {
+        note.contains("ERROR_WRITE_PROTECT")
+            && note.contains("原样保留")
+            && note.contains("全零")
+            && note.contains("不是协议要求")
+    }));
+}
+
+#[test]
 fn lba4_zero_ciphertext_byte_is_decrypted_unless_whole_short_gap_is_unwritten() {
     let onlyid = 949_028_302u32;
     let k0 = (onlyid & 0xffff) ^ (onlyid >> 16);

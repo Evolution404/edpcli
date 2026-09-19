@@ -263,7 +263,7 @@ BuildSector8(label):
 | LBA2 | 0 | 0 | 512 | 0.0% |
 | LBA3 | 0 | 0 | 512 | 0.0% |
 | LBA4 | 36 | 39 | 437 | 7.0% |
-| LBA5 | 0 | 0 | 512 | 0.0% |
+| LBA5 | 512 | 0 | 0 | 100.0% |
 | LBA6 | 36 | 124 | 352 | 7.0% |
 | LBA7 | 155 | 51 | 306 | 30.3% |
 | LBA8 | 10 | 400 | 102 | 2.0% |
@@ -275,9 +275,9 @@ BuildSector8(label):
 
 当前总计：
 
-- **COMPLETE：1023B / 6656B = 15.4%**
+- **COMPLETE：1535B / 6656B = 23.1%**
 - **PARTIAL：1560B / 6656B = 23.4%**
-- **UNKNOWN：4073B / 6656B = 61.2%**
+- **UNKNOWN：3561B / 6656B = 53.5%**
 
 LBA11 本轮从 8B COMPLETE 提升到 260B COMPLETE。没有因为“能解开第二半扇”就把其余 252B 也冒进标完成：旧 Aigo U335 `rev_pmap` 为什么选择 CHS 容量参与密钥，而其它 21 份使用 DiskSize，上游选择逻辑尚未闭合。
 
@@ -328,7 +328,7 @@ DWARF 中恢复出的原始声明文件/行号与本地函数地址：
 | LBA4 | 0x034–0x046 | PARTIAL | restore-info 其余字段 | Windows/Linux 结构边界已恢复 | 部分 reader 已知 | 22盘可解 | 尚有字段缺消费语义 |
 | LBA4 | 0x047–0x1FB | UNKNOWN | short/full form 扩展区 | short current writer 不写此区 | full-form 历史消费者未闭合 | current short form 为物理零 | 不能按零认完成 |
 | LBA4 | 0x1FC–0x1FF | COMPLETE | trailing LLGB | current writer 继续 rolling key schedule 写 LLGB | reader 作为尾锚点校验 | 22盘可验证 | 完成 |
-| LBA5 | 0x000–0x1FF | UNKNOWN | 未知/当前多为零 | 待查 | 待查 | 当前参考多为零 | 全零不等于完成 |
+| LBA5 | 0x000–0x1FF | COMPLETE | opaque preserve / write-protection probe scratch sector | `CUsbRegsiter::RegsiterUsb` 先读取既有 LBA0–12；后续 builder 只重建其它明确扇区，LBA5 不被覆盖，最终随13扇区整体写回；即 producer 语义是 preserve existing bytes | 两版 `EdpDiskCtrl` 的唯一 `base+5` raw-sector consumer 都是：读取整扇→原样写回同一扇区→仅检查 `WriteFile` 是否以 `ERROR_WRITE_PROTECT(0x13)` 失败；`UserLogin` 据此进入只读使用状态，完全不解析内容 | 22/22原始参考整扇512B全零，SHA-256均为 `076a27c79e5ace2a3d47f9dd2e83e4ff6ea8872b3c2218f66c92b89b55f36560`；7份原始CI夹具继续锁定 | COMPLETE 表示“整区用途和无payload语义闭合”；全零只是当前实盘状态，不是协议规定，非零内容也应原样保留 |
 | LBA6 | 0x000–0x03F | PARTIAL | Dept slot | `BuildSector6` 从 UsbWriteParam/UsbLabelParam 写入 | `ReadSector6` 取回 | 多盘真实部门字段可解析 | 上游业务来源明确，所有字节语义仍未逐个闭合 |
 | LBA6 | 0x050–0x05F | PARTIAL | User slot | writer 固定槽写入 | reader 取回 | 多盘真实姓名可解析 | 槽边界明确 |
 | LBA6 | 0x070–0x07F | PARTIAL | m_autoid / Autonum fixed copy slot | `BuildSector6@diskfile.cpp:672` 固定复制 writer `m_autoid[16]` | `ReadSector6@diskfile.cpp:1005` 以 C 字符串复制到 `UsbLabelParam.m_autoid`；`BuildSector8` 再序列化为 `Autonum=` | 22/22 LBA6 C-string 与 LBA8 Autonum 完全相同；但 NUL 后真实槽尾大量非零 | 字符串语义已闭合，固定槽尾不是协议零 padding，整16B仍不能算 COMPLETE |
@@ -638,6 +638,100 @@ CI 中的原始完整夹具也有多份 EETU，新增回归会逐盘解密并固
 - `+0x0C..0x13`：8B；
 - `+0x14..0x17`：4B；
 - 合计 **20B**。
+
+### 4.4 LBA5：512B 整区是 opaque write-protection probe scratch sector
+
+旧分析文档曾把 LBA5 称作“写保护探测牺牲扇区”。这次没有沿用旧结论，
+而是从当前/另一版运行时、当前注册 writer 和 22 份原始实盘重新验证。
+
+#### Consumer：两版 EdpDiskCtrl 同构
+
+当前版本：
+
+`/VRV/cems/ydcc/edpediskctrl.dll.m::sub_10012490`
+
+另一版：
+
+`/out_raw_data/EdpEDiskCtrl.dll.m::sub_10015270`
+
+两者逻辑完全同构：
+
+```text
+seek((metadata_base + 5) * sector_size)
+read(one_sector, scratch)
+
+if read succeeded:
+    seek((metadata_base + 5) * sector_size)
+    ok = write(one_sector, scratch)   // 写回刚刚读到的完全相同字节
+    if !ok && GetLastError() == ERROR_WRITE_PROTECT /* 0x13 */:
+        return WRITE_PROTECTED
+
+return NOT_WRITE_PROTECTED
+```
+
+当前 `CEdpDiskControl::UserLogin` 的调用语境进一步确认该返回值用途：
+
+```text
+if ProbeSector5WriteProtection():
+    global_read_only = 1
+    log("UDisk Write-protected and can only read-only use!")
+else:
+    global_read_only = 0
+```
+
+也就是说 consumer 只关心“能否把**同一批字节**写回”，从未解析 LBA5
+任何 offset、magic、flag 或 checksum。
+
+#### Producer：注册 writer 保留既有 LBA5
+
+`CUsbRegsiter::RegsiterUsb` 的当前 writer 流程是：
+
+```text
+buffer = zero[13 * sector_size]
+ReadSectorData(existing LBA0..12, buffer)
+
+rebuild known sectors:
+    LBA4  <- BuildSector4
+    LBA6  <- BuildSector6
+    LBA7  <- CreatePartitions / BuildSector7 path
+    LBA8  <- BuildSector8
+    LBA11 <- BuildSector11
+    LBA12 <- CreatePartitions / BuildSector12 path
+    ...
+
+# no builder targets base + 5 * sector_size
+
+WriteSectorData(buffer, count=13)
+```
+
+额外审计：
+
+- `CreatePartitions` 的真实目标是 `base + 7*sector_size` 与
+  `base + 12*sector_size`；
+- `BakupUsbSec` 只把当前 metadata 复制到磁盘尾部备份区，不修改内存 LBA5；
+- SAFE1 builder 使用独立临时缓冲区，不存在 `base+5` 写入；
+- 对当前与另一版 `EdpDiskCtrl` 的 raw-sector 引用搜索，`base+5`
+  都只出现于上述“读后原样写回”probe。
+
+因此官方 writer 对 LBA5 的规则不是“必须写零”，而是**preserve existing bytes**。
+
+#### 22份原始实盘
+
+只读全量复核：
+
+- 22/22：LBA5 512B 全零；
+- 22/22：整扇 SHA-256 都是
+  `076a27c79e5ace2a3d47f9dd2e83e4ff6ea8872b3c2218f66c92b89b55f36560`；
+- 但这只证明当前原始参考的实际内容，不把“零”提升为协议固定值。
+
+因此本账本把整个 LBA5 的 **512B** 标为 COMPLETE，含义非常具体：
+
+> LBA5 没有字段级 payload；整扇内容对协议是 opaque bytes，注册流程原样保留，
+> 运行时仅把它作为可安全执行“读→同字节写回”的写保护探测 scratch 区。
+
+如果未来发现非零原始 LBA5，这个结论不会失效：只要 writer 仍 preserve、
+probe 仍原样写回，非零内容同样符合协议。CI 对当前原始夹具的“全零”断言只用于
+防止样本集被悄悄替换，不把全零编码成生成规则。
 
 ## 5. LBA11 完整 producer / consumer 追踪
 
@@ -962,7 +1056,8 @@ if (packed_entry0.NeedDisturb != 0):
 5. **LBA8**：为 17-key ELABEL 的每个业务字段找到最终消费者。
 6. **LBA9/10**：继续追 EETU `reverse[104]`、EESI `+0x04` 及
    `+0x28..` 未闭合区；EETU 时间/次数控制和两个16B EESI卷标槽已经完成。
-7. **LBA0/1/2/3/5**：从官方 `RegsiterUsb` 的 BuildSafe6Label/模板初始化向前追，避免仅凭全零样本猜用途。
+7. **LBA0/1/2/3**：继续从官方 `RegsiterUsb` 的模板/读取路径向前追；
+   LBA5 的 opaque write-protection probe 用途已经闭合，不再作为未知扇区。
 
 ## 9. 操作安全边界
 

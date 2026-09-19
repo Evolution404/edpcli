@@ -117,6 +117,12 @@ fn inspect_meta(spec: &ProvisionSpec) -> InspectMeta {
 }
 
 fn validate_reserved(bytes: &[u8]) -> Result<(), String> {
+    // This is the canonical *fresh-image profile* policy, not a claim that every
+    // protocol generation requires these sectors to be zero. In particular,
+    // official in-place registration preserves existing LBA5 bytes and later
+    // uses that opaque sector only for a read/same-bytes-write write-protection
+    // probe. A fresh generated image starts from zero, so canonical LBA5=0 is
+    // still intentional here.
     for lba in [1usize, 2, 3, 5, 9, 10] {
         if sector(bytes, lba).iter().any(|byte| *byte != 0) {
             return Err(format!("LBA{lba} violates canonical zero-sector policy"));

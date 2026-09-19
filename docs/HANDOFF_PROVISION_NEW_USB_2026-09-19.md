@@ -22,6 +22,17 @@ producer + 官方 consumer/行为 + 原始实盘验证**同时闭合，才能标
 -> BusManageImp::WriteNormalULabel -> CEMSUsbRegsiter.dll::CUsbRegsiter::RegsiterUsb
 -> BuildSector* -> WriteSectorData(count=0x0D)`。
 
+截至最新逐字节审计，严格 COMPLETE 已提升到 **1535 / 6656B = 23.1%**。
+其中本轮新增两项高置信结论：
+
+- LBA9 EETU：`ullBTime`、`ullETime`、`useCount` 共20B已由
+  Windows producer + Linux `CheckTempUse` consumer + 20份真实EETU实盘闭合；
+  `0xFFFFFFFF` 明确是无限次数哨兵。
+- LBA5：整扇512B不是字段结构，而是 opaque write-protection probe scratch。
+  官方注册 writer preserve existing bytes；两版 EdpDiskCtrl 都只执行
+  “读整扇→同字节写回→检查 ERROR_WRITE_PROTECT(0x13)”；22/22原始盘当前全零，
+  但零不是协议固定要求。
+
 目标：让一块普通全新 USB 能生成并安全写入 EDP/cems 前部 metadata。协议、备份、inspect、Provision 统一只处理 **LBA0–12（13 sectors / 6656B）**。第一阶段不格式化数据区，不写 LBA12 之后区域。
 
 先完整阅读 `docs/PROVISION_NEW_USB_PLAN_2026-09-19.md`、`docs/RELEASE.md`，再检查 git 状态。允许连接 Mac，Phase 0 优先用现有备份和真实盘做**只读**协议审计。不要把现有 `apply` 直接改造成 provision；必须先建立纯 `ProvisionSpec/Profile/Image/Validator`。

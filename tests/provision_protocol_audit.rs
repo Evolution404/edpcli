@@ -205,6 +205,31 @@ fn committed_blank_sector_evidence_matches_real_images() {
 }
 
 #[test]
+fn original_fixtures_keep_lba5_zero_while_the_protocol_treats_it_as_opaque_scratch() {
+    let mut checked = 0usize;
+    for entry in fs::read_dir(FIXTURE_DIR).expect("protocol fixtures") {
+        let path = entry.expect("backup entry").path();
+        if path.extension().and_then(|ext| ext.to_str()) != Some("bin") {
+            continue;
+        }
+        let name = path.file_name().unwrap().to_str().unwrap();
+        if parse_reference_backup_name(name).is_none() {
+            continue;
+        }
+        let image = fs::read(&path).expect("fixture bytes");
+        assert!(
+            sector(&image, 5).iter().all(|byte| *byte == 0),
+            "original fixture has unexpected LBA5 bytes: {name}"
+        );
+        checked += 1;
+    }
+    assert!(
+        checked >= MIN_PROTOCOL_FIXTURES,
+        "protocol audit unexpectedly lost original LBA5 fixtures: {checked}"
+    );
+}
+
+#[test]
 fn onlyid_is_not_a_function_of_device_id_vid_pid_or_capacity() {
     let a = load(NETAC_A);
     let b = load(NETAC_B);

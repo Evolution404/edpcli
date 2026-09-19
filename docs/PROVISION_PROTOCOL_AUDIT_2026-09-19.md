@@ -721,7 +721,7 @@ Windows `edpediskctrl.dll` 同时给出读端和写端：
 | 2 | 0B | 0B | 512B | 0% | 同上 |
 | 3 | 0B | 0B | 512B | 0% | 有厂商 mp mark 变体，协议用途未闭合 |
 | 4 | 36B | 39B | 437B | 7.0% | onlyid clear header、OnlyIdXor8、LLGB 双锚点完成；第二 ID/HSerial/profile 字段仍不完整；short/full 扩展区大部分未知 |
-| 5 | 0B | 0B | 512B | 0% | 只知道当前参考集全零，不知道协议用途 |
+| 5 | 512B | 0B | 0B | 100% | 两版 EdpDiskCtrl 均只对 LBA5 执行“读整扇→原样写回→检查 ERROR_WRITE_PROTECT(0x13)”；当前注册 writer 读取既有13扇区后不重建 LBA5，因此 preserve existing bytes；22/22原始盘全零 |
 | 6 | 36B | 124B | 352B | 7.0% | GSerial 16B、BeiZhu 16B、checksum 4B 完成；若干固定槽/CRC/flag 仅部分闭合，大量模板区仍未知 |
 | 7 | 155B | 51B | 306B | 30.3% | 三个 64B EDPF entry 中 48B/entry 完成，加 11B pass-info；Version/NeedDisturb/key8 等仍部分，表后区域未闭合 |
 | 8 | 10B | 400B | 102B | 2.0% | LLGB magic + logical length + ElabOffset(2B)完成；17-key ELABEL 序列化/来源虽已较清楚，但下游语义并未逐字段全部闭合，因此整体只计部分；头部仍有未知区 |
@@ -732,9 +732,9 @@ Windows `edpediskctrl.dll` 同时给出读端和写端：
 
 总计：
 
-- **完成：1023B / 6656B = 15.4%**
+- **完成：1535B / 6656B = 23.1%**
 - **部分已知：1560B / 6656B = 23.4%**
-- **未知：4073B / 6656B = 61.2%**
+- **未知：3561B / 6656B = 53.5%**
 
 这是一组**严格下限**，故意宁可低估，不把“能生成/能解析”冒充成“已经完全理解”。
 后续只有在证据链真正闭合时，字节才能从“未知 → 部分已知 → 完成”升级。
@@ -746,7 +746,7 @@ Windows `edpediskctrl.dll` 同时给出读端和写端：
 | 2 | canonical 已知 | 当前 22/22 全零 |
 | 3 | canonical 已知 | 21/22 全零，1 份厂商 mp mark；EDP canonical 可零 |
 | 4 | 高度闭合 | onlyid 头、rolling XOR 区、onlyIdXor8、LLGB 双锚点已锁；动态字段生成源继续追 |
-| 5 | canonical 已知 | 当前 22/22 全零 |
+| 5 | canonical 已知 | opaque preserve / 写保护探测 scratch；当前 22/22 全零，但零不是协议固定要求 |
 | 6 | 高度闭合 | SAFE6、device CRC、checksum 已锁；0x1c0..0x1df 当前 writer 来源已拆分，0x1e0..0x1ef 仍存在版本/宿主差异 |
 | 7 | 高度闭合 | 64B EDPF entry、PartionCount、rolling XOR 已锁；表尾和 key8 生成源继续追 |
 | 8 | 高度闭合 | LLGB/ELABEL + 可变加密长度已锁；动态头字段继续追 |

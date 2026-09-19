@@ -50,11 +50,11 @@ fn strict_progress_covers_exactly_lba0_through_lba12() {
     );
     assert_eq!(complete + partial + unknown, 13 * 512);
     assert!(
-        complete >= 1023,
+        complete >= 1535,
         "strict COMPLETE coverage regressed below the audited baseline: {complete}"
     );
     assert!(
-        unknown <= 4073,
+        unknown <= 3561,
         "UNKNOWN coverage regressed above the audited baseline: {unknown}"
     );
 }
@@ -122,6 +122,9 @@ fn documentation_keeps_the_official_provisioning_chain_and_strict_rules() {
         "edpdiskglobal.h:481",
         "useCount=0xFFFFFFFF",
         "OutManage switch is off",
+        "opaque preserve / write-protection probe scratch sector",
+        "ERROR_WRITE_PROTECT(0x13)",
+        "076a27c79e5ace2a3d47f9dd2e83e4ff6ea8872b3c2218f66c92b89b55f36560",
         "overflow_marker(0x40245E2A)",
         "m_autoid / Autonum",
         "NUL 后真实槽尾大量非零",

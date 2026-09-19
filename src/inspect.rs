@@ -895,6 +895,23 @@ pub fn analyze_sector(lba: u32, raw: &[u8], meta: &InspectMeta) -> SectorView {
                 "RAW（未找到 $$$<onlyid>$$$）".into()
             }
         }
+        5 => {
+            fields.push(field(
+                0x000,
+                0x200,
+                "写保护探测 scratch 区",
+                if raw.iter().all(|byte| *byte == 0) {
+                    "当前整扇全零；内容本身不解析"
+                } else {
+                    "非零内容；协议仍按 opaque bytes 原样保留"
+                },
+                FieldStyle::Flag,
+            ));
+            notes.push(
+                "LBA5 没有字段级 payload：官方注册 writer 读取既有 LBA0–12 后不重建 LBA5，最终原样保留；EdpDiskCtrl 的两版运行时只读取整扇并把同一缓冲区写回，再以 WriteFile 是否返回 ERROR_WRITE_PROTECT(0x13) 判断 U 盘写保护状态。22 份原始参考当前均全零，但“全零”是实盘现状，不是协议要求。".into(),
+            );
+            "RAW（opaque preserve + 写保护探测 scratch sector）".into()
+        }
         6 => {
             decoded = parse_lba6(raw, meta, &mut fields, &mut notes);
             "XOR K0=0x4DAA (SAFE6)".into()
