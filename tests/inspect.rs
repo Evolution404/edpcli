@@ -459,7 +459,7 @@ fn lba8_decrypts_the_llgb_length_instead_of_a_fixed_0x170_prefix() {
     plain[4..8].copy_from_slice(&(logical_len as u32).to_le_bytes());
     plain[0x80..0x80 + elabel.len()].copy_from_slice(&elabel);
 
-    let encrypted_len = (logical_len + 15) & !15;
+    let encrypted_len = (logical_len / 16 + 1) * 16;
     let mut raw = vec![0u8; 512];
     raw[..encrypted_len].copy_from_slice(&a7f0_full(
         &plain[..encrypted_len],
@@ -479,6 +479,88 @@ fn lba8_decrypts_the_llgb_length_instead_of_a_fixed_0x170_prefix() {
         view.method.contains(&format!("前 {encrypted_len}B")),
         "{}",
         view.method
+    );
+}
+
+#[test]
+fn lba8_preserves_nonzero_bytes_after_the_dynamic_encrypted_prefix() {
+    let device_id = "disk&ven_test&prod_llgb_preserved_tail";
+    let crc = crc32_bare(device_id.as_bytes());
+    let mut plain = vec![0u8; 0x160];
+    plain[..4].copy_from_slice(b"LLGB");
+    plain[8..12].copy_from_slice(&0x0100_0001u32.to_le_bytes());
+    plain[12..16].copy_from_slice(&0x222u32.to_le_bytes());
+    plain[0x3e..0x40].copy_from_slice(&0x80u16.to_le_bytes());
+    let elabel = b"<ELABEL>GLab=322CA28A-D7D1448B-DCE2CED9||Label=TEST!SAFE6||";
+    let logical_len = 0x80 + elabel.len();
+    plain[4..8].copy_from_slice(&(logical_len as u32).to_le_bytes());
+    plain[0x80..0x80 + elabel.len()].copy_from_slice(elabel);
+
+    let encrypted_len = (logical_len / 16 + 1) * 16;
+    let mut raw = vec![0u8; 512];
+    raw[..encrypted_len].copy_from_slice(&a7f0_full(
+        &plain[..encrypted_len],
+        &crc.to_le_bytes(),
+        0,
+    ));
+    raw[0x1f0..0x1f4].copy_from_slice(&[0xde, 0xad, 0xbe, 0xef]);
+
+    let meta = InspectMeta {
+        device_id: Some(device_id.into()),
+        ..InspectMeta::default()
+    };
+    let view = analyze_sector(8, &raw, &meta);
+
+    assert_eq!(
+        &view.decoded[0x1f0..0x1f4],
+        &[0xde, 0xad, 0xbe, 0xef],
+        "bytes after the dynamic encrypted prefix are preserved physical backing, not LLGB ciphertext"
+    );
+    assert!(view.method.contains(&format!("前 {encrypted_len}B")));
+}
+
+#[test]
+fn lba8_decrypts_one_extra_block_when_logical_length_is_16_byte_aligned() {
+    let device_id = "disk&ven_test&prod_llgb_aligned";
+    let crc = crc32_bare(device_id.as_bytes());
+    let mut elabel = b"<ELABEL>Label=TEST!SAFE6||".to_vec();
+    while (0x80 + elabel.len()) % 16 != 0 {
+        elabel.push(b'X');
+    }
+    let logical_len = 0x80 + elabel.len();
+    assert_eq!(logical_len % 16, 0);
+    let encrypted_len = (logical_len / 16 + 1) * 16;
+
+    let mut plain = vec![0u8; encrypted_len];
+    plain[..4].copy_from_slice(b"LLGB");
+    plain[4..8].copy_from_slice(&(logical_len as u32).to_le_bytes());
+    plain[8..12].copy_from_slice(&0x0100_0001u32.to_le_bytes());
+    plain[12..16].copy_from_slice(&0x222u32.to_le_bytes());
+    plain[0x3e..0x40].copy_from_slice(&0x80u16.to_le_bytes());
+    plain[0x80..0x80 + elabel.len()].copy_from_slice(&elabel);
+    // The byte exactly at logical_len is the ELABEL C-string terminator and
+    // belongs to the extra encrypted block.
+    assert_eq!(plain[logical_len], 0);
+
+    let mut raw = vec![0u8; 512];
+    raw[..encrypted_len].copy_from_slice(&a7f0_full(&plain, &crc.to_le_bytes(), 0));
+    raw[encrypted_len] = 0x5a;
+
+    let meta = InspectMeta {
+        device_id: Some(device_id.into()),
+        ..InspectMeta::default()
+    };
+    let view = analyze_sector(8, &raw, &meta);
+
+    assert!(
+        view.method.contains(&format!("前 {encrypted_len}B")),
+        "{}",
+        view.method
+    );
+    assert_eq!(view.decoded[logical_len], 0);
+    assert_eq!(
+        view.decoded[encrypted_len], 0x5a,
+        "the first byte after the extra encrypted block must remain physical backing"
     );
 }
 

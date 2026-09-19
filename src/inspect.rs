@@ -1048,7 +1048,11 @@ pub fn analyze_sector(lba: u32, raw: &[u8], meta: &InspectMeta) -> SectorView {
                 let encrypted_len = if head.get(..4) == Some(b"LLGB") {
                     u32_at(&head, 4)
                         .map(|value| value as usize)
-                        .and_then(|logical_len| logical_len.checked_add(15))
+                        // Official BuildSector8 always encrypts the block that
+                        // contains the ELABEL trailing NUL.  Therefore an
+                        // already 16-byte-aligned logical length still needs
+                        // one additional encrypted block.
+                        .and_then(|logical_len| logical_len.checked_add(16))
                         .map(|value| value & !15)
                         .filter(|value| *value >= 16 && *value <= SECTOR)
                         .unwrap_or(LLGB_FALLBACK_LEN)

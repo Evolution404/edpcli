@@ -29,8 +29,8 @@ producer + 官方 consumer/行为 + 原始实盘验证**同时闭合，才能标
 截至本次 LBA11 repair-profile 闭环，严格统计为：
 
 - **COMPLETE：2191 / 6656B = 32.9%**
-- **PARTIAL：4011 / 6656B = 60.3%**
-- **UNKNOWN：454 / 6656B = 6.8%**
+- **PARTIAL：4113 / 6656B = 61.8%**
+- **UNKNOWN：352 / 6656B = 5.3%**
 
 当前各 LBA 严格状态以主账本为唯一准绳，最新关键增量：
 
@@ -71,6 +71,32 @@ producer + 官方 consumer/行为 + 原始实盘验证**同时闭合，才能标
   因此306B由 UNKNOWN 直接升 COMPLETE。复核总账时还发现此前已闭合的
   entry0 `NeedDisturb` 4B（producer + `NewCheckDisTurbUsb(*)` consumer + 22/22实盘）
   被正文标为 COMPLETE 却漏算进总数，现已纠正。LBA7 已无UNKNOWN，只剩23B PARTIAL。
+  本轮又把 entry0 的行为链继续闭合到实际磁盘动作：`SetProtect` 在
+  `NewCheckDisTurbUsb(*)` 判定后调用 `sub_1006ff80 -> sub_1006e580`，
+  精确覆盖 LBA0 `+0x1BE..+0x1FD` 的64B MBR partition table；静态模板仅含
+  `type=0x04,start_lba=66,sector_count=1` 的占位 entry。`UnsetProtect` 反向走
+  `sub_1006ffd0 -> sub_1006e9b0`，从 LBA2 读整扇恢复到 LBA0 并刷新磁盘属性。
+  因此 entry0 `NeedDisturb` 可明确描述为 **MBR scramble/descramble gate**；
+  entry1/entry2 同名字段仍没有独立 consumer，8B继续PARTIAL。
+- **LBA8 = 86 COMPLETE / 426 PARTIAL / 0 UNKNOWN = 16.8%**。
+  旧账本把22盘当前最大正文之后的102B机械记成 UNKNOWN，这是错误的固定边界模型。
+  Windows `sub_100148d0` 与 Linux `BuildSector8@0x1D602` 都只写/加密动态前缀，
+  不清零后续输出 backing；严格22盘重新复算得到
+  `logical_end=0x148..0x183`、encrypted prefix=`0x150..0x190`。
+  因而 `+0x80..+0x1FF` 的正确模型是“ELABEL / 最后一块加密padding /
+  preserve-existing tail”动态三态，边界由 LLGB length 决定。inspect 已有
+  synthetic nonzero-tail 回归，确保前缀后的物理字节原样保留。102B由UNKNOWN降为
+  PARTIAL，不增加COMPLETE。另已补齐一个此前实盘未覆盖的边界：logical_len 恰好
+  16B对齐时，官方 writer 仍按 `(logical_len/16+1)*16` 多加密一块以容纳结尾
+  NUL；inspect 原先普通 round-up 会少解16B，现已修正并有专门红→绿回归。
+  current `UsbOnlyInfo` producer 也已追到真实 Windows 调用栈：
+  `RegsiterUsb@0x1003BD3E..0x1003BD88` 先压入 `object+0x698` main onlyid，
+  再按值复制完整 `0x2AC` UsbLabelParam 后调用 `sub_100148d0`；
+  后者以 `[ebp+0x2B8]` 执行 `sprintf("%08x%08x", main_onlyid, 0)` 并写
+  `LBA8+0x1E UsbOnlyInfo`。严格22份按 LBA4 identity profile 重算：
+  6/6 current 均为该格式且 HDSerialInfo/MacInfo=0；16/16 legacy 均
+  UsbOnlyInfo为空并保留历史非零 HDSerialInfo。legacy producer/最终 consumer
+  尚未闭合，因此 `+0x14..+0x3D` 仍保持PARTIAL。
 - **LBA12 = 393 COMPLETE / 119 PARTIAL / 0 UNKNOWN = 76.8%**。
   主运行时盘面固定为 3×96B packed entry；`Reserved[7]@+0x59..+0x5F`
   已由官方字段名、writer 零来源、negative consumer 和 66/66 原始 entry 闭合。
