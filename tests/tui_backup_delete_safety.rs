@@ -13,7 +13,11 @@ const SNAPSHOT: &str =
 
 fn copy_fixture(root: &Path, name: &str) -> PathBuf {
     let source = Path::new(common::BAK_DIR).join(name);
-    assert!(source.is_file(), "missing backup fixture {}", source.display());
+    assert!(
+        source.is_file(),
+        "missing backup fixture {}",
+        source.display()
+    );
     let target = root.join(name);
     fs::copy(&source, &target).expect("copy fixture");
     let bytes = fs::read(&target).expect("read copied fixture");
