@@ -2,13 +2,58 @@
 
 use ratatui::{
     layout::{Constraint, Direction, Layout},
-    style::{Modifier, Style},
+    style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Cell, Paragraph, Row as TableRow, Table, TableState, Wrap},
     Frame,
 };
 
 use super::state::{AppState, InputMode, InspectMode, WizardStage, Workspace, WriteKind};
+
+fn accent() -> Style {
+    Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)
+}
+
+fn secondary() -> Style {
+    Style::default().fg(Color::Magenta)
+}
+
+fn success() -> Style {
+    Style::default().fg(Color::Green)
+}
+
+fn warning() -> Style {
+    Style::default().fg(Color::Yellow)
+}
+
+fn danger() -> Style {
+    Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)
+}
+
+fn muted() -> Style {
+    Style::default().fg(Color::DarkGray)
+}
+
+fn selected() -> Style {
+    Style::default()
+        .fg(Color::Black)
+        .bg(Color::Cyan)
+        .add_modifier(Modifier::BOLD)
+}
+
+fn device_status_style(row: &crate::disk_scan::Row) -> Style {
+    if row.proto != "USB" || row.denied {
+        warning()
+    } else if row.probe_error.is_some() {
+        danger()
+    } else if row.device_id.is_none() {
+        muted()
+    } else if row.is_nopwd {
+        success()
+    } else {
+        accent()
+    }
+}
 
 fn device_status(row: &crate::disk_scan::Row) -> String {
     if row.proto != "USB" {
@@ -39,17 +84,17 @@ fn draw_devices(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState
 
     let rows = state.devices().iter().map(|row| {
         TableRow::new(vec![
-            Cell::from(format!("disk{}", row.disk)),
+            Cell::from(format!("disk{}", row.disk)).style(accent()),
             Cell::from(crate::common::fmt_gb(row.size)),
-            Cell::from(row.proto.clone()),
-            Cell::from(format!("{}:{}", row.vid, row.pid)),
+            Cell::from(row.proto.clone()).style(if row.proto == "USB" { success() } else { warning() }),
+            Cell::from(format!("{}:{}", row.vid, row.pid)).style(secondary()),
             Cell::from(row.user.clone().unwrap_or_else(|| "—".into())),
             Cell::from(row.dept.clone().unwrap_or_else(|| "—".into())),
-            Cell::from(device_status(row)),
+            Cell::from(device_status(row)).style(device_status_style(row)),
         ])
     });
     let header = TableRow::new(["设备", "容量", "总线", "VID:PID", "姓名", "部门", "状态"])
-        .style(Style::default().add_modifier(Modifier::BOLD));
+        .style(accent());
     let title = if state.device_scan_pending() {
         "设备 · 扫描中…"
     } else {
@@ -68,8 +113,13 @@ fn draw_devices(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState
         ],
     )
     .header(header)
-    .block(Block::default().borders(Borders::ALL).title(title))
-    .row_highlight_style(Style::default().add_modifier(Modifier::REVERSED));
+    .block(
+        Block::default()
+            .borders(Borders::ALL)
+            .title(title)
+            .title_style(secondary()),
+    )
+    .row_highlight_style(selected());
     let mut table_state = TableState::default();
     if state.item_count() > 0 {
         table_state.select(Some(state.selected()));
@@ -80,20 +130,35 @@ fn draw_devices(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState
         let onlyid = row.onlyid.as_deref().unwrap_or("—");
         let device_id = row.device_id.as_deref().unwrap_or("—");
         let detail = Paragraph::new(vec![
-            Line::from(format!("onlyid: {onlyid}")),
-            Line::from(format!("device_id: {device_id}")),
-            Line::from(format!(
-                "姓名/部门: {} / {}",
-                row.user.as_deref().unwrap_or("—"),
-                row.dept.as_deref().unwrap_or("—")
-            )),
-            Line::from(format!(
-                "已有备份: {}  ·  状态: {}",
-                row.n_baks,
-                device_status(row)
-            )),
+            Line::from(vec![
+                Span::styled("onlyid: ", accent()),
+                Span::styled(onlyid.to_string(), secondary()),
+            ]),
+            Line::from(vec![
+                Span::styled("device_id: ", accent()),
+                Span::styled(device_id.to_string(), secondary()),
+            ]),
+            Line::from(vec![
+                Span::styled("姓名/部门: ", accent()),
+                Span::raw(format!(
+                    "{} / {}",
+                    row.user.as_deref().unwrap_or("—"),
+                    row.dept.as_deref().unwrap_or("—")
+                )),
+            ]),
+            Line::from(vec![
+                Span::styled("已有备份: ", accent()),
+                Span::raw(row.n_baks.to_string()),
+                Span::raw("  ·  状态: "),
+                Span::styled(device_status(row), device_status_style(row)),
+            ]),
         ])
-        .block(Block::default().borders(Borders::ALL).title("当前设备详情"))
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title("当前设备详情")
+                .title_style(secondary()),
+        )
         .wrap(Wrap { trim: true });
         frame.render_widget(detail, detail_area);
     }
@@ -110,22 +175,32 @@ fn draw_backups(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState
                 crate::diskio::Md5Status::NoSidecar => "缺 MD5".to_string(),
             }
         };
+        let health_style = if !backup.size_ok
+            || backup.md5_status == crate::diskio::Md5Status::Mismatch
+        {
+            danger()
+        } else if backup.md5_status == crate::diskio::Md5Status::NoSidecar {
+            warning()
+        } else {
+            success()
+        };
         TableRow::new(vec![
-            Cell::from(backup.index.to_string()),
+            Cell::from(backup.index.to_string()).style(accent()),
             Cell::from(backup.display_time.clone()),
             Cell::from(if backup.is_nopwd {
                 "免密状态"
             } else {
                 "加密原盘"
-            }),
+            })
+            .style(if backup.is_nopwd { success() } else { accent() }),
             Cell::from(backup.user.clone().unwrap_or_else(|| "—".into())),
             Cell::from(backup.dept.clone().unwrap_or_else(|| "—".into())),
-            Cell::from(backup.onlyid.clone().unwrap_or_else(|| "—".into())),
-            Cell::from(health),
+            Cell::from(backup.onlyid.clone().unwrap_or_else(|| "—".into())).style(secondary()),
+            Cell::from(health).style(health_style),
         ])
     });
     let header = TableRow::new(["#", "时间", "状态", "姓名", "部门", "onlyid", "健康"])
-        .style(Style::default().add_modifier(Modifier::BOLD));
+        .style(accent());
     let title = if state.backup_scan_pending() {
         "备份 · 扫描中…"
     } else {
@@ -144,8 +219,13 @@ fn draw_backups(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState
         ],
     )
     .header(header)
-    .block(Block::default().borders(Borders::ALL).title(title))
-    .row_highlight_style(Style::default().add_modifier(Modifier::REVERSED));
+    .block(
+        Block::default()
+            .borders(Borders::ALL)
+            .title(title)
+            .title_style(secondary()),
+    )
+    .row_highlight_style(selected());
     let mut table_state = TableState::default();
     if state.item_count() > 0 {
         table_state.select(Some(state.selected()));
@@ -333,10 +413,11 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
         .split(area);
 
     let title = Paragraph::new(Line::from(vec![
-        Span::styled("edpcli", Style::default().add_modifier(Modifier::BOLD)),
-        Span::raw("  TUI"),
+        Span::styled("edpcli", accent()),
+        Span::styled("  TUI", secondary().add_modifier(Modifier::BOLD)),
+        Span::styled("  ·  管理员模式", success()),
     ]))
-    .block(Block::default().borders(Borders::ALL));
+    .block(Block::default().borders(Borders::ALL).border_style(accent()));
     frame.render_widget(title, chunks[0]);
 
     if state.inspect_data().is_some() {
@@ -350,12 +431,27 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
             }
             InputMode::Help => {
                 let help = Paragraph::new(vec![
-                    Line::from("Vim 键位"),
+                    Line::from(Span::styled("Vim 键位", accent())),
                     Line::from("j/k/h/l 移动   gg/G 首/尾   Ctrl-d/u 半页"),
-                    Line::from("/ 搜索   n/N 匹配   : 命令   Esc 返回   q 退出   ? 帮助"),
-                    Line::from("b 创建当前设备备份   r 刷新"),
+                    Line::from(vec![
+                        Span::styled("/ 搜索", secondary()),
+                        Span::raw("   n/N 匹配   "),
+                        Span::styled(": 命令", secondary()),
+                        Span::raw("   Esc 返回   q 退出   ? 帮助"),
+                    ]),
+                    Line::from(vec![
+                        Span::styled("b", accent()),
+                        Span::raw(" 创建当前设备备份   "),
+                        Span::styled("r", accent()),
+                        Span::raw(" 刷新"),
+                    ]),
                 ])
-                .block(Block::default().borders(Borders::ALL).title("帮助"))
+                .block(
+                    Block::default()
+                        .borders(Borders::ALL)
+                        .title("帮助")
+                        .title_style(secondary()),
+                )
                 .wrap(Wrap { trim: true });
                 frame.render_widget(help, chunks[1]);
             }
