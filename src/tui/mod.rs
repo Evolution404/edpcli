@@ -265,8 +265,8 @@ fn dispatch_nav_command(
             StateEffect::None
         }
         NavCommand::BeginBackupDelete => {
-            if let Some((path, expected_md5)) = state.selected_backup_delete_target() {
-                state.begin_backup_delete(path, expected_md5);
+            if let Some((path, expected_sha256)) = state.selected_backup_delete_target() {
+                state.begin_backup_delete(path, expected_sha256);
             } else {
                 state.set_notice("当前备份缺少可固定的内容摘要，拒绝删除。");
             }
@@ -338,7 +338,7 @@ fn run_loop(resume: Option<state::WriteIntent>) -> io::Result<LoopExit> {
         }
         if let Some(result) = updates.backup_verify {
             match result {
-                Ok(()) => state.set_notice("当前备份校验通过：大小与 MD5 正常。"),
+                Ok(()) => state.set_notice("当前备份校验通过：大小与 SHA-256 正常。"),
                 Err(message) => state.set_notice(message),
             }
         }
@@ -382,10 +382,14 @@ fn run_loop(resume: Option<state::WriteIntent>) -> io::Result<LoopExit> {
                             continue;
                         }
                         ct_event::KeyCode::Enter => {
-                            if let Some((path, expected_md5)) =
+                            if let Some((path, expected_sha256)) =
                                 state.submit_backup_delete_confirmation()
                             {
-                                tasks.request_backup_delete(path, expected_md5, backup_dir.clone());
+                                tasks.request_backup_delete(
+                                    path,
+                                    expected_sha256,
+                                    backup_dir.clone(),
+                                );
                             }
                             continue;
                         }

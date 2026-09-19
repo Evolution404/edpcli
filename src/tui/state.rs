@@ -53,7 +53,7 @@ pub struct WizardState {
 pub struct BackupDeleteState {
     pub stage: WizardStage,
     pub path: std::path::PathBuf,
-    pub expected_md5: String,
+    pub expected_sha256: String,
     pub confirmation: String,
     pub message: Option<String>,
 }
@@ -359,7 +359,7 @@ impl AppState {
     pub fn set_inspect_pending(&mut self, pending: bool) {
         self.inspect_pending = pending;
         if pending {
-            self.notice = Some("正在后台读取 LBA0-13…".into());
+            self.notice = Some("正在后台读取 LBA0-12…".into());
         }
     }
 
@@ -494,12 +494,12 @@ impl AppState {
         self.backup_delete.as_ref()
     }
 
-    pub fn begin_backup_delete(&mut self, path: std::path::PathBuf, expected_md5: String) {
+    pub fn begin_backup_delete(&mut self, path: std::path::PathBuf, expected_sha256: String) {
         self.input_mode = InputMode::Normal;
         self.backup_delete = Some(BackupDeleteState {
             stage: WizardStage::Confirm,
             path,
-            expected_md5,
+            expected_sha256,
             confirmation: String::new(),
             message: None,
         });
@@ -535,7 +535,7 @@ impl AppState {
         delete.stage = WizardStage::Running;
         delete.message = Some("正在复核文件内容并删除备份…".to_string());
         self.critical_operation = true;
-        Some((delete.path.clone(), delete.expected_md5.clone()))
+        Some((delete.path.clone(), delete.expected_sha256.clone()))
     }
 
     pub fn finish_backup_delete(&mut self, result: Result<(), String>) {
@@ -620,7 +620,7 @@ impl AppState {
             return None;
         }
         let row = self.backups.get(self.selected)?;
-        Some((row.path.clone(), row.content_md5.clone()?))
+        Some((row.path.clone(), row.content_sha256.clone()?))
     }
 
     pub fn set_backup_scan_pending(&mut self, pending: bool) {

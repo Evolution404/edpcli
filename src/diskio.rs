@@ -12,8 +12,8 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use crate::common::{
     EdpCliError, EdpCliResult, EXIT_BACKUP, EXIT_INTERMEDIATE, EXIT_IO, EXIT_ROLLED_BACK, SECTOR,
 };
-use crate::md5::md5_hex;
 use crate::sectors::looks_nopwd;
+use crate::sha256::sha256_hex;
 
 pub fn raw_path(disk: u32) -> String {
     crate::platform::raw_disk_path(disk)
@@ -308,10 +308,14 @@ pub fn atomic_write_sectors(
     patch: &BTreeMap<u32, Vec<u8>>,
 ) -> EdpCliResult<()> {
     for (&lba, data) in patch {
-        if lba > 13 {
+        if lba > crate::common::METADATA_LAST_LBA {
             return Err(EdpCliError::new(
                 EXIT_IO,
-                format!("错误: 原子写仅允许元数据 LBA0-13，收到 LBA{}", lba),
+                format!(
+                    "错误: 原子写仅允许元数据 LBA0-{}，收到 LBA{}",
+                    crate::common::METADATA_LAST_LBA,
+                    lba
+                ),
             ));
         }
         if data.len() != SECTOR {
@@ -596,10 +600,10 @@ pub fn backup_is_nopwd(path: &Path, device_id: &str) -> bool {
     image_is_nopwd(&data, device_id)
 }
 
-/// 已在内存中的 LBA0-13 镜像是否为免密状态。
+/// 已在内存中的 LBA0-12 镜像是否为免密状态。
 /// 供扫描、restore、备份创建共用，避免上层重复构造扇区闭包或二次读文件。
 pub fn image_is_nopwd(data: &[u8], device_id: &str) -> bool {
-    if data.len() < 14 * SECTOR {
+    if data.len() < crate::common::METADATA_IMAGE_LEN {
         return false;
     }
     let read = |lba: u32| -> EdpCliResult<Vec<u8>> {
@@ -698,7 +702,7 @@ pub struct BackupMeta {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Md5Status {
+pub enum Sha256Status {
     Ok,
     Mismatch,
     NoSidecar,
@@ -710,12 +714,12 @@ pub struct BackupEntry {
     pub path: PathBuf,
     pub mtime: i64,
     pub is_nopwd: bool,
-    pub md5_ok: Md5Status,
+    pub sha256_ok: Sha256Status,
     pub size_ok: bool,
     /// 扫描时缓存的 LBA8 原始 512B；用于列表/元信息展示，避免随后再次打开同一备份。
     pub lba8: Option<[u8; SECTOR]>,
     /// 扫描时实际 `.bin` 内容摘要；删除前用于确认同名文件未被替换/改写。
-    pub content_md5: Option<String>,
+    pub content_sha256: Option<String>,
 }
 
 fn strip_numeric_suffix<'a>(s: &'a str, marker: &str) -> Option<(&'a str, String)> {
@@ -796,14 +800,14 @@ pub fn parse_backup_name(name: &str) -> Option<BackupMeta> {
     })
 }
 
-pub fn md5_sidecar_path(path: &Path) -> PathBuf {
-    PathBuf::from(format!("{}.md5", path.display()))
+pub fn sha256_sidecar_path(path: &Path) -> PathBuf {
+    PathBuf::from(format!("{}.sha256", path.display()))
 }
 
-/// 读取 `<备份.bin>.md5` 的首个摘要 token。
-/// 同时兼容本工具的“仅摘要”格式与标准 `md5sum` 风格的 `HASH  filename`。
-pub fn read_backup_md5(path: &Path) -> io::Result<Option<String>> {
-    let sidecar = md5_sidecar_path(path);
+/// 读取 `<备份.bin>.sha256` 的首个摘要 token。
+/// 同时兼容本工具的“仅摘要”格式与标准 `sha256sum` 风格的 `HASH  filename`。
+pub fn read_backup_sha256(path: &Path) -> io::Result<Option<String>> {
+    let sidecar = sha256_sidecar_path(path);
     let metadata = match fs::symlink_metadata(&sidecar) {
         Ok(metadata) => metadata,
         Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(None),
@@ -822,20 +826,20 @@ pub fn read_backup_md5(path: &Path) -> io::Result<Option<String>> {
             format!("{} 为空", sidecar.display()),
         ));
     };
-    if expected.len() != 32 || !expected.bytes().all(|b| b.is_ascii_hexdigit()) {
+    if expected.len() != 64 || !expected.bytes().all(|b| b.is_ascii_hexdigit()) {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
-            format!("{} 不含合法 32 位 MD5", sidecar.display()),
+            format!("{} 不含合法 64 位 SHA-256", sidecar.display()),
         ));
     }
     Ok(Some(expected.to_ascii_lowercase()))
 }
 
-fn md5_status(path: &Path, digest: &str) -> Md5Status {
-    match read_backup_md5(path) {
-        Ok(None) => Md5Status::NoSidecar,
-        Ok(Some(expected)) if expected == digest => Md5Status::Ok,
-        Ok(Some(_)) | Err(_) => Md5Status::Mismatch,
+fn sha256_status(path: &Path, digest: &str) -> Sha256Status {
+    match read_backup_sha256(path) {
+        Ok(None) => Sha256Status::NoSidecar,
+        Ok(Some(expected)) if expected == digest => Sha256Status::Ok,
+        Ok(Some(_)) | Err(_) => Sha256Status::Mismatch,
     }
 }
 
@@ -873,7 +877,7 @@ pub fn scan_backup_dir(dir: &Path) -> Vec<BackupEntry> {
             d.get(8 * SECTOR..9 * SECTOR)
                 .and_then(|raw| raw.try_into().ok())
         });
-        let content_md5 = data.as_ref().map(|d| md5_hex(d));
+        let content_sha256 = data.as_ref().map(|d| sha256_hex(d));
         if let (Some(m), Some(d)) = (meta.as_mut(), data.as_ref()) {
             if d.len() >= 5 * SECTOR {
                 m.onlyid = lba4_label_id_from(&d[4 * SECTOR..5 * SECTOR]);
@@ -881,12 +885,12 @@ pub fn scan_backup_dir(dir: &Path) -> Vec<BackupEntry> {
         }
         let size_ok = data
             .as_ref()
-            .map(|d| d.len() == 14 * SECTOR)
+            .map(|d| d.len() == crate::common::METADATA_IMAGE_LEN)
             .unwrap_or(false);
-        let md5_ok = content_md5
+        let sha256_ok = content_sha256
             .as_deref()
-            .map(|digest| md5_status(&path, digest))
-            .unwrap_or(Md5Status::Mismatch);
+            .map(|digest| sha256_status(&path, digest))
+            .unwrap_or(Sha256Status::Mismatch);
         let is_nopwd = match (&meta, &data) {
             (Some(m), Some(d)) => image_is_nopwd(d, &m.device_id),
             _ => false,
@@ -896,10 +900,10 @@ pub fn scan_backup_dir(dir: &Path) -> Vec<BackupEntry> {
             path: path.clone(),
             mtime: mtime_epoch(&path),
             is_nopwd,
-            md5_ok,
+            sha256_ok,
             size_ok,
             lba8,
-            content_md5,
+            content_sha256,
         });
     }
     entries.sort_by(cmp_backup_newest_first);
@@ -909,7 +913,7 @@ pub fn scan_backup_dir(dir: &Path) -> Vec<BackupEntry> {
 /// Shell completion 专用的轻量备份索引。
 ///
 /// 这里只判断普通 `.bin` 文件以及文件名是否符合本工具备份命名；绝不读取备份内容、
-/// 计算 MD5 或解析 LBA。完整健康状态仍由 `scan_backup_dir` 负责。
+/// 计算 SHA-256 或解析 LBA。完整健康状态仍由 `scan_backup_dir` 负责。
 pub fn scan_backup_names(dir: &Path) -> Vec<PathBuf> {
     let Ok(read_dir) = fs::read_dir(dir) else {
         return Vec::new();
@@ -984,7 +988,7 @@ pub fn prune_candidates(entries: &[BackupEntry], keep: usize) -> Vec<PathBuf> {
     out
 }
 
-/// 备份 LBA0-13 到备份目录, 附 .md5 sidecar。
+/// 备份 LBA0-12 到备份目录, 附 .sha256 sidecar。
 /// 返回 (备份路径, 是否免密状态快照); `还原:` 提示由 CLI 打印。
 pub fn create_backup(
     facts: &DiskFacts,
@@ -994,13 +998,13 @@ pub fn create_backup(
     clock: &dyn Clock,
 ) -> EdpCliResult<(PathBuf, bool)> {
     validate_backup_device_id(device_id)?;
-    if data.len() != 14 * SECTOR {
+    if data.len() != crate::common::METADATA_IMAGE_LEN {
         return Err(EdpCliError::new(
             EXIT_BACKUP,
             format!(
-                "错误: 备份镜像长度 {}B，必须恰好为 {}B（LBA0-13）",
+                "错误: 备份镜像长度 {}B，必须恰好为 {}B（LBA0-12）",
                 data.len(),
-                14 * SECTOR
+                crate::common::METADATA_IMAGE_LEN
             ),
         ));
     }
@@ -1023,10 +1027,9 @@ pub fn create_backup(
     );
     let path = bak_dir.join(format!("{}.bin", base));
     write_new_synced(&path, data, "备份文件")?;
-    // sidecar 命名与 Python 版一致: <备份.bin>.md5
-    let md5_path = md5_sidecar_path(&path);
-    let md5_data = format!("{}\n", md5_hex(data));
-    if let Err(e) = write_new_synced(&md5_path, md5_data.as_bytes(), "备份校验文件") {
+    let sha256_path = sha256_sidecar_path(&path);
+    let sha256_data = format!("{}\n", sha256_hex(data));
+    if let Err(e) = write_new_synced(&sha256_path, sha256_data.as_bytes(), "备份校验文件") {
         let _ = fs::remove_file(&path);
         return Err(e);
     }

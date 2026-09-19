@@ -502,10 +502,10 @@ mod tests {
     }
 
     #[test]
-    fn read_image_preserves_lba_zero_to_thirteen_order() {
+    fn read_image_preserves_lba_zero_to_twelve_order() {
         let image = read_image(&mut PatternSectorDev).unwrap();
-        assert_eq!(image.len(), 14 * SECTOR);
-        for lba in 0..14usize {
+        assert_eq!(image.len(), METADATA_IMAGE_LEN);
+        for lba in 0..METADATA_SECTOR_COUNT {
             assert!(
                 image[lba * SECTOR..(lba + 1) * SECTOR]
                     .iter()
@@ -895,15 +895,15 @@ mod tests {
     }
 
     #[test]
-    fn inspect_lba_is_limited_to_zero_through_thirteen() {
-        for bad in ["14", "99", "4294967295"] {
+    fn inspect_lba_is_limited_to_zero_through_twelve() {
+        for bad in ["13", "14", "99", "4294967295"] {
             let args = vec!["inspect".to_string(), "--lba".to_string(), bad.to_string()];
             let err = parse_args(&args)
                 .err()
-                .expect("inspect 不应接受 LBA0-13 之外的扇区");
-            assert!(err.contains("LBA") && err.contains("0-13"), "{err}");
+                .expect("inspect 不应接受 LBA0-12 之外的扇区");
+            assert!(err.contains("LBA") && err.contains("0-12"), "{err}");
         }
-        for good in ["0", "4", "13"] {
+        for good in ["0", "4", "12"] {
             let args = vec!["inspect".to_string(), "--lba".to_string(), good.to_string()];
             assert!(parse_args(&args).is_ok(), "LBA{good} 应被接受");
         }

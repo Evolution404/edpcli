@@ -140,7 +140,7 @@ edpcli apply --yes
 - USB 外接整盘确认；
 - 系统盘 fail-closed；
 - 提权前 selector pinning；
-- 写前 LBA0-13 快照；
+- 写前 LBA0-12 快照；
 - 自动备份；
 - 卸载/锁卷；
 - reopen 后身份和元数据二次确认；
@@ -161,13 +161,13 @@ edpcli backup create --disk 2
 
 - 直接备份当前插入的目标 U 盘，不依赖 `apply`；
 - 多盘时进入统一设备选择器；
-- 只读 LBA0-13，不修改介质；
+- 只读 LBA0-12，不修改介质；
 - 必要时自动提权；
 - 必须复用 `apply` 写前备份的同一底层 pipeline：
   - 同一命名规则；
-  - 同一 LBA0-13 数据格式；
+  - 同一 LBA0-12 数据格式；
   - 同一 onlyid/device_id/VID/PID/容量元数据；
-  - 同一 MD5 sidecar；
+  - 同一 SHA-256 sidecar；
   - 同一碰撞保护；
   - 同一目录解析规则；
   - 同一 fsync/目录持久化策略。
@@ -206,7 +206,7 @@ edpcli backup restore backup.bin
 1. 选择/自动确定目标物理盘；
 2. 自动按当前盘 onlyid/身份过滤可用备份；
 3. 交互选择备份；
-4. 校验大小、MD5、onlyid 和当前物理盘身份；
+4. 校验大小、SHA-256、onlyid 和当前物理盘身份；
 5. 用户确认；
 6. 执行现有 restore 原子写入流程。
 
@@ -464,12 +464,12 @@ edpcli help apply
 4. `info` 单盘自动选、多盘选择、备份文件；
 5. `apply --dry-run` 零写入；
 6. `apply` 写前备份仍存在；
-7. `backup create` 对当前盘直接生成 7168B + MD5；
+7. `backup create` 对当前盘直接生成 6656B + SHA-256；
 8. `backup create` 与 apply 自动备份格式/命名元数据一致；
 9. `backup create` 权限不足自动提权，但永不调用写盘 prepare/unmount；
 10. `backup restore` 只显示/接受属于当前盘的备份；
 11. `backup delete` 编号/多选/路径安全；
-12. `inspect --lba` 解析与范围 0..13；
+12. `inspect --lba` 解析与范围 0..12；
 13. 旧 `run/meta/metainfo/restore/backup rm` 返回迁移提示；
 14. completion 不再补全旧语法；
 15. 平台边界门禁继续禁止业务层出现 OS 专用命令/路径。

@@ -52,9 +52,9 @@ pub struct BackupWorkspaceItem {
     pub user: Option<String>,
     pub dept: Option<String>,
     pub is_nopwd: bool,
-    pub md5_status: crate::diskio::Md5Status,
+    pub sha256_status: crate::diskio::Sha256Status,
     pub size_ok: bool,
-    pub content_md5: Option<String>,
+    pub content_sha256: Option<String>,
 }
 
 /// Load the canonical selector used by every backup frontend.
@@ -85,9 +85,9 @@ pub fn scan_backup_workspace(root: &Path) -> Vec<BackupWorkspaceItem> {
                 user: ownership.as_ref().and_then(|value| value.user.clone()),
                 dept: ownership.as_ref().and_then(|value| value.dept.clone()),
                 is_nopwd: entry.is_nopwd,
-                md5_status: entry.md5_ok,
+                sha256_status: entry.sha256_ok,
                 size_ok: entry.size_ok,
-                content_md5: entry.content_md5.clone(),
+                content_sha256: entry.content_sha256.clone(),
             }
         })
         .collect()
@@ -126,7 +126,7 @@ pub fn verify_backup_exact(root: &Path, path: &Path) -> Result<(), String> {
         Ok(())
     } else {
         Err(format!(
-            "备份校验失败: {}（大小或 MD5 异常）",
+            "备份校验失败: {}（大小或 SHA-256 异常）",
             entry.path.display()
         ))
     }
@@ -134,12 +134,12 @@ pub fn verify_backup_exact(root: &Path, path: &Path) -> Result<(), String> {
 
 /// Delete one exact backup selected from a prior TUI scan.
 ///
-/// The expected MD5 pins the exact bytes that the user selected before confirmation. If the file is
+/// The expected SHA-256 pins the exact bytes that the user selected before confirmation. If the file is
 /// replaced or changed while the confirmation dialog is open, deletion fails closed.
-pub fn delete_backup_exact(root: &Path, path: &Path, expected_md5: &str) -> Result<(), String> {
+pub fn delete_backup_exact(root: &Path, path: &Path, expected_sha256: &str) -> Result<(), String> {
     let selector = load_backup_selector(root);
     let entry = scanned_backup_by_path(&selector, path)?;
-    if entry.content_md5.as_deref() != Some(expected_md5) {
+    if entry.content_sha256.as_deref() != Some(expected_sha256) {
         return Err(format!(
             "备份在选择/确认期间已变化，拒绝删除: {}",
             path.display()

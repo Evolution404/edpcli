@@ -42,11 +42,11 @@
 
 生产代码同时存在：
 
-- `BackupCatalog::load -> scan_backup_dir`：完整读取、MD5、LBA8 缓存；
+- `BackupCatalog::load -> scan_backup_dir`：完整读取、SHA-256、LBA8 缓存；
 - `find_backups`：按文件名 pattern 重复 `read_dir`，再读取 LBA4 做身份终验。
 
 `list`、`info`、`apply` 仍使用后者；backup 管理使用前者。多盘/大量历史备份时存在重复目录
-遍历，但 `scan_backup_dir` 又会主动计算所有 MD5，因此不能简单把所有只读查询切到完整 catalog，
+遍历，但 `scan_backup_dir` 又会主动计算所有 SHA-256，因此不能简单把所有只读查询切到完整 catalog，
 否则可能把轻量查询变重。
 
 计划：本 PR 先量化并设计“轻量索引 / 完整健康扫描”边界；只有有明确收益且不增加普通
@@ -106,13 +106,13 @@ raw I/O、备份格式、目录扫描和原子写入。
 - 每个设备扫描新增只读 sector cache；
 - 免密判断与分区展示共享已读 LBA12，实际底层读取由 2 次降为 1 次。
 
-### F. backup catalog 每份内容只计算一次 MD5
+### F. backup catalog 每份内容只计算一次 SHA-256
 
 提交：`e58f552 perf: hash backup contents once per scan`
 
-- 原实现为 `content_md5` 计算一次，又为 sidecar 健康校验计算一次；
+- 原实现为 `content_sha256` 计算一次，又为 sidecar 健康校验计算一次；
 - 现在一次计算同时服务内容摘要与 sidecar 比对；
-- `.md5` 格式、健康状态和删除前内容复核语义不变。
+- `.sha256` 格式、健康状态和删除前内容复核语义不变。
 
 ### G. info 自动提权保持备份目录一致
 
@@ -135,7 +135,7 @@ raw I/O、备份格式、目录扫描和原子写入。
 提交：`ac2f77b perf: make shell completion metadata-only`
 
 - 旧实现的 `backup-number` / `backup-file` 补全依赖完整 `BackupCatalog`，会读取每份 `.bin`、
-  计算 MD5 并解析内容；
+  计算 SHA-256 并解析内容；
 - 新实现只扫描普通 `.bin` 文件名并校验备份命名格式，不打开备份内容；
 - `backup-number` 仅使用可识别备份数量，`backup-file` 仅返回文件名；
 - 新增源码级性能门禁：`completion.rs` 禁止重新依赖 `BackupCatalog` / `BackupSelector`；
@@ -155,7 +155,7 @@ raw I/O、备份格式、目录扫描和原子写入。
 
 - **机械拆大文件**：`cli.rs` / `diskio.rs` / `inspect.rs` 仍较大，但当前没有足够证据证明单纯拆文件
   能改善正确性或性能，暂不制造无收益 churn；
-- **统一 `find_backups` 与完整 `BackupCatalog` 扫描**：完整 catalog 会读取所有备份并校验 MD5，
+- **统一 `find_backups` 与完整 `BackupCatalog` 扫描**：完整 catalog 会读取所有备份并校验 SHA-256，
   若强行给 list/info 共用，可能把轻量查询变重，因此保留“轻量查找 + 完整健康扫描”两个职责；
 - **修改 release profile 追求更小二进制**：当前本机 macOS arm64 release binary 约 1.29MB，
   依赖树无重复 crate；没有必要为了体积引入 `opt-level=z` / `panic=abort` 等行为变化；
@@ -169,7 +169,7 @@ raw I/O、备份格式、目录扫描和原子写入。
 
 - EDP/cems 加密/解密算法；
 - LBA 布局和分区算法；
-- 备份文件格式、MD5 sidecar 格式；
+- 备份文件格式、SHA-256 sidecar 格式；
 - onlyid/device_id 定义；
 - 写盘顺序、回滚协议、安全盘识别；
 - 已发布的 CLI v2 命令和参数；

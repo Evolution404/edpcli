@@ -3,13 +3,14 @@
 //!
 //! 原理(2026-08-27 定案, 内网实测成功):
 //!     LBA0  : MBR 分区1 → type=0x07 @63 × Share扇数(数据区直挂, 系统原生挂载)
-//!     LBA6  : 0x1CA=128,480 + 0x1D4-0x1ED 清零, 身份字段保留, 重算校验和
+//!     LBA6  : 保留历史兼容补丁并重算校验和（逆向已确认 0x1CA/0x1D4
+//!             分别落在 GSerial/BeiZhu 固定槽内，不是独立协议字段）
 //!     LBA7  : EDPF 2条版本2 [Share@63, type4指针(原盘保留)] + 表尾终止符保留
-//!     LBA12 : EDPF 2条版本2 + 表尾终止符保留 + 尾部144B原盘保留
+//!     LBA12 : 整扇连续 A6B0；仅修改前 0x170 的 EDPF 表区，后 144B 明文保持不变
 //!     LBA9  : 非零则清零(EETU)
 //!     其余扇区(LBA4/8/11 及全零保留区)一律不动
 //!   三条铁律: EDPF 表尾终止符必须保留(LBA7@0xC0/LBA12@0x120);
-//!             LBA12 尾部144B(0x170-0x200)不可清零; 不发明原盘没有的状态。
+//!             LBA12 0x170-0x200 明文不可擅改; 不发明原盘没有的状态。
 //!   分区参数按实际物理盘计算: Encrypt 从原盘 LBA12 type=4 读取, Share 占满其前。
 
 use crate::common::{
@@ -19,12 +20,15 @@ use crate::crypto::{
     a6b0_full, a7f0_full, crc32_bare, lba6_checksum, lba6_decode, xor_rolling, LBA6_K0,
 };
 
-pub const EDPF_ENC_LEN: usize = 368; // LBA12 前 368B A6B0 加密, 后 144B 不加密
+pub const EDPF_TABLE_LEN: usize = 0x170; // LBA12 EDPF 表区边界；整扇 512B 都连续 A6B0
 pub const E7: usize = 0x40; // entry stride: LBA7=64B
 pub const E12: usize = 0x60; // entry stride: LBA12=96B
 pub const PWD_CRC: u32 = 0x0429735D; // CRC32_bare("0000aaaa") 免密盘默认密码
-pub const NOPWD_LBA6_1CA: u32 = 128480; // 免密盘 LBA6 0x1CA 模板默认值
-pub const LBA6_CLEAR: (usize, usize) = (0x1D4, 0x1ED); // LBA6 清零区间(含 0x1EC)
+                                     // Legacy in-place conversion recipe only. Reverse audit shows +0x1CA is inside
+                                     // the fixed m_usbGSerial slot, while +0x1D4 is inside BeiZhu; neither is a
+                                     // standalone SAFE6 state field. New-disk Provision must not use these values.
+pub const NOPWD_LBA6_1CA: u32 = 128480;
+pub const LBA6_CLEAR: (usize, usize) = (0x1D4, 0x1ED);
 
 /// 扇区读取抽象(lba → 512B), 真盘/镜像/备份文件各提供实现。
 pub type ReadFn<'a> = &'a dyn Fn(u32) -> EdpCliResult<Vec<u8>>;
@@ -196,7 +200,7 @@ pub fn convert_lba12(
     share_sectors: u64,
 ) -> EdpCliResult<(Vec<u8>, Vec<u8>)> {
     require_sector(raw, "LBA12")?;
-    let mut dec = a6b0_full(&raw[..EDPF_ENC_LEN], crc_key, 0);
+    let mut dec = a6b0_full(raw, crc_key, 0);
     if dec[..4] != *b"EDPF" {
         return Err(EdpCliError::new(
             EXIT_TARGET,
@@ -212,10 +216,9 @@ pub fn convert_lba12(
     let (s1, z1) = (u64_at(&src, 0x18), u64_at(&src, 0x28));
     dec[E12..2 * E12].copy_from_slice(&make_entry(&src, 4, s1, z1));
     dec[2 * E12..3 * E12].fill(0); // entry2 区清零
-                                   // 0x120 表尾终止符区不动; 尾部 144B 从原盘密文原样拼接
-    let mut enc = a7f0_full(&dec, crc_key, 0);
-    enc.extend_from_slice(&raw[EDPF_ENC_LEN..SECTOR]);
-    if a6b0_full(&enc[..EDPF_ENC_LEN], crc_key, 0) != dec {
+                                   // 0x120 表尾状态及 0x170..0x1FF 明文都保持原样
+    let enc = a7f0_full(&dec, crc_key, 0);
+    if a6b0_full(&enc, crc_key, 0) != dec {
         return Err(EdpCliError::new(
             EXIT_TARGET,
             "错误: LBA12 A6B0/a7f0 往返自检失败",
@@ -231,20 +234,13 @@ fn hex4(b: &[u8]) -> String {
 // ══════════════════════════════════════════════════════════════════
 // 3. 已改造(免密)盘检测
 // ══════════════════════════════════════════════════════════════════
-/// 已是免密盘? LBA6 / MBR / LBA12 三处信号须同时成立(缺一即否):
-///   LBA6  解密后 0x1CA 已是免密模板值 128480 (辅助信号: 实测 netac/lexar
-///         原盘本就=128480 无区分度, 仅 aigo 原盘=20417 不同)
-///   MBR   分区1 = type=0x07 @LBA63 带 55AA (原盘实测为 0x0e)
+/// 已是免密盘? 由 MBR + LBA12 两处独立主信号共同确认:
+///   MBR   分区1 = type=0x07 @LBA63 带 55AA
 ///   LBA12 以 device_id 派生 key 解密后: entry0=Share(type2,@63,active=1,enc=1),
 ///         entry1=Encrypt指针(type4,active=1), entry2 区已清零 (主信号:
 ///         原盘恒为 3 条 EDPF, entry0 enc=0, entry2 type4/active=0;
 ///         注意 aigo 原盘 entry0 也是 type=2@63, 故不能只看 type/start)
 pub fn looks_nopwd(read: ReadFn, device_id: &str) -> EdpCliResult<bool> {
-    let raw6 = read_sector(read, 6)?;
-    let dec6 = lba6_decode(&raw6);
-    if u32_at(&dec6, 0x1CA) != NOPWD_LBA6_1CA {
-        return Ok(false);
-    }
     let mbr = read_sector(read, 0)?;
     if !(mbr[0x1BE + 4] == 0x07
         && u32_at(&mbr, 0x1BE + 8) == 63
@@ -255,7 +251,7 @@ pub fn looks_nopwd(read: ReadFn, device_id: &str) -> EdpCliResult<bool> {
     let crc = crc32_bare(device_id.as_bytes());
     let crc_key = crc.to_le_bytes();
     let raw12 = read_sector(read, 12)?;
-    let dec12 = a6b0_full(&raw12[..EDPF_ENC_LEN], &crc_key, 0);
+    let dec12 = a6b0_full(&raw12, &crc_key, 0);
     if dec12[..4] != *b"EDPF" {
         return Ok(false);
     }
@@ -307,7 +303,7 @@ pub fn parse_lba12(raw12: &[u8], device_id: &str) -> Option<Vec<EdpfPartition>> 
     }
     let crc = crc32_bare(device_id.as_bytes());
     let key = crc.to_le_bytes();
-    let dec = a6b0_full(&raw12[..EDPF_ENC_LEN], &key, 0);
+    let dec = a6b0_full(raw12, &key, 0);
     if dec[..4] != *b"EDPF" {
         return None;
     }
@@ -368,7 +364,7 @@ pub fn convert(
     }
 
     let raw12 = read_sector(read, 12)?;
-    let dec12 = a6b0_full(&raw12[..EDPF_ENC_LEN], &crc_key, 0);
+    let dec12 = a6b0_full(&raw12, &crc_key, 0);
     if dec12[..4] != *b"EDPF" {
         return Err(EdpCliError::new(
             EXIT_TARGET,
@@ -462,7 +458,7 @@ pub fn convert(
                 crate::ui::TableCell::left("LBA6", crate::ui::Tone::Green),
                 crate::ui::TableCell::left("盘标签", crate::ui::Tone::BoldCyan),
                 crate::ui::TableCell::left(
-                    "0x1CA=128480，清 25B，重算校验和",
+                    "兼容旧免密改造补丁，重算 SAFE6 校验和",
                     crate::ui::Tone::Plain,
                 ),
             ],
@@ -500,7 +496,7 @@ pub fn convert(
         println!(
             "{}",
             crate::ui::dim(
-                "不动   LBA4/8/11(盘身份) · 其余保留扇区 · 表尾终止符 · LBA12 尾部144B · 盘尾区域"
+                "不动   LBA4/8/11(盘身份) · 其余保留扇区 · 表尾状态 · LBA12 0x170..0x1FF 明文 · 盘尾区域"
             )
         );
     }

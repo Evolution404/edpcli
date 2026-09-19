@@ -189,16 +189,16 @@ fn draw_backups(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState
         let health = if !backup.size_ok {
             "大小异常".to_string()
         } else {
-            match backup.md5_status {
-                crate::diskio::Md5Status::Ok => "MD5 ✓".to_string(),
-                crate::diskio::Md5Status::Mismatch => "MD5 ✗".to_string(),
-                crate::diskio::Md5Status::NoSidecar => "缺 MD5".to_string(),
+            match backup.sha256_status {
+                crate::diskio::Sha256Status::Ok => "SHA-256 ✓".to_string(),
+                crate::diskio::Sha256Status::Mismatch => "SHA-256 ✗".to_string(),
+                crate::diskio::Sha256Status::NoSidecar => "缺 SHA-256".to_string(),
             }
         };
         let health_style =
-            if !backup.size_ok || backup.md5_status == crate::diskio::Md5Status::Mismatch {
+            if !backup.size_ok || backup.sha256_status == crate::diskio::Sha256Status::Mismatch {
                 danger()
-            } else if backup.md5_status == crate::diskio::Md5Status::NoSidecar {
+            } else if backup.sha256_status == crate::diskio::Sha256Status::NoSidecar {
                 warning()
             } else {
                 success()
@@ -275,10 +275,10 @@ fn draw_backups(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState
         let health = if !backup.size_ok {
             "大小异常"
         } else {
-            match backup.md5_status {
-                crate::diskio::Md5Status::Ok => "MD5 ✓",
-                crate::diskio::Md5Status::Mismatch => "MD5 ✗",
-                crate::diskio::Md5Status::NoSidecar => "缺 MD5",
+            match backup.sha256_status {
+                crate::diskio::Sha256Status::Ok => "SHA-256 ✓",
+                crate::diskio::Sha256Status::Mismatch => "SHA-256 ✗",
+                crate::diskio::Sha256Status::NoSidecar => "缺 SHA-256",
             }
         };
         let detail = Paragraph::new(vec![
@@ -290,7 +290,7 @@ fn draw_backups(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState
                 Span::styled("状态: ", accent()),
                 Span::styled(
                     health,
-                    if backup.size_ok && backup.md5_status == crate::diskio::Md5Status::Ok {
+                    if backup.size_ok && backup.sha256_status == crate::diskio::Sha256Status::Ok {
                         success()
                     } else {
                         warning()
@@ -463,7 +463,7 @@ fn draw_backup_delete(frame: &mut Frame, area: ratatui::layout::Rect, state: &Ap
             Span::styled("文件: ", accent()),
             Span::raw(safe(&delete.path.display().to_string())),
         ]),
-        Line::from("安全规则：固定选中时 MD5 → 删除前重新扫描 → 内容复核 → 至少保留该盘 1 份备份 → 同步删除 .md5"),
+        Line::from("安全规则：固定选中时 SHA-256 → 删除前重新扫描 → 内容复核 → 至少保留该盘 1 份备份 → 同步删除 .sha256"),
     ];
     match delete.stage {
         WizardStage::Confirm => {
@@ -523,7 +523,7 @@ fn draw_wizard(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState)
     }
     lines.push(Line::from(match wizard.kind {
         WriteKind::BackupCreate => {
-            "只读链：系统盘/USB整盘检查 → selector pinning → 读取 LBA0-13 → create-new 备份/MD5 → fsync；不会卸载或写 U 盘"
+            "只读链：系统盘/USB整盘检查 → selector pinning → 读取 LBA0-12 → create-new 备份/SHA-256 → fsync；不会卸载或写 U 盘"
         }
         WriteKind::Apply | WriteKind::Restore => {
             "安全链：系统盘/USB整盘检查 → selector pinning → 写前保护 → 卸载/锁卷 → reopen复核 → atomic write → sync/readback/rollback"

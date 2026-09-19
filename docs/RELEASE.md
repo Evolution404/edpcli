@@ -8,7 +8,7 @@
 - 当前待发布版本：**2.2.0**。
 - 2.2.0 为向后兼容的 MINOR 发布：交互式 TTY 中裸 `edpcli` 默认进入管理员态 TUI；非 TTY 继续保持 bare=list，不破坏既有脚本。
 - TUI 新增 CLI 同源语义配色、外部元数据终端控制字符防护、启动前 sudo/UAC 提权，以及备份查看/校验/删除/恢复/新建的完整生命周期操作。
-- 备份删除复用 application/service 安全边界：固定选中时 MD5、删除前重新扫描与内容复核、同名替换 fail-closed、至少保留每盘 1 份备份，并同步删除 MD5 sidecar。
+- 备份删除复用 application/service 安全边界：固定选中时 SHA-256、删除前重新扫描与内容复核、同名替换 fail-closed、至少保留每盘 1 份备份，并同步删除 SHA-256 sidecar。
 - 仓库新增受控 pre-commit Rust 自动格式化流程；CI 继续保留 `cargo fmt --all -- --check` 作为最终门禁。
 
 - 正式版本线从 **1.0.0** 开始。
@@ -133,11 +133,11 @@ GitHub-hosted Runner 没有真实 EDP USB 硬件，因此不能声称完成真�
 实际覆盖为：
 
 - Linux：创建临时磁盘镜像 → loop 整盘 → MBR 分区 → ext4 → 挂载 marker → 产品
-  `prepare_write` 执行 `umount2` → 对真实 `/dev/loopN` 做 LBA0-13 原子写/同步/读回 →
+  `prepare_write` 执行 `umount2` → 对真实 `/dev/loopN` 做 LBA0-12 原子写/同步/读回 →
   bit-for-bit 恢复 → 重新挂载并验证 marker；
 - Windows：创建临时 VHDX → MBR/NTFS/盘符 → 写 marker → 产品 `prepare_write` 执行
   volume extent 归属确认、`FSCTL_LOCK_VOLUME`、`FSCTL_DISMOUNT_VOLUME` → 对真实
-  `\\.\PhysicalDriveN` 做 LBA0-13 原子写/同步/读回 → bit-for-bit 恢复 → detach/reattach
+  `\\.\PhysicalDriveN` 做 LBA0-12 原子写/同步/读回 → bit-for-bit 恢复 → detach/reattach
   VHDX 并验证 marker；
 - CI 专用入口编译期默认关闭；Linux 只接受 `/dev/loopN`，Windows 只接受系统 API 返回
   `BusTypeVirtual` / `BusTypeFileBackedVirtual` 的磁盘，因此测试入口不能指向真实 USB 盘。

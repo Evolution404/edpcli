@@ -97,7 +97,7 @@ TUI 仅在交互式 TTY 中启动；其设备、备份和 Inspect 字段在渲�
 - `/` + Enter：搜索，`n/N` 前后匹配；
 - `:`：任务型 command palette，不执行 shell；
 - `i`：Inspect，支持字段、decoded hex、raw hex；
-- `b`：为当前选中设备创建只读 LBA0-13 备份；
+- `b`：为当前选中设备创建只读 LBA0-12 备份；
 - `a`：Apply 安全向导；
 - `R`：从当前备份执行 Restore 安全向导；
 - `Esc`：返回，`q`：退出，`?`：帮助。
@@ -112,10 +112,10 @@ TUI 仅在交互式 TTY 中启动；其设备、备份和 Inspect 字段在渲�
 
 `backup create` 与 `apply` 写前自动备份共用同一个 `create_backup` service：
 
-- 固定读取 LBA0-13，共 7168B；
+- 固定读取 LBA0-12，共 6656B；
 - 使用相同的 onlyid、device_id、VID/PID、容量元数据；
 - 使用相同命名和 `_nopwd` 状态标记；
-- 写出相同 MD5 sidecar；
+- 写出相同 SHA-256 sidecar；
 - 使用 create-new 防覆盖、fsync 和目录持久化；
 - 独立备份路径只读 U 盘，不卸载、不锁卷、不 reopen 为读写、不写任何扇区。
 
@@ -130,12 +130,12 @@ U 盘串盘。
 - 目标必须是外接 USB 整盘；
 - 系统盘身份无法确认时拒绝继续；
 - 提权前固定平台原生 selector；
-- 写前读取 LBA0-13，并在 apply 时先创建自动备份；
+- 写前读取 LBA0-12，并在 apply 时先创建自动备份；
 - 写入前卸载/锁定目标卷；
 - reopen 后再次核对介质和写前元数据；
 - 原子写入、sync、逐扇读回校验；
 - 任一写入失败自动回滚，回滚结果有独立退出码；
-- 恢复备份必须通过大小、MD5 与当前盘 LBA4 身份终验。
+- 恢复备份必须通过大小、SHA-256 与当前盘 LBA4 身份终验。
 
 `edpcli apply --dry-run` 复用真实识别和布局计算，但不会创建备份、请求写入确认、
 卸载/锁卷、reopen 或写入扇区。
@@ -164,7 +164,7 @@ eval "$(edpcli completion bash)"
 edpcli completion fish | source
 ```
 
-补全会动态提供当前物理盘、备份全局编号、备份文件名和 LBA0-13，并与 CLI v2 parser
+补全会动态提供当前物理盘、备份全局编号、备份文件名和 LBA0-12，并与 CLI v2 parser
 使用同一命令模型。
 
 ## 开发与验证

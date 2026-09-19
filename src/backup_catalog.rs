@@ -7,7 +7,7 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
-use crate::diskio::{self, BackupEntry, Md5Status};
+use crate::diskio::{self, BackupEntry, Sha256Status};
 
 #[derive(Debug, Clone)]
 pub struct BackupCatalog {
@@ -76,14 +76,14 @@ pub fn file_name(entry: &BackupEntry) -> &str {
 }
 
 pub fn is_healthy(entry: &BackupEntry) -> bool {
-    entry.size_ok && entry.md5_ok == Md5Status::Ok
+    entry.size_ok && entry.sha256_ok == Sha256Status::Ok
 }
 
 /// Delete one already-scanned backup entry using content identity, not only its pathname.
 ///
 /// The caller is responsible for higher-level retention policy (for example, keeping at least one
 /// backup for a device). This function re-checks that the target is still a regular file and that
-/// its content MD5 still matches the scan snapshot before deleting the .bin and its .md5 sidecar.
+/// its content SHA-256 still matches the scan snapshot before deleting the .bin and its .sha256 sidecar.
 pub fn delete_entry_verified(entry: &BackupEntry) -> Result<(), String> {
     let path = &entry.path;
     let metadata = fs::symlink_metadata(path)
@@ -95,12 +95,12 @@ pub fn delete_entry_verified(entry: &BackupEntry) -> Result<(), String> {
         ));
     }
     let expected = entry
-        .content_md5
+        .content_sha256
         .as_deref()
         .ok_or_else(|| format!("扫描时无法取得内容摘要，拒绝删除: {}", path.display()))?;
     let current =
         fs::read(path).map_err(|e| format!("删除前无法重新读取 {}: {}", path.display(), e))?;
-    let actual = crate::md5::md5_hex(&current);
+    let actual = crate::sha256::sha256_hex(&current);
     if actual != expected {
         return Err(format!(
             "备份在扫描/确认后内容已变化，拒绝删除同名新文件: {}",
@@ -115,7 +115,7 @@ pub fn delete_entry_verified(entry: &BackupEntry) -> Result<(), String> {
         };
         return Err(format!("删除失败 {}: {}{}", path.display(), e, suffix));
     }
-    let sidecar = diskio::md5_sidecar_path(path);
+    let sidecar = diskio::sha256_sidecar_path(path);
     if sidecar.exists() {
         if let Err(e) = fs::remove_file(&sidecar) {
             let suffix = if e.kind() == io::ErrorKind::PermissionDenied {

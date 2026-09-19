@@ -56,9 +56,9 @@ fn err(code: i32, msg: impl Into<String>) -> EdpCliError {
 }
 
 pub(crate) fn read_image(dev: &mut dyn SectorDev) -> EdpCliResult<Vec<u8>> {
-    let mut img = Vec::with_capacity(14 * SECTOR);
-    // 镜像布局必须严格保持 LBA0→13 的连续顺序；后续所有固定偏移都依赖此契约。
-    for lba in 0..14u32 {
+    let mut img = Vec::with_capacity(METADATA_IMAGE_LEN);
+    // 镜像布局必须严格保持 LBA0→12 的连续顺序；后续所有固定偏移都依赖此契约。
+    for lba in 0..METADATA_SECTOR_COUNT as u32 {
         let sector = dev
             .read_sector(lba)
             .map_err(|e| err(EXIT_IO, format!("错误: {}", e)))?;
@@ -79,17 +79,19 @@ pub(crate) fn read_image(dev: &mut dyn SectorDev) -> EdpCliResult<Vec<u8>> {
 }
 
 /// `reopen_rdwr` 会重新打开平台裸盘设备。确认期间既可能换盘，也可能有别的程序
-/// 改动同一块盘的元数据。自动备份保存的是确认前 LBA0-13，因此第一笔写入前必须
+/// 改动同一块盘的元数据。自动备份保存的是确认前 LBA0-12，因此第一笔写入前必须
 /// 再读一次并逐扇区比对，保证“当前状态 == 刚刚备份的状态”。
 pub(crate) fn verify_reopened_snapshot(
     dev: &mut dyn SectorDev,
     expected: &[u8],
 ) -> EdpCliResult<()> {
-    if expected.len() != 14 * SECTOR {
+    if expected.len() != METADATA_IMAGE_LEN {
         return Err(err(EXIT_IO, "错误: 内部预写快照长度异常"));
     }
     // 先核身份，再核其余元数据；换盘时不要被 LBA0 的差异抢先掩盖诊断。
-    for lba in std::iter::once(4u32).chain((0..14u32).filter(|&lba| lba != 4)) {
+    for lba in
+        std::iter::once(4u32).chain((0..METADATA_SECTOR_COUNT as u32).filter(|&lba| lba != 4))
+    {
         let actual = dev
             .read_sector(lba)
             .map_err(|e| err(EXIT_IO, format!("错误: 重开后读取 LBA{} 失败: {}", lba, e)))?;
@@ -346,9 +348,9 @@ pub fn apply_flow(
     Ok(EXIT_OK)
 }
 
-/// 为当前已选定 U 盘创建 LBA0-13 备份。
+/// 为当前已选定 U 盘创建 LBA0-12 备份。
 ///
-/// 这是纯只读介质路径：只读取身份和 LBA0-13，然后把快照交给与 apply 写前备份完全相同的
+/// 这是纯只读介质路径：只读取身份和 LBA0-12，然后把快照交给与 apply 写前备份完全相同的
 /// `create_backup` service。此函数不得调用 prepare_write、reopen_rdwr 或任何扇区写入。
 pub fn backup_create_flow(
     disk: u32,
@@ -484,39 +486,39 @@ pub fn restore_flow(
             format!("错误: 无法读取备份 {}: {}", path.display(), e),
         )
     })?;
-    if data.len() != 14 * SECTOR {
+    if data.len() != METADATA_IMAGE_LEN {
         return Err(err(
             EXIT_BACKUP,
-            format!("错误: 备份大小 {} ≠ {}", data.len(), 14 * SECTOR),
+            format!("错误: 备份大小 {} ≠ {}", data.len(), METADATA_IMAGE_LEN),
         ));
     }
-    let md5_path = diskio::md5_sidecar_path(&path);
-    let want = match diskio::read_backup_md5(&path) {
+    let sha256_path = diskio::sha256_sidecar_path(&path);
+    let want = match diskio::read_backup_sha256(&path) {
         Ok(Some(expected)) => expected,
         Ok(None) => {
             return Err(err(
                 EXIT_BACKUP,
-                format!("错误: 备份缺少校验文件 {}，拒绝还原", md5_path.display()),
+                format!("错误: 备份缺少校验文件 {}，拒绝还原", sha256_path.display()),
             ));
         }
         Err(e) => {
             return Err(err(
                 EXIT_BACKUP,
-                format!("错误: 无法读取有效校验 {}: {}", md5_path.display(), e),
+                format!("错误: 无法读取有效校验 {}: {}", sha256_path.display(), e),
             ));
         }
     };
-    let got = crate::md5::md5_hex(&data);
+    let got = crate::sha256::sha256_hex(&data);
     if want != got {
         return Err(err(
             EXIT_BACKUP,
             format!(
-                "错误: 备份 MD5 不符(期望 {}, 实际 {}) — 文件损坏?",
+                "错误: 备份 SHA-256 不符(期望 {}, 实际 {}) — 文件损坏?",
                 want, got
             ),
         ));
     }
-    outputln!(ctx, "{}  {}", crate::ui::green("MD5 校验通过"), got);
+    outputln!(ctx, "{}  {}", crate::ui::green("SHA-256 校验通过"), got);
 
     // 显式路径也必须执行与交互选择相同的“同一物理盘”终验。device_id/容量/VID/PID
     // 对同型号盘并不唯一，LBA4 前 16B 才是现有备份体系使用的最终身份标签。
@@ -568,7 +570,7 @@ pub fn restore_flow(
             ctx,
             "{}",
             crate::ui::dim(&format!(
-                "[dry-run] 将还原 {} → disk{} LBA0-13 ({}B) — 未写入(免密快照不作还原)。",
+                "[dry-run] 将还原 {} → disk{} LBA0-12 ({}B) — 未写入(免密快照不作还原)。",
                 path.display(),
                 disk,
                 data.len()
@@ -583,7 +585,7 @@ pub fn restore_flow(
         crate::ui::truncate_mid(&path.display().to_string(), 64)
     );
     if !ctx.prompt.confirm_yes(&crate::ui::bold(&format!(
-        "  → disk{} LBA0-13? 输入 YES: ",
+        "  → disk{} LBA0-12? 输入 YES: ",
         disk
     ))) {
         return Err(err(EXIT_CANCELLED, "已取消"));
@@ -597,7 +599,7 @@ pub fn restore_flow(
         )
     })?;
     verify_reopened_snapshot(dev, &img)?;
-    let writes: BTreeMap<u32, Vec<u8>> = (0..14u32)
+    let writes: BTreeMap<u32, Vec<u8>> = (0..METADATA_SECTOR_COUNT as u32)
         .map(|lba| {
             (
                 lba,

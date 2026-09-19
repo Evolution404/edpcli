@@ -106,8 +106,8 @@ TUI 是 CLI v2 的交互前端，不是第二套业务实现。交互式 TTY 中
 | `n / N` | 下一个 / 上一个搜索匹配 |
 | `:` | 打开 command palette |
 | `i` | Inspect 当前设备或备份 |
-| `b` | 创建当前设备的只读 LBA0-13 备份 |
-| `v` | 校验当前选中备份的大小与 MD5 |
+| `b` | 创建当前设备的只读 LBA0-12 备份 |
+| `v` | 校验当前选中备份的大小与 SHA-256 |
 | `D` | 删除当前选中备份（必须输入 `YES`） |
 | `a` | Apply 安全向导 |
 | `R` | Restore 当前选中备份 |
@@ -119,7 +119,7 @@ Command palette 只接受任务语义，例如 `:devices`、`:backups`、`:inspe
 `:backup-create`、`:backup-verify`、`:backup-delete`、`:apply`、`:restore`、
 `:refresh`、`:help`、`:q`；它不会把输入传给 shell。
 
-设备和备份扫描、Inspect LBA0-13 读取全部在后台执行；设备/备份扫描还使用 single-flight 去重，连续刷新不会并发堆积同类 worker。旧 generation 的结果不会覆盖更新状态。Backup create 复用现有只读备份 service；Apply / Restore 则进入明确的安全向导：
+设备和备份扫描、Inspect LBA0-12 读取全部在后台执行；设备/备份扫描还使用 single-flight 去重，连续刷新不会并发堆积同类 worker。旧 generation 的结果不会覆盖更新状态。Backup create 复用现有只读备份 service；Apply / Restore 则进入明确的安全向导：
 
 1. 启动 TUI 前已完成平台管理员提权；
 2. 固定当前目标 disk；Restore 同时固定精确备份路径；
@@ -127,8 +127,8 @@ Command palette 只接受任务语义，例如 `:devices`、`:backups`、`:inspe
 4. 关键写盘阶段复用与 CLI 完全相同的系统盘保护、USB 整盘确认、写前备份、卸载/锁卷、
    reopen 身份复核、atomic write、sync/readback 和 rollback；
 5. 关键阶段内 `q`、`Esc`、`Ctrl-C` 不会杀掉写盘 worker，而是在安全结束点后再退出；
-6. 备份删除会固定选中时的内容 MD5，删除前重新扫描并复核内容；如果同名文件被替换会拒绝，
-   同时保留“每块盘至少 1 份备份”的安全底线，并同步删除对应 `.md5` sidecar。
+6. 备份删除会固定选中时的内容 SHA-256，删除前重新扫描并复核内容；如果同名文件被替换会拒绝，
+   同时保留“每块盘至少 1 份备份”的安全底线，并同步删除对应 `.sha256` sidecar。
 
 ### 2.3 查看详细信息
 
@@ -178,7 +178,7 @@ edpcli apply --disk 4 --force --yes
 真实 apply 顺序：
 
 1. 确认外接 USB 整盘且不是系统盘；
-2. 读取 LBA0-13；
+2. 读取 LBA0-12；
 3. 创建写前自动备份；
 4. 用户确认；
 5. 卸载/锁卷；
@@ -217,11 +217,11 @@ edpcli backup prune --keep 3 --yes
 
 它与 apply 写前自动备份共用唯一 `create_backup` service：
 
-- 输入固定为 LBA0-13，`14 * 512 = 7168B`；
+- 输入固定为 LBA0-12，`13 * 512 = 6656B`；
 - onlyid 从备份自身 LBA4 重新解析；
 - 相同 device_id / VID / PID / 容量元数据；
 - 相同文件名和 `_nopwd` 状态标记；
-- 相同 MD5 sidecar；
+- 相同 SHA-256 sidecar；
 - 相同 create-new 防覆盖；
 - 相同 fsync 与目录持久化。
 
@@ -239,7 +239,7 @@ edpcli backup list
 不会在每个 onlyid 分组里重新从 1 编号。
 
 每项显示时间、原始/免密状态、健康状态和真实文件名，分组同时展示型号、onlyid、Dept、
-User。备份健康检查包含固定大小和 MD5 sidecar。
+User。备份健康检查包含固定大小和 SHA-256 sidecar。
 
 备份目录优先级：
 
@@ -263,7 +263,7 @@ edpcli backup restore --disk 4
 2. 读取当前盘 LBA4 身份；
 3. 只显示属于当前盘的备份；
 4. 用户选择；
-5. 校验 7168B 大小、MD5 与 LBA4 身份；
+5. 校验 6656B 大小、SHA-256 与 LBA4 身份；
 6. 用户确认；
 7. 卸载/锁卷、reopen 复核后执行原子恢复。
 
@@ -282,7 +282,7 @@ edpcli backup verify 2
 edpcli backup verify backup.bin
 ```
 
-无参数校验全部；数字按全局编号选择；文件名或备份目录内路径精确选择。大小异常、MD5
+无参数校验全部；数字按全局编号选择；文件名或备份目录内路径精确选择。大小异常、SHA-256
 缺失或不匹配返回备份错误退出码。
 
 ### 删除
@@ -302,7 +302,7 @@ edpcli backup delete backup.bin
 
 - 目标必须位于当前备份根目录；
 - 确认后删除前再次比较扫描时的内容摘要，防止同名文件被替换；
-- `.bin` 和对应 `.md5` 配对处理；
+- `.bin` 和对应 `.sha256` 配对处理；
 - 任一可识别物理盘组至少保留 1 份备份。
 
 ### 策略清理
@@ -330,7 +330,7 @@ edpcli inspect backup.bin --lba 6,7,12 --export ./metadata-out
 
 规则：
 
-- LBA 必须通过 `--lba` 显式指定，范围固定 0..13；
+- LBA 必须通过 `--lba` 显式指定，范围固定 0..12；
 - 备份文件可作为唯一位置参数；
 - `--hex` 显示解码后的字段感知 hex；
 - `--raw` 查看盘上原始字节；
@@ -379,7 +379,7 @@ edpcli completion fish | source
 - 当前物理盘 selector；
 - 备份全局编号；
 - 备份文件名；
-- LBA0-13；
+- LBA0-12；
 - 各命令允许的 flag。
 
 ## 11. 三平台写盘边界
@@ -402,7 +402,7 @@ edpcli completion fish | source
 | 2 | 参数或用法错误 |
 | 3 | 目标不可用、非目标盘、系统盘或身份无法确认 |
 | 4 | 已免密盘拒绝重复写入，需要 `--force` |
-| 5 | 备份缺失、大小/MD5 异常或备份安全策略拒绝 |
+| 5 | 备份缺失、大小/SHA-256 异常或备份安全策略拒绝 |
 | 6 | 写失败且回滚失败，需要人工恢复 |
 | 7 | 写失败但完整回滚，可安全重试 |
 | 130 | 用户取消 |
