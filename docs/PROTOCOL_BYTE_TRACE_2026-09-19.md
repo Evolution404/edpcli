@@ -401,7 +401,7 @@ DWARF 中恢复出的原始声明文件/行号与本地函数地址：
 | LBA12 | 每条entry +0x059–+0x05F | COMPLETE | packed Reserved[7] | Windows `CreatePartitions` 对3×96B先 `memset(0,0x120)`，后续只写至 +0x58；Linux DWARF正式字段名 `Reserved[7]` | Windows UserLogin/改密只消费 wrapped16 与 +0x58；Linux decrypt/改密同样不消费 Reserved | 22盘66/66 entry全零；CI原始夹具锁定 | **LBA12 packed Reserved[7] producer/negative-consumer closure**；注意相邻 +0x48..57 仍是扩展 key-material PARTIAL |
 | LBA12 | 0x120–0x12D | PARTIAL | pass-info | writer/reader结构闭合 | 部分字段消费闭合 | 22盘 | 仍有+0A/+0C/+0D |
 | LBA12 | 0x12E–0x16F | COMPLETE | post-table zero initialized padding | writer整块零初始化且不覆写 | 主reader不消费该区 | 22/22解密为零 | producer+negative consumer+实盘闭合 |
-| LBA12 | 0x170–0x1FF | PARTIAL | continuous-cipher zero plaintext tail | 整扇A6B0 writer | 当前主reader无结构消费 | 22/22解密为零 | 密码学边界已知，但历史用途仍保守PARTIAL |
+| LBA12 | 0x170–0x1FF | COMPLETE | post-table zero initialized padding / continuous-cipher tail | Windows current `sub_10014F30` 分配 `sector_size+1` 后整块清零，v0x206 只复制 `0x120+0x0E=0x12E` 结构字节，随后加密整扇；Linux `BuildSector12` 同样先把 `sector_size+1` 全零再只复制表/表尾并整扇加密 | Windows `sub_100160B0` 固定解密0x200B，但只复制 `0x120+0x0E` 返回；Linux主reader同样只解释表/表尾，不消费 post-table 区 | 严格22份 + 独立SanDisk 解密后 `0x12E..0x1FF` 全零；既有连续密文门禁同时证明 `0x170..` 不是RAW尾 | 与 `0x12E..0x16F` 同属一个 post-table zero padding 区；此前 PARTIAL 行是主表 stale 状态，总进度表早已把这144B计入 LBA12 的393B COMPLETE，因此本次只纠账、不重复增加总数 |
 <!-- FIELD_LEDGER_END -->
 
 ### 4.0 LBA3：EDP 只保留的外部制造/MP 扇区

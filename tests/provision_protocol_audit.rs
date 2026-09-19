@@ -1406,7 +1406,7 @@ fn lba11_same_rev_pmap_device_has_both_chs_and_exact_size_writer_profiles() {
 }
 
 #[test]
-fn lba12_is_a_single_512_byte_ciphertext_with_zero_plaintext_tail() {
+fn lba12_post_table_plaintext_is_zero_through_sector_end() {
     let mut checked = 0usize;
     for entry in fs::read_dir(FIXTURE_DIR).expect("protocol fixtures") {
         let path = entry.expect("backup entry").path();
@@ -1422,12 +1422,24 @@ fn lba12_is_a_single_512_byte_ciphertext_with_zero_plaintext_tail() {
         let crc = crc32_bare(meta.device_id.as_bytes());
         let plain = a6b0_full(raw, &crc.to_le_bytes(), 0);
         assert_eq!(&plain[..4], b"EDPF", "{name}");
-        assert!(plain[0x170..].iter().all(|byte| *byte == 0), "{name}");
+        assert!(
+            plain[0x12e..].iter().all(|byte| *byte == 0),
+            "post-table plaintext must remain zero through the sector end: {name}"
+        );
         checked += 1;
     }
     assert!(
         checked >= MIN_PROTOCOL_FIXTURES,
         "protocol audit unexpectedly lost fixtures"
+    );
+
+    let sandisk = decode_hex_fixture(SANDISK_LBA12_HEX);
+    let crc = crc32_bare(SANDISK_DEVICE_ID.as_bytes());
+    let plain = a6b0_full(&sandisk, &crc.to_le_bytes(), 0);
+    assert_eq!(&plain[..4], b"EDPF");
+    assert!(
+        plain[0x12e..].iter().all(|byte| *byte == 0),
+        "independent SanDisk original lost zero post-table plaintext"
     );
 }
 

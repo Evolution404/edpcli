@@ -808,6 +808,41 @@ Provision 也已按官方 writer 修正：
   因而重新计算得到的 tail 密文与旧实现“直接拼回原密文 tail”逐字节相同。
   这说明实现修正没有改变既有产品输出，只消除了错误协议模型。
 
+本轮又专门复核了 `0x12E..0x1FF` 的 producer/consumer 边界，用来解决
+逐字节主表与总进度表之间的旧账本不一致：
+
+- Windows current writer `sub_10014F30`：
+  - 分配 `sector_size+1`；
+  - 对整个缓冲执行 `memset(...,0,sector_size+1)`；
+  - v0x206 只复制 `0x120` 的 3×96B packed entry，再复制 `0x0E` pass-info；
+  - 即最后一次结构写入恰好结束于 `0x12E`；
+  - 后续对整扇执行加密并复制回输出；
+- Windows current reader `sub_100160B0`：
+  - 固定对完整 `0x200` 字节解密；
+  - magic/version 合法后只复制 `0x120` entry 区与 `0x0E` pass-info；
+  - `0x12E..0x1FF` 没有结构读取或返回；
+- Linux `CLabelManage::BuildSector12@diskfile.cpp:922` 独立给出同样的生成原则：
+  先按 `sector_size+1` 分配并整块清零，之后只复制相应 ABI 的表和表尾，
+  最终以 `m_nSectorSize` 对整个扇区加密；
+- Linux ABI 的 v0x206 表本身是 104B×3 的扩展布局，结束位置不同，
+  因此它只用于证明“整扇先零初始化、未写区域保持零并整扇加密”这一 writer
+  原则；**不能**拿 Linux 的 `0x138+0x0E` 偏移反向覆盖 Windows 96B packed 主盘面；
+- Windows packed 主盘面的 exact boundary 仍由 `sub_10014F30/sub_100160B0`
+  锁定为 `0x12E`。
+
+实盘门禁也从原先只看 `0x170..` 收紧为完整 post-table 区：
+
+- committed original fixtures 全部满足解密后 `0x12E..0x1FF == zero[210]`；
+- 独立 SanDisk original 也满足同一条件；
+- 新门禁 `lba12_post_table_plaintext_is_zero_through_sector_end` 锁定完整210B；
+- 原 `every_committed_lba12_tail_is_encrypted_zeroes_from_device_id` 继续单独锁
+  `0x170..` 的连续 counter 密文性质，防止未来再次把它误改成 raw tail。
+
+因此 `0x12E..0x1FF` 应统一记为 **210B COMPLETE post-table zero padding**。
+此前字段主表把 `0x170..0x1FF` 仍写成 PARTIAL 是 stale 状态；但下方严格进度表
+和 LBA12 的 `393B COMPLETE` 早已把这144B包含进去，所以本轮只是修正字段账本，
+**不得再次把144B加到总 COMPLETE 数**。
+
 ### onlyid：注册时随机 GUID 的 CRC32，不是硬件 ID
 
 - Windows 官方注册链：
