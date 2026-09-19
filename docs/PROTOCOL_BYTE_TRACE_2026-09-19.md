@@ -288,7 +288,7 @@ BuildSector8(label):
 | LBA6 | 4 | 156 | 352 | 0.8% |
 | LBA7 | 179 | 27 | 306 | 35.0% |
 | LBA8 | 86 | 324 | 102 | 16.8% |
-| LBA9 | 52 | 104 | 356 | 10.2% |
+| LBA9 | 54 | 102 | 356 | 10.5% |
 | LBA10 | 36 | 4 | 472 | 7.0% |
 | LBA11 | 260 | 252 | 0 | 50.8% |
 | LBA12 | 393 | 119 | 0 | 76.8% |
@@ -296,8 +296,8 @@ BuildSector8(label):
 
 当前总计：
 
-- **COMPLETE：1627B / 6656B = 24.4%**
-- **PARTIAL：3004B / 6656B = 45.1%**
+- **COMPLETE：1629B / 6656B = 24.5%**
+- **PARTIAL：3002B / 6656B = 45.1%**
 - **UNKNOWN：2025B / 6656B = 30.4%**
 
 LBA11 本轮从 8B COMPLETE 提升到 260B COMPLETE。没有因为“能解开第二半扇”就把其余 252B 也冒进标完成：旧 Aigo U335 `rev_pmap` 为什么选择 CHS 容量参与密钥，而其它 21 份使用 DiskSize，上游选择逻辑尚未闭合。
@@ -381,7 +381,8 @@ DWARF 中恢复出的原始声明文件/行号与本地函数地址：
 | LBA9 | 0x004–0x00B | COMPLETE | ullBTime | Windows `SetTempUse` 从开始时间字符串解析为64位值；空/短字符串保持0 | Linux `CheckTempUse` 与 `time(NULL)` 比较；非零且 now < ullBTime 时拒绝临时使用 | 20/20原始EETU=0；真实CI夹具回归 | 开始时间下界语义闭合，0表示不启用该下界 |
 | LBA9 | 0x00C–0x013 | COMPLETE | ullETime | Windows `SetTempUse` 从结束时间字符串解析为64位值；空/短字符串保持0 | `CheckTempUse` 与 `time(NULL)` 比较；非零且 now > ullETime 时拒绝临时使用 | 20/20原始EETU=0；真实CI夹具回归 | 结束时间上界语义闭合，0表示不启用该上界 |
 | LBA9 | 0x014–0x017 | COMPLETE | useCount | `BusManageImp::WriteNormalULabel` 普通模式从请求 `+0x947` 取次数；特殊 OutManage-off 模式明确写 `0xFFFFFFFF`；`CUsbRegsiter::SetTempUse` 再将 request+0x40 原样写 EETU+0x14 | Linux `CheckTempUse`：`0xFFFFFFFF` 不递减/不回写；0=次数耗尽；其它正值减1并 `WriteTempUseInfo` 回写 | 20/20原始EETU=0xFFFFFFFF；真实CI夹具回归 | 4B 次数控制及无限次数哨兵完全闭合 |
-| LBA9 | 0x018–0x07F | PARTIAL | reverse[104] | Windows `SetTempUse` 从 request+0x44 固定复制0x66B，并保留结构剩余字节 | 当前 Linux `CheckTempUse` 不消费该区；其它消费者未闭合 | 20/20原始EETU该区为零 | producer边界已知，但全零不能替代业务语义 |
+| LBA9 | 0x018–0x07D | PARTIAL | reverse[0..101] | Windows `SetTempUse` 先把 EETU magic 后的124B清零，再从 request+0x44 固定复制0x66=102B到 reverse 起点；`WriteNormalULabel` 上游只初始化 begin/end/useCount，机器码扫描没有初始化这102B request backing 区 | 当前 Linux `CheckTempUse` 不消费 reverse；其它消费者未闭合 | 20/20原始EETU该102B为零 | 当前样本全零不足以覆盖 producer 可复制调用方/backing bytes 的事实；保持PARTIAL |
+| LBA9 | 0x07E–0x07F | COMPLETE | reverse[102..103] zero tail | `SetTempUse` 对 EETU +0x04..+0x7F 先整体清零，随后从 +0x18 只覆盖0x66B，即最后覆盖到 +0x7D；因此 +0x7E/+0x7F 在所有 current writer 路径都保留显式零初始化 | Linux `CheckTempUse` 只读取 ullBTime/ullETime/useCount，对 reverse[104] 完全无业务读取；运行时回写只修改 useCount 并保留其余字节 | 20/20原始EETU均为 `00 00`；CI门禁 `lba9_eetu_final_two_reverse_bytes_are_writer_zero_padding` | 2B 满足 explicit-zero producer + negative consumer + real-device evidence，可严格升 COMPLETE；不得把前102B一起升级 |
 | LBA9 | 0x100–0x103 | COMPLETE | SAPF magic | 旧writer恢复模板 | `UDiskLabelRepair::Repair0Sector` | 14样本 | 完成 |
 | LBA9 | 0x104–0x113 | COMPLETE | MBR恢复entry | writer保存16B entry | repair直接写回 LBA0 0x1BE | 14/14 | 完成 |
 | LBA9 | 0x180–0x183 | COMPLETE | EPPE magic | `SetPassInfoEx` | `ReadPassExInfo` | 6样本 | 完成 |
@@ -743,16 +744,33 @@ return OK
   - `useCount = 0xFFFFFFFF`；
   - `reverse[104]` 当前实盘均为0。
 
-CI 中的原始完整夹具也有多份 EETU，新增回归会逐盘解密并固定前三项。
-`reverse[104]` 即使20/20为零，也**不升级 COMPLETE**：官方 producer 明确允许
-从请求复制0x66B附加数据，而当前只缺最终业务 consumer。
+CI 中的原始完整夹具也有多份 EETU，回归会逐盘解密并固定前三项。
+`reverse[104]` 需要进一步拆开，不能再整体归一：
+
+- `SetTempUse` 先把 magic 之后的 `0x7C` 字节全部清零；
+- 随后 `copy(EETU.reverse, request+0x44, 0x66)` 只覆盖 reverse 的前102B，
+  即 LBA9 `+0x18..+0x7D`；
+- 最后2B `+0x7E..+0x7F` 从未被覆盖，因此始终保留 writer 的显式零初始化；
+- 对 `BusManageImp::WriteNormalULabel` 的真实机器码做栈区扫描后，上游临时请求
+  只显式写 begin/end/useCount；在调用 `SetTempUse` 前没有对
+  `tempUse+0x44..+0xA9` 这102B做整体初始化。故前102B即使当前20/20为零，
+  也不能解释成协议固定零 padding。
+
+Linux `CheckTempUse` 对整个 reverse[104] 都不读取，只消费时间窗和 useCount；
+运行时次数回写也只修改 useCount、保留其余字节。因此：
+
+- `reverse[0..101] / LBA9 +0x18..+0x7D`：继续 PARTIAL；
+- `reverse[102..103] / LBA9 +0x7E..+0x7F`：
+  **explicit zero-init producer + negative consumer + 20/20 real-device zero**
+  三条证据闭合，升级 COMPLETE。
 
 本轮因此从 PARTIAL 升级：
 
 - `+0x04..0x0B`：8B；
 - `+0x0C..0x13`：8B；
 - `+0x14..0x17`：4B；
-- 合计 **20B**。
+- `+0x7E..0x7F`：2B；
+- 本节累计 **22B COMPLETE**。
 
 ### 4.4 LBA5：512B 整区是 opaque write-protection probe scratch sector
 

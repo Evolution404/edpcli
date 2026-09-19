@@ -1546,7 +1546,7 @@ real-device evidence 三者都存在，因此这16B仍保持 PARTIAL，
   - `+0x0C..+0x13 = ullETime = 0`；
   - `+0x14..+0x17 = useCount = FF FF FF FF`；
   - `+0x18..+0x7F reverse[104] = 0`。
-- 这20B已经重新由官方 producer/consumer 闭合：
+- 时间窗/次数20B已经重新由官方 producer/consumer 闭合：
   - Linux DWARF `tagEdpEDiskTmpUse@edpdiskglobal.h:481` 给出正式字段名；
   - Windows `CUsbRegsiter::SetTempUse` 真实机器码将开始/结束时间字符串解析为
     两个64位时间值，并把请求 `+0x40` 原样写入 `useCount`；
@@ -1555,8 +1555,22 @@ real-device evidence 三者都存在，因此这16B仍保持 PARTIAL，
   - Linux `CheckTempUse` 将 `useCount=0xFFFFFFFF` 当作无限次数哨兵：
     不递减、不回写；0表示次数耗尽；其它正值减1并回写；
   - `ullBTime/ullETime` 与 `time(NULL)` 比较，0表示对应时间边界不启用。
-- `reverse[104]` 虽然20/20为0，但 writer 明确允许从请求复制0x66B数据，
-  最终业务 consumer 未闭合，因此仍保持 PARTIAL。
+- `reverse[104]` 本轮继续拆到 writer 覆盖边界，而不是因为20/20为零就整体升级：
+  - `CUsbRegsiter::SetTempUse` 先对 EETU magic 后的 `0x7C` 字节整体
+    `memset(0)`；
+  - 随后只执行 `memcpy(EETU+0x18, request+0x44, 0x66)`，即覆盖
+    reverse 前102B / LBA9 `+0x18..+0x7D`；
+  - reverse 最后2B / LBA9 `+0x7E..+0x7F` 没有任何后续覆盖，因此保留
+    明确的 writer 零初始化值；
+  - 对 `BusManageImp::WriteNormalULabel/sub_100A99F0` 的真实机器码重新扫描：
+    调用 `SetTempUse(&var_BD4)` 前只写 begin/end 字符串和
+    `useCount@var_B94`。对应 `tempUse+0x44..+0xA9` 的102B栈区没有初始化写；
+    所以前102B即使当前20/20为零，也可能承接 caller/backing bytes，不能升 COMPLETE；
+  - Linux `CheckTempUse` 对整个 reverse[104] 无读取，运行时回写只修改 useCount。
+
+因此本轮只把 **LBA9 +0x7E..+0x7F 两字节**升级 COMPLETE：
+explicit-zero producer + negative consumer + 20/20 原始 EETU 为零三条证据闭合。
+`+0x18..+0x7D` 的102B继续 PARTIAL。
 - `EPPE` 位于 `0x180..0x1ff`，是独立 128B A6B0 区，counter 从 0 重新开始；当前 6/6 解密为 `EPPE 08 00 00 00` 后零填充。
 - Windows `cemsusbregsiter.dll::SetPassInfoEx` 对输入 `+0x04` 明确限制为 6..19，
   构造 `EPPE` 后只覆盖 LBA9 `+0x180..+0x1ff`；Windows
@@ -1718,15 +1732,15 @@ CI 原始夹具同时保留两种 profile。零态表示该 legacy tail 不存�
 | 6 | 4B | 156B | 352B | 0.8% | checksum 4B 完成；GSerial/BeiZhu 的 C-string 语义已知，但固定16B槽跨 current/legacy writer profile 有不同 backing 语义，因此仍 PARTIAL；原所谓“旧 +0x1E0 扩展”已纠正为 legacy MBR partition-table fragment，2/2 非零实盘的 type/start/count 与 LBA12 type4 精确一致，但旧 producer/直接 consumer 尚未闭合 |
 | 7 | 179B | 27B | 306B | 35.0% | 原 48B/entry COMPLETE + 11B pass-info 基础上，三条 packed entry 的 legacy wrapped8 共24B由官方解包/重包/写回链和22盘28/28复算闭合；Version/NeedDisturb仍部分，表后区域未闭合 |
 | 8 | 86B | 324B | 102B | 16.8% | LLGB magic + logical length + ElabOffset 完成；另闭合 ToolVersion、Labversion、writeTime 和 Reserved[64] 共76B；HDSerialInfo/MacInfo/UsbOnlyInfo 与 ELABEL 细项仍部分闭合 |
-| 9 | 52B | 104B | 356B | 10.2% | EETU magic + ullBTime/ullETime/useCount 共24B完成；SAPF magic+16B MBR恢复项、EPPE magic+最小密码长度完成；EETU reverse及其它空洞仍未闭合 |
+| 9 | 54B | 102B | 356B | 10.5% | EETU magic + ullBTime/ullETime/useCount 共24B完成；reverse[102..103] 2B 由 writer 显式零初始化、negative consumer 与20/20实盘零值闭合；SAPF magic+16B MBR恢复项、EPPE magic+最小密码长度完成；reverse前102B及其它空洞仍未闭合 |
 | 10 | 36B | 4B | 472B | 7.0% | EESI magic + 两个16B卷标槽完成；+0x04仍缺最终业务语义，其余未闭合 |
 | 11 | 260B | 252B | 0B | 50.8% | 前半 DRKB+random252 的 producer/consumer 已双闭合；后半 PDKB magic 4B 也完成；其余当前 DiskSize profile 已闭合，但历史 CHS profile 选择条件仍未解释 |
 | 12 | 393B | 119B | 0B | 76.8% | 原 372B COMPLETE 基础上，三个 packed entry 的 Reserved[7] 共21B由官方字段名、writer零来源、negative consumer和22盘66/66零值闭合；+0x48扩展槽及其它119B仍PARTIAL |
 
 总计：
 
-- **完成：1627B / 6656B = 24.4%**
-- **部分已知：3004B / 6656B = 45.1%**
+- **完成：1629B / 6656B = 24.5%**
+- **部分已知：3002B / 6656B = 45.1%**
 - **未知：2025B / 6656B = 30.4%**
 
 这是一组**严格下限**，故意宁可低估，不把“能生成/能解析”冒充成“已经完全理解”。
