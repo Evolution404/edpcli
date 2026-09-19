@@ -16,6 +16,34 @@ pub struct GenerationGate {
     current: u64,
 }
 
+#[derive(Debug, Default)]
+pub struct SingleFlightGate {
+    running: bool,
+}
+
+impl SingleFlightGate {
+    pub const fn new() -> Self {
+        Self { running: false }
+    }
+
+    pub fn try_start(&mut self) -> bool {
+        if self.running {
+            false
+        } else {
+            self.running = true;
+            true
+        }
+    }
+
+    pub fn finish(&mut self) {
+        self.running = false;
+    }
+
+    pub const fn is_running(&self) -> bool {
+        self.running
+    }
+}
+
 impl GenerationGate {
     pub const fn new() -> Self {
         Self { current: 0 }
@@ -31,6 +59,10 @@ impl GenerationGate {
 
     pub const fn is_current(&self, generation: u64) -> bool {
         generation == self.current
+    }
+
+    pub const fn current(&self) -> u64 {
+        self.current
     }
 }
 
@@ -121,6 +153,8 @@ pub struct TaskHub {
     device_generation: GenerationGate,
     backup_generation: GenerationGate,
     inspect_generation: GenerationGate,
+    device_single_flight: SingleFlightGate,
+    backup_single_flight: SingleFlightGate,
 }
 
 impl Default for TaskHub {
@@ -138,10 +172,15 @@ impl TaskHub {
             device_generation: GenerationGate::new(),
             backup_generation: GenerationGate::new(),
             inspect_generation: GenerationGate::new(),
+            device_single_flight: SingleFlightGate::new(),
+            backup_single_flight: SingleFlightGate::new(),
         }
     }
 
     pub fn request_device_scan(&mut self, backup_dir: PathBuf) -> u64 {
+        if !self.device_single_flight.try_start() {
+            return self.device_generation.current();
+        }
         let generation = self.device_generation.begin();
         let tx = self.tx.clone();
         std::thread::spawn(move || {
@@ -162,6 +201,9 @@ impl TaskHub {
     }
 
     pub fn request_backup_scan(&mut self, backup_dir: PathBuf) -> u64 {
+        if !self.backup_single_flight.try_start() {
+            return self.backup_generation.current();
+        }
         let generation = self.backup_generation.begin();
         let tx = self.tx.clone();
         std::thread::spawn(move || {
@@ -347,15 +389,17 @@ impl TaskHub {
         let mut updates = TaskUpdates::default();
         while let Ok(message) = self.rx.try_recv() {
             match message {
-                WorkerResult::Devices { generation, rows }
-                    if self.device_generation.is_current(generation) =>
-                {
-                    updates.devices = Some(rows);
+                WorkerResult::Devices { generation, rows } => {
+                    self.device_single_flight.finish();
+                    if self.device_generation.is_current(generation) {
+                        updates.devices = Some(rows);
+                    }
                 }
-                WorkerResult::Backups { generation, rows }
-                    if self.backup_generation.is_current(generation) =>
-                {
-                    updates.backups = Some(rows);
+                WorkerResult::Backups { generation, rows } => {
+                    self.backup_single_flight.finish();
+                    if self.backup_generation.is_current(generation) {
+                        updates.backups = Some(rows);
+                    }
                 }
                 WorkerResult::Write { result } => {
                     updates.write = Some(result);
@@ -371,20 +415,22 @@ impl TaskHub {
                 WorkerResult::DeviceError {
                     generation,
                     message,
-                } if self.device_generation.is_current(generation) => {
-                    updates.device_error = Some(message);
+                } => {
+                    self.device_single_flight.finish();
+                    if self.device_generation.is_current(generation) {
+                        updates.device_error = Some(message);
+                    }
                 }
                 WorkerResult::BackupError {
                     generation,
                     message,
-                } if self.backup_generation.is_current(generation) => {
-                    updates.backup_error = Some(message);
+                } => {
+                    self.backup_single_flight.finish();
+                    if self.backup_generation.is_current(generation) {
+                        updates.backup_error = Some(message);
+                    }
                 }
-                WorkerResult::Inspect { .. }
-                | WorkerResult::Devices { .. }
-                | WorkerResult::Backups { .. }
-                | WorkerResult::DeviceError { .. }
-                | WorkerResult::BackupError { .. } => {}
+                WorkerResult::Inspect { .. } => {}
             }
         }
         updates
