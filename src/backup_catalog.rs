@@ -4,6 +4,7 @@
 //! 统一由 `BackupSelector` 生成，避免各命令各自排序后产生“同一个 [N] 指向不同文件”的漂移。
 
 use std::fs;
+use std::io;
 use std::path::{Path, PathBuf};
 
 use crate::diskio::{self, BackupEntry, Md5Status};
@@ -76,4 +77,60 @@ pub fn file_name(entry: &BackupEntry) -> &str {
 
 pub fn is_healthy(entry: &BackupEntry) -> bool {
     entry.size_ok && entry.md5_ok == Md5Status::Ok
+}
+
+
+/// Delete one already-scanned backup entry using content identity, not only its pathname.
+///
+/// The caller is responsible for higher-level retention policy (for example, keeping at least one
+/// backup for a device). This function re-checks that the target is still a regular file and that
+/// its content MD5 still matches the scan snapshot before deleting the .bin and its .md5 sidecar.
+pub fn delete_entry_verified(entry: &BackupEntry) -> Result<(), String> {
+    let path = &entry.path;
+    let metadata = fs::symlink_metadata(path)
+        .map_err(|e| format!("删除前无法重新检查 {}: {}", path.display(), e))?;
+    if !metadata.file_type().is_file() {
+        return Err(format!(
+            "删除前目标已不再是普通文件，拒绝删除: {}",
+            path.display()
+        ));
+    }
+    let expected = entry
+        .content_md5
+        .as_deref()
+        .ok_or_else(|| format!("扫描时无法取得内容摘要，拒绝删除: {}", path.display()))?;
+    let current =
+        fs::read(path).map_err(|e| format!("删除前无法重新读取 {}: {}", path.display(), e))?;
+    let actual = crate::md5::md5_hex(&current);
+    if actual != expected {
+        return Err(format!(
+            "备份在扫描/确认后内容已变化，拒绝删除同名新文件: {}",
+            path.display()
+        ));
+    }
+    if let Err(e) = fs::remove_file(path) {
+        let suffix = if e.kind() == io::ErrorKind::PermissionDenied {
+            "；备份目录可能由管理员账户持有且不可写，可检查目录属主/权限"
+        } else {
+            ""
+        };
+        return Err(format!("删除失败 {}: {}{}", path.display(), e, suffix));
+    }
+    let sidecar = diskio::md5_sidecar_path(path);
+    if sidecar.exists() {
+        if let Err(e) = fs::remove_file(&sidecar) {
+            let suffix = if e.kind() == io::ErrorKind::PermissionDenied {
+                "；备份目录可能由管理员账户持有且不可写，可检查目录属主/权限"
+            } else {
+                ""
+            };
+            return Err(format!(
+                "已删除 .bin，但删除校验文件失败 {}: {}{}",
+                sidecar.display(),
+                e,
+                suffix
+            ));
+        }
+    }
+    Ok(())
 }
