@@ -911,14 +911,29 @@ pub fn analyze_sector(lba: u32, raw: &[u8], meta: &InspectMeta) -> SectorView {
         }
         8 => {
             if let Some((crc, key)) = crc_key(meta) {
-                decoded = a6b0_full(&raw[..EDPF_ENC_LEN], &key, 0);
-                decoded.resize(SECTOR, 0);
+                let head = a6b0_full(&raw[..16], &key, 0);
+                let encrypted_len = if head.get(..4) == Some(b"LLGB") {
+                    u32_at(&head, 4)
+                        .map(|value| value as usize)
+                        .and_then(|logical_len| logical_len.checked_add(15))
+                        .map(|value| value & !15)
+                        .filter(|value| *value >= 16 && *value <= SECTOR)
+                        .unwrap_or(EDPF_ENC_LEN)
+                } else {
+                    EDPF_ENC_LEN
+                };
+                decoded = raw.to_vec();
+                decoded[..encrypted_len].copy_from_slice(&a6b0_full(
+                    &raw[..encrypted_len],
+                    &key,
+                    0,
+                ));
                 if decoded.get(..4) == Some(b"LLGB") || decoded.contains(&b'<') {
                     parse_llgb(&decoded, &mut fields, &mut notes);
                 }
                 format!(
                     "A6B0 前 {}B，key=CRC32(device_id)=0x{crc:08X}",
-                    EDPF_ENC_LEN
+                    encrypted_len
                 )
             } else {
                 "RAW（缺 device_id，无法解 LBA8）".into()

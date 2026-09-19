@@ -227,6 +227,93 @@ fn lba8_llgb_fields_render_as_vertical_key_value_rows() {
 }
 
 #[test]
+fn lba8_splits_elabel_bytes_before_gbk_decoding_each_value() {
+    let device_id = "disk&ven_test&prod_llgb_boundary";
+    let crc = crc32_bare(device_id.as_bytes());
+    let mut plain = vec![0u8; 368];
+    plain[..4].copy_from_slice(b"LLGB");
+    plain[8..12].copy_from_slice(&0x0100_0001u32.to_le_bytes());
+    plain[12..16].copy_from_slice(&0x222u32.to_le_bytes());
+    plain[0x3e..0x40].copy_from_slice(&0x80u16.to_le_bytes());
+
+    // Real samples can end a truncated Dept value with a lone GBK lead byte
+    // immediately before the ASCII "||User=" delimiter. Decoding the whole
+    // ELABEL string first would consume the first '|' as that byte's trail
+    // byte and destroy the User key.
+    let mut elabel = b"<ELABEL>GLab=322CA28A-D7D1448B-DCE2CED9||Dept=".to_vec();
+    elabel.extend_from_slice(&[0xbd]);
+    elabel.extend_from_slice(b"||User=");
+    elabel.extend_from_slice(&[0xd5, 0xc5, 0xd3, 0xf1, 0xe7, 0xf4]); // 张玉玺 (GBK)
+    elabel.extend_from_slice(b"||Label=");
+    elabel.extend_from_slice(&[0xbd, 0xad, 0xcb, 0xd5, 0xb5, 0xe7, 0xc1, 0xa6]); // 江苏电力
+    elabel.extend_from_slice(b"!SAFE6||");
+    let logical_len = 0x80 + elabel.len();
+    plain[4..8].copy_from_slice(&(logical_len as u32).to_le_bytes());
+    plain[0x80..0x80 + elabel.len()].copy_from_slice(&elabel);
+
+    let mut raw = vec![0u8; 512];
+    raw[..368].copy_from_slice(&a7f0_full(&plain, &crc.to_le_bytes(), 0));
+    let meta = InspectMeta {
+        device_id: Some(device_id.into()),
+        ..InspectMeta::default()
+    };
+    let view = analyze_sector(8, &raw, &meta);
+    let out = render_fields(&view);
+
+    assert!(out.contains("User"), "{out}");
+    assert!(out.contains("张玉玺"), "{out}");
+    assert!(out.contains("Label"), "{out}");
+    assert!(out.contains("江苏电力!SAFE6"), "{out}");
+}
+
+#[test]
+fn lba8_decrypts_the_llgb_length_instead_of_a_fixed_0x170_prefix() {
+    let device_id = "disk&ven_test&prod_llgb_long";
+    let crc = crc32_bare(device_id.as_bytes());
+    let mut plain = vec![0u8; 0x190];
+    plain[..4].copy_from_slice(b"LLGB");
+    plain[8..12].copy_from_slice(&0x0100_0001u32.to_le_bytes());
+    plain[12..16].copy_from_slice(&0x222u32.to_le_bytes());
+    plain[0x3e..0x40].copy_from_slice(&0x80u16.to_le_bytes());
+
+    let mut elabel = b"<ELABEL>GLab=322CA28A-D7D1448B-DCE2CED9||".to_vec();
+    for key in [
+        "Indus", "Orgcd", "Org", "Unit", "Dept", "User", "Alarm", "Autonum", "Label", "Rmark",
+        "VOL0", "VOL1", "VOL2", "VOLC0", "VOLC1",
+    ] {
+        elabel.extend_from_slice(key.as_bytes());
+        elabel.extend_from_slice(b"=12345||");
+    }
+    elabel.extend_from_slice(b"VOLC2=TAIL||");
+    let logical_len = 0x80 + elabel.len();
+    assert!(logical_len > 0x170 && logical_len <= 0x190);
+    plain[4..8].copy_from_slice(&(logical_len as u32).to_le_bytes());
+    plain[0x80..0x80 + elabel.len()].copy_from_slice(&elabel);
+
+    let encrypted_len = (logical_len + 15) & !15;
+    let mut raw = vec![0u8; 512];
+    raw[..encrypted_len].copy_from_slice(&a7f0_full(
+        &plain[..encrypted_len],
+        &crc.to_le_bytes(),
+        0,
+    ));
+    let meta = InspectMeta {
+        device_id: Some(device_id.into()),
+        ..InspectMeta::default()
+    };
+    let view = analyze_sector(8, &raw, &meta);
+    let out = render_fields(&view);
+
+    assert!(out.contains("VOLC2"), "{out}");
+    assert!(out.contains("TAIL"), "{out}");
+    assert!(
+        view.method.contains(&format!("前 {encrypted_len}B")),
+        "{}",
+        view.method
+    );
+}
+
+#[test]
 fn repeated_structures_render_as_groups_instead_of_repeating_prefixes() {
     edpcli::ui::set_enabled_for_tests(false);
     let data = load_disk_image("netac").expect("netac fixture");

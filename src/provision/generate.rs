@@ -233,18 +233,19 @@ fn build_lba8(spec: &ProvisionSpec) -> Result<[u8; SECTOR], String> {
     body.extend_from_slice(b"||Label=");
     body.extend_from_slice(&label);
     body.extend_from_slice(b"||Rmark=||VOL0=||VOL1=||VOL2=||VOLC0=||VOLC1=||VOLC2=||");
-    body.push(0);
-    if body.len() > EDPF_ENC_LEN - 0x80 {
+    if body.len() > SECTOR - 0x80 - 1 {
         return Err(format!("LBA8 LLGB body too large: {} bytes", body.len()));
     }
-    let end = 0x80 + body.len();
-    put_u32(&mut plain, 0x04, end as u32);
-    plain[0x80..end].copy_from_slice(&body);
+    let logical_end = 0x80 + body.len();
+    put_u32(&mut plain, 0x04, logical_end as u32);
+    plain[0x80..logical_end].copy_from_slice(&body);
+    plain[logical_end] = 0;
+    let encrypted_len = (logical_end / 16 + 1) * 16;
 
     let crc = crc32_bare(spec.target().device_id().as_bytes());
-    let encrypted = a7f0_full(&plain[..EDPF_ENC_LEN], &crc.to_le_bytes(), 0);
+    let encrypted = a7f0_full(&plain[..encrypted_len], &crc.to_le_bytes(), 0);
     let mut out = [0u8; SECTOR];
-    out[..EDPF_ENC_LEN].copy_from_slice(&encrypted);
+    out[..encrypted_len].copy_from_slice(&encrypted);
     Ok(out)
 }
 

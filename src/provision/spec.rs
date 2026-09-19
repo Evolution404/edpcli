@@ -221,9 +221,13 @@ impl ProvisionSpec {
             + "||Label=".len()
             + label.len()
             + "||Rmark=||VOL0=||VOL1=||VOL2=||VOLC0=||VOLC1=||VOLC2=||".len();
-        if llgb_payload_len > 0xF0 {
+        // BuildSector8 stores the ELABEL C string at +0x80. The LLGB +0x04
+        // logical length excludes the terminating NUL, so the largest legal
+        // body is 0x17F bytes: +0x80 + 0x17F = 0x1FF, leaving byte 0x1FF
+        // for the NUL that is covered by the final encrypted block.
+        if llgb_payload_len > 0x17F {
             return Err(format!(
-                "metadata does not fit canonical LBA8 LLGB payload: {llgb_payload_len} > 240 bytes"
+                "metadata does not fit canonical LBA8 LLGB payload: {llgb_payload_len} > 383 bytes"
             ));
         }
         Ok(Self {

@@ -30,6 +30,20 @@ fn spec(onlyid: &str) -> ProvisionSpec {
     ProvisionSpec::new(target, metadata, ProvisionProfile::canonical_v1()).unwrap()
 }
 
+fn target() -> TargetIdentity {
+    let probe = HardwareProbe {
+        vid: Some(0x0dd8),
+        pid: Some(0x2005),
+        transport: NativeTransport::Uas,
+        inquiry: Some(InquiryInfo {
+            vendor: "Netac".into(),
+            product: "OnlyDisk".into(),
+            revision: "1.00".into(),
+        }),
+    };
+    TargetIdentity::from_probe(&probe, 122_880_000).unwrap()
+}
+
 fn entropy() -> ProvisionEntropy {
     let mut random = [0u8; 256];
     for (index, byte) in random.iter_mut().enumerate() {
@@ -133,6 +147,38 @@ fn generated_image_is_structurally_complete_nopwd_metadata() {
         Ok(sector(bytes, lba as usize).to_vec())
     };
     assert!(looks_nopwd(&read, spec.target().device_id()).unwrap());
+}
+
+#[test]
+fn lba8_writer_length_excludes_nul_but_encrypts_the_following_block() {
+    // With canonical profile constants these field lengths make the writer's
+    // LLGB logical length exactly 0x180. The official writer stores 0x180 in
+    // +0x04, then encrypts one additional 16-byte block so the terminating
+    // NUL is covered as well.
+    let metadata = ProvisionMetadata::new(
+        OnlyId::parse("1402259934").unwrap(),
+        "USER06",
+        "D".repeat(63),
+        "L".repeat(16),
+    )
+    .unwrap();
+    let spec = ProvisionSpec::new(target(), metadata, ProvisionProfile::canonical_v1()).unwrap();
+    let image = generate_image(&spec, &entropy()).unwrap();
+    let raw = sector(image.as_bytes(), 8);
+    let crc = crc32_bare(spec.target().device_id().as_bytes());
+    let plain = edpcli::crypto::a6b0_full(&raw[..0x190], &crc.to_le_bytes(), 0);
+
+    assert_eq!(&plain[..4], b"LLGB");
+    assert_eq!(u32::from_le_bytes(plain[4..8].try_into().unwrap()), 0x180);
+    assert_eq!(
+        plain[0x180], 0,
+        "terminating NUL must be in the extra block"
+    );
+    assert!(
+        raw[0x180..0x190].iter().any(|byte| *byte != 0),
+        "0x180..0x18F must be ciphertext, not physical zero padding"
+    );
+    assert!(raw[0x190..].iter().all(|byte| *byte == 0));
 }
 
 #[test]

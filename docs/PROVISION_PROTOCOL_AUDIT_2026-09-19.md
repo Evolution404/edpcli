@@ -145,14 +145,61 @@ GSerial / 15B BeiZhu。**NUL 后尾字节没有稳定业务语义，可能保留
 ### LBA8：加密长度由 LLGB +0x04 决定，不是固定 368B
 
 - 当前 22/22 参考样本均满足：
-  - `raw[0..round_up_16(u32_le(decoded,+0x04))]` 为 A6B0/A7F0 区；
+  - 解密后 `0x00..0x03 == "LLGB"`；
+  - `u32@+0x04 = 0x80 + strlen(ELABEL)`，**不包含结尾 NUL**；
+  - 实际 A6B0/A7F0 长度为
+    `((u32@+0x04 / 16) + 1) * 16`，即始终覆盖装有结尾 NUL 的下一块；
   - 该长度之后到 512B 为物理零；
-  - 解密后 `0x00..0x03 == "LLGB"`。
 - 真实样本的有效长度覆盖 `0x148 / 0x154 / 0x16b / 0x17a / 0x17c / 0x17e / 0x181 / 0x183` 等多种值，实际加密前缀可为 0x150、0x160、0x170、0x180、0x190。
-- 因此现有固定 368B (`0x170`) decoder 会：
+- 独立 SanDisk 原始加密盘此前曾被误判为“非 LLGB”：根因是使用了
+  `disk&ven_sandisk&prod_ultra&rev_1.00` 这一另一份免密/历史样本的短 device_id。
+  该原盘自己的 LBA7 只有在
+  `disk&ven_sandisk&prod_ultra_usb_3.0&rev_1.00` 下才能恢复 EDPF；
+  同一权威 device_id 解 LBA8 后得到标准 `LLGB`，`+0x04=0x15E`。
+  因此当前原始参考集是 **22/22 LLGB**，没有证据把该 SanDisk 归入 EKTF。
+- 因此旧固定 368B (`0x170`) decoder 会：
   - 对短标签多解无意义块；
   - 对长标签截断真实 `VOL/VOLC` 字段。
 - LBA8 `+0x14..+0x17` 与 LBA4 解密后的 `0x35..0x38` 在当前 22/22 参考样本逐字节一致，是跨扇区动态字段，不是可固定 profile 常量。
+
+Windows `sub_100148d0` 与 Linux
+`CLabelManage::BuildSector8(char*, UsbLabelParam, unsigned int)`
+还独立给出同一份 17-key ELABEL writer 模板：
+
+`<ELABEL>GLab=%s||Indus=%s||Orgcd=%s||Org=%s||Unit=%s||Dept=%s||User=%s||Alarm=%s||Autonum=%s||Label=%s||Rmark=%s||VOL0=%s||VOL1=%s||VOL2=%s||VOLC0=%s||VOLC1=%s||VOLC2=%s||`
+
+Linux writer 与 `UsbLabelParam` DWARF 对齐后，当前 profile 的赋值来源是：
+
+- GLab <- `m_usbGSerial`
+- Dept <- `m_usbdepartment`
+- User <- `m_usbowner`
+- Autonum <- `m_autoid`
+- Label <- `m_usbLabel`
+- Rmark <- `BeiZhu`
+- Indus / Orgcd / Org / Unit / Alarm / VOL0/1/2 / VOLC0/1/2
+  在该 writer 中保持初始空值。
+
+22 份原始参考样本按**原始字节先切 `||`、再逐 value 做 GBK**
+重新统计后，17 个 key 在 22/22 中全部存在：
+
+- GLab：22/22 = `322CA28A-D7D1448B-DCE2CED9`
+- Label：22/22 = `江苏电力!SAFE6`
+- Indus / Orgcd / Org / Unit / Alarm / VOL0/1/2 / VOLC0/1/2：22/22 空
+- Autonum：`YD000001` 14 份、空 6 份、`1` 2 份
+- Rmark：空 20 份、`普通` 2 份
+- Dept / User 为业务动态值。
+
+其中 4 份较长盐城 Dept 的原始值最后停在单个 GBK lead byte `0xBD`，
+紧接 ASCII `||User=`。这证明 parser 必须**先按原始 ASCII delimiter
+切字段，再分别解码字段值**；若先整段 GBK 解码，`0xBD 0x7C`
+会吞掉第一个 `|`，破坏 User 字段边界。edpcli 已增加该实盘形态的回归测试。
+
+Provision 也已按官方 writer 修正：
+
+- 不再限制“LBA8 body <= 240B / 固定加密 0x170”；
+- canonical ELABEL 在扇区容量范围内动态生成；
+- `+0x04` 不包含 NUL；
+- 若 `+0x04` 恰为 16B 整数倍，仍额外加密一个块以容纳结尾 NUL。
 
 ### LBA11：`DRKB + random252`，VID/PID 是 4 字符 ASCII
 
@@ -488,7 +535,7 @@ tests/provision_protocol_audit.rs 固化以下事实：
 - 全部真实样本的 LBA12 tail 均可由目标 device_id 纯生成；
 - canonical GLAB 在真实样本中的一致性。
 - LBA4 必须按区段而不是按单字节零值解码；
-- LBA8 加密前缀长度由 LLGB +0x04 向 16B 对齐决定；
+- LBA8 加密前缀长度由 LLGB +0x04 决定，并额外覆盖保存 ELABEL NUL 的块；
 - LBA11 固定 DRKB magic、ASCII VID/PID CRC 输入和 PDKB 明文结构；
 - LBA12 是完整 512B 连续密文，解密后 144B tail 为零；
 - LBA7/LBA12 `+0x08` 等于连续 EDPF 条目数。

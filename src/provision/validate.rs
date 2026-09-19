@@ -309,19 +309,24 @@ fn expected_lba8_plain(spec: &ProvisionSpec) -> Result<[u8; SECTOR], String> {
     body.extend_from_slice(b"||Label=");
     body.extend_from_slice(&gbk(spec.metadata().label())?);
     body.extend_from_slice(b"||Rmark=||VOL0=||VOL1=||VOL2=||VOLC0=||VOLC1=||VOLC2=||");
-    body.push(0);
-    let end = 0x80 + body.len();
-    put_u32(&mut expected, 0x04, end as u32);
-    expected[0x80..end].copy_from_slice(&body);
+    if body.len() > SECTOR - 0x80 - 1 {
+        return Err(format!("LBA8 LLGB body too large: {} bytes", body.len()));
+    }
+    let logical_end = 0x80 + body.len();
+    put_u32(&mut expected, 0x04, logical_end as u32);
+    expected[0x80..logical_end].copy_from_slice(&body);
+    expected[logical_end] = 0;
     Ok(expected)
 }
 
 fn validate_lba8(spec: &ProvisionSpec, raw: &[u8], meta: &InspectMeta) -> Result<(), String> {
     let crc = crc32_bare(spec.target().device_id().as_bytes());
-    let mut decoded = [0u8; SECTOR];
-    let head = a6b0_full(&raw[..EDPF_ENC_LEN], &crc.to_le_bytes(), 0);
-    decoded[..EDPF_ENC_LEN].copy_from_slice(&head);
     let expected = expected_lba8_plain(spec)?;
+    let logical_len = u32::from_le_bytes(expected[4..8].try_into().unwrap()) as usize;
+    let encrypted_len = (logical_len / 16 + 1) * 16;
+    let mut decoded = [0u8; SECTOR];
+    let head = a6b0_full(&raw[..encrypted_len], &crc.to_le_bytes(), 0);
+    decoded[..encrypted_len].copy_from_slice(&head);
     if decoded != expected {
         return Err("LBA8 LLGB/profile bytes mismatch".into());
     }

@@ -41,8 +41,13 @@ LBA12 必须继续按“**结构已知 != 语义已知**”的严格口径推进
    `0x1D0..0x1DF=BeiZhu`、`0x1E0..0x1EF=模板/旧版扩展`、
    `0x1F0..0x1F3=m_encrypt`；继续只追 2/22 旧格式非零扩展来源。
    `+0x1CA` 已证实位于 GSerial 槽内，不得再当独立状态字段。
-2. 继续追 LBA8 LLGB/EKTF 的动态字段和 writer 来源；
-3. 继续追 LBA12 `NeedDisturb(+0x10)` 的旧版正向消费者，以及 pass-info
+2. LBA8 当前原始参考集已确认 22/22 LLGB；Windows/Linux 都使用同一 17-key
+   ELABEL writer 模板，`+0x04` 不含结尾 NUL，加密长度为
+   `((logical_len / 16) + 1) * 16`。edpcli inspect / Provision 已去掉固定
+   0x170 假设。继续只追 LLGB 动态头 `+0x10/+0x14/+0x18..` 的生成源；
+3. 优先修正/继续追 LBA12：inspect/旧转换代码中仍有“前368B密文+尾144B RAW”
+   的历史实现，与已闭合的整扇 512B 连续 A6B0 格式冲突；同时继续追
+   `NeedDisturb(+0x10)` 的旧版正向消费者，以及 pass-info
    `+0x0A/+0x0C/+0x0D` 的跨组件消费；
 4. LBA4 `OnllyID2Nd/HSerialCRC[5]` 已恢复官方结构；继续追非当前 writer
    profile 的 HSerialCRC 上游；

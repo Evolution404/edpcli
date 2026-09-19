@@ -266,7 +266,7 @@ fn lba4_short_form_must_be_decoded_by_regions_not_by_zero_bytes() {
 }
 
 #[test]
-fn lba8_encrypted_prefix_length_is_llgb_length_rounded_to_aes_block() {
+fn lba8_encrypted_prefix_covers_the_elabel_terminating_nul() {
     let mut checked = 0usize;
     for entry in fs::read_dir(FIXTURE_DIR).expect("protocol fixtures") {
         let path = entry.expect("backup entry").path();
@@ -290,7 +290,11 @@ fn lba8_encrypted_prefix_length_is_llgb_length_rounded_to_aes_block() {
         let decoded = a6b0_full(&raw[..encrypted_len], &crc.to_le_bytes(), 0);
         assert_eq!(&decoded[..4], b"LLGB", "{name}");
         let llgb_len = u32_le(&decoded, 4) as usize;
-        assert_eq!(round_up_16(llgb_len), encrypted_len, "{name}");
+        assert_eq!(
+            (llgb_len / 16 + 1) * 16,
+            encrypted_len,
+            "writer must encrypt the block containing the ELABEL NUL: {name}"
+        );
         checked += 1;
     }
     assert!(
