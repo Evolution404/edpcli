@@ -266,7 +266,7 @@ BuildSector8(label):
 | LBA5 | 512 | 0 | 0 | 100.0% |
 | LBA6 | 36 | 124 | 352 | 7.0% |
 | LBA7 | 155 | 51 | 306 | 30.3% |
-| LBA8 | 10 | 400 | 102 | 2.0% |
+| LBA8 | 86 | 324 | 102 | 16.8% |
 | LBA9 | 52 | 104 | 356 | 10.2% |
 | LBA10 | 36 | 4 | 472 | 7.0% |
 | LBA11 | 260 | 252 | 0 | 50.8% |
@@ -275,8 +275,8 @@ BuildSector8(label):
 
 当前总计：
 
-- **COMPLETE：1535B / 6656B = 23.1%**
-- **PARTIAL：3096B / 6656B = 46.5%**
+- **COMPLETE：1611B / 6656B = 24.2%**
+- **PARTIAL：3020B / 6656B = 45.4%**
 - **UNKNOWN：2025B / 6656B = 30.4%**
 
 LBA11 本轮从 8B COMPLETE 提升到 260B COMPLETE。没有因为“能解开第二半扇”就把其余 252B 也冒进标完成：旧 Aigo U335 `rev_pmap` 为什么选择 CHS 容量参与密钥，而其它 21 份使用 DiskSize，上游选择逻辑尚未闭合。
@@ -343,9 +343,12 @@ DWARF 中恢复出的原始声明文件/行号与本地函数地址：
 | LBA7 | 0x0CE–0x1FF | UNKNOWN | 表后区域 | 待查 | 待查 | 多数为固定/零 | 未闭合 |
 | LBA8 | 0x000–0x003 | COMPLETE | LLGB magic | Windows/Linux `BuildSector8` | reader 先检查 LLGB | 22/22 | 完成 |
 | LBA8 | 0x004–0x007 | COMPLETE | logical length | writer=`0x80+strlen(ELABEL)` | decoder决定动态加密前缀 | 22/22吻合 | 完成 |
-| LBA8 | 0x008–0x03D | PARTIAL | LLGB header 前段 | writer 多个动态/固定字段 | consumer未逐字段闭合 | 22盘存在稳定结构 | 不计完成 |
+| LBA8 | 0x008–0x00B | COMPLETE | ToolVersion[4] | Windows `sub_100148d0` 与 Linux `BuildSector8@diskfile.cpp:805` 都写固定字节 `01 00 00 01` | `ReadSector8(UsbLabelParam&)` 的语义 parser 不读取该版本戳；`ReadSector8(BYTE*)` 仅把完整解密扇区原样导出 | 22/22原始盘=`01 00 00 01`；CI原始夹具锁定 | 4B writer、reader行为、实盘一致，无已知 profile 分叉 |
+| LBA8 | 0x00C–0x00F | COMPLETE | Labversion | Windows/Linux writer 都固定写 `0x00000222` | 语义 parser 跳过该 DWORD；raw reader 仅原样导出 | 22/22原始盘=`0x222`；CI原始夹具锁定 | 4B 标签版本戳闭合 |
+| LBA8 | 0x010–0x013 | COMPLETE | writeTime | Windows writer 调 `GetTickCount()`；Linux `CLabelManage::GetTickCount@0x1FBAA` 用 `clock_gettime(CLOCK_MONOTONIC)` 转为毫秒并截为32位 | 两个官方 reader 都不把该值用于标签解析/准入；raw reader 只导出原值 | 22/22原始盘均非零且跨标签变化；CI夹具保持多值反例 | 不是墙钟时间，而是制标时单调时钟毫秒计数（32位回绕） |
+| LBA8 | 0x014–0x03D | PARTIAL | HDSerialInfo / MacInfo[6] / UsbOnlyInfo[32] | 当前 Windows/Linux writer 对 HDSerialInfo/MacInfo 写零初始化值，并以 `%08x%08x` 生成 UsbOnlyInfo；历史盘存在非零/空 profile | 当前语义 parser 不消费这些字段；其它历史消费者未闭合 | 22盘 HDSerialInfo 与 UsbOnlyInfo 存在多 profile；MacInfo 22/22为零 | 已知当前 writer 不足以解释历史值，整体保持PARTIAL |
 | LBA8 | 0x03E–0x03F | COMPLETE | ElabOffset | `BuildSector8@diskfile.cpp:805` 写 `0x0080`；官方结构 `tagEdpUsbLableInfo.ElabOffset@edpdiskglobal.h:413` | `ReadSector8@diskfile.cpp:1102` 读取 WORD 并用 `decoded+ElabOffset` 构造 ELABEL 字符串 | 22/22原始盘=0x80，且22/22都指向 `<ELABEL>`；CI真实夹具锁定 | 2B 寻址语义、producer、consumer、实盘全部闭合 |
-| LBA8 | 0x040–0x07F | PARTIAL | LLGB header reserved/其它字段 | writer 零初始化/部分字段 | consumer未逐字段闭合 | 22盘 | 不计完成 |
+| LBA8 | 0x040–0x07F | COMPLETE | Reserverd[64] | Windows `sub_100148d0` 与 Linux `BuildSector8` 都先零初始化整个 header，再把未被其它赋值覆盖的 64B 原样复制到该区 | `ReadSector8(UsbLabelParam&)` 直接越过该区定位 `ElabOffset` 指向的 ELABEL；raw reader 仅原样导出，不赋予业务语义 | 22/22原始盘解密后64B全零；CI原始夹具锁定 | 官方结构名、零初始化 producer、negative consumer 和实盘全部闭合为 reserved-zero 区 |
 | LBA8 | 0x080–logical_end | PARTIAL | 17-key ELABEL | Windows/Linux 同一模板 writer | User/Dept等部分下游已知 | 22/22含17键 | 每个键最终业务消费未全部闭合 |
 | LBA8 | tail | UNKNOWN | 物理零区 | writer只写加密前缀 | 无读取语义 | 22盘为零 | 不把 padding 猜成协议字段 |
 | LBA9 | 0x000–0x003 | COMPLETE | EETU magic | `CUsbRegsiter::SetTempUse` 构造 `EETU`；`WriteTempUseInfo` 可运行时回写 | `ReadTempUseInfo` 必须校验 EETU magic | 20个非零LBA9原始样本 | 完成 |
@@ -469,6 +472,50 @@ parse ELABEL key/value pairs
 
 因此 `LBA8 +0x3E..+0x3F` 2B 从 PARTIAL 升级 COMPLETE。
 其它头字段即便已有官方名称，也不会因为与它相邻而自动升级。
+
+#### LBA8 static version/writeTime/reserved header
+
+本轮继续对同一个 `tagEdpUsbLableInfo` 逐字段追踪，而不是把整个 header 一次性
+标成“已知”。Windows `sub_100148d0` 与 Linux
+`CLabelManage::BuildSector8@0x1D602` 的实际写序列一致：
+
+```text
++0x08 ToolVersion[4] = 01 00 00 01
++0x0C Labversion     = 0x00000222
++0x10 writeTime      = monotonic milliseconds, low 32 bits
++0x40 Reserverd[64]  = zero-initialized
+```
+
+`writeTime` 的来源已独立闭合：
+
+- Windows `sub_10016610` 只有一次 `GetTickCount()` 调用并直接返回；
+- Linux `CLabelManage::GetTickCount@0x1FBAA` 调
+  `clock_gettime(CLOCK_MONOTONIC)`，计算
+  `tv_sec * 1000 + tv_nsec / 1_000_000`，返回低 32 位。
+
+所以它不是 Unix 时间戳，也不是制盘日期，而是**制标进程所在系统自启动后的
+单调时钟毫秒值**，发生 32 位回绕是协议允许的自然结果。
+
+consumer 侧也重新核对：
+
+- `ReadSector8(char*, UsbLabelParam&)` 解密后只检查 `LLGB`，
+  读取 `+0x3E ElabOffset`，随后从该 offset 解析 ELABEL；
+  不读取 ToolVersion、Labversion、writeTime 或 Reserved；
+- `ReadSector8(char*, BYTE*)` 在检查 LLGB 后只是把完整 512B 解密结果
+  `memcpy` 给调用者，并返回 `+0x04 cbSize`，同样不解释这些字段。
+
+22 份原始参考重新解密统计：
+
+- ToolVersion：22/22 = `01 00 00 01`；
+- Labversion：22/22 = `0x222`；
+- writeTime：22/22 非零，且跨独立标签存在多值；
+- Reserved[64]：22/22 全零。
+
+因此上述 76B 可从 PARTIAL 升 COMPLETE。相邻的
+`HDSerialInfo/MacInfo/UsbOnlyInfo` **没有跟着升级**：当前 writer 虽可解释
+其当前写法，但 22 盘已经出现历史 profile 差异，尤其
+`HDSerialInfo` 非零组和 `UsbOnlyInfo` 空/16位十六进制串并存；旧 producer
+尚未闭合。
 
 ### 4.2 LBA10 两个 16B 字段：交换区/保密区卷标
 

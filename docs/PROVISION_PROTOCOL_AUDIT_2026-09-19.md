@@ -268,6 +268,35 @@ CI 已增加真实夹具门禁：一方面要求 LBA6 C-string == LBA8 Autonum�
   - 对长标签截断真实 `VOL/VOLC` 字段。
 - LBA8 `+0x14..+0x17` 与 LBA4 解密后的 `0x35..0x38` 在当前 22/22 参考样本逐字节一致，是跨扇区动态字段，不是可固定 profile 常量。
 
+动态头本轮继续从 producer/consumer 重新核对，新增闭合 76B：
+
+- `+0x08..0x0B ToolVersion[4]`
+  - Windows `sub_100148d0` 和 Linux `BuildSector8@0x1D602`
+    都固定写 `01 00 00 01`；
+  - 22/22 原始盘一致；
+- `+0x0C..0x0F Labversion`
+  - 两端 writer 均固定写 `0x222`；
+  - 22/22 原始盘一致；
+- `+0x10..0x13 writeTime`
+  - Windows `sub_10016610` 直接返回 `GetTickCount()`；
+  - Linux `CLabelManage::GetTickCount@0x1FBAA` 用
+    `CLOCK_MONOTONIC` 计算毫秒并返回低32位；
+  - 22/22 原始盘均非零并存在跨标签多值，因此不能再误称墙钟时间戳；
+- `+0x40..0x7F Reserverd[64]`
+  - 两端 writer 都先零初始化完整临时 header，该64B没有后续赋值；
+  - 22/22 原始盘解密后全零。
+
+consumer 同样闭合：
+
+- `ReadSector8(char*, UsbLabelParam&)` 只检查 magic、读取
+  `ElabOffset` 并解析 ELABEL，跳过上述四段；
+- `ReadSector8(char*, BYTE*)` 只在 LLGB 校验通过后原样复制整份
+  512B 解密结果，并返回 `cbSize`，不解释这些字段。
+
+因此这 76B 具备 producer + consumer 行为 + 22盘原始证据，可以升级 COMPLETE。
+但 `+0x14..0x3D` 仍明确保持 PARTIAL：当前 writer 的
+`HDSerialInfo/MacInfo/UsbOnlyInfo` 写法无法解释所有历史盘，不能被相邻闭合字段带着升级。
+
 Windows `sub_100148d0` 与 Linux
 `CLabelManage::BuildSector8(char*, UsbLabelParam, unsigned int)`
 还独立给出同一份 17-key ELABEL writer 模板：
@@ -757,7 +786,7 @@ Windows `edpediskctrl.dll` 同时给出读端和写端：
 | 5 | 512B | 0B | 0B | 100% | 两版 EdpDiskCtrl 均只对 LBA5 执行“读整扇→原样写回→检查 ERROR_WRITE_PROTECT(0x13)”；当前注册 writer 读取既有13扇区后不重建 LBA5，因此 preserve existing bytes；22/22原始盘全零 |
 | 6 | 36B | 124B | 352B | 7.0% | GSerial 16B、BeiZhu 16B、checksum 4B 完成；若干固定槽/CRC/flag 仅部分闭合，大量模板区仍未知 |
 | 7 | 155B | 51B | 306B | 30.3% | 三个 64B EDPF entry 中 48B/entry 完成，加 11B pass-info；Version/NeedDisturb/key8 等仍部分，表后区域未闭合 |
-| 8 | 10B | 400B | 102B | 2.0% | LLGB magic + logical length + ElabOffset(2B)完成；17-key ELABEL 序列化/来源虽已较清楚，但下游语义并未逐字段全部闭合，因此整体只计部分；头部仍有未知区 |
+| 8 | 86B | 324B | 102B | 16.8% | LLGB magic + logical length + ElabOffset 完成；另闭合 ToolVersion、Labversion、writeTime 和 Reserved[64] 共76B；HDSerialInfo/MacInfo/UsbOnlyInfo 与 ELABEL 细项仍部分闭合 |
 | 9 | 52B | 104B | 356B | 10.2% | EETU magic + ullBTime/ullETime/useCount 共24B完成；SAPF magic+16B MBR恢复项、EPPE magic+最小密码长度完成；EETU reverse及其它空洞仍未闭合 |
 | 10 | 36B | 4B | 472B | 7.0% | EESI magic + 两个16B卷标槽完成；+0x04仍缺最终业务语义，其余未闭合 |
 | 11 | 260B | 252B | 0B | 50.8% | 前半 DRKB+random252 的 producer/consumer 已双闭合；后半 PDKB magic 4B 也完成；其余当前 DiskSize profile 已闭合，但历史 CHS profile 选择条件仍未解释 |
@@ -765,8 +794,8 @@ Windows `edpediskctrl.dll` 同时给出读端和写端：
 
 总计：
 
-- **完成：1535B / 6656B = 23.1%**
-- **部分已知：3096B / 6656B = 46.5%**
+- **完成：1611B / 6656B = 24.2%**
+- **部分已知：3020B / 6656B = 45.4%**
 - **未知：2025B / 6656B = 30.4%**
 
 这是一组**严格下限**，故意宁可低估，不把“能生成/能解析”冒充成“已经完全理解”。
@@ -782,7 +811,7 @@ Windows `edpediskctrl.dll` 同时给出读端和写端：
 | 5 | canonical 已知 | opaque preserve / 写保护探测 scratch；当前 22/22 全零，但零不是协议固定要求 |
 | 6 | 高度闭合 | SAFE6、device CRC、checksum 已锁；0x1c0..0x1df 当前 writer 来源已拆分，0x1e0..0x1ef 仍存在版本/宿主差异 |
 | 7 | 高度闭合 | 64B EDPF entry、PartionCount、rolling XOR 已锁；表尾和 key8 生成源继续追 |
-| 8 | 高度闭合 | LLGB/ELABEL + 可变加密长度已锁；动态头字段继续追 |
+| 8 | 高度闭合 | LLGB/ELABEL + 可变加密长度已锁；ToolVersion/Labversion/writeTime/Reserved 已闭合，HDSerialInfo/MacInfo/UsbOnlyInfo 继续追 |
 | 9 | 高度闭合 | EETU/SAPF/EPPE 三块及全零形态已区分 |
 | 10 | 高度闭合 | 可选 EESI 前0x80读写边界、magic、两个16B文本槽已闭合；+0x04与+0x28..0x7f业务语义仍待追 |
 | 11 | 高度闭合 | DRKB/random252/ASCII VID-PID/size/PDKB 链已锁 |

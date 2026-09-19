@@ -445,6 +445,52 @@ fn lba8_encrypted_prefix_covers_the_elabel_terminating_nul() {
 }
 
 #[test]
+fn lba8_static_version_write_time_and_reserved_header_profile_match_real_fixtures() {
+    let mut checked = 0usize;
+    let mut write_times = std::collections::BTreeSet::new();
+
+    for entry in fs::read_dir(FIXTURE_DIR).expect("protocol fixtures") {
+        let path = entry.expect("backup entry").path();
+        if path.extension().and_then(|ext| ext.to_str()) != Some("bin") {
+            continue;
+        }
+        let name = path.file_name().unwrap().to_str().unwrap();
+        let Some(meta) = parse_reference_backup_name(name) else {
+            continue;
+        };
+        let image = fs::read(&path).expect("fixture bytes");
+        let raw = sector(&image, 8);
+        let last_nonzero = raw
+            .iter()
+            .rposition(|byte| *byte != 0)
+            .expect("real LBA8 has encrypted LLGB data");
+        let encrypted_len = round_up_16(last_nonzero + 1);
+        let crc = crc32_bare(meta.device_id.as_bytes());
+        let decoded = a6b0_full(&raw[..encrypted_len], &crc.to_le_bytes(), 0);
+
+        assert_eq!(&decoded[0x08..0x0c], &[0x01, 0x00, 0x00, 0x01], "{name}");
+        assert_eq!(u32_le(&decoded, 0x0c), 0x222, "{name}");
+        let write_time = u32_le(&decoded, 0x10);
+        assert_ne!(write_time, 0, "{name}");
+        write_times.insert(write_time);
+        assert!(
+            decoded[0x40..0x80].iter().all(|byte| *byte == 0),
+            "LBA8 reserved header range changed: {name}"
+        );
+        checked += 1;
+    }
+
+    assert!(
+        checked >= MIN_PROTOCOL_FIXTURES,
+        "protocol audit unexpectedly lost fixtures"
+    );
+    assert!(
+        write_times.len() >= 4,
+        "LBA8 writeTime evidence lost expected per-label variability"
+    );
+}
+
+#[test]
 fn lba11_is_drkb_random252_and_uses_ascii_vid_pid_in_crc_input() {
     let mut checked = 0usize;
     let mut saw_disk_size = false;

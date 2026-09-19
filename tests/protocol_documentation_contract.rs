@@ -133,6 +133,7 @@ fn documentation_keeps_the_official_provisioning_chain_and_strict_rules() {
         "m_autoid / Autonum",
         "NUL 后真实槽尾大量非零",
         "LBA3 opaque manufacturer/MP sector",
+        "LBA8 static version/writeTime/reserved header",
         "22/22",
         "不能单独把字段升级为 COMPLETE",
         "禁止把免密转换盘",
