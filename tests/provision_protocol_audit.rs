@@ -43,6 +43,21 @@ fn u64_le(bytes: &[u8], off: usize) -> u64 {
     u64::from_le_bytes(bytes[off..off + 8].try_into().unwrap())
 }
 
+fn legacy_password_fold32(password: &[u8]) -> u32 {
+    let mut sum = 0u32;
+    let mut chunks = password.chunks_exact(4);
+    for chunk in &mut chunks {
+        sum = sum.wrapping_add(u32::from_le_bytes(chunk.try_into().unwrap()));
+    }
+    let tail = chunks.remainder();
+    if !tail.is_empty() {
+        let mut padded = [0u8; 4];
+        padded[..tail.len()].copy_from_slice(tail);
+        sum = sum.wrapping_add(u32::from_le_bytes(padded));
+    }
+    sum
+}
+
 fn onlyid_bits(text: &str) -> u32 {
     if text.starts_with('-') {
         text.parse::<i32>().unwrap() as u32
@@ -1043,6 +1058,108 @@ fn edpf_offset_08_is_partition_count_in_both_tables() {
     assert!(
         checked >= MIN_PROTOCOL_FIXTURES,
         "protocol audit unexpectedly lost fixtures"
+    );
+}
+
+#[test]
+fn lba7_physical_entries_are_packed_64_not_linux_natural_72() {
+    let mut checked = 0usize;
+    for entry in fs::read_dir(FIXTURE_DIR).expect("protocol fixtures") {
+        let path = entry.expect("backup entry").path();
+        if path.extension().and_then(|ext| ext.to_str()) != Some("bin") {
+            continue;
+        }
+        let name = path.file_name().unwrap().to_str().unwrap();
+        let Some(meta) = parse_reference_backup_name(name) else {
+            continue;
+        };
+        let image = fs::read(&path).expect("fixture bytes");
+        let crc = crc32_bare(meta.device_id.as_bytes());
+        let k0 = (crc & 0xffff) ^ (crc >> 16);
+        let lba7 = xor_rolling(sector(&image, 7), k0);
+
+        assert_eq!(&lba7[0x00..0x04], b"EDPF", "LBA7 entry0: {name}");
+        assert_eq!(&lba7[0x40..0x44], b"EDPF", "LBA7 entry1: {name}");
+        assert_eq!(&lba7[0x80..0x84], b"EDPF", "LBA7 entry2: {name}");
+        assert_ne!(
+            &lba7[0x48..0x4c],
+            b"EDPF",
+            "Linux natural 72-byte ABI must not be used for physical LBA7: {name}"
+        );
+
+        let tail = decode_edpf_tail(&lba7[0xc0..0xce]);
+        assert!(
+            matches!(u16::from_le_bytes([tail[0], tail[1]]), 0x0064 | 0x0206),
+            "packed LBA7 pass-info must start at +0xC0: {name}"
+        );
+        checked += 1;
+    }
+    assert!(
+        checked >= MIN_PROTOCOL_FIXTURES,
+        "protocol audit unexpectedly lost packed LBA7 fixtures: {checked}"
+    );
+}
+
+#[test]
+fn lba7_v64_packed_legacy_file_key_wrap_matches_real_fixtures() {
+    const DEFAULT_PASSWORD: &[u8] = b"0000aaaa";
+    const DEFAULT_USER_KEY_CRC: u32 = 0x0429_735d;
+    const LEGACY_PASSWORD_FOLD: u32 = 0x9191_9191;
+
+    assert_eq!(crc32_bare(DEFAULT_PASSWORD), DEFAULT_USER_KEY_CRC);
+    assert_eq!(
+        legacy_password_fold32(DEFAULT_PASSWORD),
+        LEGACY_PASSWORD_FOLD
+    );
+
+    let mut checked_entries = 0usize;
+    for entry in fs::read_dir(FIXTURE_DIR).expect("protocol fixtures") {
+        let path = entry.expect("backup entry").path();
+        if path.extension().and_then(|ext| ext.to_str()) != Some("bin") {
+            continue;
+        }
+        let name = path.file_name().unwrap().to_str().unwrap();
+        let Some(meta) = parse_reference_backup_name(name) else {
+            continue;
+        };
+        let image = fs::read(&path).expect("fixture bytes");
+        let crc = crc32_bare(meta.device_id.as_bytes());
+        let k0 = (crc & 0xffff) ^ (crc >> 16);
+        let lba7 = xor_rolling(sector(&image, 7), k0);
+
+        for index in 0..3 {
+            let base = index * 0x40;
+            if &lba7[base..base + 4] != b"EDPF" {
+                continue;
+            }
+            let partition_type = u32_le(&lba7, base + 0x0c);
+            if !matches!(partition_type, 2 | 4)
+                || u32_le(&lba7, base + 0x30) != DEFAULT_USER_KEY_CRC
+            {
+                continue;
+            }
+            let file_key_crc = u32_le(&lba7, base + 0x34);
+            let wrapped = &lba7[base + 0x38..base + 0x40];
+            if file_key_crc == 0 && wrapped.iter().all(|byte| *byte == 0) {
+                continue;
+            }
+
+            let mut file_key = [0u8; 8];
+            let lo = u32::from_le_bytes(wrapped[..4].try_into().unwrap()) ^ LEGACY_PASSWORD_FOLD;
+            let hi = u32::from_le_bytes(wrapped[4..].try_into().unwrap()) ^ LEGACY_PASSWORD_FOLD;
+            file_key[..4].copy_from_slice(&lo.to_le_bytes());
+            file_key[4..].copy_from_slice(&hi.to_le_bytes());
+            assert_eq!(
+                crc32_bare(&file_key),
+                file_key_crc,
+                "v0x0064 packed legacy file-key CRC mismatch: {name} entry {index}"
+            );
+            checked_entries += 1;
+        }
+    }
+    assert!(
+        checked_entries >= 8,
+        "protocol fixtures lost positive v0x0064 legacy wrapped-key evidence: {checked_entries}"
     );
 }
 

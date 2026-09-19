@@ -280,7 +280,7 @@ BuildSector8(label):
 | LBA4 | 36 | 39 | 437 | 7.0% |
 | LBA5 | 512 | 0 | 0 | 100.0% |
 | LBA6 | 4 | 156 | 352 | 0.8% |
-| LBA7 | 155 | 51 | 306 | 30.3% |
+| LBA7 | 179 | 27 | 306 | 35.0% |
 | LBA8 | 86 | 324 | 102 | 16.8% |
 | LBA9 | 52 | 104 | 356 | 10.2% |
 | LBA10 | 36 | 4 | 472 | 7.0% |
@@ -290,8 +290,8 @@ BuildSector8(label):
 
 当前总计：
 
-- **COMPLETE：1603B / 6656B = 24.1%**
-- **PARTIAL：3028B / 6656B = 45.5%**
+- **COMPLETE：1627B / 6656B = 24.4%**
+- **PARTIAL：3004B / 6656B = 45.1%**
 - **UNKNOWN：2025B / 6656B = 30.4%**
 
 LBA11 本轮从 8B COMPLETE 提升到 260B COMPLETE。没有因为“能解开第二半扇”就把其余 252B 也冒进标完成：旧 Aigo U335 `rev_pmap` 为什么选择 CHS 容量参与密钥，而其它 21 份使用 DiskSize，上游选择逻辑尚未闭合。
@@ -356,7 +356,8 @@ DWARF 中恢复出的原始声明文件/行号与本地函数地址：
 | LBA6 | 0x1E0–0x1EF | PARTIAL | current-template zero / legacy opaque extension | current `BuildSector6` 不显式覆盖；Linux `UsbMainBSec@0x22BB40` 模板对应 `+0x1E0..0x1EF` 为16B零 | current `ReadSector6` 无业务读取 | 20/22原始盘为零；2份旧profile非零，Aigo=`c1 ff 07 ef ff ff 1c a8 7d 0e e3 f4 27 00 00 00`，SanDisk=`c1 ff 07 ef ff ff b2 8a 05 0e 77 3c 4c 00 00 00` | current profile边界已知，但旧 producer/consumer 未找到，保持PARTIAL |
 | LBA6 | 0x1F0–0x1F3 | PARTIAL | m_encrypt | 官方 writer 字段名/写入已知 | 最终行为消费者未完全闭合 | 22/22=1 | 固定值不足以完成 |
 | LBA6 | 0x1FC–0x1FF | COMPLETE | SAFE6 checksum | writer 对前508B计算 checksum | reader/inspect 校验 | 22/22 校验通过 | 完成 |
-| LBA7 | 0x000–0x0BF | PARTIAL | 3×64B EDPF 区 | BuildSector7/注册 writer | 多处 reader/登录/挂载 | 22盘 | 逐字段状态见详细审计 |
+| LBA7 | 0x000–0x0BF | PARTIAL | 3×64B packed EDPF 区 | Windows old-table writer/runtime；Linux natural ABI 仅作字段名参考 | 多处 reader/登录/挂载 | 22盘均按0x40 stride成立 | 逐字段状态见详细审计；不能用 Linux 0x48 natural stride 解析物理 LBA7 |
+| LBA7 | 每条entry +0x038–+0x03F | COMPLETE | 8B legacy wrapped file-key | Windows `sub_10028DB0` 以 `fold32(password)` 对两个32位 half 做对称 XOR 包装；`sub_100125B0` 映射回 old 0x40 entry；`SavePartionSector/sub_10028580 -> sub_10010FC0` 写 LBA7 | `sub_10026050` 对 v0x0064 固定解包8B，随后以 `sub_10038840` 计算 CRC32 并比较同 entry `FileKeyCRC(+0x34)`；改密后反向重包 | 22份 original real-device 中全部28条非零 type2/type4 legacy entry 独立复算 28/28 PASS；默认 `fold32("0000aaaa")=0x91919191` | **LBA7 v0x0064 packed legacy file-key wrapping** 已闭合；FileKeyCRC 4B此前已经计入 COMPLETE，本轮仅新增3×8B=24B，禁止重复计数 |
 | LBA7 | 0x0C0–0x0CD | PARTIAL | pass-info | writer/reader 14B结构已恢复 | 部分字段有行为消费者 | 22盘 LBA7/LBA12 同步 | +0A/+0C/+0D未闭合 |
 | LBA7 | 0x0CE–0x1FF | UNKNOWN | 表后区域 | 待查 | 待查 | 多数为固定/零 | 未闭合 |
 | LBA8 | 0x000–0x003 | COMPLETE | LLGB magic | Windows/Linux `BuildSector8` | reader 先检查 LLGB | 22/22 | 完成 |
@@ -1148,12 +1149,32 @@ floor(DiskSize / (255*63*512)) * (255*63*512)
 
 ## 6. LBA7 / LBA12 EDPF 字段 producer-consumer 图
 
-官方结构定义来自 Linux DWARF：
+字段名称来自 Linux DWARF，但这里存在一个必须显式区分的 ABI 分叉：
 
 `/mnt/git/.../global/inc/edpdiskglobal.h:76`
 
 ```text
-tagEdpPartionInfo
+Linux libcemsfilesyscheck.so natural tagEdpPartionInfo (sizeof=0x48)
++0x00 Flag
++0x04 Version
++0x08 PartionCount
++0x0C PartionType
++0x10 NeedDisturb
++0x14 NeedEncrypt
++0x18 StartSector        (u64)
++0x20 SectorSize         (u64)
++0x28 PartionSize        (u64)
++0x30 UserKeyCRC
++0x34..+0x37 alignment hole
++0x38 FileKeyCRC
++0x40 EncryptFileKey     (u64)
+```
+
+但 **Windows 真实物理 LBA7 不是这个 72B natural ABI**，而是去掉对齐洞后的
+64B packed ABI：
+
+```text
+Windows physical LBA7 packed entry (stride=0x40)
 +0x00 Flag
 +0x04 Version
 +0x08 PartionCount
@@ -1165,8 +1186,20 @@ tagEdpPartionInfo
 +0x28 PartionSize        (u64)
 +0x30 UserKeyCRC
 +0x34 FileKeyCRC
-+0x38 wrapped key material...
++0x38 EncryptFileKey     (8B legacy wrapped key)
 ```
+
+**LBA7 packed 64-byte ABI versus Linux natural 72-byte ABI** 已由三条独立证据锁定：
+
+- `libcemsfilesyscheck.so::BuildSector7@0x1DCDA` 的 natural build 复制
+  `0xD8 = 3*0x48`，其 pass-info 位于 `+0xD8`；
+- Windows `cemsusbregsiter.dll::sub_10016490` 明确按 `0x40` 读取旧表并逐字段
+  扩展到 `0x60` runtime table；`edpediskctrl.dll::sub_100125B0` 做反向
+  `0x60 -> 0x40` 映射；
+- 22份 original real-device：按 `0x40` stride，21/22 为3条 EDPF、1份已知
+  中间态为2条，且 `+0xC0` 的14B pass-info 22/22 可恢复合法版本；
+  按 `0x48` stride 则 22/22 都无法得到三条连续 EDPF，`+0xD8` 也无一得到合法
+  pass-info。CI 原始夹具另外锁死 `0x40` 三条 entry 与 `+0xC0` 表尾。
 
 Linux producer/reader 原源码位置：
 
@@ -1233,7 +1266,86 @@ if (packed_entry0.NeedDisturb != 0):
 这一具体行为，不是对字段名作“扰码/防篡改”等词义扩张；entry1/entry2
 仍需分别追 consumer，不能因为同名字段而自动升级。
 
-### 6.2 LBA12 +0x38..+0x47：v0x0206 默认密码的 mode2 wrapping 已闭合，但整字段仍 PARTIAL
+### 6.2 LBA7 v0x0064 +0x38..+0x3F：8B legacy file-key wrapping 完整闭合
+
+Windows 运行时 `edpediskctrl.dll::sub_10026050` 是旧表 key 的直接 consumer 和
+改密 producer。对目标 entry，它依据 pass-info/version 决定 key 长度：
+
+```text
+key_len = 8
+if pass_info.Version == 0x0206:
+    key_len = 16
+
+plain_key = unwrap(password, entry.EncryptMode, entry.wrapped_key)
+if CRC32_bare(plain_key[0:key_len]) != entry.FileKeyCRC:
+    reject
+```
+
+对 v0x0064 legacy table，转换后的 `EncryptMode=0`。`sub_10028AB0` 的 mode0
+分支调用 `sub_10011290 + sub_10011450`。继续拆机器码可得：
+
+- `sub_10011290(password)`：按 little-endian 4B chunk 求和；不足4B的尾部
+  以零补齐后再加，结果按 u32 回绕；
+- `sub_1005CEF0` 是 unsigned 64-bit right-shift helper；
+- `sub_1004EF80` 是 unsigned 64-bit multiply helper；
+- 化简编译器 helper 后，`sub_10011450` 对两个32位 half 的实际变换为：
+
+```text
+K = fold32(password)
+plain_lo = wrapped_lo XOR K
+plain_hi = wrapped_hi XOR K
+```
+
+逆向写回 `sub_10028DB0` 使用同一对称变换：
+
+```text
+wrapped_lo = plain_lo XOR K
+wrapped_hi = plain_hi XOR K
+```
+
+默认密码的两个独立值：
+
+```text
+CRC32_bare("0000aaaa") = 0x0429735D
+fold32("0000aaaa")     = 0x91919191
+```
+
+持久化链：
+
+```text
+CEdpDiskControl::ChangePwd / sub_100269A0
+  -> sub_10026050
+       -> sub_10028DB0          # 生成新的 wrapped8
+       -> runtime entry +0x34   # FileKeyCRC
+       -> runtime entry +0x38   # wrapped8
+       -> if version == 0x64:
+            sub_100125B0        # 0x60 runtime -> 0x40 packed
+  -> CEdpDiskControl::SavePartionSector / sub_10028580
+       -> version == 0x64:
+            sub_10010FC0
+              memcpy old_table[0xC0]
+              append pass-info[0x0E]
+              rolling-XOR whole LBA7
+              WriteFile(sector 7)
+```
+
+22份 original real-device 的只读独立复算覆盖全部非零 legacy 加密 entry：
+
+- 共 **28条** type2/type4 entry 同时具有非零 `FileKeyCRC + wrapped8`；
+- 28/28 的 `UserKeyCRC == 0x0429735D`；
+- 每条分别执行 `wrapped_lo/hi XOR 0x91919191` 得到8B file-key；
+- **28/28** 都满足
+  `CRC32_bare(unwrapped_file_key8) == entry.FileKeyCRC`；
+- current-style 对应字段为零，与 newer profile 分界一致。
+
+因此每条 packed entry 的 `+0x38..+0x3F` 8B 可由 PARTIAL 升为 COMPLETE，
+三个 entry 共新增 **24B COMPLETE**。`+0x34..+0x37 FileKeyCRC` 早已因 CRC
+consumer 链计入 COMPLETE，本轮不重复增加4B/entry。
+
+CI 回归分别锁定物理 LBA7 必须使用0x40 packed stride，以及 committed original
+fixtures 的默认密码 legacy wrapped8 必须能按上述算法解包并通过 FileKeyCRC。
+
+### 6.3 LBA12 +0x38..+0x47：v0x0206 默认密码的 mode2 wrapping 已闭合，但整字段仍 PARTIAL
 
 本轮对 packed entry 的 16B wrapped file-key 做了重新独立审计，
 不再沿用旧脚本结论。
@@ -1432,7 +1544,7 @@ reader 只有一个标准SM4解包分支且完全不读取 `oldSM4` 配置。
 按“最可能把 PARTIAL 转成 COMPLETE”的收益排序：
 
 1. **LBA11**：追 Aigo U335 `rev_pmap` 为何传入 CHS 容量；闭合后可再提升 252B。
-2. **LBA7 / LBA12**：逐个追 EDPF 中 Version、NeedDisturb 其它 entry、wrapped key8、pass-info 剩余字段。
+2. **LBA7 / LBA12**：LBA7 legacy wrapped key8 已闭合；继续逐个追 EDPF 中 Version、NeedDisturb 其它 entry、LBA12 非实盘 mode1/mode3 分支和 pass-info 剩余字段。
 3. **LBA4**：继续寻找旧 `HSerialCRC[5]` 的真正 producer。
 4. **LBA6**：追 `0x1E0..0x1EF` 两份旧格式非零扩展来源。
 5. **LBA8**：为 17-key ELABEL 的每个业务字段找到最终消费者。

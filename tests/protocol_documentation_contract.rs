@@ -140,6 +140,8 @@ fn documentation_keeps_the_official_provisioning_chain_and_strict_rules() {
         "LBA12 alternate wrapping-mode algorithm map",
         "LBA12 packed Reserved[7] producer/negative-consumer closure",
         "LBA0 legacy MBR message-pointer bytes",
+        "LBA7 packed 64-byte ABI versus Linux natural 72-byte ABI",
+        "LBA7 v0x0064 packed legacy file-key wrapping",
         "22/22",
         "不能单独把字段升级为 COMPLETE",
         "禁止把免密转换盘",

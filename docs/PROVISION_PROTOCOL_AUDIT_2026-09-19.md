@@ -571,6 +571,95 @@ Provision 也已按官方 writer 修正：
 - 唯一 LBA7=2 的样本是 Netac `onlyid=949028302 @ 17:24:33`；与同 onlyid 的 17:23:49 / 17:24:20 对比，仅 LBA7 发生变化，其余 LBA0–12 一致，因此它被定性为 LBA7 局部实验/中间态。排除该扇区后，原始 LBA7 参考是 21/21 三条。
 - 因此 `+0x08` 必须命名为 `partition_count` / `PartionCount`；表格式代际不能再从该字段推断。
 
+### LBA7 packed 64-byte ABI versus Linux natural 72-byte ABI
+
+本轮重新从 Linux DWARF、Windows 转换器和22份 original real-device 三条线核对
+LBA7，确认同名 `tagEdpPartionInfo` 存在不能混用的 ABI：
+
+- `libcemsfilesyscheck.so` DWARF：`sizeof(tagEdpPartionInfo)=0x48`，
+  `UserKeyCRC@+0x30`、`FileKeyCRC@+0x38`、`EncryptFileKey@+0x40`；
+  `BuildSector7@0x1DCDA` 复制 `0xD8=3*0x48`，natural pass-info 在 `+0xD8`；
+- Windows physical/runtime old table：stride 固定 `0x40`，去掉 natural ABI 中
+  `+0x34..+0x37` 的对齐洞，因此物理布局为
+  `UserKeyCRC@+0x30 / FileKeyCRC@+0x34 / wrapped8@+0x38`，表尾在 `+0xC0`；
+- `cemsusbregsiter.dll::sub_10016490` 是官方 old->new converter：逐字段把
+  `3*0x40` old entry 扩为 `3*0x60` runtime entry；目标先清零，所以
+  runtime `EncryptMode@+0x58` 为0；
+- `edpediskctrl.dll::sub_100125B0` 是反向 new->old converter，明确把 runtime
+  `+0x34/+0x38/+0x3C` 写回 packed old `+0x34/+0x38/+0x3C`。
+
+22份原盘按 device-id CRC 派生的 LBA7 rolling key 重新解密：
+
+- packed `0x40`：21/22 为三条 EDPF，1份已知局部中间态为两条；
+  `+0xC0` pass-info 22/22 都恢复合法 Version（21份0x0064、1份0x0206）；
+- natural `0x48`：22/22 都无法得到三条连续 EDPF，`+0xD8` pass-info
+  也 0/22 合法；
+- 因此 Linux 72B natural ABI 只可用于字段名/源码来源参考，不能直接作为
+  Windows 实盘 LBA7 物理 offset。
+
+### LBA7 v0x0064 packed legacy file-key wrapping
+
+旧表 `+0x38..+0x3F` 8B wrapped key 本轮完成 producer-consumer 闭合。
+
+直接 consumer 是 `edpediskctrl.dll::sub_10026050`：
+
+1. v0x0064 固定 `key_len=8`；v0x0206 才切到16B；
+2. 从 runtime entry `+0x38` 复制 wrapped material；
+3. 调 `sub_10028AB0(password, ..., EncryptMode, ...)` 解包；
+4. 对解出的8B 调 `sub_10038840`（CRC32_bare）；
+5. 必须等于 entry `FileKeyCRC@+0x34`，否则拒绝。
+
+legacy converter 产生的 `EncryptMode=0` 进入专门旧算法：
+
+```text
+K = fold32(password)
+fold32: little-endian 4B chunk 求和，尾部不足4B补零，u32 wrapping
+plain_lo = wrapped_lo XOR K
+plain_hi = wrapped_hi XOR K
+```
+
+机器码辅助函数已独立拆清：`sub_1005CEF0` 是 unsigned 64-bit shift helper，
+`sub_1004EF80` 是 unsigned 64-bit multiply helper；化简后
+`sub_10011450` 就是上述两个 half 的 XOR 变换。逆向 producer
+`sub_10028DB0` 使用同一对称公式。
+
+默认口令独立重算：
+
+```text
+CRC32_bare("0000aaaa") = 0x0429735D
+fold32("0000aaaa")     = 0x91919191
+```
+
+写回链同样闭合：
+
+```text
+CEdpDiskControl::ChangePwd / sub_100269A0
+ -> sub_10026050
+ -> sub_10028DB0
+ -> sub_100125B0          # runtime 0x60 -> packed 0x40
+ -> SavePartionSector / sub_10028580
+ -> sub_10010FC0
+      memcpy 0xC0 old table
+      append 0x0E pass-info
+      rolling-XOR
+      WriteFile(LBA7)
+```
+
+22份 original real-device 全量正向复算：
+
+- 共28条非零 type2/type4 legacy entry；
+- 28/28 的 `UserKeyCRC=0x0429735D`；
+- 用 `K=0x91919191` 对 wrapped8 两个 DWORD 分别 XOR；
+- **28/28** 解出的8B file-key 都满足
+  `CRC32_bare(file_key8) == entry.FileKeyCRC`。
+
+因此三条 entry 的 wrapped8 共 **24B PARTIAL -> COMPLETE**。
+`FileKeyCRC(+0x34..+0x37)` 此前已因 CRC consumer 链计入 COMPLETE，
+本轮不重复把这4B/entry计数。新增回归门禁：
+
+- `lba7_physical_entries_are_packed_64_not_linux_natural_72`；
+- `lba7_v64_packed_legacy_file_key_wrap_matches_real_fixtures`。
+
 ### LBA12：主运行时盘面是 96B packed entry；不要与 104B 检查结构混用
 
 对 LBA12 的“已知”采用更严格标准：**只知道 offset、长度或结构名，不等于知道字段语义**。
@@ -1160,7 +1249,7 @@ CI 原始夹具同时保留两种 profile。零态表示该 legacy tail 不存�
 | 4 | 36B | 39B | 437B | 7.0% | onlyid clear header、OnlyIdXor8、LLGB 双锚点完成；第二 ID/HSerial/profile 字段仍不完整；short/full 扩展区大部分未知 |
 | 5 | 512B | 0B | 0B | 100% | 两版 EdpDiskCtrl 均只对 LBA5 执行“读整扇→原样写回→检查 ERROR_WRITE_PROTECT(0x13)”；当前注册 writer 读取既有13扇区后不重建 LBA5，因此 preserve existing bytes；22/22原始盘全零 |
 | 6 | 4B | 156B | 352B | 0.8% | checksum 4B 完成；GSerial/BeiZhu 的 C-string 语义已知但固定16B槽有真实 post-NUL 非零 backing bytes，因此回退PARTIAL；旧 +0x1E0 扩展仍未闭合 |
-| 7 | 155B | 51B | 306B | 30.3% | 三个 64B EDPF entry 中 48B/entry 完成，加 11B pass-info；Version/NeedDisturb/key8 等仍部分，表后区域未闭合 |
+| 7 | 179B | 27B | 306B | 35.0% | 原 48B/entry COMPLETE + 11B pass-info 基础上，三条 packed entry 的 legacy wrapped8 共24B由官方解包/重包/写回链和22盘28/28复算闭合；Version/NeedDisturb仍部分，表后区域未闭合 |
 | 8 | 86B | 324B | 102B | 16.8% | LLGB magic + logical length + ElabOffset 完成；另闭合 ToolVersion、Labversion、writeTime 和 Reserved[64] 共76B；HDSerialInfo/MacInfo/UsbOnlyInfo 与 ELABEL 细项仍部分闭合 |
 | 9 | 52B | 104B | 356B | 10.2% | EETU magic + ullBTime/ullETime/useCount 共24B完成；SAPF magic+16B MBR恢复项、EPPE magic+最小密码长度完成；EETU reverse及其它空洞仍未闭合 |
 | 10 | 36B | 4B | 472B | 7.0% | EESI magic + 两个16B卷标槽完成；+0x04仍缺最终业务语义，其余未闭合 |
@@ -1169,8 +1258,8 @@ CI 原始夹具同时保留两种 profile。零态表示该 legacy tail 不存�
 
 总计：
 
-- **完成：1603B / 6656B = 24.1%**
-- **部分已知：3028B / 6656B = 45.5%**
+- **完成：1627B / 6656B = 24.4%**
+- **部分已知：3004B / 6656B = 45.1%**
 - **未知：2025B / 6656B = 30.4%**
 
 这是一组**严格下限**，故意宁可低估，不把“能生成/能解析”冒充成“已经完全理解”。
@@ -1185,7 +1274,7 @@ CI 原始夹具同时保留两种 profile。零态表示该 legacy tail 不存�
 | 4 | 高度闭合 | onlyid 头、rolling XOR 区、onlyIdXor8、LLGB 双锚点已锁；动态字段生成源继续追 |
 | 5 | canonical 已知 | opaque preserve / 写保护探测 scratch；当前 22/22 全零，但零不是协议固定要求 |
 | 6 | 部分闭合 | checksum 已锁；GSerial/BeiZhu 仅 C-string 语义闭合、物理槽尾有真实残值反例；0x1e0..0x1ef current模板为零但两份旧profile producer/consumer仍缺失 |
-| 7 | 高度闭合 | 64B EDPF entry、PartionCount、rolling XOR 已锁；表尾和 key8 生成源继续追 |
+| 7 | 高度闭合 | 物理0x40 packed ABI、PartionCount、rolling XOR、v0x0064 legacy wrapped8 解包/重包/持久化均已锁；继续追 Version、NeedDisturb 其它 entry 和 pass-info 剩余字段 |
 | 8 | 高度闭合 | LLGB/ELABEL + 可变加密长度已锁；ToolVersion/Labversion/writeTime/Reserved 已闭合，HDSerialInfo/MacInfo/UsbOnlyInfo 继续追 |
 | 9 | 高度闭合 | EETU/SAPF/EPPE 三块及全零形态已区分 |
 | 10 | 高度闭合 | 可选 EESI 前0x80读写边界、magic、两个16B文本槽已闭合；+0x04与+0x28..0x7f业务语义仍待追 |
@@ -1199,6 +1288,7 @@ CI 原始夹具同时保留两种 profile。零态表示该 legacy tail 不存�
 - LBA4 onlyID2Nd 及关联动态字段的生成源；
 - LBA0 bootstrap 主体/profile 选择、`+0x1A0 SectorSize` consumer，以及 `+0x1B8` disk signature 的 EDP-side consumer；
 - LBA6 0x1c0..0x1ed 不同格式代际的准确字段来源。
+- LBA7 Version、entry1/entry2 NeedDisturb 与 pass-info `bNoUsbChkPasSafe/BackupPromptPeriod` 的最终消费者；
 - LBA12 NeedDisturb 在新版主路径中的进一步业务作用（旧版 fallback 门控已闭合）；
 - LBA12 +0x48..+0x57 扩展材料槽在主盘面中的确切用途；
 - LBA12 表尾 `+0x0A/+0x0C/+0x0D` 的准确跨组件消费语义。
@@ -1224,6 +1314,8 @@ tests/provision_protocol_audit.rs 固化以下事实：
 - LBA11 固定 DRKB magic、ASCII VID/PID CRC 输入和 PDKB 明文结构；
 - LBA12 是完整 512B 连续密文，解密后 144B tail 为零；
 - LBA7/LBA12 `+0x08` 等于连续 EDPF 条目数。
+- LBA7 物理盘面固定使用0x40 packed entry，不得用 Linux 检查组件的0x48 natural ABI 解析；
+- LBA7 v0x0064 默认密码 legacy wrapped8 必须按 `fold32` XOR 解包后通过 FileKeyCRC；
 - LBA12 主运行时格式固定为 96B×3，14B 表尾在 `0x120`；
 - LBA12 `NeedDisturb` 的真实参考样本分布按 type1={1}、type2={1}、type4={0} 锁定；
   该门禁只表达“当前真实备份观察事实”，不把它升级成协议恒等式；
