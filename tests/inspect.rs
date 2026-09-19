@@ -166,6 +166,67 @@ fn lba4_zero_ciphertext_byte_is_decrypted_unless_whole_short_gap_is_unwritten() 
 }
 
 #[test]
+fn lba4_server_flags_are_restored_from_post_xor_wire_bytes() {
+    let onlyid = 1_402_259_934u32;
+    let k0 = (onlyid & 0xffff) ^ (onlyid >> 16);
+    let mut plain = vec![0u8; 512];
+    let header = b"$$$1402259934$$$";
+    plain[..header.len()].copy_from_slice(header);
+    plain[0x18..0x1c].copy_from_slice(&(onlyid ^ 0x8888_8888).to_le_bytes());
+    plain[0x39..0x3d].copy_from_slice(b"LLGB");
+    plain[0x45] = 0xaf;
+    plain[0x46] = 0x36;
+    plain[0x1fc..0x200].copy_from_slice(b"LLGB");
+
+    let mut raw = plain.clone();
+    raw[0x18..].copy_from_slice(&xor_rolling(&plain[0x18..], k0));
+    // Both official Windows and Linux BuildSector4 implementations perform
+    // these two byte stores *after* the rolling-XOR loop.
+    raw[0x45] = plain[0x45];
+    raw[0x46] = plain[0x46];
+
+    let generic = xor_rolling(&raw[0x18..], k0);
+    assert_ne!(&generic[0x2d..0x2f], &[0xaf, 0x36]);
+
+    let view = analyze_sector(4, &raw, &InspectMeta::default());
+    assert_eq!(&view.decoded[0x45..0x47], &[0xaf, 0x36]);
+    assert_eq!(&view.decoded[0x39..0x3d], b"LLGB");
+    assert_eq!(&view.decoded[0x1fc..0x200], b"LLGB");
+}
+
+#[test]
+fn lba4_current_restore_profile_restores_post_xor_server_flags() {
+    let onlyid = 1_402_259_934u32;
+    let k0 = (onlyid & 0xffff) ^ (onlyid >> 16);
+    let mut plain = vec![0u8; 512];
+    let header = b"$$$1402259934$$$";
+    plain[..header.len()].copy_from_slice(header);
+    plain[0x18..0x1c].copy_from_slice(&(onlyid ^ 0x8888_8888).to_le_bytes());
+    plain[0x1c..0x20].copy_from_slice(&onlyid.to_le_bytes());
+    // Current SAFE6 producer leaves HSerialCRC[5] zero.
+    plain[0x35..0x39].copy_from_slice(&[0x08, 0x04, 0x0c, 0x01]);
+    plain[0x39..0x3d].copy_from_slice(b"LLGB");
+    plain[0x3d..0x41].copy_from_slice(&1u32.to_le_bytes());
+    plain[0x41..0x45].copy_from_slice(&[0x08, 0x04, 0x0c, 0x01]);
+    plain[0x45..0x47].copy_from_slice(&[0, 0]);
+    plain[0x1fc..0x200].copy_from_slice(b"LLGB");
+
+    let mut raw = plain.clone();
+    raw[0x18..].copy_from_slice(&xor_rolling(&plain[0x18..], k0));
+    // Both official Windows and Linux current builders overwrite these two
+    // bytes *after* the rolling-XOR loop.
+    raw[0x45..0x47].copy_from_slice(&plain[0x45..0x47]);
+    let generic = xor_rolling(&raw[0x18..], k0);
+    assert_ne!(&generic[0x2d..0x2f], &[0, 0]);
+
+    let view = analyze_sector(4, &raw, &InspectMeta::default());
+    assert_eq!(&view.decoded[0x45..0x47], &[0, 0]);
+    assert_eq!(&view.decoded[0x39..0x3d], b"LLGB");
+    assert_eq!(&view.decoded[0x1fc..0x200], b"LLGB");
+    assert!(raw[0x47..0x1fc].iter().any(|byte| *byte != 0));
+}
+
+#[test]
 fn lba10_decodes_only_the_eesi_head_and_preserves_tail_bytes() {
     let device_id = "disk&ven_test&prod_eesi";
     let crc = crc32_bare(device_id.as_bytes());

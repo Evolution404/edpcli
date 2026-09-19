@@ -184,11 +184,21 @@ fn validate_lba4(spec: &ProvisionSpec, raw: &[u8], meta: &InspectMeta) -> Result
     if view.decoded.get(0x18..0x47) != Some(expected_node.as_slice()) {
         return Err("LBA4 current-writer restore-node profile mismatch".into());
     }
-    if raw[0x47..0x1fc].iter().any(|byte| *byte != 0) {
-        return Err("LBA4 canonical short-form extension gap is not physically zero".into());
-    }
     if view.decoded.get(0x1fc..0x200) != Some(b"LLGB") {
         return Err("LBA4 trailing LLGB marker mismatch".into());
+    }
+
+    // Canonical new-media output must match the official current SAFE6
+    // full-rolling writer, including its post-XOR server-flag exception.
+    let k0 = (bits & 0xffff) ^ (bits >> 16);
+    let mut expected_plain_tail = vec![0u8; SECTOR - 0x18];
+    expected_plain_tail[..0x2f].copy_from_slice(&expected_node);
+    expected_plain_tail[0x1e4..0x1e8].copy_from_slice(b"LLGB");
+    let mut expected_wire_tail = xor_rolling(&expected_plain_tail, k0);
+    expected_wire_tail[0x2d] = expected_node[0x2d];
+    expected_wire_tail[0x2e] = expected_node[0x2e];
+    if raw.get(0x18..) != Some(expected_wire_tail.as_slice()) {
+        return Err("LBA4 does not match current SAFE6 full-rolling wire profile".into());
     }
     Ok(())
 }

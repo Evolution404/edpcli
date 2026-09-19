@@ -75,6 +75,20 @@ fn validator_rejects_mbr_and_lba12_tail_tamper() {
 }
 
 #[test]
+fn validator_rejects_historical_lba4_short_form_as_new_media_canonical() {
+    let spec = spec();
+    let image = generate_image(&spec, &entropy()).unwrap();
+    let mut bytes = image.as_bytes().to_vec();
+
+    // Historical devices legitimately exist with an unwritten/raw-zero LBA4
+    // extension, and inspect must keep reading them.  Provision validation is
+    // stricter: a newly generated current SAFE6 image must use full rolling.
+    bytes[4 * 512 + 0x47..4 * 512 + 0x1fc].fill(0);
+    let err = ProvisionValidator::validate_bytes(&spec, &bytes).unwrap_err();
+    assert!(err.contains("full-rolling wire profile"), "{err}");
+}
+
+#[test]
 fn validator_rejects_image_for_different_hardware_identity() {
     let spec = spec();
     let image = generate_image(&spec, &entropy()).unwrap();

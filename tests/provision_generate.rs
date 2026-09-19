@@ -103,6 +103,15 @@ fn generated_image_is_structurally_complete_nopwd_metadata() {
         sector(bytes, 4)[0x20..0x34].iter().any(|byte| *byte != 0),
         "zero HSerial plaintext must still pass through rolling XOR in the active node"
     );
+    assert_eq!(
+        &sector(bytes, 4)[0x45..0x47],
+        &[0, 0],
+        "current SAFE6 writer post-XOR server flags are physically zero"
+    );
+    assert!(
+        sector(bytes, 4)[0x47..0x1fc].iter().any(|byte| *byte != 0),
+        "current SAFE6 canonical must full-roll the extension instead of emitting the historical raw-zero short form"
+    );
 
     let lba6 = analyze_sector(6, sector(bytes, 6), &meta);
     assert_eq!(&lba6.decoded[0x1c0..0x1c8], b"322CA28A");

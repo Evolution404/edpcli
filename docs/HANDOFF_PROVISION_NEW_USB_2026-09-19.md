@@ -6,9 +6,9 @@
 
 基线：已正式发布的 `v2.2.0`，`main@14557e7e54e355c5853479a7220e8ff1f0e5e9e7`。
 
-最新已推送协议审计基线提交：
-`50417a9 audit: classify LBA9 preserved profile regions`。
-本交接更新会在其后提交；接手时以分支最新 origin HEAD 为准，禁止退回旧基线。
+本轮开工基线为分支 `07f58546caf40672d9358feddbf2c80f024747ac`；本交接内容会随
+本轮 LBA4 修正一起推送。接手时必须以该分支最新 `origin` HEAD 为准，禁止退回
+`07f5854` 或更早协议基线。
 
 逐字节逆向的长期主账本：
 `docs/PROTOCOL_BYTE_TRACE_2026-09-19.md`。
@@ -40,10 +40,14 @@ producer + 官方 consumer/行为 + 原始实盘验证**同时闭合，才能标
   按 onlyid key 解码后437B全零，reader只返回0x2F restore node，不解释这437B。
   但 full builder只是变换已有 backing，并不主动清零，raw-zero历史 producer/选择条件
   仍未知，所以禁止升 COMPLETE。
-  **新发现 blocker：current Windows SAFE6 分支实际传 non-null restore node，
-  执行 full rolling；现有 Provision 却强制生成 raw-zero short form，不能再称作
-  “current writer canonical”。另外 `sub_10014550` rolling 后会把
-  `LBA4+0x45/+0x46` 从 node 原样明文覆盖回来，现有 decoder 很可能把这2B解错。**
+  current Windows SAFE6 分支传 non-null restore node 并执行 full rolling 的 blocker
+  已修正：Windows/Linux producer 均确认 rolling 后把
+  `LBA4+0x45/+0x46` 从 node 原样覆盖回来；Linux DWARF正式命名为
+  `bDataToServer/bConnetServer`。22份原始盘 22/22 physical flags 与 generic rolling
+  输出不同，证明旧 inspect 解码错误。现已改为 inspect 恢复 physical post-XOR flags，
+  Provision 使用官方 current SAFE6 full rolling + 两字节 post-XOR覆盖，validator
+  精确校验 full wire profile；历史 raw-zero short form 仅保留兼容读取。
+  两flag仍因缺最终业务consumer保持PARTIAL，严格完成字节数不增加。
 - **LBA9 = 54 COMPLETE / 458 PARTIAL / 0 UNKNOWN = 10.5%**。
   EPPE writer-zero tail、历史 Dept/backing、SAPF trailing/backing 与 post-SAPF
   preserve 区已经全部从 UNKNOWN 降到 PARTIAL；整扇不再有 UNKNOWN。
@@ -132,50 +136,43 @@ producer + 官方 consumer/行为 + 原始实盘验证**同时闭合，才能标
    `docs/PROTOCOL_BYTE_TRACE_2026-09-19.md`、
    `docs/PROVISION_PROTOCOL_AUDIT_2026-09-19.md`。
    禁止 `reset/clean`。
-2. **首攻 LBA4 `+0x45/+0x46` server flags 的 post-XOR 明文覆盖。**
-   当前 Windows PE `sub_10014550` 已确认 rolling loop 后重新执行：
-   `LBA4+0x45=node+0x2D`、`LBA4+0x46=node+0x2E`。
-   现有 inspect 仍把这2B当普通 rolling 区解码，旧 profile 统计因此可能错误。
-   必须：
-   - 回 Linux `BuildSector4` 确认是否同样 post-XOR restore；
-   - 追 Windows/Linux `ReadSector4` 及上层 restore-node consumer；
-   - 对22份原始盘分别统计 physical raw / generic rolling-decoded / corrected-node；
-   - 证据闭合后再改 `src/inspect.rs` 与对应测试。
-3. **随后修正 Provision LBA4 canonical。**
-   current SAFE6 分支已确认 `strcmp(labelType,"SAFE6")==0` 后传 non-null node，
-   官方 producer执行 full rolling；当前 `build_lba4` 强制
-   `0x47..0x1FB` raw-zero short form 与官方 current writer 不一致。
-   在第2项 server-flag 特例闭合后，测试先行修改
-   `src/provision/generate.rs`、`src/provision/validate.rs`、
-   `tests/provision_generate.rs`，必要时修改 inspect；历史 raw-zero real-device
-   form 必须继续兼容读取，不能删除。
-4. **LBA7 剩余 27B PARTIAL**：
+2. **LBA4 `+0x45/+0x46` 与 current canonical 已完成本轮修正，不要回退。**
+   已确认：
+   - Linux `BuildSector4@0x1D08E` 与 Windows `sub_10014550` 都在 full rolling 后
+     post-XOR 写回 `node+0x2D/+0x2E`；
+   - Linux DWARF字段名是 `bDataToServer/bConnetServer`；
+   - Windows/Linux `ReadSector4` 都不补偿该例外，只 generic rolling + memcpy node；
+   - 严格22盘 22/22 physical flags != generic rolling flags；
+   - inspect 已显示 producer-side physical flags；Provision/validator 已改为 current
+     SAFE6 full rolling + post-XOR flags；历史 raw-zero form仍兼容读取。
+   后续若继续追 LBA4，应只追这两个字段的**最终业务 consumer**，找到之前仍PARTIAL。
+3. **LBA7 剩余 27B PARTIAL**：
    - 逐 entry 追 `Version@+0x04` 的 producer/consumer/version-switch；
    - entry1/entry2 `NeedDisturb@+0x10` 当前没有 direct xref，继续搜其它组件/历史 build；
    - pass-info `+0x0A/+0x0C/+0x0D` 继续追跨组件最终 consumer。
    不要再重复分析 wrapped8；其 24B 已 COMPLETE。
-5. **LBA4 legacy HSerialCRC[5] producer**：
+4. **LBA4 legacy HSerialCRC[5] producer**：
    当前 writer machine code 已闭合，但旧 14/22 固定
    `1D29,7B,4DD,79,7C` 与2份高熵 profile 的生成源仍未知。
    `edpuniqueid` 的 `Drive%dSerialNumber`、`DeviceNumber.dll::EDP_DiskNumber`
    已查过，当前没有建立到五槽 writer 的证据链；不要重复把它们硬接。
-6. **LBA11 rev_pmap / CHS profile**：
+5. **LBA11 rev_pmap / CHS profile**：
    当前 LBA11 260B COMPLETE、252B PARTIAL；21份使用 DiskSize，1份 Aigo U335
    `rev_pmap` 使用 CHS 容量。若能闭合“何时选择 CHS”上游条件，潜在可一次提升252B。
-7. **LBA6 legacy +0x1E0..+0x1EF**：
+6. **LBA6 legacy +0x1E0..+0x1EF**：
    20/22零、2份旧格式非零；current template 为零，但旧 producer/consumer未知。
    GSerial/BeiZhu 的 post-NUL 残值已明确是 backing bytes，不要再按 padding。
-8. **LBA8 ELABEL 与动态头剩余字段**：
+7. **LBA8 ELABEL 与动态头剩余字段**：
    static ToolVersion/Labversion/writeTime/Reserved 已 COMPLETE；
    继续为 HDSerialInfo/MacInfo/UsbOnlyInfo 与17-key ELABEL 每个业务字段追最终 consumer。
-9. **LBA10 `+0x04` 与 `+0x28..`**：`+0x04` 目前只有“默认/实盘=1、API原样
+8. **LBA10 `+0x04` 与 `+0x28..`**：`+0x04` 目前只有“默认/实盘=1、API原样
    读写”，没有业务分支 consumer，继续保持 PARTIAL；不要沿用旧文档“版本1/时间戳”
    猜测。两个16B卷标槽已经 COMPLETE，不要重复追。
-10. **LBA0 bootstrap / LBA1-LBA2 GPT 正样本**：LBA0分区表+55AA及3B legacy
+9. **LBA0 bootstrap / LBA1-LBA2 GPT 正样本**：LBA0分区表+55AA及3B legacy
    message pointer 已闭合，
    bootstrap 446B仍 PARTIAL。若能找到真实原始 GPT EDP 盘，可用于把 LBA1/LBA2
    从 PARTIAL 继续细分；在此之前不得以 synthetic builder 输出冒充实盘证据。
-11. **LBA3 MP payload**：当前已明确 EDP 只 preserve/ignore；若继续追，目标应是
+10. **LBA3 MP payload**：当前已明确 EDP 只 preserve/ignore；若继续追，目标应是
    真正厂商 MP producer/firmware consumer，而不是再证明 EDP 不使用它。
 
 每得到一批闭合结论，都要同时更新
@@ -204,18 +201,28 @@ producer + 官方 consumer/行为 + 原始实盘验证**同时闭合，才能标
 
 本次交接实际验证：
 
-- `cargo test --test provision_protocol_audit --locked`：**46/46 PASS**；
+- `cargo test --test inspect --locked`：**19/19 PASS**；
+- `cargo test --test provision_generate --locked`：**3/3 PASS**；
+- `cargo test --test provision_validate --locked`：**6/6 PASS**；
+- `cargo test --test provision_protocol_audit --locked`：**47/47 PASS**；
 - `cargo test --test protocol_documentation_contract --locked`：**3/3 PASS**；
+- `cargo test --test golden --locked`：**14/14 PASS**；
 - `git diff --check`：PASS。
 
 本轮强化的 LBA4 门禁：
 
 - `lba4_short_form_must_be_decoded_by_regions_not_by_zero_bytes` 必须同时覆盖
   raw-zero 与 rolling-encrypted-zero 两种真实物理形态，并保证 semantic gap 为零。
+- `lba4_server_flags_are_post_xor_wire_bytes_in_real_fixtures` 固定真实盘中 physical
+  post-XOR flags 与 generic ReadSector4 rolling 输出的分叉，防止再次把后者误当字段值。
+- `validator_rejects_historical_lba4_short_form_as_new_media_canonical` 固定“历史 short
+  form 可读、但新盘 current SAFE6 必须 full rolling”的生成/兼容边界。
 
-本轮**没有修改** Provision / inspect 实现；只是确认现有 current-canonical 模型存在 blocker。
-下一位一旦改动 `src/inspect.rs` 或 `src/provision/*`，必须额外运行对应
-inspect / provision_generate / provision_validate / golden 测试，不能只跑协议审计。
+本轮已经修改 `src/inspect.rs`、`src/provision/generate.rs`、
+`src/provision/validate.rs`：inspect 恢复 producer-side post-XOR flags，Provision
+切换到 current SAFE6 full rolling + 两字节覆盖，validator 精确重建并校验 current
+wire profile。后续改动这些路径仍必须同时运行 inspect / provision_generate /
+provision_validate / golden，不能只跑协议审计。
 
 整个分析过程未对真实物理 USB 执行任何 raw write。
 

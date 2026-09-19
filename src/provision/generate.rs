@@ -95,14 +95,17 @@ fn build_lba4(spec: &ProvisionSpec) -> Result<[u8; SECTOR], String> {
     plain[0x1fc..0x200].copy_from_slice(b"LLGB");
 
     let k0 = (bits & 0xffff) ^ (bits >> 16);
-    // BuildSector4 advances one rolling-XOR stream across the whole tail.
-    // The short form writes only the active node and the trailing LLGB anchor;
-    // the middle extension region remains physically unwritten/zero.
+    // Current SAFE6 BuildSector4 advances one rolling-XOR stream across the
+    // whole 0x18..0x1FF tail.  Historical devices also contain a raw-zero
+    // short representation, but that is a compatibility read profile rather
+    // than the current writer canonical.
     let encrypted = xor_rolling(&plain[0x18..], k0);
     let mut out = plain;
-    out[0x18..0x47].copy_from_slice(&encrypted[..0x2f]);
-    out[0x47..0x1fc].fill(0);
-    out[0x1fc..0x200].copy_from_slice(&encrypted[0x1e4..0x1e8]);
+    out[0x18..].copy_from_slice(&encrypted);
+    // Both official Windows and Linux builders restore these two server flags
+    // from the restore node after the rolling-XOR loop.
+    out[0x45] = plain[0x45];
+    out[0x46] = plain[0x46];
     Ok(out)
 }
 

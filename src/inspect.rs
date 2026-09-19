@@ -358,6 +358,19 @@ fn decode_lba4(raw: &[u8]) -> Option<(Vec<u8>, u32, String, u32, usize, usize)> 
         if raw.len() >= 0x1fc && raw[0x47..0x1fc].iter().all(|byte| *byte == 0) {
             dec[0x47..0x1fc].fill(0);
         }
+        // BuildSector4 in both the official Windows and Linux implementations
+        // performs two byte stores *after* the rolling-XOR loop:
+        //   wire[0x45] = restore_node.bDataToServer
+        //   wire[0x46] = restore_node.bConnetServer
+        // ReadSector4 does not compensate for that exception and therefore its
+        // generic rolling result is not the producer-side flag value.  Inspect
+        // exposes the logical restore-node view, so restore the post-XOR wire
+        // bytes here.  Historical raw-zero extension profiles use the same
+        // exception and remain readable through the region rule above.
+        if raw.len() > 0x46 {
+            dec[0x45] = raw[0x45];
+            dec[0x46] = raw[0x46];
+        }
     }
     Some((dec, serial, text, k0, hs, he))
 }
@@ -966,8 +979,22 @@ pub fn analyze_sector(lba: u32, raw: &[u8], meta: &InspectMeta) -> SectorView {
                 if decoded.get(0x39..0x3d) == Some(b"LLGB") {
                     fields.push(field(0x39, 0x3d, "LLGB magic", "LLGB", FieldStyle::Magic));
                 }
+                fields.push(field(
+                    0x45,
+                    0x46,
+                    "bDataToServer",
+                    format!("0x{:02X}", decoded[0x45]),
+                    FieldStyle::Flag,
+                ));
+                fields.push(field(
+                    0x46,
+                    0x47,
+                    "bConnetServer",
+                    format!("0x{:02X}", decoded[0x46]),
+                    FieldStyle::Flag,
+                ));
                 notes.push(
-                    "LBA4 的 0x18 以后按 labelOnlyId 派生 K0 做 rolling XOR；原始 0 填充保持为 0。"
+                    "LBA4 的 0x18..0x1FF 按 labelOnlyId 派生 K0 做 rolling XOR；历史 raw-zero extension 作为区域级兼容形态保留。官方 Windows/Linux BuildSector4 在 rolling 完成后又把 +0x45 bDataToServer / +0x46 bConnetServer 以明文字节覆盖到盘面，因此 inspect 在 rolling 解码后用这两个物理字节恢复 producer-side restore-node 语义；官方 ReadSector4 本身不会补偿这个例外。"
                         .into(),
                 );
                 format!("XOR K0=0x{k0:04X} from labelOnlyId={serial_text}")

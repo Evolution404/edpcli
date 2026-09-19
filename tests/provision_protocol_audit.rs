@@ -1119,6 +1119,55 @@ fn lba4_restore_node_profiles_keep_current_and_legacy_fields_separate() {
 }
 
 #[test]
+fn lba4_server_flags_are_post_xor_wire_bytes_in_real_fixtures() {
+    let mut current_style = 0usize;
+    let mut legacy_style = 0usize;
+
+    for entry in fs::read_dir(FIXTURE_DIR).expect("protocol fixtures") {
+        let path = entry.expect("backup entry").path();
+        if path.extension().and_then(|ext| ext.to_str()) != Some("bin") {
+            continue;
+        }
+        let name = path.file_name().unwrap().to_str().unwrap();
+        let Some(meta) = parse_reference_backup_name(name) else {
+            continue;
+        };
+        let Some(onlyid) = meta.onlyid.as_deref() else {
+            continue;
+        };
+        let bits = onlyid_bits(onlyid);
+        let k0 = (bits & 0xffff) ^ (bits >> 16);
+        let image = fs::read(&path).expect("fixture bytes");
+        let raw = sector(&image, 4);
+        let generic = xor_rolling(&raw[0x18..], k0);
+
+        // BuildSector4 writes node+0x2D/+0x2E back to these physical offsets
+        // after rolling-XOR. ReadSector4 itself does not undo that exception,
+        // so a generic rolling decode must not be treated as the flag value.
+        let physical_flags = &raw[0x45..0x47];
+        let generic_flags = &generic[0x2d..0x2f];
+        assert_ne!(
+            physical_flags, generic_flags,
+            "fixture unexpectedly stopped exercising the post-XOR flag exception: {name}"
+        );
+
+        if physical_flags == [0, 0] {
+            current_style += 1;
+            assert_ne!(generic_flags, &[0, 0], "{name}");
+        } else {
+            legacy_style += 1;
+            assert!(
+                generic_flags == [0, 0] || generic_flags == [0x0b, 0x00],
+                "unexpected historical reader-transformed flag profile in {name}: {generic_flags:02x?}"
+            );
+        }
+    }
+
+    assert!(current_style >= 2, "lost current-style zero wire flags");
+    assert!(legacy_style >= 5, "lost legacy nonzero wire flag profiles");
+}
+
+#[test]
 fn lba4_current_writer_profile_never_carries_legacy_hserial_material() {
     let mut current = 0usize;
     let mut legacy = 0usize;
