@@ -268,15 +268,15 @@ BuildSector8(label):
 | LBA7 | 155 | 51 | 306 | 30.3% |
 | LBA8 | 10 | 400 | 102 | 2.0% |
 | LBA9 | 32 | 124 | 356 | 6.2% |
-| LBA10 | 4 | 36 | 472 | 0.8% |
+| LBA10 | 36 | 4 | 472 | 7.0% |
 | LBA11 | 260 | 252 | 0 | 50.8% |
 | LBA12 | 372 | 140 | 0 | 72.7% |
 <!-- STRICT_PROGRESS_END -->
 
 当前总计：
 
-- **COMPLETE：971B / 6656B = 14.6%**
-- **PARTIAL：1612B / 6656B = 24.2%**
+- **COMPLETE：1003B / 6656B = 15.1%**
+- **PARTIAL：1580B / 6656B = 23.7%**
 - **UNKNOWN：4073B / 6656B = 61.2%**
 
 LBA11 本轮从 8B COMPLETE 提升到 260B COMPLETE。没有因为“能解开第二半扇”就把其余 252B 也冒进标完成：旧 Aigo U335 `rev_pmap` 为什么选择 CHS 容量参与密钥，而其它 21 份使用 DiskSize，上游选择逻辑尚未闭合。
@@ -356,7 +356,9 @@ DWARF 中恢复出的原始声明文件/行号与本地函数地址：
 | LBA9 | 0x184–0x187 | COMPLETE | minimum password length | writer限制6..19 | `ReadMinPassLenInfo` 返回该DWORD | 6/6=8 | 完成 |
 | LBA9 | 其余 | UNKNOWN | 未闭合区域 | 待查 | 待查 | 多profile | 未完成 |
 | LBA10 | 0x000–0x003 | COMPLETE | EESI magic | Set EESI writer | Get EESI reader | 1个SanDisk样本 | 完成 |
-| LBA10 | 0x004–0x027 | PARTIAL | EESI字段/两文本槽 | writer已恢复 | UserLogin读取部分文本 | 1样本 | 最终业务作用未全部闭合 |
+| LBA10 | 0x004–0x007 | PARTIAL | EESI +0x04 | writer原样保存API输入DWORD；reader默认=1并返回 | 独立行为消费者仍未闭合 | 唯一启用实盘=1 | 暂不命名具体业务语义 |
+| LBA10 | 0x008–0x017 | COMPLETE | Share/type2 volume label | `SetEdpEdiskSetInfo` 原样复制调用者结构前0x80并加密写入；默认 reader 初始化为GBK“交换区” | `CEdpDiskControl::UserLogin` 将该槽赋给本地 string；type2 分支直接把其 `c_str()` 传给 `SetVolumeLabelA` | 22份原始参考中唯一启用EESI的SanDisk实盘为GBK“交换区”；已加入512B原始证据夹具 | 16B字段语义、writer、consumer、实盘闭合 |
+| LBA10 | 0x018–0x027 | COMPLETE | Encrypt/type4 volume label | 同上；默认 reader 初始化为GBK“保密区” | `UserLogin` type4 分支直接把该槽对应 string 的 `c_str()` 传给 `SetVolumeLabelA` | 唯一启用SanDisk实盘为GBK“保密区”；另一版 `out_raw_data/EdpEDiskCtrl.dll` 同构复核 | 16B字段完整闭合 |
 | LBA10 | 0x028–0x1FF | UNKNOWN | 保留/其它 | 待查 | 待查 | 当前样本多零 | 未完成 |
 | LBA11 | 0x000–0x003 | COMPLETE | DRKB magic | `CDataSecrity::RandBuffer256` 先写 DRKB | `ReadSector11` 首先校验 DRKB | 22/22 | 完成 |
 | LBA11 | 0x004–0x0FF | COMPLETE | random252 | `RandBuffer256`: `srand(time(NULL)); rand()%255` 共252B | `DataEncrypt/DataDecrypt` 将整个 DRKB块纳入 CRC32 密钥输入 | 22/22；均无0xFF；7 CI夹具回归 | 每字节都是密钥扰动材料，来源和消费闭合 |
@@ -423,6 +425,82 @@ parse ELABEL key/value pairs
 
 因此 `LBA8 +0x3E..+0x3F` 2B 从 PARTIAL 升级 COMPLETE。
 其它头字段即便已有官方名称，也不会因为与它相邻而自动升级。
+
+### 4.2 LBA10 两个 16B 字段：交换区/保密区卷标
+
+旧分析曾把这两个槽解释成“数值/时间戳候选”。重新验证后该解释应废弃。
+
+当前 Windows reader `GetEdpEdiskSetInfo -> sub_1000f930` 在输出结构初始化时：
+
+```text
+out + 0x04 = 1
+out + 0x08 = "交换区"   // GBK
+out + 0x18 = "保密区"   // GBK
+```
+
+若 LBA10 存在有效 EESI，则 reader 只解密前 `0x80`，并用实盘结构覆盖这份默认值。
+
+writer `SetEdpEdiskSetInfo -> sub_1000fc70`：
+
+```text
+input->magic = "EESI"
+plain80 = input[0x00..0x7F]
+cipher80 = A6B0(plain80, CRC32(device_id))
+read sector10
+replace sector10[0x00..0x7F] = cipher80
+write sector10
+```
+
+因此 `+0x08/+0x18` 的 producer 来源就是 API 调用者提供的两个固定 16B
+文本字段，而不是 writer 内部再派生的数据。
+
+更关键的是 `CEdpDiskControl::UserLogin` 的实际汇编数据流：
+
+```text
+GetEdpEdiskSetInfo(&info)
+
+shareLabel   = string(info + 0x08)
+encryptLabel = string(info + 0x18)
+
+if current_partition.type == 2:
+    SetVolumeLabelA(drive, shareLabel.c_str())
+
+if current_partition.type == 4:
+    SetVolumeLabelA(drive, encryptLabel.c_str())
+```
+
+当前 build 中汇编可直接看到：
+
+- `info+0x08 -> std::string @ ebp-0x74`；
+- type2 分支将 `ebp-0x74.c_str()` 传给 `SetVolumeLabelA`；
+- `info+0x18 -> std::string @ ebp-0x54`；
+- type4 分支将 `ebp-0x54.c_str()` 传给 `SetVolumeLabelA`。
+
+另一版 `out_raw_data/EdpEDiskCtrl.dll` 也存在同构 reader/writer 与
+type2/type4 `SetVolumeLabelA` 路径，排除单版本偶然行为。
+
+22份原始参考只读验证：
+
+- 21/22：LBA10 全零，表示 EESI 功能未启用；
+- 1/22：独立 SanDisk 原始加密盘存在有效 EESI；
+- 该样本：
+  - `+0x08..0x17 = "交换区" + NUL/zero fill`；
+  - `+0x18..0x27 = "保密区" + NUL/zero fill`；
+  - `+0x28..0x7F = 0`，但此事实仍不能把后续区域升级为 padding。
+
+仓库新增原始证据夹具：
+
+`tests/fixtures/protocol_evidence/sandisk_ultra_usb_3_0_lba10.bin`
+
+SHA-256：
+`240d04e7c97d300c5081f793d72850d49acbf5408bc0d8cf32de8eef7a5e8f02`
+
+因此：
+
+- `LBA10 +0x08..0x17` 16B → COMPLETE；
+- `LBA10 +0x18..0x27` 16B → COMPLETE；
+- `+0x04..0x07` 仍保持 PARTIAL；
+- `+0x28..0x1FF` 仍保持 UNKNOWN。
 
 ## 5. LBA11 完整 producer / consumer 追踪
 
@@ -745,7 +823,8 @@ if (packed_entry0.NeedDisturb != 0):
 3. **LBA4**：继续寻找旧 `HSerialCRC[5]` 的真正 producer。
 4. **LBA6**：追 `0x1E0..0x1EF` 两份旧格式非零扩展来源。
 5. **LBA8**：为 17-key ELABEL 的每个业务字段找到最终消费者。
-6. **LBA9/10**：继续追 EETU、EESI 文本的最终策略作用。
+6. **LBA9/10**：继续追 EETU、EESI `+0x04` 及 `+0x28..` 未闭合区；
+   两个16B EESI卷标槽已经完成，不再作为待办。
 7. **LBA0/1/2/3/5**：从官方 `RegsiterUsb` 的 BuildSafe6Label/模板初始化向前追，避免仅凭全零样本猜用途。
 
 ## 9. 操作安全边界

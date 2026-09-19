@@ -991,19 +991,19 @@ pub fn analyze_sector(lba: u32, raw: &[u8], meta: &InspectMeta) -> SectorView {
                     fields.push(field(
                         0x08,
                         0x18,
-                        "EESI 文本槽 A",
+                        "EESI 交换区卷标",
                         text_value(&decoded[0x08..0x18]),
                         FieldStyle::Text,
                     ));
                     fields.push(field(
                         0x18,
                         0x28,
-                        "EESI 文本槽 B",
+                        "EESI 保密区卷标",
                         text_value(&decoded[0x18..0x28]),
                         FieldStyle::Text,
                     ));
                     notes.push(
-                        "EESI 仅前 0x80B 由读写端加解密；后 0x180B 不属于该结构，writer 读改写时保持原字节。".into(),
+                        "EESI 仅前 0x80B 由读写端加解密；UserLogin 将 +0x08 的字符串用于 type2(交换区) SetVolumeLabelA，将 +0x18 的字符串用于 type4(保密区) SetVolumeLabelA；后 0x180B 不属于该结构，writer 读改写时保持原字节。".into(),
                     );
                     format!("A6B0 前 0x80B，key=CRC32(device_id)=0x{crc:08X} → EESI ✓")
                 } else {

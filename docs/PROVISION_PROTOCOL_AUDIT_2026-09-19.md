@@ -665,11 +665,19 @@ Windows `edpediskctrl.dll` 同时给出读端和写端：
 
 - `+0x00..0x03 = EESI`；
 - `+0x04..0x07 = 1`；reader 在初始化输出结构时也把该 DWORD 默认设为 1，但还没有找到独立消费者足以命名其具体业务语义，因此保持 `EESI +0x04`；
-- `+0x08..0x17`：16B 文本槽 A，reader 的默认字符串与实盘均为 GBK“交换区”；
-- `+0x18..0x27`：16B 文本槽 B，reader 的默认字符串与实盘均为 GBK“保密区”；
+- `+0x08..0x17`：16B **Share/type2 卷标**；reader 默认字符串与实盘均为
+  GBK“交换区”。`UserLogin` 把该槽赋给本地 `std::string`，在 type2 分支
+  直接将其 `c_str()` 传给 `SetVolumeLabelA`；
+- `+0x18..0x27`：16B **Encrypt/type4 卷标**；reader 默认字符串与实盘均为
+  GBK“保密区”。`UserLogin` 在 type4 分支同样将该槽对应字符串传给
+  `SetVolumeLabelA`；
 - `+0x28..0x7f`：当前 SanDisk 实盘为零，尚未发现字段消费者，不能据此命名为 padding。
 
-`UserLogin` 在 `GetEdpEdiskSetInfo` 成功后会实际读取两个 16B 文本槽，并在非空时分别交给后续字符串状态设置路径，因此两者不是无意义占位；但其最终 UI/策略目标仍需继续追踪，暂不把字段名扩张成“卷标”等更具体语义。
+`UserLogin` 的实际汇编还明确给出对象映射：`+0x08 -> ebp-0x74` 的
+`std::string`，`+0x18 -> ebp-0x54` 的 `std::string`；type2/type4
+分支分别以这两个对象调用 `SetVolumeLabelA`。另一版
+`out_raw_data/EdpEDiskCtrl.dll` 也存在同构路径。因此两个16B字段的最终运行时
+用途已经闭合为交换区/保密区卷标，不再只是“文本槽候选”。
 
 ## 当前逐字节地图状态
 
@@ -707,14 +715,14 @@ Windows `edpediskctrl.dll` 同时给出读端和写端：
 | 7 | 155B | 51B | 306B | 30.3% | 三个 64B EDPF entry 中 48B/entry 完成，加 11B pass-info；Version/NeedDisturb/key8 等仍部分，表后区域未闭合 |
 | 8 | 10B | 400B | 102B | 2.0% | LLGB magic + logical length + ElabOffset(2B)完成；17-key ELABEL 序列化/来源虽已较清楚，但下游语义并未逐字段全部闭合，因此整体只计部分；头部仍有未知区 |
 | 9 | 32B | 124B | 356B | 6.2% | EETU magic、SAPF magic+16B MBR 恢复项、EPPE magic+最小密码长度完成；其它附加材料/空洞/文本区未完全闭合 |
-| 10 | 4B | 36B | 472B | 0.8% | 仅 EESI magic 完成；+0x04 和两个 16B 文本槽仍缺最终业务语义，其余未闭合 |
+| 10 | 36B | 4B | 472B | 7.0% | EESI magic + 两个16B卷标槽完成；+0x04仍缺最终业务语义，其余未闭合 |
 | 11 | 260B | 252B | 0B | 50.8% | 前半 DRKB+random252 的 producer/consumer 已双闭合；后半 PDKB magic 4B 也完成；其余当前 DiskSize profile 已闭合，但历史 CHS profile 选择条件仍未解释 |
 | 12 | 372B | 140B | 0B | 72.7% | 原 147B entry 完成字段基础上，entry0 NeedDisturb 4B 的 producer/兼容 consumer/22盘实测已闭合；另有11B pass-info与210B post-table padding完成；其余140B仍部分已知 |
 
 总计：
 
-- **完成：971B / 6656B = 14.6%**
-- **部分已知：1612B / 6656B = 24.2%**
+- **完成：1003B / 6656B = 15.1%**
+- **部分已知：1580B / 6656B = 23.7%**
 - **未知：4073B / 6656B = 61.2%**
 
 这是一组**严格下限**，故意宁可低估，不把“能生成/能解析”冒充成“已经完全理解”。

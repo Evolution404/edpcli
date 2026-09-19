@@ -19,6 +19,9 @@ fn load(name: &str) -> Vec<u8> {
 }
 
 const MIN_PROTOCOL_FIXTURES: usize = 7;
+const SANDISK_LBA10: &[u8; 512] =
+    include_bytes!("fixtures/protocol_evidence/sandisk_ultra_usb_3_0_lba10.bin");
+const SANDISK_DEVICE_ID: &str = "disk&ven_sandisk&prod_ultra_usb_3.0&rev_1.00";
 
 fn parse_reference_backup_name(name: &str) -> Option<BackupMeta> {
     let meta = parse_backup_name(name)?;
@@ -575,6 +578,29 @@ fn lba8_elabel_offset_is_0x80_and_points_to_the_elabel_payload() {
     assert!(
         checked >= MIN_PROTOCOL_FIXTURES,
         "protocol audit unexpectedly lost fixtures"
+    );
+}
+
+#[test]
+fn real_sandisk_lba10_contains_share_and_encrypt_volume_labels() {
+    let crc = crc32_bare(SANDISK_DEVICE_ID.as_bytes());
+    let plain = a6b0_full(&SANDISK_LBA10[..0x80], &crc.to_le_bytes(), 0);
+    assert_eq!(&plain[..4], b"EESI");
+    assert_eq!(u32_le(&plain, 0x04), 1);
+
+    let share = &plain[0x08..0x18];
+    let encrypt = &plain[0x18..0x28];
+    assert_eq!(
+        share,
+        &[0xbd, 0xbb, 0xbb, 0xbb, 0xc7, 0xf8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+    );
+    assert_eq!(
+        encrypt,
+        &[0xb1, 0xa3, 0xc3, 0xdc, 0xc7, 0xf8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+    );
+    assert!(
+        plain[0x28..0x80].iter().all(|byte| *byte == 0),
+        "the one enabled real EESI sample has a zero remainder after the two label slots"
     );
 }
 

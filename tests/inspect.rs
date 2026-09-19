@@ -132,8 +132,18 @@ fn lba10_decodes_only_the_eesi_head_and_preserves_tail_bytes() {
     assert_eq!(view.decoded[0x80], 0x5a);
     assert!(view.method.contains("前 0x80B"));
     assert!(view.fields.iter().any(|field| field.label == "EESI magic"));
-    assert!(view.fields.iter().any(|field| field.value == "交换区"));
-    assert!(view.fields.iter().any(|field| field.value == "保密区"));
+    assert!(view
+        .fields
+        .iter()
+        .any(|field| field.label == "EESI 交换区卷标" && field.value == "交换区"));
+    assert!(view
+        .fields
+        .iter()
+        .any(|field| field.label == "EESI 保密区卷标" && field.value == "保密区"));
+    assert!(view
+        .notes
+        .iter()
+        .any(|note| note.contains("SetVolumeLabelA")));
 }
 
 #[test]
