@@ -156,6 +156,33 @@ WriteNormalULabel(request):
 
 LBA11 本轮从 8B COMPLETE 提升到 260B COMPLETE。没有因为“能解开第二半扇”就把其余 252B 也冒进标完成：旧 Aigo U335 `rev_pmap` 为什么选择 CHS 容量参与密钥，而其它 21 份使用 DiskSize，上游选择逻辑尚未闭合。
 
+### 3.1 Linux DWARF 原源码索引
+
+`libcemsfilesyscheck.so` 带有可用 DWARF。以下位置不是按函数名猜测，而是
+DWARF 中恢复出的原始声明文件/行号与本地函数地址：
+
+| 功能 | 本地地址 | 原始源码位置 |
+|---|---:|---|
+| `CLabelManage::BuildSector6` | `0x1CAAC` | `/mnt/git/cross_platform/src/global/src/diskfile.cpp:672` |
+| `CLabelManage::BuildSector4` | `0x1D08E` | `diskfile.cpp:740` |
+| `CLabelManage::BuildSector11` | `0x1D350` | `diskfile.cpp:783` |
+| `CLabelManage::BuildSector8` | `0x1D602` | `diskfile.cpp:805` |
+| `CLabelManage::BuildSector7` | `0x1DCDA` | `diskfile.cpp:895` |
+| `CLabelManage::BuildSector12` | `0x1DEB8` | `diskfile.cpp:921` |
+| `CLabelManage::ReadSector4` | `0x1E048` | `diskfile.cpp:956` |
+| `CLabelManage::ReadSector6` | `0x1E2CC` | `diskfile.cpp:1005` |
+| `CLabelManage::ReadSector8(UsbLabelParam&)` | `0x1E994` | `diskfile.cpp:1102` |
+| `CLabelManage::ReadSector8(BYTE*)` | `0x1F0F0` | `diskfile.cpp:1143` |
+| `CLabelManage::ReadSector11` | `0x1F220` | `diskfile.cpp:1168` |
+| `CLabelManage::ReadSector12` | `0x1F426` | `diskfile.cpp:1195` |
+| `CLabelManage` 构造器 | `0x1C538` | `diskfile.cpp:576` |
+| `CDataSecrity::RandBuffer256` | `0x20204` | `/mnt/git/cross_platform/src/global/src/datasecrity.cpp:14` |
+| `CDataSecrity::DataEncrypt` | `0x202D4` | `datasecrity.cpp:34` |
+| `CDataSecrity::DataDecrypt` | `0x20476` | `datasecrity.cpp:61` |
+
+这些路径是二进制编译时记录的原始源码位置；本机没有对应原厂源码正文。
+审计把它们作为函数来源定位证据，不把 DWARF 行号误写成“已取得源码”。
+
 ## 4. 字段证据账本
 
 表中 COMPLETE 行必须同时有 producer、consumer、实盘验证。CI 会解析本表，缺任一列即失败。
@@ -310,7 +337,91 @@ ReadSector11(pVid, pPid, ullSize, sector512, outUid):
     return OK
 ```
 
-### 5.3 22份原始实盘验证
+### 5.3 Windows 独立 producer / consumer
+
+Windows `cemsusbregsiter.dll` 存在与 Linux 完全独立、但公式一致的实现：
+
+| 角色 | 函数 | 地址 | 反编译位置 |
+|---|---|---:|---:|
+| LBA11 builder | `sub_10014720` | `0x10014720` | `cemsusbregsiter.dll.m` 约 L78343 |
+| DRKB/random producer | `sub_10002B90` | `0x10002B90` | 约 L82081 |
+| KDF/encrypt | `sub_10002C30` | `0x10002C30` | 约 L82112 |
+| LBA11 reader | `sub_10015F00` | `0x10015F00` | 约 L93391 |
+
+关键证据：
+
+- `sub_10002B90` 固定写 `0x424B5244 == "DRKB"`，随后循环生成
+  `rand()%0xFF`；
+- `sub_10014720` 构造 `0x424B4450 == "PDKB"`，并把 UID C-string
+  写到明文 `+0x04`；
+- `sub_10002C30` 把
+  `DRKB256 || VID4 || PID4 || size8` 作为 CRC32 输入，再用 CRC
+  的 4B little-endian 作为后半 256B 加密 key；
+- `sub_10015F00` 先检查 `DRKB`，按同一 KDF 解密后再检查 `PDKB`。
+
+伪代码：
+
+```text
+BuildSector11_Windows(vid4, pid4, disk_size, uid):
+    rnd[0:4] = "DRKB"
+    for i in 4..255:
+        rnd[i] = rand() % 255
+
+    plain = zero[256]
+    plain[0:4] = "PDKB"
+    copy_c_string(plain+4, uid)
+
+    crc = CRC32(rnd || vid4 || pid4 || LE64(disk_size))
+    out[0:256] = rnd
+    out[256:512] = A7F0(plain, LE32(crc), 0)
+```
+
+### 5.4 Windows 当前 writer 的容量来源
+
+`cemsusbregsiter.dll.m::sub_10019780`（约 L83945）直接读取物理盘容量：
+
+```text
+GetPhysicalDiskSize(disk_number):
+    path = "\\\\.\\PHYSICALDRIVE%d"
+    h = CreateFileA(path, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE)
+    geometry = DeviceIoControl(
+        h,
+        IOCTL_DISK_GET_DRIVE_GEOMETRY_EX,   // 0x700A0
+        out_size = 0x28
+    )
+    return geometry.DiskSize                // output +0x18, uint64
+```
+
+调用链已连通：
+
+```text
+sub_100186C0 enumerate USB interface
+    -> sub_10018C40 resolve disk number
+    -> sub_10019780(PHYSICALDRIVE#, &DiskSize)
+    -> disk-info local +0xB0/+0xB4
+    -> sub_10017EB0 copies disk-info object
+    -> RegsiterUsb/sub_1003B560
+    -> sub_10018480 copies disk-info to local
+    -> local var_A8/var_A4
+    -> sub_10014720(..., size8, ...)
+```
+
+因此**当前 Windows writer 的 LBA11 KDF 容量输入就是物理
+`DISK_GEOMETRY_EX.DiskSize`**，不是 CHS 推导值。
+
+历史 profile 仍有一个明确缺口：22 份原始样本中的 Aigo U335
+`rev_pmap / onlyid=1987718388` 只有使用
+
+```text
+floor(DiskSize / (255*63*512)) * (255*63*512)
+```
+
+才能恢复 PDKB。当前 DLL 中存在 `sub_100184C0`，其常量
+`0x7D8200 == 255*63*512`，算法形态与 CHS 容量换算一致；但在当前 build
+没有发现有效 caller。因此只能证明“历史样本确实使用过 CHS profile”，尚不能证明
+旧 writer **何时/为什么**选择它。
+
+### 5.5 22份原始实盘验证
 
 只读重算结果：
 
