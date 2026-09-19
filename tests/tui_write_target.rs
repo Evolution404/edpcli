@@ -36,6 +36,7 @@ fn backup(index: usize, name: &str) -> BackupWorkspaceItem {
         is_nopwd: false,
         md5_status: Md5Status::Ok,
         size_ok: true,
+        content_md5: Some("0123456789abcdef0123456789abcdef".into()),
     }
 }
 

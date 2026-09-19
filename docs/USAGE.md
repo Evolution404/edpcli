@@ -75,8 +75,9 @@ edpcli
 edpcli list
 ```
 
-无参数等价于 `list`。输出包含设备、容量、接口、VID:PID、姓名、部门、EDP/cems 状态、
-免密状态、onlyid、EDPF 分区和已有备份数量。
+交互式终端中无参数 `edpcli` 默认请求管理员权限并进入 TUI；管道、重定向和自动化等
+非 TTY 环境下，无参数仍保持 `list` 语义。显式 `edpcli list` 始终输出设备、容量、
+接口、VID:PID、姓名、部门、EDP/cems 状态、免密状态、onlyid、EDPF 分区和已有备份数量。
 
 `list` 不写盘。程序先无特权读取；只有实际遇到裸盘权限不足时才自动请求管理员权限，
 无盘时不会无意义弹提权。
@@ -87,9 +88,11 @@ edpcli list
 edpcli tui
 ```
 
-TUI 是 CLI v2 的交互前端，不是第二套业务实现。无参数 `edpcli` 仍等价于
-`edpcli list`，因此旧脚本不会因为新增 TUI 改变行为。TUI 必须运行在交互式 TTY；
-管道和重定向场景请继续直接使用 CLI 子命令。
+TUI 是 CLI v2 的交互前端，不是第二套业务实现。交互式 TTY 中无参数 `edpcli`
+默认进入 TUI；非 TTY 的旧脚本仍保持 bare=list。macOS/Linux 会在进入 alternate screen
+前通过 `sudo` 请求权限，Windows 通过 UAC，因此不会再等到写盘操作时退出 TUI 后重启。
+来自 U 盘、备份和系统探测的文本在渲染前统一过滤终端控制字符，后台 worker 也禁止直接
+向 stdout/stderr 输出，避免异常元数据破坏 ratatui 屏幕。
 
 常用键位：
 
@@ -104,6 +107,8 @@ TUI 是 CLI v2 的交互前端，不是第二套业务实现。无参数 `edpcli
 | `:` | 打开 command palette |
 | `i` | Inspect 当前设备或备份 |
 | `b` | 创建当前设备的只读 LBA0-13 备份 |
+| `v` | 校验当前选中备份的大小与 MD5 |
+| `D` | 删除当前选中备份（必须输入 `YES`） |
 | `a` | Apply 安全向导 |
 | `R` | Restore 当前选中备份 |
 | `Esc` | 返回上一层 / 取消输入 |
@@ -111,17 +116,19 @@ TUI 是 CLI v2 的交互前端，不是第二套业务实现。无参数 `edpcli
 | `?` | 帮助 |
 
 Command palette 只接受任务语义，例如 `:devices`、`:backups`、`:inspect`、
-`:backup-create`、`:apply`、`:restore`、`:refresh`、`:help`、`:q`；它不会把输入传给 shell。
+`:backup-create`、`:backup-verify`、`:backup-delete`、`:apply`、`:restore`、
+`:refresh`、`:help`、`:q`；它不会把输入传给 shell。
 
 设备和备份扫描、Inspect LBA0-13 读取全部在后台执行；设备/备份扫描还使用 single-flight 去重，连续刷新不会并发堆积同类 worker。旧 generation 的结果不会覆盖更新状态。Backup create 复用现有只读备份 service；Apply / Restore 则进入明确的安全向导：
 
-1. 固定当前目标 disk；Restore 同时固定精确备份路径；
-2. 输入 `YES` 后才允许继续；
-3. 如需管理员权限，先正常退出 alternate screen，再通过平台提权重新进入 TUI；
-4. 提权后的 TUI 会显示已固定目标，并再次要求 `YES`；
-5. 关键写盘阶段复用与 CLI 完全相同的系统盘保护、USB 整盘确认、写前备份、卸载/锁卷、
+1. 启动 TUI 前已完成平台管理员提权；
+2. 固定当前目标 disk；Restore 同时固定精确备份路径；
+3. 输入 `YES` 后才允许进入关键操作；
+4. 关键写盘阶段复用与 CLI 完全相同的系统盘保护、USB 整盘确认、写前备份、卸载/锁卷、
    reopen 身份复核、atomic write、sync/readback 和 rollback；
-6. 关键阶段内 `q`、`Esc`、`Ctrl-C` 不会杀掉写盘 worker，而是在安全结束点后再退出。
+5. 关键阶段内 `q`、`Esc`、`Ctrl-C` 不会杀掉写盘 worker，而是在安全结束点后再退出；
+6. 备份删除会固定选中时的内容 MD5，删除前重新扫描并复核内容；如果同名文件被替换会拒绝，
+   同时保留“每块盘至少 1 份备份”的安全底线，并同步删除对应 `.md5` sidecar。
 
 ### 2.3 查看详细信息
 

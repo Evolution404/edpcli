@@ -1,7 +1,7 @@
 //! 命令行入口: 子命令解析、自动提权、交互提示、各处理器。
 //!
 //! 用法:
-//!   edpcli                                     等价于 list
+//!   edpcli                                     交互式 TTY 默认进入 TUI；非 TTY 等价于 list
 //!   edpcli list                                列出外接盘(只读)
 //!   edpcli info [备份.bin] [--disk N]          查看设备/备份详情
 //!   edpcli apply --dry-run [--disk N]          预览改造
@@ -12,7 +12,7 @@
 //! 实测记录(2026-08-27, 均内网免密成功): aigo U335 128G / aigo U320 32G /
 //! Kingston DT3.0 64G (每盘改前自动备份, 可随时 edpcli backup restore 还原)。
 
-use std::io::{self, Write};
+use std::io::{self, IsTerminal, Write};
 use std::path::Path;
 
 pub use crate::backup_cli::{backup_delete, backup_list, backup_prune, backup_verify};
@@ -127,8 +127,31 @@ pub fn convert_flow(
 // ══════════════════════════════════════════════════════════════════
 // 7. 入口
 // ══════════════════════════════════════════════════════════════════
+fn should_default_to_tui(argv: &[String]) -> bool {
+    should_default_to_tui_for_test(
+        argv.is_empty(),
+        io::stdin().is_terminal(),
+        io::stdout().is_terminal(),
+    )
+}
+
+fn should_default_to_tui_for_test(
+    argv_is_empty: bool,
+    stdin_is_terminal: bool,
+    stdout_is_terminal: bool,
+) -> bool {
+    argv_is_empty && stdin_is_terminal && stdout_is_terminal
+}
+
 pub fn run() -> i32 {
     let argv: Vec<String> = std::env::args().skip(1).collect();
+
+    // 人直接在交互式终端输入 bare `edpcli` 时进入 TUI；管道、重定向和脚本
+    // 继续走 CLI v2 的 bare=list 语义，避免破坏已有自动化。
+    if should_default_to_tui(&argv) {
+        return crate::tui::run();
+    }
+
     let parsed = match parse_args(&argv) {
         Ok(p) => p,
         Err(msg) => {
@@ -491,6 +514,14 @@ mod tests {
                 lba
             );
         }
+    }
+
+    #[test]
+    fn default_tui_requires_bare_interactive_terminal() {
+        assert!(should_default_to_tui_for_test(true, true, true));
+        assert!(!should_default_to_tui_for_test(false, true, true));
+        assert!(!should_default_to_tui_for_test(true, false, true));
+        assert!(!should_default_to_tui_for_test(true, true, false));
     }
 
     #[test]

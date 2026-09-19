@@ -14,14 +14,16 @@ edpcli backup     创建、查看、校验、恢复和清理备份
 edpcli inspect    高级：检查底层 LBA/hex 数据
 ```
 
-无参数 `edpcli` 等价于 `edpcli list`。需要交互式界面时显式运行：
+在交互式终端中直接运行无参数 `edpcli` 会默认请求管理员权限并进入 TUI；也可以显式运行：
 
 ```bash
 edpcli tui
 ```
 
-TUI 基于 `ratatui + crossterm`，跨 macOS / Linux / Windows 使用同一套
-application/service。它不会替代 CLI v2，因此现有脚本和自动化无需修改。
+管道、重定向或自动化等非 TTY 环境下，无参数 `edpcli` 仍保持 `edpcli list` 语义，
+不会把现有脚本切进 TUI。TUI 基于 `ratatui + crossterm`，跨 macOS / Linux / Windows
+使用同一套 application/service。macOS/Linux 在进入 alternate screen 前通过 `sudo`
+请求权限，Windows 通过 UAC；授权后一次进入完整能力 TUI。
 
 完整安装、跨平台 selector、备份恢复和发布说明见
 [`docs/USAGE.md`](docs/USAGE.md)。版本策略和 Release 门禁见
@@ -85,8 +87,9 @@ edpcli version
 edpcli tui
 ```
 
-TUI 仅在交互式 TTY 中启动；管道、重定向或自动化环境会 fail-closed，并提示继续使用
-CLI v2。核心键位：
+TUI 仅在交互式 TTY 中启动；其设备、备份和 Inspect 字段在渲染前统一过滤终端控制字符，
+避免来自 U 盘元数据、文件名或系统探测文本的 ESC/换行等内容破坏 alternate-screen。
+后台 worker 只通过 TaskHub 回传数据，不允许直接向 stdout/stderr 输出。核心键位：
 
 - `j/k/h/l`：上下选择、切换设备/备份工作区或 Inspect 视图；
 - `gg/G`：首项/末项；
@@ -166,7 +169,25 @@ edpcli completion fish | source
 
 ## 开发与验证
 
-项目工具链由 `rust-toolchain.toml` 固定。常用门禁：
+项目工具链由 `rust-toolchain.toml` 固定。首次克隆后安装仓库管理的 Git hook：
+
+```bash
+# macOS / Linux
+./scripts/install-git-hooks.sh
+```
+
+```powershell
+# Windows
+./scripts/install-git-hooks.ps1
+```
+
+安装器会设置 `core.hooksPath=.githooks`。之后每次 `git commit` 前，pre-commit
+会自动对已暂存的 Rust 文件执行 `rustfmt --edition 2021` 并重新暂存；如果同一个 Rust
+文件同时存在已暂存和未暂存修改，则 fail-closed，避免自动格式化把额外改动带进提交。
+通过 GitHub/API 等不会执行本地 hook 的提交路径，仓库 `AGENTS.md` 仍要求在每次提交前
+显式执行 `cargo fmt --all`。
+
+常用门禁：
 
 ```bash
 cargo fmt --all -- --check
@@ -174,6 +195,6 @@ cargo test --all-targets --locked
 cargo clippy --all-targets --locked -- -D warnings
 ```
 
-CI 在 macOS、Linux、Windows 的 arm64 / x86_64 六个目标上执行测试、clippy 和构建；
+CI 继续保留 `cargo fmt --all -- --check` 作为最终兜底，并在 macOS、Linux、Windows 的 arm64 / x86_64 六个目标上执行测试、clippy 和构建；
 Linux/Windows 另有 arm64 / x86_64 virtual-disk HIL。正式 Release 同时发布六个原生包，
 macOS 额外发布 Universal 包。
