@@ -160,4 +160,8 @@ fn documentation_keeps_the_official_provisioning_chain_and_strict_rules() {
         DOC.contains("| LBA2 | 0 | 512 | 0 | 0.0% |"),
         "LBA2 GPT profile must remain PARTIAL until a positive real GPT sample exists"
     );
+    assert!(
+        DOC.contains("| LBA7 | 489 | 23 | 0 | 95.5% |"),
+        "LBA7 progress must include the already-closed 4-byte entry0 NeedDisturb compatibility gate"
+    );
 }

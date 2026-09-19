@@ -26,10 +26,10 @@ producer + 官方 consumer/行为 + 原始实盘验证**同时闭合，才能标
 -> BusManageImp::WriteNormalULabel -> CEMSUsbRegsiter.dll::CUsbRegsiter::RegsiterUsb
 -> BuildSector* -> WriteSectorData(count=0x0D)`。
 
-截至本次 LBA4 最新审计，严格统计为：
+截至本次 LBA7 账本复核，严格统计为：
 
-- **COMPLETE：1935 / 6656B = 29.1%**
-- **PARTIAL：4267 / 6656B = 64.1%**
+- **COMPLETE：1939 / 6656B = 29.1%**
+- **PARTIAL：4263 / 6656B = 64.0%**
 - **UNKNOWN：454 / 6656B = 6.8%**
 
 当前各 LBA 严格状态以主账本为唯一准绳，最新关键增量：
@@ -43,10 +43,11 @@ producer + 官方 consumer/行为 + 原始实盘验证**同时闭合，才能标
   current Windows SAFE6 分支传 non-null restore node 并执行 full rolling 的 blocker
   已修正：Windows/Linux producer 均确认 rolling 后把
   `LBA4+0x45/+0x46` 从 node 原样覆盖回来；Linux DWARF正式命名为
-  `bDataToServer/bConnetServer`。22份原始盘 22/22 physical flags 与 generic rolling
-  输出不同，证明旧 inspect 解码错误。现已改为 inspect 恢复 physical post-XOR flags，
-  Provision 使用官方 current SAFE6 full rolling + 两字节 post-XOR覆盖，validator
-  精确校验 full wire profile；历史 raw-zero short form 仅保留兼容读取。
+  `bDataToServer/bConnetServer`。22份原始盘证明 current/legacy 两类 profile 不能
+  共用一个 flag 解码规则：current identity profile 使用 physical post-XOR flags，
+  legacy profile 保留 generic ReadSector4 rolling 视图。inspect 已按该 profile-aware
+  规则修正；Provision 使用官方 current SAFE6 full rolling + 两字节 post-XOR覆盖，
+  validator 精确校验 full wire profile；历史 raw-zero short form 仅保留兼容读取。
   两flag仍因缺最终业务consumer保持PARTIAL，严格完成字节数不增加。
 - **LBA9 = 54 COMPLETE / 458 PARTIAL / 0 UNKNOWN = 10.5%**。
   EPPE writer-zero tail、历史 Dept/backing、SAPF trailing/backing 与 post-SAPF
@@ -55,7 +56,7 @@ producer + 官方 consumer/行为 + 原始实盘验证**同时闭合，才能标
   EESI 前0x80 round-trip payload 与后0x180 current preserve/ignore storage boundary
   已闭合到 PARTIAL；整扇不再有 UNKNOWN。
 
-- **LBA7 = 485 COMPLETE / 27 PARTIAL / 0 UNKNOWN = 94.7%**。
+- **LBA7 = 489 COMPLETE / 23 PARTIAL / 0 UNKNOWN = 95.5%**。
   真实物理 LBA7 已锁定为 **3×0x40 packed EDPF + 14B pass-info@+0xC0**，
   不能用 `libcemsfilesyscheck.so` 的 0x48/72B natural ABI 直接解释盘面。
   v0x0064 legacy wrapped key `entry+0x38..0x3F` 已完整闭合：
@@ -67,7 +68,9 @@ producer + 官方 consumer/行为 + 原始实盘验证**同时闭合，才能标
   本轮继续闭合 `+0x0CE..+0x1FF` 306B：Windows `sub_10010FC0` 明确先
   memset staging，仅写0xC0 table+0x0E tail后整扇rolling；`sub_10010B40`
   解密整扇但只返回前0xCE；严格22份原始盘 22/22 解密后这306B全零。
-  因此306B由 UNKNOWN 直接升 COMPLETE，LBA7 已无UNKNOWN；只剩27B PARTIAL。
+  因此306B由 UNKNOWN 直接升 COMPLETE。复核总账时还发现此前已闭合的
+  entry0 `NeedDisturb` 4B（producer + `NewCheckDisTurbUsb(*)` consumer + 22/22实盘）
+  被正文标为 COMPLETE 却漏算进总数，现已纠正。LBA7 已无UNKNOWN，只剩23B PARTIAL。
 - **LBA12 = 393 COMPLETE / 119 PARTIAL / 0 UNKNOWN = 76.8%**。
   主运行时盘面固定为 3×96B packed entry；`Reserved[7]@+0x59..+0x5F`
   已由官方字段名、writer 零来源、negative consumer 和 66/66 原始 entry 闭合。
@@ -150,10 +153,13 @@ producer + 官方 consumer/行为 + 原始实盘验证**同时闭合，才能标
    - inspect 已显示 producer-side physical flags；Provision/validator 已改为 current
      SAFE6 full rolling + post-XOR flags；历史 raw-zero form仍兼容读取。
    后续若继续追 LBA4，应只追这两个字段的**最终业务 consumer**，找到之前仍PARTIAL。
-3. **LBA7 剩余 27B PARTIAL**：
-   - 逐 entry 追 `Version@+0x04` 的 producer/consumer/version-switch；
-   - entry1/entry2 `NeedDisturb@+0x10` 当前没有 direct xref，继续搜其它组件/历史 build；
-   - pass-info `+0x0A/+0x0C/+0x0D` 继续追跨组件最终 consumer。
+3. **LBA7 剩余 23B PARTIAL**：
+   - 三条 `Version@+0x04`：12B，继续追 producer/consumer/version-switch；
+   - entry1/entry2 `NeedDisturb@+0x10`：8B，当前没有 direct xref，继续搜其它组件/历史 build；
+   - pass-info `+0x0A/+0x0C/+0x0D`：3B，继续追跨组件最终 consumer。
+   本轮已重新核实两版 `vrvaud_c` 全局 old-table 都是3×0x40 packed，且只有
+   entry0 NeedDisturb 有行为 xref；Version、entry1/2 NeedDisturb 在两版均无直接
+   consumer。该负证据不能把正式ABI字段升级成 Reserved/COMPLETE。
    不要再重复分析 wrapped8；其 24B 已 COMPLETE。
 4. **LBA4 legacy HSerialCRC[5] producer**：
    当前 writer machine code 已闭合，但旧 14/22 固定
