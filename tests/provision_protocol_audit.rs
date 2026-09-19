@@ -1317,6 +1317,87 @@ fn lba8_static_version_write_time_and_reserved_header_profile_match_real_fixture
 }
 
 #[test]
+fn lba8_current_usb_only_info_is_main_onlyid_hex_while_legacy_profile_keeps_it_empty() {
+    let mut checked = 0usize;
+    let mut current = 0usize;
+    let mut legacy = 0usize;
+
+    for entry in fs::read_dir(FIXTURE_DIR).expect("protocol fixtures") {
+        let path = entry.expect("backup entry").path();
+        if path.extension().and_then(|ext| ext.to_str()) != Some("bin") {
+            continue;
+        }
+        let name = path.file_name().unwrap().to_str().unwrap();
+        let Some(meta) = parse_reference_backup_name(name) else {
+            continue;
+        };
+        let Some(onlyid) = meta.onlyid.as_deref() else {
+            continue;
+        };
+        let bits = onlyid_bits(onlyid);
+        let image = fs::read(&path).expect("fixture bytes");
+
+        let raw4 = sector(&image, 4);
+        let k0 = (bits & 0xffff) ^ (bits >> 16);
+        let mut lba4 = raw4.to_vec();
+        lba4[0x18..].copy_from_slice(&xor_rolling(&raw4[0x18..], k0));
+        if raw4[0x47..0x1fc].iter().all(|byte| *byte == 0) {
+            lba4[0x47..0x1fc].fill(0);
+        }
+        let current_identity =
+            u32_le(&lba4, 0x1c) == bits && lba4[0x20..0x34].iter().all(|byte| *byte == 0);
+
+        let raw8 = sector(&image, 8);
+        let crc = crc32_bare(meta.device_id.as_bytes());
+        let head = a6b0_full(&raw8[..0x80], &crc.to_le_bytes(), 0);
+        assert_eq!(&head[..4], b"LLGB", "{name}");
+        let logical_len = u32_le(&head, 4) as usize;
+        let encrypted_len = round_up_16(logical_len).min(SECTOR);
+        let lba8 = a6b0_full(&raw8[..encrypted_len], &crc.to_le_bytes(), 0);
+        let usb_only = &lba8[0x1e..0x3e];
+
+        if current_identity {
+            current += 1;
+            assert_eq!(u32_le(&lba8, 0x14), 0, "{name}");
+            assert!(
+                lba8[0x18..0x1e].iter().all(|byte| *byte == 0),
+                "current MacInfo must stay zero: {name}"
+            );
+            let expected = format!("{bits:08x}00000000");
+            assert_eq!(
+                &usb_only[..expected.len()],
+                expected.as_bytes(),
+                "current UsbOnlyInfo must encode main onlyid followed by zero DWORD: {name}"
+            );
+            assert!(
+                usb_only[expected.len()..].iter().all(|byte| *byte == 0),
+                "current UsbOnlyInfo slot tail must stay zero: {name}"
+            );
+        } else {
+            legacy += 1;
+            assert!(
+                usb_only.iter().all(|byte| *byte == 0),
+                "committed legacy profile unexpectedly gained current UsbOnlyInfo: {name}"
+            );
+        }
+        checked += 1;
+    }
+
+    assert!(
+        checked >= MIN_PROTOCOL_FIXTURES,
+        "protocol audit unexpectedly lost fixtures"
+    );
+    assert!(
+        current >= 2,
+        "committed fixtures lost current LBA8 identity profiles"
+    );
+    assert!(
+        legacy >= 2,
+        "committed fixtures lost legacy LBA8 identity profiles"
+    );
+}
+
+#[test]
 fn lba11_is_drkb_random252_and_uses_ascii_vid_pid_in_crc_input() {
     let mut checked = 0usize;
     let mut saw_disk_size = false;
