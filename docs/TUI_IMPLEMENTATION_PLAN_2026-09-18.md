@@ -404,8 +404,10 @@ CI 必须覆盖 macOS / Linux / Windows：
 截至 2026-09-19，Phase 0–7 的代码路径已经完成，当前进入最终 CI/HIL 收口：
 
 - application/service 已成为 CLI/TUI 共用边界；
-- Device dashboard 与 Backup workspace 使用后台 generation worker；
+- Device dashboard 与 Backup workspace 使用后台 generation worker，并增加同类扫描 single-flight 去重；
+- Backup workspace 已接入只读 `backup_create_flow`，支持 `b` / `:backup-create`；
 - Apply/Restore 通过共享 write service，提权重启固定 disk/backup，关键阶段延迟退出；
+- Device dashboard 增加当前设备详情区，显示 onlyid、device_id、User/Dept、备份数和状态；
 - Inspect 复用领域 analyzer，支持字段、decoded/raw hex、搜索与滚动；
 - `/`、`n/N`、`:` command palette 已实现；
 - TTY、resize、terminal RAII、worker panic containment、非阻塞与大列表状态门禁已加入；
