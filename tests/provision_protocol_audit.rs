@@ -205,6 +205,32 @@ fn committed_blank_sector_evidence_matches_real_images() {
 }
 
 #[test]
+fn lba3_manufacturing_payload_is_an_opaque_whole_sector_not_just_a_marker_string() {
+    const MARKED: &str =
+        "disk4_121110528_vid0951_pid1666_disk&ven_kingston&prod_datatraveler_3.0_onlyid2135149925_20260903_121319.bin";
+    let image = load(MARKED);
+    let lba3 = sector(&image, 3);
+
+    assert_eq!(lba3[0x001], 0x01);
+    assert_eq!(
+        &lba3[0x020..0x028],
+        &[0xb5, 0x7e, 0x9c, 0x45, 0x00, 0x80, 0x00, 0x14]
+    );
+    assert_eq!(&lba3[0x1f0..0x200], b"this is mp mark\0");
+
+    for (offset, byte) in lba3.iter().copied().enumerate() {
+        let belongs_to_observed_payload =
+            offset == 0x001 || (0x020..0x028).contains(&offset) || (0x1f0..0x200).contains(&offset);
+        if !belongs_to_observed_payload {
+            assert_eq!(
+                byte, 0,
+                "unexpected byte outside the observed Kingston MP payload at +0x{offset:03X}"
+            );
+        }
+    }
+}
+
+#[test]
 fn original_fixtures_keep_lba5_zero_while_the_protocol_treats_it_as_opaque_scratch() {
     let mut checked = 0usize;
     for entry in fs::read_dir(FIXTURE_DIR).expect("protocol fixtures") {

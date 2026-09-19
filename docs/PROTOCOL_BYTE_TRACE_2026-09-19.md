@@ -261,7 +261,7 @@ BuildSector8(label):
 | LBA0 | 66 | 446 | 0 | 12.9% |
 | LBA1 | 0 | 512 | 0 | 0.0% |
 | LBA2 | 0 | 512 | 0 | 0.0% |
-| LBA3 | 0 | 0 | 512 | 0.0% |
+| LBA3 | 0 | 512 | 0 | 0.0% |
 | LBA4 | 36 | 39 | 437 | 7.0% |
 | LBA5 | 512 | 0 | 0 | 100.0% |
 | LBA6 | 36 | 124 | 352 | 7.0% |
@@ -276,8 +276,8 @@ BuildSector8(label):
 当前总计：
 
 - **COMPLETE：1535B / 6656B = 23.1%**
-- **PARTIAL：2584B / 6656B = 38.8%**
-- **UNKNOWN：2537B / 6656B = 38.1%**
+- **PARTIAL：3096B / 6656B = 46.5%**
+- **UNKNOWN：2025B / 6656B = 30.4%**
 
 LBA11 本轮从 8B COMPLETE 提升到 260B COMPLETE。没有因为“能解开第二半扇”就把其余 252B 也冒进标完成：旧 Aigo U335 `rev_pmap` 为什么选择 CHS 容量参与密钥，而其它 21 份使用 DiskSize，上游选择逻辑尚未闭合。
 
@@ -320,7 +320,7 @@ DWARF 中恢复出的原始声明文件/行号与本地函数地址：
 | LBA0 | 0x1FE–0x1FF | COMPLETE | MBR 55AA | 官方模板直接写 `55 AA` | MBR 校验/修复链检查签名 | 22/22 | 完成 |
 | LBA1 | 0x000–0x1FF | PARTIAL | optional GPT_Header profile | Linux官方 `CLabelManage::BuildSector1_Gpt@diskfile.cpp:1458` 构造完整512B `GPT_Header`，计算 partition-table CRC 与 header CRC | Windows `IsAllowRegisterCommonLabel/sub_1002ab70` 在 protective MBR 命中后，以 sector_size 跳到 LBA1，检查 `EFI PART` 与 `header_lba@+0x18==1` | 22/22原始 SAFE6 参考整扇全零；缺正向 GPT 实盘 | producer/consumer/结构已知，但当前真实参考未启用 GPT profile，因此不升 COMPLETE |
 | LBA2 | 0x000–0x1FF | PARTIAL | optional GPT partition-entry sector | Linux官方 `BuildSector2_Gpt@diskfile.cpp:1493` 生成128B `GPT_Partition` entry（type GUID/partition GUID/start/end/attr/name） | Windows GPT parser 从 `metadata+2*sector_size` 即 LBA2 起，按每扇4个×128B entry解析；注册检查可连续解析多扇 | 22/22原始 SAFE6 参考整扇全零；缺正向 GPT 实盘 | GPT table用途和entry边界已知，但 profile 的实际已注册盘样本缺失，因此保持PARTIAL |
-| LBA3 | 0x000–0x1FF | UNKNOWN | 厂商制造标记/空 | 待查 | 待查 | 21零 + 1 Kingston `this is mp mark` | 用途未闭合 |
+| LBA3 | 0x000–0x1FF | PARTIAL | LBA3 opaque manufacturer/MP sector | Windows `CUsbRegsiter::RegsiterUsb` 先读完整13扇区，SAFE6注册链没有任何 LBA3 builder，最终整段13扇区写回，因此 LBA3 的 EDP producer 行为是 preserve-existing；Linux `libcemsfilesyscheck.so` 符号/实现同样不存在 `BuildSector3` | 当前 Windows 注册/登录/修复组件与 Linux `CLabelManage` 均未找到 `ReadSector3` 或 LBA3 payload 解析路径；这是 EDP 侧“忽略内容”的负证据，不等于已找到厂商固件消费者 | 22份原始参考独立复核：21/22全零；唯一 Kingston 非零盘在 `+0x001=01`、`+0x020..027=b5 7e 9c 45 00 80 00 14`、`+0x1F0..1FF="this is mp mark\\0"` 有内容；同 VID/PID 的另一 Kingston 原盘整扇为零 | 整扇边界和 EDP preserve/ignore 行为已确定，因此从 UNKNOWN 降为 PARTIAL；厂商 MP 工具真正 producer、字段定义及固件侧 consumer 未闭合，禁止升 COMPLETE |
 | LBA4 | 0x000–0x017 | COMPLETE | `$$$onlyid$$$` clear header | 当前注册 writer 根据 main onlyid 格式化 | 识别/解码链从此恢复 onlyid | 22/22 | 完成 |
 | LBA4 | 0x018–0x01B | COMPLETE | OnlyIdXor8 | current writer: `main_onlyid ^ 0x88888888` | restore-info 读取该字段 | 22盘 current/legacy 可解 | 完成 |
 | LBA4 | 0x01C–0x01F | PARTIAL | OnllyID2Nd | current writer = main onlyid；旧 profile 来源未闭合 | restore-info reader 读取 | 22盘存在 3 类 profile | 旧 profile 未闭合 |
@@ -373,6 +373,47 @@ DWARF 中恢复出的原始声明文件/行号与本地函数地址：
 | LBA12 | 0x12E–0x16F | COMPLETE | post-table zero initialized padding | writer整块零初始化且不覆写 | 主reader不消费该区 | 22/22解密为零 | producer+negative consumer+实盘闭合 |
 | LBA12 | 0x170–0x1FF | PARTIAL | continuous-cipher zero plaintext tail | 整扇A6B0 writer | 当前主reader无结构消费 | 22/22解密为零 | 密码学边界已知，但历史用途仍保守PARTIAL |
 <!-- FIELD_LEDGER_END -->
+
+### 4.0 LBA3：EDP 只保留的外部制造/MP 扇区
+
+这一扇区此前只因为 21/22 全零、1 份带 `this is mp mark` 而记为 UNKNOWN。
+本轮没有沿用旧文档结论，而是重新从官方写链、官方 reader 集合和 22 份原始盘三条线核对。
+
+Windows 当前注册入口
+`CUsbRegsiter::RegsiterUsb / sub_1003b560 @ usbregsiter.cpp:0x915..0xA04`
+先调用 `ReadSectorData(..., count=0x0D)` 把 LBA0–12 整段读入 staging buffer。
+SAFE6 分支随后明确重建 LBA4、LBA6、LBA8、LBA11，并由分区/EDPF helper
+处理其它协议扇区；整个函数没有 LBA3 builder。最后仍以同一个 staging buffer
+调用 `WriteSectorData(..., count=0x0D)`。所以对 LBA3 而言，官方 EDP 注册 writer
+不是“生成零扇区”，而是：
+
+```text
+read existing LBA3
+    -> no EDP mutation
+    -> write the same LBA3 bytes back with the 13-sector batch
+```
+
+Linux 当前 `libcemsfilesyscheck.so` 提供
+`BuildSector0/4/6/7/8/11/12`、`BuildSector0/1/2_Gpt` 以及
+`ReadSector4/6/8/11/12`，独立不存在 `BuildSector3` / `ReadSector3`。
+Windows 当前注册、登录和修复组件也未发现 LBA3 payload 解析路径。
+因此当前可闭合的是 **EDP preserve + EDP 不解析**；厂商量产工具或控制器固件
+是否消费该扇区，仍属于缺失证据。
+
+22 份原始生成参考重新逐字节统计：
+
+- 21/22：LBA3 512B 全零；
+- 1/22：Kingston DataTraveler 3.0 非零；
+- 该唯一非零扇区并不只是尾部字符串：
+  - `+0x001 = 0x01`；
+  - `+0x020..+0x027 = b5 7e 9c 45 00 80 00 14`；
+  - `+0x1F0..+0x1FF = "this is mp mark\\0"`；
+  - 其它字节为零；
+- 同 VID/PID 的另一份 Kingston 原始盘 LBA3 仍为全零。
+
+因此不能把 `this is mp mark` 单独建模成 EDP 字段，也不能把 21 个零样本解释成
+“协议规定全零”。LBA3 整扇从 UNKNOWN 移到 PARTIAL；在找到厂商 MP producer、
+字段格式和实际 consumer 前，512B 中没有任何字节计入 COMPLETE。
 
 ### 4.1 LBA8 ElabOffset：2B 完整闭环
 

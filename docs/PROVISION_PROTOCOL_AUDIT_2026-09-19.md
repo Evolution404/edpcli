@@ -44,6 +44,39 @@
 
 **证据口径更新（2026-09-19）：免密转换快照是 edpcli/旧工具自己生成的产品态，只能用于产品回归，禁止作为“原始加密标签如何生成”的证据。旧 23 份集合实际由 `nopwd_tool/backup` 的 22 份 + `no_password_disk4` 的 SanDisk 免密快照组成；其中 Aigo U335 `onlyid=2071754312 @ 12:09:32` 也已由 MBR/LBA6/LBA7/LBA12 内容确认是转换后的免密状态。当前生成协议参考集使用 21 份非免密完整备份，再补入独立 SanDisk 原始加密盘，共 22 份。已知局部实验态按 LBA 单独降权，不把一个被改过的扇区用于推导该扇区原始 writer 规则。仓库 `tests/provision_protocol_audit.rs` 同时显式排除 `_nopwd_` 夹具。**
 
+### LBA3：EDP preserve-existing，厂商 MP 语义仍未闭合
+
+重新追当前 Windows `CUsbRegsiter::RegsiterUsb/sub_1003b560`：
+
+- 入口先 `ReadSectorData(..., count=0x0D)` 读取现有 LBA0–12；
+- SAFE6 注册分支明确调用 LBA4/LBA6/LBA8/LBA11 builders，并继续构造协议分区信息；
+- 没有 LBA3 builder，也没有对 `buffer + 3 * sector_size` 的 payload 解析/重建；
+- 最终仍以同一 staging buffer 执行
+  `WriteSectorData(..., count=0x0D)`。
+
+所以当前官方 EDP writer 对 LBA3 的语义是 **preserve existing bytes**，不是
+“强制生成 512B zero”。Linux `libcemsfilesyscheck.so` 的独立符号/实现集同样只有
+`BuildSector0/4/6/7/8/11/12`、GPT 0/1/2，以及
+`ReadSector4/6/8/11/12`，不存在 `BuildSector3` / `ReadSector3`。
+对 Windows 当前注册、登录、修复组件的字符串/调用路径复核也没有找到
+LBA3 payload consumer。这只能证明 EDP 当前组件**不解释**该扇区，不能替代
+厂商量产工具或控制器固件的 consumer 证据。
+
+22份原始生成参考逐字节复核：
+
+- 21/22 整扇全零；
+- 唯一非零盘为 Kingston DataTraveler 3.0；
+- 该盘的真实非零结构是：
+  `+0x001=01`、
+  `+0x020..027=b5 7e 9c 45 00 80 00 14`、
+  `+0x1F0..1FF="this is mp mark\\0"`；
+- 同 VID/PID 的另一 Kingston 原盘整扇全零。
+
+因此 LBA3 不能继续作为“完全不知道边界”的 UNKNOWN，也不能把尾部 ASCII
+误建模成一个独立 EDP 字段。本轮把整扇 512B 调整为 PARTIAL：
+**EDP preserve/ignore 边界已闭合，但制造端 producer、字段定义、固件 consumer
+缺失，所以 0B 可计 COMPLETE。**
+
 ### LBA4：短版必须按区段解码，不能按单字节 0 特判
 
 - `0x00..0x17`：明文 `$$$<onlyid>$$$` 及填充。
@@ -719,7 +752,7 @@ Windows `edpediskctrl.dll` 同时给出读端和写端：
 | 0 | 66B | 446B | 0B | 12.9% | 64B 标准 MBR partition table + 55AA 完成；bootstrap 446B 来源未闭合 |
 | 1 | 0B | 512B | 0B | 0% | 官方 BuildSector1_Gpt + GPT_Header(512B) 结构 + Windows `EFI PART` / `header_lba` consumer 已闭合；22/22当前原始SAFE6盘全零，缺正向GPT实盘，因此整扇PARTIAL |
 | 2 | 0B | 512B | 0B | 0% | 官方 BuildSector2_Gpt + GPT_Partition(128B) 结构 + Windows 从LBA2起每扇4 entry parser 已闭合；22/22当前原始盘全零，缺正向GPT实盘，因此整扇PARTIAL |
-| 3 | 0B | 0B | 512B | 0% | 有厂商 mp mark 变体，协议用途未闭合 |
+| 3 | 0B | 512B | 0B | 0% | EDP 注册 writer 对整扇 preserve-existing，当前 Windows/Linux EDP reader 不解析；22份原始盘为21零+1 Kingston MP payload，但厂商 producer/固件 consumer 未闭合 |
 | 4 | 36B | 39B | 437B | 7.0% | onlyid clear header、OnlyIdXor8、LLGB 双锚点完成；第二 ID/HSerial/profile 字段仍不完整；short/full 扩展区大部分未知 |
 | 5 | 512B | 0B | 0B | 100% | 两版 EdpDiskCtrl 均只对 LBA5 执行“读整扇→原样写回→检查 ERROR_WRITE_PROTECT(0x13)”；当前注册 writer 读取既有13扇区后不重建 LBA5，因此 preserve existing bytes；22/22原始盘全零 |
 | 6 | 36B | 124B | 352B | 7.0% | GSerial 16B、BeiZhu 16B、checksum 4B 完成；若干固定槽/CRC/flag 仅部分闭合，大量模板区仍未知 |
@@ -733,8 +766,8 @@ Windows `edpediskctrl.dll` 同时给出读端和写端：
 总计：
 
 - **完成：1535B / 6656B = 23.1%**
-- **部分已知：2584B / 6656B = 38.8%**
-- **未知：2537B / 6656B = 38.1%**
+- **部分已知：3096B / 6656B = 46.5%**
+- **未知：2025B / 6656B = 30.4%**
 
 这是一组**严格下限**，故意宁可低估，不把“能生成/能解析”冒充成“已经完全理解”。
 后续只有在证据链真正闭合时，字节才能从“未知 → 部分已知 → 完成”升级。
@@ -744,7 +777,7 @@ Windows `edpediskctrl.dll` 同时给出读端和写端：
 | 0 | 部分闭合 | MBR 分区表和 55AA 已知；全新盘 bootstrap 来源仍追官方写路径 |
 | 1 | GPT profile 部分闭合 | 当前22/22全零；官方 GPT_Header writer/consumer 已知，但缺正向GPT实盘 |
 | 2 | GPT profile 部分闭合 | 当前22/22全零；官方 GPT_Partition writer/consumer 已知，但缺正向GPT实盘 |
-| 3 | canonical 已知 | 21/22 全零，1 份厂商 mp mark；EDP canonical 可零 |
+| 3 | 外部制造区部分闭合 | 21/22 全零，1 份 Kingston MP payload；官方 EDP 注册链原样保留且当前 reader 不解析，厂商生成/消费语义仍未知 |
 | 4 | 高度闭合 | onlyid 头、rolling XOR 区、onlyIdXor8、LLGB 双锚点已锁；动态字段生成源继续追 |
 | 5 | canonical 已知 | opaque preserve / 写保护探测 scratch；当前 22/22 全零，但零不是协议固定要求 |
 | 6 | 高度闭合 | SAFE6、device CRC、checksum 已锁；0x1c0..0x1df 当前 writer 来源已拆分，0x1e0..0x1ef 仍存在版本/宿主差异 |
@@ -777,6 +810,8 @@ ProvisionEntropy / ProvisionProfile 材料；纯 builder 只消费已经验证�
 tests/provision_protocol_audit.rs 固化以下事实：
 
 - canonical reserved sectors 的真实样本证据；
+- LBA3 唯一 Kingston MP 样本不仅有尾部 `this is mp mark`，还保留
+  `+0x001` 与 `+0x020..0x027` 的非零材料，防止以后把整扇误缩成一个字符串字段；
 - 同硬件身份存在不同 onlyid；
 - LBA12 tail 不是全局常量；
 - 全部真实样本的 LBA12 tail 均可由目标 device_id 纯生成；
