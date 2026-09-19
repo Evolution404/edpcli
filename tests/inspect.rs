@@ -30,8 +30,9 @@ fn lba7_and_lba12_decode_to_edpf_with_semantic_fields() {
 
     let v12 = analyze_sector(12, &data[12 * 512..13 * 512], &meta);
     assert_eq!(&v12.decoded[..4], b"EDPF");
-    assert_eq!(&v12.decoded[368..], &data[12 * 512 + 368..13 * 512]);
-    assert!(v12.method.contains("前 368B"));
+    assert!(v12.decoded[0x170..].iter().all(|byte| *byte == 0));
+    assert!(v12.method.contains("整扇 512B"));
+    assert!(!v12.method.contains("RAW"));
     assert!(v12
         .fields
         .iter()

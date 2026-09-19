@@ -224,6 +224,19 @@ Provision 也已按官方 writer 修正：
   - `decoded[0x170..0x200] == zero[144]`。
 - 因此旧描述“只加密前 368B，后 144B RAW”错误。
 - 过去观察到的 `raw[0x170..] == a7f0_full(zero144, key, initial_counter=0x170)`，正是“整扇连续加密”的自然结果，不是独立 tail 格式。
+- `0x170` 的正确含义只是 **当前 LBA12 EDPF 主表/表尾区域的结束位置**，
+  不是密码学边界。代码常量已从误导性的 `EDPF_ENC_LEN` 改为
+  `EDPF_TABLE_LEN`。
+- edpcli 当前实现已统一为：
+  - inspect：整扇 512B 解密，展示时只在 `0x000..0x16F` 解析 EDPF 结构；
+  - 旧盘 `convert_lba12`：整扇解密，只修改 EDPF entry，再整扇重加密；
+  - Provision builder：构造 512B 明文后一次性整扇加密；
+  - Provision validator：整扇解密，校验表区，并要求 canonical profile 的
+    `0x170..0x1FF` 明文为零。
+- 旧盘转换 golden 14/14 在改成整扇重加密后哈希完全不变。原因是
+  `0x170..0x1FF` 明文未修改，且 A6B0 是确定性的连续 counter 模式；
+  因而重新计算得到的 tail 密文与旧实现“直接拼回原密文 tail”逐字节相同。
+  这说明实现修正没有改变既有产品输出，只消除了错误协议模型。
 
 ### onlyid：注册时随机 GUID 的 CRC32，不是硬件 ID
 

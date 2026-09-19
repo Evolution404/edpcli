@@ -45,9 +45,10 @@ LBA12 必须继续按“**结构已知 != 语义已知**”的严格口径推进
    ELABEL writer 模板，`+0x04` 不含结尾 NUL，加密长度为
    `((logical_len / 16) + 1) * 16`。edpcli inspect / Provision 已去掉固定
    0x170 假设。继续只追 LLGB 动态头 `+0x10/+0x14/+0x18..` 的生成源；
-3. 优先修正/继续追 LBA12：inspect/旧转换代码中仍有“前368B密文+尾144B RAW”
-   的历史实现，与已闭合的整扇 512B 连续 A6B0 格式冲突；同时继续追
-   `NeedDisturb(+0x10)` 的旧版正向消费者，以及 pass-info
+3. LBA12 实现已统一为整扇 512B 连续 A6B0：inspect / 旧盘 convert /
+   Provision builder / validator 均已去掉“368B 密文 + 144B RAW”的实现；
+   `0x170` 仅保留为 `EDPF_TABLE_LEN`。旧盘转换 golden 14/14 哈希不变。
+   下一步继续追 `NeedDisturb(+0x10)` 的旧版正向消费者，以及 pass-info
    `+0x0A/+0x0C/+0x0D` 的跨组件消费；
 4. LBA4 `OnllyID2Nd/HSerialCRC[5]` 已恢复官方结构；继续追非当前 writer
    profile 的 HSerialCRC 上游；

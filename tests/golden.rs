@@ -8,7 +8,7 @@ use edpcli::common::SECTOR;
 use edpcli::crypto::{a6b0_full, crc32_bare, xor_rolling};
 use edpcli::sectors::{
     convert, convert_lba0, convert_lba12, convert_lba6, convert_lba7, find_type_entry, looks_nopwd,
-    make_entry, parse_lba12, E12, E7, EDPF_ENC_LEN, PWD_CRC,
+    make_entry, parse_lba12, E12, E7, EDPF_TABLE_LEN, PWD_CRC,
 };
 
 fn u32_at(b: &[u8], off: usize) -> u32 {
@@ -112,15 +112,15 @@ fn iron_rules_terminators_and_tail_preserved() {
 
     // LBA7 0xC0 表尾终止符区: 明文未动 → 滚动 XOR 密文也不变
     assert_eq!(&r.lba7[0xC0..], &data[7 * SECTOR + 0xC0..8 * SECTOR]);
-    // LBA12 0x120 终止符区在加密区内, 明文不动则密文不动
+    // LBA12 0x120..0x16F 表尾状态明文不动，因此对应密文不动
     assert_eq!(
-        &r.lba12[0x120..EDPF_ENC_LEN],
-        &data[12 * SECTOR + 0x120..12 * SECTOR + EDPF_ENC_LEN]
+        &r.lba12[0x120..EDPF_TABLE_LEN],
+        &data[12 * SECTOR + 0x120..12 * SECTOR + EDPF_TABLE_LEN]
     );
-    // 尾部 144B 原盘密文原样拼接
+    // 0x170..0x1FF 明文未修改；确定性连续加密后密文也应逐字节不变
     assert_eq!(
-        &r.lba12[EDPF_ENC_LEN..],
-        &data[12 * SECTOR + EDPF_ENC_LEN..13 * SECTOR]
+        &r.lba12[EDPF_TABLE_LEN..],
+        &data[12 * SECTOR + EDPF_TABLE_LEN..13 * SECTOR]
     );
 }
 
@@ -135,8 +135,8 @@ fn iron_rules_encrypt_entry_from_original() {
     let r = convert(&read_fn_of(&data), did, None, false).unwrap();
 
     let key = crc32_bare(did.as_bytes()).to_le_bytes();
-    let dec_old = a6b0_full(&data[12 * SECTOR..12 * SECTOR + EDPF_ENC_LEN], &key, 0);
-    let dec_new = a6b0_full(&r.lba12[..EDPF_ENC_LEN], &key, 0);
+    let dec_old = a6b0_full(&data[12 * SECTOR..13 * SECTOR], &key, 0);
+    let dec_new = a6b0_full(&r.lba12, &key, 0);
     let i_old = find_type_entry(&dec_old, E12, 4).unwrap();
     let e_old = &dec_old[i_old * E12..(i_old + 1) * E12];
     let e_new = &dec_new[E12..2 * E12];

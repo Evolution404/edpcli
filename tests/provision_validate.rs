@@ -71,7 +71,7 @@ fn validator_rejects_mbr_and_lba12_tail_tamper() {
     let mut bad_tail = image.as_bytes().to_vec();
     bad_tail[12 * 512 + 0x170] ^= 1;
     let err = ProvisionValidator::validate_bytes(&spec, &bad_tail).unwrap_err();
-    assert!(err.contains("LBA12 tail"), "{err}");
+    assert!(err.contains("LBA12 decoded tail"), "{err}");
 }
 
 #[test]

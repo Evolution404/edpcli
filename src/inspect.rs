@@ -8,7 +8,9 @@ use encoding_rs::GBK;
 use crate::common::SECTOR;
 use crate::crypto::{a6b0_full, crc32_bare, lba6_checksum, lba6_decode, xor_rolling};
 use crate::diskio::BackupMeta;
-use crate::sectors::EDPF_ENC_LEN;
+use crate::sectors::EDPF_TABLE_LEN;
+
+const LLGB_FALLBACK_LEN: usize = 0x170;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum FieldStyle {
@@ -918,9 +920,9 @@ pub fn analyze_sector(lba: u32, raw: &[u8], meta: &InspectMeta) -> SectorView {
                         .and_then(|logical_len| logical_len.checked_add(15))
                         .map(|value| value & !15)
                         .filter(|value| *value >= 16 && *value <= SECTOR)
-                        .unwrap_or(EDPF_ENC_LEN)
+                        .unwrap_or(LLGB_FALLBACK_LEN)
                 } else {
-                    EDPF_ENC_LEN
+                    LLGB_FALLBACK_LEN
                 };
                 decoded = raw.to_vec();
                 decoded[..encrypted_len].copy_from_slice(&a6b0_full(
@@ -1031,14 +1033,14 @@ pub fn analyze_sector(lba: u32, raw: &[u8], meta: &InspectMeta) -> SectorView {
         }
         12 => {
             if let Some((crc, key)) = crc_key(meta) {
-                let mut d = a6b0_full(&raw[..EDPF_ENC_LEN], &key, 0);
-                d.extend_from_slice(&raw[EDPF_ENC_LEN..]);
-                decoded = d;
+                decoded = a6b0_full(raw, &key, 0);
                 if decoded.get(..4) == Some(b"EDPF") {
-                    parse_edpf(&decoded[..EDPF_ENC_LEN], 0x60, &mut fields, &mut notes);
+                    parse_edpf(&decoded[..EDPF_TABLE_LEN], 0x60, &mut fields, &mut notes);
                 }
-                notes.push("LBA12 尾部 144B 未加密，检查器保持原字节，不对其做 AES。".into());
-                format!("A6B0 前 {}B + 尾部 144B RAW，CRC=0x{crc:08X}", EDPF_ENC_LEN)
+                notes.push(
+                    "LBA12：整扇 512B 使用连续 A6B0；0x170 只是 EDPF 表区边界，解密后的 0x170..0x1FF 为零填充。".into(),
+                );
+                format!("A6B0 整扇 512B，CRC=0x{crc:08X}")
             } else {
                 "RAW（缺 device_id，无法解 LBA12）".into()
             }

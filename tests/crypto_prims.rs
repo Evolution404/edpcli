@@ -6,11 +6,12 @@ mod common;
 use common::*;
 use edpcli::common::SECTOR;
 use edpcli::crypto::{a6b0_full, crc32_bare, xor_rolling};
-use edpcli::sectors::EDPF_ENC_LEN;
+use edpcli::sectors::EDPF_TABLE_LEN;
 
 #[test]
 fn lba12_decrypts_to_edpf() {
-    // 三种真实盘备份: LBA12 前 368B 用各自 CRC 作 key 必须解出 EDPF magic
+    // 三种真实盘备份: LBA12 整扇用各自 CRC 作 key 必须解出 EDPF，
+    // 且 EDPF 表区之后的 144B 明文为零。
     for key in KEYS {
         let Some(data) = load_disk_image(key) else {
             eprintln!("跳过: 真实备份不可用");
@@ -18,8 +19,13 @@ fn lba12_decrypts_to_edpf() {
         };
         let (_, did) = fixture(key).unwrap();
         let crc_key = crc32_bare(did.as_bytes()).to_le_bytes();
-        let dec = a6b0_full(&data[12 * SECTOR..12 * SECTOR + EDPF_ENC_LEN], &crc_key, 0);
+        let dec = a6b0_full(&data[12 * SECTOR..13 * SECTOR], &crc_key, 0);
         assert_eq!(&dec[..4], b"EDPF", "{}", key);
+        assert!(
+            dec[EDPF_TABLE_LEN..].iter().all(|byte| *byte == 0),
+            "{}",
+            key
+        );
     }
 }
 

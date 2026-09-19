@@ -67,7 +67,7 @@ fn inspect_backup_file_exports_selected_lbas() {
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(stdout.contains("onlyid=1402259934"));
     assert!(stdout.contains("PDKB"));
-    assert!(stdout.contains("尾部 144B RAW"));
+    assert!(stdout.contains("A6B0 整扇 512B"));
     for name in [
         "LBA11_raw.bin",
         "LBA11_decoded.bin",

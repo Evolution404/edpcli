@@ -5,7 +5,7 @@ use crate::crypto::{a7f0_full, crc32_bare, lba6_checksum, xor_rolling, LBA6_K0};
 
 use super::{ProvisionImage, ProvisionSpec, PROVISION_IMAGE_LEN};
 
-const EDPF_ENC_LEN: usize = 368;
+const LBA12_TABLE_LEN: usize = 0x170;
 const SHARE_START: u64 = 63;
 const TYPE4_SECTORS: u64 = 6;
 
@@ -272,7 +272,7 @@ fn build_lba11(spec: &ProvisionSpec, entropy: &ProvisionEntropy) -> Result<[u8; 
 }
 
 fn build_lba12(spec: &ProvisionSpec, layout: Layout) -> [u8; SECTOR] {
-    let mut plain = [0u8; EDPF_ENC_LEN];
+    let mut plain = [0u8; SECTOR];
     let share = edpf_entry(
         0x60,
         2,
@@ -293,12 +293,10 @@ fn build_lba12(spec: &ProvisionSpec, layout: Layout) -> [u8; SECTOR] {
 
     let crc = crc32_bare(spec.target().device_id().as_bytes());
     let key = crc.to_le_bytes();
-    let encrypted = a7f0_full(&plain, &key, 0);
-    let tail = a7f0_full(&[0u8; 144], &key, 0x170);
-    let mut out = [0u8; SECTOR];
-    out[..EDPF_ENC_LEN].copy_from_slice(&encrypted);
-    out[EDPF_ENC_LEN..].copy_from_slice(&tail);
-    out
+    debug_assert!(plain[LBA12_TABLE_LEN..].iter().all(|byte| *byte == 0));
+    a7f0_full(&plain, &key, 0)
+        .try_into()
+        .expect("LBA12 sector length")
 }
 
 pub fn generate_image(

@@ -3,7 +3,7 @@ use std::io;
 use encoding_rs::GBK;
 
 use crate::common::SECTOR;
-use crate::crypto::{a6b0_full, a7f0_full, crc32_bare, lba6_checksum, lba6_decode, xor_rolling};
+use crate::crypto::{a6b0_full, crc32_bare, lba6_checksum, lba6_decode, xor_rolling};
 use crate::inspect::{analyze_sector, InspectMeta};
 use crate::metainfo::{ownership_from_lba8, summarize};
 use crate::sectors::looks_nopwd;
@@ -12,7 +12,7 @@ use super::{ProvisionImage, ProvisionSpec, PROVISION_IMAGE_LEN};
 
 const SHARE_START: u64 = 63;
 const TYPE4_SECTORS: u64 = 6;
-const EDPF_ENC_LEN: usize = 368;
+const LBA12_TABLE_LEN: usize = 0x170;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ProvisionValidation {
@@ -362,8 +362,8 @@ fn validate_lba12(spec: &ProvisionSpec, raw: &[u8]) -> Result<(), String> {
     let (share_sectors, type4_start) = layout(spec)?;
     let crc = crc32_bare(spec.target().device_id().as_bytes());
     let key = crc.to_le_bytes();
-    let decoded = a6b0_full(&raw[..EDPF_ENC_LEN], &key, 0);
-    let mut expected = [0u8; EDPF_ENC_LEN];
+    let decoded = a6b0_full(raw, &key, 0);
+    let mut expected = [0u8; SECTOR];
     let share = expected_entry(
         0x60,
         2,
@@ -381,12 +381,11 @@ fn validate_lba12(spec: &ProvisionSpec, raw: &[u8]) -> Result<(), String> {
     expected[..0x60].copy_from_slice(&share);
     expected[0x60..0xc0].copy_from_slice(&type4);
     expected[0x120..0x128].copy_from_slice(spec.profile().lba12_terminator());
-    if decoded != expected {
+    if decoded[..LBA12_TABLE_LEN] != expected[..LBA12_TABLE_LEN] {
         return Err("LBA12 EDPF/profile mismatch for target device_id".into());
     }
-    let expected_tail = a7f0_full(&[0u8; 144], &key, 0x170);
-    if raw[0x170..] != expected_tail {
-        return Err("LBA12 tail does not match derived canonical ciphertext".into());
+    if decoded[LBA12_TABLE_LEN..].iter().any(|byte| *byte != 0) {
+        return Err("LBA12 decoded tail is not canonical zero plaintext".into());
     }
     Ok(())
 }
