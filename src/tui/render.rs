@@ -87,7 +87,11 @@ fn draw_devices(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState
                 row.user.as_deref().unwrap_or("—"),
                 row.dept.as_deref().unwrap_or("—")
             )),
-            Line::from(format!("已有备份: {}  ·  状态: {}", row.n_baks, device_status(row))),
+            Line::from(format!(
+                "已有备份: {}  ·  状态: {}",
+                row.n_baks,
+                device_status(row)
+            )),
         ])
         .block(Block::default().borders(Borders::ALL).title("当前设备详情"))
         .wrap(Wrap { trim: true });
