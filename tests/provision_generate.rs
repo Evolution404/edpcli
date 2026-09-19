@@ -49,7 +49,7 @@ fn entropy() -> ProvisionEntropy {
     for (index, byte) in random.iter_mut().enumerate() {
         *byte = index as u8;
     }
-    ProvisionEntropy::new([1, 2, 3, 4, 5, 6, 7, 8], random)
+    ProvisionEntropy::new(random)
 }
 
 fn sector(image: &[u8], lba: usize) -> &[u8] {
@@ -84,6 +84,25 @@ fn generated_image_is_structurally_complete_nopwd_metadata() {
     let lba4 = analyze_sector(4, sector(bytes, 4), &meta);
     assert!(lba4.method.contains("labelOnlyId=1402259934"));
     assert_eq!(&lba4.decoded[0x39..0x3d], b"LLGB");
+    let onlyid_bits = spec.metadata().onlyid().bits();
+    assert_eq!(
+        u32::from_le_bytes(lba4.decoded[0x18..0x1c].try_into().unwrap()),
+        onlyid_bits ^ 0x8888_8888,
+        "OnlyIdXor8 must be derived from the generated main onlyid"
+    );
+    assert_eq!(
+        u32::from_le_bytes(lba4.decoded[0x1c..0x20].try_into().unwrap()),
+        onlyid_bits,
+        "current Windows writer profile uses the main onlyid as OnllyID2Nd"
+    );
+    assert!(
+        lba4.decoded[0x20..0x34].iter().all(|byte| *byte == 0),
+        "current Windows writer profile leaves HSerialCRC[5] zero"
+    );
+    assert!(
+        sector(bytes, 4)[0x20..0x34].iter().any(|byte| *byte != 0),
+        "zero HSerial plaintext must still pass through rolling XOR in the active node"
+    );
 
     let lba6 = analyze_sector(6, sector(bytes, 6), &meta);
     assert_eq!(&lba6.decoded[0x1c0..0x1c8], b"322CA28A");

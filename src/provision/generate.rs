@@ -11,20 +11,12 @@ const TYPE4_SECTORS: u64 = 6;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ProvisionEntropy {
-    lba4_nonce: [u8; 8],
     pdkb_random: [u8; 256],
 }
 
 impl ProvisionEntropy {
-    pub fn new(lba4_nonce: [u8; 8], pdkb_random: [u8; 256]) -> Self {
-        Self {
-            lba4_nonce,
-            pdkb_random,
-        }
-    }
-
-    pub fn lba4_nonce(&self) -> &[u8; 8] {
-        &self.lba4_nonce
+    pub fn new(pdkb_random: [u8; 256]) -> Self {
+        Self { pdkb_random }
     }
 
     pub fn pdkb_random(&self) -> &[u8; 256] {
@@ -83,40 +75,34 @@ fn build_lba0(layout: Layout) -> [u8; SECTOR] {
     out
 }
 
-fn sparse_rolling_encrypt(plain: &[u8], k0: u32) -> Vec<u8> {
-    let mut encrypted = xor_rolling(plain, k0);
-    for (index, byte) in plain.iter().enumerate() {
-        if *byte == 0 {
-            encrypted[index] = 0;
-        }
-    }
-    encrypted
-}
-
-fn build_lba4(spec: &ProvisionSpec, entropy: &ProvisionEntropy) -> Result<[u8; SECTOR], String> {
+fn build_lba4(spec: &ProvisionSpec) -> Result<[u8; SECTOR], String> {
     let mut plain = [0u8; SECTOR];
     let tag = ["$$$", spec.metadata().onlyid().text(), "$$$"].concat();
     if tag.len() > 0x18 {
         return Err("onlyid tag does not fit LBA4 clear header".into());
     }
     plain[..tag.len()].copy_from_slice(tag.as_bytes());
-    plain[0x18..0x20].copy_from_slice(entropy.lba4_nonce());
-    plain[0x20..0x24].copy_from_slice(&[0x29, 0x1d, 0x00, 0x00]);
-    plain[0x24..0x28].copy_from_slice(&0x7bu32.to_le_bytes());
-    plain[0x28..0x2c].copy_from_slice(&0x4ddu32.to_le_bytes());
-    plain[0x2c..0x30].copy_from_slice(&0x79u32.to_le_bytes());
-    plain[0x30..0x34].copy_from_slice(&0x7cu32.to_le_bytes());
+    let bits = spec.metadata().onlyid().bits();
+    put_u32(&mut plain, 0x18, bits ^ 0x8888_8888);
+    put_u32(&mut plain, 0x1c, bits);
+    // Current Windows writer profile constructs UsbLabelParam with
+    // HDOnlySerial[5] cleared and does not fill it before BuildSector4.
+    plain[0x20..0x34].fill(0);
     plain[0x35..0x39].copy_from_slice(&spec.profile().lba4_profile_word());
     plain[0x39..0x3d].copy_from_slice(b"LLGB");
     plain[0x3d] = 1;
     plain[0x41..0x45].copy_from_slice(&[0x08, 0x04, 0x0c, 0x01]);
     plain[0x1fc..0x200].copy_from_slice(b"LLGB");
 
-    let bits = spec.metadata().onlyid().bits();
     let k0 = (bits & 0xffff) ^ (bits >> 16);
-    let encrypted = sparse_rolling_encrypt(&plain[0x18..], k0);
+    // BuildSector4 advances one rolling-XOR stream across the whole tail.
+    // The short form writes only the active node and the trailing LLGB anchor;
+    // the middle extension region remains physically unwritten/zero.
+    let encrypted = xor_rolling(&plain[0x18..], k0);
     let mut out = plain;
-    out[0x18..].copy_from_slice(&encrypted);
+    out[0x18..0x47].copy_from_slice(&encrypted[..0x2f]);
+    out[0x47..0x1fc].fill(0);
+    out[0x1fc..0x200].copy_from_slice(&encrypted[0x1e4..0x1e8]);
     Ok(out)
 }
 
@@ -307,7 +293,7 @@ pub fn generate_image(
     let mut image = vec![0u8; PROVISION_IMAGE_LEN];
     let sectors = [
         (0usize, build_lba0(layout).to_vec()),
-        (4, build_lba4(spec, entropy)?.to_vec()),
+        (4, build_lba4(spec)?.to_vec()),
         (6, build_lba6(spec)?.to_vec()),
         (7, build_lba7(spec, layout).to_vec()),
         (8, build_lba8(spec)?.to_vec()),

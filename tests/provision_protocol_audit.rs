@@ -266,6 +266,38 @@ fn lba4_short_form_must_be_decoded_by_regions_not_by_zero_bytes() {
 }
 
 #[test]
+fn lba4_common_hserial_profile_is_shared_across_different_target_usb_devices() {
+    let decode = |name: &str| {
+        let image = load(name);
+        let meta = parse_reference_backup_name(name).expect("fixture metadata");
+        let onlyid = meta.onlyid.as_deref().expect("fixture onlyid");
+        let bits = onlyid_bits(onlyid);
+        let k0 = (bits & 0xffff) ^ (bits >> 16);
+        let raw = sector(&image, 4);
+        let mut decoded = raw.to_vec();
+        decoded[0x18..].copy_from_slice(&xor_rolling(&raw[0x18..], k0));
+        if raw[0x47..0x1fc].iter().all(|byte| *byte == 0) {
+            decoded[0x47..0x1fc].fill(0);
+        }
+        (meta, decoded)
+    };
+
+    let (lexar_meta, lexar) = decode(LEXAR);
+    let (netac_meta, netac) = decode(NETAC_A);
+    assert_ne!(lexar_meta.device_id, netac_meta.device_id);
+    assert_ne!(lexar_meta.vid, netac_meta.vid);
+    assert_eq!(&lexar[0x20..0x34], &netac[0x20..0x34]);
+    assert!(lexar[0x20..0x34].iter().any(|byte| *byte != 0));
+    assert_eq!(
+        &lexar[0x20..0x34],
+        &[
+            0x29, 0x1d, 0x00, 0x00, 0x7b, 0x00, 0x00, 0x00, 0xdd, 0x04, 0x00, 0x00, 0x79, 0x00,
+            0x00, 0x00, 0x7c, 0x00, 0x00, 0x00,
+        ]
+    );
+}
+
+#[test]
 fn lba8_encrypted_prefix_covers_the_elabel_terminating_nul() {
     let mut checked = 0usize;
     for entry in fs::read_dir(FIXTURE_DIR).expect("protocol fixtures") {

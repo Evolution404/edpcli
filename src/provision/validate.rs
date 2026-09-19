@@ -167,8 +167,19 @@ fn validate_lba4(spec: &ProvisionSpec, raw: &[u8], meta: &InspectMeta) -> Result
     if view.decoded.get(0x39..0x3d) != Some(b"LLGB") {
         return Err("LBA4 LLGB magic mismatch".into());
     }
-    if view.decoded.get(0x35..0x39) != Some(&spec.profile().lba4_profile_word()) {
-        return Err("LBA4 canonical profile word mismatch".into());
+    let bits = spec.metadata().onlyid().bits();
+    let mut expected_node = [0u8; 0x2f];
+    expected_node[0x00..0x04].copy_from_slice(&(bits ^ 0x8888_8888).to_le_bytes());
+    expected_node[0x04..0x08].copy_from_slice(&bits.to_le_bytes());
+    expected_node[0x1d..0x21].copy_from_slice(&spec.profile().lba4_profile_word());
+    expected_node[0x21..0x25].copy_from_slice(b"LLGB");
+    expected_node[0x25..0x29].copy_from_slice(&1u32.to_le_bytes());
+    expected_node[0x29..0x2d].copy_from_slice(&[0x08, 0x04, 0x0c, 0x01]);
+    if view.decoded.get(0x18..0x47) != Some(expected_node.as_slice()) {
+        return Err("LBA4 current-writer restore-node profile mismatch".into());
+    }
+    if raw[0x47..0x1fc].iter().any(|byte| *byte != 0) {
+        return Err("LBA4 canonical short-form extension gap is not physically zero".into());
     }
     if view.decoded.get(0x1fc..0x200) != Some(b"LLGB") {
         return Err("LBA4 trailing LLGB marker mismatch".into());

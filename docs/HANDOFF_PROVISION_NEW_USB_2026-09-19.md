@@ -57,8 +57,13 @@ LBA12 必须继续按“**结构已知 != 语义已知**”的严格口径推进
    `+0x0C/+0x0D` 22/22 为零，Windows/Linux 当前组件均未找到直接消费者，
    只能保留官方字段名，不能当 padding。下一步可回到 LBA4 非当前 writer profile
    的 HSerialCRC 上游，或继续追 NeedDisturb 新版主路径；
-4. LBA4 `OnllyID2Nd/HSerialCRC[5]` 已恢复官方结构；继续追非当前 writer
-   profile 的 HSerialCRC 上游；
+4. LBA4 `OnllyID2Nd/HSerialCRC[5]` 已恢复官方结构。Provision 已修正为当前
+   Windows writer profile：`OnlyIdXor8=onlyid^0x88888888`、
+   `OnllyID2Nd=onlyid`、`HSerialCRC[5]=0`，并删除旧
+   `lba4_nonce` / sparse-XOR 设计。22 份样本的旧 HSerial profile 与
+   LBA9/LBA6 形态有强相关，但只能记相关性；`DeviceNumber.dll::EDP_DiskNumber`
+   只返回单 DWORD，当前没有连接到标签 writer，不得把它直接当成
+   HSerialCRC[5] 来源。旧 profile 的 5×DWORD 上游仍未闭合；
 5. 回到 LBA0/LBA3/LBA7/LBA11 的剩余非 canonical / 代际差异。
 
 每得到一批闭合结论，都要同时更新

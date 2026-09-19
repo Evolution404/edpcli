@@ -80,7 +80,57 @@ Linux DWARF 同时恢复 `diskfile.h::UsbLabelParam`：`+0x278..+0x28B = HDOnlyS
 - 14/22：`HSerialCRC[5]` 固定为 `00001D29, 0000007B, 000004DD, 00000079, 0000007C`，跨 Aigo/Lexar/Netac 等厂商复用，但 `OnllyID2Nd` 随标签实例变化；
 - 2/22：另一组高熵 `HSerialCRC[5]`，Aigo/SanDisk 之间部分成员重合。
 
-这直接否定“`HSerialCRC[5]` 必然是当前 U 盘自身唯一序列”的强解释。Linux `libbusManage.so::UserInfo::GetHDiskSerialZ()` 已确认会读取注册主机的硬盘序列并保存到 BusManage 的 `DiskInfo` 缓存，因此它是 `HDOnlySerial/HSerialCRC` 的强候选上游；但尚未找到“主机硬盘序列字符串 -> 5×DWORD”的直接转换调用，当前只能记为候选来源，不能写成已闭合公式。
+这直接否定“`HSerialCRC[5]` 必然是当前 U 盘自身唯一序列”的强解释：
+
+- 已提交 Lexar 与 Netac 真实夹具的 device_id、VID 均不同，但解出的
+  `HSerialCRC[5]` 逐字节完全相同且非零；审计测试显式锁住这个反例；
+- 22 份全量样本还呈现明显 profile 聚类：
+  - 上述 14 份固定 HSerial 组全部同时表现为 LBA9 `EETU+SAPF`；
+  - 当前 writer 形态的 6 份 `HSerialCRC=0 && OnllyID2Nd=main onlyid`
+    全部同时表现为 LBA9 `EETU+EPPE`；
+  - 另外 2 份高熵 HSerial 样本同时是 LBA9 全零、LBA6 扩展区非零。
+  这只能记为**格式/注册环境 profile 的相关性**，不能反推因果关系。
+
+主机身份候选链也进一步做了排错：
+
+- Linux `libbusManage.so::UserInfo::GetHDiskSerialZ()` 会读取注册主机硬盘序列，
+  因而“主机身份参与旧 profile”仍是合理候选；
+- Windows `vrvaud_c` 的确存在 `EDPUToolClientInfo/HDSerialCRC`，其来源已闭合到
+  `DeviceNumber.dll::EDP_DiskNumber()`，失败时回退 `EDP_DeviceNumber()`；
+- `EDP_DiskNumber()` 会枚举 `PhysicalDrive0..3`，并内含标准
+  CRC32 多项式 `0xEDB88320`，但公开结果最终只是**单个 32-bit DWORD**；
+- 当前反编译语料中 `DeviceNumber.dll` 只在 `vrvaud_c` 身份/策略链出现，
+  未在 `cemsusbregsiter/usbtoolbusmanage` 注册写链发现连接；
+- `cemsudisk` 的 `HDSerialNumber` 位于 `CallBackLog::BuildLog` 审计字段采集，
+  同样不是标签写链；
+- 对候选二进制做 20B 精确扫描，也没有发现
+  `1D29/7B/4DD/79/7C` 或高熵 HSerial 数组的静态常量。
+
+因此当前不能把 `DeviceNumber/HDSerialCRC` 单 DWORD 与 LBA4
+`HSerialCRC[5]` 直接等同；旧 profile 的“输入材料 -> 5×DWORD”转换仍未闭合。
+
+#### Provision LBA4 canonical 修正
+
+本轮发现 Provision 生成器曾把不同 profile 混在一起：
+
+- `+0x18..+0x1F` 被错误当作 8B 随机 `lba4_nonce`；
+- `+0x20..+0x33` 被硬编码成 14/22 样本中的旧 profile
+  `1D29,7B,4DD,79,7C`；
+- `sparse_rolling_encrypt` 还把“明文为 0”错误解释成“物理字节保持 0”，
+  与已验证的有效 node 区连续 rolling-XOR 冲突。
+
+现在新盘 canonical 已严格跟随**当前 Windows writer profile**：
+
+- `OnlyIdXor8 = main_onlyid ^ 0x88888888`；
+- `OnllyID2Nd = main_onlyid`；
+- `HSerialCRC[5] = 0`；
+- `0x18..0x46` 整个有效 node 连续 rolling-XOR，即使明文字节为 0 也加密；
+- short-form `0x47..0x1FB` 才作为整段“未写区”保持物理零；
+- `0x1FC..0x1FF` 使用同一条继续推进的 rolling key schedule 写入 LLGB 锚点。
+
+`ProvisionEntropy.lba4_nonce` 与 `sparse_rolling_encrypt` 已删除；
+validator 现在逐字节检查完整 47B current-writer node 和 short-form 物理零区，
+防止旧 profile 再次混入新盘生成路径。
 
 ### LBA6：`0x1C0..0x1EF` 必须拆开
 

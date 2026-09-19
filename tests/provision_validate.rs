@@ -27,7 +27,7 @@ fn spec() -> ProvisionSpec {
 }
 
 fn entropy() -> ProvisionEntropy {
-    ProvisionEntropy::new([9, 8, 7, 6, 5, 4, 3, 2], [0x5a; 256])
+    ProvisionEntropy::new([0x5a; 256])
 }
 
 #[test]
