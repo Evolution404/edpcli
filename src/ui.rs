@@ -273,6 +273,57 @@ pub fn truncate_mid(s: &str, max: usize) -> String {
     format!("{}…{}", front, back)
 }
 
+// CLI table renderers retained as presentation-only helpers. Application services never depend on CLI routing.
+/// restore 选单条目(时间已格式化 + 是否免密快照)。
+pub fn backup_menu_str(entries: &[(String, bool)]) -> String {
+    let rows = entries
+        .iter()
+        .enumerate()
+        .map(|(i, (time, is_nopwd))| {
+            vec![
+                crate::ui::TableCell::right((i + 1).to_string(), crate::ui::Tone::BoldCyan),
+                crate::ui::TableCell::left(time.clone(), crate::ui::Tone::Plain),
+                crate::ui::TableCell::left(
+                    if *is_nopwd {
+                        "免密状态"
+                    } else {
+                        "加密原盘"
+                    },
+                    if *is_nopwd {
+                        crate::ui::Tone::Green
+                    } else {
+                        crate::ui::Tone::Plain
+                    },
+                ),
+            ]
+        })
+        .collect::<Vec<_>>();
+    crate::ui::render_table(&["编号", "时间", "状态"], &rows)
+}
+
+/// 多 USB 盘选单。
+pub fn disk_menu_str(disks: &[crate::sysinfo::ExtDisk]) -> String {
+    let rows = disks
+        .iter()
+        .enumerate()
+        .map(|(i, d)| {
+            vec![
+                crate::ui::TableCell::right((i + 1).to_string(), crate::ui::Tone::BoldCyan),
+                crate::ui::TableCell::left(format!("disk{}", d.n), crate::ui::Tone::Bold),
+                crate::ui::TableCell::right(
+                    crate::common::fmt_gb(d.size),
+                    crate::ui::Tone::Magenta,
+                ),
+                crate::ui::TableCell::left(format!("{}:{}", d.vid, d.pid), crate::ui::Tone::Yellow),
+            ]
+        })
+        .collect::<Vec<_>>();
+    crate::ui::render_table(&["编号", "设备", "容量", "VID:PID"], &rows)
+}
+
+// ══════════════════════════════════════════════════════════════════
+// 4. 真盘流程
+
 #[cfg(test)]
 mod tests {
     use super::*;

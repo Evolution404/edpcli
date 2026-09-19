@@ -68,8 +68,8 @@ PATCH 递增，不能复用旧 tag。
 1. `main` 工作区 clean，`HEAD == origin/main`；
 2. `Cargo.toml` 版本已经按本规范递增，`Cargo.lock` 同步；
 3. `cargo fmt --all -- --check` 通过；
-4. `cargo test --all-targets` 通过；
-5. `cargo clippy --all-targets -- -D warnings` 通过；
+4. `cargo test --all-targets --locked` 通过；
+5. `cargo clippy --all-targets --locked -- -D warnings` 通过；
 6. 固定版本 Runner 的 macOS / Linux / Windows arm64 + x86_64 六架构 CI 全绿；
 7. Linux / Windows arm64 + x86_64 虚拟磁盘 HIL-lite 门禁全绿；
 8. tag 与 `Cargo.toml` 版本完全一致；

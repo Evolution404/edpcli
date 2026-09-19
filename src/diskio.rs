@@ -348,9 +348,7 @@ pub fn atomic_write_sectors(
     }
     match write_and_verify(dev, patch, &order) {
         Ok(()) => Ok(()),
-        Err(e) => {
-            eprintln!("!! 写入失败: {}", e);
-            eprintln!("!! 自动回滚到本次写前状态 ...");
+        Err(_write_error) => {
             for i in 0..3 {
                 match write_and_verify(dev, &mirror, &order) {
                     Ok(()) => {
@@ -1034,13 +1032,6 @@ pub fn create_backup(
     }
     // 两个目录项也持久化后才允许调用方继续进入真实盘写入阶段。
     sync_dir(bak_dir)?;
-    println!("{}  {}", crate::ui::green("备份"), path.display());
-    if is_nopwd {
-        println!(
-            "{}",
-            crate::ui::yellow("注意: 本份备份为【免密状态】快照 — 还原它不会回到加密原盘。")
-        );
-    }
     Ok((path, is_nopwd))
 }
 

@@ -14,7 +14,14 @@ edpcli backup     创建、查看、校验、恢复和清理备份
 edpcli inspect    高级：检查底层 LBA/hex 数据
 ```
 
-无参数 `edpcli` 等价于 `edpcli list`。
+无参数 `edpcli` 等价于 `edpcli list`。需要交互式界面时显式运行：
+
+```bash
+edpcli tui
+```
+
+TUI 基于 `ratatui + crossterm`，跨 macOS / Linux / Windows 使用同一套
+application/service。它不会替代 CLI v2，因此现有脚本和自动化无需修改。
 
 完整安装、跨平台 selector、备份恢复和发布说明见
 [`docs/USAGE.md`](docs/USAGE.md)。版本策略和 Release 门禁见
@@ -71,6 +78,32 @@ edpcli inspect backup.bin --lba 7 --raw
 edpcli convert --dir ./snapshot --id 'disk&ven_aigo&prod_u335' --out ./converted
 edpcli version
 ```
+
+## 交互式 TUI
+
+```bash
+edpcli tui
+```
+
+TUI 仅在交互式 TTY 中启动；管道、重定向或自动化环境会 fail-closed，并提示继续使用
+CLI v2。核心键位：
+
+- `j/k/h/l`：上下选择、切换设备/备份工作区或 Inspect 视图；
+- `gg/G`：首项/末项；
+- `Ctrl-d/Ctrl-u`：列表半页移动；Inspect hex 中滚动内容；
+- `/` + Enter：搜索，`n/N` 前后匹配；
+- `:`：任务型 command palette，不执行 shell；
+- `i`：Inspect，支持字段、decoded hex、raw hex；
+- `b`：为当前选中设备创建只读 LBA0-13 备份；
+- `a`：Apply 安全向导；
+- `R`：从当前备份执行 Restore 安全向导；
+- `Esc`：返回，`q`：退出，`?`：帮助。
+
+设备扫描、备份扫描和 Inspect 读取都在后台 worker 执行，不阻塞 redraw；同类设备/备份扫描使用 single-flight 去重，连续刷新不会无限创建线程。Backup create 复用现有只读 `backup_create_flow`。Apply / Restore
+仍只调用 CLI 共用的 application write service。进入真实写盘前必须明确输入 `YES`；
+需要提权时会固定平台原生 disk selector，Restore 还会固定精确备份路径，提权后的 TUI
+再次要求 `YES`。进入关键写盘阶段后，`q` / `Esc` / `Ctrl-C` 只登记延迟退出，
+不会中断卸载、reopen、atomic write、sync/readback 或 rollback。
 
 ## 备份
 
@@ -137,8 +170,8 @@ edpcli completion fish | source
 
 ```bash
 cargo fmt --all -- --check
-cargo test --all-targets
-cargo clippy --all-targets -- -D warnings
+cargo test --all-targets --locked
+cargo clippy --all-targets --locked -- -D warnings
 ```
 
 CI 在 macOS、Linux、Windows 的 arm64 / x86_64 六个目标上执行测试、clippy 和构建；

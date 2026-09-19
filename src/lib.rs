@@ -3,6 +3,7 @@
 //! 分层: common → platform / crypto → sectors / diskio → identify → cli。
 //! 操作系统差异统一收敛在 platform；业务核心不得直接依赖 macOS/Linux/Windows API。
 
+pub mod application;
 pub mod backup_catalog;
 pub mod backup_cli;
 pub mod build_info;
@@ -25,4 +26,5 @@ pub mod plist;
 pub mod sectors;
 pub mod selectors;
 pub mod sysinfo;
+pub mod tui;
 pub mod ui;

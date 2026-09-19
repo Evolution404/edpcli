@@ -25,6 +25,8 @@ ci-virtual-disk = []
 strip = true
 
 [dependencies]
+ratatui = "0.29.0"
+crossterm = "0.28.1"
 encoding_rs = "0.8"
 libc = "0.2"
 time = { version = "0.3", features = ["local-offset"] }
