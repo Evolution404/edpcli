@@ -10,6 +10,10 @@ use ratatui::{
 
 use super::state::{AppState, InputMode, InspectMode, WizardStage, Workspace, WriteKind};
 
+fn safe(value: &str) -> String {
+    crate::ui::sanitize_terminal_text(value)
+}
+
 fn accent() -> Style {
     Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)
 }
@@ -61,7 +65,7 @@ fn device_status(row: &crate::disk_scan::Row) -> String {
     } else if row.denied {
         "需要管理员权限".into()
     } else if let Some(error) = &row.probe_error {
-        format!("读取异常: {error}")
+        format!("读取异常: {}", safe(error))
     } else if row.device_id.is_none() {
         "非 cems 盘".into()
     } else if row.is_nopwd {
@@ -86,10 +90,10 @@ fn draw_devices(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState
         TableRow::new(vec![
             Cell::from(format!("disk{}", row.disk)).style(accent()),
             Cell::from(crate::common::fmt_gb(row.size)),
-            Cell::from(row.proto.clone()).style(if row.proto == "USB" { success() } else { warning() }),
-            Cell::from(format!("{}:{}", row.vid, row.pid)).style(secondary()),
-            Cell::from(row.user.clone().unwrap_or_else(|| "—".into())),
-            Cell::from(row.dept.clone().unwrap_or_else(|| "—".into())),
+            Cell::from(safe(&row.proto)).style(if row.proto == "USB" { success() } else { warning() }),
+            Cell::from(format!("{}:{}", safe(&row.vid), safe(&row.pid))).style(secondary()),
+            Cell::from(row.user.as_deref().map(safe).unwrap_or_else(|| "—".into())),
+            Cell::from(row.dept.as_deref().map(safe).unwrap_or_else(|| "—".into())),
             Cell::from(device_status(row)).style(device_status_style(row)),
         ])
     });
@@ -132,18 +136,18 @@ fn draw_devices(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState
         let detail = Paragraph::new(vec![
             Line::from(vec![
                 Span::styled("onlyid: ", accent()),
-                Span::styled(onlyid.to_string(), secondary()),
+                Span::styled(safe(onlyid), secondary()),
             ]),
             Line::from(vec![
                 Span::styled("device_id: ", accent()),
-                Span::styled(device_id.to_string(), secondary()),
+                Span::styled(safe(device_id), secondary()),
             ]),
             Line::from(vec![
                 Span::styled("姓名/部门: ", accent()),
                 Span::raw(format!(
                     "{} / {}",
-                    row.user.as_deref().unwrap_or("—"),
-                    row.dept.as_deref().unwrap_or("—")
+                    row.user.as_deref().map(safe).unwrap_or_else(|| "—".into()),
+                    row.dept.as_deref().map(safe).unwrap_or_else(|| "—".into())
                 )),
             ]),
             Line::from(vec![
@@ -186,16 +190,16 @@ fn draw_backups(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState
         };
         TableRow::new(vec![
             Cell::from(backup.index.to_string()).style(accent()),
-            Cell::from(backup.display_time.clone()),
+            Cell::from(safe(&backup.display_time)),
             Cell::from(if backup.is_nopwd {
                 "免密状态"
             } else {
                 "加密原盘"
             })
             .style(if backup.is_nopwd { success() } else { accent() }),
-            Cell::from(backup.user.clone().unwrap_or_else(|| "—".into())),
-            Cell::from(backup.dept.clone().unwrap_or_else(|| "—".into())),
-            Cell::from(backup.onlyid.clone().unwrap_or_else(|| "—".into())).style(secondary()),
+            Cell::from(backup.user.as_deref().map(safe).unwrap_or_else(|| "—".into())),
+            Cell::from(backup.dept.as_deref().map(safe).unwrap_or_else(|| "—".into())),
+            Cell::from(backup.onlyid.as_deref().map(safe).unwrap_or_else(|| "—".into())).style(secondary()),
             Cell::from(health).style(health_style),
         ])
     });
@@ -246,7 +250,7 @@ fn draw_command_palette(frame: &mut Frame, area: ratatui::layout::Rect, state: &
         "quit/q   退出",
     ];
     let mut lines = vec![
-        Line::from(format!(":{}", state.input_buffer())),
+        Line::from(format!(":{}", safe(state.input_buffer()))),
         Line::from(""),
     ];
     lines.extend(commands.into_iter().map(Line::from));
@@ -301,8 +305,8 @@ fn draw_inspect(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState
     };
     let mode = state.inspect_mode().unwrap_or(InspectMode::Fields);
     let mut lines = vec![
-        Line::from(format!("来源: {}", workspace.source)),
-        Line::from(format!("LBA{} · {}", view.lba, view.method)),
+        Line::from(format!("来源: {}", safe(&workspace.source))),
+        Line::from(format!("LBA{} · {}", view.lba, safe(&view.method))),
         Line::from(""),
     ];
     match mode {
@@ -314,19 +318,24 @@ fn draw_inspect(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState
                     let group = field
                         .group
                         .as_deref()
-                        .map(|value| format!("{value} · "))
+                        .map(|value| format!("{} · ", safe(value)))
                         .unwrap_or_default();
                     lines.push(Line::from(format!(
                         "{group}{}  {}",
-                        field.label, field.value
+                        safe(&field.label),
+                        safe(&field.value)
                     )));
                     for child in &field.children {
-                        lines.push(Line::from(format!("  └─ {}  {}", child.label, child.value)));
+                        lines.push(Line::from(format!(
+                            "  └─ {}  {}",
+                            safe(&child.label),
+                            safe(&child.value)
+                        )));
                     }
                 }
             }
             for note in &view.notes {
-                lines.push(Line::from(format!("注: {note}")));
+                lines.push(Line::from(format!("注: {}", safe(note))));
             }
         }
         InspectMode::DecodedHex => lines.extend(plain_hex_lines(&view.decoded)),
@@ -366,7 +375,7 @@ fn draw_wizard(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState)
         Line::from(format!("目标: disk{}", wizard.disk)),
     ];
     if let Some(path) = &wizard.backup {
-        lines.push(Line::from(format!("备份: {}", path.display())));
+        lines.push(Line::from(format!("备份: {}", safe(&path.display().to_string()))));
     }
     lines.push(Line::from(match wizard.kind {
         WriteKind::BackupCreate => {
@@ -391,7 +400,7 @@ fn draw_wizard(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState)
         }
     }
     if let Some(message) = &wizard.message {
-        lines.push(Line::from(message.clone()));
+        lines.push(Line::from(safe(message)));
     }
     frame.render_widget(
         Paragraph::new(lines)
@@ -465,13 +474,13 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
     let status = if state.is_critical_operation() {
         "关键写盘阶段：q / Esc / Ctrl-C 将延迟到安全检查点".to_string()
     } else if state.input_mode() == InputMode::Search {
-        format!("/{}", state.input_buffer())
+        format!("/{}", safe(state.input_buffer()))
     } else if state.input_mode() == InputMode::Command {
-        format!(":{}", state.input_buffer())
+        format!(":{}", safe(state.input_buffer()))
     } else if let Some(message) = state.notice() {
-        message.to_string()
+        safe(message)
     } else if let Some(search) = state.search_status() {
-        format!("{search}  ·  n/N 下一个/上一个")
+        format!("{}  ·  n/N 下一个/上一个", safe(search))
     } else if state.inspect_pending() {
         "后台读取 Inspect 数据中；界面可继续响应".to_string()
     } else if state.active_scan_pending() {
@@ -479,5 +488,5 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
     } else {
         "h/l 工作区  j/k 移动  i Inspect  b Backup  a Apply  R Restore  r 刷新  ? 帮助  : 命令  / 搜索  q 退出".to_string()
     };
-    frame.render_widget(Paragraph::new(status), chunks[2]);
+    frame.render_widget(Paragraph::new(safe(&status)), chunks[2]);
 }
