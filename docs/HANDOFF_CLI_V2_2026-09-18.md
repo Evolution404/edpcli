@@ -105,7 +105,7 @@ Phase 4 本地门禁：
   - 提权后始终以只读方式打开目标盘；
 - 原 `backup_disk(...)` 已收敛并重命名为唯一 `create_backup(...)` service；
   `apply` 写前自动备份与独立 `backup create` 现在明确共用：
-  - 相同 LBA0-13 输入；
+  - 相同 LBA0-12 输入；
   - 相同 onlyid/device_id/VID/PID/容量元数据；
   - 相同文件命名与 `_nopwd` 标记；
   - 相同 MD5 sidecar；
@@ -114,7 +114,7 @@ Phase 4 本地门禁：
 - 新增只读契约测试：测试 runner 故意不提供卸载命令，`backup create` 仍成功，
   且无确认、无 reopen、无扇区写入；
 - 新增同源格式测试：手动备份与 apply 自动备份在同一时间/同一设备事实下生成
-  相同文件名、7168B 内容和 MD5；
+  相同文件名、6656B 内容和 MD5；
 - 新增跨平台 CLI 门禁：`backup create --disk <不存在目标>` 在所有平台均在写前拒绝。
 
 Phase 5 本地门禁：
@@ -177,7 +177,7 @@ Phase 7 本地门禁：
 - zsh / bash / fish completion 已与 v2 parser 对齐：
   - 一级命令仅保留 `list/info/apply/backup/inspect/convert/completion/version/help`；
   - backup 子命令仅保留 `create/list/restore/verify/delete/prune`；
-  - 动态候选改为物理盘、全局备份编号、备份文件名、LBA0-13；
+  - 动态候选改为物理盘、全局备份编号、备份文件名、LBA0-12；
   - 用户级 onlyid/index 动态补全已删除；
 - `__complete` 内部协议同步删除 onlyid/index 输入，只保留 v2 所需动态候选；
 - README 与 `docs/USAGE.md` 已全面重写为 v2 工作流，不再教授旧 CLI grammar；

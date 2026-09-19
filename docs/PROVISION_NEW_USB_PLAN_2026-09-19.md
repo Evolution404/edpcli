@@ -2,20 +2,20 @@
 
 ## 1. 目标与边界
 
-基线：`v2.1.0` / `main@97600fd175ff2151b9cd6d2757741163148e4368`。
+基线：`v2.2.0` / `main@14557e7e54e355c5853479a7220e8ff1f0e5e9e7`。
 
 新增“把普通全新 USB 生成成 EDP/cems 元数据盘”的能力。第一阶段目标严格限定为：
 
 - 识别一块普通 USB 整盘；
-- 审计/备份范围继续覆盖 **LBA0–13（14 * 512B snapshot）**；根据官方注册写路径，协议生成与写入范围先收紧为 **LBA0–12（13 sectors）**，LBA13 默认保留原值；
+- 协议审计、备份、生成、验证、写入范围统一为 **LBA0–12（13 * 512 = 6656B）**；
 - 支持离线 plan / image / verify；
 - 最终支持经过完整安全链后写入目标 USB；
 - CLI 与 TUI 共用同一 application/service 和协议 builder；
-- **不自动格式化数据区，不创建/重建文件系统，不写 LBA13 及之后区域。** 若后续找到独立明确写 LBA13 的官方路径，再扩展写集。
+- **不自动格式化数据区，不创建/重建文件系统，不写 LBA12 之后区域。**
 
-这与现有 `apply` 不同：`apply` 是对已有 cems 盘做保守转换，依赖原盘 LBA0–13 的 type4、reserved bytes、LBA12 尾部 144B 等材料；Provision 必须能够从经过验证的 canonical profile + 目标盘动态身份重新构造。
+这与现有 `apply` 不同：`apply` 是对已有 cems 盘做保守转换，依赖原盘 LBA0–12 的 type4、reserved bytes、LBA12 尾部等材料；Provision 必须能够从经过验证的 canonical profile + 目标盘动态身份重新构造。
 
-预计正式发布版本：v2.2.0。实现阶段不要提前 bump 版本。
+预计正式发布版本：v2.3.0。实现阶段不要提前 bump 版本。
 
 ## 2. 产品接口
 
@@ -39,7 +39,7 @@ TUI 规划：
 
 - Device dashboard 对“普通 USB / 非 cems 盘”提供 `p` Provision；
 - command palette 增加 `:provision`；
-- 向导先展示目标硬件身份、device_id、onlyid、User/Dept、容量和 14 扇区变更摘要；
+- 向导先展示目标硬件身份、device_id、onlyid、User/Dept、容量和 13 扇区变更摘要；
 - 真正写盘必须输入完整确认词 `PROVISION`，不能复用单字符确认。
 
 ## 3. 架构
@@ -55,9 +55,7 @@ ProvisionProfile
         ↓
 pure builders
         ↓
-ProvisionSnapshot [LBA0..13]
-        ↓
-ProvisionWriteImage [LBA0..12]
+ProvisionImage [LBA0..12]
         ↓
 ProvisionValidator
         ↓
@@ -87,7 +85,7 @@ src/provision/validate.rs
 
 必须回答：
 
-1. LBA0–13 各字节在不同厂商/容量/设备间哪些是常量，哪些与身份或容量相关；
+1. LBA0–12 各字节在不同厂商/容量/设备间哪些是常量，哪些与身份或容量相关；
 2. onlyid 的真实取值范围、正负、重复率、与 device_id/VID/PID/序列/容量是否存在确定关系；
 3. LBA4 的完整构造规则和 rolling-XOR 区域；
 4. LBA6 SAFE6 中 Label/User/Serial/device CRC/注册位/模板值/校验和的真实生成规则；
@@ -96,15 +94,15 @@ src/provision/validate.rs
 7. LBA9 新盘应为 zero 还是 canonical SAPF；
 8. LBA11 PDKB 的 random、VID/PID、容量和 device_id 构造闭环；
 9. LBA12 后 144B 的真实加密/明文结构，以及其他 reserved bytes 是否可固定为 canonical profile；
-10. LBA1/2/3/5/10/13 的真实策略，以及哪些扇区实际属于官方写集。
+10. LBA1/2/3/5/10 的真实策略。
 
 禁止为了赶进度把未知区域直接全零或复制 donor 盘身份。
 
 状态：Phase 0 持续加深。审计结论与可重复门禁见
 docs/PROVISION_PROTOCOL_AUDIT_2026-09-19.md 和
 tests/provision_protocol_audit.rs。关键结论是：onlyid 已找到官方自动生成链；LBA12 是
-整扇连续密文；LBA11 为 DRKB+random252；LBA13 不在官方 RegsiterUsb 的 13-sector
-前部写集中；未知生成期材料必须进入显式 profile/entropy，禁止 donor copy 或臆造清零。
+整扇连续密文；LBA11 为 DRKB+random252；官方 RegsiterUsb 前部写集就是 13 sectors
+（LBA0–12）；未知生成期材料必须进入显式 profile/entropy，禁止 donor copy 或臆造清零。
 
 ## 5. Phase 1 — contract tests + ProvisionSpec/Profile
 
@@ -117,7 +115,7 @@ tests/provision_protocol_audit.rs。关键结论是：onlyid 已找到官方自�
 - builder 不访问磁盘、不执行命令；
 - `device_id` 必须来自目标盘硬件 probe；
 - 无法可靠得到 Vendor/Product/Transport 等必要身份时 fail-closed；
-- audit/backup snapshot 固定为 7168B；protocol write image 固定为 6656B（LBA0–12）；
+- backup / inspect / provision image 全部固定为 6656B（LBA0–12）；
 - reserved/canonical profile 有显式版本；
 - User/Dept/onlyid 输入边界；
 - CLI v2 既有命令不回归。
@@ -177,13 +175,13 @@ LBA12：整扇 512B 使用现有 a7f0/A6B0 变体连续加密；解密后的 `0x
 
 ### 其他 LBA
 
-LBA1/2/3/5/9/10 只允许使用 Phase 0 已验证的 canonical policy；LBA13 不由 Provision builder 主动生成，默认保留原盘值。
+LBA1/2/3/5/9/10 只允许使用 Phase 0 已验证的 canonical policy。
 
 ## 7. Phase 3 — 全量离线 Validator
 
 `ProvisionImage` 生成后，在任何写盘前必须离线自证：
 
-- snapshot 长度精确 7168B；待写 image 长度精确 6656B；
+- image 长度精确 6656B；
 - MBR/布局一致；
 - LBA4 onlyid round-trip；
 - SAFE6 checksum 与 device CRC 一致；
@@ -217,17 +215,17 @@ system disk guard
 → USB whole-disk guard
 → 确认当前为普通/目标 USB
 → native selector pinning
-→ 读取并备份原 LBA0–13
+→ 读取并备份原 LBA0–12
 → ProvisionImage 离线 validate
 → 用户输入 PROVISION
 → prepare_write / lock / unmount
 → reopen
 → capacity + VID/PID + selector identity recheck
-→ atomic write LBA0–12（LBA0 最后，LBA13 不写）
+→ atomic write LBA0–12（LBA0 最后）
 → sync
-→ readback LBA0–12 bit-for-bit，并确认 LBA13 与写前一致
+→ readback LBA0–12 bit-for-bit
 → protocol-level verify
-→ failure rollback 原 LBA0–13
+→ failure rollback 原 LBA0–12
 ```
 
 普通 U 盘原本的数据可能被新的 MBR 隐藏，因此 UI/CLI 必须明确这是破坏性 metadata 初始化。
@@ -239,7 +237,7 @@ system disk guard
 - 普通 USB 行显示“可 Provision”；
 - `p` / `:provision`；
 - 分步编辑 User / Dept / onlyid 等；
-- 预览 device_id、容量、LBA0–13 结构；
+- 预览 device_id、容量、LBA0–12 结构；
 - 权限提升后保持 native selector pin；
 - 提权后再次确认 `PROVISION`；
 - critical operation 中 q/Esc/Ctrl-C 延迟退出；
@@ -251,11 +249,11 @@ system disk guard
 
 ### Linux loop
 
-普通磁盘 sentinel LBA0–13
+普通磁盘 sentinel LBA0–12
 → provision
 → readback
 → list/info/inspect/verify
-→ restore 原 14-sector snapshot（写路径实际只触碰 LBA0–12）
+→ restore 原 13-sector snapshot
 → sentinel 完整恢复
 
 ### Windows VHD
@@ -277,4 +275,4 @@ system disk guard
 - 不复制 CLI/TUI 两套业务逻辑；
 - 不从 donor 盘复制 onlyid/device_id/User/Dept/VID/PID/容量派生材料；
 - 协议未知处先审计、加 fixture 和文档，再实现；
-- 正式 v2.2.0 发布前才升级版本。
+- 正式 v2.3.0 发布前才升级版本。

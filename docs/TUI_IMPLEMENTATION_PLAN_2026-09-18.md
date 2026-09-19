@@ -40,7 +40,7 @@ TUI 不得复制、缩短、旁路或重新解释现有写盘安全链。以下�
 - 系统盘 fail-closed；
 - USB 外接整盘确认；
 - selector pinning；
-- 写前 LBA0-13 快照与自动备份；
+- 写前 LBA0-12 快照与自动备份；
 - 卸载 / 锁卷；
 - reopen 后设备身份与元数据二次复核；
 - atomic write；
@@ -215,7 +215,7 @@ TUI 内 `:` command palette 采用任务语义，不重新实现 shell parser。
 
 ### Inspect / hex
 
-- LBA 0-13 列表；
+- LBA 0-12 列表；
 - `j/k` 选择 LBA；
 - `Enter/l` 展开；
 - raw/decoded/结构化字段切换；
