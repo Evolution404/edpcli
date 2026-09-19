@@ -15,7 +15,9 @@ fn safe(value: &str) -> String {
 }
 
 fn accent() -> Style {
-    Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)
+    Style::default()
+        .fg(Color::Cyan)
+        .add_modifier(Modifier::BOLD)
 }
 
 fn secondary() -> Style {
@@ -90,15 +92,20 @@ fn draw_devices(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState
         TableRow::new(vec![
             Cell::from(format!("disk{}", row.disk)).style(accent()),
             Cell::from(crate::common::fmt_gb(row.size)),
-            Cell::from(safe(&row.proto)).style(if row.proto == "USB" { success() } else { warning() }),
+            Cell::from(safe(&row.proto)).style(if row.proto == "USB" {
+                success()
+            } else {
+                warning()
+            }),
             Cell::from(format!("{}:{}", safe(&row.vid), safe(&row.pid))).style(secondary()),
             Cell::from(row.user.as_deref().map(safe).unwrap_or_else(|| "—".into())),
             Cell::from(row.dept.as_deref().map(safe).unwrap_or_else(|| "—".into())),
             Cell::from(device_status(row)).style(device_status_style(row)),
         ])
     });
-    let header = TableRow::new(["设备", "容量", "总线", "VID:PID", "姓名", "部门", "状态"])
-        .style(accent());
+    let header =
+        TableRow::new(["设备", "容量", "总线", "VID:PID", "姓名", "部门", "状态"])
+            .style(accent());
     let title = if state.device_scan_pending() {
         "设备 · 扫描中…"
     } else {
@@ -189,15 +196,14 @@ fn draw_backups(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState
                 crate::diskio::Md5Status::NoSidecar => "缺 MD5".to_string(),
             }
         };
-        let health_style = if !backup.size_ok
-            || backup.md5_status == crate::diskio::Md5Status::Mismatch
-        {
-            danger()
-        } else if backup.md5_status == crate::diskio::Md5Status::NoSidecar {
-            warning()
-        } else {
-            success()
-        };
+        let health_style =
+            if !backup.size_ok || backup.md5_status == crate::diskio::Md5Status::Mismatch {
+                danger()
+            } else if backup.md5_status == crate::diskio::Md5Status::NoSidecar {
+                warning()
+            } else {
+                success()
+            };
         TableRow::new(vec![
             Cell::from(backup.index.to_string()).style(accent()),
             Cell::from(safe(&backup.display_time)),
@@ -207,10 +213,28 @@ fn draw_backups(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState
                 "加密原盘"
             })
             .style(if backup.is_nopwd { success() } else { accent() }),
-            Cell::from(backup.user.as_deref().map(safe).unwrap_or_else(|| "—".into())),
-            Cell::from(backup.dept.as_deref().map(safe).unwrap_or_else(|| "—".into())),
-            Cell::from(backup.onlyid.as_deref().map(safe).unwrap_or_else(|| "—".into()))
-                .style(secondary()),
+            Cell::from(
+                backup
+                    .user
+                    .as_deref()
+                    .map(safe)
+                    .unwrap_or_else(|| "—".into()),
+            ),
+            Cell::from(
+                backup
+                    .dept
+                    .as_deref()
+                    .map(safe)
+                    .unwrap_or_else(|| "—".into()),
+            ),
+            Cell::from(
+                backup
+                    .onlyid
+                    .as_deref()
+                    .map(safe)
+                    .unwrap_or_else(|| "—".into()),
+            )
+            .style(secondary()),
             Cell::from(health).style(health_style),
         ])
     });
@@ -247,8 +271,7 @@ fn draw_backups(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState
     }
     frame.render_stateful_widget(table, table_area, &mut table_state);
 
-    if let (Some(detail_area), Some(backup)) =
-        (detail_area, state.backups().get(state.selected()))
+    if let (Some(detail_area), Some(backup)) = (detail_area, state.backups().get(state.selected()))
     {
         let health = if !backup.size_ok {
             "大小异常"
@@ -276,7 +299,11 @@ fn draw_backups(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState
                 ),
                 Span::raw("  ·  "),
                 Span::styled(
-                    if backup.is_nopwd { "免密状态" } else { "加密原盘" },
+                    if backup.is_nopwd {
+                        "免密状态"
+                    } else {
+                        "加密原盘"
+                    },
                     if backup.is_nopwd { success() } else { accent() },
                 ),
             ]),
@@ -448,7 +475,9 @@ fn draw_backup_delete(frame: &mut Frame, area: ratatui::layout::Rect, state: &Ap
             lines.push(Line::from(format!("> {}", safe(&delete.confirmation))));
         }
         WizardStage::Running => {
-            lines.push(Line::from("正在复核并删除；q / Esc / Ctrl-C 将延迟到安全结束点。"));
+            lines.push(Line::from(
+                "正在复核并删除；q / Esc / Ctrl-C 将延迟到安全结束点。",
+            ));
         }
         WizardStage::Result => {
             lines.push(Line::from("操作已结束；Esc 返回备份列表。"));
@@ -488,7 +517,10 @@ fn draw_wizard(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState)
         Line::from(format!("目标: disk{}", wizard.disk)),
     ];
     if let Some(path) = &wizard.backup {
-        lines.push(Line::from(format!("备份: {}", safe(&path.display().to_string()))));
+        lines.push(Line::from(format!(
+            "备份: {}",
+            safe(&path.display().to_string())
+        )));
     }
     lines.push(Line::from(match wizard.kind {
         WriteKind::BackupCreate => {
@@ -539,7 +571,11 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
         Span::styled("  TUI", secondary().add_modifier(Modifier::BOLD)),
         Span::styled("  ·  管理员模式", success()),
     ]))
-    .block(Block::default().borders(Borders::ALL).border_style(accent()));
+    .block(
+        Block::default()
+            .borders(Borders::ALL)
+            .border_style(accent()),
+    );
     frame.render_widget(title, chunks[0]);
 
     if state.inspect_data().is_some() {
