@@ -4,9 +4,11 @@
 //! Hardware discovery belongs to the application/platform layers; builders consume only
 //! immutable, already-resolved inputs from this domain.
 
+mod generate;
 mod profile;
 mod spec;
 
+pub use generate::{generate_image, ProvisionEntropy};
 pub use profile::ProvisionProfile;
 pub use spec::{OnlyId, ProvisionMetadata, ProvisionSpec, TargetIdentity};
 

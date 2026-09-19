@@ -296,7 +296,7 @@ fn parse_mbr(decoded: &[u8], fields: &mut Vec<SectorField>, notes: &mut Vec<Stri
     }
 }
 
-fn lba4_serial(raw: &[u8]) -> Option<(u32, usize, usize)> {
+fn lba4_serial(raw: &[u8]) -> Option<(u32, String, usize, usize)> {
     let max = raw.len().min(64);
     let b = &raw[..max];
     for i in 0..b.len().saturating_sub(6) {
@@ -304,22 +304,28 @@ fn lba4_serial(raw: &[u8]) -> Option<(u32, usize, usize)> {
             continue;
         }
         let mut j = i + 3;
+        if b.get(j) == Some(&b'-') {
+            j += 1;
+        }
+        let digits_start = j;
         while j < b.len() && b[j].is_ascii_digit() {
             j += 1;
         }
-        if j > i + 3 && b.get(j..j + 3) == Some(b"$$$") {
-            let s = std::str::from_utf8(&b[i + 3..j])
-                .ok()?
-                .parse::<u32>()
-                .ok()?;
-            return Some((s, i, j + 3));
+        if j > digits_start && b.get(j..j + 3) == Some(b"$$$") {
+            let text = std::str::from_utf8(&b[i + 3..j]).ok()?.to_string();
+            let bits = if text.starts_with('-') {
+                text.parse::<i32>().ok()? as u32
+            } else {
+                text.parse::<u32>().ok()?
+            };
+            return Some((bits, text, i, j + 3));
         }
     }
     None
 }
 
-fn decode_lba4(raw: &[u8]) -> Option<(Vec<u8>, u32, u32, usize, usize)> {
-    let (serial, hs, he) = lba4_serial(raw)?;
+fn decode_lba4(raw: &[u8]) -> Option<(Vec<u8>, u32, String, u32, usize, usize)> {
+    let (serial, text, hs, he) = lba4_serial(raw)?;
     let k0 = (serial & 0xffff) ^ (serial >> 16);
     let mut dec = raw.to_vec();
     if raw.len() >= 0x18 {
@@ -332,7 +338,7 @@ fn decode_lba4(raw: &[u8]) -> Option<(Vec<u8>, u32, u32, usize, usize)> {
             }
         }
     }
-    Some((dec, serial, k0, hs, he))
+    Some((dec, serial, text, k0, hs, he))
 }
 
 fn parse_lba6(
@@ -802,13 +808,13 @@ pub fn analyze_sector(lba: u32, raw: &[u8], meta: &InspectMeta) -> SectorView {
             "RAW + MBR 结构解析".into()
         }
         4 => {
-            if let Some((d, serial, k0, hs, he)) = decode_lba4(raw) {
+            if let Some((d, serial, serial_text, k0, hs, he)) = decode_lba4(raw) {
                 decoded = d;
                 fields.push(field(
                     hs,
                     he,
                     "labelOnlyId",
-                    format!("{} (0x{serial:08X})", serial),
+                    format!("{} (0x{serial:08X})", serial_text),
                     FieldStyle::Identity,
                 ));
                 if decoded.get(0x39..0x3d) == Some(b"LLGB") {
@@ -818,7 +824,7 @@ pub fn analyze_sector(lba: u32, raw: &[u8], meta: &InspectMeta) -> SectorView {
                     "LBA4 的 0x18 以后按 labelOnlyId 派生 K0 做 rolling XOR；原始 0 填充保持为 0。"
                         .into(),
                 );
-                format!("XOR K0=0x{k0:04X} from labelOnlyId={serial}")
+                format!("XOR K0=0x{k0:04X} from labelOnlyId={serial_text}")
             } else {
                 "RAW（未找到 $$$<onlyid>$$$）".into()
             }
