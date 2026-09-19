@@ -528,12 +528,53 @@ Provision 也已按官方 writer 修正：
   `DISK_GEOMETRY_EX +0x18` 的 64-bit `DiskSize` 写进磁盘信息对象
   `+0xB0/+0xB4`；`RegsiterUsb` 复制同一字段并传给
   `sub_10014720`。
-- 但历史 22 份样本仍有 1/22 只能以 CHS 向下取整容量解开：
-  Aigo U335 `onlyid=1987718388`。当前 DLL 中确实存在
-  `sub_100184C0`，常量 `0x7D8200=255*63*512`，形态与 CHS
-  容量换算一致；**当前 build 没有找到它的有效 caller**。
-  所以“历史 CHS profile 如何被选择”仍未闭合，不能据此把后半 256B
-  在跨版本口径下升级为完成。
+- 本轮把 current Windows 的这条 size 链进一步追到逐次对象复制，排除了
+  “枚举得到 DiskSize 后又在中间层做 CHS 转换”的可能：
+  1. `sub_100186C0` 枚举 USB 磁盘时在栈上构造 disk-info 对象
+     `var_7E0`（机器码 `1001878C: lea -0x7E0(%ebp)`）；
+  2. `sub_10019780(...,&var_814)` 成功后，机器码
+     `10018940..10018952` 直接把这 64-bit 值写到
+     `var_7E0+0xB0/+0xB4`（即 `ebp-0x730/-0x72C`）；
+  3. `sub_10019270` 从枚举集合选中目标磁盘；
+  4. `sub_100196D0` 机器码 `10019731..10019741` 把选中对象复制进
+     `CUsbRegsiter+0x808` 包装对象内部的 `+0x10` disk-info 子对象；
+  5. `RegsiterUsb` 调 `sub_10018480` 再把该 `+0x10` 子对象复制到
+     栈上 `var_158`；`sub_10017D10/sub_10017940` 对
+     `+0xB0/+0xB4` 是 DWORD 原样复制；
+  6. `var_158` 基址为 `ebp-0x158`，所以
+     `+0xB0/+0xB4 == ebp-0xA8/-0xA4`；机器码
+     `1003BD0A..1003BD17` 正是把这两个 DWORD 原样 push 给
+     `sub_10014720(BuildSector11)`。
+  current writer 从 IOCTL 的 `DiskSize` 到 LBA11 KDF 输入之间没有任何
+  `255*63*512` 取整。
+- 历史兼容公式本身也已经从“疑似 CHS helper”升级为**官方命名证据**：
+  Linux `libcemsfilesyscheck.so` 带 DWARF 的
+  `CDisk::GetWindowsDiskSizeFromLinux(unsigned long long&) @0x186D0`
+  对应 `DiskInterface.cpp:1196`；独立 `checkdiskback` 中同名函数
+  `@0x413040` 使用同一公式。两者都把容量按
+  `255*63*512 = 0x7D8200` 向下取整。Windows
+  `sub_100184C0` 是同构实现。
+- 但当前收集到的三个 build 中，这些 CHS helper 都**没有静态 caller**。
+  旧 `.m` 在 `sub_100184C0` 后面显示的一串所谓 caller 已经由真实机器码
+  复核为 `int3` 对齐区被反编译器误识别，不能作为调用证据。
+- 严格22份原始生成参考仍是 **21/22 exact DiskSize、1/22 CHS-floor**；
+  唯一 CHS 参考为 Aigo U335 `onlyid=1987718388`。但本轮新增两个反例把
+  “CHS 由设备型号/profile 静态决定”的解释排除了：
+  - 独立原始 SanDisk（HSerial high-entropy、LBA6 `+0x1E0..1EF` 非零）
+    的 LBA11 仍只在 exact DiskSize 下恢复 `PDKB + device_id`；
+  - 同一 Aigo U335、同一 `device_id/VID/PID/物理容量` 的辅助真实采集
+    `LBA11.bin/-3/-4` 使用 CHS，而 `LBA11-2.bin` 使用 exact DiskSize。
+    这批辅助文件不计入22份 generation reference，只用于证明
+    `rev_pmap` 字样/硬件身份本身不能唯一决定 size profile。
+- 因而当前最合理且证据允许的边界是：
+  **current writer = exact DiskSize；历史上确实存在 Windows-size/CHS 兼容 writer
+  profile，但负责选择它的旧调用路径/版本条件尚未找到。**
+  后半 252B 继续 PARTIAL，不因官方 helper 名称存在而提前 COMPLETE。
+- 新增回归门禁：
+  - `lba11_authentic_sandisk_legacy_profile_still_uses_exact_disk_size`；
+  - `lba11_same_rev_pmap_device_has_both_chs_and_exact_size_writer_profiles`。
+  第二条测试使用的 `LBA11-2.bin` 被明确标注为辅助行为证据，不进入22份
+  original generation reference 统计。
 - 严格完成统计因此更新为：
   - `0x000..0x0FF`：**256B 完成**；
   - `0x100..0x103`：**4B 完成**（PDKB magic 的 producer 和

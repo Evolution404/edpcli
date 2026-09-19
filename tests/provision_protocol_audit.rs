@@ -21,6 +21,10 @@ fn load(name: &str) -> Vec<u8> {
 const MIN_PROTOCOL_FIXTURES: usize = 7;
 const SANDISK_LBA10: &[u8; 512] =
     include_bytes!("fixtures/protocol_evidence/sandisk_ultra_usb_3_0_lba10.bin");
+const SANDISK_LBA11_HEX: &str =
+    include_str!("fixtures/protocol_evidence/sandisk_ultra_usb_3_0_lba11.hex");
+const AIGO_REV_PMAP_EXACT_SIZE_LBA11_HEX: &str =
+    include_str!("fixtures/protocol_evidence/aigo_u335_rev_pmap_exact_size_lba11.hex");
 const SANDISK_DEVICE_ID: &str = "disk&ven_sandisk&prod_ultra_usb_3.0&rev_1.00";
 const SANDISK_AUTHENTIC_NOPASS_LBA7_HEX: &str =
     include_str!("fixtures/protocol_evidence/sandisk_ultra_authentic_no_password_lba7.hex");
@@ -1174,6 +1178,78 @@ fn lba11_is_drkb_random252_and_uses_ascii_vid_pid_in_crc_input() {
         saw_chs,
         "protocol fixtures lost the legacy CHS LBA11 profile"
     );
+}
+
+#[test]
+fn lba11_authentic_sandisk_legacy_profile_still_uses_exact_disk_size() {
+    const VID: &str = "0781";
+    const PID: &str = "5591";
+    const PHYSICAL_SECTORS: u64 = 240_254_976;
+
+    let raw = decode_hex_fixture(SANDISK_LBA11_HEX);
+    assert_eq!(raw.len(), SECTOR);
+    assert_eq!(&raw[..4], b"DRKB");
+
+    let disk_size = PHYSICAL_SECTORS * SECTOR as u64;
+    let chs_size = chs_capacity(disk_size);
+    assert_ne!(disk_size, chs_size);
+
+    let decode = |size: u64| {
+        let mut input = Vec::with_capacity(0x110);
+        input.extend_from_slice(&raw[..0x100]);
+        input.extend_from_slice(&padded4_ascii(VID));
+        input.extend_from_slice(&padded4_ascii(PID));
+        input.extend_from_slice(&size.to_le_bytes());
+        let crc = crc32_bare(&input);
+        a6b0_full(&raw[0x100..], &crc.to_le_bytes(), 0)
+    };
+
+    let exact = decode(disk_size);
+    assert_eq!(&exact[..4], b"PDKB");
+    assert!(exact[4..].starts_with(SANDISK_DEVICE_ID.as_bytes()));
+
+    let legacy_chs = decode(chs_size);
+    assert_ne!(
+        &legacy_chs[..4],
+        b"PDKB",
+        "legacy/high-entropy profile must not be generalized into CHS sizing"
+    );
+}
+
+#[test]
+fn lba11_same_rev_pmap_device_has_both_chs_and_exact_size_writer_profiles() {
+    const AIGO_REV_PMAP: &str =
+        "disk4_245760000_vid3535_pid6300_disk&ven_aigo&prod_u335&rev_pmap_onlyid1987718388_20260827_191701.bin";
+
+    let original = load(AIGO_REV_PMAP);
+    let meta = parse_reference_backup_name(AIGO_REV_PMAP).expect("Aigo fixture metadata");
+    let exact_capture = decode_hex_fixture(AIGO_REV_PMAP_EXACT_SIZE_LBA11_HEX);
+    assert_eq!(exact_capture.len(), SECTOR);
+
+    let disk_size = meta.secs.expect("Aigo physical sectors") * SECTOR as u64;
+    let chs_size = chs_capacity(disk_size);
+    assert_ne!(disk_size, chs_size);
+
+    let decode = |raw: &[u8], size: u64| {
+        let mut input = Vec::with_capacity(0x110);
+        input.extend_from_slice(&raw[..0x100]);
+        input.extend_from_slice(&padded4_ascii(&meta.vid));
+        input.extend_from_slice(&padded4_ascii(&meta.pid));
+        input.extend_from_slice(&size.to_le_bytes());
+        let crc = crc32_bare(&input);
+        a6b0_full(&raw[0x100..], &crc.to_le_bytes(), 0)
+    };
+
+    let original_lba11 = sector(&original, 11);
+    let original_chs = decode(original_lba11, chs_size);
+    assert_eq!(&original_chs[..4], b"PDKB");
+    assert!(original_chs[4..].starts_with(meta.device_id.as_bytes()));
+    assert_ne!(&decode(original_lba11, disk_size)[..4], b"PDKB");
+
+    let exact = decode(&exact_capture, disk_size);
+    assert_eq!(&exact[..4], b"PDKB");
+    assert!(exact[4..].starts_with(meta.device_id.as_bytes()));
+    assert_ne!(&decode(&exact_capture, chs_size)[..4], b"PDKB");
 }
 
 #[test]
