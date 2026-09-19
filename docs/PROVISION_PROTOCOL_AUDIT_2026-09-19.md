@@ -77,17 +77,85 @@ LBA3 payload consumer。这只能证明 EDP 当前组件**不解释**该扇区�
 **EDP preserve/ignore 边界已闭合，但制造端 producer、字段定义、固件 consumer
 缺失，所以 0B 可计 COMPLETE。**
 
-### LBA4：短版必须按区段解码，不能按单字节 0 特判
+### LBA4：必须区分历史 raw-zero gap 与 current SAFE6 full rolling
 
 - `0x00..0x17`：明文 `$$$<onlyid>$$$` 及填充。
 - `0x18..0x46`：有效 rolling-XOR 密文区，必须无条件按 16 位 word 解码；密文字节自然等于 0 也不能跳过。
-- `0x47..0x1fb`：前部短版中可能整段未写而保持物理零；完整版中该区存在密文。
+- `0x47..0x1fb`：真实盘存在 raw-zero gap 与 rolling-encrypted-zero 两种物理表示；当前22份生成参考都没有在该437B恢复出非零业务 payload。
 - `0x1fc..0x1ff`：尾部 rolling-XOR 锚点，解密后为 `LLGB`。
 - 新的“按区段处理”规则对当前 22/22 参考样本全部恢复：
   - `0x39..0x3c == "LLGB"`；
   - `0x1fc..0x1ff == "LLGB"`；
   - `u32@0x18 == onlyid ^ 0x88888888`。
 - 旧 `inspect.rs` 的“raw 单字节为 0 就恢复成 0”规则会把真实样本 `onlyid=949028302` 的 `LLGB` 错解为 `\0LGB`；本轮已改为只在整个 `0x47..0x1fb` 未写区全零时保留该区物理零，修复后当前 22/22 参考样本均恢复双 `LLGB` 锚点。
+
+#### LBA4 `0x47..0x1FB`：437B UNKNOWN -> PARTIAL
+
+本轮重新对齐 Windows PE current producer、Linux DWARF producer/reader 与22份原始盘。Windows current
+`CEMSUsbRegsiter.dll::sub_10014550` 与 Linux
+`CLabelManage::BuildSector4@diskfile.cpp:741` 都只把0x2F restore node写到
+`+0x18..+0x46`；non-null node 分支随后把 rolling XOR 继续覆盖到
+`+0x1FF`，因此 `+0x47..+0x1FB` 只是随同 backing 一起被变换，并没有独立字段 producer。
+
+Linux `ReadSector4@diskfile.cpp:957` 会对 `+0x18..+0x1FF` 执行同一 rolling XOR，
+但最终只把 `decoded+0x18` 起0x2F复制给 restore-node 输出并校验
+`OnlyIdXor8`；不会向调用者返回或解释 `+0x47..+0x1FB`。
+
+严格22份原始生成参考重新统计：
+
+- 18/22（17份 backup + 独立 SanDisk）为物理 raw-zero gap；
+- 4/22 为几乎全非零 rolling 形态；
+- 4/4 rolling 形态按 onlyid key 解码后437B全零；
+- raw-zero 形态按区域规则保持后同样是 semantic zero。
+
+因此这437B已经具备物理边界、current full producer变换范围、reader negative
+semantic consumer 和真实双 profile 验证，从 UNKNOWN 降为 **PARTIAL**。
+但 full builder 并没有显式把437B清零，只是变换已有 backing；raw-zero 初始
+producer/选择条件也仍未知，所以严格禁止升 COMPLETE。
+
+强化门禁 `lba4_short_form_must_be_decoded_by_regions_not_by_zero_bytes`：
+committed real fixtures 必须同时覆盖 raw-zero 与 rolling-encrypted-zero 两种物理表示，
+并断言两类样本的 semantic gap 都为 zero[437]。
+
+#### current SAFE6 分支纠偏：Provision 现有 short canonical 不是官方 current writer
+
+本轮回机器码确认 `sub_100880D0` 是标准 strcmp 语义：返回0表示字符串相等。
+`CUsbRegsiter::RegsiterUsb` 对 `SAFE6` 相等分支会构造0x2F restore node并调用
+`sub_10014550(&restore_node, main_onlyid, LBA4)`；也就是说**官方 current SAFE6
+注册路径传 non-null restore node，执行 full rolling loop**。
+
+当前仓库 `src/provision/generate.rs::build_lba4` 却在 active node 和 trailing LLGB
+之间强制 `LBA4[0x47..0x1FB]=0`，并把这种 raw-zero short form 称作
+“current Windows writer profile”。该 canonical 现已确定与 current 官方 SAFE6
+producer 不一致。
+
+为了避免在 consumer 模型尚未完全复核前仓促改写新盘生成器，本轮**只记录 blocker，
+暂不修改 Provision implementation**。下一位应在 server-flag 特殊覆盖审计完成后，
+一起修正 `src/provision/generate.rs`、`src/provision/validate.rs`、
+`tests/provision_generate.rs`，必要时同时修 `src/inspect.rs` / `tests/inspect.rs`。
+历史 raw-zero 实盘必须继续兼容读取，不能因为新盘 canonical 改成 full rolling 而删除。
+
+#### LBA4 `+0x45/+0x46`：rolling 后存在明文覆盖，下一轮首攻
+
+PE 机器码显示 `sub_10014550` 在 rolling loop 完成后还会执行：
+
+- `LBA4+0x45 = restore_node+0x2D`；
+- `LBA4+0x46 = restore_node+0x2E`。
+
+因此两个 server flag 虽位于 rolling 区间内部，最终盘面却会被 producer
+重新覆盖为 node 原始字节。现有通用 LBA4 decoder 仍对这2B执行 rolling-XOR，
+所以旧 server-flag profile 统计存在明显疑点。
+
+22份原始盘的初步交叉已显示 physical raw 与旧 decoder 输出分布明显不同：
+既有物理非零但旧 decoder 得到 `00 00` 的盘，也有 full rolling 盘物理
+`00 00`、旧 decoder 反而得到非零值。下一位必须先回 Linux writer/reader和
+Windows上层 consumer闭合这个明文例外，再修改 inspect 与 Provision。
+
+在此之前：
+
+- `+0x45/+0x46` 保持 PARTIAL；
+- 不得继续把旧 decoder 输出当作 server flag 实值；
+- 不得直接提交 Provision LBA4 full-form 修复。
 
 #### LBA4 `0x18..0x46` 官方结构与第二 ID
 
@@ -246,7 +314,7 @@ current Windows 机器码确实在 node 清零后显式写入前四项固定值�
 因此当前不能把 `DeviceNumber/HDSerialCRC` 单 DWORD 与 LBA4
 `HSerialCRC[5]` 直接等同；旧 profile 的“输入材料 -> 5×DWORD”转换仍未闭合。
 
-#### Provision LBA4 canonical 修正
+#### Provision LBA4 canonical 修正（历史阶段；已被本轮 SAFE6 full-rolling 证据部分推翻）
 
 本轮发现 Provision 生成器曾把不同 profile 混在一起：
 
@@ -256,18 +324,24 @@ current Windows 机器码确实在 node 清零后显式写入前四项固定值�
 - `sparse_rolling_encrypt` 还把“明文为 0”错误解释成“物理字节保持 0”，
   与已验证的有效 node 区连续 rolling-XOR 冲突。
 
-现在新盘 canonical 已严格跟随**当前 Windows writer profile**：
+这一阶段曾把新盘 canonical 调整为：
 
 - `OnlyIdXor8 = main_onlyid ^ 0x88888888`；
 - `OnllyID2Nd = main_onlyid`；
 - `HSerialCRC[5] = 0`；
 - `0x18..0x46` 整个有效 node 连续 rolling-XOR，即使明文字节为 0 也加密；
-- short-form `0x47..0x1FB` 才作为整段“未写区”保持物理零；
+- short-form `0x47..0x1FB` 作为整段“未写区”保持物理零；
 - `0x1FC..0x1FF` 使用同一条继续推进的 rolling key schedule 写入 LLGB 锚点。
 
 `ProvisionEntropy.lba4_nonce` 与 `sparse_rolling_encrypt` 已删除；
-validator 现在逐字节检查完整 47B current-writer node 和 short-form 物理零区，
-防止旧 profile 再次混入新盘生成路径。
+validator 目前仍逐字节检查完整47B node和 short-form 物理零区。
+
+**本轮最新证据已经证明上面的“short-form = current Windows writer”结论不成立。**
+current SAFE6 分支会传 non-null restore node 并执行 full rolling loop。
+因此现有 Provision LBA4 生成/校验逻辑现在是明确的待修 blocker，而不是最终 canonical。
+下一位必须先完成 `+0x45/+0x46` post-XOR 明文覆盖的 writer/reader闭环，再把
+Provision 改为真正的 current SAFE6 full representation；历史 raw-zero form
+只作为兼容读取 profile 保留。
 
 ### LBA6：`0x1C0..0x1EF` 必须拆开
 
@@ -1926,7 +2000,7 @@ CI 原始夹具同时保留两种 profile。零态表示该 legacy tail 不存�
 | 1 | 0B | 512B | 0B | 0% | 官方 BuildSector1_Gpt + GPT_Header(512B) 结构 + Windows `EFI PART` / `header_lba` consumer 已闭合；22/22当前原始SAFE6盘全零，缺正向GPT实盘，因此整扇PARTIAL |
 | 2 | 0B | 512B | 0B | 0% | 官方 BuildSector2_Gpt + GPT_Partition(128B) 结构 + Windows 从LBA2起每扇4 entry parser 已闭合；22/22当前原始盘全零，缺正向GPT实盘，因此整扇PARTIAL |
 | 3 | 0B | 512B | 0B | 0% | EDP 注册 writer 对整扇 preserve-existing，当前 Windows/Linux EDP reader 不解析；22份原始盘为21零+1 Kingston MP payload，但厂商 producer/固件 consumer 未闭合 |
-| 4 | 36B | 39B | 437B | 7.0% | onlyid clear header、OnlyIdXor8、LLGB 双锚点完成；第二 ID/HSerial/profile 字段仍不完整；short/full 扩展区大部分未知 |
+| 4 | 36B | 476B | 0B | 7.0% | onlyid clear header、OnlyIdXor8、LLGB 双锚点完成；第二 ID/HSerial/profile 字段仍不完整；`+0x047..+0x1FB` 已由 full writer、reader negative consumer 与 raw-zero/rolling-zero 双实盘 profile 从UNKNOWN降PARTIAL |
 | 5 | 512B | 0B | 0B | 100% | 两版 EdpDiskCtrl 均只对 LBA5 执行“读整扇→原样写回→检查 ERROR_WRITE_PROTECT(0x13)”；当前注册 writer 读取既有13扇区后不重建 LBA5，因此 preserve existing bytes；22/22原始盘全零 |
 | 6 | 4B | 156B | 352B | 0.8% | checksum 4B 完成；GSerial/BeiZhu 的 C-string 语义已知，但固定16B槽跨 current/legacy writer profile 有不同 backing 语义，因此仍 PARTIAL；原所谓“旧 +0x1E0 扩展”已纠正为 legacy MBR partition-table fragment，2/2 非零实盘的 type/start/count 与 LBA12 type4 精确一致，但旧 producer/直接 consumer 尚未闭合 |
 | 7 | 179B | 27B | 306B | 35.0% | 原 48B/entry COMPLETE + 11B pass-info 基础上，三条 packed entry 的 legacy wrapped8 共24B由官方解包/重包/写回链和22盘28/28复算闭合；Version/NeedDisturb仍部分，表后区域未闭合 |
@@ -1939,8 +2013,8 @@ CI 原始夹具同时保留两种 profile。零态表示该 legacy tail 不存�
 总计：
 
 - **完成：1629B / 6656B = 24.5%**
-- **部分已知：3830B / 6656B = 57.5%**
-- **未知：1197B / 6656B = 18.0%**
+- **部分已知：4267B / 6656B = 64.1%**
+- **未知：760B / 6656B = 11.4%**
 
 这是一组**严格下限**，故意宁可低估，不把“能生成/能解析”冒充成“已经完全理解”。
 后续只有在证据链真正闭合时，字节才能从“未知 → 部分已知 → 完成”升级。
@@ -1951,7 +2025,7 @@ CI 原始夹具同时保留两种 profile。零态表示该 legacy tail 不存�
 | 1 | GPT profile 部分闭合 | 当前22/22全零；官方 GPT_Header writer/consumer 已知，但缺正向GPT实盘 |
 | 2 | GPT profile 部分闭合 | 当前22/22全零；官方 GPT_Partition writer/consumer 已知，但缺正向GPT实盘 |
 | 3 | 外部制造区部分闭合 | 21/22 全零，1 份 Kingston MP payload；官方 EDP 注册链原样保留且当前 reader 不解析，厂商生成/消费语义仍未知 |
-| 4 | 高度闭合 | onlyid 头、rolling XOR 区、onlyIdXor8、LLGB 双锚点已锁；动态字段生成源继续追 |
+| 4 | 高度闭合 | 整扇已无UNKNOWN；`+0x047..+0x1FB` 已确认是 raw-zero / rolling-encrypted-zero 双物理表示且当前22盘语义均为零，但保持PARTIAL。最新 blocker 是 current SAFE6 实际走 full rolling，而 Provision 仍生成 short raw-zero；`+0x45/+0x46` 还有 post-XOR 明文覆盖特殊规则待闭合 |
 | 5 | canonical 已知 | opaque preserve / 写保护探测 scratch；当前 22/22 全零，但零不是协议固定要求 |
 | 6 | 部分闭合 | checksum 已锁；GSerial/BeiZhu 的 C-string 语义闭合，物理槽尾为 profile-dependent backing bytes；`0x1e0..0x1ef` 已识别为 legacy MBR entry3/4 fragment，Aigo/SanDisk 2/2 与 LBA12 type4 几何吻合；current模板零来源闭合，但 legacy writer/直接 consumer 仍缺失 |
 | 7 | 高度闭合 | 物理0x40 packed ABI、PartionCount、rolling XOR、v0x0064 legacy wrapped8 解包/重包/持久化均已锁；继续追 Version、NeedDisturb 其它 entry 和 pass-info 剩余字段 |
@@ -1963,7 +2037,7 @@ CI 原始夹具同时保留两种 profile。零态表示该 legacy tail 不存�
 
 ## 尚不能猜测的材料
 
-- LBA4 中除 onlyid、已知 LLGB 常量之外的生成期动态字节；
+- LBA4 `+0x45/+0x46` server flags 的 post-XOR 明文覆盖对应 reader/consumer 语义，以及 current SAFE6 full-rolling canonical 的最终实现；
 - EDPF wrapped-key 的 mode1/mode3 正向真实盘样本（算法与consumer已闭合，当前22盘均为mode2）；
 - LBA4 onlyID2Nd 及关联动态字段的生成源；
 - LBA0 bootstrap 主体/profile 选择、`+0x1A0 SectorSize` consumer，以及 `+0x1B8` disk signature 的 EDP-side consumer；

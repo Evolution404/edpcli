@@ -6,9 +6,9 @@
 
 基线：已正式发布的 `v2.2.0`，`main@14557e7e54e355c5853479a7220e8ff1f0e5e9e7`。
 
-最新协议审计内容基线提交：
-`95192a6 audit: close LBA7 legacy wrapped keys`。
-交接文档更新提交应位于其后；接手时只要求当前分支已包含该提交、与 origin 同步且工作区 clean。
+最新已推送协议审计基线提交：
+`50417a9 audit: classify LBA9 preserved profile regions`。
+本交接更新会在其后提交；接手时以分支最新 origin HEAD 为准，禁止退回旧基线。
 
 逐字节逆向的长期主账本：
 `docs/PROTOCOL_BYTE_TRACE_2026-09-19.md`。
@@ -26,13 +26,30 @@ producer + 官方 consumer/行为 + 原始实盘验证**同时闭合，才能标
 -> BusManageImp::WriteNormalULabel -> CEMSUsbRegsiter.dll::CUsbRegsiter::RegsiterUsb
 -> BuildSector* -> WriteSectorData(count=0x0D)`。
 
-截至最新逐字节审计，严格统计为：
+截至本次 LBA4 最新审计，严格统计为：
 
-- **COMPLETE：1627 / 6656B = 24.4%**
-- **PARTIAL：3004 / 6656B = 45.1%**
-- **UNKNOWN：2025 / 6656B = 30.4%**
+- **COMPLETE：1629 / 6656B = 24.5%**
+- **PARTIAL：4267 / 6656B = 64.1%**
+- **UNKNOWN：760 / 6656B = 11.4%**
 
 当前各 LBA 严格状态以主账本为唯一准绳，最新关键增量：
+
+- **LBA4 = 36 COMPLETE / 476 PARTIAL / 0 UNKNOWN = 7.0%**。
+  `+0x047..+0x1FB` 的437B已经从 UNKNOWN 降到 PARTIAL：严格22份原始生成参考中
+  18份为 physical raw-zero gap，4份为 rolling-encrypted 形态；4/4 rolling 形态
+  按 onlyid key 解码后437B全零，reader只返回0x2F restore node，不解释这437B。
+  但 full builder只是变换已有 backing，并不主动清零，raw-zero历史 producer/选择条件
+  仍未知，所以禁止升 COMPLETE。
+  **新发现 blocker：current Windows SAFE6 分支实际传 non-null restore node，
+  执行 full rolling；现有 Provision 却强制生成 raw-zero short form，不能再称作
+  “current writer canonical”。另外 `sub_10014550` rolling 后会把
+  `LBA4+0x45/+0x46` 从 node 原样明文覆盖回来，现有 decoder 很可能把这2B解错。**
+- **LBA9 = 54 COMPLETE / 458 PARTIAL / 0 UNKNOWN = 10.5%**。
+  EPPE writer-zero tail、历史 Dept/backing、SAPF trailing/backing 与 post-SAPF
+  preserve 区已经全部从 UNKNOWN 降到 PARTIAL；整扇不再有 UNKNOWN。
+- **LBA10 = 36 COMPLETE / 476 PARTIAL / 0 UNKNOWN = 7.0%**。
+  EESI 前0x80 round-trip payload 与后0x180 current preserve/ignore storage boundary
+  已闭合到 PARTIAL；整扇不再有 UNKNOWN。
 
 - **LBA7 = 179 COMPLETE / 27 PARTIAL / 306 UNKNOWN = 35.0%**。
   真实物理 LBA7 已锁定为 **3×0x40 packed EDPF + 14B pass-info@+0xC0**，
@@ -108,40 +125,57 @@ producer + 官方 consumer/行为 + 原始实盘验证**同时闭合，才能标
 下一位 AI 优先顺序：
 
 1. **先检查 git 状态并读主账本，不要重复已完成分析。**
-   当前 HEAD 必须包含 `95192a6` 或更新提交，branch 与 origin 同步且 worktree clean。
+   当前 HEAD 必须包含 `50417a9` 或更新提交，branch 与 origin 同步且 worktree clean。
    必须先读：
    `AGENTS.md`、
    `docs/HANDOFF_PROVISION_NEW_USB_2026-09-19.md`、
    `docs/PROTOCOL_BYTE_TRACE_2026-09-19.md`、
    `docs/PROVISION_PROTOCOL_AUDIT_2026-09-19.md`。
    禁止 `reset/clean`。
-2. **首攻 LBA7 剩余 27B PARTIAL**：
+2. **首攻 LBA4 `+0x45/+0x46` server flags 的 post-XOR 明文覆盖。**
+   当前 Windows PE `sub_10014550` 已确认 rolling loop 后重新执行：
+   `LBA4+0x45=node+0x2D`、`LBA4+0x46=node+0x2E`。
+   现有 inspect 仍把这2B当普通 rolling 区解码，旧 profile 统计因此可能错误。
+   必须：
+   - 回 Linux `BuildSector4` 确认是否同样 post-XOR restore；
+   - 追 Windows/Linux `ReadSector4` 及上层 restore-node consumer；
+   - 对22份原始盘分别统计 physical raw / generic rolling-decoded / corrected-node；
+   - 证据闭合后再改 `src/inspect.rs` 与对应测试。
+3. **随后修正 Provision LBA4 canonical。**
+   current SAFE6 分支已确认 `strcmp(labelType,"SAFE6")==0` 后传 non-null node，
+   官方 producer执行 full rolling；当前 `build_lba4` 强制
+   `0x47..0x1FB` raw-zero short form 与官方 current writer 不一致。
+   在第2项 server-flag 特例闭合后，测试先行修改
+   `src/provision/generate.rs`、`src/provision/validate.rs`、
+   `tests/provision_generate.rs`，必要时修改 inspect；历史 raw-zero real-device
+   form 必须继续兼容读取，不能删除。
+4. **LBA7 剩余 27B PARTIAL**：
    - 逐 entry 追 `Version@+0x04` 的 producer/consumer/version-switch；
    - entry1/entry2 `NeedDisturb@+0x10` 当前没有 direct xref，继续搜其它组件/历史 build；
    - pass-info `+0x0A/+0x0C/+0x0D` 继续追跨组件最终 consumer。
    不要再重复分析 wrapped8；其 24B 已 COMPLETE。
-3. **LBA4 legacy HSerialCRC[5] producer**：
+5. **LBA4 legacy HSerialCRC[5] producer**：
    当前 writer machine code 已闭合，但旧 14/22 固定
    `1D29,7B,4DD,79,7C` 与2份高熵 profile 的生成源仍未知。
    `edpuniqueid` 的 `Drive%dSerialNumber`、`DeviceNumber.dll::EDP_DiskNumber`
    已查过，当前没有建立到五槽 writer 的证据链；不要重复把它们硬接。
-4. **LBA11 rev_pmap / CHS profile**：
+6. **LBA11 rev_pmap / CHS profile**：
    当前 LBA11 260B COMPLETE、252B PARTIAL；21份使用 DiskSize，1份 Aigo U335
    `rev_pmap` 使用 CHS 容量。若能闭合“何时选择 CHS”上游条件，潜在可一次提升252B。
-5. **LBA6 legacy +0x1E0..+0x1EF**：
+7. **LBA6 legacy +0x1E0..+0x1EF**：
    20/22零、2份旧格式非零；current template 为零，但旧 producer/consumer未知。
    GSerial/BeiZhu 的 post-NUL 残值已明确是 backing bytes，不要再按 padding。
-6. **LBA8 ELABEL 与动态头剩余字段**：
+8. **LBA8 ELABEL 与动态头剩余字段**：
    static ToolVersion/Labversion/writeTime/Reserved 已 COMPLETE；
    继续为 HDSerialInfo/MacInfo/UsbOnlyInfo 与17-key ELABEL 每个业务字段追最终 consumer。
-7. **LBA10 `+0x04` 与 `+0x28..`**：`+0x04` 目前只有“默认/实盘=1、API原样
+9. **LBA10 `+0x04` 与 `+0x28..`**：`+0x04` 目前只有“默认/实盘=1、API原样
    读写”，没有业务分支 consumer，继续保持 PARTIAL；不要沿用旧文档“版本1/时间戳”
    猜测。两个16B卷标槽已经 COMPLETE，不要重复追。
-8. **LBA0 bootstrap / LBA1-LBA2 GPT 正样本**：LBA0分区表+55AA及3B legacy
+10. **LBA0 bootstrap / LBA1-LBA2 GPT 正样本**：LBA0分区表+55AA及3B legacy
    message pointer 已闭合，
    bootstrap 446B仍 PARTIAL。若能找到真实原始 GPT EDP 盘，可用于把 LBA1/LBA2
    从 PARTIAL 继续细分；在此之前不得以 synthetic builder 输出冒充实盘证据。
-9. **LBA3 MP payload**：当前已明确 EDP 只 preserve/ignore；若继续追，目标应是
+11. **LBA3 MP payload**：当前已明确 EDP 只 preserve/ignore；若继续追，目标应是
    真正厂商 MP producer/firmware consumer，而不是再证明 EDP 不使用它。
 
 每得到一批闭合结论，都要同时更新
@@ -168,18 +202,20 @@ producer + 官方 consumer/行为 + 原始实盘验证**同时闭合，才能标
 
 ## 交接时验证状态
 
-最新 LBA7 legacy wrapped-key 收口后实际验证：
+本次交接实际验证：
 
-- `cargo test --test provision_protocol_audit --locked`：**34/34 PASS**；
+- `cargo test --test provision_protocol_audit --locked`：**46/46 PASS**；
 - `cargo test --test protocol_documentation_contract --locked`：**3/3 PASS**；
-- 新增门禁：
-  `lba7_physical_entries_are_packed_64_not_linux_natural_72` PASS；
-- 新增门禁：
-  `lba7_v64_packed_legacy_file_key_wrap_matches_real_fixtures` PASS；
 - `git diff --check`：PASS。
 
-更早阶段的 inspect / provision_generate / provision_validate / golden 已在各自收口时通过，
-但本次纯协议审计批次没有重新把它们作为必跑项；下一位若改动生成/inspect 路径，必须重新跑对应测试。
+本轮强化的 LBA4 门禁：
+
+- `lba4_short_form_must_be_decoded_by_regions_not_by_zero_bytes` 必须同时覆盖
+  raw-zero 与 rolling-encrypted-zero 两种真实物理形态，并保证 semantic gap 为零。
+
+本轮**没有修改** Provision / inspect 实现；只是确认现有 current-canonical 模型存在 blocker。
+下一位一旦改动 `src/inspect.rs` 或 `src/provision/*`，必须额外运行对应
+inspect / provision_generate / provision_validate / golden 测试，不能只跑协议审计。
 
 整个分析过程未对真实物理 USB 执行任何 raw write。
 

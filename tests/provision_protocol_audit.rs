@@ -968,6 +968,8 @@ fn canonical_glab_is_stable_across_decodable_real_images() {
 #[test]
 fn lba4_short_form_must_be_decoded_by_regions_not_by_zero_bytes() {
     let mut checked = 0usize;
+    let mut raw_zero_gap = 0usize;
+    let mut rolling_zero_gap = 0usize;
     for entry in fs::read_dir(FIXTURE_DIR).expect("protocol fixtures") {
         let path = entry.expect("backup entry").path();
         if path.extension().and_then(|ext| ext.to_str()) != Some("bin") {
@@ -991,16 +993,31 @@ fn lba4_short_form_must_be_decoded_by_regions_not_by_zero_bytes() {
         // Preserve that *region* as zero; do not treat individual zero ciphertext bytes as gaps.
         if raw[0x47..0x1fc].iter().all(|byte| *byte == 0) {
             decoded[0x47..0x1fc].fill(0);
+            raw_zero_gap += 1;
+        } else {
+            rolling_zero_gap += 1;
         }
 
         assert_eq!(&decoded[0x39..0x3d], b"LLGB", "{name}");
         assert_eq!(&decoded[0x1fc..0x200], b"LLGB", "{name}");
         assert_eq!(u32_le(&decoded, 0x18), bits ^ 0x8888_8888, "{name}");
+        assert!(
+            decoded[0x47..0x1fc].iter().all(|byte| *byte == 0),
+            "LBA4 extension must be semantic zero in both observed physical representations: {name}"
+        );
         checked += 1;
     }
     assert!(
         checked >= MIN_PROTOCOL_FIXTURES,
         "protocol audit unexpectedly lost fixtures"
+    );
+    assert!(
+        raw_zero_gap >= 4,
+        "committed fixtures lost the raw-zero LBA4 representation"
+    );
+    assert!(
+        rolling_zero_gap >= 2,
+        "committed fixtures lost the rolling-encrypted-zero LBA4 representation"
     );
 }
 
