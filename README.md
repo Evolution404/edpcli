@@ -94,11 +94,12 @@ CLI v2。核心键位：
 - `/` + Enter：搜索，`n/N` 前后匹配；
 - `:`：任务型 command palette，不执行 shell；
 - `i`：Inspect，支持字段、decoded hex、raw hex；
+- `b`：为当前选中设备创建只读 LBA0-13 备份；
 - `a`：Apply 安全向导；
 - `R`：从当前备份执行 Restore 安全向导；
 - `Esc`：返回，`q`：退出，`?`：帮助。
 
-设备扫描、备份扫描和 Inspect 读取都在后台 worker 执行，不阻塞 redraw。Apply / Restore
+设备扫描、备份扫描和 Inspect 读取都在后台 worker 执行，不阻塞 redraw；同类设备/备份扫描使用 single-flight 去重，连续刷新不会无限创建线程。Backup create 复用现有只读 `backup_create_flow`。Apply / Restore
 仍只调用 CLI 共用的 application write service。进入真实写盘前必须明确输入 `YES`；
 需要提权时会固定平台原生 disk selector，Restore 还会固定精确备份路径，提权后的 TUI
 再次要求 `YES`。进入关键写盘阶段后，`q` / `Esc` / `Ctrl-C` 只登记延迟退出，
