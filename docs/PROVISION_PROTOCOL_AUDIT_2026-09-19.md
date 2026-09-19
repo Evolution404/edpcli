@@ -1989,28 +1989,43 @@ explicit-zero producer + negative consumer + 20/20 原始 EETU 为零三条证�
 本轮继续把 SAPF 与 LBA9 中间区域按**真实物理边界**拆开，而不是把
 `+0x080..+0x17F` 继续整体记 UNKNOWN。
 
-#### current 注册/runtime 对 LBA9 中间256B的写边界
+#### current 注册/runtime 对 LBA9 中间256B的写边界：BuildSector6 有跨扇区 side effect
 
 current `CUsbRegsiter::RegsiterUsb/sub_1003B560` 的机器码/反编译控制流明确：
 
 1. 先从 metadata base 一次读取完整13扇 `LBA0..LBA12` 到工作缓冲；
-2. 注册过程中显式重建 LBA4、LBA6、LBA8、LBA11；
+2. 注册过程中显式调用 LBA4、LBA6、LBA8、LBA11 builder；
 3. `sub_1003DB50` 只向 `sector_size*7` 与 `sector_size*12` 写入，
    即只重建 LBA7/LBA12；
 4. `BakupUsbSec/sub_10040940` 只是把现有缓冲复制到尾部备份位置，
    不修改工作缓冲；
 5. 最后把完整13扇工作缓冲写回。
 
-因此 current 注册路径**不拥有也不重建 LBA9**，只会 preserve-existing。
+此前据此写成“current 注册路径不拥有 LBA9”是不完整的。重新下钻
+`BuildSector6` 本体后确认它会跨过自己的512B输出范围写 LBA9：
+
+- Dept `strlen>=64`：
+  - LBA6+0x000..0x03F 写 `0x40245E2A + Dept前60B`；
+  - `out + 3*sector_size + 0x80` 即 LBA9+0x80 写
+    `Dept[60..NUL]`，长度为 `strlen-59`，包含结尾NUL；
+- User `strlen>=32`：
+  - LBA6+0x050..0x06F 写 `0x40245E2A + User前28B`；
+  - LBA9+0x100 写 `User[28..NUL]`，长度为 `strlen-27`，
+    同样包含NUL。
+
+Windows `sub_10013FD0` 机器码、Linux `BuildSector6@0x1CAAC` 和
+`vrvaud_c::sub_10118ED0` 三套实现相互独立地给出同一布局。
+因此 LBA9 中间256B不是纯 preserve 区，而是长 Dept/User continuation 与
+SAPF/历史 backing 复用的多profile物理区。
 运行时两个独立 setter 又进一步把所有权边界锁死：
 
 - `SetTempUse`：read-modify-write LBA9，但只替换 `+0x000..+0x07F`；
 - `SetPassInfoEx`：read-modify-write LBA9，但只替换 `+0x180..+0x1FF`。
 
-对应 getter 也分别只读取首/尾0x80。故 `+0x080..+0x17F` 的256B在
-current 注册、临时使用、密码长度路径中均为 preserve-existing 区。
+对应 getter 也分别只读取首/尾0x80；这只能说明 TempUse/PassEx 运行时 API
+不会触碰中间区，不能否定 BuildSector6 的跨扇区 continuation。
 
-#### `+0x080..+0x0FF`：历史 Dept/backing profile，不是第四个A6B0块
+#### `+0x080..+0x0FF`：正式 long-Dept continuation，含 join=60 / join=59 双profile
 
 严格参考中有8盘该128B非零，实际每盘只有16或17B非零。尝试以 device-id CRC
 把它作为独立0x80 A6B0块解密，结果无任何可识别 magic/结构；而原始字节直接呈现
@@ -2023,12 +2038,30 @@ GBK文本特征。
 - 另4份 ELABEL Dept 在63B位置截断，并停在 GBK“建”的首字节 `BD`；
   LBA9 `+0x80` 以 `A8` 开头，随后正好是
   `湖输变电运检中心`，与同一完整部门字符串的后续字节吻合；
-- 这说明该区至少有一类历史 writer/profile 会把长 Dept 的相邻
-  backing/尾段带入 LBA9，而不是独立加密协议块。
+- 重新定位官方 BuildSector6/ReadSector6 后，这里已经不是“像 Dept backing”的推测：
+  current producer 精确写 `Dept[60..NUL]` 到 LBA9+0x80；
+- Linux/Windows/cemsudisk reader 都有相同兼容逻辑：
+  - inline 第60字节非零：把 continuation 接到 Dept index60；
+  - inline 第60字节为0：把 continuation 接到 Dept index59，
+    专门修复历史 profile 的 off-by-one/GBK split。
 
-旧 producer 的具体 memcpy/对象布局尚未找到，current 组件也没有业务 reader。
-因此128B由 UNKNOWN 降为 **PARTIAL**：current preserve/ignore 行为与真实
-非零 profile 已闭合，但历史生成源/消费者仍缺。
+严格22份完整 census：
+
+- 14/22 未触发 long-Dept marker；
+- 8/22 触发 marker 且 LBA9+0x80 非零；
+- 其中4/8为 current join=60：重建76B Dept，continuation含NUL共17B；
+- 另4/8为 legacy join=59：LBA6 inline 在 GBK lead `BD` 后出现NUL，
+  LBA9从 trail `A8` 开始；官方 reader 从 index59 覆盖后同样重建出
+  完全相同的76B合法GBK Dept，continuation含NUL共18B。
+
+CI 新增
+`lba9_dept_continuation_preserves_both_official_reader_join_profiles`，
+并提交一份严格原始 Lexar join59 的 LBA6/LBA9 最小证据夹具。
+
+但严格 COMPLETE 仍差最后一环：已定位的 current Windows/Linux/vrvaud
+三套 BuildSector6 都只生成 join=60，尚未找到4份 join=59 原盘对应的历史
+producer。因此该128B继续 **PARTIAL**；blocker 已缩小为
+“仅 legacy join59 producer 未定位”。
 
 #### SAPF `+0x114..+0x11F`：32B decode 范围内的 profile-dependent backing
 
@@ -2048,16 +2081,20 @@ GBK文本特征。
 因此它们从 UNKNOWN 降为 **PARTIAL**，并明确标记为
 `SAPF decoded trailing/backing bytes`；禁止再按“全零 reserved”处理。
 
-#### SAPF 后 `+0x120..+0x17F`：current preserve/ignore 区
+#### SAPF 后 `+0x120..+0x17F`：long-User continuation / preserve 复用区
 
 - SAPF reader只解码到 `+0x11F`；
 - `vrvaud_c` 的快速检查只取 `+0x100` 的4B magic；
-- current `RegsiterUsb` / `SetTempUse` / `SetPassInfoEx` 都不会覆盖
-  `+0x120..+0x17F`；
+- `SetTempUse` / `SetPassInfoEx` 不会覆盖 `+0x120..+0x17F`；
+- 但 BuildSector6 在 User>=32 时会从 LBA9+0x100 写
+  `User[28..NUL]`，最大可以延伸覆盖整个 `+0x120..+0x17F`；
+- 对应 ReadSector6 的 User marker 分支会从 LBA9+0x100 读完整0x80B，
+  并支持 join=28 / legacy join=27 两种接缝；
 - 14/14 SAPF真实盘及独立SanDisk当前都为零。
 
-但 current writer 的真实语义是 preserve-existing，而不是 fixed-zero producer；
-所以这96B同样只从 UNKNOWN 降为 **PARTIAL**，不升 COMPLETE。
+严格22盘目前没有 User>=32 的正向 continuation 样本，因此这里虽已有 current
+producer/consumer，却缺真实正向实盘；同时 SAPF profile 仍与 +0x100..+0x11F
+重叠。故这96B继续 **PARTIAL**，不能再描述成单纯 preserve/ignore。
 
 新增门禁：
 
@@ -2287,7 +2324,7 @@ CI 原始夹具同时保留两种 profile。零态表示该 legacy tail 不存�
 | 6 | 220B | 292B | 0B | 43.0% | 原352B UNKNOWN 已按官方 BuildSector6/ReadSector6 全部拆清：216B 为 UsbMainBSec fixed template material（双平台 producer + 前508B checksum consumer + 22/22实盘，升 COMPLETE）；136B 为 Owner/Office/Label fixed storage slots（边界/reader已闭合但 post-NUL backing 多profile，降 PARTIAL）。GSerial/BeiZhu 与 legacy MBR fragment 继续按原严格口径保持 PARTIAL |
 | 7 | 490B | 22B | 0B | 95.7% | 在原489B基础上，pass-info `bNoUsbChkPasSafe(+0x0A)` 找到 `checkdiskback::Update_EDPEDISKSHOWPARAM` 值相关行为 consumer，并经 SAFE6 policy 被两套独立客户端恢复，1B升级COMPLETE；当前剩3条 entry Version 12B、entry1/2 NeedDisturb 8B、backup-prompt 2B为PARTIAL |
 | 8 | 86B | 426B | 0B | 16.8% | LLGB magic + logical length + ElabOffset 完成；ToolVersion、Labversion、writeTime 和 Reserved[64] 已闭合。重新按动态边界审计后，`+0x80..+0x1FF` 不再按样本最大长度切成“正文+UNKNOWN尾巴”：writer只拥有动态加密前缀，之后是 preserve-existing backing，因此整段统一PARTIAL、无UNKNOWN |
-| 9 | 54B | 458B | 0B | 10.5% | EETU/EPPE/SAPF三块边界及current preserve范围已拆清：EPPE尾120B为writer-zero但公开API consumer未闭合；+0x080..0x0FF为历史Dept/backing profile，SAPF +0x114..0x11F为profile-dependent backing，+0x120..0x17F为current preserve/ignore，三段均PARTIAL，不再记UNKNOWN |
+| 9 | 54B | 458B | 0B | 10.5% | EETU/EPPE/SAPF边界保持；+0x080..0x0FF已闭合为 BuildSector6 long-Dept continuation 并验证 join60/join59 双reader profile，但 legacy join59 producer仍缺；+0x100..0x17F又与 long-User continuation/SAPF profile复用且缺长User实盘，因此仍PARTIAL |
 | 10 | 36B | 476B | 0B | 7.0% | EESI magic + 两个16B卷标槽完成；+0x04仍缺最终业务语义；+0x28..0x7F 已闭合为未解释的 EESI round-trip payload，+0x80..0x1FF 已闭合 current preserve/ignore 边界，二者均因缺字段/历史profile保持PARTIAL，不再记UNKNOWN |
 | 11 | 512B | 0B | 0B | 100% | normal register path 使用 `DISK_GEOMETRY_EX.DiskSize`；`UDiskLabelRepair` check/rewrite path 使用 `DISK_GEOMETRY` 的 CHS capacity。两条路径的 producer/consumer 与同盘双 profile 实测均闭合 |
 | 12 | 394B | 118B | 0B | 77.0% | 原393B基础上，同一 pass-info `bNoUsbChkPasSafe(+0x0A)` 的 producer/consumer/policy传递/22盘双值链闭合，1B升级COMPLETE；+0x48扩展槽、backup-prompt两字节及其它材料仍PARTIAL |
@@ -2312,7 +2349,7 @@ CI 原始夹具同时保留两种 profile。零态表示该 legacy tail 不存�
 | 6 | 高度闭合 | 整扇已无 UNKNOWN。216B UsbMainBSec static material 已由 Windows/Linux fixed producer、整扇 checksum consumer 与22盘升 COMPLETE；Owner 32B、Office 64B、Label 56B 的物理槽/reader 已闭合到 PARTIAL。GSerial/BeiZhu 的 C-string 与 legacy MBR fragment 继续因 post-NUL/profile/旧 writer 缺口保持 PARTIAL |
 | 7 | 高度闭合 | 物理0x40 packed ABI、PartionCount、rolling XOR、entry0 NeedDisturb compatibility gate、v0x0064 legacy wrapped8均已锁；`bNoUsbChkPasSafe` 已由 checkdiskback SAFE6 policy 行为链闭合；当前只剩22B PARTIAL：3×Version、entry1/2 NeedDisturb、pass-info +0C/+0D |
 | 8 | 高度闭合 | LLGB/ELABEL + 可变加密长度已锁；ToolVersion/Labversion/writeTime/Reserved 已闭合。严格22盘 `logical_end=0x148..0x183`、encrypted prefix=`0x150..0x190`；Windows/Linux writer 都只覆盖动态前缀，后部 preserve-existing，inspect 也只解前缀并保留非零tail。因此旧102B UNKNOWN已纠正为PARTIAL，LBA8现无UNKNOWN；HDSerialInfo/MacInfo/UsbOnlyInfo 与17-key ELABEL最终consumer继续追 |
-| 9 | 高度闭合 | 整扇已无UNKNOWN：EETU首0x80、EPPE末0x80、SAPF 0x100..0x11F及current preserve中间区边界均明确；历史Dept/backing、SAPF尾12B、post-SAPF区与EPPE zero-tail因历史producer/公开API consumer未完全闭合而保持PARTIAL |
+| 9 | 高度闭合 | 整扇已无UNKNOWN：EETU首0x80、EPPE末0x80、SAPF边界明确；中间区现已纠正为 BuildSector6 long-Dept/User continuation 与 SAPF/backing 的多profile复用。Dept join60 producer已闭合，join59旧producer仍缺；长User又缺正向实盘，因此继续PARTIAL |
 | 10 | 高度闭合 | 整扇 current 存储边界已解释：前0x80为 EESI round-trip payload，后0x180为 EESI setter preserve-existing tail；magic/两个16B文本槽已 COMPLETE，+0x04与+0x28..0x7F仍缺具体业务语义/非零profile |
 | 11 | 完全闭合 | DRKB/random252/ASCII VID-PID/PDKB 全部已锁；exact DiskSize 与 CHS repair 两种真实 wire profile 的 producer/consumer/实盘均闭合 |
 | 12 | 中度闭合 | 主运行时 96B packed layout 已锁，pass-info `bNoUsbChkPasSafe` 已闭合到 SAFE6 policy 行为；多个标志/扩展材料及 backup-prompt 两字节仍仅结构/算法部分已知 |

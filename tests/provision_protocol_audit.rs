@@ -34,6 +34,10 @@ const SANDISK_DEVICE_ID: &str = "disk&ven_sandisk&prod_ultra_usb_3.0&rev_1.00";
 const SANDISK_AUTHENTIC_NOPASS_LBA7_HEX: &str =
     include_str!("fixtures/protocol_evidence/sandisk_ultra_authentic_no_password_lba7.hex");
 const SANDISK_AUTHENTIC_NOPASS_DEVICE_ID: &str = "disk&ven_sandisk&prod_ultra&rev_1.00";
+const LEXAR_JOIN59_LBA6_HEX: &str =
+    include_str!("fixtures/protocol_evidence/lexar_join59_lba6.hex");
+const LEXAR_JOIN59_LBA9_HEX: &str =
+    include_str!("fixtures/protocol_evidence/lexar_join59_lba9.hex");
 
 fn parse_reference_backup_name(name: &str) -> Option<BackupMeta> {
     let meta = parse_backup_name(name)?;
@@ -2109,6 +2113,50 @@ fn lba9_middle_profile_material_must_not_be_canonicalized_to_zero() {
         sapf_zero_tail >= 1 && sapf_nonzero_tail >= 1,
         "SAPF decoded +0x14..+0x1f must retain both zero and nonzero real profiles"
     );
+}
+
+fn reconstruct_long_dept_from_lba6_lba9(raw6: &[u8], raw9: &[u8]) -> (usize, Vec<u8>) {
+    let plain6 = lba6_decode(raw6);
+    assert_eq!(u32_le(&plain6, 0), 0x4024_5e2a);
+    let inline = &plain6[4..0x40];
+    let join = if inline[59] == 0 { 59 } else { 60 };
+    let continuation = &raw9[0x80..0x100];
+    let nul = continuation
+        .iter()
+        .position(|byte| *byte == 0)
+        .expect("long Dept continuation must contain a terminating NUL");
+    let mut rebuilt = inline[..join].to_vec();
+    rebuilt.extend_from_slice(&continuation[..nul]);
+    (join, rebuilt)
+}
+
+#[test]
+fn lba9_dept_continuation_preserves_both_official_reader_join_profiles() {
+    let current_name =
+        "disk4_121110528_vid0951_pid1666_disk&ven_kingston&prod_datatraveler_3.0_onlyid2135149925_20260903_121319.bin";
+    let current = load(current_name);
+    let (current_join, current_dept) =
+        reconstruct_long_dept_from_lba6_lba9(sector(&current, 6), sector(&current, 9));
+
+    let legacy6 = decode_hex_fixture(LEXAR_JOIN59_LBA6_HEX);
+    let legacy9 = decode_hex_fixture(LEXAR_JOIN59_LBA9_HEX);
+    let (legacy_join, legacy_dept) = reconstruct_long_dept_from_lba6_lba9(&legacy6, &legacy9);
+
+    assert_eq!(
+        current_join, 60,
+        "current writer profile must join at Dept[60]"
+    );
+    assert_eq!(
+        legacy_join, 59,
+        "legacy compatibility profile must join at Dept[59]"
+    );
+    assert_eq!(
+        current_dept, legacy_dept,
+        "both join profiles must reconstruct the same full Dept bytes"
+    );
+    assert_eq!(current_dept.len(), 76);
+    let (_, _, errors) = GBK.decode(&current_dept);
+    assert!(!errors, "reconstructed Dept must be valid GBK");
 }
 
 #[test]

@@ -145,6 +145,8 @@ fn documentation_keeps_the_official_provisioning_chain_and_strict_rules() {
         "LBA7 v0x0064 packed legacy file-key wrapping",
         "Update_EDPEDISKSHOWPARAM",
         "bNoUsbChkPasSafe",
+        "lba9_dept_continuation_preserves_both_official_reader_join_profiles",
+        "legacy join=59",
         "ReWrite11Sector",
         "IOCTL_DISK_GET_DRIVE_GEOMETRY",
         "Cylinders*TracksPerCylinder*SectorsPerTrack*BytesPerSector",

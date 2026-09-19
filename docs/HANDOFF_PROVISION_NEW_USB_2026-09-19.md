@@ -50,8 +50,14 @@ producer + 官方 consumer/行为 + 原始实盘验证**同时闭合，才能标
   validator 精确校验 full wire profile；历史 raw-zero short form 仅保留兼容读取。
   两flag仍因缺最终业务consumer保持PARTIAL，严格完成字节数不增加。
 - **LBA9 = 54 COMPLETE / 458 PARTIAL / 0 UNKNOWN = 10.5%**。
-  EPPE writer-zero tail、历史 Dept/backing、SAPF trailing/backing 与 post-SAPF
-  preserve 区已经全部从 UNKNOWN 降到 PARTIAL；整扇不再有 UNKNOWN。
+  EPPE writer-zero tail、SAPF trailing/backing 等已无UNKNOWN。
+  本轮进一步纠正中间区：Windows/Linux/vrvaud 三套 BuildSector6 都会把
+  长 Dept `[60..NUL]` 写到 LBA9+0x80、长 User `[28..NUL]` 写到
+  LBA9+0x100，所以这里不是纯 preserve 区。严格22盘有8份 long-Dept：
+  4份 current join=60、4份 legacy join=59；官方 reader 两种接缝都支持，
+  两组均重建为同一76B合法GBK Dept。join59 的旧 producer仍未找到，
+  因此 +0x80..0xFF 暂不升COMPLETE；+0x100..0x17F 又与 SAPF/long-User
+  profile重叠且22盘没有长User正向样本，继续PARTIAL。
 - **LBA10 = 36 COMPLETE / 476 PARTIAL / 0 UNKNOWN = 7.0%**。
   EESI 前0x80 round-trip payload 与后0x180 current preserve/ignore storage boundary
   已闭合到 PARTIAL；整扇不再有 UNKNOWN。
@@ -66,7 +72,7 @@ producer + 官方 consumer/行为 + 原始实盘验证**同时闭合，才能标
   Owner/User 32B 主槽、Office[64]、Label 56B 主槽；producer/reader边界闭合，
   但实盘存在 post-NUL 非零 backing，所以只降为 PARTIAL。
   Dept/Owner 长值的 continuation 还确认落在 LBA9+0x80/+0x100，
-  解释了先前 LBA9 历史 Dept/backing profile。当前全 LBA0–12 已无 UNKNOWN，
+  并已用 join60/join59 双profile实盘门禁锁定。当前全 LBA0–12 已无 UNKNOWN，
   目前全局仍有4247B PARTIAL，绝不能把“UNKNOWN=0”当成全部协议完成。
 
 - **LBA7 = 490 COMPLETE / 22 PARTIAL / 0 UNKNOWN = 95.7%**。
