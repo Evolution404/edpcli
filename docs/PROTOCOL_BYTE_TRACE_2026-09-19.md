@@ -349,7 +349,7 @@ post-XOR 写回 `+0x45/+0x46`。历史 raw-zero 实盘仅作为兼容读取 prof
 | LBA4 | 36 | 476 | 0 | 7.0% |
 | LBA5 | 512 | 0 | 0 | 100.0% |
 | LBA6 | 4 | 156 | 352 | 0.8% |
-| LBA7 | 179 | 27 | 306 | 35.0% |
+| LBA7 | 485 | 27 | 0 | 94.7% |
 | LBA8 | 86 | 324 | 102 | 16.8% |
 | LBA9 | 54 | 458 | 0 | 10.5% |
 | LBA10 | 36 | 476 | 0 | 7.0% |
@@ -359,9 +359,9 @@ post-XOR 写回 `+0x45/+0x46`。历史 raw-zero 实盘仅作为兼容读取 prof
 
 当前总计：
 
-- **COMPLETE：1629B / 6656B = 24.5%**
+- **COMPLETE：1935B / 6656B = 29.1%**
 - **PARTIAL：4267B / 6656B = 64.1%**
-- **UNKNOWN：760B / 6656B = 11.4%**
+- **UNKNOWN：454B / 6656B = 6.8%**
 
 LBA11 本轮从 8B COMPLETE 提升到 260B COMPLETE。没有因为“能解开第二半扇”就把其余 252B 也冒进标完成：旧 Aigo U335 `rev_pmap` 为什么选择 CHS 容量参与密钥，而其它 21 份使用 DiskSize，上游选择逻辑尚未闭合。
 
@@ -430,7 +430,7 @@ DWARF 中恢复出的原始声明文件/行号与本地函数地址：
 | LBA7 | 0x000–0x0BF | PARTIAL | 3×64B packed EDPF 区 | Windows old-table writer/runtime；Linux natural ABI 仅作字段名参考 | 多处 reader/登录/挂载 | 22盘均按0x40 stride成立 | 逐字段状态见详细审计；不能用 Linux 0x48 natural stride 解析物理 LBA7 |
 | LBA7 | 每条entry +0x038–+0x03F | COMPLETE | 8B legacy wrapped file-key | Windows `sub_10028DB0` 以 `fold32(password)` 对两个32位 half 做对称 XOR 包装；`sub_100125B0` 映射回 old 0x40 entry；`SavePartionSector/sub_10028580 -> sub_10010FC0` 写 LBA7 | `sub_10026050` 对 v0x0064 固定解包8B，随后以 `sub_10038840` 计算 CRC32 并比较同 entry `FileKeyCRC(+0x34)`；改密后反向重包 | 22份 original real-device 中全部28条非零 type2/type4 legacy entry 独立复算 28/28 PASS；默认 `fold32("0000aaaa")=0x91919191` | **LBA7 v0x0064 packed legacy file-key wrapping** 已闭合；FileKeyCRC 4B此前已经计入 COMPLETE，本轮仅新增3×8B=24B，禁止重复计数 |
 | LBA7 | 0x0C0–0x0CD | PARTIAL | pass-info | writer/reader 14B结构已恢复；current producer 对 +0A 有显式请求输入，对 +0C/+0D 由14B memset零初始化 | +00..+09/+0B 已有行为 consumer；+0A 在 current 与旧版 `EdpEDiskCtrl` 中都只由 `CEdpEDiskCtrlInterface::Init` 导出到输出结构 +0x11，未见策略判断；+0C/+0D 两代 Windows 与 Linux 均未见读取，旧版仅把两字节一起清零 | 严格22份：+0A=18×0+4×1，且22/22 LBA7/LBA12一致；+0C/+0D=22/22零 | +0A 确认是真实可变配置/状态但最终策略 consumer 未闭合；+0C/+0D 字段名已知但单位/非零 producer/consumer 均缺，继续 PARTIAL |
-| LBA7 | 0x0CE–0x1FF | UNKNOWN | 表后区域 | 待查 | 待查 | 多数为固定/零 | 未闭合 |
+| LBA7 | 0x0CE–0x1FF | COMPLETE | packed old-table post-table writer-zero region | Windows `edpediskctrl.dll::sub_10010FC0` 先以 `sub_1004D110(...,0,0xFFF)` 明确 memset staging，随后只复制 `0xC0` packed table + `0x0E` pass-info，再对完整512B rolling并写 LBA7；`sub_1004D110` 机器码已复核为 memset 等价实现 | Windows `ReadPartionInfoExEx/sub_10010B40` 解密完整512B，但成功后只复制 `0xC0` table 和 `0x0E` pass-info，完全不返回/解释 `0x0CE..0x1FF`；Linux natural-ABI builder也独立采用“整块清零→写结构→整扇rolling”的同原则，但其表尾在0xE6，只作原则佐证、不用于覆盖Windows物理offset | 严格22份原始生成参考（21 non-converted backup + 独立SanDisk）逐盘解密：22/22 `0x0CE..0x1FF == zero[306]`；CI门禁 `lba7_post_table_plaintext_is_zero_through_sector_end` 锁定 committed original subset | 306B 的 producer零来源、negative consumer、物理边界和原盘均闭合；这里的 COMPLETE 表示 writer-owned zero region，不是靠“样本碰巧全零”推断 |
 | LBA8 | 0x000–0x003 | COMPLETE | LLGB magic | Windows/Linux `BuildSector8` | reader 先检查 LLGB | 22/22 | 完成 |
 | LBA8 | 0x004–0x007 | COMPLETE | logical length | writer=`0x80+strlen(ELABEL)` | decoder决定动态加密前缀 | 22/22吻合 | 完成 |
 | LBA8 | 0x008–0x00B | COMPLETE | ToolVersion[4] | Windows `sub_100148d0` 与 Linux `BuildSector8@diskfile.cpp:805` 都写固定字节 `01 00 00 01` | `ReadSector8(UsbLabelParam&)` 的语义 parser 不读取该版本戳；`ReadSector8(BYTE*)` 仅把完整解密扇区原样导出 | 22/22原始盘=`01 00 00 01`；CI原始夹具锁定 | 4B writer、reader行为、实盘一致，无已知 profile 分叉 |
@@ -1510,6 +1510,53 @@ consumer 链计入 COMPLETE，本轮不重复增加4B/entry。
 
 CI 回归分别锁定物理 LBA7 必须使用0x40 packed stride，以及 committed original
 fixtures 的默认密码 legacy wrapped8 必须能按上述算法解包并通过 FileKeyCRC。
+
+### 6.2.1 LBA7 `0x0CE..0x1FF`：306B post-table zero region 完整闭合
+
+Windows 主物理 old-table writer `edpediskctrl.dll::sub_10010FC0` 已回到实际实现复核：
+
+```text
+staging[0..0xFFF] = 0                         # sub_1004D110 == memset
+staging[0x000..0x0BF] = packed_table[0xC0]
+staging[0x0C0..0x0CD] = pass_info[0x0E]
+rolling_xor(staging[0x000..0x1FF])
+WriteFile(LBA7, 0x200)
+```
+
+`sub_1004D110` 不是根据命名猜测：其机器码按 `arg2` 长度逐字节/`rep stosd`
+填充 `arg1`，语义就是 memset。`sub_10010FC0` 在任何 table/tail copy 之前把
+staging 清零，并且最后一个结构写入恰好结束在 `0x0CE`，所以 plaintext
+`0x0CE..0x1FF` 的306B有明确的 **writer-zero producer**。
+
+对应 Windows consumer `ReadPartionInfoExEx/sub_10010B40`：
+
+1. 从 LBA7 读取完整 sector；
+2. 对前512B执行完整 rolling 解码；
+3. magic 合法后只向调用者复制 `decoded[0x000..0x0BF]` 的0xC0 table；
+4. 再复制 `decoded[0x0C0..0x0CD]` 的0x0E pass-info；
+5. **从不返回或解释 `decoded[0x0CE..0x1FF]`。**
+
+Linux `BuildSector7@0x1DCDA` 也独立执行“约2KB staging 先清零→复制 natural
+3×0x48 table +0x0E tail→对完整512B rolling”。因为 Linux natural ABI 的尾端是
+`0x0E6`，这条证据只用于确认同源 builder 的未用区域零初始化原则，**不能**把
+Linux `0x0E6` 偏移混成 Windows packed `0x0CE` 的物理边界。
+
+严格22份 original generation reference set 再逐盘独立复算：
+
+- 22/22 LBA7 均按各自 `CRC32(device_id)` 派生 rolling key 恢复 `EDPF`；
+- **22/22 `decoded[0x0CE..0x200] == zero[306]`**；
+- 独立 SanDisk original 同样为完整306B零，无 legacy 非零反例。
+
+新增 CI 门禁 `lba7_post_table_plaintext_is_zero_through_sector_end`。因此这306B
+满足字段/区域边界、官方 producer、negative consumer、原始实盘四证合一，
+由 **UNKNOWN -> COMPLETE**。LBA7 严格状态随之变为：
+
+```text
+485 COMPLETE / 27 PARTIAL / 0 UNKNOWN = 94.7%
+```
+
+这次新增306B COMPLETE；Version、entry1/entry2 NeedDisturb 和 pass-info 剩余3B
+仍保持 PARTIAL，不能被 post-table 区的闭合带着升级。
 
 ### 6.3 LBA12 +0x38..+0x47：v0x0206 默认密码的 mode2 wrapping 已闭合，但整字段仍 PARTIAL
 

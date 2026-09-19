@@ -1590,6 +1590,35 @@ fn lba7_physical_entries_are_packed_64_not_linux_natural_72() {
 }
 
 #[test]
+fn lba7_post_table_plaintext_is_zero_through_sector_end() {
+    let mut checked = 0usize;
+    for entry in fs::read_dir(FIXTURE_DIR).expect("protocol fixtures") {
+        let path = entry.expect("backup entry").path();
+        if path.extension().and_then(|ext| ext.to_str()) != Some("bin") {
+            continue;
+        }
+        let name = path.file_name().unwrap().to_str().unwrap();
+        let Some(meta) = parse_reference_backup_name(name) else {
+            continue;
+        };
+        let image = fs::read(&path).expect("fixture bytes");
+        let crc = crc32_bare(meta.device_id.as_bytes());
+        let k0 = (crc & 0xffff) ^ (crc >> 16);
+        let lba7 = xor_rolling(sector(&image, 7), k0);
+
+        assert!(
+            lba7[0x0ce..0x200].iter().all(|byte| *byte == 0),
+            "physical packed LBA7 post-table plaintext must remain writer-zero: {name}"
+        );
+        checked += 1;
+    }
+    assert!(
+        checked >= MIN_PROTOCOL_FIXTURES,
+        "protocol audit unexpectedly lost LBA7 post-table evidence: {checked}"
+    );
+}
+
+#[test]
 fn lba7_v64_packed_legacy_file_key_wrap_matches_real_fixtures() {
     const DEFAULT_PASSWORD: &[u8] = b"0000aaaa";
     const DEFAULT_USER_KEY_CRC: u32 = 0x0429_735d;

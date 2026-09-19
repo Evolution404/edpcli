@@ -28,9 +28,9 @@ producer + 官方 consumer/行为 + 原始实盘验证**同时闭合，才能标
 
 截至本次 LBA4 最新审计，严格统计为：
 
-- **COMPLETE：1629 / 6656B = 24.5%**
+- **COMPLETE：1935 / 6656B = 29.1%**
 - **PARTIAL：4267 / 6656B = 64.1%**
-- **UNKNOWN：760 / 6656B = 11.4%**
+- **UNKNOWN：454 / 6656B = 6.8%**
 
 当前各 LBA 严格状态以主账本为唯一准绳，最新关键增量：
 
@@ -55,7 +55,7 @@ producer + 官方 consumer/行为 + 原始实盘验证**同时闭合，才能标
   EESI 前0x80 round-trip payload 与后0x180 current preserve/ignore storage boundary
   已闭合到 PARTIAL；整扇不再有 UNKNOWN。
 
-- **LBA7 = 179 COMPLETE / 27 PARTIAL / 306 UNKNOWN = 35.0%**。
+- **LBA7 = 485 COMPLETE / 27 PARTIAL / 0 UNKNOWN = 94.7%**。
   真实物理 LBA7 已锁定为 **3×0x40 packed EDPF + 14B pass-info@+0xC0**，
   不能用 `libcemsfilesyscheck.so` 的 0x48/72B natural ABI 直接解释盘面。
   v0x0064 legacy wrapped key `entry+0x38..0x3F` 已完整闭合：
@@ -64,6 +64,10 @@ producer + 官方 consumer/行为 + 原始实盘验证**同时闭合，才能标
   通过 `CRC32_bare(file_key8)==FileKeyCRC`。producer/consumer/写回链为
   `ChangePwd -> sub_10026050 -> sub_10028DB0 -> sub_100125B0
   -> SavePartionSector/sub_10028580 -> sub_10010FC0 -> WriteFile(LBA7)`。
+  本轮继续闭合 `+0x0CE..+0x1FF` 306B：Windows `sub_10010FC0` 明确先
+  memset staging，仅写0xC0 table+0x0E tail后整扇rolling；`sub_10010B40`
+  解密整扇但只返回前0xCE；严格22份原始盘 22/22 解密后这306B全零。
+  因此306B由 UNKNOWN 直接升 COMPLETE，LBA7 已无UNKNOWN；只剩27B PARTIAL。
 - **LBA12 = 393 COMPLETE / 119 PARTIAL / 0 UNKNOWN = 76.8%**。
   主运行时盘面固定为 3×96B packed entry；`Reserved[7]@+0x59..+0x5F`
   已由官方字段名、writer 零来源、negative consumer 和 66/66 原始 entry 闭合。
@@ -204,7 +208,7 @@ producer + 官方 consumer/行为 + 原始实盘验证**同时闭合，才能标
 - `cargo test --test inspect --locked`：**19/19 PASS**；
 - `cargo test --test provision_generate --locked`：**3/3 PASS**；
 - `cargo test --test provision_validate --locked`：**6/6 PASS**；
-- `cargo test --test provision_protocol_audit --locked`：**47/47 PASS**；
+- `cargo test --test provision_protocol_audit --locked`：**48/48 PASS**；
 - `cargo test --test protocol_documentation_contract --locked`：**3/3 PASS**；
 - `cargo test --test golden --locked`：**14/14 PASS**；
 - `git diff --check`：PASS。
@@ -217,6 +221,8 @@ producer + 官方 consumer/行为 + 原始实盘验证**同时闭合，才能标
   post-XOR flags 与 generic ReadSector4 rolling 输出的分叉，防止再次把后者误当字段值。
 - `validator_rejects_historical_lba4_short_form_as_new_media_canonical` 固定“历史 short
   form 可读、但新盘 current SAFE6 必须 full rolling”的生成/兼容边界。
+- `lba7_post_table_plaintext_is_zero_through_sector_end` 固定 packed LBA7 `+0x0CE..+0x1FF`
+  为 writer-owned zero region，防止把306B再次退回 UNKNOWN 或误作可携带 payload。
 
 本轮已经修改 `src/inspect.rs`、`src/provision/generate.rs`、
 `src/provision/validate.rs`：inspect 恢复 producer-side post-XOR flags，Provision

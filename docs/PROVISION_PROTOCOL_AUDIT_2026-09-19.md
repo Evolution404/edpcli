@@ -1151,6 +1151,36 @@ CEdpDiskControl::ChangePwd / sub_100269A0
 - `lba7_physical_entries_are_packed_64_not_linux_natural_72`；
 - `lba7_v64_packed_legacy_file_key_wrap_matches_real_fixtures`。
 
+### LBA7 `+0x0CE..+0x1FF`：306B writer-zero post-table 区完整闭合
+
+Windows `edpediskctrl.dll::sub_10010FC0` 是 packed LBA7 的直接写回 producer。
+本轮继续回实际实现核对而不是沿用旧分析：
+
+- `var_1020=0` 后调用 `sub_1004D110(&var_101F, 0, 0xFFF)`；
+- `sub_1004D110` 的机器码已确认是 memset 等价实现（对齐后 `rep stosd`）；
+- 随后只 `memcpy` 0xC0 packed old table 到 staging `+0x000`；
+- 再复制0x0E pass-info到 `+0x0C0`；
+- 最后对完整256个16-bit word，即512B做 rolling XOR并 `WriteFile` 到 LBA7。
+
+因此 `+0x0CE..+0x1FF` 的306B不是“没人知道的尾巴”，而是显式 zero-init 后
+从未被任何结构写覆盖的 writer-owned 区。
+
+consumer 也闭合：Windows `ReadPartionInfoExEx/sub_10010B40` 会解码完整512B，
+但 magic 成功后只复制0xC0 table和0x0E pass-info给调用者；`+0x0CE..+0x1FF`
+完全不返回、不解析。Linux `BuildSector7@0x1DCDA` 独立体现相同的
+“整块清零→结构写入→整扇rolling”原则，不过其 natural ABI 表尾在0xE6，
+所以只作为原则交叉，不拿 Linux offset 覆盖 Windows packed 物理边界。
+
+严格22份原始生成参考重新逐盘解密：**22/22 的 `+0x0CE..+0x1FF`
+全部为 zero[306]**，独立 SanDisk original 也无反例。新增 CI 门禁：
+
+- `lba7_post_table_plaintext_is_zero_through_sector_end`。
+
+这306B因此满足区域边界 + official producer + negative consumer + 22盘原始证据，
+可从 UNKNOWN **直接升级 COMPLETE**。LBA7 严格状态由
+`179 COMPLETE / 27 PARTIAL / 306 UNKNOWN` 更新为
+`485 COMPLETE / 27 PARTIAL / 0 UNKNOWN`。剩余27B仍按既有严格规则保持PARTIAL。
+
 ### LBA12：主运行时盘面是 96B packed entry；不要与 104B 检查结构混用
 
 对 LBA12 的“已知”采用更严格标准：**只知道 offset、长度或结构名，不等于知道字段语义**。
@@ -2026,7 +2056,7 @@ CI 原始夹具同时保留两种 profile。零态表示该 legacy tail 不存�
 | 4 | 36B | 476B | 0B | 7.0% | onlyid clear header、OnlyIdXor8、LLGB 双锚点完成；第二 ID/HSerial/profile 字段仍不完整；`+0x047..+0x1FB` 已由 full writer、reader negative consumer 与 raw-zero/rolling-zero 双实盘 profile 从UNKNOWN降PARTIAL |
 | 5 | 512B | 0B | 0B | 100% | 两版 EdpDiskCtrl 均只对 LBA5 执行“读整扇→原样写回→检查 ERROR_WRITE_PROTECT(0x13)”；当前注册 writer 读取既有13扇区后不重建 LBA5，因此 preserve existing bytes；22/22原始盘全零 |
 | 6 | 4B | 156B | 352B | 0.8% | checksum 4B 完成；GSerial/BeiZhu 的 C-string 语义已知，但固定16B槽跨 current/legacy writer profile 有不同 backing 语义，因此仍 PARTIAL；原所谓“旧 +0x1E0 扩展”已纠正为 legacy MBR partition-table fragment，2/2 非零实盘的 type/start/count 与 LBA12 type4 精确一致，但旧 producer/直接 consumer 尚未闭合 |
-| 7 | 179B | 27B | 306B | 35.0% | 原 48B/entry COMPLETE + 11B pass-info 基础上，三条 packed entry 的 legacy wrapped8 共24B由官方解包/重包/写回链和22盘28/28复算闭合；Version/NeedDisturb仍部分，表后区域未闭合 |
+| 7 | 485B | 27B | 0B | 94.7% | 原179B COMPLETE基础上，`+0x0CE..+0x1FF` 306B由Windows packed writer显式zero-init、reader只返回0xCE结构区、22/22原始盘解密全零闭合为COMPLETE；Version/entry1+2 NeedDisturb/pass-info剩余3B仍PARTIAL |
 | 8 | 86B | 324B | 102B | 16.8% | LLGB magic + logical length + ElabOffset 完成；另闭合 ToolVersion、Labversion、writeTime 和 Reserved[64] 共76B；HDSerialInfo/MacInfo/UsbOnlyInfo 与 ELABEL 细项仍部分闭合 |
 | 9 | 54B | 458B | 0B | 10.5% | EETU/EPPE/SAPF三块边界及current preserve范围已拆清：EPPE尾120B为writer-zero但公开API consumer未闭合；+0x080..0x0FF为历史Dept/backing profile，SAPF +0x114..0x11F为profile-dependent backing，+0x120..0x17F为current preserve/ignore，三段均PARTIAL，不再记UNKNOWN |
 | 10 | 36B | 476B | 0B | 7.0% | EESI magic + 两个16B卷标槽完成；+0x04仍缺最终业务语义；+0x28..0x7F 已闭合为未解释的 EESI round-trip payload，+0x80..0x1FF 已闭合 current preserve/ignore 边界，二者均因缺字段/历史profile保持PARTIAL，不再记UNKNOWN |
@@ -2035,9 +2065,9 @@ CI 原始夹具同时保留两种 profile。零态表示该 legacy tail 不存�
 
 总计：
 
-- **完成：1629B / 6656B = 24.5%**
+- **完成：1935B / 6656B = 29.1%**
 - **部分已知：4267B / 6656B = 64.1%**
-- **未知：760B / 6656B = 11.4%**
+- **未知：454B / 6656B = 6.8%**
 
 这是一组**严格下限**，故意宁可低估，不把“能生成/能解析”冒充成“已经完全理解”。
 后续只有在证据链真正闭合时，字节才能从“未知 → 部分已知 → 完成”升级。
@@ -2051,7 +2081,7 @@ CI 原始夹具同时保留两种 profile。零态表示该 legacy tail 不存�
 | 4 | 高度闭合 | 整扇已无UNKNOWN；`+0x047..+0x1FB` 已确认 raw-zero / rolling-encrypted-zero 双历史物理表示且22盘语义均为零。`+0x45/+0x46` 已闭合为 `bDataToServer/bConnetServer` post-XOR wire bytes，并证明官方 ReadSector4 不补偿该例外；inspect 已恢复 producer-side flags，Provision 已改为 current SAFE6 full rolling + post-XOR覆盖。两flag因缺最终业务consumer仍PARTIAL |
 | 5 | canonical 已知 | opaque preserve / 写保护探测 scratch；当前 22/22 全零，但零不是协议固定要求 |
 | 6 | 部分闭合 | checksum 已锁；GSerial/BeiZhu 的 C-string 语义闭合，物理槽尾为 profile-dependent backing bytes；`0x1e0..0x1ef` 已识别为 legacy MBR entry3/4 fragment，Aigo/SanDisk 2/2 与 LBA12 type4 几何吻合；current模板零来源闭合，但 legacy writer/直接 consumer 仍缺失 |
-| 7 | 高度闭合 | 物理0x40 packed ABI、PartionCount、rolling XOR、v0x0064 legacy wrapped8 解包/重包/持久化均已锁；继续追 Version、NeedDisturb 其它 entry 和 pass-info 剩余字段 |
+| 7 | 高度闭合 | 物理0x40 packed ABI、PartionCount、rolling XOR、v0x0064 legacy wrapped8均已锁；`+0x0CE..+0x1FF` 306B post-table区已由writer-zero + negative consumer + 22/22原盘升级COMPLETE，整扇不再有UNKNOWN；只剩27B PARTIAL继续追 Version、NeedDisturb 其它 entry 和 pass-info剩余字段 |
 | 8 | 高度闭合 | LLGB/ELABEL + 可变加密长度已锁；ToolVersion/Labversion/writeTime/Reserved 已闭合，HDSerialInfo/MacInfo/UsbOnlyInfo 继续追 |
 | 9 | 高度闭合 | 整扇已无UNKNOWN：EETU首0x80、EPPE末0x80、SAPF 0x100..0x11F及current preserve中间区边界均明确；历史Dept/backing、SAPF尾12B、post-SAPF区与EPPE zero-tail因历史producer/公开API consumer未完全闭合而保持PARTIAL |
 | 10 | 高度闭合 | 整扇 current 存储边界已解释：前0x80为 EESI round-trip payload，后0x180为 EESI setter preserve-existing tail；magic/两个16B文本槽已 COMPLETE，+0x04与+0x28..0x7F仍缺具体业务语义/非零profile |
