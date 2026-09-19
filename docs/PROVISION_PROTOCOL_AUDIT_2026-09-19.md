@@ -127,7 +127,9 @@
   - `bNoPassNoChkIPFlg`：AutoLogin 根据其 0/1 选择是否执行 IP 检查，日志直接打印该字段名。
 - 部分已知：
   - `bNoUsbChkPasSafe`：Windows 主 DLL 会把它复制到对外/后续参数结构，但具体策略消费点尚未完全闭合；
-  - `bResetFileKey`、`ShareBackuppromptPeriod`、`EncryptBackuppromptPeriod`：官方字段名已知，但当前主 DLL 未找到直接消费点，需要继续追其它组件。
+  - `ShareBackuppromptPeriod`、`EncryptBackuppromptPeriod`：官方字段名已知，但当前主 DLL 未找到直接消费点，需要继续追其它组件。
+- 已闭合：
+  - `bResetFileKey`：Windows `ChangePwd` 的强制改密分支会读取它；置位时重新生成 16B file-key 材料，否则保留并解包原 file-key。
 - 历史 23 份 LBA12 样本的尾部形态只有 4 种；`+0x0B..0x0D` 在该样本集均为 0，
   但这只是观察事实，不能解释成协议恒零。
 
@@ -177,7 +179,7 @@
 | +0x04 | 4 | Version/entry-local field | 部分已知 | Windows writer/样本均多为0；实际消费语义未闭合 |
 | +0x08 | 4 | PartionCount | 已知 | 写端来源 + 实盘条目数 23/23 + Linux字段名 |
 | +0x0C | 4 | PartionType | 已知 | 1=Boot / 2=Share / 4=Encrypt；Windows/Linux运行时均消费 |
-| +0x10 | 4 | NeedDisturb | 部分已知 | Linux字段名、Windows写端来源已知；主运行时行为仍未闭合 |
+| +0x10 | 4 | NeedDisturb | 部分已知 | Linux字段名、Windows写端来源、Windows/Linux主运行时负消费证据已知；仍无正向行为消费者 |
 | +0x14 | 4 | NeedEncrypt | 已知 | Windows InitDiskInfo/UserLogin 实际消费；0=unencrypted，1=启用透明加密 |
 | +0x18 | 8 | StartSector | 已知 | 写端计算、挂载端使用 |
 | +0x20 | 8 | SectorSize | 已知 | 实盘=512；布局/挂载使用 |
@@ -213,17 +215,31 @@
   `There are unencrypted!`；
 - 所以该字段可定性为：0=该分区不启用透明加密，1=启用透明加密。
 
-`NeedDisturb` 目前只闭合到“字段名 + 写端来源”：
+`NeedDisturb` 目前闭合到“字段名 + 写端来源 + 当前主运行时负消费证据”，
+但仍**没有找到正向行为消费者**：
 
 - Windows writer 直接写入 `CreatePartitions(arg2)`；
-- 对标准三分区新表，写端结果已经按 96B entry 基址重新核对：
+- 对已逆向的标准三分区创建分支，写端结果已经按 96B entry 基址重新核对：
   - Boot = 1；
   - Share = 1；
   - Encrypt = 0；
+- 但真实盘样本否定了“按 PartionType 固定取值”的更强结论：
+  type1/type2 在当前样本中均为 1，而 type4 同时出现 0 和 1；
+  其中 `aigo U335 nopwd` 样本明确出现 type4=1。说明 writer 的标准分支只是一个 profile，
+  `NeedDisturb` 还受创建模式/其它 profile 输入控制；
 - Windows `UserLogin` 真实机器码与 `EdpMountFile` 参数结构已经对齐：
   `NeedEncrypt`、StartSector、PartionSize、FileKey、FileKeyCRC、EncryptMode 会进入挂载参数，
   但 `NeedDisturb` 没有进入当前用户态→挂载库→驱动参数链；
+- Windows 主 DLL 中 `entry+0x10` 的其它命中均是 96B entry 之间的结构复制；
+  与之相对，`UserLogin` 对同一 entry 明确读取 `+0x0c/+0x14/+0x28/+0x30/+0x34/+0x38/+0x58`，
+  未出现对 `+0x10` 的条件判断或参数映射；
+- Linux `libedpedisk.so::EdpDiskLayoutTagePartV2::LayoutParsedata` 只把 3×96B entry
+  整块复制进内存；`Volume::GetPartitionHeader` 再按值复制整条 96B entry；
+  `PartitionHeader` 构造函数把 `NeedDisturb/NeedEncrypt` 这一 8B 保存到对象
+  `+0x50..+0x57`。继续扫描 `PartitionHeader*` 方法后，未找到构造之后对对象
+  `+0x50/+0x54` 的业务读取或分支；
 - 因此它可以确认是“真实协议字段 + 已知生成规则”，但**当前运行时行为仍未闭合**。
+  当前证据更接近“被保留/透传的兼容字段”，但不能据此升级为“协议全局无效字段”；
   禁止按字段名直接翻译为“扰码开关”“激活”“只读”等具体功能。
 
 ### LBA12 pass-info：密码状态组进一步闭合
@@ -240,11 +256,22 @@ Windows `ChangePwd/sub_10026050` 进一步证明：
 
 - Share 改密成功时同时清 `tail+0x02` 与 `tail+0x04`；
 - Encrypt 改密成功时同时清 `tail+0x05` 与 `tail+0x07`；
-- 因此 `+0x02` 与 `+0x05` 分别属于 Share/Encrypt 的密码状态组，
-  但其精确定义仍未闭合；
-- 同一函数会检查 `tail+0x0B` 作为额外门控，再决定是否生成新的随机 16B 材料，
-  所以 `+0x0B` 也不是普通 padding；
-- `+0x0A/+0x0B/+0x0C/+0x0D` 必须继续追初始化和消费者，
+- Windows 登录入口在真正执行密码校验之前调用独立检查函数：
+  type2 读取 `tail+0x02`，type4 读取 `tail+0x05`；对应字节非零时直接阻断普通登录。
+  结合“改密成功清零”，`+0x02/+0x05` 的行为可闭合为 Share/Encrypt
+  **强制改密状态标志**，不再只是“密码状态组成员”；
+- `tail+0x0B` 也已出现真实消费者：仅在 version>=0x64、目标分区的强制改密标志非零、
+  且 `tail+0x0B` 非零时，`ChangePwd` 才调用 `sub_10029e20` 生成新的 16B 材料；
+  该生成函数以 `CoCreateGuid` 为源形成 16B 输出。随后代码重新计算 FileKeyCRC，
+  再把该 16B 材料按新密码重新包装。若条件不成立，则走“解开原 wrapped key 并校验 CRC”
+  的保留旧 file-key 路径。因此 `bResetFileKey` 可闭合为：
+  **强制改密时是否同时重新生成 file-key 材料的门控**；
+- `+0x0A bNoUsbChkPasSafe` 在当前 Windows 主 DLL 中被复制到对外结构的一个独立字节，
+  但尚未找到后续策略分支，仍为部分已知；
+- `+0x0C/+0x0D` 当前 Windows 主 DLL 未找到直接消费者；Linux DWARF 只给出
+  `ShareBackuppromptPeriod/EncryptBackuppromptPeriod` 字段名。23 份历史 LBA12 样本
+  的 `+0x0B..+0x0D` 均为 0，其中 `+0x0B` 已由非样本代码路径证明绝非 padding；
+- `+0x0A/+0x0C/+0x0D` 必须继续追初始化和跨组件消费者，
   在闭合前不得归类为“保留零字节”。
 
 Linux `PartitionHeader::SetPartitionNewPass` 同时给出负证据：
@@ -257,17 +284,17 @@ Linux `PartitionHeader::SetPartitionNewPass` 同时给出负证据：
 
 按上述严格口径，Windows/Linux 主运行时 96B packed LBA12 当前逐字节进度为：
 
-- **已知 367B / 512B（71.7%）**
+- **已知 368B / 512B（71.9%）**
   - 三个 entry 中语义闭合字段：49B/entry，共 147B；
-  - 表尾行为已闭合字段：10B；
+  - 表尾行为已闭合字段：11B；
   - `0x12e..0x1ff`：210B，写端零初始化且主读端不消费，可定性为 post-table zero padding；
-- **部分已知 145B / 512B（28.3%）**
+- **部分已知 144B / 512B（28.1%）**
   - 三个 entry 各 47B：Version、NeedDisturb、wrapped key 的通用生成关系、扩展材料槽、尾部 reserved/padding；
-  - 表尾剩余 4B：`bNoUsbChkPasSafe/bResetFileKey/ShareBackuppromptPeriod/EncryptBackuppromptPeriod`，
+  - 表尾剩余 3B：`bNoUsbChkPasSafe/ShareBackuppromptPeriod/EncryptBackuppromptPeriod`，
     字段名已知但完整行为未闭合；
 - **未知 0B / 512B（0%）**
   - 当前主运行时格式已经没有“连字段边界/官方名称都不知道”的字节；
-  - 但 145B 仍然不能算语义闭合，Provision 不得据此自行生成。
+  - 但 144B 仍然不能算语义闭合，Provision 不得据此自行生成。
 
 这组数字只描述**主运行时 96B packed 格式**；不把 `libcemsfilesyscheck.so`
 的 104B 扩展结构混入统计。
@@ -323,7 +350,7 @@ LBA12 entry `+0x30..+0x47`：
 - LBA12 NeedDisturb 的真实运行时行为；
 - LBA12 +0x48..+0x57 扩展材料槽在主盘面中的确切用途；
 - LBA12 +0x59..+0x5f 是否仅为所有版本共同 padding；
-- LBA12 表尾 +0x02/+0x05/+0x0a 等状态字节的准确语义。
+- LBA12 表尾 `+0x0A/+0x0C/+0x0D` 的准确跨组件消费语义。
 
 这些内容不得从当前插入 donor 盘复制，也不得以全零替代。实现中把它们显式建模为
 ProvisionEntropy / ProvisionProfile 材料；纯 builder 只消费已经验证的输入。
@@ -345,6 +372,10 @@ tests/provision_protocol_audit.rs 固化以下事实：
 - LBA12 是完整 512B 连续密文，解密后 144B tail 为零；
 - LBA7/LBA12 `+0x08` 等于连续 EDPF 条目数。
 - LBA12 主运行时格式固定为 96B×3，14B 表尾在 `0x120`；
+- LBA12 `NeedDisturb` 的真实样本分布按 type1={1}、type2={1}、type4={0,1} 锁定，
+  防止再次把某一个 writer profile 误写成分区类型常量；
+- LBA12 pass-info `bResetFileKey/ShareBackuppromptPeriod/EncryptBackuppromptPeriod`
+  在当前提交真实样本中均为 0；该测试只锁样本事实，不把它们归类为 padding；
 - LBA12 `+0x48..+0x57` 与 `+0x59..+0x5f` 当前样本为零，但测试只锁“观察事实”，不把零值升级成已知语义。
 
 Phase 1 以后不得绕过这些门禁，也不得把未知区域重新退化为 donor copy。

@@ -436,6 +436,55 @@ fn lba12_main_runtime_layout_is_three_packed_96_byte_entries_plus_tail_at_0x120(
 }
 
 #[test]
+fn lba12_need_disturb_values_are_profile_dependent_not_partition_constants() {
+    let mut checked = 0usize;
+    let mut type1_mask = 0u8;
+    let mut type2_mask = 0u8;
+    let mut type4_mask = 0u8;
+    for entry in fs::read_dir(FIXTURE_DIR).expect("protocol fixtures") {
+        let path = entry.expect("backup entry").path();
+        if path.extension().and_then(|ext| ext.to_str()) != Some("bin") {
+            continue;
+        }
+        let name = path.file_name().unwrap().to_str().unwrap();
+        let Some(meta) = parse_backup_name(name) else {
+            continue;
+        };
+        let image = fs::read(&path).expect("fixture bytes");
+        let crc = crc32_bare(meta.device_id.as_bytes());
+        let plain = a6b0_full(sector(&image, 12), &crc.to_le_bytes(), 0);
+        let count = u32_le(&plain, 8) as usize;
+
+        for index in 0..count {
+            let base = index * 0x60;
+            let partition_type = u32_le(&plain, base + 0x0c);
+            let need_disturb = u32_le(&plain, base + 0x10);
+            assert!(
+                need_disturb <= 1,
+                "unexpected NeedDisturb={need_disturb}: {name}"
+            );
+            match partition_type {
+                1 => type1_mask |= 1 << need_disturb,
+                2 => type2_mask |= 1 << need_disturb,
+                4 => type4_mask |= 1 << need_disturb,
+                other => panic!("unexpected partition type {other}: {name}"),
+            }
+        }
+        checked += 1;
+    }
+    assert!(
+        checked >= MIN_PROTOCOL_FIXTURES,
+        "protocol audit unexpectedly lost fixtures"
+    );
+    assert_eq!(type1_mask, 0b10, "type1 NeedDisturb sample set changed");
+    assert_eq!(type2_mask, 0b10, "type2 NeedDisturb sample set changed");
+    assert_eq!(
+        type4_mask, 0b11,
+        "type4 must retain both observed NeedDisturb=0 and NeedDisturb=1 profiles"
+    );
+}
+
+#[test]
 fn lba12_packed_entry_unresolved_extension_bytes_are_observationally_zero() {
     let mut checked = 0usize;
     for entry in fs::read_dir(FIXTURE_DIR).expect("protocol fixtures") {
@@ -546,6 +595,43 @@ fn edpf_tail_has_version_and_password_retry_fields_not_a_terminator() {
         "audit lost a non-zero password retry sample"
     );
     assert!(saw_policy_flag, "audit lost EDPF tail policy-flag evidence");
+}
+
+#[test]
+fn lba12_pass_info_reset_key_and_backup_prompt_bytes_are_observationally_zero() {
+    let mut checked = 0usize;
+    for entry in fs::read_dir(FIXTURE_DIR).expect("protocol fixtures") {
+        let path = entry.expect("backup entry").path();
+        if path.extension().and_then(|ext| ext.to_str()) != Some("bin") {
+            continue;
+        }
+        let name = path.file_name().unwrap().to_str().unwrap();
+        let Some(meta) = parse_backup_name(name) else {
+            continue;
+        };
+        let image = fs::read(&path).expect("fixture bytes");
+        let crc = crc32_bare(meta.device_id.as_bytes());
+        let lba12 = a6b0_full(sector(&image, 12), &crc.to_le_bytes(), 0);
+        let tail = decode_edpf_tail(&lba12[0x120..0x12e]);
+
+        // This locks only the committed real-sample observation. The consumer
+        // evidence for bResetFileKey comes from the reverse audit; zero here
+        // must never be generalized into "reserved".
+        assert_eq!(tail[0x0b], 0, "bResetFileKey sample changed: {name}");
+        assert_eq!(
+            tail[0x0c], 0,
+            "ShareBackuppromptPeriod sample changed: {name}"
+        );
+        assert_eq!(
+            tail[0x0d], 0,
+            "EncryptBackuppromptPeriod sample changed: {name}"
+        );
+        checked += 1;
+    }
+    assert!(
+        checked >= MIN_PROTOCOL_FIXTURES,
+        "protocol audit unexpectedly lost fixtures"
+    );
 }
 
 #[test]
