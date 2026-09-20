@@ -3034,6 +3034,46 @@ fn lba9_middle_profile_material_must_not_be_canonicalized_to_zero() {
     );
 }
 
+#[test]
+fn lba9_sapf_trailing_bytes_are_profile_overlap_not_reserved_zero() {
+    let mut saw_zero_sapf_tail = false;
+    let mut saw_nonzero_sapf_tail = false;
+
+    for entry in fs::read_dir(FIXTURE_DIR).expect("protocol fixtures") {
+        let path = entry.expect("backup entry").path();
+        if path.extension().and_then(|ext| ext.to_str()) != Some("bin") {
+            continue;
+        }
+        let name = path.file_name().unwrap().to_str().unwrap();
+        if parse_reference_backup_name(name).is_none() {
+            continue;
+        }
+        let image = fs::read(&path).expect("fixture bytes");
+        let lba9 = sector(&image, 9);
+        let mut sapf = [0u8; 0x20];
+        for (dst, src) in sapf.iter_mut().zip(&lba9[0x100..0x120]) {
+            *dst = *src ^ 0x88;
+        }
+        if &sapf[..4] != b"SAPF" {
+            continue;
+        }
+        if sapf[0x14..].iter().all(|byte| *byte == 0) {
+            saw_zero_sapf_tail = true;
+        } else {
+            saw_nonzero_sapf_tail = true;
+        }
+    }
+    assert!(saw_zero_sapf_tail && saw_nonzero_sapf_tail);
+
+    let lba9 = decode_hex_fixture(OFFICIAL_VIRTUAL_LONG_USER_LBA9_HEX);
+    let mut user = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789".repeat(3);
+    user.truncate(155);
+    // LBA9+0x100 corresponds to User[28].  Therefore the physical SAPF trailing
+    // window +0x114..+0x11f is active User[48..60] in the long-User profile.
+    assert_eq!(&lba9[0x114..0x120], &user[48..60]);
+    assert!(lba9[0x114..0x120].iter().any(|byte| *byte != 0));
+}
+
 fn reconstruct_long_dept_from_lba6_lba9(raw6: &[u8], raw9: &[u8]) -> (usize, Vec<u8>) {
     let plain6 = lba6_decode(raw6);
     assert_eq!(u32_le(&plain6, 0), 0x4024_5e2a);

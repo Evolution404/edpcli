@@ -403,7 +403,7 @@ post-XOR 写回 `+0x45/+0x46`。历史 raw-zero 实盘仅作为兼容读取 prof
 | LBA6 | 473 | 39 | 0 | 92.4% |
 | LBA7 | 512 | 0 | 0 | 100.0% |
 | LBA8 | 476 | 36 | 0 | 93.0% |
-| LBA9 | 372 | 140 | 0 | 72.7% |
+| LBA9 | 384 | 128 | 0 | 75.0% |
 | LBA10 | 512 | 0 | 0 | 100.0% |
 | LBA11 | 512 | 0 | 0 | 100.0% |
 | LBA12 | 512 | 0 | 0 | 100.0% |
@@ -411,8 +411,8 @@ post-XOR 写回 `+0x45/+0x46`。历史 raw-zero 实盘仅作为兼容读取 prof
 
 当前总计：
 
-- **COMPLETE：5500B / 6656B = 82.6%**
-- **PARTIAL：1156B / 6656B = 17.4%**
+- **COMPLETE：5512B / 6656B = 82.8%**
+- **PARTIAL：1144B / 6656B = 17.2%**
 - **UNKNOWN：0B / 6656B = 0.0%**
 
 LBA11 已完整闭合为 512B COMPLETE。此前卡住的后半 252B 不是“某型号盘偶尔使用
@@ -530,7 +530,7 @@ DWARF 中恢复出的原始声明文件/行号与本地函数地址：
 | LBA9 | 0x07E–0x07F | COMPLETE | reverse[102..103] zero tail | `SetTempUse` 对 EETU +0x04..+0x7F 先整体清零，随后从 +0x18 只覆盖0x66B，即最后覆盖到 +0x7D；因此 +0x7E/+0x7F 在所有 current writer 路径都保留显式零初始化 | Linux `CheckTempUse` 只读取 ullBTime/ullETime/useCount，对 reverse[104] 完全无业务读取；运行时回写只修改 useCount 并保留其余字节 | 20/20原始EETU均为 `00 00`；CI门禁 `lba9_eetu_final_two_reverse_bytes_are_writer_zero_padding` | 2B 满足 explicit-zero producer + negative consumer + real-device evidence，可严格升 COMPLETE；不得把前102B一起升级 |
 | LBA9 | 0x100–0x103 | COMPLETE | SAPF magic | 旧writer恢复模板 | `UDiskLabelRepair::Repair0Sector` | 14样本 | 完成 |
 | LBA9 | 0x104–0x113 | COMPLETE | MBR恢复entry | writer保存16B entry | repair直接写回 LBA0 0x1BE | 14/14 | 完成 |
-| LBA9 | 0x114–0x11F | PARTIAL | SAPF decoded trailing/backing 12B / long-User continuation overlap | 历史 SAPF producer 尚未定位；SAPF reader `sub_10008550` 固定对 `+0x100..+0x11F` 32B 全部 `^0x88` 解码。另一方面 Windows `BuildSector6/sub_10013FD0`、Linux `BuildSector6@0x1CAAC` 与 `vrvaud_c::sub_10118ED0` 均在 User 长度>=32 时把 marker+前28B 写到 LBA6+0x50，并把 `User[28..NUL]` 写入 LBA9+0x100，因此该区存在与 SAPF 重叠的 current long-User profile | `sub_10008550` 会 structural-copy 完整32B；其上层双SAPF副本一致性检查只比较 decoded `+0x04/+0x08/+0x0C/+0x10` 的 MBR boot flag/type/start/size，`sub_10008620` 恢复 LBA0 时也只写回 `+0x04..+0x13` 的16B partition entry，明确不消费尾12B。`vrvaud_c` 两条快速路径只检查4B magic。`ReadSector6` 在 User marker 命中时另会从 LBA9+0x100 复制完整0x80B回 `UsbLabelParam.m_usbowner[27/28..]` | 14份真实SAPF中该12B至少5种 decoded profile；严格22盘未出现 User>=32 的正向 continuation 样本 | SAPF尾12B已有 structural-copy/negative-semantic-consumer 闭合，但缺历史 producer；long-User current producer/consumer已知但缺实盘。两profile共用物理区，因此继续PARTIAL |
+| LBA9 | 0x114–0x11F | COMPLETE | **profile-overlap region：SAPF unowned trailing backing / long-User continuation** | SAPF profile 下历史 writer 虽未定位，但该12B没有独立字段 store 证据；真实 decoded tail 呈现零、`0xFFFFFFFE` 与多组 `0x77xxxxxx` 等典型 backing 形态。current long-User profile 则由 Windows/Linux/vrvaud 三套 `BuildSector6` 明确把 `User[28..NUL]` 连续写入 LBA9+0x100，最大155B User 的 first-party virtual writer 正例覆盖整个 `+0x100..+0x17F`，因此本12B在该 profile 下是确定的 User continuation payload | SAPF `sub_10008550` 虽 structural-copy 解码完整32B，但只校验 magic；上层双SAPF一致性只比较 decoded `+0x04/+0x08/+0x0C/+0x10`，`Repair0Sector/sub_10008620` 又只把这四个DWORD写回 LBA0 `+0x1BE..+0x1CD`，对 `+0x14..+0x1F` 12B零读取/零写回。long-User profile 则由 `ReadSector6` 固定从 LBA9+0x100 取0x80B continuation回填 User | 14份真实SAPF中 decoded trailing 12B 至少5种 profile，CI同时要求 zero/nonzero 两类都存在，排除“协议固定零”；最大155B official virtual long-User fixture又给出同一物理12B的 active payload 正例并完整 round-trip | 两种已知 profile 均已闭合：SAPF下是**unowned trailing backing + negative semantic consumer**，long-User下是 active continuation。历史 SAPF 最初 backing 来源不再是业务语义 blocker；兼容实现必须按 profile 解释，禁止把SAPF tail强制清零或把long-User字节当SAPF字段 |
 | LBA9 | 0x120–0x17F | COMPLETE | long-User continuation remainder / otherwise-preserved backing | 三套 current writer 的机器码已逐一核对为同构：Windows `0x1001417D..0x100141B1`、Linux `0x1CDA3..0x1CDE2`、vrvaud `0x10119082..0x101190B5` 都计算 `out + 3*sector_size + 0x100`，写入 `User[28..NUL]`，长度=`strlen(User)-27`；User固定数组容量0x9C允许最大155B C-string，因此最大写长恰为128B并止于+0x17F。短User路径不触碰该区，保留既有 backing | Windows `ReadSector6/sub_100152A0` marker 分支固定读取 LBA9+0x100 的0x80B到 User continuation；Linux reader同构。SAPF consumer明确止于+0x11F，EETU/EPPE运行时也不消费+0x120..+0x17F | first-party Windows `BuildSector6` 隔离执行：LBA9预填0xCC，最大155B User 后 `+0x100..+0x17F` 被精确写满“127B剩余字符+NUL”，`+0x000..0x0FF` 与 `+0x180..` 仍保持0xCC，证明真实写边界；同一 wire 再由 official `ReadSector6` 动态执行完整 checksum/rolling/marker path，输出155B原串完全一致。CI fixture锁定。physical originals虽无长User，但14/14 SAPF盘与独立SanDisk在该区为零的 preserve profile仍保留 | 96B 已有 first-party writer→wire→consumer 正向闭环，并证明 otherwise-preserve 生命周期；virtual fixture与physical census继续分栏，因此本段升 COMPLETE |
 | LBA9 | 0x180–0x183 | COMPLETE | EPPE magic | `SetPassInfoEx` | `ReadPassExInfo` | 6样本 | 完成 |
 | LBA9 | 0x184–0x187 | COMPLETE | minimum password length | writer限制6..19 | `ReadMinPassLenInfo` 返回该DWORD | 6/6=8 | 完成 |

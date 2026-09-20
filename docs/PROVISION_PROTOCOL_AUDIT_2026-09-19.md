@@ -2762,9 +2762,18 @@ producer。因此该128B继续 **PARTIAL**；blocker 已缩小为
 对应的 MBR boot flag、partition type、start LBA、size，完全不比较 `+0x14..+0x1F`；
 真正重建 LBA0 的 `sub_10008620` 也只把 SAPF `+0x04..+0x13` 这16B partition entry
 写回 MBR `+0x1BE`。`vrvaud_c` 的两条快速路径更只解码/检查 `SAPF` magic 4B。
-因此这12B现在已有明确的 **structural-copy / negative-semantic-consumer** 证据；但历史
-SAPF producer 仍未定位，且实盘存在至少5种非零 backing profile，所以仍保持 **PARTIAL**，
-标记为 `SAPF decoded trailing/backing bytes`，禁止按“全零 reserved”处理。
+因此这12B已有明确的 **structural-copy / negative-semantic-consumer** 证据。继续取得
+long-User first-party runtime 正例后，物理重叠的另一种 profile 也闭合：最大155B User 会由
+official `BuildSector6` 把 continuation 连续写满 `+0x100..+0x17F`，official
+`ReadSector6` 又完整重组原 User。也就是说 `+0x114..+0x11F` 的两种已知 profile 都已有
+完整语义：
+
+- SAPF profile：**unowned trailing backing**。真实值至少5种，repair/一致性代码不消费；
+- long-User profile：**active continuation payload**。first-party writer→wire→reader 已闭合。
+
+因此历史 SAPF 最初 producer 不再是这12B的业务语义 blocker；该区从 PARTIAL 升
+**COMPLETE**。COMPLETE 绝不表示 SAPF tail 应归零，反而要求兼容实现保留任意 backing，
+并按 profile 区分 long-User continuation。
 
 #### SAPF 后 `+0x120..+0x17F`：long-User continuation / preserve 复用区
 
@@ -2777,9 +2786,10 @@ SAPF producer 仍未定位，且实盘存在至少5种非零 backing profile，�
   并支持 join=28 / legacy join=27 两种接缝；
 - 14/14 SAPF真实盘及独立SanDisk当前都为零。
 
-严格22盘目前没有 User>=32 的正向 continuation 样本，因此这里虽已有 current
-producer/consumer，却缺真实正向实盘；同时 SAPF profile 仍与 +0x100..+0x11F
-重叠。故这96B继续 **PARTIAL**，不能再描述成单纯 preserve/ignore。
+严格22盘没有 User>=32 的 physical 正向样本这一事实继续保留，但随后已用隔离虚拟盘直接
+执行 official Windows `BuildSector6`/`ReadSector6` 获得最大155B User 的 first-party
+runtime positive-wire round-trip；写边界精确止于 `+0x17F`。因此这96B已在后续审计中升
+**COMPLETE**，不能再描述成“缺正向证据”。
 
 新增门禁：
 
@@ -2789,10 +2799,10 @@ producer/consumer，却缺真实正向实盘；同时 SAPF profile 仍与 +0x100
   - committed SAPF 夹具当前 `+0x120..+0x17F` 仍锁定为零观察，
     但文档明确零不是协议要求。
 
-由此 LBA9 账本变为：
+该阶段之后 LBA9 又继续闭合 long-User 与 SAPF trailing；最终以文末严格总表为准，当前为：
 
 ```text
-276 COMPLETE / 236 PARTIAL / 0 UNKNOWN
+384 COMPLETE / 128 PARTIAL / 0 UNKNOWN
 ```
 
 其中 EETU reverse backing 已新增102B COMPLETE，随后 EPPE writer-owned zero tail
@@ -3604,15 +3614,15 @@ profiles 的该边界，而不是把字符串具体值硬编码成未来协议�
 | 6 | 473B | 39B | 0B | 92.4% | 在既有闭环基础上，再按首个NUL边界把 GSerial `+0x1C0..1C8` 9B 与 BeiZhu `+0x1D0` 1B 升COMPLETE；剩余39B为 Dept接缝1B、GSerial尾7B、BeiZhu尾15B、legacy MBR fragment16B |
 | 7 | 512B | 0B | 0B | 100.0% | 3×Version、entry1/entry2 NeedDisturb 已按 compatibility metadata 生命周期闭合；最后两个 BackupPromptPeriod BYTE 又由正式 DWARF 字段、current-zero producer、四代 Windows + Linux structural-preserve/negative semantic consumer、跨 v0x0064/v0x0206 实盘0/0 profile 闭合为 dormant compatibility fields。LBA7 至此整扇 COMPLETE |
 | 8 | 476B | 36B | 0B | 93.0% | header 的 LLGB/logical length/ToolVersion/Labversion/writeTime/ElabOffset/Reserved/MacInfo 已闭合；`+0x080..0x1FF` 又由 Windows/Linux 双 writer、注册侧7-key reader、运行时17-key EdpEDiskCtrl reader、动态 encrypted backing/preserve tail 与22盘17-key实证整体闭合384B；仅 HDSerialInfo/UsbOnlyInfo 36B继续PARTIAL |
-| 9 | 372B | 140B | 0B | 72.7% | EETU与EPPE区域维持既有闭环；新增最大155B long-User first-party `BuildSector6` 正向输出证明 `+0x100..+0x17F` continuation 最大正好128B，official `ReadSector6` 动态 round-trip恢复原User。因 `+0x120..+0x17F` 不再与SAPF semantic区重叠，96B升COMPLETE；剩余140B为 long-Dept `+0x080..FF` 128B 与 SAPF trailing `+0x114..11F` 12B |
+| 9 | 384B | 128B | 0B | 75.0% | EETU/EPPE与 long-User 已闭合；SAPF `+0x114..+0x11F` 12B 又按 profile-overlap 完成：SAPF下是多形态 unowned trailing backing，repair/一致性逻辑明确不消费；long-User下是 first-party writer→reader 已闭合的 active continuation。因此当前只剩 long-Dept `+0x080..0x0FF` 128B PARTIAL |
 | 10 | 512B | 0B | 0B | 100.0% | EESI magic + `UsbSuspensionWnd lifecycle/control flag` + 两个16B卷标槽完成；`+0x28..+0x7F` 已闭合为 caller-owned compatibility extension（两版Ctrl完整round-trip、两套official UI零producer、业务negative-consumer、双正向EESI实盘）；`+0x80..+0x1FF` 继续按 cross-generation unowned preserve/ignore COMPLETE。LBA10整扇闭合 |
 | 11 | 512B | 0B | 0B | 100% | normal register path 使用 `DISK_GEOMETRY_EX.DiskSize`；`UDiskLabelRepair` check/rewrite path 使用 `DISK_GEOMETRY` 的 CHS capacity。两条路径的 producer/consumer 与同盘双 profile 实测均闭合 |
 | 12 | 512B | 0B | 0B | 100.0% | 3×96B packed entry、完整 pass-info、post-table tail均闭合；最后3×wrapped16 又由官方 `CreatePartitions` mode1/2/3 first-party runtime 正向输出、独立 A6B0/SM4/AES reader 与 FileKeyCRC round-trip 闭合。virtual writer fixture 与 physical real-device census 分层保存，不混淆统计 |
 
 总计：
 
-- **完成：5500B / 6656B = 82.6%**
-- **部分已知：1156B / 6656B = 17.4%**
+- **完成：5512B / 6656B = 82.8%**
+- **部分已知：1144B / 6656B = 17.2%**
 - **未知：0B / 6656B = 0.0%**
 
 这是一组**严格下限**，故意宁可低估，不把“能生成/能解析”冒充成“已经完全理解”。
@@ -3629,7 +3639,7 @@ profiles 的该边界，而不是把字符串具体值硬编码成未来协议�
 | 6 | 高度闭合 | 整扇已无 UNKNOWN，473/512 COMPLETE。GSerial前9B与BeiZhu首1B已从 profile-dependent slot 中拆出闭合；剩余39B仅为 Dept join59末字节、两字符串尾部underlay与16B legacy MBR fragment |
 | 7 | 完全闭合 | 物理0x40 packed ABI、PartionCount、rolling XOR、entry0 NeedDisturb MBR gate、v0x0064 legacy wrapped8、3×Version/entry1+2 NeedDisturb compatibility metadata、`bNoUsbChkPasSafe` SAFE6 policy 行为链及最后两个 dormant BackupPromptPeriod compatibility BYTE 均已闭合；512/512 COMPLETE |
 | 8 | 高度闭合 | **LBA8 dynamic ELABEL + encrypted backing + preserved tail** 已闭合：17-key wire template 中7键由注册侧 Windows/Linux reader回填，运行时 EdpEDiskCtrl reader 则解析全部17键；NUL后块内既有backing随动态前缀加密，块外tail原样preserve。384B动态区已COMPLETE；当前只剩 HDSerialInfo 4B 与 legacy UsbOnlyInfo 32B PARTIAL |
-| 9 | 高度闭合 | 整扇已无UNKNOWN，372/512 COMPLETE。EETU/EPPE保持既有闭环；long-User `+0x120..+0x17F` 96B 已由最大155B first-party writer→wire→reader正例闭合。剩余140B严格收敛为 long-Dept continuation 128B（legacy join59 writer仍缺）与 SAPF trailing/backing 12B（historical producer仍缺） |
+| 9 | 高度闭合 | 384/512 COMPLETE。SAPF trailing 12B 已按“SAPF unowned backing / long-User active continuation”双 profile 闭合：SAPF reader/repair只消费magic+16B MBR恢复项，真实tail多形态；long-User最大profile又直接覆盖该物理区并round-trip。现在唯一剩余128B是 long-Dept continuation，blocker仅 legacy join59 writer |
 | 10 | 完全闭合 | 前0x80 EESI：magic、`UsbSuspensionWnd lifecycle/control flag`、两个16B卷标，以及 `+0x28..+0x7F` caller-owned compatibility extension 均已闭合；后0x180按 cross-generation unowned preserve/ignore 语义 COMPLETE。512/512 COMPLETE |
 | 11 | 完全闭合 | DRKB/random252/ASCII VID-PID/PDKB 全部已锁；exact DiskSize 与 CHS repair 两种真实 wire profile 的 producer/consumer/实盘均闭合 |
 | 12 | 完全闭合 | 主运行时 96B packed layout、3×Version/NeedDisturb、wrapped16、`EncryptFileKey32[16]`、Reserved、完整 pass-info 与 continuous-cipher tail 均已闭合；512/512 COMPLETE。mode1/mode3 没有 physical real-device capture 的事实仍保留，但官方 binary runtime positive-wire + 独立 reader round-trip 已闭合其字节语义 |
