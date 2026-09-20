@@ -395,8 +395,8 @@ post-XOR 写回 `+0x45/+0x46`。历史 raw-zero 实盘仅作为兼容读取 prof
 | LBA | COMPLETE | PARTIAL | UNKNOWN | 严格完成率 |
 |---:|---:|---:|---:|---:|
 | LBA0 | 112 | 400 | 0 | 21.9% |
-| LBA1 | 0 | 512 | 0 | 0.0% |
-| LBA2 | 0 | 512 | 0 | 0.0% |
+| LBA1 | 512 | 0 | 0 | 100.0% |
+| LBA2 | 128 | 384 | 0 | 25.0% |
 | LBA3 | 0 | 512 | 0 | 0.0% |
 | LBA4 | 49 | 463 | 0 | 9.6% |
 | LBA5 | 512 | 0 | 0 | 100.0% |
@@ -411,8 +411,8 @@ post-XOR 写回 `+0x45/+0x46`。历史 raw-zero 实盘仅作为兼容读取 prof
 
 当前总计：
 
-- **COMPLETE：3904B / 6656B = 58.7%**
-- **PARTIAL：2752B / 6656B = 41.3%**
+- **COMPLETE：4544B / 6656B = 68.3%**
+- **PARTIAL：2112B / 6656B = 31.7%**
 - **UNKNOWN：0B / 6656B = 0.0%**
 
 LBA11 已完整闭合为 512B COMPLETE。此前卡住的后半 252B 不是“某型号盘偶尔使用
@@ -465,8 +465,9 @@ DWARF 中恢复出的原始声明文件/行号与本地函数地址：
 | LBA0 | 0x1BC–0x1BD | COMPLETE | standard MBR reserved / unowned compatibility word | current SAFE6 `RegsiterUsb` 只清 `+0x000..+0x18F` 并在 `+0x1BE` 起重建分区表，因此这2B保持 pre-read backing；Linux `BuildSector0@diskfile.cpp:625` 同样不写本槽；legacy `UsbMainBSec` 与 Aigo/Netac 整扇模板都在此显式携带 `00 00` | 16-bit `UsbMainBSec` bootstrap 的已确认尾部引用不包含 `+0x1BC/+0x1BD`；current 注册/准入、`UDiskLabelRepair::ReCreate0Sector` 与已审 `IOCTL_DISK_GET_DRIVE_LAYOUT_EX` 路径均不把这2B作为业务字段读取，分区语义从 `+0x1BE` 开始 | 严格22份原始参考 22/22=`00 00`；扩展 `nopwd_tool/backup + utils/backup` 的57份完整历史快照同样 57/57=`00 00`，且相邻 disk signature 明确多值，排除“整段尾部碰巧固定”的误判 | 2B 的跨已知 profile producer/preserve 生命周期、negative semantic consumer 与实盘均闭合；COMPLETE 表示该 reserved word 当前无业务 payload，未来未知非零值应兼容 preserve，不得机械清零 |
 | LBA0 | 0x1BE–0x1FD | COMPLETE | 4×MBR partition entry | `UsbMainBSec` 模板；SAPF 恢复项也直接写回此处 | `UDiskLabelRepair.dll::Repair0Sector` 直接恢复该 64B 区域 | 22/22 可按标准 MBR 解码 | 分区表边界和消费闭合 |
 | LBA0 | 0x1FE–0x1FF | COMPLETE | MBR 55AA | 官方模板直接写 `55 AA` | MBR 校验/修复链检查签名 | 22/22 | 完成 |
-| LBA1 | 0x000–0x1FF | PARTIAL | optional GPT_Header profile | Linux官方 `CLabelManage::BuildSector1_Gpt@diskfile.cpp:1458` 构造完整512B `GPT_Header`，计算 partition-table CRC 与 header CRC | Windows `IsAllowRegisterCommonLabel/sub_1002ab70` 在 protective MBR 命中后，以 sector_size 跳到 LBA1，检查 `EFI PART` 与 `header_lba@+0x18==1` | 22/22原始 SAFE6 参考整扇全零；另只读扫描本地 `u_disk` 下3896个大于13扇、低于1GiB的候选文件，LBA1 `+0x00` 均无 `EFI PART`，仍缺正向 GPT 实盘 | producer/consumer/结构已知，但当前真实参考与扩展本地捕获均未启用 GPT profile，因此不升 COMPLETE |
-| LBA2 | 0x000–0x1FF | PARTIAL | optional GPT partition-entry sector | Linux官方 `BuildSector2_Gpt@diskfile.cpp:1493` 生成128B `GPT_Partition` entry（type GUID/partition GUID/start/end/attr/name） | Windows GPT parser 从 `metadata+2*sector_size` 即 LBA2 起，按每扇4个×128B entry解析；注册检查可连续解析多扇 | 22/22原始 SAFE6 参考整扇全零；上述3896个扩展候选没有任何 LBA1 GPT header，故也没有可采信的对应 LBA2 正例 | GPT table用途和entry边界已知，但 profile 的实际已注册盘样本缺失，因此保持PARTIAL |
+| LBA1 | 0x000–0x1FF | COMPLETE | optional GPT primary header / absent-profile sector | Linux官方 `CLabelManage::BuildSector1_Gpt@0x1FDAA` 原生构造完整512B `GPT_Header`：模板先完整覆盖512B，动态写 backup/last-usable/disk-GUID/table-CRC/header-CRC；`+0x5C..+0x1FF` 由模板明确为零 | Windows current `IsAllowRegisterCommonLabel/sub_1002AB70` 在 protective MBR 命中后，以 sector_size 跳到 LBA1 并检查 `EFI PART` 与 `header_lba==1`；本轮把 official Linux builder 输出直接喂给该 Windows consumer，原生返回 `2=GPT` | 22/22 physical originals 与扩展3896候选均为 absent-GPT 全零 profile；另新增 **official-binary virtual writer** 正向fixture：2GiB/512B配置下 `EFI PART`, version=0x10000, header size=92, backup=4194303, first/last usable=34/4194270, table LBA=2, 128×128B；独立 IEEE CRC32 同时命中 header CRC `0xA4B46C72` 与16KiB array CRC `0xD32CFEA7`；CI锁定 | 两种生命周期均闭合：非GPT时 protective-MBR gate 不进入LBA1语义，当前样本为零；GPT时 first-party producer完整拥有512B并被独立 Windows first-party consumer正向识别。虚拟fixture不冒充physical capture |
+| LBA2 | 0x000–0x07F | COMPLETE | GPT partition entry0 | Linux官方 `BuildSector2_Gpt@0x1FFF6` 每次完整写一个128B `GPT_Partition`：Basic Data type GUID固定；partition GUID为caller输入；start固定63；end=`63+caller_size`；attr/name来自零模板 | Windows `sub_1002B2F0` 与 Linux `AnalyzeGptPartitionTable` 均按128B stride比较 type GUID，命中后读取 `start@+0x20/end@+0x28/attr@+0x30`；GPT header又规定 entry-size=128 | official-binary virtual writer 以 GUID `001122...eeff`、2GiB容量直接生成 entry0，得到 start=63/end=4194270/attr=0/name全零；同一输出参与 LBA1 partition-array CRC 并被 Windows GPT header consumer接受 | 128B writer→wire→consumer字段闭合；partition GUID 16B 为显式caller-owned身份材料，name/attr为模板零。该正例与physical census分层 |
+| LBA2 | 0x080–0x1FF | PARTIAL | GPT entries1..3 / unused-entry backing | `BuildSector2_Gpt` 本体能完整构造任一单个128B entry，但当前 `.so` 内无 active caller，且该函数不负责清理其它 entry slot | Windows/Linux parser 都继续按3个后续128B槽遍历；只有 type GUID 命中支持表后才读取 start/end/attr | 本轮虚拟fixture该384B为零，但这些零来自 harness 预清的34扇 staging buffer，不是 `BuildSector2_Gpt` 自身 store；22/22 physical originals在 absent-GPT profile下同样为零 | 不把 harness-owned zeros 冒充官方 producer；需找到整表初始化/active caller或独立正向样本后才能升级 |
 | LBA3 | 0x000–0x1FF | PARTIAL | **Phison MP/manufacturing metadata sector, EDP-opaque；不得与 MPALL F2 INFO page 直接等同** | Windows `CUsbRegsiter::RegsiterUsb` 先读完整13扇区，SAFE6注册链没有 LBA3 builder，最终整段写回，因此 EDP producer 是 preserve-existing；Linux 同样无 `BuildSector3`。离线取得并哈希核验 `MPALL_F1_9000_v372_0B.exe`（SHA-256 `96614750c61e0ad6b05d19e74848c1679f6318dd21de6faee46c92fb05152142`）后，机器码证明 Phison `CBaseController::WriteF2Mark` 确有独立的512B F2 INFO 写入/回读链：`object+0x1C00C` 经 `06 06 01` 写0x200B，再以 `06 05 ... "INFO"` 读回并对前0x200B全量 `memcmp`。但这只能证明相关制造生态存在 F2 INFO writer，**不能证明它就是物理 LBA3 producer** | 直接等同关系已被机器码反证：MPALL 对 F2 INFO staging 的正式校验要求开头 `12 01 00 02`，而两种真实非零 LBA3 都从 `00 01 00 00` 开始且整扇不存在 `12 01 00 02`。`GetInfo.exe` 又明确以三个连续0x210B response buffer读取 Version/INFO/RD；中间 `0x4D1EC0` 是 `Get_Info_Page INFO` 的 raw response，`SampleMark` 写在 INFO `+0xD9/+0xDA`（`12 56` 或 `00 00`），`MPF1F2` 从 INFO `+0x93` 或 `+0xDF` 的 bitfield解析，均不对应 LBA3 `+0x001/+0x020..027`。包内 FW/BN BIN 的 `"this is mp mark"` 又位于各自最后512B的 `+0x000`，而真实 LBA3 位于 `+0x1F0`。当前 Windows/Linux EDP 组件仍完全不解析 LBA3 | 22份原始参考：21/22全零；唯一 strict Kingston 非零 profile 为 `+0x001=01`、`+0x020..027=b5 7e 9c 45 00 80 00 14`、`+0x1F0..1FF="this is mp mark\0"`。扩展历史备份另有 `+0x020..027=a8 82 a4 22 00 20 02 16` 的第二种非零 profile。两组8B/4B材料在已取得 MPALL 3.72 EXE、FW/BN BIN 中均无直接常量命中。strict 非零盘为 Kingston DataTraveler 3.0 `0951:1666`、`62008590336B`；公开同 identity/capacity 记录分别出现 PS2307+MPALL v3.34.07 与 PS2309+MPALL v5.35.35 | Phison 制造家族和相关 F2-mark/F2-INFO 工具链已确认，但此前“F2 INFO staging == LBA3”的假设已被否证。LBA3 exact producer、`+0x001/+0x020..027/+0x1F0` 字段定义及 firmware consumer 仍未闭合；相同 VID/PID/model/capacity 也不能锁死 controller，因此512B继续全部 PARTIAL |
 | LBA4 | 0x000–0x017 | COMPLETE | `$$$onlyid$$$` clear header | 当前注册 writer 根据 main onlyid 格式化 | 识别/解码链从此恢复 onlyid | 22/22 | 完成 |
 | LBA4 | 0x018–0x01B | COMPLETE | OnlyIdXor8 | current writer: `main_onlyid ^ 0x88888888` | restore-info 读取该字段 | 22盘 current/legacy 可解 | 完成 |
@@ -1077,7 +1078,7 @@ WriteSectorData(buffer, count=13)
 probe 仍原样写回，非零内容同样符合协议。CI 对当前原始夹具的“全零”断言只用于
 防止样本集被悄悄替换，不把全零编码成生成规则。
 
-### 4.5 LBA1/LBA2：官方 GPT profile 已恢复，但当前22盘没有正向样本
+### 4.5 LBA1/LBA2：GPT profile 的 first-party 动态正向证据
 
 旧文档把 LBA1/LBA2 简写成“保留/全零”。重新验证后，这个描述不完整。
 
@@ -1165,7 +1166,7 @@ for sector in 0..sector_count:
 
 因此 LBA1/LBA2 不是“永远没用的保留零扇区”，而是存在正式 GPT profile。
 
-#### 实盘限制
+#### physical 实盘限制与 official-binary virtual writer
 
 22份当前原始 SAFE6 参考复核：
 
@@ -1174,15 +1175,46 @@ for sector in 0..sector_count:
 - 两者 SHA-256 均为零扇区
   `076a27c79e5ace2a3d47f9dd2e83e4ff6ea8872b3c2218f66c92b89b55f36560`。
 
-这只能说明当前参考盘没有启用 GPT metadata profile，不能反证官方 GPT builder。
-由于缺少至少一份**真实、原始、已启用 GPT profile 的实盘**，本账本把：
+这只能说明当前 physical 参考盘没有启用 GPT metadata profile，不能反证官方 GPT builder。
+本轮进一步在**完全隔离、不接触物理 raw device** 的 Unicorn x86-64 环境中直接执行
+Linux first-party `libcemsfilesyscheck.so` 内的三个官方 builder；builder 本体与内部
+`calculate_crc32` 均原生执行，只对 libc `memset/memcpy` 做 ABI 边界替代：
 
-- LBA1：512B UNKNOWN → **512B PARTIAL**；
-- LBA2：512B UNKNOWN → **512B PARTIAL**；
-- COMPLETE 不增加。
+```text
+BuildSector0_Gpt @ 0x1FD30
+BuildSector2_Gpt @ 0x1FFF6
+BuildSector1_Gpt @ 0x1FDAA
+```
 
-这也是“旧文档可参考但必须重验”的典型例子：原来的“全零/保留”观察本身没错，
-但遗漏了官方可选 profile。
+使用 2GiB / 512B sector、固定 partition GUID
+`00112233445566778899aabbccddeeff`，先由 `BuildSector2_Gpt` 生成 entry0，再由
+`BuildSector1_Gpt` 对完整16KiB partition array 计算 CRC 并生成 LBA1。输出为：
+
+- LBA1：`EFI PART`、Version=`0x00010000`、HeaderSize=92、CurrentLBA=1；
+- BackupLBA=4194303、FirstUsable=34、LastUsable=4194270；
+- Disk GUID=`a2a0d0ebe5b9334487c068b6b72699c7`；
+- partition array LBA=2、entries=128、entry-size=128；
+- 独立 IEEE CRC32 复算：header=`0xA4B46C72`、array=`0xD32CFEA7`，均与 official writer 输出一致；
+- LBA1 `+0x5C..+0x1FF` 全部来自512B官方模板的显式零区；
+- LBA2 entry0：Basic Data type GUID、caller-supplied partition GUID、start=63、
+  end=4194270、attr=0、name[72]=0。
+
+随后把同一34扇 staging image 直接喂给 current Windows
+`CEMSUsbRegsiter.dll::IsAllowRegisterCommonLabel/sub_1002AB70`，该官方 consumer
+原生执行后返回 **2 = GPT**。所以 LBA1 已具备 cross-platform
+first-party writer→wire→consumer 正向闭环。
+
+这里保留一个严格边界：`BuildSector2_Gpt` 每次只负责**完整写一个128B entry**，它不清理
+其它 entry slot；本轮 staging area 的 entries1..127 是 harness 在调用前预清的零，不能冒充
+官方 producer。因此：
+
+- LBA1：**512B COMPLETE**；
+- LBA2 `0x000..0x07F` entry0：**128B COMPLETE**；
+- LBA2 `0x080..0x1FF` entries1..3：**384B PARTIAL**，等待整表初始化/active caller 或独立正向证据。
+
+新增 fixtures `official_virtual_gpt_lba1.hex` / `official_virtual_gpt_lba2.hex` 与 CI
+`official_virtual_gpt_builder_emits_valid_lba1_and_entry0` 固定这一证据边界；测试中特别标明
+LBA2 后384B零值属于 harness backing，禁止未来误升 COMPLETE。
 
 ## 5. LBA11 完整 producer / consumer 追踪
 

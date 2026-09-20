@@ -53,6 +53,10 @@ const OFFICIAL_VIRTUAL_WRITER_MODE2_LBA12_HEX: &str =
     include_str!("fixtures/protocol_evidence/official_virtual_writer_mode2_lba12.hex");
 const OFFICIAL_VIRTUAL_WRITER_MODE3_LBA12_HEX: &str =
     include_str!("fixtures/protocol_evidence/official_virtual_writer_mode3_lba12.hex");
+const OFFICIAL_VIRTUAL_GPT_LBA1_HEX: &str =
+    include_str!("fixtures/protocol_evidence/official_virtual_gpt_lba1.hex");
+const OFFICIAL_VIRTUAL_GPT_LBA2_HEX: &str =
+    include_str!("fixtures/protocol_evidence/official_virtual_gpt_lba2.hex");
 
 fn parse_reference_backup_name(name: &str) -> Option<BackupMeta> {
     let meta = parse_backup_name(name)?;
@@ -84,6 +88,21 @@ fn decode_hex_fixture(text: &str) -> Vec<u8> {
         .step_by(2)
         .map(|index| u8::from_str_radix(&hex[index..index + 2], 16).expect("valid fixture hex"))
         .collect()
+}
+
+fn crc32_ieee(data: &[u8]) -> u32 {
+    let mut crc = 0xffff_ffffu32;
+    for &byte in data {
+        crc ^= byte as u32;
+        for _ in 0..8 {
+            crc = if crc & 1 != 0 {
+                (crc >> 1) ^ 0xedb8_8320
+            } else {
+                crc >> 1
+            };
+        }
+    }
+    !crc
 }
 
 fn gf_mul(mut a: u8, mut b: u8) -> u8 {
@@ -538,6 +557,70 @@ fn lba12_v206_hidden_default_password_wraps_real_mode2_file_keys() {
         &type4[0x38..0x48],
         "different effective passwords must not be mistaken for identical wrapping material"
     );
+}
+
+#[test]
+fn official_virtual_gpt_builder_emits_valid_lba1_and_entry0() {
+    // First-party Linux libcemsfilesyscheck BuildSector0/1/2_Gpt output from an
+    // isolated Unicorn run. The harness pre-zeroed the 34-sector staging area,
+    // then the official builders emitted the protective entry, entry0 and the
+    // complete primary header. Harness-owned unused-entry zeros are not treated
+    // as official producer evidence.
+    const BASIC_DATA_GUID: [u8; 16] = [
+        0xa2, 0xa0, 0xd0, 0xeb, 0xe5, 0xb9, 0x33, 0x44, 0x87, 0xc0, 0x68, 0xb6, 0xb7, 0x26, 0x99,
+        0xc7,
+    ];
+    const PARTITION_GUID: [u8; 16] = [
+        0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99, 0xaa, 0xbb, 0xcc, 0xdd, 0xee,
+        0xff,
+    ];
+    const TOTAL_LBA: u64 = 4_194_304;
+
+    let lba1 = decode_hex_fixture(OFFICIAL_VIRTUAL_GPT_LBA1_HEX);
+    let lba2 = decode_hex_fixture(OFFICIAL_VIRTUAL_GPT_LBA2_HEX);
+    assert_eq!(lba1.len(), SECTOR);
+    assert_eq!(lba2.len(), SECTOR);
+
+    assert_eq!(&lba1[0x00..0x08], b"EFI PART");
+    assert_eq!(u32_le(&lba1, 0x08), 0x0001_0000);
+    assert_eq!(u32_le(&lba1, 0x0c), 0x5c);
+    assert_eq!(u32_le(&lba1, 0x14), 0);
+    assert_eq!(u64_le(&lba1, 0x18), 1);
+    assert_eq!(u64_le(&lba1, 0x20), TOTAL_LBA - 1);
+    assert_eq!(u64_le(&lba1, 0x28), 34);
+    assert_eq!(u64_le(&lba1, 0x30), TOTAL_LBA - 34);
+    assert_eq!(&lba1[0x38..0x48], &BASIC_DATA_GUID);
+    assert_eq!(u64_le(&lba1, 0x48), 2);
+    assert_eq!(u32_le(&lba1, 0x50), 128);
+    assert_eq!(u32_le(&lba1, 0x54), 128);
+    assert!(lba1[0x5c..].iter().all(|byte| *byte == 0));
+
+    let mut header_for_crc = lba1[..0x5c].to_vec();
+    header_for_crc[0x10..0x14].fill(0);
+    assert_eq!(
+        u32_le(&lba1, 0x10),
+        crc32_ieee(&header_for_crc),
+        "official BuildSector1_Gpt header CRC"
+    );
+
+    // BuildSector1_Gpt CRCs the full 128-entry / 16 KiB array. In this
+    // deterministic run only entry0 is official-builder populated; all later
+    // zeros belong to the harness staging buffer and remain PARTIAL evidence.
+    let mut partition_array = vec![0u8; 32 * SECTOR];
+    partition_array[..SECTOR].copy_from_slice(&lba2);
+    assert_eq!(
+        u32_le(&lba1, 0x58),
+        crc32_ieee(&partition_array),
+        "official BuildSector1_Gpt partition-array CRC"
+    );
+
+    assert_eq!(&lba2[0x00..0x10], &BASIC_DATA_GUID);
+    assert_eq!(&lba2[0x10..0x20], &PARTITION_GUID);
+    assert_eq!(u64_le(&lba2, 0x20), 63);
+    assert_eq!(u64_le(&lba2, 0x28), TOTAL_LBA - 34);
+    assert_eq!(u64_le(&lba2, 0x30), 0);
+    assert!(lba2[0x38..0x80].iter().all(|byte| *byte == 0));
+    assert!(lba2[0x80..].iter().all(|byte| *byte == 0));
 }
 
 #[test]
