@@ -28,8 +28,8 @@ producer + 官方 consumer/行为 + 原始实盘验证**同时闭合，才能标
 
 截至本次 LBA11 repair-profile 闭环，严格统计为：
 
-- **COMPLETE：2879 / 6656B = 43.3%**
-- **PARTIAL：3777 / 6656B = 56.7%**
+- **COMPLETE：2883 / 6656B = 43.3%**
+- **PARTIAL：3773 / 6656B = 56.7%**
 - **UNKNOWN：0 / 6656B = 0.0%**
 
 当前各 LBA 严格状态以主账本为唯一准绳，最新关键增量：
@@ -58,8 +58,15 @@ producer + 官方 consumer/行为 + 原始实盘验证**同时闭合，才能标
   两组均重建为同一76B合法GBK Dept。join59 的旧 producer仍未找到，
   因此 +0x80..0xFF 暂不升COMPLETE；+0x100..0x17F 又与 SAPF/long-User
   profile重叠且22盘没有长User正向样本，继续PARTIAL。
-- **LBA10 = 420 COMPLETE / 92 PARTIAL / 0 UNKNOWN = 82.0%**。
+- **LBA10 = 424 COMPLETE / 88 PARTIAL / 0 UNKNOWN = 82.8%**。
   EESI 前0x80 round-trip payload 中 magic 与两个16B卷标已闭合；
+  本轮又把 `+0x04..+0x07` 4B 闭合为 **UsbSuspensionWnd lifecycle/control flag**：
+  两套独立 `EdpEDisk.exe` 的 `OnInitDialog` 都先清零0x80B缓冲并显式写1后
+  vtable+0x20 Get；两套卷标设置 `IDOK` handler 都清零完整0x80B、只填两个卷标，
+  再 vtable+0x24 Set，因此保存路径明确写0。consumer 侧两套程序都加载
+  `UsbSuspensionWnd.dll` 的 `Show/Destroy/SetParentWnd`，读回值0时走 Destroy，
+  自动登录成功且值非0时进入刷新/Show链；唯一启用 EESI 的原始 SanDisk 实盘=1。
+  这4B已满足边界、producer、值相关 consumer、原始实盘四项严格条件。
   后0x180已按 cross-generation unowned preserve/ignore 语义闭合为 COMPLETE：
   两代独立 EESI setter 都只替换前0x80并原样保留 tail，getter完全不暴露 tail，
   两个更老 build 连 EESI 路径都不存在。额外58份经 LBA6 CRC guard +
@@ -85,7 +92,7 @@ producer + 官方 consumer/行为 + 原始实盘验证**同时闭合，才能标
   Label 仍有56B盘面截断/profile缺口，继续PARTIAL。
   Dept/Owner 长值的 continuation 还确认落在 LBA9+0x80/+0x100，
   并已用 join60/join59 双profile实盘门禁锁定。当前全 LBA0–12 已无 UNKNOWN，
-  目前全局仍有3777B PARTIAL，绝不能把“UNKNOWN=0”当成全部协议完成。
+  目前全局仍有3773B PARTIAL，绝不能把“UNKNOWN=0”当成全部协议完成。
 
 - **LBA7 = 490 COMPLETE / 22 PARTIAL / 0 UNKNOWN = 95.7%**。
   真实物理 LBA7 已锁定为 **3×0x40 packed EDPF + 14B pass-info@+0xC0**，
@@ -178,13 +185,18 @@ producer + 官方 consumer/行为 + 原始实盘验证**同时闭合，才能标
 - LBA10：EESI `+0x08..0x17`、`+0x18..0x27` 两个16B槽已闭合为
   type2/Share“交换区”卷标和 type4/Encrypt“保密区”卷标。
   `UserLogin` 分别把两者传给 `SetVolumeLabelA`。
-  **LBA10 当前为 420 COMPLETE / 92 PARTIAL / 0 UNKNOWN = 82.0%**：
+  **LBA10 当前为 424 COMPLETE / 88 PARTIAL / 0 UNKNOWN = 82.8%**：
+  `+0x04..07` 已由两套独立 `EdpEDisk.exe` 的启动写1 / 标签设置保存写0 producer，
+  `UsbSuspensionWnd.dll` 的 Destroy 与刷新/Show 值相关 consumer，以及原始 SanDisk
+  实盘=1闭合为 COMPLETE；
   后384B已按 cross-generation unowned preserve/ignore 语义闭合。两代独立
   EESI setter 都只替换前0x80并原样写回 tail，getter完全不暴露 tail；
   两个更老 build 连 EESI 路径都不存在。committed originals + 独立 SanDisk
   继续锁定真实样本，额外58份经 LBA6 CRC + LBA12 EDPF 双重验证的历史快照
   也为58/58 tail零。COMPLETE 不代表 tail 必须为零，非零旧盘仍必须原样 preserve。
-  当前只剩 `+0x04..07` 4B 和 EESI `+0x28..7F` 88B PARTIAL。
+  当前只剩 EESI `+0x28..7F` 88B PARTIAL。两套卷标设置 `IDOK` handler 都明确
+  先清零完整0x80B再只填两个卷标，所以 current UI producer 对这88B写零；但底层
+  Set API 会完整 round-trip 调用者输入，仍缺正式字段划分、非零 profile 与值相关 consumer。
 - LBA1/LBA2：旧文档“保留/全零”结论已纠偏。Linux 官方
   `BuildSector1_Gpt/BuildSector2_Gpt` 和 Windows GPT parser 均证明二者存在
   GPT Header / GPT Partition Table profile；但22/22当前原始 SAFE6 参考都全零，

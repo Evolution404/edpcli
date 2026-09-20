@@ -117,6 +117,9 @@ fn documentation_keeps_the_official_provisioning_chain_and_strict_rules() {
         "SetVolumeLabelA",
         "Share/type2 volume label",
         "Encrypt/type4 volume label",
+        "UsbSuspensionWnd lifecycle/control flag",
+        "EdpEDisk.exe::OnInitDialog",
+        "zero-initializes the full 0x80B EESI payload",
         "240d04e7c97d300c5081f793d72850d49acbf5408bc0d8cf32de8eef7a5e8f02",
         "tagEdpEDiskTmpUse",
         "edpdiskglobal.h:481",
@@ -185,8 +188,8 @@ fn documentation_keeps_the_official_provisioning_chain_and_strict_rules() {
         "LBA8 progress must retain the closed MacInfo[6] header slot"
     );
     assert!(
-        DOC.contains("| LBA10 | 420 | 92 | 0 | 82.0% |"),
-        "LBA10 progress must retain the closed cross-generation preserve/ignore tail semantics"
+        DOC.contains("| LBA10 | 424 | 88 | 0 | 82.8% |"),
+        "LBA10 progress must retain the closed +0x04 control flag and preserve/ignore tail semantics"
     );
     assert!(
         DOC.contains("| LBA12 | 394 | 118 | 0 | 77.0% |"),
