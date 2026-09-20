@@ -28,13 +28,13 @@ producer + 官方 consumer/行为 + 原始实盘验证**同时闭合，才能标
 
 截至当前最新闭环，严格统计为：
 
-- **COMPLETE：3856 / 6656B = 57.9%**
-- **PARTIAL：2800 / 6656B = 42.1%**
+- **COMPLETE：3852 / 6656B = 57.9%**
+- **PARTIAL：2804 / 6656B = 42.1%**
 - **UNKNOWN：0 / 6656B = 0.0%**
 
 当前各 LBA 严格状态以主账本为唯一准绳，最新关键增量：
 
-- **LBA4 = 49 COMPLETE / 463 PARTIAL / 0 UNKNOWN = 9.6%**。
+- **LBA4 = 45 COMPLETE / 467 PARTIAL / 0 UNKNOWN = 8.8%**。
   `+0x047..+0x1FB` 的437B已经从 UNKNOWN 降到 PARTIAL：严格22份原始生成参考中
   18份为 physical raw-zero gap，4份为 rolling-encrypted 形态；4/4 rolling 形态
   按 onlyid key 解码后437B全零，reader只返回0x2F restore node，不解释这437B。
@@ -58,7 +58,8 @@ producer + 官方 consumer/行为 + 原始实盘验证**同时闭合，才能标
   `Version@+0x3D..40=1`、sector tuple `+0x41..44=08 04 0C 01`
   共13B已由 current writer 显式赋值、Windows/Linux ReadSector4 对完整node的
   structural-preserve/semantic-ignore，以及 committed originals + strict 22/22
-  跨 current/legacy 一致 profile 闭合为 fixed restore-node compatibility metadata。
+  跨 current/legacy 一致 profile 闭合为 fixed restore-node compatibility metadata；但其中
+  `NewLabFlag` 4B 早已作为旧基线的第二个 `LLGB` 锚点计入，因此这次拆分只净新增9B。
   `MyHardinfo@+0x35..38` 明显分profile，继续PARTIAL，不能随13B一起升级。
   两flag仍因缺最终业务consumer保持PARTIAL，raw-zero历史 producer/选择条件也仍未定位，
   严格完成字节数不增加。
@@ -151,7 +152,7 @@ producer + 官方 consumer/行为 + 原始实盘验证**同时闭合，才能标
   strict originals 22/22 与独立SanDisk均精确满足两式，因此这8B升 COMPLETE。
   Dept/Owner 长值的 continuation 还确认落在 LBA9+0x80/+0x100，
   并已用 join60/join59 双profile实盘门禁锁定。当前全 LBA0–12 已无 UNKNOWN，
-  目前全局仍有2800B PARTIAL，绝不能把“UNKNOWN=0”当成全部协议完成。
+  目前全局仍有2804B PARTIAL，绝不能把“UNKNOWN=0”当成全部协议完成。
 
 - **LBA7 = 512 COMPLETE / 0 PARTIAL / 0 UNKNOWN = 100.0%**。
   真实物理 LBA7 已锁定为 **3×0x40 packed EDPF + 14B pass-info@+0xC0**，
