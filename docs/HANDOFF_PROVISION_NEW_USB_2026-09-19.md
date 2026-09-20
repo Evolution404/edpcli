@@ -28,8 +28,8 @@ producer + 官方 consumer/行为 + 原始实盘验证**同时闭合，才能标
 
 截至本次 LBA11 repair-profile 闭环，严格统计为：
 
-- **COMPLETE：3488 / 6656B = 52.4%**
-- **PARTIAL：3168 / 6656B = 47.6%**
+- **COMPLETE：3536 / 6656B = 53.1%**
+- **PARTIAL：3120 / 6656B = 46.9%**
 - **UNKNOWN：0 / 6656B = 0.0%**
 
 当前各 LBA 严格状态以主账本为唯一准绳，最新关键增量：
@@ -117,7 +117,7 @@ producer + 官方 consumer/行为 + 原始实盘验证**同时闭合，才能标
   producer/选择条件未知继续PARTIAL。
   Dept/Owner 长值的 continuation 还确认落在 LBA9+0x80/+0x100，
   并已用 join60/join59 双profile实盘门禁锁定。当前全 LBA0–12 已无 UNKNOWN，
-  目前全局仍有3168B PARTIAL，绝不能把“UNKNOWN=0”当成全部协议完成。
+  目前全局仍有3120B PARTIAL，绝不能把“UNKNOWN=0”当成全部协议完成。
 
 - **LBA7 = 490 COMPLETE / 22 PARTIAL / 0 UNKNOWN = 95.7%**。
   真实物理 LBA7 已锁定为 **3×0x40 packed EDPF + 14B pass-info@+0xC0**，
@@ -183,9 +183,20 @@ producer + 官方 consumer/行为 + 原始实盘验证**同时闭合，才能标
   且 current/legacy 22/22 均为6B零，无已知 profile 分叉，因此6B升COMPLETE。
   `HDSerialInfo@+0x14..17` 与 `UsbOnlyInfo@+0x1E..3D` 仍因 legacy producer/
   历史 consumer 缺口保持PARTIAL。
-- **LBA12 = 394 COMPLETE / 118 PARTIAL / 0 UNKNOWN = 77.0%**。
+- **LBA12 = 442 COMPLETE / 70 PARTIAL / 0 UNKNOWN = 86.3%**。
   主运行时盘面固定为 3×96B packed entry；`Reserved[7]@+0x59..+0x5F`
   已由官方字段名、writer 零来源、negative consumer 和 66/66 原始 entry 闭合。
+  相邻 `+0x48..+0x57` 也已独立闭合，但**不是 Reserved**：104B natural ABI
+  正式命名为 `EncryptFileKey32[16]`。旧72B ABI根本没有该槽，old→new converter
+  不填它；current Windows packed writer 对3×96B整表先清零且不覆盖这16B。
+  checker 的 DecryptFileKey/CRC/filesystem decrypt 均不读 natural +0x50；
+  packed `libedpedisk.so::PartitionHeader` 虽按值结构缓存完整96B，但精确符号边界审计
+  证明映射到 object+0x88/+0x90 的两个QWORD只有 ctor 写入，没有算法读点；
+  正对照主 wrapped16 映射到 object+0x78/+0x80 并被 SMS4/AES128/OldEdp decrypt
+  实际消费。严格22盘全部66条 entry 的该槽66/66为零。因此三个 entry 共48B
+  升 COMPLETE，按 **EncryptFileKey32 compatibility slot structural-cache /
+  negative-semantic-consumer closure** 建模；未来独立ABI若出现非零值应结构保留，
+  不能强制清零。
   v0x0206 默认密码 mode2 wrapping 也已独立闭合：
   `"0000aaaa" -> sub_10040400 -> "LtSWi[2f)j"`，
   MD5 后走标准 SM4；43/43 默认 mode2 原始 entry 可独立解包并通过 FileKeyCRC。
@@ -262,8 +273,9 @@ producer + 官方 consumer/行为 + 原始实盘验证**同时闭合，才能标
 - LBA12 `+0x38..+0x47 wrapped16`：当前22盘真实使用的
   `v0x0206 + mode2 + oldSM4!="1"` 已闭合，但 mode1/mode3/oldSM4
   没有正向原盘，所以整个16B字段仍按严格规则保持 PARTIAL。
-- LBA12 `+0x48..+0x57` 是扩展材料槽；当前66/66原始 entry 为零，但历史用途未闭合。
-  相邻 `+0x59..+0x5F` 才是已经 COMPLETE 的 `Reserved[7]`，不要混成一片。
+- LBA12 `+0x48..+0x57` 已闭合为 `EncryptFileKey32[16]` cross-generation
+  compatibility slot；相邻 `+0x59..+0x5F` 是独立 COMPLETE 的 `Reserved[7]`。
+  两者都已完成，但语义完全不同，禁止重新混成一片 zero padding。
 - pass-info 当前只剩2B语义未闭合：
   `+0x0C ShareBackuppromptPeriod`、`+0x0D EncryptBackuppromptPeriod`。
   `+0x0A bNoUsbChkPasSafe` 已由独立 `checkdiskback`

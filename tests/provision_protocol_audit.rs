@@ -499,10 +499,11 @@ fn lba12_packed_reserved7_is_zero_and_separate_from_key_extension_material() {
                 "packed Reserved[7] must stay zero in original fixture: {name} entry {index}"
             );
 
-            // Keep the adjacent 16-byte extension slot as a separately tracked
-            // field. Its current all-zero profile is not evidence that it is
-            // padding: another official ABI names the corresponding material
-            // EncryptFileKey32[16].
+            // Keep the adjacent 16-byte slot separate from Reserved[7].  Another
+            // official ABI formally names the corresponding material
+            // EncryptFileKey32[16].  Its COMPLETE status comes from the external
+            // producer/ABI/negative-consumer chain; this test contributes only
+            // the original-device all-zero evidence.
             assert_eq!(plain[base + 0x48..base + 0x58].len(), 16);
             checked_entries += 1;
         }
@@ -2513,7 +2514,7 @@ fn lba12_need_disturb_values_match_all_real_reference_backups() {
 }
 
 #[test]
-fn lba12_packed_entry_unresolved_extension_bytes_are_observationally_zero() {
+fn lba12_encrypt_file_key32_compatibility_slots_are_zero_in_original_entries() {
     let mut checked = 0usize;
     for entry in fs::read_dir(FIXTURE_DIR).expect("protocol fixtures") {
         let path = entry.expect("backup entry").path();

@@ -158,6 +158,8 @@ fn documentation_keeps_the_official_provisioning_chain_and_strict_rules() {
         "LBA12 v0x0206 hidden default-password file-key wrapping",
         "LBA12 alternate wrapping-mode algorithm map",
         "LBA12 packed Reserved[7] producer/negative-consumer closure",
+        "LBA12 EncryptFileKey32 compatibility slot structural-cache / negative-semantic-consumer closure",
+        "old 72-byte ABI has no EncryptFileKey32 slot",
         "LBA0 legacy MBR message-pointer bytes",
         "LBA7 packed 64-byte ABI versus Linux natural 72-byte ABI",
         "LBA7 v0x0064 packed legacy file-key wrapping",
@@ -206,8 +208,8 @@ fn documentation_keeps_the_official_provisioning_chain_and_strict_rules() {
         "LBA10 progress must retain the closed +0x04 control flag and preserve/ignore tail semantics"
     );
     assert!(
-        DOC.contains("| LBA12 | 394 | 118 | 0 | 77.0% |"),
-        "LBA12 progress must retain the closed bNoUsbChkPasSafe policy byte"
+        DOC.contains("| LBA12 | 442 | 70 | 0 | 86.3% |"),
+        "LBA12 progress must retain the closed EncryptFileKey32 compatibility slots and bNoUsbChkPasSafe policy byte"
     );
     assert!(
         DOC.contains("| LBA11 | 512 | 0 | 0 | 100.0% |"),

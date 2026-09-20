@@ -392,13 +392,13 @@ post-XOR 写回 `+0x45/+0x46`。历史 raw-zero 实盘仅作为兼容读取 prof
 | LBA9 | 156 | 356 | 0 | 30.5% |
 | LBA10 | 424 | 88 | 0 | 82.8% |
 | LBA11 | 512 | 0 | 0 | 100.0% |
-| LBA12 | 394 | 118 | 0 | 77.0% |
+| LBA12 | 442 | 70 | 0 | 86.3% |
 <!-- STRICT_PROGRESS_END -->
 
 当前总计：
 
-- **COMPLETE：3488B / 6656B = 52.4%**
-- **PARTIAL：3168B / 6656B = 47.6%**
+- **COMPLETE：3536B / 6656B = 53.1%**
+- **PARTIAL：3120B / 6656B = 46.9%**
 - **UNKNOWN：0B / 6656B = 0.0%**
 
 LBA11 已完整闭合为 512B COMPLETE。此前卡住的后半 252B 不是“某型号盘偶尔使用
@@ -520,7 +520,8 @@ DWARF 中恢复出的原始声明文件/行号与本地函数地址：
 | LBA11 | 0x104–0x1FF | COMPLETE | 加密的 UID + zero fill | 正常注册 writer：`cemsusbregsiter.dll::sub_10014720` 以 `DISK_GEOMETRY_EX.DiskSize` 为 `ullSize`；repair writer：`UDiskLabelRepair.dll::CLabelRepair::Repair -> sub_10008950(ReWrite11Sector) -> sub_10003A40`，其 `disk_info+0x30/+0x34` 由 `IOCTL_DISK_GET_DRIVE_GEOMETRY(0x70000)` 返回的 `DISK_GEOMETRY` 经 `sub_10019EF0` 64-bit multiply 计算 `Cylinders*TracksPerCylinder*SectorsPerTrack*BytesPerSector` 后生成 LBA11 | 正常 consumer：Windows/Linux `ReadSector11` 以 exact DiskSize 解密；repair consumer：`CLabelRepair::Repair -> sub_10008820 -> sub_10003BD0` 用同一 CHS `disk_info+0x30/+0x34` 校验 LBA11，失败才进入 ReWrite11Sector | 严格22份：21/22 exact DiskSize，1/22 Aigo U335 rev_pmap 为 CHS；另有同一 Aigo rev_pmap 的独立真实 exact-size LBA11 捕获，证明 profile 取决于 writer 路径而非硬件；22/22 解密后 UID 正确且 UID 后全零 | 两种已观测 wire profile 的 producer、consumer、容量算法和实盘均闭合；因此后半252B升级 COMPLETE |
 | LBA12 | 0x000–0x11F | PARTIAL | 3×96B EDPF | Windows/Linux writer | 登录/挂载/兼容链大量消费 | 22盘 | 字段逐项状态见详细审计 |
 | LBA12 | 0x010–0x013 | COMPLETE | entry0.NeedDisturb compatibility gate | `CUsbRegsiter::CreatePartitions` 写入 entry0；Linux `edpdiskglobal.h:82` 定义字段 | `vrvaud_c::NewCheckDisTurbUsb(*)` fallback 在 `Format.cpp:0x3CE/0x380` 直接以该 DWORD 非零判 success | 22/22原始盘=1；20个entry0 type1、2个type2；7 CI夹具锁定 | 完成的是 entry0 兼容门控行为；其它 entry 的 NeedDisturb 不随之升级 |
-| LBA12 | 每条entry +0x059–+0x05F | COMPLETE | packed Reserved[7] | Windows `CreatePartitions` 对3×96B先 `memset(0,0x120)`，后续只写至 +0x58；Linux DWARF正式字段名 `Reserved[7]` | Windows UserLogin/改密只消费 wrapped16 与 +0x58；Linux decrypt/改密同样不消费 Reserved | 22盘66/66 entry全零；CI原始夹具锁定 | **LBA12 packed Reserved[7] producer/negative-consumer closure**；注意相邻 +0x48..57 仍是扩展 key-material PARTIAL |
+| LBA12 | 每条entry +0x048–+0x057 | COMPLETE | `EncryptFileKey32[16]` cross-generation compatibility slot | Windows `CreatePartitions` 对3×96B先 `memset(0,0x120)`；current packed writer 后续只写 wrapped16 `+0x38..47` 与 mode `+0x58`，所以该16B保持显式零。旧72B `tagEdpPartionInfo` **根本没有**该槽；Linux checker 的 old→new `GetPartionFromOld` 也只把旧8B key搬到 natural `+0x40`，不填 natural `+0x50 EncryptFileKey32[16]` | 104B checker DWARF正式命名 `EncryptFileKey32[16]@+0x50`，但 `DecryptFileKey/CheckFileKeyCrc/ReadFileSysSector0/DecryptFileSysSector0` 都不读取它；packed `libedpedisk.so` 会在按值构造时结构缓存完整96B，但严格按 `PartitionHeader` 符号边界审计，映射到对象 `+0x88/+0x90` 的两个QWORD只在构造器写入，后续没有值相关读取；正对照 wrapped-key 起点 object `+0x78` 被 SMS4/AES128/OldEdp decrypt 实际消费。Windows UserLogin/改密同样只消费 `+0x38..47/+0x58` | 严格22份原始盘全部现存 EDPF entry 共66条，`+0x48..57` **66/66全零**；CI `lba12_encrypt_file_key32_compatibility_slots_are_zero_in_original_entries` 锁定 | **LBA12 EncryptFileKey32 compatibility slot structural-cache / negative-semantic-consumer closure**：旧ABI无槽、新ABI正式保留名字、current producer显式零、跨Windows/Linux只结构搬运不参与算法、原始实盘全零。COMPLETE 表示“兼容槽生命周期/无当前业务语义”闭合，不把它误称 Reserved，也不禁止未来其它ABI结构性携带非零值 |
+| LBA12 | 每条entry +0x059–+0x05F | COMPLETE | packed Reserved[7] | Windows `CreatePartitions` 对3×96B先 `memset(0,0x120)`，后续只写至 +0x58；Linux DWARF正式字段名 `Reserved[7]` | Windows UserLogin/改密只消费 wrapped16 与 +0x58；Linux decrypt/改密同样不消费 Reserved | 22盘66/66 entry全零；CI原始夹具锁定 | **LBA12 packed Reserved[7] producer/negative-consumer closure**；与前面的 `EncryptFileKey32[16]` compatibility slot 分开建模 |
 | LBA12 | 0x12A | COMPLETE | pass-info `bNoUsbChkPasSafe` | 与 LBA7 同一 current CreatePartitions 请求输入，LBA12 builder 保存同一 pass-info 字节 | `checkdiskback::Update_EDPEDISKSHOWPARAM@0x406B70` 直接比较该字段并生成 SAFE6 show-policy byte +3；policy 经 `CreateSafe6TmpPolicyFile` 加密后被 `EdpEDiskBack` 与 `linuxedpedisk` 两套 `Safe6PolicyFile::GetSafe6Policy` 恢复 | 严格22份18×0+4×1，且22/22与同盘 LBA7 +0x0A相同；CI锁定双值/一致性 | 与 LBA7 同一逻辑字段、同一 producer/consumer 链，1B COMPLETE |
 | LBA12 | 0x12C–0x12D | PARTIAL | pass-info `ShareBackuppromptPeriod / EncryptBackuppromptPeriod` | current writer零初始化且不覆盖 | 已审 Windows/Linux/checkdiskback policy 链均未找到业务读取 | 22/22为0 | 仍缺单位、非零 producer 与历史/外部 consumer |
 | LBA12 | 0x12E–0x16F | COMPLETE | post-table zero initialized padding | writer整块零初始化且不覆写 | 主reader不消费该区 | 22/22解密为零 | producer+negative consumer+实盘闭合 |
@@ -1857,9 +1858,34 @@ reader 只有一个标准SM4解包分支且完全不读取 `oldSM4` 配置。
 这7B同时具备正式字段名、writer零来源、negative consumer 和实盘闭环，
 因此三个 entry 共 **21B PARTIAL -> COMPLETE**。
 
-相邻 `+0x48..+0x57` **不随之升级**：虽然当前22盘也全零且当前
-96B runtime 登录/改密不使用，但104B ABI 明确存在
-`EncryptFileKey32[16]` 扩展材料，历史 producer/consumer 尚未闭合。
+相邻 `+0x48..+0x57` 后续又完成了单独的跨代闭环，不能再停留在
+“存在字段名，所以用途未知”的阶段：
+
+- 旧 `tagEdpPartionInfo` 是 **72B ABI**，只到 `EncryptFileKey@+0x40`，
+  **old 72-byte ABI has no EncryptFileKey32 slot**；
+- 104B checker ABI 才正式增加 `EncryptFileKey32[16]@+0x50`；
+  `GetPartionFromOld` 把旧72B entry 转成104B时不填该数组；
+- `CDiskReader::DecryptFileKey` 只读 natural `+0x40..+0x4F` 的16B主 wrapped key
+  和 `+0x60 EncryptMode`；`CheckFileKeyCrc`、`ReadFileSysSector0`、
+  `DecryptFileSysSector0` 同样没有 `+0x50` 值相关读取；
+- packed 主挂载库 `libedpedisk.so` 构造 `PartitionHeader` 时会按值缓存完整96B，
+  所以 packed `+0x48..+0x57` 会结构性进入对象 `+0x88/+0x90`。但按
+  `PartitionHeader` 符号边界逐函数审计，这两个对象QWORD除构造写入外没有任何
+  算法读取；正对照 packed wrapped-key `+0x38..+0x47` 映射到 object `+0x78/+0x80`，
+  其中 `+0x78` 被 SMS4/AES128/OldEdp 三套解密路径实际取址并按16B消费；
+- Windows current `CreatePartitions` 先把3×96B整表清零，后续不覆写 packed
+  `+0x48..+0x57`；Windows UserLogin/改密也只使用主 wrapped16 与 EncryptMode；
+- 22份 original real-device reference set 的66条现存 entry 中，该16B **66/66全零**。
+
+因此这不是 Reserved[7] 的一部分，也不是当前第二把活动 file key；它是正式保留名
+`EncryptFileKey32[16]` 的 **cross-generation compatibility slot**。旧ABI无槽，
+新ABI保留并可随结构搬运，但当前已知算法链不消费；current packed producer显式零。
+这满足本项目对“结构缓存但无语义消费”区域的 COMPLETE 标准，三个 entry 共
+**48B PARTIAL -> COMPLETE**。未来若其它独立ABI出现非零该槽，兼容实现应结构保留，
+不能因为当前66/66为零而强制清零。
+
+**LBA12 EncryptFileKey32 compatibility slot structural-cache / negative-semantic-consumer closure**
+与 `Reserved[7]` 继续作为两个独立门禁，避免再次混成“23B zero padding”。
 
 ## 7. 代码与测试门禁
 
