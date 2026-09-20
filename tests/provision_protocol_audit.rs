@@ -1489,6 +1489,72 @@ fn lba4_common_hserial_profile_is_shared_across_different_target_usb_devices() {
 }
 
 #[test]
+fn lba4_fixed_hserial_is_independent_from_hardinfo_and_sapf_backing() {
+    const NETAC_C: &str =
+        "disk6_122880000_vid0dd8_pid2005_disk&ven_netac&prod_onlydisk_onlyid3274129259_20260910_172709.bin";
+
+    let decode_profile = |name: &str| {
+        let image = load(name);
+        let meta = parse_reference_backup_name(name).expect("fixture metadata");
+        let onlyid = meta.onlyid.as_deref().expect("fixture onlyid");
+        let bits = onlyid_bits(onlyid);
+        let k0 = (bits & 0xffff) ^ (bits >> 16);
+
+        let raw4 = sector(&image, 4);
+        let mut lba4 = raw4.to_vec();
+        lba4[0x18..].copy_from_slice(&xor_rolling(&raw4[0x18..], k0));
+        if raw4[0x47..0x1fc].iter().all(|byte| *byte == 0) {
+            lba4[0x47..0x1fc].fill(0);
+        }
+
+        let hserial: [u8; 20] = lba4[0x20..0x34].try_into().unwrap();
+        let hardinfo = u32_le(&lba4, 0x35);
+
+        let raw9 = sector(&image, 9);
+        let sapf_head: Vec<u8> = raw9[0x100..0x104].iter().map(|byte| byte ^ 0x88).collect();
+        assert_eq!(sapf_head, b"SAPF", "expected SAPF profile: {name}");
+        let sapf_tail: [u8; 12] =
+            std::array::from_fn(|index| raw9[0x114 + index] ^ 0x88);
+
+        (hserial, hardinfo, sapf_tail)
+    };
+
+    let lexar = decode_profile(LEXAR);
+    let netac_a = decode_profile(NETAC_A);
+    let netac_b = decode_profile(NETAC_B);
+    let netac_c = decode_profile(NETAC_C);
+
+    for profile in [&netac_a, &netac_b, &netac_c] {
+        assert_eq!(
+            lexar.0, profile.0,
+            "fixed legacy HSerial profile must stay identical across target USB devices"
+        );
+    }
+
+    assert_ne!(
+        lexar.1, netac_a.1,
+        "identical HSerial material must not be treated as an expansion of MyHardinfo/HDSerialInfo"
+    );
+
+    assert!(
+        lexar.2.iter().all(|byte| *byte == 0),
+        "Lexar supplies the zero SAPF-tail counterexample"
+    );
+    assert!(
+        netac_a.2.iter().any(|byte| *byte != 0),
+        "Netac supplies a non-zero SAPF-tail counterexample"
+    );
+    assert_eq!(
+        netac_a.2, netac_b.2,
+        "two Netac captures keep one stable SAPF backing shape"
+    );
+    assert_ne!(
+        netac_a.2, netac_c.2,
+        "the same Netac fixed-HSerial profile also exhibits a changed SAPF backing shape"
+    );
+}
+
+#[test]
 fn lba4_restore_node_profiles_keep_current_and_legacy_fields_separate() {
     const KINGSTON_CURRENT: &str =
         "disk4_121110528_vid0951_pid1666_disk&ven_kingston&prod_datatraveler_3.0_onlyid2135149925_20260903_121319.bin";
