@@ -2029,6 +2029,10 @@ fn lba4_server_flag_wire_rule_is_restore_profile_specific_in_real_fixtures() {
 
         let inspect_meta = InspectMeta::from_backup_meta(&meta);
         let view = edpcli::inspect::analyze_sector(4, raw, &inspect_meta);
+        assert_eq!(
+            view.decoded[0x46], 0,
+            "bConnetServer must remain the dormant-zero compatibility byte: {name}"
+        );
 
         if current_profile {
             current_style += 1;

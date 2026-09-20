@@ -275,10 +275,21 @@ bytes。legacy restore-node profile 不能反向套用这一 current 规则，�
 `libcemsfilesyscheck.so` 除 BuildSector4 的两次 post-XOR store 外，也没有其它
 对这两个字段的直接访问。
 
-因此这2B仍保持 **PARTIAL**：字段名、current producer/wire exception、官方
-reader 非对称行为、legacy rolling-reader profile 和22盘分布均已闭合；但 legacy
-非零 profile 的旧 producer 以及最终业务 consumer 仍缺失。按严格规则不能因为
-“current wire value 已搞清”就升 COMPLETE。
+继续把两个 BYTE 拆开后，不能再把它们作为同一 blocker 处理：
+
+- `bDataToServer @ +0x45` 的 legacy official-reader 逻辑视图确有非零 `0B` profile，
+  旧 producer 和最终业务 consumer仍缺，因此 **1B 继续 PARTIAL**；
+- `bConnetServer @ +0x46` 则不同。current Windows/Linux writer 的 restore node 都先
+  整体清零且没有任何后续赋值，所以 producer-side值明确为0；current post-XOR
+  physical representation 与 legacy rolling representation 虽然不同，但按各自正式
+  reader语义还原后该 BYTE 在 strict 22份中 **22/22=0**，另对本机20个去重历史front
+  重算也 **20/20=0**；ReadSector4、ActiveNormalUDev、GetUpLoadInformation 与上层
+  server backup 序列化都没有该 BYTE 的值相关业务分支。
+
+因此 `+0x46` 按与 LBA7 dormant compatibility metadata 相同的严格口径闭合为
+**dormant-zero compatibility byte，1B PARTIAL -> COMPLETE**。这里闭合的是已知 profile
+的 producer/representation/negative-consumer 生命周期，不授权未来遇到非零逻辑值时机械清零；
+一旦出现非零逻辑 profile 必须重新扩展协议模型。
 
 #### LBA4 `0x18..0x46` 官方结构与第二 ID
 
@@ -3529,7 +3540,7 @@ profiles 的该边界，而不是把字符串具体值硬编码成未来协议�
 | 1 | 512B | 0B | 0B | 100.0% | Linux official `BuildSector1_Gpt` first-party virtual runtime 直接生成整512B primary header，独立 IEEE CRC32 同时命中 header/16KiB array CRC；同一34扇 image 又被 current Windows `sub_1002AB70` 原生识别为GPT。physical 22/22零值继续作为 absent-GPT profile 保存，不与virtual fixture混计 |
 | 2 | 176B | 336B | 0B | 34.4% | entry0完整128B first-party闭合；current Windows active GPT creator又明确 `PartitionCount=1`，按 UEFI 2.10 unused-entry 定义把 entries1..3 的三个16B `PartitionTypeGUID=0` 闭合。每条其余112B仍缺 Windows first-party on-disk producer，继续PARTIAL |
 | 3 | 0B | 512B | 0B | 0% | EDP 注册 writer 对整扇 preserve-existing，当前 Windows/Linux EDP reader 不解析；22份原始盘为21零+1 Kingston MP payload，但厂商 producer/固件 consumer 未闭合 |
-| 4 | 49B | 463B | 0B | 9.6% | onlyid clear header、OnlyIdXor8、LLGB 双锚点完成；本轮又把 restore-node 后半固定13B（SingleUsbFlg/NewLabFlag/Version/sector tuple）按 current producer + structural-preserve/semantic-ignore + 22盘一致 profile 闭合。MyHardinfo、第二 ID/HSerial、server flags 与 `+0x047..+0x1FB` 多profile backing 继续PARTIAL |
+| 4 | 50B | 462B | 0B | 9.8% | onlyid clear header、OnlyIdXor8、LLGB 双锚点与固定restore metadata完成；server flags拆分为 `bDataToServer@+0x45` 继续PARTIAL、`bConnetServer@+0x46` 按 current显式零producer + cross-profile逻辑0 + negative semantic consumer 升COMPLETE。MyHardinfo、第二 ID/HSerial、第一server flag与 `+0x047..+0x1FB` 多profile backing继续PARTIAL |
 | 5 | 512B | 0B | 0B | 100% | 两版 EdpDiskCtrl 均只对 LBA5 执行“读整扇→原样写回→检查 ERROR_WRITE_PROTECT(0x13)”；当前注册 writer 读取既有13扇区后不重建 LBA5，因此 preserve existing bytes；22/22原始盘全零 |
 | 6 | 473B | 39B | 0B | 92.4% | 在既有闭环基础上，再按首个NUL边界把 GSerial `+0x1C0..1C8` 9B 与 BeiZhu `+0x1D0` 1B 升COMPLETE；剩余39B为 Dept接缝1B、GSerial尾7B、BeiZhu尾15B、legacy MBR fragment16B |
 | 7 | 512B | 0B | 0B | 100.0% | 3×Version、entry1/entry2 NeedDisturb 已按 compatibility metadata 生命周期闭合；最后两个 BackupPromptPeriod BYTE 又由正式 DWARF 字段、current-zero producer、四代 Windows + Linux structural-preserve/negative semantic consumer、跨 v0x0064/v0x0206 实盘0/0 profile 闭合为 dormant compatibility fields。LBA7 至此整扇 COMPLETE |
@@ -3541,8 +3552,8 @@ profiles 的该边界，而不是把字符串具体值硬编码成未来协议�
 
 总计：
 
-- **完成：4730B / 6656B = 71.1%**
-- **部分已知：1926B / 6656B = 28.9%**
+- **完成：4731B / 6656B = 71.1%**
+- **部分已知：1925B / 6656B = 28.9%**
 - **未知：0B / 6656B = 0.0%**
 
 这是一组**严格下限**，故意宁可低估，不把“能生成/能解析”冒充成“已经完全理解”。
@@ -3554,7 +3565,7 @@ profiles 的该边界，而不是把字符串具体值硬编码成未来协议�
 | 1 | 完全闭合 | absent-GPT physical profile 与 official GPT positive-wire profile 均闭合；512/512 COMPLETE |
 | 2 | GPT entry0 + unused type GUID闭合 | entry0 128B完整闭合；entries1..3 的16B `PartitionTypeGUID` 已按 current Windows one-partition creator + UEFI unused-entry 定义闭合，共176B COMPLETE；其余336B residual fields继续追 |
 | 3 | 外部制造区部分闭合 | 21/22 全零，1 份 Kingston MP payload；官方 EDP 注册链原样保留且当前 reader 不解析，厂商生成/消费语义仍未知 |
-| 4 | 高度闭合 | 整扇已无UNKNOWN；`+0x047..+0x1FB` 已确认 raw-zero / rolling-encrypted-zero 双历史物理表示且22盘语义均为零。`+0x45/+0x46` 已闭合为 `bDataToServer/bConnetServer` post-XOR wire bytes，并证明官方 ReadSector4 不补偿该例外；inspect 已恢复 producer-side flags，Provision 已改为 current SAFE6 full rolling + post-XOR覆盖。两flag因缺最终业务consumer仍PARTIAL |
+| 4 | 高度闭合 | 整扇已无UNKNOWN；`+0x047..+0x1FB` 已确认 raw-zero / rolling-encrypted-zero 双历史物理表示且22盘语义均为零。server flags中 `bConnetServer@+0x46` 已按 dormant-zero compatibility byte闭合；只剩 `bDataToServer@+0x45` 因 legacy `0B` profile 的旧producer/最终consumer缺失继续PARTIAL |
 | 5 | canonical 已知 | opaque preserve / 写保护探测 scratch；当前 22/22 全零，但零不是协议固定要求 |
 | 6 | 高度闭合 | 整扇已无 UNKNOWN，473/512 COMPLETE。GSerial前9B与BeiZhu首1B已从 profile-dependent slot 中拆出闭合；剩余39B仅为 Dept join59末字节、两字符串尾部underlay与16B legacy MBR fragment |
 | 7 | 完全闭合 | 物理0x40 packed ABI、PartionCount、rolling XOR、entry0 NeedDisturb MBR gate、v0x0064 legacy wrapped8、3×Version/entry1+2 NeedDisturb compatibility metadata、`bNoUsbChkPasSafe` SAFE6 policy 行为链及最后两个 dormant BackupPromptPeriod compatibility BYTE 均已闭合；512/512 COMPLETE |
@@ -3566,7 +3577,7 @@ profiles 的该边界，而不是把字符串具体值硬编码成未来协议�
 
 ## 尚不能猜测的材料
 
-- LBA4 `+0x45/+0x46` 已闭合 producer/wire 与 ReadSector4 非对称规则；剩余缺口仅是 `bDataToServer/bConnetServer` 的最终业务 consumer，未找到前不得升 COMPLETE；
+- LBA4 `bConnetServer@+0x46` 已闭合为 dormant-zero compatibility byte；`bDataToServer@+0x45` 仍有 legacy `0B` profile，旧producer/最终业务consumer未找到前不得升 COMPLETE；
 - LBA4 onlyID2Nd 及关联动态字段的生成源；
 - LBA0 前400B bootstrap 主体/profile 选择；
 - LBA6 0x1c0..0x1ed 不同格式代际的准确字段来源。
