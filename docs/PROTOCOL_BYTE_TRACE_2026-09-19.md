@@ -1899,6 +1899,20 @@ CDiskReader::DecryptFileKey
 | 2 | `sub_100036E0` 或 `sub_10011010`: 标准SM4-ECB | `sub_10028AB0 case2`: 标准SM4 decrypt | `MC_KKSMS4::DecryptBuffer` | 44条真实entry；已闭合 |
 | 3 | `sub_1000FC10`: AES-128-ECB | `sub_1002F670`: AES-128 inverse；CRC失败后强制mode1重试 | 当前 `fileKey_Decrypt` 无case3 | 算法/兼容行为闭合；22盘正向样本0 |
 
+继续向上追 writer 可达性后，已经能排除“mode1/mode3 只是死代码”的解释：
+
+- `CUsbRegsiter` 构造函数在 `0x10038EB4` 把 `this+0x6EC` 默认置为 `2`；
+- 唯一 setter `sub_1003B4E0(arg)` 直接覆盖 `this+0x6EC`；
+- `WriteNormalULabel` 对请求字节 `arg+0x7E8` 做正式映射：值1调用 setter(1)，值2调用 setter(3)，其它值调用 setter(2)；
+- `CreatePartitions` 三处 wrapped16 writer 都读取同一个 `this+0x6EC`：2走SM4、1走A7F0、3走AES-128，并把其低字节原样写到每条 packed entry 的 `EncryptMode@+0x58`；
+- `usbtoolBusManage.dll::UsbtoolBusMgrInter::LabelInfo::Print` 把 `LabelInfo+0x7E8` 明确打印为 `crypt=%d`，因此底层请求字段已经有上层业务名 `crypt`；
+- 制标 UI 的 `tabAlgorithmComboBox` 实际加入 `SMS4`、`AES`、`AES_CROSS` 三项并默认 index=0；`currentIndex()` 在 `0x467270..0x467282` 直接写入策略对象 `normalDetail+0x44`，日志字段名为 `normalDetail.algorithm`。
+
+但这里必须保留一条边界：当前尚未定位到 `normalDetail.algorithm` 到
+`LabelInfo.crypt(+0x7E8)` 的**直接序列化/复制点**。因此可以确认 UI 与底层 writer
+两端都真实支持三算法，也可以确认底层 crypt 字段可达 mode1/mode3；但还不能把
+`UI index 0/1/2 -> crypt 0/1/2` 当成已闭合的数据流。后续应继续追这一个桥接点。
+
 mode1 的关键固定关系：
 
 ```text
@@ -1934,7 +1948,8 @@ reader 只有一个标准SM4解包分支且完全不读取 `oldSM4` 配置。
 所以它只是实现选择，不改变盘面格式。
 
 因此 `+0x38..+0x47` 整体仍记 **PARTIAL**，但剩余原因已收缩为：
-**22份原始盘没有 mode1/mode3 的正向样本**。当前44条加密entry全部mode2。
+**22份原始盘没有 mode1/mode3 的正向样本，且 UI `normalDetail.algorithm` 到底层
+`LabelInfo.crypt` 的直接桥接点尚未定位**。当前44条加密entry全部mode2。
 严格完成度统计仍不增加 16B×3，避免用静态算法闭合替代真实盘证据。
 
 扩展历史语料也按正确 device-id 重跑，而不是把缺身份时的 A6B0 RAW 输出

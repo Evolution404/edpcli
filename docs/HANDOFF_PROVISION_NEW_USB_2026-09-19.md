@@ -249,6 +249,13 @@ producer + 官方 consumer/行为 + 原始实盘验证**同时闭合，才能标
   originals 与全树22份完整历史备份复算均为 Version `(0,0,0)` / NeedDisturb `(1,1,0)`。
   因此新增20B COMPLETE。当前唯一剩余是3条 `wrapped16@+0x38..+0x47` 共48B：
   mode1/mode3 等已知 profile 仍缺正向原盘，不得把整个 wrapped16 升 COMPLETE。
+  继续反向追 writer 后已确认 mode1/mode3 不是死代码：`WriteNormalULabel`
+  读取请求 `arg+0x7E8`，按 1→mode1、2→mode3、其它→mode2 写入
+  `CUsbRegsiter this+0x6EC`；`CreatePartitions` 再按该值选择 A7F0/SM4/AES
+  并写 `entry+0x58 EncryptMode`。上层 `LabelInfo+0x7E8` 的日志名为
+  `crypt`；制标 UI 也有 `SMS4/AES/AES_CROSS` 三项并把 currentIndex 写入
+  `normalDetail.algorithm`。但 `normalDetail.algorithm -> LabelInfo.crypt`
+  的直接桥接点还没找到，不能把两端数据流误写成已经完全接通。
 - **LBA11 = 512 COMPLETE / 0 PARTIAL / 0 UNKNOWN = 100%**。
   正常注册 writer/reader 使用 `DISK_GEOMETRY_EX.DiskSize`；
   `UDiskLabelRepair.dll::CLabelRepair::Repair` 的 LBA11 检查/重写路径使用
@@ -380,7 +387,9 @@ producer + 官方 consumer/行为 + 原始实盘验证**同时闭合，才能标
   `v0x0206 + mode2` 已闭合；`oldSM4` 已证明只是同一标准SM4的实现选择，
   不是独立 wire profile。扩展历史只读复核共52份有效捕获、33个不同
   SHA-256，去重后仍只有25份 mode tuple=`0,2,2` 与8份=`2,2,0`。
-  因 mode1/mode3 依然没有正向原盘，整个16B字段仍按严格规则保持 PARTIAL。
+  底层 `crypt` 到 mode1/2/3 的 writer 可达性已经闭合，但
+  `normalDetail.algorithm -> LabelInfo.crypt` 的桥接仍缺直接写点；
+  且 mode1/mode3 依然没有正向原盘，因此整个16B字段继续保持 PARTIAL。
 - LBA12 `+0x48..+0x57` 已闭合为 `EncryptFileKey32[16]` cross-generation
   compatibility slot；相邻 `+0x59..+0x5F` 是独立 COMPLETE 的 `Reserved[7]`。
   两者都已完成，但语义完全不同，禁止重新混成一片 zero padding。

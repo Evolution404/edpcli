@@ -2294,6 +2294,25 @@ mode1/mode2，没有 mode3 分支。这是组件能力差异，不应把 mode3
 
 #### 严格完成状态
 
+本轮继续向上追 `CreatePartitions` 的 EncryptMode 输入，确认 mode1/mode3
+不是不可达兼容代码：
+
+- `CUsbRegsiter` 构造函数 `0x10038EB4` 默认令 `this+0x6EC=2`；
+- 唯一 setter `sub_1003B4E0(arg)` 直接覆盖该成员；
+- `WriteNormalULabel` 读取请求 `arg+0x7E8`：值1→setter(1)，值2→setter(3)，其它→setter(2)；
+- `CreatePartitions` 三组 entry writer 都按 `this+0x6EC` 分派 mode2/1/3，
+  并把同一个 mode byte 写入 `entry+0x58 EncryptMode`；
+- `UsbtoolBusMgrInter::LabelInfo::Print` 把 `LabelInfo+0x7E8`
+  明确打印为 `crypt=%d`；
+- 制标 UI 的 `tabAlgorithmComboBox` 初始化为 `SMS4/AES/AES_CROSS`
+  三项，默认 index=0，`currentIndex()` 直接写
+  `normalDetail+0x44`；策略日志把该字节命名为
+  `normalDetail.algorithm`。
+
+因此底层 `crypt` 字段与 writer mode1/mode3 的**可达性**已经闭合。
+但当前还没有定位到 `normalDetail.algorithm` → `LabelInfo.crypt(+0x7E8)`
+的直接序列化/复制点，不能把 UI index 与底层 crypt 值的对应关系提前写死。
+
 22份 original real-device reference set 中：
 
 - 44条需要16B wrapped key 的 type2/type4 entry **全部 EncryptMode=2**；
@@ -2309,7 +2328,8 @@ mode1/mode2，没有 mode3 分支。这是组件能力差异，不应把 mode3
 real-device evidence。
 
 所以 `+0x38..+0x47` 目前的剩余缺口已经从“算法/分支不明”收缩为：
-**mode1/mode3 缺真实正向盘样本**。严格规则要求 producer + consumer +
+**mode1/mode3 缺真实正向盘样本，同时 UI algorithm 到 LabelInfo.crypt 的
+中间桥接点尚未定位**。严格规则要求 producer + consumer +
 real-device evidence 三者都存在，因此这16B仍保持 PARTIAL，
 完成度数字不增加；但 `oldSM4` 不再作为未解释 wire profile。
 
