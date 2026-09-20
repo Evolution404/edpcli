@@ -300,8 +300,10 @@ producer + 官方 consumer/行为 + 原始实盘验证**同时闭合，才能标
 - LBA12 physical current table = **0x60 packed stride**；Linux 检查组件另有
   0x68 natural ABI。主盘面表尾固定在 `+0x120`，不是 `+0x138`。
 - LBA12 `+0x38..+0x47 wrapped16`：当前22盘真实使用的
-  `v0x0206 + mode2 + oldSM4!="1"` 已闭合，但 mode1/mode3/oldSM4
-  没有正向原盘，所以整个16B字段仍按严格规则保持 PARTIAL。
+  `v0x0206 + mode2` 已闭合；`oldSM4` 已证明只是同一标准SM4的实现选择，
+  不是独立 wire profile。扩展历史只读复核共52份有效捕获、33个不同
+  SHA-256，去重后仍只有25份 mode tuple=`0,2,2` 与8份=`2,2,0`。
+  因 mode1/mode3 依然没有正向原盘，整个16B字段仍按严格规则保持 PARTIAL。
 - LBA12 `+0x48..+0x57` 已闭合为 `EncryptFileKey32[16]` cross-generation
   compatibility slot；相邻 `+0x59..+0x5F` 是独立 COMPLETE 的 `Reserved[7]`。
   两者都已完成，但语义完全不同，禁止重新混成一片 zero padding。
@@ -367,7 +369,9 @@ producer + 官方 consumer/行为 + 原始实盘验证**同时闭合，才能标
    另有 Aigo L8302 第三种特殊 bootstrap。**不要因此升级 COMPLETE**：仍需找到
    historical template writer/profile 选择与 L8302 producer；SectorSize 等尾部consumer
    也未闭合。若能找到真实原始 GPT EDP 盘，可用于把 LBA1/LBA2
-   从 PARTIAL 继续细分；在此之前不得以 synthetic builder 输出冒充实盘证据。
+   从 PARTIAL 继续细分；本轮已额外只读扫描 `u_disk` 下3896个大于13扇且
+   小于1GiB的候选文件，没有任何文件在 LBA1 起点出现 `EFI PART`。在取得新
+   外部实盘前不得再把本地 synthetic builder 输出冒充正向证据。
 10. **LBA3 MP payload**：当前已明确 EDP 只 preserve/ignore；若继续追，目标应是
    真正厂商 MP producer/firmware consumer，而不是再证明 EDP 不使用它。
 

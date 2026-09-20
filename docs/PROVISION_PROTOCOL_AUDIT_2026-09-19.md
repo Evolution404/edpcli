@@ -2161,6 +2161,14 @@ mode1/mode2，没有 mode3 分支。这是组件能力差异，不应把 mode3
 - mode1 正向样本：**0**；
 - mode3 正向样本：**0**。
 
+为排除“旧备份里其实已有正例但因 device-id 缺失而被漏解”的可能，本轮又对
+`utils/backup` 与 `nopwd_tool/backup` 做扩展只读复核：前者严格使用同名
+`.meta.json` 的 device-id，后者使用文件名身份，只有解密后 `EDPF` magic
+成立的捕获才计入。共52份有效捕获、33个不同整文件 SHA-256；去重后
+25份 mode tuple=`0,2,2`，8份=`2,2,0`，mode1/mode3仍为0。这里包含
+历史和转换状态，不扩大22份 strict-original reference set，也不能替代正向
+real-device evidence。
+
 所以 `+0x38..+0x47` 目前的剩余缺口已经从“算法/分支不明”收缩为：
 **mode1/mode3 缺真实正向盘样本**。严格规则要求 producer + consumer +
 real-device evidence 三者都存在，因此这16B仍保持 PARTIAL，

@@ -459,8 +459,8 @@ DWARF 中恢复出的原始声明文件/行号与本地函数地址：
 | LBA0 | 0x1BC–0x1BD | PARTIAL | standard MBR reserved word | 官方模板为0；22盘也全零 | 当前 EDP 未发现独立 consumer | 22/22=`00 00` | 仅凭标准布局+全零不足以升级 |
 | LBA0 | 0x1BE–0x1FD | COMPLETE | 4×MBR partition entry | `UsbMainBSec` 模板；SAPF 恢复项也直接写回此处 | `UDiskLabelRepair.dll::Repair0Sector` 直接恢复该 64B 区域 | 22/22 可按标准 MBR 解码 | 分区表边界和消费闭合 |
 | LBA0 | 0x1FE–0x1FF | COMPLETE | MBR 55AA | 官方模板直接写 `55 AA` | MBR 校验/修复链检查签名 | 22/22 | 完成 |
-| LBA1 | 0x000–0x1FF | PARTIAL | optional GPT_Header profile | Linux官方 `CLabelManage::BuildSector1_Gpt@diskfile.cpp:1458` 构造完整512B `GPT_Header`，计算 partition-table CRC 与 header CRC | Windows `IsAllowRegisterCommonLabel/sub_1002ab70` 在 protective MBR 命中后，以 sector_size 跳到 LBA1，检查 `EFI PART` 与 `header_lba@+0x18==1` | 22/22原始 SAFE6 参考整扇全零；缺正向 GPT 实盘 | producer/consumer/结构已知，但当前真实参考未启用 GPT profile，因此不升 COMPLETE |
-| LBA2 | 0x000–0x1FF | PARTIAL | optional GPT partition-entry sector | Linux官方 `BuildSector2_Gpt@diskfile.cpp:1493` 生成128B `GPT_Partition` entry（type GUID/partition GUID/start/end/attr/name） | Windows GPT parser 从 `metadata+2*sector_size` 即 LBA2 起，按每扇4个×128B entry解析；注册检查可连续解析多扇 | 22/22原始 SAFE6 参考整扇全零；缺正向 GPT 实盘 | GPT table用途和entry边界已知，但 profile 的实际已注册盘样本缺失，因此保持PARTIAL |
+| LBA1 | 0x000–0x1FF | PARTIAL | optional GPT_Header profile | Linux官方 `CLabelManage::BuildSector1_Gpt@diskfile.cpp:1458` 构造完整512B `GPT_Header`，计算 partition-table CRC 与 header CRC | Windows `IsAllowRegisterCommonLabel/sub_1002ab70` 在 protective MBR 命中后，以 sector_size 跳到 LBA1，检查 `EFI PART` 与 `header_lba@+0x18==1` | 22/22原始 SAFE6 参考整扇全零；另只读扫描本地 `u_disk` 下3896个大于13扇、低于1GiB的候选文件，LBA1 `+0x00` 均无 `EFI PART`，仍缺正向 GPT 实盘 | producer/consumer/结构已知，但当前真实参考与扩展本地捕获均未启用 GPT profile，因此不升 COMPLETE |
+| LBA2 | 0x000–0x1FF | PARTIAL | optional GPT partition-entry sector | Linux官方 `BuildSector2_Gpt@diskfile.cpp:1493` 生成128B `GPT_Partition` entry（type GUID/partition GUID/start/end/attr/name） | Windows GPT parser 从 `metadata+2*sector_size` 即 LBA2 起，按每扇4个×128B entry解析；注册检查可连续解析多扇 | 22/22原始 SAFE6 参考整扇全零；上述3896个扩展候选没有任何 LBA1 GPT header，故也没有可采信的对应 LBA2 正例 | GPT table用途和entry边界已知，但 profile 的实际已注册盘样本缺失，因此保持PARTIAL |
 | LBA3 | 0x000–0x1FF | PARTIAL | LBA3 opaque manufacturer/MP sector | Windows `CUsbRegsiter::RegsiterUsb` 先读完整13扇区，SAFE6注册链没有任何 LBA3 builder，最终整段13扇区写回，因此 LBA3 的 EDP producer 行为是 preserve-existing；Linux `libcemsfilesyscheck.so` 符号/实现同样不存在 `BuildSector3` | 当前 Windows 注册/登录/修复组件与 Linux `CLabelManage` 均未找到 `ReadSector3` 或 LBA3 payload 解析路径；这是 EDP 侧“忽略内容”的负证据，不等于已找到厂商固件消费者 | 22份原始参考独立复核：21/22全零；唯一 Kingston 非零盘在 `+0x001=01`、`+0x020..027=b5 7e 9c 45 00 80 00 14`、`+0x1F0..1FF="this is mp mark\\0"` 有内容；同 VID/PID 的另一 Kingston 原盘整扇为零 | 整扇边界和 EDP preserve/ignore 行为已确定，因此从 UNKNOWN 降为 PARTIAL；厂商 MP 工具真正 producer、字段定义及固件侧 consumer 未闭合，禁止升 COMPLETE |
 | LBA4 | 0x000–0x017 | COMPLETE | `$$$onlyid$$$` clear header | 当前注册 writer 根据 main onlyid 格式化 | 识别/解码链从此恢复 onlyid | 22/22 | 完成 |
 | LBA4 | 0x018–0x01B | COMPLETE | OnlyIdXor8 | current writer: `main_onlyid ^ 0x88888888` | restore-info 读取该字段 | 22盘 current/legacy 可解 | 完成 |
@@ -1846,6 +1846,14 @@ reader 只有一个标准SM4解包分支且完全不读取 `oldSM4` 配置。
 **22份原始盘没有 mode1/mode3 的正向样本**。当前44条加密entry全部mode2。
 严格完成度统计仍不增加 16B×3，避免用静态算法闭合替代真实盘证据。
 
+扩展历史语料也按正确 device-id 重跑，而不是把缺身份时的 A6B0 RAW 输出
+误当解码结果：`utils/backup` 的 `.meta.json` 侧车提供 device-id，
+`nopwd_tool/backup` 则由文件名携带 device-id。两组共得到52份可验证 EDPF
+捕获，按整份前部快照 SHA-256 去重后为33份；其中25份 mode tuple 为
+`0,2,2`，8份为 `2,2,0`，仍然没有 mode1/mode3。该扩展扫描包含历史/转换
+状态，只用作“本地语料尚无正样本”的负证据，不并入22份严格原始盘计数，
+也不提高完成度。
+
 ### 6.3 LBA12 +0x48..+0x5F：扩展 key-material 与 Reserved[7] 必须分开
 
 两个 Linux 组件使用不同 ABI：`libedpedisk.so` runtime 的
@@ -1947,4 +1955,3 @@ reader 只有一个标准SM4解包分支且完全不读取 `oldSM4` 配置。
 - 可以修改 edpcli 代码、测试、文档；
 - 可以生成内存/文件中的模拟 LBA0–12；
 - **禁止对真实物理 raw USB 执行写入**，除非用户再次明确授权。
-
