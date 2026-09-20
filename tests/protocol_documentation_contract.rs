@@ -240,8 +240,8 @@ fn documentation_keeps_the_official_provisioning_chain_and_strict_rules() {
         "LBA2 GPT profile must remain PARTIAL until a positive real GPT sample exists"
     );
     assert!(
-        DOC.contains("| LBA4 | 49 | 463 | 0 | 9.6% |"),
-        "LBA4 progress must retain the closed fixed restore-node metadata while MyHardinfo and legacy identity fields remain partial"
+        DOC.contains("| LBA4 | 45 | 467 | 0 | 8.8% |"),
+        "LBA4 progress must avoid double-counting NewLabFlag while retaining the closed fixed restore-node metadata"
     );
     assert!(
         DOC.contains("| LBA6 | 431 | 81 | 0 | 84.2% |"),
