@@ -50,12 +50,21 @@ fn strict_progress_covers_exactly_lba0_through_lba12() {
     );
     assert_eq!(complete + partial + unknown, 13 * 512);
     assert!(
-        complete >= 1535,
-        "strict COMPLETE coverage regressed below the audited baseline: {complete}"
+        complete >= 3852,
+        "strict COMPLETE coverage regressed below the corrected audited baseline: {complete}"
     );
     assert!(
-        unknown <= 2537,
-        "UNKNOWN coverage regressed above the audited baseline: {unknown}"
+        partial <= 2804,
+        "PARTIAL coverage regressed above the corrected audited baseline: {partial}"
+    );
+    assert_eq!(
+        unknown, 0,
+        "all LBA0..12 bytes are at least PARTIAL after the completed UNKNOWN audit"
+    );
+    assert!(
+        DOC.contains("COMPLETE：3852B / 6656B = 57.9%")
+            && DOC.contains("PARTIAL：2804B / 6656B = 42.1%"),
+        "displayed global totals must match the corrected strict-progress ledger"
     );
 }
 
