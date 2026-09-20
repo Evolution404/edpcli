@@ -512,9 +512,15 @@ GSerial / 15B BeiZhu。current `BuildSector6` 自身则会先把临时16B缓冲�
   因而 `m_encrypt@+0x258` 精确映射到 `ebp-0x19C`；5字节比较目标
   `0x100C9A90` 为 ASCII `!SAFE`，相等分支 `0x1003BA94` 写1、非相等分支
   `0x1003BAC7` 写0，随后 `0x1003BAF5` 立即调用 `BuildSector6` 写到
-  `LBA6+0x1F0..0x1F3`。因此“为什么 current 样本为1”的 producer 来源已闭合；
-  但当前 `UsbLabelParam`/ReadSector6 没有对应输出成员，已扫 runtime 组件也未找到
-  最终行为 consumer，所以严格计数仍保持4B PARTIAL。
+  `LBA6+0x1F0..0x1F3`。因此“为什么 current 样本为1”的 producer 来源已闭合。
+  继续核对 consumer 后，Linux DWARF 正式 `UsbLabelParam` 结构根本没有
+  `m_encrypt` 成员；Linux `ReadSector6` 不返回该字段。Windows
+  `CheckLabel/sub_100152A0` 在整段 rolling-XOR 解码和前508B checksum 验证后，
+  显式读取 Dept/User/GSerial/Label 等字段，却没有 `+0x1F0` 的值相关访问；
+  已扫 runtime 组件同样未见行为 consumer。独立 SanDisk 原始 LBA6 也保持值1。
+  因此这4B由 PARTIAL 升为 **COMPLETE**，保守语义为
+  **write-only `!SAFE` label-generation metadata**：writer 保存当次匹配结果，
+  checksum 覆盖其物理字节，但读取侧不把它作为运行时加密开关。
 
 本轮还重新从 Linux 官方二进制本身核对当前模板，而不是沿用旧文档：
 `nm -S -C` 定位 `UsbMainBSec@0x22BB40,size=0x1000`，`.data`
@@ -766,7 +772,7 @@ short-Dept fixture 的 LBA6 C-string 与 LBA8 `Dept=` 相同，并且
 
 这不是把未知 legacy producer“平均摊掉”，而是把它隔离到唯一真实分叉字节。
 LBA6 因此进一步更新为
-**419 COMPLETE / 93 PARTIAL / 0 UNKNOWN = 81.8%**。
+**423 COMPLETE / 89 PARTIAL / 0 UNKNOWN = 82.6%**。
 
 ### LBA6 原352B UNKNOWN 已全部拆清：固定字段槽 + UsbMainBSec 静态模板
 
@@ -3194,7 +3200,7 @@ SAFE6 只透明保留。COMPLETE 不意味着未来出现其它值时可以机�
 | 3 | 0B | 512B | 0B | 0% | EDP 注册 writer 对整扇 preserve-existing，当前 Windows/Linux EDP reader 不解析；22份原始盘为21零+1 Kingston MP payload，但厂商 producer/固件 consumer 未闭合 |
 | 4 | 36B | 476B | 0B | 7.0% | onlyid clear header、OnlyIdXor8、LLGB 双锚点完成；第二 ID/HSerial/profile 字段仍不完整；`+0x047..+0x1FB` 已由 full writer、reader negative consumer 与 raw-zero/rolling-zero 双实盘 profile 从UNKNOWN降PARTIAL |
 | 5 | 512B | 0B | 0B | 100% | 两版 EdpDiskCtrl 均只对 LBA5 执行“读整扇→原样写回→检查 ERROR_WRITE_PROTECT(0x13)”；当前注册 writer 读取既有13扇区后不重建 LBA5，因此 preserve existing bytes；22/22原始盘全零 |
-| 6 | 419B | 93B | 0B | 81.8% | 216B UsbMainBSec fixed template、autoid[16]、Office[64]、Label物理56B均已闭合；本轮又把 Dept 64B 拆成 `+0x00..3E` 63B COMPLETE 与 `+0x3F` 1B PARTIAL。short Dept 由不清尾 strcpy_s + 固定64B memcpy形成 C-string/backing，long current/legacy 原盘前63B逐字节一致，join59/join60 唯一分叉严格位于槽末1B；Owner、CRC副本、GSerial/BeiZhu/legacy MBR、m_encrypt等继续PARTIAL |
+| 6 | 423B | 89B | 0B | 82.6% | 216B UsbMainBSec fixed template、autoid[16]、Office[64]、Label物理56B均已闭合；Dept 前63B COMPLETE、槽末1B因join59旧producer继续PARTIAL；`m_encrypt@+0x1F0` 又由正式 writer 字段、`!SAFE` 0/1 producer、Windows/Linux negative semantic consumer、checksum ownership 与真实盘闭合为 write-only label-generation metadata。Owner、CRC副本、GSerial/BeiZhu/legacy MBR等继续PARTIAL |
 | 7 | 512B | 0B | 0B | 100.0% | 3×Version、entry1/entry2 NeedDisturb 已按 compatibility metadata 生命周期闭合；最后两个 BackupPromptPeriod BYTE 又由正式 DWARF 字段、current-zero producer、四代 Windows + Linux structural-preserve/negative semantic consumer、跨 v0x0064/v0x0206 实盘0/0 profile 闭合为 dormant compatibility fields。LBA7 至此整扇 COMPLETE |
 | 8 | 476B | 36B | 0B | 93.0% | header 的 LLGB/logical length/ToolVersion/Labversion/writeTime/ElabOffset/Reserved/MacInfo 已闭合；`+0x080..0x1FF` 又由 Windows/Linux 双 writer、注册侧7-key reader、运行时17-key EdpEDiskCtrl reader、动态 encrypted backing/preserve tail 与22盘17-key实证整体闭合384B；仅 HDSerialInfo/UsbOnlyInfo 36B继续PARTIAL |
 | 9 | 276B | 236B | 0B | 53.9% | EETU magic/time/useCount + `reverse[104]` 已完整闭合；本轮再把 EPPE `+0x188..+0x1FF` 120B 闭合为 **writer-owned zero tail**：SetPassInfoEx显式清零，CUsbRegsiter::GetPassInfoEx 与 modfilesyscheck 均只消费 magic/minPassLen，current EdpDiskCtrl factory vtable不暴露 full-block helper，6/6原始EPPE tail为零；剩余236B集中在 +0x080..0x17F Dept/User/SAPF 多profile重叠区 |
@@ -3204,8 +3210,8 @@ SAFE6 只透明保留。COMPLETE 不意味着未来出现其它值时可以机�
 
 总计：
 
-- **完成：3831B / 6656B = 57.6%**
-- **部分已知：2825B / 6656B = 42.4%**
+- **完成：3835B / 6656B = 57.6%**
+- **部分已知：2821B / 6656B = 42.4%**
 - **未知：0B / 6656B = 0.0%**
 
 这是一组**严格下限**，故意宁可低估，不把“能生成/能解析”冒充成“已经完全理解”。

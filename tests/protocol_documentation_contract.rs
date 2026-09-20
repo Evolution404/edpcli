@@ -149,6 +149,7 @@ fn documentation_keeps_the_official_provisioning_chain_and_strict_rules() {
         "LBA8 static version/writeTime/reserved header",
         "LBA6 C-string slots have profile-dependent post-NUL backing bytes",
         "LBA6 m_encrypt current producer !SAFE gate",
+        "write-only `!SAFE` label-generation metadata",
         "writer-uninitialized backing",
         "strcpy_s@0x1B9B0",
         "MacInfo[6]",
@@ -232,8 +233,8 @@ fn documentation_keeps_the_official_provisioning_chain_and_strict_rules() {
         "LBA2 GPT profile must remain PARTIAL until a positive real GPT sample exists"
     );
     assert!(
-        DOC.contains("| LBA6 | 419 | 93 | 0 | 81.8% |"),
-        "LBA6 progress must retain the closed Dept prefix, autoid, Office, and Label backing semantics"
+        DOC.contains("| LBA6 | 423 | 89 | 0 | 82.6% |"),
+        "LBA6 progress must retain the closed Dept prefix, m_encrypt metadata, autoid, Office, and Label backing semantics"
     );
     assert!(
         DOC.contains("| LBA7 | 512 | 0 | 0 | 100.0% |"),

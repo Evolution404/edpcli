@@ -104,7 +104,7 @@ producer + 官方 consumer/行为 + 原始实盘验证**同时闭合，才能标
   SanDisk 与独立 Netac 两个正向 EESI profile 的88B也都为零。未来其它
   caller 若使用非零扩展值必须 round-trip，不能因为 current profile 为零而清零。
 
-- **LBA6 = 419 COMPLETE / 93 PARTIAL / 0 UNKNOWN = 81.8%**。
+- **LBA6 = 423 COMPLETE / 89 PARTIAL / 0 UNKNOWN = 82.6%**。
   原352B UNKNOWN 已全部拆清。Windows sub_10013FD0 与 Linux
   BuildSector6@0x1CAAC 都先复制官方 UsbMainBSec，再覆盖明确字段；
   +0x40..4F、+0xC0..FF、+0x108..187、+0x1F4..1FB 共216B没有后续 overlay。
@@ -130,9 +130,15 @@ producer + 官方 consumer/行为 + 原始实盘验证**同时闭合，才能标
   新回归同时锁定 short Dept 的 LBA6/LBA8 一致性和前63B内 nonzero post-NUL backing。
   因此 `+0x000..+0x03E` 63B 升 COMPLETE；只有 `+0x03F` 因 legacy join59
   producer/选择条件未知继续PARTIAL。
+  `m_encrypt@+0x1F0..+0x1F3` 4B 也已闭合为 **write-only `!SAFE`
+  label-generation metadata**：DWARF 正式字段位于 `UsbWriteParam+0x258`，
+  Windows `RegsiterUsb` 的 `!SAFE` 5B 匹配明确产生1/0；Windows/Linux
+  BuildSector6 均扩成DWORD落盘。读取侧正式 `UsbLabelParam` 没有该成员，
+  Windows CheckLabel/Linux ReadSector6 与已扫 runtime 不按值消费，仅整扇
+  checksum覆盖其物理字节；strict originals 22/22和独立SanDisk均为1。
   Dept/Owner 长值的 continuation 还确认落在 LBA9+0x80/+0x100，
   并已用 join60/join59 双profile实盘门禁锁定。当前全 LBA0–12 已无 UNKNOWN，
-  目前全局仍有2825B PARTIAL，绝不能把“UNKNOWN=0”当成全部协议完成。
+  目前全局仍有2821B PARTIAL，绝不能把“UNKNOWN=0”当成全部协议完成。
 
 - **LBA7 = 512 COMPLETE / 0 PARTIAL / 0 UNKNOWN = 100.0%**。
   真实物理 LBA7 已锁定为 **3×0x40 packed EDPF + 14B pass-info@+0xC0**，

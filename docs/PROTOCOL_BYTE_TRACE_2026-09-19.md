@@ -221,9 +221,12 @@ GSerial/BeiZhu 则直接按 C 字符串读回。注意 `UsbLabelParam` **没有*
   立即把同一临时对象传给 `BuildSector6/sub_10013FD0`，后者再把该 BYTE 扩成
   DWORD 写到 `sector6+0x1F0`。Linux `BuildSector6@diskfile.cpp:672` 独立给出
   同一落盘映射。也就是说 current producer 的 1/0 来源已经闭合，不再是
-  “22/22 恰好为1”的样本推断；但 `UsbLabelParam` 没有 `m_encrypt` 成员，当前
-  Windows/Linux `ReadSector6` 以及已扫 runtime 组件仍未找到最终行为 consumer，
-  所以这4B继续保持 PARTIAL。
+  “22/22 恰好为1”的样本推断。继续核对读取侧后，`UsbLabelParam` 正式结构
+  没有 `m_encrypt` 成员；Windows `CheckLabel/sub_100152A0` 在校验前508B
+  checksum 后会显式解析 Dept/User/GSerial/Label 等字段，却不读取
+  `+0x1F0`；Linux `ReadSector6` 同样不返回该字段，已扫 runtime 也无值相关
+  consumer。因此这4B可闭合为 **write-only `!SAFE` label-generation metadata**：
+  writer记录当时的 `!SAFE` 匹配结果，物理字节参与整扇checksum，但不是读取侧控制量。
 
 22份原始盘进一步给出了不能把两个 16B 字符串槽整体标 COMPLETE 的直接反例：
 
@@ -397,7 +400,7 @@ post-XOR 写回 `+0x45/+0x46`。历史 raw-zero 实盘仅作为兼容读取 prof
 | LBA3 | 0 | 512 | 0 | 0.0% |
 | LBA4 | 36 | 476 | 0 | 7.0% |
 | LBA5 | 512 | 0 | 0 | 100.0% |
-| LBA6 | 419 | 93 | 0 | 81.8% |
+| LBA6 | 423 | 89 | 0 | 82.6% |
 | LBA7 | 512 | 0 | 0 | 100.0% |
 | LBA8 | 476 | 36 | 0 | 93.0% |
 | LBA9 | 276 | 236 | 0 | 53.9% |
@@ -408,8 +411,8 @@ post-XOR 写回 `+0x45/+0x46`。历史 raw-zero 实盘仅作为兼容读取 prof
 
 当前总计：
 
-- **COMPLETE：3831B / 6656B = 57.6%**
-- **PARTIAL：2825B / 6656B = 42.4%**
+- **COMPLETE：3835B / 6656B = 57.6%**
+- **PARTIAL：2821B / 6656B = 42.4%**
 - **UNKNOWN：0B / 6656B = 0.0%**
 
 LBA11 已完整闭合为 512B COMPLETE。此前卡住的后半 252B 不是“某型号盘偶尔使用
@@ -488,7 +491,7 @@ DWARF 中恢复出的原始声明文件/行号与本地函数地址：
 | LBA6 | 0x1C0–0x1CF | PARTIAL | m_usbGSerial C-string slot + profile-dependent post-NUL backing bytes | current Windows/Linux `BuildSector6` 都先清零临时16B，再固定复制输入对象前15B；输入对象 NUL 后字节可被一并带入。legacy 两盘则显示短 GSerial 覆盖了旧 MBR entry1/2 的一部分，NUL 后 surviving bytes 继续落在旧 MBR 几何位置 | Linux `ReadSector6` 只按C字符串匹配 GSerial，NUL 后不消费 | 22盘中16份短值 `322CA28A` 全部在NUL后仍有非零字节；6份长值为 `322CA28A-D7D144`；两份 legacy 盘的 `u32@+0x1CA=20417` 恰落在 entry1 sector_count 位置 | 字符串语义闭合，但固定槽尾跨 writer profile 语义不同，整16B仍不能 COMPLETE |
 | LBA6 | 0x1D0–0x1DF | PARTIAL | BeiZhu C-string slot + profile-dependent post-NUL backing bytes | current Windows/Linux writer 同样固定复制输入对象前15B；legacy 两盘中 GBK“普通”+NUL 后的 surviving bytes 与后续 `+0x1E0` 连成旧 MBR entry2/entry3 几何 | Linux `ReadSector6` 只以 C 字符串读回 BeiZhu | 22盘：20空、2份GBK“普通”；8/22首个NUL后仍有非零字节；两份 legacy 盘的 `start_lba@+0x1D6`/`sector_count@+0x1DA` 对应旧 entry2 几何 | 字符串语义闭合；legacy underlay 已识别，但 current/legacy 固定槽物理语义不同，整16B仍 PARTIAL |
 | LBA6 | 0x1E0–0x1EF | PARTIAL | current-template zero / legacy MBR partition-table fragment | current Windows/Linux `BuildSector6` 都从静态 `UsbMainBSec` 起步且不显式覆盖此区；当前模板这里为16B零。legacy 两盘表明旧 writer/profile 曾以动态 MBR table 作为 underlay：第3条 MBR entry 起于 `+0x1DE`，BeiZhu 覆盖前2B 后，`+0x1E0..0x1ED` 仍保留 start-CHS尾、`type=0x07`、end-CHS、start_lba、sector_count；`+0x1EE..0x1EF` 是 entry4 前2B | current `ReadSector6` 无业务读取；`UDiskLabelRepair` 虽有真实 MBR repair/check consumer，但其 SAFE6 判断直接读取 LBA12 并从 sector9/backup 恢复 sector0，未发现直接读取该 LBA6 fragment | 严格22份：20/22 为零且这20份仍全部存在 LBA12 type4；仅 Aigo+SanDisk 2/22 非零，2/2 的 `type/start_lba/sector_count` 都与同盘 LBA12 type4 精确对应。Aigo/SanDisk 分别为 `c1 ff 07 ef ff ff 1c a8 7d 0e e3 f4 27 00 00 00` / `c1 ff 07 ef ff ff b2 8a 05 0e 77 3c 4c 00 00 00` | 已从“opaque extension”纠正为 legacy MBR-layout 残片；current-zero producer闭合、legacy结构语义和实盘交叉已闭合，但旧 writer 与直接 consumer 仍缺，因此不增加 COMPLETE |
-| LBA6 | 0x1F0–0x1F3 | PARTIAL | m_encrypt | **LBA6 m_encrypt current producer !SAFE gate**：DWARF 定位 `UsbWriteParam+0x258`；Windows `RegsiterUsb` 临时对象=`ebp-0x3F4`，故该字段=`ebp-0x19C`；PE `0x1003BA94/0x1003BAC7` 在5字节 `!SAFE` 比较的相等/不等分支分别写1/0，随后 `0x1003BAF5 -> BuildSector6`；Windows/Linux BuildSector6 都扩成 DWORD 写 `+0x1F0` | `UsbLabelParam` 无 `m_encrypt` 成员；Windows/Linux ReadSector6 与当前已扫 runtime 组件仍未找到该字段的最终行为读取 | 22/22=1 | current producer 1/0来源已闭合；仍缺真实行为 consumer，严格标准下继续 PARTIAL |
+| LBA6 | 0x1F0–0x1F3 | COMPLETE | write-only `!SAFE` label-generation metadata (`m_encrypt`) | DWARF 正式定位 `UsbWriteParam.m_encrypt@+0x258`；Windows `RegsiterUsb` 对注册字符串执行5字节 `!SAFE` 匹配，相等/不等分支在 `0x1003BA94/0x1003BAC7` 分别写1/0，随后立即传给 BuildSector6；Windows/Linux BuildSector6 都把该 bool 扩成 DWORD 写 `+0x1F0` | 读取侧正式 `UsbLabelParam` 结构没有 `m_encrypt` 成员；Linux ReadSector6 不返回它。Windows `CheckLabel/sub_100152A0` 校验前508B checksum 后显式解析其它字段，但不读取 `+0x1F0`；已扫 runtime 无值相关 consumer。因此消费语义是 checksum-covered / semantic-ignore，而非运行时加密开关 | committed strict originals 22/22=1；独立 SanDisk 原始 LBA6 同样=1；CI `lba6_m_encrypt_is_the_observed_write_only_safe_label_metadata` 锁定 | producer 的0/1规则、正式字段名、negative semantic consumer、checksum ownership 与真实盘均闭合。COMPLETE 不表示恒为1；非 `!SAFE` producer 可合法写0 |
 | LBA6 | 0x1F4–0x1FB | COMPLETE | UsbMainBSec static zero tail before checksum | Windows/Linux BuildSector6 都由 `UsbMainBSec` 初始化，字段 overlay 最后只写到 `+0x1F3`，故8B保持模板零 | 两端 ReadSector6 的 checksum 覆盖到 `+0x1FB`；字段 parser无独立读取 | 严格22份22/22解密为8B零，官方模板同样为零；CI含独立SanDisk锁定 | explicit template-zero producer + checksum consumer +实盘，8B COMPLETE |
 | LBA6 | 0x1FC–0x1FF | COMPLETE | SAFE6 checksum | writer 对前508B计算 checksum | reader/inspect 校验 | 22/22 校验通过 | 完成 |
 | LBA7 | 0x000–0x0BF | PARTIAL | 3×64B packed EDPF 区 | Windows old-table writer/runtime；Linux natural ABI 仅作字段名参考 | 多处 reader/登录/挂载 | 22盘均按0x40 stride成立 | 逐字段状态见详细审计；不能用 Linux 0x48 natural stride 解析物理 LBA7 |

@@ -824,6 +824,40 @@ fn lba6_crc_usb_id_pair_is_device_id_crc_and_doubled_guard() {
     );
 }
 
+#[test]
+fn lba6_m_encrypt_is_the_observed_write_only_safe_label_metadata() {
+    let mut checked = 0usize;
+    for entry in fs::read_dir(FIXTURE_DIR).expect("protocol fixtures") {
+        let path = entry.expect("backup entry").path();
+        if path.extension().and_then(|ext| ext.to_str()) != Some("bin") {
+            continue;
+        }
+        let name = path.file_name().unwrap().to_str().unwrap();
+        if parse_reference_backup_name(name).is_none() {
+            continue;
+        }
+        let image = fs::read(&path).expect("fixture bytes");
+        let lba6 = lba6_decode(sector(&image, 6));
+        assert_eq!(
+            u32_le(&lba6, 0x1f0),
+            1,
+            "strict original must retain the observed !SAFE m_encrypt profile: {name}"
+        );
+        checked += 1;
+    }
+    assert!(
+        checked >= MIN_PROTOCOL_FIXTURES,
+        "protocol audit unexpectedly lost LBA6 m_encrypt fixtures"
+    );
+
+    let sandisk = lba6_decode(&decode_hex_fixture(SANDISK_LBA6_HEX));
+    assert_eq!(
+        u32_le(&sandisk, 0x1f0),
+        1,
+        "independent SanDisk original must retain the same m_encrypt profile"
+    );
+}
+
 fn assert_lba6_legacy_mbr_type4_fragment_matches_lba12(
     lba6_raw: &[u8],
     lba12_raw: &[u8],
