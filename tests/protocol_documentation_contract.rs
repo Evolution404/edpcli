@@ -50,11 +50,11 @@ fn strict_progress_covers_exactly_lba0_through_lba12() {
     );
     assert_eq!(complete + partial + unknown, 13 * 512);
     assert!(
-        complete >= 3873,
+        complete >= 3882,
         "strict COMPLETE coverage regressed below the corrected audited baseline: {complete}"
     );
     assert!(
-        partial <= 2783,
+        partial <= 2774,
         "PARTIAL coverage regressed above the corrected audited baseline: {partial}"
     );
     assert_eq!(
@@ -62,8 +62,8 @@ fn strict_progress_covers_exactly_lba0_through_lba12() {
         "all LBA0..12 bytes are at least PARTIAL after the completed UNKNOWN audit"
     );
     assert!(
-        DOC.contains("COMPLETE：3873B / 6656B = 58.2%")
-            && DOC.contains("PARTIAL：2783B / 6656B = 41.8%"),
+        DOC.contains("COMPLETE：3882B / 6656B = 58.3%")
+            && DOC.contains("PARTIAL：2774B / 6656B = 41.7%"),
         "displayed global totals must match the corrected strict-progress ledger"
     );
 }
@@ -239,7 +239,7 @@ fn documentation_keeps_the_official_provisioning_chain_and_strict_rules() {
         );
     }
     assert!(
-        DOC.contains("| LBA0 | 133 | 379 | 0 | 26.0% |"),
+        DOC.contains("| LBA0 | 142 | 370 | 0 | 27.7% |"),
         "LBA0 progress must retain the closed invariant bootstrap tail, SectorSize overlay, MBR signature, and compatibility regions"
     );
     assert!(
