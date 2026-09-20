@@ -28,8 +28,8 @@ producer + 官方 consumer/行为 + 原始实盘验证**同时闭合，才能标
 
 截至本次 LBA9 EPPE writer-owned zero tail 闭环，严格统计为：
 
-- **COMPLETE：3656 / 6656B = 54.9%**
-- **PARTIAL：3000 / 6656B = 45.1%**
+- **COMPLETE：3689 / 6656B = 55.4%**
+- **PARTIAL：2967 / 6656B = 44.6%**
 - **UNKNOWN：0 / 6656B = 0.0%**
 
 当前各 LBA 严格状态以主账本为唯一准绳，最新关键增量：
@@ -126,7 +126,7 @@ producer + 官方 consumer/行为 + 原始实盘验证**同时闭合，才能标
   producer/选择条件未知继续PARTIAL。
   Dept/Owner 长值的 continuation 还确认落在 LBA9+0x80/+0x100，
   并已用 join60/join59 双profile实盘门禁锁定。当前全 LBA0–12 已无 UNKNOWN，
-  目前全局仍有3000B PARTIAL，绝不能把“UNKNOWN=0”当成全部协议完成。
+  目前全局仍有2967B PARTIAL，绝不能把“UNKNOWN=0”当成全部协议完成。
 
 - **LBA7 = 490 COMPLETE / 22 PARTIAL / 0 UNKNOWN = 95.7%**。
   真实物理 LBA7 已锁定为 **3×0x40 packed EDPF + 14B pass-info@+0xC0**，
@@ -239,7 +239,7 @@ producer + 官方 consumer/行为 + 原始实盘验证**同时闭合，才能标
   `sub_10008950(ReWrite11Sector) -> sub_10003A40` 用同一容量重建 LBA11；同一
   Aigo U335 rev_pmap 的 CHS/exact 双真实捕获与两条官方路径吻合。因此后半252B已
   从 PARTIAL 升 COMPLETE，不再重复追 CHS profile。
-- **LBA0 = 69 COMPLETE / 443 PARTIAL**。
+- **LBA0 = 102 COMPLETE / 410 PARTIAL**。
   legacy MBR `+0x1B5..+0x1B7 = 2C 44 63` 已闭合为三个错误消息指针低字节；
   current zero bootstrap、legacy `UsbMainBSec` 与 Aigo L8302 第三 profile 已进一步
   分型。Aigo 前400B已精确匹配 CEMS 随附 `Netac_USB_API.dll/hardware.dll` 等8份
@@ -247,7 +247,15 @@ producer + 官方 consumer/行为 + 原始实盘验证**同时闭合，才能标
   整扇生成该 MBR；legacy `UsbMainBSec` 也找到
   `CUsbRegsiter::UnRegsiterUsb -> LBA0` 的直接写回链。当前仍缺旧注册版本为何在
   已注册实盘保留 legacy bootstrap，以及制标上层何时选择 Netac Format 的 profile
-  selection，因此443B PARTIAL 数不变。
+  selection，因此前400B bootstrap 主体仍保持 PARTIAL。
+  本轮又把原先机械并入大区的两段尾部拆开：`+0x190..+0x19F` 16B 与
+  `+0x1A4..+0x1B4` 17B 在 current SAFE6 中均为 unowned preserve，Linux
+  `BuildSector0` 也不写；legacy `UsbMainBSec` 与 Aigo/Netac 模板均生成零，
+  16-bit bootstrap / current 注册准入 / Repair 都不读取。严格22盘与扩展57份
+  完整历史快照两段均全零，因此共33B按 cross-profile unowned preserve / historical-zero
+  compatibility region 升 COMPLETE。`+0x1A0..+0x1A3 SectorSize` 单独保留PARTIAL：
+  Windows `sub_10013F10` 只在 SAFE1 分支写它，Linux BuildSector0不落盘，current
+  SAFE6只preserve；扩展57盘为34×512、23×0，且尚无值相关consumer。
 - **LBA3 = 整扇 PARTIAL**。
   EDP 注册链只 preserve existing，当前 EDP reader 不解析；strict 22盘仍是21零 +
   1份 Kingston `this is mp mark\0` 制造 payload。扩展只读扫描两个备份目录60份

@@ -391,7 +391,7 @@ post-XOR 写回 `+0x45/+0x46`。历史 raw-zero 实盘仅作为兼容读取 prof
 <!-- STRICT_PROGRESS_BEGIN -->
 | LBA | COMPLETE | PARTIAL | UNKNOWN | 严格完成率 |
 |---:|---:|---:|---:|---:|
-| LBA0 | 69 | 443 | 0 | 13.5% |
+| LBA0 | 102 | 410 | 0 | 19.9% |
 | LBA1 | 0 | 512 | 0 | 0.0% |
 | LBA2 | 0 | 512 | 0 | 0.0% |
 | LBA3 | 0 | 512 | 0 | 0.0% |
@@ -408,8 +408,8 @@ post-XOR 写回 `+0x45/+0x46`。历史 raw-zero 实盘仅作为兼容读取 prof
 
 当前总计：
 
-- **COMPLETE：3656B / 6656B = 54.9%**
-- **PARTIAL：3000B / 6656B = 45.1%**
+- **COMPLETE：3689B / 6656B = 55.4%**
+- **PARTIAL：2967B / 6656B = 44.6%**
 - **UNKNOWN：0B / 6656B = 0.0%**
 
 LBA11 已完整闭合为 512B COMPLETE。此前卡住的后半 252B 不是“某型号盘偶尔使用
@@ -453,7 +453,10 @@ DWARF 中恢复出的原始声明文件/行号与本地函数地址：
 <!-- FIELD_LEDGER_BEGIN -->
 | LBA | 范围 | 状态 | 字段/区域 | Producer 证据 | Consumer 证据 | 实盘验证 | 当前结论 |
 |---|---|---|---|---|---|---|---|
-| LBA0 | 0x000–0x1B4 | PARTIAL | MBR bootstrap body / legacy tail data | Windows `UsbMainBSec@0x100E7220` 提供正式 legacy 模板；current `CUsbRegsiter::RegsiterUsb` 在最终13扇区 `WriteSectorData` 前**无条件 memset LBA0 +0x000..+0x18F 共0x190B为零**；`UDiskLabelRepair::CLabelRepair::ReCreate0Sector -> sub_10003960` 的 current 重建路径也明确清零同一0x190B；另已定位 Aigo L8302 的第三 profile producer：`Netac_USB_API.dll::sub_10003880` 从 `0x1014BA58` 以 `rep movsd, ECX=0x80` 整扇复制512B MBR模板，再只从 `+0x1BE` 起重建分区材料，故前400B保持该模板 | legacy 模板自身的 BIOS/MBR bootstrap 行为可执行并消费其消息/分区材料；current EDP 路径把前400B视作可清除 bootstrap；`CUsbRegsiter::UnRegsiterUsb` 还存在 `UsbMainBSec -> LBA0` 的直接官方写回链，但 historical 注册盘最初由哪一代 writer/条件保留该 legacy 模板、以及制标上层何时选择 Netac Format 路径仍未闭合 | 21份非转换 backup 的前400B只有三类：标准 legacy profile **逐字节等于 UsbMainBSec 前400B**（SHA-256 `4eeee8d52f8b58d9a1fa35b63a14c8c5dba1b2717eaa44e6fb1ff0327ccbe5ed`）、current zero[400]、Aigo L8302 profile；Aigo L8302 前400B SHA-256=`00863071fd5db2f4ef7734d384dc46e07d9c423ed59c69407597590b89aa13ec`，与 CEMS 随附 `hardware.dll/netac_usb_api.dll/netac_usb_api64.dll/newusb20.dll` 等8份 Netac/hardware 二进制中的模板逐字节一致。仓库 curated 原盘夹具同时锁定前两类，并由 `lba0_bootstrap_profiles_are_zero_or_the_official_usb_main_bsec_prefix` 防回退。严格原盘 `+0x190..+0x1BD` 除 SectorSize、既有3B message-pointer、disk signature 外其余观测字节均为0 | Aigo 第三 profile 已从“未知来源”收敛为 Netac Format MBR 模板，legacy 模板也确认存在直接 LBA0 写回链；但 historical 注册 profile 选择与制标上层 Format 选择仍缺，因此整个大区继续 PARTIAL，不因模板指纹或单条 writer 链升级 |
+| LBA0 | 0x000–0x18F | PARTIAL | MBR bootstrap body | Windows `UsbMainBSec@0x100E7220` 提供正式 legacy 模板；current `CUsbRegsiter::RegsiterUsb` 在最终13扇区 `WriteSectorData` 前无条件 `memset(LBA0+0x000,0,0x190)`；`UDiskLabelRepair::CLabelRepair::ReCreate0Sector -> sub_10003960` 的 current 重建路径也清零同一0x190B；Aigo L8302 第三 profile 则由 `Netac_USB_API.dll::sub_10003880` 从 `0x1014BA58` 以 `rep movsd, ECX=0x80` 整扇复制512B MBR模板 | legacy 模板自身 BIOS/MBR bootstrap 会执行并消费其中代码/消息；current EDP 将前400B视作可清除 bootstrap。`CUsbRegsiter::UnRegsiterUsb` 有 `UsbMainBSec -> LBA0` 直接写回，但 historical 已注册盘为何保留 legacy 模板、以及制标上层何时选择 Netac Format 仍未闭合 | 21份非转换 backup 的前400B只有标准 `UsbMainBSec`、current zero[400]、Aigo Netac 三类；`UsbMainBSec` 前400B SHA-256=`4eeee8d52f8b58d9a1fa35b63a14c8c5dba1b2717eaa44e6fb1ff0327ccbe5ed`；Aigo/Netac 前400B SHA-256=`00863071fd5db2f4ef7734d384dc46e07d9c423ed59c69407597590b89aa13ec`；curated 原盘夹具锁定前两类，Aigo 原盘与 Netac 模板逐字节一致 | 三种主体 profile 的物理边界/部分 producer 已知，但 historical profile-selection 仍缺，因此400B继续 PARTIAL |
+| LBA0 | 0x190–0x19F | COMPLETE | cross-profile unowned preserve / historical-zero compatibility region | current SAFE6 `RegsiterUsb` 最终只清 `+0x000..+0x18F`，因此本16B保持 pre-read backing；Linux `BuildSector0@diskfile.cpp:625` 只重建 `+0x1BE` MBR entry，不写本区；legacy `UsbMainBSec` 本16B固定为零；Netac `sub_10003880` 整扇复制的 Aigo producer 模板在本16B同样为零 | 16-bit `UsbMainBSec` bootstrap 的直接数据引用落在 `+0x1B5/+0x1B6/+0x1B7` 和分区表/签名，不读取本区；current 注册/准入与 `UDiskLabelRepair::ReCreate0Sector/sub_10003960` 均不解释本16B，repair 新建只清前0x190和分区表，保持本区 unowned | 严格22份原始参考本16B 22/22 全零；扩展 `nopwd_tool/backup + utils/backup` 共57份完整历史快照也 57/57 全零；既有 `lba0_bootstrap_profiles_are_zero_or_the_official_usb_main_bsec_prefix` 门禁锁定 committed originals | COMPLETE 表示跨已知 profile 的**无业务 payload / preserve-existing**生命周期闭合，而不是规定未来盘面必须为零；遇到未知非零值应兼容保留 |
+| LBA0 | 0x1A0–0x1A3 | PARTIAL | SAFE1 / legacy `SectorSize` compatibility slot | Windows `BuildSector0/sub_10013F10` 在 **SAFE1** 分支明确写 `m_nSectorSize` 到 `+0x1A0`；`UsbMainBSec` 静态模板也固定为512。Linux `CLabelManage::BuildSector0@diskfile.cpp:625` 只用 `m_nSectorSize` 计算 partition sector count，**不把它写入 +0x1A0**；current SAFE6 主链也不调用 `sub_10013F10`，只 preserve 该槽 | 已反汇编的 legacy 16-bit MBR bootstrap不读取该槽；current SAFE6 注册/repair同样未找到值相关读取 | 严格22份原始盘存在0/512双 profile（其中4份为512）；扩展57份历史完整快照为34×512、23×0，证明它不是 current/legacy 简单二分 | 字段来源已收窄为 SAFE1/legacy compatibility metadata，但 SAFE6 历史 0/512 profile selection 与独立业务 consumer 仍缺，继续 PARTIAL |
+| LBA0 | 0x1A4–0x1B4 | COMPLETE | cross-profile unowned preserve / historical-zero compatibility region | 与 `+0x190..+0x19F` 相同：current SAFE6 不覆盖、Linux BuildSector0 不写；legacy `UsbMainBSec` 与 Aigo/Netac整扇模板均在本17B生成零 | 16-bit MBR bootstrap 不读取本区；current EDP 准入、partition repair 与 `ReCreate0Sector` 都只处理其它明确区域，不赋予本17B语义 | 严格22份 22/22 全零；扩展57份完整历史快照 57/57 全零；committed original 门禁已有精确零断言 | 17B 的跨 profile unowned/preserve、negative consumer 与真实盘已闭合；未来非零兼容值必须 preserve，不得机械清零 |
 | LBA0 | 0x1B5–0x1B7 | COMPLETE | **LBA0 legacy MBR message-pointer bytes** | 官方 `UsbMainBSec@0x100E7220` 固定为 `2C 44 63`；`sub_10013FD0`/旧模板写路径整扇复制该模板 | 模板先把 `+0x1B..` 搬到 `0x061B` 后执行；runtime `mov al,[0x07B5/0x07B6/0x07B7]` 分别组成 `SI=0x072C/0x0744/0x0763`，指向原模板 `+0x12C/+0x144/+0x163` 三条错误消息 | 22盘严格统计：14/22=`2C 44 63`，8/22=`00 00 00`，无第三种值；CI夹具同时保留两种 profile | 三字节是 legacy MBR 错误消息指针低字节；零态表示该 legacy tail 未存在/已清空，不再当“未知随机尾巴” |
 | LBA0 | 0x1B8–0x1BB | PARTIAL | standard MBR disk signature | `CreateDiskMbr` 取 `GetSystemTimePreciseAsFileTime`（fallback `GetSystemTimeAsFileTime`）→ FILETIME 转 Unix seconds → 低32位填 `CREATE_DISK_MBR.Signature` → `IOCTL_DISK_CREATE_DISK` | Windows drive-layout API 会把它作为 MBR Signature 报告；当前已审 EDP `0x70050` 调用均未发现业务逻辑读取该值 | 22/22非零，19个值；同一 onlyid 的重复备份保持不变，按LE解释与历史初始化日期吻合 | 标准字段语义与 producer 已知，但未找到 EDP 自身语义 consumer，因此按项目严格口径继续 PARTIAL |
 | LBA0 | 0x1BC–0x1BD | PARTIAL | standard MBR reserved word | 官方模板为0；22盘也全零 | 当前 EDP 未发现独立 consumer | 22/22=`00 00` | 仅凭标准布局+全零不足以升级 |

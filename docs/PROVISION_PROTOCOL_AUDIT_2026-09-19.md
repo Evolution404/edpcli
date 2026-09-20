@@ -2801,12 +2801,54 @@ memset(metadata + LBA0 + 0x000, 0, 0x190)
 - `+0x1B8..+0x1BB` 是标准 MBR disk signature；
 - `+0x1BC..+0x1BD` 为零。
 
-这批证据**不增加严格 COMPLETE 字节数**。原因是：current zero producer 虽已闭合，
+此前这批证据**没有增加严格 COMPLETE 字节数**。原因是：current zero producer 虽已闭合，
 标准 legacy template 的静态身份也已由多盘逐字节证实，但还没有定位到“哪一代官方
 注册/格式化 writer 将这400B template 写入 LBA0”的历史 producer，也没有解释
 Aigo L8302 第三种 bootstrap 的 producer/选择条件；尾部 SectorSize/reserved 的
 业务 consumer 也未全部闭合。因此 `+0x000..+0x1B4` 继续整体保持 PARTIAL，
-总计仍为 **3656B COMPLETE / 3000B PARTIAL**。
+当时总计仍为 **3656B COMPLETE / 3000B PARTIAL**；后续对尾部逐段拆分后的最新统计见下文。
+
+#### LBA0 `+0x190..+0x1B4` 再拆分：33B unowned compatibility region 闭合
+
+继续按 SAFE6 实际调用链复核后，先纠正一个旧归因：Windows
+`BuildSector0/sub_10013F10` **只在 SAFE1 分支**由 `RegsiterUsb` 调用；SAFE6 主链
+不会调用它。SAFE6 在完成 LBA4/LBA6/LBA8/LBA11/EDPF 等构造后，最终只执行：
+
+```text
+memset(LBA0 + 0x000, 0, 0x190)
+WriteSectorData(LBA0..12, count=13)
+```
+
+因此 `+0x190..+0x1BD` 在 current SAFE6 中不是新建 payload，而是既有盘面 backing。
+Linux `CLabelManage::BuildSector0@0x1C8CC, diskfile.cpp:625` 独立证明同一边界：函数
+只根据 `m_nSectorSize` 计算 MBR partition sector count、清/写 `+0x1BE` 的64B分区表，
+完全不写 `+0x190..+0x1BD`。
+
+把尾部按真实行为拆开后：
+
+- `+0x190..+0x19F` 16B：legacy `UsbMainBSec` 固定为零；Aigo L8302 的
+  `Netac_USB_API.dll::sub_10003880` 整扇模板也为零；current SAFE6/Linux builder
+  都不拥有该区，只 preserve；
+- `+0x1A0..+0x1A3` 4B：Windows SAFE1 `sub_10013F10` 明确写 sector size，
+  legacy `UsbMainBSec` 为512；但 Linux BuildSector0 只使用 sector size 计算分区、
+  不把它落到此槽，current SAFE6也只 preserve，因此这是独立 compatibility field；
+- `+0x1A4..+0x1B4` 17B：与前16B相同，legacy/Netac producer均为零，current
+  SAFE6/Linux writer均不拥有。
+
+consumer 侧也逐段核对：`UsbMainBSec` 16-bit bootstrap 的明确尾部数据引用只有
+`+0x1B5/+0x1B6/+0x1B7` 三个消息指针以及标准 MBR partition/signature；当前注册准入、
+`UDiskLabelRepair::ReCreate0Sector/sub_10003960` 也不解析上述两段33B。repair 的新建
+路径同样只清前0x190和`+0x1BE`分区表，证明这33B不属于 repair payload。
+
+实盘方面，严格22份原始参考的两段33B均22/22全零；进一步只读扫描
+`nopwd_tool/backup + utils/backup` 的57份完整历史快照仍为57/57全零。相邻
+SectorSize 则明确出现双 profile：扩展57份为34×512、23×0，证明不能把整个尾部
+机械叫做 zero padding。
+
+因此本轮只升级真正闭合的两段：16B+17B = **33B PARTIAL -> COMPLETE**，语义为
+**cross-profile unowned preserve / historical-zero compatibility region**。COMPLETE 不表示
+未来必须为零；若发现非零未知 profile，兼容实现应原样 preserve。SectorSize 4B 因
+SAFE6 历史0/512选择条件及值相关consumer仍缺，继续PARTIAL。
 
 #### LBA0 Aigo L8302 第三 profile：已定位 Netac Format 的完整 MBR producer
 
@@ -2908,8 +2950,8 @@ output_mbr[0x1BE] = 0x80
 
 总计：
 
-- **完成：3656B / 6656B = 54.9%**
-- **部分已知：3000B / 6656B = 45.1%**
+- **完成：3689B / 6656B = 55.4%**
+- **部分已知：2967B / 6656B = 44.6%**
 - **未知：0B / 6656B = 0.0%**
 
 这是一组**严格下限**，故意宁可低估，不把“能生成/能解析”冒充成“已经完全理解”。
@@ -2917,7 +2959,7 @@ output_mbr[0x1BE] = 0x80
 
 | LBA | 状态 | 当前结论 |
 |---|---|---|
-| 0 | 部分闭合 | MBR 分区表、55AA、legacy 三个错误消息指针字节已闭合；SectorSize、disk signature 的 EDP-side consumer 与其它 bootstrap/profile 尾部继续追 |
+| 0 | 部分闭合 | MBR 分区表、55AA、legacy 三个错误消息指针及 `+0x190..0x19F/+0x1A4..0x1B4` 两段 cross-profile unowned compatibility region 已闭合；SectorSize、disk signature 的 EDP-side consumer 与 bootstrap profile-selection 继续追 |
 | 1 | GPT profile 部分闭合 | 当前22/22全零；官方 GPT_Header writer/consumer 已知，但缺正向GPT实盘 |
 | 2 | GPT profile 部分闭合 | 当前22/22全零；官方 GPT_Partition writer/consumer 已知，但缺正向GPT实盘 |
 | 3 | 外部制造区部分闭合 | 21/22 全零，1 份 Kingston MP payload；官方 EDP 注册链原样保留且当前 reader 不解析，厂商生成/消费语义仍未知 |

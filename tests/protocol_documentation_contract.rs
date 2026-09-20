@@ -169,6 +169,9 @@ fn documentation_keeps_the_official_provisioning_chain_and_strict_rules() {
         "LBA0 legacy MBR message-pointer bytes",
         "4eeee8d52f8b58d9a1fa35b63a14c8c5dba1b2717eaa44e6fb1ff0327ccbe5ed",
         "lba0_bootstrap_profiles_are_zero_or_the_official_usb_main_bsec_prefix",
+        "cross-profile unowned preserve / historical-zero compatibility region",
+        "SAFE1 / legacy `SectorSize` compatibility slot",
+        "共57份完整历史快照",
         "Netac_USB_API.dll::sub_10003880",
         "00863071fd5db2f4ef7734d384dc46e07d9c423ed59c69407597590b89aa13ec",
         "rep movsd, ECX=0x80",
@@ -197,6 +200,10 @@ fn documentation_keeps_the_official_provisioning_chain_and_strict_rules() {
             "protocol ledger lost required evidence: {required}"
         );
     }
+    assert!(
+        DOC.contains("| LBA0 | 102 | 410 | 0 | 19.9% |"),
+        "LBA0 progress must retain the two closed unowned compatibility regions"
+    );
     assert!(
         DOC.contains("| LBA1 | 0 | 512 | 0 | 0.0% |"),
         "LBA1 GPT profile must remain PARTIAL until a positive real GPT sample exists"
