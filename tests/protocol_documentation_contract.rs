@@ -165,6 +165,8 @@ fn documentation_keeps_the_official_provisioning_chain_and_strict_rules() {
         "LBA12 alternate wrapping-mode algorithm map",
         "LBA12 packed Reserved[7] producer/negative-consumer closure",
         "LBA12 EncryptFileKey32 compatibility slot structural-cache / negative-semantic-consumer closure",
+        "packed entry-local `Version` compatibility metadata",
+        "全树22份完整历史备份",
         "old 72-byte ABI has no EncryptFileKey32 slot",
         "LBA0 legacy MBR message-pointer bytes",
         "4eeee8d52f8b58d9a1fa35b63a14c8c5dba1b2717eaa44e6fb1ff0327ccbe5ed",
@@ -245,8 +247,8 @@ fn documentation_keeps_the_official_provisioning_chain_and_strict_rules() {
         "LBA10 progress must retain the closed +0x04 control flag and preserve/ignore tail semantics"
     );
     assert!(
-        DOC.contains("| LBA12 | 444 | 68 | 0 | 86.7% |"),
-        "LBA12 progress must retain the closed EncryptFileKey32 and dormant pass-info compatibility fields"
+        DOC.contains("| LBA12 | 464 | 48 | 0 | 90.6% |"),
+        "LBA12 progress must retain the closed Version/NeedDisturb, EncryptFileKey32, and dormant pass-info compatibility fields"
     );
     assert!(
         DOC.contains("| LBA11 | 512 | 0 | 0 | 100.0% |"),

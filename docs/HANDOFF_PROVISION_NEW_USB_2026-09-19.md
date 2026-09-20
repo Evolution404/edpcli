@@ -28,8 +28,8 @@ producer + 官方 consumer/行为 + 原始实盘验证**同时闭合，才能标
 
 截至本次 LBA9 EPPE writer-owned zero tail 闭环，严格统计为：
 
-- **COMPLETE：3723 / 6656B = 55.9%**
-- **PARTIAL：2933 / 6656B = 44.1%**
+- **COMPLETE：3743 / 6656B = 56.2%**
+- **PARTIAL：2913 / 6656B = 43.8%**
 - **UNKNOWN：0 / 6656B = 0.0%**
 
 当前各 LBA 严格状态以主账本为唯一准绳，最新关键增量：
@@ -126,7 +126,7 @@ producer + 官方 consumer/行为 + 原始实盘验证**同时闭合，才能标
   producer/选择条件未知继续PARTIAL。
   Dept/Owner 长值的 continuation 还确认落在 LBA9+0x80/+0x100，
   并已用 join60/join59 双profile实盘门禁锁定。当前全 LBA0–12 已无 UNKNOWN，
-  目前全局仍有2933B PARTIAL，绝不能把“UNKNOWN=0”当成全部协议完成。
+  目前全局仍有2913B PARTIAL，绝不能把“UNKNOWN=0”当成全部协议完成。
 
 - **LBA7 = 512 COMPLETE / 0 PARTIAL / 0 UNKNOWN = 100.0%**。
   真实物理 LBA7 已锁定为 **3×0x40 packed EDPF + 14B pass-info@+0xC0**，
@@ -225,7 +225,7 @@ producer + 官方 consumer/行为 + 原始实盘验证**同时闭合，才能标
   且 current/legacy 22/22 均为6B零，无已知 profile 分叉，因此6B升COMPLETE。
   `HDSerialInfo@+0x14..17` 与 `UsbOnlyInfo@+0x1E..3D` 仍因 legacy producer/
   历史 consumer 缺口保持PARTIAL。
-- **LBA12 = 444 COMPLETE / 68 PARTIAL / 0 UNKNOWN = 86.7%**。
+- **LBA12 = 464 COMPLETE / 48 PARTIAL / 0 UNKNOWN = 90.6%**。
   主运行时盘面固定为 3×96B packed entry；`Reserved[7]@+0x59..+0x5F`
   已由官方字段名、writer 零来源、negative consumer 和 66/66 原始 entry 闭合。
   相邻 `+0x48..+0x57` 也已独立闭合，但**不是 Reserved**：104B natural ABI
@@ -242,7 +242,13 @@ producer + 官方 consumer/行为 + 原始实盘验证**同时闭合，才能标
   v0x0206 默认密码 mode2 wrapping 也已独立闭合：
   `"0000aaaa" -> sub_10040400 -> "LtSWi[2f)j"`，
   MD5 后走标准 SM4；43/43 默认 mode2 原始 entry 可独立解包并通过 FileKeyCRC。
-  但 mode1/mode3/oldSM4 等已知 profile 缺正向原盘，不得把整个 wrapped16 升 COMPLETE。
+  另外3×`Version@+0x04` 共12B与 entry1/entry2 `NeedDisturb@+0x10` 共8B
+  已按 compatibility metadata 生命周期闭合：current 3×96B producer 对 Version
+  保持 zero-init；NeedDisturb positional profile 为 `(1,1,0)`；Windows/Linux packed
+  runtime 对这些字段只结构携带，行为 consumer 只命中 entry0 NeedDisturb；committed
+  originals 与全树22份完整历史备份复算均为 Version `(0,0,0)` / NeedDisturb `(1,1,0)`。
+  因此新增20B COMPLETE。当前唯一剩余是3条 `wrapped16@+0x38..+0x47` 共48B：
+  mode1/mode3 等已知 profile 仍缺正向原盘，不得把整个 wrapped16 升 COMPLETE。
 - **LBA11 = 512 COMPLETE / 0 PARTIAL / 0 UNKNOWN = 100%**。
   正常注册 writer/reader 使用 `DISK_GEOMETRY_EX.DiskSize`；
   `UDiskLabelRepair.dll::CLabelRepair::Repair` 的 LBA11 检查/重写路径使用

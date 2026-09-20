@@ -1757,10 +1757,10 @@ entry1/entry2 NeedDisturb（8B），最后将 pass-info `+0x0C/+0x0D`
 | 偏移 | 长度 | 当前名称 | 当前置信度 | 证据/限制 |
 |---|---:|---|---|---|
 | +0x00 | 4 | Flag = `EDPF` | 已知 | 写端固定写入；读端判 magic |
-| +0x04 | 4 | Version/entry-local field | 部分已知 | Windows writer/样本均多为0；实际消费语义未闭合 |
+| +0x04 | 4 | Version/entry-local compatibility metadata | **COMPLETE** | current 3×96B writer 整表零初始化后从不覆盖该DWORD；Windows/Linux packed runtime只结构携带，协议版本由14B pass-info Version决定；22份×3 entry与全树历史复算均为0 |
 | +0x08 | 4 | PartionCount | 已知 | 写端来源 + 当前22/22均等于实际连续条目数 + Linux字段名 |
 | +0x0C | 4 | PartionType | 已知 | 1=Boot / 2=Share / 4=Encrypt；Windows/Linux运行时均消费 |
-| +0x10 | 4 | NeedDisturb | 部分已知（entry0兼容行为闭合） | Linux字段名、Windows写端来源；旧版 vrvaud_c 的 NewCheckDisTurbUsb(*) fallback 直接以 entry0 +0x10 非零作为 success 门控；其它 entry/新版主路径的业务作用仍未闭合 |
+| +0x10 | 4 | NeedDisturb | **COMPLETE（entry0行为 + entry1/2 compatibility）** | entry0 已由旧版 `NewCheckDisTurbUsb(*)` fallback 行为门控闭合；entry1/entry2 current positional profile 固定为1/0，Windows/Linux runtime只结构保留而无值相关消费；22份历史均 `(1,1,0)` |
 | +0x14 | 4 | NeedEncrypt | 已知 | Windows InitDiskInfo/UserLogin 实际消费；0=unencrypted，1=启用透明加密 |
 | +0x18 | 8 | StartSector | 已知 | 写端计算、挂载端使用 |
 | +0x20 | 8 | SectorSize | 已知 | 实盘=512；布局/挂载使用 |
@@ -2093,20 +2093,20 @@ COMPLETE。COMPLETE 不表示所有未来ABI都必须写零；若发现独立非
 
 按上述严格口径，Windows/Linux 主运行时 96B packed LBA12 当前逐字节进度为：
 
-- **已知 444B / 512B（86.7%）**
+- **已知 464B / 512B（90.6%）**
   - 三个 entry 中语义闭合字段：49B/entry，共 147B；
   - entry0 `NeedDisturb(+0x10)`：4B，旧兼容 consumer + 22/22 原始盘已闭合；
+  - 三个 entry 的 `Version(+0x04)`：12B，current-zero producer + packed runtime structural-preserve/negative-semantic-consumer + 22×3实盘闭合；
+  - entry1/entry2 `NeedDisturb(+0x10)`：8B，current positional 1/0 producer + cross-platform negative-semantic-consumer + 22盘实测闭合；
   - 三个 entry 的 `EncryptFileKey32[16]` compatibility slot：48B，current零producer + structural-cache/negative-semantic-consumer + 66/66实测闭合；
   - 三个 entry 的 `Reserved[7]`：21B，producer + negative consumer + 66/66 entry 实测闭合；
   - 表尾已闭合字段：14B（含 `bNoUsbChkPasSafe` 与两个 dormant BackupPromptPeriod BYTE）；
   - `0x12e..0x1ff`：210B，写端零初始化且主读端不消费，可定性为 post-table zero padding；
-- **部分已知 68B / 512B（13.3%）**
-  - 3×Version：12B；
-  - entry1/2 NeedDisturb：8B；
+- **部分已知 48B / 512B（9.4%）**
   - 三条 wrapped key `+0x38..+0x47`：48B，mode1/mode3缺正向原盘样本；
 - **未知 0B / 512B（0%）**
   - 当前主运行时格式已经没有“连字段边界/官方名称都不知道”的字节；
-  - 但 68B 仍然不能算语义闭合，Provision 不得据此自行生成。
+  - 但 48B wrapped-key profile 缺口仍不能算语义闭合，Provision 不得据此自行生成未观测 mode1/mode3。
 
 这组数字只描述**主运行时 96B packed 格式**；不把 `libcemsfilesyscheck.so`
 的 104B 扩展结构混入统计。
@@ -3163,12 +3163,12 @@ SAFE6 只透明保留。COMPLETE 不意味着未来出现其它值时可以机�
 | 9 | 276B | 236B | 0B | 53.9% | EETU magic/time/useCount + `reverse[104]` 已完整闭合；本轮再把 EPPE `+0x188..+0x1FF` 120B 闭合为 **writer-owned zero tail**：SetPassInfoEx显式清零，CUsbRegsiter::GetPassInfoEx 与 modfilesyscheck 均只消费 magic/minPassLen，current EdpDiskCtrl factory vtable不暴露 full-block helper，6/6原始EPPE tail为零；剩余236B集中在 +0x080..0x17F Dept/User/SAPF 多profile重叠区 |
 | 10 | 424B | 88B | 0B | 82.8% | EESI magic + `UsbSuspensionWnd lifecycle/control flag` + 两个16B卷标槽完成；+0x80..0x1FF 已由两个独立 EESI build 的 preserve writer、getter ignore、两个旧 build 无 EESI ownership 与扩展历史实盘闭合为 cross-generation unowned preserve/ignore COMPLETE；仅+0x28..0x7F共88B仍PARTIAL |
 | 11 | 512B | 0B | 0B | 100% | normal register path 使用 `DISK_GEOMETRY_EX.DiskSize`；`UDiskLabelRepair` check/rewrite path 使用 `DISK_GEOMETRY` 的 CHS capacity。两条路径的 producer/consumer 与同盘双 profile 实测均闭合 |
-| 12 | 444B | 68B | 0B | 86.7% | 在 `bNoUsbChkPasSafe` 与 `EncryptFileKey32[16]` compatibility slot 既有闭环基础上，表尾两个 BackupPromptPeriod BYTE 与 LBA7 共用同一 dormant compatibility-field 生命周期，再新增2B COMPLETE；当前剩3×Version、entry1/2 NeedDisturb 与3×wrapped16 mode1/mode3正向样本缺口共68B |
+| 12 | 464B | 48B | 0B | 90.6% | 在既有 pass-info / `EncryptFileKey32[16]` / Reserved 闭环基础上，本轮再把3×Version 12B与entry1/2 NeedDisturb 8B按 current producer + packed runtime structural-preserve/negative-semantic-consumer + 22盘一致 profile 闭合；当前仅剩3×wrapped16 在 mode1/mode3 缺正向真实盘样本，共48B |
 
 总计：
 
-- **完成：3723B / 6656B = 55.9%**
-- **部分已知：2933B / 6656B = 44.1%**
+- **完成：3743B / 6656B = 56.2%**
+- **部分已知：2913B / 6656B = 43.8%**
 - **未知：0B / 6656B = 0.0%**
 
 这是一组**严格下限**，故意宁可低估，不把“能生成/能解析”冒充成“已经完全理解”。
@@ -3188,7 +3188,7 @@ SAFE6 只透明保留。COMPLETE 不意味着未来出现其它值时可以机�
 | 9 | 高度闭合 | 整扇已无UNKNOWN；EETU `reverse[104]` 已完全闭合但必须区分两种 producer：前102B是 `WriteNormalULabel` 未初始化 caller backing，被 runtime 整块透明保存；末2B是 `SetTempUse` 显式零初始化。EPPE 120B 又由 current SetPassInfoEx 显式零 producer、注册侧 GetPassInfoEx / modfilesyscheck 仅消费 magic+minPassLen、current EdpDiskCtrl 对外 factory vtable 不暴露 full-block helper及6/6原盘零tail闭合为 writer-owned zero region。当前剩余236B均位于 BuildSector6 long-Dept/User continuation 与 SAPF/backing 多profile复用区 |
 | 10 | 高度闭合 | 前0x80为 EESI round-trip payload；`+0x04` 已闭合为 `UsbSuspensionWnd lifecycle/control flag`：两套独立UI启动默认写1、标签设置保存写0，0/非0分别进入 Destroy 与刷新/Show 行为链；后0x180按 cross-generation unowned preserve/ignore 语义 COMPLETE。当前仅+0x28..0x7F共88B继续PARTIAL |
 | 11 | 完全闭合 | DRKB/random252/ASCII VID-PID/PDKB 全部已锁；exact DiskSize 与 CHS repair 两种真实 wire profile 的 producer/consumer/实盘均闭合 |
-| 12 | 高度闭合 | 主运行时 96B packed layout 已锁；`EncryptFileKey32[16]` compatibility slot、`Reserved[7]`、pass-info `bNoUsbChkPasSafe` 与两个 dormant BackupPromptPeriod BYTE 均已闭合。当前只剩3×Version、entry1/entry2 NeedDisturb、3×wrapped16 的 mode1/mode3正向实盘缺口 |
+| 12 | 高度闭合 | 主运行时 96B packed layout 已锁；3×Version 与 entry1/2 NeedDisturb 已按 compatibility metadata 生命周期闭合，entry0 NeedDisturb 仍保留真实 fallback gate 行为；`EncryptFileKey32[16]`、Reserved、完整 pass-info 也均闭合。当前只剩3×wrapped16 的 mode1/mode3正向实盘缺口48B |
 
 ## 尚不能猜测的材料
 
@@ -3197,7 +3197,6 @@ SAFE6 只透明保留。COMPLETE 不意味着未来出现其它值时可以机�
 - LBA4 onlyID2Nd 及关联动态字段的生成源；
 - LBA0 前400B bootstrap 主体/profile 选择；
 - LBA6 0x1c0..0x1ed 不同格式代际的准确字段来源。
-- LBA12 NeedDisturb 在新版主路径中的进一步业务作用（旧版 fallback 门控已闭合）；
 - LBA12 `+0x48..+0x57` 已闭合为 `EncryptFileKey32[16]` cross-generation compatibility slot；后续若发现独立非零ABI，只能扩展 profile，不得回退成“未知 key”或强制零；
 
 这些内容不得从当前插入 donor 盘复制，也不得以全零替代。实现中把它们显式建模为

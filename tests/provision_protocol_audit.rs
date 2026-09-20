@@ -2595,6 +2595,7 @@ fn lba12_main_runtime_layout_is_three_packed_96_byte_entries_plus_tail_at_0x120(
 #[test]
 fn lba12_need_disturb_values_match_all_real_reference_backups() {
     let mut checked = 0usize;
+    let mut checked_versions = 0usize;
     let mut type1_mask = 0u8;
     let mut type2_mask = 0u8;
     let mut type4_mask = 0u8;
@@ -2619,12 +2620,23 @@ fn lba12_need_disturb_values_match_all_real_reference_backups() {
 
         for index in 0..count {
             let base = index * 0x60;
+            assert_eq!(
+                u32_le(&plain, base + 0x04),
+                0,
+                "LBA12 entry Version compatibility metadata changed: {name} entry {index}"
+            );
             let partition_type = u32_le(&plain, base + 0x0c);
             let need_disturb = u32_le(&plain, base + 0x10);
+            let expected_need_disturb = if index < 2 { 1 } else { 0 };
+            assert_eq!(
+                need_disturb, expected_need_disturb,
+                "LBA12 positional NeedDisturb profile changed: {name} entry {index}"
+            );
             assert!(
                 need_disturb <= 1,
                 "unexpected NeedDisturb={need_disturb}: {name}"
             );
+            checked_versions += 1;
             match partition_type {
                 1 => type1_mask |= 1 << need_disturb,
                 2 => type2_mask |= 1 << need_disturb,
@@ -2637,6 +2649,10 @@ fn lba12_need_disturb_values_match_all_real_reference_backups() {
     assert!(
         checked >= MIN_PROTOCOL_FIXTURES,
         "protocol audit unexpectedly lost fixtures"
+    );
+    assert!(
+        checked_versions >= MIN_PROTOCOL_FIXTURES * 3,
+        "protocol audit unexpectedly lost LBA12 Version evidence"
     );
     assert_eq!(type1_mask, 0b10, "type1 NeedDisturb sample set changed");
     assert_eq!(type2_mask, 0b10, "type2 NeedDisturb sample set changed");
