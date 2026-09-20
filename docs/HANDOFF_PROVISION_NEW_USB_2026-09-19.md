@@ -336,6 +336,12 @@ producer + 官方 consumer/行为 + 原始实盘验证**同时闭合，才能标
    - 三条 `Version@+0x04`：12B，继续追 producer/consumer/version-switch；
    - entry1/entry2 `NeedDisturb@+0x10`：8B，当前没有 direct xref，继续搜其它组件/历史 build；
    - pass-info `+0x0C/+0x0D`：2B，继续追跨组件最终 consumer。
+   这2B的 current producer 已进一步锁到机器码：`CreatePartitions/sub_1003DB50`
+   在 `0x1003DC16..0x1003DC26` 显式清零完整14B pass-info，后续 store 最远只到
+   `+0x0A`，所以 `+0x0C/+0x0D` 是 current writer-owned zero。两代 `vrvaud_c`
+   的 `BackupPromptInfo` 已确认是独立 policy 来源；其0xC0 old-table 全局不包含
+   pass-info tail，禁止仅凭名称相似把它当这2B的 consumer。仍需历史非零 producer/
+   profile、单位/取值域和真实业务 consumer 才能升级 COMPLETE。
    本轮已重新核实两版 `vrvaud_c` 全局 old-table 都是3×0x40 packed，且只有
    entry0 NeedDisturb 有行为 xref；Version、entry1/2 NeedDisturb 在两版均无直接
    consumer。该负证据不能把正式ABI字段升级成 Reserved/COMPLETE。

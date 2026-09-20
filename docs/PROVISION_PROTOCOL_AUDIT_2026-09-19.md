@@ -1867,10 +1867,23 @@ Windows `ChangePwd/sub_10026050` 进一步证明：
 - 22/22 的 `+0x0A` 在 LBA7/LBA12 两份副本中一致；
 - `+0x0C/+0x0D` 仍是22/22全零。
 
-所以本轮只增强“为什么**不能**升 COMPLETE”的证据：
-`+0x0A` 是显式 producer + 真实可变值 + Init 对外暴露，但缺最终策略 consumer；
-`+0x0C/+0x0D` 有官方字段名和 current-zero producer，却仍缺历史非零 producer、
-单位/取值域与 consumer。
+这里的跨版本 Windows 审计只用于继续收紧 `+0x0C/+0x0D` 的边界；
+`+0x0A` 已在后续独立 `checkdiskback::Update_EDPEDISKSHOWPARAM` + Safe6PolicyFile
+链中找到值相关 consumer，并已按主账本升级 COMPLETE，不能再沿用本段较早阶段的
+“缺最终策略 consumer”结论。对 `+0x0C/+0x0D` 而言，当前结论仍是：正式字段名与
+current writer-owned zero 来源明确，但历史非零 producer/profile、单位/取值域和
+最终业务 consumer 均缺失，所以继续 PARTIAL。
+
+对 current producer 的机器码边界又做了一次逐 store 复核：
+`CUsbRegsiter::CreatePartitions/sub_1003DB50` 在 `0x1003DC16..0x1003DC26`
+对完整14B pass-info 执行显式清零；后续赋值序列最远只在
+`0x1003E78A..0x1003E790` 写到 `pass+0x0A`，没有任何 store 命中
+`+0x0C/+0x0D`。因此这2B在 current LBA7 v0x0064 与随后仅改 Version 为
+v0x0206 的 LBA12 路径中都是**明确 writer-owned zero**，不是“没有观察到赋值”或
+未初始化 backing。两代 `vrvaud_c` 的 `BackupPromptInfo` 虽有0/非0行为分支，
+但其磁盘 old-table 全局只承接 `0xC0 = 3×0x40` packed entries，pass-info tail
+根本不在该全局内；当前也没有其它数据流把该 policy 项接到这2B。故名称相似不能
+作为 consumer 证据。
 
 Linux `PartitionHeader::SetPartitionNewPass` 同时给出负证据：
 
