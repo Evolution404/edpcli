@@ -28,8 +28,8 @@ producer + 官方 consumer/行为 + 原始实盘验证**同时闭合，才能标
 
 截至本次 LBA11 repair-profile 闭环，严格统计为：
 
-- **COMPLETE：3386 / 6656B = 50.9%**
-- **PARTIAL：3270 / 6656B = 49.1%**
+- **COMPLETE：3488 / 6656B = 52.4%**
+- **PARTIAL：3168 / 6656B = 47.6%**
 - **UNKNOWN：0 / 6656B = 0.0%**
 
 当前各 LBA 严格状态以主账本为唯一准绳，最新关键增量：
@@ -55,7 +55,17 @@ producer + 官方 consumer/行为 + 原始实盘验证**同时闭合，才能标
   明确禁止再把 raw-zero/full-rolling 选择条件等同于 current/legacy identity 代际。
   两flag仍因缺最终业务consumer保持PARTIAL，raw-zero历史 producer/选择条件也仍未定位，
   严格完成字节数不增加。
-- **LBA9 = 54 COMPLETE / 458 PARTIAL / 0 UNKNOWN = 10.5%**。
+- **LBA9 = 156 COMPLETE / 356 PARTIAL / 0 UNKNOWN = 30.5%**。
+  EETU `reverse[104]` 已进一步闭合：Linux DWARF正式给出
+  `tagEdpEDiskTmpUse.reverse[104]@+0x18`。Windows `SetTempUse` 清零目标结构后，
+  从上层请求 `+0x44` 固定复制前102B；继续回溯 `BusManageImp::WriteNormalULabel`
+  机器码确认其 SetTempUse 请求只写 begin/end/useCount，`sub_1009BAD0` 清的是另一块
+  `ebp-0x9EC` 对象，不覆盖位于 `ebp-0xBD4` 的请求，因此前102B是明确的
+  **writer-uninitialized opaque backing**。当前 runtime `ReadTempUseInfo` 把完整0x80
+  缓存到 `CEdpDiskControl+0x1076`，`GetTempUseInfo/CheckTmpUse` 只读取时间和 useCount，
+  登录递减次数后 `WriteTempUseInfo` 又整0x80透明写回；reverse 无独立业务读点。
+  原始非零 LBA9 的 EETU 当前均观测 reverse=0，但零不是协议固定要求。
+  因此前102B升COMPLETE；末2B此前已由 SetTempUse 显式零初始化闭合。
   EPPE writer-zero tail、SAPF trailing/backing 等已无UNKNOWN。
   本轮进一步纠正中间区：Windows/Linux/vrvaud 三套 BuildSector6 都会把
   长 Dept `[60..NUL]` 写到 LBA9+0x80、长 User `[28..NUL]` 写到
@@ -107,7 +117,7 @@ producer + 官方 consumer/行为 + 原始实盘验证**同时闭合，才能标
   producer/选择条件未知继续PARTIAL。
   Dept/Owner 长值的 continuation 还确认落在 LBA9+0x80/+0x100，
   并已用 join60/join59 双profile实盘门禁锁定。当前全 LBA0–12 已无 UNKNOWN，
-  目前全局仍有3270B PARTIAL，绝不能把“UNKNOWN=0”当成全部协议完成。
+  目前全局仍有3168B PARTIAL，绝不能把“UNKNOWN=0”当成全部协议完成。
 
 - **LBA7 = 490 COMPLETE / 22 PARTIAL / 0 UNKNOWN = 95.7%**。
   真实物理 LBA7 已锁定为 **3×0x40 packed EDPF + 14B pass-info@+0xC0**，

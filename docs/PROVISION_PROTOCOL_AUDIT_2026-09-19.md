@@ -2110,7 +2110,7 @@ real-device evidence 三者都存在，因此这16B仍保持 PARTIAL，
   - Linux `CheckTempUse` 将 `useCount=0xFFFFFFFF` 当作无限次数哨兵：
     不递减、不回写；0表示次数耗尽；其它正值减1并回写；
   - `ullBTime/ullETime` 与 `time(NULL)` 比较，0表示对应时间边界不启用。
-- `reverse[104]` 本轮继续拆到 writer 覆盖边界，而不是因为20/20为零就整体升级：
+- `reverse[104]` 本轮继续拆到 writer 覆盖边界，并把前102B的真实 backing 来源追到上层调用栈：
   - `CUsbRegsiter::SetTempUse` 先对 EETU magic 后的 `0x7C` 字节整体
     `memset(0)`；
   - 随后只执行 `memcpy(EETU+0x18, request+0x44, 0x66)`，即覆盖
@@ -2119,13 +2119,31 @@ real-device evidence 三者都存在，因此这16B仍保持 PARTIAL，
     明确的 writer 零初始化值；
   - 对 `BusManageImp::WriteNormalULabel/sub_100A99F0` 的真实机器码重新扫描：
     调用 `SetTempUse(&var_BD4)` 前只写 begin/end 字符串和
-    `useCount@var_B94`。对应 `tempUse+0x44..+0xA9` 的102B栈区没有初始化写；
-    所以前102B即使当前20/20为零，也可能承接 caller/backing bytes，不能升 COMPLETE；
-  - Linux `CheckTempUse` 对整个 reverse[104] 无读取，运行时回写只修改 useCount。
+    `useCount@var_B94`；请求布局因此精确为 `begin[32] / end[32] /
+    useCount@+0x40 / caller backing@+0x44`；
+  - 该函数之前确实调用 `sub_1009BAD0()`，但机器码明确先执行
+    `lea ecx,[ebp-0x9EC]`，而 `sub_1009BAD0` 只做 `memset(ecx,0,0x996)`；
+    其清零范围为 `ebp-0x9EC..-0x56`，**不包含**位于 `ebp-0xBD4` 的
+    SetTempUse 请求。因此 `request+0x44..+0xA9` 102B 不是遗漏的 reserved-zero，
+    而是正式的 **writer-uninitialized opaque backing**；
+  - Windows runtime `ReadTempUseInfo/sub_10013490` 会把完整0x80 EETU解密并缓存到
+    `CEdpDiskControl+0x1076`；对该对象区的精确引用审计显示，
+    `GetTempUseInfo/CheckTmpUse` 只读取 `ullBTime/ullETime/useCount`，显式字段引用
+    截止 `+0x108A`，而 reverse 从 `+0x108E` 开始没有独立业务读点；
+  - 登录成功需要扣减临时使用次数时，`UserLogin` 只执行
+    `*(this+0x108A)--`，随后 `WriteTempUseInfo/sub_10013770` 将完整0x80 EETU重新
+    加密写回，因此 **runtime preserves the full 0x80 EETU while only consuming
+    time/useCount**；Linux `CheckTempUse` 也不读取 reverse；
+  - committed originals 与扩展历史只读扫描当前仍未发现非零 reverse：严格非零
+    LBA9 profile 的 EETU 均为 `reverse[104]=0`。这里的零只作为真实 profile 证据，
+    不再被误写为协议固定值。
 
-因此本轮只把 **LBA9 +0x7E..+0x7F 两字节**升级 COMPLETE：
-explicit-zero producer + negative consumer + 20/20 原始 EETU 为零三条证据闭合。
-`+0x18..+0x7D` 的102B继续 PARTIAL。
+因此本轮把 **LBA9 +0x18..+0x7D 共102B** 从 PARTIAL 升 COMPLETE：正式
+`reverse[104]` 边界、writer-uninitialized producer、runtime transparent-preserve /
+negative semantic consumer 与原始实盘四项均已闭合；未来出现非零 backing 必须原样保留。
+此前 `+0x7E..+0x7F` 2B 已由 SetTempUse 显式零初始化独立闭合，所以现在整个
+`reverse[104]` 都是 COMPLETE，但前102B与末2B的 producer 语义不同，禁止重新合并为
+“104B zero padding”。
 - `EPPE` 位于 `0x180..0x1ff`，是独立 128B A6B0 区，counter 从 0 重新开始；当前 6/6 解密为 `EPPE 08 00 00 00` 后零填充。
 - Windows `cemsusbregsiter.dll::SetPassInfoEx` 对输入 `+0x04` 明确限制为 6..19，
   构造 `EPPE` 后只覆盖 LBA9 `+0x180..+0x1ff`；Windows
@@ -2306,10 +2324,11 @@ producer/consumer，却缺真实正向实盘；同时 SAPF profile 仍与 +0x100
 由此 LBA9 账本变为：
 
 ```text
-54 COMPLETE / 458 PARTIAL / 0 UNKNOWN
+156 COMPLETE / 356 PARTIAL / 0 UNKNOWN
 ```
 
-这次只做 UNKNOWN -> PARTIAL，不增加 COMPLETE。
+其中本次 EETU reverse backing 新增102B COMPLETE；中间 Dept/User/SAPF 多profile
+区仍保持 PARTIAL。
 - LBA10 在当前 22 份严格生成参考中为 21 份全零、1 份 SanDisk EESI；该 EESI 样本仅前 `0x80` 为 A6B0 密文，后 `0x180` 物理零。另有一份 2026-08-04 Netac OnlyDisk 历史真实捕获可独立解出同构 EESI，但在其生成来源链完全审计前不并入这22份计数。
 
 #### LBA10 EESI：前 0x80B 的读写边界已闭合
@@ -2591,15 +2610,15 @@ CI 原始夹具同时保留两种 profile。零态表示该 legacy tail 不存�
 | 6 | 419B | 93B | 0B | 81.8% | 216B UsbMainBSec fixed template、autoid[16]、Office[64]、Label物理56B均已闭合；本轮又把 Dept 64B 拆成 `+0x00..3E` 63B COMPLETE 与 `+0x3F` 1B PARTIAL。short Dept 由不清尾 strcpy_s + 固定64B memcpy形成 C-string/backing，long current/legacy 原盘前63B逐字节一致，join59/join60 唯一分叉严格位于槽末1B；Owner、CRC副本、GSerial/BeiZhu/legacy MBR、m_encrypt等继续PARTIAL |
 | 7 | 490B | 22B | 0B | 95.7% | 在原489B基础上，pass-info `bNoUsbChkPasSafe(+0x0A)` 找到 `checkdiskback::Update_EDPEDISKSHOWPARAM` 值相关行为 consumer，并经 SAFE6 policy 被两套独立客户端恢复，1B升级COMPLETE；当前剩3条 entry Version 12B、entry1/2 NeedDisturb 8B、backup-prompt 2B为PARTIAL |
 | 8 | 476B | 36B | 0B | 93.0% | header 的 LLGB/logical length/ToolVersion/Labversion/writeTime/ElabOffset/Reserved/MacInfo 已闭合；`+0x080..0x1FF` 又由 Windows/Linux 双 writer、注册侧7-key reader、运行时17-key EdpEDiskCtrl reader、动态 encrypted backing/preserve tail 与22盘17-key实证整体闭合384B；仅 HDSerialInfo/UsbOnlyInfo 36B继续PARTIAL |
-| 9 | 54B | 458B | 0B | 10.5% | EETU/EPPE/SAPF边界保持；+0x080..0x0FF已闭合为 BuildSector6 long-Dept continuation 并验证 join60/join59 双reader profile，但 legacy join59 producer仍缺；+0x100..0x17F又与 long-User continuation/SAPF profile复用且缺长User实盘，因此仍PARTIAL |
+| 9 | 156B | 356B | 0B | 30.5% | EETU magic/time/useCount基础上，`reverse[0..101]` 又闭合为 **writer-uninitialized opaque backing**：正式 `reverse[104]` 边界、WriteNormalULabel 未初始化 caller backing、runtime 整0x80透明保存/只消费 time+useCount、20盘原始零profile均已闭合，新增102B COMPLETE；+0x080..0x17F Dept/User/SAPF 多profile与 EPPE 120B round-trip tail 继续PARTIAL |
 | 10 | 424B | 88B | 0B | 82.8% | EESI magic + `UsbSuspensionWnd lifecycle/control flag` + 两个16B卷标槽完成；+0x80..0x1FF 已由两个独立 EESI build 的 preserve writer、getter ignore、两个旧 build 无 EESI ownership 与扩展历史实盘闭合为 cross-generation unowned preserve/ignore COMPLETE；仅+0x28..0x7F共88B仍PARTIAL |
 | 11 | 512B | 0B | 0B | 100% | normal register path 使用 `DISK_GEOMETRY_EX.DiskSize`；`UDiskLabelRepair` check/rewrite path 使用 `DISK_GEOMETRY` 的 CHS capacity。两条路径的 producer/consumer 与同盘双 profile 实测均闭合 |
 | 12 | 394B | 118B | 0B | 77.0% | 原393B基础上，同一 pass-info `bNoUsbChkPasSafe(+0x0A)` 的 producer/consumer/policy传递/22盘双值链闭合，1B升级COMPLETE；+0x48扩展槽、backup-prompt两字节及其它材料仍PARTIAL |
 
 总计：
 
-- **完成：3386B / 6656B = 50.9%**
-- **部分已知：3270B / 6656B = 49.1%**
+- **完成：3488B / 6656B = 52.4%**
+- **部分已知：3168B / 6656B = 47.6%**
 - **未知：0B / 6656B = 0.0%**
 
 这是一组**严格下限**，故意宁可低估，不把“能生成/能解析”冒充成“已经完全理解”。
@@ -2616,7 +2635,7 @@ CI 原始夹具同时保留两种 profile。零态表示该 legacy tail 不存�
 | 6 | 高度闭合 | 整扇已无 UNKNOWN。216B UsbMainBSec static material、autoid[16]、Office[64]、Label物理56B均完成；Dept 又按真实代际分叉拆成前63B COMPLETE + 槽末1B PARTIAL：short profile 的 C-string/backing 已闭合，current/legacy long profile 前63B逐字节一致，只有 `+0x3F` 因 join60=A8 / join59=00 且旧 producer 未定位继续PARTIAL。Owner仍受 long-User 正向实盘缺口影响，GSerial/BeiZhu 与 legacy MBR fragment 继续PARTIAL |
 | 7 | 高度闭合 | 物理0x40 packed ABI、PartionCount、rolling XOR、entry0 NeedDisturb compatibility gate、v0x0064 legacy wrapped8均已锁；`bNoUsbChkPasSafe` 已由 checkdiskback SAFE6 policy 行为链闭合；当前只剩22B PARTIAL：3×Version、entry1/2 NeedDisturb、pass-info +0C/+0D |
 | 8 | 高度闭合 | **LBA8 dynamic ELABEL + encrypted backing + preserved tail** 已闭合：17-key wire template 中7键由注册侧 Windows/Linux reader回填，运行时 EdpEDiskCtrl reader 则解析全部17键；NUL后块内既有backing随动态前缀加密，块外tail原样preserve。384B动态区已COMPLETE；当前只剩 HDSerialInfo 4B 与 legacy UsbOnlyInfo 32B PARTIAL |
-| 9 | 高度闭合 | 整扇已无UNKNOWN：EETU首0x80、EPPE末0x80、SAPF边界明确；中间区现已纠正为 BuildSector6 long-Dept/User continuation 与 SAPF/backing 的多profile复用。Dept join60 producer已闭合，join59旧producer仍缺；长User又缺正向实盘，因此继续PARTIAL |
+| 9 | 高度闭合 | 整扇已无UNKNOWN；EETU `reverse[104]` 已完全闭合但必须区分两种 producer：前102B是 `WriteNormalULabel` 未初始化 caller backing，被 runtime 整块透明保存；末2B是 `SetTempUse` 显式零初始化。EETU现在156B计数中的全部字段均有严格链。中间区仍是 BuildSector6 long-Dept/User continuation 与 SAPF/backing 多profile复用；EPPE 120B虽 current writer显式零，但 full-block runtime/API round-trip 的正式结构语义仍缺，因此保持PARTIAL |
 | 10 | 高度闭合 | 前0x80为 EESI round-trip payload；`+0x04` 已闭合为 `UsbSuspensionWnd lifecycle/control flag`：两套独立UI启动默认写1、标签设置保存写0，0/非0分别进入 Destroy 与刷新/Show 行为链；后0x180按 cross-generation unowned preserve/ignore 语义 COMPLETE。当前仅+0x28..0x7F共88B继续PARTIAL |
 | 11 | 完全闭合 | DRKB/random252/ASCII VID-PID/PDKB 全部已锁；exact DiskSize 与 CHS repair 两种真实 wire profile 的 producer/consumer/实盘均闭合 |
 | 12 | 中度闭合 | 主运行时 96B packed layout 已锁，pass-info `bNoUsbChkPasSafe` 已闭合到 SAFE6 policy 行为；多个标志/扩展材料及 backup-prompt 两字节仍仅结构/算法部分已知 |

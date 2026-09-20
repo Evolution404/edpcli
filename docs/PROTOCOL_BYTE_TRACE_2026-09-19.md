@@ -389,7 +389,7 @@ post-XOR 写回 `+0x45/+0x46`。历史 raw-zero 实盘仅作为兼容读取 prof
 | LBA6 | 419 | 93 | 0 | 81.8% |
 | LBA7 | 490 | 22 | 0 | 95.7% |
 | LBA8 | 476 | 36 | 0 | 93.0% |
-| LBA9 | 54 | 458 | 0 | 10.5% |
+| LBA9 | 156 | 356 | 0 | 30.5% |
 | LBA10 | 424 | 88 | 0 | 82.8% |
 | LBA11 | 512 | 0 | 0 | 100.0% |
 | LBA12 | 394 | 118 | 0 | 77.0% |
@@ -397,8 +397,8 @@ post-XOR 写回 `+0x45/+0x46`。历史 raw-zero 实盘仅作为兼容读取 prof
 
 当前总计：
 
-- **COMPLETE：3386B / 6656B = 50.9%**
-- **PARTIAL：3270B / 6656B = 49.1%**
+- **COMPLETE：3488B / 6656B = 52.4%**
+- **PARTIAL：3168B / 6656B = 47.6%**
 - **UNKNOWN：0B / 6656B = 0.0%**
 
 LBA11 已完整闭合为 512B COMPLETE。此前卡住的后半 252B 不是“某型号盘偶尔使用
@@ -498,7 +498,7 @@ DWARF 中恢复出的原始声明文件/行号与本地函数地址：
 | LBA9 | 0x004–0x00B | COMPLETE | ullBTime | Windows `SetTempUse` 从开始时间字符串解析为64位值；空/短字符串保持0 | Linux `CheckTempUse` 与 `time(NULL)` 比较；非零且 now < ullBTime 时拒绝临时使用 | 20/20原始EETU=0；真实CI夹具回归 | 开始时间下界语义闭合，0表示不启用该下界 |
 | LBA9 | 0x00C–0x013 | COMPLETE | ullETime | Windows `SetTempUse` 从结束时间字符串解析为64位值；空/短字符串保持0 | `CheckTempUse` 与 `time(NULL)` 比较；非零且 now > ullETime 时拒绝临时使用 | 20/20原始EETU=0；真实CI夹具回归 | 结束时间上界语义闭合，0表示不启用该上界 |
 | LBA9 | 0x014–0x017 | COMPLETE | useCount | `BusManageImp::WriteNormalULabel` 普通模式从请求 `+0x947` 取次数；特殊 OutManage-off 模式明确写 `0xFFFFFFFF`；`CUsbRegsiter::SetTempUse` 再将 request+0x40 原样写 EETU+0x14 | Linux `CheckTempUse`：`0xFFFFFFFF` 不递减/不回写；0=次数耗尽；其它正值减1并 `WriteTempUseInfo` 回写 | 20/20原始EETU=0xFFFFFFFF；真实CI夹具回归 | 4B 次数控制及无限次数哨兵完全闭合 |
-| LBA9 | 0x018–0x07D | PARTIAL | reverse[0..101] | Windows `SetTempUse` 先把 EETU magic 后的124B清零，再从 request+0x44 固定复制0x66=102B到 reverse 起点；`WriteNormalULabel` 上游只初始化 begin/end/useCount，机器码扫描没有初始化这102B request backing 区 | 当前 Linux `CheckTempUse` 不消费 reverse；其它消费者未闭合 | 20/20原始EETU该102B为零 | 当前样本全零不足以覆盖 producer 可复制调用方/backing bytes 的事实；保持PARTIAL |
+| LBA9 | 0x018–0x07D | COMPLETE | **EETU reverse[0..101] writer-uninitialized opaque backing** | Linux DWARF `tagEdpEDiskTmpUse@edpdiskglobal.h:481` 正式定义 `reverse[104]@+0x18`。Windows `CUsbRegsiter::SetTempUse` 先清零 EETU magic 后124B，再固定 `memcpy(EETU+0x18, request+0x44, 0x66)`。继续回溯 `BusManageImp::WriteNormalULabel/sub_100A99F0` 原始机器码确认：SetTempUse 请求 `&var_BD4` 只写 `begin[32]`、`end[32]`、`useCount@+0x40`；此前 `sub_1009BAD0` 的 `ECX=&var_9EC` 只清 `ebp-0x9EC..-0x56`，并不覆盖位于 `ebp-0xBD4` 的请求对象，因此 `request+0x44..+0xA9` 102B 是明确的 writer-uninitialized caller backing，而非 reserved-zero | 当前 Windows runtime `ReadTempUseInfo/sub_10013490` 解密并把完整0x80 EETU缓存到 `CEdpDiskControl+0x1076`；行为代码 `GetTempUseInfo/CheckTmpUse` 只直接读取 `ullBTime/ullETime/useCount`（显式对象引用截止 `+0x108A`，reverse 从 `+0x108E` 开始无独立读点）。登录递减次数后 `WriteTempUseInfo/sub_10013770` 将完整0x80重新加密写回，所以 **runtime preserves the full 0x80 EETU while only consuming time/useCount**。Linux `CheckTempUse` 同样不读取 reverse | 20/20原始非零LBA9的 EETU `reverse[104]` 全零；committed original 门禁 `real_eetu_temp_use_limits_match_the_official_unlimited_profile` 锁定该观察，扩展历史只读扫描也未发现非零 reverse | 前102B的“值不稳定/当前恰零”本身不是未知字段：正式边界、writer-uninitialized来源、runtime透明保存/negative semantic consumer与原始实盘均闭合，按与 LBA6/LBA8 backing 相同口径升 COMPLETE。未来若出现非零 reverse 必须原样保留，不得清零或赋予隐藏字段语义 |
 | LBA9 | 0x07E–0x07F | COMPLETE | reverse[102..103] zero tail | `SetTempUse` 对 EETU +0x04..+0x7F 先整体清零，随后从 +0x18 只覆盖0x66B，即最后覆盖到 +0x7D；因此 +0x7E/+0x7F 在所有 current writer 路径都保留显式零初始化 | Linux `CheckTempUse` 只读取 ullBTime/ullETime/useCount，对 reverse[104] 完全无业务读取；运行时回写只修改 useCount 并保留其余字节 | 20/20原始EETU均为 `00 00`；CI门禁 `lba9_eetu_final_two_reverse_bytes_are_writer_zero_padding` | 2B 满足 explicit-zero producer + negative consumer + real-device evidence，可严格升 COMPLETE；不得把前102B一起升级 |
 | LBA9 | 0x100–0x103 | COMPLETE | SAPF magic | 旧writer恢复模板 | `UDiskLabelRepair::Repair0Sector` | 14样本 | 完成 |
 | LBA9 | 0x104–0x113 | COMPLETE | MBR恢复entry | writer保存16B entry | repair直接写回 LBA0 0x1BE | 14/14 | 完成 |
@@ -914,12 +914,19 @@ CI 中的原始完整夹具也有多份 EETU，回归会逐盘解密并固定前
 - 对 `BusManageImp::WriteNormalULabel` 的真实机器码做栈区扫描后，上游临时请求
   只显式写 begin/end/useCount；在调用 `SetTempUse` 前没有对
   `tempUse+0x44..+0xA9` 这102B做整体初始化。故前102B即使当前20/20为零，
-  也不能解释成协议固定零 padding。
+  也不能解释成协议固定零 padding。后续进一步恢复 `sub_1009BAD0` 的真实 thiscall
+  参数后，已确认该 memset 清的是 `&var_9EC` 另一对象，完全不覆盖 `&var_BD4`
+  SetTempUse 请求，因此这102B的 producer 已从“疑似未初始化”闭合为明确的
+  writer-uninitialized backing。
 
 Linux `CheckTempUse` 对整个 reverse[104] 都不读取，只消费时间窗和 useCount；
-运行时次数回写也只修改 useCount、保留其余字节。因此：
+后续 Windows runtime 审计又确认 `ReadTempUseInfo` 整0x80缓存、
+`GetTempUseInfo/CheckTmpUse` 的显式读点只到 useCount，`WriteTempUseInfo` 再整0x80
+透明写回。因此当前最终结论为：
 
-- `reverse[0..101] / LBA9 +0x18..+0x7D`：继续 PARTIAL；
+- `reverse[0..101] / LBA9 +0x18..+0x7D`：**writer-uninitialized opaque backing**，
+  producer + transparent-preserve/negative semantic consumer + real-device profile 已闭合，
+  后续升级 COMPLETE；
 - `reverse[102..103] / LBA9 +0x7E..+0x7F`：
   **explicit zero-init producer + negative consumer + 20/20 real-device zero**
   三条证据闭合，升级 COMPLETE。
@@ -930,7 +937,8 @@ Linux `CheckTempUse` 对整个 reverse[104] 都不读取，只消费时间窗和
 - `+0x0C..0x13`：8B；
 - `+0x14..0x17`：4B；
 - `+0x7E..0x7F`：2B；
-- 本节累计 **22B COMPLETE**。
+- 此处记录的是最初阶段累计 **22B COMPLETE**；后续 reverse 前102B补齐 producer/runtime
+  透明保存证据后，EETU 本段又新增102B COMPLETE，最终计数以主账本为准。
 
 ### 4.4 LBA5：512B 整区是 opaque write-protection probe scratch sector
 

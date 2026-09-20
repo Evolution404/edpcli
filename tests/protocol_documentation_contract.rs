@@ -126,6 +126,8 @@ fn documentation_keeps_the_official_provisioning_chain_and_strict_rules() {
         "tagEdpEDiskTmpUse",
         "edpdiskglobal.h:481",
         "useCount=0xFFFFFFFF",
+        "EETU reverse[0..101] writer-uninitialized opaque backing",
+        "runtime preserves the full 0x80 EETU while only consuming time/useCount",
         "OutManage switch is off",
         "opaque preserve / write-protection probe scratch sector",
         "ERROR_WRITE_PROTECT(0x13)",
@@ -194,6 +196,10 @@ fn documentation_keeps_the_official_provisioning_chain_and_strict_rules() {
     assert!(
         DOC.contains("| LBA8 | 476 | 36 | 0 | 93.0% |"),
         "LBA8 progress must retain the closed dynamic ELABEL/backing/tail storage semantics"
+    );
+    assert!(
+        DOC.contains("| LBA9 | 156 | 356 | 0 | 30.5% |"),
+        "LBA9 progress must retain the closed EETU reverse backing semantics"
     );
     assert!(
         DOC.contains("| LBA10 | 424 | 88 | 0 | 82.8% |"),
