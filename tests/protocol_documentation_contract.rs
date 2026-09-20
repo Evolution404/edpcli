@@ -195,6 +195,8 @@ fn documentation_keeps_the_official_provisioning_chain_and_strict_rules() {
         "lba0_bootstrap_profiles_are_zero_or_the_official_usb_main_bsec_prefix",
         "cross-profile unowned preserve / historical-zero compatibility region",
         "cross-profile fixed-zero bootstrap tail padding",
+        "seven profile-invariant zero instruction-operand bytes",
+        "first/second legacy MBR error-message NUL terminators",
         "aigo_l8302_netac_lba0_prefix.hex",
         "optional SAFE1 / legacy `SectorSize` compatibility overlay",
         "2c8877b90c5d42d73f17c511ef5984efc8135543bda0746ef54f347320d78e8f",
