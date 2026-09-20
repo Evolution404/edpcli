@@ -1146,8 +1146,9 @@ fn lba0_bootstrap_profiles_are_zero_or_the_official_usb_main_bsec_prefix() {
 fn lba0_bootstrap_body_closes_all_three_profile_invariant_zero_bytes() {
     const LEGACY: &str =
         "disk26_245760000_vid3535_pid6300_disk&ven_aigo&prod_u335&rev_pmap_onlyid1987718388_nopwd_20260916_233626.bin";
-    const ISOLATED_INVARIANT_ZERO: [usize; 9] =
-        [0x0e1, 0x0e8, 0x101, 0x103, 0x10b, 0x10d, 0x124, 0x143, 0x162];
+    const ISOLATED_INVARIANT_ZERO: [usize; 9] = [
+        0x0e1, 0x0e8, 0x101, 0x103, 0x10b, 0x10d, 0x124, 0x143, 0x162,
+    ];
 
     let legacy = load(LEGACY);
     let legacy_lba0 = sector(&legacy, 0);
@@ -1183,9 +1184,7 @@ fn lba0_bootstrap_body_closes_all_three_profile_invariant_zero_bytes() {
         ISOLATED_INVARIANT_ZERO
             .iter()
             .all(|offset| netac_prefix[*offset] == 0)
-            && netac_prefix[0x17b..0x190]
-                .iter()
-                .all(|byte| *byte == 0),
+            && netac_prefix[0x17b..0x190].iter().all(|byte| *byte == 0),
         "Aigo/Netac MBR template lost an invariant zero byte"
     );
 
