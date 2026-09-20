@@ -164,6 +164,10 @@ fn documentation_keeps_the_official_provisioning_chain_and_strict_rules() {
         "85141be31933e89976970ac18f44e1da8b77d3f57fdae1d857f8ea9d19a007ec",
         "legacy MBR partition-table fragment",
         "LBA4 current writer machine-code node layout",
+        "fixed restore-node `SingleUsbFlg` metadata",
+        "fixed restore-node `NewLabFlag = LLGB`",
+        "fixed restore-node `Version = 1`",
+        "fixed restore-node sector tuple `08 04 0C 01`",
         "LBA12 v0x0206 hidden default-password file-key wrapping",
         "LBA12 alternate wrapping-mode algorithm map",
         "EESI caller-owned compatibility extension",
@@ -233,6 +237,10 @@ fn documentation_keeps_the_official_provisioning_chain_and_strict_rules() {
     assert!(
         DOC.contains("| LBA2 | 0 | 512 | 0 | 0.0% |"),
         "LBA2 GPT profile must remain PARTIAL until a positive real GPT sample exists"
+    );
+    assert!(
+        DOC.contains("| LBA4 | 49 | 463 | 0 | 9.6% |"),
+        "LBA4 progress must retain the closed fixed restore-node metadata while MyHardinfo and legacy identity fields remain partial"
     );
     assert!(
         DOC.contains("| LBA6 | 431 | 81 | 0 | 84.2% |"),

@@ -377,9 +377,22 @@ legacy non-mirror -> nonzero”的关系；22份完整统计继续由本机原�
 
 current Windows 机器码确实在 node 清零后显式写入前四项固定值：
 `SingleUsbFlg=0`、`NewLabFlag=LLGB`、`Version=1`、
-`08 04 0C 01`。但是当前 Windows/Linux `ReadSector4` 路径只把整个
-0x2F node 复制给调用者并强校验 `OnlyIdXor8`；尚未找到这些常量字段各自的
-最终业务 consumer。因此即使它们 22/22 一致，仍不升 COMPLETE。
+`08 04 0C 01`。当前 Windows/Linux `ReadSector4` 路径都会把完整
+0x2F node 在 rolling decode 后结构性返回，只对 `OnlyIdXor8` 做强校验，
+而对这四组固定字段没有值相关分支。按当前仓库已经统一用于 write-only / compatibility
+metadata 的 COMPLETE 标准，这种**structural-preserve + semantic-ignore** 是明确的
+consumer 行为，而不是“consumer未知”。因此把这17B重新拆分：
+
+- `SingleUsbFlg@+0x34` 1B：COMPLETE；
+- `MyHardinfo@+0x35..0x38` 4B：仍 PARTIAL，因值分 profile 且 producer/选择条件未闭合；
+- `NewLabFlag@+0x39..0x3C` 4B：COMPLETE；
+- `Version@+0x3D..0x40` 4B：COMPLETE；
+- sector tuple `+0x41..0x44` 4B：COMPLETE。
+
+新增回归把上述13B从代表盘扩展到全部 committed original fixtures；22份严格原始集
+仍维持 Single=0 / LLGB / Version=1 / `08 04 0C 01` 无反例。这里闭合的是
+**fixed restore-node compatibility metadata lifecycle**，不是宣称这些值永远不能在
+未来协议版本中变化。
 
 特别是 6份 `HSerialCRC=0 && OnllyID2Nd=main_onlyid` 的 current-style
 实盘，其 server flags 仍分别出现非零变化，说明“current-style HSerial”
@@ -3208,7 +3221,7 @@ SAFE6 只透明保留。COMPLETE 不意味着未来出现其它值时可以机�
 | 1 | 0B | 512B | 0B | 0% | 官方 BuildSector1_Gpt + GPT_Header(512B) 结构 + Windows `EFI PART` / `header_lba` consumer 已闭合；22/22当前原始SAFE6盘全零，缺正向GPT实盘，因此整扇PARTIAL |
 | 2 | 0B | 512B | 0B | 0% | 官方 BuildSector2_Gpt + GPT_Partition(128B) 结构 + Windows 从LBA2起每扇4 entry parser 已闭合；22/22当前原始盘全零，缺正向GPT实盘，因此整扇PARTIAL |
 | 3 | 0B | 512B | 0B | 0% | EDP 注册 writer 对整扇 preserve-existing，当前 Windows/Linux EDP reader 不解析；22份原始盘为21零+1 Kingston MP payload，但厂商 producer/固件 consumer 未闭合 |
-| 4 | 36B | 476B | 0B | 7.0% | onlyid clear header、OnlyIdXor8、LLGB 双锚点完成；第二 ID/HSerial/profile 字段仍不完整；`+0x047..+0x1FB` 已由 full writer、reader negative consumer 与 raw-zero/rolling-zero 双实盘 profile 从UNKNOWN降PARTIAL |
+| 4 | 49B | 463B | 0B | 9.6% | onlyid clear header、OnlyIdXor8、LLGB 双锚点完成；本轮又把 restore-node 后半固定13B（SingleUsbFlg/NewLabFlag/Version/sector tuple）按 current producer + structural-preserve/semantic-ignore + 22盘一致 profile 闭合。MyHardinfo、第二 ID/HSerial、server flags 与 `+0x047..+0x1FB` 多profile backing 继续PARTIAL |
 | 5 | 512B | 0B | 0B | 100% | 两版 EdpDiskCtrl 均只对 LBA5 执行“读整扇→原样写回→检查 ERROR_WRITE_PROTECT(0x13)”；当前注册 writer 读取既有13扇区后不重建 LBA5，因此 preserve existing bytes；22/22原始盘全零 |
 | 6 | 431B | 81B | 0B | 84.2% | 216B UsbMainBSec fixed template、autoid[16]、Office[64]、Label物理56B均已闭合；Dept 前63B COMPLETE、槽末1B因join59旧producer继续PARTIAL；`m_encrypt@+0x1F0` 已闭合为 write-only label-generation metadata；`m_crcUsbID[0..1]@+0x100..107` 又由正式字段名、双平台 producer、同源运行时 key 用途、historical doubled-guard consumer、current semantic-ignore、checksum ownership 与22盘关系闭合。Owner、GSerial/BeiZhu/legacy MBR等继续PARTIAL |
 | 7 | 512B | 0B | 0B | 100.0% | 3×Version、entry1/entry2 NeedDisturb 已按 compatibility metadata 生命周期闭合；最后两个 BackupPromptPeriod BYTE 又由正式 DWARF 字段、current-zero producer、四代 Windows + Linux structural-preserve/negative semantic consumer、跨 v0x0064/v0x0206 实盘0/0 profile 闭合为 dormant compatibility fields。LBA7 至此整扇 COMPLETE |
@@ -3220,8 +3233,8 @@ SAFE6 只透明保留。COMPLETE 不意味着未来出现其它值时可以机�
 
 总计：
 
-- **完成：3843B / 6656B = 57.7%**
-- **部分已知：2813B / 6656B = 42.3%**
+- **完成：3856B / 6656B = 57.9%**
+- **部分已知：2800B / 6656B = 42.1%**
 - **未知：0B / 6656B = 0.0%**
 
 这是一组**严格下限**，故意宁可低估，不把“能生成/能解析”冒充成“已经完全理解”。
