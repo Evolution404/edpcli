@@ -168,6 +168,19 @@ producer + 官方 consumer/行为 + 原始实盘验证**同时闭合，才能标
   继续追到运行时 `EdpEDiskCtrl::sub_10016260` 后确认它会解析全部17个ELABEL键，因此另十个
   是当前实盘为空的 compatibility wire slots，并非全产品 ignore。该 runtime reader 还复制
   `HDSerialInfo/UsbOnlyInfo` 到 `CEdpDiskControl+0x2D0` 标签结构，但未找到两字段值相关后续读点。
+  继续取得并MD5核验两份2020官方旧件：`EdpEDiskCtrl.dll` v3.6.10.18
+  (`95a06e0d466ba40a7d5c0e6a409e2114`) 与 `CEMSUsbRegsiter.dll` v19.11.4.1
+  (`783d01f19e998a514834bc5e5f4249ad`)。后者的可达 `sub_10007DF0` 明确先调
+  `UsbTools` ordinal4，0时fallback ordinal3，把结果写 `HDSerialInfo@+0x14`，并作为
+  `%08x%08x` 第二DWORD写入 `UsbOnlyInfo@+0x1E`。本机两代 `DeviceNumber.dll`
+  均把这两个ordinal稳定命名为 `EDP_DiskNumber/EDP_DeviceNumber`；两代主路径算法同构为：
+  枚举PhysicalDrive0..3，ATA IDENTIFY取20B serial，word-swap+trim，跳过失败/全零，
+  无分隔拼接后做标准CRC32(poly 0xEDB88320, initial=0)。因此已定位一个真实非零
+  HDSerialInfo producer family。
+  2020 runtime又提供negative-consumer硬证据：整DLL不导入DeviceNumber；标签读入后
+  后续 direct-member 只消费结构前14B，唯一 `this+0x173C` 反而作为0x104B路径缓冲区被覆盖。
+  但该2020 writer会同步生成非零 UsbOnlyInfo，与16份 strict legacy 原盘
+  “HDSerialInfo非零 + UsbOnlyInfo全零”不一致，所以 exact legacy writer仍未闭合，36B计数不变。
   严格22盘17-key顺序一致且十个 compatibility key 全空。当前仅 `HDSerialInfo` 4B 与
   legacy `UsbOnlyInfo[32]` 32B 继续PARTIAL。
   旧账本把22盘当前最大正文之后的102B机械记成 UNKNOWN，这是错误的固定边界模型。
@@ -186,7 +199,8 @@ producer + 官方 consumer/行为 + 原始实盘验证**同时闭合，才能标
   后者以 `[ebp+0x2B8]` 执行 `sprintf("%08x%08x", main_onlyid, 0)` 并写
   `LBA8+0x1E UsbOnlyInfo`。严格22份按 LBA4 identity profile 重算：
   6/6 current 均为该格式且 HDSerialInfo/MacInfo=0；16/16 legacy 均
-  UsbOnlyInfo为空并保留历史非零 HDSerialInfo。进一步把42B混合区拆开后，
+  UsbOnlyInfo为空并保留历史非零 HDSerialInfo；committed-original 回归现在也显式断言
+  legacy `HDSerialInfo != 0`。进一步把42B混合区拆开后，
   `MacInfo[6]@+0x18..+0x1D` 已满足独立闭合条件：官方字段名明确、
   Windows/Linux header 都显式零初始化、semantic reader 完全跳过，
   且 current/legacy 22/22 均为6B零，无已知 profile 分叉，因此6B升COMPLETE。
@@ -334,7 +348,10 @@ producer + 官方 consumer/行为 + 原始实盘验证**同时闭合，才能标
    GSerial/BeiZhu 的 post-NUL 残值已明确是 backing bytes，不要再按 padding。
 6. **LBA8 ELABEL 与动态头剩余字段**：
    static ToolVersion/Labversion/writeTime/Reserved 已 COMPLETE；
-   动态 ELABEL 384B 已闭合；继续只追 `HDSerialInfo@+0x14..17` 与 legacy `UsbOnlyInfo[32]@+0x1E..3D` 的旧 producer/最终 consumer。
+   动态 ELABEL 384B 已闭合。`HDSerialInfo` 已找到2020非零 producer family及
+   `EDP_DiskNumber=CRC32(规范化ATA serial无分隔拼接)` 主算法，2020 runtime也已证明不按值消费并会复用覆盖该槽；
+   但该代同时写非零 UsbOnlyInfo，尚不能解释 strict legacy 的“HDSerialInfo非零 + UsbOnlyInfo全零”。
+   下一步只追更早 exact writer/profile selection，并补完 `EDP_DeviceNumber` fallback；不要把2020过渡profile冒充16份legacy生成源。
 7. **LBA10 只剩 `+0x28..+0x7F` 88B**：`+0x04` 已闭合为
    `UsbSuspensionWnd lifecycle/control flag`，不要回退到“版本1/时间戳”或PARTIAL。
    两个16B卷标槽也已 COMPLETE。当前88B已有两套官方 UI zero producer、底层

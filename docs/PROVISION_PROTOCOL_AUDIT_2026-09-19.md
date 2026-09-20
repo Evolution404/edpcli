@@ -1157,6 +1157,52 @@ preserved tail”，但三类边界、producer ownership、consumer行为和原�
 精确对象偏移尚未找到值相关行为读点；因此这只能补强“正式runtime结构consumer”，不能替代
 legacy producer/派生公式与最终行为语义。剩余36B仍保持PARTIAL。
 
+继续向旧版本追溯后，`HDSerialInfo` 的官方 producer family 已从“完全未知”推进到可执行算法，
+但还不足以跨过 strict COMPLETE 门槛。新增证据如下：
+
+- 从金山公开 DLL 档案取得 2020 `CEMSUsbRegsiter.dll` v19.11.4.1，MD5
+  `783d01f19e998a514834bc5e5f4249ad`。其 ELABEL 模板在 `sub_10007DF0` 有真实 xref，
+  不是链接残留；函数先清零 0xD54 临时标签结构，再调用 `UsbTools.dll` ordinal4，若结果为0
+  才 fallback ordinal3，并把结果DWORD写入 LLGB header `+0x14 HDSerialInfo`。
+- 同一 writer 随后直接在 `+0x1E UsbOnlyInfo[32]` 上执行
+  `wsprintf("%08x%08x", caller_dword, hd_serial_info)`；因此 2020 这一代明确存在
+  **HDSerialInfo非零 + UsbOnlyInfo第二DWORD复写同一值** 的过渡 profile。
+- 本机两套独立 `DeviceNumber.dll` 对对应 ordinal 的命名保持一致：
+  `EDP_DiskNumber` / `EDP_DeviceNumber`。两代 `EDP_DiskNumber` 的机器码也同构：
+  枚举 `PhysicalDrive0..3`，通过 `SMART_RCV_DRIVE_DATA(0x7C088)` 下发 ATA
+  `IDENTIFY DEVICE(0xEC)`，取 words10..19 的20B Serial Number；每16-bit word交换字节、
+  裁剪首尾ASCII空格，读取失败或20B全零 serial 跳过，其余按物理盘序号**无分隔拼接**。
+  最终以标准 reflected CRC32 polynomial `0xEDB88320`、initial=0 对完整拼接字节串求值。
+  因而已知 ordinal4 主路径可写成：
+
+```text
+EDP_DiskNumber = CRC32(serial_PhysicalDrive0 || serial_PhysicalDrive1 || ...)
+```
+
+  这里每个 `serial` 都是上述 ATA 规范化后的 C-string，失败/全零盘不参与。
+- 另取得并核验 2020 `EdpEDiskCtrl.dll` v3.6.10.18，MD5
+  `95a06e0d466ba40a7d5c0e6a409e2114`。其 `ReadOrgInfoSector@0x1000C870`
+  已经完整复制 `HDSerialInfo@+0x14` 与32B `UsbOnlyInfo@+0x1E`，反证“旧 reader 只有4B
+  UsbOnlyInfo”的早期猜测。该 DLL 不导入 `DeviceNumber.dll`；围绕 `this+0x1728` 的后续
+  direct-member 审计只消费 `+0x00..+0x0C` 一带版本/标志。全DLL唯一
+  `this+0x173C` 命中位于 `0x10015CA7`，用途是把该地址作为0x104B路径缓冲区覆写、规范化并
+  `CreateFileA`，而不是读取原来的 HDSerialInfo DWORD。其它已确认结构搬运也止于 `+0x0D`，
+  没有把 `+0x14` 间接搬去做比较。
+- committed-original 回归 `lba8_current_usb_only_info_is_main_onlyid_hex_while_legacy_profile_keeps_it_empty`
+  现额外锁定 legacy 分支 `HDSerialInfo != 0`；current 仍锁定 `HDSerialInfo == 0`。
+
+因此当前最严谨的代际模型至少是三段：
+
+1. strict legacy originals：`HDSerialInfo != 0`，`UsbOnlyInfo[32] == 0`；
+2. 2020 official transitional writer：`HDSerialInfo = EDP_DiskNumber`（0时fallback
+   `EDP_DeviceNumber`），`UsbOnlyInfo` 第二DWORD复制同一值；
+3. current writer：`HDSerialInfo = 0`，`UsbOnlyInfo = main_onlyid || 0` 的16字符十六进制文本。
+
+这批证据闭合了一个真实非零 producer family、`EDP_DiskNumber` 的主算法以及 2020 runtime 的
+negative value-consumer 行为，但**尚未找到能生成 strict legacy 第1种组合的更早 exact writer**，
+也未恢复 ordinal3 fallback `EDP_DeviceNumber` 的完整输入公式。因此 `HDSerialInfo` 4B 与
+`UsbOnlyInfo[32]` 32B 均继续 PARTIAL，LBA8 仍为 **476 COMPLETE / 36 PARTIAL**。
+
 ### LBA11：`DRKB + random252`，VID/PID 是 4 字符 ASCII
 
 - `0x000..0x003 == "DRKB"`：当前 22/22。

@@ -1643,6 +1643,11 @@ fn lba8_current_usb_only_info_is_main_onlyid_hex_while_legacy_profile_keeps_it_e
             );
         } else {
             legacy += 1;
+            assert_ne!(
+                u32_le(&lba8, 0x14),
+                0,
+                "committed legacy profile unexpectedly lost nonzero HDSerialInfo: {name}"
+            );
             assert!(
                 usb_only.iter().all(|byte| *byte == 0),
                 "committed legacy profile unexpectedly gained current UsbOnlyInfo: {name}"
