@@ -9,7 +9,10 @@ use std::{collections::HashSet, fs};
 
 use common::FIXTURE_DIR;
 use edpcli::common::{METADATA_IMAGE_LEN, SECTOR};
-use edpcli::crypto::{a6b0_full, a7f0_full, crc32_bare, lba6_checksum, lba6_decode, xor_rolling};
+use edpcli::crypto::{
+    a6b0_decrypt, a6b0_full, a7f0_full, crc32_bare, lba6_checksum, lba6_decode, xor_rolling, RCON,
+    SBOX, SBOX2,
+};
 use edpcli::diskio::{parse_backup_name, BackupMeta};
 use edpcli::inspect::InspectMeta;
 use edpcli::metainfo::ownership_from_lba8;
@@ -44,6 +47,12 @@ const LEXAR_JOIN59_LBA9_HEX: &str =
     include_str!("fixtures/protocol_evidence/lexar_join59_lba9.hex");
 const KINGSTON_20260803_MP_LBA3_HEX: &str =
     include_str!("fixtures/protocol_evidence/kingston_20260803_mp_profile_lba3.hex");
+const OFFICIAL_VIRTUAL_WRITER_MODE1_LBA12_HEX: &str =
+    include_str!("fixtures/protocol_evidence/official_virtual_writer_mode1_lba12.hex");
+const OFFICIAL_VIRTUAL_WRITER_MODE2_LBA12_HEX: &str =
+    include_str!("fixtures/protocol_evidence/official_virtual_writer_mode2_lba12.hex");
+const OFFICIAL_VIRTUAL_WRITER_MODE3_LBA12_HEX: &str =
+    include_str!("fixtures/protocol_evidence/official_virtual_writer_mode3_lba12.hex");
 
 fn parse_reference_backup_name(name: &str) -> Option<BackupMeta> {
     let meta = parse_backup_name(name)?;
@@ -75,6 +84,112 @@ fn decode_hex_fixture(text: &str) -> Vec<u8> {
         .step_by(2)
         .map(|index| u8::from_str_radix(&hex[index..index + 2], 16).expect("valid fixture hex"))
         .collect()
+}
+
+fn gf_mul(mut a: u8, mut b: u8) -> u8 {
+    let mut out = 0u8;
+    for _ in 0..8 {
+        if b & 1 != 0 {
+            out ^= a;
+        }
+        let hi = a & 0x80;
+        a <<= 1;
+        if hi != 0 {
+            a ^= 0x1b;
+        }
+        b >>= 1;
+    }
+    out
+}
+
+fn aes128_expand_key(key: &[u8; 16]) -> [u8; 176] {
+    let mut out = [0u8; 176];
+    out[..16].copy_from_slice(key);
+    let mut generated = 16usize;
+    let mut rcon_index = 1usize;
+
+    while generated < out.len() {
+        let mut temp = [
+            out[generated - 4],
+            out[generated - 3],
+            out[generated - 2],
+            out[generated - 1],
+        ];
+        if generated % 16 == 0 {
+            temp.rotate_left(1);
+            for byte in &mut temp {
+                *byte = SBOX[*byte as usize];
+            }
+            temp[0] ^= RCON[rcon_index];
+            rcon_index += 1;
+        }
+        for byte in temp {
+            out[generated] = out[generated - 16] ^ byte;
+            generated += 1;
+        }
+    }
+    out
+}
+
+fn aes128_ecb_decrypt_block(block: &[u8; 16], key: &[u8; 16]) -> [u8; 16] {
+    fn add_round_key(state: &mut [u8; 16], expanded: &[u8; 176], round: usize) {
+        let base = round * 16;
+        for (index, byte) in state.iter_mut().enumerate() {
+            *byte ^= expanded[base + index];
+        }
+    }
+
+    fn inv_shift_rows(state: &mut [u8; 16]) {
+        let original = *state;
+        state[1] = original[13];
+        state[5] = original[1];
+        state[9] = original[5];
+        state[13] = original[9];
+
+        state[2] = original[10];
+        state[6] = original[14];
+        state[10] = original[2];
+        state[14] = original[6];
+
+        state[3] = original[7];
+        state[7] = original[11];
+        state[11] = original[15];
+        state[15] = original[3];
+    }
+
+    fn inv_sub_bytes(state: &mut [u8; 16]) {
+        for byte in state {
+            *byte = SBOX2[*byte as usize];
+        }
+    }
+
+    fn inv_mix_columns(state: &mut [u8; 16]) {
+        for column in 0..4 {
+            let i = column * 4;
+            let a0 = state[i];
+            let a1 = state[i + 1];
+            let a2 = state[i + 2];
+            let a3 = state[i + 3];
+            state[i] = gf_mul(a0, 14) ^ gf_mul(a1, 11) ^ gf_mul(a2, 13) ^ gf_mul(a3, 9);
+            state[i + 1] = gf_mul(a0, 9) ^ gf_mul(a1, 14) ^ gf_mul(a2, 11) ^ gf_mul(a3, 13);
+            state[i + 2] = gf_mul(a0, 13) ^ gf_mul(a1, 9) ^ gf_mul(a2, 14) ^ gf_mul(a3, 11);
+            state[i + 3] = gf_mul(a0, 11) ^ gf_mul(a1, 13) ^ gf_mul(a2, 9) ^ gf_mul(a3, 14);
+        }
+    }
+
+    let expanded = aes128_expand_key(key);
+    let mut state = *block;
+    add_round_key(&mut state, &expanded, 10);
+    for round in (1..10).rev() {
+        inv_shift_rows(&mut state);
+        inv_sub_bytes(&mut state);
+        add_round_key(&mut state, &expanded, round);
+        inv_mix_columns(&mut state);
+    }
+    inv_shift_rows(&mut state);
+    inv_sub_bytes(&mut state);
+    add_round_key(&mut state, &expanded, 0);
+    state
 }
 
 fn legacy_password_fold32(password: &[u8]) -> u32 {
@@ -423,6 +538,69 @@ fn lba12_v206_hidden_default_password_wraps_real_mode2_file_keys() {
         &type4[0x38..0x48],
         "different effective passwords must not be mistaken for identical wrapping material"
     );
+}
+
+#[test]
+fn lba12_official_virtual_writer_executes_mode1_mode2_mode3_wrapping_paths() {
+    // These are not real-device captures.  They are deterministic 512-byte LBA12
+    // outputs emitted by the official CEMSUsbRegsiter.dll CreatePartitions path
+    // under an isolated Unicorn virtual-disk harness.  Keep them separate from
+    // FIXTURE_DIR's real-device reference population.
+    const DEVICE_ID: &[u8] = b"disk&ven_virtual&prod_writerproof&rev_0001";
+    const PASSWORD: &[u8] = b"ProofPass1!";
+    const PASSWORD_MD5: [u8; 16] = [
+        0xe9, 0xc7, 0x0f, 0xce, 0xb0, 0x7e, 0x32, 0x63, 0x70, 0xb8, 0xcd, 0xc0, 0x85, 0x3a, 0xa3,
+        0x9f,
+    ];
+    const EXPECTED_USER_KEY_CRC: u32 = 0xe5a0_95a1;
+    const EXPECTED_FILE_KEY_CRC: u32 = 0xff4c_1d36;
+    const EXPECTED_FILE_KEY: [u8; 16] = [
+        0x14, 0x71, 0x96, 0xf5, 0xa2, 0xec, 0x79, 0x12, 0xed, 0xf1, 0x3f, 0x75, 0xd7, 0x66, 0xcb,
+        0x42,
+    ];
+    let fixtures = [
+        (1u8, OFFICIAL_VIRTUAL_WRITER_MODE1_LBA12_HEX),
+        (2u8, OFFICIAL_VIRTUAL_WRITER_MODE2_LBA12_HEX),
+        (3u8, OFFICIAL_VIRTUAL_WRITER_MODE3_LBA12_HEX),
+    ];
+
+    assert_eq!(crc32_bare(PASSWORD), EXPECTED_USER_KEY_CRC);
+    let outer_crc = crc32_bare(DEVICE_ID);
+    let mut unwrapped = Vec::new();
+
+    for (mode, fixture) in fixtures {
+        let raw = decode_hex_fixture(fixture);
+        assert_eq!(raw.len(), SECTOR, "mode{mode} official writer fixture");
+        let plain = a6b0_full(&raw, &outer_crc.to_le_bytes(), 0);
+        assert_eq!(&plain[..4], b"EDPF", "mode{mode}");
+        assert_eq!(u32_le(&plain, 0x08), 1, "mode{mode} entry count");
+        assert_eq!(u32_le(&plain, 0x0c), 2, "mode{mode} Share type");
+        assert_eq!(u32_le(&plain, 0x10), 1, "mode{mode} NeedDisturb");
+        assert_eq!(u32_le(&plain, 0x14), 1, "mode{mode} NeedEncrypt");
+        assert_eq!(u64_le(&plain, 0x20), 512, "mode{mode} sector size");
+        assert_eq!(u32_le(&plain, 0x30), EXPECTED_USER_KEY_CRC, "mode{mode}");
+        assert_eq!(u32_le(&plain, 0x34), EXPECTED_FILE_KEY_CRC, "mode{mode}");
+        assert_eq!(plain[0x58], mode, "mode{mode} EncryptMode");
+        assert!(plain[0x59..0x60].iter().all(|byte| *byte == 0));
+
+        let wrapped: [u8; 16] = plain[0x38..0x48].try_into().unwrap();
+        let file_key = match mode {
+            1 => a6b0_decrypt(&wrapped, &PASSWORD_MD5, 0),
+            2 => sm4_decrypt_block(&wrapped, &PASSWORD_MD5),
+            3 => aes128_ecb_decrypt_block(&wrapped, &PASSWORD_MD5),
+            _ => unreachable!(),
+        };
+        assert_eq!(file_key, EXPECTED_FILE_KEY, "mode{mode} unwrapped file key");
+        assert_eq!(
+            crc32_bare(&file_key),
+            EXPECTED_FILE_KEY_CRC,
+            "mode{mode} unwrapped FileKeyCRC"
+        );
+        unwrapped.push(file_key);
+    }
+
+    assert_eq!(unwrapped[0], unwrapped[1]);
+    assert_eq!(unwrapped[1], unwrapped[2]);
 }
 
 #[test]

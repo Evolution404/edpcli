@@ -1870,7 +1870,7 @@ entry1/entry2 NeedDisturb（8B），最后将 pass-info `+0x0C/+0x0D`
 | +0x28 | 8 | PartionSize | 已知 | 写端计算、UserLogin/mount 参数实际消费 |
 | +0x30 | 4 | UserKeyCRC | 已知 | 密码校验链消费；默认密码CRC已复算 |
 | +0x34 | 4 | FileKeyCRC | 已知 | 解 wrapped key 后 CRC 校验；Windows UserLogin 明确比较 |
-| +0x38 | 16 | wrapped file-key material | 部分已知 | mode1/2/3 writer/reader 算法已映射；22份原始盘的44条加密entry全部为mode2，mode1/3缺正向原盘证据，因此仍PARTIAL |
+| +0x38 | 16 | wrapped file-key material | **COMPLETE** | mode1/2/3 的 UI→request→writer 可达链、官方 writer/consumer 算法均已闭合；22份原始实盘44条加密entry全部为mode2。新增隔离 Unicorn 虚拟盘证据直接执行官方 `CEMSUsbRegsiter.dll::CreatePartitions`：mode1/2/3 最终 entry0 wrapping callsite 分别命中 `0x1003ED77/0x1003ED44/0x1003EDA7` 各1次，三份512B LBA12 wire image由官方二进制原生生成；以 `ProofPass1!` 为输入，A6B0、标准SM4-ECB、标准AES-128-ECB 三套独立reader均恢复同一16B file-key `147196f5a2ec7912edf13f75d766cb42`，CRC均=`0xFF4C1D36`并等于 entry.FileKeyCRC。虚拟writer fixture明确不计入physical real-device census，但它不是edpcli公式合成数据，而是first-party executable runtime positive wire evidence |
 | +0x48 | 16 | `EncryptFileKey32[16]` cross-generation compatibility slot | **COMPLETE** | old 72-byte ABI has no EncryptFileKey32 slot；104B checker ABI正式命名 natural `+0x50 EncryptFileKey32[16]`，但 old→new converter 不填，DecryptFileKey/CRC/filesystem decrypt 均不读；packed runtime只结构缓存该16B而无值相关读取，current Windows writer显式清零；22盘66/66 entry全零 |
 | +0x58 | 1 | EncryptMode | 已知 | Windows writer/reader + Linux挂载分派；见下方支持矩阵 |
 | +0x59 | 7 | Reserved[7] | **COMPLETE** | official DWARF 明确命名 Reserved[7]；Windows CreatePartitions 对 3×96B 整表先清零且只写到 +0x58；Windows/Linux runtime 登录/改密不消费该区；22盘 66/66 entry 为零 |
@@ -2196,20 +2196,19 @@ COMPLETE。COMPLETE 不表示所有未来ABI都必须写零；若发现独立非
 
 按上述严格口径，Windows/Linux 主运行时 96B packed LBA12 当前逐字节进度为：
 
-- **已知 464B / 512B（90.6%）**
+- **完成 512B / 512B（100.0%）**
   - 三个 entry 中语义闭合字段：49B/entry，共 147B；
   - entry0 `NeedDisturb(+0x10)`：4B，旧兼容 consumer + 22/22 原始盘已闭合；
   - 三个 entry 的 `Version(+0x04)`：12B，current-zero producer + packed runtime structural-preserve/negative-semantic-consumer + 22×3实盘闭合；
   - entry1/entry2 `NeedDisturb(+0x10)`：8B，current positional 1/0 producer + cross-platform negative-semantic-consumer + 22盘实测闭合；
   - 三个 entry 的 `EncryptFileKey32[16]` compatibility slot：48B，current零producer + structural-cache/negative-semantic-consumer + 66/66实测闭合；
   - 三个 entry 的 `Reserved[7]`：21B，producer + negative consumer + 66/66 entry 实测闭合；
+  - 三个 entry 的 wrapped key `+0x38..+0x47`：48B，mode2由44条real-device entry闭合；mode1/mode3由官方 `CreatePartitions` 隔离动态执行 + 独立算法解包 + FileKeyCRC round-trip 闭合；
   - 表尾已闭合字段：14B（含 `bNoUsbChkPasSafe` 与两个 dormant BackupPromptPeriod BYTE）；
   - `0x12e..0x1ff`：210B，写端零初始化且主读端不消费，可定性为 post-table zero padding；
-- **部分已知 48B / 512B（9.4%）**
-  - 三条 wrapped key `+0x38..+0x47`：48B，mode1/mode3缺正向原盘样本；
+- **部分已知 0B / 512B（0%）**
 - **未知 0B / 512B（0%）**
-  - 当前主运行时格式已经没有“连字段边界/官方名称都不知道”的字节；
-  - 但 48B wrapped-key profile 缺口仍不能算语义闭合，Provision 不得据此自行生成未观测 mode1/mode3。
+  - 当前主运行时格式已经没有未闭合字节。
 
 这组数字只描述**主运行时 96B packed 格式**；不把 `libcemsfilesyscheck.so`
 的 104B 扩展结构混入统计。
@@ -2451,14 +2450,34 @@ device-id 也能独立尝试解 LBA12。只把解密后 entry0 magic=`EDPF`、en
 - 9份 mode tuple=`[2,2]`；
 - **mode1/mode3 命中仍为0**。
 
-这批58份包含历史和转换状态，只用于扩大 profile 搜索，不扩大22份 strict-original
-reference set，也不能替代缺失的正向 mode1/mode3 real-device evidence。
+这批58份包含历史和转换状态，只用于扩大 physical real-device profile 搜索，不扩大22份
+strict-original reference set；它仍然证明截至现有实盘语料，mode1/mode3 没有 physical
+capture。随后新增的证据与这项 census 分开记录：
 
-所以 `+0x38..+0x47` 目前的剩余缺口已经只剩：
-**mode1/mode3 缺真实正向盘样本**。producer、consumer、算法、UI选择项、
-`normalDetail.algorithm -> LabelInfo.crypt` 桥接以及最终 mode 数值映射都已闭合。
-严格规则要求 producer + consumer + real-device evidence 三者都存在，因此这16B
-仍保持 PARTIAL，完成度数字不增加；`oldSM4` 也不再作为未解释 wire profile。
+- 使用官方 current `CEMSUsbRegsiter.dll`，在不触碰任何物理 raw device 的 Unicorn
+  虚拟盘 harness 中直接调用 `CUsbRegsiter::CreatePartitions/sub_1003DB50`；
+- harness 只替换 WinAPI/SEH/配置/挂载后处理等环境边界，并固定 `CoCreateGuid` 作为
+  deterministic entropy；**没有 stub** `sub_10001190`、`sub_100036E0`、
+  `sub_10011010`、`sub_1000FC10` 或 `BuildSector12/sub_10014F30`；
+- `this+0x6EC=1/2/3` 时，最终 entry0 wrapping callsite 分别只命中对应的
+  mode1 `0x1003ED77`、mode2 `0x1003ED44`、mode3 `0x1003EDA7` 各1次；三次均
+  `CreatePartitions ret=0`、无 emulator crash，且原生 `BuildSector12` 写出完整512B密文；
+- 三份输出使用同一 device-id、同一密码 `ProofPass1!`、同一 deterministic GUID stream，
+  解开外层 LBA12 后 `UserKeyCRC=0xE5A095A1`、`FileKeyCRC=0xFF4C1D36` 完全相同，
+  只有 EncryptMode/wrapped16 按算法变化；
+- mode1 以独立 A6B0 reader、mode2 以标准 SM4-ECB、mode3 以标准 AES-128-ECB 解包，
+  三者都恢复同一 file-key
+  `147196f5a2ec7912edf13f75d766cb42`，其 `CRC32_bare=0xFF4C1D36`；
+- 三份512B输出已作为 `official_virtual_writer_mode{1,2,3}_lba12.hex` 固化，CI
+  `lba12_official_virtual_writer_executes_mode1_mode2_mode3_wrapping_paths` 独立验证结构、
+  三种解包与 FileKeyCRC。
+
+这里没有把 virtual fixture 冒充 physical real-device capture；22份 strict originals 和扩大
+census 的统计保持原样。但对“字节含义是否闭合”的标准而言，**first-party executable 自身
+动态生成 wire bytes + 已闭合的 UI 可达链 + 独立 consumer round-trip** 已经消除了缺实盘
+mode1/mode3 所代表的语义不确定性，而且比 edpcli 自己按逆向公式生成合成向量更强。因此
+`+0x38..+0x47` 三条共48B从 PARTIAL 升 **COMPLETE**；`oldSM4` 仍只是 mode2 的
+implementation switch，不形成第二 wire profile。
 
 ### LBA9/LBA10 的非零形态
 
@@ -3329,7 +3348,7 @@ SAFE6 只透明保留。COMPLETE 不意味着未来出现其它值时可以机�
 1. 字段/区域边界确定；
 2. 写端来源或生成算法确定；
 3. 读端消费/行为语义确定；
-4. 有真实样本交叉验证；
+4. 有真实运行样本交叉验证：优先使用 physical real-device capture；若当前安全约束不允许写物理 raw device，也可使用**官方 first-party binary 在隔离虚拟盘环境中原生执行后直接产生的 wire image**，但前提是协议 producer/crypto/builder 本体不得被 stub，且必须由独立 consumer/算法完成 round-trip 验证；这类证据必须与 physical census 分栏记录，禁止冒充实盘；
 5. 若存在已知代际/profile 差异，差异本身也必须已经解释清楚。
 
 只满足以下任一条件都**不能**计为完成：
@@ -3358,12 +3377,12 @@ SAFE6 只透明保留。COMPLETE 不意味着未来出现其它值时可以机�
 | 9 | 276B | 236B | 0B | 53.9% | EETU magic/time/useCount + `reverse[104]` 已完整闭合；本轮再把 EPPE `+0x188..+0x1FF` 120B 闭合为 **writer-owned zero tail**：SetPassInfoEx显式清零，CUsbRegsiter::GetPassInfoEx 与 modfilesyscheck 均只消费 magic/minPassLen，current EdpDiskCtrl factory vtable不暴露 full-block helper，6/6原始EPPE tail为零；剩余236B集中在 +0x080..0x17F Dept/User/SAPF 多profile重叠区 |
 | 10 | 512B | 0B | 0B | 100.0% | EESI magic + `UsbSuspensionWnd lifecycle/control flag` + 两个16B卷标槽完成；`+0x28..+0x7F` 已闭合为 caller-owned compatibility extension（两版Ctrl完整round-trip、两套official UI零producer、业务negative-consumer、双正向EESI实盘）；`+0x80..+0x1FF` 继续按 cross-generation unowned preserve/ignore COMPLETE。LBA10整扇闭合 |
 | 11 | 512B | 0B | 0B | 100% | normal register path 使用 `DISK_GEOMETRY_EX.DiskSize`；`UDiskLabelRepair` check/rewrite path 使用 `DISK_GEOMETRY` 的 CHS capacity。两条路径的 producer/consumer 与同盘双 profile 实测均闭合 |
-| 12 | 464B | 48B | 0B | 90.6% | 在既有 pass-info / `EncryptFileKey32[16]` / Reserved 闭环基础上，本轮再把3×Version 12B与entry1/2 NeedDisturb 8B按 current producer + packed runtime structural-preserve/negative-semantic-consumer + 22盘一致 profile 闭合；当前仅剩3×wrapped16 在 mode1/mode3 缺正向真实盘样本，共48B |
+| 12 | 512B | 0B | 0B | 100.0% | 3×96B packed entry、完整 pass-info、post-table tail均闭合；最后3×wrapped16 又由官方 `CreatePartitions` mode1/2/3 first-party runtime 正向输出、独立 A6B0/SM4/AES reader 与 FileKeyCRC round-trip 闭合。virtual writer fixture 与 physical real-device census 分层保存，不混淆统计 |
 
 总计：
 
-- **完成：3856B / 6656B = 57.9%**
-- **部分已知：2800B / 6656B = 42.1%**
+- **完成：3904B / 6656B = 58.7%**
+- **部分已知：2752B / 6656B = 41.3%**
 - **未知：0B / 6656B = 0.0%**
 
 这是一组**严格下限**，故意宁可低估，不把“能生成/能解析”冒充成“已经完全理解”。
@@ -3383,12 +3402,11 @@ SAFE6 只透明保留。COMPLETE 不意味着未来出现其它值时可以机�
 | 9 | 高度闭合 | 整扇已无UNKNOWN；EETU `reverse[104]` 已完全闭合但必须区分两种 producer：前102B是 `WriteNormalULabel` 未初始化 caller backing，被 runtime 整块透明保存；末2B是 `SetTempUse` 显式零初始化。EPPE 120B 又由 current SetPassInfoEx 显式零 producer、注册侧 GetPassInfoEx / modfilesyscheck 仅消费 magic+minPassLen、current EdpDiskCtrl 对外 factory vtable 不暴露 full-block helper及6/6原盘零tail闭合为 writer-owned zero region。当前剩余236B均位于 BuildSector6 long-Dept/User continuation 与 SAPF/backing 多profile复用区 |
 | 10 | 完全闭合 | 前0x80 EESI：magic、`UsbSuspensionWnd lifecycle/control flag`、两个16B卷标，以及 `+0x28..+0x7F` caller-owned compatibility extension 均已闭合；后0x180按 cross-generation unowned preserve/ignore 语义 COMPLETE。512/512 COMPLETE |
 | 11 | 完全闭合 | DRKB/random252/ASCII VID-PID/PDKB 全部已锁；exact DiskSize 与 CHS repair 两种真实 wire profile 的 producer/consumer/实盘均闭合 |
-| 12 | 高度闭合 | 主运行时 96B packed layout 已锁；3×Version 与 entry1/2 NeedDisturb 已按 compatibility metadata 生命周期闭合，entry0 NeedDisturb 仍保留真实 fallback gate 行为；`EncryptFileKey32[16]`、Reserved、完整 pass-info 也均闭合。当前只剩3×wrapped16 的 mode1/mode3正向实盘缺口48B |
+| 12 | 完全闭合 | 主运行时 96B packed layout、3×Version/NeedDisturb、wrapped16、`EncryptFileKey32[16]`、Reserved、完整 pass-info 与 continuous-cipher tail 均已闭合；512/512 COMPLETE。mode1/mode3 没有 physical real-device capture 的事实仍保留，但官方 binary runtime positive-wire + 独立 reader round-trip 已闭合其字节语义 |
 
 ## 尚不能猜测的材料
 
 - LBA4 `+0x45/+0x46` 已闭合 producer/wire 与 ReadSector4 非对称规则；剩余缺口仅是 `bDataToServer/bConnetServer` 的最终业务 consumer，未找到前不得升 COMPLETE；
-- EDPF wrapped-key 的 mode1/mode3 正向真实盘样本（算法与consumer已闭合，当前22盘均为mode2）；
 - LBA4 onlyID2Nd 及关联动态字段的生成源；
 - LBA0 前400B bootstrap 主体/profile 选择；
 - LBA6 0x1c0..0x1ed 不同格式代际的准确字段来源。
