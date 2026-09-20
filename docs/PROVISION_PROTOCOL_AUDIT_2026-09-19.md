@@ -3115,7 +3115,57 @@ _IF_DiskFormat
 
 因此 Aigo L8302 的 400B 模板 producer 仍然成立，但剩余问题进一步精确为：
 **哪一个历史升级/量产/格式化入口真正调用 `IF_DiskFormat`，以及它以什么
-设备/profile 条件选择该路径。** 在该调用点闭合前，LBA0 前400B计数不变。
+设备/profile 条件选择该路径。** 该选择条件仍阻止 bootstrap 主体整体闭合；不过后续
+逐字节交叉证明最后21B在三种已知 producer 中完全不受该选择影响，现已单独拆出闭合。
+
+#### LBA0 `+0x17B..+0x18F`：三类 bootstrap profile 不变量 21B 闭合
+
+本轮不再把前400B强制当作一个不可拆分状态，而是直接对已知三种真实 producer
+做逐字节交集：
+
+1. current SAFE6：`RegsiterUsb` 对 `+0x000..+0x18F` 显式 `memset(0)`；
+2. legacy：official `UsbMainBSec` 模板；
+3. Aigo L8302：`Netac_USB_API.dll::sub_10003880` 的嵌入 MBR 模板，
+   已由真实 Aigo 原盘逐字节验证。
+
+三类模板前400B共同为0的物理字节只有30B，其中唯一有意义的连续大段是
+`+0x17B..+0x18F` 共21B；其余9个只是分散在代码/字符串中的单个0字节，
+继续随 bootstrap 主体保持 PARTIAL。
+
+这21B又进一步做了16-bit bootstrap consumer 复核：
+
+- legacy `UsbMainBSec` 的第三条错误消息
+  `"Missing operating system"` 固定在 `+0x163..+0x17A`，因此
+  **`+0x17B` 正是该 C-string 的 NUL 终止符**；既有 message-pointer 低字节
+  `+0x1B7=0x63` 会把打印路径指到这条消息；
+- legacy 终止符之后的 `+0x17C..+0x18F` 20B 没有代码/数据引用，是模板尾部零填充；
+- Aigo/Netac MBR bootstrap 会先把完整512B从 `0x7C00` 搬到 `0x0600`
+  （`mov cx,0x100; rep movsw`）再跳到 relocated code；三条错误消息位于原模板
+  `+0x08B/+0x0A3/+0x0C2`，最后一条的 NUL 已在 `+0x0DA`。
+  其执行路径没有任何引用落入 `+0x17B..+0x18F`，因此这21B在 Netac profile
+  明确只是零填充；
+- current SAFE6 不执行这套 bootstrap，而是直接清零同一区域。
+
+实盘证据也补成三 profile 闭环：committed fixtures 同时覆盖 current-zero 与
+legacy UsbMainBSec；另新增
+`tests/fixtures/protocol_evidence/aigo_l8302_netac_lba0_prefix.hex`
+锁定 Aigo L8302/Netac 的真实前400B。三类均满足
+`LBA0[0x17B..0x190] == zero[21]`，回归
+`lba0_tail_of_bootstrap_body_is_profile_invariant_message_terminator_and_zero_padding`
+会同时检查 legacy 消息边界和三 profile 零值。
+
+因此：
+
+- `+0x17B` 1B = **legacy third MBR error-message NUL terminator /
+  other-profile zero padding**，COMPLETE；
+- `+0x17C..+0x18F` 20B = **cross-profile fixed-zero bootstrap tail padding**，
+  COMPLETE；
+- `+0x000..+0x17A` 379B 仍因两套非零 bootstrap 代码与 historical
+  profile-selection 未闭合而保持 PARTIAL。
+
+这次是 **21B 净新增 COMPLETE**，LBA0 从112/400更新为
+**133 COMPLETE / 379 PARTIAL**；profile-selection blocker 仍真实存在，但不再拖住
+与选择无关的尾部字节。
 
 #### LBA0 `+0x1B8..+0x1BB`：Windows MBR disk signature 4B 闭合
 
@@ -3239,7 +3289,7 @@ SAFE6 只透明保留。COMPLETE 不意味着未来出现其它值时可以机�
 
 | LBA | 完成 | 部分已知 | 未知 | 严格完成率 | 当前计数依据 |
 |---:|---:|---:|---:|---:|---|
-| 0 | 112B | 400B | 0B | 21.9% | MBR partition table +55AA、legacy 三个 message-pointer、`+0x190..+0x19F/+0x1A4..+0x1B4` 两段 unowned compatibility region、optional SectorSize overlay、standard Windows MBR disk signature 与 `+0x1BC..+0x1BD` reserved/unowned word 均已闭合；只剩前400B bootstrap主体/profile-selection继续PARTIAL |
+| 0 | 133B | 379B | 0B | 26.0% | 在既有 MBR partition table/55AA、message-pointer、SectorSize、disk signature、reserved/unowned 区基础上，又把 `+0x17B` legacy第三条错误消息NUL终止符与 `+0x17C..+0x18F` 20B三profile固定零尾部闭合；只剩 `+0x000..+0x17A` 379B bootstrap主体/profile-selection继续PARTIAL |
 | 1 | 0B | 512B | 0B | 0% | 官方 BuildSector1_Gpt + GPT_Header(512B) 结构 + Windows `EFI PART` / `header_lba` consumer 已闭合；22/22当前原始SAFE6盘全零，缺正向GPT实盘，因此整扇PARTIAL |
 | 2 | 0B | 512B | 0B | 0% | 官方 BuildSector2_Gpt + GPT_Partition(128B) 结构 + Windows 从LBA2起每扇4 entry parser 已闭合；22/22当前原始盘全零，缺正向GPT实盘，因此整扇PARTIAL |
 | 3 | 0B | 512B | 0B | 0% | EDP 注册 writer 对整扇 preserve-existing，当前 Windows/Linux EDP reader 不解析；22份原始盘为21零+1 Kingston MP payload，但厂商 producer/固件 consumer 未闭合 |
@@ -3255,8 +3305,8 @@ SAFE6 只透明保留。COMPLETE 不意味着未来出现其它值时可以机�
 
 总计：
 
-- **完成：3852B / 6656B = 57.9%**
-- **部分已知：2804B / 6656B = 42.1%**
+- **完成：3873B / 6656B = 58.2%**
+- **部分已知：2783B / 6656B = 41.8%**
 - **未知：0B / 6656B = 0.0%**
 
 这是一组**严格下限**，故意宁可低估，不把“能生成/能解析”冒充成“已经完全理解”。
@@ -3264,7 +3314,7 @@ SAFE6 只透明保留。COMPLETE 不意味着未来出现其它值时可以机�
 
 | LBA | 状态 | 当前结论 |
 |---|---|---|
-| 0 | 部分闭合 | MBR 分区表、55AA、legacy 三个错误消息指针、`+0x190..0x19F/+0x1A4..0x1B4` 两段 cross-profile unowned compatibility region、optional SectorSize compatibility overlay、standard Windows MBR disk signature 及 `+0x1BC..+0x1BD` reserved/unowned word 已闭合；只剩前400B bootstrap profile-selection 继续追 |
+| 0 | 部分闭合 | MBR 分区表、55AA、legacy 三个错误消息指针、`+0x17B` 第三条消息NUL、`+0x17C..+0x18F` cross-profile fixed-zero bootstrap tail、`+0x190..+0x19F/+0x1A4..+0x1B4` unowned compatibility region、SectorSize、disk signature 与 reserved word 已闭合；剩余 `+0x000..+0x17A` bootstrap/profile-selection 继续追 |
 | 1 | GPT profile 部分闭合 | 当前22/22全零；官方 GPT_Header writer/consumer 已知，但缺正向GPT实盘 |
 | 2 | GPT profile 部分闭合 | 当前22/22全零；官方 GPT_Partition writer/consumer 已知，但缺正向GPT实盘 |
 | 3 | 外部制造区部分闭合 | 21/22 全零，1 份 Kingston MP payload；官方 EDP 注册链原样保留且当前 reader 不解析，厂商生成/消费语义仍未知 |
@@ -3283,7 +3333,7 @@ SAFE6 只透明保留。COMPLETE 不意味着未来出现其它值时可以机�
 - LBA4 `+0x45/+0x46` 已闭合 producer/wire 与 ReadSector4 非对称规则；剩余缺口仅是 `bDataToServer/bConnetServer` 的最终业务 consumer，未找到前不得升 COMPLETE；
 - EDPF wrapped-key 的 mode1/mode3 正向真实盘样本（算法与consumer已闭合，当前22盘均为mode2）；
 - LBA4 onlyID2Nd 及关联动态字段的生成源；
-- LBA0 前400B bootstrap 主体/profile 选择；
+- LBA0 `+0x000..+0x17A` bootstrap 主体/profile 选择；
 - LBA6 0x1c0..0x1ed 不同格式代际的准确字段来源。
 - LBA12 `+0x48..+0x57` 已闭合为 `EncryptFileKey32[16]` cross-generation compatibility slot；后续若发现独立非零ABI，只能扩展 profile，不得回退成“未知 key”或强制零；
 
