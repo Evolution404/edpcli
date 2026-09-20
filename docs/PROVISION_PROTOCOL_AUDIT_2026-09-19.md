@@ -159,7 +159,7 @@ profile 做差异门禁。
   - `u32@0x18 == onlyid ^ 0x88888888`。
 - 旧 `inspect.rs` 的“raw 单字节为 0 就恢复成 0”规则会把真实样本 `onlyid=949028302` 的 `LLGB` 错解为 `\0LGB`；本轮已改为只在整个 `0x47..0x1fb` 未写区全零时保留该区物理零，修复后当前 22/22 参考样本均恢复双 `LLGB` 锚点。
 
-#### LBA4 `0x47..0x1FB`：437B UNKNOWN -> PARTIAL
+#### LBA4 `0x47..0x1FB`：437B UNKNOWN -> PARTIAL -> COMPLETE
 
 本轮重新对齐 Windows PE current producer、Linux DWARF producer/reader 与22份原始盘。Windows current
 `CEMSUsbRegsiter.dll::sub_10014550` 与 Linux
@@ -178,10 +178,33 @@ Linux `ReadSector4@diskfile.cpp:957` 会对 `+0x18..+0x1FF` 执行同一 rolling
 - 4/4 rolling 形态按 onlyid key 解码后437B全零；
 - raw-zero 形态按区域规则保持后同样是 semantic zero。
 
-因此这437B已经具备物理边界、current full producer变换范围、reader negative
-semantic consumer 和真实双 profile 验证，从 UNKNOWN 降为 **PARTIAL**。
-但 full builder 并没有显式把437B清零，只是变换已有 backing；raw-zero 初始
-producer/选择条件也仍未知，所以严格禁止升 COMPLETE。
+因此这437B先具备了物理边界、current full producer变换范围、reader negative
+semantic consumer 和真实双 profile 验证，从 UNKNOWN 降为 **PARTIAL**。随后继续追
+first-party runtime 后，确认此前“必须找到 raw-zero 最初 producer 才能闭合”的前提本身
+过强：这437B根本不是一个要求固定初始化值的业务字段，而是 **unowned backing / representation carrier**。
+
+隔离 Unicorn 直接执行 current Windows `BuildSector4/sub_10014550`，把
+`+0x47..+0x1FB` 预填为任意非零 `0xA5`：
+
+- non-null restore-node 分支：437B raw bytes 全部进入 rolling 变换；独立按 onlyid key
+  反滚后 **437/437 精确恢复原始 `0xA5`**；函数本体没有在该区写任何业务 payload；
+- `arg0==NULL` 分支：同一437B **437/437 原样保持 `0xA5`**，函数完全不碰该区；
+- full 分支仍由函数自身重写尾部 `+0x1FC..+0x1FF=LLGB` 后再 rolling；NULL 分支连尾锚点
+  也不主动创建，进一步证明两条路径的区别是“transform existing representation”与“preserve existing representation”。
+
+同一 full-rolling nonzero fixture 再交给 official Windows
+`ReadSector4/sub_10015090` 动态执行；仅替换 MSVC `std::string/atoi` 运行库边界，rolling、
+0x2F memcpy 与 `OnlyIdXor8` 校验均原生。reader 返回0，恢复
+`onlyid=1625940067`、`OnllyID2Nd=main`、`LLGB`、Version=1；返回对象仍只有0x2F
+restore node，437B backing 不进入 API 输出。
+
+这与 LBA5 的 opaque-preserve 口径完全一致：**COMPLETE 描述的是字节的生命周期/所有权，
+不是宣称当前样本中的零值是协议常量。** raw-zero 历史最初是谁写入已经不再是业务语义
+blocker；对未知非零 backing，兼容实现必须 preserve 或按 full branch 可逆 rolling，禁止清洗。
+
+因此 `+0x47..+0x1FB` 共437B从 PARTIAL 升 **COMPLETE**。新增
+`official_virtual_lba4_full_nonzero_backing.hex` / `official_virtual_lba4_null_nonzero_backing.hex`
+与回归 `official_virtual_lba4_backing_is_unowned_and_representation_only` 固定任意非零正例。
 
 强化门禁 `lba4_short_form_must_be_decoded_by_regions_not_by_zero_bytes`：
 committed real fixtures 必须同时覆盖 raw-zero 与 rolling-encrypted-zero 两种物理表示，
@@ -196,9 +219,10 @@ legacy generation**。严格原始 Kingston `onlyid=1625940067 @ 2026-08-27 17:3
 SHA-256=`85141be31933e89976970ac18f44e1da8b77d3f57fdae1d857f8ea9d19a007ec`，以及
 回归 `lba4_raw_zero_short_form_also_exists_in_a_current_identity_profile`。
 
-因此 short/full representation 的真实选择条件必须独立追踪；不得再由第二ID/HSerial
-代际形态反推。这个反例增强了“raw-zero producer/选择条件仍未知”的 blocker，不改变
-LBA4 严格完成字节数。
+因此 short/full representation 的真实选择条件仍不能由第二ID/HSerial代际形态反推；
+但在 backing 已闭合为 unowned representation carrier 后，这个选择条件只影响 **wire
+representation**，不再影响437B的业务语义完成度。它仍值得追踪用于历史复现，却不再是
+这437B的 COMPLETE blocker。
 
 #### current SAFE6 分支纠偏：Provision 现有 short canonical 不是官方 current writer
 
@@ -3540,7 +3564,7 @@ profiles 的该边界，而不是把字符串具体值硬编码成未来协议�
 | 1 | 512B | 0B | 0B | 100.0% | Linux official `BuildSector1_Gpt` first-party virtual runtime 直接生成整512B primary header，独立 IEEE CRC32 同时命中 header/16KiB array CRC；同一34扇 image 又被 current Windows `sub_1002AB70` 原生识别为GPT。physical 22/22零值继续作为 absent-GPT profile 保存，不与virtual fixture混计 |
 | 2 | 176B | 336B | 0B | 34.4% | entry0完整128B first-party闭合；current Windows active GPT creator又明确 `PartitionCount=1`，按 UEFI 2.10 unused-entry 定义把 entries1..3 的三个16B `PartitionTypeGUID=0` 闭合。每条其余112B仍缺 Windows first-party on-disk producer，继续PARTIAL |
 | 3 | 0B | 512B | 0B | 0% | EDP 注册 writer 对整扇 preserve-existing，当前 Windows/Linux EDP reader 不解析；22份原始盘为21零+1 Kingston MP payload，但厂商 producer/固件 consumer 未闭合 |
-| 4 | 46B | 466B | 0B | 9.0% | onlyid clear header、OnlyIdXor8、LLGB 双锚点与固定restore metadata完成；server flags拆分为 `bDataToServer@+0x45` 继续PARTIAL、`bConnetServer@+0x46` 按 current显式零producer + cross-profile逻辑0 + negative semantic consumer 升COMPLETE。MyHardinfo 4B、第二 ID/HSerial、第一server flag与 `+0x047..+0x1FB` 多profile backing继续PARTIAL。此前汇总误把仍为PARTIAL的 MyHardinfo 4B计入COMPLETE，本轮已纠正 |
+| 4 | 483B | 29B | 0B | 94.3% | onlyid clear header、OnlyIdXor8、LLGB 双锚点与固定restore metadata完成；`+0x047..+0x1FB` 437B 已由 first-party full/null writer 动态证明为 unowned backing 的“可逆 rolling transform / byte-preserve”双表示，并由 official reader negative-consumer 闭合。剩余29B仅为 `OnllyID2Nd`4B、HSerialCRC20B、MyHardinfo4B、`bDataToServer`1B |
 | 5 | 512B | 0B | 0B | 100% | 两版 EdpDiskCtrl 均只对 LBA5 执行“读整扇→原样写回→检查 ERROR_WRITE_PROTECT(0x13)”；当前注册 writer 读取既有13扇区后不重建 LBA5，因此 preserve existing bytes；22/22原始盘全零 |
 | 6 | 473B | 39B | 0B | 92.4% | 在既有闭环基础上，再按首个NUL边界把 GSerial `+0x1C0..1C8` 9B 与 BeiZhu `+0x1D0` 1B 升COMPLETE；剩余39B为 Dept接缝1B、GSerial尾7B、BeiZhu尾15B、legacy MBR fragment16B |
 | 7 | 512B | 0B | 0B | 100.0% | 3×Version、entry1/entry2 NeedDisturb 已按 compatibility metadata 生命周期闭合；最后两个 BackupPromptPeriod BYTE 又由正式 DWARF 字段、current-zero producer、四代 Windows + Linux structural-preserve/negative semantic consumer、跨 v0x0064/v0x0206 实盘0/0 profile 闭合为 dormant compatibility fields。LBA7 至此整扇 COMPLETE |
@@ -3552,8 +3576,8 @@ profiles 的该边界，而不是把字符串具体值硬编码成未来协议�
 
 总计：
 
-- **完成：4727B / 6656B = 71.0%**
-- **部分已知：1929B / 6656B = 29.0%**
+- **完成：5164B / 6656B = 77.6%**
+- **部分已知：1492B / 6656B = 22.4%**
 - **未知：0B / 6656B = 0.0%**
 
 这是一组**严格下限**，故意宁可低估，不把“能生成/能解析”冒充成“已经完全理解”。
@@ -3565,7 +3589,7 @@ profiles 的该边界，而不是把字符串具体值硬编码成未来协议�
 | 1 | 完全闭合 | absent-GPT physical profile 与 official GPT positive-wire profile 均闭合；512/512 COMPLETE |
 | 2 | GPT entry0 + unused type GUID闭合 | entry0 128B完整闭合；entries1..3 的16B `PartitionTypeGUID` 已按 current Windows one-partition creator + UEFI unused-entry 定义闭合，共176B COMPLETE；其余336B residual fields继续追 |
 | 3 | 外部制造区部分闭合 | 21/22 全零，1 份 Kingston MP payload；官方 EDP 注册链原样保留且当前 reader 不解析，厂商生成/消费语义仍未知 |
-| 4 | 高度闭合 | 整扇已无UNKNOWN；`+0x047..+0x1FB` 已确认 raw-zero / rolling-encrypted-zero 双历史物理表示且22盘语义均为零。server flags中 `bConnetServer@+0x46` 已按 dormant-zero compatibility byte闭合；只剩 `bDataToServer@+0x45` 因 legacy `0B` profile 的旧producer/最终consumer缺失继续PARTIAL |
+| 4 | 高度闭合 | 483/512 COMPLETE。`+0x047..+0x1FB` 已闭合为 unowned backing / representation carrier：full branch 可逆rolling existing bytes，NULL branch 原样preserve，reader只返回0x2F node且semantic-ignore backing；real raw-zero/rolling-zero与任意非零virtual正例均已覆盖。只剩 second key/HSerial/MyHardinfo/第一server flag 共29B PARTIAL |
 | 5 | canonical 已知 | opaque preserve / 写保护探测 scratch；当前 22/22 全零，但零不是协议固定要求 |
 | 6 | 高度闭合 | 整扇已无 UNKNOWN，473/512 COMPLETE。GSerial前9B与BeiZhu首1B已从 profile-dependent slot 中拆出闭合；剩余39B仅为 Dept join59末字节、两字符串尾部underlay与16B legacy MBR fragment |
 | 7 | 完全闭合 | 物理0x40 packed ABI、PartionCount、rolling XOR、entry0 NeedDisturb MBR gate、v0x0064 legacy wrapped8、3×Version/entry1+2 NeedDisturb compatibility metadata、`bNoUsbChkPasSafe` SAFE6 policy 行为链及最后两个 dormant BackupPromptPeriod compatibility BYTE 均已闭合；512/512 COMPLETE |

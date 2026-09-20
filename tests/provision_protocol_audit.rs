@@ -61,6 +61,10 @@ const OFFICIAL_VIRTUAL_LONG_USER_LBA6_HEX: &str =
     include_str!("fixtures/protocol_evidence/official_virtual_long_user_lba6.hex");
 const OFFICIAL_VIRTUAL_LONG_USER_LBA9_HEX: &str =
     include_str!("fixtures/protocol_evidence/official_virtual_long_user_lba9.hex");
+const OFFICIAL_VIRTUAL_LBA4_FULL_NONZERO_BACKING_HEX: &str =
+    include_str!("fixtures/protocol_evidence/official_virtual_lba4_full_nonzero_backing.hex");
+const OFFICIAL_VIRTUAL_LBA4_NULL_NONZERO_BACKING_HEX: &str =
+    include_str!("fixtures/protocol_evidence/official_virtual_lba4_null_nonzero_backing.hex");
 
 fn parse_reference_backup_name(name: &str) -> Option<BackupMeta> {
     let meta = parse_backup_name(name)?;
@@ -1577,9 +1581,9 @@ fn lba4_strict_progress_matches_non_overlapping_detail_ranges() {
         owner.iter().all(Option::is_some),
         "LBA4 detail rows must cover all 512 bytes"
     );
-    assert_eq!((complete, partial), (46, 466));
+    assert_eq!((complete, partial), (483, 29));
     assert!(
-        trace.contains("| LBA4 | 46 | 466 | 0 | 9.0% |"),
+        trace.contains("| LBA4 | 483 | 29 | 0 | 94.3% |"),
         "STRICT_PROGRESS LBA4 summary drifted from byte-detail accounting"
     );
 }
@@ -1811,6 +1815,38 @@ fn lba4_short_form_must_be_decoded_by_regions_not_by_zero_bytes() {
     assert!(
         rolling_zero_gap >= 2,
         "committed fixtures lost the rolling-encrypted-zero LBA4 representation"
+    );
+}
+
+#[test]
+fn official_virtual_lba4_backing_is_unowned_and_representation_only() {
+    const ONLYID: u32 = 1_625_940_067;
+    let full = decode_hex_fixture(OFFICIAL_VIRTUAL_LBA4_FULL_NONZERO_BACKING_HEX);
+    let short = decode_hex_fixture(OFFICIAL_VIRTUAL_LBA4_NULL_NONZERO_BACKING_HEX);
+    assert_eq!(full.len(), SECTOR);
+    assert_eq!(short.len(), SECTOR);
+
+    let k0 = (ONLYID & 0xffff) ^ (ONLYID >> 16);
+    let mut decoded = full.clone();
+    decoded[0x18..].copy_from_slice(&xor_rolling(&full[0x18..], k0));
+
+    assert!(
+        full[0x47..0x1fc].iter().any(|byte| *byte != 0xa5),
+        "full BuildSector4 branch must transform arbitrary backing"
+    );
+    assert!(
+        decoded[0x47..0x1fc].iter().all(|byte| *byte == 0xa5),
+        "rolling decode must recover arbitrary backing exactly"
+    );
+    assert_eq!(&decoded[0x1fc..0x200], b"LLGB");
+
+    assert!(
+        short[0x47..0x1fc].iter().all(|byte| *byte == 0xa5),
+        "NULL-node BuildSector4 branch must preserve backing byte-for-byte"
+    );
+    assert!(
+        short[0x1fc..0x200].iter().all(|byte| *byte == 0xa5),
+        "NULL-node branch must not invent the trailing LLGB anchor"
     );
 }
 
