@@ -3540,7 +3540,7 @@ profiles 的该边界，而不是把字符串具体值硬编码成未来协议�
 | 1 | 512B | 0B | 0B | 100.0% | Linux official `BuildSector1_Gpt` first-party virtual runtime 直接生成整512B primary header，独立 IEEE CRC32 同时命中 header/16KiB array CRC；同一34扇 image 又被 current Windows `sub_1002AB70` 原生识别为GPT。physical 22/22零值继续作为 absent-GPT profile 保存，不与virtual fixture混计 |
 | 2 | 176B | 336B | 0B | 34.4% | entry0完整128B first-party闭合；current Windows active GPT creator又明确 `PartitionCount=1`，按 UEFI 2.10 unused-entry 定义把 entries1..3 的三个16B `PartitionTypeGUID=0` 闭合。每条其余112B仍缺 Windows first-party on-disk producer，继续PARTIAL |
 | 3 | 0B | 512B | 0B | 0% | EDP 注册 writer 对整扇 preserve-existing，当前 Windows/Linux EDP reader 不解析；22份原始盘为21零+1 Kingston MP payload，但厂商 producer/固件 consumer 未闭合 |
-| 4 | 50B | 462B | 0B | 9.8% | onlyid clear header、OnlyIdXor8、LLGB 双锚点与固定restore metadata完成；server flags拆分为 `bDataToServer@+0x45` 继续PARTIAL、`bConnetServer@+0x46` 按 current显式零producer + cross-profile逻辑0 + negative semantic consumer 升COMPLETE。MyHardinfo、第二 ID/HSerial、第一server flag与 `+0x047..+0x1FB` 多profile backing继续PARTIAL |
+| 4 | 46B | 466B | 0B | 9.0% | onlyid clear header、OnlyIdXor8、LLGB 双锚点与固定restore metadata完成；server flags拆分为 `bDataToServer@+0x45` 继续PARTIAL、`bConnetServer@+0x46` 按 current显式零producer + cross-profile逻辑0 + negative semantic consumer 升COMPLETE。MyHardinfo 4B、第二 ID/HSerial、第一server flag与 `+0x047..+0x1FB` 多profile backing继续PARTIAL。此前汇总误把仍为PARTIAL的 MyHardinfo 4B计入COMPLETE，本轮已纠正 |
 | 5 | 512B | 0B | 0B | 100% | 两版 EdpDiskCtrl 均只对 LBA5 执行“读整扇→原样写回→检查 ERROR_WRITE_PROTECT(0x13)”；当前注册 writer 读取既有13扇区后不重建 LBA5，因此 preserve existing bytes；22/22原始盘全零 |
 | 6 | 473B | 39B | 0B | 92.4% | 在既有闭环基础上，再按首个NUL边界把 GSerial `+0x1C0..1C8` 9B 与 BeiZhu `+0x1D0` 1B 升COMPLETE；剩余39B为 Dept接缝1B、GSerial尾7B、BeiZhu尾15B、legacy MBR fragment16B |
 | 7 | 512B | 0B | 0B | 100.0% | 3×Version、entry1/entry2 NeedDisturb 已按 compatibility metadata 生命周期闭合；最后两个 BackupPromptPeriod BYTE 又由正式 DWARF 字段、current-zero producer、四代 Windows + Linux structural-preserve/negative semantic consumer、跨 v0x0064/v0x0206 实盘0/0 profile 闭合为 dormant compatibility fields。LBA7 至此整扇 COMPLETE |
@@ -3552,8 +3552,8 @@ profiles 的该边界，而不是把字符串具体值硬编码成未来协议�
 
 总计：
 
-- **完成：4731B / 6656B = 71.1%**
-- **部分已知：1925B / 6656B = 28.9%**
+- **完成：4727B / 6656B = 71.0%**
+- **部分已知：1929B / 6656B = 29.0%**
 - **未知：0B / 6656B = 0.0%**
 
 这是一组**严格下限**，故意宁可低估，不把“能生成/能解析”冒充成“已经完全理解”。

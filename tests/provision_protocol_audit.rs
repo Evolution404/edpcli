@@ -1538,6 +1538,53 @@ fn strict_progress_has_no_partial_detail_rows_for_fully_complete_lbas() {
 }
 
 #[test]
+fn lba4_strict_progress_matches_non_overlapping_detail_ranges() {
+    let trace = include_str!("../docs/PROTOCOL_BYTE_TRACE_2026-09-19.md");
+    let mut owner = vec![None::<&str>; SECTOR];
+    let mut complete = 0usize;
+    let mut partial = 0usize;
+
+    for line in trace.lines().filter(|line| line.starts_with("| LBA4 | 0x")) {
+        let columns = line.split('|').map(str::trim).collect::<Vec<_>>();
+        let range = columns[2];
+        let status = columns[3];
+        let parse_hex = |value: &str| {
+            usize::from_str_radix(value.trim_start_matches("0x"), 16)
+                .expect("LBA4 detail range must be hexadecimal")
+        };
+        let (start, end) = if let Some((a, b)) = range.split_once('–') {
+            (parse_hex(a), parse_hex(b))
+        } else {
+            let offset = parse_hex(range);
+            (offset, offset)
+        };
+        assert!(end < SECTOR && start <= end, "invalid LBA4 range: {range}");
+
+        for offset in start..=end {
+            assert!(
+                owner[offset].replace(status).is_none(),
+                "overlapping LBA4 detail row at +0x{offset:03X}: {line}"
+            );
+            match status {
+                "COMPLETE" => complete += 1,
+                "PARTIAL" => partial += 1,
+                other => panic!("unexpected LBA4 detail status {other}: {line}"),
+            }
+        }
+    }
+
+    assert!(
+        owner.iter().all(Option::is_some),
+        "LBA4 detail rows must cover all 512 bytes"
+    );
+    assert_eq!((complete, partial), (46, 466));
+    assert!(
+        trace.contains("| LBA4 | 46 | 466 | 0 | 9.0% |"),
+        "STRICT_PROGRESS LBA4 summary drifted from byte-detail accounting"
+    );
+}
+
+#[test]
 fn lba3_manufacturing_payload_is_an_opaque_whole_sector_not_just_a_marker_string() {
     const MARKED: &str =
         "disk4_121110528_vid0951_pid1666_disk&ven_kingston&prod_datatraveler_3.0_onlyid2135149925_20260903_121319.bin";
