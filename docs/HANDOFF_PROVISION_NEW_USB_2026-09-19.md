@@ -246,8 +246,17 @@ producer + 官方 consumer/行为 + 原始实盘验证**同时闭合，才能标
   二进制模板，且 `Netac_USB_API.dll::sub_10003880` 用 `rep movsd(0x80 dword)`
   整扇生成该 MBR；legacy `UsbMainBSec` 也找到
   `CUsbRegsiter::UnRegsiterUsb -> LBA0` 的直接写回链。当前仍缺旧注册版本为何在
-  已注册实盘保留 legacy bootstrap，以及制标上层何时选择 Netac Format 的 profile
-  selection，因此前400B bootstrap 主体仍保持 PARTIAL。
+  已注册实盘保留 legacy bootstrap，以及何种历史入口真正选择 Netac Format 的 profile
+  selection，因此前400B bootstrap 主体仍保持 PARTIAL。最新静态追踪已确认
+  `BusManageImp::WriteLabelImp -> SafeUsbRegsiterCems.dll!GetUsbTegsiterObj
+  -> CCEMSSafeUsbRegsiter::UsbFormat`，但这里的 `UsbFormat` 实际只做
+  sectorManage/设备信息 `0x52 -> 0xA2` 判定及
+  `BackPassWord(Office)` 的 IIR/password 预处理；紧随其后的
+  `RegsiterSafeUsb` 也未调用 Netac Format。独立地，
+  `usb20dll.dll!_IF_DiskFormat -> NewUsb20.dll!FormatExA_NetacAPI`
+  已精确闭合，但当前官方包没有找到主制标链对 `IF_DiskFormat` 的普通 import
+  或 `GetProcAddress` 名称引用。后续必须找真正的历史升级/量产调用点，不能把
+  两条链因同名“Format”直接拼接。
   本轮又把原先机械并入大区的两段尾部拆开：`+0x190..+0x19F` 16B 与
   `+0x1A4..+0x1B4` 17B 在 current SAFE6 中均为 unowned preserve，Linux
   `BuildSector0` 也不写；legacy `UsbMainBSec` 与 Aigo/Netac 模板均生成零，
@@ -407,9 +416,11 @@ producer + 官方 consumer/行为 + 原始实盘验证**同时闭合，才能标
    新建路径也清零同一区；而多份 legacy 原盘前400B逐字节等于官方
    `UsbMainBSec@0x100E7220`，SHA-256 =
    `4eeee8d52f8b58d9a1fa35b63a14c8c5dba1b2717eaa44e6fb1ff0327ccbe5ed`。
-   另有 Aigo L8302 第三种特殊 bootstrap。**不要因此升级 COMPLETE**：仍需找到
-   historical template writer/profile 选择与 L8302 producer；SectorSize 等尾部consumer
-   也未闭合。若能找到真实原始 GPT EDP 盘，可用于把 LBA1/LBA2
+   另有 Aigo L8302 第三种特殊 bootstrap，其 Netac 512B template producer 已闭合。
+   **不要因此升级 COMPLETE**：仍需找到 historical legacy registration profile 选择，
+   以及真正调用 `usb20dll!IF_DiskFormat -> NewUsb20!FormatExA_NetacAPI` 的
+   历史升级/量产入口；current `WriteLabelImp -> CCEMSSafeUsbRegsiter::UsbFormat`
+   已证明不是这条直接调用链。SectorSize 等尾部consumer也未闭合。若能找到真实原始 GPT EDP 盘，可用于把 LBA1/LBA2
    从 PARTIAL 继续细分；本轮已额外只读扫描 `u_disk` 下3896个大于13扇且
    小于1GiB的候选文件，没有任何文件在 LBA1 起点出现 `EFI PART`。在取得新
    外部实盘前不得再把本地 synthetic builder 输出冒充正向证据。

@@ -2931,6 +2931,57 @@ output_mbr[0x1BE] = 0x80
 所以 LBA0 `+0x000..+0x1B4` 仍保持 PARTIAL，但“第三 profile producer 未知”
 这一旧表述已经作废。
 
+#### LBA0 Aigo/Netac 上层链继续收敛：`UsbFormat` 不是 Netac MBR Format 的直接调用点
+
+继续从 `usbtoolbusmanage.dll::BusManageImp::WriteLabelImp` 的真实 SAFE_DEV
+分支追踪后，先补齐了此前缺失的对象来源：
+
+- `BusManageImp::Init` 动态加载 `SafeUsbRegsiterCems.dll`，解析
+  `GetUsbTegsiterObj`，并把返回对象保存到内部 `+0x6798`；
+- `WriteLabelImp` 对该对象依次调用虚表 `+0x10`、`+0x14`、`+0x20`；
+- `+0x14` 精确对应
+  `CCEMSSafeUsbRegsiter::UsbFormat@0x10004220`，失败后上层日志就是
+  `UsbFormat failed`；
+- `+0x20` 精确对应
+  `CCEMSSafeUsbRegsiter::RegsiterSafeUsb@0x10004F20`。
+
+但把 `UsbFormat` 本体继续反汇编后，必须修正“它就是 Netac Format
+上层选择器”的初步假设。其前置 `+0x10` 方法会：
+
+1. 先检查目标盘 `X:\\bin\\windows\\sectorManage.dll`，不存在时再检查
+   `X:\\Costom\\sectorManage.dll`；
+2. 在需要兼容处理的盘上加载 `X:\\Costom\\usb20dll.dll`；
+3. 通过 `IF_OpenDevEx / IF_GET_Dev_Info` 读取设备信息命令 `0x52`；
+4. 返回字节为 `0xA2` 时走“无需该预处理”的分支，否则上层才进入
+   `CCEMSSafeUsbRegsiter::UsbFormat`。
+
+`UsbFormat` 自身按对象 `+0x04` 的 office/normal 分支分别进入
+`BackPassWordOffice` / `BackPassWord`，两条路径只动态解析
+`IF_OpenDevEx / IF_CloseDev / IF_IIR_Manage` 并完成密码/IIR 兼容处理；
+没有解析或调用 `IF_DiskFormat`。紧随其后的 `RegsiterSafeUsb` 也分成
+已有 V2 label 的 read/modify/write 与 `SecUsbInterface.dll` 新建路径，
+同样未出现 Netac `FormatExA_NetacAPI`。
+
+另一方面，目标盘同套兼容库 `usb20dll.dll` 的导出
+`_IF_DiskFormat@0x10003DA0` 已精确恢复：
+
+```text
+_IF_DiskFormat
+  -> fcn.10003480(open/resolve target)
+  -> NewUsb20.dll!FormatExA_NetacAPI(...)
+```
+
+也就是说，“CEMS 随盘兼容层确实提供 Netac Format API”已经由调用关系证明；
+但在当前安装包全部顶层 EXE/DLL 中继续检查普通 import 和
+`GetProcAddress("IF_DiskFormat")` 名称引用后，除 `usb20dll.dll`
+自身的 export 名外仍未发现主制标链调用点。这个**负证据很重要**：
+不能把 `WriteLabelImp -> CCEMSSafeUsbRegsiter::UsbFormat` 和
+`usb20dll!IF_DiskFormat -> NewUsb20!FormatExA_NetacAPI` 两条链凭名称强行拼接。
+
+因此 Aigo L8302 的 400B 模板 producer 仍然成立，但剩余问题进一步精确为：
+**哪一个历史升级/量产/格式化入口真正调用 `IF_DiskFormat`，以及它以什么
+设备/profile 条件选择该路径。** 在该调用点闭合前，LBA0 前400B计数不变。
+
 ## 当前逐字节地图状态
 
 ### 严格完成口径（2026-09-19）
