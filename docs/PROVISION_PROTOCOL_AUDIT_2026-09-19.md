@@ -298,6 +298,35 @@ Linux DWARF 同时恢复 `diskfile.h::UsbLabelParam`：`+0x278..+0x28B = HDOnlyS
 
 当前 Windows 新建分支的真实写链是：`object+0x698 -> node.OnllyID2Nd`，而 `object+0x698` 已闭合为 `CoCreateGuid -> GUID raw 16B -> CRC32_bare -> main onlyid`。同时 `object+0x558..0x568 -> HSerialCRC[5]`。因此当前 writer profile 的第二 ID 等于本次新生成的 main onlyid。
 
+继续向 runtime/服务器备份路径追后，`OnllyID2Nd` 的行为语义已不再只是字段名推断。
+当前 `CEMSUsbRegsiter.dll` 形成了完整的 **backup encrypt -> server/storage -> activation decrypt**
+闭环：
+
+- `GetUpLoadInformation/sub_10039C30` 读取 restore node 后，先从盘面解出 LLGB 标签和
+  v0x0202/v0x0206 EDPF 分区信息，拼成 upload/backup blob；最终调用
+  `sub_10001190(..., key=restore_node+0x04, key_len=4)` 对整份 blob 加密；
+- `ActiveNormalUDev/sub_100399A0` 先 `ReadRestorInfo` 得到同一0x2F node，再进入
+  `sub_1003CEB0`；后者直接把 `arg0+0x04`（即 `OnllyID2Nd`）作为4B key seed
+  传给 `sub_100012D0`，原地解密外部传入的 activation blob；
+- 解密后的第一DWORD必须是 `LLGB`。成功后 `sub_10041480` 把 LLGB 标签内容写回
+  LBA8；随后按尾部 Version `0x0206/0x0202` 拆出 0x120/0xC0 分区表，调用
+  `sub_100414F0` 重建 LBA12；
+- `sub_10001190` 与 `sub_100012D0` 的 key derivation 完全同构：对16个 key byte，
+  `key16[i] = key4[i mod 4] XOR base16[i]`，机器码中的 base16 精确为 ASCII
+  **`EDPSECDISK200709`**。随后两者调用同一 key schedule，块变换分别走
+  `sub_100028A0` 与 `sub_10002A00`，构成 encrypt/decrypt 对。
+
+因此 `OnllyID2Nd` 应按行为命名为 **backup/activation encryption key seed**；“第二ID”
+只是历史结构名。current writer 把 main onlyid 直接复用为该 seed；legacy profile 则保存
+独立 seed。对 `nopwd_tool/backup` 可由文件名提供 main-onlyid 的22份历史捕获重算后，
+15份 legacy 中 **15/15 second key 都不等于本设备组或全语料任何 main-onlyid**；相同
+main-onlyid 的重复捕获又保持 second key 稳定，排除“上一次 main-onlyid”解释。committed
+三份 legacy fixture 进一步锁定：NETAC_A=`44D9CE02`、NETAC_B=`028EFFD3`、
+LEXAR=`7647B1EF`。
+
+这补齐了此前缺失的 active consumer 和密码学用途，但仍没有找到 legacy seed 是由客户端、
+服务器还是旧制标器哪一方生成/注入，因此严格门槛仍差 **legacy producer** 一项，4B不升 COMPLETE。
+
 这一结论本轮又回到 **PE 机器码**重新核验，避免依赖 Hex-Rays 风格 `.m`
 伪代码的局部漏语句：
 

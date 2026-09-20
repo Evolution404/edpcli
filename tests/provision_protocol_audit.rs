@@ -1534,6 +1534,44 @@ fn lba4_restore_node_profiles_keep_current_and_legacy_fields_separate() {
 }
 
 #[test]
+fn lba4_legacy_second_onlyid_is_a_stable_distinct_backup_key_seed() {
+    let expected = [
+        (NETAC_A, 0x44d9_ce02u32),
+        (NETAC_B, 0x028e_ffd3u32),
+        (LEXAR, 0x7647_b1efu32),
+    ];
+
+    let main_ids = expected
+        .iter()
+        .map(|(name, _)| {
+            let meta = parse_reference_backup_name(name).expect("fixture metadata");
+            onlyid_bits(meta.onlyid.as_deref().expect("fixture onlyid"))
+        })
+        .collect::<HashSet<_>>();
+
+    for (name, expected_second) in expected {
+        let image = load(name);
+        let meta = parse_reference_backup_name(name).expect("fixture metadata");
+        let main = onlyid_bits(meta.onlyid.as_deref().expect("fixture onlyid"));
+        let k0 = (main & 0xffff) ^ (main >> 16);
+        let raw = sector(&image, 4);
+        let mut decoded = raw.to_vec();
+        decoded[0x18..].copy_from_slice(&xor_rolling(&raw[0x18..], k0));
+        let second = u32_le(&decoded, 0x1c);
+
+        assert_eq!(second, expected_second, "legacy second-key drift: {name}");
+        assert_ne!(
+            second, main,
+            "legacy backup key must not collapse to main onlyid: {name}"
+        );
+        assert!(
+            !main_ids.contains(&second),
+            "legacy second-key unexpectedly aliases another committed main onlyid: {name}"
+        );
+    }
+}
+
+#[test]
 fn lba4_myhardinfo_mirrors_lba8_hdserialinfo_in_original_profiles() {
     let mut checked = 0usize;
     let mut nonzero = 0usize;
