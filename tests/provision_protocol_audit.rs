@@ -1143,24 +1143,50 @@ fn lba0_bootstrap_profiles_are_zero_or_the_official_usb_main_bsec_prefix() {
 }
 
 #[test]
-fn lba0_tail_of_bootstrap_body_is_profile_invariant_message_terminator_and_zero_padding() {
+fn lba0_bootstrap_body_closes_all_three_profile_invariant_zero_bytes() {
     const LEGACY: &str =
         "disk26_245760000_vid3535_pid6300_disk&ven_aigo&prod_u335&rev_pmap_onlyid1987718388_nopwd_20260916_233626.bin";
+    const ISOLATED_INVARIANT_ZERO: [usize; 9] =
+        [0x0e1, 0x0e8, 0x101, 0x103, 0x10b, 0x10d, 0x124, 0x143, 0x162];
 
     let legacy = load(LEGACY);
     let legacy_lba0 = sector(&legacy, 0);
     let netac_prefix = decode_hex_fixture(AIGO_L8302_NETAC_LBA0_PREFIX_HEX);
 
     assert_eq!(netac_prefix.len(), 0x190);
+
+    // Seven isolated zero bytes are operands in the executable legacy bootstrap.
+    assert_eq!(&legacy_lba0[0x0df..0x0e2], &[0x8a, 0x56, 0x00]); // mov dl,[bp+0]
+    assert_eq!(&legacy_lba0[0x0e6..0x0e9], &[0x8a, 0x56, 0x00]); // mov dl,[bp+0]
+    assert_eq!(&legacy_lba0[0x100..0x102], &[0x6a, 0x00]); // push 0
+    assert_eq!(&legacy_lba0[0x102..0x104], &[0x6a, 0x00]); // push 0
+    assert_eq!(&legacy_lba0[0x10a..0x10c], &[0x6a, 0x00]); // push 0
+    assert_eq!(&legacy_lba0[0x10c..0x10f], &[0x68, 0x00, 0x7c]); // push 0x7c00
+    assert_eq!(&legacy_lba0[0x122..0x125], &[0x8a, 0x56, 0x00]); // mov dl,[bp+0]
+
+    // The other three message terminators are invariant zeros too.
+    assert_eq!(&legacy_lba0[0x12c..0x143], b"Invalid partition table");
+    assert_eq!(legacy_lba0[0x143], 0);
+    assert_eq!(
+        &legacy_lba0[0x144..0x162],
+        b"Error loading operating system"
+    );
+    assert_eq!(legacy_lba0[0x162], 0);
     assert_eq!(&legacy_lba0[0x163..0x17b], b"Missing operating system");
-    assert_eq!(legacy_lba0[0x17b], 0, "legacy third MBR error message lost its NUL terminator");
+    assert_eq!(legacy_lba0[0x17b], 0);
+
     assert!(
         legacy_lba0[0x17c..0x190].iter().all(|byte| *byte == 0),
         "legacy UsbMainBSec tail padding changed"
     );
     assert!(
-        netac_prefix[0x17b..0x190].iter().all(|byte| *byte == 0),
-        "Aigo/Netac MBR template tail padding changed"
+        ISOLATED_INVARIANT_ZERO
+            .iter()
+            .all(|offset| netac_prefix[*offset] == 0)
+            && netac_prefix[0x17b..0x190]
+                .iter()
+                .all(|byte| *byte == 0),
+        "Aigo/Netac MBR template lost an invariant zero byte"
     );
 
     let mut current_zero = 0usize;
@@ -1177,8 +1203,11 @@ fn lba0_tail_of_bootstrap_body_is_profile_invariant_message_terminator_and_zero_
         let image = fs::read(&path).expect("fixture bytes");
         let lba0 = sector(&image, 0);
         assert!(
-            lba0[0x17b..0x190].iter().all(|byte| *byte == 0),
-            "known LBA0 profile changed the invariant +0x17B..+0x18F region: {name}"
+            ISOLATED_INVARIANT_ZERO
+                .iter()
+                .all(|offset| lba0[*offset] == 0)
+                && lba0[0x17b..0x190].iter().all(|byte| *byte == 0),
+            "known LBA0 profile changed one of the 30 invariant zero bytes: {name}"
         );
         if lba0[..0x190].iter().all(|byte| *byte == 0) {
             current_zero += 1;
