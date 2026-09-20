@@ -411,7 +411,7 @@ consumer 行为，而不是“consumer未知”。因此把这17B重新拆分：
 - `Version@+0x3D..0x40` 4B：COMPLETE；
 - sector tuple `+0x41..0x44` 4B：COMPLETE。
 
-新增回归把上述13B从代表盘扩展到全部 committed original fixtures；22份严格原始集
+上述固定 metadata 共13B均有回归覆盖，但其中 `NewLabFlag` 4B 在旧36B LBA4基线中已经作为第二个 `LLGB` 锚点计入，因此本轮严格进度只净新增9B，禁止重复累计。新增回归把这些字段从代表盘扩展到全部 committed original fixtures；22份严格原始集
 仍维持 Single=0 / LLGB / Version=1 / `08 04 0C 01` 无反例。这里闭合的是
 **fixed restore-node compatibility metadata lifecycle**，不是宣称这些值永远不能在
 未来协议版本中变化。
@@ -3243,7 +3243,7 @@ SAFE6 只透明保留。COMPLETE 不意味着未来出现其它值时可以机�
 | 1 | 0B | 512B | 0B | 0% | 官方 BuildSector1_Gpt + GPT_Header(512B) 结构 + Windows `EFI PART` / `header_lba` consumer 已闭合；22/22当前原始SAFE6盘全零，缺正向GPT实盘，因此整扇PARTIAL |
 | 2 | 0B | 512B | 0B | 0% | 官方 BuildSector2_Gpt + GPT_Partition(128B) 结构 + Windows 从LBA2起每扇4 entry parser 已闭合；22/22当前原始盘全零，缺正向GPT实盘，因此整扇PARTIAL |
 | 3 | 0B | 512B | 0B | 0% | EDP 注册 writer 对整扇 preserve-existing，当前 Windows/Linux EDP reader 不解析；22份原始盘为21零+1 Kingston MP payload，但厂商 producer/固件 consumer 未闭合 |
-| 4 | 49B | 463B | 0B | 9.6% | onlyid clear header、OnlyIdXor8、LLGB 双锚点完成；本轮又把 restore-node 后半固定13B（SingleUsbFlg/NewLabFlag/Version/sector tuple）按 current producer + structural-preserve/semantic-ignore + 22盘一致 profile 闭合。MyHardinfo、第二 ID/HSerial、server flags 与 `+0x047..+0x1FB` 多profile backing 继续PARTIAL |
+| 4 | 45B | 467B | 0B | 8.8% | onlyid clear header、OnlyIdXor8、LLGB 双锚点完成；restore-node 固定 metadata 中 SingleUsbFlg/Version/sector tuple 又新增9B闭合。NewLabFlag@+0x39..+0x3C 的4B `LLGB` 早已作为“双锚点”之一计入旧36B基线，因此禁止在13B固定 metadata 拆分时重复计数。MyHardinfo、第二 ID/HSerial、server flags 与 `+0x047..+0x1FB` 多profile backing 继续PARTIAL |
 | 5 | 512B | 0B | 0B | 100% | 两版 EdpDiskCtrl 均只对 LBA5 执行“读整扇→原样写回→检查 ERROR_WRITE_PROTECT(0x13)”；当前注册 writer 读取既有13扇区后不重建 LBA5，因此 preserve existing bytes；22/22原始盘全零 |
 | 6 | 431B | 81B | 0B | 84.2% | 216B UsbMainBSec fixed template、autoid[16]、Office[64]、Label物理56B均已闭合；Dept 前63B COMPLETE、槽末1B因join59旧producer继续PARTIAL；`m_encrypt@+0x1F0` 已闭合为 write-only label-generation metadata；`m_crcUsbID[0..1]@+0x100..107` 又由正式字段名、双平台 producer、同源运行时 key 用途、historical doubled-guard consumer、current semantic-ignore、checksum ownership 与22盘关系闭合。Owner、GSerial/BeiZhu/legacy MBR等继续PARTIAL |
 | 7 | 512B | 0B | 0B | 100.0% | 3×Version、entry1/entry2 NeedDisturb 已按 compatibility metadata 生命周期闭合；最后两个 BackupPromptPeriod BYTE 又由正式 DWARF 字段、current-zero producer、四代 Windows + Linux structural-preserve/negative semantic consumer、跨 v0x0064/v0x0206 实盘0/0 profile 闭合为 dormant compatibility fields。LBA7 至此整扇 COMPLETE |
@@ -3255,8 +3255,8 @@ SAFE6 只透明保留。COMPLETE 不意味着未来出现其它值时可以机�
 
 总计：
 
-- **完成：3856B / 6656B = 57.9%**
-- **部分已知：2800B / 6656B = 42.1%**
+- **完成：3852B / 6656B = 57.9%**
+- **部分已知：2804B / 6656B = 42.1%**
 - **未知：0B / 6656B = 0.0%**
 
 这是一组**严格下限**，故意宁可低估，不把“能生成/能解析”冒充成“已经完全理解”。
