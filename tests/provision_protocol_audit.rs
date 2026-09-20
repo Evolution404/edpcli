@@ -57,6 +57,10 @@ const OFFICIAL_VIRTUAL_GPT_LBA1_HEX: &str =
     include_str!("fixtures/protocol_evidence/official_virtual_gpt_lba1.hex");
 const OFFICIAL_VIRTUAL_GPT_LBA2_HEX: &str =
     include_str!("fixtures/protocol_evidence/official_virtual_gpt_lba2.hex");
+const OFFICIAL_VIRTUAL_LONG_USER_LBA6_HEX: &str =
+    include_str!("fixtures/protocol_evidence/official_virtual_long_user_lba6.hex");
+const OFFICIAL_VIRTUAL_LONG_USER_LBA9_HEX: &str =
+    include_str!("fixtures/protocol_evidence/official_virtual_long_user_lba9.hex");
 
 fn parse_reference_backup_name(name: &str) -> Option<BackupMeta> {
     let meta = parse_backup_name(name)?;
@@ -978,6 +982,51 @@ fn lba6_owner_office_and_label_slots_have_official_fixed_storage_boundaries() {
                 .iter()
                 .all(|tail| tail.iter().any(|byte| *byte != 0)),
         "the same 江苏电力!SAFE6 label must retain at least three distinct non-zero post-NUL backing profiles"
+    );
+}
+
+#[test]
+fn official_virtual_long_user_uses_lba6_prefix_and_full_lba9_continuation_slot() {
+    // First-party Windows CEMSUsbRegsiter.dll::BuildSector6 output.  The
+    // surrounding LBA9 staging bytes were prefilled with 0xCC so this fixture
+    // proves the exact write boundary instead of accidentally treating a
+    // zeroed harness buffer as producer ownership.
+    let raw6 = decode_hex_fixture(OFFICIAL_VIRTUAL_LONG_USER_LBA6_HEX);
+    let lba9 = decode_hex_fixture(OFFICIAL_VIRTUAL_LONG_USER_LBA9_HEX);
+    assert_eq!(raw6.len(), SECTOR);
+    assert_eq!(lba9.len(), SECTOR);
+
+    let mut user = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789".repeat(3);
+    user.truncate(155);
+    assert_eq!(user.len(), 155);
+
+    let plain6 = lba6_decode(&raw6);
+    assert_eq!(u32_le(&plain6, 0x50), 0x4024_5e2a);
+    assert_eq!(&plain6[0x54..0x70], &user[..28]);
+
+    let continuation = &lba9[0x100..0x180];
+    assert_eq!(&continuation[..127], &user[28..]);
+    assert_eq!(
+        continuation[127], 0,
+        "155-byte User must end exactly at +0x17f"
+    );
+
+    let mut reconstructed = Vec::with_capacity(156);
+    reconstructed.extend_from_slice(&plain6[0x54..0x70]);
+    reconstructed.extend_from_slice(continuation);
+    let nul = reconstructed
+        .iter()
+        .position(|byte| *byte == 0)
+        .expect("official writer must terminate long User");
+    assert_eq!(&reconstructed[..nul], user.as_slice());
+
+    assert!(
+        lba9[..0x100].iter().all(|byte| *byte == 0xcc),
+        "BuildSector6 long-User path must not own pre-continuation LBA9 backing"
+    );
+    assert!(
+        lba9[0x180..].iter().all(|byte| *byte == 0xcc),
+        "BuildSector6 must stop exactly after its 0x80-byte maximum continuation"
     );
 }
 
