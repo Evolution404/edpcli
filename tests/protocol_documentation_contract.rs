@@ -184,8 +184,8 @@ fn documentation_keeps_the_official_provisioning_chain_and_strict_rules() {
         "LBA2 GPT profile must remain PARTIAL until a positive real GPT sample exists"
     );
     assert!(
-        DOC.contains("| LBA6 | 356 | 156 | 0 | 69.5% |"),
-        "LBA6 progress must retain the closed autoid, Office, and Label post-NUL backing semantics"
+        DOC.contains("| LBA6 | 419 | 93 | 0 | 81.8% |"),
+        "LBA6 progress must retain the closed Dept prefix, autoid, Office, and Label backing semantics"
     );
     assert!(
         DOC.contains("| LBA7 | 490 | 22 | 0 | 95.7% |"),

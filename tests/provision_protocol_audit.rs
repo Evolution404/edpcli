@@ -2278,11 +2278,13 @@ fn lba9_dept_continuation_preserves_both_official_reader_join_profiles() {
     let current_name =
         "disk4_121110528_vid0951_pid1666_disk&ven_kingston&prod_datatraveler_3.0_onlyid2135149925_20260903_121319.bin";
     let current = load(current_name);
+    let current6 = lba6_decode(sector(&current, 6));
     let (current_join, current_dept) =
         reconstruct_long_dept_from_lba6_lba9(sector(&current, 6), sector(&current, 9));
 
     let legacy6 = decode_hex_fixture(LEXAR_JOIN59_LBA6_HEX);
     let legacy9 = decode_hex_fixture(LEXAR_JOIN59_LBA9_HEX);
+    let legacy6_plain = lba6_decode(&legacy6);
     let (legacy_join, legacy_dept) = reconstruct_long_dept_from_lba6_lba9(&legacy6, &legacy9);
 
     assert_eq!(
@@ -2297,9 +2299,71 @@ fn lba9_dept_continuation_preserves_both_official_reader_join_profiles() {
         current_dept, legacy_dept,
         "both join profiles must reconstruct the same full Dept bytes"
     );
+    assert_eq!(
+        &current6[..0x3f],
+        &legacy6_plain[..0x3f],
+        "join60 and join59 profiles must keep the marker plus Dept[0..59) byte-identical"
+    );
+    assert_ne!(
+        current6[0x3f], legacy6_plain[0x3f],
+        "the historical profile split must remain isolated to the final byte of the 64B LBA6 Dept slot"
+    );
+    assert_eq!(
+        legacy6_plain[0x3f], 0,
+        "legacy join59 terminates the inline Dept at LBA6+0x3f"
+    );
+    assert_eq!(
+        current6[0x3f], current_dept[59],
+        "current join60 stores Dept[59] in the final inline byte"
+    );
     assert_eq!(current_dept.len(), 76);
     let (_, _, errors) = GBK.decode(&current_dept);
     assert!(!errors, "reconstructed Dept must be valid GBK");
+}
+
+#[test]
+fn lba6_short_dept_slot_is_c_string_plus_uninitialized_backing() {
+    let mut checked = 0usize;
+    let mut saw_nonzero_backing = false;
+
+    for entry in fs::read_dir(FIXTURE_DIR).expect("protocol fixtures") {
+        let path = entry.expect("backup entry").path();
+        if path.extension().and_then(|ext| ext.to_str()) != Some("bin") {
+            continue;
+        }
+        let name = path.file_name().unwrap().to_str().unwrap();
+        let Some(meta) = parse_reference_backup_name(name) else {
+            continue;
+        };
+        let image = fs::read(&path).expect("fixture bytes");
+        let plain6 = lba6_decode(sector(&image, 6));
+        if u32_le(&plain6, 0) == 0x4024_5e2a {
+            continue;
+        }
+
+        let dept = &plain6[..0x40];
+        let inspect_meta = InspectMeta {
+            device_id: Some(meta.device_id.clone()),
+            ..InspectMeta::default()
+        };
+        let ownership =
+            ownership_from_lba8(sector(&image, 8), &inspect_meta).expect("LBA8 ownership");
+        assert_eq!(
+            ownership.dept.unwrap_or_default(),
+            gbk_string(dept),
+            "short LBA6 Dept slot and LBA8 Dept diverged: {name}"
+        );
+        if let Some(nul) = dept.iter().position(|byte| *byte == 0) {
+            saw_nonzero_backing |= dept[nul + 1..0x3f].iter().any(|byte| *byte != 0);
+        }
+        checked += 1;
+    }
+
+    assert!(checked >= 3, "lost short-Dept original fixture coverage");
+    assert!(
+        saw_nonzero_backing,
+        "short Dept originals must retain non-zero post-NUL backing evidence inside +0x00..+0x3e"
+    );
 }
 
 #[test]

@@ -661,8 +661,58 @@ autoid/Office 实际共享同一类 producer bug：
 因此 `LBA6 +0x188..+0x1BF` 56B 从 PARTIAL 升 **COMPLETE**。这里的 COMPLETE
 表示“业务字符串 + writer-uninitialized backing”的逐字节行为闭合，不意味着尾部必须
 复刻旧内存垃圾；canonical 新盘仍可在 NUL 后写确定性零并重算 checksum，reader 必须接受
-旧盘的任意 backing。LBA6 更新为
+旧盘的任意 backing。到这一中间审计阶段，LBA6 更新为
 **356 COMPLETE / 156 PARTIAL / 0 UNKNOWN = 69.5%**。
+
+### LBA6 Dept 64B：已知 join59/join60 分叉严格只剩 `+0x3F` 1B
+
+Dept 主槽继续按字节下钻后，不能再把整64B因为 legacy join59 producer 未知而一起留在
+PARTIAL。Linux `UsbWriteParam(UsbLabelParam&)@0x1C362` 对 department 的实际代码是：
+
+`strcpy_s(dst+0x40, 0xBC, src+0x40)`
+
+这与 autoid/Office/Label 使用同一个自带 `strcpy_s@0x1B9B0`，并且 copy-constructor
+入口同样不先 memset 0x299B `UsbWriteParam`。因此 short Dept 的物理槽语义已经与其它
+fixed C-string slot 一致：首个 NUL 前是业务字符串，NUL 后是
+writer-uninitialized backing。Linux `BuildSector6@0x1CAAC` 又明确分两条：
+
+- `strlen(dept) <= 63`：直接把 `UsbWriteParam+0x40` 的完整64B memcpy 到 LBA6；
+- `strlen(dept) > 63`：先清64B临时槽，写 marker `0x40245E2A`，再复制
+  Dept 前60B 到 marker 后，并把 Dept[60..NUL] 写入 LBA9+0x80。
+
+因此 current long profile 中：
+
+- `+0x00..03 = 2A 5E 24 40`；
+- `+0x04..+0x3E = Dept[0..58]`；
+- `+0x3F = Dept[59]`。
+
+现有 strict-original current Kingston join60 与 strict-original legacy Lexar join59
+给出一个非常精确的历史边界：两者重建后的完整 Dept 都是同一76B字符串，解密后的
+LBA6 Dept 槽 **前63B逐字节完全相同**，唯一差异是最后1B：
+
+- current join60：`+0x3F = 0xA8`，即 Dept[59]；
+- legacy join59：`+0x3F = 0x00`，LBA9 continuation 从 Dept[59] 开始；
+- reader 已有明确 compatibility 分支：inline[59] 非零时 join=60，为0时 join=59。
+
+新回归在
+`lba9_dept_continuation_preserves_both_official_reader_join_profiles`
+中固定“前63B相同、只末1B分叉”；另新增
+`lba6_short_dept_slot_is_c_string_plus_uninitialized_backing`，要求至少3份原始
+short-Dept fixture 的 LBA6 C-string 与 LBA8 `Dept=` 相同，并且
+`+0x00..+0x3E` 内必须保留真实 post-NUL 非零 backing 反例。
+
+据此可以严格拆分：
+
+- `LBA6 +0x000..+0x03E` 63B：**COMPLETE**。short profile 的
+  C-string/backing producer、long profile 的 marker+Dept[0..58] producer、
+  reader、以及 current/legacy 原盘均闭合，且已知代际分叉不触及本段；
+- `LBA6 +0x03F` 1B：继续 **PARTIAL**。current writer/reader 已知，
+  但 legacy join59 为什么把 Dept[59] 改为NUL、由哪个旧 producer/选择条件产生，
+  尚未定位。
+
+这不是把未知 legacy producer“平均摊掉”，而是把它隔离到唯一真实分叉字节。
+LBA6 因此进一步更新为
+**419 COMPLETE / 93 PARTIAL / 0 UNKNOWN = 81.8%**。
 
 ### LBA6 原352B UNKNOWN 已全部拆清：固定字段槽 + UsbMainBSec 静态模板
 
@@ -736,7 +786,7 @@ lba6_static_usb_main_bsec_holes_are_exact_and_checksum_protected，
 
 此前 LBA6 从 4 COMPLETE / 156 PARTIAL / 352 UNKNOWN 更新为
 220 COMPLETE / 292 PARTIAL / 0 UNKNOWN；随后闭合 autoid 16B + Office 64B
-达到 300/212；本轮再闭合 Label 56B，更新为
+达到 300/212；随后闭合 Label 56B，在继续拆 Dept 之前的中间计数为
 **356 COMPLETE / 156 PARTIAL / 0 UNKNOWN**。
 
 全 LBA0–12 的 UNKNOWN 首次降为0B。这只表示每个物理字节至少已有明确区域/
@@ -2538,7 +2588,7 @@ CI 原始夹具同时保留两种 profile。零态表示该 legacy tail 不存�
 | 3 | 0B | 512B | 0B | 0% | EDP 注册 writer 对整扇 preserve-existing，当前 Windows/Linux EDP reader 不解析；22份原始盘为21零+1 Kingston MP payload，但厂商 producer/固件 consumer 未闭合 |
 | 4 | 36B | 476B | 0B | 7.0% | onlyid clear header、OnlyIdXor8、LLGB 双锚点完成；第二 ID/HSerial/profile 字段仍不完整；`+0x047..+0x1FB` 已由 full writer、reader negative consumer 与 raw-zero/rolling-zero 双实盘 profile 从UNKNOWN降PARTIAL |
 | 5 | 512B | 0B | 0B | 100% | 两版 EdpDiskCtrl 均只对 LBA5 执行“读整扇→原样写回→检查 ERROR_WRITE_PROTECT(0x13)”；当前注册 writer 读取既有13扇区后不重建 LBA5，因此 preserve existing bytes；22/22原始盘全零 |
-| 6 | 356B | 156B | 0B | 69.5% | 216B UsbMainBSec fixed template 已闭合；copy-constructor 不预清对象且自带 strcpy_s 复制到NUL即停，BuildSector6 再整宽复制，所以 autoid[16]+Office[64]+Label物理56B 的 post-NUL 多profile均属于 writer-uninitialized backing。Label 又由同一 `江苏电力!SAFE6` 至少3种不同非零尾、C-string reader、LBA8 Label一致性与整扇 checksum 共同闭合，本轮新增56B COMPLETE；Owner、GSerial/BeiZhu/legacy MBR等继续PARTIAL |
+| 6 | 419B | 93B | 0B | 81.8% | 216B UsbMainBSec fixed template、autoid[16]、Office[64]、Label物理56B均已闭合；本轮又把 Dept 64B 拆成 `+0x00..3E` 63B COMPLETE 与 `+0x3F` 1B PARTIAL。short Dept 由不清尾 strcpy_s + 固定64B memcpy形成 C-string/backing，long current/legacy 原盘前63B逐字节一致，join59/join60 唯一分叉严格位于槽末1B；Owner、CRC副本、GSerial/BeiZhu/legacy MBR、m_encrypt等继续PARTIAL |
 | 7 | 490B | 22B | 0B | 95.7% | 在原489B基础上，pass-info `bNoUsbChkPasSafe(+0x0A)` 找到 `checkdiskback::Update_EDPEDISKSHOWPARAM` 值相关行为 consumer，并经 SAFE6 policy 被两套独立客户端恢复，1B升级COMPLETE；当前剩3条 entry Version 12B、entry1/2 NeedDisturb 8B、backup-prompt 2B为PARTIAL |
 | 8 | 476B | 36B | 0B | 93.0% | header 的 LLGB/logical length/ToolVersion/Labversion/writeTime/ElabOffset/Reserved/MacInfo 已闭合；`+0x080..0x1FF` 又由 Windows/Linux 双 writer、注册侧7-key reader、运行时17-key EdpEDiskCtrl reader、动态 encrypted backing/preserve tail 与22盘17-key实证整体闭合384B；仅 HDSerialInfo/UsbOnlyInfo 36B继续PARTIAL |
 | 9 | 54B | 458B | 0B | 10.5% | EETU/EPPE/SAPF边界保持；+0x080..0x0FF已闭合为 BuildSector6 long-Dept continuation 并验证 join60/join59 双reader profile，但 legacy join59 producer仍缺；+0x100..0x17F又与 long-User continuation/SAPF profile复用且缺长User实盘，因此仍PARTIAL |
@@ -2548,8 +2598,8 @@ CI 原始夹具同时保留两种 profile。零态表示该 legacy tail 不存�
 
 总计：
 
-- **完成：3323B / 6656B = 49.9%**
-- **部分已知：3333B / 6656B = 50.1%**
+- **完成：3386B / 6656B = 50.9%**
+- **部分已知：3270B / 6656B = 49.1%**
 - **未知：0B / 6656B = 0.0%**
 
 这是一组**严格下限**，故意宁可低估，不把“能生成/能解析”冒充成“已经完全理解”。
@@ -2563,7 +2613,7 @@ CI 原始夹具同时保留两种 profile。零态表示该 legacy tail 不存�
 | 3 | 外部制造区部分闭合 | 21/22 全零，1 份 Kingston MP payload；官方 EDP 注册链原样保留且当前 reader 不解析，厂商生成/消费语义仍未知 |
 | 4 | 高度闭合 | 整扇已无UNKNOWN；`+0x047..+0x1FB` 已确认 raw-zero / rolling-encrypted-zero 双历史物理表示且22盘语义均为零。`+0x45/+0x46` 已闭合为 `bDataToServer/bConnetServer` post-XOR wire bytes，并证明官方 ReadSector4 不补偿该例外；inspect 已恢复 producer-side flags，Provision 已改为 current SAFE6 full rolling + post-XOR覆盖。两flag因缺最终业务consumer仍PARTIAL |
 | 5 | canonical 已知 | opaque preserve / 写保护探测 scratch；当前 22/22 全零，但零不是协议固定要求 |
-| 6 | 高度闭合 | 整扇已无 UNKNOWN。216B UsbMainBSec static material完成；autoid[16]、Office[64] 与 Label物理56B 的 writer-uninitialized post-NUL backing 来源、C-string consumer、checksum 与实盘多尾均闭合。Label 的同一 `江苏电力!SAFE6` 已出现至少3种不同非零尾，因此本轮再升56B COMPLETE。Owner仍受 long-User 正向实盘缺口影响，GSerial/BeiZhu 与 legacy MBR fragment 继续PARTIAL |
+| 6 | 高度闭合 | 整扇已无 UNKNOWN。216B UsbMainBSec static material、autoid[16]、Office[64]、Label物理56B均完成；Dept 又按真实代际分叉拆成前63B COMPLETE + 槽末1B PARTIAL：short profile 的 C-string/backing 已闭合，current/legacy long profile 前63B逐字节一致，只有 `+0x3F` 因 join60=A8 / join59=00 且旧 producer 未定位继续PARTIAL。Owner仍受 long-User 正向实盘缺口影响，GSerial/BeiZhu 与 legacy MBR fragment 继续PARTIAL |
 | 7 | 高度闭合 | 物理0x40 packed ABI、PartionCount、rolling XOR、entry0 NeedDisturb compatibility gate、v0x0064 legacy wrapped8均已锁；`bNoUsbChkPasSafe` 已由 checkdiskback SAFE6 policy 行为链闭合；当前只剩22B PARTIAL：3×Version、entry1/2 NeedDisturb、pass-info +0C/+0D |
 | 8 | 高度闭合 | **LBA8 dynamic ELABEL + encrypted backing + preserved tail** 已闭合：17-key wire template 中7键由注册侧 Windows/Linux reader回填，运行时 EdpEDiskCtrl reader 则解析全部17键；NUL后块内既有backing随动态前缀加密，块外tail原样preserve。384B动态区已COMPLETE；当前只剩 HDSerialInfo 4B 与 legacy UsbOnlyInfo 32B PARTIAL |
 | 9 | 高度闭合 | 整扇已无UNKNOWN：EETU首0x80、EPPE末0x80、SAPF边界明确；中间区现已纠正为 BuildSector6 long-Dept/User continuation 与 SAPF/backing 的多profile复用。Dept join60 producer已闭合，join59旧producer仍缺；长User又缺正向实盘，因此继续PARTIAL |

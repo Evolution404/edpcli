@@ -386,7 +386,7 @@ post-XOR 写回 `+0x45/+0x46`。历史 raw-zero 实盘仅作为兼容读取 prof
 | LBA3 | 0 | 512 | 0 | 0.0% |
 | LBA4 | 36 | 476 | 0 | 7.0% |
 | LBA5 | 512 | 0 | 0 | 100.0% |
-| LBA6 | 356 | 156 | 0 | 69.5% |
+| LBA6 | 419 | 93 | 0 | 81.8% |
 | LBA7 | 490 | 22 | 0 | 95.7% |
 | LBA8 | 476 | 36 | 0 | 93.0% |
 | LBA9 | 54 | 458 | 0 | 10.5% |
@@ -397,8 +397,8 @@ post-XOR 写回 `+0x45/+0x46`。历史 raw-zero 实盘仅作为兼容读取 prof
 
 当前总计：
 
-- **COMPLETE：3323B / 6656B = 49.9%**
-- **PARTIAL：3333B / 6656B = 50.1%**
+- **COMPLETE：3386B / 6656B = 50.9%**
+- **PARTIAL：3270B / 6656B = 49.1%**
 - **UNKNOWN：0B / 6656B = 0.0%**
 
 LBA11 已完整闭合为 512B COMPLETE。此前卡住的后半 252B 不是“某型号盘偶尔使用
@@ -460,7 +460,8 @@ DWARF 中恢复出的原始声明文件/行号与本地函数地址：
 | LBA4 | 0x047–0x1FB | PARTIAL | restore-node 后 backing/gap；raw-zero 与 rolling-encrypted-zero 两种物理表示 | Windows current `sub_10014550` 与 Linux `BuildSector4@diskfile.cpp:741` 都只把 0x2F restore node 写到 `+0x18..+0x46`；non-null node 分支随后把 rolling XOR 扩展到 `+0x18..+0x1FF`，因此会连同这437B已有 backing 一起变换；Windows 同函数的 `arg0==NULL` 分支明确跳过 node copy/rolling loop，可保留既有 raw gap。两端 builder 都**没有显式把这437B清零** | Linux `ReadSector4@diskfile.cpp:957` 会对 `+0x18..+0x1FF` 执行同一 rolling XOR，但最终只 `memcpy(decoded+0x18, 0x2F)` 给 restore-node 输出并校验 `OnlyIdXor8`，不返回/解释 `+0x47..+0x1FB`；Windows同类识别链也只消费 restore node / onlyid锚点 | 严格22份：18份（17 backup + 独立SanDisk）为物理 raw-zero gap，4份为几乎全非零 rolling 形态；4/4 rolling 形态按 onlyid key 解码后437B全零，raw-zero形态按区域规则保持语义零；仓库CI同时保留两种物理表示并断言 semantic gap 全零 | 已闭合物理边界、两种 current 可解释的存储/变换行为、reader negative semantic consumer 和22盘零语义；但历史 raw-zero 初始 producer及“为何选择/保留哪种表示”未闭合，且 full builder 会变换已有 backing 而非主动清零，因此严格保持 PARTIAL |
 | LBA4 | 0x1FC–0x1FF | COMPLETE | trailing LLGB | current writer 继续 rolling key schedule 写 LLGB | reader 作为尾锚点校验 | 22盘可验证 | 完成 |
 | LBA5 | 0x000–0x1FF | COMPLETE | opaque preserve / write-protection probe scratch sector | `CUsbRegsiter::RegsiterUsb` 先读取既有 LBA0–12；后续 builder 只重建其它明确扇区，LBA5 不被覆盖，最终随13扇区整体写回；即 producer 语义是 preserve existing bytes | 两版 `EdpDiskCtrl` 的唯一 `base+5` raw-sector consumer 都是：读取整扇→原样写回同一扇区→仅检查 `WriteFile` 是否以 `ERROR_WRITE_PROTECT(0x13)` 失败；`UserLogin` 据此进入只读使用状态，完全不解析内容 | 22/22原始参考整扇512B全零，SHA-256均为 `076a27c79e5ace2a3d47f9dd2e83e4ff6ea8872b3c2218f66c92b89b55f36560`；7份原始CI夹具继续锁定 | COMPLETE 表示“整区用途和无payload语义闭合”；全零只是当前实盘状态，不是协议规定，非零内容也应原样保留 |
-| LBA6 | 0x000–0x03F | PARTIAL | Dept slot | `BuildSector6` 从 UsbWriteParam/UsbLabelParam 写入 | `ReadSector6` 取回 | 多盘真实部门字段可解析 | 上游业务来源明确，所有字节语义仍未逐个闭合 |
+| LBA6 | 0x000–0x03E | COMPLETE | Dept 主槽前63B：short C-string/backing 或 long marker + Dept[0..58] | Linux `UsbWriteParam(UsbLabelParam&)@0x1C362` 对 department 调 `strcpy_s(dst+0x40,0xBC,src+0x40)`；copy-constructor 不预清对象且自带 `strcpy_s@0x1B9B0` 复制到NUL即停，所以 short profile 的 NUL 后字节是 writer-uninitialized backing。Linux `BuildSector6@0x1CAAC` 在 `strlen<=63` 时固定 memcpy 完整64B；在 long profile 时先清64B临时槽，写 marker `0x40245E2A`，再把 Dept 前60B 放到 marker 后，其中 `+0x04..+0x3E` 正好是 Dept[0..58] | Windows/Linux `ReadSector6`：short profile 按 C-string 读取；long profile 识别 marker 后把 inline prefix 与 LBA9+0x80 continuation 重组。当前/legacy 两种 long reader 均共享 marker + Dept[0..58] 这63B，接缝差异只发生在最后1B `+0x3F` | committed originals 的 short profile 至少3份，LBA6 Dept C-string 与 LBA8 `Dept=` 一致，且在 `+0x00..+0x3E` 内保留真实 post-NUL 非零 backing。严格原始 current Kingston join60 与 legacy Lexar join59 的解密 LBA6 `+0x00..+0x3E` **63B逐字节完全相同**；回归 `lba9_dept_continuation_preserves_both_official_reader_join_profiles` 锁定这一点 | 前63B的两种动态状态均闭合：short = C-string + writer-uninitialized backing；long = marker + Dept[0..58]。已知历史 join59 分叉不触及这63B，因此本段升 COMPLETE |
+| LBA6 | 0x03F | PARTIAL | long-Dept inline final byte / short-slot backing | current Linux/Windows/vrvaud long writer 在此写 Dept[59]，当前76B Dept 原盘值为 GBK trail `A8`；short profile 则只是固定64B槽的最后一个 backing byte | long reader 用此字节区分接缝：非零则 continuation 接 Dept[60]；为0则按 legacy compatibility 分支从 Dept[59] 覆盖并接 LBA9 continuation | strict-original current Kingston join60 在 `+0x3F=A8`，strict-original Lexar join59 在同一完整 Dept 上 `+0x3F=00`，且两盘前63B完全一致 | 这是当前已知 join60/join59 唯一 LBA6 主槽分叉字节；legacy join59 producer/选择条件尚未定位，因此单独保留1B PARTIAL |
 | LBA6 | 0x040–0x04F | COMPLETE | UsbMainBSec static template material | Windows `sub_10013FD0` 先从 `UsbMainBSec@0x100E7220` 复制整扇；Linux `BuildSector6@0x1CAAC` 同样从 `UsbMainBSec@0x22BB40` 复制 sector_size；本16B没有后续 overlay | Windows `sub_100152A0` 与 Linux `ReadSector6@0x1E2CC` 都在字段解析前对 raw `+0x000..0x1FB` 计算并校验 SAFE6 checksum，不匹配即拒绝；字段 parser 不另解释本段 | 严格22份原始盘解密后22/22精确等于官方模板 `f0 ac 3c 00 74 fc bb 07 00 b4 0e cd 10 eb f2 88`；CI含独立SanDisk锁定 | fixed producer + whole-sector integrity consumer + real-device evidence，无已知 profile 分叉，16B COMPLETE |
 | LBA6 | 0x050–0x06F | PARTIAL | User/Owner fixed 32B slot | Windows/Linux `BuildSector6` 在 owner 长度<32时固定复制 `UsbWriteParam.m_usbowner[0..32]`；长 owner 在本槽写 `0x40245E2A` marker + 前28B，continuation 落到 LBA9+0x100 | Windows/Linux `ReadSector6` 检查 marker；普通路径按C字符串恢复 `UsbLabelParam.m_usbowner`，长值从 LBA9 continuation 重组 | committed原始夹具的 LBA6 C-string 与 LBA8 `User=` 一致；实盘在首个NUL后存在非零 backing bytes | 32B物理边界和字符串/overflow语义闭合，但 post-NUL backing 不具稳定字段语义，整体PARTIAL |
 | LBA6 | 0x070–0x07F | COMPLETE | `m_autoid[16]` / Autonum fixed slot, including nonsemantic post-NUL backing | Linux DWARF 定义 `UsbWriteParam.m_autoid char[16]@+0x259`；`UsbWriteParam(UsbLabelParam&)@0x1C362` 调自带 `strcpy_s@0x1B9B0`，该实现只复制到首个 NUL、**不清剩余 capacity**，且构造器入口没有先 memset 整对象；`BuildSector6` 随后固定 memcpy 完整16B 到 `LBA6+0x70` | `ReadSector6` 只用 `strcpy_s(...,16,decoded+0x70)` 消费首个 NUL 前的 C-string；`BuildSector8` 将该字符串序列化为 `Autonum=`；同时 LBA6 前508B checksum 覆盖并保护包括 post-NUL backing 在内的全部物理字节 | 22/22 LBA6 C-string 与 LBA8 Autonum 相同；committed originals 中同一个空字符串至少出现2种不同且非零的 post-NUL backing，直接证明尾字节不属于隐藏字符串语义 | 16B 的逐字节行为已闭合：前缀是 C-string，NUL 后是明确的 **writer-uninitialized backing**；值不固定是协议实现行为本身，不是未知字段，因此整槽 COMPLETE |
