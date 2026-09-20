@@ -2750,7 +2750,8 @@ CI 原始夹具同时保留两种 profile。零态表示该 legacy tail 不存�
 相邻区域不随之升级：
 
 - `+0x1A0..+0x1A3`：legacy `BuildSector0/sub_10013F10` 明确写
-  SectorSize；22盘有4份为512，其余为0，但尚未找到独立 reader/consumer；
+  SectorSize；22盘有4份为512，其余为0。该字段后续已由可选 overlay 生命周期、
+  跨组件 negative consumer 与历史 0/512 双 profile 进一步闭合，见后文独立小节；
 - `+0x1B8..+0x1BB`：已经闭合为标准 MBR disk signature producer：
   `GetSystemTimePreciseAsFileTime`（fallback `GetSystemTimeAsFileTime`）
   -> FILETIME 转 Unix seconds -> low32 -> `CREATE_DISK_MBR.Signature`
@@ -3030,6 +3031,54 @@ Windows disk signature 叠加第二层业务含义。
 **standard Windows MBR disk signature**：producer、Windows 标准 consumer、
 EDP negative semantic consumer 和真实盘均已齐全。
 
+#### LBA0 `+0x1A0..+0x1A3`：optional SectorSize compatibility overlay 4B 闭合
+
+该 DWORD 过去一直因为 0/512 双态和缺少独立 reader 保留为 PARTIAL。本轮继续从
+writer ownership、全组件访问点和历史 profile 的物理独立性三个方向交叉后，已经
+可以把它从 bootstrap 主体中彻底拆出。
+
+producer / lifecycle：
+
+- Windows `CEMSUsbRegsiter.dll::BuildSector0/sub_10013F10@0x10013FB6` 在 SAFE1
+  分支明确执行 `mov [sector0+0x1A0], m_nSectorSize`；
+- legacy `UsbMainBSec` 模板该 DWORD 固定为512；
+- Aigo/Netac `sub_10003880` 使用的整扇 MBR template 在相同槽位显式为0；
+- current SAFE6 主注册链不调用 `BuildSector0`，只保留预读 LBA0 的该4B；
+- Linux `CLabelManage::BuildSector0@diskfile.cpp:625` 使用 `m_nSectorSize` 计算
+  partition sector count，但不把它序列化到 `+0x1A0`。
+
+consumer 侧的负证据也已补齐。legacy 16-bit bootstrap 不读取本槽；对 current
+`CEMSUsbRegsiter.dll` 全模块按 `+0x1A0` 数据偏移复核后，唯一真正的 sector-data
+访问就是上述 SAFE1 writer store。另一个 `push 0x1A0` 已逐指令确认只是
+`memset(local_buffer, 0, 0x1A0)` 的长度。`UDiskLabelRepair.dll` 没有盘面
+`+0x1A0` 读点，Linux 没有 `ReadSector0` consumer；`EdpEDiskCtrl.dll` 中看似
+`object+0x1A0` 的命中也已抽样追到相邻 vtable 槽调用，属于 C++ 方法表/对象布局，
+不是 LBA0 staging buffer。
+
+历史实盘进一步证明 0/512 不是两个 bootstrap profile，而只是同一 bootstrap 上的
+独立 overlay。对 `nopwd_tool/backup + utils/backup` 当前可用完整历史快照重新聚类，
+其中 **47份**具有完全相同的 official legacy `UsbMainBSec` 前400B：
+
+- 10份 `SectorSize=0`；
+- 37份 `SectorSize=512`。
+
+把每份 LBA0 的 `+0x1A0..+0x1A3`、disk signature `+0x1B8..+0x1BB` 和标准
+partition table `+0x1BE..+0x1FD` 三个独立变化区归一化为0后，47/47 整个512B
+LBA0 的 SHA-256 都严格等于：
+
+```text
+2c8877b90c5d42d73f17c511ef5984efc8135543bda0746ef54f347320d78e8f
+```
+
+这直接排除了“SectorSize=0/512 代表不同 bootstrap 主体”的解释。committed protocol
+fixtures 又同时包含0与512两种真实状态，新增测试要求两态都持续存在。
+
+因此 `+0x1A0..+0x1A3` 共 **4B PARTIAL -> COMPLETE**，按
+**optional SAFE1 / legacy SectorSize compatibility overlay** 建模：512 表示该兼容
+metadata 被历史 SAFE1/legacy writer 填充；0表示 overlay absent/unowned，current
+SAFE6 只透明保留。COMPLETE 不意味着未来出现其它值时可以机械归零，未知值仍应
+兼容保留并报告。
+
 ## 当前逐字节地图状态
 
 ### 严格完成口径（2026-09-19）
@@ -3056,7 +3105,7 @@ EDP negative semantic consumer 和真实盘均已齐全。
 
 | LBA | 完成 | 部分已知 | 未知 | 严格完成率 | 当前计数依据 |
 |---:|---:|---:|---:|---:|---|
-| 0 | 108B | 404B | 0B | 21.1% | MBR partition table +55AA、legacy 三个 message-pointer、`+0x190..+0x19F/+0x1A4..+0x1B4` 两段 unowned compatibility region、standard Windows MBR disk signature 与 `+0x1BC..+0x1BD` reserved/unowned word 均已闭合；bootstrap主体与 SectorSize 共404B继续PARTIAL |
+| 0 | 112B | 400B | 0B | 21.9% | MBR partition table +55AA、legacy 三个 message-pointer、`+0x190..+0x19F/+0x1A4..+0x1B4` 两段 unowned compatibility region、optional SectorSize overlay、standard Windows MBR disk signature 与 `+0x1BC..+0x1BD` reserved/unowned word 均已闭合；只剩前400B bootstrap主体/profile-selection继续PARTIAL |
 | 1 | 0B | 512B | 0B | 0% | 官方 BuildSector1_Gpt + GPT_Header(512B) 结构 + Windows `EFI PART` / `header_lba` consumer 已闭合；22/22当前原始SAFE6盘全零，缺正向GPT实盘，因此整扇PARTIAL |
 | 2 | 0B | 512B | 0B | 0% | 官方 BuildSector2_Gpt + GPT_Partition(128B) 结构 + Windows 从LBA2起每扇4 entry parser 已闭合；22/22当前原始盘全零，缺正向GPT实盘，因此整扇PARTIAL |
 | 3 | 0B | 512B | 0B | 0% | EDP 注册 writer 对整扇 preserve-existing，当前 Windows/Linux EDP reader 不解析；22份原始盘为21零+1 Kingston MP payload，但厂商 producer/固件 consumer 未闭合 |
@@ -3072,8 +3121,8 @@ EDP negative semantic consumer 和真实盘均已齐全。
 
 总计：
 
-- **完成：3695B / 6656B = 55.5%**
-- **部分已知：2961B / 6656B = 44.5%**
+- **完成：3699B / 6656B = 55.6%**
+- **部分已知：2957B / 6656B = 44.4%**
 - **未知：0B / 6656B = 0.0%**
 
 这是一组**严格下限**，故意宁可低估，不把“能生成/能解析”冒充成“已经完全理解”。
@@ -3081,7 +3130,7 @@ EDP negative semantic consumer 和真实盘均已齐全。
 
 | LBA | 状态 | 当前结论 |
 |---|---|---|
-| 0 | 部分闭合 | MBR 分区表、55AA、legacy 三个错误消息指针、`+0x190..0x19F/+0x1A4..0x1B4` 两段 cross-profile unowned compatibility region、standard Windows MBR disk signature 及 `+0x1BC..+0x1BD` reserved/unowned word 已闭合；只剩 SectorSize 与 bootstrap profile-selection 继续追 |
+| 0 | 部分闭合 | MBR 分区表、55AA、legacy 三个错误消息指针、`+0x190..0x19F/+0x1A4..0x1B4` 两段 cross-profile unowned compatibility region、optional SectorSize compatibility overlay、standard Windows MBR disk signature 及 `+0x1BC..+0x1BD` reserved/unowned word 已闭合；只剩前400B bootstrap profile-selection 继续追 |
 | 1 | GPT profile 部分闭合 | 当前22/22全零；官方 GPT_Header writer/consumer 已知，但缺正向GPT实盘 |
 | 2 | GPT profile 部分闭合 | 当前22/22全零；官方 GPT_Partition writer/consumer 已知，但缺正向GPT实盘 |
 | 3 | 外部制造区部分闭合 | 21/22 全零，1 份 Kingston MP payload；官方 EDP 注册链原样保留且当前 reader 不解析，厂商生成/消费语义仍未知 |
@@ -3100,7 +3149,7 @@ EDP negative semantic consumer 和真实盘均已齐全。
 - LBA4 `+0x45/+0x46` 已闭合 producer/wire 与 ReadSector4 非对称规则；剩余缺口仅是 `bDataToServer/bConnetServer` 的最终业务 consumer，未找到前不得升 COMPLETE；
 - EDPF wrapped-key 的 mode1/mode3 正向真实盘样本（算法与consumer已闭合，当前22盘均为mode2）；
 - LBA4 onlyID2Nd 及关联动态字段的生成源；
-- LBA0 bootstrap 主体/profile 选择，以及 `+0x1A0 SectorSize` consumer；
+- LBA0 前400B bootstrap 主体/profile 选择；
 - LBA6 0x1c0..0x1ed 不同格式代际的准确字段来源。
 - LBA7 Version、entry1/entry2 NeedDisturb 与 pass-info `BackupPromptPeriod` 两字节的最终消费者；
 - LBA12 NeedDisturb 在新版主路径中的进一步业务作用（旧版 fallback 门控已闭合）；

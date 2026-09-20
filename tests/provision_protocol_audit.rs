@@ -1021,6 +1021,7 @@ fn lba0_bootstrap_profiles_are_zero_or_the_official_usb_main_bsec_prefix() {
     let mut zero_profile = 0usize;
     let mut checked = 0usize;
     let mut disk_signatures = HashSet::new();
+    let mut sector_size_profiles = HashSet::new();
 
     for entry in fs::read_dir(FIXTURE_DIR).expect("protocol fixtures") {
         let path = entry.expect("backup entry").path();
@@ -1056,6 +1057,7 @@ fn lba0_bootstrap_profiles_are_zero_or_the_official_usb_main_bsec_prefix() {
             "unexpected LBA0 SectorSize profile in {name}: {}",
             u32_le(lba0, 0x1a0)
         );
+        sector_size_profiles.insert(u32_le(lba0, 0x1a0));
         assert!(
             lba0[0x1a4..0x1b5].iter().all(|byte| *byte == 0),
             "unexpected LBA0 +0x1a4..+0x1b4 material in {name}"
@@ -1089,6 +1091,11 @@ fn lba0_bootstrap_profiles_are_zero_or_the_official_usb_main_bsec_prefix() {
     assert!(
         disk_signatures.len() > 1,
         "protocol fixtures must retain multiple real MBR disk signatures"
+    );
+    assert_eq!(
+        sector_size_profiles,
+        HashSet::from([0, 512]),
+        "protocol fixtures must retain both absent and populated SectorSize overlay profiles"
     );
 }
 

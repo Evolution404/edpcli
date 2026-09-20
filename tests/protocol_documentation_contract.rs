@@ -170,7 +170,8 @@ fn documentation_keeps_the_official_provisioning_chain_and_strict_rules() {
         "4eeee8d52f8b58d9a1fa35b63a14c8c5dba1b2717eaa44e6fb1ff0327ccbe5ed",
         "lba0_bootstrap_profiles_are_zero_or_the_official_usb_main_bsec_prefix",
         "cross-profile unowned preserve / historical-zero compatibility region",
-        "SAFE1 / legacy `SectorSize` compatibility slot",
+        "optional SAFE1 / legacy `SectorSize` compatibility overlay",
+        "2c8877b90c5d42d73f17c511ef5984efc8135543bda0746ef54f347320d78e8f",
         "standard Windows MBR disk signature",
         "CEMSUsbRegsiter.dll::fcn.10046320",
         "共57份完整历史快照",
@@ -206,8 +207,8 @@ fn documentation_keeps_the_official_provisioning_chain_and_strict_rules() {
         );
     }
     assert!(
-        DOC.contains("| LBA0 | 108 | 404 | 0 | 21.1% |"),
-        "LBA0 progress must retain the closed MBR signature and compatibility regions"
+        DOC.contains("| LBA0 | 112 | 400 | 0 | 21.9% |"),
+        "LBA0 progress must retain the closed SectorSize overlay, MBR signature, and compatibility regions"
     );
     assert!(
         DOC.contains("| LBA1 | 0 | 512 | 0 | 0.0% |"),
