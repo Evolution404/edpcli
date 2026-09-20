@@ -28,8 +28,8 @@ producer + 官方 consumer/行为 + 原始实盘验证**同时闭合，才能标
 
 截至本次 LBA11 repair-profile 闭环，严格统计为：
 
-- **COMPLETE：3267 / 6656B = 49.1%**
-- **PARTIAL：3389 / 6656B = 50.9%**
+- **COMPLETE：3323 / 6656B = 49.9%**
+- **PARTIAL：3333 / 6656B = 50.1%**
 - **UNKNOWN：0 / 6656B = 0.0%**
 
 当前各 LBA 严格状态以主账本为唯一准绳，最新关键增量：
@@ -79,7 +79,7 @@ producer + 官方 consumer/行为 + 原始实盘验证**同时闭合，才能标
   LBA12 EDPF 双重验证的历史前部快照也 58/58 tail 为零。COMPLETE 不表示
   tail 必须为零；未来非零旧 profile 仍必须原样 preserve。
 
-- **LBA6 = 300 COMPLETE / 212 PARTIAL / 0 UNKNOWN = 58.6%**。
+- **LBA6 = 356 COMPLETE / 156 PARTIAL / 0 UNKNOWN = 69.5%**。
   原352B UNKNOWN 已全部拆清。Windows sub_10013FD0 与 Linux
   BuildSector6@0x1CAAC 都先复制官方 UsbMainBSec，再覆盖明确字段；
   +0x40..4F、+0xC0..FF、+0x108..187、+0x1F4..1FB 共216B没有后续 overlay。
@@ -90,15 +90,17 @@ producer + 官方 consumer/行为 + 原始实盘验证**同时闭合，才能标
   `UsbWriteParam(UsbLabelParam&)@0x1C362` 和项目自带
   `strcpy_s@0x1B9B0` 后确认：copy-constructor 不先清对象，strcpy_s 只复制到
   首个NUL并不清剩余 capacity，而 BuildSector6 随后把固定槽整宽 memcpy 上盘。
-  因此 `m_autoid[16]@+0x70` 和 `m_UsbOffice[64]@+0x80` 的 post-NUL
-  非零字节是明确的 writer-uninitialized backing，而不是未知隐藏字段。
+  因此 `m_autoid[16]@+0x70`、`m_UsbOffice[64]@+0x80` 和
+  `m_usbLabel` 物理56B槽 `+0x188..+0x1BF` 的 post-NUL 非零字节都属于明确的
+  writer-uninitialized backing，而不是未知隐藏字段。
   ReadSector6 只按 C-string 消费，前508B checksum 又覆盖全部物理字节；
-  committed originals 中同一空 autoid 至少2种尾、同一空 Office 至少3种尾。
-  这80B现已升级 COMPLETE。Owner 仍受 long-User 未见正向实盘影响，
-  Label 仍有56B盘面截断/profile缺口，继续PARTIAL。
+  committed originals 中同一空 autoid 至少2种尾、同一空 Office 至少3种尾，
+  同一 `江苏电力!SAFE6` Label 又至少有3种不同且非零的41B post-NUL backing。
+  因此 autoid+Office 80B 与 Label 56B 均已升级 COMPLETE。Owner 仍受
+  long-User 未见正向原始实盘影响，继续PARTIAL。
   Dept/Owner 长值的 continuation 还确认落在 LBA9+0x80/+0x100，
   并已用 join60/join59 双profile实盘门禁锁定。当前全 LBA0–12 已无 UNKNOWN，
-  目前全局仍有3389B PARTIAL，绝不能把“UNKNOWN=0”当成全部协议完成。
+  目前全局仍有3333B PARTIAL，绝不能把“UNKNOWN=0”当成全部协议完成。
 
 - **LBA7 = 490 COMPLETE / 22 PARTIAL / 0 UNKNOWN = 95.7%**。
   真实物理 LBA7 已锁定为 **3×0x40 packed EDPF + 14B pass-info@+0xC0**，

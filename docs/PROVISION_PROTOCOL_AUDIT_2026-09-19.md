@@ -626,6 +626,44 @@ writer-uninitialized backing；ReadSector6 只解释首个 NUL 前的 C-string�
 这不要求 Provision 模拟未初始化内存泄漏；new-disk canonical 可在 NUL 后使用
 确定性零 backing，并重算 checksum。兼容读取必须继续接受真实旧盘任意 backing。
 
+### LBA6 `m_usbLabel@0x188`：同一字符串三种非零 backing，56B 整槽闭合
+
+继续沿同一个 `UsbWriteParam(UsbLabelParam&)@0x1C362` 下钻后，Label 与
+autoid/Office 实际共享同一类 producer bug：
+
+- Linux DWARF 给出 `UsbLabelParam.m_usbLabel[64]@+0x218` 与
+  `UsbWriteParam.m_usbLabel[64]@+0x218`；
+- copy-constructor 调用
+  `strcpy_s(dst+0x218, 64, src+0x218)`；
+- 该构造器入口没有先 memset 整个 0x299B `UsbWriteParam`；
+- 自带 `strcpy_s@0x1B9B0` 在复制第一个 NUL 后立即返回，不清剩余 capacity；
+- Windows `sub_10013FD0` 与 Linux `BuildSector6@0x1CAAC`
+  都只把该64B数组的前 `0x38=56B` 固定复制到 LBA6 `+0x188..+0x1BF`；
+- Linux `ReadSector6@0x1E84B..` 从 `decoded+0x188` 构造 C++ string，
+  Windows reader 同构；`BuildSector8` 又把同一个逻辑字符串写成
+  ELABEL `Label=`；
+- SAFE6 checksum 覆盖 LBA6 前508B，所以 NUL 后 backing 虽无业务字段语义，
+  仍是受完整性保护的真实物理字节。
+
+实盘给出了比“存在非零尾”更强的反例。committed original fixtures 中，
+业务值全部是同一个 `江苏电力!SAFE6`，但首个 NUL 后的41B backing 至少出现
+**3种不同 profile，而且3种都含非零字节**。如果这些字节属于隐藏字段或固定 padding，
+同一业务字符串不应自然产生这种多 profile；该分布与“不清目标对象 + strcpy_s 到 NUL
+即停 + 固定56B memcpy”的官方 producer 逐项吻合。
+
+回归 `lba6_owner_office_and_label_slots_have_official_fixed_storage_boundaries`
+现同时要求：
+
+- LBA6 Label C-string == LBA8 `Label=`；
+- Label 槽存在 post-NUL 非零 backing；
+- 同一个 `江苏电力!SAFE6` 至少保留3种不同且非零的 post-NUL backing。
+
+因此 `LBA6 +0x188..+0x1BF` 56B 从 PARTIAL 升 **COMPLETE**。这里的 COMPLETE
+表示“业务字符串 + writer-uninitialized backing”的逐字节行为闭合，不意味着尾部必须
+复刻旧内存垃圾；canonical 新盘仍可在 NUL 后写确定性零并重算 checksum，reader 必须接受
+旧盘的任意 backing。LBA6 更新为
+**356 COMPLETE / 156 PARTIAL / 0 UNKNOWN = 69.5%**。
+
 ### LBA6 原352B UNKNOWN 已全部拆清：固定字段槽 + UsbMainBSec 静态模板
 
 本轮从 Windows/Linux 官方 BuildSector6 与 ReadSector6 的真实机器码重新恢复
@@ -664,13 +702,13 @@ Office 从 decoded+0x80 读回 64B C-string；Label 从 decoded+0x188
 构造字符串后写回 m_usbLabel[64]。
 
 实盘证明三种固定槽都有首个 NUL 后非零 backing。进一步追 producer 后，
-Office 的 backing 来源已闭合并升级 COMPLETE；Owner/Label 仍保持 PARTIAL：
-Owner 还有 long-User continuation 缺正向实盘，Label 的盘面只写源数组前56B，
-历史/profile边界仍未完全闭合。CI
+Office 与 Label 的 backing 来源都已闭合并升级 COMPLETE；Owner 仍保持 PARTIAL，
+因为 long-User continuation 目前缺正向原始实盘。CI
 `lba6_owner_office_and_label_slots_have_official_fixed_storage_boundaries`
 继续锁定 LBA6 Owner C-string == LBA8 User、LBA6 Label C-string == LBA8 Label，
-并新增“同一空 Office 至少3种 backing”反例。因此旧136B现在拆为
-Office 64B COMPLETE，其余72B继续 PARTIAL。
+并同时锁定“同一空 Office 至少3种 backing”与“同一
+`江苏电力!SAFE6` 至少3种不同且非零 backing”两组反例。因此旧136B现在拆为
+Office 64B + Label 56B COMPLETE，仅 Owner 32B继续 PARTIAL。
 
 第二类是216B writer-owned static UsbMainBSec material：
 
@@ -697,8 +735,9 @@ lba6_static_usb_main_bsec_holes_are_exact_and_checksum_protected，
 锁定 committed originals + 独立 SanDisk。
 
 此前 LBA6 从 4 COMPLETE / 156 PARTIAL / 352 UNKNOWN 更新为
-220 COMPLETE / 292 PARTIAL / 0 UNKNOWN；本轮再闭合 autoid 16B + Office 64B，
-更新为 **300 COMPLETE / 212 PARTIAL / 0 UNKNOWN**。
+220 COMPLETE / 292 PARTIAL / 0 UNKNOWN；随后闭合 autoid 16B + Office 64B
+达到 300/212；本轮再闭合 Label 56B，更新为
+**356 COMPLETE / 156 PARTIAL / 0 UNKNOWN**。
 
 全 LBA0–12 的 UNKNOWN 首次降为0B。这只表示每个物理字节至少已有明确区域/
 存储行为边界；仍有大量 PARTIAL 尚未满足最终业务语义闭环，不能把
@@ -2499,7 +2538,7 @@ CI 原始夹具同时保留两种 profile。零态表示该 legacy tail 不存�
 | 3 | 0B | 512B | 0B | 0% | EDP 注册 writer 对整扇 preserve-existing，当前 Windows/Linux EDP reader 不解析；22份原始盘为21零+1 Kingston MP payload，但厂商 producer/固件 consumer 未闭合 |
 | 4 | 36B | 476B | 0B | 7.0% | onlyid clear header、OnlyIdXor8、LLGB 双锚点完成；第二 ID/HSerial/profile 字段仍不完整；`+0x047..+0x1FB` 已由 full writer、reader negative consumer 与 raw-zero/rolling-zero 双实盘 profile 从UNKNOWN降PARTIAL |
 | 5 | 512B | 0B | 0B | 100% | 两版 EdpDiskCtrl 均只对 LBA5 执行“读整扇→原样写回→检查 ERROR_WRITE_PROTECT(0x13)”；当前注册 writer 读取既有13扇区后不重建 LBA5，因此 preserve existing bytes；22/22原始盘全零 |
-| 6 | 300B | 212B | 0B | 58.6% | 216B UsbMainBSec fixed template 已闭合；本轮又证明 copy-constructor 不预清对象且自带 strcpy_s 复制到NUL即停，BuildSector6 再整宽复制，所以 autoid[16]+Office[64] 的 post-NUL 多profile是 writer-uninitialized backing 而非隐藏字段，结合 C-string reader、整扇 checksum 与同空串多尾实盘后80B升COMPLETE；Owner/Label、GSerial/BeiZhu/legacy MBR等继续PARTIAL |
+| 6 | 356B | 156B | 0B | 69.5% | 216B UsbMainBSec fixed template 已闭合；copy-constructor 不预清对象且自带 strcpy_s 复制到NUL即停，BuildSector6 再整宽复制，所以 autoid[16]+Office[64]+Label物理56B 的 post-NUL 多profile均属于 writer-uninitialized backing。Label 又由同一 `江苏电力!SAFE6` 至少3种不同非零尾、C-string reader、LBA8 Label一致性与整扇 checksum 共同闭合，本轮新增56B COMPLETE；Owner、GSerial/BeiZhu/legacy MBR等继续PARTIAL |
 | 7 | 490B | 22B | 0B | 95.7% | 在原489B基础上，pass-info `bNoUsbChkPasSafe(+0x0A)` 找到 `checkdiskback::Update_EDPEDISKSHOWPARAM` 值相关行为 consumer，并经 SAFE6 policy 被两套独立客户端恢复，1B升级COMPLETE；当前剩3条 entry Version 12B、entry1/2 NeedDisturb 8B、backup-prompt 2B为PARTIAL |
 | 8 | 476B | 36B | 0B | 93.0% | header 的 LLGB/logical length/ToolVersion/Labversion/writeTime/ElabOffset/Reserved/MacInfo 已闭合；`+0x080..0x1FF` 又由 Windows/Linux 双 writer、注册侧7-key reader、运行时17-key EdpEDiskCtrl reader、动态 encrypted backing/preserve tail 与22盘17-key实证整体闭合384B；仅 HDSerialInfo/UsbOnlyInfo 36B继续PARTIAL |
 | 9 | 54B | 458B | 0B | 10.5% | EETU/EPPE/SAPF边界保持；+0x080..0x0FF已闭合为 BuildSector6 long-Dept continuation 并验证 join60/join59 双reader profile，但 legacy join59 producer仍缺；+0x100..0x17F又与 long-User continuation/SAPF profile复用且缺长User实盘，因此仍PARTIAL |
@@ -2509,8 +2548,8 @@ CI 原始夹具同时保留两种 profile。零态表示该 legacy tail 不存�
 
 总计：
 
-- **完成：3267B / 6656B = 49.1%**
-- **部分已知：3389B / 6656B = 50.9%**
+- **完成：3323B / 6656B = 49.9%**
+- **部分已知：3333B / 6656B = 50.1%**
 - **未知：0B / 6656B = 0.0%**
 
 这是一组**严格下限**，故意宁可低估，不把“能生成/能解析”冒充成“已经完全理解”。
@@ -2524,7 +2563,7 @@ CI 原始夹具同时保留两种 profile。零态表示该 legacy tail 不存�
 | 3 | 外部制造区部分闭合 | 21/22 全零，1 份 Kingston MP payload；官方 EDP 注册链原样保留且当前 reader 不解析，厂商生成/消费语义仍未知 |
 | 4 | 高度闭合 | 整扇已无UNKNOWN；`+0x047..+0x1FB` 已确认 raw-zero / rolling-encrypted-zero 双历史物理表示且22盘语义均为零。`+0x45/+0x46` 已闭合为 `bDataToServer/bConnetServer` post-XOR wire bytes，并证明官方 ReadSector4 不补偿该例外；inspect 已恢复 producer-side flags，Provision 已改为 current SAFE6 full rolling + post-XOR覆盖。两flag因缺最终业务consumer仍PARTIAL |
 | 5 | canonical 已知 | opaque preserve / 写保护探测 scratch；当前 22/22 全零，但零不是协议固定要求 |
-| 6 | 高度闭合 | 整扇已无 UNKNOWN。216B UsbMainBSec static material完成；autoid[16] 与 Office[64] 的 writer-uninitialized post-NUL backing 来源、C-string consumer、checksum 与实盘多尾均闭合，累计再升80B COMPLETE。Owner/Label 仍受 overflow/截断 profile 缺口影响，GSerial/BeiZhu 与 legacy MBR fragment 继续PARTIAL |
+| 6 | 高度闭合 | 整扇已无 UNKNOWN。216B UsbMainBSec static material完成；autoid[16]、Office[64] 与 Label物理56B 的 writer-uninitialized post-NUL backing 来源、C-string consumer、checksum 与实盘多尾均闭合。Label 的同一 `江苏电力!SAFE6` 已出现至少3种不同非零尾，因此本轮再升56B COMPLETE。Owner仍受 long-User 正向实盘缺口影响，GSerial/BeiZhu 与 legacy MBR fragment 继续PARTIAL |
 | 7 | 高度闭合 | 物理0x40 packed ABI、PartionCount、rolling XOR、entry0 NeedDisturb compatibility gate、v0x0064 legacy wrapped8均已锁；`bNoUsbChkPasSafe` 已由 checkdiskback SAFE6 policy 行为链闭合；当前只剩22B PARTIAL：3×Version、entry1/2 NeedDisturb、pass-info +0C/+0D |
 | 8 | 高度闭合 | **LBA8 dynamic ELABEL + encrypted backing + preserved tail** 已闭合：17-key wire template 中7键由注册侧 Windows/Linux reader回填，运行时 EdpEDiskCtrl reader 则解析全部17键；NUL后块内既有backing随动态前缀加密，块外tail原样preserve。384B动态区已COMPLETE；当前只剩 HDSerialInfo 4B 与 legacy UsbOnlyInfo 32B PARTIAL |
 | 9 | 高度闭合 | 整扇已无UNKNOWN：EETU首0x80、EPPE末0x80、SAPF边界明确；中间区现已纠正为 BuildSector6 long-Dept/User continuation 与 SAPF/backing 的多profile复用。Dept join60 producer已闭合，join59旧producer仍缺；长User又缺正向实盘，因此继续PARTIAL |

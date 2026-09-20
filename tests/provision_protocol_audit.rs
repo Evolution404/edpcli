@@ -629,6 +629,7 @@ fn lba6_owner_office_and_label_slots_have_official_fixed_storage_boundaries() {
     let mut office_tail = false;
     let mut label_tail = false;
     let mut empty_office_backing = std::collections::BTreeSet::new();
+    let mut safe6_label_backing = std::collections::BTreeSet::new();
 
     for entry in fs::read_dir(FIXTURE_DIR).expect("protocol fixtures") {
         let path = entry.expect("backup entry").path();
@@ -661,6 +662,13 @@ fn lba6_owner_office_and_label_slots_have_official_fixed_storage_boundaries() {
         if office_nul == 0 {
             empty_office_backing.insert(office[1..].to_vec());
         }
+        let label_nul = label
+            .iter()
+            .position(|byte| *byte == 0)
+            .unwrap_or(label.len());
+        if gbk_string(label) == "江苏电力!SAFE6" && label_nul < label.len() {
+            safe6_label_backing.insert(label[label_nul + 1..].to_vec());
+        }
 
         let inspect_meta = InspectMeta {
             device_id: Some(meta.device_id.clone()),
@@ -692,6 +700,13 @@ fn lba6_owner_office_and_label_slots_have_official_fixed_storage_boundaries() {
     assert!(
         empty_office_backing.len() >= 3,
         "the same empty m_UsbOffice string must retain multiple distinct post-NUL backing profiles"
+    );
+    assert!(
+        safe6_label_backing.len() >= 3
+            && safe6_label_backing
+                .iter()
+                .all(|tail| tail.iter().any(|byte| *byte != 0)),
+        "the same 江苏电力!SAFE6 label must retain at least three distinct non-zero post-NUL backing profiles"
     );
 }
 
