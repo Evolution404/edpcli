@@ -201,8 +201,8 @@ fn documentation_keeps_the_official_provisioning_chain_and_strict_rules() {
         );
     }
     assert!(
-        DOC.contains("| LBA0 | 102 | 410 | 0 | 19.9% |"),
-        "LBA0 progress must retain the two closed unowned compatibility regions"
+        DOC.contains("| LBA0 | 104 | 408 | 0 | 20.3% |"),
+        "LBA0 progress must retain the closed unowned compatibility regions and reserved word"
     );
     assert!(
         DOC.contains("| LBA1 | 0 | 512 | 0 | 0.0% |"),

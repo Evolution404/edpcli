@@ -2758,8 +2758,9 @@ CI 原始夹具同时保留两种 profile。零态表示该 legacy tail 不存�
   Windows drive-layout API 会把它作为 MBR Signature 报告，但当前已审 EDP
   `IOCTL_DISK_GET_DRIVE_LAYOUT_EX` 调用均未发现业务逻辑读取该值，因此按本项目
   “EDP consumer 也需闭合”的严格口径继续 PARTIAL；
-- `+0x1BC..+0x1BD`：当前官方模板和22盘均为0，但缺独立 consumer，
-  仍不因全零而升级。
+- `+0x1BC..+0x1BD`：在这一阶段仅确认官方模板和22盘均为0，因此当时仍未升级；
+  后续已继续补齐 current SAFE6/Linux writer ownership 边界、bootstrap/EDP negative
+  consumer 与57份历史快照，最新结论见下方独立闭环小节。
 
 ### LBA0 bootstrap profile：current 0x190 清零与 legacy UsbMainBSec 模板已分型
 
@@ -2845,10 +2846,32 @@ consumer 侧也逐段核对：`UsbMainBSec` 16-bit bootstrap 的明确尾部数�
 SectorSize 则明确出现双 profile：扩展57份为34×512、23×0，证明不能把整个尾部
 机械叫做 zero padding。
 
-因此本轮只升级真正闭合的两段：16B+17B = **33B PARTIAL -> COMPLETE**，语义为
+因此本轮先升级真正闭合的两段：16B+17B = **33B PARTIAL -> COMPLETE**，语义为
 **cross-profile unowned preserve / historical-zero compatibility region**。COMPLETE 不表示
 未来必须为零；若发现非零未知 profile，兼容实现应原样 preserve。SectorSize 4B 因
 SAFE6 历史0/512选择条件及值相关consumer仍缺，继续PARTIAL。
+
+#### LBA0 `+0x1BC..+0x1BD`：2B standard MBR reserved / unowned compatibility word 闭合
+
+这2B此前因为“模板为0 + 实盘全零”不足以满足严格口径而保持 PARTIAL。继续沿与
+`+0x190..+0x19F/+0x1A4..+0x1B4` 相同的 ownership/consumer 方法复核后，证据补齐：
+
+- current SAFE6 `RegsiterUsb` 只清 `+0x000..+0x18F`，随后从 `+0x1BE` 起重建分区表，
+  因而 `+0x1BC..+0x1BD` 属于 pre-read backing，current writer 不拥有；
+- Linux `CLabelManage::BuildSector0@diskfile.cpp:625` 同样只处理 `+0x1BE` 起的 MBR
+  partition entries，不写该2B；
+- legacy `UsbMainBSec` 与 Aigo/Netac 的完整 MBR 模板在这2B均为 `00 00`；
+- 16-bit `UsbMainBSec` bootstrap 已确认的尾部直接引用集中在三个 message-pointer、
+  partition table 与签名，不读取 `+0x1BC/+0x1BD`；current 注册/准入、
+  `UDiskLabelRepair::ReCreate0Sector` 与已审 drive-layout 路径也不赋予这2B业务语义；
+- 严格22份原始参考 22/22=`00 00`；扩展57份完整历史快照同样57/57=`00 00`，而
+  相邻 `+0x1B8..+0x1BB` disk signature 在同一语料中明确多值，说明这里不是把整个
+  MBR 尾部机械当成固定零。
+
+因此 `+0x1BC..+0x1BD` 共 **2B PARTIAL -> COMPLETE**。其完成语义是
+**standard MBR reserved / unowned compatibility word**：跨已知 writer profile 的 ownership、
+negative semantic consumer 和实盘行为已经闭合。COMPLETE 不意味着未来盘面必须为零；
+若遇到未知非零兼容值，edpcli 应保留而不是清洗。
 
 #### LBA0 Aigo L8302 第三 profile：已定位 Netac Format 的完整 MBR producer
 
@@ -2934,7 +2957,7 @@ output_mbr[0x1BE] = 0x80
 
 | LBA | 完成 | 部分已知 | 未知 | 严格完成率 | 当前计数依据 |
 |---:|---:|---:|---:|---:|---|
-| 0 | 69B | 443B | 0B | 13.5% | 原64B MBR partition table +55AA基础上，legacy MBR 的3个错误消息指针低字节 `+0x1B5..+0x1B7` producer/consumer/22盘 profile 已闭合；其余443B仍PARTIAL |
+| 0 | 104B | 408B | 0B | 20.3% | MBR partition table +55AA、legacy 三个 message-pointer、`+0x190..+0x19F/+0x1A4..+0x1B4` 两段 unowned compatibility region 与 `+0x1BC..+0x1BD` reserved/unowned word 均已闭合；bootstrap主体、SectorSize、disk signature等408B继续PARTIAL |
 | 1 | 0B | 512B | 0B | 0% | 官方 BuildSector1_Gpt + GPT_Header(512B) 结构 + Windows `EFI PART` / `header_lba` consumer 已闭合；22/22当前原始SAFE6盘全零，缺正向GPT实盘，因此整扇PARTIAL |
 | 2 | 0B | 512B | 0B | 0% | 官方 BuildSector2_Gpt + GPT_Partition(128B) 结构 + Windows 从LBA2起每扇4 entry parser 已闭合；22/22当前原始盘全零，缺正向GPT实盘，因此整扇PARTIAL |
 | 3 | 0B | 512B | 0B | 0% | EDP 注册 writer 对整扇 preserve-existing，当前 Windows/Linux EDP reader 不解析；22份原始盘为21零+1 Kingston MP payload，但厂商 producer/固件 consumer 未闭合 |
@@ -2950,8 +2973,8 @@ output_mbr[0x1BE] = 0x80
 
 总计：
 
-- **完成：3689B / 6656B = 55.4%**
-- **部分已知：2967B / 6656B = 44.6%**
+- **完成：3691B / 6656B = 55.5%**
+- **部分已知：2965B / 6656B = 44.5%**
 - **未知：0B / 6656B = 0.0%**
 
 这是一组**严格下限**，故意宁可低估，不把“能生成/能解析”冒充成“已经完全理解”。
@@ -2959,7 +2982,7 @@ output_mbr[0x1BE] = 0x80
 
 | LBA | 状态 | 当前结论 |
 |---|---|---|
-| 0 | 部分闭合 | MBR 分区表、55AA、legacy 三个错误消息指针及 `+0x190..0x19F/+0x1A4..0x1B4` 两段 cross-profile unowned compatibility region 已闭合；SectorSize、disk signature 的 EDP-side consumer 与 bootstrap profile-selection 继续追 |
+| 0 | 部分闭合 | MBR 分区表、55AA、legacy 三个错误消息指针、`+0x190..0x19F/+0x1A4..0x1B4` 两段 cross-profile unowned compatibility region 及 `+0x1BC..+0x1BD` reserved/unowned word 已闭合；SectorSize、disk signature 的 EDP-side consumer 与 bootstrap profile-selection 继续追 |
 | 1 | GPT profile 部分闭合 | 当前22/22全零；官方 GPT_Header writer/consumer 已知，但缺正向GPT实盘 |
 | 2 | GPT profile 部分闭合 | 当前22/22全零；官方 GPT_Partition writer/consumer 已知，但缺正向GPT实盘 |
 | 3 | 外部制造区部分闭合 | 21/22 全零，1 份 Kingston MP payload；官方 EDP 注册链原样保留且当前 reader 不解析，厂商生成/消费语义仍未知 |

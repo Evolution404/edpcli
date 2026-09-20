@@ -28,8 +28,8 @@ producer + 官方 consumer/行为 + 原始实盘验证**同时闭合，才能标
 
 截至本次 LBA9 EPPE writer-owned zero tail 闭环，严格统计为：
 
-- **COMPLETE：3689 / 6656B = 55.4%**
-- **PARTIAL：2967 / 6656B = 44.6%**
+- **COMPLETE：3691 / 6656B = 55.5%**
+- **PARTIAL：2965 / 6656B = 44.5%**
 - **UNKNOWN：0 / 6656B = 0.0%**
 
 当前各 LBA 严格状态以主账本为唯一准绳，最新关键增量：
@@ -126,7 +126,7 @@ producer + 官方 consumer/行为 + 原始实盘验证**同时闭合，才能标
   producer/选择条件未知继续PARTIAL。
   Dept/Owner 长值的 continuation 还确认落在 LBA9+0x80/+0x100，
   并已用 join60/join59 双profile实盘门禁锁定。当前全 LBA0–12 已无 UNKNOWN，
-  目前全局仍有2967B PARTIAL，绝不能把“UNKNOWN=0”当成全部协议完成。
+  目前全局仍有2965B PARTIAL，绝不能把“UNKNOWN=0”当成全部协议完成。
 
 - **LBA7 = 490 COMPLETE / 22 PARTIAL / 0 UNKNOWN = 95.7%**。
   真实物理 LBA7 已锁定为 **3×0x40 packed EDPF + 14B pass-info@+0xC0**，
@@ -239,7 +239,7 @@ producer + 官方 consumer/行为 + 原始实盘验证**同时闭合，才能标
   `sub_10008950(ReWrite11Sector) -> sub_10003A40` 用同一容量重建 LBA11；同一
   Aigo U335 rev_pmap 的 CHS/exact 双真实捕获与两条官方路径吻合。因此后半252B已
   从 PARTIAL 升 COMPLETE，不再重复追 CHS profile。
-- **LBA0 = 102 COMPLETE / 410 PARTIAL**。
+- **LBA0 = 104 COMPLETE / 408 PARTIAL**。
   legacy MBR `+0x1B5..+0x1B7 = 2C 44 63` 已闭合为三个错误消息指针低字节；
   current zero bootstrap、legacy `UsbMainBSec` 与 Aigo L8302 第三 profile 已进一步
   分型。Aigo 前400B已精确匹配 CEMS 随附 `Netac_USB_API.dll/hardware.dll` 等8份
@@ -256,6 +256,12 @@ producer + 官方 consumer/行为 + 原始实盘验证**同时闭合，才能标
   compatibility region 升 COMPLETE。`+0x1A0..+0x1A3 SectorSize` 单独保留PARTIAL：
   Windows `sub_10013F10` 只在 SAFE1 分支写它，Linux BuildSector0不落盘，current
   SAFE6只preserve；扩展57盘为34×512、23×0，且尚无值相关consumer。
+  相邻 `+0x1BC..+0x1BD` 2B 也已从旧的“标准 reserved word + 全零样本”继续追到
+  **unowned compatibility word**：current SAFE6/Linux BuildSector0 都不写，legacy
+  `UsbMainBSec` 与 Aigo/Netac 模板均为 `00 00`；16-bit bootstrap、current EDP
+  准入/repair/drive-layout 路径均不把它作为业务字段读取。严格22盘与扩展57份完整
+  历史快照全部为 `00 00`，因此这2B也满足 producer/preserve + negative consumer +
+  实盘四证，升级 COMPLETE；未来未知非零值仍应 preserve，不能据此强制清零。
 - **LBA3 = 整扇 PARTIAL**。
   EDP 注册链只 preserve existing，当前 EDP reader 不解析；strict 22盘仍是21零 +
   1份 Kingston `this is mp mark\0` 制造 payload。扩展只读扫描两个备份目录60份
