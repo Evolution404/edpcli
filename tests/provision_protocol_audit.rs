@@ -2603,7 +2603,17 @@ fn lba9_dept_continuation_preserves_both_official_reader_join_profiles() {
     );
     assert_eq!(
         legacy_join, 59,
-        "legacy compatibility profile must join at Dept[59]"
+        "CEMS2.0 legacy profile must join at Dept[59] when inline[59] is NUL"
+    );
+    assert_eq!(
+        usize::from(current6[0x3f] != 0) + 59,
+        current_join,
+        "current reader join must be self-described by inline Dept[59]"
+    );
+    assert_eq!(
+        usize::from(legacy6_plain[0x3f] != 0) + 59,
+        legacy_join,
+        "legacy reader join must be self-described by inline Dept[59]"
     );
     assert_eq!(
         current_dept, legacy_dept,

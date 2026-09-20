@@ -2641,6 +2641,32 @@ GBK文本特征。
   - inline 第60字节为0：把 continuation 接到 Dept index59，
     专门修复历史 profile 的 off-by-one/GBK split。
 
+继续追 reader 代际后，join59/60 的选择条件已经从“兼容分支”细化到机器码级。current
+`CEMSUsbRegsiter.dll::ReadSector6/sub_100152A0@0x1001566F..0x100156D6` 的实际流程是：
+
+1. marker 命中后，把 marker 后的 **0x3C=60B** 复制到局部 prefix；
+2. 读取 `prefix[0x3B]`，也就是第60个 inline byte / Dept[59]；
+3. 若该字节为0，LBA9+0x80 的0x80B continuation 写回 `Dept+0x3B`；
+4. 若非0，则写回 `Dept+0x3C`。
+
+所以这里没有隐藏 version/profile flag：wire image 自己用 inline 第60B是否为 NUL 决定接缝。
+
+更重要的是，本机 `VRV/cems/Edp/fileophook.dll` 与 `fileophook64.dll` 给出了更早一代
+reader。两者 PDB 分别落在
+`\\SVNRoot\\vrvrsms2.0\\Cems2.0\\trunk\\modCems\\Bin\\FileOpHook.pdb`
+和 `FileOpHook64.pdb`。旧32/64位机器码在 marker 分支中都先复制60B prefix，
+随后**不做 prefix[59] 分支，直接把 continuation 写到 prefix-base+0x3B**，即固定
+join=59。公开的2019 CEMS样本文件清单还把**同一产品目录路径**的
+`cems\\edp\\fileophook*.dll` 与
+`cems\\edp\\safeudisklabeltool\\cemsusbregsiter.dll` 放在同一软件包里；这只能作为
+CEMS2.0/EDP 产品线共包证据，**不能**证明该2019归档中的 hook 与本机2022编译的
+`FileVersion=1.0.0.11` 二进制哈希相同。
+
+因此 legacy join59 现在可以严格描述为 **CEMS2.0 旧代 canonical reader ABI**，
+而 current ydcc 通过 inline-NUL 自描述同时兼容59/60。仍缺的是同代
+`safeudisklabeltool\\cemsusbregsiter.dll` 的原始 writer 字节；没有 writer 之前不能把
+LBA6+0x3F 或 LBA9 continuation 误升 COMPLETE。
+
 严格22份完整 census：
 
 - 14/22 未触发 long-Dept marker；
