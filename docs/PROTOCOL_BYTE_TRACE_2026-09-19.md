@@ -525,7 +525,7 @@ DWARF 中恢复出的原始声明文件/行号与本地函数地址：
 | LBA9 | 0x07E–0x07F | COMPLETE | reverse[102..103] zero tail | `SetTempUse` 对 EETU +0x04..+0x7F 先整体清零，随后从 +0x18 只覆盖0x66B，即最后覆盖到 +0x7D；因此 +0x7E/+0x7F 在所有 current writer 路径都保留显式零初始化 | Linux `CheckTempUse` 只读取 ullBTime/ullETime/useCount，对 reverse[104] 完全无业务读取；运行时回写只修改 useCount 并保留其余字节 | 20/20原始EETU均为 `00 00`；CI门禁 `lba9_eetu_final_two_reverse_bytes_are_writer_zero_padding` | 2B 满足 explicit-zero producer + negative consumer + real-device evidence，可严格升 COMPLETE；不得把前102B一起升级 |
 | LBA9 | 0x100–0x103 | COMPLETE | SAPF magic | 旧writer恢复模板 | `UDiskLabelRepair::Repair0Sector` | 14样本 | 完成 |
 | LBA9 | 0x104–0x113 | COMPLETE | MBR恢复entry | writer保存16B entry | repair直接写回 LBA0 0x1BE | 14/14 | 完成 |
-| LBA9 | 0x114–0x11F | PARTIAL | SAPF decoded trailing/backing 12B / long-User continuation overlap | 历史 SAPF producer 尚未定位；SAPF reader `sub_10008550` 固定对 `+0x100..+0x11F` 32B 全部 `^0x88` 解码。另一方面 Windows `BuildSector6/sub_10013FD0`、Linux `BuildSector6@0x1CAAC` 与 `vrvaud_c::sub_10118ED0` 均在 User 长度>=32 时把 marker+前28B 写到 LBA6+0x50，并把 `User[28..NUL]` 写入 LBA9+0x100，因此该区存在与 SAPF 重叠的 current long-User profile | SAPF repair 的已确认行为只用 magic 与前16B MBR恢复项；`ReadSector6` 在 User marker 命中时又会从 LBA9+0x100 复制完整0x80B回 `UsbLabelParam.m_usbowner[27/28..]`，支持 legacy join=27 与 current join=28 | 14份真实SAPF中该12B至少5种 decoded profile；严格22盘未出现 User>=32 的正向 continuation 样本 | SAPF 与 long-User continuation 是同一物理区的不同 profile。long-User current producer/consumer已知但缺实盘；SAPF尾12B又缺历史 producer/独立语义，故继续PARTIAL |
+| LBA9 | 0x114–0x11F | PARTIAL | SAPF decoded trailing/backing 12B / long-User continuation overlap | 历史 SAPF producer 尚未定位；SAPF reader `sub_10008550` 固定对 `+0x100..+0x11F` 32B 全部 `^0x88` 解码。另一方面 Windows `BuildSector6/sub_10013FD0`、Linux `BuildSector6@0x1CAAC` 与 `vrvaud_c::sub_10118ED0` 均在 User 长度>=32 时把 marker+前28B 写到 LBA6+0x50，并把 `User[28..NUL]` 写入 LBA9+0x100，因此该区存在与 SAPF 重叠的 current long-User profile | `sub_10008550` 会 structural-copy 完整32B；其上层双SAPF副本一致性检查只比较 decoded `+0x04/+0x08/+0x0C/+0x10` 的 MBR boot flag/type/start/size，`sub_10008620` 恢复 LBA0 时也只写回 `+0x04..+0x13` 的16B partition entry，明确不消费尾12B。`vrvaud_c` 两条快速路径只检查4B magic。`ReadSector6` 在 User marker 命中时另会从 LBA9+0x100 复制完整0x80B回 `UsbLabelParam.m_usbowner[27/28..]` | 14份真实SAPF中该12B至少5种 decoded profile；严格22盘未出现 User>=32 的正向 continuation 样本 | SAPF尾12B已有 structural-copy/negative-semantic-consumer 闭合，但缺历史 producer；long-User current producer/consumer已知但缺实盘。两profile共用物理区，因此继续PARTIAL |
 | LBA9 | 0x120–0x17F | PARTIAL | post-SAPF region / long-User continuation remainder | Windows/Linux/vrvaud 三套 current `BuildSector6` 在 User>=32 时可由 `User[28..NUL]` 连续写到 LBA9+0x100..，最大可覆盖到+0x17F；若不触发该长User profile，则注册路径保留既有 backing。运行时 `SetTempUse` 与 `SetPassInfoEx` 不覆盖这96B | `ReadSector6` 的 User-marker 分支会把 LBA9+0x100 起完整0x80B复制回 owner continuation；SAPF reader只到+0x11F，不解释+0x120..+0x17F | 严格22盘没有长User正向样本；14/14 SAPF盘该96B全零，独立SanDisk亦零 | 旧“current纯preserve/ignore”结论已纠正；这里是可选 long-User continuation + otherwise preserve 的多profile区。缺真实长User样本且可能承接其它历史 backing，继续PARTIAL |
 | LBA9 | 0x180–0x183 | COMPLETE | EPPE magic | `SetPassInfoEx` | `ReadPassExInfo` | 6样本 | 完成 |
 | LBA9 | 0x184–0x187 | COMPLETE | minimum password length | writer限制6..19 | `ReadMinPassLenInfo` 返回该DWORD | 6/6=8 | 完成 |
@@ -1916,10 +1916,18 @@ CDiskReader::DecryptFileKey
 - `usbtoolBusManage.dll::UsbtoolBusMgrInter::LabelInfo::Print` 把 `LabelInfo+0x7E8` 明确打印为 `crypt=%d`，因此底层请求字段已经有上层业务名 `crypt`；
 - 制标 UI 的 `tabAlgorithmComboBox` 实际加入 `SMS4`、`AES`、`AES_CROSS` 三项并默认 index=0；`currentIndex()` 在 `0x467270..0x467282` 直接写入策略对象 `normalDetail+0x44`，日志字段名为 `normalDetail.algorithm`。
 
-但这里必须保留一条边界：当前尚未定位到 `normalDetail.algorithm` 到
-`LabelInfo.crypt(+0x7E8)` 的**直接序列化/复制点**。因此可以确认 UI 与底层 writer
-两端都真实支持三算法，也可以确认底层 crypt 字段可达 mode1/mode3；但还不能把
-`UI index 0/1/2 -> crypt 0/1/2` 当成已闭合的数据流。后续应继续追这一个桥接点。
+此前保留的 UI 桥接缺口现已由同一 `cemssafeudisklabeltool.exe` 直接闭合：
+`tabAlgorithmComboBox::currentIndex()` 写 `normalDetail+0x44`；`sub_42E8E0` 随后执行
+`LabelInfo.crypt(+0x7E8) = normalDetail.algorithm(+0x44)`，反向 `sub_42EC90` 又执行
+`normalDetail.algorithm(+0x44) = LabelInfo.crypt(+0x7E8)`。组合框初始化汇编 `0x47780F..0x47788C`
+构造 `AES_CROSS/AES/SMS4` 后按栈顶实参顺序向 QStringList 实际 append
+`SMS4 -> AES -> AES_CROSS`，并 `setCurrentIndex(0)`。因此数据流精确为：
+
+- `SMS4(index0) -> crypt0 -> EncryptMode=2`；
+- `AES(index1) -> crypt1 -> EncryptMode=1`；
+- `AES_CROSS(index2) -> crypt2 -> EncryptMode=3`。
+
+UI、normalDetail、LabelInfo 与 CreatePartitions 的三档 mode 分派现已成为连续可验证数据流。
 
 mode1 的关键固定关系：
 
@@ -1956,16 +1964,17 @@ reader 只有一个标准SM4解包分支且完全不读取 `oldSM4` 配置。
 所以它只是实现选择，不改变盘面格式。
 
 因此 `+0x38..+0x47` 整体仍记 **PARTIAL**，但剩余原因已收缩为：
-**22份原始盘没有 mode1/mode3 的正向样本，且 UI `normalDetail.algorithm` 到底层
-`LabelInfo.crypt` 的直接桥接点尚未定位**。当前44条加密entry全部mode2。
-严格完成度统计仍不增加 16B×3，避免用静态算法闭合替代真实盘证据。
+**22份原始盘没有 mode1/mode3 的正向样本**。当前44条加密entry全部mode2；
+UI→crypt→EncryptMode 的桥接和数值映射已经闭合。严格完成度统计仍不增加
+16B×3，避免用静态算法闭合替代真实盘证据。
 
-扩展历史语料也按正确 device-id 重跑，而不是把缺身份时的 A6B0 RAW 输出
-误当解码结果：`utils/backup` 的 `.meta.json` 侧车提供 device-id，
-`nopwd_tool/backup` 则由文件名携带 device-id。两组共得到52份可验证 EDPF
-捕获，按整份前部快照 SHA-256 去重后为33份；其中25份 mode tuple 为
-`0,2,2`，8份为 `2,2,0`，仍然没有 mode1/mode3。该扩展扫描包含历史/转换
-状态，只用作“本地语料尚无正样本”的负证据，不并入22份严格原始盘计数，
+扩展历史语料又改成**完全不依赖 device-id 文件名或 sidecar**的只读 census：
+对 `/Users/zhangyuxi/Desktop/u_disk` 下3896个至少13扇区、至多1GiB的候选，先以固定
+LBA6 rolling key 解出 `m_crcUsbID[0]@+0x100`；该 DWORD 就是
+`CRC32(device_id)`，可直接作为 LBA12 A6B0 key。只计解密后 entry0=`EDPF`、
+entry count=1..3 且所有0x60-stride entry magic有效者。最终得到58份有效捕获：
+49份 mode tuple=`[0,2,2]`，9份=`[2,2]`，**mode1/mode3仍为0**。
+该扩展集合含历史/转换状态，只作为 profile 搜索负证据，不并入22份 strict originals，
 也不提高完成度。
 
 ### 6.3 LBA12 +0x48..+0x5F：扩展 key-material 与 Reserved[7] 必须分开

@@ -2360,9 +2360,24 @@ mode1/mode2，没有 mode3 分支。这是组件能力差异，不应把 mode3
   `normalDetail+0x44`；策略日志把该字节命名为
   `normalDetail.algorithm`。
 
-因此底层 `crypt` 字段与 writer mode1/mode3 的**可达性**已经闭合。
-但当前还没有定位到 `normalDetail.algorithm` → `LabelInfo.crypt(+0x7E8)`
-的直接序列化/复制点，不能把 UI index 与底层 crypt 值的对应关系提前写死。
+继续回到 `cemssafeudisklabeltool.exe` 的实际请求转换链后，UI 到底层 `crypt` 的
+桥接也已经直接闭合，不再需要靠字段名相似推断：
+
+- `WriteLabel` 从 `tabAlgorithmComboBox::currentIndex()` 直接写 `normalDetail+0x44`；
+- `sub_42E8E0(normalDetail, LabelInfo)` 在 `0x42E8E0` 的转换链中明确执行
+  `LabelInfo+0x7E8 = normalDetail+0x44`；反向 `sub_42EC90` 又执行
+  `normalDetail+0x44 = LabelInfo+0x7E8`，证明这是同一个正式字段的双向映射；
+- `QComboBox` 初始化汇编 `0x47780F..0x47788C` 先构造 `AES_CROSS/AES/SMS4`，
+  但传给 `QStringList` 时按栈顶顺序实际依次 append `SMS4 -> AES -> AES_CROSS`，
+  随后 `setCurrentIndex(0)`；因此 UI index 0/1/2 精确对应
+  `crypt=0/1/2`；
+- 结合 `WriteNormalULabel` 已确认的分派：`crypt=1 -> mode1`、
+  `crypt=2 -> mode3`、其它（含默认0）`-> mode2`，最终得到
+  **SMS4(index0) -> EncryptMode=2，AES(index1) -> mode1，
+  AES_CROSS(index2) -> mode3**。
+
+因此底层 `crypt`、UI `normalDetail.algorithm`、`LabelInfo+0x7E8` 与 writer
+mode1/2/3 的可达性/数值映射现在全部闭合。
 
 22份 original real-device reference set 中：
 
@@ -2370,19 +2385,28 @@ mode1/mode2，没有 mode3 分支。这是组件能力差异，不应把 mode3
 - mode1 正向样本：**0**；
 - mode3 正向样本：**0**。
 
-为排除“旧备份里其实已有正例但因 device-id 缺失而被漏解”的可能，本轮又对
-`utils/backup` 与 `nopwd_tool/backup` 做扩展只读复核：前者严格使用同名
-`.meta.json` 的 device-id，后者使用文件名身份，只有解密后 `EDPF` magic
-成立的捕获才计入。共52份有效捕获、33个不同整文件 SHA-256；去重后
-25份 mode tuple=`0,2,2`，8份=`2,2,0`，mode1/mode3仍为0。这里包含
-历史和转换状态，不扩大22份 strict-original reference set，也不能替代正向
-real-device evidence。
+为排除“旧备份里其实已有正例但因 device-id 缺失而被漏解”的可能，先前已对
+`utils/backup` 与 `nopwd_tool/backup` 做过基于文件名/`.meta.json` 身份的复核。
+本轮进一步取消这个依赖：对 `/Users/zhangyuxi/Desktop/u_disk` 下所有大小至少13扇区、
+不超过1GiB的文件做只读 census，共扫描 **3896** 个候选。每个候选先用固定 LBA6
+rolling key 解出 `LBA6+0x100 m_crcUsbID[0]`；这个 DWORD 本身就是
+`CRC32(device_id)`，可直接作为 LBA12 A6B0 key，因此即使文件名和 sidecar 完全没有
+device-id 也能独立尝试解 LBA12。只把解密后 entry0 magic=`EDPF`、entry count=1..3
+且每条0x60-stride entry magic均有效的捕获纳入统计。结果为：
 
-所以 `+0x38..+0x47` 目前的剩余缺口已经从“算法/分支不明”收缩为：
-**mode1/mode3 缺真实正向盘样本，同时 UI algorithm 到 LabelInfo.crypt 的
-中间桥接点尚未定位**。严格规则要求 producer + consumer +
-real-device evidence 三者都存在，因此这16B仍保持 PARTIAL，
-完成度数字不增加；但 `oldSM4` 不再作为未解释 wire profile。
+- **58** 份有效 EDPF 捕获；
+- 49份 mode tuple=`[0,2,2]`；
+- 9份 mode tuple=`[2,2]`；
+- **mode1/mode3 命中仍为0**。
+
+这批58份包含历史和转换状态，只用于扩大 profile 搜索，不扩大22份 strict-original
+reference set，也不能替代缺失的正向 mode1/mode3 real-device evidence。
+
+所以 `+0x38..+0x47` 目前的剩余缺口已经只剩：
+**mode1/mode3 缺真实正向盘样本**。producer、consumer、算法、UI选择项、
+`normalDetail.algorithm -> LabelInfo.crypt` 桥接以及最终 mode 数值映射都已闭合。
+严格规则要求 producer + consumer + real-device evidence 三者都存在，因此这16B
+仍保持 PARTIAL，完成度数字不增加；`oldSM4` 也不再作为未解释 wire profile。
 
 ### LBA9/LBA10 的非零形态
 
@@ -2597,9 +2621,14 @@ producer。因此该128B继续 **PARTIAL**；blocker 已缩小为
 - 同一硬件/profile 可重复稳定出现同一组尾值。
 
 这些12B不匹配同盘 LBA0 disk signature，也不匹配当前 MBR partition entry。
-现有修复行为只闭合到 SAPF magic + 16B恢复项，没有这12B的独立业务消费。
-因此它们从 UNKNOWN 降为 **PARTIAL**，并明确标记为
-`SAPF decoded trailing/backing bytes`；禁止再按“全零 reserved”处理。
+本轮继续把 repair consumer 精确到字段级：`sub_10008550` 会把整个32B SAPF
+解码并返回；其上层双副本一致性检查只比较 decoded `+0x04/+0x08/+0x0C/+0x10`
+对应的 MBR boot flag、partition type、start LBA、size，完全不比较 `+0x14..+0x1F`；
+真正重建 LBA0 的 `sub_10008620` 也只把 SAPF `+0x04..+0x13` 这16B partition entry
+写回 MBR `+0x1BE`。`vrvaud_c` 的两条快速路径更只解码/检查 `SAPF` magic 4B。
+因此这12B现在已有明确的 **structural-copy / negative-semantic-consumer** 证据；但历史
+SAPF producer 仍未定位，且实盘存在至少5种非零 backing profile，所以仍保持 **PARTIAL**，
+标记为 `SAPF decoded trailing/backing bytes`，禁止按“全零 reserved”处理。
 
 #### SAPF 后 `+0x120..+0x17F`：long-User continuation / preserve 复用区
 
