@@ -1030,6 +1030,12 @@ fn lba6_gserial_and_beizhu_semantic_prefixes_stop_before_profile_underlay() {
         let beizhu = &plain[0x1d0..0x1e0];
 
         assert_eq!(
+            &plain[0x1ee..0x1f0],
+            &[0, 0],
+            "legacy/current MBR entry4 prefix must remain zero: {name}"
+        );
+
+        assert_eq!(
             gserial[15], 0,
             "BuildSector6 must keep the dedicated GSerial slot terminator byte zero: {name}"
         );

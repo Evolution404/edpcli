@@ -3632,7 +3632,7 @@ profiles 的该边界，而不是把字符串具体值硬编码成未来协议�
 | 3 | 0B | 512B | 0B | 0% | EDP 注册 writer 对整扇 preserve-existing，当前 Windows/Linux EDP reader 不解析；22份原始盘为21零+1 Kingston MP payload，但厂商 producer/固件 consumer 未闭合 |
 | 4 | 483B | 29B | 0B | 94.3% | onlyid clear header、OnlyIdXor8、LLGB 双锚点与固定restore metadata完成；`+0x047..+0x1FB` 437B 已由 first-party full/null writer 动态证明为 unowned backing 的“可逆 rolling transform / byte-preserve”双表示，并由 official reader negative-consumer 闭合。剩余29B仅为 `OnllyID2Nd`4B、HSerialCRC20B、MyHardinfo4B、`bDataToServer`1B |
 | 5 | 512B | 0B | 0B | 100% | 两版 EdpDiskCtrl 均只对 LBA5 执行“读整扇→原样写回→检查 ERROR_WRITE_PROTECT(0x13)”；当前注册 writer 读取既有13扇区后不重建 LBA5，因此 preserve existing bytes；22/22原始盘全零 |
-| 6 | 495B | 17B | 0B | 96.7% | 固定16B GSerial/BeiZhu 槽已按动态 C-string/backing 生命周期继续闭合：official Windows BuildSector6 虚拟执行分别把短 GSerial post-NUL source backing 设为 `A5×6`、空 BeiZhu backing 设为 `5A×14`，盘面原样保留，而 reader 只消费首NUL前正文；legacy MBR几何残值因此只是历史 backing provenance，不是第二业务字段。连同两个 fixed byte15 NUL，20B+2B均已闭合。当前仅剩 Dept join59末字节1B与 legacy MBR fragment16B 共17B |
+| 6 | 497B | 15B | 0B | 97.1% | GSerial/BeiZhu动态槽已闭合；继续把旧 MBR underlay 拆分后，`+0x1EE..+0x1EF` 已进入未使用 entry4 的 status/start-head，current模板与22份 checksum-valid历史 front 均为 `00 00`，reader无独立消费，因此2B升COMPLETE。当前仅剩 Dept join59末字节1B与 legacy MBR entry3 fragment14B |
 | 7 | 512B | 0B | 0B | 100.0% | 3×Version、entry1/entry2 NeedDisturb 已按 compatibility metadata 生命周期闭合；最后两个 BackupPromptPeriod BYTE 又由正式 DWARF 字段、current-zero producer、四代 Windows + Linux structural-preserve/negative semantic consumer、跨 v0x0064/v0x0206 实盘0/0 profile 闭合为 dormant compatibility fields。LBA7 至此整扇 COMPLETE |
 | 8 | 492B | 20B | 0B | 96.1% | header 与动态body既有闭环保持；本轮又把 `UsbOnlyInfo` 后16B按 current/2020固定16字符writer + header零初始化 + strict legacy absent-zero + runtime negative/structural consumer 闭合为终止NUL/zero suffix。只剩 HDSerialInfo 4B 与 UsbOnlyInfo 前16B identity text继续PARTIAL |
 | 9 | 384B | 128B | 0B | 75.0% | EETU/EPPE与 long-User 已闭合；SAPF `+0x114..+0x11F` 12B 又按 profile-overlap 完成：SAPF下是多形态 unowned trailing backing，repair/一致性逻辑明确不消费；long-User下是 first-party writer→reader 已闭合的 active continuation。因此当前只剩 long-Dept `+0x080..0x0FF` 128B PARTIAL |
@@ -3642,8 +3642,8 @@ profiles 的该边界，而不是把字符串具体值硬编码成未来协议�
 
 总计：
 
-- **完成：5550B / 6656B = 83.4%**
-- **部分已知：1106B / 6656B = 16.6%**
+- **完成：5552B / 6656B = 83.4%**
+- **部分已知：1104B / 6656B = 16.6%**
 - **未知：0B / 6656B = 0.0%**
 
 这是一组**严格下限**，故意宁可低估，不把“能生成/能解析”冒充成“已经完全理解”。
@@ -3657,7 +3657,7 @@ profiles 的该边界，而不是把字符串具体值硬编码成未来协议�
 | 3 | 外部制造区部分闭合 | 21/22 全零，1 份 Kingston MP payload；官方 EDP 注册链原样保留且当前 reader 不解析，厂商生成/消费语义仍未知 |
 | 4 | 高度闭合 | 483/512 COMPLETE。`+0x047..+0x1FB` 已闭合为 unowned backing / representation carrier：full branch 可逆rolling existing bytes，NULL branch 原样preserve，reader只返回0x2F node且semantic-ignore backing；real raw-zero/rolling-zero与任意非零virtual正例均已覆盖。只剩 second key/HSerial/MyHardinfo/第一server flag 共29B PARTIAL |
 | 5 | canonical 已知 | opaque preserve / 写保护探测 scratch；当前 22/22 全零，但零不是协议固定要求 |
-| 6 | 高度闭合 | 整扇已无 UNKNOWN，495/512 COMPLETE。GSerial/BeiZhu 两个16B固定槽已全部按“首NUL前正文 / post-NUL caller-owned backing / byte15 builder-owned NUL”动态状态机闭合，并有 first-party nonzero-backing 正向fixture；legacy MBR残值仅作为 backing provenance 保留。剩余17B仅为 Dept join59末字节1B与 `+0x1E0..1EF` legacy MBR fragment16B |
+| 6 | 高度闭合 | 整扇已无 UNKNOWN，497/512 COMPLETE。两个固定字符串槽已完全闭合；legacy MBR underlay 的 entry4 前2B又按跨 current/legacy universal zero 闭合。剩余15B仅为 Dept join59末字节1B与 `+0x1E0..1ED` legacy MBR entry3 snapshot14B |
 | 7 | 完全闭合 | 物理0x40 packed ABI、PartionCount、rolling XOR、entry0 NeedDisturb MBR gate、v0x0064 legacy wrapped8、3×Version/entry1+2 NeedDisturb compatibility metadata、`bNoUsbChkPasSafe` SAFE6 policy 行为链及最后两个 dormant BackupPromptPeriod compatibility BYTE 均已闭合；512/512 COMPLETE |
 | 8 | 高度闭合 | **LBA8 dynamic ELABEL + encrypted backing + preserved tail** 已闭合：17-key wire template 中7键由注册侧 Windows/Linux reader回填，运行时 EdpEDiskCtrl reader 则解析全部17键；NUL后块内既有backing随动态前缀加密，块外tail原样preserve。384B动态区已COMPLETE；当前只剩 HDSerialInfo 4B 与 legacy UsbOnlyInfo 32B PARTIAL |
 | 9 | 高度闭合 | 384/512 COMPLETE。SAPF trailing 12B 已按“SAPF unowned backing / long-User active continuation”双 profile 闭合：SAPF reader/repair只消费magic+16B MBR恢复项，真实tail多形态；long-User最大profile又直接覆盖该物理区并round-trip。现在唯一剩余128B是 long-Dept continuation，blocker仅 legacy join59 writer |
