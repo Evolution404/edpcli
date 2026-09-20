@@ -1167,8 +1167,11 @@ legacy producer/派生公式与最终行为语义。剩余36B仍保持PARTIAL。
 - 同一 writer 随后直接在 `+0x1E UsbOnlyInfo[32]` 上执行
   `wsprintf("%08x%08x", caller_dword, hd_serial_info)`；因此 2020 这一代明确存在
   **HDSerialInfo非零 + UsbOnlyInfo第二DWORD复写同一值** 的过渡 profile。
-- 本机两套独立 `DeviceNumber.dll` 对对应 ordinal 的命名保持一致：
-  `EDP_DiskNumber` / `EDP_DeviceNumber`。两代 `EDP_DiskNumber` 的机器码也同构：
+- 本机 `UsbTools.dll` 的导出表把 **ordinal4 精确命名为 `EDP_DiskNumber`、ordinal3
+  精确命名为 `EDP_DeviceNumber`**；两个导出又分别是纯 thunk，跳到
+  `DeviceNumber.dll` 的 ordinal3 / ordinal1。这里必须区分两层 DLL 的 ordinal：
+  `UsbTools` 是4/3，`DeviceNumber` 自己是3/1，旧文档把“语义映射”和“ordinal编号”
+  混成一句的写法已纠正。两代 `EDP_DiskNumber` 的机器码同构：
   枚举 `PhysicalDrive0..3`，通过 `SMART_RCV_DRIVE_DATA(0x7C088)` 下发 ATA
   `IDENTIFY DEVICE(0xEC)`，取 words10..19 的20B Serial Number；每16-bit word交换字节、
   裁剪首尾ASCII空格，读取失败或20B全零 serial 跳过，其余按物理盘序号**无分隔拼接**。
@@ -1180,6 +1183,35 @@ EDP_DiskNumber = CRC32(serial_PhysicalDrive0 || serial_PhysicalDrive1 || ...)
 ```
 
   这里每个 `serial` 都是上述 ATA 规范化后的 C-string，失败/全零盘不参与。
+- ordinal3 fallback `EDP_DeviceNumber` 也已继续闭合到可执行公式。2008
+  `DeviceNumber.dll::EDP_DeviceNumber@0x10011E00` 使用同一个 stringstream 和同一个
+  CRC32 helper：每个有效物理盘的规范化 ATA serial 仍按盘号无分隔写入主 stream；
+  随后调用 `fcn_10014120(out, 1)` 获取 MAC 身份串，并通过
+  `0x10010E70 = ostream << std::string` 把整串原样追加。mode=1 的跳表只走 MAC
+  分支，不序列化 IP：adapter description 先转大写，VMware virtual adapter 由同时命中
+  `VIRTUAL` 与 `VMWARE` 的路径排除，MAC 全零也跳过；接受的6B MAC 用 formatter
+  style=4 输出为12位**大写、无冒号、无连字符**十六进制。序列化格式为：
+
+```text
+MACAddress0=AABBCCDDEEFF\r\n
+MACAddress1=001122334455\r\n
+...
+MACCount=N\r\n
+```
+
+  index 从0递增；没有有效 MAC 时该 helper 返回空串。因此 fallback 可写成：
+
+```text
+EDP_DeviceNumber = CRC32(
+    normalized_ATA_serials_without_delimiters ||
+    MACAddress_lines || "MACCount=" || decimal(N) || "\r\n"
+)
+```
+
+  CRC 仍是 reflected poly `0xEDB88320`、initial=0。`0x10010C60` 已由实现行为锁为
+  `ostream << const char*`，`0x10010E70` 为 `ostream << std::string`，而整数 index/count
+  通过 `0x10011250` 写入并以 `ret 4` 消费参数；所以这不是根据字符串常量猜出的模板，
+  而是已沿调用栈闭合的真实序列化顺序。
 - 另取得并核验 2020 `EdpEDiskCtrl.dll` v3.6.10.18，MD5
   `95a06e0d466ba40a7d5c0e6a409e2114`。其 `ReadOrgInfoSector@0x1000C870`
   已经完整复制 `HDSerialInfo@+0x14` 与32B `UsbOnlyInfo@+0x1E`，反证“旧 reader 只有4B
@@ -1200,8 +1232,9 @@ EDP_DiskNumber = CRC32(serial_PhysicalDrive0 || serial_PhysicalDrive1 || ...)
 
 这批证据闭合了一个真实非零 producer family、`EDP_DiskNumber` 的主算法以及 2020 runtime 的
 negative value-consumer 行为，但**尚未找到能生成 strict legacy 第1种组合的更早 exact writer**，
-也未恢复 ordinal3 fallback `EDP_DeviceNumber` 的完整输入公式。因此 `HDSerialInfo` 4B 与
-`UsbOnlyInfo[32]` 32B 均继续 PARTIAL，LBA8 仍为 **476 COMPLETE / 36 PARTIAL**。
+ordinal3 fallback `EDP_DeviceNumber` 的完整输入公式现已补齐；但**尚未找到能生成 strict
+legacy 第1种组合的更早 exact writer / profile selection**。因此 `HDSerialInfo` 4B 与
+`UsbOnlyInfo[32]` 32B 仍继续 PARTIAL，LBA8 仍为 **476 COMPLETE / 36 PARTIAL**。
 
 ### LBA11：`DRKB + random252`，VID/PID 是 4 字符 ASCII
 

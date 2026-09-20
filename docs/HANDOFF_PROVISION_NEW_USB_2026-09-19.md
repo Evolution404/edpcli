@@ -172,11 +172,17 @@ producer + 官方 consumer/行为 + 原始实盘验证**同时闭合，才能标
   (`95a06e0d466ba40a7d5c0e6a409e2114`) 与 `CEMSUsbRegsiter.dll` v19.11.4.1
   (`783d01f19e998a514834bc5e5f4249ad`)。后者的可达 `sub_10007DF0` 明确先调
   `UsbTools` ordinal4，0时fallback ordinal3，把结果写 `HDSerialInfo@+0x14`，并作为
-  `%08x%08x` 第二DWORD写入 `UsbOnlyInfo@+0x1E`。本机两代 `DeviceNumber.dll`
-  均把这两个ordinal稳定命名为 `EDP_DiskNumber/EDP_DeviceNumber`；两代主路径算法同构为：
+  `%08x%08x` 第二DWORD写入 `UsbOnlyInfo@+0x1E`。本机 `UsbTools.dll` 导出表现已精确
+  锁定 ordinal4=`EDP_DiskNumber`、ordinal3=`EDP_DeviceNumber`；二者分别 thunk 到
+  `DeviceNumber.dll` ordinal3/ordinal1，禁止再把两层DLL的ordinal编号混为一谈。主路径为：
   枚举PhysicalDrive0..3，ATA IDENTIFY取20B serial，word-swap+trim，跳过失败/全零，
   无分隔拼接后做标准CRC32(poly 0xEDB88320, initial=0)。因此已定位一个真实非零
   HDSerialInfo producer family。
+  fallback `EDP_DeviceNumber` 也已闭合：先无分隔追加同一批规范化 ATA serial，再追加
+  network helper mode=1 的 MAC 串；该模式跳过全零MAC及同时含 `VIRTUAL`+`VMWARE`
+  的 VMware virtual adapter，每条序列化为
+  `MACAddress<i>=<12位大写无分隔MAC>\r\n`，最后追加 `MACCount=N\r\n`，再用同一
+  reflected CRC32 求值。没有有效MAC时 network blob 为空。
   2020 runtime又提供negative-consumer硬证据：整DLL不导入DeviceNumber；标签读入后
   后续 direct-member 只消费结构前14B，唯一 `this+0x173C` 反而作为0x104B路径缓冲区被覆盖。
   但该2020 writer会同步生成非零 UsbOnlyInfo，与16份 strict legacy 原盘
@@ -359,7 +365,8 @@ producer + 官方 consumer/行为 + 原始实盘验证**同时闭合，才能标
    动态 ELABEL 384B 已闭合。`HDSerialInfo` 已找到2020非零 producer family及
    `EDP_DiskNumber=CRC32(规范化ATA serial无分隔拼接)` 主算法，2020 runtime也已证明不按值消费并会复用覆盖该槽；
    但该代同时写非零 UsbOnlyInfo，尚不能解释 strict legacy 的“HDSerialInfo非零 + UsbOnlyInfo全零”。
-   下一步只追更早 exact writer/profile selection，并补完 `EDP_DeviceNumber` fallback；不要把2020过渡profile冒充16份legacy生成源。
+   `EDP_DeviceNumber` fallback 已补完，且 `UsbTools` ordinal4/3 与 `DeviceNumber` ordinal3/1
+   两层 thunk 已纠偏。下一步只追更早 exact writer/profile selection；不要把2020过渡profile冒充16份legacy生成源。
 7. **LBA10 只剩 `+0x28..+0x7F` 88B**：`+0x04` 已闭合为
    `UsbSuspensionWnd lifecycle/control flag`，不要回退到“版本1/时间戳”或PARTIAL。
    两个16B卷标槽也已 COMPLETE。当前88B已有两套官方 UI zero producer、底层
