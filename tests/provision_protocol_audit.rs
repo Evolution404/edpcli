@@ -44,6 +44,8 @@ const LEXAR_JOIN59_LBA9_HEX: &str =
     include_str!("fixtures/protocol_evidence/lexar_join59_lba9.hex");
 const KINGSTON_20260803_MP_LBA3_HEX: &str =
     include_str!("fixtures/protocol_evidence/kingston_20260803_mp_profile_lba3.hex");
+const AIGO_L8302_NETAC_LBA0_PREFIX_HEX: &str =
+    include_str!("fixtures/protocol_evidence/aigo_l8302_netac_lba0_prefix.hex");
 
 fn parse_reference_backup_name(name: &str) -> Option<BackupMeta> {
     let meta = parse_backup_name(name)?;
@@ -1138,6 +1140,54 @@ fn lba0_bootstrap_profiles_are_zero_or_the_official_usb_main_bsec_prefix() {
         HashSet::from([0, 512]),
         "protocol fixtures must retain both absent and populated SectorSize overlay profiles"
     );
+}
+
+#[test]
+fn lba0_tail_of_bootstrap_body_is_profile_invariant_message_terminator_and_zero_padding() {
+    const LEGACY: &str =
+        "disk26_245760000_vid3535_pid6300_disk&ven_aigo&prod_u335&rev_pmap_onlyid1987718388_nopwd_20260916_233626.bin";
+
+    let legacy = load(LEGACY);
+    let legacy_lba0 = sector(&legacy, 0);
+    let netac_prefix = decode_hex_fixture(AIGO_L8302_NETAC_LBA0_PREFIX_HEX);
+
+    assert_eq!(netac_prefix.len(), 0x190);
+    assert_eq!(&legacy_lba0[0x163..0x17b], b"Missing operating system");
+    assert_eq!(legacy_lba0[0x17b], 0, "legacy third MBR error message lost its NUL terminator");
+    assert!(
+        legacy_lba0[0x17c..0x190].iter().all(|byte| *byte == 0),
+        "legacy UsbMainBSec tail padding changed"
+    );
+    assert!(
+        netac_prefix[0x17b..0x190].iter().all(|byte| *byte == 0),
+        "Aigo/Netac MBR template tail padding changed"
+    );
+
+    let mut current_zero = 0usize;
+    let mut legacy_template = 0usize;
+    for entry in fs::read_dir(FIXTURE_DIR).expect("protocol fixtures") {
+        let path = entry.expect("backup entry").path();
+        if path.extension().and_then(|ext| ext.to_str()) != Some("bin") {
+            continue;
+        }
+        let name = path.file_name().unwrap().to_str().unwrap();
+        if parse_reference_backup_name(name).is_none() {
+            continue;
+        }
+        let image = fs::read(&path).expect("fixture bytes");
+        let lba0 = sector(&image, 0);
+        assert!(
+            lba0[0x17b..0x190].iter().all(|byte| *byte == 0),
+            "known LBA0 profile changed the invariant +0x17B..+0x18F region: {name}"
+        );
+        if lba0[..0x190].iter().all(|byte| *byte == 0) {
+            current_zero += 1;
+        } else {
+            legacy_template += 1;
+        }
+    }
+    assert!(current_zero > 0, "lost current zero-bootstrap evidence");
+    assert!(legacy_template > 0, "lost legacy UsbMainBSec evidence");
 }
 
 #[test]
