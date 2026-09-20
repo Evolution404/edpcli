@@ -336,8 +336,14 @@ producer + 官方 consumer/行为 + 原始实盘验证**同时闭合，才能标
    继续目标是正式字段声明、非零历史 profile 或值相关 consumer，缺任一关键环节前
    不得把这88B机械升级为 reserved/COMPLETE。
 8. **LBA0 bootstrap / LBA1-LBA2 GPT 正样本**：LBA0分区表+55AA及3B legacy
-   message pointer 已闭合，
-   bootstrap 446B仍 PARTIAL。若能找到真实原始 GPT EDP 盘，可用于把 LBA1/LBA2
+   message pointer 已闭合。进一步确认 current `RegsiterUsb` 在最终13扇区写入前
+   无条件清零 `LBA0+0x000..0x18F`，`UDiskLabelRepair::ReCreate0Sector` current
+   新建路径也清零同一区；而多份 legacy 原盘前400B逐字节等于官方
+   `UsbMainBSec@0x100E7220`，SHA-256 =
+   `4eeee8d52f8b58d9a1fa35b63a14c8c5dba1b2717eaa44e6fb1ff0327ccbe5ed`。
+   另有 Aigo L8302 第三种特殊 bootstrap。**不要因此升级 COMPLETE**：仍需找到
+   historical template writer/profile 选择与 L8302 producer；SectorSize 等尾部consumer
+   也未闭合。若能找到真实原始 GPT EDP 盘，可用于把 LBA1/LBA2
    从 PARTIAL 继续细分；在此之前不得以 synthetic builder 输出冒充实盘证据。
 10. **LBA3 MP payload**：当前已明确 EDP 只 preserve/ignore；若继续追，目标应是
    真正厂商 MP producer/firmware consumer，而不是再证明 EDP 不使用它。

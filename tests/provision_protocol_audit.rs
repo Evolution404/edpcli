@@ -13,6 +13,7 @@ use edpcli::crypto::{a6b0_full, a7f0_full, crc32_bare, lba6_checksum, lba6_decod
 use edpcli::diskio::{parse_backup_name, BackupMeta};
 use edpcli::inspect::InspectMeta;
 use edpcli::metainfo::ownership_from_lba8;
+use edpcli::sha256::sha256_hex;
 use encoding_rs::GBK;
 
 fn load(name: &str) -> Vec<u8> {
@@ -1007,6 +1008,75 @@ fn lba0_legacy_mbr_message_pointer_bytes_have_only_template_or_cleared_profiles(
     assert!(
         cleared_profile > 0,
         "protocol fixtures must retain the cleared/preserve-existing profile"
+    );
+}
+
+#[test]
+fn lba0_bootstrap_profiles_are_zero_or_the_official_usb_main_bsec_prefix() {
+    const USB_MAIN_BSEC_PREFIX_SHA256: &str =
+        "4eeee8d52f8b58d9a1fa35b63a14c8c5dba1b2717eaa44e6fb1ff0327ccbe5ed";
+
+    let mut template_profile = 0usize;
+    let mut zero_profile = 0usize;
+    let mut checked = 0usize;
+
+    for entry in fs::read_dir(FIXTURE_DIR).expect("protocol fixtures") {
+        let path = entry.expect("backup entry").path();
+        if path.extension().and_then(|ext| ext.to_str()) != Some("bin") {
+            continue;
+        }
+        let name = path.file_name().unwrap().to_str().unwrap();
+        if parse_reference_backup_name(name).is_none() {
+            continue;
+        }
+
+        let image = fs::read(&path).expect("fixture bytes");
+        let lba0 = sector(&image, 0);
+        let prefix = &lba0[..0x190];
+
+        if prefix.iter().all(|byte| *byte == 0) {
+            zero_profile += 1;
+        } else {
+            assert_eq!(
+                sha256_hex(prefix),
+                USB_MAIN_BSEC_PREFIX_SHA256,
+                "unexpected non-zero LBA0 bootstrap profile in {name}"
+            );
+            template_profile += 1;
+        }
+
+        assert!(
+            lba0[0x190..0x1a0].iter().all(|byte| *byte == 0),
+            "unexpected LBA0 +0x190..+0x19f material in {name}"
+        );
+        assert!(
+            matches!(u32_le(lba0, 0x1a0), 0 | 512),
+            "unexpected LBA0 SectorSize profile in {name}: {}",
+            u32_le(lba0, 0x1a0)
+        );
+        assert!(
+            lba0[0x1a4..0x1b5].iter().all(|byte| *byte == 0),
+            "unexpected LBA0 +0x1a4..+0x1b4 material in {name}"
+        );
+        assert_eq!(
+            &lba0[0x1bc..0x1be],
+            &[0, 0],
+            "standard MBR reserved word changed in {name}"
+        );
+        checked += 1;
+    }
+
+    assert!(
+        checked >= MIN_PROTOCOL_FIXTURES,
+        "protocol audit unexpectedly lost LBA0 fixtures"
+    );
+    assert!(
+        template_profile > 0,
+        "protocol fixtures lost the official UsbMainBSec bootstrap profile"
+    );
+    assert!(
+        zero_profile > 0,
+        "protocol fixtures lost the current zero-bootstrap profile"
     );
 }
 

@@ -162,6 +162,8 @@ fn documentation_keeps_the_official_provisioning_chain_and_strict_rules() {
         "LBA12 EncryptFileKey32 compatibility slot structural-cache / negative-semantic-consumer closure",
         "old 72-byte ABI has no EncryptFileKey32 slot",
         "LBA0 legacy MBR message-pointer bytes",
+        "4eeee8d52f8b58d9a1fa35b63a14c8c5dba1b2717eaa44e6fb1ff0327ccbe5ed",
+        "lba0_bootstrap_profiles_are_zero_or_the_official_usb_main_bsec_prefix",
         "LBA7 packed 64-byte ABI versus Linux natural 72-byte ABI",
         "LBA7 v0x0064 packed legacy file-key wrapping",
         "Update_EDPEDISKSHOWPARAM",

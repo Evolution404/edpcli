@@ -2614,6 +2614,53 @@ CI 原始夹具同时保留两种 profile。零态表示该 legacy tail 不存�
 - `+0x1BC..+0x1BD`：当前官方模板和22盘均为0，但缺独立 consumer，
   仍不因全零而升级。
 
+### LBA0 bootstrap profile：current 0x190 清零与 legacy UsbMainBSec 模板已分型
+
+继续沿 current Windows 注册主链回溯后，LBA0 前400B已经不再只是“观察到有零态”。
+`CUsbRegsiter::RegsiterUsb` 在各 sector builder 与分区构造完成后、最终
+`WriteSectorData(..., count=0x0D)` 之前，**无条件**执行：
+
+```text
+memset(metadata + LBA0 + 0x000, 0, 0x190)
+```
+
+因此 current 注册 writer 对 `LBA0+0x000..+0x18F` 的正式输出就是 zero[400]。
+独立的 `UDiskLabelRepair.dll::CLabelRepair::ReCreate0Sector` 新建路径也在
+`sub_10003960` 中先清零同一0x190B，再清零0x40B MBR table 并重建分区项与
+`55 AA`。这两条独立官方路径把“current zero bootstrap”从样本现象升级为
+明确 producer 行为。
+
+另一方面，`cemsusbregsiter.dll` 自身保留正式静态
+`UsbMainBSec@0x100E7220`。对其前0x190B独立提取后的 SHA-256 为：
+
+```text
+4eeee8d52f8b58d9a1fa35b63a14c8c5dba1b2717eaa44e6fb1ff0327ccbe5ed
+```
+
+21份非转换 `nopwd_tool/backup` 原始完整快照重新聚类后，前400B只有三类：
+
+- 多份 legacy 原盘与上述 `UsbMainBSec` 前400B **逐字节完全一致**；
+- 多份 current 原盘为完整 zero[400]；
+- Aigo L8302 为单独的第三种 bootstrap profile（既非上述模板也非全零）。
+
+仓库 curated 原始协议夹具已经同时覆盖第一、第二类，并新增
+`lba0_bootstrap_profiles_are_zero_or_the_official_usb_main_bsec_prefix`
+回归门禁。该门禁还固定当前已观测的尾部边界：
+
+- `+0x190..+0x19F` 为零；
+- `+0x1A0..+0x1A3` 仅见 SectorSize = 0 或 512；
+- `+0x1A4..+0x1B4` 为零；
+- `+0x1B5..+0x1B7` 是已闭合的 legacy message-pointer；
+- `+0x1B8..+0x1BB` 是标准 MBR disk signature；
+- `+0x1BC..+0x1BD` 为零。
+
+这批证据**不增加严格 COMPLETE 字节数**。原因是：current zero producer 虽已闭合，
+标准 legacy template 的静态身份也已由多盘逐字节证实，但还没有定位到“哪一代官方
+注册/格式化 writer 将这400B template 写入 LBA0”的历史 producer，也没有解释
+Aigo L8302 第三种 bootstrap 的 producer/选择条件；尾部 SectorSize/reserved 的
+业务 consumer 也未全部闭合。因此 `+0x000..+0x1B4` 继续整体保持 PARTIAL，
+总计仍为 **3656B COMPLETE / 3000B PARTIAL**。
+
 ## 当前逐字节地图状态
 
 ### 严格完成口径（2026-09-19）
