@@ -29,6 +29,22 @@ single-build string residue. This strengthens the producer-family attribution al
 main protocol audit, but does not by itself identify the exact PS2307/PS2309 wire profile that
 produced the committed Kingston LBA3 sectors.
 
+## Negative boundary: MPALL `F2_MP_21` is configuration metadata, not LBA3 wire evidence
+
+Historical MPALL configuration examples independently place `F2_MP_21` under the INI section
+`[Parameter Mark]` as `Parameter Type=F2_MP_21`. One 2010 example uses
+`IC Type=PS2251-32`; a separate 2009 PS2231 case shows the same parameter-type spelling.
+Sources:
+
+- https://flashboot.ru/forum/index.php?topic=2549.0
+- https://flashboot.ru/forum/index.php?topic=2108.0
+
+Therefore strings such as `F2_MP_21` / `F2_MP_23` found inside MPALL executables are evidence
+for the tool's configuration/profile layer. They are **not** evidence that those ASCII values, or
+their numeric suffixes, occur in the host-visible LBA3 sector. In particular they must not be used
+to assign semantics to LBA3 `+0x020..+0x027` without an actual store/copy path into the F2 buffer
+and matching real-device bytes.
+
 ## Machine-code facts recovered in the previous local analysis session
 
 The v3.72.0B executable was obtained and inspected offline without executing the MP utility.
