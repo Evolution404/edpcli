@@ -461,7 +461,7 @@ DWARF 中恢复出的原始声明文件/行号与本地函数地址：
 | LBA0 | 0x1FE–0x1FF | COMPLETE | MBR 55AA | 官方模板直接写 `55 AA` | MBR 校验/修复链检查签名 | 22/22 | 完成 |
 | LBA1 | 0x000–0x1FF | PARTIAL | optional GPT_Header profile | Linux官方 `CLabelManage::BuildSector1_Gpt@diskfile.cpp:1458` 构造完整512B `GPT_Header`，计算 partition-table CRC 与 header CRC | Windows `IsAllowRegisterCommonLabel/sub_1002ab70` 在 protective MBR 命中后，以 sector_size 跳到 LBA1，检查 `EFI PART` 与 `header_lba@+0x18==1` | 22/22原始 SAFE6 参考整扇全零；另只读扫描本地 `u_disk` 下3896个大于13扇、低于1GiB的候选文件，LBA1 `+0x00` 均无 `EFI PART`，仍缺正向 GPT 实盘 | producer/consumer/结构已知，但当前真实参考与扩展本地捕获均未启用 GPT profile，因此不升 COMPLETE |
 | LBA2 | 0x000–0x1FF | PARTIAL | optional GPT partition-entry sector | Linux官方 `BuildSector2_Gpt@diskfile.cpp:1493` 生成128B `GPT_Partition` entry（type GUID/partition GUID/start/end/attr/name） | Windows GPT parser 从 `metadata+2*sector_size` 即 LBA2 起，按每扇4个×128B entry解析；注册检查可连续解析多扇 | 22/22原始 SAFE6 参考整扇全零；上述3896个扩展候选没有任何 LBA1 GPT header，故也没有可采信的对应 LBA2 正例 | GPT table用途和entry边界已知，但 profile 的实际已注册盘样本缺失，因此保持PARTIAL |
-| LBA3 | 0x000–0x1FF | PARTIAL | LBA3 opaque manufacturer/MP sector | Windows `CUsbRegsiter::RegsiterUsb` 先读完整13扇区，SAFE6注册链没有任何 LBA3 builder，最终整段13扇区写回，因此 LBA3 的 EDP producer 行为是 preserve-existing；Linux `libcemsfilesyscheck.so` 符号/实现同样不存在 `BuildSector3` | 当前 Windows 注册/登录/修复组件与 Linux `CLabelManage` 均未找到 `ReadSector3` 或 LBA3 payload 解析路径；这是 EDP 侧“忽略内容”的负证据，不等于已找到厂商固件消费者 | 22份原始参考独立复核：21/22全零；唯一 Kingston 非零盘在 `+0x001=01`、`+0x020..027=b5 7e 9c 45 00 80 00 14`、`+0x1F0..1FF="this is mp mark\\0"` 有内容；同 VID/PID 的另一 Kingston 原盘整扇为零 | 整扇边界和 EDP preserve/ignore 行为已确定，因此从 UNKNOWN 降为 PARTIAL；厂商 MP 工具真正 producer、字段定义及固件侧 consumer 未闭合，禁止升 COMPLETE |
+| LBA3 | 0x000–0x1FF | PARTIAL | LBA3 opaque manufacturer/MP sector | Windows `CUsbRegsiter::RegsiterUsb` 先读完整13扇区，SAFE6注册链没有任何 LBA3 builder，最终整段13扇区写回，因此 LBA3 的 EDP producer 行为是 preserve-existing；Linux `libcemsfilesyscheck.so` 符号/实现同样不存在 `BuildSector3` | 当前 Windows 注册/登录/修复组件与 Linux `CLabelManage` 均未找到 `ReadSector3` 或 LBA3 payload 解析路径；这是 EDP 侧“忽略内容”的负证据，不等于已找到厂商固件消费者 | 22份原始参考：21/22全零；唯一 strict Kingston 非零 profile 为 `+0x001=01`、`+0x020..027=b5 7e 9c 45 00 80 00 14`、`+0x1F0..1FF="this is mp mark\\0"`。扩展只读扫描两个备份目录60份 `.bin`，又发现2份逐字节相同的历史 Kingston profile：同样 `+0x001=01` 和尾 marker，但 `+0x020..027=a8 82 a4 22 00 20 02 16`；另有同型号全零 LBA3 | 至少两种非零 MP payload + 全零 profile，证明中间8B不是固定模板；EDP preserve/ignore 边界已闭合，但厂商 MP 工具真正 producer、字段定义及固件侧 consumer未闭合，禁止升 COMPLETE |
 | LBA4 | 0x000–0x017 | COMPLETE | `$$$onlyid$$$` clear header | 当前注册 writer 根据 main onlyid 格式化 | 识别/解码链从此恢复 onlyid | 22/22 | 完成 |
 | LBA4 | 0x018–0x01B | COMPLETE | OnlyIdXor8 | current writer: `main_onlyid ^ 0x88888888` | restore-info 读取该字段 | 22盘 current/legacy 可解 | 完成 |
 | LBA4 | 0x01C–0x01F | PARTIAL | OnllyID2Nd | **LBA4 current writer machine-code node layout**：Windows PE `RegsiterUsb@0x1003BBD1..0x1003BBD7` 直接执行 `node+0x04 = object+0x698`；后者已闭合为本次注册 main onlyid | Windows `sub_10015090` / Linux `ReadSector4` 解密后把完整 0x2F node 返回，但当前只强校验 `node+0x00`，未发现对第二 ID 的独立行为判断 | 6/22 current-style 样本 `OnllyID2Nd==main onlyid && HSerialCRC=0`；其余16份旧 profile 第二ID不同 | current producer 已闭合，legacy producer/consumer 仍缺失，保持PARTIAL |
@@ -576,8 +576,23 @@ Windows 当前注册、登录和修复组件也未发现 LBA3 payload 解析路�
   - 其它字节为零；
 - 同 VID/PID 的另一份 Kingston 原始盘 LBA3 仍为全零。
 
+本轮又把范围扩到 `nopwd_tool/backup` 与 `utils/backup` 两个目录的60份 `.bin`
+历史/真实快照做只读 census；该扩展集合包含历史/转换状态，只用于 profile 发现，
+不改变上述22份 strict generation reference 的计数。非零 LBA3 只有3份，并形成
+**两个不同的 MP payload profile**：2026-08-03 两份逐字节相同的 Kingston 快照
+使用 `+0x020..027=a8 82 a4 22 00 20 02 16`；strict 2026-09-03 Kingston 使用
+`+0x020..027=b5 7e 9c 45 00 80 00 14`。两类都保持 `+0x001=01` 和
+`+0x1F0..1FF="this is mp mark\\0"`，而同型号其它快照还存在整扇全零 profile。
+
+新增历史 profile 的原始 LBA3 SHA-256 为
+`a1e1961d4ab452b6a2f277ee2027c962ea8bed58c6b85f05da12b247a706580e`；仓库夹具
+`tests/fixtures/protocol_evidence/kingston_20260803_mp_profile_lba3.hex` 逐字节锁定。
+回归 `lba3_mp_marker_has_multiple_real_historical_payload_profiles` 明确要求两个
+marker profile 的中间8B不同，防止把任一单盘的值错升成全局固定模板。
+
 因此不能把 `this is mp mark` 单独建模成 EDP 字段，也不能把 21 个零样本解释成
-“协议规定全零”。LBA3 整扇从 UNKNOWN 移到 PARTIAL；在找到厂商 MP producer、
+“协议规定全零”，也不能把 `+0x020..+0x027` 建模成单一固定常量。LBA3 整扇从
+UNKNOWN 移到 PARTIAL；在找到厂商 MP producer、
 字段格式和实际 consumer 前，512B 中没有任何字节计入 COMPLETE。
 
 ### 4.1 LBA8 ElabOffset：2B 完整闭环

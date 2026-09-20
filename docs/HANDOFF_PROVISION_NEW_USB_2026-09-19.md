@@ -249,8 +249,13 @@ producer + 官方 consumer/行为 + 原始实盘验证**同时闭合，才能标
   已注册实盘保留 legacy bootstrap，以及制标上层何时选择 Netac Format 的 profile
   selection，因此443B PARTIAL 数不变。
 - **LBA3 = 整扇 PARTIAL**。
-  EDP 注册链只 preserve existing，当前 EDP reader 不解析；22盘 21零 + 1份
-  Kingston `this is mp mark\0` 制造 payload。厂商 MP producer/固件 consumer 未找到。
+  EDP 注册链只 preserve existing，当前 EDP reader 不解析；strict 22盘仍是21零 +
+  1份 Kingston `this is mp mark\0` 制造 payload。扩展只读扫描两个备份目录60份
+  `.bin` 后，又发现第二种真实历史 Kingston marker profile：两类均有
+  `+0x001=01` 与同一尾 marker，但 `+0x020..027` 分别为
+  `a8 82 a4 22 00 20 02 16` / `b5 7e 9c 45 00 80 00 14`；同型号还存在全零
+  profile。已加入独立512B证据夹具和差异回归，明确中间8B不是固定模板。
+  厂商 MP producer/字段格式/固件 consumer仍未找到，因此完成字节数不增加。
 - **LBA4 current writer layout 已闭合到机器码**：
   `OnllyID2Nd=main onlyid`，`HSerialCRC[5]` 来自对象五个 DWORD；
   当前 `WriteNormalULabel` 不填 `HDOnlySerial[5]`，所以 current profile 为0；

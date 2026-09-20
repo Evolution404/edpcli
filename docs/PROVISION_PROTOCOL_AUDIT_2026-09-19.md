@@ -18,7 +18,10 @@
 
 3. 当前提交样本中的空白扇区策略已经有真实样本证据，但“当前样本全零”不等于协议上永远保留。
    - LBA1、2、5：当前 22 份生成协议参考样本全部为全零。
-   - LBA3：21 份为全零；唯一非零样本带 Kingston 制造标记 `this is mp mark`，同型号另一真实样本仍为全零。
+   - LBA3：strict 22份中21份为全零、唯一非零样本带 Kingston 制造标记
+     `this is mp mark`；扩展历史备份又发现第二种 marker profile，二者
+     `+0x020..027` 不同，同型号也存在全零快照，因此不能把任一非零 profile
+     当成固定模板。
    - LBA10：21/22 全零；唯一非零样本就是独立 SanDisk 原始加密盘，前 0x80 经 A6B0 解密后为 `EESI`，后 0x180 物理全零。因此 LBA10 是可选设置扇区，不应继续命名为“保留扇区”。
    - 官方 `RegsiterUsb` 主路径中的 `0x0d` 已确认是 sector count=13；从 LBA0 开始连续读写，协议范围因此严格为 **LBA0–LBA12**。当前 backup / inspect / Provision / restore 都统一使用这 13 个扇区。
 
@@ -72,8 +75,28 @@ LBA3 payload consumer。这只能证明 EDP 当前组件**不解释**该扇区�
   `+0x1F0..1FF="this is mp mark\\0"`；
 - 同 VID/PID 的另一 Kingston 原盘整扇全零。
 
+随后对 `nopwd_tool/backup` 与 `utils/backup` 两个历史备份目录共60份 `.bin`
+做只读扩展扫描；该扩展集合包含历史/转换状态，只用于 profile census，不改变22份
+strict original generation reference 的计数。非零 LBA3 只有3份，并精确归成两类：
+
+- 2026-08-03 两份 Kingston 快照逐字节相同：`+0x001=01`、
+  `+0x020..027=a8 82 a4 22 00 20 02 16`、
+  `+0x1F0..1FF="this is mp mark\\0"`；
+- strict 2026-09-03 Kingston：`+0x001=01`、
+  `+0x020..027=b5 7e 9c 45 00 80 00 14`、尾 marker 相同；
+- 同型号其它快照还存在整扇 zero profile。
+
+因此至少存在 **两个非零 manufacturer/MP profile + 一个 zero profile**；尾 marker
+可以作为 MP payload 家族锚点，但中间8B绝不是固定常量。新增
+`tests/fixtures/protocol_evidence/kingston_20260803_mp_profile_lba3.hex`，其512B
+原始扇区 SHA-256 为
+`a1e1961d4ab452b6a2f277ee2027c962ea8bed58c6b85f05da12b247a706580e`，并以
+`lba3_mp_marker_has_multiple_real_historical_payload_profiles` 对两个真实 marker
+profile 做差异门禁。
+
 因此 LBA3 不能继续作为“完全不知道边界”的 UNKNOWN，也不能把尾部 ASCII
-误建模成一个独立 EDP 字段。本轮把整扇 512B 调整为 PARTIAL：
+误建模成一个独立 EDP 字段，更不能把某一份 `+0x020..027` 当成固定模板。本轮把
+整扇 512B 调整为 PARTIAL：
 **EDP preserve/ignore 边界已闭合，但制造端 producer、字段定义、固件 consumer
 缺失，所以 0B 可计 COMPLETE。**
 
@@ -2906,8 +2929,10 @@ ProvisionEntropy / ProvisionProfile 材料；纯 builder 只消费已经验证�
 tests/provision_protocol_audit.rs 固化以下事实：
 
 - canonical reserved sectors 的真实样本证据；
-- LBA3 唯一 Kingston MP 样本不仅有尾部 `this is mp mark`，还保留
-  `+0x001` 与 `+0x020..0x027` 的非零材料，防止以后把整扇误缩成一个字符串字段；
+- LBA3 strict Kingston MP 样本不仅有尾部 `this is mp mark`，还保留
+  `+0x001` 与 `+0x020..0x027` 的非零材料；新增历史 Kingston profile 具有相同
+  marker 但不同的 `+0x020..0x027`，防止以后把整扇误缩成字符串字段或把中间8B
+  错当成固定模板；
 - 同硬件身份存在不同 onlyid；
 - LBA12 tail 不是全局常量；
 - 全部真实样本的 LBA12 tail 均可由目标 device_id 纯生成；

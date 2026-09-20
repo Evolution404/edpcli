@@ -42,6 +42,8 @@ const LEXAR_JOIN59_LBA6_HEX: &str =
     include_str!("fixtures/protocol_evidence/lexar_join59_lba6.hex");
 const LEXAR_JOIN59_LBA9_HEX: &str =
     include_str!("fixtures/protocol_evidence/lexar_join59_lba9.hex");
+const KINGSTON_20260803_MP_LBA3_HEX: &str =
+    include_str!("fixtures/protocol_evidence/kingston_20260803_mp_profile_lba3.hex");
 
 fn parse_reference_backup_name(name: &str) -> Option<BackupMeta> {
     let meta = parse_backup_name(name)?;
@@ -1103,6 +1105,35 @@ fn lba3_manufacturing_payload_is_an_opaque_whole_sector_not_just_a_marker_string
             );
         }
     }
+}
+
+#[test]
+fn lba3_mp_marker_has_multiple_real_historical_payload_profiles() {
+    const STRICT_MARKED: &str =
+        "disk4_121110528_vid0951_pid1666_disk&ven_kingston&prod_datatraveler_3.0_onlyid2135149925_20260903_121319.bin";
+    let strict_image = load(STRICT_MARKED);
+    let strict_lba3 = sector(&strict_image, 3);
+    let historical_lba3 = decode_hex_fixture(KINGSTON_20260803_MP_LBA3_HEX);
+
+    assert_eq!(historical_lba3.len(), SECTOR);
+    assert_eq!(strict_lba3[0x001], 0x01);
+    assert_eq!(historical_lba3[0x001], 0x01);
+    assert_eq!(&strict_lba3[0x1f0..], b"this is mp mark\0");
+    assert_eq!(&historical_lba3[0x1f0..], b"this is mp mark\0");
+
+    assert_eq!(
+        &historical_lba3[0x020..0x028],
+        &[0xa8, 0x82, 0xa4, 0x22, 0x00, 0x20, 0x02, 0x16]
+    );
+    assert_eq!(
+        &strict_lba3[0x020..0x028],
+        &[0xb5, 0x7e, 0x9c, 0x45, 0x00, 0x80, 0x00, 0x14]
+    );
+    assert_ne!(
+        &historical_lba3[0x020..0x028],
+        &strict_lba3[0x020..0x028],
+        "MP marker must not collapse distinct manufacturer payload profiles into one fixed template"
+    );
 }
 
 #[test]
