@@ -388,7 +388,7 @@ post-XOR 写回 `+0x45/+0x46`。历史 raw-zero 实盘仅作为兼容读取 prof
 | LBA5 | 512 | 0 | 0 | 100.0% |
 | LBA6 | 300 | 212 | 0 | 58.6% |
 | LBA7 | 490 | 22 | 0 | 95.7% |
-| LBA8 | 92 | 420 | 0 | 18.0% |
+| LBA8 | 476 | 36 | 0 | 93.0% |
 | LBA9 | 54 | 458 | 0 | 10.5% |
 | LBA10 | 424 | 88 | 0 | 82.8% |
 | LBA11 | 512 | 0 | 0 | 100.0% |
@@ -397,8 +397,8 @@ post-XOR 写回 `+0x45/+0x46`。历史 raw-zero 实盘仅作为兼容读取 prof
 
 当前总计：
 
-- **COMPLETE：2883B / 6656B = 43.3%**
-- **PARTIAL：3773B / 6656B = 56.7%**
+- **COMPLETE：3267B / 6656B = 49.1%**
+- **PARTIAL：3389B / 6656B = 50.9%**
 - **UNKNOWN：0B / 6656B = 0.0%**
 
 LBA11 已完整闭合为 512B COMPLETE。此前卡住的后半 252B 不是“某型号盘偶尔使用
@@ -492,7 +492,7 @@ DWARF 中恢复出的原始声明文件/行号与本地函数地址：
 | LBA8 | 0x01E–0x03D | PARTIAL | UsbOnlyInfo[32] | current Windows `RegsiterUsb -> sub_100148d0` 明确以 main onlyid 执行 `sprintf("%08x%08x", onlyid,0)` 并写32B槽；Linux BuildSector8同构；legacy producer未定位 | semantic reader跳过该槽，raw reader仅 opaque 导出；最终历史 consumer未闭合 | 6/6 current identity匹配 `format("%08x%08x", main_onlyid_bits,0)`；16/16 legacy槽全零 | current producer已闭合，但存在明确 legacy wire profile且旧 producer未找到，因此32B继续PARTIAL |
 | LBA8 | 0x03E–0x03F | COMPLETE | ElabOffset | `BuildSector8@diskfile.cpp:805` 写 `0x0080`；官方结构 `tagEdpUsbLableInfo.ElabOffset@edpdiskglobal.h:413` | `ReadSector8@diskfile.cpp:1102` 读取 WORD 并用 `decoded+ElabOffset` 构造 ELABEL 字符串 | 22/22原始盘=0x80，且22/22都指向 `<ELABEL>`；CI真实夹具锁定 | 2B 寻址语义、producer、consumer、实盘全部闭合 |
 | LBA8 | 0x040–0x07F | COMPLETE | Reserverd[64] | Windows `sub_100148d0` 与 Linux `BuildSector8` 都先零初始化整个 header，再把未被其它赋值覆盖的 64B 原样复制到该区 | `ReadSector8(UsbLabelParam&)` 直接越过该区定位 `ElabOffset` 指向的 ELABEL；raw reader 仅原样导出，不赋予业务语义 | 22/22原始盘解密后64B全零；CI原始夹具锁定 | 官方结构名、零初始化 producer、negative consumer 和实盘全部闭合为 reserved-zero 区 |
-| LBA8 | 0x080–0x1FF | PARTIAL | dynamic ELABEL / encrypted block padding / preserved physical tail | Windows `sub_100148d0` 与 Linux `BuildSector8@0x1D602` 都从 `+0x80` 写 ELABEL，并按 `(logical_len / 16 + 1) * 16` 只加密动态前缀；即 logical_len 恰好16B对齐时仍额外加密一块以覆盖结尾 NUL。两端都**不清零输出扇区的剩余尾部**，current 注册链又是在预读既有13扇区的 backing 上重建，因此 `encrypted_len..` 是 preserve-existing 区 | `ReadSector8(UsbLabelParam&)` 依据 `ElabOffset/logical_len` 解析 ELABEL，不给动态尾部附加字段语义；edpcli inspect 只解密动态前缀并原样保留其后的物理字节；synthetic nonzero-tail 与 16B-aligned logical-length 两个回归分别锁定 tail-preserve 和“对齐长度仍多解一块” | 严格22份原始盘：`logical_end=0x148..0x183`，实际 encrypted prefix=`0x150..0x190`；所有观测尾部当前为零，但零不是协议要求；22/22正文均含17-key ELABEL | 旧账本按样本长度切出102B UNKNOWN 是错误的固定边界模型。协议边界是动态的：同一物理 offset 可随 ELABEL 长度成为正文/加密块padding/保留尾部；三类存储行为均已定界，所以整段384B统一为 PARTIAL、LBA8 不再有 UNKNOWN。inspect 已修正原先普通 round-up 在16B对齐时少解一块的边界错误；每个 ELABEL 键的最终业务 consumer 与历史动态 header profile 尚未全部闭合，故不升 COMPLETE |
+| LBA8 | 0x080–0x1FF | COMPLETE | **LBA8 dynamic ELABEL + encrypted backing + preserved tail** | Windows `sub_100148d0` 与 Linux `BuildSector8@0x1D602` 独立同构：都只把 17-key ELABEL+NUL 写到 `+0x80`，按 `(logical_len / 16 + 1) * 16` 对现有 LBA8 **原地**加密；两函数都不清 caller output。Windows `RegsiterUsb` 在此之前已先读完整13扇区到 `var_500`，再把旧 `LBA8` 指针直接传入 writer，因此 ELABEL NUL 后到 `encrypted_len` 的字节属于既有 backing、会随前缀一起加密，`encrypted_len..0x1FF` 则完全 preserve-existing | Windows `sub_10015820` 与 Linux `ReadSector8(UsbLabelParam&)` 独立只解析并回填同一 7-key 集合：`current semantic reader key set = Label/GLab/Dept/User/Autonum/Rmark/Unit`；`Indus/Orgcd/Org/Alarm/VOL0/1/2/VOLC0/1/2` 十个 wire compatibility 键均不被 semantic reader消费。NUL 后块内 backing 和块外 tail 同样不赋予字段语义；inspect 的 nonzero in-block backing、nonzero physical tail、16B-aligned extra-block 三个回归锁定兼容读取边界 | 严格22份原始盘：`logical_end=0x148..0x183`、encrypted prefix=`0x150..0x190`，22/22 正文均为同一17-key顺序且十个当前 ignored compatibility 键为空；committed original 门禁同时覆盖多个动态长度，并验证当前实盘 `ELABEL NUL 后到 encrypted_len 的字节属于既有 backing` 的观测值目前为零。所有观测物理 tail 也为零，但两者的零值都不是协议要求 | 384B 的动态状态机已逐类闭合：正文/终止NUL由writer拥有；块内剩余字节为 encrypted preserved backing；块外为 unencrypted preserved tail。7个语义键有双平台 consumer，10个兼容键有双平台 negative semantic consumer；实盘无已知 body/profile 分叉。因此整段384B升 COMPLETE；这不要求 backing/tail 恒零，未来非零值必须按边界原样保留 |
 | LBA9 | 0x000–0x003 | COMPLETE | EETU magic | `CUsbRegsiter::SetTempUse` 构造 `EETU`；`WriteTempUseInfo` 可运行时回写 | `ReadTempUseInfo` 必须校验 EETU magic | 20个非零LBA9原始样本 | 完成 |
 | LBA9 | 0x004–0x00B | COMPLETE | ullBTime | Windows `SetTempUse` 从开始时间字符串解析为64位值；空/短字符串保持0 | Linux `CheckTempUse` 与 `time(NULL)` 比较；非零且 now < ullBTime 时拒绝临时使用 | 20/20原始EETU=0；真实CI夹具回归 | 开始时间下界语义闭合，0表示不启用该下界 |
 | LBA9 | 0x00C–0x013 | COMPLETE | ullETime | Windows `SetTempUse` 从结束时间字符串解析为64位值；空/短字符串保持0 | `CheckTempUse` 与 `time(NULL)` 比较；非零且 now > ullETime 时拒绝临时使用 | 20/20原始EETU=0；真实CI夹具回归 | 结束时间上界语义闭合，0表示不启用该上界 |
@@ -1887,7 +1887,7 @@ reader 只有一个标准SM4解包分支且完全不读取 `oldSM4` 配置。
 3. **LBA6**：继续追 legacy MBR-underlay writer：已知 `0x1E0..0x1ED`
    是第3条 MBR entry 幸存区且与 LBA12 type4 对齐，下一步需要找到旧版
    “动态 MBR table -> BuildSector6” producer 或直接读取该 fragment 的 consumer。
-4. **LBA8**：为 17-key ELABEL 的每个业务字段找到最终消费者。
+4. **LBA8 header residual**：动态 `+0x080..0x1FF` 已按 7-key semantic reader + 10-key compatibility ignore + encrypted backing/preserve tail 完整闭合；继续追 `HDSerialInfo@+0x14` 与 `UsbOnlyInfo[32]@+0x1E` 的 legacy producer/consumer。
 5. **LBA9/10**：继续追 EETU `reverse[104]`、EESI `+0x04` 及
    `+0x28..` 未闭合区；EETU 时间/次数控制和两个16B EESI卷标槽已经完成。
 6. **LBA0/1/2/3**：继续从官方 `RegsiterUsb` 的模板/读取路径向前追；

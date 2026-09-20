@@ -520,6 +520,47 @@ fn lba8_preserves_nonzero_bytes_after_the_dynamic_encrypted_prefix() {
 }
 
 #[test]
+fn lba8_preserves_nonzero_backing_inside_the_last_encrypted_block() {
+    let device_id = "disk&ven_test&prod_llgb_inblock_backing";
+    let crc = crc32_bare(device_id.as_bytes());
+    let elabel = b"<ELABEL>GLab=SERIAL||Label=TEST!SAFE6||";
+    let logical_len = 0x80 + elabel.len();
+    let encrypted_len = (logical_len / 16 + 1) * 16;
+    assert!(encrypted_len > logical_len + 1);
+
+    let mut plain = vec![0u8; encrypted_len];
+    plain[..4].copy_from_slice(b"LLGB");
+    plain[4..8].copy_from_slice(&(logical_len as u32).to_le_bytes());
+    plain[8..12].copy_from_slice(&0x0100_0001u32.to_le_bytes());
+    plain[12..16].copy_from_slice(&0x222u32.to_le_bytes());
+    plain[0x3e..0x40].copy_from_slice(&0x80u16.to_le_bytes());
+    plain[0x80..logical_len].copy_from_slice(elabel);
+    plain[logical_len] = 0;
+    for (index, byte) in plain[logical_len + 1..encrypted_len].iter_mut().enumerate() {
+        *byte = 0xa0u8.wrapping_add(index as u8);
+    }
+    let expected_backing = plain[logical_len + 1..encrypted_len].to_vec();
+
+    let mut raw = vec![0u8; 512];
+    raw[..encrypted_len].copy_from_slice(&a7f0_full(
+        &plain[..encrypted_len],
+        &crc.to_le_bytes(),
+        0,
+    ));
+    let meta = InspectMeta {
+        device_id: Some(device_id.into()),
+        ..InspectMeta::default()
+    };
+    let view = analyze_sector(8, &raw, &meta);
+
+    assert_eq!(
+        &view.decoded[logical_len + 1..encrypted_len],
+        expected_backing.as_slice(),
+        "bytes after the ELABEL NUL but inside the encrypted prefix are preserved backing, not semantic zero padding"
+    );
+}
+
+#[test]
 fn lba8_decrypts_one_extra_block_when_logical_length_is_16_byte_aligned() {
     let device_id = "disk&ven_test&prod_llgb_aligned";
     let crc = crc32_bare(device_id.as_bytes());

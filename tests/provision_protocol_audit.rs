@@ -1987,6 +1987,89 @@ fn lba8_elabel_offset_is_0x80_and_points_to_the_elabel_payload() {
 }
 
 #[test]
+fn lba8_real_elabel_keeps_all_wire_keys_and_current_ignored_slots_empty() {
+    const WIRE_KEYS: [&str; 17] = [
+        "GLab", "Indus", "Orgcd", "Org", "Unit", "Dept", "User", "Alarm", "Autonum", "Label",
+        "Rmark", "VOL0", "VOL1", "VOL2", "VOLC0", "VOLC1", "VOLC2",
+    ];
+    const CURRENT_IGNORED_KEYS: [&str; 10] = [
+        "Indus", "Orgcd", "Org", "Alarm", "VOL0", "VOL1", "VOL2", "VOLC0", "VOLC1", "VOLC2",
+    ];
+
+    let mut checked = 0usize;
+    let mut logical_lengths = std::collections::BTreeSet::new();
+    for entry in fs::read_dir(FIXTURE_DIR).expect("protocol fixtures") {
+        let path = entry.expect("backup entry").path();
+        if path.extension().and_then(|ext| ext.to_str()) != Some("bin") {
+            continue;
+        }
+        let name = path.file_name().unwrap().to_str().unwrap();
+        let Some(meta) = parse_reference_backup_name(name) else {
+            continue;
+        };
+        let image = fs::read(&path).expect("fixture bytes");
+        let raw = sector(&image, 8);
+        let crc = crc32_bare(meta.device_id.as_bytes());
+        let head = a6b0_full(&raw[..0x80], &crc.to_le_bytes(), 0);
+        assert_eq!(&head[..4], b"LLGB", "{name}");
+        let logical_len = u32_le(&head, 4) as usize;
+        assert!((0x80..SECTOR).contains(&logical_len), "{name}");
+        let encrypted_len = (logical_len / 16 + 1) * 16;
+        assert!(encrypted_len <= SECTOR, "{name}");
+        let plain = a6b0_full(&raw[..encrypted_len], &crc.to_le_bytes(), 0);
+        assert_eq!(plain[logical_len], 0, "ELABEL trailing NUL moved: {name}");
+
+        let body = &plain[0x80..logical_len];
+        assert!(body.starts_with(b"<ELABEL>"), "{name}");
+        let mut actual_keys = Vec::new();
+        let mut ignored = std::collections::BTreeMap::<String, Vec<u8>>::new();
+        for part in body[b"<ELABEL>".len()..].split(|byte| *byte == b'|') {
+            if part.is_empty() {
+                continue;
+            }
+            let Some(eq) = part.iter().position(|byte| *byte == b'=') else {
+                panic!("ELABEL segment lost '=' in {name}: {part:02x?}");
+            };
+            let key = std::str::from_utf8(&part[..eq]).expect("ASCII ELABEL key");
+            actual_keys.push(key.to_string());
+            if CURRENT_IGNORED_KEYS.contains(&key) {
+                ignored.insert(key.to_string(), part[eq + 1..].to_vec());
+            }
+        }
+        assert_eq!(
+            actual_keys,
+            WIRE_KEYS.map(str::to_string),
+            "17-key ELABEL wire order changed: {name}"
+        );
+        for key in CURRENT_IGNORED_KEYS {
+            assert_eq!(
+                ignored.get(key).map(Vec::as_slice),
+                Some(&[][..]),
+                "current reader-ignored compatibility key became non-empty: {name} {key}"
+            );
+        }
+
+        // Current real profiles happen to carry zero backing between the ELABEL NUL
+        // and the end of the encrypted block.  This is observational evidence only;
+        // official writers preserve whatever bytes were already in that part of LBA8.
+        assert!(
+            plain[logical_len + 1..encrypted_len]
+                .iter()
+                .all(|byte| *byte == 0),
+            "committed real profile gained non-zero in-block backing: {name}"
+        );
+        logical_lengths.insert(logical_len);
+        checked += 1;
+    }
+
+    assert!(checked >= MIN_PROTOCOL_FIXTURES, "lost LBA8 real fixtures");
+    assert!(
+        logical_lengths.len() >= 2,
+        "real LBA8 evidence must retain multiple dynamic ELABEL lengths"
+    );
+}
+
+#[test]
 fn real_eetu_temp_use_limits_match_the_official_unlimited_profile() {
     let mut checked = 0usize;
     for entry in fs::read_dir(FIXTURE_DIR).expect("protocol fixtures") {

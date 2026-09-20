@@ -144,6 +144,9 @@ fn documentation_keeps_the_official_provisioning_chain_and_strict_rules() {
         "writer-uninitialized backing",
         "strcpy_s@0x1B9B0",
         "MacInfo[6]",
+        "LBA8 dynamic ELABEL + encrypted backing + preserved tail",
+        "current semantic reader key set = Label/GLab/Dept/User/Autonum/Rmark/Unit",
+        "ELABEL NUL 后到 encrypted_len 的字节属于既有 backing",
         "cross-generation unowned preserve/ignore",
         "raw-zero/full-rolling 物理表示与 current/legacy identity 不是同一个维度",
         "85141be31933e89976970ac18f44e1da8b77d3f57fdae1d857f8ea9d19a007ec",
@@ -188,8 +191,8 @@ fn documentation_keeps_the_official_provisioning_chain_and_strict_rules() {
         "LBA7 progress must retain entry0 NeedDisturb and the closed bNoUsbChkPasSafe policy byte"
     );
     assert!(
-        DOC.contains("| LBA8 | 92 | 420 | 0 | 18.0% |"),
-        "LBA8 progress must retain the closed MacInfo[6] header slot"
+        DOC.contains("| LBA8 | 476 | 36 | 0 | 93.0% |"),
+        "LBA8 progress must retain the closed dynamic ELABEL/backing/tail storage semantics"
     );
     assert!(
         DOC.contains("| LBA10 | 424 | 88 | 0 | 82.8% |"),

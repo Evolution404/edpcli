@@ -28,8 +28,8 @@ producer + 官方 consumer/行为 + 原始实盘验证**同时闭合，才能标
 
 截至本次 LBA11 repair-profile 闭环，严格统计为：
 
-- **COMPLETE：2883 / 6656B = 43.3%**
-- **PARTIAL：3773 / 6656B = 56.7%**
+- **COMPLETE：3267 / 6656B = 49.1%**
+- **PARTIAL：3389 / 6656B = 50.9%**
 - **UNKNOWN：0 / 6656B = 0.0%**
 
 当前各 LBA 严格状态以主账本为唯一准绳，最新关键增量：
@@ -98,7 +98,7 @@ producer + 官方 consumer/行为 + 原始实盘验证**同时闭合，才能标
   Label 仍有56B盘面截断/profile缺口，继续PARTIAL。
   Dept/Owner 长值的 continuation 还确认落在 LBA9+0x80/+0x100，
   并已用 join60/join59 双profile实盘门禁锁定。当前全 LBA0–12 已无 UNKNOWN，
-  目前全局仍有3773B PARTIAL，绝不能把“UNKNOWN=0”当成全部协议完成。
+  目前全局仍有3389B PARTIAL，绝不能把“UNKNOWN=0”当成全部协议完成。
 
 - **LBA7 = 490 COMPLETE / 22 PARTIAL / 0 UNKNOWN = 95.7%**。
   真实物理 LBA7 已锁定为 **3×0x40 packed EDPF + 14B pass-info@+0xC0**，
@@ -131,7 +131,14 @@ producer + 官方 consumer/行为 + 原始实盘验证**同时闭合，才能标
   22份原始盘为18×0+4×1，且22/22 LBA7/LBA12一致，因此 LBA7/LBA12
   各1B升级COMPLETE。LBA7现在只剩 **22B PARTIAL**：
   3×Version(12B)、entry1/2 NeedDisturb(8B)、BackupPromptPeriod(2B)。
-- **LBA8 = 92 COMPLETE / 420 PARTIAL / 0 UNKNOWN = 18.0%**。
+- **LBA8 = 476 COMPLETE / 36 PARTIAL / 0 UNKNOWN = 93.0%**。
+  `+0x080..0x1FF` 384B 已按 **LBA8 dynamic ELABEL + encrypted backing + preserved tail**
+  整体闭合：Windows `sub_100148d0` / Linux `BuildSector8` 都只写17-key ELABEL+NUL，
+  对预读旧 LBA8 的动态前缀原地加密；NUL后到 encrypted_len 是既有 encrypted backing，
+  后部是 physical preserve tail。Windows/Linux semantic reader 都只消费
+  `Label/GLab/Dept/User/Autonum/Rmark/Unit` 七键，另十个 compatibility wire key 明确忽略；
+  严格22盘17-key顺序一致且十个 ignored key 全空。当前仅 `HDSerialInfo` 4B 与
+  legacy `UsbOnlyInfo[32]` 32B 继续PARTIAL。
   旧账本把22盘当前最大正文之后的102B机械记成 UNKNOWN，这是错误的固定边界模型。
   Windows `sub_100148d0` 与 Linux `BuildSector8@0x1D602` 都只写/加密动态前缀，
   不清零后续输出 backing；严格22盘重新复算得到
@@ -278,7 +285,7 @@ producer + 官方 consumer/行为 + 原始实盘验证**同时闭合，才能标
    GSerial/BeiZhu 的 post-NUL 残值已明确是 backing bytes，不要再按 padding。
 6. **LBA8 ELABEL 与动态头剩余字段**：
    static ToolVersion/Labversion/writeTime/Reserved 已 COMPLETE；
-   继续为 HDSerialInfo/MacInfo/UsbOnlyInfo 与17-key ELABEL 每个业务字段追最终 consumer。
+   动态 ELABEL 384B 已闭合；继续只追 `HDSerialInfo@+0x14..17` 与 legacy `UsbOnlyInfo[32]@+0x1E..3D` 的旧 producer/最终 consumer。
 7. **LBA10 只剩 `+0x28..+0x7F` 88B**：`+0x04` 已闭合为
    `UsbSuspensionWnd lifecycle/control flag`，不要回退到“版本1/时间戳”或PARTIAL。
    两个16B卷标槽也已 COMPLETE。当前88B已有两套官方 UI zero producer、底层
