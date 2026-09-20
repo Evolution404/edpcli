@@ -3413,17 +3413,21 @@ Windows `CEMSUsbRegsiter.dll::IsAllowRegisterCommonLabel/sub_1002AB70` 原生执
 **2 = GPT**。而 Windows `sub_1002B2F0` 与 Linux `AnalyzeGptPartitionTable` 都按128B
 stride 遍历 GPT entry，命中支持的 type GUID 后读取 `start/end/attr`。
 
-这里不降低严格标准：`BuildSector2_Gpt` 一次只写128B单 entry，当前 `.so` 内没有它的
-active caller，也没有负责清理其它 entry slot 的 store。虚拟运行中的 entries1..127 为 harness
-预清 staging backing，不能冒充 first-party producer。因此本轮只升级：
+这里不降低严格标准：`BuildSector2_Gpt` 一次只写128B active entry，当前 `.so` 内没有它的
+active caller，也没有负责清理其它 entry slot 的 store；因此 first-party writer fixture 中
+entries1..127 的零值仍不能当成“producer-owned zero”。后续继续追 parser 与 Windows
+one-partition creator 后，才把 unused entry 的语义从“未知 residual”推进到“unowned residual”，
+详见后文“LBA2 unused GPT entry”小节。
+
+最终状态为：
 
 - **LBA1：512B COMPLETE**；
-- **LBA2 `0x000..0x07F`：128B COMPLETE**；
-- **LBA2 `0x080..0x1FF`：384B 继续 PARTIAL**。
+- **LBA2：512B COMPLETE**，其中 entry0 是 active-entry first-party writer/consumer，
+  entries1..3 则按 TypeGUID=0 的 unused discriminator + residual negative-consumer 闭合。
 
 仓库 fixtures `official_virtual_gpt_lba1.hex` / `official_virtual_gpt_lba2.hex` 与
-`official_virtual_gpt_builder_emits_valid_lba1_and_entry0` 回归固定结构、CRC和这个证据边界；
-测试注释明确禁止把 harness-owned unused-entry zeros 当成官方 producer 证据。
+`official_virtual_gpt_builder_emits_valid_lba1_and_entry0` 回归固定 active entry/header 结构与CRC；
+它们仍不把 harness-owned unused-entry zeros 冒充 producer 常量。
 
 ### LBA6/LBA9 long-User：最大合法 profile 的 first-party writer→reader 闭环
 
@@ -3484,7 +3488,7 @@ reader 自身的 SAFE6 checksum、rolling XOR、marker 判定和 continuation co
 marker/prefix/continuation 与写边界证据；physical 22盘没有 long User 的历史事实继续保留，
 不与 virtual first-party positive-wire evidence 混计。
 
-### LBA2 unused GPT entry：只闭合 3×16B type GUID，不扩大到 residual 336B
+### LBA2 unused GPT entry：TypeGUID discriminator + 336B unowned residual 全部闭合
 
 继续回到 current Windows `CEMSUsbRegsiter.dll` 的真实 GPT 创建路径后，确认
 `WriteNormalULabel` 在大盘分支调用 `sub_10037160(..., partition_count=1)`；该函数构造
@@ -3498,18 +3502,49 @@ Windows 路径又明确只提交1个 active partition。因此 LBA2 首扇区的
 type GUID（物理 `+0x080..08F / +0x100..10F / +0x180..18F`）可按 standards-defined
 unused discriminator 闭合。
 
-证据仍按严格边界分层：
+第一阶段证据按严格边界分层：
 
 - official Linux GPT virtual fixture 中这三个 type GUID 均为0；
 - 本机只读扫描20,538个候选文件找到1份真实 GPT image（Ubuntu 26.04 ISO）；其3个
   used entry 后至少125个 unused entry 的 type GUID/完整entry均为0；
 - 但 Linux fixture 的其它 residual bytes 来自 harness 预清，Ubuntu image 也不是
-  EDP/Windows first-party wire producer，所以**不**据此把 unused entry 的
-  `UniqueGUID/start/end/attr/name` 一起升级。
+  EDP/Windows first-party wire producer，所以这一阶段**只**升级三个16B type discriminator，
+  不把 `UniqueGUID/start/end/attr/name` 的零值解释成 producer 常量。
 
-因此 LBA2 本轮严格增加 **48B COMPLETE**，剩余 `3×112B=336B` 继续 PARTIAL。
-回归 `one_partition_gpt_keeps_entries1_to3_partition_type_guids_unused` 只锁定三个16B
-type discriminator，不断言 residual 336B 的 producer-owned 零值。
+随后继续追 current parser，第二阶段把剩余336B的**消费语义**直接钉死。Windows
+`CPartitionType::AnalyzeGptPartitionTable/sub_1002B2F0` 对每个128B entry 的真实控制流是：
+
+1. 先以 supported-GUID map 对 `entry+0x00..0x0F` 做 TypeGUID 比较；
+2. 只有 GUID 匹配后才进入 `+0x20/+0x28/+0x30` 的 start/end/attr 读取与
+   `PartitionInfo` 构造；
+3. GUID 不匹配时直接进入下一条 entry，residual 不参与任何值相关判断。
+
+Linux first-party `CPartitionType::AnalyzeGptPartitionTable@0xFB36` 独立给出同一边界：
+`memcmp(type_guid, entry, 16)` 命中后才执行 `mov 0x20(entry)`、`mov 0x28(entry)`，再由
+`AnalyzePartitionProperty` 读取 `+0x30`；未命中则只递增 iterator/entry index。
+
+为了排除“反编译看起来没读，但运行时通过 STL helper 间接读 residual”的可能，本轮又做了
+Windows first-party 动态 consumer probe：
+
+- 直接调用 official `CPartitionType` constructor `sub_1002A530(512)`，supported-GUID map
+  由原始 DLL 构造；只给 Unicorn 映射 `fs:[0]` SEH 零页，并把 CRT
+  `HeapAlloc/HeapFree` 替换为等价 allocator/free 边界；
+- 输入1个512B entry sector，4条 entry 都设置 `TypeGUID=zero[16]`，其余
+  **112B/entry 全部故意填 `0xA5`**；
+- 原生 `sub_1002B2F0(..., sector_count=1)` 返回0且无异常；内存 read hook 对这512B
+  总共只观察到每条 entry TypeGUID 起点的短路比较读取，**336B residual 读取次数=0**；
+- 该 `0xA5` 是 consumer probe，不是 writer fixture，专门用于证明 unused residual
+  可以取任意值而不进入业务语义。
+
+所以 entries1..3 的 `UniqueGUID/start/end/attr/name` 等336B不应继续建模为
+“缺 Windows kernel 写零正例的字段”，而应建模为 **unused-entry unowned residual**：
+TypeGUID=0 已经宣告 entry 不存在，后续112B/entry没有 EDP/official parser 语义消费。
+这与 LBA4/LBA5 的 unowned backing 采用同一 COMPLETE 口径；实现可以 canonical 新盘为零，
+但兼容 reader 不得把 residual 非零误判为隐藏分区或强制依赖其零值。
+
+因此 LBA2 再增加 **336B COMPLETE**，至此 **512/512 COMPLETE**。回归
+`one_partition_gpt_keeps_entries1_to3_partition_type_guids_unused` 继续锁定三个16B discriminator；
+严格总账/完整LBA门禁则防止未来把 residual 又误退成 producer-owned zero 或 PARTIAL。
 
 ### LBA6 GSerial / BeiZhu：按首个 NUL 边界再拆 10B
 
@@ -3562,7 +3597,7 @@ profiles 的该边界，而不是把字符串具体值硬编码成未来协议�
 |---:|---:|---:|---:|---:|---|
 | 0 | 112B | 400B | 0B | 21.9% | MBR partition table +55AA、legacy 三个 message-pointer、`+0x190..+0x19F/+0x1A4..+0x1B4` 两段 unowned compatibility region、optional SectorSize overlay、standard Windows MBR disk signature 与 `+0x1BC..+0x1BD` reserved/unowned word 均已闭合；只剩前400B bootstrap主体/profile-selection继续PARTIAL |
 | 1 | 512B | 0B | 0B | 100.0% | Linux official `BuildSector1_Gpt` first-party virtual runtime 直接生成整512B primary header，独立 IEEE CRC32 同时命中 header/16KiB array CRC；同一34扇 image 又被 current Windows `sub_1002AB70` 原生识别为GPT。physical 22/22零值继续作为 absent-GPT profile 保存，不与virtual fixture混计 |
-| 2 | 176B | 336B | 0B | 34.4% | entry0完整128B first-party闭合；current Windows active GPT creator又明确 `PartitionCount=1`，按 UEFI 2.10 unused-entry 定义把 entries1..3 的三个16B `PartitionTypeGUID=0` 闭合。每条其余112B仍缺 Windows first-party on-disk producer，继续PARTIAL |
+| 2 | 512B | 0B | 0B | 100.0% | entry0完整128B first-party闭合；entries1..3 的 `PartitionTypeGUID=0` 已按 one-partition creator/unused-entry 定义闭合。剩余3×112B又由 Windows/Linux official parser 的“TypeGUID先行、未命中即短路”语义与 Windows Unicorn nonzero-residual consumer probe闭合为 unused-entry unowned residual。LBA2整扇COMPLETE |
 | 3 | 0B | 512B | 0B | 0% | EDP 注册 writer 对整扇 preserve-existing，当前 Windows/Linux EDP reader 不解析；22份原始盘为21零+1 Kingston MP payload，但厂商 producer/固件 consumer 未闭合 |
 | 4 | 483B | 29B | 0B | 94.3% | onlyid clear header、OnlyIdXor8、LLGB 双锚点与固定restore metadata完成；`+0x047..+0x1FB` 437B 已由 first-party full/null writer 动态证明为 unowned backing 的“可逆 rolling transform / byte-preserve”双表示，并由 official reader negative-consumer 闭合。剩余29B仅为 `OnllyID2Nd`4B、HSerialCRC20B、MyHardinfo4B、`bDataToServer`1B |
 | 5 | 512B | 0B | 0B | 100% | 两版 EdpDiskCtrl 均只对 LBA5 执行“读整扇→原样写回→检查 ERROR_WRITE_PROTECT(0x13)”；当前注册 writer 读取既有13扇区后不重建 LBA5，因此 preserve existing bytes；22/22原始盘全零 |
@@ -3576,8 +3611,8 @@ profiles 的该边界，而不是把字符串具体值硬编码成未来协议�
 
 总计：
 
-- **完成：5164B / 6656B = 77.6%**
-- **部分已知：1492B / 6656B = 22.4%**
+- **完成：5500B / 6656B = 82.6%**
+- **部分已知：1156B / 6656B = 17.4%**
 - **未知：0B / 6656B = 0.0%**
 
 这是一组**严格下限**，故意宁可低估，不把“能生成/能解析”冒充成“已经完全理解”。
@@ -3587,7 +3622,7 @@ profiles 的该边界，而不是把字符串具体值硬编码成未来协议�
 |---|---|---|
 | 0 | 部分闭合 | MBR 分区表、55AA、legacy 三个错误消息指针、`+0x190..0x19F/+0x1A4..0x1B4` 两段 cross-profile unowned compatibility region、optional SectorSize compatibility overlay、standard Windows MBR disk signature 及 `+0x1BC..+0x1BD` reserved/unowned word 已闭合；只剩前400B bootstrap profile-selection 继续追 |
 | 1 | 完全闭合 | absent-GPT physical profile 与 official GPT positive-wire profile 均闭合；512/512 COMPLETE |
-| 2 | GPT entry0 + unused type GUID闭合 | entry0 128B完整闭合；entries1..3 的16B `PartitionTypeGUID` 已按 current Windows one-partition creator + UEFI unused-entry 定义闭合，共176B COMPLETE；其余336B residual fields继续追 |
+| 2 | 完全闭合 | entry0 128B完整闭合；entries1..3 的 TypeGUID=0 决定 unused 状态，Windows/Linux parser 均只在GUID命中后读取 residual。Windows first-party parser 对 `TypeGUID=0 + residual=0xA5` 动态 probe 证明336B residual 0次读取，因此按 unused-entry unowned residual 闭合。512/512 COMPLETE |
 | 3 | 外部制造区部分闭合 | 21/22 全零，1 份 Kingston MP payload；官方 EDP 注册链原样保留且当前 reader 不解析，厂商生成/消费语义仍未知 |
 | 4 | 高度闭合 | 483/512 COMPLETE。`+0x047..+0x1FB` 已闭合为 unowned backing / representation carrier：full branch 可逆rolling existing bytes，NULL branch 原样preserve，reader只返回0x2F node且semantic-ignore backing；real raw-zero/rolling-zero与任意非零virtual正例均已覆盖。只剩 second key/HSerial/MyHardinfo/第一server flag 共29B PARTIAL |
 | 5 | canonical 已知 | opaque preserve / 写保护探测 scratch；当前 22/22 全零，但零不是协议固定要求 |
