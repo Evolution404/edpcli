@@ -2238,13 +2238,29 @@ current `UserLogin` 对本地 EESI 输出结构只读取 `+0x08/+0x18` 两个卷
 - 再写回完整扇区。
 
 两版 getter 也都只解密/返回前0x80B，从不暴露后384B。
-所以后384B不是“EESI padding”，而是**当前 EESI writer 不拥有、
+所以后384B不是“EESI padding”，而是 **EESI writer 不拥有、
 只负责 preserve-existing 的共存物理尾区**。
 
-严格参考中21/22 LBA10整扇为零；唯一启用EESI的独立SanDisk样本
-`+0x80..0x1FF` 也全零，测试继续锁定该观察。但 preserve-existing 的实现本身说明：
-未来若出现非零历史/其它profile，current setter也会保留它，因此不能根据当前全零
-将其升级为 reserved-zero/padding。
+继续做跨代代码 ownership 审计后，结论可以再提高一级：
+
+- 两个独立 EESI build（`ydcc/edpediskctrl.dll` 与
+  `out_raw_data/EdpEDiskCtrl.dll`）setter 都采用完全相同的
+  read-modify-write：读取完整0x200B，只替换前0x80B，再原样写回后0x180B；
+- 两个 getter 都只解密/返回前0x80B；
+- 更老 `VRV/edp/EdpEDiskCtrl.dll` 与
+  `VRV/cems/Edp/edpediskctrl.dll` 两个独立 build 连
+  `EESI` magic / Get / Set 路径都不存在，因此同样没有该 tail 的 producer
+  或 consumer ownership；
+- 当前收集到的其它产品组件没有找到 LBA10 tail 的独立解析入口。
+
+真实盘交叉验证也从22份扩展了一层：除 committed originals 与独立 SanDisk 外，
+对本机历史语料用 **LBA6 crcUsbID guard + LBA12 解密后 EDPF magic** 双重过滤，
+得到58份有效 EDP 前部快照；58/58 的 `LBA10+0x80..0x1FF` 均为零，
+其中2份独立 EESI 正例也都是 tail384B 全零。
+
+这里的 COMPLETE **绝不表示协议要求384B恒零**。恰恰相反，官方 setter 的
+preserve-existing 行为说明：若未来遇到非零历史/共存 profile，兼容实现必须
+原样保留，不能清零。
 
 因此 LBA10 的严格账本从：
 
@@ -2252,13 +2268,21 @@ current `UserLogin` 对本地 EESI 输出结构只读取 `+0x08/+0x18` 两个卷
 36 COMPLETE / 4 PARTIAL / 472 UNKNOWN
 ```
 
-调整为：
+先调整为：
 
 ```text
 36 COMPLETE / 476 PARTIAL / 0 UNKNOWN
 ```
 
-这是“UNKNOWN -> PARTIAL”的证据升级，不增加 COMPLETE。
+随后跨代 ownership + getter negative-consumer + 扩展实盘验证闭合后，
+`+0x80..0x1FF` 384B 再从 PARTIAL 升为 **COMPLETE**。因此当前 LBA10 为：
+
+```text
+420 COMPLETE / 92 PARTIAL / 0 UNKNOWN
+```
+
+剩余92B只有 `+0x04..0x07` 4B 与 `+0x28..0x7F` 88B；前者仍缺正式字段名/
+最终业务 consumer，后者虽可完整 round-trip 但缺字段语义和非零 profile。
 
 `UserLogin` 的实际汇编还明确给出对象映射：`+0x08 -> ebp-0x74` 的
 `std::string`，`+0x18 -> ebp-0x54` 的 `std::string`；type2/type4
@@ -2365,14 +2389,14 @@ CI 原始夹具同时保留两种 profile。零态表示该 legacy tail 不存�
 | 7 | 490B | 22B | 0B | 95.7% | 在原489B基础上，pass-info `bNoUsbChkPasSafe(+0x0A)` 找到 `checkdiskback::Update_EDPEDISKSHOWPARAM` 值相关行为 consumer，并经 SAFE6 policy 被两套独立客户端恢复，1B升级COMPLETE；当前剩3条 entry Version 12B、entry1/2 NeedDisturb 8B、backup-prompt 2B为PARTIAL |
 | 8 | 92B | 420B | 0B | 18.0% | LLGB、logical length、ToolVersion、Labversion、writeTime、ElabOffset、Reserved[64] 已闭合；本轮又将 header 混合区拆分并闭合 MacInfo[6] 的显式零 producer + negative semantic consumer + 22/22跨代零值，新增6B COMPLETE；HDSerialInfo/UsbOnlyInfo 与动态 ELABEL/tail继续PARTIAL |
 | 9 | 54B | 458B | 0B | 10.5% | EETU/EPPE/SAPF边界保持；+0x080..0x0FF已闭合为 BuildSector6 long-Dept continuation 并验证 join60/join59 双reader profile，但 legacy join59 producer仍缺；+0x100..0x17F又与 long-User continuation/SAPF profile复用且缺长User实盘，因此仍PARTIAL |
-| 10 | 36B | 476B | 0B | 7.0% | EESI magic + 两个16B卷标槽完成；+0x04仍缺最终业务语义；+0x28..0x7F 已闭合为未解释的 EESI round-trip payload，+0x80..0x1FF 已闭合 current preserve/ignore 边界，二者均因缺字段/历史profile保持PARTIAL，不再记UNKNOWN |
+| 10 | 420B | 92B | 0B | 82.0% | EESI magic + 两个16B卷标槽完成；+0x80..0x1FF 已由两个独立 EESI build 的 preserve writer、getter ignore、两个旧 build 无 EESI ownership 与扩展历史实盘闭合为 cross-generation unowned preserve/ignore COMPLETE；+0x04与+0x28..0x7F共92B仍PARTIAL |
 | 11 | 512B | 0B | 0B | 100% | normal register path 使用 `DISK_GEOMETRY_EX.DiskSize`；`UDiskLabelRepair` check/rewrite path 使用 `DISK_GEOMETRY` 的 CHS capacity。两条路径的 producer/consumer 与同盘双 profile 实测均闭合 |
 | 12 | 394B | 118B | 0B | 77.0% | 原393B基础上，同一 pass-info `bNoUsbChkPasSafe(+0x0A)` 的 producer/consumer/policy传递/22盘双值链闭合，1B升级COMPLETE；+0x48扩展槽、backup-prompt两字节及其它材料仍PARTIAL |
 
 总计：
 
-- **完成：2495B / 6656B = 37.5%**
-- **部分已知：4161B / 6656B = 62.5%**
+- **完成：2879B / 6656B = 43.3%**
+- **部分已知：3777B / 6656B = 56.7%**
 - **未知：0B / 6656B = 0.0%**
 
 这是一组**严格下限**，故意宁可低估，不把“能生成/能解析”冒充成“已经完全理解”。
@@ -2390,7 +2414,7 @@ CI 原始夹具同时保留两种 profile。零态表示该 legacy tail 不存�
 | 7 | 高度闭合 | 物理0x40 packed ABI、PartionCount、rolling XOR、entry0 NeedDisturb compatibility gate、v0x0064 legacy wrapped8均已锁；`bNoUsbChkPasSafe` 已由 checkdiskback SAFE6 policy 行为链闭合；当前只剩22B PARTIAL：3×Version、entry1/2 NeedDisturb、pass-info +0C/+0D |
 | 8 | 高度闭合 | LLGB/ELABEL + 可变加密长度已锁；ToolVersion/Labversion/writeTime/ElabOffset/Reserved 与 MacInfo[6] 已闭合。严格22盘 `logical_end=0x148..0x183`、encrypted prefix=`0x150..0x190`；后部 preserve-existing。HDSerialInfo、UsbOnlyInfo 与17-key ELABEL最终consumer继续追 |
 | 9 | 高度闭合 | 整扇已无UNKNOWN：EETU首0x80、EPPE末0x80、SAPF边界明确；中间区现已纠正为 BuildSector6 long-Dept/User continuation 与 SAPF/backing 的多profile复用。Dept join60 producer已闭合，join59旧producer仍缺；长User又缺正向实盘，因此继续PARTIAL |
-| 10 | 高度闭合 | 整扇 current 存储边界已解释：前0x80为 EESI round-trip payload，后0x180为 EESI setter preserve-existing tail；magic/两个16B文本槽已 COMPLETE，+0x04与+0x28..0x7F仍缺具体业务语义/非零profile |
+| 10 | 高度闭合 | 前0x80为 EESI round-trip payload；后0x180已按 cross-generation unowned preserve/ignore 语义 COMPLETE：两代 EESI writer只preserve、getter完全ignore，两代更旧build无EESI ownership，扩展58份有效历史快照无反例。magic/两个16B卷标 + tail384B 已 COMPLETE；仅+0x04与+0x28..0x7F共92B继续PARTIAL |
 | 11 | 完全闭合 | DRKB/random252/ASCII VID-PID/PDKB 全部已锁；exact DiskSize 与 CHS repair 两种真实 wire profile 的 producer/consumer/实盘均闭合 |
 | 12 | 中度闭合 | 主运行时 96B packed layout 已锁，pass-info `bNoUsbChkPasSafe` 已闭合到 SAFE6 policy 行为；多个标志/扩展材料及 backup-prompt 两字节仍仅结构/算法部分已知 |
 

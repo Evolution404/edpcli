@@ -139,6 +139,7 @@ fn documentation_keeps_the_official_provisioning_chain_and_strict_rules() {
         "writer-uninitialized backing",
         "strcpy_s@0x1B9B0",
         "MacInfo[6]",
+        "cross-generation unowned preserve/ignore",
         "legacy MBR partition-table fragment",
         "LBA4 current writer machine-code node layout",
         "LBA12 v0x0206 hidden default-password file-key wrapping",
@@ -182,6 +183,10 @@ fn documentation_keeps_the_official_provisioning_chain_and_strict_rules() {
     assert!(
         DOC.contains("| LBA8 | 92 | 420 | 0 | 18.0% |"),
         "LBA8 progress must retain the closed MacInfo[6] header slot"
+    );
+    assert!(
+        DOC.contains("| LBA10 | 420 | 92 | 0 | 82.0% |"),
+        "LBA10 progress must retain the closed cross-generation preserve/ignore tail semantics"
     );
     assert!(
         DOC.contains("| LBA12 | 394 | 118 | 0 | 77.0% |"),

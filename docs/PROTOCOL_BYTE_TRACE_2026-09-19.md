@@ -379,15 +379,15 @@ post-XOR 写回 `+0x45/+0x46`。历史 raw-zero 实盘仅作为兼容读取 prof
 | LBA7 | 490 | 22 | 0 | 95.7% |
 | LBA8 | 92 | 420 | 0 | 18.0% |
 | LBA9 | 54 | 458 | 0 | 10.5% |
-| LBA10 | 36 | 476 | 0 | 7.0% |
+| LBA10 | 420 | 92 | 0 | 82.0% |
 | LBA11 | 512 | 0 | 0 | 100.0% |
 | LBA12 | 394 | 118 | 0 | 77.0% |
 <!-- STRICT_PROGRESS_END -->
 
 当前总计：
 
-- **COMPLETE：2495B / 6656B = 37.5%**
-- **PARTIAL：4161B / 6656B = 62.5%**
+- **COMPLETE：2879B / 6656B = 43.3%**
+- **PARTIAL：3777B / 6656B = 56.7%**
 - **UNKNOWN：0B / 6656B = 0.0%**
 
 LBA11 已完整闭合为 512B COMPLETE。此前卡住的后半 252B 不是“某型号盘偶尔使用
@@ -501,7 +501,7 @@ DWARF 中恢复出的原始声明文件/行号与本地函数地址：
 | LBA10 | 0x008–0x017 | COMPLETE | Share/type2 volume label | `SetEdpEdiskSetInfo` 原样复制调用者结构前0x80并加密写入；默认 reader 初始化为GBK“交换区” | `CEdpDiskControl::UserLogin` 将该槽赋给本地 string；type2 分支直接把其 `c_str()` 传给 `SetVolumeLabelA` | 22份原始参考中唯一启用EESI的SanDisk实盘为GBK“交换区”；已加入512B原始证据夹具 | 16B字段语义、writer、consumer、实盘闭合 |
 | LBA10 | 0x018–0x027 | COMPLETE | Encrypt/type4 volume label | 同上；默认 reader 初始化为GBK“保密区” | `UserLogin` type4 分支直接把该槽对应 string 的 `c_str()` 传给 `SetVolumeLabelA` | 唯一启用SanDisk实盘为GBK“保密区”；另一版 `out_raw_data/EdpEDiskCtrl.dll` 同构复核 | 16B字段完整闭合 |
 | LBA10 | 0x028–0x07F | PARTIAL | EESI uninterpreted round-trip payload | current 与另一版 `EdpEDiskCtrl` 的 Get 都解密并向调用者返回完整0x80B；Set 都把调用者完整0x80B（除强制magic）原样加密写入，因此这88B明确属于 EESI API payload | current `UserLogin` 只消费 +0x08/+0x18 两个卷标，整函数无 +0x28..+0x7F 字段读取；外部 vtable Get/Set 调用方也未找到 | 唯一启用SanDisk EESI解密后88B全零 | 物理边界、round-trip producer/reader、当前 negative business consumer 已知，不能再叫UNKNOWN；但缺官方字段名/非零样本/业务语义，保持PARTIAL |
-| LBA10 | 0x080–0x1FF | PARTIAL | non-EESI opaque preserved physical tail | current 与 `out_raw_data/EdpEDiskCtrl.dll` 的 Set 均先读取整512B LBA10，只替换前0x80B密文，再整扇写回；因此后384B明确是 preserve-existing，不由 EESI writer 生成 | Get 只解密/返回前0x80B，完全不暴露后384B；当前产品 EESI consumer 也没有该区入口 | 21/22 LBA10整扇零；唯一启用SanDisk的后384B也全零，测试锁定 | 已知 current preserve/ignore 行为，所以从UNKNOWN降PARTIAL；但故意保留原字节意味着不能排除历史/其它共存profile，禁止把实盘全零解释为padding或升COMPLETE |
+| LBA10 | 0x080–0x1FF | COMPLETE | cross-generation unowned preserve/ignore physical tail | 两个独立 EESI build（`ydcc/edpediskctrl.dll` 与 `out_raw_data/EdpEDiskCtrl.dll`）的 setter 都执行同一 read-modify-write：先读完整0x200B LBA10，只以新 EESI 密文覆盖前0x80B，再将后0x180B原样写回；更老 `VRV/edp` 与 `cems/Edp` 两代 DLL 连 EESI magic/Get/Set 路径都不存在，因此同样没有该 tail producer | 两个 EESI getter 都只解密/返回前0x80B，完全不暴露后384B；UserLogin 也只消费前0x80中的卷标；旧两代无 EESI reader，当前收集的其它产品组件未发现 LBA10 tail 入口 | committed originals 的 LBA10 全零 profile + 独立 SanDisk EESI 的 tail384B 全零；额外对本地历史语料按 LBA6 CRC guard + LBA12 EDPF 双重过滤得到58份有效 EDP 前部快照，58/58 tail全零，其中2份独立 EESI 正例同样 tail全零 | COMPLETE 指“该384B跨已知代际均不属于 EESI payload，writer unowned/preserve、reader ignore”的存储行为已闭合，**不**表示协议要求其值恒零；若未来遇到非零 tail，兼容实现必须原样保留 |
 | LBA11 | 0x000–0x003 | COMPLETE | DRKB magic | `CDataSecrity::RandBuffer256` 先写 DRKB | `ReadSector11` 首先校验 DRKB | 22/22 | 完成 |
 | LBA11 | 0x004–0x0FF | COMPLETE | random252 | `RandBuffer256`: `srand(time(NULL)); rand()%255` 共252B | `DataEncrypt/DataDecrypt` 将整个 DRKB块纳入 CRC32 密钥输入 | 22/22；均无0xFF；7 CI夹具回归 | 每字节都是密钥扰动材料，来源和消费闭合 |
 | LBA11 | 0x100–0x103 | COMPLETE | PDKB magic（解密后） | `BuildSector11` 构造 PDKB plaintext | `ReadSector11` 解密后必须校验 PDKB | 22/22 | 完成 |
