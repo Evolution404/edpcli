@@ -1028,6 +1028,15 @@ fn lba6_gserial_and_beizhu_semantic_prefixes_stop_before_profile_underlay() {
         let beizhu = &plain[0x1d0..0x1e0];
 
         assert_eq!(
+            gserial[15], 0,
+            "BuildSector6 must keep the dedicated GSerial slot terminator byte zero: {name}"
+        );
+        assert_eq!(
+            beizhu[15], 0,
+            "BuildSector6 must keep the dedicated BeiZhu slot terminator byte zero: {name}"
+        );
+
+        assert_eq!(
             &gserial[..8],
             b"322CA28A",
             "all committed official profiles retain the common GSerial string prefix: {name}"

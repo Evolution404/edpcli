@@ -3624,7 +3624,7 @@ profiles 的该边界，而不是把字符串具体值硬编码成未来协议�
 | 3 | 0B | 512B | 0B | 0% | EDP 注册 writer 对整扇 preserve-existing，当前 Windows/Linux EDP reader 不解析；22份原始盘为21零+1 Kingston MP payload，但厂商 producer/固件 consumer 未闭合 |
 | 4 | 483B | 29B | 0B | 94.3% | onlyid clear header、OnlyIdXor8、LLGB 双锚点与固定restore metadata完成；`+0x047..+0x1FB` 437B 已由 first-party full/null writer 动态证明为 unowned backing 的“可逆 rolling transform / byte-preserve”双表示，并由 official reader negative-consumer 闭合。剩余29B仅为 `OnllyID2Nd`4B、HSerialCRC20B、MyHardinfo4B、`bDataToServer`1B |
 | 5 | 512B | 0B | 0B | 100% | 两版 EdpDiskCtrl 均只对 LBA5 执行“读整扇→原样写回→检查 ERROR_WRITE_PROTECT(0x13)”；当前注册 writer 读取既有13扇区后不重建 LBA5，因此 preserve existing bytes；22/22原始盘全零 |
-| 6 | 473B | 39B | 0B | 92.4% | 在既有闭环基础上，再按首个NUL边界把 GSerial `+0x1C0..1C8` 9B 与 BeiZhu `+0x1D0` 1B 升COMPLETE；剩余39B为 Dept接缝1B、GSerial尾7B、BeiZhu尾15B、legacy MBR fragment16B |
+| 6 | 475B | 37B | 0B | 92.8% | GSerial/BeiZhu动态槽继续拆分：两套 current builder 都先清16B temp、只复制前15B，因此 `+0x1CF/+0x1DF` 两个 dedicated terminator byte 与上游 backing 解耦；扩展22份 checksum-valid 历史 front 22/22均为0，2B升COMPLETE。剩余37B为 Dept接缝1B、GSerial动态尾6B、BeiZhu动态尾14B、legacy MBR fragment16B |
 | 7 | 512B | 0B | 0B | 100.0% | 3×Version、entry1/entry2 NeedDisturb 已按 compatibility metadata 生命周期闭合；最后两个 BackupPromptPeriod BYTE 又由正式 DWARF 字段、current-zero producer、四代 Windows + Linux structural-preserve/negative semantic consumer、跨 v0x0064/v0x0206 实盘0/0 profile 闭合为 dormant compatibility fields。LBA7 至此整扇 COMPLETE |
 | 8 | 492B | 20B | 0B | 96.1% | header 与动态body既有闭环保持；本轮又把 `UsbOnlyInfo` 后16B按 current/2020固定16字符writer + header零初始化 + strict legacy absent-zero + runtime negative/structural consumer 闭合为终止NUL/zero suffix。只剩 HDSerialInfo 4B 与 UsbOnlyInfo 前16B identity text继续PARTIAL |
 | 9 | 384B | 128B | 0B | 75.0% | EETU/EPPE与 long-User 已闭合；SAPF `+0x114..+0x11F` 12B 又按 profile-overlap 完成：SAPF下是多形态 unowned trailing backing，repair/一致性逻辑明确不消费；long-User下是 first-party writer→reader 已闭合的 active continuation。因此当前只剩 long-Dept `+0x080..0x0FF` 128B PARTIAL |
@@ -3634,8 +3634,8 @@ profiles 的该边界，而不是把字符串具体值硬编码成未来协议�
 
 总计：
 
-- **完成：5528B / 6656B = 83.1%**
-- **部分已知：1128B / 6656B = 16.9%**
+- **完成：5530B / 6656B = 83.1%**
+- **部分已知：1126B / 6656B = 16.9%**
 - **未知：0B / 6656B = 0.0%**
 
 这是一组**严格下限**，故意宁可低估，不把“能生成/能解析”冒充成“已经完全理解”。
@@ -3649,7 +3649,7 @@ profiles 的该边界，而不是把字符串具体值硬编码成未来协议�
 | 3 | 外部制造区部分闭合 | 21/22 全零，1 份 Kingston MP payload；官方 EDP 注册链原样保留且当前 reader 不解析，厂商生成/消费语义仍未知 |
 | 4 | 高度闭合 | 483/512 COMPLETE。`+0x047..+0x1FB` 已闭合为 unowned backing / representation carrier：full branch 可逆rolling existing bytes，NULL branch 原样preserve，reader只返回0x2F node且semantic-ignore backing；real raw-zero/rolling-zero与任意非零virtual正例均已覆盖。只剩 second key/HSerial/MyHardinfo/第一server flag 共29B PARTIAL |
 | 5 | canonical 已知 | opaque preserve / 写保护探测 scratch；当前 22/22 全零，但零不是协议固定要求 |
-| 6 | 高度闭合 | 整扇已无 UNKNOWN，473/512 COMPLETE。GSerial前9B与BeiZhu首1B已从 profile-dependent slot 中拆出闭合；剩余39B仅为 Dept join59末字节、两字符串尾部underlay与16B legacy MBR fragment |
+| 6 | 高度闭合 | 整扇已无 UNKNOWN，475/512 COMPLETE。除既有 GSerial前9B/BeiZhu首1B外，两个固定16B槽的最后终止字节 `+0x1CF/+0x1DF` 也已由双平台builder显式零producer + 22份checksum-valid历史front闭合；剩余37B仅为 Dept join59末字节、GSerial动态尾6B、BeiZhu动态尾14B与16B legacy MBR fragment |
 | 7 | 完全闭合 | 物理0x40 packed ABI、PartionCount、rolling XOR、entry0 NeedDisturb MBR gate、v0x0064 legacy wrapped8、3×Version/entry1+2 NeedDisturb compatibility metadata、`bNoUsbChkPasSafe` SAFE6 policy 行为链及最后两个 dormant BackupPromptPeriod compatibility BYTE 均已闭合；512/512 COMPLETE |
 | 8 | 高度闭合 | **LBA8 dynamic ELABEL + encrypted backing + preserved tail** 已闭合：17-key wire template 中7键由注册侧 Windows/Linux reader回填，运行时 EdpEDiskCtrl reader 则解析全部17键；NUL后块内既有backing随动态前缀加密，块外tail原样preserve。384B动态区已COMPLETE；当前只剩 HDSerialInfo 4B 与 legacy UsbOnlyInfo 32B PARTIAL |
 | 9 | 高度闭合 | 384/512 COMPLETE。SAPF trailing 12B 已按“SAPF unowned backing / long-User active continuation”双 profile 闭合：SAPF reader/repair只消费magic+16B MBR恢复项，真实tail多形态；long-User最大profile又直接覆盖该物理区并round-trip。现在唯一剩余128B是 long-Dept continuation，blocker仅 legacy join59 writer |
