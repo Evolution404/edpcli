@@ -28,8 +28,8 @@ producer + 官方 consumer/行为 + 原始实盘验证**同时闭合，才能标
 
 截至本次 LBA9 EPPE writer-owned zero tail 闭环，严格统计为：
 
-- **COMPLETE：3699 / 6656B = 55.6%**
-- **PARTIAL：2957 / 6656B = 44.4%**
+- **COMPLETE：3719 / 6656B = 55.9%**
+- **PARTIAL：2937 / 6656B = 44.1%**
 - **UNKNOWN：0 / 6656B = 0.0%**
 
 当前各 LBA 严格状态以主账本为唯一准绳，最新关键增量：
@@ -126,9 +126,9 @@ producer + 官方 consumer/行为 + 原始实盘验证**同时闭合，才能标
   producer/选择条件未知继续PARTIAL。
   Dept/Owner 长值的 continuation 还确认落在 LBA9+0x80/+0x100，
   并已用 join60/join59 双profile实盘门禁锁定。当前全 LBA0–12 已无 UNKNOWN，
-  目前全局仍有2957B PARTIAL，绝不能把“UNKNOWN=0”当成全部协议完成。
+  目前全局仍有2937B PARTIAL，绝不能把“UNKNOWN=0”当成全部协议完成。
 
-- **LBA7 = 490 COMPLETE / 22 PARTIAL / 0 UNKNOWN = 95.7%**。
+- **LBA7 = 510 COMPLETE / 2 PARTIAL / 0 UNKNOWN = 99.6%**。
   真实物理 LBA7 已锁定为 **3×0x40 packed EDPF + 14B pass-info@+0xC0**，
   不能用 `libcemsfilesyscheck.so` 的 0x48/72B natural ABI 直接解释盘面。
   v0x0064 legacy wrapped key `entry+0x38..0x3F` 已完整闭合：
@@ -148,8 +148,14 @@ producer + 官方 consumer/行为 + 原始实盘验证**同时闭合，才能标
   精确覆盖 LBA0 `+0x1BE..+0x1FD` 的64B MBR partition table；静态模板仅含
   `type=0x04,start_lba=66,sector_count=1` 的占位 entry。`UnsetProtect` 反向走
   `sub_1006ffd0 -> sub_1006e9b0`，从 LBA2 读整扇恢复到 LBA0 并刷新磁盘属性。
-  因此 entry0 `NeedDisturb` 可明确描述为 **MBR scramble/descramble gate**；
-  entry1/entry2 同名字段仍没有独立 consumer，8B继续PARTIAL。
+  因此 entry0 `NeedDisturb` 可明确描述为 **MBR scramble/descramble gate**。
+  entry-local Version 12B 与 entry1/entry2 NeedDisturb 8B 又继续按 compatibility
+  metadata 生命周期闭合：current writer 分别给出 Version=0 与 positional
+  NeedDisturb `(1,1,0)/(1,1)` profile；Windows old/new converter 双向保留；
+  两版 `vrvaud_c` 只有 entry0 NeedDisturb 行为读取；Linux `CDiskReader` 的
+  GetTagPartitionInfo/DecryptFileKey/CheckFileKeyCrc/ReadFileSysSector0/
+  DecryptFileSysSector0 均不读取 Version 或 NeedDisturb。committed originals +
+  独立 SanDisk 全量门禁已锁定这些 profile，因此20B升 COMPLETE。
   最新又从独立 Linux `checkdiskback` 找到 pass-info
   `bNoUsbChkPasSafe(+0x0A)` 的真实 consumer：
   `Update_EDPEDISKSHOWPARAM@0x406B70` 执行
@@ -157,8 +163,8 @@ producer + 官方 consumer/行为 + 原始实盘验证**同时闭合，才能标
   `CreateSafe6TmpPolicyFile` 随后将其写入 CRC/A6B0 加密策略文件，
   `EdpEDiskBack` 与 `linuxedpedisk` 两套 `Safe6PolicyFile` 独立恢复。
   22份原始盘为18×0+4×1，且22/22 LBA7/LBA12一致，因此 LBA7/LBA12
-  各1B升级COMPLETE。LBA7现在只剩 **22B PARTIAL**：
-  3×Version(12B)、entry1/2 NeedDisturb(8B)、BackupPromptPeriod(2B)。
+  各1B升级COMPLETE。LBA7现在只剩 **2B PARTIAL**：
+  `ShareBackuppromptPeriod / EncryptBackuppromptPeriod`。
 - **LBA8 = 476 COMPLETE / 36 PARTIAL / 0 UNKNOWN = 93.0%**。
   `+0x080..0x1FF` 384B 已按 **LBA8 dynamic ELABEL + encrypted backing + preserved tail**
   整体闭合：Windows `sub_100148d0` / Linux `BuildSector8` 都只写17-key ELABEL+NUL，
@@ -390,10 +396,8 @@ producer + 官方 consumer/行为 + 原始实盘验证**同时闭合，才能标
    - inspect 已显示 producer-side physical flags；Provision/validator 已改为 current
      SAFE6 full rolling + post-XOR flags；历史 raw-zero form仍兼容读取。
    后续若继续追 LBA4，应只追这两个字段的**最终业务 consumer**，找到之前仍PARTIAL。
-3. **LBA7 剩余 22B PARTIAL**：
-   - 三条 `Version@+0x04`：12B，继续追 producer/consumer/version-switch；
-   - entry1/entry2 `NeedDisturb@+0x10`：8B，当前没有 direct xref，继续搜其它组件/历史 build；
-   - pass-info `+0x0C/+0x0D`：2B，继续追跨组件最终 consumer。
+3. **LBA7 剩余 2B PARTIAL**：
+   - 只剩 pass-info `+0x0C/+0x0D`，继续追历史非零 producer/profile、单位/取值域和跨组件最终 consumer。
    这2B的 current producer 已进一步锁到机器码：`CreatePartitions/sub_1003DB50`
    在 `0x1003DC16..0x1003DC26` 显式清零完整14B pass-info，后续 store 最远只到
    `+0x0A`，所以 `+0x0C/+0x0D` 是 current writer-owned zero。两代 `vrvaud_c`
@@ -401,8 +405,9 @@ producer + 官方 consumer/行为 + 原始实盘验证**同时闭合，才能标
    pass-info tail，禁止仅凭名称相似把它当这2B的 consumer。仍需历史非零 producer/
    profile、单位/取值域和真实业务 consumer 才能升级 COMPLETE。
    本轮已重新核实两版 `vrvaud_c` 全局 old-table 都是3×0x40 packed，且只有
-   entry0 NeedDisturb 有行为 xref；Version、entry1/2 NeedDisturb 在两版均无直接
-   consumer。该负证据不能把正式ABI字段升级成 Reserved/COMPLETE。
+   entry0 NeedDisturb 有行为 xref；Version、entry1/2 NeedDisturb 已结合 current
+   producer、双向 converter structural-preserve、Linux CDiskReader negative-semantic
+   consumer 与真实 profile 全量门禁按 compatibility metadata 模型闭合，不得再回退成 Reserved。
    不要再重复分析 wrapped8；其 24B 已 COMPLETE。
 4. **LBA4 legacy HSerialCRC[5] producer**：
    当前 writer machine code 已闭合，但旧 14/22 固定

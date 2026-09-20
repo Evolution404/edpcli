@@ -289,6 +289,12 @@ fn lba7_entry_version_is_not_partition_count_across_real_profiles() {
                 0,
                 "entry Version must stay distinct from PartionCount: {name} entry {index}"
             );
+            let expected_need_disturb = if index < 2 { 1 } else { 0 };
+            assert_eq!(
+                u32_le(&plain, base + 0x10),
+                expected_need_disturb,
+                "LBA7 positional NeedDisturb compatibility profile changed: {name} entry {index}"
+            );
             assert_eq!(
                 u32_le(&plain, base + 0x08),
                 count as u32,
@@ -305,6 +311,7 @@ fn lba7_entry_version_is_not_partition_count_across_real_profiles() {
     for base in [0x00, 0x40] {
         assert_eq!(u32_le(&plain, base + 0x04), 0);
         assert_eq!(u32_le(&plain, base + 0x08), 2);
+        assert_eq!(u32_le(&plain, base + 0x10), 1);
         checked_entries += 1;
     }
 

@@ -1554,7 +1554,7 @@ LBA7，确认同名 `tagEdpPartionInfo` 存在不能混用的 ABI：
 与定向测试固定这一事实。该样本增加的是“真实 profile 行为”覆盖，不改变
 22份原始生成参考集的计数，也不单凭样本值把 Version/NeedDisturb 升级为 COMPLETE。
 
-### LBA7 entry Version / entry1+entry2 NeedDisturb：producer 已前推，consumer 仍未闭合
+### LBA7 entry Version / entry1+entry2 NeedDisturb：compatibility metadata 生命周期闭合
 
 本轮直接回到官方机器码，而不是沿用旧结构猜测。
 
@@ -1581,7 +1581,7 @@ type4/entry2 NeedDisturb=0。仓库新增
 \`lba7_need_disturb_is_not_a_partition_type_invariant\` 门禁，禁止以后把
 \`type4 -> 0\` 写死。
 
-consumer 侧目前得到的是更严格的“只闭合 entry0”结论：
+consumer 侧要区分“行为 consumer”与“compatibility structural consumer”：
 
 - 两版 Windows \`vrvaud_c\` 的 \`ReadPartionInfoExNew\` 都会把完整 \`0xC0\`
   packed old table 读入运行时缓冲；
@@ -1596,26 +1596,39 @@ consumer 侧目前得到的是更严格的“只闭合 entry0”结论：
   三条 `Version@+0x04` 都没有直接 xref，动态遍历也只读 PartionType；
 - Linux \`CLabelManage::GetPartionFromOld\` 也只是把 Version/NeedDisturb
   从 old ABI 搬到 new ABI；
-- Linux \`libedpedisk.so\` 的 \`PartitionHeader\` 构造函数会携带整条
-  \`tagNewEdpPartionInfo\`，但在已扫描的解密/校验路径里没有找到 entry Version
-  或 NeedDisturb 的业务分支。
+- Linux \`CLabelManage::GetPartionFromOld\` 对 Version/NeedDisturb 只做字段搬运；
+  继续逐函数复核 \`CDiskReader::GetTagPartitionInfo\`、\`DecryptFileKey\`、
+  \`CheckFileKeyCrc\`、\`ReadFileSysSector0\` 与
+  \`DecryptFileSysSector0\` 后，真实行为读取集中在 Flag/PartionType/
+  UserKeyCRC、StartSector、FileKeyCRC、wrapped key 与 EncryptMode；
+  entry \`Version@+0x04\` / \`NeedDisturb@+0x10\` 均未参与这些检查链；
 
 旧版 \`EdpEDiskCtrl.dll\` 也再次表明：旧 LBA7 被读出后，协议代际由
 14B pass-info Version 决定/被上层固定为 \`0x64\`，并未发现 entry
 \`Version@+0x04\` 用作版本选择。
 
-实盘复核：22份原始生成参考的实际 EDPF entry \`Version@+0x04\` 全部为0；
-新增真实免密 SanDisk 的两条 entry 同样为0。但“当前值恒0 + writer 零来源”
-仍不能替代一个真实 consumer。
+实盘复核：committed original fixtures 的全部有效 EDPF entry 与新增真实免密
+SanDisk 两条 entry 的 \`Version@+0x04\` 全部为0；扩展只读历史去重扫描同样
+没有非零 Version。NeedDisturb 则稳定出现三-entry `(1,1,0)` 与两-entry `(1,1)`
+两种 positional profile，没有第三种组合。
 
-因此本轮不升级任何 COMPLETE 字节：entry Version 与 entry1/entry2
-NeedDisturb 继续 PARTIAL。新增
-\`lba7_entry_version_is_not_partition_count_across_real_profiles\` 门禁，
-专门防止再次把 \`PartionCount@+0x08\` 错读成 Version。
+因此这里不把负 xref 误写成“Reserved”，而是按已经用于其它兼容槽的严格模型闭合：
 
-这次跨两版 xref 是**negative consumer evidence**，不是“Reserved”证明：这些字段
-在官方 ABI 与 old/new converter 中都会被保留，所以在找到实际策略 consumer 或
-历史版本选择语义之前，不能因为当前两个 build 都不读取就升级 COMPLETE。
+- 3×Version 共12B：current writer zero-init；Windows old/new converter 双向保存；
+  Windows 两版与 Linux 文件系统检查链都不把它作为版本选择条件；真正协议代际由
+  14B pass-info Version 决定；
+- entry1/entry2 NeedDisturb 共8B：current writer 分别形成 1/0 positional profile；
+  converter 保存；Windows 两版只有 entry0 同名字段存在行为读取，Linux 对应检查链
+  不读取 entry1/2。它们不能继承 entry0 的 MBR scramble 业务解释。
+
+仓库门禁现对所有 committed original fixtures 逐 entry 锁定 Version=0 与
+positional NeedDisturb profile，并由独立 SanDisk 的 type4@entry1=1 继续阻止
+`PartionType -> NeedDisturb` 的错误恒等化。
+
+所以这20B由 PARTIAL 升 COMPLETE，准确语义是
+**formal ABI compatibility metadata：producer/profile 已知、converter structural-preserve、
+cross-platform negative-semantic-consumer、真实 profile 已锁定**。COMPLETE 不要求
+未来其它 writer profile 必须仍写0/1/0；遇到新 profile 应扩展兼容模型。
 
 ### LBA7 v0x0064 packed legacy file-key wrapping
 
@@ -1713,8 +1726,9 @@ entry0 `NeedDisturb` 4B：该字段早已由 Windows producer、两版
 `183 COMPLETE / 23 PARTIAL / 306 UNKNOWN` 先更新为
 `489 COMPLETE / 23 PARTIAL / 0 UNKNOWN`；后续又闭合
 `bNoUsbChkPasSafe(+0x0A)` 1B，因此当前为
-`490 COMPLETE / 22 PARTIAL / 0 UNKNOWN`。剩余22B为3条 entry Version（12B）、
-entry1/entry2 NeedDisturb（8B）与 pass-info `+0x0C/+0x0D`（2B）。
+`510 COMPLETE / 2 PARTIAL / 0 UNKNOWN`。本轮把3条 entry Version（12B）与
+entry1/entry2 NeedDisturb（8B）按 compatibility metadata 生命周期闭合；
+仅 pass-info `+0x0C/+0x0D`（2B）继续 PARTIAL。
 
 ### LBA12：主运行时盘面是 96B packed entry；不要与 104B 检查结构混用
 
@@ -3112,7 +3126,7 @@ SAFE6 只透明保留。COMPLETE 不意味着未来出现其它值时可以机�
 | 4 | 36B | 476B | 0B | 7.0% | onlyid clear header、OnlyIdXor8、LLGB 双锚点完成；第二 ID/HSerial/profile 字段仍不完整；`+0x047..+0x1FB` 已由 full writer、reader negative consumer 与 raw-zero/rolling-zero 双实盘 profile 从UNKNOWN降PARTIAL |
 | 5 | 512B | 0B | 0B | 100% | 两版 EdpDiskCtrl 均只对 LBA5 执行“读整扇→原样写回→检查 ERROR_WRITE_PROTECT(0x13)”；当前注册 writer 读取既有13扇区后不重建 LBA5，因此 preserve existing bytes；22/22原始盘全零 |
 | 6 | 419B | 93B | 0B | 81.8% | 216B UsbMainBSec fixed template、autoid[16]、Office[64]、Label物理56B均已闭合；本轮又把 Dept 64B 拆成 `+0x00..3E` 63B COMPLETE 与 `+0x3F` 1B PARTIAL。short Dept 由不清尾 strcpy_s + 固定64B memcpy形成 C-string/backing，long current/legacy 原盘前63B逐字节一致，join59/join60 唯一分叉严格位于槽末1B；Owner、CRC副本、GSerial/BeiZhu/legacy MBR、m_encrypt等继续PARTIAL |
-| 7 | 490B | 22B | 0B | 95.7% | 在原489B基础上，pass-info `bNoUsbChkPasSafe(+0x0A)` 找到 `checkdiskback::Update_EDPEDISKSHOWPARAM` 值相关行为 consumer，并经 SAFE6 policy 被两套独立客户端恢复，1B升级COMPLETE；当前剩3条 entry Version 12B、entry1/2 NeedDisturb 8B、backup-prompt 2B为PARTIAL |
+| 7 | 510B | 2B | 0B | 99.6% | 在既有 entry0 NeedDisturb 行为门控、legacy wrapped8 与 `bNoUsbChkPasSafe` 闭环基础上，本轮把3×Version 12B 与 entry1/entry2 NeedDisturb 8B闭合为 formal ABI compatibility metadata：current producer/profile明确、Windows old/new converter structural-preserve、两版Windows与Linux CDiskReader链均无独立语义消费、真实 profile 全量门禁已锁；仅 backup-prompt 2B为PARTIAL |
 | 8 | 476B | 36B | 0B | 93.0% | header 的 LLGB/logical length/ToolVersion/Labversion/writeTime/ElabOffset/Reserved/MacInfo 已闭合；`+0x080..0x1FF` 又由 Windows/Linux 双 writer、注册侧7-key reader、运行时17-key EdpEDiskCtrl reader、动态 encrypted backing/preserve tail 与22盘17-key实证整体闭合384B；仅 HDSerialInfo/UsbOnlyInfo 36B继续PARTIAL |
 | 9 | 276B | 236B | 0B | 53.9% | EETU magic/time/useCount + `reverse[104]` 已完整闭合；本轮再把 EPPE `+0x188..+0x1FF` 120B 闭合为 **writer-owned zero tail**：SetPassInfoEx显式清零，CUsbRegsiter::GetPassInfoEx 与 modfilesyscheck 均只消费 magic/minPassLen，current EdpDiskCtrl factory vtable不暴露 full-block helper，6/6原始EPPE tail为零；剩余236B集中在 +0x080..0x17F Dept/User/SAPF 多profile重叠区 |
 | 10 | 424B | 88B | 0B | 82.8% | EESI magic + `UsbSuspensionWnd lifecycle/control flag` + 两个16B卷标槽完成；+0x80..0x1FF 已由两个独立 EESI build 的 preserve writer、getter ignore、两个旧 build 无 EESI ownership 与扩展历史实盘闭合为 cross-generation unowned preserve/ignore COMPLETE；仅+0x28..0x7F共88B仍PARTIAL |
@@ -3121,8 +3135,8 @@ SAFE6 只透明保留。COMPLETE 不意味着未来出现其它值时可以机�
 
 总计：
 
-- **完成：3699B / 6656B = 55.6%**
-- **部分已知：2957B / 6656B = 44.4%**
+- **完成：3719B / 6656B = 55.9%**
+- **部分已知：2937B / 6656B = 44.1%**
 - **未知：0B / 6656B = 0.0%**
 
 这是一组**严格下限**，故意宁可低估，不把“能生成/能解析”冒充成“已经完全理解”。
@@ -3137,7 +3151,7 @@ SAFE6 只透明保留。COMPLETE 不意味着未来出现其它值时可以机�
 | 4 | 高度闭合 | 整扇已无UNKNOWN；`+0x047..+0x1FB` 已确认 raw-zero / rolling-encrypted-zero 双历史物理表示且22盘语义均为零。`+0x45/+0x46` 已闭合为 `bDataToServer/bConnetServer` post-XOR wire bytes，并证明官方 ReadSector4 不补偿该例外；inspect 已恢复 producer-side flags，Provision 已改为 current SAFE6 full rolling + post-XOR覆盖。两flag因缺最终业务consumer仍PARTIAL |
 | 5 | canonical 已知 | opaque preserve / 写保护探测 scratch；当前 22/22 全零，但零不是协议固定要求 |
 | 6 | 高度闭合 | 整扇已无 UNKNOWN。216B UsbMainBSec static material、autoid[16]、Office[64]、Label物理56B均完成；Dept 又按真实代际分叉拆成前63B COMPLETE + 槽末1B PARTIAL：short profile 的 C-string/backing 已闭合，current/legacy long profile 前63B逐字节一致，只有 `+0x3F` 因 join60=A8 / join59=00 且旧 producer 未定位继续PARTIAL。Owner仍受 long-User 正向实盘缺口影响，GSerial/BeiZhu 与 legacy MBR fragment 继续PARTIAL |
-| 7 | 高度闭合 | 物理0x40 packed ABI、PartionCount、rolling XOR、entry0 NeedDisturb compatibility gate、v0x0064 legacy wrapped8均已锁；`bNoUsbChkPasSafe` 已由 checkdiskback SAFE6 policy 行为链闭合；当前只剩22B PARTIAL：3×Version、entry1/2 NeedDisturb、pass-info +0C/+0D |
+| 7 | 高度闭合 | 物理0x40 packed ABI、PartionCount、rolling XOR、entry0 NeedDisturb compatibility gate、v0x0064 legacy wrapped8均已锁；3×Version 与 entry1/entry2 NeedDisturb 已按 compatibility metadata structural-preserve/negative-semantic-consumer 模型闭合；`bNoUsbChkPasSafe` 已由 checkdiskback SAFE6 policy 行为链闭合；当前只剩 pass-info +0C/+0D 两字节 PARTIAL |
 | 8 | 高度闭合 | **LBA8 dynamic ELABEL + encrypted backing + preserved tail** 已闭合：17-key wire template 中7键由注册侧 Windows/Linux reader回填，运行时 EdpEDiskCtrl reader 则解析全部17键；NUL后块内既有backing随动态前缀加密，块外tail原样preserve。384B动态区已COMPLETE；当前只剩 HDSerialInfo 4B 与 legacy UsbOnlyInfo 32B PARTIAL |
 | 9 | 高度闭合 | 整扇已无UNKNOWN；EETU `reverse[104]` 已完全闭合但必须区分两种 producer：前102B是 `WriteNormalULabel` 未初始化 caller backing，被 runtime 整块透明保存；末2B是 `SetTempUse` 显式零初始化。EPPE 120B 又由 current SetPassInfoEx 显式零 producer、注册侧 GetPassInfoEx / modfilesyscheck 仅消费 magic+minPassLen、current EdpDiskCtrl 对外 factory vtable 不暴露 full-block helper及6/6原盘零tail闭合为 writer-owned zero region。当前剩余236B均位于 BuildSector6 long-Dept/User continuation 与 SAPF/backing 多profile复用区 |
 | 10 | 高度闭合 | 前0x80为 EESI round-trip payload；`+0x04` 已闭合为 `UsbSuspensionWnd lifecycle/control flag`：两套独立UI启动默认写1、标签设置保存写0，0/非0分别进入 Destroy 与刷新/Show 行为链；后0x180按 cross-generation unowned preserve/ignore 语义 COMPLETE。当前仅+0x28..0x7F共88B继续PARTIAL |
@@ -3151,7 +3165,7 @@ SAFE6 只透明保留。COMPLETE 不意味着未来出现其它值时可以机�
 - LBA4 onlyID2Nd 及关联动态字段的生成源；
 - LBA0 前400B bootstrap 主体/profile 选择；
 - LBA6 0x1c0..0x1ed 不同格式代际的准确字段来源。
-- LBA7 Version、entry1/entry2 NeedDisturb 与 pass-info `BackupPromptPeriod` 两字节的最终消费者；
+- LBA7 pass-info `BackupPromptPeriod` 两字节的历史非零 profile / 单位 / 最终 consumer；
 - LBA12 NeedDisturb 在新版主路径中的进一步业务作用（旧版 fallback 门控已闭合）；
 - LBA12 `+0x48..+0x57` 已闭合为 `EncryptFileKey32[16]` cross-generation compatibility slot；后续若发现独立非零ABI，只能扩展 profile，不得回退成“未知 key”或强制零；
 - LBA12 表尾 `+0x0C/+0x0D` BackupPromptPeriod 的准确跨组件消费语义。

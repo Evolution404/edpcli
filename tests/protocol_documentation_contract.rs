@@ -182,7 +182,10 @@ fn documentation_keeps_the_official_provisioning_chain_and_strict_rules() {
         "usb20dll.dll!_IF_DiskFormat",
         "NewUsb20.dll!FormatExA_NetacAPI",
         "LBA7 packed 64-byte ABI versus Linux natural 72-byte ABI",
-        "LBA7 v0x0064 packed legacy file-key wrapping",
+       "LBA7 v0x0064 packed legacy file-key wrapping",
+        "compatibility metadata 生命周期闭合",
+        "CDiskReader::GetTagPartitionInfo",
+        "formal ABI compatibility metadata",
         "Update_EDPEDISKSHOWPARAM",
         "bNoUsbChkPasSafe",
         "0x1003DC16..0x1003DC26",
@@ -223,8 +226,8 @@ fn documentation_keeps_the_official_provisioning_chain_and_strict_rules() {
         "LBA6 progress must retain the closed Dept prefix, autoid, Office, and Label backing semantics"
     );
     assert!(
-        DOC.contains("| LBA7 | 490 | 22 | 0 | 95.7% |"),
-        "LBA7 progress must retain entry0 NeedDisturb and the closed bNoUsbChkPasSafe policy byte"
+        DOC.contains("| LBA7 | 510 | 2 | 0 | 99.6% |"),
+        "LBA7 progress must retain the closed Version/NeedDisturb compatibility metadata and bNoUsbChkPasSafe policy byte"
     );
     assert!(
         DOC.contains("| LBA8 | 476 | 36 | 0 | 93.0% |"),

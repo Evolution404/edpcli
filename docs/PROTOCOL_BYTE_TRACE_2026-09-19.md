@@ -398,7 +398,7 @@ post-XOR 写回 `+0x45/+0x46`。历史 raw-zero 实盘仅作为兼容读取 prof
 | LBA4 | 36 | 476 | 0 | 7.0% |
 | LBA5 | 512 | 0 | 0 | 100.0% |
 | LBA6 | 419 | 93 | 0 | 81.8% |
-| LBA7 | 490 | 22 | 0 | 95.7% |
+| LBA7 | 510 | 2 | 0 | 99.6% |
 | LBA8 | 476 | 36 | 0 | 93.0% |
 | LBA9 | 276 | 236 | 0 | 53.9% |
 | LBA10 | 424 | 88 | 0 | 82.8% |
@@ -408,8 +408,8 @@ post-XOR 写回 `+0x45/+0x46`。历史 raw-zero 实盘仅作为兼容读取 prof
 
 当前总计：
 
-- **COMPLETE：3699B / 6656B = 55.6%**
-- **PARTIAL：2957B / 6656B = 44.4%**
+- **COMPLETE：3719B / 6656B = 55.9%**
+- **PARTIAL：2937B / 6656B = 44.1%**
 - **UNKNOWN：0B / 6656B = 0.0%**
 
 LBA11 已完整闭合为 512B COMPLETE。此前卡住的后半 252B 不是“某型号盘偶尔使用
@@ -492,7 +492,9 @@ DWARF 中恢复出的原始声明文件/行号与本地函数地址：
 | LBA6 | 0x1F4–0x1FB | COMPLETE | UsbMainBSec static zero tail before checksum | Windows/Linux BuildSector6 都由 `UsbMainBSec` 初始化，字段 overlay 最后只写到 `+0x1F3`，故8B保持模板零 | 两端 ReadSector6 的 checksum 覆盖到 `+0x1FB`；字段 parser无独立读取 | 严格22份22/22解密为8B零，官方模板同样为零；CI含独立SanDisk锁定 | explicit template-zero producer + checksum consumer +实盘，8B COMPLETE |
 | LBA6 | 0x1FC–0x1FF | COMPLETE | SAFE6 checksum | writer 对前508B计算 checksum | reader/inspect 校验 | 22/22 校验通过 | 完成 |
 | LBA7 | 0x000–0x0BF | PARTIAL | 3×64B packed EDPF 区 | Windows old-table writer/runtime；Linux natural ABI 仅作字段名参考 | 多处 reader/登录/挂载 | 22盘均按0x40 stride成立 | 逐字段状态见详细审计；不能用 Linux 0x48 natural stride 解析物理 LBA7 |
+| LBA7 | 每条entry +0x004–+0x007 | COMPLETE | entry-local `Version` compatibility metadata | `CreatePartitions` 先清零3×0x40 packed old table，三条都没有 `+0x04` 覆盖写，因此 current producer 为0；Windows `0x40->0x60` 与 `0x60->0x40` converter 均逐条结构保留该DWORD | 两版 `vrvaud_c` 对完整0xC0 packed table 的行为 xref 均不读取三条 Version；协议代际由14B pass-info Version 决定。Linux 对应 old→new converter 也只结构搬运；`CDiskReader::GetTagPartitionInfo/DecryptFileKey/CheckFileKeyCrc/ReadFileSysSector0/DecryptFileSysSector0` 的真实消费字段分别集中在 Flag/PartionType/UserKeyCRC、StartSector、FileKeyCRC、wrapped key、EncryptMode，均不读取 entry Version | committed original fixtures + 独立真实免密 SanDisk 的全部有效 LBA7 entries 均 `Version=0`；扩展只读历史去重扫描仍无非零反例 | 不是 Reserved，也不是 PartionCount；闭合的是“formal ABI compatibility metadata，current writer=0、converter structural-preserve、runtime negative-semantic-consumer”的完整生命周期，3×4B=12B COMPLETE |
 | LBA7 | entry0 +0x010–+0x013 | COMPLETE | entry0 `NeedDisturb` MBR scramble/descramble gate | Windows `CreatePartitions` 对 entry0 显式写入调用者传入的 `NeedDisturb=1`；old/new ABI converter 双向保留该DWORD | 两版 Windows `vrvaud_c` 的 `NewCheckDisTurbUsb(*)` 直接检查 packed entry0 `NeedDisturb@+0x10 != 0`；`SetProtect` 在该检查链后调用 `sub_1006ff80 -> sub_1006e580`，把 LBA0 `+0x1BE..+0x1FD` 的64B MBR表替换为静态 scramble 表；`UnsetProtect -> sub_1006ffd0 -> sub_1006e9b0` 则从 LBA2 读整扇恢复到 LBA0 并刷新磁盘属性 | 严格22份 original real-device：22/22 entry0 `NeedDisturb=1`；另有真实免密 SanDisk 两条-entry profile 同样 entry0=1 | 字段不是泛化“防篡改”位，而是驱动侧是否进入系统可见 MBR 分区表 scramble/descramble 流程的门控；静态扰动表只有一条 type=0x04、start_lba=66、sector_count=1 的占位 entry。entry1/entry2 的同名字段仍未找到独立 consumer |
+| LBA7 | entry1/entry2 +0x010–+0x013 | COMPLETE | positional `NeedDisturb` compatibility metadata | current `CreatePartitions` 的调用参数固定为1：entry0/entry1 显式写1，entry2无覆盖写而继承整表清零0；Windows old/new converter 双向结构保留该DWORD | 两版 `vrvaud_c` 的行为读取只命中 entry0 `NeedDisturb`；entry1/entry2 没有条件分支或参数映射。Linux 对应 old→new converter保留字段，但 `CDiskReader` 文件系统检查链不读 NeedDisturb | committed original fixtures 全量门禁按**位置**锁定三-entry `(1,1,0)` 与两-entry `(1,1)`；独立真实免密 SanDisk 的 type4 位于 entry1 且值为1，证明该字段不是 `PartionType -> NeedDisturb` 恒等式；扩展历史扫描没有第三种 positional profile | 8B 闭合为 current writer positional compatibility profile + structural-preserve + cross-platform negative semantic consumer；COMPLETE 不把 entry1/2 解释成 entry0 的 MBR 扰动行为，也不禁止未来其它 writer profile |
 | LBA7 | 每条entry +0x038–+0x03F | COMPLETE | 8B legacy wrapped file-key | Windows `sub_10028DB0` 以 `fold32(password)` 对两个32位 half 做对称 XOR 包装；`sub_100125B0` 映射回 old 0x40 entry；`SavePartionSector/sub_10028580 -> sub_10010FC0` 写 LBA7 | `sub_10026050` 对 v0x0064 固定解包8B，随后以 `sub_10038840` 计算 CRC32 并比较同 entry `FileKeyCRC(+0x34)`；改密后反向重包 | 22份 original real-device 中全部28条非零 type2/type4 legacy entry 独立复算 28/28 PASS；默认 `fold32("0000aaaa")=0x91919191` | **LBA7 v0x0064 packed legacy file-key wrapping** 已闭合；FileKeyCRC 4B此前已经计入 COMPLETE，本轮仅新增3×8B=24B，禁止重复计数 |
 | LBA7 | 0x0CA | COMPLETE | pass-info `bNoUsbChkPasSafe` | current Windows `CreatePartitions/sub_1003DB50` 明确从制标请求写 `tail+0x0A`；`WriteNormalULabel/sub_10046E80` 又把 `UsbWriteParam+0x7EC` 传入该请求字段 | 独立 Linux 官方 `checkdiskback::Update_EDPEDISKSHOWPARAM@0x406B70` 直接执行 `cmp byte [pass+0x0A],1; setne showparam+0x03`，随后 `CreateSafe6TmpPolicyFile@0x407D50` 将结果纳入 CRC/加密 SAFE6 policy；独立 `EdpEDiskBack::Safe6PolicyFile::GetSafe6Policy@0x4100B0` 与 `linuxedpedisk::Safe6PolicyFile::GetSafe6Policy@0x41EAA0` 解密并恢复该 policy/runtime 参数 | 严格22份原始盘：18×0、4×1；22/22 LBA7/LBA12 同盘取值一致；CI `pass_info_no_usb_safe_flag_varies_and_matches_between_lba7_and_lba12` 锁定0/1双值与跨扇区一致性 | 字段行为闭合到“值等于1时将 SAFE6 show-policy byte +3 清零，否则置1”，不是仅 opaque round-trip；producer、真实行为 consumer、跨独立客户端传递和实盘双值证据齐全 |
 | LBA7 | 0x0CC–0x0CD | PARTIAL | pass-info `ShareBackuppromptPeriod / EncryptBackuppromptPeriod` | current `CUsbRegsiter::CreatePartitions/sub_1003DB50` 机器码 `0x1003DC16..0x1003DC26` 先把完整14B pass-info 显式清零；后续字段 store 最远只到 `pass+0x0A`（`0x1003E78A..0x1003E790`），因此 `+0x0C/+0x0D` 是明确的 current writer-owned zero，而不是未初始化字节。LBA7 builder 随后原样接收该14B结构 | current/旧版 Windows `EdpEDiskCtrl`、Linux `libcemsfilesyscheck.so`、`checkdiskback`/SAFE6 policy 路径均未发现这2B的值相关读取。两代 `vrvaud_c` 虽存在独立策略项 `BackupPromptInfo` 并按其首字节分支，但其磁盘 old-table 全局只承接 `0xC0 = 3×0x40` packed entries、明确不含14B pass-info tail，且未发现任何数据流把该策略项连接到 `+0x0C/+0x0D` | 严格22份 LBA7/LBA12 均为0 | 正式字段边界与 current-zero producer 已闭合，并排除了名称相近的 `BackupPromptInfo` 误接；但单位/取值域、历史非零 producer/profile 和真实业务 consumer仍缺，继续 PARTIAL |
@@ -1501,7 +1503,7 @@ for each partition:
     entry.EncryptMode   = mode
 ```
 
-### 6.0 entry Version 与 entry1/entry2 NeedDisturb：producer 已闭合到赋值来源，consumer 仍缺
+### 6.0 entry Version 与 entry1/entry2 NeedDisturb：compatibility metadata 生命周期闭合
 
 本轮直接验证 Windows 官方 PE 机器码：
 
@@ -1534,7 +1536,7 @@ NeedDisturb=0。回归测试
 \`lba7_need_disturb_is_not_a_partition_type_invariant\`
 固定这一 profile/位置差异。
 
-consumer 继续向下追踪后的边界：
+consumer / structural-preserve 继续向下追踪后的边界：
 
 - 两版官方 \`vrvaud_c\` 都把完整 packed old table 读入缓冲；
 - \`NewCheckDisTurbUsb\` / \`NewCheckDisTurbUsbEx\` 实际只检查
@@ -1547,21 +1549,46 @@ consumer 继续向下追踪后的边界：
   `entry0 NeedDisturb@base+0x10` 的行为读取；entry1/entry2 `+0x10`
   和三条 `Version@+0x04` 均无直接 xref。动态循环也只读取 `PartionType@+0x0C`；
 - Linux \`CLabelManage::GetPartionFromOld\` 对 Version/NeedDisturb 只是 ABI 搬运；
-- Linux \`PartitionHeader\` 体系会携带整条 new entry，但已扫描的解密/校验方法没有
-  发现这两个字段参与行为分支；
+- Linux \`PartitionHeader\` 体系会携带整条 new entry；进一步对
+  \`CDiskReader::GetTagPartitionInfo\`、\`DecryptFileKey\`、
+  \`CheckFileKeyCrc\`、\`ReadFileSysSector0\`、
+  \`DecryptFileSysSector0\` 的真实机器码逐一复核后，消费字段集中在
+  Flag/PartionType/UserKeyCRC、StartSector、FileKeyCRC、wrapped key、EncryptMode，
+  均不读取 entry \`Version@+0x04\` 或 \`NeedDisturb@+0x10\`；
 - 旧 Windows \`EdpEDiskCtrl\` 读取 old LBA7 后，实际协议代际仍由
   14B pass-info Version 决定，不依赖 entry \`Version@+0x04\`。
 
-实盘方面，22份原始生成参考的全部有效 entry 与新增真实免密 SanDisk 两条 entry
-均为 \`Version@+0x04=0\`。这足以闭合“当前 writer 为什么是0”和字段物理边界，
-但按本项目 COMPLETE 标准，没有业务 consumer 就不升级：
-entry Version 与 entry1/entry2 NeedDisturb 继续 PARTIAL。
-\`lba7_entry_version_is_not_partition_count_across_real_profiles\`
-同时锁死 \`+0x04 Version\` / \`+0x08 PartionCount\` 的边界，防止旧解析错误复发。
+实盘方面，committed original fixtures 的全部有效 entry 与新增真实免密 SanDisk
+两条 entry 均为 \`Version@+0x04=0\`；扩展只读历史扫描也没有发现非零 Version。
+NeedDisturb 则稳定按**位置 profile**出现：
 
-因此当前剩余20B不能因为“跨两版都没有读取”而当作 Reserved/zero COMPLETE：
-Version/NeedDisturb 都是正式 ABI 字段，converter 也会保留其值；负 xref 只能收紧
-当前组件的“不消费”边界，不能证明其它历史组件永远忽略它们。
+- 三条 entry：\`(1,1,0)\`；
+- 两条 entry：\`(1,1)\`。
+
+尤其 SanDisk 的 type4 位于 entry1 且 NeedDisturb=1，而标准三分区 type4 位于
+entry2 且 NeedDisturb=0，因此它不能被解释成 `PartionType -> NeedDisturb`
+恒等映射。回归门禁现在对所有 committed original fixtures 逐条锁定
+Version=0 与上述 positional NeedDisturb profile，而不是只抽两个代表盘。
+
+这里的 COMPLETE 语义必须与 entry0 的真实 MBR 行为分开：
+
+- **3×Version 共12B**：formal ABI compatibility metadata。current writer 由整表
+  zero-init 产生0；Windows old/new converter 双向 structural-preserve；
+  Windows 两个独立 build 与 Linux 文件系统检查链均不把它作为版本选择或行为条件，
+  真正协议代际由 pass-info Version 决定；
+- **entry1/entry2 NeedDisturb 共8B**：current writer 的 positional
+  compatibility metadata。entry1继承调用者参数1，entry2继承 zero-init 0；
+  converter structural-preserve；已审 Windows/Linux 运行时没有 entry1/2
+  行为读取。只有 entry0 的同名 DWORD 另有 MBR scramble/descramble 行为 consumer。
+
+因此这20B现在满足与 `EncryptFileKey32` compatibility slot 相同的严格闭环模型：
+**明确 producer/profile + 双向/跨ABI structural preserve + cross-platform
+negative semantic consumer + 多真实 profile 实盘门禁**。它们不是 Reserved，
+也不能被清洗为统一常量；未来若发现其它 writer profile，应扩展 profile 而不是
+推翻“当前运行时只结构保留、不赋予独立业务语义”的闭环。
+
+本轮新增 **20B PARTIAL -> COMPLETE**，LBA7 只剩 pass-info
+\`+0x0C/+0x0D\` 两个 BackupPromptPeriod 字节继续 PARTIAL。
 
 ### 6.1 entry0 NeedDisturb：4B 已完整闭合
 
@@ -1716,12 +1743,13 @@ Linux `0x0E6` 偏移混成 Windows packed `0x0CE` 的物理边界。
 由 **UNKNOWN -> COMPLETE**。LBA7 严格状态随之变为：
 
 ```text
-490 COMPLETE / 22 PARTIAL / 0 UNKNOWN = 95.7%
+510 COMPLETE / 2 PARTIAL / 0 UNKNOWN = 99.6%
 ```
 
 post-table 审计当时新增306B COMPLETE；后续又闭合 pass-info
-`bNoUsbChkPasSafe(+0x0A)` 1B。当前 Version、entry1/entry2 NeedDisturb 和
-BackupPromptPeriod 两字节仍保持 PARTIAL，不能被相邻区域的闭合带着升级。
+`bNoUsbChkPasSafe(+0x0A)` 1B。本轮再按 compatibility metadata 生命周期闭合
+3×Version 共12B与 entry1/entry2 NeedDisturb 共8B；当前只剩
+BackupPromptPeriod 两字节保持 PARTIAL。
 
 ### 6.3 LBA12 +0x38..+0x47：v0x0206 默认密码的 mode2 wrapping 已闭合，但整字段仍 PARTIAL
 
