@@ -201,8 +201,8 @@ fn documentation_keeps_the_official_provisioning_chain_and_strict_rules() {
         "LBA8 progress must retain the closed dynamic ELABEL/backing/tail storage semantics"
     );
     assert!(
-        DOC.contains("| LBA9 | 156 | 356 | 0 | 30.5% |"),
-        "LBA9 progress must retain the closed EETU reverse backing semantics"
+        DOC.contains("| LBA9 | 276 | 236 | 0 | 53.9% |"),
+        "LBA9 progress must retain the closed EETU reverse backing and EPPE writer-owned zero tail semantics"
     );
     assert!(
         DOC.contains("| LBA10 | 424 | 88 | 0 | 82.8% |"),

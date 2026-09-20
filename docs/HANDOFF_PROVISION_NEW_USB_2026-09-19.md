@@ -26,10 +26,10 @@ producer + 官方 consumer/行为 + 原始实盘验证**同时闭合，才能标
 -> BusManageImp::WriteNormalULabel -> CEMSUsbRegsiter.dll::CUsbRegsiter::RegsiterUsb
 -> BuildSector* -> WriteSectorData(count=0x0D)`。
 
-截至本次 LBA11 repair-profile 闭环，严格统计为：
+截至本次 LBA9 EPPE writer-owned zero tail 闭环，严格统计为：
 
-- **COMPLETE：3536 / 6656B = 53.1%**
-- **PARTIAL：3120 / 6656B = 46.9%**
+- **COMPLETE：3656 / 6656B = 54.9%**
+- **PARTIAL：3000 / 6656B = 45.1%**
 - **UNKNOWN：0 / 6656B = 0.0%**
 
 当前各 LBA 严格状态以主账本为唯一准绳，最新关键增量：
@@ -55,7 +55,7 @@ producer + 官方 consumer/行为 + 原始实盘验证**同时闭合，才能标
   明确禁止再把 raw-zero/full-rolling 选择条件等同于 current/legacy identity 代际。
   两flag仍因缺最终业务consumer保持PARTIAL，raw-zero历史 producer/选择条件也仍未定位，
   严格完成字节数不增加。
-- **LBA9 = 156 COMPLETE / 356 PARTIAL / 0 UNKNOWN = 30.5%**。
+- **LBA9 = 276 COMPLETE / 236 PARTIAL / 0 UNKNOWN = 53.9%**。
   EETU `reverse[104]` 已进一步闭合：Linux DWARF正式给出
   `tagEdpEDiskTmpUse.reverse[104]@+0x18`。Windows `SetTempUse` 清零目标结构后，
   从上层请求 `+0x44` 固定复制前102B；继续回溯 `BusManageImp::WriteNormalULabel`
@@ -66,7 +66,16 @@ producer + 官方 consumer/行为 + 原始实盘验证**同时闭合，才能标
   登录递减次数后 `WriteTempUseInfo` 又整0x80透明写回；reverse 无独立业务读点。
   原始非零 LBA9 的 EETU 当前均观测 reverse=0，但零不是协议固定要求。
   因此前102B升COMPLETE；末2B此前已由 SetTempUse 显式零初始化闭合。
-  EPPE writer-zero tail、SAPF trailing/backing 等已无UNKNOWN。
+  EPPE `+0x188..+0x1FF` 120B 又完成 strict closure：Windows
+  `SetPassInfoEx` 明确把 magic 后124B清零并只回填 `+0x04=minPassLen`；
+  正式 `CUsbRegsiter::GetPassInfoEx` 解密校验后只返回该DWORD，
+  `modfilesyscheck::ReadMinPassLenInfo` 也只消费 magic/minPassLen。
+  两套 `EdpDiskCtrl` 虽保留 full-block compatibility helper，但 current DLL
+  只导出 Create/Release factory，factory 返回对象的 vtable `0x1008021c`
+  不包含 `GetPassExInfo/sub_10022AF0`；6/6原始 EPPE 的120B tail全零。
+  因此该120B由PARTIAL升COMPLETE，语义为 **writer-owned zero tail**；
+  未来若遇历史非零 tail 仍必须保留/报告，不能据此机械清零。
+  SAPF trailing/backing 等继续无UNKNOWN但仍属PARTIAL。
   本轮进一步纠正中间区：Windows/Linux/vrvaud 三套 BuildSector6 都会把
   长 Dept `[60..NUL]` 写到 LBA9+0x80、长 User `[28..NUL]` 写到
   LBA9+0x100，所以这里不是纯 preserve 区。严格22盘有8份 long-Dept：
@@ -117,7 +126,7 @@ producer + 官方 consumer/行为 + 原始实盘验证**同时闭合，才能标
   producer/选择条件未知继续PARTIAL。
   Dept/Owner 长值的 continuation 还确认落在 LBA9+0x80/+0x100，
   并已用 join60/join59 双profile实盘门禁锁定。当前全 LBA0–12 已无 UNKNOWN，
-  目前全局仍有3120B PARTIAL，绝不能把“UNKNOWN=0”当成全部协议完成。
+  目前全局仍有3000B PARTIAL，绝不能把“UNKNOWN=0”当成全部协议完成。
 
 - **LBA7 = 490 COMPLETE / 22 PARTIAL / 0 UNKNOWN = 95.7%**。
   真实物理 LBA7 已锁定为 **3×0x40 packed EDPF + 14B pass-info@+0xC0**，

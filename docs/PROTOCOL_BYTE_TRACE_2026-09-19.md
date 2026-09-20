@@ -400,7 +400,7 @@ post-XOR 写回 `+0x45/+0x46`。历史 raw-zero 实盘仅作为兼容读取 prof
 | LBA6 | 419 | 93 | 0 | 81.8% |
 | LBA7 | 490 | 22 | 0 | 95.7% |
 | LBA8 | 476 | 36 | 0 | 93.0% |
-| LBA9 | 156 | 356 | 0 | 30.5% |
+| LBA9 | 276 | 236 | 0 | 53.9% |
 | LBA10 | 424 | 88 | 0 | 82.8% |
 | LBA11 | 512 | 0 | 0 | 100.0% |
 | LBA12 | 442 | 70 | 0 | 86.3% |
@@ -408,8 +408,8 @@ post-XOR 写回 `+0x45/+0x46`。历史 raw-zero 实盘仅作为兼容读取 prof
 
 当前总计：
 
-- **COMPLETE：3536B / 6656B = 53.1%**
-- **PARTIAL：3120B / 6656B = 46.9%**
+- **COMPLETE：3656B / 6656B = 54.9%**
+- **PARTIAL：3000B / 6656B = 45.1%**
 - **UNKNOWN：0B / 6656B = 0.0%**
 
 LBA11 已完整闭合为 512B COMPLETE。此前卡住的后半 252B 不是“某型号盘偶尔使用
@@ -517,7 +517,7 @@ DWARF 中恢复出的原始声明文件/行号与本地函数地址：
 | LBA9 | 0x120–0x17F | PARTIAL | post-SAPF region / long-User continuation remainder | Windows/Linux/vrvaud 三套 current `BuildSector6` 在 User>=32 时可由 `User[28..NUL]` 连续写到 LBA9+0x100..，最大可覆盖到+0x17F；若不触发该长User profile，则注册路径保留既有 backing。运行时 `SetTempUse` 与 `SetPassInfoEx` 不覆盖这96B | `ReadSector6` 的 User-marker 分支会把 LBA9+0x100 起完整0x80B复制回 owner continuation；SAPF reader只到+0x11F，不解释+0x120..+0x17F | 严格22盘没有长User正向样本；14/14 SAPF盘该96B全零，独立SanDisk亦零 | 旧“current纯preserve/ignore”结论已纠正；这里是可选 long-User continuation + otherwise preserve 的多profile区。缺真实长User样本且可能承接其它历史 backing，继续PARTIAL |
 | LBA9 | 0x180–0x183 | COMPLETE | EPPE magic | `SetPassInfoEx` | `ReadPassExInfo` | 6样本 | 完成 |
 | LBA9 | 0x184–0x187 | COMPLETE | minimum password length | writer限制6..19 | `ReadMinPassLenInfo` 返回该DWORD | 6/6=8 | 完成 |
-| LBA9 | 0x188–0x1FF | PARTIAL | EPPE writer-zero tail / public API round-trip remainder | PE机器码 `SetPassInfoEx/sub_1003ADD0`：先校验输入DWORD为6..19，再对 EPPE `+0x04..+0x7F` 124B整体清零，写 magic，随后明确 `EPPE+0x04=*arg0`；因此 `+0x08..+0x7F` 120B 在 current writer 中为显式零 | `modfilesyscheck::ReadMinPassLenInfo` 只消费 magic/+0x04；但 `EdpDiskCtrl::ReadPassExInfo -> CEdpDiskControl::GetPassExInfo` 会把完整0x80B返回公开API调用者，尚无正式结构声明证明这120B是 reserved，也无法排除外部调用者消费 | 严格22份中6份EPPE；6/6 minPassLen=8 且解密后120B全零；CI门禁 `real_eppe_samples_keep_the_current_writer_zero_tail` | producer和当前实盘已闭合，但公开API仍 round-trip 全块，缺正式字段名/完整 consumer 闭环；从UNKNOWN降PARTIAL，不升COMPLETE |
+| LBA9 | 0x188–0x1FF | COMPLETE | **EPPE writer-owned zero tail** | PE机器码 `SetPassInfoEx/sub_1003ADD0`：先校验输入DWORD为6..19，再对 EPPE `+0x04..+0x7F` 124B整体清零，写 magic，随后明确 `EPPE+0x04=*arg0`；因此 `+0x08..+0x7F` 120B 在 current writer 中为显式零 | 正式注册侧 `CUsbRegsiter::GetPassInfoEx` 解密并校验 EPPE 后只执行 `*out = *(decoded+0x04)`；独立 `modfilesyscheck::ReadMinPassLenInfo` 同样只消费 magic/+0x04。两套 `EdpDiskCtrl` 虽保留可搬运完整0x80B的 `ReadPassExInfo/GetPassExInfo` compatibility helper，但其外层对象由唯一两个 DLL export（Create/Release）创建，current factory vtable `0x1008021c` 不包含该 helper，反编译交叉引用也仅见实现/相邻 thunk，未形成 current 产品语义消费路径 | 严格22份中6份EPPE；6/6 minPassLen=8 且解密后120B全零；CI门禁 `real_eppe_samples_keep_the_current_writer_zero_tail` | 120B 的 current producer、两个独立 semantic reader 的 negative consumer、当前公开接口边界与原始实盘均闭合，按 writer-owned zero region 升 COMPLETE。COMPLETE 不授权清洗未知历史非零 profile：兼容读取若未来遇到非零 tail 应保留/报告，而不是据此臆造业务字段 |
 | LBA9 | 0x080–0x0FF | PARTIAL | long-Dept continuation slot (current join=60 / legacy join=59) | Windows `BuildSector6/sub_10013FD0`、Linux `BuildSector6@0x1CAAC` 与 `vrvaud_c::sub_10118ED0` 三套 current producer一致：Dept长度>=64时在 LBA6+0写 `0x40245E2A + Dept前60B`，再把 `Dept[60..NUL]` 写入 LBA9+0x80；若未触发长Dept则该builder不覆盖此区 | Windows `CheckLabel/sub_100152A0`、Linux `ReadSector6@0x1E2CC` 与 `cemsudisk` reader 都识别同一 marker，并支持两种接缝：inline[59]!=0时 continuation 写回 Dept[60..]；inline[59]==0时从 Dept[59..] 覆盖，以修复 legacy GBK split profile | 严格22盘恰有8盘 marker+continuation：4盘 join=60、continuation含NUL共17B；4盘 join=59、continuation含NUL共18B；两组均重建为相同76B合法GBK Dept。CI `lba9_dept_continuation_preserves_both_official_reader_join_profiles` 锁定两种真实profile | current producer、双profile官方consumer及22盘实证已闭合；但现有三套writer都只能生成join=60，4份join=59原盘的旧producer仍未定位，按严格规则整128B继续PARTIAL，不得再称 opaque backing |
 | LBA10 | 0x000–0x003 | COMPLETE | EESI magic | Set EESI writer | Get EESI reader | 1个SanDisk样本 | 完成 |
 | LBA10 | 0x004–0x007 | COMPLETE | **UsbSuspensionWnd lifecycle/control flag** | 两套独立 `EdpEDisk.exe`（SHA-256 `cfa13177...` / `dc71c300...`）启动时都先将完整0x80B EESI缓冲清零并显式写 `+0x04=1` 后调用 vtable `+0x20 GetEdpEdiskSetInfo`；同两套程序的卷标设置对话框 `IDOK` handler zero-initializes the full 0x80B EESI payload，只填 `+0x08/+0x18` 两个卷标，再经 vtable `+0x24 SetEdpEdiskSetInfo` 保存，因此该 producer 路径明确写 `+0x04=0`；底层 setter 只强制 magic，其余DWORD原样落盘 | 两套程序均加载 `UsbSuspensionWnd.dll` 的 `Show/Destroy/SetParentWnd`：读回 EESI 后 `+0x04==0` 路径调用 `Destroy`；自动登录成功后 `+0x04!=0` 且 suspension-window helper 已初始化时，进入刷新/`Show` 链；`UserLogin` 自身不把该DWORD当卷标开关 | 唯一启用 EESI 的原始 SanDisk 实盘解密值为1；21份其它原始盘无 EESI；旧两代 DLL 无 EESI 路径，与“该控制字段属于后续 EESI profile”一致 | 4B边界、0/1官方 producer、值相关 `UsbSuspensionWnd` 行为 consumer、原始实盘均闭合；字段按可观察行为保守命名，不臆造原始 C++ 成员名 |
