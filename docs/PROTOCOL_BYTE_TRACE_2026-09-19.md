@@ -500,7 +500,7 @@ DWARF 中恢复出的原始声明文件/行号与本地函数地址：
 | LBA10 | 0x004–0x007 | COMPLETE | **UsbSuspensionWnd lifecycle/control flag** | 两套独立 `EdpEDisk.exe`（SHA-256 `cfa13177...` / `dc71c300...`）启动时都先将完整0x80B EESI缓冲清零并显式写 `+0x04=1` 后调用 vtable `+0x20 GetEdpEdiskSetInfo`；同两套程序的卷标设置对话框 `IDOK` handler zero-initializes the full 0x80B EESI payload，只填 `+0x08/+0x18` 两个卷标，再经 vtable `+0x24 SetEdpEdiskSetInfo` 保存，因此该 producer 路径明确写 `+0x04=0`；底层 setter 只强制 magic，其余DWORD原样落盘 | 两套程序均加载 `UsbSuspensionWnd.dll` 的 `Show/Destroy/SetParentWnd`：读回 EESI 后 `+0x04==0` 路径调用 `Destroy`；自动登录成功后 `+0x04!=0` 且 suspension-window helper 已初始化时，进入刷新/`Show` 链；`UserLogin` 自身不把该DWORD当卷标开关 | 唯一启用 EESI 的原始 SanDisk 实盘解密值为1；21份其它原始盘无 EESI；旧两代 DLL 无 EESI 路径，与“该控制字段属于后续 EESI profile”一致 | 4B边界、0/1官方 producer、值相关 `UsbSuspensionWnd` 行为 consumer、原始实盘均闭合；字段按可观察行为保守命名，不臆造原始 C++ 成员名 |
 | LBA10 | 0x008–0x017 | COMPLETE | Share/type2 volume label | `SetEdpEdiskSetInfo` 原样复制调用者结构前0x80并加密写入；默认 reader 初始化为GBK“交换区” | `CEdpDiskControl::UserLogin` 将该槽赋给本地 string；type2 分支直接把其 `c_str()` 传给 `SetVolumeLabelA` | 22份原始参考中唯一启用EESI的SanDisk实盘为GBK“交换区”；已加入512B原始证据夹具 | 16B字段语义、writer、consumer、实盘闭合 |
 | LBA10 | 0x018–0x027 | COMPLETE | Encrypt/type4 volume label | 同上；默认 reader 初始化为GBK“保密区” | `UserLogin` type4 分支直接把该槽对应 string 的 `c_str()` 传给 `SetVolumeLabelA` | 唯一启用SanDisk实盘为GBK“保密区”；另一版 `out_raw_data/EdpEDiskCtrl.dll` 同构复核 | 16B字段完整闭合 |
-| LBA10 | 0x028–0x07F | PARTIAL | EESI uninterpreted round-trip payload | current 与另一版 `EdpEDiskCtrl` 的 Get 都解密并向调用者返回完整0x80B；Set 都把调用者完整0x80B（除强制magic）原样加密写入；两套独立 `EdpEDisk.exe` 的卷标设置 `IDOK` producer 又都先把完整0x80B清零、只填 `+0x08/+0x18`，因此该官方 UI producer 明确给这88B写零 | current `UserLogin` 只消费 +0x08/+0x18；两套 `EdpEDisk.exe::OnInitDialog` 外部 getter caller 也只消费两个卷标；设置对话框虽经 vtable +0x24 调用 setter，但没有读取/赋予这88B任何业务值 | 唯一启用SanDisk EESI解密后88B全零 | 已补上真实外部 Get/Set caller 与 current UI 零来源，但底层 API 明确允许这88B round-trip 任意调用者数据，仍缺正式字段划分、非零 profile 与值相关 consumer，保持PARTIAL |
+| LBA10 | 0x028–0x07F | PARTIAL | EESI uninterpreted round-trip payload | current 与另一版 `EdpEDiskCtrl` 的 Get 都解密并向调用者返回完整0x80B；Set 都把调用者完整0x80B（除强制magic）原样加密写入；两套独立 `EdpEDisk.exe` 的卷标设置 `IDOK` producer 又都先把完整0x80B清零、只填 `+0x08/+0x18`，因此该官方 UI producer 明确给这88B写零 | current `UserLogin` 只消费 +0x08/+0x18；两套 `EdpEDisk.exe::OnInitDialog` 外部 getter caller 也只消费 `+0x04/+0x08/+0x18`；设置对话框虽经 vtable +0x24 调用 setter，但没有读取/赋予这88B任何业务值 | 严格22份生成参考中的 SanDisk EESI 解密后88B全零；另有2026-08-04 Netac OnlyDisk 历史真实捕获，LBA6 CRC 与 LBA7/LBA12 EDPF 自洽，独立 device_id 解密后这88B同样全零；后者暂不并入22份严格生成参考 | 已补上真实外部 Get/Set caller、current UI 零来源与第二个历史 EESI profile，但底层 API 明确允许这88B round-trip 任意调用者数据，仍缺正式字段划分、非零 profile 与值相关 consumer，保持PARTIAL |
 | LBA10 | 0x080–0x1FF | COMPLETE | cross-generation unowned preserve/ignore physical tail | 两个独立 EESI build（`ydcc/edpediskctrl.dll` 与 `out_raw_data/EdpEDiskCtrl.dll`）的 setter 都执行同一 read-modify-write：先读完整0x200B LBA10，只以新 EESI 密文覆盖前0x80B，再将后0x180B原样写回；更老 `VRV/edp` 与 `cems/Edp` 两代 DLL 连 EESI magic/Get/Set 路径都不存在，因此同样没有该 tail producer | 两个 EESI getter 都只解密/返回前0x80B，完全不暴露后384B；UserLogin 也只消费前0x80中的卷标；旧两代无 EESI reader，当前收集的其它产品组件未发现 LBA10 tail 入口 | committed originals 的 LBA10 全零 profile + 独立 SanDisk EESI 的 tail384B 全零；额外对本地历史语料按 LBA6 CRC guard + LBA12 EDPF 双重过滤得到58份有效 EDP 前部快照，58/58 tail全零，其中2份独立 EESI 正例同样 tail全零 | COMPLETE 指“该384B跨已知代际均不属于 EESI payload，writer unowned/preserve、reader ignore”的存储行为已闭合，**不**表示协议要求其值恒零；若未来遇到非零 tail，兼容实现必须原样保留 |
 | LBA11 | 0x000–0x003 | COMPLETE | DRKB magic | `CDataSecrity::RandBuffer256` 先写 DRKB | `ReadSector11` 首先校验 DRKB | 22/22 | 完成 |
 | LBA11 | 0x004–0x0FF | COMPLETE | random252 | `RandBuffer256`: `srand(time(NULL)); rand()%255` 共252B | `DataEncrypt/DataDecrypt` 将整个 DRKB块纳入 CRC32 密钥输入 | 22/22；均无0xFF；7 CI夹具回归 | 每字节都是密钥扰动材料，来源和消费闭合 |
@@ -716,6 +716,15 @@ type2/type4 `SetVolumeLabelA` 路径，排除单版本偶然行为。
   - `+0x08..0x17 = "交换区" + NUL/zero fill`；
   - `+0x18..0x27 = "保密区" + NUL/zero fill`；
   - `+0x28..0x7F = 0`，但此事实仍不能把后续区域升级为 padding。
+
+补充历史只读证据：`/Users/zhangyuxi/Desktop/u_disk/utils/backup/disk4_20260804_080927.bin`
+记录 `device_id="disk&ven_netac&prod_onlydisk&rev_0000"`，整份6656B快照
+SHA-256=`3c7e795b1b7110e9866dd31f44ba6e7c5e02ff77a1f70a8b11fcdcaf181fbf39`。
+该捕获的 LBA6 `crcUsbID`、LBA7/LBA12 EDPF 都与同一 device_id 自洽；LBA10
+独立解密再次得到 `EESI/+0x04=1/交换区/保密区`，且 `+0x28..0x7F` 88B全零。
+仓库测试夹具 `netac_onlydisk_20260804_lba10_head.hex` 锁定其前0x80密文。
+由于这份历史快照尚未完成与主22份参考同等级的原始生成来源链审计，它只作为
+额外真实 profile 证据，**不**扩大22份严格生成参考计数，也不据此把88B升级 COMPLETE。
 
 仓库新增原始证据夹具：
 

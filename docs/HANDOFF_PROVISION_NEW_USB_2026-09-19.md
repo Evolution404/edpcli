@@ -197,6 +197,10 @@ producer + 官方 consumer/行为 + 原始实盘验证**同时闭合，才能标
   当前只剩 EESI `+0x28..7F` 88B PARTIAL。两套卷标设置 `IDOK` handler 都明确
   先清零完整0x80B再只填两个卷标，所以 current UI producer 对这88B写零；但底层
   Set API 会完整 round-trip 调用者输入，仍缺正式字段划分、非零 profile 与值相关 consumer。
+  新增补充实盘：2026-08-04 Netac OnlyDisk 历史6656B捕获在独立
+  `device_id=disk&ven_netac&prod_onlydisk&rev_0000` 下通过 LBA6 CRC、LBA7/LBA12
+  EDPF 自洽校验，LBA10 同样解出 `EESI/+0x04=1/交换区/保密区` 且后88B全零；
+  已加测试门禁，但在来源链完全审计前不并入22份严格生成参考，也不提升COMPLETE。
 - LBA1/LBA2：旧文档“保留/全零”结论已纠偏。Linux 官方
   `BuildSector1_Gpt/BuildSector2_Gpt` 和 Windows GPT parser 均证明二者存在
   GPT Header / GPT Partition Table profile；但22/22当前原始 SAFE6 参考都全零，
@@ -269,9 +273,12 @@ producer + 官方 consumer/行为 + 原始实盘验证**同时闭合，才能标
 6. **LBA8 ELABEL 与动态头剩余字段**：
    static ToolVersion/Labversion/writeTime/Reserved 已 COMPLETE；
    继续为 HDSerialInfo/MacInfo/UsbOnlyInfo 与17-key ELABEL 每个业务字段追最终 consumer。
-7. **LBA10 `+0x04` 与 `+0x28..`**：`+0x04` 目前只有“默认/实盘=1、API原样
-   读写”，没有业务分支 consumer，继续保持 PARTIAL；不要沿用旧文档“版本1/时间戳”
-   猜测。两个16B卷标槽已经 COMPLETE，不要重复追。
+7. **LBA10 只剩 `+0x28..+0x7F` 88B**：`+0x04` 已闭合为
+   `UsbSuspensionWnd lifecycle/control flag`，不要回退到“版本1/时间戳”或PARTIAL。
+   两个16B卷标槽也已 COMPLETE。当前88B已有两套官方 UI zero producer、底层
+   Get/Set opaque round-trip，以及 SanDisk + 补充 Netac 两个 EESI 零 profile；
+   继续目标是正式字段声明、非零历史 profile 或值相关 consumer，缺任一关键环节前
+   不得把这88B机械升级为 reserved/COMPLETE。
 8. **LBA0 bootstrap / LBA1-LBA2 GPT 正样本**：LBA0分区表+55AA及3B legacy
    message pointer 已闭合，
    bootstrap 446B仍 PARTIAL。若能找到真实原始 GPT EDP 盘，可用于把 LBA1/LBA2

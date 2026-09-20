@@ -2151,7 +2151,7 @@ producer/consumer，却缺真实正向实盘；同时 SAPF profile 仍与 +0x100
 ```
 
 这次只做 UNKNOWN -> PARTIAL，不增加 COMPLETE。
-- LBA10 在当前 22 份参考样本中为 21 份全零、1 份 SanDisk EESI；该 EESI 样本仅前 `0x80` 为 A6B0 密文，后 `0x180` 物理零。
+- LBA10 在当前 22 份严格生成参考中为 21 份全零、1 份 SanDisk EESI；该 EESI 样本仅前 `0x80` 为 A6B0 密文，后 `0x180` 物理零。另有一份 2026-08-04 Netac OnlyDisk 历史真实捕获可独立解出同构 EESI，但在其生成来源链完全审计前不并入这22份计数。
 
 #### LBA10 EESI：前 0x80B 的读写边界已闭合
 
@@ -2161,7 +2161,7 @@ Windows `edpediskctrl.dll` 同时给出读端和写端：
 - `SetEdpEdiskSetInfo -> sub_1000fc70`：强制写入 `EESI` magic，只加密输入结构前 `0x80`；随后先读取原扇区，只替换前 `0x80`，再把整 512B 写回。
 - 因此 `0x80..0x1ff` **不是 EESI 自身的 padding**。当前 writer 明确保留这 384B 原字节；SanDisk 实盘该区恰好全零只能作为样本事实，不能推导协议恒零。
 
-当前唯一 EESI 实盘解密结果：
+当前严格22份生成参考中的 EESI 实盘解密结果：
 
 - `+0x00..0x03 = EESI`；
 - `+0x04..0x07 = 1`；reader 和两套 `EdpEDisk.exe::OnInitDialog` 外部 caller
@@ -2177,6 +2177,24 @@ Windows `edpediskctrl.dll` 同时给出读端和写端：
 - `+0x28..0x7f`：当前 SanDisk 实盘为零。虽然尚未发现字段消费者和正式字段名，
   但它们已经不能继续标 UNKNOWN：Get/Set 两端都把完整0x80B结构 round-trip，
   所以这88B明确属于 EESI API payload，只是业务语义未解释。
+
+本轮又补到一份独立历史实盘 profile：
+
+- `/Users/zhangyuxi/Desktop/u_disk/utils/backup/disk4_20260804_080927.bin`，
+  metadata 记录 `device_id=disk&ven_netac&prod_onlydisk&rev_0000`，整份6656B
+  SHA-256=`3c7e795b1b7110e9866dd31f44ba6e7c5e02ff77a1f70a8b11fcdcaf181fbf39`；
+- LBA6 解码后的 `crcUsbID[0]=0x5088EE37` 与 `CRC32(device_id)` 精确一致，
+  doubled guard、LBA7 packed EDPF、LBA12 packed EDPF 也都在同一 key 下自洽；
+- LBA10 前0x80按 `CRC32(device_id)=0x5088EE37` 解密后再次得到
+  `EESI`, `+0x04=1`, `+0x08="交换区"`, `+0x18="保密区"`，
+  `+0x28..0x7F` 仍为88B全零；
+- 回归门禁 `historical_netac_lba10_confirms_the_same_eesi_head_and_zero_uninterpreted_payload`
+  固化其前0x80密文与解密结果。
+
+这份 Netac 捕获明显不是 current canonical builder 的简单零模板（LBA6 含真实
+legacy/backing profile），因此可作为额外真实设备/profile 佐证；但其“原始生成来源”
+尚未达到主22份参考同等审计强度，所以本轮**不**把它并入严格生成参考计数，也不因为
+两份 EESI 的88B都为零就把 `+0x28..0x7F` 升 COMPLETE。
 
 本轮继续专门追 `+0x04`，先排除了一个很自然但错误的解释，再找到了真实行为链：
 
@@ -2249,8 +2267,8 @@ current `UserLogin` 对本地 EESI 输出结构只读取 `+0x08/+0x18` 两个卷
 只填写两个卷标再经 vtable+0x24 Set，因此 current UI producer 对这88B的来源为零。
 
 这些证据补齐了真实外部 Get/Set caller 和 current UI producer 零来源，但仍不足以
-COMPLETE：底层 Set API 明确允许调用者完整 round-trip 这88B；唯一启用 EESI 的
-SanDisk 原盘这88B全零，仍不能替代正式字段划分、非零 profile 或值相关 consumer。
+COMPLETE：底层 Set API 明确允许调用者完整 round-trip 这88B；严格 SanDisk EESI
+与补充 Netac 历史 EESI 的88B都为零，仍不能替代正式字段划分、非零 profile 或值相关 consumer。
 
 #### `+0x80..0x1FF`：不属于 EESI 的 opaque preserved physical tail
 

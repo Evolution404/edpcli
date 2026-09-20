@@ -31,6 +31,9 @@ const SANDISK_LBA12_HEX: &str =
 const AIGO_REV_PMAP_EXACT_SIZE_LBA11_HEX: &str =
     include_str!("fixtures/protocol_evidence/aigo_u335_rev_pmap_exact_size_lba11.hex");
 const SANDISK_DEVICE_ID: &str = "disk&ven_sandisk&prod_ultra_usb_3.0&rev_1.00";
+const NETAC_ONLYDISK_DEVICE_ID: &str = "disk&ven_netac&prod_onlydisk&rev_0000";
+const NETAC_ONLYDISK_LBA10_HEAD_HEX: &str =
+    include_str!("fixtures/protocol_evidence/netac_onlydisk_20260804_lba10_head.hex");
 const SANDISK_AUTHENTIC_NOPASS_LBA7_HEX: &str =
     include_str!("fixtures/protocol_evidence/sandisk_ultra_authentic_no_password_lba7.hex");
 const SANDISK_AUTHENTIC_NOPASS_DEVICE_ID: &str = "disk&ven_sandisk&prod_ultra&rev_1.00";
@@ -2203,6 +2206,31 @@ fn real_sandisk_lba10_contains_share_and_encrypt_volume_labels() {
     assert!(
         SANDISK_LBA10[0x80..].iter().all(|byte| *byte == 0),
         "the independent enabled EESI sample currently has a zero preserved physical tail"
+    );
+}
+
+#[test]
+fn historical_netac_lba10_confirms_the_same_eesi_head_and_zero_uninterpreted_payload() {
+    let cipher = decode_hex_fixture(NETAC_ONLYDISK_LBA10_HEAD_HEX);
+    assert_eq!(cipher.len(), 0x80);
+
+    let crc = crc32_bare(NETAC_ONLYDISK_DEVICE_ID.as_bytes());
+    assert_eq!(crc, 0x5088_ee37);
+    let plain = a6b0_full(&cipher, &crc.to_le_bytes(), 0);
+
+    assert_eq!(&plain[..4], b"EESI");
+    assert_eq!(u32_le(&plain, 0x04), 1);
+    assert_eq!(
+        &plain[0x08..0x18],
+        &[0xbd, 0xbb, 0xbb, 0xbb, 0xc7, 0xf8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+    );
+    assert_eq!(
+        &plain[0x18..0x28],
+        &[0xb1, 0xa3, 0xc3, 0xdc, 0xc7, 0xf8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+    );
+    assert!(
+        plain[0x28..0x80].iter().all(|byte| *byte == 0),
+        "the historical Netac EESI capture must retain the observed zero +0x28..+0x7f payload"
     );
 }
 

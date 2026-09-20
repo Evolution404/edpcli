@@ -120,6 +120,8 @@ fn documentation_keeps_the_official_provisioning_chain_and_strict_rules() {
         "UsbSuspensionWnd lifecycle/control flag",
         "EdpEDisk.exe::OnInitDialog",
         "zero-initializes the full 0x80B EESI payload",
+        "netac_onlydisk_20260804_lba10_head.hex",
+        "3c7e795b1b7110e9866dd31f44ba6e7c5e02ff77a1f70a8b11fcdcaf181fbf39",
         "240d04e7c97d300c5081f793d72850d49acbf5408bc0d8cf32de8eef7a5e8f02",
         "tagEdpEDiskTmpUse",
         "edpdiskglobal.h:481",
