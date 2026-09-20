@@ -2324,6 +2324,10 @@ fn lba8_current_usb_only_info_is_main_onlyid_hex_while_legacy_profile_keeps_it_e
         let lba8 = a6b0_full(&raw8[..encrypted_len], &crc.to_le_bytes(), 0);
         let usb_only = &lba8[0x1e..0x3e];
         assert!(
+            usb_only[16..].iter().all(|byte| *byte == 0),
+            "UsbOnlyInfo fixed terminator/zero suffix changed: {name}"
+        );
+        assert!(
             lba8[0x18..0x1e].iter().all(|byte| *byte == 0),
             "MacInfo[6] must stay zero across current and legacy original profiles: {name}"
         );

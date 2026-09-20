@@ -1422,8 +1422,21 @@ EDP_DeviceNumber = CRC32(
 这批证据闭合了一个真实非零 producer family、`EDP_DiskNumber` 的主算法以及 2020 runtime 的
 negative value-consumer 行为，但**尚未找到能生成 strict legacy 第1种组合的更早 exact writer**，
 ordinal3 fallback `EDP_DeviceNumber` 的完整输入公式现已补齐；但**尚未找到能生成 strict
-legacy 第1种组合的更早 exact writer / profile selection**。因此 `HDSerialInfo` 4B 与
-`UsbOnlyInfo[32]` 32B 仍继续 PARTIAL，LBA8 仍为 **476 COMPLETE / 36 PARTIAL**。
+legacy 第1种组合的更早 exact writer / profile selection**。不过继续把 `UsbOnlyInfo[32]`
+按真正发生代际分叉的位置拆开后，后16B可以独立闭合：current Windows/Linux 和2020
+transitional writer 都只生成固定16字符 `%08x%08x`，且目标header/临时结构预先整体清零，
+因此 `+0x2E` 必为C-string终止NUL、`+0x2F..+0x3D` 15B保持零；strict legacy整槽absent/zero，
+同一16B自然也是零。registration semantic reader跳过整槽，2020/current runtime只结构保存；
+另一本机 v3.6.12.28 `EdpEDiskCtrl` 分支甚至只复制 `+0x1E` 首DWORD，直接跳过后28B，继续
+证明 suffix不是行为字段。committed strict originals 新增统一门禁锁定22/22 suffix=`zero[16]`。
+
+因此 LBA8 进一步拆为：
+
+- `HDSerialInfo@+0x14..+0x17`：4B PARTIAL；
+- `UsbOnlyInfo text@+0x1E..+0x2D`：16B PARTIAL，三代profile真实分叉仍需追；
+- `UsbOnlyInfo suffix@+0x2E..+0x3D`：**16B COMPLETE**，语义为固定终止NUL+zero suffix。
+
+LBA8 由 **476 COMPLETE / 36 PARTIAL** 提升到 **492 COMPLETE / 20 PARTIAL**。
 
 ### LBA11：`DRKB + random252`，VID/PID 是 4 字符 ASCII
 
@@ -3613,7 +3626,7 @@ profiles 的该边界，而不是把字符串具体值硬编码成未来协议�
 | 5 | 512B | 0B | 0B | 100% | 两版 EdpDiskCtrl 均只对 LBA5 执行“读整扇→原样写回→检查 ERROR_WRITE_PROTECT(0x13)”；当前注册 writer 读取既有13扇区后不重建 LBA5，因此 preserve existing bytes；22/22原始盘全零 |
 | 6 | 473B | 39B | 0B | 92.4% | 在既有闭环基础上，再按首个NUL边界把 GSerial `+0x1C0..1C8` 9B 与 BeiZhu `+0x1D0` 1B 升COMPLETE；剩余39B为 Dept接缝1B、GSerial尾7B、BeiZhu尾15B、legacy MBR fragment16B |
 | 7 | 512B | 0B | 0B | 100.0% | 3×Version、entry1/entry2 NeedDisturb 已按 compatibility metadata 生命周期闭合；最后两个 BackupPromptPeriod BYTE 又由正式 DWARF 字段、current-zero producer、四代 Windows + Linux structural-preserve/negative semantic consumer、跨 v0x0064/v0x0206 实盘0/0 profile 闭合为 dormant compatibility fields。LBA7 至此整扇 COMPLETE |
-| 8 | 476B | 36B | 0B | 93.0% | header 的 LLGB/logical length/ToolVersion/Labversion/writeTime/ElabOffset/Reserved/MacInfo 已闭合；`+0x080..0x1FF` 又由 Windows/Linux 双 writer、注册侧7-key reader、运行时17-key EdpEDiskCtrl reader、动态 encrypted backing/preserve tail 与22盘17-key实证整体闭合384B；仅 HDSerialInfo/UsbOnlyInfo 36B继续PARTIAL |
+| 8 | 492B | 20B | 0B | 96.1% | header 与动态body既有闭环保持；本轮又把 `UsbOnlyInfo` 后16B按 current/2020固定16字符writer + header零初始化 + strict legacy absent-zero + runtime negative/structural consumer 闭合为终止NUL/zero suffix。只剩 HDSerialInfo 4B 与 UsbOnlyInfo 前16B identity text继续PARTIAL |
 | 9 | 384B | 128B | 0B | 75.0% | EETU/EPPE与 long-User 已闭合；SAPF `+0x114..+0x11F` 12B 又按 profile-overlap 完成：SAPF下是多形态 unowned trailing backing，repair/一致性逻辑明确不消费；long-User下是 first-party writer→reader 已闭合的 active continuation。因此当前只剩 long-Dept `+0x080..0x0FF` 128B PARTIAL |
 | 10 | 512B | 0B | 0B | 100.0% | EESI magic + `UsbSuspensionWnd lifecycle/control flag` + 两个16B卷标槽完成；`+0x28..+0x7F` 已闭合为 caller-owned compatibility extension（两版Ctrl完整round-trip、两套official UI零producer、业务negative-consumer、双正向EESI实盘）；`+0x80..+0x1FF` 继续按 cross-generation unowned preserve/ignore COMPLETE。LBA10整扇闭合 |
 | 11 | 512B | 0B | 0B | 100% | normal register path 使用 `DISK_GEOMETRY_EX.DiskSize`；`UDiskLabelRepair` check/rewrite path 使用 `DISK_GEOMETRY` 的 CHS capacity。两条路径的 producer/consumer 与同盘双 profile 实测均闭合 |
@@ -3621,8 +3634,8 @@ profiles 的该边界，而不是把字符串具体值硬编码成未来协议�
 
 总计：
 
-- **完成：5512B / 6656B = 82.8%**
-- **部分已知：1144B / 6656B = 17.2%**
+- **完成：5528B / 6656B = 83.1%**
+- **部分已知：1128B / 6656B = 16.9%**
 - **未知：0B / 6656B = 0.0%**
 
 这是一组**严格下限**，故意宁可低估，不把“能生成/能解析”冒充成“已经完全理解”。
