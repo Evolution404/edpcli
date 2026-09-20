@@ -460,7 +460,14 @@ GSerial / 15B BeiZhu。current `BuildSector6` 自身则会先把临时16B缓冲�
 - `0x1E0..0x1EF`：20/22 为模板零；2/22（Aigo U335 旧形态 +
   SanDisk 原始盘）保留 legacy MBR partition-table fragment；
 - `u32@0x1F0`：22/22 均为 1；官方 writer 字段名是 `m_encrypt`，
-  不能再标成“注册标志”。
+  不能再标成“注册标志”。本轮进一步回到 Windows PE 原始机器码闭合其
+  current producer：`RegsiterUsb` 的临时 `UsbWriteParam` 基址为 `ebp-0x3F4`，
+  因而 `m_encrypt@+0x258` 精确映射到 `ebp-0x19C`；5字节比较目标
+  `0x100C9A90` 为 ASCII `!SAFE`，相等分支 `0x1003BA94` 写1、非相等分支
+  `0x1003BAC7` 写0，随后 `0x1003BAF5` 立即调用 `BuildSector6` 写到
+  `LBA6+0x1F0..0x1F3`。因此“为什么 current 样本为1”的 producer 来源已闭合；
+  但当前 `UsbLabelParam`/ReadSector6 没有对应输出成员，已扫 runtime 组件也未找到
+  最终行为 consumer，所以严格计数仍保持4B PARTIAL。
 
 本轮还重新从 Linux 官方二进制本身核对当前模板，而不是沿用旧文档：
 `nm -S -C` 定位 `UsbMainBSec@0x22BB40,size=0x1000`，`.data`

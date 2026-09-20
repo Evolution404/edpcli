@@ -143,6 +143,7 @@ fn documentation_keeps_the_official_provisioning_chain_and_strict_rules() {
         "LBA3 opaque manufacturer/MP sector",
         "LBA8 static version/writeTime/reserved header",
         "LBA6 C-string slots have profile-dependent post-NUL backing bytes",
+        "LBA6 m_encrypt current producer !SAFE gate",
         "writer-uninitialized backing",
         "strcpy_s@0x1B9B0",
         "MacInfo[6]",
