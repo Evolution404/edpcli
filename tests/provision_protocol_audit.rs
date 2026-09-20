@@ -1141,6 +1141,24 @@ fn lba0_bootstrap_profiles_are_zero_or_the_official_usb_main_bsec_prefix() {
 }
 
 #[test]
+fn strict_progress_has_no_partial_detail_rows_for_fully_complete_lbas() {
+    let trace = include_str!("../docs/PROTOCOL_BYTE_TRACE_2026-09-19.md");
+    let complete_lbas = ["LBA5", "LBA7", "LBA10", "LBA11"];
+
+    for lba in complete_lbas {
+        let stale = trace
+            .lines()
+            .filter(|line| line.starts_with(&format!("| {lba} |")))
+            .filter(|line| line.contains("| PARTIAL |"))
+            .collect::<Vec<_>>();
+        assert!(
+            stale.is_empty(),
+            "{lba} is 100% COMPLETE in STRICT_PROGRESS but still has PARTIAL detail rows: {stale:?}"
+        );
+    }
+}
+
+#[test]
 fn lba3_manufacturing_payload_is_an_opaque_whole_sector_not_just_a_marker_string() {
     const MARKED: &str =
         "disk4_121110528_vid0951_pid1666_disk&ven_kingston&prod_datatraveler_3.0_onlyid2135149925_20260903_121319.bin";
