@@ -221,7 +221,13 @@ producer + 官方 consumer/行为 + 原始实盘验证**同时闭合，才能标
   从 PARTIAL 升 COMPLETE，不再重复追 CHS profile。
 - **LBA0 = 69 COMPLETE / 443 PARTIAL**。
   legacy MBR `+0x1B5..+0x1B7 = 2C 44 63` 已闭合为三个错误消息指针低字节；
-  22盘只有 template/cleared 两种 profile。其余 bootstrap/profile 仍未全部解释。
+  current zero bootstrap、legacy `UsbMainBSec` 与 Aigo L8302 第三 profile 已进一步
+  分型。Aigo 前400B已精确匹配 CEMS 随附 `Netac_USB_API.dll/hardware.dll` 等8份
+  二进制模板，且 `Netac_USB_API.dll::sub_10003880` 用 `rep movsd(0x80 dword)`
+  整扇生成该 MBR；legacy `UsbMainBSec` 也找到
+  `CUsbRegsiter::UnRegsiterUsb -> LBA0` 的直接写回链。当前仍缺旧注册版本为何在
+  已注册实盘保留 legacy bootstrap，以及制标上层何时选择 Netac Format 的 profile
+  selection，因此443B PARTIAL 数不变。
 - **LBA3 = 整扇 PARTIAL**。
   EDP 注册链只 preserve existing，当前 EDP reader 不解析；22盘 21零 + 1份
   Kingston `this is mp mark\0` 制造 payload。厂商 MP producer/固件 consumer 未找到。

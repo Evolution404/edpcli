@@ -2661,6 +2661,64 @@ Aigo L8302 第三种 bootstrap 的 producer/选择条件；尾部 SectorSize/res
 业务 consumer 也未全部闭合。因此 `+0x000..+0x1B4` 继续整体保持 PARTIAL，
 总计仍为 **3656B COMPLETE / 3000B PARTIAL**。
 
+#### LBA0 Aigo L8302 第三 profile：已定位 Netac Format 的完整 MBR producer
+
+继续对第三类 bootstrap 做原始二进制反查后，Aigo L8302 不再是“来源未知的特殊
+前缀”。严格原始样本
+`disk26_491520000_vid3535_pid2000_disk&ven_aigo&prod_l8302_onlyid1911491440_20260903_120554.bin`
+的 `LBA0+0x000..+0x18F` SHA-256 为：
+
+```text
+00863071fd5db2f4ef7734d384dc46e07d9c423ed59c69407597590b89aa13ec
+```
+
+这400B 在随 CEMS 安装的 **8份独立 Netac/hardware 二进制**中逐字节出现，
+包括：
+
+- `hardware.dll`（模板 VA `0x1012C9E0`）；
+- `Netac_USB_API.dll`（模板 VA `0x1014BA58`）；
+- `Netac_USB_API64.dll`；
+- `hardware1.dll / hardware1hd.dll`；
+- `isoupdate/newusb20.dll`；
+- Edp 目录下的对应 Netac 32/64 位库。
+
+关键点不是“搜索到相同字符串”，而是 Windows PE 机器码给出了完整 writer：
+`Netac_USB_API.dll::sub_10003880` 在 MBR 格式化的两个分支
+`0x10003950 / 0x100039C0` 都执行：
+
+```text
+EDI = output_mbr
+ESI = 0x1014BA58
+ECX = 0x80
+rep movsd                       # 精确复制 0x80 * 4 = 512B
+memset(output_mbr + 0x1CE, 0, 0x30)
+output_mbr[0x1BE] = 0x80
+...                            # 重建 partition type/start/count
+```
+
+因此 `+0x000..+0x18F` 400B 在该 Format profile 下由嵌入模板**原样生成**；
+分区表修改从 `+0x1BE` 附近开始，不会改动这400B。Aigo 实盘与 producer
+模板逐字节相等，已经满足该第三 profile 的原始盘交叉验证。
+
+同时又找到 legacy `UsbMainBSec` 的直接 LBA0 writer，而不再只知道它被
+`BuildSector6` 当底模使用：`CUsbRegsiter::UnRegsiterUsb` 在
+`sub_100419B0()` 判定分支中执行
+`memcpy(temp, UsbMainBSec, sector_size) -> sub_10013E40 -> WriteSectorData(LBA0,1)`。
+这证明 legacy 模板本身确实属于官方 LBA0 写回材料。
+
+不过这批发现仍**不增加 COMPLETE**。严格缺口已经缩小为两个 profile-selection
+问题：
+
+1. 22份生成参考里的 legacy 注册盘，仍缺“旧注册/格式化版本为何在最终已注册状态
+   保留 UsbMainBSec bootstrap”的历史选择链；当前找到的 `UnRegsiterUsb` writer
+   不能自动等价成旧注册 producer。
+2. Aigo 的 Netac Format 底层 producer 已闭合，但当前
+   `cemssafeudisklabeltool -> usbtoolBusManage` 主链尚未找到静态调用
+   `Format*_NetacAPI` 的上层选择点，不能宣称所有制盘都会先走该路径。
+
+所以 LBA0 `+0x000..+0x1B4` 仍保持 PARTIAL，但“第三 profile producer 未知”
+这一旧表述已经作废。
+
 ## 当前逐字节地图状态
 
 ### 严格完成口径（2026-09-19）
