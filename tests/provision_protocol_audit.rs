@@ -61,6 +61,8 @@ const OFFICIAL_VIRTUAL_LONG_USER_LBA6_HEX: &str =
     include_str!("fixtures/protocol_evidence/official_virtual_long_user_lba6.hex");
 const OFFICIAL_VIRTUAL_LONG_USER_LBA9_HEX: &str =
     include_str!("fixtures/protocol_evidence/official_virtual_long_user_lba9.hex");
+const OFFICIAL_VIRTUAL_SLOT_BACKING_LBA6_HEX: &str =
+    include_str!("fixtures/protocol_evidence/official_virtual_slot_backing_lba6.hex");
 const OFFICIAL_VIRTUAL_LBA4_FULL_NONZERO_BACKING_HEX: &str =
     include_str!("fixtures/protocol_evidence/official_virtual_lba4_full_nonzero_backing.hex");
 const OFFICIAL_VIRTUAL_LBA4_NULL_NONZERO_BACKING_HEX: &str =
@@ -1065,6 +1067,35 @@ fn lba6_gserial_and_beizhu_semantic_prefixes_stop_before_profile_underlay() {
     assert!(checked >= MIN_PROTOCOL_FIXTURES);
     assert!(saw_short_gserial && saw_long_gserial);
     assert!(saw_empty_beizhu && saw_normal_beizhu);
+}
+
+#[test]
+fn official_virtual_lba6_fixed_string_slots_preserve_nonsemantic_source_backing() {
+    // First-party Windows CEMSUsbRegsiter.dll::BuildSector6 output.  The source
+    // UsbWriteParam slots were deliberately seeded after their first NUL:
+    // GSerial backing = A5, BeiZhu backing = 5A.  BuildSector6 must preserve
+    // those first 15 source bytes while owning only the dedicated byte15 NUL.
+    let raw = decode_hex_fixture(OFFICIAL_VIRTUAL_SLOT_BACKING_LBA6_HEX);
+    assert_eq!(raw.len(), SECTOR);
+    assert_eq!(
+        lba6_checksum(&raw[..0x1fc]),
+        u32_le(&raw, 0x1fc),
+        "official virtual writer fixture must retain a valid SAFE6 checksum"
+    );
+
+    let plain = lba6_decode(&raw);
+    let gserial = &plain[0x1c0..0x1d0];
+    let beizhu = &plain[0x1d0..0x1e0];
+
+    assert_eq!(&gserial[..9], b"322CA28A\0");
+    assert!(gserial[9..15].iter().all(|byte| *byte == 0xa5));
+    assert_eq!(gserial[15], 0);
+    assert_eq!(gbk_string(gserial), "322CA28A");
+
+    assert_eq!(beizhu[0], 0);
+    assert!(beizhu[1..15].iter().all(|byte| *byte == 0x5a));
+    assert_eq!(beizhu[15], 0);
+    assert_eq!(gbk_string(beizhu), "");
 }
 
 #[test]
