@@ -431,6 +431,24 @@ consumer 行为，而不是“consumer未知”。因此把这17B重新拆分：
   - 另外 2 份高熵 HSerial 样本同时是 LBA9 全零、LBA6 扩展区非零。
   这只能记为**格式/注册环境 profile 的相关性**，不能反推因果关系。
 
+
+本轮又对 committed Lexar + Netac A/B/C 四份固定-HSerial 原盘做跨字段负相关审计，
+把两个容易误连的候选关系明确排除：
+
+- 四盘的 `HSerialCRC[5]` 20B **逐字节完全相同**，均为
+  `1D29 / 7B / 4DD / 79 / 7C`；
+- 但 Lexar 的 `MyHardinfo/LBA8.HDSerialInfo=2AB0E33C`，Netac 三盘则稳定为
+  `A017AD78`，因此这20B不是 host-hardinfo DWORD 的展开/分片；
+- 同一批固定-HSerial 盘的 SAPF decoded tail `+0x114..+0x11F` 同时覆盖
+  **全零、稳定非零和同一 Netac 后续变化**三种 backing 形态；特别是 Netac A/B
+  tail相同，而 Netac C tail 已变化，但 HSerial 仍完全不变。
+
+新增回归
+`lba4_fixed_hserial_is_independent_from_hardinfo_and_sapf_backing`
+把这组四盘反例锁死。因此旧 `HSerialCRC[5]` 不能再解释为
+`MyHardinfo/HDSerialInfo` 的展开，也不能解释为 SAPF 32B backing/tail 的缓存；
+其旧 producer 输入仍应继续沿独立的主机/注册环境身份链追踪。
+
 主机身份候选链也进一步做了排错：
 
 - Linux `libbusManage.so::UserInfo::GetHDiskSerialZ()` 会读取注册主机硬盘序列，
