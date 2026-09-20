@@ -164,6 +164,7 @@ fn documentation_keeps_the_official_provisioning_chain_and_strict_rules() {
         "85141be31933e89976970ac18f44e1da8b77d3f57fdae1d857f8ea9d19a007ec",
         "legacy MBR partition-table fragment",
         "LBA4 current writer machine-code node layout",
+        "LBA4.MyHardinfo == LBA8.HDSerialInfo",
         "fixed restore-node `SingleUsbFlg` metadata",
         "fixed restore-node `NewLabFlag = LLGB`",
         "fixed restore-node `Version = 1`",

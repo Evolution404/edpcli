@@ -375,6 +375,28 @@ legacy non-mirror -> nonzero”的关系；22份完整统计继续由本机原�
 - `MyHardinfo @ +0x35..0x38` 与两个 server flag `+0x45/+0x46`
   则明显随 profile 变化。
 
+本轮继续把 `MyHardinfo` 与其它已经恢复的身份字段做逐盘交叉，得到一个新的
+强约束：**strict 22份原始参考逐盘均满足
+`LBA4.MyHardinfo == LBA8.HDSerialInfo`**。这不是“多数相同”，而是22/22精确相等：
+
+- current profile：两处同时为0；
+- legacy profile 的非零集合为
+  `A017AD78 / A68BAE08 / 8B4613F5 / 2AB0E33C`，两扇区逐盘完全镜像；
+- 同一 Netac `0dd8:2005` 的多个不同 onlyid 都稳定为 `A017AD78`；
+- 该DWORD逐盘既不等于 `CRC32(device_id)`，也不等于 MBR disk signature，排除
+  “U盘自身ID/MBR值的简单副本”解释。
+
+current producer 也进一步闭合：`RegsiterUsb@0x1003BBBB` 对完整0x2F restore node
+执行 `memset(0)`；随后写 OnllyID2Nd、HSerialCRC、SingleUsbFlg、LLGB、Version、
+sector tuple，却**没有任何对 node+0x1D..0x20 的覆盖**，因此 current
+`MyHardinfo=0` 是正式 writer 行为，不是样本巧合。
+
+这把字段角色从 opaque profile DWORD 收敛为 **LBA8.HDSerialInfo 的 mirrored
+host-hardinfo compatibility copy**。但严格 COMPLETE 门槛仍未跨过：2020
+HDSerialInfo producer family 已知，而 strict legacy 盘对应的更早 producer / 将同值写入
+LBA4 MyHardinfo 的直接 copy 点仍未定位，所以本轮只增加语义证据，不增加 COMPLETE 字节数。
+新增回归 `lba4_myhardinfo_mirrors_lba8_hdserialinfo_in_original_profiles` 锁定零/非零双profile。
+
 current Windows 机器码确实在 node 清零后显式写入前四项固定值：
 `SingleUsbFlg=0`、`NewLabFlag=LLGB`、`Version=1`、
 `08 04 0C 01`。当前 Windows/Linux `ReadSector4` 路径都会把完整

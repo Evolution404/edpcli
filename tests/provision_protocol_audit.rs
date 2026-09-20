@@ -1502,6 +1502,55 @@ fn lba4_restore_node_profiles_keep_current_and_legacy_fields_separate() {
 }
 
 #[test]
+fn lba4_myhardinfo_mirrors_lba8_hdserialinfo_in_original_profiles() {
+    let mut checked = 0usize;
+    let mut nonzero = 0usize;
+
+    for entry in fs::read_dir(FIXTURE_DIR).expect("protocol fixtures") {
+        let path = entry.expect("backup entry").path();
+        if path.extension().and_then(|ext| ext.to_str()) != Some("bin") {
+            continue;
+        }
+        let name = path.file_name().unwrap().to_str().unwrap();
+        let Some(meta) = parse_reference_backup_name(name) else {
+            continue;
+        };
+        let Some(onlyid) = meta.onlyid.as_deref() else {
+            continue;
+        };
+
+        let image = fs::read(&path).expect("fixture bytes");
+        let bits = onlyid_bits(onlyid);
+        let k0 = (bits & 0xffff) ^ (bits >> 16);
+        let raw4 = sector(&image, 4);
+        let mut lba4 = raw4.to_vec();
+        lba4[0x18..].copy_from_slice(&xor_rolling(&raw4[0x18..], k0));
+
+        let crc = crc32_bare(meta.device_id.as_bytes());
+        let lba8 = a6b0_full(sector(&image, 8), &crc.to_le_bytes(), 0);
+        assert_eq!(&lba8[..4], b"LLGB", "LBA8 decode failed: {name}");
+
+        let my_hardinfo = u32_le(&lba4, 0x35);
+        let hd_serial_info = u32_le(&lba8, 0x14);
+        assert_eq!(
+            my_hardinfo, hd_serial_info,
+            "LBA4 MyHardinfo must mirror LBA8 HDSerialInfo in observed original profiles: {name}"
+        );
+        nonzero += usize::from(my_hardinfo != 0);
+        checked += 1;
+    }
+
+    assert!(
+        checked >= MIN_PROTOCOL_FIXTURES,
+        "protocol audit unexpectedly lost MyHardinfo/HDSerialInfo fixtures"
+    );
+    assert!(
+        nonzero > 0 && nonzero < checked,
+        "mirror evidence must retain both zero current and nonzero legacy profiles"
+    );
+}
+
+#[test]
 fn lba4_server_flag_wire_rule_is_restore_profile_specific_in_real_fixtures() {
     let mut current_style = 0usize;
     let mut legacy_style = 0usize;
