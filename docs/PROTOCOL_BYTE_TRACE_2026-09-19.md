@@ -391,7 +391,7 @@ post-XOR 写回 `+0x45/+0x46`。历史 raw-zero 实盘仅作为兼容读取 prof
 <!-- STRICT_PROGRESS_BEGIN -->
 | LBA | COMPLETE | PARTIAL | UNKNOWN | 严格完成率 |
 |---:|---:|---:|---:|---:|
-| LBA0 | 104 | 408 | 0 | 20.3% |
+| LBA0 | 108 | 404 | 0 | 21.1% |
 | LBA1 | 0 | 512 | 0 | 0.0% |
 | LBA2 | 0 | 512 | 0 | 0.0% |
 | LBA3 | 0 | 512 | 0 | 0.0% |
@@ -408,8 +408,8 @@ post-XOR 写回 `+0x45/+0x46`。历史 raw-zero 实盘仅作为兼容读取 prof
 
 当前总计：
 
-- **COMPLETE：3691B / 6656B = 55.5%**
-- **PARTIAL：2965B / 6656B = 44.5%**
+- **COMPLETE：3695B / 6656B = 55.5%**
+- **PARTIAL：2961B / 6656B = 44.5%**
 - **UNKNOWN：0B / 6656B = 0.0%**
 
 LBA11 已完整闭合为 512B COMPLETE。此前卡住的后半 252B 不是“某型号盘偶尔使用
@@ -458,7 +458,7 @@ DWARF 中恢复出的原始声明文件/行号与本地函数地址：
 | LBA0 | 0x1A0–0x1A3 | PARTIAL | SAFE1 / legacy `SectorSize` compatibility slot | Windows `BuildSector0/sub_10013F10` 在 **SAFE1** 分支明确写 `m_nSectorSize` 到 `+0x1A0`；`UsbMainBSec` 静态模板也固定为512。Linux `CLabelManage::BuildSector0@diskfile.cpp:625` 只用 `m_nSectorSize` 计算 partition sector count，**不把它写入 +0x1A0**；current SAFE6 主链也不调用 `sub_10013F10`，只 preserve 该槽 | 已反汇编的 legacy 16-bit MBR bootstrap不读取该槽；current SAFE6 注册/repair同样未找到值相关读取 | 严格22份原始盘存在0/512双 profile（其中4份为512）；扩展57份历史完整快照为34×512、23×0，证明它不是 current/legacy 简单二分 | 字段来源已收窄为 SAFE1/legacy compatibility metadata，但 SAFE6 历史 0/512 profile selection 与独立业务 consumer 仍缺，继续 PARTIAL |
 | LBA0 | 0x1A4–0x1B4 | COMPLETE | cross-profile unowned preserve / historical-zero compatibility region | 与 `+0x190..+0x19F` 相同：current SAFE6 不覆盖、Linux BuildSector0 不写；legacy `UsbMainBSec` 与 Aigo/Netac整扇模板均在本17B生成零 | 16-bit MBR bootstrap 不读取本区；current EDP 准入、partition repair 与 `ReCreate0Sector` 都只处理其它明确区域，不赋予本17B语义 | 严格22份 22/22 全零；扩展57份完整历史快照 57/57 全零；committed original 门禁已有精确零断言 | 17B 的跨 profile unowned/preserve、negative consumer 与真实盘已闭合；未来非零兼容值必须 preserve，不得机械清零 |
 | LBA0 | 0x1B5–0x1B7 | COMPLETE | **LBA0 legacy MBR message-pointer bytes** | 官方 `UsbMainBSec@0x100E7220` 固定为 `2C 44 63`；`sub_10013FD0`/旧模板写路径整扇复制该模板 | 模板先把 `+0x1B..` 搬到 `0x061B` 后执行；runtime `mov al,[0x07B5/0x07B6/0x07B7]` 分别组成 `SI=0x072C/0x0744/0x0763`，指向原模板 `+0x12C/+0x144/+0x163` 三条错误消息 | 22盘严格统计：14/22=`2C 44 63`，8/22=`00 00 00`，无第三种值；CI夹具同时保留两种 profile | 三字节是 legacy MBR 错误消息指针低字节；零态表示该 legacy tail 未存在/已清空，不再当“未知随机尾巴” |
-| LBA0 | 0x1B8–0x1BB | PARTIAL | standard MBR disk signature | `CreateDiskMbr` 取 `GetSystemTimePreciseAsFileTime`（fallback `GetSystemTimeAsFileTime`）→ FILETIME 转 Unix seconds → 低32位填 `CREATE_DISK_MBR.Signature` → `IOCTL_DISK_CREATE_DISK` | Windows drive-layout API 会把它作为 MBR Signature 报告；当前已审 EDP `0x70050` 调用均未发现业务逻辑读取该值 | 22/22非零，19个值；同一 onlyid 的重复备份保持不变，按LE解释与历史初始化日期吻合 | 标准字段语义与 producer 已知，但未找到 EDP 自身语义 consumer，因此按项目严格口径继续 PARTIAL |
+| LBA0 | 0x1B8–0x1BB | COMPLETE | standard Windows MBR disk signature | `CreateDiskMbr` 取 `GetSystemTimePreciseAsFileTime`（fallback `GetSystemTimeAsFileTime`）→ FILETIME 转 Unix seconds → 低32位填 `CREATE_DISK_MBR.Signature` → `IOCTL_DISK_CREATE_DISK`；Windows `DRIVE_LAYOUT_INFORMATION_MBR.Signature` 正式定义该 DWORD 为唯一标识 MBR disk 的 drive signature | Windows `IOCTL_DISK_GET_DRIVE_LAYOUT_EX` 将该值作为 `DRIVE_LAYOUT_INFORMATION_EX.Mbr.Signature` 返回。当前 `CEMSUsbRegsiter.dll::fcn.10046320` 的唯一 `0x70050` 调用已逐指令复核：返回 buffer 只比较 `+0x04 PartitionCount==1` 与 `+0x00 PartitionStyle==MBR`，不读取 `+0x08 Mbr.Signature`，证明 EDP 对该标准字段没有附加业务语义 | 22/22非零，19个值；同一 onlyid 的重复备份保持不变，按LE解释与历史初始化日期吻合；curated protocol fixtures 又锁定 signature 非零且至少存在两个不同真实值 | producer、Windows 标准 consumer/字段语义、EDP negative-semantic-consumer 与真实盘变化均闭合；4B 升 COMPLETE，不能把“EDP 不读取”误当成字段语义未知 |
 | LBA0 | 0x1BC–0x1BD | COMPLETE | standard MBR reserved / unowned compatibility word | current SAFE6 `RegsiterUsb` 只清 `+0x000..+0x18F` 并在 `+0x1BE` 起重建分区表，因此这2B保持 pre-read backing；Linux `BuildSector0@diskfile.cpp:625` 同样不写本槽；legacy `UsbMainBSec` 与 Aigo/Netac 整扇模板都在此显式携带 `00 00` | 16-bit `UsbMainBSec` bootstrap 的已确认尾部引用不包含 `+0x1BC/+0x1BD`；current 注册/准入、`UDiskLabelRepair::ReCreate0Sector` 与已审 `IOCTL_DISK_GET_DRIVE_LAYOUT_EX` 路径均不把这2B作为业务字段读取，分区语义从 `+0x1BE` 开始 | 严格22份原始参考 22/22=`00 00`；扩展 `nopwd_tool/backup + utils/backup` 的57份完整历史快照同样 57/57=`00 00`，且相邻 disk signature 明确多值，排除“整段尾部碰巧固定”的误判 | 2B 的跨已知 profile producer/preserve 生命周期、negative semantic consumer 与实盘均闭合；COMPLETE 表示该 reserved word 当前无业务 payload，未来未知非零值应兼容 preserve，不得机械清零 |
 | LBA0 | 0x1BE–0x1FD | COMPLETE | 4×MBR partition entry | `UsbMainBSec` 模板；SAPF 恢复项也直接写回此处 | `UDiskLabelRepair.dll::Repair0Sector` 直接恢复该 64B 区域 | 22/22 可按标准 MBR 解码 | 分区表边界和消费闭合 |
 | LBA0 | 0x1FE–0x1FF | COMPLETE | MBR 55AA | 官方模板直接写 `55 AA` | MBR 校验/修复链检查签名 | 22/22 | 完成 |

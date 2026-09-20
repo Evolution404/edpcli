@@ -171,6 +171,8 @@ fn documentation_keeps_the_official_provisioning_chain_and_strict_rules() {
         "lba0_bootstrap_profiles_are_zero_or_the_official_usb_main_bsec_prefix",
         "cross-profile unowned preserve / historical-zero compatibility region",
         "SAFE1 / legacy `SectorSize` compatibility slot",
+        "standard Windows MBR disk signature",
+        "CEMSUsbRegsiter.dll::fcn.10046320",
         "共57份完整历史快照",
         "Netac_USB_API.dll::sub_10003880",
         "00863071fd5db2f4ef7734d384dc46e07d9c423ed59c69407597590b89aa13ec",
@@ -204,8 +206,8 @@ fn documentation_keeps_the_official_provisioning_chain_and_strict_rules() {
         );
     }
     assert!(
-        DOC.contains("| LBA0 | 104 | 408 | 0 | 20.3% |"),
-        "LBA0 progress must retain the closed unowned compatibility regions and reserved word"
+        DOC.contains("| LBA0 | 108 | 404 | 0 | 21.1% |"),
+        "LBA0 progress must retain the closed MBR signature and compatibility regions"
     );
     assert!(
         DOC.contains("| LBA1 | 0 | 512 | 0 | 0.0% |"),

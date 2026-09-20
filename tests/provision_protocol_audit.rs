@@ -5,7 +5,7 @@
 
 mod common;
 
-use std::fs;
+use std::{collections::HashSet, fs};
 
 use common::FIXTURE_DIR;
 use edpcli::common::{METADATA_IMAGE_LEN, SECTOR};
@@ -1020,6 +1020,7 @@ fn lba0_bootstrap_profiles_are_zero_or_the_official_usb_main_bsec_prefix() {
     let mut template_profile = 0usize;
     let mut zero_profile = 0usize;
     let mut checked = 0usize;
+    let mut disk_signatures = HashSet::new();
 
     for entry in fs::read_dir(FIXTURE_DIR).expect("protocol fixtures") {
         let path = entry.expect("backup entry").path();
@@ -1064,6 +1065,12 @@ fn lba0_bootstrap_profiles_are_zero_or_the_official_usb_main_bsec_prefix() {
             &[0, 0],
             "standard MBR reserved word changed in {name}"
         );
+        let disk_signature = u32_le(lba0, 0x1b8);
+        assert_ne!(
+            disk_signature, 0,
+            "standard MBR disk signature unexpectedly zero in {name}"
+        );
+        disk_signatures.insert(disk_signature);
         checked += 1;
     }
 
@@ -1078,6 +1085,10 @@ fn lba0_bootstrap_profiles_are_zero_or_the_official_usb_main_bsec_prefix() {
     assert!(
         zero_profile > 0,
         "protocol fixtures lost the current zero-bootstrap profile"
+    );
+    assert!(
+        disk_signatures.len() > 1,
+        "protocol fixtures must retain multiple real MBR disk signatures"
     );
 }
 

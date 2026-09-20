@@ -2982,6 +2982,54 @@ _IF_DiskFormat
 **哪一个历史升级/量产/格式化入口真正调用 `IF_DiskFormat`，以及它以什么
 设备/profile 条件选择该路径。** 在该调用点闭合前，LBA0 前400B计数不变。
 
+#### LBA0 `+0x1B8..+0x1BB`：Windows MBR disk signature 4B 闭合
+
+这4B此前已经有完整 producer 和真实盘变化规律，但因为没有找到 EDP 自身的
+值相关业务 consumer，按旧的过严口径保留为 PARTIAL。本轮把“标准 Windows
+MBR 字段的系统语义”和“EDP 是否附加解释”拆开后，证据链已经闭合。
+
+producer 侧保持既有结论：
+
+```text
+CreateDiskMbr
+  -> GetSystemTimePreciseAsFileTime
+     (fallback GetSystemTimeAsFileTime)
+  -> FILETIME 转 Unix seconds
+  -> low32
+  -> CREATE_DISK_MBR.Signature
+  -> IOCTL_DISK_CREATE_DISK
+```
+
+Windows 正式结构定义又给出 consumer/字段语义：
+`DRIVE_LAYOUT_INFORMATION_MBR.Signature` 就是用于唯一标识 MBR disk 的
+drive signature，并由 `IOCTL_DISK_GET_DRIVE_LAYOUT_EX` 通过
+`DRIVE_LAYOUT_INFORMATION_EX.Mbr.Signature` 返回。也就是说，这4B的 consumer
+并不需要是 EDP 私有代码；它首先是 Windows 磁盘布局协议自身拥有的标准字段。
+
+同时，本轮把当前 `CEMSUsbRegsiter.dll` 中唯一的
+`IOCTL_DISK_GET_DRIVE_LAYOUT_EX (0x70050)` 调用继续追到
+`fcn.10046320@0x100465A9`。调用成功后，代码只做：
+
+```text
+buffer + 0x04 : PartitionCount == 1
+buffer + 0x00 : PartitionStyle == PARTITION_STYLE_MBR
+```
+
+而 `DRIVE_LAYOUT_INFORMATION_EX.Mbr.Signature` 位于该 header 的
+`+0x08`，这条 EDP 路径没有读取它。于是“没有 EDP consumer”不再是证据缺口，
+而是**negative-semantic-consumer 证据**：EDP 只关心布局类型和分区数量，不对
+Windows disk signature 叠加第二层业务含义。
+
+真实盘仍保持既有强验证：严格22份原始参考 22/22 非零、共有19个不同值；
+同一 onlyid 的重复备份 signature 稳定，按 little-endian 解释又与历史初始化时间
+一致。curated protocol fixtures 现再加门禁：每份真实 fixture 的 signature 必须
+非零，并且 fixture 集合至少保留两个不同真实 signature，防止未来把该字段误清零
+或退化成常量。
+
+因此 `+0x1B8..+0x1BB` 共 **4B PARTIAL -> COMPLETE**。闭合语义是
+**standard Windows MBR disk signature**：producer、Windows 标准 consumer、
+EDP negative semantic consumer 和真实盘均已齐全。
+
 ## 当前逐字节地图状态
 
 ### 严格完成口径（2026-09-19）
@@ -3008,7 +3056,7 @@ _IF_DiskFormat
 
 | LBA | 完成 | 部分已知 | 未知 | 严格完成率 | 当前计数依据 |
 |---:|---:|---:|---:|---:|---|
-| 0 | 104B | 408B | 0B | 20.3% | MBR partition table +55AA、legacy 三个 message-pointer、`+0x190..+0x19F/+0x1A4..+0x1B4` 两段 unowned compatibility region 与 `+0x1BC..+0x1BD` reserved/unowned word 均已闭合；bootstrap主体、SectorSize、disk signature等408B继续PARTIAL |
+| 0 | 108B | 404B | 0B | 21.1% | MBR partition table +55AA、legacy 三个 message-pointer、`+0x190..+0x19F/+0x1A4..+0x1B4` 两段 unowned compatibility region、standard Windows MBR disk signature 与 `+0x1BC..+0x1BD` reserved/unowned word 均已闭合；bootstrap主体与 SectorSize 共404B继续PARTIAL |
 | 1 | 0B | 512B | 0B | 0% | 官方 BuildSector1_Gpt + GPT_Header(512B) 结构 + Windows `EFI PART` / `header_lba` consumer 已闭合；22/22当前原始SAFE6盘全零，缺正向GPT实盘，因此整扇PARTIAL |
 | 2 | 0B | 512B | 0B | 0% | 官方 BuildSector2_Gpt + GPT_Partition(128B) 结构 + Windows 从LBA2起每扇4 entry parser 已闭合；22/22当前原始盘全零，缺正向GPT实盘，因此整扇PARTIAL |
 | 3 | 0B | 512B | 0B | 0% | EDP 注册 writer 对整扇 preserve-existing，当前 Windows/Linux EDP reader 不解析；22份原始盘为21零+1 Kingston MP payload，但厂商 producer/固件 consumer 未闭合 |
@@ -3024,8 +3072,8 @@ _IF_DiskFormat
 
 总计：
 
-- **完成：3691B / 6656B = 55.5%**
-- **部分已知：2965B / 6656B = 44.5%**
+- **完成：3695B / 6656B = 55.5%**
+- **部分已知：2961B / 6656B = 44.5%**
 - **未知：0B / 6656B = 0.0%**
 
 这是一组**严格下限**，故意宁可低估，不把“能生成/能解析”冒充成“已经完全理解”。
@@ -3033,7 +3081,7 @@ _IF_DiskFormat
 
 | LBA | 状态 | 当前结论 |
 |---|---|---|
-| 0 | 部分闭合 | MBR 分区表、55AA、legacy 三个错误消息指针、`+0x190..0x19F/+0x1A4..0x1B4` 两段 cross-profile unowned compatibility region 及 `+0x1BC..+0x1BD` reserved/unowned word 已闭合；SectorSize、disk signature 的 EDP-side consumer 与 bootstrap profile-selection 继续追 |
+| 0 | 部分闭合 | MBR 分区表、55AA、legacy 三个错误消息指针、`+0x190..0x19F/+0x1A4..0x1B4` 两段 cross-profile unowned compatibility region、standard Windows MBR disk signature 及 `+0x1BC..+0x1BD` reserved/unowned word 已闭合；只剩 SectorSize 与 bootstrap profile-selection 继续追 |
 | 1 | GPT profile 部分闭合 | 当前22/22全零；官方 GPT_Header writer/consumer 已知，但缺正向GPT实盘 |
 | 2 | GPT profile 部分闭合 | 当前22/22全零；官方 GPT_Partition writer/consumer 已知，但缺正向GPT实盘 |
 | 3 | 外部制造区部分闭合 | 21/22 全零，1 份 Kingston MP payload；官方 EDP 注册链原样保留且当前 reader 不解析，厂商生成/消费语义仍未知 |
@@ -3052,7 +3100,7 @@ _IF_DiskFormat
 - LBA4 `+0x45/+0x46` 已闭合 producer/wire 与 ReadSector4 非对称规则；剩余缺口仅是 `bDataToServer/bConnetServer` 的最终业务 consumer，未找到前不得升 COMPLETE；
 - EDPF wrapped-key 的 mode1/mode3 正向真实盘样本（算法与consumer已闭合，当前22盘均为mode2）；
 - LBA4 onlyID2Nd 及关联动态字段的生成源；
-- LBA0 bootstrap 主体/profile 选择、`+0x1A0 SectorSize` consumer，以及 `+0x1B8` disk signature 的 EDP-side consumer；
+- LBA0 bootstrap 主体/profile 选择，以及 `+0x1A0 SectorSize` consumer；
 - LBA6 0x1c0..0x1ed 不同格式代际的准确字段来源。
 - LBA7 Version、entry1/entry2 NeedDisturb 与 pass-info `BackupPromptPeriod` 两字节的最终消费者；
 - LBA12 NeedDisturb 在新版主路径中的进一步业务作用（旧版 fallback 门控已闭合）；

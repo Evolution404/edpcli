@@ -28,8 +28,8 @@ producer + 官方 consumer/行为 + 原始实盘验证**同时闭合，才能标
 
 截至本次 LBA9 EPPE writer-owned zero tail 闭环，严格统计为：
 
-- **COMPLETE：3691 / 6656B = 55.5%**
-- **PARTIAL：2965 / 6656B = 44.5%**
+- **COMPLETE：3695 / 6656B = 55.5%**
+- **PARTIAL：2961 / 6656B = 44.5%**
 - **UNKNOWN：0 / 6656B = 0.0%**
 
 当前各 LBA 严格状态以主账本为唯一准绳，最新关键增量：
@@ -126,7 +126,7 @@ producer + 官方 consumer/行为 + 原始实盘验证**同时闭合，才能标
   producer/选择条件未知继续PARTIAL。
   Dept/Owner 长值的 continuation 还确认落在 LBA9+0x80/+0x100，
   并已用 join60/join59 双profile实盘门禁锁定。当前全 LBA0–12 已无 UNKNOWN，
-  目前全局仍有2965B PARTIAL，绝不能把“UNKNOWN=0”当成全部协议完成。
+  目前全局仍有2961B PARTIAL，绝不能把“UNKNOWN=0”当成全部协议完成。
 
 - **LBA7 = 490 COMPLETE / 22 PARTIAL / 0 UNKNOWN = 95.7%**。
   真实物理 LBA7 已锁定为 **3×0x40 packed EDPF + 14B pass-info@+0xC0**，
@@ -239,7 +239,7 @@ producer + 官方 consumer/行为 + 原始实盘验证**同时闭合，才能标
   `sub_10008950(ReWrite11Sector) -> sub_10003A40` 用同一容量重建 LBA11；同一
   Aigo U335 rev_pmap 的 CHS/exact 双真实捕获与两条官方路径吻合。因此后半252B已
   从 PARTIAL 升 COMPLETE，不再重复追 CHS profile。
-- **LBA0 = 104 COMPLETE / 408 PARTIAL**。
+- **LBA0 = 108 COMPLETE / 404 PARTIAL**。
   legacy MBR `+0x1B5..+0x1B7 = 2C 44 63` 已闭合为三个错误消息指针低字节；
   current zero bootstrap、legacy `UsbMainBSec` 与 Aigo L8302 第三 profile 已进一步
   分型。Aigo 前400B已精确匹配 CEMS 随附 `Netac_USB_API.dll/hardware.dll` 等8份
@@ -265,6 +265,14 @@ producer + 官方 consumer/行为 + 原始实盘验证**同时闭合，才能标
   compatibility region 升 COMPLETE。`+0x1A0..+0x1A3 SectorSize` 单独保留PARTIAL：
   Windows `sub_10013F10` 只在 SAFE1 分支写它，Linux BuildSector0不落盘，current
   SAFE6只preserve；扩展57盘为34×512、23×0，且尚无值相关consumer。
+  `+0x1B8..+0x1BB` 已继续闭合为 standard Windows MBR disk signature：
+  producer 是 `CREATE_DISK_MBR.Signature -> IOCTL_DISK_CREATE_DISK`；Windows
+  `DRIVE_LAYOUT_INFORMATION_MBR.Signature` 正式把它定义为唯一标识 MBR disk 的
+  drive signature。当前 `CEMSUsbRegsiter.dll::fcn.10046320` 唯一的
+  `IOCTL_DISK_GET_DRIVE_LAYOUT_EX(0x70050)` 路径只读取
+  `PartitionStyle@+0x00` 与 `PartitionCount@+0x04`，不读取 `Mbr.Signature@+0x08`，
+  因此 EDP 对该标准字段没有额外业务语义；22盘19种真实值与新增 fixture 门禁补齐
+  实盘证据，4B 已由 PARTIAL 升 COMPLETE。
   相邻 `+0x1BC..+0x1BD` 2B 也已从旧的“标准 reserved word + 全零样本”继续追到
   **unowned compatibility word**：current SAFE6/Linux BuildSector0 都不写，legacy
   `UsbMainBSec` 与 Aigo/Netac 模板均为 `00 00`；16-bit bootstrap、current EDP
@@ -420,7 +428,7 @@ producer + 官方 consumer/行为 + 原始实盘验证**同时闭合，才能标
    **不要因此升级 COMPLETE**：仍需找到 historical legacy registration profile 选择，
    以及真正调用 `usb20dll!IF_DiskFormat -> NewUsb20!FormatExA_NetacAPI` 的
    历史升级/量产入口；current `WriteLabelImp -> CCEMSSafeUsbRegsiter::UsbFormat`
-   已证明不是这条直接调用链。SectorSize 等尾部consumer也未闭合。若能找到真实原始 GPT EDP 盘，可用于把 LBA1/LBA2
+   已证明不是这条直接调用链。SectorSize consumer仍未闭合。若能找到真实原始 GPT EDP 盘，可用于把 LBA1/LBA2
    从 PARTIAL 继续细分；本轮已额外只读扫描 `u_disk` 下3896个大于13扇且
    小于1GiB的候选文件，没有任何文件在 LBA1 起点出现 `EFI PART`。在取得新
    外部实盘前不得再把本地 synthetic builder 输出冒充正向证据。
