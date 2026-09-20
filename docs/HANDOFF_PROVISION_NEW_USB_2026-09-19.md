@@ -28,8 +28,8 @@ producer + 官方 consumer/行为 + 原始实盘验证**同时闭合，才能标
 
 截至当前最新闭环，严格统计为：
 
-- **COMPLETE：3873 / 6656B = 58.2%**
-- **PARTIAL：2783 / 6656B = 41.8%**
+- **COMPLETE：3882 / 6656B = 58.3%**
+- **PARTIAL：2774 / 6656B = 41.7%**
 - **UNKNOWN：0 / 6656B = 0.0%**
 
 当前各 LBA 严格状态以主账本为唯一准绳，最新关键增量：
@@ -152,7 +152,7 @@ producer + 官方 consumer/行为 + 原始实盘验证**同时闭合，才能标
   strict originals 22/22 与独立SanDisk均精确满足两式，因此这8B升 COMPLETE。
   Dept/Owner 长值的 continuation 还确认落在 LBA9+0x80/+0x100，
   并已用 join60/join59 双profile实盘门禁锁定。当前全 LBA0–12 已无 UNKNOWN，
-  目前全局仍有2783B PARTIAL，绝不能把“UNKNOWN=0”当成全部协议完成。
+  目前全局仍有2774B PARTIAL，绝不能把“UNKNOWN=0”当成全部协议完成。
 
 - **LBA7 = 512 COMPLETE / 0 PARTIAL / 0 UNKNOWN = 100.0%**。
   真实物理 LBA7 已锁定为 **3×0x40 packed EDPF + 14B pass-info@+0xC0**，
@@ -291,7 +291,7 @@ producer + 官方 consumer/行为 + 原始实盘验证**同时闭合，才能标
   `sub_10008950(ReWrite11Sector) -> sub_10003A40` 用同一容量重建 LBA11；同一
   Aigo U335 rev_pmap 的 CHS/exact 双真实捕获与两条官方路径吻合。因此后半252B已
   从 PARTIAL 升 COMPLETE，不再重复追 CHS profile。
-- **LBA0 = 133 COMPLETE / 379 PARTIAL**。
+- **LBA0 = 142 COMPLETE / 370 PARTIAL**。
   legacy MBR `+0x1B5..+0x1B7 = 2C 44 63` 已闭合为三个错误消息指针低字节；
   current zero bootstrap、legacy `UsbMainBSec` 与 Aigo L8302 第三 profile 已进一步
   分型。Aigo 前400B已精确匹配 CEMS 随附 `Netac_USB_API.dll/hardware.dll` 等8份
@@ -300,11 +300,12 @@ producer + 官方 consumer/行为 + 原始实盘验证**同时闭合，才能标
   `CUsbRegsiter::UnRegsiterUsb -> LBA0` 的直接写回链。当前仍缺旧注册版本为何在
   已注册实盘保留 legacy bootstrap，以及何种历史入口真正选择 Netac Format 的 profile
   selection，因此 `+0x000..+0x17A` bootstrap 主体仍保持 PARTIAL。最新又把
-  `+0x17B` legacy第三条错误消息NUL终止符与 `+0x17C..+0x18F` 20B
-  cross-profile fixed-zero bootstrap tail 单独闭合：current SAFE6显式清零，legacy
-  `UsbMainBSec` 在+0x163存放 `Missing operating system` 并于+0x17B终止，Aigo/Netac
-  三条消息已前移至+0x08B/+0x0A3/+0x0C2且该尾部无引用；三类真实profile均为zero[21]。
-  新增 `aigo_l8302_netac_lba0_prefix.hex` 与定向回归，净增加21B COMPLETE。最新静态追踪已确认
+  前400B三-profile逐字节交集现已完整拆出30B：`+0x17B`第三条错误消息NUL与
+  `+0x17C..+0x18F` 20B固定零尾部之外，又闭合7个legacy指令零操作数字节
+  (`+0x0E1/+0x0E8/+0x101/+0x103/+0x10B/+0x10D/+0x124`)和前两条错误消息NUL
+  (`+0x143/+0x162`)。current SAFE6全段显式清零，Aigo/Netac在这些偏移均为padding零；
+  legacy则有可执行指令/字符串终止符语义。新增 `aigo_l8302_netac_lba0_prefix.hex`
+  与定向回归，累计净增加30B COMPLETE。最新静态追踪已确认
   `BusManageImp::WriteLabelImp -> SafeUsbRegsiterCems.dll!GetUsbTegsiterObj
   -> CCEMSSafeUsbRegsiter::UsbFormat`，但这里的 `UsbFormat` 实际只做
   sectorManage/设备信息 `0x52 -> 0xA2` 判定及
@@ -501,7 +502,7 @@ producer + 官方 consumer/行为 + 原始实盘验证**同时闭合，才能标
    **不要因此升级 COMPLETE**：仍需找到 historical legacy registration profile 选择，
    以及真正调用 `usb20dll!IF_DiskFormat -> NewUsb20!FormatExA_NetacAPI` 的
    历史升级/量产入口；current `WriteLabelImp -> CCEMSSafeUsbRegsiter::UsbFormat`
-   已证明不是这条直接调用链。LBA0 现在只剩 `+0x000..+0x17A` 379B bootstrap/profile-selection。若能找到真实原始 GPT EDP 盘，可用于把 LBA1/LBA2
+   已证明不是这条直接调用链。LBA0 现在只剩排除9个已闭合散点后的370B bootstrap/profile-selection。若能找到真实原始 GPT EDP 盘，可用于把 LBA1/LBA2
    从 PARTIAL 继续细分；本轮已额外只读扫描 `u_disk` 下3896个大于13扇且
    小于1GiB的候选文件，没有任何文件在 LBA1 起点出现 `EFI PART`。在取得新
    外部实盘前不得再把本地 synthetic builder 输出冒充正向证据。
