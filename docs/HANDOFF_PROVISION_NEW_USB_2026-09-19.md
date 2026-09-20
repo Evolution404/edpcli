@@ -255,7 +255,13 @@ producer + 官方 consumer/行为 + 原始实盘验证**同时闭合，才能标
   `+0x001=01` 与同一尾 marker，但 `+0x020..027` 分别为
   `a8 82 a4 22 00 20 02 16` / `b5 7e 9c 45 00 80 00 14`；同型号还存在全零
   profile。已加入独立512B证据夹具和差异回归，明确中间8B不是固定模板。
-  厂商 MP producer/字段格式/固件 consumer仍未找到，因此完成字节数不增加。
+  新增外部证据已把尾 marker 收敛到 **Phison FW.BIN / MPALL** 制造生态：
+  USBDev.ru 的 Phison firmware 资料与 Falcon Sandbox 的
+  `MPALL_F1_9000_v372_0B.exe` 均出现同一 `this is mp mark`，后者同时出现
+  `C:\\PhisonLog` 与 Phison controller 型号串。strict 非零盘是0951:1666、
+  62008590336B，但公开同 identity/capacity 同时存在 PS2307 与 PS2309，
+  因此不能锁死具体 controller。exact MPALL/FW producer、字段格式与 firmware
+  consumer 仍未找到，完成字节数不增加。
 - **LBA4 current writer layout 已闭合到机器码**：
   `OnllyID2Nd=main onlyid`，`HSerialCRC[5]` 来自对象五个 DWORD；
   当前 `WriteNormalULabel` 不填 `HDOnlySerial[5]`，所以 current profile 为0；
@@ -390,8 +396,11 @@ producer + 官方 consumer/行为 + 原始实盘验证**同时闭合，才能标
    从 PARTIAL 继续细分；本轮已额外只读扫描 `u_disk` 下3896个大于13扇且
    小于1GiB的候选文件，没有任何文件在 LBA1 起点出现 `EFI PART`。在取得新
    外部实盘前不得再把本地 synthetic builder 输出冒充正向证据。
-10. **LBA3 MP payload**：当前已明确 EDP 只 preserve/ignore；若继续追，目标应是
-   真正厂商 MP producer/firmware consumer，而不是再证明 EDP 不使用它。
+10. **LBA3 Phison MP/FW payload**：当前已明确 EDP 只 preserve/ignore，且
+    `this is mp mark` 已收敛到 Phison FW.BIN / MPALL 制造生态。后续应追
+    exact MPALL/FW 对512B metadata sector 的写入函数、`+0x001/+0x020..027`
+    字段定义和 controller firmware consumer；不要再重复证明 EDP 不使用它，也不要
+    因 0951:1666/容量相同就把 controller 锁死为 PS2307 或 PS2309。
 
 每得到一批闭合结论，都要同时更新
 `docs/PROVISION_PROTOCOL_AUDIT_2026-09-19.md` 和

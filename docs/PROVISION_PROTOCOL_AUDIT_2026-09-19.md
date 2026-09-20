@@ -86,6 +86,19 @@ strict original generation reference 的计数。非零 LBA3 只有3份，并精
   `+0x020..027=b5 7e 9c 45 00 80 00 14`、尾 marker 相同；
 - 同型号其它快照还存在整扇 zero profile。
 
+本轮继续追制造端来源后，`"this is mp mark"` 已不再只是无法归属的 ASCII
+尾标。USBDev.ru 的 Phison FW.BIN / firmware 资料明确使用同一
+`this is mp mark` 作为 Phison firmware/MP marker；Falcon Sandbox 对真实
+`MPALL_F1_9000_v372_0B.exe` 的静态结果又同时包含该 marker、
+`C:\\PhisonLog` 和多个 Phison controller 型号串。因此 LBA3 的制造端家族
+可以收敛为 **Phison MP/FW manufacturing metadata**，不再只写“未知厂商 MP”。
+
+但 controller 型号仍不能锁死。本地 strict 非零盘为 Kingston DataTraveler 3.0
+`VID=0951/PID=1666`、121110528 个 512B sector，即 `62008590336B`；
+公开同一 VID/PID/model/物理容量的真实记录同时存在 PS2307 与 PS2309。
+因此这些外部标识只支持 Phison family 归属，不能证明本地盘必为某一个
+PS22xx controller。
+
 因此至少存在 **两个非零 manufacturer/MP profile + 一个 zero profile**；尾 marker
 可以作为 MP payload 家族锚点，但中间8B绝不是固定常量。新增
 `tests/fixtures/protocol_evidence/kingston_20260803_mp_profile_lba3.hex`，其512B
@@ -95,10 +108,11 @@ strict original generation reference 的计数。非零 LBA3 只有3份，并精
 profile 做差异门禁。
 
 因此 LBA3 不能继续作为“完全不知道边界”的 UNKNOWN，也不能把尾部 ASCII
-误建模成一个独立 EDP 字段，更不能把某一份 `+0x020..027` 当成固定模板。本轮把
-整扇 512B 调整为 PARTIAL：
-**EDP preserve/ignore 边界已闭合，但制造端 producer、字段定义、固件 consumer
-缺失，所以 0B 可计 COMPLETE。**
+误建模成一个独立 EDP 字段，更不能把某一份 `+0x020..027` 当成固定模板。整扇
+512B 继续保持 PARTIAL：
+**EDP preserve/ignore 边界与 Phison 制造家族已经闭合，但 exact MPALL/FW
+producer、`+0x001/+0x020..027` 字段定义和 controller firmware consumer
+仍缺失，所以 0B 可计 COMPLETE。**
 
 ### LBA4：必须区分历史 raw-zero gap 与 current SAFE6 full rolling
 
