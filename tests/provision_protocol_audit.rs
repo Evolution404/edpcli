@@ -1147,6 +1147,13 @@ fn lba3_manufacturing_payload_is_an_opaque_whole_sector_not_just_a_marker_string
     let image = load(MARKED);
     let lba3 = sector(&image, 3);
 
+    assert_eq!(&lba3[0x000..0x004], &[0x00, 0x01, 0x00, 0x00]);
+    assert!(
+        !lba3
+            .windows(4)
+            .any(|window| window == [0x12, 0x01, 0x00, 0x02]),
+        "real LBA3 must not be conflated with the independently observed MPALL F2 INFO header"
+    );
     assert_eq!(lba3[0x001], 0x01);
     assert_eq!(
         &lba3[0x020..0x028],
@@ -1175,6 +1182,13 @@ fn lba3_mp_marker_has_multiple_real_historical_payload_profiles() {
     let historical_lba3 = decode_hex_fixture(KINGSTON_20260803_MP_LBA3_HEX);
 
     assert_eq!(historical_lba3.len(), SECTOR);
+    assert_eq!(&historical_lba3[0x000..0x004], &[0x00, 0x01, 0x00, 0x00]);
+    assert!(
+        !historical_lba3
+            .windows(4)
+            .any(|window| window == [0x12, 0x01, 0x00, 0x02]),
+        "historical LBA3 must remain distinct from the MPALL F2 INFO page layout"
+    );
     assert_eq!(strict_lba3[0x001], 0x01);
     assert_eq!(historical_lba3[0x001], 0x01);
     assert_eq!(&strict_lba3[0x1f0..], b"this is mp mark\0");

@@ -93,21 +93,43 @@ strict original generation reference 的计数。非零 LBA3 只有3份，并精
 `C:\\PhisonLog` 和多个 Phison controller 型号串。因此 LBA3 的制造端家族
 可以收敛为 **Phison MP/FW manufacturing metadata**，不再只写“未知厂商 MP”。
 
-继续对公开 MPALL/UPTool 静态结果做函数族交叉后，producer 侧又向前推进了一层：
-`MPALL_F1_9000_v372_0B.exe` 明确保留 `CBaseController::WriteF2Mark` 与
-`CU32SSBaseContoller::WriteF2Mark` 名称，同时出现 `F1-F2 MARK`；另一代
-`mpall_f1_7f00_dl07_v503_0a.exe` 也独立保留 `CBaseController::WriteF2Mark`，
-而 `UPTool_Ver2093.exe` 再次出现同名函数。因此当前可以把 **exact producer family**
-从泛化的“Phison MPALL/FW”收敛到 **F2-mark writer / `WriteF2Mark` 函数族**。
-不过公开静态报告仍没有暴露该函数内部的 sector offset、512B staging layout 或
-`+0x001/+0x020..027/+0x1F0` 的逐字段 store，所以这一步只收窄 producer 定位，
-不能把任何物理字节升级 COMPLETE。
+继续取得并离线逆向 FlashBoot 的 MPALL v3.72.0B 原包后，Phison 制造链又向前推进，
+但同时否证了一个过强假设。`MPALL_F1_9000_v372_0B.exe` SHA-256=
+`96614750c61e0ad6b05d19e74848c1679f6318dd21de6faee46c92fb05152142`，
+与公开 Hybrid Analysis 样本完全一致。其机器码直接证明：
 
-但 controller 型号仍不能锁死。本地 strict 非零盘为 Kingston DataTraveler 3.0
+- `CBaseController::WriteF2Mark@0x00581B00` 把 `object+0x1C00C` 交给低层
+  `fcn.004203D0`；后者构造 `06 06 01 ...` vendor command 并写 **0x200B**；
+- 随后 `fcn.004202C0` 以 `06 05 ... "INFO"` 读取 response；
+- `WriteF2Mark` 对读回 buffer 起始处与 `object+0x1C00C` 做完整 **0x200B `memcmp`**。
+
+因此可以确认 MPALL 存在真实的 **512B F2 INFO write/readback path**。但进一步
+逐偏移审计证明，不能把这512B直接当成物理 LBA3：
+
+- MPALL 的正式 INFO 校验路径要求 staging 开头为 `12 01 00 02`；真实 Kingston
+  非零 LBA3 则从 `00 01 00 00` 开始，而且整扇均不存在 `12 01 00 02`；
+- `GetInfo.exe` 在打印 `Get_Info_Page INFO` 后先清 `0x4D1EC0` 的0x210B，再把
+  `0x4D1EC0` 与字符串 `INFO` 交给设备读取函数。相邻 `0x4D1CB0 / 0x4D1EC0 /
+  0x4D20D0` 恰为连续三个0x210B response work buffer，对应 Version/INFO/RD 路径；
+- GetInfo 的正式制造字段也位于完全不同的位置：`SampleMark` 由对象字段控制，
+  写到 raw INFO response `+0xD9/+0xDA` 为 `12 56` 或 `00 00`；`MPF1F2` 则按
+  controller generation 从 INFO `+0x93` 或 `+0xDF` 的 bitfield 解析；这些偏移
+  均与 LBA3 `+0x001/+0x020..027` 不对应；
+- MPALL 包内两份 `FW*.BIN` 与两份 `BN*.BIN` 的 `"this is mp mark"` 都在各自
+  **最后512B的 `+0x000`**，而实体 LBA3 marker 在 **`+0x1F0`**；
+- 两种真实 LBA3 的8B材料 `a882a42200200216` / `b57e9c4500800014` 以及各自
+  4B半段，在已取得的 MPALL EXE、FW/BN BIN 中均无直接常量命中。
+
+所以本轮真正闭合的是：**Phison F2-mark/F2-INFO 制造生态确实存在独立512B
+写入/回读协议，但“F2 INFO staging == LBA3”已被结构反证。** `WriteF2Mark`
+只能继续作为厂商家族/邻近制造路径证据，不能作为 LBA3 exact producer 记账。
+
+controller 型号仍不能锁死。本地 strict 非零盘为 Kingston DataTraveler 3.0
 `VID=0951/PID=1666`、121110528 个 512B sector，即 `62008590336B`；
-公开同一 VID/PID/model/物理容量的真实记录同时存在 PS2307 与 PS2309。
+Psychson 历史真实记录中同一 VID/PID/model/物理容量至少同时出现：
+**PS2307 + MPALL v3.34.07** 与 **PS2309 + MPALL v5.35.35**。
 因此这些外部标识只支持 Phison family 归属，不能证明本地盘必为某一个
-PS22xx controller。
+PS22xx controller；后续应优先差分这两个精确量产代际的 F2 INFO 路径。
 
 因此至少存在 **两个非零 manufacturer/MP profile + 一个 zero profile**；尾 marker
 可以作为 MP payload 家族锚点，但中间8B绝不是固定常量。新增
@@ -120,9 +142,10 @@ profile 做差异门禁。
 因此 LBA3 不能继续作为“完全不知道边界”的 UNKNOWN，也不能把尾部 ASCII
 误建模成一个独立 EDP 字段，更不能把某一份 `+0x020..027` 当成固定模板。整扇
 512B 继续保持 PARTIAL：
-**EDP preserve/ignore 边界、Phison 制造家族以及 `WriteF2Mark` producer 函数族
-已经闭合，但该函数内部的 exact sector/staging write、`+0x001/+0x020..027`
-字段定义和 controller firmware consumer 仍缺失，所以 0B 可计 COMPLETE。**
+**EDP preserve/ignore 边界与 Phison 制造家族已闭合，MPALL/GetInfo 又提供了
+独立 F2 INFO 路径及其与 LBA3 不同构的直接反证；但 LBA3 自身 exact producer、
+`+0x001/+0x020..027/+0x1F0` 的生成规则/字段定义和 controller firmware consumer
+仍缺失，所以严格规则下仍是 0B 可计 COMPLETE。**
 
 ### LBA4：必须区分历史 raw-zero gap 与 current SAFE6 full rolling
 
