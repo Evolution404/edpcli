@@ -628,6 +628,22 @@ fn official_virtual_gpt_builder_emits_valid_lba1_and_entry0() {
 }
 
 #[test]
+fn one_partition_gpt_keeps_entries1_to3_partition_type_guids_unused() {
+    // The virtual builder fixture's residual bytes were pre-zeroed by the
+    // harness, so only assert the three 16-byte PartitionTypeGUID fields here.
+    // Those fields are the standards-defined discriminator for an unused GPT
+    // entry; the remaining 112 bytes per entry deliberately stay PARTIAL.
+    let lba2 = decode_hex_fixture(OFFICIAL_VIRTUAL_GPT_LBA2_HEX);
+    assert_eq!(lba2.len(), SECTOR);
+    for offset in [0x80usize, 0x100, 0x180] {
+        assert!(
+            lba2[offset..offset + 0x10].iter().all(|byte| *byte == 0),
+            "unused GPT PartitionTypeGUID at {offset:#x} must be zero"
+        );
+    }
+}
+
+#[test]
 fn lba12_official_virtual_writer_executes_mode1_mode2_mode3_wrapping_paths() {
     // These are not real-device captures.  They are deterministic 512-byte LBA12
     // outputs emitted by the official CEMSUsbRegsiter.dll CreatePartitions path
@@ -983,6 +999,59 @@ fn lba6_owner_office_and_label_slots_have_official_fixed_storage_boundaries() {
                 .all(|tail| tail.iter().any(|byte| *byte != 0)),
         "the same 江苏电力!SAFE6 label must retain at least three distinct non-zero post-NUL backing profiles"
     );
+}
+
+#[test]
+fn lba6_gserial_and_beizhu_semantic_prefixes_stop_before_profile_underlay() {
+    let mut checked = 0usize;
+    let mut saw_short_gserial = false;
+    let mut saw_long_gserial = false;
+    let mut saw_empty_beizhu = false;
+    let mut saw_normal_beizhu = false;
+
+    for entry in fs::read_dir(FIXTURE_DIR).expect("protocol fixtures") {
+        let path = entry.expect("backup entry").path();
+        if path.extension().and_then(|ext| ext.to_str()) != Some("bin") {
+            continue;
+        }
+        let name = path.file_name().unwrap().to_str().unwrap();
+        if parse_reference_backup_name(name).is_none() {
+            continue;
+        }
+        let image = fs::read(&path).expect("fixture bytes");
+        let plain = lba6_decode(sector(&image, 6));
+        let gserial = &plain[0x1c0..0x1d0];
+        let beizhu = &plain[0x1d0..0x1e0];
+
+        assert_eq!(
+            &gserial[..8],
+            b"322CA28A",
+            "all committed official profiles retain the common GSerial string prefix: {name}"
+        );
+        match gserial[8] {
+            0 => saw_short_gserial = true,
+            b'-' => saw_long_gserial = true,
+            other => panic!("unexpected byte8 in GSerial semantic region: {other:#x} ({name})"),
+        }
+
+        match beizhu[0] {
+            0 => saw_empty_beizhu = true,
+            0xc6 => {
+                assert_eq!(
+                    gbk_string(beizhu),
+                    "普通",
+                    "legacy BeiZhu value changed: {name}"
+                );
+                saw_normal_beizhu = true;
+            }
+            other => panic!("unexpected BeiZhu first semantic byte: {other:#x} ({name})"),
+        }
+        checked += 1;
+    }
+
+    assert!(checked >= MIN_PROTOCOL_FIXTURES);
+    assert!(saw_short_gserial && saw_long_gserial);
+    assert!(saw_empty_beizhu && saw_normal_beizhu);
 }
 
 #[test]

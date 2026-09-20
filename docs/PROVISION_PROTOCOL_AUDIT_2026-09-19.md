@@ -3449,6 +3449,56 @@ reader 自身的 SAFE6 checksum、rolling XOR、marker 判定和 continuation co
 marker/prefix/continuation 与写边界证据；physical 22盘没有 long User 的历史事实继续保留，
 不与 virtual first-party positive-wire evidence 混计。
 
+### LBA2 unused GPT entry：只闭合 3×16B type GUID，不扩大到 residual 336B
+
+继续回到 current Windows `CEMSUsbRegsiter.dll` 的真实 GPT 创建路径后，确认
+`WriteNormalULabel` 在大盘分支调用 `sub_10037160(..., partition_count=1)`；该函数构造
+`DRIVE_LAYOUT_INFORMATION_EX` 时设置 `PartitionStyle=1 (GPT)`、`PartitionCount=1`，
+再通过 `IOCTL_DISK_CREATE_DISK(0x7C058)` 与
+`IOCTL_DISK_SET_DRIVE_LAYOUT_EX(0x7C054)` 交给 Windows disk stack 落盘。
+
+这使 entry1..3 的 **类型字段** 不再需要猜测。UEFI 2.10 §5.3.3 对 GPT entry 的
+`PartitionTypeGUID@+0x00..0x0F` 有明确 wire 语义：16B 全零即 unused entry；current
+Windows 路径又明确只提交1个 active partition。因此 LBA2 首扇区的 entry1/2/3 三个
+type GUID（物理 `+0x080..08F / +0x100..10F / +0x180..18F`）可按 standards-defined
+unused discriminator 闭合。
+
+证据仍按严格边界分层：
+
+- official Linux GPT virtual fixture 中这三个 type GUID 均为0；
+- 本机只读扫描20,538个候选文件找到1份真实 GPT image（Ubuntu 26.04 ISO）；其3个
+  used entry 后至少125个 unused entry 的 type GUID/完整entry均为0；
+- 但 Linux fixture 的其它 residual bytes 来自 harness 预清，Ubuntu image 也不是
+  EDP/Windows first-party wire producer，所以**不**据此把 unused entry 的
+  `UniqueGUID/start/end/attr/name` 一起升级。
+
+因此 LBA2 本轮严格增加 **48B COMPLETE**，剩余 `3×112B=336B` 继续 PARTIAL。
+回归 `one_partition_gpt_keeps_entries1_to3_partition_type_guids_unused` 只锁定三个16B
+type discriminator，不断言 residual 336B 的 producer-owned 零值。
+
+### LBA6 GSerial / BeiZhu：按首个 NUL 边界再拆 10B
+
+此前将 `GSerial[16]` / `BeiZhu[16]` 整槽回退 PARTIAL 是必要的，因为短字符串 NUL 后
+确有 current backing 与 legacy MBR underlay 两种物理语义。但这也把**首个 NUL 之前
+确定属于 C-string 的字节**一并低估了。
+
+Windows/Linux current `BuildSector6` 对两槽的物理写法已经是机器码级一致：先清16B
+temporary buffer，再从 `UsbWriteParam` 固定复制输入前15B，最后整16B写盘；reader从
+`+0x1C0/+0x1D0` 均按 C-string 消费。结合 strict originals：
+
+- GSerial 16/22 为 `322CA28A\0`，6/22 为 `322CA28A-D7D144`；因此
+  `+0x1C0..+0x1C7` 8B 永远是有效字符串前缀，`+0x1C8` 也仍是字符串域：short 为NUL、
+  long 为 `'-'`。历史目录另做20个去重 front census，无任何前8B反例，byte8仅出现
+  `00/2D`；legacy MBR underlay 从 short NUL **之后** 才暴露；
+- BeiZhu 20/22 为空、2/22 为 GBK“普通”。因此只有 `+0x1D0` 能跨所有 profile
+  保证仍属于 C-string 本体：空串时是NUL，“普通”时是首字节 `C6`；从 `+0x1D1`
+  开始，空串 profile 已允许进入 backing，不能继续升级。
+
+据此新增 **9B GSerial + 1B BeiZhu = 10B COMPLETE**；其余 GSerial 7B、BeiZhu 15B
+继续保留 PARTIAL。回归
+`lba6_gserial_and_beizhu_semantic_prefixes_stop_before_profile_underlay` 固定 committed
+profiles 的该边界，而不是把字符串具体值硬编码成未来协议常量。
+
 ## 当前逐字节地图状态
 
 ### 严格完成口径（2026-09-19）
@@ -3477,11 +3527,11 @@ marker/prefix/continuation 与写边界证据；physical 22盘没有 long User �
 |---:|---:|---:|---:|---:|---|
 | 0 | 112B | 400B | 0B | 21.9% | MBR partition table +55AA、legacy 三个 message-pointer、`+0x190..+0x19F/+0x1A4..+0x1B4` 两段 unowned compatibility region、optional SectorSize overlay、standard Windows MBR disk signature 与 `+0x1BC..+0x1BD` reserved/unowned word 均已闭合；只剩前400B bootstrap主体/profile-selection继续PARTIAL |
 | 1 | 512B | 0B | 0B | 100.0% | Linux official `BuildSector1_Gpt` first-party virtual runtime 直接生成整512B primary header，独立 IEEE CRC32 同时命中 header/16KiB array CRC；同一34扇 image 又被 current Windows `sub_1002AB70` 原生识别为GPT。physical 22/22零值继续作为 absent-GPT profile 保存，不与virtual fixture混计 |
-| 2 | 128B | 384B | 0B | 25.0% | entry0完整128B由 official `BuildSector2_Gpt` 原生生成并按 Windows/Linux 128B parser field map 闭合；entries1..3 的384B在 virtual staging 中虽为零，但零来自 harness 预清而非该 builder，自觉保持PARTIAL |
+| 2 | 176B | 336B | 0B | 34.4% | entry0完整128B first-party闭合；current Windows active GPT creator又明确 `PartitionCount=1`，按 UEFI 2.10 unused-entry 定义把 entries1..3 的三个16B `PartitionTypeGUID=0` 闭合。每条其余112B仍缺 Windows first-party on-disk producer，继续PARTIAL |
 | 3 | 0B | 512B | 0B | 0% | EDP 注册 writer 对整扇 preserve-existing，当前 Windows/Linux EDP reader 不解析；22份原始盘为21零+1 Kingston MP payload，但厂商 producer/固件 consumer 未闭合 |
 | 4 | 49B | 463B | 0B | 9.6% | onlyid clear header、OnlyIdXor8、LLGB 双锚点完成；本轮又把 restore-node 后半固定13B（SingleUsbFlg/NewLabFlag/Version/sector tuple）按 current producer + structural-preserve/semantic-ignore + 22盘一致 profile 闭合。MyHardinfo、第二 ID/HSerial、server flags 与 `+0x047..+0x1FB` 多profile backing 继续PARTIAL |
 | 5 | 512B | 0B | 0B | 100% | 两版 EdpDiskCtrl 均只对 LBA5 执行“读整扇→原样写回→检查 ERROR_WRITE_PROTECT(0x13)”；当前注册 writer 读取既有13扇区后不重建 LBA5，因此 preserve existing bytes；22/22原始盘全零 |
-| 6 | 463B | 49B | 0B | 90.4% | 216B UsbMainBSec fixed template、autoid[16]、Office[64]、Label物理56B均已闭合；Dept 前63B COMPLETE、槽末1B因join59旧producer继续PARTIAL；User/Owner 32B又由短值 writer-uninitialized backing 生命周期 + 最大155B long-User first-party writer/reader round-trip闭合；`m_encrypt@+0x1F0`、`m_crcUsbID[0..1]@+0x100..107`均已闭合。剩余49B集中在Dept接缝1B、GSerial/BeiZhu与legacy MBR fragment |
+| 6 | 473B | 39B | 0B | 92.4% | 在既有闭环基础上，再按首个NUL边界把 GSerial `+0x1C0..1C8` 9B 与 BeiZhu `+0x1D0` 1B 升COMPLETE；剩余39B为 Dept接缝1B、GSerial尾7B、BeiZhu尾15B、legacy MBR fragment16B |
 | 7 | 512B | 0B | 0B | 100.0% | 3×Version、entry1/entry2 NeedDisturb 已按 compatibility metadata 生命周期闭合；最后两个 BackupPromptPeriod BYTE 又由正式 DWARF 字段、current-zero producer、四代 Windows + Linux structural-preserve/negative semantic consumer、跨 v0x0064/v0x0206 实盘0/0 profile 闭合为 dormant compatibility fields。LBA7 至此整扇 COMPLETE |
 | 8 | 476B | 36B | 0B | 93.0% | header 的 LLGB/logical length/ToolVersion/Labversion/writeTime/ElabOffset/Reserved/MacInfo 已闭合；`+0x080..0x1FF` 又由 Windows/Linux 双 writer、注册侧7-key reader、运行时17-key EdpEDiskCtrl reader、动态 encrypted backing/preserve tail 与22盘17-key实证整体闭合384B；仅 HDSerialInfo/UsbOnlyInfo 36B继续PARTIAL |
 | 9 | 372B | 140B | 0B | 72.7% | EETU与EPPE区域维持既有闭环；新增最大155B long-User first-party `BuildSector6` 正向输出证明 `+0x100..+0x17F` continuation 最大正好128B，official `ReadSector6` 动态 round-trip恢复原User。因 `+0x120..+0x17F` 不再与SAPF semantic区重叠，96B升COMPLETE；剩余140B为 long-Dept `+0x080..FF` 128B 与 SAPF trailing `+0x114..11F` 12B |
@@ -3491,8 +3541,8 @@ marker/prefix/continuation 与写边界证据；physical 22盘没有 long User �
 
 总计：
 
-- **完成：4672B / 6656B = 70.2%**
-- **部分已知：1984B / 6656B = 29.8%**
+- **完成：4730B / 6656B = 71.1%**
+- **部分已知：1926B / 6656B = 28.9%**
 - **未知：0B / 6656B = 0.0%**
 
 这是一组**严格下限**，故意宁可低估，不把“能生成/能解析”冒充成“已经完全理解”。
@@ -3502,11 +3552,11 @@ marker/prefix/continuation 与写边界证据；physical 22盘没有 long User �
 |---|---|---|
 | 0 | 部分闭合 | MBR 分区表、55AA、legacy 三个错误消息指针、`+0x190..0x19F/+0x1A4..0x1B4` 两段 cross-profile unowned compatibility region、optional SectorSize compatibility overlay、standard Windows MBR disk signature 及 `+0x1BC..+0x1BD` reserved/unowned word 已闭合；只剩前400B bootstrap profile-selection 继续追 |
 | 1 | 完全闭合 | absent-GPT physical profile 与 official GPT positive-wire profile 均闭合；512/512 COMPLETE |
-| 2 | GPT entry0闭合 | `0x000..0x07F` entry0 first-party writer/consumer闭合；`0x080..0x1FF` entries1..3 因整表初始化/active caller仍缺而保持384B PARTIAL |
+| 2 | GPT entry0 + unused type GUID闭合 | entry0 128B完整闭合；entries1..3 的16B `PartitionTypeGUID` 已按 current Windows one-partition creator + UEFI unused-entry 定义闭合，共176B COMPLETE；其余336B residual fields继续追 |
 | 3 | 外部制造区部分闭合 | 21/22 全零，1 份 Kingston MP payload；官方 EDP 注册链原样保留且当前 reader 不解析，厂商生成/消费语义仍未知 |
 | 4 | 高度闭合 | 整扇已无UNKNOWN；`+0x047..+0x1FB` 已确认 raw-zero / rolling-encrypted-zero 双历史物理表示且22盘语义均为零。`+0x45/+0x46` 已闭合为 `bDataToServer/bConnetServer` post-XOR wire bytes，并证明官方 ReadSector4 不补偿该例外；inspect 已恢复 producer-side flags，Provision 已改为 current SAFE6 full rolling + post-XOR覆盖。两flag因缺最终业务consumer仍PARTIAL |
 | 5 | canonical 已知 | opaque preserve / 写保护探测 scratch；当前 22/22 全零，但零不是协议固定要求 |
-| 6 | 高度闭合 | 整扇已无 UNKNOWN，463/512 COMPLETE。User/Owner 32B 已由 short backing 生命周期和最大 long-User first-party writer/reader闭合；Dept仅剩 `+0x3F` join59旧producer，另有GSerial/BeiZhu与legacy MBR fragment共49B继续PARTIAL |
+| 6 | 高度闭合 | 整扇已无 UNKNOWN，473/512 COMPLETE。GSerial前9B与BeiZhu首1B已从 profile-dependent slot 中拆出闭合；剩余39B仅为 Dept join59末字节、两字符串尾部underlay与16B legacy MBR fragment |
 | 7 | 完全闭合 | 物理0x40 packed ABI、PartionCount、rolling XOR、entry0 NeedDisturb MBR gate、v0x0064 legacy wrapped8、3×Version/entry1+2 NeedDisturb compatibility metadata、`bNoUsbChkPasSafe` SAFE6 policy 行为链及最后两个 dormant BackupPromptPeriod compatibility BYTE 均已闭合；512/512 COMPLETE |
 | 8 | 高度闭合 | **LBA8 dynamic ELABEL + encrypted backing + preserved tail** 已闭合：17-key wire template 中7键由注册侧 Windows/Linux reader回填，运行时 EdpEDiskCtrl reader 则解析全部17键；NUL后块内既有backing随动态前缀加密，块外tail原样preserve。384B动态区已COMPLETE；当前只剩 HDSerialInfo 4B 与 legacy UsbOnlyInfo 32B PARTIAL |
 | 9 | 高度闭合 | 整扇已无UNKNOWN，372/512 COMPLETE。EETU/EPPE保持既有闭环；long-User `+0x120..+0x17F` 96B 已由最大155B first-party writer→wire→reader正例闭合。剩余140B严格收敛为 long-Dept continuation 128B（legacy join59 writer仍缺）与 SAPF trailing/backing 12B（historical producer仍缺） |
