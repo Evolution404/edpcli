@@ -2669,7 +2669,7 @@ legacy/backing profile），因此可作为额外真实设备/profile 佐证；�
 
 本轮进一步把 LBA10 后续区域从“未知”拆成两个不同的 PARTIAL 边界。
 
-#### `+0x28..0x7F`：EESI 内部未解释 round-trip payload
+#### `+0x28..0x7F`：EESI caller-owned compatibility extension
 
 current `edpediskctrl.dll` 与独立另一版
 `/Users/zhangyuxi/Desktop/u_disk/out_raw_data/EdpEDiskCtrl.dll` 都满足：
@@ -2696,9 +2696,26 @@ current `UserLogin` 对本地 EESI 输出结构只读取 `+0x08/+0x18` 两个卷
 只消费两个卷标；两套卷标设置 `IDOK` handler zero-initializes the full 0x80B EESI payload，
 只填写两个卷标再经 vtable+0x24 Set，因此 current UI producer 对这88B的来源为零。
 
-这些证据补齐了真实外部 Get/Set caller 和 current UI producer 零来源，但仍不足以
-COMPLETE：底层 Set API 明确允许调用者完整 round-trip 这88B；严格 SanDisk EESI
-与补充 Netac 历史 EESI 的88B都为零，仍不能替代正式字段划分、非零 profile 或值相关 consumer。
+继续把调用面按“谁拥有这88B”而不是“必须猜出88B内部字段名”重新审计后，
+这一区域可以严格闭合：
+
+- 两个独立 EESI `EdpEDiskCtrl` build 都把 `+0x28..0x7F` 与其它
+  EESI 字节一起完整 Get/Set，底层不生成、不解释、只做 structural round-trip；
+- 两套独立 `EdpEDisk.exe` official caller 都在保存前把完整0x80B清零，
+  只填写 `+0x08/+0x18` 两个卷标，因此 current official caller-owned
+  profile 对这88B明确写零；
+- current `UserLogin`、两套 `OnInitDialog` getter caller 以及已扫
+  `UsbSuspensionWnd` 行为链均没有对这88B做值相关读取；
+- 更老两个独立 `EdpEDiskCtrl` build 根本没有 EESI Get/Set，说明不能把
+  88B误解释成继承自旧协议的隐藏活动字段；
+- strict SanDisk EESI 与独立历史 Netac EESI 两个正向实盘 profile 的88B均为零，
+  且已有回归锁定。
+
+因此这88B从 PARTIAL 升为 **COMPLETE**，语义命名为
+**EESI caller-owned compatibility extension**。这里的 COMPLETE 表示生命周期已经
+闭合：API caller 可携带任意未来扩展字节，底层必须 round-trip；当前 official caller
+写零且当前业务 consumer 不解释。它**不**表示未来值必须为零，也不把未知内部结构
+冒充成 `Reserved[88]`。
 
 #### `+0x80..0x1FF`：不属于 EESI 的 opaque preserved physical tail
 
@@ -3181,14 +3198,14 @@ SAFE6 只透明保留。COMPLETE 不意味着未来出现其它值时可以机�
 | 7 | 512B | 0B | 0B | 100.0% | 3×Version、entry1/entry2 NeedDisturb 已按 compatibility metadata 生命周期闭合；最后两个 BackupPromptPeriod BYTE 又由正式 DWARF 字段、current-zero producer、四代 Windows + Linux structural-preserve/negative semantic consumer、跨 v0x0064/v0x0206 实盘0/0 profile 闭合为 dormant compatibility fields。LBA7 至此整扇 COMPLETE |
 | 8 | 476B | 36B | 0B | 93.0% | header 的 LLGB/logical length/ToolVersion/Labversion/writeTime/ElabOffset/Reserved/MacInfo 已闭合；`+0x080..0x1FF` 又由 Windows/Linux 双 writer、注册侧7-key reader、运行时17-key EdpEDiskCtrl reader、动态 encrypted backing/preserve tail 与22盘17-key实证整体闭合384B；仅 HDSerialInfo/UsbOnlyInfo 36B继续PARTIAL |
 | 9 | 276B | 236B | 0B | 53.9% | EETU magic/time/useCount + `reverse[104]` 已完整闭合；本轮再把 EPPE `+0x188..+0x1FF` 120B 闭合为 **writer-owned zero tail**：SetPassInfoEx显式清零，CUsbRegsiter::GetPassInfoEx 与 modfilesyscheck 均只消费 magic/minPassLen，current EdpDiskCtrl factory vtable不暴露 full-block helper，6/6原始EPPE tail为零；剩余236B集中在 +0x080..0x17F Dept/User/SAPF 多profile重叠区 |
-| 10 | 424B | 88B | 0B | 82.8% | EESI magic + `UsbSuspensionWnd lifecycle/control flag` + 两个16B卷标槽完成；+0x80..0x1FF 已由两个独立 EESI build 的 preserve writer、getter ignore、两个旧 build 无 EESI ownership 与扩展历史实盘闭合为 cross-generation unowned preserve/ignore COMPLETE；仅+0x28..0x7F共88B仍PARTIAL |
+| 10 | 512B | 0B | 0B | 100.0% | EESI magic + `UsbSuspensionWnd lifecycle/control flag` + 两个16B卷标槽完成；`+0x28..+0x7F` 已闭合为 caller-owned compatibility extension（两版Ctrl完整round-trip、两套official UI零producer、业务negative-consumer、双正向EESI实盘）；`+0x80..+0x1FF` 继续按 cross-generation unowned preserve/ignore COMPLETE。LBA10整扇闭合 |
 | 11 | 512B | 0B | 0B | 100% | normal register path 使用 `DISK_GEOMETRY_EX.DiskSize`；`UDiskLabelRepair` check/rewrite path 使用 `DISK_GEOMETRY` 的 CHS capacity。两条路径的 producer/consumer 与同盘双 profile 实测均闭合 |
 | 12 | 464B | 48B | 0B | 90.6% | 在既有 pass-info / `EncryptFileKey32[16]` / Reserved 闭环基础上，本轮再把3×Version 12B与entry1/2 NeedDisturb 8B按 current producer + packed runtime structural-preserve/negative-semantic-consumer + 22盘一致 profile 闭合；当前仅剩3×wrapped16 在 mode1/mode3 缺正向真实盘样本，共48B |
 
 总计：
 
-- **完成：3743B / 6656B = 56.2%**
-- **部分已知：2913B / 6656B = 43.8%**
+- **完成：3831B / 6656B = 57.6%**
+- **部分已知：2825B / 6656B = 42.4%**
 - **未知：0B / 6656B = 0.0%**
 
 这是一组**严格下限**，故意宁可低估，不把“能生成/能解析”冒充成“已经完全理解”。
@@ -3206,7 +3223,7 @@ SAFE6 只透明保留。COMPLETE 不意味着未来出现其它值时可以机�
 | 7 | 完全闭合 | 物理0x40 packed ABI、PartionCount、rolling XOR、entry0 NeedDisturb MBR gate、v0x0064 legacy wrapped8、3×Version/entry1+2 NeedDisturb compatibility metadata、`bNoUsbChkPasSafe` SAFE6 policy 行为链及最后两个 dormant BackupPromptPeriod compatibility BYTE 均已闭合；512/512 COMPLETE |
 | 8 | 高度闭合 | **LBA8 dynamic ELABEL + encrypted backing + preserved tail** 已闭合：17-key wire template 中7键由注册侧 Windows/Linux reader回填，运行时 EdpEDiskCtrl reader 则解析全部17键；NUL后块内既有backing随动态前缀加密，块外tail原样preserve。384B动态区已COMPLETE；当前只剩 HDSerialInfo 4B 与 legacy UsbOnlyInfo 32B PARTIAL |
 | 9 | 高度闭合 | 整扇已无UNKNOWN；EETU `reverse[104]` 已完全闭合但必须区分两种 producer：前102B是 `WriteNormalULabel` 未初始化 caller backing，被 runtime 整块透明保存；末2B是 `SetTempUse` 显式零初始化。EPPE 120B 又由 current SetPassInfoEx 显式零 producer、注册侧 GetPassInfoEx / modfilesyscheck 仅消费 magic+minPassLen、current EdpDiskCtrl 对外 factory vtable 不暴露 full-block helper及6/6原盘零tail闭合为 writer-owned zero region。当前剩余236B均位于 BuildSector6 long-Dept/User continuation 与 SAPF/backing 多profile复用区 |
-| 10 | 高度闭合 | 前0x80为 EESI round-trip payload；`+0x04` 已闭合为 `UsbSuspensionWnd lifecycle/control flag`：两套独立UI启动默认写1、标签设置保存写0，0/非0分别进入 Destroy 与刷新/Show 行为链；后0x180按 cross-generation unowned preserve/ignore 语义 COMPLETE。当前仅+0x28..0x7F共88B继续PARTIAL |
+| 10 | 完全闭合 | 前0x80 EESI：magic、`UsbSuspensionWnd lifecycle/control flag`、两个16B卷标，以及 `+0x28..+0x7F` caller-owned compatibility extension 均已闭合；后0x180按 cross-generation unowned preserve/ignore 语义 COMPLETE。512/512 COMPLETE |
 | 11 | 完全闭合 | DRKB/random252/ASCII VID-PID/PDKB 全部已锁；exact DiskSize 与 CHS repair 两种真实 wire profile 的 producer/consumer/实盘均闭合 |
 | 12 | 高度闭合 | 主运行时 96B packed layout 已锁；3×Version 与 entry1/2 NeedDisturb 已按 compatibility metadata 生命周期闭合，entry0 NeedDisturb 仍保留真实 fallback gate 行为；`EncryptFileKey32[16]`、Reserved、完整 pass-info 也均闭合。当前只剩3×wrapped16 的 mode1/mode3正向实盘缺口48B |
 

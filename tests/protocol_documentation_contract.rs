@@ -163,6 +163,7 @@ fn documentation_keeps_the_official_provisioning_chain_and_strict_rules() {
         "LBA4 current writer machine-code node layout",
         "LBA12 v0x0206 hidden default-password file-key wrapping",
         "LBA12 alternate wrapping-mode algorithm map",
+        "EESI caller-owned compatibility extension",
         "normalDetail.algorithm",
         "LabelInfo.crypt",
         "WriteNormalULabel",
@@ -247,8 +248,8 @@ fn documentation_keeps_the_official_provisioning_chain_and_strict_rules() {
         "LBA9 progress must retain the closed EETU reverse backing and EPPE writer-owned zero tail semantics"
     );
     assert!(
-        DOC.contains("| LBA10 | 424 | 88 | 0 | 82.8% |"),
-        "LBA10 progress must retain the closed +0x04 control flag and preserve/ignore tail semantics"
+        DOC.contains("| LBA10 | 512 | 0 | 0 | 100.0% |"),
+        "LBA10 must remain fully closed once the EESI compatibility extension and preserve/ignore tail are accounted for"
     );
     assert!(
         DOC.contains("| LBA12 | 464 | 48 | 0 | 90.6% |"),

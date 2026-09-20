@@ -83,7 +83,7 @@ producer + 官方 consumer/行为 + 原始实盘验证**同时闭合，才能标
   两组均重建为同一76B合法GBK Dept。join59 的旧 producer仍未找到，
   因此 +0x80..0xFF 暂不升COMPLETE；+0x100..0x17F 又与 SAPF/long-User
   profile重叠且22盘没有长User正向样本，继续PARTIAL。
-- **LBA10 = 424 COMPLETE / 88 PARTIAL / 0 UNKNOWN = 82.8%**。
+- **LBA10 = 512 COMPLETE / 0 PARTIAL / 0 UNKNOWN = 100.0%**。
   EESI 前0x80 round-trip payload 中 magic 与两个16B卷标已闭合；
   本轮又把 `+0x04..+0x07` 4B 闭合为 **UsbSuspensionWnd lifecycle/control flag**：
   两套独立 `EdpEDisk.exe` 的 `OnInitDialog` 都先清零0x80B缓冲并显式写1后
@@ -97,6 +97,12 @@ producer + 官方 consumer/行为 + 原始实盘验证**同时闭合，才能标
   两个更老 build 连 EESI 路径都不存在。额外58份经 LBA6 CRC guard +
   LBA12 EDPF 双重验证的历史前部快照也 58/58 tail 为零。COMPLETE 不表示
   tail 必须为零；未来非零旧 profile 仍必须原样 preserve。
+  本轮又把 `+0x28..+0x7F` 88B 闭合为 **EESI caller-owned compatibility
+  extension**：两个独立 Ctrl build 对完整0x80B只做 structural round-trip，
+  两套 official UI caller 都先清零完整0x80B、只填 `+0x08/+0x18`，
+  current UserLogin/OnInitDialog/UsbSuspensionWnd 行为链均不消费这88B；
+  SanDisk 与独立 Netac 两个正向 EESI profile 的88B也都为零。未来其它
+  caller 若使用非零扩展值必须 round-trip，不能因为 current profile 为零而清零。
 
 - **LBA6 = 419 COMPLETE / 93 PARTIAL / 0 UNKNOWN = 81.8%**。
   原352B UNKNOWN 已全部拆清。Windows sub_10013FD0 与 Linux
@@ -126,7 +132,7 @@ producer + 官方 consumer/行为 + 原始实盘验证**同时闭合，才能标
   producer/选择条件未知继续PARTIAL。
   Dept/Owner 长值的 continuation 还确认落在 LBA9+0x80/+0x100，
   并已用 join60/join59 双profile实盘门禁锁定。当前全 LBA0–12 已无 UNKNOWN，
-  目前全局仍有2913B PARTIAL，绝不能把“UNKNOWN=0”当成全部协议完成。
+  目前全局仍有2825B PARTIAL，绝不能把“UNKNOWN=0”当成全部协议完成。
 
 - **LBA7 = 512 COMPLETE / 0 PARTIAL / 0 UNKNOWN = 100.0%**。
   真实物理 LBA7 已锁定为 **3×0x40 packed EDPF + 14B pass-info@+0xC0**，
@@ -344,7 +350,7 @@ producer + 官方 consumer/行为 + 原始实盘验证**同时闭合，才能标
 - LBA10：EESI `+0x08..0x17`、`+0x18..0x27` 两个16B槽已闭合为
   type2/Share“交换区”卷标和 type4/Encrypt“保密区”卷标。
   `UserLogin` 分别把两者传给 `SetVolumeLabelA`。
-  **LBA10 当前为 424 COMPLETE / 88 PARTIAL / 0 UNKNOWN = 82.8%**：
+  **LBA10 当前为 512 COMPLETE / 0 PARTIAL / 0 UNKNOWN = 100.0%**：
   `+0x04..07` 已由两套独立 `EdpEDisk.exe` 的启动写1 / 标签设置保存写0 producer，
   `UsbSuspensionWnd.dll` 的 Destroy 与刷新/Show 值相关 consumer，以及原始 SanDisk
   实盘=1闭合为 COMPLETE；
@@ -353,13 +359,16 @@ producer + 官方 consumer/行为 + 原始实盘验证**同时闭合，才能标
   两个更老 build 连 EESI 路径都不存在。committed originals + 独立 SanDisk
   继续锁定真实样本，额外58份经 LBA6 CRC + LBA12 EDPF 双重验证的历史快照
   也为58/58 tail零。COMPLETE 不代表 tail 必须为零，非零旧盘仍必须原样 preserve。
-  当前只剩 EESI `+0x28..7F` 88B PARTIAL。两套卷标设置 `IDOK` handler 都明确
-  先清零完整0x80B再只填两个卷标，所以 current UI producer 对这88B写零；但底层
-  Set API 会完整 round-trip 调用者输入，仍缺正式字段划分、非零 profile 与值相关 consumer。
+  EESI `+0x28..7F` 88B 已按 **caller-owned compatibility extension** 闭合：
+  两套卷标设置 `IDOK` handler 都先清零完整0x80B再只填两个卷标；两版 Ctrl
+  对完整0x80只做 Get/Set structural round-trip，current UserLogin/OnInitDialog/
+  UsbSuspensionWnd 行为链均不解释这88B。因此 COMPLETE 表示“caller 可扩展、底层
+  必须保留”的生命周期闭合，不代表未来值必须为零，也不臆造内部字段名。
   新增补充实盘：2026-08-04 Netac OnlyDisk 历史6656B捕获在独立
   `device_id=disk&ven_netac&prod_onlydisk&rev_0000` 下通过 LBA6 CRC、LBA7/LBA12
   EDPF 自洽校验，LBA10 同样解出 `EESI/+0x04=1/交换区/保密区` 且后88B全零；
-  已加测试门禁，但在来源链完全审计前不并入22份严格生成参考，也不提升COMPLETE。
+  已加测试门禁；该历史样本仍不并入22份严格生成参考，但作为第二个正向 EESI profile
+  支撑 compatibility-extension 生命周期，不改变严格主样本计数。
 - LBA1/LBA2：旧文档“保留/全零”结论已纠偏。Linux 官方
   `BuildSector1_Gpt/BuildSector2_Gpt` 和 Windows GPT parser 均证明二者存在
   GPT Header / GPT Partition Table profile；但22/22当前原始 SAFE6 参考都全零，
