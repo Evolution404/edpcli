@@ -28,8 +28,8 @@ producer + 官方 consumer/行为 + 原始实盘验证**同时闭合，才能标
 
 截至本次 LBA9 EPPE writer-owned zero tail 闭环，严格统计为：
 
-- **COMPLETE：3719 / 6656B = 55.9%**
-- **PARTIAL：2937 / 6656B = 44.1%**
+- **COMPLETE：3723 / 6656B = 55.9%**
+- **PARTIAL：2933 / 6656B = 44.1%**
 - **UNKNOWN：0 / 6656B = 0.0%**
 
 当前各 LBA 严格状态以主账本为唯一准绳，最新关键增量：
@@ -126,9 +126,9 @@ producer + 官方 consumer/行为 + 原始实盘验证**同时闭合，才能标
   producer/选择条件未知继续PARTIAL。
   Dept/Owner 长值的 continuation 还确认落在 LBA9+0x80/+0x100，
   并已用 join60/join59 双profile实盘门禁锁定。当前全 LBA0–12 已无 UNKNOWN，
-  目前全局仍有2937B PARTIAL，绝不能把“UNKNOWN=0”当成全部协议完成。
+  目前全局仍有2933B PARTIAL，绝不能把“UNKNOWN=0”当成全部协议完成。
 
-- **LBA7 = 510 COMPLETE / 2 PARTIAL / 0 UNKNOWN = 99.6%**。
+- **LBA7 = 512 COMPLETE / 0 PARTIAL / 0 UNKNOWN = 100.0%**。
   真实物理 LBA7 已锁定为 **3×0x40 packed EDPF + 14B pass-info@+0xC0**，
   不能用 `libcemsfilesyscheck.so` 的 0x48/72B natural ABI 直接解释盘面。
   v0x0064 legacy wrapped key `entry+0x38..0x3F` 已完整闭合：
@@ -163,8 +163,15 @@ producer + 官方 consumer/行为 + 原始实盘验证**同时闭合，才能标
   `CreateSafe6TmpPolicyFile` 随后将其写入 CRC/A6B0 加密策略文件，
   `EdpEDiskBack` 与 `linuxedpedisk` 两套 `Safe6PolicyFile` 独立恢复。
   22份原始盘为18×0+4×1，且22/22 LBA7/LBA12一致，因此 LBA7/LBA12
-  各1B升级COMPLETE。LBA7现在只剩 **2B PARTIAL**：
-  `ShareBackuppromptPeriod / EncryptBackuppromptPeriod`。
+  各1B升级COMPLETE。最后两个
+  `ShareBackuppromptPeriod / EncryptBackuppromptPeriod` BYTE 也已继续闭合：
+  Linux DWARF 明确它们是 `edpdiskglobal.h:164/165` 的正式 BYTE 字段；
+  current writer 对完整14B pass-info zero-init 且不覆盖 `+0x0C/+0x0D`；
+  四个不同哈希的 Windows EdpDiskCtrl reader 与 Linux checker 都只结构搬运/
+  保存完整14B，没有这2B的值相关业务读取；两代 `vrvaud_c` 的同名 backup policy
+  已确认是独立 string/DWORD 链。committed originals 的 LBA7/LBA12 两副本逐盘0/0一致，
+  全目录19个去重真实 LBA7 profile（含 v0x0064/v0x0206）仍19/19=0/0。
+  因此2B按 **dormant compatibility bytes** 升 COMPLETE，LBA7 整扇闭合。
 - **LBA8 = 476 COMPLETE / 36 PARTIAL / 0 UNKNOWN = 93.0%**。
   `+0x080..0x1FF` 384B 已按 **LBA8 dynamic ELABEL + encrypted backing + preserved tail**
   整体闭合：Windows `sub_100148d0` / Linux `BuildSector8` 都只写17-key ELABEL+NUL，
@@ -218,7 +225,7 @@ producer + 官方 consumer/行为 + 原始实盘验证**同时闭合，才能标
   且 current/legacy 22/22 均为6B零，无已知 profile 分叉，因此6B升COMPLETE。
   `HDSerialInfo@+0x14..17` 与 `UsbOnlyInfo@+0x1E..3D` 仍因 legacy producer/
   历史 consumer 缺口保持PARTIAL。
-- **LBA12 = 442 COMPLETE / 70 PARTIAL / 0 UNKNOWN = 86.3%**。
+- **LBA12 = 444 COMPLETE / 68 PARTIAL / 0 UNKNOWN = 86.7%**。
   主运行时盘面固定为 3×96B packed entry；`Reserved[7]@+0x59..+0x5F`
   已由官方字段名、writer 零来源、negative consumer 和 66/66 原始 entry 闭合。
   相邻 `+0x48..+0x57` 也已独立闭合，但**不是 Reserved**：104B natural ABI
@@ -371,10 +378,13 @@ producer + 官方 consumer/行为 + 原始实盘验证**同时闭合，才能标
 - LBA12 `+0x48..+0x57` 已闭合为 `EncryptFileKey32[16]` cross-generation
   compatibility slot；相邻 `+0x59..+0x5F` 是独立 COMPLETE 的 `Reserved[7]`。
   两者都已完成，但语义完全不同，禁止重新混成一片 zero padding。
-- pass-info 当前只剩2B语义未闭合：
-  `+0x0C ShareBackuppromptPeriod`、`+0x0D EncryptBackuppromptPeriod`。
+- pass-info 14B 已全部闭合：
   `+0x0A bNoUsbChkPasSafe` 已由独立 `checkdiskback`
-  `Update_EDPEDISKSHOWPARAM` 的值相关策略映射和两套 Safe6PolicyFile 消费链闭合。
+  `Update_EDPEDISKSHOWPARAM` 的值相关策略映射和两套 Safe6PolicyFile 消费链闭合；
+  `+0x0C ShareBackuppromptPeriod`、`+0x0D EncryptBackuppromptPeriod`
+  已由 current-zero producer、四代 Windows/Linux structural-preserve、
+  独立 backup-policy 排除与跨 v0x0064/v0x0206 实盘0/0证据闭合为 dormant
+  compatibility BYTE。LBA7 因此已 512/512 COMPLETE。
 
 下一位 AI 优先顺序：
 
@@ -396,14 +406,16 @@ producer + 官方 consumer/行为 + 原始实盘验证**同时闭合，才能标
    - inspect 已显示 producer-side physical flags；Provision/validator 已改为 current
      SAFE6 full rolling + post-XOR flags；历史 raw-zero form仍兼容读取。
    后续若继续追 LBA4，应只追这两个字段的**最终业务 consumer**，找到之前仍PARTIAL。
-3. **LBA7 剩余 2B PARTIAL**：
-   - 只剩 pass-info `+0x0C/+0x0D`，继续追历史非零 producer/profile、单位/取值域和跨组件最终 consumer。
+3. **LBA7 已 512/512 COMPLETE**：
+   - 最后 pass-info `+0x0C/+0x0D` 已按 dormant compatibility-field 生命周期闭合；
+     若未来发现非零旧 profile，必须 preserve/report 并扩展 profile，不能机械清零。
    这2B的 current producer 已进一步锁到机器码：`CreatePartitions/sub_1003DB50`
    在 `0x1003DC16..0x1003DC26` 显式清零完整14B pass-info，后续 store 最远只到
    `+0x0A`，所以 `+0x0C/+0x0D` 是 current writer-owned zero。两代 `vrvaud_c`
    的 `BackupPromptInfo` 已确认是独立 policy 来源；其0xC0 old-table 全局不包含
-   pass-info tail，禁止仅凭名称相似把它当这2B的 consumer。仍需历史非零 producer/
-   profile、单位/取值域和真实业务 consumer 才能升级 COMPLETE。
+   pass-info tail，禁止仅凭名称相似把它当这2B的 consumer。后续四代 reader +
+   DWARF + 扩展历史 profile 证据已证明该2B在已覆盖实现中是 dormant compatibility
+   bytes，因此已升级 COMPLETE；不再追一个当前不存在的 active period consumer。
    本轮已重新核实两版 `vrvaud_c` 全局 old-table 都是3×0x40 packed，且只有
    entry0 NeedDisturb 有行为 xref；Version、entry1/2 NeedDisturb 已结合 current
    producer、双向 converter structural-preserve、Linux CDiskReader negative-semantic

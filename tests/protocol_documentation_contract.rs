@@ -186,6 +186,9 @@ fn documentation_keeps_the_official_provisioning_chain_and_strict_rules() {
         "compatibility metadata 生命周期闭合",
         "CDiskReader::GetTagPartitionInfo",
         "formal ABI compatibility metadata",
+        "dormant pass-info",
+        "edpdiskglobal.h:164/165",
+        "512 COMPLETE / 0 PARTIAL / 0 UNKNOWN",
         "Update_EDPEDISKSHOWPARAM",
         "bNoUsbChkPasSafe",
         "0x1003DC16..0x1003DC26",
@@ -226,8 +229,8 @@ fn documentation_keeps_the_official_provisioning_chain_and_strict_rules() {
         "LBA6 progress must retain the closed Dept prefix, autoid, Office, and Label backing semantics"
     );
     assert!(
-        DOC.contains("| LBA7 | 510 | 2 | 0 | 99.6% |"),
-        "LBA7 progress must retain the closed Version/NeedDisturb compatibility metadata and bNoUsbChkPasSafe policy byte"
+        DOC.contains("| LBA7 | 512 | 0 | 0 | 100.0% |"),
+        "LBA7 progress must retain the fully closed packed table and pass-info compatibility fields"
     );
     assert!(
         DOC.contains("| LBA8 | 476 | 36 | 0 | 93.0% |"),
@@ -242,8 +245,8 @@ fn documentation_keeps_the_official_provisioning_chain_and_strict_rules() {
         "LBA10 progress must retain the closed +0x04 control flag and preserve/ignore tail semantics"
     );
     assert!(
-        DOC.contains("| LBA12 | 442 | 70 | 0 | 86.3% |"),
-        "LBA12 progress must retain the closed EncryptFileKey32 compatibility slots and bNoUsbChkPasSafe policy byte"
+        DOC.contains("| LBA12 | 444 | 68 | 0 | 86.7% |"),
+        "LBA12 progress must retain the closed EncryptFileKey32 and dormant pass-info compatibility fields"
     );
     assert!(
         DOC.contains("| LBA11 | 512 | 0 | 0 | 100.0% |"),

@@ -2757,7 +2757,7 @@ fn edpf_tail_has_version_and_password_retry_fields_not_a_terminator() {
 }
 
 #[test]
-fn lba12_pass_info_reset_key_and_backup_prompt_bytes_are_observationally_zero() {
+fn pass_info_backup_prompt_compatibility_bytes_are_zero_and_synced() {
     let mut checked = 0usize;
     for entry in fs::read_dir(FIXTURE_DIR).expect("protocol fixtures") {
         let path = entry.expect("backup entry").path();
@@ -2770,20 +2770,30 @@ fn lba12_pass_info_reset_key_and_backup_prompt_bytes_are_observationally_zero() 
         };
         let image = fs::read(&path).expect("fixture bytes");
         let crc = crc32_bare(meta.device_id.as_bytes());
+        let lba7 = xor_rolling(sector(&image, 7), (crc & 0xffff) ^ (crc >> 16));
         let lba12 = a6b0_full(sector(&image, 12), &crc.to_le_bytes(), 0);
-        let tail = decode_edpf_tail(&lba12[0x120..0x12e]);
+        let tail7 = decode_edpf_tail(&lba7[0xc0..0xce]);
+        let tail12 = decode_edpf_tail(&lba12[0x120..0x12e]);
 
         // This locks only the committed real-sample observation. The consumer
         // evidence for bResetFileKey comes from the reverse audit; zero here
         // must never be generalized into "reserved".
-        assert_eq!(tail[0x0b], 0, "bResetFileKey sample changed: {name}");
+        assert_eq!(tail12[0x0b], 0, "bResetFileKey sample changed: {name}");
         assert_eq!(
-            tail[0x0c], 0,
+            tail7[0x0c], 0,
             "ShareBackuppromptPeriod sample changed: {name}"
         );
         assert_eq!(
-            tail[0x0d], 0,
+            tail7[0x0d], 0,
             "EncryptBackuppromptPeriod sample changed: {name}"
+        );
+        assert_eq!(
+            tail7[0x0c], tail12[0x0c],
+            "ShareBackuppromptPeriod diverged between LBA7/LBA12: {name}"
+        );
+        assert_eq!(
+            tail7[0x0d], tail12[0x0d],
+            "EncryptBackuppromptPeriod diverged between LBA7/LBA12: {name}"
         );
         checked += 1;
     }
