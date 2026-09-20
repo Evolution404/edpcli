@@ -6,11 +6,11 @@
 use std::collections::BTreeMap;
 use std::time::Duration;
 
-use edpcli::common::SECTOR;
+use edpcli::common::{METADATA_SECTOR_COUNT, SECTOR};
 use edpcli::diskio::{atomic_write_sectors, FileDev, SectorDev};
 
 fn read_metadata(dev: &mut dyn SectorDev) -> BTreeMap<u32, Vec<u8>> {
-    (0u32..=13)
+    (0u32..METADATA_SECTOR_COUNT as u32)
         .map(|lba| {
             let data = dev
                 .read_sector(lba)
@@ -21,7 +21,7 @@ fn read_metadata(dev: &mut dyn SectorDev) -> BTreeMap<u32, Vec<u8>> {
 }
 
 fn deterministic_patch() -> BTreeMap<u32, Vec<u8>> {
-    (0u32..=13)
+    (0u32..METADATA_SECTOR_COUNT as u32)
         .map(|lba| {
             let mut data = vec![0u8; SECTOR];
             for (index, byte) in data.iter_mut().enumerate() {

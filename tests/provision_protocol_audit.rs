@@ -77,11 +77,10 @@ fn decode_hex_fixture(text: &str) -> Vec<u8> {
 
 fn legacy_password_fold32(password: &[u8]) -> u32 {
     let mut sum = 0u32;
-    let mut chunks = password.chunks_exact(4);
-    for chunk in &mut chunks {
-        sum = sum.wrapping_add(u32::from_le_bytes(chunk.try_into().unwrap()));
+    let (chunks, tail) = password.as_chunks::<4>();
+    for chunk in chunks {
+        sum = sum.wrapping_add(u32::from_le_bytes(*chunk));
     }
-    let tail = chunks.remainder();
     if !tail.is_empty() {
         let mut padded = [0u8; 4];
         padded[..tail.len()].copy_from_slice(tail);

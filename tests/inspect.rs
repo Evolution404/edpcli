@@ -565,7 +565,7 @@ fn lba8_decrypts_one_extra_block_when_logical_length_is_16_byte_aligned() {
     let device_id = "disk&ven_test&prod_llgb_aligned";
     let crc = crc32_bare(device_id.as_bytes());
     let mut elabel = b"<ELABEL>Label=TEST!SAFE6||".to_vec();
-    while (0x80 + elabel.len()) % 16 != 0 {
+    while !(0x80 + elabel.len()).is_multiple_of(16) {
         elabel.push(b'X');
     }
     let logical_len = 0x80 + elabel.len();
