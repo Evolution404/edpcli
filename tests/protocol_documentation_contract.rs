@@ -50,11 +50,11 @@ fn strict_progress_covers_exactly_lba0_through_lba12() {
     );
     assert_eq!(complete + partial + unknown, 13 * 512);
     assert!(
-        complete >= 3852,
+        complete >= 3873,
         "strict COMPLETE coverage regressed below the corrected audited baseline: {complete}"
     );
     assert!(
-        partial <= 2804,
+        partial <= 2783,
         "PARTIAL coverage regressed above the corrected audited baseline: {partial}"
     );
     assert_eq!(
@@ -62,8 +62,8 @@ fn strict_progress_covers_exactly_lba0_through_lba12() {
         "all LBA0..12 bytes are at least PARTIAL after the completed UNKNOWN audit"
     );
     assert!(
-        DOC.contains("COMPLETE：3852B / 6656B = 57.9%")
-            && DOC.contains("PARTIAL：2804B / 6656B = 42.1%"),
+        DOC.contains("COMPLETE：3873B / 6656B = 58.2%")
+            && DOC.contains("PARTIAL：2783B / 6656B = 41.8%"),
         "displayed global totals must match the corrected strict-progress ledger"
     );
 }
@@ -194,6 +194,8 @@ fn documentation_keeps_the_official_provisioning_chain_and_strict_rules() {
         "4eeee8d52f8b58d9a1fa35b63a14c8c5dba1b2717eaa44e6fb1ff0327ccbe5ed",
         "lba0_bootstrap_profiles_are_zero_or_the_official_usb_main_bsec_prefix",
         "cross-profile unowned preserve / historical-zero compatibility region",
+        "cross-profile fixed-zero bootstrap tail padding",
+        "aigo_l8302_netac_lba0_prefix.hex",
         "optional SAFE1 / legacy `SectorSize` compatibility overlay",
         "2c8877b90c5d42d73f17c511ef5984efc8135543bda0746ef54f347320d78e8f",
         "standard Windows MBR disk signature",
@@ -237,8 +239,8 @@ fn documentation_keeps_the_official_provisioning_chain_and_strict_rules() {
         );
     }
     assert!(
-        DOC.contains("| LBA0 | 112 | 400 | 0 | 21.9% |"),
-        "LBA0 progress must retain the closed SectorSize overlay, MBR signature, and compatibility regions"
+        DOC.contains("| LBA0 | 133 | 379 | 0 | 26.0% |"),
+        "LBA0 progress must retain the closed invariant bootstrap tail, SectorSize overlay, MBR signature, and compatibility regions"
     );
     assert!(
         DOC.contains("| LBA1 | 0 | 512 | 0 | 0.0% |"),
