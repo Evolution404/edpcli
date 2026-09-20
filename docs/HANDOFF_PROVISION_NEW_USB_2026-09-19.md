@@ -260,8 +260,11 @@ producer + 官方 consumer/行为 + 原始实盘验证**同时闭合，才能标
   `MPALL_F1_9000_v372_0B.exe` 均出现同一 `this is mp mark`，后者同时出现
   `C:\\PhisonLog` 与 Phison controller 型号串。strict 非零盘是0951:1666、
   62008590336B，但公开同 identity/capacity 同时存在 PS2307 与 PS2309，
-  因此不能锁死具体 controller。exact MPALL/FW producer、字段格式与 firmware
-  consumer 仍未找到，完成字节数不增加。
+  因此不能锁死具体 controller。进一步交叉两代 MPALL 与一代 UPTool 静态结果，
+  已把 producer 函数族定位到 `CBaseController::WriteF2Mark`（3.72/5.03 均存在），
+  3.72 还出现 `CU32SSBaseContoller::WriteF2Mark` 与 `F1-F2 MARK`。但函数内部
+  sector offset/staging layout、`+0x001/+0x020..027` 字段 store 与 firmware
+  consumer 仍未取得，因此完成字节数不增加。
 - **LBA4 current writer layout 已闭合到机器码**：
   `OnllyID2Nd=main onlyid`，`HSerialCRC[5]` 来自对象五个 DWORD；
   当前 `WriteNormalULabel` 不填 `HDOnlySerial[5]`，所以 current profile 为0；
@@ -397,10 +400,11 @@ producer + 官方 consumer/行为 + 原始实盘验证**同时闭合，才能标
    小于1GiB的候选文件，没有任何文件在 LBA1 起点出现 `EFI PART`。在取得新
    外部实盘前不得再把本地 synthetic builder 输出冒充正向证据。
 10. **LBA3 Phison MP/FW payload**：当前已明确 EDP 只 preserve/ignore，且
-    `this is mp mark` 已收敛到 Phison FW.BIN / MPALL 制造生态。后续应追
-    exact MPALL/FW 对512B metadata sector 的写入函数、`+0x001/+0x020..027`
-    字段定义和 controller firmware consumer；不要再重复证明 EDP 不使用它，也不要
-    因 0951:1666/容量相同就把 controller 锁死为 PS2307 或 PS2309。
+    `this is mp mark` 已收敛到 Phison FW.BIN / MPALL 制造生态，producer 函数族
+    又进一步定位到跨版本 `CBaseController::WriteF2Mark`。后续只追该函数内部
+    512B staging/sector write、`+0x001/+0x020..027` 字段定义和 controller firmware
+    consumer；不要再重复证明 EDP 不使用它，也不要因 0951:1666/容量相同就把
+    controller 锁死为 PS2307 或 PS2309。
 
 每得到一批闭合结论，都要同时更新
 `docs/PROVISION_PROTOCOL_AUDIT_2026-09-19.md` 和
