@@ -1473,6 +1473,32 @@ fn lba4_restore_node_profiles_keep_current_and_legacy_fields_separate() {
             "restore sector tuple changed: {name}"
         );
     }
+
+    let mut checked_fixed_metadata = 0usize;
+    for entry in fs::read_dir(FIXTURE_DIR).expect("protocol fixtures") {
+        let path = entry.expect("backup entry").path();
+        if path.extension().and_then(|ext| ext.to_str()) != Some("bin") {
+            continue;
+        }
+        let name = path.file_name().unwrap().to_str().unwrap();
+        if parse_reference_backup_name(name).is_none() {
+            continue;
+        }
+        let (_, decoded) = decode(name);
+        assert_eq!(decoded[0x34], 0, "SingleUsbFlg profile changed: {name}");
+        assert_eq!(&decoded[0x39..0x3d], b"LLGB", "NewLabFlag changed: {name}");
+        assert_eq!(u32_le(&decoded, 0x3d), 1, "restore Version changed: {name}");
+        assert_eq!(
+            &decoded[0x41..0x45],
+            &[0x08, 0x04, 0x0c, 0x01],
+            "restore sector tuple changed: {name}"
+        );
+        checked_fixed_metadata += 1;
+    }
+    assert!(
+        checked_fixed_metadata >= MIN_PROTOCOL_FIXTURES,
+        "protocol audit unexpectedly lost LBA4 fixed restore metadata fixtures"
+    );
 }
 
 #[test]

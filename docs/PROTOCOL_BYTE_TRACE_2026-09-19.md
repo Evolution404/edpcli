@@ -398,7 +398,7 @@ post-XOR 写回 `+0x45/+0x46`。历史 raw-zero 实盘仅作为兼容读取 prof
 | LBA1 | 0 | 512 | 0 | 0.0% |
 | LBA2 | 0 | 512 | 0 | 0.0% |
 | LBA3 | 0 | 512 | 0 | 0.0% |
-| LBA4 | 36 | 476 | 0 | 7.0% |
+| LBA4 | 49 | 463 | 0 | 9.6% |
 | LBA5 | 512 | 0 | 0 | 100.0% |
 | LBA6 | 431 | 81 | 0 | 84.2% |
 | LBA7 | 512 | 0 | 0 | 100.0% |
@@ -411,8 +411,8 @@ post-XOR 写回 `+0x45/+0x46`。历史 raw-zero 实盘仅作为兼容读取 prof
 
 当前总计：
 
-- **COMPLETE：3843B / 6656B = 57.7%**
-- **PARTIAL：2813B / 6656B = 42.3%**
+- **COMPLETE：3856B / 6656B = 57.9%**
+- **PARTIAL：2800B / 6656B = 42.1%**
 - **UNKNOWN：0B / 6656B = 0.0%**
 
 LBA11 已完整闭合为 512B COMPLETE。此前卡住的后半 252B 不是“某型号盘偶尔使用
@@ -472,7 +472,11 @@ DWARF 中恢复出的原始声明文件/行号与本地函数地址：
 | LBA4 | 0x018–0x01B | COMPLETE | OnlyIdXor8 | current writer: `main_onlyid ^ 0x88888888` | restore-info 读取该字段 | 22盘 current/legacy 可解 | 完成 |
 | LBA4 | 0x01C–0x01F | PARTIAL | OnllyID2Nd | **LBA4 current writer machine-code node layout**：Windows PE `RegsiterUsb@0x1003BBD1..0x1003BBD7` 直接执行 `node+0x04 = object+0x698`；后者已闭合为本次注册 main onlyid | Windows `sub_10015090` / Linux `ReadSector4` 解密后把完整 0x2F node 返回，但当前只强校验 `node+0x00`，未发现对第二 ID 的独立行为判断 | 6/22 current-style 样本 `OnllyID2Nd==main onlyid && HSerialCRC=0`；其余16份旧 profile 第二ID不同 | current producer 已闭合，legacy producer/consumer 仍缺失，保持PARTIAL |
 | LBA4 | 0x020–0x033 | PARTIAL | HSerialCRC[5] | Windows PE `RegsiterUsb@0x1003BBF0..0x1003BC79` 精确把 `object+0x558/+55C/+560/+564/+568` 写入 `node+0x08..+0x1B`；`this+0x2E0` 已闭合为内嵌 `UsbLabelParam`，故这些地址正是 `HDOnlySerial[5]@+0x278`。Windows `sub_10047690` 与后续 `sub_100139F0` 两层 current 参数构造/拷贝均跳过这20B；Linux `UsbLabelParam()` 整体清零，`UsbWriteParam(UsbLabelParam&)` 同样不复制 HDOnlySerial，`BuildSector4` 只序列化已构造 node、不计算 HSerial | restore-info reader 只保留/返回这 5×DWORD，当前未找到其业务判断 | 严格22份：14份固定 `1D29,7B,4DD,79,7C`、6份全零、2份高熵；并且 22/22 满足 `OnllyID2Nd==main` iff `HSerialCRC==0` | current zero producer 已跨 Windows/Linux 闭合；legacy 非零值的上游注入算法/consumer 未找到，继续 PARTIAL，禁止解释成目标U盘唯一序列 |
-| LBA4 | 0x034–0x044 | PARTIAL | SingleUsbFlg / MyHardinfo / NewLabFlag / Version / 4 sector bytes | current Windows machine code在 node 清零后明确写 SingleUsbFlg=0、NewLabFlag=`LLGB`、Version=1、sector tuple=`08 04 0C 01`；MyHardinfo当前路径没有同等稳定赋值来源 | Windows/Linux reader 均复制完整node；目前未找到这些字段各自的最终行为 consumer | 22/22：Single=0、NewLabFlag=LLGB、Version=1、sector tuple一致；MyHardinfo明显分profile | 常量观察+producer不足以替代业务consumer；继续PARTIAL |
+| LBA4 | 0x034 | COMPLETE | fixed restore-node `SingleUsbFlg` metadata = 0 | current Windows restore-node writer 清零 node 后显式保持/写入 `SingleUsbFlg=0`；Linux official node ABI确认该 BYTE 的结构位置 | Windows/Linux `ReadSector4` 都对完整0x2F restore node做 rolling decode 后结构性返回；除 `OnlyIdXor8` 外不对该 BYTE 做值相关分支，因此是 structural-preserve / semantic-ignore metadata | committed original fixtures 全量门禁 + 22份 strict originals 均为0，跨 current/legacy identity profile 无反例 | producer、正式字段边界、结构 consumer、negative semantic consumer 与跨代实盘一致，1B COMPLETE；不是运行时开关 |
+| LBA4 | 0x035–0x038 | PARTIAL | `MyHardinfo` profile-dependent DWORD | current node 构造路径没有与相邻固定字段同等明确的稳定赋值来源 | reader 结构保留整个 node，但当前没有值相关行为 consumer | strict originals 明显分 profile | producer/选择条件与消费语义都未闭合，4B继续PARTIAL |
+| LBA4 | 0x039–0x03C | COMPLETE | fixed restore-node `NewLabFlag = LLGB` | current Windows machine code在 node 清零后显式写 `LLGB`；Linux DWARF恢复正式字段与偏移 | Windows/Linux reader解码并结构性返回完整node，不对该字段做独立行为判断 | committed original fixtures 全量门禁 + strict 22/22 均为 `LLGB`，跨 current/legacy profile 一致 | fixed writer metadata + structural-preserve/semantic-ignore + real-device profile闭合，4B COMPLETE |
+| LBA4 | 0x03D–0x040 | COMPLETE | fixed restore-node `Version = 1` | current Windows writer显式写 DWORD 1 到 restore-node Version；Linux ABI给出字段边界 | Windows/Linux reader把 Version 随完整node返回，当前没有值相关准入/行为分支 | committed original fixtures 全量门禁 + strict 22/22 均为1 | 当前已知协议代际中的固定 restore-node version metadata 生命周期闭合，4B COMPLETE；未来新版本非1时应按新profile处理而非强制改写 |
+| LBA4 | 0x041–0x044 | COMPLETE | fixed restore-node sector tuple `08 04 0C 01` | current Windows writer在 node 构造阶段显式写四个 sector BYTE `08 04 0C 01` | Windows/Linux reader随完整restore node结构返回这些BYTE，但当前没有独立值相关分支 | committed original fixtures 全量门禁 + strict 22/22 均为 `08 04 0C 01`，跨 current/legacy profile一致 | producer、结构边界、negative semantic consumer 与真实盘全部闭合，4B COMPLETE；按 fixed compatibility metadata 建模 |
 | LBA4 | 0x045–0x046 | PARTIAL | `bDataToServer` / `bConnetServer` profile-dependent wire flags | Linux DWARF恢复正式字段名；Windows `sub_10014550` 与 Linux `BuildSector4@0x1D08E` 的 **current** writer 均先完成 full rolling，再把 node `+0x2D/+0x2E` 原样覆盖回物理 `LBA4+0x45/+0x46` | Windows `sub_10015090` / Linux `ReadSector4@0x1E048` 都不会补偿 current post-XOR 例外：统一 rolling 后复制0x2F node，仅校验 OnlyIdXor8；当前未找到最终业务 consumer | 严格22盘：6份 current identity profile (`OnllyID2Nd==main && HSerialCRC==0`) physical=`00 00`、generic非零；16份 legacy identity profile physical非零，generic为14×`00 00`+2×`0B 00` | inspect 必须 profile-aware：current profile恢复physical post-XOR bytes，legacy保留official rolling-reader视图；legacy旧producer和最终consumer仍缺，因此2B保持PARTIAL |
 | LBA4 | 0x047–0x1FB | PARTIAL | restore-node 后 backing/gap；raw-zero 与 rolling-encrypted-zero 两种物理表示 | Windows current `sub_10014550` 与 Linux `BuildSector4@diskfile.cpp:741` 都只把 0x2F restore node 写到 `+0x18..+0x46`；non-null node 分支随后把 rolling XOR 扩展到 `+0x18..+0x1FF`，因此会连同这437B已有 backing 一起变换；Windows 同函数的 `arg0==NULL` 分支明确跳过 node copy/rolling loop，可保留既有 raw gap。两端 builder 都**没有显式把这437B清零** | Linux `ReadSector4@diskfile.cpp:957` 会对 `+0x18..+0x1FF` 执行同一 rolling XOR，但最终只 `memcpy(decoded+0x18, 0x2F)` 给 restore-node 输出并校验 `OnlyIdXor8`，不返回/解释 `+0x47..+0x1FB`；Windows同类识别链也只消费 restore node / onlyid锚点 | 严格22份：18份（17 backup + 独立SanDisk）为物理 raw-zero gap，4份为几乎全非零 rolling 形态；4/4 rolling 形态按 onlyid key 解码后437B全零，raw-zero形态按区域规则保持语义零；仓库CI同时保留两种物理表示并断言 semantic gap 全零 | 已闭合物理边界、两种 current 可解释的存储/变换行为、reader negative semantic consumer 和22盘零语义；但历史 raw-zero 初始 producer及“为何选择/保留哪种表示”未闭合，且 full builder 会变换已有 backing 而非主动清零，因此严格保持 PARTIAL |
 | LBA4 | 0x1FC–0x1FF | COMPLETE | trailing LLGB | current writer 继续 rolling key schedule 写 LLGB | reader 作为尾锚点校验 | 22盘可验证 | 完成 |
