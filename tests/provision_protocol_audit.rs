@@ -1182,6 +1182,28 @@ fn lba4_short_form_must_be_decoded_by_regions_not_by_zero_bytes() {
 }
 
 #[test]
+fn lba4_raw_zero_short_form_also_exists_in_a_current_identity_profile() {
+    let raw = include_bytes!(
+        "fixtures/protocol_evidence/kingston_20260827_current_identity_raw_zero_lba4.bin"
+    );
+    assert_eq!(raw.len(), SECTOR);
+
+    let onlyid = 1_625_940_067u32;
+    let k0 = (onlyid & 0xffff) ^ (onlyid >> 16);
+    let mut decoded = raw.to_vec();
+    decoded[0x18..].copy_from_slice(&xor_rolling(&raw[0x18..], k0));
+
+    // This strict-original Kingston sample has the current identity node shape
+    // (second ID == main ID and HSerialCRC[5] == zero), yet its physical
+    // extension is the historical raw-zero representation rather than full rolling.
+    // Therefore representation choice must not be inferred from identity generation.
+    assert_eq!(u32_le(&decoded, 0x1c), onlyid);
+    assert!(decoded[0x20..0x34].iter().all(|byte| *byte == 0));
+    assert!(raw[0x47..0x1fc].iter().all(|byte| *byte == 0));
+    assert_eq!(&decoded[0x39..0x3d], b"LLGB");
+}
+
+#[test]
 fn lba4_common_hserial_profile_is_shared_across_different_target_usb_devices() {
     let decode = |name: &str| {
         let image = load(name);

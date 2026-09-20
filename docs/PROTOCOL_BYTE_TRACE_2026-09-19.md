@@ -325,6 +325,17 @@ SanDisk 原始加密盘）重新逐盘复算：
 - **2/22 legacy 特殊 profile**（Aigo U335 rev_pmap + 独立 SanDisk）：同属
   legacy identity profile，physical 非零，generic reader 输出=`0B 00`。
 
+新增反例进一步证明 **raw-zero/full-rolling 物理表示与 current/legacy identity 不是同一个维度**：
+严格原始 Kingston `2026-08-27 17:30:24` 的 restore node 已是 current identity
+（`OnllyID2Nd==main onlyid && HSerialCRC[5]==0`），但 `+0x47..0x1FB` 仍为
+physical raw-zero；同盘 `17:28:57` 的14扇区只读快照与其逐字节完全一致，排除两次采集
+之间临时改写。CI 夹具
+`kingston_20260827_current_identity_raw_zero_lba4.bin`（LBA4 单扇区，SHA-256
+`85141be31933e89976970ac18f44e1da8b77d3f57fdae1d857f8ea9d19a007ec`）与
+`lba4_raw_zero_short_form_also_exists_in_a_current_identity_profile` 锁定该反例。
+因此后续追 raw-zero 历史 producer 时，**禁止**再用 OnllyID2Nd/HSerialCRC 代际形态作为
+short/full 表示的选择条件；真实选择条件仍未定位。
+
 这组结果证明此前两个极端模型都不对：既不能把 generic rolling 结果对所有盘都当
 server flags 本值，也不能把 physical bytes 对所有盘都当 producer-side flags。
 `src/inspect.rs` 现改为 profile-aware：

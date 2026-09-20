@@ -48,7 +48,13 @@ producer + 官方 consumer/行为 + 原始实盘验证**同时闭合，才能标
   legacy profile 保留 generic ReadSector4 rolling 视图。inspect 已按该 profile-aware
   规则修正；Provision 使用官方 current SAFE6 full rolling + 两字节 post-XOR覆盖，
   validator 精确校验 full wire profile；历史 raw-zero short form 仅保留兼容读取。
-  两flag仍因缺最终业务consumer保持PARTIAL，严格完成字节数不增加。
+  最新又用严格原始 Kingston `2026-08-27 17:30:24` 锁定一个关键反例：该盘已经是
+  `OnllyID2Nd==main && HSerialCRC[5]==0` 的 current identity，却仍使用 physical
+  raw-zero gap；同盘17:28:57快照逐字节一致。新增512B LBA4夹具 SHA-256
+  `85141be31933e89976970ac18f44e1da8b77d3f57fdae1d857f8ea9d19a007ec` 和回归门禁，
+  明确禁止再把 raw-zero/full-rolling 选择条件等同于 current/legacy identity 代际。
+  两flag仍因缺最终业务consumer保持PARTIAL，raw-zero历史 producer/选择条件也仍未定位，
+  严格完成字节数不增加。
 - **LBA9 = 54 COMPLETE / 458 PARTIAL / 0 UNKNOWN = 10.5%**。
   EPPE writer-zero tail、SAPF trailing/backing 等已无UNKNOWN。
   本轮进一步纠正中间区：Windows/Linux/vrvaud 三套 BuildSector6 都会把

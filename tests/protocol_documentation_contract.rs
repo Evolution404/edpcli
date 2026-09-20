@@ -145,6 +145,8 @@ fn documentation_keeps_the_official_provisioning_chain_and_strict_rules() {
         "strcpy_s@0x1B9B0",
         "MacInfo[6]",
         "cross-generation unowned preserve/ignore",
+        "raw-zero/full-rolling 物理表示与 current/legacy identity 不是同一个维度",
+        "85141be31933e89976970ac18f44e1da8b77d3f57fdae1d857f8ea9d19a007ec",
         "legacy MBR partition-table fragment",
         "LBA4 current writer machine-code node layout",
         "LBA12 v0x0206 hidden default-password file-key wrapping",

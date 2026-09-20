@@ -117,6 +117,19 @@ producer/选择条件也仍未知，所以严格禁止升 COMPLETE。
 committed real fixtures 必须同时覆盖 raw-zero 与 rolling-encrypted-zero 两种物理表示，
 并断言两类样本的 semantic gap 都为 zero[437]。
 
+继续按 identity node 形态与物理表示做交叉审计后发现一个关键反例：raw-zero **并不等于
+legacy generation**。严格原始 Kingston `onlyid=1625940067 @ 2026-08-27 17:30:24`
+同时满足 current identity 条件 `OnllyID2Nd==main onlyid && HSerialCRC[5]==0`，但其
+`+0x47..+0x1FB` 仍为 raw-zero；同设备 `17:28:57` 只读快照的 LBA0-13 与
+`17:30:24` 逐字节完全一致。仓库新增 LBA4 单扇区证据
+`tests/fixtures/protocol_evidence/kingston_20260827_current_identity_raw_zero_lba4.bin`，
+SHA-256=`85141be31933e89976970ac18f44e1da8b77d3f57fdae1d857f8ea9d19a007ec`，以及
+回归 `lba4_raw_zero_short_form_also_exists_in_a_current_identity_profile`。
+
+因此 short/full representation 的真实选择条件必须独立追踪；不得再由第二ID/HSerial
+代际形态反推。这个反例增强了“raw-zero producer/选择条件仍未知”的 blocker，不改变
+LBA4 严格完成字节数。
+
 #### current SAFE6 分支纠偏：Provision 现有 short canonical 不是官方 current writer
 
 本轮回机器码确认 `sub_100880D0` 是标准 strcmp 语义：返回0表示字符串相等。
