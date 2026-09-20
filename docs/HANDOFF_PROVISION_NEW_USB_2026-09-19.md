@@ -136,8 +136,11 @@ producer + 官方 consumer/行为 + 原始实盘验证**同时闭合，才能标
   整体闭合：Windows `sub_100148d0` / Linux `BuildSector8` 都只写17-key ELABEL+NUL，
   对预读旧 LBA8 的动态前缀原地加密；NUL后到 encrypted_len 是既有 encrypted backing，
   后部是 physical preserve tail。Windows/Linux semantic reader 都只消费
-  `Label/GLab/Dept/User/Autonum/Rmark/Unit` 七键，另十个 compatibility wire key 明确忽略；
-  严格22盘17-key顺序一致且十个 ignored key 全空。当前仅 `HDSerialInfo` 4B 与
+  注册侧 Windows/Linux reader 回填 `Label/GLab/Dept/User/Autonum/Rmark/Unit` 七键；
+  继续追到运行时 `EdpEDiskCtrl::sub_10016260` 后确认它会解析全部17个ELABEL键，因此另十个
+  是当前实盘为空的 compatibility wire slots，并非全产品 ignore。该 runtime reader 还复制
+  `HDSerialInfo/UsbOnlyInfo` 到 `CEdpDiskControl+0x2D0` 标签结构，但未找到两字段值相关后续读点。
+  严格22盘17-key顺序一致且十个 compatibility key 全空。当前仅 `HDSerialInfo` 4B 与
   legacy `UsbOnlyInfo[32]` 32B 继续PARTIAL。
   旧账本把22盘当前最大正文之后的102B机械记成 UNKNOWN，这是错误的固定边界模型。
   Windows `sub_100148d0` 与 Linux `BuildSector8@0x1D602` 都只写/加密动态前缀，

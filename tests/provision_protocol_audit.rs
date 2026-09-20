@@ -1987,12 +1987,12 @@ fn lba8_elabel_offset_is_0x80_and_points_to_the_elabel_payload() {
 }
 
 #[test]
-fn lba8_real_elabel_keeps_all_wire_keys_and_current_ignored_slots_empty() {
+fn lba8_real_elabel_keeps_all_wire_keys_and_current_compat_slots_empty() {
     const WIRE_KEYS: [&str; 17] = [
         "GLab", "Indus", "Orgcd", "Org", "Unit", "Dept", "User", "Alarm", "Autonum", "Label",
         "Rmark", "VOL0", "VOL1", "VOL2", "VOLC0", "VOLC1", "VOLC2",
     ];
-    const CURRENT_IGNORED_KEYS: [&str; 10] = [
+    const CURRENT_COMPAT_KEYS: [&str; 10] = [
         "Indus", "Orgcd", "Org", "Alarm", "VOL0", "VOL1", "VOL2", "VOLC0", "VOLC1", "VOLC2",
     ];
 
@@ -2032,7 +2032,7 @@ fn lba8_real_elabel_keeps_all_wire_keys_and_current_ignored_slots_empty() {
             };
             let key = std::str::from_utf8(&part[..eq]).expect("ASCII ELABEL key");
             actual_keys.push(key.to_string());
-            if CURRENT_IGNORED_KEYS.contains(&key) {
+            if CURRENT_COMPAT_KEYS.contains(&key) {
                 ignored.insert(key.to_string(), part[eq + 1..].to_vec());
             }
         }
@@ -2041,11 +2041,11 @@ fn lba8_real_elabel_keeps_all_wire_keys_and_current_ignored_slots_empty() {
             WIRE_KEYS.map(str::to_string),
             "17-key ELABEL wire order changed: {name}"
         );
-        for key in CURRENT_IGNORED_KEYS {
+        for key in CURRENT_COMPAT_KEYS {
             assert_eq!(
                 ignored.get(key).map(Vec::as_slice),
                 Some(&[][..]),
-                "current reader-ignored compatibility key became non-empty: {name} {key}"
+                "current compatibility key became non-empty: {name} {key}"
             );
         }
 
