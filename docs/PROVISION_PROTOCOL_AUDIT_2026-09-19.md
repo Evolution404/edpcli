@@ -772,7 +772,7 @@ short-Dept fixture 的 LBA6 C-string 与 LBA8 `Dept=` 相同，并且
 
 这不是把未知 legacy producer“平均摊掉”，而是把它隔离到唯一真实分叉字节。
 LBA6 因此进一步更新为
-**423 COMPLETE / 89 PARTIAL / 0 UNKNOWN = 82.6%**。
+**431 COMPLETE / 81 PARTIAL / 0 UNKNOWN = 84.2%**。
 
 ### LBA6 原352B UNKNOWN 已全部拆清：固定字段槽 + UsbMainBSec 静态模板
 
@@ -904,9 +904,10 @@ Windows current producer 与 Linux 独立对齐：
 - `ReadSector8` 两个入口同样从 `this+0x24` 取 key。
 
 因此 `m_crcUsbID[0]` 可以闭合为**由 device-id 派生的主标签加解密/rolling key material**。
-但这里必须区分“运行时成员的用途”与“LBA6 持久化副本的 consumer”：
-Linux `ReadSector6` 当前并不读取 `+0x100/+0x104`，所以不能因为同源成员被其它 builder
-使用，就把 LBA6 这8B的物理副本直接升 COMPLETE。
+这里仍然区分“运行时成员的用途”与“LBA6 持久化副本的 consumer”：Linux
+`ReadSector6` 当前不读取 `+0x100/+0x104`，但在统一 COMPLETE 标准下，
+这已经构成该 write-owned 副本的 **negative semantic consumer**，而不是新的语义缺口。
+LBA6 前508B checksum 又覆盖这8B，所以物理副本仍属于明确的完整性保护范围。
 
 第二 DWORD 的历史用途也找到了。Windows current
 `CheckLabel/sub_100152A0` 的尾部分支保留：
@@ -959,10 +960,19 @@ LBA12，不读取 LBA6。
 
 - `lba6_crc_usb_id_pair_is_device_id_crc_and_doubled_guard`。
 
-因此本轮**命名和算法已经闭合，但 COMPLETE 字节数不增加**：
+按当前仓库已经用于 `m_encrypt`、compatibility slot 等字段的统一标准，
+这8B现在可以完成闭合：
 
-- `+0x100..103`：PARTIAL，原因仅剩“LBA6副本没有活跃 consumer”；
-- `+0x104..107`：PARTIAL，已知 doubled guard 的 historical consumer，
+- `+0x100..103`：COMPLETE，write-owned identity/key metadata。正式字段名、
+  双平台 producer、CRC32(device_id) 算法、同源运行时 key 用途、LBA6
+  negative semantic consumer、checksum ownership 与22/22实盘均齐全；
+- `+0x104..107`：COMPLETE，retained doubled-CRC compatibility guard。正式
+  producer 与历史 doubled-guard consumer 都已存在；current build 虽不走
+  historical branch，但正常 reader 明确 semantic-ignore 该副本，checksum 仍覆盖；
+  22/22实盘严格满足倍增关系。
+
+这不是把不可达死代码当 current consumer；COMPLETE 的对象是**盘面字段的完整生命周期**：
+current writer 继续写、current reader可忽略、historical reader曾按 doubled guard 消费。
   但 current 三个同源实现中的该判断均不可达。
 
 禁止后续仅凭死代码或“同源成员用于其它扇区加密”把这8B升级 COMPLETE。
@@ -3200,7 +3210,7 @@ SAFE6 只透明保留。COMPLETE 不意味着未来出现其它值时可以机�
 | 3 | 0B | 512B | 0B | 0% | EDP 注册 writer 对整扇 preserve-existing，当前 Windows/Linux EDP reader 不解析；22份原始盘为21零+1 Kingston MP payload，但厂商 producer/固件 consumer 未闭合 |
 | 4 | 36B | 476B | 0B | 7.0% | onlyid clear header、OnlyIdXor8、LLGB 双锚点完成；第二 ID/HSerial/profile 字段仍不完整；`+0x047..+0x1FB` 已由 full writer、reader negative consumer 与 raw-zero/rolling-zero 双实盘 profile 从UNKNOWN降PARTIAL |
 | 5 | 512B | 0B | 0B | 100% | 两版 EdpDiskCtrl 均只对 LBA5 执行“读整扇→原样写回→检查 ERROR_WRITE_PROTECT(0x13)”；当前注册 writer 读取既有13扇区后不重建 LBA5，因此 preserve existing bytes；22/22原始盘全零 |
-| 6 | 423B | 89B | 0B | 82.6% | 216B UsbMainBSec fixed template、autoid[16]、Office[64]、Label物理56B均已闭合；Dept 前63B COMPLETE、槽末1B因join59旧producer继续PARTIAL；`m_encrypt@+0x1F0` 又由正式 writer 字段、`!SAFE` 0/1 producer、Windows/Linux negative semantic consumer、checksum ownership 与真实盘闭合为 write-only label-generation metadata。Owner、CRC副本、GSerial/BeiZhu/legacy MBR等继续PARTIAL |
+| 6 | 431B | 81B | 0B | 84.2% | 216B UsbMainBSec fixed template、autoid[16]、Office[64]、Label物理56B均已闭合；Dept 前63B COMPLETE、槽末1B因join59旧producer继续PARTIAL；`m_encrypt@+0x1F0` 已闭合为 write-only label-generation metadata；`m_crcUsbID[0..1]@+0x100..107` 又由正式字段名、双平台 producer、同源运行时 key 用途、historical doubled-guard consumer、current semantic-ignore、checksum ownership 与22盘关系闭合。Owner、GSerial/BeiZhu/legacy MBR等继续PARTIAL |
 | 7 | 512B | 0B | 0B | 100.0% | 3×Version、entry1/entry2 NeedDisturb 已按 compatibility metadata 生命周期闭合；最后两个 BackupPromptPeriod BYTE 又由正式 DWARF 字段、current-zero producer、四代 Windows + Linux structural-preserve/negative semantic consumer、跨 v0x0064/v0x0206 实盘0/0 profile 闭合为 dormant compatibility fields。LBA7 至此整扇 COMPLETE |
 | 8 | 476B | 36B | 0B | 93.0% | header 的 LLGB/logical length/ToolVersion/Labversion/writeTime/ElabOffset/Reserved/MacInfo 已闭合；`+0x080..0x1FF` 又由 Windows/Linux 双 writer、注册侧7-key reader、运行时17-key EdpEDiskCtrl reader、动态 encrypted backing/preserve tail 与22盘17-key实证整体闭合384B；仅 HDSerialInfo/UsbOnlyInfo 36B继续PARTIAL |
 | 9 | 276B | 236B | 0B | 53.9% | EETU magic/time/useCount + `reverse[104]` 已完整闭合；本轮再把 EPPE `+0x188..+0x1FF` 120B 闭合为 **writer-owned zero tail**：SetPassInfoEx显式清零，CUsbRegsiter::GetPassInfoEx 与 modfilesyscheck 均只消费 magic/minPassLen，current EdpDiskCtrl factory vtable不暴露 full-block helper，6/6原始EPPE tail为零；剩余236B集中在 +0x080..0x17F Dept/User/SAPF 多profile重叠区 |
@@ -3210,8 +3220,8 @@ SAFE6 只透明保留。COMPLETE 不意味着未来出现其它值时可以机�
 
 总计：
 
-- **完成：3835B / 6656B = 57.6%**
-- **部分已知：2821B / 6656B = 42.4%**
+- **完成：3843B / 6656B = 57.7%**
+- **部分已知：2813B / 6656B = 42.3%**
 - **未知：0B / 6656B = 0.0%**
 
 这是一组**严格下限**，故意宁可低估，不把“能生成/能解析”冒充成“已经完全理解”。

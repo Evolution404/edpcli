@@ -104,7 +104,7 @@ producer + 官方 consumer/行为 + 原始实盘验证**同时闭合，才能标
   SanDisk 与独立 Netac 两个正向 EESI profile 的88B也都为零。未来其它
   caller 若使用非零扩展值必须 round-trip，不能因为 current profile 为零而清零。
 
-- **LBA6 = 423 COMPLETE / 89 PARTIAL / 0 UNKNOWN = 82.6%**。
+- **LBA6 = 431 COMPLETE / 81 PARTIAL / 0 UNKNOWN = 84.2%**。
   原352B UNKNOWN 已全部拆清。Windows sub_10013FD0 与 Linux
   BuildSector6@0x1CAAC 都先复制官方 UsbMainBSec，再覆盖明确字段；
   +0x40..4F、+0xC0..FF、+0x108..187、+0x1F4..1FB 共216B没有后续 overlay。
@@ -136,9 +136,15 @@ producer + 官方 consumer/行为 + 原始实盘验证**同时闭合，才能标
   BuildSector6 均扩成DWORD落盘。读取侧正式 `UsbLabelParam` 没有该成员，
   Windows CheckLabel/Linux ReadSector6 与已扫 runtime 不按值消费，仅整扇
   checksum覆盖其物理字节；strict originals 22/22和独立SanDisk均为1。
+  `m_crcUsbID[2]@+0x100..+0x107` 8B 也已按同一严格标准闭合：
+  Linux/Windows producer 都写 `CRC32(device_id)` 与其 `*2 mod 2^32` guard；
+  同源第一DWORD是 LBA7/LBA8/LBA12 的实际运行时 key material；historical
+  CheckLabel/cemsudisk/vrvaud 保留 doubled-guard consumer；current reader
+  对 LBA6 持久化副本 semantic-ignore，但前508B checksum仍覆盖该8B。
+  strict originals 22/22 与独立SanDisk均精确满足两式，因此这8B升 COMPLETE。
   Dept/Owner 长值的 continuation 还确认落在 LBA9+0x80/+0x100，
   并已用 join60/join59 双profile实盘门禁锁定。当前全 LBA0–12 已无 UNKNOWN，
-  目前全局仍有2821B PARTIAL，绝不能把“UNKNOWN=0”当成全部协议完成。
+  目前全局仍有2813B PARTIAL，绝不能把“UNKNOWN=0”当成全部协议完成。
 
 - **LBA7 = 512 COMPLETE / 0 PARTIAL / 0 UNKNOWN = 100.0%**。
   真实物理 LBA7 已锁定为 **3×0x40 packed EDPF + 14B pass-info@+0xC0**，
