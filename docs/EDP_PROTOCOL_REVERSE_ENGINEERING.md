@@ -6019,8 +6019,14 @@ family.
 - Public archive detail page:
   `https://www.ijinshan.com/filerepair/safeusbregsitercems.dll.shtml`
 
-This is now the preferred exact historical target for closing the legacy upper-level label-format
-selection path around `CCEMSSafeUsbRegsiter::UsbFormat`.
+该二进制现已实际取得并以 SHA-256
+`cb700a3fdca69b126264d800657a2e941e8b5e5d5e35501968ed40cb694edc31`
+固化到 `audit/protocol/evidence_manifest.tsv`。机器码/字符串审计确认它会加载
+`usb20dll`，但当前恢复到的接口只包括
+`_IF_OpenDevEx/_IF_IIR_Manage/_IF_CloseDev`；二进制中没有 SAFE6/LLGB/EDPF
+字段家族，也没有恢复到 `_IF_DiskFormat` 的解析。因此它是更早设备/IIR
+兼容层证据，**不是 strict legacy LBA0-LBA12 的直接 writer**，不得再把它作为
+“尚未取得的候选”或用函数名推断 LBA0 profile selector。
 
 #### EdpEDiskCtrl.dll
 
@@ -6033,7 +6039,34 @@ selection path around `CCEMSSafeUsbRegsiter::UsbFormat`.
 
 This binary has already been used by the main audit as an independent 2020 runtime reader.
 
-### Why the safeusbregsitercems target matters
+### 2019-11-12 更早完整配套组件集：已确认存在，但尚未取得精确二进制
+
+Dr.Web 的 2019-11-12 恶意样本行为记录列出一个被展开到
+`%TEMP%\\Vz0e3033\\cems\\edp\\safeudisklabeltool` 的完整组件树，其中同时存在：
+
+- `cemssafeudisklabeltool.exe`
+- `busmanage.dll`
+- `cemsusbregsiter.dll`
+- `cemssafeudiskregmanage.dll`
+- `safeusbregsitercems.dll`
+- `sectormanage.dll`
+- `usbtools.dll`
+- `udiskprivateinterface.dll`
+
+公开记录：
+`https://vms.drweb.cn/virus/?i=28263010`。
+
+这个时间点早于当前已取得 `CEMSUsbRegsiter.dll 19.11.4.1` 的 PE 编译时间
+2019-11-21，因而证明**更早的完整配套制标组件集确实存在**。但该网页只提供
+部署文件清单，没有这些 DLL 的版本资源、哈希或文件内容，所以这里只把它作为
+historical acquisition locator；它不属于 physical/virtual/static 协议证据，也不会
+让任何 PARTIAL 字节升级。
+
+下一步取得该代或其它早于/不同于 19.11.4.1 的完整配套组件后，必须先同时检查四个
+指纹：join59 writer、非零 HSerialCRC 输入赋值、`UsbOnlyInfo=0`、
+动态 MBR template。只有能把输入赋值一路追到最终 LBA store 的候选才进入主账本。
+
+### Why the historical paired-set target matters
 
 The unresolved LBA0 bootstrap-body profile selection currently sits above the already-recovered
 low-level Netac formatting exports. The current product chain reaches a
@@ -6041,9 +6074,11 @@ low-level Netac formatting exports. The current product chain reaches a
 `CCEMSSafeUsbRegsiter::UsbFormat` method, but the exact historical condition that selected the
 legacy/Netac MBR bootstrap profile is not yet closed.
 
-The exact 2020 `safeusbregsitercems.dll` identity above provides a reproducible target for that
-missing selection logic. Until the binary is actually obtained and its call graph verified, it
-must not be used as evidence to promote LBA0 bytes from PARTIAL to COMPLETE.
+已取得的 19.4.4.2 `safeusbregsitercems.dll` 已被上述审计排除为直接 writer，
+所以缺口不再是“拿到这一个 DLL”，而是**取得与历史 writer 同代的完整配套调用链**。
+当前 `usb20dll!_IF_DiskFormat -> NewUsb20!FormatExA_NetacAPI` 只证明低层
+Netac formatter family；仍需从 historical `WriteLabel/WriteNormalULabel` 或其
+上游 profile selector 连到该 formatter，才能解释真实 LBA0 Netac profile。
 
 
 ## 12. Phison F2 / LBA3 专项取证
