@@ -184,12 +184,18 @@ impl AppState {
             && !ch.is_control()
         {
             self.input_buffer.push(ch);
+            if self.input_mode == InputMode::Search && self.inspect.is_none() {
+                self.rebuild_workspace_filter();
+            }
         }
     }
 
     pub fn backspace_input(&mut self) {
         if matches!(self.input_mode, InputMode::Search | InputMode::Command) {
             self.input_buffer.pop();
+            if self.input_mode == InputMode::Search && self.inspect.is_none() {
+                self.rebuild_workspace_filter();
+            }
         }
     }
 
@@ -198,13 +204,91 @@ impl AppState {
     }
 
     pub fn cancel_input(&mut self) {
+        let was_search = self.input_mode == InputMode::Search;
         self.input_buffer.clear();
         self.input_mode = InputMode::Normal;
+        if was_search && self.inspect.is_none() {
+            self.rebuild_workspace_filter();
+        }
     }
 
     fn clear_search_matches(&mut self) {
         self.search_matches.clear();
         self.search_cursor = 0;
+    }
+
+    fn active_search_query(&self) -> &str {
+        if self.input_mode == InputMode::Search {
+            self.input_buffer.trim()
+        } else {
+            self.search_query.as_str()
+        }
+    }
+
+    fn device_matches_query(row: &crate::disk_scan::Row, query: &str) -> bool {
+        let text = format!(
+            "disk{} {} {} {}:{} {} {} {}",
+            row.disk,
+            row.device_id.as_deref().unwrap_or_default(),
+            row.onlyid.as_deref().unwrap_or_default(),
+            row.vid,
+            row.pid,
+            row.user.as_deref().unwrap_or_default(),
+            row.dept.as_deref().unwrap_or_default(),
+            row.proto
+        );
+        text.to_ascii_lowercase().contains(query)
+    }
+
+    fn backup_matches_query(row: &crate::application::BackupWorkspaceItem, query: &str) -> bool {
+        let text = format!(
+            "{} {} {} {} {} {}",
+            row.file_name,
+            row.display_time,
+            row.onlyid.as_deref().unwrap_or_default(),
+            row.user.as_deref().unwrap_or_default(),
+            row.dept.as_deref().unwrap_or_default(),
+            if row.is_nopwd {
+                "nopwd 免密"
+            } else {
+                "encrypted 加密"
+            }
+        );
+        text.to_ascii_lowercase().contains(query)
+    }
+
+    fn rebuild_workspace_filter(&mut self) {
+        let query = self.active_search_query().to_ascii_lowercase();
+        self.clear_search_matches();
+
+        if query.is_empty() {
+            let count = match self.workspace {
+                Workspace::Devices => self.devices.len(),
+                Workspace::Backups => self.backups.len(),
+            };
+            self.selected = 0;
+            self.set_item_count(count);
+            return;
+        }
+
+        match self.workspace {
+            Workspace::Devices => {
+                for (index, row) in self.devices.iter().enumerate() {
+                    if Self::device_matches_query(row, &query) {
+                        self.search_matches.push(index);
+                    }
+                }
+            }
+            Workspace::Backups => {
+                for (index, row) in self.backups.iter().enumerate() {
+                    if Self::backup_matches_query(row, &query) {
+                        self.search_matches.push(index);
+                    }
+                }
+            }
+        }
+        self.selected = 0;
+        self.set_item_count(self.search_matches.len());
     }
 
     fn activate_search_match(&mut self, match_index: usize) {
@@ -213,6 +297,8 @@ impl AppState {
         };
         if let Some(inspect) = self.inspect.as_mut() {
             inspect.selected = target.min(inspect.item_count.saturating_sub(1));
+        } else if !self.active_search_query().is_empty() {
+            self.selected = match_index.min(self.item_count.saturating_sub(1));
         } else {
             self.selected = target.min(self.item_count.saturating_sub(1));
         }
@@ -225,6 +311,9 @@ impl AppState {
         self.search_matches.clear();
         self.search_cursor = 0;
         if self.search_query.is_empty() {
+            if self.inspect.is_none() {
+                self.rebuild_workspace_filter();
+            }
             return 0;
         }
 
@@ -270,46 +359,8 @@ impl AppState {
                 }
             }
         } else {
-            match self.workspace {
-                Workspace::Devices => {
-                    for (index, row) in self.devices.iter().enumerate() {
-                        let text = format!(
-                            "disk{} {} {} {}:{} {} {} {}",
-                            row.disk,
-                            row.device_id.as_deref().unwrap_or_default(),
-                            row.onlyid.as_deref().unwrap_or_default(),
-                            row.vid,
-                            row.pid,
-                            row.user.as_deref().unwrap_or_default(),
-                            row.dept.as_deref().unwrap_or_default(),
-                            row.proto
-                        );
-                        if text.to_ascii_lowercase().contains(&self.search_query) {
-                            self.search_matches.push(index);
-                        }
-                    }
-                }
-                Workspace::Backups => {
-                    for (index, row) in self.backups.iter().enumerate() {
-                        let text = format!(
-                            "{} {} {} {} {} {}",
-                            row.file_name,
-                            row.display_time,
-                            row.onlyid.as_deref().unwrap_or_default(),
-                            row.user.as_deref().unwrap_or_default(),
-                            row.dept.as_deref().unwrap_or_default(),
-                            if row.is_nopwd {
-                                "nopwd 免密"
-                            } else {
-                                "encrypted 加密"
-                            }
-                        );
-                        if text.to_ascii_lowercase().contains(&self.search_query) {
-                            self.search_matches.push(index);
-                        }
-                    }
-                }
-            }
+            self.rebuild_workspace_filter();
+            return self.search_matches.len();
         }
         if !self.search_matches.is_empty() {
             self.activate_search_match(0);
@@ -319,6 +370,19 @@ impl AppState {
 
     fn cycle_search(&mut self, reverse: bool) {
         if self.search_matches.is_empty() {
+            return;
+        }
+        if self.inspect.is_none() && self.workspace_filter_active() {
+            self.selected = if reverse {
+                if self.selected == 0 {
+                    self.item_count.saturating_sub(1)
+                } else {
+                    self.selected - 1
+                }
+            } else {
+                (self.selected + 1) % self.item_count.max(1)
+            };
+            self.search_cursor = self.selected;
             return;
         }
         if reverse {
@@ -335,16 +399,24 @@ impl AppState {
 
     pub fn search_status(&self) -> Option<String> {
         (!self.search_query.is_empty()).then(|| {
-            format!(
-                "/{}  {}/{}",
-                self.search_query,
-                if self.search_matches.is_empty() {
-                    0
-                } else {
-                    self.search_cursor + 1
-                },
-                self.search_matches.len()
-            )
+            if self.inspect.is_some() {
+                format!(
+                    "/{}  {}/{}",
+                    self.search_query,
+                    if self.search_matches.is_empty() {
+                        0
+                    } else {
+                        self.search_cursor + 1
+                    },
+                    self.search_matches.len()
+                )
+            } else {
+                format!(
+                    "/{}  {} 条结果",
+                    self.search_query,
+                    self.search_matches.len()
+                )
+            }
         })
     }
 
@@ -412,6 +484,17 @@ impl AppState {
         self.inspect = None;
         self.inspect_data = None;
         self.inspect_pending = false;
+        self.clear_search_matches();
+        self.search_query.clear();
+        self.input_buffer.clear();
+        if self.input_mode == InputMode::Search {
+            self.input_mode = InputMode::Normal;
+        }
+        let count = match self.workspace {
+            Workspace::Devices => self.devices.len(),
+            Workspace::Backups => self.backups.len(),
+        };
+        self.set_item_count(count);
     }
 
     pub fn wizard(&self) -> Option<&WizardState> {
@@ -589,8 +672,6 @@ impl AppState {
     }
 
     pub fn replace_devices(&mut self, devices: Vec<crate::disk_scan::Row>) {
-        self.clear_search_matches();
-        self.search_query.clear();
         if self
             .pinned_disk
             .is_some_and(|disk| !devices.iter().any(|row| row.disk == disk))
@@ -600,7 +681,7 @@ impl AppState {
         self.devices = devices;
         self.device_scan_pending = false;
         if self.workspace == Workspace::Devices {
-            self.set_item_count(self.devices.len());
+            self.rebuild_workspace_filter();
         }
     }
 
@@ -608,9 +689,42 @@ impl AppState {
         &self.backups
     }
 
+    pub fn visible_device_indices(&self) -> Vec<usize> {
+        if self.workspace == Workspace::Devices
+            && self.inspect.is_none()
+            && !self.active_search_query().is_empty()
+        {
+            self.search_matches.clone()
+        } else {
+            (0..self.devices.len()).collect()
+        }
+    }
+
+    pub fn visible_backup_indices(&self) -> Vec<usize> {
+        if self.workspace == Workspace::Backups
+            && self.inspect.is_none()
+            && !self.active_search_query().is_empty()
+        {
+            self.search_matches.clone()
+        } else {
+            (0..self.backups.len()).collect()
+        }
+    }
+
+    pub fn workspace_filter_active(&self) -> bool {
+        self.inspect.is_none() && !self.active_search_query().is_empty()
+    }
+
     pub fn selected_device(&self) -> Option<&crate::disk_scan::Row> {
         match self.workspace {
-            Workspace::Devices => self.devices.get(self.selected),
+            Workspace::Devices => {
+                let index = if self.workspace_filter_active() {
+                    *self.search_matches.get(self.selected)?
+                } else {
+                    self.selected
+                };
+                self.devices.get(index)
+            }
             Workspace::Backups => self
                 .pinned_disk
                 .and_then(|disk| self.devices.iter().find(|row| row.disk == disk)),
@@ -622,16 +736,23 @@ impl AppState {
     }
 
     pub fn selected_backup_path(&self) -> Option<std::path::PathBuf> {
-        (self.workspace == Workspace::Backups)
-            .then(|| self.backups.get(self.selected).map(|row| row.path.clone()))
-            .flatten()
+        self.selected_backup().map(|row| row.path.clone())
     }
 
-    pub fn selected_backup_delete_target(&self) -> Option<(std::path::PathBuf, String)> {
+    pub fn selected_backup(&self) -> Option<&crate::application::BackupWorkspaceItem> {
         if self.workspace != Workspace::Backups {
             return None;
         }
-        let row = self.backups.get(self.selected)?;
+        let index = if self.workspace_filter_active() {
+            *self.search_matches.get(self.selected)?
+        } else {
+            self.selected
+        };
+        self.backups.get(index)
+    }
+
+    pub fn selected_backup_delete_target(&self) -> Option<(std::path::PathBuf, String)> {
+        let row = self.selected_backup()?;
         Some((row.path.clone(), row.content_sha256.clone()?))
     }
 
@@ -640,12 +761,10 @@ impl AppState {
     }
 
     pub fn replace_backups(&mut self, backups: Vec<crate::application::BackupWorkspaceItem>) {
-        self.clear_search_matches();
-        self.search_query.clear();
         self.backups = backups;
         self.backup_scan_pending = false;
         if self.workspace == Workspace::Backups {
-            self.set_item_count(self.backups.len());
+            self.rebuild_workspace_filter();
         }
     }
 
@@ -654,7 +773,13 @@ impl AppState {
             return;
         }
         if self.workspace == Workspace::Devices && workspace == Workspace::Backups {
-            self.pinned_disk = self.devices.get(self.selected).map(|row| row.disk);
+            self.pinned_disk = self.selected_device().map(|row| row.disk);
+        }
+        self.clear_search_matches();
+        self.search_query.clear();
+        self.input_buffer.clear();
+        if self.input_mode == InputMode::Search {
+            self.input_mode = InputMode::Normal;
         }
         self.workspace = workspace;
         self.selected = 0;
@@ -790,7 +915,7 @@ impl AppState {
                 }
                 NavCommand::NextWorkspace | NavCommand::PreviousWorkspace => {}
                 NavCommand::Search => {
-                    self.input_buffer.clear();
+                    self.input_buffer = self.search_query.clone();
                     self.input_mode = InputMode::Search;
                 }
                 NavCommand::CommandPalette => {
@@ -843,7 +968,7 @@ impl AppState {
                 self.selected = self.selected.saturating_sub(delta);
             }
             NavCommand::Search => {
-                self.input_buffer.clear();
+                self.input_buffer = self.search_query.clone();
                 self.input_mode = InputMode::Search;
             }
             NavCommand::CommandPalette => {

@@ -64,3 +64,43 @@ fn selected_backup_path_is_stable_for_restore_intent() {
     assert_eq!(state.selected_device_disk(), Some(7));
     assert_eq!(state.selected_backup_path(), Some(PathBuf::from("two.bin")));
 }
+
+#[test]
+fn filtered_backup_selection_maps_to_the_real_backup_for_actions() {
+    let mut state = AppState::new();
+    state.replace_devices(vec![device(7)]);
+    state.replace_backups(vec![backup(1, "one.bin"), backup(2, "two.bin")]);
+    state.navigate(NavCommand::Right, 20);
+    state.navigate(NavCommand::Search, 20);
+    for ch in "two".chars() {
+        state.push_input_char(ch);
+    }
+
+    assert_eq!(state.item_count(), 1);
+    assert_eq!(state.visible_backup_indices(), vec![1]);
+    assert_eq!(state.selected_backup_path(), Some(PathBuf::from("two.bin")));
+    let (path, _) = state
+        .selected_backup_delete_target()
+        .expect("filtered backup delete target");
+    assert_eq!(path, PathBuf::from("two.bin"));
+}
+
+#[test]
+fn switching_to_backups_pins_the_real_device_selected_through_a_filter() {
+    let mut state = AppState::new();
+    let mut first = device(6);
+    first.user = Some("Alice".into());
+    let mut second = device(7);
+    second.user = Some("Bob".into());
+    state.replace_devices(vec![first, second]);
+
+    state.navigate(NavCommand::Search, 20);
+    for ch in "bob".chars() {
+        state.push_input_char(ch);
+    }
+    assert_eq!(state.item_count(), 1);
+    assert_eq!(state.selected_device_disk(), Some(7));
+
+    state.navigate(NavCommand::Right, 20);
+    assert_eq!(state.selected_device_disk(), Some(7));
+}

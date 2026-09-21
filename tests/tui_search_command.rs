@@ -1,6 +1,10 @@
 use edpcli::disk_scan::Row;
 use edpcli::tui::command::{parse_command, PaletteAction};
-use edpcli::tui::state::{AppState, InputMode, NavCommand};
+use edpcli::tui::{
+    render,
+    state::{AppState, InputMode, NavCommand},
+};
+use ratatui::{backend::TestBackend, Terminal};
 
 fn device(disk: u32, user: &str, dept: &str) -> Row {
     Row {
@@ -22,7 +26,7 @@ fn device(disk: u32, user: &str, dept: &str) -> Row {
 }
 
 #[test]
-fn slash_search_selects_matches_and_n_cycles_them() {
+fn slash_search_filters_the_visible_list_while_typing() {
     let mut state = AppState::new();
     state.replace_devices(vec![
         device(6, "Alice", "输电一班"),
@@ -35,15 +39,61 @@ fn slash_search_selects_matches_and_n_cycles_them() {
     for ch in "alice".chars() {
         state.push_input_char(ch);
     }
+    assert_eq!(state.item_count(), 2);
+    assert_eq!(state.visible_device_indices(), vec![0, 2]);
+    assert_eq!(state.selected_device_disk(), Some(6));
+
+    state.navigate(NavCommand::Down, 20);
+    assert_eq!(state.selected(), 1);
+    assert_eq!(state.selected_device_disk(), Some(8));
+
     assert_eq!(state.submit_search(), 2);
-    assert_eq!(state.selected(), 0);
+    assert_eq!(state.item_count(), 2);
+    assert_eq!(state.selected_device_disk(), Some(6));
 
     state.navigate(NavCommand::NextMatch, 20);
-    assert_eq!(state.selected(), 2);
+    assert_eq!(state.selected(), 1);
+    assert_eq!(state.selected_device_disk(), Some(8));
     state.navigate(NavCommand::NextMatch, 20);
     assert_eq!(state.selected(), 0);
-    state.navigate(NavCommand::PreviousMatch, 20);
-    assert_eq!(state.selected(), 2);
+
+    state.navigate(NavCommand::Search, 20);
+    for _ in 0..5 {
+        state.backspace_input();
+    }
+    assert_eq!(state.item_count(), 3);
+    assert_eq!(state.visible_device_indices(), vec![0, 1, 2]);
+    assert_eq!(state.submit_search(), 0);
+}
+
+#[test]
+fn filtered_devices_are_the_only_rows_rendered() {
+    let mut state = AppState::new();
+    state.replace_devices(vec![
+        device(6, "Alice", "输电一班"),
+        device(7, "Bob", "输电二班"),
+        device(8, "Alice-2", "输电三班"),
+    ]);
+    state.navigate(NavCommand::Search, 20);
+    for ch in "alice".chars() {
+        state.push_input_char(ch);
+    }
+
+    let backend = TestBackend::new(140, 32);
+    let mut terminal = Terminal::new(backend).expect("test terminal");
+    terminal
+        .draw(|frame| render::draw(frame, &state))
+        .expect("draw filtered devices");
+    let text = terminal
+        .backend()
+        .buffer()
+        .content()
+        .iter()
+        .map(|cell| cell.symbol())
+        .collect::<String>();
+    assert!(text.contains("Alice"), "{text}");
+    assert!(text.contains("Alice-2"), "{text}");
+    assert!(!text.contains("Bob"), "{text}");
 }
 
 #[test]
