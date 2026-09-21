@@ -58,8 +58,8 @@ fn protocol_analysis_has_one_canonical_document() {
 fn protocol_live_status_tracks_strict_baseline_without_becoming_a_second_ledger() {
     assert!(Path::new("docs/EDP_PROTOCOL_LIVE_STATUS.md").is_file());
     for required in [
-        "5457 / 6656 B = 82.0%",
-        "PARTIAL：1199 B",
+        "5586 / 6656 B = 83.9%",
+        "PARTIAL：1070 B",
         "LBA4 `0x020..0x033` 继续保持 PARTIAL",
         "ReadUsbHserialsInfo",
         "0x1019DB54",
@@ -114,21 +114,21 @@ fn strict_progress_covers_exactly_lba0_through_lba12() {
     );
     assert_eq!(complete + partial + unknown, 13 * 512);
     assert!(
-        complete >= 5457,
-        "strict COMPLETE coverage regressed below the corrected audited baseline: {complete}"
+        complete >= 5586,
+        "strict COMPLETE coverage regressed below the audited baseline: {complete}"
     );
     assert!(
-        partial <= 1199,
-        "PARTIAL coverage regressed above the corrected audited baseline: {partial}"
+        partial <= 1070,
+        "PARTIAL coverage regressed above the audited baseline: {partial}"
     );
     assert_eq!(
         unknown, 0,
         "all LBA0..12 bytes are at least PARTIAL after the completed UNKNOWN audit"
     );
     assert!(
-        DOC.contains("COMPLETE：5457B / 6656B = 82.0%")
-            && DOC.contains("PARTIAL：1199B / 6656B = 18.0%"),
-        "displayed global totals must match the corrected strict-progress ledger"
+        DOC.contains("COMPLETE：5586B / 6656B = 83.9%")
+            && DOC.contains("PARTIAL：1070B / 6656B = 16.1%"),
+        "displayed global totals must match the strict-progress ledger"
     );
 }
 
@@ -194,6 +194,9 @@ fn documentation_keeps_the_official_provisioning_chain_and_strict_rules() {
         "EdpEDisk.exe::OnInitDialog",
         "zero-initializes the full 0x80B EESI payload",
         "netac_onlydisk_20260804_lba10_head.hex",
+        "audit/protocol/physical-evidence/eesi/netac_onlydisk_20260804_lba0_12.bin",
+        "d72f6fcd192e92e6423e3b078cffa46725d8e781cdbd48dfcdaa470b72d208bd",
+        "P-EESI-NETAC",
         "3c7e795b1b7110e9866dd31f44ba6e7c5e02ff77a1f70a8b11fcdcaf181fbf39",
         "240d04e7c97d300c5081f793d72850d49acbf5408bc0d8cf32de8eef7a5e8f02",
         "tagEdpEDiskTmpUse",
@@ -335,7 +338,7 @@ fn documentation_keeps_the_official_provisioning_chain_and_strict_rules() {
         "LBA2 must retain the closed entry0 and unused-entry residual semantics"
     );
     assert!(
-        DOC.contains("| LBA4 | 486 | 26 | 0 | 94.9% |"),
+        DOC.contains("| LBA4 | 487 | 25 | 0 | 95.1% |"),
         "LBA4 progress must retain the closed backup-key seed and restore-node backing semantics"
     );
     assert!(
@@ -355,12 +358,18 @@ fn documentation_keeps_the_official_provisioning_chain_and_strict_rules() {
         "LBA9 progress must retain the closed EETU reverse backing and EPPE writer-owned zero tail semantics"
     );
     assert!(
-        DOC.contains("| LBA10 | 384 | 128 | 0 | 75.0% |"),
-        "LBA10 active EESI bytes must remain PARTIAL until a positive sample exists in the designated gold directories"
+        DOC.contains("| LBA10 | 512 | 0 | 0 | 100.0% |"),
+        "LBA10 must remain fully closed once the provenance-audited positive EESI physical profile is accounted for"
     );
     assert!(
-        !DOC.contains("补充加密原盘正向金标") && !DOC.contains("front_LBA0_12.bin"),
-        "the canonical ledger must not introduce a third gold evidence source"
+        DOC.contains("P-EESI-NETAC")
+            && DOC.contains("19+1 general census")
+            && DOC.contains("不纳入19+1 general census"),
+        "the positive EESI capture must remain purpose-specific physical evidence rather than silently changing the 19+1 general census"
+    );
+    assert!(
+        !DOC.contains("front_LBA0_12.bin"),
+        "obsolete third-source audit22 material must not be promoted into the current general census"
     );
     assert!(
         DOC.contains("| LBA12 | 512 | 0 | 0 | 100.0% |"),

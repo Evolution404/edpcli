@@ -13,6 +13,9 @@ SECTOR = 512
 IMAGE_LEN = 13 * SECTOR
 EMPTY_SECTOR_SHA256 = hashlib.sha256(bytes(SECTOR)).hexdigest()
 REPO_ROOT = Path(__file__).resolve().parents[2]
+EESI_PHYSICAL_PATH = REPO_ROOT / "audit/protocol/physical-evidence/eesi/netac_onlydisk_20260804_lba0_12.bin"
+EESI_PHYSICAL_META_PATH = REPO_ROOT / "audit/protocol/physical-evidence/eesi/netac_onlydisk_20260804_lba0_12.meta.json"
+EESI_PHYSICAL_SHA256 = "3c7e795b1b7110e9866dd31f44ba6e7c5e02ff77a1f70a8b11fcdcaf181fbf39"
 
 
 def sha256(data: bytes) -> str:
@@ -70,6 +73,29 @@ def load_gold(
     return out
 
 
+def load_eesi_physical() -> tuple[bytes, dict[str, object]]:
+    data = EESI_PHYSICAL_PATH.read_bytes()
+    if len(data) != IMAGE_LEN:
+        raise ValueError(
+            f"{EESI_PHYSICAL_PATH}: expected {IMAGE_LEN} bytes, got {len(data)}"
+        )
+    actual_sha = sha256(data)
+    if actual_sha != EESI_PHYSICAL_SHA256:
+        raise ValueError(
+            f"{EESI_PHYSICAL_PATH}: SHA-256 mismatch: expected {EESI_PHYSICAL_SHA256}, got {actual_sha}"
+        )
+    meta = json.loads(EESI_PHYSICAL_META_PATH.read_text(encoding="utf-8"))
+    if meta.get("device_id") != "disk&ven_netac&prod_onlydisk&rev_0000":
+        raise ValueError("EESI physical metadata lost the audited Netac device_id")
+    if meta.get("crc32") != "5088ee37" or meta.get("size") != IMAGE_LEN:
+        raise ValueError("EESI physical metadata lost the audited CRC/size")
+    if meta.get("md5") != hashlib.md5(data).hexdigest():
+        raise ValueError("EESI physical metadata MD5 does not match the committed capture")
+    if not any(lba(data, 10)):
+        raise ValueError("EESI physical positive unexpectedly has an all-zero LBA10")
+    return data, meta
+
+
 def lba3_shape(raw: bytes) -> dict[str, object]:
     nonzero = any(raw)
     return {
@@ -84,6 +110,7 @@ def lba3_shape(raw: bytes) -> dict[str, object]:
 
 
 def audit(gold: list[tuple[dict[str, str], bytes, Path]]) -> dict[str, object]:
+    eesi_physical, eesi_meta = load_eesi_physical()
     strict = [item for item in gold if item[0]["profile"] == "strict-encrypted"]
     nopwd = [item for item in gold if item[0]["profile"] == "authentic-nopwd"]
     digests = [item[0]["sha256"] for item in gold]
@@ -126,9 +153,14 @@ def audit(gold: list[tuple[dict[str, str], bytes, Path]]) -> dict[str, object]:
         "strict_encrypted_count": len(strict),
         "authentic_nopwd_count": len(nopwd),
         "lba10": {
-            "all_zero": True,
+            "general_census_all_zero": True,
             "zero_sector_sha256": EMPTY_SECTOR_SHA256,
-            "status_effect": "sample dependency remains; LBA10+0x000..0x07f stays PARTIAL",
+            "purpose_specific_positive": {
+                "path": str(EESI_PHYSICAL_PATH.relative_to(REPO_ROOT)),
+                "sha256": sha256(eesi_physical),
+                "device_id": eesi_meta["device_id"],
+            },
+            "status_effect": "general census remains absent-zero; P-EESI-NETAC supplies the separate positive physical profile and LBA10+0x000..0x07f is COMPLETE",
         },
         "lba3_profiles": list(lba3_profiles.values()),
     }

@@ -121,13 +121,13 @@ fn byte_ledger_covers_exactly_6656_bytes_without_overlap() {
         "byte ledger contains gaps"
     );
     let expected_complete = [
-        142, 512, 512, 0, 486, 512, 497, 512, 492, 384, 384, 512, 512,
+        142, 512, 512, 0, 487, 512, 497, 512, 492, 384, 512, 512, 512,
     ];
-    let expected_partial = [370, 0, 0, 512, 26, 0, 15, 0, 20, 128, 128, 0, 0];
+    let expected_partial = [370, 0, 0, 512, 25, 0, 15, 0, 20, 128, 0, 0, 0];
     assert_eq!(complete, expected_complete);
     assert_eq!(partial, expected_partial);
-    assert_eq!(complete.iter().sum::<usize>(), 5457);
-    assert_eq!(partial.iter().sum::<usize>(), 1199);
+    assert_eq!(complete.iter().sum::<usize>(), 5586);
+    assert_eq!(partial.iter().sum::<usize>(), 1070);
 
     for lba in 0..13 {
         let progress = format!("| LBA{lba} | {} | {} | 0 |", complete[lba], partial[lba]);
@@ -139,13 +139,19 @@ fn byte_ledger_covers_exactly_6656_bytes_without_overlap() {
 }
 
 #[test]
-fn historical_rejections_and_lba10_sample_gate_are_explicit() {
+fn historical_rejections_and_lba10_positive_physical_gate_are_explicit() {
     let matrix = include_str!("../audit/protocol/historical_matrix.tsv");
     assert!(matrix.contains("rejected for the exact strict-HSerial producer"));
     assert!(matrix.contains("LBA4 post-XOR flag writer is positive"));
     assert!(matrix.contains("0x10006249..0x10006257"));
+    assert!(matrix.contains("probe_lba4_v19_writer.py"));
+    assert!(matrix.contains("c26628566108031f439f999a46858476414ec8e7d1030a8293c9df0c463ad5d8"));
+    assert!(matrix.contains("f5e6ddbb4e3097c9968296b43627543ecacdc24b174e52f8f049b289d7264efc"));
+    assert!(matrix.contains("RepairSafe6Label@0x10008B20"));
     assert!(matrix.contains("join59"));
-    assert!(matrix.contains("rejected paired caller for strict nonzero HSerial"));
+    assert!(matrix.contains(
+        "rejected complete recovered 2020 BusManage request-constructor family for strict nonzero HSerial"
+    ));
     assert!(matrix.contains("dynamic_MBR_template"));
     assert!(matrix.contains("2019-11-12"));
     assert!(matrix.contains("not component build date"));
@@ -155,9 +161,9 @@ fn historical_rejections_and_lba10_sample_gate_are_explicit() {
     assert!(matrix.contains("independently dated/hashed component bytes"));
     assert!(matrix.contains("cemssafeudisklabeltool.exe local variants"));
     assert!(matrix.contains("ReadUsbHserialsInfo@0x100054A0"));
-    assert!(matrix.contains("0x100072C0"));
-    assert!(matrix.contains("0x1000DDA0"));
-    assert!(matrix.contains("0x1000DB90"));
+    assert!(matrix.contains("0x10010020/0x100103B0/0x10010580/0x10010730"));
+    assert!(matrix.contains("0x100108C3"));
+    assert!(matrix.contains("0x10010920"));
     assert!(matrix.contains("disk_end-0x80000"));
     assert!(matrix.contains("ISUdiskRegsiterObj vtable 0x1019DB54"));
     assert!(matrix.contains("virtual_68@0x1000E650"));
@@ -168,10 +174,11 @@ fn historical_rejections_and_lba10_sample_gate_are_explicit() {
 
     let lba10 = LEDGER
         .lines()
-        .find(|line| line.starts_with("10\t000-07f\tPARTIAL\t"))
+        .find(|line| line.starts_with("10\t000-07f\tCOMPLETE\t"))
         .expect("LBA10 active EESI row");
-    assert!(lba10.contains("all designated gold is zero"));
-    assert!(lba10.contains("allowed authentic enabled sample"));
+    assert!(lba10.contains("P-EESI-NETAC"));
+    assert!(lba10.contains("purpose-specific positive"));
+    assert!(lba10.contains("general census"));
 }
 
 #[test]

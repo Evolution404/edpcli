@@ -7,7 +7,7 @@
 > `COMPLETE` 只允许由可复核证据升级；`PARTIAL` 表示边界/部分语义已经验证但仍有
 > 明确缺口；任何候选解释必须标注为候选或已证伪，不得写成事实。
 >
-> **当前严格进度：5457 / 6656B COMPLETE（82.0%），1199B PARTIAL（18.0%），UNKNOWN=0。**
+> **当前严格进度：5586 / 6656B COMPLETE（83.9%），1070B PARTIAL（16.1%），UNKNOWN=0。**
 >
 > 文末“验证历程附录”用于保留详细推导和纠错记录；若附录中的历史阶段判断与本文前半
 > canonical 账本冲突，**一律以前半当前账本为准**。
@@ -79,12 +79,28 @@
   `c9fb7ba50d715e8c0d53611c73076b3c50e7b40a23f05693001d33c17f05abba`
   仅保留为 lineage 记录；
 - `tests/protocol_byte_ledger.rs`：自动展开所有 range，拒绝遗漏、重叠、证据 ID
-  漂移和 5457/1199 统计偏差。
+  漂移和 5586/1070 统计偏差。
 
-本轮实际重放现行20份唯一金标后：LBA10 **20/20 整扇全零**；LBA3 为19份全零 +
+本轮实际重放现行20份 general-census 唯一金标后：LBA10 **20/20 整扇全零**；LBA3 为19份全零 +
 1份 strict Kingston 非零 profile，后者 `+0x020..0x027=b57e9c4500800014`、
-`+0x1F0..0x1FF="this is mp mark\0"`。因此旧 `/tmp/audit22` 曾混入的第三来源
-SanDisk EESI 正例不得继续影响 current strict 状态。
+`+0x1F0..0x1FF="this is mp mark\0"`。旧 `/tmp/audit22` 曾混入的第三来源 SanDisk
+EESI 正例仍不得作为 general census 的第21份样本。
+
+但这不再等同于“没有合格的 EESI 正向物理证据”。本轮重新审计
+`/Users/zhangyuxi/Desktop/u_disk/utils/backup/disk4_20260804_080927.bin`：完整6656B
+SHA-256=`3c7e795b1b7110e9866dd31f44ba6e7c5e02ff77a1f70a8b11fcdcaf181fbf39`，companion
+metadata 固定 `device_id=disk&ven_netac&prod_onlydisk&rev_0000`、CRC32=`5088ee37`、
+size=6656、MD5=`db17edf8246ad55e9800b36701afd8e4`。产生这组三件套的
+`make_big_boot.py`（审计时 SHA-256=`d72f6fcd192e92e6423e3b078cffa46725d8e781cdbd48dfcdaa470b72d208bd`）
+在 `read_lba()` 中以 `O_RDONLY/pread` 读取，`--apply` 主流程先调用 `backup()` 保存
+LBA0-LBA12，再进行第二次 `YES` 确认，之后才 unmount 并通过 `O_RDWR/pwrite` 修改
+LBA0/LBA12。因此该文件是对应运行的**写前真实物理快照**。仓库现将它完整保存为
+`audit/protocol/physical-evidence/eesi/netac_onlydisk_20260804_lba0_12.bin`，登记为
+`P-EESI-NETAC`，只作为 EESI-enabled profile 的 purpose-specific physical evidence，不纳入19+1 general census。
+对其重放得到 `CRC32(device_id)=0x5088EE37`，LBA10 前0x80解密为 `EESI`、flag=1、
+GBK“交换区”、GBK“保密区”、88B零 compatibility extension；它与独立旧 SanDisk
+EESI 正例的明文布局一致。结合两套官方 EESI producer/consumer 生命周期，LBA10
+`0x000..0x07F` 的 real-device gate 现已满足并升级 COMPLETE。
 
 ### 1.3 去重金标交叉复核：指纹不能合并为单一筛选条件
 
@@ -117,8 +133,9 @@ bootstrap 实例。
 - 物理 `+0x45/+0x46=00 00`，完整 rolling-reader 视图却为 **`D4 D9`**；
 - backing `+0x47..+0x1FB` 并非整段零，不能套 raw-zero gap 规则。
 
-本轮已把这个分叉进一步闭合到“表示规则已知、该实盘的精确 producer provenance
-仍未知”：
+本轮已把这个分叉进一步闭合到“表示规则已知，并且该实盘的 512B wire image 可由
+已取得的官方 historical writer 以 zero server flags 精确重建；物理盘当年究竟由哪个
+具体可执行文件生成仍不作无证据归因”：
 
 - current Windows `CEMSUsbRegsiter.dll` SHA-256=
   `122b30301a7d23590f69313063414518f2b60d8535a57ee5d5a585a0c6b4c6eb` 的
@@ -139,6 +156,17 @@ bootstrap 实例。
   无 unmapped/exception，返回0并得到 onlyid=`794661040`、正确 guard、
   second=`0x4A32BA39`、非零 HSerial、`LLGB`、Version=1、tuple=`08040c01`、
   `wire_flags=0000`、`reader_flags=d4d9`；
+- 新增 `scripts/protocol/probe_lba4_v19_writer.py` 对 historical v19.11.4.1 writer 做
+  **memory-backed 原生执行**：固定 DLL SHA-256 与 authentic gold SHA-256，保留样本
+  second=`0x4A32BA39` 与原20B非零 HSerial，仅把 restore node 的两个 server flag
+  设为 `00 00`；caller-owned backing 则按 rolling 逆变换回 writer 输入形态。probe
+  只 stub PhysicalDrive 路径格式化与 debug 文本格式化两个 CRT 边界，并把
+  `CreateFileA/ReadFile/WriteFile` 重定向到内存；`fcn.10006090@RVA 0x06090` 的
+  rolling loop、node copy、post-XOR stores 全部执行官方机器码。结果 `ret=1`、无
+  unmapped/exception，唯一一次 write 为 `offset=2048,size=512`，输出 SHA-256
+  `c26628566108031f439f999a46858476414ec8e7d1030a8293c9df0c463ad5d8` 与真实
+  SanDisk LBA4 **512/512 完全一致**。这证明 `wire=00 00 / reader=D4 D9` 不需要
+  非零 producer flag 才能产生；它不声称 v19.11.4.1 就是当年制造该物理盘的 exact EXE；
 - 对 onlyid=`794661040`，rolling K0=`0xBFED`。在两个 flag 物理位置上的 key byte
   分别为 `D4`、`D9`，所以 reader 的 `D4 D9` 精确等于 `00^D4, 00^D9`。
   它是**官方 reader view**，不是已证明的 producer-side flag 值。
@@ -151,23 +179,34 @@ reader view 为 `00 00`/`0B 00`，与 ordinary rolling representation 相容，�
 writer 仍未取得；在该 family 中 reader view 才对应 node flag。仅凭盘面与身份字段，
 目前不能无歧义选择两种 family。
 
-真实免密 SanDisk 的 `00 00 -> D4 D9` **与 v19/current-style post-XOR family 相容**，
-但尚不能声称它一定由 v19.11.4.1 生成：已取得的 paired 2020 BusManage 会把 HSerial
+真实免密 SanDisk 的 `00 00 -> D4 D9` 现在不再只是“与 post-XOR family 相容”：上述
+v19 virtual execution 已证明，在保留其 non-mirrored second ID 与 nonzero HSerial 的条件下，
+**producer node flags=`00 00` 可以由官方 historical writer 精确重建整扇真实 wire image**。
+但仍不能声称它一定由 v19.11.4.1 生成：已取得的 paired 2020 BusManage 会把 HSerial
 request 区清零，仍缺真正给该盘 nonzero HSerial 的上游 caller；同时也没有该盘
 `disk_end-4 sectors` / `disk_end-0x80000` 两份 restore-node 镜像的精确捕获。
 2026-08-23 原采集只保存 LBA0-LBA13 与 `size-0xE0000` 等其它尾区，不能拿来替代这两个
 镜像地址。current `RegsiterUsb` 的 LBA4 内部写路径只经过 BuildSector4，
-`UnRegsiterUsb` 的逐扇写回序列不含 LBA4；已审 current repair 路径也没有找到
-只 patch `+0x45/+0x46` 的证据。故“后续只改两个物理字节”在这些现行路径中被排除，
-但历史免密/恢复组件仍是未闭合缺口。
+`UnRegsiterUsb` 的逐扇写回序列不含 LBA4；current repair 路径也没有找到只 patch
+`+0x45/+0x46` 的证据。另取得 historical `UDiskLabelRepair.dll` 2021-12-08 build，
+SHA-256=`f5e6ddbb4e3097c9968296b43627543ecacdc24b174e52f8f049b289d7264efc`：
+`RepairSafe6Label@0x10008B20` 从 `disk_end-0x80000` **整块读取9扇区并原样写回
+LBA4-LBA12**，`RewriteSafe6BakLabel@0x100094E0` 反向整块备份；其独立 LBA4 reader
+`fcn.10006DA0` 做完整0xF4 rolling、复制0x2F node、只校验 `OnlyIdXor8`。因此这条
+历史修复链同样不会凭空制造/清零单独两个 flag byte。
 
-实现因此不再猜 producer：`inspect` 的 `decoded` 对 LBA4 始终保持官方 rolling-reader
-view，两个 flag 字段同时展示 `reader=` 与 `wire=`，并显式标记 producer 需按 writer
-provenance 判定。由于真实免密 profile 的 exact producer 尚未证明，原先把
-`bConnetServer@+0x046` 作为跨 profile dormant-zero 的 COMPLETE 已越过证据边界；本轮
-将其**降为 PARTIAL**。保留的限定结论只是：current Windows/Linux 与
-v19.11.4.1 SAFE6 已知 writer 中该 node byte 均由 zero-init 保持为0。严格统计随之从
-5458/1198纠正为 **5457 COMPLETE / 1199 PARTIAL**；这是证据纠错，不是协议倒退。
+实现仍然不猜 producer：`inspect` 的 `decoded` 对 LBA4 始终保持官方 rolling-reader
+view，两个 flag 字段同时展示 `reader=` 与 `wire=`，不会把 `D9` 强行改成0。字段状态则
+按 producer/representation/consumer 生命周期分别记账：`bDataToServer@+0x045` 仍有
+真实 `0B` reader profile，保持 PARTIAL；`bConnetServer@+0x046` 的已取得 current
+Windows/Linux 与 v19.11.4.1 constructors 都 zero-init 且无赋值，historical rolling-form
+实盘的正式 reader view 为0，真实免密 SanDisk 又已由 v19 official writer 以
+producer-side zero 精确重建整扇，而所有已审 reader/restore 上层均无该 byte 的值相关
+业务分支。因此 `+0x046` 重新闭合为 **producer-side dormant-zero compatibility byte，
+COMPLETE**。这里 COMPLETE 不等于“reader 总返回0”，也不宣称已知道 SanDisk 当年的
+exact manufacturing executable；它只表示该 byte 的已知 producer 值、两类 wire/reader
+表示关系、repair 边界和 negative semantic consumer 已闭合。严格统计为
+**5586 COMPLETE / 1070 PARTIAL**。
 
 原采集目录的 `dec/LBA04_dec.bin` 虽显示 flags=0，但不能作为独立反证：当时的
 `analyze/scripts/read_metadata.py::lba4_decode` 对每一个 raw-zero byte 强制把解码值
@@ -505,7 +544,10 @@ short/full 表示的选择条件；真实选择条件仍未定位。
 但 physical flags=`00 00`，current 官方 reader 输出=`D4 D9`。所以此前两个极端模型
 以及 identity classifier 都不成立：既不能把 generic rolling 结果对所有盘都当
 producer flags，也不能把 physical bytes 对所有盘都当 producer flags，更不能用
-second/HSerial 决定取哪一层。`src/inspect.rs` 现改为 reader-faithful：
+second/HSerial 决定取哪一层。进一步的 v19 writer probe 已保留同一 second/HSerial，
+以 node flags=`00 00` 原生执行 `fcn.10006090`，并把该真实 LBA4 **512/512 精确重建**；
+所以 `D4 D9` 已被正向证明可以只是 post-XOR writer 遇到非对称 reader 后的 transformed
+bytes，而不是必须存在的 nonzero producer flags。`src/inspect.rs` 仍保持 reader-faithful：
 
 ```text
 reader = rolling_decode(raw[0x18..])
@@ -525,11 +567,20 @@ current/v19 的 post-XOR producer 语义仍保留在审计证据与 Provision wr
   内只用身份材料，不读取两个 server flag；
 - Linux `libcemsfilesyscheck.so` 除 BuildSector4 的两次 post-XOR store 外，没有
   对 restore-node `+0x2D/+0x2E` 的直接字段访问。
+- historical `UDiskLabelRepair.dll` 2021 build 的 `RepairSafe6Label@0x10008B20` /
+  `RewriteSafe6BakLabel@0x100094E0` 只在 LBA4-LBA12 与 `disk_end-0x80000` 间整块复制
+  9扇区 raw bytes；独立 reader `fcn.10006DA0` 也只是 rolling + 完整 node copy +
+  `OnlyIdXor8` guard，没有单字节 flag patch 或值相关分支。
 
-所以这 **2B 当前都保持 PARTIAL**：`+0x45` 仍缺历史非零 producer/最终 consumer；
-`+0x46` 虽在 current/v19.11.4.1 已知 SAFE6 writer 内可限定为 producer-side zero，
-但 authentic no-password gold 的 exact producer 尚未归因且 official reader 明确为
-`D9`，不能再把加密子集中的 reader-zero 观察外推成跨 profile COMPLETE。
+所以两个 BYTE 必须继续拆开记账：`+0x45` 仍缺历史非零 producer/最终 consumer，保持
+**PARTIAL**；`+0x46` 则由 current Windows/Linux + v19.11.4.1 direct producer zero、
+historical rolling-form reader-zero、真实免密 physical wire=`00`、v19 exact-512 virtual
+writer reconstruction、跨代 reader/repair negative consumer 一起闭合为
+**COMPLETE**。这里 COMPLETE 的字段语义是 producer-side dormant-zero compatibility
+byte；官方 reader 对 post-XOR wire 可返回非零 transformed byte（真实样本即 `D9`），
+inspect 因而绝不能为了 COMPLETE 状态把 reader view 清成0。物理盘当年的 exact EXE
+provenance 仍未知，但这不再构成该1B生命周期的缺口；它继续构成 HSerial upstream 等
+其它字段的 provenance 缺口。
 
 同时，current SAFE6 Provision 已从历史 raw-zero short representation 改为官方
 current writer 的 full representation：完整 `+0x18..+0x1FF` rolling，然后再
@@ -576,21 +627,21 @@ post-XOR 写回 `+0x45/+0x46`。历史 raw-zero 实盘仅作为兼容读取 prof
 | LBA1 | 512 | 0 | 0 | 100.0% |
 | LBA2 | 512 | 0 | 0 | 100.0% |
 | LBA3 | 0 | 512 | 0 | 0.0% |
-| LBA4 | 486 | 26 | 0 | 94.9% |
+| LBA4 | 487 | 25 | 0 | 95.1% |
 | LBA5 | 512 | 0 | 0 | 100.0% |
 | LBA6 | 497 | 15 | 0 | 97.1% |
 | LBA7 | 512 | 0 | 0 | 100.0% |
 | LBA8 | 492 | 20 | 0 | 96.1% |
 | LBA9 | 384 | 128 | 0 | 75.0% |
-| LBA10 | 384 | 128 | 0 | 75.0% |
+| LBA10 | 512 | 0 | 0 | 100.0% |
 | LBA11 | 512 | 0 | 0 | 100.0% |
 | LBA12 | 512 | 0 | 0 | 100.0% |
 <!-- STRICT_PROGRESS_END -->
 
 当前总计：
 
-- **COMPLETE：5457B / 6656B = 82.0%**
-- **PARTIAL：1199B / 6656B = 18.0%**
+- **COMPLETE：5586B / 6656B = 83.9%**
+- **PARTIAL：1070B / 6656B = 16.1%**
 - **UNKNOWN：0B / 6656B = 0.0%**
 
 LBA11 已完整闭合为 512B COMPLETE。此前卡住的后半 252B 不是“某型号盘偶尔使用
@@ -662,7 +713,7 @@ DWARF 中恢复出的原始声明文件/行号与本地函数地址：
 | LBA4 | 0x03D–0x040 | COMPLETE | fixed restore-node `Version = 1` | current Windows writer显式写 DWORD 1 到 restore-node Version；Linux ABI给出字段边界 | Windows/Linux reader把 Version 随完整node返回，当前没有值相关准入/行为分支 | committed original fixtures 全量门禁 + strict 22/22 均为1 | 当前已知协议代际中的固定 restore-node version metadata 生命周期闭合，4B COMPLETE；未来新版本非1时应按新profile处理而非强制改写 |
 | LBA4 | 0x041–0x044 | COMPLETE | fixed restore-node sector tuple `08 04 0C 01` | current Windows writer在 node 构造阶段显式写四个 sector BYTE `08 04 0C 01` | Windows/Linux reader随完整restore node结构返回这些BYTE，但当前没有独立值相关分支 | committed original fixtures 全量门禁 + strict 22/22 均为 `08 04 0C 01`，跨 current/legacy profile一致 | producer、结构边界、negative semantic consumer 与真实盘全部闭合，4B COMPLETE；按 fixed compatibility metadata 建模 |
 | LBA4 | 0x045 | PARTIAL | `bDataToServer` representation-dependent server flag | current Windows/Linux writer均在full rolling后把 node+0x2D post-XOR覆盖到物理+0x45；historical v19.11.4.1 `fcn.10006090@0x10006249` 也执行同一覆盖，且其 SAFE6 node 可携带 legacy second/HSerial identity，因此身份形态不能判定表示。更早加密实盘又观察到 ordinary-rolling-compatible wire | Windows/Linux ReadSector4 统一 rolling 并结构性返回该byte，不补偿 post-XOR；上层 ActiveNormalUDev/GetUpLoadInformation/usbtoolbusmanage 没有已知值相关分支 | 加密金标同时存在 wire-nonzero→reader `00/0B` 与 post-XOR-compatible profile；真实免密 SanDisk 则为 wire=`00`、official reader=`D4` | exact historical rolling producer、真实免密 exact producer provenance 与最终业务 consumer仍缺；1B继续PARTIAL，禁止按 HSerial 身份猜表示 |
-| LBA4 | 0x046 | PARTIAL | `bConnetServer` representation-dependent compatibility flag | current Windows/Linux 与 v19.11.4.1 writer都在rolling后post-XOR覆盖 node+0x2E；这些已知 SAFE6 node constructor 均 zero-init 且无后续 flag store，所以**这些 writer family 内** producer-side值为0。真实免密盘 exact producer仍未定位 | Windows/Linux ReadSector4统一rolling并返回该byte而不修正；隔离执行 current `ReadSector4@0x10015090` 对真实免密金标成功返回 reader=`D9`；上层当前未见值相关业务分支 | authentic no-password gold SHA-256 `d6a935...` 为 wire=`00`、reader=`D9`，guard/LLGB/version/tuple均有效；该样本超出旧加密子集 `reader==0` 观察 | 旧 dormant-zero COMPLETE 把“已知 writer 默认0”错误外推到未归因真实 profile；全局降为PARTIAL。保留 scoped 结论：current/v19.11.4.1 SAFE6 producer-side=0。缺 authentic exact writer/同盘镜像/历史转换路径 |
+| LBA4 | 0x046 | COMPLETE | `bConnetServer` producer-side dormant-zero compatibility flag；reader view 随 wire representation 可非零 | current Windows/Linux 与 v19.11.4.1 writer都在rolling后post-XOR覆盖 node+0x2E；这些 SAFE6 node constructor 均 zero-init 且无后续 flag store，所以 direct producer-side=0。新增 `scripts/protocol/probe_lba4_v19_writer.py` 保留真实免密 SanDisk 的 second=`0x4A32BA39`/nonzero HSerial，只将 node flags 设为`00 00`，memory-backed 原生执行 v19 `fcn.10006090` 后唯一一次 LBA4 write 与真实扇区512/512完全一致，SHA-256=`c26628566108031f439f999a46858476414ec8e7d1030a8293c9df0c463ad5d8` | Windows/Linux ReadSector4统一rolling并返回该byte而不修正；current reader probe 对真实免密盘得到`D9`，证明 reader view 不是 producer value。2021 historical `UDiskLabelRepair::fcn.10006DA0` 独立执行同款rolling、完整复制0x2F node且只校验OnlyIdXor8；其 repair/backup 路径整块复制9扇区，不单独修改flag；ActiveNormalUDev/GetUpLoadInformation等已审上层无该byte值相关业务分支 | strict encrypted historical rolling-form样本的正式 reader view 本byte为0；authentic no-password gold SHA-256 `d6a935...` 为 physical wire=`00`、reader=`D9`，且 v19 official writer 以 producer node byte=0 精确重建整扇 | 生命周期按“producer-side zero + representation-dependent reader transform”闭合；COMPLETE 不意味着 reader 必为0，也不声称 v19 是该物理盘当年的 exact manufacturing EXE。exact provenance 仍属于 HSerial upstream 等其它字段的调查范围，不再构成本1B语义缺口 |
 | LBA4 | 0x047–0x1FB | COMPLETE | **unowned backing / representation carrier**；raw-preserve 与 rolling-transformed 两种 wire 表示 | Windows current `sub_10014550` 与 Linux `BuildSector4@diskfile.cpp:741` 都只拥有0x2F restore node。non-null node 分支随后把 rolling XOR 覆盖到 `+0x18..+0x1FF`，因此对这437B只是**可逆变换既有 backing**；Windows `arg0==NULL` 分支则完全跳过 node copy/rolling，对该区逐字节 preserve。两端都没有独立业务字段 store。隔离 Unicorn 直接执行 official Windows writer：预填437B=`0xA5` 时，full 分支 raw bytes改变但独立 rolling decode后437/437恢复 `0xA5`；NULL 分支437/437保持原始 `0xA5` | Windows `ReadSector4/sub_10015090` 与 Linux `ReadSector4@diskfile.cpp:957` 都会为 restore-node 识别需要而滚动处理整段，但最终只返回 `decoded+0x18` 的0x2F node并校验 `OnlyIdXor8`，不暴露/解释 `+0x47..+0x1FB`。同一 official Windows reader 对上述 nonzero-full fixture 动态执行成功，返回 main onlyid、LLGB、Version=1，而437B不进入输出 | strict 22份仍保留18份 raw-zero与4份 rolling-zero物理表示；新增 first-party virtual writer fixtures 又证明 backing 可合法为任意非零值并在 full/null 两分支分别“transform/preserve”。CI `official_virtual_lba4_backing_is_unowned_and_representation_only` 锁定非零正例 | 437B 的含义不是“应该为零但最初 producer 未找到”，而是**没有业务 payload 的 caller/existing backing**。其完整生命周期已由 preserve/可逆transform writer、negative semantic consumer、real双表示和任意非零 first-party 正例闭合；与 LBA5 opaque-preserve 区采用同一 COMPLETE 口径。历史 raw-zero 最初来源不再是语义 blocker，未来未知非零 backing 必须保留/变换而不得清洗 |
 | LBA4 | 0x1FC–0x1FF | COMPLETE | trailing LLGB | current writer 继续 rolling key schedule 写 LLGB | reader 作为尾锚点校验 | 22盘可验证 | 完成 |
 | LBA5 | 0x000–0x1FF | COMPLETE | opaque preserve / write-protection probe scratch sector | `CUsbRegsiter::RegsiterUsb` 先读取既有 LBA0–12；后续 builder 只重建其它明确扇区，LBA5 不被覆盖，最终随13扇区整体写回；即 producer 语义是 preserve existing bytes | 两版 `EdpDiskCtrl` 的唯一 `base+5` raw-sector consumer 都是：读取整扇→原样写回同一扇区→仅检查 `WriteFile` 是否以 `ERROR_WRITE_PROTECT(0x13)` 失败；`UserLogin` 据此进入只读使用状态，完全不解析内容 | 22/22原始参考整扇512B全零，SHA-256均为 `076a27c79e5ace2a3d47f9dd2e83e4ff6ea8872b3c2218f66c92b89b55f36560`；7份原始CI夹具继续锁定 | COMPLETE 表示“整区用途和无payload语义闭合”；全零只是当前实盘状态，不是协议规定，非零内容也应原样保留 |
@@ -722,11 +773,11 @@ DWARF 中恢复出的原始声明文件/行号与本地函数地址：
 | LBA9 | 0x184–0x187 | COMPLETE | minimum password length | writer限制6..19 | `ReadMinPassLenInfo` 返回该DWORD | 6/6=8 | 完成 |
 | LBA9 | 0x188–0x1FF | COMPLETE | **EPPE writer-owned zero tail** | PE机器码 `SetPassInfoEx/sub_1003ADD0`：先校验输入DWORD为6..19，再对 EPPE `+0x04..+0x7F` 124B整体清零，写 magic，随后明确 `EPPE+0x04=*arg0`；因此 `+0x08..+0x7F` 120B 在 current writer 中为显式零 | 正式注册侧 `CUsbRegsiter::GetPassInfoEx` 解密并校验 EPPE 后只执行 `*out = *(decoded+0x04)`；独立 `modfilesyscheck::ReadMinPassLenInfo` 同样只消费 magic/+0x04。两套 `EdpDiskCtrl` 虽保留可搬运完整0x80B的 `ReadPassExInfo/GetPassExInfo` compatibility helper，但其外层对象由唯一两个 DLL export（Create/Release）创建，current factory vtable `0x1008021c` 不包含该 helper，反编译交叉引用也仅见实现/相邻 thunk，未形成 current 产品语义消费路径 | 严格22份中6份EPPE；6/6 minPassLen=8 且解密后120B全零；CI门禁 `real_eppe_samples_keep_the_current_writer_zero_tail` | 120B 的 current producer、两个独立 semantic reader 的 negative consumer、当前公开接口边界与原始实盘均闭合，按 writer-owned zero region 升 COMPLETE。COMPLETE 不授权清洗未知历史非零 profile：兼容读取若未来遇到非零 tail 应保留/报告，而不是据此臆造业务字段 |
 | LBA9 | 0x080–0x0FF | PARTIAL | long-Dept continuation slot（current join=60 / CEMS2.0 legacy join=59） | Windows `BuildSector6/sub_10013FD0`、Linux `BuildSector6@0x1CAAC` 与 `vrvaud_c::sub_10118ED0` 三套 current producer一致：Dept长度>=64时在 LBA6+0写 `0x40245E2A + Dept前60B`，再把 `Dept[60..NUL]` 写入 LBA9+0x80；若未触发长Dept则该builder不覆盖此区。对本机 VRV 二进制按 `0x40245E2A` 做全量常量指纹后，producer 命中仅见 current `cemsusbregsiter.dll` / `vrvaud_c.dll`，且两者都复制60B；历史 v19.11.4.1 直接 LBA6 writer `fcn.10006370` 则完全没有 marker 分支 | current Windows `ReadSector6/sub_100152A0` 先从 marker 后复制完整 `0x3C=60B` inline prefix，再检查 `prefix[59]`：0时 continuation 接 Dept+59，非零时接 Dept+60。CEMS2.0 `cems/Edp/fileophook.dll` `fcn.10022f80@0x10022F80` 的 marker 分支在复制60B inline 后，无条件把0x80 continuation 写到目标 `+0x3B`；x64 build同构，PDB路径明确落在 `\\SVNRoot\\vrvrsms2.0\\Cems2.0\\trunk\\modCems\\Bin\\FileOpHook*.pdb`。因此这里闭合的是 **CEMS2.0 join59 reader only**，不能反推同代 writer | 严格22盘恰有8盘 marker+continuation：4盘 join=60、continuation含NUL共17B；4盘 join=59、continuation含NUL共18B；两组均重建为相同76B合法GBK Dept。CI `lba9_dept_continuation_preserves_both_official_reader_join_profiles` 锁定 inline[59]!=0 -> 60、inline[59]==0 -> 59 与两种真实profile | current producer、current自描述reader、CEMS2.0固定join59 reader及实盘均闭合；**all locally available marker writers use 60**，所以 exact blocker 进一步收缩为尚未取得的 CEMS2.0 同代 legacy join59 writer/profile-selection。128B继续PARTIAL |
-| LBA10 | 0x000–0x003 | PARTIAL | EESI magic | Set EESI writer已定位 | Get EESI reader已定位 | 指定金标中的19份唯一加密原盘与1份真实免密盘均未出现EESI | producer/consumer已闭合，但正向EESI捕获不在指定金标目录，缺金标正向实盘，保持PARTIAL |
-| LBA10 | 0x004–0x007 | PARTIAL | **UsbSuspensionWnd lifecycle/control flag** | 两套独立 `EdpEDisk.exe`（SHA-256 `cfa13177...` / `dc71c300...`）启动时都先将完整0x80B EESI缓冲清零并显式写 `+0x04=1` 后调用 vtable `+0x20 GetEdpEdiskSetInfo`；同两套程序的卷标设置对话框 `IDOK` handler zero-initializes the full 0x80B EESI payload，只填 `+0x08/+0x18` 两个卷标，再经 vtable `+0x24 SetEdpEdiskSetInfo` 保存，因此该 producer 路径明确写 `+0x04=0`；底层 setter 只强制 magic，其余DWORD原样落盘 | 两套程序均加载 `UsbSuspensionWnd.dll` 的 `Show/Destroy/SetParentWnd`：读回 EESI 后 `+0x04==0` 路径调用 `Destroy`；自动登录成功后 `+0x04!=0` 且 suspension-window helper 已初始化时，进入刷新/`Show` 链；`UserLogin` 自身不把该DWORD当卷标开关 | 指定金标无启用EESI的正向盘 | 4B边界、0/1官方 producer 与值相关 consumer 已闭合；缺金标正向实盘，保持PARTIAL |
-| LBA10 | 0x008–0x017 | PARTIAL | Share/type2 volume label | `SetEdpEdiskSetInfo` 原样复制调用者结构前0x80并加密写入；默认 reader 初始化为GBK“交换区” | `CEdpDiskControl::UserLogin` 将该槽赋给本地 string；type2分支传给 `SetVolumeLabelA` | 指定金标无启用EESI的正向盘 | 字段语义、writer、consumer已闭合，缺金标正向实盘 |
-| LBA10 | 0x018–0x027 | PARTIAL | Encrypt/type4 volume label | 同上；默认 reader 初始化为GBK“保密区” | `UserLogin` type4分支传给 `SetVolumeLabelA` | 指定金标无启用EESI的正向盘 | 字段语义、writer、consumer已闭合，缺金标正向实盘 |
-| LBA10 | 0x028–0x07F | PARTIAL | EESI caller-owned compatibility extension | 两个独立 EESI `EdpEDiskCtrl` build 的 Get/Set 证明完整0x80B structural round-trip；current official UI profile对这88B写零 | current callers不读取这88B；更老两代无EESI接口 | 指定金标无启用EESI的正向盘 | lifecycle已定位，但缺金标正向EESI实盘，88B保持PARTIAL |
+| LBA10 | 0x000–0x003 | COMPLETE | EESI magic | `SetEdpEdiskSetInfo` 强制写 `EESI` magic，并只加密/覆盖前0x80B | `GetEdpEdiskSetInfo` 解密前0x80B并首先校验 `EESI` | purpose-specific Netac pre-write physical capture SHA-256 `3c7e795b...` 在 `CRC32(device_id)=0x5088EE37` 下解出 `EESI`；19+1 general census 则保持 absent-zero profile | producer、reader、正向/缺省两类真实物理 profile 均闭合；purpose-specific capture 不参与 general census 计数 |
+| LBA10 | 0x004–0x007 | COMPLETE | **UsbSuspensionWnd lifecycle/control flag** | 两套独立 `EdpEDisk.exe`（SHA-256 `cfa13177...` / `dc71c300...`）启动时都先将完整0x80B EESI缓冲清零并显式写 `+0x04=1` 后调用 vtable `+0x20 GetEdpEdiskSetInfo`；同两套程序的卷标设置对话框 `IDOK` handler zero-initializes the full 0x80B EESI payload，只填 `+0x08/+0x18` 两个卷标，再经 vtable `+0x24 SetEdpEdiskSetInfo` 保存，因此该 producer 路径明确写 `+0x04=0`；底层 setter 只强制 magic，其余DWORD原样落盘 | 两套程序均加载 `UsbSuspensionWnd.dll` 的 `Show/Destroy/SetParentWnd`：读回 EESI 后 `+0x04==0` 路径调用 `Destroy`；自动登录成功后 `+0x04!=0` 且 suspension-window helper 已初始化时，进入刷新/`Show` 链；`UserLogin` 自身不把该DWORD当卷标开关 | provenance-audited Netac pre-write capture 解出 `+0x04=1`；general census 提供 absent-zero profile | 4B边界、0/1官方 producer、值相关 consumer 与正向物理值全部闭合 |
+| LBA10 | 0x008–0x017 | COMPLETE | Share/type2 volume label | `SetEdpEdiskSetInfo` 原样复制调用者结构前0x80并加密写入；默认 reader 初始化为GBK“交换区” | `CEdpDiskControl::UserLogin` 将该槽赋给本地 string；type2分支传给 `SetVolumeLabelA` | provenance-audited Netac pre-write capture 解出固定16B槽 `bdbbbbbbc7f8...` = GBK“交换区” | 16B边界、writer、业务 consumer 与正向真实盘值闭合 |
+| LBA10 | 0x018–0x027 | COMPLETE | Encrypt/type4 volume label | 同上；默认 reader 初始化为GBK“保密区” | `UserLogin` type4分支传给 `SetVolumeLabelA` | provenance-audited Netac pre-write capture 解出固定16B槽 `b1a3c3dcc7f8...` = GBK“保密区” | 16B边界、writer、业务 consumer 与正向真实盘值闭合 |
+| LBA10 | 0x028–0x07F | COMPLETE | EESI caller-owned compatibility extension | 两个独立 EESI `EdpEDiskCtrl` build 的 Get/Set 证明完整0x80B structural round-trip；current official UI profile对这88B写零 | current callers不读取这88B；更老两代无EESI接口 | provenance-audited Netac EESI-enabled capture与独立旧 SanDisk 正例均为88B全零 | 生命周期边界已闭合：caller可round-trip扩展字节，当前官方caller写零且业务consumer不解释；COMPLETE不表示未来扩展必须恒零 |
 | LBA10 | 0x080–0x1FF | COMPLETE | cross-generation unowned preserve/ignore physical tail | 两个独立 EESI build的setter只覆盖前0x80B并原样回写后0x180B；旧两代没有该tail producer | getter只解密/返回前0x80B，所有已审consumer均忽略后384B | 仓库现行20份唯一金标（19加密+1真实免密）均为384B零；官方writer的preserve行为独立闭合 | COMPLETE表示该384B不属于EESI payload且必须preserve，不表示协议要求恒零 |
 | LBA11 | 0x000–0x003 | COMPLETE | DRKB magic | `CDataSecrity::RandBuffer256` 先写 DRKB | `ReadSector11` 首先校验 DRKB | 22/22 | 完成 |
 | LBA11 | 0x004–0x0FF | COMPLETE | random252 | `RandBuffer256`: `srand(time(NULL)); rand()%255` 共252B | `DataEncrypt/DataDecrypt` 将整个 DRKB块纳入 CRC32 密钥输入 | 22/22；均无0xFF；7 CI夹具回归 | 每字节都是密钥扰动材料，来源和消费闭合 |
@@ -2649,11 +2700,15 @@ K0=`0xBFED`，两个 flag 位置的 rolling key byte 分别=`D4/D9`，因此 wir
 - `bDataToServer @ +0x45` 的 legacy official-reader 逻辑视图确有非零 `0B` profile，
   旧 producer 和最终业务 consumer仍缺，因此 **1B 继续 PARTIAL**；
 - `bConnetServer @ +0x46`：current Windows/Linux 与 v19.11.4.1 SAFE6 node constructor
-  都由 zero-init 保持该 byte=0，这是**限定到这些 writer family**的稳定结论；但真实免密
-  gold 的 exact producer 尚未定位，而官方 reader 对它明确返回 `D9`。旧“strict22 reader
-  22/22=0”只覆盖原始加密参考集，不能外推到 authentic no-password profile。因此本字节
-  从全局 COMPLETE **降回 PARTIAL**，直到取得该盘 exact writer/同盘 mirror 或其它能消除
-  representation 歧义的证据。
+  都由 zero-init 保持该 byte=0；historical rolling-form encrypted originals 的正式 reader
+  view 同样为0。更关键的是 `scripts/protocol/probe_lba4_v19_writer.py` 保留真实免密
+  SanDisk 的 second=`0x4A32BA39` 与 nonzero HSerial，只把 node flags 设为`00 00`，在
+  memory-backed I/O 中原生执行 v19 `fcn.10006090`，最终输出与真实 LBA4 **512/512
+  完全一致**、SHA-256=`c26628566108031f439f999a46858476414ec8e7d1030a8293c9df0c463ad5d8`，
+  且无 emulator exception。故 authentic reader=`D9` 已正向闭合为 post-XOR representation
+  artifact，而不是 nonzero producer flag。再结合 2021 historical repair 的整9扇区 raw-copy
+  行为与跨代 negative semantic consumer，本字节重新闭合为 **COMPLETE**。COMPLETE 不代表
+  reader 必为0，也不把 v19 虚拟重建冒充该物理盘 exact manufacturing provenance。
 
 ##### LBA4 `0x18..0x46` 官方结构与第二 ID
 
@@ -2900,6 +2955,31 @@ consumer 行为，而不是“consumer未知”。因此把这17B重新拆分：
   - 另外 2 份高熵 HSerial 样本同时是 LBA9 全零、LBA6 扩展区非零。
   这只能记为**格式/注册环境 profile 的相关性**，不能反推因果关系。
 
+本轮又把 `bDataToServer@+0x45` 的非零 reader profile 与这组代际指纹精确对齐：
+旧备份集中唯一 `reader=0B 00` 的样本就是 Aigo U335
+`rev_pmap / onlyid=1987718388`。独立按正式 rolling 算法解码得到
+`HSerialCRC[5]=B5FF9C55/B39DAB28/7E8F5D4A/9AC9605A/7AC6D637`、
+`MyHardinfo=8B4613F5`，physical flags=`64 7A`；同一份盘又是 LBA9 整扇全零、
+LBA6 扩展区非零，并且是严格参考中的唯一 CHS MBR profile。也就是说已观察到的
+`bDataToServer reader=0B` 不属于 14份固定 `1D29/7B/4DD/79/7C + SAPF` 主流 legacy
+代，而与**高熵 HSerial / zero-LBA9 / CHS** 的更老 profile 同现。这进一步缩窄了
+missing writer 的代际范围，但在取得那个 writer 前，仍禁止把 `0B` 自行解释成某个
+业务枚举值。
+
+同一物理 Aigo U335 / 同一 `onlyid=1987718388` 还有一份 2026-09-16 免密转换后快照。
+与 2026-08-27 原始加密备份逐扇区比较时，LBA0/LBA6/LBA7/LBA11/LBA12 均发生变化，
+但 **LBA4 512/512 byte 完全一致**（两份 LBA4 SHA-256 均为
+`aad70723b3c1...`）。因此 `reader=0B 00`、高熵 HSerial 和 `MyHardinfo=8B4613F5`
+都明确早于免密转换并被转换路径原样保留；不能再把这个 flag profile 解释为 nopwd 工具的
+派生结果。回归 `lba4_old_server_flag_profile_survives_nopwd_conversion_bit_exact` 固定该纵向证据。
+
+Linux DWARF 还把该 node 的静态使用面收窄：`LPEDP_PARTION_RESTORINFO_NODE`
+在 `libcemsfilesyscheck.so` 这个编译单元中只作为 `BuildSector4@diskfile.cpp:740` 与
+`ReadSector4@diskfile.cpp:956` 的参数出现；`ReadSector4` rolling 后只整体复制 0x2F node，
+随后唯一字段级判断是 `OnlyIdXor8`。所以该组件没有 `bDataToServer/bConnetServer` 的
+值相关业务消费者。这个 negative consumer 证据缩小了 `+0x045` 的缺口，但旧 `0B`
+producer 与其它上层组件是否消费它仍未取得，故状态继续 PARTIAL。
+
 
 本轮又对 committed Lexar + Netac A/B/C 四份固定-HSerial 原盘做跨字段负相关审计，
 把两个容易误连的候选关系明确排除：
@@ -2975,6 +3055,14 @@ consumer 行为，而不是“consumer未知”。因此把这17B重新拆分：
 - 2020 `BusManageImp::ActiveNormalUDev` 对这份 0x184-byte request 先整体
   `memset(0)`，只填 `request+0xD0` 起的 0x40-byte 字符串区；它不覆盖
   `+0x150..+0x160`，所以这条已取得 caller 路径**确定**向五个 HSerial DWORD 输入全零。
+- 继续穷举整个 2020 `busManage.dll` 后，这个负结论已从单一路径扩展到**全部已恢复
+  request constructor**：模块中只有 `fcn.10010020`、`fcn.100103B0`、
+  `fcn.10010580`、`fcn.10010730` 四处先对 0x184-byte request 完整 `memset(0)`；四个
+  函数逐指令扫描均没有访问 `request+0x150/+0x154/+0x158/+0x15C/+0x160`。由于
+  request 基址固定为 `EBP-0x190`，五个 HSerial 槽精确落在
+  `EBP-0x40/-0x3C/-0x38/-0x34/-0x30`，可以排除把其它栈局部变量误认成字段访问。
+  因而**这个 2020 BusManage 模块中不存在另一条隐藏构造路径会填入 strict legacy 的
+  非零 HSerial 五元组**；缺失 producer 必须是更早或不同的 caller。
 - `fcn.10008800` 从 `4*sectorSize` 连续读 `9*sectorSize`，即 LBA4-LBA12，
   再原样写到 **`disk_end-0x80000`**。该地址与 `fcn.1000DB90` 的第三 reader
   完全一致，所以这一候选是 LBA4-LBA12 的 512 KiB 盘尾镜像头，不是另一套 HSerial

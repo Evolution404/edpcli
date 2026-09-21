@@ -15,12 +15,18 @@ silent byte-accounting drift.
   branch, function address, or ABI field boundary.
 
 `evidence_manifest.tsv` records the concrete artifacts and anchors.  The
-`gold_samples.tsv` freezes the current gold population by source name,
-repository path, length and SHA-256.  The complete LBA0-LBA12 gold bytes are
-checked into `audit/protocol/gold/`, so the protocol census is reproducible
-from a clean clone without access to the capture workstation.  Host-local
-executable binaries are still identified by digest rather than copied into
-this repository.
+`gold_samples.tsv` freezes the current **general census** population by source
+name, repository path, length and SHA-256.  The complete LBA0-LBA12 census
+bytes are checked into `audit/protocol/gold/`, so that population is
+reproducible from a clean clone without access to the capture workstation.
+Host-local executable binaries are still identified by digest rather than
+copied into this repository.
+
+Purpose-specific physical positives that are needed to close one protocol
+profile without changing the general census live under
+`audit/protocol/physical-evidence/`.  They are manifest-tracked, committed by
+digest, and covered by focused regression tests, but they are deliberately not
+folded into `gold_samples.tsv` unless the general census policy itself changes.
 
 The baseline harness is intentionally fail-closed on population drift: a new
 non-`_nopwd_` backup is not silently included or ignored.  It must first be
@@ -28,13 +34,19 @@ reviewed and explicitly added to `gold_samples.tsv` with its digest.
 
 ## Gold data and provenance
 
-The only protocol gold byte set used by automated analysis is the checked-in
+The general-census protocol gold byte set is the checked-in
 `audit/protocol/gold/` tree:
 
 1. `audit/protocol/gold/strict-encrypted/`: exactly 19 unique 6656-byte
    original-generation real-device images.
 2. `audit/protocol/gold/authentic-nopwd/`: one 6656-byte authentic SanDisk
    Ultra no-password capture containing exactly LBA0-LBA12.
+
+A separate positive EESI-enabled Netac capture is kept under
+`audit/protocol/physical-evidence/eesi/`.  It is a field-scoped physical
+reference rather than a 21st census member; this distinction preserves the
+19+1 population used for cross-profile counts while allowing LBA10's enabled
+profile to satisfy the real-device evidence gate.
 
 Every manifest row must have a unique SHA-256. Repeated read-only captures
 whose full 6656-byte image is byte-for-byte identical are deliberately

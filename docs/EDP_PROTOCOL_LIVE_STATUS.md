@@ -7,12 +7,22 @@
 
 ## 严格进度
 
-- COMPLETE：5457 / 6656 B = 82.0%
-- PARTIAL：1199 B
+- COMPLETE：5586 / 6656 B = 83.9%
+- PARTIAL：1070 B
 - UNKNOWN：0 B
 - 本轮进入时仓库 HEAD：`63b76da1fed351f1e7bbe45f0f12f5c22765e3dc`
-- 本轮因真实免密 SanDisk flag 表示证据纠错，LBA4 `+0x046` 从 COMPLETE 降回
-  PARTIAL；LBA4 `0x020..0x033` 继续保持 PARTIAL。
+- 中途另一工作流先在 `1c281cb9bf4a9d92f8fc27198120d53db6466da9` 将真实免密 SanDisk
+  flag 表示歧义保守降级；本轮随后补齐 v19 historical writer 的 exact-512 virtual
+  reconstruction 与 2021 repair 边界证据，LBA4 `+0x046` 重新满足 COMPLETE 门禁。
+  LBA4 `0x020..0x033` 继续保持 PARTIAL。
+
+## 最新结论：LBA10 EESI 正向物理 profile 已闭环
+
+- 新增用途受限 physical evidence：`audit/protocol/physical-evidence/eesi/netac_onlydisk_20260804_lba0_12.bin`，完整6656B SHA-256=`3c7e795b1b7110e9866dd31f44ba6e7c5e02ff77a1f70a8b11fcdcaf181fbf39`；它不加入19+1 general census。
+- 原始 companion metadata 记录 `device_id=disk&ven_netac&prod_onlydisk&rev_0000`、CRC32=`5088ee37`、size=6656、MD5=`db17edf8246ad55e9800b36701afd8e4`。
+- 原采集工具 `make_big_boot.py` SHA-256=`d72f6fcd192e92e6423e3b078cffa46725d8e781cdbd48dfcdaa470b72d208bd`；其 `read_lba()` 使用 `O_RDONLY/pread`，`--apply` 主流程先 `backup()` 落盘13扇快照，之后才二次确认、unmount，并进入 `O_RDWR/pwrite`。因此该文件是这次操作的写前真实物理状态，不是修改器合成输出。
+- 对该完整捕获重放：`CRC32(device_id)=0x5088EE37`，LBA10 前0x80解密为 `EESI`、flag=1、GBK“交换区”、GBK“保密区”、后续88B全零；与独立旧 SanDisk EESI 正例一致。
+- `S-EESI-361018` 已经给出 magic、flag 0/1、两个卷标和88B caller-owned extension 的 producer/consumer 生命周期。补上允许的真实正向 physical profile 后，LBA10 `0x000..0x07F` 128B 从 PARTIAL 升为 COMPLETE；general 19+1 census 仍保持 LBA10 20/20 zero，不改变其它字段统计口径。
 
 ## 最新结论：LBA4 HSerial / HDSerial
 
@@ -76,7 +86,7 @@ join59样本与非零fragment样本不重合，因此历史writer四类指纹不
 LLGB、Version=1、sector tuple=`08 04 0C 01` 全部通过。旧 dec 文件的零 flags 来自
 逐字节 raw-zero 强制归零的错误 decoder，继续禁止作为独立证据。
 
-本轮新增两条关键闭环：
+本轮新增四条关键闭环：
 
 - v19.11.4.1 `CEMSUsbRegsiter.dll` SHA-256
   `584e591dc679a2dad2c6d15b4ea96f8be39ae40e7841e883ea9cbc2f35a89814` 的
@@ -86,18 +96,36 @@ LLGB、Version=1、sector tuple=`08 04 0C 01` 全部通过。旧 dec 文件的�
 - `scripts/protocol/probe_lba4_reader.py` 隔离执行 current official
   `ReadSector4@RVA 0x15090`，固定 current DLL hash 与 authentic gold hash，实际执行到
   `0x15295`、返回0、无 emulator exception，复现 wire=`0000` -> reader=`d4d9`。
-  onlyid 的 K0=`0xBFED`，两个位置的 rolling key byte 正好为 `D4/D9`。
+  onlyid 的 K0=`0xBFED`，两个位置的 rolling key byte正好为 `D4/D9`；
+- `scripts/protocol/probe_lba4_v19_writer.py` 固定 v19 DLL 与 authentic gold hash，保留
+  second=`0x4A32BA39` 和原20B nonzero HSerial，只把 node flags 设为 `0000`，把所有
+  PhysicalDrive I/O 重定向到内存后原生执行 `fcn.10006090@RVA 0x06090`。结果 `ret=1`、
+  无 emulator exception、唯一一次 LBA4 write=`offset 2048,size 512`，输出 SHA-256
+  `c26628566108031f439f999a46858476414ec8e7d1030a8293c9df0c463ad5d8` 与真实 SanDisk
+  LBA4 **512/512完全一致**；
+- historical `UDiskLabelRepair.dll` 2021-12-08 build，SHA-256
+  `f5e6ddbb4e3097c9968296b43627543ecacdc24b174e52f8f049b289d7264efc`：
+  `RepairSafe6Label@0x10008B20` / `RewriteSafe6BakLabel@0x100094E0` 只在 LBA4-LBA12
+  与 `disk_end-0x80000` 间整块复制9扇区；`fcn.10006DA0` 独立 reader 做完整 rolling、
+  copy 0x2F node、只校验 OnlyIdXor8，没有单独 patch flag 的路径。
 
 因此 `inspect` 已删除 `second==main && HSerial==0` 的 representation heuristic：
 `decoded` 始终保持官方 reader view，flag 字段同时展示 wire/reader，producer-side 值
-必须按 writer provenance 判断。current Windows/Linux 与 v19.11.4.1 SAFE6 writer 中
-`bConnetServer` producer-side=0 仍是稳定的**限定结论**；但 authentic no-password
-sample 的 exact producer、`disk_end-4 sectors`/`disk_end-0x80000` 同盘镜像和可能的
-历史免密/恢复路径尚缺，因此 `+0x046` 的跨 profile dormant-zero COMPLETE 已撤销。
+必须按 writer provenance 判断；**不会为了 COMPLETE 把 reader 的 D9 清成0**。
+`bConnetServer@+0x046` 现按 producer-side dormant-zero compatibility byte 重新闭合：
+current Windows/Linux 与 v19.11.4.1 direct producer 都保持 node+0x2E=0；historical
+rolling-form reader view 为0；真实免密 wire=00/reader=D9 又已由 v19 official writer
+以 producer-side zero 精确重建整扇；跨代 reader/restore 均无值相关业务分支。
+物理盘当年的 exact manufacturing EXE 仍未知，但这不再构成本1B语义缺口。
 
-已审 current `RegsiterUsb` 的 LBA4 写入只经过 BuildSector4；`UnRegsiterUsb` 的逐扇写回
-不含 LBA4，current repair 路径也未找到只改两个 flag byte 的证据。该假设对现行路径
-已排除，但未知 historical converter 仍不能凭空排除。完整证据见主文档第1.3节。
+新增纵向实盘约束：同一 Aigo U335 `onlyid=1987718388` 的原始加密备份与后续免密快照
+虽然 LBA0/6/7/11/12 已改变，但 LBA4 512/512 完全相同；因此该盘的 `reader=0B 00`、
+高熵 HSerial 和 MyHardinfo 都不是免密转换产生。Linux DWARF 同时证明 restore-node 指针
+在 `libcemsfilesyscheck.so` 内只进入 BuildSector4/ReadSector4，后者除 OnlyIdXor8 外无字段级
+判断；这进一步把 `+0x045` 缺口限定到更老 producer 和其它上层 consumer，状态仍为 PARTIAL。
+
+剩余 blocker 仍包括 HSerialCRC[5] 非零上游 producer、`bDataToServer@+0x045` 的历史
+非零 producer/最终 consumer，以及其它既有 PARTIAL 字节。完整证据见主文档第1.3节。
 
 ## 固定门禁
 

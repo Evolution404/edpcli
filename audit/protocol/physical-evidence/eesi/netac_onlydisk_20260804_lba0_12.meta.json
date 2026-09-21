@@ -1,0 +1,11 @@
+{
+  "disk": 4,
+  "device_id": "disk&ven_netac&prod_onlydisk&rev_0000",
+  "crc32": "5088ee37",
+  "backup": "LBA0-12 (13 sectors)",
+  "size": 6656,
+  "md5": "db17edf8246ad55e9800b36701afd8e4",
+  "time": "20260804_080927",
+  "lba0_part1_sectors": 20417,
+  "lba12_entry0_type": 1
+}

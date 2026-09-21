@@ -38,6 +38,13 @@ const SANDISK_DEVICE_ID: &str = "disk&ven_sandisk&prod_ultra_usb_3.0&rev_1.00";
 const NETAC_ONLYDISK_DEVICE_ID: &str = "disk&ven_netac&prod_onlydisk&rev_0000";
 const NETAC_ONLYDISK_LBA10_HEAD_HEX: &str =
     include_str!("fixtures/protocol_evidence/netac_onlydisk_20260804_lba10_head.hex");
+const NETAC_EESI_CAPTURE: &[u8; 6656] =
+    include_bytes!("../audit/protocol/physical-evidence/eesi/netac_onlydisk_20260804_lba0_12.bin");
+const NETAC_EESI_META: &str = include_str!(
+    "../audit/protocol/physical-evidence/eesi/netac_onlydisk_20260804_lba0_12.meta.json"
+);
+const NETAC_EESI_PROVENANCE: &str =
+    include_str!("../audit/protocol/physical-evidence/eesi/README.md");
 const SANDISK_AUTHENTIC_NOPASS_LBA7_HEX: &str =
     include_str!("fixtures/protocol_evidence/sandisk_ultra_authentic_no_password_lba7.hex");
 const SANDISK_AUTHENTIC_NOPASS_DEVICE_ID: &str = "disk&ven_sandisk&prod_ultra&rev_1.00";
@@ -1629,9 +1636,9 @@ fn lba4_strict_progress_matches_non_overlapping_detail_ranges() {
         owner.iter().all(Option::is_some),
         "LBA4 detail rows must cover all 512 bytes"
     );
-    assert_eq!((complete, partial), (486, 26));
+    assert_eq!((complete, partial), (487, 25));
     assert!(
-        trace.contains("| LBA4 | 486 | 26 | 0 | 94.9% |"),
+        trace.contains("| LBA4 | 487 | 25 | 0 | 95.1% |"),
         "STRICT_PROGRESS LBA4 summary drifted from byte-detail accounting"
     );
 }
@@ -2338,6 +2345,63 @@ fn lba4_server_flag_wire_representation_is_not_inferred_from_identity_shape() {
 
     assert!(current_style >= 2, "lost current-style zero wire flags");
     assert!(legacy_style >= 5, "lost legacy nonzero wire flag profiles");
+}
+
+#[test]
+fn lba4_nonzero_bdatatoserver_reader_profile_is_the_high_entropy_zero_lba9_generation() {
+    const AIGO_REV_PMAP: &str =
+        "disk4_245760000_vid3535_pid6300_disk&ven_aigo&prod_u335&rev_pmap_onlyid1987718388_20260827_191701.bin";
+
+    let image = load(AIGO_REV_PMAP);
+    let meta = parse_reference_backup_name(AIGO_REV_PMAP).expect("Aigo fixture metadata");
+    let bits = onlyid_bits(meta.onlyid.as_deref().expect("Aigo onlyid"));
+    let k0 = (bits & 0xffff) ^ (bits >> 16);
+    let raw4 = sector(&image, 4);
+    let mut decoded4 = raw4.to_vec();
+    decoded4[0x18..].copy_from_slice(&xor_rolling(&raw4[0x18..], k0));
+
+    assert_eq!(&raw4[0x45..0x47], &[0x64, 0x7a]);
+    assert_eq!(&decoded4[0x45..0x47], &[0x0b, 0x00]);
+    assert_eq!(
+        &decoded4[0x20..0x34],
+        &[
+            0x55, 0x9c, 0xff, 0xb5, 0x28, 0xab, 0x9d, 0xb3, 0x4a, 0x5d, 0x8f, 0x7e, 0x5a, 0x60,
+            0xc9, 0x9a, 0x37, 0xd6, 0xc6, 0x7a,
+        ],
+        "the reader=0B profile must retain the high-entropy HSerial generation"
+    );
+    assert_eq!(u32_le(&decoded4, 0x35), 0x8b46_13f5);
+    assert!(
+        sector(&image, 9).iter().all(|byte| *byte == 0),
+        "the same historical generation must retain the observed all-zero LBA9 profile"
+    );
+}
+
+#[test]
+fn lba4_old_server_flag_profile_survives_nopwd_conversion_bit_exact() {
+    const ORIGINAL: &str =
+        "disk4_245760000_vid3535_pid6300_disk&ven_aigo&prod_u335&rev_pmap_onlyid1987718388_20260827_191701.bin";
+    const NOPWD: &str =
+        "disk26_245760000_vid3535_pid6300_disk&ven_aigo&prod_u335&rev_pmap_onlyid1987718388_nopwd_20260916_233626.bin";
+
+    let original = load(ORIGINAL);
+    let nopwd = load(NOPWD);
+
+    assert_eq!(
+        sector(&original, 4),
+        sector(&nopwd, 4),
+        "no-password conversion must preserve the old LBA4 restore node bit-for-bit"
+    );
+    assert_ne!(
+        sector(&original, 0),
+        sector(&nopwd, 0),
+        "fixtures must remain distinct pre/post-conversion captures"
+    );
+    assert_ne!(
+        sector(&original, 12),
+        sector(&nopwd, 12),
+        "the no-password conversion must still show its expected metadata rewrite elsewhere"
+    );
 }
 
 #[test]
@@ -3419,13 +3483,28 @@ fn real_sandisk_lba10_contains_share_and_encrypt_volume_labels() {
 }
 
 #[test]
-fn historical_netac_lba10_confirms_the_same_eesi_head_and_zero_uninterpreted_payload() {
-    let cipher = decode_hex_fixture(NETAC_ONLYDISK_LBA10_HEAD_HEX);
-    assert_eq!(cipher.len(), 0x80);
+fn provenance_audited_netac_physical_capture_closes_the_enabled_eesi_profile() {
+    assert_eq!(NETAC_EESI_CAPTURE.len(), 13 * SECTOR);
+    assert_eq!(
+        sha256_hex(NETAC_EESI_CAPTURE),
+        "3c7e795b1b7110e9866dd31f44ba6e7c5e02ff77a1f70a8b11fcdcaf181fbf39"
+    );
+    assert!(NETAC_EESI_META.contains("disk&ven_netac&prod_onlydisk&rev_0000"));
+    assert!(NETAC_EESI_META.contains("\"crc32\": \"5088ee37\""));
+    assert!(NETAC_EESI_META.contains("\"backup\": \"LBA0-12 (13 sectors)\""));
+    assert!(NETAC_EESI_META.contains("\"md5\": \"db17edf8246ad55e9800b36701afd8e4\""));
+    assert!(NETAC_EESI_PROVENANCE.contains("O_RDONLY"));
+    assert!(NETAC_EESI_PROVENANCE.contains("before the second `YES` confirmation"));
+    assert!(NETAC_EESI_PROVENANCE
+        .contains("d72f6fcd192e92e6423e3b078cffa46725d8e781cdbd48dfcdaa470b72d208bd"));
+
+    let fixture_head = decode_hex_fixture(NETAC_ONLYDISK_LBA10_HEAD_HEX);
+    let physical_lba10 = sector(NETAC_EESI_CAPTURE, 10);
+    assert_eq!(&physical_lba10[..0x80], fixture_head.as_slice());
 
     let crc = crc32_bare(NETAC_ONLYDISK_DEVICE_ID.as_bytes());
     assert_eq!(crc, 0x5088_ee37);
-    let plain = a6b0_full(&cipher, &crc.to_le_bytes(), 0);
+    let plain = a6b0_full(&physical_lba10[..0x80], &crc.to_le_bytes(), 0);
 
     assert_eq!(&plain[..4], b"EESI");
     assert_eq!(u32_le(&plain, 0x04), 1);
@@ -3439,7 +3518,11 @@ fn historical_netac_lba10_confirms_the_same_eesi_head_and_zero_uninterpreted_pay
     );
     assert!(
         plain[0x28..0x80].iter().all(|byte| *byte == 0),
-        "the historical Netac EESI capture must retain the observed zero +0x28..+0x7f payload"
+        "the physical Netac EESI capture must retain the observed zero +0x28..+0x7f extension"
+    );
+    assert!(
+        physical_lba10[0x80..].iter().all(|byte| *byte == 0),
+        "the physical Netac EESI capture currently has a zero preserved tail"
     );
 }
 
