@@ -89,11 +89,11 @@ fn strict_progress_covers_exactly_lba0_through_lba12() {
     );
     assert_eq!(complete + partial + unknown, 13 * 512);
     assert!(
-        complete >= 5458,
+        complete >= 5586,
         "strict COMPLETE coverage regressed below the corrected audited baseline: {complete}"
     );
     assert!(
-        partial <= 1198,
+        partial <= 1070,
         "PARTIAL coverage regressed above the corrected audited baseline: {partial}"
     );
     assert_eq!(
@@ -101,8 +101,8 @@ fn strict_progress_covers_exactly_lba0_through_lba12() {
         "all LBA0..12 bytes are at least PARTIAL after the completed UNKNOWN audit"
     );
     assert!(
-        DOC.contains("COMPLETE：5458B / 6656B = 82.0%")
-            && DOC.contains("PARTIAL：1198B / 6656B = 18.0%"),
+        DOC.contains("COMPLETE：5586B / 6656B = 83.9%")
+            && DOC.contains("PARTIAL：1070B / 6656B = 16.1%"),
         "displayed global totals must match the corrected strict-progress ledger"
     );
 }
@@ -211,8 +211,18 @@ fn documentation_keeps_the_official_provisioning_chain_and_strict_rules() {
         "raw-zero/full-rolling 物理表示与 current/legacy identity 不是同一个维度",
         "85141be31933e89976970ac18f44e1da8b77d3f57fdae1d857f8ea9d19a007ec",
         "legacy MBR partition-table fragment",
+        "fcn.10006370",
+        "排除 v19.11.4.1 作为 nonzero snapshot producer",
+        "fcn.10022f80@0x10022F80",
+        "CEMS2.0 join59 reader only",
+        "all locally available marker writers use 60",
         "LBA4 current writer machine-code node layout",
         "LBA4.MyHardinfo == LBA8.HDSerialInfo",
+        "historical restore-node reader/activation consumer",
+        "ISUdiskRegsiterObj::virtual_8@0x1000B9C0",
+        "request+0x150..+0x160",
+        "ReadUsbHserialsInfo",
+        "RestoreRegsiterUsb",
         "fixed restore-node `SingleUsbFlg` metadata",
         "fixed restore-node `NewLabFlag = LLGB`",
         "fixed restore-node `Version = 1`",
@@ -275,6 +285,9 @@ fn documentation_keeps_the_official_provisioning_chain_and_strict_rules() {
         "禁止把免密转换盘",
         "/Users/zhangyuxi/.edpcli-backup",
         "/Users/zhangyuxi/Desktop/u_disk/analyze/disk_data/no_password_disk4",
+        "analyze/last/three_disks/disk3/raw/front_LBA0_12.bin",
+        "764fc0bbbdf5a9980498d710cb90bce3f8b623f66dec07cb580debc4869538b4",
+        "os.open(dev, os.O_RDONLY)",
         "edpcli 自制免密盘，只能用于产品回归，**没有协议参考价值**",
     ] {
         assert!(
@@ -315,8 +328,8 @@ fn documentation_keeps_the_official_provisioning_chain_and_strict_rules() {
         "LBA9 progress must retain the closed EETU reverse backing and EPPE writer-owned zero tail semantics"
     );
     assert!(
-        DOC.contains("| LBA10 | 384 | 128 | 0 | 75.0% |"),
-        "LBA10 active EESI bytes must remain PARTIAL until a positive sample exists in the designated gold directories"
+        DOC.contains("| LBA10 | 512 | 0 | 0 | 100.0% |"),
+        "LBA10 must be fully closed once the read-only SanDisk EESI gold capture is pinned"
     );
     assert!(
         DOC.contains("| LBA12 | 512 | 0 | 0 | 100.0% |"),
