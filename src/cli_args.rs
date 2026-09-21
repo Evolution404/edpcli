@@ -135,7 +135,7 @@ fn print_topic_help(topic: &str) {
         }
         "inspect" => {
             println!("{}", bold("用法: edpcli inspect [备份.bin] [--disk N] [--lba 6,7,12] [--hex|--raw] [--export DIR]"));
-            println!("LBA 必须通过 --lba 显式指定；不指定时显示 LBA0-13 概览。");
+            println!("LBA 必须通过 --lba 显式指定；不指定时显示 LBA0-12 概览。");
         }
         "backup" => {
             println!("{}", bold("用法: edpcli backup [动作] [选项]"));
@@ -215,15 +215,15 @@ fn parse_lbas(s: &str) -> Result<Vec<u32>, String> {
     for token in s.split(',') {
         if token.is_empty() || !token.bytes().all(|b| b.is_ascii_digit()) {
             return Err(format!(
-                "错误: --lba 仅接受 0-13 的逗号分隔列表, 得到 {}",
+                "错误: --lba 仅接受 0-12 的逗号分隔列表, 得到 {}",
                 s
             ));
         }
         let lba = token
             .parse::<u32>()
-            .map_err(|_| format!("错误: inspect LBA 仅支持 0-13, 得到 {}", token))?;
-        if lba > 13 {
-            return Err(format!("错误: inspect LBA 仅支持 0-13, 得到 {}", token));
+            .map_err(|_| format!("错误: inspect LBA 仅支持 0-12, 得到 {}", token))?;
+        if lba > crate::common::METADATA_LAST_LBA {
+            return Err(format!("错误: inspect LBA 仅支持 0-12, 得到 {}", token));
         }
         if !out.contains(&lba) {
             out.push(lba);

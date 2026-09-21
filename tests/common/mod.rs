@@ -49,9 +49,11 @@ pub fn neg_id_bin() -> Option<PathBuf> {
     p.exists().then_some(p)
 }
 
-/// 整份 14 扇备份 → 一张"盘"的 LBA0-13 镜像。
+/// 读取历史夹具时只取协议有效的 LBA0-12；v2.2.0 旧夹具若含 LBA13 则忽略尾扇区。
 pub fn load_disk_image(key: &str) -> Option<Vec<u8>> {
-    fs::read(fixture_bin(key)?).ok()
+    let mut data = fs::read(fixture_bin(key)?).ok()?;
+    data.truncate(edpcli::common::METADATA_IMAGE_LEN);
+    (data.len() == edpcli::common::METADATA_IMAGE_LEN).then_some(data)
 }
 
 pub fn read_fn_of(

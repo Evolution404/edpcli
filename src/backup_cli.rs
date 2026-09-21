@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 
 use crate::backup_catalog;
 use crate::cli::Prompter;
-use crate::common::{EXIT_BACKUP, EXIT_CANCELLED, EXIT_OK, SECTOR};
+use crate::common::{EXIT_BACKUP, EXIT_CANCELLED, EXIT_OK, METADATA_IMAGE_LEN, SECTOR};
 use crate::diskio::{self, BackupEntry, BackupMeta, Md5Status};
 use crate::metainfo;
 
@@ -54,7 +54,7 @@ fn backup_kind(entry: &BackupEntry) -> &'static str {
 
 fn backup_health(entry: &BackupEntry) -> String {
     if !entry.size_ok {
-        return crate::ui::red(&format!("大小 ✗ (应为 {}B)", 14 * SECTOR));
+        return crate::ui::red(&format!("大小 ✗ (应为 {}B)", METADATA_IMAGE_LEN));
     }
     match entry.md5_ok {
         Md5Status::Ok => crate::ui::green("MD5 ✓"),

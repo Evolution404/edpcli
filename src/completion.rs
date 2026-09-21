@@ -1,6 +1,6 @@
 //! Shell Tab 补全脚本与动态候选提供器。
 //!
-//! v2 只动态提供物理盘、全局备份编号、备份文件名与 LBA0-13。用户级 onlyid/index
+//! v2 只动态提供物理盘、全局备份编号、备份文件名与 LBA0-12。用户级 onlyid/index
 //! 已退出 CLI grammar，补全层不得重新暴露。
 
 use crate::diskio;
@@ -47,7 +47,9 @@ pub fn dynamic_values(
             .into_iter()
             .map(|disk| crate::platform::disk_selector_value(disk.n))
             .collect(),
-        "lba" => (0..14).map(|n| n.to_string()).collect(),
+        "lba" => (0..crate::common::METADATA_SECTOR_COUNT)
+            .map(|n| n.to_string())
+            .collect(),
         _ => vec![],
     }
 }

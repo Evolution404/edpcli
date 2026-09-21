@@ -7,7 +7,9 @@ use std::collections::BTreeMap;
 use std::fs;
 
 use common::*;
-use edpcli::common::{EXIT_INTERMEDIATE, EXIT_ROLLED_BACK, SECTOR};
+use edpcli::common::{
+    EXIT_INTERMEDIATE, EXIT_ROLLED_BACK, METADATA_IMAGE_LEN, METADATA_LAST_LBA, SECTOR,
+};
 use edpcli::diskio::{atomic_write_sectors, pwrite_loop, FileDev, SectorDev};
 
 struct Image {
@@ -270,21 +272,21 @@ fn rejects_non_sector_sized_patch_before_any_write() {
 fn rejects_patch_outside_metadata_lba_range_before_any_write() {
     let tmp = TmpDir::new("atomic_lba_range");
     let path = tmp.0.join("disk.img");
-    let base = vec![0u8; 15 * SECTOR];
+    let base = vec![0u8; METADATA_IMAGE_LEN + SECTOR];
     fs::write(&path, &base).unwrap();
     let mut malformed = BTreeMap::new();
-    malformed.insert(14u32, vec![0xAA; SECTOR]);
+    malformed.insert(METADATA_LAST_LBA + 1, vec![0xAA; SECTOR]);
     let mut dev =
         FileDev::open_rdwr(path.to_str().unwrap(), std::time::Duration::from_secs(1)).unwrap();
 
     let e = atomic_write_sectors(&mut dev, &malformed).unwrap_err();
     assert_eq!(e.code, edpcli::common::EXIT_IO, "{}", e.msg);
     assert!(
-        e.msg.contains("0-13") || e.msg.contains("LBA14"),
+        e.msg.contains("0-12") || e.msg.contains(&(METADATA_LAST_LBA + 1).to_string()),
         "{}",
         e.msg
     );
-    assert_eq!(img_bytes(&path), base, "LBA0-13 之外必须在第一笔写入前拒绝");
+    assert_eq!(img_bytes(&path), base, "LBA0-12 之外必须在第一笔写入前拒绝");
 }
 
 #[test]
@@ -292,7 +294,7 @@ fn pwrite_loop_handles_short_writes() {
     // 每次只写一半: 循环必须把 512B 写满(Python TestPwriteFull 等价)
     let tmp = TmpDir::new("pwrite");
     let p = tmp.0.join("x.bin");
-    fs::write(&p, vec![0u8; 14 * SECTOR]).unwrap();
+    fs::write(&p, vec![0u8; METADATA_IMAGE_LEN]).unwrap();
     {
         use std::fs::OpenOptions;
         use std::io::{Seek, SeekFrom, Write};
