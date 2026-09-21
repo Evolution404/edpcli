@@ -58,8 +58,8 @@ fn protocol_analysis_has_one_canonical_document() {
 fn protocol_live_status_tracks_strict_baseline_without_becoming_a_second_ledger() {
     assert!(Path::new("docs/EDP_PROTOCOL_LIVE_STATUS.md").is_file());
     for required in [
-        "5458 / 6656 B = 82.0%",
-        "PARTIAL：1198 B",
+        "5457 / 6656 B = 82.0%",
+        "PARTIAL：1199 B",
         "LBA4 `0x020..0x033` 继续保持 PARTIAL",
         "ReadUsbHserialsInfo",
         "0x1019DB54",
@@ -114,11 +114,11 @@ fn strict_progress_covers_exactly_lba0_through_lba12() {
     );
     assert_eq!(complete + partial + unknown, 13 * 512);
     assert!(
-        complete >= 5458,
+        complete >= 5457,
         "strict COMPLETE coverage regressed below the corrected audited baseline: {complete}"
     );
     assert!(
-        partial <= 1198,
+        partial <= 1199,
         "PARTIAL coverage regressed above the corrected audited baseline: {partial}"
     );
     assert_eq!(
@@ -126,8 +126,8 @@ fn strict_progress_covers_exactly_lba0_through_lba12() {
         "all LBA0..12 bytes are at least PARTIAL after the completed UNKNOWN audit"
     );
     assert!(
-        DOC.contains("COMPLETE：5458B / 6656B = 82.0%")
-            && DOC.contains("PARTIAL：1198B / 6656B = 18.0%"),
+        DOC.contains("COMPLETE：5457B / 6656B = 82.0%")
+            && DOC.contains("PARTIAL：1199B / 6656B = 18.0%"),
         "displayed global totals must match the corrected strict-progress ledger"
     );
 }
@@ -335,7 +335,7 @@ fn documentation_keeps_the_official_provisioning_chain_and_strict_rules() {
         "LBA2 must retain the closed entry0 and unused-entry residual semantics"
     );
     assert!(
-        DOC.contains("| LBA4 | 487 | 25 | 0 | 95.1% |"),
+        DOC.contains("| LBA4 | 486 | 26 | 0 | 94.9% |"),
         "LBA4 progress must retain the closed backup-key seed and restore-node backing semantics"
     );
     assert!(

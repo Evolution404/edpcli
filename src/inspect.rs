@@ -358,26 +358,15 @@ fn decode_lba4(raw: &[u8]) -> Option<(Vec<u8>, u32, String, u32, usize, usize)> 
         if raw.len() >= 0x1fc && raw[0x47..0x1fc].iter().all(|byte| *byte == 0) {
             dec[0x47..0x1fc].fill(0);
         }
-        // Current SAFE6 BuildSector4 in both the official Windows and Linux
-        // implementations performs two byte stores *after* the rolling-XOR
-        // loop:
-        //   wire[0x45] = restore_node.bDataToServer
-        //   wire[0x46] = restore_node.bConnetServer
-        // ReadSector4 itself does not compensate for that exception.  Older
-        // restore-node profiles in the real-device set predate this wire rule:
-        // their +0x45/+0x46 bytes are ordinary rolling ciphertext.  The
-        // current writer profile is independently identified by the node
-        // identity shape that is already locked by the protocol audit:
-        // OnllyID2Nd mirrors the main onlyid and HSerialCRC[5] is all zero.
-        let current_post_xor_flags = raw.len() > 0x46
-            && u32_at(&dec, 0x1c) == Some(serial)
-            && dec
-                .get(0x20..0x34)
-                .is_some_and(|hserial| hserial.iter().all(|byte| *byte == 0));
-        if current_post_xor_flags {
-            dec[0x45] = raw[0x45];
-            dec[0x46] = raw[0x46];
-        }
+        // Keep `decoded` equal to the official ReadSector4 rolling-reader view.
+        // Multiple writer generations are now proven to use different wire
+        // representations for +0x45/+0x46, and the representation cannot be
+        // inferred from OnllyID2Nd/HSerial identity shape alone.  In
+        // particular, v19.11.4.1 also performs post-XOR flag stores while its
+        // restore node can carry a non-mirrored second ID and HSerial material.
+        // Callers that need producer semantics must therefore inspect both the
+        // physical wire bytes and the reader view instead of silently replacing
+        // either one here.
     }
     Some((dec, serial, text, k0, hs, he))
 }
@@ -990,18 +979,24 @@ pub fn analyze_sector(lba: u32, raw: &[u8], meta: &InspectMeta) -> SectorView {
                     0x45,
                     0x46,
                     "bDataToServer",
-                    format!("0x{:02X}", decoded[0x45]),
+                    format!(
+                        "reader=0x{:02X}; wire=0x{:02X}; producer=需按 writer 判定",
+                        decoded[0x45], raw[0x45]
+                    ),
                     FieldStyle::Flag,
                 ));
                 fields.push(field(
                     0x46,
                     0x47,
                     "bConnetServer",
-                    format!("0x{:02X}", decoded[0x46]),
+                    format!(
+                        "reader=0x{:02X}; wire=0x{:02X}; producer=需按 writer 判定",
+                        decoded[0x46], raw[0x46]
+                    ),
                     FieldStyle::Flag,
                 ));
                 notes.push(
-                    "LBA4 的 0x18..0x1FF 按 labelOnlyId 派生 K0 做 rolling XOR；历史 raw-zero extension 作为区域级兼容形态保留。官方 current Windows/Linux BuildSector4 在 rolling 完成后又把 +0x45 bDataToServer / +0x46 bConnetServer 以明文字节覆盖到盘面，而 ReadSector4 本身不会补偿。inspect 仅在 current restore profile（OnllyID2Nd=main onlyid 且 HSerialCRC[5]=0）恢复这两个物理字节；legacy profile 保留官方 rolling reader 视图。"
+                    "LBA4 的 0x18..0x1FF 按 labelOnlyId 派生 K0 做 rolling XOR；历史 raw-zero extension 仅按整段兼容形态处理。官方 current Windows/Linux BuildSector4 与历史 Windows v19.11.4.1 LBA4 writer 都会在 rolling 完成后把 +0x45 bDataToServer / +0x46 bConnetServer 再覆盖到盘面，而 ReadSector4 不补偿这两个 post-XOR store；另一方面，部分更早实盘的 wire bytes 又符合普通 rolling 表示。OnllyID2Nd/HSerial 身份形态已被证明不能判定 wire 表示，因此 inspect 的 decoded 始终保持官方 rolling-reader 视图，并在字段值中同时显示 wire byte；producer-side 值必须结合 writer provenance 判定。"
                         .into(),
                 );
                 format!("XOR K0=0x{k0:04X} from labelOnlyId={serial_text}")

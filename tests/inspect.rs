@@ -166,7 +166,7 @@ fn lba4_zero_ciphertext_byte_is_decrypted_unless_whole_short_gap_is_unwritten() 
 }
 
 #[test]
-fn lba4_server_flags_are_restored_from_post_xor_wire_bytes() {
+fn lba4_post_xor_wire_flags_do_not_override_official_reader_view() {
     let onlyid = 1_402_259_934u32;
     let k0 = (onlyid & 0xffff) ^ (onlyid >> 16);
     let mut plain = vec![0u8; 512];
@@ -190,13 +190,18 @@ fn lba4_server_flags_are_restored_from_post_xor_wire_bytes() {
     assert_ne!(&generic[0x2d..0x2f], &[0xaf, 0x36]);
 
     let view = analyze_sector(4, &raw, &InspectMeta::default());
-    assert_eq!(&view.decoded[0x45..0x47], &[0xaf, 0x36]);
+    assert_eq!(&view.decoded[0x45..0x47], &generic[0x2d..0x2f]);
     assert_eq!(&view.decoded[0x39..0x3d], b"LLGB");
     assert_eq!(&view.decoded[0x1fc..0x200], b"LLGB");
+    assert!(view.fields.iter().any(|field| {
+        field.label == "bDataToServer"
+            && field.value.contains("wire=0xAF")
+            && field.value.contains("producer=需按 writer 判定")
+    }));
 }
 
 #[test]
-fn lba4_current_restore_profile_restores_post_xor_server_flags() {
+fn lba4_current_identity_shape_does_not_reclassify_post_xor_flags() {
     let onlyid = 1_402_259_934u32;
     let k0 = (onlyid & 0xffff) ^ (onlyid >> 16);
     let mut plain = vec![0u8; 512];
@@ -221,7 +226,7 @@ fn lba4_current_restore_profile_restores_post_xor_server_flags() {
     assert_ne!(&generic[0x2d..0x2f], &[0, 0]);
 
     let view = analyze_sector(4, &raw, &InspectMeta::default());
-    assert_eq!(&view.decoded[0x45..0x47], &[0, 0]);
+    assert_eq!(&view.decoded[0x45..0x47], &generic[0x2d..0x2f]);
     assert_eq!(&view.decoded[0x39..0x3d], b"LLGB");
     assert_eq!(&view.decoded[0x1fc..0x200], b"LLGB");
     assert!(raw[0x47..0x1fc].iter().any(|byte| *byte != 0));
@@ -233,23 +238,24 @@ fn lba4_legacy_restore_profile_keeps_rolling_decoded_server_flags() {
     let meta = meta_for("netac");
     let raw = &data[4 * 512..5 * 512];
 
-    // This committed original fixture is a legacy restore-node profile:
+    // This committed original fixture has a legacy-identity restore node:
     // OnllyID2Nd does not mirror the main onlyid and HSerialCRC[5] is non-zero.
-    // Its physical +0x45/+0x46 bytes are rolling ciphertext, not current-style
-    // post-XOR clear server flags. The historical ReadSector4 view is 00 00.
+    // Its physical +0x45/+0x46 bytes produce a 00 00 historical ReadSector4
+    // view. The exact earlier writer remains unknown, so the fixture proves a
+    // rolling-representation observation, not an identity-based classifier.
     assert_eq!(&raw[0x45..0x47], &[0xaf, 0x36]);
 
     let view = analyze_sector(4, raw, &meta);
     assert_ne!(
         u32::from_le_bytes(view.decoded[0x1c..0x20].try_into().unwrap()),
         1_402_259_934u32,
-        "fixture unexpectedly stopped exercising the legacy restore-node profile"
+        "fixture unexpectedly stopped exercising the legacy-identity restore node"
     );
     assert!(view.decoded[0x20..0x34].iter().any(|byte| *byte != 0));
     assert_eq!(
         &view.decoded[0x45..0x47],
         &[0, 0],
-        "legacy restore-node server flags must remain rolling-decoded"
+        "inspect must remain equal to the official rolling-reader view"
     );
 }
 

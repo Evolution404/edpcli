@@ -129,6 +129,16 @@ fn authentic_nopwd_lba4_flags_require_a_separate_representation_audit() {
     // profile. Neither it nor the wire zeros prove producer-side flag values.
     let view = analyze_sector(4, raw, &InspectMeta::default());
     assert_eq!(&view.decoded[0x45..0x47], &[0xd4, 0xd9]);
+    assert!(view.fields.iter().any(|field| {
+        field.label == "bDataToServer"
+            && field.value.contains("reader=0xD4")
+            && field.value.contains("wire=0x00")
+    }));
+    assert!(view.fields.iter().any(|field| {
+        field.label == "bConnetServer"
+            && field.value.contains("reader=0xD9")
+            && field.value.contains("wire=0x00")
+    }));
     // An older decoder zeroed every raw-zero byte independently; that even
     // erased the B of LLGB, so its derived dec/ files are not counterevidence.
     assert_eq!(raw[0x3c], 0);

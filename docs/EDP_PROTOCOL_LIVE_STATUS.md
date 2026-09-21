@@ -7,11 +7,12 @@
 
 ## 严格进度
 
-- COMPLETE：5458 / 6656 B = 82.0%
-- PARTIAL：1198 B
+- COMPLETE：5457 / 6656 B = 82.0%
+- PARTIAL：1199 B
 - UNKNOWN：0 B
-- 本轮进入时仓库 HEAD：`43c7227c6e9952fe52559c3d963173f0d0279a20`
-- 本轮没有增加 COMPLETE 字节；LBA4 `0x020..0x033` 继续保持 PARTIAL。
+- 本轮进入时仓库 HEAD：`63b76da1fed351f1e7bbe45f0f12f5c22765e3dc`
+- 本轮因真实免密 SanDisk flag 表示证据纠错，LBA4 `+0x046` 从 COMPLETE 降回
+  PARTIAL；LBA4 `0x020..0x033` 继续保持 PARTIAL。
 
 ## 最新结论：LBA4 HSerial / HDSerial
 
@@ -63,21 +64,40 @@ join59 reader 与同代 writer ABI，寻找能够实际生成 Dept[59] 拼接形
 “取得独立的同代 `safeudisklabeltool/cemsusbregsiter` writer，并直接看到 Dept[59] 被置 NUL、
 continuation 从 Dept[59] 开始的 producer/选择条件”。没有该 writer 前不得增加 COMPLETE。
 
-## 新增金标交叉复核：下一步优先检查 LBA4 flag 表示
+## 最新结论：真实免密 SanDisk 的 LBA4 flag 表示
 
 `tests/protocol_gold_crosscheck.rs` 对当前19份加密金标重算：HSerial=6份零、12份
 固定tuple、1份其它非零；Dept=12短/3 join59/4 join60；非零MBR fragment只有1份。
 join59样本与非零fragment样本不重合，因此历史writer四类指纹不能作为必须同时命中的
 筛选条件；这也不证明它们一定来自不同writer。
 
-真实免密SanDisk完整金标的LBA4发现待解释分叉：main=`794661040`，second不同、
-HSerial非零，但物理flags=`00 00`，官方rolling-reader视图和当前inspect为`D4 D9`。
-guard、LLGB、Version、sector tuple均正确，源raw与checked-in捕获一致。旧dec文件的
-零flags来自逐字节raw-zero强制归零的错误decoder，不能用于解释该profile。
+真实免密 SanDisk 完整金标 LBA4：main=`794661040`，second=`0x4A32BA39`、HSerial非零，
+物理 flags=`00 00`，current official `ReadSector4` rolling-reader view=`D4 D9`；guard、
+LLGB、Version=1、sector tuple=`08 04 0C 01` 全部通过。旧 dec 文件的零 flags 来自
+逐字节 raw-zero 强制归零的错误 decoder，继续禁止作为独立证据。
 
-下一步优先确认这个profile的writer/post-XOR或后续修改路径，再复核LBA4+0x046
-dormant-zero COMPLETE的适用范围。5458B保留为待复核基线，不能将该基线理解为此
-新增profile已闭合。完整证据见主文档第1.3节；不得凭物理零值直接修正inspect。
+本轮新增两条关键闭环：
+
+- v19.11.4.1 `CEMSUsbRegsiter.dll` SHA-256
+  `584e591dc679a2dad2c6d15b4ea96f8be39ae40e7841e883ea9cbc2f35a89814` 的
+  `fcn.10006090` 在 rolling 后于 `0x10006249..0x10006257` 同样执行
+  `node+0x2D/+0x2E -> physical+0x45/+0x46`。其 SAFE6 node 同时允许从 request/object
+  注入 nonzero HSerial，所以 **legacy identity 不能再作为 rolling-wire flag 的判据**；
+- `scripts/protocol/probe_lba4_reader.py` 隔离执行 current official
+  `ReadSector4@RVA 0x15090`，固定 current DLL hash 与 authentic gold hash，实际执行到
+  `0x15295`、返回0、无 emulator exception，复现 wire=`0000` -> reader=`d4d9`。
+  onlyid 的 K0=`0xBFED`，两个位置的 rolling key byte 正好为 `D4/D9`。
+
+因此 `inspect` 已删除 `second==main && HSerial==0` 的 representation heuristic：
+`decoded` 始终保持官方 reader view，flag 字段同时展示 wire/reader，producer-side 值
+必须按 writer provenance 判断。current Windows/Linux 与 v19.11.4.1 SAFE6 writer 中
+`bConnetServer` producer-side=0 仍是稳定的**限定结论**；但 authentic no-password
+sample 的 exact producer、`disk_end-4 sectors`/`disk_end-0x80000` 同盘镜像和可能的
+历史免密/恢复路径尚缺，因此 `+0x046` 的跨 profile dormant-zero COMPLETE 已撤销。
+
+已审 current `RegsiterUsb` 的 LBA4 写入只经过 BuildSector4；`UnRegsiterUsb` 的逐扇写回
+不含 LBA4，current repair 路径也未找到只改两个 flag byte 的证据。该假设对现行路径
+已排除，但未知 historical converter 仍不能凭空排除。完整证据见主文档第1.3节。
 
 ## 固定门禁
 

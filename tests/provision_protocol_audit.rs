@@ -1629,9 +1629,9 @@ fn lba4_strict_progress_matches_non_overlapping_detail_ranges() {
         owner.iter().all(Option::is_some),
         "LBA4 detail rows must cover all 512 bytes"
     );
-    assert_eq!((complete, partial), (487, 25));
+    assert_eq!((complete, partial), (486, 26));
     assert!(
-        trace.contains("| LBA4 | 487 | 25 | 0 | 95.1% |"),
+        trace.contains("| LBA4 | 486 | 26 | 0 | 94.9% |"),
         "STRICT_PROGRESS LBA4 summary drifted from byte-detail accounting"
     );
 }
@@ -2287,7 +2287,7 @@ fn lba4_myhardinfo_mirrors_lba8_hdserialinfo_in_original_profiles() {
 }
 
 #[test]
-fn lba4_server_flag_wire_rule_is_restore_profile_specific_in_real_fixtures() {
+fn lba4_server_flag_wire_representation_is_not_inferred_from_identity_shape() {
     let mut current_style = 0usize;
     let mut legacy_style = 0usize;
 
@@ -2317,30 +2317,21 @@ fn lba4_server_flag_wire_rule_is_restore_profile_specific_in_real_fixtures() {
         let inspect_meta = InspectMeta::from_backup_meta(&meta);
         let view = edpcli::inspect::analyze_sector(4, raw, &inspect_meta);
         assert_eq!(
-            view.decoded[0x46], 0,
-            "bConnetServer must remain the dormant-zero compatibility byte: {name}"
+            &view.decoded[0x45..0x47],
+            generic_flags,
+            "inspect must preserve the official rolling-reader view: {name}"
         );
 
         if current_profile {
             current_style += 1;
             assert_eq!(physical_flags, &[0, 0], "{name}");
             assert_ne!(generic_flags, &[0, 0], "{name}");
-            assert_eq!(
-                &view.decoded[0x45..0x47],
-                physical_flags,
-                "current restore profile must expose the official post-XOR wire flags: {name}"
-            );
         } else {
             legacy_style += 1;
             assert_ne!(physical_flags, generic_flags, "{name}");
             assert!(
                 generic_flags == [0, 0] || generic_flags == [0x0b, 0x00],
                 "unexpected historical reader-transformed flag profile in {name}: {generic_flags:02x?}"
-            );
-            assert_eq!(
-                &view.decoded[0x45..0x47],
-                generic_flags,
-                "legacy restore profile must keep the rolling-decoded flag semantics: {name}"
             );
         }
     }

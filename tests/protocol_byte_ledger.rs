@@ -121,13 +121,13 @@ fn byte_ledger_covers_exactly_6656_bytes_without_overlap() {
         "byte ledger contains gaps"
     );
     let expected_complete = [
-        142, 512, 512, 0, 487, 512, 497, 512, 492, 384, 384, 512, 512,
+        142, 512, 512, 0, 486, 512, 497, 512, 492, 384, 384, 512, 512,
     ];
-    let expected_partial = [370, 0, 0, 512, 25, 0, 15, 0, 20, 128, 128, 0, 0];
+    let expected_partial = [370, 0, 0, 512, 26, 0, 15, 0, 20, 128, 128, 0, 0];
     assert_eq!(complete, expected_complete);
     assert_eq!(partial, expected_partial);
-    assert_eq!(complete.iter().sum::<usize>(), 5458);
-    assert_eq!(partial.iter().sum::<usize>(), 1198);
+    assert_eq!(complete.iter().sum::<usize>(), 5457);
+    assert_eq!(partial.iter().sum::<usize>(), 1199);
 
     for lba in 0..13 {
         let progress = format!("| LBA{lba} | {} | {} | 0 |", complete[lba], partial[lba]);
@@ -141,9 +141,11 @@ fn byte_ledger_covers_exactly_6656_bytes_without_overlap() {
 #[test]
 fn historical_rejections_and_lba10_sample_gate_are_explicit() {
     let matrix = include_str!("../audit/protocol/historical_matrix.tsv");
-    assert!(matrix.contains("rejected for exact legacy profile"));
+    assert!(matrix.contains("rejected for the exact strict-HSerial producer"));
+    assert!(matrix.contains("LBA4 post-XOR flag writer is positive"));
+    assert!(matrix.contains("0x10006249..0x10006257"));
     assert!(matrix.contains("join59"));
-    assert!(matrix.contains("not strict nonzero producer"));
+    assert!(matrix.contains("rejected paired caller for strict nonzero HSerial"));
     assert!(matrix.contains("dynamic_MBR_template"));
     assert!(matrix.contains("2019-11-12"));
     assert!(matrix.contains("not component build date"));
