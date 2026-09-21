@@ -31,6 +31,22 @@ def lba(image: bytes, index: int) -> bytes:
 def load_gold(
     manifest: list[dict[str, str]], backup_dir: Path, nopwd_dir: Path
 ) -> list[tuple[dict[str, str], bytes, Path]]:
+    expected_strict = {
+        row["sample"] for row in manifest if row["profile"] == "strict-encrypted"
+    }
+    actual_strict = {
+        path.name
+        for path in backup_dir.glob("*.bin")
+        if "_nopwd_" not in path.name
+    }
+    if actual_strict != expected_strict:
+        missing = sorted(expected_strict - actual_strict)
+        unexpected = sorted(actual_strict - expected_strict)
+        raise ValueError(
+            "strict gold population drift: "
+            f"missing={missing or 'none'} unexpected={unexpected or 'none'}"
+        )
+
     out: list[tuple[dict[str, str], bytes, Path]] = []
     for row in manifest:
         if row["profile"] == "strict-encrypted":

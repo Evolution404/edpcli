@@ -19,6 +19,10 @@ silent byte-accounting drift.
 and SHA-256.  Host-local binaries are identified by digest rather than copied
 into this repository.
 
+The baseline harness is intentionally fail-closed on population drift: a new
+non-`_nopwd_` backup is not silently included or ignored.  It must first be
+reviewed and explicitly added to `gold_samples.tsv` with its digest.
+
 ## Gold sources
 
 The only protocol gold sources are:
