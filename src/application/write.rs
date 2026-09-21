@@ -573,7 +573,7 @@ pub fn restore_flow(
                 "[dry-run] 将还原 {} → disk{} LBA0-12 ({}B) — 未写入(免密快照不作还原)。",
                 path.display(),
                 disk,
-                data.len()
+                METADATA_IMAGE_LEN
             ))
         );
         return Ok(EXIT_OK);
