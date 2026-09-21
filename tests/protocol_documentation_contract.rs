@@ -284,9 +284,11 @@ fn documentation_keeps_the_official_provisioning_chain_and_strict_rules() {
         "22/22",
         "不能单独把字段升级为 COMPLETE",
         "禁止把免密转换盘",
+        "audit/protocol/gold/strict-encrypted/",
+        "audit/protocol/gold/authentic-nopwd/",
         "/Users/zhangyuxi/.edpcli-backup",
         "/Users/zhangyuxi/Desktop/u_disk/analyze/disk_data/no_password_disk4",
-        "edpcli 自制免密盘，只能用于产品回归，**没有协议参考价值**",
+        "用于产品回归，**没有协议参考价值**",
     ] {
         assert!(
             DOC.contains(required),

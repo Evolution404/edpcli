@@ -12,6 +12,7 @@ import sys
 SECTOR = 512
 IMAGE_LEN = 13 * SECTOR
 EMPTY_SECTOR_SHA256 = hashlib.sha256(bytes(SECTOR)).hexdigest()
+REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 def sha256(data: bytes) -> str:
@@ -29,37 +30,33 @@ def lba(image: bytes, index: int) -> bytes:
 
 
 def load_gold(
-    manifest: list[dict[str, str]], backup_dir: Path, nopwd_dir: Path
+    manifest: list[dict[str, str]], repo_root: Path
 ) -> list[tuple[dict[str, str], bytes, Path]]:
-    expected_strict = {
-        row["sample"] for row in manifest if row["profile"] == "strict-encrypted"
+    expected_paths = {row["repo_path"] for row in manifest}
+    gold_root = repo_root / "audit/protocol/gold"
+    actual_paths = {
+        path.relative_to(repo_root).as_posix() for path in gold_root.rglob("*.bin")
     }
-    actual_strict = {
-        path.name
-        for path in backup_dir.glob("*.bin")
-        if "_nopwd_" not in path.name
-    }
-    if actual_strict != expected_strict:
-        missing = sorted(expected_strict - actual_strict)
-        unexpected = sorted(actual_strict - expected_strict)
+    if actual_paths != expected_paths:
+        missing = sorted(expected_paths - actual_paths)
+        unexpected = sorted(actual_paths - expected_paths)
         raise ValueError(
-            "strict gold population drift: "
+            "checked-in gold population drift: "
             f"missing={missing or 'none'} unexpected={unexpected or 'none'}"
         )
 
     out: list[tuple[dict[str, str], bytes, Path]] = []
     for row in manifest:
-        if row["profile"] == "strict-encrypted":
-            path = backup_dir / row["sample"]
-            data = path.read_bytes()
-        elif row["profile"] == "authentic-nopwd":
-            path = nopwd_dir / "raw" / "LBA0_13_concat.bin"
-            full = path.read_bytes()
-            if len(full) < IMAGE_LEN:
-                raise ValueError(f"{path}: shorter than LBA0-LBA12")
-            data = full[:IMAGE_LEN]
-        else:
+        if row["profile"] not in {"strict-encrypted", "authentic-nopwd"}:
             raise ValueError(f"unknown gold profile: {row['profile']}")
+
+        path = repo_root / row["repo_path"]
+        resolved = path.resolve()
+        try:
+            resolved.relative_to(repo_root.resolve())
+        except ValueError as exc:
+            raise ValueError(f"gold path escapes repository: {path}") from exc
+        data = path.read_bytes()
 
         expected_len = int(row["bytes"])
         if len(data) != expected_len:
@@ -136,24 +133,13 @@ def audit(gold: list[tuple[dict[str, str], bytes, Path]]) -> dict[str, object]:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "--backup-dir", default=str(Path.home() / ".edpcli-backup"), type=Path
-    )
-    parser.add_argument(
-        "--nopwd-dir",
-        default=str(
-            Path.home()
-            / "Desktop/u_disk/analyze/disk_data/no_password_disk4"
-        ),
-        type=Path,
-    )
-    parser.add_argument(
-        "--manifest", default="audit/protocol/gold_samples.tsv", type=Path
+        "--manifest", default=REPO_ROOT / "audit/protocol/gold_samples.tsv", type=Path
     )
     parser.add_argument("--json-out", type=Path)
     args = parser.parse_args()
 
     rows = parse_manifest(args.manifest)
-    gold = load_gold(rows, args.backup_dir, args.nopwd_dir)
+    gold = load_gold(rows, REPO_ROOT)
     result = audit(gold)
     text = json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True)
     print(text)

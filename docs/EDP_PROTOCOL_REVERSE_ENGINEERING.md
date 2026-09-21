@@ -38,14 +38,18 @@
 
 ### 1.1 实盘证据规则
 
-从 2026-09-20 起，协议样本的**唯一金标来源**固定为以下两个目录：
+从 2026-09-21 起，协议分析实际使用的**唯一金标字节集**固定为仓库内
+`audit/protocol/gold/`，确保 clean clone/CI/后续 AI 不依赖采集机本地目录即可重放：
 
-- 加密原盘备份：`/Users/zhangyuxi/.edpcli-backup`。当前目录有 23 份 `.bin`，
-  其中 21 份非 `_nopwd_` 备份组成严格 original-generation 金标集；目录内 2 份
-  `_nopwd_` 备份是 edpcli 自制免密盘，只能用于产品回归，**没有协议参考价值**；
-- 真实免密盘：`/Users/zhangyuxi/Desktop/u_disk/analyze/disk_data/no_password_disk4`。
-  这是 SanDisk Ultra 真实免密盘的只读采集，是免密行为/profile 的唯一金标；它与
-  `.edpcli-backup` 中的自制 `_nopwd_` 备份不可混用。
+- `audit/protocol/gold/strict-encrypted/`：21 份 6656B 的严格
+  original-generation 加密原盘 LBA0-LBA12；
+- `audit/protocol/gold/authentic-nopwd/`：1 份 6656B 的 SanDisk Ultra 真实免密盘
+  LBA0-LBA12，只读采集，作为免密行为/profile 的唯一金标。
+
+原始采集 provenance 仍分别保留为 `/Users/zhangyuxi/.edpcli-backup` 与
+`/Users/zhangyuxi/Desktop/u_disk/analyze/disk_data/no_password_disk4`，但这两个目录已不再
+是审计运行依赖。其中 `.edpcli-backup` 的 `_nopwd_` 文件是 edpcli 自制免密盘，只能
+用于产品回归，**没有协议参考价值**，不得与真实免密金标混用。
 `nopwd_tool/backup`、`utils/backup`、散落的历史快照以及仓库裁剪夹具均不得再作为
 金标统计来源。仓库 `tests/fixtures/protocol` 只保留从金标提取的 CI 回归子集；附录中
 残留的 22/57/58 份历史 census 仅记录当时研究过程，不能覆盖本节口径，也不能独立
@@ -61,7 +65,8 @@
 `audit/protocol/` 作为本文的机器可校验伴随账本，而不是第二份真相源：
 
 - `gold_samples.tsv`：冻结当前21份严格加密原盘 + 1份真实免密盘 LBA0-LBA12
-  的文件名、长度和 SHA-256；
+  的来源名、仓库相对路径、长度和 SHA-256；`audit/protocol/gold/` 保存对应完整
+  6656B 字节，因此基线审计从 clean clone 即可直接重放；
 - `evidence_manifest.tsv`：把 physical / virtual / static 三类证据分开记录，固定
   官方二进制版本、SHA-256、关键函数地址、实验边界和不能证明的内容；
 - `byte_ledger.tsv`：按 profile 标注并覆盖全部6656B；

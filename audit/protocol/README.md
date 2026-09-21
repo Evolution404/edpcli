@@ -15,23 +15,34 @@ silent byte-accounting drift.
   branch, function address, or ABI field boundary.
 
 `evidence_manifest.tsv` records the concrete artifacts and anchors.  The
-`gold_samples.tsv` file freezes the current two-source gold population by name
-and SHA-256.  Host-local binaries are identified by digest rather than copied
-into this repository.
+`gold_samples.tsv` freezes the current gold population by source name,
+repository path, length and SHA-256.  The complete LBA0-LBA12 gold bytes are
+checked into `audit/protocol/gold/`, so the protocol census is reproducible
+from a clean clone without access to the capture workstation.  Host-local
+executable binaries are still identified by digest rather than copied into
+this repository.
 
 The baseline harness is intentionally fail-closed on population drift: a new
 non-`_nopwd_` backup is not silently included or ignored.  It must first be
 reviewed and explicitly added to `gold_samples.tsv` with its digest.
 
-## Gold sources
+## Gold data and provenance
 
-The only protocol gold sources are:
+The only protocol gold byte set used by automated analysis is the checked-in
+`audit/protocol/gold/` tree:
 
-1. `~/.edpcli-backup`: exactly 21 non-`_nopwd_` 6656-byte original-generation
-   captures in this baseline.  The two `_nopwd_` files are excluded.
-2. `~/Desktop/u_disk/analyze/disk_data/no_password_disk4`: the authentic
-   SanDisk no-password capture.  Only LBA0-LBA12 (the first 6656 bytes of
-   `raw/LBA0_13_concat.bin`) are in protocol scope.
+1. `audit/protocol/gold/strict-encrypted/`: exactly 21 6656-byte
+   original-generation captures.
+2. `audit/protocol/gold/authentic-nopwd/`: one 6656-byte authentic SanDisk
+   Ultra no-password capture containing exactly LBA0-LBA12.
+
+The original capture provenance remains recorded as
+`~/.edpcli-backup` for the 21 encrypted captures and
+`~/Desktop/u_disk/analyze/disk_data/no_password_disk4/raw/LBA0_13_concat.bin`
+for the SanDisk capture.  Those host-local paths are provenance only; they are
+no longer runtime dependencies of `audit_baseline.py`.  The original SanDisk
+file also contained LBA13, but the checked-in gold image intentionally stops at
+6656 bytes.
 
 The old `/private/tmp/audit22` harness mixed a third SanDisk EESI capture into
 its population.  Its source/executable hashes are retained in the manifest for
