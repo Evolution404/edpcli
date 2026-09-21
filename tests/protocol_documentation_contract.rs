@@ -4,13 +4,52 @@
 //! be called COMPLETE unless producer, consumer and real-device evidence are
 //! recorded together.
 
-const DOC: &str = include_str!("../docs/PROTOCOL_BYTE_TRACE_2026-09-19.md");
+use std::path::Path;
+
+const DOC: &str = include_str!("../docs/EDP_PROTOCOL_REVERSE_ENGINEERING.md");
 
 fn between<'a>(text: &'a str, start: &str, end: &str) -> &'a str {
     let start_pos = text.find(start).expect("missing start marker") + start.len();
     let rest = &text[start_pos..];
     let end_pos = rest.find(end).expect("missing end marker");
     &rest[..end_pos]
+}
+
+#[test]
+fn protocol_analysis_has_one_canonical_document() {
+    assert!(
+        Path::new("docs/EDP_PROTOCOL_REVERSE_ENGINEERING.md").is_file(),
+        "canonical protocol analysis document is missing"
+    );
+
+    for obsolete in [
+        "docs/PROTOCOL_BYTE_TRACE_2026-09-19.md",
+        "docs/PROVISION_PROTOCOL_AUDIT_2026-09-19.md",
+        "docs/HANDOFF_PROVISION_NEW_USB_2026-09-19.md",
+        "docs/HISTORICAL_DLL_TARGETS_2026-09-21.md",
+        "docs/PHISON_F2_TRACE_2026-09-21.md",
+    ] {
+        assert!(
+            !Path::new(obsolete).exists(),
+            "obsolete parallel protocol document must not reappear: {obsolete}"
+        );
+    }
+
+    for required_section in [
+        "# EDP LBA0–LBA12 协议逆向与验证总文档",
+        "## 3. 严格逐字节进度",
+        "## 4. 字段证据账本",
+        "## 7. 代码与测试门禁",
+        "## 8. 后续提升顺序",
+        "## 10. 验证历程附录",
+        "## 11. 历史 DLL / profile 取证目标",
+        "## 12. Phison F2 / LBA3 专项取证",
+    ] {
+        assert!(
+            DOC.contains(required_section),
+            "canonical protocol document lost required total/branch structure: {required_section}"
+        );
+    }
 }
 
 #[test]

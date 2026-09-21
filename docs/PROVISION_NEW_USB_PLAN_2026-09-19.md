@@ -99,7 +99,7 @@ src/provision/validate.rs
 禁止为了赶进度把未知区域直接全零或复制 donor 盘身份。
 
 状态：Phase 0 持续加深。审计结论与可重复门禁见
-docs/PROVISION_PROTOCOL_AUDIT_2026-09-19.md 和
+docs/EDP_PROTOCOL_REVERSE_ENGINEERING.md 和
 tests/provision_protocol_audit.rs。关键结论是：onlyid 已找到官方自动生成链；LBA12 是
 整扇连续密文；LBA11 为 DRKB+random252；官方 RegsiterUsb 前部写集就是 13 sectors
 （LBA0–12）；未知生成期材料必须进入显式 profile/entropy，禁止 donor copy 或臆造清零。

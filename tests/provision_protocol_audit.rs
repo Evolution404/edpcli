@@ -1573,7 +1573,7 @@ fn lba0_bootstrap_profiles_are_zero_or_the_official_usb_main_bsec_prefix() {
 
 #[test]
 fn strict_progress_has_no_partial_detail_rows_for_fully_complete_lbas() {
-    let trace = include_str!("../docs/PROTOCOL_BYTE_TRACE_2026-09-19.md");
+    let trace = include_str!("../docs/EDP_PROTOCOL_REVERSE_ENGINEERING.md");
     let complete_lbas = ["LBA1", "LBA2", "LBA5", "LBA7", "LBA10", "LBA11", "LBA12"];
 
     for lba in complete_lbas {
@@ -1591,7 +1591,7 @@ fn strict_progress_has_no_partial_detail_rows_for_fully_complete_lbas() {
 
 #[test]
 fn lba4_strict_progress_matches_non_overlapping_detail_ranges() {
-    let trace = include_str!("../docs/PROTOCOL_BYTE_TRACE_2026-09-19.md");
+    let trace = include_str!("../docs/EDP_PROTOCOL_REVERSE_ENGINEERING.md");
     let mut owner = vec![None::<&str>; SECTOR];
     let mut complete = 0usize;
     let mut partial = 0usize;
