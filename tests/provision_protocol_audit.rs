@@ -1789,6 +1789,28 @@ fn lba3_mp_marker_has_multiple_real_historical_payload_profiles() {
 }
 
 #[test]
+fn lba3_independent_mp_profiles_share_one_exact_472_byte_marker_tail() {
+    const STRICT_MARKED: &str =
+        "disk4_121110528_vid0951_pid1666_disk&ven_kingston&prod_datatraveler_3.0_onlyid2135149925_20260903_121319.bin";
+    const COMMON_TAIL_SHA256: &str =
+        "5f88797f7273191052e7a9300316e1a4f0f31563db07110a86fa4e648379198f";
+
+    let strict_image = load(STRICT_MARKED);
+    let strict_lba3 = sector(&strict_image, 3);
+    let historical_lba3 = decode_hex_fixture(KINGSTON_20260803_MP_LBA3_HEX);
+
+    assert_ne!(&strict_lba3[..0x28], &historical_lba3[..0x28]);
+    assert_eq!(&strict_lba3[0x28..], &historical_lba3[0x28..]);
+    assert_eq!(
+        sha256_hex(&strict_lba3[0x28..]),
+        COMMON_TAIL_SHA256,
+        "the 472-byte MP marker tail must stay stable across independent physical profiles"
+    );
+    assert!(strict_lba3[0x28..0x1f0].iter().all(|byte| *byte == 0));
+    assert_eq!(&strict_lba3[0x1f0..], b"this is mp mark\0");
+}
+
+#[test]
 fn original_fixtures_keep_lba5_zero_while_the_protocol_treats_it_as_opaque_scratch() {
     let mut checked = 0usize;
     for entry in fs::read_dir(FIXTURE_DIR).expect("protocol fixtures") {

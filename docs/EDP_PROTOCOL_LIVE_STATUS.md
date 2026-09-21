@@ -16,6 +16,13 @@
   reconstruction 与 2021 repair 边界证据，LBA4 `+0x046` 重新满足 COMPLETE 门禁。
   LBA4 `0x020..0x033` 已按 caller-owned HSerial identity vector 字段级生命周期闭环。
 
+## 最新结论：LBA3 472B marker-tail invariant（暂不计入 COMPLETE）
+
+- 两个独立真实非零 LBA3 profile 的前40B不同，但 `+0x028..+0x1FF` 472B逐字节相同，SHA-256=`5f88797f7273191052e7a9300316e1a4f0f31563db07110a86fa4e648379198f`；其中 `+0x028..+0x1EF` 为456B零，`+0x1F0..+0x1FF` 为 `this is mp mark\\0`。
+- v3.72 四份 FW/BN final marker page 经观测到的16B布局重排后，以上472B全部 472/472 bit-exact；BN整扇500/512、FW整扇496/512。离线复算脚本：`scripts/protocol/audit_lba3_phison_marker_page.py`。
+- RTTI 已恢复 marker-page checker 的具体地址；这些函数只做 `file_size-0x200 -> read512 -> marker/controller/version compare`。`CBaseController::WriteF2Mark=0x581B00` 与 `CU32SSBaseContoller::WriteF2Mark=0x487FA0` 也已逐指令复核，分别属于 F2 INFO / U32SS vendor-write 路径，不构造 host LBA3 sparse record。
+- 因 exact host serializer / controller-firmware LBA3 consumer 仍缺，LBA3 继续 512B PARTIAL；**当前严格进度仍为6000/6656=90.1%，不提前把这472B计入。**
+
 ## 最新结论：LBA0 三种 bootstrap profile 已按盘面语义闭环
 
 - 20份 general census 的 LBA0 前400B被严格穷尽为三类：8份显式 `zero[400]`、11份 `UsbMainBSec`、1份 Netac MBR；真实免密 SanDisk 属于 `UsbMainBSec`，不存在第四种 wire profile。

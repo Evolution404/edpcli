@@ -6447,19 +6447,37 @@ The v3.72 archive contains four FW/BN BIN files.  All four end with one exact
 | `FW67FF01V60424M.BIN` | `0x16200` | `this is mp mark\0` | `67 01 01 10 06 04 24 46` |
 | `FW67FF01V61110M.BIN` | `0x1C200` | `this is mp mark\0` | `67 01 01 10 06 11 10 46` |
 
-`CBaseController::virtual_464` provides the matching consumer path in machine
-code: it seeks to `file_size - 0x200`, reads `0x200` bytes, compares the
-first15 bytes with `"this is mp mark"`, then uses adjacent bytes in
-controller/version compatibility checks.  The same literal is referenced from
-`CBaseController30`, `C2250Controller`, `C2260Controller` and
-`C2261Controller` `virtual_464/468` implementations.  Thus the PC-side
-utility treats the final page as a formal FW/BN **version marker page**.
+RTTI/vtable recovery fixes the previously name-only marker-page consumers to
+concrete addresses: Base=`0x55FC90/0x55F570`, Base30=`0x541290/0x541780`,
+C2250=`0x535C40/0x5354A0`, C2260=`0x5333A0/0x532B80`, and
+C2261=`0x5316B0/0x532B80`.  Direct machine code confirms the lifecycle: seek
+`file_size - 0x200`, read `0x200` bytes, compare the first15 bytes with
+`"this is mp mark"`, then consume adjacent bytes in controller/version
+compatibility checks.  Thus the PC-side utility treats the final page as a
+formal FW/BN **version marker page**.
 
-This is not the host-visible LBA3 layout: the firmware page puts the marker at
-`+0x000`, while both real nonzero LBA3 profiles put it at `+0x1F0`.
-The two observed LBA3 8-byte payloads still do not occur verbatim in the EXE or
-the four FW/BN BINs.  Literal xrefs recovered so far are marker-page
-readers/comparators; they do not construct the sparse
+The F2 functions are now fixed to code addresses too:
+`CBaseController::WriteF2Mark@0x581B00` sends `this+0x1C00C` through the F2
+vendor-write helper, reads back an `INFO` response, and compares `0x200` bytes;
+`CU32SSBaseContoller::WriteF2Mark@0x487FA0` uses a different `F3 00 83...`
+wrapper and `0x1C0` payload.  These functions therefore reinforce, rather than
+remove, the boundary between F2 INFO and the host-visible sparse LBA3 record.
+
+A reproducible cross-family invariant has nevertheless been added.  The two
+independent physical nonzero LBA3 profiles have different first 40 bytes but an
+identical `+0x028..+0x1FF` tail: 456 zero bytes followed by
+`"this is mp mark\0"`, SHA-256
+`5f88797f7273191052e7a9300316e1a4f0f31563db07110a86fa4e648379198f`.
+For all four pinned v3.72 FW/BN files, moving the final marker page's first16
+bytes to its end yields the same 472-byte tail exactly; BN pages then match the
+physical sector 500/512 and FW pages 496/512.  The offline reproducer is
+`scripts/protocol/audit_lba3_phison_marker_page.py`.
+
+This still does not establish the host serializer: the PC executable contains
+no recovered `496B+16B` rotation path, and the exact physical dynamic 8-byte
+values occur locally only in the physical captures.  The observed 16-byte
+layout reordering is therefore a structural relationship, not an attributed
+MPALL transformation.  No recovered PC-side path constructs the sparse
 `00 01 00 00 ... +0x020..027 ... marker@+0x1F0` host sector.
 
 Simple-checksum explanations were independently rejected.  The two first
@@ -6487,8 +6505,9 @@ The committed LBA3 evidence remains:
 
 - EDP itself preserves and ignores this sector.
 - Real devices show a zero profile and at least two non-zero
-  `"this is mp mark\0"` profiles.
-- The manufacturer family is Phison MP/FW and the producer family includes F2-mark writers.
+  `"this is mp mark\0"` profiles; the two nonzero profiles share one exact 472B tail while their dynamic first40B differ.
+- The manufacturer family is Phison MP/FW; v3.72 final FW/BN marker pages independently reproduce that 472B tail after the observed 16B layout reordering.
+- Exact `WriteF2Mark` and FW/BN compatibility-reader addresses are now recovered, but they do **not** construct the host sparse record.
 - The exact writer that constructs the committed `00 01 00 00 ... this is mp mark\0` profile,
   the meaning of `+0x020..+0x027`, and the controller-firmware consumer remain unresolved.
 

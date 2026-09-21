@@ -81,13 +81,43 @@ machine-code path:
    checks (including the `"controller : %x"` /
    `"controller ver: %x %x %x"` diagnostic paths).
 
-The same marker literal is referenced from multiple controller-class
-`virtual_464/468` implementations (`CBaseController`,
-`CBaseController30`, `C2250Controller`, `C2260Controller`,
-`C2261Controller`).  These are FW/BN **marker-page readers**.  No recovered
-literal xref constructs the host-visible LBA3 layout.  This further separates
-the PC-side firmware marker page from the still-missing manufacturer record
-builder that puts the marker at LBA3 `+0x1F0`.
+MSVC RTTI/vtable recovery now fixes those previously name-only `virtual_464/468`
+paths to concrete code addresses: Base=`0x55FC90/0x55F570`, Base30=
+`0x541290/0x541780`, C2250=`0x535C40/0x5354A0`, C2260=
+`0x5333A0/0x532B80`, and C2261=`0x5316B0/0x532B80`.  Direct disassembly of the
+controller implementations confirms the same lifecycle: open candidate FW/BN,
+seek `file_size-0x200`, read 512B, compare the first15 bytes against
+`"this is mp mark"`, then consume the adjacent controller/version bytes.  These
+are FW/BN **marker-page readers/compatibility checkers**, not host-sector
+serializers.
+
+The F2 writer names are now independently fixed to code as well:
+`CBaseController::WriteF2Mark=0x581B00` and
+`CU32SSBaseContoller::WriteF2Mark=0x487FA0`.  Base `WriteF2Mark` passes
+`this+0x1C00C` into the F2 vendor-write helper, reads back an `INFO` response,
+and compares the first `0x200` bytes.  CU32SS uses a different `F3 00 83...`
+wrapper and a `0x1C0` payload.  Therefore same-name F2 operations are not one
+universal 512B host-LBA3 writer, and neither recovered function constructs the
+sparse `marker@+0x1F0` record.
+
+A new offline audit adds a stronger structural invariant without crossing that
+boundary.  Two independent physical nonzero LBA3 profiles have distinct first
+40 bytes but exactly the same `+0x028..+0x1FF` 472-byte tail, SHA-256
+`5f88797f7273191052e7a9300316e1a4f0f31563db07110a86fa4e648379198f`.
+That tail is 456 zero bytes at `+0x028..+0x1EF` followed by
+`"this is mp mark\0"` at `+0x1F0..+0x1FF`.  All four pinned v3.72 FW/BN final
+marker pages, after moving their first 16 marker bytes to the end, match this
+physical tail 472/472; the BN pages match the full physical sector 500/512 and
+the FW pages 496/512.  `scripts/protocol/audit_lba3_phison_marker_page.py`
+replays the archive/member/page hashes and this comparison without opening any
+device.
+
+This is evidence of a shared marker-page-family tail, not evidence that MPALL
+performs that 16-byte reordering.  A scan of the v3.72 PC executable found no
+`496B+16B` rotation path, and the exact physical 8-byte values
+`b5 7e 9c 45 00 80 00 14` / `a8 82 a4 22 00 20 02 16` occur locally only in
+the corresponding physical captures.  The manufacturer record builder and the
+controller-firmware mapping that exposes it as host LBA3 are still missing.
 
 Simple checksum projection was also tested and rejected.  Neither observed
 LBA3 DWORD (`0x459C7EB5` in the strict sample,
