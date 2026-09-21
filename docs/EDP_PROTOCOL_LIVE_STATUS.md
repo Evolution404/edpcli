@@ -7,8 +7,8 @@
 
 ## 严格进度
 
-- COMPLETE：6000 / 6656 B = 90.1%
-- PARTIAL：656 B
+- COMPLETE：6512 / 6656 B = 97.8%
+- PARTIAL：144 B
 - UNKNOWN：0 B
 - 本轮进入时仓库 HEAD：`63b76da1fed351f1e7bbe45f0f12f5c22765e3dc`
 - 中途另一工作流先在 `1c281cb9bf4a9d92f8fc27198120d53db6466da9` 将真实免密 SanDisk
@@ -16,12 +16,13 @@
   reconstruction 与 2021 repair 边界证据，LBA4 `+0x046` 重新满足 COMPLETE 门禁。
   LBA4 `0x020..0x033` 已按 caller-owned HSerial identity vector 字段级生命周期闭环。
 
-## 最新结论：LBA3 472B marker-tail invariant（暂不计入 COMPLETE）
+## 最新结论：LBA3 按 EDP preserve-only 生命周期闭环
 
-- 两个独立真实非零 LBA3 profile 的前40B不同，但 `+0x028..+0x1FF` 472B逐字节相同，SHA-256=`5f88797f7273191052e7a9300316e1a4f0f31563db07110a86fa4e648379198f`；其中 `+0x028..+0x1EF` 为456B零，`+0x1F0..+0x1FF` 为 `this is mp mark\\0`。
-- v3.72 四份 FW/BN final marker page 经观测到的16B布局重排后，以上472B全部 472/472 bit-exact；BN整扇500/512、FW整扇496/512。离线复算脚本：`scripts/protocol/audit_lba3_phison_marker_page.py`。
-- RTTI 已恢复 marker-page checker 的具体地址；这些函数只做 `file_size-0x200 -> read512 -> marker/controller/version compare`。`CBaseController::WriteF2Mark=0x581B00` 与 `CU32SSBaseContoller::WriteF2Mark=0x487FA0` 也已逐指令复核，分别属于 F2 INFO / U32SS vendor-write 路径，不构造 host LBA3 sparse record。
-- 因 exact host serializer / controller-firmware LBA3 consumer 仍缺，LBA3 继续 512B PARTIAL；**当前严格进度仍为6000/6656=90.1%，不提前把这472B计入。**
+- current Windows `RegsiterUsb` 先读 LBA0-LBA12 到同一 staging image、没有 LBA3 builder，最终整段写回；Linux 独立没有 `BuildSector3/ReadSector3`，因此 current EDP 对 LBA3 的规则是 preserve/ignore。
+- historical v19.11.4.1 已新增可重放 seek 审计：`scripts/protocol/audit_v19_lba3_preserve.py` 固定 DLL SHA-256，枚举31个 `SetFilePointer` 调用点，可恢复的固定 sector multiplier 精确为 `{1,2,4,6,7,8,12}`，不存在3；SAFE6 `virtual_56` 也不直接调用 generic absolute-seek wrapper。
+- 2021 `UDiskLabelRepair.dll` 的 repair/backup 只复制 LBA4-LBA12 共9扇区；现有 edpcli apply 也只写 `0/6/7/9/12`，且 atomic-write 回归已经锁定未列入扇区逐字节不动。
+- 两个独立真实非零 LBA3 profile 的动态前40B不同，但共同保留 marker-tail；这证明不能把 LBA3 规定为零或固定模板。Phison F2 INFO 与 host LBA3 的直接等同已被反证，厂商内部 bit 继续保持 opaque。
+- 因此 LBA3 512B 现在按 **manufacturer-owned opaque MP metadata / EDP preserve-only sector** 计入 COMPLETE；exact Phison serializer/firmware 私有含义仍是 manufacturer provenance，不再作为 EDP 字节闭环 blocker。
 
 ## 最新结论：LBA0 三种 bootstrap profile 已按盘面语义闭环
 
@@ -69,8 +70,8 @@
 
 本机可见的 `/private/tmp/ijinshan_edp` 三件套与已审组件 SHA-256 完全重复：BusManage 仍是 2020 build，CEMSUsbRegsiter 仍是 v19.11.4.1，RegManage 仍是 v20.1.2.2；Spotlight 也未发现更早的 `busmanage.dll/cemsusbregsiter.dll`。更早 caller 的 HSerial 数值生成算法仍可继续追，但已从字节闭环 blocker 降为 provenance 开放问题。
 
-当前真正剩余的字节 blocker 转为 LBA3、LBA4 `bDataToServer@+0x045`、LBA6/LBA9：继续追
-join59 reader 与同代 writer ABI，寻找能够实际生成 Dept[59] 拼接形态的历史 producer。
+当前真正剩余的字节 blocker 只剩 LBA4 `bDataToServer@+0x045` 与 LBA6/LBA9：继续追
+join59 reader 与同代 writer ABI、legacy MBR underlay producer，寻找能够实际生成 Dept[59] 拼接形态的历史 producer。
 
 ## 最新结论：LBA6/LBA9 join59
 
@@ -140,7 +141,7 @@ rolling-form reader view 为0；真实免密 wire=00/reader=D9 又已由 v19 off
 在 `libcemsfilesyscheck.so` 内只进入 BuildSector4/ReadSector4，后者除 OnlyIdXor8 外无字段级
 判断；这进一步把 `+0x045` 缺口限定到更老 producer 和其它上层 consumer，状态仍为 PARTIAL。
 
-剩余 blocker 不再包括 HSerialCRC[5]；仍包括 `bDataToServer@+0x045` 的历史非零 producer/最终 consumer，以及 LBA3、LBA6/LBA9 的既有 PARTIAL 字节。完整证据见主文档第1.3节。
+剩余 blocker 已不再包括 HSerialCRC[5] 或 LBA3；只剩 `bDataToServer@+0x045` 的历史非零 producer/最终 consumer，以及 LBA6 `+0x03F/+0x1E0..+0x1ED`、LBA9 `+0x080..+0x0FF` 的既有 PARTIAL 字节。完整证据见主文档第1.3节。
 
 ## 固定门禁
 

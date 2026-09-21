@@ -61,8 +61,8 @@ fn protocol_analysis_has_one_canonical_document() {
 fn protocol_live_status_tracks_strict_baseline_without_becoming_a_second_ledger() {
     assert!(Path::new("docs/EDP_PROTOCOL_LIVE_STATUS.md").is_file());
     for required in [
-        "6000 / 6656 B = 90.1%",
-        "PARTIAL：656 B",
+        "6512 / 6656 B = 97.8%",
+        "PARTIAL：144 B",
         "LBA4 `0x020..0x033` 已按 caller-owned HSerial identity vector 字段级生命周期闭环",
         "ReadUsbHserialsInfo",
         "0x1019DB54",
@@ -117,11 +117,11 @@ fn strict_progress_covers_exactly_lba0_through_lba12() {
     );
     assert_eq!(complete + partial + unknown, 13 * 512);
     assert!(
-        complete >= 6000,
+        complete >= 6512,
         "strict COMPLETE coverage regressed below the audited baseline: {complete}"
     );
     assert!(
-        partial <= 656,
+        partial <= 144,
         "PARTIAL coverage regressed above the audited baseline: {partial}"
     );
     assert_eq!(
@@ -129,8 +129,8 @@ fn strict_progress_covers_exactly_lba0_through_lba12() {
         "all LBA0..12 bytes are at least PARTIAL after the completed UNKNOWN audit"
     );
     assert!(
-        DOC.contains("COMPLETE：6000B / 6656B = 90.1%")
-            && DOC.contains("PARTIAL：656B / 6656B = 9.9%"),
+        DOC.contains("COMPLETE：6512B / 6656B = 97.8%")
+            && DOC.contains("PARTIAL：144B / 6656B = 2.2%"),
         "displayed global totals must match the strict-progress ledger"
     );
 }
@@ -219,7 +219,7 @@ fn documentation_keeps_the_official_provisioning_chain_and_strict_rules() {
         "m_autoid / Autonum",
         "同一个空字符串至少出现2种不同且非零的 post-NUL backing",
         "同一个空 Office 字符串至少出现3种不同且非零的 post-NUL backing",
-        "Phison MP/manufacturing metadata sector, EDP-opaque",
+        "manufacturer-owned opaque MP metadata / EDP preserve-only sector",
         "MPALL_F1_9000_v372_0B.exe",
         "CBaseController::WriteF2Mark",
         "CU32SSBaseContoller::WriteF2Mark",

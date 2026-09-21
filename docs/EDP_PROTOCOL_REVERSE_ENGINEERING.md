@@ -7,7 +7,7 @@
 > `COMPLETE` 只允许由可复核证据升级；`PARTIAL` 表示边界/部分语义已经验证但仍有
 > 明确缺口；任何候选解释必须标注为候选或已证伪，不得写成事实。
 >
-> **当前严格进度：6000 / 6656B COMPLETE（90.1%），656B PARTIAL（9.9%），UNKNOWN=0。**
+> **当前严格进度：6512 / 6656B COMPLETE（97.8%），144B PARTIAL（2.2%），UNKNOWN=0。**
 >
 > 文末“验证历程附录”用于保留详细推导和纠错记录；若附录中的历史阶段判断与本文前半
 > canonical 账本冲突，**一律以前半当前账本为准**。
@@ -205,8 +205,9 @@ producer-side zero 精确重建整扇，而所有已审 reader/restore 上层均
 业务分支。因此 `+0x046` 重新闭合为 **producer-side dormant-zero compatibility byte，
 COMPLETE**。这里 COMPLETE 不等于“reader 总返回0”，也不宣称已知道 SanDisk 当年的
 exact manufacturing executable；它只表示该 byte 的已知 producer 值、两类 wire/reader
-表示关系、repair 边界和 negative semantic consumer 已闭合。严格统计为
-**6000 COMPLETE / 656 PARTIAL**。
+表示关系、repair 边界和 negative semantic consumer 已闭合。该阶段当时的严格统计为
+6000 COMPLETE / 656 PARTIAL；随后 LBA3 preserve-only 生命周期闭合，当前总计以第3节的
+6512 COMPLETE / 144 PARTIAL 为准。
 
 原采集目录的 `dec/LBA04_dec.bin` 虽显示 flags=0，但不能作为独立反证：当时的
 `analyze/scripts/read_metadata.py::lba4_decode` 对每一个 raw-zero byte 强制把解码值
@@ -625,7 +626,7 @@ post-XOR 写回 `+0x45/+0x46`。历史 raw-zero 实盘仅作为兼容读取 prof
 | LBA0 | 512 | 0 | 0 | 100.0% |
 | LBA1 | 512 | 0 | 0 | 100.0% |
 | LBA2 | 512 | 0 | 0 | 100.0% |
-| LBA3 | 0 | 512 | 0 | 0.0% |
+| LBA3 | 512 | 0 | 0 | 100.0% |
 | LBA4 | 511 | 1 | 0 | 99.8% |
 | LBA5 | 512 | 0 | 0 | 100.0% |
 | LBA6 | 497 | 15 | 0 | 97.1% |
@@ -639,8 +640,8 @@ post-XOR 写回 `+0x45/+0x46`。历史 raw-zero 实盘仅作为兼容读取 prof
 
 当前总计：
 
-- **COMPLETE：6000B / 6656B = 90.1%**
-- **PARTIAL：656B / 6656B = 9.9%**
+- **COMPLETE：6512B / 6656B = 97.8%**
+- **PARTIAL：144B / 6656B = 2.2%**
 - **UNKNOWN：0B / 6656B = 0.0%**
 
 LBA11 已完整闭合为 512B COMPLETE。此前卡住的后半 252B 不是“某型号盘偶尔使用
@@ -701,7 +702,7 @@ DWARF 中恢复出的原始声明文件/行号与本地函数地址：
 | LBA2 | 0x000–0x07F | COMPLETE | GPT partition entry0 | Linux官方 `BuildSector2_Gpt@0x1FFF6` 每次完整写一个128B `GPT_Partition`：Basic Data type GUID固定；partition GUID为caller输入；start固定63；end=`63+caller_size`；attr/name来自零模板 | Windows `sub_1002B2F0` 与 Linux `AnalyzeGptPartitionTable` 均按128B stride比较 type GUID，命中后读取 `start@+0x20/end@+0x28/attr@+0x30`；GPT header又规定 entry-size=128 | official-binary virtual writer 以 GUID `001122...eeff`、2GiB容量直接生成 entry0，得到 start=63/end=4194270/attr=0/name全零；同一输出参与 LBA1 partition-array CRC 并被 Windows GPT header consumer接受 | 128B writer→wire→consumer字段闭合；partition GUID 16B 为显式caller-owned身份材料，name/attr为模板零。该正例与physical census分层 |
 | LBA2 | 0x080–0x08F / 0x100–0x10F / 0x180–0x18F | COMPLETE | GPT entries1..3 的 unused `PartitionTypeGUID` | current Windows `WriteNormalULabel` 大盘分支调用 GPT creator `sub_10037160(..., partition_count=1)`；该函数向 `IOCTL_DISK_CREATE_DISK` 传 `PartitionStyle=GPT(1)`，并向 `IOCTL_DISK_SET_DRIVE_LAYOUT_EX` 提交 `DRIVE_LAYOUT_INFORMATION_EX.PartitionCount=1`。因此 entry0 后三个槽在 current 一分区 profile 中均为 unused GPT entry；UEFI 2.10 §5.3.3 定义 unused entry 的 `PartitionTypeGUID=00000000-0000-0000-0000-000000000000` | Windows/Linux GPT parser 都以16B type GUID 判定 entry 是否有效；type GUID 为0时该 entry 不进入 start/end/attr 语义解析 | official Linux virtual GPT fixture 的 entries1..3 三个 type GUID 均为0；另对本机20,538个候选文件只读扫描得到1份真实 GPT image（Ubuntu 26.04 ISO），其3个已用 entry 后至少125个 unused entry 的 type GUID/完整entry均为0。physical EDP originals仍为 absent-GPT 全零 profile | 这里只升级每条 unused entry 的16B type discriminator。其余112B仍不借助 harness 预清或通用规范推断；三条共48B从PARTIAL升COMPLETE |
 | LBA2 | 0x090–0x0FF / 0x110–0x17F / 0x190–0x1FF | COMPLETE | **GPT entries1..3 unused-entry unowned residual** | current Windows GPT creator明确只提交 `PartitionCount=1`，因此 entries1..3 的 `PartitionTypeGUID` 为零时整条 entry 已处于 unused 状态；这336B不是 EDP 自定义 payload，Windows kernel 是否把 residual 具体初始化为零不影响其协议语义。Linux `BuildSector2_Gpt` 只负责 active entry，同样不赋予 unused residual 独立字段语义 | current Windows `CPartitionType::AnalyzeGptPartitionTable/sub_1002B2F0` 的机器码先比较每条 entry 的16B TypeGUID；仅在匹配受支持非零 GUID 后才读取 `+0x20/+0x28/+0x30` 等 residual 字段。Linux `AnalyzeGptPartitionTable@0xFB36` 独立同构：`memcmp(type_guid, entry,16)` 命中后才读 start/end/attr。隔离 Unicorn 进一步让 Windows official constructor 原生建立 supported-GUID map（仅映射 SEH 零页并 stub `HeapAlloc/HeapFree` CRT 边界），再喂4条 `TypeGUID=0 + residual=0xA5` 的 entry；parser `ret=0`、无异常，memory-read hook 对336B residual **0次读取**，四条 entry 均在 TypeGUID 起始比较即短路 | Linux first-party virtual GPT fixture与独立 Ubuntu GPT实盘中的 unused residual均为零；新增 Windows first-party consumer probe又证明任意非零 residual 不进入语义消费。这里不把 `0xA5` probe冒充 writer output，而是用于证明“unused后 residual 值无业务意义” | 按与 LBA4/LBA5 unowned backing 一致的 COMPLETE 口径闭合：决定 entry 是否存在的是16B TypeGUID；为零后其余112B/entry属于 unowned residual，兼容读取不得赋予隐藏语义或强制依赖零值。至此 LBA2 512/512 COMPLETE |
-| LBA3 | 0x000–0x1FF | PARTIAL | **Phison MP/manufacturing metadata sector, EDP-opaque；不得与 MPALL F2 INFO page 直接等同** | Windows `CUsbRegsiter::RegsiterUsb` 先读完整13扇区，SAFE6注册链没有 LBA3 builder，最终整段写回，因此 EDP producer 是 preserve-existing；Linux 同样无 `BuildSector3`。离线取得并哈希核验 `MPALL_F1_9000_v372_0B.exe`（SHA-256 `96614750c61e0ad6b05d19e74848c1679f6318dd21de6faee46c92fb05152142`）后，机器码证明 Phison `CBaseController::WriteF2Mark` 确有独立的512B F2 INFO 写入/回读链：`object+0x1C00C` 经 `06 06 01` 写0x200B，再以 `06 05 ... "INFO"` 读回并对前0x200B全量 `memcmp`。但这只能证明相关制造生态存在 F2 INFO writer，**不能证明它就是物理 LBA3 producer** | 直接等同关系已被机器码反证：MPALL 对 F2 INFO staging 的正式校验要求开头 `12 01 00 02`，而两种真实非零 LBA3 都从 `00 01 00 00` 开始且整扇不存在 `12 01 00 02`。`GetInfo.exe` 又明确以三个连续0x210B response buffer读取 Version/INFO/RD；中间 `0x4D1EC0` 是 `Get_Info_Page INFO` 的 raw response，`SampleMark` 写在 INFO `+0xD9/+0xDA`（`12 56` 或 `00 00`），`MPF1F2` 从 INFO `+0x93` 或 `+0xDF` 的 bitfield解析，均不对应 LBA3 `+0x001/+0x020..027`。包内 FW/BN BIN 的 `"this is mp mark"` 又位于各自最后512B的 `+0x000`，而真实 LBA3 位于 `+0x1F0`。当前 Windows/Linux EDP 组件仍完全不解析 LBA3 | 22份原始参考：21/22全零；唯一 strict Kingston 非零 profile 为 `+0x001=01`、`+0x020..027=b5 7e 9c 45 00 80 00 14`、`+0x1F0..1FF="this is mp mark\0"`。扩展历史备份另有 `+0x020..027=a8 82 a4 22 00 20 02 16` 的第二种非零 profile。两组8B/4B材料在已取得 MPALL 3.72 EXE、FW/BN BIN 中均无直接常量命中。strict 非零盘为 Kingston DataTraveler 3.0 `0951:1666`、`62008590336B`；公开同 identity/capacity 记录分别出现 PS2307+MPALL v3.34.07 与 PS2309+MPALL v5.35.35 | Phison 制造家族和相关 F2-mark/F2-INFO 工具链已确认，但此前“F2 INFO staging == LBA3”的假设已被否证。LBA3 exact producer、`+0x001/+0x020..027/+0x1F0` 字段定义及 firmware consumer 仍未闭合；相同 VID/PID/model/capacity 也不能锁死 controller，因此512B继续全部 PARTIAL |
+| LBA3 | 0x000–0x1FF | COMPLETE | **manufacturer-owned opaque MP metadata / EDP preserve-only sector；不得与 MPALL F2 INFO page 直接等同** | current Windows `CUsbRegsiter::RegsiterUsb` 先读完整13扇区，SAFE6注册链没有 LBA3 builder，最终把同一 staging image 整段写回，因此 LBA3 的 EDP producer 语义是 preserve-existing；Linux 独立不存在 `BuildSector3`。historical v19.11.4.1 又由 `scripts/protocol/audit_v19_lba3_preserve.py` 固定 SHA-256 后枚举全 DLL 31 个 `SetFilePointer`，可恢复的固定 sector-size 倍率精确为 `{1,2,4,6,7,8,12}`、无3，SAFE6 `virtual_56@0x1000CC50` 也不直接调用 generic absolute-seek wrapper | current Windows/Linux 注册、登录路径没有 LBA3 payload parser；2021 `UDiskLabelRepair.dll` 的 `RepairSafe6Label/RewriteSafe6BakLabel` 只在 LBA4-LBA12 与尾部镜像之间整块复制9扇区，天然绕过 LBA3。Phison `WriteF2Mark/GetInfo` 分析继续作为边界反证：F2 INFO 不是 host LBA3，不能把厂商内部 bit 强行赋予 EDP 语义 | 22份原始参考21/22全零、1份 strict Kingston 非零；扩展历史另有第二种不同非零 MP profile。两种非零 profile 均保留 `+0x001=01` 与 `+0x1F0..1FF="this is mp mark\0"`，但 `+0x020..027` 不同，证明 EDP 必须透明保留而不能零填或套固定模板 | **EDP协议层生命周期闭合**：这512B属于外部制造商拥有的 opaque metadata，EDP 的逐字节规则是 preserve/ignore。exact Phison host serializer、controller/firmware 私有字段含义继续作为 manufacturer provenance 研究问题，不再构成 EDP LBA0-LBA12 字节语义 blocker；未来任意未知非零 LBA3 都必须原样保留 |
 | LBA4 | 0x000–0x017 | COMPLETE | `$$$onlyid$$$` clear header | 当前注册 writer 根据 main onlyid 格式化 | 识别/解码链从此恢复 onlyid | 22/22 | 完成 |
 | LBA4 | 0x018–0x01B | COMPLETE | OnlyIdXor8 | current writer: `main_onlyid ^ 0x88888888` | restore-info 读取该字段 | 22盘 current/legacy 可解 | 完成 |
 | LBA4 | 0x01C–0x01F | COMPLETE | `OnllyID2Nd` = backup/activation encryption key seed | **current producer**：Windows `RegsiterUsb@0x1003BBD1..0x1003BBD7` 直接执行 `node+0x04 = object+0x698`，即复用本次注册 main onlyid。**legacy producer**现已从官方归档 `CEMSUsbRegsiter.dll` v19.11.4.1（MD5 `783d01f19e998a514834bc5e5f4249ad`）恢复：SAFE6 `virtual_56@0x1000CC50` 清零0x2F restore node 后调用 `fcn.100058E0`；该函数 `CoCreateGuid()` 生成16B GUID，初始化协议 CRC table，以初值0逐字节计算同款 reflected `CRC32_bare`，返回DWORD；`0x1000D122` 将结果精确写入 `node+0x04`。因此早期 profile 是“**独立 GUID-CRC key**”，current profile 改为“**复用 main GUID-CRC onlyid**” | active consumer 已闭合为完整 round-trip：`GetUpLoadInformation/sub_10039C30` 以 `restore_node+0x04` 为4B seed 加密 LLGB+EDPF backup blob；`ActiveNormalUDev -> sub_1003CEB0` 取同一 seed 解密 activation/restore blob，校验 `LLGB` 后恢复 LBA8/LBA12。两 helper 的16B key material 均为 `key4[i mod 4] XOR "EDPSECDISK200709"[i]`，随后走同一 key schedule、互为 encrypt/decrypt block transform | strict current profile `OnllyID2Nd==main onlyid && HSerialCRC=0`；legacy profile `OnllyID2Nd!=main`。可复核 legacy second key 不等于本设备/全集 main-onlyid；committed NETAC_A/NETAC_B/LEXAR 精确锁定 `44D9CE02/028EFFD3/7647B1EF`，并新增门禁证明它们也不退化为 `CRC32(device_id)`、MBR disk signature 或 `MyHardinfo`；同一 main 的重复捕获 second key 保持稳定，符合“制标时生成后持久化”的随机 key 生命周期 | 4B 的正式边界、current/legacy 双 producer、随机生成算法、双向密码学 consumer 和真实 profile 均闭合；不同代际只改变 seed 来源，不改变 backup/activation key 语义，升级 COMPLETE |
@@ -818,8 +819,13 @@ Linux 当前 `libcemsfilesyscheck.so` 提供
 `BuildSector0/4/6/7/8/11/12`、`BuildSector0/1/2_Gpt` 以及
 `ReadSector4/6/8/11/12`，独立不存在 `BuildSector3` / `ReadSector3`。
 Windows 当前注册、登录和修复组件也未发现 LBA3 payload 解析路径。
-因此当前可闭合的是 **EDP preserve + EDP 不解析**；厂商量产工具或控制器固件
-是否消费该扇区，仍属于缺失证据。
+因此 current EDP 已经给出 **preserve + 不解析** 的明确协议边界。为验证该边界并非
+current-only，本轮又对 historical v19.11.4.1 做了固定 SHA-256 的全 DLL seek 审计：
+31 个 `SetFilePointer` 调用点中，可恢复为 `sector_size × N` 的固定倍率集合精确为
+`{1,2,4,6,7,8,12}`，不存在 `N=3`；SAFE6 `virtual_56@0x1000CC50` 也不直接调用
+generic absolute-seek wrapper。可重放脚本为 `scripts/protocol/audit_v19_lba3_preserve.py`。
+另有 2021 `UDiskLabelRepair.dll` 的 `RepairSafe6Label/RewriteSafe6BakLabel` 只在
+LBA4-LBA12 与尾部镜像间复制9扇区，同样没有把 LBA3 纳入 repair payload。
 
 22 份原始生成参考重新逐字节统计：
 
@@ -846,10 +852,16 @@ Windows 当前注册、登录和修复组件也未发现 LBA3 payload 解析路�
 回归 `lba3_mp_marker_has_multiple_real_historical_payload_profiles` 明确要求两个
 marker profile 的中间8B不同，防止把任一单盘的值错升成全局固定模板。
 
-因此不能把 `this is mp mark` 单独建模成 EDP 字段，也不能把 21 个零样本解释成
-“协议规定全零”，也不能把 `+0x020..+0x027` 建模成单一固定常量。LBA3 整扇从
-UNKNOWN 移到 PARTIAL；在找到厂商 MP producer、
-字段格式和实际 consumer 前，512B 中没有任何字节计入 COMPLETE。
+因此不能把 `this is mp mark` 单独建模成 EDP 字段，也不能把21个零样本解释成
+“协议规定全零”，更不能把 `+0x020..+0x027` 建模成单一固定常量。相反，跨 current
+Windows、Linux、v19.11.4.1 与 2021 repair 的证据共同限定了 **EDP 自己对这512B没有
+payload ownership：只保留、不解释、不重建**。这与 LBA4 unowned backing、LBA5 opaque
+preserve 的 COMPLETE 口径一致，因此 LBA3 512B 现按
+`manufacturer-owned opaque MP metadata / EDP preserve-only sector` 升为 COMPLETE。
+
+这里的 COMPLETE 只关闭 **EDP LBA0-LBA12 协议语义**；Phison exact host serializer、
+controller/firmware 私有字段定义仍是 manufacturer provenance 开放问题。未来遇到任何未知
+非零 LBA3，兼容实现都必须逐字节保留，不能因为当前多数样本为零而清洗。
 
 ### 4.1 LBA8 ElabOffset：2B 完整闭环
 
@@ -6511,7 +6523,7 @@ The committed LBA3 evidence remains:
 - The exact writer that constructs the committed `00 01 00 00 ... this is mp mark\0` profile,
   the meaning of `+0x020..+0x027`, and the controller-firmware consumer remain unresolved.
 
-Therefore LBA3 stays 512B PARTIAL and contributes 0B to COMPLETE.
+Therefore LBA3 is 512B COMPLETE at the EDP protocol layer as a manufacturer-owned opaque preserve-only sector; the unresolved items above remain manufacturer-provenance questions.
 
 ### Next concrete reverse-engineering targets
 
@@ -6525,5 +6537,4 @@ Therefore LBA3 stays 512B PARTIAL and contributes 0B to COMPLETE.
    `marker@+0x1F0` manufacturing record and what generates `+0x020..0x027`.
 4. Obtain device-specific controller/FW/ID_BLK evidence for the exact physical
    target before selecting the PS2307 or PS2309 branch.
-5. Only after an exact producer/store layout and a real consumer are recovered should any
-   LBA3 subrange move from PARTIAL to COMPLETE.
+5. Keep any recovered Phison-private subfield semantics separate from the EDP byte ledger; they may enrich manufacturer provenance but do not change LBA3's preserve-only EDP ownership boundary.
