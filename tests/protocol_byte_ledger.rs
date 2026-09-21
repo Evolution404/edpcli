@@ -143,7 +143,7 @@ fn historical_rejections_and_lba10_sample_gate_are_explicit() {
     let matrix = include_str!("../audit/protocol/historical_matrix.tsv");
     assert!(matrix.contains("rejected for exact legacy profile"));
     assert!(matrix.contains("join59"));
-    assert!(matrix.contains("strict nonzero HSerialCRC"));
+    assert!(matrix.contains("not strict nonzero producer"));
     assert!(matrix.contains("dynamic_MBR_template"));
     assert!(matrix.contains("2019-11-12"));
     assert!(matrix.contains("not component build date"));
@@ -152,6 +152,11 @@ fn historical_rejections_and_lba10_sample_gate_are_explicit() {
     assert!(matrix.contains("UsbOnlyInfo_zero"));
     assert!(matrix.contains("independently dated/hashed component bytes"));
     assert!(matrix.contains("cemssafeudisklabeltool.exe local variants"));
+    assert!(matrix.contains("ReadUsbHserialsInfo@0x100054A0"));
+    assert!(matrix.contains("0x100072C0"));
+    assert!(matrix.contains("0x1000DDA0"));
+    assert!(matrix.contains("0x1000DB90"));
+    assert!(matrix.contains("disk_end-4sectors-0x80000"));
 
     let lba10 = LEDGER
         .lines()
