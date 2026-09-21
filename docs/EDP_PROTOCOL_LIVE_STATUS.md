@@ -7,8 +7,8 @@
 
 ## 严格进度
 
-- COMPLETE：5594 / 6656 B = 84.0%
-- PARTIAL：1062 B
+- COMPLETE：5610 / 6656 B = 84.3%
+- PARTIAL：1046 B
 - UNKNOWN：0 B
 - 本轮进入时仓库 HEAD：`63b76da1fed351f1e7bbe45f0f12f5c22765e3dc`
 - 中途另一工作流先在 `1c281cb9bf4a9d92f8fc27198120d53db6466da9` 将真实免密 SanDisk
@@ -16,12 +16,13 @@
   reconstruction 与 2021 repair 边界证据，LBA4 `+0x046` 重新满足 COMPLETE 门禁。
   LBA4 `0x020..0x033` 继续保持 PARTIAL。
 
-## 最新结论：LBA4 MyHardinfo / LBA8 HDSerialInfo 已闭环
+## 最新结论：LBA4 MyHardinfo / LBA8 host identity 与 UsbOnlyInfo 已闭环
 
 - v19.11.4.1 的 LBA4 SAFE6 writer 与 LBA8 LLGB writer 独立调用 `EDP_DiskNumber`，返回0才 fallback `EDP_DeviceNumber`，分别写 `MyHardinfo@node+0x1D` 与 `HDSerialInfo@+0x14`；current profile 两处都为0。
 - strict originals 逐盘 22/22 两副本完全相等；非零集合为 `A017AD78/A68BAE08/8B4613F5/2AB0E33C`，其中 `A68BAE08` 跨 Lexar 与 Aigo 不同目标U盘出现，符合 host identity 而不是目标U盘唯一身份。
 - current `EdpEDiskCtrl::UpLoadBackupInfo` 的 JSON 模板直接硬编码 `myHardinfo=0`，historical restore 又只消费 `OnllyID2Nd`，因此上层业务对该 DWORD 是 structural-preserve / semantic-ignore。
-- v19 的相邻 `UsbOnlyInfo` 与 strict legacy 不同只证明另一个16B字段存在 generation 分叉；MyHardinfo/HDSerialInfo 本身的 producer、physical mirror、host grouping 与 negative consumer 已闭合。两处各4B升 COMPLETE，`UsbOnlyInfo[0..15]` 仍保持 PARTIAL。
+- `UsbOnlyInfo[0..15]` 现按 optional compatibility identity text 建模：current producer 写 `"%08x%08x" = main onlyid + 0`；v19 transitional producer 写相同16字符格式、第二DWORD为 host-hardinfo；strict legacy originals 保持16B全零，代表 absent profile。
+- registration semantic reader跳过该槽，current/v19 runtime只结构保存且无值相关业务分支；因此三种已观测 profile 的 producer/absent-state、consumer 和 physical evidence 已闭合。最早把该槽留空的 manufacturing EXE 未取得，但不再构成该16B字段语义缺口。MyHardinfo/HDSerialInfo 两处各4B与 UsbOnlyInfo 16B 均为 COMPLETE。
 
 ## 最新结论：LBA10 EESI 正向物理 profile 已闭环
 

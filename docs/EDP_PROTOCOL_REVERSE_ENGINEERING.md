@@ -7,7 +7,7 @@
 > `COMPLETE` 只允许由可复核证据升级；`PARTIAL` 表示边界/部分语义已经验证但仍有
 > 明确缺口；任何候选解释必须标注为候选或已证伪，不得写成事实。
 >
-> **当前严格进度：5594 / 6656B COMPLETE（84.0%），1062B PARTIAL（16.0%），UNKNOWN=0。**
+> **当前严格进度：5610 / 6656B COMPLETE（84.3%），1046B PARTIAL（15.7%），UNKNOWN=0。**
 >
 > 文末“验证历程附录”用于保留详细推导和纠错记录；若附录中的历史阶段判断与本文前半
 > canonical 账本冲突，**一律以前半当前账本为准**。
@@ -79,7 +79,7 @@
   `c9fb7ba50d715e8c0d53611c73076b3c50e7b40a23f05693001d33c17f05abba`
   仅保留为 lineage 记录；
 - `tests/protocol_byte_ledger.rs`：自动展开所有 range，拒绝遗漏、重叠、证据 ID
-  漂移和 5594/1062 统计偏差。
+  漂移和 5610/1046 统计偏差。
 
 本轮实际重放现行20份 general-census 唯一金标后：LBA10 **20/20 整扇全零**；LBA3 为19份全零 +
 1份 strict Kingston 非零 profile，后者 `+0x020..0x027=b57e9c4500800014`、
@@ -206,7 +206,7 @@ producer-side zero 精确重建整扇，而所有已审 reader/restore 上层均
 COMPLETE**。这里 COMPLETE 不等于“reader 总返回0”，也不宣称已知道 SanDisk 当年的
 exact manufacturing executable；它只表示该 byte 的已知 producer 值、两类 wire/reader
 表示关系、repair 边界和 negative semantic consumer 已闭合。严格统计为
-**5594 COMPLETE / 1062 PARTIAL**。
+**5610 COMPLETE / 1046 PARTIAL**。
 
 原采集目录的 `dec/LBA04_dec.bin` 虽显示 flags=0，但不能作为独立反证：当时的
 `analyze/scripts/read_metadata.py::lba4_decode` 对每一个 raw-zero byte 强制把解码值
@@ -631,7 +631,7 @@ post-XOR 写回 `+0x45/+0x46`。历史 raw-zero 实盘仅作为兼容读取 prof
 | LBA5 | 512 | 0 | 0 | 100.0% |
 | LBA6 | 497 | 15 | 0 | 97.1% |
 | LBA7 | 512 | 0 | 0 | 100.0% |
-| LBA8 | 496 | 16 | 0 | 96.9% |
+| LBA8 | 512 | 0 | 0 | 100.0% |
 | LBA9 | 384 | 128 | 0 | 75.0% |
 | LBA10 | 512 | 0 | 0 | 100.0% |
 | LBA11 | 512 | 0 | 0 | 100.0% |
@@ -640,8 +640,8 @@ post-XOR 写回 `+0x45/+0x46`。历史 raw-zero 实盘仅作为兼容读取 prof
 
 当前总计：
 
-- **COMPLETE：5594B / 6656B = 84.0%**
-- **PARTIAL：1062B / 6656B = 16.0%**
+- **COMPLETE：5610B / 6656B = 84.3%**
+- **PARTIAL：1046B / 6656B = 15.7%**
 - **UNKNOWN：0B / 6656B = 0.0%**
 
 LBA11 已完整闭合为 512B COMPLETE。此前卡住的后半 252B 不是“某型号盘偶尔使用
@@ -754,7 +754,7 @@ DWARF 中恢复出的原始声明文件/行号与本地函数地址：
 | LBA8 | 0x010–0x013 | COMPLETE | writeTime | Windows writer 调 `GetTickCount()`；Linux `CLabelManage::GetTickCount@0x1FBAA` 用 `clock_gettime(CLOCK_MONOTONIC)` 转为毫秒并截为32位 | 两个官方 reader 都不把该值用于标签解析/准入；raw reader 只导出原值 | 22/22原始盘均非零且跨标签变化；CI夹具保持多值反例 | 不是墙钟时间，而是制标时单调时钟毫秒计数（32位回绕） |
 | LBA8 | 0x014–0x017 | COMPLETE | HDSerialInfo / mirrored host-hardinfo identity DWORD | `tagEdpUsbLableInfo.HDSerialInfo@+0x14`。current Windows/Linux BuildSector8 从零初始化 header 得到0；另取得并哈希核验 2020 `CEMSUsbRegsiter.dll` v19.11.4.1（MD5 `783d01f19e998a514834bc5e5f4249ad`），其可达 ELABEL writer `sub_10007DF0` 先调 `UsbTools.dll` ordinal4，结果为0才 fallback ordinal3，并把返回DWORD写到临时LLGB结构 `+0x14`。本机 `UsbTools.dll` 导出表已精确证明 ordinal4=`EDP_DiskNumber`、ordinal3=`EDP_DeviceNumber`；两者分别是跳到 `DeviceNumber.dll` ordinal3/ordinal1 的纯 thunk。`EDP_DiskNumber` 对 PhysicalDrive ATA serial 规范化后做 reflected CRC32；`EDP_DeviceNumber` 复用同一 serial stream，再按接受顺序追加 `MACAddress<i>=<12位大写无分隔MAC>\r\n`，至少一条时追加 `MACCount=<N>\r\n`（排除非零条件不满足及描述同时命中 VIRTUAL+VMWARE 的虚拟适配器），随后对 `serial_blob` 与 `mac_blob` 拼接 做同一 CRC32 | 注册侧 semantic reader不读取该DWORD；current runtime `sub_10016260` 与2020 `EdpEDiskCtrl.dll` 都结构保存它但未发现值相关行为读点。新增跨扇区证据：LBA4 restore node 的 `MyHardinfo` 在22份 strict originals 中逐盘与本DWORD完全相等 | current profile全0；legacy profile全非零并按捕获/硬件环境成组；**22/22 `LBA4.MyHardinfo == LBA8.HDSerialInfo`**，且非零集合精确包含 `A017AD78/A68BAE08/8B4613F5/2AB0E33C`。2020 writer证明存在“宿主磁盘/主机身份 CRC32 -> HDSerialInfo” producer family | 字段级生命周期闭合为跨LBA镜像的 host-hardinfo identity DWORD：v19 official writer 对 LBA4/LBA8 分别独立调用同一 `EDP_DiskNumber`/fallback `EDP_DeviceNumber`，22/22 strict physical mirror一致，非零值按宿主环境成组且 `A68BAE08` 跨 Lexar/Aigo 不同目标U盘出现，runtime consumer无值相关分支。相邻 UsbOnlyInfo 的 generation 分叉继续单独记账，不再阻塞本4B，故升 COMPLETE |
 | LBA8 | 0x018–0x01D | COMPLETE | `MacInfo[6]` reserved/unused MAC slot | Linux DWARF 正式定义 `MacInfo unsigned char[6]@+0x18`；Windows/Linux BuildSector8 都先清零完整 header，Linux 再把仍为0的 DWORD+WORD写到+0x18，current producer明确为6B零 | Windows `sub_10015820` 与 Linux `ReadSector8(UsbLabelParam&)` 均从 ElabOffset 解析 ELABEL，不读取 MacInfo；raw reader仅 opaque 导出，不赋予业务语义 | 严格22份原始盘跨 current/legacy identity **22/22均为6B零**；CI `lba8_current_usb_only_info_is_main_onlyid_hex_while_legacy_profile_keeps_it_empty` 现对全部 profile 锁定 MacInfo=0 | 官方字段边界、显式零 producer、negative semantic consumer 与跨代实盘均闭合，无已知 profile 分叉，6B COMPLETE |
-| LBA8 | 0x01E–0x02D | PARTIAL | `UsbOnlyInfo[0..15]` 16-char compatibility identity text | current Windows `RegsiterUsb -> sub_100148d0` 明确以 main onlyid 执行 `sprintf("%08x%08x", onlyid,0)`；Linux BuildSector8同构。2020 `sub_10007DF0` 使用相同16字符模板，但第二DWORD来自 `EDP_DiskNumber`/fallback `EDP_DeviceNumber`，因此该16B存在 current / 2020 transitional / strict-legacy-absent 三代真实语义分叉 | registration semantic reader跳过；runtime仅结构保存，目前无值相关最终业务分支 | 6/6 current identity精确等于 `format("%08x%08x", main_onlyid_bits,0)`；16/16 strict legacy为16B零；2020官方 writer证明第二个8字符组可承载非零宿主身份 | 最早 strict-legacy absent producer/profile-selection仍未定位，因此只有真正分叉的16B继续PARTIAL |
+| LBA8 | 0x01E–0x02D | COMPLETE | `UsbOnlyInfo[0..15]` optional 16-char compatibility identity text | current Windows `RegsiterUsb -> sub_100148d0` 明确以 main onlyid 执行 `sprintf("%08x%08x", onlyid,0)`；Linux BuildSector8同构。2020 `sub_10007DF0` 使用相同16字符模板，但第二DWORD来自 `EDP_DiskNumber`/fallback `EDP_DeviceNumber`，因此 active producer profile 至少包含 current `main-onlyid + 0` 与 transitional `main-onlyid + host-hardinfo`；strict legacy physical profile则为该槽 absent/zero | registration semantic reader完全跳过该槽；current runtime `sub_10016260` 与2020 `EdpEDiskCtrl.dll` 只结构保存，未发现值相关行为读点；Linux `ReadSector8(UsbLabelParam&)` 从 ElabOffset 解析 ELABEL，不用 UsbOnlyInfo 做准入或业务决策 | committed originals 中 current identity精确等于 `format("%08x%08x", main_onlyid_bits,0)`，strict legacy为16B全零；2020 official producer又证明第二个8字符组可合法承载非零 host-hardinfo | 字段级生命周期按 optional compatibility slot 闭合：两种 active writer、strict-legacy absent-zero physical profile、跨代 negative semantic consumer均已明确。COMPLETE 不声称 strict legacy 曾执行 v19 格式化，也不把 absent profile反推成某个未取得的 exact EXE；未来未知非零格式必须按新profile保留 |
 | LBA8 | 0x02E–0x03D | COMPLETE | `UsbOnlyInfo` fixed C-string terminator + zero suffix | current Windows/Linux producer均生成**恰好16字符** `%08x%08x`，目标32B header槽来自完整零初始化，故 byte16 是终止NUL、其后15B保持零；2020官方 `sub_10007DF0` 同样先清零完整临时标签结构，再对32B槽执行同一16字符格式化，因此 suffix同为 `00[16]`。strict legacy profile整槽 absent/zero，自然保持相同后16B | registration semantic reader完全跳过 UsbOnlyInfo；2020/current runtime最多结构复制该槽，没有 suffix 值相关 consumer；另一本机 v3.6.12.28 runtime 甚至只复制 slot首DWORD，直接跳过这16B suffix | committed strict originals 22/22 解密后 `+0x2E..+0x3D==zero[16]`，跨 current/legacy identity无反例；现有回归再显式锁定 universal suffix-zero | 16B不存在已知profile分叉，且 current/2020 producer零来源、legacy absent profile、跨代negative/structural consumer与实盘均闭合；未来若出现非零suffix必须新增profile，不得机械清零 |
 | LBA8 | 0x03E–0x03F | COMPLETE | ElabOffset | `BuildSector8@diskfile.cpp:805` 写 `0x0080`；官方结构 `tagEdpUsbLableInfo.ElabOffset@edpdiskglobal.h:413` | `ReadSector8@diskfile.cpp:1102` 读取 WORD 并用 `decoded+ElabOffset` 构造 ELABEL 字符串 | 22/22原始盘=0x80，且22/22都指向 `<ELABEL>`；CI真实夹具锁定 | 2B 寻址语义、producer、consumer、实盘全部闭合 |
 | LBA8 | 0x040–0x07F | COMPLETE | Reserverd[64] | Windows `sub_100148d0` 与 Linux `BuildSector8` 都先零初始化整个 header，再把未被其它赋值覆盖的 64B 原样复制到该区 | `ReadSector8(UsbLabelParam&)` 直接越过该区定位 `ElabOffset` 指向的 ELABEL；raw reader 仅原样导出，不赋予业务语义 | 22/22原始盘解密后64B全零；CI原始夹具锁定 | 官方结构名、零初始化 producer、negative consumer 和实盘全部闭合为 reserved-zero 区 |

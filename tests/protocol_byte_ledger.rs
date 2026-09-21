@@ -121,13 +121,13 @@ fn byte_ledger_covers_exactly_6656_bytes_without_overlap() {
         "byte ledger contains gaps"
     );
     let expected_complete = [
-        142, 512, 512, 0, 491, 512, 497, 512, 496, 384, 512, 512, 512,
+        142, 512, 512, 0, 491, 512, 497, 512, 512, 384, 512, 512, 512,
     ];
-    let expected_partial = [370, 0, 0, 512, 21, 0, 15, 0, 16, 128, 0, 0, 0];
+    let expected_partial = [370, 0, 0, 512, 21, 0, 15, 0, 0, 128, 0, 0, 0];
     assert_eq!(complete, expected_complete);
     assert_eq!(partial, expected_partial);
-    assert_eq!(complete.iter().sum::<usize>(), 5594);
-    assert_eq!(partial.iter().sum::<usize>(), 1062);
+    assert_eq!(complete.iter().sum::<usize>(), 5610);
+    assert_eq!(partial.iter().sum::<usize>(), 1046);
 
     for lba in 0..13 {
         let progress = format!("| LBA{lba} | {} | {} | 0 |", complete[lba], partial[lba]);
@@ -182,7 +182,7 @@ fn historical_rejections_and_lba10_positive_physical_gate_are_explicit() {
 }
 
 #[test]
-fn host_hardinfo_mirror_is_closed_independently_from_usb_only_info_generation() {
+fn host_hardinfo_and_optional_usb_only_info_have_separate_closed_lifecycles() {
     let lba4 = LEDGER
         .lines()
         .find(|line| line.starts_with("4\t035-038\tCOMPLETE\t"))
@@ -193,7 +193,7 @@ fn host_hardinfo_mirror_is_closed_independently_from_usb_only_info_generation() 
         .expect("LBA8 HDSerialInfo row");
     let usb_only = LEDGER
         .lines()
-        .find(|line| line.starts_with("8\t01e-02d\tPARTIAL\t"))
+        .find(|line| line.starts_with("8\t01e-02d\tCOMPLETE\t"))
         .expect("LBA8 UsbOnlyInfo row");
 
     for row in [lba4, lba8] {
@@ -201,7 +201,8 @@ fn host_hardinfo_mirror_is_closed_independently_from_usb_only_info_generation() 
         assert!(row.contains("host"));
         assert!(row.contains("P-GOLD-ENC"));
     }
-    assert!(usb_only.contains("strict legacy absent/zero producer remains missing"));
+    assert!(usb_only.contains("strict-legacy-absent"));
+    assert!(usb_only.contains("semantic consumers do not branch"));
     assert!(DOC.contains("A68BAE08"));
     assert!(DOC.contains("不同目标U盘"));
 }
@@ -280,7 +281,7 @@ fn devicenumber_host_identity_crc_boundary_is_explicit() {
         "0x100130A2",
         "fcn.10013210",
         "standard reflected IEEE CRC-32",
-        "does **not** close the strict-legacy profile",
+        "LBA4 `HSerialCRC[5]` remains PARTIAL",
         "one DWORD",
         "HDOnlySerial[5]",
     ] {

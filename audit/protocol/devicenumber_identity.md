@@ -66,16 +66,9 @@ entry.  It stores that single DWORD in both the restore-node
 meaning of those fields as a host-identity CRC family more precisely than
 the earlier generic “hardware serial” label.
 
-This still does **not** close the strict-legacy profile:
+Field-level closure is now separated from generation-wide identity:
 
-1. the v19.11.4.1 writer is a transitional generation whose
-   `UsbOnlyInfo` behavior differs from the strict-legacy gold samples; and
-2. `DeviceNumber.dll` returns one DWORD, while
-   `UsbLabelParam::HDOnlySerial[5]` is five DWORDs.  No machine-code path
-   has yet been found that expands this single result into those five
-   values or otherwise generates the strict nonzero five-slot sequence.
-
-Accordingly LBA4 `MyHardinfo`, LBA8 `HDSerialInfo`, and especially LBA4
-`HSerialCRC[5]` keep their existing strict status until the exact
-generation/profile producer is recovered.
+1. LBA4 `MyHardinfo` and LBA8 `HDSerialInfo` are COMPLETE because v19 independently writes the same `EDP_DiskNumber`/fallback `EDP_DeviceNumber` result to both locations, current writes zero, 22/22 strict originals mirror the two DWORDs, the same nonzero host value can recur across different target USB vendors, and audited consumers do not branch on it.
+2. LBA8 `UsbOnlyInfo[0..15]` is also COMPLETE as an optional compatibility slot: current writes `main-onlyid + 0`, v19 transitional writes `main-onlyid + host-hardinfo`, strict legacy physical samples carry the absent-zero profile, and semantic readers ignore the slot. This does not claim the strict-legacy disks were manufactured by v19.
+3. LBA4 `HSerialCRC[5]` remains PARTIAL. `DeviceNumber.dll` returns one DWORD, while `UsbLabelParam::HDOnlySerial[5]` is five DWORDs; no machine-code path has yet been found that generates the strict nonzero five-slot sequence.
 
