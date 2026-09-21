@@ -7,7 +7,7 @@
 > `COMPLETE` 只允许由可复核证据升级；`PARTIAL` 表示边界/部分语义已经验证但仍有
 > 明确缺口；任何候选解释必须标注为候选或已证伪，不得写成事实。
 >
-> **当前严格进度：5586 / 6656B COMPLETE（83.9%），1070B PARTIAL（16.1%），UNKNOWN=0。**
+> **当前严格进度：5458 / 6656B COMPLETE（82.0%），1198B PARTIAL（18.0%），UNKNOWN=0。**
 >
 > 文末“验证历程附录”用于保留详细推导和纠错记录；若附录中的历史阶段判断与本文前半
 > canonical 账本冲突，**一律以前半当前账本为准**。
@@ -38,8 +38,7 @@
 
 ### 1.1 实盘证据规则
 
-从 2026-09-20 起，协议样本的金标来源固定为以下两个目录，以及一个经过独立
-provenance 复核的补充原始捕获：
+从 2026-09-20 起，协议样本的**唯一金标来源**固定为以下两个目录：
 
 - 加密原盘备份：`/Users/zhangyuxi/.edpcli-backup`。当前目录有 23 份 `.bin`，
   其中 21 份非 `_nopwd_` 备份组成严格 original-generation 金标集；目录内 2 份
@@ -47,19 +46,6 @@ provenance 复核的补充原始捕获：
 - 真实免密盘：`/Users/zhangyuxi/Desktop/u_disk/analyze/disk_data/no_password_disk4`。
   这是 SanDisk Ultra 真实免密盘的只读采集，是免密行为/profile 的唯一金标；它与
   `.edpcli-backup` 中的自制 `_nopwd_` 备份不可混用。
-- **补充加密原盘正向金标（只允许这一份显式例外，不重新放开其它散落快照）**：
-  `/Users/zhangyuxi/Desktop/u_disk/analyze/last/three_disks/disk3/raw/front_LBA0_12.bin`，
-  仓库固定副本为
-  `tests/fixtures/protocol_evidence/sandisk_ultra_usb_3_0_front_lba0_12.bin`。
-  源文件 SHA-256=`764fc0bbbdf5a9980498d710cb90bce3f8b623f66dec07cb580debc4869538b4`；
-  源采集、`info.json` 与脚本早在 2026-06-30 的 `u_disk` commit `404cd97` 已提交，
-  采集脚本以 `os.open(dev, os.O_RDONLY)` 打开真实块设备并仅用 `os.pread` 读取，
-  `info.json` 明确记录“只读采集, 不写真实盘”，设备为 `0781:5591` SanDisk Ultra USB 3.0。
-  该完整6656B捕获的 LBA10 与既有
-  `sandisk_ultra_usb_3_0_lba10.bin` 512B fixture 逐字节一致；provenance 另固定在
-  `sandisk_ultra_usb_3_0_front_lba0_12.provenance.txt`。这份证据仅用于补足需要
-  **启用 EESI 正向真实盘**的字段，不授权把其它历史目录重新纳入金标统计。
-
 `nopwd_tool/backup`、`utils/backup`、散落的历史快照以及仓库裁剪夹具均不得再作为
 金标统计来源。仓库 `tests/fixtures/protocol` 只保留从金标提取的 CI 回归子集；附录中
 残留的 22/57/58 份历史 census 仅记录当时研究过程，不能覆盖本节口径，也不能独立
@@ -466,15 +452,15 @@ post-XOR 写回 `+0x45/+0x46`。历史 raw-zero 实盘仅作为兼容读取 prof
 | LBA7 | 512 | 0 | 0 | 100.0% |
 | LBA8 | 492 | 20 | 0 | 96.1% |
 | LBA9 | 384 | 128 | 0 | 75.0% |
-| LBA10 | 512 | 0 | 0 | 100.0% |
+| LBA10 | 384 | 128 | 0 | 75.0% |
 | LBA11 | 512 | 0 | 0 | 100.0% |
 | LBA12 | 512 | 0 | 0 | 100.0% |
 <!-- STRICT_PROGRESS_END -->
 
 当前总计：
 
-- **COMPLETE：5586B / 6656B = 83.9%**
-- **PARTIAL：1070B / 6656B = 16.1%**
+- **COMPLETE：5458B / 6656B = 82.0%**
+- **PARTIAL：1198B / 6656B = 18.0%**
 - **UNKNOWN：0B / 6656B = 0.0%**
 
 LBA11 已完整闭合为 512B COMPLETE。此前卡住的后半 252B 不是“某型号盘偶尔使用
@@ -606,11 +592,11 @@ DWARF 中恢复出的原始声明文件/行号与本地函数地址：
 | LBA9 | 0x184–0x187 | COMPLETE | minimum password length | writer限制6..19 | `ReadMinPassLenInfo` 返回该DWORD | 6/6=8 | 完成 |
 | LBA9 | 0x188–0x1FF | COMPLETE | **EPPE writer-owned zero tail** | PE机器码 `SetPassInfoEx/sub_1003ADD0`：先校验输入DWORD为6..19，再对 EPPE `+0x04..+0x7F` 124B整体清零，写 magic，随后明确 `EPPE+0x04=*arg0`；因此 `+0x08..+0x7F` 120B 在 current writer 中为显式零 | 正式注册侧 `CUsbRegsiter::GetPassInfoEx` 解密并校验 EPPE 后只执行 `*out = *(decoded+0x04)`；独立 `modfilesyscheck::ReadMinPassLenInfo` 同样只消费 magic/+0x04。两套 `EdpDiskCtrl` 虽保留可搬运完整0x80B的 `ReadPassExInfo/GetPassExInfo` compatibility helper，但其外层对象由唯一两个 DLL export（Create/Release）创建，current factory vtable `0x1008021c` 不包含该 helper，反编译交叉引用也仅见实现/相邻 thunk，未形成 current 产品语义消费路径 | 严格22份中6份EPPE；6/6 minPassLen=8 且解密后120B全零；CI门禁 `real_eppe_samples_keep_the_current_writer_zero_tail` | 120B 的 current producer、两个独立 semantic reader 的 negative consumer、当前公开接口边界与原始实盘均闭合，按 writer-owned zero region 升 COMPLETE。COMPLETE 不授权清洗未知历史非零 profile：兼容读取若未来遇到非零 tail 应保留/报告，而不是据此臆造业务字段 |
 | LBA9 | 0x080–0x0FF | PARTIAL | long-Dept continuation slot（current join=60 / CEMS2.0 legacy join=59） | Windows `BuildSector6/sub_10013FD0`、Linux `BuildSector6@0x1CAAC` 与 `vrvaud_c::sub_10118ED0` 三套 current producer一致：Dept长度>=64时在 LBA6+0写 `0x40245E2A + Dept前60B`，再把 `Dept[60..NUL]` 写入 LBA9+0x80；若未触发长Dept则该builder不覆盖此区。对本机 VRV 二进制按 `0x40245E2A` 做全量常量指纹后，producer 命中仅见 current `cemsusbregsiter.dll` / `vrvaud_c.dll`，且两者都复制60B；历史 v19.11.4.1 直接 LBA6 writer `fcn.10006370` 则完全没有 marker 分支 | current Windows `ReadSector6/sub_100152A0` 先从 marker 后复制完整 `0x3C=60B` inline prefix，再检查 `prefix[59]`：0时 continuation 接 Dept+59，非零时接 Dept+60。CEMS2.0 `cems/Edp/fileophook.dll` `fcn.10022f80@0x10022F80` 的 marker 分支在复制60B inline 后，无条件把0x80 continuation 写到目标 `+0x3B`；x64 build同构，PDB路径明确落在 `\\SVNRoot\\vrvrsms2.0\\Cems2.0\\trunk\\modCems\\Bin\\FileOpHook*.pdb`。因此这里闭合的是 **CEMS2.0 join59 reader only**，不能反推同代 writer | 严格22盘恰有8盘 marker+continuation：4盘 join=60、continuation含NUL共17B；4盘 join=59、continuation含NUL共18B；两组均重建为相同76B合法GBK Dept。CI `lba9_dept_continuation_preserves_both_official_reader_join_profiles` 锁定 inline[59]!=0 -> 60、inline[59]==0 -> 59 与两种真实profile | current producer、current自描述reader、CEMS2.0固定join59 reader及实盘均闭合；**all locally available marker writers use 60**，所以 exact blocker 进一步收缩为尚未取得的 CEMS2.0 同代 legacy join59 writer/profile-selection。128B继续PARTIAL |
-| LBA10 | 0x000–0x003 | COMPLETE | EESI magic | `SetEdpEdiskSetInfo` 强制写入 `EESI` magic 并仅加密前0x80B | `GetEdpEdiskSetInfo` 解密前0x80B并首先校验 `EESI` | 补充金标 `sandisk_ultra_usb_3_0_front_lba0_12.bin` 的 LBA10 与既有512B fixture逐字节一致，按 SanDisk `device_id` 解密后命中 `EESI`；完整捕获源 SHA-256 与只读采集 provenance 已固定 | producer、consumer、正向真实盘与 provenance 均闭合，4B COMPLETE |
-| LBA10 | 0x004–0x007 | COMPLETE | **UsbSuspensionWnd lifecycle/control flag** | 两套独立 `EdpEDisk.exe`（SHA-256 `cfa13177...` / `dc71c300...`）启动时都先将完整0x80B EESI缓冲清零并显式写 `+0x04=1` 后调用 vtable `+0x20 GetEdpEdiskSetInfo`；同两套程序的卷标设置对话框 `IDOK` handler zero-initializes the full 0x80B EESI payload，只填 `+0x08/+0x18` 两个卷标，再经 vtable `+0x24 SetEdpEdiskSetInfo` 保存，因此该 producer 路径明确写 `+0x04=0`；底层 setter 只强制 magic，其余DWORD原样落盘 | 两套程序均加载 `UsbSuspensionWnd.dll` 的 `Show/Destroy/SetParentWnd`：读回 EESI 后 `+0x04==0` 路径调用 `Destroy`；自动登录成功后 `+0x04!=0` 且 suspension-window helper 已初始化时，进入刷新/`Show` 链；`UserLogin` 自身不把该DWORD当卷标开关 | 补充 SanDisk 只读金标解密值为1；其完整6656B源文件、设备身份与采集脚本 provenance 已锁定 | 4B边界、0/1官方 producer、值相关 consumer 与正向真实盘闭合，COMPLETE |
-| LBA10 | 0x008–0x017 | COMPLETE | Share/type2 volume label | `SetEdpEdiskSetInfo` 原样复制调用者结构前0x80并加密写入；默认 reader 初始化为GBK“交换区” | `CEdpDiskControl::UserLogin` 将该槽赋给本地 string；type2分支传给 `SetVolumeLabelA` | 补充 SanDisk 只读金标解密后精确为GBK“交换区”+NUL/zero fill | 16B字段语义、writer、consumer、正向真实盘闭合 |
-| LBA10 | 0x018–0x027 | COMPLETE | Encrypt/type4 volume label | 同上；默认 reader 初始化为GBK“保密区” | `UserLogin` type4分支传给 `SetVolumeLabelA` | 补充 SanDisk 只读金标解密后精确为GBK“保密区”+NUL/zero fill | 16B字段语义、writer、consumer、正向真实盘闭合 |
-| LBA10 | 0x028–0x07F | COMPLETE | EESI caller-owned compatibility extension | 两个独立 EESI `EdpEDiskCtrl` build 的 Get/Set 证明完整0x80B structural round-trip；current official UI profile对这88B写零 | current callers不读取这88B；更老两代无EESI接口 | 补充 SanDisk 只读金标与独立历史 Netac EESI 正例解密后这88B均全零；SanDisk 正例 provenance 已纳入金标 | 生命周期闭合为 caller-owned compatibility extension：底层原样 round-trip、current caller 写零且不解释；未来非零必须preserve，88B COMPLETE |
+| LBA10 | 0x000–0x003 | PARTIAL | EESI magic | Set EESI writer已定位 | Get EESI reader已定位 | 指定金标中的21份加密原盘与1份真实免密盘均未出现EESI | producer/consumer已闭合，但正向EESI捕获不在指定金标目录，缺金标正向实盘，保持PARTIAL |
+| LBA10 | 0x004–0x007 | PARTIAL | **UsbSuspensionWnd lifecycle/control flag** | 两套独立 `EdpEDisk.exe`（SHA-256 `cfa13177...` / `dc71c300...`）启动时都先将完整0x80B EESI缓冲清零并显式写 `+0x04=1` 后调用 vtable `+0x20 GetEdpEdiskSetInfo`；同两套程序的卷标设置对话框 `IDOK` handler zero-initializes the full 0x80B EESI payload，只填 `+0x08/+0x18` 两个卷标，再经 vtable `+0x24 SetEdpEdiskSetInfo` 保存，因此该 producer 路径明确写 `+0x04=0`；底层 setter 只强制 magic，其余DWORD原样落盘 | 两套程序均加载 `UsbSuspensionWnd.dll` 的 `Show/Destroy/SetParentWnd`：读回 EESI 后 `+0x04==0` 路径调用 `Destroy`；自动登录成功后 `+0x04!=0` 且 suspension-window helper 已初始化时，进入刷新/`Show` 链；`UserLogin` 自身不把该DWORD当卷标开关 | 指定金标无启用EESI的正向盘 | 4B边界、0/1官方 producer 与值相关 consumer 已闭合；缺金标正向实盘，保持PARTIAL |
+| LBA10 | 0x008–0x017 | PARTIAL | Share/type2 volume label | `SetEdpEdiskSetInfo` 原样复制调用者结构前0x80并加密写入；默认 reader 初始化为GBK“交换区” | `CEdpDiskControl::UserLogin` 将该槽赋给本地 string；type2分支传给 `SetVolumeLabelA` | 指定金标无启用EESI的正向盘 | 字段语义、writer、consumer已闭合，缺金标正向实盘 |
+| LBA10 | 0x018–0x027 | PARTIAL | Encrypt/type4 volume label | 同上；默认 reader 初始化为GBK“保密区” | `UserLogin` type4分支传给 `SetVolumeLabelA` | 指定金标无启用EESI的正向盘 | 字段语义、writer、consumer已闭合，缺金标正向实盘 |
+| LBA10 | 0x028–0x07F | PARTIAL | EESI caller-owned compatibility extension | 两个独立 EESI `EdpEDiskCtrl` build 的 Get/Set 证明完整0x80B structural round-trip；current official UI profile对这88B写零 | current callers不读取这88B；更老两代无EESI接口 | 指定金标无启用EESI的正向盘 | lifecycle已定位，但缺金标正向EESI实盘，88B保持PARTIAL |
 | LBA10 | 0x080–0x1FF | COMPLETE | cross-generation unowned preserve/ignore physical tail | 两个独立 EESI build的setter只覆盖前0x80B并原样回写后0x180B；旧两代没有该tail producer | getter只解密/返回前0x80B，所有已审consumer均忽略后384B | `/Users/zhangyuxi/.edpcli-backup` 的21份非免密金标与真实免密金标 `no_password_disk4` 均为384B零；官方writer的preserve行为独立闭合 | COMPLETE表示该384B不属于EESI payload且必须preserve，不表示协议要求恒零 |
 | LBA11 | 0x000–0x003 | COMPLETE | DRKB magic | `CDataSecrity::RandBuffer256` 先写 DRKB | `ReadSector11` 首先校验 DRKB | 22/22 | 完成 |
 | LBA11 | 0x004–0x0FF | COMPLETE | random252 | `RandBuffer256`: `srand(time(NULL)); rand()%255` 共252B | `DataEncrypt/DataDecrypt` 将整个 DRKB块纳入 CRC32 密钥输入 | 22/22；均无0xFF；7 CI夹具回归 | 每字节都是密钥扰动材料，来源和消费闭合 |

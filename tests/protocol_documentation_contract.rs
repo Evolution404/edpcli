@@ -28,6 +28,7 @@ fn protocol_analysis_has_one_canonical_document() {
         "docs/HANDOFF_PROVISION_NEW_USB_2026-09-19.md",
         "docs/HISTORICAL_DLL_TARGETS_2026-09-21.md",
         "docs/PHISON_F2_TRACE_2026-09-21.md",
+        "docs/EDP_PROTOCOL_REVERSE_ENGINEERING_STATUS.md",
     ] {
         assert!(
             !Path::new(obsolete).exists(),
@@ -89,11 +90,11 @@ fn strict_progress_covers_exactly_lba0_through_lba12() {
     );
     assert_eq!(complete + partial + unknown, 13 * 512);
     assert!(
-        complete >= 5586,
+        complete >= 5458,
         "strict COMPLETE coverage regressed below the corrected audited baseline: {complete}"
     );
     assert!(
-        partial <= 1070,
+        partial <= 1198,
         "PARTIAL coverage regressed above the corrected audited baseline: {partial}"
     );
     assert_eq!(
@@ -101,8 +102,8 @@ fn strict_progress_covers_exactly_lba0_through_lba12() {
         "all LBA0..12 bytes are at least PARTIAL after the completed UNKNOWN audit"
     );
     assert!(
-        DOC.contains("COMPLETE：5586B / 6656B = 83.9%")
-            && DOC.contains("PARTIAL：1070B / 6656B = 16.1%"),
+        DOC.contains("COMPLETE：5458B / 6656B = 82.0%")
+            && DOC.contains("PARTIAL：1198B / 6656B = 18.0%"),
         "displayed global totals must match the corrected strict-progress ledger"
     );
 }
@@ -285,9 +286,6 @@ fn documentation_keeps_the_official_provisioning_chain_and_strict_rules() {
         "禁止把免密转换盘",
         "/Users/zhangyuxi/.edpcli-backup",
         "/Users/zhangyuxi/Desktop/u_disk/analyze/disk_data/no_password_disk4",
-        "analyze/last/three_disks/disk3/raw/front_LBA0_12.bin",
-        "764fc0bbbdf5a9980498d710cb90bce3f8b623f66dec07cb580debc4869538b4",
-        "os.open(dev, os.O_RDONLY)",
         "edpcli 自制免密盘，只能用于产品回归，**没有协议参考价值**",
     ] {
         assert!(
@@ -328,8 +326,12 @@ fn documentation_keeps_the_official_provisioning_chain_and_strict_rules() {
         "LBA9 progress must retain the closed EETU reverse backing and EPPE writer-owned zero tail semantics"
     );
     assert!(
-        DOC.contains("| LBA10 | 512 | 0 | 0 | 100.0% |"),
-        "LBA10 must be fully closed once the read-only SanDisk EESI gold capture is pinned"
+        DOC.contains("| LBA10 | 384 | 128 | 0 | 75.0% |"),
+        "LBA10 active EESI bytes must remain PARTIAL until a positive sample exists in the designated gold directories"
+    );
+    assert!(
+        !DOC.contains("补充加密原盘正向金标") && !DOC.contains("front_LBA0_12.bin"),
+        "the canonical ledger must not introduce a third gold evidence source"
     );
     assert!(
         DOC.contains("| LBA12 | 512 | 0 | 0 | 100.0% |"),

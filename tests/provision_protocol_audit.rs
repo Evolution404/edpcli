@@ -26,10 +26,6 @@ fn load(name: &str) -> Vec<u8> {
 const MIN_PROTOCOL_FIXTURES: usize = 7;
 const SANDISK_LBA10: &[u8; 512] =
     include_bytes!("fixtures/protocol_evidence/sandisk_ultra_usb_3_0_lba10.bin");
-const SANDISK_FULL_CAPTURE: &[u8; 6656] =
-    include_bytes!("fixtures/protocol_evidence/sandisk_ultra_usb_3_0_front_lba0_12.bin");
-const SANDISK_CAPTURE_INFO: &str =
-    include_str!("fixtures/protocol_evidence/sandisk_ultra_usb_3_0_front_lba0_12.provenance.txt");
 const SANDISK_LBA11_HEX: &str =
     include_str!("fixtures/protocol_evidence/sandisk_ultra_usb_3_0_lba11.hex");
 const SANDISK_LBA6_HEX: &str =
@@ -1578,7 +1574,7 @@ fn lba0_bootstrap_profiles_are_zero_or_the_official_usb_main_bsec_prefix() {
 #[test]
 fn strict_progress_has_no_partial_detail_rows_for_fully_complete_lbas() {
     let trace = include_str!("../docs/EDP_PROTOCOL_REVERSE_ENGINEERING.md");
-    let complete_lbas = ["LBA1", "LBA2", "LBA5", "LBA7", "LBA10", "LBA11", "LBA12"];
+    let complete_lbas = ["LBA1", "LBA2", "LBA5", "LBA7", "LBA11", "LBA12"];
 
     for lba in complete_lbas {
         let stale = trace
@@ -3406,18 +3402,6 @@ fn lba6_short_dept_slot_is_c_string_plus_uninitialized_backing() {
 
 #[test]
 fn real_sandisk_lba10_contains_share_and_encrypt_volume_labels() {
-    assert_eq!(
-        &SANDISK_FULL_CAPTURE[10 * 512..11 * 512],
-        SANDISK_LBA10,
-        "the committed EESI fixture must remain byte-identical to the June read-only full-device capture"
-    );
-    assert!(
-        SANDISK_CAPTURE_INFO.contains("只读采集, 不写真实盘")
-            && SANDISK_CAPTURE_INFO.contains("vid=0x0781")
-            && SANDISK_CAPTURE_INFO.contains("pid=0x5591")
-            && SANDISK_CAPTURE_INFO.contains("product=Ultra USB 3.0"),
-        "the positive EESI evidence must retain its real-device read-only capture provenance"
-    );
     let crc = crc32_bare(SANDISK_DEVICE_ID.as_bytes());
     let plain = a6b0_full(&SANDISK_LBA10[..0x80], &crc.to_le_bytes(), 0);
     assert_eq!(&plain[..4], b"EESI");
