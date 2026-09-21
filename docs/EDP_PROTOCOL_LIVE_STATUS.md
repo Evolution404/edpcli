@@ -27,6 +27,8 @@
 - 2020 caller 不消费这两个 scalar 输出，只把 0x2F node 传给 `vtable+0x44`；该槽在
   v19.11.4.1 精确对应 `RestoreRegsiterUsb/virtual_68@0x1000E650`，恢复端只取
   `node+0x04 OnllyID2Nd` 作为恢复密钥。
+- 历史写入链已继续闭合：`request+0x150..+0x160 -> object+0x2488..+0x2498 -> node+0x08..+0x1B -> fcn.10006090 -> LBA4`；但五个非零 DWORD 在进入 request 之前的生成算法仍未知。
+- `fcn.10008800` 会把 LBA4-LBA12 共9扇区原样备份到 `disk_end-0x80000`；该地址与第三 restore-node reader `fcn.1000DB90` 精确一致。
 
 因此已经**直接排除**“DeviceNumber/HDSerialCRC 单 DWORD 就是 LBA4 HSerialCRC[5] 20B”
 这一等价关系。但仍不能排除更早 writer 使用主机身份材料经过未知转换生成 5×DWORD；

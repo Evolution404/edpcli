@@ -156,7 +156,7 @@ fn historical_rejections_and_lba10_sample_gate_are_explicit() {
     assert!(matrix.contains("0x100072C0"));
     assert!(matrix.contains("0x1000DDA0"));
     assert!(matrix.contains("0x1000DB90"));
-    assert!(matrix.contains("disk_end-4sectors-0x80000"));
+    assert!(matrix.contains("disk_end-0x80000"));
     assert!(matrix.contains("ISUdiskRegsiterObj vtable 0x1019DB54"));
     assert!(matrix.contains("virtual_68@0x1000E650"));
     assert!(matrix.contains("directly disproves DeviceNumber/DiskNumber == HSerial[5]"));
@@ -176,12 +176,16 @@ fn lba4_hserial_and_devicenumber_direct_equivalence_stays_rejected() {
         .find(|line| line.starts_with("4\t020-033\tPARTIAL\tHSerialCRC[5]\t"))
         .expect("LBA4 HSerialCRC[5] ledger row");
 
-    assert!(row.contains("ReadUsbHserialsInfo ABI separates persisted 0x2F node"));
-    assert!(row.contains("direct equality"));
+    assert!(row.contains("request+0x150..+0x160 -> object+0x2488..+0x2498"));
+    assert!(row.contains("ReadUsbHserialsInfo ABI separates persisted node"));
     assert!(row.contains("strict legacy nonzero upstream producer still missing"));
     assert!(DOC.contains("vtable+0x2C"));
     assert!(DOC.contains("0x1019DB54"));
     assert!(DOC.contains("virtual_44@0x100054A0"));
+    assert!(DOC.contains("object+0x2488..+0x2498"));
+    assert!(DOC.contains("fcn.10006090"));
+    assert!(DOC.contains("fcn.10008800"));
+    assert!(DOC.contains("disk_end-0x80000"));
     assert!(DOC.contains("ordinal3=`EDP_DeviceNumber`"));
     assert!(DOC.contains("ordinal4=`EDP_DiskNumber`"));
     assert!(DOC.contains("旧 `ReadUsbHserialsInfo` ABI 已直接排除这种等价关系"));
