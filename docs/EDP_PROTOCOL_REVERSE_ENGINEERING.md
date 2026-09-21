@@ -86,6 +86,54 @@
 `+0x1F0..0x1FF="this is mp mark\0"`。因此旧 `/tmp/audit22` 曾混入的第三来源
 SanDisk EESI 正例不得继续影响 current strict 状态。
 
+### 1.3 去重金标交叉复核：指纹不能合并为单一筛选条件
+
+对当前仓库19份 strict-encrypted 金标重新解码 LBA4/LBA6/LBA8，
+`tests/protocol_gold_crosscheck.rs` 固定以下 census（不再沿用旧22份计数）：
+
+| 观察项 | 当前19份加密金标 |
+|---|---|
+| HSerialCRC[5] | 6份全零、12份固定 `1D29/7B/4DD/79/7C`、1份其它非零 |
+| Dept | 12份短串、3份 join59、4份 join60 |
+| LBA6 `+0x1E0..+0x1ED` | 18份全零、1份非零（Aigo U335 rev_pmap） |
+| LBA0 前400B | 8份全零、10份 UsbMainBSec、1份 Netac |
+| LBA4 MyHardinfo / LBA8 HDSerialInfo | 19/19 相等；所有样本 LBA4 guard 与 LBA6 checksum 均通过 |
+
+3份 join59 均携带固定 HSerial，且 MBR fragment 为零；唯一非零 fragment 样本
+则是短 Dept + 其它非零 HSerial。**这不证明它们必然来自不同 writer**，但表明目前没有
+同时展示 join59 与非零 fragment 的金标。因此历史组件矩阵的四类指纹应作为独立
+调查入口，不能要求候选同时命中四项才予保留。LBA0 模板同样不是 HSerial 世代的
+单值判别器：current-zero HSerial 与 legacy 非零 HSerial 都存在 UsbMainBSec/zero
+bootstrap 实例。
+
+#### 真实免密 SanDisk LBA4：新增待解释的 flag 表示分叉
+
+仓库真实免密金标 SHA-256=`d6a935525b9e7bba9926a5ee1e2a74996d2aaf93bc6291723eaaedcff679a258`
+的 LBA4，已与原始 `raw/LBA04.bin` 及 concat 对应扇区逐字节比对一致：
+
+- main onlyid=`794661040`，rolling 后 `OnlyIdXor8` guard 正确；
+- second onlyid=`0x4A32BA39`，HSerial 五 DWORD 非零；
+- node 中 `LLGB`、Version=1、sector tuple=`08 04 0C 01` 正确；
+- 物理 `+0x45/+0x46=00 00`，完整 rolling-reader 视图却为 **`D4 D9`**；
+- backing `+0x47..+0x1FB` 并非整段零，不能套 raw-zero gap 规则。
+
+当前 `inspect` 因其不满足 `second==main && HSerial==0`，保留 `D4 D9` 的 reader
+视图。现有 `bConnetServer==0` 测试只遍历裁剪的加密原盘子集，没有覆盖这一真实免密
+样本。**`D4 D9` 不等于已证明 producer 写入非零 server flags；`00 00` 同样不能独立
+证明 post-XOR writer。** 下一步须找到该 profile 的实际 writer/后续修改路径，或明确
+其生成语义证据的适用边界。当前 LBA4 `+0x046` 的 dormant-zero COMPLETE 结论不能
+直接外推到该 profile；原5458B统计作为待复核基线保留，本观察不新增 COMPLETE。
+
+原采集目录的 `dec/LBA04_dec.bin` 虽显示 flags=0，但不能作为独立反证：当时的
+`analyze/scripts/read_metadata.py::lba4_decode` 对每一个 raw-zero byte 强制把解码值
+归零。同一错误还把物理 `+0x03C=00` 正确解出的 `LLGB` 最后一个 `B` 清成零。
+因此本次回归只使用 checked-in raw 金标和正式 rolling 规则，不依赖历史 dec 文件。
+
+另外，金标中的 Netac `onlyid=949028302 @17:24:33` 与 `@17:23:49` 仍只在 LBA7
+不同；第6节已将前者 LBA7 认定为局部实验/中间态。SHA-256去重并不消除该证据限制，
+后续 manifest 应显式记录 per-LBA 的生成证据排除范围，不能仅靠整镜像
+`strict-encrypted` 标签把该 LBA7 当原始生成正例。
+
 ## 2. 官方制盘工具链：已经确认
 
 ### 2.1 官方 GUI

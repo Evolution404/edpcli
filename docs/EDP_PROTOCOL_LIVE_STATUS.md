@@ -63,6 +63,22 @@ join59 reader 与同代 writer ABI，寻找能够实际生成 Dept[59] 拼接形
 “取得独立的同代 `safeudisklabeltool/cemsusbregsiter` writer，并直接看到 Dept[59] 被置 NUL、
 continuation 从 Dept[59] 开始的 producer/选择条件”。没有该 writer 前不得增加 COMPLETE。
 
+## 新增金标交叉复核：下一步优先检查 LBA4 flag 表示
+
+`tests/protocol_gold_crosscheck.rs` 对当前19份加密金标重算：HSerial=6份零、12份
+固定tuple、1份其它非零；Dept=12短/3 join59/4 join60；非零MBR fragment只有1份。
+join59样本与非零fragment样本不重合，因此历史writer四类指纹不能作为必须同时命中的
+筛选条件；这也不证明它们一定来自不同writer。
+
+真实免密SanDisk完整金标的LBA4发现待解释分叉：main=`794661040`，second不同、
+HSerial非零，但物理flags=`00 00`，官方rolling-reader视图和当前inspect为`D4 D9`。
+guard、LLGB、Version、sector tuple均正确，源raw与checked-in捕获一致。旧dec文件的
+零flags来自逐字节raw-zero强制归零的错误decoder，不能用于解释该profile。
+
+下一步优先确认这个profile的writer/post-XOR或后续修改路径，再复核LBA4+0x046
+dormant-zero COMPLETE的适用范围。5458B保留为待复核基线，不能将该基线理解为此
+新增profile已闭合。完整证据见主文档第1.3节；不得凭物理零值直接修正inspect。
+
 ## 固定门禁
 
 任何新增 COMPLETE 必须同时满足现有 source + consumer + physical gold/model 门禁，并通过
