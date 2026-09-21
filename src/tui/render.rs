@@ -557,6 +557,17 @@ fn draw_wizard(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState)
 
 pub fn draw(frame: &mut Frame, state: &AppState) {
     let area = frame.area();
+    let (core_mode, core_activity) = if state.is_critical_operation() {
+        (CoreMode::Guard, "SAFE TRANSACTION")
+    } else if state.inspect_pending() {
+        (CoreMode::Busy, "READ LBA0-12")
+    } else if state.active_scan_pending() {
+        (CoreMode::Busy, "BACKGROUND SCAN")
+    } else if state.wizard().is_some() {
+        (CoreMode::Busy, "USER FLOW")
+    } else {
+        (CoreMode::Stable, "INTERACTIVE")
+    };
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
@@ -570,7 +581,7 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
         Span::styled("edpcli", accent()),
         Span::styled("  TUI", secondary().add_modifier(Modifier::BOLD)),
         Span::styled("  ·  管理员模式", success()),
-        animation::compact_indicator(state.animation_frame()),
+        animation::compact_indicator(state.animation_frame(), core_mode),
     ]))
     .block(
         Block::default()
@@ -645,23 +656,12 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
     }
 
     if let Some(animation_area) = animation_area {
-        let (mode, activity) = if state.is_critical_operation() {
-            (CoreMode::Guard, "SAFE TRANSACTION")
-        } else if state.inspect_pending() {
-            (CoreMode::Busy, "READ LBA0-12")
-        } else if state.active_scan_pending() {
-            (CoreMode::Busy, "BACKGROUND SCAN")
-        } else if state.wizard().is_some() {
-            (CoreMode::Busy, "USER FLOW")
-        } else {
-            (CoreMode::Stable, "INTERACTIVE")
-        };
         animation::draw(
             frame,
             animation_area,
             state.animation_frame(),
-            mode,
-            activity,
+            core_mode,
+            core_activity,
         );
     }
 

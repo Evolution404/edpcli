@@ -213,14 +213,12 @@ fn centered_grid_lines(tick: u64, width: usize, height: usize) -> Vec<Line<'stat
         .collect()
 }
 
-pub fn compact_indicator(tick: u64) -> Span<'static> {
+pub fn compact_indicator(tick: u64, mode: CoreMode) -> Span<'static> {
     const FRAMES: [&str; 8] = ["◇", "◈", "◆", "◈", "◇", "◌", "○", "◌"];
     let glyph = FRAMES[(tick as usize) % FRAMES.len()];
     Span::styled(
-        format!("  CORE {glyph}"),
-        Style::default()
-            .fg(Color::Cyan)
-            .add_modifier(Modifier::BOLD),
+        format!("  CORE {glyph} {}", mode.label()),
+        mode.style().add_modifier(Modifier::BOLD),
     )
 }
 
@@ -281,8 +279,20 @@ mod tests {
     }
 
     #[test]
-    fn compact_indicator_cycles() {
-        assert_ne!(compact_indicator(0).content, compact_indicator(2).content);
-        assert_eq!(compact_indicator(0).content, compact_indicator(8).content);
+    fn compact_indicator_cycles_and_preserves_mode() {
+        assert_ne!(
+            compact_indicator(0, CoreMode::Stable).content,
+            compact_indicator(2, CoreMode::Stable).content
+        );
+        assert_eq!(
+            compact_indicator(0, CoreMode::Stable).content,
+            compact_indicator(8, CoreMode::Stable).content
+        );
+        assert!(compact_indicator(0, CoreMode::Busy)
+            .content
+            .contains("ACTIVE"));
+        assert!(compact_indicator(0, CoreMode::Guard)
+            .content
+            .contains("GUARDED"));
     }
 }
