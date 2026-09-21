@@ -71,3 +71,11 @@ cargo test --test protocol_documentation_contract
 The baseline audit is read-only.  It never opens a raw disk device and never
 writes any gold capture.
 
+## Local executable integrity
+
+`audit/protocol/labeltool_variant_diff.md` records the byte-level comparison
+between the three local `cemssafeudisklabeltool*.exe` copies. Only
+`cemssafeudisklabeltool_orig.exe` is treated as an official front-end
+baseline; the other two contain locally applied policy/validation bypasses and
+must not be used as producer evidence.
+

@@ -148,6 +148,7 @@ fn historical_rejections_and_lba10_sample_gate_are_explicit() {
     assert!(matrix.contains("2019-11-12"));
     assert!(matrix.contains("earlier complete paired-set locator only"));
     assert!(matrix.contains("UsbOnlyInfo=0"));
+    assert!(matrix.contains("cemssafeudisklabeltool.exe local variants"));
 
     let lba10 = LEDGER
         .lines()
@@ -155,6 +156,26 @@ fn historical_rejections_and_lba10_sample_gate_are_explicit() {
         .expect("LBA10 active EESI row");
     assert!(lba10.contains("all designated gold is zero"));
     assert!(lba10.contains("allowed authentic enabled sample"));
+}
+
+#[test]
+fn local_labeltool_patches_cannot_be_mistaken_for_official_protocol_evidence() {
+    let note = include_str!("../audit/protocol/labeltool_variant_diff.md");
+    for required in [
+        "b530a82b29bbc43be8d415225392ca135ab7df8a8d9f69c6598493c4942e9e11",
+        "0x00449B76",
+        "0x0042DDC0",
+        "0x004289FB",
+        "must not be cited as official producer evidence",
+        "CreateBusManageImp",
+        "BusManageImp::WriteLabel@0x100A28E0",
+        "0x996 = 2454",
+    ] {
+        assert!(
+            note.contains(required),
+            "label-tool integrity boundary lost evidence: {required}"
+        );
+    }
 }
 
 #[test]
