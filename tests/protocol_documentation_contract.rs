@@ -7,6 +7,7 @@
 use std::path::Path;
 
 const DOC: &str = include_str!("../docs/EDP_PROTOCOL_REVERSE_ENGINEERING.md");
+const LIVE: &str = include_str!("../docs/EDP_PROTOCOL_LIVE_STATUS.md");
 
 fn between<'a>(text: &'a str, start: &str, end: &str) -> &'a str {
     let start_pos = text.find(start).expect("missing start marker") + start.len();
@@ -49,6 +50,27 @@ fn protocol_analysis_has_one_canonical_document() {
         assert!(
             DOC.contains(required_section),
             "canonical protocol document lost required total/branch structure: {required_section}"
+        );
+    }
+}
+
+#[test]
+fn protocol_live_status_tracks_strict_baseline_without_becoming_a_second_ledger() {
+    assert!(Path::new("docs/EDP_PROTOCOL_LIVE_STATUS.md").is_file());
+    for required in [
+        "5458 / 6656 B = 82.0%",
+        "PARTIAL：1198 B",
+        "LBA4 `0x020..0x033` 继续保持 PARTIAL",
+        "ReadUsbHserialsInfo",
+        "0x1019DB54",
+        "EDP_DeviceNumber",
+        "EDP_DiskNumber",
+        "不能升级 COMPLETE",
+        "join59",
+    ] {
+        assert!(
+            LIVE.contains(required),
+            "live protocol status lost required boundary: {required}"
         );
     }
 }

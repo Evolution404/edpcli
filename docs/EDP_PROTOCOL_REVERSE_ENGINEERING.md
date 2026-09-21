@@ -2828,8 +2828,42 @@ consumer 行为，而不是“consumer未知”。因此把这17B重新拆分：
 - 对候选二进制做 20B 精确扫描，也没有发现
   `1D29/7B/4DD/79/7C` 或高熵 HSerial 数组的静态常量。
 
+本轮又把 2020 `busManage.dll` 中 `"ReadUsbHserialsInfo failed"` 的调用点按
+**接口 ABI** 追到底，得到比“没有发现 DeviceNumber 到 20B 的连接”更强的直接负证据：
+
+- 字符串 `0x1002D05C` 的唯一代码 xref 落在
+  `fcn.10010730@0x10010730` 的 `0x100108CC`。实际调用位于
+  `0x10010891..0x100108C6`：caller 先准备三个输出区，第一项由
+  `DWORD 0 + memset(后续 0x2B)` 组成连续 **0x2F-byte restore node**，第二、第三项
+  各为独立 4B DWORD，然后通过 CEMSUsbRegsiter 接口 `vtable+0x2C` 调用；返回0才打印
+  `ReadUsbHserialsInfo failed`。这不是 import，也不是本地 helper，而是历史接口的虚方法槽。
+- v19.11.4.1 `CEMSUsbRegsiter.dll` 的 `ISUdiskRegsiterObj` vtable 已精确定位到
+  `0x1019DB54`；因此 `+0x2C` 正好是
+  `ISUdiskRegsiterObj::virtual_44@0x100054A0`。该方法把**第一个输出指针**依次交给
+  `fcn.100072C0 / fcn.1000DDA0 / fcn.1000DB90` 三个主/备 reader。主 reader
+  `fcn.100072C0` seek 到 `4*BytesPerSector`，完成 `$$$`/onlyid 校验与 rolling decode 后，
+  以 `16 + 16 + 8 + 4 + 2 + 1` 字节的连续 stores 精确回填 0x2F-byte node；其中
+  `node+0x08..+0x1B` 的 20B HSerial 是**从盘面 restore node 解码回来**，不是此函数运行时生成。
+- 只有 restore node reader 成功后，`virtual_44@0x100055A2..0x100055BD` 才分别调用
+  `UsbTools.dll` ordinal3=`EDP_DeviceNumber` 与 ordinal4=`EDP_DiskNumber`，并把两个
+  返回值分别写入**第二、第三个 4B 输出指针**。因此旧 ABI 明确是
+  `restore-node[0x2F] + DeviceNumber DWORD + DiskNumber DWORD` 三条独立输出通道，
+  而不是“DeviceNumber 直接填 HSerial[5]”。
+- 2020 `busManage` 成功后没有消费那两个 host-identity DWORD；它只把第一项
+  0x2F-byte node 传给同一接口的 `vtable+0x44`。在 v19.11.4.1 vtable 中该槽精确映射
+  `ISUdiskRegsiterObj::virtual_68@0x1000E650`；restore 路径从传入 node 只取
+  `node+0x04 OnllyID2Nd` 作为恢复密钥，不读取 `node+0x08..+0x1B` 的 HSerial 值。
+- current `usbtoolbusmanage.dll` 又提供代际对照：`ActiveNormalUDev` helper
+  `fcn.100AA7E0` 已改为通过新接口 `vtable+0x14` 直接调用 `RestoreRegsiterUsb`，二进制中
+  不再存在旧 `ReadUsbHserialsInfo` 三输出调用形态，确认上述 `+0x2C/+0x44` 是历史 ABI，
+  不是对 current 接口的误配。
+
 因此当前不能把 `DeviceNumber/HDSerialCRC` 单 DWORD 与 LBA4
-`HSerialCRC[5]` 直接等同；旧 profile 的“输入材料 -> 5×DWORD”转换仍未闭合。
+`HSerialCRC[5]` 直接等同；**旧 `ReadUsbHserialsInfo` ABI 已直接排除这种等价关系**。
+这里仍不能进一步断言“更早 writer 从未使用 DeviceNumber/硬件身份材料”：未知的更早 caller
+仍可能存在某种 `host material -> 5×DWORD` 转换。由于 strict legacy 非零
+`request+0x150..+0x160` 的真正赋值点/算法仍未找到，LBA4 这20B继续保持 PARTIAL，
+不得据此增加 COMPLETE 字节数。
 
 ##### Provision LBA4 canonical 修正（历史阶段；已被本轮 SAFE6 full-rolling 证据部分推翻）
 
