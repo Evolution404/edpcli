@@ -146,8 +146,11 @@ fn historical_rejections_and_lba10_sample_gate_are_explicit() {
     assert!(matrix.contains("strict nonzero HSerialCRC"));
     assert!(matrix.contains("dynamic_MBR_template"));
     assert!(matrix.contains("2019-11-12"));
-    assert!(matrix.contains("earlier complete paired-set locator only"));
-    assert!(matrix.contains("UsbOnlyInfo=0"));
+    assert!(matrix.contains("not component build date"));
+    assert!(matrix.contains("not evidence of an earlier generation"));
+    assert!(matrix.contains("install_2024_05_03_15_33_19.log"));
+    assert!(matrix.contains("UsbOnlyInfo_zero"));
+    assert!(matrix.contains("independently dated/hashed component bytes"));
     assert!(matrix.contains("cemssafeudisklabeltool.exe local variants"));
 
     let lba10 = LEDGER

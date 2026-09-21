@@ -6039,9 +6039,9 @@ family.
 
 This binary has already been used by the main audit as an independent 2020 runtime reader.
 
-### 2019-11-12 更早完整配套组件集：已确认存在，但尚未取得精确二进制
+### Dr.Web 完整配套组件树：存在性已确认，但日期不能用于旧版本定年
 
-Dr.Web 的 2019-11-12 恶意样本行为记录列出一个被展开到
+Dr.Web 的 `Trojan.StartPage1.58410` 记录列出一个被展开到
 `%TEMP%\\Vz0e3033\\cems\\edp\\safeudisklabeltool` 的完整组件树，其中同时存在：
 
 - `cemssafeudisklabeltool.exe`
@@ -6056,13 +6056,19 @@ Dr.Web 的 2019-11-12 恶意样本行为记录列出一个被展开到
 公开记录：
 `https://vms.drweb.cn/virus/?i=28263010`。
 
-这个时间点早于当前已取得 `CEMSUsbRegsiter.dll 19.11.4.1` 的 PE 编译时间
-2019-11-21，因而证明**更早的完整配套制标组件集确实存在**。但该网页只提供
-部署文件清单，没有这些 DLL 的版本资源、哈希或文件内容，所以这里只把它作为
-historical acquisition locator；它不属于 physical/virtual/static 协议证据，也不会
-让任何 PARTIAL 字节升级。
+**纠错：不能把页面的 2019-11-12 当成这棵组件树的部署/构建日期。**
+该日期是页面明确标注的 “Added to the Dr.Web virus database” 日期；同一页面又明确
+写着 “Virus description added: 2024-05-05”，并且它列出的落地文件中直接包含
+`%TEMP%\\install_2024_05_03_15_33_19.log`。因此这份文件树至多证明“某个被该
+病毒名描述的样本/安装包包含一套完整 safeudisklabeltool 配套组件”，**不能证明这些
+组件早于 2019-11-21**，也不能用来给其中 DLL 定代。
 
-下一步取得该代或其它早于/不同于 19.11.4.1 的完整配套组件后，必须先同时检查四个
+该网页仍可作为 component-set existence locator，但不再作为 “earlier historical
+acquisition locator”。它没有给出这些 DLL 的逐文件版本、哈希或原始字节，因此
+不属于 physical/virtual/static 协议证据，也不会让任何 PARTIAL 字节升级。
+
+下一步取得真正有独立版本/PE 时间/哈希证明、且早于或不同于 19.11.4.1 的完整配套
+组件后，必须先同时检查四个
 指纹：join59 writer、非零 HSerialCRC 输入赋值、`UsbOnlyInfo=0`、
 动态 MBR template。只有能把输入赋值一路追到最终 LBA store 的候选才进入主账本。
 
