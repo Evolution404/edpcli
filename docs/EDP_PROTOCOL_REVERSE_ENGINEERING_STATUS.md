@@ -115,17 +115,11 @@ provenance 明确记录 `os.open(..., O_RDONLY)` + `os.pread(...)`，设备为
 
 `feat/provision-new-usb-20260919`
 
-创建本页前基线 HEAD / origin 均为：
+最新已落库协议证据提交为：
 
-`38f41623abff4133e71b5e8728f9bffd4adcc6a3`
+`473b980cf5925422a62c88eb4c662b27c560c223` (`audit: preserve historical LBA4 and SanDisk evidence`)
 
-除本实时状态页外，以下逆向成果仍处于工作区、**尚未统一提交**：
-
-- `docs/EDP_PROTOCOL_REVERSE_ENGINEERING.md`
-- `tests/protocol_documentation_contract.rs`
-- `tests/provision_protocol_audit.rs`
-- `tests/fixtures/protocol_evidence/sandisk_ultra_usb_3_0_front_lba0_12.bin`
-- `tests/fixtures/protocol_evidence/sandisk_ultra_usb_3_0_front_lba0_12.provenance.txt`
+该提交已推送到 `origin/feat/provision-new-usb-20260919`；提交后工作区 clean。
 
 最近已验证门禁：
 
