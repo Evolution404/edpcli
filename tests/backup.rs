@@ -483,6 +483,30 @@ fn scan_backup_dir_reports_ok_mismatch_missing_and_unrecognized() {
     assert_eq!(odd_e.sha256_ok, Sha256Status::Ok);
 }
 
+#[test]
+fn scan_backup_dir_rejects_legacy_7168_byte_images() {
+    let Some(original) = load_disk_image("netac") else {
+        eprintln!("跳过: 真实备份不可用");
+        return;
+    };
+    let tmp = TmpDir::new("scan_backup_reject_7168");
+    let mut legacy = original;
+    legacy.extend_from_slice(&[0u8; SECTOR]);
+    let path = write_backup(
+        &tmp.0,
+        "disk6_122880000_vid0dd8_pid2005_disk&ven_netac&prod_onlydisk_onlyid1402259934_20260910_172399.bin",
+        &legacy,
+    );
+
+    let entries = scan_backup_dir(&tmp.0);
+    let entry = entries
+        .iter()
+        .find(|entry| entry.path == path)
+        .expect("legacy-sized backup entry");
+    assert_eq!(legacy.len(), METADATA_IMAGE_LEN + SECTOR);
+    assert!(!entry.size_ok, "7168B/LBA0-13 旧备份必须判定为无效长度");
+}
+
 #[cfg(unix)]
 #[test]
 fn sha256_sidecar_symlink_is_not_followed() {

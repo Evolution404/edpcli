@@ -1,7 +1,7 @@
 mod common;
 
 use edpcli::application::inspect::load_backup_inspect;
-use edpcli::common::METADATA_SECTOR_COUNT;
+use edpcli::common::{METADATA_IMAGE_LEN, METADATA_SECTOR_COUNT, SECTOR};
 use edpcli::tui::state::{AppState, InspectMode, NavCommand};
 
 #[test]
@@ -17,6 +17,17 @@ fn backup_inspect_reuses_domain_analyzer_for_all_metadata_lbas() {
         assert_eq!(view.raw.len(), 512);
         assert_eq!(view.decoded.len(), 512);
     }
+}
+
+#[test]
+fn backup_inspect_rejects_legacy_7168_byte_images() {
+    let tmp = common::TmpDir::new("inspect_reject_7168");
+    let path = tmp.0.join("legacy-lba0-13.bin");
+    std::fs::write(&path, vec![0u8; METADATA_IMAGE_LEN + SECTOR]).unwrap();
+
+    let err = load_backup_inspect(&path).expect_err("7168B legacy image must be rejected");
+    assert!(err.contains("LBA0-12"), "{err}");
+    assert!(err.contains(&METADATA_IMAGE_LEN.to_string()), "{err}");
 }
 
 #[test]
