@@ -187,6 +187,28 @@ fn local_labeltool_patches_cannot_be_mistaken_for_official_protocol_evidence() {
 }
 
 #[test]
+fn devicenumber_host_identity_crc_boundary_is_explicit() {
+    let note = include_str!("../audit/protocol/devicenumber_identity.md");
+    for required in [
+        "0ef94c3679da6f27eac75959cf299bbad19676c251d88f7554fbc305407d6041",
+        "EDP_DeviceNumber @ 0x10011E00",
+        "EDP_DiskNumber @ 0x10012C90",
+        "0xEDB88320",
+        "0x100130A2",
+        "fcn.10013210",
+        "standard reflected IEEE CRC-32",
+        "does **not** close the strict-legacy profile",
+        "one DWORD",
+        "HDOnlySerial[5]",
+    ] {
+        assert!(
+            note.contains(required),
+            "DeviceNumber host-identity evidence lost boundary: {required}"
+        );
+    }
+}
+
+#[test]
 fn evidence_modalities_remain_distinct() {
     let modalities: HashSet<_> = evidence_modalities().into_values().collect();
     assert!(modalities.contains("physical"));
