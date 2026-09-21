@@ -4,7 +4,7 @@ use ratatui::{
     layout::{Constraint, Direction, Layout},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Cell, Paragraph, Row as TableRow, Table, TableState, Wrap},
+    widgets::{Block, Borders, Cell, Paragraph, Row as TableRow, Table, TableState, Tabs, Wrap},
     Frame,
 };
 
@@ -437,20 +437,36 @@ fn draw_inspect(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState
         InspectMode::DecodedHex => lines.extend(plain_hex_lines(&view.decoded)),
         InspectMode::RawHex => lines.extend(plain_hex_lines(&view.raw)),
     }
-    let mode_label = match mode {
-        InspectMode::Fields => "字段",
-        InspectMode::DecodedHex => "Decoded Hex",
-        InspectMode::RawHex => "Raw Hex",
+    let mode_index = match mode {
+        InspectMode::Fields => 0,
+        InspectMode::DecodedHex => 1,
+        InspectMode::RawHex => 2,
     };
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title("Inspect · h/l 切换 Tab · Ctrl-d/u 滚动");
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+    if inner.width == 0 || inner.height == 0 {
+        return;
+    }
+    let inspect_chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(1), Constraint::Min(1)])
+        .split(inner);
+    let tabs = Tabs::new(["字段", "Decoded Hex", "Raw Hex"])
+        .select(mode_index)
+        .style(muted())
+        .highlight_style(selected())
+        .divider(Span::styled(" │ ", muted()));
+    frame.render_widget(tabs, inspect_chunks[0]);
+
     let scroll = state.inspect_scroll().unwrap_or(0).min(u16::MAX as usize) as u16;
     frame.render_widget(
         Paragraph::new(lines)
-            .block(Block::default().borders(Borders::ALL).title(format!(
-                "Inspect · {mode_label} · h/l 切换视图 · Ctrl-d/u 滚动"
-            )))
             .wrap(Wrap { trim: false })
             .scroll((scroll, 0)),
-        area,
+        inspect_chunks[1],
     );
 }
 
