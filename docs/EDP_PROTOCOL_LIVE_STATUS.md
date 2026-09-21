@@ -110,6 +110,25 @@ consumer。当前真正剩余的字节 blocker 只剩 LBA6/LBA9：继续追 join
 “取得独立的同代 `safeudisklabeltool/cemsusbregsiter` writer，并直接看到 Dept[59] 被置 NUL、
 continuation 从 Dept[59] 开始的 producer/选择条件”。没有该 writer 前不得增加 COMPLETE。
 
+### 2026-09-22：legacy producer 部署边界继续收窄
+
+- 新增 `scripts/protocol/audit_legacy_labeltool_boundary.py`，固定旧
+  `cems/Edp/cemsudisk.dll` SHA-256
+  `49d9a63c0ddcf9de05add21af2ab01128db29e03729c1cba642067446a431ecd`
+  与版本 `8.1.2205.3015`。该控制层同时保留
+  `SafeUDiskLabelTool\\cemsSafeUdiskLabelTool.exe`、
+  `setLabelSafeUDisk/cleanLabelSafeUDisk/initPwdSafeUDisk` 和
+  `safeUdiskRegManage` 标记，说明同代终端把安全U盘注册/变更明确委托给独立
+  SafeUDiskLabelTool，而不是由 endpoint FileOpHook reader 承担。
+- 这与 2022-12 的 x86/x64 FileOpHook “join59 positive reader + raw PhysicalDrive
+  read-only”证据组成同一部署边界：**缺失的 join59 writer 应继续在独立
+  SafeUDiskLabelTool/CEMSUsbRegsiter 家族中找，不应再回头把终端 reader 当 producer。**
+- LBA6 legacy entry3 的 CHS 也完成字段级解码：Aigo 与 SanDisk 两份 nonzero
+  实盘均为 start `C=1023,H=0,S=1`、type `0x07`、end
+  `C=1023,H=239,S=63`，后8B又分别与本盘 LBA12 type4 的 StartSector /
+  PartionSize/512 精确相等。因此 14B 的**字段含义已经全部确定**；它继续
+  PARTIAL 只因为 exact historical snapshot producer/profile selector 尚未取得。
+
 ## 最新结论：真实免密 SanDisk 的 LBA4 flag 表示
 
 `tests/protocol_gold_crosscheck.rs` 对当前19份加密金标重算：HSerial=6份零、12份

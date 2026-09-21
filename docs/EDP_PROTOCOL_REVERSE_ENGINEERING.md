@@ -3310,6 +3310,18 @@ m_encrypt 0x1F0..0x1F3
 - `+0x1EA..1ED = sector_count`；
 - `+0x1EE..1EF` 已进入第4条 MBR entry，两个旧样本均为 `00 00`。
 
+CHS 也不是“看起来像 MBR”的弱匹配。两块独立 nonzero 实盘的完整 entry3
+前8B 都是 `00 00 C1 FF 07 EF FF FF`；按传统 MBR CHS 编码解码：
+
+- start CHS = `C=1023, H=0, S=1`；
+- end CHS = `C=1023, H=239, S=63`。
+
+即两端都处于传统 CHS 柱面上限的饱和值，并呈现 240-head/63-sector 风格。
+配合下述 `start_lba/sector_count` 与 LBA12 type4 的 2/2 精确相等，说明
+`+0x1E0..+0x1ED` 的 14B 已全部可以解释为 **旧 MBR entry3 的结构字段**，
+而不是未知私有字段。严格状态仍保持 PARTIAL 的唯一原因是尚未取得把这份
+旧 MBR snapshot 带入 SAFE6 backing 的 exact producer/profile-selection。
+
 两块独立真实盘与 LBA12 做交叉后：
 
 ```text

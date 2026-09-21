@@ -1312,7 +1312,25 @@ fn assert_lba6_legacy_mbr_type4_fragment_matches_lba12(
     // LBA6 +0x1DE is the third 16-byte MBR partition entry. The first two
     // bytes of that entry were overwritten by the preceding BeiZhu slot,
     // but +0x1E0 onward still preserves the rest of the entry.
+    let start_chs = &lba6[0x1df..0x1e2];
+    let end_chs = &lba6[0x1e3..0x1e6];
+    let decode_chs = |chs: &[u8]| {
+        let head = chs[0];
+        let sector = chs[1] & 0x3f;
+        let cylinder = (((chs[1] as u16) & 0xc0) << 2) | chs[2] as u16;
+        (cylinder, head, sector)
+    };
+    assert_eq!(
+        decode_chs(start_chs),
+        (1023, 0, 1),
+        "legacy MBR start CHS must retain the saturated 240/63 geometry"
+    );
     assert_eq!(lba6[0x1e2], 0x07, "legacy MBR partition type");
+    assert_eq!(
+        decode_chs(end_chs),
+        (1023, 239, 63),
+        "legacy MBR end CHS must retain the saturated 240/63 geometry"
+    );
     assert_eq!(
         u32_le(&lba6, 0x1e6) as u64,
         u64_le(&lba12, type4 + 0x18),
