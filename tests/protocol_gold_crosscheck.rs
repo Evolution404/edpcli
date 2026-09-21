@@ -1,5 +1,6 @@
 //! Cross-check historical fingerprints against the full, deduplicated gold set.
-//! These observations do not promote any protocol field to COMPLETE.
+//! Most observations are census constraints; the MyHardinfo/HDSerialInfo mirror also locks the
+//! physical side of their field-level host-identity lifecycle.
 
 use edpcli::crypto::{a6b0_full, crc32_bare, lba6_checksum, lba6_decode, xor_rolling};
 use edpcli::diskio::parse_backup_name;
@@ -108,6 +109,37 @@ fn strict_gold_legacy_fingerprints_are_not_a_single_required_conjunction() {
     assert_eq!(join_counts, [12, 3, 4]);
     assert_eq!(nonzero_fragments, 1);
     assert_eq!(bootstrap_counts, [8, 10, 1]);
+}
+
+#[test]
+fn host_hardinfo_identity_can_repeat_across_different_target_usb_vendors() {
+    let mut a68_samples = Vec::new();
+    for row in GOLD.lines().skip(1) {
+        let columns: Vec<_> = row.split('\t').collect();
+        if columns[0] != "strict-encrypted" {
+            continue;
+        }
+        let name = columns[3];
+        let meta = parse_backup_name(name).expect("gold backup metadata");
+        let onlyid = meta.onlyid.as_ref().unwrap().parse::<i64>().unwrap() as u32;
+        let image = fs::read(Path::new(env!("CARGO_MANIFEST_DIR")).join(columns[4])).unwrap();
+        let node = xor_rolling(
+            &image[4 * 512 + 0x18..5 * 512],
+            (onlyid & 0xffff) ^ (onlyid >> 16),
+        );
+        let head8 = a6b0_full(
+            &image[8 * 512..8 * 512 + 0x80],
+            &crc32_bare(meta.device_id.as_bytes()).to_le_bytes(),
+            0,
+        );
+        assert_eq!(word(&node, 0x1d), word(&head8, 0x14), "{name}");
+        if word(&node, 0x1d) == 0xA68B_AE08 {
+            a68_samples.push(name.to_ascii_lowercase());
+        }
+    }
+    assert_eq!(a68_samples.len(), 3);
+    assert!(a68_samples.iter().any(|name| name.contains("ven_aigo")));
+    assert!(a68_samples.iter().any(|name| name.contains("ven_lexar")));
 }
 
 #[test]

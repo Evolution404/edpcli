@@ -121,13 +121,13 @@ fn byte_ledger_covers_exactly_6656_bytes_without_overlap() {
         "byte ledger contains gaps"
     );
     let expected_complete = [
-        142, 512, 512, 0, 487, 512, 497, 512, 492, 384, 512, 512, 512,
+        142, 512, 512, 0, 491, 512, 497, 512, 496, 384, 512, 512, 512,
     ];
-    let expected_partial = [370, 0, 0, 512, 25, 0, 15, 0, 20, 128, 0, 0, 0];
+    let expected_partial = [370, 0, 0, 512, 21, 0, 15, 0, 16, 128, 0, 0, 0];
     assert_eq!(complete, expected_complete);
     assert_eq!(partial, expected_partial);
-    assert_eq!(complete.iter().sum::<usize>(), 5586);
-    assert_eq!(partial.iter().sum::<usize>(), 1070);
+    assert_eq!(complete.iter().sum::<usize>(), 5594);
+    assert_eq!(partial.iter().sum::<usize>(), 1062);
 
     for lba in 0..13 {
         let progress = format!("| LBA{lba} | {} | {} | 0 |", complete[lba], partial[lba]);
@@ -179,6 +179,31 @@ fn historical_rejections_and_lba10_positive_physical_gate_are_explicit() {
     assert!(lba10.contains("P-EESI-NETAC"));
     assert!(lba10.contains("purpose-specific positive"));
     assert!(lba10.contains("general census"));
+}
+
+#[test]
+fn host_hardinfo_mirror_is_closed_independently_from_usb_only_info_generation() {
+    let lba4 = LEDGER
+        .lines()
+        .find(|line| line.starts_with("4\t035-038\tCOMPLETE\t"))
+        .expect("LBA4 MyHardinfo row");
+    let lba8 = LEDGER
+        .lines()
+        .find(|line| line.starts_with("8\t014-017\tCOMPLETE\t"))
+        .expect("LBA8 HDSerialInfo row");
+    let usb_only = LEDGER
+        .lines()
+        .find(|line| line.starts_with("8\t01e-02d\tPARTIAL\t"))
+        .expect("LBA8 UsbOnlyInfo row");
+
+    for row in [lba4, lba8] {
+        assert!(row.contains("S-WIN-191141"));
+        assert!(row.contains("host"));
+        assert!(row.contains("P-GOLD-ENC"));
+    }
+    assert!(usb_only.contains("strict legacy absent/zero producer remains missing"));
+    assert!(DOC.contains("A68BAE08"));
+    assert!(DOC.contains("不同目标U盘"));
 }
 
 #[test]
