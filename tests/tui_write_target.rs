@@ -3,7 +3,11 @@ use std::path::PathBuf;
 use edpcli::application::BackupWorkspaceItem;
 use edpcli::disk_scan::Row;
 use edpcli::diskio::Sha256Status;
-use edpcli::tui::state::{AppState, NavCommand};
+use edpcli::tui::{
+    render,
+    state::{AppState, NavCommand},
+};
+use ratatui::{backend::TestBackend, Terminal};
 
 fn device(disk: u32) -> Row {
     Row {
@@ -83,6 +87,38 @@ fn filtered_backup_selection_maps_to_the_real_backup_for_actions() {
         .selected_backup_delete_target()
         .expect("filtered backup delete target");
     assert_eq!(path, PathBuf::from("two.bin"));
+}
+
+#[test]
+fn filtered_backup_workspace_renders_only_matching_rows() {
+    let mut state = AppState::new();
+    state.replace_devices(vec![device(7)]);
+    let mut one = backup(1, "one.bin");
+    one.user = Some("Alice".into());
+    let mut two = backup(2, "two.bin");
+    two.user = Some("Bob".into());
+    state.replace_backups(vec![one, two]);
+    state.navigate(NavCommand::Right, 20);
+    state.navigate(NavCommand::Search, 20);
+    for ch in "bob".chars() {
+        state.push_input_char(ch);
+    }
+
+    let backend = TestBackend::new(160, 34);
+    let mut terminal = Terminal::new(backend).expect("test terminal");
+    terminal
+        .draw(|frame| render::draw(frame, &state))
+        .expect("draw filtered backups");
+    let text = terminal
+        .backend()
+        .buffer()
+        .content()
+        .iter()
+        .map(|cell| cell.symbol())
+        .collect::<String>();
+    assert!(text.contains("Bob"), "{text}");
+    assert!(!text.contains("Alice"), "{text}");
+    assert!(text.contains("1/2"), "{text}");
 }
 
 #[test]
