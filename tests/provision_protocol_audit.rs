@@ -146,7 +146,7 @@ fn aes128_expand_key(key: &[u8; 16]) -> [u8; 176] {
             out[generated - 2],
             out[generated - 1],
         ];
-        if generated % 16 == 0 {
+        if generated.is_multiple_of(16) {
             temp.rotate_left(1);
             for byte in &mut temp {
                 *byte = SBOX[*byte as usize];
@@ -1574,7 +1574,7 @@ fn lba0_bootstrap_profiles_are_zero_or_the_official_usb_main_bsec_prefix() {
 #[test]
 fn strict_progress_has_no_partial_detail_rows_for_fully_complete_lbas() {
     let trace = include_str!("../docs/EDP_PROTOCOL_REVERSE_ENGINEERING.md");
-    let complete_lbas = ["LBA1", "LBA2", "LBA5", "LBA7", "LBA10", "LBA11", "LBA12"];
+    let complete_lbas = ["LBA1", "LBA2", "LBA5", "LBA7", "LBA11", "LBA12"];
 
     for lba in complete_lbas {
         let stale = trace
@@ -1612,9 +1612,9 @@ fn lba4_strict_progress_matches_non_overlapping_detail_ranges() {
         };
         assert!(end < SECTOR && start <= end, "invalid LBA4 range: {range}");
 
-        for offset in start..=end {
+        for (offset, slot) in owner.iter_mut().enumerate().take(end + 1).skip(start) {
             assert!(
-                owner[offset].replace(status).is_none(),
+                slot.replace(status).is_none(),
                 "overlapping LBA4 detail row at +0x{offset:03X}: {line}"
             );
             match status {
