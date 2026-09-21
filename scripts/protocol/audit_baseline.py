@@ -86,8 +86,11 @@ def lba3_shape(raw: bytes) -> dict[str, object]:
 def audit(gold: list[tuple[dict[str, str], bytes, Path]]) -> dict[str, object]:
     strict = [item for item in gold if item[0]["profile"] == "strict-encrypted"]
     nopwd = [item for item in gold if item[0]["profile"] == "authentic-nopwd"]
-    if len(strict) != 21:
-        raise ValueError(f"strict encrypted gold population must be 21, got {len(strict)}")
+    digests = [item[0]["sha256"] for item in gold]
+    if len(digests) != len(set(digests)):
+        raise ValueError("checked-in gold set contains duplicate SHA-256 images")
+    if len(strict) != 19:
+        raise ValueError(f"strict encrypted gold population must be 19, got {len(strict)}")
     if len(nopwd) != 1:
         raise ValueError(f"authentic no-password gold population must be 1, got {len(nopwd)}")
 
@@ -119,6 +122,7 @@ def audit(gold: list[tuple[dict[str, str], bytes, Path]]) -> dict[str, object]:
 
     return {
         "image_bytes": IMAGE_LEN,
+        "unique_image_count": len(gold),
         "strict_encrypted_count": len(strict),
         "authentic_nopwd_count": len(nopwd),
         "lba10": {

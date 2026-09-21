@@ -31,13 +31,17 @@ reviewed and explicitly added to `gold_samples.tsv` with its digest.
 The only protocol gold byte set used by automated analysis is the checked-in
 `audit/protocol/gold/` tree:
 
-1. `audit/protocol/gold/strict-encrypted/`: exactly 21 6656-byte
-   original-generation captures.
+1. `audit/protocol/gold/strict-encrypted/`: exactly 19 unique 6656-byte
+   original-generation real-device images.
 2. `audit/protocol/gold/authentic-nopwd/`: one 6656-byte authentic SanDisk
    Ultra no-password capture containing exactly LBA0-LBA12.
 
+Every manifest row must have a unique SHA-256. Repeated read-only captures
+whose full 6656-byte image is byte-for-byte identical are deliberately
+deduplicated and must not be reintroduced as independent gold samples.
+
 The original capture provenance remains recorded as
-`~/.edpcli-backup` for the 21 encrypted captures and
+`~/.edpcli-backup` for the encrypted captures and
 `~/Desktop/u_disk/analyze/disk_data/no_password_disk4/raw/LBA0_13_concat.bin`
 for the SanDisk capture.  Those host-local paths are provenance only; they are
 no longer runtime dependencies of `audit_baseline.py`.  The original SanDisk
