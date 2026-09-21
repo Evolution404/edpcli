@@ -127,6 +127,7 @@ pub struct AppState {
     search_query: String,
     search_matches: Vec<usize>,
     search_cursor: usize,
+    animation_frame: u64,
 }
 
 impl Default for AppState {
@@ -159,7 +160,16 @@ impl AppState {
             search_query: String::new(),
             search_matches: Vec::new(),
             search_cursor: 0,
+            animation_frame: 0,
         }
+    }
+
+    pub const fn animation_frame(&self) -> u64 {
+        self.animation_frame
+    }
+
+    pub fn advance_animation(&mut self) {
+        self.animation_frame = self.animation_frame.wrapping_add(1);
     }
 
     pub fn input_buffer(&self) -> &str {

@@ -3,6 +3,7 @@
 //! Business work is delegated to `crate::application`; this module owns only terminal lifecycle,
 //! event dispatch and rendering.
 
+pub mod animation;
 pub mod command;
 pub mod event;
 pub mod render;
@@ -10,7 +11,7 @@ pub mod state;
 pub mod task;
 
 use std::io::{self, IsTerminal, Stdout};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use crossterm::{
     cursor::{Hide, Show},
@@ -295,6 +296,7 @@ fn palette_action_to_nav(action: command::PaletteAction) -> NavCommand {
 fn run_loop(resume: Option<state::WriteIntent>) -> io::Result<LoopExit> {
     let mut session = TerminalSession::enter()?;
     let mut state = AppState::new();
+    let mut last_animation_tick = Instant::now();
     if let Some(intent) = resume {
         state.begin_write_wizard(intent.kind, intent.disk, intent.backup);
     }
@@ -307,6 +309,14 @@ fn run_loop(resume: Option<state::WriteIntent>) -> io::Result<LoopExit> {
     state.set_backup_scan_pending(true);
 
     loop {
+        let now = Instant::now();
+        if now.duration_since(last_animation_tick)
+            >= Duration::from_millis(animation::TICK_INTERVAL_MS)
+        {
+            state.advance_animation();
+            last_animation_tick = now;
+        }
+
         let updates = tasks.poll();
         if let Some(rows) = updates.devices {
             state.replace_devices(rows);
@@ -360,7 +370,7 @@ fn run_loop(resume: Option<state::WriteIntent>) -> io::Result<LoopExit> {
             }
         }
         session.terminal.draw(|frame| render::draw(frame, &state))?;
-        if !ct_event::poll(Duration::from_millis(100))? {
+        if !ct_event::poll(Duration::from_millis(animation::TICK_INTERVAL_MS))? {
             continue;
         }
 

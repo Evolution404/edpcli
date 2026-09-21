@@ -9,6 +9,7 @@ use ratatui::{
 };
 
 use super::state::{AppState, InputMode, InspectMode, WizardStage, Workspace, WriteKind};
+use super::{animation, animation::CoreMode};
 
 fn safe(value: &str) -> String {
     crate::ui::sanitize_terminal_text(value)
@@ -569,6 +570,7 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
         Span::styled("edpcli", accent()),
         Span::styled("  TUI", secondary().add_modifier(Modifier::BOLD)),
         Span::styled("  ·  管理员模式", success()),
+        animation::compact_indicator(state.animation_frame()),
     ]))
     .block(
         Block::default()
@@ -577,16 +579,27 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
     );
     frame.render_widget(title, chunks[0]);
 
+    let body = chunks[1];
+    let (content_area, animation_area) = if body.width >= 118 && body.height >= 14 {
+        let parts = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([Constraint::Min(82), Constraint::Length(30)])
+            .split(body);
+        (parts[0], Some(parts[1]))
+    } else {
+        (body, None)
+    };
+
     if state.inspect_data().is_some() {
-        draw_inspect(frame, chunks[1], state);
+        draw_inspect(frame, content_area, state);
     } else if state.backup_delete().is_some() {
-        draw_backup_delete(frame, chunks[1], state);
+        draw_backup_delete(frame, content_area, state);
     } else if state.wizard().is_some() {
-        draw_wizard(frame, chunks[1], state);
+        draw_wizard(frame, content_area, state);
     } else {
         match state.input_mode() {
             InputMode::Command => {
-                draw_command_palette(frame, chunks[1], state);
+                draw_command_palette(frame, content_area, state);
             }
             InputMode::Help => {
                 let help = Paragraph::new(vec![
@@ -622,13 +635,34 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
                         .title_style(secondary()),
                 )
                 .wrap(Wrap { trim: true });
-                frame.render_widget(help, chunks[1]);
+                frame.render_widget(help, content_area);
             }
             _ => match state.workspace() {
-                Workspace::Devices => draw_devices(frame, chunks[1], state),
-                Workspace::Backups => draw_backups(frame, chunks[1], state),
+                Workspace::Devices => draw_devices(frame, content_area, state),
+                Workspace::Backups => draw_backups(frame, content_area, state),
             },
         }
+    }
+
+    if let Some(animation_area) = animation_area {
+        let (mode, activity) = if state.is_critical_operation() {
+            (CoreMode::Guard, "SAFE TRANSACTION")
+        } else if state.inspect_pending() {
+            (CoreMode::Busy, "READ LBA0-12")
+        } else if state.active_scan_pending() {
+            (CoreMode::Busy, "BACKGROUND SCAN")
+        } else if state.wizard().is_some() {
+            (CoreMode::Busy, "USER FLOW")
+        } else {
+            (CoreMode::Stable, "INTERACTIVE")
+        };
+        animation::draw(
+            frame,
+            animation_area,
+            state.animation_frame(),
+            mode,
+            activity,
+        );
     }
 
     let status = if state.is_critical_operation() && state.backup_delete().is_some() {
