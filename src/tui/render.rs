@@ -298,13 +298,14 @@ fn draw_backups(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState
         .split(backup_parts[0]);
     frame.render_widget(
         Paragraph::new(Line::from(vec![
-            Span::styled(format!(" 全部 {} ", state.backups().len()), selected()),
-            Span::raw("  "),
-            Span::styled(format!("免密快照 {nopwd_count}"), success()),
-            Span::raw("  "),
-            Span::styled(format!("原盘备份 {original_count}"), accent()),
+            Span::styled("总计 ", muted()),
+            Span::styled(state.backups().len().to_string(), accent()),
+            Span::styled("  ·  免密快照 ", muted()),
+            Span::styled(nopwd_count.to_string(), success()),
+            Span::styled("  ·  原盘备份 ", muted()),
+            Span::styled(original_count.to_string(), accent()),
         ]))
-        .block(Block::default().borders(Borders::ALL).title("备份统计")),
+        .block(Block::default().borders(Borders::ALL).title("备份概览")),
         summary_parts[0],
     );
     let search_text = if state.input_mode() == InputMode::Search {
