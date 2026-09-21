@@ -359,8 +359,50 @@ main-onlyid 的重复捕获又保持 second key 稳定，排除“上一次 main
 三份 legacy fixture 进一步锁定：NETAC_A=`44D9CE02`、NETAC_B=`028EFFD3`、
 LEXAR=`7647B1EF`。
 
-这补齐了此前缺失的 active consumer 和密码学用途，但仍没有找到 legacy seed 是由客户端、
-服务器还是旧制标器哪一方生成/注入，因此严格门槛仍差 **legacy producer** 一项，4B不升 COMPLETE。
+此前这里只缺 legacy producer；本轮已由官方历史二进制补齐。
+
+取得并哈希核验的归档 `CEMSUsbRegsiter.dll` v19.11.4.1，
+MD5=`783d01f19e998a514834bc5e5f4249ad`。该版本仍有可达 SAFE6 注册路径
+`ISUdiskRegsiterObj::virtual_56@0x1000CC50`。其机器码在识别 `"SAFE6"` 后：
+
+```text
+0x1000D109  memset(node, 0, 0x2F)
+0x1000D11D  call fcn.100058E0
+0x1000D122  node+0x04 = EAX          ; OnllyID2Nd
+```
+
+`fcn.100058E0@0x100058E0` 又可完整恢复：
+
+```text
+GUID g;
+CoCreateGuid(&g);
+init_crc_table();
+crc = 0;
+for byte in raw_bytes(g)[0..16]:
+    crc = (crc >> 8) ^ table[(crc_low8 ^ byte) & 0xFF];
+return crc;
+```
+
+也就是说，旧 SAFE6 writer 的第二 key 不是 main onlyid、device-id、MBR signature
+或宿主硬件号派生，而是**单独生成的一枚 GUID 的16个原始字节经协议同款
+CRC32_bare 得到的32-bit随机 key**。current writer 则取消第二次随机生成，直接把
+main onlyid（它本身也是 `CoCreateGuid -> CRC32_bare`）复用到 `OnllyID2Nd`。
+
+这解释了此前所有真实 profile：
+
+- current：`OnllyID2Nd == main onlyid`；
+- legacy：`OnllyID2Nd` 与 main onlyid 独立；
+- 同一已制盘标签的重复备份中 second key 保持稳定，因为随机只发生在制标写入时，
+  后续只是持久化读取；
+- committed NETAC_A/NETAC_B/LEXAR 的 exact second key 继续锁定为
+  `44D9CE02/028EFFD3/7647B1EF`；
+- 回归进一步证明这些 legacy key 既不等于 main/其它 main-onlyid，也不等于
+  `CRC32(device_id)`、LBA0 disk signature 或 `MyHardinfo`，防止再次把随机
+  backup key 误归类为目标盘/宿主机身份。
+
+结合已经闭合的 backup encrypt / activation decrypt 双向 consumer，
+`OnllyID2Nd` 的代际差异现在只剩“seed 来源不同”，其业务语义没有分叉。
+因此 LBA4 `+0x1C..+0x1F` **4B 从 PARTIAL 升 COMPLETE**。
 
 这一结论本轮又回到 **PE 机器码**重新核验，避免依赖 Hex-Rays 风格 `.m`
 伪代码的局部漏语句：
@@ -3630,7 +3672,7 @@ profiles 的该边界，而不是把字符串具体值硬编码成未来协议�
 | 1 | 512B | 0B | 0B | 100.0% | Linux official `BuildSector1_Gpt` first-party virtual runtime 直接生成整512B primary header，独立 IEEE CRC32 同时命中 header/16KiB array CRC；同一34扇 image 又被 current Windows `sub_1002AB70` 原生识别为GPT。physical 22/22零值继续作为 absent-GPT profile 保存，不与virtual fixture混计 |
 | 2 | 512B | 0B | 0B | 100.0% | entry0完整128B first-party闭合；entries1..3 的 `PartitionTypeGUID=0` 已按 one-partition creator/unused-entry 定义闭合。剩余3×112B又由 Windows/Linux official parser 的“TypeGUID先行、未命中即短路”语义与 Windows Unicorn nonzero-residual consumer probe闭合为 unused-entry unowned residual。LBA2整扇COMPLETE |
 | 3 | 0B | 512B | 0B | 0% | EDP 注册 writer 对整扇 preserve-existing，当前 Windows/Linux EDP reader 不解析；22份原始盘为21零+1 Kingston MP payload，但厂商 producer/固件 consumer 未闭合 |
-| 4 | 483B | 29B | 0B | 94.3% | onlyid clear header、OnlyIdXor8、LLGB 双锚点与固定restore metadata完成；`+0x047..+0x1FB` 437B 已由 first-party full/null writer 动态证明为 unowned backing 的“可逆 rolling transform / byte-preserve”双表示，并由 official reader negative-consumer 闭合。剩余29B仅为 `OnllyID2Nd`4B、HSerialCRC20B、MyHardinfo4B、`bDataToServer`1B |
+| 4 | 487B | 25B | 0B | 95.1% | onlyid clear header、OnlyIdXor8、`OnllyID2Nd` backup/activation key、LLGB 双锚点与固定restore metadata完成；`+0x047..+0x1FB` 437B 已由 first-party full/null writer 动态证明为 unowned backing 的“可逆 rolling transform / byte-preserve”双表示，并由 official reader negative-consumer 闭合。剩余25B仅为 HSerialCRC20B、MyHardinfo4B、`bDataToServer`1B |
 | 5 | 512B | 0B | 0B | 100% | 两版 EdpDiskCtrl 均只对 LBA5 执行“读整扇→原样写回→检查 ERROR_WRITE_PROTECT(0x13)”；当前注册 writer 读取既有13扇区后不重建 LBA5，因此 preserve existing bytes；22/22原始盘全零 |
 | 6 | 497B | 15B | 0B | 97.1% | GSerial/BeiZhu动态槽已闭合；继续把旧 MBR underlay 拆分后，`+0x1EE..+0x1EF` 已进入未使用 entry4 的 status/start-head，current模板与22份 checksum-valid历史 front 均为 `00 00`，reader无独立消费，因此2B升COMPLETE。当前仅剩 Dept join59末字节1B与 legacy MBR entry3 fragment14B |
 | 7 | 512B | 0B | 0B | 100.0% | 3×Version、entry1/entry2 NeedDisturb 已按 compatibility metadata 生命周期闭合；最后两个 BackupPromptPeriod BYTE 又由正式 DWARF 字段、current-zero producer、四代 Windows + Linux structural-preserve/negative semantic consumer、跨 v0x0064/v0x0206 实盘0/0 profile 闭合为 dormant compatibility fields。LBA7 至此整扇 COMPLETE |
@@ -3642,8 +3684,8 @@ profiles 的该边界，而不是把字符串具体值硬编码成未来协议�
 
 总计：
 
-- **完成：5552B / 6656B = 83.4%**
-- **部分已知：1104B / 6656B = 16.6%**
+- **完成：5556B / 6656B = 83.5%**
+- **部分已知：1100B / 6656B = 16.5%**
 - **未知：0B / 6656B = 0.0%**
 
 这是一组**严格下限**，故意宁可低估，不把“能生成/能解析”冒充成“已经完全理解”。
@@ -3655,7 +3697,7 @@ profiles 的该边界，而不是把字符串具体值硬编码成未来协议�
 | 1 | 完全闭合 | absent-GPT physical profile 与 official GPT positive-wire profile 均闭合；512/512 COMPLETE |
 | 2 | 完全闭合 | entry0 128B完整闭合；entries1..3 的 TypeGUID=0 决定 unused 状态，Windows/Linux parser 均只在GUID命中后读取 residual。Windows first-party parser 对 `TypeGUID=0 + residual=0xA5` 动态 probe 证明336B residual 0次读取，因此按 unused-entry unowned residual 闭合。512/512 COMPLETE |
 | 3 | 外部制造区部分闭合 | 21/22 全零，1 份 Kingston MP payload；官方 EDP 注册链原样保留且当前 reader 不解析，厂商生成/消费语义仍未知 |
-| 4 | 高度闭合 | 483/512 COMPLETE。`+0x047..+0x1FB` 已闭合为 unowned backing / representation carrier：full branch 可逆rolling existing bytes，NULL branch 原样preserve，reader只返回0x2F node且semantic-ignore backing；real raw-zero/rolling-zero与任意非零virtual正例均已覆盖。只剩 second key/HSerial/MyHardinfo/第一server flag 共29B PARTIAL |
+| 4 | 高度闭合 | 487/512 COMPLETE。`OnllyID2Nd` 已由历史 SAFE6 `CoCreateGuid -> CRC32_bare` 独立 key producer 与 current main-onlyid复用 producer 双代闭合；`+0x047..+0x1FB` 已闭合为 unowned backing / representation carrier。只剩 HSerial/MyHardinfo/第一server flag 共25B PARTIAL |
 | 5 | canonical 已知 | opaque preserve / 写保护探测 scratch；当前 22/22 全零，但零不是协议固定要求 |
 | 6 | 高度闭合 | 整扇已无 UNKNOWN，497/512 COMPLETE。两个固定字符串槽已完全闭合；legacy MBR underlay 的 entry4 前2B又按跨 current/legacy universal zero 闭合。剩余15B仅为 Dept join59末字节1B与 `+0x1E0..1ED` legacy MBR entry3 snapshot14B |
 | 7 | 完全闭合 | 物理0x40 packed ABI、PartionCount、rolling XOR、entry0 NeedDisturb MBR gate、v0x0064 legacy wrapped8、3×Version/entry1+2 NeedDisturb compatibility metadata、`bNoUsbChkPasSafe` SAFE6 policy 行为链及最后两个 dormant BackupPromptPeriod compatibility BYTE 均已闭合；512/512 COMPLETE |

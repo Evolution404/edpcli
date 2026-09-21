@@ -1627,9 +1627,9 @@ fn lba4_strict_progress_matches_non_overlapping_detail_ranges() {
         owner.iter().all(Option::is_some),
         "LBA4 detail rows must cover all 512 bytes"
     );
-    assert_eq!((complete, partial), (483, 29));
+    assert_eq!((complete, partial), (487, 25));
     assert!(
-        trace.contains("| LBA4 | 483 | 29 | 0 | 94.3% |"),
+        trace.contains("| LBA4 | 487 | 25 | 0 | 95.1% |"),
         "STRICT_PROGRESS LBA4 summary drifted from byte-detail accounting"
     );
 }
@@ -2075,6 +2075,21 @@ fn lba4_legacy_second_onlyid_is_a_stable_distinct_backup_key_seed() {
         assert!(
             !main_ids.contains(&second),
             "legacy second-key unexpectedly aliases another committed main onlyid: {name}"
+        );
+        assert_ne!(
+            second,
+            crc32_bare(meta.device_id.as_bytes()),
+            "legacy backup key must not collapse to target device-id CRC: {name}"
+        );
+        assert_ne!(
+            second,
+            u32_le(sector(&image, 0), 0x1b8),
+            "legacy backup key must not collapse to the target MBR disk signature: {name}"
+        );
+        assert_ne!(
+            second,
+            u32_le(&decoded, 0x35),
+            "legacy backup key must remain independent from host-hardinfo identity: {name}"
         );
     }
 }
