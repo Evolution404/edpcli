@@ -96,6 +96,8 @@ pub enum NavCommand {
     BeginBackupDelete,
     VerifyBackup,
     OpenInspect,
+    NextWorkspace,
+    PreviousWorkspace,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -786,6 +788,7 @@ impl AppState {
                     };
                     inspect.scroll = 0;
                 }
+                NavCommand::NextWorkspace | NavCommand::PreviousWorkspace => {}
                 NavCommand::Search => {
                     self.input_buffer.clear();
                     self.input_mode = InputMode::Search;
@@ -811,6 +814,12 @@ impl AppState {
         }
 
         match command {
+            NavCommand::NextWorkspace | NavCommand::PreviousWorkspace => {
+                self.switch_workspace(match self.workspace {
+                    Workspace::Devices => Workspace::Backups,
+                    Workspace::Backups => Workspace::Devices,
+                });
+            }
             NavCommand::Up => {
                 self.selected = self.selected.saturating_sub(1);
             }

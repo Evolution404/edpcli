@@ -37,6 +37,8 @@ impl KeyMapper {
         }
 
         match event.code {
+            KeyCode::Tab => Some(NavCommand::NextWorkspace),
+            KeyCode::BackTab => Some(NavCommand::PreviousWorkspace),
             KeyCode::Char('g') => {
                 self.pending_g = true;
                 None
@@ -95,6 +97,19 @@ mod tests {
         assert_eq!(
             mapper.map(key(KeyCode::Char('u'), KeyModifiers::CONTROL)),
             Some(NavCommand::HalfPageUp)
+        );
+    }
+
+    #[test]
+    fn tab_switches_workspace_pages() {
+        let mut mapper = KeyMapper::new();
+        assert_eq!(
+            mapper.map(key(KeyCode::Tab, KeyModifiers::NONE)),
+            Some(NavCommand::NextWorkspace)
+        );
+        assert_eq!(
+            mapper.map(key(KeyCode::BackTab, KeyModifiers::SHIFT)),
+            Some(NavCommand::PreviousWorkspace)
         );
     }
 

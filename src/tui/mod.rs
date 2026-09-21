@@ -475,7 +475,7 @@ fn run_loop(resume: Option<state::WriteIntent>) -> io::Result<LoopExit> {
                                 match command::parse_command(&input) {
                                     Ok(action) => {
                                         let viewport_height =
-                                            session.terminal.size()?.height.saturating_sub(5)
+                                            session.terminal.size()?.height.saturating_sub(9)
                                                 as usize;
                                         let effect = dispatch_nav_command(
                                             &mut state,
@@ -499,7 +499,7 @@ fn run_loop(resume: Option<state::WriteIntent>) -> io::Result<LoopExit> {
 
                 if let Some(command) = keys.map(key) {
                     let viewport_height =
-                        session.terminal.size()?.height.saturating_sub(5) as usize;
+                        session.terminal.size()?.height.saturating_sub(9) as usize;
                     match dispatch_nav_command(
                         &mut state,
                         &mut tasks,

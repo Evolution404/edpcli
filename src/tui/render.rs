@@ -1,7 +1,7 @@
 //! Ratatui rendering for the top-level shell.
 
 use ratatui::{
-    layout::{Constraint, Direction, Layout},
+    layout::{Alignment, Constraint, Direction, Layout},
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Cell, Paragraph, Row as TableRow, Table, TableState, Tabs, Wrap},
@@ -78,256 +78,427 @@ fn device_status(row: &crate::disk_scan::Row) -> String {
     }
 }
 
-fn draw_devices(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState) {
-    let (table_area, detail_area) = if area.height >= 12 {
-        let parts = Layout::default()
+fn workspace_sidebar_layout(
+    area: ratatui::layout::Rect,
+) -> (
+    ratatui::layout::Rect,
+    Option<(ratatui::layout::Rect, Option<ratatui::layout::Rect>)>,
+) {
+    if area.width < 108 || area.height < 12 {
+        return (area, None);
+    }
+    let columns = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Min(68), Constraint::Length(40)])
+        .split(area);
+    if columns[1].height >= 18 {
+        let sidebar = Layout::default()
             .direction(Direction::Vertical)
-            .constraints([Constraint::Min(5), Constraint::Length(6)])
-            .split(area);
-        (parts[0], Some(parts[1]))
+            .constraints([Constraint::Min(8), Constraint::Length(10)])
+            .split(columns[1]);
+        (columns[0], Some((sidebar[0], Some(sidebar[1]))))
     } else {
-        (area, None)
+        (columns[0], Some((columns[1], None)))
+    }
+}
+
+fn draw_workspace_animation(
+    frame: &mut Frame,
+    area: Option<ratatui::layout::Rect>,
+    state: &AppState,
+    activity: &'static str,
+) {
+    let Some(area) = area else {
+        return;
+    };
+    let mode = if state.active_scan_pending() {
+        CoreMode::Busy
+    } else {
+        CoreMode::Stable
+    };
+    animation::draw(frame, area, state.animation_frame(), mode, activity);
+}
+
+fn draw_devices(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState) {
+    let (list_area, sidebar) = workspace_sidebar_layout(area);
+    let title = if state.device_scan_pending() {
+        format!("设备列表 ({}) · 扫描中…", state.devices().len())
+    } else {
+        format!("设备列表 ({})", state.devices().len())
     };
 
-    let rows = state.devices().iter().map(|row| {
-        TableRow::new(vec![
-            Cell::from(format!("disk{}", row.disk)).style(accent()),
-            Cell::from(crate::common::fmt_gb(row.size)),
-            Cell::from(safe(&row.proto)).style(if row.proto == "USB" {
-                success()
-            } else {
-                warning()
-            }),
-            Cell::from(format!("{}:{}", safe(&row.vid), safe(&row.pid))).style(secondary()),
-            Cell::from(row.user.as_deref().map(safe).unwrap_or_else(|| "—".into())),
-            Cell::from(row.dept.as_deref().map(safe).unwrap_or_else(|| "—".into())),
-            Cell::from(device_status(row)).style(device_status_style(row)),
-        ])
-    });
-    let header =
-        TableRow::new(["设备", "容量", "总线", "VID:PID", "姓名", "部门", "状态"]).style(accent());
-    let title = if state.device_scan_pending() {
-        "设备 · 扫描中…"
-    } else {
-        "设备"
-    };
-    let table = Table::new(
-        rows,
-        [
-            Constraint::Length(10),
-            Constraint::Length(10),
-            Constraint::Length(8),
-            Constraint::Length(11),
-            Constraint::Length(14),
-            Constraint::Min(18),
-            Constraint::Min(16),
-        ],
-    )
-    .header(header)
-    .block(
-        Block::default()
+    if state.devices().is_empty() {
+        let block = Block::default()
             .borders(Borders::ALL)
             .title(title)
-            .title_style(secondary()),
-    )
-    .row_highlight_style(selected());
-    let mut table_state = TableState::default();
-    if state.item_count() > 0 {
-        table_state.select(Some(state.selected()));
-    }
-    frame.render_stateful_widget(table, table_area, &mut table_state);
-
-    if let (Some(detail_area), Some(row)) = (detail_area, state.selected_device()) {
-        let onlyid = row.onlyid.as_deref().unwrap_or("—");
-        let device_id = row.device_id.as_deref().unwrap_or("—");
-        let detail = Paragraph::new(vec![
-            Line::from(vec![
-                Span::styled("onlyid: ", accent()),
-                Span::styled(safe(onlyid), secondary()),
-            ]),
-            Line::from(vec![
-                Span::styled("device_id: ", accent()),
-                Span::styled(safe(device_id), secondary()),
-            ]),
-            Line::from(vec![
-                Span::styled("姓名/部门: ", accent()),
-                Span::raw(format!(
-                    "{} / {}",
-                    row.user.as_deref().map(safe).unwrap_or_else(|| "—".into()),
-                    row.dept.as_deref().map(safe).unwrap_or_else(|| "—".into())
+            .title_style(secondary());
+        let inner = block.inner(list_area);
+        frame.render_widget(block, list_area);
+        frame.render_widget(
+            Paragraph::new(vec![
+                Line::from(Span::styled(
+                    "暂无设备数据",
+                    secondary().add_modifier(Modifier::BOLD),
                 )),
-            ]),
-            Line::from(vec![
-                Span::styled("已有备份: ", accent()),
-                Span::raw(row.n_baks.to_string()),
-                Span::raw("  ·  状态: "),
-                Span::styled(device_status(row), device_status_style(row)),
-            ]),
-        ])
+                Line::from(""),
+                Line::from("未检测到符合条件的存储设备。"),
+                Line::from(vec![
+                    Span::raw("按 "),
+                    Span::styled("r", success().add_modifier(Modifier::BOLD)),
+                    Span::raw(" 刷新设备；插入 U 盘后可再次扫描。"),
+                ]),
+                Line::from(""),
+                Line::from("Tab / h / l 可切换到备份页面。"),
+            ])
+            .alignment(Alignment::Center)
+            .wrap(Wrap { trim: true }),
+            inner,
+        );
+    } else {
+        let rows = state.devices().iter().map(|row| {
+            TableRow::new(vec![
+                Cell::from(format!("disk{}", row.disk)).style(accent()),
+                Cell::from(crate::common::fmt_gb(row.size)),
+                Cell::from(safe(&row.proto)).style(if row.proto == "USB" {
+                    success()
+                } else {
+                    warning()
+                }),
+                Cell::from(format!("{}:{}", safe(&row.vid), safe(&row.pid))).style(secondary()),
+                Cell::from(row.user.as_deref().map(safe).unwrap_or_else(|| "—".into())),
+                Cell::from(row.dept.as_deref().map(safe).unwrap_or_else(|| "—".into())),
+                Cell::from(device_status(row)).style(device_status_style(row)),
+            ])
+        });
+        let header = TableRow::new(["设备", "容量", "总线", "VID:PID", "姓名", "部门", "状态"])
+            .style(accent());
+        let table = Table::new(
+            rows,
+            [
+                Constraint::Length(9),
+                Constraint::Length(10),
+                Constraint::Length(7),
+                Constraint::Length(11),
+                Constraint::Length(12),
+                Constraint::Min(18),
+                Constraint::Length(14),
+            ],
+        )
+        .header(header)
         .block(
             Block::default()
                 .borders(Borders::ALL)
-                .title("当前设备详情")
+                .title(title)
+                .title_style(secondary()),
+        )
+        .row_highlight_style(selected());
+        let mut table_state = TableState::default();
+        table_state.select(Some(state.selected()));
+        frame.render_stateful_widget(table, list_area, &mut table_state);
+    }
+
+    if let Some((detail_area, animation_area)) = sidebar {
+        let detail = if let Some(row) = state.selected_device() {
+            let onlyid = row.onlyid.as_deref().unwrap_or("—");
+            let device_id = row.device_id.as_deref().unwrap_or("—");
+            Paragraph::new(vec![
+                Line::from(vec![
+                    Span::styled("状态  ", muted()),
+                    Span::styled(
+                        device_status(row),
+                        device_status_style(row).add_modifier(Modifier::BOLD),
+                    ),
+                ]),
+                Line::from(format!(
+                    "设备  disk{}  ·  {}  ·  {}",
+                    row.disk,
+                    crate::common::fmt_gb(row.size),
+                    safe(&row.proto)
+                )),
+                Line::from(format!("VID:PID  {}:{}", safe(&row.vid), safe(&row.pid))),
+                Line::from(format!(
+                    "姓名  {}",
+                    row.user.as_deref().map(safe).unwrap_or_else(|| "—".into())
+                )),
+                Line::from(format!(
+                    "部门  {}",
+                    row.dept.as_deref().map(safe).unwrap_or_else(|| "—".into())
+                )),
+                Line::from(format!("onlyid  {}", safe(onlyid))),
+                Line::from(format!("device_id  {}", safe(device_id))),
+                Line::from(format!("已有备份  {} 份", row.n_baks)),
+                Line::from(""),
+                Line::from(Span::styled(
+                    "可用操作",
+                    secondary().add_modifier(Modifier::BOLD),
+                )),
+                Line::from(vec![
+                    Span::styled("i", accent()),
+                    Span::raw(" Inspect    "),
+                    Span::styled("b", accent()),
+                    Span::raw(" 新建备份"),
+                ]),
+                Line::from(vec![
+                    Span::styled("a", warning()),
+                    Span::raw(" Apply      "),
+                    Span::styled("r", success()),
+                    Span::raw(" 刷新"),
+                ]),
+            ])
+        } else {
+            Paragraph::new(vec![
+                Line::from(Span::styled(
+                    "操作与信息",
+                    secondary().add_modifier(Modifier::BOLD),
+                )),
+                Line::from(""),
+                Line::from("选择设备后，这里会显示身份、所属人员、备份数量和可用操作。"),
+                Line::from(""),
+                Line::from("r  刷新设备"),
+                Line::from("/  搜索设备"),
+                Line::from("Tab  切换页面"),
+            ])
+        }
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title("设备详情")
                 .title_style(secondary()),
         )
         .wrap(Wrap { trim: true });
         frame.render_widget(detail, detail_area);
+        draw_workspace_animation(frame, animation_area, state, "DEVICE WORKSPACE");
+    }
+}
+
+fn backup_health(backup: &crate::application::BackupWorkspaceItem) -> (&'static str, Style) {
+    if !backup.size_ok {
+        ("大小异常", danger())
+    } else {
+        match backup.sha256_status {
+            crate::diskio::Sha256Status::Ok => ("SHA-256 ✓", success()),
+            crate::diskio::Sha256Status::Mismatch => ("SHA-256 ✗", danger()),
+            crate::diskio::Sha256Status::NoSidecar => ("缺 SHA-256", warning()),
+        }
     }
 }
 
 fn draw_backups(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState) {
-    let (table_area, detail_area) = if area.height >= 11 {
-        let parts = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([Constraint::Min(5), Constraint::Length(5)])
-            .split(area);
-        (parts[0], Some(parts[1]))
+    let (list_area, sidebar) = workspace_sidebar_layout(area);
+    let backup_parts = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(3), Constraint::Min(4)])
+        .split(list_area);
+
+    let nopwd_count = state.backups().iter().filter(|row| row.is_nopwd).count();
+    let original_count = state.backups().len().saturating_sub(nopwd_count);
+    let summary_parts = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Min(40), Constraint::Length(32)])
+        .split(backup_parts[0]);
+    frame.render_widget(
+        Paragraph::new(Line::from(vec![
+            Span::styled(format!(" 全部 {} ", state.backups().len()), selected()),
+            Span::raw("  "),
+            Span::styled(format!("免密快照 {nopwd_count}"), success()),
+            Span::raw("  "),
+            Span::styled(format!("原盘备份 {original_count}"), accent()),
+        ]))
+        .block(Block::default().borders(Borders::ALL).title("备份统计")),
+        summary_parts[0],
+    );
+    let search_text = if state.input_mode() == InputMode::Search {
+        format!("/{}", safe(state.input_buffer()))
+    } else if let Some(status) = state.search_status() {
+        status
     } else {
-        (area, None)
+        "/ 搜索姓名、部门、onlyid".to_string()
+    };
+    frame.render_widget(
+        Paragraph::new(search_text)
+            .block(Block::default().borders(Borders::ALL).title("搜索"))
+            .style(muted()),
+        summary_parts[1],
+    );
+
+    let title = if state.backup_scan_pending() {
+        format!("备份列表 ({}) · 扫描中…", state.backups().len())
+    } else {
+        format!("备份列表 ({})", state.backups().len())
     };
 
-    let rows = state.backups().iter().map(|backup| {
-        let health = if !backup.size_ok {
-            "大小异常".to_string()
-        } else {
-            match backup.sha256_status {
-                crate::diskio::Sha256Status::Ok => "SHA-256 ✓".to_string(),
-                crate::diskio::Sha256Status::Mismatch => "SHA-256 ✗".to_string(),
-                crate::diskio::Sha256Status::NoSidecar => "缺 SHA-256".to_string(),
-            }
-        };
-        let health_style =
-            if !backup.size_ok || backup.sha256_status == crate::diskio::Sha256Status::Mismatch {
-                danger()
-            } else if backup.sha256_status == crate::diskio::Sha256Status::NoSidecar {
-                warning()
-            } else {
-                success()
-            };
-        TableRow::new(vec![
-            Cell::from(backup.index.to_string()).style(accent()),
-            Cell::from(safe(&backup.display_time)),
-            Cell::from(if backup.is_nopwd {
-                "免密状态"
-            } else {
-                "加密原盘"
-            })
-            .style(if backup.is_nopwd { success() } else { accent() }),
-            Cell::from(
-                backup
-                    .user
-                    .as_deref()
-                    .map(safe)
-                    .unwrap_or_else(|| "—".into()),
-            ),
-            Cell::from(
-                backup
-                    .dept
-                    .as_deref()
-                    .map(safe)
-                    .unwrap_or_else(|| "—".into()),
-            ),
-            Cell::from(
-                backup
-                    .onlyid
-                    .as_deref()
-                    .map(safe)
-                    .unwrap_or_else(|| "—".into()),
-            )
-            .style(secondary()),
-            Cell::from(health).style(health_style),
-        ])
-    });
-    let header =
-        TableRow::new(["#", "时间", "状态", "姓名", "部门", "onlyid", "健康"]).style(accent());
-    let title = if state.backup_scan_pending() {
-        "备份 · 扫描中…"
-    } else {
-        "备份"
-    };
-    let table = Table::new(
-        rows,
-        [
-            Constraint::Length(5),
-            Constraint::Length(17),
-            Constraint::Length(10),
-            Constraint::Length(14),
-            Constraint::Min(18),
-            Constraint::Length(14),
-            Constraint::Length(10),
-        ],
-    )
-    .header(header)
-    .block(
-        Block::default()
+    if state.backups().is_empty() {
+        let block = Block::default()
             .borders(Borders::ALL)
             .title(title)
-            .title_style(secondary()),
-    )
-    .row_highlight_style(selected());
-    let mut table_state = TableState::default();
-    if state.item_count() > 0 {
-        table_state.select(Some(state.selected()));
-    }
-    frame.render_stateful_widget(table, table_area, &mut table_state);
-
-    if let (Some(detail_area), Some(backup)) = (detail_area, state.backups().get(state.selected()))
-    {
-        let health = if !backup.size_ok {
-            "大小异常"
-        } else {
-            match backup.sha256_status {
-                crate::diskio::Sha256Status::Ok => "SHA-256 ✓",
-                crate::diskio::Sha256Status::Mismatch => "SHA-256 ✗",
-                crate::diskio::Sha256Status::NoSidecar => "缺 SHA-256",
-            }
-        };
-        let detail = Paragraph::new(vec![
-            Line::from(vec![
-                Span::styled("文件: ", accent()),
-                Span::raw(safe(&backup.file_name)),
-            ]),
-            Line::from(vec![
-                Span::styled("状态: ", accent()),
-                Span::styled(
-                    health,
-                    if backup.size_ok && backup.sha256_status == crate::diskio::Sha256Status::Ok {
-                        success()
-                    } else {
-                        warning()
-                    },
+            .title_style(secondary());
+        let inner = block.inner(backup_parts[1]);
+        frame.render_widget(block, backup_parts[1]);
+        frame.render_widget(
+            Paragraph::new(vec![
+                Line::from(Span::styled(
+                    "暂无备份记录",
+                    secondary().add_modifier(Modifier::BOLD),
+                )),
+                Line::from(""),
+                Line::from("先在“设备”页面选择目标 U 盘，然后按 b 创建只读备份。"),
+                Line::from("备份创建完成后，这里会自动刷新。"),
+            ])
+            .alignment(Alignment::Center)
+            .wrap(Wrap { trim: true }),
+            inner,
+        );
+    } else {
+        let rows = state.backups().iter().map(|backup| {
+            let (health, health_style) = backup_health(backup);
+            TableRow::new(vec![
+                Cell::from(backup.index.to_string()).style(accent()),
+                Cell::from(safe(&backup.display_time)),
+                Cell::from(if backup.is_nopwd {
+                    "免密状态"
+                } else {
+                    "加密原盘"
+                })
+                .style(if backup.is_nopwd { success() } else { accent() }),
+                Cell::from(
+                    backup
+                        .user
+                        .as_deref()
+                        .map(safe)
+                        .unwrap_or_else(|| "—".into()),
                 ),
-                Span::raw("  ·  "),
-                Span::styled(
-                    if backup.is_nopwd {
-                        "免密状态"
-                    } else {
-                        "加密原盘"
-                    },
-                    if backup.is_nopwd { success() } else { accent() },
+                Cell::from(
+                    backup
+                        .dept
+                        .as_deref()
+                        .map(safe)
+                        .unwrap_or_else(|| "—".into()),
                 ),
-            ]),
-            Line::from(vec![
-                Span::styled("操作: ", accent()),
-                Span::styled("i 查看", secondary()),
-                Span::raw("  "),
-                Span::styled("v 校验", success()),
-                Span::raw("  "),
-                Span::styled("D 删除", danger()),
-                Span::raw("  "),
-                Span::styled("R 恢复", warning()),
-                Span::raw("  "),
-                Span::styled("b 新建", accent()),
-            ]),
-        ])
+                Cell::from(health).style(health_style),
+            ])
+        });
+        let header = TableRow::new(["#", "时间", "状态", "姓名", "部门", "健康"]).style(accent());
+        let table = Table::new(
+            rows,
+            [
+                Constraint::Length(4),
+                Constraint::Length(17),
+                Constraint::Length(10),
+                Constraint::Length(12),
+                Constraint::Min(22),
+                Constraint::Length(11),
+            ],
+        )
+        .header(header)
         .block(
             Block::default()
                 .borders(Borders::ALL)
-                .title("当前备份")
+                .title(title)
+                .title_style(secondary()),
+        )
+        .row_highlight_style(selected());
+        let mut table_state = TableState::default();
+        table_state.select(Some(state.selected()));
+        frame.render_stateful_widget(table, backup_parts[1], &mut table_state);
+    }
+
+    if let Some((detail_area, animation_area)) = sidebar {
+        let detail = if let Some(backup) = state.backups().get(state.selected()) {
+            let (health, health_style) = backup_health(backup);
+            Paragraph::new(vec![
+                Line::from(vec![
+                    Span::styled("时间  ", muted()),
+                    Span::raw(safe(&backup.display_time)),
+                ]),
+                Line::from(vec![
+                    Span::styled("状态  ", muted()),
+                    Span::styled(
+                        if backup.is_nopwd {
+                            "免密状态"
+                        } else {
+                            "加密原盘"
+                        },
+                        if backup.is_nopwd { success() } else { accent() },
+                    ),
+                ]),
+                Line::from(format!(
+                    "姓名  {}",
+                    backup
+                        .user
+                        .as_deref()
+                        .map(safe)
+                        .unwrap_or_else(|| "—".into())
+                )),
+                Line::from(format!(
+                    "部门  {}",
+                    backup
+                        .dept
+                        .as_deref()
+                        .map(safe)
+                        .unwrap_or_else(|| "—".into())
+                )),
+                Line::from(format!(
+                    "onlyid  {}",
+                    backup
+                        .onlyid
+                        .as_deref()
+                        .map(safe)
+                        .unwrap_or_else(|| "—".into())
+                )),
+                Line::from(vec![
+                    Span::styled("健康  ", muted()),
+                    Span::styled(health, health_style.add_modifier(Modifier::BOLD)),
+                ]),
+                Line::from(format!("文件  {}", safe(&backup.file_name))),
+                Line::from(""),
+                Line::from(if backup.is_nopwd {
+                    "提示：这是免密状态快照；还原后不会回到加密原盘。"
+                } else {
+                    "提示：这是加密原盘备份，可用于恢复原始状态。"
+                }),
+                Line::from(""),
+                Line::from(Span::styled(
+                    "可用操作",
+                    secondary().add_modifier(Modifier::BOLD),
+                )),
+                Line::from(vec![
+                    Span::styled("i", accent()),
+                    Span::raw(" Inspect   "),
+                    Span::styled("v", success()),
+                    Span::raw(" 校验"),
+                ]),
+                Line::from(vec![
+                    Span::styled("R", warning()),
+                    Span::raw(" 恢复      "),
+                    Span::styled("D", danger()),
+                    Span::raw(" 删除"),
+                ]),
+                Line::from(vec![
+                    Span::styled("b", accent()),
+                    Span::raw(" 新建备份   "),
+                    Span::styled("r", success()),
+                    Span::raw(" 刷新"),
+                ]),
+            ])
+        } else {
+            Paragraph::new(vec![
+                Line::from(Span::styled(
+                    "备份详情",
+                    secondary().add_modifier(Modifier::BOLD),
+                )),
+                Line::from(""),
+                Line::from("选择一条备份后，这里会显示身份、健康状态和安全操作。"),
+            ])
+        }
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title("备份详情")
                 .title_style(secondary()),
         )
         .wrap(Wrap { trim: true });
         frame.render_widget(detail, detail_area);
+        draw_workspace_animation(frame, animation_area, state, "BACKUP WORKSPACE");
     }
 }
 
@@ -588,8 +759,9 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(3),
+            Constraint::Length(3),
             Constraint::Min(4),
-            Constraint::Length(2),
+            Constraint::Length(3),
         ])
         .split(area);
 
@@ -606,8 +778,31 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
     );
     frame.render_widget(title, chunks[0]);
 
-    let body = chunks[1];
-    let (content_area, animation_area) = if body.width >= 118 && body.height >= 14 {
+    let workspace_index = match state.workspace() {
+        Workspace::Devices => 0,
+        Workspace::Backups => 1,
+    };
+    let workspace_tabs = Tabs::new(["设备", "备份"])
+        .select(workspace_index)
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(accent())
+                .title("页面 · Tab / h / l 切换"),
+        )
+        .style(muted())
+        .highlight_style(selected())
+        .divider(Span::styled(" │ ", muted()))
+        .padding("  ", "  ");
+    frame.render_widget(workspace_tabs, chunks[1]);
+
+    let body = chunks[2];
+    let overlay_active = state.inspect_data().is_some()
+        || state.backup_delete().is_some()
+        || state.wizard().is_some()
+        || matches!(state.input_mode(), InputMode::Command | InputMode::Help);
+    let (content_area, animation_area) = if overlay_active && body.width >= 118 && body.height >= 14
+    {
         let parts = Layout::default()
             .direction(Direction::Horizontal)
             .constraints([Constraint::Min(82), Constraint::Length(30)])
@@ -631,7 +826,7 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
             InputMode::Help => {
                 let help = Paragraph::new(vec![
                     Line::from(Span::styled("Vim 键位", accent())),
-                    Line::from("j/k/h/l 移动   gg/G 首/尾   Ctrl-d/u 半页"),
+                    Line::from("Tab 切换页面   j/k/h/l 移动   gg/G 首/尾   Ctrl-d/u 半页"),
                     Line::from(vec![
                         Span::styled("/ 搜索", secondary()),
                         Span::raw("   n/N 匹配   "),
@@ -700,12 +895,19 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
     } else {
         match state.workspace() {
             Workspace::Devices => {
-                "h/l 工作区  j/k 移动  i 查看  b 新建备份  a Apply  r 刷新  ? 帮助  : 命令  / 搜索  q 退出".to_string()
+                "Tab 页面  ·  j/k 移动  ·  i Inspect  ·  b 新建备份  ·  a Apply  ·  r 刷新  ·  / 搜索  ·  ? 帮助  ·  q 退出".to_string()
             }
             Workspace::Backups => {
-                "h/l 工作区  j/k 移动  i 查看  v 校验  D 删除  R 恢复  b 新建  r 刷新  ? 帮助  : 命令  / 搜索  q 退出".to_string()
+                "Tab 页面  ·  j/k 移动  ·  i Inspect  ·  v 校验  ·  R 恢复  ·  D 删除  ·  b 新建  ·  / 搜索  ·  q 退出".to_string()
             }
         }
     };
-    frame.render_widget(Paragraph::new(safe(&status)), chunks[2]);
+    frame.render_widget(
+        Paragraph::new(safe(&status)).block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(accent()),
+        ),
+        chunks[3],
+    );
 }
