@@ -134,6 +134,7 @@ continuation 从 Dept[59] 开始的 producer/选择条件”。没有该 writer 
   8.1.2502.2116 / ydcc 2.10.0 CEMSUsbRegsiter 是已证实存在且随后被删除的精确
   acquisition target**。目前仍未恢复其 DLL bytes/hash，所以该证据只缩小版本窗口，
   不把 LBA6/LBA9 的143B PARTIAL 升级。
+- 进一步审计此前未纳入账本的 `VUpdateService.log`（SHA-256=`5ec3b53e...`）：更新服务在 2026-04-30 升级前仍把本机 CEMS/ydcc 本地基线报告为 `8.1.2502.2116`，随后切换服务版本到 `8.1.2604.0917`；同一日志还记录新版 `cemsusbregsiter.dll` 通过版本化 `ydcc/cemsusbregsiter.dll.zip` 单文件下载，并附 CRC/size 元数据。由此可确认 2025 generation 不只是数据库历史行，而是升级前实际运行基线；旧 DLL bytes/hash 仍未恢复，因此仍不提升143B。
 - LBA6 legacy entry3 的 CHS 也完成字段级解码：Aigo 与 SanDisk 两份 nonzero
   实盘均为 start `C=1023,H=0,S=1`、type `0x07`、end
   `C=1023,H=239,S=63`，后8B又分别与本盘 LBA12 type4 的 StartSector /

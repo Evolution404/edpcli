@@ -122,6 +122,8 @@ EESI 正例的明文布局一致。结合两套官方 EESI producer/consumer 生
 单值判别器：current-zero HSerial 与 legacy 非零 HSerial 都存在 UsbMainBSec/zero
 bootstrap 实例。
 
+历史 writer 的 acquisition target 也已从“未知中间代”收紧到可复核的本机运行基线。`Product_audit` 与 `VUpdateReplace.log` 已证明 2025-05-13 部署了 CEMS base `8.1.2502.2116`，且其更新树包含 `ydcc/cemsusbregsiter.dll(.zip)`；新增审计 `VUpdateService.log`（SHA-256=`5ec3b53e34573646b29dde6cee5595fccb527c385f0b0f571d7b8b74ebf8c517`）进一步证明，在 2026-04-30 升级发生前，更新服务仍将本机 `LocalVersionBase` 报告为 `8.1.2502.2116`，之后才看到 `ServiceVersionBase=8.1.2604.0917`，并对新版 `ydcc/cemsusbregsiter.dll.zip` 逐文件下载、校验 CRC/size。这说明 2025 generation 是升级前实际运行的 CEMSUsbRegsiter 家族候选，而非单纯历史数据库记录。由于旧 DLL bytes/hash 仍未恢复，这条证据只收紧 join59/legacy-MBR producer 的获取目标，不改变 `LBA6+0x03F/+0x1E0..+0x1ED` 与 `LBA9+0x080..+0x0FF` 的 PARTIAL 状态。
+
 #### 真实免密 SanDisk LBA4：wire / reader / producer 三层必须分开
 
 仓库真实免密金标 SHA-256=`d6a935525b9e7bba9926a5ee1e2a74996d2aaf93bc6291723eaaedcff679a258`
