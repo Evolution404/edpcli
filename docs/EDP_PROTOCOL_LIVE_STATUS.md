@@ -94,6 +94,14 @@ join59 reader 与同代 writer ABI、legacy MBR underlay producer，寻找能够
   CEMS2.0-lineage FileOpHook 是 join59 reader 证据，**不是**缺失的 join59 producer。
 - 扩大到 Desktop + `/private/tmp` 的 PE marker 扫描以及 `VRV.zip` 归档检查仍没有得到
   新的 earlier writer；2024 `EdpEDiskCtrl.dll` 新命中仍只是兼容 reader。
+- current `cemsudisk.dll` 的真实 join 选择现已精确恢复并由
+  `scripts/protocol/audit_join59_selector.py` 固定：marker 后先复制60B inline Dept，
+  然后直接测试这60B的最后1B **Dept[59]**；该字节为0时 continuation 写到输出
+  `+0x7B`（覆盖 Dept[59]，join59），非0时写到 `+0x7C`（join60）。
+- 同一审计证明 current `CEMSUsbRegsiter::BuildSector6` 只有
+  `strlen(Dept)>=64` 才进 long 分支，并固定复制60B、从 `Dept[60]` 取 continuation；
+  所以 current writer 被直接排除为 join59 producer。这一新证据关闭的是 reader
+  profile-selection 规则，不是历史 producer，严格完成率仍为6512/6656=97.8%。
 
 所以 LBA6 `+0x03F` 与 LBA9 `+0x080..+0x0FF` 保持 PARTIAL；当前 blocker 已进一步缩成
 “取得独立的同代 `safeudisklabeltool/cemsusbregsiter` writer，并直接看到 Dept[59] 被置 NUL、

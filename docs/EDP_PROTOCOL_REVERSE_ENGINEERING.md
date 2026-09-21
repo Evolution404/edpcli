@@ -3242,6 +3242,28 @@ prefix 基址 `+0x3B`，所以 Dept[59] 会被 continuation 首字节覆盖。�
 产生 Lexar join59 实盘的 exact-generation writer/profile-selection。因此
 LBA6 `+0x03F` 与 LBA9 `+0x080..0x0FF` 继续保持 PARTIAL。
 
+本轮又把 current `cemsudisk.dll::sub_101015e0` 的兼容选择条件收敛到单个
+wire 字节，而不是继续把它笼统记成“代际模式”。固定 SHA-256
+`32e88065725ccb9bc50e24c244f5686bf1d38335f58737f454a8f4ca2c892fd1`
+后，机器码 `0x10101910..0x1010191B` 先把 marker 后 **15 DWORD = 60B**
+inline Dept prefix 复制到输出；紧接着 `0x1010191D` 读取源局部
+`[ebp-0x6D]`。该地址正好是从 `[ebp-0xA8]` 开始的60B中第60个字节，
+即 **serialized Dept[59] 本身**。随后：
+
+- Dept[59] == 0：`0x10101934` 把128B LBA9 continuation 写到输出
+  `+0x7B`，因此 continuation 覆盖 Dept[59]，形成 join59；
+- Dept[59] != 0：`0x1010194F` 改写到 `+0x7C`，从 Dept[60] 继续，
+  形成 join60。
+
+同一审计同时锁定 current `CEMSUsbRegsiter::BuildSector6@0x10013FD0` 的
+反向边界：`0x1001402D` 只有在 `strlen(Dept)>=64` 时进入 long-marker
+分支，`0x10014077` 固定复制60B inline prefix，`0x100140C4` 又固定从
+`Dept+0x7C = Dept[60]` 取 continuation 写到 LBA9+0x80。因此 current writer
+不可能自行生成“long Dept 但 Dept[59]=NUL”的 join59 wire。
+`scripts/protocol/audit_join59_selector.py` 固定两份 DLL SHA 并重放这些
+指令约束。这个结果闭合了 **consumer/profile-selection rule**，但没有提供
+缺失的 historical producer，所以严格字节状态不变。
+
 两份旧 profile 的实际解密字节是：
 
 ```text
