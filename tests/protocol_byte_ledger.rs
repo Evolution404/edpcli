@@ -121,13 +121,13 @@ fn byte_ledger_covers_exactly_6656_bytes_without_overlap() {
         "byte ledger contains gaps"
     );
     let expected_complete = [
-        142, 512, 512, 0, 491, 512, 497, 512, 512, 384, 512, 512, 512,
+        512, 512, 512, 0, 491, 512, 497, 512, 512, 384, 512, 512, 512,
     ];
-    let expected_partial = [370, 0, 0, 512, 21, 0, 15, 0, 0, 128, 0, 0, 0];
+    let expected_partial = [0, 0, 0, 512, 21, 0, 15, 0, 0, 128, 0, 0, 0];
     assert_eq!(complete, expected_complete);
     assert_eq!(partial, expected_partial);
-    assert_eq!(complete.iter().sum::<usize>(), 5610);
-    assert_eq!(partial.iter().sum::<usize>(), 1046);
+    assert_eq!(complete.iter().sum::<usize>(), 5980);
+    assert_eq!(partial.iter().sum::<usize>(), 676);
 
     for lba in 0..13 {
         let progress = format!("| LBA{lba} | {} | {} | 0 |", complete[lba], partial[lba]);
@@ -136,6 +136,20 @@ fn byte_ledger_covers_exactly_6656_bytes_without_overlap() {
             "canonical strict-progress table diverged from byte ledger: {progress}"
         );
     }
+}
+
+#[test]
+fn lba0_bootstrap_blob_is_closed_while_selector_provenance_stays_separate() {
+    let row = LEDGER
+        .lines()
+        .find(|line| line.starts_with("0\t000-0e0,0e2-0e7"))
+        .expect("LBA0 bootstrap blob row");
+    assert!(row.contains("\tCOMPLETE\t"));
+    assert!(row.contains("S-NETAC-MBR"));
+    assert!(row.contains("P-GOLD-NOPWD"));
+    assert!(row.contains("selector chooses a known producer profile"));
+    assert!(DOC.contains("8×zero + 11×UsbMainBSec + 1×Netac"));
+    assert!(DOC.contains("调用链 provenance 开放问题"));
 }
 
 #[test]

@@ -10,9 +10,25 @@ use std::{fs, path::Path};
 const GOLD: &str = include_str!("../audit/protocol/gold_samples.tsv");
 const AUTHENTIC: &[u8; 6656] =
     include_bytes!("../audit/protocol/gold/authentic-nopwd/sandisk_ultra_20260823_lba0_12.bin");
+const USB_MAIN_BSEC_PREFIX_HEX: &str =
+    include_str!("fixtures/protocol_evidence/official_usb_main_bsec_lba0_prefix.hex");
+const NETAC_MBR_PREFIX_HEX: &str =
+    include_str!("fixtures/protocol_evidence/official_netac_mbr_lba0_prefix.hex");
 
 fn word(bytes: &[u8], offset: usize) -> u32 {
     u32::from_le_bytes(bytes[offset..offset + 4].try_into().unwrap())
+}
+
+fn decode_hex_fixture(text: &str) -> Vec<u8> {
+    let compact: String = text.chars().filter(|c| !c.is_ascii_whitespace()).collect();
+    compact
+        .as_bytes()
+        .chunks_exact(2)
+        .map(|pair| {
+            u8::from_str_radix(std::str::from_utf8(pair).expect("hex utf8"), 16)
+                .expect("valid fixture hex")
+        })
+        .collect()
 }
 
 #[test]
@@ -109,6 +125,63 @@ fn strict_gold_legacy_fingerprints_are_not_a_single_required_conjunction() {
     assert_eq!(join_counts, [12, 3, 4]);
     assert_eq!(nonzero_fragments, 1);
     assert_eq!(bootstrap_counts, [8, 10, 1]);
+}
+
+#[test]
+fn general_census_lba0_bootstrap_is_exhaustively_three_first_party_profiles() {
+    const ZERO_PREFIX_SHA256: &str =
+        "7a12e561363385e9dfeeab326368731c030ed4b374e7f5897ac819159d2884c5";
+    const USB_MAIN_BSEC_PREFIX_SHA256: &str =
+        "4eeee8d52f8b58d9a1fa35b63a14c8c5dba1b2717eaa44e6fb1ff0327ccbe5ed";
+    const NETAC_PREFIX_SHA256: &str =
+        "00863071fd5db2f4ef7734d384dc46e07d9c423ed59c69407597590b89aa13ec";
+
+    let usb_main = decode_hex_fixture(USB_MAIN_BSEC_PREFIX_HEX);
+    let netac = decode_hex_fixture(NETAC_MBR_PREFIX_HEX);
+    assert_eq!(usb_main.len(), 400);
+    assert_eq!(netac.len(), 400);
+    assert_eq!(
+        edpcli::sha256::sha256_hex(&usb_main),
+        USB_MAIN_BSEC_PREFIX_SHA256
+    );
+    assert_eq!(edpcli::sha256::sha256_hex(&netac), NETAC_PREFIX_SHA256);
+
+    let mut counts = [0usize; 3]; // explicit-zero, UsbMainBSec, Netac MBR
+    let mut total = 0usize;
+    for row in GOLD.lines().skip(1) {
+        let columns: Vec<_> = row.split('\t').collect();
+        if columns.len() < 5 {
+            continue;
+        }
+        let image = fs::read(Path::new(env!("CARGO_MANIFEST_DIR")).join(columns[4])).unwrap();
+        let prefix = &image[..400];
+        let hash = edpcli::sha256::sha256_hex(prefix);
+        let class = if hash == ZERO_PREFIX_SHA256 {
+            assert!(prefix.iter().all(|byte| *byte == 0));
+            0
+        } else if hash == USB_MAIN_BSEC_PREFIX_SHA256 {
+            assert_eq!(prefix, usb_main.as_slice());
+            1
+        } else {
+            assert_eq!(
+                hash, NETAC_PREFIX_SHA256,
+                "unexpected LBA0 bootstrap profile: {}",
+                columns[3]
+            );
+            assert_eq!(prefix, netac.as_slice());
+            2
+        };
+        if columns[0] == "authentic-nopwd" {
+            assert_eq!(
+                class, 1,
+                "authentic no-password disk must retain UsbMainBSec bootstrap"
+            );
+        }
+        counts[class] += 1;
+        total += 1;
+    }
+    assert_eq!(total, 20);
+    assert_eq!(counts, [8, 11, 1]);
 }
 
 #[test]

@@ -7,14 +7,21 @@
 
 ## 严格进度
 
-- COMPLETE：5610 / 6656 B = 84.3%
-- PARTIAL：1046 B
+- COMPLETE：5980 / 6656 B = 89.8%
+- PARTIAL：676 B
 - UNKNOWN：0 B
 - 本轮进入时仓库 HEAD：`63b76da1fed351f1e7bbe45f0f12f5c22765e3dc`
 - 中途另一工作流先在 `1c281cb9bf4a9d92f8fc27198120d53db6466da9` 将真实免密 SanDisk
   flag 表示歧义保守降级；本轮随后补齐 v19 historical writer 的 exact-512 virtual
   reconstruction 与 2021 repair 边界证据，LBA4 `+0x046` 重新满足 COMPLETE 门禁。
   LBA4 `0x020..0x033` 继续保持 PARTIAL。
+
+## 最新结论：LBA0 三种 bootstrap profile 已按盘面语义闭环
+
+- 20份 general census 的 LBA0 前400B被严格穷尽为三类：8份显式 `zero[400]`、11份 `UsbMainBSec`、1份 Netac MBR；真实免密 SanDisk 属于 `UsbMainBSec`，不存在第四种 wire profile。
+- 从 current `CEMSUsbRegsiter.dll@VA 0x100E7220` 提取的 first-party `UsbMainBSec` 前400B SHA-256=`4eeee8d52f8b58e...`，与对应物理 profile逐字节一致；从 `Netac_USB_API.dll` 1.3.1.16（SHA-256=`b12a249a...`）`VA 0x1014BA58` 提取的模板前400B SHA-256=`00863071fd5db2f4...`，与 Aigo L8302 唯一 Netac profile逐字节一致。两份静态 producer prefix 已提交为 clean-clone fixture。
+- current SAFE6 对同一区域显式清零，构成第三个 absent-zero profile；两种非零 profile 都是完整的16-bit MBR bootstrap payload，EDP 对该区域按 bootstrap/opaque 处理。
+- historical 上游“为什么选择 UsbMainBSec / Netac / zero”仍是调用链 provenance 问题，但它只选择三个已闭合 producer state之一，不再制造未解释的盘面字节。因此原剩余370B升 COMPLETE，LBA0 达到512/512 COMPLETE。
 
 ## 最新结论：LBA4 MyHardinfo / LBA8 host identity 与 UsbOnlyInfo 已闭环
 

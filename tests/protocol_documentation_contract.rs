@@ -58,8 +58,8 @@ fn protocol_analysis_has_one_canonical_document() {
 fn protocol_live_status_tracks_strict_baseline_without_becoming_a_second_ledger() {
     assert!(Path::new("docs/EDP_PROTOCOL_LIVE_STATUS.md").is_file());
     for required in [
-        "5610 / 6656 B = 84.3%",
-        "PARTIAL：1046 B",
+        "5980 / 6656 B = 89.8%",
+        "PARTIAL：676 B",
         "LBA4 `0x020..0x033` 继续保持 PARTIAL",
         "ReadUsbHserialsInfo",
         "0x1019DB54",
@@ -114,11 +114,11 @@ fn strict_progress_covers_exactly_lba0_through_lba12() {
     );
     assert_eq!(complete + partial + unknown, 13 * 512);
     assert!(
-        complete >= 5610,
+        complete >= 5980,
         "strict COMPLETE coverage regressed below the audited baseline: {complete}"
     );
     assert!(
-        partial <= 1046,
+        partial <= 676,
         "PARTIAL coverage regressed above the audited baseline: {partial}"
     );
     assert_eq!(
@@ -126,8 +126,8 @@ fn strict_progress_covers_exactly_lba0_through_lba12() {
         "all LBA0..12 bytes are at least PARTIAL after the completed UNKNOWN audit"
     );
     assert!(
-        DOC.contains("COMPLETE：5610B / 6656B = 84.3%")
-            && DOC.contains("PARTIAL：1046B / 6656B = 15.7%"),
+        DOC.contains("COMPLETE：5980B / 6656B = 89.8%")
+            && DOC.contains("PARTIAL：676B / 6656B = 10.2%"),
         "displayed global totals must match the strict-progress ledger"
     );
 }
@@ -282,6 +282,10 @@ fn documentation_keeps_the_official_provisioning_chain_and_strict_rules() {
         "共57份完整历史快照",
         "Netac_USB_API.dll::sub_10003880",
         "00863071fd5db2f4ef7734d384dc46e07d9c423ed59c69407597590b89aa13ec",
+        "official_usb_main_bsec_lba0_prefix.hex",
+        "official_netac_mbr_lba0_prefix.hex",
+        "8×zero + 11×UsbMainBSec + 1×Netac",
+        "S-NETAC-MBR",
         "rep movsd, ECX=0x80",
         "CCEMSSafeUsbRegsiter::UsbFormat",
         "usb20dll.dll!_IF_DiskFormat",
@@ -326,8 +330,8 @@ fn documentation_keeps_the_official_provisioning_chain_and_strict_rules() {
         );
     }
     assert!(
-        DOC.contains("| LBA0 | 142 | 370 | 0 | 27.7% |"),
-        "LBA0 progress must retain the closed invariant bootstrap tail, SectorSize overlay, MBR signature, and compatibility regions"
+        DOC.contains("| LBA0 | 512 | 0 | 0 | 100.0% |"),
+        "LBA0 progress must retain all three closed bootstrap producer profiles plus the already-closed compatibility and partition regions"
     );
     assert!(
         DOC.contains("| LBA1 | 512 | 0 | 0 | 100.0% |"),
