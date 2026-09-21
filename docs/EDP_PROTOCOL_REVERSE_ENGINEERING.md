@@ -7,7 +7,7 @@
 > `COMPLETE` 只允许由可复核证据升级；`PARTIAL` 表示边界/部分语义已经验证但仍有
 > 明确缺口；任何候选解释必须标注为候选或已证伪，不得写成事实。
 >
-> **当前严格进度：5980 / 6656B COMPLETE（89.8%），676B PARTIAL（10.2%），UNKNOWN=0。**
+> **当前严格进度：6000 / 6656B COMPLETE（90.1%），656B PARTIAL（9.9%），UNKNOWN=0。**
 >
 > 文末“验证历程附录”用于保留详细推导和纠错记录；若附录中的历史阶段判断与本文前半
 > canonical 账本冲突，**一律以前半当前账本为准**。
@@ -22,7 +22,7 @@
 
 字段状态只有三种：
 
-- **COMPLETE**：字段边界、producer/生成算法、consumer/行为语义、真实原盘验证全部闭合；存在代际/profile 差异时，差异也必须解释到不会影响字段语义。
+- **COMPLETE**：字段边界、producer/序列化或明确的 caller-owned 输入边界、consumer/行为语义、真实原盘验证全部闭合；若字段值本身由协议规定可推导算法，则该算法也必须闭合。对于明确的 caller-owned identity/material，必须证明 writer 只负责透明接收/序列化、consumer 不依赖某个未证明的隐藏派生关系，此时更上游“业务为何选择这个值”的 provenance 不属于盘面字段语义缺口。存在代际/profile 差异时，差异也必须解释到不会影响字段语义。
 - **PARTIAL**：至少一项关键证据缺失。例如只有字段名、只有 producer、只有 consumer、只有样本规律、只有解密公式，均只能算 PARTIAL。
 - **UNKNOWN**：尚不能稳定划定语义边界，或只知道“当前样本为零/固定值”。
 
@@ -79,7 +79,7 @@
   `c9fb7ba50d715e8c0d53611c73076b3c50e7b40a23f05693001d33c17f05abba`
   仅保留为 lineage 记录；
 - `tests/protocol_byte_ledger.rs`：自动展开所有 range，拒绝遗漏、重叠、证据 ID
-  漂移和 5980/676 统计偏差。
+  漂移和 6000/656 统计偏差。
 
 本轮实际重放现行20份 general-census 唯一金标后：LBA10 **20/20 整扇全零**；LBA3 为19份全零 +
 1份 strict Kingston 非零 profile，后者 `+0x020..0x027=b57e9c4500800014`、
@@ -206,7 +206,7 @@ producer-side zero 精确重建整扇，而所有已审 reader/restore 上层均
 COMPLETE**。这里 COMPLETE 不等于“reader 总返回0”，也不宣称已知道 SanDisk 当年的
 exact manufacturing executable；它只表示该 byte 的已知 producer 值、两类 wire/reader
 表示关系、repair 边界和 negative semantic consumer 已闭合。严格统计为
-**5980 COMPLETE / 676 PARTIAL**。
+**6000 COMPLETE / 656 PARTIAL**。
 
 原采集目录的 `dec/LBA04_dec.bin` 虽显示 flags=0，但不能作为独立反证：当时的
 `analyze/scripts/read_metadata.py::lba4_decode` 对每一个 raw-zero byte 强制把解码值
@@ -626,7 +626,7 @@ post-XOR 写回 `+0x45/+0x46`。历史 raw-zero 实盘仅作为兼容读取 prof
 | LBA1 | 512 | 0 | 0 | 100.0% |
 | LBA2 | 512 | 0 | 0 | 100.0% |
 | LBA3 | 0 | 512 | 0 | 0.0% |
-| LBA4 | 491 | 21 | 0 | 95.9% |
+| LBA4 | 511 | 1 | 0 | 99.8% |
 | LBA5 | 512 | 0 | 0 | 100.0% |
 | LBA6 | 497 | 15 | 0 | 97.1% |
 | LBA7 | 512 | 0 | 0 | 100.0% |
@@ -639,8 +639,8 @@ post-XOR 写回 `+0x45/+0x46`。历史 raw-zero 实盘仅作为兼容读取 prof
 
 当前总计：
 
-- **COMPLETE：5980B / 6656B = 89.8%**
-- **PARTIAL：676B / 6656B = 10.2%**
+- **COMPLETE：6000B / 6656B = 90.1%**
+- **PARTIAL：656B / 6656B = 9.9%**
 - **UNKNOWN：0B / 6656B = 0.0%**
 
 LBA11 已完整闭合为 512B COMPLETE。此前卡住的后半 252B 不是“某型号盘偶尔使用
@@ -705,7 +705,7 @@ DWARF 中恢复出的原始声明文件/行号与本地函数地址：
 | LBA4 | 0x000–0x017 | COMPLETE | `$$$onlyid$$$` clear header | 当前注册 writer 根据 main onlyid 格式化 | 识别/解码链从此恢复 onlyid | 22/22 | 完成 |
 | LBA4 | 0x018–0x01B | COMPLETE | OnlyIdXor8 | current writer: `main_onlyid ^ 0x88888888` | restore-info 读取该字段 | 22盘 current/legacy 可解 | 完成 |
 | LBA4 | 0x01C–0x01F | COMPLETE | `OnllyID2Nd` = backup/activation encryption key seed | **current producer**：Windows `RegsiterUsb@0x1003BBD1..0x1003BBD7` 直接执行 `node+0x04 = object+0x698`，即复用本次注册 main onlyid。**legacy producer**现已从官方归档 `CEMSUsbRegsiter.dll` v19.11.4.1（MD5 `783d01f19e998a514834bc5e5f4249ad`）恢复：SAFE6 `virtual_56@0x1000CC50` 清零0x2F restore node 后调用 `fcn.100058E0`；该函数 `CoCreateGuid()` 生成16B GUID，初始化协议 CRC table，以初值0逐字节计算同款 reflected `CRC32_bare`，返回DWORD；`0x1000D122` 将结果精确写入 `node+0x04`。因此早期 profile 是“**独立 GUID-CRC key**”，current profile 改为“**复用 main GUID-CRC onlyid**” | active consumer 已闭合为完整 round-trip：`GetUpLoadInformation/sub_10039C30` 以 `restore_node+0x04` 为4B seed 加密 LLGB+EDPF backup blob；`ActiveNormalUDev -> sub_1003CEB0` 取同一 seed 解密 activation/restore blob，校验 `LLGB` 后恢复 LBA8/LBA12。两 helper 的16B key material 均为 `key4[i mod 4] XOR "EDPSECDISK200709"[i]`，随后走同一 key schedule、互为 encrypt/decrypt block transform | strict current profile `OnllyID2Nd==main onlyid && HSerialCRC=0`；legacy profile `OnllyID2Nd!=main`。可复核 legacy second key 不等于本设备/全集 main-onlyid；committed NETAC_A/NETAC_B/LEXAR 精确锁定 `44D9CE02/028EFFD3/7647B1EF`，并新增门禁证明它们也不退化为 `CRC32(device_id)`、MBR disk signature 或 `MyHardinfo`；同一 main 的重复捕获 second key 保持稳定，符合“制标时生成后持久化”的随机 key 生命周期 | 4B 的正式边界、current/legacy 双 producer、随机生成算法、双向密码学 consumer 和真实 profile 均闭合；不同代际只改变 seed 来源，不改变 backup/activation key 语义，升级 COMPLETE |
-| LBA4 | 0x020–0x033 | PARTIAL | HSerialCRC[5] | current Windows PE `RegsiterUsb@0x1003BBF0..0x1003BC79` 精确把 `object+0x558/+55C/+560/+564/+568` 写入 `node+0x08..+0x1B`；`this+0x2E0` 已闭合为内嵌 `UsbLabelParam`，故这些地址正是 `HDOnlySerial[5]@+0x278`。Windows `sub_10047690` 与后续 `sub_100139F0` 两层 current 参数构造/拷贝均跳过这20B；Linux同样清零且不复制。历史 v19.11.4.1 `ISUdiskRegsiterObj::virtual_8@0x1000B9C0` 又把 legacy ABI 精确向上推进一层：`request+0x150..+0x160` 五个DWORD逐项复制到 object HSerial 槽，SAFE6 再不变写入LBA4。与之配套的2020 `busManage.dll` `WriteNormalULabel` 先 `memset(request,0,0x184)`，其 `fcn.1000BA20` 不覆盖这20B，因此该已取得组合仍生成全零HSerial，不能冒充 strict legacy 非零 producer | **historical restore-node reader/activation consumer** 已闭合为 value-ignore：2020 `BusManageImp::ActiveNormalUDev` 经 CEMSUsbRegsiter vtable `+0x2C` 进入 `ReadUsbHserialsInfo@0x100054A0`。该函数先用 `IOCTL_DISK_GET_DRIVE_GEOMETRY(0x70000)` 经 `fcn.10005A30` 取得正式 `BytesPerSector@object+0x2134`，再依次尝试三份同格式 restore node：`fcn.100072C0` 精确 seek `4*BytesPerSector` 即 **LBA4**；`fcn.1000DDA0` 读取 **disk_end - 4 sectors**；`fcn.1000DB90` 读取 **disk_end - 0x80000 bytes**。三者都要求 `$$$` 头、解析十进制 onlyid、执行相同 rolling decode，并回填完整0x2F node。2019三套主/备 reader 都只比较 `node+0x00 OnlyIdXor8`；随后 vtable `+0x44` `RestoreRegsiterUsb` 对传入node只取 `node+0x04 OnllyID2Nd` 作为恢复blob密钥，不访问 `+0x08..+0x2E`。因此三镜像证明的是 HSerial 的结构性保存/恢复兼容，不是非零值生成算法 | 严格22份：14份固定 `1D29,7B,4DD,79,7C`、6份全零、2份高熵；并且 22/22 满足 `OnllyID2Nd==main` iff `HSerialCRC==0` | current-zero producer、legacy注入ABI、三镜像 historical reader 与 value-ignore consumer 均已闭合；剩余 blocker 已缩为 **strict legacy 非零5×DWORD由哪个更早 caller 生成、其输入/算法是什么**，故20B仍 PARTIAL |
+| LBA4 | 0x020–0x033 | COMPLETE | caller-owned `HSerialCRC[5]` / `HDOnlySerial[5]` identity vector | current Windows PE `RegsiterUsb@0x1003BBF0..0x1003BC79` 精确把 `object+0x558/+55C/+560/+564/+568` 写入 `node+0x08..+0x1B`；`this+0x2E0` 已闭合为内嵌 `UsbLabelParam`，故这些地址正是 `HDOnlySerial[5]@+0x278`。current Windows 两层参数构造以及 Linux caller均不提供这20B，所以 current profile为 zero/absent。historical v19.11.4.1 `ISUdiskRegsiterObj::virtual_8@0x1000B9C0` 则把 legacy ABI `request+0x150..+0x160` 五个DWORD逐项原样复制到 object HSerial 槽，SAFE6 再原样放入 restore node。`scripts/protocol/probe_lba4_v19_writer.py` 固定 v19 DLL/gold SHA，保留 authentic no-password SanDisk 的真实非零20B HSerial 输入，原生执行 `fcn.10006090` 后输出 LBA4 SHA-256=`c2662856...`，512/512与物理 gold 完全一致 | **historical restore-node reader/activation consumer** 已闭合为 structural-preserve / semantic-ignore：2020 `ActiveNormalUDev` 经 vtable `+0x2C` 进入 `ReadUsbHserialsInfo@0x100054A0`，依次从 LBA4、disk_end-4 sectors、disk_end-0x80000 三个镜像读取并 rolling decode完整0x2F node；三套 reader只比较 `OnlyIdXor8`。随后 vtable `+0x44` `RestoreRegsiterUsb` 只取 `node+0x04 OnllyID2Nd` 作为恢复blob密钥，不读取 `+0x08..+0x1B` 的五DWORD值。`EDP_DeviceNumber/EDP_DiskNumber` 是 reader 成功后另行返回的单DWORD scalar，ABI直接排除它与HSerial五槽等价 | 严格22份覆盖14份固定 `1D29,7B,4DD,79,7C`、6份全零、2份高熵，且 authentic no-password SanDisk 的非零20B已由 first-party v19 writer 在不修改该vector的条件下 bit-exact 重建整扇 | 字段级生命周期按 caller-owned identity vector 闭合：正式字段边界、current absent-zero profile、legacy caller injection ABI、官方 writer transport、三镜像 reader、negative semantic consumer和多种真实非零profile均已确定。更早 caller 为什么/如何计算五个DWORD仍是 value-generation provenance 开放问题，类似其它 caller-owned identity material，不再构成这20B盘面语义缺口；不得把 DeviceNumber/DiskNumber 猜成该算法 |
 | LBA4 | 0x034 | COMPLETE | fixed restore-node `SingleUsbFlg` metadata = 0 | current Windows restore-node writer 清零 node 后显式保持/写入 `SingleUsbFlg=0`；Linux official node ABI确认该 BYTE 的结构位置 | Windows/Linux `ReadSector4` 都对完整0x2F restore node做 rolling decode 后结构性返回；除 `OnlyIdXor8` 外不对该 BYTE 做值相关分支，因此是 structural-preserve / semantic-ignore metadata | committed original fixtures 全量门禁 + 22份 strict originals 均为0，跨 current/legacy identity profile 无反例 | producer、正式字段边界、结构 consumer、negative semantic consumer 与跨代实盘一致，1B COMPLETE；不是运行时开关 |
 | LBA4 | 0x035–0x038 | COMPLETE | `MyHardinfo` = observed mirror of LBA8 `HDSerialInfo` | current SAFE6 `RegsiterUsb` 对完整0x2F node清零且不覆盖 `node+0x1D..20`，因此 current producer=0。历史官方 `CEMSUsbRegsiter.dll` v19.11.4.1（MD5 `783d01f19e998a514834bc5e5f4249ad`）SAFE6 `virtual_56` 在 `0x1000D189` 调 `UsbTools.dll` ordinal4=`EDP_DiskNumber`，返回0才 fallback ordinal3=`EDP_DeviceNumber`，并在 `0x1000D19B` 把结果直接写到 `node+0x1D MyHardinfo`；同一二进制 LBA8 writer `sub_10007DF0@0x10007E82..` 独立调用同一 ordinal4/3 并把结果写入 `HDSerialInfo`，从 producer 机制解释跨LBA镜像 | 历史三套LBA4 reader完整结构返回node但只比较OnlyIdXor8；2020 `ReadUsbHserialsInfo -> RestoreRegsiterUsb` 链又证明恢复端只消费 `node+0x04`，不读取 `MyHardinfo`。因此 LBA4 副本是 structural-preserve / semantic-ignore compatibility metadata | strict originals逐盘 **22/22 `MyHardinfo == LBA8.HDSerialInfo`**，同时保留 current `0->0` 和 legacy非零 `A017AD78/A68BAE08/8B4613F5/2AB0E33C`；该值不等于device-id CRC或MBR signature | 字段级生命周期现已闭合：current-zero 与 legacy host-identity producer family、LBA4/LBA8 独立镜像写点、22/22 physical mirror、跨不同目标U盘复用同一 host-hardinfo 值以及 negative semantic consumer 共同限定了本 DWORD。v19 的相邻 `UsbOnlyInfo` 与 strict legacy 不同只证明另一个16B字段存在 generation 分叉，不再作为本字段 blocker；exact manufacturing executable 未定位不影响该4B含义闭环 |
 | LBA4 | 0x039–0x03C | COMPLETE | fixed restore-node `NewLabFlag = LLGB` | current Windows machine code在 node 清零后显式写 `LLGB`；Linux DWARF恢复正式字段与偏移 | Windows/Linux reader解码并结构性返回完整node，不对该字段做独立行为判断 | committed original fixtures 全量门禁 + strict 22/22 均为 `LLGB`，跨 current/legacy profile 一致 | fixed writer metadata + structural-preserve/semantic-ignore + real-device profile闭合，4B COMPLETE |

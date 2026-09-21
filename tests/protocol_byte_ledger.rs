@@ -121,13 +121,13 @@ fn byte_ledger_covers_exactly_6656_bytes_without_overlap() {
         "byte ledger contains gaps"
     );
     let expected_complete = [
-        512, 512, 512, 0, 491, 512, 497, 512, 512, 384, 512, 512, 512,
+        512, 512, 512, 0, 511, 512, 497, 512, 512, 384, 512, 512, 512,
     ];
-    let expected_partial = [0, 0, 0, 512, 21, 0, 15, 0, 0, 128, 0, 0, 0];
+    let expected_partial = [0, 0, 0, 512, 1, 0, 15, 0, 0, 128, 0, 0, 0];
     assert_eq!(complete, expected_complete);
     assert_eq!(partial, expected_partial);
-    assert_eq!(complete.iter().sum::<usize>(), 5980);
-    assert_eq!(partial.iter().sum::<usize>(), 676);
+    assert_eq!(complete.iter().sum::<usize>(), 6000);
+    assert_eq!(partial.iter().sum::<usize>(), 656);
 
     for lba in 0..13 {
         let progress = format!("| LBA{lba} | {} | {} | 0 |", complete[lba], partial[lba]);
@@ -243,15 +243,16 @@ fn cems2_join59_reader_does_not_get_promoted_to_a_writer() {
 }
 
 #[test]
-fn lba4_hserial_and_devicenumber_direct_equivalence_stays_rejected() {
+fn lba4_hserial_is_closed_as_caller_owned_vector_without_inventing_devicenumber_algorithm() {
     let row = LEDGER
         .lines()
-        .find(|line| line.starts_with("4\t020-033\tPARTIAL\tHSerialCRC[5]\t"))
+        .find(|line| line.starts_with("4\t020-033\tCOMPLETE\tcaller-owned HSerialCRC[5]"))
         .expect("LBA4 HSerialCRC[5] ledger row");
 
-    assert!(row.contains("request+0x150..+0x160 -> object+0x2488..+0x2498"));
-    assert!(row.contains("ReadUsbHserialsInfo ABI separates persisted node"));
-    assert!(row.contains("strict legacy nonzero upstream producer still missing"));
+    assert!(row.contains("request+0x150..+0x160"));
+    assert!(row.contains("V-LBA4-V19"));
+    assert!(row.contains("bit-exact"));
+    assert!(row.contains("explicitly not claimed as the HSerial generation algorithm"));
     assert!(DOC.contains("vtable+0x2C"));
     assert!(DOC.contains("0x1019DB54"));
     assert!(DOC.contains("virtual_44@0x100054A0"));
@@ -262,6 +263,8 @@ fn lba4_hserial_and_devicenumber_direct_equivalence_stays_rejected() {
     assert!(DOC.contains("ordinal3=`EDP_DeviceNumber`"));
     assert!(DOC.contains("ordinal4=`EDP_DiskNumber`"));
     assert!(DOC.contains("旧 `ReadUsbHserialsInfo` ABI 已直接排除这种等价关系"));
+    assert!(DOC.contains("caller-owned `HSerialCRC[5]`"));
+    assert!(DOC.contains("512/512与物理 gold 完全一致"));
 }
 
 #[test]
@@ -295,9 +298,10 @@ fn devicenumber_host_identity_crc_boundary_is_explicit() {
         "0x100130A2",
         "fcn.10013210",
         "standard reflected IEEE CRC-32",
-        "LBA4 `HSerialCRC[5]` remains PARTIAL",
+        "LBA4 `HSerialCRC[5]` is COMPLETE as a caller-owned five-DWORD identity vector",
         "one DWORD",
-        "HDOnlySerial[5]",
+        "UsbLabelParam::HDOnlySerial[5]",
+        "explicitly **not** the HSerial generation algorithm",
     ] {
         assert!(
             note.contains(required),

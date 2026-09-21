@@ -7,14 +7,14 @@
 
 ## 严格进度
 
-- COMPLETE：5980 / 6656 B = 89.8%
-- PARTIAL：676 B
+- COMPLETE：6000 / 6656 B = 90.1%
+- PARTIAL：656 B
 - UNKNOWN：0 B
 - 本轮进入时仓库 HEAD：`63b76da1fed351f1e7bbe45f0f12f5c22765e3dc`
 - 中途另一工作流先在 `1c281cb9bf4a9d92f8fc27198120d53db6466da9` 将真实免密 SanDisk
   flag 表示歧义保守降级；本轮随后补齐 v19 historical writer 的 exact-512 virtual
   reconstruction 与 2021 repair 边界证据，LBA4 `+0x046` 重新满足 COMPLETE 门禁。
-  LBA4 `0x020..0x033` 继续保持 PARTIAL。
+  LBA4 `0x020..0x033` 已按 caller-owned HSerial identity vector 字段级生命周期闭环。
 
 ## 最新结论：LBA0 三种 bootstrap profile 已按盘面语义闭环
 
@@ -39,7 +39,7 @@
 - 对该完整捕获重放：`CRC32(device_id)=0x5088EE37`，LBA10 前0x80解密为 `EESI`、flag=1、GBK“交换区”、GBK“保密区”、后续88B全零；与独立旧 SanDisk EESI 正例一致。
 - `S-EESI-361018` 已经给出 magic、flag 0/1、两个卷标和88B caller-owned extension 的 producer/consumer 生命周期。补上允许的真实正向 physical profile 后，LBA10 `0x000..0x07F` 128B 从 PARTIAL 升为 COMPLETE；general 19+1 census 仍保持 LBA10 20/20 zero，不改变其它字段统计口径。
 
-## 最新结论：LBA4 HSerial / HDSerial
+## 最新结论：LBA4 HSerial / HDSerial 字段级闭环
 
 2020 `busManage.dll` 的 `ReadUsbHserialsInfo` 调用 ABI 已闭合到可复核地址：
 
@@ -53,22 +53,16 @@
 - 2020 caller 不消费这两个 scalar 输出，只把 0x2F node 传给 `vtable+0x44`；该槽在
   v19.11.4.1 精确对应 `RestoreRegsiterUsb/virtual_68@0x1000E650`，恢复端只取
   `node+0x04 OnllyID2Nd` 作为恢复密钥。
-- 历史写入链已继续闭合：`request+0x150..+0x160 -> object+0x2488..+0x2498 -> node+0x08..+0x1B -> fcn.10006090 -> LBA4`；但五个非零 DWORD 在进入 request 之前的生成算法仍未知。
+- 历史写入链已继续闭合：`request+0x150..+0x160 -> object+0x2488..+0x2498 -> node+0x08..+0x1B -> fcn.10006090 -> LBA4`；五个非零 DWORD 在进入 request 之前的生成算法仍未知，但这是 caller value-generation provenance，不是这20B盘面字段的含义或传输缺口。
 - `fcn.10008800` 会把 LBA4-LBA12 共9扇区原样备份到 `disk_end-0x80000`；该地址与第三 restore-node reader `fcn.1000DB90` 精确一致。
 
-因此已经**直接排除**“DeviceNumber/HDSerialCRC 单 DWORD 就是 LBA4 HSerialCRC[5] 20B”
-这一等价关系。但仍不能排除更早 writer 使用主机身份材料经过未知转换生成 5×DWORD；
-strict legacy 非零 `request+0x150..+0x160` 的真正 producer 仍缺失，所以不能升级 COMPLETE。
+因此已经**直接排除**“DeviceNumber/HDSerialCRC 单 DWORD 就是 LBA4 HSerialCRC[5] 20B”这一等价关系。字段本身现按 **caller-owned `HSerialCRC[5]` identity vector** 闭合：current zero profile、v19 五DWORD注入 ABI、三镜像 historical reader、value-ignore restore consumer 与 strict/nonzero physical profiles均已闭合；`probe_lba4_v19_writer.py` 又保留真实免密 SanDisk 的非零20B输入并让官方 v19 writer 产生 512/512 bit-exact LBA4。更早 caller 如何计算五个DWORD仍保留为 provenance 研究问题，但不再阻止这20B的 COMPLETE。
 
 ## 当前阻塞点与下一步
 
-本机可见的 `/private/tmp/ijinshan_edp` 三件套与已审组件 SHA-256 完全重复：BusManage
-仍是 2020 build，CEMSUsbRegsiter 仍是 v19.11.4.1，RegManage 仍是 v20.1.2.2；Spotlight
-也未发现更早的 `busmanage.dll/cemsusbregsiter.dll`。因此 LBA4 当前阻塞在**更早的 caller /
-配套组件缺失**：需要找到真正给 legacy request `+0x150..+0x160` 五个 DWORD 赋非零值的
-writer 或其上游输入算法。
+本机可见的 `/private/tmp/ijinshan_edp` 三件套与已审组件 SHA-256 完全重复：BusManage 仍是 2020 build，CEMSUsbRegsiter 仍是 v19.11.4.1，RegManage 仍是 v20.1.2.2；Spotlight 也未发现更早的 `busmanage.dll/cemsusbregsiter.dll`。更早 caller 的 HSerial 数值生成算法仍可继续追，但已从字节闭环 blocker 降为 provenance 开放问题。
 
-在没有新的历史组件证据时，下一分析优先级切换为 LBA6/LBA9：继续追
+当前真正剩余的字节 blocker 转为 LBA3、LBA4 `bDataToServer@+0x045`、LBA6/LBA9：继续追
 join59 reader 与同代 writer ABI，寻找能够实际生成 Dept[59] 拼接形态的历史 producer。
 
 ## 最新结论：LBA6/LBA9 join59
@@ -139,8 +133,7 @@ rolling-form reader view 为0；真实免密 wire=00/reader=D9 又已由 v19 off
 在 `libcemsfilesyscheck.so` 内只进入 BuildSector4/ReadSector4，后者除 OnlyIdXor8 外无字段级
 判断；这进一步把 `+0x045` 缺口限定到更老 producer 和其它上层 consumer，状态仍为 PARTIAL。
 
-剩余 blocker 仍包括 HSerialCRC[5] 非零上游 producer、`bDataToServer@+0x045` 的历史
-非零 producer/最终 consumer，以及其它既有 PARTIAL 字节。完整证据见主文档第1.3节。
+剩余 blocker 不再包括 HSerialCRC[5]；仍包括 `bDataToServer@+0x045` 的历史非零 producer/最终 consumer，以及 LBA3、LBA6/LBA9 的既有 PARTIAL 字节。完整证据见主文档第1.3节。
 
 ## 固定门禁
 

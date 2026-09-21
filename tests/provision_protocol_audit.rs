@@ -1636,9 +1636,9 @@ fn lba4_strict_progress_matches_non_overlapping_detail_ranges() {
         owner.iter().all(Option::is_some),
         "LBA4 detail rows must cover all 512 bytes"
     );
-    assert_eq!((complete, partial), (491, 21));
+    assert_eq!((complete, partial), (511, 1));
     assert!(
-        trace.contains("| LBA4 | 491 | 21 | 0 | 95.9% |"),
+        trace.contains("| LBA4 | 511 | 1 | 0 | 99.8% |"),
         "STRICT_PROGRESS LBA4 summary drifted from byte-detail accounting"
     );
 }

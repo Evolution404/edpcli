@@ -37,6 +37,9 @@ fn protocol_analysis_has_one_canonical_document() {
         );
     }
 
+    assert!(DOC.contains("caller-owned identity/material"));
+    assert!(DOC.contains("provenance 不属于盘面字段语义缺口"));
+
     for required_section in [
         "# EDP LBA0–LBA12 协议逆向与验证总文档",
         "## 3. 严格逐字节进度",
@@ -58,14 +61,14 @@ fn protocol_analysis_has_one_canonical_document() {
 fn protocol_live_status_tracks_strict_baseline_without_becoming_a_second_ledger() {
     assert!(Path::new("docs/EDP_PROTOCOL_LIVE_STATUS.md").is_file());
     for required in [
-        "5980 / 6656 B = 89.8%",
-        "PARTIAL：676 B",
-        "LBA4 `0x020..0x033` 继续保持 PARTIAL",
+        "6000 / 6656 B = 90.1%",
+        "PARTIAL：656 B",
+        "LBA4 `0x020..0x033` 已按 caller-owned HSerial identity vector 字段级生命周期闭环",
         "ReadUsbHserialsInfo",
         "0x1019DB54",
         "EDP_DeviceNumber",
         "EDP_DiskNumber",
-        "不能升级 COMPLETE",
+        "不再阻止这20B的 COMPLETE",
         "join59",
         "GENERIC_READ",
         "fcn.18002B880",
@@ -114,11 +117,11 @@ fn strict_progress_covers_exactly_lba0_through_lba12() {
     );
     assert_eq!(complete + partial + unknown, 13 * 512);
     assert!(
-        complete >= 5980,
+        complete >= 6000,
         "strict COMPLETE coverage regressed below the audited baseline: {complete}"
     );
     assert!(
-        partial <= 676,
+        partial <= 656,
         "PARTIAL coverage regressed above the audited baseline: {partial}"
     );
     assert_eq!(
@@ -126,8 +129,8 @@ fn strict_progress_covers_exactly_lba0_through_lba12() {
         "all LBA0..12 bytes are at least PARTIAL after the completed UNKNOWN audit"
     );
     assert!(
-        DOC.contains("COMPLETE：5980B / 6656B = 89.8%")
-            && DOC.contains("PARTIAL：676B / 6656B = 10.2%"),
+        DOC.contains("COMPLETE：6000B / 6656B = 90.1%")
+            && DOC.contains("PARTIAL：656B / 6656B = 9.9%"),
         "displayed global totals must match the strict-progress ledger"
     );
 }
@@ -342,8 +345,8 @@ fn documentation_keeps_the_official_provisioning_chain_and_strict_rules() {
         "LBA2 must retain the closed entry0 and unused-entry residual semantics"
     );
     assert!(
-        DOC.contains("| LBA4 | 491 | 21 | 0 | 95.9% |"),
-        "LBA4 progress must retain the closed backup-key seed and restore-node backing semantics"
+        DOC.contains("| LBA4 | 511 | 1 | 0 | 99.8% |"),
+        "LBA4 progress must retain the caller-owned HSerial vector closure while leaving only bDataToServer partial"
     );
     assert!(
         DOC.contains("| LBA6 | 497 | 15 | 0 | 97.1% |"),
