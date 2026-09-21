@@ -56,6 +56,68 @@ block at offset `+0x000`; the host-visible target LBA3 contains the same text at
 `+0x1F0`.  This proves ecosystem/marker ancestry only.  It does **not** prove a
 copy, projection, rotation, checksum transform, or LBA mapping.
 
+The final-512-byte relationship has now been verified byte-for-byte against all
+four BIN files in the archived v3.72 package:
+
+- `BN67V1292KM.BIN`: marker page starts at file offset `0x8200`;
+- `BN67V132M.BIN`: marker page starts at file offset `0x8200`;
+- `FW67FF01V60424M.BIN`: marker page starts at file offset `0x16200`;
+- `FW67FF01V61110M.BIN`: marker page starts at file offset `0x1C200`.
+
+Each page starts with the 16 bytes `"this is mp mark\0"`; version/controller
+material follows at page `+0x10`.  For example the two FW pages contain
+`67 01 01 10 06 04 24 46 ff 01 ff ...` and
+`67 01 01 10 06 11 10 46 ff 01 ff ...`.
+
+The MPALL executable consumes this layout directly rather than treating the
+marker as a decorative string.  In `CBaseController::virtual_464` the recovered
+machine-code path:
+
+1. opens a candidate FW/BN file;
+2. seeks to `file_size - 0x200`;
+3. reads exactly `0x200` bytes;
+4. compares the first 15 bytes with `"this is mp mark"`; and
+5. uses the adjacent marker-page bytes in controller/version compatibility
+   checks (including the `"controller : %x"` /
+   `"controller ver: %x %x %x"` diagnostic paths).
+
+The same marker literal is referenced from multiple controller-class
+`virtual_464/468` implementations (`CBaseController`,
+`CBaseController30`, `C2250Controller`, `C2260Controller`,
+`C2261Controller`).  These are FW/BN **marker-page readers**.  No recovered
+literal xref constructs the host-visible LBA3 layout.  This further separates
+the PC-side firmware marker page from the still-missing manufacturer record
+builder that puts the marker at LBA3 `+0x1F0`.
+
+Simple checksum projection was also tested and rejected.  Neither observed
+LBA3 DWORD (`0x459C7EB5` in the strict sample,
+`0x22A482A8` in the 2026-08-03 historical profile) matches standard CRC32 of
+the v3.72 FW/BN whole file, its final 512 bytes, marker 16 bytes, marker metadata
+16 bytes, or the remaining 496 bytes.  The strict DWORD also does not match the
+EDP `crc32_bare` of any LBA0-LBA12 sector, the 6656-byte image, the image with
+LBA3 zeroed, the LBA3 prefix, device_id, capacity, sector count or onlyid.
+Thus `+0x020..0x023` is not supported as a simple EDP-side or FW-file checksum.
+
+## Local capture inventory is insufficient to lock PS2307 versus PS2309
+
+The older 2026-08-03 profile is preserved in two back-to-back 6656-byte
+captures:
+
+- `utils/backup/disk4_20260803_105045.bin`;
+- `utils/backup/disk4_20260803_105053.bin`.
+
+They are byte-identical and carry
+`+0x020..0x027 = a8 82 a4 22 00 20 02 16`.  Their sidecar JSON files record
+only the EDP device_id, EDP CRC, LBA range, image hash/time and a few partition
+facts.  The later 2026-08-27 Kingston sidecars add VID/PID/capacity, but still
+do **not** contain USB serial, bcdDevice/SCSI revision, controller model,
+firmware, ID_BLK or NAND ID.  The saved macOS ioreg snapshots do not contain
+this Kingston device either, and the local CEMS `usb_info.xml` is a generic
+VID/PID dictionary rather than a device capture.
+
+This is a reproducible negative boundary: the existing local archive cannot
+select PS2307 or PS2309 for either nonzero LBA3 profile.
+
 ## Exact evidence required before any LBA3 byte is promoted
 
 At least one of the following must tie the actual target device to a controller

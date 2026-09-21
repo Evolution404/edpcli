@@ -6152,6 +6152,52 @@ The v3.72.0B executable was obtained and inspected offline without executing the
   Therefore that branch is a useful negative discriminator and must not be promoted as the
   LBA3 template.
 
+### FW/BN final marker page is a real MPALL input, not a direct LBA3 image
+
+The v3.72 archive contains four FW/BN BIN files.  All four end with one exact
+512-byte marker page:
+
+| file | final page file offset | page +0x000 | page +0x010 prefix |
+|---|---:|---|---|
+| `BN67V1292KM.BIN` | `0x8200` | `this is mp mark\0` | `67 01 00 10 01 29 24 42` |
+| `BN67V132M.BIN` | `0x8200` | `this is mp mark\0` | `67 01 00 10 01 32 10 42` |
+| `FW67FF01V60424M.BIN` | `0x16200` | `this is mp mark\0` | `67 01 01 10 06 04 24 46` |
+| `FW67FF01V61110M.BIN` | `0x1C200` | `this is mp mark\0` | `67 01 01 10 06 11 10 46` |
+
+`CBaseController::virtual_464` provides the matching consumer path in machine
+code: it seeks to `file_size - 0x200`, reads `0x200` bytes, compares the
+first15 bytes with `"this is mp mark"`, then uses adjacent bytes in
+controller/version compatibility checks.  The same literal is referenced from
+`CBaseController30`, `C2250Controller`, `C2260Controller` and
+`C2261Controller` `virtual_464/468` implementations.  Thus the PC-side
+utility treats the final page as a formal FW/BN **version marker page**.
+
+This is not the host-visible LBA3 layout: the firmware page puts the marker at
+`+0x000`, while both real nonzero LBA3 profiles put it at `+0x1F0`.
+The two observed LBA3 8-byte payloads still do not occur verbatim in the EXE or
+the four FW/BN BINs.  Literal xrefs recovered so far are marker-page
+readers/comparators; they do not construct the sparse
+`00 01 00 00 ... +0x020..027 ... marker@+0x1F0` host sector.
+
+Simple-checksum explanations were independently rejected.  The two first
+DWORDs `0x459C7EB5` / `0x22A482A8` are not standard CRC32 of the v3.72
+FW/BN whole files or their marker-page subregions.  For the strict physical
+sample, `0x459C7EB5` is also not the EDP `crc32_bare` of any individual
+LBA0-LBA12 sector, the whole 6656-byte image, the image with LBA3 zeroed,
+device_id, capacity, sector count or onlyid.  Therefore there is currently no
+evidence that `+0x020..0x023` is a simple host-side or firmware-file checksum.
+
+### Existing local capture metadata cannot select PS2307 versus PS2309
+
+The historical `a8 82 a4 22 00 20 02 16` profile exists in two byte-identical
+back-to-back captures from 2026-08-03.  Their sidecars record EDP device_id,
+hash/time and partition facts only.  The 2026-08-27 Kingston sidecars add
+VID/PID/capacity but still omit USB serial, USB/SCSI revision, controller,
+firmware, ID_BLK and NAND ID.  Saved macOS ioreg snapshots likewise contain no
+matching Kingston instance.  Consequently the local archive cannot identify
+either nonzero LBA3 profile as PS2307 or PS2309; the two public same-identity
+reports remain hypotheses rather than target attribution.
+
 ### Current strict interpretation
 
 The committed LBA3 evidence remains:
@@ -6167,11 +6213,15 @@ Therefore LBA3 stays 512B PARTIAL and contributes 0B to COMPLETE.
 
 ### Next concrete reverse-engineering targets
 
-1. Recover write xrefs into the object-owned F2 buffer around `this+0x1C00C`, rather than
-   following marker-string xrefs.
-2. Classify those writers by controller class and identify which family can generate prefix
-   `00 01 00 00`.
-3. Trace the `F2 Merged` and `U3_DoF2` paths to determine whether the 512-byte host-visible
-   LBA3 sector is a projection of a larger controller F2 structure.
-4. Only after an exact producer/store layout and a real consumer are recovered should any
+1. Acquire and fingerprint the exact target-era PS2307 MPALL v3.34.07 and
+   PS2309 MPALL v5.35.35 families (plus matching FW/BN where available), keeping
+   the two controller hypotheses separate.
+2. Search those generations for the sparse host-record constructor, not merely
+   the already-disproved INFO-page `WriteF2Mark` path.
+3. Trace the `F2 Merged` / controller firmware path to determine how a formal
+   FW/BN marker page becomes the host-visible
+   `marker@+0x1F0` manufacturing record and what generates `+0x020..0x027`.
+4. Obtain device-specific controller/FW/ID_BLK evidence for the exact physical
+   target before selecting the PS2307 or PS2309 branch.
+5. Only after an exact producer/store layout and a real consumer are recovered should any
    LBA3 subrange move from PARTIAL to COMPLETE.

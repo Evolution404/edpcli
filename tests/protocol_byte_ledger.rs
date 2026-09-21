@@ -164,3 +164,22 @@ fn evidence_modalities_remain_distinct() {
     assert!(modalities.contains("virtual"));
     assert!(modalities.contains("static"));
 }
+
+#[test]
+fn lba3_manufacturing_gate_keeps_fw_marker_page_distinct_from_host_lba3() {
+    let note = include_str!("../audit/protocol/lba3_identity.md");
+    for required in [
+        "file_size - 0x200",
+        "CBaseController::virtual_464",
+        "marker-page readers",
+        "0x459C7EB5",
+        "0x22A482A8",
+        "Local capture inventory is insufficient to lock PS2307 versus PS2309",
+        "do **not** contain USB serial",
+    ] {
+        assert!(
+            note.contains(required),
+            "LBA3 identity/manufacturing gate lost evidence boundary: {required}"
+        );
+    }
+}
