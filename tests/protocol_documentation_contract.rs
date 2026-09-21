@@ -50,12 +50,21 @@ fn strict_progress_covers_exactly_lba0_through_lba12() {
     );
     assert_eq!(complete + partial + unknown, 13 * 512);
     assert!(
-        complete >= 1535,
-        "strict COMPLETE coverage regressed below the audited baseline: {complete}"
+        complete >= 5586,
+        "strict COMPLETE coverage regressed below the corrected audited baseline: {complete}"
     );
     assert!(
-        unknown <= 2537,
-        "UNKNOWN coverage regressed above the audited baseline: {unknown}"
+        partial <= 1070,
+        "PARTIAL coverage regressed above the corrected audited baseline: {partial}"
+    );
+    assert_eq!(
+        unknown, 0,
+        "all LBA0..12 bytes are at least PARTIAL after the completed UNKNOWN audit"
+    );
+    assert!(
+        DOC.contains("COMPLETE：5586B / 6656B = 83.9%")
+            && DOC.contains("PARTIAL：1070B / 6656B = 16.1%"),
+        "displayed global totals must match the corrected strict-progress ledger"
     );
 }
 
@@ -140,7 +149,7 @@ fn documentation_keeps_the_official_provisioning_chain_and_strict_rules() {
         "m_autoid / Autonum",
         "同一个空字符串至少出现2种不同且非零的 post-NUL backing",
         "同一个空 Office 字符串至少出现3种不同且非零的 post-NUL backing",
-        "Phison MP/FW manufacturing metadata sector, EDP-opaque",
+        "Phison MP/manufacturing metadata sector, EDP-opaque",
         "MPALL_F1_9000_v372_0B.exe",
         "CBaseController::WriteF2Mark",
         "CU32SSBaseContoller::WriteF2Mark",
@@ -185,6 +194,10 @@ fn documentation_keeps_the_official_provisioning_chain_and_strict_rules() {
         "4eeee8d52f8b58d9a1fa35b63a14c8c5dba1b2717eaa44e6fb1ff0327ccbe5ed",
         "lba0_bootstrap_profiles_are_zero_or_the_official_usb_main_bsec_prefix",
         "cross-profile unowned preserve / historical-zero compatibility region",
+        "cross-profile fixed-zero bootstrap tail padding",
+        "seven profile-invariant zero instruction-operand bytes",
+        "first/second legacy MBR error-message NUL terminators",
+        "aigo_l8302_netac_lba0_prefix.hex",
         "optional SAFE1 / legacy `SectorSize` compatibility overlay",
         "2c8877b90c5d42d73f17c511ef5984efc8135543bda0746ef54f347320d78e8f",
         "standard Windows MBR disk signature",
@@ -228,35 +241,35 @@ fn documentation_keeps_the_official_provisioning_chain_and_strict_rules() {
         );
     }
     assert!(
-        DOC.contains("| LBA0 | 112 | 400 | 0 | 21.9% |"),
-        "LBA0 progress must retain the closed SectorSize overlay, MBR signature, and compatibility regions"
+        DOC.contains("| LBA0 | 142 | 370 | 0 | 27.7% |"),
+        "LBA0 progress must retain the closed invariant bootstrap tail, SectorSize overlay, MBR signature, and compatibility regions"
     );
     assert!(
-        DOC.contains("| LBA1 | 0 | 512 | 0 | 0.0% |"),
-        "LBA1 GPT profile must remain PARTIAL until a positive real GPT sample exists"
+        DOC.contains("| LBA1 | 512 | 0 | 0 | 100.0% |"),
+        "LBA1 must retain the closed official GPT positive-wire and absent-GPT profiles"
     );
     assert!(
-        DOC.contains("| LBA2 | 0 | 512 | 0 | 0.0% |"),
-        "LBA2 GPT profile must remain PARTIAL until a positive real GPT sample exists"
+        DOC.contains("| LBA2 | 512 | 0 | 0 | 100.0% |"),
+        "LBA2 must retain the closed entry0 and unused-entry residual semantics"
     );
     assert!(
-        DOC.contains("| LBA4 | 49 | 463 | 0 | 9.6% |"),
-        "LBA4 progress must retain the closed fixed restore-node metadata while MyHardinfo and legacy identity fields remain partial"
+        DOC.contains("| LBA4 | 487 | 25 | 0 | 95.1% |"),
+        "LBA4 progress must retain the closed backup-key seed and restore-node backing semantics"
     );
     assert!(
-        DOC.contains("| LBA6 | 431 | 81 | 0 | 84.2% |"),
-        "LBA6 progress must retain the closed Dept prefix, crcUsbID pair, m_encrypt metadata, autoid, Office, and Label backing semantics"
+        DOC.contains("| LBA6 | 497 | 15 | 0 | 97.1% |"),
+        "LBA6 progress must retain the closed string slots, crcUsbID pair, m_encrypt metadata, and static template regions"
     );
     assert!(
         DOC.contains("| LBA7 | 512 | 0 | 0 | 100.0% |"),
         "LBA7 progress must retain the fully closed packed table and pass-info compatibility fields"
     );
     assert!(
-        DOC.contains("| LBA8 | 476 | 36 | 0 | 93.0% |"),
+        DOC.contains("| LBA8 | 492 | 20 | 0 | 96.1% |"),
         "LBA8 progress must retain the closed dynamic ELABEL/backing/tail storage semantics"
     );
     assert!(
-        DOC.contains("| LBA9 | 276 | 236 | 0 | 53.9% |"),
+        DOC.contains("| LBA9 | 384 | 128 | 0 | 75.0% |"),
         "LBA9 progress must retain the closed EETU reverse backing and EPPE writer-owned zero tail semantics"
     );
     assert!(
@@ -264,7 +277,7 @@ fn documentation_keeps_the_official_provisioning_chain_and_strict_rules() {
         "LBA10 must remain fully closed once the EESI compatibility extension and preserve/ignore tail are accounted for"
     );
     assert!(
-        DOC.contains("| LBA12 | 464 | 48 | 0 | 90.6% |"),
+        DOC.contains("| LBA12 | 512 | 0 | 0 | 100.0% |"),
         "LBA12 progress must retain the closed Version/NeedDisturb, EncryptFileKey32, and dormant pass-info compatibility fields"
     );
     assert!(

@@ -540,7 +540,7 @@ consumer 行为，而不是“consumer未知”。因此把这17B重新拆分：
 - `Version@+0x3D..0x40` 4B：COMPLETE；
 - sector tuple `+0x41..0x44` 4B：COMPLETE。
 
-新增回归把上述13B从代表盘扩展到全部 committed original fixtures；22份严格原始集
+上述固定 metadata 共13B均有回归覆盖，但其中 `NewLabFlag` 4B 在旧36B LBA4基线中已经作为第二个 `LLGB` 锚点计入，因此本轮严格进度只净新增9B，禁止重复累计。新增回归把这些字段从代表盘扩展到全部 committed original fixtures；22份严格原始集
 仍维持 Single=0 / LLGB / Version=1 / `08 04 0C 01` 无反例。这里闭合的是
 **fixed restore-node compatibility metadata lifecycle**，不是宣称这些值永远不能在
 未来协议版本中变化。
@@ -559,6 +559,24 @@ consumer 行为，而不是“consumer未知”。因此把这17B重新拆分：
     全部同时表现为 LBA9 `EETU+EPPE`；
   - 另外 2 份高熵 HSerial 样本同时是 LBA9 全零、LBA6 扩展区非零。
   这只能记为**格式/注册环境 profile 的相关性**，不能反推因果关系。
+
+
+本轮又对 committed Lexar + Netac A/B/C 四份固定-HSerial 原盘做跨字段负相关审计，
+把两个容易误连的候选关系明确排除：
+
+- 四盘的 `HSerialCRC[5]` 20B **逐字节完全相同**，均为
+  `1D29 / 7B / 4DD / 79 / 7C`；
+- 但 Lexar 的 `MyHardinfo/LBA8.HDSerialInfo=2AB0E33C`，Netac 三盘则稳定为
+  `A017AD78`，因此这20B不是 host-hardinfo DWORD 的展开/分片；
+- 同一批固定-HSerial 盘的 SAPF decoded tail `+0x114..+0x11F` 同时覆盖
+  **全零、稳定非零和同一 Netac 后续变化**三种 backing 形态；特别是 Netac A/B
+  tail相同，而 Netac C tail 已变化，但 HSerial 仍完全不变。
+
+新增回归
+`lba4_fixed_hserial_is_independent_from_hardinfo_and_sapf_backing`
+把这组四盘反例锁死。因此旧 `HSerialCRC[5]` 不能再解释为
+`MyHardinfo/HDSerialInfo` 的展开，也不能解释为 SAPF 32B backing/tail 的缓存；
+其旧 producer 输入仍应继续沿独立的主机/注册环境身份链追踪。
 
 主机身份候选链也进一步做了排错：
 
@@ -3353,7 +3371,69 @@ _IF_DiskFormat
 
 因此 Aigo L8302 的 400B 模板 producer 仍然成立，但剩余问题进一步精确为：
 **哪一个历史升级/量产/格式化入口真正调用 `IF_DiskFormat`，以及它以什么
-设备/profile 条件选择该路径。** 在该调用点闭合前，LBA0 前400B计数不变。
+设备/profile 条件选择该路径。** 该选择条件仍阻止 bootstrap 主体整体闭合；不过后续
+逐字节交叉最终得到30B在三种已知 producer 中完全不受该选择影响，现已单独拆出闭合。
+
+#### LBA0 前400B：三类 bootstrap profile 的30B逐字节不变量闭合
+
+本轮不再把前400B强制当作一个不可拆分状态，而是直接对已知三种真实 producer
+做逐字节交集：
+
+1. current SAFE6：`RegsiterUsb` 对 `+0x000..+0x18F` 显式 `memset(0)`；
+2. legacy：official `UsbMainBSec` 模板；
+3. Aigo L8302：`Netac_USB_API.dll::sub_10003880` 的嵌入 MBR 模板，
+   已由真实 Aigo 原盘逐字节验证。
+
+三类模板前400B共同为0的物理字节只有30B。除连续的
+`+0x17B..+0x18F` 21B 外，还有9个离散位置：
+`+0x0E1/+0x0E8/+0x101/+0x103/+0x10B/+0x10D/+0x124/+0x143/+0x162`。
+这些离散字节也逐条回到16-bit代码/字符串边界核实，不再因为“位于大块PARTIAL中”
+而机械降级。
+
+consumer 复核结果：
+
+- legacy `UsbMainBSec` 的第三条错误消息
+  `"Missing operating system"` 固定在 `+0x163..+0x17A`，因此
+  **`+0x17B` 正是该 C-string 的 NUL 终止符**；既有 message-pointer 低字节
+  `+0x1B7=0x63` 会把打印路径指到这条消息；
+- legacy 终止符之后的 `+0x17C..+0x18F` 20B 没有代码/数据引用，是模板尾部零填充；
+- Aigo/Netac MBR bootstrap 会先把完整512B从 `0x7C00` 搬到 `0x0600`
+  （`mov cx,0x100; rep movsw`）再跳到 relocated code；三条错误消息位于原模板
+  `+0x08B/+0x0A3/+0x0C2`，最后一条的 NUL 已在 `+0x0DA`。
+  其执行路径没有任何引用落入 `+0x17B..+0x18F`，因此这21B在 Netac profile
+  明确只是零填充；
+- current SAFE6 不执行这套 bootstrap，而是直接清零同一区域。
+- legacy 的7个代码散点也都有精确指令语义：
+  `+0x0E1/+0x0E8/+0x124` 是三个 `mov dl,[bp+0]` 的零位移操作数；
+  `+0x101/+0x103/+0x10B` 是三个 `push 0` 的零立即数；
+  `+0x10D` 是 `push 0x7C00` 的低字节0。Aigo/Netac 在这些偏移已经是零填充，
+  current SAFE6同样显式清零；
+- legacy 前两条错误消息分别是
+  `Invalid partition table@+0x12C..+0x142` 与
+  `Error loading operating system@+0x144..+0x161`，所以
+  `+0x143/+0x162` 分别是其NUL终止符；Aigo/Netac/current 在两处仍均为0。
+
+实盘证据也补成三 profile 闭环：committed fixtures 同时覆盖 current-zero 与
+legacy UsbMainBSec；另新增
+`tests/fixtures/protocol_evidence/aigo_l8302_netac_lba0_prefix.hex`
+锁定 Aigo L8302/Netac 的真实前400B。三类均满足
+`LBA0[0x17B..0x190] == zero[21]`，且上述9个离散偏移也全部为0。回归
+`lba0_bootstrap_body_closes_all_three_profile_invariant_zero_bytes`
+同时锁定 legacy 指令操作数、三条错误消息终止符以及三 profile 物理零值。
+
+因此：
+
+- 7个 legacy 指令零操作数字节：COMPLETE；
+- `+0x143/+0x162/+0x17B` 三个 legacy MBR 错误消息 NUL 终止符：
+  COMPLETE；
+- `+0x17C..+0x18F` 20B cross-profile fixed-zero bootstrap tail padding：
+  COMPLETE；
+- 其余370B bootstrap 代码/数据仍因两套非零模板与 historical profile-selection
+  未闭合而保持 PARTIAL。
+
+这次前400B共 **30B 净新增 COMPLETE**，LBA0 从112/400更新为
+**142 COMPLETE / 370 PARTIAL**；profile-selection blocker 仍真实存在，但不再拖住
+与选择无关的逐字节不变量。
 
 #### LBA0 `+0x1B8..+0x1BB`：Windows MBR disk signature 4B 闭合
 
@@ -3668,7 +3748,7 @@ profiles 的该边界，而不是把字符串具体值硬编码成未来协议�
 
 | LBA | 完成 | 部分已知 | 未知 | 严格完成率 | 当前计数依据 |
 |---:|---:|---:|---:|---:|---|
-| 0 | 112B | 400B | 0B | 21.9% | MBR partition table +55AA、legacy 三个 message-pointer、`+0x190..+0x19F/+0x1A4..+0x1B4` 两段 unowned compatibility region、optional SectorSize overlay、standard Windows MBR disk signature 与 `+0x1BC..+0x1BD` reserved/unowned word 均已闭合；只剩前400B bootstrap主体/profile-selection继续PARTIAL |
+| 0 | 142B | 370B | 0B | 27.7% | 前400B三profile逐字节交集已闭合30B：7个legacy指令零操作数、3个错误消息NUL终止符、20B固定零尾部；再加既有 MBR partition table/55AA、message-pointer、SectorSize、disk signature、reserved/unowned区。剩余370B bootstrap主体/profile-selection继续PARTIAL |
 | 1 | 512B | 0B | 0B | 100.0% | Linux official `BuildSector1_Gpt` first-party virtual runtime 直接生成整512B primary header，独立 IEEE CRC32 同时命中 header/16KiB array CRC；同一34扇 image 又被 current Windows `sub_1002AB70` 原生识别为GPT。physical 22/22零值继续作为 absent-GPT profile 保存，不与virtual fixture混计 |
 | 2 | 512B | 0B | 0B | 100.0% | entry0完整128B first-party闭合；entries1..3 的 `PartitionTypeGUID=0` 已按 one-partition creator/unused-entry 定义闭合。剩余3×112B又由 Windows/Linux official parser 的“TypeGUID先行、未命中即短路”语义与 Windows Unicorn nonzero-residual consumer probe闭合为 unused-entry unowned residual。LBA2整扇COMPLETE |
 | 3 | 0B | 512B | 0B | 0% | EDP 注册 writer 对整扇 preserve-existing，当前 Windows/Linux EDP reader 不解析；22份原始盘为21零+1 Kingston MP payload，但厂商 producer/固件 consumer 未闭合 |
@@ -3684,8 +3764,8 @@ profiles 的该边界，而不是把字符串具体值硬编码成未来协议�
 
 总计：
 
-- **完成：5556B / 6656B = 83.5%**
-- **部分已知：1100B / 6656B = 16.5%**
+- **完成：5586B / 6656B = 83.9%**
+- **部分已知：1070B / 6656B = 16.1%**
 - **未知：0B / 6656B = 0.0%**
 
 这是一组**严格下限**，故意宁可低估，不把“能生成/能解析”冒充成“已经完全理解”。
@@ -3693,9 +3773,9 @@ profiles 的该边界，而不是把字符串具体值硬编码成未来协议�
 
 | LBA | 状态 | 当前结论 |
 |---|---|---|
-| 0 | 部分闭合 | MBR 分区表、55AA、legacy 三个错误消息指针、`+0x190..0x19F/+0x1A4..0x1B4` 两段 cross-profile unowned compatibility region、optional SectorSize compatibility overlay、standard Windows MBR disk signature 及 `+0x1BC..+0x1BD` reserved/unowned word 已闭合；只剩前400B bootstrap profile-selection 继续追 |
 | 1 | 完全闭合 | absent-GPT physical profile 与 official GPT positive-wire profile 均闭合；512/512 COMPLETE |
 | 2 | 完全闭合 | entry0 128B完整闭合；entries1..3 的 TypeGUID=0 决定 unused 状态，Windows/Linux parser 均只在GUID命中后读取 residual。Windows first-party parser 对 `TypeGUID=0 + residual=0xA5` 动态 probe 证明336B residual 0次读取，因此按 unused-entry unowned residual 闭合。512/512 COMPLETE |
+| 0 | 部分闭合 | 前400B已拆出30B三profile不变量（7个legacy指令零操作数、3个错误消息NUL、20B固定零尾部）；MBR分区表、55AA、message-pointer、unowned compatibility region、SectorSize、disk signature与reserved word也已闭合。剩余370B bootstrap/profile-selection继续追 |
 | 3 | 外部制造区部分闭合 | 21/22 全零，1 份 Kingston MP payload；官方 EDP 注册链原样保留且当前 reader 不解析，厂商生成/消费语义仍未知 |
 | 4 | 高度闭合 | 487/512 COMPLETE。`OnllyID2Nd` 已由历史 SAFE6 `CoCreateGuid -> CRC32_bare` 独立 key producer 与 current main-onlyid复用 producer 双代闭合；`+0x047..+0x1FB` 已闭合为 unowned backing / representation carrier。只剩 HSerial/MyHardinfo/第一server flag 共25B PARTIAL |
 | 5 | canonical 已知 | opaque preserve / 写保护探测 scratch；当前 22/22 全零，但零不是协议固定要求 |
@@ -3711,7 +3791,7 @@ profiles 的该边界，而不是把字符串具体值硬编码成未来协议�
 
 - LBA4 `bConnetServer@+0x46` 已闭合为 dormant-zero compatibility byte；`bDataToServer@+0x45` 仍有 legacy `0B` profile，旧producer/最终业务consumer未找到前不得升 COMPLETE；
 - LBA4 onlyID2Nd 及关联动态字段的生成源；
-- LBA0 前400B bootstrap 主体/profile 选择；
+- LBA0 剩余370B bootstrap 主体/profile 选择；
 - LBA6 0x1c0..0x1ed 不同格式代际的准确字段来源。
 - LBA12 `+0x48..+0x57` 已闭合为 `EncryptFileKey32[16]` cross-generation compatibility slot；后续若发现独立非零ABI，只能扩展 profile，不得回退成“未知 key”或强制零；
 

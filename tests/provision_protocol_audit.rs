@@ -67,6 +67,8 @@ const OFFICIAL_VIRTUAL_LBA4_FULL_NONZERO_BACKING_HEX: &str =
     include_str!("fixtures/protocol_evidence/official_virtual_lba4_full_nonzero_backing.hex");
 const OFFICIAL_VIRTUAL_LBA4_NULL_NONZERO_BACKING_HEX: &str =
     include_str!("fixtures/protocol_evidence/official_virtual_lba4_null_nonzero_backing.hex");
+const AIGO_L8302_NETAC_LBA0_PREFIX_HEX: &str =
+    include_str!("fixtures/protocol_evidence/aigo_l8302_netac_lba0_prefix.hex");
 
 fn parse_reference_backup_name(name: &str) -> Option<BackupMeta> {
     let meta = parse_backup_name(name)?;
@@ -1635,6 +1637,82 @@ fn lba4_strict_progress_matches_non_overlapping_detail_ranges() {
 }
 
 #[test]
+fn lba0_bootstrap_body_closes_all_three_profile_invariant_zero_bytes() {
+    const LEGACY: &str =
+        "disk26_245760000_vid3535_pid6300_disk&ven_aigo&prod_u335&rev_pmap_onlyid1987718388_nopwd_20260916_233626.bin";
+    const ISOLATED_INVARIANT_ZERO: [usize; 9] = [
+        0x0e1, 0x0e8, 0x101, 0x103, 0x10b, 0x10d, 0x124, 0x143, 0x162,
+    ];
+
+    let legacy = load(LEGACY);
+    let legacy_lba0 = sector(&legacy, 0);
+    let netac_prefix = decode_hex_fixture(AIGO_L8302_NETAC_LBA0_PREFIX_HEX);
+
+    assert_eq!(netac_prefix.len(), 0x190);
+
+    // Seven isolated zero bytes are operands in the executable legacy bootstrap.
+    assert_eq!(&legacy_lba0[0x0df..0x0e2], &[0x8a, 0x56, 0x00]); // mov dl,[bp+0]
+    assert_eq!(&legacy_lba0[0x0e6..0x0e9], &[0x8a, 0x56, 0x00]); // mov dl,[bp+0]
+    assert_eq!(&legacy_lba0[0x100..0x102], &[0x6a, 0x00]); // push 0
+    assert_eq!(&legacy_lba0[0x102..0x104], &[0x6a, 0x00]); // push 0
+    assert_eq!(&legacy_lba0[0x10a..0x10c], &[0x6a, 0x00]); // push 0
+    assert_eq!(&legacy_lba0[0x10c..0x10f], &[0x68, 0x00, 0x7c]); // push 0x7c00
+    assert_eq!(&legacy_lba0[0x122..0x125], &[0x8a, 0x56, 0x00]); // mov dl,[bp+0]
+
+    // The other three message terminators are invariant zeros too.
+    assert_eq!(&legacy_lba0[0x12c..0x143], b"Invalid partition table");
+    assert_eq!(legacy_lba0[0x143], 0);
+    assert_eq!(
+        &legacy_lba0[0x144..0x162],
+        b"Error loading operating system"
+    );
+    assert_eq!(legacy_lba0[0x162], 0);
+    assert_eq!(&legacy_lba0[0x163..0x17b], b"Missing operating system");
+    assert_eq!(legacy_lba0[0x17b], 0);
+
+    assert!(
+        legacy_lba0[0x17c..0x190].iter().all(|byte| *byte == 0),
+        "legacy UsbMainBSec tail padding changed"
+    );
+    assert!(
+        ISOLATED_INVARIANT_ZERO
+            .iter()
+            .all(|offset| netac_prefix[*offset] == 0)
+            && netac_prefix[0x17b..0x190].iter().all(|byte| *byte == 0),
+        "Aigo/Netac MBR template lost an invariant zero byte"
+    );
+
+    let mut current_zero = 0usize;
+    let mut legacy_template = 0usize;
+    for entry in fs::read_dir(FIXTURE_DIR).expect("protocol fixtures") {
+        let path = entry.expect("backup entry").path();
+        if path.extension().and_then(|ext| ext.to_str()) != Some("bin") {
+            continue;
+        }
+        let name = path.file_name().unwrap().to_str().unwrap();
+        if parse_reference_backup_name(name).is_none() {
+            continue;
+        }
+        let image = fs::read(&path).expect("fixture bytes");
+        let lba0 = sector(&image, 0);
+        assert!(
+            ISOLATED_INVARIANT_ZERO
+                .iter()
+                .all(|offset| lba0[*offset] == 0)
+                && lba0[0x17b..0x190].iter().all(|byte| *byte == 0),
+            "known LBA0 profile changed one of the 30 invariant zero bytes: {name}"
+        );
+        if lba0[..0x190].iter().all(|byte| *byte == 0) {
+            current_zero += 1;
+        } else {
+            legacy_template += 1;
+        }
+    }
+    assert!(current_zero > 0, "lost current zero-bootstrap evidence");
+    assert!(legacy_template > 0, "lost legacy UsbMainBSec evidence");
+}
+
+#[test]
 fn lba3_manufacturing_payload_is_an_opaque_whole_sector_not_just_a_marker_string() {
     const MARKED: &str =
         "disk4_121110528_vid0951_pid1666_disk&ven_kingston&prod_datatraveler_3.0_onlyid2135149925_20260903_121319.bin";
@@ -1947,6 +2025,71 @@ fn lba4_common_hserial_profile_is_shared_across_different_target_usb_devices() {
             0x29, 0x1d, 0x00, 0x00, 0x7b, 0x00, 0x00, 0x00, 0xdd, 0x04, 0x00, 0x00, 0x79, 0x00,
             0x00, 0x00, 0x7c, 0x00, 0x00, 0x00,
         ]
+    );
+}
+
+#[test]
+fn lba4_fixed_hserial_is_independent_from_hardinfo_and_sapf_backing() {
+    const NETAC_C: &str =
+        "disk6_122880000_vid0dd8_pid2005_disk&ven_netac&prod_onlydisk_onlyid3274129259_20260910_172709.bin";
+
+    let decode_profile = |name: &str| {
+        let image = load(name);
+        let meta = parse_reference_backup_name(name).expect("fixture metadata");
+        let onlyid = meta.onlyid.as_deref().expect("fixture onlyid");
+        let bits = onlyid_bits(onlyid);
+        let k0 = (bits & 0xffff) ^ (bits >> 16);
+
+        let raw4 = sector(&image, 4);
+        let mut lba4 = raw4.to_vec();
+        lba4[0x18..].copy_from_slice(&xor_rolling(&raw4[0x18..], k0));
+        if raw4[0x47..0x1fc].iter().all(|byte| *byte == 0) {
+            lba4[0x47..0x1fc].fill(0);
+        }
+
+        let hserial: [u8; 20] = lba4[0x20..0x34].try_into().unwrap();
+        let hardinfo = u32_le(&lba4, 0x35);
+
+        let raw9 = sector(&image, 9);
+        let sapf_head: Vec<u8> = raw9[0x100..0x104].iter().map(|byte| byte ^ 0x88).collect();
+        assert_eq!(sapf_head, b"SAPF", "expected SAPF profile: {name}");
+        let sapf_tail: [u8; 12] = std::array::from_fn(|index| raw9[0x114 + index] ^ 0x88);
+
+        (hserial, hardinfo, sapf_tail)
+    };
+
+    let lexar = decode_profile(LEXAR);
+    let netac_a = decode_profile(NETAC_A);
+    let netac_b = decode_profile(NETAC_B);
+    let netac_c = decode_profile(NETAC_C);
+
+    for profile in [&netac_a, &netac_b, &netac_c] {
+        assert_eq!(
+            lexar.0, profile.0,
+            "fixed legacy HSerial profile must stay identical across target USB devices"
+        );
+    }
+
+    assert_ne!(
+        lexar.1, netac_a.1,
+        "identical HSerial material must not be treated as an expansion of MyHardinfo/HDSerialInfo"
+    );
+
+    assert!(
+        lexar.2.iter().all(|byte| *byte == 0),
+        "Lexar supplies the zero SAPF-tail counterexample"
+    );
+    assert!(
+        netac_a.2.iter().any(|byte| *byte != 0),
+        "Netac supplies a non-zero SAPF-tail counterexample"
+    );
+    assert_eq!(
+        netac_a.2, netac_b.2,
+        "two Netac captures keep one stable SAPF backing shape"
+    );
+    assert_ne!(
+        netac_a.2, netac_c.2,
+        "the same Netac fixed-HSerial profile also exhibits a changed SAPF backing shape"
     );
 }
 

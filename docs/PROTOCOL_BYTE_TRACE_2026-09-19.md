@@ -385,6 +385,34 @@ current profile 的 raw 恢复只代表已闭合的 current producer wire 语义
 current writer 的 full representation：完整 `+0x18..+0x1FF` rolling，然后再
 post-XOR 写回 `+0x45/+0x46`。历史 raw-zero 实盘仅作为兼容读取 profile 保留。
 
+### 已验证的远端证据同步（2026-09-21）
+
+本节只收录已经在独立二进制、真实盘或现有回归中核验过、但此前分散在交接/专项
+笔记中的证据；它们不会因为“合并文档”而自动增加 COMPLETE 字节。
+
+- **LBA0 / Netac 格式化链**：current 主制标链已静态闭合到
+  `BusManageImp::WriteLabelImp -> CCEMSSafeUsbRegsiter::UsbFormat`，但该
+  `UsbFormat` 只执行 sectorManage / IIR / password 兼容预处理，并不调用
+  Netac MBR format。另一条独立、已验证的兼容层调用链为
+  `usb20dll.dll!_IF_DiskFormat -> NewUsb20.dll!FormatExA_NetacAPI`。
+  当前安装包未找到两条链的连接点，因此历史 profile selector 仍是 LBA0 blocker，
+  禁止因函数名同含 “Format” 就强行拼接。
+- **LBA3 / Phison 制造链**：离线静态结果除
+  `CBaseController::WriteF2Mark` 外，还确认
+  `CU32SSBaseContoller::WriteF2Mark` 与字符串 `F1-F2 MARK`；不同 controller
+  class 的 F2 staging 长度/包装不同，因此不能把同名 `WriteF2Mark` 当成统一
+  512B LBA3 wire writer。对 strict Kingston `0951:1666`、62008590336B 的公开
+  交叉记录还满足“**公开同 identity/capacity 记录同时存在 PS2307 与 PS2309**”，
+  所以 controller 型号不能仅凭 VID/PID/model/capacity 锁死。
+- **LBA4 / current node layout**：已有 **LBA4 current writer machine-code node layout**
+  证据，current `RegsiterUsb` 逐字段把对象成员写入 0x2F restore node；
+  本地新增的历史 v19.11.4.1 writer 又进一步闭合 `OnllyID2Nd` 的独立
+  `CoCreateGuid -> CRC32_bare` legacy producer。
+- **LBA6 / legacy underlay**：`+0x1E0..+0x1ED` 已按标准 MBR entry 对齐为
+  **legacy MBR partition-table fragment**，Aigo/SanDisk 两块真实盘均能与同盘
+  LBA12 type4 的 type/start/count 交叉核对；当前仍缺 exact legacy writer 与直接
+  consumer，因此保持 PARTIAL。
+
 ## 3. 严格逐字节进度
 
 > 每个 LBA 固定 512B；总计 13 × 512 = 6656B。
@@ -394,7 +422,7 @@ post-XOR 写回 `+0x45/+0x46`。历史 raw-zero 实盘仅作为兼容读取 prof
 <!-- STRICT_PROGRESS_BEGIN -->
 | LBA | COMPLETE | PARTIAL | UNKNOWN | 严格完成率 |
 |---:|---:|---:|---:|---:|
-| LBA0 | 112 | 400 | 0 | 21.9% |
+| LBA0 | 142 | 370 | 0 | 27.7% |
 | LBA1 | 512 | 0 | 0 | 100.0% |
 | LBA2 | 512 | 0 | 0 | 100.0% |
 | LBA3 | 0 | 512 | 0 | 0.0% |
@@ -411,8 +439,8 @@ post-XOR 写回 `+0x45/+0x46`。历史 raw-zero 实盘仅作为兼容读取 prof
 
 当前总计：
 
-- **COMPLETE：5556B / 6656B = 83.5%**
-- **PARTIAL：1100B / 6656B = 16.5%**
+- **COMPLETE：5586B / 6656B = 83.9%**
+- **PARTIAL：1070B / 6656B = 16.1%**
 - **UNKNOWN：0B / 6656B = 0.0%**
 
 LBA11 已完整闭合为 512B COMPLETE。此前卡住的后半 252B 不是“某型号盘偶尔使用
@@ -456,7 +484,11 @@ DWARF 中恢复出的原始声明文件/行号与本地函数地址：
 <!-- FIELD_LEDGER_BEGIN -->
 | LBA | 范围 | 状态 | 字段/区域 | Producer 证据 | Consumer 证据 | 实盘验证 | 当前结论 |
 |---|---|---|---|---|---|---|---|
-| LBA0 | 0x000–0x18F | PARTIAL | MBR bootstrap body | Windows `UsbMainBSec@0x100E7220` 提供正式 legacy 模板；current `CUsbRegsiter::RegsiterUsb` 在最终13扇区 `WriteSectorData` 前无条件 `memset(LBA0+0x000,0,0x190)`；`UDiskLabelRepair::CLabelRepair::ReCreate0Sector -> sub_10003960` 的 current 重建路径也清零同一0x190B；Aigo L8302 第三 profile 则由 `Netac_USB_API.dll::sub_10003880` 从 `0x1014BA58` 以 `rep movsd, ECX=0x80` 整扇复制512B MBR模板 | legacy 模板自身 BIOS/MBR bootstrap 会执行并消费其中代码/消息；current EDP 将前400B视作可清除 bootstrap。`CUsbRegsiter::UnRegsiterUsb` 有 `UsbMainBSec -> LBA0` 直接写回。主制标链已进一步恢复为 `BusManageImp::WriteLabelImp -> SafeUsbRegsiterCems.dll!GetUsbTegsiterObj -> CCEMSSafeUsbRegsiter::UsbFormat`；该 `UsbFormat` 会先按目标盘 `Costom\\sectorManage.dll` / `Costom\\usb20dll.dll` 状态和设备信息命令 `0x52` 的 `0xA2` 返回值决定是否执行密码/IIR预处理，但没有直接调用 Netac Format。随盘 `usb20dll.dll!_IF_DiskFormat` 则明确下钻到 `NewUsb20.dll!FormatExA_NetacAPI`，当前官方包未找到主制标链对 `IF_DiskFormat` 的普通符号导入/动态名称引用。因此 historical 已注册盘为何保留 legacy 模板、以及何种上层流程实际选择 Netac Format 仍未闭合 | 21份非转换 backup 的前400B只有标准 `UsbMainBSec`、current zero[400]、Aigo Netac 三类；`UsbMainBSec` 前400B SHA-256=`4eeee8d52f8b58d9a1fa35b63a14c8c5dba1b2717eaa44e6fb1ff0327ccbe5ed`；Aigo/Netac 前400B SHA-256=`00863071fd5db2f4ef7734d384dc46e07d9c423ed59c69407597590b89aa13ec`；curated 原盘夹具锁定前两类，Aigo 原盘与 Netac 模板逐字节一致 | 三种主体 profile 的物理边界/部分 producer 已知，但 historical profile-selection 仍缺，因此400B继续 PARTIAL；尤其不能把存在的 `IF_DiskFormat -> FormatExA_NetacAPI` 导出链误当成已证实的 current WriteLabel 调用链 |
+| LBA0 | 0x000–0x17A excluding 0x0E1/0x0E8/0x101/0x103/0x10B/0x10D/0x124/0x143/0x162 | PARTIAL | remaining profile-dependent MBR bootstrap body | Windows `UsbMainBSec@0x100E7220` 提供正式 legacy 模板；current `CUsbRegsiter::RegsiterUsb` 在最终13扇区 `WriteSectorData` 前无条件 `memset(LBA0+0x000,0,0x190)`；`UDiskLabelRepair::CLabelRepair::ReCreate0Sector -> sub_10003960` 的 current 重建路径也清零同一0x190B；Aigo L8302 第三 profile 则由 `Netac_USB_API.dll::sub_10003880` 从 `0x1014BA58` 以 `rep movsd, ECX=0x80` 整扇复制512B MBR模板 | legacy 与 Netac 模板各自执行不同16-bit MBR bootstrap；current EDP 将前400B视作可清除 bootstrap。`CUsbRegsiter::UnRegsiterUsb` 有 `UsbMainBSec -> LBA0` 直接写回。主制标链尚未闭合 historical UsbMainBSec / Netac Format profile-selection | 21份非转换 backup 的前400B只有标准 `UsbMainBSec`、current zero[400]、Aigo Netac 三类；两种非零模板 SHA-256 分别为 `4eeee8d52f8b58d9a1fa35b63a14c8c5dba1b2717eaa44e6fb1ff0327ccbe5ed` / `00863071fd5db2f4ef7734d384dc46e07d9c423ed59c69407597590b89aa13ec` | 排除9个已闭合散点后，剩余bootstrap/profile-selection区域共370B继续PARTIAL；此前整400B总括行现已拆出全部30B three-profile invariant zeros |
+| LBA0 | 0x0E1/0x0E8/0x101/0x103/0x10B/0x10D/0x124 | COMPLETE | seven profile-invariant zero instruction-operand bytes | current SAFE6 explicitly clears all seven; legacy `UsbMainBSec` fixes them as zero operands in executable instructions: three `mov dl,[bp+0]` displacements (+0x0E1/+0x0E8/+0x124), three `push 0` immediates (+0x101/+0x103/+0x10B), and the low byte of `push 0x7C00` (+0x10D); Aigo/Netac template is zero padding at all seven offsets | legacy 16-bit bootstrap executes the corresponding instructions, so each zero participates in a decoded operand; Netac bootstrap's code/messages end before these offsets and has no references into them; current EDP clears/does not parse the bootstrap | committed current-zero + legacy fixtures and dedicated Aigo/Netac prefix evidence are all zero at all seven exact offsets; regression locks the instruction byte windows | profile selection changes surrounding code but cannot change these seven physical bytes; their per-profile producer/consumer behavior is closed |
+| LBA0 | 0x143/0x162 | COMPLETE | first/second legacy MBR error-message NUL terminators / other-profile zero padding | current SAFE6 clears both; legacy `UsbMainBSec` stores `Invalid partition table` at +0x12C..+0x142 then NUL@+0x143, and `Error loading operating system` at +0x144..+0x161 then NUL@+0x162; Aigo/Netac template is zero padding at both offsets | legacy print loop consumes the NULs as C-string terminators through the existing message-pointer path; Netac uses earlier message copies and does not reference these offsets; current EDP has no bootstrap consumer after clearing | all committed current-zero/legacy fixtures plus dedicated Aigo/Netac prefix evidence keep both bytes zero; regression checks the exact strings and terminators | 2B are profile-invariant physical zeros with fully explained legacy string semantics and padding semantics in the other profiles |
+| LBA0 | 0x17B | COMPLETE | legacy third MBR error-message NUL terminator / other-profile zero padding | current SAFE6 writer explicitly clears through +0x18F; legacy `UsbMainBSec` fixes `Missing operating system` at +0x163..+0x17A followed by NUL at +0x17B; Aigo/Netac embedded MBR template is already zero throughout this offset | legacy relocated bootstrap's print loop terminates on the NUL after the third error string; Netac bootstrap uses its three messages at +0x08B/+0x0A3/+0x0C2 (last NUL at +0x0DA), so +0x17B is not read there; current EDP has no bootstrap consumer after clearing | committed current-zero + legacy fixtures and dedicated Aigo L8302 Netac prefix evidence are all zero at +0x17B | profile selection cannot change this byte: it is the legacy message terminator and a zero-padding byte in the other known producer families |
+| LBA0 | 0x17C–0x18F | COMPLETE | cross-profile fixed-zero bootstrap tail padding | current SAFE6 writer explicitly clears this20B; legacy `UsbMainBSec` has zero padding immediately after the third message terminator; Aigo/Netac embedded template also contains zeros here | legacy 16-bit bootstrap has no data/code reference into +0x17C..+0x18F after its final message; Netac bootstrap relocates its code but its last message ends at +0x0DA and no code/data reference targets this tail; current EDP does not parse it | committed current-zero + legacy fixtures plus `aigo_l8302_netac_lba0_prefix.hex` all preserve 20B zero; three known physical profiles agree byte-for-byte | producer ownership, negative consumer/reference boundary, and all known real-device profiles close 20B as fixed-zero bootstrap padding; future unknown profiles must still be treated compatibly rather than blindly cleaned |
 | LBA0 | 0x190–0x19F | COMPLETE | cross-profile unowned preserve / historical-zero compatibility region | current SAFE6 `RegsiterUsb` 最终只清 `+0x000..+0x18F`，因此本16B保持 pre-read backing；Linux `BuildSector0@diskfile.cpp:625` 只重建 `+0x1BE` MBR entry，不写本区；legacy `UsbMainBSec` 本16B固定为零；Netac `sub_10003880` 整扇复制的 Aigo producer 模板在本16B同样为零 | 16-bit `UsbMainBSec` bootstrap 的直接数据引用落在 `+0x1B5/+0x1B6/+0x1B7` 和分区表/签名，不读取本区；current 注册/准入与 `UDiskLabelRepair::ReCreate0Sector/sub_10003960` 均不解释本16B，repair 新建只清前0x190和分区表，保持本区 unowned | 严格22份原始参考本16B 22/22 全零；扩展 `nopwd_tool/backup + utils/backup` 共57份完整历史快照也 57/57 全零；既有 `lba0_bootstrap_profiles_are_zero_or_the_official_usb_main_bsec_prefix` 门禁锁定 committed originals | COMPLETE 表示跨已知 profile 的**无业务 payload / preserve-existing**生命周期闭合，而不是规定未来盘面必须为零；遇到未知非零值应兼容保留 |
 | LBA0 | 0x1A0–0x1A3 | COMPLETE | optional SAFE1 / legacy `SectorSize` compatibility overlay | Windows `BuildSector0/sub_10013F10@0x10013FB6` 在 **SAFE1** 分支明确把 `m_nSectorSize` 写到 `+0x1A0`；`UsbMainBSec` 完整模板同样携带512。Aigo/Netac `sub_10003880` 的整扇 MBR template 在该槽显式为0；current SAFE6 不调用 `BuildSector0` 而 preserve 现有 backing，Linux `BuildSector0@diskfile.cpp:625` 只用 `m_nSectorSize` 计算 partition sector count、不序列化该槽 | legacy 16-bit bootstrap 不读取该槽；current `CEMSUsbRegsiter.dll` 全模块对 `+0x1A0` 的唯一 sector-data 访问就是上述 writer store，另一个 `push 0x1A0` 只是临时 `memset` 长度；`UDiskLabelRepair` 没有盘面 `+0x1A0` 读点，Linux 没有 `ReadSector0` consumer；`EdpEDiskCtrl` 的 `+0x1A0` 命中已逐项确认是 vtable/object 偏移而非 LBA0 数据 | 严格22份原始盘仅0/512双态；committed fixtures 同时保留0和512。扩展只读历史扫描中，47份相同 legacy bootstrap 快照分为10×0、37×512；把 SectorSize、disk signature、partition table 三个独立变量归一化后47/47整个LBA0 SHA-256均为 `2c8877b90c5d42d73f17c511ef5984efc8135543bda0746ef54f347320d78e8f`，证明该DWORD只是独立可选 overlay | 512表示 SAFE1/legacy writer 填充的 sector-size compatibility metadata；0表示该 overlay absent/unowned，后续 SAFE6 只透明保留。producer/preserve、negative consumer、0/512 双真实 profile 与物理独立性均闭合，4B 升 COMPLETE；不要求未来未知值被清洗 |
 | LBA0 | 0x1A4–0x1B4 | COMPLETE | cross-profile unowned preserve / historical-zero compatibility region | 与 `+0x190..+0x19F` 相同：current SAFE6 不覆盖、Linux BuildSector0 不写；legacy `UsbMainBSec` 与 Aigo/Netac整扇模板均在本17B生成零 | 16-bit MBR bootstrap 不读取本区；current EDP 准入、partition repair 与 `ReCreate0Sector` 都只处理其它明确区域，不赋予本17B语义 | 严格22份 22/22 全零；扩展57份完整历史快照 57/57 全零；committed original 门禁已有精确零断言 | 17B 的跨 profile unowned/preserve、negative consumer 与真实盘已闭合；未来非零兼容值必须 preserve，不得机械清零 |
