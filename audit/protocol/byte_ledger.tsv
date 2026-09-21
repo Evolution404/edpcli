@@ -1,0 +1,35 @@
+lba	ranges	status	field_or_region	profiles	producer_evidence	consumer_evidence	physical_evidence	notes
+0	000-0e0,0e2-0e7,0e9-100,102,104-10a,10c,10e-123,125-142,144-161,163-17a	PARTIAL	profile-dependent MBR bootstrap body	current-zero;legacy-UsbMainBSec;legacy-Netac	S-WIN-CURRENT;S-WIN-191141	S-WIN-CURRENT	P-GOLD-ENC	profile selector between historical writer families remains unresolved
+0	0e1,0e8,101,103,10b,10d,124,143,162,17b-18f	COMPLETE	cross-profile invariant bootstrap operands/terminators/tail	current-zero;legacy-UsbMainBSec;legacy-Netac	S-WIN-CURRENT;S-WIN-191141	S-WIN-CURRENT	P-GOLD-ENC	known producer families agree and legacy executable/string consumption is closed
+0	190-1bd	COMPLETE	preserved compatibility region plus SectorSize/disk-signature metadata	current;legacy-UsbMainBSec;legacy-Netac	S-WIN-CURRENT;S-WIN-191141	S-WIN-CURRENT	P-GOLD-ENC	includes explicit standard MBR disk signature and known preserve regions; see canonical field ledger for subfield boundaries
+0	1be-1ff	COMPLETE	MBR partition table and 55AA signature	all-known-MBR	S-WIN-CURRENT;S-WIN-191141	S-WIN-CURRENT	P-GOLD-ENC;P-GOLD-NOPWD	standard partition entries and signature
+1	000-1ff	COMPLETE	optional GPT primary header / absent profile	gpt;absent	S-LINUX-DWARF;V-GPT	S-WIN-CURRENT	P-GOLD-ENC	positive official virtual writer plus physical absent-profile evidence
+2	000-1ff	COMPLETE	GPT partition entry sector / absent profile	gpt;absent	S-LINUX-DWARF;V-GPT	S-WIN-CURRENT	P-GOLD-ENC	entry0 writer and unused-entry negative consumer are closed
+3	000-1ff	PARTIAL	Phison MP/manufacturing metadata sector	zero;kingston-mp-profile-a;historical-mp-profile-b	S-PHISON-372	S-PHISON-372	P-GOLD-ENC;P-GOLD-NOPWD	F2 INFO direct equivalence disproved; host-LBA mapping and firmware consumer unresolved
+4	000-01f	COMPLETE	onlyid header / OnlyIdXor8 / OnllyID2Nd	current;legacy	S-WIN-CURRENT;S-WIN-191141	S-WIN-CURRENT;S-LINUX-DWARF	P-GOLD-ENC	current and legacy key-seed producer families closed
+4	020-033	PARTIAL	HSerialCRC[5]	current-zero;strict-legacy-nonzero	S-WIN-CURRENT;S-WIN-191141	S-WIN-191141	P-GOLD-ENC	strict legacy nonzero upstream producer still missing
+4	034	COMPLETE	SingleUsbFlg	all-known	S-WIN-CURRENT;S-LINUX-DWARF	S-WIN-CURRENT;S-LINUX-DWARF	P-GOLD-ENC	fixed compatibility byte
+4	035-038	PARTIAL	MyHardinfo / host-hardinfo identity mirror	current-zero;transitional-2019;strict-legacy	S-WIN-CURRENT;S-WIN-191141	S-WIN-191141	P-GOLD-ENC	2019 transitional writer does not match strict legacy UsbOnlyInfo-zero profile
+4	039-044	COMPLETE	NewLabFlag Version sector tuple	all-known	S-WIN-CURRENT;S-LINUX-DWARF	S-WIN-CURRENT;S-LINUX-DWARF	P-GOLD-ENC	fixed restore-node compatibility metadata
+4	045	PARTIAL	bDataToServer	current;legacy	S-WIN-CURRENT;S-LINUX-DWARF	S-WIN-CURRENT;S-LINUX-DWARF	P-GOLD-ENC	legacy nonzero producer/final business consumer unresolved
+4	046-1ff	COMPLETE	bConnetServer + unowned representation carrier + LLGB tail	current-full;legacy-rolling;raw-zero	S-WIN-CURRENT;S-LINUX-DWARF;V-LBA4	S-WIN-CURRENT;S-LINUX-DWARF	P-GOLD-ENC	includes transform/preserve backing semantics rather than assuming zeros
+5	000-1ff	COMPLETE	opaque preserve / write-protection probe scratch sector	all-known	S-WIN-CURRENT	S-WIN-CURRENT	P-GOLD-ENC	contents are not parsed; write result is consumed
+6	000-03e	COMPLETE	Dept inline prefix / short-slot backing	short;long-join59;long-join60	S-WIN-CURRENT;S-LINUX-DWARF	S-WIN-CURRENT;S-LINUX-DWARF	P-GOLD-ENC	first 63 bytes closed across current and legacy readers
+6	03f	PARTIAL	long-Dept inline final byte / short backing	short;long-join59;long-join60	S-WIN-CURRENT;S-LINUX-DWARF	S-WIN-CURRENT	P-GOLD-ENC	join59 same-generation writer remains missing
+6	040-1df	COMPLETE	SAFE6 template plus User/Autonum/Office/CRC/Label/GSerial/BeiZhu	current;legacy	S-WIN-CURRENT;S-LINUX-DWARF;V-LBA6	S-WIN-CURRENT;S-LINUX-DWARF	P-GOLD-ENC	post-NUL backing is explicitly modeled as backing, not hidden fields
+6	1e0-1ed	PARTIAL	legacy MBR entry3 snapshot fragment	current-zero;legacy-nonzero	S-WIN-CURRENT;S-WIN-191141	S-WIN-CURRENT	P-GOLD-ENC	v19.11.4.1 is explicitly excluded as the nonzero snapshot producer
+6	1ee-1ff	COMPLETE	entry4 zero prefix + !SAFE metadata + checksum tail	all-known	S-WIN-CURRENT;S-LINUX-DWARF	S-WIN-CURRENT;S-LINUX-DWARF	P-GOLD-ENC	m_encrypt is write-only generation metadata and checksum is consumed
+7	000-1ff	COMPLETE	packed EDPF table + pass-info + zero post-table region	2-entry;3-entry;legacy-v0064	S-WIN-CURRENT;S-LINUX-DWARF	S-WIN-CURRENT;S-LINUX-DWARF	P-GOLD-ENC;P-GOLD-NOPWD	all 512 bytes have a producer/consumer lifecycle
+8	000-013	COMPLETE	LLGB header magic/length/version/writeTime	current;legacy	S-WIN-CURRENT;S-LINUX-DWARF	S-WIN-CURRENT;S-LINUX-DWARF	P-GOLD-ENC	writeTime is monotonic-ms stamp, not wall-clock
+8	014-017	PARTIAL	HDSerialInfo host-hardinfo identity	current-zero;transitional-2019;strict-legacy	S-WIN-CURRENT;S-WIN-191141	S-WIN-191141	P-GOLD-ENC	exact strict-legacy producer/profile selection remains missing
+8	018-01d	COMPLETE	MacInfo[6] reserved zero	all-known	S-WIN-CURRENT;S-LINUX-DWARF	S-WIN-CURRENT;S-LINUX-DWARF	P-GOLD-ENC	no semantic consumer
+8	01e-02d	PARTIAL	UsbOnlyInfo[0..15]	current;transitional-2019;strict-legacy-absent	S-WIN-CURRENT;S-WIN-191141	S-WIN-191141	P-GOLD-ENC	strict legacy absent/zero producer remains missing
+8	02e-1ff	COMPLETE	UsbOnlyInfo suffix + ELABEL header/body/backing/tail	current;legacy	S-WIN-CURRENT;S-LINUX-DWARF	S-WIN-CURRENT;S-LINUX-DWARF	P-GOLD-ENC	body is dynamic; in-block backing and outer tail are preserve-existing
+9	000-07f	COMPLETE	EETU temp-use structure	EETU;zero	S-WIN-CURRENT	S-WIN-CURRENT;S-LINUX-DWARF	P-GOLD-ENC	includes writer-uninitialized reverse backing and explicit final-zero bytes
+9	080-0ff	PARTIAL	long-Dept continuation slot	short-preserve;join59;join60	S-WIN-CURRENT;S-LINUX-DWARF	S-WIN-CURRENT	P-GOLD-ENC	current join60 producer and legacy join59 reader known; legacy join59 producer missing
+9	100-1ff	COMPLETE	SAPF/User-continuation/EPPE profile-overlap region	SAPF;long-user;EPPE;zero	S-WIN-CURRENT;S-LINUX-DWARF;V-LBA6	S-WIN-CURRENT;S-LINUX-DWARF	P-GOLD-ENC	profile-dependent ownership is explicit
+10	000-07f	PARTIAL	optional EESI payload	absent-zero;EESI-enabled	S-EESI-361018	S-EESI-361018	P-GOLD-ENC;P-GOLD-NOPWD	all designated gold is zero; status cannot upgrade until an allowed authentic enabled sample is added
+10	080-1ff	COMPLETE	cross-generation unowned preserve/ignore physical tail	absent-zero;EESI-enabled	S-EESI-361018	S-EESI-361018	P-GOLD-ENC;P-GOLD-NOPWD	EESI setter preserves this tail and getter never exposes it
+11	000-1ff	COMPLETE	DRKB + encrypted PDKB identity sector	normal-disk-size;repair-CHS	S-WIN-CURRENT;S-LINUX-DWARF	S-WIN-CURRENT;S-LINUX-DWARF	P-GOLD-ENC	both normal DiskSize and repair CHS capacity producer profiles are closed
+12	000-1ff	COMPLETE	EDPF table/pass-info + encrypted zero padding	mode1;mode2;mode3;legacy-v0064	S-WIN-CURRENT;S-LINUX-DWARF;V-LBA12	S-WIN-CURRENT;S-LINUX-DWARF	P-GOLD-ENC;P-GOLD-NOPWD	virtual mode1/3 evidence remains labeled virtual; physical originals provide mode2
+
