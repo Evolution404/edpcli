@@ -123,6 +123,17 @@ continuation 从 Dept[59] 开始的 producer/选择条件”。没有该 writer 
 - 这与 2022-12 的 x86/x64 FileOpHook “join59 positive reader + raw PhysicalDrive
   read-only”证据组成同一部署边界：**缺失的 join59 writer 应继续在独立
   SafeUDiskLabelTool/CEMSUsbRegsiter 家族中找，不应再回头把终端 reader 当 producer。**
+- 新增 scripts/protocol/audit_ydcc_2025_update_provenance.py，固定本机
+  VUpdateReplace.log SHA-256=dfc74465... 与 emsstore_decrypted.db
+  SHA-256=10704b28...。数据库 Product_audit 证明 ydcc 2.10.0
+  于 **2025-05-13 13:19:15** 首次安装、2026-04-30 更新；UTF-16LE 更新日志又直接
+  保留 base\\8.1.2502.2116\\ydcc\\cemsusbregsiter.dll 与 .dll.zip 路径。
+  2026 替换流程还把当时运行中的旧 DLL 备份到
+  base\\8.1.2604.0917.bk\\ydcc\\cemsusbregsiter.dll 后再替换/清理。
+- 因此 missing producer 不再只是“某个未知中间版本”：**2025 的
+  8.1.2502.2116 / ydcc 2.10.0 CEMSUsbRegsiter 是已证实存在且随后被删除的精确
+  acquisition target**。目前仍未恢复其 DLL bytes/hash，所以该证据只缩小版本窗口，
+  不把 LBA6/LBA9 的143B PARTIAL 升级。
 - LBA6 legacy entry3 的 CHS 也完成字段级解码：Aigo 与 SanDisk 两份 nonzero
   实盘均为 start `C=1023,H=0,S=1`、type `0x07`、end
   `C=1023,H=239,S=63`，后8B又分别与本盘 LBA12 type4 的 StartSector /
