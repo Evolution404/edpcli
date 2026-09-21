@@ -5121,6 +5121,30 @@ join=59。公开的2019 CEMS样本文件清单还把**同一产品目录路径**
 CEMS2.0/EDP 产品线共包证据，**不能**证明该2019归档中的 hook 与本机2022编译的
 `FileVersion=1.0.0.11` 二进制哈希相同。
 
+本轮继续排除了“这两份 reader DLL 自己还藏着 join59 raw writer”的可能路径：
+
+- x86 `fileophook.dll` SHA-256 为
+  `db3d0a94694cbed20696ef00b8f22e8e111e3f12068c763efc3e703fb960bc65`，PE 编译时间
+  `2022-12-13 03:40:57`，fixed file version 为 `8.1.2211.2811`、字符串
+  `FileVersion=1.0.0.11`。marker `0x40245E2A` 在该二进制只有一个命中，正是
+  `fcn.10022F80@0x100232ED` 的 `cmp`。唯一有实际代码 xref 的
+  `\\.\\PhysicalDrive%u` 路径进入 `fcn.10026280`，该函数在 `0x1002631B`
+  以 `dwDesiredAccess=0x80000000 (GENERIC_READ)` 打开物理盘，随后只执行
+  `SetFilePointer + ReadFile`。模块虽导入 `WriteFile`，但这些调用点没有连接到这一唯一
+  live PhysicalDrive raw path，不能据此推导出 sector writer。
+- x64 `fileophook64.dll` SHA-256 为
+  `93364d3f6798570fc10345cfe30d46d8b86b68f8e3468c49fa76ae7e8a42d2a9`，PE 编译时间
+  `2022-12-13 02:44:33`，版本同样为 `8.1.2211.2811 / 1.0.0.11`。该架构也只有一个
+  marker 命中：`fcn.180026D70@0x18002724F` 的 `cmp`；其固定 join59 分支在
+  `0x18002726C` 复制 `0x3C` bytes，再于 `0x180027277` 把 continuation 写到
+  prefix `+0x3B`。唯一 `\\.\\PhysicalDrive%u` xref 则进入 `fcn.18002B880`，
+  `0x18002B8FE` 同样使用 `GENERIC_READ`，最终只调用 `ReadFile`。
+- 对整个 `/Users/zhangyuxi/Desktop` 与 `/private/tmp` 的 PE 文件按 marker 原始字节
+  `2A 5E 24 40` 扫描，本轮只命中11个已知家族文件；额外出现的 2024
+  `EdpEDiskCtrl.dll` 两个命中也都是兼容 reader 的 `cmp`，没有出现新的历史 marker writer。
+  `VRV.zip` 中的 Edp FileOpHook 仍是同一 2022 尺寸/代际，ydcc BusManage/CEMSUsbRegsiter
+  则是 current 2026 树，因此归档也未补出 earlier writer。
+
 因此 legacy join59 现在可以严格描述为 **CEMS2.0 旧代 canonical reader ABI**，
 而 current ydcc 通过 inline-NUL 自描述同时兼容59/60。仍缺的是同代
 `safeudisklabeltool\\cemsusbregsiter.dll` 的原始 writer 字节；没有 writer 之前不能把

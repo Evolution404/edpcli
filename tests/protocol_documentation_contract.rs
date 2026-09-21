@@ -67,6 +67,8 @@ fn protocol_live_status_tracks_strict_baseline_without_becoming_a_second_ledger(
         "EDP_DiskNumber",
         "不能升级 COMPLETE",
         "join59",
+        "GENERIC_READ",
+        "fcn.18002B880",
     ] {
         assert!(
             LIVE.contains(required),

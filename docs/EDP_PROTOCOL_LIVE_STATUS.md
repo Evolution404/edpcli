@@ -45,6 +45,24 @@ writer 或其上游输入算法。
 在没有新的历史组件证据时，下一分析优先级切换为 LBA6/LBA9：继续追
 join59 reader 与同代 writer ABI，寻找能够实际生成 Dept[59] 拼接形态的历史 producer。
 
+## 最新结论：LBA6/LBA9 join59
+
+- `cems/Edp/fileophook.dll` x86 SHA-256=`db3d0a94694cbed20696ef00b8f22e8e111e3f12068c763efc3e703fb960bc65`，
+  `fileophook64.dll` x64 SHA-256=`93364d3f6798570fc10345cfe30d46d8b86b68f8e3468c49fa76ae7e8a42d2a9`；
+  两者均为 2022-12-13 build，版本 `8.1.2211.2811 / 1.0.0.11`，不能冒充2019 writer。
+- x86 `fcn.10022F80` 与 x64 `fcn.180026D70` 都固定执行 join59：marker 后先取60B prefix，
+  再把 LBA9 continuation 覆盖到 prefix `+0x3B`，没有 current 的 prefix[59] 分支。
+- 但两个架构的唯一 live `\\.\\PhysicalDrive%u` raw path——x86 `fcn.10026280` 与
+  x64 `fcn.18002B880`——都只以 `GENERIC_READ` 打开盘并调用 `ReadFile`；marker 在两个
+  二进制也都只有一个 `cmp` 命中。因此这两份
+  CEMS2.0-lineage FileOpHook 是 join59 reader 证据，**不是**缺失的 join59 producer。
+- 扩大到 Desktop + `/private/tmp` 的 PE marker 扫描以及 `VRV.zip` 归档检查仍没有得到
+  新的 earlier writer；2024 `EdpEDiskCtrl.dll` 新命中仍只是兼容 reader。
+
+所以 LBA6 `+0x03F` 与 LBA9 `+0x080..+0x0FF` 保持 PARTIAL；当前 blocker 已进一步缩成
+“取得独立的同代 `safeudisklabeltool/cemsusbregsiter` writer，并直接看到 Dept[59] 被置 NUL、
+continuation 从 Dept[59] 开始的 producer/选择条件”。没有该 writer 前不得增加 COMPLETE。
+
 ## 固定门禁
 
 任何新增 COMPLETE 必须同时满足现有 source + consumer + physical gold/model 门禁，并通过

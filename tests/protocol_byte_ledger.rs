@@ -160,6 +160,9 @@ fn historical_rejections_and_lba10_sample_gate_are_explicit() {
     assert!(matrix.contains("ISUdiskRegsiterObj vtable 0x1019DB54"));
     assert!(matrix.contains("virtual_68@0x1000E650"));
     assert!(matrix.contains("directly disproves DeviceNumber/DiskNumber == HSerial[5]"));
+    assert!(matrix.contains("db3d0a94694cbed20696ef00b8f22e8e111e3f12068c763efc3e703fb960bc65"));
+    assert!(matrix.contains("93364d3f6798570fc10345cfe30d46d8b86b68f8e3468c49fa76ae7e8a42d2a9"));
+    assert!(matrix.contains("GENERIC_READ"));
 
     let lba10 = LEDGER
         .lines()
@@ -167,6 +170,27 @@ fn historical_rejections_and_lba10_sample_gate_are_explicit() {
         .expect("LBA10 active EESI row");
     assert!(lba10.contains("all designated gold is zero"));
     assert!(lba10.contains("allowed authentic enabled sample"));
+}
+
+#[test]
+fn cems2_join59_reader_does_not_get_promoted_to_a_writer() {
+    let lba6 = LEDGER
+        .lines()
+        .find(|line| line.starts_with("6\t03f\tPARTIAL\t"))
+        .expect("LBA6 join boundary row");
+    let lba9 = LEDGER
+        .lines()
+        .find(|line| line.starts_with("9\t080-0ff\tPARTIAL\t"))
+        .expect("LBA9 continuation row");
+
+    for row in [lba6, lba9] {
+        assert!(row.contains("S-FILEOPHOOK-2022"));
+        assert!(row.contains("producer") || row.contains("writer"));
+    }
+    assert!(DOC.contains("fcn.10026280"));
+    assert!(DOC.contains("GENERIC_READ"));
+    assert!(DOC.contains("fcn.18002B880"));
+    assert!(DOC.contains("不能据此推导出 sector writer"));
 }
 
 #[test]
