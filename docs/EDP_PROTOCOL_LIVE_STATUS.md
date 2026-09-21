@@ -3,7 +3,7 @@
 > 这是 LBA0-LBA12 逆向的短状态页；完整证据与推理只维护在
 > `docs/EDP_PROTOCOL_REVERSE_ENGINEERING.md`，本页不作为第二份协议总文档。
 
-更新时间：2026-09-21
+更新时间：2026-09-22
 
 ## 严格进度
 
@@ -72,6 +72,14 @@
 
 当前真正剩余的字节 blocker 只剩 LBA4 `bDataToServer@+0x045` 与 LBA6/LBA9：继续追
 join59 reader 与同代 writer ABI、legacy MBR underlay producer，寻找能够实际生成 Dept[59] 拼接形态的历史 producer。
+
+### 2026-09-22：v19 LBA6 BeiZhu 32B 槽审计纠错
+
+- 新增 `scripts/protocol/audit_v19_lba6_beizhu_slot.py`，固定 v19.11.4.1 DLL SHA-256，直接锁定 `BuildSector6@0x10006370`、`ReadSector6@0x10006AC0`、共享 `strcpy_s@0x101473FE` 及六个 reader callsite。
+- 旧文档“v19 overlay 不触及 `+0x1E0..+0x1ED`”是错误的：v19 writer 在 `0x10006648..0x10006656` 把 `sector+0x1D0` 作为 **cap=32 的 BeiZhu C-string 槽**；reader 对称地从 `+0x1D0` 用同一 cap=32 C-string helper 返回。
+- 但这不是“完整32B raw copy”：`strcpy_s` 在首个NUL即停止。真实 writer caller `0x1000B16C..0x1000B226` 先把完整32B arg8局部清零，再复制 `object+0x2620` 的 BeiZhu；pinned `UsbMainBSec@0x101BA790` `+0x1D0..+0x1F3` 也全部为0。因此 v19 对短 BeiZhu 只能生成本14B为0，**不能生成** Aigo/SanDisk 两份 nonzero MBR underlay。
+- consumer 侧已进一步闭合：第一组 caller 完全不再读取 arg8；第二组成功路径读取的是另一字符串；第三组唯一后续使用是把 arg8 再以 `strcpy_s(cap=16)` 写入对象，NUL 后 `+0x10..+0x1D` 无比较、分支、哈希或字段提取。
+- 因而 LBA6 `+0x1E0..+0x1ED` 的 blocker 现在只剩 **exact earlier legacy MBR-underlay producer/profile-selection**。在该 producer 取得前仍保持 PARTIAL；严格进度继续为 6512/6656=97.8%，没有为了完成率降低门槛。
 
 ## 最新结论：LBA6/LBA9 join59
 

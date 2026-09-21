@@ -734,7 +734,7 @@ DWARF 中恢复出的原始声明文件/行号与本地函数地址：
 | LBA6 | 0x1D0 | COMPLETE | `BeiZhu` C-string 首字节 / 空串 NUL | current Windows/Linux writer从 BeiZhu 输入槽复制前15B到零化temp；reader从 `+0x1D0` 按 C-string 读回。无论 profile 是空串还是 GBK“普通”，首字节都仍属于字符串本体（空串时就是终止NUL） | Windows/Linux reader以 C-string 解释，不存在首字节的 underlay-only 分支 | strict 22盘：20份首字节=00（空），2份首字节=C6（GBK“普通”首字节）；旧 MBR underlay在“普通”NUL之后才暴露 | profile-independent 字符串边界闭合，1B升COMPLETE |
 | LBA6 | 0x1D1–0x1DE | COMPLETE | BeiZhu dynamic string-tail / caller-owned post-NUL backing | current Windows/Linux writer同样只复制 source BeiZhu 前15B到零化temp：非空 profile 中首个NUL前属于同一 BeiZhu 字符串，空/短 profile 中其余字节只是 source backing。first-party Windows `BuildSector6` 虚拟执行把空 BeiZhu 的 source `+1..14` 人为填成 `5A×14`，输出逐字节保留 | Windows/Linux reader只按 C-string 消费到首个NUL，绝不解释 post-NUL backing；legacy“普通”profile的 MBR几何残值位于NUL之后，因此同样不进入业务语义 | 22盘含20空+2个GBK“普通”，并有8/22 post-NUL非零；两份 legacy backing 与旧 MBR snapshot 连续。official virtual fixture又证明任意 `5A×14` backing 合法存在而不改变空字符串语义 | 与 Label/Office 固定槽同类：正文与backing由首NUL动态分界，backing是caller-owned compatibility bytes而非隐藏字段。14B从PARTIAL升COMPLETE |
 | LBA6 | 0x1DF | COMPLETE | `BeiZhu[15]` dedicated zero terminator byte | Windows/Linux `BuildSector6` 对16B临时槽先清零、只复制 source BeiZhu 前15B，因此 byte15 始终由 builder 明确保留为0，与空串/GBK“普通”及 source backing 无关 | reader从 `+0x1D0` 按 C-string 消费；该字节是固定槽最后的安全终止NUL | committed current/legacy fixtures全部为0；扩展22份 checksum-valid 历史 front 同样22/22 `+0x1DF=0` | 跨 profile 无分叉，producer/consumer/实盘完整闭合；1B从PARTIAL升COMPLETE |
-| LBA6 | 0x1E0–0x1ED | PARTIAL | current-template zero / legacy MBR entry3 snapshot fragment | current Windows/Linux `BuildSector6` 都从静态 `UsbMainBSec` 起步且不显式覆盖此区；current模板这14B为零。历史 `CEMSUsbRegsiter.dll` v19.11.4.1 的 `fcn.10006370` 现也已独立闭合为 LBA6 writer：先以 `rep movsd, ECX=0x80` 复制 512B 静态模板 `0x101BA790`，再覆盖 Dept/User/Autonum/Office/CRC/Label/GSerial/BeiZhu/`m_encrypt` 等已知槽，对前508B计算同款 checksum，最终 `SetFilePointer(6*sector_size)` + `WriteFile(sector_size)`；其静态模板 `+0x1E0..+0x1ED` 同样全零，且 overlay 不触及本14B。legacy Aigo+SanDisk 两盘则精确保留旧 MBR entry3 bytes[2..15]：start-CHS尾、`type=0x07`、end-CHS、start_lba、sector_count | current `ReadSector6` 无业务读取；repair链消费的是 LBA0/LBA12/backup，不直接解释该 LBA6 snapshot | 20/22 strict历史为零；2/22 nonzero 且 type/start/count 与各自 LBA12 type4精确对应。SanDisk三分区几何完全同步；Aigo rev_pmap 显示这里是更早的 stale MBR snapshot | 14B历史语义已明确；新增机器码证据进一步**排除 v19.11.4.1 作为 nonzero snapshot producer**，把 blocker 收缩到更早 CEMS2.0/legacy writer 或 profile-selection，故继续PARTIAL |
+| LBA6 | 0x1E0–0x1ED | PARTIAL | v19 BeiZhu cap-32 C-string slot post-NUL template backing / legacy MBR entry3 snapshot fragment | current Windows/Linux `BuildSector6` 的较新 ABI 只显式拥有到 `+0x1DF`；historical v19.11.4.1 则把 `+0x1D0` 建模为 **capacity=32 的 BeiZhu C-string 槽**：`fcn.10006370@0x10006648..0x10006656` 对 `sector+0x1D0` 调 `strcpy_s(cap=0x20, caller arg8)`。其真实 caller `0x1000B16C..0x1000B226` 先把完整32B局部清零，再从 `object+0x2620` 以 `strcpy_s(cap=0x20)` 填入 BeiZhu；v19 `UsbMainBSec@0x101BA790` 的 `+0x1D0..+0x1F3` 也全部为0。因此该代 writer 对短 BeiZhu 的本14B明确生成0，而不是主动生成 MBR 字段。legacy Aigo+SanDisk 两盘则精确保留旧 MBR entry3 bytes[2..15]：start-CHS尾、`type=0x07`、end-CHS、start_lba、sector_count | v19 `ReadSector6@0x10006E07..0x10006E16` 从 decoded `+0x1D0` 调同一 `strcpy_s` 返回 caller arg8，capacity同为32，只消费到首个NUL。六个已恢复 caller 分三组：第一组 arg8 局部除初始化/两次 reader 传参外无后续引用；第二组成功路径解析的是另一 `esp+0x18` 字符串，不读取 arg8 的稳定 `esp+0x38` 输出槽；第三组 arg8 局部 `-0x64` 的唯一后续值使用是再经 `strcpy_s(cap=16)` 写入 object+0x140。因此 NUL 后 `+0x10..+0x1D` 没有 cmp/test/hash/branch/字段提取业务消费 | 20/22 strict历史为零；2/22 nonzero 且 type/start/count 与各自 LBA12 type4精确对应。SanDisk三分区几何完全同步；Aigo rev_pmap 显示这里是更早的 stale MBR snapshot；`scripts/protocol/audit_v19_lba6_beizhu_slot.py` 固定 v19 DLL SHA 并重放上述模板、writer、reader 与 caller-use 约束 | consumer 边界现已闭合，旧“v19 overlay 不触及本14B”陈述已纠正；机器码证据继续**排除 v19.11.4.1 作为 nonzero snapshot producer**：pinned v19 writer/template 恰恰只能生成 post-NUL zero，无法生成两份真实 nonzero MBR underlay。exact legacy underlay producer/profile-selection 仍缺，故按严格 producer+consumer+physical 门槛继续 PARTIAL，禁止仅因 reader 不消费而升级 |
 | LBA6 | 0x1EE–0x1EF | COMPLETE | MBR entry4 unused prefix = zero | current `UsbMainBSec` 对第4条 entry 的 status/start-head 为0，BuildSector6不覆盖；legacy snapshot跨到 entry4 后同样保留 `00 00` | ReadSector6无独立业务读取；作为未使用第4条 MBR entry前缀无后续语义 | committed current/legacy fixtures均为0；扩展 `nopwd_tool/backup` 22份全部 checksum-valid，22/22 `+0x1EE..0x1EF=00 00` | current template producer、legacy snapshot profile、negative consumer和全历史实证均无分叉；2B升COMPLETE |
 | LBA6 | 0x1F0–0x1F3 | COMPLETE | write-only `!SAFE` label-generation metadata (`m_encrypt`) | DWARF 正式定位 `UsbWriteParam.m_encrypt@+0x258`；Windows `RegsiterUsb` 对注册字符串执行5字节 `!SAFE` 匹配，相等/不等分支在 `0x1003BA94/0x1003BAC7` 分别写1/0，随后立即传给 BuildSector6；Windows/Linux BuildSector6 都把该 bool 扩成 DWORD 写 `+0x1F0` | 读取侧正式 `UsbLabelParam` 结构没有 `m_encrypt` 成员；Linux ReadSector6 不返回它。Windows `CheckLabel/sub_100152A0` 校验前508B checksum 后显式解析其它字段，但不读取 `+0x1F0`；已扫 runtime 无值相关 consumer。因此消费语义是 checksum-covered / semantic-ignore，而非运行时加密开关 | committed strict originals 22/22=1；独立 SanDisk 原始 LBA6 同样=1；CI `lba6_m_encrypt_is_the_observed_write_only_safe_label_metadata` 锁定 | producer 的0/1规则、正式字段名、negative semantic consumer、checksum ownership 与真实盘均闭合。COMPLETE 不表示恒为1；非 `!SAFE` producer 可合法写0 |
 | LBA6 | 0x1F4–0x1FB | COMPLETE | UsbMainBSec static zero tail before checksum | Windows/Linux BuildSector6 都由 `UsbMainBSec` 初始化，字段 overlay 最后只写到 `+0x1F3`，故8B保持模板零 | 两端 ReadSector6 的 checksum 覆盖到 `+0x1FB`；字段 parser无独立读取 | 严格22份22/22解密为8B零，官方模板同样为零；CI含独立SanDisk锁定 | explicit template-zero producer + checksum consumer +实盘，8B COMPLETE |
@@ -3318,24 +3318,40 @@ GSerial/BeiZhu 的 legacy post-NUL 尾也继续支持同一解释：
   而 LBA12 新表为 `20418 -> 20481`，呈现明确 ±1 版本差异；type4 边界仍一致。
   这进一步说明旧 fragment 不是由当前 LBA12 简单复制出来，而是独立的旧布局。
 
-producer/consumer 边界也重新核过：
+producer/consumer 边界也重新核过，并补上 v19.11.4.1 的精确 ABI：
 
 - current Windows `sub_10013FD0` 与 Linux `BuildSector6` 都从静态
-  `UsbMainBSec` 复制整扇；
-- current Windows 在写 GSerial/BeiZhu 时，对临时缓冲先清零，再复制输入槽
-  前15B并固定覆盖16B；
+  `UsbMainBSec` 复制整扇；current writer 在写 GSerial/BeiZhu 时，对16B临时缓冲
+  先清零，再复制输入槽前15B并固定覆盖16B；
+- historical v19.11.4.1 `BuildSector6/fcn.10006370` 也先复制完整512B
+  `UsbMainBSec@0x101BA790`，但其 BeiZhu 物理槽是更宽的 cap=32 ABI：
+  `0x10006648..0x10006656` 对 `sector+0x1D0` 调
+  `strcpy_s(cap=0x20, caller arg8)`。这意味着旧文档“v19 overlay 不触及
+  +0x1E0..+0x1ED”是错误的；本14B 位于 v19 BeiZhu 槽的**容量范围**内；
+- 这仍然不是 raw 32B copy。共享 helper `0x101473FE` 在复制首个 NUL 后立即停止。
+  已恢复 writer caller `0x1000B16C..0x1000B226` 先把 arg8 的32B局部完整清零，
+  再从 `object+0x2620` 以 `strcpy_s(cap=32)` 写入 BeiZhu；同时 pinned v19
+  `UsbMainBSec +0x1D0..+0x1F3` 也全部为0。因此短 BeiZhu 下 v19 只能让
+  `+0x1E0..+0x1ED` 保持0，不能生成两份物理 nonzero MBR underlay；
+- historical v19 `ReadSector6@0x10006E07..0x10006E16` 从 decoded
+  `+0x1D0` 通过同一 `strcpy_s(cap=32)` 返回 caller arg8，只消费到首NUL。
+  六个 caller 分三组：第一组目标局部除初始化/两次 reader 传参外无引用；第二组
+  成功路径读取另一 `esp+0x18` 字符串，不读取目标稳定 `esp+0x38` 槽；第三组
+  目标 `-0x64` 的唯一后续值使用是再以 `strcpy_s(cap=16)` 写入对象。
+  因而 post-NUL `+0x10..+0x1D` 没有 cmp/test/hash/branch/字段提取业务消费；
 - Windows 当前 `UsbMainBSec@0x100E7220` 只发现读取 xref，没有运行时写入；
-- Linux `UsbMainBSec@0x22BB40` 同样只在 current builder 被读取；
+  Linux `UsbMainBSec@0x22BB40` 同样只在 current builder 被读取；
 - current `BuildSector0`/Netac/hardware MBR builder 都只构造单条普通分区，
   不能生成这里的三分区 legacy layout；
 - `UDiskLabelRepair.dll` 的 `CLabelRepair::CheckSafe6LabelExist`
   直接从 LBA12 解析 type1/2/4，`Repair0Sector/ReCreate0Sector` 从 sector9/
   backup sector 恢复或重建 LBA0；目前没有发现它直接读取 LBA6 fragment。
 
-因此本轮可以把“legacy opaque extension”这一旧命名**正式撤销**，但仍不能
-把 `+0x1E0..0x1EF` 升 COMPLETE：结构语义与两块实盘已经很强，current-zero
-producer 也闭合，但生成动态 legacy MBR underlay 的旧 writer 以及直接消费该
-LBA6 fragment 的 consumer 仍未找到。
+因此“legacy opaque extension”这一旧命名仍应撤销。consumer 侧现已闭合到
+**C-string prefix only / post-NUL semantic-ignore**，但 `+0x1E0..+0x1ED`
+仍不能升 COMPLETE：两份 nonzero 物理值确实是旧 MBR entry3 fragment，而 pinned
+v19/current writer 都只能给出 zero profile。生成该 dynamic legacy MBR underlay 的
+exact earlier writer/profile-selection 仍缺，故继续保持 PARTIAL。
 
 新增回归门禁：
 
