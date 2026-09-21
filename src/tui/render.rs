@@ -370,7 +370,7 @@ fn draw_backups(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState
     let original_count = state.backups().len().saturating_sub(nopwd_count);
     let summary_parts = Layout::default()
         .direction(Direction::Horizontal)
-        .constraints([Constraint::Min(40), Constraint::Length(32)])
+        .constraints([Constraint::Min(40), Constraint::Length(38)])
         .split(backup_parts[0]);
     frame.render_widget(
         Paragraph::new(Line::from(vec![
@@ -384,17 +384,35 @@ fn draw_backups(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState
         .block(Block::default().borders(Borders::ALL).title("备份概览")),
         summary_parts[0],
     );
-    let search_text = if state.input_mode() == InputMode::Search {
-        format!("/{}", safe(state.input_buffer()))
+    let search_active = state.input_mode() == InputMode::Search;
+    let search_filtered = state.workspace_filter_active();
+    let search_text = if search_active {
+        format!("/{}▌", safe(state.input_buffer()))
     } else if let Some(status) = state.search_status() {
         status
     } else {
         "/ 搜索姓名、部门、onlyid".to_string()
     };
+    let search_style = if search_active {
+        accent()
+    } else if search_filtered {
+        secondary()
+    } else {
+        muted()
+    };
     frame.render_widget(
         Paragraph::new(search_text)
-            .block(Block::default().borders(Borders::ALL).title("搜索"))
-            .style(muted()),
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .border_style(search_style)
+                    .title(if search_active {
+                        "搜索 · 实时过滤"
+                    } else {
+                        "搜索"
+                    }),
+            )
+            .style(search_style),
         summary_parts[1],
     );
 
@@ -981,7 +999,17 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
     } else if state.is_critical_operation() {
         "关键写盘阶段：q / Esc / Ctrl-C 将延迟到安全检查点".to_string()
     } else if state.input_mode() == InputMode::Search {
-        format!("/{}", safe(state.input_buffer()))
+        if state.inspect_data().is_some() {
+            format!(
+                "/{}  ·  Enter 搜索  ·  Esc 取消编辑",
+                safe(state.input_buffer())
+            )
+        } else {
+            format!(
+                "/{}  ·  输入即过滤  ·  Enter 确认  ·  Esc 取消编辑",
+                safe(state.input_buffer())
+            )
+        }
     } else if state.input_mode() == InputMode::Command {
         format!(":{}", safe(state.input_buffer()))
     } else if let Some(message) = state.notice() {
