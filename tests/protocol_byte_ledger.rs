@@ -121,13 +121,13 @@ fn byte_ledger_covers_exactly_6656_bytes_without_overlap() {
         "byte ledger contains gaps"
     );
     let expected_complete = [
-        512, 512, 512, 512, 511, 512, 497, 512, 512, 384, 512, 512, 512,
+        512, 512, 512, 512, 512, 512, 497, 512, 512, 384, 512, 512, 512,
     ];
-    let expected_partial = [0, 0, 0, 0, 1, 0, 15, 0, 0, 128, 0, 0, 0];
+    let expected_partial = [0, 0, 0, 0, 0, 0, 15, 0, 0, 128, 0, 0, 0];
     assert_eq!(complete, expected_complete);
     assert_eq!(partial, expected_partial);
-    assert_eq!(complete.iter().sum::<usize>(), 6512);
-    assert_eq!(partial.iter().sum::<usize>(), 144);
+    assert_eq!(complete.iter().sum::<usize>(), 6513);
+    assert_eq!(partial.iter().sum::<usize>(), 143);
 
     for lba in 0..13 {
         let progress = format!("| LBA{lba} | {} | {} | 0 |", complete[lba], partial[lba]);

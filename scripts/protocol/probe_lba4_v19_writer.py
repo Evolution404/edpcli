@@ -78,11 +78,25 @@ def parse_args() -> argparse.Namespace:
             "audit/protocol/gold/authentic-nopwd/sandisk_ultra_20260823_lba0_12.bin"
         ),
     )
+    parser.add_argument(
+        "--node-flags",
+        default="0000",
+        help=(
+            "two producer-side restore-node flag bytes as four hex digits; "
+            "default 0000 retains the exact authentic-SanDisk reconstruction"
+        ),
+    )
     return parser.parse_args()
 
 
 def main() -> None:
     args = parse_args()
+    try:
+        node_flags = bytes.fromhex(args.node_flags)
+    except ValueError as exc:
+        raise SystemExit("--node-flags must be exactly four hex digits") from exc
+    if len(node_flags) != 2:
+        raise SystemExit("--node-flags must be exactly four hex digits")
     require_file_hash(args.dll, V19_DLL_SHA256)
     image = require_file_hash(args.image, AUTHENTIC_GOLD_SHA256)
     if len(image) != 13 * 512:
@@ -99,12 +113,12 @@ def main() -> None:
     # ReadSector4's rolling view is the correct pre-rolling representation for
     # caller-owned backing.  It also exposes D4/D9 at the two post-XOR writer
     # exception bytes; replace only those two node bytes with the producer-side
-    # values being tested here (00/00).
+    # values being tested here.
     reader = rolling(target[0x18:], ONLYID)
     if reader[0x2D:0x2F] != bytes.fromhex("d4d9"):
         raise SystemExit("authentic SanDisk reader-view flags changed")
     node = bytearray(reader[:0x2F])
-    node[0x2D:0x2F] = b"\x00\x00"
+    node[0x2D:0x2F] = node_flags
 
     seed_sector = bytearray(target)
     seed_sector[0x18:] = reader
@@ -315,9 +329,18 @@ def main() -> None:
         raise SystemExit("historical writer did not report success")
     if exceptions:
         raise SystemExit("emulator encountered an unexpected exception/unmapped access")
-    if write_calls != [(4 * 512, target)]:
-        raise SystemExit("historical writer did not issue exactly one exact LBA4 write")
-    if output != target or sha256(output) != AUTHENTIC_LBA4_SHA256:
+    if len(write_calls) != 1 or write_calls[0][0] != 4 * 512 or len(write_calls[0][1]) != 512:
+        raise SystemExit("historical writer did not issue exactly one 512-byte LBA4 write")
+
+    expected = bytearray(target)
+    expected[0x45:0x47] = node_flags
+    if output != bytes(expected):
+        raise SystemExit(
+            "historical writer changed bytes outside the caller-owned node flag overlay"
+        )
+    if output[0x45:0x47] != node_flags:
+        raise SystemExit("historical writer did not transparently serialize node flags")
+    if node_flags == b"\x00\x00" and sha256(output) != AUTHENTIC_LBA4_SHA256:
         raise SystemExit("historical writer did not reproduce authentic LBA4 exactly")
 
 

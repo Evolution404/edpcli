@@ -61,8 +61,8 @@ fn protocol_analysis_has_one_canonical_document() {
 fn protocol_live_status_tracks_strict_baseline_without_becoming_a_second_ledger() {
     assert!(Path::new("docs/EDP_PROTOCOL_LIVE_STATUS.md").is_file());
     for required in [
-        "6512 / 6656 B = 97.8%",
-        "PARTIAL：144 B",
+        "6513 / 6656 B = 97.9%",
+        "PARTIAL：143 B",
         "LBA4 `0x020..0x033` 已按 caller-owned HSerial identity vector 字段级生命周期闭环",
         "ReadUsbHserialsInfo",
         "0x1019DB54",
@@ -117,11 +117,11 @@ fn strict_progress_covers_exactly_lba0_through_lba12() {
     );
     assert_eq!(complete + partial + unknown, 13 * 512);
     assert!(
-        complete >= 6512,
+        complete >= 6513,
         "strict COMPLETE coverage regressed below the audited baseline: {complete}"
     );
     assert!(
-        partial <= 144,
+        partial <= 143,
         "PARTIAL coverage regressed above the audited baseline: {partial}"
     );
     assert_eq!(
@@ -129,8 +129,8 @@ fn strict_progress_covers_exactly_lba0_through_lba12() {
         "all LBA0..12 bytes are at least PARTIAL after the completed UNKNOWN audit"
     );
     assert!(
-        DOC.contains("COMPLETE：6512B / 6656B = 97.8%")
-            && DOC.contains("PARTIAL：144B / 6656B = 2.2%"),
+        DOC.contains("COMPLETE：6513B / 6656B = 97.9%")
+            && DOC.contains("PARTIAL：143B / 6656B = 2.1%"),
         "displayed global totals must match the strict-progress ledger"
     );
 }
@@ -345,8 +345,8 @@ fn documentation_keeps_the_official_provisioning_chain_and_strict_rules() {
         "LBA2 must retain the closed entry0 and unused-entry residual semantics"
     );
     assert!(
-        DOC.contains("| LBA4 | 511 | 1 | 0 | 99.8% |"),
-        "LBA4 progress must retain the caller-owned HSerial vector closure while leaving only bDataToServer partial"
+        DOC.contains("| LBA4 | 512 | 0 | 0 | 100.0% |"),
+        "LBA4 progress must retain the caller-owned HSerial and bDataToServer closures"
     );
     assert!(
         DOC.contains("| LBA6 | 497 | 15 | 0 | 97.1% |"),

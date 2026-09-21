@@ -7,8 +7,8 @@
 
 ## 严格进度
 
-- COMPLETE：6512 / 6656 B = 97.8%
-- PARTIAL：144 B
+- COMPLETE：6513 / 6656 B = 97.9%
+- PARTIAL：143 B
 - UNKNOWN：0 B
 - 本轮进入时仓库 HEAD：`63b76da1fed351f1e7bbe45f0f12f5c22765e3dc`
 - 中途另一工作流先在 `1c281cb9bf4a9d92f8fc27198120d53db6466da9` 将真实免密 SanDisk
@@ -70,8 +70,11 @@
 
 本机可见的 `/private/tmp/ijinshan_edp` 三件套与已审组件 SHA-256 完全重复：BusManage 仍是 2020 build，CEMSUsbRegsiter 仍是 v19.11.4.1，RegManage 仍是 v20.1.2.2；Spotlight 也未发现更早的 `busmanage.dll/cemsusbregsiter.dll`。更早 caller 的 HSerial 数值生成算法仍可继续追，但已从字节闭环 blocker 降为 provenance 开放问题。
 
-当前真正剩余的字节 blocker 只剩 LBA4 `bDataToServer@+0x045` 与 LBA6/LBA9：继续追
-join59 reader 与同代 writer ABI、legacy MBR underlay producer，寻找能够实际生成 Dept[59] 拼接形态的历史 producer。
+LBA4 `bDataToServer@+0x045` 已按 caller-owned compatibility BYTE 闭环：v19
+official writer 注入逻辑值 `0B` 时只改变 wire `+0x45`；strict Aigo 的
+`wire=64 7A` 又按正式 rolling 精确解为 `node=0B 00`，reader/restore 无值相关
+consumer。当前真正剩余的字节 blocker 只剩 LBA6/LBA9：继续追 join59 同代 writer ABI
+与 legacy MBR underlay producer。
 
 ### 2026-09-22：v19 LBA6 BeiZhu 32B 槽审计纠错
 
@@ -79,7 +82,7 @@ join59 reader 与同代 writer ABI、legacy MBR underlay producer，寻找能够
 - 旧文档“v19 overlay 不触及 `+0x1E0..+0x1ED`”是错误的：v19 writer 在 `0x10006648..0x10006656` 把 `sector+0x1D0` 作为 **cap=32 的 BeiZhu C-string 槽**；reader 对称地从 `+0x1D0` 用同一 cap=32 C-string helper 返回。
 - 但这不是“完整32B raw copy”：`strcpy_s` 在首个NUL即停止。真实 writer caller `0x1000B16C..0x1000B226` 先把完整32B arg8局部清零，再复制 `object+0x2620` 的 BeiZhu；pinned `UsbMainBSec@0x101BA790` `+0x1D0..+0x1F3` 也全部为0。因此 v19 对短 BeiZhu 只能生成本14B为0，**不能生成** Aigo/SanDisk 两份 nonzero MBR underlay。
 - consumer 侧已进一步闭合：第一组 caller 完全不再读取 arg8；第二组成功路径读取的是另一字符串；第三组唯一后续使用是把 arg8 再以 `strcpy_s(cap=16)` 写入对象，NUL 后 `+0x10..+0x1D` 无比较、分支、哈希或字段提取。
-- 因而 LBA6 `+0x1E0..+0x1ED` 的 blocker 现在只剩 **exact earlier legacy MBR-underlay producer/profile-selection**。在该 producer 取得前仍保持 PARTIAL；严格进度继续为 6512/6656=97.8%，没有为了完成率降低门槛。
+- 因而 LBA6 `+0x1E0..+0x1ED` 的 blocker 现在只剩 **exact earlier legacy MBR-underlay producer/profile-selection**。在该 producer 取得前仍保持 PARTIAL；LBA4 `+0x045` 后续独立闭环使全局严格进度更新为 6513/6656=97.9%，这里仍没有为了完成率降低本14B门槛。
 
 ## 最新结论：LBA6/LBA9 join59
 
@@ -101,7 +104,7 @@ join59 reader 与同代 writer ABI、legacy MBR underlay producer，寻找能够
 - 同一审计证明 current `CEMSUsbRegsiter::BuildSector6` 只有
   `strlen(Dept)>=64` 才进 long 分支，并固定复制60B、从 `Dept[60]` 取 continuation；
   所以 current writer 被直接排除为 join59 producer。这一新证据关闭的是 reader
-  profile-selection 规则，不是历史 producer，严格完成率仍为6512/6656=97.8%。
+  profile-selection 规则，不是历史 producer；LBA4 `+0x045` 后续独立闭环后全局严格完成率为6513/6656=97.9%。
 
 所以 LBA6 `+0x03F` 与 LBA9 `+0x080..+0x0FF` 保持 PARTIAL；当前 blocker 已进一步缩成
 “取得独立的同代 `safeudisklabeltool/cemsusbregsiter` writer，并直接看到 Dept[59] 被置 NUL、
@@ -157,7 +160,7 @@ rolling-form reader view 为0；真实免密 wire=00/reader=D9 又已由 v19 off
 在 `libcemsfilesyscheck.so` 内只进入 BuildSector4/ReadSector4，后者除 OnlyIdXor8 外无字段级
 判断；这进一步把 `+0x045` 缺口限定到更老 producer 和其它上层 consumer，状态仍为 PARTIAL。
 
-剩余 blocker 已不再包括 HSerialCRC[5] 或 LBA3；只剩 `bDataToServer@+0x045` 的历史非零 producer/最终 consumer，以及 LBA6 `+0x03F/+0x1E0..+0x1ED`、LBA9 `+0x080..+0x0FF` 的既有 PARTIAL 字节。完整证据见主文档第1.3节。
+剩余 blocker 已不再包括 HSerialCRC[5]、LBA3 或 `bDataToServer@+0x045`；只剩 LBA6 `+0x03F/+0x1E0..+0x1ED`、LBA9 `+0x080..+0x0FF` 的既有 PARTIAL 字节。完整证据见主文档第1.3节。
 
 ## 固定门禁
 

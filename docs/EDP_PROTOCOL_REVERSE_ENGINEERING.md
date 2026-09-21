@@ -7,7 +7,7 @@
 > `COMPLETE` 只允许由可复核证据升级；`PARTIAL` 表示边界/部分语义已经验证但仍有
 > 明确缺口；任何候选解释必须标注为候选或已证伪，不得写成事实。
 >
-> **当前严格进度：6512 / 6656B COMPLETE（97.8%），144B PARTIAL（2.2%），UNKNOWN=0。**
+> **当前严格进度：6513 / 6656B COMPLETE（97.9%），143B PARTIAL（2.1%），UNKNOWN=0。**
 >
 > 文末“验证历程附录”用于保留详细推导和纠错记录；若附录中的历史阶段判断与本文前半
 > canonical 账本冲突，**一律以前半当前账本为准**。
@@ -207,7 +207,7 @@ COMPLETE**。这里 COMPLETE 不等于“reader 总返回0”，也不宣称已�
 exact manufacturing executable；它只表示该 byte 的已知 producer 值、两类 wire/reader
 表示关系、repair 边界和 negative semantic consumer 已闭合。该阶段当时的严格统计为
 6000 COMPLETE / 656 PARTIAL；随后 LBA3 preserve-only 生命周期闭合，当前总计以第3节的
-6512 COMPLETE / 144 PARTIAL 为准。
+6513 COMPLETE / 143 PARTIAL 为准。
 
 原采集目录的 `dec/LBA04_dec.bin` 虽显示 flags=0，但不能作为独立反证：当时的
 `analyze/scripts/read_metadata.py::lba4_decode` 对每一个 raw-zero byte 强制把解码值
@@ -627,7 +627,7 @@ post-XOR 写回 `+0x45/+0x46`。历史 raw-zero 实盘仅作为兼容读取 prof
 | LBA1 | 512 | 0 | 0 | 100.0% |
 | LBA2 | 512 | 0 | 0 | 100.0% |
 | LBA3 | 512 | 0 | 0 | 100.0% |
-| LBA4 | 511 | 1 | 0 | 99.8% |
+| LBA4 | 512 | 0 | 0 | 100.0% |
 | LBA5 | 512 | 0 | 0 | 100.0% |
 | LBA6 | 497 | 15 | 0 | 97.1% |
 | LBA7 | 512 | 0 | 0 | 100.0% |
@@ -640,8 +640,8 @@ post-XOR 写回 `+0x45/+0x46`。历史 raw-zero 实盘仅作为兼容读取 prof
 
 当前总计：
 
-- **COMPLETE：6512B / 6656B = 97.8%**
-- **PARTIAL：144B / 6656B = 2.2%**
+- **COMPLETE：6513B / 6656B = 97.9%**
+- **PARTIAL：143B / 6656B = 2.1%**
 - **UNKNOWN：0B / 6656B = 0.0%**
 
 LBA11 已完整闭合为 512B COMPLETE。此前卡住的后半 252B 不是“某型号盘偶尔使用
@@ -712,7 +712,7 @@ DWARF 中恢复出的原始声明文件/行号与本地函数地址：
 | LBA4 | 0x039–0x03C | COMPLETE | fixed restore-node `NewLabFlag = LLGB` | current Windows machine code在 node 清零后显式写 `LLGB`；Linux DWARF恢复正式字段与偏移 | Windows/Linux reader解码并结构性返回完整node，不对该字段做独立行为判断 | committed original fixtures 全量门禁 + strict 22/22 均为 `LLGB`，跨 current/legacy profile 一致 | fixed writer metadata + structural-preserve/semantic-ignore + real-device profile闭合，4B COMPLETE |
 | LBA4 | 0x03D–0x040 | COMPLETE | fixed restore-node `Version = 1` | current Windows writer显式写 DWORD 1 到 restore-node Version；Linux ABI给出字段边界 | Windows/Linux reader把 Version 随完整node返回，当前没有值相关准入/行为分支 | committed original fixtures 全量门禁 + strict 22/22 均为1 | 当前已知协议代际中的固定 restore-node version metadata 生命周期闭合，4B COMPLETE；未来新版本非1时应按新profile处理而非强制改写 |
 | LBA4 | 0x041–0x044 | COMPLETE | fixed restore-node sector tuple `08 04 0C 01` | current Windows writer在 node 构造阶段显式写四个 sector BYTE `08 04 0C 01` | Windows/Linux reader随完整restore node结构返回这些BYTE，但当前没有独立值相关分支 | committed original fixtures 全量门禁 + strict 22/22 均为 `08 04 0C 01`，跨 current/legacy profile一致 | producer、结构边界、negative semantic consumer 与真实盘全部闭合，4B COMPLETE；按 fixed compatibility metadata 建模 |
-| LBA4 | 0x045 | PARTIAL | `bDataToServer` representation-dependent server flag | current Windows/Linux writer均在full rolling后把 node+0x2D post-XOR覆盖到物理+0x45；historical v19.11.4.1 `fcn.10006090@0x10006249` 也执行同一覆盖，且其 SAFE6 node 可携带 legacy second/HSerial identity，因此身份形态不能判定表示。更早加密实盘又观察到 ordinary-rolling-compatible wire | Windows/Linux ReadSector4 统一 rolling 并结构性返回该byte，不补偿 post-XOR；上层 ActiveNormalUDev/GetUpLoadInformation/usbtoolbusmanage 没有已知值相关分支 | 加密金标同时存在 wire-nonzero→reader `00/0B` 与 post-XOR-compatible profile；真实免密 SanDisk 则为 wire=`00`、official reader=`D4` | exact historical rolling producer、真实免密 exact producer provenance 与最终业务 consumer仍缺；1B继续PARTIAL，禁止按 HSerial 身份猜表示 |
+| LBA4 | 0x045 | COMPLETE | caller-owned `bDataToServer` compatibility byte；wire 表示随 writer family 变化 | current Windows/Linux 与 historical v19.11.4.1 `fcn.10006090` 都把完整0x2F node作为输入；v19 writer 在 full rolling 后执行 `node+0x2D -> wire+0x45` post-XOR store。扩展后的 `probe_lba4_v19_writer.py --node-flags 0b00` 原生执行 official machine code，除 `+0x45: 00->0B` 外 512B 无任何变化，证明该 BYTE 是透明 caller-owned 输入而非 writer 内部派生 | Windows/Linux ReadSector4 rolling 后结构性返回完整node；2021 repair reader同样完整复制node且只校验OnlyIdXor8。ActiveNormalUDev/RestoreRegsiterUsb只消费OnllyID2Nd，GetUpLoadInformation虽携带node但本DLL没有 `+0x2D` 值相关读取；Linux DWARF中该node只进入BuildSector4/ReadSector4。因此已覆盖 consumer 对该BYTE是 structural-preserve / semantic-ignore | strict Aigo U335 `onlyid=1987718388` 的 physical flags=`64 7A`；按正式rolling精确得到 logical node flags=`0B 00`，其中对应key byte为 `6F/7A`，即 `64^6F=0B`、`7A^7A=00`。同盘免密转换前后LBA4 512/512不变，排除转换工具生成该值；其它 strict/post-XOR profile 与 authentic SanDisk 又覆盖 zero/nonzero reader view | 字段生命周期按 caller-owned compatibility metadata 闭合：逻辑值由上游调用者选择，writer只透明序列化，reader/restore无隐藏派生或值相关语义。更早 ordinary-rolling manufacturing EXE 未取得只影响 wire-representation provenance，不再构成本1B盘面语义缺口；不得把 physical wire byte直接当逻辑flag |
 | LBA4 | 0x046 | COMPLETE | `bConnetServer` producer-side dormant-zero compatibility flag；reader view 随 wire representation 可非零 | current Windows/Linux 与 v19.11.4.1 writer都在rolling后post-XOR覆盖 node+0x2E；这些 SAFE6 node constructor 均 zero-init 且无后续 flag store，所以 direct producer-side=0。新增 `scripts/protocol/probe_lba4_v19_writer.py` 保留真实免密 SanDisk 的 second=`0x4A32BA39`/nonzero HSerial，只将 node flags 设为`00 00`，memory-backed 原生执行 v19 `fcn.10006090` 后唯一一次 LBA4 write 与真实扇区512/512完全一致，SHA-256=`c26628566108031f439f999a46858476414ec8e7d1030a8293c9df0c463ad5d8` | Windows/Linux ReadSector4统一rolling并返回该byte而不修正；current reader probe 对真实免密盘得到`D9`，证明 reader view 不是 producer value。2021 historical `UDiskLabelRepair::fcn.10006DA0` 独立执行同款rolling、完整复制0x2F node且只校验OnlyIdXor8；其 repair/backup 路径整块复制9扇区，不单独修改flag；ActiveNormalUDev/GetUpLoadInformation等已审上层无该byte值相关业务分支 | strict encrypted historical rolling-form样本的正式 reader view 本byte为0；authentic no-password gold SHA-256 `d6a935...` 为 physical wire=`00`、reader=`D9`，且 v19 official writer 以 producer node byte=0 精确重建整扇 | 生命周期按“producer-side zero + representation-dependent reader transform”闭合；COMPLETE 不意味着 reader 必为0，也不声称 v19 是该物理盘当年的 exact manufacturing EXE。exact provenance 仍属于 HSerial upstream 等其它字段的调查范围，不再构成本1B语义缺口 |
 | LBA4 | 0x047–0x1FB | COMPLETE | **unowned backing / representation carrier**；raw-preserve 与 rolling-transformed 两种 wire 表示 | Windows current `sub_10014550` 与 Linux `BuildSector4@diskfile.cpp:741` 都只拥有0x2F restore node。non-null node 分支随后把 rolling XOR 覆盖到 `+0x18..+0x1FF`，因此对这437B只是**可逆变换既有 backing**；Windows `arg0==NULL` 分支则完全跳过 node copy/rolling，对该区逐字节 preserve。两端都没有独立业务字段 store。隔离 Unicorn 直接执行 official Windows writer：预填437B=`0xA5` 时，full 分支 raw bytes改变但独立 rolling decode后437/437恢复 `0xA5`；NULL 分支437/437保持原始 `0xA5` | Windows `ReadSector4/sub_10015090` 与 Linux `ReadSector4@diskfile.cpp:957` 都会为 restore-node 识别需要而滚动处理整段，但最终只返回 `decoded+0x18` 的0x2F node并校验 `OnlyIdXor8`，不暴露/解释 `+0x47..+0x1FB`。同一 official Windows reader 对上述 nonzero-full fixture 动态执行成功，返回 main onlyid、LLGB、Version=1，而437B不进入输出 | strict 22份仍保留18份 raw-zero与4份 rolling-zero物理表示；新增 first-party virtual writer fixtures 又证明 backing 可合法为任意非零值并在 full/null 两分支分别“transform/preserve”。CI `official_virtual_lba4_backing_is_unowned_and_representation_only` 锁定非零正例 | 437B 的含义不是“应该为零但最初 producer 未找到”，而是**没有业务 payload 的 caller/existing backing**。其完整生命周期已由 preserve/可逆transform writer、negative semantic consumer、real双表示和任意非零 first-party 正例闭合；与 LBA5 opaque-preserve 区采用同一 COMPLETE 口径。历史 raw-zero 最初来源不再是语义 blocker，未来未知非零 backing 必须保留/变换而不得清洗 |
 | LBA4 | 0x1FC–0x1FF | COMPLETE | trailing LLGB | current writer 继续 rolling key schedule 写 LLGB | reader 作为尾锚点校验 | 22盘可验证 | 完成 |
@@ -2708,8 +2708,14 @@ K0=`0xBFED`，两个 flag 位置的 rolling key byte 分别=`D4/D9`，因此 wir
 
 继续把两个 BYTE 拆开后：
 
-- `bDataToServer @ +0x45` 的 legacy official-reader 逻辑视图确有非零 `0B` profile，
-  旧 producer 和最终业务 consumer仍缺，因此 **1B 继续 PARTIAL**；
+- `bDataToServer @ +0x45` 的 legacy official-reader 逻辑视图确有非零 `0B` profile。
+  本轮按主文档 caller-owned 门槛补齐：v19 official writer 原生注入 `node+0x2D=0B`
+  后只改变 wire `+0x45` 一个字节，证明 writer 是透明序列化边界；strict Aigo
+  `onlyid=1987718388` 的 wire `64 7A` 又按正式 rolling 精确还原为 logical
+  `0B 00`（key bytes=`6F/7A`）。结合 Windows/Linux/2021 reader 的完整node
+  structural-preserve 以及 restore/upload 路径无该BYTE值相关分支，本字节按
+  **caller-owned compatibility metadata** 升为 COMPLETE。更早 ordinary-rolling
+  manufacturing EXE 仍未知，但只影响 representation provenance；
 - `bConnetServer @ +0x46`：current Windows/Linux 与 v19.11.4.1 SAFE6 node constructor
   都由 zero-init 保持该 byte=0；historical rolling-form encrypted originals 的正式 reader
   view 同样为0。更关键的是 `scripts/protocol/probe_lba4_v19_writer.py` 保留真实免密
