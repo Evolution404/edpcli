@@ -25,7 +25,15 @@ def sha256(data: bytes) -> str:
 def parse_manifest(path: Path) -> list[dict[str, str]]:
     lines = [line for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
     header = lines[0].split("\t")
-    return [dict(zip(header, line.split("\t"), strict=True)) for line in lines[1:]]
+    rows: list[dict[str, str]] = []
+    for line_number, line in enumerate(lines[1:], start=2):
+        values = line.split("\t")
+        if len(values) != len(header):
+            raise ValueError(
+                f"{path}:{line_number}: expected {len(header)} columns, got {len(values)}"
+            )
+        rows.append(dict(zip(header, values)))
+    return rows
 
 
 def lba(image: bytes, index: int) -> bytes:
