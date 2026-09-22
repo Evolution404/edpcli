@@ -30,6 +30,9 @@ pub(crate) fn resolve_inspect_file(backup_dir: &Path, target: &str) -> Result<Pa
     if !path.is_file() {
         return Err(format!("不是普通文件: {}", path.display()));
     }
+    if path.extension().and_then(|ext| ext.to_str()) != Some("edpb") {
+        return Err(format!("只接受 .edpb 备份: {}", path.display()));
+    }
     Ok(path)
 }
 
@@ -220,31 +223,53 @@ fn inspect_backup_flow(opts: InspectOpts) -> i32 {
             return EXIT_BACKUP;
         }
     };
-    let parsed_meta = path
-        .file_name()
-        .and_then(|n| n.to_str())
-        .and_then(diskio::parse_backup_name);
+    let verified = match crate::edpb::verify_file(&path) {
+        Ok(container) => container,
+        Err(message) => {
+            eprintln!(
+                "{}",
+                crate::ui::red(&format!(
+                    "错误: EDPB 校验失败 {}: {message}",
+                    path.display()
+                ))
+            );
+            return EXIT_BACKUP;
+        }
+    };
     let source_label = path.display().to_string();
-    let mut meta = parsed_meta
-        .as_ref()
-        .map(InspectMeta::from_backup_meta)
-        .unwrap_or_default();
+    let manifest = &verified.manifest;
+    let mut meta = InspectMeta {
+        device_id: Some(manifest.device.device_id.clone()),
+        vid: Some(manifest.device.vid.clone()),
+        pid: Some(manifest.device.pid.clone()),
+        size_bytes: manifest.geometry.capacity_bytes,
+        onlyid: manifest.device.onlyid.clone(),
+    };
     if let Some(did) = &opts.device_id {
         meta.device_id = Some(did.clone());
     }
-    let path_s = path.to_string_lossy().into_owned();
-    let mut dev = match FileDev::open_rdonly(&path_s) {
-        Ok(dev) => dev,
-        Err(e) => {
+    let data = match crate::edpb::read_raw_protocol(&path) {
+        Ok(data) => data,
+        Err(message) => {
             eprintln!(
                 "{}",
-                crate::ui::red(&format!("错误: 无法打开 {}: {e}", path.display()))
+                crate::ui::red(&format!("错误: 读取 EDPB LBA0-12 失败: {message}"))
             );
-            return EXIT_IO;
+            return EXIT_BACKUP;
         }
     };
-    let mut reader = SectorReadCache::new(&mut dev);
-    render_inspect_source(&source_label, &meta, &opts, |lba| reader.read_sector(lba))
+    render_inspect_source(&source_label, &meta, &opts, |lba| {
+        let start = lba as usize * SECTOR;
+        let end = start + SECTOR;
+        data.get(start..end)
+            .map(|bytes| bytes.to_vec())
+            .ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::UnexpectedEof,
+                    format!("EDPB Core 不含 LBA{lba}"),
+                )
+            })
+    })
 }
 
 fn inspect_disk_flow(runner: &dyn CmdRunner, mut opts: InspectOpts) -> i32 {

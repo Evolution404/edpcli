@@ -143,12 +143,12 @@ pub fn verify_backup_exact(root: &Path, path: &Path) -> Result<(), String> {
         ));
     }
     let entry = crate::diskio::scan_backup_file(&canonical_path)
-        .ok_or_else(|| format!("目标不是可读取的 .bin 备份: {}", canonical_path.display()))?;
+        .ok_or_else(|| format!("目标不是可读取的 .edpb 备份: {}", canonical_path.display()))?;
     if crate::backup_catalog::is_healthy(&entry) {
         Ok(())
     } else {
         Err(format!(
-            "备份校验失败: {}（大小或 SHA-256 异常）",
+            "EDPB 校验失败: {}（容器结构、Manifest 或 Artifact 完整性异常）",
             canonical_path.display()
         ))
     }

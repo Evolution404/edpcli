@@ -9,7 +9,7 @@ use std::path::Path;
 
 use crate::common::SECTOR;
 use crate::crypto::crc32_bare;
-use crate::diskio::{self, BackupEntry, FileDev, SectorDev};
+use crate::diskio::{self, BackupEntry};
 use crate::inspect::{self, InspectMeta, SectorView};
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -413,7 +413,18 @@ pub fn render_with_source(summary: &MetaInfoSummary, source: Option<&str>) -> St
 }
 
 pub fn summarize_backup(path: &Path, meta: &InspectMeta) -> io::Result<MetaInfoSummary> {
-    let path = path.to_string_lossy().into_owned();
-    let mut dev = FileDev::open_rdonly(&path)?;
-    summarize(meta, |lba| dev.read_sector(lba))
+    let data = crate::edpb::read_raw_protocol(path)
+        .map_err(|message| io::Error::new(io::ErrorKind::InvalidData, message))?;
+    summarize(meta, |lba| {
+        let start = lba as usize * SECTOR;
+        let end = start + SECTOR;
+        data.get(start..end)
+            .map(|bytes| bytes.to_vec())
+            .ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::UnexpectedEof,
+                    format!("EDPB Core 不含 LBA{lba}"),
+                )
+            })
+    })
 }

@@ -63,16 +63,28 @@ fn backup_flow(opts: InfoOpts) -> i32 {
             return EXIT_BACKUP;
         }
     };
-    let parsed_meta = path
-        .file_name()
-        .and_then(|name| name.to_str())
-        .and_then(diskio::parse_backup_name);
+    let verified = match crate::edpb::verify_file(&path) {
+        Ok(container) => container,
+        Err(message) => {
+            eprintln!(
+                "{}",
+                crate::ui::red(&format!(
+                    "错误: EDPB 校验失败 {}: {message}",
+                    path.display()
+                ))
+            );
+            return EXIT_BACKUP;
+        }
+    };
     let source_label = path.display().to_string();
-
-    let mut inspect_meta = parsed_meta
-        .as_ref()
-        .map(InspectMeta::from_backup_meta)
-        .unwrap_or_default();
+    let manifest = &verified.manifest;
+    let mut inspect_meta = InspectMeta {
+        device_id: Some(manifest.device.device_id.clone()),
+        vid: Some(manifest.device.vid.clone()),
+        pid: Some(manifest.device.pid.clone()),
+        size_bytes: manifest.geometry.capacity_bytes,
+        onlyid: manifest.device.onlyid.clone(),
+    };
     if let Some(device_id) = opts.device_id {
         inspect_meta.device_id = Some(device_id);
     }

@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 
 use crate::backup_catalog;
 use crate::cli::Prompter;
-use crate::common::{EXIT_BACKUP, EXIT_CANCELLED, EXIT_OK, METADATA_IMAGE_LEN, SECTOR};
+use crate::common::{EXIT_BACKUP, EXIT_CANCELLED, EXIT_OK, SECTOR};
 use crate::diskio::{self, BackupEntry, BackupMeta, Sha256Status};
 use crate::metainfo;
 
@@ -54,12 +54,12 @@ fn backup_kind(entry: &BackupEntry) -> &'static str {
 
 fn backup_health(entry: &BackupEntry) -> String {
     if !entry.size_ok {
-        return crate::ui::red(&format!("大小 ✗ (应为 {}B)", METADATA_IMAGE_LEN));
+        return crate::ui::red("EDPB ✗ 核心数据异常");
     }
     match entry.sha256_ok {
-        Sha256Status::Ok => crate::ui::green("SHA-256 ✓"),
-        Sha256Status::Mismatch => crate::ui::red("SHA-256 ✗ 损坏"),
-        Sha256Status::NoSidecar => crate::ui::yellow("(缺 .sha256)"),
+        Sha256Status::Ok => crate::ui::green("EDPB ✓"),
+        Sha256Status::Mismatch => crate::ui::red("EDPB ✗ 损坏"),
+        Sha256Status::NoSidecar => crate::ui::red("EDPB ✗ 未校验"),
     }
 }
 
@@ -231,7 +231,7 @@ pub fn backup_verify(backup_dir: &Path, target: Option<&str>) -> i32 {
     };
 
     if selected.is_empty() {
-        println!("没有可校验的 .bin 备份。");
+        println!("没有可校验的 .edpb 备份。");
         return EXIT_OK;
     }
     let mut bad = 0usize;

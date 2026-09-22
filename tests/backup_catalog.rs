@@ -4,37 +4,44 @@ use std::fs;
 
 use common::*;
 use edpcli::backup_catalog::BackupCatalog;
+use edpcli::edpb::{self, CoreCapture};
 use edpcli::metainfo::backup_ownership;
-use edpcli::sha256::sha256_hex;
+
+fn write_edpb(path: &std::path::Path, data: &[u8], snapshot_id: &str) {
+    let capture = CoreCapture {
+        snapshot_id: snapshot_id.into(),
+        created_epoch: 1_789_000_000,
+        disk_number: Some(6),
+        vid: "0dd8".into(),
+        pid: "2005".into(),
+        device_id: "disk&ven_netac&prod_onlydisk".into(),
+        onlyid: Some("1402259934".into()),
+        total_sectors: Some(122_880_000),
+        logical_sector_size: 512,
+        edpcli_version: env!("CARGO_PKG_VERSION").into(),
+        device_state: "encrypted".into(),
+        lba0_12: data,
+    };
+    edpb::write_core_backup(path, &capture).unwrap();
+}
 
 fn copied_catalog() -> Option<(TmpDir, BackupCatalog)> {
-    let Some(src) = fixture_bin("netac") else {
+    let Some(data) = load_disk_image("netac") else {
         eprintln!("跳过: 真实备份不可用");
         return None;
     };
     let tmp = TmpDir::new("backup_catalog");
-    let name = src.file_name().unwrap();
-    let first = tmp.0.join(name);
-    fs::copy(&src, &first).unwrap();
-    let data = fs::read(&first).unwrap();
-    fs::write(
-        format!("{}.sha256", first.display()),
-        format!("{}\n", sha256_hex(&data)),
-    )
-    .unwrap();
+    let first = tmp.0.join(
+        "disk6_122880000_vid0dd8_pid2005_disk&ven_netac&prod_onlydisk_onlyid1402259934_20260910_172300.edpb",
+    );
+    write_edpb(&first, &data, "catalog-first");
 
     // 同一 onlyid 制造第二份，并故意让 mtime 与文件名时间相反。
-    // 备份真实创建时间来自文件名；复制/touch 不应改变 [1][2] 编号。
-    let second_name = name
-        .to_string_lossy()
-        .replace("_20260910_172300.bin", "_20260911_172300.bin");
-    let second = tmp.0.join(second_name);
-    fs::copy(&first, &second).unwrap();
-    fs::write(
-        format!("{}.sha256", second.display()),
-        format!("{}\n", sha256_hex(&data)),
-    )
-    .unwrap();
+    // 列表创建时间排序来自文件名；复制/touch 不应改变 [1][2] 编号。
+    let second = tmp.0.join(
+        "disk6_122880000_vid0dd8_pid2005_disk&ven_netac&prod_onlydisk_onlyid1402259934_20260911_172300.edpb",
+    );
+    write_edpb(&second, &data, "catalog-second");
     set_mtime(&first, 1_789_100_000); // 文件名较旧，但 mtime 较新
     set_mtime(&second, 1_789_000_000); // 文件名较新，但 mtime 较旧
 
@@ -71,7 +78,7 @@ fn target_resolution_is_confined_to_backup_root() {
     let entry = catalog.resolve_target(&name).unwrap();
     assert!(entry.path.starts_with(&tmp.0));
 
-    let outside = tmp.0.parent().unwrap().join("outside.bin");
+    let outside = tmp.0.parent().unwrap().join("outside.edpb");
     fs::write(&outside, vec![0u8; 16]).unwrap();
     assert!(catalog.resolve_target(outside.to_str().unwrap()).is_err());
 }
@@ -85,7 +92,7 @@ fn ownership_uses_lba8_cached_during_catalog_scan() {
     assert!(entry.lba8.is_some());
 
     // 扫描完成后移除源文件；归属信息仍应从 BackupEntry 的内存 LBA8 得到，
-    // 证明 backup list 不会为了 Dept/User 再次打开同一个 .bin。
+    // 证明 backup list 不会为了 Dept/User 再次打开同一个 .edpb。
     fs::remove_file(&entry.path).unwrap();
     let ownership = backup_ownership(entry).expect("缓存 LBA8 应可解析归属信息");
     assert!(ownership

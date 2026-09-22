@@ -41,15 +41,18 @@ fn analyze_image(
 }
 
 pub fn load_backup_inspect(path: &Path) -> Result<InspectWorkspace, String> {
-    let data = std::fs::read(path)
-        .map_err(|error| format!("错误: 无法读取备份 {}: {error}", path.display()))?;
-    let meta = path
-        .file_name()
-        .and_then(|name| name.to_str())
-        .and_then(diskio::parse_backup_name)
-        .as_ref()
-        .map(InspectMeta::from_backup_meta)
-        .unwrap_or_default();
+    let verified = crate::edpb::verify_file(path)
+        .map_err(|error| format!("错误: EDPB 校验失败 {}: {error}", path.display()))?;
+    let data = crate::edpb::read_raw_protocol(path)
+        .map_err(|error| format!("错误: 读取 EDPB LBA0-12 失败 {}: {error}", path.display()))?;
+    let manifest = &verified.manifest;
+    let meta = InspectMeta {
+        device_id: Some(manifest.device.device_id.clone()),
+        vid: Some(manifest.device.vid.clone()),
+        pid: Some(manifest.device.pid.clone()),
+        size_bytes: manifest.geometry.capacity_bytes,
+        onlyid: manifest.device.onlyid.clone(),
+    };
     analyze_image(path.display().to_string(), &data, meta)
 }
 

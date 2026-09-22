@@ -42,29 +42,6 @@ fn validate_backup_device_id(device_id: &str) -> EdpCliResult<()> {
     }
 }
 
-fn write_new_synced(path: &Path, data: &[u8], label: &str) -> EdpCliResult<()> {
-    let mut file = OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(path)
-        .map_err(|e| {
-            if e.kind() == io::ErrorKind::AlreadyExists {
-                EdpCliError::new(
-                    EXIT_IO,
-                    format!("错误: {}已存在，拒绝覆盖: {}", label, path.display()),
-                )
-            } else {
-                io_err(e)
-            }
-        })?;
-    if let Err(e) = file.write_all(data).and_then(|_| file.sync_all()) {
-        drop(file);
-        let _ = fs::remove_file(path);
-        return Err(io_err(e));
-    }
-    Ok(())
-}
-
 fn sync_dir(dir: &Path) -> EdpCliResult<()> {
     crate::platform::sync_directory(dir).map_err(io_err)
 }
@@ -577,24 +554,17 @@ pub fn lba4_tag16_from(raw: &[u8]) -> Option<[u8; 16]> {
     raw.get(..16)?.try_into().ok()
 }
 
-fn read_bytes_at(path: &Path, offset: u64, n: usize) -> io::Result<Vec<u8>> {
-    let mut f = File::open(path)?;
-    f.seek(SeekFrom::Start(offset))?;
-    let mut buf = vec![0u8; n];
-    f.read_exact(&mut buf)?;
-    Ok(buf)
-}
-
 /// 直接从备份快照的 LBA4 读取 labelOnlyId，不依赖当前插入的真盘。
 pub fn backup_label_id(path: &Path) -> Option<String> {
-    read_bytes_at(path, 4 * SECTOR as u64, 32)
-        .ok()
-        .and_then(|b| lba4_label_id_from(&b))
+    crate::edpb::read_raw_protocol(path).ok().and_then(|data| {
+        data.get(4 * SECTOR..5 * SECTOR)
+            .and_then(lba4_label_id_from)
+    })
 }
 
 /// 备份文件是否为免密状态快照(按内容检测, 与文件名无关)。
 pub fn backup_is_nopwd(path: &Path, device_id: &str) -> bool {
-    let Ok(data) = fs::read(path) else {
+    let Ok(data) = crate::edpb::read_raw_protocol(path) else {
         return false;
     };
     image_is_nopwd(&data, device_id)
@@ -613,11 +583,11 @@ pub fn image_is_nopwd(data: &[u8], device_id: &str) -> bool {
 }
 
 pub fn ts_suffix_pos(name: &str) -> Option<usize> {
-    // 尾部 `_\d{8}_\d{6}.bin` 的 '_' 位置
-    if !name.ends_with(".bin") {
+    // 新备份只认 .edpb；旧 .bin 不进入正式运行时解析路径。
+    if !name.ends_with(".edpb") {
         return None;
     }
-    let stem = &name[..name.len() - 4];
+    let stem = &name[..name.len() - 5];
     let b = stem.as_bytes();
     if b.len() < 16 {
         return None;
@@ -639,7 +609,7 @@ pub fn ts_suffix_pos(name: &str) -> Option<usize> {
 pub fn backup_name_time_key(path: &Path) -> Option<u64> {
     let name = path.file_name()?.to_str()?;
     let pos = ts_suffix_pos(name)?;
-    let end = name.len().checked_sub(4)?;
+    let end = name.len().checked_sub(5)?;
     let stamp = name.get(pos + 1..end)?;
     let mut digits = String::with_capacity(14);
     for ch in stamp.bytes() {
@@ -660,7 +630,7 @@ pub fn backup_name_time_key(path: &Path) -> Option<u64> {
 pub fn backup_name_time_human(path: &Path) -> Option<String> {
     let name = path.file_name()?.to_str()?;
     let pos = ts_suffix_pos(name)?;
-    let end = name.len().checked_sub(4)?;
+    let end = name.len().checked_sub(5)?;
     let stamp = name.get(pos + 1..end)?;
     if stamp.len() != 15 {
         return None;
@@ -835,14 +805,6 @@ pub fn read_backup_sha256(path: &Path) -> io::Result<Option<String>> {
     Ok(Some(expected.to_ascii_lowercase()))
 }
 
-fn sha256_status(path: &Path, digest: &str) -> Sha256Status {
-    match read_backup_sha256(path) {
-        Ok(None) => Sha256Status::NoSidecar,
-        Ok(Some(expected)) if expected == digest => Sha256Status::Ok,
-        Ok(Some(_)) | Err(_) => Sha256Status::Mismatch,
-    }
-}
-
 /// 扫描备份目录并给出跨盘管理所需的完整元数据。
 ///
 /// 扫描必须是只读操作：文件名仅用于解析设备信息；只要备份内容可读且包含完整
@@ -868,35 +830,42 @@ pub fn scan_backup_dir(dir: &Path) -> Vec<BackupEntry> {
 /// Load and validate one exact backup without hashing every sibling in its directory.
 pub fn scan_backup_file(path: &Path) -> Option<BackupEntry> {
     let file_type = fs::symlink_metadata(path).ok()?.file_type();
-    if !file_type.is_file() || path.extension().and_then(|e| e.to_str()) != Some("bin") {
+    if !file_type.is_file() || path.extension().and_then(|e| e.to_str()) != Some("edpb") {
         return None;
     }
-    let name = path
-        .file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or_default();
-    let mut meta = parse_backup_name(name);
-    let data = fs::read(path).ok();
-    let lba8 = data.as_ref().and_then(|d| {
-        d.get(8 * SECTOR..9 * SECTOR)
-            .and_then(|raw| raw.try_into().ok())
-    });
-    let content_sha256 = data.as_ref().map(|d| sha256_hex(d));
-    if let (Some(m), Some(d)) = (meta.as_mut(), data.as_ref()) {
-        if d.len() >= 5 * SECTOR {
-            m.onlyid = lba4_label_id_from(&d[4 * SECTOR..5 * SECTOR]);
-        }
-    }
-    let size_ok = data
+    let file_data = fs::read(path).ok();
+    let content_sha256 = file_data.as_ref().map(|data| sha256_hex(data));
+    let verified = crate::edpb::verify_file(path).ok();
+    let raw = verified
         .as_ref()
-        .map(|d| d.len() == crate::common::METADATA_IMAGE_LEN)
+        .and_then(|_| crate::edpb::read_raw_protocol(path).ok());
+    let meta = verified.as_ref().map(|container| {
+        let manifest = &container.manifest;
+        BackupMeta {
+            disk: manifest.observation.disk_number.unwrap_or(0),
+            secs: manifest.geometry.total_sectors,
+            vid: manifest.device.vid.clone(),
+            pid: manifest.device.pid.clone(),
+            device_id: manifest.device.device_id.clone(),
+            onlyid: manifest.device.onlyid.clone(),
+            tagged_nopwd: manifest.snapshot.device_state == "passwordless",
+        }
+    });
+    let lba8 = raw.as_ref().and_then(|data| {
+        data.get(8 * SECTOR..9 * SECTOR)
+            .and_then(|bytes| bytes.try_into().ok())
+    });
+    let size_ok = raw
+        .as_ref()
+        .map(|data| data.len() == crate::common::METADATA_IMAGE_LEN)
         .unwrap_or(false);
-    let sha256_ok = content_sha256
-        .as_deref()
-        .map(|digest| sha256_status(path, digest))
-        .unwrap_or(Sha256Status::Mismatch);
-    let is_nopwd = match (&meta, &data) {
-        (Some(m), Some(d)) => image_is_nopwd(d, &m.device_id),
+    let sha256_ok = if verified.is_some() && size_ok {
+        Sha256Status::Ok
+    } else {
+        Sha256Status::Mismatch
+    };
+    let is_nopwd = match (&meta, &raw) {
+        (Some(meta), Some(data)) => image_is_nopwd(data, &meta.device_id),
         _ => false,
     };
     Some(BackupEntry {
@@ -927,11 +896,9 @@ pub fn scan_backup_names(dir: &Path) -> Vec<PathBuf> {
                 return None;
             }
             let path = entry.path();
-            if path.extension().and_then(|ext| ext.to_str()) != Some("bin") {
+            if path.extension().and_then(|ext| ext.to_str()) != Some("edpb") {
                 return None;
             }
-            let name = path.file_name()?.to_str()?;
-            parse_backup_name(name)?;
             Some(path)
         })
         .collect();
@@ -989,8 +956,7 @@ pub fn prune_candidates(entries: &[BackupEntry], keep: usize) -> Vec<PathBuf> {
     out
 }
 
-/// 备份 LBA0-12 到备份目录, 附 .sha256 sidecar。
-/// 返回 (备份路径, 是否免密状态快照); `还原:` 提示由 CLI 打印。
+/// 创建自包含 EDPB Core 备份。正式运行时不生成 .bin 或 .sha256 sidecar。
 pub fn create_backup(
     facts: &DiskFacts,
     data: &[u8],
@@ -1010,31 +976,44 @@ pub fn create_backup(
         ));
     }
     fs::create_dir_all(bak_dir).map_err(io_err)?;
-    let ts = clock.fmt_ts(clock.now_epoch());
+    let epoch = clock.now_epoch();
+    let ts = clock.fmt_ts(epoch);
     let secs = facts
         .total_sectors
         .map(|s| s.to_string())
         .unwrap_or_else(|| "unknown".into());
-    let onlyid_part = lba4_label_id_from(&data[4 * SECTOR..5 * SECTOR])
+    let onlyid = lba4_label_id_from(&data[4 * SECTOR..5 * SECTOR]);
+    let onlyid_part = onlyid
         .as_ref()
-        .map(|o| format!("_onlyid{}", o))
+        .map(|value| format!("_onlyid{}", value))
         .unwrap_or_default();
-    // 免密状态快照打 _nopwd 标: 区别于加密原盘备份, 防止还原时拿错
     let is_nopwd = image_is_nopwd(data, device_id);
     let state_part = if is_nopwd { "_nopwd" } else { "" };
     let base = format!(
         "disk{}_{}_vid{}_pid{}_{}{}{}_{}",
         facts.disk, secs, facts.vid, facts.pid, device_id, onlyid_part, state_part, ts
     );
-    let path = bak_dir.join(format!("{}.bin", base));
-    write_new_synced(&path, data, "备份文件")?;
-    let sha256_path = sha256_sidecar_path(&path);
-    let sha256_data = format!("{}\n", sha256_hex(data));
-    if let Err(e) = write_new_synced(&sha256_path, sha256_data.as_bytes(), "备份校验文件") {
-        let _ = fs::remove_file(&path);
-        return Err(e);
-    }
-    // 两个目录项也持久化后才允许调用方继续进入真实盘写入阶段。
+    let path = bak_dir.join(format!("{}.edpb", base));
+    let capture = crate::edpb::CoreCapture {
+        snapshot_id: format!("{}-{}", onlyid.as_deref().unwrap_or(device_id), ts),
+        created_epoch: epoch,
+        disk_number: Some(facts.disk),
+        vid: facts.vid.clone(),
+        pid: facts.pid.clone(),
+        device_id: device_id.to_string(),
+        onlyid,
+        total_sectors: facts.total_sectors,
+        logical_sector_size: SECTOR as u32,
+        edpcli_version: env!("CARGO_PKG_VERSION").to_string(),
+        device_state: if is_nopwd {
+            "passwordless".into()
+        } else {
+            "encrypted".into()
+        },
+        lba0_12: data,
+    };
+    crate::edpb::write_core_backup(&path, &capture)
+        .map_err(|error| EdpCliError::new(EXIT_BACKUP, format!("错误: {error}")))?;
     sync_dir(bak_dir)?;
     Ok((path, is_nopwd))
 }
@@ -1081,85 +1060,49 @@ pub fn mtime_epoch(path: &Path) -> i64 {
 }
 
 /// 匹配备份目录中本盘备份, 新→旧排序。
-/// 注意: device_id/总扇区/VID/PID 均非盘唯一(同型号盘全同), 最终以
-/// LBA4 labelOnlyId(每盘随机唯一, 明文) 终验剔除他盘备份。
-/// my_tag 为本盘 LBA4 前 16 字节; None/全零 跳过终验。
-/// 兼容旧命名(device_id 中 & 被替换为 _)。
+/// 身份来自 EDPB manifest；非零 LBA4 16B 标签仍作为同盘终验。
 pub fn find_backups(
     bak_dir: &Path,
     facts: &DiskFacts,
     device_id: Option<&str>,
     my_tag: Option<[u8; 16]>,
 ) -> Vec<PathBuf> {
-    if !bak_dir.is_dir() {
-        return vec![];
-    }
-    let Ok(entries) = fs::read_dir(bak_dir) else {
-        return vec![];
-    };
-    let files: Vec<(String, PathBuf)> = entries
-        .flatten()
-        .filter_map(|entry| {
-            let file_type = entry.file_type().ok()?;
-            if !file_type.is_file() {
-                return None;
+    let tag = my_tag.filter(|value| value.iter().any(|&byte| byte != 0));
+    scan_backup_dir(bak_dir)
+        .into_iter()
+        .filter(|entry| {
+            let Some(meta) = entry.meta.as_ref() else {
+                return false;
+            };
+            if meta.vid != facts.vid || meta.pid != facts.pid {
+                return false;
             }
-            let path = entry.path();
-            if path.extension().and_then(|e| e.to_str()) != Some("bin") {
-                return None;
+            if let Some(total) = facts.total_sectors {
+                if meta.secs != Some(total) {
+                    return false;
+                }
             }
-            Some((entry.file_name().to_string_lossy().into_owned(), path))
+            if let Some(expected_device_id) = device_id {
+                if meta.device_id != expected_device_id {
+                    return false;
+                }
+            }
+            if let Some(expected_tag) = tag {
+                let Ok(raw) = crate::edpb::read_raw_protocol(&entry.path) else {
+                    return false;
+                };
+                let Some(actual_tag) = raw.get(4 * SECTOR..5 * SECTOR).and_then(lba4_tag16_from)
+                else {
+                    return false;
+                };
+                if actual_tag != expected_tag {
+                    return false;
+                }
+            }
+            true
         })
-        .collect();
-    let secs = facts
-        .total_sectors
-        .map(|s| s.to_string())
-        .unwrap_or_else(|| "unknown".into());
-    let mut tiers: Vec<Vec<String>> = Vec::new();
-    if let Some(did) = device_id {
-        tiers.push(vec![
-            format!("disk*_{}_vid{}_pid{}_{}_*", secs, facts.vid, facts.pid, did),
-            format!(
-                "disk*_{}_vid{}_pid{}_{}_*",
-                secs,
-                facts.vid,
-                facts.pid,
-                did.replace('&', "_")
-            ),
-        ]);
-    }
-    tiers.push(vec![format!(
-        "disk*_{}_vid{}_pid{}_*",
-        secs, facts.vid, facts.pid
-    )]); // 兜底(识别失败时)
-    for pats in &tiers {
-        let mut out: Vec<PathBuf> = files
-            .iter()
-            .filter(|(name, _)| pats.iter().any(|pat| wildcard_match(pat, name)))
-            .map(|(_, path)| path.clone())
-            .collect();
-        if out.is_empty() {
-            continue;
-        }
-        // LBA4 终验: 剔除同型号他盘的备份
-        if let Some(tag) = my_tag.filter(|t| t.iter().any(|&b| b != 0)) {
-            out.retain(|f| {
-                read_bytes_at(f, 4 * SECTOR as u64, 16)
-                    .map(|b| b[..16] == tag)
-                    .unwrap_or(false)
-            });
-        }
-        out.sort_by(
-            |a, b| match (backup_name_time_key(a), backup_name_time_key(b)) {
-                (Some(at), Some(bt)) => bt.cmp(&at).then_with(|| a.cmp(b)),
-                (Some(_), None) => Ordering::Less,
-                (None, Some(_)) => Ordering::Greater,
-                (None, None) => mtime_epoch(b).cmp(&mtime_epoch(a)).then_with(|| a.cmp(b)),
-            },
-        );
-        return out;
-    }
-    Vec::new()
+        .map(|entry| entry.path)
+        .collect()
 }
 
 // ══════════════════════════════════════════════════════════════════

@@ -18,6 +18,7 @@ use edpcli::common::{
 };
 use edpcli::diskio::FileDev;
 use edpcli::diskio::SectorDev;
+use edpcli::edpb::{self, CoreCapture};
 
 // ══════════════════════════════════════════════════════════════════
 // 子进程测试(真二进制)
@@ -146,6 +147,57 @@ impl edpcli::diskio::Clock for FixedClockForCli {
     }
 }
 
+fn write_test_edpb(
+    path: &std::path::Path,
+    data: &[u8],
+    device_id: &str,
+    vid: &str,
+    pid: &str,
+    total_sectors: u64,
+    state: &str,
+) {
+    let onlyid = edpcli::diskio::lba4_label_id_from(&data[4 * SECTOR..5 * SECTOR]);
+    let capture = CoreCapture {
+        snapshot_id: path.file_name().unwrap().to_string_lossy().into_owned(),
+        created_epoch: 1_789_603_200,
+        disk_number: Some(26),
+        vid: vid.into(),
+        pid: pid.into(),
+        device_id: device_id.into(),
+        onlyid,
+        total_sectors: Some(total_sectors),
+        logical_sector_size: SECTOR as u32,
+        edpcli_version: env!("CARGO_PKG_VERSION").into(),
+        device_state: state.into(),
+        lba0_12: data,
+    };
+    edpb::write_core_backup(path, &capture).unwrap();
+}
+
+fn write_netac_edpb(path: &std::path::Path, data: &[u8], state: &str) {
+    write_test_edpb(
+        path,
+        data,
+        "disk&ven_netac&prod_onlydisk",
+        "0dd8",
+        "2005",
+        122_880_000,
+        state,
+    );
+}
+
+fn write_lexar_edpb(path: &std::path::Path, data: &[u8], state: &str) {
+    write_test_edpb(
+        path,
+        data,
+        "disk&ven_lexar&prod_usb_flash_drive",
+        "21c4",
+        "0cd1",
+        243_625_984,
+        state,
+    );
+}
+
 struct SwapOnReopenDev {
     before: Vec<u8>,
     after: Vec<u8>,
@@ -270,7 +322,7 @@ fn apply_force_writes_same_sectors_and_tags_backup() {
         .flatten()
         .map(|e| e.file_name().to_string_lossy().into_owned())
         .collect();
-    names.retain(|n| n.ends_with(".bin"));
+    names.retain(|n| n.ends_with(".edpb"));
     assert_eq!(names.len(), 1);
     assert!(names[0].contains("_nopwd"), "{:?}", names);
     let _ = did;
@@ -389,7 +441,7 @@ fn backup_create_is_read_only_and_matches_apply_automatic_backup() {
     assert_eq!(manual_prompt.idx, 0, "backup create 不应要求写盘确认");
     assert!(!manual_dev.switched, "backup create 不得 reopen 为读写");
     assert_eq!(manual_dev.writes, 0, "backup create 不得写 U 盘");
-    assert_eq!(fs::read(&manual_path).unwrap(), orig);
+    assert_eq!(edpb::read_raw_protocol(&manual_path).unwrap(), orig);
 
     // apply 写前自动备份：同一时间、同一设备事实、同一 LBA0-12 输入，应生成
     // 完全相同的文件名/内容/SHA-256；随后在确认处取消，避免进入任何真写阶段。
@@ -413,7 +465,7 @@ fn backup_create_is_read_only_and_matches_apply_automatic_backup() {
         .unwrap()
         .flatten()
         .map(|entry| entry.path())
-        .find(|path| path.extension().and_then(|ext| ext.to_str()) == Some("bin"))
+        .find(|path| path.extension().and_then(|ext| ext.to_str()) == Some("edpb"))
         .expect("apply 应生成写前自动备份");
     assert_eq!(
         manual_path.file_name(),
@@ -424,10 +476,10 @@ fn backup_create_is_read_only_and_matches_apply_automatic_backup() {
         fs::read(&manual_path).unwrap(),
         fs::read(&auto_path).unwrap()
     );
-    assert_eq!(
-        fs::read_to_string(format!("{}.sha256", manual_path.display())).unwrap(),
-        fs::read_to_string(format!("{}.sha256", auto_path.display())).unwrap()
-    );
+    assert!(edpb::verify_file(&manual_path).is_ok());
+    assert!(edpb::verify_file(&auto_path).is_ok());
+    assert!(!std::path::PathBuf::from(format!("{}.sha256", manual_path.display())).exists());
+    assert!(!std::path::PathBuf::from(format!("{}.sha256", auto_path.display())).exists());
 }
 
 #[test]
@@ -436,22 +488,14 @@ fn restore_numeric_target_uses_backup_selector_and_current_disk_identity() {
         eprintln!("跳过: 真实备份不可用");
         return;
     };
-    let Some(source) = fixture_bin("netac") else {
-        eprintln!("跳过: 真实备份不可用");
-        return;
-    };
     let runner = netac_runner(6);
     let tmp = TmpDir::new("restore_numeric_selector");
     let backup_dir = tmp.0.join("bak");
     fs::create_dir_all(&backup_dir).unwrap();
-    let target = backup_dir.join(source.file_name().unwrap());
-    fs::copy(&source, &target).unwrap();
-    let data = fs::read(&target).unwrap();
-    fs::write(
-        format!("{}.sha256", target.display()),
-        format!("{}\n", sha256(&data)),
-    )
-    .unwrap();
+    let target = backup_dir.join(
+        "disk6_122880000_vid0dd8_pid2005_disk&ven_netac&prod_onlydisk_onlyid1402259934_20260910_172300.edpb",
+    );
+    write_netac_edpb(&target, &orig, "encrypted");
 
     let mut prompt = ScriptPrompter {
         inputs: vec!["NO".into()],
@@ -517,13 +561,8 @@ fn restore_explicit_nopwd_backup_blocked() {
     let runner = netac_runner(26);
     let tmp = TmpDir::new("restore_block");
     // 当前盘是免密盘(conv), 备份也是免密快照 → 硬拦截不写入
-    let bakfile = tmp.0.join("conv.bin");
-    fs::write(&bakfile, &conv).unwrap();
-    fs::write(
-        tmp.0.join("conv.bin.sha256"),
-        format!("{}\n", sha256(&conv)),
-    )
-    .unwrap();
+    let bakfile = tmp.0.join("conv.edpb");
+    write_netac_edpb(&bakfile, &conv, "passwordless");
     let img_path = tmp.0.join("disk.img");
     let original = load_disk_image("netac").unwrap();
     fs::write(&img_path, &original).unwrap();
@@ -546,7 +585,7 @@ fn restore_explicit_nopwd_backup_blocked() {
 }
 
 #[test]
-fn restore_detects_nopwd_from_backup_name_when_current_device_id_is_unavailable() {
+fn restore_detects_nopwd_from_edpb_manifest_when_current_device_id_is_unavailable() {
     let Some((conv, _)) = converted_image("netac") else {
         eprintln!("跳过: 真实备份不可用");
         return;
@@ -560,14 +599,9 @@ fn restore_detects_nopwd_from_backup_name_when_current_device_id_is_unavailable(
 
     let tmp = TmpDir::new("restore_nopwd_without_current_did");
     let bakfile = tmp.0.join(
-        "disk26_122880000_vid0dd8_pid2005_disk&ven_netac&prod_onlydisk_onlyid1402259934_nopwd_20260917_120000.bin",
+        "disk26_122880000_vid0dd8_pid2005_disk&ven_netac&prod_onlydisk_onlyid1402259934_nopwd_20260917_120000.edpb",
     );
-    fs::write(&bakfile, &conv).unwrap();
-    fs::write(
-        format!("{}.sha256", bakfile.display()),
-        format!("{}\n", sha256(&conv)),
-    )
-    .unwrap();
+    write_netac_edpb(&bakfile, &conv, "passwordless");
 
     let img_path = tmp.0.join("disk.img");
     fs::write(&img_path, &original).unwrap();
@@ -589,12 +623,12 @@ fn restore_detects_nopwd_from_backup_name_when_current_device_id_is_unavailable(
     assert_eq!(
         fs::read(&img_path).unwrap(),
         original,
-        "即使当前盘 device_id 识别失败，也必须从备份文件名识别免密快照并拒绝写入"
+        "即使当前盘 device_id 识别失败，也必须从 EDPB Manifest 识别免密快照并拒绝写入"
     );
 }
 
 #[test]
-fn restore_refuses_unknown_backup_identity_when_device_id_is_unavailable() {
+fn restore_rejects_legacy_bin_when_device_id_is_unavailable() {
     let Some((conv, _)) = converted_image("netac") else {
         eprintln!("跳过: 真实备份不可用");
         return;
@@ -631,11 +665,7 @@ fn restore_refuses_unknown_backup_identity_when_device_id_is_unavailable() {
     )
     .unwrap_err();
     assert_eq!(e.code, EXIT_BACKUP);
-    assert!(
-        e.msg.contains("device_id") || e.msg.contains("身份"),
-        "{}",
-        e.msg
-    );
+    assert!(e.msg.contains(".edpb"), "{}", e.msg);
     assert_eq!(fs::read(&img_path).unwrap(), original);
 }
 
@@ -648,14 +678,9 @@ fn restore_refuses_when_current_disk_identity_tag_is_zero() {
     let runner = netac_runner(26);
     let tmp = TmpDir::new("restore_zero_current_identity");
     let bakfile = tmp.0.join(
-        "disk26_122880000_vid0dd8_pid2005_disk&ven_netac&prod_onlydisk_onlyid1402259934_20260917_120000.bin",
+        "disk26_122880000_vid0dd8_pid2005_disk&ven_netac&prod_onlydisk_onlyid1402259934_20260917_120000.edpb",
     );
-    fs::write(&bakfile, &original).unwrap();
-    fs::write(
-        format!("{}.sha256", bakfile.display()),
-        format!("{}\n", sha256(&original)),
-    )
-    .unwrap();
+    write_netac_edpb(&bakfile, &original, "encrypted");
 
     let mut current = original.clone();
     current[4 * SECTOR..4 * SECTOR + 16].fill(0);
@@ -695,20 +720,10 @@ fn restore_picker_selects_newest_and_writes() {
     let bak = tmp.0.join("bak");
     fs::create_dir_all(&bak).unwrap();
     // 两份备份: 旧的(原盘内容)较新、新的(免密快照)较旧 → 选择 1 = 最新(mtime 大者)
-    let older = bak.join("disk26_122880000_vid0dd8_pid2005_disk&ven_netac&prod_onlydisk_onlyid1402259934_20260101_000000.bin");
-    let newer = bak.join("disk26_122880000_vid0dd8_pid2005_disk&ven_netac&prod_onlydisk_onlyid1402259934_nopwd_20260916_230000.bin");
-    fs::write(&older, &orig).unwrap();
-    fs::write(
-        format!("{}.sha256", older.display()),
-        format!("{}\n", sha256(&orig)),
-    )
-    .unwrap();
-    fs::write(&newer, &conv).unwrap();
-    fs::write(
-        format!("{}.sha256", newer.display()),
-        format!("{}\n", sha256(&conv)),
-    )
-    .unwrap();
+    let older = bak.join("disk26_122880000_vid0dd8_pid2005_disk&ven_netac&prod_onlydisk_onlyid1402259934_20260101_000000.edpb");
+    let newer = bak.join("disk26_122880000_vid0dd8_pid2005_disk&ven_netac&prod_onlydisk_onlyid1402259934_nopwd_20260916_230000.edpb");
+    write_netac_edpb(&older, &orig, "encrypted");
+    write_netac_edpb(&newer, &conv, "passwordless");
     set_mtime(&older, 1_700_000_000);
     set_mtime(&newer, 1_790_000_000);
     // 当前盘为原盘; 选择"1"(最新 = 免密快照) → 应被硬拦截不写入
@@ -743,20 +758,20 @@ fn restore_picker_selects_newest_and_writes() {
 }
 
 #[test]
-fn restore_sha256_mismatch_rejected() {
+fn restore_edpb_payload_hash_mismatch_rejected() {
     let Some(orig) = load_disk_image("netac") else {
         eprintln!("跳过: 真实备份不可用");
         return;
     };
     let runner = netac_runner(26);
-    let tmp = TmpDir::new("restore_sha256");
-    let bakfile = tmp.0.join("broken.bin");
-    fs::write(&bakfile, &orig).unwrap();
-    fs::write(
-        tmp.0.join("broken.bin.sha256"),
-        "deadbeefdeadbeefdeadbeefdeadbeef\n",
-    )
-    .unwrap();
+    let tmp = TmpDir::new("restore_edpb_hash");
+    let bakfile = tmp.0.join("broken.edpb");
+    write_netac_edpb(&bakfile, &orig, "encrypted");
+    let verified = edpb::verify_file(&bakfile).unwrap();
+    let data_offset = verified.manifest.artifacts[0].storage.data_offset as usize;
+    let mut bytes = fs::read(&bakfile).unwrap();
+    bytes[data_offset + 23] ^= 0x5A;
+    fs::write(&bakfile, bytes).unwrap();
     let img_path = tmp.0.join("disk.img");
     fs::write(&img_path, &orig).unwrap();
     let mut prompt = ScriptPrompter::yes();
@@ -777,26 +792,18 @@ fn restore_sha256_mismatch_rejected() {
 }
 
 #[test]
-fn restore_accepts_standard_sha256_sidecar_format_case_insensitively() {
+fn restore_valid_edpb_needs_no_external_sidecar() {
     let Some(orig) = load_disk_image("netac") else {
         eprintln!("跳过: 真实备份不可用");
         return;
     };
     let runner = netac_runner(26);
-    let tmp = TmpDir::new("restore_sha256_standard_format");
+    let tmp = TmpDir::new("restore_edpb_no_sidecar");
     let bakfile = tmp.0.join(
-        "disk26_122880000_vid0dd8_pid2005_disk&ven_netac&prod_onlydisk_onlyid1402259934_20260917_120000.bin",
+        "disk26_122880000_vid0dd8_pid2005_disk&ven_netac&prod_onlydisk_onlyid1402259934_20260917_120000.edpb",
     );
-    fs::write(&bakfile, &orig).unwrap();
-    fs::write(
-        format!("{}.sha256", bakfile.display()),
-        format!(
-            "{}  {}\n",
-            sha256(&orig).to_uppercase(),
-            bakfile.file_name().unwrap().to_string_lossy()
-        ),
-    )
-    .unwrap();
+    write_netac_edpb(&bakfile, &orig, "encrypted");
+    assert!(!std::path::PathBuf::from(format!("{}.sha256", bakfile.display())).exists());
     let img_path = tmp.0.join("disk.img");
     fs::write(&img_path, &orig).unwrap();
     let mut prompt = ScriptPrompter::yes();
@@ -818,15 +825,18 @@ fn restore_accepts_standard_sha256_sidecar_format_case_insensitively() {
 }
 
 #[test]
-fn restore_missing_sha256_is_rejected() {
+fn restore_truncated_edpb_is_rejected() {
     let Some(orig) = load_disk_image("netac") else {
         eprintln!("跳过: 真实备份不可用");
         return;
     };
     let runner = netac_runner(26);
-    let tmp = TmpDir::new("restore_missing_sha256");
-    let bakfile = tmp.0.join("missing-sha256.bin");
-    fs::write(&bakfile, &orig).unwrap();
+    let tmp = TmpDir::new("restore_truncated_edpb");
+    let bakfile = tmp.0.join("truncated.edpb");
+    write_netac_edpb(&bakfile, &orig, "encrypted");
+    let mut bytes = fs::read(&bakfile).unwrap();
+    bytes.truncate(bytes.len() - 20);
+    fs::write(&bakfile, bytes).unwrap();
     let img_path = tmp.0.join("disk.img");
     fs::write(&img_path, &orig).unwrap();
     let mut prompt = ScriptPrompter::yes();
@@ -843,7 +853,7 @@ fn restore_missing_sha256_is_rejected() {
     )
     .unwrap_err();
     assert_eq!(err.code, EXIT_BACKUP);
-    assert!(err.msg.contains(".sha256"), "{}", err.msg);
+    assert!(err.msg.contains("EDPB"), "{}", err.msg);
     assert_eq!(fs::read(&img_path).unwrap(), orig);
 }
 
@@ -855,13 +865,8 @@ fn restore_explicit_backup_from_other_disk_is_rejected() {
     };
     let runner = netac_runner(26);
     let tmp = TmpDir::new("restore_wrong_disk");
-    let bakfile = tmp.0.join("other-disk.bin");
-    fs::write(&bakfile, &other).unwrap();
-    fs::write(
-        tmp.0.join("other-disk.bin.sha256"),
-        format!("{}\n", sha256(&other)),
-    )
-    .unwrap();
+    let bakfile = tmp.0.join("other-disk.edpb");
+    write_lexar_edpb(&bakfile, &other, "encrypted");
 
     let img_path = tmp.0.join("disk.img");
     fs::write(&img_path, &current).unwrap();
@@ -1015,14 +1020,9 @@ fn restore_refuses_if_disk_identity_changes_after_reopen() {
     let runner = netac_runner(6);
     let tmp = TmpDir::new("restore_swap_after_reopen");
     let backup = tmp.0.join(
-        "disk6_122880000_vid0dd8_pid2005_disk&ven_netac&prod_onlydisk_onlyid1402259934_20260917_120000.bin",
+        "disk6_122880000_vid0dd8_pid2005_disk&ven_netac&prod_onlydisk_onlyid1402259934_20260917_120000.edpb",
     );
-    fs::write(&backup, &netac).unwrap();
-    fs::write(
-        format!("{}.sha256", backup.display()),
-        format!("{}\n", sha256(&netac)),
-    )
-    .unwrap();
+    write_netac_edpb(&backup, &netac, "encrypted");
     let mut prompt = ScriptPrompter::yes();
     let mut dev = SwapOnReopenDev::new(netac, lexar);
 

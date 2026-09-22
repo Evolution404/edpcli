@@ -6,6 +6,7 @@
 pub mod application;
 pub mod backup_catalog;
 pub mod backup_cli;
+pub mod backup_metadata;
 pub mod build_info;
 pub mod cli;
 pub mod cli_args;
@@ -14,6 +15,7 @@ pub mod completion;
 pub mod crypto;
 pub mod disk_scan;
 pub mod diskio;
+pub mod edpb;
 pub mod elevate;
 pub mod identify;
 pub mod inspect;

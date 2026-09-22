@@ -558,11 +558,7 @@ pub fn restore_flow(
     dev: &mut dyn SectorDev,
 ) -> EdpCliResult<i32> {
     guard_usb_disk(ctx.runner, disk)?;
-    let runner = ctx.runner;
-
     let img = read_image(dev)?;
-    let id = identify(runner, disk, &img[7 * SECTOR..8 * SECTOR]);
-    let did = id.device_id;
     let lba4 = &img[4 * SECTOR..5 * SECTOR];
     let label_id = diskio::lba4_label_id_from(lba4);
     let tag16 = diskio::lba4_tag16_from(lba4)
@@ -636,50 +632,46 @@ pub fn restore_flow(
         }
     };
 
-    // 显式备份文件的预检 + 写入
-    let data = std::fs::read(&path).map_err(|e| {
+    // EDPB 自包含校验 + 可恢复 Artifact 预检。
+    let verified = crate::edpb::verify_file(&path).map_err(|message| {
         err(
             EXIT_BACKUP,
-            format!("错误: 无法读取备份 {}: {}", path.display(), e),
+            format!("错误: EDPB 校验失败 {}: {}", path.display(), message),
+        )
+    })?;
+    let raw_artifact = verified
+        .manifest
+        .artifacts
+        .iter()
+        .find(|artifact| artifact.id == crate::edpb::RAW_PROTOCOL_ARTIFACT_ID)
+        .ok_or_else(|| err(EXIT_BACKUP, "错误: EDPB 缺少 LBA0-12 原始 Artifact"))?;
+    if raw_artifact.restore_policy != crate::edpb::RestorePolicy::Restorable {
+        return Err(err(
+            EXIT_BACKUP,
+            "错误: EDPB 的 LBA0-12 Artifact 未标记为可恢复，拒绝写盘",
+        ));
+    }
+    let data = crate::edpb::read_raw_protocol(&path).map_err(|message| {
+        err(
+            EXIT_BACKUP,
+            format!("错误: 读取 EDPB LBA0-12 失败: {message}"),
         )
     })?;
     if data.len() != METADATA_IMAGE_LEN {
         return Err(err(
             EXIT_BACKUP,
-            format!("错误: 备份大小 {} ≠ {}", data.len(), METADATA_IMAGE_LEN),
-        ));
-    }
-    let sha256_path = diskio::sha256_sidecar_path(&path);
-    let want = match diskio::read_backup_sha256(&path) {
-        Ok(Some(expected)) => expected,
-        Ok(None) => {
-            return Err(err(
-                EXIT_BACKUP,
-                format!("错误: 备份缺少校验文件 {}，拒绝还原", sha256_path.display()),
-            ));
-        }
-        Err(e) => {
-            return Err(err(
-                EXIT_BACKUP,
-                format!("错误: 无法读取有效校验 {}: {}", sha256_path.display(), e),
-            ));
-        }
-    };
-    let got = crate::sha256::sha256_hex(&data);
-    if want != got {
-        return Err(err(
-            EXIT_BACKUP,
             format!(
-                "错误: 备份 SHA-256 不符(期望 {}, 实际 {}) — 文件损坏?",
-                want, got
+                "错误: EDPB LBA0-12 大小 {} ≠ {}",
+                data.len(),
+                METADATA_IMAGE_LEN
             ),
         ));
     }
-    ctx.prompt
-        .write_event(WriteEvent::BackupShaVerified { digest: got });
+    ctx.prompt.write_event(WriteEvent::BackupShaVerified {
+        digest: verified.file_sha256.clone(),
+    });
 
-    // 显式路径也必须执行与交互选择相同的“同一物理盘”终验。device_id/容量/VID/PID
-    // 对同型号盘并不唯一，LBA4 前 16B 才是现有备份体系使用的最终身份标签。
+    // 同一物理盘终验仍以原始 LBA4 前 16B 为准；Manifest 不替代原始证据。
     let backup_lba4 = &data[4 * SECTOR..5 * SECTOR];
     let backup_tag16 = diskio::lba4_tag16_from(backup_lba4)
         .ok_or_else(|| err(EXIT_BACKUP, "错误: 备份 LBA4 缺少 16B 身份标签"))?;
@@ -694,28 +686,9 @@ pub fn restore_flow(
             ),
         ));
     }
-    let backup_meta = path
-        .file_name()
-        .and_then(|name| name.to_str())
-        .and_then(diskio::parse_backup_name);
-    let tagged_nopwd = backup_meta
-        .as_ref()
-        .map(|meta| meta.tagged_nopwd)
-        .unwrap_or(false);
-    let detection_did = did
-        .as_deref()
-        .or_else(|| backup_meta.as_ref().map(|meta| meta.device_id.as_str()));
-    let nopwd_snap = if tagged_nopwd {
-        true
-    } else {
-        let Some(device_id) = detection_did else {
-            return Err(err(
-                EXIT_BACKUP,
-                "错误: 当前盘与备份文件名都无法提供 device_id，无法确认备份是否为免密状态，拒绝还原",
-            ));
-        };
-        diskio::image_is_nopwd(&data, device_id)
-    };
+    let tagged_nopwd = verified.manifest.snapshot.device_state == "passwordless";
+    let nopwd_snap =
+        tagged_nopwd || diskio::image_is_nopwd(&data, &verified.manifest.device.device_id);
     if nopwd_snap {
         ctx.prompt
             .write_event(WriteEvent::RestoreSnapshotNopwdWarning);

@@ -49,13 +49,13 @@ impl BackupCatalog {
         if !path.starts_with(&root) {
             return Err(format!("拒绝访问备份目录之外的路径: {}", path.display()));
         }
-        if path.extension().and_then(|e| e.to_str()) != Some("bin") {
-            return Err(format!("目标不是 .bin 备份: {}", path.display()));
+        if path.extension().and_then(|e| e.to_str()) != Some("edpb") {
+            return Err(format!("目标不是 .edpb 备份: {}", path.display()));
         }
         self.entries
             .iter()
             .find(|entry| canonical_entry_path(&entry.path) == path)
-            .ok_or_else(|| "目标不是可扫描的 .bin 备份".into())
+            .ok_or_else(|| "目标不是可扫描的 .edpb 备份".into())
     }
 }
 
@@ -83,7 +83,7 @@ pub fn is_healthy(entry: &BackupEntry) -> bool {
 ///
 /// The caller is responsible for higher-level retention policy (for example, keeping at least one
 /// backup for a device). This function re-checks that the target is still a regular file and that
-/// its content SHA-256 still matches the scan snapshot before deleting the .bin and its .sha256 sidecar.
+/// its content SHA-256 still matches the scan snapshot before deleting the single .edpb file.
 pub fn delete_entry_verified(entry: &BackupEntry) -> Result<(), String> {
     let path = &entry.path;
     let metadata = fs::symlink_metadata(path)
@@ -114,22 +114,6 @@ pub fn delete_entry_verified(entry: &BackupEntry) -> Result<(), String> {
             ""
         };
         return Err(format!("删除失败 {}: {}{}", path.display(), e, suffix));
-    }
-    let sidecar = diskio::sha256_sidecar_path(path);
-    if sidecar.exists() {
-        if let Err(e) = fs::remove_file(&sidecar) {
-            let suffix = if e.kind() == io::ErrorKind::PermissionDenied {
-                "；备份目录可能由管理员账户持有且不可写，可检查目录属主/权限"
-            } else {
-                ""
-            };
-            return Err(format!(
-                "已删除 .bin，但删除校验文件失败 {}: {}{}",
-                sidecar.display(),
-                e,
-                suffix
-            ));
-        }
     }
     Ok(())
 }
