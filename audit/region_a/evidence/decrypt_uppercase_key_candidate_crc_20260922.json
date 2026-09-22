@@ -1,0 +1,194 @@
+{
+  "profile": "x86-2021-uppercase",
+  "key_ascii": "8EEAA2062EFA0B371076EBE510D98F18",
+  "cipher": "AES-256-CBC",
+  "iv": "00000000000000000000000000000000",
+  "main_crc": {
+    "crc_offset": 1022,
+    "body_offset": 0,
+    "body_length": 996,
+    "stored": 5011,
+    "calculated_inverted": 48503,
+    "ok": false
+  },
+  "segment_crcs": [
+    {
+      "crc_offset": 1024,
+      "body_offset": 32,
+      "body_length": 4,
+      "stored": 3005,
+      "calculated_inverted": 52592,
+      "ok": false,
+      "name": "log_partition_size_be_sectors"
+    },
+    {
+      "crc_offset": 1026,
+      "body_offset": 36,
+      "body_length": 4,
+      "stored": 11488,
+      "calculated_inverted": 51028,
+      "ok": false,
+      "name": "public_partition_size_be_sectors"
+    },
+    {
+      "crc_offset": 1028,
+      "body_offset": 40,
+      "body_length": 4,
+      "stored": 38691,
+      "calculated_inverted": 15477,
+      "ok": false,
+      "name": "share_partition_size_be_sectors"
+    },
+    {
+      "crc_offset": 1030,
+      "body_offset": 44,
+      "body_length": 4,
+      "stored": 61557,
+      "calculated_inverted": 24238,
+      "ok": false,
+      "name": "private_partition_size_be_sectors"
+    },
+    {
+      "crc_offset": 1032,
+      "body_offset": 84,
+      "body_length": 32,
+      "stored": 6363,
+      "calculated_inverted": 55260,
+      "ok": false,
+      "name": "device_info_slot_a"
+    },
+    {
+      "crc_offset": 1034,
+      "body_offset": 116,
+      "body_length": 32,
+      "stored": 10726,
+      "calculated_inverted": 49798,
+      "ok": false,
+      "name": "device_info_slot_b"
+    },
+    {
+      "crc_offset": 1036,
+      "body_offset": 148,
+      "body_length": 64,
+      "stored": 36101,
+      "calculated_inverted": 51753,
+      "ok": false,
+      "name": "key_config_slot_0x094"
+    },
+    {
+      "crc_offset": 1038,
+      "body_offset": 212,
+      "body_length": 64,
+      "stored": 58854,
+      "calculated_inverted": 6633,
+      "ok": false,
+      "name": "key_config_slot_0x0d4"
+    },
+    {
+      "crc_offset": 1040,
+      "body_offset": 276,
+      "body_length": 64,
+      "stored": 18183,
+      "calculated_inverted": 32834,
+      "ok": false,
+      "name": "data_key_slot"
+    },
+    {
+      "crc_offset": 1042,
+      "body_offset": 340,
+      "body_length": 64,
+      "stored": 13814,
+      "calculated_inverted": 40046,
+      "ok": false,
+      "name": "key_config_slot_0x154"
+    },
+    {
+      "crc_offset": 1044,
+      "body_offset": 404,
+      "body_length": 64,
+      "stored": 21973,
+      "calculated_inverted": 3585,
+      "ok": false,
+      "name": "password_digest_slot_a"
+    },
+    {
+      "crc_offset": 1046,
+      "body_offset": 468,
+      "body_length": 64,
+      "stored": 43976,
+      "calculated_inverted": 611,
+      "ok": false,
+      "name": "password_digest_slot_b"
+    },
+    {
+      "crc_offset": 1048,
+      "body_offset": 532,
+      "body_length": 4,
+      "stored": 34947,
+      "calculated_inverted": 42,
+      "ok": false,
+      "name": "retry_counter_block"
+    },
+    {
+      "crc_offset": 1050,
+      "body_offset": 540,
+      "body_length": 64,
+      "stored": 1107,
+      "calculated_inverted": 27208,
+      "ok": false,
+      "name": "device_flag_slot"
+    },
+    {
+      "crc_offset": 1052,
+      "body_offset": 604,
+      "body_length": 64,
+      "stored": 37803,
+      "calculated_inverted": 1888,
+      "ok": false,
+      "name": "extended_slot_0x25c"
+    },
+    {
+      "crc_offset": 1054,
+      "body_offset": 668,
+      "body_length": 64,
+      "stored": 44731,
+      "calculated_inverted": 61747,
+      "ok": false,
+      "name": "flag_info_head"
+    },
+    {
+      "crc_offset": 1056,
+      "body_offset": 732,
+      "body_length": 255,
+      "stored": 35401,
+      "calculated_inverted": 11228,
+      "ok": false,
+      "name": "variable_info_area"
+    },
+    {
+      "crc_offset": 1058,
+      "body_offset": 988,
+      "body_length": 4,
+      "stored": 36374,
+      "calculated_inverted": 62017,
+      "ok": false,
+      "name": "node_status_0x34_mirror"
+    },
+    {
+      "crc_offset": 1060,
+      "body_offset": 992,
+      "body_length": 4,
+      "stored": 54833,
+      "calculated_inverted": 43865,
+      "ok": false,
+      "name": "node_status_0x30_mirror"
+    }
+  ],
+  "all_crc_ok": false,
+  "partition_sizes": {
+    "log_be_sectors_0x020": 1408411971,
+    "public_be_sectors_0x024": 239804857,
+    "share_be_sectors_0x028": 3318101879,
+    "private_be_sectors_0x02c": 599959250
+  }
+}

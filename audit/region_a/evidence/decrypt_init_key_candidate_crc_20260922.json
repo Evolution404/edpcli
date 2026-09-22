@@ -1,0 +1,234 @@
+{
+  "size": 2048,
+  "fields": {
+    "header_0x000_0x01f": "ee73c37b712d0371e47f9c8f6cbf8b604544b8f102c671a1e2023b109eeebf75",
+    "partition_sizes": {
+      "log_be_sectors_0x020": 2570089854,
+      "public_be_sectors_0x024": 97504429,
+      "share_be_sectors_0x028": 3955970139,
+      "private_be_sectors_0x02c": 188247050
+    },
+    "device_info_slots": {
+      "slot_0x054_hex": "70c2e0a6bacc656fea150cd2a99a95daeeec9716f5035d99eb0dbc05e22e339d",
+      "slot_0x054_ascii": "p.....eo..............].......3.",
+      "slot_0x074_hex": "ddadff547138d2e35f528dd12f3c90637baaf8786b5732b3ec844cb383dc52ca",
+      "slot_0x074_ascii": "...Tq8.._R../<.c{..xkW2...L...R."
+    },
+    "key_slots": {
+      "slot_0x094": "b196eaccafa0353d807da471ada74f56807c127c02be16e69cfe713b5ff96288b900798997230e9cffb3c42b04736a8f7ecf103d20f369e4c6a55efb4e25560d",
+      "slot_0x0d4": "2da5515fe79182f31caf3db437f7cfcb1ef30d7915de715ebfcc1fab1ced701b90bfe16cfa1458bc2b0df3137fd6023237ada40d7803fd4aef19f13f3561e8fd",
+      "data_key_slot_0x114": "f6120eec0c2af5fc36a5aed701318765eff68da202a3f71ba52c5f0e871780e6be4beb99b8a1241aaf00934171198e19330e84f6b0f5b3812baca333fc581341",
+      "encrypted_data_key_0x123_0x142": "65eff68da202a3f71ba52c5f0e871780e6be4beb99b8a1241aaf00934171198e",
+      "slot_0x154": "d465f9d4726c28e7e7bfa04134495cdbe215eba3888238a3668b7befc2c97f5a02d1e520e122e2a4acbc65e1d98b33c1abe91d603de58398a37fd0d0e70a9244",
+      "password_digest_0x194": "be246d411dee2861dd77b30929ad91ee7f977557aa6cd4fab9462dde9e66ddda206965f0515d7914c9fe31169d82bcdfd671faa292516becb32cc8624f51bc9f",
+      "password_digest_0x1d4": "f473da8d2b6cb576fcf11053c7240e06b20bd790c7cc4a71ba60402560a9030a0c1c42ba131e814363fe9df8fbc22a8eec13178010910ebec788998dcebad6a2"
+    },
+    "retry_and_flags": {
+      "max_try_a_0x214": 96,
+      "remain_try_a_0x215": 190,
+      "max_try_b_0x216": 241,
+      "remain_try_b_0x217": 206,
+      "flag_0x218": 51,
+      "flag_0x219": 17,
+      "device_flag_block_0x21c": "2173ed2ce76295898ab057bb5c480f6439a0ef625e8c344acc6603a58152404e93a1e9ea2d326365b3a95150d0abb6e37d89480fb5ced50a26085a6ed3d03d86"
+    },
+    "flag_info": {
+      "slot_0x25c": "08dc88c031309de9f0636fe319763172b7135101050d4990a26de557c644a699efeceb31c15b0319001be559b6b694641f59a56a23e45b6585c6da8e8730d39e",
+      "flag_info_0x29c_0x3cd": "1556e88eaddc864332b14b1b9cde71b3a237773d70c7e06f1c3f0decad9deaea96fc317e131630632724920f5d2a55fc85610f8f8668212735549def72f6195d0b5d9a9daecf755c59ac56d1450c795e198ed03ae40eb60a521620b9f52b6d5d0113b46b6d0ff8c6cecd1423bad858ece3f7bc57ce5472078b235749c34299234aeee068c5f892c6f40ebdfcfdedb208173a4cc33baccc0b06b5b4aa45b4f94ccca7152fc79dd13b32e715ddb9e22168f05798054bd616682950aa3c9623f39784ac3356e2d6f1ad6129c3fe0a116bfd748e5737aef9c7dde1c4159ebc0759f37acb7985826a25f324cdeac8ca54a35ad3d3d4690d84c0aed12f7cbe6a274088dc761d0552e956bd0b3f77ec4d62f3d0be7260dca6d4b34a51e196713bc11b32ded49914d9a1fe39d96df1dd85f249ef5753",
+      "variable_area_0x2dc_0x3da": "0b5d9a9daecf755c59ac56d1450c795e198ed03ae40eb60a521620b9f52b6d5d0113b46b6d0ff8c6cecd1423bad858ece3f7bc57ce5472078b235749c34299234aeee068c5f892c6f40ebdfcfdedb208173a4cc33baccc0b06b5b4aa45b4f94ccca7152fc79dd13b32e715ddb9e22168f05798054bd616682950aa3c9623f39784ac3356e2d6f1ad6129c3fe0a116bfd748e5737aef9c7dde1c4159ebc0759f37acb7985826a25f324cdeac8ca54a35ad3d3d4690d84c0aed12f7cbe6a274088dc761d0552e956bd0b3f77ec4d62f3d0be7260dca6d4b34a51e196713bc11b32ded49914d9a1fe39d96df1dd85f249ef57539e36c537622dfda872453e9aa8"
+    },
+    "node_mirrors": {
+      "node_plus_34_mirror_0x3dc_be": 462702858,
+      "node_plus_30_mirror_0x3e0_le": 3194185844,
+      "tail_meta_0x3e4": "fccdf0cde54fc91a2dd758baa3e95f4fb0e58925a6b46225"
+    },
+    "answer_info": {
+      "meta_0x426_0x428": "b1aba9",
+      "digest1_0x429": "1fe6ae40a28f72e0f6479b273b12c5d9a78e352c",
+      "digest2_0x43d": "a12a0210f75bf99b00ad07cdd0a5df0a00cfa592",
+      "digest3_0x451": "1291519e47125c0de535e2cebec0cca182c942e3"
+    }
+  },
+  "main_crc": {
+    "crc_offset": 1022,
+    "body_offset": 0,
+    "body_length": 996,
+    "stored": 32956,
+    "calculated_inverted": 2353,
+    "ok": false
+  },
+  "segment_crcs": [
+    {
+      "crc_offset": 1024,
+      "body_offset": 32,
+      "body_length": 4,
+      "stored": 7796,
+      "calculated_inverted": 63607,
+      "ok": false,
+      "name": "log_partition_size_be_sectors"
+    },
+    {
+      "crc_offset": 1026,
+      "body_offset": 36,
+      "body_length": 4,
+      "stored": 35418,
+      "calculated_inverted": 38235,
+      "ok": false,
+      "name": "public_partition_size_be_sectors"
+    },
+    {
+      "crc_offset": 1028,
+      "body_offset": 40,
+      "body_length": 4,
+      "stored": 45795,
+      "calculated_inverted": 15046,
+      "ok": false,
+      "name": "share_partition_size_be_sectors"
+    },
+    {
+      "crc_offset": 1030,
+      "body_offset": 44,
+      "body_length": 4,
+      "stored": 38724,
+      "calculated_inverted": 13777,
+      "ok": false,
+      "name": "private_partition_size_be_sectors"
+    },
+    {
+      "crc_offset": 1032,
+      "body_offset": 84,
+      "body_length": 32,
+      "stored": 21558,
+      "calculated_inverted": 13282,
+      "ok": false,
+      "name": "device_info_slot_a"
+    },
+    {
+      "crc_offset": 1034,
+      "body_offset": 116,
+      "body_length": 32,
+      "stored": 54224,
+      "calculated_inverted": 22493,
+      "ok": false,
+      "name": "device_info_slot_b"
+    },
+    {
+      "crc_offset": 1036,
+      "body_offset": 148,
+      "body_length": 64,
+      "stored": 49544,
+      "calculated_inverted": 41035,
+      "ok": false,
+      "name": "key_config_slot_0x094"
+    },
+    {
+      "crc_offset": 1038,
+      "body_offset": 212,
+      "body_length": 64,
+      "stored": 42306,
+      "calculated_inverted": 32006,
+      "ok": false,
+      "name": "key_config_slot_0x0d4"
+    },
+    {
+      "crc_offset": 1040,
+      "body_offset": 276,
+      "body_length": 64,
+      "stored": 4348,
+      "calculated_inverted": 15599,
+      "ok": false,
+      "name": "data_key_slot"
+    },
+    {
+      "crc_offset": 1042,
+      "body_offset": 340,
+      "body_length": 64,
+      "stored": 26018,
+      "calculated_inverted": 62023,
+      "ok": false,
+      "name": "key_config_slot_0x154"
+    },
+    {
+      "crc_offset": 1044,
+      "body_offset": 404,
+      "body_length": 64,
+      "stored": 45184,
+      "calculated_inverted": 25840,
+      "ok": false,
+      "name": "password_digest_slot_a"
+    },
+    {
+      "crc_offset": 1046,
+      "body_offset": 468,
+      "body_length": 64,
+      "stored": 63405,
+      "calculated_inverted": 64692,
+      "ok": false,
+      "name": "password_digest_slot_b"
+    },
+    {
+      "crc_offset": 1048,
+      "body_offset": 532,
+      "body_length": 4,
+      "stored": 46610,
+      "calculated_inverted": 64325,
+      "ok": false,
+      "name": "retry_counter_block"
+    },
+    {
+      "crc_offset": 1050,
+      "body_offset": 540,
+      "body_length": 64,
+      "stored": 27905,
+      "calculated_inverted": 24580,
+      "ok": false,
+      "name": "device_flag_slot"
+    },
+    {
+      "crc_offset": 1052,
+      "body_offset": 604,
+      "body_length": 64,
+      "stored": 17142,
+      "calculated_inverted": 24059,
+      "ok": false,
+      "name": "extended_slot_0x25c"
+    },
+    {
+      "crc_offset": 1054,
+      "body_offset": 668,
+      "body_length": 64,
+      "stored": 58450,
+      "calculated_inverted": 56549,
+      "ok": false,
+      "name": "flag_info_head"
+    },
+    {
+      "crc_offset": 1056,
+      "body_offset": 732,
+      "body_length": 255,
+      "stored": 37089,
+      "calculated_inverted": 50576,
+      "ok": false,
+      "name": "variable_info_area"
+    },
+    {
+      "crc_offset": 1058,
+      "body_offset": 988,
+      "body_length": 4,
+      "stored": 32560,
+      "calculated_inverted": 17423,
+      "ok": false,
+      "name": "node_status_0x34_mirror"
+    },
+    {
+      "crc_offset": 1060,
+      "body_offset": 992,
+      "body_length": 4,
+      "stored": 64987,
+      "calculated_inverted": 30669,
+      "ok": false,
+      "name": "node_status_0x30_mirror"
+    }
+  ],
+  "all_crc_ok": false
+}

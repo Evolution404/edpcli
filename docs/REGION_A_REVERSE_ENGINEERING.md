@@ -77,34 +77,67 @@ SHA-256：
 
 ReadIIR 和 WriteIIR 都使用 device tree node `+0x18` 计算物理位置，并固定处理 0x800B。后 0x400B 尚未由这条主路径解释。
 
-## 5. AES 算法边界
+## 5. AES 算法、默认 Init key 与版本 profile
 
-`sub_1800092c0/sub_180009390` 调用 `sub_18001c560()` 得到 cipher descriptor。静态注册表把该 selector 放在 `AES-192-CBC` family：
+`sub_1800092c0/sub_180009390` 调用 `sub_18001c560()` 得到 `EVP_CIPHER` descriptor。早期仅依据 OpenSSL 注册字符串曾误判为 AES-192-CBC；2026-09-22 已用 descriptor 本体纠正。
 
-- `sub_18001c580/sub_18001c560/...` 注册为 AES-192-CBC
-- 当前动态 path 返回 descriptor address `0x1801cd190`
+动态路径返回 `0x1801cd190`。该结构的关键字段为：
 
-2026-09-22 使用 `/opt/homebrew/bin/python3.14` + Unicorn 2.1.4 重新执行官方 wrapper，确认：
+- NID = 427 (`0x1ab`)
+- block size = 16
+- key length = 32
+- IV length = 16
+- flags = `0x1002`
 
-- `sub_180009050` 返回候选 0x20B key buffer：`8eeaa2062efa0b371076ebe510d98f18` + 16B zero
-- decrypt wrapper 把该 buffer 直接作为 EVP key pointer
-- observed EVP init IV 参数为 NULL
+因此 Region A 主 IIR wrapper 实际使用 **AES-256-CBC**。另外，使用完整 32 字节 ASCII key 和 zero IV 的标准 OpenSSL AES-256-CBC 解密，与官方 wrapper 前 2032 字节输出 bit-exact，证明当前 fresh EVP context 中 observed NULL-IV 参数的有效行为就是 zero IV。证据见 `audit/region_a/evidence/cipher_descriptor_aes256_20260922.json`。
 
-注意：NULL IV 参数不能单独证明有效 IV 一定是全零；还需闭合 EVP context 初始化状态。
+### 5.1 默认 Init key 的精确生成规则
 
-更重要的是，该候选解真实 Lexar Region A 后：
+`SectorManageImp::Init` 构造固定 32B 输入。它不是普通 C 字符串，而是包含嵌入 NUL：
 
-- main CRC: FAIL
-- 19 segment CRC: 0/19 PASS
-- all_crc_ok: false
+`76 72 76 44 6c 6c 00 38 30 48 33 54 37 33 34 57 47 4e 44 4d 4b 50 59 50 4d 38 30 45 59 58 31 00`
 
-因此该 candidate/context **明确不能标记为真实盘正确解密 key**。
+即显示为 `vrvDll\0` + 原固定常量后半段 + 末尾 NUL。
+
+对这 32B 做标准 MD5：
+
+`8eeaa2062efa0b371076ebe510d98f18`
+
+`sub_180015c80`/对应 x86 helper 随后把 16B digest 格式化成 32 个 ASCII hex 字符，最后才复制进 core context 的第一个 string。
+
+历史版本存在大小写 profile：
+
+- 2021 x86 `sectormanage.dll`: `%02X`，得到 `8EEAA2062EFA0B371076EBE510D98F18`
+- 2021/2025 x64 `sectormanage64.dll`: `%02x`，得到 `8eeaa2062efa0b371076ebe510d98f18`
+- 2026 x86 `sectormanage.dll`: 机器码引用 `0x101a6d98`，该地址是 `%02x`，同样得到小写 key
+
+机器证据见 `audit/region_a/evidence/init_key_derivation_20260922.json` 和 `init_key_profiles_20260922.json`。
+
+### 5.2 两类默认 key 都不能解当前真实 Lexar
+
+用实际小写 Init final key 走官方 `sub_180009390` wrapper：
+
+- cipher = AES-256-CBC
+- key = `8eeaa2062efa0b371076ebe510d98f18` 的 32 个 ASCII 字节
+- effective IV = 16B zero
+- main CRC = FAIL
+- 19 segment CRC = 0/19 PASS
+
+再用 2021 x86 大写 key：
+
+- key = `8EEAA2062EFA0B371076EBE510D98F18`
+- main CRC = FAIL
+- 19 segment CRC = 0/19 PASS
+
+因此**两个已知默认 Init key profile 都被真实物理 ciphertext 明确排除**。这把未解问题进一步收窄为：真实制盘/运行链存在不同的 key provenance、对象状态或尚未定位的 producer profile，而不是 AES mode、IV 或简单 hex 大小写问题。
 
 证据：
 
-- `audit/region_a/evidence/derive_iir_key_official_20260922.json`
-- `audit/region_a/evidence/decrypt_candidate_20260922.json`
-- `audit/region_a/evidence/decrypt_candidate_crc_20260922.json`
+- `audit/region_a/evidence/decrypt_init_key_candidate_20260922.json`
+- `audit/region_a/evidence/decrypt_init_key_candidate_crc_20260922.json`
+- `audit/region_a/evidence/decrypt_uppercase_key_candidate_crc_20260922.json`
+
+旧的 raw MD5 intermediate (`8eeaa206...` + zero-filled output buffer) 解密尝试继续保留为 negative history，但它不是 `Init` 最终写入 core context 的 key，不能再作为主候选。
 
 ## 6. IIR plaintext 已知布局
 
@@ -171,7 +204,7 @@ ReadIIR 和 WriteIIR 都使用 device tree node `+0x18` 计算物理位置，并
 2. 对 physical gold 解密后，main CRC 通过。
 3. 同一 plaintext 的 19 个 segment CRC 全通过。
 4. plaintext 的关键容量/状态字段与同一物理盘 LBA7/LBA12/设备几何交叉一致。
-5. 使用同一官方 AES-192-CBC context 重加密后，必须与 physical Region A 前 0x800B bit-exact。
+5. 使用闭环后的真实官方 AES-256-CBC key/context 重加密后，必须与 physical Region A 前 0x800B bit-exact。
 6. 解密实现和静态/动态证据必须进入仓库测试，不依赖聊天记录。
 
 只有满足 1-6，才允许声明“Region A 前 0x800 解密完成”。

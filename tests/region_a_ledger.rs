@@ -230,3 +230,92 @@ fn failed_init_iir_harness_is_negative_evidence_not_virtual_positive() {
     assert!(profile.contains("NOT_REPRODUCED"));
     assert!(profile.contains("N-IIR-INIT-RUNNER"));
 }
+
+#[test]
+fn region_a_cipher_descriptor_is_aes256_cbc_and_matches_standard_crypto() {
+    let descriptor: serde_json::Value = serde_json::from_str(include_str!(
+        "../audit/region_a/evidence/cipher_descriptor_aes256_20260922.json"
+    ))
+    .unwrap();
+    assert_eq!(descriptor["descriptor_va"], "0x1801cd190");
+    assert_eq!(descriptor["nid"], 427);
+    assert_eq!(descriptor["block_size"], 16);
+    assert_eq!(descriptor["key_len"], 32);
+    assert_eq!(descriptor["iv_len"], 16);
+    assert_eq!(descriptor["classification"], "AES-256-CBC");
+    assert_eq!(descriptor["openssl_matches_official_prefix"], true);
+    assert_eq!(
+        descriptor["official_prefix_sha256"],
+        descriptor["openssl_prefix_sha256"]
+    );
+    assert!(!DOC.contains("Region A 主 IIR wrapper 实际使用 **AES-192-CBC**"));
+    assert!(DOC.contains("Region A 主 IIR wrapper 实际使用 **AES-256-CBC**"));
+}
+
+#[test]
+fn init_final_key_profiles_are_closed_but_both_fail_physical_lexar_integrity() {
+    let derivation: serde_json::Value = serde_json::from_str(include_str!(
+        "../audit/region_a/evidence/init_key_derivation_20260922.json"
+    ))
+    .unwrap();
+    assert_eq!(derivation["input_len"], 32);
+    assert_eq!(
+        derivation["input_hex"],
+        "767276446c6c00383048335437333457474e444d4b5059504d38304559583100"
+    );
+    assert_eq!(
+        derivation["md5_digest_hex"],
+        "8eeaa2062efa0b371076ebe510d98f18"
+    );
+    assert_eq!(
+        derivation["final_core_key_ascii"],
+        "8eeaa2062efa0b371076ebe510d98f18"
+    );
+
+    let profiles: serde_json::Value = serde_json::from_str(include_str!(
+        "../audit/region_a/evidence/init_key_profiles_20260922.json"
+    ))
+    .unwrap();
+    let profiles = profiles["profiles"].as_array().unwrap();
+    assert_eq!(profiles.len(), 3);
+    assert_eq!(profiles[0]["formatter"], "%02X");
+    assert_eq!(
+        profiles[0]["final_key_ascii"],
+        "8EEAA2062EFA0B371076EBE510D98F18"
+    );
+    assert_eq!(profiles[1]["formatter"], "%02x");
+    assert_eq!(profiles[2]["formatter"], "%02x");
+
+    let lower: serde_json::Value = serde_json::from_str(include_str!(
+        "../audit/region_a/evidence/decrypt_init_key_candidate_crc_20260922.json"
+    ))
+    .unwrap();
+    assert_eq!(lower["main_crc"]["ok"], false);
+    assert_eq!(lower["all_crc_ok"], false);
+    assert_eq!(
+        lower["segment_crcs"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|item| item["ok"] == true)
+            .count(),
+        0
+    );
+
+    let upper: serde_json::Value = serde_json::from_str(include_str!(
+        "../audit/region_a/evidence/decrypt_uppercase_key_candidate_crc_20260922.json"
+    ))
+    .unwrap();
+    assert_eq!(upper["key_ascii"], "8EEAA2062EFA0B371076EBE510D98F18");
+    assert_eq!(upper["main_crc"]["ok"], false);
+    assert_eq!(upper["all_crc_ok"], false);
+    assert_eq!(
+        upper["segment_crcs"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|item| item["ok"] == true)
+            .count(),
+        0
+    );
+}

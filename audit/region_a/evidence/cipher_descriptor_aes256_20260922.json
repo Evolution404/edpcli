@@ -1,0 +1,16 @@
+{
+  "descriptor_va": "0x1801cd190",
+  "nid": 427,
+  "block_size": 16,
+  "key_len": 32,
+  "iv_len": 16,
+  "flags": "0x1002",
+  "classification": "AES-256-CBC",
+  "key_ascii": "8eeaa2062efa0b371076ebe510d98f18",
+  "iv": "00000000000000000000000000000000",
+  "official_wrapper_prefix_len": 2032,
+  "openssl_matches_official_prefix": true,
+  "openssl_plain_sha256": "22ea67f383b6c39bbc93dfd3c7e1a302df61c90ce443bd4c4fdab09dad9f41c0",
+  "official_prefix_sha256": "0b034540b089dd0d572ec4cd25c4cf8bbb7abdf0ce0b34309ed7a78d10a38c22",
+  "openssl_prefix_sha256": "0b034540b089dd0d572ec4cd25c4cf8bbb7abdf0ce0b34309ed7a78d10a38c22"
+}

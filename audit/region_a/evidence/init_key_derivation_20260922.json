@@ -1,0 +1,10 @@
+{
+  "input_len": 32,
+  "input_hex": "767276446c6c00383048335437333457474e444d4b5059504d38304559583100",
+  "input_display": "vrvDll\\080H3T734WGNDMKPYPM80EYX1\\0",
+  "md5_digest_hex": "8eeaa2062efa0b371076ebe510d98f18",
+  "hex_format": "%02x",
+  "final_core_key_ascii": "8eeaa2062efa0b371076ebe510d98f18",
+  "final_core_key_hex": "3865656161323036326566613062333731303736656265353130643938663138",
+  "final_core_key_len": 32
+}
