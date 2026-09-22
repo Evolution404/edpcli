@@ -4,6 +4,7 @@ use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use edpcli::common::{EXIT_OK, EXIT_TARGET, METADATA_IMAGE_LEN};
+use edpcli::edpb::{self, CoreCapture};
 
 fn run(args: &[&str]) -> std::process::Output {
     Command::new(env!("CARGO_BIN_EXE_edpcli"))
@@ -48,15 +49,24 @@ impl Drop for TempDir {
 
 fn synthetic_backup(dir: &TempDir) -> PathBuf {
     let path = dir.0.join(
-        "disk6_123456_vid3535_pid6300_disk&ven_aigo&prod_u335_onlyid1987718388_20260918_120000.bin",
+        "disk6_123456_vid3535_pid6300_disk&ven_aigo&prod_u335_onlyid1987718388_20260918_120000.edpb",
     );
     let data = vec![0u8; METADATA_IMAGE_LEN];
-    fs::write(&path, &data).expect("write backup");
-    fs::write(
-        edpcli::diskio::sha256_sidecar_path(&path),
-        format!("{}\n", edpcli::sha256::sha256_hex(&data)),
-    )
-    .expect("write sha256");
+    let capture = CoreCapture {
+        snapshot_id: "platform-matrix".into(),
+        created_epoch: 1_790_000_000,
+        disk_number: Some(6),
+        vid: "3535".into(),
+        pid: "6300".into(),
+        device_id: "disk&ven_aigo&prod_u335".into(),
+        onlyid: Some("1987718388".into()),
+        total_sectors: Some(123_456),
+        logical_sector_size: 512,
+        edpcli_version: env!("CARGO_PKG_VERSION").into(),
+        device_state: "encrypted".into(),
+        lba0_12: &data,
+    };
+    edpb::write_core_backup(&path, &capture).expect("write EDPB");
     path
 }
 
