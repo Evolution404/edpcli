@@ -213,7 +213,9 @@ pub fn run() -> i32 {
         } => {
             let bak = diskio::resolve_backup_dir(backup_dir.as_deref());
             match action {
-                BackupAction::Create { disk } => backup_create_real_flow(&runner, disk, backup_dir),
+                BackupAction::Create { disk, deep } => {
+                    backup_create_real_flow(&runner, disk, backup_dir, deep)
+                }
                 BackupAction::List => backup_list(&bak),
                 BackupAction::Verify { target } => backup_verify(&bak, target.as_deref()),
                 BackupAction::Restore { target, disk } => real_flow(
@@ -303,6 +305,7 @@ fn backup_create_real_flow(
     runner: &SysRunner,
     disk_opt: Option<u32>,
     backup_dir_flag: Option<String>,
+    deep: bool,
 ) -> i32 {
     if let Some(disk) = disk_opt {
         if let Err(error) = guard_usb_disk(runner, disk) {
@@ -351,7 +354,10 @@ fn backup_create_real_flow(
         prompt: &mut prompt,
         backup_dir: diskio::resolve_backup_dir(backup_dir_flag.as_deref()),
     };
-    finish(backup_create_flow(disk, &mut ctx, &mut dev).map(|_| EXIT_OK))
+    finish(
+        crate::application::write::backup_create_level_flow(disk, &mut ctx, &mut dev, deep)
+            .map(|_| EXIT_OK),
+    )
 }
 
 /// apply/backup restore 的公共外壳:
@@ -691,7 +697,10 @@ mod tests {
         assert!(matches!(
             parse_args(&["backup".into(), "create".into(), "--disk=4".into()]).unwrap(),
             Parsed::Backup {
-                action: BackupAction::Create { disk: Some(4) },
+                action: BackupAction::Create {
+                    disk: Some(4),
+                    deep: false
+                },
                 ..
             }
         ));

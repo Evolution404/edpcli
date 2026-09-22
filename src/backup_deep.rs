@@ -248,3 +248,108 @@ pub fn analyze_partition(
     }
     report
 }
+
+/// Acquire the complete Metadata policy first, then append Deep evidence and
+/// interpretation. Failed analysis never removes an existing raw artifact.
+pub fn acquire_deep(
+    dev: &mut dyn crate::diskio::SectorDev,
+    lba0_12: &[u8],
+    device_id: &str,
+    total_sectors: u64,
+) -> Result<crate::backup_metadata::MetadataAcquisition, String> {
+    let mut out = crate::backup_metadata::acquire_metadata(dev, lba0_12, device_id, total_sectors)?;
+    let partitions =
+        crate::backup_metadata::parse_partition_geometry(lba0_12, device_id, total_sectors)?;
+    for p in partitions
+        .iter()
+        .filter(|p| matches!(p.partition_type, 2 | 4))
+    {
+        let prefix_id = format!("raw.partition.{}.prefix", p.index);
+        let prefix = out
+            .artifacts
+            .iter()
+            .find(|a| a.id == prefix_id)
+            .map(|a| a.data.clone());
+        let mut report = assess_partition(p, prefix.as_deref());
+        if report.status == AnalysisStatus::Unsupported && p.need_encrypt == 0 {
+            let mut reader = RawPartitionReader::new(dev, p);
+            // Reuse captured sectors so the parser sees the same bytes as the
+            // Metadata evidence, even if the live source subsequently changes.
+            for a in &out.artifacts {
+                if a.kind != "raw_sectors" || a.source_extent_ids.len() != 1 {
+                    continue;
+                }
+                let Some(e) = out.extents.iter().find(|e| e.id == a.source_extent_ids[0]) else {
+                    continue;
+                };
+                if e.start_lba < p.start_sector
+                    || e.start_lba + e.sector_count > p.start_sector + p.sector_count
+                {
+                    continue;
+                }
+                for (offset, sector) in a.data.chunks_exact(512).enumerate() {
+                    reader
+                        .sectors
+                        .entry(e.start_lba - p.start_sector + offset as u64)
+                        .or_insert_with(|| sector.to_vec());
+                }
+            }
+            report = analyze_partition(p, &mut reader);
+            // Store bounded contiguous runs rather than one artifact per sector.
+            let mut runs: Vec<(u64, Vec<u8>)> = Vec::new();
+            for (lba, bytes) in reader.sectors {
+                if let Some((start, data)) = runs.last_mut() {
+                    if *start + data.len() as u64 / 512 == lba {
+                        data.extend(bytes);
+                        continue;
+                    }
+                }
+                runs.push((lba, bytes));
+            }
+            for (ordinal, (lba, data)) in runs.into_iter().enumerate() {
+                let eid = format!("extent.partition.{}.deep.{ordinal}", p.index);
+                let aid = format!("raw.partition.{}.deep.{ordinal}", p.index);
+                out.extents.push(crate::edpb::Extent {
+                    id: eid.clone(),
+                    region_id: format!("region.partition.{}.type{}", p.index, p.partition_type),
+                    start_lba: p.start_sector + lba,
+                    sector_count: data.len() as u64 / 512,
+                    purpose: "filesystem_analysis_evidence".into(),
+                });
+                out.artifacts.push(ArtifactInput {
+                    id: aid.clone(),
+                    kind: "raw_sectors".into(),
+                    media_type: "application/octet-stream".into(),
+                    source_extent_ids: vec![eid.clone()],
+                    derivation: None,
+                    restore_policy: RestorePolicy::EvidenceOnly,
+                    completeness: ArtifactCompleteness::Complete,
+                    data,
+                });
+                report.source_artifact_ids.push(aid);
+                report.source_extent_ids.push(eid);
+            }
+        }
+        let mut summary = report.clone().into_artifact()?;
+        let mut list = summary.clone();
+        list.id = format!("derived.partition.{}.file_list", p.index);
+        list.kind = "file_list".into();
+        list.data = serde_json::to_vec_pretty(&serde_json::json!({
+            "schema":"edpcli.deep.file_list.v1", "partition_index":p.index,
+            "partition_type":p.partition_type, "status":report.status, "reason":report.reason,
+            "entries":report.entries,
+        }))
+        .map_err(|e| e.to_string())?;
+        // Keep the summary compact; the list is its own derived artifact.
+        let mut summary_json = serde_json::to_value(&report).map_err(|e| e.to_string())?;
+        summary_json
+            .as_object_mut()
+            .expect("analysis object")
+            .remove("entries");
+        summary.data = serde_json::to_vec_pretty(&summary_json).map_err(|e| e.to_string())?;
+        out.artifacts.push(summary);
+        out.artifacts.push(list);
+    }
+    out.notes.push("Deep v1: read-only FAT16/FAT32 inventory; encrypted partitions locked; exFAT/NTFS unsupported; ordinary file payloads not read".into());
+    Ok(out)
+}

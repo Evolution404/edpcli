@@ -1116,3 +1116,34 @@ fn apply_refuses_if_metadata_changes_after_backup_before_write() {
     );
     assert_eq!(dev.writes, 0, "确认后的元数据变化必须在第一笔写入前拦截");
 }
+
+#[test]
+fn deep_backup_create_never_unmounts_reopens_or_writes() {
+    let orig = load_disk_image("netac").expect("committed netac fixture");
+    let mut runner = netac_runner(6);
+    runner.canned.remove("diskutil unmountDisk force disk6");
+    let tmp = TmpDir::new("deep_readonly_flow");
+    let mut prompt = ScriptPrompter {
+        inputs: vec![],
+        idx: 0,
+    };
+    let mut dev = SwapOnReopenDev::new(orig.clone(), orig.clone());
+    let (path, _) = edpcli::application::write::backup_create_level_flow(
+        6,
+        &mut ctx(&runner, &mut prompt, &tmp.0),
+        &mut dev,
+        true,
+    )
+    .unwrap();
+    assert!(!dev.switched);
+    assert_eq!(dev.writes, 0);
+    assert_eq!(prompt.idx, 0);
+    let v = edpb::verify_file(&path).unwrap();
+    assert_eq!(v.manifest.snapshot.capture_level, edpb::CaptureLevel::Deep);
+    assert!(v
+        .manifest
+        .artifacts
+        .iter()
+        .any(|a| a.kind == "filesystem_summary"));
+    assert_eq!(edpb::read_raw_protocol(&path).unwrap(), orig);
+}

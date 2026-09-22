@@ -382,3 +382,10 @@ EDPB 不生成 .sha256 sidecar。
 8. 全部验证成功前不得删除旧文件。
 
 正式发行代码不依赖该迁移器。
+
+## Deep v1 implementation
+
+`backup create --deep` stores a Metadata superset with `capture_level=deep`.
+FAT16/FAT32 inventory, status/null semantics, evidence layering, resource limits
+and current exFAT/NTFS/decryption boundaries are specified in
+[DEEP_BACKUP_V1.md](DEEP_BACKUP_V1.md). Automatic pre-write backups remain Metadata.

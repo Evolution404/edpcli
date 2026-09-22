@@ -125,7 +125,7 @@ _edpcli() {
       fi
       if [[ "$cur" == -* ]]; then
         case "$action" in
-          create)  compadd -- --disk --backup-dir --help ;;
+          create)  compadd -- --disk --deep --backup-dir --help ;;
           restore) compadd -- --disk --yes --backup-dir --help ;;
           verify)  compadd -- --backup-dir --help ;;
           delete)  compadd -- --yes --backup-dir --help ;;
@@ -217,7 +217,7 @@ _edpcli() {
         COMPREPLY=( $(compgen -W 'create list restore verify delete prune' -- "$cur") )
       elif [[ "$cur" == -* ]]; then
         case "$action" in
-          create)  vals='--disk --backup-dir --help' ;;
+          create)  vals='--disk --deep --backup-dir --help' ;;
           restore) vals='--disk --yes --backup-dir --help' ;;
           verify)  vals='--backup-dir --help' ;;
           delete)  vals='--yes --backup-dir --help' ;;
@@ -306,6 +306,7 @@ end
 complete -c edpcli -f
 complete -c edpcli -n '__fish_use_subcommand' -a 'list info apply backup inspect convert completion version help'
 complete -c edpcli -n '__fish_seen_subcommand_from backup' -a 'create list restore verify delete prune'
+complete -c edpcli -n '__fish_seen_subcommand_from backup; and __fish_seen_subcommand_from create' -l deep -d '只读文件系统分析'
 complete -c edpcli -n '__edpcli_wants_backup_target' -a '(__edpcli_backup_numbers) (__edpcli_backup_files)'
 complete -c edpcli -n '__fish_seen_subcommand_from inspect info apply backup' -l disk -r -a '(edpcli __complete disk 2>/dev/null)'
 complete -c edpcli -n '__fish_seen_subcommand_from inspect' -l lba -r -a '(edpcli __complete lba 2>/dev/null)'

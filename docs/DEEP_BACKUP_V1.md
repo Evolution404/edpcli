@@ -47,3 +47,21 @@ FAT layout, cluster classification, directory entries and long filename rules:
 Existing EDP partition/key evidence is in
 [EDP protocol reverse engineering](EDP_PROTOCOL_REVERSE_ENGINEERING.md), sections
 6.1 onward. No password guessing or fabricated key material is used.
+
+## Capture and replay
+
+`edpcli backup create --disk N --deep` uses the same O_RDONLY device-opening
+path as Metadata. Without `--deep`, manual and automatic backups remain Metadata.
+Deep first acquires Metadata (including Region A), then stores additional raw
+read ranges and `derived.partition.<index>.filesystem_summary` plus
+`derived.partition.<index>.file_list` in the same EDPB. Numeric indices are used
+to avoid collisions if the partition table has more than one entry of a type.
+Each JSON also identifies partition_type. The file list contains null entries
+when analysis did not complete. No sidecar is created. Parser failure does not
+abort preservation of successful raw reads or pre-existing Metadata artifacts.
+
+Raw reads are cached and grouped into contiguous evidence extents. The captured
+Metadata bytes take precedence over later reads of those same sectors. This is
+not a filesystem freeze: a concurrently changing source may produce a failure or
+an inconsistent snapshot, so it must not be described as an atomic filesystem
+snapshot. Deep never unmounts or changes the source volume state.

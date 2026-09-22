@@ -79,6 +79,7 @@ pub enum Parsed {
 pub enum BackupAction {
     Create {
         disk: Option<u32>,
+        deep: bool,
     },
     List,
     Verify {
@@ -139,7 +140,7 @@ fn print_topic_help(topic: &str) {
         }
         "backup" => {
             println!("{}", bold("用法: edpcli backup [动作] [选项]"));
-            println!("  backup create [--disk N]              立即备份当前 U 盘");
+            println!("  backup create [--disk N] [--deep]     只读备份；--deep 增加文件系统分析");
             println!("  backup [list]                          查看备份");
             println!("  backup restore [编号|文件] [--disk N] 恢复备份");
             println!("  backup verify [编号|文件]              校验备份");
@@ -464,9 +465,14 @@ pub fn parse_args(argv: &[String]) -> Result<Parsed, String> {
             let action = match action_name {
                 "create" => {
                     let mut disk = None;
+                    let mut deep = false;
                     let mut i = 0;
                     while i < tail.len() {
                         match flag_name(&tail[i]) {
+                            "--deep" => {
+                                if tail[i] != "--deep" || deep { return Err("错误: --deep 不接受值或重复指定".into()); }
+                                deep = true;
+                            }
                             "--disk" => {
                                 let v = take_value(tail, &mut i, "--disk")?;
                                 set_once(&mut disk, parse_disk_spec(&v)?, "--disk")?;
@@ -479,7 +485,7 @@ pub fn parse_args(argv: &[String]) -> Result<Parsed, String> {
                         }
                         i += 1;
                     }
-                    BackupAction::Create { disk }
+                    BackupAction::Create { disk, deep }
                 }
                 "list" => {
                     let mut i = 0;

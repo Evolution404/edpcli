@@ -312,3 +312,105 @@ fn fat_long_names_and_local_timestamps_are_preserved() {
         AnalysisStatus::ParseFailed
     );
 }
+
+#[test]
+fn deep_container_retains_metadata_and_never_makes_analysis_restorable() {
+    use edpcli::{backup_deep::acquire_deep, backup_metadata::acquire_metadata, edpb};
+    struct Dev;
+    impl edpcli::diskio::SectorDev for Dev {
+        fn read_sector(&mut self, _: u32) -> io::Result<Vec<u8>> {
+            Ok(vec![0; 512])
+        }
+        fn write_sector(&mut self, _: u32, _: &[u8]) -> io::Result<()> {
+            panic!("unexpected write")
+        }
+        fn reopen_rdwr(&mut self, _: std::time::Duration) -> io::Result<()> {
+            panic!("unexpected reopen")
+        }
+    }
+    let image=include_bytes!("fixtures/protocol/disk4_243625984_vid21c4_pid0cd1_disk&ven_lexar&prod_usb_flash_drive_onlyid3164177653_20260827_221910.bin");
+    let did = "disk&ven_lexar&prod_usb_flash_drive";
+    let metadata = acquire_metadata(&mut Dev, image, did, 243625984).unwrap();
+    let deep = acquire_deep(&mut Dev, image, did, 243625984).unwrap();
+    for original in &metadata.artifacts {
+        let retained = deep.artifacts.iter().find(|a| a.id == original.id).unwrap();
+        assert_eq!(retained.data, original.data);
+        assert_eq!(retained.restore_policy, original.restore_policy);
+    }
+    assert!(deep.artifacts.iter().any(|a| a.id == "raw.region_a"));
+    for index in [1, 2] {
+        for kind in ["filesystem_summary", "file_list"] {
+            let a = deep
+                .artifacts
+                .iter()
+                .find(|a| a.id == format!("derived.partition.{index}.{kind}"))
+                .unwrap();
+            assert_eq!(a.restore_policy, RestorePolicy::DerivedOnly);
+            let v: serde_json::Value = serde_json::from_slice(&a.data).unwrap();
+            assert_eq!(v["status"], "locked");
+        }
+    }
+    let path = std::env::temp_dir().join(format!(
+        "deep-{}-{}.edpb",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let capture = edpb::MetadataCapture {
+        core: edpb::CoreCapture {
+            snapshot_id: "deep-test".into(),
+            created_epoch: 1_790_000_000,
+            disk_number: Some(5),
+            vid: "21c4".into(),
+            pid: "0cd1".into(),
+            device_id: did.into(),
+            onlyid: Some("3164177653".into()),
+            total_sectors: Some(243625984),
+            logical_sector_size: 512,
+            edpcli_version: "test".into(),
+            device_state: "encrypted".into(),
+            lba0_12: image,
+        },
+        regions: deep.regions,
+        extents: deep.extents,
+        artifacts: deep.artifacts,
+        notes: deep.notes,
+    };
+    edpb::write_deep_backup(&path, &capture).unwrap();
+    let verified = edpb::verify_file(&path).unwrap();
+    assert_eq!(
+        verified.manifest.snapshot.capture_level,
+        edpb::CaptureLevel::Deep
+    );
+    assert_eq!(
+        verified
+            .manifest
+            .artifacts
+            .iter()
+            .filter(|a| a.restore_policy == RestorePolicy::Restorable)
+            .count(),
+        1
+    );
+    assert_eq!(edpb::read_raw_protocol(&path).unwrap(), image);
+    std::fs::remove_file(path).unwrap();
+}
+
+#[test]
+fn deep_source_has_no_mutation_or_mount_operations() {
+    for source in [
+        include_str!("../src/backup_deep.rs"),
+        include_str!("../src/backup_deep/fat.rs"),
+    ] {
+        for forbidden in [
+            "write_sector(",
+            "prepare_write(",
+            "reopen_rdwr(",
+            "diskutil",
+            "Command::new",
+        ] {
+            assert!(!source.contains(forbidden), "{forbidden}");
+        }
+    }
+}

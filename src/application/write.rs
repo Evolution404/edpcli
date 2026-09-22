@@ -536,6 +536,16 @@ pub fn backup_create_flow(
     ctx: &mut Ctx,
     dev: &mut dyn SectorDev,
 ) -> EdpCliResult<(PathBuf, bool)> {
+    backup_create_level_flow(disk, ctx, dev, false)
+}
+
+/// Explicit Deep opt-in; shares the existing read-only device and identity path.
+pub fn backup_create_level_flow(
+    disk: u32,
+    ctx: &mut Ctx,
+    dev: &mut dyn SectorDev,
+    deep: bool,
+) -> EdpCliResult<(PathBuf, bool)> {
     guard_usb_disk(ctx.runner, disk)?;
     let img = read_image(dev)?;
     let id = identify(ctx.runner, disk, &img[7 * SECTOR..8 * SECTOR]);
@@ -559,14 +569,23 @@ pub fn backup_create_flow(
             "错误: 无法获取磁盘总扇区数，无法创建 Metadata 级备份",
         )
     })?;
-    let metadata = crate::backup_metadata::acquire_metadata(dev, &img, &device_id, total_sectors)
-        .map_err(|message| {
+    let acquire = if deep {
+        crate::backup_deep::acquire_deep
+    } else {
+        crate::backup_metadata::acquire_metadata
+    };
+    let metadata = acquire(dev, &img, &device_id, total_sectors).map_err(|message| {
         err(
             EXIT_BACKUP,
             format!("错误: Metadata 级备份采集失败: {message}"),
         )
     })?;
-    let created = diskio::create_metadata_backup(
+    let save = if deep {
+        diskio::create_deep_backup
+    } else {
+        diskio::create_metadata_backup
+    };
+    let created = save(
         &facts,
         &img,
         &device_id,

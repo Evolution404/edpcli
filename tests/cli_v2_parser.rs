@@ -41,7 +41,10 @@ fn backup_v2_actions_parse_without_onlyid_or_index_ui() {
     assert!(matches!(
         parse_args(&args(&["backup", "create", "--disk", "4"])).expect("backup create"),
         Parsed::Backup {
-            action: BackupAction::Create { disk: Some(4) },
+            action: BackupAction::Create {
+                disk: Some(4),
+                deep: false
+            },
             ..
         }
     ));
@@ -149,4 +152,20 @@ fn v2_help_names_only_the_new_top_level_commands() {
             "legacy command leaked into help: {removed}\n{help}"
         );
     }
+}
+
+#[test]
+fn deep_backup_is_explicit_and_rejects_duplicate_flags() {
+    assert!(matches!(
+        parse_args(&args(&["backup", "create", "--deep", "--disk", "5"])).unwrap(),
+        Parsed::Backup {
+            action: BackupAction::Create {
+                disk: Some(5),
+                deep: true
+            },
+            ..
+        }
+    ));
+    assert!(parse_args(&args(&["backup", "create", "--deep", "--deep"])).is_err());
+    assert!(parse_args(&args(&["backup", "create", "--deep=false"])).is_err());
 }

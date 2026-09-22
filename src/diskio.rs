@@ -1054,6 +1054,29 @@ pub fn create_metadata_backup(
     Ok((path, is_nopwd))
 }
 
+/// Save an acquired Deep superset; this writes only the destination container.
+pub fn create_deep_backup(
+    facts: &DiskFacts,
+    data: &[u8],
+    device_id: &str,
+    deep: crate::backup_metadata::MetadataAcquisition,
+    bak_dir: &Path,
+    clock: &dyn Clock,
+) -> EdpCliResult<(PathBuf, bool)> {
+    let (path, is_nopwd, core) = prepare_backup_capture(facts, data, device_id, bak_dir, clock)?;
+    let capture = crate::edpb::MetadataCapture {
+        core,
+        regions: deep.regions,
+        extents: deep.extents,
+        artifacts: deep.artifacts,
+        notes: deep.notes,
+    };
+    crate::edpb::write_deep_backup(&path, &capture)
+        .map_err(|e| EdpCliError::new(EXIT_BACKUP, format!("错误: {e}")))?;
+    sync_dir(bak_dir)?;
+    Ok((path, is_nopwd))
+}
+
 /// 只支持 `*` 的通配匹配(device_id/文件名只含 &/_/字母数字, 无其它元字符)。
 pub fn wildcard_match(pat: &str, text: &str) -> bool {
     let parts: Vec<&str> = pat.split('*').collect();

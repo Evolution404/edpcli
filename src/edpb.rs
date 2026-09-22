@@ -508,6 +508,26 @@ pub fn write_metadata_backup(
     )
 }
 
+/// Write the Metadata superset with Deep-derived artifacts into one container.
+pub fn write_deep_backup(path: &Path, capture: &MetadataCapture<'_>) -> Result<Manifest, String> {
+    if capture
+        .artifacts
+        .iter()
+        .any(|a| a.kind != "raw_sectors" && a.restore_policy != RestorePolicy::DerivedOnly)
+    {
+        return Err("Deep interpretation must be derived_only".into());
+    }
+    write_container(
+        path,
+        &capture.core,
+        CaptureLevel::Deep,
+        &capture.regions,
+        &capture.extents,
+        &capture.artifacts,
+        &capture.notes,
+    )
+}
+
 fn read_exact_at(file: &mut File, offset: u64, len: usize) -> Result<Vec<u8>, String> {
     file.seek(SeekFrom::Start(offset))
         .map_err(|e| format!("EDPB seek failed: {e}"))?;
