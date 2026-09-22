@@ -1,0 +1,10 @@
+scope	profile	semantic_status	positive_wire_modality	physical_status	evidence	notes
+LBA1:000-1ff	absent-gpt	COMPLETE	physical	COVERED	P-GOLD-ENC;P-GOLD-NOPWD	current real-device census exercises the non-GPT/absent sector state
+LBA1:000-1ff	enabled-gpt	COMPLETE	virtual	MISSING_PHYSICAL	V-GPT	first-party Linux builder output and Windows consumer close semantics; no EDP real-device positive GPT capture is currently available
+LBA2:000-07f	absent-gpt	COMPLETE	physical	COVERED	P-GOLD-ENC;P-GOLD-NOPWD	current real-device census exercises the absent GPT partition-table state
+LBA2:000-07f	enabled-gpt-entry0	COMPLETE	virtual	MISSING_PHYSICAL	V-GPT	first-party GPT writer output closes entry0 semantics; no EDP real-device positive GPT capture is currently available
+LBA2:080-1ff	enabled-gpt-unused-entries	COMPLETE	virtual	MISSING_PHYSICAL	V-GPT	unused-entry semantics are closed by first-party writer/consumer behavior; no EDP real-device positive GPT capture is currently available
+LBA12:000-1ff	mode1	COMPLETE	virtual	MISSING_PHYSICAL	V-LBA12	first-party CreatePartitions runtime output plus independent unwrap/CRC closes semantic behavior; current physical corpus has zero mode1 positives
+LBA12:000-1ff	mode2	COMPLETE	physical	COVERED	P-GOLD-ENC;V-LBA12	current real-device corpus supplies mode2 positives and first-party runtime execution independently reproduces the writer path
+LBA12:000-1ff	mode3	COMPLETE	virtual	MISSING_PHYSICAL	V-LBA12	first-party CreatePartitions runtime output plus independent unwrap/CRC closes semantic behavior; current physical corpus has zero mode3 positives
+LBA12:000-1ff	legacy-v0064	COMPLETE	physical	COVERED	P-GOLD-ENC;P-GOLD-NOPWD	legacy physical entries exercise the v0064 compatibility profile

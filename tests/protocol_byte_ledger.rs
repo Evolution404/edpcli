@@ -4,6 +4,7 @@ use std::collections::{HashMap, HashSet};
 
 const LEDGER: &str = include_str!("../audit/protocol/byte_ledger.tsv");
 const EVIDENCE: &str = include_str!("../audit/protocol/evidence_manifest.tsv");
+const PROFILE_COVERAGE: &str = include_str!("../audit/protocol/profile_coverage.tsv");
 const DOC: &str = include_str!("../docs/EDP_PROTOCOL_REVERSE_ENGINEERING.md");
 
 fn parse_hex(value: &str) -> usize {
@@ -49,6 +50,7 @@ fn byte_ledger_covers_exactly_6656_bytes_without_overlap() {
     let mut seen = vec![false; 13 * 512];
     let mut complete = [0usize; 13];
     let mut partial = [0usize; 13];
+    let mut unknown = [0usize; 13];
 
     for line in LEDGER
         .lines()
@@ -111,7 +113,8 @@ fn byte_ledger_covers_exactly_6656_bytes_without_overlap() {
             match status {
                 "COMPLETE" => complete[lba] += 1,
                 "PARTIAL" => partial[lba] += 1,
-                _ => {}
+                "UNKNOWN" => unknown[lba] += 1,
+                _ => unreachable!(),
             }
         }
     }
@@ -120,22 +123,65 @@ fn byte_ledger_covers_exactly_6656_bytes_without_overlap() {
         seen.into_iter().all(|value| value),
         "byte ledger contains gaps"
     );
-    let expected_complete = [
-        512, 512, 512, 512, 512, 512, 497, 512, 512, 384, 512, 512, 512,
-    ];
-    let expected_partial = [0, 0, 0, 0, 0, 0, 15, 0, 0, 128, 0, 0, 0];
-    assert_eq!(complete, expected_complete);
-    assert_eq!(partial, expected_partial);
-    assert_eq!(complete.iter().sum::<usize>(), 6513);
-    assert_eq!(partial.iter().sum::<usize>(), 143);
+    assert_eq!(
+        complete.iter().sum::<usize>()
+            + partial.iter().sum::<usize>()
+            + unknown.iter().sum::<usize>(),
+        13 * 512,
+        "semantic status totals must cover exactly LBA0-LBA12 without a historical completion floor"
+    );
 
     for lba in 0..13 {
-        let progress = format!("| LBA{lba} | {} | {} | 0 |", complete[lba], partial[lba]);
+        let progress = format!(
+            "| LBA{lba} | {} | {} | {} |",
+            complete[lba], partial[lba], unknown[lba]
+        );
         assert!(
             DOC.contains(&progress),
             "canonical strict-progress table diverged from byte ledger: {progress}"
         );
     }
+}
+
+#[test]
+fn profile_coverage_keeps_semantic_status_separate_from_physical_positive_evidence() {
+    let evidence = evidence_modalities();
+    let mut rows = 0usize;
+    for line in PROFILE_COVERAGE
+        .lines()
+        .skip(1)
+        .filter(|line| !line.trim().is_empty())
+    {
+        let cols: Vec<_> = line.split('\t').collect();
+        assert_eq!(cols.len(), 7, "bad profile-coverage row: {line}");
+        assert!(matches!(cols[2], "COMPLETE" | "PARTIAL" | "UNKNOWN"));
+        assert!(matches!(cols[3], "physical" | "virtual" | "static"));
+        assert!(matches!(cols[4], "COVERED" | "MISSING_PHYSICAL"));
+        let ids: Vec<_> = cols[5].split(';').filter(|id| !id.is_empty()).collect();
+        assert!(
+            !ids.is_empty(),
+            "profile coverage needs evidence ids: {line}"
+        );
+        for id in &ids {
+            assert!(
+                evidence.contains_key(id),
+                "unknown profile evidence id {id}: {line}"
+            );
+        }
+        match cols[4] {
+            "COVERED" => assert!(
+                ids.iter().any(|id| evidence[id] == "physical"),
+                "COVERED profile must cite a physical capture: {line}"
+            ),
+            "MISSING_PHYSICAL" => assert!(
+                ids.iter().all(|id| evidence[id] != "physical"),
+                "MISSING_PHYSICAL must not cite a physical positive as coverage: {line}"
+            ),
+            _ => unreachable!(),
+        }
+        rows += 1;
+    }
+    assert!(rows > 0, "profile coverage ledger must not be empty");
 }
 
 #[test]

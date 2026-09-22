@@ -5,11 +5,13 @@
 
 更新时间：2026-09-22
 
-## 严格进度
+## 语义闭环进度与物理 profile 覆盖
 
-- COMPLETE：6513 / 6656 B = 97.9%
-- PARTIAL：143 B
+- 语义 COMPLETE：6513 / 6656 B = 97.9%
+- 语义 PARTIAL：143 B
 - UNKNOWN：0 B
+- `COMPLETE` 表示 EDP 盘面字节边界、producer/caller-owned 序列化边界与 consumer 语义已经闭合；**不再等同于每个已知 profile 都存在真实物理正例**。
+- profile 级物理正例覆盖独立维护在 `audit/protocol/profile_coverage.tsv`。当前标记为 `MISSING_PHYSICAL` 的是 GPT enabled profile，以及 LBA12 mode1/mode3；它们均已有 first-party runtime positive wire evidence，但不得冒充 real-device capture。
 - 本轮进入时仓库 HEAD：`63b76da1fed351f1e7bbe45f0f12f5c22765e3dc`
 - 中途另一工作流先在 `1c281cb9bf4a9d92f8fc27198120d53db6466da9` 将真实免密 SanDisk
   flag 表示歧义保守降级；本轮随后补齐 v19 historical writer 的 exact-512 virtual

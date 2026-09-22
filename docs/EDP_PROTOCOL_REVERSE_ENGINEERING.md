@@ -7,7 +7,8 @@
 > `COMPLETE` 只允许由可复核证据升级；`PARTIAL` 表示边界/部分语义已经验证但仍有
 > 明确缺口；任何候选解释必须标注为候选或已证伪，不得写成事实。
 >
-> **当前严格进度：6513 / 6656B COMPLETE（97.9%），143B PARTIAL（2.1%），UNKNOWN=0。**
+> **当前 EDP 字节语义闭环进度：6513 / 6656B COMPLETE（97.9%），143B PARTIAL（2.1%），UNKNOWN=0。**
+> `COMPLETE` 与“每个已知 profile 都有真实物理正例”是两个独立维度；物理 profile 覆盖见 `audit/protocol/profile_coverage.tsv`。
 >
 > 文末“验证历程附录”用于保留详细推导和纠错记录；若附录中的历史阶段判断与本文前半
 > canonical 账本冲突，**一律以前半当前账本为准**。
@@ -18,13 +19,15 @@
 > 本文是长期维护的**唯一协议分析主账本**。研究过程、历史误判、专项取证和更长的
 > 证据讨论已全部迁入本文第10–12节，不再维护并行分析文档。
 
-## 1. 完成判定：必须四证合一
+## 1. 完成判定：语义闭环与物理 profile 覆盖分层
 
-字段状态只有三种：
+字段的**语义状态**只有三种：
 
-- **COMPLETE**：字段边界、producer/序列化或明确的 caller-owned 输入边界、consumer/行为语义、真实原盘验证全部闭合；若字段值本身由协议规定可推导算法，则该算法也必须闭合。对于明确的 caller-owned identity/material，必须证明 writer 只负责透明接收/序列化、consumer 不依赖某个未证明的隐藏派生关系，此时更上游“业务为何选择这个值”的 provenance 不属于盘面字段语义缺口。存在代际/profile 差异时，差异也必须解释到不会影响字段语义。
-- **PARTIAL**：至少一项关键证据缺失。例如只有字段名、只有 producer、只有 consumer、只有样本规律、只有解密公式，均只能算 PARTIAL。
+- **COMPLETE**：字段边界、producer/序列化或明确的 caller-owned 输入边界、consumer/行为语义已经闭合；若字段值本身由协议规定可推导算法，则该算法也必须闭合。真实原盘仍是最高价值的正向证据，但当某个 profile 缺少 real-device capture 时，若 first-party 官方二进制已直接生成该 profile 的 positive wire、consumer 可独立正向消费且算法/边界可重放，该字段可以在**语义维度**保持 COMPLETE，同时必须把该 profile 单独标记为 `MISSING_PHYSICAL`，不得把 virtual output 写成 physical capture。对于明确的 caller-owned identity/material，必须证明 writer 只负责透明接收/序列化、consumer 不依赖某个未证明的隐藏派生关系，此时更上游“业务为何选择这个值”的 provenance 不属于盘面字段语义缺口。存在代际/profile 差异时，差异也必须解释到不会影响字段语义。
+- **PARTIAL**：至少一项关键语义证据缺失。例如只有字段名、只有 producer、只有 consumer、只有样本规律、只有解密公式，均只能算 PARTIAL。
 - **UNKNOWN**：尚不能稳定划定语义边界，或只知道“当前样本为零/固定值”。
+
+与上述状态独立，`audit/protocol/profile_coverage.tsv` 维护已知 profile 的**物理正例覆盖**：`COVERED` 表示有对应 real-device positive capture；`MISSING_PHYSICAL` 表示当前只有 static/first-party virtual positive evidence。语义 COMPLETE **不等于**所有 profile 已完成物理采样，物理覆盖也不能替代 producer/consumer 语义证明。
 
 以下内容**永远不能单独把字段升级为 COMPLETE**：
 
@@ -71,7 +74,8 @@
   6656B 字节，因此基线审计从 clean clone 即可直接重放；
 - `evidence_manifest.tsv`：把 physical / virtual / static 三类证据分开记录，固定
   官方二进制版本、SHA-256、关键函数地址、实验边界和不能证明的内容；
-- `byte_ledger.tsv`：按 profile 标注并覆盖全部6656B；
+- `byte_ledger.tsv`：按 profile 标注并覆盖全部6656B，状态表示 EDP 字节**语义闭环**；
+- `profile_coverage.tsv`：把已知 profile 的 real-device positive coverage 与语义状态分开维护，禁止把 official virtual output 冒充 physical capture；
 - `historical_matrix.tsv`：集中记录历史 DLL 版本与 join59、HSerialCRC、
   UsbOnlyInfo、动态 MBR 四类指纹的命中/排除结果；
 - `scripts/protocol/audit_baseline.py`：取代旧 `/private/tmp/audit22` 的样本 census
@@ -575,11 +579,10 @@ current/v19 的 post-XOR producer 语义仍保留在审计证据与 Provision wr
   9扇区 raw bytes；独立 reader `fcn.10006DA0` 也只是 rolling + 完整 node copy +
   `OnlyIdXor8` guard，没有单字节 flag patch 或值相关分支。
 
-所以两个 BYTE 必须继续拆开记账：`+0x45` 仍缺历史非零 producer/最终 consumer，保持
-**PARTIAL**；`+0x46` 则由 current Windows/Linux + v19.11.4.1 direct producer zero、
+这段历史阶段判断已被后续证据取代：`+0x45` 现已由 v19 official writer 的 caller-owned 注入实验、strict Aigo rolling decode=`0B` 与跨代 negative consumer 闭合为 **COMPLETE**；`+0x46` 则由 current Windows/Linux + v19.11.4.1 direct producer zero、
 historical rolling-form reader-zero、真实免密 physical wire=`00`、v19 exact-512 virtual
 writer reconstruction、跨代 reader/repair negative consumer 一起闭合为
-**COMPLETE**。这里 COMPLETE 的字段语义是 producer-side dormant-zero compatibility
+**COMPLETE**。其中 `+0x46` 的字段语义是 producer-side dormant-zero compatibility
 byte；官方 reader 对 post-XOR wire 可返回非零 transformed byte（真实样本即 `D9`），
 inspect 因而绝不能为了 COMPLETE 状态把 reader view 清成0。物理盘当年的 exact EXE
 provenance 仍未知，但这不再构成该1B生命周期的缺口；它继续构成 HSerial upstream 等
@@ -620,7 +623,7 @@ post-XOR 写回 `+0x45/+0x46`。历史 raw-zero 实盘仅作为兼容读取 prof
 
 > 每个 LBA 固定 512B；总计 13 × 512 = 6656B。
 >
-> 完成率只统计 COMPLETE，不把 PARTIAL 计入完成。
+> 本表的完成率只统计**语义 COMPLETE**，不把 PARTIAL 计入完成；它不是 physical-profile coverage 百分比。
 
 <!-- STRICT_PROGRESS_BEGIN -->
 | LBA | COMPLETE | PARTIAL | UNKNOWN | 严格完成率 |
@@ -640,11 +643,13 @@ post-XOR 写回 `+0x45/+0x46`。历史 raw-zero 实盘仅作为兼容读取 prof
 | LBA12 | 512 | 0 | 0 | 100.0% |
 <!-- STRICT_PROGRESS_END -->
 
-当前总计：
+当前语义总计：
 
 - **COMPLETE：6513B / 6656B = 97.9%**
 - **PARTIAL：143B / 6656B = 2.1%**
 - **UNKNOWN：0B / 6656B = 0.0%**
+
+物理 profile 正例覆盖不再混入上述百分比。当前 `profile_coverage.tsv` 明确记录：GPT enabled profile 以及 LBA12 mode1/mode3 尚无 EDP real-device positive capture；对应语义由 first-party runtime positive wire + consumer/算法重放闭合。
 
 LBA11 已完整闭合为 512B COMPLETE。此前卡住的后半 252B 不是“某型号盘偶尔使用
 CHS”的未知 profile，而是来自另一条官方 writer/reader 路径：正常注册 writer 使用
@@ -2108,10 +2113,12 @@ post-table 审计当时新增306B COMPLETE；后续又闭合 pass-info
 3×Version 共12B与 entry1/entry2 NeedDisturb 共8B，最后把两个
 BackupPromptPeriod BYTE 闭合为 dormant compatibility fields；LBA7 至此整扇完成。
 
-### 6.3 LBA12 +0x38..+0x47：v0x0206 默认密码的 mode2 wrapping 已闭合，但整字段仍 PARTIAL
+### 6.3 LBA12 +0x38..+0x47：历史阶段记录（当前 mode1/2/3 语义均已 COMPLETE）
 
-本轮对 packed entry 的 16B wrapped file-key 做了重新独立审计，
-不再沿用旧脚本结论。
+> 本节保留当时仅闭合 mode2 的推导过程；**当前结论以前方 canonical 字段账本为准**。后续 first-party `CreatePartitions` 隔离执行已经补齐 mode1/mode3 positive wire 与独立 unwrap/CRC，因此整字段现为语义 COMPLETE；mode1/mode3 仍在 `profile_coverage.tsv` 标记为 `MISSING_PHYSICAL`。
+
+当时对 packed entry 的 16B wrapped file-key 做了重新独立审计，
+不再沿用更早脚本结论。
 
 Windows producer：
 

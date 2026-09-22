@@ -946,7 +946,7 @@ pub fn analyze_sector(lba: u32, raw: &[u8], meta: &InspectMeta) -> SectorView {
                     ));
                 }
                 notes.push(
-                    "官方 BuildSector1_Gpt 生成完整 512B GPT_Header；Windows 注册检查在 protective MBR 命中后会读取 LBA1 的 “EFI PART” 和 header_lba。当前22份原始 SAFE6 参考均未启用该 profile，LBA1 全零，因此本扇区仍是 PARTIAL 而非 COMPLETE。".into(),
+                    "语义状态 COMPLETE：官方 BuildSector1_Gpt 生成完整 512B GPT_Header，Windows 注册检查在 protective MBR 命中后读取 “EFI PART” 和 header_lba。物理 profile 覆盖仍有缺口：当前 real-device corpus 未启用 GPT，enabled-GPT 正例来自 first-party virtual writer。".into(),
                 );
                 "RAW + GPT_Header 结构解析".into()
             } else {
@@ -958,7 +958,7 @@ pub fn analyze_sector(lba: u32, raw: &[u8], meta: &InspectMeta) -> SectorView {
         }
         2 => {
             notes.push(
-                "官方 Linux BuildSector2_Gpt 生成 0x80B GPT_Partition entry；Windows GPT 注册检查从 LBA2 起按每扇4个×128B entry 解析分区表。当前22份原始 SAFE6 参考 LBA2 均全零，缺少正向 GPT 实盘，因此只定为 PARTIAL。".into(),
+                "语义状态 COMPLETE：官方 Linux BuildSector2_Gpt 生成 0x80B GPT_Partition entry，Windows GPT 注册检查从 LBA2 起按每扇4个×128B entry 解析分区表。物理 profile 覆盖仍有缺口：当前 real-device corpus 未启用 GPT，enabled-GPT 正例来自 first-party virtual writer。".into(),
             );
             "RAW（GPT partition-table profile；当前参考未启用）".into()
         }
