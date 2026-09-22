@@ -5,23 +5,31 @@ use std::io::Write;
 use std::process::{Command, Stdio};
 
 use common::*;
-use edpcli::sha256::sha256_hex;
+use edpcli::edpb::{self, CoreCapture};
 
 fn two_netac_backups() -> Option<TmpDir> {
-    let src = fixture_bin("netac")?;
+    let data = load_disk_image("netac")?;
     let tmp = TmpDir::new("cli_ux");
     for ts in ["20260910_172300", "20260911_172300"] {
         let name = format!(
-            "disk6_122880000_vid0dd8_pid2005_disk&ven_netac&prod_onlydisk_onlyid1402259934_{ts}.bin"
+            "disk6_122880000_vid0dd8_pid2005_disk&ven_netac&prod_onlydisk_onlyid1402259934_{ts}.edpb"
         );
         let dst = tmp.0.join(name);
-        fs::copy(&src, &dst).unwrap();
-        let data = fs::read(&dst).unwrap();
-        fs::write(
-            format!("{}.sha256", dst.display()),
-            format!("{}\n", sha256_hex(&data)),
-        )
-        .unwrap();
+        let capture = CoreCapture {
+            snapshot_id: format!("ux-{ts}"),
+            created_epoch: 1_789_000_000,
+            disk_number: Some(6),
+            vid: "0dd8".into(),
+            pid: "2005".into(),
+            device_id: "disk&ven_netac&prod_onlydisk".into(),
+            onlyid: Some("1402259934".into()),
+            total_sectors: Some(122_880_000),
+            logical_sector_size: 512,
+            edpcli_version: env!("CARGO_PKG_VERSION").into(),
+            device_state: "encrypted".into(),
+            lba0_12: &data,
+        };
+        edpb::write_core_backup(&dst, &capture).unwrap();
     }
     Some(tmp)
 }
@@ -106,7 +114,7 @@ fn info_accepts_backup_file_directly() {
         .unwrap()
         .flatten()
         .map(|e| e.path())
-        .find(|p| p.extension().and_then(|e| e.to_str()) == Some("bin"))
+        .find(|p| p.extension().and_then(|e| e.to_str()) == Some("edpb"))
         .unwrap();
     let out = Command::new(env!("CARGO_BIN_EXE_edpcli"))
         .env("NO_COLOR", "1")
@@ -217,7 +225,7 @@ fn positional_backup_path_and_numbered_verify_follow_same_ux() {
         .unwrap()
         .flatten()
         .map(|e| e.path())
-        .find(|p| p.extension().and_then(|e| e.to_str()) == Some("bin"))
+        .find(|p| p.extension().and_then(|e| e.to_str()) == Some("edpb"))
         .unwrap();
 
     let inspect = Command::new(env!("CARGO_BIN_EXE_edpcli"))
@@ -283,7 +291,7 @@ fn backup_delete_without_target_uses_global_interactive_selector() {
     let before = fs::read_dir(&tmp.0)
         .unwrap()
         .flatten()
-        .filter(|entry| entry.path().extension().and_then(|ext| ext.to_str()) == Some("bin"))
+        .filter(|entry| entry.path().extension().and_then(|ext| ext.to_str()) == Some("edpb"))
         .count();
     assert_eq!(before, 2);
 
@@ -313,7 +321,7 @@ fn backup_delete_without_target_uses_global_interactive_selector() {
     let after = fs::read_dir(&tmp.0)
         .unwrap()
         .flatten()
-        .filter(|entry| entry.path().extension().and_then(|ext| ext.to_str()) == Some("bin"))
+        .filter(|entry| entry.path().extension().and_then(|ext| ext.to_str()) == Some("edpb"))
         .count();
     assert_eq!(after, 1, "交互删除应删除所选全局编号且保留至少一份");
 }
@@ -344,7 +352,7 @@ fn piping_output_to_head_does_not_panic_on_broken_pipe() {
         .unwrap()
         .flatten()
         .map(|e| e.path())
-        .find(|p| p.extension().and_then(|e| e.to_str()) == Some("bin"))
+        .find(|p| p.extension().and_then(|e| e.to_str()) == Some("edpb"))
         .unwrap();
     let bin = env!("CARGO_BIN_EXE_edpcli");
     let script = format!(

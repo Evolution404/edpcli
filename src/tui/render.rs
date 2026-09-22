@@ -917,7 +917,7 @@ fn draw_wizard(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState)
     }
     lines.push(Line::from(match wizard.kind {
         WriteKind::BackupCreate => {
-            "只读链：系统盘/USB整盘检查 → selector pinning → 读取 LBA0-12 → create-new 备份/SHA-256 → fsync；不会卸载或写 U 盘"
+            "只读链：系统盘/USB整盘检查 → selector pinning → 读取协议/分区元数据/盘尾证据 → 单文件 Metadata EDPB 内部校验 → fsync；不会卸载或写 U 盘"
         }
         WriteKind::Apply | WriteKind::Restore => {
             "安全链：系统盘/USB整盘检查 → selector pinning → 写前保护 → 卸载/锁卷 → reopen复核 → atomic write → sync/readback/rollback"
