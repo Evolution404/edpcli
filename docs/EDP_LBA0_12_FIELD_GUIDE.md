@@ -422,10 +422,10 @@ PackedStruct/EncryptedRegion 行按目录现有粒度展示，不补造目录未
 | Physical evidence | P-GOLD-ENC |
 | Implementation provenance | Physical corpus covers absent profile. |
 | Semantic status | COMPLETE |
-| Implementation status | PLANNED |
-| Behavior-test status | PLANNED |
-| Code symbol | planned:protocol::lba1::gpt_primary |
-| Test symbol | UNIMPLEMENTED |
+| Implementation status | COMPLETE |
+| Behavior-test status | COMPLETE |
+| Code symbol | edpcli::protocol::lba1::parse_lba1 |
+| Test symbol | gpt_behavior::gpt_absent_is_explicit_and_unknown_never_defaults_to_absent |
 | Ownership test | protocol_field_catalog::field_catalog_has_exact_byte_ownership_for_every_profile_state |
 
 #### lba1.gpt_primary · gpt_layout / enabled
@@ -445,10 +445,10 @@ PackedStruct/EncryptedRegion 行按目录现有粒度展示，不补造目录未
 | Physical evidence | MISSING_PHYSICAL |
 | Implementation provenance | Official virtual positive, not physical. |
 | Semantic status | COMPLETE |
-| Implementation status | PLANNED |
-| Behavior-test status | PLANNED |
-| Code symbol | planned:protocol::lba1::gpt_primary |
-| Test symbol | UNIMPLEMENTED |
+| Implementation status | COMPLETE |
+| Behavior-test status | COMPLETE |
+| Code symbol | edpcli::protocol::lba1::parse_lba1 |
+| Test symbol | gpt_behavior::gpt_virtual_header_and_entries_are_typed_and_crc_checked |
 | Ownership test | protocol_field_catalog::field_catalog_has_exact_byte_ownership_for_every_profile_state |
 
 ### 历史演进 matrix
@@ -508,10 +508,10 @@ PackedStruct/EncryptedRegion 行按目录现有粒度展示，不补造目录未
 | Physical evidence | P-GOLD-ENC |
 | Implementation provenance | Physical corpus covers absent profile. |
 | Semantic status | COMPLETE |
-| Implementation status | PLANNED |
-| Behavior-test status | PLANNED |
-| Code symbol | planned:protocol::lba2::gpt_entries |
-| Test symbol | UNIMPLEMENTED |
+| Implementation status | COMPLETE |
+| Behavior-test status | COMPLETE |
+| Code symbol | edpcli::protocol::lba2::parse_lba2 |
+| Test symbol | gpt_behavior::gpt_absent_is_explicit_and_unknown_never_defaults_to_absent |
 | Ownership test | protocol_field_catalog::field_catalog_has_exact_byte_ownership_for_every_profile_state |
 
 #### lba2.gpt_entry0 · gpt_layout / enabled
@@ -531,10 +531,10 @@ PackedStruct/EncryptedRegion 行按目录现有粒度展示，不补造目录未
 | Physical evidence | MISSING_PHYSICAL |
 | Implementation provenance | Official virtual positive. |
 | Semantic status | COMPLETE |
-| Implementation status | PLANNED |
-| Behavior-test status | PLANNED |
-| Code symbol | planned:protocol::lba2::gpt_entry0 |
-| Test symbol | UNIMPLEMENTED |
+| Implementation status | COMPLETE |
+| Behavior-test status | COMPLETE |
+| Code symbol | edpcli::protocol::lba2::parse_lba2 |
+| Test symbol | gpt_behavior::gpt_virtual_header_and_entries_are_typed_and_crc_checked |
 | Ownership test | protocol_field_catalog::field_catalog_has_exact_byte_ownership_for_every_profile_state |
 
 #### lba2.gpt_unused · gpt_layout / enabled
@@ -554,10 +554,10 @@ PackedStruct/EncryptedRegion 行按目录现有粒度展示，不补造目录未
 | Physical evidence | MISSING_PHYSICAL |
 | Implementation provenance | Residual is semantically ignored after zero TypeGUID. |
 | Semantic status | COMPLETE |
-| Implementation status | PLANNED |
-| Behavior-test status | PLANNED |
-| Code symbol | planned:protocol::lba2::gpt_unused |
-| Test symbol | UNIMPLEMENTED |
+| Implementation status | COMPLETE |
+| Behavior-test status | COMPLETE |
+| Code symbol | edpcli::protocol::lba2::parse_lba2 |
+| Test symbol | gpt_behavior::gpt_virtual_header_and_entries_are_typed_and_crc_checked |
 | Ownership test | protocol_field_catalog::field_catalog_has_exact_byte_ownership_for_every_profile_state |
 
 ### 历史演进 matrix

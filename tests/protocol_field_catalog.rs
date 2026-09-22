@@ -497,6 +497,8 @@ macro_rules! symbol_registry {
 fn code_symbols() -> BTreeSet<String> {
     symbol_registry![
         edpcli::protocol::lba0::parse_lba0,
+        edpcli::protocol::lba1::parse_lba1,
+        edpcli::protocol::lba2::parse_lba2,
         edpcli::protocol::lba3::parse_lba3,
         edpcli::protocol::lba5::parse_lba5
     ]
@@ -504,6 +506,8 @@ fn code_symbols() -> BTreeSet<String> {
 
 fn behavior_test_symbols() -> BTreeSet<String> {
     symbol_registry![
+        gpt_behavior::gpt_virtual_header_and_entries_are_typed_and_crc_checked,
+        gpt_behavior::gpt_absent_is_explicit_and_unknown_never_defaults_to_absent,
         basic_behavior::lba0_profiles_decode_mbr_and_preserve_backing,
         basic_behavior::opaque_sectors_preserve_every_byte_without_inventing_manufacturer_semantics,
         basic_behavior::basic_parsers_replay_all_committed_physical_gold
@@ -598,3 +602,5 @@ fn completion_gate_rejects_planned_missing_and_unregistered_symbols() {
 mod basic_behavior;
 #[path = "protocol_behavior/core.rs"]
 mod core_behavior;
+#[path = "protocol_behavior/gpt.rs"]
+mod gpt_behavior;
