@@ -461,6 +461,22 @@ fn partinfo_transport_uses_readonly_fe06_and_aes256_ecb_but_physical_response_is
     assert!(DOC.contains("不再把“继续抓 FE06”作为 Region A 主线"));
 }
 #[test]
+fn cemsusbregsiter_sector_io_graph_does_not_claim_region_a_payload_io() {
+    let evidence: serde_json::Value = serde_json::from_str(include_str!(
+        "../audit/region_a/evidence/cemsusbregsiter_no_region_a_io_20260922.json"
+    ))
+    .unwrap();
+    assert_eq!(
+        evidence["status"],
+        "NEGATIVE_IO_BOUNDARY_CLOSED_CEMSUSBREGSITER"
+    );
+    assert_eq!(evidence["functions"]["read_sector_data"], "sub_100136c0");
+    assert_eq!(evidence["functions"]["write_sector_data"], "sub_10013810");
+    assert!(DOC.contains("只闭环 Region A 指针生产，未发现 payload I/O"));
+    assert!(DOC.contains("未闭环 Region A 0xC00 payload producer/consumer"));
+}
+
+#[test]
 fn sectorinfo_upload_path_is_closed_as_lba8_edpf_not_region_a() {
     let evidence: serde_json::Value = serde_json::from_str(include_str!(
         "../audit/region_a/evidence/sectorinfo_upload_log_20260922.json"
@@ -488,6 +504,8 @@ fn sectorinfo_upload_path_is_closed_as_lba8_edpf_not_region_a() {
 
 #[test]
 fn mount_edp_part_is_closed_as_lba12_partition_path_not_region_a() {
+    // Mount path is separately proven not to consume the legacy Region A key-block.
+
     let evidence: serde_json::Value = serde_json::from_str(include_str!(
         "../audit/region_a/evidence/mount_not_region_a_20260922.json"
     ))

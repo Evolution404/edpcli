@@ -165,6 +165,16 @@ ReadIIR 和 WriteIIR 都使用 device tree node `+0x18` 计算物理位置，并
 结论：**`sectorInfo` 不能再作为 Region A 上传服务器的证据。** 是否存在另一条真正上传 Region A 的网络链仍然是开放问题。
 
 机器证据：`audit/region_a/evidence/sectorinfo_upload_log_20260922.json`。
+### 4.5 `cemsusbregsiter` 只闭环 Region A 指针生产，未发现 payload I/O
+
+2026-09-22 对当前 `cemsusbregsiter.dll` 的 `CDiskFile` 扇区 I/O 调用图做了完整枚举：`sub_100136c0` 是 `ReadSectorData`，`sub_10013810` 是 `WriteSectorData`。`CreatePartitions/sub_1003db50` 确实通过 `sub_10040110` 计算 `CHS_bytes - 0xE0000`，并把换算后的 Region A sector 写进 legacy EDPF entry；但其后 `sub_10014da0` 只是把 3×0x40 legacy 表序列化到 LBA7，本身不按 entry 的 `StartSector` 做物理 I/O。
+
+对该 DLL 内全部直接 `ReadSectorData/WriteSectorData` 调用逐项检查后，没有发现以 Region A `CHS-0x700` 为目标、长度为 6 sectors 的读写。`BakupUsbSec/sub_10040940` 写的是另一组 front-label backup sectors，`sub_10013e40` 只构造内存结构，也都不是 Region A payload I/O。
+
+因此当前严格结论是：**`cemsusbregsiter` 已闭环 Region A 指针 metadata producer，但未闭环 Region A 0xC00 payload producer/consumer。** 真正 payload 路径必须继续到其他模块、其他版本或该 DLL 之外的 I/O 机制查找。
+
+机器证据：`audit/region_a/evidence/cemsusbregsiter_no_region_a_io_20260922.json`。
+
 ## 5. AES 算法、默认 Init key 与版本 profile
 
 `sub_1800092c0/sub_180009390` 调用 `sub_18001c560()` 得到 `EVP_CIPHER` descriptor。早期仅依据 OpenSSL 注册字符串曾误判为 AES-192-CBC；2026-09-22 已用 descriptor 本体纠正。
