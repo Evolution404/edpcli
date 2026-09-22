@@ -3,9 +3,11 @@
 
 The 2026 updater compared each local runtime file against its service record
 before replacement.  Those comparisons preserve the MD5 of the deleted local
-2025 generation even though its bytes are gone.  VUpdateReplace.log also shows
-that cemsusbregsiter.dll was copied into the new-base .bk tree and that this
-backup copy was then explicitly deleted.
+2025 generation even though its bytes are gone.  VUpdateReplace.log also closes
+both ends of that runtime lifecycle: the 2025 first installation copied
+cemsusbregsiter.dll from versioned 8.1.2502.2116 staging into the runtime tree
+and explicitly deleted both staged DLL and DLL.zip; the 2026 replacement later
+copied the old runtime into the new-base .bk tree and deleted that backup copy.
 
 This is acquisition/provenance evidence only.  It identifies the missing file
 precisely; it does not prove join59 or legacy-MBR serialization.
@@ -122,6 +124,57 @@ def main() -> None:
         }
 
     replace_lines = args.replace_log.read_bytes().decode("utf-16le", errors="strict").splitlines()
+    runtime_path = r"C:\Program Files (x86)\VRV\CEMS\ydcc\cemsusbregsiter.dll"
+    first_backup_path = (
+        rf"C:\Program Files (x86)\VRV\CEMS\product\CEMS\base\{OLD_BASE}.bk"
+        r"\ydcc\cemsusbregsiter.dll"
+    )
+    first_stage_path = (
+        rf"C:\Program Files (x86)\VRV\CEMS\product\CEMS\base\{OLD_BASE}"
+        r"\ydcc\cemsusbregsiter.dll"
+    )
+    first_stage_zip = first_stage_path + ".zip"
+
+    def find_timed_sequence(
+        start_marker: str,
+        timestamp: str,
+        needles: list[str],
+        *,
+        window: int = 20,
+    ) -> tuple[int, list[int]]:
+        for hit in all_line_hits(replace_lines, start_marker):
+            context = "\n".join(
+                replace_lines[max(0, hit - 4) : min(len(replace_lines), hit + window)]
+            )
+            if timestamp not in context:
+                continue
+            try:
+                positions = require_ordered(replace_lines, hit, needles, window=window)
+            except SystemExit:
+                continue
+            return hit, positions
+        raise SystemExit(
+            f"missing timed replacement sequence {timestamp}: {start_marker!r}"
+        )
+
+    _, first_backup_seq = find_timed_sequence(
+        first_backup_path,
+        "2025-05-13 13:19:03",
+        [first_backup_path, runtime_path, "备份原始文件不存在 error:3"],
+        window=16,
+    )
+    _, first_copy_seq = find_timed_sequence(
+        first_stage_path,
+        "2025-05-13 13:19:14",
+        [first_stage_path, runtime_path, "拷贝替换文件成功"],
+        window=16,
+    )
+    _, first_cleanup_seq = find_timed_sequence(
+        first_stage_path,
+        "2025-05-13 13:19:33",
+        [first_stage_path, "文件删除成功", first_stage_zip, "文件删除成功"],
+        window=20,
+    )
     backup_path = (
         rf"C:\Program Files (x86)\VRV\CEMS\product\CEMS\base\{NEW_BASE}.bk"
         r"\ydcc\cemsusbregsiter.dll"
@@ -154,20 +207,39 @@ def main() -> None:
             "filename": "cemsusbregsiter.dll",
             "md5": RUNTIME["cemsusbregsiter.dll"]["file_md5"],
         },
+        "first_install_lifecycle": {
+            "backup_path": first_backup_path,
+            "backup_missing_line": first_backup_seq[2] + 1,
+            "backup_missing_timestamp": "2025-05-13 13:19:03",
+            "stage_dll": first_stage_path,
+            "runtime_path": runtime_path,
+            "copy_success_line": first_copy_seq[2] + 1,
+            "copy_timestamp": "2025-05-13 13:19:14",
+            "stage_zip": first_stage_zip,
+            "dll_delete_success_line": first_cleanup_seq[1] + 1,
+            "zip_delete_success_line": first_cleanup_seq[3] + 1,
+            "cleanup_timestamp": "2025-05-13 13:19:33",
+            "interpretation": (
+                "no pre-existing ydcc cemsusbregsiter runtime was available to back up; "
+                "8.1.2502.2116 was copied from versioned staging into the runtime tree, "
+                "then the staged DLL and DLL.zip were both deleted successfully"
+            ),
+        },
         "backup_lifecycle": {
             "path": backup_path,
             "copy_block_line": create_hit + 1,
             "delete_success_block_line": delete_hit + 1,
         },
         "claim": (
-            "the pre-upgrade local 2025 ydcc runtime is now content-addressable by "
-            "MD5: cemsusbregsiter.dll=02F8CD326E8CBDA04F17B6235BDF268D; "
-            "the updater copied that runtime into the 8.1.2604.0917.bk tree and "
-            "then explicitly deleted the backup copy"
+            "the 2025 ydcc cemsusbregsiter runtime is content-addressable by MD5 "
+            "02F8CD326E8CBDA04F17B6235BDF268D; its first installation copied the DLL "
+            "from base/8.1.2502.2116 staging, then explicitly deleted both staged DLL "
+            "and DLL.zip; the 2026 updater later copied the runtime into the "
+            "8.1.2604.0917.bk tree and explicitly deleted that backup copy"
         ),
         "claim_boundary": (
-            "hash/lifecycle provenance only; the old bytes are still unavailable, "
-            "so no join59 or legacy-MBR byte is promoted"
+            "hash/lifecycle provenance only; the old bytes and 2025 ZIP CRC/size are "
+            "still unavailable, so no join59 or legacy-MBR byte is promoted"
         ),
     }
     print(json.dumps(result, indent=2, sort_keys=True))
