@@ -502,6 +502,7 @@ fn code_symbols() -> BTreeSet<String> {
         edpcli::protocol::lba3::parse_lba3,
         edpcli::protocol::lba4::parse_lba4,
         edpcli::protocol::lba6::parse_lba6,
+        edpcli::protocol::lba7::parse_lba7,
         edpcli::protocol::lba9::parse_lba9,
         edpcli::protocol::lba5::parse_lba5
     ]
@@ -512,6 +513,8 @@ fn behavior_test_symbols() -> BTreeSet<String> {
         dept_behavior::dept_and_safe6_fields_replay_physical_profiles_without_losing_backing,
         dept_behavior::dept_join_seams_and_post_nul_backing_are_independent,
         dept_behavior::lba9_eetu_sapf_eppe_and_long_user_keep_distinct_ownership,
+        edpf_behavior::lba7_packed_entries_and_pass_info_replay_all_physical_profiles,
+        edpf_behavior::pass_info_storage_transform_is_exact_and_profile_axes_fail_closed,
         lba4_behavior::lba4_separates_wire_reader_and_producer_for_both_encodings,
         lba4_behavior::lba4_overlays_are_explicit_and_do_not_select_encoding,
         gpt_behavior::gpt_virtual_header_and_entries_are_typed_and_crc_checked,
@@ -612,6 +615,8 @@ mod basic_behavior;
 mod core_behavior;
 #[path = "protocol_behavior/dept.rs"]
 mod dept_behavior;
+#[path = "protocol_behavior/edpf.rs"]
+mod edpf_behavior;
 #[path = "protocol_behavior/gpt.rs"]
 mod gpt_behavior;
 #[path = "protocol_behavior/lba4.rs"]

@@ -2346,10 +2346,10 @@ PackedStruct/EncryptedRegion 行按目录现有粒度展示，不补造目录未
 | Physical evidence | P-GOLD-ENC;P-GOLD-NOPWD |
 | Implementation provenance | Canonical COMPLETE semantics; provenance limits remain documented. |
 | Semantic status | COMPLETE |
-| Implementation status | PLANNED |
-| Behavior-test status | PLANNED |
-| Code symbol | planned:protocol::lba7::entries_0_1 |
-| Test symbol | UNIMPLEMENTED |
+| Implementation status | COMPLETE |
+| Behavior-test status | COMPLETE |
+| Code symbol | edpcli::protocol::lba7::parse_lba7 |
+| Test symbol | edpf_behavior::lba7_packed_entries_and_pass_info_replay_all_physical_profiles |
 | Ownership test | protocol_field_catalog::field_catalog_has_exact_byte_ownership_for_every_profile_state |
 
 #### lba7.entry2 · lba7_entry_count / three-entry
@@ -2369,10 +2369,10 @@ PackedStruct/EncryptedRegion 行按目录现有粒度展示，不补造目录未
 | Physical evidence | P-GOLD-ENC;P-GOLD-NOPWD |
 | Implementation provenance | Entry count is independent from pass-info version. |
 | Semantic status | COMPLETE |
-| Implementation status | PLANNED |
-| Behavior-test status | PLANNED |
-| Code symbol | planned:protocol::lba7::entry2 |
-| Test symbol | UNIMPLEMENTED |
+| Implementation status | COMPLETE |
+| Behavior-test status | COMPLETE |
+| Code symbol | edpcli::protocol::lba7::parse_lba7 |
+| Test symbol | edpf_behavior::lba7_packed_entries_and_pass_info_replay_all_physical_profiles |
 | Ownership test | protocol_field_catalog::field_catalog_has_exact_byte_ownership_for_every_profile_state |
 
 #### lba7.entry2 · lba7_entry_count / two-entry
@@ -2392,10 +2392,10 @@ PackedStruct/EncryptedRegion 行按目录现有粒度展示，不补造目录未
 | Physical evidence | P-GOLD-ENC;P-GOLD-NOPWD |
 | Implementation provenance | Entry count is independent from pass-info version. |
 | Semantic status | COMPLETE |
-| Implementation status | PLANNED |
-| Behavior-test status | PLANNED |
-| Code symbol | planned:protocol::lba7::entry2 |
-| Test symbol | UNIMPLEMENTED |
+| Implementation status | COMPLETE |
+| Behavior-test status | COMPLETE |
+| Code symbol | edpcli::protocol::lba7::parse_lba7 |
+| Test symbol | edpf_behavior::lba7_packed_entries_and_pass_info_replay_all_physical_profiles |
 | Ownership test | protocol_field_catalog::field_catalog_has_exact_byte_ownership_for_every_profile_state |
 
 #### lba7.pass_info · lba7_passinfo_version / current-v0206
@@ -2415,10 +2415,10 @@ PackedStruct/EncryptedRegion 行按目录现有粒度展示，不补造目录未
 | Physical evidence | P-GOLD-ENC;P-GOLD-NOPWD |
 | Implementation provenance | Independent from entry count. |
 | Semantic status | COMPLETE |
-| Implementation status | PLANNED |
-| Behavior-test status | PLANNED |
-| Code symbol | planned:protocol::lba7::pass_info |
-| Test symbol | UNIMPLEMENTED |
+| Implementation status | COMPLETE |
+| Behavior-test status | COMPLETE |
+| Code symbol | edpcli::protocol::lba7::parse_lba7 |
+| Test symbol | edpf_behavior::lba7_packed_entries_and_pass_info_replay_all_physical_profiles |
 | Ownership test | protocol_field_catalog::field_catalog_has_exact_byte_ownership_for_every_profile_state |
 
 #### lba7.pass_info · lba7_passinfo_version / legacy-v0064
@@ -2438,10 +2438,10 @@ PackedStruct/EncryptedRegion 行按目录现有粒度展示，不补造目录未
 | Physical evidence | P-GOLD-ENC;P-GOLD-NOPWD |
 | Implementation provenance | Independent from entry count. |
 | Semantic status | COMPLETE |
-| Implementation status | PLANNED |
-| Behavior-test status | PLANNED |
-| Code symbol | planned:protocol::lba7::pass_info |
-| Test symbol | UNIMPLEMENTED |
+| Implementation status | COMPLETE |
+| Behavior-test status | COMPLETE |
+| Code symbol | edpcli::protocol::lba7::parse_lba7 |
+| Test symbol | edpf_behavior::lba7_packed_entries_and_pass_info_replay_all_physical_profiles |
 | Ownership test | protocol_field_catalog::field_catalog_has_exact_byte_ownership_for_every_profile_state |
 
 #### lba7.post_table_zero · base / all
@@ -2461,10 +2461,10 @@ PackedStruct/EncryptedRegion 行按目录现有粒度展示，不补造目录未
 | Physical evidence | P-GOLD-ENC;P-GOLD-NOPWD |
 | Implementation provenance | Canonical COMPLETE semantics; provenance limits remain documented. |
 | Semantic status | COMPLETE |
-| Implementation status | PLANNED |
-| Behavior-test status | PLANNED |
-| Code symbol | planned:protocol::lba7::post_table_zero |
-| Test symbol | UNIMPLEMENTED |
+| Implementation status | COMPLETE |
+| Behavior-test status | COMPLETE |
+| Code symbol | edpcli::protocol::lba7::parse_lba7 |
+| Test symbol | edpf_behavior::lba7_packed_entries_and_pass_info_replay_all_physical_profiles |
 | Ownership test | protocol_field_catalog::field_catalog_has_exact_byte_ownership_for_every_profile_state |
 
 ### 历史演进 matrix
