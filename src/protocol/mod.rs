@@ -14,4 +14,5 @@ pub mod types;
 
 pub mod lba6;
 pub mod lba7;
+pub mod lba8;
 pub mod lba9;
