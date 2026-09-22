@@ -1,10 +1,11 @@
 use edpcli::{
-    crypto::{crc32_bare, xor_rolling},
+    crypto::{a6b0_full, a7f0_full, crc32_bare, xor_rolling},
     diskio::parse_backup_name,
     protocol::{
         edpf::PassInfo,
+        lba12::parse_lba12,
         lba7::{parse_lba7, Entry2},
-        profile::{Lba7EntryCount, Lba7PassinfoVersion},
+        profile::{Lba12Mode, Lba7EntryCount, Lba7PassinfoVersion},
     },
 };
 
@@ -68,6 +69,102 @@ pub fn lba7_packed_entries_and_pass_info_replay_all_physical_profiles() {
     }
     assert!(entry_counts.iter().all(|count| *count > 0));
     assert!(versions.iter().all(|count| *count > 0));
+}
+
+fn hex(text: &str) -> [u8; 512] {
+    let h: String = text.split_whitespace().collect();
+    (0..h.len())
+        .step_by(2)
+        .map(|i| u8::from_str_radix(&h[i..i + 2], 16).unwrap())
+        .collect::<Vec<_>>()
+        .try_into()
+        .unwrap()
+}
+
+#[test]
+pub fn lba12_outer_cipher_and_wrapped_key_modes_keep_profile_axes_distinct() {
+    let mut physical_mode2 = 0usize;
+    for row in include_str!("../../audit/protocol/gold_samples.tsv")
+        .lines()
+        .skip(1)
+    {
+        let c: Vec<_> = row.split('\t').collect();
+        let image =
+            std::fs::read(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(c[4])).unwrap();
+        let raw: &[u8; 512] = image[12 * 512..13 * 512].try_into().unwrap();
+        let device_id = if c[0] == "authentic-nopwd" {
+            "disk&ven_sandisk&prod_ultra&rev_1.00".to_string()
+        } else {
+            parse_backup_name(c[3]).unwrap().device_id
+        };
+        let crc = crc32_bare(device_id.as_bytes());
+        let plain = a6b0_full(raw, &crc.to_le_bytes(), 0);
+        let pass = PassInfo::decode_stored(&plain[0x120..0x12e].try_into().unwrap());
+        assert_eq!(pass.version, 0x0206);
+        let count = u32::from_le_bytes(plain[8..12].try_into().unwrap()) as usize;
+        let encrypted_modes: Vec<_> = (0..count)
+            .map(|index| &plain[index * 0x60..(index + 1) * 0x60])
+            .filter(|entry| u32::from_le_bytes(entry[0x14..0x18].try_into().unwrap()) != 0)
+            .map(|entry| entry[0x58])
+            .collect();
+        assert!(!encrypted_modes.is_empty());
+        assert!(encrypted_modes.iter().all(|mode| *mode == 2));
+        physical_mode2 += 1;
+        let view = parse_lba12(raw, crc, Lba12Mode::Mode2).unwrap();
+        assert_eq!(view.reconstruct(), *raw);
+        assert_eq!(view.reencode(), *raw);
+        assert_eq!(view.pass_info, pass);
+        assert!(view.zero_padding.iter().all(|byte| *byte == 0));
+    }
+    assert!(physical_mode2 > 0);
+
+    const DEVICE_ID: &[u8] = b"disk&ven_virtual&prod_writerproof&rev_0001";
+    let crc = crc32_bare(DEVICE_ID);
+    let mode1 = hex(include_str!(
+        "../fixtures/protocol_evidence/official_virtual_writer_mode1_lba12.hex"
+    ));
+    for (mode, raw) in [
+        (Lba12Mode::Mode1, mode1),
+        (
+            Lba12Mode::Mode2,
+            hex(include_str!(
+                "../fixtures/protocol_evidence/official_virtual_writer_mode2_lba12.hex"
+            )),
+        ),
+        (
+            Lba12Mode::Mode3,
+            hex(include_str!(
+                "../fixtures/protocol_evidence/official_virtual_writer_mode3_lba12.hex"
+            )),
+        ),
+    ] {
+        let view = parse_lba12(&raw, crc, mode).unwrap();
+        assert_eq!(view.reencode(), raw);
+        assert_eq!(view.mode, mode);
+        assert_eq!(view.entries.len(), 1);
+        assert_eq!(
+            view.entries[0].encrypt_mode,
+            match mode {
+                Lba12Mode::Mode1 => 1,
+                Lba12Mode::Mode2 => 2,
+                Lba12Mode::Mode3 => 3,
+                _ => unreachable!(),
+            }
+        );
+    }
+
+    // legacy-v0064 is a wrapped-key representation state.  It is deliberately
+    // exercised as compatibility representation here, not mislabeled as a
+    // physical LBA12 capture: current committed physical LBA12 is v0x0206/mode2.
+    let mut legacy_plain: [u8; 512] = a6b0_full(&mode1, &crc.to_le_bytes(), 0).try_into().unwrap();
+    legacy_plain[0x40..0x48].fill(0);
+    legacy_plain[0x58] = 0;
+    let legacy_wire: [u8; 512] = a7f0_full(&legacy_plain, &crc.to_le_bytes(), 0)
+        .try_into()
+        .unwrap();
+    let legacy = parse_lba12(&legacy_wire, crc, Lba12Mode::LegacyV0064).unwrap();
+    assert_eq!(legacy.entries[0].encrypt_mode, 0);
+    assert_eq!(legacy.reencode(), legacy_wire);
 }
 
 #[test]

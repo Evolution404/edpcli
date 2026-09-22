@@ -498,6 +498,7 @@ fn code_symbols() -> BTreeSet<String> {
     symbol_registry![
         edpcli::protocol::lba0::parse_lba0,
         edpcli::protocol::lba1::parse_lba1,
+        edpcli::protocol::lba12::parse_lba12,
         edpcli::protocol::lba2::parse_lba2,
         edpcli::protocol::lba3::parse_lba3,
         edpcli::protocol::lba4::parse_lba4,
@@ -514,6 +515,7 @@ fn behavior_test_symbols() -> BTreeSet<String> {
         dept_behavior::dept_join_seams_and_post_nul_backing_are_independent,
         dept_behavior::lba9_eetu_sapf_eppe_and_long_user_keep_distinct_ownership,
         edpf_behavior::lba7_packed_entries_and_pass_info_replay_all_physical_profiles,
+        edpf_behavior::lba12_outer_cipher_and_wrapped_key_modes_keep_profile_axes_distinct,
         edpf_behavior::pass_info_storage_transform_is_exact_and_profile_axes_fail_closed,
         lba4_behavior::lba4_separates_wire_reader_and_producer_for_both_encodings,
         lba4_behavior::lba4_overlays_are_explicit_and_do_not_select_encoding,

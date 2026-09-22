@@ -3853,10 +3853,10 @@ PackedStruct/EncryptedRegion 行按目录现有粒度展示，不补造目录未
 | Physical evidence | P-GOLD-ENC;P-GOLD-NOPWD |
 | Implementation provenance | Virtual mode1/mode3 remains explicitly virtual. |
 | Semantic status | COMPLETE |
-| Implementation status | PLANNED |
-| Behavior-test status | PLANNED |
-| Code symbol | planned:protocol::lba12::edpf_table |
-| Test symbol | UNIMPLEMENTED |
+| Implementation status | COMPLETE |
+| Behavior-test status | COMPLETE |
+| Code symbol | edpcli::protocol::lba12::parse_lba12 |
+| Test symbol | edpf_behavior::lba12_outer_cipher_and_wrapped_key_modes_keep_profile_axes_distinct |
 | Ownership test | protocol_field_catalog::field_catalog_has_exact_byte_ownership_for_every_profile_state |
 
 #### lba12.edpf_table · lba12_mode / mode1
@@ -3876,10 +3876,10 @@ PackedStruct/EncryptedRegion 行按目录现有粒度展示，不补造目录未
 | Physical evidence | MISSING_PHYSICAL |
 | Implementation provenance | Virtual mode1/mode3 remains explicitly virtual. |
 | Semantic status | COMPLETE |
-| Implementation status | PLANNED |
-| Behavior-test status | PLANNED |
-| Code symbol | planned:protocol::lba12::edpf_table |
-| Test symbol | UNIMPLEMENTED |
+| Implementation status | COMPLETE |
+| Behavior-test status | COMPLETE |
+| Code symbol | edpcli::protocol::lba12::parse_lba12 |
+| Test symbol | edpf_behavior::lba12_outer_cipher_and_wrapped_key_modes_keep_profile_axes_distinct |
 | Ownership test | protocol_field_catalog::field_catalog_has_exact_byte_ownership_for_every_profile_state |
 
 #### lba12.edpf_table · lba12_mode / mode2
@@ -3899,10 +3899,10 @@ PackedStruct/EncryptedRegion 行按目录现有粒度展示，不补造目录未
 | Physical evidence | P-GOLD-ENC;P-GOLD-NOPWD |
 | Implementation provenance | Virtual mode1/mode3 remains explicitly virtual. |
 | Semantic status | COMPLETE |
-| Implementation status | PLANNED |
-| Behavior-test status | PLANNED |
-| Code symbol | planned:protocol::lba12::edpf_table |
-| Test symbol | UNIMPLEMENTED |
+| Implementation status | COMPLETE |
+| Behavior-test status | COMPLETE |
+| Code symbol | edpcli::protocol::lba12::parse_lba12 |
+| Test symbol | edpf_behavior::lba12_outer_cipher_and_wrapped_key_modes_keep_profile_axes_distinct |
 | Ownership test | protocol_field_catalog::field_catalog_has_exact_byte_ownership_for_every_profile_state |
 
 #### lba12.edpf_table · lba12_mode / mode3
@@ -3922,10 +3922,10 @@ PackedStruct/EncryptedRegion 行按目录现有粒度展示，不补造目录未
 | Physical evidence | MISSING_PHYSICAL |
 | Implementation provenance | Virtual mode1/mode3 remains explicitly virtual. |
 | Semantic status | COMPLETE |
-| Implementation status | PLANNED |
-| Behavior-test status | PLANNED |
-| Code symbol | planned:protocol::lba12::edpf_table |
-| Test symbol | UNIMPLEMENTED |
+| Implementation status | COMPLETE |
+| Behavior-test status | COMPLETE |
+| Code symbol | edpcli::protocol::lba12::parse_lba12 |
+| Test symbol | edpf_behavior::lba12_outer_cipher_and_wrapped_key_modes_keep_profile_axes_distinct |
 | Ownership test | protocol_field_catalog::field_catalog_has_exact_byte_ownership_for_every_profile_state |
 
 #### lba12.pass_info · lba12_mode / legacy-v0064
@@ -3945,10 +3945,10 @@ PackedStruct/EncryptedRegion 行按目录现有粒度展示，不补造目录未
 | Physical evidence | P-GOLD-ENC;P-GOLD-NOPWD |
 | Implementation provenance | Pass-info is inside continuous sector encryption. |
 | Semantic status | COMPLETE |
-| Implementation status | PLANNED |
-| Behavior-test status | PLANNED |
-| Code symbol | planned:protocol::lba12::pass_info |
-| Test symbol | UNIMPLEMENTED |
+| Implementation status | COMPLETE |
+| Behavior-test status | COMPLETE |
+| Code symbol | edpcli::protocol::lba12::parse_lba12 |
+| Test symbol | edpf_behavior::lba12_outer_cipher_and_wrapped_key_modes_keep_profile_axes_distinct |
 | Ownership test | protocol_field_catalog::field_catalog_has_exact_byte_ownership_for_every_profile_state |
 
 #### lba12.pass_info · lba12_mode / mode1
@@ -3968,10 +3968,10 @@ PackedStruct/EncryptedRegion 行按目录现有粒度展示，不补造目录未
 | Physical evidence | MISSING_PHYSICAL |
 | Implementation provenance | Pass-info is inside continuous sector encryption. |
 | Semantic status | COMPLETE |
-| Implementation status | PLANNED |
-| Behavior-test status | PLANNED |
-| Code symbol | planned:protocol::lba12::pass_info |
-| Test symbol | UNIMPLEMENTED |
+| Implementation status | COMPLETE |
+| Behavior-test status | COMPLETE |
+| Code symbol | edpcli::protocol::lba12::parse_lba12 |
+| Test symbol | edpf_behavior::lba12_outer_cipher_and_wrapped_key_modes_keep_profile_axes_distinct |
 | Ownership test | protocol_field_catalog::field_catalog_has_exact_byte_ownership_for_every_profile_state |
 
 #### lba12.pass_info · lba12_mode / mode2
@@ -3991,10 +3991,10 @@ PackedStruct/EncryptedRegion 行按目录现有粒度展示，不补造目录未
 | Physical evidence | P-GOLD-ENC;P-GOLD-NOPWD |
 | Implementation provenance | Pass-info is inside continuous sector encryption. |
 | Semantic status | COMPLETE |
-| Implementation status | PLANNED |
-| Behavior-test status | PLANNED |
-| Code symbol | planned:protocol::lba12::pass_info |
-| Test symbol | UNIMPLEMENTED |
+| Implementation status | COMPLETE |
+| Behavior-test status | COMPLETE |
+| Code symbol | edpcli::protocol::lba12::parse_lba12 |
+| Test symbol | edpf_behavior::lba12_outer_cipher_and_wrapped_key_modes_keep_profile_axes_distinct |
 | Ownership test | protocol_field_catalog::field_catalog_has_exact_byte_ownership_for_every_profile_state |
 
 #### lba12.pass_info · lba12_mode / mode3
@@ -4014,10 +4014,10 @@ PackedStruct/EncryptedRegion 行按目录现有粒度展示，不补造目录未
 | Physical evidence | MISSING_PHYSICAL |
 | Implementation provenance | Pass-info is inside continuous sector encryption. |
 | Semantic status | COMPLETE |
-| Implementation status | PLANNED |
-| Behavior-test status | PLANNED |
-| Code symbol | planned:protocol::lba12::pass_info |
-| Test symbol | UNIMPLEMENTED |
+| Implementation status | COMPLETE |
+| Behavior-test status | COMPLETE |
+| Code symbol | edpcli::protocol::lba12::parse_lba12 |
+| Test symbol | edpf_behavior::lba12_outer_cipher_and_wrapped_key_modes_keep_profile_axes_distinct |
 | Ownership test | protocol_field_catalog::field_catalog_has_exact_byte_ownership_for_every_profile_state |
 
 #### lba12.zero_padding · lba12_mode / legacy-v0064
@@ -4037,10 +4037,10 @@ PackedStruct/EncryptedRegion 行按目录现有粒度展示，不补造目录未
 | Physical evidence | P-GOLD-ENC;P-GOLD-NOPWD |
 | Implementation provenance | Tail is encrypted, never raw. |
 | Semantic status | COMPLETE |
-| Implementation status | PLANNED |
-| Behavior-test status | PLANNED |
-| Code symbol | planned:protocol::lba12::zero_padding |
-| Test symbol | UNIMPLEMENTED |
+| Implementation status | COMPLETE |
+| Behavior-test status | COMPLETE |
+| Code symbol | edpcli::protocol::lba12::parse_lba12 |
+| Test symbol | edpf_behavior::lba12_outer_cipher_and_wrapped_key_modes_keep_profile_axes_distinct |
 | Ownership test | protocol_field_catalog::field_catalog_has_exact_byte_ownership_for_every_profile_state |
 
 #### lba12.zero_padding · lba12_mode / mode1
@@ -4060,10 +4060,10 @@ PackedStruct/EncryptedRegion 行按目录现有粒度展示，不补造目录未
 | Physical evidence | MISSING_PHYSICAL |
 | Implementation provenance | Tail is encrypted, never raw. |
 | Semantic status | COMPLETE |
-| Implementation status | PLANNED |
-| Behavior-test status | PLANNED |
-| Code symbol | planned:protocol::lba12::zero_padding |
-| Test symbol | UNIMPLEMENTED |
+| Implementation status | COMPLETE |
+| Behavior-test status | COMPLETE |
+| Code symbol | edpcli::protocol::lba12::parse_lba12 |
+| Test symbol | edpf_behavior::lba12_outer_cipher_and_wrapped_key_modes_keep_profile_axes_distinct |
 | Ownership test | protocol_field_catalog::field_catalog_has_exact_byte_ownership_for_every_profile_state |
 
 #### lba12.zero_padding · lba12_mode / mode2
@@ -4083,10 +4083,10 @@ PackedStruct/EncryptedRegion 行按目录现有粒度展示，不补造目录未
 | Physical evidence | P-GOLD-ENC;P-GOLD-NOPWD |
 | Implementation provenance | Tail is encrypted, never raw. |
 | Semantic status | COMPLETE |
-| Implementation status | PLANNED |
-| Behavior-test status | PLANNED |
-| Code symbol | planned:protocol::lba12::zero_padding |
-| Test symbol | UNIMPLEMENTED |
+| Implementation status | COMPLETE |
+| Behavior-test status | COMPLETE |
+| Code symbol | edpcli::protocol::lba12::parse_lba12 |
+| Test symbol | edpf_behavior::lba12_outer_cipher_and_wrapped_key_modes_keep_profile_axes_distinct |
 | Ownership test | protocol_field_catalog::field_catalog_has_exact_byte_ownership_for_every_profile_state |
 
 #### lba12.zero_padding · lba12_mode / mode3
@@ -4106,10 +4106,10 @@ PackedStruct/EncryptedRegion 行按目录现有粒度展示，不补造目录未
 | Physical evidence | MISSING_PHYSICAL |
 | Implementation provenance | Tail is encrypted, never raw. |
 | Semantic status | COMPLETE |
-| Implementation status | PLANNED |
-| Behavior-test status | PLANNED |
-| Code symbol | planned:protocol::lba12::zero_padding |
-| Test symbol | UNIMPLEMENTED |
+| Implementation status | COMPLETE |
+| Behavior-test status | COMPLETE |
+| Code symbol | edpcli::protocol::lba12::parse_lba12 |
+| Test symbol | edpf_behavior::lba12_outer_cipher_and_wrapped_key_modes_keep_profile_axes_distinct |
 | Ownership test | protocol_field_catalog::field_catalog_has_exact_byte_ownership_for_every_profile_state |
 
 ### 历史演进 matrix
