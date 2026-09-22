@@ -3844,14 +3844,14 @@ PackedStruct/EncryptedRegion 行按目录现有粒度展示，不补造目录未
 | Semantic type | EncryptedRegion |
 | Meaning | 3x96B EDPF table; key mode legacy-v0064 compatibility. |
 | Ownership | owner |
-| Decode rule | Decrypt table under legacy-v0064. |
-| Encode rule | Serialize table under legacy-v0064. |
+| Decode rule | Decrypt outer sector with device CRC; validate NeedEncrypt entries use legacy mode0 wrapped-key representation. |
+| Encode rule | Serialize legacy mode0 wrapped-key entries, then encrypt the whole sector with device CRC. |
 | Profile | lba12_mode / legacy-v0064 |
 | Evolution kind | EncodingChanged |
 | Producer evidence | S-WIN-CURRENT;S-LINUX-DWARF |
 | Consumer evidence | S-WIN-CURRENT;S-LINUX-DWARF |
-| Physical evidence | P-GOLD-ENC;P-GOLD-NOPWD |
-| Implementation provenance | Virtual mode1/mode3 remains explicitly virtual. |
+| Physical evidence | MISSING_PHYSICAL |
+| Implementation provenance | Legacy mode0 compatibility is semantically closed but has no committed positive physical LBA12 capture. |
 | Semantic status | COMPLETE |
 | Implementation status | COMPLETE |
 | Behavior-test status | COMPLETE |
@@ -3942,8 +3942,8 @@ PackedStruct/EncryptedRegion 行按目录现有粒度展示，不补造目录未
 | Evolution kind | EncodingChanged |
 | Producer evidence | S-WIN-CURRENT;S-LINUX-DWARF |
 | Consumer evidence | S-WIN-CURRENT;S-LINUX-DWARF |
-| Physical evidence | P-GOLD-ENC;P-GOLD-NOPWD |
-| Implementation provenance | Pass-info is inside continuous sector encryption. |
+| Physical evidence | MISSING_PHYSICAL |
+| Implementation provenance | Legacy mode0 compatibility is semantically closed but has no committed positive physical LBA12 capture. |
 | Semantic status | COMPLETE |
 | Implementation status | COMPLETE |
 | Behavior-test status | COMPLETE |
@@ -4034,8 +4034,8 @@ PackedStruct/EncryptedRegion 行按目录现有粒度展示，不补造目录未
 | Evolution kind | EncodingChanged |
 | Producer evidence | S-WIN-CURRENT;S-LINUX-DWARF |
 | Consumer evidence | S-WIN-CURRENT;S-LINUX-DWARF |
-| Physical evidence | P-GOLD-ENC;P-GOLD-NOPWD |
-| Implementation provenance | Tail is encrypted, never raw. |
+| Physical evidence | MISSING_PHYSICAL |
+| Implementation provenance | Legacy mode0 compatibility is semantically closed but has no committed positive physical LBA12 capture. |
 | Semantic status | COMPLETE |
 | Implementation status | COMPLETE |
 | Behavior-test status | COMPLETE |
@@ -4118,10 +4118,10 @@ PackedStruct/EncryptedRegion 行按目录现有粒度展示，不补造目录未
 
 | State | Role | 完整 axis 范围（可跨 LBA） | Evolution | 差异说明 | Evidence |
 | --- | --- | --- | --- | --- | --- |
-| legacy-v0064 | owner | 12:000-1ff | EncodingChanged | LBA12 wrapped-key mode is independent from all other profile axes. | S-WIN-CURRENT;S-LINUX-DWARF;V-LBA12;P-GOLD-ENC |
-| mode1 | owner | 12:000-1ff | EncodingChanged | LBA12 wrapped-key mode is independent from all other profile axes. | S-WIN-CURRENT;S-LINUX-DWARF;V-LBA12;P-GOLD-ENC |
-| mode2 | owner | 12:000-1ff | EncodingChanged | LBA12 wrapped-key mode is independent from all other profile axes. | S-WIN-CURRENT;S-LINUX-DWARF;V-LBA12;P-GOLD-ENC |
-| mode3 | owner | 12:000-1ff | EncodingChanged | LBA12 wrapped-key mode is independent from all other profile axes. | S-WIN-CURRENT;S-LINUX-DWARF;V-LBA12;P-GOLD-ENC |
+| legacy-v0064 | owner | 12:000-1ff | EncodingChanged | LBA12 wrapped-key mode is independent from all other profile axes. | S-WIN-CURRENT;S-LINUX-DWARF |
+| mode1 | owner | 12:000-1ff | EncodingChanged | LBA12 wrapped-key mode is independent from all other profile axes. | S-WIN-CURRENT;S-LINUX-DWARF;V-LBA12 |
+| mode2 | owner | 12:000-1ff | EncodingChanged | LBA12 wrapped-key mode is independent from all other profile axes. | S-WIN-CURRENT;S-LINUX-DWARF;V-LBA12;P-GOLD-ENC;P-GOLD-NOPWD |
+| mode3 | owner | 12:000-1ff | EncodingChanged | LBA12 wrapped-key mode is independent from all other profile axes. | S-WIN-CURRENT;S-LINUX-DWARF;V-LBA12 |
 
 | Region（含首尾） | legacy-v0064 | mode1 | mode2 | mode3 |
 | --- | --- | --- | --- | --- |

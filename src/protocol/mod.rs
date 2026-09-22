@@ -1,6 +1,7 @@
 //! Typed, read-only EDP protocol API. Parsing never performs device I/O.
 //! Profile axes stay orthogonal; unidentified states remain Unknown.
 pub mod edpf;
+pub mod image;
 pub mod layout;
 pub mod lba0;
 pub mod lba1;

@@ -33,10 +33,10 @@ lba10_eesi	absent-zero	owner	10:000-1ff	AddedRemoved	EESI is optional; enabled p
 lba10_eesi	eesi-enabled	owner	10:000-1ff	AddedRemoved	EESI is optional; enabled payload owns only its defined prefix and preserves tail.	S-EESI-361018;P-EESI-NETAC;P-GOLD-ENC
 lba11_capacity	disk-size	owner	11:000-1ff	ProducerChanged	LBA11 capacity key input differs by writer path, not hardware identity.	S-WIN-CURRENT;S-LINUX-DWARF;P-GOLD-ENC
 lba11_capacity	repair-chs	owner	11:000-1ff	ProducerChanged	LBA11 capacity key input differs by writer path, not hardware identity.	S-WIN-CURRENT;S-LINUX-DWARF;P-GOLD-ENC
-lba12_mode	legacy-v0064	owner	12:000-1ff	EncodingChanged	LBA12 wrapped-key mode is independent from all other profile axes.	S-WIN-CURRENT;S-LINUX-DWARF;V-LBA12;P-GOLD-ENC
-lba12_mode	mode1	owner	12:000-1ff	EncodingChanged	LBA12 wrapped-key mode is independent from all other profile axes.	S-WIN-CURRENT;S-LINUX-DWARF;V-LBA12;P-GOLD-ENC
-lba12_mode	mode2	owner	12:000-1ff	EncodingChanged	LBA12 wrapped-key mode is independent from all other profile axes.	S-WIN-CURRENT;S-LINUX-DWARF;V-LBA12;P-GOLD-ENC
-lba12_mode	mode3	owner	12:000-1ff	EncodingChanged	LBA12 wrapped-key mode is independent from all other profile axes.	S-WIN-CURRENT;S-LINUX-DWARF;V-LBA12;P-GOLD-ENC
+lba12_mode	legacy-v0064	owner	12:000-1ff	EncodingChanged	LBA12 wrapped-key mode is independent from all other profile axes.	S-WIN-CURRENT;S-LINUX-DWARF
+lba12_mode	mode1	owner	12:000-1ff	EncodingChanged	LBA12 wrapped-key mode is independent from all other profile axes.	S-WIN-CURRENT;S-LINUX-DWARF;V-LBA12
+lba12_mode	mode2	owner	12:000-1ff	EncodingChanged	LBA12 wrapped-key mode is independent from all other profile axes.	S-WIN-CURRENT;S-LINUX-DWARF;V-LBA12;P-GOLD-ENC;P-GOLD-NOPWD
+lba12_mode	mode3	owner	12:000-1ff	EncodingChanged	LBA12 wrapped-key mode is independent from all other profile axes.	S-WIN-CURRENT;S-LINUX-DWARF;V-LBA12
 lba4_second_key_source	current-main-onlyid	overlay	4:01c-01f	ProducerChanged	OnllyID2Nd meaning is stable while producer seed source changes.	S-WIN-CURRENT;S-WIN-191141;P-GOLD-ENC
 lba4_second_key_source	legacy-guid-crc	overlay	4:01c-01f	ProducerChanged	OnllyID2Nd meaning is stable while producer seed source changes.	S-WIN-CURRENT;S-WIN-191141;P-GOLD-ENC
 lba4_hserial_source	current-zero	overlay	4:020-033	ProducerChanged	HSerialCRC vector is independently absent or caller supplied.	S-WIN-CURRENT;S-WIN-191141;V-LBA4-V19;P-GOLD-ENC

@@ -14,4 +14,4 @@ LBA6:1e0-1ed	legacy-mbr-snapshot	COMPLETE	physical	COVERED	P-GOLD-ENC;P-EESI-NET
 LBA12:000-1ff	mode1	COMPLETE	virtual	MISSING_PHYSICAL	V-LBA12	first-party CreatePartitions runtime output plus independent unwrap/CRC closes semantic behavior; current physical corpus has zero mode1 positives
 LBA12:000-1ff	mode2	COMPLETE	physical	COVERED	P-GOLD-ENC;V-LBA12	current real-device corpus supplies mode2 positives and first-party runtime execution independently reproduces the writer path
 LBA12:000-1ff	mode3	COMPLETE	virtual	MISSING_PHYSICAL	V-LBA12	first-party CreatePartitions runtime output plus independent unwrap/CRC closes semantic behavior; current physical corpus has zero mode3 positives
-LBA12:000-1ff	legacy-v0064	COMPLETE	physical	COVERED	P-GOLD-ENC;P-GOLD-NOPWD	legacy physical entries exercise the v0064 compatibility profile
+LBA12:000-1ff	legacy-v0064	COMPLETE	none	MISSING_PHYSICAL	S-WIN-CURRENT;S-LINUX-DWARF	legacy mode0 wrapped-key compatibility is semantically closed; current committed physical LBA12 corpus has NeedEncrypt entries in mode2, so PassInfo v0x0064 is not counted as a mode0 physical positive
