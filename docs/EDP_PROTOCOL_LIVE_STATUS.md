@@ -7,14 +7,14 @@
 
 ## 语义闭环进度与物理 profile 覆盖
 
-- 语义 COMPLETE：6642 / 6656 B = 99.8%
-- 语义 PARTIAL：14 B
+- 语义 COMPLETE：6656 / 6656 B = 100.0%
+- 语义 PARTIAL：0 B
 - UNKNOWN：0 B
 - `COMPLETE` 表示 EDP 盘面字节边界、producer/caller-owned 序列化边界与 consumer 语义已经闭合；**不再等同于每个已知 profile 都存在真实物理正例**。
 - profile 级物理正例覆盖独立维护在 `audit/protocol/profile_coverage.tsv`。当前标记为 `MISSING_PHYSICAL` 的是 GPT enabled profile，以及 LBA12 mode1/mode3；它们均已有 first-party runtime positive wire evidence，但不得冒充 real-device capture。
 - **join59 129B 已按历史 wire-level 语义闭环升级 COMPLETE**：`scripts/protocol/audit_join59_semantic_closure.py` 固定 current selector、CEMS2.0 x86/x64 两套独立 first-party join59 reader，并以默认 Python 标准库直接校验固定 PE VA 机器码，无额外 `pefile/capstone` 依赖。7份独立完整 long-Dept physical image（3×join59 + 4×join60）全部重建为同一76B Dept；standalone Lexar fixture 与已计入金标的 LBA6/LBA9 扇区逐字节相同，只作为回归夹具、不重复计权。LBA9 continuation 首NUL之后正式建模为 consumer-ignored backing，当前7个独立 observation 均为零，但不把零值写成协议强制。
 - LBA6 `+0x03F` 同时补齐 short profile：12份 short physical 中 Dept 都在 byte63 前终止，而 byte63 既有 `00` 也有非零 `8B`，因此三态已经唯一：short=post-NUL backing、join59=NUL接缝、join60=Dept[59]。exact historical join59 writer EXE/selector 仍可继续追，但只属于 implementation provenance，不再占语义未闭环字节。
-- 当前唯一语义 PARTIAL 只剩 **LBA6 `+0x1E0..+0x1ED` 的14B legacy MBR entry3 underlay**。
+- **LBA0–LBA12 当前语义闭环已达 6656/6656B = 100.0%**。最后14B LBA6 `+0x1E0..+0x1ED` 已由 Aigo、SanDisk、Netac 三种独立 committed nonzero 几何 + current/v19 zero writer profile 闭合；exact historical copy-site/profile selector 保留为 implementation provenance。
 - 本轮进入时仓库 HEAD：`63b76da1fed351f1e7bbe45f0f12f5c22765e3dc`
 - 中途另一工作流先在 `1c281cb9bf4a9d92f8fc27198120d53db6466da9` 将真实免密 SanDisk
   flag 表示歧义保守降级；本轮随后补齐 v19 historical writer 的 exact-512 virtual
@@ -90,7 +90,7 @@ consumer。当前真正剩余的字节 blocker 只剩 LBA6/LBA9：继续追 join
 - 旧文档“v19 overlay 不触及 `+0x1E0..+0x1ED`”是错误的：v19 writer 在 `0x10006648..0x10006656` 把 `sector+0x1D0` 作为 **cap=32 的 BeiZhu C-string 槽**；reader 对称地从 `+0x1D0` 用同一 cap=32 C-string helper 返回。
 - 但这不是“完整32B raw copy”：`strcpy_s` 在首个NUL即停止。进一步枚举 v19 全部 executable `object+0x2620` xref，只得到 `0x1000B219` 的读取和 `0x1000CCEF` 的唯一写入；该写入在 `0x1000CCE8..0x1000CCF8` 明确是 `strcpy_s(dest=object+0x2620, cap=0x10, source=object+0x2478)`。真实 writer caller `0x1000B16C..0x1000B226` 又先把完整32B arg8局部清零，再以 cap=32 复制这个最多15B正文+NUL的 object field。因此 v19 强制 `+0x1DF` 为终止NUL、`+0x1E0..+0x1EF` 保持0；pinned `UsbMainBSec@0x101BA790` `+0x1D0..+0x1F3` 也全部为0，**不能生成** Aigo/SanDisk 两份 nonzero MBR underlay。
 - consumer 侧已进一步闭合：第一组 caller 完全不再读取 arg8；第二组成功路径读取的是另一字符串；第三组唯一后续使用是把 arg8 再以 `strcpy_s(cap=16)` 写入对象，NUL 后 `+0x10..+0x1D` 无比较、分支、哈希或字段提取。
-- 因而 LBA6 `+0x1E0..+0x1ED` 的 blocker 现在只剩 **exact earlier legacy MBR-underlay producer/profile-selection**。在该 producer 取得前仍保持 PARTIAL；join59 129B 后续独立闭环后，全局语义进度更新为 6642/6656=99.8%，这里仍没有为了完成率降低本14B门槛。
+- 本段是历史阶段记录：当时 exact earlier legacy MBR-underlay producer/profile-selection 尚被当作最后 blocker。后续新增第三个 committed nonzero 正例 `P-EESI-NETAC`，并由 `tests/provision_protocol_audit.rs` 对 Aigo、SanDisk、Netac 三种不同几何逐字验证统一14B公式 `C1 FF 07 EF FF FF || LE32(LBA12 type4 StartSector) || LE32(LBA12 type4 PartionSize/512)`；结合 current/v19 zero writer 与 post-NUL negative consumer，现已把 old copy-site/selector 降为 implementation provenance，14B 升级 COMPLETE。
 
 ## 最新结论：LBA6/LBA9 join59
 

@@ -343,8 +343,8 @@ fn documentation_keeps_the_official_provisioning_chain_and_strict_rules() {
         "LBA4 progress must retain the caller-owned HSerial and bDataToServer closures"
     );
     assert!(
-        DOC.contains("| LBA6 | 498 | 14 | 0 | 97.3% |"),
-        "LBA6 progress must retain the closed string slots, join discriminator, crcUsbID pair, m_encrypt metadata, and static template regions while leaving only the 14B MBR underlay partial"
+        DOC.contains("| LBA6 | 512 | 0 | 0 | 100.0% |"),
+        "LBA6 progress must retain the closed string slots, join discriminator, deterministic legacy MBR snapshot/zero-underlay profiles, crcUsbID pair, m_encrypt metadata, and static template regions"
     );
     assert!(
         DOC.contains("| LBA7 | 512 | 0 | 0 | 100.0% |"),

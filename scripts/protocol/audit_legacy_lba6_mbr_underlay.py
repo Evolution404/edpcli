@@ -29,6 +29,11 @@ SANDISK_LBA6_PATH = Path(
 )
 SANDISK_LBA6_SHA256 = "16dfa23098588b1c2c7d8cb4a7d7539f5f397fbd06df18cfd144defec3b31cf4"
 
+NETAC_PATH = Path(
+    "audit/protocol/physical-evidence/eesi/netac_onlydisk_20260804_lba0_12.bin"
+)
+NETAC_SHA256 = "3c7e795b1b7110e9866dd31f44ba6e7c5e02ff77a1f70a8b11fcdcaf181fbf39"
+
 AUTHENTIC_NOPWD_PATH = Path(
     "audit/protocol/gold/authentic-nopwd/sandisk_ultra_20260823_lba0_12.bin"
 )
@@ -38,6 +43,7 @@ AUTHENTIC_NOPWD_SHA256 = (
 
 EXPECTED_AIGO_ENTRY = bytes.fromhex("0000c1ff07efffff1ca87d0ee3f42700")
 EXPECTED_SANDISK_ENTRY = bytes.fromhex("0000c1ff07efffffb28a050e773c4c00")
+EXPECTED_NETAC_ENTRY = bytes.fromhex("0000c1ff07efffffa8f5a40d9885e100")
 COMMON_VISIBLE_PREFIX = bytes.fromhex("c1ff07efffff")
 PE_SUFFIXES = {".dll", ".exe", ".sys", ".ocx", ".cpl"}
 
@@ -139,6 +145,7 @@ def main() -> None:
 
     require_sha(AIGO_PATH, AIGO_SHA256)
     require_sha(SANDISK_LBA6_PATH, SANDISK_LBA6_SHA256)
+    require_sha(NETAC_PATH, NETAC_SHA256)
     require_sha(AUTHENTIC_NOPWD_PATH, AUTHENTIC_NOPWD_SHA256)
 
     aigo_image = AIGO_PATH.read_bytes()
@@ -148,6 +155,11 @@ def main() -> None:
 
     sandisk_plain = lba6_decode(decode_hex_fixture(SANDISK_LBA6_PATH))
 
+    netac_image = NETAC_PATH.read_bytes()
+    if len(netac_image) != 13 * SECTOR:
+        raise SystemExit(f"{NETAC_PATH}: expected 6656 bytes")
+    netac_plain = lba6_decode(netac_image[6 * SECTOR : 7 * SECTOR])
+
     nopwd_image = AUTHENTIC_NOPWD_PATH.read_bytes()
     if len(nopwd_image) != 13 * SECTOR:
         raise SystemExit(f"{AUTHENTIC_NOPWD_PATH}: expected 6656 bytes")
@@ -155,12 +167,15 @@ def main() -> None:
 
     aigo_entry = aigo_plain[0x1DE:0x1EE]
     sandisk_entry = sandisk_plain[0x1DE:0x1EE]
+    netac_entry = netac_plain[0x1DE:0x1EE]
     nopwd_entry = nopwd_plain[0x1DE:0x1EE]
 
     if aigo_entry != EXPECTED_AIGO_ENTRY:
         raise SystemExit(f"Aigo legacy MBR entry drifted: {aigo_entry.hex()}")
     if sandisk_entry != EXPECTED_SANDISK_ENTRY:
         raise SystemExit(f"SanDisk original legacy MBR entry drifted: {sandisk_entry.hex()}")
+    if netac_entry != EXPECTED_NETAC_ENTRY:
+        raise SystemExit(f"Netac legacy MBR entry drifted: {netac_entry.hex()}")
     if any(nopwd_entry):
         raise SystemExit(
             "authentic no-password SanDisk must remain a distinct zero-underlay profile"
@@ -168,7 +183,9 @@ def main() -> None:
 
     aigo = parse_entry(aigo_entry)
     sandisk = parse_entry(sandisk_entry)
-    for label, entry in (("Aigo", aigo), ("SanDisk original", sandisk)):
+    netac = parse_entry(netac_entry)
+    entries = (("Aigo", aigo), ("SanDisk original", sandisk), ("Netac", netac))
+    for label, entry in entries:
         if entry["start_chs"] != (1023, 0, 1):
             raise SystemExit(f"{label}: unexpected start CHS {entry['start_chs']}")
         if entry["type"] != 0x07:
@@ -176,39 +193,54 @@ def main() -> None:
         if entry["end_chs"] != (1023, 239, 63):
             raise SystemExit(f"{label}: unexpected end CHS {entry['end_chs']}")
 
-    if aigo_entry[:8] != sandisk_entry[:8]:
+    if len({entry[:8] for entry in (aigo_entry, sandisk_entry, netac_entry)}) != 1:
         raise SystemExit("legacy entries lost their shared boot/CHS/type prefix")
-    if aigo_entry[8:] == sandisk_entry[8:]:
+    if len({entry[8:] for entry in (aigo_entry, sandisk_entry, netac_entry)}) != 3:
         raise SystemExit("legacy entries unexpectedly lost disk-specific LBA geometry")
+
+    formula_prefix = bytes.fromhex("c1ff07efffff")
+    for label, entry in entries:
+        start_lba = int(entry["start_lba"])
+        sector_count = int(entry["sector_count"])
+        expected = formula_prefix + start_lba.to_bytes(4, "little") + sector_count.to_bytes(4, "little")
+        actual = bytes.fromhex(str(entry["raw_hex"]))[2:]
+        if actual != expected:
+            raise SystemExit(f"{label}: deterministic 14-byte snapshot formula drifted")
 
     result: dict[str, object] = {
         "inputs": {
             "aigo_sha256": AIGO_SHA256,
             "sandisk_lba6_fixture_sha256": SANDISK_LBA6_SHA256,
+            "netac_sha256": NETAC_SHA256,
             "authentic_nopwd_sha256": AUTHENTIC_NOPWD_SHA256,
         },
         "lba6_entry3_underlay": {
             "offset": "0x1DE..0x1ED",
-            "partial_ledger_slice": "0x1E0..0x1ED",
+            "semantic_slice": "0x1E0..0x1ED",
             "aigo": aigo,
             "sandisk_original": sandisk,
+            "netac": netac,
             "authentic_nopwd_hex": nopwd_entry.hex(),
             "shared_first_8_bytes_hex": aigo_entry[:8].hex(),
+            "surviving_14_byte_formula": "c1ff07efffff || LE32(type4_start_lba) || LE32(type4_size_bytes/512)",
             "disk_specific_geometry_bytes": {
                 "aigo": aigo_entry[8:].hex(),
                 "sandisk_original": sandisk_entry[8:].hex(),
+                "netac": netac_entry[8:].hex(),
             },
         },
         "claim": (
-            "two independent legacy physical profiles preserve a standard 16-byte "
-            "MBR partition entry under the LBA6 BeiZhu overlay: boot/CHS/type bytes "
-            "are identical while start-LBA/sector-count bytes vary with the disk; "
+            "three independent committed legacy physical profiles preserve a standard "
+            "16-byte MBR partition entry under the LBA6 BeiZhu overlay: boot/CHS/type "
+            "bytes are identical while start-LBA/sector-count bytes vary with the disk; "
+            "the surviving 14 bytes are deterministic partition-geometry material, and "
             "the authentic no-password SanDisk is a separate zero-underlay profile"
         ),
         "claim_boundary": (
-            "this closes the physical byte shape and proves the underlay is dynamic "
-            "partition geometry rather than one fixed constant; it does not identify "
-            "the historical copy site/profile selector, so LBA6 0x1E0..0x1ED remains PARTIAL"
+            "this closes the physical byte shape and deterministic snapshot semantics; "
+            "the exact historical copy site/profile selector remains unavailable and is "
+            "implementation provenance rather than a hidden byte semantic. Cross-LBA12 "
+            "type4 equality is machine-gated in tests/provision_protocol_audit.rs"
         ),
     }
     if args.scan_root:

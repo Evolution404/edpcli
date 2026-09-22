@@ -1309,6 +1309,23 @@ fn assert_lba6_legacy_mbr_type4_fragment_matches_lba12(
     let type4 = 2 * 0x60;
     assert_eq!(u32_le(&lba12, type4 + 0x0c), 4);
 
+    let start_lba = u64_le(&lba12, type4 + 0x18);
+    let partition_bytes = u64_le(&lba12, type4 + 0x28);
+    assert_eq!(partition_bytes % SECTOR as u64, 0);
+    let sector_count = partition_bytes / SECTOR as u64;
+    assert!(start_lba <= u32::MAX as u64);
+    assert!(sector_count <= u32::MAX as u64);
+
+    let mut expected_fragment = [0u8; 14];
+    expected_fragment[..6].copy_from_slice(&[0xc1, 0xff, 0x07, 0xef, 0xff, 0xff]);
+    expected_fragment[6..10].copy_from_slice(&(start_lba as u32).to_le_bytes());
+    expected_fragment[10..14].copy_from_slice(&(sector_count as u32).to_le_bytes());
+    assert_eq!(
+        &lba6[0x1e0..0x1ee],
+        &expected_fragment,
+        "legacy MBR entry3 surviving bytes must be the deterministic type4 snapshot fragment"
+    );
+
     // LBA6 +0x1DE is the third 16-byte MBR partition entry. The first two
     // bytes of that entry were overwritten by the preceding BeiZhu slot,
     // but +0x1E0 onward still preserves the rest of the entry.
@@ -1382,6 +1399,15 @@ fn lba6_authentic_sandisk_legacy_mbr_type4_fragment_matches_lba12() {
     assert_eq!(lba6.len(), SECTOR);
     assert_eq!(lba12.len(), SECTOR);
     assert_lba6_legacy_mbr_type4_fragment_matches_lba12(&lba6, &lba12, SANDISK_DEVICE_ID);
+}
+
+#[test]
+fn lba6_netac_legacy_mbr_type4_fragment_matches_lba12() {
+    assert_lba6_legacy_mbr_type4_fragment_matches_lba12(
+        sector(NETAC_EESI_CAPTURE, 6),
+        sector(NETAC_EESI_CAPTURE, 12),
+        NETAC_ONLYDISK_DEVICE_ID,
+    );
 }
 
 #[test]

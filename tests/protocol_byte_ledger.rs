@@ -292,6 +292,21 @@ fn cems2_join59_reader_can_close_wire_semantics_without_becoming_a_writer() {
 }
 
 #[test]
+fn legacy_mbr_snapshot_can_close_semantics_without_inventing_the_old_copy_site() {
+    let row = LEDGER
+        .lines()
+        .find(|line| line.starts_with("6\t1e0-1ed\tCOMPLETE\t"))
+        .expect("LBA6 legacy MBR snapshot row");
+    assert!(row.contains("S-MBR-SNAPSHOT-SEMANTIC"));
+    assert!(row.contains("P-EESI-NETAC"));
+    assert!(row.contains("C1 FF 07 EF FF FF"));
+    assert!(row.contains("implementation provenance"));
+    assert!(DOC.contains("P-EESI-NETAC"));
+    assert!(DOC.contains("type4 PartionSize/512"));
+    assert!(DOC.contains("exact historical copy-site/profile selector"));
+}
+
+#[test]
 fn lba4_hserial_is_closed_as_caller_owned_vector_without_inventing_devicenumber_algorithm() {
     let row = LEDGER
         .lines()
