@@ -175,6 +175,37 @@ ReadIIR 和 WriteIIR 都使用 device tree node `+0x18` 计算物理位置，并
 
 机器证据：`audit/region_a/evidence/cemsusbregsiter_no_region_a_io_20260922.json`。
 
+### 4.6 三盘物理证据进一步把 Region A 与静态 IIR 候选窗口分离
+
+2026-09-23 对同一次只读采集体系中的三块真实盘重新交叉检查。`capture_disk.py` 明确把两个位置独立采集：
+
+- Region A：`CHS_bytes - 0xE0000`，长度 `0xC00 / 3072B`。
+- 静态 IIR 候选窗口：`CHS_bytes - 0x40000`，长度 `0x800 / 2048B`。
+
+三盘结果完全不同：
+
+- Lexar Region A SHA-256=`fbf45d...aaa24`，3068/3072 字节非零；IIR 候选窗口 2048B 全零。
+- aigo Region A SHA-256=`996d23...f138`，3058/3072 字节非零；IIR 候选窗口 2048B 全零。
+- SanDisk Region A SHA-256=`e51e95...298a`，3067/3072 字节非零；IIR 候选窗口 2048B 全零。
+- 三个 IIR 候选窗口 SHA-256 均为全零 2048B 的 `e5a00aa9991ac8a5ee3109844d84a55583bd20572ad3ffcd42792f3c36b183ad`。
+
+因此在这三块实盘上，**LBA7 指向的 Region A 与 CHS-0x40000 的静态 IIR 候选窗口是两个不同物理对象**。这进一步支持当前原则：除非后续取得 runtime PartInfo 地址直接等于 Region A 的正证据，否则不得把 Region A 当作 IIR。
+
+机器证据：`audit/region_a/evidence/region_a_vs_iir_three_disk_20260923.json`。
+
+### 4.7 `edpediskctrl!ReadEncryptPartionInfoEx` 已排除为 Region A consumer
+
+继续追 `edpediskctrl.dll` 后，`ReadEncryptPartionInfoEx/sub_100128d0` 的真实寻址链已经闭环：
+
+1. `InitDiskInfo/sub_10021e20` 调用 `sub_10031120`，把返回值保存为全局 label base。
+2. `sub_10031120` 的日志名是 `CDiskFunc::GetGptIndex`；它只读取前 13 个扇区来判断 MBR/GPT label 基址。
+3. `sub_100128d0` 在相对扇区为 0 时默认设为 `0x0c`，随后按 `(label_base + relative_sector) * sector_size` 做 `SetFilePointer + ReadFile`。
+4. 这条地址计算没有读取 legacy LBA7 entry 的 `StartSector@+0x18/+0x1c`。
+
+所以虽然该函数也会解密并校验 `EDPF` magic，它消费的是前部 label/LBA12-family metadata，不是 CHS-0x700 的 Region A payload。`UDiskLabelRepair.dll` 中同名解析路径也表现为对已读 label buffer 的结构解密，未发现按 legacy StartSector 再跳转 6 sectors 的证据。
+
+机器证据：`audit/region_a/evidence/edpediskctrl_front_label_not_region_a_20260923.json`。
+
 ## 5. AES 算法、默认 Init key 与版本 profile
 
 `sub_1800092c0/sub_180009390` 调用 `sub_18001c560()` 得到 `EVP_CIPHER` descriptor。早期仅依据 OpenSSL 注册字符串曾误判为 AES-192-CBC；2026-09-22 已用 descriptor 本体纠正。
@@ -327,6 +358,6 @@ IIR、LBA12 分区挂载、`sectorInfo` 上传链目前都不满足第 1 条，�
 
 1. 沿 **legacy/LBA7 0x40 entry 的 StartSector=Region A** 继续找真正的数据访问者，优先搜索读取旧表后把 `+0x18/+0x1c` 当物理地址使用的调用链。
 2. 追 `CreatePartitions` 中 Region A 旧表项的生命周期：创建、序列化到 LBA7、后续读取/恢复/登录时的消费者，区分结构复制与真实磁盘 I/O。
-3. 在 `u_disk` 历史版本、日志和 DLL/SYS 中按 `0xC00` 长度、CHS-0x700 地址和 old-format entry 语义交叉搜索 producer/consumer。
-4. IIR 继续保留为独立旁证；除非获得直接 physical address 绑定，否则不再把 FE06、AES-256-CBC、IIR CRC 或 Init key 用作 Region A 主线。
-5. `MountEdpPart/EdpMountFile` 与 `sectorInfo` 已是负证据：后续不得重复把它们当 Region A consumer/upload path。
+3. 在 `u_disk` 历史版本、日志和 DLL/SYS 中按 `0xC00` 长度、CHS-0x700 地址和 old-format entry 语义交叉搜索 producer/consumer；当前重点转向旧注册/兼容组件，而不是 current `edpediskctrl` 前部 label 路径。
+4. IIR 继续保留为独立旁证；三盘 CHS-0x40000 候选窗口已经与 Region A 物理分离，除非获得直接 runtime physical address 绑定，否则不再把 FE06、AES-256-CBC、IIR CRC 或 Init key 用作 Region A 主线。
+5. `MountEdpPart/EdpMountFile`、`sectorInfo`、current `edpediskctrl!ReadEncryptPartionInfoEx` 已是负证据：后续不得重复把它们当 Region A consumer/upload path。

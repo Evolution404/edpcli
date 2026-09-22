@@ -382,7 +382,9 @@ fn iir_address_chain_is_static_complete_but_physical_binding_remains_partial() {
 
     let wire = include_str!("../audit/region_a/wire_byte_ledger.tsv");
     assert!(wire.contains("000-bff\tUNKNOWN"));
-    assert!(wire.contains("independent 0x800-byte IIR path is an unbound hypothesis"));
+    assert!(wire.contains(
+        "three-disk captures separate Region A from the CHS-0x40000 IIR candidate window"
+    ));
     assert!(DOC.contains("IIR 与 Region A 是否同址仍是未证明假设"));
 }
 
@@ -528,4 +530,59 @@ fn mount_edp_part_is_closed_as_lba12_partition_path_not_region_a() {
     );
     assert!(DOC.contains("`MountEdpPart -> EdpMountFile` 不是 Region A consumer"));
     assert!(DOC.contains("0 COMPLETE / 0 PARTIAL / 3072 UNKNOWN"));
+}
+
+#[test]
+fn three_disk_capture_physically_separates_region_a_from_static_iir_window() {
+    let evidence: serde_json::Value = serde_json::from_str(include_str!(
+        "../audit/region_a/evidence/region_a_vs_iir_three_disk_20260923.json"
+    ))
+    .unwrap();
+    assert_eq!(
+        evidence["status"],
+        "PHYSICAL_DISTINCTION_CLOSED_REGION_A_VS_STATIC_IIR_WINDOW"
+    );
+    let samples = evidence["samples"].as_array().unwrap();
+    assert_eq!(samples.len(), 3);
+    for sample in samples {
+        assert_eq!(sample["iir_nonzero_bytes"], 0);
+        assert_eq!(
+            sample["iir_sha256"],
+            "e5a00aa9991ac8a5ee3109844d84a55583bd20572ad3ffcd42792f3c36b183ad"
+        );
+        assert!(sample["region_a_nonzero_bytes"].as_u64().unwrap() > 3000);
+        assert_ne!(sample["region_a_sha256"], sample["iir_sha256"]);
+    }
+    assert!(DOC.contains("Region A 与 CHS-0x40000 的静态 IIR 候选窗口是两个不同物理对象"));
+}
+
+#[test]
+fn edpediskctrl_front_label_reader_is_not_region_a_consumer() {
+    let evidence: serde_json::Value = serde_json::from_str(include_str!(
+        "../audit/region_a/evidence/edpediskctrl_front_label_not_region_a_20260923.json"
+    ))
+    .unwrap();
+    assert_eq!(
+        evidence["status"],
+        "NEGATIVE_BINDING_CLOSED_EDPEDISKCTRL_FRONT_LABEL_PATH"
+    );
+    assert_eq!(
+        evidence["source"]["functions"]["get_gpt_index"],
+        "sub_10031120"
+    );
+    assert_eq!(
+        evidence["source"]["functions"]["read_encrypt_partition_info_ex"],
+        "sub_100128d0"
+    );
+    assert!(evidence["address_chain"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|v| v.as_str().unwrap().contains("0x0c")));
+    assert!(evidence["address_chain"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|v| v.as_str().unwrap().contains("+0x18/+0x1c")));
+    assert!(DOC.contains("`edpediskctrl!ReadEncryptPartionInfoEx` 已排除为 Region A consumer"));
 }
