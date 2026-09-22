@@ -3614,10 +3614,10 @@ PackedStruct/EncryptedRegion 行按目录现有粒度展示，不补造目录未
 | Physical evidence | P-GOLD-ENC |
 | Implementation provenance | Writer path selects capacity algorithm. |
 | Semantic status | COMPLETE |
-| Implementation status | PLANNED |
-| Behavior-test status | PLANNED |
-| Code symbol | planned:protocol::lba11::drkb_magic |
-| Test symbol | UNIMPLEMENTED |
+| Implementation status | COMPLETE |
+| Behavior-test status | COMPLETE |
+| Code symbol | edpcli::protocol::lba11::parse_lba11 |
+| Test symbol | lba11_behavior::lba11_disk_size_and_repair_chs_profiles_replay_physical_gold |
 | Ownership test | protocol_field_catalog::field_catalog_has_exact_byte_ownership_for_every_profile_state |
 
 #### lba11.drkb_magic · lba11_capacity / repair-chs
@@ -3637,10 +3637,10 @@ PackedStruct/EncryptedRegion 行按目录现有粒度展示，不补造目录未
 | Physical evidence | P-GOLD-ENC |
 | Implementation provenance | Writer path selects capacity algorithm. |
 | Semantic status | COMPLETE |
-| Implementation status | PLANNED |
-| Behavior-test status | PLANNED |
-| Code symbol | planned:protocol::lba11::drkb_magic |
-| Test symbol | UNIMPLEMENTED |
+| Implementation status | COMPLETE |
+| Behavior-test status | COMPLETE |
+| Code symbol | edpcli::protocol::lba11::parse_lba11 |
+| Test symbol | lba11_behavior::lba11_disk_size_and_repair_chs_profiles_replay_physical_gold |
 | Ownership test | protocol_field_catalog::field_catalog_has_exact_byte_ownership_for_every_profile_state |
 
 #### lba11.random252 · lba11_capacity / disk-size
@@ -3660,10 +3660,10 @@ PackedStruct/EncryptedRegion 行按目录现有粒度展示，不补造目录未
 | Physical evidence | P-GOLD-ENC |
 | Implementation provenance | Writer path selects capacity algorithm. |
 | Semantic status | COMPLETE |
-| Implementation status | PLANNED |
-| Behavior-test status | PLANNED |
-| Code symbol | planned:protocol::lba11::random252 |
-| Test symbol | UNIMPLEMENTED |
+| Implementation status | COMPLETE |
+| Behavior-test status | COMPLETE |
+| Code symbol | edpcli::protocol::lba11::parse_lba11 |
+| Test symbol | lba11_behavior::lba11_disk_size_and_repair_chs_profiles_replay_physical_gold |
 | Ownership test | protocol_field_catalog::field_catalog_has_exact_byte_ownership_for_every_profile_state |
 
 #### lba11.random252 · lba11_capacity / repair-chs
@@ -3683,10 +3683,10 @@ PackedStruct/EncryptedRegion 行按目录现有粒度展示，不补造目录未
 | Physical evidence | P-GOLD-ENC |
 | Implementation provenance | Writer path selects capacity algorithm. |
 | Semantic status | COMPLETE |
-| Implementation status | PLANNED |
-| Behavior-test status | PLANNED |
-| Code symbol | planned:protocol::lba11::random252 |
-| Test symbol | UNIMPLEMENTED |
+| Implementation status | COMPLETE |
+| Behavior-test status | COMPLETE |
+| Code symbol | edpcli::protocol::lba11::parse_lba11 |
+| Test symbol | lba11_behavior::lba11_disk_size_and_repair_chs_profiles_replay_physical_gold |
 | Ownership test | protocol_field_catalog::field_catalog_has_exact_byte_ownership_for_every_profile_state |
 
 #### lba11.pdkb_magic · lba11_capacity / disk-size
@@ -3706,10 +3706,10 @@ PackedStruct/EncryptedRegion 行按目录现有粒度展示，不补造目录未
 | Physical evidence | P-GOLD-ENC |
 | Implementation provenance | Writer path selects capacity algorithm. |
 | Semantic status | COMPLETE |
-| Implementation status | PLANNED |
-| Behavior-test status | PLANNED |
-| Code symbol | planned:protocol::lba11::pdkb_magic |
-| Test symbol | UNIMPLEMENTED |
+| Implementation status | COMPLETE |
+| Behavior-test status | COMPLETE |
+| Code symbol | edpcli::protocol::lba11::parse_lba11 |
+| Test symbol | lba11_behavior::lba11_disk_size_and_repair_chs_profiles_replay_physical_gold |
 | Ownership test | protocol_field_catalog::field_catalog_has_exact_byte_ownership_for_every_profile_state |
 
 #### lba11.pdkb_magic · lba11_capacity / repair-chs
@@ -3729,10 +3729,10 @@ PackedStruct/EncryptedRegion 行按目录现有粒度展示，不补造目录未
 | Physical evidence | P-GOLD-ENC |
 | Implementation provenance | Writer path selects capacity algorithm. |
 | Semantic status | COMPLETE |
-| Implementation status | PLANNED |
-| Behavior-test status | PLANNED |
-| Code symbol | planned:protocol::lba11::pdkb_magic |
-| Test symbol | UNIMPLEMENTED |
+| Implementation status | COMPLETE |
+| Behavior-test status | COMPLETE |
+| Code symbol | edpcli::protocol::lba11::parse_lba11 |
+| Test symbol | lba11_behavior::lba11_disk_size_and_repair_chs_profiles_replay_physical_gold |
 | Ownership test | protocol_field_catalog::field_catalog_has_exact_byte_ownership_for_every_profile_state |
 
 #### lba11.uid_payload · lba11_capacity / disk-size
@@ -3752,10 +3752,10 @@ PackedStruct/EncryptedRegion 行按目录现有粒度展示，不补造目录未
 | Physical evidence | P-GOLD-ENC |
 | Implementation provenance | Writer path selects capacity algorithm. |
 | Semantic status | COMPLETE |
-| Implementation status | PLANNED |
-| Behavior-test status | PLANNED |
-| Code symbol | planned:protocol::lba11::uid_payload |
-| Test symbol | UNIMPLEMENTED |
+| Implementation status | COMPLETE |
+| Behavior-test status | COMPLETE |
+| Code symbol | edpcli::protocol::lba11::parse_lba11 |
+| Test symbol | lba11_behavior::lba11_disk_size_and_repair_chs_profiles_replay_physical_gold |
 | Ownership test | protocol_field_catalog::field_catalog_has_exact_byte_ownership_for_every_profile_state |
 
 #### lba11.uid_payload · lba11_capacity / repair-chs
@@ -3775,10 +3775,10 @@ PackedStruct/EncryptedRegion 行按目录现有粒度展示，不补造目录未
 | Physical evidence | P-GOLD-ENC |
 | Implementation provenance | Writer path selects capacity algorithm. |
 | Semantic status | COMPLETE |
-| Implementation status | PLANNED |
-| Behavior-test status | PLANNED |
-| Code symbol | planned:protocol::lba11::uid_payload |
-| Test symbol | UNIMPLEMENTED |
+| Implementation status | COMPLETE |
+| Behavior-test status | COMPLETE |
+| Code symbol | edpcli::protocol::lba11::parse_lba11 |
+| Test symbol | lba11_behavior::lba11_disk_size_and_repair_chs_profiles_replay_physical_gold |
 | Ownership test | protocol_field_catalog::field_catalog_has_exact_byte_ownership_for_every_profile_state |
 
 ### 历史演进 matrix

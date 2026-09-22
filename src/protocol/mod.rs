@@ -5,6 +5,7 @@ pub mod layout;
 pub mod lba0;
 pub mod lba1;
 pub mod lba10;
+pub mod lba11;
 pub mod lba12;
 pub mod lba2;
 pub mod lba3;
