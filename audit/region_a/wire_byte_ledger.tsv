@@ -1,0 +1,3 @@
+ranges	status	field_or_region	profiles	producer_evidence	consumer_evidence	physical_evidence	notes
+000-7ff	PARTIAL	AES-192-CBC encrypted IIR main table	lexar-current	S-SECTORMANAGE-IIR	S-SECTORMANAGE-IIR	P-REGIONA-LEXAR;P-LBA7-LEXAR	ReadIIR/WriteIIR size, location, cipher family and physical bytes are closed; real-device AES key/context is unresolved, and the current sub_180009050 candidate fails main CRC plus all 19 segment CRCs
+800-bff	UNKNOWN	unidentified Region A tail	lexar-current			P-REGIONA-LEXAR	physical bytes are captured; no proven producer or consumer in the primary ReadIIR/WriteIIR path

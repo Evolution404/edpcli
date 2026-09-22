@@ -1,0 +1,34 @@
+ranges	status	field_or_region	producer_evidence	consumer_evidence	physical_plaintext_evidence	notes
+000-01f	UNKNOWN	IIR header / initialization state	S-SECTORMANAGE-IIR	S-SECTORMANAGE-IIR		layout exists but per-byte semantics are not closed
+020-023	PARTIAL	log partition size, big-endian sectors	S-SECTORMANAGE-IIR	S-SECTORMANAGE-IIR		MISSING_PHYSICAL_PLAINTEXT; WriteIIRPar/GetHardInfoImp semantics known
+024-027	PARTIAL	public partition size, big-endian sectors	S-SECTORMANAGE-IIR	S-SECTORMANAGE-IIR		MISSING_PHYSICAL_PLAINTEXT; WriteIIRPar/GetHardInfoImp semantics known
+028-02b	PARTIAL	share partition size, big-endian sectors	S-SECTORMANAGE-IIR	S-SECTORMANAGE-IIR		MISSING_PHYSICAL_PLAINTEXT; WriteIIRPar/GetHardInfoImp semantics known
+02c-02f	PARTIAL	private partition size, big-endian sectors	S-SECTORMANAGE-IIR	S-SECTORMANAGE-IIR		MISSING_PHYSICAL_PLAINTEXT; WriteIIRPar/GetHardInfoImp semantics known
+030-053	UNKNOWN	unmapped header/body bytes	S-SECTORMANAGE-IIR	S-SECTORMANAGE-IIR		producer/consumer table bounds known but semantic ownership unresolved
+054-073	PARTIAL	device/hardware info slot A	S-SECTORMANAGE-IIR	S-SECTORMANAGE-IIR		MISSING_PHYSICAL_PLAINTEXT; WriteIIRPar par_id 0x0e
+074-093	PARTIAL	device/hardware info slot B	S-SECTORMANAGE-IIR	S-SECTORMANAGE-IIR		MISSING_PHYSICAL_PLAINTEXT; WriteIIRPar par_id 0x0f
+094-0d3	PARTIAL	key/password configuration slot 0x094	S-SECTORMANAGE-IIR	S-SECTORMANAGE-IIR		MISSING_PHYSICAL_PLAINTEXT; WriteIIRPar par_id 0x10
+0d4-113	PARTIAL	key/password configuration slot 0x0d4	S-SECTORMANAGE-IIR	S-SECTORMANAGE-IIR		MISSING_PHYSICAL_PLAINTEXT; WriteIIRPar par_id 0x11; retry linkage known
+114-153	PARTIAL	data-key slot	S-SECTORMANAGE-IIR	S-SECTORMANAGE-IIR		MISSING_PHYSICAL_PLAINTEXT; ChangeDataKey writes this slot
+154-193	PARTIAL	key/answer configuration slot	S-SECTORMANAGE-IIR	S-SECTORMANAGE-IIR		MISSING_PHYSICAL_PLAINTEXT; WriteIIRPar par_id 0x13
+194-1d3	PARTIAL	password digest slot A	S-SECTORMANAGE-IIR	S-SECTORMANAGE-IIR		MISSING_PHYSICAL_PLAINTEXT; SetPasswd type=2 path
+1d4-213	PARTIAL	password digest slot B	S-SECTORMANAGE-IIR	S-SECTORMANAGE-IIR		MISSING_PHYSICAL_PLAINTEXT; SetPasswd type=1 and CheckPasswd consumer
+214-217	PARTIAL	retry counter block	S-SECTORMANAGE-IIR	S-SECTORMANAGE-IIR		MISSING_PHYSICAL_PLAINTEXT; CRC-covered counter bytes
+218-219	PARTIAL	status/flag bytes	S-SECTORMANAGE-IIR	S-SECTORMANAGE-IIR		MISSING_PHYSICAL_PLAINTEXT; individual flag semantics remain incomplete
+21a-21b	UNKNOWN	unmapped bytes before device flag slot	S-SECTORMANAGE-IIR	S-SECTORMANAGE-IIR		no stable semantic mapping yet
+21c-25b	PARTIAL	device/flag information slot	S-SECTORMANAGE-IIR	S-SECTORMANAGE-IIR		MISSING_PHYSICAL_PLAINTEXT; WriteIIRPar par_id 0x1c
+25c-29b	PARTIAL	extended information slot 0x25c	S-SECTORMANAGE-IIR	S-SECTORMANAGE-IIR		MISSING_PHYSICAL_PLAINTEXT; WriteIIRPar par_id 0x1d
+29c-2db	PARTIAL	flag/extended information head	S-SECTORMANAGE-IIR	S-SECTORMANAGE-IIR		MISSING_PHYSICAL_PLAINTEXT; WriteIIRPar par_id 0x1e
+2dc-3da	PARTIAL	variable information area	S-SECTORMANAGE-IIR	S-SECTORMANAGE-IIR		MISSING_PHYSICAL_PLAINTEXT; WriteIIRPar par_id 0x1f; length 0xff
+3db	UNKNOWN	unmapped byte between variable area and node mirrors	S-SECTORMANAGE-IIR	S-SECTORMANAGE-IIR		no stable semantic mapping yet
+3dc-3df	PARTIAL	node +0x34 mirror/status	S-SECTORMANAGE-IIR	S-SECTORMANAGE-IIR		MISSING_PHYSICAL_PLAINTEXT; ReadIIR writes value back to node
+3e0-3e3	PARTIAL	node +0x30 mirror/status	S-SECTORMANAGE-IIR	S-SECTORMANAGE-IIR		MISSING_PHYSICAL_PLAINTEXT; ReadIIR writes value back to node
+3e4-3fb	PARTIAL	tail short structure / reserved metadata	S-SECTORMANAGE-IIR	S-SECTORMANAGE-IIR		MISSING_PHYSICAL_PLAINTEXT; WriteIIRPar par_id 0x22 bounds known, subfield semantics open
+3fc-3fd	UNKNOWN	unmapped bytes immediately before main CRC	S-SECTORMANAGE-IIR	S-SECTORMANAGE-IIR		no stable semantic mapping yet
+3fe-3ff	PARTIAL	inverted CRC16 of plaintext +0x000..+0x3e3	S-SECTORMANAGE-IIR	S-SECTORMANAGE-IIR		MISSING_PHYSICAL_PLAINTEXT; algorithm reproduced in src/protocol/region_a.rs
+400-425	PARTIAL	19 inverted CRC16 values for field segments	S-SECTORMANAGE-IIR	S-SECTORMANAGE-IIR		MISSING_PHYSICAL_PLAINTEXT; all 19 segment definitions reproduced in src/protocol/region_a.rs
+426-428	PARTIAL	answer/authentication metadata	S-SECTORMANAGE-IIR	S-SECTORMANAGE-IIR		MISSING_PHYSICAL_PLAINTEXT; structure observed in static parser mapping
+429-43c	PARTIAL	answer/auth digest 1	S-SECTORMANAGE-IIR	S-SECTORMANAGE-IIR		MISSING_PHYSICAL_PLAINTEXT; 20-byte digest slot
+43d-450	PARTIAL	answer/auth digest 2	S-SECTORMANAGE-IIR	S-SECTORMANAGE-IIR		MISSING_PHYSICAL_PLAINTEXT; 20-byte digest slot
+451-464	PARTIAL	answer/auth digest 3	S-SECTORMANAGE-IIR	S-SECTORMANAGE-IIR		MISSING_PHYSICAL_PLAINTEXT; 20-byte digest slot
+465-7ff	UNKNOWN	unmapped IIR plaintext tail/backing	S-SECTORMANAGE-IIR	S-SECTORMANAGE-IIR		primary table is encrypted as full 0x800 bytes but producer semantics for this tail are not closed

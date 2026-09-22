@@ -1,0 +1,2 @@
+profile	wire_status	physical_ciphertext	physical_plaintext	official_virtual_producer	decrypt_status	evidence	notes
+lexar-current	PARTIAL	COVERED	MISSING	NOT_REPRODUCED	KEY_CONTEXT_UNKNOWN	P-REGIONA-LEXAR;P-LBA7-LEXAR;S-SECTORMANAGE-IIR;V-IIR-KEY-CANDIDATE;V-IIR-DECRYPT-CANDIDATE;V-IIR-CANDIDATE-CRC;N-IIR-INIT-RUNNER	physical six-sector ciphertext and LBA7 pointer are captured; candidate official key-init/decrypt path is rejected by CRC; current InitIIR Unicorn producer harness fails before WriteDev

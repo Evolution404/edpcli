@@ -13,6 +13,7 @@ pub mod lba3;
 pub mod lba4;
 pub mod lba5;
 pub mod profile;
+pub mod region_a;
 pub mod types;
 
 pub mod lba6;

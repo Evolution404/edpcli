@@ -1,0 +1,249 @@
+{
+  "init_ret": 47965391576546,
+  "read_ret": 30601644496,
+  "write_dev_called": false,
+  "generated_ct_sha256": "e5a00aa9991ac8a5ee3109844d84a55583bd20572ad3ffcd42792f3c36b183ad",
+  "generated_ct_first32": "0000000000000000000000000000000000000000000000000000000000000000",
+  "plain_first32": "0000000000000000000000000000000000000000000000000000000000000000",
+  "parsed": {
+    "size": 2048,
+    "fields": {
+      "header_0x000_0x01f": "0000000000000000000000000000000000000000000000000000000000000000",
+      "partition_sizes": {
+        "log_be_sectors_0x020": 0,
+        "public_be_sectors_0x024": 0,
+        "share_be_sectors_0x028": 0,
+        "private_be_sectors_0x02c": 0
+      },
+      "device_info_slots": {
+        "slot_0x054_hex": "0000000000000000000000000000000000000000000000000000000000000000",
+        "slot_0x054_ascii": "................................",
+        "slot_0x074_hex": "0000000000000000000000000000000000000000000000000000000000000000",
+        "slot_0x074_ascii": "................................"
+      },
+      "key_slots": {
+        "slot_0x094": "00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+        "slot_0x0d4": "00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+        "data_key_slot_0x114": "00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+        "encrypted_data_key_0x123_0x142": "0000000000000000000000000000000000000000000000000000000000000000",
+        "slot_0x154": "00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+        "password_digest_0x194": "00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+        "password_digest_0x1d4": "00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "retry_and_flags": {
+        "max_try_a_0x214": 0,
+        "remain_try_a_0x215": 0,
+        "max_try_b_0x216": 0,
+        "remain_try_b_0x217": 0,
+        "flag_0x218": 0,
+        "flag_0x219": 0,
+        "device_flag_block_0x21c": "00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "flag_info": {
+        "slot_0x25c": "00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+        "flag_info_0x29c_0x3cd": "000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+        "variable_area_0x2dc_0x3da": "000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "node_mirrors": {
+        "node_plus_34_mirror_0x3dc_be": 0,
+        "node_plus_30_mirror_0x3e0_le": 0,
+        "tail_meta_0x3e4": "000000000000000000000000000000000000000000000000"
+      },
+      "answer_info": {
+        "meta_0x426_0x428": "000000",
+        "digest1_0x429": "0000000000000000000000000000000000000000",
+        "digest2_0x43d": "0000000000000000000000000000000000000000",
+        "digest3_0x451": "0000000000000000000000000000000000000000"
+      }
+    },
+    "main_crc": {
+      "crc_offset": 1022,
+      "body_offset": 0,
+      "body_length": 996,
+      "stored": 0,
+      "calculated_inverted": 7102,
+      "ok": false
+    },
+    "segment_crcs": [
+      {
+        "crc_offset": 1024,
+        "body_offset": 32,
+        "body_length": 4,
+        "stored": 0,
+        "calculated_inverted": 56319,
+        "ok": false,
+        "name": "log_partition_size_be_sectors"
+      },
+      {
+        "crc_offset": 1026,
+        "body_offset": 36,
+        "body_length": 4,
+        "stored": 0,
+        "calculated_inverted": 56319,
+        "ok": false,
+        "name": "public_partition_size_be_sectors"
+      },
+      {
+        "crc_offset": 1028,
+        "body_offset": 40,
+        "body_length": 4,
+        "stored": 0,
+        "calculated_inverted": 56319,
+        "ok": false,
+        "name": "share_partition_size_be_sectors"
+      },
+      {
+        "crc_offset": 1030,
+        "body_offset": 44,
+        "body_length": 4,
+        "stored": 0,
+        "calculated_inverted": 56319,
+        "ok": false,
+        "name": "private_partition_size_be_sectors"
+      },
+      {
+        "crc_offset": 1032,
+        "body_offset": 84,
+        "body_length": 32,
+        "stored": 0,
+        "calculated_inverted": 27646,
+        "ok": false,
+        "name": "device_info_slot_a"
+      },
+      {
+        "crc_offset": 1034,
+        "body_offset": 116,
+        "body_length": 32,
+        "stored": 0,
+        "calculated_inverted": 27646,
+        "ok": false,
+        "name": "device_info_slot_b"
+      },
+      {
+        "crc_offset": 1036,
+        "body_offset": 148,
+        "body_length": 64,
+        "stored": 0,
+        "calculated_inverted": 53439,
+        "ok": false,
+        "name": "key_config_slot_0x094"
+      },
+      {
+        "crc_offset": 1038,
+        "body_offset": 212,
+        "body_length": 64,
+        "stored": 0,
+        "calculated_inverted": 53439,
+        "ok": false,
+        "name": "key_config_slot_0x0d4"
+      },
+      {
+        "crc_offset": 1040,
+        "body_offset": 276,
+        "body_length": 64,
+        "stored": 0,
+        "calculated_inverted": 53439,
+        "ok": false,
+        "name": "data_key_slot"
+      },
+      {
+        "crc_offset": 1042,
+        "body_offset": 340,
+        "body_length": 64,
+        "stored": 0,
+        "calculated_inverted": 53439,
+        "ok": false,
+        "name": "key_config_slot_0x154"
+      },
+      {
+        "crc_offset": 1044,
+        "body_offset": 404,
+        "body_length": 64,
+        "stored": 0,
+        "calculated_inverted": 53439,
+        "ok": false,
+        "name": "password_digest_slot_a"
+      },
+      {
+        "crc_offset": 1046,
+        "body_offset": 468,
+        "body_length": 64,
+        "stored": 0,
+        "calculated_inverted": 53439,
+        "ok": false,
+        "name": "password_digest_slot_b"
+      },
+      {
+        "crc_offset": 1048,
+        "body_offset": 532,
+        "body_length": 4,
+        "stored": 0,
+        "calculated_inverted": 56319,
+        "ok": false,
+        "name": "retry_counter_block"
+      },
+      {
+        "crc_offset": 1050,
+        "body_offset": 540,
+        "body_length": 64,
+        "stored": 0,
+        "calculated_inverted": 53439,
+        "ok": false,
+        "name": "device_flag_slot"
+      },
+      {
+        "crc_offset": 1052,
+        "body_offset": 604,
+        "body_length": 64,
+        "stored": 0,
+        "calculated_inverted": 53439,
+        "ok": false,
+        "name": "extended_slot_0x25c"
+      },
+      {
+        "crc_offset": 1054,
+        "body_offset": 668,
+        "body_length": 64,
+        "stored": 0,
+        "calculated_inverted": 53439,
+        "ok": false,
+        "name": "flag_info_head"
+      },
+      {
+        "crc_offset": 1056,
+        "body_offset": 732,
+        "body_length": 255,
+        "stored": 0,
+        "calculated_inverted": 49265,
+        "ok": false,
+        "name": "variable_info_area"
+      },
+      {
+        "crc_offset": 1058,
+        "body_offset": 988,
+        "body_length": 4,
+        "stored": 0,
+        "calculated_inverted": 56319,
+        "ok": false,
+        "name": "node_status_0x34_mirror"
+      },
+      {
+        "crc_offset": 1060,
+        "body_offset": 992,
+        "body_length": 4,
+        "stored": 0,
+        "calculated_inverted": 56319,
+        "ok": false,
+        "name": "node_status_0x30_mirror"
+      }
+    ],
+    "all_crc_ok": false
+  },
+  "trace": [],
+  "emu_trace": [
+    "UNMAPPED access=20 addr=0x6fdffffc8 size=8 rip=0x180153eeb rva=0x153eeb",
+    "EXCEPTION Invalid memory write (UC_ERR_WRITE_UNMAPPED) at rip=0x180153eeb",
+    "UNMAPPED access=21 addr=0xccccccccccccc size=1 rip=0xcccccccccccccccc rva=0xcccccccb4ccccccc",
+    "EXCEPTION Invalid memory fetch (UC_ERR_FETCH_UNMAPPED) at rip=0xcccccccccccccccc"
+  ]
+}
