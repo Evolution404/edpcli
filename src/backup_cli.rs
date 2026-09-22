@@ -4,7 +4,7 @@
 //! 校验/清理/删除动作。这样 `cli.rs` 不再承载备份领域细节，inspect 也只依赖两个
 //! 明确的选择视图接口。
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use crate::backup_catalog;
@@ -265,10 +265,6 @@ pub fn backup_verify(backup_dir: &Path, target: Option<&str>) -> i32 {
     }
 }
 
-fn delete_backup_pair(entry: &BackupEntry) -> Result<(), String> {
-    backup_catalog::delete_entry_verified(entry)
-}
-
 pub fn backup_prune(backup_dir: &Path, keep: usize, yes: bool) -> i32 {
     if !backup_dir.is_dir() {
         eprintln!(
@@ -277,58 +273,43 @@ pub fn backup_prune(backup_dir: &Path, keep: usize, yes: bool) -> i32 {
         );
         return EXIT_BACKUP;
     }
-    let selector = crate::application::load_backup_selector(backup_dir);
-    let selected_refs: Vec<&BackupEntry> = selector.catalog().entries().iter().collect();
-    let selected: Vec<BackupEntry> = selected_refs.into_iter().cloned().collect();
-    let candidates = diskio::prune_candidates(&selected, keep);
-    let candidate_set: BTreeSet<PathBuf> = candidates
-        .iter()
-        .map(|p| backup_catalog::canonical_entry_path(p))
-        .collect();
-
-    let originals = selected
-        .iter()
-        .filter(|e| e.meta.is_some() && !e.is_nopwd)
-        .count();
-    let snapshots = selected
-        .iter()
-        .filter(|e| e.meta.is_some() && e.is_nopwd)
-        .count();
-    let keep_snapshots = snapshots.saturating_sub(candidates.len());
-    if candidates.is_empty() {
+    let session = crate::application::backup::DeleteSession::open(backup_dir);
+    let plan = match session.plan_prune(keep) {
+        Ok(plan) => plan,
+        Err(error) => {
+            eprintln!("{}", crate::ui::red(&format!("错误: {}", error.message())));
+            return EXIT_BACKUP;
+        }
+    };
+    let Some(stats) = plan.prune_stats.as_ref() else {
+        return EXIT_BACKUP;
+    };
+    if plan.targets.is_empty() {
         println!("无需清理：当前策略不会删除任何备份。");
         println!(
             "保留: 加密原盘 {} 份 · 免密快照 {} 份",
-            originals, keep_snapshots
+            stats.originals, stats.retained_snapshots
         );
         return EXIT_OK;
     }
 
     println!(
         "将删除 {} 个免密状态快照(每盘保留最新 {} 份, 加密原盘永不自动删除):",
-        candidates.len(),
+        plan.targets.len(),
         keep
     );
-    for path in &candidates {
-        let model = selected
-            .iter()
-            .find(|e| {
-                backup_catalog::canonical_entry_path(&e.path)
-                    == backup_catalog::canonical_entry_path(path)
-            })
-            .and_then(|e| e.meta.as_ref())
+    for entry in &plan.targets {
+        let model = entry
+            .meta
+            .as_ref()
             .map(backup_model_name)
             .unwrap_or_else(|| "未知盘".into());
-        let name = path
-            .file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or("<无效文件名>");
-        println!("  {}   {}", name, model);
+        println!("  {}   {}", backup_catalog::file_name(entry), model);
     }
     println!();
     println!(
         "保留: 加密原盘 {} 份 · 免密快照 {} 份",
-        originals, keep_snapshots
+        stats.originals, stats.retained_snapshots
     );
     if !yes {
         println!("确认执行: edpcli backup prune --keep {} --yes", keep);
@@ -336,18 +317,16 @@ pub fn backup_prune(backup_dir: &Path, keep: usize, yes: bool) -> i32 {
     }
 
     let mut failed = 0usize;
-    for entry in &selected {
-        if candidate_set.contains(&backup_catalog::canonical_entry_path(&entry.path)) {
-            if let Err(msg) = delete_backup_pair(entry) {
-                failed += 1;
-                eprintln!("{}", crate::ui::red(&format!("错误: {}", msg)));
-            }
+    for (_, result) in session.execute(&plan) {
+        if let Err(msg) = result {
+            failed += 1;
+            eprintln!("{}", crate::ui::red(&format!("错误: {}", msg)));
         }
     }
     if failed == 0 {
         println!(
             "{}",
-            crate::ui::green(&format!("已删除 {} 份免密状态快照。", candidates.len()))
+            crate::ui::green(&format!("已删除 {} 份免密状态快照。", plan.targets.len()))
         );
         EXIT_OK
     } else {
@@ -368,9 +347,8 @@ pub fn backup_delete(
         );
         return EXIT_BACKUP;
     }
-    let selector = crate::application::load_backup_selector(backup_dir);
-    let entries = selector.catalog().entries();
-    let numbered = selector.numbered();
+    let session = crate::application::backup::DeleteSession::open(backup_dir);
+    let numbered = session.selector().numbered();
     if numbered.is_empty() {
         println!("没有可删除的备份。");
         return EXIT_OK;
@@ -381,63 +359,41 @@ pub fn backup_delete(
         .map(|(index, entry)| (backup_catalog::canonical_entry_path(&entry.path), index + 1))
         .collect();
 
-    let selected = if targets.is_empty() {
+    // 交互选择留在 CLI，但条目解析与确认快照仍来自同一份 DeleteSession 扫描。
+    let plan = if targets.is_empty() {
         println!("请选择要删除的备份:");
         print_numbered_backup_entries(&numbered);
-        loop {
+        let selected = loop {
             let input = prompt.prompt_line("选择 [如 2 / 1,3 / 2-4，回车取消]: ");
             let input = input.trim();
             if input.is_empty() {
                 eprintln!("已取消");
                 return EXIT_CANCELLED;
             }
-            match selector.resolve_many(&[input.to_string()]) {
-                Ok(entries) => break entries,
+            match session.selector().resolve_many(&[input.to_string()]) {
+                Ok(entries) => break entries.into_iter().cloned().collect::<Vec<BackupEntry>>(),
                 Err(msg) => eprintln!("{}", crate::ui::red(&format!("错误: {}", msg))),
             }
-        }
+        };
+        session.plan_resolved(selected)
     } else {
-        match selector.resolve_many(targets) {
-            Ok(entries) => entries,
-            Err(msg) => {
-                eprintln!("{}", crate::ui::red(&format!("错误: {}", msg)));
-                return EXIT_BACKUP;
-            }
+        session.plan_targets(targets)
+    };
+    let plan = match plan {
+        Ok(plan) => plan,
+        Err(error) => {
+            eprintln!("{}", crate::ui::red(&format!("错误: {}", error.message())));
+            return EXIT_BACKUP;
         }
     };
 
-    // 在任何交互确认之前固定“用户看到的那批条目”。确认后删除时直接用这些
-    // 扫描快照做内容复核，不能重新按可能已被替换的路径去解释目标。
-    let to_delete: Vec<BackupEntry> = selected.into_iter().cloned().collect();
-    let resolved: Vec<PathBuf> = to_delete
+    let resolved: Vec<PathBuf> = plan
+        .targets
         .iter()
         .map(|entry| backup_catalog::canonical_entry_path(&entry.path))
         .collect();
-
-    let mut total_per_group: BTreeMap<String, usize> = BTreeMap::new();
-    let mut deleting_per_group: BTreeMap<String, usize> = BTreeMap::new();
-    for entry in entries {
-        if let Some(key) = diskio::backup_group_key(entry) {
-            *total_per_group.entry(key.clone()).or_default() += 1;
-            let ep = backup_catalog::canonical_entry_path(&entry.path);
-            if resolved.contains(&ep) {
-                *deleting_per_group.entry(key).or_default() += 1;
-            }
-        }
-    }
-    for (key, deleting) in &deleting_per_group {
-        let total = total_per_group.get(key).copied().unwrap_or(0);
-        if *deleting >= total && total > 0 {
-            eprintln!(
-                "{}",
-                crate::ui::red("错误: 安全保护拒绝删除——该盘将被清到零份备份；至少保留 1 份。",)
-            );
-            return EXIT_BACKUP;
-        }
-    }
-
     println!("将删除 {} 份备份:", resolved.len());
-    for (path, entry) in resolved.iter().zip(&to_delete) {
+    for (path, entry) in resolved.iter().zip(&plan.targets) {
         let name = path
             .file_name()
             .and_then(|n| n.to_str())
@@ -459,8 +415,8 @@ pub fn backup_delete(
     }
 
     let mut failed = 0usize;
-    for entry in &to_delete {
-        if let Err(msg) = delete_backup_pair(entry) {
+    for (_, result) in session.execute(&plan) {
+        if let Err(msg) = result {
             failed += 1;
             eprintln!("{}", crate::ui::red(&format!("错误: {}", msg)));
         }

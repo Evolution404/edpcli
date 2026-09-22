@@ -4,9 +4,11 @@
 //! operations however they need, but must not reimplement device discovery or raw-disk
 //! safety policy.
 
+pub mod backup;
 pub mod device;
 pub mod inspect;
 pub mod write;
+pub use backup::delete_backup_exact;
 use std::cell::RefCell;
 use std::io;
 use std::path::Path;
@@ -125,18 +127,8 @@ pub fn parse_pinned_disk_selector(value: &str) -> Result<u32, String> {
         .map_err(|error| format!("错误: resume disk {value}: {error}"))
 }
 
-fn scanned_backup_by_path<'a>(
-    selector: &'a crate::selectors::BackupSelector,
-    path: &Path,
-) -> Result<&'a crate::diskio::BackupEntry, String> {
-    let target = crate::backup_catalog::canonical_entry_path(path);
-    selector
-        .catalog()
-        .entries()
-        .iter()
-        .find(|entry| crate::backup_catalog::canonical_entry_path(&entry.path) == target)
-        .ok_or_else(|| format!("备份已不存在或不再属于当前备份目录: {}", path.display()))
-}
+// 备份删除/保留策略的统一入口已迁至 application::backup(DeleteSession/plan/execute)；
+// delete_backup_exact 保留为 TUI worker 的薄封装再导出。
 
 /// Verify exactly one backup selected by the TUI against the canonical backup catalog.
 pub fn verify_backup_exact(root: &Path, path: &Path) -> Result<(), String> {
@@ -160,35 +152,4 @@ pub fn verify_backup_exact(root: &Path, path: &Path) -> Result<(), String> {
             canonical_path.display()
         ))
     }
-}
-
-/// Delete one exact backup selected from a prior TUI scan.
-///
-/// The expected SHA-256 pins the exact bytes that the user selected before confirmation. If the file is
-/// replaced or changed while the confirmation dialog is open, deletion fails closed.
-pub fn delete_backup_exact(root: &Path, path: &Path, expected_sha256: &str) -> Result<(), String> {
-    let selector = load_backup_selector(root);
-    let entry = scanned_backup_by_path(&selector, path)?;
-    if entry.content_sha256.as_deref() != Some(expected_sha256) {
-        return Err(format!(
-            "备份在选择/确认期间已变化，拒绝删除: {}",
-            path.display()
-        ));
-    }
-
-    if let Some(group) = diskio::backup_group_key(entry) {
-        let remaining_in_group = selector
-            .catalog()
-            .entries()
-            .iter()
-            .filter(|candidate| {
-                diskio::backup_group_key(candidate).as_deref() == Some(group.as_str())
-            })
-            .count();
-        if remaining_in_group <= 1 {
-            return Err("安全保护拒绝删除——该盘将被清到零份备份；至少保留 1 份。".into());
-        }
-    }
-
-    crate::backup_catalog::delete_entry_verified(entry)
 }
