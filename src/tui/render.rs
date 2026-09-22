@@ -777,7 +777,7 @@ fn draw_backup_delete(frame: &mut Frame, area: ratatui::layout::Rect, state: &Ap
             Span::styled("文件: ", accent()),
             Span::raw(safe(&delete.path.display().to_string())),
         ]),
-        Line::from("安全规则：固定选中时 SHA-256 → 删除前重新扫描 → 内容复核 → 至少保留该盘 1 份备份 → 同步删除 .sha256"),
+        Line::from("安全规则：固定选中时 SHA-256 → 删除前重新扫描 → 内容复核 → 至少保留该盘 1 份备份 → 删除单文件 .edpb"),
     ];
     match delete.stage {
         WizardStage::Confirm => {

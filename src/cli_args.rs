@@ -125,7 +125,7 @@ fn print_topic_help(topic: &str) {
         "info" => {
             println!(
                 "{}",
-                bold("用法: edpcli info [备份.bin] [--disk N] [--id DEVICE_ID] [--backup-dir D]")
+                bold("用法: edpcli info [备份.edpb] [--disk N] [--id DEVICE_ID] [--backup-dir D]")
             );
             println!("未指定来源且只有一个可用目标盘时自动选择；多盘时交互选择。");
         }
@@ -134,7 +134,7 @@ fn print_topic_help(topic: &str) {
             println!("--dry-run 只执行识别与布局计算，不提交写入。");
         }
         "inspect" => {
-            println!("{}", bold("用法: edpcli inspect [备份.bin] [--disk N] [--lba 6,7,12] [--hex|--raw] [--export DIR]"));
+            println!("{}", bold("用法: edpcli inspect [备份.edpb] [--disk N] [--lba 6,7,12] [--hex|--raw] [--export DIR]"));
             println!("LBA 必须通过 --lba 显式指定；不指定时显示 LBA0-12 概览。");
         }
         "backup" => {
@@ -385,7 +385,7 @@ pub fn parse_args(argv: &[String]) -> Result<Parsed, String> {
                     ));
                 } else if opts.backup.is_none() {
                     // 最常见的离线查看不应强迫用户记 --backup：
-                    // `edpcli inspect backup.bin 7 12` 与显式 --backup 等价。
+                    // `edpcli inspect backup.edpb 7 12` 与显式 --backup 等价。
                     opts.backup = Some(a.to_string());
                 } else {
                     return Err(format!("错误: inspect 多余的位置参数: {}", a));
