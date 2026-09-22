@@ -1666,10 +1666,10 @@ PackedStruct/EncryptedRegion 行按目录现有粒度展示，不补造目录未
 | Physical evidence | P-GOLD-ENC |
 | Implementation provenance | Historical join59 executable provenance is not required for wire semantics. |
 | Semantic status | COMPLETE |
-| Implementation status | PLANNED |
-| Behavior-test status | PLANNED |
-| Code symbol | planned:protocol::lba6::dept_prefix |
-| Test symbol | UNIMPLEMENTED |
+| Implementation status | COMPLETE |
+| Behavior-test status | COMPLETE |
+| Code symbol | edpcli::protocol::lba6::parse_lba6 |
+| Test symbol | dept_behavior::dept_join_seams_and_post_nul_backing_are_independent |
 | Ownership test | protocol_field_catalog::field_catalog_has_exact_byte_ownership_for_every_profile_state |
 
 #### lba6.dept_prefix · dept_layout / join60
@@ -1689,10 +1689,10 @@ PackedStruct/EncryptedRegion 行按目录现有粒度展示，不补造目录未
 | Physical evidence | P-GOLD-ENC |
 | Implementation provenance | Historical join59 executable provenance is not required for wire semantics. |
 | Semantic status | COMPLETE |
-| Implementation status | PLANNED |
-| Behavior-test status | PLANNED |
-| Code symbol | planned:protocol::lba6::dept_prefix |
-| Test symbol | UNIMPLEMENTED |
+| Implementation status | COMPLETE |
+| Behavior-test status | COMPLETE |
+| Code symbol | edpcli::protocol::lba6::parse_lba6 |
+| Test symbol | dept_behavior::dept_join_seams_and_post_nul_backing_are_independent |
 | Ownership test | protocol_field_catalog::field_catalog_has_exact_byte_ownership_for_every_profile_state |
 
 #### lba6.dept_prefix · dept_layout / short
@@ -1712,10 +1712,10 @@ PackedStruct/EncryptedRegion 行按目录现有粒度展示，不补造目录未
 | Physical evidence | P-GOLD-ENC |
 | Implementation provenance | Historical join59 executable provenance is not required for wire semantics. |
 | Semantic status | COMPLETE |
-| Implementation status | PLANNED |
-| Behavior-test status | PLANNED |
-| Code symbol | planned:protocol::lba6::dept_prefix |
-| Test symbol | UNIMPLEMENTED |
+| Implementation status | COMPLETE |
+| Behavior-test status | COMPLETE |
+| Code symbol | edpcli::protocol::lba6::parse_lba6 |
+| Test symbol | dept_behavior::dept_join_seams_and_post_nul_backing_are_independent |
 | Ownership test | protocol_field_catalog::field_catalog_has_exact_byte_ownership_for_every_profile_state |
 
 #### lba6.dept_seam · dept_layout / join59
@@ -1735,10 +1735,10 @@ PackedStruct/EncryptedRegion 行按目录现有粒度展示，不补造目录未
 | Physical evidence | P-GOLD-ENC |
 | Implementation provenance | Exact per-state byte role is closed. |
 | Semantic status | COMPLETE |
-| Implementation status | PLANNED |
-| Behavior-test status | PLANNED |
-| Code symbol | planned:protocol::lba6::dept_seam |
-| Test symbol | UNIMPLEMENTED |
+| Implementation status | COMPLETE |
+| Behavior-test status | COMPLETE |
+| Code symbol | edpcli::protocol::lba6::parse_lba6 |
+| Test symbol | dept_behavior::dept_join_seams_and_post_nul_backing_are_independent |
 | Ownership test | protocol_field_catalog::field_catalog_has_exact_byte_ownership_for_every_profile_state |
 
 #### lba6.dept_seam · dept_layout / join60
@@ -1758,10 +1758,10 @@ PackedStruct/EncryptedRegion 行按目录现有粒度展示，不补造目录未
 | Physical evidence | P-GOLD-ENC |
 | Implementation provenance | Exact per-state byte role is closed. |
 | Semantic status | COMPLETE |
-| Implementation status | PLANNED |
-| Behavior-test status | PLANNED |
-| Code symbol | planned:protocol::lba6::dept_seam |
-| Test symbol | UNIMPLEMENTED |
+| Implementation status | COMPLETE |
+| Behavior-test status | COMPLETE |
+| Code symbol | edpcli::protocol::lba6::parse_lba6 |
+| Test symbol | dept_behavior::dept_join_seams_and_post_nul_backing_are_independent |
 | Ownership test | protocol_field_catalog::field_catalog_has_exact_byte_ownership_for_every_profile_state |
 
 #### lba6.dept_seam · dept_layout / short
@@ -1781,10 +1781,10 @@ PackedStruct/EncryptedRegion 行按目录现有粒度展示，不补造目录未
 | Physical evidence | P-GOLD-ENC |
 | Implementation provenance | Exact per-state byte role is closed. |
 | Semantic status | COMPLETE |
-| Implementation status | PLANNED |
-| Behavior-test status | PLANNED |
-| Code symbol | planned:protocol::lba6::dept_seam |
-| Test symbol | UNIMPLEMENTED |
+| Implementation status | COMPLETE |
+| Behavior-test status | COMPLETE |
+| Code symbol | edpcli::protocol::lba6::parse_lba6 |
+| Test symbol | dept_behavior::dept_join_seams_and_post_nul_backing_are_independent |
 | Ownership test | protocol_field_catalog::field_catalog_has_exact_byte_ownership_for_every_profile_state |
 
 #### lba6.template_040_04f · base / all
@@ -1804,10 +1804,10 @@ PackedStruct/EncryptedRegion 行按目录现有粒度展示，不补造目录未
 | Physical evidence | P-GOLD-ENC;P-GOLD-NOPWD |
 | Implementation provenance | Canonical COMPLETE semantics; provenance limits remain documented. |
 | Semantic status | COMPLETE |
-| Implementation status | PLANNED |
-| Behavior-test status | PLANNED |
-| Code symbol | planned:protocol::lba6::template_040_04f |
-| Test symbol | UNIMPLEMENTED |
+| Implementation status | COMPLETE |
+| Behavior-test status | COMPLETE |
+| Code symbol | edpcli::protocol::lba6::parse_lba6 |
+| Test symbol | dept_behavior::dept_and_safe6_fields_replay_physical_profiles_without_losing_backing |
 | Ownership test | protocol_field_catalog::field_catalog_has_exact_byte_ownership_for_every_profile_state |
 
 #### lba6.user_slot · base / all
@@ -1827,10 +1827,10 @@ PackedStruct/EncryptedRegion 行按目录现有粒度展示，不补造目录未
 | Physical evidence | P-GOLD-ENC;P-GOLD-NOPWD |
 | Implementation provenance | Canonical COMPLETE semantics; provenance limits remain documented. |
 | Semantic status | COMPLETE |
-| Implementation status | PLANNED |
-| Behavior-test status | PLANNED |
-| Code symbol | planned:protocol::lba6::user_slot |
-| Test symbol | UNIMPLEMENTED |
+| Implementation status | COMPLETE |
+| Behavior-test status | COMPLETE |
+| Code symbol | edpcli::protocol::lba6::parse_lba6 |
+| Test symbol | dept_behavior::dept_and_safe6_fields_replay_physical_profiles_without_losing_backing |
 | Ownership test | protocol_field_catalog::field_catalog_has_exact_byte_ownership_for_every_profile_state |
 
 #### lba6.autonum_slot · base / all
@@ -1850,10 +1850,10 @@ PackedStruct/EncryptedRegion 行按目录现有粒度展示，不补造目录未
 | Physical evidence | P-GOLD-ENC;P-GOLD-NOPWD |
 | Implementation provenance | Canonical COMPLETE semantics; provenance limits remain documented. |
 | Semantic status | COMPLETE |
-| Implementation status | PLANNED |
-| Behavior-test status | PLANNED |
-| Code symbol | planned:protocol::lba6::autonum_slot |
-| Test symbol | UNIMPLEMENTED |
+| Implementation status | COMPLETE |
+| Behavior-test status | COMPLETE |
+| Code symbol | edpcli::protocol::lba6::parse_lba6 |
+| Test symbol | dept_behavior::dept_and_safe6_fields_replay_physical_profiles_without_losing_backing |
 | Ownership test | protocol_field_catalog::field_catalog_has_exact_byte_ownership_for_every_profile_state |
 
 #### lba6.office_slot · base / all
@@ -1873,10 +1873,10 @@ PackedStruct/EncryptedRegion 行按目录现有粒度展示，不补造目录未
 | Physical evidence | P-GOLD-ENC;P-GOLD-NOPWD |
 | Implementation provenance | Canonical COMPLETE semantics; provenance limits remain documented. |
 | Semantic status | COMPLETE |
-| Implementation status | PLANNED |
-| Behavior-test status | PLANNED |
-| Code symbol | planned:protocol::lba6::office_slot |
-| Test symbol | UNIMPLEMENTED |
+| Implementation status | COMPLETE |
+| Behavior-test status | COMPLETE |
+| Code symbol | edpcli::protocol::lba6::parse_lba6 |
+| Test symbol | dept_behavior::dept_and_safe6_fields_replay_physical_profiles_without_losing_backing |
 | Ownership test | protocol_field_catalog::field_catalog_has_exact_byte_ownership_for_every_profile_state |
 
 #### lba6.template_0c0_0ff · base / all
@@ -1896,10 +1896,10 @@ PackedStruct/EncryptedRegion 行按目录现有粒度展示，不补造目录未
 | Physical evidence | P-GOLD-ENC;P-GOLD-NOPWD |
 | Implementation provenance | Canonical COMPLETE semantics; provenance limits remain documented. |
 | Semantic status | COMPLETE |
-| Implementation status | PLANNED |
-| Behavior-test status | PLANNED |
-| Code symbol | planned:protocol::lba6::template_0c0_0ff |
-| Test symbol | UNIMPLEMENTED |
+| Implementation status | COMPLETE |
+| Behavior-test status | COMPLETE |
+| Code symbol | edpcli::protocol::lba6::parse_lba6 |
+| Test symbol | dept_behavior::dept_and_safe6_fields_replay_physical_profiles_without_losing_backing |
 | Ownership test | protocol_field_catalog::field_catalog_has_exact_byte_ownership_for_every_profile_state |
 
 #### lba6.device_crc · base / all
@@ -1919,10 +1919,10 @@ PackedStruct/EncryptedRegion 行按目录现有粒度展示，不补造目录未
 | Physical evidence | P-GOLD-ENC;P-GOLD-NOPWD |
 | Implementation provenance | Canonical COMPLETE semantics; provenance limits remain documented. |
 | Semantic status | COMPLETE |
-| Implementation status | PLANNED |
-| Behavior-test status | PLANNED |
-| Code symbol | planned:protocol::lba6::device_crc |
-| Test symbol | UNIMPLEMENTED |
+| Implementation status | COMPLETE |
+| Behavior-test status | COMPLETE |
+| Code symbol | edpcli::protocol::lba6::parse_lba6 |
+| Test symbol | dept_behavior::dept_and_safe6_fields_replay_physical_profiles_without_losing_backing |
 | Ownership test | protocol_field_catalog::field_catalog_has_exact_byte_ownership_for_every_profile_state |
 
 #### lba6.device_crc_guard · base / all
@@ -1942,10 +1942,10 @@ PackedStruct/EncryptedRegion 行按目录现有粒度展示，不补造目录未
 | Physical evidence | P-GOLD-ENC;P-GOLD-NOPWD |
 | Implementation provenance | Canonical COMPLETE semantics; provenance limits remain documented. |
 | Semantic status | COMPLETE |
-| Implementation status | PLANNED |
-| Behavior-test status | PLANNED |
-| Code symbol | planned:protocol::lba6::device_crc_guard |
-| Test symbol | UNIMPLEMENTED |
+| Implementation status | COMPLETE |
+| Behavior-test status | COMPLETE |
+| Code symbol | edpcli::protocol::lba6::parse_lba6 |
+| Test symbol | dept_behavior::dept_and_safe6_fields_replay_physical_profiles_without_losing_backing |
 | Ownership test | protocol_field_catalog::field_catalog_has_exact_byte_ownership_for_every_profile_state |
 
 #### lba6.template_108_187 · base / all
@@ -1965,10 +1965,10 @@ PackedStruct/EncryptedRegion 行按目录现有粒度展示，不补造目录未
 | Physical evidence | P-GOLD-ENC;P-GOLD-NOPWD |
 | Implementation provenance | Canonical COMPLETE semantics; provenance limits remain documented. |
 | Semantic status | COMPLETE |
-| Implementation status | PLANNED |
-| Behavior-test status | PLANNED |
-| Code symbol | planned:protocol::lba6::template_108_187 |
-| Test symbol | UNIMPLEMENTED |
+| Implementation status | COMPLETE |
+| Behavior-test status | COMPLETE |
+| Code symbol | edpcli::protocol::lba6::parse_lba6 |
+| Test symbol | dept_behavior::dept_and_safe6_fields_replay_physical_profiles_without_losing_backing |
 | Ownership test | protocol_field_catalog::field_catalog_has_exact_byte_ownership_for_every_profile_state |
 
 #### lba6.label_slot · base / all
@@ -1988,10 +1988,10 @@ PackedStruct/EncryptedRegion 行按目录现有粒度展示，不补造目录未
 | Physical evidence | P-GOLD-ENC;P-GOLD-NOPWD |
 | Implementation provenance | Canonical COMPLETE semantics; provenance limits remain documented. |
 | Semantic status | COMPLETE |
-| Implementation status | PLANNED |
-| Behavior-test status | PLANNED |
-| Code symbol | planned:protocol::lba6::label_slot |
-| Test symbol | UNIMPLEMENTED |
+| Implementation status | COMPLETE |
+| Behavior-test status | COMPLETE |
+| Code symbol | edpcli::protocol::lba6::parse_lba6 |
+| Test symbol | dept_behavior::dept_and_safe6_fields_replay_physical_profiles_without_losing_backing |
 | Ownership test | protocol_field_catalog::field_catalog_has_exact_byte_ownership_for_every_profile_state |
 
 #### lba6.gserial_prefix · base / all
@@ -2011,10 +2011,10 @@ PackedStruct/EncryptedRegion 行按目录现有粒度展示，不补造目录未
 | Physical evidence | P-GOLD-ENC;P-GOLD-NOPWD |
 | Implementation provenance | Canonical COMPLETE semantics; provenance limits remain documented. |
 | Semantic status | COMPLETE |
-| Implementation status | PLANNED |
-| Behavior-test status | PLANNED |
-| Code symbol | planned:protocol::lba6::gserial_prefix |
-| Test symbol | UNIMPLEMENTED |
+| Implementation status | COMPLETE |
+| Behavior-test status | COMPLETE |
+| Code symbol | edpcli::protocol::lba6::parse_lba6 |
+| Test symbol | dept_behavior::dept_and_safe6_fields_replay_physical_profiles_without_losing_backing |
 | Ownership test | protocol_field_catalog::field_catalog_has_exact_byte_ownership_for_every_profile_state |
 
 #### lba6.gserial_tail · base / all
@@ -2034,10 +2034,10 @@ PackedStruct/EncryptedRegion 行按目录现有粒度展示，不补造目录未
 | Physical evidence | P-GOLD-ENC;P-GOLD-NOPWD |
 | Implementation provenance | Canonical COMPLETE semantics; provenance limits remain documented. |
 | Semantic status | COMPLETE |
-| Implementation status | PLANNED |
-| Behavior-test status | PLANNED |
-| Code symbol | planned:protocol::lba6::gserial_tail |
-| Test symbol | UNIMPLEMENTED |
+| Implementation status | COMPLETE |
+| Behavior-test status | COMPLETE |
+| Code symbol | edpcli::protocol::lba6::parse_lba6 |
+| Test symbol | dept_behavior::dept_and_safe6_fields_replay_physical_profiles_without_losing_backing |
 | Ownership test | protocol_field_catalog::field_catalog_has_exact_byte_ownership_for_every_profile_state |
 
 #### lba6.gserial_terminator · base / all
@@ -2057,10 +2057,10 @@ PackedStruct/EncryptedRegion 行按目录现有粒度展示，不补造目录未
 | Physical evidence | P-GOLD-ENC;P-GOLD-NOPWD |
 | Implementation provenance | Canonical COMPLETE semantics; provenance limits remain documented. |
 | Semantic status | COMPLETE |
-| Implementation status | PLANNED |
-| Behavior-test status | PLANNED |
-| Code symbol | planned:protocol::lba6::gserial_terminator |
-| Test symbol | UNIMPLEMENTED |
+| Implementation status | COMPLETE |
+| Behavior-test status | COMPLETE |
+| Code symbol | edpcli::protocol::lba6::parse_lba6 |
+| Test symbol | dept_behavior::dept_and_safe6_fields_replay_physical_profiles_without_losing_backing |
 | Ownership test | protocol_field_catalog::field_catalog_has_exact_byte_ownership_for_every_profile_state |
 
 #### lba6.beizhu_head · base / all
@@ -2080,10 +2080,10 @@ PackedStruct/EncryptedRegion 行按目录现有粒度展示，不补造目录未
 | Physical evidence | P-GOLD-ENC;P-GOLD-NOPWD |
 | Implementation provenance | Canonical COMPLETE semantics; provenance limits remain documented. |
 | Semantic status | COMPLETE |
-| Implementation status | PLANNED |
-| Behavior-test status | PLANNED |
-| Code symbol | planned:protocol::lba6::beizhu_head |
-| Test symbol | UNIMPLEMENTED |
+| Implementation status | COMPLETE |
+| Behavior-test status | COMPLETE |
+| Code symbol | edpcli::protocol::lba6::parse_lba6 |
+| Test symbol | dept_behavior::dept_and_safe6_fields_replay_physical_profiles_without_losing_backing |
 | Ownership test | protocol_field_catalog::field_catalog_has_exact_byte_ownership_for_every_profile_state |
 
 #### lba6.beizhu_tail · base / all
@@ -2103,10 +2103,10 @@ PackedStruct/EncryptedRegion 行按目录现有粒度展示，不补造目录未
 | Physical evidence | P-GOLD-ENC;P-GOLD-NOPWD |
 | Implementation provenance | Canonical COMPLETE semantics; provenance limits remain documented. |
 | Semantic status | COMPLETE |
-| Implementation status | PLANNED |
-| Behavior-test status | PLANNED |
-| Code symbol | planned:protocol::lba6::beizhu_tail |
-| Test symbol | UNIMPLEMENTED |
+| Implementation status | COMPLETE |
+| Behavior-test status | COMPLETE |
+| Code symbol | edpcli::protocol::lba6::parse_lba6 |
+| Test symbol | dept_behavior::dept_and_safe6_fields_replay_physical_profiles_without_losing_backing |
 | Ownership test | protocol_field_catalog::field_catalog_has_exact_byte_ownership_for_every_profile_state |
 
 #### lba6.beizhu_terminator · base / all
@@ -2126,10 +2126,10 @@ PackedStruct/EncryptedRegion 行按目录现有粒度展示，不补造目录未
 | Physical evidence | P-GOLD-ENC;P-GOLD-NOPWD |
 | Implementation provenance | Canonical COMPLETE semantics; provenance limits remain documented. |
 | Semantic status | COMPLETE |
-| Implementation status | PLANNED |
-| Behavior-test status | PLANNED |
-| Code symbol | planned:protocol::lba6::beizhu_terminator |
-| Test symbol | UNIMPLEMENTED |
+| Implementation status | COMPLETE |
+| Behavior-test status | COMPLETE |
+| Code symbol | edpcli::protocol::lba6::parse_lba6 |
+| Test symbol | dept_behavior::dept_and_safe6_fields_replay_physical_profiles_without_losing_backing |
 | Ownership test | protocol_field_catalog::field_catalog_has_exact_byte_ownership_for_every_profile_state |
 
 #### lba6.mbr_underlay · lba6_mbr_underlay / legacy-mbr-snapshot
@@ -2149,10 +2149,10 @@ PackedStruct/EncryptedRegion 行按目录现有粒度展示，不补造目录未
 | Physical evidence | P-GOLD-ENC;P-EESI-NETAC |
 | Implementation provenance | Historical nonzero copy site remains provenance only. |
 | Semantic status | COMPLETE |
-| Implementation status | PLANNED |
-| Behavior-test status | PLANNED |
-| Code symbol | planned:protocol::lba6::mbr_underlay |
-| Test symbol | UNIMPLEMENTED |
+| Implementation status | COMPLETE |
+| Behavior-test status | COMPLETE |
+| Code symbol | edpcli::protocol::lba6::parse_lba6 |
+| Test symbol | dept_behavior::dept_and_safe6_fields_replay_physical_profiles_without_losing_backing |
 | Ownership test | protocol_field_catalog::field_catalog_has_exact_byte_ownership_for_every_profile_state |
 
 #### lba6.mbr_underlay · lba6_mbr_underlay / zero-underlay
@@ -2172,10 +2172,10 @@ PackedStruct/EncryptedRegion 行按目录现有粒度展示，不补造目录未
 | Physical evidence | P-GOLD-ENC;P-GOLD-NOPWD;P-EESI-NETAC |
 | Implementation provenance | Historical nonzero selector remains provenance only. |
 | Semantic status | COMPLETE |
-| Implementation status | PLANNED |
-| Behavior-test status | PLANNED |
-| Code symbol | planned:protocol::lba6::mbr_underlay |
-| Test symbol | UNIMPLEMENTED |
+| Implementation status | COMPLETE |
+| Behavior-test status | COMPLETE |
+| Code symbol | edpcli::protocol::lba6::parse_lba6 |
+| Test symbol | dept_behavior::dept_and_safe6_fields_replay_physical_profiles_without_losing_backing |
 | Ownership test | protocol_field_catalog::field_catalog_has_exact_byte_ownership_for_every_profile_state |
 
 #### lba6.compat_1ee_1ef · base / all
@@ -2195,10 +2195,10 @@ PackedStruct/EncryptedRegion 行按目录现有粒度展示，不补造目录未
 | Physical evidence | P-GOLD-ENC;P-GOLD-NOPWD |
 | Implementation provenance | Canonical COMPLETE semantics; provenance limits remain documented. |
 | Semantic status | COMPLETE |
-| Implementation status | PLANNED |
-| Behavior-test status | PLANNED |
-| Code symbol | planned:protocol::lba6::compat_1ee_1ef |
-| Test symbol | UNIMPLEMENTED |
+| Implementation status | COMPLETE |
+| Behavior-test status | COMPLETE |
+| Code symbol | edpcli::protocol::lba6::parse_lba6 |
+| Test symbol | dept_behavior::dept_and_safe6_fields_replay_physical_profiles_without_losing_backing |
 | Ownership test | protocol_field_catalog::field_catalog_has_exact_byte_ownership_for_every_profile_state |
 
 #### lba6.encrypt_generation_flag · base / all
@@ -2218,10 +2218,10 @@ PackedStruct/EncryptedRegion 行按目录现有粒度展示，不补造目录未
 | Physical evidence | P-GOLD-ENC;P-GOLD-NOPWD |
 | Implementation provenance | Canonical COMPLETE semantics; provenance limits remain documented. |
 | Semantic status | COMPLETE |
-| Implementation status | PLANNED |
-| Behavior-test status | PLANNED |
-| Code symbol | planned:protocol::lba6::encrypt_generation_flag |
-| Test symbol | UNIMPLEMENTED |
+| Implementation status | COMPLETE |
+| Behavior-test status | COMPLETE |
+| Code symbol | edpcli::protocol::lba6::parse_lba6 |
+| Test symbol | dept_behavior::dept_and_safe6_fields_replay_physical_profiles_without_losing_backing |
 | Ownership test | protocol_field_catalog::field_catalog_has_exact_byte_ownership_for_every_profile_state |
 
 #### lba6.zero_tail · base / all
@@ -2241,10 +2241,10 @@ PackedStruct/EncryptedRegion 行按目录现有粒度展示，不补造目录未
 | Physical evidence | P-GOLD-ENC;P-GOLD-NOPWD |
 | Implementation provenance | Canonical COMPLETE semantics; provenance limits remain documented. |
 | Semantic status | COMPLETE |
-| Implementation status | PLANNED |
-| Behavior-test status | PLANNED |
-| Code symbol | planned:protocol::lba6::zero_tail |
-| Test symbol | UNIMPLEMENTED |
+| Implementation status | COMPLETE |
+| Behavior-test status | COMPLETE |
+| Code symbol | edpcli::protocol::lba6::parse_lba6 |
+| Test symbol | dept_behavior::dept_and_safe6_fields_replay_physical_profiles_without_losing_backing |
 | Ownership test | protocol_field_catalog::field_catalog_has_exact_byte_ownership_for_every_profile_state |
 
 #### lba6.checksum · base / all
@@ -2264,10 +2264,10 @@ PackedStruct/EncryptedRegion 行按目录现有粒度展示，不补造目录未
 | Physical evidence | P-GOLD-ENC;P-GOLD-NOPWD |
 | Implementation provenance | Canonical COMPLETE semantics; provenance limits remain documented. |
 | Semantic status | COMPLETE |
-| Implementation status | PLANNED |
-| Behavior-test status | PLANNED |
-| Code symbol | planned:protocol::lba6::checksum |
-| Test symbol | UNIMPLEMENTED |
+| Implementation status | COMPLETE |
+| Behavior-test status | COMPLETE |
+| Code symbol | edpcli::protocol::lba6::parse_lba6 |
+| Test symbol | dept_behavior::dept_and_safe6_fields_replay_physical_profiles_without_losing_backing |
 | Ownership test | protocol_field_catalog::field_catalog_has_exact_byte_ownership_for_every_profile_state |
 
 ### 历史演进 matrix
@@ -3003,10 +3003,10 @@ PackedStruct/EncryptedRegion 行按目录现有粒度展示，不补造目录未
 | Physical evidence | P-GOLD-ENC |
 | Implementation provenance | Independent from upper overlays. |
 | Semantic status | COMPLETE |
-| Implementation status | PLANNED |
-| Behavior-test status | PLANNED |
-| Code symbol | planned:protocol::lba9::eetu |
-| Test symbol | UNIMPLEMENTED |
+| Implementation status | COMPLETE |
+| Behavior-test status | COMPLETE |
+| Code symbol | edpcli::protocol::lba9::parse_lba9 |
+| Test symbol | dept_behavior::dept_and_safe6_fields_replay_physical_profiles_without_losing_backing |
 | Ownership test | protocol_field_catalog::field_catalog_has_exact_byte_ownership_for_every_profile_state |
 
 #### lba9.eetu · lba9_eetu / eetu
@@ -3026,10 +3026,10 @@ PackedStruct/EncryptedRegion 行按目录现有粒度展示，不补造目录未
 | Physical evidence | P-GOLD-ENC |
 | Implementation provenance | Reverse bytes are backing, not hidden fields. |
 | Semantic status | COMPLETE |
-| Implementation status | PLANNED |
-| Behavior-test status | PLANNED |
-| Code symbol | planned:protocol::lba9::eetu |
-| Test symbol | UNIMPLEMENTED |
+| Implementation status | COMPLETE |
+| Behavior-test status | COMPLETE |
+| Code symbol | edpcli::protocol::lba9::parse_lba9 |
+| Test symbol | dept_behavior::lba9_eetu_sapf_eppe_and_long_user_keep_distinct_ownership |
 | Ownership test | protocol_field_catalog::field_catalog_has_exact_byte_ownership_for_every_profile_state |
 
 #### lba9.dept_continuation · dept_layout / join59
@@ -3049,10 +3049,10 @@ PackedStruct/EncryptedRegion 行按目录现有粒度展示，不补造目录未
 | Physical evidence | P-GOLD-ENC |
 | Implementation provenance | Post-NUL backing is not normalized. |
 | Semantic status | COMPLETE |
-| Implementation status | PLANNED |
-| Behavior-test status | PLANNED |
-| Code symbol | planned:protocol::lba9::dept_continuation |
-| Test symbol | UNIMPLEMENTED |
+| Implementation status | COMPLETE |
+| Behavior-test status | COMPLETE |
+| Code symbol | edpcli::protocol::lba9::parse_lba9 |
+| Test symbol | dept_behavior::dept_join_seams_and_post_nul_backing_are_independent |
 | Ownership test | protocol_field_catalog::field_catalog_has_exact_byte_ownership_for_every_profile_state |
 
 #### lba9.dept_continuation · dept_layout / join60
@@ -3072,10 +3072,10 @@ PackedStruct/EncryptedRegion 行按目录现有粒度展示，不补造目录未
 | Physical evidence | P-GOLD-ENC |
 | Implementation provenance | Post-NUL backing is not normalized. |
 | Semantic status | COMPLETE |
-| Implementation status | PLANNED |
-| Behavior-test status | PLANNED |
-| Code symbol | planned:protocol::lba9::dept_continuation |
-| Test symbol | UNIMPLEMENTED |
+| Implementation status | COMPLETE |
+| Behavior-test status | COMPLETE |
+| Code symbol | edpcli::protocol::lba9::parse_lba9 |
+| Test symbol | dept_behavior::dept_join_seams_and_post_nul_backing_are_independent |
 | Ownership test | protocol_field_catalog::field_catalog_has_exact_byte_ownership_for_every_profile_state |
 
 #### lba9.dept_continuation · dept_layout / short
@@ -3095,10 +3095,10 @@ PackedStruct/EncryptedRegion 行按目录现有粒度展示，不补造目录未
 | Physical evidence | P-GOLD-ENC |
 | Implementation provenance | Post-NUL backing is not normalized. |
 | Semantic status | COMPLETE |
-| Implementation status | PLANNED |
-| Behavior-test status | PLANNED |
-| Code symbol | planned:protocol::lba9::dept_continuation |
-| Test symbol | UNIMPLEMENTED |
+| Implementation status | COMPLETE |
+| Behavior-test status | COMPLETE |
+| Code symbol | edpcli::protocol::lba9::parse_lba9 |
+| Test symbol | dept_behavior::dept_join_seams_and_post_nul_backing_are_independent |
 | Ownership test | protocol_field_catalog::field_catalog_has_exact_byte_ownership_for_every_profile_state |
 
 #### lba9.eppe_pre · lba9_overlay / eppe
@@ -3118,10 +3118,10 @@ PackedStruct/EncryptedRegion 行按目录现有粒度展示，不补造目录未
 | Physical evidence | P-GOLD-ENC |
 | Implementation provenance | EPPE starts at +0x180. |
 | Semantic status | COMPLETE |
-| Implementation status | PLANNED |
-| Behavior-test status | PLANNED |
-| Code symbol | planned:protocol::lba9::eppe_pre |
-| Test symbol | UNIMPLEMENTED |
+| Implementation status | COMPLETE |
+| Behavior-test status | COMPLETE |
+| Code symbol | edpcli::protocol::lba9::parse_lba9 |
+| Test symbol | dept_behavior::lba9_eetu_sapf_eppe_and_long_user_keep_distinct_ownership |
 | Ownership test | protocol_field_catalog::field_catalog_has_exact_byte_ownership_for_every_profile_state |
 
 #### lba9.sapf · lba9_overlay / sapf
@@ -3141,10 +3141,10 @@ PackedStruct/EncryptedRegion 行按目录现有粒度展示，不补造目录未
 | Physical evidence | P-GOLD-ENC |
 | Implementation provenance | Profile avoids User/EPPE reinterpretation. |
 | Semantic status | COMPLETE |
-| Implementation status | PLANNED |
-| Behavior-test status | PLANNED |
-| Code symbol | planned:protocol::lba9::sapf |
-| Test symbol | UNIMPLEMENTED |
+| Implementation status | COMPLETE |
+| Behavior-test status | COMPLETE |
+| Code symbol | edpcli::protocol::lba9::parse_lba9 |
+| Test symbol | dept_behavior::lba9_eetu_sapf_eppe_and_long_user_keep_distinct_ownership |
 | Ownership test | protocol_field_catalog::field_catalog_has_exact_byte_ownership_for_every_profile_state |
 
 #### lba9.upper_zero · lba9_overlay / zero
@@ -3164,10 +3164,10 @@ PackedStruct/EncryptedRegion 行按目录现有粒度展示，不补造目录未
 | Physical evidence | P-GOLD-ENC |
 | Implementation provenance | Explicit ownership state. |
 | Semantic status | COMPLETE |
-| Implementation status | PLANNED |
-| Behavior-test status | PLANNED |
-| Code symbol | planned:protocol::lba9::upper_zero |
-| Test symbol | UNIMPLEMENTED |
+| Implementation status | COMPLETE |
+| Behavior-test status | COMPLETE |
+| Code symbol | edpcli::protocol::lba9::parse_lba9 |
+| Test symbol | dept_behavior::dept_and_safe6_fields_replay_physical_profiles_without_losing_backing |
 | Ownership test | protocol_field_catalog::field_catalog_has_exact_byte_ownership_for_every_profile_state |
 
 #### lba9.user_continuation · lba9_overlay / long-user
@@ -3187,10 +3187,10 @@ PackedStruct/EncryptedRegion 行按目录现有粒度展示，不补造目录未
 | Physical evidence | MISSING_PHYSICAL |
 | Implementation provenance | Official virtual positive. |
 | Semantic status | COMPLETE |
-| Implementation status | PLANNED |
-| Behavior-test status | PLANNED |
-| Code symbol | planned:protocol::lba9::user_continuation |
-| Test symbol | UNIMPLEMENTED |
+| Implementation status | COMPLETE |
+| Behavior-test status | COMPLETE |
+| Code symbol | edpcli::protocol::lba9::parse_lba9 |
+| Test symbol | dept_behavior::lba9_eetu_sapf_eppe_and_long_user_keep_distinct_ownership |
 | Ownership test | protocol_field_catalog::field_catalog_has_exact_byte_ownership_for_every_profile_state |
 
 #### lba9.sapf_tail · lba9_overlay / sapf
@@ -3210,10 +3210,10 @@ PackedStruct/EncryptedRegion 行按目录现有粒度展示，不补造目录未
 | Physical evidence | P-GOLD-ENC |
 | Implementation provenance | SAPF consumer stops at +0x11F. |
 | Semantic status | COMPLETE |
-| Implementation status | PLANNED |
-| Behavior-test status | PLANNED |
-| Code symbol | planned:protocol::lba9::sapf_tail |
-| Test symbol | UNIMPLEMENTED |
+| Implementation status | COMPLETE |
+| Behavior-test status | COMPLETE |
+| Code symbol | edpcli::protocol::lba9::parse_lba9 |
+| Test symbol | dept_behavior::lba9_eetu_sapf_eppe_and_long_user_keep_distinct_ownership |
 | Ownership test | protocol_field_catalog::field_catalog_has_exact_byte_ownership_for_every_profile_state |
 
 #### lba9.eppe_magic · lba9_overlay / eppe
@@ -3233,10 +3233,10 @@ PackedStruct/EncryptedRegion 行按目录现有粒度展示，不补造目录未
 | Physical evidence | P-GOLD-ENC |
 | Implementation provenance | Canonical COMPLETE semantics; provenance limits remain documented. |
 | Semantic status | COMPLETE |
-| Implementation status | PLANNED |
-| Behavior-test status | PLANNED |
-| Code symbol | planned:protocol::lba9::eppe_magic |
-| Test symbol | UNIMPLEMENTED |
+| Implementation status | COMPLETE |
+| Behavior-test status | COMPLETE |
+| Code symbol | edpcli::protocol::lba9::parse_lba9 |
+| Test symbol | dept_behavior::lba9_eetu_sapf_eppe_and_long_user_keep_distinct_ownership |
 | Ownership test | protocol_field_catalog::field_catalog_has_exact_byte_ownership_for_every_profile_state |
 
 #### lba9.long_user_tail · lba9_overlay / long-user
@@ -3256,10 +3256,10 @@ PackedStruct/EncryptedRegion 行按目录现有粒度展示，不补造目录未
 | Physical evidence | P-GOLD-ENC |
 | Implementation provenance | Physical preserve state plus virtual active User. |
 | Semantic status | COMPLETE |
-| Implementation status | PLANNED |
-| Behavior-test status | PLANNED |
-| Code symbol | planned:protocol::lba9::long_user_tail |
-| Test symbol | UNIMPLEMENTED |
+| Implementation status | COMPLETE |
+| Behavior-test status | COMPLETE |
+| Code symbol | edpcli::protocol::lba9::parse_lba9 |
+| Test symbol | dept_behavior::lba9_eetu_sapf_eppe_and_long_user_keep_distinct_ownership |
 | Ownership test | protocol_field_catalog::field_catalog_has_exact_byte_ownership_for_every_profile_state |
 
 #### lba9.eppe_min_len · lba9_overlay / eppe
@@ -3279,10 +3279,10 @@ PackedStruct/EncryptedRegion 行按目录现有粒度展示，不补造目录未
 | Physical evidence | P-GOLD-ENC |
 | Implementation provenance | Canonical COMPLETE semantics; provenance limits remain documented. |
 | Semantic status | COMPLETE |
-| Implementation status | PLANNED |
-| Behavior-test status | PLANNED |
-| Code symbol | planned:protocol::lba9::eppe_min_len |
-| Test symbol | UNIMPLEMENTED |
+| Implementation status | COMPLETE |
+| Behavior-test status | COMPLETE |
+| Code symbol | edpcli::protocol::lba9::parse_lba9 |
+| Test symbol | dept_behavior::lba9_eetu_sapf_eppe_and_long_user_keep_distinct_ownership |
 | Ownership test | protocol_field_catalog::field_catalog_has_exact_byte_ownership_for_every_profile_state |
 
 #### lba9.eppe_zero_tail · lba9_overlay / eppe
@@ -3302,10 +3302,10 @@ PackedStruct/EncryptedRegion 行按目录现有粒度展示，不补造目录未
 | Physical evidence | P-GOLD-ENC |
 | Implementation provenance | Canonical COMPLETE semantics; provenance limits remain documented. |
 | Semantic status | COMPLETE |
-| Implementation status | PLANNED |
-| Behavior-test status | PLANNED |
-| Code symbol | planned:protocol::lba9::eppe_zero_tail |
-| Test symbol | UNIMPLEMENTED |
+| Implementation status | COMPLETE |
+| Behavior-test status | COMPLETE |
+| Code symbol | edpcli::protocol::lba9::parse_lba9 |
+| Test symbol | dept_behavior::lba9_eetu_sapf_eppe_and_long_user_keep_distinct_ownership |
 | Ownership test | protocol_field_catalog::field_catalog_has_exact_byte_ownership_for_every_profile_state |
 
 ### 历史演进 matrix

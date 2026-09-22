@@ -83,3 +83,28 @@ pub(crate) fn u32le(bytes: &[u8], offset: usize) -> u32 {
 pub(crate) fn u64le(bytes: &[u8], offset: usize) -> u64 {
     u64::from_le_bytes(bytes[offset..offset + 8].try_into().unwrap())
 }
+
+/// A bounded byte string. Encoding is retained; bytes after the first NUL are backing.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CStringSlot<const N: usize>(pub(crate) [u8; N]);
+impl<const N: usize> CStringSlot<N> {
+    pub fn bytes(&self) -> &[u8; N] {
+        &self.0
+    }
+    pub fn value(&self) -> &[u8] {
+        let end = self.0.iter().position(|b| *b == 0).unwrap_or(N);
+        &self.0[..end]
+    }
+    pub fn backing(&self) -> &[u8] {
+        let start = self
+            .0
+            .iter()
+            .position(|b| *b == 0)
+            .map(|i| i + 1)
+            .unwrap_or(N);
+        &self.0[start..]
+    }
+    pub fn is_terminated(&self) -> bool {
+        self.0.contains(&0)
+    }
+}

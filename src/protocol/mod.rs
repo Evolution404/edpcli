@@ -9,3 +9,6 @@ pub mod lba4;
 pub mod lba5;
 pub mod profile;
 pub mod types;
+
+pub mod lba6;
+pub mod lba9;
