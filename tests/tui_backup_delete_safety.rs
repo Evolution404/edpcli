@@ -4,7 +4,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use edpcli::application::{delete_backup_exact, scan_backup_workspace};
-use edpcli::diskio::sha256_sidecar_path;
+use edpcli::edpb::{self, CoreCapture};
 
 const ORIGINAL: &str =
     "disk4_245760000_vid3535_pid6300_disk&ven_aigo&prod_u335&rev_pmap_onlyid1987718388_20260827_191701.bin";
@@ -18,14 +18,33 @@ fn copy_fixture(root: &Path, name: &str) -> PathBuf {
         "missing backup fixture {}",
         source.display()
     );
-    let target = root.join(name);
-    fs::copy(&source, &target).expect("copy fixture");
-    let bytes = fs::read(&target).expect("read copied fixture");
-    fs::write(
-        sha256_sidecar_path(&target),
-        format!("{}\n", edpcli::sha256::sha256_hex(&bytes)),
+    let target = root.join(name).with_extension("edpb");
+    let bytes = fs::read(&source).expect("read protocol fixture");
+    let meta = edpcli::diskio::parse_backup_name(target.file_name().unwrap().to_str().unwrap())
+        .expect("EDPB name");
+    edpb::write_core_backup(
+        &target,
+        &CoreCapture {
+            snapshot_id: name.into(),
+            created_epoch: 1_789_000_000,
+            disk_number: Some(meta.disk),
+            vid: meta.vid,
+            pid: meta.pid,
+            device_id: meta.device_id,
+            onlyid: meta.onlyid,
+            total_sectors: meta.secs,
+            logical_sector_size: 512,
+            edpcli_version: env!("CARGO_PKG_VERSION").into(),
+            device_state: if meta.tagged_nopwd {
+                "passwordless"
+            } else {
+                "encrypted"
+            }
+            .into(),
+            lba0_12: &bytes,
+        },
     )
-    .expect("write sha256 sidecar");
+    .expect("write EDPB fixture");
     target
 }
 
@@ -54,17 +73,15 @@ fn delete_rejects_a_backup_replaced_after_selection() {
 }
 
 #[test]
-fn delete_removes_selected_backup_and_its_sidecar_when_another_copy_remains() {
+fn delete_removes_selected_edpb_when_another_copy_remains() {
     let tmp = common::TmpDir::new("tui_backup_delete_pair");
     let target = copy_fixture(&tmp.0, ORIGINAL);
     let keep = copy_fixture(&tmp.0, SNAPSHOT);
-    let sidecar = sha256_sidecar_path(&target);
     let expected = expected_sha256(&tmp.0, &target);
 
     delete_backup_exact(&tmp.0, &target, &expected).expect("delete selected backup");
 
     assert!(!target.exists());
-    assert!(!sidecar.exists());
     assert!(keep.exists());
 }
 
