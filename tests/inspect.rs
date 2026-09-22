@@ -2,13 +2,40 @@ mod common;
 
 use common::*;
 use edpcli::crypto::{a7f0_full, crc32_bare, xor_rolling};
-use edpcli::diskio::parse_backup_name;
 use edpcli::inspect::{analyze_sector, render_fields, render_hex, FieldStyle, InspectMeta};
 
 fn meta_for(key: &str) -> InspectMeta {
-    let (name, _) = fixture(key).expect("fixture metadata");
-    let parsed = parse_backup_name(name).expect("parse fixture backup name");
-    InspectMeta::from_backup_meta(&parsed)
+    let (device_id, vid, pid, sectors, onlyid) = match key {
+        "netac" => (
+            "disk&ven_netac&prod_onlydisk",
+            "0dd8",
+            "2005",
+            122_880_000u64,
+            "1402259934",
+        ),
+        "lexar" => (
+            "disk&ven_lexar&prod_usb_flash_drive",
+            "21c4",
+            "0cd1",
+            243_625_984u64,
+            "3164177653",
+        ),
+        "aigo" => (
+            "disk&ven_aigo&prod_u335&rev_pmap",
+            "3535",
+            "6300",
+            245_760_000u64,
+            "1987718388",
+        ),
+        other => panic!("unknown fixture metadata key: {other}"),
+    };
+    InspectMeta {
+        device_id: Some(device_id.into()),
+        vid: Some(vid.into()),
+        pid: Some(pid.into()),
+        size_bytes: sectors.checked_mul(512),
+        onlyid: Some(onlyid.into()),
+    }
 }
 
 #[test]
@@ -72,7 +99,7 @@ fn lba6_reports_safe6_checksum_and_identity_fields() {
 }
 
 #[test]
-fn lba11_can_decrypt_from_backup_filename_metadata() {
+fn lba11_can_decrypt_from_explicit_device_metadata() {
     let data = load_disk_image("netac").expect("netac fixture");
     let meta = meta_for("netac");
     let v = analyze_sector(11, &data[11 * 512..12 * 512], &meta);
