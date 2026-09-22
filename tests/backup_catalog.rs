@@ -4,8 +4,8 @@ use std::fs;
 
 use common::*;
 use edpcli::backup_catalog::BackupCatalog;
-use edpcli::md5::md5_hex;
 use edpcli::metainfo::backup_ownership;
+use edpcli::sha256::sha256_hex;
 
 fn copied_catalog() -> Option<(TmpDir, BackupCatalog)> {
     let Some(src) = fixture_bin("netac") else {
@@ -18,8 +18,8 @@ fn copied_catalog() -> Option<(TmpDir, BackupCatalog)> {
     fs::copy(&src, &first).unwrap();
     let data = fs::read(&first).unwrap();
     fs::write(
-        format!("{}.md5", first.display()),
-        format!("{}\n", md5_hex(&data)),
+        format!("{}.sha256", first.display()),
+        format!("{}\n", sha256_hex(&data)),
     )
     .unwrap();
 
@@ -31,8 +31,8 @@ fn copied_catalog() -> Option<(TmpDir, BackupCatalog)> {
     let second = tmp.0.join(second_name);
     fs::copy(&first, &second).unwrap();
     fs::write(
-        format!("{}.md5", second.display()),
-        format!("{}\n", md5_hex(&data)),
+        format!("{}.sha256", second.display()),
+        format!("{}\n", sha256_hex(&data)),
     )
     .unwrap();
     set_mtime(&first, 1_789_100_000); // 文件名较旧，但 mtime 较新

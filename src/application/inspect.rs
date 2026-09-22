@@ -2,7 +2,7 @@
 
 use std::path::Path;
 
-use crate::common::{LEGACY_METADATA_IMAGE_LEN, METADATA_IMAGE_LEN, METADATA_SECTOR_COUNT, SECTOR};
+use crate::common::{METADATA_IMAGE_LEN, METADATA_SECTOR_COUNT, SECTOR};
 use crate::diskio::{self, FileDev, SectorReadCache};
 use crate::identify::identify;
 use crate::inspect::{self, InspectMeta, SectorView};
@@ -20,12 +20,11 @@ fn analyze_image(
     data: &[u8],
     meta: InspectMeta,
 ) -> Result<InspectWorkspace, String> {
-    if data.len() != METADATA_IMAGE_LEN && data.len() != LEGACY_METADATA_IMAGE_LEN {
+    if data.len() != METADATA_IMAGE_LEN {
         return Err(format!(
-            "错误: inspect 镜像长度 {}B，预期 {}B (LBA0-12；兼容旧版 {}B LBA0-13 备份)",
+            "错误: inspect 镜像长度 {}B，预期 {}B (LBA0-12)",
             data.len(),
-            METADATA_IMAGE_LEN,
-            LEGACY_METADATA_IMAGE_LEN
+            METADATA_IMAGE_LEN
         ));
     }
     let views = (0..METADATA_SECTOR_COUNT as u32)

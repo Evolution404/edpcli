@@ -5,7 +5,7 @@ use std::io::Write;
 use std::process::{Command, Stdio};
 
 use common::*;
-use edpcli::md5::md5_hex;
+use edpcli::sha256::sha256_hex;
 
 fn two_netac_backups() -> Option<TmpDir> {
     let src = fixture_bin("netac")?;
@@ -18,8 +18,8 @@ fn two_netac_backups() -> Option<TmpDir> {
         fs::copy(&src, &dst).unwrap();
         let data = fs::read(&dst).unwrap();
         fs::write(
-            format!("{}.md5", dst.display()),
-            format!("{}\n", md5_hex(&data)),
+            format!("{}.sha256", dst.display()),
+            format!("{}\n", sha256_hex(&data)),
         )
         .unwrap();
     }

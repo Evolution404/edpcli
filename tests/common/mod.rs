@@ -1,4 +1,4 @@
-//! 测试公用: 真实备份夹具定位、金标(与 Python 版逐字一致)、临时目录、免密盘镜像合成。
+//! 测试公用: 真实协议夹具定位、金标(与 Python 版逐字一致)、临时目录、免密盘镜像合成。
 //! 每个集成测试文件各自引入本模块, 未被该文件用到的项不算死代码。
 #![allow(dead_code)]
 
@@ -7,10 +7,10 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicU32, Ordering};
 
 use edpcli::common::SECTOR;
-use edpcli::md5::md5_hex;
 use edpcli::sectors::convert;
+use edpcli::sha256::sha256_hex;
 
-pub const BAK_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/backup");
+pub const FIXTURE_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/protocol");
 
 /// (键, 备份文件名, device_id) — 覆盖三种型号, 含 BOT 带 &rev_ 的 aigo
 pub fn fixture(key: &str) -> Option<(&'static str, &'static str)> {
@@ -37,22 +37,21 @@ pub const KEYS: [&str; 3] = ["netac", "lexar", "aigo"];
 pub const AIGO_NEG_BIN: &str =
     "disk4_1953525168_vid174c_pid55aa_disk&ven_aigo&prod_hd806_onlyid-1833210541_20260903_121552.bin";
 
-/// 备份 bin 的完整路径; 文件不存在返回 None(用例自行跳过)。
+/// 13 扇区协议夹具的完整路径; 文件不存在返回 None(用例自行跳过)。
 pub fn fixture_bin(key: &str) -> Option<PathBuf> {
     let (bin, _) = fixture(key)?;
-    let p = PathBuf::from(BAK_DIR).join(bin);
+    let p = PathBuf::from(FIXTURE_DIR).join(bin);
     p.exists().then_some(p)
 }
 
 pub fn neg_id_bin() -> Option<PathBuf> {
-    let p = PathBuf::from(BAK_DIR).join(AIGO_NEG_BIN);
+    let p = PathBuf::from(FIXTURE_DIR).join(AIGO_NEG_BIN);
     p.exists().then_some(p)
 }
 
-/// 读取历史夹具时只取协议有效的 LBA0-12；v2.2.0 旧夹具若含 LBA13 则忽略尾扇区。
+/// 严格读取一张 LBA0-12 / 6656B 协议镜像；其它长度直接拒绝。
 pub fn load_disk_image(key: &str) -> Option<Vec<u8>> {
-    let mut data = fs::read(fixture_bin(key)?).ok()?;
-    data.truncate(edpcli::common::METADATA_IMAGE_LEN);
+    let data = fs::read(fixture_bin(key)?).ok()?;
     (data.len() == edpcli::common::METADATA_IMAGE_LEN).then_some(data)
 }
 
@@ -85,10 +84,10 @@ pub fn golden(key: &str) -> Golden {
             crc: 0xF1A78819,
             k0: 0x79BE,
             lba9_none: false,
-            lba0: "fd76dc67f22b770b9083c1d048188726",
-            lba6: "7088f76eb9cd19bf10e3d98d4a6049c2",
-            lba7: "ff53ab1c18053c783250d0b8c1a9283f",
-            lba12: "c36f05a29d9877a25681051594c557ce",
+            lba0: "78a2b41a827c97efe9914a7afe5e92d6711c4ad79d60f081752c3e7e8abe92ad",
+            lba6: "dd7dd0487f2888112e9c0df398835eda6bac9dbf5b8fbd2bc1330eba4a90e69c",
+            lba7: "bb9c3408edabe217be11bf6fba62a2951de0588e5c4bb215562e300a896358b9",
+            lba12: "2b3ae3c06962ba2b30d5deac2c7740cac95aa233fb31b4bc2217fe754a887df2",
         },
         "lexar" => Golden {
             share: 231423937,
@@ -97,10 +96,10 @@ pub fn golden(key: &str) -> Golden {
             crc: 0x6BBAEEFB,
             k0: 0x8541,
             lba9_none: false,
-            lba0: "18c2b6e793f78329bf159b3726632070",
-            lba6: "56f8012133790126707c79af0ca0e662",
-            lba7: "59fe2195d7c80d9c73c0fd98876bb0a5",
-            lba12: "7ec3ddb9ac51c246ec7fb4742b8689cc",
+            lba0: "093f6dc8af363b092c91df79d709983c6f103b9cfb90deb23837d0dbafdc29a5",
+            lba6: "cc66cd15d26a56cc38f8232441655f377d31920cb4b4e5c7b616866ca9ad300a",
+            lba7: "615023be42f14182e6a9d13568bbc158d09571e5978455959d8c216efe9f6adf",
+            lba12: "feaa4b2ca4d56f6300eb3276f9ec64ee9e5eacdcf74fa784464355a52c8055be",
         },
         "aigo" => Golden {
             share: 243115997,
@@ -109,10 +108,10 @@ pub fn golden(key: &str) -> Golden {
             crc: 0x2EEB4CE1,
             k0: 0x620A,
             lba9_none: true,
-            lba0: "52e8a2a54bfe646b236ee0f84d79d32d",
-            lba6: "769de2441ba38f39e03297c3d928ec71",
-            lba7: "02d920e71c328dc4df5b206fa51f232c",
-            lba12: "f865701657d7bd000752574546d50b4e",
+            lba0: "6b85db3f0029e1396f480ad9a2efbada62464ce151f67b46eb789533d55970cf",
+            lba6: "931b1924baca6e39933e4b81379f4e47f6c1af9d7cda4a62fdfe3fc3f371a7e8",
+            lba7: "44f5167f9fd8f7cacda5912e64b46d09bceefb708fa211a14161c6bcaae94238",
+            lba12: "b319aa7a013477fe8778c51dcab719c6db95803992db5bb9df568abae06888b6",
         },
         "aigo_size50" => Golden {
             share: 97656248,
@@ -121,10 +120,10 @@ pub fn golden(key: &str) -> Golden {
             crc: 0,
             k0: 0,
             lba9_none: true,
-            lba0: "2a0fabe2b49e644867befdec33bdf9d7",
-            lba6: "769de2441ba38f39e03297c3d928ec71",
-            lba7: "42a2778336ead2a313f2bdfe6e3352c2",
-            lba12: "c8fc3272ede87ba259a4d4e4d99f08fa",
+            lba0: "090b9c91e0970a04bd32d4cd8e307ed6fceefdce2e1e18ba1ac29bdc67253606",
+            lba6: "931b1924baca6e39933e4b81379f4e47f6c1af9d7cda4a62fdfe3fc3f371a7e8",
+            lba7: "7e0ddd83d9d340af6ca5b9bc1cfb2acdaef981bdb37a9c0c215f731b27345e97",
+            lba12: "cf1832eaf98505a9cfcdbb7500d2b527a385d5a2f7629cb270fa2c6a55c04327",
         },
         _ => panic!("未知金标键 {}", key),
     }
@@ -134,7 +133,7 @@ pub fn golden(key: &str) -> Golden {
 pub fn converted_image(key: &str) -> Option<(Vec<u8>, String)> {
     let data = load_disk_image(key)?;
     let (_, did) = fixture(key)?;
-    let r = convert(&read_fn_of(&data), did, None, false).ok()?;
+    let r = convert(&read_fn_of(&data), did, None, &mut |_| {}).ok()?;
     let mut conv = data.clone();
     for (lba, sector) in [
         (0usize, &r.lba0),
@@ -171,8 +170,8 @@ impl Drop for TmpDir {
     }
 }
 
-pub fn md5(b: &[u8]) -> String {
-    md5_hex(b)
+pub fn sha256(b: &[u8]) -> String {
+    sha256_hex(b)
 }
 
 // ══════════════════════════════════════════════════════════════════

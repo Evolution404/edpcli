@@ -102,20 +102,25 @@ TUI 仅在交互式 TTY 中启动；其设备、备份和 Inspect 字段在渲�
 - `R`：从当前备份执行 Restore 安全向导；
 - `Esc`：返回，`q`：退出，`?`：帮助。
 
-设备扫描、备份扫描和 Inspect 读取都在后台 worker 执行，不阻塞 redraw；同类设备/备份扫描使用 single-flight 去重，连续刷新不会无限创建线程。Backup create 复用现有只读 `backup_create_flow`。Apply / Restore
+设备扫描、备份扫描和 Inspect 读取都在后台 worker 执行，不阻塞 redraw；同类任务使用
+single-flight，并把繁忙期间的重复请求合并为最后一次。动画只重绘可见表格行；可通过
+`EDPCLI_ANIMATION=reduced` 降低更新频率，或用 `EDPCLI_ANIMATION=off` 关闭动态帧。
+Backup create 复用现有只读 `backup_create_flow`。Apply / Restore
 仍只调用 CLI 共用的 application write service。进入真实写盘前必须明确输入 `YES`；
-需要提权时会固定平台原生 disk selector，Restore 还会固定精确备份路径，提权后的 TUI
+需要提权时会固定平台原生 disk selector、用户确认时看到的 onlyid/device_id，Restore
+还会固定精确备份路径。操作开始前会重新读取设备身份，提权后的 TUI
 再次要求 `YES`。进入关键写盘阶段后，`q` / `Esc` / `Ctrl-C` 只登记延迟退出，
-不会中断卸载、reopen、atomic write、sync/readback 或 rollback。
+不会中断卸载、reopen、atomic write、sync/readback 或 rollback；即使终端绘制/读取失败，
+程序也会先恢复终端并等待关键 worker 完成安全收尾。
 
 ## 备份
 
 `backup create` 与 `apply` 写前自动备份共用同一个 `create_backup` service：
 
-- 固定读取 LBA0-12，共 6656B；读取 2.2.0 生成的 7168B 旧备份时忽略尾部 LBA13；
+- 固定读取 LBA0-12，共 6656B；
 - 使用相同的 onlyid、device_id、VID/PID、容量元数据；
 - 使用相同命名和 `_nopwd` 状态标记；
-- 写出相同 MD5 sidecar；
+- 写出相同 SHA-256 sidecar；
 - 使用 create-new 防覆盖、fsync 和目录持久化；
 - 独立备份路径只读 U 盘，不卸载、不锁卷、不 reopen 为读写、不写任何扇区。
 
@@ -135,7 +140,7 @@ U 盘串盘。
 - reopen 后再次核对介质和写前元数据；
 - 原子写入、sync、逐扇读回校验；
 - 任一写入失败自动回滚，回滚结果有独立退出码；
-- 恢复备份必须通过大小、MD5 与当前盘 LBA4 身份终验。
+- 恢复备份必须通过大小、SHA-256 与当前盘 LBA4 身份终验。
 
 `edpcli apply --dry-run` 复用真实识别和布局计算，但不会创建备份、请求写入确认、
 卸载/锁卷、reopen 或写入扇区。

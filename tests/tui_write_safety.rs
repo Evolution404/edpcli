@@ -55,7 +55,7 @@ fn shared_write_service_does_not_print_directly_into_tui_terminal() {
     let service = include_str!("../src/application/write.rs");
     assert!(!service.contains("println!("));
     assert!(!service.contains("print!("));
-    assert!(service.contains(".output("));
+    assert!(service.contains(".write_event("));
 
     let diskio = include_str!("../src/diskio.rs");
     let atomic = diskio
@@ -64,3 +64,34 @@ fn shared_write_service_does_not_print_directly_into_tui_terminal() {
         .expect("atomic write source");
     assert!(!atomic.contains("eprintln!(\"!! 写入失败"));
 }
+
+#[test]
+fn selected_device_identity_is_rechecked_before_the_operation_starts() {
+    struct ImageDev(Vec<u8>);
+    impl SectorDev for ImageDev {
+        fn read_sector(&mut self, lba: u32) -> io::Result<Vec<u8>> {
+            let start = lba as usize * 512;
+            Ok(self.0[start..start + 512].to_vec())
+        }
+        fn write_sector(&mut self, _lba: u32, _data: &[u8]) -> io::Result<()> {
+            unreachable!("identity verification is read-only")
+        }
+    }
+
+    let Some(image) = common::load_disk_image("netac") else {
+        return;
+    };
+    let runner = common::FakeRunner {
+        canned: Default::default(),
+    };
+    let mut dev = ImageDev(image);
+    let error = verify_expected_identity(&runner, 6, Some("different-device"), None, &mut dev)
+        .expect_err("changed onlyid must fail closed");
+    assert!(error.msg.contains("选择/确认期间发生变化"), "{}", error.msg);
+}
+mod common;
+
+use std::io;
+
+use edpcli::application::write::verify_expected_identity;
+use edpcli::diskio::SectorDev;

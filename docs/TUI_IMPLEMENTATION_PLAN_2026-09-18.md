@@ -40,7 +40,7 @@ TUI 不得复制、缩短、旁路或重新解释现有写盘安全链。以下�
 - 系统盘 fail-closed；
 - USB 外接整盘确认；
 - selector pinning；
-- 写前 LBA0-13 快照与自动备份；
+- 写前 LBA0-12 快照与自动备份；
 - 卸载 / 锁卷；
 - reopen 后设备身份与元数据二次复核；
 - atomic write；
@@ -194,7 +194,7 @@ TUI 内 `:` command palette 采用任务语义，不重新实现 shell parser。
 ### Backup workspace
 
 - 全局稳定编号与 CLI `backup list` 保持同源；
-- 显示备份所属盘、时间、User/Dept、免密/加密原盘、MD5 健康状态；
+- 显示备份所属盘、时间、User/Dept、免密/加密原盘、SHA-256 健康状态；
 - 可从当前设备过滤对应备份；
 - restore 仍由 application/service 做 onlyid/LBA4 防串盘终验。
 
@@ -215,7 +215,7 @@ TUI 内 `:` command palette 采用任务语义，不重新实现 shell parser。
 
 ### Inspect / hex
 
-- LBA 0-13 列表；
+- LBA 0-12 列表；
 - `j/k` 选择 LBA；
 - `Enter/l` 展开；
 - raw/decoded/结构化字段切换；
@@ -268,7 +268,7 @@ TUI 内 `:` command palette 采用任务语义，不重新实现 shell parser。
 - CLI 和 TUI 共用 `BackupSelector` 稳定编号；
 - 后台备份扫描；
 - workspace 选择、过滤、详情；
-- User/Dept、MD5、免密状态完整展示；
+- User/Dept、SHA-256、免密状态完整展示；
 - backup create 通过共用 service 执行，保持纯只读语义。
 
 ## Phase 4 — Apply / Restore 安全向导

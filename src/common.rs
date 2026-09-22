@@ -4,7 +4,6 @@ pub const SECTOR: usize = 512;
 pub const METADATA_SECTOR_COUNT: usize = 13;
 pub const METADATA_LAST_LBA: u32 = 12;
 pub const METADATA_IMAGE_LEN: usize = METADATA_SECTOR_COUNT * SECTOR;
-pub const LEGACY_METADATA_IMAGE_LEN: usize = (METADATA_SECTOR_COUNT + 1) * SECTOR;
 
 /// 退出码契约(脚本可区分失败类型; 原 Python 版一律 exit 1):
 pub const EXIT_OK: i32 = 0; // 成功(含 dry-run/预览)
@@ -12,7 +11,7 @@ pub const EXIT_IO: i32 = 1; // 运行时 IO 错误
 pub const EXIT_USAGE: i32 = 2; // 用法错误(未知旗标/缺参数/参数非数字)
 pub const EXIT_TARGET: i32 = 3; // 目标不可用(非cems/识别失败/size越界/系统盘)
 pub const EXIT_ALREADY_NOPWD: i32 = 4; // 已免密盘拒绝重复写入(需 --force)
-pub const EXIT_BACKUP: i32 = 5; // 备份问题(无匹配/大小不符/MD5不符)
+pub const EXIT_BACKUP: i32 = 5; // 备份问题(无匹配/大小不符/SHA-256不符)
 pub const EXIT_INTERMEDIATE: i32 = 6; // 写失败且回滚失败(中间态, 需人处理)
 pub const EXIT_ROLLED_BACK: i32 = 7; // 写失败但已完整回滚(可安全重试)
 pub const EXIT_CANCELLED: i32 = 130; // 用户取消(空选择/未输 YES)

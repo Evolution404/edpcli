@@ -4,15 +4,37 @@
 //! operations however they need, but must not reimplement device discovery or raw-disk
 //! safety policy.
 
+pub mod backup;
+pub mod device;
 pub mod inspect;
 pub mod write;
+pub use backup::delete_backup_exact;
 use std::cell::RefCell;
 use std::io;
 use std::path::Path;
+pub use write::WriteEvent;
 
 use crate::disk_scan::{scan_disks, Row};
 use crate::diskio::{self, raw_path, FileDev};
 use crate::sysinfo::{CmdRunner, ReadProbeCache};
+
+/// Frontend interaction boundary shared by CLI selectors and write services.
+pub trait Prompter {
+    fn prompt_line(&mut self, msg: &str) -> String;
+    fn confirm_yes(&mut self, msg: &str) -> bool;
+
+    /// 类型化进度事件。默认实现按 CLI 文本契约渲染后经 `output` 输出；
+    /// 交互前端覆写以获得结构化阶段。
+    fn write_event(&mut self, event: WriteEvent) {
+        self.output(&write::render_event_text(&event));
+    }
+
+    fn output(&mut self, msg: &str) {
+        let mut stdout = std::io::stdout();
+        let _ = std::io::Write::write_all(&mut stdout, msg.as_bytes());
+        let _ = std::io::Write::flush(&mut stdout);
+    }
+}
 
 /// Build the device-dashboard model using the same read-only probing path for every frontend.
 ///
@@ -52,9 +74,9 @@ pub struct BackupWorkspaceItem {
     pub user: Option<String>,
     pub dept: Option<String>,
     pub is_nopwd: bool,
-    pub md5_status: crate::diskio::Md5Status,
+    pub sha256_status: crate::diskio::Sha256Status,
     pub size_ok: bool,
-    pub content_md5: Option<String>,
+    pub content_sha256: Option<String>,
 }
 
 /// Load the canonical selector used by every backup frontend.
@@ -85,9 +107,9 @@ pub fn scan_backup_workspace(root: &Path) -> Vec<BackupWorkspaceItem> {
                 user: ownership.as_ref().and_then(|value| value.user.clone()),
                 dept: ownership.as_ref().and_then(|value| value.dept.clone()),
                 is_nopwd: entry.is_nopwd,
-                md5_status: entry.md5_ok,
+                sha256_status: entry.sha256_ok,
                 size_ok: entry.size_ok,
-                content_md5: entry.content_md5.clone(),
+                content_sha256: entry.content_sha256.clone(),
             }
         })
         .collect()
@@ -105,60 +127,29 @@ pub fn parse_pinned_disk_selector(value: &str) -> Result<u32, String> {
         .map_err(|error| format!("错误: resume disk {value}: {error}"))
 }
 
-fn scanned_backup_by_path<'a>(
-    selector: &'a crate::selectors::BackupSelector,
-    path: &Path,
-) -> Result<&'a crate::diskio::BackupEntry, String> {
-    let target = crate::backup_catalog::canonical_entry_path(path);
-    selector
-        .catalog()
-        .entries()
-        .iter()
-        .find(|entry| crate::backup_catalog::canonical_entry_path(&entry.path) == target)
-        .ok_or_else(|| format!("备份已不存在或不再属于当前备份目录: {}", path.display()))
-}
+// 备份删除/保留策略的统一入口已迁至 application::backup(DeleteSession/plan/execute)；
+// delete_backup_exact 保留为 TUI worker 的薄封装再导出。
 
 /// Verify exactly one backup selected by the TUI against the canonical backup catalog.
 pub fn verify_backup_exact(root: &Path, path: &Path) -> Result<(), String> {
-    let selector = load_backup_selector(root);
-    let entry = scanned_backup_by_path(&selector, path)?;
-    if crate::backup_catalog::is_healthy(entry) {
+    let canonical_root = std::fs::canonicalize(root)
+        .map_err(|error| format!("备份目录不可访问 {}: {error}", root.display()))?;
+    let canonical_path = std::fs::canonicalize(path)
+        .map_err(|error| format!("备份文件不存在或不可访问 {}: {error}", path.display()))?;
+    if !canonical_path.starts_with(&canonical_root) {
+        return Err(format!(
+            "拒绝校验备份目录之外的路径: {}",
+            canonical_path.display()
+        ));
+    }
+    let entry = crate::diskio::scan_backup_file(&canonical_path)
+        .ok_or_else(|| format!("目标不是可读取的 .bin 备份: {}", canonical_path.display()))?;
+    if crate::backup_catalog::is_healthy(&entry) {
         Ok(())
     } else {
         Err(format!(
-            "备份校验失败: {}（大小或 MD5 异常）",
-            entry.path.display()
+            "备份校验失败: {}（大小或 SHA-256 异常）",
+            canonical_path.display()
         ))
     }
-}
-
-/// Delete one exact backup selected from a prior TUI scan.
-///
-/// The expected MD5 pins the exact bytes that the user selected before confirmation. If the file is
-/// replaced or changed while the confirmation dialog is open, deletion fails closed.
-pub fn delete_backup_exact(root: &Path, path: &Path, expected_md5: &str) -> Result<(), String> {
-    let selector = load_backup_selector(root);
-    let entry = scanned_backup_by_path(&selector, path)?;
-    if entry.content_md5.as_deref() != Some(expected_md5) {
-        return Err(format!(
-            "备份在选择/确认期间已变化，拒绝删除: {}",
-            path.display()
-        ));
-    }
-
-    if let Some(group) = diskio::backup_group_key(entry) {
-        let remaining_in_group = selector
-            .catalog()
-            .entries()
-            .iter()
-            .filter(|candidate| {
-                diskio::backup_group_key(candidate).as_deref() == Some(group.as_str())
-            })
-            .count();
-        if remaining_in_group <= 1 {
-            return Err("安全保护拒绝删除——该盘将被清到零份备份；至少保留 1 份。".into());
-        }
-    }
-
-    crate::backup_catalog::delete_entry_verified(entry)
 }

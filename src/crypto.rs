@@ -3,7 +3,7 @@
 //!   device_id → CRC32(bare: init=0, poly 0xEDB88320, 无final-xor)
 //!   LBA7  K0 = low16(CRC) ^ high16(CRC), 整扇 16位字滚动 XOR(逐字递减1)
 //!   LBA12 key = CRC的4字节×4 ^ "EDPSECDISK200709" → AES-128 变体(A6B0/a7f0,
-//!          counter=块号×16), 仅加密前 368B, 尾部 144B 为原始数据
+//!          counter=块号×16), 整扇 512B 连续加密
 //!   LBA6  固定 K0=0x4DAA 滚动 XOR; 0x1FC 校验和 = 密文CRC32(bare)×10轮
 //!          ((v>>15)+(v<<1)) 变换, 小端写入
 

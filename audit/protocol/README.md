@@ -1,0 +1,96 @@
+# Protocol audit reproducibility baseline
+
+This directory is the machine-readable companion to
+`docs/EDP_PROTOCOL_REVERSE_ENGINEERING.md`.  It does not replace the canonical
+document; it makes the evidence behind that document reproducible and rejects
+silent byte-accounting drift.
+
+## Evidence classes
+
+- `physical`: bytes captured from an allowed real-device gold source.
+- `virtual`: output or behavior produced by executing an official binary in an
+  isolated file/memory-backed harness.  Virtual evidence is never relabeled as
+  a physical capture.
+- `static`: PE/ELF/DWARF/disassembly evidence such as an exact write, read,
+  branch, function address, or ABI field boundary.
+
+`evidence_manifest.tsv` records the concrete artifacts and anchors.  The
+`gold_samples.tsv` freezes the current gold population by source name,
+repository path, length and SHA-256.  The complete LBA0-LBA12 gold bytes are
+checked into `audit/protocol/gold/`, so the protocol census is reproducible
+from a clean clone without access to the capture workstation.  Host-local
+executable binaries are still identified by digest rather than copied into
+this repository.
+
+The baseline harness is intentionally fail-closed on population drift: a new
+non-`_nopwd_` backup is not silently included or ignored.  It must first be
+reviewed and explicitly added to `gold_samples.tsv` with its digest.
+
+## Gold data and provenance
+
+The only protocol gold byte set used by automated analysis is the checked-in
+`audit/protocol/gold/` tree:
+
+1. `audit/protocol/gold/strict-encrypted/`: exactly 19 unique 6656-byte
+   original-generation real-device images.
+2. `audit/protocol/gold/authentic-nopwd/`: one 6656-byte authentic SanDisk
+   Ultra no-password capture containing exactly LBA0-LBA12.
+
+Every manifest row must have a unique SHA-256. Repeated read-only captures
+whose full 6656-byte image is byte-for-byte identical are deliberately
+deduplicated and must not be reintroduced as independent gold samples.
+
+The original capture provenance remains recorded as
+`~/.edpcli-backup` for the encrypted captures and
+`~/Desktop/u_disk/analyze/disk_data/no_password_disk4/raw/LBA0_13_concat.bin`
+for the SanDisk capture.  Those host-local paths are provenance only; they are
+no longer runtime dependencies of `audit_baseline.py`.  The original SanDisk
+file also contained LBA13, but the checked-in gold image intentionally stops at
+6656 bytes.
+
+The old `/private/tmp/audit22` harness mixed a third SanDisk EESI capture into
+its population.  Its source/executable hashes are retained in the manifest for
+provenance, but its population definition is obsolete.  The checked-in
+`scripts/protocol/audit_baseline.py` reproduces the useful census behavior
+against the current two-source policy instead of depending on `/private/tmp`.
+
+## Byte ledger
+
+`byte_ledger.tsv` partitions every byte in LBA0-LBA12 exactly once.  Each row
+records status, known profile applicability, and separate producer, consumer,
+and physical evidence IDs.  `tests/protocol_byte_ledger.rs` expands all range
+expressions and rejects overlap, gaps, bad evidence references, and divergence
+from the canonical strict-progress table.
+
+For a human-readable byte dump, run:
+
+```text
+python3 scripts/protocol/query_byte_ledger.py --lba 4
+python3 scripts/protocol/query_byte_ledger.py --lba 3 --offset 0x20
+python3 scripts/protocol/query_byte_ledger.py --image <6656-byte-image> --lba 10
+```
+
+The image form prints physical offsets and bytes next to the ledger status,
+field/region, profiles, and evidence IDs.  Decryption-specific offsets remain
+in the canonical field descriptions until the relevant decoder is explicitly
+registered in the query tool; the query tool must not invent a decrypted view.
+
+## Re-run baseline checks
+
+```text
+python3 scripts/protocol/audit_baseline.py
+cargo test --test protocol_byte_ledger
+cargo test --test protocol_documentation_contract
+```
+
+The baseline audit is read-only.  It never opens a raw disk device and never
+writes any gold capture.
+
+## Local executable integrity
+
+`audit/protocol/labeltool_variant_diff.md` records the byte-level comparison
+between the three local `cemssafeudisklabeltool*.exe` copies. Only
+`cemssafeudisklabeltool_orig.exe` is treated as an official front-end
+baseline; the other two contain locally applied policy/validation bypasses and
+must not be used as producer evidence.
+

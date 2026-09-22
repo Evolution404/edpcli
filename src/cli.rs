@@ -88,7 +88,8 @@ pub fn convert_flow(
     };
     let d = Path::new(&dir);
     let read = |lba: u32| -> EdpCliResult<Vec<u8>> { Ok(diskio::read_lba_file(d, lba)) };
-    let result = match convert(&read, &id, size, true) {
+    let mut show = |report| print!("{}", crate::sectors::render_convert_report(&report));
+    let result = match convert(&read, &id, size, &mut show) {
         Ok(r) => r,
         Err(e) => {
             eprintln!("{}", crate::ui::red(&e.msg));

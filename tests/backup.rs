@@ -11,7 +11,7 @@ use edpcli::common::{METADATA_IMAGE_LEN, SECTOR};
 use edpcli::diskio::Clock;
 use edpcli::diskio::{
     backup_is_nopwd, backup_label_id, create_backup, find_backups, parse_backup_name,
-    prune_candidates, scan_backup_dir, BackupEntry, BackupMeta, DiskFacts, Md5Status,
+    prune_candidates, scan_backup_dir, BackupEntry, BackupMeta, DiskFacts, Sha256Status,
 };
 
 struct FixedClock;
@@ -40,7 +40,11 @@ fn netac_facts() -> DiskFacts {
 fn write_backup(dir: &std::path::Path, name: &str, data: &[u8]) -> std::path::PathBuf {
     let p = dir.join(name);
     fs::write(&p, data).unwrap();
-    fs::write(format!("{}.md5", p.display()), format!("{}\n", md5(data))).unwrap();
+    fs::write(
+        format!("{}.sha256", p.display()),
+        format!("{}\n", sha256(data)),
+    )
+    .unwrap();
     p
 }
 
@@ -101,7 +105,7 @@ fn find_backups_lba4_final_filter() {
 }
 
 #[test]
-fn backup_written_with_md5_and_onlyid() {
+fn backup_written_with_sha256_and_onlyid() {
     let Some(data) = load_disk_image("netac") else {
         eprintln!("跳过: 真实备份不可用");
         return;
@@ -120,8 +124,8 @@ fn backup_written_with_md5_and_onlyid() {
     assert!(!is_nopwd); // 原盘备份不打 _nopwd
     assert!(!name.contains("_nopwd"), "{}", name);
     assert_eq!(fs::read(&path).unwrap(), data); // LBA0-12 全量
-    let md5_content = fs::read_to_string(format!("{}.md5", path.display())).unwrap();
-    assert_eq!(md5_content.trim(), md5(&data));
+    let sha256_content = fs::read_to_string(format!("{}.sha256", path.display())).unwrap();
+    assert_eq!(sha256_content.trim(), sha256(&data));
     // 备份可被 find_backups 找回
     let my_tag: [u8; 16] = data[4 * 512..4 * 512 + 16].try_into().unwrap();
     let found = find_backups(
@@ -273,7 +277,7 @@ fn creating_new_backup_does_not_rename_existing_history() {
         "disk6_122880000_vid0dd8_pid2005_disk&ven_netac&prod_onlydisk_20250101_010101.bin",
         &data,
     );
-    let legacy_md5 = std::path::PathBuf::from(format!("{}.md5", legacy.display()));
+    let legacy_sha256 = std::path::PathBuf::from(format!("{}.sha256", legacy.display()));
 
     let (new_path, _) = create_backup(
         &netac_facts(),
@@ -285,7 +289,7 @@ fn creating_new_backup_does_not_rename_existing_history() {
     .unwrap();
 
     assert!(legacy.exists(), "创建新备份不应重命名历史 .bin");
-    assert!(legacy_md5.exists(), "创建新备份不应重命名历史 .md5");
+    assert!(legacy_sha256.exists(), "创建新备份不应重命名历史 .sha256");
     assert!(new_path.exists());
     assert_ne!(new_path, legacy);
 }
@@ -326,10 +330,10 @@ fn backup_collision_never_overwrites_existing_file() {
     );
     assert_eq!(fs::read(&path).unwrap(), first, "同名备份绝不能被静默覆盖");
     assert_eq!(
-        fs::read_to_string(format!("{}.md5", path.display()))
+        fs::read_to_string(format!("{}.sha256", path.display()))
             .unwrap()
             .trim(),
-        md5(&first)
+        sha256(&first)
     );
 }
 
@@ -435,7 +439,7 @@ fn scan_backup_dir_reports_ok_mismatch_missing_and_unrecognized() {
         &original,
     );
     fs::write(
-        format!("{}.md5", damaged.display()),
+        format!("{}.sha256", damaged.display()),
         "00000000000000000000000000000000\n",
     )
     .unwrap();
@@ -446,8 +450,8 @@ fn scan_backup_dir_reports_ok_mismatch_missing_and_unrecognized() {
     let odd = tmp.0.join("other.bin");
     fs::write(&odd, &original).unwrap();
     fs::write(
-        format!("{}.md5", odd.display()),
-        format!("{}\n", md5(&original)),
+        format!("{}.sha256", odd.display()),
+        format!("{}\n", sha256(&original)),
     )
     .unwrap();
 
@@ -460,48 +464,72 @@ fn scan_backup_dir_reports_ok_mismatch_missing_and_unrecognized() {
             .unwrap()
     };
     let ok_e = by_name(ok.file_name().unwrap().to_str().unwrap());
-    assert_eq!(ok_e.md5_ok, Md5Status::Ok);
+    assert_eq!(ok_e.sha256_ok, Sha256Status::Ok);
     assert!(ok_e.size_ok);
     assert!(!ok_e.is_nopwd);
     assert!(ok_e.meta.is_some());
 
     let damaged_e = by_name(damaged.file_name().unwrap().to_str().unwrap());
-    assert_eq!(damaged_e.md5_ok, Md5Status::Mismatch);
+    assert_eq!(damaged_e.sha256_ok, Sha256Status::Mismatch);
     assert!(damaged_e.size_ok);
 
     let missing_e = by_name(missing.file_name().unwrap().to_str().unwrap());
-    assert_eq!(missing_e.md5_ok, Md5Status::NoSidecar);
+    assert_eq!(missing_e.sha256_ok, Sha256Status::NoSidecar);
     assert!(missing_e.is_nopwd);
 
     let odd_e = by_name("other.bin");
     assert!(odd_e.meta.is_none());
     assert!(!odd_e.is_nopwd);
-    assert_eq!(odd_e.md5_ok, Md5Status::Ok);
+    assert_eq!(odd_e.sha256_ok, Sha256Status::Ok);
+}
+
+#[test]
+fn scan_backup_dir_rejects_legacy_7168_byte_images() {
+    let Some(original) = load_disk_image("netac") else {
+        eprintln!("跳过: 真实备份不可用");
+        return;
+    };
+    let tmp = TmpDir::new("scan_backup_reject_7168");
+    let mut legacy = original;
+    legacy.extend_from_slice(&[0u8; SECTOR]);
+    let path = write_backup(
+        &tmp.0,
+        "disk6_122880000_vid0dd8_pid2005_disk&ven_netac&prod_onlydisk_onlyid1402259934_20260910_172399.bin",
+        &legacy,
+    );
+
+    let entries = scan_backup_dir(&tmp.0);
+    let entry = entries
+        .iter()
+        .find(|entry| entry.path == path)
+        .expect("legacy-sized backup entry");
+    assert_eq!(legacy.len(), METADATA_IMAGE_LEN + SECTOR);
+    assert!(!entry.size_ok, "7168B/LBA0-13 旧备份必须判定为无效长度");
 }
 
 #[cfg(unix)]
 #[test]
-fn md5_sidecar_symlink_is_not_followed() {
+fn sha256_sidecar_symlink_is_not_followed() {
     use std::os::unix::fs::symlink;
 
     let Some(data) = load_disk_image("netac") else {
         eprintln!("跳过: 真实备份不可用");
         return;
     };
-    let tmp = TmpDir::new("md5_symlink");
+    let tmp = TmpDir::new("sha256_symlink");
     let backup = write_backup(
         &tmp.0,
         "disk6_122880000_vid0dd8_pid2005_disk&ven_netac&prod_onlydisk_onlyid1402259934_20260910_170000.bin",
         &data,
     );
-    let sidecar = std::path::PathBuf::from(format!("{}.md5", backup.display()));
+    let sidecar = std::path::PathBuf::from(format!("{}.sha256", backup.display()));
     fs::remove_file(&sidecar).unwrap();
     let outside = tmp.0.parent().unwrap().join(format!(
-        "edpcli_outside_md5_{}_{}",
+        "edpcli_outside_sha256_{}_{}",
         std::process::id(),
-        md5(&data)
+        sha256(&data)
     ));
-    fs::write(&outside, format!("{}\n", md5(&data))).unwrap();
+    fs::write(&outside, format!("{}\n", sha256(&data))).unwrap();
     symlink(&outside, &sidecar).unwrap();
 
     assert_eq!(backup_verify(&tmp.0, None), 5);
@@ -521,12 +549,12 @@ fn scan_is_read_only_and_infers_missing_onlyid_in_memory() {
         "disk6_122880000_vid0dd8_pid2005_disk&ven_netac&prod_onlydisk_20250101_010101.bin",
         &original,
     );
-    let legacy_md5 = std::path::PathBuf::from(format!("{}.md5", legacy.display()));
+    let legacy_sha256 = std::path::PathBuf::from(format!("{}.sha256", legacy.display()));
 
     let entries = scan_backup_dir(&tmp.0);
     assert_eq!(entries.len(), 1);
     assert!(legacy.exists(), "扫描不应重命名 .bin");
-    assert!(legacy_md5.exists(), "扫描不应重命名 .md5");
+    assert!(legacy_sha256.exists(), "扫描不应重命名 .sha256");
     assert_eq!(entries[0].path, legacy);
     assert_eq!(
         entries[0].meta.as_ref().and_then(|m| m.onlyid.as_deref()),
@@ -580,10 +608,10 @@ fn fake_entry(name: &str, onlyid: &str, mtime: i64, is_nopwd: bool) -> BackupEnt
         path: std::path::PathBuf::from(name),
         mtime,
         is_nopwd,
-        md5_ok: Md5Status::Ok,
+        sha256_ok: Sha256Status::Ok,
         size_ok: true,
         lba8: None,
-        content_md5: None,
+        content_sha256: None,
     }
 }
 
@@ -686,7 +714,7 @@ fn verify_and_prune_preview_exit_contract() {
     let bad = tmp.0.join(
         "disk6_122880000_vid0dd8_pid2005_disk&ven_netac&prod_onlydisk_onlyid1402259934_20260910_170010.bin",
     );
-    fs::write(&bad, &original).unwrap(); // 故意缺 .md5
+    fs::write(&bad, &original).unwrap(); // 故意缺 .sha256
     assert_eq!(backup_verify(&tmp.0, None), 5);
 
     let before = fs::read_dir(&tmp.0).unwrap().count();
@@ -739,7 +767,7 @@ fn delete_cancel_yes_missing_and_last_backup_guard() {
         0
     );
     assert!(!first.exists());
-    assert!(!std::path::PathBuf::from(format!("{}.md5", first.display())).exists());
+    assert!(!std::path::PathBuf::from(format!("{}.sha256", first.display())).exists());
 
     // 安全底线：同盘只剩 second 时，手动 delete 也不能清到零份。
     assert_eq!(
@@ -877,4 +905,104 @@ fn delete_without_target_enters_global_picker_then_confirms() {
     assert_eq!(backup_delete(&tmp.0, &[], false, &mut prompt), 0);
     assert!(!older.exists());
     assert!(newer.exists());
+}
+
+// ══════════════════════════════════════════════════════════════════
+// CLI 与 TUI 共用删除/保留策略服务 (application::backup)
+// ══════════════════════════════════════════════════════════════════
+const SHARED_GROUP_A: &str = "disk6_122880000_vid0dd8_pid2005_disk&ven_netac&prod_onlydisk_onlyid1402259934_20260910_170000.bin";
+const SHARED_GROUP_B: &str = "disk6_122880000_vid0dd8_pid2005_disk&ven_netac&prod_onlydisk_onlyid1402259934_20260910_170001.bin";
+
+#[test]
+fn cli_and_tui_delete_share_retention_floor_and_execution() {
+    let Some(original) = load_disk_image("netac") else {
+        eprintln!("跳过: 真实备份不可用");
+        return;
+    };
+    let cli_tmp = TmpDir::new("shared_floor_cli");
+    let tui_tmp = TmpDir::new("shared_floor_tui");
+    for dir in [&cli_tmp.0, &tui_tmp.0] {
+        write_backup(dir, SHARED_GROUP_A, &original);
+        write_backup(dir, SHARED_GROUP_B, &original);
+    }
+
+    // 同盘两份时删一份: 两个入口都允许且都真删(含 sidecar)。
+    let mut unused = ScriptPrompter::yes();
+    assert_eq!(
+        backup_delete(&cli_tmp.0, &[SHARED_GROUP_A.to_string()], true, &mut unused),
+        0
+    );
+    assert!(!cli_tmp.0.join(SHARED_GROUP_A).exists());
+
+    let sha = edpcli::sha256::sha256_hex(&original);
+    assert_eq!(
+        edpcli::application::delete_backup_exact(&tui_tmp.0, &tui_tmp.0.join(SHARED_GROUP_A), &sha),
+        Ok(())
+    );
+    assert!(!tui_tmp.0.join(SHARED_GROUP_A).exists());
+    assert!(!tui_tmp.0.join(format!("{SHARED_GROUP_A}.sha256")).exists());
+
+    // 同盘仅剩一份: 两个入口都以同一保留底线拒绝，盘上文件保留。
+    assert_eq!(
+        backup_delete(&cli_tmp.0, &[SHARED_GROUP_B.to_string()], true, &mut unused),
+        5
+    );
+    let refusal =
+        edpcli::application::delete_backup_exact(&tui_tmp.0, &tui_tmp.0.join(SHARED_GROUP_B), &sha)
+            .unwrap_err();
+    assert!(refusal.contains("至少保留 1 份"), "{refusal}");
+    assert!(cli_tmp.0.join(SHARED_GROUP_B).exists());
+    assert!(tui_tmp.0.join(SHARED_GROUP_B).exists());
+}
+
+#[test]
+fn prune_plan_composition_deletes_only_snapshots_beyond_keep() {
+    let Some(original) = load_disk_image("netac") else {
+        eprintln!("跳过: 真实备份不可用");
+        return;
+    };
+    let Some((converted, _)) = converted_image("netac") else {
+        eprintln!("跳过: 真实备份不可用");
+        return;
+    };
+    let tmp = TmpDir::new("prune_service");
+    write_backup(&tmp.0, SHARED_GROUP_A, &original);
+    for ts in ["170001", "170002", "170003"] {
+        let name = format!(
+            "disk6_122880000_vid0dd8_pid2005_disk&ven_netac&prod_onlydisk_onlyid1402259934_nopwd_20260910_{ts}.bin"
+        );
+        write_backup(&tmp.0, &name, &converted);
+    }
+
+    let session = edpcli::application::backup::DeleteSession::open(&tmp.0);
+    let plan = session.plan_prune(0).expect("原盘在场, keep=0 可清光快照");
+    assert_eq!(plan.targets.len(), 3);
+    let stats = plan.prune_stats.as_ref().expect("plan_prune 携带统计");
+    assert_eq!(stats.originals, 1);
+    assert_eq!(stats.retained_snapshots, 0);
+    for (_, result) in session.execute(&plan) {
+        assert_eq!(result, Ok(()), "逐条执行不得阻断后续");
+    }
+    assert!(tmp.0.join(SHARED_GROUP_A).exists(), "加密原盘永不自动删除");
+    for ts in ["170001", "170002", "170003"] {
+        assert!(!tmp
+            .0
+            .join(format!(
+                "disk6_122880000_vid0dd8_pid2005_disk&ven_netac&prod_onlydisk_onlyid1402259934_nopwd_20260910_{ts}.bin"
+            ))
+            .exists());
+    }
+
+    // 无原盘的组即使 keep=0 也强制保留最新一份(prune_candidates 的 keep.max(1))。
+    let lone = TmpDir::new("prune_service_lone");
+    write_backup(
+        &lone.0,
+        "disk6_122880000_vid0dd8_pid2005_disk&ven_netac&prod_onlydisk_onlyid9999999999_nopwd_20260910_170000.bin",
+        &converted,
+    );
+    let session = edpcli::application::backup::DeleteSession::open(&lone.0);
+    let plan = session
+        .plan_prune(0)
+        .expect("无原盘组强制保留, 不触发底线拒绝");
+    assert!(plan.targets.is_empty());
 }

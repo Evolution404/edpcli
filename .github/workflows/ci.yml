@@ -12,6 +12,14 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  protocol-audit:
+    name: checked-in protocol gold audit
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Verify checked-in LBA0-LBA12 gold set
+        run: python3 scripts/protocol/audit_baseline.py
+
   quality:
     name: ${{ matrix.label }} / test-clippy-release
     strategy:

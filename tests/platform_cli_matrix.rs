@@ -53,10 +53,10 @@ fn synthetic_backup(dir: &TempDir) -> PathBuf {
     let data = vec![0u8; METADATA_IMAGE_LEN];
     fs::write(&path, &data).expect("write backup");
     fs::write(
-        edpcli::diskio::md5_sidecar_path(&path),
-        format!("{}\n", edpcli::md5::md5_hex(&data)),
+        edpcli::diskio::sha256_sidecar_path(&path),
+        format!("{}\n", edpcli::sha256::sha256_hex(&data)),
     )
-    .expect("write md5");
+    .expect("write sha256");
     path
 }
 
@@ -72,7 +72,10 @@ fn assert_ok(output: std::process::Output, context: &str) {
 
 #[test]
 fn list_is_read_only_and_available_on_every_platform() {
-    assert_ok(run(&["list"]), "list");
+    // 哨兵旗标让被拒盘以行内提示呈现而不触发提权重启：本测试验证 list 在
+    // 所有平台只读可用，不应因开发机插着需特权的真实外接盘而要求 sudo。
+    // CI Runner 无外接盘，两种调用方式行为一致。
+    assert_ok(run(&["list", "--_elevated"]), "list");
 }
 
 #[test]

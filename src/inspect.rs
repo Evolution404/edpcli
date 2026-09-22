@@ -8,7 +8,9 @@ use encoding_rs::GBK;
 use crate::common::SECTOR;
 use crate::crypto::{a6b0_full, crc32_bare, lba6_checksum, lba6_decode, xor_rolling};
 use crate::diskio::BackupMeta;
-use crate::sectors::EDPF_ENC_LEN;
+use crate::sectors::EDPF_TABLE_LEN;
+
+const LLGB_FALLBACK_LEN: usize = 0x170;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum FieldStyle {
@@ -67,10 +69,6 @@ pub struct SectorView {
     pub method: String,
     pub fields: Vec<SectorField>,
     pub notes: Vec<String>,
-}
-
-fn u16_at(b: &[u8], off: usize) -> Option<u16> {
-    Some(u16::from_le_bytes(b.get(off..off + 2)?.try_into().ok()?))
 }
 
 fn u32_at(b: &[u8], off: usize) -> Option<u32> {
@@ -223,6 +221,27 @@ fn crc_key(meta: &InspectMeta) -> Option<(u32, [u8; 4])> {
     Some((crc, crc.to_le_bytes()))
 }
 
+fn hex_bytes(bytes: &[u8]) -> String {
+    bytes
+        .iter()
+        .map(|byte| format!("{byte:02X}"))
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn fixed_c_slot_value(bytes: &[u8]) -> String {
+    let nul = bytes.iter().position(|byte| *byte == 0);
+    let text_end = nul.unwrap_or(bytes.len());
+    let text = text_value(&bytes[..text_end]);
+    let tail_start = nul.map_or(bytes.len(), |index| index + 1);
+    let tail = &bytes[tail_start..];
+    if tail.iter().any(|byte| *byte != 0) {
+        format!("{text}；NUL 后原始字节={}", hex_bytes(tail))
+    } else {
+        text
+    }
+}
+
 fn lba7_k0(crc: u32) -> u32 {
     (crc & 0xffff) ^ (crc >> 16)
 }
@@ -296,7 +315,7 @@ fn parse_mbr(decoded: &[u8], fields: &mut Vec<SectorField>, notes: &mut Vec<Stri
     }
 }
 
-fn lba4_serial(raw: &[u8]) -> Option<(u32, usize, usize)> {
+fn lba4_serial(raw: &[u8]) -> Option<(u32, String, usize, usize)> {
     let max = raw.len().min(64);
     let b = &raw[..max];
     for i in 0..b.len().saturating_sub(6) {
@@ -304,35 +323,52 @@ fn lba4_serial(raw: &[u8]) -> Option<(u32, usize, usize)> {
             continue;
         }
         let mut j = i + 3;
+        if b.get(j) == Some(&b'-') {
+            j += 1;
+        }
+        let digits_start = j;
         while j < b.len() && b[j].is_ascii_digit() {
             j += 1;
         }
-        if j > i + 3 && b.get(j..j + 3) == Some(b"$$$") {
-            let s = std::str::from_utf8(&b[i + 3..j])
-                .ok()?
-                .parse::<u32>()
-                .ok()?;
-            return Some((s, i, j + 3));
+        if j > digits_start && b.get(j..j + 3) == Some(b"$$$") {
+            let text = std::str::from_utf8(&b[i + 3..j]).ok()?.to_string();
+            let bits = if text.starts_with('-') {
+                text.parse::<i32>().ok()? as u32
+            } else {
+                text.parse::<u32>().ok()?
+            };
+            return Some((bits, text, i, j + 3));
         }
     }
     None
 }
 
-fn decode_lba4(raw: &[u8]) -> Option<(Vec<u8>, u32, u32, usize, usize)> {
-    let (serial, hs, he) = lba4_serial(raw)?;
+fn decode_lba4(raw: &[u8]) -> Option<(Vec<u8>, u32, String, u32, usize, usize)> {
+    let (serial, text, hs, he) = lba4_serial(raw)?;
     let k0 = (serial & 0xffff) ^ (serial >> 16);
     let mut dec = raw.to_vec();
     if raw.len() >= 0x18 {
         let region = &raw[0x18..];
         let x = xor_rolling(region, k0);
         dec[0x18..].copy_from_slice(&x);
-        for (i, &v) in region.iter().enumerate() {
-            if v == 0 {
-                dec[0x18 + i] = 0;
-            }
+        // Short-form LBA4 leaves the whole extension gap physically unwritten.
+        // Only that *region-level* all-zero condition is special.  A zero byte
+        // inside an actually written rolling-XOR region is valid ciphertext and
+        // must still be decrypted.
+        if raw.len() >= 0x1fc && raw[0x47..0x1fc].iter().all(|byte| *byte == 0) {
+            dec[0x47..0x1fc].fill(0);
         }
+        // Keep `decoded` equal to the official ReadSector4 rolling-reader view.
+        // Multiple writer generations are now proven to use different wire
+        // representations for +0x45/+0x46, and the representation cannot be
+        // inferred from OnllyID2Nd/HSerial identity shape alone.  In
+        // particular, v19.11.4.1 also performs post-XOR flag stores while its
+        // restore node can carry a non-mirrored second ID and HSerial material.
+        // Callers that need producer semantics must therefore inspect both the
+        // physical wire bytes and the reader view instead of silently replacing
+        // either one here.
     }
-    Some((dec, serial, k0, hs, he))
+    Some((dec, serial, text, k0, hs, he))
 }
 
 fn parse_lba6(
@@ -398,32 +434,31 @@ fn parse_lba6(
     }
     fields.push(field(
         0x1c0,
-        0x1c8,
-        "GLAB 前缀",
-        text_value(&dec[0x1c0..0x1c8]),
-        FieldStyle::Magic,
+        0x1d0,
+        "m_usbGSerial 槽",
+        fixed_c_slot_value(&dec[0x1c0..0x1d0]),
+        FieldStyle::Identity,
     ));
-    let v1ca = u32_at(&dec, 0x1ca).unwrap_or(0);
     fields.push(field(
-        0x1ca,
-        0x1ce,
-        "模板值",
-        format!("{} (0x{v1ca:08X})", v1ca),
+        0x1d0,
+        0x1e0,
+        "BeiZhu 槽",
+        fixed_c_slot_value(&dec[0x1d0..0x1e0]),
+        FieldStyle::Text,
+    ));
+    fields.push(field(
+        0x1e0,
+        0x1f0,
+        "模板/版本扩展区",
+        hex_bytes(&dec[0x1e0..0x1f0]),
         FieldStyle::Flag,
     ));
-    let flagv = dec[0x1f0];
+    let encrypt = u32_at(&dec, 0x1f0).unwrap_or(0);
     fields.push(field(
         0x1f0,
-        0x1f1,
-        "注册标志",
-        format!(
-            "0x{flagv:02X} {}",
-            if flagv == 1 {
-                "SAFE6 已注册"
-            } else {
-                "未注册/其他"
-            }
-        ),
+        0x1f4,
+        "m_encrypt",
+        format!("{encrypt} (0x{encrypt:08X})"),
         FieldStyle::Flag,
     ));
     let stored = u32_at(raw, 0x1fc).unwrap_or(0);
@@ -438,7 +473,9 @@ fn parse_lba6(
         ),
         FieldStyle::Checksum,
     ));
-    notes.push("LBA6：前 508B 使用 rolling XOR K0=0x4DAA，最后 4B 校验和保持明文。".into());
+    notes.push(
+        "LBA6：前 508B 使用 rolling XOR K0=0x4DAA，最后 4B 校验和保持明文。当前 writer 把 0x1C0..0x1CF / 0x1D0..0x1DF 分别作为固定 16B GSerial / BeiZhu 槽；NUL 后字节不能按独立字段解释。".into(),
+    );
     dec
 }
 
@@ -688,51 +725,95 @@ fn parse_sapf(dec: &[u8], fields: &mut Vec<SectorField>, notes: &mut Vec<String>
         return;
     }
     fields.push(field(0x100, 0x104, "SAPF magic", "SAPF", FieldStyle::Magic));
-    let ver = u16_at(dec, 0x104).unwrap_or(0);
-    let count = u16_at(dec, 0x106).unwrap_or(0) as usize;
-    fields.push(field(
-        0x104,
-        0x108,
-        "SAPF 头",
-        format!("version=0x{ver:04X} count={count}"),
+    let entry = 0x104;
+    let status = dec[entry];
+    let ptype = dec[entry + 4];
+    let start = u32_at(dec, entry + 8).unwrap_or(0);
+    let secs = u32_at(dec, entry + 12).unwrap_or(0);
+    fields.push(grouped_field(
+        entry,
+        entry + 1,
+        "MBR 恢复表项",
+        "status",
+        format!("0x{status:02X}"),
         FieldStyle::Flag,
     ));
-    for i in 0..count.min(8) {
-        let off = 0x108 + i * 0x10;
-        if off + 0x10 > dec.len() {
-            break;
-        }
-        let ptype = dec[off];
-        let flags = dec[off + 1];
-        let start = u32_at(dec, off + 4).unwrap_or(0);
-        let secs = u32_at(dec, off + 8).unwrap_or(0);
-        let group = format!("Part[{i}]");
-        fields.push(grouped_field(
-            off,
-            off + 2,
-            group.clone(),
-            "类型/标志",
-            format!("type=0x{ptype:02X}  flags=0x{flags:02X}"),
-            FieldStyle::Flag,
-        ));
-        fields.push(grouped_field(
-            off + 4,
-            off + 8,
-            group.clone(),
-            "起始 LBA",
-            start.to_string(),
-            FieldStyle::Address,
-        ));
-        fields.push(grouped_field(
-            off + 8,
-            off + 12,
-            group,
-            "大小",
-            format!("{secs} 扇区 / {}", human_bytes(secs as u64 * SECTOR as u64)),
-            FieldStyle::Size,
+    fields.push(grouped_field(
+        entry + 1,
+        entry + 4,
+        "MBR 恢复表项",
+        "start CHS",
+        hex_bytes(&dec[entry + 1..entry + 4]),
+        FieldStyle::Address,
+    ));
+    fields.push(grouped_field(
+        entry + 4,
+        entry + 5,
+        "MBR 恢复表项",
+        "partition type",
+        format!("0x{ptype:02X}"),
+        FieldStyle::Flag,
+    ));
+    fields.push(grouped_field(
+        entry + 5,
+        entry + 8,
+        "MBR 恢复表项",
+        "end CHS",
+        hex_bytes(&dec[entry + 5..entry + 8]),
+        FieldStyle::Address,
+    ));
+    fields.push(grouped_field(
+        entry + 8,
+        entry + 12,
+        "MBR 恢复表项",
+        "起始 LBA",
+        start.to_string(),
+        FieldStyle::Address,
+    ));
+    fields.push(grouped_field(
+        entry + 12,
+        entry + 16,
+        "MBR 恢复表项",
+        "扇区数",
+        format!("{secs} / {}", human_bytes(secs as u64 * SECTOR as u64)),
+        FieldStyle::Size,
+    ));
+    notes.push(
+        "SAPF：magic 后 +0x04..+0x13 是 16B MBR 分区表项，Windows LBA0 自愈会以此作为第一恢复源。"
+            .into(),
+    );
+    if dec[0x114..0x120].iter().any(|byte| *byte != 0) {
+        notes.push("SAPF +0x14..+0x1F 存在附加材料；字段语义尚未闭合。".into());
+    }
+}
+
+fn parse_eppe(dec: &[u8], fields: &mut Vec<SectorField>, notes: &mut Vec<String>) {
+    if dec.get(0x180..0x184) != Some(b"EPPE") {
+        return;
+    }
+    fields.push(field(0x180, 0x184, "EPPE magic", "EPPE", FieldStyle::Magic));
+    let min_len = u32_at(dec, 0x184).unwrap_or(0);
+    fields.push(field(
+        0x184,
+        0x188,
+        "最小密码长度",
+        min_len.to_string(),
+        FieldStyle::Flag,
+    ));
+    let text_end = c_field_end(dec, 0x188, 0x200);
+    if text_end > 0x188 {
+        fields.push(field(
+            0x188,
+            text_end,
+            "EPPE +0x08 文本槽",
+            text_value(&dec[0x188..text_end]),
+            FieldStyle::Text,
         ));
     }
-    notes.push(format!("SAPF：version=0x{ver:04X}，记录数={count}。"));
+    notes.push(
+        "EPPE：独立 0x80B A6B0 块；SetPassInfoEx 将 +0x04 限定为 6..19，ReadMinPassLenInfo 从同一字段返回最小密码长度。"
+            .into(),
+    );
 }
 
 fn padded4(s: &str) -> [u8; 4] {
@@ -801,27 +882,144 @@ pub fn analyze_sector(lba: u32, raw: &[u8], meta: &InspectMeta) -> SectorView {
             parse_mbr(&decoded, &mut fields, &mut notes);
             "RAW + MBR 结构解析".into()
         }
+        1 => {
+            if decoded.get(..8) == Some(b"EFI PART") {
+                fields.push(field(
+                    0x00,
+                    0x08,
+                    "GPT signature",
+                    "EFI PART",
+                    FieldStyle::Magic,
+                ));
+                if let Some(value) = u32_at(&decoded, 0x08) {
+                    fields.push(field(
+                        0x08,
+                        0x0c,
+                        "GPT version",
+                        format!("0x{value:08X}"),
+                        FieldStyle::Flag,
+                    ));
+                }
+                if let Some(value) = u32_at(&decoded, 0x0c) {
+                    fields.push(field(
+                        0x0c,
+                        0x10,
+                        "GPT header size",
+                        value.to_string(),
+                        FieldStyle::Size,
+                    ));
+                }
+                if let Some(value) = u32_at(&decoded, 0x10) {
+                    fields.push(field(
+                        0x10,
+                        0x14,
+                        "GPT header CRC32",
+                        format!("0x{value:08X}"),
+                        FieldStyle::Checksum,
+                    ));
+                }
+                if let Some(value) = u64_at(&decoded, 0x18) {
+                    fields.push(field(
+                        0x18,
+                        0x20,
+                        "GPT header LBA",
+                        value.to_string(),
+                        FieldStyle::Address,
+                    ));
+                }
+                if let Some(value) = u64_at(&decoded, 0x20) {
+                    fields.push(field(
+                        0x20,
+                        0x28,
+                        "GPT backup LBA",
+                        value.to_string(),
+                        FieldStyle::Address,
+                    ));
+                }
+                if let Some(value) = u64_at(&decoded, 0x48) {
+                    fields.push(field(
+                        0x48,
+                        0x50,
+                        "GPT partition table first LBA",
+                        value.to_string(),
+                        FieldStyle::Address,
+                    ));
+                }
+                notes.push(
+                    "官方 BuildSector1_Gpt 生成完整 512B GPT_Header；Windows 注册检查在 protective MBR 命中后会读取 LBA1 的 “EFI PART” 和 header_lba。当前22份原始 SAFE6 参考均未启用该 profile，LBA1 全零，因此本扇区仍是 PARTIAL 而非 COMPLETE。".into(),
+                );
+                "RAW + GPT_Header 结构解析".into()
+            } else {
+                notes.push(
+                    "当前 LBA1 未检测到 GPT header。官方 Linux 库存在 BuildSector1_Gpt，Windows GPT 注册检查会把 LBA1 作为 GPT header 消费；当前22份原始参考均全零，缺少正向 GPT 实盘。".into(),
+                );
+                "RAW（当前样本未启用 GPT LBA1 profile）".into()
+            }
+        }
+        2 => {
+            notes.push(
+                "官方 Linux BuildSector2_Gpt 生成 0x80B GPT_Partition entry；Windows GPT 注册检查从 LBA2 起按每扇4个×128B entry 解析分区表。当前22份原始 SAFE6 参考 LBA2 均全零，缺少正向 GPT 实盘，因此只定为 PARTIAL。".into(),
+            );
+            "RAW（GPT partition-table profile；当前参考未启用）".into()
+        }
         4 => {
-            if let Some((d, serial, k0, hs, he)) = decode_lba4(raw) {
+            if let Some((d, serial, serial_text, k0, hs, he)) = decode_lba4(raw) {
                 decoded = d;
                 fields.push(field(
                     hs,
                     he,
                     "labelOnlyId",
-                    format!("{} (0x{serial:08X})", serial),
+                    format!("{} (0x{serial:08X})", serial_text),
                     FieldStyle::Identity,
                 ));
                 if decoded.get(0x39..0x3d) == Some(b"LLGB") {
                     fields.push(field(0x39, 0x3d, "LLGB magic", "LLGB", FieldStyle::Magic));
                 }
+                fields.push(field(
+                    0x45,
+                    0x46,
+                    "bDataToServer",
+                    format!(
+                        "reader=0x{:02X}; wire=0x{:02X}; producer=需按 writer 判定",
+                        decoded[0x45], raw[0x45]
+                    ),
+                    FieldStyle::Flag,
+                ));
+                fields.push(field(
+                    0x46,
+                    0x47,
+                    "bConnetServer",
+                    format!(
+                        "reader=0x{:02X}; wire=0x{:02X}; producer=需按 writer 判定",
+                        decoded[0x46], raw[0x46]
+                    ),
+                    FieldStyle::Flag,
+                ));
                 notes.push(
-                    "LBA4 的 0x18 以后按 labelOnlyId 派生 K0 做 rolling XOR；原始 0 填充保持为 0。"
+                    "LBA4 的 0x18..0x1FF 按 labelOnlyId 派生 K0 做 rolling XOR；历史 raw-zero extension 仅按整段兼容形态处理。官方 current Windows/Linux BuildSector4 与历史 Windows v19.11.4.1 LBA4 writer 都会在 rolling 完成后把 +0x45 bDataToServer / +0x46 bConnetServer 再覆盖到盘面，而 ReadSector4 不补偿这两个 post-XOR store；另一方面，部分更早实盘的 wire bytes 又符合普通 rolling 表示。OnllyID2Nd/HSerial 身份形态已被证明不能判定 wire 表示，因此 inspect 的 decoded 始终保持官方 rolling-reader 视图，并在字段值中同时显示 wire byte；producer-side 值必须结合 writer provenance 判定。"
                         .into(),
                 );
-                format!("XOR K0=0x{k0:04X} from labelOnlyId={serial}")
+                format!("XOR K0=0x{k0:04X} from labelOnlyId={serial_text}")
             } else {
                 "RAW（未找到 $$$<onlyid>$$$）".into()
             }
+        }
+        5 => {
+            fields.push(field(
+                0x000,
+                0x200,
+                "写保护探测 scratch 区",
+                if raw.iter().all(|byte| *byte == 0) {
+                    "当前整扇全零；内容本身不解析"
+                } else {
+                    "非零内容；协议仍按 opaque bytes 原样保留"
+                },
+                FieldStyle::Flag,
+            ));
+            notes.push(
+                "LBA5 没有字段级 payload：官方注册 writer 读取既有 LBA0–12 后不重建 LBA5，最终原样保留；EdpDiskCtrl 的两版运行时只读取整扇并把同一缓冲区写回，再以 WriteFile 是否返回 ERROR_WRITE_PROTECT(0x13) 判断 U 盘写保护状态。22 份原始参考当前均全零，但“全零”是实盘现状，不是协议要求。".into(),
+            );
+            "RAW（opaque preserve + 写保护探测 scratch sector）".into()
         }
         6 => {
             decoded = parse_lba6(raw, meta, &mut fields, &mut notes);
@@ -841,14 +1039,33 @@ pub fn analyze_sector(lba: u32, raw: &[u8], meta: &InspectMeta) -> SectorView {
         }
         8 => {
             if let Some((crc, key)) = crc_key(meta) {
-                decoded = a6b0_full(&raw[..EDPF_ENC_LEN], &key, 0);
-                decoded.resize(SECTOR, 0);
+                let head = a6b0_full(&raw[..16], &key, 0);
+                let encrypted_len = if head.get(..4) == Some(b"LLGB") {
+                    u32_at(&head, 4)
+                        .map(|value| value as usize)
+                        // Official BuildSector8 always encrypts the block that
+                        // contains the ELABEL trailing NUL.  Therefore an
+                        // already 16-byte-aligned logical length still needs
+                        // one additional encrypted block.
+                        .and_then(|logical_len| logical_len.checked_add(16))
+                        .map(|value| value & !15)
+                        .filter(|value| *value >= 16 && *value <= SECTOR)
+                        .unwrap_or(LLGB_FALLBACK_LEN)
+                } else {
+                    LLGB_FALLBACK_LEN
+                };
+                decoded = raw.to_vec();
+                decoded[..encrypted_len].copy_from_slice(&a6b0_full(
+                    &raw[..encrypted_len],
+                    &key,
+                    0,
+                ));
                 if decoded.get(..4) == Some(b"LLGB") || decoded.contains(&b'<') {
                     parse_llgb(&decoded, &mut fields, &mut notes);
                 }
                 format!(
                     "A6B0 前 {}B，key=CRC32(device_id)=0x{crc:08X}",
-                    EDPF_ENC_LEN
+                    encrypted_len
                 )
             } else {
                 "RAW（缺 device_id，无法解 LBA8）".into()
@@ -856,28 +1073,116 @@ pub fn analyze_sector(lba: u32, raw: &[u8], meta: &InspectMeta) -> SectorView {
         }
         9 => {
             if let Some((crc, key)) = crc_key(meta) {
-                let mut d = a6b0_full(&raw[..0x80], &key, 0);
-                d.resize(0x100, 0);
-                d.extend(raw[0x100..0x120].iter().map(|b| b ^ 0x88));
-                d.resize(SECTOR, 0);
-                decoded = d;
+                decoded = raw.to_vec();
+                let eetu = a6b0_full(&raw[..0x80], &key, 0);
+                decoded[..0x80].copy_from_slice(&eetu);
+                for off in 0x100..0x120 {
+                    decoded[off] = raw[off] ^ 0x88;
+                }
+                if raw[0x180..0x200].iter().any(|byte| *byte != 0) {
+                    let eppe = a6b0_full(&raw[0x180..0x200], &key, 0);
+                    decoded[0x180..0x200].copy_from_slice(&eppe);
+                }
+                if decoded.get(..4) == Some(b"EETU") {
+                    fields.push(field(0x00, 0x04, "EETU magic", "EETU", FieldStyle::Magic));
+                    if let Some(value) = u64_at(&decoded, 0x04) {
+                        fields.push(field(
+                            0x04,
+                            0x0c,
+                            "EETU 开始时间 (ullBTime)",
+                            if value == 0 {
+                                "0（不限制）".into()
+                            } else {
+                                value.to_string()
+                            },
+                            FieldStyle::Flag,
+                        ));
+                    }
+                    if let Some(value) = u64_at(&decoded, 0x0c) {
+                        fields.push(field(
+                            0x0c,
+                            0x14,
+                            "EETU 结束时间 (ullETime)",
+                            if value == 0 {
+                                "0（不限制）".into()
+                            } else {
+                                value.to_string()
+                            },
+                            FieldStyle::Flag,
+                        ));
+                    }
+                    if let Some(value) = u32_at(&decoded, 0x14) {
+                        fields.push(field(
+                            0x14,
+                            0x18,
+                            "EETU 使用次数 (useCount)",
+                            if value == u32::MAX {
+                                "无限（0xFFFFFFFF）".into()
+                            } else {
+                                value.to_string()
+                            },
+                            FieldStyle::Flag,
+                        ));
+                    }
+                    notes.push(
+                        "EETU：tagEdpEDiskTmpUse 独立 0x80B A6B0 运行时块；ullBTime/ullETime 与 time(NULL) 比较，二者都为 0 时不限制时间；useCount=0xFFFFFFFF 表示无限次数，0 表示次数耗尽，其它正值每次检查后减 1 并由 WriteTempUseInfo 回写。reverse[104] 的业务语义仍未闭合。".into(),
+                    );
+                }
                 let before = fields.len();
                 parse_sapf(&decoded, &mut fields, &mut notes);
                 if fields.len() == before {
                     notes.push("未检测到 SAPF 结构。".into());
                 }
-                format!("A6B0 0x000..0x07F + XOR 0x88 @0x100..0x11F，CRC=0x{crc:08X}")
+                parse_eppe(&decoded, &mut fields, &mut notes);
+                format!("A6B0 EETU@0x000/EPPE@0x180 + XOR 0x88 SAPF@0x100，CRC=0x{crc:08X}")
             } else {
                 "RAW（缺 device_id，无法解 LBA9）".into()
             }
         }
         10 => {
-            notes.push(if raw.iter().all(|&b| b == 0) {
-                "LBA10 全零。".into()
+            if raw.iter().all(|&b| b == 0) {
+                notes.push("LBA10 全零。".into());
+                "RAW（当前样本为空）".into()
+            } else if let Some((crc, key)) = crc_key(meta) {
+                let head = a6b0_full(&raw[..0x80], &key, 0);
+                if head.get(..4) == Some(b"EESI") {
+                    decoded[..0x80].copy_from_slice(&head);
+                    fields.push(field(0x00, 0x04, "EESI magic", "EESI", FieldStyle::Magic));
+                    if let Some(value) = u32_at(&decoded, 0x04) {
+                        fields.push(field(
+                            0x04,
+                            0x08,
+                            "EESI +0x04",
+                            format!("{} (0x{value:08X})", value),
+                            FieldStyle::Flag,
+                        ));
+                    }
+                    fields.push(field(
+                        0x08,
+                        0x18,
+                        "EESI 交换区卷标",
+                        text_value(&decoded[0x08..0x18]),
+                        FieldStyle::Text,
+                    ));
+                    fields.push(field(
+                        0x18,
+                        0x28,
+                        "EESI 保密区卷标",
+                        text_value(&decoded[0x18..0x28]),
+                        FieldStyle::Text,
+                    ));
+                    notes.push(
+                        "EESI 仅前 0x80B 由读写端加解密；UserLogin 将 +0x08 的字符串用于 type2(交换区) SetVolumeLabelA，将 +0x18 的字符串用于 type4(保密区) SetVolumeLabelA；后 0x180B 不属于该结构，writer 读改写时保持原字节。".into(),
+                    );
+                    format!("A6B0 前 0x80B，key=CRC32(device_id)=0x{crc:08X} → EESI ✓")
+                } else {
+                    notes.push("LBA10 非零，但前 0x80B 未解出 EESI。".into());
+                    format!("A6B0 前 0x80B 尝试，CRC=0x{crc:08X}（非 EESI）")
+                }
             } else {
-                "LBA10 存在非零数据。".into()
-            });
-            "RAW（保留扇区）".into()
+                notes.push("LBA10 非零；缺 device_id，无法验证 EESI。".into());
+                "RAW（缺 device_id，无法解 LBA10）".into()
+            }
         }
         11 => {
             if let Some((d, m)) = decode_lba11(raw, meta) {
@@ -897,14 +1202,14 @@ pub fn analyze_sector(lba: u32, raw: &[u8], meta: &InspectMeta) -> SectorView {
         }
         12 => {
             if let Some((crc, key)) = crc_key(meta) {
-                let mut d = a6b0_full(&raw[..EDPF_ENC_LEN], &key, 0);
-                d.extend_from_slice(&raw[EDPF_ENC_LEN..]);
-                decoded = d;
+                decoded = a6b0_full(raw, &key, 0);
                 if decoded.get(..4) == Some(b"EDPF") {
-                    parse_edpf(&decoded[..EDPF_ENC_LEN], 0x60, &mut fields, &mut notes);
+                    parse_edpf(&decoded[..EDPF_TABLE_LEN], 0x60, &mut fields, &mut notes);
                 }
-                notes.push("LBA12 尾部 144B 未加密，检查器保持原字节，不对其做 AES。".into());
-                format!("A6B0 前 {}B + 尾部 144B RAW，CRC=0x{crc:08X}", EDPF_ENC_LEN)
+                notes.push(
+                    "LBA12：整扇 512B 使用连续 A6B0；0x170 只是 EDPF 表区边界，解密后的 0x170..0x1FF 为零填充。".into(),
+                );
+                format!("A6B0 整扇 512B，CRC=0x{crc:08X}")
             } else {
                 "RAW（缺 device_id，无法解 LBA12）".into()
             }
