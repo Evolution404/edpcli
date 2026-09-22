@@ -78,6 +78,9 @@ official writer 注入逻辑值 `0B` 时只改变 wire `+0x45`；strict Aigo 的
 consumer。当前真正剩余的字节 blocker 只剩 LBA6/LBA9：继续追 join59 同代 writer ABI
 与 legacy MBR underlay producer。
 
+- `scripts/protocol/audit_current_busmanage_dept_forwarding.py` 已固定 current `usbtoolbusmanage.dll` -> `CEMSUsbRegsiter.dll` 的 Dept 转发边界：`WriteNormalULabel` 从 request `+0x80` 以 `wcsncpy(...,0xBC)` 搬运完整字段，经 writer interface `vtable+0x08` 传入；current CEMSUsbRegsiter 又把同一 `request+0x80` 复制到 `UsbLabelParam+0x40`、capacity=`0xBC`。因此 current BusManage **不会在 writer 之前把 Dept 截成59/60B，也不会制造 Dept[59]=NUL**。
+- 同一审计从 `VUpdateService.log` 恢复被删除的 2025 `usbtoolbusmanage.dll` runtime MD5=`FC29B1C96E48F4F82EA6D641362B3364`；与已知 2025 `cemsusbregsiter.dll` MD5=`02F8CD326E8CBDA04F17B6235BDF268D` 组成同代双 acquisition fingerprint。join59 producer 因而继续锁定到旧 CEMSUsbRegsiter serializer 或同 writer interface 的旧实现；仍未取得旧 bytes，所以129B不提升。
+
 ### 2026-09-22：v19 LBA6 BeiZhu 32B 槽审计纠错
 
 - 新增 `scripts/protocol/audit_v19_lba6_beizhu_slot.py`，固定 v19.11.4.1 DLL SHA-256，直接锁定 `BuildSector6@0x10006370`、`ReadSector6@0x10006AC0`、共享 `strcpy_s@0x101473FE` 及六个 reader callsite。
