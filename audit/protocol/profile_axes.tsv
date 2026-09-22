@@ -1,0 +1,45 @@
+axis	state	role	ranges	effect_kind	description	evidence
+lba0_bootstrap	zero	owner	0:000-18f	ProducerChanged	LBA0 bootstrap family; upper-layer selector provenance is separate from wire semantics.	S-WIN-CURRENT;S-NETAC-MBR;P-GOLD-ENC
+lba0_bootstrap	usb-main-bsec	owner	0:000-18f	ProducerChanged	LBA0 bootstrap family; upper-layer selector provenance is separate from wire semantics.	S-WIN-CURRENT;S-NETAC-MBR;P-GOLD-ENC
+lba0_bootstrap	netac-mbr	owner	0:000-18f	ProducerChanged	LBA0 bootstrap family; upper-layer selector provenance is separate from wire semantics.	S-WIN-CURRENT;S-NETAC-MBR;P-GOLD-ENC
+lba0_sector_size_overlay	absent	owner	0:1a0-1a3	AddedRemoved	Optional SAFE1/legacy SectorSize overlay independent from bootstrap family.	S-WIN-CURRENT;P-GOLD-ENC
+lba0_sector_size_overlay	sector-size-512	owner	0:1a0-1a3	AddedRemoved	Optional SAFE1/legacy SectorSize overlay independent from bootstrap family.	S-WIN-CURRENT;P-GOLD-ENC
+gpt_layout	absent	owner	1:000-1ff;2:000-1ff	AddedRemoved	GPT LBA1/LBA2 presence is independent from SAFE6 metadata profiles.	V-GPT;P-GOLD-ENC
+gpt_layout	enabled	owner	1:000-1ff;2:000-1ff	AddedRemoved	GPT LBA1/LBA2 presence is independent from SAFE6 metadata profiles.	V-GPT;P-GOLD-ENC
+lba3_metadata	zero	owner	3:000-1ff	ProducerChanged	Manufacturer MP metadata states share the EDP preserve-only lifecycle.	S-WIN-CURRENT;S-WIN-191141-LBA3;P-GOLD-ENC
+lba3_metadata	kingston-mp-a	owner	3:000-1ff	ProducerChanged	Manufacturer MP metadata states share the EDP preserve-only lifecycle.	S-WIN-CURRENT;S-WIN-191141-LBA3;P-GOLD-ENC
+lba3_metadata	historical-mp-b	owner	3:000-1ff	ProducerChanged	Manufacturer MP metadata states share the EDP preserve-only lifecycle.	S-WIN-CURRENT;S-WIN-191141-LBA3;P-GOLD-ENC
+lba4_encoding	post-xor	owner	4:018-1ff	EncodingChanged	Restore-node logical fields are stable while wire representation differs.	S-WIN-CURRENT;S-WIN-191141;V-LBA4;V-LBA4-V19
+lba4_encoding	ordinary-rolling	owner	4:018-1ff	EncodingChanged	Restore-node logical fields are stable while wire representation differs.	S-WIN-CURRENT;S-WIN-191141;V-LBA4;V-LBA4-V19
+dept_layout	short	owner	6:000-03f;9:080-0ff	OwnershipChanged	Dept seam is an independent serialization axis spanning LBA6 and LBA9.	S-JOIN59-SEMANTIC;P-GOLD-ENC
+dept_layout	join59	owner	6:000-03f;9:080-0ff	OwnershipChanged	Dept seam is an independent serialization axis spanning LBA6 and LBA9.	S-JOIN59-SEMANTIC;P-GOLD-ENC
+dept_layout	join60	owner	6:000-03f;9:080-0ff	OwnershipChanged	Dept seam is an independent serialization axis spanning LBA6 and LBA9.	S-JOIN59-SEMANTIC;P-GOLD-ENC
+lba6_mbr_underlay	zero-underlay	owner	6:1e0-1ed	OwnershipChanged	Post-NUL LBA6 slice is zero backing or surviving MBR entry3 snapshot.	S-MBR-SNAPSHOT-SEMANTIC;P-GOLD-ENC
+lba6_mbr_underlay	legacy-mbr-snapshot	owner	6:1e0-1ed	OwnershipChanged	Post-NUL LBA6 slice is zero backing or surviving MBR entry3 snapshot.	S-MBR-SNAPSHOT-SEMANTIC;P-GOLD-ENC
+lba7_entry_count	two-entry	owner	7:080-0bf	AddedRemoved	Third packed legacy EDPF entry is independently absent or present.	S-WIN-CURRENT;P-GOLD-ENC;P-GOLD-NOPWD
+lba7_entry_count	three-entry	owner	7:080-0bf	AddedRemoved	Third packed legacy EDPF entry is independently absent or present.	S-WIN-CURRENT;P-GOLD-ENC;P-GOLD-NOPWD
+lba7_passinfo_version	legacy-v0064	owner	7:0c0-0cd	ProducerChanged	LBA7 pass-info version is independent from packed entry count.	S-WIN-CURRENT;S-LINUX-DWARF;P-GOLD-ENC
+lba7_passinfo_version	current-v0206	owner	7:0c0-0cd	ProducerChanged	LBA7 pass-info version is independent from packed entry count.	S-WIN-CURRENT;S-LINUX-DWARF;P-GOLD-ENC
+lba8_usb_only_info	current	owner	8:01e-02d	ProducerChanged	UsbOnlyInfo has current, transitional, and absent producer states.	S-WIN-CURRENT;S-WIN-191141;P-GOLD-ENC
+lba8_usb_only_info	transitional-2019	owner	8:01e-02d	ProducerChanged	UsbOnlyInfo has current, transitional, and absent producer states.	S-WIN-CURRENT;S-WIN-191141;P-GOLD-ENC
+lba8_usb_only_info	strict-legacy-absent	owner	8:01e-02d	ProducerChanged	UsbOnlyInfo has current, transitional, and absent producer states.	S-WIN-CURRENT;S-WIN-191141;P-GOLD-ENC
+lba9_eetu	absent-zero	owner	9:000-07f	AddedRemoved	EETU is optional and independent from Dept/User upper overlays.	S-WIN-CURRENT;S-LINUX-DWARF;P-GOLD-ENC
+lba9_eetu	eetu	owner	9:000-07f	AddedRemoved	EETU is optional and independent from Dept/User upper overlays.	S-WIN-CURRENT;S-LINUX-DWARF;P-GOLD-ENC
+lba9_overlay	zero	owner	9:100-1ff	OwnershipChanged	Upper half is multiplexed among restore, User continuation, password policy, and backing.	S-WIN-CURRENT;S-LINUX-DWARF;V-LBA6;P-GOLD-ENC
+lba9_overlay	sapf	owner	9:100-1ff	OwnershipChanged	Upper half is multiplexed among restore, User continuation, password policy, and backing.	S-WIN-CURRENT;S-LINUX-DWARF;V-LBA6;P-GOLD-ENC
+lba9_overlay	long-user	owner	9:100-1ff	OwnershipChanged	Upper half is multiplexed among restore, User continuation, password policy, and backing.	S-WIN-CURRENT;S-LINUX-DWARF;V-LBA6;P-GOLD-ENC
+lba9_overlay	eppe	owner	9:100-1ff	OwnershipChanged	Upper half is multiplexed among restore, User continuation, password policy, and backing.	S-WIN-CURRENT;S-LINUX-DWARF;V-LBA6;P-GOLD-ENC
+lba10_eesi	absent-zero	owner	10:000-1ff	AddedRemoved	EESI is optional; enabled payload owns only its defined prefix and preserves tail.	S-EESI-361018;P-EESI-NETAC;P-GOLD-ENC
+lba10_eesi	eesi-enabled	owner	10:000-1ff	AddedRemoved	EESI is optional; enabled payload owns only its defined prefix and preserves tail.	S-EESI-361018;P-EESI-NETAC;P-GOLD-ENC
+lba11_capacity	disk-size	owner	11:000-1ff	ProducerChanged	LBA11 capacity key input differs by writer path, not hardware identity.	S-WIN-CURRENT;S-LINUX-DWARF;P-GOLD-ENC
+lba11_capacity	repair-chs	owner	11:000-1ff	ProducerChanged	LBA11 capacity key input differs by writer path, not hardware identity.	S-WIN-CURRENT;S-LINUX-DWARF;P-GOLD-ENC
+lba12_mode	legacy-v0064	owner	12:000-1ff	EncodingChanged	LBA12 wrapped-key mode is independent from all other profile axes.	S-WIN-CURRENT;S-LINUX-DWARF;V-LBA12;P-GOLD-ENC
+lba12_mode	mode1	owner	12:000-1ff	EncodingChanged	LBA12 wrapped-key mode is independent from all other profile axes.	S-WIN-CURRENT;S-LINUX-DWARF;V-LBA12;P-GOLD-ENC
+lba12_mode	mode2	owner	12:000-1ff	EncodingChanged	LBA12 wrapped-key mode is independent from all other profile axes.	S-WIN-CURRENT;S-LINUX-DWARF;V-LBA12;P-GOLD-ENC
+lba12_mode	mode3	owner	12:000-1ff	EncodingChanged	LBA12 wrapped-key mode is independent from all other profile axes.	S-WIN-CURRENT;S-LINUX-DWARF;V-LBA12;P-GOLD-ENC
+lba4_second_key_source	current-main-onlyid	overlay	4:01c-01f	ProducerChanged	OnllyID2Nd meaning is stable while producer seed source changes.	S-WIN-CURRENT;S-WIN-191141;P-GOLD-ENC
+lba4_second_key_source	legacy-guid-crc	overlay	4:01c-01f	ProducerChanged	OnllyID2Nd meaning is stable while producer seed source changes.	S-WIN-CURRENT;S-WIN-191141;P-GOLD-ENC
+lba4_hserial_source	current-zero	overlay	4:020-033	ProducerChanged	HSerialCRC vector is independently absent or caller supplied.	S-WIN-CURRENT;S-WIN-191141;V-LBA4-V19;P-GOLD-ENC
+lba4_hserial_source	legacy-caller-vector	overlay	4:020-033	ProducerChanged	HSerialCRC vector is independently absent or caller supplied.	S-WIN-CURRENT;S-WIN-191141;V-LBA4-V19;P-GOLD-ENC
+host_hardinfo_source	current-zero	overlay	4:035-038;8:014-017	ProducerChanged	LBA4/LBA8 host-hardinfo mirrors share an independent producer axis.	S-WIN-CURRENT;S-WIN-191141;P-GOLD-ENC
+host_hardinfo_source	legacy-host-identity	overlay	4:035-038;8:014-017	ProducerChanged	LBA4/LBA8 host-hardinfo mirrors share an independent producer axis.	S-WIN-CURRENT;S-WIN-191141;P-GOLD-ENC

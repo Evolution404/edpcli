@@ -217,6 +217,10 @@ physical_evidence
 implementation_provenance
 code_symbol
 test_symbol
+semantic_status
+implementation_status
+behavior_test_status
+ownership_test_symbol
 ```
 
 要求：
@@ -226,7 +230,10 @@ test_symbol
 3. profile 分叉必须显式展开；
 4. preserve / opaque / backing 也必须成为正式 semantic type，不能留空；
 5. 字段不得仅以“reserved”命名而没有 ownership 行为；
-6. 所有 COMPLETE 字段必须链接到正式代码 symbol 和测试 symbol。
+6. `semantic_status=COMPLETE` 只表示语义闭环，允许同时为 `implementation_status=PLANNED`、`behavior_test_status=PLANNED`，不降低 6656B 语义覆盖。
+7. `implementation_status=COMPLETE` 必须链接到真实且经编译期登记的 `code_symbol`；`behavior_test_status=COMPLETE` 必须链接到真实且经编译期登记的 `test_symbol`。两个工程状态分别升级，允许值为 `PLANNED | COMPLETE`。
+8. PLANNED 链接只能是 `planned:...` 设计目标或 `UNIMPLEMENTED`，不能算作正式符号。通用 ownership 测试单独记录为 `ownership_test_symbol`，不能充当字段行为测试。
+9. Phase 3/4 升级时，在 `tests/protocol_field_catalog.rs` 的符号登记表加入可编译 Rust 路径，再同步更新对应行状态和链接；行为测试放在该 integration test 或其导入的测试模块。登记证明符号存在，review 仍须核对字段关联与行为断言，不能以存在性替代行为正确性。
 
 推荐 semantic type：
 
