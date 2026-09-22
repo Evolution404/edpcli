@@ -8,10 +8,11 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use common::load_disk_image;
 use edpcli::backup_metadata::{
-    acquire_metadata, parse_partition_geometry, FilesystemKind, PARTITION_PREFIX_SECTORS,
-    TAIL_A_WINDOW_SECTORS,
+    acquire_metadata, parse_partition_geometry, parse_region_a_geometry, FilesystemKind,
+    DEVICE_TAIL_WINDOW_SECTORS, PARTITION_PREFIX_SECTORS, REGION_A_SECTORS,
 };
 use edpcli::common::SECTOR;
+use edpcli::crypto::{crc32_bare, xor_rolling};
 use edpcli::diskio::SectorDev;
 use edpcli::edpb::{
     self, CaptureLevel, CoreCapture, MetadataCapture, RestorePolicy, SemanticStatus,
@@ -19,6 +20,9 @@ use edpcli::edpb::{
 
 const NETAC_DEVICE_ID: &str = "disk&ven_netac&prod_onlydisk";
 const NETAC_TOTAL_SECTORS: u64 = 122_880_000;
+const LEXAR_DEVICE_ID: &str = "disk&ven_lexar&prod_usb_flash_drive";
+const LEXAR_TOTAL_SECTORS: u64 = 243_625_984;
+const LEXAR_REGION_A_START: u64 = 243_623_933;
 
 struct TempDir(PathBuf);
 
@@ -90,6 +94,24 @@ fn ntfs_boot(mft_lcn: u64, mftmirr_lcn: u64) -> Vec<u8> {
     boot
 }
 
+fn patterned_sector(byte: u8) -> Vec<u8> {
+    vec![byte; SECTOR]
+}
+
+fn rewrite_lexar_region_a_pointer(image: &[u8], start_lba: u64) -> Vec<u8> {
+    let mut out = image.to_vec();
+    let crc = crc32_bare(LEXAR_DEVICE_ID.as_bytes());
+    let k0 = (crc & 0xffff) ^ (crc >> 16);
+    let mut plain = xor_rolling(&out[7 * SECTOR..8 * SECTOR], k0);
+    for entry in [1usize, 2usize] {
+        let offset = entry * 0x40 + 0x18;
+        plain[offset..offset + 8].copy_from_slice(&start_lba.to_le_bytes());
+    }
+    let wire = xor_rolling(&plain, k0);
+    out[7 * SECTOR..8 * SECTOR].copy_from_slice(&wire);
+    out
+}
+
 fn core<'a>(image: &'a [u8]) -> CoreCapture<'a> {
     CoreCapture {
         snapshot_id: "metadata-test".into(),
@@ -131,6 +153,112 @@ fn authentic_lba12_yields_bounded_partition_geometry() {
 }
 
 #[test]
+fn authentic_lexar_lba7_points_to_six_sector_region_a() {
+    let Some(image) = load_disk_image("lexar") else {
+        eprintln!("跳过: 真实 Lexar 协议夹具不可用");
+        return;
+    };
+    let region_a = parse_region_a_geometry(&image, LEXAR_DEVICE_ID, LEXAR_TOTAL_SECTORS).unwrap();
+    assert_eq!(region_a.start_lba, LEXAR_REGION_A_START);
+    assert_eq!(region_a.sector_count, REGION_A_SECTORS);
+    assert_eq!(region_a.chs_expected_start_lba, Some(LEXAR_REGION_A_START));
+    assert_eq!(region_a.lba7_candidate_entries, vec![1, 2]);
+}
+
+#[test]
+fn metadata_capture_reads_complete_region_a_and_separate_tail_window() {
+    let Some(image) = load_disk_image("lexar") else {
+        eprintln!("跳过: 真实 Lexar 协议夹具不可用");
+        return;
+    };
+    let mut dev = ReadOnlySparseDev::new();
+    let mut expected = Vec::new();
+    for offset in 0..REGION_A_SECTORS {
+        let sector = patterned_sector(0x40 + offset as u8);
+        expected.extend_from_slice(&sector);
+        dev.insert(LEXAR_REGION_A_START + offset, sector);
+    }
+
+    let acquired =
+        acquire_metadata(&mut dev, &image, LEXAR_DEVICE_ID, LEXAR_TOTAL_SECTORS).unwrap();
+    let region_a = acquired
+        .regions
+        .iter()
+        .find(|region| region.id == "region.region_a")
+        .expect("Region A must be modeled explicitly");
+    assert_eq!(region_a.semantic_status, SemanticStatus::Identified);
+    assert_eq!(region_a.start_lba, Some(LEXAR_REGION_A_START));
+    assert_eq!(region_a.sector_count, Some(REGION_A_SECTORS));
+
+    let raw_region_a = acquired
+        .artifacts
+        .iter()
+        .find(|artifact| artifact.id == "raw.region_a")
+        .expect("raw Region A artifact");
+    assert_eq!(raw_region_a.restore_policy, RestorePolicy::EvidenceOnly);
+    assert_eq!(raw_region_a.data, expected);
+
+    let tail = acquired
+        .regions
+        .iter()
+        .find(|region| region.id == "region.device_tail_window")
+        .expect("device tail forensic window");
+    assert_eq!(tail.semantic_status, SemanticStatus::Unknown);
+    assert_eq!(tail.sector_count, Some(DEVICE_TAIL_WINDOW_SECTORS));
+    assert_eq!(
+        tail.start_lba,
+        Some(LEXAR_TOTAL_SECTORS - DEVICE_TAIL_WINDOW_SECTORS)
+    );
+    assert_ne!(tail.start_lba, region_a.start_lba);
+    assert!(acquired
+        .artifacts
+        .iter()
+        .any(|artifact| artifact.id == "raw.device_tail_window"
+            && artifact.restore_policy == RestorePolicy::EvidenceOnly));
+
+    let layout = acquired
+        .artifacts
+        .iter()
+        .find(|artifact| artifact.id == "derived.region_a.layout")
+        .expect("Region A layout artifact");
+    let layout_json: serde_json::Value = serde_json::from_slice(&layout.data).unwrap();
+    assert_eq!(layout_json["iir_main"]["length"], 2048);
+    assert_eq!(
+        layout_json["iir_main"]["classification"],
+        "aes_192_cbc_encrypted_iir"
+    );
+    assert_eq!(layout_json["unknown_tail"]["length"], 1024);
+}
+
+#[test]
+fn lba7_region_a_pointer_remains_authoritative_when_chs_cross_check_differs() {
+    let Some(image) = load_disk_image("lexar") else {
+        eprintln!("跳过: 真实 Lexar 协议夹具不可用");
+        return;
+    };
+    let altered_start = LEXAR_REGION_A_START - 1;
+    let altered = rewrite_lexar_region_a_pointer(&image, altered_start);
+    let parsed = parse_region_a_geometry(&altered, LEXAR_DEVICE_ID, LEXAR_TOTAL_SECTORS).unwrap();
+    assert_eq!(parsed.start_lba, altered_start);
+    assert_eq!(parsed.chs_expected_start_lba, Some(LEXAR_REGION_A_START));
+
+    let mut dev = ReadOnlySparseDev::new();
+    let acquired =
+        acquire_metadata(&mut dev, &altered, LEXAR_DEVICE_ID, LEXAR_TOTAL_SECTORS).unwrap();
+    let region_a = acquired
+        .regions
+        .iter()
+        .find(|region| region.id == "region.region_a")
+        .unwrap();
+    assert_eq!(region_a.start_lba, Some(altered_start));
+    assert!(acquired.issues.iter().any(|issue| {
+        issue.region_id == "region.region_a"
+            && issue.start_lba == altered_start
+            && issue.error.contains("differs from CHS-1792 expected")
+    }));
+}
+
+#[test]
 fn metadata_capture_reads_partition_key_sectors_and_tail_evidence_without_writes() {
     let Some(image) = load_disk_image("netac") else {
         eprintln!("跳过: 真实协议夹具不可用");
@@ -154,18 +282,18 @@ fn metadata_capture_reads_partition_key_sectors_and_tail_evidence_without_writes
     let tail = acquired
         .regions
         .iter()
-        .find(|region| region.id == "region.tail.A")
-        .expect("tail.A observation window");
+        .find(|region| region.id == "region.device_tail_window")
+        .expect("device tail forensic window");
     assert_eq!(tail.semantic_status, SemanticStatus::Unknown);
-    assert_eq!(tail.sector_count, Some(TAIL_A_WINDOW_SECTORS));
+    assert_eq!(tail.sector_count, Some(DEVICE_TAIL_WINDOW_SECTORS));
     assert_eq!(
         tail.start_lba,
-        Some(NETAC_TOTAL_SECTORS - TAIL_A_WINDOW_SECTORS)
+        Some(NETAC_TOTAL_SECTORS - DEVICE_TAIL_WINDOW_SECTORS)
     );
     assert!(acquired
         .artifacts
         .iter()
-        .any(|artifact| artifact.id == "raw.tail.A.window"
+        .any(|artifact| artifact.id == "raw.device_tail_window"
             && artifact.restore_policy == RestorePolicy::EvidenceOnly));
     assert!(acquired
         .artifacts
@@ -264,13 +392,13 @@ fn metadata_container_detects_corruption_in_non_protocol_artifact() {
     let extra = manifest
         .artifacts
         .iter()
-        .find(|artifact| artifact.id == "raw.tail.A.window")
+        .find(|artifact| artifact.id == "raw.region_a")
         .unwrap();
     let mut bytes = fs::read(&path).unwrap();
     bytes[extra.storage.data_offset as usize + 7] ^= 0x5a;
     fs::write(&path, bytes).unwrap();
     let error = edpb::verify_file(&path).unwrap_err();
-    assert!(error.contains("raw.tail.A.window"));
+    assert!(error.contains("raw.region_a"));
     assert!(error.contains("SHA-256"));
 }
 

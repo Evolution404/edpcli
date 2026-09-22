@@ -8,16 +8,20 @@
 use serde::Serialize;
 
 use crate::common::SECTOR;
-use crate::crypto::{a6b0_full, crc32_bare};
+use crate::crypto::{a6b0_full, crc32_bare, xor_rolling};
 use crate::diskio::SectorDev;
 use crate::edpb::{
     ArtifactCompleteness, ArtifactInput, Derivation, Extent, Region, RestorePolicy, SemanticStatus,
 };
-use crate::protocol::edpf::EdpfEntry96;
+use crate::protocol::edpf::{EdpfEntry64, EdpfEntry96};
 
 pub const PARTITION_PREFIX_SECTORS: u64 = 64;
 pub const PARTITION_SUFFIX_SECTORS: u64 = 8;
-pub const TAIL_A_WINDOW_SECTORS: u64 = 2048;
+pub const DEVICE_TAIL_WINDOW_SECTORS: u64 = 2048;
+pub const REGION_A_SECTORS: u64 = 6;
+pub const REGION_A_BYTES: u64 = REGION_A_SECTORS * SECTOR as u64;
+pub const REGION_A_CHS_TRACK_SECTORS: u64 = 16_065;
+pub const REGION_A_CHS_BACKOFF_SECTORS: u64 = 1_792;
 pub const TAIL_METADATA_MIRROR_OFFSET_SECTORS: u64 = 1024;
 pub const TAIL_METADATA_MIRROR_SECTORS: u64 = 9;
 pub const TAIL_END4_MIRROR_OFFSET_SECTORS: u64 = 4;
@@ -36,6 +40,14 @@ pub struct PartitionGeometry {
     pub user_key_crc: u32,
     pub file_key_crc: u32,
     pub encrypt_mode: u8,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+pub struct RegionAGeometry {
+    pub start_lba: u64,
+    pub sector_count: u64,
+    pub lba7_candidate_entries: Vec<usize>,
+    pub chs_expected_start_lba: Option<u64>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
@@ -248,6 +260,95 @@ pub fn parse_partition_geometry(
         });
     }
     Ok(out)
+}
+
+fn parse_lba7_region_a_candidates(
+    lba0_12: &[u8],
+    device_id: &str,
+) -> Result<Vec<(usize, EdpfEntry64)>, String> {
+    if lba0_12.len() != 13 * SECTOR {
+        return Err(format!(
+            "Region A planning requires 6656B LBA0-12, got {}B",
+            lba0_12.len()
+        ));
+    }
+    let lba7: &[u8; SECTOR] = lba0_12[7 * SECTOR..8 * SECTOR]
+        .try_into()
+        .expect("slice length checked");
+    let device_crc = crc32_bare(device_id.as_bytes());
+    let k0 = (device_crc & 0xffff) ^ (device_crc >> 16);
+    let plain = xor_rolling(lba7, k0);
+
+    let mut entries = Vec::new();
+    for index in 0..3usize {
+        let base = index * 0x40;
+        let raw: &[u8; 0x40] = plain[base..base + 0x40]
+            .try_into()
+            .expect("LBA7 entry bounds");
+        if &raw[..4] != b"EDPF" {
+            if index < 2 {
+                return Err(format!("LBA7 entry{index} missing EDPF magic"));
+            }
+            break;
+        }
+        let entry = EdpfEntry64::parse(raw).map_err(|e| format!("parse LBA7 entry{index}: {e}"))?;
+        entries.push((index, entry));
+    }
+    Ok(entries)
+}
+
+pub fn parse_region_a_geometry(
+    lba0_12: &[u8],
+    device_id: &str,
+    total_sectors: u64,
+) -> Result<RegionAGeometry, String> {
+    let entries = parse_lba7_region_a_candidates(lba0_12, device_id)?;
+    let candidates: Vec<(usize, EdpfEntry64)> = entries
+        .into_iter()
+        .filter(|(index, entry)| {
+            *index > 0
+                && entry.sector_size == SECTOR as u64
+                && entry.partition_size == REGION_A_BYTES
+        })
+        .collect();
+    if candidates.is_empty() {
+        return Err("LBA7 has no 3072-byte Region A pointer entry".into());
+    }
+
+    let start_lba = candidates[0].1.start_sector;
+    if candidates
+        .iter()
+        .any(|(_, entry)| entry.start_sector != start_lba)
+    {
+        return Err(format!(
+            "LBA7 Region A pointers disagree: {}",
+            candidates
+                .iter()
+                .map(|(index, entry)| format!("entry{index}={}", entry.start_sector))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ));
+    }
+    let end = start_lba
+        .checked_add(REGION_A_SECTORS)
+        .ok_or_else(|| "Region A geometry overflow".to_string())?;
+    if end > total_sectors {
+        return Err(format!(
+            "LBA7 Region A exceeds source disk: start={start_lba}, end={end}, total={total_sectors}"
+        ));
+    }
+
+    let chs_aligned = (total_sectors / REGION_A_CHS_TRACK_SECTORS)
+        .checked_mul(REGION_A_CHS_TRACK_SECTORS)
+        .ok_or_else(|| "Region A CHS geometry overflow".to_string())?;
+    let chs_expected_start_lba = chs_aligned.checked_sub(REGION_A_CHS_BACKOFF_SECTORS);
+
+    Ok(RegionAGeometry {
+        start_lba,
+        sector_count: REGION_A_SECTORS,
+        lba7_candidate_entries: candidates.iter().map(|(index, _)| *index).collect(),
+        chs_expected_start_lba,
+    })
 }
 
 fn probe_filesystem(partition: &PartitionGeometry, prefix: &[u8]) -> FilesystemProbe {
@@ -519,12 +620,93 @@ pub fn acquire_metadata(
         }
     }
 
-    let tail_count = total_sectors.min(TAIL_A_WINDOW_SECTORS);
+    match parse_region_a_geometry(lba0_12, device_id, total_sectors) {
+        Ok(region_a) => {
+            let region_id = "region.region_a";
+            out.regions.push(Region {
+                id: region_id.into(),
+                role: "iir_key_management".into(),
+                start_lba: Some(region_a.start_lba),
+                sector_count: Some(region_a.sector_count),
+                semantic_status: SemanticStatus::Identified,
+            });
+            let raw = add_raw_extent(
+                &mut out,
+                dev,
+                region_id,
+                "extent.region_a".into(),
+                "raw.region_a".into(),
+                region_a.start_lba,
+                region_a.sector_count,
+                "region_a_iir_key_management",
+            )?;
+            if let Some(expected) = region_a.chs_expected_start_lba {
+                if expected != region_a.start_lba {
+                    out.issues.push(CaptureIssue {
+                        region_id: region_id.into(),
+                        start_lba: region_a.start_lba,
+                        sector_count: region_a.sector_count,
+                        error: format!(
+                            "LBA7 Region A pointer {} differs from CHS-1792 expected {}; LBA7 pointer preserved as authoritative",
+                            region_a.start_lba, expected
+                        ),
+                    });
+                }
+            }
+            if raw.is_some() {
+                let layout = serde_json::json!({
+                    "total_size": REGION_A_BYTES,
+                    "source": "lba7_entry_pointer",
+                    "candidate_entries": region_a.lba7_candidate_entries,
+                    "iir_main": {
+                        "offset": 0,
+                        "length": 0x800,
+                        "classification": "aes_192_cbc_encrypted_iir"
+                    },
+                    "unknown_tail": {
+                        "offset": 0x800,
+                        "length": 0x400,
+                        "classification": "unknown"
+                    }
+                });
+                out.artifacts.push(ArtifactInput {
+                    id: "derived.region_a.layout".into(),
+                    kind: "region_a_layout".into(),
+                    media_type: "application/json".into(),
+                    source_extent_ids: vec!["extent.region_a".into()],
+                    derivation: Some(Derivation {
+                        method: "lba7_region_a_layout_v1".into(),
+                        source_artifact_ids: vec!["raw.region_a".into()],
+                    }),
+                    restore_policy: RestorePolicy::DerivedOnly,
+                    completeness: ArtifactCompleteness::Complete,
+                    data: serde_json::to_vec_pretty(&layout)
+                        .map_err(|e| format!("serialize Region A layout failed: {e}"))?,
+                });
+            }
+        }
+        Err(error) => {
+            let fallback_start = (total_sectors / REGION_A_CHS_TRACK_SECTORS)
+                .checked_mul(REGION_A_CHS_TRACK_SECTORS)
+                .and_then(|aligned| aligned.checked_sub(REGION_A_CHS_BACKOFF_SECTORS))
+                .unwrap_or(0);
+            out.issues.push(CaptureIssue {
+                region_id: "region.region_a".into(),
+                start_lba: fallback_start,
+                sector_count: REGION_A_SECTORS,
+                error: format!(
+                    "Region A was not captured because LBA7 pointer validation failed: {error}"
+                ),
+            });
+        }
+    }
+
+    let tail_count = total_sectors.min(DEVICE_TAIL_WINDOW_SECTORS);
     let tail_start = total_sectors - tail_count;
-    let tail_region = "region.tail.A";
+    let tail_region = "region.device_tail_window";
     out.regions.push(Region {
         id: tail_region.into(),
-        role: "unknown_tail_window".into(),
+        role: "forensic_tail_window".into(),
         start_lba: Some(tail_start),
         sector_count: Some(tail_count),
         semantic_status: SemanticStatus::Unknown,
@@ -533,11 +715,11 @@ pub fn acquire_metadata(
         &mut out,
         dev,
         tail_region,
-        "extent.tail.A.window".into(),
-        "raw.tail.A.window".into(),
+        "extent.device_tail_window".into(),
+        "raw.device_tail_window".into(),
         tail_start,
         tail_count,
-        "unknown_tail_evidence_window",
+        "forensic_tail_evidence_window",
     )?;
 
     if total_sectors >= TAIL_METADATA_MIRROR_OFFSET_SECTORS + TAIL_METADATA_MIRROR_SECTORS {
@@ -585,11 +767,11 @@ pub fn acquire_metadata(
     }
 
     out.notes.push(format!(
-        "metadata capture policy: partition prefix={} sectors, suffix={} sectors, tail.A window={} sectors",
+        "metadata capture policy: partition prefix={} sectors, suffix={} sectors, device tail window={} sectors",
         PARTITION_PREFIX_SECTORS, PARTITION_SUFFIX_SECTORS, tail_count
     ));
     out.notes.push(
-        "tail.A is preserved as unknown evidence; identified mirror subregions remain evidence_only"
+        "Region A is the LBA7-pointed six-sector IIR/key-management block; device tail window is separate forensic evidence"
             .into(),
     );
     if !out.issues.is_empty() {

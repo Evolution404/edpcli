@@ -29,7 +29,7 @@ EDPB 是 edpcli 的单文件设备备份容器，扩展名为 .edpb。
 - partition.type1
 - partition.type2
 - partition.type4
-- tail.A
+- region_a
 - device.tail_window
 - vendor.unknown.N
 
@@ -284,21 +284,37 @@ Deep 默认不备份所有用户文件内容。
 
 原始密文 Artifact 与解密后的派生 Artifact 必须分别保存。
 
-## 11. 区域 A 和未知尾部
+## 11. Region A 与设备尾部取证窗口
 
-未知区域首先按 evidence_only 原始证据保存。
+Region A 是 LBA7 compact EDPF 表中 entry1/entry2 指向的固定 6 扇区（3072B）IIR/密钥管理块，不是泛指盘尾窗口。
 
-例如：
+Metadata 级必须优先使用 LBA7 盘内指针确定 Region A：
 
-- Region id = tail.A
+- Region id = region.region_a
+- role = iir_key_management
+- sector_count = 6
+- Artifact id = raw.region_a
+- restore_policy = evidence_only
+- semantic_status = identified
+
+CHS 公式 `(total_sectors // 16065) * 16065 - 1792` 仅用于一致性交叉验证。若 CHS 计算结果与 LBA7 指针不一致，必须记录 structured capture issue，并继续以 LBA7 指针为事实源，不得静默改写起点。
+
+Region A 当前已知内部语义：
+
+- `+0x000..+0x7ff`：0x800B，已确认是 `sectormanage64.dll::ReadIIR/WriteIIR` 使用的 AES-192-CBC IIR 主表密文
+- `+0x800..+0xbff`：0x400B，官方用途尚未闭环，保持 unknown
+
+可增加 `derived.region_a.layout` 描述上述布局，但派生结果不得替代 `raw.region_a` 原始字节。
+
+最后 2048 扇区的广义取证窗口是另一独立 Region：
+
+- Region id = region.device_tail_window
+- role = forensic_tail_window
+- Artifact id = raw.device_tail_window
 - semantic_status = unknown
-- start_lba / sector_count 使用实际探测结果
-- Artifact kind = raw_sectors
 - restore_policy = evidence_only
 
-以后即使识别出其语义，也只需增加新的解析器或派生 Artifact，不需要改变 EDPB 文件结构。
-
-除了明确的区域 A，建议 Metadata 级另保存一个可配置的 device.tail_window，便于未来重新研究尚未识别的尾部结构。
+Region A 和 device tail window 即使物理范围发生重叠，也必须保持不同语义，禁止再使用 `tail.A` 把两者混为一谈。
 
 ## 12. 完整性规则
 
