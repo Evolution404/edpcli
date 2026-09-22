@@ -119,14 +119,18 @@ Command palette 只接受任务语义，例如 `:devices`、`:backups`、`:inspe
 `:backup-create`、`:backup-verify`、`:backup-delete`、`:apply`、`:restore`、
 `:refresh`、`:help`、`:q`；它不会把输入传给 shell。
 
-设备和备份扫描、Inspect LBA0-12 读取全部在后台执行；设备/备份扫描还使用 single-flight 去重，连续刷新不会并发堆积同类 worker。旧 generation 的结果不会覆盖更新状态。Backup create 复用现有只读备份 service；Apply / Restore 则进入明确的安全向导：
+设备和备份扫描、Inspect LBA0-12 读取全部在后台执行；同类任务使用 single-flight，繁忙期间
+的新请求会合并为最后一次，旧 generation 的结果不会覆盖更新状态。列表每帧只构造可见行；
+设置 `EDPCLI_ANIMATION=reduced` 可降低动画更新频率，设置 `EDPCLI_ANIMATION=off` 可关闭
+动态帧。Backup create 复用现有只读备份 service；Apply / Restore 则进入明确的安全向导：
 
 1. 启动 TUI 前已完成平台管理员提权；
-2. 固定当前目标 disk；Restore 同时固定精确备份路径；
+2. 固定当前目标 disk、onlyid、device_id；Restore 同时固定精确备份路径；
 3. 输入 `YES` 后才允许进入关键操作；
 4. 关键写盘阶段复用与 CLI 完全相同的系统盘保护、USB 整盘确认、写前备份、卸载/锁卷、
    reopen 身份复核、atomic write、sync/readback 和 rollback；
 5. 关键阶段内 `q`、`Esc`、`Ctrl-C` 不会杀掉写盘 worker，而是在安全结束点后再退出；
+   终端 I/O 失败时先恢复终端，再等待关键 worker 完成安全收尾；
 6. 备份删除会固定选中时的内容 SHA-256，删除前重新扫描并复核内容；如果同名文件被替换会拒绝，
    同时保留“每块盘至少 1 份备份”的安全底线，并同步删除对应 `.sha256` sidecar。
 
