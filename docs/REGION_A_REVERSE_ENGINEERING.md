@@ -136,6 +136,20 @@ ReadIIR 和 WriteIIR 都使用 device tree node `+0x18` 计算物理位置，并
 
 机器证据：`audit/region_a/evidence/iir_address_chain_20260922.json`。
 
+### 4.2 `0x06FE` PartInfo 传输和解码规则已静态闭环
+
+`netac_usb_api64.dll!GetPartInfoAllA_NetacAPI` 的底层链已经继续闭环：
+
+1. 上层命令字 `0x06FE` 以小端写入 12B SCSI CDB，因此 CDB 为 `FE 06 00 00 00 00 00 00 00 00 00 00`。
+2. `sub_180003b80 -> sub_180003990` 固定申请 0x200B 数据区；该调用使用 direction=1，底层完成后才把数据区复制回调用者，因此是 **device-to-host DATA-IN**，不是写盘命令。
+3. 原始 512B 响应不能直接解释。官方随后用固定 32B ASCII key `1234567890abcdefFEDCBA!@#$%^&*()` 初始化 `sub_180001040`：block size=16、key size=32、rounds=14。
+4. `sub_180002650` 把 512B 按 16B 独立分块，逐块调用 `sub_1800021c0`，没有 CBC/stream chaining state，因此该响应解码算法是 **AES-256-ECB**。
+5. 解码后 byte `+0x04` 是 partition count，24B PartInfo entries 从 `+0x08` 开始；所以 `PartInfo[2].sector_num` 位于解码后 `+0x38`，其第一个 u32 应直接实测为 `243624189 / 0x0E8568FD` 才能关闭当前 Lexar 的同址绑定。
+
+机器证据：`audit/region_a/evidence/partinfo_transport_crypto_20260922.json`。
+
+这里 COMPLETE 的只是**命令传输和响应解码规则**。真实 Lexar 的 512B `FE 06` DATA-IN 尚未成功捕获，因此 §4.1 的物理同址状态仍保持 PARTIAL。
+
 ## 5. AES 算法、默认 Init key 与版本 profile
 
 `sub_1800092c0/sub_180009390` 调用 `sub_18001c560()` 得到 `EVP_CIPHER` descriptor。早期仅依据 OpenSSL 注册字符串曾误判为 AES-192-CBC；2026-09-22 已用 descriptor 本体纠正。
@@ -197,6 +211,19 @@ ReadIIR 和 WriteIIR 都使用 device tree node `+0x18` 计算物理位置，并
 - `audit/region_a/evidence/decrypt_uppercase_key_candidate_crc_20260922.json`
 
 旧的 raw MD5 intermediate (`8eeaa206...` + zero-filled output buffer) 解密尝试继续保留为 negative history，但它不是 `Init` 最终写入 core context 的 key，不能再作为主候选。
+
+### 5.3 当前 x64 core-key 写入边界进一步收窄
+
+对同一份 SHA-256=`5fa0823b...` 的当前 x64 `sectormanage64.dll` 继续做数据流和 bounded write-reference 审计：
+
+- `SectorManageImp::Init/sub_18000b520` 把最终 32B ASCII hex key 写入 `SectorManageImp+0x08` 所持 shared core object 的**第一个 `std::string`**。
+- `ReadIIR/sub_180010fc0` 直接读取这个首字符串并作为 arg4 传给 `sub_180009390` decrypt wrapper。
+- `WriteIIR/sub_180012100` 和 `BackupIIR` 同样直接读取这个首字符串并作为 key 传给 `sub_1800092c0` encrypt wrapper。
+- 在覆盖当前 `SectorManageImp` 业务实现的反编译代码区内，枚举 MSVC `std::string` SSO/heap 分支及随后的 payload 写入后，**只发现 `Init` 这一处直接 core-key payload writer**；公开业务方法列表中也没有 `SetCoreKey/LoadCoreKey` 一类接口。
+
+因此，当前 x64 runtime 存在“另一个显式业务 API 在 ReadIIR 前覆盖 key”的假设已明显变弱。更合理的剩余边界是：物理 Lexar 并非由这一代/这一 profile 的默认 Init key 生产，存在历史 producer/profile，或存在当前 bounded scan 没有覆盖到的间接内存变更。
+
+这仍然**不能**升级为“运行时绝无覆盖”。机器证据 `audit/region_a/evidence/core_key_provenance_20260922.json` 明确保留 indirect mutation 和 historical producer 两个限制。
 
 ## 6. IIR plaintext 已知布局
 
@@ -282,13 +309,12 @@ ReadIIR 和 WriteIIR 都使用 device tree node `+0x18` 计算物理位置，并
 
 ## 11. 下一步研究顺序
 
-当前最高优先级不是继续暴力扫 key，而是追官方 core-context 的真实初始化来源：
+当前最高优先级已经从“继续猜 key”收敛为物理绑定、producer profile 和尾部用途三条线：
 
-1. `SectorManageImp::Init/sub_18000b520` 到 `core_context + 0x00 string` 的完整数据流。
-2. 真实客户端创建 SectorManageImp 时，是否覆盖/替换 `sub_180009050` 的默认 output。
-3. ReadIIR 登录/设备打开链里 core context 是否从驱动、配置、设备标识或 session state 更新。
-4. 动态追踪 `sub_180009390` 调用点上游，记录真实运行时 key buffer provenance，而不是只在 wrapper 内观察最终 pointer。
-5. 修复官方 InitIIR Unicorn harness，使其真正到达 WriteDev，再用生成 plaintext/ciphertext做 producer round-trip。
-6. 另开路径追 Region A 后 0x400 的读写者。
+1. 使用已经闭环的 `FE 06 + 512B DATA-IN + AES-256-ECB` 规则，只读捕获当前 Lexar 的真实 PartInfo 响应；直接验证 `PartInfo[2].sector_num == 243624189`。
+2. 当前 x64 `Init -> core+0x00 -> ReadIIR/WriteIIR/BackupIIR` 直接数据流已闭环；后续重点转为寻找**历史 producer/profile**，以及有证据时再追间接内存覆盖，而不是继续假设存在未见的 `SetCoreKey` API。
+3. 动态追踪真实 Windows 客户端的 `sub_180009390` 调用点仍有价值，用于观测 runtime key buffer 是否确实等于当前 Init default key。
+4. 修复官方 InitIIR Unicorn harness，使其真正到达 WriteDev，再用生成 plaintext/ciphertext做 producer round-trip。
+5. 独立追 Region A `+0x800..+0xbff` 的 producer/consumer，不把这 0x400B 强行归入主 IIR。
 
 禁止把当前 `8eeaa206...` candidate、LBA7 key8、file_key 或任意扫描结果直接升级为真实 key，除非通过第 9 节全部门禁。

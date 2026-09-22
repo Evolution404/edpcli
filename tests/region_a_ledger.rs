@@ -384,3 +384,77 @@ fn iir_address_chain_is_static_complete_but_physical_binding_remains_partial() {
     assert!(wire.contains("physical Lexar PartInfo[2] runtime value is still missing"));
     assert!(DOC.contains("保持 PARTIAL，禁止写成“已证明同址”"));
 }
+
+#[test]
+fn current_x64_core_key_dataflow_is_closed_without_overclaiming_runtime_uniqueness() {
+    let evidence: serde_json::Value = serde_json::from_str(include_str!(
+        "../audit/region_a/evidence/core_key_provenance_20260922.json"
+    ))
+    .unwrap();
+
+    assert_eq!(evidence["status"], "STATIC_BOUNDARY_CLOSED_CURRENT_X64");
+    assert_eq!(
+        evidence["direct_writer"]["function"],
+        "sub_18000b520 / SectorManageImp::Init"
+    );
+    assert_eq!(
+        evidence["direct_writer"]["default_x64_key_ascii"],
+        "8eeaa2062efa0b371076ebe510d98f18"
+    );
+    assert_eq!(evidence["consumers"].as_array().unwrap().len(), 3);
+    assert_eq!(
+        evidence["bounded_write_scan"]["direct_core_key_payload_writers_found"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+    assert_eq!(
+        evidence["bounded_write_scan"]["explicit_set_or_load_core_key_api_found"],
+        false
+    );
+    assert!(evidence["limitations"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|v| v.as_str().unwrap().contains("indirect memory mutation")));
+    assert!(DOC.contains("只发现 `Init` 这一处直接 core-key payload writer"));
+}
+
+#[test]
+fn partinfo_transport_uses_readonly_fe06_and_aes256_ecb_but_physical_response_is_missing() {
+    let evidence: serde_json::Value = serde_json::from_str(include_str!(
+        "../audit/region_a/evidence/partinfo_transport_crypto_20260922.json"
+    ))
+    .unwrap();
+
+    assert_eq!(
+        evidence["status"],
+        "STATIC_COMPLETE_PHYSICAL_RESPONSE_MISSING"
+    );
+    assert_eq!(evidence["command"]["cdb_hex"], "fe0600000000000000000000");
+    assert_eq!(evidence["command"]["transfer_direction"], "device-to-host");
+    assert_eq!(evidence["command"]["transfer_length"], 512);
+    assert_eq!(evidence["response_crypto"]["cipher"], "AES-256-ECB");
+    assert_eq!(evidence["response_crypto"]["key_len"], 32);
+    assert_eq!(evidence["response_crypto"]["block_size"], 16);
+    assert_eq!(evidence["response_crypto"]["rounds"], 14);
+    assert_eq!(
+        evidence["response_crypto"]["key_ascii"],
+        "1234567890abcdefFEDCBA!@#$%^&*()"
+    );
+    assert_eq!(
+        evidence["decrypted_layout"]["partinfo2_sector_num_offset"],
+        56
+    );
+    assert_eq!(
+        evidence["decrypted_layout"]["partinfo2_expected_for_current_lexar"],
+        243624189u64
+    );
+    assert_eq!(
+        evidence["physical_status"]["current_lexar_response_captured"],
+        false
+    );
+    assert!(DOC.contains("**AES-256-ECB**"));
+    assert!(DOC.contains("真实 Lexar 的 512B `FE 06` DATA-IN 尚未成功捕获"));
+}
