@@ -414,3 +414,69 @@ fn deep_source_has_no_mutation_or_mount_operations() {
         }
     }
 }
+
+#[test]
+fn parsed_deep_inventory_cites_captured_raw_metadata() {
+    use edpcli::crypto::{a6b0_full, a7f0_full, crc32_bare};
+    let (p, fs, data) = fat_fixture(true);
+    let did = "disk&ven_lexar&prod_usb_flash_drive";
+    let mut image=include_bytes!("fixtures/protocol/disk4_243625984_vid21c4_pid0cd1_disk&ven_lexar&prod_usb_flash_drive_onlyid3164177653_20260827_221910.bin").to_vec();
+    let key = crc32_bare(did.as_bytes()).to_le_bytes();
+    let mut table = a6b0_full(&image[12 * 512..13 * 512], &key, 0);
+    put32(&mut table, 96 + 0x14, 0);
+    table[96 + 0x28..96 + 0x30].copy_from_slice(&p.partition_size.to_le_bytes());
+    image[12 * 512..13 * 512].copy_from_slice(&a7f0_full(&table, &key, 0));
+    struct Dev {
+        start: u64,
+        fs: SparseReader,
+        forbidden: [u64; 2],
+    }
+    impl edpcli::diskio::SectorDev for Dev {
+        fn read_sector(&mut self, lba: u32) -> io::Result<Vec<u8>> {
+            assert!(
+                !self.forbidden.contains(&(lba as u64)),
+                "read ordinary file data"
+            );
+            Ok((lba as u64)
+                .checked_sub(self.start)
+                .and_then(|rel| self.fs.sectors.get(&rel))
+                .cloned()
+                .unwrap_or(vec![0; 512]))
+        }
+        fn write_sector(&mut self, _: u32, _: &[u8]) -> io::Result<()> {
+            panic!("unexpected write")
+        }
+    }
+    let mut dev = Dev {
+        start: p.start_sector,
+        fs,
+        forbidden: [p.start_sector + data + 1, p.start_sector + data + 3],
+    };
+    let deep = edpcli::backup_deep::acquire_deep(&mut dev, &image, did, 243625984).unwrap();
+    let summary = deep
+        .artifacts
+        .iter()
+        .find(|a| a.id == "derived.partition.1.filesystem_summary")
+        .unwrap();
+    let v: serde_json::Value = serde_json::from_slice(&summary.data).unwrap();
+    assert_eq!(v["status"], "parsed");
+    assert_eq!(v["file_count"], 2);
+    for id in &summary.derivation.as_ref().unwrap().source_artifact_ids {
+        if id == "raw.protocol.lba0_12" {
+            continue;
+        }
+        let evidence = deep
+            .artifacts
+            .iter()
+            .find(|a| &a.id == id)
+            .expect("raw source exists");
+        assert_eq!(evidence.restore_policy, RestorePolicy::EvidenceOnly);
+    }
+    let list = deep
+        .artifacts
+        .iter()
+        .find(|a| a.id == "derived.partition.1.file_list")
+        .unwrap();
+    let v: serde_json::Value = serde_json::from_slice(&list.data).unwrap();
+    assert_eq!(v["entries"].as_array().unwrap().len(), 4);
+}

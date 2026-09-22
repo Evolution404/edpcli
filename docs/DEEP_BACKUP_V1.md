@@ -65,3 +65,18 @@ Metadata bytes take precedence over later reads of those same sectors. This is
 not a filesystem freeze: a concurrently changing source may produce a failure or
 an inconsistent snapshot, so it must not be described as an atomic filesystem
 snapshot. Deep never unmounts or changes the source volume state.
+
+For read-only assessment of an existing Metadata EDPB:
+
+```sh
+cargo run --example deep_assess_metadata -- /path/to/backup.edpb
+```
+
+This validates the source container and reports prefix assessment only; it does
+not relabel the source as Deep or fabricate sectors missing from Metadata.
+
+The 2026-09-22 Lexar Region A capture (container SHA-256
+`0a52a9cb52e47ca5e11d3a74d8c6f9f07937b0dc3d06f4d0802f3fb5917e254f`)
+was replayed offline with this tool. Its type2 partition is 118477684736 bytes and
+type4 is 6234963968 bytes. Both are `locked`; filesystem type, counts, listing
+and usage statistics remain null. No source device was opened for this replay.
