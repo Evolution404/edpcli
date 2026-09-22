@@ -99,8 +99,28 @@ fn copied_backups() -> Option<(TmpDir, Vec<String>)> {
     for key in ["netac", "aigo", "lexar"] {
         let src = fixture_bin(key)?;
         let (name, _) = fixture(key)?;
-        fs::copy(src, tmp.0.join(name)).ok()?;
-        names.push(name.to_string());
+        let bytes = fs::read(src).expect("read protocol fixture");
+        let name = format!("{}.edpb", name.strip_suffix(".bin").unwrap());
+        let meta = edpcli::diskio::parse_backup_name(&name).unwrap();
+        edpcli::edpb::write_core_backup(
+            &tmp.0.join(&name),
+            &edpcli::edpb::CoreCapture {
+                snapshot_id: name.clone(),
+                created_epoch: 1_789_000_000,
+                disk_number: Some(meta.disk),
+                vid: meta.vid,
+                pid: meta.pid,
+                device_id: meta.device_id,
+                onlyid: meta.onlyid,
+                total_sectors: meta.secs,
+                logical_sector_size: 512,
+                edpcli_version: env!("CARGO_PKG_VERSION").into(),
+                device_state: "encrypted".into(),
+                lba0_12: &bytes,
+            },
+        )
+        .expect("write selector EDPB fixture");
+        names.push(name);
     }
     Some((tmp, names))
 }
