@@ -28,7 +28,7 @@ Region A 不是 device tail window。它是 LBA7 compact EDPF entry1/entry2 指�
 
 含义：
 
-- `+0x000..+0x7ff` 与 `SectorManageImp::ReadIIR/WriteIIR` 的静态结构关系高度收敛，但独立的 PartInfo 地址链尚未完成物理同址绑定；0x800B 读写长度和 AES-256-CBC 已闭环，因此仍保持 PARTIAL。
+- `+0x000..+0x7ff` 与 `SectorManageImp::ReadIIR/WriteIIR` 的**静态结构关系高度收敛但尚未完成物理绑定**：0x800B 读写长度、AES-256-CBC、device-tree 地址链和真实 Region A ciphertext 均有证据；但仍缺当前 Lexar 控制器 `0x06FE/GetPartInfoAll` 的 `PartInfo[2].sector_num` 实测值，因此保持 PARTIAL，禁止写成“已证明同址”。
 - `+0x800..+0xbff` 只有真实物理密文，主 `ReadIIR/WriteIIR` 不覆盖，producer/consumer 未定位，因此 UNKNOWN。
 
 机器 ledger：`audit/region_a/wire_byte_ledger.tsv`。
@@ -111,6 +111,30 @@ SHA-256：
 - `sub_18001c560` / AES cipher descriptor selector
 
 ReadIIR 和 WriteIIR 都使用 device tree node `+0x18` 计算物理位置，并固定处理 0x800B。后 0x400B 尚未由这条主路径解释。
+
+### 4.1 物理地址链已闭环到 PartInfo[2]，最后一个 runtime 值仍缺
+
+2026-09-22 进一步把地址来源向下追到 `netac_usb_api64.dll`：
+
+1. `GetPartInfoAllA_NetacAPI` 通过控制器命令 `0x06FE` 取得 PartInfo 表；每个条目 24B。
+2. `GetPartSectorNumAllA_NetacAPI` 明确逐项复制每个 24B 条目的**第一个 u32**，因此该字段语义是 sector number。
+3. `langkeudisk64!GetDevInfo` 遍历4个 PartInfo 条目，把 `sector_num << 9` 依次写入4个64位局部值；第3个条目 `PartInfo[2]` 成为 `GetDevInfo` 输出 `+0x18`。
+4. `sectormanage64!GetHardInfoImp` 把 `GetDevInfo.out+0x18` 写入 device-tree node `+0x18`。
+5. `ReadIIR/WriteIIR` 从该 node 读取 `+0x18`，再减 `0x20000` bytes（256 sectors）得到实际0x800B IIR读写位置。
+
+因此静态公式已经是：
+
+`IIR_LBA = PartInfo[2].sector_num - 256`
+
+对当前 Lexar，若 IIR 与 LBA7 Region A 起点同址，则必须满足：
+
+- `PartInfo[2].sector_num = 243624189`
+- `243624189 - 256 = 243623933`
+- 同时 `243624189 = CHS - 1536`
+
+当前**尚未抓到这块 Lexar 的真实 `0x06FE` 控制器响应**，所以 `243624189` 仍是由物理 Region A 反推的待验证值，不能算 runtime physical evidence。旧文档把 `node+0x18` 称为“总扇区数”已经被静态代码否定：它实际来自 `PartInfo[2].sector_num * 512`。
+
+机器证据：`audit/region_a/evidence/iir_address_chain_20260922.json`。
 
 ## 5. AES 算法、默认 Init key 与版本 profile
 

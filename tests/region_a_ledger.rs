@@ -356,3 +356,31 @@ fn init_final_key_profiles_are_closed_but_both_fail_physical_lexar_integrity() {
         0
     );
 }
+
+#[test]
+fn iir_address_chain_is_static_complete_but_physical_binding_remains_partial() {
+    let chain: serde_json::Value = serde_json::from_str(include_str!(
+        "../audit/region_a/evidence/iir_address_chain_20260922.json"
+    ))
+    .unwrap();
+
+    assert_eq!(chain["status"], "PARTIAL");
+    assert_eq!(chain["lexar_physical"]["region_a_start_lba"], 243623933u64);
+    assert_eq!(
+        chain["lexar_physical"]["required_partinfo2_sector_num"],
+        243624189u64
+    );
+    assert_eq!(
+        chain["lexar_physical"]["relation"],
+        "required_partinfo2_sector_num - 256 == region_a_start_lba"
+    );
+    assert!(chain["missing_evidence"]
+        .as_str()
+        .unwrap()
+        .contains("not directly observed"));
+
+    let wire = include_str!("../audit/region_a/wire_byte_ledger.tsv");
+    assert!(wire.contains("000-7ff\tPARTIAL"));
+    assert!(wire.contains("physical Lexar PartInfo[2] runtime value is still missing"));
+    assert!(DOC.contains("保持 PARTIAL，禁止写成“已证明同址”"));
+}

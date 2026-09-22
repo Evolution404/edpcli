@@ -1,0 +1,36 @@
+{
+  "status": "PARTIAL",
+  "binding": "ReadIIR physical address to LBA7 Region A",
+  "static_chain": [
+    {
+      "module": "netac_usb_api64.dll",
+      "function": "GetPartSectorNumAllA_NetacAPI",
+      "fact": "copies the first u32 of each 24-byte GetPartInfoAll entry as the per-part sector number"
+    },
+    {
+      "module": "langkeudisk64.dll",
+      "function": "GetDevInfo",
+      "fact": "loops 4 PartInfo entries; sector_num << 9 is stored in local +0xd0/+0xd8/+0xe0/+0xe8; local +0xe0 (PartInfo[2]) becomes GetDevInfo output +0x18"
+    },
+    {
+      "module": "sectormanage64.dll",
+      "function": "GetHardInfoImp",
+      "fact": "copies GetDevInfo output +0x18 into the device-tree node +0x18"
+    },
+    {
+      "module": "sectormanage64.dll",
+      "function": "ReadIIR/WriteIIR",
+      "fact": "uses device-tree node +0x18 minus 0x20000 bytes as the fixed 0x800-byte IIR physical offset"
+    }
+  ],
+  "lexar_physical": {
+    "total_sectors": 243625984,
+    "chs_sectors": 243625725,
+    "region_a_start_lba": 243623933,
+    "required_partinfo2_sector_num": 243624189,
+    "relation": "required_partinfo2_sector_num - 256 == region_a_start_lba",
+    "required_partinfo2_vs_chs": "CHS - 1536 sectors"
+  },
+  "missing_evidence": "No runtime/controller 0x06FE GetPartInfoAll response has yet been captured for this Lexar, so PartInfo[2].sector_num=243624189 is not directly observed.",
+  "rejected_old_claim": "GetDevInfo output +0x18 is not the total device sector count; it is PartInfo[2].sector_num converted to bytes."
+}
