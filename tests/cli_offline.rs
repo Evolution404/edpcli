@@ -227,7 +227,16 @@ impl SwapOnReopenDev {
 impl SectorDev for SwapOnReopenDev {
     fn read_sector(&mut self, lba: u32) -> std::io::Result<Vec<u8>> {
         let start = lba as usize * SECTOR;
-        Ok(self.active()[start..start + SECTOR].to_vec())
+        let end = start + SECTOR;
+        self.active()
+            .get(start..end)
+            .map(|bytes| bytes.to_vec())
+            .ok_or_else(|| {
+                std::io::Error::new(
+                    std::io::ErrorKind::UnexpectedEof,
+                    format!("test sparse disk does not materialize LBA{lba}"),
+                )
+            })
     }
 
     fn write_sector(&mut self, _lba: u32, _data: &[u8]) -> std::io::Result<()> {
@@ -442,6 +451,16 @@ fn backup_create_is_read_only_and_matches_apply_automatic_backup() {
     assert!(!manual_dev.switched, "backup create 不得 reopen 为读写");
     assert_eq!(manual_dev.writes, 0, "backup create 不得写 U 盘");
     assert_eq!(edpb::read_raw_protocol(&manual_path).unwrap(), orig);
+    let manual_verified = edpb::verify_file(&manual_path).unwrap();
+    assert_eq!(
+        manual_verified.manifest.snapshot.capture_level,
+        edpcli::edpb::CaptureLevel::Metadata
+    );
+    assert!(manual_verified
+        .manifest
+        .artifacts
+        .iter()
+        .any(|artifact| artifact.id == "derived.capture_issues"));
 
     // apply 写前自动备份：同一时间、同一设备事实、同一 LBA0-12 输入，应生成
     // 完全相同的文件名/内容/SHA-256；随后在确认处取消，避免进入任何真写阶段。

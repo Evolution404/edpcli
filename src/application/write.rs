@@ -8,9 +8,7 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use crate::common::*;
-use crate::diskio::{
-    self, backup_is_nopwd, create_backup, find_backups, raw_path, Clock, DiskFacts, SectorDev,
-};
+use crate::diskio::{self, backup_is_nopwd, find_backups, raw_path, Clock, DiskFacts, SectorDev};
 use crate::identify::identify;
 use crate::sectors::{convert, looks_nopwd, ConvertReport};
 use crate::selectors::{BackupSelector, DeviceSelector};
@@ -474,7 +472,21 @@ pub fn apply_flow(
         ctx.prompt.write_event(WriteEvent::ForceRewriteNotice);
     }
 
-    let (bpath, backup_is_nopwd) = create_backup(&facts, &img, &did, &ctx.backup_dir, ctx.clock)?;
+    let total_sectors = facts.total_sectors.ok_or_else(|| {
+        err(
+            EXIT_BACKUP,
+            "错误: 无法获取磁盘总扇区数，无法创建 Metadata 级备份",
+        )
+    })?;
+    let metadata = crate::backup_metadata::acquire_metadata(dev, &img, &did, total_sectors)
+        .map_err(|message| {
+            err(
+                EXIT_BACKUP,
+                format!("错误: Metadata 级备份采集失败: {message}"),
+            )
+        })?;
+    let (bpath, backup_is_nopwd) =
+        diskio::create_metadata_backup(&facts, &img, &did, metadata, &ctx.backup_dir, ctx.clock)?;
     ctx.prompt.write_event(WriteEvent::BackupCreated {
         path: bpath.clone(),
     });
@@ -514,10 +526,11 @@ pub fn apply_flow(
     Ok(EXIT_OK)
 }
 
-/// 为当前已选定 U 盘创建 LBA0-12 备份。
+/// 为当前已选定 U 盘创建 Metadata 级 EDPB 备份。
 ///
-/// 这是纯只读介质路径：只读取身份和 LBA0-12，然后把快照交给与 apply 写前备份完全相同的
-/// `create_backup` service。此函数不得调用 prepare_write、reopen_rdwr 或任何扇区写入。
+/// 这是纯只读介质路径：读取身份、LBA0-12、分区关键元数据和盘尾证据，
+/// 然后交给与 apply 写前备份完全相同的 Metadata writer。此函数不得调用
+/// prepare_write、reopen_rdwr 或任何扇区写入。
 pub fn backup_create_flow(
     disk: u32,
     ctx: &mut Ctx,
@@ -540,7 +553,27 @@ pub fn backup_create_flow(
         pid,
         label_id: diskio::lba4_label_id_from(&img[4 * SECTOR..5 * SECTOR]),
     };
-    let created = create_backup(&facts, &img, &device_id, &ctx.backup_dir, ctx.clock)?;
+    let total_sectors = facts.total_sectors.ok_or_else(|| {
+        err(
+            EXIT_BACKUP,
+            "错误: 无法获取磁盘总扇区数，无法创建 Metadata 级备份",
+        )
+    })?;
+    let metadata = crate::backup_metadata::acquire_metadata(dev, &img, &device_id, total_sectors)
+        .map_err(|message| {
+        err(
+            EXIT_BACKUP,
+            format!("错误: Metadata 级备份采集失败: {message}"),
+        )
+    })?;
+    let created = diskio::create_metadata_backup(
+        &facts,
+        &img,
+        &device_id,
+        metadata,
+        &ctx.backup_dir,
+        ctx.clock,
+    )?;
     ctx.prompt.write_event(WriteEvent::BackupCreated {
         path: created.0.clone(),
     });

@@ -64,6 +64,15 @@ pub struct MetadataAcquisition {
     pub extents: Vec<Extent>,
     pub artifacts: Vec<ArtifactInput>,
     pub notes: Vec<String>,
+    pub issues: Vec<CaptureIssue>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+pub struct CaptureIssue {
+    pub region_id: String,
+    pub start_lba: u64,
+    pub sector_count: u64,
+    pub error: String,
 }
 
 fn u16le(raw: &[u8], offset: usize) -> Option<u16> {
@@ -131,11 +140,22 @@ fn add_raw_extent(
     start_lba: u64,
     sector_count: u64,
     purpose: &str,
-) -> Result<(), String> {
+) -> Result<Option<Vec<u8>>, String> {
     if sector_count == 0 {
-        return Ok(());
+        return Ok(Some(Vec::new()));
     }
-    let data = read_extent(dev, start_lba, sector_count)?;
+    let data = match read_extent(dev, start_lba, sector_count) {
+        Ok(data) => data,
+        Err(error) => {
+            out.issues.push(CaptureIssue {
+                region_id: region_id.to_string(),
+                start_lba,
+                sector_count,
+                error,
+            });
+            return Ok(None);
+        }
+    };
     out.extents.push(Extent {
         id: extent_id.clone(),
         region_id: region_id.to_string(),
@@ -151,9 +171,9 @@ fn add_raw_extent(
         derivation: None,
         restore_policy: RestorePolicy::EvidenceOnly,
         completeness: ArtifactCompleteness::Complete,
-        data,
+        data: data.clone(),
     });
-    Ok(())
+    Ok(Some(data))
 }
 
 pub fn parse_partition_geometry(
@@ -383,7 +403,7 @@ fn add_key_sector(
         ));
         return Ok(());
     }
-    add_raw_extent(
+    let _ = add_raw_extent(
         out,
         dev,
         region_id,
@@ -392,7 +412,8 @@ fn add_key_sector(
         lba,
         1,
         "filesystem_key_sector",
-    )
+    )?;
+    Ok(())
 }
 
 pub fn acquire_metadata(
@@ -440,7 +461,7 @@ pub fn acquire_metadata(
         let prefix_start = partition.start_sector;
         let prefix_extent_id = extent_id(partition.index, "prefix");
         let prefix_artifact_id = artifact_id(partition.index, "prefix");
-        add_raw_extent(
+        let prefix = add_raw_extent(
             &mut out,
             dev,
             &region_id,
@@ -450,19 +471,12 @@ pub fn acquire_metadata(
             prefix_count,
             "partition_metadata_prefix",
         )?;
-        let prefix = out
-            .artifacts
-            .iter()
-            .find(|artifact| artifact.id == prefix_artifact_id)
-            .expect("prefix artifact just inserted")
-            .data
-            .clone();
 
         if partition.sector_count > prefix_count {
             let suffix_count = PARTITION_SUFFIX_SECTORS.min(partition.sector_count - prefix_count);
             if suffix_count > 0 {
                 let suffix_start = partition.start_sector + partition.sector_count - suffix_count;
-                add_raw_extent(
+                let _ = add_raw_extent(
                     &mut out,
                     dev,
                     &region_id,
@@ -475,7 +489,7 @@ pub fn acquire_metadata(
             }
         }
 
-        let probe = probe_filesystem(partition, &prefix);
+        let probe = probe_filesystem(partition, prefix.as_deref().unwrap_or(&[]));
         let mut seen = std::collections::BTreeSet::new();
         for (ordinal, lba) in probe
             .key_lbas
@@ -486,21 +500,23 @@ pub fn acquire_metadata(
         {
             add_key_sector(&mut out, dev, partition, &region_id, ordinal, lba)?;
         }
-        let probe_json = serde_json::to_vec_pretty(&probe)
-            .map_err(|e| format!("serialize filesystem probe failed: {e}"))?;
-        out.artifacts.push(ArtifactInput {
-            id: format!("derived.partition.{}.filesystem_probe", partition.index),
-            kind: "filesystem_probe".into(),
-            media_type: "application/json".into(),
-            source_extent_ids: vec![prefix_extent_id],
-            derivation: Some(Derivation {
-                method: "filesystem_boot_probe_v1".into(),
-                source_artifact_ids: vec![prefix_artifact_id],
-            }),
-            restore_policy: RestorePolicy::DerivedOnly,
-            completeness: ArtifactCompleteness::Complete,
-            data: probe_json,
-        });
+        if prefix.is_some() {
+            let probe_json = serde_json::to_vec_pretty(&probe)
+                .map_err(|e| format!("serialize filesystem probe failed: {e}"))?;
+            out.artifacts.push(ArtifactInput {
+                id: format!("derived.partition.{}.filesystem_probe", partition.index),
+                kind: "filesystem_probe".into(),
+                media_type: "application/json".into(),
+                source_extent_ids: vec![prefix_extent_id],
+                derivation: Some(Derivation {
+                    method: "filesystem_boot_probe_v1".into(),
+                    source_artifact_ids: vec![prefix_artifact_id],
+                }),
+                restore_policy: RestorePolicy::DerivedOnly,
+                completeness: ArtifactCompleteness::Complete,
+                data: probe_json,
+            });
+        }
     }
 
     let tail_count = total_sectors.min(TAIL_A_WINDOW_SECTORS);
@@ -513,7 +529,7 @@ pub fn acquire_metadata(
         sector_count: Some(tail_count),
         semantic_status: SemanticStatus::Unknown,
     });
-    add_raw_extent(
+    let _ = add_raw_extent(
         &mut out,
         dev,
         tail_region,
@@ -534,7 +550,7 @@ pub fn acquire_metadata(
             sector_count: Some(TAIL_METADATA_MIRROR_SECTORS),
             semantic_status: SemanticStatus::Identified,
         });
-        add_raw_extent(
+        let _ = add_raw_extent(
             &mut out,
             dev,
             region_id,
@@ -556,7 +572,7 @@ pub fn acquire_metadata(
             sector_count: Some(1),
             semantic_status: SemanticStatus::Identified,
         });
-        add_raw_extent(
+        let _ = add_raw_extent(
             &mut out,
             dev,
             region_id,
@@ -576,5 +592,23 @@ pub fn acquire_metadata(
         "tail.A is preserved as unknown evidence; identified mirror subregions remain evidence_only"
             .into(),
     );
+    if !out.issues.is_empty() {
+        let issue_json = serde_json::to_vec_pretty(&out.issues)
+            .map_err(|e| format!("serialize metadata capture issues failed: {e}"))?;
+        out.artifacts.push(ArtifactInput {
+            id: "derived.capture_issues".into(),
+            kind: "capture_issues".into(),
+            media_type: "application/json".into(),
+            source_extent_ids: Vec::new(),
+            derivation: None,
+            restore_policy: RestorePolicy::DerivedOnly,
+            completeness: ArtifactCompleteness::Complete,
+            data: issue_json,
+        });
+        out.notes.push(format!(
+            "metadata capture completed with {} unreadable extent(s); no missing bytes were zero-filled",
+            out.issues.len()
+        ));
+    }
     Ok(out)
 }

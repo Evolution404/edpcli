@@ -264,6 +264,11 @@ Metadata 级在 Core 之上增加关键盘面证据，目标包括：
 
 Metadata 不要求复制整个数据分区。
 
+正常的 `backup create` 和 apply 写前自动备份默认创建 Metadata 级 EDPB。
+如果某个 Metadata Extent 无法读取，备份不得用零字节冒充成功采集：
+成功读取的 Extent 正常保存，失败范围记录到 `derived.capture_issues`
+结构化 Artifact 中，容器仍可保存并通过完整性校验。
+
 ## 10. Deep 级规划
 
 Deep 在 Metadata 之上增加可派生信息：

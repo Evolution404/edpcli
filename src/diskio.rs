@@ -956,14 +956,13 @@ pub fn prune_candidates(entries: &[BackupEntry], keep: usize) -> Vec<PathBuf> {
     out
 }
 
-/// 创建自包含 EDPB Core 备份。正式运行时不生成 .bin 或 .sha256 sidecar。
-pub fn create_backup(
+fn prepare_backup_capture<'a>(
     facts: &DiskFacts,
-    data: &[u8],
+    data: &'a [u8],
     device_id: &str,
     bak_dir: &Path,
     clock: &dyn Clock,
-) -> EdpCliResult<(PathBuf, bool)> {
+) -> EdpCliResult<(PathBuf, bool, crate::edpb::CoreCapture<'a>)> {
     validate_backup_device_id(device_id)?;
     if data.len() != crate::common::METADATA_IMAGE_LEN {
         return Err(EdpCliError::new(
@@ -1012,7 +1011,44 @@ pub fn create_backup(
         },
         lba0_12: data,
     };
+    Ok((path, is_nopwd, capture))
+}
+
+/// 创建自包含 EDPB Core 备份。
+/// 仅供明确需要 Core 级快照的内部路径/测试使用；用户正常备份走 Metadata 级路径。
+pub fn create_backup(
+    facts: &DiskFacts,
+    data: &[u8],
+    device_id: &str,
+    bak_dir: &Path,
+    clock: &dyn Clock,
+) -> EdpCliResult<(PathBuf, bool)> {
+    let (path, is_nopwd, capture) = prepare_backup_capture(facts, data, device_id, bak_dir, clock)?;
     crate::edpb::write_core_backup(&path, &capture)
+        .map_err(|error| EdpCliError::new(EXIT_BACKUP, format!("错误: {error}")))?;
+    sync_dir(bak_dir)?;
+    Ok((path, is_nopwd))
+}
+
+/// 创建默认的 Metadata 级 EDPB 备份。
+/// metadata 必须在源盘仍以只读方式打开时采集完成；本函数只写备份文件。
+pub fn create_metadata_backup(
+    facts: &DiskFacts,
+    data: &[u8],
+    device_id: &str,
+    metadata: crate::backup_metadata::MetadataAcquisition,
+    bak_dir: &Path,
+    clock: &dyn Clock,
+) -> EdpCliResult<(PathBuf, bool)> {
+    let (path, is_nopwd, core) = prepare_backup_capture(facts, data, device_id, bak_dir, clock)?;
+    let capture = crate::edpb::MetadataCapture {
+        core,
+        regions: metadata.regions,
+        extents: metadata.extents,
+        artifacts: metadata.artifacts,
+        notes: metadata.notes,
+    };
+    crate::edpb::write_metadata_backup(&path, &capture)
         .map_err(|error| EdpCliError::new(EXIT_BACKUP, format!("错误: {error}")))?;
     sync_dir(bak_dir)?;
     Ok((path, is_nopwd))
