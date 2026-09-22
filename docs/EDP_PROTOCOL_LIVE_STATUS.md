@@ -7,11 +7,14 @@
 
 ## 语义闭环进度与物理 profile 覆盖
 
-- 语义 COMPLETE：6513 / 6656 B = 97.9%
-- 语义 PARTIAL：143 B
+- 语义 COMPLETE：6642 / 6656 B = 99.8%
+- 语义 PARTIAL：14 B
 - UNKNOWN：0 B
 - `COMPLETE` 表示 EDP 盘面字节边界、producer/caller-owned 序列化边界与 consumer 语义已经闭合；**不再等同于每个已知 profile 都存在真实物理正例**。
 - profile 级物理正例覆盖独立维护在 `audit/protocol/profile_coverage.tsv`。当前标记为 `MISSING_PHYSICAL` 的是 GPT enabled profile，以及 LBA12 mode1/mode3；它们均已有 first-party runtime positive wire evidence，但不得冒充 real-device capture。
+- **join59 129B 已按历史 wire-level 语义闭环升级 COMPLETE**：`scripts/protocol/audit_join59_semantic_closure.py` 固定 current selector、CEMS2.0 x86/x64 两套独立 first-party join59 reader，并以默认 Python 标准库直接校验固定 PE VA 机器码，无额外 `pefile/capstone` 依赖。7份独立完整 long-Dept physical image（3×join59 + 4×join60）全部重建为同一76B Dept；standalone Lexar fixture 与已计入金标的 LBA6/LBA9 扇区逐字节相同，只作为回归夹具、不重复计权。LBA9 continuation 首NUL之后正式建模为 consumer-ignored backing，当前7个独立 observation 均为零，但不把零值写成协议强制。
+- LBA6 `+0x03F` 同时补齐 short profile：12份 short physical 中 Dept 都在 byte63 前终止，而 byte63 既有 `00` 也有非零 `8B`，因此三态已经唯一：short=post-NUL backing、join59=NUL接缝、join60=Dept[59]。exact historical join59 writer EXE/selector 仍可继续追，但只属于 implementation provenance，不再占语义未闭环字节。
+- 当前唯一语义 PARTIAL 只剩 **LBA6 `+0x1E0..+0x1ED` 的14B legacy MBR entry3 underlay**。
 - 本轮进入时仓库 HEAD：`63b76da1fed351f1e7bbe45f0f12f5c22765e3dc`
 - 中途另一工作流先在 `1c281cb9bf4a9d92f8fc27198120d53db6466da9` 将真实免密 SanDisk
   flag 表示歧义保守降级；本轮随后补齐 v19 historical writer 的 exact-512 virtual
@@ -87,7 +90,7 @@ consumer。当前真正剩余的字节 blocker 只剩 LBA6/LBA9：继续追 join
 - 旧文档“v19 overlay 不触及 `+0x1E0..+0x1ED`”是错误的：v19 writer 在 `0x10006648..0x10006656` 把 `sector+0x1D0` 作为 **cap=32 的 BeiZhu C-string 槽**；reader 对称地从 `+0x1D0` 用同一 cap=32 C-string helper 返回。
 - 但这不是“完整32B raw copy”：`strcpy_s` 在首个NUL即停止。进一步枚举 v19 全部 executable `object+0x2620` xref，只得到 `0x1000B219` 的读取和 `0x1000CCEF` 的唯一写入；该写入在 `0x1000CCE8..0x1000CCF8` 明确是 `strcpy_s(dest=object+0x2620, cap=0x10, source=object+0x2478)`。真实 writer caller `0x1000B16C..0x1000B226` 又先把完整32B arg8局部清零，再以 cap=32 复制这个最多15B正文+NUL的 object field。因此 v19 强制 `+0x1DF` 为终止NUL、`+0x1E0..+0x1EF` 保持0；pinned `UsbMainBSec@0x101BA790` `+0x1D0..+0x1F3` 也全部为0，**不能生成** Aigo/SanDisk 两份 nonzero MBR underlay。
 - consumer 侧已进一步闭合：第一组 caller 完全不再读取 arg8；第二组成功路径读取的是另一字符串；第三组唯一后续使用是把 arg8 再以 `strcpy_s(cap=16)` 写入对象，NUL 后 `+0x10..+0x1D` 无比较、分支、哈希或字段提取。
-- 因而 LBA6 `+0x1E0..+0x1ED` 的 blocker 现在只剩 **exact earlier legacy MBR-underlay producer/profile-selection**。在该 producer 取得前仍保持 PARTIAL；LBA4 `+0x045` 后续独立闭环使全局严格进度更新为 6513/6656=97.9%，这里仍没有为了完成率降低本14B门槛。
+- 因而 LBA6 `+0x1E0..+0x1ED` 的 blocker 现在只剩 **exact earlier legacy MBR-underlay producer/profile-selection**。在该 producer 取得前仍保持 PARTIAL；join59 129B 后续独立闭环后，全局语义进度更新为 6642/6656=99.8%，这里仍没有为了完成率降低本14B门槛。
 
 ## 最新结论：LBA6/LBA9 join59
 
@@ -108,12 +111,10 @@ consumer。当前真正剩余的字节 blocker 只剩 LBA6/LBA9：继续追 join
   `+0x7B`（覆盖 Dept[59]，join59），非0时写到 `+0x7C`（join60）。
 - 同一审计证明 current `CEMSUsbRegsiter::BuildSector6` 只有
   `strlen(Dept)>=64` 才进 long 分支，并固定复制60B、从 `Dept[60]` 取 continuation；
-  所以 current writer 被直接排除为 join59 producer。这一新证据关闭的是 reader
-  profile-selection 规则，不是历史 producer；LBA4 `+0x045` 后续独立闭环后全局严格完成率为6513/6656=97.9%。
+  所以 current writer 被直接排除为 join59 producer。这一阶段当时只关闭了 reader
+  profile-selection 规则；**后续 `audit_join59_semantic_closure.py` 已用双 first-party reader + 3×join59/4×join60 独立完整 physical wire 完成旧格式的唯一逆映射；standalone fixture 仅作重复回归，不额外计权。因此本段“必须取得同代 writer 才能升级”的历史判断已被后续证据取代。**
 
-所以 LBA6 `+0x03F` 与 LBA9 `+0x080..+0x0FF` 保持 PARTIAL；当前 blocker 已进一步缩成
-“取得独立的同代 `safeudisklabeltool/cemsusbregsiter` writer，并直接看到 Dept[59] 被置 NUL、
-continuation 从 Dept[59] 开始的 producer/选择条件”。没有该 writer 前不得增加 COMPLETE。
+当前 LBA6 `+0x03F` 与 LBA9 `+0x080..+0x0FF` 已升级 COMPLETE；仍未取得的 `safeudisklabeltool/cemsusbregsiter` historical writer 只保留为 provenance/acquisition 研究目标。
 
 ### 2026-09-22：legacy producer 部署边界继续收窄
 
@@ -137,18 +138,17 @@ continuation 从 Dept[59] 开始的 producer/选择条件”。没有该 writer 
   base\\8.1.2604.0917.bk\\ydcc\\cemsusbregsiter.dll 后再替换/清理。
 - 因此 missing producer 不再只是“某个未知中间版本”：**2025 的
   8.1.2502.2116 / ydcc 2.10.0 CEMSUsbRegsiter 是已证实存在且随后被删除的精确
-  acquisition target**。目前仍未恢复其 DLL bytes/hash，所以该证据只缩小版本窗口，
-  不把 LBA6/LBA9 的143B PARTIAL 升级。
-- 进一步审计此前未纳入账本的 `VUpdateService.log`（SHA-256=`5ec3b53e...`）：更新服务在 2026-04-30 升级前仍把本机 CEMS/ydcc 本地基线报告为 `8.1.2502.2116`，随后切换服务版本到 `8.1.2604.0917`；同一日志还记录新版 `cemsusbregsiter.dll` 通过版本化 `ydcc/cemsusbregsiter.dll.zip` 单文件下载，并附 CRC/size 元数据。由此可确认 2025 generation 不只是数据库历史行，而是升级前实际运行基线；旧 DLL bytes/hash 仍未恢复，因此仍不提升143B。
+  acquisition target**。目前仍未恢复其 DLL bytes/hash，所以该证据只缩小版本窗口；join59 129B 后续已通过 physical wire + 双 first-party consumer 的 wire-level 语义闭环独立升级，不依赖这份旧 DLL 的恢复。
+- 进一步审计此前未纳入账本的 `VUpdateService.log`（SHA-256=`5ec3b53e...`）：更新服务在 2026-04-30 升级前仍把本机 CEMS/ydcc 本地基线报告为 `8.1.2502.2116`，随后切换服务版本到 `8.1.2604.0917`；同一日志还记录新版 `cemsusbregsiter.dll` 通过版本化 `ydcc/cemsusbregsiter.dll.zip` 单文件下载，并附 CRC/size 元数据。由此可确认 2025 generation 不只是数据库历史行，而是升级前实际运行基线；旧 DLL bytes/hash 仍未恢复；该事实现在只影响 historical implementation provenance，不再影响已闭合的 join59 129B。
 - 新增 `scripts/protocol/audit_vupdate_metadata_crypto.py`：固定 `VUpdateReplace.exe` SHA-256=`9b110457...` 与四份本地加密更新元数据，直接复现 `0x4275F0/0x427670` 的 32 轮 TEA-family 解密（delta=`0x7E69AC4E`，sum0=`0xCD3589C0`，K=`27BDB886/F03E934F/993BA3AE/D0AAE945`）。`UpdateProductInfo.xml.data` 解密后明确同时记录 `LocalVersionBase=8.1.2502.2116` 与 `ServiceVersionBase=8.1.2604.0917`；`UpgradeIndex.xml.enc(.base)` 与 `UpdateProductFileRecord.xml.data.bk` 均只保留 2026 新索引，其中新版 `ydcc/cemsusbregsiter.dll.zip` 的 MD5/ZIP CRC/size 为 `2ABA574551E59550B0D4FB50E8BECD27 / F9FE2852 / 533081`。这同时证明 `.base` 不是旧 2025 索引，不能从现存元数据倒推出旧 ZIP 的 CRC/size。
 - 新增 `scripts/protocol/audit_legacy_lba6_mbr_underlay.py`：clean-clone 直接固定 Aigo rev_pmap 完整金标（SHA-256=`150d705e...`）与独立 SanDisk 原始 LBA6 fixture（SHA-256=`16dfa230...`），按 SAFE6 rolling 重放 `+0x1DE..+0x1ED` 的完整16B标准 MBR entry。Aigo 的账本14B为 `c1ff07efffff1ca87d0ee3f42700`，SanDisk 为 `c1ff07efffffb28a050e773c4c00`；二者前6B相同、后8B随盘变化，而真实免密 SanDisk 完整金标同一 underlay 为16B全零，证明这里是 profile-dependent 动态分区几何而非固定常量。可选本机 PE 扫描又覆盖 `/Users/zhangyuxi/Desktop/u_disk/VRV/cems` + `/private/tmp` 共1745个 PE，公共前缀 `c1ff07efffff` 为0命中；该负证据只用于继续排除已捕获组件内嵌固定模板，不作为升级门槛。exact historical copy site/profile selector 仍缺，因此14B保持 PARTIAL。
 - 新增 `scripts/protocol/audit_netac_mbr_entry_boundary.py`，把此前只闭合 LBA0 bootstrap 的 Netac 1.3.1.16 formatter 继续向内追到 `FormatExA_NetacAPI@0x1000A030 -> fcn.100040A0@0x1000A205 -> fcn.10003880@0x100040EB`。`fcn.10003880` 两条 MBR 初始化分支都会先复制 `0x1014BA58` 的完整512B模板，再明确执行 `memset(output+0x1CE,0,0x30)`；`memset@0x100FE5A0` 的参数/写循环也已直接固定。随后可见动态 patch 只落在第一条 entry 的 `+0x1BE/+0x1C2/+0x1C6/+0x1CA`，而模板自身 `+0x1CE..+0x1FD` 也全零。因此**当前捕获的 Netac MBR 初始化路径被直接排除为 nonzero `+0x1DE` entry3 underlay 的来源**；搜索空间进一步缩为更老 formatter 或 EDP 对既有 MBR entry3 的复制/复用，仍不提升14B。
 - 新增 `scripts/protocol/audit_modfilesyscheck_ydcc210_boundary.py`，固定 2024-09-27 `modfilesyscheck.dll` SHA-256=`12072373...` 与内嵌 `git_ydcc_dev_2.10` source/PDB 路径。该组件确实以 `0xC0000000=GENERIC_READ|GENERIC_WRITE` 打开 `\\.\\PhysicalDrive%u`，但协议 raw-sector helper `fcn.10005250` 的固定函数体中只有 `ReadFile@0x10005313`，没有任何 `WriteFile` IAT call；模块里的 `Dept=/LLGB/EETU` 属于解析/检查侧。由此直接排除“RW handle = 同代 writer”的错误捷径，继续把 join59 producer 锁定在 label-tool/CEMSUsbRegsiter 写入链，而不是 modFileSysCheck。
-- 新增 `scripts/protocol/audit_ydcc_2025_runtime_fingerprint.py`：从 2026-04-30 `VUpdateService.log` 的逐文件 “Record And File” 比较中恢复出被删除的 2025 本机运行时 MD5：`cemsusbregsiter.dll=02F8CD326E8CBDA04F17B6235BDF268D`、`cemsudisk.dll=3E6116EC2E92F24E92A64AA45CC85577`、`cemssafeudisklabeltool.exe=B000D3235E4E1522BF5F3B3F886561A3`。其中新版 record MD5 与现存 2026 文件吻合，因而旧值可明确归属升级前本机文件。另由 `VUpdateReplace.log` 固定：旧 `cemsusbregsiter.dll` 在 18:29:59 被复制到 `base\\8.1.2604.0917.bk\\ydcc\\cemsusbregsiter.dll`，18:30:05 该备份副本又被明确“文件删除成功”。因此旧 writer 现在已有**精确 MD5 获取指纹**，且本机 .bk 缺失可解释为更新器主动清理；仍未取得原始 bytes，不能提升143B。
-- 继续补齐同一 `VUpdateReplace.log` 的 2025 **首次安装**生命周期：13:19:03 对 `base\\8.1.2502.2116.bk\\ydcc\\cemsusbregsiter.dll` 明确记录“备份原始文件不存在 error:3”；13:19:14 从 `base\\8.1.2502.2116\\ydcc\\cemsusbregsiter.dll` 向运行目录“拷贝替换文件成功”；13:19:33 对 staged DLL 与 `cemsusbregsiter.dll.zip` 又分别记录“文件删除成功”。因此 8.1.2502.2116 可确认为这台端点的首次 ydcc writer 落地版本，现存 staging/ZIP 缺失不是搜索遗漏，而是 updater 主动清理的可复现结果。结合上面的旧 runtime MD5，现在 acquisition target 已同时具备版本、首次落地来源、精确 MD5 与清理时间线；原始 bytes 和 2025 ZIP CRC/size 仍缺，143B保持 PARTIAL。
+- 新增 `scripts/protocol/audit_ydcc_2025_runtime_fingerprint.py`：从 2026-04-30 `VUpdateService.log` 的逐文件 “Record And File” 比较中恢复出被删除的 2025 本机运行时 MD5：`cemsusbregsiter.dll=02F8CD326E8CBDA04F17B6235BDF268D`、`cemsudisk.dll=3E6116EC2E92F24E92A64AA45CC85577`、`cemssafeudisklabeltool.exe=B000D3235E4E1522BF5F3B3F886561A3`。其中新版 record MD5 与现存 2026 文件吻合，因而旧值可明确归属升级前本机文件。另由 `VUpdateReplace.log` 固定：旧 `cemsusbregsiter.dll` 在 18:29:59 被复制到 `base\\8.1.2604.0917.bk\\ydcc\\cemsusbregsiter.dll`，18:30:05 该备份副本又被明确“文件删除成功”。因此旧 writer 现在已有**精确 MD5 获取指纹**，且本机 .bk 缺失可解释为更新器主动清理；仍未取得原始 bytes；join59 129B 后续已由独立 wire-level 证据闭环，该缺失现仅保留为 provenance。
+- 继续补齐同一 `VUpdateReplace.log` 的 2025 **首次安装**生命周期：13:19:03 对 `base\\8.1.2502.2116.bk\\ydcc\\cemsusbregsiter.dll` 明确记录“备份原始文件不存在 error:3”；13:19:14 从 `base\\8.1.2502.2116\\ydcc\\cemsusbregsiter.dll` 向运行目录“拷贝替换文件成功”；13:19:33 对 staged DLL 与 `cemsusbregsiter.dll.zip` 又分别记录“文件删除成功”。因此 8.1.2502.2116 可确认为这台端点的首次 ydcc writer 落地版本，现存 staging/ZIP 缺失不是搜索遗漏，而是 updater 主动清理的可复现结果。结合上面的旧 runtime MD5，现在 acquisition target 已同时具备版本、首次落地来源、精确 MD5 与清理时间线；原始 bytes 和 2025 ZIP CRC/size 仍缺；这继续影响历史实现归因，但不再作为 join59 129B 的字节语义 blocker。
 - 新增 `scripts/protocol/audit_ydcc_2025_label_stack_routing.py`：固定现存 `safeusbregsitercems.dll` SHA-256=`01628988...`（PE 2025-02-19，PDB/source lineage=`ydcc_branches_2.10.4_dev`）。`RegsiterSafeUsb` 在 `0x10004F7C` 调用 `IsSafeUDiskV2`，false 时由 `0x10004F89` 直接跳到 `0x1000547E` legacy fallback；V2 路径加载 `sectorManage.dll` 并解析 `SetUDiskSecureInfoEx`，同代 `sectorManage.dll` SHA-256=`63a56fa3...`、PE 2025-05-12，保留 `SectorManageImp/WriteIIR` 新标签体系标记。
-- 同一审计把 non-V2 路径继续追到 `SecUsbInterface.dll` SHA-256=`2e6c1fd0...`：它解析 `GetDiskInfo/SetReserved3Data`，再从设备 `:\\Costom\\UsbInterface_c.dll` 获取 `GetYDInterfaceObject`。其 `GetDiskInfo` 的 /RTC frame descriptor 在 `0x100BD61C` 直接命名并定长 `m_Reserved3=0x40B`、`ExtensionData=0x112B`；vtable `+0x48/+0x4C` 与 `+0x34/+0x38` 分别形成 getter/setter 对。由此 2025 SafeUsb 的 legacy fallback 已可定性为**结构化 YD vendor metadata 路径**，而不是在本 DLL 中直接构造 512B SAFE6；但最终 provider `UsbInterface_c.dll` 当前未取得，因此不能越过证据边界声称它的物理 backing 与 LBA0-12 无关。该发现继续收窄 join59 producer 搜索，不提升143B。
-- 公开 acquisition 侧新增一个现代布局 locator：Dr.Web `Trojan.MulDrop33.11264`（病毒库记录日期 2025-10-16）展示一份实际解包并执行 `vpclientinst.exe -vrv` 的完整 `cems/ydcc` 树，其中同时存在 `busmanage.dll / cemssafeudisklabeltool.exe / cemsudisk.dll / cemsusbregsiter.dll / modfilesyscheck.dll / version.ver`。该页面不公开单文件 hash/版本，因此只登记为**获取目标包的 locator**，绝不作为 producer 证据或提升143B。
+- 同一审计把 non-V2 路径继续追到 `SecUsbInterface.dll` SHA-256=`2e6c1fd0...`：它解析 `GetDiskInfo/SetReserved3Data`，再从设备 `:\\Costom\\UsbInterface_c.dll` 获取 `GetYDInterfaceObject`。其 `GetDiskInfo` 的 /RTC frame descriptor 在 `0x100BD61C` 直接命名并定长 `m_Reserved3=0x40B`、`ExtensionData=0x112B`；vtable `+0x48/+0x4C` 与 `+0x34/+0x38` 分别形成 getter/setter 对。由此 2025 SafeUsb 的 legacy fallback 已可定性为**结构化 YD vendor metadata 路径**，而不是在本 DLL 中直接构造 512B SAFE6；但最终 provider `UsbInterface_c.dll` 当前未取得，因此不能越过证据边界声称它的物理 backing 与 LBA0-12 无关。该发现继续收窄 historical join59 producer 搜索；join59 129B 后续已按 wire-level 语义闭环，故此处只保留 provenance 价值。
+- 公开 acquisition 侧新增一个现代布局 locator：Dr.Web `Trojan.MulDrop33.11264`（病毒库记录日期 2025-10-16）展示一份实际解包并执行 `vpclientinst.exe -vrv` 的完整 `cems/ydcc` 树，其中同时存在 `busmanage.dll / cemssafeudisklabeltool.exe / cemsudisk.dll / cemsusbregsiter.dll / modfilesyscheck.dll / version.ver`。该页面不公开单文件 hash/版本，因此只登记为**获取目标包的 locator**，绝不作为 producer 证据；历史 writer 获取继续只服务 implementation provenance。
 - LBA6 legacy entry3 的 CHS 也完成字段级解码：Aigo 与 SanDisk 两份 nonzero
   实盘均为 start `C=1023,H=0,S=1`、type `0x07`、end
   `C=1023,H=239,S=63`，后8B又分别与本盘 LBA12 type4 的 StartSector /

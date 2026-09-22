@@ -268,24 +268,27 @@ fn host_hardinfo_and_optional_usb_only_info_have_separate_closed_lifecycles() {
 }
 
 #[test]
-fn cems2_join59_reader_does_not_get_promoted_to_a_writer() {
+fn cems2_join59_reader_can_close_wire_semantics_without_becoming_a_writer() {
     let lba6 = LEDGER
         .lines()
-        .find(|line| line.starts_with("6\t03f\tPARTIAL\t"))
+        .find(|line| line.starts_with("6\t03f\tCOMPLETE\t"))
         .expect("LBA6 join boundary row");
     let lba9 = LEDGER
         .lines()
-        .find(|line| line.starts_with("9\t080-0ff\tPARTIAL\t"))
+        .find(|line| line.starts_with("9\t080-0ff\tCOMPLETE\t"))
         .expect("LBA9 continuation row");
 
     for row in [lba6, lba9] {
         assert!(row.contains("S-FILEOPHOOK-2022"));
-        assert!(row.contains("producer") || row.contains("writer"));
+        assert!(row.contains("S-JOIN59-SEMANTIC"));
+        assert!(row.contains("Exact") || row.contains("exact"));
+        assert!(row.contains("writer") || row.contains("producer"));
     }
     assert!(DOC.contains("fcn.10026280"));
     assert!(DOC.contains("GENERIC_READ"));
     assert!(DOC.contains("fcn.18002B880"));
     assert!(DOC.contains("不能据此推导出 sector writer"));
+    assert!(DOC.contains("implementation provenance"));
 }
 
 #[test]

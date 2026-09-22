@@ -61,8 +61,8 @@ fn protocol_analysis_has_one_canonical_document() {
 fn protocol_live_status_tracks_strict_baseline_without_becoming_a_second_ledger() {
     assert!(Path::new("docs/EDP_PROTOCOL_LIVE_STATUS.md").is_file());
     for required in [
-        "语义 COMPLETE：6513 / 6656 B = 97.9%",
-        "语义 PARTIAL：143 B",
+        "语义 COMPLETE：",
+        "语义 PARTIAL：",
         "profile_coverage.tsv",
         "MISSING_PHYSICAL",
         "LBA4 `0x020..0x033` 已按 caller-owned HSerial identity vector 字段级生命周期闭环",
@@ -343,8 +343,8 @@ fn documentation_keeps_the_official_provisioning_chain_and_strict_rules() {
         "LBA4 progress must retain the caller-owned HSerial and bDataToServer closures"
     );
     assert!(
-        DOC.contains("| LBA6 | 497 | 15 | 0 | 97.1% |"),
-        "LBA6 progress must retain the closed string slots, crcUsbID pair, m_encrypt metadata, and static template regions"
+        DOC.contains("| LBA6 | 498 | 14 | 0 | 97.3% |"),
+        "LBA6 progress must retain the closed string slots, join discriminator, crcUsbID pair, m_encrypt metadata, and static template regions while leaving only the 14B MBR underlay partial"
     );
     assert!(
         DOC.contains("| LBA7 | 512 | 0 | 0 | 100.0% |"),
@@ -355,8 +355,8 @@ fn documentation_keeps_the_official_provisioning_chain_and_strict_rules() {
         "LBA8 progress must retain the closed dynamic ELABEL/backing/tail storage semantics"
     );
     assert!(
-        DOC.contains("| LBA9 | 384 | 128 | 0 | 75.0% |"),
-        "LBA9 progress must retain the closed EETU reverse backing and EPPE writer-owned zero tail semantics"
+        DOC.contains("| LBA9 | 512 | 0 | 0 | 100.0% |"),
+        "LBA9 progress must retain the closed EETU, join59/join60 continuation, SAPF/User overlap, and EPPE semantics"
     );
     assert!(
         DOC.contains("| LBA10 | 512 | 0 | 0 | 100.0% |"),

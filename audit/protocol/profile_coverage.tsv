@@ -4,6 +4,11 @@ LBA1:000-1ff	enabled-gpt	COMPLETE	virtual	MISSING_PHYSICAL	V-GPT	first-party Lin
 LBA2:000-07f	absent-gpt	COMPLETE	physical	COVERED	P-GOLD-ENC;P-GOLD-NOPWD	current real-device census exercises the absent GPT partition-table state
 LBA2:000-07f	enabled-gpt-entry0	COMPLETE	virtual	MISSING_PHYSICAL	V-GPT	first-party GPT writer output closes entry0 semantics; no EDP real-device positive GPT capture is currently available
 LBA2:080-1ff	enabled-gpt-unused-entries	COMPLETE	virtual	MISSING_PHYSICAL	V-GPT	unused-entry semantics are closed by first-party writer/consumer behavior; no EDP real-device positive GPT capture is currently available
+LBA6:03f	short-dept-backing	COMPLETE	physical	COVERED	P-GOLD-ENC	12 committed short-Dept physical profiles terminate before byte63; byte63 includes both 00 and nonzero 8B, proving post-NUL backing behavior
+LBA6:03f	join59	COMPLETE	physical	COVERED	P-GOLD-ENC;S-JOIN59-SEMANTIC	3 independent full-image physical observations plus independent x86/x64 first-party readers close the NUL discriminator and Dept[59] overwrite mapping; duplicate fixture is regression-only
+LBA6:03f	join60	COMPLETE	physical	COVERED	P-GOLD-ENC;S-JOIN59-SEMANTIC	4 physical observations show byte63=Dept[59] and continuation begins at Dept[60]
+LBA9:080-0ff	join59	COMPLETE	physical	COVERED	P-GOLD-ENC;S-JOIN59-SEMANTIC	3 independent full-image physical observations reconstruct one 76B Dept; continuation begins at Dept[59] and post-NUL backing is consumer-ignored; duplicate fixture is regression-only
+LBA9:080-0ff	join60	COMPLETE	physical	COVERED	P-GOLD-ENC;S-JOIN59-SEMANTIC	4 physical observations reconstruct the same 76B Dept; continuation begins at Dept[60] and post-NUL backing is consumer-ignored
 LBA12:000-1ff	mode1	COMPLETE	virtual	MISSING_PHYSICAL	V-LBA12	first-party CreatePartitions runtime output plus independent unwrap/CRC closes semantic behavior; current physical corpus has zero mode1 positives
 LBA12:000-1ff	mode2	COMPLETE	physical	COVERED	P-GOLD-ENC;V-LBA12	current real-device corpus supplies mode2 positives and first-party runtime execution independently reproduces the writer path
 LBA12:000-1ff	mode3	COMPLETE	virtual	MISSING_PHYSICAL	V-LBA12	first-party CreatePartitions runtime output plus independent unwrap/CRC closes semantic behavior; current physical corpus has zero mode3 positives
