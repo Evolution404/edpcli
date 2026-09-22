@@ -5,7 +5,18 @@
 
 ## 当前版本线
 
-- 当前待发布版本：**2.2.1**。
+- 当前待发布版本：**2.3.0**。
+- 2.3.0 为 MINOR 发布（版本号为用户明确指定），主线为动画工作区与操作安全：
+  TUI 常驻核心动画与工作区导航重构（设备/备份双面板、侧栏、Inspect 标签页、实时搜索、
+  命令面板）；关键操作全局互斥与 operation id、终端 I/O 失败先收尾安全链再退出、延迟
+  退出即时生效；刷新按稳定身份恢复选择、扫描合并待处理刷新、Inspect/Verify 并发有界；
+  dirty redraw 与动画三档策略。write service 进度为类型化 WriteEvent（CLI 文本/退出码
+  逐字节保留，黄金基线锁定）；CLI/TUI 共用备份删除/保留策略服务（application::backup）；
+  provision 校验区分 LBA4 producer flags、wire profile 与 reader view。
+- **兼容性注意**：备份校验 sidecar 自本版起由 MD5 更换为 SHA-256（`.sha256`，安全修复）。
+  2.2.x 创建的旧备份（仅 `.md5` sidecar）在本版 verify 显示“缺 .sha256”、restore 拒绝
+  执行；可为旧备份补生成 `.sha256` sidecar（内容为备份文件的 SHA-256 hex）后继续使用。
+  按 SemVer 严格口径接近 MAJOR，版本号 2.3.0 系用户明确指定。
 - 2.2.1 为紧急 PATCH：修正 2.2.0 把元数据范围错误扩展到 LBA0-13 的问题。物理盘识别、
   inspect、备份、恢复与原子写统一严格收口到 LBA0-12（13 sectors / 6656B）；非 6656B
   元数据镜像直接拒绝，不保留 LBA13 或 7168B 旧备份兼容路径。
