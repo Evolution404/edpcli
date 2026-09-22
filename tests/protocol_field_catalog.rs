@@ -495,11 +495,19 @@ macro_rules! symbol_registry {
 }
 
 fn code_symbols() -> BTreeSet<String> {
-    symbol_registry![]
+    symbol_registry![
+        edpcli::protocol::lba0::parse_lba0,
+        edpcli::protocol::lba3::parse_lba3,
+        edpcli::protocol::lba5::parse_lba5
+    ]
 }
 
 fn behavior_test_symbols() -> BTreeSet<String> {
-    symbol_registry![]
+    symbol_registry![
+        basic_behavior::lba0_profiles_decode_mbr_and_preserve_backing,
+        basic_behavior::opaque_sectors_preserve_every_byte_without_inventing_manufacturer_semantics,
+        basic_behavior::basic_parsers_replay_all_committed_physical_gold
+    ]
 }
 
 fn completion_link_valid(status: &str, symbol: &str, registered: &BTreeSet<String>) -> bool {
@@ -585,3 +593,8 @@ fn completion_gate_rejects_planned_missing_and_unregistered_symbols() {
     ));
     assert!(!completion_link_valid("UNKNOWN", "UNIMPLEMENTED", &real));
 }
+
+#[path = "protocol_behavior/basic.rs"]
+mod basic_behavior;
+#[path = "protocol_behavior/core.rs"]
+mod core_behavior;
