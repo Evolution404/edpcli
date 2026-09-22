@@ -8,6 +8,188 @@
 > 3. 覆盖 LBA0–LBA12 每个字节、每个已知 profile 的结构化测试；
 > 4. 完全纳入 edpcli 仓库、clean clone 可重放且不依赖外部 `u_disk` 目录的证据与测试体系。
 
+
+## 0. 2026-09-22 当前执行状态
+
+### 0.1 仓库与 main 合并状态
+
+当前工作分支：
+
+```text
+feat/provision-new-usb-20260919
+```
+
+已将 `origin/main@d4bad92`（v2.3.0）合入当前分支，merge commit：
+
+```text
+4103223 Merge remote-tracking branch 'origin/main' into feat/provision-new-usb-20260919
+```
+
+合并时没有使用 `-X ours` / `-X theirs` 全局覆盖。协议证据链、v2.3.0 TUI/动画/任务串行化、provision/inspect/diskio 等冲突按语义逐项合并。合并完成后全仓测试：
+
+```text
+460 / 460 PASS
+```
+
+后续完成 LBA7/8/10/11/12 typed protocol 后，全仓测试提升为：
+
+```text
+469 / 469 PASS
+```
+
+当前已提交 HEAD：
+
+```text
+9fe3771dd58f0f6c8a3f58549951f9671751de37
+feat: type LBA11 capacity profiles
+```
+
+### 0.2 字段级协议工程化已经 142/142
+
+当前 `field_catalog.tsv` 的工程状态已经达到：
+
+```text
+LBA0-LBA12 semantic coverage        = 6656 / 6656 B
+field × profile rows                = 142
+implementation COMPLETE             = 142 / 142
+behavior-test COMPLETE              = 142 / 142
+```
+
+最后五个 sector 的提交：
+
+```text
+e67bfda  feat: type LBA7 EDPF and pass-info profiles
+268c3e9  feat: type LBA12 wrapped-key profiles
+082af6f  feat: type LBA8 dynamic label profiles
+49933bc  feat: type LBA10 EESI profiles
+9fe3771  feat: type LBA11 capacity profiles
+```
+
+已完成的关键 typed 行为包括：
+
+- LBA7：two-entry / three-entry、PassInfo v0x0064 / v0x0206；
+- LBA8：动态 encrypted_len、current / transitional / strict-legacy UsbOnlyInfo、HostHardinfo 独立 axis；
+- LBA10：absent-zero / EESI-enabled，且 +0x80..1FF tail preserve；
+- LBA11：exact DiskSize / repair-CHS 两种容量派生；
+- LBA12：外层 sector cipher 与 entry 内 wrapped-key algorithm 分离建模；mode1/2/3/legacy profile 独立；
+- 所有上述 parser 都要求显式 profile，Unknown fail-closed，不使用“不是 A 就当 B”的 fallback。
+
+### 0.3 LBA12 coverage 账本修正
+
+本轮发现并修正了一处旧账本混淆：
+
+```text
+PassInfo.Version == 0x0064
+```
+
+不能当成：
+
+```text
+LBA12 wrapped-key mode == legacy mode0
+```
+
+当前 checked-in 物理 LBA12 corpus 中，`NeedEncrypt != 0` 的 entry 实际正例是 mode2；
+mode1/mode3 有 first-party virtual writer 正例；legacy mode0 compatibility 语义闭环，但当前没有 committed positive physical LBA12 capture。
+
+因此当前 WIP 已同步修正：
+
+- `audit/protocol/field_catalog.tsv`
+- `audit/protocol/profile_axes.tsv`
+- `audit/protocol/profile_coverage.tsv`
+- `docs/EDP_LBA0_12_FIELD_GUIDE.md`
+
+不得再把 PassInfo 版本和 wrapped-key profile 混为同一个 axis。
+
+### 0.4 当前未提交 WIP
+
+当前正在实现 Phase 3 最后一部分：
+
+```text
+src/protocol/image.rs
+```
+
+目标接口：
+
+```rust
+parse_protocol_image(
+    raw: &[u8; 6656],
+    context: ProtocolImageContext,
+) -> Result<ProtocolImageView, ProtocolError>
+```
+
+`ProtocolImageContext` 显式携带：
+
+- `ProtocolProfile`
+- `device_id`
+- `VID/PID`
+- 物理容量
+
+不做无上下文“猜 profile”。
+
+当前 WIP 已加入的跨 LBA invariant 包括：
+
+- LBA6 device CRC == `CRC32(device_id)`；
+- LBA4 HostHardinfo == LBA8 HostHardinfo；
+- LBA6/LBA9 Dept profile 一致并可恢复完整 Dept/User；
+- LBA7 / LBA12 EDPF entry 数量一致；
+- LBA7 / LBA12 partition type 顺序一致；
+- legacy LBA6 MBR snapshot 与 LBA12 type4 geometry 一致；
+- LBA11 PDKB UID == 当前 `device_id`；
+- profile 与实际 LBA0/GPT/LBA3/LBA6/LBA9 状态必须一致。
+
+截至本状态记录，WIP 已通过：
+
+```text
+cargo check --all-targets              PASS
+protocol_field_catalog                26 / 26 PASS
+protocol_field_guide                   2 / 2 PASS
+```
+
+但 **尚未提交**，且还没有把整镜像正例/破坏样本 cross-LBA tests 补齐，因此不得把 Phase 3 整体标记完成。
+
+当前工作区还包含：
+
+```text
+?? audit/protocol/independent_review_2026-09-22.md
+```
+
+该独立审计文档继续保持未跟踪、未修改；除非用户明确要求，不纳入提交。
+
+### 0.5 剩余工程工作与执行顺序
+
+字段级 142/142 后，剩余工作严格按以下顺序执行：
+
+1. **完成整镜像 parser / cross-LBA validation**
+   - 使用 committed 6656B physical gold 做正例；
+   - 添加至少一个破坏 LBA7/LBA12、LBA6/LBA12、device_id consistency 的负例；
+   - 整镜像重建必须保持 13 个 sector wire bytes 可验证。
+
+2. **完成 external runtime dependency gate**
+   - 日常 `cargo test` 不允许访问 `/Users/.../u_disk`、`~/Desktop/u_disk`、`/private/tmp`；
+   - 文档中的 provenance 字符串可以保留；
+   - `scripts/protocol` 中仍需手工外部二进制的研究脚本必须改成显式参数，不得作为默认运行时依赖。
+
+3. **生成自动 coverage report**
+   - 输出 JSON + Markdown；
+   - 至少统计 13 LBA、6656B ownership、142 rows、profile states、parser/test/evidence、physical/virtual modality；
+   - physical gap 不得被 virtual positive 偷换。
+
+4. **README / AGENTS 协议入口**
+   - 日常开发从 FIELD_GUIDE / src/protocol / field_catalog / coverage tests 进入；
+   - 逆向总文档只作为 provenance/history。
+
+5. **最终门禁**
+   - `cargo fmt --all -- --check`
+   - `cargo test`
+   - `git diff --check`
+   - clean-clone protocol tests
+   - worktree 除明确保留的独立审计文档外 clean
+   - 提交并 push
+
+6. **完成上述协议工程收口后，再进入正式制盘重构**
+   - 禁止让旧 `ProvisionProfile::canonical_v1()` 继续代表所有官方模式；
+   - 新 builder 必须反过来通过 `ProtocolImageView` / cross-LBA validator 验证，禁止 producer 自证。
+
 ## 1. 总体原则
 
 ### 1.1 一个事实，三种表达
@@ -668,3 +850,363 @@ clean-clone protocol tests         = PASS
 5. `docs/EDP_PROTOCOL_REVERSE_ENGINEERING.md` —— 仅在需要 provenance / 历史推导时阅读。
 
 逆向历史文档不应再成为理解协议的必读入口。
+
+
+---
+
+## 14. 官方制盘复刻与“已有官方盘 → 二合一”设计
+
+### 14.1 总原则：两个正交轴，不再用一个 canonical profile 混在一起
+
+正式制盘必须至少把以下两个轴分开：
+
+#### 轴 A：官方分区布局模式
+
+已由官方 PDF、LabelTool UI、request structure、`CreatePartitions` 和真实盘闭环：
+
+```text
+part=0  DefaultThreePartition
+        默认三分区
+        type1 Boot + type2 Share + type4 Encrypt
+
+part=1  BootExchangeMerged
+        启动区与交换区二合一
+        type2 Share + type4 Encrypt
+
+part=2  AllEncrypt
+        整盘加密
+        官方两-entry 特殊布局
+
+part=3  InOutNetDual
+        内外网通用双分区
+        type1 Boot + type2 Share
+```
+
+实现中必须建立正式 enum，例如：
+
+```rust
+pub enum OfficialPartitionMode {
+    DefaultThreePartition,
+    BootExchangeMerged,
+    AllEncrypt,
+    InOutNetDual,
+}
+```
+
+#### 轴 B：LBA12 wrapped-file-key 算法
+
+与上面的 `part` 布局独立：
+
+```text
+legacy mode0 compatibility
+mode1  A6B0/A7F0 legacy-family wrapping
+mode2  SM4-ECB wrapped file key
+mode3  AES-128-ECB wrapped file key
+```
+
+注意：
+
+> LBA12 整个 sector 的外层保护仍是 device-id CRC 派生的 A6B0/A7F0；
+> mode1/2/3 描述的是 `NeedEncrypt != 0` EDPF entry 内的 wrapped file-key algorithm，
+> 不是“整扇 LBA12 分别使用三种算法”。
+
+正式 spec 应类似：
+
+```rust
+pub struct OfficialProvisionSpec {
+    pub partition_mode: OfficialPartitionMode,
+    pub wrapped_key_mode: Lba12Mode,
+    pub geometry: OfficialGeometry,
+    pub identity: TargetIdentity,
+    pub metadata: ProvisionMetadata,
+    pub password_policy: PasswordPolicy,
+}
+```
+
+禁止再用一个 `canonical_v1` 同时暗含分区模式、密钥算法、历史表示和产品策略。
+
+### 14.2 新盘制盘：复刻官方 producer，而不是复刻某一只 donor 盘
+
+“从普通 U 盘新制盘”的目标是 first-party producer-compatible，而不是 donor cloning。
+
+建议流水线：
+
+```text
+probe hardware identity
+    ↓
+select OfficialPartitionMode
+    ↓
+select LBA12 wrapped-key mode
+    ↓
+calculate official geometry
+    ↓
+generate file keys / password wrapping
+    ↓
+build typed protocol image LBA0-LBA12
+    ↓
+ProtocolImageView cross-LBA validation
+    ↓
+write metadata
+    ↓
+create/format required data partitions
+    ↓
+deploy mode-specific files/resources when applicable
+    ↓
+read back metadata + filesystem geometry
+    ↓
+final validation
+```
+
+各官方模式的 writer 必须由同一组 typed primitives 组合，不能复制四套 magic-offset 代码。
+
+### 14.3 官方 BootExchangeMerged 的已闭环目标形态
+
+当前官方 `part=1` 已闭环为：
+
+```text
+EDPF:
+entry0 = type2
+entry1 = type4
+PartionCount = 2
+
+LBA0 MBR:
+single visible partition
+type  = 0x07
+start = 63
+count = type2 sector count
+
+LBA12:
+type2 starts at 63
+type4 starts immediately after type2
+```
+
+因此“二合一”不是简单扩大一个独立 type1 Boot。
+
+current producer 的精确语义是：
+
+- 独立 type1 被取消；
+- 前部大区成为 type2；
+- 标准 MBR 直接暴露同一 type2 物理范围；
+- OS 因此无需先走 EDP UserLogin 即可访问前部文件系统；
+- type4 仍由 EDP 安全挂载链管理。
+
+### 14.4 特殊模式：已有官方盘转换为二合一
+
+这一模式必须和“新盘 provision”使用不同 API，建议命名：
+
+```rust
+convert_official_to_merged(...)
+```
+
+而不是复用：
+
+```rust
+generate_image(...)
+```
+
+核心原则：
+
+> **Preserve → Transform，禁止 Rebuild-from-template。**
+
+首先只读解析现有官方盘，保存其真实协议状态：
+
+- LBA0–LBA12 原始 6656B；
+- device_id / VID / PID / total size；
+- onlyid；
+- LBA3 opaque manufacturer data；
+- LBA4 representation / overlays；
+- LBA6 SAFE6 backing、Dept/User、MBR snapshot profile；
+- LBA8 ELABEL / HostHardinfo / backing；
+- LBA7 / LBA12 EDPF；
+- PassInfo；
+- 原 UserKeyCRC / FileKeyCRC / wrapped file-key / EncryptMode；
+- LBA11 DRKB/PDKB 与随机 payload；
+- type2/type4 真实 StartSector / PartionSize；
+- 当前文件系统 geometry。
+
+### 14.5 转换不允许改变 type4，除非显式进入未来的“数据迁移模式”
+
+第一版转换器的非协商约束：
+
+```text
+old type4 StartSector == new type4 StartSector
+old type4 PartionSize == new type4 PartionSize
+old wrapped file key  == new wrapped file key
+old FileKeyCRC        == new FileKeyCRC
+old UserKeyCRC        == new UserKeyCRC
+```
+
+即：
+
+- 不移动保密区；
+- 不重新加密保密区；
+- 不生成新的 type4 file key；
+- 不改变保密区密文；
+- 不把“改成二合一”实现成全盘解密/重写。
+
+新的 type2 geometry 固定由原 type4 起点反推：
+
+```text
+new type2 StartSector = 63
+new type2 SectorCount = old type4 StartSector - 63
+```
+
+这样保密区可以物理原地保留。
+
+### 14.6 为什么转换不能只写 LBA0-LBA12
+
+普通三分区盘前部通常存在：
+
+```text
+type1 Boot
+type2 Share
+type4 Encrypt
+```
+
+转换后要求：
+
+```text
+type2 from LBA63
+type4 Encrypt unchanged
+```
+
+即使 metadata 可以改成上述目标，原 type1 + type2 两个前部文件系统并不会自动变成一个合法的大 type2 文件系统。
+
+因此第一版转换器必须明确区分：
+
+#### A. Metadata-only 可行
+
+只有当现有前部物理文件系统已经满足目标 geometry，或经过严格证明无需移动/重建即可扩展时，才允许 metadata-only。
+
+必须先通过 filesystem geometry validator，不能仅凭 EDPF 推断。
+
+#### B. Front-region rebuild
+
+默认、安全、可证明的转换路径：
+
+```text
+backup front-region user files（可选）
+    ↓
+freeze old type4 boundary
+    ↓
+recreate one filesystem on LBA63 .. old_type4_start-1
+    ↓
+restore front-region files（可选）
+    ↓
+rewrite minimal EDP metadata
+    ↓
+readback validate
+```
+
+这里允许重建**前部非保密区**，但仍不得移动或改写 type4 数据区。
+
+第一版不实现未经证明的 in-place filesystem move/grow 魔法。
+
+### 14.7 转换时允许修改的协议范围
+
+最小变更集合应从 typed diff 自动推导，而不是硬编码“写 0/6/7/12”。
+
+预期主要包含：
+
+- LBA0：标准 MBR 改为单 `0x07 @ LBA63`；
+- LBA7：entry count / partition type / geometry；
+- LBA12：current EDPF entry count / partition type / geometry；
+- LBA6：仅当 legacy MBR snapshot profile 需要同步 type4 geometry 时更新 snapshot/checksum；
+- 其它扇区默认 preserve。
+
+明确默认 preserve：
+
+- LBA3；
+- LBA4 onlyid / HSerial / representation；
+- LBA8 ELABEL / identity / opaque backing；
+- LBA10 EESI；
+- LBA11 DRKB/PDKB；
+- type4 key material；
+- 未被转换规则拥有的所有 backing/opaque bytes。
+
+若实际 typed diff 出现额外字段变化，转换必须 fail-closed 并要求 review。
+
+### 14.8 安全执行事务
+
+转换命令必须先产生只读计划，建议：
+
+```text
+edpcli convert-official-to-merged <device> --plan
+```
+
+计划至少输出：
+
+- 当前 profile；
+- 目标 profile；
+- old/new EDPF；
+- old/new MBR；
+- type4 immutable boundary；
+- 需要重建的前部范围；
+- 将改写的 sector/byte range；
+- 将 preserve 的 sector/range；
+- 文件系统处理方式；
+- rollback artifact；
+- 最终 validator 列表。
+
+真正执行前必须：
+
+1. 重做硬件身份检查；
+2. 备份原 LBA0–LBA12；
+3. 备份所有将修改的前部 boot/partition metadata；
+4. 再次确认 type4 起点、大小、hash/sample 未变化；
+5. whole-unmount；
+6. 前部文件系统操作；
+7. metadata rewrite；
+8. readback；
+9. `ProtocolImageView` validation；
+10. 原生 OS mount 验证 type2；
+11. EDP 安全链验证 type4 可识别；
+12. 任一步失败立即停止后续写入并提供回滚。
+
+### 14.9 测试策略
+
+新制盘与转换测试分开。
+
+#### Fresh official provisioning tests
+
+必须覆盖：
+
+- 四种 `OfficialPartitionMode`；
+- mode1 / mode2 / mode3；
+- legacy compatibility 仅按实际有证据的 producer 规则；
+- LBA0–LBA12 typed parse；
+- cross-LBA invariant；
+- MBR/EDPF geometry；
+- filesystem visible/hidden behavior。
+
+#### Existing-official → merged tests
+
+第一阶段只允许虚拟镜像/软件块设备：
+
+- 默认三分区 → 二合一；
+- 不同 Dept layout；
+- LBA6 zero-underlay / legacy snapshot；
+- current/legacy LBA4 representation；
+- type4 起点/大小保持不变；
+- type4 区内容 hash 前后不变；
+- front rebuild 后 MBR/type2 filesystem 可挂载；
+- rollback 可恢复原 metadata。
+
+真实盘写入必须继续沿用当前 fail-closed 设备身份和 readback 机制，且不得为了测试访问真实 raw disk。
+
+### 14.10 实现顺序
+
+正式制盘重构按以下顺序：
+
+1. 完成当前 `ProtocolImageView` 与 cross-LBA validator；
+2. 把现有 `ProvisionProfile::canonical_v1()` 拆成 orthogonal provision spec；
+3. 实现官方四种 partition mode 的纯内存 builder；
+4. 用 first-party/physical fixtures 做 byte-level differential tests；
+5. 实现 fresh-provision filesystem stage；
+6. 新增 `ConversionPlan`，只读分析已有官方盘；
+7. 实现 front-region rebuild + metadata minimal transform；
+8. 实现 readback / rollback；
+9. 虚拟盘全矩阵；
+10. 最后才允许真实盘显式执行。
+
+在第 1–4 步完成前，不继续扩展旧 canonical writer，以免形成第二套错误协议事实源。
