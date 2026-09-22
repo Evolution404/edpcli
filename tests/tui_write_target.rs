@@ -70,6 +70,21 @@ fn selected_backup_path_is_stable_for_restore_intent() {
 }
 
 #[test]
+fn refresh_preserves_targets_by_stable_identity_after_reordering() {
+    let mut state = AppState::new();
+    state.replace_devices(vec![device(6), device(7)]);
+    state.navigate(NavCommand::Down, 20);
+    state.replace_devices(vec![device(7), device(6)]);
+    assert_eq!(state.selected_device_disk(), Some(7));
+
+    state.replace_backups(vec![backup(1, "one.bin"), backup(2, "two.bin")]);
+    state.navigate(NavCommand::Right, 20);
+    state.navigate(NavCommand::Down, 20);
+    state.replace_backups(vec![backup(2, "two.bin"), backup(1, "one.bin")]);
+    assert_eq!(state.selected_backup_path(), Some(PathBuf::from("two.bin")));
+}
+
+#[test]
 fn filtered_backup_selection_maps_to_the_real_backup_for_actions() {
     let mut state = AppState::new();
     state.replace_devices(vec![device(7)]);

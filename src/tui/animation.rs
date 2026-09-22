@@ -4,6 +4,8 @@
 //! increasing tick and never performs I/O. This keeps the visual layer independent
 //! from device operations and lets the event loop continue drawing while workers run.
 
+use std::time::Duration;
+
 use ratatui::{
     layout::{Alignment, Rect},
     style::{Color, Modifier, Style},
@@ -13,6 +15,32 @@ use ratatui::{
 };
 
 pub const TICK_INTERVAL_MS: u64 = 80;
+pub const REDUCED_TICK_INTERVAL_MS: u64 = 240;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MotionMode {
+    Full,
+    Reduced,
+    Off,
+}
+
+impl MotionMode {
+    pub fn from_env() -> Self {
+        match std::env::var("EDPCLI_ANIMATION") {
+            Ok(value) if value.eq_ignore_ascii_case("off") => Self::Off,
+            Ok(value) if value.eq_ignore_ascii_case("reduced") => Self::Reduced,
+            _ => Self::Full,
+        }
+    }
+
+    pub const fn tick_interval(self) -> Option<Duration> {
+        match self {
+            Self::Full => Some(Duration::from_millis(TICK_INTERVAL_MS)),
+            Self::Reduced => Some(Duration::from_millis(REDUCED_TICK_INTERVAL_MS)),
+            Self::Off => None,
+        }
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CoreMode {
@@ -294,5 +322,11 @@ mod tests {
         assert!(compact_indicator(0, CoreMode::Guard)
             .content
             .contains("GUARDED"));
+    }
+
+    #[test]
+    fn reduced_and_off_modes_change_animation_scheduling() {
+        assert!(MotionMode::Reduced.tick_interval() > MotionMode::Full.tick_interval());
+        assert_eq!(MotionMode::Off.tick_interval(), None);
     }
 }

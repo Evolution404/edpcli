@@ -4,6 +4,10 @@ use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 
 use super::state::NavCommand;
 
+pub fn is_actionable_key(event: &KeyEvent) -> bool {
+    !matches!(event.kind, KeyEventKind::Release)
+}
+
 #[derive(Debug, Default)]
 pub struct KeyMapper {
     pending_g: bool,
@@ -15,7 +19,7 @@ impl KeyMapper {
     }
 
     pub fn map(&mut self, event: KeyEvent) -> Option<NavCommand> {
-        if matches!(event.kind, KeyEventKind::Release) {
+        if !is_actionable_key(&event) {
             return None;
         }
 
@@ -133,5 +137,16 @@ mod tests {
             mapper.map(key(KeyCode::Char('c'), KeyModifiers::CONTROL)),
             Some(NavCommand::Quit)
         );
+    }
+
+    #[test]
+    fn release_events_never_reach_navigation_or_text_input() {
+        let event = KeyEvent::new_with_kind(
+            KeyCode::Char('x'),
+            KeyModifiers::NONE,
+            KeyEventKind::Release,
+        );
+        assert!(!is_actionable_key(&event));
+        assert_eq!(KeyMapper::new().map(event), None);
     }
 }

@@ -33,10 +33,17 @@ pub enum WizardStage {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExpectedIdentity {
+    pub onlyid: Option<String>,
+    pub device_id: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WriteIntent {
     pub kind: WriteKind,
     pub disk: u32,
     pub backup: Option<std::path::PathBuf>,
+    pub expected_identity: Option<ExpectedIdentity>,
 }
 
 #[derive(Debug, Clone)]
@@ -45,6 +52,7 @@ pub struct WizardState {
     pub kind: WriteKind,
     pub disk: u32,
     pub backup: Option<std::path::PathBuf>,
+    pub expected_identity: Option<ExpectedIdentity>,
     pub confirmation: String,
     pub message: Option<String>,
 }
@@ -506,16 +514,32 @@ impl AppState {
         kind: WriteKind,
         disk: u32,
         backup: Option<std::path::PathBuf>,
-    ) {
+    ) -> bool {
+        self.begin_write_wizard_for_identity(kind, disk, backup, None)
+    }
+
+    pub fn begin_write_wizard_for_identity(
+        &mut self,
+        kind: WriteKind,
+        disk: u32,
+        backup: Option<std::path::PathBuf>,
+        expected_identity: Option<ExpectedIdentity>,
+    ) -> bool {
+        if self.critical_operation {
+            self.notice = Some("关键操作仍在执行，完成前不能启动其他任务。".to_string());
+            return false;
+        }
         self.input_mode = InputMode::Normal;
         self.wizard = Some(WizardState {
             stage: WizardStage::Confirm,
             kind,
             disk,
             backup,
+            expected_identity,
             confirmation: String::new(),
             message: None,
         });
+        true
     }
 
     pub fn push_wizard_confirmation(&mut self, ch: char) {
@@ -556,6 +580,7 @@ impl AppState {
             kind: wizard.kind,
             disk: wizard.disk,
             backup: wizard.backup.clone(),
+            expected_identity: wizard.expected_identity.clone(),
         };
         wizard.stage = WizardStage::Running;
         wizard.message = Some("关键写盘阶段进行中，不可中断".to_string());
@@ -589,7 +614,15 @@ impl AppState {
         self.backup_delete.as_ref()
     }
 
-    pub fn begin_backup_delete(&mut self, path: std::path::PathBuf, expected_sha256: String) {
+    pub fn begin_backup_delete(
+        &mut self,
+        path: std::path::PathBuf,
+        expected_sha256: String,
+    ) -> bool {
+        if self.critical_operation {
+            self.notice = Some("关键操作仍在执行，完成前不能启动其他任务。".to_string());
+            return false;
+        }
         self.input_mode = InputMode::Normal;
         self.backup_delete = Some(BackupDeleteState {
             stage: WizardStage::Confirm,
@@ -598,6 +631,7 @@ impl AppState {
             confirmation: String::new(),
             message: None,
         });
+        true
     }
 
     pub fn push_backup_delete_confirmation(&mut self, ch: char) {
@@ -672,6 +706,9 @@ impl AppState {
     }
 
     pub fn replace_devices(&mut self, devices: Vec<crate::disk_scan::Row>) {
+        let selected_disk = (self.workspace == Workspace::Devices)
+            .then(|| self.selected_device_disk())
+            .flatten();
         if self
             .pinned_disk
             .is_some_and(|disk| !devices.iter().any(|row| row.disk == disk))
@@ -682,6 +719,18 @@ impl AppState {
         self.device_scan_pending = false;
         if self.workspace == Workspace::Devices {
             self.rebuild_workspace_filter();
+            if let Some(disk) = selected_disk {
+                let source_index = self.devices.iter().position(|row| row.disk == disk);
+                self.selected = source_index
+                    .and_then(|index| {
+                        if self.workspace_filter_active() {
+                            self.search_matches.iter().position(|value| *value == index)
+                        } else {
+                            Some(index)
+                        }
+                    })
+                    .unwrap_or(0);
+            }
         }
     }
 
@@ -700,6 +749,29 @@ impl AppState {
         }
     }
 
+    pub fn visible_device_count(&self) -> usize {
+        if self.workspace == Workspace::Devices
+            && self.inspect.is_none()
+            && !self.active_search_query().is_empty()
+        {
+            self.search_matches.len()
+        } else {
+            self.devices.len()
+        }
+    }
+
+    pub fn device_at_visible(&self, position: usize) -> Option<&crate::disk_scan::Row> {
+        let index = if self.workspace == Workspace::Devices
+            && self.inspect.is_none()
+            && !self.active_search_query().is_empty()
+        {
+            *self.search_matches.get(position)?
+        } else {
+            position
+        };
+        self.devices.get(index)
+    }
+
     pub fn visible_backup_indices(&self) -> Vec<usize> {
         if self.workspace == Workspace::Backups
             && self.inspect.is_none()
@@ -709,6 +781,32 @@ impl AppState {
         } else {
             (0..self.backups.len()).collect()
         }
+    }
+
+    pub fn visible_backup_count(&self) -> usize {
+        if self.workspace == Workspace::Backups
+            && self.inspect.is_none()
+            && !self.active_search_query().is_empty()
+        {
+            self.search_matches.len()
+        } else {
+            self.backups.len()
+        }
+    }
+
+    pub fn backup_at_visible(
+        &self,
+        position: usize,
+    ) -> Option<&crate::application::BackupWorkspaceItem> {
+        let index = if self.workspace == Workspace::Backups
+            && self.inspect.is_none()
+            && !self.active_search_query().is_empty()
+        {
+            *self.search_matches.get(position)?
+        } else {
+            position
+        };
+        self.backups.get(index)
     }
 
     pub fn workspace_filter_active(&self) -> bool {
@@ -761,10 +859,25 @@ impl AppState {
     }
 
     pub fn replace_backups(&mut self, backups: Vec<crate::application::BackupWorkspaceItem>) {
+        let selected_path = (self.workspace == Workspace::Backups)
+            .then(|| self.selected_backup_path())
+            .flatten();
         self.backups = backups;
         self.backup_scan_pending = false;
         if self.workspace == Workspace::Backups {
             self.rebuild_workspace_filter();
+            if let Some(path) = selected_path {
+                let source_index = self.backups.iter().position(|row| row.path == path);
+                self.selected = source_index
+                    .and_then(|index| {
+                        if self.workspace_filter_active() {
+                            self.search_matches.iter().position(|value| *value == index)
+                        } else {
+                            Some(index)
+                        }
+                    })
+                    .unwrap_or(0);
+            }
         }
     }
 
@@ -832,10 +945,25 @@ impl AppState {
         }
     }
 
-    pub fn navigate(&mut self, command: NavCommand, viewport_height: usize) -> StateEffect {
-        if self.critical_operation && matches!(command, NavCommand::Quit | NavCommand::Escape) {
+    /// Apply the one global command policy used while a destructive or otherwise
+    /// critical worker owns the operation slot. Every command entry point (keys,
+    /// command palette and direct dispatch) must pass through this guard.
+    pub fn guard_critical_command(&mut self, command: NavCommand) -> Option<StateEffect> {
+        if !self.critical_operation {
+            return None;
+        }
+        if matches!(command, NavCommand::Quit | NavCommand::Escape) {
             self.exit_pending = true;
-            return StateEffect::ExitDeferred;
+            Some(StateEffect::ExitDeferred)
+        } else {
+            self.notice = Some("关键操作仍在执行，完成前不能切换页面或启动其他任务。".to_string());
+            Some(StateEffect::None)
+        }
+    }
+
+    pub fn navigate(&mut self, command: NavCommand, viewport_height: usize) -> StateEffect {
+        if let Some(effect) = self.guard_critical_command(command) {
+            return effect;
         }
 
         if command == NavCommand::Escape {

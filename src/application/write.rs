@@ -16,18 +16,10 @@ use crate::sectors::{convert, looks_nopwd};
 use crate::selectors::{BackupSelector, DeviceSelector};
 use crate::sysinfo::{self, CmdRunner};
 
+pub use super::device::{guard_system_disk, guard_usb_disk};
+pub use super::Prompter;
+
 const OPEN_WAIT: std::time::Duration = std::time::Duration::from_secs(10);
-
-pub trait Prompter {
-    fn prompt_line(&mut self, msg: &str) -> String;
-    fn confirm_yes(&mut self, msg: &str) -> bool;
-
-    fn output(&mut self, msg: &str) {
-        let mut stdout = std::io::stdout();
-        let _ = std::io::Write::write_all(&mut stdout, msg.as_bytes());
-        let _ = std::io::Write::flush(&mut stdout);
-    }
-}
 
 macro_rules! output {
     ($ctx:expr, $($arg:tt)*) => {{
@@ -134,25 +126,60 @@ pub(crate) fn verify_reopened_snapshot(
     Ok(())
 }
 
-pub(crate) fn guard_system_disk(runner: &dyn CmdRunner, disk: u32) -> EdpCliResult<()> {
-    if crate::platform::is_system_disk(runner, disk) {
-        return Err(err(EXIT_TARGET, format!("错误: 拒绝系统盘 disk{}", disk)));
+/// Revalidate the identity shown by the TUI immediately before starting the
+/// selected operation. The write flow still performs its existing fresh
+/// snapshot and post-reopen checks; this closes the earlier selection/confirmation
+/// window where another USB device could take the same platform disk number.
+pub fn verify_expected_identity(
+    runner: &dyn CmdRunner,
+    disk: u32,
+    expected_onlyid: Option<&str>,
+    expected_device_id: Option<&str>,
+    dev: &mut dyn SectorDev,
+) -> EdpCliResult<()> {
+    if let Some(expected) = expected_onlyid {
+        let raw = dev
+            .read_sector(4)
+            .map_err(|error| err(EXIT_IO, format!("错误: 身份复核读取 LBA4 失败: {error}")))?;
+        if raw.len() != SECTOR {
+            return Err(err(
+                EXIT_IO,
+                format!("错误: 身份复核 LBA4 读取 {}B，预期 {SECTOR}B", raw.len()),
+            ));
+        }
+        let actual = diskio::lba4_label_id_from(&raw);
+        if actual.as_deref() != Some(expected) {
+            return Err(err(
+                EXIT_TARGET,
+                format!(
+                    "错误: 设备在选择/确认期间发生变化(expected onlyid={expected}, actual onlyid={})，拒绝继续",
+                    actual.as_deref().unwrap_or("未知")
+                ),
+            ));
+        }
+    }
+    if let Some(expected) = expected_device_id {
+        let raw = dev
+            .read_sector(7)
+            .map_err(|error| err(EXIT_IO, format!("错误: 身份复核读取 LBA7 失败: {error}")))?;
+        if raw.len() != SECTOR {
+            return Err(err(
+                EXIT_IO,
+                format!("错误: 身份复核 LBA7 读取 {}B，预期 {SECTOR}B", raw.len()),
+            ));
+        }
+        let actual = identify(runner, disk, &raw).device_id;
+        if actual.as_deref() != Some(expected) {
+            return Err(err(
+                EXIT_TARGET,
+                format!(
+                    "错误: 设备在选择/确认期间发生变化(expected device_id={expected}, actual device_id={})，拒绝继续",
+                    actual.as_deref().unwrap_or("未知")
+                ),
+            ));
+        }
     }
     Ok(())
-}
-
-pub(crate) fn guard_usb_disk(runner: &dyn CmdRunner, disk: u32) -> EdpCliResult<()> {
-    guard_system_disk(runner, disk)?;
-    if sysinfo::usb_disk(runner, disk).is_some() {
-        return Ok(());
-    }
-    Err(err(
-        EXIT_TARGET,
-        format!(
-            "错误: disk{} 当前不是可操作的外接 USB 整盘（要求 WholeDisk=true、Internal=false、非虚拟盘、BusProtocol=USB），拒绝裸盘操作",
-            disk
-        ),
-    ))
 }
 
 pub(crate) fn auto_pick_disk(

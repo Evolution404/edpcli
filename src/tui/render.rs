@@ -162,10 +162,17 @@ fn draw_workspace_animation(
     animation::draw(frame, area, state.animation_frame(), mode, activity);
 }
 
+fn visible_window(selected: usize, total: usize, area_height: u16) -> std::ops::Range<usize> {
+    let capacity = usize::from(area_height.saturating_sub(3)).max(1);
+    let start = selected
+        .saturating_sub(capacity / 2)
+        .min(total.saturating_sub(capacity));
+    start..(start + capacity).min(total)
+}
+
 fn draw_devices(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState) {
     let (list_area, sidebar) = workspace_sidebar_layout(area);
-    let visible_indices = state.visible_device_indices();
-    let visible_count = visible_indices.len();
+    let visible_count = state.visible_device_count();
     let total_count = state.devices().len();
     let count_label = if state.workspace_filter_active() {
         format!("{visible_count}/{total_count}")
@@ -178,7 +185,7 @@ fn draw_devices(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState
         format!("设备列表 ({count_label})")
     };
 
-    if visible_indices.is_empty() {
+    if visible_count == 0 {
         let block = Block::default()
             .borders(Borders::ALL)
             .title(title)
@@ -215,9 +222,10 @@ fn draw_devices(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState
             inner,
         );
     } else {
-        let rows = visible_indices
-            .iter()
-            .filter_map(|&index| state.devices().get(index))
+        let window = visible_window(state.selected(), visible_count, list_area.height);
+        let window_start = window.start;
+        let rows = window
+            .filter_map(|position| state.device_at_visible(position))
             .map(|row| {
                 TableRow::new(vec![
                     Cell::from(format!("disk{}", row.disk)).style(accent()),
@@ -256,7 +264,7 @@ fn draw_devices(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState
         )
         .row_highlight_style(selected());
         let mut table_state = TableState::default();
-        table_state.select(Some(state.selected()));
+        table_state.select(Some(state.selected().saturating_sub(window_start)));
         frame.render_stateful_widget(table, list_area, &mut table_state);
     }
 
@@ -353,8 +361,7 @@ fn backup_health(backup: &crate::application::BackupWorkspaceItem) -> (&'static 
 
 fn draw_backups(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState) {
     let (list_area, sidebar) = workspace_sidebar_layout(area);
-    let visible_indices = state.visible_backup_indices();
-    let visible_count = visible_indices.len();
+    let visible_count = state.visible_backup_count();
     let total_count = state.backups().len();
     let count_label = if state.workspace_filter_active() {
         format!("{visible_count}/{total_count}")
@@ -422,7 +429,7 @@ fn draw_backups(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState
         format!("备份列表 ({count_label})")
     };
 
-    if visible_indices.is_empty() {
+    if visible_count == 0 {
         let block = Block::default()
             .borders(Borders::ALL)
             .title(title)
@@ -457,9 +464,10 @@ fn draw_backups(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState
             inner,
         );
     } else {
-        let rows = visible_indices
-            .iter()
-            .filter_map(|&index| state.backups().get(index))
+        let window = visible_window(state.selected(), visible_count, backup_parts[1].height);
+        let window_start = window.start;
+        let rows = window
+            .filter_map(|position| state.backup_at_visible(position))
             .map(|backup| {
                 let (health, health_style) = backup_health(backup);
                 TableRow::new(vec![
@@ -509,7 +517,7 @@ fn draw_backups(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState
         )
         .row_highlight_style(selected());
         let mut table_state = TableState::default();
-        table_state.select(Some(state.selected()));
+        table_state.select(Some(state.selected().saturating_sub(window_start)));
         frame.render_stateful_widget(table, backup_parts[1], &mut table_state);
     }
 
@@ -1046,7 +1054,7 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
 
 #[cfg(test)]
 mod tests {
-    use super::{hard_wrap_value, wrapped_field_lines};
+    use super::{hard_wrap_value, visible_window, wrapped_field_lines};
 
     #[test]
     fn hard_wrap_breaks_unspaced_values_by_terminal_display_width() {
@@ -1066,5 +1074,12 @@ mod tests {
         assert_eq!(lines[0].spans[1].content.as_ref(), "abcd");
         assert_eq!(lines[1].spans[1].content.as_ref(), "efgh");
         assert_eq!(lines[2].spans[1].content.as_ref(), "ijkl");
+    }
+
+    #[test]
+    fn large_tables_only_build_the_rows_visible_in_the_viewport() {
+        let window = visible_window(50_000, 100_000, 24);
+        assert!(window.contains(&50_000));
+        assert_eq!(window.len(), 21);
     }
 }

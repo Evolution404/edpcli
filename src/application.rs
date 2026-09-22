@@ -4,6 +4,7 @@
 //! operations however they need, but must not reimplement device discovery or raw-disk
 //! safety policy.
 
+pub mod device;
 pub mod inspect;
 pub mod write;
 use std::cell::RefCell;
@@ -13,6 +14,18 @@ use std::path::Path;
 use crate::disk_scan::{scan_disks, Row};
 use crate::diskio::{self, raw_path, FileDev};
 use crate::sysinfo::{CmdRunner, ReadProbeCache};
+
+/// Frontend interaction boundary shared by CLI selectors and write services.
+pub trait Prompter {
+    fn prompt_line(&mut self, msg: &str) -> String;
+    fn confirm_yes(&mut self, msg: &str) -> bool;
+
+    fn output(&mut self, msg: &str) {
+        let mut stdout = std::io::stdout();
+        let _ = std::io::Write::write_all(&mut stdout, msg.as_bytes());
+        let _ = std::io::Write::flush(&mut stdout);
+    }
+}
 
 /// Build the device-dashboard model using the same read-only probing path for every frontend.
 ///
@@ -120,14 +133,24 @@ fn scanned_backup_by_path<'a>(
 
 /// Verify exactly one backup selected by the TUI against the canonical backup catalog.
 pub fn verify_backup_exact(root: &Path, path: &Path) -> Result<(), String> {
-    let selector = load_backup_selector(root);
-    let entry = scanned_backup_by_path(&selector, path)?;
-    if crate::backup_catalog::is_healthy(entry) {
+    let canonical_root = std::fs::canonicalize(root)
+        .map_err(|error| format!("备份目录不可访问 {}: {error}", root.display()))?;
+    let canonical_path = std::fs::canonicalize(path)
+        .map_err(|error| format!("备份文件不存在或不可访问 {}: {error}", path.display()))?;
+    if !canonical_path.starts_with(&canonical_root) {
+        return Err(format!(
+            "拒绝校验备份目录之外的路径: {}",
+            canonical_path.display()
+        ));
+    }
+    let entry = crate::diskio::scan_backup_file(&canonical_path)
+        .ok_or_else(|| format!("目标不是可读取的 .bin 备份: {}", canonical_path.display()))?;
+    if crate::backup_catalog::is_healthy(&entry) {
         Ok(())
     } else {
         Err(format!(
             "备份校验失败: {}（大小或 SHA-256 异常）",
-            entry.path.display()
+            canonical_path.display()
         ))
     }
 }

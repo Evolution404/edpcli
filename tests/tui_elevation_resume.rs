@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use edpcli::application::pin_disk_selector;
-use edpcli::tui::state::{WriteIntent, WriteKind};
+use edpcli::tui::state::{ExpectedIdentity, WriteIntent, WriteKind};
 use edpcli::tui::{parse_resume_args, resume_argv};
 
 fn resume_disk_value(argv: &[String]) -> &str {
@@ -18,6 +18,7 @@ fn elevation_resume_argv_pins_apply_disk_as_native_selector() {
         kind: WriteKind::Apply,
         disk: 6,
         backup: None,
+        expected_identity: None,
     };
     let argv = resume_argv(&intent);
     assert_eq!(resume_disk_value(&argv), pin_disk_selector(intent.disk));
@@ -29,6 +30,7 @@ fn elevation_resume_argv_pins_restore_disk_and_backup() {
         kind: WriteKind::Restore,
         disk: 9,
         backup: Some(PathBuf::from("backup/a b.bin")),
+        expected_identity: None,
     };
     let argv = resume_argv(&intent);
 
@@ -58,6 +60,7 @@ fn parse_resume_accepts_an_explicit_selector_without_weakening_native_pinning() 
             kind: WriteKind::Apply,
             disk: 6,
             backup: None,
+            expected_identity: None,
         })
     );
 }
@@ -72,4 +75,19 @@ fn malformed_resume_state_fails_closed() {
         "7".to_string(),
     ];
     assert!(parse_resume_args(&argv).is_err());
+}
+
+#[test]
+fn elevation_resume_preserves_the_identity_the_user_confirmed() {
+    let intent = WriteIntent {
+        kind: WriteKind::Apply,
+        disk: 6,
+        backup: None,
+        expected_identity: Some(ExpectedIdentity {
+            onlyid: Some("1402259934".into()),
+            device_id: Some("disk&ven_netac&prod_onlydisk".into()),
+        }),
+    };
+    let argv = resume_argv(&intent);
+    assert_eq!(parse_resume_args(&argv).unwrap(), Some(intent));
 }

@@ -857,57 +857,58 @@ pub fn scan_backup_dir(dir: &Path) -> Vec<BackupEntry> {
     };
     let mut entries = Vec::new();
     for item in read_dir.flatten() {
-        let Ok(file_type) = item.file_type() else {
-            continue;
-        };
-        if !file_type.is_file() {
-            continue;
+        if let Some(entry) = scan_backup_file(&item.path()) {
+            entries.push(entry);
         }
-        let path = item.path();
-        if path.extension().and_then(|e| e.to_str()) != Some("bin") {
-            continue;
-        }
-        let name = path
-            .file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or_default();
-        let mut meta = parse_backup_name(name);
-        let data = fs::read(&path).ok();
-        let lba8 = data.as_ref().and_then(|d| {
-            d.get(8 * SECTOR..9 * SECTOR)
-                .and_then(|raw| raw.try_into().ok())
-        });
-        let content_sha256 = data.as_ref().map(|d| sha256_hex(d));
-        if let (Some(m), Some(d)) = (meta.as_mut(), data.as_ref()) {
-            if d.len() >= 5 * SECTOR {
-                m.onlyid = lba4_label_id_from(&d[4 * SECTOR..5 * SECTOR]);
-            }
-        }
-        let size_ok = data
-            .as_ref()
-            .map(|d| d.len() == crate::common::METADATA_IMAGE_LEN)
-            .unwrap_or(false);
-        let sha256_ok = content_sha256
-            .as_deref()
-            .map(|digest| sha256_status(&path, digest))
-            .unwrap_or(Sha256Status::Mismatch);
-        let is_nopwd = match (&meta, &data) {
-            (Some(m), Some(d)) => image_is_nopwd(d, &m.device_id),
-            _ => false,
-        };
-        entries.push(BackupEntry {
-            meta,
-            path: path.clone(),
-            mtime: mtime_epoch(&path),
-            is_nopwd,
-            sha256_ok,
-            size_ok,
-            lba8,
-            content_sha256,
-        });
     }
     entries.sort_by(cmp_backup_newest_first);
     entries
+}
+
+/// Load and validate one exact backup without hashing every sibling in its directory.
+pub fn scan_backup_file(path: &Path) -> Option<BackupEntry> {
+    let file_type = fs::symlink_metadata(path).ok()?.file_type();
+    if !file_type.is_file() || path.extension().and_then(|e| e.to_str()) != Some("bin") {
+        return None;
+    }
+    let name = path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or_default();
+    let mut meta = parse_backup_name(name);
+    let data = fs::read(path).ok();
+    let lba8 = data.as_ref().and_then(|d| {
+        d.get(8 * SECTOR..9 * SECTOR)
+            .and_then(|raw| raw.try_into().ok())
+    });
+    let content_sha256 = data.as_ref().map(|d| sha256_hex(d));
+    if let (Some(m), Some(d)) = (meta.as_mut(), data.as_ref()) {
+        if d.len() >= 5 * SECTOR {
+            m.onlyid = lba4_label_id_from(&d[4 * SECTOR..5 * SECTOR]);
+        }
+    }
+    let size_ok = data
+        .as_ref()
+        .map(|d| d.len() == crate::common::METADATA_IMAGE_LEN)
+        .unwrap_or(false);
+    let sha256_ok = content_sha256
+        .as_deref()
+        .map(|digest| sha256_status(path, digest))
+        .unwrap_or(Sha256Status::Mismatch);
+    let is_nopwd = match (&meta, &data) {
+        (Some(m), Some(d)) => image_is_nopwd(d, &m.device_id),
+        _ => false,
+    };
+    Some(BackupEntry {
+        meta,
+        path: path.to_path_buf(),
+        mtime: mtime_epoch(path),
+        is_nopwd,
+        sha256_ok,
+        size_ok,
+        lba8,
+        content_sha256,
+    })
 }
 
 /// Shell completion 专用的轻量备份索引。
