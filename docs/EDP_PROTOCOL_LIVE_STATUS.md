@@ -80,7 +80,7 @@ consumer。当前真正剩余的字节 blocker 只剩 LBA6/LBA9：继续追 join
 
 - 新增 `scripts/protocol/audit_v19_lba6_beizhu_slot.py`，固定 v19.11.4.1 DLL SHA-256，直接锁定 `BuildSector6@0x10006370`、`ReadSector6@0x10006AC0`、共享 `strcpy_s@0x101473FE` 及六个 reader callsite。
 - 旧文档“v19 overlay 不触及 `+0x1E0..+0x1ED`”是错误的：v19 writer 在 `0x10006648..0x10006656` 把 `sector+0x1D0` 作为 **cap=32 的 BeiZhu C-string 槽**；reader 对称地从 `+0x1D0` 用同一 cap=32 C-string helper 返回。
-- 但这不是“完整32B raw copy”：`strcpy_s` 在首个NUL即停止。真实 writer caller `0x1000B16C..0x1000B226` 先把完整32B arg8局部清零，再复制 `object+0x2620` 的 BeiZhu；pinned `UsbMainBSec@0x101BA790` `+0x1D0..+0x1F3` 也全部为0。因此 v19 对短 BeiZhu 只能生成本14B为0，**不能生成** Aigo/SanDisk 两份 nonzero MBR underlay。
+- 但这不是“完整32B raw copy”：`strcpy_s` 在首个NUL即停止。进一步枚举 v19 全部 executable `object+0x2620` xref，只得到 `0x1000B219` 的读取和 `0x1000CCEF` 的唯一写入；该写入在 `0x1000CCE8..0x1000CCF8` 明确是 `strcpy_s(dest=object+0x2620, cap=0x10, source=object+0x2478)`。真实 writer caller `0x1000B16C..0x1000B226` 又先把完整32B arg8局部清零，再以 cap=32 复制这个最多15B正文+NUL的 object field。因此 v19 强制 `+0x1DF` 为终止NUL、`+0x1E0..+0x1EF` 保持0；pinned `UsbMainBSec@0x101BA790` `+0x1D0..+0x1F3` 也全部为0，**不能生成** Aigo/SanDisk 两份 nonzero MBR underlay。
 - consumer 侧已进一步闭合：第一组 caller 完全不再读取 arg8；第二组成功路径读取的是另一字符串；第三组唯一后续使用是把 arg8 再以 `strcpy_s(cap=16)` 写入对象，NUL 后 `+0x10..+0x1D` 无比较、分支、哈希或字段提取。
 - 因而 LBA6 `+0x1E0..+0x1ED` 的 blocker 现在只剩 **exact earlier legacy MBR-underlay producer/profile-selection**。在该 producer 取得前仍保持 PARTIAL；LBA4 `+0x045` 后续独立闭环使全局严格进度更新为 6513/6656=97.9%，这里仍没有为了完成率降低本14B门槛。
 

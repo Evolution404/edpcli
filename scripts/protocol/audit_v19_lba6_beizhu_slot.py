@@ -6,7 +6,9 @@ The audit pins the historical DLL and proves four deliberately narrow facts:
    +0x1D0..+0x1F3 bytes are zero.
 2. The historical writer overlays sector+0x1D0 with a 32-byte-capacity
    C-string copy sourced from caller arg8; its recovered caller zeroes the
-   complete 32-byte temporary before copying BeiZhu into it.
+   complete 32-byte temporary before copying BeiZhu into it.  The upstream
+   object+0x2620 source field is itself populated by strcpy_s(cap=16), so a
+   valid producer can carry at most 15 text bytes plus the terminating NUL.
 3. ReadSector6 returns sector+0x1D0 through the same bounded C-string helper,
    not through a raw 32-byte memcpy.
 4. Recovered upper callers either ignore that output or pass it onward as a
@@ -127,6 +129,30 @@ def main() -> None:
     require(0x10006653, "push", "0x20")
     require(0x10006656, "call", "0x101473fe")
 
+    # Pin every executable reference to the upstream BeiZhu object field.
+    # One is the BuildSector6 caller read below; the other is the sole write,
+    # which copies object+0x2478 into object+0x2620 with destination cap=16.
+    object_beizhu_refs = []
+    for section in pe.sections:
+        if not (section.Characteristics & 0x20000000):
+            continue
+        section_va = IMAGE_BASE + section.VirtualAddress
+        for ins in md.disasm(section.get_data(), section_va):
+            for op in ins.operands:
+                if op.type == X86_OP_MEM and op.mem.disp == 0x2620:
+                    object_beizhu_refs.append(ins.address)
+                    break
+    if object_beizhu_refs != [0x1000B219, 0x1000CCEF]:
+        raise SystemExit(
+            f"object+0x2620 executable reference set changed: {object_beizhu_refs}"
+        )
+    require(0x1000CCE8, "lea", "eax", "esi", "0x2478")
+    require(0x1000CCEE, "push", "eax")
+    require(0x1000CCEF, "lea", "eax", "esi", "0x2620")
+    require(0x1000CCF5, "push", "0x10")
+    require(0x1000CCF7, "push", "eax")
+    require(0x1000CCF8, "call", "0x101473fe")
+
     # Recovered writer caller: zero[32], then strcpy_s(cap=32, object+0x2620).
     require(0x1000B16C, "mov", "byte ptr [ebp - 0x24]", "0")
     require(0x1000B170, "movups", "[ebp - 0x23]", "xmm0")
@@ -208,7 +234,14 @@ def main() -> None:
                 "template_sha256": sha256(template),
                 "template_lba6_1d0_1f3_zero": True,
                 "writer_beizhu_slot": "sector+0x1D0 strcpy_s(cap=32, caller arg8)",
-                "writer_caller_arg8": "zero[32] then strcpy_s(cap=32, object+0x2620)",
+                "writer_object_beizhu": (
+                    "object+0x2620 has exactly one executable writer reference: "
+                    "strcpy_s(cap=16, object+0x2478), limiting valid text to 15B + NUL"
+                ),
+                "writer_caller_arg8": (
+                    "zero[32] then strcpy_s(cap=32, object+0x2620); because the source "
+                    "field is cap=16, byte15 is NUL and bytes16..31 stay zero"
+                ),
                 "reader_beizhu_slot": "strcpy_s(caller arg8, cap=32, sector+0x1D0)",
                 "reader_callsites": [f"0x{x:08X}" for x in sorted(EXPECTED_READ_CALLERS)],
                 "upper_consumer": (
@@ -216,8 +249,9 @@ def main() -> None:
                     "callers; one caller narrows the string into a 16-byte object field"
                 ),
                 "claim_boundary": (
-                    "v19 proves C-string ownership/negative consumption but cannot "
-                    "produce the two observed non-zero legacy MBR-underlay tails"
+                    "v19 proves the upstream cap=16 BeiZhu limit, forces +0x1DF to "
+                    "the string terminator and +0x1E0..+0x1EF to zero in this writer, "
+                    "and therefore cannot produce the observed non-zero legacy MBR underlay"
                 ),
             },
             indent=2,
