@@ -10,6 +10,7 @@ pub mod write;
 use std::cell::RefCell;
 use std::io;
 use std::path::Path;
+pub use write::WriteEvent;
 
 use crate::disk_scan::{scan_disks, Row};
 use crate::diskio::{self, raw_path, FileDev};
@@ -19,6 +20,12 @@ use crate::sysinfo::{CmdRunner, ReadProbeCache};
 pub trait Prompter {
     fn prompt_line(&mut self, msg: &str) -> String;
     fn confirm_yes(&mut self, msg: &str) -> bool;
+
+    /// 类型化进度事件。默认实现按 CLI 文本契约渲染后经 `output` 输出；
+    /// 交互前端覆写以获得结构化阶段。
+    fn write_event(&mut self, event: WriteEvent) {
+        self.output(&write::render_event_text(&event));
+    }
 
     fn output(&mut self, msg: &str) {
         let mut stdout = std::io::stdout();

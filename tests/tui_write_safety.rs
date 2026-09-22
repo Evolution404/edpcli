@@ -55,7 +55,7 @@ fn shared_write_service_does_not_print_directly_into_tui_terminal() {
     let service = include_str!("../src/application/write.rs");
     assert!(!service.contains("println!("));
     assert!(!service.contains("print!("));
-    assert!(service.contains(".output("));
+    assert!(service.contains(".write_event("));
 
     let diskio = include_str!("../src/diskio.rs");
     let atomic = diskio

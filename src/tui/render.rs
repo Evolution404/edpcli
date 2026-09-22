@@ -813,6 +813,86 @@ fn draw_backup_delete(frame: &mut Frame, area: ratatui::layout::Rect, state: &Ap
     );
 }
 
+/// 把类型化写盘事件映射为向导 Running 阶段的单行显示文本。
+/// 直接从事件类型映射，不经 ANSI 文本反解析；调用方负责经 `safe` 消毒。
+fn write_progress_text(event: &crate::application::WriteEvent) -> String {
+    use crate::application::WriteEvent;
+    use crate::sectors::ConvertReport;
+    match event {
+        WriteEvent::ApplyDeviceHeader {
+            disk,
+            size_text,
+            vid,
+            pid,
+        } => format!("已选定 disk{disk}（{size_text}，USB {vid}:{pid}），读取元数据…"),
+        WriteEvent::ExistingBackupsHeader { count } => {
+            format!("本盘已有 {count} 份备份，写入时会自动再备份")
+        }
+        WriteEvent::ExistingBackupsMenu { .. } => "已列出本盘既有备份清单".to_string(),
+        WriteEvent::NoExistingBackups => "尚无备份；写入时自动创建首个备份".to_string(),
+        WriteEvent::AlreadyNopwdHint => "该盘已是免密盘（再次写入内容相同）".to_string(),
+        WriteEvent::DryRunPreview { .. } => "dry-run 预览完成，未写盘".to_string(),
+        WriteEvent::ForceRewriteNotice => "--force 继续重写；自动备份将标记免密状态".to_string(),
+        WriteEvent::BackupCreated { path } => format!(
+            "写前备份完成：{}",
+            path.file_name()
+                .map(|name| name.to_string_lossy().into_owned())
+                .unwrap_or_else(|| path.to_string_lossy().into_owned())
+        ),
+        WriteEvent::BackupCreatedIsNopwd => {
+            "本份备份为免密状态快照（还原不会回到加密原盘）".to_string()
+        }
+        WriteEvent::RestoreCommandHint { .. } => {
+            "备份完成；可用 edpcli backup restore 还原".to_string()
+        }
+        WriteEvent::ApplyWriteCompleted => {
+            "已写入，读回校验通过；请拔出重插后格式化数据区".to_string()
+        }
+        WriteEvent::RestoreMatchesHeader { onlyid, count, .. } => {
+            format!("onlyid={onlyid} 匹配 {count} 个备份")
+        }
+        WriteEvent::RestoreMatchRow {
+            index,
+            time,
+            is_nopwd,
+            ..
+        } => format!(
+            "[{index}] {time} {}",
+            if *is_nopwd {
+                "免密状态"
+            } else {
+                "加密原盘"
+            }
+        ),
+        WriteEvent::RestoreSelectionRetry { message } => message.clone(),
+        WriteEvent::BackupShaVerified { .. } => "备份 SHA-256 校验通过".to_string(),
+        WriteEvent::RestoreSnapshotNopwdWarning => {
+            "该备份为免密状态快照；dry-run 不作还原".to_string()
+        }
+        WriteEvent::RestoreDryRunNotice { .. } => "[dry-run] 还原预览完成，未写入".to_string(),
+        WriteEvent::RestoreTargetHeader { path } => format!(
+            "还原目标已确认：{}",
+            path.file_name()
+                .map(|name| name.to_string_lossy().into_owned())
+                .unwrap_or_else(|| path.to_string_lossy().into_owned())
+        ),
+        WriteEvent::RestoreWriteCompleted => "已还原，读回校验通过；请拔出重插".to_string(),
+        WriteEvent::Convert(ConvertReport::Identity { crc, .. }) => {
+            format!("已解出盘标识（CRC32 0x{crc:08X}）")
+        }
+        WriteEvent::Convert(ConvertReport::Layout { .. }) => {
+            "已计算 Share/Encrypt 布局".to_string()
+        }
+        WriteEvent::Convert(ConvertReport::SectorPlan { clears_lba9, .. }) => {
+            if *clears_lba9 {
+                "扇区写入计划就绪（LBA9 将清零）".to_string()
+            } else {
+                "扇区写入计划就绪（LBA9 已为零）".to_string()
+            }
+        }
+    }
+}
+
 fn draw_wizard(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState) {
     let Some(wizard) = state.wizard() else {
         return;
@@ -847,18 +927,26 @@ fn draw_wizard(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState)
         WizardStage::Confirm => {
             lines.push(Line::from("确认后进入关键写盘阶段。请输入 YES："));
             lines.push(Line::from(format!("> {}", wizard.confirmation)));
+            if let Some(message) = &wizard.message {
+                lines.push(Line::from(safe(message)));
+            }
         }
         WizardStage::Running => {
             lines.push(Line::from(
                 "关键写盘阶段进行中；q / Esc / Ctrl-C 不会中断当前事务。",
             ));
+            // 类型化事件映射为单行；尚无事件时回退到进入 Running 的初始提示。
+            let progress_line = wizard.progress.as_ref().map(write_progress_text);
+            if let Some(text) = progress_line.or_else(|| wizard.message.clone()) {
+                lines.push(Line::from(safe(&text)));
+            }
         }
         WizardStage::Result => {
             lines.push(Line::from("操作已到达安全结束点；Esc 返回。"));
+            if let Some(message) = &wizard.message {
+                lines.push(Line::from(safe(message)));
+            }
         }
-    }
-    if let Some(message) = &wizard.message {
-        lines.push(Line::from(safe(message)));
     }
     frame.render_widget(
         Paragraph::new(lines)

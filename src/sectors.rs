@@ -344,24 +344,156 @@ pub struct ConvertResult {
     pub raw12: Vec<u8>,
 }
 
-pub fn convert(
-    read: ReadFn,
-    device_id: &str,
-    size_gb: Option<f64>,
-    verbose: bool,
-) -> EdpCliResult<ConvertResult> {
-    let crc = crc32_bare(device_id.as_bytes());
-    let k0 = (crc & 0xFFFF) ^ (crc >> 16);
-    let crc_key = crc.to_le_bytes();
-    if verbose {
-        println!(
-            "{}  {}  (CRC32 0x{:08X}, K0 0x{:04X})",
+/// convert 过程的类型化报告。领域层不知道前端；渲染成文本由
+/// `render_convert_report` 单点负责(CLI 契约)，交互前端可直接消费结构化数据。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ConvertReport {
+    Identity {
+        device_id: String,
+        crc: u32,
+        k0: u32,
+    },
+    Layout {
+        share: u64,
+        enc_start: u64,
+        enc_size: u64,
+    },
+    SectorPlan {
+        share: u64,
+        clears_lba9: bool,
+    },
+}
+
+/// 逐字节复刻旧 verbose 分支的 stdout 输出(含样式与换行位置)。
+pub fn render_convert_report(report: &ConvertReport) -> String {
+    match report {
+        ConvertReport::Identity { device_id, crc, k0 } => format!(
+            "{}  {}  (CRC32 0x{:08X}, K0 0x{:04X})\n",
             crate::ui::bold("标识"),
             device_id,
             crc,
             k0
-        );
+        ),
+        ConvertReport::Layout {
+            share,
+            enc_start,
+            enc_size,
+        } => {
+            let (share, enc_start, enc_size) = (*share, *enc_start, *enc_size);
+            let enc_end = enc_start + enc_size / SECTOR as u64 - 1;
+            let share_range = format!("LBA 63 ~ {}", group_digits(63 + share - 1));
+            let enc_range = format!(
+                "LBA {} ~ {}",
+                group_digits(enc_start),
+                group_digits(enc_end)
+            );
+            let rows = vec![
+                vec![
+                    crate::ui::TableCell::left("Share", crate::ui::Tone::Green),
+                    crate::ui::TableCell::right(share_range, crate::ui::Tone::Green),
+                    crate::ui::TableCell::right(
+                        fmt_gb(share * SECTOR as u64),
+                        crate::ui::Tone::Magenta,
+                    ),
+                    crate::ui::TableCell::left(
+                        "明文数据区，系统直接挂载读写",
+                        crate::ui::Tone::Plain,
+                    ),
+                ],
+                vec![
+                    crate::ui::TableCell::left("Encrypt", crate::ui::Tone::Yellow),
+                    crate::ui::TableCell::right(enc_range, crate::ui::Tone::Green),
+                    crate::ui::TableCell::right(fmt_gb(enc_size), crate::ui::Tone::Magenta),
+                    crate::ui::TableCell::left("原样保留不动", crate::ui::Tone::Dim),
+                ],
+            ];
+            format!(
+                "{}\n{}",
+                crate::ui::bold_cyan("布局"),
+                crate::ui::render_table(&["区域", "LBA 范围", "大小", "说明"], &rows)
+            )
+        }
+        ConvertReport::SectorPlan { share, clears_lba9 } => {
+            let (share, clears_lba9) = (*share, *clears_lba9);
+            let rows = vec![
+                vec![
+                    crate::ui::TableCell::left("LBA0", crate::ui::Tone::Green),
+                    crate::ui::TableCell::left("MBR", crate::ui::Tone::BoldCyan),
+                    crate::ui::TableCell::left(
+                        format!(
+                            "单分区(type=07) 指向 Share: @LBA63 × {} 扇",
+                            group_digits(share)
+                        ),
+                        crate::ui::Tone::Plain,
+                    ),
+                ],
+                vec![
+                    crate::ui::TableCell::left("LBA6", crate::ui::Tone::Green),
+                    crate::ui::TableCell::left("盘标签", crate::ui::Tone::BoldCyan),
+                    crate::ui::TableCell::left(
+                        "兼容旧免密改造补丁，重算 SAFE6 校验和",
+                        crate::ui::Tone::Plain,
+                    ),
+                ],
+                vec![
+                    crate::ui::TableCell::left("LBA7", crate::ui::Tone::Green),
+                    crate::ui::TableCell::left("分区表", crate::ui::Tone::BoldCyan),
+                    crate::ui::TableCell::left(
+                        "2 条目: Share@63 + Encrypt",
+                        crate::ui::Tone::Plain,
+                    ),
+                ],
+                vec![
+                    crate::ui::TableCell::left("LBA12", crate::ui::Tone::Green),
+                    crate::ui::TableCell::left("分区表", crate::ui::Tone::BoldCyan),
+                    crate::ui::TableCell::left(
+                        "2 条目: Share@63 + Encrypt",
+                        crate::ui::Tone::Plain,
+                    ),
+                ],
+                vec![
+                    crate::ui::TableCell::left("LBA9", crate::ui::Tone::Green),
+                    crate::ui::TableCell::left("临时区", crate::ui::Tone::BoldCyan),
+                    crate::ui::TableCell::left(
+                        if clears_lba9 {
+                            "清零(当前存在)"
+                        } else {
+                            "已是零，不写"
+                        },
+                        if clears_lba9 {
+                            crate::ui::Tone::Plain
+                        } else {
+                            crate::ui::Tone::Dim
+                        },
+                    ),
+                ],
+            ];
+            format!(
+                "\n{}\n{}{}\n",
+                crate::ui::bold_cyan("将写入 5 个扇区:"),
+                crate::ui::render_table(&["LBA", "区域", "动作"], &rows),
+                crate::ui::dim(
+                    "不动   LBA4/8/11(盘身份) · 其余保留扇区 · 表尾状态 · LBA12 0x170..0x1FF 明文 · 盘尾区域"
+                )
+            )
+        }
     }
+}
+
+pub fn convert(
+    read: ReadFn,
+    device_id: &str,
+    size_gb: Option<f64>,
+    report: &mut dyn FnMut(ConvertReport),
+) -> EdpCliResult<ConvertResult> {
+    let crc = crc32_bare(device_id.as_bytes());
+    let k0 = (crc & 0xFFFF) ^ (crc >> 16);
+    let crc_key = crc.to_le_bytes();
+    report(ConvertReport::Identity {
+        device_id: device_id.to_string(),
+        crc,
+        k0,
+    });
 
     let raw12 = read_sector(read, 12)?;
     let dec12 = a6b0_full(&raw12, &crc_key, 0);
@@ -393,37 +525,11 @@ pub fn convert(
             ),
         ));
     }
-    if verbose {
-        let enc_end = enc_start + enc_size / SECTOR as u64 - 1;
-        let share_range = format!("LBA 63 ~ {}", group_digits(63 + share - 1));
-        let enc_range = format!(
-            "LBA {} ~ {}",
-            group_digits(enc_start),
-            group_digits(enc_end)
-        );
-        println!("{}", crate::ui::bold_cyan("布局"));
-        let rows = vec![
-            vec![
-                crate::ui::TableCell::left("Share", crate::ui::Tone::Green),
-                crate::ui::TableCell::right(share_range, crate::ui::Tone::Green),
-                crate::ui::TableCell::right(
-                    fmt_gb(share * SECTOR as u64),
-                    crate::ui::Tone::Magenta,
-                ),
-                crate::ui::TableCell::left("明文数据区，系统直接挂载读写", crate::ui::Tone::Plain),
-            ],
-            vec![
-                crate::ui::TableCell::left("Encrypt", crate::ui::Tone::Yellow),
-                crate::ui::TableCell::right(enc_range, crate::ui::Tone::Green),
-                crate::ui::TableCell::right(fmt_gb(enc_size), crate::ui::Tone::Magenta),
-                crate::ui::TableCell::left("原样保留不动", crate::ui::Tone::Dim),
-            ],
-        ];
-        print!(
-            "{}",
-            crate::ui::render_table(&["区域", "LBA 范围", "大小", "说明"], &rows)
-        );
-    }
+    report(ConvertReport::Layout {
+        share,
+        enc_start,
+        enc_size,
+    });
 
     let (new12, plain12) = convert_lba12(&raw12, &crc_key, share)?;
     let raw7 = read_sector(read, 7)?;
@@ -439,67 +545,10 @@ pub fn convert(
         None
     };
 
-    if verbose {
-        println!();
-        println!("{}", crate::ui::bold_cyan("将写入 5 个扇区:"));
-        let rows = vec![
-            vec![
-                crate::ui::TableCell::left("LBA0", crate::ui::Tone::Green),
-                crate::ui::TableCell::left("MBR", crate::ui::Tone::BoldCyan),
-                crate::ui::TableCell::left(
-                    format!(
-                        "单分区(type=07) 指向 Share: @LBA63 × {} 扇",
-                        group_digits(share)
-                    ),
-                    crate::ui::Tone::Plain,
-                ),
-            ],
-            vec![
-                crate::ui::TableCell::left("LBA6", crate::ui::Tone::Green),
-                crate::ui::TableCell::left("盘标签", crate::ui::Tone::BoldCyan),
-                crate::ui::TableCell::left(
-                    "兼容旧免密改造补丁，重算 SAFE6 校验和",
-                    crate::ui::Tone::Plain,
-                ),
-            ],
-            vec![
-                crate::ui::TableCell::left("LBA7", crate::ui::Tone::Green),
-                crate::ui::TableCell::left("分区表", crate::ui::Tone::BoldCyan),
-                crate::ui::TableCell::left("2 条目: Share@63 + Encrypt", crate::ui::Tone::Plain),
-            ],
-            vec![
-                crate::ui::TableCell::left("LBA12", crate::ui::Tone::Green),
-                crate::ui::TableCell::left("分区表", crate::ui::Tone::BoldCyan),
-                crate::ui::TableCell::left("2 条目: Share@63 + Encrypt", crate::ui::Tone::Plain),
-            ],
-            vec![
-                crate::ui::TableCell::left("LBA9", crate::ui::Tone::Green),
-                crate::ui::TableCell::left("临时区", crate::ui::Tone::BoldCyan),
-                crate::ui::TableCell::left(
-                    if new9.is_some() {
-                        "清零(当前存在)"
-                    } else {
-                        "已是零，不写"
-                    },
-                    if new9.is_some() {
-                        crate::ui::Tone::Plain
-                    } else {
-                        crate::ui::Tone::Dim
-                    },
-                ),
-            ],
-        ];
-        print!(
-            "{}",
-            crate::ui::render_table(&["LBA", "区域", "动作"], &rows)
-        );
-        println!(
-            "{}",
-            crate::ui::dim(
-                "不动   LBA4/8/11(盘身份) · 其余保留扇区 · 表尾状态 · LBA12 0x170..0x1FF 明文 · 盘尾区域"
-            )
-        );
-    }
+    report(ConvertReport::SectorPlan {
+        share,
+        clears_lba9: new9.is_some(),
+    });
 
     Ok(ConvertResult {
         lba0: new0,

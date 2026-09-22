@@ -90,7 +90,7 @@ enum WorkerResult {
     },
     WriteProgress {
         operation_id: OperationId,
-        message: String,
+        event: crate::application::WriteEvent,
     },
     Inspect {
         generation: u64,
@@ -125,7 +125,7 @@ pub struct TaskUpdates {
     pub devices: Option<Vec<Row>>,
     pub backups: Option<Vec<BackupWorkspaceItem>>,
     pub write: Option<(OperationId, Result<(), String>)>,
-    pub write_progress: Option<(OperationId, String)>,
+    pub write_progress: Option<(OperationId, crate::application::WriteEvent)>,
     pub inspect: Option<Result<InspectWorkspace, String>>,
     pub device_error: Option<String>,
     pub backup_error: Option<String>,
@@ -145,37 +145,6 @@ impl TaskUpdates {
             || self.backup_verify.is_some()
             || self.backup_delete.is_some()
     }
-}
-
-fn strip_ansi(input: &str) -> String {
-    let mut out = String::with_capacity(input.len());
-    let mut chars = input.chars().peekable();
-    while let Some(ch) = chars.next() {
-        if ch == '\u{1b}' && chars.peek() == Some(&'[') {
-            let _ = chars.next();
-            for next in chars.by_ref() {
-                if ('@'..='~').contains(&next) {
-                    break;
-                }
-            }
-        } else {
-            out.push(ch);
-        }
-    }
-    out
-}
-
-fn progress_summary(input: &str) -> String {
-    let plain = strip_ansi(input);
-    plain
-        .lines()
-        .rev()
-        .find(|line| !line.trim().is_empty())
-        .unwrap_or("写盘安全链执行中")
-        .trim()
-        .chars()
-        .take(160)
-        .collect()
 }
 
 fn panic_message(payload: Box<dyn std::any::Any + Send>) -> String {
@@ -451,12 +420,15 @@ impl TaskHub {
                         true
                     }
 
-                    fn output(&mut self, msg: &str) {
+                    fn write_event(&mut self, event: crate::application::WriteEvent) {
                         let _ = self.tx.send(WorkerResult::WriteProgress {
                             operation_id: self.operation_id,
-                            message: progress_summary(msg),
+                            event,
                         });
                     }
+
+                    // 写流程只允许经 write_event 上报；兜底丢弃，防止文本直接写进备用屏。
+                    fn output(&mut self, _msg: &str) {}
                 }
 
                 let runner = SysRunner;
@@ -521,12 +493,15 @@ impl TaskHub {
                         true
                     }
 
-                    fn output(&mut self, msg: &str) {
+                    fn write_event(&mut self, event: crate::application::WriteEvent) {
                         let _ = self.tx.send(WorkerResult::WriteProgress {
                             operation_id: self.operation_id,
-                            message: progress_summary(msg),
+                            event,
                         });
                     }
+
+                    // 写流程只允许经 write_event 上报；兜底丢弃，防止文本直接写进备用屏。
+                    fn output(&mut self, _msg: &str) {}
                 }
 
                 let result = (|| -> Result<(), String> {
@@ -634,10 +609,10 @@ impl TaskHub {
                 }
                 WorkerResult::WriteProgress {
                     operation_id,
-                    message,
+                    event,
                 } => {
                     if self.active_operation == Some(operation_id) {
-                        updates.write_progress = Some((operation_id, message));
+                        updates.write_progress = Some((operation_id, event));
                     }
                 }
                 WorkerResult::Inspect { generation, result } => {

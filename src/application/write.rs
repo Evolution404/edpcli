@@ -12,7 +12,7 @@ use crate::diskio::{
     self, backup_is_nopwd, create_backup, find_backups, raw_path, Clock, DiskFacts, SectorDev,
 };
 use crate::identify::identify;
-use crate::sectors::{convert, looks_nopwd};
+use crate::sectors::{convert, looks_nopwd, ConvertReport};
 use crate::selectors::{BackupSelector, DeviceSelector};
 use crate::sysinfo::{self, CmdRunner};
 
@@ -21,19 +21,197 @@ pub use super::Prompter;
 
 const OPEN_WAIT: std::time::Duration = std::time::Duration::from_secs(10);
 
-macro_rules! output {
-    ($ctx:expr, $($arg:tt)*) => {{
-        let message = format!($($arg)*);
-        $ctx.prompt.output(&message);
-    }};
+/// 写盘流程的类型化进度阶段。每个变体对应旧版一处文本输出；CLI 文本契约由
+/// `render_event_text` 逐字节复刻(含 ui:: 样式与换行位置)，交互确认(prompt_line/
+/// confirm_yes)不属于进度，仍留在 Prompter。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum WriteEvent {
+    ApplyDeviceHeader {
+        disk: u32,
+        size_text: String,
+        vid: String,
+        pid: String,
+    },
+    ExistingBackupsHeader {
+        count: usize,
+    },
+    ExistingBackupsMenu {
+        rows: Vec<(String, bool)>,
+    },
+    NoExistingBackups,
+    AlreadyNopwdHint,
+    DryRunPreview {
+        disk: u32,
+        needs_force: bool,
+    },
+    ForceRewriteNotice,
+    BackupCreated {
+        path: PathBuf,
+    },
+    BackupCreatedIsNopwd,
+    RestoreCommandHint {
+        path: PathBuf,
+        disk: u32,
+    },
+    ApplyWriteCompleted,
+    RestoreMatchesHeader {
+        disk: u32,
+        onlyid: String,
+        count: usize,
+    },
+    RestoreMatchRow {
+        index: usize,
+        time: String,
+        is_nopwd: bool,
+        file_name: String,
+    },
+    RestoreSelectionRetry {
+        message: String,
+    },
+    BackupShaVerified {
+        digest: String,
+    },
+    RestoreSnapshotNopwdWarning,
+    RestoreDryRunNotice {
+        path: PathBuf,
+        disk: u32,
+    },
+    RestoreTargetHeader {
+        path: PathBuf,
+    },
+    RestoreWriteCompleted,
+    Convert(ConvertReport),
 }
 
-macro_rules! outputln {
-    ($ctx:expr, $($arg:tt)*) => {{
-        let mut message = format!($($arg)*);
-        message.push('\n');
-        $ctx.prompt.output(&message);
-    }};
+/// 逐字节复刻旧 output!/outputln! 的文本(含样式与换行位置)。CLI 与测试黄金基线共用。
+pub fn render_event_text(event: &WriteEvent) -> String {
+    match event {
+        WriteEvent::ApplyDeviceHeader {
+            disk,
+            size_text,
+            vid,
+            pid,
+        } => format!(
+            "{}  disk{} · {} · USB {}:{}\n",
+            crate::ui::bold("盘"),
+            disk,
+            size_text,
+            vid,
+            pid
+        ),
+        WriteEvent::ExistingBackupsHeader { count } => format!(
+            "\n{}  本盘已有 {} 份(写入时会自动再备份):\n",
+            crate::ui::bold("备份"),
+            count
+        ),
+        // 旧 output! 语义: 菜单表格自带尾换行，不再补
+        WriteEvent::ExistingBackupsMenu { rows } => crate::ui::backup_menu_str(rows),
+        WriteEvent::NoExistingBackups => format!(
+            "\n{}  尚无; 写入时自动创建首个备份\n",
+            crate::ui::bold("备份")
+        ),
+        WriteEvent::AlreadyNopwdHint => format!(
+            "\n{}\n",
+            crate::ui::yellow(
+                "提示: 该盘已是改造后的免密盘 — 再次写入只会重写相同内容(实测幂等)。"
+            )
+        ),
+        WriteEvent::DryRunPreview { disk, needs_force } => {
+            let tail = if *needs_force {
+                " (该盘已是免密盘, 须加 --force)"
+            } else {
+                ""
+            };
+            format!(
+                "{}\n",
+                crate::ui::dim(&format!(
+                    "操作  以上为预览(dry-run), 未写盘。执行写入: edpcli apply --disk {}{}",
+                    disk, tail
+                ))
+            )
+        }
+        WriteEvent::ForceRewriteNotice => format!(
+            "{}\n",
+            crate::ui::yellow(
+                "--force: 继续重写。本次自动备份将标记为免密状态(文件名含 _nopwd); 加密原盘备份是更早时间戳那份。"
+            )
+        ),
+        WriteEvent::BackupCreated { path } => format!(
+            "{}  {}\n",
+            crate::ui::green("备份"),
+            path.display()
+        ),
+        WriteEvent::BackupCreatedIsNopwd => format!(
+            "{}\n",
+            crate::ui::yellow("注意: 本份备份为【免密状态】快照 — 还原它不会回到加密原盘。")
+        ),
+        WriteEvent::RestoreCommandHint { path, disk } => format!(
+            "{}  edpcli backup restore \"{}\" --disk {} --yes\n",
+            crate::ui::bold("还原"),
+            path.display(),
+            disk
+        ),
+        WriteEvent::ApplyWriteCompleted => format!(
+            "{}\n",
+            crate::ui::green(
+                "已写入, 读回校验通过。请拔出 U 盘重新插入, 数据区格式化 exFAT/NTFS 即得免密可写区。"
+            )
+        ),
+        WriteEvent::RestoreMatchesHeader {
+            disk,
+            onlyid,
+            count,
+        } => format!("disk{} · onlyid={} 匹配备份 {} 个:\n", disk, onlyid, count),
+        WriteEvent::RestoreMatchRow {
+            index,
+            time,
+            is_nopwd,
+            file_name,
+        } => format!(
+            "  [{}] {}   {}   {}\n",
+            index,
+            time,
+            if *is_nopwd {
+                "免密状态"
+            } else {
+                "加密原盘"
+            },
+            file_name
+        ),
+        WriteEvent::RestoreSelectionRetry { message } => {
+            format!("{}\n", crate::ui::yellow(message))
+        }
+        WriteEvent::BackupShaVerified { digest } => format!(
+            "{}  {}\n",
+            crate::ui::green("SHA-256 校验通过"),
+            digest
+        ),
+        WriteEvent::RestoreSnapshotNopwdWarning => format!(
+            "{}\n",
+            crate::ui::yellow(
+                "注意: 该备份为【免密状态】快照 — 还原后仍是免密盘, 不会回到加密原盘。"
+            )
+        ),
+        WriteEvent::RestoreDryRunNotice { path, disk } => format!(
+            "{}\n",
+            crate::ui::dim(&format!(
+                "[dry-run] 将还原 {} → disk{} LBA0-12 ({}B) — 未写入(免密快照不作还原)。",
+                path.display(),
+                disk,
+                METADATA_IMAGE_LEN
+            ))
+        ),
+        WriteEvent::RestoreTargetHeader { path } => format!(
+            "{}  {}\n",
+            crate::ui::bold("还原"),
+            crate::ui::truncate_mid(&path.display().to_string(), 64)
+        ),
+        WriteEvent::RestoreWriteCompleted => format!(
+            "{}\n",
+            crate::ui::green("已还原, 读回校验通过。请拔出重插。")
+        ),
+        WriteEvent::Convert(report) => crate::sectors::render_convert_report(report),
+    }
 }
 
 pub struct Ctx<'a> {
@@ -216,15 +394,12 @@ pub fn apply_flow(
         Some(s) => fmt_gb(s * SECTOR as u64),
         None => "unknown 扇".to_string(),
     };
-    outputln!(
-        ctx,
-        "{}  disk{} · {} · USB {}:{}",
-        crate::ui::bold("盘"),
+    ctx.prompt.write_event(WriteEvent::ApplyDeviceHeader {
         disk,
-        sz,
-        vid,
-        pid
-    );
+        size_text: sz,
+        vid: vid.clone(),
+        pid: pid.clone(),
+    });
 
     let img = read_image(dev)?;
     let id = identify(runner, disk, &img[7 * SECTOR..8 * SECTOR]);
@@ -252,16 +427,14 @@ pub fn apply_flow(
     let read = |lba: u32| -> EdpCliResult<Vec<u8>> {
         Ok(img[lba as usize * SECTOR..(lba as usize + 1) * SECTOR].to_vec())
     };
-    let result = convert(&read, &did, size_gb, true)?;
+    let mut convert_report =
+        |report: ConvertReport| ctx.prompt.write_event(WriteEvent::Convert(report));
+    let result = convert(&read, &did, size_gb, &mut convert_report)?;
 
     let baks = find_backups(&ctx.backup_dir, &facts, Some(&did), Some(tag16));
     if !baks.is_empty() {
-        outputln!(
-            ctx,
-            "\n{}  本盘已有 {} 份(写入时会自动再备份):",
-            crate::ui::bold("备份"),
-            baks.len()
-        );
+        ctx.prompt
+            .write_event(WriteEvent::ExistingBackupsHeader { count: baks.len() });
         let entries: Vec<(String, bool)> = baks
             .iter()
             .map(|b| {
@@ -271,39 +444,21 @@ pub fn apply_flow(
                 )
             })
             .collect();
-        output!(ctx, "{}", crate::ui::backup_menu_str(&entries));
+        ctx.prompt
+            .write_event(WriteEvent::ExistingBackupsMenu { rows: entries });
     } else {
-        outputln!(
-            ctx,
-            "\n{}  尚无; 写入时自动创建首个备份",
-            crate::ui::bold("备份")
-        );
+        ctx.prompt.write_event(WriteEvent::NoExistingBackups);
     }
 
     let already = looks_nopwd(&read, &did)?;
     if already {
-        outputln!(
-            ctx,
-            "\n{}",
-            crate::ui::yellow(
-                "提示: 该盘已是改造后的免密盘 — 再次写入只会重写相同内容(实测幂等)。"
-            )
-        );
+        ctx.prompt.write_event(WriteEvent::AlreadyNopwdHint);
     }
     if !apply {
-        let tail = if already {
-            " (该盘已是免密盘, 须加 --force)"
-        } else {
-            ""
-        };
-        outputln!(
-            ctx,
-            "{}",
-            crate::ui::dim(&format!(
-                "操作  以上为预览(dry-run), 未写盘。执行写入: edpcli apply --disk {}{}",
-                disk, tail
-            ))
-        );
+        ctx.prompt.write_event(WriteEvent::DryRunPreview {
+            disk,
+            needs_force: already,
+        });
         return Ok(EXIT_OK);
     }
     if already && !force {
@@ -316,28 +471,18 @@ pub fn apply_flow(
         ));
     }
     if already {
-        outputln!(ctx,
-            "{}",
-            crate::ui::yellow("--force: 继续重写。本次自动备份将标记为免密状态(文件名含 _nopwd); 加密原盘备份是更早时间戳那份。")
-        );
+        ctx.prompt.write_event(WriteEvent::ForceRewriteNotice);
     }
 
     let (bpath, backup_is_nopwd) = create_backup(&facts, &img, &did, &ctx.backup_dir, ctx.clock)?;
-    outputln!(ctx, "{}  {}", crate::ui::green("备份"), bpath.display());
+    ctx.prompt.write_event(WriteEvent::BackupCreated {
+        path: bpath.clone(),
+    });
     if backup_is_nopwd {
-        outputln!(
-            ctx,
-            "{}",
-            crate::ui::yellow("注意: 本份备份为【免密状态】快照 — 还原它不会回到加密原盘。")
-        );
+        ctx.prompt.write_event(WriteEvent::BackupCreatedIsNopwd);
     }
-    outputln!(
-        ctx,
-        "{}  edpcli backup restore \"{}\" --disk {} --yes",
-        crate::ui::bold("还原"),
-        bpath.display(),
-        disk
-    );
+    ctx.prompt
+        .write_event(WriteEvent::RestoreCommandHint { path: bpath, disk });
 
     if !ctx.prompt.confirm_yes(&crate::ui::bold(&format!(
         "将改写 disk{} LBA0/6/7/12/9。输入 YES: ",
@@ -365,13 +510,7 @@ pub fn apply_flow(
     }
     writes.insert(0, result.lba0);
     diskio::atomic_write_sectors(dev, &writes)?;
-    outputln!(
-        ctx,
-        "{}",
-        crate::ui::green(
-            "已写入, 读回校验通过。请拔出 U 盘重新插入, 数据区格式化 exFAT/NTFS 即得免密可写区。"
-        )
-    );
+    ctx.prompt.write_event(WriteEvent::ApplyWriteCompleted);
     Ok(EXIT_OK)
 }
 
@@ -402,13 +541,11 @@ pub fn backup_create_flow(
         label_id: diskio::lba4_label_id_from(&img[4 * SECTOR..5 * SECTOR]),
     };
     let created = create_backup(&facts, &img, &device_id, &ctx.backup_dir, ctx.clock)?;
-    outputln!(ctx, "{}  {}", crate::ui::green("备份"), created.0.display());
+    ctx.prompt.write_event(WriteEvent::BackupCreated {
+        path: created.0.clone(),
+    });
     if created.1 {
-        outputln!(
-            ctx,
-            "{}",
-            crate::ui::yellow("注意: 本份备份为【免密状态】快照 — 还原它不会回到加密原盘。")
-        );
+        ctx.prompt.write_event(WriteEvent::BackupCreatedIsNopwd);
     }
     Ok(created)
 }
@@ -459,32 +596,23 @@ pub fn restore_flow(
                     ),
                 ));
             }
-            outputln!(
-                ctx,
-                "disk{} · onlyid={} 匹配备份 {} 个:",
+            ctx.prompt.write_event(WriteEvent::RestoreMatchesHeader {
                 disk,
-                onlyid,
-                choices.len()
-            );
+                onlyid: onlyid.to_string(),
+                count: choices.len(),
+            });
             for (index, entry) in &choices {
-                let time = diskio::backup_display_time(&entry.path, entry.mtime);
-                let state = if entry.is_nopwd {
-                    "免密状态"
-                } else {
-                    "加密原盘"
-                };
-                outputln!(
-                    ctx,
-                    "  [{}] {}   {}   {}",
-                    index,
-                    time,
-                    state,
-                    entry
+                ctx.prompt.write_event(WriteEvent::RestoreMatchRow {
+                    index: *index,
+                    time: diskio::backup_display_time(&entry.path, entry.mtime),
+                    is_nopwd: entry.is_nopwd,
+                    file_name: entry
                         .path
                         .file_name()
                         .and_then(|name| name.to_str())
                         .unwrap_or("<无效文件名>")
-                );
+                        .to_string(),
+                });
             }
             loop {
                 let input = ctx.prompt.prompt_line("选择全局备份编号 (回车取消): ");
@@ -494,7 +622,9 @@ pub fn restore_flow(
                 }
                 match view.resolve_one(input) {
                     Ok(entry) => break entry.path.clone(),
-                    Err(message) => outputln!(ctx, "{}", crate::ui::yellow(&message)),
+                    Err(message) => ctx
+                        .prompt
+                        .write_event(WriteEvent::RestoreSelectionRetry { message }),
                 }
             }
         }
@@ -545,7 +675,8 @@ pub fn restore_flow(
             ),
         ));
     }
-    outputln!(ctx, "{}  {}", crate::ui::green("SHA-256 校验通过"), got);
+    ctx.prompt
+        .write_event(WriteEvent::BackupShaVerified { digest: got });
 
     // 显式路径也必须执行与交互选择相同的“同一物理盘”终验。device_id/容量/VID/PID
     // 对同型号盘并不唯一，LBA4 前 16B 才是现有备份体系使用的最终身份标签。
@@ -586,31 +717,16 @@ pub fn restore_flow(
         diskio::image_is_nopwd(&data, device_id)
     };
     if nopwd_snap {
-        outputln!(
-            ctx,
-            "{}",
-            crate::ui::yellow(
-                "注意: 该备份为【免密状态】快照 — 还原后仍是免密盘, 不会回到加密原盘。"
-            )
-        );
-        outputln!(
-            ctx,
-            "{}",
-            crate::ui::dim(&format!(
-                "[dry-run] 将还原 {} → disk{} LBA0-12 ({}B) — 未写入(免密快照不作还原)。",
-                path.display(),
-                disk,
-                METADATA_IMAGE_LEN
-            ))
-        );
+        ctx.prompt
+            .write_event(WriteEvent::RestoreSnapshotNopwdWarning);
+        ctx.prompt.write_event(WriteEvent::RestoreDryRunNotice {
+            path: path.clone(),
+            disk,
+        });
         return Ok(EXIT_OK);
     }
-    outputln!(
-        ctx,
-        "{}  {}",
-        crate::ui::bold("还原"),
-        crate::ui::truncate_mid(&path.display().to_string(), 64)
-    );
+    ctx.prompt
+        .write_event(WriteEvent::RestoreTargetHeader { path: path.clone() });
     if !ctx.prompt.confirm_yes(&crate::ui::bold(&format!(
         "  → disk{} LBA0-12? 输入 YES: ",
         disk
@@ -635,10 +751,6 @@ pub fn restore_flow(
         })
         .collect();
     diskio::atomic_write_sectors(dev, &writes)?;
-    outputln!(
-        ctx,
-        "{}",
-        crate::ui::green("已还原, 读回校验通过。请拔出重插。")
-    );
+    ctx.prompt.write_event(WriteEvent::RestoreWriteCompleted);
     Ok(EXIT_OK)
 }

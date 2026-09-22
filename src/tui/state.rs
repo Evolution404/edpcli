@@ -55,6 +55,8 @@ pub struct WizardState {
     pub expected_identity: Option<ExpectedIdentity>,
     pub confirmation: String,
     pub message: Option<String>,
+    /// Running 阶段最新收到的类型化进度事件；渲染层映射为单行显示。
+    pub progress: Option<crate::application::WriteEvent>,
 }
 
 #[derive(Debug, Clone)]
@@ -538,6 +540,7 @@ impl AppState {
             expected_identity,
             confirmation: String::new(),
             message: None,
+            progress: None,
         });
         true
     }
@@ -588,10 +591,10 @@ impl AppState {
         Some(intent)
     }
 
-    pub fn set_write_progress(&mut self, message: String) {
+    pub fn set_write_progress(&mut self, event: crate::application::WriteEvent) {
         if let Some(wizard) = self.wizard.as_mut() {
             if wizard.stage == WizardStage::Running {
-                wizard.message = Some(message);
+                wizard.progress = Some(event);
             }
         }
     }
@@ -600,6 +603,7 @@ impl AppState {
         self.critical_operation = false;
         if let Some(wizard) = self.wizard.as_mut() {
             wizard.stage = WizardStage::Result;
+            wizard.progress = None;
             wizard.message = Some(match result {
                 Ok(()) if wizard.kind == WriteKind::BackupCreate => {
                     "备份创建完成；备份列表已刷新".to_string()

@@ -133,7 +133,7 @@ pub fn golden(key: &str) -> Golden {
 pub fn converted_image(key: &str) -> Option<(Vec<u8>, String)> {
     let data = load_disk_image(key)?;
     let (_, did) = fixture(key)?;
-    let r = convert(&read_fn_of(&data), did, None, false).ok()?;
+    let r = convert(&read_fn_of(&data), did, None, &mut |_| {}).ok()?;
     let mut conv = data.clone();
     for (lba, sector) in [
         (0usize, &r.lba0),
