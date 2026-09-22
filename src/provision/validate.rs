@@ -181,7 +181,12 @@ fn validate_lba4(spec: &ProvisionSpec, raw: &[u8], meta: &InspectMeta) -> Result
     expected_node[0x21..0x25].copy_from_slice(b"LLGB");
     expected_node[0x25..0x29].copy_from_slice(&1u32.to_le_bytes());
     expected_node[0x29..0x2d].copy_from_slice(&[0x08, 0x04, 0x0c, 0x01]);
-    if view.decoded.get(0x18..0x47) != Some(expected_node.as_slice()) {
+    // inspect exposes the official rolling-reader view. Current writers
+    // overwrite +0x45/+0x46 after rolling, so those two bytes intentionally do
+    // not round-trip to the producer plaintext in view.decoded. Validate the
+    // semantic restore-node prefix here and validate the complete producer wire
+    // representation (including both post-XOR flags) below.
+    if view.decoded.get(0x18..0x45) != Some(&expected_node[..0x2d]) {
         return Err("LBA4 current-writer restore-node profile mismatch".into());
     }
     if view.decoded.get(0x1fc..0x200) != Some(b"LLGB") {

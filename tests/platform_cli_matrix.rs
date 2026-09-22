@@ -72,7 +72,11 @@ fn assert_ok(output: std::process::Output, context: &str) {
 
 #[test]
 fn list_is_read_only_and_available_on_every_platform() {
-    assert_ok(run(&["list"]), "list");
+    // This subprocess matrix must stay hermetic even when the host has a real
+    // external disk whose raw identity needs elevation. The internal sentinel
+    // suppresses interactive re-elevation while still exercising the same
+    // read-only list path; elevation policy itself has dedicated unit tests.
+    assert_ok(run(&["list", "--_elevated"]), "list");
 }
 
 #[test]

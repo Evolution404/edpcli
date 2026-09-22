@@ -123,18 +123,23 @@ fn lba1_recognizes_the_official_gpt_header_profile() {
         .any(|field| { field.label == "GPT partition table first LBA" && field.value == "2" }));
     assert!(view.notes.iter().any(|note| {
         note.contains("BuildSector1_Gpt")
-            && note.contains("当前22份原始")
-            && note.contains("PARTIAL")
+            && note.contains("语义状态 COMPLETE")
+            && note.contains("物理 profile 覆盖仍有缺口")
+            && note.contains("first-party virtual writer")
     }));
 }
 
 #[test]
-fn lba2_reports_the_official_gpt_partition_table_profile_without_claiming_completion() {
+fn lba2_reports_complete_semantics_without_claiming_physical_positive_coverage() {
     let raw = [0u8; 512];
     let view = analyze_sector(2, &raw, &InspectMeta::default());
     assert!(view.method.contains("GPT partition-table profile"));
     assert!(view.notes.iter().any(|note| {
-        note.contains("BuildSector2_Gpt") && note.contains("4个×128B") && note.contains("PARTIAL")
+        note.contains("BuildSector2_Gpt")
+            && note.contains("4个×128B")
+            && note.contains("语义状态 COMPLETE")
+            && note.contains("物理 profile 覆盖仍有缺口")
+            && note.contains("first-party virtual writer")
     }));
 }
 
