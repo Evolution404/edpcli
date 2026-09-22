@@ -1,16 +1,44 @@
 mod common;
 
+use std::path::PathBuf;
+
 use edpcli::application::inspect::load_backup_inspect;
 use edpcli::common::{METADATA_IMAGE_LEN, METADATA_SECTOR_COUNT, SECTOR};
+use edpcli::edpb::{self, CoreCapture};
 use edpcli::tui::{
     render,
     state::{AppState, InspectMode, NavCommand},
 };
 use ratatui::{backend::TestBackend, style::Color, Terminal};
 
+fn netac_edpb(tag: &str) -> Option<(common::TmpDir, PathBuf)> {
+    let data = common::load_disk_image("netac")?;
+    let tmp = common::TmpDir::new(tag);
+    let path = tmp.0.join("netac.edpb");
+    edpb::write_core_backup(
+        &path,
+        &CoreCapture {
+            snapshot_id: format!("tui-inspect-{tag}"),
+            created_epoch: 1_789_000_000,
+            disk_number: Some(6),
+            vid: "0dd8".into(),
+            pid: "2005".into(),
+            device_id: "disk&ven_netac&prod_onlydisk".into(),
+            onlyid: Some("1402259934".into()),
+            total_sectors: Some(122_880_000),
+            logical_sector_size: 512,
+            edpcli_version: env!("CARGO_PKG_VERSION").into(),
+            device_state: "encrypted".into(),
+            lba0_12: &data,
+        },
+    )
+    .unwrap();
+    Some((tmp, path))
+}
+
 #[test]
 fn backup_inspect_reuses_domain_analyzer_for_all_metadata_lbas() {
-    let Some(path) = common::fixture_bin("netac") else {
+    let Some((_tmp, path)) = netac_edpb("inspect_workspace") else {
         eprintln!("跳过: 真实备份不可用");
         return;
     };
@@ -24,14 +52,13 @@ fn backup_inspect_reuses_domain_analyzer_for_all_metadata_lbas() {
 }
 
 #[test]
-fn backup_inspect_rejects_legacy_7168_byte_images() {
+fn backup_inspect_rejects_legacy_bin_images() {
     let tmp = common::TmpDir::new("inspect_reject_7168");
     let path = tmp.0.join("legacy-lba0-13.bin");
     std::fs::write(&path, vec![0u8; METADATA_IMAGE_LEN + SECTOR]).unwrap();
 
-    let err = load_backup_inspect(&path).expect_err("7168B legacy image must be rejected");
-    assert!(err.contains("LBA0-12"), "{err}");
-    assert!(err.contains(&METADATA_IMAGE_LEN.to_string()), "{err}");
+    let err = load_backup_inspect(&path).expect_err("legacy .bin must be rejected");
+    assert!(err.contains(".edpb"), "{err}");
 }
 
 #[test]
@@ -75,7 +102,7 @@ fn render_inspect(state: &AppState) -> (String, String) {
 
 #[test]
 fn inspect_renders_all_tabs_and_moves_highlight_with_mode() {
-    let Some(path) = common::fixture_bin("netac") else {
+    let Some((_tmp, path)) = netac_edpb("inspect_tabs") else {
         eprintln!("跳过: 真实备份不可用");
         return;
     };
