@@ -3,7 +3,7 @@ fn write_safety_primitives_live_only_in_application_service() {
     let service = include_str!("../src/application/write.rs");
     for required in [
         "guard_usb_disk",
-        "create_backup",
+        "create_metadata_backup",
         "prepare_write",
         "reopen_rdwr",
         "verify_reopened_snapshot",
