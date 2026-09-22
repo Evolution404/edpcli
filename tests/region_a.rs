@@ -1,6 +1,6 @@
 use edpcli::protocol::region_a::{
-    analyze_iir_plain, stored_iir_crc, IIR_CRC_SEGMENTS, IIR_MAIN_CRC_BODY_LEN,
-    IIR_MAIN_CRC_OFFSET, IIR_MAIN_SIZE,
+    analyze_iir_plain, locate_region_a_from_geometry, stored_iir_crc, IIR_CRC_SEGMENTS,
+    IIR_MAIN_CRC_BODY_LEN, IIR_MAIN_CRC_OFFSET, IIR_MAIN_SIZE, REGION_A_TOTAL_SIZE,
 };
 
 fn synthetic_valid_iir() -> Vec<u8> {
@@ -58,4 +58,39 @@ fn single_byte_tamper_breaks_segment_and_main_crc() {
 fn parser_rejects_non_0x800_plaintext() {
     let error = analyze_iir_plain(&vec![0u8; IIR_MAIN_SIZE - 1]).unwrap_err();
     assert!(error.to_string().contains("2048"));
+}
+
+#[test]
+fn official_geometry_locator_matches_three_physical_lba7_region_a_pointers() {
+    // (cylinders, tracks/cylinder, sectors/track, bytes/sector, LBA7 StartSector)
+    let samples = [
+        (15_165u64, 255u32, 63u32, 512u32, 243_623_933u64), // Lexar
+        (15_297u64, 255u32, 63u32, 512u32, 245_744_513u64), // aigo
+        (14_955u64, 255u32, 63u32, 512u32, 240_250_283u64), // SanDisk
+    ];
+
+    for (cylinders, tracks, sectors, bytes, expected_lba) in samples {
+        let layout = locate_region_a_from_geometry(cylinders, tracks, sectors, bytes)
+            .expect("valid geometry");
+        assert_eq!(layout.start_lba, expected_lba);
+        assert_eq!(layout.size_bytes, REGION_A_TOTAL_SIZE as u64);
+        assert_eq!(layout.size_sectors, 6);
+        assert_eq!(
+            layout.start_byte_offset,
+            layout.chs_bytes - 0xE0000,
+            "official locator is CHS bytes minus 0xE0000"
+        );
+    }
+}
+
+#[test]
+fn geometry_locator_is_chs_based_not_physical_total_sector_based() {
+    let lexar = locate_region_a_from_geometry(15_165, 255, 63, 512).expect("Lexar geometry");
+    assert_eq!(lexar.chs_bytes / 512, 243_625_725);
+    assert_eq!(lexar.start_lba, 243_623_933);
+
+    // The physical device has 243,625,984 sectors, but the official locator
+    // deliberately uses DISK_GEOMETRY's CHS product instead.
+    assert_ne!(243_625_984u64 - lexar.start_lba, 0x700);
+    assert_eq!(243_625_725u64 - lexar.start_lba, 0x700);
 }

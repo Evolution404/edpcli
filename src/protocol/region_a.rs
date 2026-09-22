@@ -7,6 +7,53 @@
 //! is exposed here.
 
 pub const REGION_A_TOTAL_SIZE: usize = 0xC00;
+pub const REGION_A_CHS_TAIL_DISTANCE_BYTES: u64 = 0xE0000;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct RegionALayout {
+    pub chs_bytes: u64,
+    pub start_byte_offset: u64,
+    pub start_lba: u64,
+    pub size_bytes: u64,
+    pub size_sectors: u64,
+}
+
+/// Reproduces the Region A locator used by cemsusbregsiter.dll.
+///
+/// The official registration path obtains a classic DISK_GEOMETRY, computes
+/// Cylinders * TracksPerCylinder * SectorsPerTrack * BytesPerSector, subtracts
+/// 0xE0000 bytes, then divides by the sector size for the EDPF StartSector.
+/// The 0xC00-byte Region A extent is rounded up to a whole sector.
+pub fn locate_region_a_from_geometry(
+    cylinders: u64,
+    tracks_per_cylinder: u32,
+    sectors_per_track: u32,
+    bytes_per_sector: u32,
+) -> Option<RegionALayout> {
+    let sector_size = u64::from(bytes_per_sector);
+    if sector_size == 0 {
+        return None;
+    }
+
+    let chs_bytes = cylinders
+        .checked_mul(u64::from(tracks_per_cylinder))?
+        .checked_mul(u64::from(sectors_per_track))?
+        .checked_mul(sector_size)?;
+    let start_byte_offset = chs_bytes.checked_sub(REGION_A_CHS_TAIL_DISTANCE_BYTES)?;
+    let size_bytes = (REGION_A_TOTAL_SIZE as u64)
+        .checked_add(sector_size - 1)?
+        .checked_div(sector_size)?
+        .checked_mul(sector_size)?;
+
+    Some(RegionALayout {
+        chs_bytes,
+        start_byte_offset,
+        start_lba: start_byte_offset / sector_size,
+        size_bytes,
+        size_sectors: size_bytes / sector_size,
+    })
+}
+
 pub const IIR_MAIN_SIZE: usize = 0x800;
 pub const IIR_UNKNOWN_TAIL_OFFSET: usize = 0x800;
 pub const IIR_UNKNOWN_TAIL_SIZE: usize = 0x400;

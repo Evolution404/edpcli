@@ -172,6 +172,43 @@ fn physical_lexar_region_a_fixture_is_exact_and_stable() {
 }
 
 #[test]
+fn region_a_locator_evidence_closes_three_brand_chs_formula_without_closing_iir_binding() {
+    let locator: serde_json::Value = serde_json::from_str(include_str!(
+        "../audit/region_a/evidence/region_a_locator_algorithm_20260922.json"
+    ))
+    .unwrap();
+
+    assert_eq!(locator["status"], "COMPLETE");
+    assert_eq!(
+        locator["formula"]["for_512_byte_sectors"],
+        "RegionA_LBA = CHS_sectors - 0x700 = CHS_sectors - 1792"
+    );
+
+    let samples = locator["physical_cross_brand"].as_array().unwrap();
+    assert_eq!(samples.len(), 3);
+    for sample in samples {
+        assert_eq!(
+            sample["formula_region_a_lba"],
+            sample["decoded_lba7_entry1_start_sector"]
+        );
+        assert_eq!(
+            sample["formula_region_a_lba"],
+            sample["decoded_lba7_entry2_start_sector"]
+        );
+        assert_eq!(sample["decoded_lba7_region_size_bytes"], 0xC00);
+        assert_eq!(sample["prev_512_all_zero"], true);
+        assert_eq!(sample["next_512_all_zero"], true);
+    }
+
+    let evidence = evidence_modalities();
+    assert_eq!(evidence["S-REGIONA-LOCATOR"], "static");
+    assert_eq!(evidence["P-REGIONA-LOCATOR-3DISK"], "physical");
+    assert!(DOC.contains("Region A 物理定位算法已 COMPLETE"));
+    assert!(DOC.contains("sectormanage64::ReadIIR"));
+    assert!(DOC.contains("保持 PARTIAL"));
+}
+
+#[test]
 fn reproduced_official_key_candidate_is_explicitly_rejected_by_iir_crcs() {
     let derive: serde_json::Value = serde_json::from_str(include_str!(
         "../audit/region_a/evidence/derive_iir_key_official_20260922.json"

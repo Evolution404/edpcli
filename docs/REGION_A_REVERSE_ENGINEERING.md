@@ -28,7 +28,7 @@ Region A 不是 device tail window。它是 LBA7 compact EDPF entry1/entry2 指�
 
 含义：
 
-- `+0x000..+0x7ff` 已证明是 `SectorManageImp::ReadIIR/WriteIIR` 固定读写的 IIR 主表密文，producer/consumer、读写长度、AES cipher family 和真实物理 ciphertext 均有证据；但真实设备 AES key/context 尚未闭环，因此保持 PARTIAL。
+- `+0x000..+0x7ff` 与 `SectorManageImp::ReadIIR/WriteIIR` 的静态结构关系高度收敛，但独立的 PartInfo 地址链尚未完成物理同址绑定；0x800B 读写长度和 AES-256-CBC 已闭环，因此仍保持 PARTIAL。
 - `+0x800..+0xbff` 只有真实物理密文，主 `ReadIIR/WriteIIR` 不覆盖，producer/consumer 未定位，因此 UNKNOWN。
 
 机器 ledger：`audit/region_a/wire_byte_ledger.tsv`。
@@ -54,6 +54,41 @@ Region A 不是 device tail window。它是 LBA7 compact EDPF entry1/entry2 指�
 LBA7 compact key 字段已经单独闭环：默认密码 `0000aaaa` 可通过 old-format unwrap 得到 `key8 = dd4019e3637d390f`，且 CRC32(key8) 与 LBA7 存储值一致。
 
 这只证明 LBA7 compact key 自洽，不证明 `key8` 就是 Region A AES key，也不证明它如何扩展成 AES 上下文。
+
+### 3.1 Region A 物理定位算法已 COMPLETE：基于 CHS，不依赖厂商命令
+
+2026-09-22 已用 `cemsusbregsiter.dll` 机器码和三品牌实盘 LBA7 独立交叉验证闭环制盘/注册路径的定位算法：
+
+1. `CDiskFile::sub_10012c40` 对 `\\.\PhysicalDriveN` 调用标准 `IOCTL_DISK_GET_DRIVE_GEOMETRY (0x70000)`。
+2. 官方代码用三个 64 位乘法调用计算 `Cylinders * TracksPerCylinder * SectorsPerTrack * BytesPerSector`，结果写入 `CDiskFile+0x30/+0x34`。
+3. `CUsbRegsiter::CreateDiskFile` 把该 CHS 字节容量复制到 `this+0x6a0/+0x6a4`，sector size 写入 `this+0x6a8`。
+4. `sub_10040110 @ 0x10040110` 的机器码直接执行 `m_ullSize - 0x100000 + 0x20000`，即 `CHS_bytes - 0xE0000`。
+5. `CreatePartitions @ 0x1003de7a` 调用该函数，再用 `sub_10068590` 除以 sector size，把 64 位商写入 EDPF entry `+0x18/+0x1c`；同时把对齐后的 `0xC00` 写入 `+0x28/+0x2c`。
+6. `MountEdpPart` 原样复制这些字段到 `m_Partion.StartSector/PartitionSize`，并调用 `EdpEDisk.dll!EdpMountFile`。
+
+因此通用公式是：
+
+`RegionA_byte_offset = CHS_bytes - 0xE0000`
+
+`RegionA_LBA = (CHS_bytes - 0xE0000) / BytesPerSector`
+
+对 512B sector：
+
+`RegionA_LBA = CHS_sectors - 0x700 = CHS_sectors - 1792`
+
+三盘独立 LBA7 解码均精确匹配：
+
+| 设备 | CHS sectors | 公式 LBA | LBA7 entry1/2 StartSector | size |
+|---|---:|---:|---:|---:|
+| Lexar | 243625725 | 243623933 | 243623933 | 0xC00 |
+| aigo | 245746305 | 245744513 | 245744513 | 0xC00 |
+| SanDisk | 240252075 | 240250283 | 240250283 | 0xC00 |
+
+这同时修正旧的 `total_sectors - 2051` 表述：该式只在 Lexar 上因 `physical_total - CHS = 259 sectors` 而数值成立，不是官方通用算法。官方还另外取得 real size，但 Region A locator 明确使用 `DISK_GEOMETRY` 的 CHS 乘积。
+
+证据：`audit/region_a/evidence/region_a_locator_algorithm_20260922.json`。
+
+注意：这里 COMPLETE 的是 **cemsusbregsiter 制盘/注册路径的 Region A 物理定位**；它不自动把 `sectormanage64::ReadIIR` 的 PartInfo 地址链提升为同址 COMPLETE，后者仍按 §4.1 的边界保持 PARTIAL。
 
 ## 4. IIR producer / consumer
 
