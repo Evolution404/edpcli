@@ -1,0 +1,60 @@
+{
+  "status": "NEGATIVE_BINDING_CLOSED_SECTORINFO_IS_LBA8_EDPF_NOT_REGION_A",
+  "claim": "The runtime sectorInfo upload path is real, but independent decode plus EdpEDiskCtrl static provenance identify it as LBA8/EDPF backup metadata rather than Region A.",
+  "source_root": "/Users/zhangyuxi/Desktop/u_disk",
+  "aggregate": {
+    "upload_records_audited": 79,
+    "decoded_length_counts": {
+      "672": 52,
+      "688": 27
+    },
+    "independently_decoded_samples": 9,
+    "llgb_magic_pass": 9
+  },
+  "samples": [
+    {
+      "file": "edp_log/EdpEdiskLogs/EdpEdisk_20250514.log",
+      "sha256": "6513040ce5c83d8076f32723fc8ef83541e571aad13f78671ad153806695b8d0",
+      "line": 254,
+      "onlyID2Nd": "83BDB42D",
+      "sectorInfo_decoded_length": 672
+    },
+    {
+      "file": "edp_log/EdpEdiskLogs/EdpEdisk_20250623.log",
+      "sha256": "8d6e8594fa4edc4d1ece19c5c62390022dc63cc007276bcc946a230e76cbe740",
+      "line": 117,
+      "onlyID2Nd": "C8B810BC",
+      "sectorInfo_decoded_length": 688
+    },
+    {
+      "file": "edp_log/EdpEdiskLogs/EdpEdisk_20260226.log",
+      "sha256": "73724e86f2ef5c63a3b655b8eb57be28bcdc756fdac73b0a108abfb7a2c77882",
+      "line": 116,
+      "onlyID2Nd": "3942DE67",
+      "sectorInfo_decoded_length": 688,
+      "adjacent_prior_log": "ReadOrgSector 2!"
+    }
+  ],
+  "static_provenance": {
+    "binary": "VRV/cems/ydcc/edpediskctrl.dll",
+    "binary_sha256": "5be85c0f85dc65dd8f89e59a78f584a8325e5208441fc461e2a612501a5b3e08",
+    "decompile_sha256": "e904e8858bd9e436aa39287d2f4a70d1df9f09b9ba74f49dbdf964a67eb896e4",
+    "read_function": "ReadOrgSector / sub_10013140",
+    "default_relative_sector": 8,
+    "read_bytes": 512,
+    "address_rule": "SetFilePointer(base + relative_sector * sector_size), with relative_sector defaulting to 8"
+  },
+  "independent_decoder": {
+    "script": "analyze/scripts/decode_sectorinfo.py",
+    "script_sha256": "f332d46b1f7e122dba82088111e50900d445c3c223510623696f34e7549f5c4f",
+    "report": "analyze/last/exe_self_generated/sectorinfo_decoded/report.json",
+    "report_sha256": "65974afedba311b98d1e5f025f7af43951518d69a7bb57f4844db6aebb3b6892",
+    "result": "9/9 decode to LLGB + <ELABEL> LBA8 plaintext followed by one EDPF entry",
+    "layouts": [
+      "512-byte LBA8 plaintext + 160-byte appended EDPF metadata",
+      "512-byte LBA8 plaintext + 176-byte appended EDPF metadata"
+    ]
+  },
+  "conclusion": "sectorInfo is not Region A and must not be cited as Region A upload evidence.",
+  "remaining_region_a_upload_question": "No independently verified network-upload path for the 0xC00 Region A physical extent has been found yet."
+}

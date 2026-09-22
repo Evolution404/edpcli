@@ -150,6 +150,18 @@ ReadIIR 和 WriteIIR 都使用 device tree node `+0x18` 计算物理位置，并
 
 这里 COMPLETE 的只是**命令传输和响应解码规则**。真实 Lexar 的 512B `FE 06` DATA-IN 尚未成功捕获，因此 §4.1 的物理同址状态仍保持 PARTIAL。
 
+### 4.3 `sectorInfo` 上传链已明确排除为 Region A
+
+2026-09-22 对运行日志、`EdpEDiskCtrl.dll` 静态实现和已有独立解码器交叉复核后，可以关闭此前“`sectorInfo` 可能就是 Region A 上报数据”的候选：
+
+- `CEdpDiskControl::UpLoadBackupInfo` 确实把 `sectorInfo` 放入上传 JSON；79 条日志样本的 Base64 解码长度为 672B（52 条）或 688B（27 条）。
+- `ReadOrgSector/sub_10013140` 在未显式传入相对扇区时把 `var_12` 设为 8，再按 `(base + 8) * sector_size` 定位并读取 512B；这条 producer 路径锚定的是 LBA8 类数据，而不是磁盘尾部 Region A。
+- `analyze/scripts/decode_sectorinfo.py` 独立复核 9 个 `sectorInfo` 样本，9/9 都还原出 `LLGB + <ELABEL>` 的 LBA8 明文；其后追加 160B 或 176B EDPF 元数据。
+- 因此这条上传链的真实结构是“LBA8 明文 + EDPF 备份元数据”，与 0xC00 Region A 物理块不是同一对象。
+
+结论：**`sectorInfo` 不能再作为 Region A 上传服务器的证据。** 是否存在另一条真正上传 Region A 的网络链仍然是开放问题。
+
+机器证据：`audit/region_a/evidence/sectorinfo_upload_log_20260922.json`。
 ## 5. AES 算法、默认 Init key 与版本 profile
 
 `sub_1800092c0/sub_180009390` 调用 `sub_18001c560()` 得到 `EVP_CIPHER` descriptor。早期仅依据 OpenSSL 注册字符串曾误判为 AES-192-CBC；2026-09-22 已用 descriptor 本体纠正。
@@ -311,10 +323,12 @@ ReadIIR 和 WriteIIR 都使用 device tree node `+0x18` 计算物理位置，并
 
 当前最高优先级已经从“继续猜 key”收敛为物理绑定、producer profile 和尾部用途三条线：
 
-1. 使用已经闭环的 `FE 06 + 512B DATA-IN + AES-256-ECB` 规则，只读捕获当前 Lexar 的真实 PartInfo 响应；直接验证 `PartInfo[2].sector_num == 243624189`。
-2. 当前 x64 `Init -> core+0x00 -> ReadIIR/WriteIIR/BackupIIR` 直接数据流已闭环；后续重点转为寻找**历史 producer/profile**，以及有证据时再追间接内存覆盖，而不是继续假设存在未见的 `SetCoreKey` API。
-3. 动态追踪真实 Windows 客户端的 `sub_180009390` 调用点仍有价值，用于观测 runtime key buffer 是否确实等于当前 Init default key。
-4. 修复官方 InitIIR Unicorn harness，使其真正到达 WriteDev，再用生成 plaintext/ciphertext做 producer round-trip。
-5. 独立追 Region A `+0x800..+0xbff` 的 producer/consumer，不把这 0x400B 强行归入主 IIR。
+1. 继续闭环 `cemsusbregsiter::MountEdpPart -> EdpMountFile -> IOCTL 0x8200e000 -> EdpEDisk64.sys`，精确映射 EDPF type2/type4 的 `StartSector/sector_size/partition_size` 与驱动 backing offset/I/O boundary，并继续寻找对 `+0x800..+0xbff` 的实际读写调用者。
+2. 独立追 Region A `+0x800..+0xbff` 的 producer/consumer 和加密配置，不把这 0x400B 强行归入主 IIR。
+3. 当前 x64 `Init -> core+0x00 -> ReadIIR/WriteIIR/BackupIIR` 直接数据流已闭环；后续重点转为寻找**历史 producer/profile**，以及有证据时再追间接内存覆盖，而不是继续假设存在未见的 `SetCoreKey` API。
+4. 动态追踪真实 Windows 客户端的 `sub_180009390` 调用点仍有价值，用于观测 runtime key buffer 是否确实等于当前 Init default key。
+5. 修复官方 InitIIR Unicorn harness，使其真正到达 WriteDev，再用生成 plaintext/ciphertext 做 producer round-trip。
+
+当前 Lexar 已有实测表明不识别上述 `FE 06` controller 协议；因此 `FE 06` 仅保留为 Netac 静态 profile 证据，不再作为当前 Lexar 的主研究路径。
 
 禁止把当前 `8eeaa206...` candidate、LBA7 key8、file_key 或任意扫描结果直接升级为真实 key，除非通过第 9 节全部门禁。

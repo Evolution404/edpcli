@@ -458,3 +458,28 @@ fn partinfo_transport_uses_readonly_fe06_and_aes256_ecb_but_physical_response_is
     assert!(DOC.contains("**AES-256-ECB**"));
     assert!(DOC.contains("真实 Lexar 的 512B `FE 06` DATA-IN 尚未成功捕获"));
 }
+#[test]
+fn sectorinfo_upload_path_is_closed_as_lba8_edpf_not_region_a() {
+    let evidence: serde_json::Value = serde_json::from_str(include_str!(
+        "../audit/region_a/evidence/sectorinfo_upload_log_20260922.json"
+    ))
+    .unwrap();
+
+    assert_eq!(
+        evidence["status"],
+        "NEGATIVE_BINDING_CLOSED_SECTORINFO_IS_LBA8_EDPF_NOT_REGION_A"
+    );
+    assert_eq!(evidence["aggregate"]["upload_records_audited"], 79);
+    assert_eq!(evidence["aggregate"]["decoded_length_counts"]["672"], 52);
+    assert_eq!(evidence["aggregate"]["decoded_length_counts"]["688"], 27);
+    assert_eq!(evidence["aggregate"]["independently_decoded_samples"], 9);
+    assert_eq!(evidence["aggregate"]["llgb_magic_pass"], 9);
+    assert_eq!(evidence["static_provenance"]["default_relative_sector"], 8);
+    assert_eq!(evidence["static_provenance"]["read_bytes"], 512);
+    assert_eq!(
+        evidence["conclusion"],
+        "sectorInfo is not Region A and must not be cited as Region A upload evidence."
+    );
+    assert!(DOC.contains("`sectorInfo` 上传链已明确排除为 Region A"));
+    assert!(DOC.contains("`sectorInfo` 不能再作为 Region A 上传服务器的证据"));
+}
