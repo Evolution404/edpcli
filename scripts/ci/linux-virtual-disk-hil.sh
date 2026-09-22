@@ -53,7 +53,7 @@ if mountpoint -q "$mount_dir"; then
   exit 1
 fi
 
-# Rust HIL 测试会把 LBA0-13 bit-for-bit 恢复。重新挂载并读取文件，证明分区表和文件系统
+# Rust HIL 测试会把 LBA0-12 bit-for-bit 恢复。重新挂载并读取文件，证明分区表和文件系统
 # 仍然完整，而不是仅仅在同一 raw fd 上读到了缓存。
 sudo mount "$partition" "$mount_dir"
 marker="$(sudo cat "$mount_dir/marker.txt")"

@@ -7,7 +7,8 @@
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
-use crate::application::write::{guard_usb_disk, Prompter};
+use crate::application::device::guard_usb_disk;
+use crate::application::Prompter;
 use crate::backup_catalog::{self, BackupCatalog};
 use crate::common::{EdpCliError, EdpCliResult, EXIT_CANCELLED, EXIT_TARGET};
 use crate::diskio::{self, BackupEntry};

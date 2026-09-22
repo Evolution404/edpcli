@@ -49,9 +49,10 @@ pub fn neg_id_bin() -> Option<PathBuf> {
     p.exists().then_some(p)
 }
 
-/// 整份 13 扇协议夹具 → 一张"盘"的 LBA0-12 镜像。
+/// 严格读取一张 LBA0-12 / 6656B 协议镜像；其它长度直接拒绝。
 pub fn load_disk_image(key: &str) -> Option<Vec<u8>> {
-    fs::read(fixture_bin(key)?).ok()
+    let data = fs::read(fixture_bin(key)?).ok()?;
+    (data.len() == edpcli::common::METADATA_IMAGE_LEN).then_some(data)
 }
 
 pub fn read_fn_of(
@@ -132,7 +133,7 @@ pub fn golden(key: &str) -> Golden {
 pub fn converted_image(key: &str) -> Option<(Vec<u8>, String)> {
     let data = load_disk_image(key)?;
     let (_, did) = fixture(key)?;
-    let r = convert(&read_fn_of(&data), did, None, false).ok()?;
+    let r = convert(&read_fn_of(&data), did, None, &mut |_| {}).ok()?;
     let mut conv = data.clone();
     for (lba, sector) in [
         (0usize, &r.lba0),

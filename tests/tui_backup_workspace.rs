@@ -1,7 +1,11 @@
 mod common;
 
 use edpcli::application::scan_backup_workspace;
-use edpcli::tui::state::{AppState, NavCommand, Workspace};
+use edpcli::tui::{
+    render,
+    state::{AppState, NavCommand, Workspace},
+};
+use ratatui::{backend::TestBackend, style::Color, Terminal};
 
 #[test]
 fn backup_workspace_uses_one_based_global_selector_indices() {
@@ -21,6 +25,43 @@ fn vim_horizontal_navigation_switches_workspaces() {
 
     state.navigate(NavCommand::Left, 20);
     assert_eq!(state.workspace(), Workspace::Devices);
+}
+
+#[test]
+fn tab_navigation_switches_workspaces_without_removing_vim_navigation() {
+    let mut state = AppState::new();
+    assert_eq!(state.workspace(), Workspace::Devices);
+    state.navigate(NavCommand::NextWorkspace, 20);
+    assert_eq!(state.workspace(), Workspace::Backups);
+    state.navigate(NavCommand::PreviousWorkspace, 20);
+    assert_eq!(state.workspace(), Workspace::Devices);
+}
+
+fn highlighted_text(state: &AppState) -> String {
+    let backend = TestBackend::new(140, 32);
+    let mut terminal = Terminal::new(backend).expect("test terminal");
+    terminal
+        .draw(|frame| render::draw(frame, state))
+        .expect("draw TUI");
+    terminal
+        .backend()
+        .buffer()
+        .content()
+        .iter()
+        .filter(|cell| cell.style().bg == Some(Color::Cyan))
+        .map(|cell| cell.symbol())
+        .collect()
+}
+
+#[test]
+fn workspace_tabs_are_always_visible_and_active_page_is_highlighted() {
+    let mut state = AppState::new();
+    let highlighted = highlighted_text(&state);
+    assert!(highlighted.contains('设'), "{highlighted}");
+
+    state.navigate(NavCommand::NextWorkspace, 20);
+    let highlighted = highlighted_text(&state);
+    assert!(highlighted.contains('份'), "{highlighted}");
 }
 
 #[test]

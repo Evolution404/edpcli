@@ -65,7 +65,7 @@ try {
     }
 
     # 强制 detach/reattach，排除同一个 raw handle 或缓存造成的假阳性，并验证原始分区表、
-    # NTFS 和文件内容在 LBA0-13 roundtrip 后仍可恢复。
+    # NTFS 和文件内容在 LBA0-12 roundtrip 后仍可恢复。
     Detach-HilVhd
     Mount-DiskImage -ImagePath $vhd | Out-Null
     $disk = Get-DiskImage -ImagePath $vhd | Get-Disk

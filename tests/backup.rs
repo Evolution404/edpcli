@@ -483,6 +483,30 @@ fn scan_backup_dir_reports_ok_mismatch_missing_and_unrecognized() {
     assert_eq!(odd_e.sha256_ok, Sha256Status::Ok);
 }
 
+#[test]
+fn scan_backup_dir_rejects_legacy_7168_byte_images() {
+    let Some(original) = load_disk_image("netac") else {
+        eprintln!("跳过: 真实备份不可用");
+        return;
+    };
+    let tmp = TmpDir::new("scan_backup_reject_7168");
+    let mut legacy = original;
+    legacy.extend_from_slice(&[0u8; SECTOR]);
+    let path = write_backup(
+        &tmp.0,
+        "disk6_122880000_vid0dd8_pid2005_disk&ven_netac&prod_onlydisk_onlyid1402259934_20260910_172399.bin",
+        &legacy,
+    );
+
+    let entries = scan_backup_dir(&tmp.0);
+    let entry = entries
+        .iter()
+        .find(|entry| entry.path == path)
+        .expect("legacy-sized backup entry");
+    assert_eq!(legacy.len(), METADATA_IMAGE_LEN + SECTOR);
+    assert!(!entry.size_ok, "7168B/LBA0-13 旧备份必须判定为无效长度");
+}
+
 #[cfg(unix)]
 #[test]
 fn sha256_sidecar_symlink_is_not_followed() {
@@ -881,4 +905,104 @@ fn delete_without_target_enters_global_picker_then_confirms() {
     assert_eq!(backup_delete(&tmp.0, &[], false, &mut prompt), 0);
     assert!(!older.exists());
     assert!(newer.exists());
+}
+
+// ══════════════════════════════════════════════════════════════════
+// CLI 与 TUI 共用删除/保留策略服务 (application::backup)
+// ══════════════════════════════════════════════════════════════════
+const SHARED_GROUP_A: &str = "disk6_122880000_vid0dd8_pid2005_disk&ven_netac&prod_onlydisk_onlyid1402259934_20260910_170000.bin";
+const SHARED_GROUP_B: &str = "disk6_122880000_vid0dd8_pid2005_disk&ven_netac&prod_onlydisk_onlyid1402259934_20260910_170001.bin";
+
+#[test]
+fn cli_and_tui_delete_share_retention_floor_and_execution() {
+    let Some(original) = load_disk_image("netac") else {
+        eprintln!("跳过: 真实备份不可用");
+        return;
+    };
+    let cli_tmp = TmpDir::new("shared_floor_cli");
+    let tui_tmp = TmpDir::new("shared_floor_tui");
+    for dir in [&cli_tmp.0, &tui_tmp.0] {
+        write_backup(dir, SHARED_GROUP_A, &original);
+        write_backup(dir, SHARED_GROUP_B, &original);
+    }
+
+    // 同盘两份时删一份: 两个入口都允许且都真删(含 sidecar)。
+    let mut unused = ScriptPrompter::yes();
+    assert_eq!(
+        backup_delete(&cli_tmp.0, &[SHARED_GROUP_A.to_string()], true, &mut unused),
+        0
+    );
+    assert!(!cli_tmp.0.join(SHARED_GROUP_A).exists());
+
+    let sha = edpcli::sha256::sha256_hex(&original);
+    assert_eq!(
+        edpcli::application::delete_backup_exact(&tui_tmp.0, &tui_tmp.0.join(SHARED_GROUP_A), &sha),
+        Ok(())
+    );
+    assert!(!tui_tmp.0.join(SHARED_GROUP_A).exists());
+    assert!(!tui_tmp.0.join(format!("{SHARED_GROUP_A}.sha256")).exists());
+
+    // 同盘仅剩一份: 两个入口都以同一保留底线拒绝，盘上文件保留。
+    assert_eq!(
+        backup_delete(&cli_tmp.0, &[SHARED_GROUP_B.to_string()], true, &mut unused),
+        5
+    );
+    let refusal =
+        edpcli::application::delete_backup_exact(&tui_tmp.0, &tui_tmp.0.join(SHARED_GROUP_B), &sha)
+            .unwrap_err();
+    assert!(refusal.contains("至少保留 1 份"), "{refusal}");
+    assert!(cli_tmp.0.join(SHARED_GROUP_B).exists());
+    assert!(tui_tmp.0.join(SHARED_GROUP_B).exists());
+}
+
+#[test]
+fn prune_plan_composition_deletes_only_snapshots_beyond_keep() {
+    let Some(original) = load_disk_image("netac") else {
+        eprintln!("跳过: 真实备份不可用");
+        return;
+    };
+    let Some((converted, _)) = converted_image("netac") else {
+        eprintln!("跳过: 真实备份不可用");
+        return;
+    };
+    let tmp = TmpDir::new("prune_service");
+    write_backup(&tmp.0, SHARED_GROUP_A, &original);
+    for ts in ["170001", "170002", "170003"] {
+        let name = format!(
+            "disk6_122880000_vid0dd8_pid2005_disk&ven_netac&prod_onlydisk_onlyid1402259934_nopwd_20260910_{ts}.bin"
+        );
+        write_backup(&tmp.0, &name, &converted);
+    }
+
+    let session = edpcli::application::backup::DeleteSession::open(&tmp.0);
+    let plan = session.plan_prune(0).expect("原盘在场, keep=0 可清光快照");
+    assert_eq!(plan.targets.len(), 3);
+    let stats = plan.prune_stats.as_ref().expect("plan_prune 携带统计");
+    assert_eq!(stats.originals, 1);
+    assert_eq!(stats.retained_snapshots, 0);
+    for (_, result) in session.execute(&plan) {
+        assert_eq!(result, Ok(()), "逐条执行不得阻断后续");
+    }
+    assert!(tmp.0.join(SHARED_GROUP_A).exists(), "加密原盘永不自动删除");
+    for ts in ["170001", "170002", "170003"] {
+        assert!(!tmp
+            .0
+            .join(format!(
+                "disk6_122880000_vid0dd8_pid2005_disk&ven_netac&prod_onlydisk_onlyid1402259934_nopwd_20260910_{ts}.bin"
+            ))
+            .exists());
+    }
+
+    // 无原盘的组即使 keep=0 也强制保留最新一份(prune_candidates 的 keep.max(1))。
+    let lone = TmpDir::new("prune_service_lone");
+    write_backup(
+        &lone.0,
+        "disk6_122880000_vid0dd8_pid2005_disk&ven_netac&prod_onlydisk_onlyid9999999999_nopwd_20260910_170000.bin",
+        &converted,
+    );
+    let session = edpcli::application::backup::DeleteSession::open(&lone.0);
+    let plan = session
+        .plan_prune(0)
+        .expect("无原盘组强制保留, 不触发底线拒绝");
+    assert!(plan.targets.is_empty());
 }

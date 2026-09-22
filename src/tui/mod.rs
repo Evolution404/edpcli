@@ -3,6 +3,7 @@
 //! Business work is delegated to `crate::application`; this module owns only terminal lifecycle,
 //! event dispatch and rendering.
 
+pub mod animation;
 pub mod command;
 pub mod event;
 pub mod render;
@@ -10,7 +11,7 @@ pub mod state;
 pub mod task;
 
 use std::io::{self, IsTerminal, Stdout};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use crossterm::{
     cursor::{Hide, Show},
@@ -27,6 +28,8 @@ use task::TaskHub;
 const RESUME_KIND_FLAG: &str = "--_resume-kind";
 const RESUME_DISK_FLAG: &str = "--_resume-disk";
 const RESUME_BACKUP_FLAG: &str = "--_resume-backup";
+const RESUME_ONLYID_FLAG: &str = "--_resume-onlyid";
+const RESUME_DEVICE_ID_FLAG: &str = "--_resume-device-id";
 
 /// Serialize a confirmed write intent for an elevated TUI restart.
 ///
@@ -48,6 +51,16 @@ pub fn resume_argv(intent: &state::WriteIntent) -> Vec<String> {
         argv.push(RESUME_BACKUP_FLAG.to_string());
         argv.push(path.to_string_lossy().into_owned());
     }
+    if let Some(identity) = &intent.expected_identity {
+        if let Some(onlyid) = &identity.onlyid {
+            argv.push(RESUME_ONLYID_FLAG.to_string());
+            argv.push(onlyid.clone());
+        }
+        if let Some(device_id) = &identity.device_id {
+            argv.push(RESUME_DEVICE_ID_FLAG.to_string());
+            argv.push(device_id.clone());
+        }
+    }
     argv
 }
 
@@ -59,6 +72,8 @@ pub fn parse_resume_args(argv: &[String]) -> Result<Option<state::WriteIntent>, 
     let mut kind = None;
     let mut disk = None;
     let mut backup = None;
+    let mut onlyid = None;
+    let mut device_id = None;
     let mut saw_resume = false;
 
     let mut i = usize::from(argv.first().is_some_and(|arg| arg == "tui"));
@@ -104,6 +119,20 @@ pub fn parse_resume_args(argv: &[String]) -> Result<Option<state::WriteIntent>, 
                 saw_resume = true;
                 backup = Some(std::path::PathBuf::from(take(RESUME_BACKUP_FLAG)?));
             }
+            RESUME_ONLYID_FLAG => {
+                if onlyid.is_some() {
+                    return Err(format!("错误: {RESUME_ONLYID_FLAG} 重复指定"));
+                }
+                saw_resume = true;
+                onlyid = Some(take(RESUME_ONLYID_FLAG)?);
+            }
+            RESUME_DEVICE_ID_FLAG => {
+                if device_id.is_some() {
+                    return Err(format!("错误: {RESUME_DEVICE_ID_FLAG} 重复指定"));
+                }
+                saw_resume = true;
+                device_id = Some(take(RESUME_DEVICE_ID_FLAG)?);
+            }
             other => return Err(format!("错误: tui 不认识内部 resume 参数 {other}")),
         }
         i += 1;
@@ -121,7 +150,13 @@ pub fn parse_resume_args(argv: &[String]) -> Result<Option<state::WriteIntent>, 
         state::WriteKind::Restore if backup.is_none() => {
             Err(format!("错误: restore resume 缺少 {RESUME_BACKUP_FLAG}"))
         }
-        _ => Ok(Some(state::WriteIntent { kind, disk, backup })),
+        _ => Ok(Some(state::WriteIntent {
+            kind,
+            disk,
+            backup,
+            expected_identity: (onlyid.is_some() || device_id.is_some())
+                .then_some(state::ExpectedIdentity { onlyid, device_id }),
+        })),
     }
 }
 
@@ -200,6 +235,9 @@ fn dispatch_nav_command(
     backup_dir: &std::path::Path,
     viewport_height: usize,
 ) -> StateEffect {
+    if let Some(effect) = state.guard_critical_command(command) {
+        return effect;
+    }
     match command {
         NavCommand::Refresh => {
             match state.workspace() {
@@ -232,24 +270,54 @@ fn dispatch_nav_command(
             StateEffect::None
         }
         NavCommand::BeginApply => {
-            if let Some(disk) = state.selected_device_disk() {
-                state.begin_write_wizard(state::WriteKind::Apply, disk, None);
+            if let Some(row) = state.selected_device() {
+                let disk = row.disk;
+                let identity = state::ExpectedIdentity {
+                    onlyid: row.onlyid.clone(),
+                    device_id: row.device_id.clone(),
+                };
+                state.begin_write_wizard_for_identity(
+                    state::WriteKind::Apply,
+                    disk,
+                    None,
+                    Some(identity),
+                );
             }
             StateEffect::None
         }
         NavCommand::BeginRestore => {
-            if let (Some(disk), Some(backup)) =
-                (state.selected_device_disk(), state.selected_backup_path())
+            if let (Some(row), Some(backup)) =
+                (state.selected_device(), state.selected_backup_path())
             {
-                state.begin_write_wizard(state::WriteKind::Restore, disk, Some(backup));
+                let disk = row.disk;
+                let identity = state::ExpectedIdentity {
+                    onlyid: row.onlyid.clone(),
+                    device_id: row.device_id.clone(),
+                };
+                state.begin_write_wizard_for_identity(
+                    state::WriteKind::Restore,
+                    disk,
+                    Some(backup),
+                    Some(identity),
+                );
             } else {
                 state.set_notice("恢复需要先在设备页选定目标 U 盘，再进入备份页选择备份。");
             }
             StateEffect::None
         }
         NavCommand::BeginBackupCreate => {
-            if let Some(disk) = state.selected_device_disk() {
-                state.begin_write_wizard(state::WriteKind::BackupCreate, disk, None);
+            if let Some(row) = state.selected_device() {
+                let disk = row.disk;
+                let identity = state::ExpectedIdentity {
+                    onlyid: row.onlyid.clone(),
+                    device_id: row.device_id.clone(),
+                };
+                state.begin_write_wizard_for_identity(
+                    state::WriteKind::BackupCreate,
+                    disk,
+                    None,
+                    Some(identity),
+                );
             } else {
                 state.set_notice("创建备份需要先在设备页选定 U 盘。");
             }
@@ -295,6 +363,10 @@ fn palette_action_to_nav(action: command::PaletteAction) -> NavCommand {
 fn run_loop(resume: Option<state::WriteIntent>) -> io::Result<LoopExit> {
     let mut session = TerminalSession::enter()?;
     let mut state = AppState::new();
+    let mut last_animation_tick = Instant::now();
+    let motion_mode = animation::MotionMode::from_env();
+    let mut redraw_requested = true;
+    let mut last_render_at: Option<Instant> = None;
     if let Some(intent) = resume {
         state.begin_write_wizard(intent.kind, intent.disk, intent.backup);
     }
@@ -306,211 +378,270 @@ fn run_loop(resume: Option<state::WriteIntent>) -> io::Result<LoopExit> {
     state.set_device_scan_pending(true);
     state.set_backup_scan_pending(true);
 
-    loop {
-        let updates = tasks.poll();
-        if let Some(rows) = updates.devices {
-            state.replace_devices(rows);
-        }
-        if let Some(rows) = updates.backups {
-            state.replace_backups(rows);
-        }
-        if let Some(message) = updates.device_error {
-            state.set_device_scan_pending(false);
-            state.set_notice(message);
-        }
-        if let Some(message) = updates.backup_error {
-            state.set_backup_scan_pending(false);
-            state.set_notice(message);
-        }
-        if let Some(message) = updates.write_progress {
-            state.set_write_progress(message);
-        }
-        if let Some(result) = updates.write {
-            let refresh_backups = result.is_ok()
-                && state
-                    .wizard()
-                    .is_some_and(|wizard| wizard.kind == state::WriteKind::BackupCreate);
-            state.finish_write(result);
-            if refresh_backups {
-                tasks.request_backup_scan(backup_dir.clone());
-                state.set_backup_scan_pending(true);
-            }
-        }
-        if let Some(result) = updates.backup_verify {
-            match result {
-                Ok(()) => state.set_notice("当前备份校验通过：大小与 SHA-256 正常。"),
-                Err(message) => state.set_notice(message),
-            }
-        }
-        if let Some(result) = updates.backup_delete {
-            let refresh_backups = result.is_ok();
-            state.finish_backup_delete(result);
-            if refresh_backups {
-                tasks.request_backup_scan(backup_dir.clone());
-                state.set_backup_scan_pending(true);
-            }
-        }
-        if let Some(result) = updates.inspect {
-            match result {
-                Ok(workspace) => state.replace_inspect(workspace),
-                Err(message) => {
-                    state.set_inspect_pending(false);
-                    state.set_notice(message);
+    let result = (|| -> io::Result<LoopExit> {
+        loop {
+            let now = Instant::now();
+            if let Some(interval) = motion_mode.tick_interval() {
+                if now.duration_since(last_animation_tick) >= interval {
+                    state.advance_animation();
+                    last_animation_tick = now;
+                    redraw_requested = true;
                 }
             }
-        }
-        session.terminal.draw(|frame| render::draw(frame, &state))?;
-        if !ct_event::poll(Duration::from_millis(100))? {
-            continue;
-        }
 
-        match ct_event::read()? {
-            ct_event::Event::Key(key) => {
-                if state
-                    .backup_delete()
-                    .is_some_and(|delete| delete.stage == state::WizardStage::Confirm)
-                {
-                    match key.code {
-                        ct_event::KeyCode::Char(ch)
-                            if !key.modifiers.contains(ct_event::KeyModifiers::CONTROL) =>
-                        {
-                            state.push_backup_delete_confirmation(ch);
-                            continue;
-                        }
-                        ct_event::KeyCode::Backspace => {
-                            state.backspace_backup_delete_confirmation();
-                            continue;
-                        }
-                        ct_event::KeyCode::Enter => {
-                            if let Some((path, expected_sha256)) =
-                                state.submit_backup_delete_confirmation()
+            let updates = tasks.poll();
+            redraw_requested |= updates.has_updates();
+            if let Some(rows) = updates.devices {
+                state.replace_devices(rows);
+            }
+            if let Some(rows) = updates.backups {
+                state.replace_backups(rows);
+            }
+            if let Some(message) = updates.device_error {
+                state.set_device_scan_pending(false);
+                state.set_notice(message);
+            }
+            if let Some(message) = updates.backup_error {
+                state.set_backup_scan_pending(false);
+                state.set_notice(message);
+            }
+            if let Some((_operation_id, event)) = updates.write_progress {
+                state.set_write_progress(event);
+            }
+            if let Some((_operation_id, result)) = updates.write {
+                let refresh_backups = result.is_ok()
+                    && state
+                        .wizard()
+                        .is_some_and(|wizard| wizard.kind == state::WriteKind::BackupCreate);
+                state.finish_write(result);
+                if refresh_backups {
+                    tasks.request_backup_scan(backup_dir.clone());
+                    state.set_backup_scan_pending(true);
+                }
+            }
+            if let Some((path, result)) = updates.backup_verify {
+                match result {
+                    Ok(()) => state.set_notice(format!(
+                        "备份 {} 校验通过：大小与 SHA-256 正常。",
+                        path.file_name()
+                            .and_then(|name| name.to_str())
+                            .unwrap_or("<无效文件名>")
+                    )),
+                    Err(message) => state.set_notice(message),
+                }
+            }
+            if let Some((_operation_id, result)) = updates.backup_delete {
+                let refresh_backups = result.is_ok();
+                state.finish_backup_delete(result);
+                if refresh_backups {
+                    tasks.request_backup_scan(backup_dir.clone());
+                    state.set_backup_scan_pending(true);
+                }
+            }
+            if let Some(result) = updates.inspect {
+                match result {
+                    Ok(workspace) => state.replace_inspect(workspace),
+                    Err(message) => {
+                        state.set_inspect_pending(false);
+                        state.set_notice(message);
+                    }
+                }
+            }
+            if state.take_deferred_exit() == StateEffect::ExitRequested {
+                break;
+            }
+
+            let now = Instant::now();
+            const MIN_RENDER_INTERVAL: Duration = Duration::from_millis(16);
+            if redraw_requested
+                && last_render_at.is_none_or(|last| now.duration_since(last) >= MIN_RENDER_INTERVAL)
+            {
+                session.terminal.draw(|frame| render::draw(frame, &state))?;
+                redraw_requested = false;
+                last_render_at = Some(now);
+            }
+            let poll_timeout = if redraw_requested {
+                last_render_at
+                    .map(|last| MIN_RENDER_INTERVAL.saturating_sub(now.duration_since(last)))
+                    .unwrap_or_default()
+                    .min(Duration::from_millis(animation::TICK_INTERVAL_MS))
+            } else {
+                Duration::from_millis(animation::TICK_INTERVAL_MS)
+            };
+            if !ct_event::poll(poll_timeout)? {
+                continue;
+            }
+
+            redraw_requested = true;
+            match ct_event::read()? {
+                ct_event::Event::Key(key) => {
+                    if !event::is_actionable_key(&key) {
+                        continue;
+                    }
+                    if state
+                        .backup_delete()
+                        .is_some_and(|delete| delete.stage == state::WizardStage::Confirm)
+                    {
+                        match key.code {
+                            ct_event::KeyCode::Char(ch)
+                                if !key.modifiers.contains(ct_event::KeyModifiers::CONTROL) =>
                             {
-                                tasks.request_backup_delete(
-                                    path,
-                                    expected_sha256,
-                                    backup_dir.clone(),
-                                );
+                                state.push_backup_delete_confirmation(ch);
+                                continue;
                             }
-                            continue;
-                        }
-                        ct_event::KeyCode::Esc => {
-                            let _ = state.navigate(NavCommand::Escape, 1);
-                            continue;
-                        }
-                        _ => {}
-                    }
-                }
-
-                if state
-                    .wizard()
-                    .is_some_and(|wizard| wizard.stage == state::WizardStage::Confirm)
-                {
-                    match key.code {
-                        ct_event::KeyCode::Char(ch)
-                            if !key.modifiers.contains(ct_event::KeyModifiers::CONTROL) =>
-                        {
-                            state.push_wizard_confirmation(ch);
-                            continue;
-                        }
-                        ct_event::KeyCode::Backspace => {
-                            state.backspace_wizard_confirmation();
-                            continue;
-                        }
-                        ct_event::KeyCode::Enter => {
-                            if let Some(intent) = state.submit_wizard_confirmation() {
-                                if !crate::elevate::is_root() {
-                                    return Ok(LoopExit::Elevate(intent));
-                                }
-                                if intent.kind == state::WriteKind::BackupCreate {
-                                    tasks.request_backup_create(intent.disk, backup_dir.clone());
-                                } else {
-                                    tasks.request_write(intent, backup_dir.clone());
-                                }
+                            ct_event::KeyCode::Backspace => {
+                                state.backspace_backup_delete_confirmation();
+                                continue;
                             }
-                            continue;
+                            ct_event::KeyCode::Enter => {
+                                if let Some((path, expected_sha256)) =
+                                    state.submit_backup_delete_confirmation()
+                                {
+                                    if let Err(message) = tasks.request_backup_delete(
+                                        path,
+                                        expected_sha256,
+                                        backup_dir.clone(),
+                                    ) {
+                                        state.finish_backup_delete(Err(message.to_string()));
+                                    }
+                                }
+                                continue;
+                            }
+                            ct_event::KeyCode::Esc => {
+                                let _ = state.navigate(NavCommand::Escape, 1);
+                                continue;
+                            }
+                            _ => {}
                         }
-                        ct_event::KeyCode::Esc => {
-                            let _ = state.navigate(NavCommand::Escape, 1);
-                            continue;
-                        }
-                        _ => {}
                     }
-                }
 
-                if matches!(
-                    state.input_mode(),
-                    state::InputMode::Search | state::InputMode::Command
-                ) {
-                    match key.code {
-                        ct_event::KeyCode::Char(ch)
-                            if !key.modifiers.contains(ct_event::KeyModifiers::CONTROL) =>
-                        {
-                            state.push_input_char(ch);
-                            continue;
-                        }
-                        ct_event::KeyCode::Backspace => {
-                            state.backspace_input();
-                            continue;
-                        }
-                        ct_event::KeyCode::Esc => {
-                            let _ = state.navigate(NavCommand::Escape, 1);
-                            continue;
-                        }
-                        ct_event::KeyCode::Enter => {
-                            if state.input_mode() == state::InputMode::Search {
-                                state.submit_search();
-                            } else {
-                                let input = state.take_input();
-                                state.cancel_input();
-                                match command::parse_command(&input) {
-                                    Ok(action) => {
-                                        let viewport_height =
-                                            session.terminal.size()?.height.saturating_sub(5)
-                                                as usize;
-                                        let effect = dispatch_nav_command(
-                                            &mut state,
-                                            &mut tasks,
-                                            palette_action_to_nav(action),
-                                            &backup_dir,
-                                            viewport_height,
-                                        );
-                                        if effect == StateEffect::ExitRequested {
-                                            break;
+                    if state
+                        .wizard()
+                        .is_some_and(|wizard| wizard.stage == state::WizardStage::Confirm)
+                    {
+                        match key.code {
+                            ct_event::KeyCode::Char(ch)
+                                if !key.modifiers.contains(ct_event::KeyModifiers::CONTROL) =>
+                            {
+                                state.push_wizard_confirmation(ch);
+                                continue;
+                            }
+                            ct_event::KeyCode::Backspace => {
+                                state.backspace_wizard_confirmation();
+                                continue;
+                            }
+                            ct_event::KeyCode::Enter => {
+                                if let Some(intent) = state.submit_wizard_confirmation() {
+                                    if !crate::elevate::is_root() {
+                                        return Ok(LoopExit::Elevate(intent));
+                                    }
+                                    if intent.kind == state::WriteKind::BackupCreate {
+                                        if let Err(message) =
+                                            tasks.request_backup_create(intent, backup_dir.clone())
+                                        {
+                                            state.finish_write(Err(message.to_string()));
+                                        }
+                                    } else {
+                                        if let Err(message) =
+                                            tasks.request_write(intent, backup_dir.clone())
+                                        {
+                                            state.finish_write(Err(message.to_string()));
                                         }
                                     }
-                                    Err(message) => state.set_notice(message),
                                 }
+                                continue;
                             }
-                            continue;
+                            ct_event::KeyCode::Esc => {
+                                let _ = state.navigate(NavCommand::Escape, 1);
+                                continue;
+                            }
+                            _ => {}
                         }
-                        _ => {}
                     }
-                }
 
-                if let Some(command) = keys.map(key) {
-                    let viewport_height =
-                        session.terminal.size()?.height.saturating_sub(5) as usize;
-                    match dispatch_nav_command(
-                        &mut state,
-                        &mut tasks,
-                        command,
-                        &backup_dir,
-                        viewport_height,
+                    if matches!(
+                        state.input_mode(),
+                        state::InputMode::Search | state::InputMode::Command
                     ) {
-                        StateEffect::ExitRequested => break,
-                        StateEffect::ExitDeferred | StateEffect::None => {}
+                        match key.code {
+                            ct_event::KeyCode::Char(ch)
+                                if !key.modifiers.contains(ct_event::KeyModifiers::CONTROL) =>
+                            {
+                                state.push_input_char(ch);
+                                continue;
+                            }
+                            ct_event::KeyCode::Backspace => {
+                                state.backspace_input();
+                                continue;
+                            }
+                            ct_event::KeyCode::Esc => {
+                                let _ = state.navigate(NavCommand::Escape, 1);
+                                continue;
+                            }
+                            ct_event::KeyCode::Enter => {
+                                if state.input_mode() == state::InputMode::Search {
+                                    state.submit_search();
+                                } else {
+                                    let input = state.take_input();
+                                    state.cancel_input();
+                                    match command::parse_command(&input) {
+                                        Ok(action) => {
+                                            let viewport_height =
+                                                session.terminal.size()?.height.saturating_sub(9)
+                                                    as usize;
+                                            let effect = dispatch_nav_command(
+                                                &mut state,
+                                                &mut tasks,
+                                                palette_action_to_nav(action),
+                                                &backup_dir,
+                                                viewport_height,
+                                            );
+                                            if effect == StateEffect::ExitRequested {
+                                                break;
+                                            }
+                                        }
+                                        Err(message) => state.set_notice(message),
+                                    }
+                                }
+                                continue;
+                            }
+                            _ => {}
+                        }
+                    }
+
+                    if let Some(command) = keys.map(key) {
+                        let viewport_height =
+                            session.terminal.size()?.height.saturating_sub(9) as usize;
+                        match dispatch_nav_command(
+                            &mut state,
+                            &mut tasks,
+                            command,
+                            &backup_dir,
+                            viewport_height,
+                        ) {
+                            StateEffect::ExitRequested => break,
+                            StateEffect::ExitDeferred | StateEffect::None => {}
+                        }
                     }
                 }
+                ct_event::Event::Resize(_, _) => {}
+                _ => {}
             }
-            ct_event::Event::Resize(_, _) => {}
-            _ => {}
-        }
 
-        if state.take_deferred_exit() == StateEffect::ExitRequested {
-            break;
+            if state.take_deferred_exit() == StateEffect::ExitRequested {
+                break;
+            }
         }
+        Ok(LoopExit::Done)
+    })();
+
+    if result.is_err() && tasks.active_operation().is_some() {
+        // Restore raw mode/alternate screen before waiting. The transaction keeps
+        // running without its UI and is allowed to complete rollback/readback.
+        drop(session);
+        tasks.wait_for_critical_operation();
     }
-    Ok(LoopExit::Done)
+    result
 }
 
 /// Run the interactive TUI only when both stdin and stdout are terminals.

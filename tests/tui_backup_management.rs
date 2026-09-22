@@ -21,9 +21,17 @@ fn backup_delete_uses_shared_application_service_not_direct_filesystem_removal()
     assert!(task.contains("delete_backup_exact"));
     assert!(!task.contains("remove_file("));
 
+    // 统一删除/保留策略服务：执行原语与保留底线必须住在共享服务里，
+    // 前端不得自带副本；application 仅保留薄封装再导出。
+    let service = include_str!("../src/application/backup.rs");
+    assert!(service.contains("pub fn delete_backup_exact"));
+    assert!(service.contains("delete_entry_verified"));
+    assert!(service.contains("fn enforce_retention_floor"));
+    assert!(service.contains("pub struct DeleteSession"));
+
     let application = include_str!("../src/application.rs");
-    assert!(application.contains("pub fn delete_backup_exact"));
-    assert!(application.contains("delete_entry_verified"));
+    assert!(application.contains("pub mod backup;"));
+    assert!(application.contains("pub use backup::delete_backup_exact;"));
 }
 
 #[test]

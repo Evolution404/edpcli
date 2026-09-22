@@ -4,6 +4,10 @@ use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 
 use super::state::NavCommand;
 
+pub fn is_actionable_key(event: &KeyEvent) -> bool {
+    !matches!(event.kind, KeyEventKind::Release)
+}
+
 #[derive(Debug, Default)]
 pub struct KeyMapper {
     pending_g: bool,
@@ -15,7 +19,7 @@ impl KeyMapper {
     }
 
     pub fn map(&mut self, event: KeyEvent) -> Option<NavCommand> {
-        if matches!(event.kind, KeyEventKind::Release) {
+        if !is_actionable_key(&event) {
             return None;
         }
 
@@ -37,6 +41,8 @@ impl KeyMapper {
         }
 
         match event.code {
+            KeyCode::Tab => Some(NavCommand::NextWorkspace),
+            KeyCode::BackTab => Some(NavCommand::PreviousWorkspace),
             KeyCode::Char('g') => {
                 self.pending_g = true;
                 None
@@ -99,6 +105,19 @@ mod tests {
     }
 
     #[test]
+    fn tab_switches_workspace_pages() {
+        let mut mapper = KeyMapper::new();
+        assert_eq!(
+            mapper.map(key(KeyCode::Tab, KeyModifiers::NONE)),
+            Some(NavCommand::NextWorkspace)
+        );
+        assert_eq!(
+            mapper.map(key(KeyCode::BackTab, KeyModifiers::SHIFT)),
+            Some(NavCommand::PreviousWorkspace)
+        );
+    }
+
+    #[test]
     fn double_g_maps_to_top_without_leaking_first_g() {
         let mut mapper = KeyMapper::new();
         assert_eq!(
@@ -118,5 +137,16 @@ mod tests {
             mapper.map(key(KeyCode::Char('c'), KeyModifiers::CONTROL)),
             Some(NavCommand::Quit)
         );
+    }
+
+    #[test]
+    fn release_events_never_reach_navigation_or_text_input() {
+        let event = KeyEvent::new_with_kind(
+            KeyCode::Char('x'),
+            KeyModifiers::NONE,
+            KeyEventKind::Release,
+        );
+        assert!(!is_actionable_key(&event));
+        assert_eq!(KeyMapper::new().map(event), None);
     }
 }

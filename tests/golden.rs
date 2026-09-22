@@ -33,7 +33,7 @@ fn short_sector_inputs_fail_closed_instead_of_panicking() {
 
     let read = |_lba: u32| Ok(short.clone());
     assert!(looks_nopwd(&read, "disk&ven_test&prod_test").is_err());
-    assert!(convert(&read, "disk&ven_test&prod_test", None, false).is_err());
+    assert!(convert(&read, "disk&ven_test&prod_test", None, &mut |_| {}).is_err());
 }
 
 #[test]
@@ -45,7 +45,7 @@ fn convert_golden_default_all_disks() {
     for key in KEYS {
         let data = load_disk_image(key).unwrap();
         let (_, did) = fixture(key).unwrap();
-        let r = convert(&read_fn_of(&data), did, None, false).unwrap();
+        let r = convert(&read_fn_of(&data), did, None, &mut |_| {}).unwrap();
         let g = golden(key);
         assert_eq!(r.share, g.share, "{}", key);
         assert_eq!(r.enc_start, g.enc_start, "{}", key);
@@ -67,7 +67,7 @@ fn convert_golden_size_gb_path() {
         return;
     };
     let (_, did) = fixture("aigo").unwrap();
-    let r = convert(&read_fn_of(&data), did, Some(50.0), false).unwrap();
+    let r = convert(&read_fn_of(&data), did, Some(50.0), &mut |_| {}).unwrap();
     let g = golden("aigo_size50");
     assert_eq!(r.share, g.share); // 8 扇对齐: 97,656,248
     assert_eq!(r.enc_start, g.enc_start);
@@ -85,7 +85,7 @@ fn convert_golden_size_overflow_rejected() {
         return;
     };
     let (_, did) = fixture("netac").unwrap();
-    let e = convert(&read_fn_of(&data), did, Some(100.0), false).unwrap_err();
+    let e = convert(&read_fn_of(&data), did, Some(100.0), &mut |_| {}).unwrap_err();
     assert_eq!(e.code, edpcli::common::EXIT_TARGET);
     assert!(e.msg.contains("越过"), "{}", e.msg);
 }
@@ -96,7 +96,13 @@ fn convert_golden_wrong_device_id_rejected() {
         eprintln!("跳过: 真实备份不可用");
         return;
     };
-    let e = convert(&read_fn_of(&data), "disk&ven_bogus&prod_x", None, false).unwrap_err();
+    let e = convert(
+        &read_fn_of(&data),
+        "disk&ven_bogus&prod_x",
+        None,
+        &mut |_| {},
+    )
+    .unwrap_err();
     assert_eq!(e.code, edpcli::common::EXIT_TARGET);
     assert!(e.msg.contains("EDPF"), "{}", e.msg);
 }
@@ -108,7 +114,7 @@ fn iron_rules_terminators_and_tail_preserved() {
         return;
     };
     let (_, did) = fixture("netac").unwrap();
-    let r = convert(&read_fn_of(&data), did, None, false).unwrap();
+    let r = convert(&read_fn_of(&data), did, None, &mut |_| {}).unwrap();
 
     // LBA7 0xC0 表尾终止符区: 明文未动 → 滚动 XOR 密文也不变
     assert_eq!(&r.lba7[0xC0..], &data[7 * SECTOR + 0xC0..8 * SECTOR]);
@@ -132,7 +138,7 @@ fn iron_rules_encrypt_entry_from_original() {
         return;
     };
     let (_, did) = fixture("netac").unwrap();
-    let r = convert(&read_fn_of(&data), did, None, false).unwrap();
+    let r = convert(&read_fn_of(&data), did, None, &mut |_| {}).unwrap();
 
     let key = crc32_bare(did.as_bytes()).to_le_bytes();
     let dec_old = a6b0_full(&data[12 * SECTOR..13 * SECTOR], &key, 0);
@@ -151,7 +157,7 @@ fn iron_rules_lba0_mbr_shape_and_lba9() {
         return;
     };
     let (_, did) = fixture("netac").unwrap();
-    let r = convert(&read_fn_of(&data), did, None, false).unwrap();
+    let r = convert(&read_fn_of(&data), did, None, &mut |_| {}).unwrap();
 
     let out = &r.lba0;
     assert_eq!(&out[0x1FE..0x200], &[0x55, 0xAA]);

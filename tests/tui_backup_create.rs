@@ -18,6 +18,7 @@ fn backup_create_resume_pins_only_the_device() {
         kind: WriteKind::BackupCreate,
         disk: 6,
         backup: None,
+        expected_identity: None,
     };
     let argv = resume_argv(&intent);
     assert!(argv
@@ -41,6 +42,7 @@ fn numeric_backup_create_resume_parses_without_becoming_a_write_wizard() {
             kind: WriteKind::BackupCreate,
             disk: 6,
             backup: None,
+            expected_identity: None,
         })
     );
 }
