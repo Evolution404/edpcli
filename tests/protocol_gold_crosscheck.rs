@@ -2,8 +2,10 @@
 //! Most observations are census constraints; the MyHardinfo/HDSerialInfo mirror also locks the
 //! physical side of their field-level host-identity lifecycle.
 
+#[path = "support/gold_name.rs"]
+mod gold_name;
+
 use edpcli::crypto::{a6b0_full, crc32_bare, lba6_checksum, lba6_decode, xor_rolling};
-use edpcli::diskio::parse_backup_name;
 use edpcli::inspect::{analyze_sector, InspectMeta};
 use std::{fs, path::Path};
 
@@ -45,7 +47,7 @@ fn strict_gold_legacy_fingerprints_are_not_a_single_required_conjunction() {
             continue;
         }
         let name = columns[3];
-        let meta = parse_backup_name(name).expect("gold backup metadata");
+        let meta = gold_name::parse_gold_name(name).expect("gold backup metadata");
         let onlyid = meta.onlyid.as_ref().unwrap().parse::<i64>().unwrap() as u32;
         let image = fs::read(Path::new(env!("CARGO_MANIFEST_DIR")).join(columns[4])).unwrap();
         let node = xor_rolling(
@@ -193,7 +195,7 @@ fn host_hardinfo_identity_can_repeat_across_different_target_usb_vendors() {
             continue;
         }
         let name = columns[3];
-        let meta = parse_backup_name(name).expect("gold backup metadata");
+        let meta = gold_name::parse_gold_name(name).expect("gold backup metadata");
         let onlyid = meta.onlyid.as_ref().unwrap().parse::<i64>().unwrap() as u32;
         let image = fs::read(Path::new(env!("CARGO_MANIFEST_DIR")).join(columns[4])).unwrap();
         let node = xor_rolling(

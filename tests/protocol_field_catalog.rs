@@ -6,6 +6,9 @@
 //!
 //! This lets independent history axes compose without inventing a monolithic Legacy20xx version.
 
+#[path = "support/gold_name.rs"]
+mod gold_name;
+
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::fs;
 use std::path::PathBuf;

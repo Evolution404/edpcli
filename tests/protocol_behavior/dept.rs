@@ -1,6 +1,5 @@
 use edpcli::{
     crypto::{a6b0_full, a7f0_full, crc32_bare, lba6_decode},
-    diskio::parse_backup_name,
     protocol::{lba6::*, lba9::*, profile::*},
 };
 fn hex(text: &str) -> [u8; 512] {
@@ -52,7 +51,12 @@ pub fn dept_and_safe6_fields_replay_physical_profiles_without_losing_backing() {
         let crc = if c[0] == "authentic-nopwd" {
             crc32_bare(b"disk&ven_sandisk&prod_ultra&rev_1.00")
         } else {
-            crc32_bare(parse_backup_name(c[3]).unwrap().device_id.as_bytes())
+            crc32_bare(
+                crate::gold_name::parse_gold_name(c[3])
+                    .unwrap()
+                    .device_id
+                    .as_bytes(),
+            )
         };
         assert_eq!(v.device_crc, crc);
         let nine = parse_lba9(raw9, crc, v.dept_profile(), v.has_long_user()).unwrap();

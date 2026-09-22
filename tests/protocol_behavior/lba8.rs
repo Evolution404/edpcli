@@ -1,6 +1,5 @@
 use edpcli::{
     crypto::{a6b0_full, a7f0_full, crc32_bare},
-    diskio::parse_backup_name,
     protocol::{
         lba4::{parse_lba4, Lba4Context},
         lba8::{parse_lba8, Lba8Context, UsbOnlyInfo},
@@ -12,7 +11,7 @@ fn device_id_for(profile: &str, sample: &str) -> String {
     if profile == "authentic-nopwd" {
         "disk&ven_sandisk&prod_ultra&rev_1.00".into()
     } else {
-        parse_backup_name(sample).unwrap().device_id
+        crate::gold_name::parse_gold_name(sample).unwrap().device_id
     }
 }
 

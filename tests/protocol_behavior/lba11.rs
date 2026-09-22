@@ -1,7 +1,4 @@
-use edpcli::{
-    diskio::parse_backup_name,
-    protocol::{lba11::parse_lba11, profile::Lba11Capacity},
-};
+use edpcli::protocol::{lba11::parse_lba11, profile::Lba11Capacity};
 
 #[test]
 pub fn lba11_disk_size_and_repair_chs_profiles_replay_physical_gold() {
@@ -16,7 +13,7 @@ pub fn lba11_disk_size_and_repair_chs_profiles_replay_physical_gold() {
         if c[0] != "strict-encrypted" {
             continue;
         }
-        let meta = parse_backup_name(c[3]).unwrap();
+        let meta = crate::gold_name::parse_gold_name(c[3]).unwrap();
         let sectors = meta.secs.unwrap();
         let image =
             std::fs::read(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(c[4])).unwrap();

@@ -5,6 +5,9 @@
 
 mod common;
 
+#[path = "support/gold_name.rs"]
+mod gold_name;
+
 use std::{collections::HashSet, fs};
 
 use common::FIXTURE_DIR;
@@ -13,7 +16,7 @@ use edpcli::crypto::{
     a6b0_decrypt, a6b0_full, a7f0_full, crc32_bare, lba6_checksum, lba6_decode, xor_rolling, RCON,
     SBOX, SBOX2,
 };
-use edpcli::diskio::{parse_backup_name, BackupMeta};
+use edpcli::diskio::BackupMeta;
 use edpcli::inspect::InspectMeta;
 use edpcli::metainfo::ownership_from_lba8;
 use edpcli::sha256::sha256_hex;
@@ -78,7 +81,7 @@ const AIGO_L8302_NETAC_LBA0_PREFIX_HEX: &str =
     include_str!("fixtures/protocol_evidence/aigo_l8302_netac_lba0_prefix.hex");
 
 fn parse_reference_backup_name(name: &str) -> Option<BackupMeta> {
-    let meta = parse_backup_name(name)?;
+    let meta = gold_name::parse_gold_name(name)?;
     if meta.tagged_nopwd {
         return None;
     }

@@ -1,6 +1,5 @@
 use edpcli::{
     crypto::{a6b0_full, a7f0_full, crc32_bare, xor_rolling},
-    diskio::parse_backup_name,
     protocol::{
         edpf::PassInfo,
         lba12::parse_lba12,
@@ -24,7 +23,7 @@ pub fn lba7_packed_entries_and_pass_info_replay_all_physical_profiles() {
         let device_id = if c[0] == "authentic-nopwd" {
             "disk&ven_sandisk&prod_ultra&rev_1.00".to_string()
         } else {
-            parse_backup_name(c[3]).unwrap().device_id
+            crate::gold_name::parse_gold_name(c[3]).unwrap().device_id
         };
         let crc = crc32_bare(device_id.as_bytes());
         let plain = xor_rolling(raw, (crc & 0xffff) ^ (crc >> 16));
@@ -95,7 +94,7 @@ pub fn lba12_outer_cipher_and_wrapped_key_modes_keep_profile_axes_distinct() {
         let device_id = if c[0] == "authentic-nopwd" {
             "disk&ven_sandisk&prod_ultra&rev_1.00".to_string()
         } else {
-            parse_backup_name(c[3]).unwrap().device_id
+            crate::gold_name::parse_gold_name(c[3]).unwrap().device_id
         };
         let crc = crc32_bare(device_id.as_bytes());
         let plain = a6b0_full(raw, &crc.to_le_bytes(), 0);
