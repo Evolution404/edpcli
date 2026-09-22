@@ -254,11 +254,15 @@ fn styled_events_keep_ansi_wrap() {
 // ══════════════════════════════════════════════════════════════════
 // 事件序列行为测试(进程内，镜像 cli_offline 装配)
 // ══════════════════════════════════════════════════════════════════
+// 辅助项只被下方 macOS 门控的测试使用；非 macOS 目标上必须同样门控，
+// 否则 dead_code 会让 clippy -D warnings 失败。
+#[cfg(target_os = "macos")]
 #[derive(Default)]
 struct EventRecorderPrompter {
     events: Vec<WriteEvent>,
 }
 
+#[cfg(target_os = "macos")]
 impl edpcli::cli::Prompter for EventRecorderPrompter {
     fn prompt_line(&mut self, _msg: &str) -> String {
         String::new()
@@ -278,6 +282,7 @@ impl edpcli::cli::Prompter for EventRecorderPrompter {
     }
 }
 
+#[cfg(target_os = "macos")]
 fn tag(event: &WriteEvent) -> &'static str {
     match event {
         WriteEvent::ApplyDeviceHeader { .. } => "apply-device-header",
@@ -305,8 +310,10 @@ fn tag(event: &WriteEvent) -> &'static str {
     }
 }
 
+#[cfg(target_os = "macos")]
 struct FixedClock;
 
+#[cfg(target_os = "macos")]
 impl edpcli::diskio::Clock for FixedClock {
     fn now_epoch(&self) -> i64 {
         1789603200
