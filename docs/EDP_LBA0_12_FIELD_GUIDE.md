@@ -772,10 +772,10 @@ PackedStruct/EncryptedRegion 行按目录现有粒度展示，不补造目录未
 | Physical evidence | P-GOLD-ENC;P-GOLD-NOPWD |
 | Implementation provenance | Canonical COMPLETE semantics; provenance limits remain documented. |
 | Semantic status | COMPLETE |
-| Implementation status | PLANNED |
-| Behavior-test status | PLANNED |
-| Code symbol | planned:protocol::lba4::onlyid_header |
-| Test symbol | UNIMPLEMENTED |
+| Implementation status | COMPLETE |
+| Behavior-test status | COMPLETE |
+| Code symbol | edpcli::protocol::lba4::parse_lba4 |
+| Test symbol | lba4_behavior::lba4_separates_wire_reader_and_producer_for_both_encodings |
 | Ownership test | protocol_field_catalog::field_catalog_has_exact_byte_ownership_for_every_profile_state |
 
 #### lba4.onlyid_xor8 · lba4_encoding / ordinary-rolling
@@ -795,10 +795,10 @@ PackedStruct/EncryptedRegion 行按目录现有粒度展示，不补造目录未
 | Physical evidence | P-GOLD-ENC;P-GOLD-NOPWD |
 | Implementation provenance | Encoding composes independently with producer overlays. |
 | Semantic status | COMPLETE |
-| Implementation status | PLANNED |
-| Behavior-test status | PLANNED |
-| Code symbol | planned:protocol::lba4::onlyid_xor8 |
-| Test symbol | UNIMPLEMENTED |
+| Implementation status | COMPLETE |
+| Behavior-test status | COMPLETE |
+| Code symbol | edpcli::protocol::lba4::parse_lba4 |
+| Test symbol | lba4_behavior::lba4_separates_wire_reader_and_producer_for_both_encodings |
 | Ownership test | protocol_field_catalog::field_catalog_has_exact_byte_ownership_for_every_profile_state |
 
 #### lba4.onlyid_xor8 · lba4_encoding / post-xor
@@ -818,10 +818,10 @@ PackedStruct/EncryptedRegion 行按目录现有粒度展示，不补造目录未
 | Physical evidence | P-GOLD-ENC;P-GOLD-NOPWD |
 | Implementation provenance | Encoding composes independently with producer overlays. |
 | Semantic status | COMPLETE |
-| Implementation status | PLANNED |
-| Behavior-test status | PLANNED |
-| Code symbol | planned:protocol::lba4::onlyid_xor8 |
-| Test symbol | UNIMPLEMENTED |
+| Implementation status | COMPLETE |
+| Behavior-test status | COMPLETE |
+| Code symbol | edpcli::protocol::lba4::parse_lba4 |
+| Test symbol | lba4_behavior::lba4_separates_wire_reader_and_producer_for_both_encodings |
 | Ownership test | protocol_field_catalog::field_catalog_has_exact_byte_ownership_for_every_profile_state |
 
 #### overlay.lba4.second_key_source · lba4_second_key_source / current-main-onlyid
@@ -841,10 +841,10 @@ PackedStruct/EncryptedRegion 行按目录现有粒度展示，不补造目录未
 | Physical evidence | P-GOLD-ENC |
 | Implementation provenance | Composes with either encoding. |
 | Semantic status | COMPLETE |
-| Implementation status | PLANNED |
-| Behavior-test status | PLANNED |
-| Code symbol | planned:protocol::profile::lba4_second_key_source |
-| Test symbol | UNIMPLEMENTED |
+| Implementation status | COMPLETE |
+| Behavior-test status | COMPLETE |
+| Code symbol | edpcli::protocol::lba4::parse_lba4 |
+| Test symbol | lba4_behavior::lba4_overlays_are_explicit_and_do_not_select_encoding |
 | Ownership test | protocol_field_catalog::field_catalog_has_exact_byte_ownership_for_every_profile_state |
 
 #### overlay.lba4.second_key_source · lba4_second_key_source / legacy-guid-crc
@@ -864,10 +864,10 @@ PackedStruct/EncryptedRegion 行按目录现有粒度展示，不补造目录未
 | Physical evidence | P-GOLD-ENC |
 | Implementation provenance | Composes with either encoding. |
 | Semantic status | COMPLETE |
-| Implementation status | PLANNED |
-| Behavior-test status | PLANNED |
-| Code symbol | planned:protocol::profile::lba4_second_key_source |
-| Test symbol | UNIMPLEMENTED |
+| Implementation status | COMPLETE |
+| Behavior-test status | COMPLETE |
+| Code symbol | edpcli::protocol::lba4::parse_lba4 |
+| Test symbol | lba4_behavior::lba4_overlays_are_explicit_and_do_not_select_encoding |
 | Ownership test | protocol_field_catalog::field_catalog_has_exact_byte_ownership_for_every_profile_state |
 
 #### lba4.second_key · lba4_encoding / ordinary-rolling
@@ -887,10 +887,10 @@ PackedStruct/EncryptedRegion 行按目录现有粒度展示，不补造目录未
 | Physical evidence | P-GOLD-ENC;P-GOLD-NOPWD |
 | Implementation provenance | Encoding composes independently with producer overlays. |
 | Semantic status | COMPLETE |
-| Implementation status | PLANNED |
-| Behavior-test status | PLANNED |
-| Code symbol | planned:protocol::lba4::second_key |
-| Test symbol | UNIMPLEMENTED |
+| Implementation status | COMPLETE |
+| Behavior-test status | COMPLETE |
+| Code symbol | edpcli::protocol::lba4::parse_lba4 |
+| Test symbol | lba4_behavior::lba4_separates_wire_reader_and_producer_for_both_encodings |
 | Ownership test | protocol_field_catalog::field_catalog_has_exact_byte_ownership_for_every_profile_state |
 
 #### lba4.second_key · lba4_encoding / post-xor
@@ -910,10 +910,10 @@ PackedStruct/EncryptedRegion 行按目录现有粒度展示，不补造目录未
 | Physical evidence | P-GOLD-ENC;P-GOLD-NOPWD |
 | Implementation provenance | Encoding composes independently with producer overlays. |
 | Semantic status | COMPLETE |
-| Implementation status | PLANNED |
-| Behavior-test status | PLANNED |
-| Code symbol | planned:protocol::lba4::second_key |
-| Test symbol | UNIMPLEMENTED |
+| Implementation status | COMPLETE |
+| Behavior-test status | COMPLETE |
+| Code symbol | edpcli::protocol::lba4::parse_lba4 |
+| Test symbol | lba4_behavior::lba4_separates_wire_reader_and_producer_for_both_encodings |
 | Ownership test | protocol_field_catalog::field_catalog_has_exact_byte_ownership_for_every_profile_state |
 
 #### overlay.lba4.hserial_source · lba4_hserial_source / current-zero
@@ -933,10 +933,10 @@ PackedStruct/EncryptedRegion 行按目录现有粒度展示，不补造目录未
 | Physical evidence | P-GOLD-ENC;P-GOLD-NOPWD |
 | Implementation provenance | Caller value-generation algorithm is not invented. |
 | Semantic status | COMPLETE |
-| Implementation status | PLANNED |
-| Behavior-test status | PLANNED |
-| Code symbol | planned:protocol::profile::lba4_hserial_source |
-| Test symbol | UNIMPLEMENTED |
+| Implementation status | COMPLETE |
+| Behavior-test status | COMPLETE |
+| Code symbol | edpcli::protocol::lba4::parse_lba4 |
+| Test symbol | lba4_behavior::lba4_overlays_are_explicit_and_do_not_select_encoding |
 | Ownership test | protocol_field_catalog::field_catalog_has_exact_byte_ownership_for_every_profile_state |
 
 #### overlay.lba4.hserial_source · lba4_hserial_source / legacy-caller-vector
@@ -956,10 +956,10 @@ PackedStruct/EncryptedRegion 行按目录现有粒度展示，不补造目录未
 | Physical evidence | P-GOLD-ENC;P-GOLD-NOPWD |
 | Implementation provenance | Caller value-generation algorithm is not invented. |
 | Semantic status | COMPLETE |
-| Implementation status | PLANNED |
-| Behavior-test status | PLANNED |
-| Code symbol | planned:protocol::profile::lba4_hserial_source |
-| Test symbol | UNIMPLEMENTED |
+| Implementation status | COMPLETE |
+| Behavior-test status | COMPLETE |
+| Code symbol | edpcli::protocol::lba4::parse_lba4 |
+| Test symbol | lba4_behavior::lba4_overlays_are_explicit_and_do_not_select_encoding |
 | Ownership test | protocol_field_catalog::field_catalog_has_exact_byte_ownership_for_every_profile_state |
 
 #### lba4.hserial · lba4_encoding / ordinary-rolling
@@ -979,10 +979,10 @@ PackedStruct/EncryptedRegion 行按目录现有粒度展示，不补造目录未
 | Physical evidence | P-GOLD-ENC;P-GOLD-NOPWD |
 | Implementation provenance | Encoding composes independently with producer overlays. |
 | Semantic status | COMPLETE |
-| Implementation status | PLANNED |
-| Behavior-test status | PLANNED |
-| Code symbol | planned:protocol::lba4::hserial |
-| Test symbol | UNIMPLEMENTED |
+| Implementation status | COMPLETE |
+| Behavior-test status | COMPLETE |
+| Code symbol | edpcli::protocol::lba4::parse_lba4 |
+| Test symbol | lba4_behavior::lba4_separates_wire_reader_and_producer_for_both_encodings |
 | Ownership test | protocol_field_catalog::field_catalog_has_exact_byte_ownership_for_every_profile_state |
 
 #### lba4.hserial · lba4_encoding / post-xor
@@ -1002,10 +1002,10 @@ PackedStruct/EncryptedRegion 行按目录现有粒度展示，不补造目录未
 | Physical evidence | P-GOLD-ENC;P-GOLD-NOPWD |
 | Implementation provenance | Encoding composes independently with producer overlays. |
 | Semantic status | COMPLETE |
-| Implementation status | PLANNED |
-| Behavior-test status | PLANNED |
-| Code symbol | planned:protocol::lba4::hserial |
-| Test symbol | UNIMPLEMENTED |
+| Implementation status | COMPLETE |
+| Behavior-test status | COMPLETE |
+| Code symbol | edpcli::protocol::lba4::parse_lba4 |
+| Test symbol | lba4_behavior::lba4_separates_wire_reader_and_producer_for_both_encodings |
 | Ownership test | protocol_field_catalog::field_catalog_has_exact_byte_ownership_for_every_profile_state |
 
 #### lba4.single_usb · lba4_encoding / ordinary-rolling
@@ -1025,10 +1025,10 @@ PackedStruct/EncryptedRegion 行按目录现有粒度展示，不补造目录未
 | Physical evidence | P-GOLD-ENC;P-GOLD-NOPWD |
 | Implementation provenance | Encoding composes independently with producer overlays. |
 | Semantic status | COMPLETE |
-| Implementation status | PLANNED |
-| Behavior-test status | PLANNED |
-| Code symbol | planned:protocol::lba4::single_usb |
-| Test symbol | UNIMPLEMENTED |
+| Implementation status | COMPLETE |
+| Behavior-test status | COMPLETE |
+| Code symbol | edpcli::protocol::lba4::parse_lba4 |
+| Test symbol | lba4_behavior::lba4_separates_wire_reader_and_producer_for_both_encodings |
 | Ownership test | protocol_field_catalog::field_catalog_has_exact_byte_ownership_for_every_profile_state |
 
 #### lba4.single_usb · lba4_encoding / post-xor
@@ -1048,10 +1048,10 @@ PackedStruct/EncryptedRegion 行按目录现有粒度展示，不补造目录未
 | Physical evidence | P-GOLD-ENC;P-GOLD-NOPWD |
 | Implementation provenance | Encoding composes independently with producer overlays. |
 | Semantic status | COMPLETE |
-| Implementation status | PLANNED |
-| Behavior-test status | PLANNED |
-| Code symbol | planned:protocol::lba4::single_usb |
-| Test symbol | UNIMPLEMENTED |
+| Implementation status | COMPLETE |
+| Behavior-test status | COMPLETE |
+| Code symbol | edpcli::protocol::lba4::parse_lba4 |
+| Test symbol | lba4_behavior::lba4_separates_wire_reader_and_producer_for_both_encodings |
 | Ownership test | protocol_field_catalog::field_catalog_has_exact_byte_ownership_for_every_profile_state |
 
 #### overlay.host_hardinfo.lba4 · host_hardinfo_source / current-zero
@@ -1071,10 +1071,10 @@ PackedStruct/EncryptedRegion 行按目录现有粒度展示，不补造目录未
 | Physical evidence | P-GOLD-ENC |
 | Implementation provenance | Cross-LBA mirror is independent. |
 | Semantic status | COMPLETE |
-| Implementation status | PLANNED |
-| Behavior-test status | PLANNED |
-| Code symbol | planned:protocol::profile::host_hardinfo_source |
-| Test symbol | UNIMPLEMENTED |
+| Implementation status | COMPLETE |
+| Behavior-test status | COMPLETE |
+| Code symbol | edpcli::protocol::lba4::parse_lba4 |
+| Test symbol | lba4_behavior::lba4_overlays_are_explicit_and_do_not_select_encoding |
 | Ownership test | protocol_field_catalog::field_catalog_has_exact_byte_ownership_for_every_profile_state |
 
 #### overlay.host_hardinfo.lba4 · host_hardinfo_source / legacy-host-identity
@@ -1094,10 +1094,10 @@ PackedStruct/EncryptedRegion 行按目录现有粒度展示，不补造目录未
 | Physical evidence | P-GOLD-ENC |
 | Implementation provenance | Cross-LBA mirror is independent. |
 | Semantic status | COMPLETE |
-| Implementation status | PLANNED |
-| Behavior-test status | PLANNED |
-| Code symbol | planned:protocol::profile::host_hardinfo_source |
-| Test symbol | UNIMPLEMENTED |
+| Implementation status | COMPLETE |
+| Behavior-test status | COMPLETE |
+| Code symbol | edpcli::protocol::lba4::parse_lba4 |
+| Test symbol | lba4_behavior::lba4_overlays_are_explicit_and_do_not_select_encoding |
 | Ownership test | protocol_field_catalog::field_catalog_has_exact_byte_ownership_for_every_profile_state |
 
 #### lba4.my_hardinfo · lba4_encoding / ordinary-rolling
@@ -1117,10 +1117,10 @@ PackedStruct/EncryptedRegion 行按目录现有粒度展示，不补造目录未
 | Physical evidence | P-GOLD-ENC;P-GOLD-NOPWD |
 | Implementation provenance | Encoding composes independently with producer overlays. |
 | Semantic status | COMPLETE |
-| Implementation status | PLANNED |
-| Behavior-test status | PLANNED |
-| Code symbol | planned:protocol::lba4::my_hardinfo |
-| Test symbol | UNIMPLEMENTED |
+| Implementation status | COMPLETE |
+| Behavior-test status | COMPLETE |
+| Code symbol | edpcli::protocol::lba4::parse_lba4 |
+| Test symbol | lba4_behavior::lba4_separates_wire_reader_and_producer_for_both_encodings |
 | Ownership test | protocol_field_catalog::field_catalog_has_exact_byte_ownership_for_every_profile_state |
 
 #### lba4.my_hardinfo · lba4_encoding / post-xor
@@ -1140,10 +1140,10 @@ PackedStruct/EncryptedRegion 行按目录现有粒度展示，不补造目录未
 | Physical evidence | P-GOLD-ENC;P-GOLD-NOPWD |
 | Implementation provenance | Encoding composes independently with producer overlays. |
 | Semantic status | COMPLETE |
-| Implementation status | PLANNED |
-| Behavior-test status | PLANNED |
-| Code symbol | planned:protocol::lba4::my_hardinfo |
-| Test symbol | UNIMPLEMENTED |
+| Implementation status | COMPLETE |
+| Behavior-test status | COMPLETE |
+| Code symbol | edpcli::protocol::lba4::parse_lba4 |
+| Test symbol | lba4_behavior::lba4_separates_wire_reader_and_producer_for_both_encodings |
 | Ownership test | protocol_field_catalog::field_catalog_has_exact_byte_ownership_for_every_profile_state |
 
 #### lba4.new_lab_flag · lba4_encoding / ordinary-rolling
@@ -1163,10 +1163,10 @@ PackedStruct/EncryptedRegion 行按目录现有粒度展示，不补造目录未
 | Physical evidence | P-GOLD-ENC;P-GOLD-NOPWD |
 | Implementation provenance | Encoding composes independently with producer overlays. |
 | Semantic status | COMPLETE |
-| Implementation status | PLANNED |
-| Behavior-test status | PLANNED |
-| Code symbol | planned:protocol::lba4::new_lab_flag |
-| Test symbol | UNIMPLEMENTED |
+| Implementation status | COMPLETE |
+| Behavior-test status | COMPLETE |
+| Code symbol | edpcli::protocol::lba4::parse_lba4 |
+| Test symbol | lba4_behavior::lba4_separates_wire_reader_and_producer_for_both_encodings |
 | Ownership test | protocol_field_catalog::field_catalog_has_exact_byte_ownership_for_every_profile_state |
 
 #### lba4.new_lab_flag · lba4_encoding / post-xor
@@ -1186,10 +1186,10 @@ PackedStruct/EncryptedRegion 行按目录现有粒度展示，不补造目录未
 | Physical evidence | P-GOLD-ENC;P-GOLD-NOPWD |
 | Implementation provenance | Encoding composes independently with producer overlays. |
 | Semantic status | COMPLETE |
-| Implementation status | PLANNED |
-| Behavior-test status | PLANNED |
-| Code symbol | planned:protocol::lba4::new_lab_flag |
-| Test symbol | UNIMPLEMENTED |
+| Implementation status | COMPLETE |
+| Behavior-test status | COMPLETE |
+| Code symbol | edpcli::protocol::lba4::parse_lba4 |
+| Test symbol | lba4_behavior::lba4_separates_wire_reader_and_producer_for_both_encodings |
 | Ownership test | protocol_field_catalog::field_catalog_has_exact_byte_ownership_for_every_profile_state |
 
 #### lba4.version · lba4_encoding / ordinary-rolling
@@ -1209,10 +1209,10 @@ PackedStruct/EncryptedRegion 行按目录现有粒度展示，不补造目录未
 | Physical evidence | P-GOLD-ENC;P-GOLD-NOPWD |
 | Implementation provenance | Encoding composes independently with producer overlays. |
 | Semantic status | COMPLETE |
-| Implementation status | PLANNED |
-| Behavior-test status | PLANNED |
-| Code symbol | planned:protocol::lba4::version |
-| Test symbol | UNIMPLEMENTED |
+| Implementation status | COMPLETE |
+| Behavior-test status | COMPLETE |
+| Code symbol | edpcli::protocol::lba4::parse_lba4 |
+| Test symbol | lba4_behavior::lba4_separates_wire_reader_and_producer_for_both_encodings |
 | Ownership test | protocol_field_catalog::field_catalog_has_exact_byte_ownership_for_every_profile_state |
 
 #### lba4.version · lba4_encoding / post-xor
@@ -1232,10 +1232,10 @@ PackedStruct/EncryptedRegion 行按目录现有粒度展示，不补造目录未
 | Physical evidence | P-GOLD-ENC;P-GOLD-NOPWD |
 | Implementation provenance | Encoding composes independently with producer overlays. |
 | Semantic status | COMPLETE |
-| Implementation status | PLANNED |
-| Behavior-test status | PLANNED |
-| Code symbol | planned:protocol::lba4::version |
-| Test symbol | UNIMPLEMENTED |
+| Implementation status | COMPLETE |
+| Behavior-test status | COMPLETE |
+| Code symbol | edpcli::protocol::lba4::parse_lba4 |
+| Test symbol | lba4_behavior::lba4_separates_wire_reader_and_producer_for_both_encodings |
 | Ownership test | protocol_field_catalog::field_catalog_has_exact_byte_ownership_for_every_profile_state |
 
 #### lba4.sector_tuple · lba4_encoding / ordinary-rolling
@@ -1255,10 +1255,10 @@ PackedStruct/EncryptedRegion 行按目录现有粒度展示，不补造目录未
 | Physical evidence | P-GOLD-ENC;P-GOLD-NOPWD |
 | Implementation provenance | Encoding composes independently with producer overlays. |
 | Semantic status | COMPLETE |
-| Implementation status | PLANNED |
-| Behavior-test status | PLANNED |
-| Code symbol | planned:protocol::lba4::sector_tuple |
-| Test symbol | UNIMPLEMENTED |
+| Implementation status | COMPLETE |
+| Behavior-test status | COMPLETE |
+| Code symbol | edpcli::protocol::lba4::parse_lba4 |
+| Test symbol | lba4_behavior::lba4_separates_wire_reader_and_producer_for_both_encodings |
 | Ownership test | protocol_field_catalog::field_catalog_has_exact_byte_ownership_for_every_profile_state |
 
 #### lba4.sector_tuple · lba4_encoding / post-xor
@@ -1278,10 +1278,10 @@ PackedStruct/EncryptedRegion 行按目录现有粒度展示，不补造目录未
 | Physical evidence | P-GOLD-ENC;P-GOLD-NOPWD |
 | Implementation provenance | Encoding composes independently with producer overlays. |
 | Semantic status | COMPLETE |
-| Implementation status | PLANNED |
-| Behavior-test status | PLANNED |
-| Code symbol | planned:protocol::lba4::sector_tuple |
-| Test symbol | UNIMPLEMENTED |
+| Implementation status | COMPLETE |
+| Behavior-test status | COMPLETE |
+| Code symbol | edpcli::protocol::lba4::parse_lba4 |
+| Test symbol | lba4_behavior::lba4_separates_wire_reader_and_producer_for_both_encodings |
 | Ownership test | protocol_field_catalog::field_catalog_has_exact_byte_ownership_for_every_profile_state |
 
 #### lba4.data_to_server · lba4_encoding / ordinary-rolling
@@ -1301,10 +1301,10 @@ PackedStruct/EncryptedRegion 行按目录现有粒度展示，不补造目录未
 | Physical evidence | P-GOLD-ENC;P-GOLD-NOPWD |
 | Implementation provenance | Encoding composes independently with producer overlays. |
 | Semantic status | COMPLETE |
-| Implementation status | PLANNED |
-| Behavior-test status | PLANNED |
-| Code symbol | planned:protocol::lba4::data_to_server |
-| Test symbol | UNIMPLEMENTED |
+| Implementation status | COMPLETE |
+| Behavior-test status | COMPLETE |
+| Code symbol | edpcli::protocol::lba4::parse_lba4 |
+| Test symbol | lba4_behavior::lba4_separates_wire_reader_and_producer_for_both_encodings |
 | Ownership test | protocol_field_catalog::field_catalog_has_exact_byte_ownership_for_every_profile_state |
 
 #### lba4.data_to_server · lba4_encoding / post-xor
@@ -1324,10 +1324,10 @@ PackedStruct/EncryptedRegion 行按目录现有粒度展示，不补造目录未
 | Physical evidence | P-GOLD-ENC;P-GOLD-NOPWD |
 | Implementation provenance | Encoding composes independently with producer overlays. |
 | Semantic status | COMPLETE |
-| Implementation status | PLANNED |
-| Behavior-test status | PLANNED |
-| Code symbol | planned:protocol::lba4::data_to_server |
-| Test symbol | UNIMPLEMENTED |
+| Implementation status | COMPLETE |
+| Behavior-test status | COMPLETE |
+| Code symbol | edpcli::protocol::lba4::parse_lba4 |
+| Test symbol | lba4_behavior::lba4_separates_wire_reader_and_producer_for_both_encodings |
 | Ownership test | protocol_field_catalog::field_catalog_has_exact_byte_ownership_for_every_profile_state |
 
 #### lba4.connect_server · lba4_encoding / ordinary-rolling
@@ -1347,10 +1347,10 @@ PackedStruct/EncryptedRegion 行按目录现有粒度展示，不补造目录未
 | Physical evidence | P-GOLD-ENC;P-GOLD-NOPWD |
 | Implementation provenance | Encoding composes independently with producer overlays. |
 | Semantic status | COMPLETE |
-| Implementation status | PLANNED |
-| Behavior-test status | PLANNED |
-| Code symbol | planned:protocol::lba4::connect_server |
-| Test symbol | UNIMPLEMENTED |
+| Implementation status | COMPLETE |
+| Behavior-test status | COMPLETE |
+| Code symbol | edpcli::protocol::lba4::parse_lba4 |
+| Test symbol | lba4_behavior::lba4_separates_wire_reader_and_producer_for_both_encodings |
 | Ownership test | protocol_field_catalog::field_catalog_has_exact_byte_ownership_for_every_profile_state |
 
 #### lba4.connect_server · lba4_encoding / post-xor
@@ -1370,10 +1370,10 @@ PackedStruct/EncryptedRegion 行按目录现有粒度展示，不补造目录未
 | Physical evidence | P-GOLD-ENC;P-GOLD-NOPWD |
 | Implementation provenance | Encoding composes independently with producer overlays. |
 | Semantic status | COMPLETE |
-| Implementation status | PLANNED |
-| Behavior-test status | PLANNED |
-| Code symbol | planned:protocol::lba4::connect_server |
-| Test symbol | UNIMPLEMENTED |
+| Implementation status | COMPLETE |
+| Behavior-test status | COMPLETE |
+| Code symbol | edpcli::protocol::lba4::parse_lba4 |
+| Test symbol | lba4_behavior::lba4_separates_wire_reader_and_producer_for_both_encodings |
 | Ownership test | protocol_field_catalog::field_catalog_has_exact_byte_ownership_for_every_profile_state |
 
 #### lba4.representation_backing · lba4_encoding / ordinary-rolling
@@ -1393,10 +1393,10 @@ PackedStruct/EncryptedRegion 行按目录现有粒度展示，不补造目录未
 | Physical evidence | P-GOLD-ENC;P-GOLD-NOPWD |
 | Implementation provenance | Encoding composes independently with producer overlays. |
 | Semantic status | COMPLETE |
-| Implementation status | PLANNED |
-| Behavior-test status | PLANNED |
-| Code symbol | planned:protocol::lba4::representation_backing |
-| Test symbol | UNIMPLEMENTED |
+| Implementation status | COMPLETE |
+| Behavior-test status | COMPLETE |
+| Code symbol | edpcli::protocol::lba4::parse_lba4 |
+| Test symbol | lba4_behavior::lba4_separates_wire_reader_and_producer_for_both_encodings |
 | Ownership test | protocol_field_catalog::field_catalog_has_exact_byte_ownership_for_every_profile_state |
 
 #### lba4.representation_backing · lba4_encoding / post-xor
@@ -1416,10 +1416,10 @@ PackedStruct/EncryptedRegion 行按目录现有粒度展示，不补造目录未
 | Physical evidence | P-GOLD-ENC;P-GOLD-NOPWD |
 | Implementation provenance | Encoding composes independently with producer overlays. |
 | Semantic status | COMPLETE |
-| Implementation status | PLANNED |
-| Behavior-test status | PLANNED |
-| Code symbol | planned:protocol::lba4::representation_backing |
-| Test symbol | UNIMPLEMENTED |
+| Implementation status | COMPLETE |
+| Behavior-test status | COMPLETE |
+| Code symbol | edpcli::protocol::lba4::parse_lba4 |
+| Test symbol | lba4_behavior::lba4_separates_wire_reader_and_producer_for_both_encodings |
 | Ownership test | protocol_field_catalog::field_catalog_has_exact_byte_ownership_for_every_profile_state |
 
 #### lba4.trailing_llgb · lba4_encoding / ordinary-rolling
@@ -1439,10 +1439,10 @@ PackedStruct/EncryptedRegion 行按目录现有粒度展示，不补造目录未
 | Physical evidence | P-GOLD-ENC;P-GOLD-NOPWD |
 | Implementation provenance | Encoding composes independently with producer overlays. |
 | Semantic status | COMPLETE |
-| Implementation status | PLANNED |
-| Behavior-test status | PLANNED |
-| Code symbol | planned:protocol::lba4::trailing_llgb |
-| Test symbol | UNIMPLEMENTED |
+| Implementation status | COMPLETE |
+| Behavior-test status | COMPLETE |
+| Code symbol | edpcli::protocol::lba4::parse_lba4 |
+| Test symbol | lba4_behavior::lba4_separates_wire_reader_and_producer_for_both_encodings |
 | Ownership test | protocol_field_catalog::field_catalog_has_exact_byte_ownership_for_every_profile_state |
 
 #### lba4.trailing_llgb · lba4_encoding / post-xor
@@ -1462,10 +1462,10 @@ PackedStruct/EncryptedRegion 行按目录现有粒度展示，不补造目录未
 | Physical evidence | P-GOLD-ENC;P-GOLD-NOPWD |
 | Implementation provenance | Encoding composes independently with producer overlays. |
 | Semantic status | COMPLETE |
-| Implementation status | PLANNED |
-| Behavior-test status | PLANNED |
-| Code symbol | planned:protocol::lba4::trailing_llgb |
-| Test symbol | UNIMPLEMENTED |
+| Implementation status | COMPLETE |
+| Behavior-test status | COMPLETE |
+| Code symbol | edpcli::protocol::lba4::parse_lba4 |
+| Test symbol | lba4_behavior::lba4_separates_wire_reader_and_producer_for_both_encodings |
 | Ownership test | protocol_field_catalog::field_catalog_has_exact_byte_ownership_for_every_profile_state |
 
 ### 历史演进 matrix

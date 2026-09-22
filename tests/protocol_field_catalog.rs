@@ -500,12 +500,15 @@ fn code_symbols() -> BTreeSet<String> {
         edpcli::protocol::lba1::parse_lba1,
         edpcli::protocol::lba2::parse_lba2,
         edpcli::protocol::lba3::parse_lba3,
+        edpcli::protocol::lba4::parse_lba4,
         edpcli::protocol::lba5::parse_lba5
     ]
 }
 
 fn behavior_test_symbols() -> BTreeSet<String> {
     symbol_registry![
+        lba4_behavior::lba4_separates_wire_reader_and_producer_for_both_encodings,
+        lba4_behavior::lba4_overlays_are_explicit_and_do_not_select_encoding,
         gpt_behavior::gpt_virtual_header_and_entries_are_typed_and_crc_checked,
         gpt_behavior::gpt_absent_is_explicit_and_unknown_never_defaults_to_absent,
         basic_behavior::lba0_profiles_decode_mbr_and_preserve_backing,
@@ -604,3 +607,5 @@ mod basic_behavior;
 mod core_behavior;
 #[path = "protocol_behavior/gpt.rs"]
 mod gpt_behavior;
+#[path = "protocol_behavior/lba4.rs"]
+mod lba4_behavior;
