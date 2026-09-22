@@ -155,7 +155,11 @@ fn profile_coverage_keeps_semantic_status_separate_from_physical_positive_eviden
         let cols: Vec<_> = line.split('\t').collect();
         assert_eq!(cols.len(), 7, "bad profile-coverage row: {line}");
         assert!(matches!(cols[2], "COMPLETE" | "PARTIAL" | "UNKNOWN"));
-        assert!(matches!(cols[3], "physical" | "virtual" | "static"));
+        assert!(
+            matches!(cols[3], "physical" | "virtual" | "static")
+                || (cols[3] == "none" && cols[4] == "MISSING_PHYSICAL"),
+            "absent positive wire evidence is only valid for MISSING_PHYSICAL: {line}"
+        );
         assert!(matches!(cols[4], "COVERED" | "MISSING_PHYSICAL"));
         let ids: Vec<_> = cols[5].split(';').filter(|id| !id.is_empty()).collect();
         assert!(
