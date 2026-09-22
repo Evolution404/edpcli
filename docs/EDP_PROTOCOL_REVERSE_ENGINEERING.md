@@ -1804,6 +1804,280 @@ Windows 当前 producer：
   `usbregsiter.cpp:0xE13..0xE15`；
 - 该函数按 `0x60` stride 构造 packed LBA12 entry。
 
+### 5.9 官方“启动区与交换区二合一”制盘链：UI → request → EDPF → MBR → FormatDisk
+
+本轮继续从 first-party 制标程序反向追踪真实免密码 SanDisk 的来源，已经把
+“启动区与交换区二合一”从产品 UI 一直闭合到物理 MBR。这里要特别区分：
+
+- **产品术语**：“启动区与交换区二合一”；
+- **EDPF 物理布局**：`type2 + type4` 两条 entry；
+- **操作系统可见布局**：一个从 LBA63 开始的普通 MBR `0x07` 分区；
+- **current FormatDisk 行为**：把该前部卷按“交换区”特殊 profile 格式化，
+  不再走普通独立 type1 启动区的文件部署分支。
+
+#### 5.9.1 UI profile 编号不是推断：四个 radio 直接写 `part=0/1/2/3`
+
+`cemssafeudisklabeltool.exe` 的 UI 对象名明确包含：
+
+`defaultPartRadio`、`bootAndExchangePartRadio`、`allEncryptPartRadio`、
+`inAndOutNetPartRadio`。
+
+`WriteLabel` 的 Qt meta-call 表和对应机器码已经把四个 radio 与请求值固定为：
+
+```text
+part=0  defaultPartRadio
+        默认三分区
+
+part=1  bootAndExchangePartRadio
+        启动区与交换区二合一
+
+part=2  allEncryptPartRadio
+        整盘加密
+
+part=3  inAndOutNetPartRadio
+        内外网通用双分区
+```
+
+请求结构中对应关系也已经闭合：
+
+```text
+normalDetail +0x34 -> part
+normalDetail +0x38 -> boot MiB
+normalDetail +0x3C -> exchange MiB
+normalDetail +0x40 -> encrypt MiB
+normalDetail +0x44 -> encrypt mode
+normalDetail +0x49 -> noPwd
+```
+
+这里的 UI/request 逻辑不是单一副本偶然值。本机三份 LabelTool：
+
+```text
+cemssafeudisklabeltool.exe
+cemssafeudisklabeltool_orig.exe
+cemssafeudisklabeltool_2ndbackup.exe
+```
+
+虽然整文件和整 `.text` SHA-256 不同，但三段关键代码
+`ValueChangedSlot@0x466580`、request builder `@0x467470`、
+`PartType UI@0x46F2C0` 的局部机器码逐字节一致。三份 PE 的 compile time/GUID
+也一致为 `2024-01-07 03:22:07` / `9AD6E70914B54620ACEFF60ACD36BD811`。
+因此本小节对 UI 公式按“同一官方构建族的三个本地副本”计证据，而不是把一个修改副本
+外推成历史协议恒等式。
+
+#### 5.9.2 容量公式闭合：二合一的大 type2 直接来自 exchange MiB
+
+Qt meta-call 已把容量相关 slot 精确映射为：
+
+```text
+ValueChangedSlot(int)                         -> sub_466580
+PartTypeRadioChangeSlot()                     -> sub_4714b0
+exchangePartSizeEdit()                        -> sub_471dc0
+encryptPartSizeEdit()                         -> sub_471f30
+on_lineEditExchangeSize_editingFinished()     -> sub_466be0
+on_lineEditEncryptSize_editingFinished()      -> sub_466d40
+```
+
+`PartTypeRadioChangeSlot -> sub_46F2C0` 对 `part=0` 和 `part=1`
+都使用同一 50:50 初值。令：
+
+```text
+total_mib = 当前设备可用于分区的容量 MiB
+boot_mib  = 固定 Boot 保留 MiB（来自全局 label 参数）
+available = total_mib - boot_mib
+p         = slider 位置，百分数
+```
+
+则普通/二合一可调模式的核心公式为：
+
+```text
+exchange_mib = available * p / 100
+encrypt_mib  = total_mib - exchange_mib - boot_mib
+```
+
+初始 `p=50`，slider range=`1..99`。用户直接编辑 exchange 或 encrypt
+输入框时，另一边仍按同一恒等式补齐；两个 `editingFinished` 又把手填 MiB
+反算成 slider 百分比：
+
+```text
+p_exchange = exchange_mib * 100 / available
+p_encrypt  = 100 - encrypt_mib * 100 / available
+```
+
+底层 `cemsusbregsiter.dll::sub_10046D20` 再明确规定：
+
+```text
+type1 -> object+0x7DC (boot MiB)     * 0x100000
+type2 -> object+0x7E0 (exchange MiB) * 0x100000
+type4 -> object+0x7E4 (encrypt MiB)  * 0x100000
+```
+
+所以二合一的“前部大区”不是隐藏执行
+`boot + exchange` 的第二套容量公式；其 EDPF entry 本身就是 **type2**，
+大小直接由 exchange MiB 字段生成。产品名称里的“启动+交换二合一”描述的是
+用途/profile，不是“保留 type1 entry 后把两段物理相加”。
+
+#### 5.9.3 `part=1` 的官方 EDPF 构造：严格只有 type2 + type4
+
+底层布局构造函数按 `part` 做显式 switch：
+
+```text
+part=0:
+    PartionCount = 3
+    entry0 = type1
+    entry1 = type2
+    entry2 = type4
+
+part=1:
+    PartionCount = 2
+    entry0 = type2
+    entry1 = type4
+
+part=2:
+    PartionCount = 2
+    entry0 = type1
+    entry1 = type4
+    # current writer 另有整盘加密几何修正
+
+part=3:
+    PartionCount = 2
+    entry0 = type1
+    entry1 = type2
+```
+
+因此真实免密码 SanDisk 的 `PartionCount=2 + type2/type4` 已不再只是
+“看起来像某种免密 profile”，而是和 first-party `part=1` 构造分支逐项一致。
+
+#### 5.9.4 current CreatePartitions 几何：entry0 从 LBA63 开始，type4 紧随其后
+
+`CUsbRegsiter::CreatePartitions/sub_1003DB50` 的 current 几何计算可归纳为：
+
+1. sector size 取设备真实 `SectorSize`；
+2. 第一个有效分区固定从 `StartSector=63` 开始；
+3. 第一段有效字节数 = 第一段边界字节数 - `63 * SectorSize`；
+4. 第二条 entry 的 StartSector = 第一段边界 / SectorSize；
+5. 后续分区按前一分区边界连续排列；
+6. 盘尾仍预留 current writer 的 metadata/reserved 区，不全部分配给 type4。
+
+真实 SanDisk Ultra 给出精确物理交叉验证：
+
+```text
+MBR visible partition:
+type  = 0x07
+start = 63
+count = 117611802 sectors
+
+LBA12 entry0 (type2):
+StartSector  = 63
+PartionSize  = 117611802 * 512
+
+LBA12 entry1 (type4):
+StartSector  = 117611865
+```
+
+并且：
+
+```text
+63 + 117611802 = 117611865
+```
+
+即 MBR 可见区、LBA12 type2 和 type4 起点在扇区级完全连续，不存在独立 type1
+夹在中间。
+
+#### 5.9.5 MBR 是“免登录直接访问”的关键：type2 位于 entry0 时官方返回 0x07
+
+`RegsiterUsb` 在 EDPF 构造之后会调用 MBR builder。分区类型选择函数
+`sub_10041A80` 会查询 EDPF 中 type2/type1/type4 的位置；当 **type2 存在且位于
+entry0** 时直接返回 `0x07`。
+
+随后 `sub_10013E40` 的机器码明确构造标准 MBR：
+
+```text
+partition_entry[0].type      = caller supplied type   # part=1 -> 0x07
+partition_entry[0].start_lba = 63
+partition_entry[0].count     = calculated sector count
+
+partition_entry[1..3] = zero
+MBR[0x1FE] = 0x55
+MBR[0x1FF] = 0xAA
+```
+
+因此 current 官方二合一链是：
+
+```text
+bootAndExchangePartRadio
+        -> part=1
+        -> EDPF: type2 + type4
+        -> type2 is entry0
+        -> MBR selector returns 0x07
+        -> MBR exposes type2 @ LBA63
+        -> OS native filesystem mount
+```
+
+这解释了真实免密码盘为什么无需先走
+`EdpEDisk.exe -> UserLogin -> unwrap file key -> EdpMountFile` 才能访问前部卷。
+
+同时必须保留一个容易误判的事实：真实 SanDisk 的 type2
+`NeedEncrypt=1`，但 raw 前部卷已验证为**明文 NTFS**。二者不矛盾：
+`NeedEncrypt` 是 EDP 登录/挂载链的字段；二合一前部卷在日常访问时由标准 MBR
+直接暴露给操作系统，绕过该登录挂载链。因此不能把“EDPF NeedEncrypt=1”机械解释为
+“MBR 直接访问时物理扇区必然是密文”。
+
+#### 5.9.6 current FormatDisk 对 type2+type4 有专用分支；产品“二合一”不等于复制 type1 内容
+
+`CUsbRegsiter::FormatDisk` 直接识别：
+
+```text
+PartionCount == 2
+entry0.PartionType == 2
+entry1.PartionType == 4
+```
+
+命中后设置专用状态。二进制中的 GBK 常量进一步区分：
+
+```text
+BD BB BB BB C7 F8 -> “交换区”
+C6 F4 B6 AF C7 F8 -> “启动区”
+```
+
+current `FormatDisk` 对上述二合一 profile 将前部可见卷走“交换区”分支；
+普通存在独立 type1 的路径才走“启动区”逻辑，并在相应条件下部署
+`EdpEDisk.exe`、`EdpDisk.chm`、`DiskDigger.exe` 和皮肤资源。
+
+因此应撤销“二合一就是把 type1 的启动文件完整搬进 type2”的简单解释。
+current first-party 代码支持的更精确描述是：
+
+> **取消独立 type1，把前部大卷作为 type2/交换区直接暴露；产品层把这种用途组合称为
+> ‘启动区与交换区二合一’，但 current FormatDisk 并不机械复制普通 type1 的完整启动区部署步骤。**
+
+这里存在明确的历史边界：本机目前只有 current `cemsusbregsiter.dll` 能完整追到
+`CreatePartitions/FormatDisk`；尚未取得一个可独立执行、能证明旧年代
+“二合一”是否部署不同启动文件集的 historical FormatDisk producer。
+因此**不得**把 current 的文件部署差异升级为所有历史版本协议恒等式。
+
+#### 5.9.7 LBA7 与 LBA12 在二合一盘上不是“完全重复的两张几何表”
+
+真实 SanDisk 还暴露出一个容易误读的兼容层：
+
+- LBA12 当前 96B entry 给出实际连续 type2/type4 几何；
+- 旧 LBA7 packed 表同样只有 type2/type4 两条，但 type4 的 legacy 几何可落到
+  盘尾兼容/占位位置，真实样本中其旧表大小只有 `0xC00 = 3072B`；
+- current `CreatePartitions` 先组织旧格式表，再生成/修正 current LBA12 表。
+
+因此兼容实现不能简单要求“LBA7 type4 StartSector/PartionSize 必须逐字节等于 LBA12”。
+对 current 挂载/实际分区几何，应优先服从已经由 Windows/Linux consumer 闭合的
+LBA12 96B packed runtime 表；LBA7 继续按 legacy ABI/profile 单独解释。
+
+综合本轮证据，真实免密码 SanDisk 的官方制盘原理可以收敛为：
+
+```text
+官方 UI part=1
+  -> type2 + type4
+  -> type2 从 LBA63 开始，占据保密区之前的前部大区
+  -> MBR 为同一 type2 物理范围建立标准 0x07 分区
+  -> OS 可直接挂载前部明文文件系统，无需 EDP UserLogin
+  -> type4 仍保存密码/file-key/EncryptMode 等 EDP 安全元数据并走安全挂载链
+```
+
 核心伪代码：
 
 ```text
