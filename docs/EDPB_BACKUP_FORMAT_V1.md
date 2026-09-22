@@ -286,12 +286,12 @@ Deep 默认不备份所有用户文件内容。
 
 ## 11. Region A 与设备尾部取证窗口
 
-Region A 是 LBA7 compact EDPF 表中 entry1/entry2 指向的固定 6 扇区（3072B）IIR/密钥管理块，不是泛指盘尾窗口。
+Region A 是 LBA7 compact EDPF 表中 entry1/entry2 指向的固定 6 扇区（3072B）物理块，不是泛指盘尾窗口。当前尚未闭环其内部业务语义，也没有证明它与 `SectorManageImp::ReadIIR/WriteIIR` 是同一对象。
 
 Metadata 级必须优先使用 LBA7 盘内指针确定 Region A：
 
 - Region id = region.region_a
-- role = iir_key_management
+- role = region_a_unknown
 - sector_count = 6
 - Artifact id = raw.region_a
 - restore_policy = evidence_only
@@ -299,12 +299,9 @@ Metadata 级必须优先使用 LBA7 盘内指针确定 Region A：
 
 CHS 公式 `(total_sectors // 16065) * 16065 - 1792` 仅用于一致性交叉验证。若 CHS 计算结果与 LBA7 指针不一致，必须记录 structured capture issue，并继续以 LBA7 指针为事实源，不得静默改写起点。
 
-Region A 当前已知内部语义：
+Region A 当前严格内部语义为：`+0x000..+0xbff` 全部保持 unknown。IIR 的 0x800B 布局、AES/CRC 和 PartInfo 地址链作为独立研究对象保留，但在出现直接物理绑定前不得映射到 Region A 的任何字节。
 
-- `+0x000..+0x7ff`：0x800B，已确认是 `sectormanage64.dll::ReadIIR/WriteIIR` 使用的 AES-192-CBC IIR 主表密文
-- `+0x800..+0xbff`：0x400B，官方用途尚未闭环，保持 unknown
-
-可增加 `derived.region_a.layout` 描述上述布局，但派生结果不得替代 `raw.region_a` 原始字节。
+`derived.region_a.layout` 只能描述“3072B physical extent + unknown wire semantics + IIR binding unproven”，派生结果不得替代 `raw.region_a` 原始字节。
 
 最后 2048 扇区的广义取证窗口是另一独立 Region：
 

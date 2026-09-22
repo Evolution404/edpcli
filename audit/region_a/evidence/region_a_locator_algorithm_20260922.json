@@ -25,10 +25,6 @@
       "function": "CUsbRegsiter::CreatePartitions",
       "callsite": "0x1003de7a",
       "fact": "stores the 64-bit locator result, divides by sector size via sub_10068590, writes the quotient to EDPF +0x18/+0x1c, and writes aligned 0xC00 size to +0x28/+0x2c"
-    },
-    {
-      "function": "CUsbRegsiter::MountEdpPart/sub_100439d0",
-      "fact": "copies EDPF +0x18/+0x1c to m_Partion.StartSector and +0x28/+0x2c to PartitionSize, then invokes EdpEDisk.dll!EdpMountFile through the function pointer loaded at object+0xa0"
     }
   ],
   "formula": {
@@ -92,5 +88,5 @@
     }
   ],
   "correction": "total_sectors - 2051 is Lexar-specific because that device has a 259-sector physical-minus-CHS delta; it is not the generic official formula.",
-  "scope": "This closes Region A physical location in the cemsusbregsiter registration/mount path. It does not by itself prove that sectormanage64 ReadIIR resolves to the same physical block; that separate PartInfo-based binding remains PARTIAL."
+  "scope": "This closes only the Region A physical locator written into the legacy 0x40-stride LBA7 table. MountEdpPart consumes the distinct 0x60-stride new/LBA12 table and must not be cited as a Region A consumer. The separate sectormanage ReadIIR PartInfo-based address remains unbound to Region A."
 }

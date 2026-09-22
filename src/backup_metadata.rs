@@ -625,7 +625,7 @@ pub fn acquire_metadata(
             let region_id = "region.region_a";
             out.regions.push(Region {
                 id: region_id.into(),
-                role: "iir_key_management".into(),
+                role: "region_a_unknown".into(),
                 start_lba: Some(region_a.start_lba),
                 sector_count: Some(region_a.sector_count),
                 semantic_status: SemanticStatus::Identified,
@@ -638,7 +638,7 @@ pub fn acquire_metadata(
                 "raw.region_a".into(),
                 region_a.start_lba,
                 region_a.sector_count,
-                "region_a_iir_key_management",
+                "region_a_unresolved",
             )?;
             if let Some(expected) = region_a.chs_expected_start_lba {
                 if expected != region_a.start_lba {
@@ -658,16 +658,12 @@ pub fn acquire_metadata(
                     "total_size": REGION_A_BYTES,
                     "source": "lba7_entry_pointer",
                     "candidate_entries": region_a.lba7_candidate_entries,
-                    "iir_main": {
+                    "wire_semantics": {
                         "offset": 0,
-                        "length": 0x800,
-                        "classification": "aes_192_cbc_encrypted_iir"
-                    },
-                    "unknown_tail": {
-                        "offset": 0x800,
-                        "length": 0x400,
+                        "length": REGION_A_BYTES,
                         "classification": "unknown"
-                    }
+                    },
+                    "iir_binding": "unproven"
                 });
                 out.artifacts.push(ArtifactInput {
                     id: "derived.region_a.layout".into(),
@@ -771,7 +767,7 @@ pub fn acquire_metadata(
         PARTITION_PREFIX_SECTORS, PARTITION_SUFFIX_SECTORS, tail_count
     ));
     out.notes.push(
-        "Region A is the LBA7-pointed six-sector IIR/key-management block; device tail window is separate forensic evidence"
+        "Region A is the LBA7-pointed six-sector block with unresolved internal semantics; device tail window is separate forensic evidence"
             .into(),
     );
     if !out.issues.is_empty() {

@@ -24,18 +24,15 @@ Region A 不是 device tail window。它是 LBA7 compact EDPF entry1/entry2 指�
 
 | 范围 | COMPLETE | PARTIAL | UNKNOWN |
 |---|---:|---:|---:|
-| Region A +0x000..+0xbff | 0 | 2048 | 1024 |
+| Region A +0x000..+0xbff | 0 | 0 | 3072 |
 
-含义：
-
-- `+0x000..+0x7ff` 与 `SectorManageImp::ReadIIR/WriteIIR` 的**静态结构关系高度收敛但尚未完成物理绑定**：0x800B 读写长度、AES-256-CBC、device-tree 地址链和真实 Region A ciphertext 均有证据；但仍缺当前 Lexar 控制器 `0x06FE/GetPartInfoAll` 的 `PartInfo[2].sector_num` 实测值，因此保持 PARTIAL，禁止写成“已证明同址”。
-- `+0x800..+0xbff` 只有真实物理密文，主 `ReadIIR/WriteIIR` 不覆盖，producer/consumer 未定位，因此 UNKNOWN。
+含义：当前唯一严格成立的是 LBA7 指针、CHS 定位公式和 3072B 物理密文本身。尚未找到直接作用于这 0xC00 的 producer、consumer、明文结构或加密边界，因此**全部 3072B 都是 UNKNOWN**。此前把前 0x800B 计为 IIR PARTIAL 属于未证明的对象绑定，现已撤销。
 
 机器 ledger：`audit/region_a/wire_byte_ledger.tsv`。
 
-### 2.2 条件 IIR plaintext 2048B
+### 2.2 独立 IIR plaintext 参考 2048B
 
-这里的“plaintext”仅表示：如果获得正确 Region A AES 上下文后，`ReadIIR` 解出的 0x800B 表结构。当前真实 Lexar 尚未获得 CRC 闭合的 plaintext，因此任何字段都不能算 physical COMPLETE。
+IIR 是一个独立研究对象：`ReadIIR/WriteIIR` 的 0x800B 表结构、AES-256-CBC 和 CRC 规则均有静态证据，但**尚未证明它与 Region A 是同一物理对象**。因此下面的 IIR plaintext ledger 只记录 IIR 自身解析进度，不计入 Region A 的 COMPLETE/PARTIAL 字节。
 
 | 范围 | COMPLETE | PARTIAL | UNKNOWN |
 |---|---:|---:|---:|
@@ -63,8 +60,8 @@ LBA7 compact key 字段已经单独闭环：默认密码 `0000aaaa` 可通过 ol
 2. 官方代码用三个 64 位乘法调用计算 `Cylinders * TracksPerCylinder * SectorsPerTrack * BytesPerSector`，结果写入 `CDiskFile+0x30/+0x34`。
 3. `CUsbRegsiter::CreateDiskFile` 把该 CHS 字节容量复制到 `this+0x6a0/+0x6a4`，sector size 写入 `this+0x6a8`。
 4. `sub_10040110 @ 0x10040110` 的机器码直接执行 `m_ullSize - 0x100000 + 0x20000`，即 `CHS_bytes - 0xE0000`。
-5. `CreatePartitions @ 0x1003de7a` 调用该函数，再用 `sub_10068590` 除以 sector size，把 64 位商写入 EDPF entry `+0x18/+0x1c`；同时把对齐后的 `0xC00` 写入 `+0x28/+0x2c`。
-6. `MountEdpPart` 原样复制这些字段到 `m_Partion.StartSector/PartitionSize`，并调用 `EdpEDisk.dll!EdpMountFile`。
+5. `CreatePartitions @ 0x1003de7a` 调用该函数，再用 `sub_10068590` 除以 sector size，把 64 位商写入**旧 0x40-stride / LBA7 表**的 entry `+0x18/+0x1c`；同时把对齐后的 `0xC00` 写入 `+0x28/+0x2c`。
+6. 同一函数另建 `var_1364` 的 **0x60-stride / LBA12 新表**。`sub_10014f30(..., &var_1244, &var_1364, ..., 0x206)` 序列化新表，随后 `MountEdpPart` 明确接收 `&var_1364`，不是承载 Region A 指针的旧表。
 
 因此通用公式是：
 
@@ -88,9 +85,15 @@ LBA7 compact key 字段已经单独闭环：默认密码 `0000aaaa` 可通过 ol
 
 证据：`audit/region_a/evidence/region_a_locator_algorithm_20260922.json`。
 
-注意：这里 COMPLETE 的是 **cemsusbregsiter 制盘/注册路径的 Region A 物理定位**；它不自动把 `sectormanage64::ReadIIR` 的 PartInfo 地址链提升为同址 COMPLETE，后者仍按 §4.1 的边界保持 PARTIAL。
+注意：这里 COMPLETE 的只有 **Region A 物理定位**，不包含其数据语义。
 
-## 4. IIR producer / consumer
+### 3.2 已排除：`MountEdpPart -> EdpMountFile` 不是 Region A consumer
+
+`CreatePartitions` 同时维护两张不同表：`var_1244` 为 3×0x40 的 legacy/LBA7 表，Region A 的 CHS-0x700 指针写在这里；`var_1364` 为 3×0x60 的 new/LBA12 表，`MountEdpPart` 迭代的正是后者。当前 Lexar 更能直接交叉验证：LBA7 entry1/2 都指向 243623933，而 LBA12 type2/type4 的真实数据分区起点分别是 20480 和 231424000。
+
+因此 `EdpMountFile/EdpEDisk64.sys` 的分区加密、file_key、SM4 profile **不能作为 Region A 的 producer/consumer 或解密证据**。机器证据：`audit/region_a/evidence/mount_not_region_a_20260922.json`。
+
+## 4. 独立 IIR 候选（尚未与 Region A 绑定）
 
 静态证据来自：
 
@@ -110,7 +113,7 @@ SHA-256：
 - `sub_180009390` / decrypt wrapper
 - `sub_18001c560` / AES cipher descriptor selector
 
-ReadIIR 和 WriteIIR 都使用 device tree node `+0x18` 计算物理位置，并固定处理 0x800B。后 0x400B 尚未由这条主路径解释。
+ReadIIR 和 WriteIIR 都使用 device tree node `+0x18` 计算物理位置，并固定处理 0x800B。这些事实只证明 IIR 自身结构；在缺少直接物理地址实测前，不把这 0x800B 映射到 Region A，也不存在所谓“Region A 后 0x400B 是 IIR 尾部”的前提。
 
 ### 4.1 物理地址链已闭环到 PartInfo[2]，最后一个 runtime 值仍缺
 
@@ -148,7 +151,7 @@ ReadIIR 和 WriteIIR 都使用 device tree node `+0x18` 计算物理位置，并
 
 机器证据：`audit/region_a/evidence/partinfo_transport_crypto_20260922.json`。
 
-这里 COMPLETE 的只是**命令传输和响应解码规则**。真实 Lexar 的 512B `FE 06` DATA-IN 尚未成功捕获，因此 §4.1 的物理同址状态仍保持 PARTIAL。
+这里 COMPLETE 的只是**IIR/Netac profile 的命令传输和响应解码规则**。真实 Lexar 的 512B `FE 06` DATA-IN 尚未成功捕获，因此 IIR 与 Region A 是否同址仍是未证明假设；该缺口不再给 Region A wire ledger 贡献 PARTIAL 字节。
 
 ### 4.3 `sectorInfo` 上传链已明确排除为 Region A
 
@@ -174,7 +177,7 @@ ReadIIR 和 WriteIIR 都使用 device tree node `+0x18` 计算物理位置，并
 - IV length = 16
 - flags = `0x1002`
 
-因此 Region A 主 IIR wrapper 实际使用 **AES-256-CBC**。另外，使用完整 32 字节 ASCII key 和 zero IV 的标准 OpenSSL AES-256-CBC 解密，与官方 wrapper 前 2032 字节输出 bit-exact，证明当前 fresh EVP context 中 observed NULL-IV 参数的有效行为就是 zero IV。证据见 `audit/region_a/evidence/cipher_descriptor_aes256_20260922.json`。
+因此 IIR wrapper 实际使用 **AES-256-CBC**。另外，使用完整 32 字节 ASCII key 和 zero IV 的标准 OpenSSL AES-256-CBC 解密，与官方 wrapper 前 2032 字节输出 bit-exact，证明当前 fresh EVP context 中 observed NULL-IV 参数的有效行为就是 zero IV。证据见 `audit/region_a/evidence/cipher_descriptor_aes256_20260922.json`。
 
 ### 5.1 默认 Init key 的精确生成规则
 
@@ -274,7 +277,7 @@ ReadIIR 和 WriteIIR 都使用 device tree node `+0x18` 计算物理位置，并
 - data-key slot 单字节篡改会同时击穿对应 segment CRC 和 main CRC
 - 非 0x800B plaintext fail closed
 
-代码当前故意**没有**提供 real Region A decrypt API，因为真实 AES key/context 尚未闭环。
+代码中的 CRC/字段解析仅是独立 IIR helper。当前故意**没有**提供 Region A decrypt API，因为 Region A 的 producer/consumer 和实际 crypto boundary 都尚未识别。
 
 ## 8. 官方 InitIIR runner 当前不能算 producer 正证据
 
@@ -294,41 +297,26 @@ ReadIIR 和 WriteIIR 都使用 device tree node `+0x18` 计算物理位置，并
 - `audit/region_a/evidence/init_iir_runner_failure_20260922.json`
 - `audit/region_a/evidence/init_iir_runner_failure_20260922.txt`
 
-## 9. 真实解密 COMPLETE 门禁
+## 9. Region A 字节 COMPLETE 门禁
 
-真实 Lexar `+0x000..+0x7ff` 只有同时满足下列条件才能从 PARTIAL 升级为 COMPLETE：
+任意 Region A 字节或连续区间只有同时满足下列条件，才允许从 UNKNOWN 升级：
 
-1. key/context producer 来源从官方调用链闭合，不能靠猜测、字典扫描或硬编码物理 plaintext。
-2. 对 physical gold 解密后，main CRC 通过。
-3. 同一 plaintext 的 19 个 segment CRC 全通过。
-4. plaintext 的关键容量/状态字段与同一物理盘 LBA7/LBA12/设备几何交叉一致。
-5. 使用闭环后的真实官方 AES-256-CBC key/context 重加密后，必须与 physical Region A 前 0x800B bit-exact。
-6. 解密实现和静态/动态证据必须进入仓库测试，不依赖聊天记录。
+1. 找到直接以 LBA7 Region A StartSector/0xC00 extent 为目标的 producer 或 consumer，不能靠地址数值相似推定对象相同。
+2. 闭环该路径的实际字节范围、结构和读写方向。
+3. 若存在加密，必须从该路径闭环算法、key/IV/tweak provenance，并对 physical gold 做解密与重加密 bit-exact 验证。
+4. 至少一个真实物理样本提供字段/行为正证据；跨品牌结论必须有相应 profile 证据。
+5. 结论进入机器 ledger、测试和人类文档，三者严格一致。
 
-只有满足 1-6，才允许声明“Region A 前 0x800 解密完成”。
+IIR、LBA12 分区挂载、`sectorInfo` 上传链目前都不满足第 1 条，因此不能给 Region A 的任何字节提升状态。
 
 ## 10. Region A 整体 100% 门禁
 
-即使前 0x800 解密完成，整个 0xC00 仍不能宣布 100%。还必须对 `+0x800..+0xbff` 找到：
-
-- producer
-- consumer
-- 数据结构/算法
-- 至少一个 physical positive
-- 行为测试
-
-在此之前后 0x400 始终 UNKNOWN。
+整个 `+0x000..+0xbff` 共 3072B 必须无缝覆盖，并对每个区间闭环 producer、consumer、数据结构、crypto（如有）、physical positive 与行为测试。当前严格状态仍为 **0 COMPLETE / 0 PARTIAL / 3072 UNKNOWN**。
 
 ## 11. 下一步研究顺序
 
-当前最高优先级已经从“继续猜 key”收敛为物理绑定、producer profile 和尾部用途三条线：
-
-1. 继续闭环 `cemsusbregsiter::MountEdpPart -> EdpMountFile -> IOCTL 0x8200e000 -> EdpEDisk64.sys`，精确映射 EDPF type2/type4 的 `StartSector/sector_size/partition_size` 与驱动 backing offset/I/O boundary，并继续寻找对 `+0x800..+0xbff` 的实际读写调用者。
-2. 独立追 Region A `+0x800..+0xbff` 的 producer/consumer 和加密配置，不把这 0x400B 强行归入主 IIR。
-3. 当前 x64 `Init -> core+0x00 -> ReadIIR/WriteIIR/BackupIIR` 直接数据流已闭环；后续重点转为寻找**历史 producer/profile**，以及有证据时再追间接内存覆盖，而不是继续假设存在未见的 `SetCoreKey` API。
-4. 动态追踪真实 Windows 客户端的 `sub_180009390` 调用点仍有价值，用于观测 runtime key buffer 是否确实等于当前 Init default key。
-5. 修复官方 InitIIR Unicorn harness，使其真正到达 WriteDev，再用生成 plaintext/ciphertext 做 producer round-trip。
-
-当前 Lexar 已有实测表明不识别上述 `FE 06` controller 协议；因此 `FE 06` 仅保留为 Netac 静态 profile 证据，不再作为当前 Lexar 的主研究路径。
-
-禁止把当前 `8eeaa206...` candidate、LBA7 key8、file_key 或任意扫描结果直接升级为真实 key，除非通过第 9 节全部门禁。
+1. 沿 **legacy/LBA7 0x40 entry 的 StartSector=Region A** 继续找真正的数据访问者，优先搜索读取旧表后把 `+0x18/+0x1c` 当物理地址使用的调用链。
+2. 追 `CreatePartitions` 中 Region A 旧表项的生命周期：创建、序列化到 LBA7、后续读取/恢复/登录时的消费者，区分结构复制与真实磁盘 I/O。
+3. 在 `u_disk` 历史版本、日志和 DLL/SYS 中按 `0xC00` 长度、CHS-0x700 地址和 old-format entry 语义交叉搜索 producer/consumer。
+4. IIR 继续保留为独立旁证；除非获得直接 physical address 绑定，否则不再把 FE06、AES-256-CBC、IIR CRC 或 Init key 用作 Region A 主线。
+5. `MountEdpPart/EdpMountFile` 与 `sectorInfo` 已是负证据：后续不得重复把它们当 Region A consumer/upload path。

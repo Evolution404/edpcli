@@ -100,8 +100,8 @@ fn region_a_wire_ledger_covers_exactly_3072_bytes_without_overlap() {
         seen.into_iter().all(|value| value),
         "wire ledger contains gaps"
     );
-    assert_eq!((complete, partial, unknown), (0, 2048, 1024));
-    assert!(DOC.contains("| Region A +0x000..+0xbff | 0 | 2048 | 1024 |"));
+    assert_eq!((complete, partial, unknown), (0, 0, 3072));
+    assert!(DOC.contains("| Region A +0x000..+0xbff | 0 | 0 | 3072 |"));
 }
 
 #[test]
@@ -204,8 +204,8 @@ fn region_a_locator_evidence_closes_three_brand_chs_formula_without_closing_iir_
     assert_eq!(evidence["S-REGIONA-LOCATOR"], "static");
     assert_eq!(evidence["P-REGIONA-LOCATOR-3DISK"], "physical");
     assert!(DOC.contains("Region A 物理定位算法已 COMPLETE"));
-    assert!(DOC.contains("sectormanage64::ReadIIR"));
-    assert!(DOC.contains("保持 PARTIAL"));
+    assert!(DOC.contains("独立 IIR 候选（尚未与 Region A 绑定）"));
+    assert!(DOC.contains("不包含其数据语义"));
 }
 
 #[test]
@@ -265,11 +265,12 @@ fn failed_init_iir_harness_is_negative_evidence_not_virtual_positive() {
 
     let profile = include_str!("../audit/region_a/profile_coverage.tsv");
     assert!(profile.contains("NOT_REPRODUCED"));
-    assert!(profile.contains("N-IIR-INIT-RUNNER"));
+    assert!(!profile.contains("N-IIR-INIT-RUNNER"));
+    assert!(EVIDENCE.contains("N-IIR-INIT-RUNNER"));
 }
 
 #[test]
-fn region_a_cipher_descriptor_is_aes256_cbc_and_matches_standard_crypto() {
+fn iir_cipher_descriptor_is_aes256_cbc_and_matches_standard_crypto() {
     let descriptor: serde_json::Value = serde_json::from_str(include_str!(
         "../audit/region_a/evidence/cipher_descriptor_aes256_20260922.json"
     ))
@@ -285,8 +286,8 @@ fn region_a_cipher_descriptor_is_aes256_cbc_and_matches_standard_crypto() {
         descriptor["official_prefix_sha256"],
         descriptor["openssl_prefix_sha256"]
     );
-    assert!(!DOC.contains("Region A 主 IIR wrapper 实际使用 **AES-192-CBC**"));
-    assert!(DOC.contains("Region A 主 IIR wrapper 实际使用 **AES-256-CBC**"));
+    assert!(!DOC.contains("Region A 主 IIR wrapper"));
+    assert!(DOC.contains("IIR wrapper 实际使用 **AES-256-CBC**"));
 }
 
 #[test]
@@ -380,9 +381,9 @@ fn iir_address_chain_is_static_complete_but_physical_binding_remains_partial() {
         .contains("not directly observed"));
 
     let wire = include_str!("../audit/region_a/wire_byte_ledger.tsv");
-    assert!(wire.contains("000-7ff\tPARTIAL"));
-    assert!(wire.contains("physical Lexar PartInfo[2] runtime value is still missing"));
-    assert!(DOC.contains("保持 PARTIAL，禁止写成“已证明同址”"));
+    assert!(wire.contains("000-bff\tUNKNOWN"));
+    assert!(wire.contains("independent 0x800-byte IIR path is an unbound hypothesis"));
+    assert!(DOC.contains("IIR 与 Region A 是否同址仍是未证明假设"));
 }
 
 #[test]
@@ -482,4 +483,30 @@ fn sectorinfo_upload_path_is_closed_as_lba8_edpf_not_region_a() {
     );
     assert!(DOC.contains("`sectorInfo` 上传链已明确排除为 Region A"));
     assert!(DOC.contains("`sectorInfo` 不能再作为 Region A 上传服务器的证据"));
+}
+
+#[test]
+fn mount_edp_part_is_closed_as_lba12_partition_path_not_region_a() {
+    let evidence: serde_json::Value = serde_json::from_str(include_str!(
+        "../audit/region_a/evidence/mount_not_region_a_20260922.json"
+    ))
+    .unwrap();
+    assert_eq!(
+        evidence["status"],
+        "NEGATIVE_BINDING_CLOSED_MOUNTED_TABLE_IS_LBA12_NOT_REGION_A"
+    );
+    assert_eq!(
+        evidence["current_lexar_crosscheck"]["lba7_old_format"][0]["start_sector"],
+        243623933u64
+    );
+    assert_eq!(
+        evidence["current_lexar_crosscheck"]["lba12_actual_partitions"][0]["start_sector"],
+        20480u64
+    );
+    assert_eq!(
+        evidence["current_lexar_crosscheck"]["lba12_actual_partitions"][1]["start_sector"],
+        231424000u64
+    );
+    assert!(DOC.contains("`MountEdpPart -> EdpMountFile` 不是 Region A consumer"));
+    assert!(DOC.contains("0 COMPLETE / 0 PARTIAL / 3072 UNKNOWN"));
 }

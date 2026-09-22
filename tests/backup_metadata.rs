@@ -222,12 +222,10 @@ fn metadata_capture_reads_complete_region_a_and_separate_tail_window() {
         .find(|artifact| artifact.id == "derived.region_a.layout")
         .expect("Region A layout artifact");
     let layout_json: serde_json::Value = serde_json::from_slice(&layout.data).unwrap();
-    assert_eq!(layout_json["iir_main"]["length"], 2048);
-    assert_eq!(
-        layout_json["iir_main"]["classification"],
-        "aes_192_cbc_encrypted_iir"
-    );
-    assert_eq!(layout_json["unknown_tail"]["length"], 1024);
+    assert_eq!(layout_json["wire_semantics"]["offset"], 0);
+    assert_eq!(layout_json["wire_semantics"]["length"], 3072);
+    assert_eq!(layout_json["wire_semantics"]["classification"], "unknown");
+    assert_eq!(layout_json["iir_binding"], "unproven");
 }
 
 #[test]

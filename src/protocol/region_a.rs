@@ -1,10 +1,10 @@
-//! Region A / IIR protocol structures.
+//! Region A locator plus independent IIR protocol helpers.
 //!
-//! Region A is the six-sector (0xC00-byte) block pointed to by LBA7 entry1/entry2.
-//! The first 0x800 bytes are the encrypted SectorManageImp::ReadIIR/WriteIIR table.
-//! This module intentionally parses only already-decrypted IIR plaintext; the
-//! real-device AES key source is not yet closed and therefore no decrypt function
-//! is exposed here.
+//! Region A is the six-sector (0xC00-byte) physical block pointed to by LBA7
+//! entry1/entry2. No byte-level binding between that physical block and the
+//! separate SectorManageImp::ReadIIR/WriteIIR object has been proven. The IIR
+//! parser below therefore operates only on standalone already-decrypted 0x800-byte
+//! IIR buffers and must not be interpreted as a Region A decoder.
 
 pub const REGION_A_TOTAL_SIZE: usize = 0xC00;
 pub const REGION_A_CHS_TAIL_DISTANCE_BYTES: u64 = 0xE0000;
@@ -55,8 +55,6 @@ pub fn locate_region_a_from_geometry(
 }
 
 pub const IIR_MAIN_SIZE: usize = 0x800;
-pub const IIR_UNKNOWN_TAIL_OFFSET: usize = 0x800;
-pub const IIR_UNKNOWN_TAIL_SIZE: usize = 0x400;
 pub const IIR_MAIN_CRC_OFFSET: usize = 0x3FE;
 pub const IIR_MAIN_CRC_BODY_LEN: usize = 0x3E4;
 
