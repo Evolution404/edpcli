@@ -1,13 +1,55 @@
 mod common;
 
-use std::fs;
+use std::path::PathBuf;
 use std::process::Command;
 
 use common::*;
+use edpcli::edpb::{self, CoreCapture};
+
+fn fixture_edpb(key: &str, tag: &str) -> Option<(TmpDir, PathBuf)> {
+    let data = load_disk_image(key)?;
+    let (disk, sectors, vid, pid, device_id, onlyid) = match key {
+        "netac" => (
+            6,
+            122_880_000u64,
+            "0dd8",
+            "2005",
+            "disk&ven_netac&prod_onlydisk",
+            "1402259934",
+        ),
+        "aigo" => (
+            4,
+            245_760_000u64,
+            "3535",
+            "6300",
+            "disk&ven_aigo&prod_u335&rev_pmap",
+            "1987718388",
+        ),
+        _ => return None,
+    };
+    let tmp = TmpDir::new(tag);
+    let path = tmp.0.join(format!("{key}.edpb"));
+    let capture = CoreCapture {
+        snapshot_id: format!("inspect-cli-{key}"),
+        created_epoch: 1_789_000_000,
+        disk_number: Some(disk),
+        vid: vid.into(),
+        pid: pid.into(),
+        device_id: device_id.into(),
+        onlyid: Some(onlyid.into()),
+        total_sectors: Some(sectors),
+        logical_sector_size: 512,
+        edpcli_version: env!("CARGO_PKG_VERSION").into(),
+        device_state: "encrypted".into(),
+        lba0_12: &data,
+    };
+    edpb::write_core_backup(&path, &capture).unwrap();
+    Some((tmp, path))
+}
 
 #[test]
 fn inspect_backup_file_is_offline_and_renders_structured_hex() {
-    let Some(path) = fixture_bin("netac") else {
+    let Some((_tmp, path)) = fixture_edpb("netac", "inspect_cli_offline") else {
         eprintln!("跳过: 真实备份不可用");
         return;
     };
@@ -35,18 +77,10 @@ fn inspect_backup_file_is_offline_and_renders_structured_hex() {
 
 #[test]
 fn inspect_backup_file_exports_selected_lbas() {
-    let Some(path) = fixture_bin("netac") else {
+    let Some((tmp, copied)) = fixture_edpb("netac", "inspect_cli") else {
         eprintln!("跳过: 真实备份不可用");
         return;
     };
-    let tmp = TmpDir::new("inspect_cli");
-    let name = path.file_name().unwrap();
-    let copied = tmp.0.join(name);
-    fs::copy(&path, &copied).unwrap();
-    let src_sha256 = format!("{}.sha256", path.display());
-    if std::path::Path::new(&src_sha256).exists() {
-        fs::copy(src_sha256, format!("{}.sha256", copied.display())).unwrap();
-    }
     let export = tmp.0.join("out");
     let out = Command::new(env!("CARGO_BIN_EXE_edpcli"))
         .env("NO_COLOR", "1")
@@ -82,13 +116,10 @@ fn inspect_backup_file_exports_selected_lbas() {
 
 #[test]
 fn known_lba_without_structure_does_not_dump_hex_unless_requested() {
-    let (Some((name, _)), Some(data)) = (fixture("aigo"), load_disk_image("aigo")) else {
+    let Some((_tmp, target)) = fixture_edpb("aigo", "inspect_no_auto_hex") else {
         eprintln!("跳过: 真实备份不可用");
         return;
     };
-    let tmp = TmpDir::new("inspect_no_auto_hex");
-    let target = tmp.0.join(name);
-    fs::write(&target, data).unwrap();
 
     let out = Command::new(env!("CARGO_BIN_EXE_edpcli"))
         .args(["inspect", target.to_str().unwrap(), "--lba", "9"])
