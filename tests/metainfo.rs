@@ -1,14 +1,34 @@
 mod common;
 
 use common::*;
-use edpcli::diskio::parse_backup_name;
 use edpcli::inspect::InspectMeta;
 use edpcli::metainfo::{render, summarize};
 
 fn meta_for(key: &str) -> InspectMeta {
-    let (name, _) = fixture(key).expect("fixture metadata");
-    let parsed = parse_backup_name(name).expect("parse fixture backup name");
-    InspectMeta::from_backup_meta(&parsed)
+    let (device_id, vid, pid, sectors, onlyid) = match key {
+        "netac" => (
+            "disk&ven_netac&prod_onlydisk",
+            "0dd8",
+            "2005",
+            122_880_000u64,
+            "1402259934",
+        ),
+        "aigo" => (
+            "disk&ven_aigo&prod_u335&rev_pmap",
+            "3535",
+            "6300",
+            245_760_000u64,
+            "1987718388",
+        ),
+        other => panic!("unknown fixture metadata key: {other}"),
+    };
+    InspectMeta {
+        device_id: Some(device_id.into()),
+        vid: Some(vid.into()),
+        pid: Some(pid.into()),
+        size_bytes: sectors.checked_mul(512),
+        onlyid: Some(onlyid.into()),
+    }
 }
 
 #[test]
