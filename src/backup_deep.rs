@@ -120,3 +120,131 @@ pub fn assess_partition(p: &PartitionGeometry, prefix: Option<&[u8]>) -> Partiti
     }
     report
 }
+
+mod fat;
+
+/// Filesystem parsers only see relative, read-only sectors. A future decrypted
+/// reader must authenticate its key and preserve decoded evidence separately.
+pub trait PartitionReader {
+    fn read_sector(&mut self, relative_lba: u64) -> std::io::Result<Vec<u8>>;
+}
+
+/// Bounded raw partition view, recording exactly the evidence read by parsers.
+pub struct RawPartitionReader<'a> {
+    dev: &'a mut dyn crate::diskio::SectorDev,
+    partition: &'a PartitionGeometry,
+    pub(crate) sectors: std::collections::BTreeMap<u64, Vec<u8>>,
+}
+impl<'a> RawPartitionReader<'a> {
+    pub fn new(
+        dev: &'a mut dyn crate::diskio::SectorDev,
+        partition: &'a PartitionGeometry,
+    ) -> Self {
+        Self {
+            dev,
+            partition,
+            sectors: Default::default(),
+        }
+    }
+}
+impl PartitionReader for RawPartitionReader<'_> {
+    fn read_sector(&mut self, relative_lba: u64) -> std::io::Result<Vec<u8>> {
+        use std::io::{Error, ErrorKind};
+        if relative_lba >= self.partition.sector_count {
+            return Err(Error::new(
+                ErrorKind::InvalidData,
+                "sector outside partition",
+            ));
+        }
+        if let Some(bytes) = self.sectors.get(&relative_lba) {
+            return Ok(bytes.clone());
+        }
+        if self.sectors.len() >= 131_072 {
+            return Err(Error::other("Deep evidence exceeds 64 MiB budget"));
+        }
+        let absolute = self
+            .partition
+            .start_sector
+            .checked_add(relative_lba)
+            .and_then(|v| u32::try_from(v).ok())
+            .ok_or_else(|| Error::other("partition LBA overflow"))?;
+        let bytes = self.dev.read_sector(absolute)?;
+        if bytes.len() != 512 {
+            return Err(Error::new(ErrorKind::UnexpectedEof, "truncated sector"));
+        }
+        self.sectors.insert(relative_lba, bytes.clone());
+        Ok(bytes)
+    }
+}
+
+pub fn analyze_partition(
+    p: &PartitionGeometry,
+    reader: &mut dyn PartitionReader,
+) -> PartitionAnalysis {
+    let mut report = assess_partition(p, None);
+    if p.need_encrypt != 0 {
+        report.status = AnalysisStatus::Locked;
+        report.reason = "encrypted partition; no verified decrypted reader is available".into();
+        return report;
+    }
+    if p.sector_size != 512 || p.partition_size != p.sector_count.saturating_mul(512) {
+        report.status = AnalysisStatus::ParseFailed;
+        report.reason = "invalid partition geometry".into();
+        return report;
+    }
+    let boot = match reader.read_sector(0) {
+        Ok(b) if b.len() == 512 => b,
+        Ok(_) => {
+            report.status = AnalysisStatus::ParseFailed;
+            report.reason = "truncated boot sector".into();
+            return report;
+        }
+        Err(e) => {
+            report.status = AnalysisStatus::ParseFailed;
+            report.reason = e.to_string();
+            return report;
+        }
+    };
+    // Reuse Metadata's recognizer for known signatures. FAT16 is classified
+    // by BPB cluster count below, not by the informational FAT label.
+    let probe = crate::backup_metadata::probe_filesystem(p, &boot);
+    if matches!(
+        probe.kind,
+        crate::backup_metadata::FilesystemKind::Ntfs
+            | crate::backup_metadata::FilesystemKind::Exfat
+    ) || &boot[3..11] == b"NTFS    "
+        || &boot[3..11] == b"EXFAT   "
+    {
+        report.status = AnalysisStatus::Unsupported;
+        report.reason = "filesystem inventory parser is not implemented for exFAT/NTFS yet".into();
+        return report;
+    }
+    if !matches!(boot[0], 0xeb | 0xe9) {
+        report.status = AnalysisStatus::Unsupported;
+        report.reason = "unrecognized filesystem boot sector".into();
+        return report;
+    }
+    match fat::parse(reader, p.sector_count, &boot) {
+        Ok(fs) => {
+            report.status = AnalysisStatus::Parsed;
+            report.filesystem = Some(fs.kind.into());
+            report.total_bytes = Some(fs.total);
+            report.free_bytes = Some(fs.free);
+            report.used_bytes = Some(fs.total - fs.free);
+            report.file_count = Some(fs.entries.iter().filter(|e| !e.is_directory).count() as u64);
+            report.directory_count = Some(
+                fs.entries
+                    .iter()
+                    .filter(|e| e.is_directory && e.path != "/")
+                    .count() as u64,
+            );
+            report.entries = Some(fs.entries);
+            report.reason = "complete directory traversal; used bytes include filesystem overhead and allocated clusters".into();
+        }
+        Err(e) => {
+            report.status = AnalysisStatus::ParseFailed;
+            report.reason = e;
+        }
+    }
+    report
+}

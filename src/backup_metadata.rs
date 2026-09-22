@@ -351,7 +351,7 @@ pub fn parse_region_a_geometry(
     })
 }
 
-fn probe_filesystem(partition: &PartitionGeometry, prefix: &[u8]) -> FilesystemProbe {
+pub(crate) fn probe_filesystem(partition: &PartitionGeometry, prefix: &[u8]) -> FilesystemProbe {
     let mut probe = FilesystemProbe {
         partition_index: partition.index,
         partition_type: partition.partition_type,

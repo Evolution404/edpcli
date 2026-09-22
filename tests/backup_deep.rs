@@ -77,3 +77,238 @@ fn plaintext_metadata_does_not_claim_a_complete_inventory() {
         AnalysisStatus::Unsupported
     );
 }
+
+use edpcli::backup_deep::{analyze_partition, PartitionReader};
+use std::{collections::BTreeMap, io};
+
+struct SparseReader {
+    sectors: BTreeMap<u64, Vec<u8>>,
+    reads: Vec<u64>,
+}
+impl PartitionReader for SparseReader {
+    fn read_sector(&mut self, lba: u64) -> io::Result<Vec<u8>> {
+        self.reads.push(lba);
+        self.sectors
+            .get(&lba)
+            .cloned()
+            .ok_or_else(|| io::Error::other("uncaptured sector"))
+    }
+}
+fn put16(b: &mut [u8], at: usize, v: u16) {
+    b[at..at + 2].copy_from_slice(&v.to_le_bytes());
+}
+fn put32(b: &mut [u8], at: usize, v: u32) {
+    b[at..at + 4].copy_from_slice(&v.to_le_bytes());
+}
+fn entry(name: &[u8; 11], cluster: u16, size: u32, dir: bool) -> [u8; 32] {
+    let mut e = [0; 32];
+    e[..11].copy_from_slice(name);
+    e[11] = if dir { 16 } else { 32 };
+    e[12] = 24;
+    put16(&mut e, 26, cluster);
+    put32(&mut e, 28, size);
+    e
+}
+fn fat_fixture(fat32: bool) -> (PartitionGeometry, SparseReader, u64) {
+    let (clusters, fat_sectors, reserved, root_sectors) = if fat32 {
+        (65525u32, 512u32, 32u32, 0u32)
+    } else {
+        (4085, 16, 1, 1)
+    };
+    let total = reserved + fat_sectors + root_sectors + clusters;
+    let mut p = partition();
+    p.need_encrypt = 0;
+    p.need_disturb = 0;
+    p.sector_count = total as u64;
+    p.partition_size = p.sector_count * 512;
+    let mut boot = vec![0; 512];
+    boot[0] = 0xeb;
+    put16(&mut boot, 11, 512);
+    boot[13] = 1;
+    put16(&mut boot, 14, reserved as u16);
+    boot[16] = 1;
+    boot[21] = 0xf8;
+    put32(&mut boot, 32, total);
+    boot[510] = 0x55;
+    boot[511] = 0xaa;
+    if fat32 {
+        put32(&mut boot, 36, fat_sectors);
+        put32(&mut boot, 44, 2);
+        boot[82..90].copy_from_slice(b"FAT32   ");
+    } else {
+        put16(&mut boot, 17, 16);
+        put16(&mut boot, 22, fat_sectors as u16);
+        boot[54..62].copy_from_slice(b"FAT16   ");
+    }
+    let mut r = SparseReader {
+        sectors: BTreeMap::new(),
+        reads: vec![],
+    };
+    r.sectors.insert(0, boot);
+    let mut fat = vec![0; fat_sectors as usize * 512];
+    for c in 0..=5 {
+        if fat32 {
+            put32(&mut fat, c * 4, 0x0fffffff);
+        } else {
+            put16(&mut fat, c * 2, 0xffff);
+        }
+    }
+    for (i, s) in fat.chunks(512).enumerate() {
+        r.sectors.insert(reserved as u64 + i as u64, s.to_vec());
+    }
+    let data = (reserved + fat_sectors + root_sectors) as u64;
+    let root = if fat32 { data } else { data - 1 };
+    let mut dir = vec![0; 512];
+    dir[..32].copy_from_slice(&entry(b"FOO     TXT", 3, 5, false));
+    dir[32..64].copy_from_slice(&entry(b"DIR        ", 4, 0, true));
+    r.sectors.insert(root, dir);
+    let mut sub = vec![0; 512];
+    sub[..32].copy_from_slice(&entry(b"BAR     BIN", 5, 7, false));
+    r.sectors.insert(data + 2, sub);
+    // File data clusters 3 and 5 deliberately absent: parser must not read them.
+    (p, r, data)
+}
+
+#[test]
+fn fat16_and_fat32_inventory_reads_no_file_contents() {
+    for fat32 in [false, true] {
+        let (p, mut r, data) = fat_fixture(fat32);
+        let report = analyze_partition(&p, &mut r);
+        assert_eq!(report.status, AnalysisStatus::Parsed, "{}", report.reason);
+        assert_eq!(
+            report.filesystem.as_deref(),
+            Some(if fat32 { "fat32" } else { "fat16" })
+        );
+        assert_eq!(report.total_bytes, Some(p.partition_size));
+        assert_eq!(
+            report.used_bytes.unwrap() + report.free_bytes.unwrap(),
+            p.partition_size
+        );
+        assert_eq!(
+            report.free_bytes,
+            Some((if fat32 { 65525 - 4 } else { 4085 - 4 }) * 512)
+        );
+        assert_eq!(report.file_count, Some(2));
+        assert_eq!(report.directory_count, Some(1));
+        let entries = report.entries.unwrap();
+        assert_eq!(
+            entries.iter().map(|e| e.path.as_str()).collect::<Vec<_>>(),
+            ["/", "/dir/", "/dir/bar.bin", "/foo.txt"]
+        );
+        assert_eq!(entries[3].logical_size, 5);
+        assert_eq!(entries[3].allocated_size, Some(512));
+        assert!(!r.reads.contains(&(data + 1)));
+        assert!(!r.reads.contains(&(data + 3)));
+    }
+}
+
+#[test]
+fn corrupt_fat_metadata_fails_closed() {
+    for mutation in 0..6 {
+        let (p, mut r, data) = fat_fixture(false);
+        match mutation {
+            0 => r.sectors.get_mut(&0).unwrap()[13] = 255,
+            1 => put32(r.sectors.get_mut(&0).unwrap(), 32, u32::MAX),
+            2 => put16(r.sectors.get_mut(&1).unwrap(), 8, 4), // circular directory chain
+            3 => r.sectors.get_mut(&(data - 1)).unwrap()[0] = b'/',
+            4 => {
+                r.sectors.get_mut(&1).unwrap().truncate(511);
+            }
+            _ => put16(r.sectors.get_mut(&(data - 1)).unwrap(), 26, 60000),
+        }
+        let report = analyze_partition(&p, &mut r);
+        assert_eq!(
+            report.status,
+            AnalysisStatus::ParseFailed,
+            "mutation {mutation}: {}",
+            report.reason
+        );
+        assert!(report.entries.is_none());
+        assert!(report.used_bytes.is_none());
+    }
+}
+
+#[test]
+fn unknown_and_locked_readers_have_explicit_states() {
+    let mut p = partition();
+    let mut r = SparseReader {
+        sectors: BTreeMap::new(),
+        reads: vec![],
+    };
+    assert_eq!(analyze_partition(&p, &mut r).status, AnalysisStatus::Locked);
+    assert!(r.reads.is_empty());
+    p.need_encrypt = 0;
+    p.need_disturb = 0;
+    r.sectors.insert(0, vec![0; 512]);
+    assert_eq!(
+        analyze_partition(&p, &mut r).status,
+        AnalysisStatus::Unsupported
+    );
+    for sig in [b"EXFAT   ", b"NTFS    "] {
+        r.sectors.get_mut(&0).unwrap()[3..11].copy_from_slice(sig);
+        let report = analyze_partition(&p, &mut r);
+        assert_eq!(report.status, AnalysisStatus::Unsupported);
+        assert!(report.file_count.is_none());
+    }
+}
+
+#[test]
+fn raw_partition_reader_rejects_out_of_range_without_device_io() {
+    struct Dev(usize);
+    impl edpcli::diskio::SectorDev for Dev {
+        fn read_sector(&mut self, _: u32) -> io::Result<Vec<u8>> {
+            self.0 += 1;
+            Ok(vec![0; 512])
+        }
+        fn write_sector(&mut self, _: u32, _: &[u8]) -> io::Result<()> {
+            panic!("unexpected write")
+        }
+        fn reopen_rdwr(&mut self, _: std::time::Duration) -> io::Result<()> {
+            panic!("unexpected reopen")
+        }
+    }
+    let p = partition();
+    let mut d = Dev(0);
+    let mut r = edpcli::backup_deep::RawPartitionReader::new(&mut d, &p);
+    assert!(r.read_sector(p.sector_count).is_err());
+    assert!(r.read_sector(u64::MAX).is_err());
+    assert_eq!(d.0, 0);
+}
+
+#[test]
+fn fat_long_names_and_local_timestamps_are_preserved() {
+    let (p, mut r, data) = fat_fixture(false);
+    let mut short = entry(b"LONGNA~1TXT", 3, 5, false);
+    put16(&mut short, 24, ((2026 - 1980) << 9) | (9 << 5) | 22);
+    put16(&mut short, 22, (17 << 11) | (30 << 5) | 15);
+    let check = short[..11]
+        .iter()
+        .fold(0u8, |sum, &c| sum.rotate_right(1).wrapping_add(c));
+    let mut long = [0xff; 32];
+    long[0] = 0x41;
+    long[11] = 15;
+    long[12] = 0;
+    long[13] = check;
+    put16(&mut long, 26, 0);
+    let units: Vec<u16> = "长文件.txt".encode_utf16().chain([0]).collect();
+    for (&offset, value) in [1, 3, 5, 7, 9, 14, 16, 18, 20, 22, 24, 28, 30]
+        .iter()
+        .zip(units.iter().copied().chain(std::iter::repeat(0xffff)))
+    {
+        put16(&mut long, offset, value);
+    }
+    let root = r.sectors.get_mut(&(data - 1)).unwrap();
+    root.fill(0);
+    root[..32].copy_from_slice(&long);
+    root[32..64].copy_from_slice(&short);
+    let report = analyze_partition(&p, &mut r);
+    assert_eq!(report.status, AnalysisStatus::Parsed, "{}", report.reason);
+    let e = &report.entries.unwrap()[1];
+    assert_eq!(e.path, "/长文件.txt");
+    assert_eq!(e.mtime.as_deref(), Some("2026-09-22T17:30:30.00"));
+    r.sectors.get_mut(&(data - 1)).unwrap()[13] ^= 1;
+    assert_eq!(
+        analyze_partition(&p, &mut r).status,
+        AnalysisStatus::ParseFailed
+    );
+}
