@@ -151,7 +151,7 @@ ReadIIR 和 WriteIIR 都使用 device tree node `+0x18` 计算物理位置，并
 
 机器证据：`audit/region_a/evidence/partinfo_transport_crypto_20260922.json`。
 
-这里 COMPLETE 的只是**IIR/Netac profile 的命令传输和响应解码规则**。真实 Lexar 的 512B `FE 06` DATA-IN 尚未成功捕获，因此 IIR 与 Region A 是否同址仍是未证明假设；该缺口不再给 Region A wire ledger 贡献 PARTIAL 字节。
+这里 COMPLETE 的只是**IIR/Netac profile 的命令传输和响应解码规则**，不代表该控制器协议适用于当前 Lexar。按此前实盘结论，当前 Lexar 不识别这条 `FE 06` 路径，因此后续不再把“继续抓 FE06”作为 Region A 主线。IIR 与 Region A 是否同址仍是未证明假设；这组静态证据不给 Region A wire ledger 贡献任何 PARTIAL 字节。
 
 ### 4.3 `sectorInfo` 上传链已明确排除为 Region A
 
@@ -201,7 +201,7 @@ ReadIIR 和 WriteIIR 都使用 device tree node `+0x18` 计算物理位置，并
 
 机器证据见 `audit/region_a/evidence/init_key_derivation_20260922.json` 和 `init_key_profiles_20260922.json`。
 
-### 5.2 两类默认 key 都不能解当前真实 Lexar
+### 5.2 两类默认 key 只排除了“Region A 前 0x800 = IIR”的组合假设
 
 用实际小写 Init final key 走官方 `sub_180009390` wrapper：
 
@@ -217,7 +217,7 @@ ReadIIR 和 WriteIIR 都使用 device tree node `+0x18` 计算物理位置，并
 - main CRC = FAIL
 - 19 segment CRC = 0/19 PASS
 
-因此**两个已知默认 Init key profile 都被真实物理 ciphertext 明确排除**。这把未解问题进一步收窄为：真实制盘/运行链存在不同的 key provenance、对象状态或尚未定位的 producer profile，而不是 AES mode、IV 或简单 hex 大小写问题。
+严格结论仅是：**如果**把 Region A 前 0x800B 当作 IIR ciphertext，则 lower/upper 两种默认 Init key 都不能产生满足 IIR CRC 的明文。因此只排除了“Region A[:0x800] = IIR 且使用这两类默认 key”这一组合假设；不能据此声称已经排除了 Region A 的真实 key，也不能用它缩小 Region A 自身的 crypto profile。
 
 证据：
 

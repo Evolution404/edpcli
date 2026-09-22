@@ -45,7 +45,7 @@
   "conclusion": "No second direct business-layer writer of the current x64 core key string was found. The current ReadIIR/WriteIIR/BackupIIR paths all consume the same core string initialized by SectorManageImp::Init.",
   "limitations": [
     "This is a bounded static result for the analyzed current x64 binary, not proof that no indirect memory mutation is possible.",
-    "It does not prove which sectormanage generation/profile originally produced the physical Lexar Region A ciphertext.",
-    "The known default Init key is rejected by the physical Lexar IIR CRC structure, and the exact physical ReadIIR-to-Region-A binding is still awaiting a real PartInfo[2] controller value."
+    "It does not prove that any physical Lexar Region A bytes are an IIR object or were produced by this sectormanage generation/profile.",
+    "Applying the known default Init key to Region A[:0x800] under the unproven IIR-binding hypothesis fails IIR CRCs; that rejects only the combined binding-plus-key hypothesis and does not identify Region A crypto."
   ]
 }

@@ -1,6 +1,6 @@
 {
   "status": "PARTIAL",
-  "binding": "ReadIIR physical address to LBA7 Region A",
+  "binding": "candidate ReadIIR physical-address equality with LBA7 Region A",
   "static_chain": [
     {
       "module": "netac_usb_api64.dll",
@@ -31,6 +31,6 @@
     "relation": "required_partinfo2_sector_num - 256 == region_a_start_lba",
     "required_partinfo2_vs_chs": "CHS - 1536 sectors"
   },
-  "missing_evidence": "No runtime/controller 0x06FE GetPartInfoAll response has yet been captured for this Lexar, so PartInfo[2].sector_num=243624189 is not directly observed.",
+  "missing_evidence": "No direct current-Lexar PartInfo[2].sector_num observation binds this IIR address chain to Region A. FE06 is a Netac-profile static route and is not used as the current Lexar Region A mainline.",
   "rejected_old_claim": "GetDevInfo output +0x18 is not the total device sector count; it is PartInfo[2].sector_num converted to bytes."
 }

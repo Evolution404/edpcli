@@ -38,7 +38,7 @@
   },
   "physical_status": {
     "current_lexar_response_captured": false,
-    "required_observation": "decrypt a real Lexar FE06 512-byte DATA-IN response and directly observe PartInfo[2].sector_num",
-    "promotion_rule": "do not promote the ReadIIR-to-Region-A physical binding from PARTIAL until the real controller value is observed"
+    "profile_scope": "static Netac-profile transport/decoder evidence only",
+    "current_lexar_region_a_use": "none without an independent physical binding; do not use FE06 as the current Lexar Region A mainline"
   }
 }

@@ -291,7 +291,7 @@ fn iir_cipher_descriptor_is_aes256_cbc_and_matches_standard_crypto() {
 }
 
 #[test]
-fn init_final_key_profiles_are_closed_but_both_fail_physical_lexar_integrity() {
+fn init_final_key_profiles_fail_only_unproven_region_a_as_iir_hypothesis() {
     let derivation: serde_json::Value = serde_json::from_str(include_str!(
         "../audit/region_a/evidence/init_key_derivation_20260922.json"
     ))
@@ -378,7 +378,7 @@ fn iir_address_chain_is_static_complete_but_physical_binding_remains_partial() {
     assert!(chain["missing_evidence"]
         .as_str()
         .unwrap()
-        .contains("not directly observed"));
+        .contains("No direct current-Lexar PartInfo[2].sector_num observation"));
 
     let wire = include_str!("../audit/region_a/wire_byte_ledger.tsv");
     assert!(wire.contains("000-bff\tUNKNOWN"));
@@ -457,7 +457,8 @@ fn partinfo_transport_uses_readonly_fe06_and_aes256_ecb_but_physical_response_is
         false
     );
     assert!(DOC.contains("**AES-256-ECB**"));
-    assert!(DOC.contains("真实 Lexar 的 512B `FE 06` DATA-IN 尚未成功捕获"));
+    assert!(DOC.contains("当前 Lexar 不识别这条 `FE 06` 路径"));
+    assert!(DOC.contains("不再把“继续抓 FE06”作为 Region A 主线"));
 }
 #[test]
 fn sectorinfo_upload_path_is_closed_as_lba8_edpf_not_region_a() {
