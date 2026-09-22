@@ -498,6 +498,7 @@ fn code_symbols() -> BTreeSet<String> {
     symbol_registry![
         edpcli::protocol::lba0::parse_lba0,
         edpcli::protocol::lba1::parse_lba1,
+        edpcli::protocol::lba10::parse_lba10,
         edpcli::protocol::lba12::parse_lba12,
         edpcli::protocol::lba2::parse_lba2,
         edpcli::protocol::lba3::parse_lba3,
@@ -520,6 +521,8 @@ fn behavior_test_symbols() -> BTreeSet<String> {
         edpf_behavior::pass_info_storage_transform_is_exact_and_profile_axes_fail_closed,
         lba8_behavior::lba8_dynamic_prefix_and_identity_profiles_preserve_backing,
         lba8_behavior::lba8_profile_axes_fail_closed_without_coupling,
+        lba10_behavior::lba10_absent_and_eesi_enabled_profiles_round_trip_without_touching_tail,
+        lba10_behavior::lba10_profiles_fail_closed,
         lba4_behavior::lba4_separates_wire_reader_and_producer_for_both_encodings,
         lba4_behavior::lba4_overlays_are_explicit_and_do_not_select_encoding,
         gpt_behavior::gpt_virtual_header_and_entries_are_typed_and_crc_checked,
@@ -624,6 +627,8 @@ mod dept_behavior;
 mod edpf_behavior;
 #[path = "protocol_behavior/gpt.rs"]
 mod gpt_behavior;
+#[path = "protocol_behavior/lba10.rs"]
+mod lba10_behavior;
 #[path = "protocol_behavior/lba4.rs"]
 mod lba4_behavior;
 #[path = "protocol_behavior/lba8.rs"]

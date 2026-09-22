@@ -3402,10 +3402,10 @@ PackedStruct/EncryptedRegion 行按目录现有粒度展示，不补造目录未
 | Physical evidence | P-GOLD-ENC;P-GOLD-NOPWD |
 | Implementation provenance | General census covers absent state. |
 | Semantic status | COMPLETE |
-| Implementation status | PLANNED |
-| Behavior-test status | PLANNED |
-| Code symbol | planned:protocol::lba10::absent |
-| Test symbol | UNIMPLEMENTED |
+| Implementation status | COMPLETE |
+| Behavior-test status | COMPLETE |
+| Code symbol | edpcli::protocol::lba10::parse_lba10 |
+| Test symbol | lba10_behavior::lba10_absent_and_eesi_enabled_profiles_round_trip_without_touching_tail |
 | Ownership test | protocol_field_catalog::field_catalog_has_exact_byte_ownership_for_every_profile_state |
 
 #### lba10.eesi_magic · lba10_eesi / eesi-enabled
@@ -3425,10 +3425,10 @@ PackedStruct/EncryptedRegion 行按目录现有粒度展示，不补造目录未
 | Physical evidence | P-EESI-NETAC |
 | Implementation provenance | Authentic pre-write enabled capture. |
 | Semantic status | COMPLETE |
-| Implementation status | PLANNED |
-| Behavior-test status | PLANNED |
-| Code symbol | planned:protocol::lba10::eesi_magic |
-| Test symbol | UNIMPLEMENTED |
+| Implementation status | COMPLETE |
+| Behavior-test status | COMPLETE |
+| Code symbol | edpcli::protocol::lba10::parse_lba10 |
+| Test symbol | lba10_behavior::lba10_absent_and_eesi_enabled_profiles_round_trip_without_touching_tail |
 | Ownership test | protocol_field_catalog::field_catalog_has_exact_byte_ownership_for_every_profile_state |
 
 #### lba10.suspension_flag · lba10_eesi / eesi-enabled
@@ -3448,10 +3448,10 @@ PackedStruct/EncryptedRegion 行按目录现有粒度展示，不补造目录未
 | Physical evidence | P-EESI-NETAC |
 | Implementation provenance | Authentic pre-write enabled capture. |
 | Semantic status | COMPLETE |
-| Implementation status | PLANNED |
-| Behavior-test status | PLANNED |
-| Code symbol | planned:protocol::lba10::suspension_flag |
-| Test symbol | UNIMPLEMENTED |
+| Implementation status | COMPLETE |
+| Behavior-test status | COMPLETE |
+| Code symbol | edpcli::protocol::lba10::parse_lba10 |
+| Test symbol | lba10_behavior::lba10_absent_and_eesi_enabled_profiles_round_trip_without_touching_tail |
 | Ownership test | protocol_field_catalog::field_catalog_has_exact_byte_ownership_for_every_profile_state |
 
 #### lba10.share_label · lba10_eesi / eesi-enabled
@@ -3471,10 +3471,10 @@ PackedStruct/EncryptedRegion 行按目录现有粒度展示，不补造目录未
 | Physical evidence | P-EESI-NETAC |
 | Implementation provenance | Authentic pre-write enabled capture. |
 | Semantic status | COMPLETE |
-| Implementation status | PLANNED |
-| Behavior-test status | PLANNED |
-| Code symbol | planned:protocol::lba10::share_label |
-| Test symbol | UNIMPLEMENTED |
+| Implementation status | COMPLETE |
+| Behavior-test status | COMPLETE |
+| Code symbol | edpcli::protocol::lba10::parse_lba10 |
+| Test symbol | lba10_behavior::lba10_absent_and_eesi_enabled_profiles_round_trip_without_touching_tail |
 | Ownership test | protocol_field_catalog::field_catalog_has_exact_byte_ownership_for_every_profile_state |
 
 #### lba10.encrypt_label · lba10_eesi / eesi-enabled
@@ -3494,10 +3494,10 @@ PackedStruct/EncryptedRegion 行按目录现有粒度展示，不补造目录未
 | Physical evidence | P-EESI-NETAC |
 | Implementation provenance | Authentic pre-write enabled capture. |
 | Semantic status | COMPLETE |
-| Implementation status | PLANNED |
-| Behavior-test status | PLANNED |
-| Code symbol | planned:protocol::lba10::encrypt_label |
-| Test symbol | UNIMPLEMENTED |
+| Implementation status | COMPLETE |
+| Behavior-test status | COMPLETE |
+| Code symbol | edpcli::protocol::lba10::parse_lba10 |
+| Test symbol | lba10_behavior::lba10_absent_and_eesi_enabled_profiles_round_trip_without_touching_tail |
 | Ownership test | protocol_field_catalog::field_catalog_has_exact_byte_ownership_for_every_profile_state |
 
 #### lba10.extension · lba10_eesi / eesi-enabled
@@ -3517,10 +3517,10 @@ PackedStruct/EncryptedRegion 行按目录现有粒度展示，不补造目录未
 | Physical evidence | P-EESI-NETAC |
 | Implementation provenance | Authentic pre-write enabled capture. |
 | Semantic status | COMPLETE |
-| Implementation status | PLANNED |
-| Behavior-test status | PLANNED |
-| Code symbol | planned:protocol::lba10::extension |
-| Test symbol | UNIMPLEMENTED |
+| Implementation status | COMPLETE |
+| Behavior-test status | COMPLETE |
+| Code symbol | edpcli::protocol::lba10::parse_lba10 |
+| Test symbol | lba10_behavior::lba10_absent_and_eesi_enabled_profiles_round_trip_without_touching_tail |
 | Ownership test | protocol_field_catalog::field_catalog_has_exact_byte_ownership_for_every_profile_state |
 
 #### lba10.tail · lba10_eesi / eesi-enabled
@@ -3540,10 +3540,10 @@ PackedStruct/EncryptedRegion 行按目录现有粒度展示，不补造目录未
 | Physical evidence | P-EESI-NETAC |
 | Implementation provenance | Authentic pre-write enabled capture. |
 | Semantic status | COMPLETE |
-| Implementation status | PLANNED |
-| Behavior-test status | PLANNED |
-| Code symbol | planned:protocol::lba10::tail |
-| Test symbol | UNIMPLEMENTED |
+| Implementation status | COMPLETE |
+| Behavior-test status | COMPLETE |
+| Code symbol | edpcli::protocol::lba10::parse_lba10 |
+| Test symbol | lba10_behavior::lba10_absent_and_eesi_enabled_profiles_round_trip_without_touching_tail |
 | Ownership test | protocol_field_catalog::field_catalog_has_exact_byte_ownership_for_every_profile_state |
 
 ### 历史演进 matrix
