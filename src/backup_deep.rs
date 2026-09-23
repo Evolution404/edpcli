@@ -122,6 +122,7 @@ pub fn assess_partition(p: &PartitionGeometry, prefix: Option<&[u8]>) -> Partiti
 }
 
 mod fat;
+pub mod keys;
 
 /// Filesystem parsers only see relative, read-only sectors. A future decrypted
 /// reader must authenticate its key and preserve decoded evidence separately.
@@ -177,6 +178,31 @@ impl PartitionReader for RawPartitionReader<'_> {
     }
 }
 
+/// SM4-ECB view for a mode2 key that has passed FileKeyCRC. Raw reads remain
+/// in the underlying reader; decoded evidence is recorded separately.
+pub struct DecryptedPartitionReader<'a> {
+    raw: &'a mut dyn PartitionReader,
+    key: [u8; 16],
+    decoded: std::collections::BTreeMap<u64, Vec<u8>>,
+}
+impl PartitionReader for DecryptedPartitionReader<'_> {
+    fn read_sector(&mut self, lba: u64) -> std::io::Result<Vec<u8>> {
+        if let Some(data) = self.decoded.get(&lba) {
+            return Ok(data.clone());
+        }
+        if self.decoded.len() >= 131_072 {
+            return Err(std::io::Error::other("decoded evidence exceeds budget"));
+        }
+        let raw = self.raw.read_sector(lba)?;
+        if raw.len() != 512 {
+            return Err(std::io::Error::other("truncated encrypted sector"));
+        }
+        let decoded = keys::decrypt_mode2(&raw, &self.key).map_err(std::io::Error::other)?;
+        self.decoded.insert(lba, decoded.clone());
+        Ok(decoded)
+    }
+}
+
 pub fn analyze_partition(
     p: &PartitionGeometry,
     reader: &mut dyn PartitionReader,
@@ -216,6 +242,14 @@ pub fn analyze_partition(
         || &boot[3..11] == b"EXFAT   "
     {
         report.status = AnalysisStatus::Unsupported;
+        report.filesystem = Some(
+            if &boot[3..11] == b"EXFAT   " {
+                "exfat"
+            } else {
+                "ntfs"
+            }
+            .into(),
+        );
         report.reason = "filesystem inventory parser is not implemented for exFAT/NTFS yet".into();
         return report;
     }
@@ -271,7 +305,16 @@ pub fn acquire_deep(
             .find(|a| a.id == prefix_id)
             .map(|a| a.data.clone());
         let mut report = assess_partition(p, prefix.as_deref());
-        if report.status == AnalysisStatus::Unsupported && p.need_encrypt == 0 {
+        let mut file_key = None;
+        if report.status == AnalysisStatus::Locked {
+            match keys::default_file_key(lba0_12, device_id, p.index) {
+                Ok(key) => file_key = Some(key),
+                Err(error) => report.reason = error,
+            }
+        }
+        if (report.status == AnalysisStatus::Unsupported && p.need_encrypt == 0)
+            || file_key.is_some()
+        {
             let mut reader = RawPartitionReader::new(dev, p);
             // Reuse captured sectors so the parser sees the same bytes as the
             // Metadata evidence, even if the live source subsequently changes.
@@ -294,7 +337,24 @@ pub fn acquire_deep(
                         .or_insert_with(|| sector.to_vec());
                 }
             }
-            report = analyze_partition(p, &mut reader);
+            let mut decoded = std::collections::BTreeMap::new();
+            if let Some(key) = file_key {
+                let mut view = DecryptedPartitionReader {
+                    raw: &mut reader,
+                    key,
+                    decoded: Default::default(),
+                };
+                let mut plain_geometry = p.clone();
+                plain_geometry.need_encrypt = 0;
+                report = analyze_partition(&plain_geometry, &mut view);
+                report.reason = format!(
+                    "default password key CRC verified; mode2 decoded view: {}",
+                    report.reason
+                );
+                decoded = view.decoded;
+            } else {
+                report = analyze_partition(p, &mut reader);
+            }
             // Store bounded contiguous runs rather than one artifact per sector.
             let mut runs: Vec<(u64, Vec<u8>)> = Vec::new();
             for (lba, bytes) in reader.sectors {
@@ -316,6 +376,26 @@ pub fn acquire_deep(
                     sector_count: data.len() as u64 / 512,
                     purpose: "filesystem_analysis_evidence".into(),
                 });
+                let end_lba = lba + data.len() as u64 / 512;
+                for (&relative, bytes) in decoded.range(lba..end_lba) {
+                    let decoded_id = format!("decoded.partition.{}.sector.{relative}", p.index);
+                    out.artifacts.push(ArtifactInput {
+                        id: decoded_id.clone(),
+                        kind: "decoded_sectors".into(),
+                        media_type: "application/octet-stream".into(),
+                        source_extent_ids: vec![eid.clone()],
+                        derivation: Some(Derivation {
+                            method: format!(
+                                "sm4_ecb_default_v206_crc_verified; relative_lba={relative}"
+                            ),
+                            source_artifact_ids: vec!["raw.protocol.lba0_12".into(), aid.clone()],
+                        }),
+                        restore_policy: RestorePolicy::DerivedOnly,
+                        completeness: ArtifactCompleteness::Complete,
+                        data: bytes.clone(),
+                    });
+                    report.source_artifact_ids.push(decoded_id);
+                }
                 out.artifacts.push(ArtifactInput {
                     id: aid.clone(),
                     kind: "raw_sectors".into(),
@@ -350,6 +430,6 @@ pub fn acquire_deep(
         out.artifacts.push(summary);
         out.artifacts.push(list);
     }
-    out.notes.push("Deep v1: read-only FAT16/FAT32 inventory; encrypted partitions locked; exFAT/NTFS unsupported; ordinary file payloads not read".into());
+    out.notes.push("Deep v1: read-only FAT16/FAT32 inventory; default 0000aaaa mode2 auto-decryption with CRC validation; exFAT/NTFS unsupported; ordinary file payloads not read".into());
     Ok(out)
 }

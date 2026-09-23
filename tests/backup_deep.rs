@@ -1,3 +1,7 @@
+mod common;
+#[path = "support/gold_name.rs"]
+mod gold_name;
+
 use edpcli::backup_deep::{assess_partition, AnalysisStatus};
 use edpcli::backup_metadata::PartitionGeometry;
 use edpcli::edpb::{ArtifactCompleteness, RestorePolicy};
@@ -341,6 +345,21 @@ fn deep_container_retains_metadata_and_never_makes_analysis_restorable() {
         .artifacts
         .iter()
         .any(|a| a.id == "raw.lba7_compatibility"));
+    let decoded = deep
+        .artifacts
+        .iter()
+        .find(|a| a.id == "decoded.partition.1.sector.0")
+        .unwrap();
+    assert_eq!(decoded.restore_policy, RestorePolicy::DerivedOnly);
+    assert_eq!(decoded.data.len(), 512);
+    assert!(decoded
+        .derivation
+        .as_ref()
+        .unwrap()
+        .source_artifact_ids
+        .iter()
+        .any(|id| id.starts_with("raw.partition.1.deep.")));
+
     for index in [1, 2] {
         for kind in ["filesystem_summary", "file_list"] {
             let a = deep
@@ -350,7 +369,7 @@ fn deep_container_retains_metadata_and_never_makes_analysis_restorable() {
                 .unwrap();
             assert_eq!(a.restore_policy, RestorePolicy::DerivedOnly);
             let v: serde_json::Value = serde_json::from_slice(&a.data).unwrap();
-            assert_eq!(v["status"], "locked");
+            assert_eq!(v["status"], "unsupported");
         }
     }
     let path = std::env::temp_dir().join(format!(
@@ -482,4 +501,113 @@ fn parsed_deep_inventory_cites_captured_raw_metadata() {
         .unwrap();
     let v: serde_json::Value = serde_json::from_slice(&list.data).unwrap();
     assert_eq!(v["entries"].as_array().unwrap().len(), 4);
+}
+
+#[test]
+fn default_mode2_key_unwrap_requires_valid_crc() {
+    use edpcli::backup_deep::keys::default_file_key;
+    use edpcli::crypto::{a6b0_full, a7f0_full, crc32_bare};
+    let mut image=include_bytes!("fixtures/protocol/disk4_243625984_vid21c4_pid0cd1_disk&ven_lexar&prod_usb_flash_drive_onlyid3164177653_20260827_221910.bin").to_vec();
+    let did = "disk&ven_lexar&prod_usb_flash_drive";
+    let key = default_file_key(&image, did, 1).unwrap();
+    assert_eq!(key, default_file_key(&image, did, 2).unwrap());
+    let crc = crc32_bare(did.as_bytes()).to_le_bytes();
+    let mut plain = a6b0_full(&image[6144..], &crc, 0);
+    plain[96 + 0x38] ^= 1;
+    image[6144..].copy_from_slice(&a7f0_full(&plain, &crc, 0));
+    assert!(default_file_key(&image, did, 1)
+        .unwrap_err()
+        .contains("FileKeyCRC"));
+}
+
+#[test]
+fn default_mode2_key_unwrap_replays_all_committed_default_password_fixtures() {
+    use edpcli::backup_deep::keys::default_file_key;
+    use edpcli::crypto::{a6b0_full, crc32_bare};
+    use std::fs;
+
+    const DEFAULT_USER_KEY_CRC: u32 = 0x0429_735d;
+    let mut expected_entries = 0usize;
+    let mut verified_entries = 0usize;
+
+    for entry in fs::read_dir(common::FIXTURE_DIR).expect("protocol fixtures") {
+        let path = entry.expect("fixture entry").path();
+        if path.extension().and_then(|extension| extension.to_str()) != Some("bin") {
+            continue;
+        }
+        let name = path.file_name().unwrap().to_str().unwrap();
+        let Some(meta) = gold_name::parse_gold_name(name) else {
+            continue;
+        };
+        let image = fs::read(&path).expect("fixture bytes");
+        if image.len() != 13 * 512 {
+            continue;
+        }
+        let device_crc = crc32_bare(meta.device_id.as_bytes()).to_le_bytes();
+        let plain = a6b0_full(&image[12 * 512..13 * 512], &device_crc, 0);
+
+        for index in 0..3 {
+            let base = index * 0x60;
+            if &plain[base..base + 4] != b"EDPF"
+                || u32::from_le_bytes(plain[base + 0x30..base + 0x34].try_into().unwrap())
+                    != DEFAULT_USER_KEY_CRC
+                || plain[base + 0x58] != 2
+            {
+                continue;
+            }
+            expected_entries += 1;
+            default_file_key(&image, &meta.device_id, index).unwrap_or_else(|error| {
+                panic!("default mode2 key unwrap failed: {name} entry {index}: {error}")
+            });
+            verified_entries += 1;
+        }
+    }
+
+    assert_eq!(verified_entries, expected_entries);
+    assert!(
+        verified_entries >= 12,
+        "protocol fixture set lost default-password mode2 coverage"
+    );
+}
+
+#[test]
+fn default_mode2_key_rejects_unverified_profiles() {
+    use edpcli::backup_deep::keys::default_file_key;
+    use edpcli::crypto::{a6b0_full, a7f0_full, crc32_bare};
+
+    let original = include_bytes!("fixtures/protocol/disk4_243625984_vid21c4_pid0cd1_disk&ven_lexar&prod_usb_flash_drive_onlyid3164177653_20260827_221910.bin");
+    let did = "disk&ven_lexar&prod_usb_flash_drive";
+    let device_crc = crc32_bare(did.as_bytes()).to_le_bytes();
+
+    for (offset, value, expected) in [
+        (0x120, 0, "PassInfo"),
+        (96 + 0x30, 0, "default password"),
+        (96 + 0x58, 3, "mode2"),
+    ] {
+        let mut image = original.to_vec();
+        let mut plain = a6b0_full(&image[6144..], &device_crc, 0);
+        plain[offset] = value;
+        image[6144..].copy_from_slice(&a7f0_full(&plain, &device_crc, 0));
+        assert!(
+            default_file_key(&image, did, 1)
+                .unwrap_err()
+                .contains(expected),
+            "mutation at {offset:#x} must be rejected"
+        );
+    }
+}
+
+#[test]
+fn mode2_sm4_matches_published_block_vector() {
+    use edpcli::backup_deep::keys::sm4_decrypt_block;
+
+    let key = [
+        0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef, 0xfe, 0xdc, 0xba, 0x98, 0x76, 0x54, 0x32,
+        0x10,
+    ];
+    let cipher = [
+        0x68, 0x1e, 0xdf, 0x34, 0xd2, 0x06, 0x96, 0x5e, 0x86, 0xb3, 0xe9, 0x4f, 0x53, 0x6e, 0x42,
+        0x46,
+    ];
+    assert_eq!(sm4_decrypt_block(&cipher, &key), key);
 }

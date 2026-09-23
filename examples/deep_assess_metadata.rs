@@ -33,7 +33,30 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         } else {
             None
         };
-        reports.push(assess_partition(p, prefix.as_deref()));
+        let mut report = assess_partition(p, prefix.as_deref());
+        if p.need_encrypt != 0 && prefix.as_ref().is_some_and(|b| b.len() >= 512) {
+            match edpcli::backup_deep::keys::default_file_key(
+                &raw,
+                &verified.manifest.device.device_id,
+                p.index,
+            ) {
+                Ok(key) => {
+                    let decoded =
+                        edpcli::backup_deep::keys::decrypt_mode2(prefix.as_ref().unwrap(), &key)?;
+                    let mut plain = p.clone();
+                    plain.need_encrypt = 0;
+                    report = assess_partition(&plain, Some(&decoded));
+                    report.filesystem = match &decoded[3..11] {
+                        b"EXFAT   " => Some("exfat".into()),
+                        b"NTFS    " => Some("ntfs".into()),
+                        _ => None,
+                    };
+                    report.reason="default 0000aaaa key CRC verified; decoded prefix available; inventory not captured".into();
+                }
+                Err(error) => report.reason = error,
+            }
+        }
+        reports.push(report);
     }
     println!(
         "{}",

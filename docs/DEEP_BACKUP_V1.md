@@ -1,10 +1,10 @@
 # Deep filesystem analysis v1
 
 Deep is a read-only superset of Metadata. It does not read ordinary file payload
-clusters. Raw metadata evidence remains `evidence_only`; summary and file-list
-artifacts are `derived_only`. No decoded artifact is produced until a verified
-partition decryption implementation exists. Protocol-sector decoding is not a
-partition filesystem decryption implementation.
+clusters. Raw metadata evidence remains `evidence_only`; summary, file-list and
+decoded-sector artifacts are `derived_only`. Default-password LBA12 v0x0206
+mode2 entries can be decoded after their file key passes `FileKeyCRC` validation.
+Other encrypted profiles remain locked.
 
 ## Analysis contract
 
@@ -34,10 +34,11 @@ parse failure, not a complete partial listing. Ordinary file data is never read.
 The initial implementation reports exFAT and NTFS as unsupported. Their bitmap,
 directory/index and allocation parsers remain a separate next stage; a boot
 signature alone must not produce volume statistics. Encrypted type2/type4
-partitions report locked even if ciphertext happens to contain a filesystem
-signature. `PartitionReader` exposes only relative sector reads; the future
-DecryptedPartitionReader must validate keys and preserve decoded evidence
-separately, including derivation back to raw evidence.
+partitions with no verified default mode2 key report locked even if ciphertext
+happens to contain a filesystem signature. `PartitionReader` exposes only
+relative sector reads. The decoded reader preserves each decoded sector as a
+derived artifact citing its raw sector evidence. A valid file-key CRC verifies
+the unwrapped key; it does not by itself prove a complete filesystem inventory.
 
 ## Sources
 
@@ -46,7 +47,8 @@ FAT layout, cluster classification, directory entries and long filename rules:
 
 Existing EDP partition/key evidence is in
 [EDP protocol reverse engineering](EDP_PROTOCOL_REVERSE_ENGINEERING.md), sections
-6.1 onward. No password guessing or fabricated key material is used.
+6.1 onward. The v0x0206 default substitution is used only when `UserKeyCRC`
+identifies `0000aaaa`; no password guessing or fabricated key material is used.
 
 ## Capture and replay
 
@@ -72,11 +74,23 @@ For read-only assessment of an existing Metadata EDPB:
 cargo run --example deep_assess_metadata -- /path/to/backup.edpb
 ```
 
-This validates the source container and reports prefix assessment only; it does
-not relabel the source as Deep or fabricate sectors missing from Metadata.
+This validates the source container and reports prefix assessment only. For a
+verified default mode2 key it may identify the decoded prefix's filesystem
+signature, but does not report volume statistics or a file listing. It does not
+relabel the source as Deep or fabricate sectors missing from Metadata.
 
 The 2026-09-22 Lexar LBA7 compatibility-extent capture (container SHA-256
 `0a52a9cb52e47ca5e11d3a74d8c6f9f07937b0dc3d06f4d0802f3fb5917e254f`)
-was replayed offline with this tool. Its type2 partition is 118477684736 bytes and
-type4 is 6234963968 bytes. Both are `locked`; filesystem type, counts, listing
-and usage statistics remain null. No source device was opened for this replay.
+was replayed offline before default mode2 decoding was added. Its type2 partition
+is 118477684736 bytes and type4 is 6234963968 bytes. That earlier replay reported
+both as `locked`; it did not establish a filesystem inventory. No source device
+was opened for the replay.
+
+A later offline replay of the existing Lexar Metadata EDPB (container SHA-256
+`38575406e72006f003deabdf485a33df14de979d48c9a99150691aea2e926f7d`)
+used `deep_default_probe` on both encrypted partition prefixes. Both decoded
+prefixes had the `EXFAT   ` boot signature and a valid 12-sector exFAT boot
+checksum. `deep_assess_metadata` consequently reported `unsupported` with
+`filesystem=exfat`, leaving counts, sizes and entries null. This is positive
+evidence for prefix decoding, not a complete exFAT inventory or an atomic disk
+snapshot. The replay read the backup file, not the source device.
