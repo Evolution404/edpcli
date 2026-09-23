@@ -156,7 +156,11 @@ fn lba1_uses_the_canonical_gpt_header_parser() {
     raw[0x10..0x14].copy_from_slice(&crc.to_le_bytes());
 
     let view = analyze_sector(1, &raw, &InspectMeta::default());
-    assert!(view.method.contains("canonical protocol::lba1"), "{}", view.method);
+    assert!(
+        view.method.contains("canonical protocol::lba1"),
+        "{}",
+        view.method
+    );
     assert!(view
         .fields
         .iter()
@@ -165,18 +169,29 @@ fn lba1_uses_the_canonical_gpt_header_parser() {
         .fields
         .iter()
         .any(|field| field.label == "分区表首 LBA" && field.value == "2"));
-    assert!(view.notes.iter().any(|note| note.contains("protocol::lba1::parse_lba1")));
+    assert!(view
+        .notes
+        .iter()
+        .any(|note| note.contains("protocol::lba1::parse_lba1")));
 }
 
 #[test]
 fn lba2_uses_canonical_absent_profile_without_inventing_entries() {
     let raw = [0u8; 512];
     let view = analyze_sector(2, &raw, &InspectMeta::default());
-    assert!(view.method.contains("canonical protocol::lba2"), "{}", view.method);
-    assert!(view.fields.iter().any(|field| {
-        field.label == "GPT partition profile" && field.value.contains("Absent")
-    }));
-    assert!(view.notes.iter().any(|note| note.contains("protocol::lba2::parse_lba2")));
+    assert!(
+        view.method.contains("canonical protocol::lba2"),
+        "{}",
+        view.method
+    );
+    assert!(view
+        .fields
+        .iter()
+        .any(|field| { field.label == "GPT partition profile" && field.value.contains("Absent") }));
+    assert!(view
+        .notes
+        .iter()
+        .any(|note| note.contains("protocol::lba2::parse_lba2")));
 }
 
 #[test]
@@ -375,7 +390,11 @@ fn lba9_decodes_eetu_and_sapf_without_inventing_overlapping_eppe() {
 
     assert_eq!(&view.decoded[..4], b"EETU");
     assert_eq!(&view.decoded[0x100..0x104], b"SAPF");
-    assert_ne!(&view.decoded[0x180..0x184], b"EPPE", "SAPF and EPPE are alternative LBA9 overlay profiles");
+    assert_ne!(
+        &view.decoded[0x180..0x184],
+        b"EPPE",
+        "SAPF and EPPE are alternative LBA9 overlay profiles"
+    );
     assert!(view.fields.iter().any(|field| field.label == "EETU magic"));
     assert!(view.fields.iter().any(|field| {
         field.label == "EETU 开始时间 (ullBTime)" && field.value == "0（不限制）"
@@ -387,7 +406,10 @@ fn lba9_decodes_eetu_and_sapf_without_inventing_overlapping_eppe() {
         field.label == "EETU 使用次数 (useCount)" && field.value == "无限（0xFFFFFFFF）"
     }));
     assert!(view.notes.iter().any(|note| {
-        note.contains("time(NULL)") && note.contains("0xFFFFFFFF") && note.contains("reverse[104]") && note.contains("COMPLETE")
+        note.contains("time(NULL)")
+            && note.contains("0xFFFFFFFF")
+            && note.contains("reverse[104]")
+            && note.contains("COMPLETE")
     }));
     assert!(view
         .fields
