@@ -4,6 +4,13 @@ set -eu
 repo_root="$(git rev-parse --show-toplevel)"
 cd "$repo_root"
 
+if ! command -v rustfmt >/dev/null 2>&1 && [ -f "$HOME/.cargo/env" ]; then
+    # GUI-launched tools (for example WebCodex Desktop on macOS) may inherit a
+    # minimal PATH and skip shell startup files. rustup installs this portable
+    # environment shim specifically so non-interactive callers can recover it.
+    . "$HOME/.cargo/env"
+fi
+
 if ! command -v rustfmt >/dev/null 2>&1; then
     echo "error: rustfmt is required by the edpcli pre-commit hook" >&2
     echo "install the pinned toolchain/components from rust-toolchain.toml, then retry" >&2

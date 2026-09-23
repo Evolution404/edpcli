@@ -5,6 +5,8 @@ fn repository_pre_commit_hook_autoformats_staged_rust_files() {
     assert!(hook.contains("git diff --cached --name-only"));
     assert!(hook.contains("git add --"));
     assert!(hook.contains("partially staged"));
+    assert!(hook.contains("$HOME/.cargo/env"));
+    assert!(hook.contains(". \"$HOME/.cargo/env\""));
 }
 
 #[test]
