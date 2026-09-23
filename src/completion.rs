@@ -144,8 +144,10 @@ _edpcli() {
       fi
       ;;
     inspect)
-      if [[ "$cur" == -* ]]; then
-        compadd -- --disk --lba --raw --hex --export --id --backup-dir --help
+      if (( CURRENT == 3 )); then
+        compadd -- raw decode meta
+      elif [[ "$cur" == -* ]]; then
+        compadd -- --disk --lba --count --export --id --backup-dir --help
       else
         _edpcli_backup_targets "$bak"
       fi
@@ -236,8 +238,10 @@ _edpcli() {
         _edpcli_backup_targets "$bak" "$cur"
       fi ;;
     inspect)
-      if [[ "$cur" == -* ]]; then
-        vals='--disk --lba --raw --hex --export --id --backup-dir --help'
+      if (( COMP_CWORD == 2 )); then
+        COMPREPLY=( $(compgen -W 'raw decode meta' -- "$cur") )
+      elif [[ "$cur" == -* ]]; then
+        vals='--disk --lba --count --export --id --backup-dir --help'
         COMPREPLY=( $(compgen -W "$vals" -- "$cur") )
       else
         _edpcli_backup_targets "$bak" "$cur"
@@ -309,9 +313,9 @@ complete -c edpcli -n '__fish_seen_subcommand_from backup' -a 'create list resto
 complete -c edpcli -n '__fish_seen_subcommand_from backup; and __fish_seen_subcommand_from create' -l deep -d '只读文件系统分析'
 complete -c edpcli -n '__edpcli_wants_backup_target' -a '(__edpcli_backup_numbers) (__edpcli_backup_files)'
 complete -c edpcli -n '__fish_seen_subcommand_from inspect info apply backup' -l disk -r -a '(edpcli __complete disk 2>/dev/null)'
+complete -c edpcli -n '__fish_seen_subcommand_from inspect' -a 'raw decode meta'
 complete -c edpcli -n '__fish_seen_subcommand_from inspect' -l lba -r -a '(edpcli __complete lba 2>/dev/null)'
-complete -c edpcli -n '__fish_seen_subcommand_from inspect' -l raw
-complete -c edpcli -n '__fish_seen_subcommand_from inspect' -l hex
+complete -c edpcli -n '__fish_seen_subcommand_from inspect' -l count -r
 complete -c edpcli -n '__fish_seen_subcommand_from inspect' -l export -r
 complete -c edpcli -n '__fish_seen_subcommand_from inspect info convert' -l id -r
 complete -c edpcli -n '__fish_seen_subcommand_from backup inspect info list apply' -l backup-dir -r

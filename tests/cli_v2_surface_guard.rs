@@ -79,7 +79,9 @@ fn v2_surface_contains_required_task_commands() {
         "edpcli backup verify",
         "edpcli backup delete",
         "edpcli backup prune",
-        "edpcli inspect --lba",
+        "edpcli inspect raw",
+        "edpcli inspect decode",
+        "edpcli inspect meta",
     ] {
         assert!(readme.contains(required), "README missing {required}");
         assert!(usage.contains(required), "USAGE missing {required}");

@@ -603,39 +603,39 @@ mod tests {
         }
         match parse_args(&[
             "inspect".into(),
+            "meta".into(),
             "--lba".into(),
             "6,7,12".into(),
-            "--hex".into(),
             "--backup-dir".into(),
             "/tmp/bak".into(),
         ])
         .unwrap()
         {
             Parsed::Inspect(opts) => {
+                assert_eq!(opts.mode, crate::cli_args::InspectMode::Meta);
                 assert_eq!(opts.lbas, vec![6, 7, 12]);
-                assert!(opts.hex);
                 assert_eq!(opts.backup_dir.as_deref(), Some("/tmp/bak"));
             }
-            _ => panic!("应解析为 inspect"),
+            _ => panic!("应解析为 inspect meta"),
         }
         match parse_args(&[
             "inspect".into(),
+            "raw".into(),
             "x.bin".into(),
             "--lba".into(),
             "9".into(),
-            "--raw".into(),
             "--id".into(),
             "disk&ven_x&prod_y".into(),
         ])
         .unwrap()
         {
             Parsed::Inspect(opts) => {
+                assert_eq!(opts.mode, crate::cli_args::InspectMode::Raw);
                 assert_eq!(opts.backup.as_deref(), Some("x.bin"));
                 assert_eq!(opts.lbas, vec![9]);
-                assert!(opts.raw);
                 assert_eq!(opts.device_id.as_deref(), Some("disk&ven_x&prod_y"));
             }
-            _ => panic!("应解析为 inspect backup"),
+            _ => panic!("应解析为 inspect raw backup"),
         }
         match parse_args(&[
             "backup".into(),
@@ -835,17 +835,24 @@ mod tests {
         assert!(parse_args(&["backup".into(), "list".into(), "--yes".into()]).is_err());
         assert!(parse_args(&[
             "inspect".into(),
+            "raw".into(),
             "--disk".into(),
             "4".into(),
             "x.bin".into(),
         ])
         .is_err());
-        assert!(parse_args(&["inspect".into(), "--onlyid".into(), "1402259934".into(),]).is_err());
         assert!(parse_args(&[
             "inspect".into(),
+            "meta".into(),
+            "--onlyid".into(),
+            "1402259934".into(),
+        ])
+        .is_err());
+        assert!(parse_args(&[
+            "inspect".into(),
+            "raw".into(),
             "--lba".into(),
             "7".into(),
-            "--raw".into(),
             "--hex".into(),
         ])
         .is_err());
@@ -878,8 +885,7 @@ mod tests {
             vec!["backup", "prune", "--yes=0"],
             vec!["backup", "delete", "1", "--yes=no"],
             vec!["backup", "restore", "backup.bin", "--yes=false"],
-            vec!["inspect", "--raw=true"],
-            vec!["inspect", "--hex=1"],
+            vec!["backup", "create", "--deep=false"],
         ] {
             let args: Vec<String> = argv.into_iter().map(str::to_string).collect();
             let err = parse_args(&args).err().expect("布尔旗标带值必须报错");
@@ -895,8 +901,6 @@ mod tests {
             vec!["apply", "--dry-run", "--dry-run"],
             vec!["backup", "prune", "--yes", "--yes"],
             vec!["backup", "restore", "backup.bin", "--yes", "--yes"],
-            vec!["inspect", "--raw", "--raw"],
-            vec!["inspect", "--hex", "--hex"],
         ] {
             let args: Vec<String> = argv.into_iter().map(str::to_string).collect();
             let err = parse_args(&args).err().expect("布尔旗标重复必须报错");
@@ -905,18 +909,47 @@ mod tests {
     }
 
     #[test]
-    fn inspect_lba_is_limited_to_zero_through_twelve() {
-        for bad in ["13", "14", "99", "4294967295"] {
-            let args = vec!["inspect".to_string(), "--lba".to_string(), bad.to_string()];
-            let err = parse_args(&args)
-                .err()
-                .expect("inspect 不应接受 LBA0-12 之外的扇区");
-            assert!(err.contains("LBA") && err.contains("0-12"), "{err}");
+    fn inspect_accepts_arbitrary_u64_lbas_ranges_and_count() {
+        match parse_args(&[
+            "inspect".into(),
+            "decode".into(),
+            "--lba".into(),
+            "240250283-240250288".into(),
+        ])
+        .unwrap()
+        {
+            Parsed::Inspect(opts) => {
+                assert_eq!(opts.mode, crate::cli_args::InspectMode::Decode);
+                assert_eq!(
+                    opts.lbas,
+                    vec![240250283, 240250284, 240250285, 240250286, 240250287, 240250288]
+                );
+            }
+            _ => panic!("应解析为 inspect decode"),
         }
-        for good in ["0", "4", "12"] {
-            let args = vec!["inspect".to_string(), "--lba".to_string(), good.to_string()];
-            assert!(parse_args(&args).is_ok(), "LBA{good} 应被接受");
+
+        match parse_args(&[
+            "inspect".into(),
+            "raw".into(),
+            "--lba".into(),
+            "4294967296".into(),
+            "--count".into(),
+            "2".into(),
+        ])
+        .unwrap()
+        {
+            Parsed::Inspect(opts) => assert_eq!(opts.lbas, vec![4_294_967_296, 4_294_967_297]),
+            _ => panic!("应解析为 inspect raw"),
         }
+
+        assert!(parse_args(&["inspect".into(), "--lba".into(), "7".into()]).is_err());
+        assert!(parse_args(&[
+            "inspect".into(),
+            "meta".into(),
+            "--lba".into(),
+            "12-7".into(),
+        ])
+        .is_err());
     }
 
     #[test]
@@ -928,7 +961,7 @@ mod tests {
             vec!["backup", "create", "--disk=4", "--disk=6"],
             vec!["backup", "prune", "--keep", "1", "--keep", "2"],
             vec!["info", "--disk", "4", "--disk", "6"],
-            vec!["inspect", "--lba", "1", "--lba", "2"],
+            vec!["inspect", "meta", "--lba", "1", "--lba", "2"],
             vec!["convert", "--dir", "a", "--dir", "b", "--id", "x"],
         ] {
             let args: Vec<String> = argv.into_iter().map(str::to_string).collect();

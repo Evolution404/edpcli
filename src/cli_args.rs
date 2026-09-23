@@ -3,6 +3,8 @@
 //! 只负责 argv → 结构化命令，不做 I/O、不提权、不访问磁盘；所有歧义参数在这里
 //! 统一拒绝，避免执行层出现“后一个覆盖前一个”或布尔 flag 带值的危险语义。
 
+use std::collections::HashSet;
+
 use crate::completion::Shell;
 use crate::elevate::ELEVATED_FLAG;
 
@@ -16,16 +18,48 @@ pub struct DiskOpts {
     pub backup_dir: Option<String>,
 }
 
-#[derive(Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InspectMode {
+    Raw,
+    Decode,
+    Meta,
+}
+
+impl InspectMode {
+    fn parse(value: &str) -> Option<Self> {
+        match value {
+            "raw" => Some(Self::Raw),
+            "decode" => Some(Self::Decode),
+            "meta" => Some(Self::Meta),
+            _ => None,
+        }
+    }
+}
+
 pub struct InspectOpts {
+    pub mode: InspectMode,
     pub disk: Option<u32>,
     pub backup: Option<String>,
-    pub lbas: Vec<u32>,
-    pub raw: bool,
-    pub hex: bool,
+    pub lbas: Vec<u64>,
+    pub count: Option<u64>,
     pub export: Option<String>,
     pub device_id: Option<String>,
     pub backup_dir: Option<String>,
+}
+
+impl Default for InspectOpts {
+    fn default() -> Self {
+        Self {
+            mode: InspectMode::Meta,
+            disk: None,
+            backup: None,
+            lbas: Vec::new(),
+            count: None,
+            export: None,
+            device_id: None,
+            backup_dir: None,
+        }
+    }
 }
 
 #[derive(Default)]
@@ -135,8 +169,9 @@ fn print_topic_help(topic: &str) {
             println!("--dry-run 只执行识别与布局计算，不提交写入。");
         }
         "inspect" => {
-            println!("{}", bold("用法: edpcli inspect [备份.edpb] [--disk N] [--lba 6,7,12] [--hex|--raw] [--export DIR]"));
-            println!("LBA 必须通过 --lba 显式指定；不指定时显示 LBA0-12 概览。");
+            println!("{}", bold("用法: edpcli inspect <raw|decode|meta> [备份.edpb] [--disk N] [--lba 列表或范围] [--count N] [--export DIR]"));
+            println!("raw=物理原始字节；decode=按已验证区域算法解码；meta=结构化区域与字段语义。");
+            println!("--lba 支持 7,12,240250283 或 240250283-240250288；--count 仅能与单个起始 LBA 同用。");
         }
         "backup" => {
             println!("{}", bold("用法: edpcli backup [动作] [选项]"));
@@ -208,29 +243,69 @@ fn parse_keep(s: &str) -> Result<usize, String> {
         .map_err(|_| format!("错误: --keep 超出范围: {}", s))
 }
 
-fn parse_lbas(s: &str) -> Result<Vec<u32>, String> {
+const MAX_INSPECT_SECTORS: usize = 65_536;
+
+fn parse_lba_value(value: &str) -> Result<u64, String> {
+    if value.is_empty() || !value.bytes().all(|byte| byte.is_ascii_digit()) {
+        return Err(format!("错误: LBA 须为非负十进制整数，得到 {value}"));
+    }
+    value
+        .parse::<u64>()
+        .map_err(|_| format!("错误: LBA 超出 u64 范围: {value}"))
+}
+
+fn push_unique_lba(out: &mut Vec<u64>, seen: &mut HashSet<u64>, lba: u64) -> Result<(), String> {
+    if seen.insert(lba) {
+        if out.len() >= MAX_INSPECT_SECTORS {
+            return Err(format!(
+                "错误: 单次 inspect 最多读取 {MAX_INSPECT_SECTORS} 个扇区"
+            ));
+        }
+        out.push(lba);
+    }
+    Ok(())
+}
+
+fn parse_lbas(s: &str) -> Result<Vec<u64>, String> {
     if s.is_empty() {
         return Err("错误: --lba 缺少 LBA 值".into());
     }
     let mut out = Vec::new();
+    let mut seen = HashSet::new();
     for token in s.split(',') {
-        if token.is_empty() || !token.bytes().all(|b| b.is_ascii_digit()) {
-            return Err(format!(
-                "错误: --lba 仅接受 0-12 的逗号分隔列表, 得到 {}",
-                s
-            ));
-        }
-        let lba = token
-            .parse::<u32>()
-            .map_err(|_| format!("错误: inspect LBA 仅支持 0-12, 得到 {}", token))?;
-        if lba > crate::common::METADATA_LAST_LBA {
-            return Err(format!("错误: inspect LBA 仅支持 0-12, 得到 {}", token));
-        }
-        if !out.contains(&lba) {
-            out.push(lba);
+        if let Some((start, end)) = token.split_once('-') {
+            let start = parse_lba_value(start)?;
+            let end = parse_lba_value(end)?;
+            if start > end {
+                return Err(format!("错误: LBA 范围起点大于终点: {token}"));
+            }
+            let span = end
+                .checked_sub(start)
+                .and_then(|value| value.checked_add(1))
+                .ok_or_else(|| format!("错误: LBA 范围溢出: {token}"))?;
+            if span > MAX_INSPECT_SECTORS as u64 {
+                return Err(format!(
+                    "错误: 单个 LBA 范围最多包含 {MAX_INSPECT_SECTORS} 个扇区"
+                ));
+            }
+            for lba in start..=end {
+                push_unique_lba(&mut out, &mut seen, lba)?;
+            }
+        } else {
+            push_unique_lba(&mut out, &mut seen, parse_lba_value(token)?)?;
         }
     }
     Ok(out)
+}
+
+fn parse_inspect_count(s: &str) -> Result<u64, String> {
+    let count = parse_lba_value(s)?;
+    if count == 0 || count > MAX_INSPECT_SECTORS as u64 {
+        return Err(format!(
+            "错误: --count 须为 1..={MAX_INSPECT_SECTORS}，得到 {s}"
+        ));
+    }
+    Ok(count)
 }
 
 fn flag_name(a: &str) -> &str {
@@ -344,7 +419,20 @@ pub fn parse_args(argv: &[String]) -> Result<Parsed, String> {
                     topic: Some("inspect".into()),
                 });
             }
-            let mut opts = InspectOpts::default();
+            let Some(mode_text) = rest.first() else {
+                return Err("错误: inspect 需要模式 raw / decode / meta".into());
+            };
+            let mode = InspectMode::parse(mode_text).ok_or_else(|| {
+                format!(
+                    "错误: inspect 模式必须是 raw / decode / meta，得到 {}",
+                    mode_text
+                )
+            })?;
+            let rest = rest[1..].to_vec();
+            let mut opts = InspectOpts {
+                mode,
+                ..InspectOpts::default()
+            };
             let mut lba_seen = false;
             let mut i = 0;
             while i < rest.len() {
@@ -363,8 +451,10 @@ pub fn parse_args(argv: &[String]) -> Result<Parsed, String> {
                             opts.lbas = parse_lbas(&v)?;
                             lba_seen = true;
                         }
-                        "--raw" => set_switch(&mut opts.raw, a, "--raw")?,
-                        "--hex" => set_switch(&mut opts.hex, a, "--hex")?,
+                        "--count" => {
+                            let v = take_value(&rest, &mut i, "--count")?;
+                            set_once(&mut opts.count, parse_inspect_count(&v)?, "--count")?;
+                        }
                         "--export" => {
                             let v = take_value(&rest, &mut i, "--export")?;
                             set_once(&mut opts.export, v, "--export")?;
@@ -381,12 +471,10 @@ pub fn parse_args(argv: &[String]) -> Result<Parsed, String> {
                     }
                 } else if !a.is_empty() && a.bytes().all(|b| b.is_ascii_digit()) {
                     return Err(format!(
-                        "错误: v2 不接受裸 LBA {}。请使用: edpcli inspect --lba {}",
+                        "错误: inspect 不接受裸 LBA {}。请使用 --lba {}",
                         a, a
                     ));
                 } else if opts.backup.is_none() {
-                    // 最常见的离线查看不应强迫用户记 --backup：
-                    // `edpcli inspect backup.edpb 7 12` 与显式 --backup 等价。
                     opts.backup = Some(a.to_string());
                 } else {
                     return Err(format!("错误: inspect 多余的位置参数: {}", a));
@@ -398,8 +486,18 @@ pub fn parse_args(argv: &[String]) -> Result<Parsed, String> {
             if source_count > 1 {
                 return Err("错误: inspect 的 --disk 与备份文件只能选一种".into());
             }
-            if opts.raw && opts.hex {
-                return Err("错误: inspect 的 --raw 与 --hex 语义相反，不能同时使用".into());
+            if let Some(count) = opts.count {
+                if opts.lbas.len() != 1 {
+                    return Err("错误: --count 只能与单个 --lba 起点同时使用".into());
+                }
+                let start = opts.lbas[0];
+                opts.lbas.clear();
+                for offset in 0..count {
+                    let lba = start
+                        .checked_add(offset)
+                        .ok_or_else(|| "错误: --count 产生的 LBA 范围溢出".to_string())?;
+                    opts.lbas.push(lba);
+                }
             }
             Ok(Parsed::Inspect(opts))
         }
@@ -469,10 +567,7 @@ pub fn parse_args(argv: &[String]) -> Result<Parsed, String> {
                     let mut i = 0;
                     while i < tail.len() {
                         match flag_name(&tail[i]) {
-                            "--deep" => {
-                                if tail[i] != "--deep" || deep { return Err("错误: --deep 不接受值或重复指定".into()); }
-                                deep = true;
-                            }
+                            "--deep" => set_switch(&mut deep, &tail[i], "--deep")?,
                             "--disk" => {
                                 let v = take_value(tail, &mut i, "--disk")?;
                                 set_once(&mut disk, parse_disk_spec(&v)?, "--disk")?;

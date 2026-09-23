@@ -21,6 +21,7 @@ pub mod elevate;
 pub mod identify;
 pub mod inspect;
 pub(crate) mod inspect_cli;
+pub mod inspect_target;
 pub mod metainfo;
 pub(crate) mod metainfo_cli;
 pub mod platform;

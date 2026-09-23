@@ -230,7 +230,7 @@ fn positional_backup_path_and_numbered_verify_follow_same_ux() {
 
     let inspect = Command::new(env!("CARGO_BIN_EXE_edpcli"))
         .env("NO_COLOR", "1")
-        .arg("inspect")
+        .args(["inspect", "meta"])
         .arg(&file)
         .args(["--lba", "7"])
         .output()
@@ -327,16 +327,16 @@ fn backup_delete_without_target_uses_global_interactive_selector() {
 }
 
 #[test]
-fn contradictory_inspect_flags_fail_with_focused_help() {
+fn inspect_requires_one_of_the_three_modes() {
     let out = Command::new(env!("CARGO_BIN_EXE_edpcli"))
         .env("NO_COLOR", "1")
-        .args(["inspect", "--lba", "7", "--raw", "--hex"])
+        .args(["inspect", "--lba", "7"])
         .output()
         .unwrap();
     assert_eq!(out.status.code(), Some(2));
     let stdout = String::from_utf8_lossy(&out.stdout);
     let stderr = String::from_utf8_lossy(&out.stderr);
-    assert!(stderr.contains("不能同时使用"));
+    assert!(stderr.contains("raw / decode / meta") || stderr.contains("模式"));
     assert!(stdout.contains("用法: edpcli inspect"));
     assert!(!stdout.contains("cems 加密 U 盘"));
 }
@@ -356,7 +356,7 @@ fn piping_output_to_head_does_not_panic_on_broken_pipe() {
         .unwrap();
     let bin = env!("CARGO_BIN_EXE_edpcli");
     let script = format!(
-        "\"{}\" inspect \"{}\" --hex | head -n 1 >/dev/null",
+        "\"{}\" inspect raw \"{}\" --lba 7 | head -n 1 >/dev/null",
         bin,
         file.display()
     );

@@ -322,27 +322,42 @@ edpcli backup prune --keep 2 --yes
 
 ## 7. 高级扇区检查
 
+`inspect` 是只读盘面分析入口，必须显式选择一种模式：
+
+- `raw`：读取物理 512B 原始扇区，不做任何解密或变换；
+- `decode`：根据 LBA 所属区域执行已经验证的协议或数据区解码；算法、密钥或校验无法确认时直接失败，不会退回 raw 冒充解码结果；
+- `meta`：显示物理偏移、区域叠加关系、分区几何、加密状态、协议字段和解码依据，不以十六进制字节流为主。
+
 ```bash
-edpcli inspect
-edpcli inspect --disk 4
-edpcli inspect --lba 7
-edpcli inspect --disk 4 --lba 6,7,8,12
-edpcli inspect backup.bin --lba 7,12 --hex
-edpcli inspect backup.bin --lba 7 --raw
-edpcli inspect backup.bin --lba 6,7,12 --export ./metadata-out
+edpcli inspect meta --disk 4 --lba 7
+edpcli inspect raw --disk 4 --lba 240250283
+edpcli inspect raw --disk 4 --lba 240250283-240250288
+edpcli inspect decode --disk 4 --lba 240250283 --count 6
+edpcli inspect decode --disk 4 --lba 20480
+edpcli inspect meta backup.edpb --lba 7,12
+edpcli inspect raw backup.edpb --lba 240250283
+edpcli inspect decode backup.edpb --lba 240250283 --export ./inspect-out
 ```
 
 规则：
 
-- LBA 必须通过 `--lba` 显式指定，范围固定 0..12；
-- 备份文件可作为唯一位置参数；
-- `--hex` 显示解码后的字段感知十六进制；
-- `--raw` 查看盘上原始字节；
-- `--hex` 与 `--raw` 互斥；
-- `--export` 导出原始/解码后二进制和十六进制；
+- `--lba` 使用非负十进制 `u64`，支持逗号列表和闭区间，如 `7,12,240250283` 或 `240250283-240250288`；
+- `--count N` 只能与单个起始 LBA 同用，从该 LBA 起连续读取 N 个扇区；
+- 单次最多检查 65536 个扇区，防止误输入造成无界读取；
+- 对物理盘，LBA 必须满足 `0 <= LBA < total_sectors`，越界在读盘前拒绝；
+- LBA0-LBA12 使用现有协议解析器；LCE 使用 zero8 + 64 位物理字节偏移 tweak；
+- 数据分区把“所属区域”“`NeedEncrypt` 配置”和“物理数据当前是否为密文”分开判断，`NeedEncrypt=1` 不再直接触发 SM4；
+- 分区起始扇区若通过严格 FAT16/FAT32/exFAT/NTFS boot-sector 结构校验，`decode` 直接返回物理明文，并明确标记“未执行 SM4”；
+- raw 起始扇区不能确认明文时，只有 `EncryptMode=2`、FileKey 可按已验证规则解封且 `FileKeyCRC=PASS`，并且 SM4-ECB 解密后的起始扇区再次通过严格文件系统校验，才把该分区判定为 mode2 密文；
+- 检查分区内非起始 LBA 时，会先读取同一分区起始扇区作为物理状态证据；离线 EDPB 若没有采集该起始扇区则 `decode` fail-closed；
+- 当前自动 FileKey 解封只对已经验证的默认密码配置开放；非默认密码、未知加密模式或 raw/decoded 两边都不能确认时会明确拒绝 decode；
+- 未知厂商区或没有经过验证的算法只允许 `raw`/`meta`，`decode` 会 fail-closed；
+- 区域可以重叠，例如 LCE 同时可能位于盘尾取证窗口，`meta` 会同时列出；
+- EDPB 离线检查可读取容器中已采集的原始扇区范围；没有采集到的 LBA 会明确报告不存在；
+- `--export` 按模式分别导出 `LBA<n>_raw.*`、`LBA<n>_decoded.*` 或 `LBA<n>_meta.txt`；
 - 离线文件无法自动确定 device_id 时可显式 `--id`。
 
-未指定文件时只选择物理 U 盘；不会因为无盘而自动跳到备份目录猜来源。
+未指定备份文件时只选择物理 U 盘，不会因为无盘而自动跳到备份目录猜来源。
 
 ## 8. 离线转换
 

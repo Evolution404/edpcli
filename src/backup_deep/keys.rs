@@ -28,7 +28,7 @@ fn sm4_tau(value: u32) -> u32 {
     ])
 }
 
-pub fn sm4_decrypt_block(ciphertext: &[u8; 16], key: &[u8; 16]) -> [u8; 16] {
+fn sm4_round_keys(key: &[u8; 16]) -> [u32; 32] {
     const FK: [u32; 4] = [0xa3b1bac6, 0x56aa3350, 0x677d9197, 0xb27022dc];
     let mut rk_state = [
         u32::from_be_bytes(key[0..4].try_into().unwrap()) ^ FK[0],
@@ -49,18 +49,31 @@ pub fn sm4_decrypt_block(ciphertext: &[u8; 16], key: &[u8; 16]) -> [u8; 16] {
         *round_key = next;
         rk_state = [rk_state[1], rk_state[2], rk_state[3], next];
     }
+    round_keys
+}
 
+fn sm4_crypt_block(input: &[u8; 16], key: &[u8; 16], decrypt: bool) -> [u8; 16] {
+    let round_keys = sm4_round_keys(key);
     let mut x = [
-        u32::from_be_bytes(ciphertext[0..4].try_into().unwrap()),
-        u32::from_be_bytes(ciphertext[4..8].try_into().unwrap()),
-        u32::from_be_bytes(ciphertext[8..12].try_into().unwrap()),
-        u32::from_be_bytes(ciphertext[12..16].try_into().unwrap()),
+        u32::from_be_bytes(input[0..4].try_into().unwrap()),
+        u32::from_be_bytes(input[4..8].try_into().unwrap()),
+        u32::from_be_bytes(input[8..12].try_into().unwrap()),
+        u32::from_be_bytes(input[12..16].try_into().unwrap()),
     ];
-    for round_key in round_keys.iter().rev() {
+    let mut apply_round = |round_key: u32| {
         let b = sm4_tau(x[1] ^ x[2] ^ x[3] ^ round_key);
         let next =
             x[0] ^ b ^ b.rotate_left(2) ^ b.rotate_left(10) ^ b.rotate_left(18) ^ b.rotate_left(24);
         x = [x[1], x[2], x[3], next];
+    };
+    if decrypt {
+        for &round_key in round_keys.iter().rev() {
+            apply_round(round_key);
+        }
+    } else {
+        for &round_key in &round_keys {
+            apply_round(round_key);
+        }
     }
     let words = [x[3], x[2], x[1], x[0]];
     let mut out = [0u8; 16];
@@ -68,6 +81,16 @@ pub fn sm4_decrypt_block(ciphertext: &[u8; 16], key: &[u8; 16]) -> [u8; 16] {
         out[index * 4..index * 4 + 4].copy_from_slice(&word.to_be_bytes());
     }
     out
+}
+
+pub fn sm4_decrypt_block(ciphertext: &[u8; 16], key: &[u8; 16]) -> [u8; 16] {
+    sm4_crypt_block(ciphertext, key, true)
+}
+
+/// Test/provisioning helper for producing mode2 ciphertext from known plaintext.
+/// Inspect itself never calls this: its data path remains strictly read-only.
+pub fn sm4_encrypt_block(plaintext: &[u8; 16], key: &[u8; 16]) -> [u8; 16] {
+    sm4_crypt_block(plaintext, key, false)
 }
 
 /// Recover a mode2 file key from an LBA12 v0x0206 default-password entry.
@@ -112,11 +135,12 @@ pub fn default_file_key(image: &[u8], device_id: &str, index: usize) -> Result<[
 }
 
 pub fn decrypt_mode2(data: &[u8], key: &[u8; 16]) -> Result<Vec<u8>, String> {
-    if data.len() % 16 != 0 {
+    let (blocks, remainder) = data.as_chunks::<16>();
+    if !remainder.is_empty() {
         return Err("truncated SM4 block".into());
     }
-    Ok(data
-        .chunks_exact(16)
-        .flat_map(|block| sm4_decrypt_block(block.try_into().unwrap(), key))
+    Ok(blocks
+        .iter()
+        .flat_map(|block| sm4_decrypt_block(block, key))
         .collect())
 }

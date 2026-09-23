@@ -158,17 +158,16 @@ fn imix(col: &[u8; 4]) -> [u8; 4] {
 }
 
 /// 轮密钥展开 + counter 混入(cb 的 8 字节循环 XOR 进全部 176 个轮密钥字节)。
-fn expand_with_counter(key_raw: &[u8], counter: u32) -> [[u8; 4]; 44] {
+///
+/// 驱动把物理 backing byte offset 作为 64 位 tweak seed 传入；LBA0-LBA12
+/// 的历史调用仍以 0 起步，因此现有 u32 API 由下面的兼容包装保持位级一致。
+fn expand_with_counter(key_raw: &[u8], counter: u64) -> [[u8; 4]; 44] {
     let mut expanded = [0u8; 16];
     for i in 0..16 {
         expanded[i] = key_raw[i % key_raw.len()] ^ KEY_TABLE[i];
     }
     let mut rk = aes_expand(&expanded);
-    let cb: [u8; 8] = {
-        let mut b = [0u8; 8];
-        b[0..4].copy_from_slice(&counter.to_le_bytes());
-        b
-    };
+    let cb = counter.to_le_bytes();
     for wi in 0..44 {
         for bi in 0..4 {
             rk[wi][bi] ^= cb[(wi * 4 + bi) % 8];
@@ -179,6 +178,11 @@ fn expand_with_counter(key_raw: &[u8], counter: u32) -> [[u8; 4]; 44] {
 
 /// A6B0 单块解密(data 恰 16B)。
 pub fn a6b0_decrypt(data: &[u8], key_raw: &[u8], counter: u32) -> [u8; 16] {
+    a6b0_decrypt_offset(data, key_raw, u64::from(counter))
+}
+
+/// 使用完整 64 位物理字节偏移作为 tweak seed 的 A6B0 单块解密。
+pub fn a6b0_decrypt_offset(data: &[u8], key_raw: &[u8], counter: u64) -> [u8; 16] {
     assert!(data.len() == 16, "A6B0 块长须 16");
     let rk = expand_with_counter(key_raw, counter);
     let mut s = [0u8; 16];
@@ -211,6 +215,11 @@ pub fn a6b0_decrypt(data: &[u8], key_raw: &[u8], counter: u32) -> [u8; 16] {
 
 /// a7f0 单块加密(data 恰 16B)。
 pub fn a7f0_encrypt(data: &[u8], key_raw: &[u8], counter: u32) -> [u8; 16] {
+    a7f0_encrypt_offset(data, key_raw, u64::from(counter))
+}
+
+/// 使用完整 64 位物理字节偏移作为 tweak seed 的 a7f0 单块加密。
+pub fn a7f0_encrypt_offset(data: &[u8], key_raw: &[u8], counter: u64) -> [u8; 16] {
     assert!(data.len() == 16, "a7f0 块长须 16");
     let rk = expand_with_counter(key_raw, counter);
     let mut s = [0u8; 16];
@@ -243,12 +252,17 @@ pub fn a7f0_encrypt(data: &[u8], key_raw: &[u8], counter: u32) -> [u8; 16] {
 
 /// A6B0 连续块解密(长度须 16 的倍数; counter 每块 +16)。
 pub fn a6b0_full(data: &[u8], key: &[u8], initial_counter: u32) -> Vec<u8> {
+    a6b0_full_offset(data, key, u64::from(initial_counter))
+}
+
+/// 使用完整 64 位物理字节偏移作为起始 tweak 的连续 A6B0 解密。
+pub fn a6b0_full_offset(data: &[u8], key: &[u8], initial_counter: u64) -> Vec<u8> {
     let mut out = Vec::with_capacity(data.len());
     let mut ctr = initial_counter;
     let (blocks, remainder) = data.as_chunks::<16>();
     debug_assert!(remainder.is_empty(), "A6B0 输入长度必须是 16 的倍数");
     for blk in blocks {
-        out.extend_from_slice(&a6b0_decrypt(blk, key, ctr));
+        out.extend_from_slice(&a6b0_decrypt_offset(blk, key, ctr));
         ctr = ctr.wrapping_add(16);
     }
     out
@@ -256,12 +270,17 @@ pub fn a6b0_full(data: &[u8], key: &[u8], initial_counter: u32) -> Vec<u8> {
 
 /// a7f0 连续块加密(长度须 16 的倍数; counter 每块 +16)。
 pub fn a7f0_full(data: &[u8], key: &[u8], initial_counter: u32) -> Vec<u8> {
+    a7f0_full_offset(data, key, u64::from(initial_counter))
+}
+
+/// 使用完整 64 位物理字节偏移作为起始 tweak 的连续 a7f0 加密。
+pub fn a7f0_full_offset(data: &[u8], key: &[u8], initial_counter: u64) -> Vec<u8> {
     let mut out = Vec::with_capacity(data.len());
     let mut ctr = initial_counter;
     let (blocks, remainder) = data.as_chunks::<16>();
     debug_assert!(remainder.is_empty(), "a7f0 输入长度必须是 16 的倍数");
     for blk in blocks {
-        out.extend_from_slice(&a7f0_encrypt(blk, key, ctr));
+        out.extend_from_slice(&a7f0_encrypt_offset(blk, key, ctr));
         ctr = ctr.wrapping_add(16);
     }
     out

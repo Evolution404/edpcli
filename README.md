@@ -72,10 +72,10 @@ edpcli backup delete
 edpcli backup delete 2,4,5
 edpcli backup prune --keep 2
 
-edpcli inspect --lba 7
-edpcli inspect --disk 4 --lba 6,7,12 --hex
-edpcli inspect backup.bin --lba 7,12 --hex
-edpcli inspect backup.bin --lba 7 --raw
+edpcli inspect meta --lba 7
+edpcli inspect raw --disk 4 --lba 240250283-240250288
+edpcli inspect decode --disk 4 --lba 20480 --count 8
+edpcli inspect meta backup.edpb --lba 7,12
 
 edpcli convert --dir ./snapshot --id 'disk&ven_aigo&prod_u335' --out ./converted
 edpcli version

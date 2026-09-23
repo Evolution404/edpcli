@@ -180,6 +180,26 @@ impl FileDev {
     pub fn path(&self) -> &str {
         &self.path
     }
+
+    /// inspect 专用的只读 u64 LBA 读取路径。
+    ///
+    /// 写盘安全链仍使用 SectorDev 的 u32 接口，避免这次只读重构扩大写路径风险。
+    /// 偏移计算采用 checked arithmetic，任何溢出直接失败。
+    pub fn read_sector_u64(&mut self, lba: u64) -> io::Result<Vec<u8>> {
+        let base = lba
+            .checked_mul(SECTOR as u64)
+            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "LBA 字节偏移溢出"))?;
+        let mut buf = vec![0u8; SECTOR];
+        self.file.seek(SeekFrom::Start(base))?;
+        self.file.read_exact(&mut buf).map_err(|error| {
+            if error.kind() == io::ErrorKind::UnexpectedEof {
+                io::Error::new(error.kind(), format!("LBA{lba} 读取提前 EOF"))
+            } else {
+                error
+            }
+        })?;
+        Ok(buf)
+    }
 }
 
 /// pwrite_full 等价: 以单次尝试闭包写满 data(短写循环, 0 视为失败)。
@@ -1209,6 +1229,34 @@ mod tests {
         fn sync(&mut self) -> io::Result<()> {
             Err(io::Error::other("not used"))
         }
+    }
+
+    #[test]
+    fn inspect_u64_reader_accepts_last_sector_rejects_eof_and_offset_overflow() {
+        let path = std::env::temp_dir().join(format!(
+            "edpcli_inspect_u64_{}_{}.bin",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let mut bytes = vec![0u8; 2 * SECTOR];
+        bytes[SECTOR..].fill(0x5a);
+        fs::write(&path, bytes).unwrap();
+
+        let mut dev = FileDev::open_rdonly(path.to_str().unwrap()).unwrap();
+        assert_eq!(dev.read_sector_u64(1).unwrap(), vec![0x5a; SECTOR]);
+
+        let eof = dev.read_sector_u64(2).unwrap_err();
+        assert_eq!(eof.kind(), io::ErrorKind::UnexpectedEof);
+        assert!(eof.to_string().contains("LBA2"));
+
+        let overflow = dev.read_sector_u64(u64::MAX).unwrap_err();
+        assert_eq!(overflow.kind(), io::ErrorKind::InvalidInput);
+        assert!(overflow.to_string().contains("偏移溢出"));
+
+        let _ = fs::remove_file(path);
     }
 
     #[test]

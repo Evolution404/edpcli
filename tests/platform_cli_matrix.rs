@@ -119,7 +119,10 @@ fn info_inspect_and_backup_work_offline_on_every_platform() {
     let dir_s = dir.0.to_str().expect("utf8 backup dir");
 
     assert_ok(run(&["info", backup_s]), "info backup");
-    assert_ok(run(&["inspect", backup_s, "--lba", "8"]), "inspect backup");
+    assert_ok(
+        run(&["inspect", "meta", backup_s, "--lba", "8"]),
+        "inspect backup",
+    );
     assert_ok(
         run(&["backup", "verify", backup_s, "--backup-dir", dir_s]),
         "backup verify",

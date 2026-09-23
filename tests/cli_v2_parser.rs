@@ -1,4 +1,4 @@
-use edpcli::cli_args::{parse_args, BackupAction, Parsed};
+use edpcli::cli_args::{parse_args, BackupAction, InspectMode, Parsed};
 
 fn args(values: &[&str]) -> Vec<String> {
     values.iter().map(|value| (*value).to_string()).collect()
@@ -71,34 +71,106 @@ fn backup_v2_actions_parse_without_onlyid_or_index_ui() {
 }
 
 #[test]
-fn inspect_requires_explicit_lba_flag() {
-    match parse_args(&args(&[
-        "inspect",
-        "backup.bin",
-        "--lba",
-        "6,7,12",
-        "--hex",
-    ]))
-    .expect("inspect")
+fn inspect_requires_mode_and_explicit_lba_flag() {
+    match parse_args(&args(&["inspect", "meta", "backup.bin", "--lba", "6,7,12"])).expect("inspect")
     {
         Parsed::Inspect(opts) => {
+            assert_eq!(opts.mode, InspectMode::Meta);
             assert_eq!(opts.backup.as_deref(), Some("backup.bin"));
             assert_eq!(opts.lbas, vec![6, 7, 12]);
-            assert!(opts.hex);
         }
         _ => panic!("expected inspect"),
     }
 
-    let error = parse_args(&args(&["inspect", "7"]))
+    let error = parse_args(&args(&["inspect", "raw", "7"]))
         .err()
         .expect("bare LBA must be rejected");
     assert!(error.contains("--lba"), "{error}");
+    assert!(parse_args(&args(&["inspect", "--lba", "7"])).is_err());
+    assert!(parse_args(&args(&["inspect", "raw", "--lba", "7", "--hex"])).is_err());
+}
+
+#[test]
+fn inspect_accepts_u64_ranges_and_count() {
+    match parse_args(&args(&[
+        "inspect",
+        "decode",
+        "--lba",
+        "240250283-240250288",
+    ]))
+    .unwrap()
+    {
+        Parsed::Inspect(opts) => {
+            assert_eq!(opts.mode, InspectMode::Decode);
+            assert_eq!(opts.lbas.len(), 6);
+            assert_eq!(opts.lbas[0], 240250283);
+            assert_eq!(opts.lbas[5], 240250288);
+        }
+        _ => panic!("expected inspect decode"),
+    }
+
+    match parse_args(&args(&[
+        "inspect",
+        "raw",
+        "--lba",
+        "4294967296",
+        "--count",
+        "2",
+    ]))
+    .unwrap()
+    {
+        Parsed::Inspect(opts) => {
+            assert_eq!(opts.mode, InspectMode::Raw);
+            assert_eq!(opts.lbas, vec![4_294_967_296, 4_294_967_297]);
+        }
+        _ => panic!("expected inspect raw"),
+    }
+
+    assert!(parse_args(&args(&["inspect", "meta", "--lba", "5,6", "--count", "2"])).is_err());
+    assert!(parse_args(&args(&["inspect", "meta", "--lba", "9-7"])).is_err());
+}
+
+#[test]
+fn inspect_enforces_65536_sector_limit_and_u64_count_overflow() {
+    let max = parse_args(&args(&["inspect", "raw", "--lba", "1000000-1065535"]))
+        .expect("65536-sector range must be accepted");
+    match max {
+        Parsed::Inspect(opts) => {
+            assert_eq!(opts.lbas.len(), 65_536);
+            assert_eq!(opts.lbas.first(), Some(&1_000_000));
+            assert_eq!(opts.lbas.last(), Some(&1_065_535));
+        }
+        _ => panic!("expected inspect raw"),
+    }
+
+    let too_many = parse_args(&args(&["inspect", "raw", "--lba", "1000000-1065536"]))
+        .err()
+        .expect("65537-sector range must be rejected");
+    assert!(too_many.contains("65536"), "{too_many}");
+
+    let too_large_count = parse_args(&args(&["inspect", "raw", "--lba", "1", "--count", "65537"]))
+        .err()
+        .expect("count above 65536 must be rejected");
+    assert!(too_large_count.contains("65536"), "{too_large_count}");
+
+    let overflow = parse_args(&args(&[
+        "inspect",
+        "raw",
+        "--lba",
+        "18446744073709551615",
+        "--count",
+        "2",
+    ]))
+    .err()
+    .expect("u64 count expansion overflow must be rejected");
+    assert!(overflow.contains("溢出"), "{overflow}");
 }
 
 #[test]
 fn inspect_backup_dir_alone_never_selects_a_backup_source() {
     match parse_args(&args(&[
         "inspect",
+        "meta",
         "--backup-dir",
         "/tmp/backups",
         "--lba",
