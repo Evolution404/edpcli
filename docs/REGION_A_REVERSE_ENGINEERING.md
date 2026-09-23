@@ -247,6 +247,22 @@ ReadIIR 和 WriteIIR 都使用 device tree node `+0x18` 计算物理位置，并
 
 机器证据：`audit/region_a/evidence/edpsecdisk_cipher_profile_20260923.json`。
 
+### 4.12 Linux 客户端筛查：跨平台回退 consumer 确认，Linux producer 不存在
+
+2026-09-23 对 Linux 客户端全套 6 个 x86-64 ELF（`libedpedisk.so`、`linuxedpedisk`、`cemsudiskcallerproxy`、`checkdiskback`、`EdpEDiskBack`、`libcemsfilesyscheck.so`，全部未 strip、两个带 DWARF）做了可执行段级筛查：
+
+1. **±0xE0000 立即数在全部可执行段中零命中**（同时搜了正/补码两种编码；裸 dword 命中全部位于 OpenSSL AES 代码或非执行段）。Linux 客户端不计算 Region A 物理地址，**不存在 Linux 侧 Region A 指针 producer**。`checkdiskback` 仅一处 ReadSectorData、零写；`EdpEDiskBack` 无裸盘 I/O。
+2. **跨平台回退 consumer 确认**：`libedpedisk.so!Edpedisk::Volume::GetEdpUsbTage()`（0x42f80）V1 布局失败后用 V2 列表（含旧 LBA7 解析器 `EdpDiskLayoutOldTageIndex`），成功则 `GetPartionFromOld` 把 3×0x40 旧条目逐字段转成 0x60 运行时条目，并把运行时版本置 **0x64** —— 与 Windows 旧版 `EdpEDiskCtrl` 回退（4.9）完全对应。该条件路径是产品级跨平台设计，不再只是单平台静态发现。
+3. **密码学分类学闭环**（均来自带符号反汇编）：
+   - `CipherEDPAES`（16/16）→ `aes_128_Decrypt(offset=cipher+0x50, buf, schedKey, rounds)`；EDP 模式把 `startSector*sectorSize` 写入每个 cipher 的 +0x50 再**逐 cipher 顺序套用（支持多层堆叠）**。
+   - `CipherEDPSIMPLE`（2/2）：数据面 = 全缓冲 16 位 XOR 滚动、每字 -1；单块版只保护 buffer+0x18 起的 24B（恰为旧条目 StartSector/SectorSize/PartionSize 三个字段）。
+   - `CipherEDPSIMPLEKEY`（4/4）：单块同样只保护 +0x18..+0x2f，16 位 key 步进 +0xFF。
+   - 模式：EDP + XTS；`PartitionHeaderOldEdp` 用 EDPSIMPLEKEY + 密码加法和校验（`GetUserPassLong` = 按 4 字节块累加）+ 条目 `EncryptFileKey` 8B。
+4. **DWARF 权威条目布局**：旧 72B / 新 104B（新增 EncryptFileKey16/32、EncryptMode@+0x60；`Volume::GetPartitionHeader` 按 entry+0x58 的 EncryptMode 分发 header 类，2→Sms4）。
+5. **多层假设暴力测试为负**：`region_a_stacked_brute.py` 对 [AES(key8)→SIMPLE] 双层与 SIMPLE 单层、K0 全 65536 空间、线性/二次两种步进、magic/零串 oracle，两盘均无结构（唯一 BKDP 候选因上下文仍高熵判为巧合）。未测：SIMPLE→AES 加密顺序。
+
+机器证据：`audit/region_a/evidence/linux_client_region_a_screening_20260923.json`。
+
 ## 5. AES 算法、默认 Init key 与版本 profile
 
 `sub_1800092c0/sub_180009390` 调用 `sub_18001c560()` 得到 `EVP_CIPHER` descriptor。早期仅依据 OpenSSL 注册字符串曾误判为 AES-192-CBC；2026-09-22 已用 descriptor 本体纠正。

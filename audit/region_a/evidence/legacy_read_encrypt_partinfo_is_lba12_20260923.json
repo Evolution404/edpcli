@@ -1,0 +1,48 @@
+{
+  "status": "NEGATIVE_BINDING_CLOSED_LEGACY_READ_ENCRYPT_PARTINFO_IS_LBA12",
+  "date": "2026-09-23",
+  "binary": {
+    "path": "/Users/zhangyuxi/Desktop/u_disk/VRV/edp/EdpEDiskCtrl.dll",
+    "sha256": "14038a7fd755ee94638bc45938673bbdda5117c409214f816adafe05ae090070"
+  },
+  "lba4_restore_node": {
+    "node_physical_offset": "LBA4+0x18",
+    "magic_check": "sub_10011530 @ 0x1001161b checks node+0x21 == LLGB",
+    "sector_tuple_physical_offsets": "LBA4+0x41..+0x44",
+    "sector_tuple_hex": "08040c01",
+    "physical_corpus_result": "22/22 strict captures",
+    "start_sector_source": "node+0x2b == LBA4+0x43 == 0x0c",
+    "sector_count_source": "node+0x2c == LBA4+0x44 == 0x01"
+  },
+  "caller_machine_code": {
+    "range": "0x1001161b..0x1001165c",
+    "observations": [
+      "0x10011636 loads byte [ebp+0x2b]",
+      "0x1001163a loads byte [ebp+0x2c]",
+      "the two bytes are stored into the local extent passed to sub_100108d0"
+    ]
+  },
+  "reader_machine_code": {
+    "function": "sub_100108d0",
+    "range": "0x100108d0..0x10010bf0",
+    "address_semantics": [
+      "extent+0x04 is the start sector; if zero, 0x10010952 defaults it to 0x0c",
+      "0x10010959..0x1001096a seeks to (extent+0x04) * (extent+0x0c)",
+      "0x10010970..0x10010985 reads (extent+0x08) * (extent+0x0c) bytes",
+      "the decrypted buffer must begin with EDPF"
+    ]
+  },
+  "resolved_extent": {
+    "start_lba": 12,
+    "sector_count": 1,
+    "region_a_start_source_used": false
+  },
+  "proves": [
+    "The historical ReadEncryptPartionInfoEx path selected by sub_10011530 reads one sector at LBA12.",
+    "This EDPF reader does not dereference the legacy LBA7 Region A StartSector."
+  ],
+  "does_not_prove": [
+    "How the six-sector Region A payload was generated.",
+    "That no other historical EdpEDiskCtrl path reads or writes Region A."
+  ]
+}

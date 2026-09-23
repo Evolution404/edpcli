@@ -31,8 +31,8 @@
       {"key": "wrapped8 b5355e2c582ed090 (len 8)", "roundtrip": true, "entropy_bits_per_byte": 7.928, "magics_found": 0},
       {"key": "zero key (len 8)", "roundtrip": true, "entropy_bits_per_byte": 7.943, "magics_found": 0},
       {"key": "reversed key8 (len 8)", "roundtrip": true, "entropy_bits_per_byte": 7.934, "magics_found": 0},
-      {"key": "expanded16 key8^KEY_TABLE (len 16)", "roundtrip": true, "entropy_bits_per_byte": 7.93, "magics_found": 0},
-      {"key": "md5(key8) (len 16)", "roundtrip": true, "entropy_bits_per_byte": 7.935, "magics_found": 0}
+      {"key": "expanded16 key8^KEY_TABLE (len 16)", "roundtrip": true, "entropy_bits_per_byte": 7.942, "magics_found": 0},
+      {"key": "md5(key8) (len 16)", "roundtrip": true, "entropy_bits_per_byte": 7.932, "magics_found": 0}
     ],
     "magics_scanned": ["EDPF", "FAT", "NTFS", "LLGB", "IIR"],
     "prior_art_overlap": "COMPREHENSIVE_ANALYSIS_20260611.md section 5 already lists A6B0, XOR, SM4-ECB/CBC, AES-128/192-CBC, A7F0, EdpEDisk64 3-SBOX and XOR-0x88 preprocessing as excluded for Region A; today's driver-exact emulation independently reproduces the A6B0 family semantics and extends the negatives to the emulated sub_13160/sub_13450 call convention"

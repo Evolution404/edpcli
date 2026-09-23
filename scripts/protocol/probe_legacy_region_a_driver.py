@@ -51,16 +51,24 @@ def load_driver(uc: Uc, path: Path) -> None:
         uc.mem_write(IMAGE_BASE + rva, data[raw_offset:raw_offset + raw_size])
 
 
-def call_in_place(uc: Uc, function: int, buffer: int, length: int, key: int) -> None:
+def call_in_place(
+    uc: Uc,
+    function: int,
+    buffer: int,
+    length: int,
+    key: int,
+    key_length: int = 8,
+    tweak_offset: int = 0,
+) -> None:
     rsp = STACK_BASE + STACK_SIZE - 0x1080
     uc.mem_write(rsp, struct.pack("<Q", SENTINEL))
-    uc.mem_write(rsp + 0x28, struct.pack("<Q", 8))
+    uc.mem_write(rsp + 0x28, struct.pack("<Q", key_length))
     uc.mem_write(rsp + 0x30, struct.pack("<Q", buffer))
-    # Driver calls pass the data buffer in both the first two arguments and
-    # again as the final stack argument. A separate output buffer changes the
-    # behavior and does not reproduce the read/write path.
+    # Real read/write calls pass the physical backing byte offset in RCX,
+    # the data buffer in RDX and again as the final stack argument. The cipher
+    # increments this tweak offset by 16 bytes per block.
     for register, value in (
-        (UC_X86_REG_RCX, buffer), (UC_X86_REG_RDX, buffer),
+        (UC_X86_REG_RCX, tweak_offset), (UC_X86_REG_RDX, buffer),
         (UC_X86_REG_R8, length), (UC_X86_REG_R9, key),
         (UC_X86_REG_RSP, rsp), (UC_X86_REG_RBP, 0),
         (UC_X86_REG_RBX, 0), (UC_X86_REG_RSI, 0), (UC_X86_REG_RDI, 0),
@@ -71,7 +79,15 @@ def call_in_place(uc: Uc, function: int, buffer: int, length: int, key: int) -> 
         raise RuntimeError("Driver function did not return to the sentinel")
 
 
-def probe(driver: Path, ciphertext: bytes, key8: bytes) -> dict:
+def probe(
+    driver: Path,
+    ciphertext: bytes,
+    key8: bytes,
+    decrypt: int = DECRYPT,
+    encrypt: int = ENCRYPT,
+    physical_byte_offset: int = 0,
+    decrypted_output: Path | None = None,
+) -> dict:
     if len(key8) != 8 or not ciphertext or len(ciphertext) % 16:
         raise ValueError("Key must be 8 bytes and ciphertext a nonempty multiple of 16 bytes")
     if len(ciphertext) > 0xC00:
@@ -83,13 +99,22 @@ def probe(driver: Path, ciphertext: bytes, key8: bytes) -> dict:
     buffer, key = HEAP_BASE, HEAP_BASE + 0x4000
     uc.mem_write(buffer, ciphertext)
     uc.mem_write(key, key8)
-    call_in_place(uc, DECRYPT, buffer, len(ciphertext), key)
+    call_in_place(
+        uc, decrypt, buffer, len(ciphertext), key, tweak_offset=physical_byte_offset
+    )
     plaintext = bytes(uc.mem_read(buffer, len(ciphertext)))
-    call_in_place(uc, ENCRYPT, buffer, len(ciphertext), key)
+    if decrypted_output is not None:
+        decrypted_output.write_bytes(plaintext)
+    call_in_place(
+        uc, encrypt, buffer, len(ciphertext), key, tweak_offset=physical_byte_offset
+    )
     roundtrip = bytes(uc.mem_read(buffer, len(ciphertext))) == ciphertext
     counts = Counter(plaintext)
     entropy = -sum((n / len(plaintext)) * math.log2(n / len(plaintext)) for n in counts.values())
     return {
+        "decrypt_address": f"0x{decrypt:x}",
+        "encrypt_address": f"0x{encrypt:x}",
+        "physical_byte_offset": physical_byte_offset,
         "ciphertext_sha256": hashlib.sha256(ciphertext).hexdigest(),
         "decrypted_sha256": hashlib.sha256(plaintext).hexdigest(),
         "roundtrip_exact": roundtrip,
@@ -97,7 +122,7 @@ def probe(driver: Path, ciphertext: bytes, key8: bytes) -> dict:
         "decrypted_nonzero_bytes": sum(bool(value) for value in plaintext),
         "known_markers": {
             marker.decode(): plaintext.find(marker)
-            for marker in (b"EDPF", b"FAT", b"NTFS", b"LLGB")
+            for marker in (b"EDPF", b"FAT", b"NTFS", b"LLGB", b"IIR")
             if marker in plaintext
         },
     }
@@ -108,8 +133,39 @@ def main() -> None:
     parser.add_argument("--driver", type=Path, required=True)
     parser.add_argument("--region-a", type=Path, required=True)
     parser.add_argument("--key8", required=True, help="16 hex digits from a CRC-validated LBA7 key")
+    parser.add_argument(
+        "--decrypted-output",
+        type=Path,
+        help="optional path for the decrypted extent (written only after a successful decrypt call)",
+    )
+    parser.add_argument(
+        "--decrypt-address",
+        type=lambda value: int(value, 0),
+        default=DECRYPT,
+        help=f"driver decrypt function address (default: 0x{DECRYPT:x})",
+    )
+    parser.add_argument(
+        "--physical-byte-offset",
+        type=lambda value: int(value, 0),
+        required=True,
+        help="physical backing byte offset used by the real driver as the tweak seed",
+    )
+    parser.add_argument(
+        "--encrypt-address",
+        type=lambda value: int(value, 0),
+        default=ENCRYPT,
+        help=f"driver encrypt function address (default: 0x{ENCRYPT:x})",
+    )
     args = parser.parse_args()
-    result = probe(args.driver, args.region_a.read_bytes(), bytes.fromhex(args.key8))
+    result = probe(
+        args.driver,
+        args.region_a.read_bytes(),
+        bytes.fromhex(args.key8),
+        decrypt=args.decrypt_address,
+        encrypt=args.encrypt_address,
+        physical_byte_offset=args.physical_byte_offset,
+        decrypted_output=args.decrypted_output,
+    )
     print(json.dumps(result, indent=2))
     if not result["roundtrip_exact"]:
         raise SystemExit("Driver transform roundtrip failed; do not interpret decrypted output")

@@ -1,0 +1,73 @@
+{
+  "status": "LINUX_CROSS_PLATFORM_FALLBACK_CONFIRMED_NO_LINUX_PRODUCER",
+  "date": "2026-09-23",
+  "binaries": {
+    "root": "/Users/zhangyuxi/Desktop/u_disk/cn.com.vrv.cems.ydcc/files/cems/ydcc",
+    "all_x86_64_elf_not_stripped": [
+      "edpedisk/libedpedisk.so (with DWARF debug_info)",
+      "edpedisk/linuxedpedisk",
+      "edpedisk/cemsudiskcallerproxy",
+      "checkdiskback",
+      "EdpEDiskBack",
+      "libcemsfilesyscheck.so (with DWARF debug_info)"
+    ],
+    "strings": "libedpedisk.so contains EDPSECDISK200709, DRKB, EDPF, LLGB"
+  },
+  "producer_screening_negative": {
+    "e0000_search": "Neither +0xE0000 (00 00 0E 00) nor sign-extended -0xE0000 (00 00 F2 FF) appears as an immediate in any executable section of any of the six binaries; the only raw dword hits sit inside OpenSSL AES_set_encrypt_key code and non-executable data/debug sections.",
+    "conclusion": "No Linux client code computes the Region A physical address; there is no Linux Region A pointer producer in this set.",
+    "io_screening": "checkdiskback has exactly one ReadSectorData call site and zero WriteSectorData call sites (read-only checker); EdpEDiskBack has no raw sector I/O at all (file-level backup daemon).",
+    "runtime_log": "edpedisk/edpedisk.log (2026-08-03) records two CoreService exceptions at Edpedisk::File::ReadCompleteBuffer:67; no Region A address evidence."
+  },
+  "cross_platform_fallback_consumer_confirmed": {
+    "function": "Edpedisk::Volume::GetEdpUsbTage() at libedpedisk.so 0x42f80",
+    "flow": [
+      "Try EdpDiskSectorLayout::GetAvailableLayouts() V1 list; on success return via GetPartExtInfo.",
+      "On V1 failure try GetAvailableLayoutsV2() list, which includes EdpDiskLayoutOldTageIndex (the legacy LBA7 0x40-stride parser).",
+      "On V2 success call Edpedisk::GetPartionFromOld(new_entries, old_entries) at 0x4301e, converting all three 0x40 legacy entries field-by-field into 0x60 runtime entries.",
+      "Set runtime table version to 0x64 at Volume+0x10a4, identical to the Windows legacy EdpEDiskCtrl fallback (runtime version 0x64).",
+      "If both fail, throw Edpedisk::EdpHeadCheckFailed."
+    ],
+    "second_caller": "EdpDiskLayoutTagePartV2::LayoutParsedata also calls GetPartionFromOld at 0x55905.",
+    "significance": "The Windows-only finding of 2026-09-23 (legacy LBA7 fallback mounting a Region A extent) is now confirmed as a deliberate cross-platform product behavior implemented independently in the Linux client, still conditional on new-label read failure.",
+    "limit": "This is static evidence of the same conditional path; no runtime proof that any sampled disk took the fallback on Linux either."
+  },
+  "cipher_taxonomy_from_linux": {
+    "CipherEDPAES": "block 16 / key 16; DecryptBlocks calls aes_128_Decrypt(offset=cipher+0x50, buf, scheduled_key, rounds); EDPSECDISK family",
+    "CipherEDPSIMPLE": "block 2 / key 2; DecryptBlocks is a whole-buffer 16-bit XOR rolling with constant step -1 per word; single-block Decrypt XORs only 24 bytes at buffer+0x18 with 16-bit key stepping +0xFF per word (the StartSector/SectorSize/PartionSize field window of tagEdpPartionInfo)",
+    "CipherEDPSIMPLEKEY": "block 4 / key 4; single-block Decrypt also protects exactly 24 bytes at +0x18 with 16-bit key step +0xFF",
+    "CipherSMS4_128": "block 16 / key 16",
+    "CipherEDPOPENSSLAES": "standard OpenSSL AES",
+    "EncryptionModeEDP": "DecryptSectorsCurrentThread stores sector byte offset (startSector*sectorSize) into every cipher object at +0x50 then applies each cipher in the list sequentially (stacked layers are supported); DecryptBufferEDP shifts the offset parameter by 9 (x512) before storing",
+    "EncryptionModeXTS": "standard XTS implementation with secondary cipher keys",
+    "PartitionHeaderOldEdp": "constructor installs an EDPSIMPLEKEY algorithm object; Decrypt derives a password additive checksum via GetUserPassLong (32-bit sum of the password bytes in 4-byte chunks) and processes the 8-byte key at +0x78 (entry EncryptFileKey)",
+    "Volume::GetPartitionHeader": "dispatches on entry EncryptMode at tagNewEdpPartionInfo+0x58: 2 constructs PartitionHeaderSms4; 0/1 route to the legacy header classes"
+  },
+  "dwarf_struct_layouts": {
+    "tagEdpPartionInfo_size_72": "+0x00 Flag +0x04 Version +0x08 PartionCount +0x0c PartionType +0x10 NeedDisturb +0x14 NeedEncrypt +0x18 StartSector(u64) +0x20 SectorSize(u64) +0x28 PartionSize(u64) +0x30 UserKeyCRC +0x38 FileKeyCRC +0x40 EncryptFileKey(8B)",
+    "tagNewEdpPartionInfo_size_104": "old fields plus +0x48 EncryptFileKey16 +0x50 EncryptFileKey32 +0x60 EncryptMode +0x61 Reserved"
+  },
+  "stacked_layer_k0_bruteforce_negative": {
+    "script": "scripts/protocol/region_a_stacked_brute.py",
+    "hypotheses": [
+      "H1 ciphertext = SIMPLE(K0) then AES layer: decrypt AES(key8, counter=offset) then rolling XOR",
+      "H2 ciphertext = SIMPLE(K0) only"
+    ],
+    "k0_space": "all 65536 values, both linear step (-1/word) and quadratic step (LBA6/7 xor_decode family 256i - i(i+1)/2)",
+    "oracles": "even-offset magic words (EDPF/DRKB/LLGB/SAPF/FPAS/FAT1/NTFS/BKDP/VERA/$$$), zero runs >= 8 words",
+    "disks": ["lexar", "sandisk_nopwd"],
+    "result": "no structure found; the single BKDP candidate on lexar H2 quadratic at K0=0xf204 is rejected as coincidence because the decoded buffer remains high entropy with no surrounding structure",
+    "untested": "SIMPLE-then-AES encryption order (would need 65536 AES passes); SIMPLE keyed differently than K0-only"
+  },
+  "proves": [
+    "The conditional legacy LBA7 fallback that can mount a Region A extent is a deliberate cross-platform design reproduced in the Linux client, including the 0x40-to-0x60 entry conversion and the 0x64 runtime version marker.",
+    "The EDP data-plane cipher semantics (EDPSECDISK AES-128, per-block counter equal to the virtual byte offset) are confirmed in a second independent implementation.",
+    "The Linux client contains no Region A address computation and no raw-disk writer that could be the Region A producer.",
+    "A SIMPLE rolling-XOR second layer over the AES-decrypted or raw Region A ciphertext is excluded for all 65536 K0 values under both known step variants on the two CRC-verified-key disks."
+  ],
+  "does_not_prove": [
+    "That any sampled disk ever took the fallback on Linux or Windows.",
+    "The Region A plaintext format or its true producer; the remaining Linux leads are the old-profile header read path (where the header buffer is fetched) and the ydcc 2025 update chain, both unscreened.",
+    "That the cipher list for the old profile is exactly [EDPAES]; a differently keyed or ordered stack is not excluded."
+  ]
+}
