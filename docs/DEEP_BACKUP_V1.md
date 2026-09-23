@@ -31,19 +31,26 @@ mirrored FATs, short sectors and reads outside the partition. Work limits are
 metadata, and 64 MiB of raw read evidence per partition. Exceeding a limit is a
 parse failure, not a complete partial listing. Ordinary file data is never read.
 
-The initial implementation reports exFAT and NTFS as unsupported. Their bitmap,
-directory/index and allocation parsers remain a separate next stage; a boot
-signature alone must not produce volume statistics. Encrypted type2/type4
-partitions with no verified default mode2 key report locked even if ciphertext
-happens to contain a filesystem signature. `PartitionReader` exposes only
-relative sector reads. The decoded reader preserves each decoded sector as a
-derived artifact citing its raw sector evidence. A valid file-key CRC verifies
-the unwrapped key; it does not by itself prove a complete filesystem inventory.
+exFAT is supported read-only using the primary boot-region checksum, active FAT,
+allocation bitmap and bounded directory traversal. File entry sets require a
+valid entry-set checksum and UTF-16 filename sequence. FAT-chained and contiguous
+`NoFatChain` allocations are validated against partition/cluster bounds and the
+allocation bitmap. Directory and filesystem metadata clusters may be read;
+ordinary file payload clusters are not read. NTFS remains unsupported and is the
+next filesystem parser stage. Encrypted type2/type4 partitions with no verified
+default mode2 key report locked even if ciphertext happens to contain a
+filesystem signature. `PartitionReader` exposes only relative sector reads. The
+decoded reader preserves each decoded sector as a derived artifact citing its
+raw sector evidence. A valid file-key CRC verifies the unwrapped key; it does not
+by itself prove a complete filesystem inventory.
 
 ## Sources
 
 FAT layout, cluster classification, directory entries and long filename rules:
 [Microsoft FAT specification v1.03](https://www.cs.fsu.edu/~cop4610t/assignments/project3/spec/fatspec.pdf).
+
+exFAT boot regions, allocation bitmap, FAT chains and directory entry sets:
+[Microsoft exFAT File System Specification](https://learn.microsoft.com/en-us/windows/win32/fileio/exfat-specification).
 
 Existing EDP partition/key evidence is in
 [EDP protocol reverse engineering](EDP_PROTOCOL_REVERSE_ENGINEERING.md), sections
@@ -90,7 +97,9 @@ A later offline replay of the existing Lexar Metadata EDPB (container SHA-256
 `38575406e72006f003deabdf485a33df14de979d48c9a99150691aea2e926f7d`)
 used `deep_default_probe` on both encrypted partition prefixes. Both decoded
 prefixes had the `EXFAT   ` boot signature and a valid 12-sector exFAT boot
-checksum. `deep_assess_metadata` consequently reported `unsupported` with
-`filesystem=exfat`, leaving counts, sizes and entries null. This is positive
-evidence for prefix decoding, not a complete exFAT inventory or an atomic disk
-snapshot. The replay read the backup file, not the source device.
+checksum. That historical replay predated the exFAT inventory parser, so
+`deep_assess_metadata` reported `unsupported` with `filesystem=exfat`, leaving
+counts, sizes and entries null. The current parser can only produce a complete
+inventory when the required FAT, allocation bitmap and directory metadata are
+available through a full Deep reader; a Metadata prefix alone still cannot do
+so. The replay read the backup file, not the source device.

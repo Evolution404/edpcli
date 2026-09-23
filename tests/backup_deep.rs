@@ -104,6 +104,9 @@ fn put16(b: &mut [u8], at: usize, v: u16) {
 fn put32(b: &mut [u8], at: usize, v: u32) {
     b[at..at + 4].copy_from_slice(&v.to_le_bytes());
 }
+fn put64(b: &mut [u8], at: usize, v: u64) {
+    b[at..at + 8].copy_from_slice(&v.to_le_bytes());
+}
 fn entry(name: &[u8; 11], cluster: u16, size: u32, dir: bool) -> [u8; 32] {
     let mut e = [0; 32];
     e[..11].copy_from_slice(name);
@@ -173,6 +176,143 @@ fn fat_fixture(fat32: bool) -> (PartitionGeometry, SparseReader, u64) {
     (p, r, data)
 }
 
+fn exfat_set_checksum(bytes: &[u8]) -> u16 {
+    bytes
+        .iter()
+        .enumerate()
+        .filter(|(index, _)| !matches!(index, 2 | 3))
+        .fold(0u16, |sum, (_, &byte)| {
+            sum.rotate_right(1).wrapping_add(byte as u16)
+        })
+}
+
+fn exfat_file_set(name: &str, cluster: u32, size: u64, directory: bool) -> Vec<u8> {
+    let units = name.encode_utf16().collect::<Vec<_>>();
+    let name_entries = units.len().div_ceil(15);
+    let mut set = vec![0u8; (2 + name_entries) * 32];
+    set[0] = 0x85;
+    set[1] = (1 + name_entries) as u8;
+    put16(&mut set, 4, if directory { 0x10 } else { 0x20 });
+    let stream = &mut set[32..64];
+    stream[0] = 0xc0;
+    stream[1] = 0x03; // allocation possible + no FAT chain
+    stream[3] = units.len() as u8;
+    put64(stream, 8, size);
+    put32(stream, 20, cluster);
+    put64(stream, 24, size);
+    for (entry_index, chunk) in units.chunks(15).enumerate() {
+        let entry = &mut set[(2 + entry_index) * 32..(3 + entry_index) * 32];
+        entry[0] = 0xc1;
+        for (index, value) in chunk.iter().enumerate() {
+            put16(entry, 2 + index * 2, *value);
+        }
+    }
+    let checksum = exfat_set_checksum(&set);
+    put16(&mut set, 2, checksum);
+    set
+}
+
+fn exfat_boot_checksum(sectors: &[Vec<u8>]) -> u32 {
+    let mut checksum = 0u32;
+    for (sector_index, sector) in sectors.iter().take(11).enumerate() {
+        for (offset, &byte) in sector.iter().enumerate() {
+            if sector_index == 0 && matches!(offset, 106 | 107 | 112) {
+                continue;
+            }
+            checksum = checksum.rotate_right(1).wrapping_add(byte as u32);
+        }
+    }
+    checksum
+}
+
+fn exfat_fixture() -> (PartitionGeometry, SparseReader, u64, [u64; 2]) {
+    let volume_sectors = 96u64;
+    let fat_offset = 24u32;
+    let heap_offset = 32u32;
+    let clusters = 64u32;
+    let root_cluster = 2u32;
+    let mut p = partition();
+    p.need_encrypt = 0;
+    p.need_disturb = 0;
+    p.sector_count = volume_sectors;
+    p.partition_size = volume_sectors * 512;
+
+    let mut sectors = BTreeMap::new();
+    let mut boot = vec![0u8; 512];
+    boot[0..3].copy_from_slice(&[0xeb, 0x76, 0x90]);
+    boot[3..11].copy_from_slice(b"EXFAT   ");
+    put64(&mut boot, 72, volume_sectors);
+    put32(&mut boot, 80, fat_offset);
+    put32(&mut boot, 84, 1);
+    put32(&mut boot, 88, heap_offset);
+    put32(&mut boot, 92, clusters);
+    put32(&mut boot, 96, root_cluster);
+    put16(&mut boot, 104, 0x0100);
+    boot[108] = 9;
+    boot[109] = 0;
+    boot[110] = 1;
+    boot[111] = 0x80;
+    boot[112] = 8;
+    boot[510..512].copy_from_slice(&[0x55, 0xaa]);
+    let mut boot_region = vec![boot.clone()];
+    for _ in 1..=10 {
+        boot_region.push(vec![0; 512]);
+    }
+    let checksum = exfat_boot_checksum(&boot_region);
+    let mut checksum_sector = vec![0u8; 512];
+    for chunk in checksum_sector.chunks_exact_mut(4) {
+        chunk.copy_from_slice(&checksum.to_le_bytes());
+    }
+    sectors.insert(0, boot);
+    for sector in 1..=10 {
+        sectors.insert(sector, vec![0; 512]);
+    }
+    sectors.insert(11, checksum_sector);
+
+    let mut fat = vec![0u8; 512];
+    put32(&mut fat, 0, 0xfffffff8);
+    put32(&mut fat, 4, 0xffffffff);
+    put32(&mut fat, 2 * 4, 0xffffffff); // root
+    put32(&mut fat, 3 * 4, 0xffffffff); // allocation bitmap
+    sectors.insert(fat_offset as u64, fat);
+
+    let root_lba = heap_offset as u64;
+    let bitmap_lba = root_lba + 1;
+    let file_lba = root_lba + 2;
+    let dir_lba = root_lba + 3;
+    let nested_file_lba = root_lba + 4;
+    let mut root = vec![0u8; 512];
+    root[0] = 0x81;
+    put32(&mut root, 20, 3);
+    put64(&mut root, 24, 8);
+    let foo = exfat_file_set("foo.txt", 4, 5, false);
+    root[32..32 + foo.len()].copy_from_slice(&foo);
+    let dir = exfat_file_set("dir", 5, 512, true);
+    let dir_offset = 32 + foo.len();
+    root[dir_offset..dir_offset + dir.len()].copy_from_slice(&dir);
+    sectors.insert(root_lba, root);
+
+    let mut bitmap = vec![0u8; 512];
+    bitmap[0] = 0x1f; // clusters 2..6 are allocated
+    sectors.insert(bitmap_lba, bitmap);
+
+    let mut subdir = vec![0u8; 512];
+    let bar = exfat_file_set("bar.bin", 6, 7, false);
+    subdir[..bar.len()].copy_from_slice(&bar);
+    sectors.insert(dir_lba, subdir);
+    // file_lba and nested_file_lba are deliberately not captured.
+
+    (
+        p,
+        SparseReader {
+            sectors,
+            reads: vec![],
+        },
+        dir_lba,
+        [file_lba, nested_file_lba],
+    )
+}
+
 #[test]
 fn fat16_and_fat32_inventory_reads_no_file_contents() {
     for fat32 in [false, true] {
@@ -203,6 +343,68 @@ fn fat16_and_fat32_inventory_reads_no_file_contents() {
         assert_eq!(entries[3].allocated_size, Some(512));
         assert!(!r.reads.contains(&(data + 1)));
         assert!(!r.reads.contains(&(data + 3)));
+    }
+}
+
+#[test]
+fn exfat_inventory_reads_metadata_but_never_ordinary_file_payloads() {
+    let (p, mut reader, dir_lba, forbidden) = exfat_fixture();
+    let report = analyze_partition(&p, &mut reader);
+    assert_eq!(report.status, AnalysisStatus::Parsed, "{}", report.reason);
+    assert_eq!(report.filesystem.as_deref(), Some("exfat"));
+    assert_eq!(report.total_bytes, Some(p.partition_size));
+    assert_eq!(report.file_count, Some(2));
+    assert_eq!(report.directory_count, Some(1));
+    assert_eq!(report.free_bytes, Some((64 - 5) * 512));
+    assert_eq!(
+        report
+            .entries
+            .as_ref()
+            .unwrap()
+            .iter()
+            .map(|entry| entry.path.as_str())
+            .collect::<Vec<_>>(),
+        ["/", "/dir/", "/dir/bar.bin", "/foo.txt"]
+    );
+    assert_eq!(
+        report
+            .entries
+            .as_ref()
+            .unwrap()
+            .last()
+            .unwrap()
+            .allocated_size,
+        Some(512)
+    );
+    assert!(reader.reads.contains(&dir_lba));
+    for lba in forbidden {
+        assert!(
+            !reader.reads.contains(&lba),
+            "ordinary file payload LBA {lba} was read"
+        );
+    }
+}
+
+#[test]
+fn corrupt_exfat_metadata_fails_closed() {
+    for mutation in 0..4 {
+        let (p, mut reader, _, _) = exfat_fixture();
+        match mutation {
+            0 => reader.sectors.get_mut(&0).unwrap()[64] ^= 1, // boot checksum
+            1 => reader.sectors.get_mut(&33).unwrap()[0] &= !1, // root marked free
+            2 => reader.sectors.get_mut(&32).unwrap()[34] ^= 1, // entry-set checksum
+            _ => put32(reader.sectors.get_mut(&24).unwrap(), 2 * 4, 2), // root FAT loop
+        }
+        let report = analyze_partition(&p, &mut reader);
+        assert_eq!(
+            report.status,
+            AnalysisStatus::ParseFailed,
+            "mutation {mutation}: {}",
+            report.reason
+        );
+        assert_eq!(report.filesystem.as_deref(), Some("exfat"));
+        assert!(report.entries.is_none());
+        assert!(report.used_bytes.is_none());
     }
 }
 
@@ -248,12 +450,14 @@ fn unknown_and_locked_readers_have_explicit_states() {
         analyze_partition(&p, &mut r).status,
         AnalysisStatus::Unsupported
     );
-    for sig in [b"EXFAT   ", b"NTFS    "] {
-        r.sectors.get_mut(&0).unwrap()[3..11].copy_from_slice(sig);
-        let report = analyze_partition(&p, &mut r);
-        assert_eq!(report.status, AnalysisStatus::Unsupported);
-        assert!(report.file_count.is_none());
-    }
+    r.sectors.get_mut(&0).unwrap()[3..11].copy_from_slice(b"NTFS    ");
+    let report = analyze_partition(&p, &mut r);
+    assert_eq!(report.status, AnalysisStatus::Unsupported);
+    assert!(report.file_count.is_none());
+    r.sectors.get_mut(&0).unwrap()[3..11].copy_from_slice(b"EXFAT   ");
+    let report = analyze_partition(&p, &mut r);
+    assert_eq!(report.status, AnalysisStatus::ParseFailed);
+    assert!(report.file_count.is_none());
 }
 
 #[test]
@@ -424,6 +628,7 @@ fn deep_source_has_no_mutation_or_mount_operations() {
     for source in [
         include_str!("../src/backup_deep.rs"),
         include_str!("../src/backup_deep/fat.rs"),
+        include_str!("../src/backup_deep/exfat.rs"),
     ] {
         for forbidden in [
             "write_sector(",

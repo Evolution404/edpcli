@@ -121,6 +121,7 @@ pub fn assess_partition(p: &PartitionGeometry, prefix: Option<&[u8]>) -> Partiti
     report
 }
 
+mod exfat;
 mod fat;
 pub mod keys;
 
@@ -234,23 +235,46 @@ pub fn analyze_partition(
     // Reuse Metadata's recognizer for known signatures. FAT16 is classified
     // by BPB cluster count below, not by the informational FAT label.
     let probe = crate::backup_metadata::probe_filesystem(p, &boot);
-    if matches!(
-        probe.kind,
-        crate::backup_metadata::FilesystemKind::Ntfs
-            | crate::backup_metadata::FilesystemKind::Exfat
-    ) || &boot[3..11] == b"NTFS    "
+    if matches!(probe.kind, crate::backup_metadata::FilesystemKind::Exfat)
         || &boot[3..11] == b"EXFAT   "
     {
-        report.status = AnalysisStatus::Unsupported;
-        report.filesystem = Some(
-            if &boot[3..11] == b"EXFAT   " {
-                "exfat"
-            } else {
-                "ntfs"
+        match exfat::parse(reader, p.sector_count, &boot) {
+            Ok(fs) => {
+                report.status = AnalysisStatus::Parsed;
+                report.filesystem = Some("exfat".into());
+                report.total_bytes = Some(fs.total);
+                report.free_bytes = Some(fs.free);
+                report.used_bytes = Some(fs.total - fs.free);
+                report.file_count = Some(
+                    fs.entries
+                        .iter()
+                        .filter(|entry| !entry.is_directory)
+                        .count() as u64,
+                );
+                report.directory_count = Some(
+                    fs.entries
+                        .iter()
+                        .filter(|entry| entry.is_directory && entry.path != "/")
+                        .count() as u64,
+                );
+                report.entries = Some(fs.entries);
+                report.reason =
+                    "complete exFAT directory traversal; used bytes include filesystem overhead and allocated clusters".into();
             }
-            .into(),
-        );
-        report.reason = "filesystem inventory parser is not implemented for exFAT/NTFS yet".into();
+            Err(error) => {
+                report.status = AnalysisStatus::ParseFailed;
+                report.filesystem = Some("exfat".into());
+                report.reason = error;
+            }
+        }
+        return report;
+    }
+    if matches!(probe.kind, crate::backup_metadata::FilesystemKind::Ntfs)
+        || &boot[3..11] == b"NTFS    "
+    {
+        report.status = AnalysisStatus::Unsupported;
+        report.filesystem = Some("ntfs".into());
+        report.reason = "filesystem inventory parser is not implemented for NTFS yet".into();
         return report;
     }
     if !matches!(boot[0], 0xeb | 0xe9) {
@@ -430,6 +454,6 @@ pub fn acquire_deep(
         out.artifacts.push(summary);
         out.artifacts.push(list);
     }
-    out.notes.push("Deep v1: read-only FAT16/FAT32 inventory; default 0000aaaa mode2 auto-decryption with CRC validation; exFAT/NTFS unsupported; ordinary file payloads not read".into());
+    out.notes.push("Deep v1: read-only FAT16/FAT32/exFAT inventory; default 0000aaaa mode2 auto-decryption with CRC validation; NTFS unsupported; ordinary file payloads not read".into());
     Ok(out)
 }
