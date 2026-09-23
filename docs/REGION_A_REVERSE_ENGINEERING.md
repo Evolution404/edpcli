@@ -277,6 +277,18 @@ ReadIIR 和 WriteIIR 都使用 device tree node `+0x18` 计算物理位置，并
 
 机器证据：`audit/region_a/evidence/region_a_exhaustive_cipher_matrix_20260923.json`。
 
+### 4.14 Producer 头号嫌疑人锁定：被删除的 2025 版 `cemsusbregsiter.dll`
+
+2026-09-23 淚夜轮次沿假设 (a)（ydcc 2025 更新栈是 producer）追查：
+
+1. **主仓 `audit_ydcc_2025_update_provenance.py` 已固定**：ydcc 2.10.0 于 2025-05-13 安装、2026-04-30 被更新替换；其 `cemsusbregsiter.dll` 与 `.zip` 缓存被删除，更新前备份写入 `8.1.2604.0917.bk`。**join59 线索同构**：现役 writer 无法产生盘上 join59 长 Dept 状态 —— Region A 与 join59 极可能出自同一缺失的历史 writer。
+2. **本地回收已穷尽**：u_disk 内仅存当前版 DLL；无 `.bk`/`8.1.*` 目录树、无 zip 缓存；`emsstore_decrypted.db` 30 张表无文件 blob；`Logfile.PML`（2026-05-23，删除后捕获）零命中 `cemsusbregsiter`/`8.1.2502`/`.bk`。
+3. **新运行时参考**：`u_disk/Process_Monitor/log/EdpEdisk_20260523.log` 是现役栈真实登录全程 trace（InitDiskInfo→GetGptIndex→UpdateLabelInfo→GetNewTagePartionInfo→type2 Share 登录成功），无任何 Region A 迹象。
+4. **服务器坐标已定**：TCP `21.47.46.148:10088`（CEMS-C-TCP/TCPServlet）；旧工件路径 `8.1.2502.2116/ydcc/cemsusbregsiter.dll.zip`。**取回该工件 = 找回头号嫌疑人 writer**，但属对外网络动作，需用户明确授权。
+5. 驱动矩阵收尾：`sub_18140`（签名同 SM4 形）全 key 负；仅 `sub_13f40`（上下文式）未测但无证据关联。
+
+机器证据：`audit/region_a/evidence/ydcc_producer_hunt_20260923.json`。
+
 ## 5. AES 算法、默认 Init key 与版本 profile
 
 `sub_1800092c0/sub_180009390` 调用 `sub_18001c560()` 得到 `EVP_CIPHER` descriptor。早期仅依据 OpenSSL 注册字符串曾误判为 AES-192-CBC；2026-09-22 已用 descriptor 本体纠正。

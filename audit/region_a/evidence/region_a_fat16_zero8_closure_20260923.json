@@ -1,0 +1,125 @@
+{
+  "status": "COMPLETE_REGION_A_FIXED_FAT16_TEMPLATE_ZERO8_PHYSICAL_OFFSET_TWEAK",
+  "date": "2026-09-23",
+  "scope": "Region A +0x000..+0xBFF (3072 bytes)",
+  "plaintext": {
+    "fixture": "audit/region_a/gold/region_a_plain_zero8.bin",
+    "size_bytes": 3072,
+    "sha256": "386595e473d3051e07fac43a02e0a8f8134b77858bb12e93246e4ebfbf51ee1c",
+    "format": "fixed six-sector FAT16 compatibility image",
+    "boot_sector": {
+      "jump_hex": "eb3c90",
+      "oem": "MSDOS5.0",
+      "bytes_per_sector": 512,
+      "sectors_per_cluster": 1,
+      "reserved_sectors": 1,
+      "fat_count": 1,
+      "root_entries": 16,
+      "total_sectors32": 6,
+      "media": "0xf8",
+      "sectors_per_fat16": 2,
+      "sectors_per_track": 63,
+      "heads": 255,
+      "hidden_sectors": 129,
+      "extended_boot_signature": "0x29",
+      "volume_id": "0x63dedf66",
+      "volume_label": "NO NAME    ",
+      "filesystem_type": "FAT16   ",
+      "signature_hex_at_0x1fe": "55aa"
+    },
+    "active_file": {
+      "short_name_gbk": "你的U~1 TXT",
+      "first_cluster": 3,
+      "size_bytes": 82,
+      "data_offset": "0xA00",
+      "gb18030_text": "您的U盘数据已经升级，但客户端得程序是旧版本的，如果要使用U盘数据请升级客户端程序。"
+    }
+  },
+  "static_template_sources": [
+    {
+      "path": "/Users/zhangyuxi/Desktop/u_disk/VRV/cems/Edp/edpdrivers/vrvaud_c.dll",
+      "sha256": "57a290d900bc2c97e515b8549a2cffdf9f57ba90ce8f489cfe03c455a2797b1f",
+      "build_mtime": "2022-07-01",
+      "template_raw_file_offset": "0x1697d8",
+      "template_va": "0x1016b9d8",
+      "section": ".data",
+      "exact_3072_byte_match": true
+    },
+    {
+      "path": "/Users/zhangyuxi/Desktop/u_disk/VRV/cems/ydcc/vrvaud_c.dll",
+      "sha256": "7b1fc2aae299ee296a774d7e8d693e77f04767cf2326692c453b43eaee913069",
+      "build_mtime": "2026-04-09",
+      "template_raw_file_offset": "0x203ee8",
+      "template_va": "0x10205ae8",
+      "section": ".data",
+      "exact_3072_byte_match": true
+    }
+  ],
+  "crypto": {
+    "driver_current": {
+      "path": "/Users/zhangyuxi/Desktop/u_disk/VRV/edp/EdpEDisk64.sys",
+      "sha256": "724544a96f899b9bb0f87a8adedd08a961d8e4b8ec40aa90bc8144e5ae7e0620",
+      "decrypt": "0x13160",
+      "encrypt": "0x13450"
+    },
+    "driver_old": {
+      "path": "/Users/zhangyuxi/Desktop/u_disk/VRV/edp/EdpEDisk64.sys.old",
+      "sha256": "2eeb792f63cbd3b44e685c14127708a5bed411010ca945d588916b98449dbea7",
+      "decrypt": "0x13100",
+      "encrypt": "0x133f0"
+    },
+    "family": "EDPSECDISK200709 / A6B0-A7F0 counter-tweaked AES-128 family",
+    "key": "0000000000000000",
+    "key_length": 8,
+    "tweak_seed": "physical backing byte offset = StartSector * 512; driver computes backing_offset + virtual_offset before transform",
+    "driver_write_mapping": "0x1214d..0x12163 computes physical ByteOffset; 0x122aa..0x122c9 passes that value in RCX to sub_13450; 0x1232e ZwWriteFile persists transformed bytes",
+    "driver_read_mapping": "read path likewise passes mapped physical ByteOffset in RCX to sub_13160"
+  },
+  "physical_crosscheck": [
+    {
+      "profile": "sandisk-nopwd-two-entry",
+      "start_lba": 120164408,
+      "physical_byte_offset": 61524176896,
+      "ciphertext_sha256": "aaeffbba440e553c2eb47accac54552c9b53af9d4951f728ac700a2e81aca0a0",
+      "decrypt_plaintext_sha256": "386595e473d3051e07fac43a02e0a8f8134b77858bb12e93246e4ebfbf51ee1c",
+      "template_encrypt_bit_exact_to_physical": true,
+      "old_driver_result_identical": true,
+      "current_driver_result_identical": true
+    },
+    {
+      "profile": "lexar-current",
+      "start_lba": 243623933,
+      "physical_byte_offset": 124735453696,
+      "ciphertext_sha256": "fbf45d4713664d1e68eca634e8e9c04565be8b60d9ad4e1a18b7df3c766aaa24",
+      "decrypt_plaintext_sha256": "386595e473d3051e07fac43a02e0a8f8134b77858bb12e93246e4ebfbf51ee1c",
+      "template_encrypt_bit_exact_to_physical": true,
+      "old_driver_result_identical": true,
+      "current_driver_result_identical": true
+    }
+  ],
+  "mount_and_io_binding": {
+    "controller": "legacy EdpEDiskCtrl.dll fallback path",
+    "fallback_evidence": "audit/region_a/evidence/legacy_edpediskctrl_region_a_fallback_20260923.json",
+    "write_evidence": "audit/region_a/evidence/legacy_region_a_conditional_write_20260923.json",
+    "facts": [
+      "When the preferred new-label read fails, the historical controller reads LBA7, converts the 0x40 legacy type4 entry into a runtime entry, and passes StartSector/PartitionSize/NeedEncrypt to EdpMountFile.",
+      "The driver bounds all virtual I/O to PartitionSize and maps virtual offsets to backing_offset + virtual_offset, so a 0xC00 Region A mount covers exactly all six sectors.",
+      "The zero 8-byte key plus mapped physical-byte tweak regenerates both captured physical Region A ciphertexts bit-for-bit from the independent vrvaud_c plaintext template."
+    ]
+  },
+  "producer_interpretation": {
+    "plaintext_template_source": "vrvaud_c.dll embeds the exact complete 3072-byte image in writable .data in both 2022 and 2026 builds",
+    "physical_ciphertext_writer": "legacy EdpEDisk64.sys generic mounted-extent write path ending in ZwWriteFile",
+    "historical_first_callsite": "not yet located; the exact vrvaud_c function/helper that submits the initial 3072-byte template write remains open",
+    "why_this_does_not_block_wire_decode": "The complete plaintext template, exact driver algorithm/key/tweak provenance, direct Region A mount/read/write mapping, and two independent physical bit-exact reconstructions are all closed. The remaining gap is business call-site archaeology, not byte interpretation or crypto."
+  },
+  "supersedes": [
+    "The prior claim that all tested host cipher/key/tweak combinations were negative.",
+    "The prior zero8 result produced with an incorrect RCX tweak convention.",
+    "The prior claim that the four ciphertexts rule out a shared plaintext template; different physical-offset tweaks deliberately destroy ciphertext equality."
+  ],
+  "does_not_prove": [
+    "Which exact vrvaud_c internal function or missing EdpUSecUp/EdpUUpdate helper performed the historical first write.",
+    "That IIR is related to Region A; the recovered Region A object is independently a fixed FAT16 compatibility image."
+  ]
+}
