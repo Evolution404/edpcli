@@ -1,7 +1,8 @@
 use edpcli::protocol::edpf::EdpPartitionType;
 use edpcli::provision::{
-    build_official_partition_layout, OfficialPartitionMode, OfficialPartitionSizes,
-    OFFICIAL_PARTITION_START_SECTOR, WHOLE_DISK_ENCRYPTED_COMPAT_BOOT_BYTES,
+    build_official_partition_layout, official_mbr_partition_type, OfficialPartitionMode,
+    OfficialPartitionSizes, OFFICIAL_PARTITION_START_SECTOR,
+    WHOLE_DISK_ENCRYPTED_COMPAT_BOOT_BYTES,
 };
 
 fn types(mode: OfficialPartitionMode) -> Vec<u32> {
@@ -23,6 +24,26 @@ fn official_four_modes_emit_the_verified_partition_type_sequences() {
     assert_eq!(
         types(OfficialPartitionMode::IntranetExtranetDualPartition),
         vec![1, 2]
+    );
+}
+
+#[test]
+fn official_mbr_selector_matches_the_first_party_writer_branches() {
+    assert_eq!(
+        official_mbr_partition_type(OfficialPartitionMode::DefaultThreePartition),
+        0x0e
+    );
+    assert_eq!(
+        official_mbr_partition_type(OfficialPartitionMode::BootShareCombined),
+        0x07
+    );
+    assert_eq!(
+        official_mbr_partition_type(OfficialPartitionMode::WholeDiskEncrypted),
+        0x0b
+    );
+    assert_eq!(
+        official_mbr_partition_type(OfficialPartitionMode::IntranetExtranetDualPartition),
+        0x0e
     );
 }
 

@@ -12,8 +12,8 @@ mod validate;
 
 pub use generate::{generate_image, ProvisionEntropy};
 pub use layout::{
-    build_official_partition_layout, OfficialPartitionGeometry, OfficialPartitionMode,
-    OfficialPartitionSizes, OFFICIAL_PARTITION_START_SECTOR,
+    build_official_partition_layout, official_mbr_partition_type, OfficialPartitionGeometry,
+    OfficialPartitionMode, OfficialPartitionSizes, OFFICIAL_PARTITION_START_SECTOR,
     WHOLE_DISK_ENCRYPTED_COMPAT_BOOT_BYTES,
 };
 pub use profile::ProvisionProfile;

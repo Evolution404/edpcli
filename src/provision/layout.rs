@@ -12,6 +12,18 @@ pub const OFFICIAL_PARTITION_START_SECTOR: u64 = 63;
 pub const WHOLE_DISK_ENCRYPTED_COMPAT_BOOT_BYTES: u64 = 0x7e00;
 const MIB: u64 = 1024 * 1024;
 
+/// MBR partition-type byte selected by the current first-party writer for the
+/// four official partition modes.  This is the direct result of the producer's
+/// partition-position selector, not a filesystem guess.
+pub const fn official_mbr_partition_type(mode: OfficialPartitionMode) -> u8 {
+    match mode {
+        OfficialPartitionMode::DefaultThreePartition => 0x0e,
+        OfficialPartitionMode::BootShareCombined => 0x07,
+        OfficialPartitionMode::WholeDiskEncrypted => 0x0b,
+        OfficialPartitionMode::IntranetExtranetDualPartition => 0x0e,
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct OfficialPartitionSizes {
     pub boot_mib: u64,

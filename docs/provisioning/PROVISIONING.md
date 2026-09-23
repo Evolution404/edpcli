@@ -34,6 +34,8 @@
 
 `PartionType`：`1=Boot`、`2=Share`、`4=Encrypt`。
 
+当前一方 `cemsusbregsiter.dll::sub_10041A80` 的 MBR 类型选择分支也已逐指令闭合：模式0→`0x0E`、模式1→`0x07`、模式2→`0x0B`、模式3→`0x0E`。模式1命中“type2 位于 entry0”分支；模式2命中“type1 位于 entry0 且 type4 位于 entry1”分支。该映射已编码为 `official_mbr_partition_type`，不得按文件系统名称自行猜测。
+
 LBA7 旧表中条目0 与后续条目的几何规则不同；后续条目可保留各自 `PartionType` 并共同指向 LCE（LBA7 兼容扩展区）。因此制盘功能不得把 LCE 当成 type4 专属区域。详细证据见 [`../protocol/LCE.md`](../protocol/LCE.md)。
 
 ## 3. 路线图 A：完整复刻官方四模式新盘制盘
