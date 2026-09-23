@@ -4,6 +4,17 @@ use common::*;
 use edpcli::crypto::{a7f0_full, crc32_bare, xor_rolling};
 use edpcli::inspect::{analyze_sector, render_fields, render_hex, FieldStyle, InspectMeta};
 
+fn crc32_ieee_test(data: &[u8]) -> u32 {
+    let mut crc = 0xffff_ffffu32;
+    for &byte in data {
+        crc ^= byte as u32;
+        for _ in 0..8 {
+            crc = (crc >> 1) ^ (0xedb8_8320u32 & (0u32.wrapping_sub(crc & 1)));
+        }
+    }
+    !crc
+}
+
 fn meta_for(key: &str) -> InspectMeta {
     let (device_id, vid, pid, sectors, onlyid) = match key {
         "netac" => (
@@ -89,7 +100,7 @@ fn lba6_reports_safe6_checksum_and_identity_fields() {
     assert!(v
         .fields
         .iter()
-        .any(|f| f.label == "模板/版本扩展区" && f.start == 0x1e0 && f.end == 0x1f0));
+        .any(|f| f.label == "legacy MBR snapshot" && f.start == 0x1e0 && f.end == 0x1ee));
     assert!(v
         .fields
         .iter()
@@ -128,18 +139,24 @@ fn lba5_is_reported_as_an_opaque_write_protection_probe_sector() {
 }
 
 #[test]
-fn lba1_recognizes_the_official_gpt_header_profile() {
+fn lba1_uses_the_canonical_gpt_header_parser() {
     let mut raw = [0u8; 512];
     raw[..8].copy_from_slice(b"EFI PART");
     raw[0x08..0x0c].copy_from_slice(&0x0001_0000u32.to_le_bytes());
     raw[0x0c..0x10].copy_from_slice(&92u32.to_le_bytes());
-    raw[0x10..0x14].copy_from_slice(&0x1234_5678u32.to_le_bytes());
     raw[0x18..0x20].copy_from_slice(&1u64.to_le_bytes());
     raw[0x20..0x28].copy_from_slice(&999u64.to_le_bytes());
+    raw[0x28..0x30].copy_from_slice(&34u64.to_le_bytes());
+    raw[0x30..0x38].copy_from_slice(&900u64.to_le_bytes());
     raw[0x48..0x50].copy_from_slice(&2u64.to_le_bytes());
+    raw[0x50..0x54].copy_from_slice(&128u32.to_le_bytes());
+    raw[0x54..0x58].copy_from_slice(&128u32.to_le_bytes());
+    raw[0x58..0x5c].copy_from_slice(&0x1234_5678u32.to_le_bytes());
+    let crc = crc32_ieee_test(&raw[..92]);
+    raw[0x10..0x14].copy_from_slice(&crc.to_le_bytes());
 
     let view = analyze_sector(1, &raw, &InspectMeta::default());
-    assert!(view.method.contains("GPT_Header"));
+    assert!(view.method.contains("canonical protocol::lba1"), "{}", view.method);
     assert!(view
         .fields
         .iter()
@@ -147,27 +164,19 @@ fn lba1_recognizes_the_official_gpt_header_profile() {
     assert!(view
         .fields
         .iter()
-        .any(|field| { field.label == "GPT partition table first LBA" && field.value == "2" }));
-    assert!(view.notes.iter().any(|note| {
-        note.contains("BuildSector1_Gpt")
-            && note.contains("语义状态 COMPLETE")
-            && note.contains("物理 profile 覆盖仍有缺口")
-            && note.contains("first-party virtual writer")
-    }));
+        .any(|field| field.label == "分区表首 LBA" && field.value == "2"));
+    assert!(view.notes.iter().any(|note| note.contains("protocol::lba1::parse_lba1")));
 }
 
 #[test]
-fn lba2_reports_complete_semantics_without_claiming_physical_positive_coverage() {
+fn lba2_uses_canonical_absent_profile_without_inventing_entries() {
     let raw = [0u8; 512];
     let view = analyze_sector(2, &raw, &InspectMeta::default());
-    assert!(view.method.contains("GPT partition-table profile"));
-    assert!(view.notes.iter().any(|note| {
-        note.contains("BuildSector2_Gpt")
-            && note.contains("4个×128B")
-            && note.contains("语义状态 COMPLETE")
-            && note.contains("物理 profile 覆盖仍有缺口")
-            && note.contains("first-party virtual writer")
+    assert!(view.method.contains("canonical protocol::lba2"), "{}", view.method);
+    assert!(view.fields.iter().any(|field| {
+        field.label == "GPT partition profile" && field.value.contains("Absent")
     }));
+    assert!(view.notes.iter().any(|note| note.contains("protocol::lba2::parse_lba2")));
 }
 
 #[test]
@@ -175,8 +184,9 @@ fn lba4_zero_ciphertext_byte_is_decrypted_unless_whole_short_gap_is_unwritten() 
     let onlyid = 949_028_302u32;
     let k0 = (onlyid & 0xffff) ^ (onlyid >> 16);
     let mut plain = vec![0u8; 512];
-    let header = b"$$$949028302$$$";
+    let header = b"$$949028302$$";
     plain[..header.len()].copy_from_slice(header);
+    plain[0x18..0x1c].copy_from_slice(&(onlyid ^ 0x8888_8888).to_le_bytes());
     plain[0x39..0x3d].copy_from_slice(b"LLGB");
     plain[0x1fc..0x200].copy_from_slice(b"LLGB");
 
@@ -330,7 +340,7 @@ fn lba10_decodes_only_the_eesi_head_and_preserves_tail_bytes() {
 }
 
 #[test]
-fn lba9_decodes_independent_eetu_sapf_and_eppe_regions() {
+fn lba9_decodes_eetu_and_sapf_without_inventing_overlapping_eppe() {
     let device_id = "disk&ven_test&prod_lba9";
     let crc = crc32_bare(device_id.as_bytes());
     let key = crc.to_le_bytes();
@@ -365,7 +375,7 @@ fn lba9_decodes_independent_eetu_sapf_and_eppe_regions() {
 
     assert_eq!(&view.decoded[..4], b"EETU");
     assert_eq!(&view.decoded[0x100..0x104], b"SAPF");
-    assert_eq!(&view.decoded[0x180..0x184], b"EPPE");
+    assert_ne!(&view.decoded[0x180..0x184], b"EPPE", "SAPF and EPPE are alternative LBA9 overlay profiles");
     assert!(view.fields.iter().any(|field| field.label == "EETU magic"));
     assert!(view.fields.iter().any(|field| {
         field.label == "EETU 开始时间 (ullBTime)" && field.value == "0（不限制）"
@@ -377,7 +387,7 @@ fn lba9_decodes_independent_eetu_sapf_and_eppe_regions() {
         field.label == "EETU 使用次数 (useCount)" && field.value == "无限（0xFFFFFFFF）"
     }));
     assert!(view.notes.iter().any(|note| {
-        note.contains("time(NULL)") && note.contains("0xFFFFFFFF") && note.contains("reverse[104]")
+        note.contains("time(NULL)") && note.contains("0xFFFFFFFF") && note.contains("reverse[104]") && note.contains("COMPLETE")
     }));
     assert!(view
         .fields
