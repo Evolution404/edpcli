@@ -263,6 +263,20 @@ ReadIIR 和 WriteIIR 都使用 device tree node `+0x18` 计算物理位置，并
 
 机器证据：`audit/region_a/evidence/linux_client_region_a_screening_20260923.json`。
 
+### 4.13 主机密码矩阵穷尽为负；probe 调用约定修正
+
+2026-09-23 晚间轮次把 Region A 的主机软件解密假设空间系统性关闭：
+
+1. **probe 调用约定修正**：worktree 中存在前一会话未提交、现已随 0237078 入库的 `call_in_place(key_length, tweak_offset)` 修正 —— 真实驱动调用把**物理 backing 字节偏移放在 RCX** 作为 tweak。此前 4.9 证据中的 decrypted SHA 值（lexar `ead2c923...` 等）是 RCX=buffer 指针的错误约定产物，已在新证据中给出修正值；定性结论（高熵、无 magic）在 tweak ∈ {0, 绝对偏移, 低 32 位} 下全部复验成立。
+2. **双实现 bit-exact 互证**：驱动 `sub_13160` 仿真与历史 `decrypt_tail.py` 纯 Python `a6b0_full` 在 lexar 全 3072B 上逐字节一致（`ebc61ab6...`），counter-tweak AES-128 模型精确成立。
+3. **keylen=16 矩阵**（此前 probe 硬编码 keylen=8，16B key 实际只用了前 8 字节）：13 种 16B 候选 × 2 盘，含已知常量 oracle（StartSector/512/3072 的 u64/u32 字节），全负。
+4. **驱动 SM4 分支** `sub_160e0`（loc_12273，key 字大端交换确认）：file_key/SM4 master/salt/key8pad 全负。签名 `(rcx=buf, rdx=len, r8=buf, r9=key)`。未测分支：`sub_18140`、`sub_13f40`。
+5. 至此累计排除：EDP-AES 27 key × keylen{8,16} × tweak{0,abs,low32}；SIMPLE/SIMPLEKEY 叠层 K0 全空间双步进；驱动 SM4 4 key；历史全部清单。
+
+剩余假设收窄为三选一：**(a) ydcc 2025 更新栈自己的 crypto 是 producer**（主仓 `audit_ydcc_update_wire`/`audit_vupdate_metadata_crypto` 是未筛面）；**(b) Region A 明文本身高熵**（keybag/证书，magic/熵 oracle 永不触发）；**(c) 控制器固件管理**。三者都指向同一行动：去 ydcc 2025 更新链找 producer。
+
+机器证据：`audit/region_a/evidence/region_a_exhaustive_cipher_matrix_20260923.json`。
+
 ## 5. AES 算法、默认 Init key 与版本 profile
 
 `sub_1800092c0/sub_180009390` 调用 `sub_18001c560()` 得到 `EVP_CIPHER` descriptor。早期仅依据 OpenSSL 注册字符串曾误判为 AES-192-CBC；2026-09-22 已用 descriptor 本体纠正。
