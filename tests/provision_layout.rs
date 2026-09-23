@@ -3,10 +3,10 @@ use edpcli::protocol::{
 };
 use edpcli::provision::{
     build_official_partition_layout, generate_official_image, official_mbr_partition_type,
-    wrap_file_key, FileKeyWrapMode, OfficialPartitionMode, OfficialPartitionSizes,
-    OfficialProvisionPlan, OfficialProvisionValidator, OnlyId, ProvisionEntropy, ProvisionImage,
-    ProvisionMetadata, ProvisionProfile, ProvisionSpec, TargetIdentity,
-    OFFICIAL_PARTITION_START_SECTOR, WHOLE_DISK_ENCRYPTED_COMPAT_BOOT_BYTES,
+    wrap_file_key, wrap_legacy_lba7_file_key, FileKeyWrapMode, OfficialPartitionMode,
+    OfficialPartitionSizes, OfficialProvisionPlan, OfficialProvisionValidator, OnlyId,
+    ProvisionEntropy, ProvisionImage, ProvisionMetadata, ProvisionProfile, ProvisionSpec,
+    TargetIdentity, OFFICIAL_PARTITION_START_SECTOR, WHOLE_DISK_ENCRYPTED_COMPAT_BOOT_BYTES,
 };
 use edpcli::{
     crypto::{a6b0_full, crc32_bare, xor_rolling},
@@ -131,6 +131,13 @@ fn official_spec() -> ProvisionSpec {
     ProvisionSpec::new(target, metadata, ProvisionProfile::canonical_v1()).unwrap()
 }
 
+fn legacy_key_material() -> edpcli::provision::LegacyLba7KeyMaterial {
+    wrap_legacy_lba7_file_key(
+        b"0000aaaa",
+        [0x7d, 0x9e, 0xe4, 0xe8, 0x75, 0x4a, 0xd4, 0x38],
+    )
+}
+
 fn official_plan(mode: OfficialPartitionMode) -> OfficialProvisionPlan {
     let compat = locate_lba7_compatibility_extent_from_geometry(1024, 255, 63, 512).unwrap();
     let key_material = wrap_file_key(
@@ -145,6 +152,7 @@ fn official_plan(mode: OfficialPartitionMode) -> OfficialProvisionPlan {
         mode,
         OfficialPartitionSizes::new(32, 64, 128),
         compat,
+        legacy_key_material(),
         key_material,
     )
     .unwrap()
@@ -201,6 +209,14 @@ fn official_image_generator_emits_all_four_verified_layouts() {
             assert_eq!(u32le(&lba7, b7 + 0x14), u32::from(ptype != 1));
             assert_eq!(u32le(&lba12, b12 + 0x14), u32::from(ptype != 1));
             if ptype == 1 {
+                assert!(lba7[b7 + 0x30..b7 + 0x40].iter().all(|byte| *byte == 0));
+            } else {
+                assert_eq!(
+                    &lba7[b7 + 0x30..b7 + 0x40],
+                    plan.lba7_key_material.packed16().as_slice()
+                );
+            }
+            if ptype == 1 {
                 assert!(lba12[b12 + 0x30..b12 + 0x59].iter().all(|byte| *byte == 0));
             } else {
                 assert_eq!(
@@ -248,6 +264,7 @@ fn official_generator_serializes_all_three_current_lba12_wrap_modes() {
             OfficialPartitionMode::BootShareCombined,
             OfficialPartitionSizes::new(32, 64, 128),
             compat,
+            legacy_key_material(),
             key_material,
         )
         .unwrap();

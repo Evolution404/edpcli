@@ -603,6 +603,12 @@ fn validate_official_lba7(
                 plan.lba7_compatibility_extent.size_bytes,
             )
         };
+        let encrypted = expected_need_encrypt(partition.partition_type.raw()) != 0;
+        let material = if encrypted {
+            plan.lba7_key_material.packed16()
+        } else {
+            [0u8; 16]
+        };
         validate_official_entry(
             &plain,
             index * 0x40,
@@ -612,7 +618,7 @@ fn validate_official_lba7(
             partition,
             start,
             size,
-            spec.profile().lba7_material(),
+            &material,
             0,
         )?;
     }

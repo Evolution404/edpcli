@@ -1,6 +1,6 @@
 use edpcli::{
-    crypto::{a6b0_full, crc32_bare},
-    provision::{wrap_file_key, FileKeyWrapMode},
+    crypto::{a6b0_full, crc32_bare, xor_rolling},
+    provision::{wrap_file_key, wrap_legacy_lba7_file_key, FileKeyWrapMode},
 };
 
 const DEVICE_ID: &[u8] = b"disk&ven_virtual&prod_writerproof&rev_0001";
@@ -25,6 +25,27 @@ fn decode_hex(text: &str) -> Vec<u8> {
         .step_by(2)
         .map(|i| u8::from_str_radix(&hex[i..i + 2], 16).unwrap())
         .collect()
+}
+
+#[test]
+fn legacy_lba7_key_material_matches_real_current_netac_bytes() {
+    let image = std::fs::read(
+        "tests/fixtures/protocol/disk6_122880000_vid0dd8_pid2005_disk&ven_netac&prod_onlydisk_onlyid1402259934_20260910_172300.bin",
+    )
+    .unwrap();
+    let device_id = b"disk&ven_netac&prod_onlydisk";
+    let crc = crc32_bare(device_id);
+    let plain = xor_rolling(&image[7 * 512..8 * 512], (crc & 0xffff) ^ (crc >> 16));
+    assert_eq!(u32::from_le_bytes(plain[0x08..0x0c].try_into().unwrap()), 3);
+
+    let file_key = [0x7d, 0x9e, 0xe4, 0xe8, 0x75, 0x4a, 0xd4, 0x38];
+    let material = wrap_legacy_lba7_file_key(b"0000aaaa", file_key);
+    assert_eq!(material.user_key_crc, 0x0429_735d);
+    assert_eq!(material.file_key_crc, 0xf169_bc97);
+
+    assert!(plain[0x30..0x40].iter().all(|byte| *byte == 0));
+    assert_eq!(material.packed16().as_slice(), &plain[0x70..0x80]);
+    assert_eq!(material.packed16().as_slice(), &plain[0xb0..0xc0]);
 }
 
 #[test]

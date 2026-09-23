@@ -265,15 +265,21 @@ fn build_official_lba7(
             (compat.start_lba, compat.size_bytes)
         };
         let base = index * 0x40;
+        let encrypted = need_encrypt(partition.partition_type.raw()) != 0;
+        let material = if encrypted {
+            plan.lba7_key_material.packed16()
+        } else {
+            [0u8; 16]
+        };
         let entry = edpf_entry_with_flags(
             0x40,
             count,
             partition.partition_type.raw(),
             need_disturb(index),
-            need_encrypt(partition.partition_type.raw()),
+            u32::from(encrypted),
             start,
             size_bytes,
-            spec.profile().lba7_material(),
+            &material,
             0,
         );
         plain[base..base + 0x40].copy_from_slice(&entry);

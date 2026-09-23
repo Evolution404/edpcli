@@ -8,7 +8,7 @@ use crate::protocol::{
     edpf::EdpPartitionType, lba7::Lba7PartitionMode, lba7_compat::Lba7CompatibilityExtentLayout,
 };
 
-use super::ProvisionKeyMaterial;
+use super::{LegacyLba7KeyMaterial, ProvisionKeyMaterial};
 
 pub type OfficialPartitionMode = Lba7PartitionMode;
 
@@ -68,6 +68,7 @@ pub struct OfficialProvisionPlan {
     pub mode: OfficialPartitionMode,
     pub sizes: OfficialPartitionSizes,
     pub lba7_compatibility_extent: Lba7CompatibilityExtentLayout,
+    pub lba7_key_material: LegacyLba7KeyMaterial,
     pub lba12_key_material: ProvisionKeyMaterial,
 }
 
@@ -76,6 +77,7 @@ impl OfficialProvisionPlan {
         mode: OfficialPartitionMode,
         sizes: OfficialPartitionSizes,
         lba7_compatibility_extent: Lba7CompatibilityExtentLayout,
+        lba7_key_material: LegacyLba7KeyMaterial,
         lba12_key_material: ProvisionKeyMaterial,
     ) -> Result<Self, String> {
         if lba7_compatibility_extent.size_bytes == 0 || lba7_compatibility_extent.size_sectors == 0
@@ -86,6 +88,7 @@ impl OfficialProvisionPlan {
             mode,
             sizes,
             lba7_compatibility_extent,
+            lba7_key_material,
             lba12_key_material,
         })
     }

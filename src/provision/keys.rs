@@ -9,6 +9,51 @@ const DEFAULT_PASSWORD: &[u8] = b"0000aaaa";
 const DEFAULT_EFFECTIVE_PASSWORD: &[u8] = b"LtSWi[2f)j";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct LegacyLba7KeyMaterial {
+    pub user_key_crc: u32,
+    pub file_key_crc: u32,
+    pub wrapped_file_key: [u8; 8],
+}
+
+impl LegacyLba7KeyMaterial {
+    pub fn packed16(self) -> [u8; 16] {
+        let mut out = [0u8; 16];
+        out[..4].copy_from_slice(&self.user_key_crc.to_le_bytes());
+        out[4..8].copy_from_slice(&self.file_key_crc.to_le_bytes());
+        out[8..].copy_from_slice(&self.wrapped_file_key);
+        out
+    }
+}
+
+pub fn wrap_legacy_lba7_file_key(password: &[u8], file_key: [u8; 8]) -> LegacyLba7KeyMaterial {
+    let folded = legacy_password_fold32(password);
+    let mut wrapped_file_key = [0u8; 8];
+    for (index, chunk) in file_key.chunks_exact(4).enumerate() {
+        let word = u32::from_le_bytes(chunk.try_into().unwrap()) ^ folded;
+        wrapped_file_key[index * 4..index * 4 + 4].copy_from_slice(&word.to_le_bytes());
+    }
+    LegacyLba7KeyMaterial {
+        user_key_crc: crc32_bare(password),
+        file_key_crc: crc32_bare(&file_key),
+        wrapped_file_key,
+    }
+}
+
+fn legacy_password_fold32(password: &[u8]) -> u32 {
+    let mut sum = 0u32;
+    let (chunks, tail) = password.as_chunks::<4>();
+    for chunk in chunks {
+        sum = sum.wrapping_add(u32::from_le_bytes(*chunk));
+    }
+    if !tail.is_empty() {
+        let mut padded = [0u8; 4];
+        padded[..tail.len()].copy_from_slice(tail);
+        sum = sum.wrapping_add(u32::from_le_bytes(padded));
+    }
+    sum
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[repr(u8)]
 pub enum FileKeyWrapMode {
     A7f0 = 1,
@@ -149,6 +194,21 @@ mod tests {
             *byte = u8::from_str_radix(&value[i * 2..i * 2 + 2], 16).unwrap();
         }
         out
+    }
+
+    #[test]
+    fn legacy_default_password_fold_matches_first_party_vector() {
+        assert_eq!(legacy_password_fold32(b"0000aaaa"), 0x9191_9191);
+        let material = wrap_legacy_lba7_file_key(
+            b"0000aaaa",
+            [0x7d, 0x9e, 0xe4, 0xe8, 0x75, 0x4a, 0xd4, 0x38],
+        );
+        assert_eq!(material.user_key_crc, 0x0429_735d);
+        assert_eq!(material.file_key_crc, 0xf169_bc97);
+        assert_eq!(
+            material.wrapped_file_key,
+            [0xec, 0x0f, 0x75, 0x79, 0xe4, 0xdb, 0x45, 0xa9]
+        );
     }
 
     #[test]

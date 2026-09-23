@@ -12,7 +12,10 @@ mod spec;
 mod validate;
 
 pub use generate::{generate_image, generate_official_image, ProvisionEntropy};
-pub use keys::{wrap_file_key, FileKeyWrapMode, ProvisionKeyMaterial};
+pub use keys::{
+    wrap_file_key, wrap_legacy_lba7_file_key, FileKeyWrapMode, LegacyLba7KeyMaterial,
+    ProvisionKeyMaterial,
+};
 pub use layout::{
     build_official_partition_layout, official_mbr_partition_type, OfficialPartitionGeometry,
     OfficialPartitionMode, OfficialPartitionSizes, OfficialProvisionPlan,
