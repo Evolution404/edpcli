@@ -50,6 +50,12 @@ fn convert_golden_default_all_disks() {
         assert_eq!(r.share, g.share, "{}", key);
         assert_eq!(r.enc_start, g.enc_start, "{}", key);
         assert_eq!(r.enc_size, g.enc_size, "{}", key);
+        assert_eq!(r.plan.share_start, 63, "{}", key);
+        assert_eq!(r.plan.share_sectors, r.share, "{}", key);
+        assert_eq!(r.plan.encrypt_start, r.enc_start, "{}", key);
+        assert_eq!(r.plan.encrypt_size, r.enc_size, "{}", key);
+        assert!(r.plan.preserves_encrypt_geometry, "{}", key);
+        assert!(r.plan.front_region_is_contiguous, "{}", key);
         assert_eq!(r.crc, g.crc, "{}", key);
         assert_eq!(r.k0, g.k0, "{}", key);
         assert_eq!(r.lba9.is_none(), g.lba9_none, "{}", key);
@@ -70,6 +76,7 @@ fn convert_golden_size_gb_path() {
     let r = convert(&read_fn_of(&data), did, Some(50.0), &mut |_| {}).unwrap();
     let g = golden("aigo_size50");
     assert_eq!(r.share, g.share); // 8 扇对齐: 97,656,248
+    assert!(!r.plan.front_region_is_contiguous);
     assert_eq!(r.enc_start, g.enc_start);
     assert_eq!(sha256(&r.lba0), g.lba0, "LBA0");
     assert_eq!(sha256(&r.lba6), g.lba6, "LBA6");

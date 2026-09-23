@@ -342,6 +342,74 @@ pub struct ConvertResult {
     pub plain7: Vec<u8>,
     pub plain12: Vec<u8>,
     pub raw12: Vec<u8>,
+    pub plan: ConversionPlan,
+}
+
+/// Read-only plan for converting an existing official disk into the verified
+/// type2+type4 passwordless layout.  The encrypted partition geometry is an
+/// invariant: conversion may expose/rebuild only the front region.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConversionPlan {
+    pub share_start: u64,
+    pub share_sectors: u64,
+    pub encrypt_start: u64,
+    pub encrypt_size: u64,
+    pub preserves_encrypt_geometry: bool,
+    pub front_region_is_contiguous: bool,
+}
+
+pub fn plan_passwordless_conversion(
+    raw12: &[u8],
+    device_id: &str,
+    size_gb: Option<f64>,
+) -> EdpCliResult<ConversionPlan> {
+    require_sector(raw12, "LBA12")?;
+    let crc = crc32_bare(device_id.as_bytes());
+    let dec12 = a6b0_full(raw12, &crc.to_le_bytes(), 0);
+    if dec12[..4] != *b"EDPF" {
+        return Err(EdpCliError::new(
+            EXIT_TARGET,
+            format!(
+                "错误: LBA12 解密后非 EDPF({}) — device_id 不符或非 cems 盘",
+                hex4(&dec12[..4])
+            ),
+        ));
+    }
+    let enc_e = ent(&dec12, find_type_entry(&dec12, E12, 4)?, E12);
+    let encrypt_start = u64_at(enc_e, 0x18);
+    let encrypt_size = u64_at(enc_e, 0x28);
+    if encrypt_start <= 63 || encrypt_size < SECTOR as u64 {
+        return Err(EdpCliError::new(
+            EXIT_TARGET,
+            "错误: Encrypt 几何非法，拒绝生成免密转换计划",
+        ));
+    }
+    let share_sectors = if let Some(gb) = size_gb {
+        (py_round_half_even(gb * 1e9 / SECTOR as f64) / 8 * 8) as u64
+    } else {
+        encrypt_start - 63
+    };
+    let share_end = 63u64
+        .checked_add(share_sectors)
+        .ok_or_else(|| EdpCliError::new(EXIT_TARGET, "错误: Share 几何溢出，拒绝生成转换计划"))?;
+    if share_end > encrypt_start {
+        return Err(EdpCliError::new(
+            EXIT_TARGET,
+            format!(
+                "错误: Share@63+{} 越过 Encrypt@{}",
+                group_digits(share_sectors),
+                group_digits(encrypt_start)
+            ),
+        ));
+    }
+    Ok(ConversionPlan {
+        share_start: 63,
+        share_sectors,
+        encrypt_start,
+        encrypt_size,
+        preserves_encrypt_geometry: true,
+        front_region_is_contiguous: share_end == encrypt_start,
+    })
 }
 
 /// convert 过程的类型化报告。领域层不知道前端；渲染成文本由
@@ -496,35 +564,10 @@ pub fn convert(
     });
 
     let raw12 = read_sector(read, 12)?;
-    let dec12 = a6b0_full(&raw12, &crc_key, 0);
-    if dec12[..4] != *b"EDPF" {
-        return Err(EdpCliError::new(
-            EXIT_TARGET,
-            format!(
-                "错误: LBA12 解密后非 EDPF({}) — device_id 不符或非 cems 盘",
-                hex4(&dec12[..4])
-            ),
-        ));
-    }
-    let enc_e = ent(&dec12, find_type_entry(&dec12, E12, 4)?, E12);
-    let enc_start = u64_at(enc_e, 0x18);
-    let enc_size = u64_at(enc_e, 0x28);
-    let share: u64 = if let Some(gb) = size_gb {
-        // GB(10^9), 8 扇对齐; round 为 Python 银行家舍入
-        (py_round_half_even(gb * 1e9 / SECTOR as f64) / 8 * 8) as u64
-    } else {
-        enc_start - 63
-    };
-    if 63 + share > enc_start {
-        return Err(EdpCliError::new(
-            EXIT_TARGET,
-            format!(
-                "错误: Share@63+{} 越过 Encrypt@{}",
-                group_digits(share),
-                group_digits(enc_start)
-            ),
-        ));
-    }
+    let plan = plan_passwordless_conversion(&raw12, device_id, size_gb)?;
+    let enc_start = plan.encrypt_start;
+    let enc_size = plan.encrypt_size;
+    let share = plan.share_sectors;
     report(ConvertReport::Layout {
         share,
         enc_start,
@@ -564,5 +607,6 @@ pub fn convert(
         plain7,
         plain12,
         raw12,
+        plan,
     })
 }
