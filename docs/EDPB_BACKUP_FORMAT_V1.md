@@ -29,7 +29,7 @@ EDPB 是 edpcli 的单文件设备备份容器，扩展名为 .edpb。
 - partition.type1
 - partition.type2
 - partition.type4
-- region_a
+- lba7_compatibility_extent
 - device.tail_window
 - vendor.unknown.N
 
@@ -284,24 +284,26 @@ Deep 默认不备份所有用户文件内容。
 
 原始密文 Artifact 与解密后的派生 Artifact 必须分别保存。
 
-## 11. Region A 与设备尾部取证窗口
+## 11. LBA7 compatibility extent 与设备尾部取证窗口
 
-Region A 是 LBA7 compact EDPF 表中 entry1/entry2 指向的固定 6 扇区（3072B）物理块，不是泛指盘尾窗口。当前尚未闭环其内部业务语义，也没有证明它与 `SectorManageImp::ReadIIR/WriteIIR` 是同一对象。
+LBA7 legacy compatibility extent 是旧版 `EDP_PARTION_INFO` 表中后续 entry 使用的固定 6 扇区（3072B）兼容物理块，不是泛指盘尾窗口，也不是 type4 专属区域。官方 producer 已证明：后续 entry 保留各自的 `PartionType`，但会被写成同一个 0xC00 兼容几何，因此 type2/type4 同址不能解释为逻辑分区 alias。
 
-Metadata 级必须优先使用 LBA7 盘内指针确定 Region A：
+Metadata 级必须优先使用 LBA7 盘内指针确定 compatibility extent：
 
-- Region id = region.region_a
-- role = region_a_unknown
+- Region id = region.lba7_compatibility_extent
+- role = lba7_legacy_partition_compatibility_extent
 - sector_count = 6
-- Artifact id = raw.region_a
+- Artifact id = raw.lba7_compatibility
 - restore_policy = evidence_only
 - semantic_status = identified
 
 CHS 公式 `(total_sectors // 16065) * 16065 - 1792` 仅用于一致性交叉验证。若 CHS 计算结果与 LBA7 指针不一致，必须记录 structured capture issue，并继续以 LBA7 指针为事实源，不得静默改写起点。
 
-Region A 当前严格内部语义为：`+0x000..+0xbff` 全部保持 unknown。IIR 的 0x800B 布局、AES/CRC 和 PartInfo 地址链作为独立研究对象保留，但在出现直接物理绑定前不得映射到 Region A 的任何字节。
+当前物理 payload 已闭环为固定 FAT16 compatibility image，并有独立 EDPSECDISK transform 证据。逻辑 `PartionType` 与该物理 payload 必须分层表示：同一 compatibility extent 可由 type2 或 type4 entry 指向。
 
-`derived.region_a.layout` 只能描述“3072B physical extent + unknown wire semantics + IIR binding unproven”，派生结果不得替代 `raw.region_a` 原始字节。
+`derived.lba7_compatibility.layout` 描述 3072B physical extent、实际指向它的 LBA7 entry/type、官方模式以及已验证 wire semantics；派生结果不得替代 `raw.lba7_compatibility` 原始字节。
+
+IIR 是另一独立协议对象，不得绑定到该 compatibility extent。
 
 最后 2048 扇区的广义取证窗口是另一独立 Region：
 
@@ -311,7 +313,7 @@ Region A 当前严格内部语义为：`+0x000..+0xbff` 全部保持 unknown。I
 - semantic_status = unknown
 - restore_policy = evidence_only
 
-Region A 和 device tail window 即使物理范围发生重叠，也必须保持不同语义，禁止再使用 `tail.A` 把两者混为一谈。
+LBA7 compatibility extent 和 device tail window 即使物理范围发生重叠，也必须保持不同语义。
 
 ## 12. 完整性规则
 

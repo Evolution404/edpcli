@@ -52,7 +52,7 @@ Existing EDP partition/key evidence is in
 
 `edpcli backup create --disk N --deep` uses the same O_RDONLY device-opening
 path as Metadata. Without `--deep`, manual and automatic backups remain Metadata.
-Deep first acquires Metadata (including Region A), then stores additional raw
+Deep first acquires Metadata (including the LBA7 compatibility extent), then stores additional raw
 read ranges and `derived.partition.<index>.filesystem_summary` plus
 `derived.partition.<index>.file_list` in the same EDPB. Numeric indices are used
 to avoid collisions if the partition table has more than one entry of a type.
@@ -75,7 +75,7 @@ cargo run --example deep_assess_metadata -- /path/to/backup.edpb
 This validates the source container and reports prefix assessment only; it does
 not relabel the source as Deep or fabricate sectors missing from Metadata.
 
-The 2026-09-22 Lexar Region A capture (container SHA-256
+The 2026-09-22 Lexar LBA7 compatibility-extent capture (container SHA-256
 `0a52a9cb52e47ca5e11d3a74d8c6f9f07937b0dc3d06f4d0802f3fb5917e254f`)
 was replayed offline with this tool. Its type2 partition is 118477684736 bytes and
 type4 is 6234963968 bytes. Both are `locked`; filesystem type, counts, listing

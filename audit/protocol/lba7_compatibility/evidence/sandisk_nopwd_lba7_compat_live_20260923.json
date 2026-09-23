@@ -1,0 +1,40 @@
+{
+  "status": "PHYSICAL_LBA7_COMPAT_CAPTURED_SANDISK_NOPWD_TWO_ENTRY",
+  "device": "SanDisk Ultra /dev/rdisk5, 61530439680 bytes, 512-byte sectors",
+  "method": "Read-only os.open(O_RDONLY) and os.pread of LBA7, CHS-based LBA7 legacy compatibility extent, eight neighboring sectors, and the earlier physical-total-based candidate",
+  "capture_manifest": "audit/protocol/lba7_compatibility/live_captures/sandisk_nopwd_20260923/manifest.json",
+  "lba7_raw_sha256": "929b31556cca1d1fe2574d175a1b1975ca80bbc33d14954f4f1d978f1b53c488",
+  "lba7_matches_20260823_capture_byte_for_byte": true,
+  "lba7_decoded_sha256": "9e5be500dafafc40aca7bcd50d04008f30063280c104d14d074d7d0938e1f340",
+  "lba7_entries": [
+    {"partition_type": 2, "start_sector": 63, "partition_size_bytes": 60217242624},
+    {"partition_type": 4, "start_sector": 120164408, "partition_size_bytes": 3072}
+  ],
+  "lba7_compat": {
+    "chs_sectors": 120166200,
+    "start_lba": 120164408,
+    "length_bytes": 3072,
+    "sha256": "aaeffbba440e553c2eb47accac54552c9b53af9d4951f728ac700a2e81aca0a0",
+    "nonzero_bytes": 3062,
+    "entropy_bits_per_byte": 7.936826263617983,
+    "sector_nonzero_bytes": [511, 506, 511, 512, 512, 510],
+    "four_preceding_sectors_all_zero": true,
+    "four_following_sectors_all_zero": true
+  },
+  "mislocated_capture": {
+    "lba": 120174848,
+    "sha256": "e80232b4d18d0bb7e794be263ba937626f383f9917d4b8a737ba893a8f752293",
+    "nonzero_bytes": 0,
+    "matches_20260823_old_file_byte_for_byte": true
+  },
+  "proves": [
+    "The LBA7-pointed LBA7 legacy compatibility extent is a real isolated six-sector high-entropy block even on this no-password two-entry disk.",
+    "The earlier all-zero no-password capture was at the wrong physical address and did not sample LBA7 legacy compatibility extent.",
+    "In this two-entry profile only LBA7 type4 points at the LBA7 legacy compatibility extent 0xC00 extent; LBA7 type2 points at the actual Share start LBA63."
+  ],
+  "does_not_prove": [
+    "The plaintext layout or actual business purpose of the 3072 bytes.",
+    "That the LBA7 legacy compatibility extent bytes are encrypted by the LBA7 wrapped8 key or by the LBA12 SM4 file key.",
+    "That a current Windows or Linux client reads this block during login or mount."
+  ]
+}

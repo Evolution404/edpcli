@@ -2,6 +2,41 @@ use super::types::*;
 
 pub const PASS_INFO_BYTES: usize = 14;
 
+/// First-party EDP logical partition type values.
+///
+/// These values are consumed by `EdpEDiskCtrl.dll::InitDiskInfo`:
+/// 1 -> boot, 2 -> share/exchange, 4 -> encrypted/private.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[repr(u32)]
+pub enum EdpPartitionType {
+    Boot = 1,
+    Share = 2,
+    Encrypt = 4,
+}
+
+impl EdpPartitionType {
+    pub const fn from_raw(value: u32) -> Option<Self> {
+        match value {
+            1 => Some(Self::Boot),
+            2 => Some(Self::Share),
+            4 => Some(Self::Encrypt),
+            _ => None,
+        }
+    }
+
+    pub const fn raw(self) -> u32 {
+        self as u32
+    }
+
+    pub const fn role(self) -> &'static str {
+        match self {
+            Self::Boot => "boot",
+            Self::Share => "share",
+            Self::Encrypt => "encrypt",
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct PassInfo {
     pub version: u16,

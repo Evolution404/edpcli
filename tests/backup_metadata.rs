@@ -8,8 +8,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use common::load_disk_image;
 use edpcli::backup_metadata::{
-    acquire_metadata, parse_partition_geometry, parse_region_a_geometry, FilesystemKind,
-    DEVICE_TAIL_WINDOW_SECTORS, PARTITION_PREFIX_SECTORS, REGION_A_SECTORS,
+    acquire_metadata, parse_lba7_compatibility_geometry, parse_partition_geometry, FilesystemKind,
+    DEVICE_TAIL_WINDOW_SECTORS, LBA7_COMPAT_EXTENT_SECTORS, PARTITION_PREFIX_SECTORS,
 };
 use edpcli::common::SECTOR;
 use edpcli::crypto::{crc32_bare, xor_rolling};
@@ -22,7 +22,7 @@ const NETAC_DEVICE_ID: &str = "disk&ven_netac&prod_onlydisk";
 const NETAC_TOTAL_SECTORS: u64 = 122_880_000;
 const LEXAR_DEVICE_ID: &str = "disk&ven_lexar&prod_usb_flash_drive";
 const LEXAR_TOTAL_SECTORS: u64 = 243_625_984;
-const LEXAR_REGION_A_START: u64 = 243_623_933;
+const LEXAR_LBA7_COMPAT_START: u64 = 243_623_933;
 
 struct TempDir(PathBuf);
 
@@ -98,7 +98,7 @@ fn patterned_sector(byte: u8) -> Vec<u8> {
     vec![byte; SECTOR]
 }
 
-fn rewrite_lexar_region_a_pointer(image: &[u8], start_lba: u64) -> Vec<u8> {
+fn rewrite_lexar_lba7_compatibility_pointer(image: &[u8], start_lba: u64) -> Vec<u8> {
     let mut out = image.to_vec();
     let crc = crc32_bare(LEXAR_DEVICE_ID.as_bytes());
     let k0 = (crc & 0xffff) ^ (crc >> 16);
@@ -153,50 +153,67 @@ fn authentic_lba12_yields_bounded_partition_geometry() {
 }
 
 #[test]
-fn authentic_lexar_lba7_points_to_six_sector_region_a() {
+fn authentic_lexar_lba7_points_to_six_sector_compatibility_extent() {
     let Some(image) = load_disk_image("lexar") else {
         eprintln!("跳过: 真实 Lexar 协议夹具不可用");
         return;
     };
-    let region_a = parse_region_a_geometry(&image, LEXAR_DEVICE_ID, LEXAR_TOTAL_SECTORS).unwrap();
-    assert_eq!(region_a.start_lba, LEXAR_REGION_A_START);
-    assert_eq!(region_a.sector_count, REGION_A_SECTORS);
-    assert_eq!(region_a.chs_expected_start_lba, Some(LEXAR_REGION_A_START));
-    assert_eq!(region_a.lba7_candidate_entries, vec![1, 2]);
+    let compat =
+        parse_lba7_compatibility_geometry(&image, LEXAR_DEVICE_ID, LEXAR_TOTAL_SECTORS).unwrap();
+    assert_eq!(compat.start_lba, LEXAR_LBA7_COMPAT_START);
+    assert_eq!(compat.sector_count, LBA7_COMPAT_EXTENT_SECTORS);
+    assert_eq!(compat.chs_expected_start_lba, Some(LEXAR_LBA7_COMPAT_START));
+    assert_eq!(
+        compat.official_partition_mode.as_deref(),
+        Some("0 (缺省三分区)")
+    );
+    assert_eq!(compat.lba7_pointer_entries.len(), 2);
+    assert_eq!(compat.lba7_pointer_entries[0].entry_index, 1);
+    assert_eq!(compat.lba7_pointer_entries[0].partition_type, 2);
+    assert_eq!(
+        compat.lba7_pointer_entries[0].partition_role.as_deref(),
+        Some("share")
+    );
+    assert_eq!(compat.lba7_pointer_entries[1].entry_index, 2);
+    assert_eq!(compat.lba7_pointer_entries[1].partition_type, 4);
+    assert_eq!(
+        compat.lba7_pointer_entries[1].partition_role.as_deref(),
+        Some("encrypt")
+    );
 }
 
 #[test]
-fn metadata_capture_reads_complete_region_a_and_separate_tail_window() {
+fn metadata_capture_reads_complete_lba7_compatibility_extent_and_separate_tail_window() {
     let Some(image) = load_disk_image("lexar") else {
         eprintln!("跳过: 真实 Lexar 协议夹具不可用");
         return;
     };
     let mut dev = ReadOnlySparseDev::new();
     let mut expected = Vec::new();
-    for offset in 0..REGION_A_SECTORS {
+    for offset in 0..LBA7_COMPAT_EXTENT_SECTORS {
         let sector = patterned_sector(0x40 + offset as u8);
         expected.extend_from_slice(&sector);
-        dev.insert(LEXAR_REGION_A_START + offset, sector);
+        dev.insert(LEXAR_LBA7_COMPAT_START + offset, sector);
     }
 
     let acquired =
         acquire_metadata(&mut dev, &image, LEXAR_DEVICE_ID, LEXAR_TOTAL_SECTORS).unwrap();
-    let region_a = acquired
+    let compat = acquired
         .regions
         .iter()
-        .find(|region| region.id == "region.region_a")
-        .expect("Region A must be modeled explicitly");
-    assert_eq!(region_a.semantic_status, SemanticStatus::Identified);
-    assert_eq!(region_a.start_lba, Some(LEXAR_REGION_A_START));
-    assert_eq!(region_a.sector_count, Some(REGION_A_SECTORS));
+        .find(|region| region.id == "region.lba7_compatibility_extent")
+        .expect("LBA7 compatibility extent must be modeled explicitly");
+    assert_eq!(compat.semantic_status, SemanticStatus::Identified);
+    assert_eq!(compat.start_lba, Some(LEXAR_LBA7_COMPAT_START));
+    assert_eq!(compat.sector_count, Some(LBA7_COMPAT_EXTENT_SECTORS));
 
-    let raw_region_a = acquired
+    let raw_compat = acquired
         .artifacts
         .iter()
-        .find(|artifact| artifact.id == "raw.region_a")
-        .expect("raw Region A artifact");
-    assert_eq!(raw_region_a.restore_policy, RestorePolicy::EvidenceOnly);
-    assert_eq!(raw_region_a.data, expected);
+        .find(|artifact| artifact.id == "raw.lba7_compatibility")
+        .expect("raw LBA7 compatibility extent artifact");
+    assert_eq!(raw_compat.restore_policy, RestorePolicy::EvidenceOnly);
+    assert_eq!(raw_compat.data, expected);
 
     let tail = acquired
         .regions
@@ -209,7 +226,7 @@ fn metadata_capture_reads_complete_region_a_and_separate_tail_window() {
         tail.start_lba,
         Some(LEXAR_TOTAL_SECTORS - DEVICE_TAIL_WINDOW_SECTORS)
     );
-    assert_ne!(tail.start_lba, region_a.start_lba);
+    assert_ne!(tail.start_lba, compat.start_lba);
     assert!(acquired
         .artifacts
         .iter()
@@ -219,38 +236,62 @@ fn metadata_capture_reads_complete_region_a_and_separate_tail_window() {
     let layout = acquired
         .artifacts
         .iter()
-        .find(|artifact| artifact.id == "derived.region_a.layout")
-        .expect("Region A layout artifact");
+        .find(|artifact| artifact.id == "derived.lba7_compatibility.layout")
+        .expect("LBA7 compatibility extent layout artifact");
     let layout_json: serde_json::Value = serde_json::from_slice(&layout.data).unwrap();
     assert_eq!(layout_json["wire_semantics"]["offset"], 0);
     assert_eq!(layout_json["wire_semantics"]["length"], 3072);
-    assert_eq!(layout_json["wire_semantics"]["classification"], "unknown");
-    assert_eq!(layout_json["iir_binding"], "unproven");
+    assert_eq!(
+        layout_json["wire_semantics"]["classification"],
+        "fixed_fat16_compatibility_image_encrypted"
+    );
+    assert_eq!(layout_json["official_partition_mode"], "0 (缺省三分区)");
+    assert_eq!(
+        layout_json["pointer_entries"],
+        serde_json::json!([
+            {
+                "entry_index": 1,
+                "partition_type": 2,
+                "partition_role": "share"
+            },
+            {
+                "entry_index": 2,
+                "partition_type": 4,
+                "partition_role": "encrypt"
+            }
+        ])
+    );
+    assert_eq!(
+        layout_json["wire_semantics"]["plaintext_sha256"],
+        "386595e473d3051e07fac43a02e0a8f8134b77858bb12e93246e4ebfbf51ee1c"
+    );
+    assert!(layout_json.get("iir_binding").is_none());
 }
 
 #[test]
-fn lba7_region_a_pointer_remains_authoritative_when_chs_cross_check_differs() {
+fn lba7_compatibility_pointer_remains_authoritative_when_chs_cross_check_differs() {
     let Some(image) = load_disk_image("lexar") else {
         eprintln!("跳过: 真实 Lexar 协议夹具不可用");
         return;
     };
-    let altered_start = LEXAR_REGION_A_START - 1;
-    let altered = rewrite_lexar_region_a_pointer(&image, altered_start);
-    let parsed = parse_region_a_geometry(&altered, LEXAR_DEVICE_ID, LEXAR_TOTAL_SECTORS).unwrap();
+    let altered_start = LEXAR_LBA7_COMPAT_START - 1;
+    let altered = rewrite_lexar_lba7_compatibility_pointer(&image, altered_start);
+    let parsed =
+        parse_lba7_compatibility_geometry(&altered, LEXAR_DEVICE_ID, LEXAR_TOTAL_SECTORS).unwrap();
     assert_eq!(parsed.start_lba, altered_start);
-    assert_eq!(parsed.chs_expected_start_lba, Some(LEXAR_REGION_A_START));
+    assert_eq!(parsed.chs_expected_start_lba, Some(LEXAR_LBA7_COMPAT_START));
 
     let mut dev = ReadOnlySparseDev::new();
     let acquired =
         acquire_metadata(&mut dev, &altered, LEXAR_DEVICE_ID, LEXAR_TOTAL_SECTORS).unwrap();
-    let region_a = acquired
+    let compat = acquired
         .regions
         .iter()
-        .find(|region| region.id == "region.region_a")
+        .find(|region| region.id == "region.lba7_compatibility_extent")
         .unwrap();
-    assert_eq!(region_a.start_lba, Some(altered_start));
+    assert_eq!(compat.start_lba, Some(altered_start));
     assert!(acquired.issues.iter().any(|issue| {
-        issue.region_id == "region.region_a"
+        issue.region_id == "region.lba7_compatibility_extent"
             && issue.start_lba == altered_start
             && issue.error.contains("differs from CHS-1792 expected")
     }));
@@ -390,13 +431,13 @@ fn metadata_container_detects_corruption_in_non_protocol_artifact() {
     let extra = manifest
         .artifacts
         .iter()
-        .find(|artifact| artifact.id == "raw.region_a")
+        .find(|artifact| artifact.id == "raw.lba7_compatibility")
         .unwrap();
     let mut bytes = fs::read(&path).unwrap();
     bytes[extra.storage.data_offset as usize + 7] ^= 0x5a;
     fs::write(&path, bytes).unwrap();
     let error = edpb::verify_file(&path).unwrap_err();
-    assert!(error.contains("raw.region_a"));
+    assert!(error.contains("raw.lba7_compatibility"));
     assert!(error.contains("SHA-256"));
 }
 

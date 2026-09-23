@@ -337,7 +337,10 @@ fn deep_container_retains_metadata_and_never_makes_analysis_restorable() {
         assert_eq!(retained.data, original.data);
         assert_eq!(retained.restore_policy, original.restore_policy);
     }
-    assert!(deep.artifacts.iter().any(|a| a.id == "raw.region_a"));
+    assert!(deep
+        .artifacts
+        .iter()
+        .any(|a| a.id == "raw.lba7_compatibility"));
     for index in [1, 2] {
         for kind in ["filesystem_summary", "file_list"] {
             let a = deep

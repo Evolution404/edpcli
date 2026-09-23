@@ -1,0 +1,44 @@
+{
+  "status": "SOURCE_NAMING_CLOSED",
+  "date": "2026-09-23",
+  "binary": {
+    "path": "/Users/zhangyuxi/Desktop/u_disk/cn.com.vrv.cems.ydcc/files/cems/ydcc/libcemsfilesyscheck.so",
+    "sha256": "6a6080663e6e942f03769ab74196da4f67ccc5389cac01f48d9abc1d7033c360"
+  },
+  "dwarf_source": "/mnt/git/linux/ydcc/src/modCems/solution/build/modFileSysCheck/../../../../global/inc/edpdiskglobal.h",
+  "legacy_type": {
+    "struct": "tagEdpPartionInfo",
+    "typedef": "EDP_PARTION_INFO",
+    "size_bytes": 72,
+    "decl_line": 76,
+    "fields": {
+      "Flag": "0x00",
+      "Version": "0x04",
+      "PartionCount": "0x08",
+      "PartionType": "0x0c",
+      "NeedDisturb": "0x10",
+      "NeedEncrypt": "0x14",
+      "StartSector": "0x18",
+      "SectorSize": "0x20",
+      "PartionSize": "0x28",
+      "UserKeyCRC": "0x30",
+      "FileKeyCRC": "0x38",
+      "EncryptFileKey": "0x40"
+    }
+  },
+  "new_type": {
+    "struct": "tagNewEdpPartionInfo",
+    "typedef": "EDP_NEW_PARTION_INFO",
+    "size_bytes": 104,
+    "decl_line": 101
+  },
+  "symbols": [
+    "CLabelManage::BuildSector7(char*, tagEdpPartionInfo*, tagEdpPartionPassInfo*) @ 0x1dcda",
+    "CLabelManage::GetPartionFromOld(tagNewEdpPartionInfo*, tagEdpPartionInfo*) @ 0x1f808"
+  ],
+  "canonical_terms": {
+    "sector7": "LBA7 legacy EDP partition table",
+    "payload": "LBA7 legacy compatibility extent"
+  },
+  "proves": "The project naming is derived from first-party DWARF/source identifiers rather than an analysis placeholder."
+}

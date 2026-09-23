@@ -13,15 +13,18 @@ use crate::diskio::SectorDev;
 use crate::edpb::{
     ArtifactCompleteness, ArtifactInput, Derivation, Extent, Region, RestorePolicy, SemanticStatus,
 };
-use crate::protocol::edpf::{EdpfEntry64, EdpfEntry96};
+use crate::protocol::{
+    edpf::{EdpPartitionType, EdpfEntry64, EdpfEntry96},
+    lba7::Lba7PartitionMode,
+};
 
 pub const PARTITION_PREFIX_SECTORS: u64 = 64;
 pub const PARTITION_SUFFIX_SECTORS: u64 = 8;
 pub const DEVICE_TAIL_WINDOW_SECTORS: u64 = 2048;
-pub const REGION_A_SECTORS: u64 = 6;
-pub const REGION_A_BYTES: u64 = REGION_A_SECTORS * SECTOR as u64;
-pub const REGION_A_CHS_TRACK_SECTORS: u64 = 16_065;
-pub const REGION_A_CHS_BACKOFF_SECTORS: u64 = 1_792;
+pub const LBA7_COMPAT_EXTENT_SECTORS: u64 = 6;
+pub const LBA7_COMPAT_EXTENT_BYTES: u64 = LBA7_COMPAT_EXTENT_SECTORS * SECTOR as u64;
+pub const LBA7_COMPAT_CHS_TRACK_SECTORS: u64 = 16_065;
+pub const LBA7_COMPAT_CHS_BACKOFF_SECTORS: u64 = 1_792;
 pub const TAIL_METADATA_MIRROR_OFFSET_SECTORS: u64 = 1024;
 pub const TAIL_METADATA_MIRROR_SECTORS: u64 = 9;
 pub const TAIL_END4_MIRROR_OFFSET_SECTORS: u64 = 4;
@@ -43,10 +46,18 @@ pub struct PartitionGeometry {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
-pub struct RegionAGeometry {
+pub struct Lba7CompatibilityPointer {
+    pub entry_index: usize,
+    pub partition_type: u32,
+    pub partition_role: Option<String>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+pub struct Lba7CompatibilityGeometry {
     pub start_lba: u64,
     pub sector_count: u64,
-    pub lba7_candidate_entries: Vec<usize>,
+    pub lba7_pointer_entries: Vec<Lba7CompatibilityPointer>,
+    pub official_partition_mode: Option<String>,
     pub chs_expected_start_lba: Option<u64>,
 }
 
@@ -262,13 +273,13 @@ pub fn parse_partition_geometry(
     Ok(out)
 }
 
-fn parse_lba7_region_a_candidates(
+fn parse_lba7_legacy_entries(
     lba0_12: &[u8],
     device_id: &str,
 ) -> Result<Vec<(usize, EdpfEntry64)>, String> {
     if lba0_12.len() != 13 * SECTOR {
         return Err(format!(
-            "Region A planning requires 6656B LBA0-12, got {}B",
+            "LBA7 compatibility extent planning requires 6656B LBA0-12, got {}B",
             lba0_12.len()
         ));
     }
@@ -297,22 +308,28 @@ fn parse_lba7_region_a_candidates(
     Ok(entries)
 }
 
-pub fn parse_region_a_geometry(
+pub fn parse_lba7_compatibility_geometry(
     lba0_12: &[u8],
     device_id: &str,
     total_sectors: u64,
-) -> Result<RegionAGeometry, String> {
-    let entries = parse_lba7_region_a_candidates(lba0_12, device_id)?;
+) -> Result<Lba7CompatibilityGeometry, String> {
+    let entries = parse_lba7_legacy_entries(lba0_12, device_id)?;
+    let partition_types = entries
+        .iter()
+        .map(|(_, entry)| entry.partition_type)
+        .collect::<Vec<_>>();
+    let official_partition_mode = Lba7PartitionMode::from_partition_types(&partition_types)
+        .map(|mode| format!("{} ({})", mode as u8, mode.ui_name_zh()));
     let candidates: Vec<(usize, EdpfEntry64)> = entries
         .into_iter()
         .filter(|(index, entry)| {
             *index > 0
                 && entry.sector_size == SECTOR as u64
-                && entry.partition_size == REGION_A_BYTES
+                && entry.partition_size == LBA7_COMPAT_EXTENT_BYTES
         })
         .collect();
     if candidates.is_empty() {
-        return Err("LBA7 has no 3072-byte Region A pointer entry".into());
+        return Err("LBA7 has no 3072-byte legacy compatibility extent pointer entry".into());
     }
 
     let start_lba = candidates[0].1.start_sector;
@@ -321,32 +338,44 @@ pub fn parse_region_a_geometry(
         .any(|(_, entry)| entry.start_sector != start_lba)
     {
         return Err(format!(
-            "LBA7 Region A pointers disagree: {}",
+            "LBA7 3072-byte compatibility extent pointers disagree: {}",
             candidates
                 .iter()
-                .map(|(index, entry)| format!("entry{index}={}", entry.start_sector))
+                .map(|(index, entry)| format!(
+                    "entry{index}={} type={}",
+                    entry.start_sector, entry.partition_type
+                ))
                 .collect::<Vec<_>>()
                 .join(", ")
         ));
     }
     let end = start_lba
-        .checked_add(REGION_A_SECTORS)
-        .ok_or_else(|| "Region A geometry overflow".to_string())?;
+        .checked_add(LBA7_COMPAT_EXTENT_SECTORS)
+        .ok_or_else(|| "LBA7 compatibility extent geometry overflow".to_string())?;
     if end > total_sectors {
         return Err(format!(
-            "LBA7 Region A exceeds source disk: start={start_lba}, end={end}, total={total_sectors}"
+            "LBA7 compatibility extent exceeds source disk: start={start_lba}, end={end}, total={total_sectors}"
         ));
     }
 
-    let chs_aligned = (total_sectors / REGION_A_CHS_TRACK_SECTORS)
-        .checked_mul(REGION_A_CHS_TRACK_SECTORS)
-        .ok_or_else(|| "Region A CHS geometry overflow".to_string())?;
-    let chs_expected_start_lba = chs_aligned.checked_sub(REGION_A_CHS_BACKOFF_SECTORS);
+    let chs_aligned = (total_sectors / LBA7_COMPAT_CHS_TRACK_SECTORS)
+        .checked_mul(LBA7_COMPAT_CHS_TRACK_SECTORS)
+        .ok_or_else(|| "LBA7 compatibility extent CHS geometry overflow".to_string())?;
+    let chs_expected_start_lba = chs_aligned.checked_sub(LBA7_COMPAT_CHS_BACKOFF_SECTORS);
 
-    Ok(RegionAGeometry {
+    Ok(Lba7CompatibilityGeometry {
         start_lba,
-        sector_count: REGION_A_SECTORS,
-        lba7_candidate_entries: candidates.iter().map(|(index, _)| *index).collect(),
+        sector_count: LBA7_COMPAT_EXTENT_SECTORS,
+        lba7_pointer_entries: candidates
+            .iter()
+            .map(|(entry_index, entry)| Lba7CompatibilityPointer {
+                entry_index: *entry_index,
+                partition_type: entry.partition_type,
+                partition_role: EdpPartitionType::from_raw(entry.partition_type)
+                    .map(|partition_type| partition_type.role().to_string()),
+            })
+            .collect(),
+        official_partition_mode,
         chs_expected_start_lba,
     })
 }
@@ -620,78 +649,82 @@ pub fn acquire_metadata(
         }
     }
 
-    match parse_region_a_geometry(lba0_12, device_id, total_sectors) {
-        Ok(region_a) => {
-            let region_id = "region.region_a";
+    match parse_lba7_compatibility_geometry(lba0_12, device_id, total_sectors) {
+        Ok(compat) => {
+            let region_id = "region.lba7_compatibility_extent";
             out.regions.push(Region {
                 id: region_id.into(),
-                role: "region_a_unknown".into(),
-                start_lba: Some(region_a.start_lba),
-                sector_count: Some(region_a.sector_count),
+                role: "lba7_legacy_partition_compatibility_extent".into(),
+                start_lba: Some(compat.start_lba),
+                sector_count: Some(compat.sector_count),
                 semantic_status: SemanticStatus::Identified,
             });
             let raw = add_raw_extent(
                 &mut out,
                 dev,
                 region_id,
-                "extent.region_a".into(),
-                "raw.region_a".into(),
-                region_a.start_lba,
-                region_a.sector_count,
-                "region_a_unresolved",
+                "extent.lba7_compatibility".into(),
+                "raw.lba7_compatibility".into(),
+                compat.start_lba,
+                compat.sector_count,
+                "lba7_compatibility_extent_ciphertext",
             )?;
-            if let Some(expected) = region_a.chs_expected_start_lba {
-                if expected != region_a.start_lba {
+            if let Some(expected) = compat.chs_expected_start_lba {
+                if expected != compat.start_lba {
                     out.issues.push(CaptureIssue {
                         region_id: region_id.into(),
-                        start_lba: region_a.start_lba,
-                        sector_count: region_a.sector_count,
+                        start_lba: compat.start_lba,
+                        sector_count: compat.sector_count,
                         error: format!(
-                            "LBA7 Region A pointer {} differs from CHS-1792 expected {}; LBA7 pointer preserved as authoritative",
-                            region_a.start_lba, expected
+                            "LBA7 compatibility extent pointer {} differs from CHS-1792 expected {}; LBA7 pointer preserved as authoritative",
+                            compat.start_lba, expected
                         ),
                     });
                 }
             }
             if raw.is_some() {
                 let layout = serde_json::json!({
-                    "total_size": REGION_A_BYTES,
-                    "source": "lba7_entry_pointer",
-                    "candidate_entries": region_a.lba7_candidate_entries,
+                    "total_size": LBA7_COMPAT_EXTENT_BYTES,
+                    "source": "lba7_edp_partion_info",
+                    "pointer_entries": compat.lba7_pointer_entries,
+                    "official_partition_mode": compat.official_partition_mode,
+                    "producer_rule": "CreatePartitions preserves PartionType but rewrites legacy entries after entry0 to the same aligned 0xC00 compatibility extent",
                     "wire_semantics": {
                         "offset": 0,
-                        "length": REGION_A_BYTES,
-                        "classification": "unknown"
-                    },
-                    "iir_binding": "unproven"
+                        "length": LBA7_COMPAT_EXTENT_BYTES,
+                        "classification": "fixed_fat16_compatibility_image_encrypted",
+                        "plaintext_sha256": "386595e473d3051e07fac43a02e0a8f8134b77858bb12e93246e4ebfbf51ee1c",
+                        "crypto": "EDPSECDISK zero8 + physical backing byte-offset tweak"
+                    }
                 });
                 out.artifacts.push(ArtifactInput {
-                    id: "derived.region_a.layout".into(),
-                    kind: "region_a_layout".into(),
+                    id: "derived.lba7_compatibility.layout".into(),
+                    kind: "lba7_compatibility_layout".into(),
                     media_type: "application/json".into(),
-                    source_extent_ids: vec!["extent.region_a".into()],
+                    source_extent_ids: vec!["extent.lba7_compatibility".into()],
                     derivation: Some(Derivation {
-                        method: "lba7_region_a_layout_v1".into(),
-                        source_artifact_ids: vec!["raw.region_a".into()],
+                        method: "lba7_compatibility_layout_v1".into(),
+                        source_artifact_ids: vec!["raw.lba7_compatibility".into()],
                     }),
                     restore_policy: RestorePolicy::DerivedOnly,
                     completeness: ArtifactCompleteness::Complete,
-                    data: serde_json::to_vec_pretty(&layout)
-                        .map_err(|e| format!("serialize Region A layout failed: {e}"))?,
+                    data: serde_json::to_vec_pretty(&layout).map_err(|e| {
+                        format!("serialize LBA7 compatibility extent layout failed: {e}")
+                    })?,
                 });
             }
         }
         Err(error) => {
-            let fallback_start = (total_sectors / REGION_A_CHS_TRACK_SECTORS)
-                .checked_mul(REGION_A_CHS_TRACK_SECTORS)
-                .and_then(|aligned| aligned.checked_sub(REGION_A_CHS_BACKOFF_SECTORS))
+            let fallback_start = (total_sectors / LBA7_COMPAT_CHS_TRACK_SECTORS)
+                .checked_mul(LBA7_COMPAT_CHS_TRACK_SECTORS)
+                .and_then(|aligned| aligned.checked_sub(LBA7_COMPAT_CHS_BACKOFF_SECTORS))
                 .unwrap_or(0);
             out.issues.push(CaptureIssue {
-                region_id: "region.region_a".into(),
+                region_id: "region.lba7_compatibility_extent".into(),
                 start_lba: fallback_start,
-                sector_count: REGION_A_SECTORS,
+                sector_count: LBA7_COMPAT_EXTENT_SECTORS,
                 error: format!(
-                    "Region A was not captured because LBA7 pointer validation failed: {error}"
+                    "LBA7 compatibility extent was not captured because LBA7 pointer validation failed: {error}"
                 ),
             });
         }
@@ -767,7 +800,7 @@ pub fn acquire_metadata(
         PARTITION_PREFIX_SECTORS, PARTITION_SUFFIX_SECTORS, tail_count
     ));
     out.notes.push(
-        "Region A is the LBA7-pointed six-sector block with unresolved internal semantics; device tail window is separate forensic evidence"
+        "LBA7 compatibility extent is the LBA7-pointed six-sector compatibility block; device tail window is separate forensic evidence"
             .into(),
     );
     if !out.issues.is_empty() {

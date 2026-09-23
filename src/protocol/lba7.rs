@@ -1,9 +1,69 @@
 use super::{
-    edpf::{EdpfEntry64, PassInfo},
+    edpf::{EdpPartitionType, EdpfEntry64, PassInfo},
     profile::{Lba7EntryCount, Lba7PassinfoVersion},
     types::*,
 };
 use crate::crypto::xor_rolling;
+
+/// Partition-mode selector emitted by the first-party label tool.
+///
+/// The mapping is recovered from the original `cemssafeudisklabeltool.exe`
+/// radio buttons through `usbtoolbusmanage.dll` into
+/// `cemsusbregsiter.dll::CreatePartitions`.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[repr(u8)]
+pub enum Lba7PartitionMode {
+    /// 官方界面“缺省三分区”.
+    DefaultThreePartition = 0,
+    /// 官方界面“启动区和交换区二合一”.
+    BootShareCombined = 1,
+    /// 官方界面“整盘加密”.
+    WholeDiskEncrypted = 2,
+    /// 官方界面“内外网通用双分区”.
+    IntranetExtranetDualPartition = 3,
+}
+
+impl Lba7PartitionMode {
+    pub const fn ui_name_zh(self) -> &'static str {
+        match self {
+            Self::DefaultThreePartition => "缺省三分区",
+            Self::BootShareCombined => "启动区和交换区二合一",
+            Self::WholeDiskEncrypted => "整盘加密",
+            Self::IntranetExtranetDualPartition => "内外网通用双分区",
+        }
+    }
+
+    pub const fn partition_types(self) -> &'static [EdpPartitionType] {
+        match self {
+            Self::DefaultThreePartition => &[
+                EdpPartitionType::Boot,
+                EdpPartitionType::Share,
+                EdpPartitionType::Encrypt,
+            ],
+            Self::BootShareCombined => &[EdpPartitionType::Share, EdpPartitionType::Encrypt],
+            Self::WholeDiskEncrypted => &[EdpPartitionType::Boot, EdpPartitionType::Encrypt],
+            Self::IntranetExtranetDualPartition => {
+                &[EdpPartitionType::Boot, EdpPartitionType::Share]
+            }
+        }
+    }
+
+    pub fn from_partition_types(types: &[u32]) -> Option<Self> {
+        [
+            Self::DefaultThreePartition,
+            Self::BootShareCombined,
+            Self::WholeDiskEncrypted,
+            Self::IntranetExtranetDualPartition,
+        ]
+        .into_iter()
+        .find(|mode| {
+            mode.partition_types()
+                .iter()
+                .map(|partition_type| partition_type.raw())
+                .eq(types.iter().copied())
+        })
+    }
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Entry2 {
@@ -37,6 +97,24 @@ impl Lba7View {
         xor_rolling(&self.stored_plain, self.k0)
             .try_into()
             .expect("LBA7 sector length")
+    }
+
+    pub fn partition_types(&self) -> Vec<u32> {
+        let mut out = vec![
+            self.entries_0_1[0].partition_type,
+            self.entries_0_1[1].partition_type,
+        ];
+        if let Entry2::Present(entry) = self.entry2 {
+            out.push(entry.partition_type);
+        }
+        out
+    }
+
+    /// Returns a first-party label-tool mode only when the LBA7 type sequence
+    /// exactly matches one of the four producer cases. Unknown historical
+    /// sequences remain unclassified instead of being guessed.
+    pub fn official_partition_mode(&self) -> Option<Lba7PartitionMode> {
+        Lba7PartitionMode::from_partition_types(&self.partition_types())
     }
 }
 

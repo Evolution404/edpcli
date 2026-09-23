@@ -1,0 +1,96 @@
+{
+  "status": "COMPLETE_LBA7_COMPAT_FIXED_FAT16_TEMPLATE_ZERO8_PHYSICAL_OFFSET_TWEAK",
+  "date": "2026-09-23",
+  "canonical_name": {
+    "metadata": "LBA7 legacy EDP partition table",
+    "source_type": "tagEdpPartionInfo / EDP_PARTION_INFO",
+    "payload": "LBA7 legacy compatibility extent",
+    "naming_evidence": "audit/protocol/lba7_compatibility/evidence/source_naming_dwarf_20260923.json"
+  },
+  "lba7_binding": {
+    "entry_type": 4,
+    "sector_size": 512,
+    "partition_size": 3072,
+    "two_entry_profile": "entry1 points to the extent",
+    "three_entry_profile": "entry1 and entry2 point to the same extent",
+    "authoritative_address_field": "StartSector"
+  },
+  "plaintext": {
+    "fixture": "audit/protocol/lba7_compatibility/gold/lba7_compat_plain_zero8.bin",
+    "size_bytes": 3072,
+    "sha256": "386595e473d3051e07fac43a02e0a8f8134b77858bb12e93246e4ebfbf51ee1c",
+    "format": "fixed six-sector FAT16 compatibility image",
+    "boot_sector": {
+      "jump_hex": "eb3c90",
+      "oem": "MSDOS5.0",
+      "bytes_per_sector": 512,
+      "sectors_per_cluster": 1,
+      "reserved_sectors": 1,
+      "fat_count": 1,
+      "root_entries": 16,
+      "total_sectors32": 6,
+      "sectors_per_fat16": 2,
+      "signature_hex_at_0x1fe": "55aa"
+    },
+    "active_file": {
+      "short_name_gbk": "你的U~1 TXT",
+      "first_cluster": 3,
+      "size_bytes": 82,
+      "data_offset": "0xA00",
+      "gb18030_text": "您的U盘数据已经升级，但客户端得程序是旧版本的，如果要使用U盘数据请升级客户端程序。"
+    },
+    "template_sources": [
+      {
+        "path": "/Users/zhangyuxi/Desktop/u_disk/VRV/cems/Edp/edpdrivers/vrvaud_c.dll",
+        "sha256": "57a290d900bc2c97e515b8549a2cffdf9f57ba90ce8f489cfe03c455a2797b1f",
+        "template_raw_file_offset": "0x1697d8",
+        "exact_3072_byte_match": true
+      },
+      {
+        "path": "/Users/zhangyuxi/Desktop/u_disk/VRV/cems/ydcc/vrvaud_c.dll",
+        "sha256": "7b1fc2aae299ee296a774d7e8d693e77f04767cf2326692c453b43eaee913069",
+        "template_raw_file_offset": "0x203ee8",
+        "exact_3072_byte_match": true
+      }
+    ]
+  },
+  "crypto": {
+    "family": "EDPSECDISK200709 / A6B0-A7F0 counter-tweaked AES-128 family",
+    "key_hex": "0000000000000000",
+    "key_length": 8,
+    "tweak_seed": "physical backing byte offset = StartSector * 512",
+    "mapping": "driver transforms backing_offset + virtual_offset before physical read/write"
+  },
+  "physical_crosscheck": [
+    {
+      "profile": "sandisk-nopwd-two-entry",
+      "start_lba": 120164408,
+      "physical_byte_offset": 61524176896,
+      "ciphertext_sha256": "aaeffbba440e553c2eb47accac54552c9b53af9d4951f728ac700a2e81aca0a0",
+      "decrypt_plaintext_sha256": "386595e473d3051e07fac43a02e0a8f8134b77858bb12e93246e4ebfbf51ee1c",
+      "template_encrypt_bit_exact_to_physical": true,
+      "old_driver_result_identical": true,
+      "current_driver_result_identical": true
+    },
+    {
+      "profile": "lexar-current",
+      "start_lba": 243623933,
+      "physical_byte_offset": 124735453696,
+      "ciphertext_sha256": "fbf45d4713664d1e68eca634e8e9c04565be8b60d9ad4e1a18b7df3c766aaa24",
+      "decrypt_plaintext_sha256": "386595e473d3051e07fac43a02e0a8f8134b77858bb12e93246e4ebfbf51ee1c",
+      "template_encrypt_bit_exact_to_physical": true,
+      "old_driver_result_identical": true,
+      "current_driver_result_identical": true
+    }
+  ],
+  "mount_and_io_binding": {
+    "fallback_evidence": "audit/protocol/lba7_compatibility/evidence/lba7_compat_fallback_mount_20260923.json",
+    "write_evidence": "audit/protocol/lba7_compatibility/evidence/lba7_compat_conditional_write_20260923.json",
+    "facts": [
+      "When preferred new-label parsing fails, the historical controller reads the LBA7 EDP_PARTION_INFO table and converts the legacy type4 entry to the runtime partition form.",
+      "EdpMountFile receives StartSector, PartionSize and NeedEncrypt from that converted entry.",
+      "The driver bounds virtual I/O to PartionSize and maps it to backing_offset + virtual_offset."
+    ]
+  },
+  "open_provenance": "The exact historical vrvaud_c callsite that first submitted the 3072-byte template remains unidentified; this does not affect byte, format, address or crypto closure."
+}

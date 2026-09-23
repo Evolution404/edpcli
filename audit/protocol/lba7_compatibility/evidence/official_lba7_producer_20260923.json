@@ -1,0 +1,166 @@
+{
+  "id": "S-LBA7-OFFICIAL-PRODUCER",
+  "date": "2026-09-23",
+  "scope": "First-party Windows label-tool stack captured under VRV/cems/ydcc. Conclusions in this record are producer-derived; physical samples are only cross-checks.",
+  "binaries": {
+    "cemssafeudisklabeltool_orig.exe": {
+      "sha256": "b530a82b29bbc43be8d415225392ca135ab7df8a8d9f69c6598493c4942e9e11",
+      "size": 1258312,
+      "mtime": "2026-06-11 14:12:00"
+    },
+    "usbtoolbusmanage.dll": {
+      "sha256": "08381e33d44d11719795b063a978a6646387ce40d62c2f7aeb514c0c308459e9",
+      "size": 1042248,
+      "mtime": "2026-04-09 17:03:30"
+    },
+    "cemsusbregsiter.dll": {
+      "sha256": "122b30301a7d23590f69313063414518f2b60d8535a57ee5d5a585a0c6b4c6eb",
+      "size": 1124680,
+      "mtime": "2026-04-09 17:03:28"
+    },
+    "edpediskctrl.dll": {
+      "sha256": "5be85c0f85dc65dd8f89e59a78f584a8325e5208441fc461e2a612501a5b3e08",
+      "size": 4430152,
+      "mtime": "2026-04-09 17:03:28"
+    }
+  },
+  "label_tool_mode_source": {
+    "ui_setup_function": "sub_479910",
+    "ui_offsets": [
+      {
+        "ui_offset": "0x94",
+        "object_name": "defaultPartRadio",
+        "official_text": "缺省三分区"
+      },
+      {
+        "ui_offset": "0x98",
+        "object_name": "bootAndExchangePartRadio",
+        "official_text": "启动区和交换区二合一"
+      },
+      {
+        "ui_offset": "0x9c",
+        "object_name": "allEncryptPartRadio",
+        "official_text": "整盘加密"
+      },
+      {
+        "ui_offset": "0xa0",
+        "object_name": "inAndOutNetPartRadio",
+        "official_text": "内外网通用双分区"
+      }
+    ],
+    "serializer_function": "sub_467470",
+    "runtime_offsets": [
+      {
+        "runtime_offset": "0xa8",
+        "mode": 0,
+        "machine_write": "0x467a5f"
+      },
+      {
+        "runtime_offset": "0xac",
+        "mode": 1,
+        "machine_write": "0x467a81"
+      },
+      {
+        "runtime_offset": "0xb0",
+        "mode": 2,
+        "machine_write": "0x467aa3"
+      },
+      {
+        "runtime_offset": "0xb4",
+        "mode": 3,
+        "machine_write": "0x467ac5"
+      }
+    ],
+    "binding": "WriteLabel embeds the generated UI object at this+0x14, so UI offsets 0x94/0x98/0x9c/0xa0 become runtime offsets 0xa8/0xac/0xb0/0xb4."
+  },
+  "mode_dataflow": [
+    {
+      "binary": "cemssafeudisklabeltool_orig.exe",
+      "function": "sub_42e8e0",
+      "evidence": "The compact write-label structure byte +0x34 is copied unchanged to LabelInfo +0x7db; partition-size fields +0x38/+0x3c/+0x40 likewise map to +0x7dc/+0x7e0/+0x7e4."
+    },
+    {
+      "binary": "usbtoolbusmanage.dll",
+      "function": "BusManageImp::WriteNormalULabel / sub_100a99f0",
+      "machine_anchor": "0x100a9cfd",
+      "evidence": "LabelInfo +0x7db is copied byte-for-byte into the registration input; adjacent partition fields are copied without mode remapping."
+    },
+    {
+      "binary": "cemsusbregsiter.dll",
+      "function": "sub_10046e80",
+      "source_anchor": "decompile lines 67619-67681",
+      "evidence": "The producer reads input +0x7db and expands mode 0..3 into fixed PartionType sequences."
+    }
+  ],
+  "official_mode_matrix": [
+    {
+      "mode": 0,
+      "official_text": "缺省三分区",
+      "partion_types": [
+        1,
+        2,
+        4
+      ]
+    },
+    {
+      "mode": 1,
+      "official_text": "启动区和交换区二合一",
+      "partion_types": [
+        2,
+        4
+      ]
+    },
+    {
+      "mode": 2,
+      "official_text": "整盘加密",
+      "partion_types": [
+        1,
+        4
+      ],
+      "special_case": "Producer forces the type1 configured size to 0x7e00 bytes and subtracts it from type4; the UI describes the user-visible mode as containing only the encrypted/private area."
+    },
+    {
+      "mode": 3,
+      "official_text": "内外网通用双分区",
+      "partion_types": [
+        1,
+        2
+      ]
+    }
+  ],
+  "partion_type_semantics": {
+    "binary": "edpediskctrl.dll",
+    "function": "CEdpDiskControl::InitDiskInfo",
+    "source_anchor": "EdpDiskControl.cpp decompile lines 50919-50935",
+    "mapping": {
+      "1": "boot / m_bHasBootPart",
+      "2": "share-exchange / m_bHasSharePart",
+      "4": "encrypt-private / m_bHasEncryptPart"
+    }
+  },
+  "lba7_compatibility_extent": {
+    "binary": "cemsusbregsiter.dll",
+    "create_partitions_function": "sub_1003db50",
+    "locator_function": "sub_10040110",
+    "locator_formula": "CHS_geometry_bytes - 0xE0000",
+    "logical_size": "0xC00 bytes, rounded up to a whole sector",
+    "entry0_rule": "Entry0 retains the first logical partition type and normal logical geometry, including StartSector=63 and the configured partition size adjusted for the 63-sector prefix.",
+    "later_entry_rule": "Legacy entries after entry0 retain their own PartionType, but CreatePartitions overwrites their StartSector with the common sub_10040110 locator and their PartionSize with the aligned 0xC00 size.",
+    "consequence": "In mode0, entry1 type2 and entry2 type4 legitimately point to the same 3072-byte physical extent. This is not evidence that type2 aliases type4. In mode1 the type2 entry is entry0 and therefore retains large logical geometry while the following type4 entry points to the 3072-byte extent. In mode3 the later compatibility pointer is type2, proving the extent is not type4-specific."
+  },
+  "lba7_serializer": {
+    "binary": "cemsusbregsiter.dll",
+    "function": "sub_10014da0",
+    "evidence": "Copies the 0xC0-byte legacy EDP_PARTION_INFO table, appends the 14-byte legacy pass-info block, applies the sector rolling-XOR transform, and writes the result for SectorSize*7 (LBA7)."
+  },
+  "conclusions": [
+    "LBA7 is a legacy EDP_PARTION_INFO table, not a type2 or type4 region.",
+    "PartionType 1/2/4 mean boot/share/encrypt respectively.",
+    "The fixed six-sector physical object is an LBA7 legacy compatibility extent whose pointer entry can be type2 or type4 depending on official mode and entry position.",
+    "Shared StartSector/PartionSize between type2 and type4 in a three-entry table is a producer-format artifact, not a logical-partition alias relationship."
+  ],
+  "limitations": [
+    "This producer matrix is proven for the captured first-party 2026 Windows stack. Older producer versions must be checked separately before claiming identical behavior across all historical versions.",
+    "No first-party standalone symbol naming the 0xC00 physical payload object was found; 'LBA7 legacy compatibility extent' is a descriptive project term."
+  ]
+}

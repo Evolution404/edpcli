@@ -1,12 +1,62 @@
 use edpcli::{
     crypto::{a6b0_full, a7f0_full, crc32_bare, xor_rolling},
     protocol::{
-        edpf::PassInfo,
+        edpf::{EdpPartitionType, PassInfo},
         lba12::parse_lba12,
-        lba7::{parse_lba7, Entry2},
+        lba7::{parse_lba7, Entry2, Lba7PartitionMode},
         profile::{Lba12Mode, Lba7EntryCount, Lba7PassinfoVersion},
     },
 };
+
+#[test]
+pub fn official_lba7_partition_types_and_label_modes_are_exact() {
+    assert_eq!(EdpPartitionType::from_raw(1), Some(EdpPartitionType::Boot));
+    assert_eq!(EdpPartitionType::from_raw(2), Some(EdpPartitionType::Share));
+    assert_eq!(
+        EdpPartitionType::from_raw(4),
+        Some(EdpPartitionType::Encrypt)
+    );
+    assert_eq!(EdpPartitionType::from_raw(3), None);
+    assert_eq!(EdpPartitionType::Boot.role(), "boot");
+    assert_eq!(EdpPartitionType::Share.role(), "share");
+    assert_eq!(EdpPartitionType::Encrypt.role(), "encrypt");
+
+    let cases = [
+        (
+            Lba7PartitionMode::DefaultThreePartition,
+            "缺省三分区",
+            vec![1, 2, 4],
+        ),
+        (
+            Lba7PartitionMode::BootShareCombined,
+            "启动区和交换区二合一",
+            vec![2, 4],
+        ),
+        (
+            Lba7PartitionMode::WholeDiskEncrypted,
+            "整盘加密",
+            vec![1, 4],
+        ),
+        (
+            Lba7PartitionMode::IntranetExtranetDualPartition,
+            "内外网通用双分区",
+            vec![1, 2],
+        ),
+    ];
+    for (mode, name, types) in cases {
+        assert_eq!(mode.ui_name_zh(), name);
+        assert_eq!(
+            mode.partition_types()
+                .iter()
+                .map(|partition_type| partition_type.raw())
+                .collect::<Vec<_>>(),
+            types
+        );
+        assert_eq!(Lba7PartitionMode::from_partition_types(&types), Some(mode));
+    }
+    assert_eq!(Lba7PartitionMode::from_partition_types(&[1, 4, 2]), None);
+    assert_eq!(Lba7PartitionMode::from_partition_types(&[4]), None);
+}
 
 #[test]
 pub fn lba7_packed_entries_and_pass_info_replay_all_physical_profiles() {
