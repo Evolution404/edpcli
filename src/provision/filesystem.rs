@@ -345,7 +345,7 @@ pub fn build_empty_exfat(
         sector[510..512].copy_from_slice(&[0x55, 0xaa]);
     }
     let boot_checksum = exfat_boot_checksum(&main_boot);
-    for chunk in main_boot[11].chunks_exact_mut(4) {
+    for chunk in main_boot[11].as_chunks_mut::<4>().0 {
         chunk.copy_from_slice(&boot_checksum.to_le_bytes());
     }
     for (index, sector) in main_boot.iter().enumerate() {
@@ -365,7 +365,7 @@ pub fn build_empty_exfat(
     fat_chain(&mut fat, root_cluster, 1)?;
     fat_chain(&mut fat, bitmap_cluster, bitmap_clusters)?;
     fat_chain(&mut fat, upcase_cluster, upcase_clusters)?;
-    for (index, chunk) in fat.chunks_exact(SECTOR_SIZE).enumerate() {
+    for (index, chunk) in fat.as_chunks::<SECTOR_SIZE>().0.iter().enumerate() {
         let mut sector = [0u8; SECTOR_SIZE];
         sector.copy_from_slice(chunk);
         sectors.insert(FAT_OFFSET + index as u64, sector);
@@ -432,9 +432,13 @@ pub fn encrypt_sparse_mode2(
         .iter()
         .map(|(&lba, sector)| {
             let mut encrypted = [0u8; SECTOR_SIZE];
-            for (source, target) in sector.chunks_exact(16).zip(encrypted.chunks_exact_mut(16)) {
-                let block: &[u8; 16] = source.try_into().expect("16-byte SM4 block");
-                target.copy_from_slice(&sm4_encrypt_block(block, file_key));
+            for (source, target) in sector
+                .as_chunks::<16>()
+                .0
+                .iter()
+                .zip(encrypted.as_chunks_mut::<16>().0.iter_mut())
+            {
+                target.copy_from_slice(&sm4_encrypt_block(source, file_key));
             }
             (lba, encrypted)
         })

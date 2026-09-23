@@ -354,7 +354,7 @@ pub fn acquire_deep(
                 {
                     continue;
                 }
-                for (offset, sector) in a.data.chunks_exact(512).enumerate() {
+                for (offset, sector) in a.data.as_chunks::<512>().0.iter().enumerate() {
                     reader
                         .sectors
                         .entry(e.start_lba - p.start_sector + offset as u64)

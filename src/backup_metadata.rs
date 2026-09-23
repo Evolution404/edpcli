@@ -154,6 +154,9 @@ fn artifact_id(partition_index: usize, name: &str) -> String {
     format!("raw.partition.{partition_index}.{name}")
 }
 
+// Mirrors one raw-evidence record into the extent/artifact model; keeping the
+// fields explicit makes call sites auditable against the on-disk capture schema.
+#[allow(clippy::too_many_arguments)]
 fn add_raw_extent(
     out: &mut MetadataAcquisition,
     dev: &mut dyn SectorDev,

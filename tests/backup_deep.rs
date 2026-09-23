@@ -260,7 +260,7 @@ fn exfat_fixture() -> (PartitionGeometry, SparseReader, u64, [u64; 2]) {
     }
     let checksum = exfat_boot_checksum(&boot_region);
     let mut checksum_sector = vec![0u8; 512];
-    for chunk in checksum_sector.chunks_exact_mut(4) {
+    for chunk in checksum_sector.as_chunks_mut::<4>().0 {
         chunk.copy_from_slice(&checksum.to_le_bytes());
     }
     sectors.insert(0, boot);
@@ -285,10 +285,10 @@ fn exfat_fixture() -> (PartitionGeometry, SparseReader, u64, [u64; 2]) {
     root[0] = 0x81;
     put32(&mut root, 20, 3);
     put64(&mut root, 24, 8);
-    let foo = exfat_file_set("foo.txt", 4, 5, false);
-    root[32..32 + foo.len()].copy_from_slice(&foo);
+    let root_file = exfat_file_set("foo.txt", 4, 5, false);
+    root[32..32 + root_file.len()].copy_from_slice(&root_file);
     let dir = exfat_file_set("dir", 5, 512, true);
-    let dir_offset = 32 + foo.len();
+    let dir_offset = 32 + root_file.len();
     root[dir_offset..dir_offset + dir.len()].copy_from_slice(&dir);
     sectors.insert(root_lba, root);
 

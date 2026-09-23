@@ -107,7 +107,7 @@ _edpcli() {
   _edpcli_flag_value --backup-dir; bak="$REPLY"
 
   if (( CURRENT == 2 )); then
-    compadd -- list info apply backup inspect convert completion version help
+    compadd -- list info apply backup provision inspect convert completion version help
     return
   fi
 
@@ -136,6 +136,20 @@ _edpcli() {
         _edpcli_backup_targets "$bak"
       fi
       ;;
+    provision)
+      if (( CURRENT == 3 )); then
+        compadd -- plan image write convert
+        return
+      fi
+      if [[ "$cur" == -* ]]; then
+        case "$action" in
+          plan)    compadd -- --disk --mode --boot-mib --share-mib --encrypt-mib --label-id --user --dept --label --password --volume-label --help ;;
+          image)   compadd -- --disk --mode --boot-mib --share-mib --encrypt-mib --label-id --user --dept --label --password --volume-label --out --help ;;
+          write)   compadd -- --disk --mode --boot-mib --share-mib --encrypt-mib --label-id --user --dept --label --password --volume-label --yes --help ;;
+          convert) compadd -- --disk --write --yes --backup-dir --help ;;
+        esac
+      fi
+      ;;
     info)
       if [[ "$cur" == -* ]]; then
         compadd -- --disk --id --backup-dir --help
@@ -156,7 +170,7 @@ _edpcli() {
     convert) [[ "$cur" == -* ]] && compadd -- --dir --id --size --out --help ;;
     list)    [[ "$cur" == -* ]] && compadd -- --backup-dir --help ;;
     completion) (( CURRENT == 3 )) && compadd -- zsh bash fish ;;
-    help) (( CURRENT == 3 )) && compadd -- list info apply backup inspect convert completion version ;;
+    help) (( CURRENT == 3 )) && compadd -- list info apply backup provision inspect convert completion version ;;
   esac
 }
 
@@ -198,7 +212,7 @@ _edpcli() {
   _edpcli_flag_value --backup-dir; bak="$EDPCLI_VALUE"
 
   if (( COMP_CWORD == 1 )); then
-    COMPREPLY=( $(compgen -W 'list info apply backup inspect convert completion version help' -- "$cur") )
+    COMPREPLY=( $(compgen -W 'list info apply backup provision inspect convert completion version help' -- "$cur") )
     return
   fi
 
@@ -230,6 +244,18 @@ _edpcli() {
       elif [[ "$action" == restore || "$action" == verify || "$action" == delete ]]; then
         _edpcli_backup_targets "$bak" "$cur"
       fi ;;
+    provision)
+      if (( COMP_CWORD == 2 )); then
+        COMPREPLY=( $(compgen -W 'plan image write convert' -- "$cur") )
+      elif [[ "$cur" == -* ]]; then
+        case "$action" in
+          plan)    vals='--disk --mode --boot-mib --share-mib --encrypt-mib --label-id --user --dept --label --password --volume-label --help' ;;
+          image)   vals='--disk --mode --boot-mib --share-mib --encrypt-mib --label-id --user --dept --label --password --volume-label --out --help' ;;
+          write)   vals='--disk --mode --boot-mib --share-mib --encrypt-mib --label-id --user --dept --label --password --volume-label --yes --help' ;;
+          convert) vals='--disk --write --yes --backup-dir --help' ;;
+        esac
+        COMPREPLY=( $(compgen -W "$vals" -- "$cur") )
+      fi ;;
     info)
       if [[ "$cur" == -* ]]; then
         vals='--disk --id --backup-dir --help'
@@ -250,7 +276,7 @@ _edpcli() {
     convert) vals='--dir --id --size --out --help'; COMPREPLY=( $(compgen -W "$vals" -- "$cur") ) ;;
     list) vals='--backup-dir --help'; COMPREPLY=( $(compgen -W "$vals" -- "$cur") ) ;;
     completion) COMPREPLY=( $(compgen -W 'zsh bash fish' -- "$cur") ) ;;
-    help) COMPREPLY=( $(compgen -W 'list info apply backup inspect convert completion version' -- "$cur") ) ;;
+    help) COMPREPLY=( $(compgen -W 'list info apply backup provision inspect convert completion version' -- "$cur") ) ;;
   esac
 }
 
@@ -308,24 +334,36 @@ function __edpcli_wants_backup_target
 end
 
 complete -c edpcli -f
-complete -c edpcli -n '__fish_use_subcommand' -a 'list info apply backup inspect convert completion version help'
+complete -c edpcli -n '__fish_use_subcommand' -a 'list info apply backup provision inspect convert completion version help'
 complete -c edpcli -n '__fish_seen_subcommand_from backup' -a 'create list restore verify delete prune'
+complete -c edpcli -n '__fish_seen_subcommand_from provision' -a 'plan image write convert'
 complete -c edpcli -n '__fish_seen_subcommand_from backup; and __fish_seen_subcommand_from create' -l deep -d '只读文件系统分析'
 complete -c edpcli -n '__edpcli_wants_backup_target' -a '(__edpcli_backup_numbers) (__edpcli_backup_files)'
-complete -c edpcli -n '__fish_seen_subcommand_from inspect info apply backup' -l disk -r -a '(edpcli __complete disk 2>/dev/null)'
+complete -c edpcli -n '__fish_seen_subcommand_from inspect info apply backup provision' -l disk -r -a '(edpcli __complete disk 2>/dev/null)'
 complete -c edpcli -n '__fish_seen_subcommand_from inspect' -a 'raw decode meta'
 complete -c edpcli -n '__fish_seen_subcommand_from inspect' -l lba -r -a '(edpcli __complete lba 2>/dev/null)'
 complete -c edpcli -n '__fish_seen_subcommand_from inspect' -l count -r
 complete -c edpcli -n '__fish_seen_subcommand_from inspect' -l export -r
 complete -c edpcli -n '__fish_seen_subcommand_from inspect info convert' -l id -r
-complete -c edpcli -n '__fish_seen_subcommand_from backup inspect info list apply' -l backup-dir -r
-complete -c edpcli -n '__fish_seen_subcommand_from backup apply' -l yes
+complete -c edpcli -n '__fish_seen_subcommand_from backup inspect info list apply provision' -l backup-dir -r
+complete -c edpcli -n '__fish_seen_subcommand_from backup apply provision' -l yes
 complete -c edpcli -n '__fish_seen_subcommand_from backup' -l keep -r
 complete -c edpcli -n '__fish_seen_subcommand_from apply convert' -l size -r
 complete -c edpcli -n '__fish_seen_subcommand_from apply' -l dry-run
 complete -c edpcli -n '__fish_seen_subcommand_from apply' -l force
 complete -c edpcli -n '__fish_seen_subcommand_from convert' -l dir -r
 complete -c edpcli -n '__fish_seen_subcommand_from convert' -l out -r
+complete -c edpcli -n '__fish_seen_subcommand_from provision' -l mode -r -a '0 1 2 3'
+complete -c edpcli -n '__fish_seen_subcommand_from provision' -l boot-mib -r
+complete -c edpcli -n '__fish_seen_subcommand_from provision' -l share-mib -r
+complete -c edpcli -n '__fish_seen_subcommand_from provision' -l encrypt-mib -r
+complete -c edpcli -n '__fish_seen_subcommand_from provision' -l label-id -r
+complete -c edpcli -n '__fish_seen_subcommand_from provision' -l user -r
+complete -c edpcli -n '__fish_seen_subcommand_from provision' -l dept -r
+complete -c edpcli -n '__fish_seen_subcommand_from provision' -l label -r
+complete -c edpcli -n '__fish_seen_subcommand_from provision' -l password -r
+complete -c edpcli -n '__fish_seen_subcommand_from provision' -l volume-label -r
+complete -c edpcli -n '__fish_seen_subcommand_from provision' -l write
 complete -c edpcli -n '__fish_seen_subcommand_from completion' -a 'zsh bash fish'
 
 # v2 backup create / backup restore / backup verify / backup delete / backup prune
@@ -345,6 +383,7 @@ mod tests {
                 "info",
                 "apply",
                 "backup",
+                "provision",
                 "inspect",
                 "backup create",
                 "backup restore",

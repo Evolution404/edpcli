@@ -101,7 +101,7 @@ pub(super) fn parse(
     }
     let is32 = clusters >= 65525;
     if (is32 && (fat16 != 0 || root_entries != 0 || u16le(boot, 42) != 0))
-        || (!is32 && (fat16 == 0 || root_entries == 0 || root_entries % 16 != 0))
+        || (!is32 && (fat16 == 0 || root_entries == 0 || !root_entries.is_multiple_of(16)))
     {
         return Err("inconsistent FAT type and BPB".into());
     }
@@ -185,7 +185,7 @@ pub(super) fn parse(
                 return Err("directory metadata exceeds Deep budget".into());
             }
             let sector = read(r, lba, total)?;
-            for e in sector.chunks_exact(32) {
+            for e in sector.as_chunks::<32>().0 {
                 if e[0] == 0 {
                     if !lfn.parts.is_empty() {
                         return Err("orphaned long filename".into());
@@ -330,7 +330,7 @@ impl LongName {
     }
     fn finish(&mut self, e: &[u8]) -> Result<String, String> {
         if self.parts.is_empty() {
-            if e[..11].iter().any(|&c| c >= 128 || c < 32) {
+            if e[..11].iter().any(|&c| !(32..128).contains(&c)) {
                 return Err("non-ASCII short name needs an explicit OEM code page".into());
             }
             let mut base = String::from_utf8(e[..8].to_vec())

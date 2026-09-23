@@ -28,8 +28,8 @@ impl LegacyLba7KeyMaterial {
 pub fn wrap_legacy_lba7_file_key(password: &[u8], file_key: [u8; 8]) -> LegacyLba7KeyMaterial {
     let folded = legacy_password_fold32(password);
     let mut wrapped_file_key = [0u8; 8];
-    for (index, chunk) in file_key.chunks_exact(4).enumerate() {
-        let word = u32::from_le_bytes(chunk.try_into().unwrap()) ^ folded;
+    for (index, chunk) in file_key.as_chunks::<4>().0.iter().enumerate() {
+        let word = u32::from_le_bytes(*chunk) ^ folded;
         wrapped_file_key[index * 4..index * 4 + 4].copy_from_slice(&word.to_le_bytes());
     }
     LegacyLba7KeyMaterial {
@@ -147,7 +147,7 @@ pub(crate) fn md5_digest(input: &[u8]) -> [u8; 16] {
     padded.extend_from_slice(&bit_len.to_le_bytes());
 
     let mut state = [0x67452301u32, 0xefcdab89, 0x98badcfe, 0x10325476];
-    for chunk in padded.chunks_exact(64) {
+    for chunk in padded.as_chunks::<64>().0 {
         let mut m = [0u32; 16];
         for (i, word) in m.iter_mut().enumerate() {
             *word = u32::from_le_bytes(chunk[i * 4..i * 4 + 4].try_into().unwrap());

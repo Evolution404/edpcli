@@ -107,7 +107,7 @@ fn validate_type4(entry: &EdpfEntry96) -> Result<PasswordlessConversionPlan, Str
     if entry.start_sector <= SHARE_START {
         return Err("source type4 starts before the passwordless front region can exist".into());
     }
-    if entry.partition_size < SECTOR as u64 || entry.partition_size % SECTOR as u64 != 0 {
+    if entry.partition_size < SECTOR as u64 || !entry.partition_size.is_multiple_of(SECTOR as u64) {
         return Err("source type4 size is empty or not 512-byte aligned".into());
     }
     let front_sectors = entry.start_sector - SHARE_START;

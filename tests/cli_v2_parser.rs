@@ -1,4 +1,4 @@
-use edpcli::cli_args::{parse_args, BackupAction, InspectMode, Parsed};
+use edpcli::cli_args::{parse_args, BackupAction, InspectMode, Parsed, ProvisionAction};
 
 fn args(values: &[&str]) -> Vec<String> {
     values.iter().map(|value| (*value).to_string()).collect()
@@ -34,6 +34,77 @@ fn apply_owns_dry_run_instead_of_run_command() {
         }
         _ => panic!("expected apply"),
     }
+}
+
+#[test]
+fn provision_parses_all_four_product_actions_and_rejects_ambiguous_flags() {
+    let common = [
+        "--disk",
+        "4",
+        "--mode",
+        "1",
+        "--share-mib",
+        "64",
+        "--encrypt-mib",
+        "128",
+        "--label-id",
+        "1402259934",
+        "--user",
+        "USER06",
+        "--dept",
+        "江苏省电力有限公司",
+        "--label",
+        "江苏电力!SAFE6",
+        "--password",
+        "ProofPass1!",
+    ];
+    let mut plan = vec!["provision", "plan"];
+    plan.extend(common);
+    match parse_args(&args(&plan)).expect("provision plan") {
+        Parsed::Provision(ProvisionAction::Plan(opts)) => {
+            assert_eq!(opts.mode, 1);
+            assert_eq!(opts.disk, Some(4));
+            assert_eq!(opts.volume_label, "SAFE6");
+        }
+        _ => panic!("expected provision plan"),
+    }
+
+    let mut image = vec!["provision", "image"];
+    image.extend(common);
+    image.extend(["--out", "/tmp/edp.img"]);
+    assert!(matches!(
+        parse_args(&args(&image)).unwrap(),
+        Parsed::Provision(ProvisionAction::Image { .. })
+    ));
+
+    let mut write = vec!["provision", "write"];
+    write.extend(common);
+    write.push("--yes");
+    assert!(matches!(
+        parse_args(&args(&write)).unwrap(),
+        Parsed::Provision(ProvisionAction::Write { yes: true, .. })
+    ));
+
+    assert!(matches!(
+        parse_args(&args(&[
+            "provision",
+            "convert",
+            "--disk",
+            "4",
+            "--write",
+            "--yes"
+        ]))
+        .unwrap(),
+        Parsed::Provision(ProvisionAction::Convert {
+            disk: Some(4),
+            write: true,
+            yes: true,
+            ..
+        })
+    ));
+    assert!(parse_args(&args(&["provision", "plan", "--onlyid", "1"])).is_err());
+    assert!(parse_args(&args(&["provision", "convert", "--yes"])).is_err());
+    assert!(parse_args(&args(&["provision", "plan", "--mode", "4"])).is_err());
 }
 
 #[test]

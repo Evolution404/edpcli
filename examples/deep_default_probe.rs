@@ -16,8 +16,10 @@ fn exfat_boot_checksum(boot: &[u8]) -> Option<bool> {
         });
     Some(
         boot[11 * 512..12 * 512]
-            .chunks_exact(4)
-            .all(|word| u32::from_le_bytes(word.try_into().unwrap()) == calculated),
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .all(|word| u32::from_le_bytes(*word) == calculated),
     )
 }
 

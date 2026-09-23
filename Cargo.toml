@@ -1,6 +1,6 @@
 [package]
 name = "edpcli"
-version = "2.3.0"
+version = "2.4.0"
 edition = "2021"
 rust-version = "1.98"
 description = "EDP/cems U 盘管理 CLI（识别、元信息、备份、恢复与免密转换）"
@@ -28,6 +28,7 @@ strip = true
 ratatui = "0.29.0"
 crossterm = "0.28.1"
 encoding_rs = "0.8"
+getrandom = "0.3"
 libc = "0.2"
 sha2 = "0.10"
 serde = { version = "1", features = ["derive"] }

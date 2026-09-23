@@ -312,6 +312,7 @@ fn orthogonal_profile_axes_keep_required_historical_forks_independent() {
 }
 
 #[test]
+#[allow(clippy::needless_range_loop)]
 fn field_catalog_has_exact_byte_ownership_for_every_profile_state() {
     let axes = parse_axes();
     let rows = parse_catalog();

@@ -83,7 +83,9 @@ pub fn dept_and_safe6_fields_replay_physical_profiles_without_losing_backing() {
             assert!(s.start_lba > 0);
             let twelve = a6b0_full(&image[6144..6656], &crc.to_le_bytes(), 0);
             let entry = twelve
-                .chunks_exact(96)
+                .as_chunks::<96>()
+                .0
+                .iter()
                 .take(3)
                 .find(|e| u32::from_le_bytes(e[12..16].try_into().unwrap()) == 4)
                 .unwrap();

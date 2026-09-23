@@ -3,8 +3,8 @@
 `edpcli` 是 EDP/cems U 盘管理命令行工具，支持 macOS、Linux、Windows。普通使用只需要
 理解“设备、改造、备份”三个对象，不需要手工输入内部 onlyid 或备份索引参数。
 
-> `apply` 和 `backup restore` 会真实写入物理盘。工具会执行系统盘保护、USB 整盘
-> 校验、目标选择器固定、卸载/锁卷、重新打开后身份复核、原子写入、同步、读回校验和
+> `apply`、`backup restore` 和 `provision write/convert --write` 会真实写入物理盘。工具会执行系统盘保护、USB 整盘
+> 校验、目标选择器固定、卸载/锁卷、重新打开后身份复核、事务写入、同步、读回校验和
 > 失败回滚。任何关键事实无法确认时都会拒绝继续。
 
 ## 1. 安装
@@ -66,7 +66,7 @@ edpcli.exe list
 `--version` 保持单行；`version` 输出版本、平台、架构、目标三元组、UTC 编译时间、
 Git 提交、Rust 编译器和构建类型。
 
-## 2. 最常用的五个任务
+## 2. 最常用任务
 
 ### 2.1 查看当前 U 盘
 
@@ -193,7 +193,60 @@ edpcli apply --disk 4 --force --yes
 
 `--force` 只用于明确允许重复改造已免密盘；`--yes` 用于脚本化确认。
 
-### 2.6 管理备份
+### 2.6 官方四模式制盘与严格免密改造
+
+新盘制盘使用 `provision` 命令。模式与官方工具一致：
+
+| 模式 | 含义 | 逻辑分区 |
+|---:|---|---|
+| `0` | 缺省三分区 | type1 + type2 + type4 |
+| `1` | 启动区和交换区二合一 | type2 + type4 |
+| `2` | 整盘加密 | 兼容 type1 + type4 |
+| `3` | 内外网通用双分区 | type1 + type2 |
+
+先只读检查目标和布局：
+
+```bash
+edpcli provision plan --disk 4 --mode 1 \
+  --share-mib 1024 --encrypt-mib 2048 \
+  --label-id 1402259934 --user USER06 \
+  --dept '江苏省电力有限公司' --label '江苏电力!SAFE6' \
+  --password '你的密码'
+```
+
+导出与该目标盘绑定的稀疏制盘镜像：
+
+```bash
+edpcli provision image --disk 4 --mode 1 \
+  --share-mib 1024 --encrypt-mib 2048 \
+  --label-id 1402259934 --user USER06 \
+  --dept '江苏省电力有限公司' --label '江苏电力!SAFE6' \
+  --password '你的密码' --out ./edp-mode1.img
+```
+
+真实制盘把 `plan` 改为 `write`。该操作是破坏性的：程序会固定目标 USB 整盘、容量和
+USB/SCSI 身份，保留目标盘原有 LBA3 制造商元数据，生成随机文件密钥、旧版兼容密钥和
+协议随机材料；写入时先提交文件系统与 LCE，再提交 LBA1-LBA12，最后提交 MBR。
+所有触碰扇区都会先镜像，写入或读回失败时整组回滚。
+
+当前产品写入只开放已经完整验证的 `exFAT + mode2(SM4)` 数据区路线。协议模型虽然能够
+描述其他文件系统和封装类型，但真实写入不会把“可描述”当作“已验证”。
+
+已有官方盘改成严格免密二合一盘：
+
+```bash
+edpcli provision convert --disk 4
+edpcli provision convert --disk 4 --write
+edpcli provision convert --disk 4 --write --yes
+```
+
+不带 `--write` 时只生成转换预览。写入时保持原 type4 起点、大小和密钥材料不变，也不
+移动或重加密 type4；LBA63 到原 type4 起点前的区域会重建为空的明文 exFAT，并只修改
+目标转换需要的 LBA0、LBA7、LBA12。**当前版本不会迁移前部 type1/type2 中已有的用户
+文件**，需要保留这些文件时必须在执行转换前自行复制出来。程序会在写盘前创建现有的
+EDPB 元数据备份，但该备份不是前部用户文件备份。
+
+### 2.7 管理备份
 
 ```bash
 edpcli backup create

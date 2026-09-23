@@ -57,17 +57,19 @@ fn obsolete_parallel_plans_and_handoffs_do_not_reappear() {
 }
 
 #[test]
-fn provisioning_keeps_current_state_and_four_mode_roadmap_separate() {
+fn provisioning_documents_current_four_mode_product_and_future_extensions() {
     let doc = fs::read_to_string("docs/provisioning/PROVISIONING.md").unwrap();
     for required in [
         "## 1. 当前已经实现的能力",
-        "## 3. 路线图 A：完整复刻官方四模式新盘制盘",
-        "## 4. 路线图 B：已有官方盘转换为“启动区和交换区二合一”",
+        "## 3. 当前实现 A：官方四模式新盘制盘",
+        "## 4. 当前实现 B：已有官方盘转换为“启动区和交换区二合一”",
         "缺省三分区",
         "启动区和交换区二合一",
         "整盘加密",
         "内外网通用双分区",
-        "当前构造器不是完整的官方四模式制盘器",
+        "## 5. 当前产品入口",
+        "edpcli provision write",
+        "## 6. 后续扩展顺序",
     ] {
         assert!(
             doc.contains(required),

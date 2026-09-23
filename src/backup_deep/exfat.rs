@@ -231,7 +231,7 @@ struct StreamRecord {
 }
 
 fn parse_file_set(bytes: &[u8]) -> Result<StreamRecord, String> {
-    if bytes.len() < 96 || bytes.len() % 32 != 0 || bytes[0] != 0x85 {
+    if bytes.len() < 96 || !bytes.len().is_multiple_of(32) || bytes[0] != 0x85 {
         return Err("invalid exFAT file entry set".into());
     }
     let secondary_count = bytes[1] as usize;
@@ -262,7 +262,7 @@ fn parse_file_set(bytes: &[u8]) -> Result<StreamRecord, String> {
         return Err("exFAT filename entry count mismatch".into());
     }
     let mut units = Vec::with_capacity(filename_entries * 15);
-    for entry in bytes[64..].chunks_exact(32) {
+    for entry in bytes[64..].as_chunks::<32>().0 {
         if entry[0] != 0xc1 || entry[1] != 0 {
             return Err("invalid exFAT filename entry".into());
         }
@@ -377,8 +377,10 @@ pub(super) fn parse(
     }
     let checksum = boot_checksum(&boot_region);
     if !boot_region[11]
-        .chunks_exact(4)
-        .all(|chunk| u32::from_le_bytes(chunk.try_into().unwrap()) == checksum)
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .all(|chunk| u32::from_le_bytes(*chunk) == checksum)
     {
         return Err("exFAT boot-region checksum mismatch".into());
     }

@@ -99,8 +99,13 @@ fn real_shape_fat12_boot(partition_start: u64, sector_count: u64) -> [u8; SECTOR
 
 fn encrypt_mode2_sector(plain: &[u8; SECTOR], key: &[u8; 16]) -> [u8; SECTOR] {
     let mut out = [0u8; SECTOR];
-    for (source, target) in plain.chunks_exact(16).zip(out.chunks_exact_mut(16)) {
-        target.copy_from_slice(&sm4_encrypt_block(source.try_into().unwrap(), key));
+    for (source, target) in plain
+        .as_chunks::<16>()
+        .0
+        .iter()
+        .zip(out.as_chunks_mut::<16>().0.iter_mut())
+    {
+        target.copy_from_slice(&sm4_encrypt_block(source, key));
     }
     out
 }

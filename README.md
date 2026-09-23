@@ -4,13 +4,14 @@ Rust 单二进制工具，支持 **macOS / Linux / Windows**。三平台共享�
 识别、备份、元信息、扇区检查、转换与安全写入核心；操作系统差异统一收敛在
 `src/platform/`。
 
-CLI v2 的日常工作流只有五类任务：
+CLI v2 的日常工作流包括：
 
 ```text
 edpcli list       查看当前插入的 U 盘
 edpcli info       查看 U 盘或备份详细信息
 edpcli apply      预览或执行 U 盘改造
 edpcli backup     创建、查看、校验、恢复和清理备份
+edpcli provision  官方四模式制盘与严格免密改造
 edpcli inspect    高级：检查底层 LBA/hex 数据
 ```
 
@@ -72,6 +73,11 @@ edpcli backup delete
 edpcli backup delete 2,4,5
 edpcli backup prune --keep 2
 
+edpcli provision plan --disk 4 --mode 1 --share-mib 1024 --encrypt-mib 2048 \
+  --label-id 1402259934 --user USER06 --dept '江苏省电力有限公司' \
+  --label '江苏电力!SAFE6' --password '你的密码'
+edpcli provision convert --disk 4
+edpcli provision convert --disk 4 --write
 edpcli inspect meta --lba 7
 edpcli inspect raw --disk 4 --lba 240250283-240250288
 edpcli inspect decode --disk 4 --lba 20480 --count 8
@@ -130,7 +136,7 @@ U 盘串盘。
 
 ## 写盘安全
 
-`apply` 与 `backup restore` 的真实写盘路径保持以下 fail-closed 门禁：
+`apply`、`backup restore` 与 `provision` 的真实写盘路径保持以下无法确认即拒绝继续门禁：
 
 - 目标必须是外接 USB 整盘；
 - 系统盘身份无法确认时拒绝继续；
@@ -140,6 +146,8 @@ U 盘串盘。
 - reopen 后再次核对介质和写前元数据；
 - 原子写入、sync、逐扇读回校验；
 - 任一写入失败自动回滚，回滚结果有独立退出码；
+- 新盘制盘原样保留目标制造商 LBA3，并在重开后再次核对；
+- 严格免密转换保持 type4 起点、大小和密钥材料不变；
 - 恢复备份必须通过大小、SHA-256 与当前盘 LBA4 身份终验。
 
 `edpcli apply --dry-run` 复用真实识别和布局计算，但不会创建备份、请求写入确认、

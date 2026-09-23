@@ -69,6 +69,44 @@ pub fn build_official_provision_write_image(
         );
     }
 
+    if total_sectors == 0 {
+        return Err("target has zero sectors".into());
+    }
+
+    let lce_start = plan.lba7_compatibility_extent.start_lba;
+    let lce_end = lce_start
+        .checked_add(plan.lba7_compatibility_extent.size_sectors)
+        .ok_or("LCE range overflow")?;
+    if lce_end > total_sectors {
+        return Err(format!(
+            "LCE range LBA{lce_start}..{} exceeds target LBA{}",
+            lce_end - 1,
+            total_sectors - 1
+        ));
+    }
+    for partition in plan.logical_partitions(SECTOR as u64)? {
+        let end = partition.end_sector_exclusive();
+        if end > total_sectors {
+            return Err(format!(
+                "{} partition LBA{}..{} exceeds target LBA{}",
+                partition.partition_type.role(),
+                partition.start_sector,
+                end.saturating_sub(1),
+                total_sectors - 1
+            ));
+        }
+        if partition.start_sector < lce_end && lce_start < end {
+            return Err(format!(
+                "{} partition LBA{}..{} overlaps LCE LBA{}..{}",
+                partition.partition_type.role(),
+                partition.start_sector,
+                end - 1,
+                lce_start,
+                lce_end - 1
+            ));
+        }
+    }
+
     let filesystems =
         build_official_exfat_partitions(plan, file_key, volume_label, volume_serials)?;
     let mut patch = BTreeMap::new();
@@ -85,7 +123,7 @@ pub fn build_official_provision_write_image(
     }
 
     let lce = build_lce_ciphertext(plan.lba7_compatibility_extent)?;
-    for (index, sector) in lce.chunks_exact(SECTOR).enumerate() {
+    for (index, sector) in lce.as_chunks::<SECTOR>().0.iter().enumerate() {
         let lba = plan
             .lba7_compatibility_extent
             .start_lba

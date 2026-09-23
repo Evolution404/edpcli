@@ -70,6 +70,40 @@ pub struct InfoOpts {
     pub backup_dir: Option<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProvisionNewOpts {
+    pub disk: Option<u32>,
+    pub mode: u8,
+    pub boot_mib: Option<u64>,
+    pub share_mib: Option<u64>,
+    pub encrypt_mib: Option<u64>,
+    pub label_id: String,
+    pub user: String,
+    pub dept: String,
+    pub label: String,
+    pub password: String,
+    pub volume_label: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ProvisionAction {
+    Plan(ProvisionNewOpts),
+    Image {
+        opts: ProvisionNewOpts,
+        out: String,
+    },
+    Write {
+        opts: ProvisionNewOpts,
+        yes: bool,
+    },
+    Convert {
+        disk: Option<u32>,
+        write: bool,
+        yes: bool,
+        backup_dir: Option<String>,
+    },
+}
+
 pub enum Parsed {
     List {
         backup_dir: Option<String>,
@@ -83,6 +117,7 @@ pub enum Parsed {
     },
     Inspect(InspectOpts),
     Info(InfoOpts),
+    Provision(ProvisionAction),
     Apply {
         opts: DiskOpts,
         dry_run: bool,
@@ -139,6 +174,7 @@ pub fn usage_text() -> String {
   info      查看 U 盘或备份详细信息\n\
   apply     预览或执行 U 盘改造\n\
   backup    创建、查看、校验、恢复和清理备份\n\
+  provision 制盘：官方四模式新盘与现有盘免密改造\n\
   inspect   高级：检查底层 LBA/hex 数据\n\n\
 其他:\n\
   convert   高级：离线转换快照\n\
@@ -181,6 +217,19 @@ fn print_topic_help(topic: &str) {
             println!("  backup verify [编号|文件]              校验备份");
             println!("  backup delete [编号|文件]...           删除备份");
             println!("  backup prune [--keep N]                按策略清理");
+        }
+        "provision" => {
+            println!(
+                "{}",
+                bold("用法: edpcli provision <plan|image|write|convert> [选项]")
+            );
+            println!("  provision plan  --disk N --mode 0|1|2|3 <身份/分区参数>");
+            println!("  provision image --disk N --mode 0|1|2|3 <身份/分区参数> --out FILE");
+            println!("  provision write --disk N --mode 0|1|2|3 <身份/分区参数> [--yes]");
+            println!("  provision convert [--disk N] [--write] [--yes] [--backup-dir D]");
+            println!("新盘身份参数: --label-id ID --user USER --dept DEPT --label LABEL --password PASSWORD");
+            println!("分区参数: --boot-mib N --share-mib N --encrypt-mib N；仅当前模式实际使用的项必填。");
+            println!("当前产品写入固定使用已验证的 exFAT + SM4(mode2) 路线。");
         }
         "completion" => {
             println!("{}", bold("用法: edpcli completion <zsh|bash|fish>"));
@@ -233,6 +282,154 @@ fn parse_size(s: &str) -> Result<f64, String> {
         Ok(v) if v.is_finite() && v > 0.0 => Ok(v),
         _ => Err(format!("错误: --size 须为正数(GB), 得到 {}", s)),
     }
+}
+
+fn parse_positive_u64(s: &str, flag: &str) -> Result<u64, String> {
+    if s.is_empty() || !s.bytes().all(|b| b.is_ascii_digit()) {
+        return Err(format!("错误: {flag} 须为正整数，得到 {s}"));
+    }
+    match s.parse::<u64>() {
+        Ok(value) if value > 0 => Ok(value),
+        _ => Err(format!("错误: {flag} 须为正整数，得到 {s}")),
+    }
+}
+
+fn parse_provision_mode(s: &str) -> Result<u8, String> {
+    match s {
+        "0" => Ok(0),
+        "1" => Ok(1),
+        "2" => Ok(2),
+        "3" => Ok(3),
+        _ => Err(format!("错误: --mode 只接受 0/1/2/3，得到 {s}")),
+    }
+}
+
+fn parse_new_provision_opts(
+    rest: &[String],
+) -> Result<(ProvisionNewOpts, Option<String>, bool), String> {
+    let mut disk = None;
+    let mut mode = None;
+    let mut boot_mib = None;
+    let mut share_mib = None;
+    let mut encrypt_mib = None;
+    let mut label_id = None;
+    let mut user = None;
+    let mut dept = None;
+    let mut label = None;
+    let mut password = None;
+    let mut volume_label = None;
+    let mut out = None;
+    let mut yes = false;
+    let mut i = 0usize;
+    while i < rest.len() {
+        match flag_name(&rest[i]) {
+            "--disk" => {
+                let value = take_value(rest, &mut i, "--disk")?;
+                set_once(&mut disk, parse_disk_spec(&value)?, "--disk")?;
+            }
+            "--mode" => {
+                let value = take_value(rest, &mut i, "--mode")?;
+                set_once(&mut mode, parse_provision_mode(&value)?, "--mode")?;
+            }
+            "--boot-mib" => {
+                let value = take_value(rest, &mut i, "--boot-mib")?;
+                set_once(
+                    &mut boot_mib,
+                    parse_positive_u64(&value, "--boot-mib")?,
+                    "--boot-mib",
+                )?;
+            }
+            "--share-mib" => {
+                let value = take_value(rest, &mut i, "--share-mib")?;
+                set_once(
+                    &mut share_mib,
+                    parse_positive_u64(&value, "--share-mib")?,
+                    "--share-mib",
+                )?;
+            }
+            "--encrypt-mib" => {
+                let value = take_value(rest, &mut i, "--encrypt-mib")?;
+                set_once(
+                    &mut encrypt_mib,
+                    parse_positive_u64(&value, "--encrypt-mib")?,
+                    "--encrypt-mib",
+                )?;
+            }
+            "--label-id" => {
+                let value = take_value(rest, &mut i, "--label-id")?;
+                set_once(&mut label_id, value, "--label-id")?;
+            }
+            "--user" => {
+                let value = take_value(rest, &mut i, "--user")?;
+                set_once(&mut user, value, "--user")?;
+            }
+            "--dept" => {
+                let value = take_value(rest, &mut i, "--dept")?;
+                set_once(&mut dept, value, "--dept")?;
+            }
+            "--label" => {
+                let value = take_value(rest, &mut i, "--label")?;
+                set_once(&mut label, value, "--label")?;
+            }
+            "--password" => {
+                let value = take_value(rest, &mut i, "--password")?;
+                set_once(&mut password, value, "--password")?;
+            }
+            "--volume-label" => {
+                let value = take_value(rest, &mut i, "--volume-label")?;
+                set_once(&mut volume_label, value, "--volume-label")?;
+            }
+            "--out" => {
+                let value = take_value(rest, &mut i, "--out")?;
+                set_once(&mut out, value, "--out")?;
+            }
+            "--yes" => set_switch(&mut yes, &rest[i], "--yes")?,
+            other => return Err(format!("错误: provision 不认识选项 {other}")),
+        }
+        i += 1;
+    }
+
+    let mode = mode.ok_or("错误: provision 新盘操作必须指定 --mode 0|1|2|3")?;
+    let require = |value: Option<u64>, flag: &str| {
+        value.ok_or_else(|| format!("错误: mode{mode} 必须指定 {flag}"))
+    };
+    match mode {
+        0 => {
+            require(boot_mib, "--boot-mib")?;
+            require(share_mib, "--share-mib")?;
+            require(encrypt_mib, "--encrypt-mib")?;
+        }
+        1 => {
+            require(share_mib, "--share-mib")?;
+            require(encrypt_mib, "--encrypt-mib")?;
+        }
+        2 => {
+            require(encrypt_mib, "--encrypt-mib")?;
+        }
+        3 => {
+            require(boot_mib, "--boot-mib")?;
+            require(share_mib, "--share-mib")?;
+        }
+        _ => unreachable!(),
+    }
+
+    Ok((
+        ProvisionNewOpts {
+            disk,
+            mode,
+            boot_mib,
+            share_mib,
+            encrypt_mib,
+            label_id: label_id.ok_or("错误: provision 新盘操作必须指定 --label-id")?,
+            user: user.ok_or("错误: provision 新盘操作必须指定 --user")?,
+            dept: dept.ok_or("错误: provision 新盘操作必须指定 --dept")?,
+            label: label.ok_or("错误: provision 新盘操作必须指定 --label")?,
+            password: password.ok_or("错误: provision 新盘操作必须指定 --password")?,
+            volume_label: volume_label.unwrap_or_else(|| "SAFE6".into()),
+        },
+        out,
+        yes,
+    ))
 }
 
 fn parse_keep(s: &str) -> Result<usize, String> {
@@ -721,6 +918,81 @@ pub fn parse_args(argv: &[String]) -> Result<Parsed, String> {
                 yes,
                 backup_dir,
             })
+        }
+        "provision" => {
+            if rest.iter().any(|a| a == "-h" || a == "--help") {
+                return Ok(Parsed::Help {
+                    topic: Some("provision".into()),
+                });
+            }
+            let Some(action) = rest.first().map(String::as_str) else {
+                return Err("错误: provision 需要动作 plan / image / write / convert".into());
+            };
+            let tail = &rest[1..];
+            match action {
+                "plan" | "image" | "write" => {
+                    let (opts, out, yes) = parse_new_provision_opts(tail)?;
+                    match action {
+                        "plan" => {
+                            if out.is_some() || yes {
+                                return Err("错误: provision plan 不接受 --out 或 --yes".into());
+                            }
+                            Ok(Parsed::Provision(ProvisionAction::Plan(opts)))
+                        }
+                        "image" => {
+                            if yes {
+                                return Err("错误: provision image 不接受 --yes".into());
+                            }
+                            let out = out.ok_or("错误: provision image 必须指定 --out FILE")?;
+                            Ok(Parsed::Provision(ProvisionAction::Image { opts, out }))
+                        }
+                        "write" => {
+                            if out.is_some() {
+                                return Err("错误: provision write 不接受 --out".into());
+                            }
+                            Ok(Parsed::Provision(ProvisionAction::Write { opts, yes }))
+                        }
+                        _ => unreachable!(),
+                    }
+                }
+                "convert" => {
+                    let mut disk = None;
+                    let mut write = false;
+                    let mut yes = false;
+                    let mut backup_dir = None;
+                    let mut i = 0usize;
+                    while i < tail.len() {
+                        match flag_name(&tail[i]) {
+                            "--disk" => {
+                                let value = take_value(tail, &mut i, "--disk")?;
+                                set_once(&mut disk, parse_disk_spec(&value)?, "--disk")?;
+                            }
+                            "--backup-dir" => {
+                                let value = take_value(tail, &mut i, "--backup-dir")?;
+                                set_once(&mut backup_dir, value, "--backup-dir")?;
+                            }
+                            "--write" => set_switch(&mut write, &tail[i], "--write")?,
+                            "--yes" => set_switch(&mut yes, &tail[i], "--yes")?,
+                            other => {
+                                return Err(format!("错误: provision convert 不认识选项 {other}"))
+                            }
+                        }
+                        i += 1;
+                    }
+                    if yes && !write {
+                        return Err("错误: provision convert --yes 只能与 --write 同用".into());
+                    }
+                    Ok(Parsed::Provision(ProvisionAction::Convert {
+                        disk,
+                        write,
+                        yes,
+                        backup_dir,
+                    }))
+                }
+                other => Err(format!(
+                    "错误: 未知 provision 动作: {other} (可用 plan / image / write / convert)"
+                )),
+            }
         }
         "apply" => {
             if rest.iter().any(|a| a == "-h" || a == "--help") {

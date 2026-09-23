@@ -19,6 +19,7 @@ pub use crate::backup_cli::{backup_delete, backup_list, backup_prune, backup_ver
 use crate::cli_args::print_help;
 pub use crate::cli_args::{
     parse_args, print_usage, BackupAction, DiskOpts, InfoOpts, InspectOpts, Parsed,
+    ProvisionAction, ProvisionNewOpts,
 };
 use crate::common::*;
 use crate::completion;
@@ -169,6 +170,7 @@ pub fn run() -> i32 {
                             | "apply"
                             | "backup"
                             | "inspect"
+                            | "provision"
                             | "convert"
                             | "completion"
                     )
@@ -240,6 +242,7 @@ pub fn run() -> i32 {
             let probe = ReadProbeCache::new(&runner);
             info_flow(&probe, opts)
         }
+        Parsed::Provision(action) => provision_flow(&runner, action),
         Parsed::Convert { dir, id, size, out } => match dir {
             Some(d) => convert_flow(d, id, size, out),
             None => {
@@ -259,6 +262,296 @@ pub fn run() -> i32 {
                 FlowKind::Apply { force, yes }
             };
             real_flow(&runner, opts.disk, opts.size, opts.backup_dir, flow)
+        }
+    }
+}
+
+fn provision_request(
+    opts: &ProvisionNewOpts,
+) -> crate::application::provision::NewProvisionRequest {
+    crate::application::provision::NewProvisionRequest {
+        mode: opts.mode,
+        boot_mib: opts.boot_mib,
+        share_mib: opts.share_mib,
+        encrypt_mib: opts.encrypt_mib,
+        label_id: opts.label_id.clone(),
+        user: opts.user.clone(),
+        dept: opts.dept.clone(),
+        label: opts.label.clone(),
+        password: opts.password.clone(),
+        volume_label: opts.volume_label.clone(),
+    }
+}
+
+fn provision_resolve_disk(
+    runner: &SysRunner,
+    disk_opt: Option<u32>,
+    prompt: &mut dyn Prompter,
+) -> EdpCliResult<u32> {
+    DeviceSelector::new(disk_opt).resolve(runner, prompt)
+}
+
+fn print_new_provision_summary(
+    opts: &ProvisionNewOpts,
+    prepared: &crate::application::provision::PreparedNewProvision,
+) {
+    println!(
+        "制盘计划: disk{} mode{}  device_id={}",
+        prepared.disk, opts.mode, prepared.device_id
+    );
+    println!(
+        "目标扇区={}  LCE=LBA{}  计划写入={}扇区",
+        prepared.write_image.total_sectors,
+        prepared.lce_start_lba,
+        prepared.write_image.touched_sector_count()
+    );
+    println!(
+        "分区 MiB: boot={} share={} encrypt={}  文件系统=exFAT",
+        opts.boot_mib
+            .map(|v| v.to_string())
+            .unwrap_or_else(|| "-".into()),
+        opts.share_mib
+            .map(|v| v.to_string())
+            .unwrap_or_else(|| "-".into()),
+        opts.encrypt_mib
+            .map(|v| v.to_string())
+            .unwrap_or_else(|| "-".into())
+    );
+}
+
+fn provision_flow(runner: &SysRunner, action: ProvisionAction) -> i32 {
+    match action {
+        ProvisionAction::Plan(opts) => {
+            let mut prompt = StdPrompter;
+            let disk = match provision_resolve_disk(runner, opts.disk, &mut prompt) {
+                Ok(value) => value,
+                Err(error) => return finish(Err(error)),
+            };
+            let request = provision_request(&opts);
+            match crate::application::provision::prepare_new_provision(runner, disk, &request) {
+                Ok(prepared) => {
+                    print_new_provision_summary(&opts, &prepared);
+                    EXIT_OK
+                }
+                Err(error) => finish(Err(error)),
+            }
+        }
+        ProvisionAction::Image { opts, out } => {
+            if let Some(disk) = opts.disk {
+                if let Err(error) = guard_usb_disk(runner, disk) {
+                    return finish(Err(error));
+                }
+            }
+            if !elevate::is_root() {
+                let mut prompt = StdPrompter;
+                let disk = match provision_resolve_disk(runner, opts.disk, &mut prompt) {
+                    Ok(value) => value,
+                    Err(error) => return finish(Err(error)),
+                };
+                let mut argv: Vec<String> = std::env::args().skip(1).collect();
+                DeviceSelector::new(opts.disk).pin_argv(&mut argv, disk);
+                elevate::ensure_elevated(&argv);
+                unreachable!();
+            }
+
+            let mut prompt = StdPrompter;
+            let disk = match provision_resolve_disk(runner, opts.disk, &mut prompt) {
+                Ok(value) => value,
+                Err(error) => return finish(Err(error)),
+            };
+            let request = provision_request(&opts);
+            let mut prepared = match crate::application::provision::prepare_new_provision(
+                runner, disk, &request,
+            ) {
+                Ok(value) => value,
+                Err(error) => return finish(Err(error)),
+            };
+            let mut dev = match FileDev::open_rdonly(&raw_path(disk)) {
+                Ok(value) => value,
+                Err(error) => {
+                    return finish(Err(EdpCliError::new(
+                        EXIT_IO,
+                        format!("错误: 无法只读打开 {}: {error}", raw_path(disk)),
+                    )))
+                }
+            };
+            if let Err(error) =
+                crate::application::provision::capture_manufacturer_lba3(&mut dev, &mut prepared)
+            {
+                return finish(Err(error));
+            }
+            print_new_provision_summary(&opts, &prepared);
+            match crate::application::provision::export_sparse_provision_image(
+                Path::new(&out),
+                &prepared,
+            ) {
+                Ok(()) => {
+                    println!("稀疏制盘镜像已写入 {}（已保留目标盘原始 LBA3）", out);
+                    EXIT_OK
+                }
+                Err(error) => finish(Err(error)),
+            }
+        }
+        ProvisionAction::Write { opts, yes } => {
+            if let Some(disk) = opts.disk {
+                if let Err(error) = guard_usb_disk(runner, disk) {
+                    return finish(Err(error));
+                }
+            }
+            if !elevate::is_root() {
+                let mut prompt = StdPrompter;
+                let disk = match provision_resolve_disk(runner, opts.disk, &mut prompt) {
+                    Ok(value) => value,
+                    Err(error) => return finish(Err(error)),
+                };
+                let mut argv: Vec<String> = std::env::args().skip(1).collect();
+                DeviceSelector::new(opts.disk).pin_argv(&mut argv, disk);
+                elevate::ensure_elevated(&argv);
+                unreachable!();
+            }
+
+            let mut prompt = StdPrompter;
+            let disk = match provision_resolve_disk(runner, opts.disk, &mut prompt) {
+                Ok(value) => value,
+                Err(error) => return finish(Err(error)),
+            };
+            let request = provision_request(&opts);
+            let mut prepared = match crate::application::provision::prepare_new_provision(
+                runner, disk, &request,
+            ) {
+                Ok(value) => value,
+                Err(error) => return finish(Err(error)),
+            };
+            let mut dev = match FileDev::open_rdonly(&raw_path(disk)) {
+                Ok(value) => value,
+                Err(error) => {
+                    return finish(Err(EdpCliError::new(
+                        EXIT_IO,
+                        format!("错误: 无法只读打开 {}: {error}", raw_path(disk)),
+                    )))
+                }
+            };
+            if let Err(error) =
+                crate::application::provision::capture_manufacturer_lba3(&mut dev, &mut prepared)
+            {
+                return finish(Err(error));
+            }
+            print_new_provision_summary(&opts, &prepared);
+            let confirmed = if yes {
+                true
+            } else {
+                prompt.confirm_yes(&crate::ui::bold(&format!(
+                    "将破坏性重建 disk{} 为官方 mode{}，并原样保留制造商 LBA3。输入 YES: ",
+                    disk, opts.mode
+                )))
+            };
+            if !confirmed {
+                return finish(Err(EdpCliError::new(EXIT_CANCELLED, "已取消(未写盘)")));
+            }
+            match crate::application::provision::commit_new_provision(runner, &mut dev, &prepared) {
+                Ok(()) => {
+                    println!(
+                        "{}",
+                        crate::ui::green("制盘完成，读回校验通过。请拔出重插。")
+                    );
+                    EXIT_OK
+                }
+                Err(error) => finish(Err(error)),
+            }
+        }
+        ProvisionAction::Convert {
+            disk: disk_opt,
+            write,
+            yes,
+            backup_dir,
+        } => {
+            if let Some(disk) = disk_opt {
+                if let Err(error) = guard_usb_disk(runner, disk) {
+                    return finish(Err(error));
+                }
+            }
+            if !elevate::is_root() {
+                let mut prompt = StdPrompter;
+                let disk = match provision_resolve_disk(runner, disk_opt, &mut prompt) {
+                    Ok(value) => value,
+                    Err(error) => return finish(Err(error)),
+                };
+                let mut argv = argv_with_backup_dir_for_elevation(backup_dir.as_deref());
+                DeviceSelector::new(disk_opt).pin_argv(&mut argv, disk);
+                elevate::ensure_elevated(&argv);
+                unreachable!();
+            }
+
+            let mut std_prompt = StdPrompter;
+            let disk = match provision_resolve_disk(runner, disk_opt, &mut std_prompt) {
+                Ok(value) => value,
+                Err(error) => return finish(Err(error)),
+            };
+            let mut dev = match FileDev::open_rdonly(&raw_path(disk)) {
+                Ok(value) => value,
+                Err(error) => {
+                    return finish(Err(EdpCliError::new(
+                        EXIT_IO,
+                        format!("错误: 无法打开 {}: {error}", raw_path(disk)),
+                    )))
+                }
+            };
+            let prepared = match crate::application::provision::prepare_passwordless_conversion(
+                runner, disk, &mut dev,
+            ) {
+                Ok(value) => value,
+                Err(error) => return finish(Err(error)),
+            };
+            println!(
+                "免密转换计划: disk{}  前部=LBA{}..{}  type4 保持 LBA{} / {}B",
+                disk,
+                prepared.conversion.plan.front_start_lba,
+                prepared.conversion.plan.encrypt_start_lba - 1,
+                prepared.conversion.plan.encrypt_start_lba,
+                prepared.conversion.plan.encrypt_size_bytes
+            );
+            println!(
+                "将重建前部 exFAT；type4 几何和密钥材料不移动、不重加密。计划写入={}扇区",
+                prepared.patch.len()
+            );
+            if !write {
+                println!("只读预览完成；执行写入需加 --write。");
+                return EXIT_OK;
+            }
+
+            let mut always = AlwaysYes(StdPrompter);
+            let prompt: &mut dyn Prompter = if yes { &mut always } else { &mut std_prompt };
+            let mut ctx = Ctx {
+                runner,
+                clock: &SystemClock,
+                prompt,
+                backup_dir: diskio::resolve_backup_dir(backup_dir.as_deref()),
+            };
+            if let Err(error) =
+                crate::application::write::backup_create_flow(disk, &mut ctx, &mut dev)
+            {
+                return finish(Err(error));
+            }
+            if !ctx.prompt.confirm_yes(&crate::ui::bold(&format!(
+                "已完成写前备份。将重建 disk{} 前部区域并切换免密布局。输入 YES: ",
+                disk
+            ))) {
+                return finish(Err(EdpCliError::new(EXIT_CANCELLED, "已取消(未写盘)")));
+            }
+            match crate::application::provision::commit_passwordless_conversion(
+                runner, &mut dev, &prepared,
+            ) {
+                Ok(()) => {
+                    println!(
+                        "{}",
+                        crate::ui::green(
+                            "免密改造完成，type4 保持原位且读回校验通过。请拔出重插。"
+                        )
+                    );
+                    EXIT_OK
+                }
+                Err(error) => finish(Err(error)),
+            }
         }
     }
 }

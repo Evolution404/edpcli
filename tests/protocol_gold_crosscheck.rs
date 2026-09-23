@@ -25,7 +25,9 @@ fn decode_hex_fixture(text: &str) -> Vec<u8> {
     let compact: String = text.chars().filter(|c| !c.is_ascii_whitespace()).collect();
     compact
         .as_bytes()
-        .chunks_exact(2)
+        .as_chunks::<2>()
+        .0
+        .iter()
         .map(|pair| {
             u8::from_str_radix(std::str::from_utf8(pair).expect("hex utf8"), 16)
                 .expect("valid fixture hex")
