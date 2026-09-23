@@ -347,7 +347,7 @@ edpcli inspect decode backup.edpb --lba 240250283 --export ./inspect-out
 - 对物理盘，LBA 必须满足 `0 <= LBA < total_sectors`，越界在读盘前拒绝；
 - LBA0-LBA12 使用现有协议解析器；LCE 使用 zero8 + 64 位物理字节偏移 tweak；
 - 数据分区把“所属区域”“`NeedEncrypt` 配置”和“物理数据当前是否为密文”分开判断，`NeedEncrypt=1` 不再直接触发 SM4；
-- 分区起始扇区若通过严格 FAT16/FAT32/exFAT/NTFS boot-sector 结构校验，`decode` 直接返回物理明文，并明确标记“未执行 SM4”；
+- 分区起始扇区若通过严格 FAT12/FAT16/FAT32/exFAT/NTFS boot-sector 结构校验，`decode` 直接返回物理明文，并明确标记“未执行 SM4”；
 - raw 起始扇区不能确认明文时，只有 `EncryptMode=2`、FileKey 可按已验证规则解封且 `FileKeyCRC=PASS`，并且 SM4-ECB 解密后的起始扇区再次通过严格文件系统校验，才把该分区判定为 mode2 密文；
 - 检查分区内非起始 LBA 时，会先读取同一分区起始扇区作为物理状态证据；离线 EDPB 若没有采集该起始扇区则 `decode` fail-closed；
 - 当前自动 FileKey 解封只对已经验证的默认密码配置开放；非默认密码、未知加密模式或 raw/decoded 两边都不能确认时会明确拒绝 decode；

@@ -2,7 +2,9 @@ use edpcli::backup_deep::keys::{default_file_key, sm4_encrypt_block};
 use edpcli::backup_metadata::parse_partition_geometry;
 use edpcli::common::SECTOR;
 use edpcli::crypto::{a6b0_full, a6b0_full_offset, a7f0_full, crc32_bare};
-use edpcli::inspect_target::{InspectDiskContext, PhysicalDataState, SectorRegion};
+use edpcli::inspect_target::{
+    FilesystemBootKind, InspectDiskContext, PhysicalDataState, SectorRegion,
+};
 
 const LEXAR_DEVICE_ID: &str = "disk&ven_lexar&prod_usb_flash_drive";
 const LEXAR_TOTAL_SECTORS: u64 = 243_625_984;
@@ -68,6 +70,29 @@ fn valid_ntfs_boot(sector_count: u64) -> [u8; SECTOR] {
     put64(&mut boot, 40, sector_count);
     put64(&mut boot, 48, 4);
     put64(&mut boot, 56, 8);
+    boot[510..512].copy_from_slice(&[0x55, 0xaa]);
+    boot
+}
+
+fn real_shape_fat12_boot(partition_start: u64, sector_count: u64) -> [u8; SECTOR] {
+    assert!(sector_count <= u16::MAX as u64);
+    let mut boot = [0u8; SECTOR];
+    boot[0..3].copy_from_slice(&[0xeb, 0x3c, 0x90]);
+    boot[3..11].copy_from_slice(b"MSDOS5.0");
+    put16(&mut boot, 11, 512);
+    boot[13] = 8;
+    put16(&mut boot, 14, 8);
+    boot[16] = 2;
+    put16(&mut boot, 17, 512);
+    put16(&mut boot, 19, sector_count as u16);
+    boot[21] = 0xf8;
+    put16(&mut boot, 22, 8);
+    put16(&mut boot, 24, 63);
+    put16(&mut boot, 26, 255);
+    put32(&mut boot, 28, partition_start as u32);
+    boot[38] = 0x29;
+    boot[43..54].copy_from_slice(b"NO NAME    ");
+    boot[54..62].copy_from_slice(b"FAT12   ");
     boot[510..512].copy_from_slice(&[0x55, 0xaa]);
     boot
 }
@@ -140,6 +165,34 @@ fn plaintext_type1_with_valid_raw_filesystem_decodes_without_transform() {
         .unwrap();
     assert_eq!(decoded.as_slice(), raw.as_slice());
     assert!(method.contains("type1"));
+    assert!(method.contains("未执行 SM4"));
+}
+
+#[test]
+fn plaintext_type1_with_real_fat12_shape_decodes_without_transform() {
+    let context = InspectDiskContext::new(
+        LEXAR_PROTOCOL.to_vec(),
+        Some(LEXAR_DEVICE_ID.into()),
+        LEXAR_TOTAL_SECTORS,
+    );
+    let partition = context
+        .partitions
+        .iter()
+        .find(|partition| partition.partition_type == 1)
+        .expect("real protocol fixture must contain type1");
+    let raw = real_shape_fat12_boot(partition.start_sector, partition.sector_count);
+    let state = context.partition_physical_state(partition, &raw);
+    assert_eq!(
+        state,
+        PhysicalDataState::PlaintextFilesystem {
+            filesystem: FilesystemBootKind::Fat12,
+        }
+    );
+    let (decoded, method) = context
+        .decode_non_protocol(partition.start_sector, &raw)
+        .unwrap();
+    assert_eq!(decoded.as_slice(), raw.as_slice());
+    assert!(method.contains("FAT12"));
     assert!(method.contains("未执行 SM4"));
 }
 

@@ -61,6 +61,7 @@ impl SectorRegion {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FilesystemBootKind {
+    Fat12,
     Fat16,
     Fat32,
     Exfat,
@@ -70,6 +71,7 @@ pub enum FilesystemBootKind {
 impl FilesystemBootKind {
     pub fn label(self) -> &'static str {
         match self {
+            Self::Fat12 => "FAT12",
             Self::Fat16 => "FAT16",
             Self::Fat32 => "FAT32",
             Self::Exfat => "exFAT",
@@ -250,8 +252,11 @@ fn detect_filesystem_boot(
         }
         return None;
     }
-    if cluster_count >= 4_085 && fat16 != 0 && root_entries != 0 {
-        return Some(FilesystemBootKind::Fat16);
+    if fat16 != 0 && root_entries != 0 {
+        if cluster_count >= 4_085 {
+            return Some(FilesystemBootKind::Fat16);
+        }
+        return Some(FilesystemBootKind::Fat12);
     }
     None
 }
