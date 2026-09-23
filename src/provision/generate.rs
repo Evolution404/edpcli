@@ -3,7 +3,10 @@ use encoding_rs::GBK;
 use crate::common::SECTOR;
 use crate::crypto::{a7f0_full, crc32_bare, lba6_checksum, xor_rolling, LBA6_K0};
 
-use super::{ProvisionImage, ProvisionSpec, PROVISION_IMAGE_LEN};
+use super::{
+    build_official_partition_layout, official_mbr_partition_type, OfficialPartitionGeometry,
+    OfficialProvisionPlan, ProvisionImage, ProvisionSpec, PROVISION_IMAGE_LEN,
+};
 
 const LBA12_TABLE_LEN: usize = 0x170;
 const SHARE_START: u64 = 63;
@@ -159,20 +162,159 @@ fn build_lba6(spec: &ProvisionSpec) -> Result<[u8; SECTOR], String> {
 }
 
 fn edpf_entry(stride: usize, ptype: u32, start: u64, size_bytes: u64, material: &[u8]) -> Vec<u8> {
+    edpf_entry_with_flags(stride, 2, ptype, 1, 1, start, size_bytes, material, 2)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn edpf_entry_with_flags(
+    stride: usize,
+    partition_count: u32,
+    ptype: u32,
+    need_disturb: u32,
+    need_encrypt: u32,
+    start: u64,
+    size_bytes: u64,
+    material: &[u8],
+    encrypt_mode: u8,
+) -> Vec<u8> {
     let mut entry = vec![0u8; stride];
     entry[..4].copy_from_slice(b"EDPF");
-    put_u32(&mut entry, 0x08, 2);
+    put_u32(&mut entry, 0x08, partition_count);
     put_u32(&mut entry, 0x0c, ptype);
-    put_u32(&mut entry, 0x10, 1);
-    put_u32(&mut entry, 0x14, 1);
+    put_u32(&mut entry, 0x10, need_disturb);
+    put_u32(&mut entry, 0x14, need_encrypt);
     put_u64(&mut entry, 0x18, start);
     put_u64(&mut entry, 0x20, SECTOR as u64);
     put_u64(&mut entry, 0x28, size_bytes);
     entry[0x30..0x30 + material.len()].copy_from_slice(material);
-    if stride == 0x60 {
-        put_u64(&mut entry, 0x58, 2);
+    if stride == 0x60 && need_encrypt != 0 {
+        entry[0x58] = encrypt_mode;
     }
     entry
+}
+
+fn need_encrypt(partition_type: u32) -> u32 {
+    u32::from(partition_type != 1)
+}
+
+fn need_disturb(index: usize) -> u32 {
+    u32::from(index < 2)
+}
+
+fn validate_official_geometry(
+    spec: &ProvisionSpec,
+    plan: &OfficialProvisionPlan,
+) -> Result<Vec<OfficialPartitionGeometry>, String> {
+    let logical = build_official_partition_layout(plan.mode, plan.sizes, SECTOR as u64)?;
+    let end = logical
+        .last()
+        .ok_or("official partition layout is empty")?
+        .end_sector_exclusive();
+    if end > spec.target().total_sectors() {
+        return Err(format!(
+            "official partition layout ends at LBA {end}, beyond target {}",
+            spec.target().total_sectors()
+        ));
+    }
+    let compat = plan.lba7_compatibility_extent;
+    if compat.size_bytes != compat.size_sectors * SECTOR as u64 {
+        return Err("LBA7 compatibility extent is not 512-byte-sector aligned".into());
+    }
+    if compat.start_lba + compat.size_sectors > spec.target().total_sectors() {
+        return Err("LBA7 compatibility extent lies beyond target".into());
+    }
+    Ok(logical)
+}
+
+fn build_official_lba0(
+    plan: &OfficialProvisionPlan,
+    logical: &[OfficialPartitionGeometry],
+) -> Result<[u8; SECTOR], String> {
+    let first = logical
+        .first()
+        .ok_or("official partition layout is empty")?;
+    let mut out = [0u8; SECTOR];
+    let entry = 0x1be;
+    out[entry + 4] = official_mbr_partition_type(plan.mode);
+    let start = u32::try_from(first.start_sector).map_err(|_| "MBR start LBA overflows u32")?;
+    let count =
+        u32::try_from(first.sector_count()).map_err(|_| "MBR sector count overflows u32")?;
+    put_u32(&mut out, entry + 8, start);
+    put_u32(&mut out, entry + 12, count);
+    out[0x1fe..0x200].copy_from_slice(&[0x55, 0xaa]);
+    Ok(out)
+}
+
+fn build_official_lba7(
+    spec: &ProvisionSpec,
+    plan: &OfficialProvisionPlan,
+    logical: &[OfficialPartitionGeometry],
+) -> Result<[u8; SECTOR], String> {
+    let count = u32::try_from(logical.len()).map_err(|_| "partition count overflow")?;
+    if !(2..=3).contains(&count) {
+        return Err(format!(
+            "unsupported official LBA7 partition count: {count}"
+        ));
+    }
+    let compat = plan.lba7_compatibility_extent;
+    let mut plain = [0u8; SECTOR];
+    for (index, partition) in logical.iter().enumerate() {
+        let (start, size_bytes) = if index == 0 {
+            (partition.start_sector, partition.size_bytes)
+        } else {
+            (compat.start_lba, compat.size_bytes)
+        };
+        let base = index * 0x40;
+        let entry = edpf_entry_with_flags(
+            0x40,
+            count,
+            partition.partition_type.raw(),
+            need_disturb(index),
+            need_encrypt(partition.partition_type.raw()),
+            start,
+            size_bytes,
+            spec.profile().lba7_material(),
+            0,
+        );
+        plain[base..base + 0x40].copy_from_slice(&entry);
+    }
+    plain[0xc0..0xc8].copy_from_slice(spec.profile().lba7_terminator());
+    let crc = crc32_bare(spec.target().device_id().as_bytes());
+    let k0 = (crc & 0xffff) ^ (crc >> 16);
+    Ok(xor_rolling(&plain, k0).try_into().expect("sector length"))
+}
+
+fn build_official_lba12(
+    spec: &ProvisionSpec,
+    logical: &[OfficialPartitionGeometry],
+) -> Result<[u8; SECTOR], String> {
+    let count = u32::try_from(logical.len()).map_err(|_| "partition count overflow")?;
+    if !(2..=3).contains(&count) {
+        return Err(format!(
+            "unsupported official LBA12 partition count: {count}"
+        ));
+    }
+    let mut plain = [0u8; SECTOR];
+    for (index, partition) in logical.iter().enumerate() {
+        let base = index * 0x60;
+        let entry = edpf_entry_with_flags(
+            0x60,
+            count,
+            partition.partition_type.raw(),
+            need_disturb(index),
+            need_encrypt(partition.partition_type.raw()),
+            partition.start_sector,
+            partition.size_bytes,
+            spec.profile().lba12_material(),
+            spec.profile().lba12_encrypt_mode(),
+        );
+        plain[base..base + 0x60].copy_from_slice(&entry);
+    }
+    plain[0x120..0x128].copy_from_slice(spec.profile().lba12_terminator());
+    let crc = crc32_bare(spec.target().device_id().as_bytes());
+    Ok(a7f0_full(&plain, &crc.to_le_bytes(), 0)
+        .try_into()
+        .expect("LBA12 sector length"))
 }
 
 fn build_lba7(spec: &ProvisionSpec, layout: Layout) -> [u8; SECTOR] {
@@ -307,6 +449,32 @@ pub fn generate_image(
         (8, build_lba8(spec)?.to_vec()),
         (11, build_lba11(spec, entropy)?.to_vec()),
         (12, build_lba12(spec, layout).to_vec()),
+    ];
+    for (lba, data) in sectors {
+        image[lba * SECTOR..(lba + 1) * SECTOR].copy_from_slice(&data);
+    }
+    ProvisionImage::from_bytes(image)
+}
+
+/// Generate the current first-party SAFE6 metadata shape for one of the four
+/// official partition modes. The LBA7 legacy table intentionally differs from
+/// LBA12 after entry0: later LBA7 entries point at the fixed compatibility
+/// extent while LBA12 retains the real logical partition geometry.
+pub fn generate_official_image(
+    spec: &ProvisionSpec,
+    entropy: &ProvisionEntropy,
+    plan: &OfficialProvisionPlan,
+) -> Result<ProvisionImage, String> {
+    let logical = validate_official_geometry(spec, plan)?;
+    let mut image = vec![0u8; PROVISION_IMAGE_LEN];
+    let sectors = [
+        (0usize, build_official_lba0(plan, &logical)?.to_vec()),
+        (4, build_lba4(spec)?.to_vec()),
+        (6, build_lba6(spec)?.to_vec()),
+        (7, build_official_lba7(spec, plan, &logical)?.to_vec()),
+        (8, build_lba8(spec)?.to_vec()),
+        (11, build_lba11(spec, entropy)?.to_vec()),
+        (12, build_official_lba12(spec, &logical)?.to_vec()),
     ];
     for (lba, data) in sectors {
         image[lba * SECTOR..(lba + 1) * SECTOR].copy_from_slice(&data);

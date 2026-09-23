@@ -10,15 +10,18 @@ mod profile;
 mod spec;
 mod validate;
 
-pub use generate::{generate_image, ProvisionEntropy};
+pub use generate::{generate_image, generate_official_image, ProvisionEntropy};
 pub use layout::{
     build_official_partition_layout, official_mbr_partition_type, OfficialPartitionGeometry,
-    OfficialPartitionMode, OfficialPartitionSizes, OFFICIAL_PARTITION_START_SECTOR,
-    WHOLE_DISK_ENCRYPTED_COMPAT_BOOT_BYTES,
+    OfficialPartitionMode, OfficialPartitionSizes, OfficialProvisionPlan,
+    OFFICIAL_PARTITION_START_SECTOR, WHOLE_DISK_ENCRYPTED_COMPAT_BOOT_BYTES,
 };
 pub use profile::ProvisionProfile;
 pub use spec::{OnlyId, ProvisionMetadata, ProvisionSpec, TargetIdentity};
-pub use validate::{ProvisionValidation, ProvisionValidator};
+pub use validate::{
+    OfficialProvisionValidation, OfficialProvisionValidator, ProvisionValidation,
+    ProvisionValidator,
+};
 
 use crate::common::METADATA_IMAGE_LEN;
 

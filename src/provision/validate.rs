@@ -8,7 +8,10 @@ use crate::inspect::{analyze_sector, InspectMeta};
 use crate::metainfo::{ownership_from_lba8, summarize};
 use crate::sectors::looks_nopwd;
 
-use super::{ProvisionImage, ProvisionSpec, PROVISION_IMAGE_LEN};
+use super::{
+    official_mbr_partition_type, OfficialPartitionGeometry, OfficialPartitionMode,
+    OfficialProvisionPlan, ProvisionImage, ProvisionSpec, PROVISION_IMAGE_LEN,
+};
 
 const SHARE_START: u64 = 63;
 const TYPE4_SECTORS: u64 = 6;
@@ -424,6 +427,233 @@ fn validate_lba12(spec: &ProvisionSpec, raw: &[u8]) -> Result<(), String> {
     }
     if decoded[LBA12_TABLE_LEN..].iter().any(|byte| *byte != 0) {
         return Err("LBA12 decoded tail is not canonical zero plaintext".into());
+    }
+    Ok(())
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct OfficialProvisionValidation {
+    profile_id: String,
+    device_id: String,
+    onlyid: String,
+    mode: OfficialPartitionMode,
+}
+
+impl OfficialProvisionValidation {
+    pub fn profile_id(&self) -> &str {
+        &self.profile_id
+    }
+
+    pub fn device_id(&self) -> &str {
+        &self.device_id
+    }
+
+    pub fn onlyid(&self) -> &str {
+        &self.onlyid
+    }
+
+    pub fn mode(&self) -> OfficialPartitionMode {
+        self.mode
+    }
+}
+
+pub struct OfficialProvisionValidator;
+
+impl OfficialProvisionValidator {
+    pub fn validate(
+        spec: &ProvisionSpec,
+        image: &ProvisionImage,
+        plan: &OfficialProvisionPlan,
+    ) -> Result<OfficialProvisionValidation, String> {
+        let bytes = image.as_bytes();
+        validate_reserved(bytes)?;
+        let meta = inspect_meta(spec);
+        validate_lba4(spec, sector(bytes, 4), &meta)?;
+        validate_lba6(spec, sector(bytes, 6))?;
+        validate_lba8(spec, sector(bytes, 8), &meta)?;
+        validate_lba11(spec, sector(bytes, 11), &meta)?;
+
+        let logical = plan.logical_partitions(SECTOR as u64)?;
+        let end = logical
+            .last()
+            .ok_or("official partition layout is empty")?
+            .end_sector_exclusive();
+        if end > spec.target().total_sectors() {
+            return Err("official partition layout exceeds target".into());
+        }
+        validate_official_mbr(plan, &logical, sector(bytes, 0))?;
+        validate_official_lba7(spec, plan, &logical, sector(bytes, 7))?;
+        validate_official_lba12(spec, &logical, sector(bytes, 12))?;
+
+        Ok(OfficialProvisionValidation {
+            profile_id: spec.profile().id().to_string(),
+            device_id: spec.target().device_id().to_string(),
+            onlyid: spec.metadata().onlyid().text().to_string(),
+            mode: plan.mode,
+        })
+    }
+}
+
+fn read_u32(raw: &[u8], offset: usize) -> u32 {
+    u32::from_le_bytes(raw[offset..offset + 4].try_into().unwrap())
+}
+
+fn read_u64(raw: &[u8], offset: usize) -> u64 {
+    u64::from_le_bytes(raw[offset..offset + 8].try_into().unwrap())
+}
+
+fn validate_official_mbr(
+    plan: &OfficialProvisionPlan,
+    logical: &[OfficialPartitionGeometry],
+    raw: &[u8],
+) -> Result<(), String> {
+    let first = logical
+        .first()
+        .ok_or("official partition layout is empty")?;
+    let mut expected = [0u8; SECTOR];
+    expected[0x1be + 4] = official_mbr_partition_type(plan.mode);
+    let start = u32::try_from(first.start_sector).map_err(|_| "MBR start LBA overflows u32")?;
+    let count =
+        u32::try_from(first.sector_count()).map_err(|_| "MBR sector count overflows u32")?;
+    expected[0x1be + 8..0x1be + 12].copy_from_slice(&start.to_le_bytes());
+    expected[0x1be + 12..0x1be + 16].copy_from_slice(&count.to_le_bytes());
+    expected[0x1fe..0x200].copy_from_slice(&[0x55, 0xaa]);
+    if raw != expected {
+        return Err("official LBA0 MBR/profile mismatch".into());
+    }
+    Ok(())
+}
+
+fn expected_need_disturb(index: usize) -> u32 {
+    u32::from(index < 2)
+}
+
+fn expected_need_encrypt(partition_type: u32) -> u32 {
+    u32::from(partition_type != 1)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn validate_official_entry(
+    raw: &[u8],
+    base: usize,
+    stride: usize,
+    index: usize,
+    count: u32,
+    partition: &OfficialPartitionGeometry,
+    expected_start: u64,
+    expected_size: u64,
+    material: &[u8],
+    encrypt_mode: u8,
+) -> Result<(), String> {
+    if raw.get(base..base + 4) != Some(b"EDPF") {
+        return Err(format!("official EDPF entry{index} magic mismatch"));
+    }
+    let ptype = partition.partition_type.raw();
+    let fields_ok = read_u32(raw, base + 0x04) == 0
+        && read_u32(raw, base + 0x08) == count
+        && read_u32(raw, base + 0x0c) == ptype
+        && read_u32(raw, base + 0x10) == expected_need_disturb(index)
+        && read_u32(raw, base + 0x14) == expected_need_encrypt(ptype)
+        && read_u64(raw, base + 0x18) == expected_start
+        && read_u64(raw, base + 0x20) == SECTOR as u64
+        && read_u64(raw, base + 0x28) == expected_size;
+    if !fields_ok {
+        return Err(format!(
+            "official EDPF entry{index} geometry/flags mismatch"
+        ));
+    }
+    if raw.get(base + 0x30..base + 0x30 + material.len()) != Some(material) {
+        return Err(format!("official EDPF entry{index} key material mismatch"));
+    }
+    if stride == 0x60 {
+        if raw[base + 0x48..base + 0x58].iter().any(|byte| *byte != 0) {
+            return Err(format!(
+                "official LBA12 entry{index} compatibility key is not zero"
+            ));
+        }
+        let expected_mode = if expected_need_encrypt(ptype) != 0 {
+            encrypt_mode
+        } else {
+            0
+        };
+        if raw[base + 0x58] != expected_mode
+            || raw[base + 0x59..base + 0x60].iter().any(|byte| *byte != 0)
+        {
+            return Err(format!("official LBA12 entry{index} encrypt mode mismatch"));
+        }
+    }
+    Ok(())
+}
+
+fn validate_official_lba7(
+    spec: &ProvisionSpec,
+    plan: &OfficialProvisionPlan,
+    logical: &[OfficialPartitionGeometry],
+    raw: &[u8],
+) -> Result<(), String> {
+    let crc = crc32_bare(spec.target().device_id().as_bytes());
+    let plain = xor_rolling(raw, (crc & 0xffff) ^ (crc >> 16));
+    let count = u32::try_from(logical.len()).map_err(|_| "partition count overflow")?;
+    for (index, partition) in logical.iter().enumerate() {
+        let (start, size) = if index == 0 {
+            (partition.start_sector, partition.size_bytes)
+        } else {
+            (
+                plan.lba7_compatibility_extent.start_lba,
+                plan.lba7_compatibility_extent.size_bytes,
+            )
+        };
+        validate_official_entry(
+            &plain,
+            index * 0x40,
+            0x40,
+            index,
+            count,
+            partition,
+            start,
+            size,
+            spec.profile().lba7_material(),
+            0,
+        )?;
+    }
+    let used_end = logical.len() * 0x40;
+    if plain[used_end..0xc0].iter().any(|byte| *byte != 0)
+        || plain[0xc0..0xc8] != *spec.profile().lba7_terminator()
+        || plain[0xc8..].iter().any(|byte| *byte != 0)
+    {
+        return Err("official LBA7 table/pass-info/tail mismatch".into());
+    }
+    Ok(())
+}
+
+fn validate_official_lba12(
+    spec: &ProvisionSpec,
+    logical: &[OfficialPartitionGeometry],
+    raw: &[u8],
+) -> Result<(), String> {
+    let crc = crc32_bare(spec.target().device_id().as_bytes());
+    let plain = a6b0_full(raw, &crc.to_le_bytes(), 0);
+    let count = u32::try_from(logical.len()).map_err(|_| "partition count overflow")?;
+    for (index, partition) in logical.iter().enumerate() {
+        validate_official_entry(
+            &plain,
+            index * 0x60,
+            0x60,
+            index,
+            count,
+            partition,
+            partition.start_sector,
+            partition.size_bytes,
+            spec.profile().lba12_material(),
+            spec.profile().lba12_encrypt_mode(),
+        )?;
+    }
+    let used_end = logical.len() * 0x60;
+    if plain[used_end..0x120].iter().any(|byte| *byte != 0)
+        || plain[0x120..0x128] != *spec.profile().lba12_terminator()
+        || plain[0x128..].iter().any(|byte| *byte != 0)
+    {
+        return Err("official LBA12 table/pass-info/tail mismatch".into());
     }
     Ok(())
 }

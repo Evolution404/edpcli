@@ -19,7 +19,7 @@
 
 当前 `ProvisionProfile::canonical_v1()` 的配置类型 ID 为 `jiangsu-safe6-nopwd`。当前构造器生成 LBA0、4、6、7、8、11、12，并由 `ProvisionValidator` 做离线一致性验证。
 
-**当前构造器不是完整的官方四模式制盘器。** 它只代表一条已经编码和测试的标准 v1 路径。
+现有 `generate_image()` 继续保留标准 v1 二合一兼容输出；新增 `generate_official_image()` + `OfficialProvisionPlan` 已能纯内存生成四种官方分区模式的 LBA0/LBA7/LBA12，并由独立 `OfficialProvisionValidator` 反向校验 MBR、EDPF 类型/标志、逻辑几何与 LCE。该能力仍只覆盖元数据阶段，尚未等同于完整可写入新盘的产品制盘器：文件系统阶段、完整封装密钥配置矩阵和真实设备产品入口仍需完成。
 
 ## 2. 已闭环的官方协议事实
 
@@ -35,6 +35,8 @@
 `PartionType`：`1=Boot`、`2=Share`、`4=Encrypt`。
 
 当前一方 `cemsusbregsiter.dll::sub_10041A80` 的 MBR 类型选择分支也已逐指令闭合：模式0→`0x0E`、模式1→`0x07`、模式2→`0x0B`、模式3→`0x0E`。模式1命中“type2 位于 entry0”分支；模式2命中“type1 位于 entry0 且 type4 位于 entry1”分支。该映射已编码为 `official_mbr_partition_type`，不得按文件系统名称自行猜测。
+
+同一一方写入端 `sub_10046D20` 还逐分区类型固定了 `NeedEncrypt`：type1=`0`、type2=`1`、type4=`1`；`CreatePartitions` 的位置规则为 entry0/entry1 的 `NeedDisturb=1`、entry2=`0`。四模式生成器必须按这两条 producer 规则序列化，不能沿用旧二合一生成器“所有条目均为1”的简化值。
 
 LBA7 旧表中条目0 与后续条目的几何规则不同；后续条目可保留各自 `PartionType` 并共同指向 LCE（LBA7 兼容扩展区）。因此制盘功能不得把 LCE 当成 type4 专属区域。详细证据见 [`../protocol/LCE.md`](../protocol/LCE.md)。
 

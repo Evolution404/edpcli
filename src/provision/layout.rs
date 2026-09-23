@@ -4,7 +4,9 @@
 //! the current first-party label-tool family; it does not create filesystems or
 //! touch a device.
 
-use crate::protocol::{edpf::EdpPartitionType, lba7::Lba7PartitionMode};
+use crate::protocol::{
+    edpf::EdpPartitionType, lba7::Lba7PartitionMode, lba7_compat::Lba7CompatibilityExtentLayout,
+};
 
 pub type OfficialPartitionMode = Lba7PartitionMode;
 
@@ -56,6 +58,38 @@ impl OfficialPartitionGeometry {
 
     pub fn end_sector_exclusive(self) -> u64 {
         self.start_sector + self.sector_count()
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct OfficialProvisionPlan {
+    pub mode: OfficialPartitionMode,
+    pub sizes: OfficialPartitionSizes,
+    pub lba7_compatibility_extent: Lba7CompatibilityExtentLayout,
+}
+
+impl OfficialProvisionPlan {
+    pub fn new(
+        mode: OfficialPartitionMode,
+        sizes: OfficialPartitionSizes,
+        lba7_compatibility_extent: Lba7CompatibilityExtentLayout,
+    ) -> Result<Self, String> {
+        if lba7_compatibility_extent.size_bytes == 0 || lba7_compatibility_extent.size_sectors == 0
+        {
+            return Err("LBA7 compatibility extent must be non-empty".into());
+        }
+        Ok(Self {
+            mode,
+            sizes,
+            lba7_compatibility_extent,
+        })
+    }
+
+    pub fn logical_partitions(
+        self,
+        sector_size: u64,
+    ) -> Result<Vec<OfficialPartitionGeometry>, String> {
+        build_official_partition_layout(self.mode, self.sizes, sector_size)
     }
 }
 
