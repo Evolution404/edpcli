@@ -98,9 +98,19 @@ fn region_labels(context: &InspectDiskContext, lba: u64) -> String {
         .join("；")
 }
 
-fn protocol_view(lba: u64, raw: &[u8], meta: &InspectMeta) -> Result<inspect::SectorView, String> {
+fn protocol_view(
+    context: &InspectDiskContext,
+    lba: u64,
+    raw: &[u8],
+    meta: &InspectMeta,
+) -> Result<inspect::SectorView, String> {
     let lba32 = u32::try_from(lba).map_err(|_| format!("LBA{lba} 超出协议解析器范围"))?;
-    Ok(inspect::analyze_sector(lba32, raw, meta))
+    Ok(inspect::analyze_sector_with_context(
+        lba32,
+        raw,
+        meta,
+        Some(&context.protocol_image),
+    ))
 }
 
 fn render_meta(
@@ -141,7 +151,7 @@ fn render_meta(
     }
 
     if lba <= u64::from(crate::common::METADATA_LAST_LBA) {
-        let view = protocol_view(lba, raw, meta)?;
+        let view = protocol_view(context, lba, raw, meta)?;
         out.push_str(&format!("协议解码: {}\n", view.method));
         out.push_str(&inspect::render_fields(&view));
         for note in &view.notes {
@@ -347,7 +357,7 @@ where
             }
             InspectMode::Decode => {
                 let result = if lba <= u64::from(crate::common::METADATA_LAST_LBA) {
-                    protocol_view(lba, &raw, meta).map(|view| (view.decoded, view.method))
+                    protocol_view(context, lba, &raw, meta).map(|view| (view.decoded, view.method))
                 } else {
                     context.decode_non_protocol_with_boot(lba, &raw, partition_boot.as_deref())
                 };
