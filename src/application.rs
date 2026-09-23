@@ -7,6 +7,7 @@
 pub mod backup;
 pub mod device;
 pub mod inspect;
+pub mod offline_convert;
 pub mod provision;
 pub mod write;
 pub use backup::delete_backup_exact;

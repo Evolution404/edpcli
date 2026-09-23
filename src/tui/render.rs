@@ -9,7 +9,7 @@ use ratatui::{
 };
 
 use super::state::{
-    AppState, InputMode, InspectMode, ProvisionKind, ProvisionPrepared, ProvisionStage,
+    AppState, ApplyStage, InputMode, InspectMode, ProvisionKind, ProvisionPrepared, ProvisionStage,
     WizardStage, Workspace, WriteKind,
 };
 use super::{animation, animation::CoreMode};
@@ -101,6 +101,7 @@ fn provision_kind_style(kind: ProvisionKind) -> Style {
         ProvisionKind::Mode2 => Color::LightYellow,
         ProvisionKind::Mode3 => Color::LightGreen,
         ProvisionKind::Convert => Color::LightBlue,
+        ProvisionKind::Offline => Color::LightRed,
     };
     Style::default().fg(color).add_modifier(Modifier::BOLD)
 }
@@ -646,7 +647,22 @@ fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppSta
     let provision = state.provision();
     let (main_area, sidebar) = workspace_sidebar_layout(area);
 
-    let target_lines = if let Some(row) = state.selected_device() {
+    let display_kind = if provision.stage == ProvisionStage::Menu {
+        ProvisionKind::ALL[state.selected().min(ProvisionKind::ALL.len() - 1)]
+    } else {
+        provision.kind
+    };
+    let offline = display_kind == ProvisionKind::Offline;
+    let target_lines = if offline {
+        vec![
+            Line::from(Span::styled(
+                "离线转换模式",
+                provision_kind_style(display_kind),
+            )),
+            Line::from("不读取、不卸载、不写入任何物理磁盘。"),
+            Line::from("输入来自已导出的 LBA 快照目录。"),
+        ]
+    } else if let Some(row) = state.selected_device() {
         vec![
             Line::from(vec![
                 Span::styled(format!("disk{}", row.disk), accent()),
@@ -677,7 +693,7 @@ fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppSta
     } else {
         vec![
             Line::from(Span::styled("未固定目标 USB", danger())),
-            Line::from("请返回“设备”页选中目标盘，再进入制盘页。"),
+            Line::from("物理制盘前请返回“设备”页选中目标盘。"),
         ]
     };
 
@@ -687,28 +703,54 @@ fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppSta
                 .block(
                     Block::default()
                         .borders(Borders::ALL)
-                        .title("固定目标")
-                        .title_style(accent()),
+                        .title(if offline {
+                            "离线工具"
+                        } else {
+                            "固定目标"
+                        })
+                        .title_style(if offline {
+                            provision_kind_style(display_kind)
+                        } else {
+                            accent()
+                        }),
                 )
                 .wrap(Wrap { trim: true }),
             side_top,
         );
         if let Some(side_bottom) = side_bottom {
             frame.render_widget(
-                Paragraph::new(vec![
-                    Line::from(Span::styled("安全不变量", warning())),
-                    Line::from("• 仅允许 USB 整盘目标"),
-                    Line::from("• LBA3 厂商数据原样保留"),
-                    Line::from("• 写前固定硬件身份/容量"),
-                    Line::from("• MBR 最后提交"),
-                    Line::from("• 逐扇区读回；失败整组回滚"),
-                    Line::from("• 免密改造不移动/重加密 type4"),
-                ])
+                Paragraph::new(if offline {
+                    vec![
+                        Line::from(Span::styled("离线边界", provision_kind_style(display_kind))),
+                        Line::from("• 仅读取普通目录中的 LBA*.bin"),
+                        Line::from("• 不打开 raw device"),
+                        Line::from("• 输出为普通文件"),
+                        Line::from("• 与 CLI convert 共用 application service"),
+                    ]
+                } else {
+                    vec![
+                        Line::from(Span::styled("安全不变量", warning())),
+                        Line::from("• 仅允许 USB 整盘目标"),
+                        Line::from("• LBA3 厂商数据原样保留"),
+                        Line::from("• 写前固定硬件身份/容量"),
+                        Line::from("• MBR 最后提交"),
+                        Line::from("• 逐扇区读回；失败整组回滚"),
+                        Line::from("• 免密改造不移动/重加密 type4"),
+                    ]
+                })
                 .block(
                     Block::default()
                         .borders(Borders::ALL)
-                        .border_style(warning())
-                        .title("写盘保护"),
+                        .border_style(if offline {
+                            provision_kind_style(provision.kind)
+                        } else {
+                            warning()
+                        })
+                        .title(if offline {
+                            "离线边界"
+                        } else {
+                            "写盘保护"
+                        }),
                 )
                 .wrap(Wrap { trim: true }),
                 side_bottom,
@@ -861,6 +903,10 @@ fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppSta
                                 prepared.write_image.highest_touched_lba().unwrap_or(0)
                             )),
                             Line::from("LBA3 已从目标盘捕获并绑定；写入前将再次复核。"),
+                            Line::from(vec![
+                                Span::styled("E", secondary()),
+                                Span::raw(" 导出与该目标绑定的稀疏制盘镜像"),
+                            ]),
                         ]);
                     }
                     ProvisionPrepared::Convert(prepared) => {
@@ -889,6 +935,9 @@ fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppSta
                     }
                 }
             }
+            if let Some(message) = &provision.message {
+                lines.push(Line::from(Span::styled(safe(message), success())));
+            }
             lines.extend([
                 Line::from(""),
                 Line::from(vec![
@@ -907,6 +956,52 @@ fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppSta
                             .title("计划预览"),
                     )
                     .wrap(Wrap { trim: true }),
+                main_area,
+            );
+        }
+        ProvisionStage::ExportPath => {
+            frame.render_widget(
+                Paragraph::new(vec![
+                    Line::from(Span::styled("导出目标绑定制盘镜像", secondary())),
+                    Line::from(""),
+                    Line::from("镜像包含目标盘硬件身份和原始 LBA3，不应写入另一块不同 U 盘。"),
+                    Line::from(vec![
+                        Span::styled("输出路径  ", muted()),
+                        Span::styled(safe(&provision.export_path), selected()),
+                    ]),
+                    Line::from(""),
+                    Line::from("直接输入编辑路径 · Backspace 删除 · Enter 开始导出 · Esc 返回"),
+                ])
+                .block(
+                    Block::default()
+                        .borders(Borders::ALL)
+                        .border_style(secondary())
+                        .title("镜像导出"),
+                )
+                .wrap(Wrap { trim: true }),
+                main_area,
+            );
+        }
+        ProvisionStage::Exporting => {
+            frame.render_widget(
+                Paragraph::new(vec![
+                    Line::from(Span::styled("◈ 正在导出稀疏制盘镜像", secondary())),
+                    Line::from(""),
+                    Line::from(safe(
+                        provision
+                            .message
+                            .as_deref()
+                            .unwrap_or("正在写入镜像并执行 fsync…"),
+                    )),
+                    Line::from("导出完成前保持当前计划不变。"),
+                ])
+                .alignment(Alignment::Center)
+                .block(
+                    Block::default()
+                        .borders(Borders::ALL)
+                        .border_style(secondary())
+                        .title("镜像导出"),
+                ),
                 main_area,
             );
         }
@@ -978,6 +1073,170 @@ fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppSta
                 main_area,
             );
         }
+        ProvisionStage::OfflineForm => {
+            let mut lines = vec![
+                Line::from(Span::styled(
+                    "离线 LBA 快照转换",
+                    provision_kind_style(ProvisionKind::Offline),
+                )),
+                Line::from("等价于 CLI convert；不访问任何物理磁盘。"),
+                Line::from(""),
+            ];
+            for (index, (label, value)) in state.offline_fields().iter().enumerate() {
+                let shown = if value.is_empty() {
+                    match index {
+                        2 => "〈可选：留空自动〉".to_string(),
+                        3 => "〈可选：留空仅预览〉".to_string(),
+                        _ => "〈必填〉".to_string(),
+                    }
+                } else {
+                    safe(value)
+                };
+                lines.push(Line::from(vec![
+                    Span::styled(format!("{:>14}  ", label), muted()),
+                    Span::styled(
+                        shown,
+                        if index == provision.offline_field_selected {
+                            selected()
+                        } else {
+                            Style::default()
+                        },
+                    ),
+                ]));
+            }
+            lines.extend([
+                Line::from(""),
+                Line::from(vec![
+                    Span::styled("↑/↓ Tab", accent()),
+                    Span::raw(" 切字段   "),
+                    Span::styled("直接输入", secondary()),
+                    Span::raw(" 编辑   "),
+                    Span::styled("Enter", success()),
+                    Span::raw(" 执行转换   "),
+                    Span::styled("Esc", warning()),
+                    Span::raw(" 返回"),
+                ]),
+            ]);
+            if let Some(message) = &provision.message {
+                lines.push(Line::from(Span::styled(safe(message), danger())));
+            }
+            frame.render_widget(
+                Paragraph::new(lines)
+                    .block(
+                        Block::default()
+                            .borders(Borders::ALL)
+                            .border_style(provision_kind_style(ProvisionKind::Offline))
+                            .title("离线转换参数"),
+                    )
+                    .wrap(Wrap { trim: false }),
+                main_area,
+            );
+        }
+        ProvisionStage::OfflineRunning => {
+            frame.render_widget(
+                Paragraph::new(vec![
+                    Line::from(Span::styled(
+                        "◈ 正在离线转换",
+                        provision_kind_style(ProvisionKind::Offline),
+                    )),
+                    Line::from(""),
+                    Line::from(safe(
+                        provision
+                            .message
+                            .as_deref()
+                            .unwrap_or("正在读取 LBA 快照并计算转换结果…"),
+                    )),
+                    Line::from("不会访问或修改物理磁盘。"),
+                ])
+                .alignment(Alignment::Center)
+                .block(
+                    Block::default()
+                        .borders(Borders::ALL)
+                        .border_style(provision_kind_style(ProvisionKind::Offline))
+                        .title("离线执行"),
+                ),
+                main_area,
+            );
+        }
+        ProvisionStage::OfflineResult => {
+            let mut lines = vec![
+                Line::from(Span::styled(
+                    "离线转换结果",
+                    provision_kind_style(ProvisionKind::Offline),
+                )),
+                Line::from(""),
+            ];
+            if let Some(view) = &provision.offline_result {
+                lines.extend([
+                    Line::from(format!(
+                        "CRC32: 0x{:08X}    K0: 0x{:08X}",
+                        view.crc, view.k0
+                    )),
+                    Line::from(format!("Share: {} sectors", view.share)),
+                    Line::from(format!(
+                        "Encrypt: start LBA {}  /  {} bytes",
+                        view.enc_start, view.enc_size
+                    )),
+                ]);
+                if let Some(output_dir) = &view.output_dir {
+                    lines.push(Line::from(vec![
+                        Span::styled("产物目录: ", muted()),
+                        Span::styled(safe(&output_dir.display().to_string()), success()),
+                    ]));
+                } else {
+                    lines.push(Line::from(Span::styled(
+                        "仅完成预览；未写出 LBA 文件。",
+                        warning(),
+                    )));
+                }
+                lines.push(Line::from(""));
+                for report in &view.reports {
+                    let text = match report {
+                        crate::sectors::ConvertReport::Identity { device_id, .. } => {
+                            format!("身份: {}", safe(device_id))
+                        }
+                        crate::sectors::ConvertReport::Layout {
+                            share,
+                            enc_start,
+                            enc_size,
+                        } => format!(
+                            "布局: share={share} sectors · enc_start={enc_start} · enc_size={enc_size}"
+                        ),
+                        crate::sectors::ConvertReport::SectorPlan {
+                            clears_lba9, ..
+                        } => format!(
+                            "扇区计划: LBA0/6/7/12{}",
+                            if *clears_lba9 { " + 清零 LBA9" } else { "" }
+                        ),
+                    };
+                    lines.push(Line::from(vec![
+                        Span::styled("• ", accent()),
+                        Span::raw(text),
+                    ]));
+                }
+            } else if let Some(message) = &provision.message {
+                lines.push(Line::from(Span::styled(safe(message), danger())));
+            }
+            lines.extend([
+                Line::from(""),
+                Line::from("Enter 返回参数继续转换 · Esc 返回制盘中心"),
+            ]);
+            frame.render_widget(
+                Paragraph::new(lines)
+                    .block(
+                        Block::default()
+                            .borders(Borders::ALL)
+                            .border_style(if provision.offline_result.is_some() {
+                                success()
+                            } else {
+                                danger()
+                            })
+                            .title("离线转换结果"),
+                    )
+                    .wrap(Wrap { trim: true }),
+                main_area,
+            );
+        }
     }
 }
 
@@ -986,6 +1245,7 @@ fn draw_command_palette(frame: &mut Frame, area: ratatui::layout::Rect, state: &
         "devices  切到设备",
         "backups  切到备份",
         "provision 制盘/免密改造",
+        "offline-convert 离线 LBA 快照转换",
         "inspect  打开 Inspect",
         "apply    Apply 安全向导",
         "restore  Restore 安全向导",
@@ -1347,6 +1607,167 @@ fn write_progress_text(event: &crate::application::WriteEvent) -> String {
     }
 }
 
+fn draw_apply(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState) {
+    let Some(apply) = state.apply() else {
+        return;
+    };
+    let mut lines = vec![
+        Line::from(vec![
+            Span::styled("Apply 免密改造", secondary().add_modifier(Modifier::BOLD)),
+            Span::raw(format!("  ·  disk{}", apply.disk)),
+        ]),
+        Line::from("旧版兼容改造链；每次写入前强制执行完整 dry-run 预览。"),
+        Line::from(""),
+    ];
+
+    match apply.stage {
+        ApplyStage::Setup => {
+            lines.extend([
+                Line::from(vec![
+                    Span::styled("目标 Share 大小 GiB  ", muted()),
+                    Span::styled(
+                        if apply.size_gb.is_empty() {
+                            "自动（使用原 type4 边界）".into()
+                        } else {
+                            safe(&apply.size_gb)
+                        },
+                        selected(),
+                    ),
+                ]),
+                Line::from(vec![
+                    Span::styled("force               ", muted()),
+                    Span::styled(
+                        if apply.force { "ON" } else { "OFF" },
+                        if apply.force { warning() } else { success() },
+                    ),
+                ]),
+                Line::from(""),
+                Line::from(vec![
+                    Span::styled("数字 / .", accent()),
+                    Span::raw(" 编辑大小   "),
+                    Span::styled("Backspace", accent()),
+                    Span::raw(" 删除   "),
+                    Span::styled("f", warning()),
+                    Span::raw(" 切换 force   "),
+                    Span::styled("Enter", success()),
+                    Span::raw(" 只读预览"),
+                ]),
+            ]);
+            if let Some(message) = &apply.message {
+                lines.push(Line::from(Span::styled(safe(message), danger())));
+            }
+        }
+        ApplyStage::Previewing => {
+            lines.extend([
+                Line::from(Span::styled("◈ 正在执行只读预览", secondary())),
+                Line::from(
+                    apply
+                        .message
+                        .as_deref()
+                        .unwrap_or("正在识别目标和计算布局…"),
+                ),
+                Line::from("不会卸载、不会写盘。"),
+            ]);
+        }
+        ApplyStage::Review => {
+            lines.push(Line::from(Span::styled(
+                "dry-run 完成；以下计划均来自真实目标的只读计算",
+                success(),
+            )));
+            lines.push(Line::from(format!(
+                "size={}  force={}",
+                if apply.size_gb.is_empty() {
+                    "auto"
+                } else {
+                    apply.size_gb.as_str()
+                },
+                if apply.force { "ON" } else { "OFF" }
+            )));
+            lines.push(Line::from(""));
+            for event in &apply.events {
+                let text = write_progress_text(event);
+                let style = match event {
+                    crate::application::WriteEvent::AlreadyNopwdHint => warning(),
+                    crate::application::WriteEvent::DryRunPreview { .. } => success(),
+                    crate::application::WriteEvent::Convert(_) => secondary(),
+                    _ => Style::default(),
+                };
+                lines.push(Line::from(vec![
+                    Span::styled("• ", accent()),
+                    Span::styled(safe(&text), style),
+                ]));
+            }
+            if let Some(message) = &apply.message {
+                lines.push(Line::from(Span::styled(safe(message), warning())));
+            }
+            lines.extend([
+                Line::from(""),
+                Line::from(vec![
+                    Span::styled("Enter", danger()),
+                    Span::raw(" 进入最终 YES 确认   "),
+                    Span::styled("Esc", warning()),
+                    Span::raw(" 返回参数设置"),
+                ]),
+            ]);
+        }
+        ApplyStage::Confirm => {
+            lines.extend([
+                Line::from(Span::styled("破坏性写盘最终确认", danger())),
+                Line::from("确认后会自动写前备份、卸载/锁卷、复核目标、事务写入并读回。"),
+                Line::from(vec![
+                    Span::raw("精确输入 "),
+                    Span::styled("YES", danger()),
+                    Span::raw(" 后按 Enter： "),
+                    Span::styled(safe(&apply.confirmation), selected()),
+                ]),
+                Line::from(Span::styled("Esc 返回 dry-run 计划。", warning())),
+            ]);
+            if let Some(message) = &apply.message {
+                lines.push(Line::from(Span::styled(safe(message), danger())));
+            }
+        }
+        ApplyStage::Running => {
+            lines.push(Line::from(Span::styled(
+                "◆ Apply 安全事务执行中",
+                warning(),
+            )));
+            if let Some(event) = apply.events.last() {
+                lines.push(Line::from(safe(&write_progress_text(event))));
+            } else if let Some(message) = &apply.message {
+                lines.push(Line::from(safe(message)));
+            }
+            lines.push(Line::from(Span::styled(
+                "q / Esc / Ctrl-C 不会中断当前介质事务。",
+                danger(),
+            )));
+        }
+        ApplyStage::Result => {
+            lines.extend([
+                Line::from(Span::styled("Apply 已到达安全结束点", success())),
+                Line::from(safe(apply.message.as_deref().unwrap_or("操作结束"))),
+                Line::from("Enter / Esc 返回设备列表。"),
+            ]);
+        }
+    }
+
+    frame.render_widget(
+        Paragraph::new(lines)
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .border_style(match apply.stage {
+                        ApplyStage::Confirm => danger(),
+                        ApplyStage::Running => warning(),
+                        ApplyStage::Result => success(),
+                        _ => secondary(),
+                    })
+                    .title("Apply · 预览后写入"),
+            )
+            .wrap(Wrap { trim: true }),
+        area,
+    );
+}
+
 fn draw_wizard(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState) {
     let Some(wizard) = state.wizard() else {
         return;
@@ -1422,7 +1843,8 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
         (CoreMode::Busy, "READ LBA0-12")
     } else if state.active_scan_pending() {
         (CoreMode::Busy, "BACKGROUND SCAN")
-    } else if state.wizard().is_some()
+    } else if state.apply().is_some()
+        || state.wizard().is_some()
         || (state.workspace() == Workspace::Provision
             && state.provision().stage != ProvisionStage::Menu)
     {
@@ -1442,6 +1864,7 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
 
     let title = Paragraph::new(Line::from(vec![
         Span::styled("edpcli", accent()),
+        Span::styled(format!(" v{}", env!("CARGO_PKG_VERSION")), muted()),
         Span::styled("  TUI", secondary().add_modifier(Modifier::BOLD)),
         Span::styled("  ·  管理员模式", success()),
         animation::compact_indicator(state.animation_frame(), core_mode),
@@ -1476,6 +1899,7 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
     let overlay_active = state.inspect_data().is_some()
         || state.backup_delete().is_some()
         || state.backup_prune().is_some()
+        || state.apply().is_some()
         || state.wizard().is_some()
         || matches!(state.input_mode(), InputMode::Command | InputMode::Help);
     let (content_area, animation_area) = if overlay_active && body.width >= 118 && body.height >= 14
@@ -1495,6 +1919,8 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
         draw_backup_delete(frame, content_area, state);
     } else if state.backup_prune().is_some() {
         draw_backup_prune(frame, content_area, state);
+    } else if state.apply().is_some() {
+        draw_apply(frame, content_area, state);
     } else if state.wizard().is_some() {
         draw_wizard(frame, content_area, state);
     } else {
@@ -1530,7 +1956,9 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
                     ]),
                     Line::from(vec![
                         Span::styled("制盘: ", secondary()),
-                        Span::raw("四种官方模式 + 现有盘免密改造；先计划预览，再 YES 写盘"),
+                        Span::raw(
+                            "四种官方模式 + 现有盘免密改造 + 离线快照转换；物理写盘先预览再 YES",
+                        ),
                     ]),
                     Line::from(vec![
                         Span::styled("r", accent()),
@@ -1612,10 +2040,21 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
                     "↑/↓/Tab 字段  ·  输入编辑  ·  Enter 生成只读计划  ·  Esc 返回".to_string()
                 }
                 ProvisionStage::Planning => "正在生成只读计划…".to_string(),
-                ProvisionStage::Review => "Enter 最终确认  ·  Esc 返回修改".to_string(),
+                ProvisionStage::Review => {
+                    "Enter 最终确认  ·  E 导出镜像（新盘计划）  ·  Esc 返回修改".to_string()
+                }
+                ProvisionStage::ExportPath => "输入导出路径  ·  Enter 导出  ·  Esc 返回计划".to_string(),
+                ProvisionStage::Exporting => "镜像正在后台导出…".to_string(),
                 ProvisionStage::Confirm => "输入 YES + Enter 执行  ·  Esc 返回计划".to_string(),
                 ProvisionStage::Running => "安全事务执行中；退出请求延迟到安全检查点".to_string(),
                 ProvisionStage::Result => "Enter / Esc 返回制盘中心".to_string(),
+                ProvisionStage::OfflineForm => {
+                    "↑/↓/Tab 字段  ·  Enter 离线转换  ·  Esc 返回制盘中心".to_string()
+                }
+                ProvisionStage::OfflineRunning => "离线转换后台执行中…".to_string(),
+                ProvisionStage::OfflineResult => {
+                    "Enter 返回参数  ·  Esc 返回制盘中心".to_string()
+                }
             },
         }
     };

@@ -92,6 +92,18 @@ enum WorkerResult {
         operation_id: OperationId,
         event: crate::application::WriteEvent,
     },
+    ApplyPreview {
+        generation: u64,
+        result: Result<Vec<crate::application::WriteEvent>, String>,
+    },
+    ApplyProgress {
+        operation_id: OperationId,
+        event: crate::application::WriteEvent,
+    },
+    ApplyWrite {
+        operation_id: OperationId,
+        result: Result<(), String>,
+    },
     Inspect {
         generation: u64,
         result: Result<InspectWorkspace, String>,
@@ -133,6 +145,14 @@ enum WorkerResult {
         operation_id: OperationId,
         result: Result<(), String>,
     },
+    ProvisionExport {
+        generation: u64,
+        result: Result<PathBuf, String>,
+    },
+    OfflineConvert {
+        generation: u64,
+        result: Result<crate::tui::state::OfflineConvertView, String>,
+    },
 }
 
 enum InspectRequest {
@@ -146,6 +166,9 @@ pub struct TaskUpdates {
     pub backups: Option<Vec<BackupWorkspaceItem>>,
     pub write: Option<(OperationId, Result<(), String>)>,
     pub write_progress: Option<(OperationId, crate::application::WriteEvent)>,
+    pub apply_preview: Option<Result<Vec<crate::application::WriteEvent>, String>>,
+    pub apply_progress: Option<(OperationId, crate::application::WriteEvent)>,
+    pub apply_write: Option<(OperationId, Result<(), String>)>,
     pub inspect: Option<Result<InspectWorkspace, String>>,
     pub device_error: Option<String>,
     pub backup_error: Option<String>,
@@ -156,6 +179,8 @@ pub struct TaskUpdates {
     pub provision_plan: Option<Result<crate::tui::state::ProvisionPrepared, String>>,
     pub provision_progress: Option<(OperationId, String)>,
     pub provision_write: Option<(OperationId, Result<(), String>)>,
+    pub provision_export: Option<Result<PathBuf, String>>,
+    pub offline_convert: Option<Result<crate::tui::state::OfflineConvertView, String>>,
 }
 
 impl TaskUpdates {
@@ -164,6 +189,9 @@ impl TaskUpdates {
             || self.backups.is_some()
             || self.write.is_some()
             || self.write_progress.is_some()
+            || self.apply_preview.is_some()
+            || self.apply_progress.is_some()
+            || self.apply_write.is_some()
             || self.inspect.is_some()
             || self.device_error.is_some()
             || self.backup_error.is_some()
@@ -174,6 +202,8 @@ impl TaskUpdates {
             || self.provision_plan.is_some()
             || self.provision_progress.is_some()
             || self.provision_write.is_some()
+            || self.provision_export.is_some()
+            || self.offline_convert.is_some()
     }
 }
 
@@ -195,12 +225,18 @@ pub struct TaskHub {
     inspect_generation: GenerationGate,
     verify_generation: GenerationGate,
     provision_generation: GenerationGate,
+    provision_export_generation: GenerationGate,
+    offline_convert_generation: GenerationGate,
+    apply_generation: GenerationGate,
     prune_generation: GenerationGate,
     device_single_flight: SingleFlightGate,
     backup_single_flight: SingleFlightGate,
     inspect_single_flight: SingleFlightGate,
     verify_single_flight: SingleFlightGate,
     provision_single_flight: SingleFlightGate,
+    provision_export_single_flight: SingleFlightGate,
+    offline_convert_single_flight: SingleFlightGate,
+    apply_single_flight: SingleFlightGate,
     prune_single_flight: SingleFlightGate,
     pending_device_scan: Option<PathBuf>,
     pending_backup_scan: Option<PathBuf>,
@@ -228,12 +264,18 @@ impl TaskHub {
             inspect_generation: GenerationGate::new(),
             verify_generation: GenerationGate::new(),
             provision_generation: GenerationGate::new(),
+            provision_export_generation: GenerationGate::new(),
+            offline_convert_generation: GenerationGate::new(),
+            apply_generation: GenerationGate::new(),
             prune_generation: GenerationGate::new(),
             device_single_flight: SingleFlightGate::new(),
             backup_single_flight: SingleFlightGate::new(),
             inspect_single_flight: SingleFlightGate::new(),
             verify_single_flight: SingleFlightGate::new(),
             provision_single_flight: SingleFlightGate::new(),
+            provision_export_single_flight: SingleFlightGate::new(),
+            offline_convert_single_flight: SingleFlightGate::new(),
+            apply_single_flight: SingleFlightGate::new(),
             prune_single_flight: SingleFlightGate::new(),
             pending_device_scan: None,
             pending_backup_scan: None,
@@ -593,6 +635,155 @@ impl TaskHub {
         Ok(operation_id)
     }
 
+    pub fn request_apply_preview(
+        &mut self,
+        disk: u32,
+        expected_identity: crate::tui::state::ExpectedIdentity,
+        size_gb: Option<f64>,
+        backup_dir: PathBuf,
+    ) -> Result<u64, &'static str> {
+        if !self.apply_single_flight.try_start() {
+            return Err("已有 Apply 预览正在生成");
+        }
+        let generation = self.apply_generation.begin();
+        let tx = self.tx.clone();
+        std::thread::spawn(move || {
+            let result = catch_unwind(AssertUnwindSafe(|| {
+                struct Collector {
+                    events: Vec<crate::application::WriteEvent>,
+                }
+                impl crate::application::write::Prompter for Collector {
+                    fn prompt_line(&mut self, _msg: &str) -> String {
+                        String::new()
+                    }
+                    fn confirm_yes(&mut self, _msg: &str) -> bool {
+                        false
+                    }
+                    fn write_event(&mut self, event: crate::application::WriteEvent) {
+                        self.events.push(event);
+                    }
+                    fn output(&mut self, _msg: &str) {}
+                }
+
+                let runner = SysRunner;
+                crate::application::write::guard_usb_disk(&runner, disk)
+                    .map_err(|error| error.msg)?;
+                let path = crate::diskio::raw_path(disk);
+                let mut dev = crate::diskio::FileDev::open_rdonly(&path)
+                    .map_err(|error| format!("错误: 无法只读打开 {path}: {error}"))?;
+                crate::application::write::verify_expected_identity(
+                    &runner,
+                    disk,
+                    expected_identity.onlyid.as_deref(),
+                    expected_identity.device_id.as_deref(),
+                    &mut dev,
+                )
+                .map_err(|error| error.msg)?;
+                let mut prompt = Collector { events: Vec::new() };
+                let mut ctx = crate::application::write::Ctx {
+                    runner: &runner,
+                    clock: &crate::diskio::SystemClock,
+                    prompt: &mut prompt,
+                    backup_dir,
+                };
+                crate::application::write::apply_flow(
+                    crate::application::write::ApplyMode::DryRun,
+                    disk,
+                    size_gb,
+                    &mut ctx,
+                    &mut dev,
+                )
+                .map_err(|error| error.msg)?;
+                Ok(prompt.events)
+            }))
+            .unwrap_or_else(|payload| {
+                Err(format!(
+                    "Apply 预览 worker 异常终止: {}",
+                    panic_message(payload)
+                ))
+            });
+            let _ = tx.send(WorkerResult::ApplyPreview { generation, result });
+        });
+        Ok(generation)
+    }
+
+    pub fn request_apply_write(
+        &mut self,
+        disk: u32,
+        expected_identity: crate::tui::state::ExpectedIdentity,
+        size_gb: Option<f64>,
+        force: bool,
+        backup_dir: PathBuf,
+    ) -> Result<OperationId, &'static str> {
+        let operation_id = self.begin_operation()?;
+        let tx = self.tx.clone();
+        self.critical_worker = Some(std::thread::spawn(move || {
+            let result = catch_unwind(AssertUnwindSafe(|| {
+                struct Progress {
+                    tx: Sender<WorkerResult>,
+                    operation_id: OperationId,
+                }
+                impl crate::application::write::Prompter for Progress {
+                    fn prompt_line(&mut self, _msg: &str) -> String {
+                        String::new()
+                    }
+                    fn confirm_yes(&mut self, _msg: &str) -> bool {
+                        true
+                    }
+                    fn write_event(&mut self, event: crate::application::WriteEvent) {
+                        let _ = self.tx.send(WorkerResult::ApplyProgress {
+                            operation_id: self.operation_id,
+                            event,
+                        });
+                    }
+                    fn output(&mut self, _msg: &str) {}
+                }
+
+                let runner = SysRunner;
+                crate::application::write::guard_usb_disk(&runner, disk)
+                    .map_err(|error| error.msg)?;
+                let path = crate::diskio::raw_path(disk);
+                let mut dev = crate::diskio::FileDev::open_rdonly(&path)
+                    .map_err(|error| format!("错误: 无法只读打开 {path}: {error}"))?;
+                crate::application::write::verify_expected_identity(
+                    &runner,
+                    disk,
+                    expected_identity.onlyid.as_deref(),
+                    expected_identity.device_id.as_deref(),
+                    &mut dev,
+                )
+                .map_err(|error| error.msg)?;
+                let mut prompt = Progress {
+                    tx: tx.clone(),
+                    operation_id,
+                };
+                let mut ctx = crate::application::write::Ctx {
+                    runner: &runner,
+                    clock: &crate::diskio::SystemClock,
+                    prompt: &mut prompt,
+                    backup_dir,
+                };
+                crate::application::write::apply_flow(
+                    crate::application::write::ApplyMode::Write { force },
+                    disk,
+                    size_gb,
+                    &mut ctx,
+                    &mut dev,
+                )
+                .map(|_| ())
+                .map_err(|error| error.msg)
+            }))
+            .unwrap_or_else(|payload| {
+                Err(format!("Apply worker 异常终止: {}", panic_message(payload)))
+            });
+            let _ = tx.send(WorkerResult::ApplyWrite {
+                operation_id,
+                result,
+            });
+        }));
+        Ok(operation_id)
+    }
+
     pub fn request_write(
         &mut self,
         intent: crate::tui::state::WriteIntent,
@@ -755,6 +946,67 @@ impl TaskHub {
         Ok(generation)
     }
 
+    pub fn request_provision_export(
+        &mut self,
+        prepared: crate::application::provision::PreparedNewProvision,
+        path: PathBuf,
+    ) -> Result<u64, &'static str> {
+        if !self.provision_export_single_flight.try_start() {
+            return Err("已有制盘镜像正在导出");
+        }
+        let generation = self.provision_export_generation.begin();
+        let tx = self.tx.clone();
+        std::thread::spawn(move || {
+            let result = catch_unwind(AssertUnwindSafe(|| {
+                crate::application::provision::export_sparse_provision_image(&path, &prepared)
+                    .map_err(|error| error.msg)?;
+                Ok(path)
+            }))
+            .unwrap_or_else(|payload| {
+                Err(format!(
+                    "制盘镜像导出 worker 异常终止: {}",
+                    panic_message(payload)
+                ))
+            });
+            let _ = tx.send(WorkerResult::ProvisionExport { generation, result });
+        });
+        Ok(generation)
+    }
+
+    pub fn request_offline_convert(
+        &mut self,
+        request: crate::application::offline_convert::OfflineConvertRequest,
+    ) -> Result<u64, &'static str> {
+        if !self.offline_convert_single_flight.try_start() {
+            return Err("已有离线转换正在执行");
+        }
+        let generation = self.offline_convert_generation.begin();
+        let tx = self.tx.clone();
+        std::thread::spawn(move || {
+            let result = catch_unwind(AssertUnwindSafe(|| {
+                let output = crate::application::offline_convert::run(&request)
+                    .map_err(|error| error.msg)?;
+                Ok(crate::tui::state::OfflineConvertView {
+                    reports: output.reports,
+                    share: output.result.share,
+                    enc_start: output.result.enc_start,
+                    enc_size: output.result.enc_size,
+                    crc: output.result.crc,
+                    k0: output.result.k0,
+                    output_dir: output.output_dir,
+                })
+            }))
+            .unwrap_or_else(|payload| {
+                Err(format!(
+                    "离线转换 worker 异常终止: {}",
+                    panic_message(payload)
+                ))
+            });
+            let _ = tx.send(WorkerResult::OfflineConvert { generation, result });
+        });
+        Ok(generation)
+    }
+
     pub fn request_provision_write(
         &mut self,
         prepared: crate::tui::state::ProvisionPrepared,
@@ -877,6 +1129,28 @@ impl TaskHub {
                         updates.write_progress = Some((operation_id, event));
                     }
                 }
+                WorkerResult::ApplyPreview { generation, result } => {
+                    self.apply_single_flight.finish();
+                    if self.apply_generation.is_current(generation) {
+                        updates.apply_preview = Some(result);
+                    }
+                }
+                WorkerResult::ApplyProgress {
+                    operation_id,
+                    event,
+                } => {
+                    if self.active_operation == Some(operation_id) {
+                        updates.apply_progress = Some((operation_id, event));
+                    }
+                }
+                WorkerResult::ApplyWrite {
+                    operation_id,
+                    result,
+                } => {
+                    if self.finish_operation(operation_id) {
+                        updates.apply_write = Some((operation_id, result));
+                    }
+                }
                 WorkerResult::Inspect { generation, result } => {
                     self.inspect_single_flight.finish();
                     if let Some((next_generation, request)) = self.pending_inspect.take() {
@@ -971,6 +1245,18 @@ impl TaskHub {
                 } => {
                     if self.finish_operation(operation_id) {
                         updates.provision_write = Some((operation_id, result));
+                    }
+                }
+                WorkerResult::ProvisionExport { generation, result } => {
+                    self.provision_export_single_flight.finish();
+                    if self.provision_export_generation.is_current(generation) {
+                        updates.provision_export = Some(result);
+                    }
+                }
+                WorkerResult::OfflineConvert { generation, result } => {
+                    self.offline_convert_single_flight.finish();
+                    if self.offline_convert_generation.is_current(generation) {
+                        updates.offline_convert = Some(result);
                     }
                 }
             }

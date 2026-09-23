@@ -93,31 +93,26 @@ edpcli version
 edpcli tui
 ```
 
-TUI 仅在交互式 TTY 中启动；其设备、备份和 Inspect 字段在渲染前统一过滤终端控制字符，
-避免来自 U 盘元数据、文件名或系统探测文本的 ESC/换行等内容破坏 alternate-screen。
-后台 worker 只通过 TaskHub 回传数据，不允许直接向 stdout/stderr 输出。核心键位：
+TUI 仅在交互式 TTY 中启动；设备、备份、制盘三个工作区使用同一套
+application/service，不维护第二套业务实现。来自 U 盘元数据、文件名、快照路径和系统探测
+的文本在渲染前统一过滤终端控制字符，后台 worker 只通过 TaskHub 回传数据，不允许直接向
+stdout/stderr 输出。
 
-- `j/k/h/l`：上下选择、切换设备/备份工作区或 Inspect 视图；
-- `gg/G`：首项/末项；
-- `Ctrl-d/Ctrl-u`：列表半页移动；Inspect hex 中滚动内容；
-- `/` + Enter：搜索，`n/N` 前后匹配；
-- `:`：任务型 command palette，不执行 shell；
-- `i`：Inspect，支持字段、decoded hex、raw hex；
-- `b`：为当前选中设备创建只读 LBA0-12 备份；
-- `a`：Apply 安全向导；
-- `R`：从当前备份执行 Restore 安全向导；
-- `Esc`：返回，`q`：退出，`?`：帮助。
+TUI 已覆盖主要用户流程：设备列表/详情、Inspect、Apply、普通/深度备份、校验、恢复、单条删除、
+keep-N 清理、官方四模式制盘、现有官方盘严格免密改造、目标绑定稀疏镜像导出，以及离线 LBA 快照
+转换。物理写盘统一遵循“先只读计划/预览，再精确输入 YES”的交互；Apply 还支持 TUI 内设置目标
+大小和 force，并强制先完成 dry-run。离线快照转换不打开 raw device。
 
-设备扫描、备份扫描和 Inspect 读取都在后台 worker 执行，不阻塞 redraw；同类任务使用
-single-flight，并把繁忙期间的重复请求合并为最后一次。动画只重绘可见表格行；可通过
-`EDPCLI_ANIMATION=reduced` 降低更新频率，或用 `EDPCLI_ANIMATION=off` 关闭动态帧。
-Backup create 复用现有只读 `backup_create_flow`。Apply / Restore
-仍只调用 CLI 共用的 application write service。进入真实写盘前必须明确输入 `YES`；
-需要提权时会固定平台原生 disk selector、用户确认时看到的 onlyid/device_id，Restore
-还会固定精确备份路径。操作开始前会重新读取设备身份，提权后的 TUI
-再次要求 `YES`。进入关键写盘阶段后，`q` / `Esc` / `Ctrl-C` 只登记延迟退出，
-不会中断卸载、reopen、atomic write、sync/readback 或 rollback；即使终端绘制/读取失败，
-程序也会先恢复终端并等待关键 worker 完成安全收尾。
+核心键位为 `j/k` 上下选择、`Tab/h/l` 切换工作区、`gg/G` 首尾、`Ctrl-d/Ctrl-u` 半页、
+`/` 搜索、`:` 命令面板、`i` Inspect、`b/B` 普通/深度备份、`a` Apply、`R` Restore、
+`v` 校验、`D` 删除、`P` keep-N 清理、`Esc` 返回、`q` 退出、`?` 帮助。
+
+设备扫描、备份扫描、Inspect、Apply 预览、制盘计划、镜像导出和离线转换均在后台 worker 执行，
+不阻塞 redraw；同类任务使用 single-flight，繁忙期间只保留最新有效结果。动画只重绘可见表格行，
+可通过 `EDPCLI_ANIMATION=reduced` 降低更新频率，或用 `EDPCLI_ANIMATION=off` 关闭动态帧。
+进入关键介质事务后，`q` / `Esc` / `Ctrl-C` 只登记延迟退出，不会中断卸载、reopen、
+atomic write、sync/readback 或 rollback；终端 I/O 失败时也会先恢复终端，再等待关键 worker
+完成安全收尾。
 
 ## 备份
 

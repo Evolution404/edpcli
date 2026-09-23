@@ -60,6 +60,28 @@ pub struct WizardState {
     pub progress: Option<crate::application::WriteEvent>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ApplyStage {
+    Setup,
+    Previewing,
+    Review,
+    Confirm,
+    Running,
+    Result,
+}
+
+#[derive(Debug, Clone)]
+pub struct ApplyState {
+    pub stage: ApplyStage,
+    pub disk: u32,
+    pub expected_identity: ExpectedIdentity,
+    pub size_gb: String,
+    pub force: bool,
+    pub events: Vec<crate::application::WriteEvent>,
+    pub confirmation: String,
+    pub message: Option<String>,
+}
+
 #[derive(Debug, Clone)]
 pub struct BackupDeleteState {
     pub stage: WizardStage,
@@ -108,15 +130,17 @@ pub enum ProvisionKind {
     Mode2,
     Mode3,
     Convert,
+    Offline,
 }
 
 impl ProvisionKind {
-    pub const ALL: [Self; 5] = [
+    pub const ALL: [Self; 6] = [
         Self::Mode0,
         Self::Mode1,
         Self::Mode2,
         Self::Mode3,
         Self::Convert,
+        Self::Offline,
     ];
 
     pub const fn mode(self) -> Option<u8> {
@@ -125,7 +149,7 @@ impl ProvisionKind {
             Self::Mode1 => Some(1),
             Self::Mode2 => Some(2),
             Self::Mode3 => Some(3),
-            Self::Convert => None,
+            Self::Convert | Self::Offline => None,
         }
     }
 
@@ -136,6 +160,7 @@ impl ProvisionKind {
             Self::Mode2 => "模式 2 · 整盘加密",
             Self::Mode3 => "模式 3 · 内外网双分区",
             Self::Convert => "现有官方盘 · 严格免密改造",
+            Self::Offline => "离线工具 · LBA 快照转换",
         }
     }
 
@@ -146,6 +171,7 @@ impl ProvisionKind {
             Self::Mode2 => "兼容 type1 + type4 整盘加密布局",
             Self::Mode3 => "type1 + type2 内外网双分区",
             Self::Convert => "保留原 type4 几何/密钥，仅重建前部明文 exFAT",
+            Self::Offline => "不碰真盘：快照目录 → 免密转换计划 / 可选导出扇区",
         }
     }
 }
@@ -156,9 +182,14 @@ pub enum ProvisionStage {
     Form,
     Planning,
     Review,
+    ExportPath,
+    Exporting,
     Confirm,
     Running,
     Result,
+    OfflineForm,
+    OfflineRunning,
+    OfflineResult,
 }
 
 #[derive(Debug, Clone)]
@@ -178,6 +209,25 @@ pub struct ProvisionForm {
     pub label: String,
     pub password: String,
     pub volume_label: String,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct OfflineConvertForm {
+    pub source_dir: String,
+    pub device_id: String,
+    pub size_gb: String,
+    pub output_dir: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct OfflineConvertView {
+    pub reports: Vec<crate::sectors::ConvertReport>,
+    pub share: u64,
+    pub enc_start: u64,
+    pub enc_size: u64,
+    pub crc: u32,
+    pub k0: u32,
+    pub output_dir: Option<std::path::PathBuf>,
 }
 
 impl Default for ProvisionForm {
@@ -205,6 +255,10 @@ pub struct ProvisionState {
     pub form: ProvisionForm,
     pub prepared: Option<ProvisionPrepared>,
     pub confirmation: String,
+    pub export_path: String,
+    pub offline_form: OfflineConvertForm,
+    pub offline_field_selected: usize,
+    pub offline_result: Option<OfflineConvertView>,
     pub message: Option<String>,
 }
 
@@ -218,6 +272,10 @@ impl Default for ProvisionState {
             form: ProvisionForm::default(),
             prepared: None,
             confirmation: String::new(),
+            export_path: String::new(),
+            offline_form: OfflineConvertForm::default(),
+            offline_field_selected: 0,
+            offline_result: None,
             message: None,
         }
     }
@@ -283,6 +341,7 @@ pub struct AppState {
     critical_operation: bool,
     exit_pending: bool,
     wizard: Option<WizardState>,
+    apply: Option<ApplyState>,
     backup_delete: Option<BackupDeleteState>,
     backup_prune: Option<BackupPruneState>,
     provision: ProvisionState,
@@ -318,6 +377,7 @@ impl AppState {
             critical_operation: false,
             exit_pending: false,
             wizard: None,
+            apply: None,
             backup_delete: None,
             backup_prune: None,
             provision: ProvisionState::default(),
@@ -666,6 +726,212 @@ impl AppState {
             Workspace::Provision => ProvisionKind::ALL.len(),
         };
         self.set_item_count(count);
+    }
+
+    pub fn apply(&self) -> Option<&ApplyState> {
+        self.apply.as_ref()
+    }
+
+    pub fn apply_mut(&mut self) -> Option<&mut ApplyState> {
+        self.apply.as_mut()
+    }
+
+    pub fn begin_apply(&mut self, disk: u32, expected_identity: ExpectedIdentity) -> bool {
+        if self.critical_operation {
+            self.notice = Some("关键操作仍在执行，完成前不能启动 Apply。".into());
+            return false;
+        }
+        self.apply = Some(ApplyState {
+            stage: ApplyStage::Setup,
+            disk,
+            expected_identity,
+            size_gb: String::new(),
+            force: false,
+            events: Vec::new(),
+            confirmation: String::new(),
+            message: None,
+        });
+        self.input_mode = InputMode::Normal;
+        true
+    }
+
+    pub fn apply_push_char(&mut self, ch: char) {
+        if let Some(apply) = self.apply.as_mut() {
+            if apply.stage == ApplyStage::Setup
+                && (ch.is_ascii_digit() || ch == '.')
+                && apply.size_gb.len() < 16
+            {
+                apply.size_gb.push(ch);
+                apply.message = None;
+            } else if apply.stage == ApplyStage::Confirm && apply.confirmation.len() < 16 {
+                apply.confirmation.push(ch);
+                apply.message = None;
+            }
+        }
+    }
+
+    pub fn apply_backspace(&mut self) {
+        if let Some(apply) = self.apply.as_mut() {
+            match apply.stage {
+                ApplyStage::Setup => {
+                    apply.size_gb.pop();
+                    apply.message = None;
+                }
+                ApplyStage::Confirm => {
+                    apply.confirmation.pop();
+                    apply.message = None;
+                }
+                _ => {}
+            }
+        }
+    }
+
+    pub fn apply_toggle_force(&mut self) {
+        if let Some(apply) = self.apply.as_mut() {
+            if apply.stage == ApplyStage::Setup {
+                apply.force = !apply.force;
+                apply.message = None;
+            }
+        }
+    }
+
+    pub fn apply_size_value(&mut self) -> Result<Option<f64>, String> {
+        let apply = self
+            .apply
+            .as_mut()
+            .ok_or_else(|| "Apply 向导未打开".to_string())?;
+        let trimmed = apply.size_gb.trim();
+        if trimmed.is_empty() {
+            return Ok(None);
+        }
+        let value = trimmed
+            .parse::<f64>()
+            .ok()
+            .filter(|value| value.is_finite() && *value > 0.0)
+            .ok_or_else(|| "目标大小必须是大于 0 的 GiB 数值；留空表示自动布局".to_string())?;
+        Ok(Some(value))
+    }
+
+    pub fn apply_start_preview(&mut self) {
+        if let Some(apply) = self.apply.as_mut() {
+            apply.stage = ApplyStage::Previewing;
+            apply.events.clear();
+            apply.message = Some("正在只读识别目标、计算布局并检查既有备份…".into());
+        }
+    }
+
+    pub fn apply_finish_preview(
+        &mut self,
+        result: Result<Vec<crate::application::WriteEvent>, String>,
+    ) {
+        let Some(apply) = self.apply.as_mut() else {
+            return;
+        };
+        match result {
+            Ok(events) => {
+                apply.events = events;
+                apply.stage = ApplyStage::Review;
+                apply.message = None;
+            }
+            Err(message) => {
+                apply.stage = ApplyStage::Setup;
+                apply.message = Some(message);
+            }
+        }
+    }
+
+    pub fn apply_begin_confirm(&mut self) {
+        if let Some(apply) = self.apply.as_mut() {
+            if apply.stage != ApplyStage::Review {
+                return;
+            }
+            let needs_force = apply.events.iter().any(|event| {
+                matches!(
+                    event,
+                    crate::application::WriteEvent::DryRunPreview {
+                        needs_force: true,
+                        ..
+                    }
+                )
+            });
+            if needs_force && !apply.force {
+                apply.message = Some(
+                    "dry-run 判定该盘已是免密状态；请按 Esc 返回参数页，按 f 开启 force 后重新预览。"
+                        .into(),
+                );
+                return;
+            }
+            apply.stage = ApplyStage::Confirm;
+            apply.confirmation.clear();
+            apply.message = None;
+        }
+    }
+
+    pub fn apply_back_to_setup(&mut self) {
+        if let Some(apply) = self.apply.as_mut() {
+            if apply.stage == ApplyStage::Review {
+                apply.stage = ApplyStage::Setup;
+                apply.events.clear();
+                apply.message = None;
+            }
+        }
+    }
+
+    pub fn apply_back_to_review(&mut self) {
+        if let Some(apply) = self.apply.as_mut() {
+            if apply.stage == ApplyStage::Confirm {
+                apply.stage = ApplyStage::Review;
+                apply.confirmation.clear();
+                apply.message = None;
+            }
+        }
+    }
+
+    pub fn apply_take_for_write(&mut self) -> Option<(u32, ExpectedIdentity, Option<f64>, bool)> {
+        let size = self.apply_size_value().ok()?;
+        let apply = self.apply.as_mut()?;
+        if apply.stage != ApplyStage::Confirm {
+            return None;
+        }
+        if apply.confirmation != "YES" {
+            apply.message = Some("必须精确输入 YES 才会进入写盘阶段".into());
+            return None;
+        }
+        let result = (
+            apply.disk,
+            apply.expected_identity.clone(),
+            size,
+            apply.force,
+        );
+        apply.stage = ApplyStage::Running;
+        apply.message = Some("Apply 安全事务执行中；退出请求会延迟到安全检查点".into());
+        self.critical_operation = true;
+        Some(result)
+    }
+
+    pub fn apply_set_progress(&mut self, event: crate::application::WriteEvent) {
+        if let Some(apply) = self.apply.as_mut() {
+            if apply.stage == ApplyStage::Running {
+                apply.events.push(event);
+            }
+        }
+    }
+
+    pub fn apply_finish_write(&mut self, result: Result<(), String>) {
+        self.critical_operation = false;
+        if let Some(apply) = self.apply.as_mut() {
+            apply.stage = ApplyStage::Result;
+            apply.message = Some(match result {
+                Ok(()) => "Apply 完成，写入/同步/读回安全链全部通过。请拔出重插。".into(),
+                Err(message) => message,
+            });
+        }
+    }
+
+    pub fn close_apply(&mut self) {
+        if !self.critical_operation {
+            self.apply = None;
+        }
     }
 
     pub fn wizard(&self) -> Option<&WizardState> {
@@ -1023,8 +1289,11 @@ impl AppState {
         self.provision.confirmation.clear();
         self.provision.message = None;
         self.provision.prepared = None;
+        self.provision.offline_result = None;
         if kind == ProvisionKind::Convert {
             self.provision.stage = ProvisionStage::Planning;
+        } else if kind == ProvisionKind::Offline {
+            self.provision.stage = ProvisionStage::OfflineForm;
         } else {
             let defaults = self.selected_device().map(|row| {
                 (
@@ -1049,8 +1318,108 @@ impl AppState {
             ProvisionKind::Mode1 => 8,
             ProvisionKind::Mode2 => 7,
             ProvisionKind::Mode3 => 8,
-            ProvisionKind::Convert => 0,
+            ProvisionKind::Convert | ProvisionKind::Offline => 0,
         }
+    }
+
+    pub fn offline_fields(&self) -> [(&'static str, &str); 4] {
+        [
+            ("快照目录", self.provision.offline_form.source_dir.as_str()),
+            ("device_id", self.provision.offline_form.device_id.as_str()),
+            ("目标大小 GiB", self.provision.offline_form.size_gb.as_str()),
+            ("输出目录", self.provision.offline_form.output_dir.as_str()),
+        ]
+    }
+
+    pub fn offline_move_field(&mut self, delta: isize) {
+        self.provision.offline_field_selected = if delta < 0 {
+            self.provision
+                .offline_field_selected
+                .saturating_sub(delta.unsigned_abs())
+        } else {
+            (self.provision.offline_field_selected + delta as usize).min(3)
+        };
+    }
+
+    fn offline_selected_field_mut(&mut self) -> &mut String {
+        match self.provision.offline_field_selected {
+            0 => &mut self.provision.offline_form.source_dir,
+            1 => &mut self.provision.offline_form.device_id,
+            2 => &mut self.provision.offline_form.size_gb,
+            _ => &mut self.provision.offline_form.output_dir,
+        }
+    }
+
+    pub fn offline_push_char(&mut self, ch: char) {
+        if !ch.is_control() {
+            let field = self.offline_selected_field_mut();
+            if field.chars().count() < 512 {
+                field.push(ch);
+                self.provision.message = None;
+            }
+        }
+    }
+
+    pub fn offline_backspace(&mut self) {
+        self.offline_selected_field_mut().pop();
+        self.provision.message = None;
+    }
+
+    pub fn offline_request(
+        &mut self,
+    ) -> Result<crate::application::offline_convert::OfflineConvertRequest, String> {
+        let source_dir = self.provision.offline_form.source_dir.trim();
+        let device_id = self.provision.offline_form.device_id.trim();
+        if source_dir.is_empty() || device_id.is_empty() {
+            return Err("快照目录和 device_id 不能为空".into());
+        }
+        let size_gb = if self.provision.offline_form.size_gb.trim().is_empty() {
+            None
+        } else {
+            Some(
+                self.provision
+                    .offline_form
+                    .size_gb
+                    .trim()
+                    .parse::<f64>()
+                    .ok()
+                    .filter(|value| value.is_finite() && *value > 0.0)
+                    .ok_or_else(|| "目标大小必须为大于 0 的 GiB 数值".to_string())?,
+            )
+        };
+        let output_dir = (!self.provision.offline_form.output_dir.trim().is_empty())
+            .then(|| std::path::PathBuf::from(self.provision.offline_form.output_dir.trim()));
+        Ok(crate::application::offline_convert::OfflineConvertRequest {
+            source_dir: std::path::PathBuf::from(source_dir),
+            device_id: device_id.to_string(),
+            size_gb,
+            output_dir,
+        })
+    }
+
+    pub fn offline_start(&mut self) {
+        self.provision.stage = ProvisionStage::OfflineRunning;
+        self.provision.message = Some("正在后台读取 LBA 快照并执行离线转换…".into());
+        self.provision.offline_result = None;
+    }
+
+    pub fn offline_finish(&mut self, result: Result<OfflineConvertView, String>) {
+        self.provision.stage = ProvisionStage::OfflineResult;
+        match result {
+            Ok(view) => {
+                self.provision.offline_result = Some(view);
+                self.provision.message = None;
+            }
+            Err(message) => {
+                self.provision.offline_result = None;
+                self.provision.message = Some(message);
+            }
+        }
+    }
+
+    pub fn offline_back_to_form(&mut self) {
+        self.provision.stage = ProvisionStage::OfflineForm;
+        self.provision.message = None;
     }
 
     pub fn provision_move_field(&mut self, delta: isize) {
@@ -1076,7 +1445,7 @@ impl AppState {
         if matches!(mode, 0 | 1 | 3) {
             slots.push(1);
         }
-        if matches!(mode, 0 | 1 | 2) {
+        if matches!(mode, 0..=2) {
             slots.push(2);
         }
         slots.extend([3, 4, 5, 6, 7, 8]);
@@ -1095,7 +1464,7 @@ impl AppState {
         if matches!(mode, 0 | 1 | 3) {
             out.push(("交换区 MiB", self.provision.form.share_mib.as_str(), false));
         }
-        if matches!(mode, 0 | 1 | 2) {
+        if matches!(mode, 0..=2) {
             out.push((
                 "保密区 MiB",
                 self.provision.form.encrypt_mib.as_str(),
@@ -1168,7 +1537,7 @@ impl AppState {
         let share_mib = matches!(mode, 0 | 1 | 3)
             .then(|| parse(&self.provision.form.share_mib, "交换区"))
             .transpose()?;
-        let encrypt_mib = matches!(mode, 0 | 1 | 2)
+        let encrypt_mib = matches!(mode, 0..=2)
             .then(|| parse(&self.provision.form.encrypt_mib, "保密区"))
             .transpose()?;
         if self.provision.form.label_id.trim().is_empty()
@@ -1213,6 +1582,73 @@ impl AppState {
                 };
                 self.provision.message = Some(message);
             }
+        }
+    }
+
+    pub fn provision_begin_export(&mut self) {
+        let is_new = matches!(self.provision.prepared, Some(ProvisionPrepared::New(_)));
+        if self.provision.stage != ProvisionStage::Review || !is_new {
+            return;
+        }
+        let mode = self.provision.kind.mode().unwrap_or(0);
+        self.provision.export_path = format!("./edp-mode{mode}.img");
+        self.provision.stage = ProvisionStage::ExportPath;
+        self.provision.message = None;
+    }
+
+    pub fn provision_export_push_char(&mut self, ch: char) {
+        if self.provision.stage == ProvisionStage::ExportPath
+            && !ch.is_control()
+            && self.provision.export_path.chars().count() < 512
+        {
+            self.provision.export_path.push(ch);
+            self.provision.message = None;
+        }
+    }
+
+    pub fn provision_export_backspace(&mut self) {
+        if self.provision.stage == ProvisionStage::ExportPath {
+            self.provision.export_path.pop();
+            self.provision.message = None;
+        }
+    }
+
+    pub fn provision_take_export(
+        &mut self,
+    ) -> Option<(
+        crate::application::provision::PreparedNewProvision,
+        std::path::PathBuf,
+    )> {
+        if self.provision.stage != ProvisionStage::ExportPath {
+            return None;
+        }
+        let path = self.provision.export_path.trim();
+        if path.is_empty() {
+            self.provision.message = Some("镜像导出路径不能为空".into());
+            return None;
+        }
+        let prepared = match self.provision.prepared.as_ref()? {
+            ProvisionPrepared::New(prepared) => prepared.as_ref().clone(),
+            ProvisionPrepared::Convert(_) => return None,
+        };
+        let path = std::path::PathBuf::from(path);
+        self.provision.stage = ProvisionStage::Exporting;
+        self.provision.message = Some(format!("正在后台导出 {}…", path.display()));
+        Some((prepared, path))
+    }
+
+    pub fn provision_finish_export(&mut self, result: Result<std::path::PathBuf, String>) {
+        self.provision.stage = ProvisionStage::Review;
+        self.provision.message = Some(match result {
+            Ok(path) => format!("镜像导出完成：{}", path.display()),
+            Err(message) => message,
+        });
+    }
+
+    pub fn provision_cancel_export(&mut self) {
+        if self.provision.stage == ProvisionStage::ExportPath {
+            self.provision.stage = ProvisionStage::Review;
+            self.provision.message = None;
         }
     }
 
@@ -1567,6 +2003,16 @@ impl AppState {
                         } else {
                             ProvisionStage::Form
                         };
+                    }
+                    ProvisionStage::ExportPath => self.provision_cancel_export(),
+                    ProvisionStage::Exporting => {
+                        self.notice = Some("镜像正在后台导出，请等待完成。".into());
+                    }
+                    ProvisionStage::OfflineForm | ProvisionStage::OfflineResult => {
+                        self.provision_reset();
+                    }
+                    ProvisionStage::OfflineRunning => {
+                        self.notice = Some("离线转换正在后台执行，请等待完成。".into());
                     }
                     ProvisionStage::Form | ProvisionStage::Planning | ProvisionStage::Result => {
                         self.provision_reset();

@@ -292,12 +292,9 @@ fn dispatch_nav_command(
                     onlyid: row.onlyid.clone(),
                     device_id: row.device_id.clone(),
                 };
-                state.begin_write_wizard_for_identity(
-                    state::WriteKind::Apply,
-                    disk,
-                    None,
-                    Some(identity),
-                );
+                state.begin_apply(disk, identity);
+            } else {
+                state.set_notice("Apply 需要先在设备页选定目标 U 盘。");
             }
             StateEffect::None
         }
@@ -392,6 +389,7 @@ fn palette_action_to_nav(action: command::PaletteAction) -> NavCommand {
         command::PaletteAction::Devices => NavCommand::WorkspaceDevices,
         command::PaletteAction::Backups => NavCommand::WorkspaceBackups,
         command::PaletteAction::Provision => NavCommand::WorkspaceProvision,
+        command::PaletteAction::OfflineConvert => NavCommand::WorkspaceProvision,
         command::PaletteAction::Inspect => NavCommand::OpenInspect,
         command::PaletteAction::Apply => NavCommand::BeginApply,
         command::PaletteAction::Restore => NavCommand::BeginRestore,
@@ -498,6 +496,22 @@ fn run_loop(resume: Option<state::WriteIntent>) -> io::Result<LoopExit> {
                     state.set_backup_scan_pending(true);
                 }
             }
+            if let Some(result) = updates.apply_preview {
+                state.apply_finish_preview(result);
+            }
+            if let Some((_operation_id, event)) = updates.apply_progress {
+                state.apply_set_progress(event);
+            }
+            if let Some((_operation_id, result)) = updates.apply_write {
+                let success = result.is_ok();
+                state.apply_finish_write(result);
+                if success {
+                    tasks.request_device_scan(backup_dir.clone());
+                    tasks.request_backup_scan(backup_dir.clone());
+                    state.set_device_scan_pending(true);
+                    state.set_backup_scan_pending(true);
+                }
+            }
             if let Some(result) = updates.provision_plan {
                 state.provision_finish_plan(result);
             }
@@ -513,6 +527,12 @@ fn run_loop(resume: Option<state::WriteIntent>) -> io::Result<LoopExit> {
                     state.set_device_scan_pending(true);
                     state.set_backup_scan_pending(true);
                 }
+            }
+            if let Some(result) = updates.provision_export {
+                state.provision_finish_export(result);
+            }
+            if let Some(result) = updates.offline_convert {
+                state.offline_finish(result);
             }
             if let Some(result) = updates.inspect {
                 match result {
@@ -554,22 +574,138 @@ fn run_loop(resume: Option<state::WriteIntent>) -> io::Result<LoopExit> {
                     if !event::is_actionable_key(&key) {
                         continue;
                     }
+                    if let Some(stage) = state.apply().map(|apply| apply.stage) {
+                        use state::ApplyStage;
+                        match stage {
+                            ApplyStage::Setup => {
+                                match key.code {
+                                    ct_event::KeyCode::Char('f')
+                                        if !key
+                                            .modifiers
+                                            .contains(ct_event::KeyModifiers::CONTROL) =>
+                                    {
+                                        state.apply_toggle_force();
+                                    }
+                                    ct_event::KeyCode::Char(ch)
+                                        if !key
+                                            .modifiers
+                                            .contains(ct_event::KeyModifiers::CONTROL) =>
+                                    {
+                                        state.apply_push_char(ch);
+                                    }
+                                    ct_event::KeyCode::Backspace => state.apply_backspace(),
+                                    ct_event::KeyCode::Enter => {
+                                        let (disk, expected_identity) = {
+                                            let Some(apply) = state.apply() else {
+                                                continue;
+                                            };
+                                            (apply.disk, apply.expected_identity.clone())
+                                        };
+                                        match state.apply_size_value() {
+                                            Ok(size_gb) => {
+                                                state.apply_start_preview();
+                                                if let Err(message) = tasks.request_apply_preview(
+                                                    disk,
+                                                    expected_identity,
+                                                    size_gb,
+                                                    backup_dir.clone(),
+                                                ) {
+                                                    state.apply_finish_preview(Err(
+                                                        message.to_string()
+                                                    ));
+                                                }
+                                            }
+                                            Err(message) => {
+                                                if let Some(apply) = state.apply_mut() {
+                                                    apply.message = Some(message);
+                                                }
+                                            }
+                                        }
+                                    }
+                                    ct_event::KeyCode::Esc => state.close_apply(),
+                                    _ => {}
+                                }
+                                continue;
+                            }
+                            ApplyStage::Previewing => {
+                                if key.code == ct_event::KeyCode::Esc {
+                                    state.set_notice("Apply 只读预览正在后台生成，请等待完成。");
+                                }
+                                continue;
+                            }
+                            ApplyStage::Review => {
+                                match key.code {
+                                    ct_event::KeyCode::Enter => state.apply_begin_confirm(),
+                                    ct_event::KeyCode::Esc => state.apply_back_to_setup(),
+                                    _ => {}
+                                }
+                                continue;
+                            }
+                            ApplyStage::Confirm => {
+                                match key.code {
+                                    ct_event::KeyCode::Char(ch)
+                                        if !key
+                                            .modifiers
+                                            .contains(ct_event::KeyModifiers::CONTROL) =>
+                                    {
+                                        state.apply_push_char(ch);
+                                    }
+                                    ct_event::KeyCode::Backspace => state.apply_backspace(),
+                                    ct_event::KeyCode::Enter => {
+                                        if let Some((disk, identity, size_gb, force)) =
+                                            state.apply_take_for_write()
+                                        {
+                                            if let Err(message) = tasks.request_apply_write(
+                                                disk,
+                                                identity,
+                                                size_gb,
+                                                force,
+                                                backup_dir.clone(),
+                                            ) {
+                                                state.apply_finish_write(Err(message.to_string()));
+                                            }
+                                        }
+                                    }
+                                    ct_event::KeyCode::Esc => state.apply_back_to_review(),
+                                    _ => {}
+                                }
+                                continue;
+                            }
+                            ApplyStage::Running => {}
+                            ApplyStage::Result => {
+                                if matches!(
+                                    key.code,
+                                    ct_event::KeyCode::Enter | ct_event::KeyCode::Esc
+                                ) {
+                                    state.close_apply();
+                                    continue;
+                                }
+                            }
+                        }
+                    }
                     if state.workspace() == state::Workspace::Provision {
                         use state::ProvisionStage;
                         match state.provision().stage {
                             ProvisionStage::Menu => {
                                 if key.code == ct_event::KeyCode::Enter {
-                                    let Some(disk) = state.selected_device_disk() else {
+                                    let selected_kind = state::ProvisionKind::ALL
+                                        [state.selected().min(state::ProvisionKind::ALL.len() - 1)];
+                                    let disk = state.selected_device_disk();
+                                    if selected_kind != state::ProvisionKind::Offline
+                                        && disk.is_none()
+                                    {
                                         state.set_notice(
-                                            "制盘需要先在设备页选定一个 USB 目标，再切换到制盘页。",
+                                            "物理制盘/改造需要先在设备页选定一个 USB 目标。",
                                         );
                                         continue;
-                                    };
+                                    }
                                     let kind = state.provision_begin_selected();
                                     if kind == state::ProvisionKind::Convert {
-                                        if let Err(message) =
-                                            tasks.request_provision_plan(disk, kind, None)
-                                        {
+                                        if let Err(message) = tasks.request_provision_plan(
+                                            disk.expect("physical provision requires disk"),
+                                            kind,
+                                            None,
+                                        ) {
                                             state.provision_finish_plan(Err(message.to_string()));
                                         }
                                     }
@@ -634,10 +770,49 @@ fn run_loop(resume: Option<state::WriteIntent>) -> io::Result<LoopExit> {
                             ProvisionStage::Review => {
                                 match key.code {
                                     ct_event::KeyCode::Enter => state.provision_begin_confirm(),
+                                    ct_event::KeyCode::Char('E') => {
+                                        state.provision_begin_export();
+                                    }
                                     ct_event::KeyCode::Esc => {
                                         let _ = state.navigate(NavCommand::Escape, 1);
                                     }
                                     _ => {}
+                                }
+                                continue;
+                            }
+                            ProvisionStage::ExportPath => {
+                                match key.code {
+                                    ct_event::KeyCode::Enter => {
+                                        if let Some((prepared, path)) =
+                                            state.provision_take_export()
+                                        {
+                                            if let Err(message) =
+                                                tasks.request_provision_export(prepared, path)
+                                            {
+                                                state.provision_finish_export(Err(
+                                                    message.to_string()
+                                                ));
+                                            }
+                                        }
+                                    }
+                                    ct_event::KeyCode::Backspace => {
+                                        state.provision_export_backspace();
+                                    }
+                                    ct_event::KeyCode::Esc => state.provision_cancel_export(),
+                                    ct_event::KeyCode::Char(ch)
+                                        if !key
+                                            .modifiers
+                                            .contains(ct_event::KeyModifiers::CONTROL) =>
+                                    {
+                                        state.provision_export_push_char(ch);
+                                    }
+                                    _ => {}
+                                }
+                                continue;
+                            }
+                            ProvisionStage::Exporting => {
+                                if key.code == ct_event::KeyCode::Esc {
+                                    state.set_notice("镜像正在后台导出，请等待完成。");
                                 }
                                 continue;
                             }
@@ -681,6 +856,54 @@ fn run_loop(resume: Option<state::WriteIntent>) -> io::Result<LoopExit> {
                                     state.provision_reset();
                                     continue;
                                 }
+                            }
+                            ProvisionStage::OfflineForm => {
+                                match key.code {
+                                    ct_event::KeyCode::Up | ct_event::KeyCode::BackTab => {
+                                        state.offline_move_field(-1);
+                                    }
+                                    ct_event::KeyCode::Down | ct_event::KeyCode::Tab => {
+                                        state.offline_move_field(1);
+                                    }
+                                    ct_event::KeyCode::Backspace => state.offline_backspace(),
+                                    ct_event::KeyCode::Enter => match state.offline_request() {
+                                        Ok(request) => {
+                                            state.offline_start();
+                                            if let Err(message) =
+                                                tasks.request_offline_convert(request)
+                                            {
+                                                state.offline_finish(Err(message.to_string()));
+                                            }
+                                        }
+                                        Err(message) => {
+                                            state.provision_mut().message = Some(message);
+                                        }
+                                    },
+                                    ct_event::KeyCode::Esc => state.provision_reset(),
+                                    ct_event::KeyCode::Char(ch)
+                                        if !key
+                                            .modifiers
+                                            .contains(ct_event::KeyModifiers::CONTROL) =>
+                                    {
+                                        state.offline_push_char(ch);
+                                    }
+                                    _ => {}
+                                }
+                                continue;
+                            }
+                            ProvisionStage::OfflineRunning => {
+                                if key.code == ct_event::KeyCode::Esc {
+                                    state.set_notice("离线转换正在后台执行，请等待完成。");
+                                }
+                                continue;
+                            }
+                            ProvisionStage::OfflineResult => {
+                                match key.code {
+                                    ct_event::KeyCode::Enter => state.offline_back_to_form(),
+                                    ct_event::KeyCode::Esc => state.provision_reset(),
+                                    _ => {}
+                                }
+                                continue;
                             }
                         }
                     }
@@ -888,15 +1111,25 @@ fn run_loop(resume: Option<state::WriteIntent>) -> io::Result<LoopExit> {
                                             let viewport_height =
                                                 session.terminal.size()?.height.saturating_sub(9)
                                                     as usize;
-                                            let effect = dispatch_nav_command(
-                                                &mut state,
-                                                &mut tasks,
-                                                palette_action_to_nav(action),
-                                                &backup_dir,
-                                                viewport_height,
-                                            );
-                                            if effect == StateEffect::ExitRequested {
-                                                break;
+                                            if action == command::PaletteAction::OfflineConvert {
+                                                let _ = state.navigate(
+                                                    NavCommand::WorkspaceProvision,
+                                                    viewport_height,
+                                                );
+                                                let _ = state
+                                                    .navigate(NavCommand::Bottom, viewport_height);
+                                                state.provision_begin_selected();
+                                            } else {
+                                                let effect = dispatch_nav_command(
+                                                    &mut state,
+                                                    &mut tasks,
+                                                    palette_action_to_nav(action),
+                                                    &backup_dir,
+                                                    viewport_height,
+                                                );
+                                                if effect == StateEffect::ExitRequested {
+                                                    break;
+                                                }
                                             }
                                         }
                                         Err(message) => state.set_notice(message),

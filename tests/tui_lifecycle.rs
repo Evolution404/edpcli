@@ -68,6 +68,121 @@ fn three_workspaces_cycle_and_new_overlays_render_at_all_terminal_sizes() {
 }
 
 #[test]
+fn apply_and_offline_convert_states_render_and_enforce_preview_before_write() {
+    use edpcli::application::WriteEvent;
+    use edpcli::tui::state::{ApplyStage, ExpectedIdentity, OfflineConvertView, ProvisionKind};
+
+    let mut apply = AppState::new();
+    assert!(apply.begin_apply(
+        7,
+        ExpectedIdentity {
+            onlyid: None,
+            device_id: None,
+        },
+    ));
+    assert_eq!(apply.apply().unwrap().stage, ApplyStage::Setup);
+    apply.apply_start_preview();
+    apply.apply_finish_preview(Ok(vec![WriteEvent::DryRunPreview {
+        disk: 7,
+        needs_force: false,
+    }]));
+    assert_eq!(apply.apply().unwrap().stage, ApplyStage::Review);
+    for (width, height) in [(40, 10), (80, 24), (160, 60)] {
+        let backend = TestBackend::new(width, height);
+        let mut terminal = Terminal::new(backend).expect("test terminal");
+        terminal.draw(|frame| render::draw(frame, &apply)).unwrap();
+    }
+    apply.apply_begin_confirm();
+    assert_eq!(apply.apply().unwrap().stage, ApplyStage::Confirm);
+    assert!(apply.apply_take_for_write().is_none(), "YES is mandatory");
+    for ch in ['Y', 'E', 'S'] {
+        apply.apply_push_char(ch);
+    }
+    assert!(apply.apply_take_for_write().is_some());
+    assert_eq!(apply.apply().unwrap().stage, ApplyStage::Running);
+    apply.apply_finish_write(Ok(()));
+    assert_eq!(apply.apply().unwrap().stage, ApplyStage::Result);
+
+    let mut force_gate = AppState::new();
+    assert!(force_gate.begin_apply(
+        8,
+        ExpectedIdentity {
+            onlyid: None,
+            device_id: None,
+        },
+    ));
+    force_gate.apply_start_preview();
+    force_gate.apply_finish_preview(Ok(vec![WriteEvent::DryRunPreview {
+        disk: 8,
+        needs_force: true,
+    }]));
+    force_gate.apply_begin_confirm();
+    assert_eq!(
+        force_gate.apply().unwrap().stage,
+        ApplyStage::Review,
+        "needs_force preview must block confirmation when force is off"
+    );
+    assert!(force_gate
+        .apply()
+        .unwrap()
+        .message
+        .as_deref()
+        .is_some_and(|message| message.contains("force")));
+    force_gate.apply_back_to_setup();
+    force_gate.apply_toggle_force();
+    force_gate.apply_start_preview();
+    force_gate.apply_finish_preview(Ok(vec![WriteEvent::DryRunPreview {
+        disk: 8,
+        needs_force: true,
+    }]));
+    force_gate.apply_begin_confirm();
+    assert_eq!(force_gate.apply().unwrap().stage, ApplyStage::Confirm);
+
+    let mut offline = AppState::new();
+    offline.navigate(NavCommand::WorkspaceProvision, 20);
+    offline.navigate(NavCommand::Bottom, 20);
+    assert_eq!(
+        ProvisionKind::ALL[offline.selected()],
+        ProvisionKind::Offline,
+        "offline tool must remain the sixth provision entry"
+    );
+    assert_eq!(offline.provision_begin_selected(), ProvisionKind::Offline);
+    assert_eq!(offline.provision().stage, ProvisionStage::OfflineForm);
+    assert!(
+        offline.selected_device_disk().is_none(),
+        "offline conversion must not require a physical disk"
+    );
+    for (width, height) in [(40, 10), (80, 24), (160, 60)] {
+        let backend = TestBackend::new(width, height);
+        let mut terminal = Terminal::new(backend).expect("test terminal");
+        terminal
+            .draw(|frame| render::draw(frame, &offline))
+            .unwrap();
+    }
+
+    offline.offline_finish(Ok(OfflineConvertView {
+        reports: vec![edpcli::sectors::ConvertReport::SectorPlan {
+            share: 100,
+            clears_lba9: true,
+        }],
+        share: 100,
+        enc_start: 200,
+        enc_size: 300,
+        crc: 0x1234_5678,
+        k0: 0x9abc,
+        output_dir: None,
+    }));
+    assert_eq!(offline.provision().stage, ProvisionStage::OfflineResult);
+    for (width, height) in [(40, 10), (80, 24), (160, 60)] {
+        let backend = TestBackend::new(width, height);
+        let mut terminal = Terminal::new(backend).expect("test terminal");
+        terminal
+            .draw(|frame| render::draw(frame, &offline))
+            .unwrap();
+    }
+}
+
+#[test]
 fn terminal_lifecycle_has_raii_restore_for_error_and_unwind_paths() {
     let source = include_str!("../src/tui/mod.rs");
     for required in [

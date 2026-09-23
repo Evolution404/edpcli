@@ -29,7 +29,6 @@ use crate::diskio::{self, raw_path, FileDev, SystemClock};
 use crate::elevate::{self, ELEVATED_FLAG};
 use crate::inspect_cli::inspect_flow;
 use crate::metainfo_cli::info_flow;
-use crate::sectors::convert;
 use crate::selectors::DeviceSelector;
 use crate::sysinfo::{ReadProbeCache, SysRunner};
 
@@ -87,41 +86,24 @@ pub fn convert_flow(
         eprintln!("错误: 离线模式需 --id <device_id>");
         return EXIT_USAGE;
     };
-    let d = Path::new(&dir);
-    let read = |lba: u32| -> EdpCliResult<Vec<u8>> { Ok(diskio::read_lba_file(d, lba)) };
-    let mut show = |report| print!("{}", crate::sectors::render_convert_report(&report));
-    let result = match convert(&read, &id, size, &mut show) {
-        Ok(r) => r,
+    let request = crate::application::offline_convert::OfflineConvertRequest {
+        source_dir: std::path::PathBuf::from(&dir),
+        device_id: id,
+        size_gb: size,
+        output_dir: out.as_ref().map(std::path::PathBuf::from),
+    };
+    let output = match crate::application::offline_convert::run(&request) {
+        Ok(output) => output,
         Err(e) => {
             eprintln!("{}", crate::ui::red(&e.msg));
             return e.code;
         }
     };
-    if let Some(out) = out {
-        if let Err(e) = std::fs::create_dir_all(&out) {
-            eprintln!("错误: 无法创建输出目录 {}: {}", out, e);
-            return EXIT_IO;
-        }
-        for (lba, data) in [
-            (0u32, &result.lba0),
-            (6, &result.lba6),
-            (7, &result.lba7),
-            (12, &result.lba12),
-        ] {
-            let p = Path::new(&out).join(format!("LBA{:02}.bin", lba));
-            if let Err(e) = std::fs::write(&p, data) {
-                eprintln!("错误: 无法写入 {}: {}", p.display(), e);
-                return EXIT_IO;
-            }
-        }
-        if let Some(l9) = &result.lba9 {
-            let p = Path::new(&out).join("LBA09.bin");
-            if let Err(e) = std::fs::write(&p, l9) {
-                eprintln!("错误: 无法写入 {}: {}", p.display(), e);
-                return EXIT_IO;
-            }
-        }
-        println!("\n产物已写入 {}/", out);
+    for report in &output.reports {
+        print!("{}", crate::sectors::render_convert_report(report));
+    }
+    if let Some(out) = output.output_dir {
+        println!("\n产物已写入 {}/", out.display());
     }
     EXIT_OK
 }
