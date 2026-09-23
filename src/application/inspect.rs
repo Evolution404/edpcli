@@ -338,12 +338,8 @@ fn advanced_meta_text(
 
     if lba <= u64::from(crate::common::METADATA_LAST_LBA) {
         let lba32 = u32::try_from(lba).map_err(|_| format!("LBA{lba} 超出协议解析器范围"))?;
-        let view = inspect::analyze_sector_with_context(
-            lba32,
-            raw,
-            meta,
-            Some(&context.protocol_image),
-        );
+        let view =
+            inspect::analyze_sector_with_context(lba32, raw, meta, Some(&context.protocol_image));
         out.push_str(&format!("协议解码: {}\n", view.method));
         out.push_str(&inspect::render_fields(&view));
         for note in &view.notes {
