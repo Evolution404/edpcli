@@ -70,8 +70,10 @@ fn repository_locks_tui_dependencies_and_ci_checks_locked_tree() {
     assert!(lock.contains("name = \"crossterm\""));
 
     let ci = include_str!("../.github/workflows/ci.yml");
+    let test_wrapper = include_str!("../scripts/ci/run-cargo-test-ci.py");
     assert!(ci.contains("cargo fmt --all -- --check"));
-    assert!(ci.contains("cargo test --all-targets --locked"));
+    assert!(ci.contains("python scripts/ci/run-cargo-test-ci.py"));
+    assert!(test_wrapper.contains(r#"COMMAND = ["cargo", "test", "--all-targets", "--locked"]"#));
     assert!(ci.contains("cargo clippy --all-targets --locked -- -D warnings"));
 }
 
