@@ -214,6 +214,18 @@ ReadIIR 和 WriteIIR 都使用 device tree node `+0x18` 计算物理位置，并
 
 2026-09-23 对用户重新插入的同一 SanDisk (`disk5`) 进行了只读重采集。当前 LBA7 原始 512B 与 2026-08-23 旧快照逐字节一致。LBA7 type4 指向的真正 Region A `LBA120164408..120164413` 为独立的六扇区高熵块：SHA-256=`aaeffbba440e553c2eb47accac54552c9b53af9d4951f728ac700a2e81aca0a0`，3062/3072B 非零，熵约 7.937 bit/B；前后各四扇区全零。旧错误位点仍为 3072B 全零并与旧文件逐字节一致。采集原始数据与方法保存在 `audit/region_a/live_captures/sandisk_nopwd_20260923/` 和 `scripts/protocol/capture_region_a_readonly.py`，机器结论在 `audit/region_a/evidence/sandisk_nopwd_region_a_live_20260923.json`。这证明该两条目免密码 profile 仍有真实 Region A payload，但其明文与消费机制仍未知。
 
+### 4.9 旧版 `EdpEDiskCtrl.dll` 的条件挂载路径
+
+离线驱动变换复算脚本：`scripts/protocol/probe_legacy_region_a_driver.py`（只读输入文件，不访问物理盘）。
+
+对历史版本 `u_disk/VRV/edp/EdpEDiskCtrl.dll`（与当前 `cemsusbregsiter` 挂载路径不同）核查出一条**仅在新版标签读取失败时**启用的旧标签路径。`InitDiskInfo/sub_10018d90` 首先调用 `sub_10011530` 读取 LBA12 family 新标签；失败后调用 `sub_1000f520` 从物理 LBA7 读取 512B 旧标签，再经 `sub_10010850` 将三个 `0x40` entry 逐个复制到 `0x60` 运行时 entry，保留 `NeedEncrypt@+0x14`、`StartSector@+0x18`、`PartitionSize@+0x28`、CRC 与 wrapped8；运行时表版本置 `0x64`。这条分支的存在由反汇编 `0x10018df5..0x10018e75` 确认。
+
+在同一 DLL 的 `UserLogin/sub_10018ee0`，按 type 匹配运行时 `0x60` entry 后，`0x10019889` 从所选 entry 的 `+0x14/+0x18/+0x28/+0x34/+0x58` 复制挂载参数，随后 `0x10019b12` 调用动态解析的 `EdpMountFile`。版本非 `0x206` 时，登录校验使用 8B key，驱动 `EdpEDisk64.sys` 的读写分支也按非 `0x206` 走 8B key 算法。因而**若旧标签回退被触发、对应 type 成功登录且挂载成功**，LBA7 中指向 Region A 的 entry 会把它作为 3072B backing extent 提交给虚拟磁盘驱动。这是目前找到的第一条有物理 Region A 指针参与的条件消费链，不能推广成当前客户端正常登录必读 Region A。
+
+免密 SanDisk 的旧表恰好提供可复核实例：type2 指向 LBA63 的普通 Share，type4 指向 Region A LBA120164408、大小 3072B、`NeedEncrypt=1`。type4 的 wrapped8=`b5355e2c582ed090` 用旧口令 `0000aaaa` 解得 8B key=`24a4cfbdc9bf4101`，bare CRC32=`9d13ad66` 与 entry 相符；新版 LBA12 type4 则指向 LBA117611865、大小 1299594240B、`EncryptMode=2`。这说明旧回退和新版正常路径选择的是不同的物理对象与密钥分支。旧回退可挂载性的静态证据**尚未证明**用户曾在该盘上触发回退、Windows 能识别此 3KB 虚拟设备中的文件系统，或 Region A 明文内容的真正业务作用。机器证据见 `audit/region_a/evidence/legacy_edpediskctrl_region_a_fallback_20260923.json`。
+
+以同一份 `EdpEDisk64.sys` 在 Unicorn 中调用旧版 8B key 分支 `sub_13160`，并用 `sub_13450` 对结果回加密，已在 16B 零块及完整 3072B Region A 上验证逐字节 round-trip。对免密 SanDisk 使用上述 CRC 闭合的 key8，解后 SHA-256=`5e3620...a2ac7`、熵约 7.936 bit/B；对 Lexar 使用其已验证 key8=`dd4019e3637d390f`，解后 SHA-256=`ead2c923...436960a`、熵约 7.939 bit/B。两份输出均无 `EDPF`/`FAT`/`NTFS`/`LLGB` 标识。这只排除“用此驱动旧 8B key 分支解后直接得到普通可识别磁盘格式”的简单模型；不排除双层加密、另一种 key/模式或随机内容。历史 `u_disk/analyze/mock_newlabel/decrypt_region_a_driver.py` 使用了不符合该驱动调用方式的分离输入/输出缓冲，先前由它产生的候选明文不应用来判定 Region A。
+
 ## 5. AES 算法、默认 Init key 与版本 profile
 
 `sub_1800092c0/sub_180009390` 调用 `sub_18001c560()` 得到 `EVP_CIPHER` descriptor。早期仅依据 OpenSSL 注册字符串曾误判为 AES-192-CBC；2026-09-22 已用 descriptor 本体纠正。
@@ -364,8 +376,8 @@ IIR、LBA12 分区挂载、`sectorInfo` 上传链目前都不满足第 1 条，�
 
 ## 11. 下一步研究顺序
 
-1. 沿 **legacy/LBA7 0x40 entry 的 StartSector=Region A** 继续找真正的数据访问者，优先搜索读取旧表后把 `+0x18/+0x1c` 当物理地址使用的调用链。
-2. 追 `CreatePartitions` 中 Region A 旧表项的生命周期：创建、序列化到 LBA7、后续读取/恢复/登录时的消费者，区分结构复制与真实磁盘 I/O。
+1. 复现旧版 `EdpEDiskCtrl` 在新版标签失效时的 type4 登录和 `EdpMountFile` 参数，确认旧驱动是否实际接受并读取 `0xC00` Region A；优先用离线镜像或隔离环境，不修改实盘标签。
+2. 找 Region A 六扇区的真正 producer，追 `CreatePartitions` 写出 LBA7 指针之后的初始化/恢复流程；仅有旧版条件挂载 consumer 不能解释 payload 来源。
 3. 在 `u_disk` 历史版本、日志和 DLL/SYS 中按 `0xC00` 长度、CHS-0x700 地址和 old-format entry 语义交叉搜索 producer/consumer；当前重点转向旧注册/兼容组件，而不是 current `edpediskctrl` 前部 label 路径。
 4. IIR 继续保留为独立旁证；三盘 CHS-0x40000 候选窗口已经与 Region A 物理分离，除非获得直接 runtime physical address 绑定，否则不再把 FE06、AES-256-CBC、IIR CRC 或 Init key 用作 Region A 主线。
-5. `MountEdpPart/EdpMountFile`、`sectorInfo`、current `edpediskctrl!ReadEncryptPartionInfoEx` 已是负证据：后续不得重复把它们当 Region A consumer/upload path。
+5. 当前 `cemsusbregsiter!MountEdpPart/EdpMountFile`、`sectorInfo`、current `edpediskctrl!ReadEncryptPartionInfoEx` 已是负证据；旧版 `EdpEDiskCtrl` 的 **LBA12 失败回退**是单独的条件路径，不得与当前正常挂载混同。
