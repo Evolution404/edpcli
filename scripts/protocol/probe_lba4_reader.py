@@ -38,17 +38,16 @@ def require_hash(path: Path, expected: str) -> None:
 
 
 def parse_args() -> argparse.Namespace:
-    home = Path.home()
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--dll",
         type=Path,
-        default=home / "Desktop/u_disk/VRV/cems/ydcc/cemsusbregsiter.dll",
+        required=True,
     )
     parser.add_argument(
         "--framework-dir",
         type=Path,
-        default=home / "Desktop/u_disk/analyze/scripts",
+        required=True,
         help="directory containing emu_framework.py",
     )
     parser.add_argument(

@@ -67,7 +67,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--archive",
         type=Path,
-        default=Path("/private/tmp/phison-mpall-v3720b.zip"),
+        required=True,
         help="pinned Phison MPALL v3.72 archive",
     )
     return parser.parse_args()

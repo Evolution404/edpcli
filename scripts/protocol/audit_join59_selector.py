@@ -66,16 +66,12 @@ def main() -> None:
     parser.add_argument(
         "--cemsudisk",
         type=Path,
-        default=Path(
-            "/Users/zhangyuxi/Desktop/u_disk/VRV/cems/ydcc/cemsudisk.dll"
-        ),
+        required=True,
     )
     parser.add_argument(
         "--cemsusbregsiter",
         type=Path,
-        default=Path(
-            "/Users/zhangyuxi/Desktop/u_disk/VRV/cems/ydcc/cemsusbregsiter.dll"
-        ),
+        required=True,
     )
     args = parser.parse_args()
 

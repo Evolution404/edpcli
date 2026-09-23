@@ -127,7 +127,7 @@ def main() -> None:
     parser.add_argument(
         "--root",
         type=Path,
-        default=Path("/Users/zhangyuxi/Desktop/u_disk/VRV/cems/product/CEMS"),
+        required=True,
     )
     args = parser.parse_args()
 

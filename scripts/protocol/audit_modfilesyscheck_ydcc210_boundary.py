@@ -18,7 +18,6 @@ import struct
 from datetime import datetime, timezone
 from pathlib import Path
 
-DEFAULT_DLL = Path("/Users/zhangyuxi/Desktop/u_disk/VRV/cems/ydcc/modfilesyscheck.dll")
 DLL_SHA256 = "12072373ebaf24126b6b0b24692befa03c0dc7de46a6e1db24c600cc9b0ff8d8"
 EXPECTED_TIMESTAMP = 1727400439
 
@@ -95,7 +94,7 @@ def read_va(
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--dll", type=Path, default=DEFAULT_DLL)
+    parser.add_argument("--dll", type=Path, required=True)
     args = parser.parse_args()
 
     actual_sha = sha256(args.dll)

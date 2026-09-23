@@ -339,22 +339,22 @@ def main() -> None:
     parser.add_argument(
         "--current-reader",
         type=Path,
-        default=Path("/Users/zhangyuxi/Desktop/u_disk/VRV/cems/ydcc/cemsudisk.dll"),
+        required=True,
     )
     parser.add_argument(
         "--current-writer",
         type=Path,
-        default=Path("/Users/zhangyuxi/Desktop/u_disk/VRV/cems/ydcc/cemsusbregsiter.dll"),
+        required=True,
     )
     parser.add_argument(
         "--fileop-x86",
         type=Path,
-        default=Path("/Users/zhangyuxi/Desktop/u_disk/VRV/cems/Edp/fileophook.dll"),
+        required=True,
     )
     parser.add_argument(
         "--fileop-x64",
         type=Path,
-        default=Path("/Users/zhangyuxi/Desktop/u_disk/VRV/cems/Edp/fileophook64.dll"),
+        required=True,
     )
     args = parser.parse_args()
 

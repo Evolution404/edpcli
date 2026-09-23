@@ -49,17 +49,17 @@ def main() -> None:
     parser.add_argument(
         "--log",
         type=Path,
-        default=Path("/Users/zhangyuxi/Desktop/u_disk/VRV/cems/VUpdateReplace.log"),
+        required=True,
     )
     parser.add_argument(
         "--db",
         type=Path,
-        default=Path("/Users/zhangyuxi/Desktop/u_disk/VRV/cems/emsstore_decrypted.db"),
+        required=True,
     )
     parser.add_argument(
         "--service-log",
         type=Path,
-        default=Path("/Users/zhangyuxi/Desktop/u_disk/VRV/cems/VUpdateService.log"),
+        required=True,
     )
     args = parser.parse_args()
 

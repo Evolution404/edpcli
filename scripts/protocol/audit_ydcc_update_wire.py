@@ -161,25 +161,22 @@ def main() -> None:
     parser.add_argument(
         "--vcems",
         type=Path,
-        default=Path("/Users/zhangyuxi/Desktop/u_disk/VRV/cems/VcemsDownload.dll"),
+        required=True,
     )
     parser.add_argument(
         "--cems-base",
         type=Path,
-        default=Path("/Users/zhangyuxi/Desktop/u_disk/VRV/cems/cemsBase.dll"),
+        required=True,
     )
     parser.add_argument(
         "--db",
         type=Path,
-        default=Path("/Users/zhangyuxi/Desktop/u_disk/VRV/cems/emsstore_decrypted.db"),
+        required=True,
     )
     parser.add_argument(
         "--download-log",
         type=Path,
-        default=Path(
-            "/Users/zhangyuxi/Desktop/u_disk/VRV/cems/cemsSvc_Log/Net/"
-            "cemsDownLoadFile_2026-04-30.log"
-        ),
+        required=True,
     )
     args = parser.parse_args()
 

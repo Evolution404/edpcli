@@ -19,7 +19,6 @@ import struct
 from pathlib import Path
 
 DLL_SHA256 = "b12a249ab86cad28ed8f733f06355c22e16dd10c95cc714d361e48b2c520796f"
-DEFAULT_DLL = Path("/Users/zhangyuxi/Desktop/u_disk/VRV/cems/ydcc/netac_usb_api.dll")
 
 FORMAT_EX_A = 0x1000A030
 FORMAT_TO_GEOMETRY_CALL = 0x1000A205
@@ -125,7 +124,7 @@ def require_at(
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--dll", type=Path, default=DEFAULT_DLL)
+    parser.add_argument("--dll", type=Path, required=True)
     args = parser.parse_args()
 
     actual_sha = sha256(args.dll)

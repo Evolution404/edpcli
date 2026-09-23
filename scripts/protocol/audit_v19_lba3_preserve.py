@@ -38,7 +38,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--dll",
         type=Path,
-        default=Path("/private/tmp/cemsusbregsiter_19.11.4.1.dll"),
+        required=True,
         help="pinned historical CEMSUsbRegsiter.dll v19.11.4.1",
     )
     return parser.parse_args()

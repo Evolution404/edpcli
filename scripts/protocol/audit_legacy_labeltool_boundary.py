@@ -42,7 +42,7 @@ def main() -> None:
     parser.add_argument(
         "--cemsudisk",
         type=Path,
-        default=Path("/Users/zhangyuxi/Desktop/u_disk/VRV/cems/Edp/cemsudisk.dll"),
+        required=True,
     )
     args = parser.parse_args()
 

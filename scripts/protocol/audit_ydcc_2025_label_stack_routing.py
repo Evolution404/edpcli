@@ -26,11 +26,6 @@ import struct
 from datetime import datetime, timezone
 from pathlib import Path
 
-ROOT = Path("/Users/zhangyuxi/Desktop/u_disk/VRV/cems/ydcc")
-DEFAULT_SAFEUSB = ROOT / "safeusbregsitercems.dll"
-DEFAULT_SECTOR = ROOT / "sectormanage.dll"
-DEFAULT_SECUSB = ROOT / "secusbinterface.dll"
-
 SAFEUSB_SHA256 = "016289889f27cf9de8cb685f9efc285fd467204600fec7184b73f1b5ddf5f14e"
 SECTOR_SHA256 = "63a56fa36ac61d96ce9d84352a3dd79b3c835d67ee6fc6de7e9c276c3d22bf44"
 SECUSB_SHA256 = "2e6c1fd0af2224d74c4316869da5a2c2e35ed7a05ae77620fe7e71a59d2c4651"
@@ -157,9 +152,9 @@ def assert_pe(
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--safeusb", type=Path, default=DEFAULT_SAFEUSB)
-    parser.add_argument("--sector", type=Path, default=DEFAULT_SECTOR)
-    parser.add_argument("--secusb", type=Path, default=DEFAULT_SECUSB)
+    parser.add_argument("--safeusb", type=Path, required=True)
+    parser.add_argument("--sector", type=Path, required=True)
+    parser.add_argument("--secusb", type=Path, required=True)
     args = parser.parse_args()
 
     safe, safe_base, safe_sections = assert_pe(

@@ -38,10 +38,6 @@ CEMSREG_MD5 = "2ABA574551E59550B0D4FB50E8BECD27"
 SERVICE_LOG_SHA256 = "5ec3b53e34573646b29dde6cee5595fccb527c385f0b0f571d7b8b74ebf8c517"
 OLD_USBTOOL_MD5 = "FC29B1C96E48F4F82EA6D641362B3364"
 
-DEFAULT_USBTOOL = Path("/Users/zhangyuxi/Desktop/u_disk/VRV/cems/ydcc/usbtoolbusmanage.dll")
-DEFAULT_CEMSREG = Path("/Users/zhangyuxi/Desktop/u_disk/VRV/cems/ydcc/cemsusbregsiter.dll")
-DEFAULT_SERVICE_LOG = Path("/Users/zhangyuxi/Desktop/u_disk/VRV/cems/VUpdateService.log")
-
 USBTOOL_DEPT_COPY_VA = 0x100A9B53
 USBTOOL_WRITER_CALL_VA = 0x100A9DBD
 CEMSREG_DEPT_CONVERT_VA = 0x100476BB
@@ -198,9 +194,9 @@ def find_md5_block(lines: list[str]) -> dict[str, int]:
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--usbtool", type=Path, default=DEFAULT_USBTOOL)
-    parser.add_argument("--cemsreg", type=Path, default=DEFAULT_CEMSREG)
-    parser.add_argument("--service-log", type=Path, default=DEFAULT_SERVICE_LOG)
+    parser.add_argument("--usbtool", type=Path, required=True)
+    parser.add_argument("--cemsreg", type=Path, required=True)
+    parser.add_argument("--service-log", type=Path, required=True)
     args = parser.parse_args()
 
     if digest(args.usbtool, "sha256").lower() != USBTOOL_SHA256:
