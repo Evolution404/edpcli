@@ -1,5 +1,5 @@
 //! FAT BPB, allocation tables and directory metadata; never file payloads.
-//! Layout: Microsoft FAT specification v1.03 (docs/DEEP_BACKUP_V1.md).
+//! Layout: Microsoft FAT specification v1.03 (docs/backup/DEEP_BACKUP_V1.md).
 use super::{FileEntry, PartitionReader};
 use std::collections::{BTreeSet, VecDeque};
 

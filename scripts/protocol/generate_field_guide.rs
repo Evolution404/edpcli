@@ -46,9 +46,9 @@ pub fn render() -> String {
     let axes = rows(AXES);
     let mut out = String::from("# EDP LBA0–LBA12 字段手册\n\n\
 > 自动生成：请修改 canonical TSV 后重新生成，勿直接编辑本文件。\n\n\
-事实源：[field_catalog.tsv](../audit/protocol/field_catalog.tsv)、[profile_axes.tsv](../audit/protocol/profile_axes.tsv)。\n\
-证据 ID 的 modality、定位与限制见 [evidence_manifest.tsv](../audit/protocol/evidence_manifest.tsv)。\n\
-生成器：[generate_field_guide.rs](../scripts/protocol/generate_field_guide.rs)；\n\
+事实源：[field_catalog.tsv](../../audit/protocol/field_catalog.tsv)、[profile_axes.tsv](../../audit/protocol/profile_axes.tsv)。\n\
+证据 ID 的 modality、定位与限制见 [evidence_manifest.tsv](../../audit/protocol/evidence_manifest.tsv)。\n\
+生成器：[generate_field_guide.rs](../../scripts/protocol/generate_field_guide.rs)；\n\
 运行 `rustc --edition=2021 scripts/protocol/generate_field_guide.rs -o target/generate-field-guide`，\n\
 再运行 `target/generate-field-guide`；加 `--check` 只校验，不写文件。\n\n\
 ## 阅读约定\n\n\
@@ -254,11 +254,11 @@ PackedStruct/EncryptedRegion 行按目录现有粒度展示，不补造目录未
         for test in tests {
             writeln!(
                 out,
-                "- Ownership：`{test}`（[测试文件](../tests/protocol_field_catalog.rs)）。"
+                "- Ownership：`{test}`（[测试文件](../../tests/protocol_field_catalog.rs)）。"
             )
             .unwrap();
         }
-        out.push_str("- Fixture 定位：通过各行 physical/producer/consumer evidence ID 查询 [证据清单](../audit/protocol/evidence_manifest.tsv)，保留其 modality 和 limitations。\n\n");
+        out.push_str("- Fixture 定位：通过各行 physical/producer/consumer evidence ID 查询 [证据清单](../../audit/protocol/evidence_manifest.tsv)，保留其 modality 和 limitations。\n\n");
     }
     while out.ends_with("\n\n") {
         out.pop();
@@ -268,7 +268,7 @@ PackedStruct/EncryptedRegion 行按目录现有粒度展示，不补造目录未
 
 #[allow(dead_code)]
 fn main() {
-    let path = "docs/EDP_LBA0_12_FIELD_GUIDE.md";
+    let path = "docs/protocol/EDP_LBA0_12_FIELD_GUIDE.md";
     let rendered = render();
     match std::env::args().nth(1).as_deref() {
         None => std::fs::write(path, rendered).unwrap(),

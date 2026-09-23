@@ -4,7 +4,7 @@ mod generator;
 #[test]
 fn field_guide_is_the_exact_catalog_and_axes_projection() {
     assert_eq!(
-        include_str!("../docs/EDP_LBA0_12_FIELD_GUIDE.md"),
+        include_str!("../docs/protocol/EDP_LBA0_12_FIELD_GUIDE.md"),
         generator::render(),
         "regenerate the field guide after changing canonical TSVs"
     );

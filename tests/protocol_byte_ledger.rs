@@ -5,7 +5,7 @@ use std::collections::{HashMap, HashSet};
 const LEDGER: &str = include_str!("../audit/protocol/byte_ledger.tsv");
 const EVIDENCE: &str = include_str!("../audit/protocol/evidence_manifest.tsv");
 const PROFILE_COVERAGE: &str = include_str!("../audit/protocol/profile_coverage.tsv");
-const DOC: &str = include_str!("../docs/EDP_PROTOCOL_REVERSE_ENGINEERING.md");
+const DOC: &str = include_str!("../docs/protocol/EDP_PROTOCOL_REVERSE_ENGINEERING.md");
 
 fn parse_hex(value: &str) -> usize {
     usize::from_str_radix(value, 16).expect("hex ledger offset")
@@ -337,7 +337,7 @@ fn lba4_hserial_is_closed_as_caller_owned_vector_without_inventing_devicenumber_
 
 #[test]
 fn local_labeltool_patches_cannot_be_mistaken_for_official_protocol_evidence() {
-    let note = include_str!("../audit/protocol/labeltool_variant_diff.md");
+    let note = include_str!("../audit/protocol/notes/labeltool_variant_diff.md");
     for required in [
         "b530a82b29bbc43be8d415225392ca135ab7df8a8d9f69c6598493c4942e9e11",
         "0x00449B76",
@@ -357,7 +357,7 @@ fn local_labeltool_patches_cannot_be_mistaken_for_official_protocol_evidence() {
 
 #[test]
 fn devicenumber_host_identity_crc_boundary_is_explicit() {
-    let note = include_str!("../audit/protocol/devicenumber_identity.md");
+    let note = include_str!("../audit/protocol/notes/devicenumber_identity.md");
     for required in [
         "0ef94c3679da6f27eac75959cf299bbad19676c251d88f7554fbc305407d6041",
         "EDP_DeviceNumber @ 0x10011E00",
@@ -410,7 +410,7 @@ fn evidence_modalities_remain_distinct() {
 
 #[test]
 fn lba3_manufacturing_gate_keeps_fw_marker_page_distinct_from_host_lba3() {
-    let note = include_str!("../audit/protocol/lba3_identity.md");
+    let note = include_str!("../audit/protocol/notes/lba3_manufacturer_boundary.md");
     for required in [
         "file_size - 0x200",
         "CBaseController::virtual_464",

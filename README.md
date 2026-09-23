@@ -25,9 +25,9 @@ edpcli tui
 使用同一套 application/service。macOS/Linux 在进入 alternate screen 前通过 `sudo`
 请求权限，Windows 通过 UAC；授权后一次进入完整能力 TUI。
 
-完整安装、跨平台 selector、备份恢复和发布说明见
-[`docs/USAGE.md`](docs/USAGE.md)。版本策略和 Release 门禁见
-[`docs/RELEASE.md`](docs/RELEASE.md)。
+完整文档分类见 [`docs/README.md`](docs/README.md)。安装、跨平台 selector、备份恢复见
+[`docs/user/USAGE.md`](docs/user/USAGE.md)，版本策略和 Release 门禁见
+[`docs/user/RELEASE.md`](docs/user/RELEASE.md)。
 
 ## 安装 / 升级
 
@@ -44,7 +44,7 @@ sudo install -m 0755 edpcli /usr/local/bin/edpcli
 edpcli version
 ```
 
-其他平台/架构的安装命令见 [`docs/USAGE.md`](docs/USAGE.md)。
+其他平台/架构的安装命令见 [`docs/user/USAGE.md`](docs/user/USAGE.md)。
 
 ## 快速使用
 

@@ -286,7 +286,7 @@ Deep 默认不备份所有用户文件内容。
 
 ## 11. LBA7 compatibility extent 与设备尾部取证窗口
 
-LBA7 legacy compatibility extent 是旧版 `EDP_PARTION_INFO` 表中后续 entry 使用的固定 6 扇区（3072B）兼容物理块，不是泛指盘尾窗口，也不是 type4 专属区域。官方 producer 已证明：后续 entry 保留各自的 `PartionType`，但会被写成同一个 0xC00 兼容几何，因此 type2/type4 同址不能解释为逻辑分区 alias。
+LCE（LBA7 Compatibility Extent）是旧版 `EDP_PARTION_INFO` 表中后续 entry 使用的固定 6 扇区（3072B）兼容物理块，不是泛指盘尾窗口，也不是 type4 专属区域。官方 producer 已证明：后续 entry 保留各自的 `PartionType`，但会被写成同一个 0xC00 兼容几何，因此 type2/type4 同址不能解释为逻辑分区 alias。
 
 Metadata 级必须优先使用 LBA7 盘内指针确定 compatibility extent：
 
@@ -313,7 +313,7 @@ IIR 是另一独立协议对象，不得绑定到该 compatibility extent。
 - semantic_status = unknown
 - restore_policy = evidence_only
 
-LBA7 compatibility extent 和 device tail window 即使物理范围发生重叠，也必须保持不同语义。
+LCE 和 device tail window 即使物理范围发生重叠，也必须保持不同语义。
 
 ## 12. 完整性规则
 

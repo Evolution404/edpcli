@@ -2,9 +2,9 @@
 
 > 自动生成：请修改 canonical TSV 后重新生成，勿直接编辑本文件。
 
-事实源：[field_catalog.tsv](../audit/protocol/field_catalog.tsv)、[profile_axes.tsv](../audit/protocol/profile_axes.tsv)。
-证据 ID 的 modality、定位与限制见 [evidence_manifest.tsv](../audit/protocol/evidence_manifest.tsv)。
-生成器：[generate_field_guide.rs](../scripts/protocol/generate_field_guide.rs)；
+事实源：[field_catalog.tsv](../../audit/protocol/field_catalog.tsv)、[profile_axes.tsv](../../audit/protocol/profile_axes.tsv)。
+证据 ID 的 modality、定位与限制见 [evidence_manifest.tsv](../../audit/protocol/evidence_manifest.tsv)。
+生成器：[generate_field_guide.rs](../../scripts/protocol/generate_field_guide.rs)；
 运行 `rustc --edition=2021 scripts/protocol/generate_field_guide.rs -o target/generate-field-guide`，
 再运行 `target/generate-field-guide`；加 `--check` 只校验，不写文件。
 
@@ -384,8 +384,8 @@ PackedStruct/EncryptedRegion 行按目录现有粒度展示，不补造目录未
 
 正式 parser 与行为测试以本节各字段的 code/test symbol 及状态为准；未实现链接不代表可调用 API。profile detector 尚未在目录中登记。
 
-- Ownership：`protocol_field_catalog::field_catalog_has_exact_byte_ownership_for_every_profile_state`（[测试文件](../tests/protocol_field_catalog.rs)）。
-- Fixture 定位：通过各行 physical/producer/consumer evidence ID 查询 [证据清单](../audit/protocol/evidence_manifest.tsv)，保留其 modality 和 limitations。
+- Ownership：`protocol_field_catalog::field_catalog_has_exact_byte_ownership_for_every_profile_state`（[测试文件](../../tests/protocol_field_catalog.rs)）。
+- Fixture 定位：通过各行 physical/producer/consumer evidence ID 查询 [证据清单](../../audit/protocol/evidence_manifest.tsv)，保留其 modality 和 limitations。
 
 ## LBA1
 
@@ -468,8 +468,8 @@ PackedStruct/EncryptedRegion 行按目录现有粒度展示，不补造目录未
 
 正式 parser 与行为测试以本节各字段的 code/test symbol 及状态为准；未实现链接不代表可调用 API。profile detector 尚未在目录中登记。
 
-- Ownership：`protocol_field_catalog::field_catalog_has_exact_byte_ownership_for_every_profile_state`（[测试文件](../tests/protocol_field_catalog.rs)）。
-- Fixture 定位：通过各行 physical/producer/consumer evidence ID 查询 [证据清单](../audit/protocol/evidence_manifest.tsv)，保留其 modality 和 limitations。
+- Ownership：`protocol_field_catalog::field_catalog_has_exact_byte_ownership_for_every_profile_state`（[测试文件](../../tests/protocol_field_catalog.rs)）。
+- Fixture 定位：通过各行 physical/producer/consumer evidence ID 查询 [证据清单](../../audit/protocol/evidence_manifest.tsv)，保留其 modality 和 limitations。
 
 ## LBA2
 
@@ -578,8 +578,8 @@ PackedStruct/EncryptedRegion 行按目录现有粒度展示，不补造目录未
 
 正式 parser 与行为测试以本节各字段的 code/test symbol 及状态为准；未实现链接不代表可调用 API。profile detector 尚未在目录中登记。
 
-- Ownership：`protocol_field_catalog::field_catalog_has_exact_byte_ownership_for_every_profile_state`（[测试文件](../tests/protocol_field_catalog.rs)）。
-- Fixture 定位：通过各行 physical/producer/consumer evidence ID 查询 [证据清单](../audit/protocol/evidence_manifest.tsv)，保留其 modality 和 limitations。
+- Ownership：`protocol_field_catalog::field_catalog_has_exact_byte_ownership_for_every_profile_state`（[测试文件](../../tests/protocol_field_catalog.rs)）。
+- Fixture 定位：通过各行 physical/producer/consumer evidence ID 查询 [证据清单](../../audit/protocol/evidence_manifest.tsv)，保留其 modality 和 limitations。
 
 ## LBA3
 
@@ -688,8 +688,8 @@ PackedStruct/EncryptedRegion 行按目录现有粒度展示，不补造目录未
 
 正式 parser 与行为测试以本节各字段的 code/test symbol 及状态为准；未实现链接不代表可调用 API。profile detector 尚未在目录中登记。
 
-- Ownership：`protocol_field_catalog::field_catalog_has_exact_byte_ownership_for_every_profile_state`（[测试文件](../tests/protocol_field_catalog.rs)）。
-- Fixture 定位：通过各行 physical/producer/consumer evidence ID 查询 [证据清单](../audit/protocol/evidence_manifest.tsv)，保留其 modality 和 limitations。
+- Ownership：`protocol_field_catalog::field_catalog_has_exact_byte_ownership_for_every_profile_state`（[测试文件](../../tests/protocol_field_catalog.rs)）。
+- Fixture 定位：通过各行 physical/producer/consumer evidence ID 查询 [证据清单](../../audit/protocol/evidence_manifest.tsv)，保留其 modality 和 limitations。
 
 ## LBA4
 
@@ -1529,8 +1529,8 @@ PackedStruct/EncryptedRegion 行按目录现有粒度展示，不补造目录未
 
 正式 parser 与行为测试以本节各字段的 code/test symbol 及状态为准；未实现链接不代表可调用 API。profile detector 尚未在目录中登记。
 
-- Ownership：`protocol_field_catalog::field_catalog_has_exact_byte_ownership_for_every_profile_state`（[测试文件](../tests/protocol_field_catalog.rs)）。
-- Fixture 定位：通过各行 physical/producer/consumer evidence ID 查询 [证据清单](../audit/protocol/evidence_manifest.tsv)，保留其 modality 和 limitations。
+- Ownership：`protocol_field_catalog::field_catalog_has_exact_byte_ownership_for_every_profile_state`（[测试文件](../../tests/protocol_field_catalog.rs)）。
+- Fixture 定位：通过各行 physical/producer/consumer evidence ID 查询 [证据清单](../../audit/protocol/evidence_manifest.tsv)，保留其 modality 和 limitations。
 
 ## LBA5
 
@@ -1579,8 +1579,8 @@ PackedStruct/EncryptedRegion 行按目录现有粒度展示，不补造目录未
 
 正式 parser 与行为测试以本节各字段的 code/test symbol 及状态为准；未实现链接不代表可调用 API。profile detector 尚未在目录中登记。
 
-- Ownership：`protocol_field_catalog::field_catalog_has_exact_byte_ownership_for_every_profile_state`（[测试文件](../tests/protocol_field_catalog.rs)）。
-- Fixture 定位：通过各行 physical/producer/consumer evidence ID 查询 [证据清单](../audit/protocol/evidence_manifest.tsv)，保留其 modality 和 limitations。
+- Ownership：`protocol_field_catalog::field_catalog_has_exact_byte_ownership_for_every_profile_state`（[测试文件](../../tests/protocol_field_catalog.rs)）。
+- Fixture 定位：通过各行 physical/producer/consumer evidence ID 查询 [证据清单](../../audit/protocol/evidence_manifest.tsv)，保留其 modality 和 limitations。
 
 ## LBA6
 
@@ -2300,8 +2300,8 @@ PackedStruct/EncryptedRegion 行按目录现有粒度展示，不补造目录未
 
 正式 parser 与行为测试以本节各字段的 code/test symbol 及状态为准；未实现链接不代表可调用 API。profile detector 尚未在目录中登记。
 
-- Ownership：`protocol_field_catalog::field_catalog_has_exact_byte_ownership_for_every_profile_state`（[测试文件](../tests/protocol_field_catalog.rs)）。
-- Fixture 定位：通过各行 physical/producer/consumer evidence ID 查询 [证据清单](../audit/protocol/evidence_manifest.tsv)，保留其 modality 和 limitations。
+- Ownership：`protocol_field_catalog::field_catalog_has_exact_byte_ownership_for_every_profile_state`（[测试文件](../../tests/protocol_field_catalog.rs)）。
+- Fixture 定位：通过各行 physical/producer/consumer evidence ID 查询 [证据清单](../../audit/protocol/evidence_manifest.tsv)，保留其 modality 和 limitations。
 
 ## LBA7
 
@@ -2495,8 +2495,8 @@ PackedStruct/EncryptedRegion 行按目录现有粒度展示，不补造目录未
 
 正式 parser 与行为测试以本节各字段的 code/test symbol 及状态为准；未实现链接不代表可调用 API。profile detector 尚未在目录中登记。
 
-- Ownership：`protocol_field_catalog::field_catalog_has_exact_byte_ownership_for_every_profile_state`（[测试文件](../tests/protocol_field_catalog.rs)）。
-- Fixture 定位：通过各行 physical/producer/consumer evidence ID 查询 [证据清单](../audit/protocol/evidence_manifest.tsv)，保留其 modality 和 limitations。
+- Ownership：`protocol_field_catalog::field_catalog_has_exact_byte_ownership_for_every_profile_state`（[测试文件](../../tests/protocol_field_catalog.rs)）。
+- Fixture 定位：通过各行 physical/producer/consumer evidence ID 查询 [证据清单](../../audit/protocol/evidence_manifest.tsv)，保留其 modality 和 limitations。
 
 ## LBA8
 
@@ -2941,8 +2941,8 @@ PackedStruct/EncryptedRegion 行按目录现有粒度展示，不补造目录未
 
 正式 parser 与行为测试以本节各字段的 code/test symbol 及状态为准；未实现链接不代表可调用 API。profile detector 尚未在目录中登记。
 
-- Ownership：`protocol_field_catalog::field_catalog_has_exact_byte_ownership_for_every_profile_state`（[测试文件](../tests/protocol_field_catalog.rs)）。
-- Fixture 定位：通过各行 physical/producer/consumer evidence ID 查询 [证据清单](../audit/protocol/evidence_manifest.tsv)，保留其 modality 和 limitations。
+- Ownership：`protocol_field_catalog::field_catalog_has_exact_byte_ownership_for_every_profile_state`（[测试文件](../../tests/protocol_field_catalog.rs)）。
+- Fixture 定位：通过各行 physical/producer/consumer evidence ID 查询 [证据清单](../../audit/protocol/evidence_manifest.tsv)，保留其 modality 和 limitations。
 
 ## LBA9
 
@@ -3354,8 +3354,8 @@ PackedStruct/EncryptedRegion 行按目录现有粒度展示，不补造目录未
 
 正式 parser 与行为测试以本节各字段的 code/test symbol 及状态为准；未实现链接不代表可调用 API。profile detector 尚未在目录中登记。
 
-- Ownership：`protocol_field_catalog::field_catalog_has_exact_byte_ownership_for_every_profile_state`（[测试文件](../tests/protocol_field_catalog.rs)）。
-- Fixture 定位：通过各行 physical/producer/consumer evidence ID 查询 [证据清单](../audit/protocol/evidence_manifest.tsv)，保留其 modality 和 limitations。
+- Ownership：`protocol_field_catalog::field_catalog_has_exact_byte_ownership_for_every_profile_state`（[测试文件](../../tests/protocol_field_catalog.rs)）。
+- Fixture 定位：通过各行 physical/producer/consumer evidence ID 查询 [证据清单](../../audit/protocol/evidence_manifest.tsv)，保留其 modality 和 limitations。
 
 ## LBA10
 
@@ -3568,8 +3568,8 @@ PackedStruct/EncryptedRegion 行按目录现有粒度展示，不补造目录未
 
 正式 parser 与行为测试以本节各字段的 code/test symbol 及状态为准；未实现链接不代表可调用 API。profile detector 尚未在目录中登记。
 
-- Ownership：`protocol_field_catalog::field_catalog_has_exact_byte_ownership_for_every_profile_state`（[测试文件](../tests/protocol_field_catalog.rs)）。
-- Fixture 定位：通过各行 physical/producer/consumer evidence ID 查询 [证据清单](../audit/protocol/evidence_manifest.tsv)，保留其 modality 和 limitations。
+- Ownership：`protocol_field_catalog::field_catalog_has_exact_byte_ownership_for_every_profile_state`（[测试文件](../../tests/protocol_field_catalog.rs)）。
+- Fixture 定位：通过各行 physical/producer/consumer evidence ID 查询 [证据清单](../../audit/protocol/evidence_manifest.tsv)，保留其 modality 和 limitations。
 
 ## LBA11
 
@@ -3801,8 +3801,8 @@ PackedStruct/EncryptedRegion 行按目录现有粒度展示，不补造目录未
 
 正式 parser 与行为测试以本节各字段的 code/test symbol 及状态为准；未实现链接不代表可调用 API。profile detector 尚未在目录中登记。
 
-- Ownership：`protocol_field_catalog::field_catalog_has_exact_byte_ownership_for_every_profile_state`（[测试文件](../tests/protocol_field_catalog.rs)）。
-- Fixture 定位：通过各行 physical/producer/consumer evidence ID 查询 [证据清单](../audit/protocol/evidence_manifest.tsv)，保留其 modality 和 limitations。
+- Ownership：`protocol_field_catalog::field_catalog_has_exact_byte_ownership_for_every_profile_state`（[测试文件](../../tests/protocol_field_catalog.rs)）。
+- Fixture 定位：通过各行 physical/producer/consumer evidence ID 查询 [证据清单](../../audit/protocol/evidence_manifest.tsv)，保留其 modality 和 limitations。
 
 ## LBA12
 
@@ -4133,5 +4133,5 @@ PackedStruct/EncryptedRegion 行按目录现有粒度展示，不补造目录未
 
 正式 parser 与行为测试以本节各字段的 code/test symbol 及状态为准；未实现链接不代表可调用 API。profile detector 尚未在目录中登记。
 
-- Ownership：`protocol_field_catalog::field_catalog_has_exact_byte_ownership_for_every_profile_state`（[测试文件](../tests/protocol_field_catalog.rs)）。
-- Fixture 定位：通过各行 physical/producer/consumer evidence ID 查询 [证据清单](../audit/protocol/evidence_manifest.tsv)，保留其 modality 和 limitations。
+- Ownership：`protocol_field_catalog::field_catalog_has_exact_byte_ownership_for_every_profile_state`（[测试文件](../../tests/protocol_field_catalog.rs)）。
+- Fixture 定位：通过各行 physical/producer/consumer evidence ID 查询 [证据清单](../../audit/protocol/evidence_manifest.tsv)，保留其 modality 和 limitations。

@@ -1,8 +1,8 @@
-# LBA7 legacy compatibility extent — official producer closure
+# LCE（LBA7 Compatibility Extent）
 
 ## 1. Status
 
-This document records the current verified interpretation of the legacy EDP partition table stored at LBA7 and of the fixed six-sector physical extent referenced by later legacy entries.
+LCE 是项目对 LBA7 legacy compatibility extent 的统一简称。本文记录 LCE 的 producer、physical payload、crypto、consumer 和写入边界。
 
 The former project name **Region A** is retired. The later name **legacy type4 extent** is also retired: first-party producer code proves that the fixed 0xC00-byte physical object is not type4-specific.
 
@@ -10,12 +10,29 @@ Canonical project terminology:
 
 - metadata table: **LBA7 legacy EDP partition table**
 - first-party structure names: `tagEdpPartionInfo` / `EDP_PARTION_INFO`
-- physical payload: **LBA7 legacy compatibility extent**
+- physical payload: **LCE (LBA7 Compatibility Extent)**
 - physical payload size: `0xC00` bytes = 3072 bytes = 6 sectors at 512 B/sector
 - current-format counterpart: LBA12 `tagNewEdpPartionInfo`
 - IIR: a separate protocol object; it is not this extent
 
 The producer conclusions below are derived from the captured first-party Windows labeling stack, not inferred from disk samples.
+
+### 1.1 Closure matrix
+
+| LCE question | Status | Verified boundary |
+| --- | --- | --- |
+| Physical locator / size | **COMPLETE** | official `CreatePartitions` CHS-derived locator, aligned `0xC00`; LBA7 pointer is authoritative |
+| LBA7 producer / pointer generation | **COMPLETE** | official mode selector -> `PartionType[]` -> entry0/later-entry geometry -> LBA7 serializer |
+| Payload plaintext | **COMPLETE** | fixed six-sector FAT16 compatibility image, 3072B |
+| Encryption / decryption | **COMPLETE** | EDPSECDISK zero8 family + physical backing byte-offset tweak; Lexar/SanDisk bit-exact reconstruction |
+| Legacy consumer / mount | **COMPLETE** | old LBA7 fallback converts entry to runtime geometry and reaches `EdpMountFile` |
+| Driver physical read/write mapping | **COMPLETE** | mounted virtual I/O maps through `backing_offset + virtual_offset`; complete 0xC00 extent is addressable |
+| Current normal LBA12 path | **SEPARATE** | current normal type4 mount is not LCE and must not be used as LCE evidence |
+| IIR relationship | **SEPARATE** | IIR is a different protocol object |
+| Upper-layer business trigger: who deliberately rewrites LCE, when, and why | **OPEN** | low-level writable path is proven, but the exact business workflow/event that decides to modify the payload has not been closed end-to-end |
+| All historical producer-version equivalence | **OPEN** | 2026 first-party producer is closed; older versions require independent verification |
+
+因此，**LCE 的底层生产、定位、内容、加解密、消费和驱动物理写入路径已经闭环；但不能说“所有写入行为 100% 完全搞明白”**。剩余缺口是上层业务触发 provenance：哪个业务流程在什么条件下决定修改 LCE，以及不同历史版本是否完全相同。
 
 ## 2. First-party producer chain
 
@@ -171,7 +188,7 @@ The current normal LBA12 path is a distinct geometry source and must not be cite
 
 IIR work is retained in `src/protocol/iir.rs` and `tests/iir.rs`.
 
-The LBA7 compatibility extent and IIR are separate protocol objects. Prior attempts to bind the old “Region A” name to IIR are not part of the current model.
+LCE and IIR are separate protocol objects. Prior attempts to bind the old “Region A” name to IIR are not part of the current model.
 
 ## 10. Version scope
 
@@ -179,7 +196,7 @@ The four-mode producer matrix is proven for the captured first-party 2026 Window
 
 Older producer binaries should be checked separately before claiming that the exact same UI-mode matrix and entry geometry rules applied in all years.
 
-The first-party code exposes structure names and field semantics, but no standalone symbol naming the 0xC00 payload object was found. **LBA7 legacy compatibility extent** is therefore an explicit project descriptive term, not a claimed vendor symbol.
+The first-party code exposes structure names and field semantics, but no standalone symbol naming the 0xC00 payload object was found. **LCE / LBA7 Compatibility Extent** is therefore an explicit project descriptive term, not a claimed vendor symbol.
 
 ## 11. Current protocol invariants
 

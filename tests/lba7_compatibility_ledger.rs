@@ -4,7 +4,7 @@ use edpcli::{backup_metadata::parse_lba7_compatibility_geometry, sha256::sha256_
 
 const EVIDENCE: &str = include_str!("../audit/protocol/lba7_compatibility/evidence_manifest.tsv");
 const LEDGER: &str = include_str!("../audit/protocol/lba7_compatibility/byte_ledger.tsv");
-const DOC: &str = include_str!("../docs/LBA7_COMPATIBILITY_EXTENT.md");
+const DOC: &str = include_str!("../docs/protocol/LCE.md");
 const PRODUCER: &str = include_str!(
     "../audit/protocol/lba7_compatibility/evidence/official_lba7_producer_20260923.json"
 );

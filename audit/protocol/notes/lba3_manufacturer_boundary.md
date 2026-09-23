@@ -1,6 +1,6 @@
-# LBA3 target identity gate
+# LBA3 manufacturer provenance boundary
 
-Status: **PARTIAL / identity not locked** (2026-09-21).
+Status: **EDP protocol boundary COMPLETE; manufacturer-internal provenance remains opaque.**
 
 ## Local target that actually carries the nonzero LBA3 profile
 
@@ -148,7 +148,7 @@ VID/PID dictionary rather than a device capture.
 This is a reproducible negative boundary: the existing local archive cannot
 select PS2307 or PS2309 for either nonzero LBA3 profile.
 
-## Exact evidence required before any LBA3 byte is promoted
+## Evidence required only for deeper manufacturer-internal provenance
 
 At least one of the following must tie the actual target device to a controller
 generation:
@@ -166,6 +166,5 @@ of the host-visible projection:
 2. the firmware path that exposes or consumes that structure as host LBA3 (or
    proves the intermediate mapping if LBA3 is a projection of another page).
 
-Until both are present, LBA3 remains `512B PARTIAL`; string similarity and the
-nearby F2 INFO protocol do not count as completion evidence.
+These missing manufacturer details do **not** downgrade LBA3 at the EDP protocol boundary. Current EDP behavior is closed as preserve/ignore for manufacturer-owned opaque metadata; the points above are only prerequisites for assigning internal Phison field semantics.
 

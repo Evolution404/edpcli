@@ -41,13 +41,15 @@
 
 ### 1.1 实盘证据规则
 
-从 2026-09-21 起，协议分析实际使用的**唯一金标字节集**固定为仓库内
+从 2026-09-21 起，协议分析的 **general census 金标字节集**固定为仓库内
 `audit/protocol/gold/`，确保 clean clone/CI/后续 AI 不依赖采集机本地目录即可重放：
 
 - `audit/protocol/gold/strict-encrypted/`：19 份 SHA-256 唯一的 6656B 严格
   original-generation 加密原盘 LBA0-LBA12；
 - `audit/protocol/gold/authentic-nopwd/`：1 份 6656B 的 SanDisk Ultra 真实免密盘
   LBA0-LBA12，只读采集，作为免密行为/profile 的唯一金标。
+
+少数 profile 需要独立的 purpose-specific real-device positive，但不应改变 general census 人口定义。这类证据统一放在 `audit/protocol/physical-evidence/`，必须有独立 provenance、SHA-256、只读采集边界和 focused regression test。例如 LBA10 EESI-enabled profile 的 `P-EESI-NETAC` 就属于这一类；它可以关闭对应 profile 的 physical-positive 缺口，但不会被计成 general census 的“第21份样本”。
 
 原始采集 provenance 仍分别保留为 `/Users/zhangyuxi/.edpcli-backup` 与
 `/Users/zhangyuxi/Desktop/u_disk/analyze/disk_data/no_password_disk4`，但这两个目录已不再
@@ -56,8 +58,9 @@
 `nopwd_tool/backup`、`utils/backup`、散落的历史快照以及仓库裁剪夹具均不得再作为
 金标统计来源。仓库 `tests/fixtures/protocol` 只保留从金标提取的 CI 回归子集；附录中
 残留的 22/57/58 份历史 census 仅记录当时研究过程，不能覆盖本节口径，也不能独立
-支撑 COMPLETE。canonical 账本中涉及真实盘的结论必须能回到上述 19 份加密原盘或
-1 份真实免密盘；否则降为 PARTIAL。
+支撑 COMPLETE。canonical 账本中涉及真实盘的结论必须能回到上述 19+1 general census
+或 manifest-tracked 的 purpose-specific physical evidence；否则不得把普通历史快照、
+实验盘或临时目录样本冒充 physical-positive closure。
 
 **禁止把免密转换盘、自生成盘、文件名带 `_nopwd` 的夹具、或内容已经呈现自制免密
 状态的备份作为“原始 writer 协议”证据。**
@@ -1022,75 +1025,25 @@ if current_partition.type == 4:
 另一版 `out_raw_data/EdpEDiskCtrl.dll` 也存在同构 reader/writer 与
 type2/type4 `SetVolumeLabelA` 路径，排除单版本偶然行为。
 
-> **2026-09-21 current-gold 纠偏：** 本小节下方保留的 EESI 正例属于历史研究集合，
-> 不是第1.1节现行金标。按现行去重规则重放后，19份唯一严格加密原盘 + 1份真实免密盘
-> 的 LBA10 **20/20 全零**。因此 EESI 的静态 producer/consumer 边界仍可引用，
-> 但 `LBA10+0x000..0x07F` 必须保持 PARTIAL，直到取得符合来源规则的真实启用样本。
+> **Current EESI closure：** 19+1 general census 的 LBA10 仍是 20/20 全零，说明 EESI
+> 不是所有盘都会启用；但仓库另有 purpose-specific physical positive
+> `P-EESI-NETAC`，它是修改前只读捕获的真实 Netac OnlyDisk LBA0–12，并由
+> `S-EESI-361018` 的 official producer/consumer 链独立闭合。purpose-specific evidence
+> 不并入 general census 计数，但可以为对应 profile 提供物理正例。
 
-历史研究集合当时的只读验证（仅作推导记录）：
+当前 LBA10 结论：
 
-- 21/22：LBA10 全零；
-- 1/22：第三来源独立 SanDisk 原始加密盘存在有效 EESI；
-- 该样本：
-  - `+0x08..0x17 = "交换区" + NUL/zero fill`；
-  - `+0x18..0x27 = "保密区" + NUL/zero fill`；
-  - `+0x28..0x7F = 0`，但此事实仍不能把后续区域升级为 padding。
+- `+0x000..0x07F`：EESI structure/profile，**COMPLETE**。official Get/Set 边界、UI
+  caller、flag 的值相关 consumer、share/encrypt label 语义均已闭合；
+- `+0x080..0x1FF`：cross-generation unowned preserve/ignore physical tail，
+  **COMPLETE**；
+- `P-EESI-NETAC` 只证明 enabled profile 的真实物理存在，不改变 19+1 general census
+  的“20/20 LBA10 zero”事实；两者属于不同 evidence population；
+- 当前状态以 `audit/protocol/byte_ledger.tsv` 为准：LBA10 =
+  **512 COMPLETE / 0 PARTIAL / 0 UNKNOWN**。
 
-补充历史只读证据：`/Users/zhangyuxi/Desktop/u_disk/utils/backup/disk4_20260804_080927.bin`
-记录 `device_id="disk&ven_netac&prod_onlydisk&rev_0000"`，整份6656B快照
-SHA-256=`3c7e795b1b7110e9866dd31f44ba6e7c5e02ff77a1f70a8b11fcdcaf181fbf39`。
-该捕获的 LBA6 `crcUsbID`、LBA7/LBA12 EDPF 都与同一 device_id 自洽；LBA10
-独立解密再次得到 `EESI/+0x04=1/交换区/保密区`，且 `+0x28..0x7F` 88B全零。
-仓库测试夹具 `netac_onlydisk_20260804_lba10_head.hex` 锁定其前0x80密文。
-由于这份历史快照尚未完成与主22份参考同等级的原始生成来源链审计，它只作为
-额外真实 profile 证据，**不**扩大22份严格生成参考计数，也不据此把88B升级 COMPLETE。
-
-仓库新增原始证据夹具：
-
-`tests/fixtures/protocol_evidence/sandisk_ultra_usb_3_0_lba10.bin`
-
-SHA-256：
-`240d04e7c97d300c5081f793d72850d49acbf5408bc0d8cf32de8eef7a5e8f02`
-
-`+0x04..0x07` 本轮继续追到 `EdpEDisk.exe` 的真实外部调用者后已经闭合。
-此前“未找到外部 vtable Get/Set caller”的结论需要废弃：
-
-- `out_raw_data/EdpEDisk.exe`（SHA-256
-  `cfa1317775801381b6ca51f13857d1e52506ff48ac4df94d7b9f91f742d3e4a1`）与
-  `VRV/cems/ydcc/edpedisk.exe`（SHA-256
-  `dc71c30041c4fe9fab277737116216502e9f6a610630a1a70b125c59441e1fd1`）
-  在 `CEdpDiskDlg::OnInitDialog` 都先清零对象内 `0x80` 字节 EESI 缓冲，
-  显式写 `buffer+0x04=1`，再经接口 vtable `+0x20` 调
-  `GetEdpEdiskSetInfo(buffer)`；
-- 同两套程序的卷标设置对话框 `IDOK` handler 则先清零完整 `0x80B` EESI，
-  只把两个编辑框写入 `+0x08/+0x18`，然后经 vtable `+0x24` 调
-  `SetEdpEdiskSetInfo`。因此这条官方 producer 明确把 `+0x04` 写成0，
-  同时也明确把 `+0x28..0x7F` 写成0；
-- 两套程序都加载 `UsbSuspensionWnd.dll` 并解析 `Show`、`Destroy`、
-  `SetParentWnd`。重新读回 EESI 后，`+0x04==0` 的路径会调用 `Destroy`；
-  自动登录成功后，`+0x04!=0` 且 helper 初始化成功时会进入
-  suspension-window 的刷新/`Show` 链；
-- 因而 `+0x04` 不是卷标文本开关，也不是固定常量。它是一个有明确0/1
-  producer 和值相关 consumer 的 **UsbSuspensionWnd lifecycle/control flag**。
-  这里按可观察行为命名，不宣称恢复了原厂 C++ 成员名。
-
-历史集合中唯一启用 EESI 的 SanDisk 样本该 DWORD=1；其余21份没有 EESI。
-该结论曾在旧口径下用于升级状态；**现行严格账本已经撤销这一升级**，因为这个正例
-不属于第1.1节允许的金标来源。
-
-因此以下项目是**旧口径阶段性状态，不是 current strict 状态**：
-
-- `LBA10 +0x04..0x07` 4B → COMPLETE；
-- `LBA10 +0x08..0x17` 16B → COMPLETE；
-- `LBA10 +0x18..0x27` 16B → COMPLETE；
-- `+0x28..0x7F` 88B → COMPLETE：闭合为 **EESI caller-owned compatibility
-  extension**。底层 Get/Set 负责完整 structural round-trip；两套 official UI
-  caller 当前写零且业务 consumer 不解释；未来非零扩展必须原样保留，不得机械清零；
-- `+0x80..0x1FF` 384B → COMPLETE：按后续跨代审计已闭合为
-  cross-generation unowned preserve/ignore physical tail，不能再按 padding 分析。
-
-current strict 状态见第3节主账本：前0x80B统一为 PARTIAL；只有
-`+0x80..0x1FF` 的 preserve/ignore lifecycle 保持 COMPLETE。
+历史上曾因 general census 缺少 enabled positive 而把前0x80记为 PARTIAL；该状态已被
+`P-EESI-NETAC` 和当前 ledger 取代，旧过程只保留在第10节验证历程附录。
 
 ### 4.3 LBA9 EETU：时间窗口 + 使用次数 20B 完整闭环
 
@@ -2640,28 +2593,34 @@ entry count=1..3 且所有0x60-stride entry magic有效者。最终得到58份�
 6. 主文档必须保留官方制盘工具链；
 7. 主文档必须明确禁止把“样本全零/只有字段名/能生成”当完成。
 
-## 8. 后续提升顺序
+## 8. 后续证据提升（不改变当前 6656B COMPLETE 基线）
 
-按 2026-09-21 审计意见执行，优先级固定为：
+LBA0–LBA12 当前语义覆盖已经是 **6656/6656B COMPLETE**。后续工作只允许提升
+物理 profile 覆盖、历史 provenance 或协议边界之外的对象，不能把缺少某个旧 EXE
+重新解释成盘面字节语义缺口。
 
-1. **先保持可复现基线为硬门禁**：任何 COMPLETE 必须能从
+优先级：
+
+1. **保持机器账本为硬门禁**：任何 COMPLETE 都必须能从
    `audit/protocol/byte_ledger.tsv` 回指 producer / consumer / physical evidence；
-   virtual execution 与 physical capture 永不混写。
-2. **集中追历史制标链，同时覆盖 LBA0 / LBA4 / LBA6 / LBA8 / LBA9 legacy 分叉**：
-   目标指纹固定为 join59、非零 `HSerialCRC[5]`、`UsbOnlyInfo=0`、动态 MBR
-   template。`CEMSUsbRegsiter.dll 19.11.4.1` 已明确只能解释其中一部分，且 paired
-   caller 会给 HSerialCRC 零态；其 LBA6 writer 也从零模板起步，禁止再拿它解释
-   strict legacy 非零 HSerialCRC / MBR snapshot。
-3. **LBA3 独立作为制造协议主线**：先锁定 strict Kingston `0951:1666`、
-   `62008590336B` 那一只设备的 controller / chip F/W / ID_BLK，再追制造 buffer 到
-   host-visible LBA3 的真实映射和 firmware consumer。`audit/protocol/lba3_identity.md`
-   记录了为什么相同 VID/PID/product/capacity 仍无法区分 PS2307 与 PS2309。
-4. **LBA10 明确按样本依赖处理**：现行20份唯一指定金标全部为零，不再通过继续静态
-   反编译 EESI 来提升前0x80B；只有新增符合第1.1节来源规则的真实启用样本并完成
-   解密/字段/消费验证后才允许升级。
-5. **最终逐字节交付**：`scripts/protocol/query_byte_ledger.py` 已提供物理偏移、LBA
-   偏移、raw byte、状态、profile 和证据索引的查询骨架；后续只在实际 decoder
-   被接入后输出 decrypted byte/offset，禁止把 raw byte 冒充解密视图。
+   virtual 与 physical 永不混写。
+2. **补 `MISSING_PHYSICAL` profile**：优先寻找真实 EDP GPT-enabled、LBA12 mode1、
+   mode3 和 legacy-v0064 正例；在获得实盘前维持语义 COMPLETE + 物理覆盖缺失，
+   不得把官方 virtual output 冒充实盘。
+3. **历史 producer provenance**：继续追 join59、非零 `HSerialCRC[5]`、
+   `UsbOnlyInfo=0`、legacy MBR snapshot 等 exact writer/profile selector，只用于解释
+   “当年由哪个版本/调用者产生”，不回退已经闭合的 wire semantics。
+4. **LBA3 manufacturer internals**：EDP 边界已经 COMPLETE 为 manufacturer-owned
+   opaque preserve/ignore；若继续追 PS2307/PS2309、F2 marker page 与 firmware mapping，
+   这是更深的厂商内部格式研究，见
+   `audit/protocol/notes/lba3_manufacturer_boundary.md`。
+5. **LCE 专项**：LCE 的 locator、payload、crypto、legacy consumer 和 driver
+   physical I/O 已闭环；剩余的是上层业务“何时/为何主动重写 LCE”的 trigger provenance
+   和历史版本等价性，见 `docs/protocol/LCE.md`。
+6. **LBA0–12 之外的对象**：IIR 的真实物理绑定/封装链、device tail forensic window
+   等必须单独建账，不能计入 LBA0–LBA12 的 6656B 状态。
+7. **逐字节交付工具**：`scripts/protocol/query_byte_ledger.py` 继续作为 raw byte /
+   profile / evidence 查询入口；只有注册正式 decoder 后才允许显示 decrypted view。
 
 ## 9. 操作安全边界
 

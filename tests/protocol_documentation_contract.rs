@@ -6,8 +6,9 @@
 
 use std::path::Path;
 
-const DOC: &str = include_str!("../docs/EDP_PROTOCOL_REVERSE_ENGINEERING.md");
-const LIVE: &str = include_str!("../docs/EDP_PROTOCOL_LIVE_STATUS.md");
+const DOC: &str = include_str!("../docs/protocol/EDP_PROTOCOL_REVERSE_ENGINEERING.md");
+const PROTOCOL_INDEX: &str = include_str!("../docs/protocol/README.md");
+const LCE: &str = include_str!("../docs/protocol/LCE.md");
 
 fn between<'a>(text: &'a str, start: &str, end: &str) -> &'a str {
     let start_pos = text.find(start).expect("missing start marker") + start.len();
@@ -19,7 +20,7 @@ fn between<'a>(text: &'a str, start: &str, end: &str) -> &'a str {
 #[test]
 fn protocol_analysis_has_one_canonical_document() {
     assert!(
-        Path::new("docs/EDP_PROTOCOL_REVERSE_ENGINEERING.md").is_file(),
+        Path::new("docs/protocol/EDP_PROTOCOL_REVERSE_ENGINEERING.md").is_file(),
         "canonical protocol analysis document is missing"
     );
 
@@ -30,6 +31,9 @@ fn protocol_analysis_has_one_canonical_document() {
         "docs/HISTORICAL_DLL_TARGETS_2026-09-21.md",
         "docs/PHISON_F2_TRACE_2026-09-21.md",
         "docs/EDP_PROTOCOL_REVERSE_ENGINEERING_STATUS.md",
+        "docs/EDP_PROTOCOL_LIVE_STATUS.md",
+        "docs/EDP_PROTOCOL_ENGINEERING_PLAN.md",
+        "docs/PROVISION_NEW_USB_PLAN_2026-09-19.md",
     ] {
         assert!(
             !Path::new(obsolete).exists(),
@@ -45,7 +49,7 @@ fn protocol_analysis_has_one_canonical_document() {
         "## 3. 严格逐字节进度",
         "## 4. 字段证据账本",
         "## 7. 代码与测试门禁",
-        "## 8. 后续提升顺序",
+        "## 8. 后续证据提升（不改变当前 6656B COMPLETE 基线）",
         "## 10. 验证历程附录",
         "## 11. 历史 DLL / profile 取证目标",
         "## 12. Phison F2 / LBA3 专项取证",
@@ -58,26 +62,29 @@ fn protocol_analysis_has_one_canonical_document() {
 }
 
 #[test]
-fn protocol_live_status_tracks_strict_baseline_without_becoming_a_second_ledger() {
-    assert!(Path::new("docs/EDP_PROTOCOL_LIVE_STATUS.md").is_file());
+fn protocol_index_and_lce_replace_parallel_live_status_document() {
+    assert!(Path::new("docs/protocol/README.md").is_file());
+    assert!(Path::new("docs/protocol/LCE.md").is_file());
     for required in [
-        "语义 COMPLETE：",
-        "语义 PARTIAL：",
-        "profile_coverage.tsv",
-        "MISSING_PHYSICAL",
-        "LBA4 `0x020..0x033` 已按 caller-owned HSerial identity vector 字段级生命周期闭环",
-        "ReadUsbHserialsInfo",
-        "0x1019DB54",
-        "EDP_DeviceNumber",
-        "EDP_DiskNumber",
-        "不再阻止这20B的 COMPLETE",
-        "join59",
-        "GENERIC_READ",
-        "fcn.18002B880",
+        "6656/6656B COMPLETE",
+        "LCE = LBA7 Compatibility Extent",
+        "audit/protocol/profile_coverage.tsv",
     ] {
         assert!(
-            LIVE.contains(required),
-            "live protocol status lost required boundary: {required}"
+            PROTOCOL_INDEX.contains(required),
+            "protocol index lost required boundary: {required}"
+        );
+    }
+    for required in [
+        "Physical locator / size",
+        "LBA7 producer / pointer generation",
+        "Driver physical read/write mapping",
+        "Upper-layer business trigger",
+        "**OPEN**",
+    ] {
+        assert!(
+            LCE.contains(required),
+            "LCE document lost closure boundary: {required}"
         );
     }
 }
@@ -190,12 +197,11 @@ fn documentation_keeps_the_official_provisioning_chain_and_strict_rules() {
         "UsbSuspensionWnd lifecycle/control flag",
         "EdpEDisk.exe::OnInitDialog",
         "zero-initializes the full 0x80B EESI payload",
-        "netac_onlydisk_20260804_lba10_head.hex",
+        "purpose-specific physical positive",
         "audit/protocol/physical-evidence/eesi/netac_onlydisk_20260804_lba0_12.bin",
         "d72f6fcd192e92e6423e3b078cffa46725d8e781cdbd48dfcdaa470b72d208bd",
         "P-EESI-NETAC",
         "3c7e795b1b7110e9866dd31f44ba6e7c5e02ff77a1f70a8b11fcdcaf181fbf39",
-        "240d04e7c97d300c5081f793d72850d49acbf5408bc0d8cf32de8eef7a5e8f02",
         "tagEdpEDiskTmpUse",
         "edpdiskglobal.h:481",
         "useCount=0xFFFFFFFF",

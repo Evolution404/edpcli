@@ -27,7 +27,7 @@ fn assert_no_v1_grammar(surface: &str, name: &str) {
 #[test]
 fn public_docs_do_not_teach_removed_v1_grammar() {
     assert_no_v1_grammar(&manifest_file("README.md"), "README.md");
-    assert_no_v1_grammar(&manifest_file("docs/USAGE.md"), "docs/USAGE.md");
+    assert_no_v1_grammar(&manifest_file("docs/user/USAGE.md"), "docs/user/USAGE.md");
 }
 
 #[test]
@@ -69,7 +69,7 @@ fn help_and_completion_expose_only_v2_surface() {
 #[test]
 fn v2_surface_contains_required_task_commands() {
     let readme = manifest_file("README.md");
-    let usage = manifest_file("docs/USAGE.md");
+    let usage = manifest_file("docs/user/USAGE.md");
     for required in [
         "edpcli list",
         "edpcli info",

@@ -53,7 +53,7 @@ exFAT boot regions, allocation bitmap, FAT chains and directory entry sets:
 [Microsoft exFAT File System Specification](https://learn.microsoft.com/en-us/windows/win32/fileio/exfat-specification).
 
 Existing EDP partition/key evidence is in
-[EDP protocol reverse engineering](EDP_PROTOCOL_REVERSE_ENGINEERING.md), sections
+[EDP protocol reverse engineering](../protocol/EDP_PROTOCOL_REVERSE_ENGINEERING.md), sections
 6.1 onward. The v0x0206 default substitution is used only when `UserKeyCRC`
 identifies `0000aaaa`; no password guessing or fabricated key material is used.
 

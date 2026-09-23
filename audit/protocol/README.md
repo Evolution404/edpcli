@@ -1,7 +1,7 @@
 # Protocol audit reproducibility baseline
 
 This directory is the machine-readable companion to
-`docs/EDP_PROTOCOL_REVERSE_ENGINEERING.md`.  It does not replace the canonical
+`docs/protocol/EDP_PROTOCOL_REVERSE_ENGINEERING.md`.  It does not replace the canonical
 document; it makes the evidence behind that document reproducible and rejects
 silent byte-accounting drift.
 
@@ -98,9 +98,13 @@ cargo test --test protocol_documentation_contract
 The baseline audit is read-only.  It never opens a raw disk device and never
 writes any gold capture.
 
+## Analysis notes
+
+`notes/` contains retained provenance/boundary investigations that still have long-term evidence value. They are **not** current status ledgers and may describe historical hypotheses or superseded progress states. Current semantic status always comes from `byte_ledger.tsv`, `field_catalog.tsv`, `profile_coverage.tsv` and their tests.
+
 ## Local executable integrity
 
-`audit/protocol/labeltool_variant_diff.md` records the byte-level comparison
+`audit/protocol/notes/labeltool_variant_diff.md` records the byte-level comparison
 between the three local `cemssafeudisklabeltool*.exe` copies. Only
 `cemssafeudisklabeltool_orig.exe` is treated as an official front-end
 baseline; the other two contain locally applied policy/validation bypasses and
