@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+use edpcli::backup_metadata::parse_region_a_geometry;
 use edpcli::sha256::sha256_hex;
 
 const EVIDENCE: &str = include_str!("../audit/region_a/evidence_manifest.tsv");
@@ -7,6 +8,52 @@ const WIRE: &str = include_str!("../audit/region_a/wire_byte_ledger.tsv");
 const PLAIN: &str = include_str!("../audit/region_a/plain_byte_ledger.tsv");
 const DOC: &str = include_str!("../docs/REGION_A_REVERSE_ENGINEERING.md");
 const PHYSICAL: &[u8] = include_bytes!("../audit/region_a/gold/lexar_region_a_lba243623933.bin");
+const SANDISK_NOPWD_LBA7: &[u8] =
+    include_bytes!("../audit/region_a/live_captures/sandisk_nopwd_20260923/lba7_raw.bin");
+const SANDISK_NOPWD_REGION_A: &[u8] =
+    include_bytes!("../audit/region_a/live_captures/sandisk_nopwd_20260923/region_a_chs.bin");
+const SANDISK_NOPWD_NEIGHBORHOOD: &[u8] = include_bytes!(
+    "../audit/region_a/live_captures/sandisk_nopwd_20260923/region_a_neighborhood.bin"
+);
+const SANDISK_NOPWD_OLD_WRONG_OFFSET: &[u8] = include_bytes!(
+    "../audit/region_a/live_captures/sandisk_nopwd_20260923/physical_minus_e0000.bin"
+);
+
+#[test]
+fn live_sandisk_no_password_region_a_is_nonzero_at_its_lba7_pointer() {
+    let mut front = vec![0u8; 13 * 512];
+    front[7 * 512..8 * 512].copy_from_slice(SANDISK_NOPWD_LBA7);
+    let geometry =
+        parse_region_a_geometry(&front, "disk&ven_sandisk&prod_ultra&rev_1.00", 120_176_640)
+            .unwrap();
+    assert_eq!(geometry.start_lba, 120_164_408);
+    assert_eq!(geometry.chs_expected_start_lba, Some(120_164_408));
+    assert_eq!(geometry.lba7_candidate_entries, vec![1]);
+
+    assert_eq!(SANDISK_NOPWD_REGION_A.len(), 0xC00);
+    assert_eq!(
+        SANDISK_NOPWD_REGION_A
+            .iter()
+            .filter(|&&byte| byte != 0)
+            .count(),
+        3062
+    );
+    assert_eq!(
+        sha256_hex(SANDISK_NOPWD_REGION_A),
+        "aaeffbba440e553c2eb47accac54552c9b53af9d4951f728ac700a2e81aca0a0"
+    );
+    assert_eq!(
+        &SANDISK_NOPWD_NEIGHBORHOOD[0x800..0x1400],
+        SANDISK_NOPWD_REGION_A
+    );
+    assert!(SANDISK_NOPWD_NEIGHBORHOOD[..0x800]
+        .iter()
+        .all(|&byte| byte == 0));
+    assert!(SANDISK_NOPWD_NEIGHBORHOOD[0x1400..]
+        .iter()
+        .all(|&byte| byte == 0));
+    assert!(SANDISK_NOPWD_OLD_WRONG_OFFSET.iter().all(|&byte| byte == 0));
+}
 
 fn parse_hex(value: &str) -> usize {
     usize::from_str_radix(value, 16).expect("hex Region A offset")

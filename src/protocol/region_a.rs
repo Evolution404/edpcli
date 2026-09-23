@@ -1,7 +1,9 @@
 //! Region A locator plus independent IIR protocol helpers.
 //!
-//! Region A is the six-sector (0xC00-byte) physical block pointed to by LBA7
-//! entry1/entry2. No byte-level binding between that physical block and the
+//! Region A is the six-sector (0xC00-byte) physical block pointed to by a
+//! non-Boot LBA7 entry. In the common three-entry profile, entry1/entry2 both
+//! point there; in a two-entry profile, only entry1 may do so. No byte-level
+//! binding between that physical block and the
 //! separate SectorManageImp::ReadIIR/WriteIIR object has been proven. The IIR
 //! parser below therefore operates only on standalone already-decrypted 0x800-byte
 //! IIR buffers and must not be interpreted as a Region A decoder.

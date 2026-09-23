@@ -4,7 +4,7 @@
 
 ## 1. 范围和硬约束
 
-Region A 不是 device tail window。它是 LBA7 compact EDPF entry1/entry2 指向的固定 6 扇区区域。
+Region A 不是 device tail window。它是 LBA7 compact EDPF 中 `PartitionSize=0xC00` 的非 Boot 条目所指向的固定 6 扇区区域；三条目样本的 entry1/entry2 同指它，两条目免密码 SanDisk 仅 type4 entry1 指向它。
 
 当前真实 Lexar：
 
@@ -205,6 +205,14 @@ ReadIIR 和 WriteIIR 都使用 device tree node `+0x18` 计算物理位置，并
 所以虽然该函数也会解密并校验 `EDPF` magic，它消费的是前部 label/LBA12-family metadata，不是 CHS-0x700 的 Region A payload。`UDiskLabelRepair.dll` 中同名解析路径也表现为对已读 label buffer 的结构解密，未发现按 legacy StartSector 再跳转 6 sectors 的证据。
 
 机器证据：`audit/region_a/evidence/edpediskctrl_front_label_not_region_a_20260923.json`。
+
+### 4.8 免密码 SanDisk 的旧「Region A 全零」采集位点错误
+
+历史 `no_password_disk4/raw/region_a_at_e53720000.bin` 确实是 3072B 全零，但它采集于 **physical_total_bytes - 0xE0000**，对应 LBA `120174848`。该盘 CHS 容量是 `120166200` sectors，解码后的 LBA7 type4 entry 指向 **CHS_bytes - 0xE0000**，即 LBA `120164408` / 字节偏移 `0xe53207000`。两个位置相差 `10440` sectors。旧文件的零值不能归因给 Region A。
+
+该两条目 profile 还有一个约束：LBA7 type2 指向实际 Share 起点 LBA63，而 type4 指向 CHS 定位的 0xC00 区域。因此「LBA7 type2/type4 总是同址指向 Region A」也不是通用规律。机器证据：`audit/region_a/evidence/no_password_sandisk_mislocated_capture_20260923.json`。
+
+2026-09-23 对用户重新插入的同一 SanDisk (`disk5`) 进行了只读重采集。当前 LBA7 原始 512B 与 2026-08-23 旧快照逐字节一致。LBA7 type4 指向的真正 Region A `LBA120164408..120164413` 为独立的六扇区高熵块：SHA-256=`aaeffbba440e553c2eb47accac54552c9b53af9d4951f728ac700a2e81aca0a0`，3062/3072B 非零，熵约 7.937 bit/B；前后各四扇区全零。旧错误位点仍为 3072B 全零并与旧文件逐字节一致。采集原始数据与方法保存在 `audit/region_a/live_captures/sandisk_nopwd_20260923/` 和 `scripts/protocol/capture_region_a_readonly.py`，机器结论在 `audit/region_a/evidence/sandisk_nopwd_region_a_live_20260923.json`。这证明该两条目免密码 profile 仍有真实 Region A payload，但其明文与消费机制仍未知。
 
 ## 5. AES 算法、默认 Init key 与版本 profile
 
