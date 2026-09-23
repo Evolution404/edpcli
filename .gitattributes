@@ -1,5 +1,9 @@
 # Protocol evidence manifests hash checked-in text byte-for-byte.  Force LF so
 # Windows checkout cannot rewrite evidence bytes and invalidate SHA-256 proofs.
+# Canonical protocol tables and their generated guide also have byte-stable
+# drift tests, so they must not depend on the checkout platform's EOL policy.
+audit/protocol/*.tsv text eol=lf
+docs/protocol/EDP_LBA0_12_FIELD_GUIDE.md text eol=lf
 audit/protocol/lba7_compatibility/*.tsv text eol=lf
 audit/protocol/lba7_compatibility/*.md text eol=lf
 audit/protocol/lba7_compatibility/**/*.json text eol=lf

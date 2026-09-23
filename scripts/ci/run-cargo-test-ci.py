@@ -25,7 +25,8 @@ def github_escape(value: str) -> str:
 
 
 def main() -> int:
-    tail: deque[str] = deque(maxlen=300)
+    tail: deque[str] = deque(maxlen=120)
+    interesting: deque[str] = deque(maxlen=200)
     process = subprocess.Popen(
         COMMAND,
         stdout=subprocess.PIPE,
@@ -36,14 +37,6 @@ def main() -> int:
         bufsize=1,
     )
     assert process.stdout is not None
-    for line in process.stdout:
-        print(line, end="", flush=True)
-        tail.append(line.rstrip("\r\n"))
-
-    code = process.wait()
-    if code == 0:
-        return 0
-
     keywords = (
         "FAILED",
         "failures:",
@@ -52,8 +45,18 @@ def main() -> int:
         "test result:",
         "assertion",
     )
-    interesting = [line for line in tail if any(key in line for key in keywords)]
-    diagnostic_lines = (interesting[-80:] + list(tail)[-80:])[-140:]
+    for line in process.stdout:
+        print(line, end="", flush=True)
+        clean = line.rstrip("\r\n")
+        tail.append(clean)
+        if any(key in clean for key in keywords):
+            interesting.append(clean)
+
+    code = process.wait()
+    if code == 0:
+        return 0
+
+    diagnostic_lines = (list(interesting)[-100:] + list(tail)[-60:])[-140:]
     diagnostic = "\n".join(diagnostic_lines)
     if len(diagnostic) > 12_000:
         diagnostic = diagnostic[-12_000:]
