@@ -3,8 +3,8 @@ use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use edpcli::edpb::{
-    read_raw_protocol, verify_file, write_core_backup, CaptureLevel, CoreCapture, RestorePolicy,
-    RAW_PROTOCOL_ARTIFACT_ID,
+    read_raw_protocol, verify_file, write_core_backup, write_legacy_migrated_backup,
+    ArtifactCompleteness, CaptureLevel, CoreCapture, RestorePolicy, RAW_PROTOCOL_ARTIFACT_ID,
 };
 
 struct TempDir(PathBuf);
@@ -69,6 +69,42 @@ fn core_container_round_trips_raw_protocol_and_manifest() {
         .unwrap();
     assert_eq!(artifact.restore_policy, RestorePolicy::Restorable);
     assert_eq!(read_raw_protocol(&path).unwrap(), data);
+}
+
+#[test]
+fn legacy_migrated_container_preserves_core_and_marks_missing_data() {
+    let tmp = TempDir::new("edpb_legacy_migrated");
+    let path = tmp.0.join("legacy.edpb");
+    let data: Vec<u8> = (0..13 * 512).map(|i| (i % 239) as u8).collect();
+    let notes = vec!["migrated_from_legacy_file=legacy.bin".to_string()];
+
+    write_legacy_migrated_backup(&path, &capture(&data), &notes).unwrap();
+    let verified = verify_file(&path).unwrap();
+
+    assert_eq!(
+        verified.manifest.snapshot.capture_level,
+        CaptureLevel::LegacyMigrated
+    );
+    assert_eq!(
+        verified.manifest.provenance.capture_source,
+        "legacy_backup_file"
+    );
+    assert_eq!(
+        verified.manifest.provenance.source_format,
+        "legacy_raw_lba0_12_bin"
+    );
+    assert_eq!(read_raw_protocol(&path).unwrap(), data);
+
+    let missing = verified
+        .manifest
+        .artifacts
+        .iter()
+        .filter(|artifact| artifact.completeness == ArtifactCompleteness::NotCaptured)
+        .collect::<Vec<_>>();
+    assert_eq!(missing.len(), 4);
+    assert!(missing
+        .iter()
+        .all(|artifact| artifact.restore_policy == RestorePolicy::DerivedOnly));
 }
 
 #[test]
