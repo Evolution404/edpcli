@@ -157,6 +157,69 @@ fn imix(col: &[u8; 4]) -> [u8; 4] {
     ]
 }
 
+/// Standard AES-128 ECB single-block encryption used by EDP EncryptMode=3.
+///
+/// This deliberately does not apply the EDPSECDISK key table or tweak used by
+/// A7F0/A6B0. The first-party mode3 writer calls the ordinary AES-128 block
+/// transform with MD5(effective_password) as the 16-byte key.
+pub fn aes128_ecb_encrypt_block(plaintext: &[u8; 16], key: &[u8; 16]) -> [u8; 16] {
+    let rk = aes_expand(key);
+    let mut s = *plaintext;
+    for i in 0..16 {
+        s[i] ^= rk[i / 4][i % 4];
+    }
+    for rnd in 1..=9 {
+        for b in &mut s {
+            *b = SBOX[*b as usize];
+        }
+        s = shift_rows(&s);
+        for c in (0..16).step_by(4) {
+            let col: [u8; 4] = s[c..c + 4].try_into().unwrap();
+            s[c..c + 4].copy_from_slice(&mix_column(&col));
+        }
+        for i in 0..16 {
+            s[i] ^= rk[rnd * 4 + i / 4][i % 4];
+        }
+    }
+    for b in &mut s {
+        *b = SBOX[*b as usize];
+    }
+    s = shift_rows(&s);
+    for i in 0..16 {
+        s[i] ^= rk[40 + i / 4][i % 4];
+    }
+    s
+}
+
+/// Standard AES-128 ECB single-block decryption used by EDP EncryptMode=3.
+pub fn aes128_ecb_decrypt_block(ciphertext: &[u8; 16], key: &[u8; 16]) -> [u8; 16] {
+    let rk = aes_expand(key);
+    let mut s = *ciphertext;
+    for i in 0..16 {
+        s[i] ^= rk[40 + i / 4][i % 4];
+    }
+    for rnd in (1..=9).rev() {
+        s = inv_shift(&s);
+        for b in &mut s {
+            *b = SBOX2[*b as usize];
+        }
+        for i in 0..16 {
+            s[i] ^= rk[rnd * 4 + i / 4][i % 4];
+        }
+        for c in (0..16).step_by(4) {
+            let col: [u8; 4] = s[c..c + 4].try_into().unwrap();
+            s[c..c + 4].copy_from_slice(&imix(&col));
+        }
+    }
+    s = inv_shift(&s);
+    for b in &mut s {
+        *b = SBOX2[*b as usize];
+    }
+    for i in 0..16 {
+        s[i] ^= rk[i / 4][i % 4];
+    }
+    s
+}
 /// 轮密钥展开 + counter 混入(cb 的 8 字节循环 XOR 进全部 176 个轮密钥字节)。
 ///
 /// 驱动把物理 backing byte offset 作为 64 位 tweak seed 传入；LBA0-LBA12
@@ -373,6 +436,24 @@ mod tests {
         let w1 = u16::from_le_bytes([out[2], out[3]]);
         assert_eq!(w0, 0x1234);
         assert_eq!(w1, (0x1234u32.wrapping_add(0x100).wrapping_sub(1)) as u16);
+    }
+
+    #[test]
+    fn standard_aes128_ecb_matches_nist_vector() {
+        let key = [
+            0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d,
+            0x0e, 0x0f,
+        ];
+        let plain = [
+            0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99, 0xaa, 0xbb, 0xcc, 0xdd,
+            0xee, 0xff,
+        ];
+        let expected = [
+            0x69, 0xc4, 0xe0, 0xd8, 0x6a, 0x7b, 0x04, 0x30, 0xd8, 0xcd, 0xb7, 0x80, 0x70, 0xb4,
+            0xc5, 0x5a,
+        ];
+        assert_eq!(aes128_ecb_encrypt_block(&plain, &key), expected);
+        assert_eq!(aes128_ecb_decrypt_block(&expected, &key), plain);
     }
 
     #[test]

@@ -12,7 +12,6 @@ pub struct ProvisionProfile {
     lba4_profile_word: [u8; 4],
     lba7_material: [u8; 16],
     lba12_material: [u8; 24],
-    lba12_encrypt_mode: u8,
     lba7_terminator: [u8; 8],
     lba12_terminator: [u8; 8],
 }
@@ -36,7 +35,6 @@ impl ProvisionProfile {
                 0x5d, 0x73, 0x29, 0x04, 0xcf, 0x18, 0x96, 0xfe, 0xee, 0xf4, 0x08, 0x82, 0x9e, 0xc2,
                 0xd5, 0xf5, 0x40, 0x66, 0x0f, 0x21, 0x3e, 0x70, 0x95, 0x2e,
             ],
-            lba12_encrypt_mode: 2,
             lba7_terminator: [0xec, 0x00, 0x01, 0x77, 0x00, 0x01, 0x77, 0x00],
             lba12_terminator: [0x8e, 0x02, 0x01, 0x77, 0x00, 0x01, 0x77, 0x00],
         }
@@ -80,10 +78,6 @@ impl ProvisionProfile {
 
     pub(crate) fn lba12_material(&self) -> &[u8; 24] {
         &self.lba12_material
-    }
-
-    pub(crate) fn lba12_encrypt_mode(&self) -> u8 {
-        self.lba12_encrypt_mode
     }
 
     pub(crate) fn lba7_terminator(&self) -> &[u8; 8] {

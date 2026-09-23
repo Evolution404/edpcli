@@ -3,10 +3,10 @@ use edpcli::protocol::{
 };
 use edpcli::provision::{
     build_official_partition_layout, generate_official_image, official_mbr_partition_type,
-    OfficialPartitionMode, OfficialPartitionSizes, OfficialProvisionPlan,
-    OfficialProvisionValidator, OnlyId, ProvisionEntropy, ProvisionImage, ProvisionMetadata,
-    ProvisionProfile, ProvisionSpec, TargetIdentity, OFFICIAL_PARTITION_START_SECTOR,
-    WHOLE_DISK_ENCRYPTED_COMPAT_BOOT_BYTES,
+    wrap_file_key, FileKeyWrapMode, OfficialPartitionMode, OfficialPartitionSizes,
+    OfficialProvisionPlan, OfficialProvisionValidator, OnlyId, ProvisionEntropy, ProvisionImage,
+    ProvisionMetadata, ProvisionProfile, ProvisionSpec, TargetIdentity,
+    OFFICIAL_PARTITION_START_SECTOR, WHOLE_DISK_ENCRYPTED_COMPAT_BOOT_BYTES,
 };
 use edpcli::{
     crypto::{a6b0_full, crc32_bare, xor_rolling},
@@ -133,7 +133,21 @@ fn official_spec() -> ProvisionSpec {
 
 fn official_plan(mode: OfficialPartitionMode) -> OfficialProvisionPlan {
     let compat = locate_lba7_compatibility_extent_from_geometry(1024, 255, 63, 512).unwrap();
-    OfficialProvisionPlan::new(mode, OfficialPartitionSizes::new(32, 64, 128), compat).unwrap()
+    let key_material = wrap_file_key(
+        b"ProofPass1!",
+        [
+            0x14, 0x71, 0x96, 0xf5, 0xa2, 0xec, 0x79, 0x12, 0xed, 0xf1, 0x3f, 0x75, 0xd7, 0x66,
+            0xcb, 0x42,
+        ],
+        FileKeyWrapMode::Sm4,
+    );
+    OfficialProvisionPlan::new(
+        mode,
+        OfficialPartitionSizes::new(32, 64, 128),
+        compat,
+        key_material,
+    )
+    .unwrap()
 }
 
 fn u32le(raw: &[u8], offset: usize) -> u32 {
@@ -186,6 +200,15 @@ fn official_image_generator_emits_all_four_verified_layouts() {
             assert_eq!(u32le(&lba12, b12 + 0x10), u32::from(index < 2));
             assert_eq!(u32le(&lba7, b7 + 0x14), u32::from(ptype != 1));
             assert_eq!(u32le(&lba12, b12 + 0x14), u32::from(ptype != 1));
+            if ptype == 1 {
+                assert!(lba12[b12 + 0x30..b12 + 0x59].iter().all(|byte| *byte == 0));
+            } else {
+                assert_eq!(
+                    &lba12[b12 + 0x30..b12 + 0x48],
+                    plan.lba12_key_material.packed24().as_slice()
+                );
+                assert_eq!(lba12[b12 + 0x58], FileKeyWrapMode::Sm4.raw());
+            }
 
             assert_eq!(u64le(&lba12, b12 + 0x18), partition.start_sector);
             assert_eq!(u64le(&lba12, b12 + 0x28), partition.size_bytes);
@@ -202,6 +225,43 @@ fn official_image_generator_emits_all_four_verified_layouts() {
                     plan.lba7_compatibility_extent.size_bytes
                 );
             }
+        }
+    }
+}
+
+#[test]
+fn official_generator_serializes_all_three_current_lba12_wrap_modes() {
+    let spec = official_spec();
+    let entropy = ProvisionEntropy::new([0x5a; 252]);
+    let compat = locate_lba7_compatibility_extent_from_geometry(1024, 255, 63, 512).unwrap();
+    let file_key = [
+        0x14, 0x71, 0x96, 0xf5, 0xa2, 0xec, 0x79, 0x12, 0xed, 0xf1, 0x3f, 0x75, 0xd7, 0x66, 0xcb,
+        0x42,
+    ];
+    for wrap_mode in [
+        FileKeyWrapMode::A7f0,
+        FileKeyWrapMode::Sm4,
+        FileKeyWrapMode::Aes128Ecb,
+    ] {
+        let key_material = wrap_file_key(b"ProofPass1!", file_key, wrap_mode);
+        let plan = OfficialProvisionPlan::new(
+            OfficialPartitionMode::BootShareCombined,
+            OfficialPartitionSizes::new(32, 64, 128),
+            compat,
+            key_material,
+        )
+        .unwrap();
+        let image = generate_official_image(&spec, &entropy, &plan).unwrap();
+        OfficialProvisionValidator::validate(&spec, &image, &plan).unwrap();
+        let crc = crc32_bare(spec.target().device_id().as_bytes());
+        let lba12 = a6b0_full(&image.as_bytes()[12 * 512..13 * 512], &crc.to_le_bytes(), 0);
+        for index in 0..2 {
+            let base = index * 0x60;
+            assert_eq!(
+                &lba12[base + 0x30..base + 0x48],
+                key_material.packed24().as_slice()
+            );
+            assert_eq!(lba12[base + 0x58], wrap_mode.raw());
         }
     }
 }

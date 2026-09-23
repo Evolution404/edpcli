@@ -286,6 +286,7 @@ fn build_official_lba7(
 
 fn build_official_lba12(
     spec: &ProvisionSpec,
+    plan: &OfficialProvisionPlan,
     logical: &[OfficialPartitionGeometry],
 ) -> Result<[u8; SECTOR], String> {
     let count = u32::try_from(logical.len()).map_err(|_| "partition count overflow")?;
@@ -297,16 +298,26 @@ fn build_official_lba12(
     let mut plain = [0u8; SECTOR];
     for (index, partition) in logical.iter().enumerate() {
         let base = index * 0x60;
+        let encrypted = need_encrypt(partition.partition_type.raw()) != 0;
+        let material = if encrypted {
+            plan.lba12_key_material.packed24()
+        } else {
+            [0u8; 24]
+        };
         let entry = edpf_entry_with_flags(
             0x60,
             count,
             partition.partition_type.raw(),
             need_disturb(index),
-            need_encrypt(partition.partition_type.raw()),
+            u32::from(encrypted),
             partition.start_sector,
             partition.size_bytes,
-            spec.profile().lba12_material(),
-            spec.profile().lba12_encrypt_mode(),
+            &material,
+            if encrypted {
+                plan.lba12_key_material.encrypt_mode.raw()
+            } else {
+                0
+            },
         );
         plain[base..base + 0x60].copy_from_slice(&entry);
     }
@@ -474,7 +485,7 @@ pub fn generate_official_image(
         (7, build_official_lba7(spec, plan, &logical)?.to_vec()),
         (8, build_lba8(spec)?.to_vec()),
         (11, build_lba11(spec, entropy)?.to_vec()),
-        (12, build_official_lba12(spec, &logical)?.to_vec()),
+        (12, build_official_lba12(spec, plan, &logical)?.to_vec()),
     ];
     for (lba, data) in sectors {
         image[lba * SECTOR..(lba + 1) * SECTOR].copy_from_slice(&data);

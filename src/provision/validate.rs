@@ -483,7 +483,7 @@ impl OfficialProvisionValidator {
         }
         validate_official_mbr(plan, &logical, sector(bytes, 0))?;
         validate_official_lba7(spec, plan, &logical, sector(bytes, 7))?;
-        validate_official_lba12(spec, &logical, sector(bytes, 12))?;
+        validate_official_lba12(spec, plan, &logical, sector(bytes, 12))?;
 
         Ok(OfficialProvisionValidation {
             profile_id: spec.profile().id().to_string(),
@@ -628,6 +628,7 @@ fn validate_official_lba7(
 
 fn validate_official_lba12(
     spec: &ProvisionSpec,
+    plan: &OfficialProvisionPlan,
     logical: &[OfficialPartitionGeometry],
     raw: &[u8],
 ) -> Result<(), String> {
@@ -635,6 +636,12 @@ fn validate_official_lba12(
     let plain = a6b0_full(raw, &crc.to_le_bytes(), 0);
     let count = u32::try_from(logical.len()).map_err(|_| "partition count overflow")?;
     for (index, partition) in logical.iter().enumerate() {
+        let encrypted = expected_need_encrypt(partition.partition_type.raw()) != 0;
+        let material = if encrypted {
+            plan.lba12_key_material.packed24()
+        } else {
+            [0u8; 24]
+        };
         validate_official_entry(
             &plain,
             index * 0x60,
@@ -644,8 +651,12 @@ fn validate_official_lba12(
             partition,
             partition.start_sector,
             partition.size_bytes,
-            spec.profile().lba12_material(),
-            spec.profile().lba12_encrypt_mode(),
+            &material,
+            if encrypted {
+                plan.lba12_key_material.encrypt_mode.raw()
+            } else {
+                0
+            },
         )?;
     }
     let used_end = logical.len() * 0x60;

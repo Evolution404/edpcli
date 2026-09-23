@@ -5,12 +5,14 @@
 //! immutable, already-resolved inputs from this domain.
 
 mod generate;
+mod keys;
 mod layout;
 mod profile;
 mod spec;
 mod validate;
 
 pub use generate::{generate_image, generate_official_image, ProvisionEntropy};
+pub use keys::{wrap_file_key, FileKeyWrapMode, ProvisionKeyMaterial};
 pub use layout::{
     build_official_partition_layout, official_mbr_partition_type, OfficialPartitionGeometry,
     OfficialPartitionMode, OfficialPartitionSizes, OfficialProvisionPlan,
