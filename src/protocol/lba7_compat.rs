@@ -8,6 +8,8 @@
 
 pub const LBA7_COMPAT_EXTENT_TOTAL_SIZE: usize = 0xC00;
 pub const LBA7_COMPAT_CHS_TAIL_DISTANCE_BYTES: u64 = 0xE0000;
+pub const VERIFIED_USB_TRACKS_PER_CYLINDER: u32 = 255;
+pub const VERIFIED_USB_SECTORS_PER_TRACK: u32 = 63;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct Lba7CompatibilityExtentLayout {
@@ -53,4 +55,31 @@ pub fn locate_lba7_compatibility_extent_from_geometry(
         size_bytes,
         size_sectors: size_bytes / sector_size,
     })
+}
+
+/// Cross-platform equivalent of the current first-party USB geometry profile.
+///
+/// Physical Lexar/aigo/SanDisk fixtures all use the Windows removable-media
+/// translation 255 tracks/cylinder x 63 sectors/track with 512-byte sectors.
+/// We deliberately floor to a complete translated cylinder, matching the
+/// DISK_GEOMETRY Cylinders product consumed by the first-party writer.
+pub fn locate_lba7_compatibility_extent_from_verified_usb_capacity(
+    total_sectors: u64,
+    bytes_per_sector: u32,
+) -> Option<Lba7CompatibilityExtentLayout> {
+    if bytes_per_sector != 512 {
+        return None;
+    }
+    let sectors_per_cylinder = u64::from(VERIFIED_USB_TRACKS_PER_CYLINDER)
+        .checked_mul(u64::from(VERIFIED_USB_SECTORS_PER_TRACK))?;
+    let cylinders = total_sectors.checked_div(sectors_per_cylinder)?;
+    if cylinders == 0 {
+        return None;
+    }
+    locate_lba7_compatibility_extent_from_geometry(
+        cylinders,
+        VERIFIED_USB_TRACKS_PER_CYLINDER,
+        VERIFIED_USB_SECTORS_PER_TRACK,
+        bytes_per_sector,
+    )
 }

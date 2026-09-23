@@ -13,6 +13,7 @@ mod lce;
 mod profile;
 mod spec;
 mod validate;
+mod write_plan;
 
 pub use conversion::{
     build_passwordless_conversion, PasswordlessConversionImage, PasswordlessConversionPlan,
@@ -38,6 +39,7 @@ pub use validate::{
     OfficialProvisionValidation, OfficialProvisionValidator, ProvisionValidation,
     ProvisionValidator,
 };
+pub use write_plan::{build_official_provision_write_image, OfficialProvisionWriteImage};
 
 use crate::common::METADATA_IMAGE_LEN;
 
