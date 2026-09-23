@@ -4,6 +4,7 @@
 //! Hardware discovery belongs to the application/platform layers; builders consume only
 //! immutable, already-resolved inputs from this domain.
 
+mod filesystem;
 mod generate;
 mod keys;
 mod layout;
@@ -11,6 +12,10 @@ mod profile;
 mod spec;
 mod validate;
 
+pub use filesystem::{
+    build_empty_exfat, build_official_exfat_partitions, encrypt_sparse_mode2,
+    OfficialFilesystemFormat, PartitionFilesystemImage, SparseFilesystemImage,
+};
 pub use generate::{generate_image, generate_official_image, ProvisionEntropy};
 pub use keys::{
     wrap_file_key, wrap_legacy_lba7_file_key, FileKeyWrapMode, LegacyLba7KeyMaterial,

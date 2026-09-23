@@ -13,6 +13,7 @@
 - `src/provision/spec.rs`
 - `src/provision/profile.rs`
 - `src/provision/generate.rs`
+- `src/provision/filesystem.rs`
 - `src/provision/validate.rs`
 
 该模块禁止打开设备、执行系统命令或提权。硬件发现和真实写盘属于应用层/平台层。
@@ -21,7 +22,7 @@
 
 现有 `generate_image()` 继续保留标准 v1 二合一兼容输出；新增 `generate_official_image()` + `OfficialProvisionPlan` 已能纯内存生成四种官方分区模式的 LBA0/LBA7/LBA12，并由独立 `OfficialProvisionValidator` 反向校验 MBR、EDPF 类型/标志、逻辑几何与 LCE。LBA12 当前封装密钥轴已独立实现为 `ProvisionKeyMaterial`：mode1=A7F0、mode2=SM4-ECB、mode3=AES-128-ECB，三种输出均与官方虚拟写入端逐字节夹具一致；`0000aaaa` 的 v0x0206 隐式有效密码替换也已编码。LBA7 旧版 8B 封装密钥则独立建模为 `LegacyLba7KeyMaterial`，按 `fold32(password)` 对两个 32 位半字异或封装，真实 Netac 原盘向量已逐字节回归；LBA7 与 LBA12 的明文文件密钥来源仍作为两个独立输入，不建立未经证明的派生关系。
 
-**当前构造器不是完整的官方四模式制盘器。** 协议元数据生成与校验已经闭环；剩余工作集中在文件系统创建/格式化阶段和真实设备产品入口。
+**当前构造器不是完整的官方四模式制盘器。** 协议元数据生成与校验已经闭环；一方当前默认 `exfat` 文件系统的纯内存构造、四模式明文/加密物理布局和 `mode2` 数据区加密也已实现。剩余工作集中在现有盘前部区域重建、真实设备产品入口和发布收口。
 
 ## 2. 已闭环的官方协议事实
 
@@ -44,6 +45,12 @@
 
 同一真实 Netac 原盘的 LBA7 也给出完全对应的门禁：type1/`NeedEncrypt=0` 的 `UserKeyCRC`、`FileKeyCRC` 和 8B 旧版封装文件密钥全部为0；type2/type4 共用同一组非零旧版材料。当前 `wrap_legacy_lba7_file_key()` 已用 `0000aaaa` 与该原盘 8B 明文文件密钥复算出完全一致的 16B 条目材料。
 
+当前一方 `CUsbRegsiter::FormatDisk` 的文件系统配置轴也已闭合：从 `usbtoolCfg.ini` 的 `[GLOBAL] fType` 读取格式类型，缺省值为 `exfat`，并把 `ntfs`、`exfat`、`fat32` 分别规范化为传给 `fmifs.dll!FormatEx` 的 `NTFS`、`exFat`、`fat32`；`version.ver` 中的 `[information] FormatImageDisk` 属于独立图像盘分支，命中时强制走 `FAT`，不能与普通 U 盘配置混为一谈。
+
+默认 `exfat` 路线已实现为稀疏元数据构造器，只生成启动区、FAT、分配位图、大小写表和根目录等必要扇区。现有深度解析器可完整反向解析；另外已用 `hdiutil` 临时虚拟块设备做本机硬件在环验证，系统原生识别为 `ExFAT`、成功挂载并完成文件写回/读回，验证过程只使用 `/tmp` 虚拟镜像，没有访问物理 U 盘。
+
+四模式物理文件系统规则当前固定为：模式0 `[明文 type1, 加密 type2, 加密 type4]`；模式1 `[明文 type2, 加密 type4]`；模式2 的 `0x7E00` type1 仅为兼容保留项、不创建文件系统，type4 加密；模式3 `[明文 type1, 加密 type2]`。其中模式1 的 type2 虽然 `NeedEncrypt=1`，但 MBR 直接暴露路径已经由真实免密 SanDisk 验证为物理明文，不能机械按该标志加密。当前跨平台数据区写入只对已验证的 `mode2` 扇区级 `SM4-ECB` 路线开放，其他封装模式无法确认时拒绝继续。
+
 LBA7 旧表中条目0 与后续条目的几何规则不同；后续条目可保留各自 `PartionType` 并共同指向 LCE（LBA7 兼容扩展区）。因此制盘功能不得把 LCE 当成 type4 专属区域。详细证据见 [`../protocol/LCE.md`](../protocol/LCE.md)。
 
 ## 3. 路线图 A：完整复刻官方四模式新盘制盘
@@ -56,11 +63,12 @@ LBA7 旧表中条目0 与后续条目的几何规则不同；后续条目可保�
 
 1. `OfficialPartitionMode`：0/1/2/3 四种官方布局；
 2. LBA12 封装文件密钥 / `EncryptMode` 配置类型；
-3. 旧版/当前 LBA4 表示配置类型；
-4. LBA6 Dept 续段/快照配置类型；
-5. LBA8 身份/保留底层字节配置类型；
-6. GPT/MBR 配置类型；
-7. 写入端代际/兼容版本来源。
+3. `OfficialFilesystemFormat`：`exfat` / `ntfs` / `fat32` 文件系统配置轴；
+4. 旧版/当前 LBA4 表示配置类型；
+5. LBA6 Dept 续段/快照配置类型；
+6. LBA8 身份/保留底层字节配置类型；
+7. GPT/MBR 配置类型；
+8. 写入端代际/兼容版本来源。
 
 软件版本只作为来源信息，不直接代替盘面配置类型。
 
@@ -160,7 +168,7 @@ edpcli provision write
 2. 为四种 `OfficialPartitionMode` 实现纯内存构造器；
 3. 用一方写入端/物理测试夹具做逐字节差异测试；
 4. 完整实现封装密钥/配置类型矩阵；
-5. 实现新盘制盘文件系统阶段；
+5. 实现新盘制盘默认 `exfat` 文件系统阶段，并保留 `ntfs` / `fat32` 类型化配置；
 6. 实现 `ConversionPlan` 的只读分析；
 7. 实现前部区域重建 + 最小元数据变换；
 8. 增加回滚/读回/虚拟磁盘硬件在环；

@@ -8,7 +8,7 @@ use crate::protocol::{
     edpf::EdpPartitionType, lba7::Lba7PartitionMode, lba7_compat::Lba7CompatibilityExtentLayout,
 };
 
-use super::{LegacyLba7KeyMaterial, ProvisionKeyMaterial};
+use super::{LegacyLba7KeyMaterial, OfficialFilesystemFormat, ProvisionKeyMaterial};
 
 pub type OfficialPartitionMode = Lba7PartitionMode;
 
@@ -67,6 +67,7 @@ impl OfficialPartitionGeometry {
 pub struct OfficialProvisionPlan {
     pub mode: OfficialPartitionMode,
     pub sizes: OfficialPartitionSizes,
+    pub filesystem_format: OfficialFilesystemFormat,
     pub lba7_compatibility_extent: Lba7CompatibilityExtentLayout,
     pub lba7_key_material: LegacyLba7KeyMaterial,
     pub lba12_key_material: ProvisionKeyMaterial,
@@ -80,6 +81,24 @@ impl OfficialProvisionPlan {
         lba7_key_material: LegacyLba7KeyMaterial,
         lba12_key_material: ProvisionKeyMaterial,
     ) -> Result<Self, String> {
+        Self::new_with_filesystem(
+            mode,
+            sizes,
+            OfficialFilesystemFormat::ExFat,
+            lba7_compatibility_extent,
+            lba7_key_material,
+            lba12_key_material,
+        )
+    }
+
+    pub fn new_with_filesystem(
+        mode: OfficialPartitionMode,
+        sizes: OfficialPartitionSizes,
+        filesystem_format: OfficialFilesystemFormat,
+        lba7_compatibility_extent: Lba7CompatibilityExtentLayout,
+        lba7_key_material: LegacyLba7KeyMaterial,
+        lba12_key_material: ProvisionKeyMaterial,
+    ) -> Result<Self, String> {
         if lba7_compatibility_extent.size_bytes == 0 || lba7_compatibility_extent.size_sectors == 0
         {
             return Err("LBA7 compatibility extent must be non-empty".into());
@@ -87,6 +106,7 @@ impl OfficialProvisionPlan {
         Ok(Self {
             mode,
             sizes,
+            filesystem_format,
             lba7_compatibility_extent,
             lba7_key_material,
             lba12_key_material,

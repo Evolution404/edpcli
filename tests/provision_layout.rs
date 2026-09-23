@@ -3,10 +3,11 @@ use edpcli::protocol::{
 };
 use edpcli::provision::{
     build_official_partition_layout, generate_official_image, official_mbr_partition_type,
-    wrap_file_key, wrap_legacy_lba7_file_key, FileKeyWrapMode, OfficialPartitionMode,
-    OfficialPartitionSizes, OfficialProvisionPlan, OfficialProvisionValidator, OnlyId,
-    ProvisionEntropy, ProvisionImage, ProvisionMetadata, ProvisionProfile, ProvisionSpec,
-    TargetIdentity, OFFICIAL_PARTITION_START_SECTOR, WHOLE_DISK_ENCRYPTED_COMPAT_BOOT_BYTES,
+    wrap_file_key, wrap_legacy_lba7_file_key, FileKeyWrapMode, OfficialFilesystemFormat,
+    OfficialPartitionMode, OfficialPartitionSizes, OfficialProvisionPlan,
+    OfficialProvisionValidator, OnlyId, ProvisionEntropy, ProvisionImage, ProvisionMetadata,
+    ProvisionProfile, ProvisionSpec, TargetIdentity, OFFICIAL_PARTITION_START_SECTOR,
+    WHOLE_DISK_ENCRYPTED_COMPAT_BOOT_BYTES,
 };
 use edpcli::{
     crypto::{a6b0_full, crc32_bare, xor_rolling},
@@ -53,6 +54,37 @@ fn official_mbr_selector_matches_the_first_party_writer_branches() {
         official_mbr_partition_type(OfficialPartitionMode::IntranetExtranetDualPartition),
         0x0e
     );
+}
+
+#[test]
+fn official_plan_defaults_to_current_writer_exfat_but_accepts_other_configured_formats() {
+    let default = official_plan(OfficialPartitionMode::BootShareCombined);
+    assert_eq!(default.filesystem_format, OfficialFilesystemFormat::ExFat);
+
+    let compat = locate_lba7_compatibility_extent_from_geometry(1024, 255, 63, 512).unwrap();
+    let current = wrap_file_key(
+        b"ProofPass1!",
+        [
+            0x14, 0x71, 0x96, 0xf5, 0xa2, 0xec, 0x79, 0x12, 0xed, 0xf1, 0x3f, 0x75, 0xd7, 0x66,
+            0xcb, 0x42,
+        ],
+        FileKeyWrapMode::Sm4,
+    );
+    for format in [
+        OfficialFilesystemFormat::Ntfs,
+        OfficialFilesystemFormat::Fat32,
+    ] {
+        let plan = OfficialProvisionPlan::new_with_filesystem(
+            OfficialPartitionMode::BootShareCombined,
+            OfficialPartitionSizes::new(32, 64, 128),
+            format,
+            compat,
+            legacy_key_material(),
+            current,
+        )
+        .unwrap();
+        assert_eq!(plan.filesystem_format, format);
+    }
 }
 
 #[test]
