@@ -374,6 +374,113 @@ pub fn atomic_write_sectors(
     }
 }
 
+/// Existing-media passwordless conversion writer.
+///
+/// This is intentionally separate from `atomic_write_sectors`: the legacy
+/// metadata writer remains hard-limited to LBA0-12, while this function accepts
+/// only the strict conversion surface: LBA0/LBA7/LBA12 plus sparse front-region
+/// sectors in `[63, encrypt_start_lba)`. The preserved type4 partition starts at
+/// `encrypt_start_lba` and can therefore never be touched by this transaction.
+pub fn atomic_write_passwordless_conversion_sectors(
+    dev: &mut dyn SectorDev,
+    patch: &BTreeMap<u32, Vec<u8>>,
+    encrypt_start_lba: u64,
+) -> EdpCliResult<()> {
+    const FRONT_START: u64 = 63;
+    if encrypt_start_lba <= FRONT_START || encrypt_start_lba > u32::MAX as u64 {
+        return Err(EdpCliError::new(
+            EXIT_IO,
+            format!("错误: 严格转换 type4 起点无效: LBA{encrypt_start_lba}"),
+        ));
+    }
+    for required in [0u32, 7, 12] {
+        if !patch.contains_key(&required) {
+            return Err(EdpCliError::new(
+                EXIT_IO,
+                format!("错误: 严格转换缺少必需元数据 LBA{required}"),
+            ));
+        }
+    }
+    let mut has_front = false;
+    for (&lba, data) in patch {
+        let metadata = matches!(lba, 0 | 7 | 12);
+        let front = (lba as u64) >= FRONT_START && (lba as u64) < encrypt_start_lba;
+        if !metadata && !front {
+            return Err(EdpCliError::new(
+                EXIT_IO,
+                format!(
+                    "错误: 严格转换拒绝越界 LBA{lba}; 只允许 LBA0/7/12 与 LBA{FRONT_START}-{}",
+                    encrypt_start_lba - 1
+                ),
+            ));
+        }
+        has_front |= front;
+        if data.len() != SECTOR {
+            return Err(EdpCliError::new(
+                EXIT_IO,
+                format!(
+                    "错误: LBA{lba} 写入数据长度 {}B，必须为 {SECTOR}B",
+                    data.len()
+                ),
+            ));
+        }
+    }
+    if !has_front {
+        return Err(EdpCliError::new(
+            EXIT_IO,
+            "错误: 严格转换缺少前部文件系统扇区",
+        ));
+    }
+
+    dev.sync().map_err(|e| {
+        EdpCliError::new(
+            EXIT_IO,
+            format!("错误: 严格转换写前介质缓存同步预检失败: {e}"),
+        )
+    })?;
+
+    let mut mirror = BTreeMap::new();
+    for &lba in patch.keys() {
+        mirror.insert(lba, dev.read_sector(lba).map_err(io_err)?);
+    }
+
+    // Rebuild the front filesystem first. Only after it is durable do we make
+    // the new EDP tables visible, and the MBR switch remains the final write.
+    let mut order: Vec<u32> = patch
+        .keys()
+        .copied()
+        .filter(|&lba| (lba as u64) >= FRONT_START)
+        .collect();
+    order.sort_unstable();
+    order.extend([7, 12, 0]);
+
+    match write_and_verify(dev, patch, &order) {
+        Ok(()) => Ok(()),
+        Err(_write_error) => {
+            for attempt in 0..3 {
+                match write_and_verify(dev, &mirror, &order) {
+                    Ok(()) => {
+                        return Err(EdpCliError::new(
+                            EXIT_ROLLED_BACK,
+                            "错误: 严格转换写入失败，已完整回滚前部文件系统与 LBA0/7/12；盘仍为写前状态。",
+                        ));
+                    }
+                    Err(error) if attempt == 2 => {
+                        return Err(EdpCliError::new(
+                            EXIT_INTERMEDIATE,
+                            format!(
+                                "错误: 严格转换回滚失败({error})，盘处于中间状态；请立即从写前备份恢复。"
+                            ),
+                        ));
+                    }
+                    Err(_) => thread::sleep(Duration::from_millis(500)),
+                }
+            }
+            unreachable!()
+        }
+    }
+}
+
 // ══════════════════════════════════════════════════════════════════
 // 2. 时钟(本地时间; 进程内换算, 测试注入 FixedClock)
 // ══════════════════════════════════════════════════════════════════

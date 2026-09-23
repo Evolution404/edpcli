@@ -147,7 +147,9 @@ new type2 SectorCount = old type4 StartSector - 63
 
 若实际差异出现未授权字段变化，必须无法确认即拒绝继续。
 
-当前 `build_passwordless_conversion()` 已实现上述严格纯内存变换：从源 LBA12/LBA7 解析 type4，保持 type4 的起点、大小、`UserKeyCRC`、`FileKeyCRC`、封装文件密钥和 `EncryptMode` 不变；新的 type2 从 LBA63 延伸到原 type4 起点，并复用同一组密钥材料；LBA0 改为 `0x07` 单可见分区；前部区域重建为空的明文 exFAT。转换产物只包含 LBA0、LBA7、LBA12 和前部稀疏文件系统，不生成 LBA6/LBA9 补丁，因此旧 `apply` 中历史兼容改写不属于这条正式转换路径。错误 `device_id`、缺少 type4、已经是 type2+type4 的盘均直接拒绝。该能力仍是纯内存阶段，尚未接入真实设备写入。
+当前 `build_passwordless_conversion()` 已实现上述严格纯内存变换：从源 LBA12/LBA7 解析 type4，保持 type4 的起点、大小、`UserKeyCRC`、`FileKeyCRC`、封装文件密钥和 `EncryptMode` 不变；新的 type2 从 LBA63 延伸到原 type4 起点，并复用同一组密钥材料；LBA0 改为 `0x07` 单可见分区；前部区域重建为空的明文 exFAT。转换产物只包含 LBA0、LBA7、LBA12 和前部稀疏文件系统，不生成 LBA6/LBA9 补丁，因此旧 `apply` 中历史兼容改写不属于这条正式转换路径。错误 `device_id`、缺少 type4、已经是 type2+type4 的盘均直接拒绝。
+
+`atomic_write_passwordless_conversion_sectors()` 已提供独立事务写入原语，但尚未接到用户命令：它只允许 LBA0/LBA7/LBA12 和 `[63, old_type4_start)` 的前部稀疏扇区，任何触碰 type4 或夹带其他元数据都会在第一笔写入前拒绝。正写顺序固定为“前部文件系统 -> LBA7 -> LBA12 -> LBA0”，失败时以前部和元数据共同的写前镜像回滚并再次读回校验。旧 `atomic_write_sectors()` 的 LBA0-12 边界保持不变。
 
 ## 5. 路线图 C：产品入口
 
@@ -175,7 +177,7 @@ edpcli provision write
 5. 实现新盘制盘默认 `exfat` 文件系统阶段，并保留 `ntfs` / `fat32` 类型化配置；
 6. 实现已有盘严格转换的只读分析；
 7. 实现前部区域重建 + 最小元数据变换；
-8. 将严格转换产物接入回滚/读回/虚拟磁盘硬件在环；
+8. 将严格转换事务写入原语接入应用层并完成虚拟磁盘硬件在环；
 9. 最后才接 CLI/TUI 和显式真实设备写入。
 
 ## 7. 完成门禁
