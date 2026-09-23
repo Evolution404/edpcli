@@ -113,6 +113,26 @@ enum WorkerResult {
         operation_id: OperationId,
         result: Result<(), String>,
     },
+    BackupPrunePlan {
+        generation: u64,
+        result: Result<crate::tui::state::BackupPrunePrepared, String>,
+    },
+    BackupPruneExecute {
+        operation_id: OperationId,
+        result: Result<usize, String>,
+    },
+    ProvisionPlan {
+        generation: u64,
+        result: Result<crate::tui::state::ProvisionPrepared, String>,
+    },
+    ProvisionProgress {
+        operation_id: OperationId,
+        message: String,
+    },
+    ProvisionWrite {
+        operation_id: OperationId,
+        result: Result<(), String>,
+    },
 }
 
 enum InspectRequest {
@@ -131,6 +151,11 @@ pub struct TaskUpdates {
     pub backup_error: Option<String>,
     pub backup_verify: Option<(PathBuf, Result<(), String>)>,
     pub backup_delete: Option<(OperationId, Result<(), String>)>,
+    pub backup_prune_plan: Option<Result<crate::tui::state::BackupPrunePrepared, String>>,
+    pub backup_prune_execute: Option<(OperationId, Result<usize, String>)>,
+    pub provision_plan: Option<Result<crate::tui::state::ProvisionPrepared, String>>,
+    pub provision_progress: Option<(OperationId, String)>,
+    pub provision_write: Option<(OperationId, Result<(), String>)>,
 }
 
 impl TaskUpdates {
@@ -144,6 +169,11 @@ impl TaskUpdates {
             || self.backup_error.is_some()
             || self.backup_verify.is_some()
             || self.backup_delete.is_some()
+            || self.backup_prune_plan.is_some()
+            || self.backup_prune_execute.is_some()
+            || self.provision_plan.is_some()
+            || self.provision_progress.is_some()
+            || self.provision_write.is_some()
     }
 }
 
@@ -164,10 +194,14 @@ pub struct TaskHub {
     backup_generation: GenerationGate,
     inspect_generation: GenerationGate,
     verify_generation: GenerationGate,
+    provision_generation: GenerationGate,
+    prune_generation: GenerationGate,
     device_single_flight: SingleFlightGate,
     backup_single_flight: SingleFlightGate,
     inspect_single_flight: SingleFlightGate,
     verify_single_flight: SingleFlightGate,
+    provision_single_flight: SingleFlightGate,
+    prune_single_flight: SingleFlightGate,
     pending_device_scan: Option<PathBuf>,
     pending_backup_scan: Option<PathBuf>,
     pending_inspect: Option<(u64, InspectRequest)>,
@@ -193,10 +227,14 @@ impl TaskHub {
             backup_generation: GenerationGate::new(),
             inspect_generation: GenerationGate::new(),
             verify_generation: GenerationGate::new(),
+            provision_generation: GenerationGate::new(),
+            prune_generation: GenerationGate::new(),
             device_single_flight: SingleFlightGate::new(),
             backup_single_flight: SingleFlightGate::new(),
             inspect_single_flight: SingleFlightGate::new(),
             verify_single_flight: SingleFlightGate::new(),
+            provision_single_flight: SingleFlightGate::new(),
+            prune_single_flight: SingleFlightGate::new(),
             pending_device_scan: None,
             pending_backup_scan: None,
             pending_inspect: None,
@@ -396,6 +434,89 @@ impl TaskHub {
         Ok(operation_id)
     }
 
+    pub fn request_backup_prune_plan(
+        &mut self,
+        backup_dir: PathBuf,
+        keep: usize,
+    ) -> Result<u64, &'static str> {
+        if !self.prune_single_flight.try_start() {
+            return Err("已有备份清理计划正在生成");
+        }
+        let generation = self.prune_generation.begin();
+        let tx = self.tx.clone();
+        std::thread::spawn(move || {
+            let result = catch_unwind(AssertUnwindSafe(|| {
+                let session = crate::application::backup::DeleteSession::open(&backup_dir);
+                let plan = session.plan_prune(keep).map_err(|error| error.message())?;
+                let (originals, retained_snapshots) = plan
+                    .prune_stats
+                    .as_ref()
+                    .map(|stats| (stats.originals, stats.retained_snapshots))
+                    .unwrap_or((0, 0));
+                Ok(crate::tui::state::BackupPrunePrepared {
+                    plan,
+                    keep,
+                    originals,
+                    retained_snapshots,
+                })
+            }))
+            .unwrap_or_else(|payload| {
+                Err(format!(
+                    "备份清理计划 worker 异常终止: {}",
+                    panic_message(payload)
+                ))
+            });
+            let _ = tx.send(WorkerResult::BackupPrunePlan { generation, result });
+        });
+        Ok(generation)
+    }
+
+    pub fn request_backup_prune_execute(
+        &mut self,
+        prepared: crate::tui::state::BackupPrunePrepared,
+        backup_dir: PathBuf,
+    ) -> Result<OperationId, &'static str> {
+        let operation_id = self.begin_operation()?;
+        let tx = self.tx.clone();
+        self.critical_worker = Some(std::thread::spawn(move || {
+            let result = catch_unwind(AssertUnwindSafe(|| {
+                let session = crate::application::backup::DeleteSession::open(&backup_dir);
+                let expected = prepared.plan.targets.len();
+                let results = session.execute(&prepared.plan);
+                let failures = results
+                    .iter()
+                    .filter_map(|(path, result)| {
+                        result
+                            .as_ref()
+                            .err()
+                            .map(|message| format!("{}: {message}", path.display()))
+                    })
+                    .collect::<Vec<_>>();
+                if failures.is_empty() {
+                    Ok(expected)
+                } else {
+                    Err(format!(
+                        "清理未完全成功：{} / {} 项失败；未通过摘要复核的文件未删除。{}",
+                        failures.len(),
+                        expected,
+                        failures.join("；")
+                    ))
+                }
+            }))
+            .unwrap_or_else(|payload| {
+                Err(format!(
+                    "备份清理 worker 异常终止: {}",
+                    panic_message(payload)
+                ))
+            });
+            let _ = tx.send(WorkerResult::BackupPruneExecute {
+                operation_id,
+                result,
+            });
+        }));
+        Ok(operation_id)
+    }
+
     pub fn request_backup_create(
         &mut self,
         intent: crate::tui::state::WriteIntent,
@@ -456,7 +577,8 @@ impl TaskHub {
                     prompt: &mut prompt,
                     backup_dir,
                 };
-                crate::application::write::backup_create_flow(disk, &mut ctx, &mut dev)
+                let deep = intent.kind == crate::tui::state::WriteKind::BackupCreateDeep;
+                crate::application::write::backup_create_level_flow(disk, &mut ctx, &mut dev, deep)
                     .map(|_| ())
                     .map_err(|error| error.msg)
             }))
@@ -559,6 +681,9 @@ impl TaskHub {
                         crate::tui::state::WriteKind::BackupCreate => {
                             Err("错误: backup create 必须走只读备份 worker".to_string())
                         }
+                        crate::tui::state::WriteKind::BackupCreateDeep => {
+                            Err("错误: deep backup 必须走只读备份 worker".to_string())
+                        }
                     }
                 })();
                 result
@@ -567,6 +692,143 @@ impl TaskHub {
                 Err(format!("写盘 worker 异常终止: {}", panic_message(payload)))
             });
             let _ = tx.send(WorkerResult::Write {
+                operation_id,
+                result,
+            });
+        }));
+        Ok(operation_id)
+    }
+
+    pub fn request_provision_plan(
+        &mut self,
+        disk: u32,
+        kind: crate::tui::state::ProvisionKind,
+        request: Option<crate::application::provision::NewProvisionRequest>,
+    ) -> Result<u64, &'static str> {
+        if !self.provision_single_flight.try_start() {
+            return Err("已有制盘计划正在生成");
+        }
+        let generation = self.provision_generation.begin();
+        let tx = self.tx.clone();
+        std::thread::spawn(move || {
+            let result = catch_unwind(AssertUnwindSafe(|| {
+                let runner = SysRunner;
+                if kind == crate::tui::state::ProvisionKind::Convert {
+                    let path = crate::diskio::raw_path(disk);
+                    let mut dev = crate::diskio::FileDev::open_rdonly(&path)
+                        .map_err(|error| format!("错误: 无法只读打开 {path}: {error}"))?;
+                    crate::application::provision::prepare_passwordless_conversion(
+                        &runner, disk, &mut dev,
+                    )
+                    .map(|prepared| {
+                        crate::tui::state::ProvisionPrepared::Convert(Box::new(prepared))
+                    })
+                    .map_err(|error| error.msg)
+                } else {
+                    let request =
+                        request.ok_or_else(|| "错误: 新盘制盘缺少表单参数".to_string())?;
+                    let mut prepared = crate::application::provision::prepare_new_provision(
+                        &runner, disk, &request,
+                    )
+                    .map_err(|error| error.msg)?;
+                    let path = crate::diskio::raw_path(disk);
+                    let mut dev = crate::diskio::FileDev::open_rdonly(&path)
+                        .map_err(|error| format!("错误: 无法只读打开 {path}: {error}"))?;
+                    crate::application::provision::capture_manufacturer_lba3(
+                        &mut dev,
+                        &mut prepared,
+                    )
+                    .map_err(|error| error.msg)?;
+                    Ok(crate::tui::state::ProvisionPrepared::New(Box::new(
+                        prepared,
+                    )))
+                }
+            }))
+            .unwrap_or_else(|payload| {
+                Err(format!(
+                    "制盘计划 worker 异常终止: {}",
+                    panic_message(payload)
+                ))
+            });
+            let _ = tx.send(WorkerResult::ProvisionPlan { generation, result });
+        });
+        Ok(generation)
+    }
+
+    pub fn request_provision_write(
+        &mut self,
+        prepared: crate::tui::state::ProvisionPrepared,
+        backup_dir: PathBuf,
+    ) -> Result<OperationId, &'static str> {
+        let operation_id = self.begin_operation()?;
+        let tx = self.tx.clone();
+        self.critical_worker = Some(std::thread::spawn(move || {
+            let result = catch_unwind(AssertUnwindSafe(|| {
+                let runner = SysRunner;
+                match prepared {
+                    crate::tui::state::ProvisionPrepared::New(prepared) => {
+                        let _ = tx.send(WorkerResult::ProvisionProgress {
+                            operation_id,
+                            message: "正在写入文件系统/LCE/协议元数据，并逐扇区读回校验…".into(),
+                        });
+                        let path = crate::diskio::raw_path(prepared.disk);
+                        let mut dev = crate::diskio::FileDev::open_rdonly(&path)
+                            .map_err(|error| format!("错误: 无法只读打开 {path}: {error}"))?;
+                        crate::application::provision::commit_new_provision(
+                            &runner, &mut dev, &prepared,
+                        )
+                        .map_err(|error| error.msg)
+                    }
+                    crate::tui::state::ProvisionPrepared::Convert(prepared) => {
+                        let path = crate::diskio::raw_path(prepared.disk);
+                        let mut dev = crate::diskio::FileDev::open_rdonly(&path)
+                            .map_err(|error| format!("错误: 无法只读打开 {path}: {error}"))?;
+
+                        struct ConfirmedPrompter;
+                        impl crate::application::write::Prompter for ConfirmedPrompter {
+                            fn prompt_line(&mut self, _msg: &str) -> String {
+                                String::new()
+                            }
+                            fn confirm_yes(&mut self, _msg: &str) -> bool {
+                                true
+                            }
+                            fn output(&mut self, _msg: &str) {}
+                        }
+
+                        let _ = tx.send(WorkerResult::ProvisionProgress {
+                            operation_id,
+                            message: "正在创建写前元数据备份…".into(),
+                        });
+                        let mut prompt = ConfirmedPrompter;
+                        let mut ctx = crate::application::write::Ctx {
+                            runner: &runner,
+                            clock: &crate::diskio::SystemClock,
+                            prompt: &mut prompt,
+                            backup_dir,
+                        };
+                        crate::application::write::backup_create_flow(
+                            prepared.disk,
+                            &mut ctx,
+                            &mut dev,
+                        )
+                        .map_err(|error| error.msg)?;
+
+                        let _ = tx.send(WorkerResult::ProvisionProgress {
+                            operation_id,
+                            message: "写前备份完成；正在重建前部 exFAT 并提交 LBA7/LBA12/LBA0…"
+                                .into(),
+                        });
+                        crate::application::provision::commit_passwordless_conversion(
+                            &runner, &mut dev, &prepared,
+                        )
+                        .map_err(|error| error.msg)
+                    }
+                }
+            }))
+            .unwrap_or_else(|payload| {
+                Err(format!("制盘 worker 异常终止: {}", panic_message(payload)))
+            });
+            let _ = tx.send(WorkerResult::ProvisionWrite {
                 operation_id,
                 result,
             });
@@ -673,6 +935,42 @@ impl TaskHub {
                 } => {
                     if self.finish_operation(operation_id) {
                         updates.backup_delete = Some((operation_id, result));
+                    }
+                }
+                WorkerResult::BackupPrunePlan { generation, result } => {
+                    self.prune_single_flight.finish();
+                    if self.prune_generation.is_current(generation) {
+                        updates.backup_prune_plan = Some(result);
+                    }
+                }
+                WorkerResult::BackupPruneExecute {
+                    operation_id,
+                    result,
+                } => {
+                    if self.finish_operation(operation_id) {
+                        updates.backup_prune_execute = Some((operation_id, result));
+                    }
+                }
+                WorkerResult::ProvisionPlan { generation, result } => {
+                    self.provision_single_flight.finish();
+                    if self.provision_generation.is_current(generation) {
+                        updates.provision_plan = Some(result);
+                    }
+                }
+                WorkerResult::ProvisionProgress {
+                    operation_id,
+                    message,
+                } => {
+                    if self.active_operation == Some(operation_id) {
+                        updates.provision_progress = Some((operation_id, message));
+                    }
+                }
+                WorkerResult::ProvisionWrite {
+                    operation_id,
+                    result,
+                } => {
+                    if self.finish_operation(operation_id) {
+                        updates.provision_write = Some((operation_id, result));
                     }
                 }
             }

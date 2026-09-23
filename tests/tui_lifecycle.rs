@@ -1,7 +1,10 @@
 use std::process::{Command, Stdio};
 
 use edpcli::common::EXIT_USAGE;
-use edpcli::tui::{render, state::AppState};
+use edpcli::tui::{
+    render,
+    state::{AppState, NavCommand, ProvisionStage, Workspace},
+};
 use ratatui::{backend::TestBackend, Terminal};
 
 #[test]
@@ -30,6 +33,37 @@ fn redraw_handles_small_and_large_terminal_sizes_without_panicking() {
         terminal
             .draw(|frame| render::draw(frame, &state))
             .unwrap_or_else(|error| panic!("{width}x{height}: {error}"));
+    }
+}
+
+#[test]
+fn three_workspaces_cycle_and_new_overlays_render_at_all_terminal_sizes() {
+    let mut state = AppState::new();
+    assert_eq!(state.workspace(), Workspace::Devices);
+    state.navigate(NavCommand::NextWorkspace, 20);
+    assert_eq!(state.workspace(), Workspace::Backups);
+    state.navigate(NavCommand::NextWorkspace, 20);
+    assert_eq!(state.workspace(), Workspace::Provision);
+    state.navigate(NavCommand::NextWorkspace, 20);
+    assert_eq!(state.workspace(), Workspace::Devices);
+    state.navigate(NavCommand::PreviousWorkspace, 20);
+    assert_eq!(state.workspace(), Workspace::Provision);
+
+    state.provision_begin_selected();
+    assert_eq!(state.provision().stage, ProvisionStage::Form);
+    for (width, height) in [(40, 10), (80, 24), (160, 60)] {
+        let backend = TestBackend::new(width, height);
+        let mut terminal = Terminal::new(backend).expect("test terminal");
+        terminal.draw(|frame| render::draw(frame, &state)).unwrap();
+    }
+
+    state.provision_reset();
+    state.navigate(NavCommand::WorkspaceBackups, 20);
+    assert!(state.begin_backup_prune());
+    for (width, height) in [(40, 10), (80, 24), (160, 60)] {
+        let backend = TestBackend::new(width, height);
+        let mut terminal = Terminal::new(backend).expect("test terminal");
+        terminal.draw(|frame| render::draw(frame, &state)).unwrap();
     }
 }
 

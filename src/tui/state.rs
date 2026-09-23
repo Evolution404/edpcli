@@ -23,6 +23,7 @@ pub enum WriteKind {
     Apply,
     Restore,
     BackupCreate,
+    BackupCreateDeep,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -69,9 +70,157 @@ pub struct BackupDeleteState {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BackupPruneStage {
+    Input,
+    Planning,
+    Review,
+    Confirm,
+    Running,
+    Result,
+}
+
+pub struct BackupPrunePrepared {
+    pub plan: crate::application::backup::DeletePlan,
+    pub keep: usize,
+    pub originals: usize,
+    pub retained_snapshots: usize,
+}
+
+pub struct BackupPruneState {
+    pub stage: BackupPruneStage,
+    pub keep_input: String,
+    pub prepared: Option<BackupPrunePrepared>,
+    pub confirmation: String,
+    pub message: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Workspace {
     Devices,
     Backups,
+    Provision,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProvisionKind {
+    Mode0,
+    Mode1,
+    Mode2,
+    Mode3,
+    Convert,
+}
+
+impl ProvisionKind {
+    pub const ALL: [Self; 5] = [
+        Self::Mode0,
+        Self::Mode1,
+        Self::Mode2,
+        Self::Mode3,
+        Self::Convert,
+    ];
+
+    pub const fn mode(self) -> Option<u8> {
+        match self {
+            Self::Mode0 => Some(0),
+            Self::Mode1 => Some(1),
+            Self::Mode2 => Some(2),
+            Self::Mode3 => Some(3),
+            Self::Convert => None,
+        }
+    }
+
+    pub const fn title(self) -> &'static str {
+        match self {
+            Self::Mode0 => "模式 0 · 缺省三分区",
+            Self::Mode1 => "模式 1 · 启动/交换二合一",
+            Self::Mode2 => "模式 2 · 整盘加密",
+            Self::Mode3 => "模式 3 · 内外网双分区",
+            Self::Convert => "现有官方盘 · 严格免密改造",
+        }
+    }
+
+    pub const fn description(self) -> &'static str {
+        match self {
+            Self::Mode0 => "type1 启动区 + type2 交换区 + type4 保密区",
+            Self::Mode1 => "type2 二合一区 + type4 保密区",
+            Self::Mode2 => "兼容 type1 + type4 整盘加密布局",
+            Self::Mode3 => "type1 + type2 内外网双分区",
+            Self::Convert => "保留原 type4 几何/密钥，仅重建前部明文 exFAT",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProvisionStage {
+    Menu,
+    Form,
+    Planning,
+    Review,
+    Confirm,
+    Running,
+    Result,
+}
+
+#[derive(Debug, Clone)]
+pub enum ProvisionPrepared {
+    New(Box<crate::application::provision::PreparedNewProvision>),
+    Convert(Box<crate::application::provision::PreparedPasswordlessConversion>),
+}
+
+#[derive(Debug, Clone)]
+pub struct ProvisionForm {
+    pub boot_mib: String,
+    pub share_mib: String,
+    pub encrypt_mib: String,
+    pub label_id: String,
+    pub user: String,
+    pub dept: String,
+    pub label: String,
+    pub password: String,
+    pub volume_label: String,
+}
+
+impl Default for ProvisionForm {
+    fn default() -> Self {
+        Self {
+            boot_mib: "512".into(),
+            share_mib: "1024".into(),
+            encrypt_mib: "2048".into(),
+            label_id: String::new(),
+            user: String::new(),
+            dept: String::new(),
+            label: "SAFE6".into(),
+            password: String::new(),
+            volume_label: "SAFE6".into(),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct ProvisionState {
+    pub stage: ProvisionStage,
+    pub kind: ProvisionKind,
+    pub menu_selected: usize,
+    pub field_selected: usize,
+    pub form: ProvisionForm,
+    pub prepared: Option<ProvisionPrepared>,
+    pub confirmation: String,
+    pub message: Option<String>,
+}
+
+impl Default for ProvisionState {
+    fn default() -> Self {
+        Self {
+            stage: ProvisionStage::Menu,
+            kind: ProvisionKind::Mode0,
+            menu_selected: 0,
+            field_selected: 0,
+            form: ProvisionForm::default(),
+            prepared: None,
+            confirmation: String::new(),
+            message: None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -103,11 +252,16 @@ pub enum NavCommand {
     BeginApply,
     BeginRestore,
     BeginBackupCreate,
+    BeginBackupCreateDeep,
     BeginBackupDelete,
+    BeginBackupPrune,
     VerifyBackup,
     OpenInspect,
     NextWorkspace,
     PreviousWorkspace,
+    WorkspaceDevices,
+    WorkspaceBackups,
+    WorkspaceProvision,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -130,6 +284,8 @@ pub struct AppState {
     exit_pending: bool,
     wizard: Option<WizardState>,
     backup_delete: Option<BackupDeleteState>,
+    backup_prune: Option<BackupPruneState>,
+    provision: ProvisionState,
     pinned_disk: Option<u32>,
     inspect: Option<InspectState>,
     inspect_data: Option<crate::application::inspect::InspectWorkspace>,
@@ -149,7 +305,7 @@ impl Default for AppState {
 }
 
 impl AppState {
-    pub const fn new() -> Self {
+    pub fn new() -> Self {
         Self {
             workspace: Workspace::Devices,
             devices: Vec::new(),
@@ -163,6 +319,8 @@ impl AppState {
             exit_pending: false,
             wizard: None,
             backup_delete: None,
+            backup_prune: None,
+            provision: ProvisionState::default(),
             pinned_disk: None,
             inspect: None,
             inspect_data: None,
@@ -275,6 +433,7 @@ impl AppState {
             let count = match self.workspace {
                 Workspace::Devices => self.devices.len(),
                 Workspace::Backups => self.backups.len(),
+                Workspace::Provision => ProvisionKind::ALL.len(),
             };
             self.selected = 0;
             self.set_item_count(count);
@@ -296,6 +455,7 @@ impl AppState {
                     }
                 }
             }
+            Workspace::Provision => {}
         }
         self.selected = 0;
         self.set_item_count(self.search_matches.len());
@@ -503,6 +663,7 @@ impl AppState {
         let count = match self.workspace {
             Workspace::Devices => self.devices.len(),
             Workspace::Backups => self.backups.len(),
+            Workspace::Provision => ProvisionKind::ALL.len(),
         };
         self.set_item_count(count);
     }
@@ -605,7 +766,12 @@ impl AppState {
             wizard.stage = WizardStage::Result;
             wizard.progress = None;
             wizard.message = Some(match result {
-                Ok(()) if wizard.kind == WriteKind::BackupCreate => {
+                Ok(())
+                    if matches!(
+                        wizard.kind,
+                        WriteKind::BackupCreate | WriteKind::BackupCreateDeep
+                    ) =>
+                {
                     "备份创建完成；备份列表已刷新".to_string()
                 }
                 Ok(()) => "操作完成，安全链全部通过".to_string(),
@@ -616,6 +782,146 @@ impl AppState {
 
     pub fn backup_delete(&self) -> Option<&BackupDeleteState> {
         self.backup_delete.as_ref()
+    }
+
+    pub fn backup_prune(&self) -> Option<&BackupPruneState> {
+        self.backup_prune.as_ref()
+    }
+
+    pub fn backup_prune_mut(&mut self) -> Option<&mut BackupPruneState> {
+        self.backup_prune.as_mut()
+    }
+
+    pub fn begin_backup_prune(&mut self) -> bool {
+        if self.critical_operation || self.backup_prune.is_some() {
+            return false;
+        }
+        self.backup_prune = Some(BackupPruneState {
+            stage: BackupPruneStage::Input,
+            keep_input: "3".into(),
+            prepared: None,
+            confirmation: String::new(),
+            message: None,
+        });
+        true
+    }
+
+    pub fn backup_prune_push_digit(&mut self, ch: char) {
+        if let Some(prune) = self.backup_prune.as_mut() {
+            if prune.stage == BackupPruneStage::Input
+                && ch.is_ascii_digit()
+                && prune.keep_input.len() < 6
+            {
+                prune.keep_input.push(ch);
+                prune.message = None;
+            }
+        }
+    }
+
+    pub fn backup_prune_backspace(&mut self) {
+        if let Some(prune) = self.backup_prune.as_mut() {
+            match prune.stage {
+                BackupPruneStage::Input => {
+                    prune.keep_input.pop();
+                    prune.message = None;
+                }
+                BackupPruneStage::Confirm => {
+                    prune.confirmation.pop();
+                    prune.message = None;
+                }
+                _ => {}
+            }
+        }
+    }
+
+    pub fn backup_prune_start_plan(&mut self) -> Result<usize, String> {
+        let prune = self
+            .backup_prune
+            .as_mut()
+            .ok_or_else(|| "清理向导未打开".to_string())?;
+        let keep = prune
+            .keep_input
+            .parse::<usize>()
+            .ok()
+            .filter(|value| *value > 0)
+            .ok_or_else(|| "保留份数必须为大于 0 的整数".to_string())?;
+        prune.stage = BackupPruneStage::Planning;
+        prune.message = Some("正在后台扫描备份并生成固定清理计划…".into());
+        Ok(keep)
+    }
+
+    pub fn backup_prune_finish_plan(&mut self, result: Result<BackupPrunePrepared, String>) {
+        let Some(prune) = self.backup_prune.as_mut() else {
+            return;
+        };
+        match result {
+            Ok(prepared) if prepared.plan.targets.is_empty() => {
+                prune.prepared = Some(prepared);
+                prune.stage = BackupPruneStage::Result;
+                prune.message = Some("无需清理：当前备份已经满足保留策略。".into());
+            }
+            Ok(prepared) => {
+                prune.prepared = Some(prepared);
+                prune.stage = BackupPruneStage::Review;
+                prune.message = None;
+            }
+            Err(message) => {
+                prune.stage = BackupPruneStage::Input;
+                prune.message = Some(message);
+            }
+        }
+    }
+
+    pub fn backup_prune_begin_confirm(&mut self) {
+        if let Some(prune) = self.backup_prune.as_mut() {
+            if prune.stage == BackupPruneStage::Review {
+                prune.stage = BackupPruneStage::Confirm;
+                prune.confirmation.clear();
+                prune.message = None;
+            }
+        }
+    }
+
+    pub fn backup_prune_push_confirmation(&mut self, ch: char) {
+        if let Some(prune) = self.backup_prune.as_mut() {
+            if prune.stage == BackupPruneStage::Confirm && prune.confirmation.len() < 16 {
+                prune.confirmation.push(ch);
+                prune.message = None;
+            }
+        }
+    }
+
+    pub fn backup_prune_take_for_execute(&mut self) -> Option<BackupPrunePrepared> {
+        let prune = self.backup_prune.as_mut()?;
+        if prune.stage != BackupPruneStage::Confirm {
+            return None;
+        }
+        if prune.confirmation != "YES" {
+            prune.message = Some("必须精确输入 YES 才会删除备份".into());
+            return None;
+        }
+        let prepared = prune.prepared.take()?;
+        prune.stage = BackupPruneStage::Running;
+        prune.message = Some("正在逐条复核摘要并清理固定候选…".into());
+        self.critical_operation = true;
+        Some(prepared)
+    }
+
+    pub fn backup_prune_finish_execute(&mut self, result: Result<usize, String>) {
+        self.critical_operation = false;
+        if let Some(prune) = self.backup_prune.as_mut() {
+            prune.stage = BackupPruneStage::Result;
+            prune.message = Some(match result {
+                Ok(count) => format!("清理完成：已安全删除 {count} 份旧备份。"),
+                Err(message) => message,
+            });
+        }
+    }
+
+    pub fn close_backup_prune(&mut self) {
+        if !self.critical_operation {
+            self.backup_prune = None;
+        }
     }
 
     pub fn begin_backup_delete(
@@ -686,6 +992,277 @@ impl AppState {
         self.workspace
     }
 
+    pub const fn provision(&self) -> &ProvisionState {
+        &self.provision
+    }
+
+    pub fn provision_mut(&mut self) -> &mut ProvisionState {
+        &mut self.provision
+    }
+
+    pub fn provision_reset(&mut self) {
+        let selected = self
+            .provision
+            .menu_selected
+            .min(ProvisionKind::ALL.len() - 1);
+        self.provision = ProvisionState::default();
+        self.provision.menu_selected = selected;
+        self.provision.kind = ProvisionKind::ALL[selected];
+        if self.workspace == Workspace::Provision {
+            self.set_item_count(ProvisionKind::ALL.len());
+            self.selected = selected;
+        }
+    }
+
+    pub fn provision_begin_selected(&mut self) -> ProvisionKind {
+        let index = self.selected.min(ProvisionKind::ALL.len() - 1);
+        let kind = ProvisionKind::ALL[index];
+        self.provision.menu_selected = index;
+        self.provision.kind = kind;
+        self.provision.field_selected = 0;
+        self.provision.confirmation.clear();
+        self.provision.message = None;
+        self.provision.prepared = None;
+        if kind == ProvisionKind::Convert {
+            self.provision.stage = ProvisionStage::Planning;
+        } else {
+            let defaults = self.selected_device().map(|row| {
+                (
+                    row.onlyid.clone().unwrap_or_default(),
+                    row.user.clone().unwrap_or_default(),
+                    row.dept.clone().unwrap_or_default(),
+                )
+            });
+            if let Some((label_id, user, dept)) = defaults {
+                self.provision.form.label_id = label_id;
+                self.provision.form.user = user;
+                self.provision.form.dept = dept;
+            }
+            self.provision.stage = ProvisionStage::Form;
+        }
+        kind
+    }
+
+    pub fn provision_field_count(&self) -> usize {
+        match self.provision.kind {
+            ProvisionKind::Mode0 => 9,
+            ProvisionKind::Mode1 => 8,
+            ProvisionKind::Mode2 => 7,
+            ProvisionKind::Mode3 => 8,
+            ProvisionKind::Convert => 0,
+        }
+    }
+
+    pub fn provision_move_field(&mut self, delta: isize) {
+        let count = self.provision_field_count();
+        if count == 0 {
+            return;
+        }
+        self.provision.field_selected = if delta < 0 {
+            self.provision
+                .field_selected
+                .saturating_sub(delta.unsigned_abs())
+        } else {
+            (self.provision.field_selected + delta as usize).min(count - 1)
+        };
+    }
+
+    fn provision_field_slot(&self, display_index: usize) -> Option<usize> {
+        let mode = self.provision.kind.mode()?;
+        let mut slots = Vec::with_capacity(9);
+        if matches!(mode, 0 | 3) {
+            slots.push(0);
+        }
+        if matches!(mode, 0 | 1 | 3) {
+            slots.push(1);
+        }
+        if matches!(mode, 0 | 1 | 2) {
+            slots.push(2);
+        }
+        slots.extend([3, 4, 5, 6, 7, 8]);
+        slots.get(display_index).copied()
+    }
+
+    pub fn provision_visible_fields(&self) -> Vec<(&'static str, &str, bool)> {
+        let mut out = Vec::new();
+        let mode = match self.provision.kind.mode() {
+            Some(value) => value,
+            None => return out,
+        };
+        if matches!(mode, 0 | 3) {
+            out.push(("启动区 MiB", self.provision.form.boot_mib.as_str(), false));
+        }
+        if matches!(mode, 0 | 1 | 3) {
+            out.push(("交换区 MiB", self.provision.form.share_mib.as_str(), false));
+        }
+        if matches!(mode, 0 | 1 | 2) {
+            out.push((
+                "保密区 MiB",
+                self.provision.form.encrypt_mib.as_str(),
+                false,
+            ));
+        }
+        out.extend([
+            ("标签标识", self.provision.form.label_id.as_str(), false),
+            ("用户", self.provision.form.user.as_str(), false),
+            ("部门", self.provision.form.dept.as_str(), false),
+            ("标签", self.provision.form.label.as_str(), false),
+            ("密码", self.provision.form.password.as_str(), true),
+            ("卷标", self.provision.form.volume_label.as_str(), false),
+        ]);
+        out
+    }
+
+    fn provision_selected_field_mut(&mut self) -> Option<&mut String> {
+        match self.provision_field_slot(self.provision.field_selected)? {
+            0 => Some(&mut self.provision.form.boot_mib),
+            1 => Some(&mut self.provision.form.share_mib),
+            2 => Some(&mut self.provision.form.encrypt_mib),
+            3 => Some(&mut self.provision.form.label_id),
+            4 => Some(&mut self.provision.form.user),
+            5 => Some(&mut self.provision.form.dept),
+            6 => Some(&mut self.provision.form.label),
+            7 => Some(&mut self.provision.form.password),
+            8 => Some(&mut self.provision.form.volume_label),
+            _ => None,
+        }
+    }
+
+    pub fn provision_push_char(&mut self, ch: char) {
+        if ch.is_control() {
+            return;
+        }
+        if let Some(field) = self.provision_selected_field_mut() {
+            if field.chars().count() < 128 {
+                field.push(ch);
+                self.provision.message = None;
+            }
+        }
+    }
+
+    pub fn provision_backspace(&mut self) {
+        if let Some(field) = self.provision_selected_field_mut() {
+            field.pop();
+            self.provision.message = None;
+        }
+    }
+
+    pub fn provision_request(
+        &mut self,
+    ) -> Result<crate::application::provision::NewProvisionRequest, String> {
+        let mode = self
+            .provision
+            .kind
+            .mode()
+            .ok_or_else(|| "免密改造不使用新盘表单".to_string())?;
+        let parse = |value: &str, label: &str| -> Result<u64, String> {
+            value
+                .parse::<u64>()
+                .ok()
+                .filter(|value| *value > 0)
+                .ok_or_else(|| format!("{label} 必须为正整数 MiB"))
+        };
+        let boot_mib = matches!(mode, 0 | 3)
+            .then(|| parse(&self.provision.form.boot_mib, "启动区"))
+            .transpose()?;
+        let share_mib = matches!(mode, 0 | 1 | 3)
+            .then(|| parse(&self.provision.form.share_mib, "交换区"))
+            .transpose()?;
+        let encrypt_mib = matches!(mode, 0 | 1 | 2)
+            .then(|| parse(&self.provision.form.encrypt_mib, "保密区"))
+            .transpose()?;
+        if self.provision.form.label_id.trim().is_empty()
+            || self.provision.form.user.trim().is_empty()
+            || self.provision.form.dept.trim().is_empty()
+            || self.provision.form.label.trim().is_empty()
+            || self.provision.form.password.is_empty()
+        {
+            return Err("标签标识、用户、部门、标签和密码均不能为空".into());
+        }
+        Ok(crate::application::provision::NewProvisionRequest {
+            mode,
+            boot_mib,
+            share_mib,
+            encrypt_mib,
+            label_id: self.provision.form.label_id.trim().to_string(),
+            user: self.provision.form.user.trim().to_string(),
+            dept: self.provision.form.dept.trim().to_string(),
+            label: self.provision.form.label.trim().to_string(),
+            password: self.provision.form.password.clone(),
+            volume_label: self.provision.form.volume_label.trim().to_string(),
+        })
+    }
+
+    pub fn provision_set_planning(&mut self) {
+        self.provision.stage = ProvisionStage::Planning;
+        self.provision.message = Some("正在只读检查目标并生成精确制盘计划…".into());
+    }
+
+    pub fn provision_finish_plan(&mut self, result: Result<ProvisionPrepared, String>) {
+        match result {
+            Ok(prepared) => {
+                self.provision.prepared = Some(prepared);
+                self.provision.stage = ProvisionStage::Review;
+                self.provision.message = None;
+            }
+            Err(message) => {
+                self.provision.stage = if self.provision.kind == ProvisionKind::Convert {
+                    ProvisionStage::Menu
+                } else {
+                    ProvisionStage::Form
+                };
+                self.provision.message = Some(message);
+            }
+        }
+    }
+
+    pub fn provision_begin_confirm(&mut self) {
+        if self.provision.prepared.is_some() {
+            self.provision.stage = ProvisionStage::Confirm;
+            self.provision.confirmation.clear();
+            self.provision.message = None;
+        }
+    }
+
+    pub fn provision_push_confirmation(&mut self, ch: char) {
+        if self.provision.stage == ProvisionStage::Confirm && self.provision.confirmation.len() < 16
+        {
+            self.provision.confirmation.push(ch);
+            self.provision.message = None;
+        }
+    }
+
+    pub fn provision_backspace_confirmation(&mut self) {
+        if self.provision.stage == ProvisionStage::Confirm {
+            self.provision.confirmation.pop();
+            self.provision.message = None;
+        }
+    }
+
+    pub fn provision_take_for_write(&mut self) -> Option<ProvisionPrepared> {
+        if self.provision.stage != ProvisionStage::Confirm {
+            return None;
+        }
+        if self.provision.confirmation != "YES" {
+            self.provision.message = Some("必须精确输入 YES 才会执行破坏性写盘".into());
+            return None;
+        }
+        let prepared = self.provision.prepared.take()?;
+        self.provision.stage = ProvisionStage::Running;
+        self.provision.message = Some("事务写盘进行中；退出请求会延迟到安全检查点".into());
+        self.critical_operation = true;
+        Some(prepared)
+    }
+
+    pub fn provision_finish_write(&mut self, result: Result<(), String>) {
+        self.critical_operation = false;
+        self.provision.stage = ProvisionStage::Result;
+        self.provision.message = Some(match result {
+            Ok(()) => "操作完成，写入/同步/读回安全链全部通过。请拔出重插后复核。".into(),
+            Err(message) => message,
+        });
+    }
+
     pub fn devices(&self) -> &[crate::disk_scan::Row] {
         &self.devices
     }
@@ -702,6 +1279,7 @@ impl AppState {
         match self.workspace {
             Workspace::Devices => self.device_scan_pending,
             Workspace::Backups => self.backup_scan_pending,
+            Workspace::Provision => false,
         }
     }
 
@@ -827,7 +1405,7 @@ impl AppState {
                 };
                 self.devices.get(index)
             }
-            Workspace::Backups => self
+            Workspace::Backups | Workspace::Provision => self
                 .pinned_disk
                 .and_then(|disk| self.devices.iter().find(|row| row.disk == disk)),
         }
@@ -889,7 +1467,7 @@ impl AppState {
         if self.workspace == workspace {
             return;
         }
-        if self.workspace == Workspace::Devices && workspace == Workspace::Backups {
+        if self.workspace == Workspace::Devices && workspace != Workspace::Devices {
             self.pinned_disk = self.selected_device().map(|row| row.disk);
         }
         self.clear_search_matches();
@@ -903,6 +1481,7 @@ impl AppState {
         let count = match workspace {
             Workspace::Devices => self.devices.len(),
             Workspace::Backups => self.backups.len(),
+            Workspace::Provision => ProvisionKind::ALL.len(),
         };
         self.set_item_count(count);
     }
@@ -971,6 +1550,31 @@ impl AppState {
         }
 
         if command == NavCommand::Escape {
+            if self.workspace == Workspace::Provision
+                && self.provision.stage != ProvisionStage::Menu
+            {
+                match self.provision.stage {
+                    ProvisionStage::Running => {
+                        self.exit_pending = true;
+                    }
+                    ProvisionStage::Confirm => {
+                        self.provision.stage = ProvisionStage::Review;
+                        self.provision.confirmation.clear();
+                    }
+                    ProvisionStage::Review => {
+                        self.provision.stage = if self.provision.kind == ProvisionKind::Convert {
+                            ProvisionStage::Menu
+                        } else {
+                            ProvisionStage::Form
+                        };
+                    }
+                    ProvisionStage::Form | ProvisionStage::Planning | ProvisionStage::Result => {
+                        self.provision_reset();
+                    }
+                    ProvisionStage::Menu => {}
+                }
+                return StateEffect::None;
+            }
             if self.inspect.is_some() {
                 self.close_inspect();
                 return StateEffect::None;
@@ -1045,7 +1649,11 @@ impl AppState {
                     };
                     inspect.scroll = 0;
                 }
-                NavCommand::NextWorkspace | NavCommand::PreviousWorkspace => {}
+                NavCommand::NextWorkspace
+                | NavCommand::PreviousWorkspace
+                | NavCommand::WorkspaceDevices
+                | NavCommand::WorkspaceBackups
+                | NavCommand::WorkspaceProvision => {}
                 NavCommand::Search => {
                     self.input_buffer = self.search_query.clone();
                     self.input_mode = InputMode::Search;
@@ -1061,7 +1669,9 @@ impl AppState {
                 | NavCommand::BeginApply
                 | NavCommand::BeginRestore
                 | NavCommand::BeginBackupCreate
+                | NavCommand::BeginBackupCreateDeep
                 | NavCommand::BeginBackupDelete
+                | NavCommand::BeginBackupPrune
                 | NavCommand::VerifyBackup
                 | NavCommand::OpenInspect
                 | NavCommand::NextMatch
@@ -1073,10 +1683,23 @@ impl AppState {
         match command {
             NavCommand::NextWorkspace | NavCommand::PreviousWorkspace => {
                 self.switch_workspace(match self.workspace {
-                    Workspace::Devices => Workspace::Backups,
+                    Workspace::Devices if command == NavCommand::NextWorkspace => {
+                        Workspace::Backups
+                    }
+                    Workspace::Backups if command == NavCommand::NextWorkspace => {
+                        Workspace::Provision
+                    }
+                    Workspace::Provision if command == NavCommand::NextWorkspace => {
+                        Workspace::Devices
+                    }
+                    Workspace::Devices => Workspace::Provision,
                     Workspace::Backups => Workspace::Devices,
+                    Workspace::Provision => Workspace::Backups,
                 });
             }
+            NavCommand::WorkspaceDevices => self.switch_workspace(Workspace::Devices),
+            NavCommand::WorkspaceBackups => self.switch_workspace(Workspace::Backups),
+            NavCommand::WorkspaceProvision => self.switch_workspace(Workspace::Provision),
             NavCommand::Up => {
                 self.selected = self.selected.saturating_sub(1);
             }
@@ -1108,13 +1731,29 @@ impl AppState {
                 self.input_mode = InputMode::Command;
             }
             NavCommand::Help => self.input_mode = InputMode::Help,
-            NavCommand::Left => self.switch_workspace(Workspace::Devices),
-            NavCommand::Right => self.switch_workspace(Workspace::Backups),
+            NavCommand::Left => {
+                let target = match self.workspace {
+                    Workspace::Devices => Workspace::Provision,
+                    Workspace::Backups => Workspace::Devices,
+                    Workspace::Provision => Workspace::Backups,
+                };
+                self.switch_workspace(target);
+            }
+            NavCommand::Right => {
+                let target = match self.workspace {
+                    Workspace::Devices => Workspace::Backups,
+                    Workspace::Backups => Workspace::Provision,
+                    Workspace::Provision => Workspace::Devices,
+                };
+                self.switch_workspace(target);
+            }
             NavCommand::Refresh
             | NavCommand::BeginApply
             | NavCommand::BeginRestore
             | NavCommand::BeginBackupCreate
+            | NavCommand::BeginBackupCreateDeep
             | NavCommand::BeginBackupDelete
+            | NavCommand::BeginBackupPrune
             | NavCommand::VerifyBackup
             | NavCommand::OpenInspect
             | NavCommand::NextMatch

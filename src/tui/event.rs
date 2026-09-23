@@ -60,8 +60,10 @@ impl KeyMapper {
             KeyCode::Char('i') => Some(NavCommand::OpenInspect),
             KeyCode::Char('a') => Some(NavCommand::BeginApply),
             KeyCode::Char('b') => Some(NavCommand::BeginBackupCreate),
+            KeyCode::Char('B') => Some(NavCommand::BeginBackupCreateDeep),
             KeyCode::Char('v') => Some(NavCommand::VerifyBackup),
             KeyCode::Char('D') => Some(NavCommand::BeginBackupDelete),
+            KeyCode::Char('P') => Some(NavCommand::BeginBackupPrune),
             KeyCode::Char('R') => Some(NavCommand::BeginRestore),
             KeyCode::Char('r') => Some(NavCommand::Refresh),
             KeyCode::Char('q') => Some(NavCommand::Quit),
@@ -93,6 +95,14 @@ mod tests {
         assert_eq!(
             mapper.map(key(KeyCode::Char('G'), KeyModifiers::SHIFT)),
             Some(NavCommand::Bottom)
+        );
+        assert_eq!(
+            mapper.map(key(KeyCode::Char('B'), KeyModifiers::SHIFT)),
+            Some(NavCommand::BeginBackupCreateDeep)
+        );
+        assert_eq!(
+            mapper.map(key(KeyCode::Char('P'), KeyModifiers::SHIFT)),
+            Some(NavCommand::BeginBackupPrune)
         );
         assert_eq!(
             mapper.map(key(KeyCode::Char('d'), KeyModifiers::CONTROL)),

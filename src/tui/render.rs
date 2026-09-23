@@ -8,7 +8,10 @@ use ratatui::{
     Frame,
 };
 
-use super::state::{AppState, InputMode, InspectMode, WizardStage, Workspace, WriteKind};
+use super::state::{
+    AppState, InputMode, InspectMode, ProvisionKind, ProvisionPrepared, ProvisionStage,
+    WizardStage, Workspace, WriteKind,
+};
 use super::{animation, animation::CoreMode};
 
 fn safe(value: &str) -> String {
@@ -89,6 +92,17 @@ fn selected() -> Style {
         .fg(Color::Black)
         .bg(Color::Cyan)
         .add_modifier(Modifier::BOLD)
+}
+
+fn provision_kind_style(kind: ProvisionKind) -> Style {
+    let color = match kind {
+        ProvisionKind::Mode0 => Color::LightCyan,
+        ProvisionKind::Mode1 => Color::LightMagenta,
+        ProvisionKind::Mode2 => Color::LightYellow,
+        ProvisionKind::Mode3 => Color::LightGreen,
+        ProvisionKind::Convert => Color::LightBlue,
+    };
+    Style::default().fg(color).add_modifier(Modifier::BOLD)
 }
 
 fn device_status_style(row: &crate::disk_scan::Row) -> Style {
@@ -628,16 +642,358 @@ fn draw_backups(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState
     }
 }
 
+fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState) {
+    let provision = state.provision();
+    let (main_area, sidebar) = workspace_sidebar_layout(area);
+
+    let target_lines = if let Some(row) = state.selected_device() {
+        vec![
+            Line::from(vec![
+                Span::styled(format!("disk{}", row.disk), accent()),
+                Span::raw(format!(
+                    "  {:.2} GiB",
+                    row.size as f64 / 1024.0 / 1024.0 / 1024.0
+                )),
+            ]),
+            Line::from(vec![
+                Span::styled("接口  ", muted()),
+                Span::styled(safe(&row.proto), secondary()),
+                Span::raw("   "),
+                Span::styled(format!("{}:{}", safe(&row.vid), safe(&row.pid)), muted()),
+            ]),
+            Line::from(vec![
+                Span::styled("状态  ", muted()),
+                Span::styled(device_status(row), device_status_style(row)),
+            ]),
+            Line::from(vec![
+                Span::styled("标签  ", muted()),
+                Span::raw(safe(row.onlyid.as_deref().unwrap_or("未读取"))),
+            ]),
+            Line::from(vec![
+                Span::styled("用户  ", muted()),
+                Span::raw(safe(row.user.as_deref().unwrap_or("未读取"))),
+            ]),
+        ]
+    } else {
+        vec![
+            Line::from(Span::styled("未固定目标 USB", danger())),
+            Line::from("请返回“设备”页选中目标盘，再进入制盘页。"),
+        ]
+    };
+
+    if let Some((side_top, side_bottom)) = sidebar {
+        frame.render_widget(
+            Paragraph::new(target_lines)
+                .block(
+                    Block::default()
+                        .borders(Borders::ALL)
+                        .title("固定目标")
+                        .title_style(accent()),
+                )
+                .wrap(Wrap { trim: true }),
+            side_top,
+        );
+        if let Some(side_bottom) = side_bottom {
+            frame.render_widget(
+                Paragraph::new(vec![
+                    Line::from(Span::styled("安全不变量", warning())),
+                    Line::from("• 仅允许 USB 整盘目标"),
+                    Line::from("• LBA3 厂商数据原样保留"),
+                    Line::from("• 写前固定硬件身份/容量"),
+                    Line::from("• MBR 最后提交"),
+                    Line::from("• 逐扇区读回；失败整组回滚"),
+                    Line::from("• 免密改造不移动/重加密 type4"),
+                ])
+                .block(
+                    Block::default()
+                        .borders(Borders::ALL)
+                        .border_style(warning())
+                        .title("写盘保护"),
+                )
+                .wrap(Wrap { trim: true }),
+                side_bottom,
+            );
+        }
+    }
+
+    match provision.stage {
+        ProvisionStage::Menu => {
+            let rows = ProvisionKind::ALL
+                .into_iter()
+                .enumerate()
+                .map(|(index, kind)| {
+                    TableRow::new(vec![
+                        Cell::from(Span::styled(format!("{index}"), provision_kind_style(kind))),
+                        Cell::from(Span::styled(kind.title(), provision_kind_style(kind))),
+                        Cell::from(kind.description()),
+                    ])
+                });
+            let table = Table::new(
+                rows,
+                [
+                    Constraint::Length(4),
+                    Constraint::Length(30),
+                    Constraint::Min(28),
+                ],
+            )
+            .header(
+                TableRow::new(["#", "制盘方案", "布局 / 行为"])
+                    .style(accent())
+                    .bottom_margin(1),
+            )
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .border_style(secondary())
+                    .title("制盘中心 · 选择方案")
+                    .title_style(secondary()),
+            )
+            .row_highlight_style(selected())
+            .highlight_symbol("▶ ");
+            let mut table_state = TableState::default();
+            table_state.select(Some(state.selected()));
+            frame.render_stateful_widget(table, main_area, &mut table_state);
+        }
+        ProvisionStage::Form => {
+            let mut lines = vec![
+                Line::from(vec![
+                    Span::styled(provision.kind.title(), provision_kind_style(provision.kind)),
+                    Span::raw("  ·  "),
+                    Span::styled("填写制盘参数", accent()),
+                ]),
+                Line::from(Span::styled(provision.kind.description(), muted())),
+                Line::from(""),
+            ];
+            for (index, (label, value, secret)) in
+                state.provision_visible_fields().iter().enumerate()
+            {
+                let shown = if *secret {
+                    "•".repeat(value.chars().count())
+                } else if value.is_empty() {
+                    "〈请输入〉".into()
+                } else {
+                    safe(value)
+                };
+                let value_style = if index == provision.field_selected {
+                    selected()
+                } else {
+                    Style::default()
+                };
+                lines.push(Line::from(vec![
+                    Span::styled(format!("{:>12}  ", label), muted()),
+                    Span::styled(shown, value_style),
+                ]));
+            }
+            lines.push(Line::from(""));
+            lines.push(Line::from(vec![
+                Span::styled("↑/↓ Tab", accent()),
+                Span::raw(" 切字段   "),
+                Span::styled("直接输入", secondary()),
+                Span::raw(" 修改   "),
+                Span::styled("Enter", success()),
+                Span::raw(" 生成计划   "),
+                Span::styled("Esc", warning()),
+                Span::raw(" 返回"),
+            ]));
+            if let Some(message) = &provision.message {
+                lines.push(Line::from(Span::styled(safe(message), danger())));
+            }
+            frame.render_widget(
+                Paragraph::new(lines)
+                    .block(
+                        Block::default()
+                            .borders(Borders::ALL)
+                            .border_style(provision_kind_style(provision.kind))
+                            .title("参数表单"),
+                    )
+                    .wrap(Wrap { trim: false }),
+                main_area,
+            );
+        }
+        ProvisionStage::Planning => {
+            frame.render_widget(
+                Paragraph::new(vec![
+                    Line::from(Span::styled("◈  正在生成精确计划", secondary())),
+                    Line::from(""),
+                    Line::from(safe(
+                        provision
+                            .message
+                            .as_deref()
+                            .unwrap_or("正在只读检查目标盘…"),
+                    )),
+                    Line::from("此阶段不写盘；正在计算 LCE、分区边界、文件系统与协议元数据。"),
+                ])
+                .alignment(Alignment::Center)
+                .block(
+                    Block::default()
+                        .borders(Borders::ALL)
+                        .border_style(secondary())
+                        .title("只读规划"),
+                ),
+                main_area,
+            );
+        }
+        ProvisionStage::Review => {
+            let mut lines = vec![
+                Line::from(Span::styled("计划已通过全部只读校验", success())),
+                Line::from(""),
+                Line::from(Span::styled(
+                    provision.kind.title(),
+                    provision_kind_style(provision.kind),
+                )),
+            ];
+            if let Some(prepared) = provision.prepared.as_ref() {
+                match prepared {
+                    ProvisionPrepared::New(prepared) => {
+                        lines.extend([
+                            Line::from(format!(
+                                "目标: disk{}  {}",
+                                prepared.disk,
+                                safe(&prepared.device_id)
+                            )),
+                            Line::from(format!(
+                                "容量: {} sectors   LCE: LBA{}",
+                                prepared.write_image.total_sectors, prepared.lce_start_lba
+                            )),
+                            Line::from(format!(
+                                "事务触碰: {} sectors   最高写入 LBA: {}",
+                                prepared.write_image.touched_sector_count(),
+                                prepared.write_image.highest_touched_lba().unwrap_or(0)
+                            )),
+                            Line::from("LBA3 已从目标盘捕获并绑定；写入前将再次复核。"),
+                        ]);
+                    }
+                    ProvisionPrepared::Convert(prepared) => {
+                        let plan = &prepared.conversion.plan;
+                        lines.extend([
+                            Line::from(format!(
+                                "目标: disk{}  {}",
+                                prepared.disk,
+                                safe(&prepared.device_id)
+                            )),
+                            Line::from(format!(
+                                "前部重建: LBA{}..{} → 明文 exFAT",
+                                plan.front_start_lba,
+                                plan.encrypt_start_lba.saturating_sub(1)
+                            )),
+                            Line::from(format!(
+                                "type4 保持: LBA{} / {} bytes",
+                                plan.encrypt_start_lba, plan.encrypt_size_bytes
+                            )),
+                            Line::from(format!("事务触碰: {} sectors", prepared.patch.len())),
+                            Line::from(Span::styled(
+                                "注意：当前不会迁移原 type1/type2 用户文件。",
+                                warning(),
+                            )),
+                        ]);
+                    }
+                }
+            }
+            lines.extend([
+                Line::from(""),
+                Line::from(vec![
+                    Span::styled("Enter", danger()),
+                    Span::raw(" 进入最终 YES 确认   "),
+                    Span::styled("Esc", warning()),
+                    Span::raw(" 返回修改"),
+                ]),
+            ]);
+            frame.render_widget(
+                Paragraph::new(lines)
+                    .block(
+                        Block::default()
+                            .borders(Borders::ALL)
+                            .border_style(success())
+                            .title("计划预览"),
+                    )
+                    .wrap(Wrap { trim: true }),
+                main_area,
+            );
+        }
+        ProvisionStage::Confirm => {
+            frame.render_widget(
+                Paragraph::new(vec![
+                    Line::from(Span::styled("破坏性写盘最终确认", danger())),
+                    Line::from(""),
+                    Line::from("请重新核对目标盘和计划。此操作会修改真实物理介质。"),
+                    Line::from(vec![
+                        Span::raw("精确输入 "),
+                        Span::styled("YES", danger()),
+                        Span::raw(" 后按 Enter： "),
+                        Span::styled(safe(&provision.confirmation), selected()),
+                    ]),
+                    Line::from(""),
+                    Line::from(Span::styled("Esc 返回计划页，不会写盘。", warning())),
+                ])
+                .block(
+                    Block::default()
+                        .borders(Borders::ALL)
+                        .border_style(danger())
+                        .title("最终确认"),
+                )
+                .wrap(Wrap { trim: true }),
+                main_area,
+            );
+        }
+        ProvisionStage::Running => {
+            frame.render_widget(
+                Paragraph::new(vec![
+                    Line::from(Span::styled("◆  安全事务执行中", warning())),
+                    Line::from(""),
+                    Line::from(safe(
+                        provision.message.as_deref().unwrap_or("正在执行事务写盘…"),
+                    )),
+                    Line::from(""),
+                    Line::from(Span::styled(
+                        "q / Esc / Ctrl-C 不会中断介质事务；退出请求只会在安全检查点生效。",
+                        danger(),
+                    )),
+                ])
+                .alignment(Alignment::Center)
+                .block(
+                    Block::default()
+                        .borders(Borders::ALL)
+                        .border_style(warning())
+                        .title("事务执行"),
+                ),
+                main_area,
+            );
+        }
+        ProvisionStage::Result => {
+            frame.render_widget(
+                Paragraph::new(vec![
+                    Line::from(Span::styled("制盘流程已到达安全结束点", success())),
+                    Line::from(""),
+                    Line::from(safe(provision.message.as_deref().unwrap_or("操作结束"))),
+                    Line::from(""),
+                    Line::from(Span::styled("Enter / Esc 返回制盘中心", accent())),
+                ])
+                .alignment(Alignment::Center)
+                .block(
+                    Block::default()
+                        .borders(Borders::ALL)
+                        .border_style(success())
+                        .title("结果"),
+                ),
+                main_area,
+            );
+        }
+    }
+}
+
 fn draw_command_palette(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState) {
     let commands = [
         "devices  切到设备",
         "backups  切到备份",
+        "provision 制盘/免密改造",
         "inspect  打开 Inspect",
         "apply    Apply 安全向导",
         "restore  Restore 安全向导",
         "backup-create  备份当前设备",
         "backup-verify  校验当前备份",
         "backup-delete  删除当前备份",
+        "backup-deep    深度备份当前设备",
+        "backup-prune   keep-N 清理旧备份",
         "refresh  刷新当前工作区",
         "help     帮助",
         "quit/q   退出",
@@ -813,6 +1169,104 @@ fn draw_backup_delete(frame: &mut Frame, area: ratatui::layout::Rect, state: &Ap
     );
 }
 
+fn draw_backup_prune(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState) {
+    let Some(prune) = state.backup_prune() else {
+        return;
+    };
+    use super::state::BackupPruneStage;
+
+    let mut lines = vec![
+        Line::from(Span::styled("备份保留策略清理", warning())),
+        Line::from("按同盘组执行 keep-N；原始盘备份与保留底线由 application 层统一保护。"),
+        Line::from(""),
+    ];
+    match prune.stage {
+        BackupPruneStage::Input => {
+            lines.extend([
+                Line::from(vec![
+                    Span::styled("每组保留最近 N 份快照: ", accent()),
+                    Span::styled(safe(&prune.keep_input), selected()),
+                ]),
+                Line::from("仅输入正整数；Enter 生成只读清理计划，Esc 取消。"),
+            ]);
+        }
+        BackupPruneStage::Planning => {
+            lines.push(Line::from(Span::styled(
+                "正在扫描备份并生成固定候选快照…",
+                secondary(),
+            )));
+        }
+        BackupPruneStage::Review => {
+            if let Some(prepared) = prune.prepared.as_ref() {
+                lines.extend([
+                    Line::from(format!("keep-N: {}", prepared.keep)),
+                    Line::from(format!("原盘备份: {} 份", prepared.originals)),
+                    Line::from(format!(
+                        "计划删除: {} 份   清理后快照: {} 份",
+                        prepared.plan.targets.len(),
+                        prepared.retained_snapshots
+                    )),
+                    Line::from(""),
+                    Line::from(Span::styled(
+                        "Enter 进入 YES 确认；执行时逐条按固定 SHA-256 复核。",
+                        warning(),
+                    )),
+                ]);
+            }
+        }
+        BackupPruneStage::Confirm => {
+            let count = prune
+                .prepared
+                .as_ref()
+                .map(|prepared| prepared.plan.targets.len())
+                .unwrap_or(0);
+            lines.extend([
+                Line::from(Span::styled(
+                    format!("即将删除 {count} 份旧备份，这是不可撤销操作。"),
+                    danger(),
+                )),
+                Line::from(vec![
+                    Span::raw("精确输入 "),
+                    Span::styled("YES", danger()),
+                    Span::raw(" 后按 Enter： "),
+                    Span::styled(safe(&prune.confirmation), selected()),
+                ]),
+            ]);
+        }
+        BackupPruneStage::Running => {
+            lines.push(Line::from(Span::styled(
+                "正在逐条摘要复核并删除；退出请求会延迟到安全结束点。",
+                warning(),
+            )));
+        }
+        BackupPruneStage::Result => {
+            lines.push(Line::from(Span::styled(
+                safe(prune.message.as_deref().unwrap_or("清理流程结束")),
+                success(),
+            )));
+            lines.push(Line::from("Enter / Esc 返回备份列表。"));
+        }
+    }
+    if prune.stage != BackupPruneStage::Result {
+        if let Some(message) = &prune.message {
+            lines.push(Line::from(Span::styled(safe(message), danger())));
+        }
+    }
+
+    frame.render_widget(
+        Paragraph::new(lines)
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .border_style(warning())
+                    .title("备份清理 · keep-N")
+                    .title_style(warning()),
+            )
+            .wrap(Wrap { trim: true }),
+        area,
+    );
+}
+
 /// 把类型化写盘事件映射为向导 Running 阶段的单行显示文本。
 /// 直接从事件类型映射，不经 ANSI 文本反解析；调用方负责经 `safe` 消毒。
 fn write_progress_text(event: &crate::application::WriteEvent) -> String {
@@ -901,6 +1355,7 @@ fn draw_wizard(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState)
         WriteKind::Apply => "Apply 免密转换",
         WriteKind::Restore => "Restore 备份还原",
         WriteKind::BackupCreate => "Create Backup 只读备份",
+        WriteKind::BackupCreateDeep => "Deep Backup 深度备份",
     };
     let mut lines = vec![
         Line::from(Span::styled(
@@ -918,6 +1373,9 @@ fn draw_wizard(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState)
     lines.push(Line::from(match wizard.kind {
         WriteKind::BackupCreate => {
             "只读链：系统盘/USB整盘检查 → selector pinning → 读取协议/分区元数据/盘尾证据 → 单文件 Metadata EDPB 内部校验 → fsync；不会卸载或写 U 盘"
+        }
+        WriteKind::BackupCreateDeep => {
+            "只读链：完整读取可验证分区/文件系统证据并写入 Deep EDPB；耗时更长，但不会卸载或写 U 盘"
         }
         WriteKind::Apply | WriteKind::Restore => {
             "安全链：系统盘/USB整盘检查 → selector pinning → 写前保护 → 卸载/锁卷 → reopen复核 → atomic write → sync/readback/rollback"
@@ -964,7 +1422,10 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
         (CoreMode::Busy, "READ LBA0-12")
     } else if state.active_scan_pending() {
         (CoreMode::Busy, "BACKGROUND SCAN")
-    } else if state.wizard().is_some() {
+    } else if state.wizard().is_some()
+        || (state.workspace() == Workspace::Provision
+            && state.provision().stage != ProvisionStage::Menu)
+    {
         (CoreMode::Busy, "USER FLOW")
     } else {
         (CoreMode::Stable, "INTERACTIVE")
@@ -995,8 +1456,9 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
     let workspace_index = match state.workspace() {
         Workspace::Devices => 0,
         Workspace::Backups => 1,
+        Workspace::Provision => 2,
     };
-    let workspace_tabs = Tabs::new(["设备", "备份"])
+    let workspace_tabs = Tabs::new(["设备", "备份", "制盘"])
         .select(workspace_index)
         .block(
             Block::default()
@@ -1013,6 +1475,7 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
     let body = chunks[2];
     let overlay_active = state.inspect_data().is_some()
         || state.backup_delete().is_some()
+        || state.backup_prune().is_some()
         || state.wizard().is_some()
         || matches!(state.input_mode(), InputMode::Command | InputMode::Help);
     let (content_area, animation_area) = if overlay_active && body.width >= 118 && body.height >= 14
@@ -1030,6 +1493,8 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
         draw_inspect(frame, content_area, state);
     } else if state.backup_delete().is_some() {
         draw_backup_delete(frame, content_area, state);
+    } else if state.backup_prune().is_some() {
+        draw_backup_prune(frame, content_area, state);
     } else if state.wizard().is_some() {
         draw_wizard(frame, content_area, state);
     } else {
@@ -1058,6 +1523,14 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
                         Span::styled("R 恢复", warning()),
                         Span::raw("   "),
                         Span::styled("b 新建", accent()),
+                        Span::raw("   "),
+                        Span::styled("B 深度备份", secondary()),
+                        Span::raw("   "),
+                        Span::styled("P 清理旧备份", warning()),
+                    ]),
+                    Line::from(vec![
+                        Span::styled("制盘: ", secondary()),
+                        Span::raw("四种官方模式 + 现有盘免密改造；先计划预览，再 YES 写盘"),
                     ]),
                     Line::from(vec![
                         Span::styled("r", accent()),
@@ -1076,6 +1549,7 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
             _ => match state.workspace() {
                 Workspace::Devices => draw_devices(frame, content_area, state),
                 Workspace::Backups => draw_backups(frame, content_area, state),
+                Workspace::Provision => draw_provision(frame, content_area, state),
             },
         }
     }
@@ -1092,6 +1566,8 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
 
     let status = if state.is_critical_operation() && state.backup_delete().is_some() {
         "备份删除正在执行：q / Esc / Ctrl-C 将延迟到安全检查点".to_string()
+    } else if state.is_critical_operation() && state.backup_prune().is_some() {
+        "备份清理正在执行：q / Esc / Ctrl-C 将延迟到安全检查点".to_string()
     } else if state.is_critical_operation() {
         "关键写盘阶段：q / Esc / Ctrl-C 将延迟到安全检查点".to_string()
     } else if state.input_mode() == InputMode::Search {
@@ -1128,6 +1604,19 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
             Workspace::Backups => {
                 "Tab 页面  ·  j/k 移动  ·  i Inspect  ·  v 校验  ·  R 恢复  ·  D 删除  ·  b 新建  ·  / 搜索  ·  q 退出".to_string()
             }
+            Workspace::Provision => match state.provision().stage {
+                ProvisionStage::Menu => {
+                    "Tab 页面  ·  j/k 选择方案  ·  Enter 打开  ·  r 刷新目标  ·  :provision 直达  ·  ? 帮助  ·  q 退出".to_string()
+                }
+                ProvisionStage::Form => {
+                    "↑/↓/Tab 字段  ·  输入编辑  ·  Enter 生成只读计划  ·  Esc 返回".to_string()
+                }
+                ProvisionStage::Planning => "正在生成只读计划…".to_string(),
+                ProvisionStage::Review => "Enter 最终确认  ·  Esc 返回修改".to_string(),
+                ProvisionStage::Confirm => "输入 YES + Enter 执行  ·  Esc 返回计划".to_string(),
+                ProvisionStage::Running => "安全事务执行中；退出请求延迟到安全检查点".to_string(),
+                ProvisionStage::Result => "Enter / Esc 返回制盘中心".to_string(),
+            },
         }
     };
     frame.render_widget(

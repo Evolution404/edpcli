@@ -43,6 +43,7 @@ pub fn resume_argv(intent: &state::WriteIntent) -> Vec<String> {
             state::WriteKind::Apply => "apply".to_string(),
             state::WriteKind::Restore => "restore".to_string(),
             state::WriteKind::BackupCreate => "backup-create".to_string(),
+            state::WriteKind::BackupCreateDeep => "backup-create-deep".to_string(),
         },
         RESUME_DISK_FLAG.to_string(),
         crate::application::pin_disk_selector(intent.disk),
@@ -101,6 +102,7 @@ pub fn parse_resume_args(argv: &[String]) -> Result<Option<state::WriteIntent>, 
                     "apply" => state::WriteKind::Apply,
                     "restore" => state::WriteKind::Restore,
                     "backup-create" => state::WriteKind::BackupCreate,
+                    "backup-create-deep" => state::WriteKind::BackupCreateDeep,
                     _ => return Err(format!("错误: 非法 TUI resume kind: {value}")),
                 });
             }
@@ -144,7 +146,11 @@ pub fn parse_resume_args(argv: &[String]) -> Result<Option<state::WriteIntent>, 
     let kind = kind.ok_or_else(|| format!("错误: 缺少 {RESUME_KIND_FLAG}"))?;
     let disk = disk.ok_or_else(|| format!("错误: 缺少 {RESUME_DISK_FLAG}"))?;
     match kind {
-        state::WriteKind::Apply | state::WriteKind::BackupCreate if backup.is_some() => {
+        state::WriteKind::Apply
+        | state::WriteKind::BackupCreate
+        | state::WriteKind::BackupCreateDeep
+            if backup.is_some() =>
+        {
             Err("错误: 非 Restore resume 不允许携带备份路径".into())
         }
         state::WriteKind::Restore if backup.is_none() => {
@@ -249,6 +255,10 @@ fn dispatch_nav_command(
                     tasks.request_backup_scan(backup_dir.to_path_buf());
                     state.set_backup_scan_pending(true);
                 }
+                state::Workspace::Provision => {
+                    tasks.request_device_scan(backup_dir.to_path_buf());
+                    state.set_device_scan_pending(true);
+                }
             }
             StateEffect::None
         }
@@ -263,6 +273,12 @@ fn dispatch_nav_command(
                 state::Workspace::Backups => {
                     if let Some(path) = state.selected_backup_path() {
                         tasks.request_inspect_backup(path);
+                        state.set_inspect_pending(true);
+                    }
+                }
+                state::Workspace::Provision => {
+                    if let Some(disk) = state.selected_device_disk() {
+                        tasks.request_inspect_disk(disk);
                         state.set_inspect_pending(true);
                     }
                 }
@@ -323,6 +339,24 @@ fn dispatch_nav_command(
             }
             StateEffect::None
         }
+        NavCommand::BeginBackupCreateDeep => {
+            if let Some(row) = state.selected_device() {
+                let disk = row.disk;
+                let identity = state::ExpectedIdentity {
+                    onlyid: row.onlyid.clone(),
+                    device_id: row.device_id.clone(),
+                };
+                state.begin_write_wizard_for_identity(
+                    state::WriteKind::BackupCreateDeep,
+                    disk,
+                    None,
+                    Some(identity),
+                );
+            } else {
+                state.set_notice("深度备份需要先在设备页选定 U 盘。");
+            }
+            StateEffect::None
+        }
         NavCommand::VerifyBackup => {
             if let Some(path) = state.selected_backup_path() {
                 state.set_notice("正在后台校验当前备份…");
@@ -340,20 +374,32 @@ fn dispatch_nav_command(
             }
             StateEffect::None
         }
+        NavCommand::BeginBackupPrune => {
+            if state.workspace() != state::Workspace::Backups {
+                let _ = state.navigate(NavCommand::WorkspaceBackups, viewport_height);
+            }
+            if !state.begin_backup_prune() {
+                state.set_notice("已有关键操作或清理向导正在执行。");
+            }
+            StateEffect::None
+        }
         _ => state.navigate(command, viewport_height),
     }
 }
 
 fn palette_action_to_nav(action: command::PaletteAction) -> NavCommand {
     match action {
-        command::PaletteAction::Devices => NavCommand::Left,
-        command::PaletteAction::Backups => NavCommand::Right,
+        command::PaletteAction::Devices => NavCommand::WorkspaceDevices,
+        command::PaletteAction::Backups => NavCommand::WorkspaceBackups,
+        command::PaletteAction::Provision => NavCommand::WorkspaceProvision,
         command::PaletteAction::Inspect => NavCommand::OpenInspect,
         command::PaletteAction::Apply => NavCommand::BeginApply,
         command::PaletteAction::Restore => NavCommand::BeginRestore,
         command::PaletteAction::BackupCreate => NavCommand::BeginBackupCreate,
+        command::PaletteAction::BackupCreateDeep => NavCommand::BeginBackupCreateDeep,
         command::PaletteAction::BackupVerify => NavCommand::VerifyBackup,
         command::PaletteAction::BackupDelete => NavCommand::BeginBackupDelete,
+        command::PaletteAction::BackupPrune => NavCommand::BeginBackupPrune,
         command::PaletteAction::Refresh => NavCommand::Refresh,
         command::PaletteAction::Help => NavCommand::Help,
         command::PaletteAction::Quit => NavCommand::Quit,
@@ -410,9 +456,12 @@ fn run_loop(resume: Option<state::WriteIntent>) -> io::Result<LoopExit> {
             }
             if let Some((_operation_id, result)) = updates.write {
                 let refresh_backups = result.is_ok()
-                    && state
-                        .wizard()
-                        .is_some_and(|wizard| wizard.kind == state::WriteKind::BackupCreate);
+                    && state.wizard().is_some_and(|wizard| {
+                        matches!(
+                            wizard.kind,
+                            state::WriteKind::BackupCreate | state::WriteKind::BackupCreateDeep
+                        )
+                    });
                 state.finish_write(result);
                 if refresh_backups {
                     tasks.request_backup_scan(backup_dir.clone());
@@ -435,6 +484,33 @@ fn run_loop(resume: Option<state::WriteIntent>) -> io::Result<LoopExit> {
                 state.finish_backup_delete(result);
                 if refresh_backups {
                     tasks.request_backup_scan(backup_dir.clone());
+                    state.set_backup_scan_pending(true);
+                }
+            }
+            if let Some(result) = updates.backup_prune_plan {
+                state.backup_prune_finish_plan(result);
+            }
+            if let Some((_operation_id, result)) = updates.backup_prune_execute {
+                let refresh_backups = result.is_ok();
+                state.backup_prune_finish_execute(result);
+                if refresh_backups {
+                    tasks.request_backup_scan(backup_dir.clone());
+                    state.set_backup_scan_pending(true);
+                }
+            }
+            if let Some(result) = updates.provision_plan {
+                state.provision_finish_plan(result);
+            }
+            if let Some((_operation_id, message)) = updates.provision_progress {
+                state.provision_mut().message = Some(message);
+            }
+            if let Some((_operation_id, result)) = updates.provision_write {
+                let success = result.is_ok();
+                state.provision_finish_write(result);
+                if success {
+                    tasks.request_device_scan(backup_dir.clone());
+                    tasks.request_backup_scan(backup_dir.clone());
+                    state.set_device_scan_pending(true);
                     state.set_backup_scan_pending(true);
                 }
             }
@@ -477,6 +553,225 @@ fn run_loop(resume: Option<state::WriteIntent>) -> io::Result<LoopExit> {
                 ct_event::Event::Key(key) => {
                     if !event::is_actionable_key(&key) {
                         continue;
+                    }
+                    if state.workspace() == state::Workspace::Provision {
+                        use state::ProvisionStage;
+                        match state.provision().stage {
+                            ProvisionStage::Menu => {
+                                if key.code == ct_event::KeyCode::Enter {
+                                    let Some(disk) = state.selected_device_disk() else {
+                                        state.set_notice(
+                                            "制盘需要先在设备页选定一个 USB 目标，再切换到制盘页。",
+                                        );
+                                        continue;
+                                    };
+                                    let kind = state.provision_begin_selected();
+                                    if kind == state::ProvisionKind::Convert {
+                                        if let Err(message) =
+                                            tasks.request_provision_plan(disk, kind, None)
+                                        {
+                                            state.provision_finish_plan(Err(message.to_string()));
+                                        }
+                                    }
+                                    continue;
+                                }
+                            }
+                            ProvisionStage::Form => {
+                                match key.code {
+                                    ct_event::KeyCode::Up | ct_event::KeyCode::BackTab => {
+                                        state.provision_move_field(-1);
+                                    }
+                                    ct_event::KeyCode::Down | ct_event::KeyCode::Tab => {
+                                        state.provision_move_field(1);
+                                    }
+                                    ct_event::KeyCode::Backspace => state.provision_backspace(),
+                                    ct_event::KeyCode::Enter => {
+                                        let Some(disk) = state.selected_device_disk() else {
+                                            state.provision_mut().message = Some(
+                                                "目标 USB 已不存在，请返回设备页重新选择。".into(),
+                                            );
+                                            continue;
+                                        };
+                                        match state.provision_request() {
+                                            Ok(request) => {
+                                                let kind = state.provision().kind;
+                                                state.provision_set_planning();
+                                                if let Err(message) = tasks.request_provision_plan(
+                                                    disk,
+                                                    kind,
+                                                    Some(request),
+                                                ) {
+                                                    state.provision_finish_plan(Err(
+                                                        message.to_string()
+                                                    ));
+                                                }
+                                            }
+                                            Err(message) => {
+                                                state.provision_mut().message = Some(message);
+                                            }
+                                        }
+                                    }
+                                    ct_event::KeyCode::Esc => {
+                                        let _ = state.navigate(NavCommand::Escape, 1);
+                                    }
+                                    ct_event::KeyCode::Char(ch)
+                                        if !key
+                                            .modifiers
+                                            .contains(ct_event::KeyModifiers::CONTROL) =>
+                                    {
+                                        state.provision_push_char(ch);
+                                    }
+                                    _ => {}
+                                }
+                                continue;
+                            }
+                            ProvisionStage::Planning => {
+                                if key.code == ct_event::KeyCode::Esc {
+                                    state.set_notice("制盘计划正在后台生成，请等待完成。");
+                                }
+                                continue;
+                            }
+                            ProvisionStage::Review => {
+                                match key.code {
+                                    ct_event::KeyCode::Enter => state.provision_begin_confirm(),
+                                    ct_event::KeyCode::Esc => {
+                                        let _ = state.navigate(NavCommand::Escape, 1);
+                                    }
+                                    _ => {}
+                                }
+                                continue;
+                            }
+                            ProvisionStage::Confirm => {
+                                match key.code {
+                                    ct_event::KeyCode::Char(ch)
+                                        if !key
+                                            .modifiers
+                                            .contains(ct_event::KeyModifiers::CONTROL) =>
+                                    {
+                                        state.provision_push_confirmation(ch);
+                                    }
+                                    ct_event::KeyCode::Backspace => {
+                                        state.provision_backspace_confirmation();
+                                    }
+                                    ct_event::KeyCode::Enter => {
+                                        if let Some(prepared) = state.provision_take_for_write() {
+                                            if let Err(message) = tasks.request_provision_write(
+                                                prepared,
+                                                backup_dir.clone(),
+                                            ) {
+                                                state.provision_finish_write(Err(
+                                                    message.to_string()
+                                                ));
+                                            }
+                                        }
+                                    }
+                                    ct_event::KeyCode::Esc => {
+                                        let _ = state.navigate(NavCommand::Escape, 1);
+                                    }
+                                    _ => {}
+                                }
+                                continue;
+                            }
+                            ProvisionStage::Running => {}
+                            ProvisionStage::Result => {
+                                if matches!(
+                                    key.code,
+                                    ct_event::KeyCode::Enter | ct_event::KeyCode::Esc
+                                ) {
+                                    state.provision_reset();
+                                    continue;
+                                }
+                            }
+                        }
+                    }
+                    if let Some(stage) = state.backup_prune().map(|prune| prune.stage) {
+                        use state::BackupPruneStage;
+                        match stage {
+                            BackupPruneStage::Input => {
+                                match key.code {
+                                    ct_event::KeyCode::Char(ch) if ch.is_ascii_digit() => {
+                                        state.backup_prune_push_digit(ch);
+                                    }
+                                    ct_event::KeyCode::Backspace => state.backup_prune_backspace(),
+                                    ct_event::KeyCode::Enter => match state
+                                        .backup_prune_start_plan()
+                                    {
+                                        Ok(keep) => {
+                                            if let Err(message) = tasks
+                                                .request_backup_prune_plan(backup_dir.clone(), keep)
+                                            {
+                                                state.backup_prune_finish_plan(Err(
+                                                    message.to_string()
+                                                ));
+                                            }
+                                        }
+                                        Err(message) => {
+                                            if let Some(prune) = state.backup_prune_mut() {
+                                                prune.message = Some(message);
+                                            }
+                                        }
+                                    },
+                                    ct_event::KeyCode::Esc => state.close_backup_prune(),
+                                    _ => {}
+                                }
+                                continue;
+                            }
+                            BackupPruneStage::Planning => {
+                                if key.code == ct_event::KeyCode::Esc {
+                                    state.set_notice("清理计划正在后台生成，请等待完成。");
+                                }
+                                continue;
+                            }
+                            BackupPruneStage::Review => {
+                                match key.code {
+                                    ct_event::KeyCode::Enter => state.backup_prune_begin_confirm(),
+                                    ct_event::KeyCode::Esc => state.close_backup_prune(),
+                                    _ => {}
+                                }
+                                continue;
+                            }
+                            BackupPruneStage::Confirm => {
+                                match key.code {
+                                    ct_event::KeyCode::Char(ch)
+                                        if !key
+                                            .modifiers
+                                            .contains(ct_event::KeyModifiers::CONTROL) =>
+                                    {
+                                        state.backup_prune_push_confirmation(ch);
+                                    }
+                                    ct_event::KeyCode::Backspace => state.backup_prune_backspace(),
+                                    ct_event::KeyCode::Enter => {
+                                        if let Some(prepared) =
+                                            state.backup_prune_take_for_execute()
+                                        {
+                                            if let Err(message) = tasks
+                                                .request_backup_prune_execute(
+                                                    prepared,
+                                                    backup_dir.clone(),
+                                                )
+                                            {
+                                                state.backup_prune_finish_execute(Err(
+                                                    message.to_string()
+                                                ));
+                                            }
+                                        }
+                                    }
+                                    ct_event::KeyCode::Esc => state.close_backup_prune(),
+                                    _ => {}
+                                }
+                                continue;
+                            }
+                            BackupPruneStage::Running => {}
+                            BackupPruneStage::Result => {
+                                if matches!(
+                                    key.code,
+                                    ct_event::KeyCode::Enter | ct_event::KeyCode::Esc
+                                ) {
+                                    state.close_backup_prune();
+                                    continue;
+                                }
+                            }
+                        }
                     }
                     if state
                         .backup_delete()
@@ -535,7 +830,11 @@ fn run_loop(resume: Option<state::WriteIntent>) -> io::Result<LoopExit> {
                                     if !crate::elevate::is_root() {
                                         return Ok(LoopExit::Elevate(intent));
                                     }
-                                    if intent.kind == state::WriteKind::BackupCreate {
+                                    if matches!(
+                                        intent.kind,
+                                        state::WriteKind::BackupCreate
+                                            | state::WriteKind::BackupCreateDeep
+                                    ) {
                                         if let Err(message) =
                                             tasks.request_backup_create(intent, backup_dir.clone())
                                         {
