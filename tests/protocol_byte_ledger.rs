@@ -198,8 +198,8 @@ fn lba0_bootstrap_blob_is_closed_while_selector_provenance_stays_separate() {
     assert!(row.contains("S-NETAC-MBR"));
     assert!(row.contains("P-GOLD-NOPWD"));
     assert!(row.contains("selector chooses a known producer profile"));
-    assert!(DOC.contains("8×zero + 11×UsbMainBSec + 1×Netac"));
-    assert!(DOC.contains("调用链 provenance 开放问题"));
+    assert!(DOC.contains("8×全零 + 11×UsbMainBSec + 1×Netac"));
+    assert!(DOC.contains("调用链来源开放问题"));
 }
 
 #[test]
@@ -291,8 +291,8 @@ fn cems2_join59_reader_can_close_wire_semantics_without_becoming_a_writer() {
     assert!(DOC.contains("fcn.10026280"));
     assert!(DOC.contains("GENERIC_READ"));
     assert!(DOC.contains("fcn.18002B880"));
-    assert!(DOC.contains("不能据此推导出 sector writer"));
-    assert!(DOC.contains("implementation provenance"));
+    assert!(DOC.contains("不能据此推导出扇区写入端"));
+    assert!(DOC.contains("实现来源"));
 }
 
 #[test]
@@ -307,7 +307,7 @@ fn legacy_mbr_snapshot_can_close_semantics_without_inventing_the_old_copy_site()
     assert!(row.contains("implementation provenance"));
     assert!(DOC.contains("P-EESI-NETAC"));
     assert!(DOC.contains("type4 PartionSize/512"));
-    assert!(DOC.contains("exact historical copy-site/profile selector"));
+    assert!(DOC.contains("精确历史复制点/配置类型选择器"));
 }
 
 #[test]
@@ -331,8 +331,8 @@ fn lba4_hserial_is_closed_as_caller_owned_vector_without_inventing_devicenumber_
     assert!(DOC.contains("ordinal3=`EDP_DeviceNumber`"));
     assert!(DOC.contains("ordinal4=`EDP_DiskNumber`"));
     assert!(DOC.contains("旧 `ReadUsbHserialsInfo` ABI 已直接排除这种等价关系"));
-    assert!(DOC.contains("caller-owned `HSerialCRC[5]`"));
-    assert!(DOC.contains("512/512与物理 gold 完全一致"));
+    assert!(DOC.contains("调用方负责 `HSerialCRC[5]`"));
+    assert!(DOC.contains("512/512与物理金标完全一致"));
 }
 
 #[test]
@@ -343,7 +343,7 @@ fn local_labeltool_patches_cannot_be_mistaken_for_official_protocol_evidence() {
         "0x00449B76",
         "0x0042DDC0",
         "0x004289FB",
-        "must not be cited as official producer evidence",
+        "绝不能作为任何 LBA 字段的官方写入端证据",
         "CreateBusManageImp",
         "BusManageImp::WriteLabel@0x100A28E0",
         "0x996 = 2454",
@@ -365,11 +365,11 @@ fn devicenumber_host_identity_crc_boundary_is_explicit() {
         "0xEDB88320",
         "0x100130A2",
         "fcn.10013210",
-        "standard reflected IEEE CRC-32",
-        "LBA4 `HSerialCRC[5]` is COMPLETE as a caller-owned five-DWORD identity vector",
-        "one DWORD",
+        "标准反射 IEEE CRC-32",
+        "LBA4 `HSerialCRC[5]` 已作为调用方负责的五 DWORD 身份向量完全闭环",
+        "单个 DWORD",
         "UsbLabelParam::HDOnlySerial[5]",
-        "explicitly **not** the HSerial generation algorithm",
+        "明确**不是** HSerial 生成算法",
     ] {
         assert!(
             note.contains(required),
@@ -414,11 +414,11 @@ fn lba3_manufacturing_gate_keeps_fw_marker_page_distinct_from_host_lba3() {
     for required in [
         "file_size - 0x200",
         "CBaseController::virtual_464",
-        "marker-page readers",
+        "标记页读取器/兼容性检查器",
         "0x459C7EB5",
         "0x22A482A8",
-        "Local capture inventory is insufficient to lock PS2307 versus PS2309",
-        "do **not** contain USB serial",
+        "本地采集不足以确定 PS2307 或 PS2309",
+        "仍**没有** USB 序列号",
     ] {
         assert!(
             note.contains(required),

@@ -6,57 +6,57 @@
 ## 当前版本线
 
 - 当前待发布版本：**2.3.0**。
-- 2.3.0 为 MINOR 发布（版本号为用户明确指定），主线为动画工作区与操作安全：
-  TUI 常驻核心动画与工作区导航重构（设备/备份双面板、侧栏、Inspect 标签页、实时搜索、
-  命令面板）；关键操作全局互斥与 operation id、终端 I/O 失败先收尾安全链再退出、延迟
-  退出即时生效；刷新按稳定身份恢复选择、扫描合并待处理刷新、Inspect/Verify 并发有界；
-  dirty redraw 与动画三档策略。write service 进度为类型化 WriteEvent（CLI 文本/退出码
-  逐字节保留，黄金基线锁定）；CLI/TUI 共用备份删除/保留策略服务（application::backup）；
-  provision 校验区分 LBA4 producer flags、wire profile 与 reader view。
-- **兼容性注意**：备份校验 sidecar 自本版起由 MD5 更换为 SHA-256（`.sha256`，安全修复）。
-  2.2.x 创建的旧备份（仅 `.md5` sidecar）在本版 verify 显示“缺 .sha256”、restore 拒绝
-  执行；可为旧备份补生成 `.sha256` sidecar（内容为备份文件的 SHA-256 hex）后继续使用。
-  按 SemVer 严格口径接近 MAJOR，版本号 2.3.0 系用户明确指定。
-- 2.2.1 为紧急 PATCH：修正 2.2.0 把元数据范围错误扩展到 LBA0-13 的问题。物理盘识别、
-  inspect、备份、恢复与原子写统一严格收口到 LBA0-12（13 sectors / 6656B）；非 6656B
+- 2.3.0 为次版本发布（版本号为用户明确指定），主线为动画工作区与操作安全：
+  TUI 常驻核心动画与工作区导航重构（设备/备份双面板、侧栏、检查标签页、实时搜索、
+  命令面板）；关键操作全局互斥与操作编号、终端 I/O 失败先收尾安全链再退出、延迟
+  退出即时生效；刷新按稳定身份恢复选择、扫描合并待处理刷新、检查/校验并发有界；
+  脏区重绘与动画三档策略。写入服务进度为类型化 WriteEvent（CLI 文本/退出码
+  逐字节保留，黄金基线锁定）；CLI/TUI 共用备份删除/保留策略服务（application::备份）；
+  制盘校验区分 LBA4 写入端标志、盘面配置类型与读取端视图。
+- **兼容性注意**：备份校验旁挂文件自本版起由 MD5 更换为 SHA-256（`.sha256`，安全修复）。
+  2.2.x 创建的旧备份（仅 `.md5` 旁挂文件）在本版校验显示“缺 .sha256”、恢复拒绝
+  执行；可为旧备份补生成 `.sha256` 旁挂文件（内容为备份文件的 SHA-256 十六进制）后继续使用。
+  按语义化版本规范严格口径接近主版本变化，版本号 2.3.0 系用户明确指定。
+- 2.2.1 为紧急补丁版本：修正 2.2.0 把元数据范围错误扩展到 LBA0-13 的问题。物理盘识别、
+  检查、备份、恢复与原子写统一严格收口到 LBA0-12（13 个扇区 / 6656B）；非 6656B
   元数据镜像直接拒绝，不保留 LBA13 或 7168B 旧备份兼容路径。
-- 2.2.0 为向后兼容的 MINOR 发布：交互式 TTY 中裸 `edpcli` 默认进入管理员态 TUI；非 TTY 继续保持 bare=list，不破坏既有脚本。
+- 2.2.0 为向后兼容的次版本发布：交互式 TTY 中裸 `edpcli` 默认进入管理员态 TUI；非 TTY 继续保持 `bare=list`，不破坏既有脚本。
 - TUI 新增 CLI 同源语义配色、外部元数据终端控制字符防护、启动前 sudo/UAC 提权，以及备份查看/校验/删除/恢复/新建的完整生命周期操作。
-- 备份删除复用 application/service 安全边界：固定选中时 SHA-256、删除前重新扫描与内容复核、同名替换 fail-closed、至少保留每盘 1 份备份，并同步删除 SHA-256 sidecar。
-- 仓库新增受控 pre-commit Rust 自动格式化流程；CI 继续保留 `cargo fmt --all -- --check` 作为最终门禁。
+- 备份删除复用应用层/服务层安全边界：固定选中时 SHA-256、删除前重新扫描与内容复核、同名替换拒绝继续、至少保留每盘 1 份备份，并同步删除 SHA-256 旁挂文件。
+- 仓库新增受控提交前 Rust 自动格式化流程；CI 继续保留 `cargo fmt --all -- --check` 作为最终门禁。
 
 - 正式版本线从 **1.0.0** 开始。
 - `Cargo.toml` 中的 `package.version` 是源代码版本的唯一事实源。
-- 正式 tag 必须使用 `vMAJOR.MINOR.PATCH`，并且必须与 `Cargo.toml` 完全一致。
-- GitHub Release workflow 会校验 tag 与 `Cargo.toml`；不一致时拒绝发布。
+- 正式标签必须使用 `vMAJOR.MINOR.PATCH`，并且必须与 `Cargo.toml` 完全一致。
+- GitHub 发布工作流会校验标签与 `Cargo.toml`；不一致时拒绝发布。
 
 2026-09-18 经用户明确要求，项目版本线从此前的 `3.0.0` 重新起算为 `1.0.0`。这是一次
 明确授权的版本线重置，不应被后续 AI 当作一般惯例重复执行。
 
-2026-09-18 起，正式发布架构矩阵固定为：macOS arm64、macOS x86_64、macOS Universal、
+2026-09-18 起，正式发布架构矩阵固定为：macOS arm64、macOS x86_64、macOS 通用、
 Linux arm64、Linux x86_64、Windows arm64、Windows x86_64。新增/删除正式架构属于对公开
-发布能力的变更，按 SemVer 决定版本级别；当前首次加入 Linux/Windows arm64 使用 `1.1.0`。
+发布能力的变更，按语义化版本规范决定版本级别；当前首次加入 Linux/Windows arm64 使用 `1.1.0`。
 
 ## 后续版本号由维护 AI 自主决定
 
-以后每次正式发布，维护 AI 根据本次变更自行选择 SemVer 版本，不需要为了普通版本升级再次
+以后每次正式发布，维护 AI 根据本次变更自行选择语义化版本，不需要为了普通版本升级再次
 询问用户。决策遵循以下顺序：
 
-### PATCH：`1.0.0 -> 1.0.1`
+### 补丁版本：`1.0.0 -> 1.0.1`
 
 适用于保持现有外部行为兼容的修复，例如：
 
-- Bug 修复；
+- 缺陷修复；
 - 安全加固但不改变正常调用方式；
 - 性能优化；
-- CI、构建、打包、checksum、发布流程修复；
+- CI、构建、打包、校验和、发布流程修复；
 - 文档修正；
 - 内部重构且 CLI、配置、备份格式和协议行为保持兼容。
 
-只有文档变化且用户没有要求“发布新版”时，可以不创建新 Release；一旦要正式发布，则按
-PATCH 递增，不能复用旧 tag。
+只有文档变化且用户没有要求“发布新版”时，可以不创建新正式发布；一旦要正式发布，则按
+补丁版本递增，不能复用旧标签。
 
-### MINOR：`1.0.x -> 1.1.0`
+### 次版本：`1.0.x -> 1.1.0`
 
 适用于向后兼容的新能力，例如：
 
@@ -66,7 +66,7 @@ PATCH 递增，不能复用旧 tag。
 - 新增备份/检查/诊断能力；
 - 新增兼容模式，但旧用法仍然有效。
 
-### MAJOR：`1.x.y -> 2.0.0`
+### 主版本：`1.x.y -> 2.0.0`
 
 适用于对用户或自动化脚本存在破坏性变化，例如：
 
@@ -78,82 +78,82 @@ PATCH 递增，不能复用旧 tag。
 - 改变设备识别、写盘安全语义或协议结果，使既有调用产生不同含义；
 - 放弃某个已正式支持的平台或架构。
 
-如果同一版本同时包含多类变化，选择其中最高级别的版本变化。例如同时有 Bug 修复和新增
-兼容功能，使用 MINOR；同时存在破坏性变化，则使用 MAJOR。
+如果同一版本同时包含多类变化，选择其中最高级别的版本变化。例如同时有缺陷修复和新增
+兼容功能，使用次版本；同时存在破坏性变化，则使用主版本。
 
 ## 正式发布门禁
 
 每次正式发布必须满足：
 
-1. `main` 工作区 clean，`HEAD == origin/main`；
+1. `main` 工作区干净，`HEAD == origin/main`；
 2. `Cargo.toml` 版本已经按本规范递增，`Cargo.lock` 同步；
 3. `cargo fmt --all -- --check` 通过；
 4. `cargo test --all-targets --locked` 通过；
 5. `cargo clippy --all-targets --locked -- -D warnings` 通过；
-6. 固定版本 Runner 的 macOS / Linux / Windows arm64 + x86_64 六架构 CI 全绿；
-7. Linux / Windows arm64 + x86_64 虚拟磁盘 HIL-lite 门禁全绿；
-8. tag 与 `Cargo.toml` 版本完全一致；
-9. 三平台 arm64/x86_64 以及 macOS Universal 共七套 Release 产物全部生成；
-10. 三个平台的 SHA-256 sidecar 独立校验通过；
-11. macOS Universal 包确认同时包含 `arm64` 与 `x86_64`；
+6. 固定版本执行器的 macOS / Linux / Windows arm64 + x86_64 六架构持续集成全绿；
+7. Linux / Windows arm64 + x86_64 虚拟磁盘轻量硬件在环门禁全绿；
+8. 标签与 `Cargo.toml` 版本完全一致；
+9. 三平台 arm64/x86_64 以及 macOS 通用共七套发布产物全部生成；
+10. 三个平台的 SHA-256 旁挂文件独立校验通过；
+11. macOS 通用包确认同时包含 `arm64` 与 `x86_64`；
 12. Linux 两个包分别确认是预期 ELF arm64/x86_64，Windows 两个包分别确认是预期 PE
     arm64/x86_64。
 
-如果任一平台构建或验收失败，不创建残缺的正式 Release。
+如果任一平台构建或验收失败，不创建残缺的正式发布。
 
-## Rust 与 Runner 基线
+## Rust 与执行器基线
 
-- Release Rust 工具链固定为 `rust-toolchain.toml` 中指定的版本；当前为 `1.98.1`。
-- 正式 CI / Release 使用固定系统镜像和原生 CPU 架构 Runner，避免 `*-latest` 静默切换，
+- 发布使用的 Rust 工具链固定为 `rust-toolchain.toml` 中指定的版本；当前为 `1.98.1`。
+- 正式持续集成 / 发布使用固定系统镜像和原生 CPU 架构执行器，避免 `*-latest` 静默切换，
   也避免把交叉编译成功误当成目标平台原生验证成功。
 - 另设 `latest` 兼容性工作流用于提前发现未来操作系统或 Rust stable 的兼容问题，但它不改变
-  正式 Release 的构建基线。
+  正式发布的构建基线。
 
 ## 发布供应链材料
 
-每个正式 Release 除三平台二进制和 SHA-256 sidecar 外，还自动附带：
+每个正式发布除三平台二进制和 SHA-256 旁挂文件外，还自动附带：
 
 - CycloneDX 1.5 SBOM：`edpcli-vX.Y.Z-sbom.cdx.json`；
 - 完整 `Cargo.lock`；
 - `cargo metadata --locked` JSON；
 - `rustc -Vv` 工具链记录；
-- `release-manifest.json`：记录 tag、commit、固定 Runner、Rust 版本、每个发布资产的大小和
+- ``发布清单.json``：记录 tag、commit、固定执行器、Rust 版本、每个发布资产的大小和
   SHA-256。
 
-GitHub Actions 均锁到不可变 commit SHA，避免同名 action tag 被上游移动后悄然改变构建。
+GitHub Actions 均锁到不可变 commit SHA，避免同名操作标签被上游移动后悄然改变构建。
 
-GitHub 官方 artifact attestation 对私有/内部仓库要求 GitHub Enterprise Cloud；当前仓库
-不能把这一能力作为必过门禁，因此不配置一个注定失败的 attestation job。如果仓库未来迁移
+GitHub 官方产物证明对私有/内部仓库要求 GitHub Enterprise Cloud；当前仓库
+不能把这一能力作为必过门禁，因此不配置一个注定失败的证明作业。如果仓库未来迁移
 到满足条件的套餐，应按 GitHub 官方 `actions/attest` 流程增加 `id-token: write` 与
-`attestations: write` 后再启用。Apple Developer ID notarization 和 Windows Authenticode
-同样需要外部签名证书；在证书存在之前，发布流程以 checksum + SBOM + manifest 保证可核验性。
+`attestations: write` 后再启用。Apple Developer ID 公证和 Windows Authenticode 签名
+同样需要外部签名证书；在证书存在之前，发布流程以校验和 + SBOM + 清单保证可核验性。
 
 ## 无物理 Linux/Windows 机器时的验收口径
 
-GitHub-hosted Runner 没有真实 EDP USB 硬件，因此不能声称完成真实 USB 总线硬件在环验证。
+GitHub 托管执行器没有真实 EDP USB 硬件，因此不能声称完成真实 USB 总线硬件在环验证。
 项目采用三层替代验证：
 
 1. **原生平台 CI**：在真实 Linux/Windows 内核/API 环境运行完整测试与 CLI；
-2. **虚拟磁盘 HIL-lite**：在临时 loop/VHD 上执行真实 raw block I/O、同步、卸载/锁卷、
+2. **虚拟磁盘轻量硬件在环**：在临时循环/VHD 上执行真实原始块 I/O、同步、卸载/锁卷、
    原子写入、读回和恢复；
-3. **USB 身份契约测试**：使用可重复 fixture 覆盖 VID/PID、UAS/BOT、系统盘 fail-closed、
-   selector 与枚举规则。
+3. **USB 身份契约测试**：使用可重复测试夹具覆盖 VID/PID、UAS/BOT、系统盘拒绝继续、
+   选择器与枚举规则。
 
 上述三层可以显著提高可信度，但仍必须在发布说明中诚实区分“虚拟磁盘验证”和“真实 USB
-硬件验证”。如果未来具备实体 Linux/Windows 主机，应新增真实 USB HIL，而不是删除现有
+硬件验证”。如果未来具备实体 Linux/Windows 主机，应新增真实 USB 硬件在环，而不是删除现有
 虚拟磁盘测试。
 
-当前 `Virtual Disk HIL` workflow 在 Linux/Windows 的 arm64 与 x86_64 Runner 上分别执行，
+当前 “虚拟磁盘硬件在环”工作流在 Linux/Windows 的 arm64 与 x86_64 执行器上分别执行，
 实际覆盖为：
 
-- Linux：创建临时磁盘镜像 → loop 整盘 → MBR 分区 → ext4 → 挂载 marker → 产品
+- Linux：创建临时磁盘镜像 → 循环整盘 → MBR 分区 → ext4 → 挂载标记文件 → 产品
   `prepare_write` 执行 `umount2` → 对真实 `/dev/loopN` 做 LBA0-12 原子写/同步/读回 →
-  bit-for-bit 恢复 → 重新挂载并验证 marker；
-- Windows：创建临时 VHDX → MBR/NTFS/盘符 → 写 marker → 产品 `prepare_write` 执行
-  volume extent 归属确认、`FSCTL_LOCK_VOLUME`、`FSCTL_DISMOUNT_VOLUME` → 对真实
-  `\\.\PhysicalDriveN` 做 LBA0-12 原子写/同步/读回 → bit-for-bit 恢复 → detach/reattach
-  VHDX 并验证 marker；
-- CI 专用入口编译期默认关闭；Linux 只接受 `/dev/loopN`，Windows 只接受系统 API 返回
+  逐字节一致地恢复 → 重新挂载并验证标记文件；
+- Windows：创建临时 VHDX → MBR/NTFS/盘符 → 写入标记文件 → 产品 `prepare_write` 执行
+  volume 扩展区归属确认、`FSCTL_LOCK_VOLUME`、`FSCTL_DISMOUNT_VOLUME` → 对真实
+  `\\.\PhysicalDriveN` 做 LBA0-12 原子写/同步/读回 → 逐字节一致地恢复 → 分离/重新挂接
+  VHDX 并验证标记文件；
+- 持续集成专用入口编译期默认关闭；Linux 只接受 `/dev/loopN`，Windows 只接受系统 API 返回
   `BusTypeVirtual` / `BusTypeFileBackedVirtual` 的磁盘，因此测试入口不能指向真实 USB 盘。
 
 ## 发布步骤
@@ -163,15 +163,15 @@ GitHub-hosted Runner 没有真实 EDP USB 硬件，因此不能声称完成真�
 ```text
 功能分支
 → 测试/审计
-→ PR CI 全绿
+→ PR 持续集成全绿
 → 合并 main
-→ main CI 全绿
+→ main 持续集成全绿
 → 根据本规范决定版本号并确认 Cargo.toml/Cargo.lock
-→ 创建 vMAJOR.MINOR.PATCH tag
-→ Release workflow 构建三平台
-→ 下载 Release 资产做独立 checksum/架构验收
+→ 创建 `vMAJOR.MINOR.PATCH` 标签
+→ 发布工作流构建三平台
+→ 下载发布资产做独立校验和/架构验收
 → 完成发布
 ```
 
-不得在 CI 尚未验证时先创建正式 Release，也不得手工上传一个平台成功、另一个平台缺失的
+不得在持续集成尚未验证时先创建正式发布，也不得手工上传一个平台成功、另一个平台缺失的
 半成品正式版本。

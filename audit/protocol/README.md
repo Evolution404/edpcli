@@ -1,80 +1,39 @@
-# Protocol audit reproducibility baseline
+# 协议审计可复现基线
 
-This directory is the machine-readable companion to
-`docs/protocol/EDP_PROTOCOL_REVERSE_ENGINEERING.md`.  It does not replace the canonical
-document; it makes the evidence behind that document reproducible and rejects
-silent byte-accounting drift.
+本目录是 `docs/protocol/EDP_PROTOCOL_REVERSE_ENGINEERING.md` 的机器可读伴随证据层，不替代标准协议文档。它用于使文档背后的证据可复现，并拒绝静默的字节账本漂移。
 
-## Evidence classes
+## 证据类型
 
-- `physical`: bytes captured from an allowed real-device gold source.
-- `virtual`: output or behavior produced by executing an official binary in an
-  isolated file/memory-backed harness.  Virtual evidence is never relabeled as
-  a physical capture.
-- `static`: PE/ELF/DWARF/disassembly evidence such as an exact write, read,
-  branch, function address, or ABI field boundary.
+- `physical`：从允许使用的真实设备金标来源采集的字节。
+- `virtual`：在隔离的文件/内存后端环境中执行官方二进制得到的输出或行为。虚拟证据绝不能改标成物理采集。
+- `static`：PE/ELF/DWARF/反汇编证据，例如精确写入、读取、分支、函数地址或 ABI 字段边界。
 
-`evidence_manifest.tsv` records the concrete artifacts and anchors.  The
-`gold_samples.tsv` freezes the current **general census** population by source
-name, repository path, length and SHA-256.  The complete LBA0-LBA12 census
-bytes are checked into `audit/protocol/gold/`, so that population is
-reproducible from a clean clone without access to the capture workstation.
-Host-local executable binaries are still identified by digest rather than
-copied into this repository.
+`evidence_manifest.tsv` 记录具体产物和锚点。`gold_samples.tsv` 按来源名、仓库路径、长度和 SHA-256 冻结当前 **通用统计集** 样本集。完整 LBA0-LBA12 统计集字节已经提交到 `audit/protocol/gold/`，因此无需访问采集工作站即可从干净克隆复现该样本集。主机本地的可执行二进制仍只记录摘要，不复制进仓库。
 
-Purpose-specific physical positives that are needed to close one protocol
-profile without changing the general census live under
-`audit/protocol/physical-evidence/`.  They are manifest-tracked, committed by
-digest, and covered by focused regression tests, but they are deliberately not
-folded into `gold_samples.tsv` unless the general census policy itself changes.
+某些协议配置类型需要特定用途物理正例来闭环，但不应改变通用统计集。这类证据放在 `audit/protocol/physical-evidence/`，必须进入清单、按摘要固定并由定向回归测试覆盖；除非通用统计集政策本身发生变化，否则不得并入 `gold_samples.tsv`。
 
-The baseline harness is intentionally fail-closed on population drift: a new
-non-`_nopwd_` backup is not silently included or ignored.  It must first be
-reviewed and explicitly added to `gold_samples.tsv` with its digest.
+基线脚本对样本集漂移采用无法确认即拒绝继续：新的非 `_nopwd_` 备份不会被静默纳入或忽略，必须先人工审计，并把来源及摘要显式加入 `gold_samples.tsv`。
 
-## Gold data and provenance
+## 金标数据与来源
 
-The general-census protocol gold byte set is the checked-in
-`audit/protocol/gold/` tree:
+通用统计集的协议金标字节集位于已经提交的 `audit/protocol/gold/`：
 
-1. `audit/protocol/gold/strict-encrypted/`: exactly 19 unique 6656-byte
-   original-generation real-device images.
-2. `audit/protocol/gold/authentic-nopwd/`: one 6656-byte authentic SanDisk
-   Ultra no-password capture containing exactly LBA0-LBA12.
+1. `audit/protocol/gold/strict-encrypted/`：恰好 19 份 SHA-256 唯一的 6656 字节原始代真实设备镜像。
+2. `audit/protocol/gold/authentic-nopwd/`：1 份 6656 字节真实 SanDisk Ultra 免密盘采集，仅包含 LBA0-LBA12。
 
-A separate positive EESI-enabled Netac capture is kept under
-`audit/protocol/physical-evidence/eesi/`.  It is a field-scoped physical
-reference rather than a 21st census member; this distinction preserves the
-19+1 population used for cross-profile counts while allowing LBA10's enabled
-profile to satisfy the real-device evidence gate.
+另有一份 EESI 启用的 Netac 正向采集保存在 `audit/protocol/physical-evidence/eesi/`。它是字段级物理参考，不是第 21 个统计集成员；这样既保留 19+1 的跨配置类型统计口径，又允许 LBA10 的启用配置类型满足真实设备证据门禁。
 
-Every manifest row must have a unique SHA-256. Repeated read-only captures
-whose full 6656-byte image is byte-for-byte identical are deliberately
-deduplicated and must not be reintroduced as independent gold samples.
+清单中每一行都必须具有唯一 SHA-256。完整 6656 字节完全相同的重复只读采集必须去重，禁止重新作为独立金标样本加入。
 
-The original capture provenance remains recorded as
-`~/.edpcli-backup` for the encrypted captures and
-`~/Desktop/u_disk/analyze/disk_data/no_password_disk4/raw/LBA0_13_concat.bin`
-for the SanDisk capture.  Those host-local paths are provenance only; they are
-no longer runtime dependencies of `audit_baseline.py`.  The original SanDisk
-file also contained LBA13, but the checked-in gold image intentionally stops at
-6656 bytes.
+原始采集来源仍记录为：加密样本的 `~/.edpcli-backup`，以及 SanDisk 样本的 `~/Desktop/u_disk/analyze/disk_data/no_password_disk4/raw/LBA0_13_concat.bin`。这些主机本地路径只保留来源信息，不再是 `audit_baseline.py` 的运行依赖。原始 SanDisk 文件还包含 LBA13，但仓库中的金标镜像有意截断为 6656 字节。
 
-The old `/private/tmp/audit22` harness mixed a third SanDisk EESI capture into
-its population.  Its source/executable hashes are retained in the manifest for
-provenance, but its population definition is obsolete.  The checked-in
-`scripts/protocol/audit_baseline.py` reproduces the useful census behavior
-against the current two-source policy instead of depending on `/private/tmp`.
+旧的 `/private/tmp/audit22` 测试框架曾把第三份 SanDisk EESI 采集混入样本集。其源码/可执行文件摘要仍在清单中保留作为来源记录，但对应样本集定义已经废弃。当前 `scripts/protocol/audit_baseline.py` 在仓库内按新的两类来源政策复现有价值的统计集行为，不再依赖 `/private/tmp`。
 
-## Byte ledger
+## 字节账本
 
-`byte_ledger.tsv` partitions every byte in LBA0-LBA12 exactly once.  Each row
-records status, known profile applicability, and separate producer, consumer,
-and physical evidence IDs.  `tests/protocol_byte_ledger.rs` expands all range
-expressions and rejects overlap, gaps, bad evidence references, and divergence
-from the canonical strict-progress table.
+`byte_ledger.tsv` 对 LBA0-LBA12 的每个字节恰好分区一次。每一行记录状态、适用配置类型，以及相互独立的写入端、消费端和物理证据 ID。`tests/protocol_byte_ledger.rs` 会展开所有范围表达式，并拒绝重叠、缺口、非法证据引用以及与标准严格进度表不一致的情况。
 
-For a human-readable byte dump, run:
+需要查看人类可读的逐字节内容时运行：
 
 ```text
 python3 scripts/protocol/query_byte_ledger.py --lba 4
@@ -82,12 +41,9 @@ python3 scripts/protocol/query_byte_ledger.py --lba 3 --offset 0x20
 python3 scripts/protocol/query_byte_ledger.py --image <6656-byte-image> --lba 10
 ```
 
-The image form prints physical offsets and bytes next to the ledger status,
-field/region, profiles, and evidence IDs.  Decryption-specific offsets remain
-in the canonical field descriptions until the relevant decoder is explicitly
-registered in the query tool; the query tool must not invent a decrypted view.
+带镜像参数的形式会在账本状态、字段/区域、配置类型和证据 ID 旁显示物理偏移及字节。与解密有关的偏移，在对应解码器明确注册进查询工具之前仍以标准字段说明为准；查询工具不得臆造解密视图。
 
-## Re-run baseline checks
+## 重新运行基线检查
 
 ```text
 python3 scripts/protocol/audit_baseline.py
@@ -95,18 +51,12 @@ cargo test --test protocol_byte_ledger
 cargo test --test protocol_documentation_contract
 ```
 
-The baseline audit is read-only.  It never opens a raw disk device and never
-writes any gold capture.
+基线审计全程只读，不打开原始磁盘设备，也不写入任何金标采集。
 
-## Analysis notes
+## 分析笔记
 
-`notes/` contains retained provenance/boundary investigations that still have long-term evidence value. They are **not** current status ledgers and may describe historical hypotheses or superseded progress states. Current semantic status always comes from `byte_ledger.tsv`, `field_catalog.tsv`, `profile_coverage.tsv` and their tests.
+`notes/` 保存仍具有长期证据价值的来源/边界调查。它们不是当前状态账本，可能包含历史假设或已经被后续结论替代的阶段性进度。当前语义状态始终以 `byte_ledger.tsv`、`field_catalog.tsv`、`profile_coverage.tsv` 及其测试为准。
 
-## Local executable integrity
+## 本地可执行文件完整性
 
-`audit/protocol/notes/labeltool_variant_diff.md` records the byte-level comparison
-between the three local `cemssafeudisklabeltool*.exe` copies. Only
-`cemssafeudisklabeltool_orig.exe` is treated as an official front-end
-baseline; the other two contain locally applied policy/validation bypasses and
-must not be used as producer evidence.
-
+`audit/protocol/notes/labeltool_variant_diff.md` 记录三份本地 `cemssafeudisklabeltool*.exe` 的逐字节比较。只有 `cemssafeudisklabeltool_orig.exe` 被视为官方前端基线；另外两份包含本地施加的策略/校验绕过，禁止作为官方写入端证据。

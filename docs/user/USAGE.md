@@ -4,29 +4,29 @@
 理解“设备、改造、备份”三个对象，不需要手工输入内部 onlyid 或备份索引参数。
 
 > `apply` 和 `backup restore` 会真实写入物理盘。工具会执行系统盘保护、USB 整盘
-> 校验、selector pinning、卸载/锁卷、reopen 身份复核、原子写入、sync、读回校验和
-> 失败回滚。任何关键事实无法确认时都会 fail-closed。
+> 校验、目标选择器固定、卸载/锁卷、重新打开后身份复核、原子写入、同步、读回校验和
+> 失败回滚。任何关键事实无法确认时都会拒绝继续。
 
 ## 1. 安装
 
-正式 Release 发布七套包：
+正式发布提供七套包：
 
 | 平台 | 架构 | 产物 |
 |---|---|---|
 | macOS | arm64 | `edpcli-vX.Y.Z-macos-arm64.tar.gz` |
 | macOS | x86_64 | `edpcli-vX.Y.Z-macos-x86_64.tar.gz` |
-| macOS | Universal | `edpcli-vX.Y.Z-macos-universal.tar.gz` |
+| macOS | 通用 | `edpcli-vX.Y.Z-macos-universal.tar.gz` |
 | Linux | arm64 | `edpcli-vX.Y.Z-linux-arm64.tar.gz` |
 | Linux | x86_64 | `edpcli-vX.Y.Z-linux-x86_64.tar.gz` |
 | Windows | arm64 | `edpcli-vX.Y.Z-windows-arm64.zip` |
 | Windows | x86_64 | `edpcli-vX.Y.Z-windows-x86_64.zip` |
 
-每个包都有独立 SHA-256；发布清单还包含 manifest / SBOM。macOS Apple Silicon 推荐安装
-arm64 包，Universal 仅用于同一二进制兼容两类 Mac 的场景。
+每个包都有独立 SHA-256；发布清单还包含清单 / SBOM。macOS Apple Silicon 推荐安装
+arm64 包，通用包仅用于同一二进制兼容两类 Mac 的场景。
 
-### 从 GitHub Release 安装 / 升级（推荐）
+### 从 GitHub 正式发布安装 / 升级（推荐）
 
-安装了 GitHub CLI (`gh`) 后，macOS Apple Silicon 可直接下载 **最新正式 Release**、校验
+安装了 GitHub CLI (`gh`) 后，macOS Apple Silicon 可直接下载 **最新正式发布**、校验
 SHA-256 并安装：
 
 ```bash
@@ -40,12 +40,12 @@ sudo install -m 0755 edpcli /usr/local/bin/edpcli
 edpcli version
 ```
 
-这是安装和升级的统一命令；再次执行会从 GitHub 最新正式 Release 下载并覆盖旧版。
+这是安装和升级的统一命令；再次执行会从 GitHub 最新正式发布下载并覆盖旧版。
 Intel Mac 将 `macos-arm64` 改为 `macos-x86_64`；需要通用二进制时改为
 `macos-universal`。Linux 同理选择 `linux-arm64` 或 `linux-x86_64`，并将校验命令改为
 `sha256sum -c ...sha256`。
 
-如果已经手工下载了 Release 包，macOS / Linux 可直接安装：
+如果已经手工下载了发布包，macOS / Linux 可直接安装：
 
 ```bash
 tar -xzf edpcli-vX.Y.Z-macos-arm64.tar.gz
@@ -63,8 +63,8 @@ edpcli.exe version
 edpcli.exe list
 ```
 
-`--version` 保持单行；`version` 输出版本、平台、架构、目标 triple、UTC 编译时间、
-Git commit、Rust 编译器和构建类型。
+`--version` 保持单行；`version` 输出版本、平台、架构、目标三元组、UTC 编译时间、
+Git 提交、Rust 编译器和构建类型。
 
 ## 2. 最常用的五个任务
 
@@ -89,50 +89,50 @@ edpcli tui
 ```
 
 TUI 是 CLI v2 的交互前端，不是第二套业务实现。交互式 TTY 中无参数 `edpcli`
-默认进入 TUI；非 TTY 的旧脚本仍保持 bare=list。macOS/Linux 会在进入 alternate screen
+默认进入 TUI；非 TTY 的旧脚本仍保持 `bare=list`。macOS/Linux 会在进入备用屏幕
 前通过 `sudo` 请求权限，Windows 通过 UAC，因此不会再等到写盘操作时退出 TUI 后重启。
-来自 U 盘、备份和系统探测的文本在渲染前统一过滤终端控制字符，后台 worker 也禁止直接
-向 stdout/stderr 输出，避免异常元数据破坏 ratatui 屏幕。
+来自 U 盘、备份和系统探测的文本在渲染前统一过滤终端控制字符，后台工作线程也禁止直接
+向标准输出/标准错误输出，避免异常元数据破坏 ratatui 屏幕。
 
 常用键位：
 
 | 键位 | 行为 |
 |---|---|
 | `j / k` | 上 / 下选择 |
-| `h / l` | 切换设备/备份工作区；Inspect 中切换字段/decoded hex/raw hex |
+| `h / l` | 切换设备/备份工作区；检查界面中切换字段/解码十六进制/原始十六进制 |
 | `gg / G` | 首项 / 末项 |
-| `Ctrl-d / Ctrl-u` | 列表半页移动；Inspect hex 中滚动 |
-| `/` | 搜索当前设备、备份或 Inspect 内容 |
+| `Ctrl-d / Ctrl-u` | 列表半页移动；检查十六进制中滚动 |
+| `/` | 搜索当前设备、备份或检查内容 |
 | `n / N` | 下一个 / 上一个搜索匹配 |
-| `:` | 打开 command palette |
-| `i` | Inspect 当前设备或备份 |
+| `:` | 打开命令面板 |
+| `i` | 检查当前设备或备份 |
 | `b` | 创建当前设备的只读 LBA0-12 备份 |
 | `v` | 校验当前选中备份的大小与 SHA-256 |
 | `D` | 删除当前选中备份（必须输入 `YES`） |
-| `a` | Apply 安全向导 |
-| `R` | Restore 当前选中备份 |
+| `a` | 改造安全向导 |
+| `R` | 恢复当前选中备份 |
 | `Esc` | 返回上一层 / 取消输入 |
 | `q` | 退出 |
 | `?` | 帮助 |
 
-Command palette 只接受任务语义，例如 `:devices`、`:backups`、`:inspect`、
+命令面板只接受任务语义，例如 `:devices`、`:backups`、`:inspect`、
 `:backup-create`、`:backup-verify`、`:backup-delete`、`:apply`、`:restore`、
-`:refresh`、`:help`、`:q`；它不会把输入传给 shell。
+`:refresh`、`:help`、`:q`；它不会把输入传给命令解释器。
 
-设备和备份扫描、Inspect LBA0-12 读取全部在后台执行；同类任务使用 single-flight，繁忙期间
-的新请求会合并为最后一次，旧 generation 的结果不会覆盖更新状态。列表每帧只构造可见行；
+设备和备份扫描、检查 LBA0-LBA12 读取全部在后台执行；同类任务使用单任务并发合并，繁忙期间
+的新请求会合并为最后一次，旧代次的结果不会覆盖更新状态。列表每帧只构造可见行；
 设置 `EDPCLI_ANIMATION=reduced` 可降低动画更新频率，设置 `EDPCLI_ANIMATION=off` 可关闭
-动态帧。Backup create 复用现有只读备份 service；Apply / Restore 则进入明确的安全向导：
+动态帧。备份创建复用现有只读备份服务；改造 / 恢复则进入明确的安全向导：
 
 1. 启动 TUI 前已完成平台管理员提权；
-2. 固定当前目标 disk、onlyid、device_id；Restore 同时固定精确备份路径；
+2. 固定当前目标磁盘、onlyid、device_id；恢复同时固定精确备份路径；
 3. 输入 `YES` 后才允许进入关键操作；
 4. 关键写盘阶段复用与 CLI 完全相同的系统盘保护、USB 整盘确认、写前备份、卸载/锁卷、
-   reopen 身份复核、atomic write、sync/readback 和 rollback；
-5. 关键阶段内 `q`、`Esc`、`Ctrl-C` 不会杀掉写盘 worker，而是在安全结束点后再退出；
+   重新打开后身份复核、atomic 写入、sync/读回和 rollback；
+5. 关键阶段内 `q`、`Esc`、`Ctrl-C` 不会杀掉写盘工作线程，而是在安全结束点后再退出；
    终端 I/O 失败时先恢复终端，再等待关键 worker 完成安全收尾；
 6. 备份删除会固定选中时的内容 SHA-256，删除前重新扫描并复核内容；如果同名文件被替换会拒绝，
-   同时保留“每块盘至少 1 份备份”的安全底线，并同步删除对应 `.sha256` sidecar。
+   同时保留“每块盘至少 1 份备份”的安全底线，并同步删除对应 `.sha256` 旁挂文件。
 
 ### 2.3 查看详细信息
 
@@ -161,12 +161,12 @@ edpcli apply --dry-run --disk 4
 edpcli apply --dry-run --disk 4 --size 100
 ```
 
-dry-run 会执行完整目标识别、device_id 判定和分区布局计算，但保证：
+预览模式会执行完整目标识别、device_id 判定和分区布局计算，但保证：
 
 - 不创建备份；
 - 不进入 YES 写入确认；
 - 不卸载或锁卷；
-- 不 reopen 为读写；
+- 不重新打开为读写；
 - 不写任何扇区。
 
 ### 2.5 执行改造
@@ -179,16 +179,16 @@ edpcli apply --disk 4 --force
 edpcli apply --disk 4 --force --yes
 ```
 
-真实 apply 顺序：
+真实改造顺序：
 
 1. 确认外接 USB 整盘且不是系统盘；
 2. 读取 LBA0-12；
 3. 创建写前自动备份；
 4. 用户确认；
 5. 卸载/锁卷；
-6. reopen 为读写并再次核对介质身份和写前快照；
+6. 重新打开为读写并再次核对介质身份和写前快照；
 7. 原子写入目标扇区；
-8. sync 并逐扇读回；
+8. 同步并逐扇读回；
 9. 任一步失败时按既定回滚协议恢复。
 
 `--force` 只用于明确允许重复改造已免密盘；`--yes` 用于脚本化确认。
@@ -217,19 +217,19 @@ edpcli backup prune --keep 3 --yes
 ## 3. `backup create`：立即备份当前 U 盘
 
 `backup create` 是纯只读介质流程。多盘时使用和其他物理盘命令相同的
-`DeviceSelector`；读取裸盘需要权限时由 CLI 自己提权并固定平台原生 selector。
+`DeviceSelector`；读取裸盘需要权限时由 CLI 自己提权并固定平台原生目标选择器。
 
-它与 apply 写前自动备份共用唯一 `create_backup` service：
+它与改造写前自动备份共用唯一 `create_backup` service：
 
 - 输入固定为 LBA0-12，`13 * 512 = 6656B`；
 - onlyid 从备份自身 LBA4 重新解析；
 - 相同 device_id / VID / PID / 容量元数据；
 - 相同文件名和 `_nopwd` 状态标记；
-- 相同 SHA-256 sidecar；
-- 相同 create-new 防覆盖；
-- 相同 fsync 与目录持久化。
+- 相同 SHA-256 旁挂文件；
+- 相同仅新建方式防覆盖；
+- 相同 `fsync` 与目录持久化。
 
-独立备份不会调用写盘 prepare/unmount/lock，不会 reopen 为读写，不会修改 U 盘。
+独立备份不会调用写盘准备/卸载/锁定，不会重新打开为读写，不会修改 U 盘。
 
 ## 4. 备份列表和全局编号
 
@@ -243,7 +243,7 @@ edpcli backup list
 不会在每个 onlyid 分组里重新从 1 编号。
 
 每项显示时间、原始/免密状态、健康状态和真实文件名，分组同时展示型号、onlyid、Dept、
-User。备份健康检查包含固定大小和 SHA-256 sidecar。
+User。备份健康检查包含固定大小和 SHA-256 旁挂文件。
 
 备份目录优先级：
 
@@ -336,10 +336,10 @@ edpcli inspect backup.bin --lba 6,7,12 --export ./metadata-out
 
 - LBA 必须通过 `--lba` 显式指定，范围固定 0..12；
 - 备份文件可作为唯一位置参数；
-- `--hex` 显示解码后的字段感知 hex；
+- `--hex` 显示解码后的字段感知十六进制；
 - `--raw` 查看盘上原始字节；
 - `--hex` 与 `--raw` 互斥；
-- `--export` 导出 raw/decoded 二进制和 hex；
+- `--export` 导出原始/解码后二进制和十六进制；
 - 离线文件无法自动确定 device_id 时可显式 `--id`。
 
 未指定文件时只选择物理 U 盘；不会因为无盘而自动跳到备份目录猜来源。
@@ -352,9 +352,9 @@ edpcli convert --dir ./snapshot --id 'disk&ven_aigo&prod_u335' --out ./converted
 
 `convert` 只处理快照目录，不访问物理盘，主要用于协议验证、金标比较和工程回归。
 
-## 9. `--disk` selector
+## 9. `--disk` 目标选择器
 
-`--disk` 同时接受统一编号和平台原生整盘 selector：
+`--disk` 同时接受统一编号和平台原生整盘目标选择器：
 
 | 平台 | 示例 |
 |---|---|
@@ -362,9 +362,9 @@ edpcli convert --dir ./snapshot --id 'disk&ven_aigo&prod_u335' --out ./converted
 | Linux | `--disk 2`、`--disk /dev/sdb`、`--disk /dev/nvme1n1` |
 | Windows | `--disk 3`、`--disk PhysicalDrive3`、`--disk '\\.\PhysicalDrive3'` |
 
-跨提权边界前，程序会把选中的目标固定为当前平台原生 selector，避免重执行后枚举漂移。
+跨提权边界前，程序会把选中的目标固定为当前平台原生目标选择器，避免重执行后枚举漂移。
 
-## 10. Shell 补全
+## 10. 命令行补全
 
 ```bash
 # zsh
@@ -379,22 +379,22 @@ edpcli completion fish | source
 
 补全动态提供：
 
-- v2 一级命令和 backup 子命令；
-- 当前物理盘 selector；
+- v2 一级命令和备份子命令；
+- 当前物理盘目标选择器；
 - 备份全局编号；
 - 备份文件名；
 - LBA0-12；
-- 各命令允许的 flag。
+- 各命令允许的参数。
 
 ## 11. 三平台写盘边界
 
 | 平台 | 系统盘确认 | 写前卸载/锁卷 | 提权 |
 |---|---|---|---|
 | macOS | 根卷到 APFS PhysicalStore | 整盘卸载 | CLI 请求管理员权限 |
-| Linux | 根挂载设备链 | 卸载并复查 mountinfo | CLI 请求管理员权限 |
-| Windows | 系统卷到 disk extents | lock + dismount volume | UAC |
+| Linux | 根挂载设备链 | 卸载并复查 `mountinfo` | CLI 请求管理员权限 |
+| Windows | 系统卷到磁盘扩展区 | 锁定 + 卸载卷 | UAC |
 
-共同原则是 fail-closed：系统盘身份、目标卷归属、卸载/锁卷、介质身份或写后校验任一项
+共同原则是拒绝继续：系统盘身份、目标卷归属、卸载/锁卷、介质身份或写后校验任一项
 无法确认时，不进入下一写入阶段。
 
 ## 12. 常用退出码
@@ -402,7 +402,7 @@ edpcli completion fish | source
 | 退出码 | 含义 |
 |---:|---|
 | 0 | 成功或预览完成 |
-| 1 | IO / 运行时错误 |
+| 1 | I/O / 运行时错误 |
 | 2 | 参数或用法错误 |
 | 3 | 目标不可用、非目标盘、系统盘或身份无法确认 |
 | 4 | 已免密盘拒绝重复写入，需要 `--force` |
@@ -422,6 +422,6 @@ cargo clippy --all-targets --locked -- -D warnings
 ```
 
 GitHub Actions 在 macOS/Linux/Windows 的 arm64、x86_64 六个目标执行完整测试、clippy
-和 release build；Linux/Windows 另有四套 virtual-disk HIL。发布时生成七个包，并验证
-SHA-256、SBOM、manifest。版本和 tag 必须严格一致，详细流程见
+和发布构建；Linux/Windows 另有四套虚拟磁盘硬件在环。发布时生成七个包，并验证
+SHA-256、SBOM、清单。版本和标签必须严格一致，详细流程见
 [`RELEASE.md`](RELEASE.md)。

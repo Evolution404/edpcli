@@ -9,31 +9,32 @@
 
 ## 当前架构
 
-- [`architecture/ARCHITECTURE.md`](architecture/ARCHITECTURE.md)：当前模块边界、只读/写入安全边界、CLI/TUI/application/platform 关系。
+- [`architecture/ARCHITECTURE.md`](architecture/ARCHITECTURE.md)：当前模块边界、只读/写入安全边界、CLI/TUI/应用层/平台层关系。
 
 ## 备份
 
-- [`backup/EDPB_FORMAT_V1.md`](backup/EDPB_FORMAT_V1.md)：EDPB v1 容器与 Artifact/Region 规范。
-- [`backup/DEEP_BACKUP_V1.md`](backup/DEEP_BACKUP_V1.md)：Deep Backup 的只读文件系统 inventory、解密和证据边界。
+- [`backup/EDPB_FORMAT_V1.md`](backup/EDPB_FORMAT_V1.md)：EDPB v1 容器与 `Artifact`/`Region` 规范。
+- [`backup/DEEP_BACKUP_V1.md`](backup/DEEP_BACKUP_V1.md)：深度备份的只读文件系统目录清单、解密和证据边界。
 
 ## EDP 协议
 
 - [`protocol/README.md`](protocol/README.md)：协议文档阅读顺序与事实源规则。
 - [`protocol/EDP_LBA0_12_FIELD_GUIDE.md`](protocol/EDP_LBA0_12_FIELD_GUIDE.md)：LBA0–12 人类可读字段手册；由机器字段目录生成/校验。
-- [`protocol/EDP_PROTOCOL_REVERSE_ENGINEERING.md`](protocol/EDP_PROTOCOL_REVERSE_ENGINEERING.md)：协议逆向、证据、历史 profile 与 provenance 的唯一总文档。
-- [`protocol/LCE.md`](protocol/LCE.md)：LCE（LBA7 Compatibility Extent）专项闭环与未闭环边界。
+- [`protocol/EDP_PROTOCOL_REVERSE_ENGINEERING.md`](protocol/EDP_PROTOCOL_REVERSE_ENGINEERING.md)：协议逆向、证据、历史配置类型与来源信息的唯一总文档。
+- [`protocol/LCE.md`](protocol/LCE.md)：LCE（LBA7 兼容扩展区）专项闭环与未闭环边界。
 
-## Provisioning
+## 制盘
 
-- [`provisioning/PROVISIONING.md`](provisioning/PROVISIONING.md)：Provisioning 的唯一长期事实源，同时记录 CURRENT 已实现能力与未来官方四模式/转换 ROADMAP，并严格区分两者。
+- [`provisioning/PROVISIONING.md`](provisioning/PROVISIONING.md)：制盘功能的唯一长期事实源，同时记录当前已实现能力与未来官方四模式/转换路线图，并严格区分两者。
 
 ## 证据目录
 
-协议机器账本、gold fixture、静态/虚拟/物理证据位于 [`../audit/protocol/`](../audit/protocol/)。`audit/` 是证据层，不是第二套产品文档。
+协议机器账本、金标测试夹具、静态/虚拟/物理证据位于 [`../audit/protocol/`](../audit/protocol/)。`audit/` 是证据层，不是第二套产品文档。
 
 ## 文档规则
 
-1. 当前行为只写入上述 canonical 文档；不要再创建 `*_PLAN_*`、`HANDOFF_*`、`LIVE_STATUS` 等平行事实源。
-2. 协议语义优先级：机器 ledger/catalog/test > 协议总文档 > 专题说明；历史分析笔记不能覆盖 canonical 结论。
-3. 过程性调查若仍有长期证据价值，放到 `audit/protocol/notes/`，并明确它是 provenance/边界说明而非当前状态表。
+1. 当前行为只写入上述标准文档；不要再创建 `*_PLAN_*`、`HANDOFF_*`、`LIVE_STATUS` 等平行事实源。
+2. 协议语义优先级：机器账本/字段目录/测试 > 协议总文档 > 专题说明；历史分析笔记不能覆盖标准结论。
+3. 过程性调查若仍有长期证据价值，放到 `audit/protocol/notes/`，并明确它是来源/边界说明而非当前状态表。
 4. 文档中的“已支持/已闭环”必须能指向代码和测试；未实现能力不得以计划语气伪装成当前功能。
+5. 人类阅读的 Markdown 正文必须使用中文；只有代码标识、变量/字段/函数/类型名、命令、路径、协议枚举、原始二进制字符串和必要专有名词可以保留原文。

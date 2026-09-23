@@ -3563,7 +3563,7 @@ fn provenance_audited_netac_physical_capture_closes_the_enabled_eesi_profile() {
     assert!(NETAC_EESI_META.contains("\"backup\": \"LBA0-12 (13 sectors)\""));
     assert!(NETAC_EESI_META.contains("\"md5\": \"db17edf8246ad55e9800b36701afd8e4\""));
     assert!(NETAC_EESI_PROVENANCE.contains("O_RDONLY"));
-    assert!(NETAC_EESI_PROVENANCE.contains("before the second `YES` confirmation"));
+    assert!(NETAC_EESI_PROVENANCE.contains("发生在第二次 `YES` 确认之前"));
     assert!(NETAC_EESI_PROVENANCE
         .contains("d72f6fcd192e92e6423e3b078cffa46725d8e781cdbd48dfcdaa470b72d208bd"));
 

@@ -1,0 +1,272 @@
+source	zh
+14-byte LBA7 pass-info current-v0206.	14 字节 LBA7 密码信息，v0206 当前版 版本。
+14-byte LBA7 pass-info legacy-v0064.	14 字节 LBA7 密码信息，v0064 旧版 版本。
+14-byte pass-info.	14 字节 密码信息。
+2*CRC32(device_id) compatibility guard.	2*CRC32(device_id) 兼容性校验值。
+252-byte random key material	252 字节随机密钥材料
+3x96B EDPF table; key mode A7F0/A6B0.	3*96B EDPF 表；密钥模式为 A7F0/A6B0。
+3x96B EDPF table; key mode AES-128-ECB.	3*96B EDPF 表；密钥模式为 AES-128-ECB。
+3x96B EDPF table; key mode SM4-ECB.	3*96B EDPF 表；密钥模式为 SM4-ECB。
+3x96B EDPF table; key mode legacy-v0064 compatibility.	3*96B EDPF 表；密钥模式为 v0064 旧版 兼容模式。
+Absent EETU/zero state.	EETU 缺失/全零状态。
+Absent GPT entry sector.	GPT 条目扇区缺失状态。
+Absent GPT primary-header sector.	GPT 主头扇区缺失状态。
+Absent/zero entry2.	entry2 缺失/全零状态。
+Active GPT entry0.	有效的 GPT entry0。
+All-zero manufacturer metadata.	全零的制造商元数据。
+Autonum slot; post-NUL backing.	Autonum 槽；NUL 后为保留底层字节。
+Backing before EPPE payload.	EPPE 负载之前的保留底层字节。
+Backing outside SAPF payload.	SAPF 负载之外的保留底层字节。
+Backing outside long-User payload.	长 User 负载之外的保留底层字节。
+BeiZhu first byte/empty NUL.	BeiZhu 首字节/空值 NUL。
+BeiZhu tail or post-NUL backing.	BeiZhu 尾部或 NUL 后保留底层字节。
+Byte63 NUL seam.	第 63 字节为 NUL 拼接边界。
+Byte63 post-NUL backing.	第 63 字节为 NUL 后保留底层字节。
+Byte63 stores Dept[59].	第 63 字节保存 Dept[59]。
+CRC32(device_id).	CRC32(device_id)。
+Caller extension	调用方扩展区
+Clear $$$onlyid$$$ header.	明文 $$$onlyid$$$ 头。
+Continuation begins Dept[59].	续段从 Dept[59] 开始。
+Continuation begins Dept[60].	续段从 Dept[60] 开始。
+Cross-profile preserved compatibility backing.	跨 配置类型 原样保留的兼容性底层字节。
+Current HSerial vector is zero.	当前 HSerial 向量为全零。
+Current host-hardinfo is zero.	当前 host-hardinfo 为全零。
+Current main-onlyid text + zero DWORD.	当前 main-onlyid 文本 + 全零 DWORD。
+DRKB magic	DRKB 魔数
+Dedicated BeiZhu NUL.	BeiZhu 专用 NUL。
+Dedicated GSerial NUL.	GSerial 专用 NUL。
+Distinct historical MP profile B.	独立的历史 MP 配置类型 B。
+Dynamic ELABEL body/backing/tail	动态 ELABEL 正文/保留底层字节/尾部
+EESI absent-zero profile.	EESI 缺失全零 配置类型。
+EESI magic	EESI 魔数
+EETU time/useCount structure plus reverse backing.	EETU 时间/useCount 结构及反向保留底层字节。
+ELABEL offset	ELABEL 偏移
+EPPE magic.	EPPE 魔数。
+EPPE writer-owned zero tail.	由 EPPE 写入端负责的全零尾部。
+Encrypted UID + zero fill	加密 UID + 全零填充
+Explicit-zero absent bootstrap.	显式全零的缺失 引导代码。
+Four standard MBR partition entries.	四个标准 MBR 分区条目。
+GPT primary header and template-owned remainder.	GPT 主头及由模板负责的剩余区域。
+GSerial prefix/terminator position.	GSerial 前缀/终止符位置。
+GSerial tail or post-NUL backing.	GSerial 尾部或 NUL 后保留底层字节。
+HDSerialInfo host identity	HDSerialInfo 主机身份信息
+HSerialCRC[5] vector	HSerialCRC[5] 向量
+Historical host DiskNumber/DeviceNumber-derived identity.	历史主机端由 DiskNumber/DeviceNumber 派生的身份信息。
+LLGB magic	LLGB 魔数
+Label slot with backing.	带保留底层字节的 Label 槽。
+Labversion	Labversion
+Legacy ABI carries caller HSerial[5].	旧版 ABI 携带调用方提供的 HSerial[5]。
+Legacy MBR error-message pointer bytes.	旧版 MBR 错误消息指针字节。
+Logical encrypted-prefix length	逻辑加密前缀长度
+Long User continuation User[28..NUL].	长 User 续段 User[28..NUL]。
+MBR 55AA signature.	MBR 55AA 签名。
+MacInfo[6] reserved slot	MacInfo[6] 保留槽
+Manufacturer MP profile A.	制造商 MP 配置类型 A。
+Marker plus Dept[0..58].	标记 + Dept[0..58]。
+Minimum password length.	最小密码长度。
+Monotonic-millisecond writeTime	单调毫秒 writeTime
+MyHardinfo mirror	MyHardinfo 镜像
+Netac embedded MBR bootstrap.	Netac 内嵌 MBR 引导代码。
+NewLabFlag LLGB	NewLabFlag LLGB
+No active upper-half payload.	上半区没有有效负载。
+Office slot; post-NUL backing.	Office 槽；NUL 后为保留底层字节。
+Official UsbMainBSec MBR bootstrap.	官方 UsbMainBSec MBR 引导代码。
+OnllyID2Nd activation key seed	OnllyID2Nd 激活密钥种子
+OnlyIdXor8 guard	OnlyIdXor8 校验值
+Opaque write-protection probe scratch sector.	不透明的写保护探测临时扇区。
+PDKB magic	PDKB 魔数
+Packed 64-byte legacy EDPF entries 0 and 1.	打包的 64 字节旧版 EDPF entry0 和 entry1。
+Post-NUL zero backing.	NUL 后全零保留底层字节。
+Post-table zero plaintext inside cipher stream.	密文流中表结构之后的全零明文区。
+Present packed EDPF entry2.	存在的打包 EDPF entry2。
+Preserve/ignore tail	原样保留/忽略的尾部
+Preserved compatibility backing after optional SectorSize.	可选 SectorSize 之后原样保留的兼容性底层字节。
+Representation carrier/backing	表示载体/保留底层字节
+Reserved zero header	保留的全零头部
+SAFE6 checksum over first 508 bytes.	SAFE6 对前 508 字节计算的校验和。
+SAPF restore metadata.	SAPF 恢复元数据。
+Second key comes from independent GUID CRC.	第二密钥来自独立 GUID CRC。
+Second key reuses main onlyid.	第二密钥复用 main onlyid。
+Sector tuple 08 04 0C 01	扇区元组 08 04 0C 01
+SectorSize overlay absent.	SectorSize 覆盖项 缺失。
+SectorSize overlay stores LE 512.	SectorSize 覆盖项 保存小端 512。
+Short Dept C-string/backing.	短 Dept C 字符串/保留底层字节。
+SingleUsbFlg	SingleUsbFlg
+Standard MBR disk signature.	标准 MBR 磁盘签名。
+Standard MBR reserved word.	标准 MBR 保留字。
+Static bootstrap/message template.	静态 引导代码/消息模板。
+Static template material.	静态模板材料。
+Static zero tail.	静态全零尾部。
+Strict legacy absent/zero slot.	严格旧版缺失/全零槽。
+Surviving MBR entry3 bytes tied to LBA12 type4 geometry.	与 LBA12 type4 几何信息绑定的残留 MBR entry3 字节。
+ToolVersion[4]	ToolVersion[4]
+Trailing LLGB	尾部 LLGB
+Transitional text + host-hardinfo DWORD.	过渡期文本 + host-hardinfo DWORD。
+Type2 label	type2 标签
+Type4 label	type4 标签
+Unused GPT entries1..3.	未使用的 GPT entries1..3。
+Unused continuation backing.	未使用的续段保留底层字节。
+UsbMainBSec static template.	UsbMainBSec 静态模板。
+UsbOnlyInfo suffix	UsbOnlyInfo 后缀
+UsbSuspensionWnd flag	UsbSuspensionWnd 标志
+User slot; post-NUL backing.	User 槽；NUL 后为保留底层字节。
+Version 1	版本 1
+Write-only !SAFE m_encrypt metadata.	仅写的 !SAFE m_encrypt 元数据。
+Writer-owned zero region after table/pass-info.	由写入端负责的 table/密码信息 后全零区域。
+Zero compatibility tail.	全零兼容性尾部。
+bConnetServer	bConnetServer
+bDataToServer	bDataToServer
+Apply official rolling reader; keep wire and reader flag views distinct.	应用官方 滚动读取端；盘面 与 读取端 的标志视图必须分开保留。
+Apply official rolling reader; logical flags follow rolling-decoded view.	应用官方 滚动读取端；逻辑标志以 rolling 解码后的视图为准。
+Decode 0x40-stride entries.	按 0x40 步长解码条目。
+Decode 128-byte entry.	解码 128 字节条目。
+Decode Dept only from LBA6 C-string.	仅从 LBA6 C 字符串解码 Dept。
+Decode EFI PART header/LBAs/GUIDs/CRCs.	解码 EFI PART 头、LBA、GUID 和 CRC。
+Decode LE DWORD.	解码小端 DWORD。
+Decode LE DWORD; zero is absent, 512 populated.	解码小端 DWORD；0 表示缺失，512 表示已填充。
+Decode LE u32.	解码小端 u32。
+Decode SAPF only through +0x11F.	SAPF 只解码到 +0x11F。
+Decode field; C-strings stop at first NUL.	解码字段；C 字符串在第一个 NUL 处停止。
+Decode fixed CHS/type prefix plus LE start/count formula.	解码固定 CHS/type 前缀及小端 start/count 公式。
+Decode four 16-byte entries.	解码四个 16 字节条目。
+Decode named pass-info fields.	解码已命名的 密码信息 字段。
+Decode named pass-info fields; dormant period units remain uninterpreted.	解码已命名的 密码信息 字段；休眠 period 单位仍不解释。
+Decode packed 64-byte entry2.	解码打包的 64 字节 entry2。
+Decode selected compatibility representation; no behavior branch.	解码所选兼容表示；不产生行为分支。
+Decode with LBA8 logical-length/ELABEL rules.	按照 LBA8 逻辑长度/ELABEL 规则解码。
+Decrypt outer sector with device CRC; validate NeedEncrypt entries use legacy mode0 wrapped-key representation.	使用设备 CRC 解密外层扇区；校验 NeedEncrypt 条目采用 旧版模式0封装密钥 表示。
+Decrypt table under mode1.	按 模式1 解密表。
+Decrypt table under mode2.	按 模式2 解密表。
+Decrypt table under mode3.	按 模式3 解密表。
+Decrypt then require writer-zero compatibility region.	解密后要求兼容区域为写入端规定的全零状态。
+Decrypt/interpret first 0x80; preserve tail.	解密并解释前 0x80 字节；尾部原样保留。
+Derive crypto key using CHS capacity product; decode canonical field.	使用 CHS 容量乘积派生加密密钥；解码标准字段。
+Derive crypto key using DISK_GEOMETRY_EX.DiskSize; decode canonical field.	使用 DISK_GEOMETRY_EX.DiskSize 派生加密密钥；解码标准字段。
+Do not interpret EESI without magic.	没有魔数时不解释 EESI。
+EDP does not decode payload.	EDP 不解码该负载。
+Ignore semantic content.	忽略语义内容。
+Ignore/preserve backing.	忽略/原样保留底层字节。
+Interpret only with UsbMainBSec bootstrap.	仅在 UsbMainBSec 引导代码 下解释。
+Join User continuation and ignore post-NUL backing.	拼接 User 续段并忽略 NUL 后保留底层字节。
+No EDP business meaning.	没有 EDP 业务含义。
+No EDP payload semantics.	没有 EDP 负载语义。
+No GPT entries.	没有 GPT 条目。
+No GPT payload.	没有 GPT 负载。
+No current semantic consumer.	当前没有语义消费者。
+No independent business consumer.	没有独立业务消费者。
+No semantic fields.	没有语义字段。
+No temp-use semantics without EETU magic.	没有 EETU 魔数时不解释临时使用语义。
+Nonzero seam selects join60; append at Dept[60].	非零拼接边界选择 join60；从 Dept[60] 追加。
+Overlay annotation; owner is lba4_encoding.	覆盖项 注解；所有者为 lba4_编码。
+Overlay annotation; semantic owner is base/LBA4 encoding.	覆盖项 注解；语义所有者为 base/LBA4 编码。
+Parse main onlyid.	解析 main onlyid。
+Select this profile-level bootstrap image.	选择该 配置类型 级 引导代码 镜像。
+Treat entry2 as absent.	将 entry2 视为缺失。
+Treat payload as opaque.	将负载作为不透明数据处理。
+Validate 55 AA.	校验 55 AA。
+Validate EETU; consume bounds/useCount; preserve reverse backing.	校验 EETU；消费 bounds/useCount；原样保留反向底层字节。
+Validate EPPE magic.	校验 EPPE 魔数。
+Zero TypeGUID means residual is ignored.	TypeGUID 为零时忽略剩余内容。
+Zero seam selects join59; overlay continuation at Dept[59].	全零拼接边界选择 join59；在 Dept[59] 叠加续段。
+Build official GPT header and CRCs.	构造官方 GPT 头和 CRC。
+Build sector using CHS capacity product.	使用 CHS 容量乘积构造扇区。
+Build sector using DISK_GEOMETRY_EX.DiskSize.	使用 DISK_GEOMETRY_EX.DiskSize 构造扇区。
+Current producer initializes zero.	当前写入端初始化为零。
+Format canonical header.	格式化标准头。
+Full rolling then post-XOR overwrite +0x45/+0x46 from node flags.	先执行完整 rolling，再用 node 标志对 +0x45/+0x46 做 post-XOR 覆盖。
+Initialize to zero.	初始化为零。
+Keep entry2 unused.	保持 entry2 未使用。
+Keep template bytes or zero state.	保持模板字节或全零状态。
+Keep unused entries unowned.	保持未使用条目无所有者。
+Keep zero unless preserving legacy snapshot.	除非保留旧版快照，否则保持为零。
+Preserve absent or write 512.	保留缺失状态或写入 512。
+Preserve absent profile.	保留缺失 配置类型。
+Preserve absent state.	保留缺失状态。
+Preserve absent zero.	保留缺失全零状态。
+Preserve backing.	原样保留底层字节。
+Preserve bytes.	原样保留字节。
+Preserve exact sector.	原样保留完整扇区。
+Preserve exact sector; never normalize.	原样保留完整扇区；禁止归一化。
+Preserve existing snapshot; do not synthesize in current writes.	保留现有快照；当前写入不得自行生成。
+Preserve standard signature.	保留标准签名。
+Producer axis is independent of LBA4 encoding and UsbOnlyInfo.	写入端轴与 LBA4 编码、UsbOnlyInfo 相互独立。
+Producer source changes only.	仅写入端来源发生变化。
+Serialize SAPF restore fields.	序列化 SAPF 恢复字段。
+Serialize canonical field and preserve documented backing.	序列化标准字段并原样保留已记录的底层字节。
+Serialize controls; preserve backing; explicit tail stays zero.	序列化控制字段；原样保留底层字节；显式尾部保持全零。
+Serialize current field while preserving documented backing.	序列化当前字段，同时原样保留已记录的底层字节。
+Serialize entry2.	序列化 entry2。
+Serialize legacy mode0 wrapped-key entries, then encrypt the whole sector with device CRC.	序列化 旧版模式0封装密钥 条目，再使用设备 CRC 加密整个扇区。
+Serialize official entry0.	序列化官方 entry0。
+Serialize packed old-table form.	序列化打包的旧表形式。
+Serialize selected mode/version pass-info.	序列化所选 mode/version 的 密码信息。
+Serialize selected pass-info version and preserve named dormant bytes.	序列化所选 密码信息 版本，并原样保留已命名的休眠字节。
+Serialize selected representation without coupling other axes.	序列化所选表示，不与其他轴耦合。
+Serialize table under mode1.	按 模式1 序列化表。
+Serialize table under mode2.	按 模式2 序列化表。
+Serialize table under mode3.	按 模式3 序列化表。
+Serialize through ordinary rolling without post-XOR flag reinterpretation.	通过普通 rolling 序列化，不对 post-XOR 标志重新解释。
+Serialize/restore MBR entries.	序列化/恢复 MBR 条目。
+SetEESI owns first 0x80 and preserves tail.	SetEESI 负责前 0x80 字节并原样保留尾部。
+Write 55 AA.	写入 55 AA。
+Write Dept[59] inline and continuation from Dept[60].	内联写入 Dept[59]，续段从 Dept[60] 开始。
+Write EPPE magic.	写入 EPPE 魔数。
+Write NUL seam and continuation from Dept[59].	写入 NUL 拼接边界，续段从 Dept[59] 开始。
+Write exact first-party image or explicit zero.	写入精确的一方镜像或显式全零。
+Write remaining User bytes through NUL.	写入剩余 User 字节直到 NUL。
+Write short Dept; preserve LBA9 backing.	写入短 Dept；原样保留 LBA9 底层字节。
+Write validated 6..19 value.	写入已校验的 6..19 值。
+Zero plaintext before whole-sector encryption.	整扇区加密前先将明文置零。
+Zero/caller producer varies independently.	全零/调用方写入模式独立变化。
+Authentic pre-write enabled capture.	真实的写入前启用状态采集。
+Caller value-generation algorithm is not invented.	不臆造调用方的值生成算法。
+Canonical COMPLETE semantics; provenance limits remain documented.	标准 COMPLETE 语义；来源边界继续保留记录。
+Composes with either encoding.	可与任一编码方式组合。
+Cross-LBA mirror is independent.	跨 LBA 镜像关系相互独立。
+EPPE starts at +0x180.	EPPE 从 +0x180 开始。
+Encoding composes independently with producer overlays.	编码可与写入端 覆盖项 独立组合。
+Entry count is independent from pass-info version.	条目数量与 密码信息 版本相互独立。
+Exact per-state byte role is closed.	各状态的精确字节角色已闭环。
+Explicit ownership state.	显式所有权状态。
+General census covers absent state.	通用样本集覆盖缺失状态。
+Historical join59 executable provenance is not required for wire semantics.	历史 join59 可执行文件来源不是 盘面 语义闭环的必要条件。
+Historical nonzero copy site remains provenance only.	历史非零复制位置仅属于来源信息。
+Historical nonzero selector remains provenance only.	历史非零选择器仅属于来源信息。
+Independent from bootstrap family.	与 引导代码 家族相互独立。
+Independent from entry count.	与条目数量相互独立。
+Independent from upper overlays.	与上层 覆盖项 相互独立。
+Legacy mode0 compatibility is semantically closed but has no committed positive physical LBA12 capture.	旧版 模式0 兼容语义已闭环，但尚无已提交的 LBA12 正向物理采集。
+Manufacturer serializer is outside EDP boundary.	制造商序列化器位于 EDP 边界之外。
+Official virtual positive, not physical.	官方虚拟正例，不是物理证据。
+Official virtual positive.	官方虚拟正例。
+Pass-info is inside continuous sector encryption.	密码信息 位于连续的扇区加密流内。
+Physical corpus covers absent profile.	物理样本集覆盖缺失 配置类型。
+Physical preserve state plus virtual active User.	物理保留状态 + 虚拟激活 User。
+Post-NUL backing is not normalized.	NUL 后底层字节不做归一化。
+Producer generation kept separate from representation.	写入端代际与表示形式分开维护。
+Profile avoids User/EPPE reinterpretation.	该 配置类型 避免对 User/EPPE 重新解释。
+Residual is semantically ignored after zero TypeGUID.	TypeGUID 为零后，剩余内容在语义上忽略。
+Reverse bytes are backing, not hidden fields.	反向字节属于底层保留内容，不是隐藏字段。
+SAPF consumer stops at +0x11F.	SAPF 消费端在 +0x11F 停止。
+Selector provenance is separate from wire closure.	选择器来源与 盘面 闭环分开。
+Tail is encrypted, never raw.	尾部始终加密，不是原始明文。
+Virtual mode1/mode3 remains explicitly virtual.	模式1/模式3 的正例明确保持为虚拟证据。
+Writer path selects capacity algorithm.	写入路径决定容量算法。
+Dept seam is an independent serialization axis spanning LBA6 and LBA9.	Dept 拼接边界是跨 LBA6/LBA9 的独立序列化轴。
+EESI is optional; enabled payload owns only its defined prefix and preserves tail.	EESI 为可选项；启用负载只负责已定义前缀，并原样保留尾部。
+EETU is optional and independent from Dept/User upper overlays.	EETU 为可选项，并与 Dept/User 上层 覆盖项 相互独立。
+GPT LBA1/LBA2 presence is independent from SAFE6 metadata profiles.	GPT LBA1/LBA2 是否存在与 SAFE6 元数据 配置类型 相互独立。
+HSerialCRC vector is independently absent or caller supplied.	HSerialCRC 向量可独立处于缺失状态或由调用方提供。
+LBA0 bootstrap family; upper-layer selector provenance is separate from wire semantics.	LBA0 引导代码 家族；上层选择器来源与 盘面 语义分开。
+LBA11 capacity key input differs by writer path, not hardware identity.	LBA11 容量密钥输入取决于写入路径，而不是硬件身份。
+LBA12 wrapped-key mode is independent from all other profile axes.	LBA12 封装密钥 mode 与所有其他 配置类型 轴相互独立。
+LBA4/LBA8 host-hardinfo mirrors share an independent producer axis.	LBA4/LBA8 host-hardinfo 镜像共享一条独立的写入端轴。
+LBA7 pass-info version is independent from packed entry count.	LBA7 密码信息 版本与打包条目数量相互独立。
+Manufacturer MP metadata states share the EDP preserve-only lifecycle.	制造商 MP 元数据状态共享 EDP 仅保留生命周期。
+OnllyID2Nd meaning is stable while producer seed source changes.	OnllyID2Nd 含义稳定，但写入端种子来源会变化。
+Optional SAFE1/legacy SectorSize overlay independent from bootstrap family.	可选 SAFE1/旧版 SectorSize 覆盖项 与 引导代码 家族相互独立。
+Post-NUL LBA6 slice is zero backing or surviving MBR entry3 snapshot.	LBA6 的 NUL 后切片为全零底层字节或残留的 MBR entry3 快照。
+Restore-node logical fields are stable while wire representation differs.	恢复节点 逻辑字段稳定，但 盘面 表示不同。
+Third packed legacy EDPF entry is independently absent or present.	第三个打包旧版 EDPF 条目可独立缺失或存在。
+Upper half is multiplexed among restore, User continuation, password policy, and backing.	上半区在 恢复、User 续段、密码策略和保留底层字节之间复用。
+UsbOnlyInfo has current, transitional, and absent producer states.	UsbOnlyInfo 存在当前、过渡和缺失三种写入端状态。

@@ -1,170 +1,89 @@
-# LBA3 manufacturer provenance boundary
+# LBA3 制造商来源边界
 
-Status: **EDP protocol boundary COMPLETE; manufacturer-internal provenance remains opaque.**
+状态：**EDP 协议边界完全闭环；制造商内部来源仍保持不透明。**
 
-## Local target that actually carries the nonzero LBA3 profile
+## 实际携带非零 LBA3 配置类型的本地目标
 
-The designated strict gold sample is:
+指定严格金标样本为：
 
 `disk4_121110528_vid0951_pid1666_disk&ven_kingston&prod_datatraveler_3.0_onlyid2135149925_20260903_121319.bin`
 
-Host-visible identity:
+主机可见身份：
 
 - VID:PID = `0951:1666`
-- product = `Kingston DataTraveler 3.0`
-- capacity = `121110528 * 512 = 62008590336` bytes
+- 产品 = `Kingston DataTraveler 3.0`
+- 容量 = `121110528 * 512 = 62008590336` 字节
 - LBA3 `+0x000..0x003 = 00 01 00 00`
 - LBA3 `+0x020..0x027 = b5 7e 9c 45 00 80 00 14`
 - LBA3 `+0x1F0..0x1FF = "this is mp mark\0"`
 
-The checked-in baseline harness independently reproduces that shape from the
-current gold set.  No controller model, chip firmware version, ID_BLK version,
-MPALL version, NAND ID, or device serial was captured with this 2026-09-03
-sample.  The target device is not currently present in the macOS USB device
-tree, so no new device-specific controller probe can be made from this host at
-this point.
+仓库内基线脚本可从当前金标集独立复现这一形态。2026-09-03 采集时没有同时保存控制器型号、芯片固件版本、ID_BLK 版本、MPALL 版本、NAND ID 或设备序列号。当前目标设备也不在 macOS USB 设备树中，因此本机暂时无法继续执行针对该设备的控制器探测。
 
-## Why VID/PID/product/capacity cannot select a controller generation
+## 为什么 VID/PID/产品/容量不能确定控制器代际
 
-Two public device reports have the **same** host-visible identity and the exact
-`62008590336`-byte physical capacity, but identify different controller
-generations:
+两个公开设备报告具有**相同**主机可见身份和完全相同的 `62008590336` 字节物理容量，但控制器代际不同：
 
-1. Psychson issue #173 reports `0951:1666`, `Kingston DataTraveler 3.0`,
-   physical capacity `62008590336`, **PS2307**, chip F/W `01.02.55`, ID_BLK
-   `1.3.0.0`, MPALL `v3.34.07`:
+1. Psychson 问题 #173 报告 `0951:1666`、`Kingston DataTraveler 3.0`、物理容量 `62008590336`、**PS2307**、芯片固件 `01.02.55`、ID_BLK `1.3.0.0`、MPALL `v3.34.07`：
    https://github.com/brandonlw/Psychson/issues/173
-2. Psychson issue #213 reports the same VID/PID/product and physical capacity,
-   but **PS2309**, chip F/W `08.05.5D`, ID_BLK `1.4.33.0`, MPALL `v5.35.35`:
+2. Psychson 问题 #213 报告相同 VID/PID/产品和物理容量，但为 **PS2309**、芯片固件 `08.05.5D`、ID_BLK `1.4.33.0`、MPALL `v5.35.35`：
    https://github.com/brandonlw/Psychson/issues/213
 
-This is a direct counterexample to controller inference from the currently
-recorded host identity.  MPALL 3.34/PS2307 and MPALL 5.35/PS2309 must therefore
-remain separate hypotheses until device-specific evidence exists.
+这直接反证了“可根据当前记录的主机身份推断控制器”。因此，在拿到设备专属证据前，MPALL 3.34/PS2307 与 MPALL 5.35/PS2309 必须保持为两个独立假设。
 
-## Existing manufacturing evidence and its boundary
+## 已有制造证据及其边界
 
-The locally archived `MPALL_F1_9000_v372_0B.exe` establishes a real Phison
-F2-mark/F2-INFO manufacturing path.  Its `CBaseController::WriteF2Mark` writes
-and reads back a 512-byte object buffer with vendor commands, but the staging
-page requires a `12 01 00 02` prefix.  That is structurally incompatible with
-the target LBA3 `00 01 00 00` prefix.  `GetInfo.exe` also decodes SampleMark and
-MPF1F2 at offsets unrelated to target LBA3 `+0x020..0x027`.
+本地归档的 `MPALL_F1_9000_v372_0B.exe` 证明真实存在 Phison F2 标记/F2 信息制造路径。`CBaseController::WriteF2Mark` 使用厂商命令写入并读回一个 512 字节对象缓冲区，但暂存页要求 `12 01 00 02` 前缀，与目标 LBA3 的 `00 01 00 00` 前缀在结构上不兼容。`GetInfo.exe` 对 SampleMark 和 MPF1F2 的解码偏移也与目标 LBA3 `+0x020..+0x027` 无关。
 
-The package FW/BN binaries contain `"this is mp mark"` in their final 512-byte
-block at offset `+0x000`; the host-visible target LBA3 contains the same text at
-`+0x1F0`.  This proves ecosystem/marker ancestry only.  It does **not** prove a
-copy, projection, rotation, checksum transform, or LBA mapping.
+该包 FW/BN 二进制的最后 512 字节块在 `+0x000` 包含 `"this is mp mark"`；主机可见目标 LBA3 在 `+0x1F0` 包含同一文本。这只证明生态/标记来源关系，**不能**证明复制、投影、旋转、校验变换或 LBA 映射。
 
-The final-512-byte relationship has now been verified byte-for-byte against all
-four BIN files in the archived v3.72 package:
+已对 v3.72 归档包中的四个 BIN 文件逐字节验证最后 512 字节关系：
 
-- `BN67V1292KM.BIN`: marker page starts at file offset `0x8200`;
-- `BN67V132M.BIN`: marker page starts at file offset `0x8200`;
-- `FW67FF01V60424M.BIN`: marker page starts at file offset `0x16200`;
-- `FW67FF01V61110M.BIN`: marker page starts at file offset `0x1C200`.
+- `BN67V1292KM.BIN`：标记页起始文件偏移 `0x8200`；
+- `BN67V132M.BIN`：标记页起始文件偏移 `0x8200`；
+- `FW67FF01V60424M.BIN`：标记页起始文件偏移 `0x16200`；
+- `FW67FF01V61110M.BIN`：标记页起始文件偏移 `0x1C200`。
 
-Each page starts with the 16 bytes `"this is mp mark\0"`; version/controller
-material follows at page `+0x10`.  For example the two FW pages contain
-`67 01 01 10 06 04 24 46 ff 01 ff ...` and
-`67 01 01 10 06 11 10 46 ff 01 ff ...`.
+每个页面都以 16 字节 `"this is mp mark\0"` 开头；版本/控制器材料从页面 `+0x10` 开始。例如两个 FW 页面分别包含 `67 01 01 10 06 04 24 46 ff 01 ff ...` 和 `67 01 01 10 06 11 10 46 ff 01 ff ...`。
 
-The MPALL executable consumes this layout directly rather than treating the
-marker as a decorative string.  In `CBaseController::virtual_464` the recovered
-machine-code path:
+MPALL 可执行文件会直接消费该布局，而不是把标记当作装饰字符串。在 `CBaseController::virtual_464` 中恢复出的机器码路径会：
 
-1. opens a candidate FW/BN file;
-2. seeks to `file_size - 0x200`;
-3. reads exactly `0x200` bytes;
-4. compares the first 15 bytes with `"this is mp mark"`; and
-5. uses the adjacent marker-page bytes in controller/version compatibility
-   checks (including the `"controller : %x"` /
-   `"controller ver: %x %x %x"` diagnostic paths).
+1. 打开候选 FW/BN 文件；
+2. 定位到 `file_size - 0x200`；
+3. 精确读取 `0x200` 字节；
+4. 把前 15 字节与 `"this is mp mark"` 比较；
+5. 在控制器/版本兼容性检查中使用相邻标记页字节，包括 `"controller : %x"` / `"controller ver: %x %x %x"` 诊断路径。
 
-MSVC RTTI/vtable recovery now fixes those previously name-only `virtual_464/468`
-paths to concrete code addresses: Base=`0x55FC90/0x55F570`, Base30=
-`0x541290/0x541780`, C2250=`0x535C40/0x5354A0`, C2260=
-`0x5333A0/0x532B80`, and C2261=`0x5316B0/0x532B80`.  Direct disassembly of the
-controller implementations confirms the same lifecycle: open candidate FW/BN,
-seek `file_size-0x200`, read 512B, compare the first15 bytes against
-`"this is mp mark"`, then consume the adjacent controller/version bytes.  These
-are FW/BN **marker-page readers/compatibility checkers**, not host-sector
-serializers.
+MSVC RTTI/虚表恢复已经把此前只有名称的 `virtual_464/468` 路径固定到具体代码地址：基础版本=`0x55FC90/0x55F570`、Base30=`0x541290/0x541780`、C2250=`0x535C40/0x5354A0`、C2260=`0x5333A0/0x532B80`、C2261=`0x5316B0/0x532B80`。直接反汇编控制器实现确认相同生命周期：打开候选 FW/BN，定位到 `file_size-0x200`，读取 512B，比较前 15 字节 `"this is mp mark"`，再消费相邻控制器/版本字节。这些是 FW/BN **标记页读取器/兼容性检查器**，不是主机扇区序列化器。
 
-The F2 writer names are now independently fixed to code as well:
-`CBaseController::WriteF2Mark=0x581B00` and
-`CU32SSBaseContoller::WriteF2Mark=0x487FA0`.  Base `WriteF2Mark` passes
-`this+0x1C00C` into the F2 vendor-write helper, reads back an `INFO` response,
-and compares the first `0x200` bytes.  CU32SS uses a different `F3 00 83...`
-wrapper and a `0x1C0` payload.  Therefore same-name F2 operations are not one
-universal 512B host-LBA3 writer, and neither recovered function constructs the
-sparse `marker@+0x1F0` record.
+F2 写入器名称也已独立绑定到代码：`CBaseController::WriteF2Mark=0x581B00`、`CU32SSBaseContoller::WriteF2Mark=0x487FA0`。基础版本 `WriteF2Mark` 把 `this+0x1C00C` 传给 F2 厂商写入辅助函数，读回 `INFO` 响应，再比较前 `0x200` 字节。CU32SS 使用不同的 `F3 00 83...` 包装和 `0x1C0` 负载。因此，同名 F2 操作并不是统一的 512B 主机 LBA3 写入器；目前恢复的函数也都不会构造稀疏的 `marker@+0x1F0` 记录。
 
-A new offline audit adds a stronger structural invariant without crossing that
-boundary.  Two independent physical nonzero LBA3 profiles have distinct first
-40 bytes but exactly the same `+0x028..+0x1FF` 472-byte tail, SHA-256
-`5f88797f7273191052e7a9300316e1a4f0f31563db07110a86fa4e648379198f`.
-That tail is 456 zero bytes at `+0x028..+0x1EF` followed by
-`"this is mp mark\0"` at `+0x1F0..+0x1FF`.  All four pinned v3.72 FW/BN final
-marker pages, after moving their first 16 marker bytes to the end, match this
-physical tail 472/472; the BN pages match the full physical sector 500/512 and
-the FW pages 496/512.  `scripts/protocol/audit_lba3_phison_marker_page.py`
-replays the archive/member/page hashes and this comparison without opening any
-device.
+新的离线审计进一步建立了更强结构不变量，同时没有越过证据边界。两份独立的非零 LBA3 物理配置类型前 40 字节不同，但 `+0x028..+0x1FF` 的 472 字节尾部完全一致，SHA-256 为 `5f88797f7273191052e7a9300316e1a4f0f31563db07110a86fa4e648379198f`。该尾部由 `+0x028..+0x1EF` 的 456 个零字节，加上 `+0x1F0..+0x1FF` 的 `"this is mp mark\0"` 构成。四个已固定的 v3.72 FW/BN 最终标记页，把前 16 个标记字节移到末尾后，都与该物理尾部 472/472 一致；BN 页面与完整物理扇区匹配 500/512，FW 页面匹配 496/512。`scripts/protocol/audit_lba3_phison_marker_page.py` 可以在不打开任何设备的情况下重放归档/成员/页面摘要和该比较。
 
-This is evidence of a shared marker-page-family tail, not evidence that MPALL
-performs that 16-byte reordering.  A scan of the v3.72 PC executable found no
-`496B+16B` rotation path, and the exact physical 8-byte values
-`b5 7e 9c 45 00 80 00 14` / `a8 82 a4 22 00 20 02 16` occur locally only in
-the corresponding physical captures.  The manufacturer record builder and the
-controller-firmware mapping that exposes it as host LBA3 are still missing.
+这证明存在共享的标记页家族尾部，但不能证明 MPALL 实际执行了这项 16 字节重排。扫描 v3.72 PC 可执行文件没有发现 `496B+16B` 旋转路径；精确物理 8 字节值 `b5 7e 9c 45 00 80 00 14` / `a8 82 a4 22 00 20 02 16` 在本地也只出现在各自物理采集中。制造商记录构造器，以及把它映射成主机 LBA3 的控制器固件路径仍然缺失。
 
-Simple checksum projection was also tested and rejected.  Neither observed
-LBA3 DWORD (`0x459C7EB5` in the strict sample,
-`0x22A482A8` in the 2026-08-03 historical profile) matches standard CRC32 of
-the v3.72 FW/BN whole file, its final 512 bytes, marker 16 bytes, marker metadata
-16 bytes, or the remaining 496 bytes.  The strict DWORD also does not match the
-EDP `crc32_bare` of any LBA0-LBA12 sector, the 6656-byte image, the image with
-LBA3 zeroed, the LBA3 prefix, device_id, capacity, sector count or onlyid.
-Thus `+0x020..0x023` is not supported as a simple EDP-side or FW-file checksum.
+还测试并排除了简单校验和投影。两个已观察 LBA3 DWORD（严格样本中的 `0x459C7EB5`、2026-08-03 历史配置类型中的 `0x22A482A8`）都不等于 v3.72 FW/BN 整个文件、最后 512 字节、16 字节标记、16 字节标记元数据或剩余 496 字节的标准 CRC32。严格 DWORD 也不等于任何 LBA0-LBA12 扇区、6656 字节镜像、LBA3 置零后的镜像、LBA3 前缀、device_id、容量、扇区数或 onlyid 的 EDP `crc32_bare`。因此，没有证据支持把 `+0x020..0x023` 解释为简单 EDP 侧或 FW 文件校验和。
 
-## Local capture inventory is insufficient to lock PS2307 versus PS2309
+## 本地采集不足以确定 PS2307 或 PS2309
 
-The older 2026-08-03 profile is preserved in two back-to-back 6656-byte
-captures:
+更早的 2026-08-03 配置类型保存在两份连续的 6656 字节采集中：
 
-- `utils/backup/disk4_20260803_105045.bin`;
-- `utils/backup/disk4_20260803_105053.bin`.
+- `utils/backup/disk4_20260803_105045.bin`
+- `utils/backup/disk4_20260803_105053.bin`
 
-They are byte-identical and carry
-`+0x020..0x027 = a8 82 a4 22 00 20 02 16`.  Their sidecar JSON files record
-only the EDP device_id, EDP CRC, LBA range, image hash/time and a few partition
-facts.  The later 2026-08-27 Kingston sidecars add VID/PID/capacity, but still
-do **not** contain USB serial, bcdDevice/SCSI revision, controller model,
-firmware, ID_BLK or NAND ID.  The saved macOS ioreg snapshots do not contain
-this Kingston device either, and the local CEMS `usb_info.xml` is a generic
-VID/PID dictionary rather than a device capture.
+两份采集逐字节相同，并包含 `+0x020..+0x027 = a8 82 a4 22 00 20 02 16`。其旁挂 JSON 只记录 EDP device_id、EDP CRC、LBA 范围、镜像摘要/时间和少量分区事实。2026-08-27 的 Kingston 旁挂文件增加了 VID/PID/容量，但仍**没有** USB 序列号、bcdDevice/SCSI 修订号、控制器型号、固件、ID_BLK 或 NAND ID。保存的 macOS ioreg 快照也不包含这块 Kingston 设备；本地 CEMS `usb_info.xml` 只是通用 VID/PID 字典，不是设备采集。
 
-This is a reproducible negative boundary: the existing local archive cannot
-select PS2307 or PS2309 for either nonzero LBA3 profile.
+这是可复现的负面边界：现有本地归档无法为任一非零 LBA3 配置类型在 PS2307 和 PS2309 之间做出选择。
 
-## Evidence required only for deeper manufacturer-internal provenance
+## 仅用于继续追踪制造商内部来源的证据要求
 
-At least one of the following must tie the actual target device to a controller
-generation:
+至少需要以下一种证据，把实际目标设备绑定到具体控制器代际：
 
-- a device-specific USBFlashInfo/ChipGenius/MPALL GetInfo capture containing
-  controller part number, chip F/W, ID_BLK and preferably NAND ID; or
-- a read-only vendor-command capture from that exact physical device that
-  returns equivalent controller/firmware identity.
+- 针对该设备的 USBFlashInfo/ChipGenius/MPALL GetInfo 采集，包含控制器部件号、芯片固件、ID_BLK，最好还有 NAND ID；或
+- 对该精确物理设备执行只读厂商命令，返回等价的控制器/固件身份。
 
-After identity is locked, the manufacturing proof must still show both sides
-of the host-visible projection:
+身份锁定后，制造证明仍需同时展示主机可见投影的两端：
 
-1. the exact producer/copy/transform that constructs
-   `00 01 00 00 ... b5 7e 9c 45 00 80 00 14 ... this is mp mark`; and
-2. the firmware path that exposes or consumes that structure as host LBA3 (or
-   proves the intermediate mapping if LBA3 is a projection of another page).
+1. 构造 `00 01 00 00 ... b5 7e 9c 45 00 80 00 14 ... this is mp mark` 的精确写入/复制/变换；
+2. 把该结构暴露或消费为主机 LBA3 的固件路径；如果 LBA3 是另一页面的投影，则需证明中间映射。
 
-These missing manufacturer details do **not** downgrade LBA3 at the EDP protocol boundary. Current EDP behavior is closed as preserve/ignore for manufacturer-owned opaque metadata; the points above are only prerequisites for assigning internal Phison field semantics.
-
+这些缺失的制造商细节**不会**降低 LBA3 在 EDP 协议边界的完全闭环状态。当前 EDP 行为已经闭环为“对制造商自有不透明元数据原样保留/忽略”；上面的证据只是在继续解释 Phison 内部字段语义时才需要。

@@ -200,8 +200,8 @@ fn live_sandisk_two_entry_pointer_and_payload_are_preserved() {
 
 #[test]
 fn final_document_rejects_the_old_alias_model() {
-    assert!(DOC.contains("type2 is not a type4 alias"));
-    assert!(DOC.contains("fixed physical extent is **not type4-specific**"));
-    assert!(DOC.contains("IIR remains a separate module and evidence chain"));
+    assert!(DOC.contains("type2 不是 type4 的别名"));
+    assert!(DOC.contains("固定物理扩展区**并不专属于 type4**"));
+    assert!(DOC.contains("IIR 保持独立模块和独立证据链"));
     assert!(!DOC.contains("# Region A"));
 }

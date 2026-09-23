@@ -1,27 +1,27 @@
-# LCE audit evidence
+# LCE 审计证据
 
-LCE = LBA7 Compatibility Extent. This directory is the canonical machine-readable evidence set for LCE and the legacy EDP partition-table entries that point to it.
+LCE 表示“LBA7 兼容扩展区”。本目录是 LCE 以及指向它的旧版 EDP 分区表条目的标准机器可读证据集。
 
-Canonical terminology:
+统一术语：
 
-- metadata object: `LBA7 legacy EDP partition table`
-- first-party structure: `tagEdpPartionInfo` / `EDP_PARTION_INFO`
-- logical types: `1=boot`, `2=share/exchange`, `4=encrypt/private`
-- physical object: `LCE (LBA7 Compatibility Extent)`
-- payload size: `0xC00` bytes (six 512-byte sectors)
-- new-format counterpart: LBA12 `tagNewEdpPartionInfo`
+- 元数据对象：`LBA7 legacy EDP partition table`
+- 一方结构体：`tagEdpPartionInfo` / `EDP_PARTION_INFO`
+- 逻辑类型：`1=boot`、`2=share/exchange`、`4=encrypt/private`
+- 物理对象：LCE（LBA7 兼容扩展区）
+- 负载大小：`0xC00` 字节（6 个 512 字节扇区）
+- 新格式对应结构：LBA12 `tagNewEdpPartionInfo`
 
-LCE is not type4-specific. First-party `CreatePartitions` preserves the logical `PartionType` of later entries but rewrites their geometry to the same fixed compatibility extent. Consequently mode 0 `[1,2,4]` legitimately has type2 and type4 pointing to the same six-sector block, and mode 3 `[1,2]` can point to it with type2.
+LCE 不专属于 type4。一方 `CreatePartitions` 会保留后续条目的逻辑 `PartionType`，但把其几何改写为同一个固定兼容扩展区。因此模式 0 `[1,2,4]` 中 type2 和 type4 合法地指向同一个六扇区块；模式 3 `[1,2]` 也可以由 type2 指向该区域。
 
-Files:
+文件：
 
-- `evidence/official_lba7_producer_20260923.json`: producer-derived mode matrix, type semantics, and entry geometry rules.
-- `byte_ledger.tsv`: exact 3072-byte payload coverage.
-- `profile_coverage.tsv`: verified physical-profile coverage.
-- `evidence_manifest.tsv`: evidence identities, hashes and scope boundaries.
-- `gold/`: committed physical ciphertext and recovered plaintext fixtures.
-- `live_captures/`: bounded read-only physical captures.
+- `evidence/official_lba7_producer_20260923.json`：由写入端得到的模式矩阵、类型语义和条目几何规则。
+- `byte_ledger.tsv`：精确覆盖 3072 字节负载。
+- `profile_coverage.tsv`：已验证的物理配置类型覆盖。
+- `evidence_manifest.tsv`：证据身份、摘要和适用边界。
+- `gold/`：已提交的物理密文和恢复明文测试夹具。
+- `live_captures/`：有边界的只读物理采集。
 
-IIR is a separate protocol object and is intentionally not modeled as this extent.
+IIR 是独立协议对象，有意不建模为该扩展区。
 
-The low-level LCE producer/locator/payload/crypto/legacy consumer/driver I/O chain is closed. The remaining open provenance is the upper-layer business trigger that decides when and why to rewrite LCE, plus equivalence across older producer versions. See `docs/protocol/LCE.md`.
+LCE 的底层写入端、位置、负载、加解密、旧版消费端和驱动 I/O 链已经闭环。剩余开放来源问题是：哪个上层业务触发在何时、为何决定重写 LCE，以及更早写入端版本是否等价。详见 `docs/protocol/LCE.md`。

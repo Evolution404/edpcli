@@ -1,211 +1,211 @@
-# LCE（LBA7 Compatibility Extent）
+# LCE（LBA7 兼容扩展区）
 
-## 1. Status
+## 1. 状态
 
-LCE 是项目对 LBA7 legacy compatibility extent 的统一简称。本文记录 LCE 的 producer、physical payload、crypto、consumer 和写入边界。
+LCE 是项目对“LBA7 兼容扩展区”的统一简称。本文记录 LCE 的写入端、物理负载、加解密、消费端和写入边界。
 
-The former project name **Region A** is retired. The later name **legacy type4 extent** is also retired: first-party producer code proves that the fixed 0xC00-byte physical object is not type4-specific.
+旧项目名称 **区域 A** 已废弃；后续曾使用的 **旧版 type4 扩展区** 也已废弃。官方一方写入端代码已经证明，固定的 `0xC00` 字节物理对象并不专属于 type4。
 
-Canonical project terminology:
+项目统一术语：
 
-- metadata table: **LBA7 legacy EDP partition table**
-- first-party structure names: `tagEdpPartionInfo` / `EDP_PARTION_INFO`
-- physical payload: **LCE (LBA7 Compatibility Extent)**
-- physical payload size: `0xC00` bytes = 3072 bytes = 6 sectors at 512 B/sector
-- current-format counterpart: LBA12 `tagNewEdpPartionInfo`
-- IIR: a separate protocol object; it is not this extent
+- 元数据表：**LBA7 旧版 EDP 分区表**
+- 一方结构体名称：`tagEdpPartionInfo` / `EDP_PARTION_INFO`
+- 物理负载：**LCE（LBA7 兼容扩展区）**
+- 物理负载大小：`0xC00` 字节 = 3072 字节 = 6 个 512B 扇区
+- 当前格式对应结构：LBA12 `tagNewEdpPartionInfo`
+- IIR：独立协议对象，不是 LCE
 
-The producer conclusions below are derived from the captured first-party Windows labeling stack, not inferred from disk samples.
+以下写入端结论来自已获取的一方 Windows 制盘链，而不是从盘面样本反推。
 
-### 1.1 Closure matrix
+### 1.1 闭环矩阵
 
-| LCE question | Status | Verified boundary |
+| LCE 问题 | 状态 | 已验证边界 |
 | --- | --- | --- |
-| Physical locator / size | **COMPLETE** | official `CreatePartitions` CHS-derived locator, aligned `0xC00`; LBA7 pointer is authoritative |
-| LBA7 producer / pointer generation | **COMPLETE** | official mode selector -> `PartionType[]` -> entry0/later-entry geometry -> LBA7 serializer |
-| Payload plaintext | **COMPLETE** | fixed six-sector FAT16 compatibility image, 3072B |
-| Encryption / decryption | **COMPLETE** | EDPSECDISK zero8 family + physical backing byte-offset tweak; Lexar/SanDisk bit-exact reconstruction |
-| Legacy consumer / mount | **COMPLETE** | old LBA7 fallback converts entry to runtime geometry and reaches `EdpMountFile` |
-| Driver physical read/write mapping | **COMPLETE** | mounted virtual I/O maps through `backing_offset + virtual_offset`; complete 0xC00 extent is addressable |
-| Current normal LBA12 path | **SEPARATE** | current normal type4 mount is not LCE and must not be used as LCE evidence |
-| IIR relationship | **SEPARATE** | IIR is a different protocol object |
-| Upper-layer business trigger: who deliberately rewrites LCE, when, and why | **OPEN** | low-level writable path is proven, but the exact business workflow/event that decides to modify the payload has not been closed end-to-end |
-| All historical producer-version equivalence | **OPEN** | 2026 first-party producer is closed; older versions require independent verification |
+| 物理位置/大小 | **完全闭环** | 官方 `CreatePartitions` 由 CHS 派生位置并按 `0xC00` 对齐；LBA7 指针具有最终权威性 |
+| LBA7 写入端/指针生成 | **完全闭环** | 官方模式选择 -> `PartionType[]` -> 条目0/后续条目几何 -> LBA7 序列化器 |
+| 负载明文 | **完全闭环** | 固定六扇区 FAT16 兼容镜像，3072B |
+| 加密/解密 | **完全闭环** | EDPSECDISK zero8 家族 + 物理后端字节偏移修正；Lexar/SanDisk 均可逐字节精确重建 |
+| 旧版消费端/挂载 | **完全闭环** | 旧 LBA7 回退路径把条目转换成运行时几何并到达 `EdpMountFile` |
+| 驱动物理读写映射 | **完全闭环** | 已挂载虚拟 I/O 通过 `backing_offset + virtual_offset` 映射；完整 `0xC00` 区域均可寻址 |
+| 当前正常 LBA12 路径 | **SEPARATE** | 当前正常 type4 挂载不是 LCE，禁止作为 LCE 证据 |
+| IIR 关系 | **SEPARATE** | IIR 是另一个独立协议对象 |
+| 上层业务触发：谁在何时、为何主动重写 LCE | **OPEN** | 底层可写路径已证明，但决定修改负载的精确业务流程/事件尚未端到端闭环 |
+| 所有历史写入端版本是否完全等价 | **OPEN** | 2026 一方写入端已闭环；更早版本仍需独立验证 |
 
-因此，**LCE 的底层生产、定位、内容、加解密、消费和驱动物理写入路径已经闭环；但不能说“所有写入行为 100% 完全搞明白”**。剩余缺口是上层业务触发 provenance：哪个业务流程在什么条件下决定修改 LCE，以及不同历史版本是否完全相同。
+因此，**LCE 的底层生产、定位、内容、加解密、消费和驱动物理写入路径已经闭环；但不能说“所有写入行为 100% 完全搞明白”**。剩余缺口是上层业务触发来源：哪个业务流程在什么条件下决定修改 LCE，以及不同历史版本是否完全相同。
 
-## 2. First-party producer chain
+## 2. 一方写入链
 
-The end-to-end chain is:
+端到端链路：
 
 `cemssafeudisklabeltool_orig.exe`
 → `usbtoolbusmanage.dll`
 → `cemsusbregsiter.dll`
 → `CUsbRegsiter::CreatePartitions`
-→ legacy `EDP_PARTION_INFO[3]`
-→ LBA7 serializer.
+→ 旧版 `EDP_PARTION_INFO[3]`
+→ LBA7 序列化器。
 
-Machine-readable evidence is in:
+机器可读证据位于：
 
 `audit/protocol/lba7_compatibility/evidence/official_lba7_producer_20260923.json`
 
-Captured binary identities:
+已获取二进制身份：
 
-| Binary | SHA-256 |
+| 二进制 | SHA-256 |
 | --- | --- |
 | `cemssafeudisklabeltool_orig.exe` | `b530a82b29bbc43be8d415225392ca135ab7df8a8d9f69c6598493c4942e9e11` |
 | `usbtoolbusmanage.dll` | `08381e33d44d11719795b063a978a6646387ce40d62c2f7aeb514c0c308459e9` |
 | `cemsusbregsiter.dll` | `122b30301a7d23590f69313063414518f2b60d8535a57ee5d5a585a0c6b4c6eb` |
 | `edpediskctrl.dll` | `5be85c0f85dc65dd8f89e59a78f584a8325e5208441fc461e2a612501a5b3e08` |
 
-## 3. `PartionType` official semantics
+## 3. `PartionType` 官方语义
 
-`edpediskctrl.dll::CEdpDiskControl::InitDiskInfo` scans the legacy/runtime partition list and sets three explicit booleans. This directly binds the numeric values:
+`edpediskctrl.dll::CEdpDiskControl::InitDiskInfo` 会扫描旧版/运行时分区列表，并设置三个明确的布尔值，由此直接固定数值含义：
 
-| `PartionType` | First-party consumer meaning | Project name |
+| `PartionType` | 一方消费端字段 | 项目中文名称 |
 | ---: | --- | --- |
-| `1` | `m_bHasBootPart` | Boot / 启动区 |
-| `2` | `m_bHasSharePart` | Share / 交换区 |
-| `4` | `m_bHasEncryptPart` | Encrypt / 保密区 |
+| `1` | `m_bHasBootPart` | 启动区 |
+| `2` | `m_bHasSharePart` | 交换区 |
+| `4` | `m_bHasEncryptPart` | 保密区 |
 
-These values are now encoded in `src/protocol/edpf.rs` as `EdpPartitionType`.
+这些值已在 `src/protocol/edpf.rs` 中编码为 `EdpPartitionType`。
 
-## 4. Official labeling modes
+## 4. 官方制盘模式
 
-The original label tool exposes four radio buttons. Their UI object offsets, object names and runtime selector writes are continuously bound by the original EXE machine code.
+原始制盘工具提供四个单选项。原始可执行文件机器码连续绑定了对应界面对象偏移、对象名称和运行时选择器写入。
 
-| mode | Official UI text | Producer `PartionType[]` |
+| 模式 | 官方界面文字 | 写入端 `PartionType[]` |
 | ---: | --- | --- |
 | `0` | 缺省三分区 | `[1, 2, 4]` |
 | `1` | 启动区和交换区二合一 | `[2, 4]` |
 | `2` | 整盘加密 | `[1, 4]` |
 | `3` | 内外网通用双分区 | `[1, 2]` |
 
-The data path does not remap the selector:
+数据路径不会重新映射模式选择器：
 
-1. label-tool serialization writes the selected mode into compact field `+0x34`;
-2. `sub_42e8e0` copies it to `LabelInfo+0x7db`;
-3. `usbtoolbusmanage.dll::WriteNormalULabel` copies `+0x7db` unchanged into the registration input;
-4. `cemsusbregsiter.dll::sub_10046e80` reads that same byte and expands the four cases above.
+1. 制盘工具序列化时把所选模式写入紧凑字段 `+0x34`；
+2. `sub_42e8e0` 将其复制到 `LabelInfo+0x7db`；
+3. `usbtoolbusmanage.dll::WriteNormalULabel` 将 `+0x7db` 原样复制到注册输入；
+4. `cemsusbregsiter.dll::sub_10046e80` 读取同一字节，并展开成上面的四种情况。
 
-`src/protocol/lba7.rs::Lba7PartitionMode` codifies this matrix. Unknown historical sequences remain unclassified rather than being guessed.
+`src/protocol/lba7.rs::Lba7PartitionMode` 已固化该矩阵。未知历史序列保持未分类，禁止猜测。
 
-### 4.1 Whole-disk-encrypted special case
+### 4.1 整盘加密模式的特殊规则
 
-Mode 2 still constructs the compatibility sequence `[1, 4]`. The producer then forces the type1 configured size to `0x7E00` bytes and subtracts that amount from type4. The UI description nevertheless says the user-visible mode contains only the private/encrypted area. Therefore the type1 record in this mode must not be described as a normal user-visible boot partition without additional evidence.
+模式 2 仍构造兼容序列 `[1, 4]`。写入端随后强制把 type1 配置大小设为 `0x7E00` 字节，并从 type4 中扣除相同大小。界面描述仍说明用户可见模式只包含保密区。因此，在缺少额外证据前，不能把该模式中的 type1 条目描述成普通用户可见启动区。
 
-## 5. Why type2 and type4 can point to the same 3072-byte address
+## 5. 为什么 type2 和 type4 可以指向同一个 3072 字节地址
 
-This is the central producer result.
+这是当前最关键的写入端结论。
 
-`CUsbRegsiter::CreatePartitions` does **not** serialize all old-table entries with the same geometry rule.
+`CUsbRegsiter::CreatePartitions` **不会**使用同一种几何规则序列化所有旧表条目。
 
-### 5.1 Entry0
+### 5.1 条目0
 
-The first legacy entry retains the first logical partition's type and normal logical geometry. In the observed producer path it uses the normal first-partition start (`StartSector=63`) and a configured partition size adjusted by the 63-sector prefix.
+第一个旧版条目保留第一个逻辑分区的类型和正常逻辑几何。在已观察的写入路径中，它使用正常第一分区起点（`StartSector=63`），分区大小按 63 扇区前缀进行调整。
 
-### 5.2 Entry1 and entry2
+### 5.2 条目1 和条目2
 
-For subsequent legacy entries the producer preserves each entry's own `PartionType`, but overwrites the physical geometry with a compatibility representation:
+对后续旧版条目，写入端保留各条目自己的 `PartionType`，但把物理几何覆盖成兼容表示：
 
-- `StartSector` = result of `sub_10040110()`;
-- `PartionSize` = aligned `0xC00` bytes;
-- on 512-byte media this is exactly six sectors.
+- `StartSector` = `sub_10040110()` 的结果；
+- `PartionSize` = 按 `0xC00` 字节对齐；
+- 在 512 字节扇区介质上恰好等于 6 个扇区。
 
-`sub_10040110()` computes the address from classic `DISK_GEOMETRY`:
+`sub_10040110()` 使用经典 `DISK_GEOMETRY` 计算地址：
 
 `CHS_geometry_bytes - 0xE0000`
 
-Thus later entries can carry **different logical types while pointing to the same physical 3072-byte block**.
+因此，后续条目可以保留**不同的逻辑类型，同时指向同一个物理 3072 字节块**。
 
-This is an old-table serialization rule. It is **not** evidence that one logical partition aliases another.
+这是旧表序列化规则，**不能**据此认定一个逻辑分区是另一个逻辑分区的别名。
 
-### 5.3 Consequences by official mode
+### 5.3 各官方模式的结果
 
-Mode 0, `[1, 2, 4]`:
+模式 0，`[1, 2, 4]`：
 
-- entry0 type1: normal first-partition geometry;
-- entry1 type2: fixed compatibility extent;
-- entry2 type4: the same fixed compatibility extent.
+- 条目0 type1：正常第一分区几何；
+- 条目1 type2：固定兼容扩展区；
+- 条目2 type4：同一个固定兼容扩展区。
 
-Therefore a physical LBA7 table with type2 and type4 at the same `StartSector` / `PartionSize=3072` is expected producer output. **type2 is not a type4 alias.**
+因此，物理 LBA7 表中 type2 和 type4 具有相同 `StartSector` / `PartionSize=3072` 是预期的一方写入结果。**type2 不是 type4 的别名。**
 
-Mode 1, `[2, 4]`:
+模式 1，`[2, 4]`：
 
-- entry0 type2: normal large share/combined geometry;
-- entry1 type4: fixed compatibility extent.
+- 条目0 type2：正常的大交换/二合一分区几何；
+- 条目1 type4：固定兼容扩展区。
 
-This explains the observed no-password SanDisk profile where type2 starts at LBA63 while type4 points near the CHS tail.
+这解释了真实免密 SanDisk 配置类型：type2 从 LBA63 开始，而 type4 指向接近 CHS 尾部的位置。
 
-Mode 3, `[1, 2]`:
+模式 3，`[1, 2]`：
 
-- entry0 type1: normal first-partition geometry;
-- entry1 type2: fixed compatibility extent.
+- 条目0 type1：正常第一分区几何；
+- 条目1 type2：固定兼容扩展区。
 
-This producer case proves decisively that the fixed physical extent is **not type4-specific**.
+这个一方写入案例直接证明固定物理扩展区**并不专属于 type4**。
 
-## 6. LBA7 serialization
+## 6. LBA7 序列化
 
-The legacy table is three 0x40-byte slots (`0xC0` bytes maximum) followed by the legacy 14-byte password/status structure. The producer's LBA7 serializer copies those bytes, applies the legacy rolling-XOR storage transform, and emits the sector-7 representation.
+旧表最多包含三个 `0x40` 字节槽（合计 `0xC0` 字节），之后跟随旧版 14 字节密码/状态结构。LBA7 序列化器复制这些字节，应用旧版滚动异或存储变换，然后生成扇区 7 的表示。
 
-The typed parser is implemented in:
+类型化解析器位于：
 
 - `src/protocol/edpf.rs`
 - `src/protocol/lba7.rs`
 
-The fixed compatibility-address helper is implemented separately in:
+固定兼容地址辅助逻辑单独位于：
 
 - `src/protocol/lba7_compat.rs`
 
-This separation is intentional: logical partition type and physical compatibility extent are different concepts.
+这种拆分是有意设计：逻辑分区类型与物理兼容扩展区是两个不同概念。
 
-## 7. Physical extent content and crypto closure
+## 7. 物理扩展区内容与加解密闭环
 
-Previous work on the physical six-sector block remains valid after the naming correction:
+命名纠正后，此前对物理六扇区块的结论仍然有效：
 
-- the extent is exactly 3072 bytes;
-- committed Lexar and live no-password SanDisk captures are real physical ciphertexts at their LBA7 pointers;
-- the recovered plaintext is a fixed FAT16 compatibility image;
-- the legacy EDPSECDISK transform with zero8 key and the physical backing byte-offset tweak regenerates the verified device ciphertexts bit-for-bit.
+- 扩展区精确为 3072 字节；
+- 已提交的 Lexar 采集和实时免密 SanDisk 采集，都是其 LBA7 指针位置上的真实物理密文；
+- 恢复出的明文是固定 FAT16 兼容镜像；
+- 使用 zero8 密钥的旧版 EDPSECDISK 变换，加上物理后端字节偏移修正，可以逐字节精确重新生成已验证设备密文。
 
-Those facts describe the payload bytes. They do not change the producer conclusion that the same physical object may be referenced by type2 or type4 depending on entry position and official mode.
+这些事实描述的是负载字节，并不改变写入端结论：同一个物理对象可以根据条目位置和官方模式被 type2 或 type4 引用。
 
-Canonical fixtures now live under:
+标准测试夹具位于：
 
 `audit/protocol/lba7_compatibility/`
 
-The byte ledger covers the full `+0x000..+0xBFF` range without gaps.
+字节账本无缺口覆盖完整 `+0x000..+0xBFF`。
 
-## 8. Consumer boundary
+## 8. 消费端边界
 
-Historical `EdpEDiskCtrl` can fall back from the preferred new-label path to the legacy LBA7 table, convert an old entry into runtime form, and submit its backing geometry to the legacy virtual-disk path. The legacy driver can consequently map a host virtual write onto the physical compatibility extent.
+历史 `EdpEDiskCtrl` 可以从首选新标签路径回退到旧版 LBA7 表，把旧条目转换成运行时形式，再把其后端几何提交给旧版虚拟磁盘路径。因此旧驱动能够把主机虚拟写入映射到物理 LCE。
 
-That proves a conditional consumer/write path. It does not mean every disk or every login takes this fallback.
+这证明存在有条件的消费/写入路径，但不代表每块盘或每次登录都会进入该回退流程。
 
-The current normal LBA12 path is a distinct geometry source and must not be cited as evidence that the compatibility extent is the current type4 filesystem partition.
+当前正常 LBA12 路径使用另一套独立几何来源，禁止把它引用为“LCE 就是当前 type4 文件系统分区”的证据。
 
-## 9. IIR is separate
+## 9. IIR 与 LCE 相互独立
 
-IIR work is retained in `src/protocol/iir.rs` and `tests/iir.rs`.
+IIR 相关实现保留在 `src/protocol/iir.rs` 和 `tests/iir.rs`。
 
-LCE and IIR are separate protocol objects. Prior attempts to bind the old “Region A” name to IIR are not part of the current model.
+LCE 与 IIR 是不同协议对象。此前把旧称“区域 A”绑定到 IIR 的尝试不属于当前模型。
 
-## 10. Version scope
+## 10. 版本适用范围
 
-The four-mode producer matrix is proven for the captured first-party 2026 Windows stack identified above. It must not automatically be projected onto every historical label-tool release.
+四模式写入矩阵目前只对上文已识别的 2026 一方 Windows 栈成立，不能自动投射到所有历史制盘工具版本。
 
-Older producer binaries should be checked separately before claiming that the exact same UI-mode matrix and entry geometry rules applied in all years.
+在声称各年代都使用完全相同的界面模式矩阵和条目几何规则前，必须分别检查更早写入端二进制。
 
-The first-party code exposes structure names and field semantics, but no standalone symbol naming the 0xC00 payload object was found. **LCE / LBA7 Compatibility Extent** is therefore an explicit project descriptive term, not a claimed vendor symbol.
+一方代码公开了结构体名称和字段语义，但没有找到给 `0xC00` 负载对象命名的独立符号。因此 **LCE / LBA7 兼容扩展区** 是项目自定义描述性术语，不宣称它是厂商原始符号。
 
-## 11. Current protocol invariants
+## 11. 当前协议不变量
 
-The repository now treats the following as regression invariants:
+仓库把以下规则作为回归不变量：
 
-1. `PartionType=1/2/4` maps to boot/share/encrypt.
-2. Official mode 0/1/2/3 maps to `[1,2,4]`, `[2,4]`, `[1,4]`, `[1,2]` respectively.
-3. LBA7 mode classification is exact; unknown sequences are not guessed.
-4. A 3072-byte compatibility pointer is selected by legacy entry position/geometry, not by requiring `PartionType=4`.
-5. Multiple later entries may point to the same compatibility extent while retaining distinct logical types.
-6. The LBA7 pointer remains authoritative; the CHS formula is an independent producer cross-check.
-7. IIR remains a separate module and evidence chain.
+1. `PartionType=1/2/4` 分别表示启动区/交换区/保密区。
+2. 官方模式 0/1/2/3 分别映射到 `[1,2,4]`、`[2,4]`、`[1,4]`、`[1,2]`。
+3. LBA7 模式分类必须精确；未知序列不得猜测。
+4. 3072 字节兼容指针由旧版条目位置/几何决定，不要求 `PartionType=4`。
+5. 多个后续条目可以在保留不同逻辑类型的同时指向同一个兼容扩展区。
+6. LBA7 指针具有最终权威性；CHS 公式只作为独立写入端交叉验证。
+7. IIR 保持独立模块和独立证据链。
