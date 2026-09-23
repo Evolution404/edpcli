@@ -232,6 +232,21 @@ ReadIIR 和 WriteIIR 都使用 device tree node `+0x18` 计算物理位置，并
 
 写入者筛查还覆盖了 `cemsusbregsiter.dll` 的直接 `WriteFile`/`SetFilePointer` 调用：所见物理盘或逻辑盘写入分别用于前部标签、备份、NTFS 初始化及包装器；`CreatePartitions` 中另外三处 `CHS−0xE0000` 运算只填入 `SetPartInfoNew` 条目。安装包中的 `safeusbregsitercems.dll`、`usbtools.dll`、`usbshformat.exe`、Netac API 与 Linux 客户端也未出现可直接绑定为 `CHS−0xE0000` 六扇区写入的正证据。静态未命中不等于排除间接/动态地址流。现存 Region A 的**首次生成点仍未定位**，不可把驱动的通用 `ZwWriteFile` 等同于已证实的历史 producer。细节记录在 `audit/region_a/evidence/legacy_region_a_conditional_write_20260923.json`。
 
+### 4.11 旧驱动 8B key 分支已绑定 A6B0/EDPSECDISK 密码族；counter-tweak 语义澄清
+
+2026-09-23 用 Unicorn 对 `EdpEDisk64.sys` `sub_13160/sub_13450` 做结构实验后，旧 8B key 分支的密码学轮廓已经精确化：
+
+1. 驱动 0x191d0 处 key 表为 ASCII `EDPSECDISK200709`（16B），与历史 `analyze/last/decrypt_tail.py` 从 `EdpEDiskCtrl.dll sub_10001de0` 提取的 A6B0 常量逐字节一致；`.sys.old`（2023-11）也含同一常量。
+2. 算法是 **counter-tweaked AES-128 变体**：`expanded[i] = key[i % keylen] ^ KEY_TABLE[i]`，标准 AES-128 44 字扩展，每个 16B 块把 8 字节小端 counter（= 缓冲区内字节偏移，逐块 +16）注入全部轮密钥（`cb[(wi*4+bi)%8]`）。**不是 ECB，也不是 CBC**：单块解密（counter=0）与全缓冲中同块解密（counter=0x50）结果不同；两段相同明文加密结果不同。
+3. 因此此前 4.9 的解密尝试语义是"counter 从 Region A 偏移 0 起步"，这是条件挂载下虚拟偏移 0 的正确语义；解后高熵的负结论仍然有效，但**任何未来重试都必须显式选择 counter seed**，而不是寻找 IV。
+4. key 候选矩阵（免密 SanDisk，驱动精确语义）：key8、wrapped8、全零、反转 key8、expanded16（key8^KEY_TABLE）、md5(key8) —— 全部 round-trip 精确、熵 7.93-7.94、无任何 magic。这与历史 `COMPREHENSIVE_ANALYSIS_20260611.md` 第五节已排除 A6B0/XOR/SM4/AES-128/192-CBC/A7F0/3-SBOX/XOR-0x88 的清单互相印证。
+5. 四份物理密文（lexar/aigo/sandisk3/sandisk_nopwd）统计：每份 192 块内零重复；任意两份之间零共享块；同位置字节相等仅 0.3-0.5%（随机巧合水平）。排除"跨盘同 key + 同明文模板"。
+6. `EDPSECDISK` ASCII 标记可直接做跨二进制搜索，已命中 **Linux 客户端全套**（`libedpedisk.so`、`linuxedpedisk`、`cemsudiskcallerproxy`、`checkdiskback`、`EdpEDiskBack`、`libcemsfilesyscheck.so`）及 `EdpEDiskEx.dll`、`UDiskLabelRepair.dll` 等；Linux 侧为 ELF、比签名驱动更易反汇编，且从未按 CHS-0xE0000/0xC00 语义筛查过。
+
+推论：现有负证据一致指向两种剩余假设——(a) Region A 使用尚未推导的 key 派生（counter seed 也可能不是 0），(b) Region A 明文本身就是高熵 keybag/证书类材料，即使解密正确也不会出现 magic 或熵下降。两者都要求先闭环 producer/consumer，不能靠猜 key 突破。
+
+机器证据：`audit/region_a/evidence/edpsecdisk_cipher_profile_20260923.json`。
+
 ## 5. AES 算法、默认 Init key 与版本 profile
 
 `sub_1800092c0/sub_180009390` 调用 `sub_18001c560()` 得到 `EVP_CIPHER` descriptor。早期仅依据 OpenSSL 注册字符串曾误判为 AES-192-CBC；2026-09-22 已用 descriptor 本体纠正。
@@ -382,8 +397,10 @@ IIR、LBA12 分区挂载、`sectorInfo` 上传链目前都不满足第 1 条，�
 
 ## 11. 下一步研究顺序
 
-1. 复现旧版 `EdpEDiskCtrl` 在新版标签失效时的 type4 登录和 `EdpMountFile` 参数，确认旧驱动是否实际接受并读取 `0xC00` Region A；优先用离线镜像或隔离环境，不修改实盘标签。
-2. 找 Region A 六扇区的真正 producer，追 `CreatePartitions` 写出 LBA7 指针之后的初始化/恢复流程；仅有旧版条件挂载 consumer 不能解释 payload 来源。
-3. 在 `u_disk` 历史版本、日志和 DLL/SYS 中按 `0xC00` 长度、CHS-0x700 地址和 old-format entry 语义交叉搜索 producer/consumer；当前重点转向旧注册/兼容组件，而不是 current `edpediskctrl` 前部 label 路径。
-4. IIR 继续保留为独立旁证；三盘 CHS-0x40000 候选窗口已经与 Region A 物理分离，除非获得直接 runtime physical address 绑定，否则不再把 FE06、AES-256-CBC、IIR CRC 或 Init key 用作 Region A 主线。
-5. 当前 `cemsusbregsiter!MountEdpPart/EdpMountFile`、`sectorInfo`、current `edpediskctrl!ReadEncryptPartionInfoEx` 已是负证据；旧版 `EdpEDiskCtrl` 的 **LBA12 失败回退**是单独的条件路径，不得与当前正常挂载混同。
+1. **Linux 客户端 producer/consumer 筛查（新增，最高优先）**：对 `libedpedisk.so`、`linuxedpedisk`、`cemsudiskcallerproxy`、`checkdiskback`、`EdpEDiskBack`、`libcemsfilesyscheck.so` 按 `0xE0000` 减法序列（`2D 00 00 0E 00` / `81 E9 00 00 0E 00`）、`0xC00`/`1792`/`0x700` 常量和 6 扇区 I/O 模式反汇编搜索；ELF 无驱动签名负担，任一命中即同时给出跨平台 producer/consumer 与确切 key 派生。`EDPSECDISK` 标记命中处优先核对是否为 A6B0 同族 counter-tweak 实现。
+2. 复现旧版 `EdpEDiskCtrl` 在新版标签失效时的 type4 登录和 `EdpMountFile` 参数，确认旧驱动是否实际接受并读取 `0xC00` Region A；优先用离线镜像或隔离环境，不修改实盘标签。若挂载成功，观察 3KB 虚拟设备的读 I/O 语义（counter seed、是否从 0 开始），并让 OS 文件系统识别失败/成功本身成为格式正证据。
+3. 找 Region A 六扇区的真正 producer，追 `CreatePartitions` 写出 LBA7 指针之后的初始化/恢复流程；仅有旧版条件挂载 consumer 不能解释 payload 来源。追加方向：ydcc 2025 更新链（`audit_ydcc_update_wire`、vupdate metadata crypto）是否携带写入 CHS-0xE0000 的 0xC00 blob。
+4. crypto 侧并行穷举仍有界进行：counter seed 取 {0, 绝对 LBA*16, PartitionSize 派生}，key 取 {device_id CRC32（如 lexar `fbeeba6b`）、file_key `1a28e58c...`、LBA12 entry 派生 key}；并用结构 oracle（解后块重复、CRC16/CRC32 自洽扫描、跨盘同位置明文相等）替代 magic 检测，以覆盖"明文本身高熵"的 keybag 假设。
+5. 在 `u_disk` 历史版本、日志和 DLL/SYS 中按 `0xC00` 长度、CHS-0x700 地址和 old-format entry 语义交叉搜索 producer/consumer；当前重点转向旧注册/兼容组件，而不是 current `edpediskctrl` 前部 label 路径。
+6. IIR 继续保留为独立旁证；三盘 CHS-0x40000 候选窗口已经与 Region A 物理分离，除非获得直接 runtime physical address 绑定，否则不再把 FE06、AES-256-CBC、IIR CRC 或 Init key 用作 Region A 主线。
+7. 当前 `cemsusbregsiter!MountEdpPart/EdpMountFile`、`sectorInfo`、current `edpediskctrl!ReadEncryptPartionInfoEx` 已是负证据；旧版 `EdpEDiskCtrl` 的 **LBA12 失败回退**是单独的条件路径，不得与当前正常挂载混同。
