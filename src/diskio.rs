@@ -481,6 +481,106 @@ pub fn atomic_write_passwordless_conversion_sectors(
     }
 }
 
+/// Transactional writer for a fully planned new-disk provisioning image.
+///
+/// The domain planner has already bounded every filesystem/LCE sector. This
+/// layer independently enforces target bounds and complete LBA0-12 metadata,
+/// mirrors every touched sector, writes data/LCE first, metadata LBA1-12 next,
+/// and commits LBA0/MBR last. Any write/readback failure rolls back the exact
+/// same touched set.
+pub fn atomic_write_official_provision_sectors(
+    dev: &mut dyn SectorDev,
+    patch: &BTreeMap<u32, Vec<u8>>,
+    total_sectors: u64,
+) -> EdpCliResult<()> {
+    if total_sectors == 0 || total_sectors > u32::MAX as u64 {
+        return Err(EdpCliError::new(
+            EXIT_IO,
+            format!("错误: 制盘目标扇区数不受支持: {total_sectors}"),
+        ));
+    }
+    for required in 0..=crate::common::METADATA_LAST_LBA {
+        if !patch.contains_key(&required) {
+            return Err(EdpCliError::new(
+                EXIT_IO,
+                format!("错误: 制盘写入计划缺少协议元数据 LBA{required}"),
+            ));
+        }
+    }
+    let mut has_data = false;
+    for (&lba, data) in patch {
+        if u64::from(lba) >= total_sectors {
+            return Err(EdpCliError::new(
+                EXIT_IO,
+                format!(
+                    "错误: 制盘写入计划 LBA{lba} 超过目标末端 LBA{}",
+                    total_sectors - 1
+                ),
+            ));
+        }
+        has_data |= lba > crate::common::METADATA_LAST_LBA;
+        if data.len() != SECTOR {
+            return Err(EdpCliError::new(
+                EXIT_IO,
+                format!(
+                    "错误: 制盘 LBA{lba} 数据长度 {}B，必须为 {SECTOR}B",
+                    data.len()
+                ),
+            ));
+        }
+    }
+    if !has_data {
+        return Err(EdpCliError::new(
+            EXIT_IO,
+            "错误: 制盘写入计划没有文件系统/LCE 数据扇区",
+        ));
+    }
+
+    dev.sync().map_err(|e| {
+        EdpCliError::new(EXIT_IO, format!("错误: 制盘写前介质缓存同步预检失败: {e}"))
+    })?;
+
+    let mut mirror = BTreeMap::new();
+    for &lba in patch.keys() {
+        mirror.insert(lba, dev.read_sector(lba).map_err(io_err)?);
+    }
+
+    let mut order: Vec<u32> = patch
+        .keys()
+        .copied()
+        .filter(|&lba| lba > crate::common::METADATA_LAST_LBA)
+        .collect();
+    order.sort_unstable();
+    order.extend(1..=crate::common::METADATA_LAST_LBA);
+    order.push(0);
+
+    match write_and_verify(dev, patch, &order) {
+        Ok(()) => Ok(()),
+        Err(_write_error) => {
+            for attempt in 0..3 {
+                match write_and_verify(dev, &mirror, &order) {
+                    Ok(()) => {
+                        return Err(EdpCliError::new(
+                            EXIT_ROLLED_BACK,
+                            "错误: 制盘写入失败，已完整回滚全部已规划扇区；目标仍为写前状态。",
+                        ));
+                    }
+                    Err(error) if attempt == 2 => {
+                        return Err(EdpCliError::new(
+                            EXIT_INTERMEDIATE,
+                            format!(
+                                "错误: 制盘回滚失败({error})，目标处于中间状态；禁止继续使用该盘。"
+                            ),
+                        ));
+                    }
+                    Err(_) => thread::sleep(Duration::from_millis(500)),
+                }
+            }
+            unreachable!()
+        }
+    }
+}
+
 // ══════════════════════════════════════════════════════════════════
 // 2. 时钟(本地时间; 进程内换算, 测试注入 FixedClock)
 // ══════════════════════════════════════════════════════════════════
