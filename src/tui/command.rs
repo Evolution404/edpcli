@@ -9,12 +9,14 @@ pub enum PaletteAction {
     Provision,
     OfflineConvert,
     Inspect,
+    AdvancedInspect,
     Apply,
     Restore,
     BackupCreate,
     BackupCreateDeep,
     BackupVerify,
     BackupDelete,
+    BackupBatchDelete,
     BackupPrune,
     Refresh,
     Help,
@@ -33,12 +35,14 @@ pub fn parse_command(input: &str) -> Result<PaletteAction, String> {
         "provision" | "make" | "p" => Ok(PaletteAction::Provision),
         "convert" | "offline-convert" | "offline" | "oc" => Ok(PaletteAction::OfflineConvert),
         "inspect" | "i" => Ok(PaletteAction::Inspect),
+        "advanced-inspect" | "inspect-advanced" | "ai" => Ok(PaletteAction::AdvancedInspect),
         "apply" | "a" => Ok(PaletteAction::Apply),
         "restore" | "r" => Ok(PaletteAction::Restore),
         "backup-create" | "create-backup" | "bc" => Ok(PaletteAction::BackupCreate),
         "backup-deep" | "deep-backup" | "bdp" => Ok(PaletteAction::BackupCreateDeep),
         "backup-verify" | "verify-backup" | "verify" | "v" => Ok(PaletteAction::BackupVerify),
         "backup-delete" | "delete-backup" | "delete" | "bd" => Ok(PaletteAction::BackupDelete),
+        "backup-delete-selected" | "batch-delete" | "bdx" => Ok(PaletteAction::BackupBatchDelete),
         "backup-prune" | "prune" | "bp" => Ok(PaletteAction::BackupPrune),
         "refresh" | "reload" => Ok(PaletteAction::Refresh),
         "help" | "h" | "?" => Ok(PaletteAction::Help),
@@ -64,6 +68,10 @@ mod tests {
         );
         assert_eq!(parse_command("prune").unwrap(), PaletteAction::BackupPrune);
         assert_eq!(
+            parse_command("batch-delete").unwrap(),
+            PaletteAction::BackupBatchDelete
+        );
+        assert_eq!(
             parse_command("offline-convert").unwrap(),
             PaletteAction::OfflineConvert
         );
@@ -72,6 +80,10 @@ mod tests {
         assert_eq!(
             parse_command("convert").unwrap(),
             PaletteAction::OfflineConvert
+        );
+        assert_eq!(
+            parse_command("advanced-inspect").unwrap(),
+            PaletteAction::AdvancedInspect
         );
     }
 }

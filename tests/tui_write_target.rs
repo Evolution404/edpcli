@@ -137,6 +137,55 @@ fn filtered_backup_workspace_renders_only_matching_rows() {
 }
 
 #[test]
+fn backup_multi_selection_is_path_pinned_and_reconciles_after_refresh() {
+    let mut state = AppState::new();
+    state.replace_devices(vec![device(7)]);
+    state.replace_backups(vec![
+        backup(1, "one.bin"),
+        backup(2, "two.bin"),
+        backup(3, "three.bin"),
+    ]);
+    state.navigate(NavCommand::Right, 20);
+
+    state.toggle_selected_backup();
+    state.navigate(NavCommand::Down, 20);
+    state.toggle_selected_backup();
+    assert_eq!(state.backup_selection_count(), 2);
+    assert!(state.backup_is_selected(&PathBuf::from("one.bin")));
+    assert!(state.backup_is_selected(&PathBuf::from("two.bin")));
+
+    let targets = state
+        .begin_backup_batch_delete()
+        .expect("two pinned batch targets");
+    assert_eq!(targets.len(), 2);
+    let backend = TestBackend::new(120, 28);
+    let mut terminal = Terminal::new(backend).expect("test terminal");
+    terminal
+        .draw(|frame| render::draw(frame, &state))
+        .expect("draw batch delete planning");
+    state.close_backup_batch_delete();
+
+    state.replace_backups(vec![backup(2, "two.bin"), backup(3, "three.bin")]);
+    assert_eq!(state.backup_selection_count(), 1);
+    assert!(!state.backup_is_selected(&PathBuf::from("one.bin")));
+    assert!(state.backup_is_selected(&PathBuf::from("two.bin")));
+
+    let backend = TestBackend::new(160, 34);
+    let mut terminal = Terminal::new(backend).expect("test terminal");
+    terminal
+        .draw(|frame| render::draw(frame, &state))
+        .expect("draw selected backup rows");
+    let text = terminal
+        .backend()
+        .buffer()
+        .content()
+        .iter()
+        .map(|cell| cell.symbol())
+        .collect::<String>();
+    assert_eq!(state.backup_selection_count(), 1);
+    assert!(text.contains('✓'), "{text}");
+}
+#[test]
 fn switching_to_backups_pins_the_real_device_selected_through_a_filter() {
     let mut state = AppState::new();
     let mut first = device(6);

@@ -402,6 +402,8 @@ fn draw_backups(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState
             Span::styled(nopwd_count.to_string(), success()),
             Span::styled("  ·  原盘备份 ", muted()),
             Span::styled(original_count.to_string(), accent()),
+            Span::styled("  ·  已选 ", muted()),
+            Span::styled(state.backup_selection_count().to_string(), warning()),
         ]))
         .block(Block::default().borders(Borders::ALL).title("备份概览")),
         summary_parts[0],
@@ -486,6 +488,16 @@ fn draw_backups(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState
             .map(|backup| {
                 let (health, health_style) = backup_health(backup);
                 TableRow::new(vec![
+                    Cell::from(if state.backup_is_selected(&backup.path) {
+                        "✓"
+                    } else {
+                        ""
+                    })
+                    .style(if state.backup_is_selected(&backup.path) {
+                        warning()
+                    } else {
+                        muted()
+                    }),
                     Cell::from(backup.index.to_string()).style(accent()),
                     Cell::from(safe(&backup.display_time)),
                     Cell::from(if backup.is_nopwd {
@@ -511,10 +523,12 @@ fn draw_backups(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState
                     Cell::from(health).style(health_style),
                 ])
             });
-        let header = TableRow::new(["#", "时间", "状态", "姓名", "部门", "健康"]).style(accent());
+        let header =
+            TableRow::new(["选", "#", "时间", "状态", "姓名", "部门", "健康"]).style(accent());
         let table = Table::new(
             rows,
             [
+                Constraint::Length(3),
                 Constraint::Length(4),
                 Constraint::Length(17),
                 Constraint::Length(10),
@@ -1247,11 +1261,13 @@ fn draw_command_palette(frame: &mut Frame, area: ratatui::layout::Rect, state: &
         "provision 制盘/免密改造",
         "offline-convert 离线 LBA 快照转换",
         "inspect  打开 Inspect",
+        "advanced-inspect  任意 LBA / decode / meta / 导出",
         "apply    Apply 安全向导",
         "restore  Restore 安全向导",
         "backup-create  备份当前设备",
         "backup-verify  校验当前备份",
         "backup-delete  删除当前备份",
+        "batch-delete  删除空格勾选的多份备份",
         "backup-deep    深度备份当前设备",
         "backup-prune   keep-N 清理旧备份",
         "refresh  刷新当前工作区",
@@ -1383,6 +1399,247 @@ fn draw_inspect(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState
     );
 }
 
+fn draw_advanced_inspect(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState) {
+    let Some(advanced) = state.advanced_inspect() else {
+        return;
+    };
+    use super::state::AdvancedInspectStage;
+    use crate::application::inspect::AdvancedInspectMode;
+
+    match advanced.stage {
+        AdvancedInspectStage::Form => {
+            let fields = [
+                ("LBA 列表/范围", advanced.form.lba_spec.as_str()),
+                ("count", advanced.form.count.as_str()),
+                ("device_id 覆盖", advanced.form.device_id.as_str()),
+                ("导出目录", advanced.form.export_dir.as_str()),
+            ];
+            let mut lines = vec![
+                Line::from(vec![
+                    Span::styled("高级检查", secondary().add_modifier(Modifier::BOLD)),
+                    Span::raw("  ·  "),
+                    Span::styled(safe(&advanced.source.label()), accent()),
+                ]),
+                Line::from(""),
+                Line::from(vec![
+                    Span::styled("模式  ", muted()),
+                    Span::styled(
+                        advanced.form.mode.label(),
+                        match advanced.form.mode {
+                            AdvancedInspectMode::Meta => success(),
+                            AdvancedInspectMode::Decode => secondary(),
+                            AdvancedInspectMode::Raw => warning(),
+                        },
+                    ),
+                    Span::raw("   "),
+                    Span::styled("←/→", accent()),
+                    Span::raw(" 切换 meta/decode/raw"),
+                ]),
+                Line::from(""),
+            ];
+            for (index, (label, value)) in fields.iter().enumerate() {
+                let shown = if value.is_empty() {
+                    "〈留空〉"
+                } else {
+                    value
+                };
+                lines.push(Line::from(vec![
+                    Span::styled(format!("{label:>14}  "), muted()),
+                    Span::styled(
+                        safe(shown),
+                        if index == advanced.form.field_selected {
+                            selected()
+                        } else {
+                            Style::default()
+                        },
+                    ),
+                ]));
+            }
+            lines.extend([
+                Line::from(""),
+                Line::from(
+                    "LBA 示例：7,12,240250283 或 240250283-240250288；count 只与单个起点同用。",
+                ),
+                Line::from(
+                    "导出目录留空=只查看；填写后 raw/decode 输出 .bin+.hex，meta 输出 .txt。",
+                ),
+                Line::from(vec![
+                    Span::styled("↑/↓ Tab", accent()),
+                    Span::raw(" 切字段   "),
+                    Span::styled("Enter", success()),
+                    Span::raw(" 后台执行   "),
+                    Span::styled("Esc", warning()),
+                    Span::raw(" 关闭"),
+                ]),
+            ]);
+            if let Some(message) = &advanced.message {
+                lines.push(Line::from(Span::styled(safe(message), danger())));
+            }
+            frame.render_widget(
+                Paragraph::new(lines)
+                    .block(
+                        Block::default()
+                            .borders(Borders::ALL)
+                            .border_style(secondary())
+                            .title("高级检查 · 任意 LBA"),
+                    )
+                    .wrap(Wrap { trim: false }),
+                area,
+            );
+        }
+        AdvancedInspectStage::Running => {
+            frame.render_widget(
+                Paragraph::new(vec![
+                    Line::from(Span::styled("◈ 高级检查后台执行中", secondary())),
+                    Line::from(""),
+                    Line::from(safe(
+                        advanced
+                            .message
+                            .as_deref()
+                            .unwrap_or("正在读取、区域识别与解码…"),
+                    )),
+                    Line::from("只读任务不会写物理盘；如设置导出目录，仅写普通文件。"),
+                ])
+                .alignment(Alignment::Center)
+                .block(
+                    Block::default()
+                        .borders(Borders::ALL)
+                        .border_style(secondary())
+                        .title("高级检查"),
+                ),
+                area,
+            );
+        }
+        AdvancedInspectStage::Result => {
+            let Some(workspace) = advanced.result.as_ref() else {
+                return;
+            };
+            let Some(item) = workspace.items.get(advanced.selected) else {
+                return;
+            };
+
+            let (list_area, detail_area) = if area.width >= 100 && area.height >= 12 {
+                let parts = Layout::default()
+                    .direction(Direction::Horizontal)
+                    .constraints([Constraint::Length(34), Constraint::Min(48)])
+                    .split(area);
+                (Some(parts[0]), parts[1])
+            } else {
+                (None, area)
+            };
+
+            if let Some(list_area) = list_area {
+                let window =
+                    visible_window(advanced.selected, workspace.items.len(), list_area.height);
+                let start = window.start;
+                let rows = window.map(|index| {
+                    let value = &workspace.items[index];
+                    let region = value.regions.first().map(String::as_str).unwrap_or("未知");
+                    TableRow::new(vec![
+                        Cell::from(format!("LBA{}", value.lba)).style(accent()),
+                        Cell::from(safe(region)),
+                    ])
+                });
+                let mut table_state = TableState::default();
+                table_state.select(Some(advanced.selected.saturating_sub(start)));
+                frame.render_stateful_widget(
+                    Table::new(rows, [Constraint::Length(14), Constraint::Min(12)])
+                        .block(
+                            Block::default()
+                                .borders(Borders::ALL)
+                                .border_style(accent())
+                                .title(format!(
+                                    "LBA {}/{}",
+                                    advanced.selected + 1,
+                                    workspace.items.len()
+                                )),
+                        )
+                        .row_highlight_style(selected())
+                        .highlight_symbol("▶ "),
+                    list_area,
+                    &mut table_state,
+                );
+            }
+
+            let mut lines = vec![
+                Line::from(vec![
+                    Span::styled(format!("LBA{}", item.lba), accent()),
+                    Span::raw("  ·  "),
+                    Span::styled(workspace.mode.label(), secondary()),
+                ]),
+                Line::from(format!("来源: {}", safe(&workspace.source))),
+                Line::from(format!(
+                    "区域: {}",
+                    safe(&if item.regions.is_empty() {
+                        "未知".to_string()
+                    } else {
+                        item.regions.join("；")
+                    })
+                )),
+                Line::from(format!(
+                    "RAW SHA-256: {}   非零={}/512",
+                    safe(&item.raw_sha256),
+                    item.raw_nonzero
+                )),
+            ];
+
+            match workspace.mode {
+                AdvancedInspectMode::Raw => {
+                    lines.push(Line::from(""));
+                    lines.extend(plain_hex_lines(&item.raw));
+                }
+                AdvancedInspectMode::Decode => {
+                    lines.push(Line::from(format!(
+                        "方法: {}",
+                        safe(item.method.as_deref().unwrap_or("未解码"))
+                    )));
+                    if let Some(hash) = &item.decoded_sha256 {
+                        lines.push(Line::from(format!("Decoded SHA-256: {}", safe(hash))));
+                    }
+                    lines.push(Line::from(""));
+                    if let Some(decoded) = &item.decoded {
+                        lines.extend(plain_hex_lines(decoded));
+                    }
+                }
+                AdvancedInspectMode::Meta => {
+                    lines.push(Line::from(""));
+                    if let Some(text) = &item.meta_text {
+                        lines.extend(text.lines().map(|line| Line::from(safe(line))));
+                    }
+                }
+            }
+
+            if let Some(dir) = &workspace.export_dir {
+                lines.insert(
+                    1,
+                    Line::from(vec![
+                        Span::styled("已导出  ", success()),
+                        Span::raw(safe(&dir.display().to_string())),
+                    ]),
+                );
+            }
+
+            let scroll = advanced.scroll.min(u16::MAX as usize) as u16;
+            frame.render_widget(
+                Paragraph::new(lines)
+                    .block(
+                        Block::default()
+                            .borders(Borders::ALL)
+                            .border_style(match workspace.mode {
+                                AdvancedInspectMode::Meta => success(),
+                                AdvancedInspectMode::Decode => secondary(),
+                                AdvancedInspectMode::Raw => warning(),
+                            })
+                            .title("高级检查 · j/k LBA · Ctrl-d/u 滚动 · Enter 参数"),
+                    )
+                    .wrap(Wrap { trim: false })
+                    .scroll((scroll, 0)),
+                detail_area,
+            );
+        }
+    }
+}
+
 fn draw_backup_delete(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState) {
     let Some(delete) = state.backup_delete() else {
         return;
@@ -1422,6 +1679,87 @@ fn draw_backup_delete(frame: &mut Frame, area: ratatui::layout::Rect, state: &Ap
                     .borders(Borders::ALL)
                     .border_style(danger())
                     .title("危险操作 · 删除备份")
+                    .title_style(danger()),
+            )
+            .wrap(Wrap { trim: true }),
+        area,
+    );
+}
+
+fn draw_backup_batch_delete(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState) {
+    let Some(batch) = state.backup_batch_delete() else {
+        return;
+    };
+    use super::state::BackupBatchDeleteStage;
+
+    let planned = batch
+        .prepared
+        .as_ref()
+        .map(|plan| plan.targets.len())
+        .unwrap_or_else(|| state.backup_selection_count());
+    let mut lines = vec![
+        Line::from(Span::styled("批量删除备份", danger())),
+        Line::from(format!("当前勾选: {} 份", state.backup_selection_count())),
+        Line::from("安全规则：新鲜扫描逐项固定路径 + SHA-256 → 一次性保留底线检查 → 固定 DeletePlan → 执行时逐条复核。"),
+        Line::from(""),
+    ];
+    match batch.stage {
+        BackupBatchDeleteStage::Planning => {
+            lines.push(Line::from(Span::styled(
+                "正在生成固定批量删除计划…",
+                secondary(),
+            )));
+        }
+        BackupBatchDeleteStage::Review => {
+            lines.extend([
+                Line::from(Span::styled(
+                    format!("计划已固定：将删除 {planned} 份备份。"),
+                    warning(),
+                )),
+                Line::from("Enter 进入最终 YES 确认；Esc 取消计划并保留勾选。"),
+            ]);
+        }
+        BackupBatchDeleteStage::Confirm => {
+            lines.extend([
+                Line::from(Span::styled(
+                    format!("不可撤销：即将删除 {planned} 份备份。"),
+                    danger(),
+                )),
+                Line::from(vec![
+                    Span::raw("精确输入 "),
+                    Span::styled("YES", danger()),
+                    Span::raw(" 后按 Enter： "),
+                    Span::styled(safe(&batch.confirmation), selected()),
+                ]),
+            ]);
+        }
+        BackupBatchDeleteStage::Running => {
+            lines.push(Line::from(Span::styled(
+                "正在按固定计划逐条复核并删除；退出请求延迟到安全结束点。",
+                warning(),
+            )));
+        }
+        BackupBatchDeleteStage::Result => {
+            lines.push(Line::from(Span::styled(
+                safe(batch.message.as_deref().unwrap_or("批量删除流程结束")),
+                success(),
+            )));
+            lines.push(Line::from("Enter / Esc 返回备份列表。"));
+        }
+    }
+    if batch.stage != BackupBatchDeleteStage::Result {
+        if let Some(message) = &batch.message {
+            lines.push(Line::from(Span::styled(safe(message), muted())));
+        }
+    }
+
+    frame.render_widget(
+        Paragraph::new(lines)
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .border_style(danger())
+                    .title("危险操作 · 批量删除")
                     .title_style(danger()),
             )
             .wrap(Wrap { trim: true }),
@@ -1839,6 +2177,8 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
     let area = frame.area();
     let (core_mode, core_activity) = if state.is_critical_operation() {
         (CoreMode::Guard, "SAFE TRANSACTION")
+    } else if state.advanced_inspect().is_some() {
+        (CoreMode::Busy, "高级检查")
     } else if state.inspect_pending() {
         (CoreMode::Busy, "READ LBA0-12")
     } else if state.active_scan_pending() {
@@ -1896,8 +2236,10 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
     frame.render_widget(workspace_tabs, chunks[1]);
 
     let body = chunks[2];
-    let overlay_active = state.inspect_data().is_some()
+    let overlay_active = state.advanced_inspect().is_some()
+        || state.inspect_data().is_some()
         || state.backup_delete().is_some()
+        || state.backup_batch_delete().is_some()
         || state.backup_prune().is_some()
         || state.apply().is_some()
         || state.wizard().is_some()
@@ -1913,10 +2255,14 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
         (body, None)
     };
 
-    if state.inspect_data().is_some() {
+    if state.advanced_inspect().is_some() {
+        draw_advanced_inspect(frame, content_area, state);
+    } else if state.inspect_data().is_some() {
         draw_inspect(frame, content_area, state);
     } else if state.backup_delete().is_some() {
         draw_backup_delete(frame, content_area, state);
+    } else if state.backup_batch_delete().is_some() {
+        draw_backup_batch_delete(frame, content_area, state);
     } else if state.backup_prune().is_some() {
         draw_backup_prune(frame, content_area, state);
     } else if state.apply().is_some() {
@@ -1934,6 +2280,8 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
                     Line::from("Tab 切换页面   j/k/h/l 移动   gg/G 首/尾   Ctrl-d/u 半页"),
                     Line::from(vec![
                         Span::styled("/ 搜索/过滤", secondary()),
+                        Span::raw("   "),
+                        Span::styled("I 高级 Inspect", warning()),
                         Span::raw("   n/N 搜索结果   "),
                         Span::styled(": 命令", secondary()),
                         Span::raw("   Esc 返回   q 退出   ? 帮助"),
@@ -1945,6 +2293,8 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
                         Span::styled("v 校验", success()),
                         Span::raw("   "),
                         Span::styled("D 删除", danger()),
+                        Span::raw("   "),
+                        Span::styled("Space 勾选 / X 批删", danger()),
                         Span::raw("   "),
                         Span::styled("R 恢复", warning()),
                         Span::raw("   "),
@@ -1994,10 +2344,23 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
 
     let status = if state.is_critical_operation() && state.backup_delete().is_some() {
         "备份删除正在执行：q / Esc / Ctrl-C 将延迟到安全检查点".to_string()
+    } else if state.is_critical_operation() && state.backup_batch_delete().is_some() {
+        "批量备份删除正在执行：q / Esc / Ctrl-C 将延迟到安全检查点".to_string()
     } else if state.is_critical_operation() && state.backup_prune().is_some() {
         "备份清理正在执行：q / Esc / Ctrl-C 将延迟到安全检查点".to_string()
     } else if state.is_critical_operation() {
         "关键写盘阶段：q / Esc / Ctrl-C 将延迟到安全检查点".to_string()
+    } else if let Some(advanced) = state.advanced_inspect() {
+        use super::state::AdvancedInspectStage;
+        match advanced.stage {
+            AdvancedInspectStage::Form => {
+                "高级检查参数：←/→ 模式 · Tab/↑↓ 字段 · Enter 执行 · Esc 关闭".to_string()
+            }
+            AdvancedInspectStage::Running => "高级检查后台只读执行中…".to_string(),
+            AdvancedInspectStage::Result => {
+                "高级检查：j/k LBA · Ctrl-d/u 滚动 · Enter 参数 · Esc 关闭".to_string()
+            }
+        }
     } else if state.input_mode() == InputMode::Search {
         if state.inspect_data().is_some() {
             format!(
@@ -2027,10 +2390,10 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
     } else {
         match state.workspace() {
             Workspace::Devices => {
-                "Tab 页面  ·  j/k 移动  ·  i Inspect  ·  b 新建备份  ·  a Apply  ·  r 刷新  ·  / 搜索  ·  ? 帮助  ·  q 退出".to_string()
+                "Tab 页面  ·  j/k 移动  ·  i 快速 Inspect  ·  I 高级 Inspect  ·  b 备份  ·  a Apply  ·  r 刷新  ·  q 退出".to_string()
             }
             Workspace::Backups => {
-                "Tab 页面  ·  j/k 移动  ·  i Inspect  ·  v 校验  ·  R 恢复  ·  D 删除  ·  b 新建  ·  / 搜索  ·  q 退出".to_string()
+                "Tab 页面 · j/k 移动 · Space 勾选 · X 批删 · i/I 检查 · v 校验 · R 恢复 · D 单删 · q 退出".to_string()
             }
             Workspace::Provision => match state.provision().stage {
                 ProvisionStage::Menu => {

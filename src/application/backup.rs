@@ -104,6 +104,33 @@ impl DeleteSession {
         self.plan_resolved(vec![entry.clone()])
     }
 
+    /// TUI 批量固定的 (path, content_sha256) → 新鲜扫描逐项复核 → 统一保留底线。
+    pub fn plan_exact_many(
+        &self,
+        targets: &[(PathBuf, String)],
+    ) -> Result<DeletePlan, DeletePlanError> {
+        let mut selected = Vec::with_capacity(targets.len());
+        let mut seen = BTreeSet::new();
+        for (path, expected_sha256) in targets {
+            let canonical = canonical_entry_path(path);
+            if !seen.insert(canonical.clone()) {
+                continue;
+            }
+            let entry = scanned_backup_by_path(&self.selector, &canonical).map_err(|_| {
+                DeletePlanError::Vanished {
+                    path: path.to_path_buf(),
+                }
+            })?;
+            if entry.content_sha256.as_deref() != Some(expected_sha256.as_str()) {
+                return Err(DeletePlanError::Changed {
+                    path: path.to_path_buf(),
+                });
+            }
+            selected.push(entry.clone());
+        }
+        self.plan_resolved(selected)
+    }
+
     /// keep-N 清理：prune_candidates 纯策略 + 组装条目 + 统计。
     /// prune_candidates 自带“无原盘组至少留 1”规则，底线复核仅作纵深防御。
     pub fn plan_prune(&self, keep: usize) -> Result<DeletePlan, DeletePlanError> {

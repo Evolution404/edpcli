@@ -98,16 +98,17 @@ application/service，不维护第二套业务实现。来自 U 盘元数据、�
 的文本在渲染前统一过滤终端控制字符，后台 worker 只通过 TaskHub 回传数据，不允许直接向
 stdout/stderr 输出。
 
-TUI 已覆盖主要用户流程：设备列表/详情、Inspect、Apply、普通/深度备份、校验、恢复、单条删除、
+TUI 已覆盖用户业务流程：设备列表/详情、快速检查、高级检查、Apply、普通/深度备份、校验、恢复、单条/批量删除、
 keep-N 清理、官方四模式制盘、现有官方盘严格免密改造、目标绑定稀疏镜像导出，以及离线 LBA 快照
-转换。物理写盘统一遵循“先只读计划/预览，再精确输入 YES”的交互；Apply 还支持 TUI 内设置目标
-大小和 force，并强制先完成 dry-run。离线快照转换不打开 raw device。
+转换。`i` 是 LBA0–12 快速检查；`I` 可检查任意 LBA 列表/范围或 count，支持 raw/decode/meta、
+device_id 覆盖与普通目录导出。物理写盘统一遵循“先只读计划/预览，再精确输入 YES”的交互；Apply
+还支持 TUI 内设置目标大小和 force，并强制先完成 dry-run。离线快照转换不打开 raw device。
 
 核心键位为 `j/k` 上下选择、`Tab/h/l` 切换工作区、`gg/G` 首尾、`Ctrl-d/Ctrl-u` 半页、
-`/` 搜索、`:` 命令面板、`i` Inspect、`b/B` 普通/深度备份、`a` Apply、`R` Restore、
-`v` 校验、`D` 删除、`P` keep-N 清理、`Esc` 返回、`q` 退出、`?` 帮助。
+`/` 搜索、`:` 命令面板、`i` 快速检查、`I` 高级检查、`b/B` 普通/深度备份、`a` Apply、`R` Restore、
+`v` 校验、`D` 单删、`Space` 勾选/取消、`X` 批量删除、`P` keep-N 清理、`Esc` 返回、`q` 退出、`?` 帮助。
 
-设备扫描、备份扫描、Inspect、Apply 预览、制盘计划、镜像导出和离线转换均在后台 worker 执行，
+设备扫描、备份扫描、快速/高级检查、Apply 预览、制盘计划、镜像导出和离线转换均在后台 worker 执行，
 不阻塞 redraw；同类任务使用 single-flight，繁忙期间只保留最新有效结果。动画只重绘可见表格行，
 可通过 `EDPCLI_ANIMATION=reduced` 降低更新频率，或用 `EDPCLI_ANIMATION=off` 关闭动态帧。
 进入关键介质事务后，`q` / `Esc` / `Ctrl-C` 只登记延迟退出，不会中断卸载、reopen、

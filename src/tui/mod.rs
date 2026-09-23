@@ -285,6 +285,22 @@ fn dispatch_nav_command(
             }
             StateEffect::None
         }
+        NavCommand::OpenAdvancedInspect => {
+            let source = match state.workspace() {
+                state::Workspace::Devices | state::Workspace::Provision => state
+                    .selected_device_disk()
+                    .map(state::AdvancedInspectSource::Disk),
+                state::Workspace::Backups => state
+                    .selected_backup_path()
+                    .map(state::AdvancedInspectSource::Backup),
+            };
+            if let Some(source) = source {
+                state.begin_advanced_inspect(source);
+            } else {
+                state.set_notice("高级检查需要先选定物理盘或 EDPB 备份。");
+            }
+            StateEffect::None
+        }
         NavCommand::BeginApply => {
             if let Some(row) = state.selected_device() {
                 let disk = row.disk;
@@ -371,6 +387,27 @@ fn dispatch_nav_command(
             }
             StateEffect::None
         }
+        NavCommand::ToggleBackupSelection => {
+            if state.workspace() == state::Workspace::Backups {
+                state.toggle_selected_backup();
+            } else {
+                state.set_notice("批量选择只在备份页可用。");
+            }
+            StateEffect::None
+        }
+        NavCommand::BeginBackupBatchDelete => {
+            if state.workspace() != state::Workspace::Backups {
+                let _ = state.navigate(NavCommand::WorkspaceBackups, viewport_height);
+            }
+            if let Some(targets) = state.begin_backup_batch_delete() {
+                if let Err(message) =
+                    tasks.request_backup_batch_delete_plan(targets, backup_dir.to_path_buf())
+                {
+                    state.backup_batch_delete_finish_plan(Err(message.to_string()));
+                }
+            }
+            StateEffect::None
+        }
         NavCommand::BeginBackupPrune => {
             if state.workspace() != state::Workspace::Backups {
                 let _ = state.navigate(NavCommand::WorkspaceBackups, viewport_height);
@@ -391,12 +428,14 @@ fn palette_action_to_nav(action: command::PaletteAction) -> NavCommand {
         command::PaletteAction::Provision => NavCommand::WorkspaceProvision,
         command::PaletteAction::OfflineConvert => NavCommand::WorkspaceProvision,
         command::PaletteAction::Inspect => NavCommand::OpenInspect,
+        command::PaletteAction::AdvancedInspect => NavCommand::OpenAdvancedInspect,
         command::PaletteAction::Apply => NavCommand::BeginApply,
         command::PaletteAction::Restore => NavCommand::BeginRestore,
         command::PaletteAction::BackupCreate => NavCommand::BeginBackupCreate,
         command::PaletteAction::BackupCreateDeep => NavCommand::BeginBackupCreateDeep,
         command::PaletteAction::BackupVerify => NavCommand::VerifyBackup,
         command::PaletteAction::BackupDelete => NavCommand::BeginBackupDelete,
+        command::PaletteAction::BackupBatchDelete => NavCommand::BeginBackupBatchDelete,
         command::PaletteAction::BackupPrune => NavCommand::BeginBackupPrune,
         command::PaletteAction::Refresh => NavCommand::Refresh,
         command::PaletteAction::Help => NavCommand::Help,
@@ -485,6 +524,17 @@ fn run_loop(resume: Option<state::WriteIntent>) -> io::Result<LoopExit> {
                     state.set_backup_scan_pending(true);
                 }
             }
+            if let Some(result) = updates.backup_batch_delete_plan {
+                state.backup_batch_delete_finish_plan(result);
+            }
+            if let Some((_operation_id, result)) = updates.backup_batch_delete_execute {
+                let refresh_backups = result.is_ok();
+                state.backup_batch_delete_finish_execute(result);
+                if refresh_backups {
+                    tasks.request_backup_scan(backup_dir.clone());
+                    state.set_backup_scan_pending(true);
+                }
+            }
             if let Some(result) = updates.backup_prune_plan {
                 state.backup_prune_finish_plan(result);
             }
@@ -543,6 +593,9 @@ fn run_loop(resume: Option<state::WriteIntent>) -> io::Result<LoopExit> {
                     }
                 }
             }
+            if let Some(result) = updates.advanced_inspect {
+                state.advanced_inspect_finish(result);
+            }
             if state.take_deferred_exit() == StateEffect::ExitRequested {
                 break;
             }
@@ -573,6 +626,96 @@ fn run_loop(resume: Option<state::WriteIntent>) -> io::Result<LoopExit> {
                 ct_event::Event::Key(key) => {
                     if !event::is_actionable_key(&key) {
                         continue;
+                    }
+                    if let Some(stage) = state.advanced_inspect().map(|advanced| advanced.stage) {
+                        use state::AdvancedInspectStage;
+                        match stage {
+                            AdvancedInspectStage::Form => {
+                                match key.code {
+                                    ct_event::KeyCode::Left => {
+                                        state.advanced_inspect_shift_mode(true);
+                                    }
+                                    ct_event::KeyCode::Right => {
+                                        state.advanced_inspect_shift_mode(false);
+                                    }
+                                    ct_event::KeyCode::Up | ct_event::KeyCode::BackTab => {
+                                        state.advanced_inspect_move_field(-1);
+                                    }
+                                    ct_event::KeyCode::Down | ct_event::KeyCode::Tab => {
+                                        state.advanced_inspect_move_field(1);
+                                    }
+                                    ct_event::KeyCode::Backspace => {
+                                        state.advanced_inspect_backspace();
+                                    }
+                                    ct_event::KeyCode::Enter => {
+                                        match state.advanced_inspect_request() {
+                                            Ok((source, request)) => {
+                                                state.advanced_inspect_start();
+                                                if let Err(message) =
+                                                    tasks.request_advanced_inspect(source, request)
+                                                {
+                                                    state.advanced_inspect_finish(Err(
+                                                        message.to_string()
+                                                    ));
+                                                }
+                                            }
+                                            Err(message) => {
+                                                if let Some(advanced) = state.advanced_inspect_mut()
+                                                {
+                                                    advanced.message = Some(message);
+                                                }
+                                            }
+                                        }
+                                    }
+                                    ct_event::KeyCode::Esc => state.close_advanced_inspect(),
+                                    ct_event::KeyCode::Char(ch)
+                                        if !key
+                                            .modifiers
+                                            .contains(ct_event::KeyModifiers::CONTROL) =>
+                                    {
+                                        state.advanced_inspect_push_char(ch);
+                                    }
+                                    _ => {}
+                                }
+                                continue;
+                            }
+                            AdvancedInspectStage::Running => {
+                                if key.code == ct_event::KeyCode::Esc {
+                                    state.set_notice("高级检查正在后台读取，请等待完成。");
+                                }
+                                continue;
+                            }
+                            AdvancedInspectStage::Result => {
+                                match key.code {
+                                    ct_event::KeyCode::Up | ct_event::KeyCode::Char('k') => {
+                                        state.advanced_inspect_move_result(-1);
+                                    }
+                                    ct_event::KeyCode::Down | ct_event::KeyCode::Char('j') => {
+                                        state.advanced_inspect_move_result(1);
+                                    }
+                                    ct_event::KeyCode::Char('u')
+                                        if key
+                                            .modifiers
+                                            .contains(ct_event::KeyModifiers::CONTROL) =>
+                                    {
+                                        state.advanced_inspect_scroll(-10);
+                                    }
+                                    ct_event::KeyCode::Char('d')
+                                        if key
+                                            .modifiers
+                                            .contains(ct_event::KeyModifiers::CONTROL) =>
+                                    {
+                                        state.advanced_inspect_scroll(10);
+                                    }
+                                    ct_event::KeyCode::Enter => {
+                                        state.advanced_inspect_back_to_form();
+                                    }
+                                    ct_event::KeyCode::Esc => state.close_advanced_inspect(),
+                                    _ => {}
+                                }
+                                continue;
+                            }
+                        }
                     }
                     if let Some(stage) = state.apply().map(|apply| apply.stage) {
                         use state::ApplyStage;
@@ -904,6 +1047,74 @@ fn run_loop(resume: Option<state::WriteIntent>) -> io::Result<LoopExit> {
                                     _ => {}
                                 }
                                 continue;
+                            }
+                        }
+                    }
+                    if let Some(stage) = state.backup_batch_delete().map(|batch| batch.stage) {
+                        use state::BackupBatchDeleteStage;
+                        match stage {
+                            BackupBatchDeleteStage::Planning => {
+                                if key.code == ct_event::KeyCode::Esc {
+                                    state.set_notice("批量删除计划正在后台生成，请等待完成。");
+                                }
+                                continue;
+                            }
+                            BackupBatchDeleteStage::Review => {
+                                match key.code {
+                                    ct_event::KeyCode::Enter => {
+                                        state.backup_batch_delete_begin_confirm();
+                                    }
+                                    ct_event::KeyCode::Esc => {
+                                        state.close_backup_batch_delete();
+                                    }
+                                    _ => {}
+                                }
+                                continue;
+                            }
+                            BackupBatchDeleteStage::Confirm => {
+                                match key.code {
+                                    ct_event::KeyCode::Char(ch)
+                                        if !key
+                                            .modifiers
+                                            .contains(ct_event::KeyModifiers::CONTROL) =>
+                                    {
+                                        state.backup_batch_delete_push_confirmation(ch);
+                                    }
+                                    ct_event::KeyCode::Backspace => {
+                                        state.backup_batch_delete_backspace();
+                                    }
+                                    ct_event::KeyCode::Enter => {
+                                        if let Some(plan) =
+                                            state.backup_batch_delete_take_for_execute()
+                                        {
+                                            if let Err(message) = tasks
+                                                .request_backup_batch_delete_execute(
+                                                    plan,
+                                                    backup_dir.clone(),
+                                                )
+                                            {
+                                                state.backup_batch_delete_finish_execute(Err(
+                                                    message.to_string(),
+                                                ));
+                                            }
+                                        }
+                                    }
+                                    ct_event::KeyCode::Esc => {
+                                        state.close_backup_batch_delete();
+                                    }
+                                    _ => {}
+                                }
+                                continue;
+                            }
+                            BackupBatchDeleteStage::Running => {}
+                            BackupBatchDeleteStage::Result => {
+                                if matches!(
+                                    key.code,
+                                    ct_event::KeyCode::Enter | ct_event::KeyCode::Esc
+                                ) {
+                                    state.close_backup_batch_delete();
+                                    continue;
+                                }
                             }
                         }
                     }

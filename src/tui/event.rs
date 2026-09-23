@@ -58,11 +58,14 @@ impl KeyMapper {
             KeyCode::Char(':') => Some(NavCommand::CommandPalette),
             KeyCode::Char('?') => Some(NavCommand::Help),
             KeyCode::Char('i') => Some(NavCommand::OpenInspect),
+            KeyCode::Char('I') => Some(NavCommand::OpenAdvancedInspect),
             KeyCode::Char('a') => Some(NavCommand::BeginApply),
             KeyCode::Char('b') => Some(NavCommand::BeginBackupCreate),
             KeyCode::Char('B') => Some(NavCommand::BeginBackupCreateDeep),
             KeyCode::Char('v') => Some(NavCommand::VerifyBackup),
             KeyCode::Char('D') => Some(NavCommand::BeginBackupDelete),
+            KeyCode::Char(' ') => Some(NavCommand::ToggleBackupSelection),
+            KeyCode::Char('X') => Some(NavCommand::BeginBackupBatchDelete),
             KeyCode::Char('P') => Some(NavCommand::BeginBackupPrune),
             KeyCode::Char('R') => Some(NavCommand::BeginRestore),
             KeyCode::Char('r') => Some(NavCommand::Refresh),
@@ -103,6 +106,18 @@ mod tests {
         assert_eq!(
             mapper.map(key(KeyCode::Char('P'), KeyModifiers::SHIFT)),
             Some(NavCommand::BeginBackupPrune)
+        );
+        assert_eq!(
+            mapper.map(key(KeyCode::Char('I'), KeyModifiers::SHIFT)),
+            Some(NavCommand::OpenAdvancedInspect)
+        );
+        assert_eq!(
+            mapper.map(key(KeyCode::Char(' '), KeyModifiers::NONE)),
+            Some(NavCommand::ToggleBackupSelection)
+        );
+        assert_eq!(
+            mapper.map(key(KeyCode::Char('X'), KeyModifiers::SHIFT)),
+            Some(NavCommand::BeginBackupBatchDelete)
         );
         assert_eq!(
             mapper.map(key(KeyCode::Char('d'), KeyModifiers::CONTROL)),

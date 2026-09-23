@@ -183,6 +183,73 @@ fn apply_and_offline_convert_states_render_and_enforce_preview_before_write() {
 }
 
 #[test]
+fn advanced_inspect_form_and_result_render_across_terminal_sizes() {
+    use edpcli::application::inspect::{
+        AdvancedInspectItem, AdvancedInspectMode, AdvancedInspectWorkspace,
+    };
+    use edpcli::inspect::InspectMeta;
+    use edpcli::tui::state::{AdvancedInspectSource, AdvancedInspectStage};
+
+    let mut state = AppState::new();
+    assert!(state.begin_advanced_inspect(AdvancedInspectSource::Disk(9)));
+    assert_eq!(
+        state.advanced_inspect().unwrap().stage,
+        AdvancedInspectStage::Form
+    );
+    for (width, height) in [(40, 10), (80, 24), (160, 60)] {
+        let backend = TestBackend::new(width, height);
+        let mut terminal = Terminal::new(backend).expect("test terminal");
+        terminal.draw(|frame| render::draw(frame, &state)).unwrap();
+    }
+
+    let items = [7u64, 12, 24_025_028]
+        .into_iter()
+        .map(|lba| AdvancedInspectItem {
+            lba,
+            regions: vec![format!("测试区域 LBA{lba}")],
+            raw: vec![0x5a; 512],
+            raw_sha256: format!("raw-{lba}"),
+            raw_nonzero: 512,
+            decoded: None,
+            decoded_sha256: None,
+            method: None,
+            meta_text: Some(format!(
+                "LBA: {lba}\n区域:\n  - 测试区域\n物理数据状态: 测试\ndecode 策略: fail-closed\n"
+            )),
+        })
+        .collect();
+    state.advanced_inspect_finish(Ok(AdvancedInspectWorkspace {
+        source: "测试物理盘 disk9".into(),
+        meta: InspectMeta::default(),
+        mode: AdvancedInspectMode::Meta,
+        items,
+        export_dir: None,
+    }));
+    assert_eq!(
+        state.advanced_inspect().unwrap().stage,
+        AdvancedInspectStage::Result
+    );
+    state.advanced_inspect_move_result(1);
+    state.advanced_inspect_scroll(10);
+    assert_eq!(state.advanced_inspect().unwrap().selected, 1);
+    assert_eq!(state.advanced_inspect().unwrap().scroll, 10);
+
+    for (width, height) in [(40, 10), (80, 24), (160, 60)] {
+        let backend = TestBackend::new(width, height);
+        let mut terminal = Terminal::new(backend).expect("test terminal");
+        terminal.draw(|frame| render::draw(frame, &state)).unwrap();
+    }
+
+    state.advanced_inspect_back_to_form();
+    assert_eq!(
+        state.advanced_inspect().unwrap().stage,
+        AdvancedInspectStage::Form
+    );
+    state.close_advanced_inspect();
+    assert!(state.advanced_inspect().is_none());
+}
+
+#[test]
 fn terminal_lifecycle_has_raii_restore_for_error_and_unwind_paths() {
     let source = include_str!("../src/tui/mod.rs");
     for required in [

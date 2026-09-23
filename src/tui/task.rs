@@ -108,6 +108,10 @@ enum WorkerResult {
         generation: u64,
         result: Result<InspectWorkspace, String>,
     },
+    AdvancedInspect {
+        generation: u64,
+        result: Result<crate::application::inspect::AdvancedInspectWorkspace, String>,
+    },
     DeviceError {
         generation: u64,
         message: String,
@@ -124,6 +128,14 @@ enum WorkerResult {
     BackupDelete {
         operation_id: OperationId,
         result: Result<(), String>,
+    },
+    BackupBatchDeletePlan {
+        generation: u64,
+        result: Result<crate::application::backup::DeletePlan, String>,
+    },
+    BackupBatchDeleteExecute {
+        operation_id: OperationId,
+        result: Result<usize, String>,
     },
     BackupPrunePlan {
         generation: u64,
@@ -170,10 +182,14 @@ pub struct TaskUpdates {
     pub apply_progress: Option<(OperationId, crate::application::WriteEvent)>,
     pub apply_write: Option<(OperationId, Result<(), String>)>,
     pub inspect: Option<Result<InspectWorkspace, String>>,
+    pub advanced_inspect:
+        Option<Result<crate::application::inspect::AdvancedInspectWorkspace, String>>,
     pub device_error: Option<String>,
     pub backup_error: Option<String>,
     pub backup_verify: Option<(PathBuf, Result<(), String>)>,
     pub backup_delete: Option<(OperationId, Result<(), String>)>,
+    pub backup_batch_delete_plan: Option<Result<crate::application::backup::DeletePlan, String>>,
+    pub backup_batch_delete_execute: Option<(OperationId, Result<usize, String>)>,
     pub backup_prune_plan: Option<Result<crate::tui::state::BackupPrunePrepared, String>>,
     pub backup_prune_execute: Option<(OperationId, Result<usize, String>)>,
     pub provision_plan: Option<Result<crate::tui::state::ProvisionPrepared, String>>,
@@ -193,10 +209,13 @@ impl TaskUpdates {
             || self.apply_progress.is_some()
             || self.apply_write.is_some()
             || self.inspect.is_some()
+            || self.advanced_inspect.is_some()
             || self.device_error.is_some()
             || self.backup_error.is_some()
             || self.backup_verify.is_some()
             || self.backup_delete.is_some()
+            || self.backup_batch_delete_plan.is_some()
+            || self.backup_batch_delete_execute.is_some()
             || self.backup_prune_plan.is_some()
             || self.backup_prune_execute.is_some()
             || self.provision_plan.is_some()
@@ -223,21 +242,25 @@ pub struct TaskHub {
     device_generation: GenerationGate,
     backup_generation: GenerationGate,
     inspect_generation: GenerationGate,
+    advanced_inspect_generation: GenerationGate,
     verify_generation: GenerationGate,
     provision_generation: GenerationGate,
     provision_export_generation: GenerationGate,
     offline_convert_generation: GenerationGate,
     apply_generation: GenerationGate,
     prune_generation: GenerationGate,
+    batch_delete_generation: GenerationGate,
     device_single_flight: SingleFlightGate,
     backup_single_flight: SingleFlightGate,
     inspect_single_flight: SingleFlightGate,
+    advanced_inspect_single_flight: SingleFlightGate,
     verify_single_flight: SingleFlightGate,
     provision_single_flight: SingleFlightGate,
     provision_export_single_flight: SingleFlightGate,
     offline_convert_single_flight: SingleFlightGate,
     apply_single_flight: SingleFlightGate,
     prune_single_flight: SingleFlightGate,
+    batch_delete_single_flight: SingleFlightGate,
     pending_device_scan: Option<PathBuf>,
     pending_backup_scan: Option<PathBuf>,
     pending_inspect: Option<(u64, InspectRequest)>,
@@ -262,21 +285,25 @@ impl TaskHub {
             device_generation: GenerationGate::new(),
             backup_generation: GenerationGate::new(),
             inspect_generation: GenerationGate::new(),
+            advanced_inspect_generation: GenerationGate::new(),
             verify_generation: GenerationGate::new(),
             provision_generation: GenerationGate::new(),
             provision_export_generation: GenerationGate::new(),
             offline_convert_generation: GenerationGate::new(),
             apply_generation: GenerationGate::new(),
             prune_generation: GenerationGate::new(),
+            batch_delete_generation: GenerationGate::new(),
             device_single_flight: SingleFlightGate::new(),
             backup_single_flight: SingleFlightGate::new(),
             inspect_single_flight: SingleFlightGate::new(),
+            advanced_inspect_single_flight: SingleFlightGate::new(),
             verify_single_flight: SingleFlightGate::new(),
             provision_single_flight: SingleFlightGate::new(),
             provision_export_single_flight: SingleFlightGate::new(),
             offline_convert_single_flight: SingleFlightGate::new(),
             apply_single_flight: SingleFlightGate::new(),
             prune_single_flight: SingleFlightGate::new(),
+            batch_delete_single_flight: SingleFlightGate::new(),
             pending_device_scan: None,
             pending_backup_scan: None,
             pending_inspect: None,
@@ -420,6 +447,37 @@ impl TaskHub {
         });
     }
 
+    pub fn request_advanced_inspect(
+        &mut self,
+        source: crate::tui::state::AdvancedInspectSource,
+        request: crate::application::inspect::AdvancedInspectRequest,
+    ) -> Result<u64, &'static str> {
+        if !self.advanced_inspect_single_flight.try_start() {
+            return Err("已有高级检查正在执行");
+        }
+        let generation = self.advanced_inspect_generation.begin();
+        let tx = self.tx.clone();
+        std::thread::spawn(move || {
+            let result = catch_unwind(AssertUnwindSafe(|| match source {
+                crate::tui::state::AdvancedInspectSource::Disk(disk) => {
+                    let runner = SysRunner;
+                    crate::application::inspect::load_disk_advanced_inspect(&runner, disk, &request)
+                }
+                crate::tui::state::AdvancedInspectSource::Backup(path) => {
+                    crate::application::inspect::load_backup_advanced_inspect(&path, &request)
+                }
+            }))
+            .unwrap_or_else(|payload| {
+                Err(format!(
+                    "高级检查 worker 异常终止: {}",
+                    panic_message(payload)
+                ))
+            });
+            let _ = tx.send(WorkerResult::AdvancedInspect { generation, result });
+        });
+        Ok(generation)
+    }
+
     pub fn request_backup_verify(&mut self, path: PathBuf, backup_dir: PathBuf) -> u64 {
         let generation = self.verify_generation.begin();
         if !self.verify_single_flight.try_start() {
@@ -469,6 +527,80 @@ impl TaskHub {
                 ))
             });
             let _ = tx.send(WorkerResult::BackupDelete {
+                operation_id,
+                result,
+            });
+        }));
+        Ok(operation_id)
+    }
+
+    pub fn request_backup_batch_delete_plan(
+        &mut self,
+        targets: Vec<(PathBuf, String)>,
+        backup_dir: PathBuf,
+    ) -> Result<u64, &'static str> {
+        if !self.batch_delete_single_flight.try_start() {
+            return Err("已有批量删除计划正在生成");
+        }
+        let generation = self.batch_delete_generation.begin();
+        let tx = self.tx.clone();
+        std::thread::spawn(move || {
+            let result = catch_unwind(AssertUnwindSafe(|| {
+                let session = crate::application::backup::DeleteSession::open(&backup_dir);
+                session
+                    .plan_exact_many(&targets)
+                    .map_err(|error| error.message())
+            }))
+            .unwrap_or_else(|payload| {
+                Err(format!(
+                    "批量删除计划 worker 异常终止: {}",
+                    panic_message(payload)
+                ))
+            });
+            let _ = tx.send(WorkerResult::BackupBatchDeletePlan { generation, result });
+        });
+        Ok(generation)
+    }
+
+    pub fn request_backup_batch_delete_execute(
+        &mut self,
+        plan: crate::application::backup::DeletePlan,
+        backup_dir: PathBuf,
+    ) -> Result<OperationId, &'static str> {
+        let operation_id = self.begin_operation()?;
+        let tx = self.tx.clone();
+        self.critical_worker = Some(std::thread::spawn(move || {
+            let result = catch_unwind(AssertUnwindSafe(|| {
+                let session = crate::application::backup::DeleteSession::open(&backup_dir);
+                let expected = plan.targets.len();
+                let results = session.execute(&plan);
+                let failures = results
+                    .iter()
+                    .filter_map(|(path, result)| {
+                        result
+                            .as_ref()
+                            .err()
+                            .map(|message| format!("{}: {message}", path.display()))
+                    })
+                    .collect::<Vec<_>>();
+                if failures.is_empty() {
+                    Ok(expected)
+                } else {
+                    Err(format!(
+                        "批量删除未完全成功：{} / {} 项失败；未通过复核的文件未删除。{}",
+                        failures.len(),
+                        expected,
+                        failures.join("；")
+                    ))
+                }
+            }))
+            .unwrap_or_else(|payload| {
+                Err(format!(
+                    "批量删除 worker 异常终止: {}",
+                    panic_message(payload)
+                ))
+            });
+            let _ = tx.send(WorkerResult::BackupBatchDeleteExecute {
                 operation_id,
                 result,
             });
@@ -1161,6 +1293,12 @@ impl TaskHub {
                         updates.inspect = Some(result);
                     }
                 }
+                WorkerResult::AdvancedInspect { generation, result } => {
+                    self.advanced_inspect_single_flight.finish();
+                    if self.advanced_inspect_generation.is_current(generation) {
+                        updates.advanced_inspect = Some(result);
+                    }
+                }
                 WorkerResult::DeviceError {
                     generation,
                     message,
@@ -1209,6 +1347,20 @@ impl TaskHub {
                 } => {
                     if self.finish_operation(operation_id) {
                         updates.backup_delete = Some((operation_id, result));
+                    }
+                }
+                WorkerResult::BackupBatchDeletePlan { generation, result } => {
+                    self.batch_delete_single_flight.finish();
+                    if self.batch_delete_generation.is_current(generation) {
+                        updates.backup_batch_delete_plan = Some(result);
+                    }
+                }
+                WorkerResult::BackupBatchDeleteExecute {
+                    operation_id,
+                    result,
+                } => {
+                    if self.finish_operation(operation_id) {
+                        updates.backup_batch_delete_execute = Some((operation_id, result));
                     }
                 }
                 WorkerResult::BackupPrunePlan { generation, result } => {

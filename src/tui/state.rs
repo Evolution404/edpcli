@@ -18,6 +18,62 @@ pub struct InspectState {
     scroll: usize,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AdvancedInspectSource {
+    Disk(u32),
+    Backup(std::path::PathBuf),
+}
+
+impl AdvancedInspectSource {
+    pub fn label(&self) -> String {
+        match self {
+            Self::Disk(disk) => format!("物理盘 disk{disk}"),
+            Self::Backup(path) => format!("备份 {}", path.display()),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AdvancedInspectStage {
+    Form,
+    Running,
+    Result,
+}
+
+#[derive(Debug, Clone)]
+pub struct AdvancedInspectForm {
+    pub mode: crate::application::inspect::AdvancedInspectMode,
+    pub lba_spec: String,
+    pub count: String,
+    pub device_id: String,
+    pub export_dir: String,
+    pub field_selected: usize,
+}
+
+impl Default for AdvancedInspectForm {
+    fn default() -> Self {
+        Self {
+            mode: crate::application::inspect::AdvancedInspectMode::Meta,
+            lba_spec: "0-12".into(),
+            count: String::new(),
+            device_id: String::new(),
+            export_dir: String::new(),
+            field_selected: 0,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct AdvancedInspectState {
+    pub source: AdvancedInspectSource,
+    pub stage: AdvancedInspectStage,
+    pub form: AdvancedInspectForm,
+    pub result: Option<crate::application::inspect::AdvancedInspectWorkspace>,
+    pub selected: usize,
+    pub scroll: usize,
+    pub message: Option<String>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WriteKind {
     Apply,
@@ -87,6 +143,22 @@ pub struct BackupDeleteState {
     pub stage: WizardStage,
     pub path: std::path::PathBuf,
     pub expected_sha256: String,
+    pub confirmation: String,
+    pub message: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BackupBatchDeleteStage {
+    Planning,
+    Review,
+    Confirm,
+    Running,
+    Result,
+}
+
+pub struct BackupBatchDeleteState {
+    pub stage: BackupBatchDeleteStage,
+    pub prepared: Option<crate::application::backup::DeletePlan>,
     pub confirmation: String,
     pub message: Option<String>,
 }
@@ -312,9 +384,12 @@ pub enum NavCommand {
     BeginBackupCreate,
     BeginBackupCreateDeep,
     BeginBackupDelete,
+    ToggleBackupSelection,
+    BeginBackupBatchDelete,
     BeginBackupPrune,
     VerifyBackup,
     OpenInspect,
+    OpenAdvancedInspect,
     NextWorkspace,
     PreviousWorkspace,
     WorkspaceDevices,
@@ -343,11 +418,14 @@ pub struct AppState {
     wizard: Option<WizardState>,
     apply: Option<ApplyState>,
     backup_delete: Option<BackupDeleteState>,
+    backup_batch_delete: Option<BackupBatchDeleteState>,
+    backup_selection: std::collections::BTreeSet<std::path::PathBuf>,
     backup_prune: Option<BackupPruneState>,
     provision: ProvisionState,
     pinned_disk: Option<u32>,
     inspect: Option<InspectState>,
     inspect_data: Option<crate::application::inspect::InspectWorkspace>,
+    advanced_inspect: Option<AdvancedInspectState>,
     inspect_pending: bool,
     notice: Option<String>,
     input_buffer: String,
@@ -379,11 +457,14 @@ impl AppState {
             wizard: None,
             apply: None,
             backup_delete: None,
+            backup_batch_delete: None,
+            backup_selection: std::collections::BTreeSet::new(),
             backup_prune: None,
             provision: ProvisionState::default(),
             pinned_disk: None,
             inspect: None,
             inspect_data: None,
+            advanced_inspect: None,
             inspect_pending: false,
             notice: None,
             input_buffer: String::new(),
@@ -650,6 +731,224 @@ impl AppState {
         })
     }
 
+    pub fn advanced_inspect(&self) -> Option<&AdvancedInspectState> {
+        self.advanced_inspect.as_ref()
+    }
+
+    pub fn advanced_inspect_mut(&mut self) -> Option<&mut AdvancedInspectState> {
+        self.advanced_inspect.as_mut()
+    }
+
+    pub fn begin_advanced_inspect(&mut self, source: AdvancedInspectSource) -> bool {
+        if self.critical_operation {
+            self.notice = Some("关键操作仍在执行，完成前不能启动高级检查。".into());
+            return false;
+        }
+        let mut form = AdvancedInspectForm::default();
+        if let AdvancedInspectSource::Disk(disk) = &source {
+            if let Some(row) = self.devices.iter().find(|row| row.disk == *disk) {
+                form.device_id = row.device_id.clone().unwrap_or_default();
+            }
+        }
+        self.advanced_inspect = Some(AdvancedInspectState {
+            source,
+            stage: AdvancedInspectStage::Form,
+            form,
+            result: None,
+            selected: 0,
+            scroll: 0,
+            message: None,
+        });
+        self.input_mode = InputMode::Normal;
+        true
+    }
+
+    pub fn advanced_inspect_shift_mode(&mut self, reverse: bool) {
+        if let Some(state) = self.advanced_inspect.as_mut() {
+            if state.stage == AdvancedInspectStage::Form {
+                state.form.mode = if reverse {
+                    state.form.mode.previous()
+                } else {
+                    state.form.mode.next()
+                };
+                state.message = None;
+            }
+        }
+    }
+
+    pub fn advanced_inspect_move_field(&mut self, delta: isize) {
+        let Some(state) = self.advanced_inspect.as_mut() else {
+            return;
+        };
+        if state.stage != AdvancedInspectStage::Form {
+            return;
+        }
+        const COUNT: usize = 4;
+        state.form.field_selected = if delta < 0 {
+            state
+                .form
+                .field_selected
+                .saturating_sub(delta.unsigned_abs())
+        } else {
+            (state.form.field_selected + delta as usize).min(COUNT - 1)
+        };
+    }
+
+    fn advanced_selected_field_mut(&mut self) -> Option<&mut String> {
+        let state = self.advanced_inspect.as_mut()?;
+        if state.stage != AdvancedInspectStage::Form {
+            return None;
+        }
+        match state.form.field_selected {
+            0 => Some(&mut state.form.lba_spec),
+            1 => Some(&mut state.form.count),
+            2 => Some(&mut state.form.device_id),
+            3 => Some(&mut state.form.export_dir),
+            _ => None,
+        }
+    }
+
+    pub fn advanced_inspect_push_char(&mut self, ch: char) {
+        if ch.is_control() {
+            return;
+        }
+        if let Some(field) = self.advanced_selected_field_mut() {
+            if field.chars().count() < 512 {
+                field.push(ch);
+            }
+        }
+        if let Some(state) = self.advanced_inspect.as_mut() {
+            state.message = None;
+        }
+    }
+
+    pub fn advanced_inspect_backspace(&mut self) {
+        if let Some(field) = self.advanced_selected_field_mut() {
+            field.pop();
+        }
+        if let Some(state) = self.advanced_inspect.as_mut() {
+            state.message = None;
+        }
+    }
+
+    pub fn advanced_inspect_request(
+        &mut self,
+    ) -> Result<
+        (
+            AdvancedInspectSource,
+            crate::application::inspect::AdvancedInspectRequest,
+        ),
+        String,
+    > {
+        let state = self
+            .advanced_inspect
+            .as_mut()
+            .ok_or_else(|| "高级检查未打开".to_string())?;
+        let lbas = crate::application::inspect::parse_advanced_lbas(
+            &state.form.lba_spec,
+            &state.form.count,
+        )?;
+        let request = crate::application::inspect::AdvancedInspectRequest {
+            mode: state.form.mode,
+            lbas,
+            export_dir: (!state.form.export_dir.trim().is_empty())
+                .then(|| std::path::PathBuf::from(state.form.export_dir.trim())),
+            device_id_override: (!state.form.device_id.trim().is_empty())
+                .then(|| state.form.device_id.trim().to_string()),
+        };
+        Ok((state.source.clone(), request))
+    }
+
+    pub fn advanced_inspect_start(&mut self) {
+        if let Some(state) = self.advanced_inspect.as_mut() {
+            state.stage = AdvancedInspectStage::Running;
+            state.result = None;
+            state.selected = 0;
+            state.scroll = 0;
+            state.message = Some("正在后台读取并解析指定扇区…".into());
+        }
+    }
+
+    pub fn advanced_inspect_finish(
+        &mut self,
+        result: Result<crate::application::inspect::AdvancedInspectWorkspace, String>,
+    ) {
+        let Some(state) = self.advanced_inspect.as_mut() else {
+            return;
+        };
+        match result {
+            Ok(workspace) => {
+                state.stage = AdvancedInspectStage::Result;
+                state.result = Some(workspace);
+                state.selected = 0;
+                state.scroll = 0;
+                state.message = None;
+            }
+            Err(message) => {
+                state.stage = AdvancedInspectStage::Form;
+                state.result = None;
+                state.message = Some(message);
+            }
+        }
+    }
+
+    pub fn advanced_inspect_move_result(&mut self, delta: isize) {
+        let Some(state) = self.advanced_inspect.as_mut() else {
+            return;
+        };
+        if state.stage != AdvancedInspectStage::Result {
+            return;
+        }
+        let count = state
+            .result
+            .as_ref()
+            .map(|value| value.items.len())
+            .unwrap_or(0);
+        if count == 0 {
+            state.selected = 0;
+            return;
+        }
+        state.selected = if delta < 0 {
+            state.selected.saturating_sub(delta.unsigned_abs())
+        } else {
+            (state.selected + delta as usize).min(count - 1)
+        };
+        state.scroll = 0;
+    }
+
+    pub fn advanced_inspect_scroll(&mut self, delta: isize) {
+        if let Some(state) = self.advanced_inspect.as_mut() {
+            if state.stage == AdvancedInspectStage::Result {
+                state.scroll = if delta < 0 {
+                    state.scroll.saturating_sub(delta.unsigned_abs())
+                } else {
+                    state.scroll.saturating_add(delta as usize)
+                };
+            }
+        }
+    }
+
+    pub fn advanced_inspect_back_to_form(&mut self) {
+        if let Some(state) = self.advanced_inspect.as_mut() {
+            if state.stage == AdvancedInspectStage::Result {
+                state.stage = AdvancedInspectStage::Form;
+                state.result = None;
+                state.selected = 0;
+                state.scroll = 0;
+                state.message = None;
+            }
+        }
+    }
+
+    pub fn close_advanced_inspect(&mut self) {
+        if self
+            .advanced_inspect
+            .as_ref()
+            .is_some_and(|state| state.stage != AdvancedInspectStage::Running)
+        {
+            self.advanced_inspect = None;
+        }
+    }
     pub fn inspect_data(&self) -> Option<&crate::application::inspect::InspectWorkspace> {
         self.inspect_data.as_ref()
     }
@@ -1048,6 +1347,155 @@ impl AppState {
 
     pub fn backup_delete(&self) -> Option<&BackupDeleteState> {
         self.backup_delete.as_ref()
+    }
+
+    pub fn backup_batch_delete(&self) -> Option<&BackupBatchDeleteState> {
+        self.backup_batch_delete.as_ref()
+    }
+
+    pub fn backup_selection_count(&self) -> usize {
+        self.backup_selection.len()
+    }
+
+    pub fn backup_is_selected(&self, path: &std::path::Path) -> bool {
+        self.backup_selection.contains(path)
+    }
+
+    pub fn toggle_selected_backup(&mut self) {
+        let Some((path, expected_sha256)) = self.selected_backup_delete_target() else {
+            self.notice = Some("当前备份缺少固定 SHA-256，不能加入批量删除选择。".into());
+            return;
+        };
+        debug_assert!(!expected_sha256.is_empty());
+        if !self.backup_selection.remove(&path) {
+            self.backup_selection.insert(path);
+        }
+        self.notice = Some(format!(
+            "批量删除已勾选 {} 份备份；空格继续选择，X 生成删除计划。",
+            self.backup_selection.len()
+        ));
+    }
+
+    pub fn selected_backup_batch_targets(&self) -> Vec<(std::path::PathBuf, String)> {
+        self.backups
+            .iter()
+            .filter(|row| self.backup_selection.contains(&row.path))
+            .filter_map(|row| {
+                row.content_sha256
+                    .as_ref()
+                    .map(|hash| (row.path.clone(), hash.clone()))
+            })
+            .collect()
+    }
+
+    pub fn begin_backup_batch_delete(&mut self) -> Option<Vec<(std::path::PathBuf, String)>> {
+        if self.critical_operation || self.backup_batch_delete.is_some() {
+            self.notice = Some("已有关键操作或批量删除向导正在执行。".into());
+            return None;
+        }
+        let targets = self.selected_backup_batch_targets();
+        if targets.is_empty() {
+            self.notice = Some("先在备份页按空格勾选至少一份备份。".into());
+            return None;
+        }
+        self.backup_batch_delete = Some(BackupBatchDeleteState {
+            stage: BackupBatchDeleteStage::Planning,
+            prepared: None,
+            confirmation: String::new(),
+            message: Some("正在新鲜扫描并逐项复核 SHA-256，生成固定删除计划…".into()),
+        });
+        Some(targets)
+    }
+
+    pub fn backup_batch_delete_finish_plan(
+        &mut self,
+        result: Result<crate::application::backup::DeletePlan, String>,
+    ) {
+        let Some(batch) = self.backup_batch_delete.as_mut() else {
+            return;
+        };
+        match result {
+            Ok(plan) if plan.targets.is_empty() => {
+                batch.stage = BackupBatchDeleteStage::Result;
+                batch.message = Some("批量删除计划为空，没有可删除目标。".into());
+            }
+            Ok(plan) => {
+                batch.prepared = Some(plan);
+                batch.stage = BackupBatchDeleteStage::Review;
+                batch.message = None;
+            }
+            Err(message) => {
+                batch.stage = BackupBatchDeleteStage::Result;
+                batch.message = Some(message);
+            }
+        }
+    }
+
+    pub fn backup_batch_delete_begin_confirm(&mut self) {
+        if let Some(batch) = self.backup_batch_delete.as_mut() {
+            if batch.stage == BackupBatchDeleteStage::Review {
+                batch.stage = BackupBatchDeleteStage::Confirm;
+                batch.confirmation.clear();
+                batch.message = None;
+            }
+        }
+    }
+
+    pub fn backup_batch_delete_push_confirmation(&mut self, ch: char) {
+        if let Some(batch) = self.backup_batch_delete.as_mut() {
+            if batch.stage == BackupBatchDeleteStage::Confirm && batch.confirmation.len() < 16 {
+                batch.confirmation.push(ch);
+                batch.message = None;
+            }
+        }
+    }
+
+    pub fn backup_batch_delete_backspace(&mut self) {
+        if let Some(batch) = self.backup_batch_delete.as_mut() {
+            if batch.stage == BackupBatchDeleteStage::Confirm {
+                batch.confirmation.pop();
+                batch.message = None;
+            }
+        }
+    }
+
+    pub fn backup_batch_delete_take_for_execute(
+        &mut self,
+    ) -> Option<crate::application::backup::DeletePlan> {
+        let batch = self.backup_batch_delete.as_mut()?;
+        if batch.stage != BackupBatchDeleteStage::Confirm {
+            return None;
+        }
+        if batch.confirmation != "YES" {
+            batch.message = Some("必须精确输入 YES 才会批量删除备份。".into());
+            return None;
+        }
+        let plan = batch.prepared.take()?;
+        batch.stage = BackupBatchDeleteStage::Running;
+        batch.message = Some("正在按固定计划逐条复核并删除…".into());
+        self.critical_operation = true;
+        Some(plan)
+    }
+
+    pub fn backup_batch_delete_finish_execute(&mut self, result: Result<usize, String>) {
+        self.critical_operation = false;
+        let success = result.is_ok();
+        if let Some(batch) = self.backup_batch_delete.as_mut() {
+            batch.stage = BackupBatchDeleteStage::Result;
+            batch.message = Some(match result {
+                Ok(count) => format!("批量删除完成：已安全删除 {count} 份备份。"),
+                Err(message) => message,
+            });
+        }
+        if success {
+            self.backup_selection.clear();
+        }
+    }
+
+    pub fn close_backup_batch_delete(&mut self) {
+        if !self.critical_operation {
+            self.backup_batch_delete = None;
+        }
     }
 
     pub fn backup_prune(&self) -> Option<&BackupPruneState> {
@@ -1881,6 +2329,14 @@ impl AppState {
             .then(|| self.selected_backup_path())
             .flatten();
         self.backups = backups;
+        let selectable = self
+            .backups
+            .iter()
+            .filter(|row| row.content_sha256.is_some())
+            .map(|row| row.path.clone())
+            .collect::<std::collections::BTreeSet<_>>();
+        self.backup_selection
+            .retain(|path| selectable.contains(path));
         self.backup_scan_pending = false;
         if self.workspace == Workspace::Backups {
             self.rebuild_workspace_filter();
@@ -2117,9 +2573,12 @@ impl AppState {
                 | NavCommand::BeginBackupCreate
                 | NavCommand::BeginBackupCreateDeep
                 | NavCommand::BeginBackupDelete
+                | NavCommand::ToggleBackupSelection
+                | NavCommand::BeginBackupBatchDelete
                 | NavCommand::BeginBackupPrune
                 | NavCommand::VerifyBackup
                 | NavCommand::OpenInspect
+                | NavCommand::OpenAdvancedInspect
                 | NavCommand::NextMatch
                 | NavCommand::PreviousMatch => {}
             }
@@ -2199,9 +2658,12 @@ impl AppState {
             | NavCommand::BeginBackupCreate
             | NavCommand::BeginBackupCreateDeep
             | NavCommand::BeginBackupDelete
+            | NavCommand::ToggleBackupSelection
+            | NavCommand::BeginBackupBatchDelete
             | NavCommand::BeginBackupPrune
             | NavCommand::VerifyBackup
             | NavCommand::OpenInspect
+            | NavCommand::OpenAdvancedInspect
             | NavCommand::NextMatch
             | NavCommand::PreviousMatch
             | NavCommand::Escape

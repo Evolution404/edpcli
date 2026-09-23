@@ -966,6 +966,54 @@ fn cli_and_tui_delete_share_retention_floor_and_execution() {
 }
 
 #[test]
+fn batch_delete_plan_pins_each_path_and_sha_before_execution() {
+    let Some(original) = load_disk_image("netac") else {
+        eprintln!("跳过: 真实备份不可用");
+        return;
+    };
+    let tmp = TmpDir::new("batch_delete_plan");
+    let first = write_backup(
+        &tmp.0,
+        "disk6_122880000_vid0dd8_pid2005_disk&ven_netac&prod_onlydisk_onlyid1402259934_20260910_170000.edpb",
+        &original,
+    );
+    let second = write_backup(
+        &tmp.0,
+        "disk6_122880000_vid0dd8_pid2005_disk&ven_netac&prod_onlydisk_onlyid1402259934_20260910_170001.edpb",
+        &original,
+    );
+    let keep = write_backup(
+        &tmp.0,
+        "disk6_122880000_vid0dd8_pid2005_disk&ven_netac&prod_onlydisk_onlyid1402259934_20260910_170002.edpb",
+        &original,
+    );
+    let first_sha = edpcli::sha256::sha256_hex(&fs::read(&first).unwrap());
+    let second_sha = edpcli::sha256::sha256_hex(&fs::read(&second).unwrap());
+
+    let session = edpcli::application::backup::DeleteSession::open(&tmp.0);
+    match session.plan_exact_many(&[(first.clone(), "00".repeat(32))]) {
+        Err(edpcli::application::backup::DeletePlanError::Changed { .. }) => {}
+        Err(other) => panic!("摘要不匹配应返回 Changed，实际: {}", other.message()),
+        Ok(_) => panic!("摘要不匹配必须拒绝"),
+    }
+
+    let plan = session
+        .plan_exact_many(&[
+            (first.clone(), first_sha),
+            (second.clone(), second_sha),
+            (first.clone(), "ignored duplicate".into()),
+        ])
+        .expect("同盘三份中批删两份应允许");
+    assert_eq!(plan.targets.len(), 2, "重复路径必须去重");
+    let results = session.execute(&plan);
+    assert_eq!(results.len(), 2);
+    assert!(results.iter().all(|(_, result)| result.is_ok()));
+    assert!(!first.exists());
+    assert!(!second.exists());
+    assert!(keep.exists(), "批量删除仍必须保留同盘至少一份备份");
+}
+
+#[test]
 fn prune_plan_composition_deletes_only_snapshots_beyond_keep() {
     let Some(original) = load_disk_image("netac") else {
         eprintln!("跳过: 真实备份不可用");

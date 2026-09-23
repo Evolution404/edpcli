@@ -105,10 +105,13 @@ TUI 顶部有三个工作区：**设备 / 备份 / 制盘**。常用键位：
 | `/` | 搜索当前设备、备份或检查内容 |
 | `n / N` | 下一个 / 上一个搜索匹配 |
 | `:` | 打开任务型命令面板，不执行 shell |
-| `i` | 检查当前设备或备份 |
+| `i` | 快速检查当前设备或备份的 LBA0–12 |
+| `I` | 高级检查：任意 LBA 列表/范围/count，支持 raw/decode/meta、device_id 覆盖与导出 |
 | `b / B` | 普通 / 深度只读备份 |
 | `v` | 校验当前备份大小与 SHA-256 |
 | `D` | 删除当前备份，内容摘要固定后再要求 `YES` |
+| `Space` | 勾选 / 取消当前备份，用于固定路径+SHA-256 的多目标删除 |
+| `X` | 为全部已勾选备份生成一次固定批量删除计划，复核后要求 `YES` |
 | `P` | keep-N 清理旧备份，先预览固定删除计划再要求 `YES` |
 | `a` | Apply：设置可选 size/force → 强制 dry-run → 计划复核 → `YES` 写入 |
 | `R` | 恢复当前备份 |
@@ -122,17 +125,17 @@ TUI 顶部有三个工作区：**设备 / 备份 / 制盘**。常用键位：
 自动创建 EDPB 元数据备份；它保留原 type4 起点、大小和密钥材料。离线快照转换不要求插盘，
 只读取普通目录中的 `LBA*.bin`，并可选择仅预览或把转换后的 LBA00/06/07/09/12 写到普通目录。
 
-命令面板支持 `:devices`、`:backups`、`:provision`、`:offline-convert`、`:inspect`、
-`:backup-create`、`:backup-deep`、`:backup-verify`、`:backup-delete`、`:backup-prune`、
+命令面板支持 `:devices`、`:backups`、`:provision`、`:offline-convert`、`:inspect`、`:advanced-inspect`、
+`:backup-create`、`:backup-deep`、`:backup-verify`、`:backup-delete`、`:batch-delete`、`:backup-prune`、
 `:apply`、`:restore`、`:refresh`、`:help`、`:q`。输入永远不会传给系统命令解释器。
 
-设备/备份扫描、检查读取、改造只读预览、制盘计划、稀疏镜像导出和离线转换都在后台执行；
+设备/备份扫描、快速/高级检查、改造只读预览、制盘计划、稀疏镜像导出和离线转换都在后台执行；
 同类任务使用 single-flight，旧代次结果不会覆盖较新的状态。所有真实介质写入都复用 CLI 共用的
 application write/provision service，并保持以下安全链：启动 TUI 前完成管理员提权；固定目标盘与
 onlyid/device_id；先只读预览；精确输入 `YES` 后才进入关键事务；关键阶段重新检查系统盘/USB
 整盘、写前保护、卸载/锁卷、reopen 后身份、atomic write、sync/readback/rollback。关键阶段内
 `q`、`Esc`、`Ctrl-C` 只登记延迟退出，终端异常时也会先恢复终端再等待关键 worker 安全结束。
-备份删除与 keep-N 清理都基于固定 SHA-256 计划执行，不会删除确认后被替换的文件，并继续保留
+备份单删、空格多选后的批量删除与 keep-N 清理都基于固定 SHA-256 计划执行，不会删除确认后被替换的文件，并继续保留
 “每块盘至少 1 份备份”的底线。
 
 ### 2.3 查看详细信息
