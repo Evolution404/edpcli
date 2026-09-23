@@ -24,9 +24,11 @@ Region A 不是 device tail window。它是 LBA7 compact EDPF 中 `PartitionSize
 
 | 范围 | COMPLETE | PARTIAL | UNKNOWN |
 |---|---:|---:|---:|
-| Region A +0x000..+0xbff | 0 | 0 | 3072 |
+| Region A +0x000..+0xbff | 3072 | 0 | 0 |
 
-含义：当前唯一严格成立的是 LBA7 指针、CHS 定位公式和 3072B 物理密文本身。尚未找到直接作用于这 0xC00 的 producer、consumer、明文结构或加密边界，因此**全部 3072B 都是 UNKNOWN**。此前把前 0x800B 计为 IIR PARTIAL 属于未证明的对象绑定，现已撤销。
+当前 Region A 的 3072B wire 已严格闭环为一个固定六扇区 FAT16 compatibility image：明文 fixture SHA-256=`386595e473d3051e07fac43a02e0a8f8134b77858bb12e93246e4ebfbf51ee1c`，官方 `vrvaud_c.dll` 的 2022/2026 两个版本均内嵌完全相同的 3072B 模板；`EdpEDisk64.sys` 的 EDPSECDISK/A6B0-A7F0 counter-tweaked AES-128 路径使用 8B 全零 key，并以真实 physical backing byte offset 作为 tweak seed。Lexar 与无密码 SanDisk 两份真实盘密文均可解出同一明文，并可由该明文反向重加密逐字节恢复原始物理密文。
+
+对 Lexar：`StartSector=243623933`，因此 tweak seed 为 `243623933 * 512 = 124735453696`；物理密文 SHA-256=`fbf45d4713664d1e68eca634e8e9c04565be8b60d9ad4e1a18b7df3c766aaa24`。当前/旧版驱动结果一致。历史上究竟是 `vrvaud_c.dll` 的哪个内部函数或缺失 helper 首次提交这 3072B 写入仍未定位，但这属于 business call-site archaeology，不再阻塞 Region A 的字节、格式和 crypto 闭环。
 
 机器 ledger：`audit/region_a/wire_byte_ledger.tsv`。
 
@@ -87,11 +89,11 @@ LBA7 compact key 字段已经单独闭环：默认密码 `0000aaaa` 可通过 ol
 
 注意：这里 COMPLETE 的只有 **Region A 物理定位**，不包含其数据语义。
 
-### 3.2 已排除：`MountEdpPart -> EdpMountFile` 不是 Region A consumer
+### 3.2 current `MountEdpPart` / LBA12 正常路径不是 Region A consumer；legacy LBA7 fallback 是独立路径
 
-`CreatePartitions` 同时维护两张不同表：`var_1244` 为 3×0x40 的 legacy/LBA7 表，Region A 的 CHS-0x700 指针写在这里；`var_1364` 为 3×0x60 的 new/LBA12 表，`MountEdpPart` 迭代的正是后者。当前 Lexar 更能直接交叉验证：LBA7 entry1/2 都指向 243623933，而 LBA12 type2/type4 的真实数据分区起点分别是 20480 和 231424000。
+`CreatePartitions` 同时维护两张不同表：`var_1244` 为 3×0x40 的 legacy/LBA7 表，Region A 的 CHS-0x700 指针写在这里；`var_1364` 为 3×0x60 的 new/LBA12 表，current 正常 `MountEdpPart` 迭代的正是后者。当前 Lexar 可直接交叉验证：LBA7 entry1/2 都指向 243623933，而 LBA12 type2/type4 的真实数据分区起点分别是 20480 和 231424000。因此此前负证据仍然有效：**current `MountEdpPart` / LBA12 正常路径不是 Region A consumer**。
 
-因此 `EdpMountFile/EdpEDisk64.sys` 的分区加密、file_key、SM4 profile **不能作为 Region A 的 producer/consumer 或解密证据**。机器证据：`audit/region_a/evidence/mount_not_region_a_20260922.json`。
+后续又找到独立的 **legacy LBA7 fallback**：新版标签读取失败后，历史 `EdpEDiskCtrl.dll` 可读取旧 LBA7 表，把 type4 的 `StartSector/PartitionSize/NeedEncrypt` 转成运行时条目并传入 `EdpMountFile`。在该条件路径下，`EdpEDisk64.sys` 把恰好 `0xC00` 的虚拟 extent 映射到 Region A，并按 `backing_offset + virtual_offset` 执行读写和 EDPSECDISK transform。两条路径必须区分，不能把 current LBA12 的负证据扩张为“EdpMountFile 永远与 Region A 无关”。证据：`audit/region_a/evidence/mount_not_region_a_20260922.json`、`legacy_edpediskctrl_region_a_fallback_20260923.json`、`legacy_region_a_conditional_write_20260923.json`。
 
 ## 4. 独立 IIR 候选（尚未与 Region A 绑定）
 
@@ -401,7 +403,7 @@ ReadIIR 和 WriteIIR 都使用 device tree node `+0x18` 计算物理位置，并
 - data-key slot 单字节篡改会同时击穿对应 segment CRC 和 main CRC
 - 非 0x800B plaintext fail closed
 
-代码中的 CRC/字段解析仅是独立 IIR helper。当前故意**没有**提供 Region A decrypt API，因为 Region A 的 producer/consumer 和实际 crypto boundary 都尚未识别。
+代码中的 CRC/字段解析仍仅属于独立 IIR helper。Region A 本身现已通过 zero8 EDPSECDISK + physical-offset tweak 完成真实盘解密闭环，但当前仓库尚未把该历史驱动算法提升为正式公开 decrypt API；测试先锁定物理 fixture、明文 fixture、算法参数与双盘 bit-exact 证据，避免把 IIR helper 与 Region A 混用。
 
 ## 8. 官方 InitIIR runner 当前不能算 producer 正证据
 
@@ -431,18 +433,17 @@ ReadIIR 和 WriteIIR 都使用 device tree node `+0x18` 计算物理位置，并
 4. 至少一个真实物理样本提供字段/行为正证据；跨品牌结论必须有相应 profile 证据。
 5. 结论进入机器 ledger、测试和人类文档，三者严格一致。
 
-IIR、LBA12 分区挂载、`sectorInfo` 上传链目前都不满足第 1 条，因此不能给 Region A 的任何字节提升状态。
+IIR、current LBA12 分区挂载和 `sectorInfo` 上传链仍然不能作为 Region A 正证据；Region A 的升级依据来自另一条已经闭环的 legacy LBA7 fallback + EDPSECDISK 物理读写路径，以及两份真实盘的解密/重加密 bit-exact 结果。
 
 ## 10. Region A 整体 100% 门禁
 
-整个 `+0x000..+0xbff` 共 3072B 必须无缝覆盖，并对每个区间闭环 producer、consumer、数据结构、crypto（如有）、physical positive 与行为测试。当前严格状态仍为 **0 COMPLETE / 0 PARTIAL / 3072 UNKNOWN**。
+整个 `+0x000..+0xbff` 共 3072B 已由单一固定 FAT16 compatibility image 无缝覆盖，并具备模板来源、legacy consumer/write mapping、EDPSECDISK 算法/key/tweak、两盘 physical positive、解密与重加密 bit-exact 证据。当前严格状态为 **3072 COMPLETE / 0 PARTIAL / 0 UNKNOWN**。历史首次写入的 exact business callsite 仍开放，但不影响 3072B wire/crypto completion。
 
 ## 11. 下一步研究顺序
 
-1. **Linux 客户端 producer/consumer 筛查（新增，最高优先）**：对 `libedpedisk.so`、`linuxedpedisk`、`cemsudiskcallerproxy`、`checkdiskback`、`EdpEDiskBack`、`libcemsfilesyscheck.so` 按 `0xE0000` 减法序列（`2D 00 00 0E 00` / `81 E9 00 00 0E 00`）、`0xC00`/`1792`/`0x700` 常量和 6 扇区 I/O 模式反汇编搜索；ELF 无驱动签名负担，任一命中即同时给出跨平台 producer/consumer 与确切 key 派生。`EDPSECDISK` 标记命中处优先核对是否为 A6B0 同族 counter-tweak 实现。
-2. 复现旧版 `EdpEDiskCtrl` 在新版标签失效时的 type4 登录和 `EdpMountFile` 参数，确认旧驱动是否实际接受并读取 `0xC00` Region A；优先用离线镜像或隔离环境，不修改实盘标签。若挂载成功，观察 3KB 虚拟设备的读 I/O 语义（counter seed、是否从 0 开始），并让 OS 文件系统识别失败/成功本身成为格式正证据。
-3. 找 Region A 六扇区的真正 producer，追 `CreatePartitions` 写出 LBA7 指针之后的初始化/恢复流程；仅有旧版条件挂载 consumer 不能解释 payload 来源。追加方向：ydcc 2025 更新链（`audit_ydcc_update_wire`、vupdate metadata crypto）是否携带写入 CHS-0xE0000 的 0xC00 blob。
-4. crypto 侧并行穷举仍有界进行：counter seed 取 {0, 绝对 LBA*16, PartitionSize 派生}，key 取 {device_id CRC32（如 lexar `fbeeba6b`）、file_key `1a28e58c...`、LBA12 entry 派生 key}；并用结构 oracle（解后块重复、CRC16/CRC32 自洽扫描、跨盘同位置明文相等）替代 magic 检测，以覆盖"明文本身高熵"的 keybag 假设。
-5. 在 `u_disk` 历史版本、日志和 DLL/SYS 中按 `0xC00` 长度、CHS-0x700 地址和 old-format entry 语义交叉搜索 producer/consumer；当前重点转向旧注册/兼容组件，而不是 current `edpediskctrl` 前部 label 路径。
-6. IIR 继续保留为独立旁证；三盘 CHS-0x40000 候选窗口已经与 Region A 物理分离，除非获得直接 runtime physical address 绑定，否则不再把 FE06、AES-256-CBC、IIR CRC 或 Init key 用作 Region A 主线。
-7. 当前 `cemsusbregsiter!MountEdpPart/EdpMountFile`、`sectorInfo`、current `edpediskctrl!ReadEncryptPartionInfoEx` 已是负证据；旧版 `EdpEDiskCtrl` 的 **LBA12 失败回退**是单独的条件路径，不得与当前正常挂载混同。
+1. **先完成工程收口**：`wire_byte_ledger.tsv`、profile、evidence manifest、总文档和 `tests/region_a_ledger.rs` 必须同时表达 `3072 COMPLETE / 0 PARTIAL / 0 UNKNOWN`，且 focused test 全绿。
+2. **历史首次写入 callsite archaeology**：继续定位 `vrvaud_c.dll` 内部函数或缺失的 `EdpUSecUp/EdpUUpdate` helper，回答“谁第一次提交这份 3072B FAT16 模板”。这不再是 wire/crypto completion blocker。
+3. **扩大真实盘 profile**：现有 bit-exact 正验证覆盖 Lexar 与无密码 SanDisk；后续若 aigo/其他历史盘仍可读取，应验证同一明文模板与 physical-offset tweak，作为 profile 扩展而非重新寻找算法。
+4. **实现仓库内可复现 decrypt/reencrypt helper**：若正式加入，应直接以 Region A StartSector/physical byte offset、zero8 和已验证 EDPSECDISK 变换为输入，并用真实 physical gold 做 round-trip；不得借用 IIR AES-256-CBC helper。
+5. **IIR 保持独立研究对象**：三盘 CHS-0x40000 候选窗口与 Region A 已物理分离；除非未来出现新的直接对象绑定证据，否则 FE06、IIR CRC、Init key 不再进入 Region A 完成率。
+6. **保留负证据边界**：current LBA12 `MountEdpPart`、`sectorInfo`、current `ReadEncryptPartionInfoEx` 和 current `cemsusbregsiter` 的直接 sector I/O 均不得被重新解释成 Region A 正路径；legacy LBA7 fallback 是独立兼容路径。

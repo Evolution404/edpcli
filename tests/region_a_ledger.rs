@@ -8,6 +8,7 @@ const WIRE: &str = include_str!("../audit/region_a/wire_byte_ledger.tsv");
 const PLAIN: &str = include_str!("../audit/region_a/plain_byte_ledger.tsv");
 const DOC: &str = include_str!("../docs/REGION_A_REVERSE_ENGINEERING.md");
 const PHYSICAL: &[u8] = include_bytes!("../audit/region_a/gold/lexar_region_a_lba243623933.bin");
+const REGION_A_PLAIN: &[u8] = include_bytes!("../audit/region_a/gold/region_a_plain_zero8.bin");
 const SANDISK_NOPWD_LBA7: &[u8] =
     include_bytes!("../audit/region_a/live_captures/sandisk_nopwd_20260923/lba7_raw.bin");
 const SANDISK_NOPWD_REGION_A: &[u8] =
@@ -89,7 +90,7 @@ fn evidence_modalities() -> HashMap<&'static str, &'static str> {
         assert_eq!(cols.len(), 9, "bad evidence row: {line}");
         assert!(matches!(
             cols[1],
-            "physical" | "static" | "virtual" | "negative"
+            "physical" | "static" | "static+provenance" | "virtual" | "negative"
         ));
         assert!(
             out.insert(cols[0], cols[1]).is_none(),
@@ -147,8 +148,8 @@ fn region_a_wire_ledger_covers_exactly_3072_bytes_without_overlap() {
         seen.into_iter().all(|value| value),
         "wire ledger contains gaps"
     );
-    assert_eq!((complete, partial, unknown), (0, 0, 3072));
-    assert!(DOC.contains("| Region A +0x000..+0xbff | 0 | 0 | 3072 |"));
+    assert_eq!((complete, partial, unknown), (3072, 0, 0));
+    assert!(DOC.contains("| Region A +0x000..+0xbff | 3072 | 0 | 0 |"));
 }
 
 #[test]
@@ -216,6 +217,100 @@ fn physical_lexar_region_a_fixture_is_exact_and_stable() {
         "fbf45d4713664d1e68eca634e8e9c04565be8b60d9ad4e1a18b7df3c766aaa24"
     );
     assert!(PHYSICAL.iter().filter(|&&byte| byte != 0).count() > 3000);
+}
+
+#[test]
+fn recovered_region_a_plaintext_is_the_fixed_fat16_compatibility_image() {
+    assert_eq!(REGION_A_PLAIN.len(), 0xC00);
+    assert_eq!(
+        sha256_hex(REGION_A_PLAIN),
+        "386595e473d3051e07fac43a02e0a8f8134b77858bb12e93246e4ebfbf51ee1c"
+    );
+    assert_eq!(&REGION_A_PLAIN[..3], &[0xeb, 0x3c, 0x90]);
+    assert_eq!(&REGION_A_PLAIN[3..11], b"MSDOS5.0");
+    assert_eq!(
+        u16::from_le_bytes([REGION_A_PLAIN[11], REGION_A_PLAIN[12]]),
+        512
+    );
+    assert_eq!(REGION_A_PLAIN[13], 1);
+    assert_eq!(REGION_A_PLAIN[16], 1);
+    assert_eq!(
+        u32::from_le_bytes([
+            REGION_A_PLAIN[32],
+            REGION_A_PLAIN[33],
+            REGION_A_PLAIN[34],
+            REGION_A_PLAIN[35],
+        ]),
+        6
+    );
+    assert_eq!(&REGION_A_PLAIN[54..62], b"FAT16   ");
+    assert_eq!(&REGION_A_PLAIN[510..512], &[0x55, 0xaa]);
+    assert_eq!(&REGION_A_PLAIN[0xA00..0xA00 + 4], &[0xc4, 0xfa, 0xb5, 0xc4]);
+
+    let closure: serde_json::Value = serde_json::from_str(include_str!(
+        "../audit/region_a/evidence/region_a_fat16_zero8_closure_20260923.json"
+    ))
+    .unwrap();
+    assert_eq!(
+        closure["status"],
+        "COMPLETE_REGION_A_FIXED_FAT16_TEMPLATE_ZERO8_PHYSICAL_OFFSET_TWEAK"
+    );
+    assert_eq!(closure["crypto"]["key"], "0000000000000000");
+    assert_eq!(closure["crypto"]["key_length"], 8);
+    assert_eq!(
+        closure["crypto"]["family"],
+        "EDPSECDISK200709 / A6B0-A7F0 counter-tweaked AES-128 family"
+    );
+    assert!(closure["crypto"]["tweak_seed"]
+        .as_str()
+        .unwrap()
+        .contains("physical backing byte offset = StartSector * 512"));
+
+    let templates = closure["static_template_sources"].as_array().unwrap();
+    assert_eq!(templates.len(), 2);
+    assert!(templates
+        .iter()
+        .all(|source| source["exact_3072_byte_match"] == true));
+
+    let samples = closure["physical_crosscheck"].as_array().unwrap();
+    assert_eq!(samples.len(), 2);
+    assert!(samples
+        .iter()
+        .all(|sample| sample["template_encrypt_bit_exact_to_physical"] == true));
+    assert!(samples.iter().all(|sample| {
+        sample["decrypt_plaintext_sha256"]
+            == "386595e473d3051e07fac43a02e0a8f8134b77858bb12e93246e4ebfbf51ee1c"
+    }));
+    assert!(samples
+        .iter()
+        .all(|sample| sample["old_driver_result_identical"] == true));
+    assert!(samples
+        .iter()
+        .all(|sample| sample["current_driver_result_identical"] == true));
+
+    let lexar = samples
+        .iter()
+        .find(|sample| sample["profile"] == "lexar-current")
+        .unwrap();
+    assert_eq!(lexar["start_lba"], 243_623_933u64);
+    assert_eq!(lexar["physical_byte_offset"], 243_623_933u64 * 512);
+    assert_eq!(
+        lexar["ciphertext_sha256"],
+        "fbf45d4713664d1e68eca634e8e9c04565be8b60d9ad4e1a18b7df3c766aaa24"
+    );
+    assert_eq!(lexar["ciphertext_sha256"], sha256_hex(PHYSICAL));
+
+    assert!(
+        closure["producer_interpretation"]["historical_first_callsite"]
+            .as_str()
+            .unwrap()
+            .contains("not yet located")
+    );
+    assert!(closure["does_not_prove"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|item| item.as_str().unwrap().contains("IIR")));
 }
 
 #[test]
@@ -311,7 +406,8 @@ fn failed_init_iir_harness_is_negative_evidence_not_virtual_positive() {
     assert_eq!(run["parsed"]["all_crc_ok"], false);
 
     let profile = include_str!("../audit/region_a/profile_coverage.tsv");
-    assert!(profile.contains("NOT_REPRODUCED"));
+    assert!(profile.contains("lexar-current\tCOMPLETE"));
+    assert!(profile.contains("sandisk-nopwd-two-entry\tCOMPLETE"));
     assert!(!profile.contains("N-IIR-INIT-RUNNER"));
     assert!(EVIDENCE.contains("N-IIR-INIT-RUNNER"));
 }
@@ -406,7 +502,7 @@ fn init_final_key_profiles_fail_only_unproven_region_a_as_iir_hypothesis() {
 }
 
 #[test]
-fn iir_address_chain_is_static_complete_but_physical_binding_remains_partial() {
+fn iir_address_chain_remains_independent_after_region_a_closure() {
     let chain: serde_json::Value = serde_json::from_str(include_str!(
         "../audit/region_a/evidence/iir_address_chain_20260922.json"
     ))
@@ -428,11 +524,19 @@ fn iir_address_chain_is_static_complete_but_physical_binding_remains_partial() {
         .contains("No direct current-Lexar PartInfo[2].sector_num observation"));
 
     let wire = include_str!("../audit/region_a/wire_byte_ledger.tsv");
-    assert!(wire.contains("000-bff\tUNKNOWN"));
-    assert!(wire.contains(
-        "three-disk captures separate Region A from the CHS-0x40000 IIR candidate window"
-    ));
-    assert!(DOC.contains("IIR 与 Region A 是否同址仍是未证明假设"));
+    assert!(wire.contains("000-bff\tCOMPLETE"));
+    assert!(wire.contains("fixed six-sector FAT16 compatibility image"));
+
+    let closure: serde_json::Value = serde_json::from_str(include_str!(
+        "../audit/region_a/evidence/region_a_fat16_zero8_closure_20260923.json"
+    ))
+    .unwrap();
+    assert!(closure["does_not_prove"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|item| item.as_str().unwrap().contains("IIR")));
+    assert!(DOC.contains("Region A 与 CHS-0x40000 的静态 IIR 候选窗口是两个不同物理对象"));
 }
 
 #[test]
@@ -522,7 +626,16 @@ fn cemsusbregsiter_sector_io_graph_does_not_claim_region_a_payload_io() {
     assert_eq!(evidence["functions"]["read_sector_data"], "sub_100136c0");
     assert_eq!(evidence["functions"]["write_sector_data"], "sub_10013810");
     assert!(DOC.contains("只闭环 Region A 指针生产，未发现 payload I/O"));
-    assert!(DOC.contains("未闭环 Region A 0xC00 payload producer/consumer"));
+    let closure: serde_json::Value = serde_json::from_str(include_str!(
+        "../audit/region_a/evidence/region_a_fat16_zero8_closure_20260923.json"
+    ))
+    .unwrap();
+    assert!(
+        closure["producer_interpretation"]["historical_first_callsite"]
+            .as_str()
+            .unwrap()
+            .contains("not yet located")
+    );
 }
 
 #[test]
@@ -552,7 +665,7 @@ fn sectorinfo_upload_path_is_closed_as_lba8_edpf_not_region_a() {
 }
 
 #[test]
-fn mount_edp_part_is_closed_as_lba12_partition_path_not_region_a() {
+fn current_lba12_mount_path_is_not_region_a_but_legacy_fallback_is() {
     // Mount path is separately proven not to consume the legacy Region A key-block.
 
     let evidence: serde_json::Value = serde_json::from_str(include_str!(
@@ -575,8 +688,9 @@ fn mount_edp_part_is_closed_as_lba12_partition_path_not_region_a() {
         evidence["current_lexar_crosscheck"]["lba12_actual_partitions"][1]["start_sector"],
         231424000u64
     );
-    assert!(DOC.contains("`MountEdpPart -> EdpMountFile` 不是 Region A consumer"));
-    assert!(DOC.contains("0 COMPLETE / 0 PARTIAL / 3072 UNKNOWN"));
+    assert!(DOC.contains("current `MountEdpPart` / LBA12 正常路径不是 Region A consumer"));
+    assert!(DOC.contains("legacy LBA7 fallback"));
+    assert!(DOC.contains("3072 COMPLETE / 0 PARTIAL / 0 UNKNOWN"));
 }
 
 #[test]
