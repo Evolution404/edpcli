@@ -17,7 +17,6 @@ use crate::protocol::{
     },
 };
 
-const LLGB_FALLBACK_LEN: usize = 0x170;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum FieldStyle {
@@ -82,9 +81,6 @@ fn u32_at(b: &[u8], off: usize) -> Option<u32> {
     Some(u32::from_le_bytes(b.get(off..off + 4)?.try_into().ok()?))
 }
 
-fn u64_at(b: &[u8], off: usize) -> Option<u64> {
-    Some(u64::from_le_bytes(b.get(off..off + 8)?.try_into().ok()?))
-}
 
 fn field(
     start: usize,
