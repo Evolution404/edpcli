@@ -4,6 +4,7 @@
 //! Hardware discovery belongs to the application/platform layers; builders consume only
 //! immutable, already-resolved inputs from this domain.
 
+mod conversion;
 mod filesystem;
 mod generate;
 mod keys;
@@ -13,6 +14,9 @@ mod profile;
 mod spec;
 mod validate;
 
+pub use conversion::{
+    build_passwordless_conversion, PasswordlessConversionImage, PasswordlessConversionPlan,
+};
 pub use filesystem::{
     build_empty_exfat, build_official_exfat_partitions, encrypt_sparse_mode2,
     OfficialFilesystemFormat, PartitionFilesystemImage, SparseFilesystemImage,
