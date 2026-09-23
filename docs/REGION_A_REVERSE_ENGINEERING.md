@@ -226,6 +226,12 @@ ReadIIR 和 WriteIIR 都使用 device tree node `+0x18` 计算物理位置，并
 
 以同一份 `EdpEDisk64.sys` 在 Unicorn 中调用旧版 8B key 分支 `sub_13160`，并用 `sub_13450` 对结果回加密，已在 16B 零块及完整 3072B Region A 上验证逐字节 round-trip。对免密 SanDisk 使用上述 CRC 闭合的 key8，解后 SHA-256=`5e3620...a2ac7`、熵约 7.936 bit/B；对 Lexar 使用其已验证 key8=`dd4019e3637d390f`，解后 SHA-256=`ead2c923...436960a`、熵约 7.939 bit/B。两份输出均无 `EDPF`/`FAT`/`NTFS`/`LLGB` 标识。这只排除“用此驱动旧 8B key 分支解后直接得到普通可识别磁盘格式”的简单模型；不排除双层加密、另一种 key/模式或随机内容。历史 `u_disk/analyze/mock_newlabel/decrypt_region_a_driver.py` 使用了不符合该驱动调用方式的分离输入/输出缓冲，先前由它产生的候选明文不应用来判定 Region A。
 
+### 4.10 已定位的条件物理写入点与现存 payload 来源的界限
+
+旧版驱动 `EdpEDisk64.sys` 的写 IRP 路径提供了一个**可达 Region A 的物理写入点**：`0x120f2` 先检查虚拟写入 `offset + length <= PartitionSize`；`0x1214d..0x12163` 计算并保存 `backing_offset + virtual_offset`；若启用加密且版本非 `0x206`，`0x122aa` 选择 8B key 的 `sub_13450`；最后 `0x12300..0x1232e` 把数据、长度及保存的物理偏移传给 `ZwWriteFile`。结合上节的旧 LBA7 回退，如果 type4 的 3072B 分区成功挂载，主机向其虚拟偏移 `0..0xBFF` 写数据，驱动就会写入真实 Region A 六扇区。这是**写入能力和条件代码路径**，尚无执行轨迹证明四块采样盘的现存高熵内容由它产生。
+
+写入者筛查还覆盖了 `cemsusbregsiter.dll` 的直接 `WriteFile`/`SetFilePointer` 调用：所见物理盘或逻辑盘写入分别用于前部标签、备份、NTFS 初始化及包装器；`CreatePartitions` 中另外三处 `CHS−0xE0000` 运算只填入 `SetPartInfoNew` 条目。安装包中的 `safeusbregsitercems.dll`、`usbtools.dll`、`usbshformat.exe`、Netac API 与 Linux 客户端也未出现可直接绑定为 `CHS−0xE0000` 六扇区写入的正证据。静态未命中不等于排除间接/动态地址流。现存 Region A 的**首次生成点仍未定位**，不可把驱动的通用 `ZwWriteFile` 等同于已证实的历史 producer。细节记录在 `audit/region_a/evidence/legacy_region_a_conditional_write_20260923.json`。
+
 ## 5. AES 算法、默认 Init key 与版本 profile
 
 `sub_1800092c0/sub_180009390` 调用 `sub_18001c560()` 得到 `EVP_CIPHER` descriptor。早期仅依据 OpenSSL 注册字符串曾误判为 AES-192-CBC；2026-09-22 已用 descriptor 本体纠正。

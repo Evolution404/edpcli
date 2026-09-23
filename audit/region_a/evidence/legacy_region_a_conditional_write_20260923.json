@@ -1,0 +1,44 @@
+{
+  "status": "CONDITIONAL_PHYSICAL_WRITE_POINT_FOUND_HISTORICAL_PRODUCER_UNKNOWN",
+  "date": "2026-09-23",
+  "binary": {
+    "path": "/Users/zhangyuxi/Desktop/u_disk/VRV/edp/EdpEDisk64.sys",
+    "sha256": "724544a96f899b9bb0f87a8adedd08a961d8e4b8ec40aa90bc8144e5ae7e0620"
+  },
+  "driver_write_path": [
+    {
+      "address": "0x120f2",
+      "fact": "Reject virtual writes whose offset or offset plus length exceeds mounted PartitionSize."
+    },
+    {
+      "address": "0x1214d..0x12163",
+      "fact": "Compute and retain backing_offset plus virtual_offset as the physical ByteOffset."
+    },
+    {
+      "address": "0x12208..0x122be",
+      "fact": "When encryption is enabled and version is not 0x206, use the 8-byte-key sub_13450 write transform."
+    },
+    {
+      "address": "0x12300..0x1232e",
+      "fact": "Pass transformed or untransformed data, length, and saved physical ByteOffset to ZwWriteFile on the backing handle."
+    }
+  ],
+  "region_a_binding_is_conditional_on": [
+    "Historical EdpEDiskCtrl.dll fails its preferred LBA12-family new-label read and falls back to LBA7.",
+    "The selected LBA7 type4 entry points to the 3072-byte Region A and login successfully mounts it.",
+    "A host write to virtual offset 0..0xBFF actually occurs."
+  ],
+  "bounded_writer_screen": {
+    "cemsusbregsiter_direct_writefile": "Direct WriteFile/SetFilePointer call sites enumerated; inspected disk-related sites target front labels, backups, or NTFS initialization. None is proven to write a six-sector CHS-minus-0xE0000 payload.",
+    "cemsusbregsiter_locator_variants": "Four CHS-minus-0xE0000 code sequences, including sub_10040110, build partition pointer metadata; the three sequences inside CreatePartitions write SetPartInfoNew fields.",
+    "other_binaries": "safeusbregsitercems.dll, usbtools.dll, usbshformat.exe, Netac API binaries, and the Linux client were screened for a directly provable six-sector CHS-minus-0xE0000 write; none found in this bounded pass."
+  },
+  "proves": [
+    "The legacy driver has a physical WriteFile boundary that can target Region A if its 3072-byte LBA7 entry is mounted and receives a virtual write."
+  ],
+  "does_not_prove": [
+    "That any of the sampled disks took the fallback, mounted Region A, or wrote the captured bytes through this driver path.",
+    "The first producer of the existing high-entropy 3072-byte payload.",
+    "The plaintext format or business meaning of Region A."
+  ]
+}
