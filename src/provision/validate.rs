@@ -323,7 +323,7 @@ fn validate_lba7(spec: &ProvisionSpec, raw: &[u8]) -> Result<(), String> {
     );
     expected[..0x40].copy_from_slice(&share);
     expected[0x40..0x80].copy_from_slice(&type4);
-    expected[0xc0..0xc8].copy_from_slice(&spec.profile().lba7_pass_info_prefix());
+    expected[0xc0..0xce].copy_from_slice(&spec.profile().lba7_pass_info());
     if decoded != expected {
         return Err("LBA7 EDPF/profile mismatch for target device_id".into());
     }
@@ -421,7 +421,7 @@ fn validate_lba12(spec: &ProvisionSpec, raw: &[u8]) -> Result<(), String> {
     );
     expected[..0x60].copy_from_slice(&share);
     expected[0x60..0xc0].copy_from_slice(&type4);
-    expected[0x120..0x128].copy_from_slice(&spec.profile().lba12_pass_info_prefix());
+    expected[0x120..0x12e].copy_from_slice(&spec.profile().lba12_pass_info());
     if decoded[..LBA12_TABLE_LEN] != expected[..LBA12_TABLE_LEN] {
         return Err("LBA12 EDPF/profile mismatch for target device_id".into());
     }
@@ -624,8 +624,8 @@ fn validate_official_lba7(
     }
     let used_end = logical.len() * 0x40;
     if plain[used_end..0xc0].iter().any(|byte| *byte != 0)
-        || plain[0xc0..0xc8] != spec.profile().lba7_pass_info_prefix()
-        || plain[0xc8..].iter().any(|byte| *byte != 0)
+        || plain[0xc0..0xce] != spec.profile().lba7_pass_info()
+        || plain[0xce..].iter().any(|byte| *byte != 0)
     {
         return Err("official LBA7 table/pass-info/tail mismatch".into());
     }
@@ -667,8 +667,8 @@ fn validate_official_lba12(
     }
     let used_end = logical.len() * 0x60;
     if plain[used_end..0x120].iter().any(|byte| *byte != 0)
-        || plain[0x120..0x128] != spec.profile().lba12_pass_info_prefix()
-        || plain[0x128..].iter().any(|byte| *byte != 0)
+        || plain[0x120..0x12e] != spec.profile().lba12_pass_info()
+        || plain[0x12e..].iter().any(|byte| *byte != 0)
     {
         return Err("official LBA12 table/pass-info/tail mismatch".into());
     }

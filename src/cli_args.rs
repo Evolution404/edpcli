@@ -98,7 +98,10 @@ pub struct ProvisionNewOpts {
     pub boot_fs: crate::provision::OfficialFilesystemFormat,
     pub share_fs: crate::provision::OfficialFilesystemFormat,
     pub encrypt_fs: crate::provision::OfficialFilesystemFormat,
-    pub force_change_password: bool,
+    pub force_change_password: Option<bool>,
+    pub cancel_password_complexity_check: Option<bool>,
+    pub max_share_password_errors: Option<u8>,
+    pub max_encrypt_password_errors: Option<u8>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -241,7 +244,14 @@ fn print_topic_help(topic: &str) {
             );
             println!("密码默认值: 0000aaaa；卷标默认值: 启动区。");
             println!("标签标识未指定时自动生成一个合法 onlyid 候选；可通过 --label-id 手动覆盖。");
-            println!("密码策略: --force-change-password 表示首次插入时强制修改密码；默认关闭。");
+            println!("密码策略: 未指定时继承注册盘可靠 PassInfo；普通盘默认 强制改密=否、取消复杂性验证=否、两区最大错误次数=255。");
+            println!("    --force-change-password / --no-force-change-password");
+            println!(
+                "    --cancel-password-complexity-check / --enforce-password-complexity-check"
+            );
+            println!(
+                "    --share-max-password-errors N --encrypt-max-password-errors N   (0..255)"
+            );
             println!("分区参数: --boot-mib N / --boot-sectors N、--share-mib N、--encrypt-mib N；mode0 未指定启动区时默认 20417 扇区。");
             println!("当前可写文件系统为 FAT16/exFAT；加密分区使用已验证的 SM4(mode2) 扇区变换。");
         }
@@ -360,7 +370,10 @@ fn parse_new_provision_opts(
     let mut boot_fs = None;
     let mut share_fs = None;
     let mut encrypt_fs = None;
-    let mut force_change_password = false;
+    let mut force_change_password = None;
+    let mut cancel_password_complexity_check = None;
+    let mut max_share_password_errors = None;
+    let mut max_encrypt_password_errors = None;
     let mut out = None;
     let mut yes = false;
     let mut i = 0usize;
@@ -510,10 +523,67 @@ fn parse_new_provision_opts(
                 )?;
             }
             "--force-change-password" => {
-                set_switch(
-                    &mut force_change_password,
-                    &rest[i],
-                    "--force-change-password",
+                if rest[i] != "--force-change-password" {
+                    return Err(format!(
+                        "错误: --force-change-password 是布尔旗标，不接受参数值: {}",
+                        rest[i]
+                    ));
+                }
+                if force_change_password.replace(true).is_some() {
+                    return Err("错误: 强制改密策略重复或冲突指定".into());
+                }
+            }
+            "--no-force-change-password" => {
+                if rest[i] != "--no-force-change-password" {
+                    return Err(format!(
+                        "错误: --no-force-change-password 是布尔旗标，不接受参数值: {}",
+                        rest[i]
+                    ));
+                }
+                if force_change_password.replace(false).is_some() {
+                    return Err("错误: 强制改密策略重复或冲突指定".into());
+                }
+            }
+            "--cancel-password-complexity-check" => {
+                if rest[i] != "--cancel-password-complexity-check" {
+                    return Err(format!(
+                        "错误: --cancel-password-complexity-check 是布尔旗标，不接受参数值: {}",
+                        rest[i]
+                    ));
+                }
+                if cancel_password_complexity_check.replace(true).is_some() {
+                    return Err("错误: 密码复杂性验证策略重复或冲突指定".into());
+                }
+            }
+            "--enforce-password-complexity-check" => {
+                if rest[i] != "--enforce-password-complexity-check" {
+                    return Err(format!(
+                        "错误: --enforce-password-complexity-check 是布尔旗标，不接受参数值: {}",
+                        rest[i]
+                    ));
+                }
+                if cancel_password_complexity_check.replace(false).is_some() {
+                    return Err("错误: 密码复杂性验证策略重复或冲突指定".into());
+                }
+            }
+            "--share-max-password-errors" => {
+                let value = take_value(rest, &mut i, "--share-max-password-errors")?;
+                set_once(
+                    &mut max_share_password_errors,
+                    value.parse::<u8>().map_err(|_| {
+                        format!("错误: --share-max-password-errors 须为 0..255，得到 {value}")
+                    })?,
+                    "--share-max-password-errors",
+                )?;
+            }
+            "--encrypt-max-password-errors" => {
+                let value = take_value(rest, &mut i, "--encrypt-max-password-errors")?;
+                set_once(
+                    &mut max_encrypt_password_errors,
+                    value.parse::<u8>().map_err(|_| {
+                        format!("错误: --encrypt-max-password-errors 须为 0..255，得到 {value}")
+                    })?,
+                    "--encrypt-max-password-errors",
                 )?;
             }
             "--out" => {
@@ -631,6 +701,9 @@ fn parse_new_provision_opts(
             share_fs: share_fs.unwrap_or(crate::provision::OfficialFilesystemFormat::ExFat),
             encrypt_fs: encrypt_fs.unwrap_or(crate::provision::OfficialFilesystemFormat::ExFat),
             force_change_password,
+            cancel_password_complexity_check,
+            max_share_password_errors,
+            max_encrypt_password_errors,
         },
         out,
         yes,

@@ -286,7 +286,7 @@ fn build_official_lba7(
         );
         plain[base..base + 0x40].copy_from_slice(&entry);
     }
-    plain[0xc0..0xc8].copy_from_slice(&spec.profile().lba7_pass_info_prefix());
+    plain[0xc0..0xce].copy_from_slice(&spec.profile().lba7_pass_info());
     let crc = crc32_bare(spec.target().device_id().as_bytes());
     let k0 = (crc & 0xffff) ^ (crc >> 16);
     Ok(xor_rolling(&plain, k0).try_into().expect("sector length"))
@@ -334,7 +334,7 @@ fn build_official_lba12(
         );
         plain[base..base + 0x60].copy_from_slice(&entry);
     }
-    plain[0x120..0x128].copy_from_slice(&spec.profile().lba12_pass_info_prefix());
+    plain[0x120..0x12e].copy_from_slice(&spec.profile().lba12_pass_info());
     let crc = crc32_bare(spec.target().device_id().as_bytes());
     Ok(a7f0_full(&plain, &crc.to_le_bytes(), 0)
         .try_into()
@@ -359,7 +359,7 @@ fn build_lba7(spec: &ProvisionSpec, layout: Layout) -> [u8; SECTOR] {
     );
     plain[..0x40].copy_from_slice(&share);
     plain[0x40..0x80].copy_from_slice(&type4);
-    plain[0xc0..0xc8].copy_from_slice(&spec.profile().lba7_pass_info_prefix());
+    plain[0xc0..0xce].copy_from_slice(&spec.profile().lba7_pass_info());
     let crc = crc32_bare(spec.target().device_id().as_bytes());
     let k0 = (crc & 0xffff) ^ (crc >> 16);
     xor_rolling(&plain, k0).try_into().expect("sector length")
@@ -449,7 +449,7 @@ fn build_lba12(spec: &ProvisionSpec, layout: Layout) -> [u8; SECTOR] {
     );
     plain[..0x60].copy_from_slice(&share);
     plain[0x60..0xc0].copy_from_slice(&type4);
-    plain[0x120..0x128].copy_from_slice(&spec.profile().lba12_pass_info_prefix());
+    plain[0x120..0x12e].copy_from_slice(&spec.profile().lba12_pass_info());
 
     let crc = crc32_bare(spec.target().device_id().as_bytes());
     let key = crc.to_le_bytes();

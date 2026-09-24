@@ -23,9 +23,9 @@ use crate::provision::{
     OfficialPartitionFilesystems, OfficialPartitionMode, OfficialPartitionSizes,
     OfficialProvisionPlan, OfficialProvisionWriteImage, OnlyId, ParsedExistingProvision,
     PartitionAction, PartitionFilesystemImage, PartitionFormatTarget, PartitionRole,
-    ProvisionEntropy, ProvisionImage, ProvisionMetadata, ProvisionProfile, ProvisionSpec,
-    QuickCapacityUnit, SparseFilesystemImage, TargetGeometryOverrides, TargetIdentity,
-    TargetPartitionGeometry, TargetProvisionPlan, DEFAULT_MODE0_BOOT_SECTORS,
+    PassInfoPolicy, ProvisionEntropy, ProvisionImage, ProvisionMetadata, ProvisionProfile,
+    ProvisionSpec, QuickCapacityUnit, SparseFilesystemImage, TargetGeometryOverrides,
+    TargetIdentity, TargetPartitionGeometry, TargetProvisionPlan, DEFAULT_MODE0_BOOT_SECTORS,
 };
 use crate::sysinfo::{self, CmdRunner};
 use encoding_rs::GBK;
@@ -58,7 +58,10 @@ pub struct NewProvisionRequest {
     pub password: String,
     pub volume_label: String,
     pub format: FormatOptions,
-    pub force_change_password: bool,
+    pub force_change_password: Option<bool>,
+    pub cancel_password_complexity_check: Option<bool>,
+    pub max_share_password_errors: Option<u8>,
+    pub max_encrypt_password_errors: Option<u8>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -191,7 +194,7 @@ fn plan_format_targets_with_keys(
             }
         })
         .collect::<Vec<_>>();
-    for choice in planned.iter().filter(|choice| choice.selected) {
+    for choice in planned.iter().filter(|choice| choice.target.format_capable) {
         if !matches!(
             choice.filesystem,
             Some(OfficialFilesystemFormat::Fat16 | OfficialFilesystemFormat::ExFat)
@@ -281,6 +284,7 @@ pub struct PreparedNewProvision {
     pub device_id: String,
     pub mode: OfficialPartitionMode,
     pub force_change_password: bool,
+    pub pass_info_policy: PassInfoPolicy,
     pub lce_start_lba: u64,
     pub write_image: OfficialProvisionWriteImage,
     pub format_targets: Vec<PlannedPartitionFormat>,
@@ -301,6 +305,7 @@ impl std::fmt::Debug for PreparedNewProvision {
             .field("device_id", &self.device_id)
             .field("mode", &self.mode)
             .field("force_change_password", &self.force_change_password)
+            .field("pass_info_policy", &self.pass_info_policy)
             .field("lce_start_lba", &self.lce_start_lba)
             .field("write_image", &self.write_image)
             .field("format_targets", &self.format_targets)
@@ -420,8 +425,14 @@ pub fn prepare_new_provision(
         request.label.clone(),
     )
     .map_err(|message| err(EXIT_TARGET, format!("错误: 制盘身份字段无效: {message}")))?;
-    let profile =
-        ProvisionProfile::canonical_v1().with_force_change_password(request.force_change_password);
+    let pass_info_policy = PassInfoPolicy {
+        force_change_password: request.force_change_password.unwrap_or(false),
+        cancel_password_complexity_check: request.cancel_password_complexity_check.unwrap_or(false),
+        max_share_password_errors: request.max_share_password_errors.unwrap_or(u8::MAX),
+        max_encrypt_password_errors: request.max_encrypt_password_errors.unwrap_or(u8::MAX),
+    };
+    let force_change_password = pass_info_policy.force_change_password;
+    let profile = ProvisionProfile::canonical_v1().with_pass_info_policy(pass_info_policy);
     let spec = ProvisionSpec::new(target, metadata, profile)
         .map_err(|message| err(EXIT_TARGET, format!("错误: 制盘元数据无法编码: {message}")))?;
 
@@ -495,7 +506,8 @@ pub fn prepare_new_provision(
         disk,
         device_id,
         mode: selected_mode,
-        force_change_password: request.force_change_password,
+        force_change_password,
+        pass_info_policy,
         lce_start_lba: compatibility.start_lba,
         write_image,
         format_targets,
@@ -690,6 +702,25 @@ pub fn prepare_target_provision(
         None
     };
     let selected_mode = mode(request.mode)?;
+    let inherited_pass_info_policy = source
+        .as_ref()
+        .and_then(|source| source.pass_info_policy)
+        .unwrap_or_default();
+    let pass_info_policy = PassInfoPolicy {
+        force_change_password: request
+            .force_change_password
+            .unwrap_or(inherited_pass_info_policy.force_change_password),
+        cancel_password_complexity_check: request
+            .cancel_password_complexity_check
+            .unwrap_or(inherited_pass_info_policy.cancel_password_complexity_check),
+        max_share_password_errors: request
+            .max_share_password_errors
+            .unwrap_or(inherited_pass_info_policy.max_share_password_errors),
+        max_encrypt_password_errors: request
+            .max_encrypt_password_errors
+            .unwrap_or(inherited_pass_info_policy.max_encrypt_password_errors),
+    };
+    let force_change_password = pass_info_policy.force_change_password;
     let prefill = prefill_for_target_mode(
         source.as_ref().map(|source| &source.profile),
         selected_mode,
@@ -812,8 +843,7 @@ pub fn prepare_target_provision(
         label,
     )
     .map_err(|message| err(EXIT_TARGET, format!("错误: 制盘身份字段无效: {message}")))?;
-    let profile =
-        ProvisionProfile::canonical_v1().with_force_change_password(request.force_change_password);
+    let profile = ProvisionProfile::canonical_v1().with_pass_info_policy(pass_info_policy);
     let spec = ProvisionSpec::new(target, metadata, profile)
         .map_err(|message| err(EXIT_TARGET, format!("错误: 制盘元数据无法编码: {message}")))?;
     let mut filesystems = request.format.filesystems();
@@ -933,7 +963,8 @@ pub fn prepare_target_provision(
         disk,
         device_id,
         mode: selected_mode,
-        force_change_password: request.force_change_password,
+        force_change_password,
+        pass_info_policy,
         lce_start_lba: compatibility.start_lba,
         write_image,
         format_targets,
@@ -1562,6 +1593,7 @@ mod tests {
             device_id: "disk&ven_netac&prod_onlydisk".into(),
             mode: OfficialPartitionMode::BootShareCombined,
             force_change_password: false,
+            pass_info_policy: PassInfoPolicy::default(),
             lce_start_lba: 900,
             write_image: OfficialProvisionWriteImage {
                 metadata,
@@ -1742,6 +1774,7 @@ mod tests {
             device_id: "disk&ven_aigo&prod_u335".into(),
             mode: plan.mode,
             force_change_password: false,
+            pass_info_policy: PassInfoPolicy::default(),
             lce_start_lba: plan.lba7_compatibility_extent.start_lba,
             write_image: OfficialProvisionWriteImage {
                 metadata: ProvisionImage::from_bytes(vec![0; 13 * SECTOR]).unwrap(),
@@ -1860,6 +1893,7 @@ mod tests {
             device_id,
             mode: plan.mode,
             force_change_password: false,
+            pass_info_policy: PassInfoPolicy::default(),
             lce_start_lba: plan.lba7_compatibility_extent.start_lba,
             write_image,
             format_targets: vec![],

@@ -303,6 +303,9 @@ pub struct ProvisionForm {
     pub share_fs: crate::provision::OfficialFilesystemFormat,
     pub encrypt_fs: crate::provision::OfficialFilesystemFormat,
     pub force_change_password: bool,
+    pub cancel_password_complexity_check: bool,
+    pub max_share_password_errors: String,
+    pub max_encrypt_password_errors: String,
 }
 
 fn toggle_supported_fs(
@@ -373,6 +376,9 @@ impl Default for ProvisionForm {
             share_fs: crate::provision::OfficialFilesystemFormat::ExFat,
             encrypt_fs: crate::provision::OfficialFilesystemFormat::ExFat,
             force_change_password: false,
+            cancel_password_complexity_check: false,
+            max_share_password_errors: u8::MAX.to_string(),
+            max_encrypt_password_errors: u8::MAX.to_string(),
         }
     }
 }
@@ -2007,20 +2013,50 @@ impl AppState {
                     row.onlyid.clone(),
                     row.user.clone().unwrap_or_default(),
                     row.dept.clone().unwrap_or_default(),
+                    row.label.clone(),
+                    row.force_change_password,
+                    row.cancel_password_complexity_check,
+                    row.max_share_password_errors,
+                    row.max_encrypt_password_errors,
                 )
             });
             let scanned_onlyid = defaults
                 .as_ref()
-                .and_then(|(onlyid, _, _)| onlyid.clone())
+                .and_then(|(onlyid, _, _, _, _, _, _, _)| onlyid.clone())
                 .filter(|value| !value.trim().is_empty());
             self.provision.form.label_id = scanned_onlyid.unwrap_or_else(|| {
                 crate::provision::OnlyId::random_candidate()
                     .map(|value| value.text().to_string())
                     .unwrap_or_else(|_| "1".into())
             });
-            if let Some((_, user, dept)) = defaults {
+            if let Some((
+                _,
+                user,
+                dept,
+                label,
+                force_change_password,
+                cancel_password_complexity_check,
+                max_share_password_errors,
+                max_encrypt_password_errors,
+            )) = defaults
+            {
                 self.provision.form.user = user;
                 self.provision.form.dept = dept;
+                if let Some(label) = label.filter(|value| !value.trim().is_empty()) {
+                    self.provision.form.label = label;
+                }
+                if let Some(force_change_password) = force_change_password {
+                    self.provision.form.force_change_password = force_change_password;
+                }
+                if let Some(cancel) = cancel_password_complexity_check {
+                    self.provision.form.cancel_password_complexity_check = cancel;
+                }
+                if let Some(value) = max_share_password_errors {
+                    self.provision.form.max_share_password_errors = value.to_string();
+                }
+                if let Some(value) = max_encrypt_password_errors {
+                    self.provision.form.max_encrypt_password_errors = value.to_string();
+                }
             }
             let target_mode = match kind {
                 ProvisionKind::Mode0 => {
@@ -2197,7 +2233,7 @@ impl AppState {
                 slots.push(label);
             }
         }
-        slots.push(9);
+        slots.extend([9, 27, 28, 29]);
         if matches!(mode, 0 | 3) {
             slots.extend([21, 24]);
         }
@@ -2365,12 +2401,31 @@ impl AppState {
             out.push((format!("{}卷标", role.label()), label, false));
         }
         out.push((
-            "首次强制改密".into(),
+            "初始化密码强制修改".into(),
             if self.provision.form.force_change_password {
                 "☑ 是"
             } else {
                 "☐ 否"
             },
+            false,
+        ));
+        out.push((
+            "取消密码复杂性验证".into(),
+            if self.provision.form.cancel_password_complexity_check {
+                "☑ 是"
+            } else {
+                "☐ 否"
+            },
+            false,
+        ));
+        out.push((
+            "交换区密码最大错误次数".into(),
+            self.provision.form.max_share_password_errors.as_str(),
+            false,
+        ));
+        out.push((
+            "保密区密码最大错误次数".into(),
+            self.provision.form.max_encrypt_password_errors.as_str(),
             false,
         ));
         let describe = |mode: crate::provision::CapacityInputMode,
@@ -2474,6 +2529,8 @@ impl AppState {
             24 => Some(&mut self.provision.form.boot_start_lba),
             25 => Some(&mut self.provision.form.share_start_lba),
             26 => Some(&mut self.provision.form.encrypt_start_lba),
+            28 => Some(&mut self.provision.form.max_share_password_errors),
+            29 => Some(&mut self.provision.form.max_encrypt_password_errors),
             _ => None,
         }
     }
@@ -2720,6 +2777,8 @@ impl AppState {
                 .find(|line| !line.starts_with("gap=") && !line.starts_with("unallocated=")),
             21..=23 => Some("Space 切换 Quick(MiB/GiB) / Exact(sector)，不允许隐式取整".into()),
             24..=26 => Some("canonical start LBA；改变后会立即重新判定 Preserve/Rebuild".into()),
+            27 => Some("Space 切换；勾选后 PassInfo bNoUsbChkPasSafe=1，取消密码复杂性验证".into()),
+            28 | 29 => Some("PassInfo 逻辑值 0..255；落盘时由协议编码自动 XOR 0x88".into()),
             _ => None,
         }
     }
@@ -2736,6 +2795,12 @@ impl AppState {
             Some(9) => {
                 self.provision.form.force_change_password =
                     !self.provision.form.force_change_password;
+                self.provision.message = None;
+                true
+            }
+            Some(27) => {
+                self.provision.form.cancel_password_complexity_check =
+                    !self.provision.form.cancel_password_complexity_check;
                 self.provision.message = None;
                 true
             }
@@ -2875,6 +2940,20 @@ impl AppState {
         {
             return Err("标签标识、用户、部门、标签和密码均不能为空".into());
         }
+        let max_share_password_errors = self
+            .provision
+            .form
+            .max_share_password_errors
+            .trim()
+            .parse::<u8>()
+            .map_err(|_| "交换区密码最大错误次数必须为 0..255".to_string())?;
+        let max_encrypt_password_errors = self
+            .provision
+            .form
+            .max_encrypt_password_errors
+            .trim()
+            .parse::<u8>()
+            .map_err(|_| "保密区密码最大错误次数必须为 0..255".to_string())?;
         Ok(crate::application::provision::NewProvisionRequest {
             mode,
             boot_start_lba: matches!(mode, 0 | 3)
@@ -2909,7 +2988,12 @@ impl AppState {
                 share_fs: self.provision.form.share_fs,
                 encrypt_fs: self.provision.form.encrypt_fs,
             },
-            force_change_password: self.provision.form.force_change_password,
+            force_change_password: Some(self.provision.form.force_change_password),
+            cancel_password_complexity_check: Some(
+                self.provision.form.cancel_password_complexity_check,
+            ),
+            max_share_password_errors: Some(max_share_password_errors),
+            max_encrypt_password_errors: Some(max_encrypt_password_errors),
         })
     }
 

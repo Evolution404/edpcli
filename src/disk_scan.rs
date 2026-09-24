@@ -28,6 +28,11 @@ pub struct Row {
     pub onlyid: Option<String>,
     pub dept: Option<String>,
     pub user: Option<String>,
+    pub label: Option<String>,
+    pub force_change_password: Option<bool>,
+    pub cancel_password_complexity_check: Option<bool>,
+    pub max_share_password_errors: Option<u8>,
+    pub max_encrypt_password_errors: Option<u8>,
     pub n_baks: usize,
     pub denied: bool,
     pub probe_error: Option<String>,
@@ -104,6 +109,11 @@ pub fn scan_disks(
             onlyid: None,
             dept: None,
             user: None,
+            label: None,
+            force_change_password: None,
+            cancel_password_complexity_check: None,
+            max_share_password_errors: None,
+            max_encrypt_password_errors: None,
             n_baks: 0,
             denied: false,
             probe_error: None,
@@ -140,17 +150,18 @@ pub fn scan_disks(
                 let lba4 = read_exact(4)?;
                 row.onlyid = diskio::lba4_label_id_from(&lba4);
                 if let Some(did) = &id.device_id {
+                    let meta = InspectMeta {
+                        device_id: Some(did.clone()),
+                        vid: Some(d.vid.clone()),
+                        pid: Some(d.pid.clone()),
+                        size_bytes: Some(d.size),
+                        onlyid: row.onlyid.clone(),
+                    };
                     if let Ok(lba8) = read_exact(8) {
-                        let meta = InspectMeta {
-                            device_id: Some(did.clone()),
-                            vid: Some(d.vid.clone()),
-                            pid: Some(d.pid.clone()),
-                            size_bytes: Some(d.size),
-                            onlyid: row.onlyid.clone(),
-                        };
                         if let Some(ownership) = metainfo::ownership_from_lba8(&lba8, &meta) {
                             row.dept = ownership.dept;
                             row.user = ownership.user;
+                            row.label = ownership.label;
                         }
                     }
                     let read = |lba: u32| {
@@ -161,6 +172,21 @@ pub fn scan_disks(
                     let lba12 = read_exact(12)?;
                     row.provision_kind = DiskProvisionKind::from_sectors(&lba7, &lba12, did);
                     row.partitions = parse_lba12(&lba12, did);
+                    if row.provision_kind != DiskProvisionKind::Plain {
+                        let lba6 = read_exact(6)?;
+                        row.label =
+                            metainfo::safe6_label_from_lba6(&lba6, &meta).or(row.label.take());
+                        if let Some(policy) =
+                            crate::provision::pass_info_policy_from_sectors(&lba7, &lba12, did)
+                        {
+                            row.force_change_password = Some(policy.force_change_password);
+                            row.cancel_password_complexity_check =
+                                Some(policy.cancel_password_complexity_check);
+                            row.max_share_password_errors = Some(policy.max_share_password_errors);
+                            row.max_encrypt_password_errors =
+                                Some(policy.max_encrypt_password_errors);
+                        }
+                    }
                     let tag = diskio::lba4_tag16_from(&lba4).ok_or_else(|| {
                         io::Error::new(io::ErrorKind::UnexpectedEof, "LBA4 缺少 16B 身份标签")
                     })?;

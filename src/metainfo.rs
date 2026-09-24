@@ -62,6 +62,14 @@ fn field_value_any(view: &SectorView, labels: &[&str]) -> Option<String> {
     labels.iter().find_map(|label| field_value(view, label))
 }
 
+pub fn safe6_label_from_lba6(raw: &[u8], inspect_meta: &InspectMeta) -> Option<String> {
+    if raw.len() != SECTOR {
+        return None;
+    }
+    let view = inspect::analyze_sector(6, raw, inspect_meta);
+    field_value_any(&view, &["Label", "标签"])
+}
+
 fn child_value(view: &SectorView, label: &str) -> Option<String> {
     view.fields
         .iter()

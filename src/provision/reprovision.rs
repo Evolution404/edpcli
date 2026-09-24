@@ -4,12 +4,13 @@ use crate::protocol::edpf::EdpPartitionType;
 use crate::{
     common::SECTOR,
     crypto::{a6b0_full, crc32_bare, xor_rolling},
-    protocol::edpf::{EdpfEntry64, EdpfEntry96},
+    protocol::edpf::{EdpfEntry64, EdpfEntry96, PassInfo},
 };
 
 use super::{
-    OfficialFilesystemFormat, OfficialPartitionMode, PartitionRole, DEFAULT_MODE0_BOOT_SECTORS,
-    OFFICIAL_PARTITION_START_SECTOR, WHOLE_DISK_ENCRYPTED_COMPAT_BOOT_BYTES,
+    OfficialFilesystemFormat, OfficialPartitionMode, PartitionRole, PassInfoPolicy,
+    DEFAULT_MODE0_BOOT_SECTORS, OFFICIAL_PARTITION_START_SECTOR,
+    WHOLE_DISK_ENCRYPTED_COMPAT_BOOT_BYTES,
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -660,6 +661,63 @@ pub struct ParsedExistingProvision {
     pub records: Vec<ExistingPartitionRecord>,
     pub device_id: String,
     pub total_sectors: u64,
+    pub pass_info_policy: Option<PassInfoPolicy>,
+    pub force_change_password: Option<bool>,
+}
+
+fn reliable_pass_info_policy(plain7: &[u8], plain12: &[u8]) -> Option<PassInfoPolicy> {
+    fn decode(stored: &[u8]) -> Option<PassInfoPolicy> {
+        let stored: &[u8; 14] = stored.try_into().ok()?;
+        let pass = PassInfo::decode_stored(stored);
+        if !matches!(pass.version, 0x0064 | 0x0206) {
+            return None;
+        }
+        let force_change_password = match (pass.force_change_share, pass.force_change_encrypt) {
+            (0, 0) => false,
+            (1, 1) => true,
+            _ => return None,
+        };
+        let cancel_password_complexity_check = match pass.no_usb_check_password_safe {
+            0 => false,
+            1 => true,
+            _ => return None,
+        };
+        Some(PassInfoPolicy {
+            force_change_password,
+            cancel_password_complexity_check,
+            max_share_password_errors: pass.max_share_password_errors,
+            max_encrypt_password_errors: pass.max_encrypt_password_errors,
+        })
+    }
+
+    let from7 = decode(plain7.get(0xc0..0xce)?)?;
+    let from12 = decode(plain12.get(0x120..0x12e)?)?;
+    (from7 == from12).then_some(from7)
+}
+
+pub fn pass_info_policy_from_sectors(
+    lba7: &[u8],
+    lba12: &[u8],
+    device_id: &str,
+) -> Option<PassInfoPolicy> {
+    if lba7.len() != SECTOR || lba12.len() != SECTOR || device_id.is_empty() {
+        return None;
+    }
+    let crc = crc32_bare(device_id.as_bytes());
+    let plain7 = xor_rolling(lba7, (crc & 0xffff) ^ (crc >> 16));
+    let plain12 = a6b0_full(lba12, &crc.to_le_bytes(), 0);
+    if plain7.get(..4) != Some(b"EDPF") || plain12.get(..4) != Some(b"EDPF") {
+        return None;
+    }
+    reliable_pass_info_policy(&plain7, &plain12)
+}
+
+pub fn force_change_password_from_sectors(
+    lba7: &[u8],
+    lba12: &[u8],
+    device_id: &str,
+) -> Option<bool> {
+    pass_info_policy_from_sectors(lba7, lba12, device_id).map(|policy| policy.force_change_password)
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -973,6 +1031,8 @@ pub fn parse_existing_provision(
     }
     let mode = OfficialPartitionMode::from_partition_types(&types)
         .ok_or("EDPF partition types do not match an official mode")?;
+    let pass_info_policy = reliable_pass_info_policy(&plain7, &plain12);
+    let force_change_password = pass_info_policy.map(|policy| policy.force_change_password);
     if plain7[count * 0x40..0xc0].iter().any(|byte| *byte != 0)
         || plain12[count * 0x60..0x120].iter().any(|byte| *byte != 0)
     {
@@ -1016,5 +1076,7 @@ pub fn parse_existing_provision(
         records,
         device_id: device_id.to_string(),
         total_sectors,
+        pass_info_policy,
+        force_change_password,
     }))
 }

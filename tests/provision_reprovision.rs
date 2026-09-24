@@ -9,8 +9,8 @@ use edpcli::{
         wrap_legacy_lba7_file_key, CapacityInput, CapacityInputMode, CapacitySource,
         DiskProvisionKind, ExistingPartition, ExistingProvisionProfile, FileKeyWrapMode,
         OfficialFilesystemFormat, OfficialPartitionMode, OfficialPartitionSizes,
-        OfficialProvisionPlan, OnlyId, PartitionAction, PartitionRole, ProvisionEntropy,
-        ProvisionMetadata, ProvisionProfile, ProvisionSpec, QuickCapacityUnit,
+        OfficialProvisionPlan, OnlyId, PartitionAction, PartitionRole, PassInfoPolicy,
+        ProvisionEntropy, ProvisionMetadata, ProvisionProfile, ProvisionSpec, QuickCapacityUnit,
         TargetGeometryOverrides, TargetIdentity, TargetProvisionPlan,
         OFFICIAL_PARTITION_START_SECTOR,
     },
@@ -683,8 +683,22 @@ fn same_mode_prefill_uses_exact_source_partition_sizes() {
     assert_eq!(prefill.share.as_ref().unwrap().sectors(), 4_000_003);
 }
 
-fn generated_source(
+fn generated_source_with_force_change(
     mode: OfficialPartitionMode,
+    force_change_password: bool,
+) -> (ProvisionSpec, edpcli::provision::ProvisionImage, String) {
+    generated_source_with_policy(
+        mode,
+        PassInfoPolicy {
+            force_change_password,
+            ..PassInfoPolicy::default()
+        },
+    )
+}
+
+fn generated_source_with_policy(
+    mode: OfficialPartitionMode,
+    pass_info_policy: PassInfoPolicy,
 ) -> (ProvisionSpec, edpcli::provision::ProvisionImage, String) {
     let probe = HardwareProbe {
         vid: Some(0x0dd8),
@@ -705,7 +719,12 @@ fn generated_source(
         "江苏电力!SAFE6",
     )
     .unwrap();
-    let spec = ProvisionSpec::new(target, metadata, ProvisionProfile::canonical_v1()).unwrap();
+    let spec = ProvisionSpec::new(
+        target,
+        metadata,
+        ProvisionProfile::canonical_v1().with_pass_info_policy(pass_info_policy),
+    )
+    .unwrap();
     let compat = locate_lba7_compatibility_extent_from_geometry(1024, 255, 63, 512).unwrap();
     let plan = OfficialProvisionPlan::new(
         mode,
@@ -723,6 +742,77 @@ fn generated_source(
         generate_official_image(&spec, &ProvisionEntropy::new([0x5a; 252]), &plan).unwrap(),
         did,
     )
+}
+
+fn generated_source(
+    mode: OfficialPartitionMode,
+) -> (ProvisionSpec, edpcli::provision::ProvisionImage, String) {
+    generated_source_with_force_change(mode, false)
+}
+
+#[test]
+fn existing_profile_inherits_force_change_only_from_consistent_passinfo() {
+    let (_, false_image, did) =
+        generated_source_with_force_change(OfficialPartitionMode::DefaultThreePartition, false);
+    let parsed_false = parse_existing_provision(&false_image, &did, 16_777_216)
+        .unwrap()
+        .unwrap();
+    assert_eq!(parsed_false.force_change_password, Some(false));
+
+    let (_, true_image, did) =
+        generated_source_with_force_change(OfficialPartitionMode::DefaultThreePartition, true);
+    let parsed_true = parse_existing_provision(&true_image, &did, 16_777_216)
+        .unwrap()
+        .unwrap();
+    assert_eq!(parsed_true.force_change_password, Some(true));
+    assert_eq!(
+        parsed_true.pass_info_policy,
+        Some(PassInfoPolicy {
+            force_change_password: true,
+            ..PassInfoPolicy::default()
+        })
+    );
+
+    let custom_policy = PassInfoPolicy {
+        force_change_password: true,
+        cancel_password_complexity_check: true,
+        max_share_password_errors: 7,
+        max_encrypt_password_errors: 9,
+    };
+    let (_, custom_image, custom_did) =
+        generated_source_with_policy(OfficialPartitionMode::DefaultThreePartition, custom_policy);
+    let parsed_custom = parse_existing_provision(&custom_image, &custom_did, 16_777_216)
+        .unwrap()
+        .unwrap();
+    assert_eq!(parsed_custom.pass_info_policy, Some(custom_policy));
+
+    let mut inconsistent = true_image.as_bytes().to_vec();
+    let crc = crc32_bare(did.as_bytes());
+    let k0 = (crc & 0xffff) ^ (crc >> 16);
+    let mut plain7 = xor_rolling(&inconsistent[7 * 512..8 * 512], k0);
+    plain7[0xc2] = 0;
+    let wire7 = xor_rolling(&plain7, k0);
+    inconsistent[7 * 512..8 * 512].copy_from_slice(&wire7);
+    let inconsistent = edpcli::provision::ProvisionImage::from_bytes(inconsistent).unwrap();
+    let parsed_inconsistent = parse_existing_provision(&inconsistent, &did, 16_777_216)
+        .unwrap()
+        .unwrap();
+    assert_eq!(parsed_inconsistent.force_change_password, None);
+    assert_eq!(parsed_inconsistent.pass_info_policy, None);
+
+    let mut inconsistent_complexity = custom_image.as_bytes().to_vec();
+    let crc = crc32_bare(custom_did.as_bytes());
+    let k0 = (crc & 0xffff) ^ (crc >> 16);
+    let mut plain7 = xor_rolling(&inconsistent_complexity[7 * 512..8 * 512], k0);
+    plain7[0xca] = 0;
+    let wire7 = xor_rolling(&plain7, k0);
+    inconsistent_complexity[7 * 512..8 * 512].copy_from_slice(&wire7);
+    let inconsistent_complexity =
+        edpcli::provision::ProvisionImage::from_bytes(inconsistent_complexity).unwrap();
+    let parsed = parse_existing_provision(&inconsistent_complexity, &custom_did, 16_777_216)
+        .unwrap()
+        .unwrap();
+    assert_eq!(parsed.pass_info_policy, None);
 }
 
 #[test]

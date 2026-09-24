@@ -3,8 +3,8 @@ use edpcli::inspect::{analyze_sector, InspectMeta};
 use edpcli::metainfo::ownership_from_lba8;
 use edpcli::platform::{HardwareProbe, InquiryInfo, NativeTransport};
 use edpcli::provision::{
-    generate_image, OnlyId, ProvisionEntropy, ProvisionMetadata, ProvisionProfile, ProvisionSpec,
-    TargetIdentity,
+    generate_image, OnlyId, PassInfoPolicy, ProvisionEntropy, ProvisionMetadata, ProvisionProfile,
+    ProvisionSpec, TargetIdentity,
 };
 use edpcli::sectors::looks_nopwd;
 
@@ -13,6 +13,16 @@ fn spec(onlyid: &str) -> ProvisionSpec {
 }
 
 fn spec_with_force_change(onlyid: &str, force_change_password: bool) -> ProvisionSpec {
+    spec_with_policy(
+        onlyid,
+        PassInfoPolicy {
+            force_change_password,
+            ..PassInfoPolicy::default()
+        },
+    )
+}
+
+fn spec_with_policy(onlyid: &str, policy: PassInfoPolicy) -> ProvisionSpec {
     let probe = HardwareProbe {
         vid: Some(0x0dd8),
         pid: Some(0x2005),
@@ -34,7 +44,7 @@ fn spec_with_force_change(onlyid: &str, force_change_password: bool) -> Provisio
     ProvisionSpec::new(
         target,
         metadata,
-        ProvisionProfile::canonical_v1().with_force_change_password(force_change_password),
+        ProvisionProfile::canonical_v1().with_pass_info_policy(policy),
     )
     .unwrap()
 }
@@ -63,6 +73,37 @@ fn entropy() -> ProvisionEntropy {
 
 fn sector(image: &[u8], lba: usize) -> &[u8] {
     &image[lba * 512..(lba + 1) * 512]
+}
+
+#[test]
+fn generated_pass_info_carries_all_user_configurable_policy_fields() {
+    let policy = PassInfoPolicy {
+        force_change_password: true,
+        cancel_password_complexity_check: true,
+        max_share_password_errors: 7,
+        max_encrypt_password_errors: 9,
+    };
+    let spec = spec_with_policy("1402259934", policy);
+    let image = generate_image(&spec, &entropy()).unwrap();
+    let meta = InspectMeta {
+        device_id: Some(spec.target().device_id().into()),
+        vid: None,
+        pid: None,
+        size_bytes: None,
+        onlyid: None,
+    };
+    for (lba, base) in [(7usize, 0xc0usize), (12usize, 0x120usize)] {
+        let decoded = analyze_sector(lba as u32, sector(image.as_bytes(), lba), &meta).decoded;
+        let stored: &[u8; 14] = decoded[base..base + 14].try_into().unwrap();
+        let pass = edpcli::protocol::edpf::PassInfo::decode_stored(stored);
+        assert_eq!(pass.force_change_share, 1);
+        assert_eq!(pass.force_change_encrypt, 1);
+        assert_eq!(pass.no_usb_check_password_safe, 1);
+        assert_eq!(pass.max_share_password_errors, 7);
+        assert_eq!(pass.max_encrypt_password_errors, 9);
+        assert_eq!(pass.current_share_password_errors, 0);
+        assert_eq!(pass.current_encrypt_password_errors, 0);
+    }
 }
 
 #[test]

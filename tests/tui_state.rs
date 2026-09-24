@@ -13,6 +13,11 @@ fn device(size: u64) -> edpcli::disk_scan::Row {
         onlyid: Some("1402259934".into()),
         dept: Some("输电运检中心".into()),
         user: Some("测试用户".into()),
+        label: None,
+        force_change_password: None,
+        cancel_password_complexity_check: None,
+        max_share_password_errors: None,
+        max_encrypt_password_errors: None,
         n_baks: 0,
         denied: false,
         probe_error: None,
@@ -67,6 +72,80 @@ fn registered_mode0_to_mode1_form_keeps_exact_encrypt_geometry() {
     assert_eq!(request.share_sectors, Some(4_020_417));
     assert_eq!(request.encrypt_sectors, Some(2_097_153));
     assert_eq!(request.encrypt_start_lba, Some(4_020_480));
+}
+
+#[test]
+fn registered_identity_prefills_custom_label_and_force_policy_but_remains_editable() {
+    use edpcli::provision::DiskProvisionKind;
+    use edpcli::sectors::EdpfPartition;
+
+    let mut row = device(64_000_000_000);
+    row.provision_kind = DiskProvisionKind::Mode0;
+    row.label = Some("来源自定义!SAFE6".into());
+    row.force_change_password = Some(true);
+    row.cancel_password_complexity_check = Some(true);
+    row.max_share_password_errors = Some(7);
+    row.max_encrypt_password_errors = Some(9);
+    row.partitions = Some(vec![
+        EdpfPartition {
+            ptype: 1,
+            active: 1,
+            enc: 0,
+            start_lba: 63,
+            size_bytes: 20_417 * 512,
+        },
+        EdpfPartition {
+            ptype: 2,
+            active: 1,
+            enc: 1,
+            start_lba: 20_480,
+            size_bytes: 4_000_000 * 512,
+        },
+        EdpfPartition {
+            ptype: 4,
+            active: 1,
+            enc: 1,
+            start_lba: 4_020_480,
+            size_bytes: 2_097_153 * 512,
+        },
+    ]);
+
+    let mut state = AppState::new();
+    state.replace_devices(vec![row]);
+    state.navigate(NavCommand::WorkspaceProvision, 20);
+    state.provision_select_disk();
+    state.provision_skip_backup();
+    assert_eq!(state.provision_begin_selected(), ProvisionKind::Mode0);
+    assert_eq!(state.provision().form.label, "来源自定义!SAFE6");
+    assert!(state.provision().form.force_change_password);
+    assert!(state.provision().form.cancel_password_complexity_check);
+    assert_eq!(state.provision().form.max_share_password_errors, "7");
+    assert_eq!(state.provision().form.max_encrypt_password_errors, "9");
+
+    let force_index = state
+        .provision_visible_fields()
+        .iter()
+        .position(|(label, _, _)| label == "初始化密码强制修改")
+        .unwrap();
+    state.provision_mut().field_selected = force_index;
+    assert!(state.provision_toggle_force_change_password());
+    assert!(!state.provision().form.force_change_password);
+
+    let complexity_index = state
+        .provision_visible_fields()
+        .iter()
+        .position(|(label, _, _)| label == "取消密码复杂性验证")
+        .unwrap();
+    state.provision_mut().field_selected = complexity_index;
+    assert!(state.provision_toggle_selected_option());
+    assert!(!state.provision().form.cancel_password_complexity_check);
+
+    let request = state.provision_request().unwrap();
+    assert_eq!(request.label, "来源自定义!SAFE6");
+    assert_eq!(request.force_change_password, Some(false));
+    assert_eq!(request.cancel_password_complexity_check, Some(false));
+    assert_eq!(request.max_share_password_errors, Some(7));
+    assert_eq!(request.max_encrypt_password_errors, Some(9));
 }
 
 #[test]
@@ -421,7 +500,7 @@ fn provision_force_change_password_checkbox_defaults_off_and_toggles() {
     state.provision_mut().field_selected = state
         .provision_visible_fields()
         .iter()
-        .position(|(label, _, _)| label == "首次强制改密")
+        .position(|(label, _, _)| label == "初始化密码强制修改")
         .unwrap();
 
     assert!(!state.provision().form.force_change_password);

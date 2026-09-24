@@ -110,6 +110,8 @@ fn scan_and_print_all_row_kinds() {
     let row6 = rows.iter().find(|r| r.disk == 6).unwrap();
     assert!(!row6.is_nopwd);
     assert_eq!(row6.user.as_deref(), Some("宋旭琳"));
+    assert_eq!(row6.label.as_deref(), Some("江苏电力!SAFE6"));
+    assert_eq!(row6.force_change_password, Some(true));
     assert!(
         row6.dept
             .as_deref()
@@ -144,6 +146,8 @@ fn scan_and_print_all_row_kinds() {
     assert!(out2.contains("mode1 · 二合一"), "{}", out2);
     let row6b = rows2.iter().find(|r| r.disk == 6).unwrap();
     assert!(row6b.is_nopwd);
+    assert_eq!(row6b.label.as_deref(), Some("江苏电力!SAFE6"));
+    assert_eq!(row6b.force_change_password, Some(true));
     assert_eq!(row6b.partitions.as_ref().unwrap().len(), 2);
     assert_eq!(
         converted_read_calls

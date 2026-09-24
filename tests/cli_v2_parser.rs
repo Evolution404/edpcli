@@ -126,7 +126,7 @@ fn provision_label_prefills_from_target_unless_cli_overrides_it() {
     match parse_args(&args(&base)).expect("default provision label") {
         Parsed::Provision(ProvisionAction::Plan(opts)) => {
             assert!(opts.label.is_empty());
-            assert!(!opts.force_change_password);
+            assert_eq!(opts.force_change_password, None);
         }
         _ => panic!("expected provision plan"),
     }
@@ -143,9 +143,61 @@ fn provision_label_prefills_from_target_unless_cli_overrides_it() {
     let mut forced = base.to_vec();
     forced.push("--force-change-password");
     match parse_args(&args(&forced)).expect("force-change provision policy") {
-        Parsed::Provision(ProvisionAction::Plan(opts)) => assert!(opts.force_change_password),
+        Parsed::Provision(ProvisionAction::Plan(opts)) => {
+            assert_eq!(opts.force_change_password, Some(true))
+        }
         _ => panic!("expected provision plan"),
     }
+
+    let mut disabled = base.to_vec();
+    disabled.push("--no-force-change-password");
+    match parse_args(&args(&disabled)).expect("explicitly disable force-change policy") {
+        Parsed::Provision(ProvisionAction::Plan(opts)) => {
+            assert_eq!(opts.force_change_password, Some(false))
+        }
+        _ => panic!("expected provision plan"),
+    }
+
+    let mut conflicting = base.to_vec();
+    conflicting.extend(["--force-change-password", "--no-force-change-password"]);
+    assert!(parse_args(&args(&conflicting)).is_err());
+}
+
+#[test]
+fn provision_parses_complete_pass_info_policy_overrides() {
+    let base = ["provision", "plan", "--disk", "4", "--mode", "1"];
+    let mut values = base.to_vec();
+    values.extend([
+        "--force-change-password",
+        "--cancel-password-complexity-check",
+        "--share-max-password-errors",
+        "7",
+        "--encrypt-max-password-errors",
+        "9",
+    ]);
+    let Parsed::Provision(ProvisionAction::Plan(opts)) = parse_args(&args(&values)).unwrap() else {
+        panic!("expected provision plan");
+    };
+    assert_eq!(opts.force_change_password, Some(true));
+    assert_eq!(opts.cancel_password_complexity_check, Some(true));
+    assert_eq!(opts.max_share_password_errors, Some(7));
+    assert_eq!(opts.max_encrypt_password_errors, Some(9));
+
+    let mut enforce = base.to_vec();
+    enforce.push("--enforce-password-complexity-check");
+    let Parsed::Provision(ProvisionAction::Plan(opts)) = parse_args(&args(&enforce)).unwrap()
+    else {
+        panic!("expected provision plan");
+    };
+    assert_eq!(opts.cancel_password_complexity_check, Some(false));
+
+    let mut inline_bool = base.to_vec();
+    inline_bool.push("--cancel-password-complexity-check=true");
+    assert!(parse_args(&args(&inline_bool)).is_err());
+
+    let mut invalid = base.to_vec();
+    invalid.extend(["--share-max-password-errors", "256"]);
+    assert!(parse_args(&args(&invalid)).is_err());
 }
 
 #[test]

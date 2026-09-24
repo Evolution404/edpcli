@@ -143,9 +143,9 @@ _edpcli() {
       fi
       if [[ "$cur" == -* ]]; then
         case "$action" in
-          plan)    compadd -- --disk --mode --boot-mib --boot-sectors --share-mib --encrypt-mib --label-id --user --dept --label --password --volume-label --force-change-password --help ;;
-          image)   compadd -- --disk --mode --boot-mib --boot-sectors --share-mib --encrypt-mib --label-id --user --dept --label --password --volume-label --force-change-password --out --help ;;
-          write)   compadd -- --disk --mode --boot-mib --boot-sectors --share-mib --encrypt-mib --label-id --user --dept --label --password --volume-label --force-change-password --yes --help ;;
+          plan)    compadd -- --disk --mode --boot-mib --boot-sectors --share-mib --encrypt-mib --label-id --user --dept --label --password --volume-label --force-change-password --no-force-change-password --cancel-password-complexity-check --enforce-password-complexity-check --share-max-password-errors --encrypt-max-password-errors --help ;;
+          image)   compadd -- --disk --mode --boot-mib --boot-sectors --share-mib --encrypt-mib --label-id --user --dept --label --password --volume-label --force-change-password --no-force-change-password --cancel-password-complexity-check --enforce-password-complexity-check --share-max-password-errors --encrypt-max-password-errors --out --help ;;
+          write)   compadd -- --disk --mode --boot-mib --boot-sectors --share-mib --encrypt-mib --label-id --user --dept --label --password --volume-label --force-change-password --no-force-change-password --cancel-password-complexity-check --enforce-password-complexity-check --share-max-password-errors --encrypt-max-password-errors --yes --help ;;
           convert) compadd -- --disk --write --yes --backup-dir --help ;;
         esac
       fi
@@ -249,9 +249,9 @@ _edpcli() {
         COMPREPLY=( $(compgen -W 'plan image write convert' -- "$cur") )
       elif [[ "$cur" == -* ]]; then
         case "$action" in
-          plan)    vals='--disk --mode --boot-mib --boot-sectors --share-mib --encrypt-mib --label-id --user --dept --label --password --volume-label --force-change-password --help' ;;
-          image)   vals='--disk --mode --boot-mib --boot-sectors --share-mib --encrypt-mib --label-id --user --dept --label --password --volume-label --force-change-password --out --help' ;;
-          write)   vals='--disk --mode --boot-mib --boot-sectors --share-mib --encrypt-mib --label-id --user --dept --label --password --volume-label --force-change-password --yes --help' ;;
+          plan)    vals='--disk --mode --boot-mib --boot-sectors --share-mib --encrypt-mib --label-id --user --dept --label --password --volume-label --force-change-password --no-force-change-password --cancel-password-complexity-check --enforce-password-complexity-check --share-max-password-errors --encrypt-max-password-errors --help' ;;
+          image)   vals='--disk --mode --boot-mib --boot-sectors --share-mib --encrypt-mib --label-id --user --dept --label --password --volume-label --force-change-password --no-force-change-password --cancel-password-complexity-check --enforce-password-complexity-check --share-max-password-errors --encrypt-max-password-errors --out --help' ;;
+          write)   vals='--disk --mode --boot-mib --boot-sectors --share-mib --encrypt-mib --label-id --user --dept --label --password --volume-label --force-change-password --no-force-change-password --cancel-password-complexity-check --enforce-password-complexity-check --share-max-password-errors --encrypt-max-password-errors --yes --help' ;;
           convert) vals='--disk --write --yes --backup-dir --help' ;;
         esac
         COMPREPLY=( $(compgen -W "$vals" -- "$cur") )
@@ -364,6 +364,12 @@ complete -c edpcli -n '__fish_seen_subcommand_from provision' -l dept -r
 complete -c edpcli -n '__fish_seen_subcommand_from provision' -l label -r
 complete -c edpcli -n '__fish_seen_subcommand_from provision' -l password -r
 complete -c edpcli -n '__fish_seen_subcommand_from provision' -l volume-label -r
+complete -c edpcli -n '__fish_seen_subcommand_from provision' -l force-change-password
+complete -c edpcli -n '__fish_seen_subcommand_from provision' -l no-force-change-password
+complete -c edpcli -n '__fish_seen_subcommand_from provision' -l cancel-password-complexity-check
+complete -c edpcli -n '__fish_seen_subcommand_from provision' -l enforce-password-complexity-check
+complete -c edpcli -n '__fish_seen_subcommand_from provision' -l share-max-password-errors -r
+complete -c edpcli -n '__fish_seen_subcommand_from provision' -l encrypt-max-password-errors -r
 complete -c edpcli -n '__fish_seen_subcommand_from provision' -l write
 complete -c edpcli -n '__fish_seen_subcommand_from completion' -a 'zsh bash fish'
 
@@ -388,6 +394,11 @@ mod tests {
                 "inspect",
                 "backup create",
                 "backup restore",
+                "no-force-change-password",
+                "cancel-password-complexity-check",
+                "enforce-password-complexity-check",
+                "share-max-password-errors",
+                "encrypt-max-password-errors",
             ] {
                 assert!(script.contains(required), "{shell:?} missing {required}");
             }

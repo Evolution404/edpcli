@@ -34,14 +34,14 @@ pub use layout::{
     OFFICIAL_PARTITION_START_SECTOR, WHOLE_DISK_ENCRYPTED_COMPAT_BOOT_BYTES,
 };
 pub use lce::{build_lce_ciphertext, lce_plaintext};
-pub use profile::{ProvisionProfile, DEFAULT_SAFE6_LABEL};
+pub use profile::{PassInfoPolicy, ProvisionProfile, DEFAULT_SAFE6_LABEL};
 pub use reprovision::{
-    apply_target_geometry_overrides, decide_partition_action, parse_existing_provision,
-    prefill_for_target_mode, validate_target_geometry, CapacityInput, CapacityInputMode,
-    CapacitySource, DiskProvisionKind, ExistingPartition, ExistingPartitionRecord,
-    ExistingProvisionProfile, ParsedExistingProvision, PartitionAction, ProvisionPrefill,
-    QuickCapacityUnit, TargetGeometryOverrides, TargetPartitionGeometry, TargetPartitionPlan,
-    TargetProvisionPlan,
+    apply_target_geometry_overrides, decide_partition_action, force_change_password_from_sectors,
+    parse_existing_provision, pass_info_policy_from_sectors, prefill_for_target_mode,
+    validate_target_geometry, CapacityInput, CapacityInputMode, CapacitySource, DiskProvisionKind,
+    ExistingPartition, ExistingPartitionRecord, ExistingProvisionProfile, ParsedExistingProvision,
+    PartitionAction, ProvisionPrefill, QuickCapacityUnit, TargetGeometryOverrides,
+    TargetPartitionGeometry, TargetPartitionPlan, TargetProvisionPlan,
 };
 pub use spec::{OnlyId, ProvisionMetadata, ProvisionSpec, TargetIdentity};
 pub use validate::{

@@ -1033,12 +1033,28 @@ fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppSta
                             Line::from("LBA3 已从目标盘捕获并绑定；写入前将再次复核。"),
                             Line::from("先写协议/LCE 并验证，再对勾选的分区单独格式化并验证。"),
                             Line::from(format!(
-                                "首次强制改密: {}",
+                                "初始化密码强制修改: {}",
                                 if prepared.force_change_password {
                                     "是"
                                 } else {
                                     "否"
                                 }
+                            )),
+                            Line::from(format!(
+                                "取消密码复杂性验证: {}",
+                                if prepared.pass_info_policy.cancel_password_complexity_check {
+                                    "是"
+                                } else {
+                                    "否"
+                                }
+                            )),
+                            Line::from(format!(
+                                "交换区密码最大错误次数: {}",
+                                prepared.pass_info_policy.max_share_password_errors
+                            )),
+                            Line::from(format!(
+                                "保密区密码最大错误次数: {}",
+                                prepared.pass_info_policy.max_encrypt_password_errors
                             )),
                             Line::from("制盘后格式化:"),
                         ]);

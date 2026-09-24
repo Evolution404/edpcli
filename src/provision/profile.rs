@@ -2,6 +2,27 @@
 
 pub const DEFAULT_SAFE6_LABEL: &str = "江苏电力!SAFE6";
 
+use crate::protocol::edpf::PassInfo;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct PassInfoPolicy {
+    pub force_change_password: bool,
+    pub cancel_password_complexity_check: bool,
+    pub max_share_password_errors: u8,
+    pub max_encrypt_password_errors: u8,
+}
+
+impl Default for PassInfoPolicy {
+    fn default() -> Self {
+        Self {
+            force_change_password: false,
+            cancel_password_complexity_check: false,
+            max_share_password_errors: u8::MAX,
+            max_encrypt_password_errors: u8::MAX,
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ProvisionProfile {
     id: &'static str,
@@ -14,7 +35,7 @@ pub struct ProvisionProfile {
     lba4_profile_word: [u8; 4],
     lba7_material: [u8; 16],
     lba12_material: [u8; 24],
-    force_change_password: bool,
+    pass_info_policy: PassInfoPolicy,
 }
 
 impl ProvisionProfile {
@@ -36,17 +57,26 @@ impl ProvisionProfile {
                 0x5d, 0x73, 0x29, 0x04, 0xcf, 0x18, 0x96, 0xfe, 0xee, 0xf4, 0x08, 0x82, 0x9e, 0xc2,
                 0xd5, 0xf5, 0x40, 0x66, 0x0f, 0x21, 0x3e, 0x70, 0x95, 0x2e,
             ],
-            force_change_password: false,
+            pass_info_policy: PassInfoPolicy::default(),
         }
     }
 
     pub fn with_force_change_password(mut self, enabled: bool) -> Self {
-        self.force_change_password = enabled;
+        self.pass_info_policy.force_change_password = enabled;
+        self
+    }
+
+    pub fn with_pass_info_policy(mut self, policy: PassInfoPolicy) -> Self {
+        self.pass_info_policy = policy;
         self
     }
 
     pub fn force_change_password(&self) -> bool {
-        self.force_change_password
+        self.pass_info_policy.force_change_password
+    }
+
+    pub fn pass_info_policy(&self) -> PassInfoPolicy {
+        self.pass_info_policy
     }
 
     pub fn id(&self) -> &'static str {
@@ -89,14 +119,32 @@ impl ProvisionProfile {
         &self.lba12_material
     }
 
-    pub(crate) fn lba7_pass_info_prefix(&self) -> [u8; 8] {
-        let force = u8::from(self.force_change_password);
-        [0xec, 0x00, force, 0x77, 0x00, force, 0x77, 0x00]
+    fn pass_info(&self, version: u16) -> PassInfo {
+        let policy = self.pass_info_policy;
+        let force = u8::from(policy.force_change_password);
+        PassInfo {
+            version,
+            force_change_share: force,
+            max_share_password_errors: policy.max_share_password_errors,
+            current_share_password_errors: 0,
+            force_change_encrypt: force,
+            max_encrypt_password_errors: policy.max_encrypt_password_errors,
+            current_encrypt_password_errors: 0,
+            no_password_set: 0,
+            no_password_no_check_ip: 0,
+            no_usb_check_password_safe: u8::from(policy.cancel_password_complexity_check),
+            reset_file_key: 0,
+            share_backup_prompt_period: 0,
+            encrypt_backup_prompt_period: 0,
+        }
     }
 
-    pub(crate) fn lba12_pass_info_prefix(&self) -> [u8; 8] {
-        let force = u8::from(self.force_change_password);
-        [0x8e, 0x02, force, 0x77, 0x00, force, 0x77, 0x00]
+    pub(crate) fn lba7_pass_info(&self) -> [u8; 14] {
+        self.pass_info(0x0064).encode_stored()
+    }
+
+    pub(crate) fn lba12_pass_info(&self) -> [u8; 14] {
+        self.pass_info(0x0206).encode_stored()
     }
 
     pub(crate) fn safe6_template(&self) -> [u8; 512] {
