@@ -10,18 +10,23 @@ use std::io::{Seek, SeekFrom, Write};
 use std::path::Path;
 use std::time::Duration;
 
+use crate::backup_deep::{analyze_partition, keys::decrypt_mode2, AnalysisStatus, PartitionReader};
+use crate::backup_metadata::PartitionGeometry;
 use crate::common::{EdpCliError, EdpCliResult, EXIT_IO, EXIT_TARGET, SECTOR};
 use crate::diskio::{self, SectorDev};
 use crate::identify::identify;
 use crate::protocol::lba7_compat::locate_lba7_compatibility_extent_from_verified_usb_capacity;
 use crate::provision::{
-    build_official_provision_write_image, build_passwordless_conversion, wrap_file_key,
-    wrap_legacy_lba7_file_key, FileKeyWrapMode, OfficialPartitionMode, OfficialPartitionSizes,
-    OfficialProvisionPlan, OfficialProvisionWriteImage, OnlyId, PasswordlessConversionImage,
-    ProvisionEntropy, ProvisionImage, ProvisionMetadata, ProvisionProfile, ProvisionSpec,
-    TargetIdentity, DEFAULT_MODE0_BOOT_SECTORS,
+    build_official_partition_filesystem, build_official_provision_protocol_image,
+    build_passwordless_conversion, wrap_file_key, wrap_legacy_lba7_file_key, FileKeyWrapMode,
+    OfficialFilesystemFormat, OfficialPartitionFilesystems, OfficialPartitionMode,
+    OfficialPartitionSizes, OfficialProvisionPlan, OfficialProvisionWriteImage, OnlyId,
+    PartitionFormatTarget, PartitionRole, PasswordlessConversionImage, ProvisionEntropy,
+    ProvisionImage, ProvisionMetadata, ProvisionProfile, ProvisionSpec, TargetIdentity,
+    DEFAULT_MODE0_BOOT_SECTORS,
 };
 use crate::sysinfo::{self, CmdRunner};
+use encoding_rs::GBK;
 
 use super::device::guard_usb_disk;
 use super::write::{read_image, verify_reopened_snapshot};
@@ -45,10 +50,148 @@ pub struct NewProvisionRequest {
     pub label: String,
     pub password: String,
     pub volume_label: String,
+    pub format: FormatOptions,
     pub force_change_password: bool,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub struct FormatOptions {
+    pub boot: bool,
+    pub share: bool,
+    pub encrypt: bool,
+    pub boot_label: String,
+    pub share_label: String,
+    pub encrypt_label: String,
+    pub boot_fs: OfficialFilesystemFormat,
+    pub share_fs: OfficialFilesystemFormat,
+    pub encrypt_fs: OfficialFilesystemFormat,
+}
+
+impl Default for FormatOptions {
+    fn default() -> Self {
+        Self {
+            boot: false,
+            share: false,
+            encrypt: false,
+            boot_label: "启动区".into(),
+            share_label: "交换区".into(),
+            encrypt_label: "保密区".into(),
+            boot_fs: OfficialFilesystemFormat::Fat16,
+            share_fs: OfficialFilesystemFormat::ExFat,
+            encrypt_fs: OfficialFilesystemFormat::ExFat,
+        }
+    }
+}
+
+impl FormatOptions {
+    pub fn filesystems(&self) -> OfficialPartitionFilesystems {
+        OfficialPartitionFilesystems {
+            boot: self.boot_fs,
+            share: self.share_fs,
+            encrypt: self.encrypt_fs,
+        }
+    }
+    fn choice(&self, role: PartitionRole) -> (bool, &str) {
+        match role {
+            PartitionRole::Boot => (self.boot, &self.boot_label),
+            PartitionRole::Share | PartitionRole::BootShareCombined => {
+                (self.share, &self.share_label)
+            }
+            PartitionRole::Encrypt => (self.encrypt, &self.encrypt_label),
+            PartitionRole::CompatibilityReserve => (false, ""),
+        }
+    }
+}
+
+pub fn plan_format_targets(
+    plan: &OfficialProvisionPlan,
+    options: &FormatOptions,
+    serials: &[u32],
+    file_key: &[u8; 16],
+) -> Result<Vec<PlannedPartitionFormat>, String> {
+    let targets = plan.format_targets()?;
+    if targets.len() != serials.len() {
+        return Err("format serial count does not match partition count".into());
+    }
+    if options.boot
+        && !targets
+            .iter()
+            .any(|t| t.format_capable && t.role == PartitionRole::Boot)
+        || options.share
+            && !targets.iter().any(|t| {
+                t.format_capable
+                    && matches!(
+                        t.role,
+                        PartitionRole::Share | PartitionRole::BootShareCombined
+                    )
+            })
+        || options.encrypt
+            && !targets
+                .iter()
+                .any(|t| t.format_capable && t.role == PartitionRole::Encrypt)
+    {
+        return Err("当前模式不包含所选的可格式化分区".into());
+    }
+    let planned = targets
+        .into_iter()
+        .enumerate()
+        .map(|(index, target)| {
+            let (selected, label) = options.choice(target.role);
+            PlannedPartitionFormat {
+                target,
+                selected,
+                filesystem: target.filesystem,
+                volume_label: label.to_string(),
+                volume_serial: serials[index],
+            }
+        })
+        .collect::<Vec<_>>();
+    for choice in planned.iter().filter(|choice| choice.target.format_capable) {
+        if !matches!(
+            choice.filesystem,
+            Some(OfficialFilesystemFormat::Fat16 | OfficialFilesystemFormat::ExFat)
+        ) {
+            return Err(format!(
+                "{} 文件系统尚无可验证的写入实现",
+                choice.target.role.label()
+            ));
+        }
+    }
+    for choice in planned.iter().filter(|choice| choice.selected) {
+        build_official_partition_filesystem(
+            plan,
+            &choice.target,
+            file_key,
+            &choice.volume_label,
+            choice.volume_serial,
+        )
+        .map_err(|message| format!("{} 格式化计划无效: {message}", choice.target.role.label()))?;
+    }
+    Ok(planned)
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PlannedPartitionFormat {
+    pub target: PartitionFormatTarget,
+    pub selected: bool,
+    pub filesystem: Option<OfficialFilesystemFormat>,
+    pub volume_label: String,
+    pub volume_serial: u32,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PartitionFormatResult {
+    pub role: PartitionRole,
+    pub result: Result<(), String>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ProvisionCommitReport {
+    pub provision_succeeded: bool,
+    pub formats: Vec<PartitionFormatResult>,
+}
+
+#[derive(Clone, Eq, PartialEq)]
 pub struct PreparedNewProvision {
     pub disk: u32,
     pub device_id: String,
@@ -56,8 +199,33 @@ pub struct PreparedNewProvision {
     pub force_change_password: bool,
     pub lce_start_lba: u64,
     pub write_image: OfficialProvisionWriteImage,
+    pub format_targets: Vec<PlannedPartitionFormat>,
+    plan: OfficialProvisionPlan,
+    file_key: [u8; 16],
+    expected_onlyid: String,
+    expected_serial: Option<String>,
     expected_probe: crate::platform::HardwareProbe,
     expected_lba3: Option<[u8; SECTOR]>,
+}
+
+impl std::fmt::Debug for PreparedNewProvision {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("PreparedNewProvision")
+            .field("disk", &self.disk)
+            .field("device_id", &self.device_id)
+            .field("mode", &self.mode)
+            .field("force_change_password", &self.force_change_password)
+            .field("lce_start_lba", &self.lce_start_lba)
+            .field("write_image", &self.write_image)
+            .field("format_targets", &self.format_targets)
+            .field("plan", &self.plan)
+            .field("expected_onlyid", &self.expected_onlyid)
+            .field("expected_serial", &self.expected_serial)
+            .field("expected_probe", &self.expected_probe)
+            .field("expected_lba3", &self.expected_lba3)
+            .finish_non_exhaustive()
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -168,7 +336,8 @@ pub fn prepare_new_provision(
         legacy_key,
         current_key,
     )
-    .map_err(|message| err(EXIT_TARGET, format!("错误: 制盘布局无效: {message}")))?;
+    .map_err(|message| err(EXIT_TARGET, format!("错误: 制盘布局无效: {message}")))?
+    .with_filesystems(request.format.filesystems());
     let logical_count = plan
         .logical_partitions(SECTOR as u64)
         .map_err(|message| err(EXIT_TARGET, format!("错误: 制盘布局无效: {message}")))?
@@ -177,15 +346,20 @@ pub fn prepare_new_provision(
     for _ in 0..logical_count {
         serials.push(u32::from_le_bytes(random_array::<4>()?));
     }
-    let write_image = build_official_provision_write_image(
-        &spec,
-        &entropy,
-        &plan,
-        &file_key,
-        &request.volume_label,
-        &serials,
-    )
-    .map_err(|message| err(EXIT_TARGET, format!("错误: 无法构造制盘镜像: {message}")))?;
+    let format_targets = plan_format_targets(&plan, &request.format, &serials, &file_key)
+        .map_err(|message| err(EXIT_TARGET, format!("错误: {message}")))?;
+    let expected_serial = if format_targets.iter().any(|choice| choice.selected) {
+        Some(
+            runner
+                .hardware_serial(disk)
+                .filter(|serial| !serial.trim().is_empty())
+                .ok_or_else(|| err(EXIT_TARGET, "错误: 无法读取 USB 硬件序列号，拒绝安排格式化"))?,
+        )
+    } else {
+        None
+    };
+    let write_image = build_official_provision_protocol_image(&spec, &entropy, &plan)
+        .map_err(|message| err(EXIT_TARGET, format!("错误: 无法构造制盘镜像: {message}")))?;
 
     Ok(PreparedNewProvision {
         disk,
@@ -194,6 +368,11 @@ pub fn prepare_new_provision(
         force_change_password: request.force_change_password,
         lce_start_lba: compatibility.start_lba,
         write_image,
+        format_targets,
+        plan,
+        file_key,
+        expected_onlyid: request.label_id.clone(),
+        expected_serial,
         expected_probe: probe,
         expected_lba3: None,
     })
@@ -300,7 +479,7 @@ pub fn commit_new_provision(
     runner: &dyn CmdRunner,
     dev: &mut dyn SectorDev,
     prepared: &PreparedNewProvision,
-) -> EdpCliResult<()> {
+) -> EdpCliResult<ProvisionCommitReport> {
     guard_usb_disk(runner, prepared.disk)?;
     let _guard = sysinfo::prepare_write(runner, prepared.disk).map_err(|error| {
         err(
@@ -322,6 +501,14 @@ pub fn commit_new_provision(
             "错误: 制盘确认/卸载期间目标硬件身份或容量发生变化，疑似换盘，拒绝写入",
         ));
     }
+    if let Some(serial) = &prepared.expected_serial {
+        if runner.hardware_serial(prepared.disk).as_ref() != Some(serial) {
+            return Err(err(
+                EXIT_TARGET,
+                "错误: 制盘确认期间 USB 硬件序列号发生变化",
+            ));
+        }
+    }
     let expected_lba3 = prepared.expected_lba3.ok_or_else(|| {
         err(
             EXIT_TARGET,
@@ -341,7 +528,354 @@ pub fn commit_new_provision(
         dev,
         &prepared.write_image.patch,
         prepared.write_image.total_sectors,
+    )?;
+    verify_protocol_readback(dev, prepared)?;
+    let mut report = ProvisionCommitReport {
+        provision_succeeded: true,
+        formats: Vec::new(),
+    };
+    for choice in prepared
+        .format_targets
+        .iter()
+        .filter(|choice| choice.selected)
+    {
+        let result = format_partition(runner, dev, prepared, choice);
+        report.formats.push(PartitionFormatResult {
+            role: choice.target.role,
+            result: result.map_err(|error| error.msg),
+        });
+    }
+    Ok(report)
+}
+
+fn verify_format_identity(
+    runner: &dyn CmdRunner,
+    dev: &mut dyn SectorDev,
+    prepared: &PreparedNewProvision,
+) -> EdpCliResult<()> {
+    guard_usb_disk(runner, prepared.disk)?;
+    let fresh_probe = runner
+        .hardware_probe(prepared.disk)
+        .or_else(|| crate::platform::fallback_hardware_probe(runner, prepared.disk))
+        .ok_or_else(|| err(EXIT_TARGET, "错误: 格式化前无法复核硬件身份"))?;
+    let fresh_total = sysinfo::disk_total_sectors(runner, prepared.disk)
+        .ok_or_else(|| err(EXIT_TARGET, "错误: 格式化前无法复核容量"))?;
+    verify_format_hardware(
+        &prepared.expected_probe,
+        prepared.write_image.total_sectors,
+        &prepared.device_id,
+        prepared.expected_serial.as_deref(),
+        &fresh_probe,
+        fresh_total,
+        runner.hardware_serial(prepared.disk).as_deref(),
+    )?;
+    verify_protocol_readback(dev, prepared)
+}
+
+fn verify_format_hardware(
+    expected_probe: &crate::platform::HardwareProbe,
+    expected_total: u64,
+    expected_device_id: &str,
+    expected_serial: Option<&str>,
+    fresh_probe: &crate::platform::HardwareProbe,
+    fresh_total: u64,
+    fresh_serial: Option<&str>,
+) -> EdpCliResult<()> {
+    let fresh_identity =
+        TargetIdentity::from_probe(fresh_probe, fresh_total).map_err(|message| {
+            err(
+                EXIT_TARGET,
+                format!("错误: 格式化前硬件身份无效: {message}"),
+            )
+        })?;
+    if fresh_probe != expected_probe
+        || fresh_total != expected_total
+        || fresh_identity.device_id() != expected_device_id
+    {
+        return Err(err(
+            EXIT_TARGET,
+            "错误: 格式化前硬件身份、容量或 device_id 已变化",
+        ));
+    }
+    if expected_serial.is_none_or(|serial| Some(serial) != fresh_serial) {
+        return Err(err(
+            EXIT_TARGET,
+            "错误: 格式化前 USB 硬件序列号缺失或已变化",
+        ));
+    }
+    Ok(())
+}
+
+fn verify_protocol_readback(
+    dev: &mut dyn SectorDev,
+    prepared: &PreparedNewProvision,
+) -> EdpCliResult<()> {
+    let raw = read_image(dev)?;
+    if (0..13u32).any(|lba| {
+        prepared.write_image.patch.get(&lba).is_none_or(|expected| {
+            raw[lba as usize * SECTOR..(lba as usize + 1) * SECTOR] != expected[..]
+        })
+    }) {
+        return Err(err(
+            EXIT_TARGET,
+            "错误: 格式化前 LBA0–12 与本次制盘计划不一致",
+        ));
+    }
+    let onlyid = diskio::lba4_label_id_from(&raw[4 * SECTOR..5 * SECTOR]);
+    if onlyid.as_deref() != Some(&prepared.expected_onlyid) {
+        return Err(err(
+            EXIT_TARGET,
+            "错误: 格式化前 onlyid 与本次制盘计划不一致",
+        ));
+    }
+    let actual = crate::backup_metadata::parse_partition_geometry(
+        &raw,
+        &prepared.device_id,
+        prepared.write_image.total_sectors,
     )
+    .map_err(|message| err(EXIT_TARGET, format!("错误: 格式化前分区表无效: {message}")))?;
+    let planned = prepared
+        .plan
+        .logical_partitions(SECTOR as u64)
+        .map_err(|message| err(EXIT_TARGET, message))?;
+    if actual.len() != planned.len()
+        || actual.iter().zip(planned.iter()).any(|(actual, planned)| {
+            actual.partition_type != planned.partition_type.raw()
+                || actual.start_sector != planned.start_sector
+                || actual.sector_count != planned.sector_count()
+        })
+    {
+        return Err(err(
+            EXIT_TARGET,
+            "错误: 格式化前实际分区布局与制盘计划不一致",
+        ));
+    }
+    Ok(())
+}
+
+struct FormatReader<'a> {
+    dev: &'a mut dyn SectorDev,
+    target: PartitionFormatTarget,
+    file_key: &'a [u8; 16],
+}
+
+impl PartitionReader for FormatReader<'_> {
+    fn read_sector(&mut self, relative_lba: u64) -> std::io::Result<Vec<u8>> {
+        if relative_lba >= self.target.geometry.sector_count() {
+            return Err(std::io::Error::other("format read outside partition"));
+        }
+        let absolute = self
+            .target
+            .geometry
+            .start_sector
+            .checked_add(relative_lba)
+            .and_then(|lba| u32::try_from(lba).ok())
+            .ok_or_else(|| std::io::Error::other("format LBA overflow"))?;
+        let raw = self.dev.read_sector(absolute)?;
+        if raw.len() != SECTOR {
+            return Err(std::io::Error::other("truncated format readback"));
+        }
+        if self.target.physically_encrypted {
+            decrypt_mode2(&raw, self.file_key).map_err(std::io::Error::other)
+        } else {
+            Ok(raw)
+        }
+    }
+}
+
+fn format_partition(
+    runner: &dyn CmdRunner,
+    dev: &mut dyn SectorDev,
+    prepared: &PreparedNewProvision,
+    choice: &PlannedPartitionFormat,
+) -> EdpCliResult<()> {
+    verify_format_identity(runner, dev, prepared)?;
+    execute_partition_format(dev, &prepared.plan, &prepared.file_key, choice)?;
+    verify_format_identity(runner, dev, prepared)?;
+    Ok(())
+}
+
+/// Format one verified official partition. The caller owns device identity and
+/// protocol verification; this operation never writes the protocol region.
+fn execute_partition_format(
+    dev: &mut dyn SectorDev,
+    plan: &OfficialProvisionPlan,
+    file_key: &[u8; 16],
+    choice: &PlannedPartitionFormat,
+) -> EdpCliResult<()> {
+    let filesystem = choice
+        .filesystem
+        .ok_or_else(|| err(EXIT_TARGET, "错误: 兼容保留区不可格式化"))?;
+    let built = build_official_partition_filesystem(
+        plan,
+        &choice.target,
+        file_key,
+        &choice.volume_label,
+        choice.volume_serial,
+    )
+    .map_err(|message| err(EXIT_TARGET, message))?;
+    for (&relative, sector) in built.image.sectors() {
+        let absolute = choice
+            .target
+            .geometry
+            .start_sector
+            .checked_add(relative)
+            .and_then(|lba| u32::try_from(lba).ok())
+            .ok_or_else(|| err(EXIT_TARGET, "错误: 格式化写入 LBA 溢出"))?;
+        dev.write_sector(absolute, sector).map_err(|error| {
+            err(
+                EXIT_IO,
+                format!("错误: 格式化 LBA{absolute} 写入失败: {error}"),
+            )
+        })?;
+    }
+    dev.sync()
+        .map_err(|error| err(EXIT_IO, format!("错误: 格式化同步失败: {error}")))?;
+    for (&relative, expected) in built.image.sectors() {
+        let absolute = u32::try_from(choice.target.geometry.start_sector + relative)
+            .map_err(|_| err(EXIT_TARGET, "错误: 格式化读回 LBA 溢出"))?;
+        let actual = dev.read_sector(absolute).map_err(|error| {
+            err(
+                EXIT_IO,
+                format!("错误: 格式化 LBA{absolute} 读回失败: {error}"),
+            )
+        })?;
+        if actual.as_slice() != expected {
+            return Err(err(
+                EXIT_IO,
+                format!("错误: 格式化 LBA{absolute} 读回不一致"),
+            ));
+        }
+    }
+    let raw_boot = dev
+        .read_sector(
+            u32::try_from(choice.target.geometry.start_sector)
+                .map_err(|_| err(EXIT_TARGET, "错误: 分区起点 LBA 溢出"))?,
+        )
+        .map_err(|error| err(EXIT_IO, format!("错误: 读取文件系统引导扇区失败: {error}")))?;
+    if choice.target.physically_encrypted
+        && (raw_boot.get(3..11) == Some(b"EXFAT   ") || raw_boot.get(54..62) == Some(b"FAT16   "))
+    {
+        return Err(err(EXIT_IO, "错误: 加密分区物理首扇区出现明文文件系统签名"));
+    }
+    let geometry = PartitionGeometry {
+        index: 0,
+        partition_type: choice.target.geometry.partition_type.raw(),
+        partition_count: 1,
+        need_disturb: 0,
+        need_encrypt: 0,
+        start_sector: choice.target.geometry.start_sector,
+        sector_size: SECTOR as u64,
+        partition_size: choice.target.geometry.size_bytes,
+        sector_count: choice.target.geometry.sector_count(),
+        user_key_crc: 0,
+        file_key_crc: 0,
+        encrypt_mode: 0,
+    };
+    let mut reader = FormatReader {
+        dev,
+        target: choice.target,
+        file_key,
+    };
+    let boot = reader
+        .read_sector(0)
+        .map_err(|error| err(EXIT_IO, error.to_string()))?;
+    let geometry_ok = match filesystem {
+        OfficialFilesystemFormat::ExFat => {
+            boot.get(3..11) == Some(b"EXFAT   ")
+                && u64::from_le_bytes(boot[64..72].try_into().unwrap())
+                    == choice.target.geometry.start_sector
+                && u64::from_le_bytes(boot[72..80].try_into().unwrap())
+                    == choice.target.geometry.sector_count()
+                && u32::from_le_bytes(boot[100..104].try_into().unwrap()) == choice.volume_serial
+        }
+        OfficialFilesystemFormat::Fat16 => {
+            let total16 = u16::from_le_bytes(boot[19..21].try_into().unwrap()) as u64;
+            let total = if total16 != 0 {
+                total16
+            } else {
+                u32::from_le_bytes(boot[32..36].try_into().unwrap()) as u64
+            };
+            boot.get(54..62) == Some(b"FAT16   ")
+                && u32::from_le_bytes(boot[28..32].try_into().unwrap()) as u64
+                    == choice.target.geometry.start_sector
+                && total == choice.target.geometry.sector_count()
+                && u32::from_le_bytes(boot[39..43].try_into().unwrap()) == choice.volume_serial
+        }
+        OfficialFilesystemFormat::Fat32 | OfficialFilesystemFormat::Ntfs => false,
+    };
+    if !geometry_ok {
+        return Err(err(EXIT_IO, "错误: 文件系统签名、几何或卷序列号读回不一致"));
+    }
+    let report = analyze_partition(&geometry, &mut reader);
+    if report.status != AnalysisStatus::Parsed
+        || report.filesystem.as_deref() != Some(filesystem.config_token())
+        || report.file_count != Some(0)
+    {
+        return Err(err(
+            EXIT_IO,
+            format!(
+                "错误: {} 深度解析失败: {}",
+                filesystem.config_token(),
+                report.reason
+            ),
+        ));
+    }
+    let root_lba = match filesystem {
+        OfficialFilesystemFormat::ExFat => {
+            let root_cluster = u32::from_le_bytes(boot[96..100].try_into().unwrap());
+            let heap_offset = u32::from_le_bytes(boot[88..92].try_into().unwrap()) as u64;
+            let cluster_sectors = 1u64 << boot[109];
+            heap_offset + (root_cluster as u64 - 2) * cluster_sectors
+        }
+        OfficialFilesystemFormat::Fat16 => {
+            u16::from_le_bytes(boot[14..16].try_into().unwrap()) as u64
+                + boot[16] as u64 * u16::from_le_bytes(boot[22..24].try_into().unwrap()) as u64
+        }
+        OfficialFilesystemFormat::Fat32 | OfficialFilesystemFormat::Ntfs => unreachable!(),
+    };
+    let root = reader
+        .read_sector(root_lba)
+        .map_err(|error| err(EXIT_IO, error.to_string()))?;
+    let actual_label = match filesystem {
+        OfficialFilesystemFormat::ExFat => root
+            .as_chunks::<32>()
+            .0
+            .iter()
+            .find(|entry| entry[0] == 0x83)
+            .and_then(|entry| {
+                let count = entry[1] as usize;
+                (count <= 11).then(|| {
+                    (0..count)
+                        .map(|index| {
+                            u16::from_le_bytes([entry[2 + index * 2], entry[3 + index * 2]])
+                        })
+                        .collect::<Vec<_>>()
+                })
+            })
+            .and_then(|units| String::from_utf16(&units).ok())
+            .unwrap_or_default(),
+        OfficialFilesystemFormat::Fat16 => {
+            if root[11] != 0x08 || boot[43..54] != root[..11] {
+                return Err(err(EXIT_IO, "错误: FAT16 卷标目录项读回不一致"));
+            }
+            let (decoded, _, had_errors) = GBK.decode(&root[..11]);
+            if had_errors {
+                return Err(err(EXIT_IO, "错误: FAT16 卷标无法按 GBK 解码"));
+            }
+            decoded.trim_end_matches(' ').to_string()
+        }
+        OfficialFilesystemFormat::Fat32 | OfficialFilesystemFormat::Ntfs => unreachable!(),
+    };
+    let expected_label = if filesystem == OfficialFilesystemFormat::Fat16 {
+        choice.volume_label.to_uppercase()
+    } else {
+        choice.volume_label.clone()
+    };
+    if actual_label != expected_label {
+        return Err(err(EXIT_IO, "错误: 文件系统卷标读回不一致"));
+    }
+    Ok(())
 }
 
 pub fn export_sparse_provision_image(
@@ -418,6 +952,24 @@ mod tests {
                 total_sectors: 1024,
                 patch,
             },
+            format_targets: Vec::new(),
+            plan: OfficialProvisionPlan::new(
+                OfficialPartitionMode::BootShareCombined,
+                OfficialPartitionSizes::new(32, 64, 128),
+                crate::protocol::lba7_compat::Lba7CompatibilityExtentLayout {
+                    chs_bytes: 0,
+                    start_byte_offset: 0,
+                    start_lba: 900,
+                    size_bytes: 3072,
+                    size_sectors: 6,
+                },
+                wrap_legacy_lba7_file_key(b"0000aaaa", [0; 8]),
+                wrap_file_key(b"0000aaaa", [0; 16], FileKeyWrapMode::Sm4),
+            )
+            .unwrap(),
+            file_key: [0; 16],
+            expected_onlyid: "1".into(),
+            expected_serial: None,
             expected_probe: probe,
             expected_lba3: None,
         };
@@ -426,5 +978,226 @@ mod tests {
         capture_manufacturer_lba3(&mut dev, &mut prepared).unwrap();
         assert_eq!(prepared.write_image.patch.get(&3).unwrap(), &expected);
         assert_eq!(prepared.expected_lba3, Some(expected));
+    }
+
+    #[derive(Default)]
+    struct MemoryDev {
+        sectors: BTreeMap<u32, Vec<u8>>,
+        fail_at: Option<u32>,
+    }
+
+    impl SectorDev for MemoryDev {
+        fn read_sector(&mut self, lba: u32) -> io::Result<Vec<u8>> {
+            Ok(self
+                .sectors
+                .get(&lba)
+                .cloned()
+                .unwrap_or_else(|| vec![0; SECTOR]))
+        }
+        fn write_sector(&mut self, lba: u32, data: &[u8]) -> io::Result<()> {
+            if self.fail_at == Some(lba) {
+                return Err(io::Error::other("injected format failure"));
+            }
+            self.sectors.insert(lba, data.to_vec());
+            Ok(())
+        }
+    }
+
+    fn format_test_plan(mode: OfficialPartitionMode, key: &[u8; 16]) -> OfficialProvisionPlan {
+        OfficialProvisionPlan::new(
+            mode,
+            OfficialPartitionSizes::new(32, 64, 128),
+            crate::protocol::lba7_compat::Lba7CompatibilityExtentLayout {
+                chs_bytes: 0,
+                start_byte_offset: 4_194_000 * SECTOR as u64,
+                start_lba: 4_194_000,
+                size_bytes: 3072,
+                size_sectors: 6,
+            },
+            wrap_legacy_lba7_file_key(b"0000aaaa", [0; 8]),
+            wrap_file_key(b"0000aaaa", *key, FileKeyWrapMode::Sm4),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn format_executor_uses_the_same_matrix_and_preserves_protocol_sectors() {
+        let key = [0x42; 16];
+        for mode in [
+            OfficialPartitionMode::DefaultThreePartition,
+            OfficialPartitionMode::BootShareCombined,
+            OfficialPartitionMode::WholeDiskEncrypted,
+            OfficialPartitionMode::IntranetExtranetDualPartition,
+        ] {
+            let plan = format_test_plan(mode, &key);
+            let serials = vec![0x1234_5678; plan.format_targets().unwrap().len()];
+            let options = FormatOptions {
+                boot: mode != OfficialPartitionMode::WholeDiskEncrypted
+                    && mode != OfficialPartitionMode::BootShareCombined,
+                share: mode != OfficialPartitionMode::WholeDiskEncrypted,
+                encrypt: mode != OfficialPartitionMode::IntranetExtranetDualPartition,
+                ..FormatOptions::default()
+            };
+            let choices = plan_format_targets(&plan, &options, &serials, &key).unwrap();
+            let mut dev = MemoryDev::default();
+            for lba in 0..13u32 {
+                dev.sectors.insert(lba, vec![lba as u8; SECTOR]);
+            }
+            for choice in choices.iter().filter(|choice| choice.selected) {
+                execute_partition_format(&mut dev, &plan, &key, choice).unwrap();
+                let raw = dev
+                    .read_sector(choice.target.geometry.start_sector as u32)
+                    .unwrap();
+                if choice.target.physically_encrypted {
+                    assert_ne!(raw.get(3..11), Some(&b"EXFAT   "[..]));
+                    assert_ne!(raw.get(54..62), Some(&b"FAT16   "[..]));
+                } else if choice.filesystem == Some(OfficialFilesystemFormat::Fat16) {
+                    assert_eq!(raw.get(54..62), Some(&b"FAT16   "[..]));
+                } else {
+                    assert_eq!(raw.get(3..11), Some(&b"EXFAT   "[..]));
+                }
+            }
+            for lba in 0..13u32 {
+                assert_eq!(dev.read_sector(lba).unwrap(), vec![lba as u8; SECTOR]);
+            }
+            if mode == OfficialPartitionMode::WholeDiskEncrypted {
+                assert!(!dev.sectors.contains_key(&63));
+            }
+        }
+    }
+
+    #[test]
+    fn format_failure_keeps_the_protocol_and_prior_successful_partition() {
+        let key = [0x42; 16];
+        let plan = format_test_plan(OfficialPartitionMode::DefaultThreePartition, &key);
+        let choices = plan_format_targets(
+            &plan,
+            &FormatOptions {
+                boot: true,
+                share: true,
+                ..FormatOptions::default()
+            },
+            &[1, 2, 3],
+            &key,
+        )
+        .unwrap();
+        let mut dev = MemoryDev::default();
+        for lba in 0..13u32 {
+            dev.sectors.insert(lba, vec![0xa5; SECTOR]);
+        }
+        execute_partition_format(&mut dev, &plan, &key, &choices[0]).unwrap();
+        dev.fail_at = Some(choices[1].target.geometry.start_sector as u32);
+        assert!(execute_partition_format(&mut dev, &plan, &key, &choices[1]).is_err());
+        assert_eq!(
+            &dev.read_sector(choices[0].target.geometry.start_sector as u32)
+                .unwrap()[54..62],
+            b"FAT16   "
+        );
+        for lba in 0..13u32 {
+            assert_eq!(dev.read_sector(lba).unwrap(), vec![0xa5; SECTOR]);
+        }
+    }
+
+    #[test]
+    fn format_hardware_gate_rejects_changed_serial_probe_capacity_and_device_id() {
+        let probe = crate::platform::HardwareProbe {
+            vid: Some(0x3535),
+            pid: Some(0x6300),
+            transport: crate::platform::NativeTransport::Uas,
+            inquiry: Some(crate::platform::InquiryInfo {
+                vendor: "aigo".into(),
+                product: "U335".into(),
+                revision: "PMAP".into(),
+            }),
+        };
+        let total = 16_777_216;
+        let device_id = TargetIdentity::from_probe(&probe, total)
+            .unwrap()
+            .device_id()
+            .to_string();
+        let check =
+            |fresh: &crate::platform::HardwareProbe, capacity, serial: Option<&str>, id: &str| {
+                verify_format_hardware(&probe, total, id, Some("SERIAL-1"), fresh, capacity, serial)
+            };
+        assert!(check(&probe, total, Some("SERIAL-1"), &device_id).is_ok());
+        assert!(check(&probe, total, Some("SERIAL-2"), &device_id).is_err());
+        assert!(check(&probe, total, None, &device_id).is_err());
+        assert!(check(&probe, total + 1, Some("SERIAL-1"), &device_id).is_err());
+        assert!(check(&probe, total, Some("SERIAL-1"), "disk&ven_other&prod_other").is_err());
+        let mut changed = probe.clone();
+        changed.vid = Some(0x0951);
+        assert!(check(&changed, total, Some("SERIAL-1"), &device_id).is_err());
+        let mut changed = probe.clone();
+        changed.inquiry.as_mut().unwrap().revision = "DIFF".into();
+        assert!(check(&changed, total, Some("SERIAL-1"), &device_id).is_err());
+    }
+
+    #[test]
+    fn protocol_readback_gate_rejects_changed_onlyid_and_layout() {
+        let total = 16_777_216u64;
+        let probe = crate::platform::HardwareProbe {
+            vid: Some(0x0dd8),
+            pid: Some(0x2005),
+            transport: crate::platform::NativeTransport::Uas,
+            inquiry: Some(crate::platform::InquiryInfo {
+                vendor: "Netac".into(),
+                product: "OnlyDisk".into(),
+                revision: "1.00".into(),
+            }),
+        };
+        let target = TargetIdentity::from_probe(&probe, total).unwrap();
+        let device_id = target.device_id().to_string();
+        let spec = ProvisionSpec::new(
+            target,
+            ProvisionMetadata::new(
+                OnlyId::parse("1402259934").unwrap(),
+                "USER06",
+                "江苏省电力有限公司",
+                "江苏电力!SAFE6",
+            )
+            .unwrap(),
+            ProvisionProfile::canonical_v1(),
+        )
+        .unwrap();
+        let plan = OfficialProvisionPlan::new(
+            OfficialPartitionMode::DefaultThreePartition,
+            OfficialPartitionSizes::new(32, 64, 128),
+            locate_lba7_compatibility_extent_from_verified_usb_capacity(total, 512).unwrap(),
+            wrap_legacy_lba7_file_key(b"0000aaaa", [0x7d; 8]),
+            wrap_file_key(b"0000aaaa", [0x42; 16], FileKeyWrapMode::Sm4),
+        )
+        .unwrap();
+        let write_image = build_official_provision_protocol_image(
+            &spec,
+            &ProvisionEntropy::new([0x5a; 252]),
+            &plan,
+        )
+        .unwrap();
+        let mut dev = MemoryDev {
+            sectors: write_image.patch.clone(),
+            fail_at: None,
+        };
+        let prepared = PreparedNewProvision {
+            disk: 4,
+            device_id,
+            mode: plan.mode,
+            force_change_password: false,
+            lce_start_lba: plan.lba7_compatibility_extent.start_lba,
+            write_image,
+            format_targets: vec![],
+            plan,
+            file_key: [0x42; 16],
+            expected_onlyid: "1402259934".into(),
+            expected_serial: None,
+            expected_probe: probe,
+            expected_lba3: Some([0; SECTOR]),
+        };
+        verify_protocol_readback(&mut dev, &prepared).unwrap();
+        dev.sectors.get_mut(&4).unwrap()[4] ^= 1;
+        assert!(verify_protocol_readback(&mut dev, &prepared).is_err());
+        dev.sectors
+            .insert(4, prepared.write_image.patch[&4].clone());
+        dev.sectors.get_mut(&12).unwrap()[0] ^= 1;
+        assert!(verify_protocol_readback(&mut dev, &prepared).is_err());
     }
 }

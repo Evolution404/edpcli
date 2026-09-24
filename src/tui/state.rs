@@ -301,7 +301,26 @@ pub struct ProvisionForm {
     pub label: String,
     pub password: String,
     pub volume_label: String,
+    pub format_boot: bool,
+    pub format_share: bool,
+    pub format_encrypt: bool,
+    pub share_label: String,
+    pub encrypt_label: String,
+    pub boot_fs: crate::provision::OfficialFilesystemFormat,
+    pub share_fs: crate::provision::OfficialFilesystemFormat,
+    pub encrypt_fs: crate::provision::OfficialFilesystemFormat,
     pub force_change_password: bool,
+}
+
+fn toggle_supported_fs(
+    value: crate::provision::OfficialFilesystemFormat,
+) -> crate::provision::OfficialFilesystemFormat {
+    match value {
+        crate::provision::OfficialFilesystemFormat::Fat16 => {
+            crate::provision::OfficialFilesystemFormat::ExFat
+        }
+        _ => crate::provision::OfficialFilesystemFormat::Fat16,
+    }
 }
 
 #[derive(Debug, Clone, Default)]
@@ -342,6 +361,14 @@ impl Default for ProvisionForm {
             label: crate::provision::DEFAULT_SAFE6_LABEL.into(),
             password: "0000aaaa".into(),
             volume_label: "启动区".into(),
+            format_boot: false,
+            format_share: false,
+            format_encrypt: false,
+            share_label: "交换区".into(),
+            encrypt_label: "保密区".into(),
+            boot_fs: crate::provision::OfficialFilesystemFormat::Fat16,
+            share_fs: crate::provision::OfficialFilesystemFormat::ExFat,
+            encrypt_fs: crate::provision::OfficialFilesystemFormat::ExFat,
             force_change_password: false,
         }
     }
@@ -1798,13 +1825,9 @@ impl AppState {
     }
 
     pub fn provision_field_count(&self) -> usize {
-        match self.provision.kind {
-            ProvisionKind::Mode0 => 11,
-            ProvisionKind::Mode1 => 10,
-            ProvisionKind::Mode2 => 9,
-            ProvisionKind::Mode3 => 10,
-            ProvisionKind::Convert | ProvisionKind::Offline => 0,
-        }
+        (0..)
+            .take_while(|&index| self.provision_field_slot(index).is_some())
+            .count()
     }
 
     pub fn offline_fields(&self) -> [(&'static str, &str); 4] {
@@ -1934,31 +1957,76 @@ impl AppState {
         if matches!(mode, 0..=2) {
             slots.push(2);
         }
-        slots.extend([3, 4, 5, 6, 7, 8, 9]);
+        slots.extend([3, 4, 5, 6, 7]);
+        for target in self.provision_format_template() {
+            let (toggle, filesystem, label) = match target.role {
+                crate::provision::PartitionRole::Boot => (11, Some(18), Some(14)),
+                crate::provision::PartitionRole::Share
+                | crate::provision::PartitionRole::BootShareCombined => (12, Some(19), Some(15)),
+                crate::provision::PartitionRole::Encrypt => (13, Some(20), Some(16)),
+                crate::provision::PartitionRole::CompatibilityReserve => (17, None, None),
+            };
+            slots.push(toggle);
+            if let Some(filesystem) = filesystem {
+                slots.push(filesystem);
+            }
+            if let Some(label) = label {
+                slots.push(label);
+            }
+        }
+        slots.push(9);
         slots.get(display_index).copied()
     }
 
-    pub fn provision_visible_fields(&self) -> Vec<(&'static str, &str, bool)> {
+    fn provision_format_template(&self) -> Vec<crate::provision::PartitionFormatTarget> {
+        let Some(mode) = self.provision.kind.mode() else {
+            return Vec::new();
+        };
+        let mode = match mode {
+            0 => crate::provision::OfficialPartitionMode::DefaultThreePartition,
+            1 => crate::provision::OfficialPartitionMode::BootShareCombined,
+            2 => crate::provision::OfficialPartitionMode::WholeDiskEncrypted,
+            _ => crate::provision::OfficialPartitionMode::IntranetExtranetDualPartition,
+        };
+        crate::provision::official_format_targets_with_filesystems(
+            mode,
+            crate::provision::OfficialPartitionSizes::new(32, 64, 128),
+            512,
+            crate::provision::OfficialPartitionFilesystems {
+                boot: self.provision.form.boot_fs,
+                share: self.provision.form.share_fs,
+                encrypt: self.provision.form.encrypt_fs,
+            },
+        )
+        .unwrap_or_default()
+    }
+
+    pub fn provision_visible_fields(&self) -> Vec<(String, &str, bool)> {
         let mut out = Vec::new();
         let mode = match self.provision.kind.mode() {
             Some(value) => value,
             None => return out,
         };
-        out.push(("分配方式", self.provision.form.size_mode.label(), false));
+        out.push((
+            "分配方式".into(),
+            self.provision.form.size_mode.label(),
+            false,
+        ));
         let ratio = self.provision.form.size_mode == ProvisionSizeMode::Ratio;
         if mode == 0 {
             out.push((
-                "启动区扇区",
+                "启动区扇区".into(),
                 self.provision.form.boot_sectors.as_str(),
                 false,
             ));
         } else if mode == 3 {
             out.push((
-                if ratio {
+                (if ratio {
                     "启动区比例"
                 } else {
                     "启动区 MiB"
-                },
+                })
+                .into(),
                 if ratio {
                     self.provision.form.boot_ratio.as_str()
                 } else {
@@ -1969,11 +2037,12 @@ impl AppState {
         }
         if matches!(mode, 0 | 1 | 3) {
             out.push((
-                if ratio {
+                (if ratio {
                     "交换区比例"
                 } else {
                     "交换区 MiB"
-                },
+                })
+                .into(),
                 if ratio {
                     self.provision.form.share_ratio.as_str()
                 } else {
@@ -1984,11 +2053,12 @@ impl AppState {
         }
         if matches!(mode, 0..=2) {
             out.push((
-                if ratio {
+                (if ratio {
                     "保密区比例"
                 } else {
                     "保密区 MiB"
-                },
+                })
+                .into(),
                 if ratio {
                     self.provision.form.encrypt_ratio.as_str()
                 } else {
@@ -1998,22 +2068,76 @@ impl AppState {
             ));
         }
         out.extend([
-            ("标签标识", self.provision.form.label_id.as_str(), false),
-            ("用户", self.provision.form.user.as_str(), false),
-            ("部门", self.provision.form.dept.as_str(), false),
-            ("标签", self.provision.form.label.as_str(), false),
-            ("密码", self.provision.form.password.as_str(), true),
-            ("卷标", self.provision.form.volume_label.as_str(), false),
             (
-                "首次强制改密",
-                if self.provision.form.force_change_password {
-                    "☑ 是"
-                } else {
-                    "☐ 否"
-                },
+                "标签标识".into(),
+                self.provision.form.label_id.as_str(),
                 false,
             ),
+            ("用户".into(), self.provision.form.user.as_str(), false),
+            ("部门".into(), self.provision.form.dept.as_str(), false),
+            ("标签".into(), self.provision.form.label.as_str(), false),
+            ("密码".into(), self.provision.form.password.as_str(), true),
         ]);
+        for target in self.provision_format_template() {
+            let role = target.role;
+            if !target.format_capable {
+                out.push((role.label().into(), "— 不可格式化", false));
+                continue;
+            }
+            let (selected, label) = match role {
+                crate::provision::PartitionRole::Boot => (
+                    self.provision.form.format_boot,
+                    self.provision.form.volume_label.as_str(),
+                ),
+                crate::provision::PartitionRole::Share
+                | crate::provision::PartitionRole::BootShareCombined => (
+                    self.provision.form.format_share,
+                    self.provision.form.share_label.as_str(),
+                ),
+                crate::provision::PartitionRole::Encrypt => (
+                    self.provision.form.format_encrypt,
+                    self.provision.form.encrypt_label.as_str(),
+                ),
+                crate::provision::PartitionRole::CompatibilityReserve => unreachable!(),
+            };
+            out.push((
+                format!(
+                    "{} type{} {}{}",
+                    role.label(),
+                    target.geometry.partition_type.raw(),
+                    if target.physically_encrypted {
+                        "加密"
+                    } else {
+                        "明文"
+                    },
+                    target
+                        .visible_mbr_type
+                        .map(|mbr| format!(" / MBR 0x{mbr:02X}"))
+                        .unwrap_or_default()
+                ),
+                if selected {
+                    "☑ 格式化"
+                } else {
+                    "☐ 不格式化"
+                },
+                false,
+            ));
+            out.push((
+                format!("{}文件系统", role.label()),
+                target.filesystem.unwrap().windows_format_name(),
+                false,
+            ));
+            out.push((format!("{}卷标", role.label()), label, false));
+        }
+        out.push((
+            "首次强制改密".into(),
+            if self.provision.form.force_change_password {
+                "☑ 是"
+            } else {
+                "☐ 否"
+            },
+            false,
+        ));
         out
     }
 
@@ -2045,7 +2169,9 @@ impl AppState {
             5 => Some(&mut self.provision.form.dept),
             6 => Some(&mut self.provision.form.label),
             7 => Some(&mut self.provision.form.password),
-            8 => Some(&mut self.provision.form.volume_label),
+            14 => Some(&mut self.provision.form.volume_label),
+            15 => Some(&mut self.provision.form.share_label),
+            16 => Some(&mut self.provision.form.encrypt_label),
             _ => None,
         }
     }
@@ -2243,6 +2369,31 @@ impl AppState {
                 self.provision.message = None;
                 true
             }
+            Some(11) => {
+                self.provision.form.format_boot = !self.provision.form.format_boot;
+                true
+            }
+            Some(12) => {
+                self.provision.form.format_share = !self.provision.form.format_share;
+                true
+            }
+            Some(13) => {
+                self.provision.form.format_encrypt = !self.provision.form.format_encrypt;
+                true
+            }
+            Some(18) => {
+                self.provision.form.boot_fs = toggle_supported_fs(self.provision.form.boot_fs);
+                true
+            }
+            Some(19) => {
+                self.provision.form.share_fs = toggle_supported_fs(self.provision.form.share_fs);
+                true
+            }
+            Some(20) => {
+                self.provision.form.encrypt_fs =
+                    toggle_supported_fs(self.provision.form.encrypt_fs);
+                true
+            }
             _ => false,
         }
     }
@@ -2350,6 +2501,17 @@ impl AppState {
             label: self.provision.form.label.trim().to_string(),
             password: self.provision.form.password.clone(),
             volume_label: self.provision.form.volume_label.trim().to_string(),
+            format: crate::application::provision::FormatOptions {
+                boot: self.provision.form.format_boot,
+                share: self.provision.form.format_share,
+                encrypt: self.provision.form.format_encrypt,
+                boot_label: self.provision.form.volume_label.trim().to_string(),
+                share_label: self.provision.form.share_label.trim().to_string(),
+                encrypt_label: self.provision.form.encrypt_label.trim().to_string(),
+                boot_fs: self.provision.form.boot_fs,
+                share_fs: self.provision.form.share_fs,
+                encrypt_fs: self.provision.form.encrypt_fs,
+            },
             force_change_password: self.provision.form.force_change_password,
         })
     }
@@ -2482,11 +2644,11 @@ impl AppState {
         Some(prepared)
     }
 
-    pub fn provision_finish_write(&mut self, result: Result<(), String>) {
+    pub fn provision_finish_write(&mut self, result: Result<String, String>) {
         self.critical_operation = false;
         self.provision.stage = ProvisionStage::Result;
         self.provision.message = Some(match result {
-            Ok(()) => "操作完成，写入/同步/读回安全链全部通过。请拔出重插后复核。".into(),
+            Ok(message) => message,
             Err(message) => message,
         });
     }

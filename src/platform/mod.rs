@@ -123,6 +123,10 @@ pub fn hardware_probe(disk: u32) -> Option<HardwareProbe> {
     imp::hardware_probe(disk)
 }
 
+pub fn hardware_serial(disk: u32) -> Option<String> {
+    imp::hardware_serial(disk).filter(|serial| !serial.trim().is_empty())
+}
+
 /// 平台原生探测缺字段时的兼容探测。仅平台实现知道具体 OS 工具或 API；
 /// 业务层只消费统一的 `HardwareProbe`。
 pub fn fallback_hardware_probe(

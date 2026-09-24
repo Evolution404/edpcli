@@ -155,7 +155,7 @@ enum WorkerResult {
     },
     ProvisionWrite {
         operation_id: OperationId,
-        result: Result<(), String>,
+        result: Result<String, String>,
     },
     ProvisionExport {
         generation: u64,
@@ -194,7 +194,7 @@ pub struct TaskUpdates {
     pub backup_prune_execute: Option<(OperationId, Result<usize, String>)>,
     pub provision_plan: Option<Result<crate::tui::state::ProvisionPrepared, String>>,
     pub provision_progress: Option<(OperationId, String)>,
-    pub provision_write: Option<(OperationId, Result<(), String>)>,
+    pub provision_write: Option<(OperationId, Result<String, String>)>,
     pub provision_export: Option<Result<PathBuf, String>>,
     pub offline_convert: Option<Result<crate::tui::state::OfflineConvertView, String>>,
 }
@@ -1153,7 +1153,7 @@ impl TaskHub {
                     crate::tui::state::ProvisionPrepared::New(prepared) => {
                         let _ = tx.send(WorkerResult::ProvisionProgress {
                             operation_id,
-                            message: "正在写入文件系统/LCE/协议元数据，并逐扇区读回校验…".into(),
+                            message: "正在写入 LCE/协议元数据，并逐扇区读回校验…".into(),
                         });
                         let path = crate::diskio::raw_path(prepared.disk);
                         let mut dev = crate::diskio::FileDev::open_rdonly(&path)
@@ -1161,6 +1161,24 @@ impl TaskHub {
                         crate::application::provision::commit_new_provision(
                             &runner, &mut dev, &prepared,
                         )
+                        .map(|report| {
+                            let mut lines =
+                                vec!["制盘：成功，协议与几何读回验证通过。".to_string()];
+                            if report.formats.is_empty() {
+                                lines.push("格式化：未选择任何分区".into());
+                            }
+                            for item in report.formats {
+                                lines.push(match item.result {
+                                    Ok(()) => {
+                                        format!("格式化：✓ {}，读回验证通过", item.role.label())
+                                    }
+                                    Err(message) => {
+                                        format!("格式化：✗ {}：{message}", item.role.label())
+                                    }
+                                });
+                            }
+                            lines.join("\n")
+                        })
                         .map_err(|error| error.msg)
                     }
                     crate::tui::state::ProvisionPrepared::Convert(prepared) => {
@@ -1205,6 +1223,7 @@ impl TaskHub {
                         crate::application::provision::commit_passwordless_conversion(
                             &runner, &mut dev, &prepared,
                         )
+                        .map(|()| "免密改造：成功，读回验证通过。".into())
                         .map_err(|error| error.msg)
                     }
                 }

@@ -4,8 +4,8 @@ use crate::common::SECTOR;
 use crate::crypto::{a7f0_full, crc32_bare, lba6_checksum, xor_rolling, LBA6_K0};
 
 use super::{
-    build_official_partition_layout, official_mbr_partition_type, OfficialPartitionGeometry,
-    OfficialProvisionPlan, ProvisionImage, ProvisionSpec, PROVISION_IMAGE_LEN,
+    build_official_partition_layout, OfficialPartitionGeometry, OfficialProvisionPlan,
+    ProvisionImage, ProvisionSpec, PROVISION_IMAGE_LEN,
 };
 
 const LBA12_TABLE_LEN: usize = 0x170;
@@ -235,7 +235,7 @@ fn build_official_lba0(
         .ok_or("official partition layout is empty")?;
     let mut out = [0u8; SECTOR];
     let entry = 0x1be;
-    out[entry + 4] = official_mbr_partition_type(plan.mode);
+    out[entry + 4] = plan.visible_mbr_partition_type()?;
     let start = u32::try_from(first.start_sector).map_err(|_| "MBR start LBA overflows u32")?;
     let count =
         u32::try_from(first.sector_count()).map_err(|_| "MBR sector count overflows u32")?;

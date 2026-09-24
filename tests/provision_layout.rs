@@ -3,11 +3,12 @@ use edpcli::protocol::{
 };
 use edpcli::provision::{
     build_official_partition_layout, generate_official_image, official_mbr_partition_type,
-    wrap_file_key, wrap_legacy_lba7_file_key, FileKeyWrapMode, OfficialFilesystemFormat,
-    OfficialPartitionMode, OfficialPartitionSizes, OfficialProvisionPlan,
-    OfficialProvisionValidator, OnlyId, ProvisionEntropy, ProvisionImage, ProvisionMetadata,
-    ProvisionProfile, ProvisionSpec, TargetIdentity, DEFAULT_MODE0_BOOT_SECTORS,
-    OFFICIAL_PARTITION_START_SECTOR, WHOLE_DISK_ENCRYPTED_COMPAT_BOOT_BYTES,
+    visible_mbr_partition_type, wrap_file_key, wrap_legacy_lba7_file_key, FileKeyWrapMode,
+    OfficialFilesystemFormat, OfficialPartitionFilesystems, OfficialPartitionMode,
+    OfficialPartitionSizes, OfficialProvisionPlan, OfficialProvisionValidator, OnlyId,
+    ProvisionEntropy, ProvisionImage, ProvisionMetadata, ProvisionProfile, ProvisionSpec,
+    TargetIdentity, DEFAULT_MODE0_BOOT_SECTORS, OFFICIAL_PARTITION_START_SECTOR,
+    WHOLE_DISK_ENCRYPTED_COMPAT_BOOT_BYTES,
 };
 use edpcli::{
     crypto::{a6b0_full, crc32_bare, xor_rolling},
@@ -54,6 +55,73 @@ fn official_mbr_selector_matches_the_first_party_writer_branches() {
         official_mbr_partition_type(OfficialPartitionMode::IntranetExtranetDualPartition),
         0x0e
     );
+}
+
+#[test]
+fn visible_mbr_type_tracks_the_front_filesystem_without_changing_edp_roles() {
+    for mode in [
+        OfficialPartitionMode::DefaultThreePartition,
+        OfficialPartitionMode::IntranetExtranetDualPartition,
+    ] {
+        let plan = official_plan(mode);
+        let default_front = plan.format_targets().unwrap().remove(0);
+        assert_eq!(
+            default_front.filesystem,
+            Some(OfficialFilesystemFormat::Fat16)
+        );
+        assert_eq!(plan.visible_mbr_partition_type().unwrap(), 0x0e);
+        let mut filesystems = OfficialPartitionFilesystems::defaults();
+        filesystems.boot = OfficialFilesystemFormat::ExFat;
+        let exfat = plan.with_filesystems(filesystems);
+        assert_eq!(exfat.visible_mbr_partition_type().unwrap(), 0x07);
+        assert_eq!(
+            exfat.logical_partitions(512).unwrap(),
+            plan.logical_partitions(512).unwrap()
+        );
+    }
+    let combined = official_plan(OfficialPartitionMode::BootShareCombined);
+    assert_eq!(
+        combined.format_targets().unwrap()[0].filesystem,
+        Some(OfficialFilesystemFormat::ExFat)
+    );
+    assert_eq!(combined.visible_mbr_partition_type().unwrap(), 0x07);
+    assert_eq!(
+        official_plan(OfficialPartitionMode::WholeDiskEncrypted)
+            .visible_mbr_partition_type()
+            .unwrap(),
+        0x0b
+    );
+    assert_eq!(
+        visible_mbr_partition_type(
+            OfficialPartitionMode::DefaultThreePartition,
+            OfficialFilesystemFormat::Fat32
+        ),
+        0x0c
+    );
+    assert_eq!(
+        visible_mbr_partition_type(
+            OfficialPartitionMode::DefaultThreePartition,
+            OfficialFilesystemFormat::Ntfs
+        ),
+        0x07
+    );
+}
+
+#[test]
+fn generated_mode0_exfat_front_uses_mbr_07_from_the_initial_protocol_image() {
+    let spec = official_spec();
+    let entropy = ProvisionEntropy::new([0x5a; 252]);
+    let fat16_plan = official_plan(OfficialPartitionMode::DefaultThreePartition);
+    let mut filesystems = OfficialPartitionFilesystems::defaults();
+    filesystems.boot = OfficialFilesystemFormat::ExFat;
+    let exfat_plan = fat16_plan.with_filesystems(filesystems);
+    let fat16 = generate_official_image(&spec, &entropy, &fat16_plan).unwrap();
+    let exfat = generate_official_image(&spec, &entropy, &exfat_plan).unwrap();
+    assert_eq!(fat16.as_bytes()[0x1c2], 0x0e);
+    assert_eq!(exfat.as_bytes()[0x1c2], 0x07);
+    assert_eq!(exfat.as_bytes()[..0x1c2], fat16.as_bytes()[..0x1c2]);
+    assert_eq!(exfat.as_bytes()[0x1c3..], fat16.as_bytes()[0x1c3..]);
+    OfficialProvisionValidator::validate(&spec, &exfat, &exfat_plan).unwrap();
 }
 
 #[test]

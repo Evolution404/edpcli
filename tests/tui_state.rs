@@ -31,10 +31,67 @@ fn provision_label_defaults_to_jiangsu_safe6_and_remains_editable() {
     assert_eq!(form.boot_sectors, "20417");
     assert!(edpcli::provision::OnlyId::parse(&form.label_id).is_ok());
     assert!(!form.force_change_password);
+    assert!(!form.format_boot && !form.format_share && !form.format_encrypt);
+    assert_eq!(
+        form.boot_fs,
+        edpcli::provision::OfficialFilesystemFormat::Fat16
+    );
+    assert_eq!(
+        form.share_fs,
+        edpcli::provision::OfficialFilesystemFormat::ExFat
+    );
     form.label = "自定义标签!SAFE6".into();
     form.label_id = "123456789".into();
     assert_eq!(form.label, "自定义标签!SAFE6");
     assert_eq!(form.label_id, "123456789");
+}
+
+#[test]
+fn provision_format_controls_follow_current_mode_targets() {
+    let mut state = AppState::new();
+    state.provision_mut().kind = ProvisionKind::Mode1;
+    let fields = state.provision_visible_fields();
+    assert!(fields
+        .iter()
+        .any(|(label, _, _)| label.contains("启动/交换区 type2 明文")));
+    assert!(fields
+        .iter()
+        .any(|(label, _, _)| label.contains("保密区 type4 加密")));
+    assert!(!fields
+        .iter()
+        .any(|(label, _, _)| label.contains("启动区 type1")));
+    let share_index = fields
+        .iter()
+        .position(|(label, _, _)| label.contains("启动/交换区 type2"))
+        .unwrap();
+    let fs_index = fields
+        .iter()
+        .position(|(label, _, _)| label == "启动/交换区文件系统")
+        .unwrap();
+    state.provision_mut().field_selected = share_index;
+    assert!(state.provision_toggle_selected_option());
+    assert!(state.provision().form.format_share);
+    state.provision_mut().field_selected = fs_index;
+    assert!(state.provision_toggle_selected_option());
+    assert_eq!(
+        state.provision().form.share_fs,
+        edpcli::provision::OfficialFilesystemFormat::Fat16
+    );
+
+    state.provision_mut().kind = ProvisionKind::Mode2;
+    let fields = state.provision_visible_fields();
+    assert!(fields
+        .iter()
+        .any(|(label, value, _)| label.contains("兼容保留区") && *value == "— 不可格式化"));
+    assert!(!fields
+        .iter()
+        .any(|(label, _, _)| label.contains("启动区 type1")));
+    let reserve_index = fields
+        .iter()
+        .position(|(label, _, _)| label.contains("兼容保留区"))
+        .unwrap();
+    state.provision_mut().field_selected = reserve_index;
+    assert!(!state.provision_toggle_selected_option());
 }
 
 #[test]

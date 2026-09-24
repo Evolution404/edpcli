@@ -179,9 +179,136 @@ fn provision_password_and_volume_label_have_product_defaults() {
         Parsed::Provision(ProvisionAction::Plan(opts)) => {
             assert_eq!(opts.password, "0000aaaa");
             assert_eq!(opts.volume_label, "启动区");
+            assert!(!opts.format_boot && !opts.format_share && !opts.format_encrypt);
+            assert_eq!(
+                opts.boot_fs,
+                edpcli::provision::OfficialFilesystemFormat::Fat16
+            );
+            assert_eq!(
+                opts.share_fs,
+                edpcli::provision::OfficialFilesystemFormat::ExFat
+            );
+            assert_eq!(
+                opts.encrypt_fs,
+                edpcli::provision::OfficialFilesystemFormat::ExFat
+            );
         }
         _ => panic!("expected provision plan"),
     }
+}
+
+#[test]
+fn provision_format_flags_and_independent_labels_parse() {
+    let parsed = parse_args(&args(&[
+        "provision",
+        "write",
+        "--disk",
+        "4",
+        "--mode",
+        "0",
+        "--share-mib",
+        "64",
+        "--encrypt-mib",
+        "128",
+        "--user",
+        "USER06",
+        "--dept",
+        "江苏省电力有限公司",
+        "--format-boot",
+        "--format-share",
+        "--format-encrypt",
+        "--boot-label",
+        "启动",
+        "--share-label",
+        "交换",
+        "--encrypt-label",
+        "保密",
+        "--boot-fs",
+        "exfat",
+        "--share-fs",
+        "fat16",
+        "--encrypt-fs",
+        "exfat",
+    ]))
+    .unwrap();
+    match parsed {
+        Parsed::Provision(ProvisionAction::Write { opts, .. }) => {
+            assert!(opts.format_boot && opts.format_share && opts.format_encrypt);
+            assert_eq!(
+                (
+                    &opts.boot_label[..],
+                    &opts.share_label[..],
+                    &opts.encrypt_label[..]
+                ),
+                ("启动", "交换", "保密")
+            );
+            assert_eq!(
+                opts.boot_fs,
+                edpcli::provision::OfficialFilesystemFormat::ExFat
+            );
+            assert_eq!(
+                opts.share_fs,
+                edpcli::provision::OfficialFilesystemFormat::Fat16
+            );
+        }
+        _ => panic!("expected provision write"),
+    }
+}
+
+#[test]
+fn provision_cli_rejects_filesystems_without_a_writer() {
+    let base = [
+        "provision",
+        "plan",
+        "--disk",
+        "4",
+        "--mode",
+        "0",
+        "--share-mib",
+        "64",
+        "--encrypt-mib",
+        "128",
+        "--user",
+        "USER06",
+        "--dept",
+        "江苏省电力有限公司",
+    ];
+    for filesystem in ["fat32", "ntfs"] {
+        let mut command = base.to_vec();
+        command.extend(["--boot-fs", filesystem]);
+        assert!(parse_args(&args(&command)).is_err());
+    }
+}
+
+#[test]
+fn legacy_volume_label_is_a_fallback_for_each_partition_label() {
+    let parsed = parse_args(&args(&[
+        "provision",
+        "plan",
+        "--disk",
+        "4",
+        "--mode",
+        "0",
+        "--share-mib",
+        "64",
+        "--encrypt-mib",
+        "128",
+        "--user",
+        "USER06",
+        "--dept",
+        "江苏省电力有限公司",
+        "--volume-label",
+        "共同卷标",
+        "--share-label",
+        "独立交换",
+    ]))
+    .unwrap();
+    let Parsed::Provision(ProvisionAction::Plan(opts)) = parsed else {
+        panic!("expected provision plan");
+    };
+    assert_eq!(opts.boot_label, "共同卷标");
+    assert_eq!(opts.share_label, "独立交换");
+    assert_eq!(opts.encrypt_label, "共同卷标");
 }
 
 #[test]

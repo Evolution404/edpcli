@@ -1,13 +1,14 @@
 use edpcli::{
+    backup_metadata::parse_partition_geometry,
     platform::{HardwareProbe, InquiryInfo, NativeTransport},
     protocol::lba7_compat::{
         locate_lba7_compatibility_extent_from_verified_usb_capacity, Lba7CompatibilityExtentLayout,
     },
     provision::{
-        build_official_provision_write_image, wrap_file_key, wrap_legacy_lba7_file_key,
-        FileKeyWrapMode, OfficialPartitionMode, OfficialPartitionSizes, OfficialProvisionPlan,
-        OnlyId, ProvisionEntropy, ProvisionMetadata, ProvisionProfile, ProvisionSpec,
-        TargetIdentity,
+        build_official_provision_protocol_image, build_official_provision_write_image,
+        wrap_file_key, wrap_legacy_lba7_file_key, FileKeyWrapMode, OfficialPartitionMode,
+        OfficialPartitionSizes, OfficialProvisionPlan, OnlyId, ProvisionEntropy, ProvisionMetadata,
+        ProvisionProfile, ProvisionSpec, TargetIdentity,
     },
 };
 
@@ -105,8 +106,41 @@ fn all_four_modes_build_one_bounded_write_image() {
                 .patch
                 .contains_key(&(plan.lba7_compatibility_extent.start_lba as u32 + offset)));
         }
-        assert!(image.touched_sector_count() > 19);
+        assert_eq!(image.touched_sector_count(), 19);
         assert!(u64::from(image.highest_touched_lba().unwrap()) < total);
+    }
+}
+
+#[test]
+fn protocol_only_phase_never_writes_a_filesystem_partition() {
+    let total = 16_777_216u64;
+    let spec = spec(total);
+    for mode in [
+        OfficialPartitionMode::DefaultThreePartition,
+        OfficialPartitionMode::BootShareCombined,
+        OfficialPartitionMode::WholeDiskEncrypted,
+        OfficialPartitionMode::IntranetExtranetDualPartition,
+    ] {
+        let plan = plan(mode, total);
+        let image = build_official_provision_protocol_image(
+            &spec,
+            &ProvisionEntropy::new([0x5a; 252]),
+            &plan,
+        )
+        .unwrap();
+        let geometry =
+            parse_partition_geometry(image.metadata.as_bytes(), spec.target().device_id(), total)
+                .unwrap();
+        assert_eq!(geometry.len(), plan.logical_partitions(512).unwrap().len());
+        let lce = plan.lba7_compatibility_extent.start_lba as u32;
+        assert_eq!(image.patch.len(), 19);
+        assert!(image
+            .patch
+            .keys()
+            .all(|&lba| lba <= 12 || (lce..lce + 6).contains(&lba)));
+        for partition in plan.logical_partitions(512).unwrap() {
+            assert!(!image.patch.contains_key(&(partition.start_sector as u32)));
+        }
     }
 }
 

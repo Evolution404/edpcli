@@ -175,11 +175,12 @@ impl Drop for DevInfoSet {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 struct UsbIdentity {
     vid: Option<u16>,
     pid: Option<u16>,
     transport: NativeTransport,
+    serial: Option<String>,
 }
 
 fn parse_hex_tag(text: &str, tag: &str) -> Option<u16> {
@@ -192,10 +193,21 @@ fn usb_identity_from_instance_chain(ids: &[String]) -> Option<UsbIdentity> {
     let mut vid = None;
     let mut pid = None;
     let mut transport = NativeTransport::Unknown;
+    let mut serial = None;
     for id in ids {
         let upper = id.to_ascii_uppercase();
         vid = vid.or_else(|| parse_hex_tag(&upper, "VID_"));
         pid = pid.or_else(|| parse_hex_tag(&upper, "PID_"));
+        if upper.starts_with("USB\\VID_")
+            && parse_hex_tag(&upper, "VID_").is_some()
+            && parse_hex_tag(&upper, "PID_").is_some()
+        {
+            serial = id
+                .rsplit('\\')
+                .next()
+                .filter(|value| !value.is_empty() && !value.contains('&'))
+                .map(str::to_string);
+        }
         if upper.contains("UASPSTOR") {
             transport = NativeTransport::Uas;
         } else if transport == NativeTransport::Unknown && upper.contains("USBSTOR") {
@@ -207,6 +219,7 @@ fn usb_identity_from_instance_chain(ids: &[String]) -> Option<UsbIdentity> {
             vid,
             pid,
             transport,
+            serial,
         },
     )
 }
@@ -444,9 +457,10 @@ pub(super) fn hardware_probe(disk: u32) -> Option<HardwareProbe> {
     let probe = query_disk(disk).ok()?;
     let usb = setupapi_usb_identity(disk);
     Some(HardwareProbe {
-        vid: usb.and_then(|id| id.vid),
-        pid: usb.and_then(|id| id.pid),
+        vid: usb.as_ref().and_then(|id| id.vid),
+        pid: usb.as_ref().and_then(|id| id.pid),
         transport: usb
+            .as_ref()
             .map(|id| id.transport)
             .unwrap_or(NativeTransport::Unknown),
         inquiry: (!probe.vendor.is_empty()).then_some(InquiryInfo {
@@ -455,6 +469,10 @@ pub(super) fn hardware_probe(disk: u32) -> Option<HardwareProbe> {
             revision: probe.revision,
         }),
     })
+}
+
+pub(super) fn hardware_serial(disk: u32) -> Option<String> {
+    setupapi_usb_identity(disk)?.serial
 }
 
 pub(super) fn fallback_hardware_probe(
@@ -476,10 +494,12 @@ pub(super) fn list_external_disks(_runner: &dyn CmdRunner) -> Vec<ExtDisk> {
                 n: disk,
                 size: probe.size,
                 vid: usb
+                    .as_ref()
                     .and_then(|id| id.vid)
                     .map(|vid| format!("{vid:04x}"))
                     .unwrap_or_else(|| "xxxx".into()),
                 pid: usb
+                    .as_ref()
                     .and_then(|id| id.pid)
                     .map(|pid| format!("{pid:04x}"))
                     .unwrap_or_else(|| "xxxx".into()),
@@ -875,6 +895,7 @@ mod tests {
                 vid: Some(0x3535),
                 pid: Some(0x6300),
                 transport: NativeTransport::Uas,
+                serial: Some("123".into()),
             })
         );
     }
@@ -888,6 +909,7 @@ mod tests {
                 vid: None,
                 pid: None,
                 transport: NativeTransport::Uas,
+                serial: None,
             })
         );
     }
@@ -905,6 +927,7 @@ mod tests {
                 vid: Some(0x0d18),
                 pid: Some(0x2005),
                 transport: NativeTransport::Bot,
+                serial: Some("ABC".into()),
             })
         );
     }
@@ -936,6 +959,7 @@ mod tests {
                 vid: None,
                 pid: None,
                 transport: NativeTransport::Uas,
+                serial: None,
             })
         );
     }

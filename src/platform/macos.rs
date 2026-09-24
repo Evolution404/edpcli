@@ -140,6 +140,10 @@ pub(super) fn hardware_probe(disk: u32) -> Option<HardwareProbe> {
     super::macos_native::probe_disk(disk)
 }
 
+pub(super) fn hardware_serial(disk: u32) -> Option<String> {
+    super::macos_native::probe_disk_serial(disk)
+}
+
 fn split_class_blocks<'a>(out: &'a str, class: &str) -> Vec<&'a str> {
     let marker_with_fields = format!("<class {class},");
     let marker_bare = format!("<class {class}>");

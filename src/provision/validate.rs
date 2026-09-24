@@ -9,8 +9,8 @@ use crate::metainfo::{ownership_from_lba8, summarize};
 use crate::sectors::looks_nopwd;
 
 use super::{
-    official_mbr_partition_type, OfficialPartitionGeometry, OfficialPartitionMode,
-    OfficialProvisionPlan, ProvisionImage, ProvisionSpec, PROVISION_IMAGE_LEN,
+    OfficialPartitionGeometry, OfficialPartitionMode, OfficialProvisionPlan, ProvisionImage,
+    ProvisionSpec, PROVISION_IMAGE_LEN,
 };
 
 const SHARE_START: u64 = 63;
@@ -511,7 +511,7 @@ fn validate_official_mbr(
         .first()
         .ok_or("official partition layout is empty")?;
     let mut expected = [0u8; SECTOR];
-    expected[0x1be + 4] = official_mbr_partition_type(plan.mode);
+    expected[0x1be + 4] = plan.visible_mbr_partition_type()?;
     let start = u32::try_from(first.start_sector).map_err(|_| "MBR start LBA overflows u32")?;
     let count =
         u32::try_from(first.sector_count()).map_err(|_| "MBR sector count overflows u32")?;
