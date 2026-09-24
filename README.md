@@ -11,7 +11,7 @@ edpcli list       查看当前插入的 U 盘
 edpcli info       查看 U 盘或备份详细信息
 edpcli apply      预览或执行 U 盘改造
 edpcli backup     创建、查看、校验、恢复和清理备份
-edpcli provision  官方四模式制盘与严格免密改造
+edpcli provision  官方四模式制盘；mode1 可保留重制现有 mode0
 edpcli inspect    高级：检查底层 LBA/hex 数据
 ```
 
@@ -86,8 +86,11 @@ edpcli backup prune --keep 2
 edpcli provision plan --disk 4 --mode 1 --share-mib 1024 --encrypt-mib 2048 \
   --label-id 1402259934 --user USER06 --dept '江苏省电力有限公司' \
   --label '江苏电力!SAFE6' --password '你的密码'
-edpcli provision convert --disk 4
-edpcli provision convert --disk 4 --write
+edpcli provision write --disk 4 --mode 1 --share-mib 1024 --encrypt-mib 2048 \
+  --user USER06 --dept '江苏省电力有限公司' --yes
+edpcli provision plan --disk 4 --mode 1 \
+  --force-change-password --cancel-password-complexity-check \
+  --share-max-password-errors 5 --encrypt-max-password-errors 5
 edpcli inspect meta --lba 7
 edpcli inspect raw --disk 4 --lba 240250283-240250288
 edpcli inspect decode --disk 4 --lba 20480 --count 8
@@ -109,9 +112,9 @@ application/service，不维护第二套业务实现。来自 U 盘元数据、�
 stdout/stderr 输出。
 
 TUI 已覆盖用户业务流程：设备列表/详情、快速检查、高级检查、Apply、普通/深度备份、校验、恢复、单条/批量删除、
-keep-N 清理、官方四模式制盘、现有官方盘严格免密改造、目标绑定稀疏镜像导出，以及离线 LBA 快照
-转换。`i` 是 LBA0–12 快速检查；`I` 可检查任意 LBA 列表/范围或 count，支持 raw/decode/meta、
-device_id 覆盖与普通目录导出。物理写盘统一遵循“先只读计划/预览，再精确输入 YES”的交互；Apply
+keep-N 清理、官方四模式制盘、mode1 对现有 mode0 的保留重制、目标绑定稀疏镜像导出，以及离线 LBA 快照
+转换。进入物理制盘模式选择前，TUI 会显示当前盘是否已有 EDPB 保存记录，并让用户明确选择是否先保存当前盘。`i` 是 LBA0–12 快速检查；`I` 可检查任意 LBA 列表/范围或 count，支持 raw/decode/meta、
+制盘表单同时暴露完整 PassInfo 策略：初始化密码强制修改、取消密码复杂性验证，以及交换区/保密区密码最大错误次数；可靠注册盘会自动继承四项值，普通盘默认“否、否、255、255”。device_id 覆盖与普通目录导出。物理写盘统一遵循“先只读计划/预览，再精确输入 YES”的交互；Apply
 还支持 TUI 内设置目标大小和 force，并强制先完成 dry-run。离线快照转换不打开 raw device。
 
 核心键位为 `j/k` 上下选择、`Tab/h/l` 切换工作区、`gg/G` 首尾、`Ctrl-d/Ctrl-u` 半页、
