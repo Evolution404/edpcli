@@ -316,16 +316,12 @@ fn provision_format_controls_follow_current_mode_targets() {
     let fields = state.provision_visible_fields();
     assert!(fields
         .iter()
-        .any(|(label, _, _)| label.contains("启动/交换区 type2 明文")));
-    assert!(fields
-        .iter()
-        .any(|(label, _, _)| label.contains("保密区 type4 加密")));
-    assert!(!fields
-        .iter()
-        .any(|(label, _, _)| label.contains("启动区 type1")));
+        .any(|(label, _, _)| label == "启动/交换区格式化"));
+    assert!(fields.iter().any(|(label, _, _)| label == "保密区格式化"));
+    assert!(!fields.iter().any(|(label, _, _)| label == "启动区格式化"));
     let share_index = fields
         .iter()
-        .position(|(label, _, _)| label.contains("启动/交换区 type2"))
+        .position(|(label, _, _)| label == "启动/交换区格式化")
         .unwrap();
     let fs_index = fields
         .iter()
@@ -345,10 +341,8 @@ fn provision_format_controls_follow_current_mode_targets() {
     let fields = state.provision_visible_fields();
     assert!(fields
         .iter()
-        .any(|(label, value, _)| label.contains("兼容保留区") && *value == "— 不可格式化"));
-    assert!(!fields
-        .iter()
-        .any(|(label, _, _)| label.contains("启动区 type1")));
+        .any(|(label, value, _)| label.contains("兼容保留区") && *value == "固定，不格式化"));
+    assert!(!fields.iter().any(|(label, _, _)| label == "启动区格式化"));
     let reserve_index = fields
         .iter()
         .position(|(label, _, _)| label.contains("兼容保留区"))
@@ -406,6 +400,66 @@ fn provision_uses_only_per_partition_quick_exact_inputs() {
 }
 
 #[test]
+fn provision_capacity_hints_match_each_partition() {
+    let mut state = AppState::new();
+    state.replace_devices(vec![device(64_000_000_000)]);
+    state.navigate(NavCommand::WorkspaceProvision, 20);
+    state.provision_select_disk();
+    state.provision_skip_backup();
+    assert_eq!(state.provision_begin_selected(), ProvisionKind::Mode0);
+
+    let fields = state.provision_visible_fields();
+    let hint_for = |label: &str| {
+        let index = fields
+            .iter()
+            .position(|(field, _, _)| field.starts_with(label))
+            .expect("partition capacity field");
+        state.provision_field_hint(index).expect("partition hint")
+    };
+
+    let boot = hint_for("启动区");
+    let share = hint_for("交换区");
+    let encrypt = hint_for("保密区");
+    assert!(boot.starts_with("启动区"), "{boot}");
+    assert!(share.starts_with("交换区"), "{share}");
+    assert!(encrypt.starts_with("保密区"), "{encrypt}");
+    assert_ne!(boot, share);
+    assert_ne!(share, encrypt);
+}
+
+#[test]
+fn provision_form_sections_are_compact_and_user_facing() {
+    let mut state = AppState::new();
+    state.replace_devices(vec![device(64_000_000_000)]);
+    state.navigate(NavCommand::WorkspaceProvision, 20);
+    state.provision_select_disk();
+    state.provision_skip_backup();
+    assert_eq!(state.provision_begin_selected(), ProvisionKind::Mode0);
+
+    let fields = state.provision_visible_fields();
+    let mut sections = Vec::new();
+    for index in 0..fields.len() {
+        if let Some(section) = state.provision_field_section(index) {
+            if sections.last().copied() != Some(section) {
+                sections.push(section);
+            }
+        }
+        if let Some(hint) = state.provision_field_hint(index) {
+            for internal in ["canonical", "PassInfo", "XOR", "Preserve", "Rebuild"] {
+                assert!(
+                    !hint.contains(internal),
+                    "internal term leaked in hint: {hint}"
+                );
+            }
+        }
+    }
+    assert_eq!(
+        sections,
+        vec!["身份信息", "分区布局", "格式化（可选）", "密码策略"]
+    );
+}
+
+#[test]
 fn registered_mode0_to_mode1_preview_keeps_encrypt_anchor_and_blocks_overlap() {
     use edpcli::provision::{CapacityInputMode, DiskProvisionKind};
     use edpcli::sectors::EdpfPartition;
@@ -454,10 +508,12 @@ fn registered_mode0_to_mode1_preview_keeps_encrypt_anchor_and_blocks_overlap() {
     let smaller = encrypt_start - 63 - 4096;
     state.provision_mut().form.share_sectors = smaller.to_string();
     let preview = state.provision_geometry_preview_lines();
-    assert!(preview.iter().any(|line| line.contains("gap=4096 sectors")));
     assert!(preview
         .iter()
-        .any(|line| line.contains(&format!("start={encrypt_start}"))));
+        .any(|line| line.contains("空隙  4096 sector")));
+    assert!(preview
+        .iter()
+        .any(|line| line.contains(&format!("LBA {encrypt_start}–"))));
     let request = state
         .provision_request()
         .expect("shrink must leave a legal gap");
@@ -487,7 +543,7 @@ fn plain_mode0_preview_reflows_unanchored_share_after_boot_edit() {
     assert!(state
         .provision_geometry_preview_lines()
         .iter()
-        .any(|line| line.contains("start=10063")));
+        .any(|line| line.contains("LBA 10063–")));
 }
 
 #[test]
@@ -519,13 +575,13 @@ fn mode0_defaults_share_to_remaining_space_once_without_linking_fields() {
     assert!(state
         .provision_geometry_preview_lines()
         .iter()
-        .any(|line| line == &format!("unallocated={expected_remainder} sectors")));
+        .any(|line| line == &format!("未分配  {expected_remainder} sector")));
 
     let original_share = state.provision().form.share_mib.clone();
     state.provision_mut().field_selected = state
         .provision_visible_fields()
         .iter()
-        .position(|(label, _, _)| label == "保密区 MiB")
+        .position(|(label, _, _)| label == "保密区容量 (MiB)")
         .expect("encrypt field");
     for _ in 0..4 {
         state.provision_backspace();
@@ -538,7 +594,7 @@ fn mode0_defaults_share_to_remaining_space_once_without_linking_fields() {
     assert!(state
         .provision_geometry_preview_lines()
         .iter()
-        .any(|line| line == &format!("unallocated={} sectors", expected_remainder + 512 * 2048)));
+        .any(|line| line == &format!("未分配  {} sector", expected_remainder + 512 * 2048)));
 
     state.provision_begin_selected();
     assert_eq!(state.provision().form.encrypt_mib, "512");

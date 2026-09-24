@@ -895,25 +895,24 @@ fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppSta
             let mut lines = vec![
                 Line::from(vec![
                     Span::styled(provision.kind.title(), provision_kind_style(provision.kind)),
-                    Span::raw("  ·  "),
-                    Span::styled("填写制盘参数", accent()),
+                    Span::raw("  "),
+                    Span::styled("制盘参数", accent()),
                 ]),
                 Line::from(Span::styled(provision.kind.description(), muted())),
-                Line::from(""),
             ];
-            let mut shown_format_header = false;
+            let mut current_section: Option<&str> = None;
             let mut selected_line = 0usize;
             for (index, (label, value, secret)) in
                 state.provision_visible_fields().iter().enumerate()
             {
-                if !shown_format_header && (label.contains(" type") || label.contains("兼容保留区"))
-                {
+                let section = state.provision_field_section(index);
+                if section != current_section {
                     lines.push(Line::from(""));
                     lines.push(Line::from(Span::styled(
-                        "制盘后格式化（默认全部不选）",
+                        section.unwrap_or("其他"),
                         secondary(),
                     )));
-                    shown_format_header = true;
+                    current_section = section;
                 }
                 let shown = if value.is_empty() {
                     "〈请输入〉".into()
@@ -928,11 +927,32 @@ fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppSta
                     Style::default()
                 };
                 let mut spans = vec![
-                    Span::styled(format!("{:>12}  ", label), muted()),
+                    Span::styled(
+                        if index == provision.field_selected {
+                            "▶ "
+                        } else {
+                            "  "
+                        },
+                        if index == provision.field_selected {
+                            selected()
+                        } else {
+                            muted()
+                        },
+                    ),
+                    Span::styled(
+                        format!("{label}  "),
+                        if index == provision.field_selected {
+                            accent()
+                        } else {
+                            muted()
+                        },
+                    ),
                     Span::styled(shown, value_style),
                 ];
-                if let Some(hint) = state.provision_field_hint(index) {
-                    spans.push(Span::styled(format!("  · {}", safe(&hint)), muted()));
+                if index == provision.field_selected {
+                    if let Some(hint) = state.provision_field_hint(index) {
+                        spans.push(Span::styled(format!("  · {}", safe(&hint)), muted()));
+                    }
                 }
                 if index == provision.field_selected {
                     selected_line = lines.len();
@@ -940,7 +960,7 @@ fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppSta
                 lines.push(Line::from(spans));
             }
             lines.push(Line::from(""));
-            lines.push(Line::from(Span::styled("实时精确布局", secondary())));
+            lines.push(Line::from(Span::styled("布局预览", secondary())));
             for preview in state.provision_geometry_preview_lines() {
                 let style = if preview.starts_with("布局无效:") {
                     danger()
@@ -952,11 +972,11 @@ fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppSta
             lines.push(Line::from(""));
             lines.push(Line::from(vec![
                 Span::styled("↑/↓", accent()),
-                Span::raw(" 切字段   Tab/Shift-Tab/←/→ 切页面   "),
+                Span::raw(" 字段   "),
                 Span::styled("直接输入", secondary()),
-                Span::raw(" 修改   "),
+                Span::raw(" 编辑   "),
                 Span::styled("Space", secondary()),
-                Span::raw(" 切换选项   "),
+                Span::raw(" 切换   "),
                 Span::styled("Enter", success()),
                 Span::raw(" 生成计划   "),
                 Span::styled("Esc", warning()),
@@ -973,7 +993,7 @@ fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppSta
                         Block::default()
                             .borders(Borders::ALL)
                             .border_style(provision_kind_style(provision.kind))
-                            .title("参数表单"),
+                            .title("制盘参数"),
                     )
                     .scroll((scroll as u16, 0))
                     .wrap(Wrap { trim: false }),
