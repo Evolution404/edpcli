@@ -290,6 +290,179 @@ fn write_and_verify(
     Ok(())
 }
 
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+pub enum SectorWriteStage {
+    Data,
+    Metadata,
+    Commit,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct TransactionSectorWrite {
+    pub bytes: Vec<u8>,
+    pub stage: SectorWriteStage,
+    pub owner: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct WriteTransactionPlan {
+    total_sectors: u64,
+    writes: BTreeMap<u32, TransactionSectorWrite>,
+}
+
+impl WriteTransactionPlan {
+    pub fn new(total_sectors: u64) -> Self {
+        Self {
+            total_sectors,
+            writes: BTreeMap::new(),
+        }
+    }
+
+    pub fn total_sectors(&self) -> u64 {
+        self.total_sectors
+    }
+
+    pub fn writes(&self) -> &BTreeMap<u32, TransactionSectorWrite> {
+        &self.writes
+    }
+
+    pub fn insert(
+        &mut self,
+        lba: u32,
+        bytes: Vec<u8>,
+        stage: SectorWriteStage,
+        owner: impl Into<String>,
+    ) -> Result<(), String> {
+        if self.total_sectors == 0 || u64::from(lba) >= self.total_sectors {
+            return Err(format!(
+                "事务写入 LBA{lba} 超过目标末端{}",
+                self.total_sectors.saturating_sub(1)
+            ));
+        }
+        if bytes.len() != SECTOR {
+            return Err(format!(
+                "事务写入 LBA{lba} 数据长度 {}B，必须为 {SECTOR}B",
+                bytes.len()
+            ));
+        }
+        if self.writes.contains_key(&lba) {
+            return Err(format!("事务写计划重复声明 LBA{lba}"));
+        }
+        self.writes.insert(
+            lba,
+            TransactionSectorWrite {
+                bytes,
+                stage,
+                owner: owner.into(),
+            },
+        );
+        Ok(())
+    }
+
+    pub fn from_plain_provision(
+        plain: &crate::provision::PlainProvisionWritePlan,
+    ) -> Result<Self, String> {
+        let mut transaction = Self::new(plain.total_sectors);
+        for (&lba, write) in &plain.writes {
+            let (stage, owner) = match write.owner {
+                crate::provision::PlainSectorOwner::Mbr => {
+                    (SectorWriteStage::Commit, "plain mbr".to_string())
+                }
+                crate::provision::PlainSectorOwner::EdpMetadataCleanup => (
+                    SectorWriteStage::Metadata,
+                    "plain edp metadata cleanup".to_string(),
+                ),
+                crate::provision::PlainSectorOwner::LceCleanup => {
+                    (SectorWriteStage::Data, "plain lce cleanup".to_string())
+                }
+                crate::provision::PlainSectorOwner::Filesystem { partition_index } => (
+                    SectorWriteStage::Data,
+                    format!("plain filesystem P{}", partition_index + 1),
+                ),
+            };
+            transaction.insert(lba, write.bytes.to_vec(), stage, owner)?;
+        }
+        Ok(transaction)
+    }
+
+    fn ordered_lbas(&self) -> Vec<u32> {
+        let mut entries = self
+            .writes
+            .iter()
+            .map(|(&lba, write)| (write.stage, lba))
+            .collect::<Vec<_>>();
+        entries.sort_unstable();
+        entries.into_iter().map(|(_, lba)| lba).collect()
+    }
+
+    fn sector_map(&self) -> BTreeMap<u32, Vec<u8>> {
+        self.writes
+            .iter()
+            .map(|(&lba, write)| (lba, write.bytes.clone()))
+            .collect()
+    }
+}
+
+/// Execute an already normalized sector transaction.
+///
+/// The planner owns business semantics and final sector ownership. This executor
+/// owns only the safety mechanics: preflight sync, snapshot of every touched
+/// sector, stage-ordered writes, exact readback, and exact rollback on failure.
+pub fn execute_write_transaction(
+    dev: &mut dyn SectorDev,
+    plan: &WriteTransactionPlan,
+) -> EdpCliResult<()> {
+    if plan.writes.is_empty() {
+        return Ok(());
+    }
+    if plan.total_sectors == 0 || plan.total_sectors > u32::MAX as u64 {
+        return Err(EdpCliError::new(
+            EXIT_IO,
+            format!("错误: 事务目标扇区数不受支持: {}", plan.total_sectors),
+        ));
+    }
+
+    dev.sync().map_err(|e| {
+        EdpCliError::new(
+            EXIT_IO,
+            format!("错误: 写前介质缓存同步预检失败，拒绝开始事务: {e}"),
+        )
+    })?;
+
+    let sectors = plan.sector_map();
+    let order = plan.ordered_lbas();
+    let mut mirror = BTreeMap::new();
+    for &lba in sectors.keys() {
+        mirror.insert(lba, dev.read_sector(lba).map_err(io_err)?);
+    }
+
+    match write_and_verify(dev, &sectors, &order) {
+        Ok(()) => Ok(()),
+        Err(_write_error) => {
+            for attempt in 0..3 {
+                match write_and_verify(dev, &mirror, &order) {
+                    Ok(()) => {
+                        return Err(EdpCliError::new(
+                            EXIT_ROLLED_BACK,
+                            "错误: 事务写入失败，已完整回滚全部 touched sectors；目标仍为写前状态。",
+                        ));
+                    }
+                    Err(error) if attempt == 2 => {
+                        return Err(EdpCliError::new(
+                            EXIT_INTERMEDIATE,
+                            format!(
+                                "错误: 事务回滚失败({error})，目标处于中间状态；禁止继续使用该盘。"
+                            ),
+                        ));
+                    }
+                    Err(_) => thread::sleep(Duration::from_millis(500)),
+                }
+            }
+            unreachable!()
+        }
+    }
+}
+
 /// 全有或全无写盘(patch={lba:512B 新内容})。
 ///
 /// USB 盘硬件没有跨扇区事务, 严格原子不可得; 以四层逼近:
@@ -304,6 +477,7 @@ pub fn atomic_write_sectors(
     dev: &mut dyn SectorDev,
     patch: &BTreeMap<u32, Vec<u8>>,
 ) -> EdpCliResult<()> {
+    let mut plan = WriteTransactionPlan::new((crate::common::METADATA_LAST_LBA + 1) as u64);
     for (&lba, data) in patch {
         if lba > crate::common::METADATA_LAST_LBA {
             return Err(EdpCliError::new(
@@ -315,63 +489,15 @@ pub fn atomic_write_sectors(
                 ),
             ));
         }
-        if data.len() != SECTOR {
-            return Err(EdpCliError::new(
-                EXIT_IO,
-                format!(
-                    "错误: LBA{} 写入数据长度 {}B，必须恰好为一个扇区 {}B",
-                    lba,
-                    data.len(),
-                    SECTOR
-                ),
-            ));
-        }
+        let stage = if lba == 0 {
+            SectorWriteStage::Commit
+        } else {
+            SectorWriteStage::Metadata
+        };
+        plan.insert(lba, data.clone(), stage, "metadata")
+            .map_err(|message| EdpCliError::new(EXIT_IO, format!("错误: {message}")))?;
     }
-    if patch.is_empty() {
-        return Ok(());
-    }
-    // 在第一笔写入前先验证设备支持持久化屏障。若 raw USB 控制器不支持
-    // DKIOCSYNCHRONIZECACHE，应在 0 写入状态下失败，而不是写完后才发现。
-    dev.sync().map_err(|e| {
-        EdpCliError::new(
-            EXIT_IO,
-            format!("错误: 写前介质缓存同步预检失败，拒绝开始写入: {}", e),
-        )
-    })?;
-    let mut order: Vec<u32> = patch.keys().copied().filter(|&l| l != 0).collect();
-    order.sort_unstable();
-    if patch.contains_key(&0) {
-        order.push(0);
-    }
-    let mut mirror = BTreeMap::new();
-    for &lba in patch.keys() {
-        mirror.insert(lba, dev.read_sector(lba).map_err(io_err)?);
-    }
-    match write_and_verify(dev, patch, &order) {
-        Ok(()) => Ok(()),
-        Err(_write_error) => {
-            for i in 0..3 {
-                match write_and_verify(dev, &mirror, &order) {
-                    Ok(()) => {
-                        return Err(EdpCliError::new(
-                            EXIT_ROLLED_BACK,
-                            "错误: 已完整回滚, 盘仍为写前状态(未改造)。可换 USB 口/线后重试, 或 edpcli backup restore 走还原流程。",
-                        ))
-                    }
-                    Err(e2) => {
-                        if i == 2 {
-                            return Err(EdpCliError::new(
-                                EXIT_INTERMEDIATE,
-                                format!("错误: 回滚亦失败({}) — 盘处于中间状态! 请重插后立即 edpcli backup restore 从备份还原。", e2),
-                            ));
-                        }
-                        thread::sleep(Duration::from_millis(500));
-                    }
-                }
-            }
-            unreachable!()
-        }
-    }
+    execute_write_transaction(dev, &plan)
 }
 
 /// Transactional writer for a fully planned new-disk provisioning image.
@@ -429,49 +555,19 @@ pub fn atomic_write_official_provision_sectors(
         ));
     }
 
-    dev.sync().map_err(|e| {
-        EdpCliError::new(EXIT_IO, format!("错误: 制盘写前介质缓存同步预检失败: {e}"))
-    })?;
-
-    let mut mirror = BTreeMap::new();
-    for &lba in patch.keys() {
-        mirror.insert(lba, dev.read_sector(lba).map_err(io_err)?);
+    let mut plan = WriteTransactionPlan::new(total_sectors);
+    for (&lba, data) in patch {
+        let stage = if lba == 0 {
+            SectorWriteStage::Commit
+        } else if lba <= crate::common::METADATA_LAST_LBA {
+            SectorWriteStage::Metadata
+        } else {
+            SectorWriteStage::Data
+        };
+        plan.insert(lba, data.clone(), stage, "official provision")
+            .map_err(|message| EdpCliError::new(EXIT_IO, format!("错误: {message}")))?;
     }
-
-    let mut order: Vec<u32> = patch
-        .keys()
-        .copied()
-        .filter(|&lba| lba > crate::common::METADATA_LAST_LBA)
-        .collect();
-    order.sort_unstable();
-    order.extend(1..=crate::common::METADATA_LAST_LBA);
-    order.push(0);
-
-    match write_and_verify(dev, patch, &order) {
-        Ok(()) => Ok(()),
-        Err(_write_error) => {
-            for attempt in 0..3 {
-                match write_and_verify(dev, &mirror, &order) {
-                    Ok(()) => {
-                        return Err(EdpCliError::new(
-                            EXIT_ROLLED_BACK,
-                            "错误: 制盘写入失败，已完整回滚全部已规划扇区；目标仍为写前状态。",
-                        ));
-                    }
-                    Err(error) if attempt == 2 => {
-                        return Err(EdpCliError::new(
-                            EXIT_INTERMEDIATE,
-                            format!(
-                                "错误: 制盘回滚失败({error})，目标处于中间状态；禁止继续使用该盘。"
-                            ),
-                        ));
-                    }
-                    Err(_) => thread::sleep(Duration::from_millis(500)),
-                }
-            }
-            unreachable!()
-        }
-    }
+    execute_write_transaction(dev, &plan)
 }
 
 // ══════════════════════════════════════════════════════════════════
