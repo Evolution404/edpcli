@@ -1190,9 +1190,9 @@ pub fn analyze_sector_with_context(
                     0x1fc,
                     "representation backing",
                     if view.backing_is_raw_zero() {
-                        "raw-zero profile".into()
+                        "raw-zero profile"
                     } else {
-                        "rolling representation carrier".into()
+                        "rolling representation carrier"
                     },
                     FieldStyle::Flag,
                 ));
