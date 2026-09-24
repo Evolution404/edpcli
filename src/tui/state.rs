@@ -510,6 +510,7 @@ pub struct ProvisionState {
     pub offline_field_selected: usize,
     pub offline_result: Option<OfflineConvertView>,
     pub message: Option<String>,
+    target_disk: Option<u32>,
     form_initialized_for: Option<(u32, u64, Option<String>, ProvisionKind)>,
 }
 
@@ -528,6 +529,7 @@ impl Default for ProvisionState {
             offline_field_selected: 0,
             offline_result: None,
             message: None,
+            target_disk: None,
             form_initialized_for: None,
         }
     }
@@ -1898,11 +1900,15 @@ impl AppState {
             .provision
             .menu_selected
             .min(ProvisionKind::ALL.len() - 1);
+        let target_disk = self.provision.target_disk;
         self.provision = ProvisionState::default();
         self.provision.menu_selected = selected;
         self.provision.kind = ProvisionKind::ALL[selected];
+        self.provision.target_disk = target_disk;
+        self.pinned_disk = target_disk;
         if self.workspace == Workspace::Provision {
-            if self.pinned_disk.is_some() {
+            if target_disk.is_some() {
+                self.provision.stage = ProvisionStage::Menu;
                 self.set_item_count(ProvisionKind::ALL.len());
                 self.selected = selected;
             } else {
@@ -3163,6 +3169,13 @@ impl AppState {
         {
             self.pinned_disk = None;
         }
+        if self
+            .provision
+            .target_disk
+            .is_some_and(|disk| !devices.iter().any(|row| row.disk == disk))
+        {
+            self.provision.target_disk = None;
+        }
         self.devices = devices;
         self.device_scan_pending = false;
         if self.workspace == Workspace::Provision {
@@ -3305,6 +3318,7 @@ impl AppState {
         }
         let disk = self.provision_device_at(self.selected)?.disk;
         self.pinned_disk = Some(disk);
+        self.provision.target_disk = Some(disk);
         self.provision.stage = ProvisionStage::BackupPrompt;
         self.provision.message = None;
         self.selected = 0;
@@ -3313,6 +3327,8 @@ impl AppState {
     }
 
     pub fn provision_begin_offline(&mut self) {
+        self.provision.target_disk = None;
+        self.pinned_disk = None;
         self.provision.kind = ProvisionKind::Offline;
         self.provision.stage = ProvisionStage::OfflineForm;
         self.provision.message = None;
@@ -3387,7 +3403,21 @@ impl AppState {
             self.pinned_disk = self.selected_device().map(|row| row.disk);
         }
         if workspace == Workspace::Provision {
-            self.pinned_disk = None;
+            let preserve_offline = matches!(
+                self.provision.stage,
+                ProvisionStage::OfflineForm
+                    | ProvisionStage::OfflineRunning
+                    | ProvisionStage::OfflineResult
+            );
+            if let Some(disk) = self.provision.target_disk {
+                self.pinned_disk = Some(disk);
+            } else if preserve_offline {
+                self.pinned_disk = None;
+            } else {
+                self.pinned_disk = None;
+                self.provision.stage = ProvisionStage::SelectDisk;
+                self.provision.message = None;
+            }
         }
         self.clear_search_matches();
         self.search_query.clear();
@@ -3400,11 +3430,22 @@ impl AppState {
         let count = match workspace {
             Workspace::Devices => self.devices.len(),
             Workspace::Backups => self.backups.len(),
-            Workspace::Provision => {
-                self.provision.stage = ProvisionStage::SelectDisk;
-                self.provision.message = None;
-                self.provision_selectable_devices().count()
-            }
+            Workspace::Provision => match self.provision.stage {
+                ProvisionStage::SelectDisk => self.provision_selectable_devices().count(),
+                ProvisionStage::BackupPrompt | ProvisionStage::BackupSaving => 2,
+                ProvisionStage::Menu => ProvisionKind::ALL.len(),
+                ProvisionStage::Form
+                | ProvisionStage::Planning
+                | ProvisionStage::Review
+                | ProvisionStage::ExportPath
+                | ProvisionStage::Exporting
+                | ProvisionStage::Confirm
+                | ProvisionStage::Running
+                | ProvisionStage::Result
+                | ProvisionStage::OfflineForm
+                | ProvisionStage::OfflineRunning
+                | ProvisionStage::OfflineResult => 0,
+            },
         };
         self.set_item_count(count);
     }
@@ -3458,9 +3499,13 @@ impl AppState {
         if !self.critical_operation {
             return None;
         }
-        if matches!(command, NavCommand::Quit | NavCommand::Escape) {
+        if command == NavCommand::Quit {
             self.exit_pending = true;
             Some(StateEffect::ExitDeferred)
+        } else if command == NavCommand::Escape {
+            self.notice =
+                Some("关键操作仍在执行，当前不能返回；操作完成后再按 Esc 返回。".to_string());
+            Some(StateEffect::None)
         } else {
             self.notice = Some("关键操作仍在执行，完成前不能切换页面或启动其他任务。".to_string());
             Some(StateEffect::None)
@@ -3473,12 +3518,27 @@ impl AppState {
         }
 
         if command == NavCommand::Escape {
-            if self.workspace == Workspace::Provision
-                && self.provision.stage != ProvisionStage::Menu
-            {
+            if self.workspace == Workspace::Provision {
                 match self.provision.stage {
+                    ProvisionStage::SelectDisk => {
+                        self.switch_workspace(Workspace::Devices);
+                    }
+                    ProvisionStage::BackupPrompt => {
+                        self.pinned_disk = None;
+                        self.provision.target_disk = None;
+                        self.provision.stage = ProvisionStage::SelectDisk;
+                        self.provision.message = None;
+                        self.selected = 0;
+                        self.set_item_count(self.provision_selectable_devices().count());
+                    }
+                    ProvisionStage::Menu => {
+                        self.provision.stage = ProvisionStage::BackupPrompt;
+                        self.provision.message = None;
+                        self.selected = 0;
+                        self.set_item_count(2);
+                    }
                     ProvisionStage::Running => {
-                        self.exit_pending = true;
+                        self.notice = Some("制盘安全事务正在执行，当前不能返回。".into());
                     }
                     ProvisionStage::Confirm => {
                         self.provision.stage = ProvisionStage::Review;
@@ -3497,15 +3557,15 @@ impl AppState {
                     ProvisionStage::OfflineRunning => {
                         self.notice = Some("离线转换正在后台执行，请等待完成。".into());
                     }
-                    ProvisionStage::Form | ProvisionStage::Planning | ProvisionStage::Result => {
+                    ProvisionStage::Form | ProvisionStage::Result => {
                         self.provision_reset();
+                    }
+                    ProvisionStage::Planning => {
+                        self.notice = Some("制盘计划正在后台生成，请等待完成。".into());
                     }
                     ProvisionStage::BackupSaving => {
                         self.notice = Some("正在保存当前盘，请等待完成。".into());
                     }
-                    ProvisionStage::SelectDisk
-                    | ProvisionStage::BackupPrompt
-                    | ProvisionStage::Menu => {}
                 }
                 return StateEffect::None;
             }
@@ -3525,7 +3585,7 @@ impl AppState {
                 self.cancel_input();
                 return StateEffect::None;
             }
-            return StateEffect::ExitRequested;
+            return StateEffect::None;
         }
 
         if command == NavCommand::Quit {

@@ -951,8 +951,8 @@ fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppSta
             }
             lines.push(Line::from(""));
             lines.push(Line::from(vec![
-                Span::styled("↑/↓ Tab", accent()),
-                Span::raw(" 切字段   "),
+                Span::styled("↑/↓", accent()),
+                Span::raw(" 切字段   Tab/Shift-Tab 切页面   "),
                 Span::styled("直接输入", secondary()),
                 Span::raw(" 修改   "),
                 Span::styled("Space", secondary()),
@@ -2545,13 +2545,13 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
     }
 
     let status = if state.is_critical_operation() && state.backup_delete().is_some() {
-        "备份删除正在执行：q / Esc / Ctrl-C 将延迟到安全检查点".to_string()
+        "备份删除正在执行：Esc 不退出；q / Ctrl-C 将延迟到安全检查点".to_string()
     } else if state.is_critical_operation() && state.backup_batch_delete().is_some() {
-        "批量备份删除正在执行：q / Esc / Ctrl-C 将延迟到安全检查点".to_string()
+        "批量备份删除正在执行：Esc 不退出；q / Ctrl-C 将延迟到安全检查点".to_string()
     } else if state.is_critical_operation() && state.backup_prune().is_some() {
-        "备份清理正在执行：q / Esc / Ctrl-C 将延迟到安全检查点".to_string()
+        "备份清理正在执行：Esc 不退出；q / Ctrl-C 将延迟到安全检查点".to_string()
     } else if state.is_critical_operation() {
-        "关键写盘阶段：q / Esc / Ctrl-C 将延迟到安全检查点".to_string()
+        "关键写盘阶段：Esc 不退出；q / Ctrl-C 将延迟到安全检查点".to_string()
     } else if let Some(advanced) = state.advanced_inspect() {
         use super::state::AdvancedInspectStage;
         match advanced.stage {
@@ -2600,14 +2600,14 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
             Workspace::Provision => match state.provision().stage {
                 ProvisionStage::SelectDisk => "制盘选盘：↑/↓ 选择 USB 盘  ·  Enter 固定目标  ·  Esc 返回设备页".to_string(),
                 ProvisionStage::BackupPrompt => {
-                    "制盘前保存：↑/↓ 选择  ·  Enter 确认  ·  Esc 返回设备页".to_string()
+                    "制盘前保存：↑/↓ 选择  ·  Enter 确认  ·  Esc 返回选盘  ·  Tab 切页面".to_string()
                 }
                 ProvisionStage::BackupSaving => "正在保存当前盘…".to_string(),
                 ProvisionStage::Menu => {
                     "Tab 页面  ·  j/k 选择方案  ·  Enter 打开  ·  r 刷新目标  ·  :provision 直达  ·  ? 帮助  ·  q 退出".to_string()
                 }
                 ProvisionStage::Form => {
-                    "↑/↓/Tab 字段  ·  输入编辑  ·  Space 切换选项  ·  Enter 生成只读计划  ·  Esc 返回".to_string()
+                    "↑/↓ 字段  ·  Tab/Shift-Tab 切页面  ·  输入编辑  ·  Space 切换选项  ·  Enter 生成只读计划  ·  Esc 返回".to_string()
                 }
                 ProvisionStage::Planning => "正在生成只读计划…".to_string(),
                 ProvisionStage::Review => {
@@ -2616,10 +2616,10 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
                 ProvisionStage::ExportPath => "输入导出路径  ·  Enter 导出  ·  Esc 返回计划".to_string(),
                 ProvisionStage::Exporting => "镜像正在后台导出…".to_string(),
                 ProvisionStage::Confirm => "输入 YES + Enter 执行  ·  Esc 返回计划".to_string(),
-                ProvisionStage::Running => "安全事务执行中；退出请求延迟到安全检查点".to_string(),
+                ProvisionStage::Running => "安全事务执行中；Esc 不退出，q / Ctrl-C 的退出请求延迟到安全检查点".to_string(),
                 ProvisionStage::Result => "Enter / Esc 返回制盘中心".to_string(),
                 ProvisionStage::OfflineForm => {
-                    "↑/↓/Tab 字段  ·  Enter 离线转换  ·  Esc 返回制盘中心".to_string()
+                    "↑/↓ 字段  ·  Tab/Shift-Tab 切页面  ·  Enter 离线转换  ·  Esc 返回制盘中心".to_string()
                 }
                 ProvisionStage::OfflineRunning => "离线转换后台执行中…".to_string(),
                 ProvisionStage::OfflineResult => {

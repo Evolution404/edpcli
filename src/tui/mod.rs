@@ -443,6 +443,17 @@ fn palette_action_to_nav(action: command::PaletteAction) -> NavCommand {
     }
 }
 
+fn workspace_tab_command(key: &ct_event::KeyEvent) -> Option<NavCommand> {
+    if key.modifiers.contains(ct_event::KeyModifiers::CONTROL) {
+        return None;
+    }
+    match key.code {
+        ct_event::KeyCode::Tab => Some(NavCommand::NextWorkspace),
+        ct_event::KeyCode::BackTab => Some(NavCommand::PreviousWorkspace),
+        _ => None,
+    }
+}
+
 fn run_loop(resume: Option<state::WriteIntent>) -> io::Result<LoopExit> {
     let mut session = TerminalSession::enter()?;
     let mut state = AppState::new();
@@ -835,14 +846,29 @@ fn run_loop(resume: Option<state::WriteIntent>) -> io::Result<LoopExit> {
                         }
                     }
                     if state.workspace() == state::Workspace::Provision {
+                        if let Some(command) = workspace_tab_command(&key) {
+                            let viewport_height =
+                                session.terminal.size()?.height.saturating_sub(9) as usize;
+                            match dispatch_nav_command(
+                                &mut state,
+                                &mut tasks,
+                                command,
+                                &backup_dir,
+                                viewport_height,
+                            ) {
+                                StateEffect::ExitRequested => break,
+                                StateEffect::ExitDeferred | StateEffect::None => {}
+                            }
+                            continue;
+                        }
                         use state::ProvisionStage;
                         match state.provision().stage {
                             ProvisionStage::SelectDisk => {
                                 match key.code {
-                                    ct_event::KeyCode::Up | ct_event::KeyCode::BackTab => {
+                                    ct_event::KeyCode::Up => {
                                         let _ = state.navigate(NavCommand::Up, 2);
                                     }
-                                    ct_event::KeyCode::Down | ct_event::KeyCode::Tab => {
+                                    ct_event::KeyCode::Down => {
                                         let _ = state.navigate(NavCommand::Down, 2);
                                     }
                                     ct_event::KeyCode::Enter => {
@@ -852,7 +878,7 @@ fn run_loop(resume: Option<state::WriteIntent>) -> io::Result<LoopExit> {
                                     }
                                     ct_event::KeyCode::Char('o') => state.provision_begin_offline(),
                                     ct_event::KeyCode::Esc => {
-                                        let _ = state.navigate(NavCommand::WorkspaceDevices, 1);
+                                        let _ = state.navigate(NavCommand::Escape, 1);
                                     }
                                     _ => {}
                                 }
@@ -860,10 +886,10 @@ fn run_loop(resume: Option<state::WriteIntent>) -> io::Result<LoopExit> {
                             }
                             ProvisionStage::BackupPrompt => {
                                 match key.code {
-                                    ct_event::KeyCode::Up | ct_event::KeyCode::BackTab => {
+                                    ct_event::KeyCode::Up => {
                                         let _ = state.navigate(NavCommand::Up, 2);
                                     }
-                                    ct_event::KeyCode::Down | ct_event::KeyCode::Tab => {
+                                    ct_event::KeyCode::Down => {
                                         let _ = state.navigate(NavCommand::Down, 2);
                                     }
                                     ct_event::KeyCode::Enter => {
@@ -899,7 +925,7 @@ fn run_loop(resume: Option<state::WriteIntent>) -> io::Result<LoopExit> {
                                         }
                                     }
                                     ct_event::KeyCode::Esc => {
-                                        let _ = state.navigate(NavCommand::WorkspaceDevices, 1);
+                                        let _ = state.navigate(NavCommand::Escape, 1);
                                     }
                                     _ => {}
                                 }
@@ -927,13 +953,17 @@ fn run_loop(resume: Option<state::WriteIntent>) -> io::Result<LoopExit> {
                                     state.provision_begin_selected();
                                     continue;
                                 }
+                                if key.code == ct_event::KeyCode::Esc {
+                                    let _ = state.navigate(NavCommand::Escape, 1);
+                                    continue;
+                                }
                             }
                             ProvisionStage::Form => {
                                 match key.code {
-                                    ct_event::KeyCode::Up | ct_event::KeyCode::BackTab => {
+                                    ct_event::KeyCode::Up => {
                                         state.provision_move_field(-1);
                                     }
-                                    ct_event::KeyCode::Down | ct_event::KeyCode::Tab => {
+                                    ct_event::KeyCode::Down => {
                                         state.provision_move_field(1);
                                     }
                                     ct_event::KeyCode::Backspace => state.provision_backspace(),
@@ -1080,10 +1110,10 @@ fn run_loop(resume: Option<state::WriteIntent>) -> io::Result<LoopExit> {
                             }
                             ProvisionStage::OfflineForm => {
                                 match key.code {
-                                    ct_event::KeyCode::Up | ct_event::KeyCode::BackTab => {
+                                    ct_event::KeyCode::Up => {
                                         state.offline_move_field(-1);
                                     }
-                                    ct_event::KeyCode::Down | ct_event::KeyCode::Tab => {
+                                    ct_event::KeyCode::Down => {
                                         state.offline_move_field(1);
                                     }
                                     ct_event::KeyCode::Backspace => state.offline_backspace(),
@@ -1502,6 +1532,18 @@ pub fn run() -> i32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn provision_workspace_keeps_tab_navigation_global() {
+        let tab = ct_event::KeyEvent::new(ct_event::KeyCode::Tab, ct_event::KeyModifiers::NONE);
+        let backtab =
+            ct_event::KeyEvent::new(ct_event::KeyCode::BackTab, ct_event::KeyModifiers::SHIFT);
+        assert_eq!(workspace_tab_command(&tab), Some(NavCommand::NextWorkspace));
+        assert_eq!(
+            workspace_tab_command(&backtab),
+            Some(NavCommand::PreviousWorkspace)
+        );
+    }
 
     #[test]
     fn tty_gate_is_purely_a_terminal_capability_check() {

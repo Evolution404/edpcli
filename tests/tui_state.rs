@@ -1,5 +1,6 @@
 use edpcli::tui::state::{
     AppState, InputMode, NavCommand, ProvisionForm, ProvisionKind, ProvisionStage, StateEffect,
+    Workspace,
 };
 
 fn device(size: u64) -> edpcli::disk_scan::Row {
@@ -208,6 +209,71 @@ fn provision_requires_a_new_explicit_usb_selection_after_other_workspace_selecti
     state.provision_skip_backup();
     state.provision_begin_selected();
     assert_eq!(state.provision().stage, ProvisionStage::Form);
+}
+
+#[test]
+fn provision_escape_walks_back_one_level_without_exiting() {
+    let mut state = AppState::new();
+    state.replace_devices(vec![device(64_000_000_000)]);
+    state.navigate(NavCommand::WorkspaceProvision, 20);
+    assert_eq!(state.provision().stage, ProvisionStage::SelectDisk);
+
+    assert_eq!(state.provision_select_disk(), Some(6));
+    assert_eq!(state.provision().stage, ProvisionStage::BackupPrompt);
+    assert_eq!(state.navigate(NavCommand::Escape, 20), StateEffect::None);
+    assert_eq!(state.provision().stage, ProvisionStage::SelectDisk);
+    assert!(state.selected_device_disk().is_none());
+
+    assert_eq!(state.provision_select_disk(), Some(6));
+    state.provision_skip_backup();
+    assert_eq!(state.provision().stage, ProvisionStage::Menu);
+    assert_eq!(state.navigate(NavCommand::Escape, 20), StateEffect::None);
+    assert_eq!(state.provision().stage, ProvisionStage::BackupPrompt);
+    assert_eq!(state.selected_device_disk(), Some(6));
+
+    state.provision_skip_backup();
+    state.provision_begin_selected();
+    assert_eq!(state.provision().stage, ProvisionStage::Form);
+    assert_eq!(state.navigate(NavCommand::Escape, 20), StateEffect::None);
+    assert_eq!(state.provision().stage, ProvisionStage::Menu);
+}
+
+#[test]
+fn provision_tab_roundtrip_preserves_current_flow_state() {
+    let mut state = AppState::new();
+    state.replace_devices(vec![device(64_000_000_000)]);
+    state.navigate(NavCommand::WorkspaceProvision, 20);
+    assert_eq!(state.provision_select_disk(), Some(6));
+    state.provision_skip_backup();
+    state.provision_begin_selected();
+    state.provision_mut().form.label = "保持当前制盘状态!SAFE6".into();
+    assert_eq!(state.provision().stage, ProvisionStage::Form);
+
+    state.navigate(NavCommand::NextWorkspace, 20);
+    assert_eq!(state.workspace(), Workspace::Devices);
+    state.navigate(NavCommand::PreviousWorkspace, 20);
+
+    assert_eq!(state.workspace(), Workspace::Provision);
+    assert_eq!(state.provision().stage, ProvisionStage::Form);
+    assert_eq!(state.selected_device_disk(), Some(6));
+    assert_eq!(state.provision().form.label, "保持当前制盘状态!SAFE6");
+}
+
+#[test]
+fn escape_never_requests_program_exit_even_during_critical_operation() {
+    let mut state = AppState::new();
+    assert_eq!(state.navigate(NavCommand::Escape, 20), StateEffect::None);
+    assert!(!state.exit_pending());
+
+    state.set_critical_operation(true);
+    assert_eq!(state.navigate(NavCommand::Escape, 20), StateEffect::None);
+    assert!(!state.exit_pending());
+
+    assert_eq!(
+        state.navigate(NavCommand::Quit, 20),
+        StateEffect::ExitDeferred
+    );
+    assert!(state.exit_pending());
 }
 
 #[test]
@@ -581,10 +647,7 @@ fn quit_is_deferred_during_critical_write_phase() {
         state.navigate(NavCommand::Quit, 10),
         StateEffect::ExitDeferred
     );
-    assert_eq!(
-        state.navigate(NavCommand::Escape, 10),
-        StateEffect::ExitDeferred
-    );
+    assert_eq!(state.navigate(NavCommand::Escape, 10), StateEffect::None);
     assert!(state.exit_pending());
 
     state.set_critical_operation(false);
