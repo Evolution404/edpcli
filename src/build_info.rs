@@ -30,18 +30,34 @@ pub fn short() -> String {
     format!("edpcli {VERSION}")
 }
 
+pub fn local_build_timestamp() -> String {
+    let Ok(utc) = time::OffsetDateTime::parse(
+        BUILD_TIMESTAMP,
+        &time::format_description::well_known::Rfc3339,
+    ) else {
+        return BUILD_TIMESTAMP.to_string();
+    };
+    let Ok(offset) = time::UtcOffset::local_offset_at(utc) else {
+        return BUILD_TIMESTAMP.to_string();
+    };
+    utc.to_offset(offset)
+        .format(&time::format_description::well_known::Rfc3339)
+        .unwrap_or_else(|_| BUILD_TIMESTAMP.to_string())
+}
+
 pub fn detailed() -> String {
     format!(
         "edpcli {VERSION}\n\
 平台: {}\n\
 架构: {} ({TARGET_ARCH})\n\
 目标: {TARGET}\n\
-构建时间: {BUILD_TIMESTAMP}\n\
+构建时间: {}\n\
 Git: {GIT_COMMIT}\n\
 Rust: {RUSTC}\n\
 构建类型: {PROFILE}",
         display_os(),
-        display_arch()
+        display_arch(),
+        local_build_timestamp()
     )
 }
 
@@ -64,6 +80,7 @@ mod tests {
         ] {
             assert!(text.contains(field), "missing {field}: {text}");
         }
+        assert!(text.contains(&format!("构建时间: {}", local_build_timestamp())));
         assert!(BUILD_TIMESTAMP.ends_with('Z'));
         assert!(!GIT_COMMIT.is_empty());
     }
