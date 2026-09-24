@@ -108,6 +108,43 @@ fn provision_parses_all_four_product_actions_and_rejects_ambiguous_flags() {
 }
 
 #[test]
+fn provision_label_defaults_to_jiangsu_safe6_but_cli_can_override_it() {
+    let base = [
+        "provision",
+        "plan",
+        "--disk",
+        "4",
+        "--mode",
+        "1",
+        "--share-mib",
+        "64",
+        "--encrypt-mib",
+        "128",
+        "--label-id",
+        "1402259934",
+        "--user",
+        "USER06",
+        "--dept",
+        "江苏省电力有限公司",
+        "--password",
+        "ProofPass1!",
+    ];
+    match parse_args(&args(&base)).expect("default provision label") {
+        Parsed::Provision(ProvisionAction::Plan(opts)) => assert_eq!(opts.label, "江苏电力!SAFE6"),
+        _ => panic!("expected provision plan"),
+    }
+
+    let mut custom = base.to_vec();
+    custom.extend(["--label", "自定义标签!SAFE6"]);
+    match parse_args(&args(&custom)).expect("custom provision label") {
+        Parsed::Provision(ProvisionAction::Plan(opts)) => {
+            assert_eq!(opts.label, "自定义标签!SAFE6")
+        }
+        _ => panic!("expected provision plan"),
+    }
+}
+
+#[test]
 fn backup_v2_actions_parse_without_onlyid_or_index_ui() {
     assert!(matches!(
         parse_args(&args(&["backup", "create", "--disk", "4"])).expect("backup create"),

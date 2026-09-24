@@ -569,6 +569,41 @@ fn lba8_splits_elabel_bytes_before_gbk_decoding_each_value() {
 }
 
 #[test]
+fn lba8_preserves_a_malformed_label_value_instead_of_collapsing_it_to_safe6() {
+    let device_id = "disk&ven_test&prod_llgb_malformed_label";
+    let crc = crc32_bare(device_id.as_bytes());
+    let mut plain = vec![0u8; 368];
+    plain[..4].copy_from_slice(b"LLGB");
+    plain[8..12].copy_from_slice(&0x0100_0001u32.to_le_bytes());
+    plain[12..16].copy_from_slice(&0x222u32.to_le_bytes());
+    plain[0x3e..0x40].copy_from_slice(&0x80u16.to_le_bytes());
+
+    let mut elabel =
+        b"<ELABEL>GLab=322CA28A-D7D1448B-DCE2CED9||Dept=TEST||User=USER||Label=Label  ".to_vec();
+    elabel.extend_from_slice(&[0xbd, 0xad, 0xcb, 0xd5, 0xb5, 0xe7, 0xc1, 0xa6]);
+    elabel.extend_from_slice(b"!SAFE6||");
+    let logical_len = 0x80 + elabel.len();
+    plain[4..8].copy_from_slice(&(logical_len as u32).to_le_bytes());
+    plain[0x80..logical_len].copy_from_slice(&elabel);
+
+    let encrypted_len = (logical_len / 16 + 1) * 16;
+    let mut raw = vec![0u8; 512];
+    raw[..encrypted_len].copy_from_slice(&a7f0_full(
+        &plain[..encrypted_len],
+        &crc.to_le_bytes(),
+        0,
+    ));
+    let meta = InspectMeta {
+        device_id: Some(device_id.into()),
+        ..InspectMeta::default()
+    };
+    let view = analyze_sector(8, &raw, &meta);
+    let out = render_fields(&view);
+
+    assert!(out.contains("Label  江苏电力!SAFE6"), "{out}");
+}
+
+#[test]
 fn lba8_decrypts_the_llgb_length_instead_of_a_fixed_0x170_prefix() {
     let device_id = "disk&ven_test&prod_llgb_long";
     let crc = crc32_bare(device_id.as_bytes());

@@ -33,7 +33,7 @@ pub use layout::{
     OFFICIAL_PARTITION_START_SECTOR, WHOLE_DISK_ENCRYPTED_COMPAT_BOOT_BYTES,
 };
 pub use lce::{build_lce_ciphertext, lce_plaintext};
-pub use profile::ProvisionProfile;
+pub use profile::{ProvisionProfile, DEFAULT_SAFE6_LABEL};
 pub use spec::{OnlyId, ProvisionMetadata, ProvisionSpec, TargetIdentity};
 pub use validate::{
     OfficialProvisionValidation, OfficialProvisionValidator, ProvisionValidation,

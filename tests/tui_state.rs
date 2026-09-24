@@ -1,4 +1,12 @@
-use edpcli::tui::state::{AppState, InputMode, NavCommand, StateEffect};
+use edpcli::tui::state::{AppState, InputMode, NavCommand, ProvisionForm, StateEffect};
+
+#[test]
+fn provision_label_defaults_to_jiangsu_safe6_and_remains_editable() {
+    let mut form = ProvisionForm::default();
+    assert_eq!(form.label, "江苏电力!SAFE6");
+    form.label = "自定义标签!SAFE6".into();
+    assert_eq!(form.label, "自定义标签!SAFE6");
+}
 
 #[test]
 fn vim_vertical_navigation_is_bounded() {

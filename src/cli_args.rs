@@ -227,7 +227,11 @@ fn print_topic_help(topic: &str) {
             println!("  provision image --disk N --mode 0|1|2|3 <身份/分区参数> --out FILE");
             println!("  provision write --disk N --mode 0|1|2|3 <身份/分区参数> [--yes]");
             println!("  provision convert [--disk N] [--write] [--yes] [--backup-dir D]");
-            println!("新盘身份参数: --label-id ID --user USER --dept DEPT --label LABEL --password PASSWORD");
+            println!("新盘身份参数: --label-id ID --user USER --dept DEPT [--label LABEL] --password PASSWORD");
+            println!(
+                "标签默认值: {}；可通过 --label 自定义。",
+                crate::provision::DEFAULT_SAFE6_LABEL
+            );
             println!("分区参数: --boot-mib N --share-mib N --encrypt-mib N；仅当前模式实际使用的项必填。");
             println!("当前产品写入固定使用已验证的 exFAT + SM4(mode2) 路线。");
         }
@@ -423,7 +427,7 @@ fn parse_new_provision_opts(
             label_id: label_id.ok_or("错误: provision 新盘操作必须指定 --label-id")?,
             user: user.ok_or("错误: provision 新盘操作必须指定 --user")?,
             dept: dept.ok_or("错误: provision 新盘操作必须指定 --dept")?,
-            label: label.ok_or("错误: provision 新盘操作必须指定 --label")?,
+            label: label.unwrap_or_else(|| crate::provision::DEFAULT_SAFE6_LABEL.into()),
             password: password.ok_or("错误: provision 新盘操作必须指定 --password")?,
             volume_label: volume_label.unwrap_or_else(|| "SAFE6".into()),
         },

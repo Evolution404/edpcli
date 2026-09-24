@@ -311,7 +311,7 @@ impl Default for ProvisionForm {
             label_id: String::new(),
             user: String::new(),
             dept: String::new(),
-            label: "SAFE6".into(),
+            label: crate::provision::DEFAULT_SAFE6_LABEL.into(),
             password: String::new(),
             volume_label: "SAFE6".into(),
         }

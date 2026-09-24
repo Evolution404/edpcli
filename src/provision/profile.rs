@@ -1,5 +1,7 @@
 //! Versioned canonical protocol profile.
 
+pub const DEFAULT_SAFE6_LABEL: &str = "江苏电力!SAFE6";
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ProvisionProfile {
     id: &'static str,
