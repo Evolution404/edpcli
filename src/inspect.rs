@@ -1488,19 +1488,25 @@ pub fn analyze_sector_with_context(
                             FieldStyle::Identity,
                         ));
                         let usb = match &view.usb_only_info {
-                            lba8::UsbOnlyInfo::Current(bytes) => {
-                                format!("current {}", text_value(bytes))
-                            }
-                            lba8::UsbOnlyInfo::Transitional(bytes) => {
-                                format!("transitional {}", text_value(bytes))
-                            }
-                            lba8::UsbOnlyInfo::StrictLegacyAbsent => "strict-legacy-absent".into(),
+                            lba8::UsbOnlyInfo::Current(bytes)
+                            | lba8::UsbOnlyInfo::Transitional(bytes) => text_value(bytes),
+                            lba8::UsbOnlyInfo::StrictLegacyAbsent => "<absent>".into(),
                         };
+                        let usb_candidates = usb_profiles
+                            .iter()
+                            .map(|profile| profile.as_str())
+                            .collect::<Vec<_>>()
+                            .join(",");
+                        let host_candidates = host_profiles
+                            .iter()
+                            .map(|profile| profile.as_str())
+                            .collect::<Vec<_>>()
+                            .join(",");
                         fields.push(field(
                             0x01e,
                             0x02e,
                             "UsbOnlyInfo",
-                            usb,
+                            format!("{usb}；profile 候选={usb_candidates}"),
                             FieldStyle::Identity,
                         ));
                         fields.push(field(
@@ -1545,9 +1551,7 @@ pub fn analyze_sector_with_context(
                             ));
                         }
                         notes.push(format!(
-                            "profile: UsbOnlyInfo={} host-hardinfo={}; encrypted_len={}B",
-                            usb_profile.as_str(),
-                            host_profile.as_str(),
+                            "profile 候选: UsbOnlyInfo=[{usb_candidates}] host-hardinfo=[{host_candidates}]；encrypted_len={}B",
                             view.encrypted_len()
                         ));
                         format!("canonical protocol::lba8 A6B0 前 {}B", view.encrypted_len())
