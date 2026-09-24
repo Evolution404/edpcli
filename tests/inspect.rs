@@ -454,6 +454,28 @@ fn lba9_decodes_eetu_and_sapf_without_inventing_overlapping_eppe() {
         .fields
         .iter()
         .any(|field| field.label == "起始 LBA" && field.value == "63"));
+}
+
+#[test]
+fn lba9_decodes_eppe_as_its_own_canonical_overlay_profile() {
+    let device_id = "disk&ven_test&prod_lba9_eppe";
+    let crc = crc32_bare(device_id.as_bytes());
+    let key = crc.to_le_bytes();
+    let mut raw = vec![0u8; 512];
+
+    let mut eppe = [0u8; 0x80];
+    eppe[..4].copy_from_slice(b"EPPE");
+    eppe[4..8].copy_from_slice(&8u32.to_le_bytes());
+    raw[0x180..0x200].copy_from_slice(&a7f0_full(&eppe, &key, 0));
+
+    let meta = InspectMeta {
+        device_id: Some(device_id.into()),
+        ..InspectMeta::default()
+    };
+    let view = analyze_sector(9, &raw, &meta);
+
+    assert_eq!(&view.decoded[0x180..0x184], b"EPPE");
+    assert!(!view.fields.iter().any(|field| field.label == "partition type"));
     assert!(view
         .fields
         .iter()
