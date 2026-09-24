@@ -1223,7 +1223,7 @@ pub fn analyze_sector_with_context(
                 ),
                 FieldStyle::Flag,
             ));
-            notes.push("LBA5 内容不解析；EDP 只消费写回结果判断 ERROR_WRITE_PROTECT，扇区本身原样保留。当前样本是否全零不构成协议要求。".into());
+            notes.push("LBA5 内容不解析；EDP 只消费写回结果判断 ERROR_WRITE_PROTECT，扇区本身原样保留；当前样本可以全零，但全零不是协议要求。".into());
             "canonical protocol::lba5（写保护探测）".into()
         }
         6 => match lba6::parse_lba6(raw_sector) {
@@ -1606,14 +1606,22 @@ pub fn analyze_sector_with_context(
                                     0x004,
                                     0x00c,
                                     "EETU 开始时间 (ullBTime)",
-                                    eetu.begin_time.to_string(),
+                                    if eetu.begin_time == 0 {
+                                        "0（不限制）".into()
+                                    } else {
+                                        eetu.begin_time.to_string()
+                                    },
                                     FieldStyle::Flag,
                                 ));
                                 fields.push(field(
                                     0x00c,
                                     0x014,
                                     "EETU 结束时间 (ullETime)",
-                                    eetu.end_time.to_string(),
+                                    if eetu.end_time == 0 {
+                                        "0（不限制）".into()
+                                    } else {
+                                        eetu.end_time.to_string()
+                                    },
                                     FieldStyle::Flag,
                                 ));
                                 fields.push(field(
