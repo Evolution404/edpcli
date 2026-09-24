@@ -9,7 +9,6 @@ CLI v2 的日常工作流包括：
 ```text
 edpcli list       查看当前插入的 U 盘
 edpcli info       查看 U 盘或备份详细信息
-edpcli apply      预览或执行 U 盘改造
 edpcli backup     创建、查看、校验、恢复和清理备份
 edpcli provision  官方四模式制盘；mode1 可保留重制现有 mode0
 edpcli inspect    高级：检查底层 LBA/hex 数据
@@ -66,12 +65,6 @@ edpcli info
 edpcli info --disk 4
 edpcli info backup.bin
 
-edpcli apply --dry-run
-edpcli apply --dry-run --disk 4
-edpcli apply --disk 4
-edpcli apply --disk 4 --size 100
-edpcli apply --disk 4 --force
-
 edpcli backup create
 edpcli backup create --disk 4
 edpcli backup list
@@ -106,22 +99,20 @@ edpcli version
 edpcli tui
 ```
 
-TUI 仅在交互式 TTY 中启动；设备、备份、制盘三个工作区使用同一套
+TUI 仅在交互式 TTY 中启动；设备和备份两个标签页使用同一套
 application/service，不维护第二套业务实现。来自 U 盘元数据、文件名、快照路径和系统探测
 的文本在渲染前统一过滤终端控制字符，后台 worker 只通过 TaskHub 回传数据，不允许直接向
 stdout/stderr 输出。
 
-TUI 已覆盖用户业务流程：设备列表/详情、快速检查、高级检查、Apply、普通/深度备份、校验、恢复、单条/批量删除、
+TUI 已覆盖用户业务流程：设备列表/详情、快速检查、高级检查、普通/深度备份、校验、恢复、单条/批量删除、
 keep-N 清理、官方四模式制盘、mode1 对现有 mode0 的保留重制、目标绑定稀疏镜像导出，以及离线 LBA 快照
-转换。进入物理制盘模式选择前，TUI 会显示当前盘是否已有 EDPB 保存记录，并让用户明确选择是否先保存当前盘。`i` 是 LBA0–12 快速检查；`I` 可检查任意 LBA 列表/范围或 count，支持 raw/decode/meta、
-制盘表单同时暴露完整 PassInfo 策略：初始化密码强制修改、取消密码复杂性验证，以及交换区/保密区密码最大错误次数；可靠注册盘会自动继承四项值，普通盘默认“否、否、255、255”。device_id 覆盖与普通目录导出。物理写盘统一遵循“先只读计划/预览，再精确输入 YES”的交互；Apply
-还支持 TUI 内设置目标大小和 force，并强制先完成 dry-run。离线快照转换不打开 raw device。
+转换。在设备页选中 USB 盘按 Enter 进入制盘；选择模式前先明确是否保存当前盘。`i` 是 LBA0–12 快速检查；`I` 可检查任意 LBA 列表/范围或 count，支持 raw/decode/meta、device_id 覆盖与普通目录导出。制盘表单同时暴露完整 PassInfo 策略：初始化密码强制修改、取消密码复杂性验证，以及交换区/保密区密码最大错误次数；可靠注册盘会自动继承四项值，普通盘默认“否、否、255、255”。物理写盘统一遵循“先只读计划/预览，再精确输入 YES”的交互。离线快照转换不打开 raw device。
 
-核心键位为 `j/k` 上下选择、`Tab/h/l` 切换工作区、`gg/G` 首尾、`Ctrl-d/Ctrl-u` 半页、
-`/` 搜索、`:` 命令面板、`i` 快速检查、`I` 高级检查、`b/B` 普通/深度备份、`a` Apply、`R` Restore、
+核心键位为 `j/k` 上下选择、`Tab/h/l` 切换标签页、`Enter` 从设备进入制盘、`gg/G` 首尾、`Ctrl-d/Ctrl-u` 半页、
+`/` 搜索、`:` 命令面板、`i` 快速检查、`I` 高级检查、`b/B` 普通/深度备份、`R` Restore、
 `v` 校验、`D` 单删、`Space` 勾选/取消、`X` 批量删除、`P` keep-N 清理、`Esc` 返回、`q` 退出、`?` 帮助。
 
-设备扫描、备份扫描、快速/高级检查、Apply 预览、制盘计划、镜像导出和离线转换均在后台 worker 执行，
+设备扫描、备份扫描、快速/高级检查、制盘计划、镜像导出和离线转换均在后台 worker 执行，
 不阻塞 redraw；同类任务使用 single-flight，繁忙期间只保留最新有效结果。动画只重绘可见表格行，
 可通过 `EDPCLI_ANIMATION=reduced` 降低更新频率，或用 `EDPCLI_ANIMATION=off` 关闭动态帧。
 进入关键介质事务后，`q` / `Esc` / `Ctrl-C` 只登记延迟退出，不会中断卸载、reopen、
@@ -130,7 +121,7 @@ atomic write、sync/readback 或 rollback；终端 I/O 失败时也会先恢复�
 
 ## 备份
 
-`backup create` 与 `apply` 写前自动备份共用同一个 `create_backup` service：
+`backup create` 使用统一的 Metadata 备份 service：
 
 - 固定读取 LBA0-12，共 6656B；
 - 使用相同的 onlyid、device_id、VID/PID、容量元数据；
@@ -145,22 +136,21 @@ U 盘串盘。
 
 ## 写盘安全
 
-`apply`、`backup restore` 与 `provision` 的真实写盘路径保持以下无法确认即拒绝继续门禁：
+`backup restore` 与 `provision` 的真实写盘路径保持以下无法确认即拒绝继续门禁：
 
 - 目标必须是外接 USB 整盘；
 - 系统盘身份无法确认时拒绝继续；
 - 提权前固定平台原生 selector；
-- 写前读取 LBA0-12，并在 apply 时先创建自动备份；
+- 写前读取 LBA0-12，并在制盘前提供保存当前盘的明确选择；
 - 写入前卸载/锁定目标卷；
 - reopen 后再次核对介质和写前元数据；
 - 原子写入、sync、逐扇读回校验；
 - 任一写入失败自动回滚，回滚结果有独立退出码；
 - 新盘制盘原样保留目标制造商 LBA3，并在重开后再次核对；
-- 严格免密转换保持 type4 起点、大小和密钥材料不变；
+- 保留重制时保持可复用分区的起点、大小和密钥材料不变；
 - 恢复备份必须通过大小、SHA-256 与当前盘 LBA4 身份终验。
 
-`edpcli apply --dry-run` 复用真实识别和布局计算，但不会创建备份、请求写入确认、
-卸载/锁卷、reopen 或写入扇区。
+`edpcli provision plan` 只读计算目标布局，不卸载/锁卷、reopen 或写入扇区。
 
 ## 平台实现
 
