@@ -58,6 +58,10 @@ fn field_value(view: &SectorView, label: &str) -> Option<String> {
         .map(|field| field.value.clone())
 }
 
+fn field_value_any(view: &SectorView, labels: &[&str]) -> Option<String> {
+    labels.iter().find_map(|label| field_value(view, label))
+}
+
 fn child_value(view: &SectorView, label: &str) -> Option<String> {
     view.fields
         .iter()
@@ -164,9 +168,9 @@ where
             rmark: child_value(&v8, "Rmark"),
             autonum: child_value(&v8, "Autonum"),
         },
-        safe6_label: field_value(&v6, "标签"),
-        safe6_user: field_value(&v6, "用户"),
-        safe6_serial: field_value(&v6, "序列"),
+        safe6_label: field_value_any(&v6, &["Label", "标签"]),
+        safe6_user: field_value_any(&v6, &["User", "用户"]),
+        safe6_serial: field_value_any(&v6, &["m_usbGSerial 槽", "序列"]),
         safe6_register: field_value(&v6, "注册标志"),
         safe6_checksum: field_value(&v6, "校验和"),
         pdkb_device_id: field_value(&v11, "PDKB device_id"),
