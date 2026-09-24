@@ -36,7 +36,8 @@ gh release download --repo Evolution404/edpcli \
   --pattern 'edpcli-v*-macos-arm64.tar.gz.sha256'
 shasum -a 256 -c edpcli-v*-macos-arm64.tar.gz.sha256
 tar -xzf edpcli-v*-macos-arm64.tar.gz
-sudo install -m 0755 edpcli /usr/local/bin/edpcli
+mkdir -p "$HOME/.local/bin"
+install -m 0755 edpcli "$HOME/.local/bin/edpcli"
 edpcli version
 ```
 
@@ -50,10 +51,20 @@ Intel Mac 将 `macos-arm64` 改为 `macos-x86_64`；需要通用二进制时改�
 ```bash
 tar -xzf edpcli-vX.Y.Z-macos-arm64.tar.gz
 chmod +x edpcli
-sudo install -m 0755 edpcli /usr/local/bin/edpcli
+mkdir -p "$HOME/.local/bin"
+install -m 0755 edpcli "$HOME/.local/bin/edpcli"
 edpcli --version
 edpcli version
 ```
+
+在本机开发/试用未发布版本时，统一使用：
+
+```bash
+scripts/install-local.sh target/release/edpcli
+```
+
+该脚本固定写入 `~/.local/bin/edpcli`，不会写 `/usr/local/bin`；安装后还会通过
+`zsh -lic 'command -v edpcli'` 和 SHA-256 对比确认用户终端实际运行的就是刚安装的二进制。
 
 Windows 将 `edpcli.exe` 放入固定目录并加入 `PATH`：
 

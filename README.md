@@ -41,9 +41,19 @@ gh release download --repo Evolution404/edpcli \
   --pattern 'edpcli-v*-macos-arm64.tar.gz.sha256'
 shasum -a 256 -c edpcli-v*-macos-arm64.tar.gz.sha256
 tar -xzf edpcli-v*-macos-arm64.tar.gz
-sudo install -m 0755 edpcli /usr/local/bin/edpcli
+mkdir -p "$HOME/.local/bin"
+install -m 0755 edpcli "$HOME/.local/bin/edpcli"
 edpcli version
 ```
+
+本机开发/测试构建不要直接写 `/usr/local/bin`。仓库提供统一安装入口：
+
+```bash
+scripts/install-local.sh target/release/edpcli
+```
+
+脚本会固定安装到 `~/.local/bin/edpcli`，并用交互式 zsh 的实际命令解析结果和
+SHA-256 做双重校验，避免自动化环境 PATH 与用户终端 PATH 不一致时装错位置。
 
 其他平台/架构的安装命令见 [`docs/user/USAGE.md`](docs/user/USAGE.md)。
 
