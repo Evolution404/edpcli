@@ -823,10 +823,10 @@ fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppSta
             for (index, (label, value, secret)) in
                 state.provision_visible_fields().iter().enumerate()
             {
-                let shown = if *secret {
-                    "•".repeat(value.chars().count())
-                } else if value.is_empty() {
+                let shown = if value.is_empty() {
                     "〈请输入〉".into()
+                } else if *secret {
+                    "•".repeat(value.chars().count())
                 } else {
                     safe(value)
                 };
@@ -835,10 +835,14 @@ fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppSta
                 } else {
                     Style::default()
                 };
-                lines.push(Line::from(vec![
+                let mut spans = vec![
                     Span::styled(format!("{:>12}  ", label), muted()),
                     Span::styled(shown, value_style),
-                ]));
+                ];
+                if let Some(hint) = state.provision_field_hint(index) {
+                    spans.push(Span::styled(format!("  · {}", safe(&hint)), muted()));
+                }
+                lines.push(Line::from(spans));
             }
             lines.push(Line::from(""));
             lines.push(Line::from(vec![
@@ -847,7 +851,7 @@ fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppSta
                 Span::styled("直接输入", secondary()),
                 Span::raw(" 修改   "),
                 Span::styled("Space", secondary()),
-                Span::raw(" 勾选   "),
+                Span::raw(" 切换选项   "),
                 Span::styled("Enter", success()),
                 Span::raw(" 生成计划   "),
                 Span::styled("Esc", warning()),
@@ -2410,7 +2414,7 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
                     "Tab 页面  ·  j/k 选择方案  ·  Enter 打开  ·  r 刷新目标  ·  :provision 直达  ·  ? 帮助  ·  q 退出".to_string()
                 }
                 ProvisionStage::Form => {
-                    "↑/↓/Tab 字段  ·  输入编辑  ·  Space 勾选  ·  Enter 生成只读计划  ·  Esc 返回".to_string()
+                    "↑/↓/Tab 字段  ·  输入编辑  ·  Space 切换选项  ·  Enter 生成只读计划  ·  Esc 返回".to_string()
                 }
                 ProvisionStage::Planning => "正在生成只读计划…".to_string(),
                 ProvisionStage::Review => {

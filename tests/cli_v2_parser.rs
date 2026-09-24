@@ -64,7 +64,7 @@ fn provision_parses_all_four_product_actions_and_rejects_ambiguous_flags() {
         Parsed::Provision(ProvisionAction::Plan(opts)) => {
             assert_eq!(opts.mode, 1);
             assert_eq!(opts.disk, Some(4));
-            assert_eq!(opts.volume_label, "SAFE6");
+            assert_eq!(opts.volume_label, "启动区");
         }
         _ => panic!("expected provision plan"),
     }
@@ -150,6 +150,35 @@ fn provision_label_defaults_to_jiangsu_safe6_but_cli_can_override_it() {
     forced.push("--force-change-password");
     match parse_args(&args(&forced)).expect("force-change provision policy") {
         Parsed::Provision(ProvisionAction::Plan(opts)) => assert!(opts.force_change_password),
+        _ => panic!("expected provision plan"),
+    }
+}
+
+#[test]
+fn provision_password_and_volume_label_have_product_defaults() {
+    let args = args(&[
+        "provision",
+        "plan",
+        "--disk",
+        "4",
+        "--mode",
+        "1",
+        "--share-mib",
+        "64",
+        "--encrypt-mib",
+        "128",
+        "--label-id",
+        "1402259934",
+        "--user",
+        "USER06",
+        "--dept",
+        "江苏省电力有限公司",
+    ]);
+    match parse_args(&args).expect("default password and volume label") {
+        Parsed::Provision(ProvisionAction::Plan(opts)) => {
+            assert_eq!(opts.password, "0000aaaa");
+            assert_eq!(opts.volume_label, "启动区");
+        }
         _ => panic!("expected provision plan"),
     }
 }

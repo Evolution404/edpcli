@@ -1,14 +1,67 @@
 use edpcli::tui::state::{
-    AppState, InputMode, NavCommand, ProvisionForm, ProvisionKind, StateEffect,
+    AppState, InputMode, NavCommand, ProvisionForm, ProvisionKind, ProvisionSizeMode, StateEffect,
 };
+
+fn device(size: u64) -> edpcli::disk_scan::Row {
+    edpcli::disk_scan::Row {
+        disk: 6,
+        size,
+        vid: "1234".into(),
+        pid: "5678".into(),
+        proto: "USB".into(),
+        device_id: Some("disk&ven_test&prod_test".into()),
+        onlyid: Some("1402259934".into()),
+        dept: Some("输电运检中心".into()),
+        user: Some("测试用户".into()),
+        n_baks: 0,
+        denied: false,
+        probe_error: None,
+        is_nopwd: false,
+        partitions: None,
+    }
+}
 
 #[test]
 fn provision_label_defaults_to_jiangsu_safe6_and_remains_editable() {
     let mut form = ProvisionForm::default();
     assert_eq!(form.label, "江苏电力!SAFE6");
+    assert_eq!(form.password, "0000aaaa");
+    assert_eq!(form.volume_label, "启动区");
+    assert_eq!(form.size_mode, ProvisionSizeMode::Manual);
     assert!(!form.force_change_password);
     form.label = "自定义标签!SAFE6".into();
     assert_eq!(form.label, "自定义标签!SAFE6");
+}
+
+#[test]
+fn provision_manual_ranges_follow_remaining_capacity_and_ratio_mode_fills_usable_space() {
+    let mut state = AppState::new();
+    state.replace_devices(vec![device(64_000_000_000)]);
+    state.navigate(NavCommand::WorkspaceProvision, 20);
+    assert_eq!(state.provision_begin_selected(), ProvisionKind::Mode0);
+
+    let total_hint = state.provision_field_hint(0).expect("total capacity hint");
+    let usable = total_hint
+        .split_whitespace()
+        .find_map(|word| word.parse::<u64>().ok())
+        .expect("usable MiB in hint");
+
+    state.provision_mut().form.boot_mib = "512".into();
+    state.provision_mut().form.share_mib = "1024".into();
+    let encrypt_hint = state.provision_field_hint(3).expect("encrypt range hint");
+    assert_eq!(encrypt_hint, format!("可填 1..{} MiB", usable - 512 - 1024));
+
+    state.provision_mut().field_selected = 0;
+    assert!(state.provision_toggle_selected_option());
+    assert_eq!(state.provision().form.size_mode, ProvisionSizeMode::Ratio);
+    state.provision_mut().form.label_id = "1402259934".into();
+    state.provision_mut().form.user = "测试用户".into();
+    state.provision_mut().form.dept = "输电运检中心".into();
+    let request = state.provision_request().expect("ratio request");
+    assert_eq!(
+        request.boot_mib.unwrap() + request.share_mib.unwrap() + request.encrypt_mib.unwrap(),
+        usable
+    );
 }
 
 #[test]

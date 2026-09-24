@@ -894,7 +894,7 @@ fn run_loop(resume: Option<state::WriteIntent>) -> io::Result<LoopExit> {
                                         let _ = state.navigate(NavCommand::Escape, 1);
                                     }
                                     ct_event::KeyCode::Char(' ') => {
-                                        if !state.provision_toggle_force_change_password() {
+                                        if !state.provision_toggle_selected_option() {
                                             state.provision_push_char(' ');
                                         }
                                     }
