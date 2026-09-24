@@ -253,6 +253,9 @@ fn provision_request(
 ) -> crate::application::provision::NewProvisionRequest {
     crate::application::provision::NewProvisionRequest {
         mode: opts.mode,
+        boot_start_lba: opts.boot_start_lba,
+        share_start_lba: opts.share_start_lba,
+        encrypt_start_lba: opts.encrypt_start_lba,
         boot_mib: opts.boot_mib,
         boot_sectors: opts.boot_sectors,
         share_mib: opts.share_mib,
@@ -288,6 +291,43 @@ fn provision_resolve_disk(
     DeviceSelector::new(disk_opt).resolve(runner, prompt)
 }
 
+fn target_plan_summary_lines(plan: &crate::provision::TargetProvisionPlan) -> Vec<String> {
+    use crate::provision::PartitionAction;
+
+    let mut lines = Vec::with_capacity(plan.partitions.len() + 1);
+    for partition in &plan.partitions {
+        let geometry = &partition.geometry;
+        let end_lba = geometry
+            .start_lba
+            .checked_add(geometry.sector_count)
+            .and_then(|end| end.checked_sub(1))
+            .unwrap_or(u64::MAX);
+        let fate = match partition.action {
+            PartitionAction::PreserveExact => {
+                "PreserveExact · 复用原 FileKey/LBA7/LBA12 key material · 不写数据区 · 原数据保留"
+            }
+            PartitionAction::Rebuild => {
+                "Rebuild · 生成目标 key material/按选项重建文件系统 · 原数据不可原样保留"
+            }
+        };
+        lines.push(format!(
+            "  {} type{} start={} end={} sectors={} · {} · {}",
+            geometry.role.label(),
+            geometry.partition_type.raw(),
+            geometry.start_lba,
+            end_lba,
+            geometry.sector_count,
+            fate,
+            partition.reason
+        ));
+    }
+    lines.push(format!(
+        "  unallocated={} sectors",
+        plan.unallocated_sectors
+    ));
+    lines
+}
+
 fn print_new_provision_summary(
     opts: &ProvisionNewOpts,
     prepared: &crate::application::provision::PreparedNewProvision,
@@ -302,23 +342,29 @@ fn print_new_provision_summary(
         prepared.lce_start_lba,
         prepared.write_image.touched_sector_count()
     );
-    let boot = if let Some(sectors) = opts.boot_sectors {
-        format!("{sectors} sectors")
+    if let Some(target_plan) = &prepared.target_plan {
+        println!("最终精确分区（TargetProvisionPlan）:");
+        for line in target_plan_summary_lines(target_plan) {
+            println!("{line}");
+        }
     } else {
-        opts.boot_mib
-            .map(|v| format!("{v} MiB"))
-            .unwrap_or_else(|| "-".into())
-    };
-    println!(
-        "分区: boot={} share={}MiB encrypt={}MiB",
-        boot,
-        opts.share_mib
-            .map(|v| v.to_string())
-            .unwrap_or_else(|| "-".into()),
-        opts.encrypt_mib
-            .map(|v| v.to_string())
-            .unwrap_or_else(|| "-".into())
-    );
+        println!("最终精确分区:");
+        for choice in &prepared.format_targets {
+            let geometry = &choice.target.geometry;
+            let end_lba = geometry
+                .start_sector
+                .saturating_add(geometry.sector_count())
+                .saturating_sub(1);
+            println!(
+                "  {} type{} start={} end={} sectors={}",
+                choice.target.role.label(),
+                geometry.partition_type.raw(),
+                geometry.start_sector,
+                end_lba,
+                geometry.sector_count()
+            );
+        }
+    }
     println!("制盘后格式化:");
     for choice in &prepared.format_targets {
         let target = &choice.target;
@@ -366,7 +412,18 @@ fn provision_flow(runner: &SysRunner, action: ProvisionAction) -> i32 {
                 Err(error) => return finish(Err(error)),
             };
             let request = provision_request(&opts);
-            match crate::application::provision::prepare_new_provision(runner, disk, &request) {
+            let mut dev = match FileDev::open_rdonly(&raw_path(disk)) {
+                Ok(value) => value,
+                Err(error) => {
+                    return finish(Err(EdpCliError::new(
+                        EXIT_IO,
+                        format!("错误: 无法只读打开 {}: {error}", raw_path(disk)),
+                    )))
+                }
+            };
+            match crate::application::provision::prepare_target_provision(
+                runner, disk, &request, &mut dev,
+            ) {
                 Ok(prepared) => {
                     print_new_provision_summary(&opts, &prepared);
                     EXIT_OK
@@ -398,12 +455,6 @@ fn provision_flow(runner: &SysRunner, action: ProvisionAction) -> i32 {
                 Err(error) => return finish(Err(error)),
             };
             let request = provision_request(&opts);
-            let mut prepared = match crate::application::provision::prepare_new_provision(
-                runner, disk, &request,
-            ) {
-                Ok(value) => value,
-                Err(error) => return finish(Err(error)),
-            };
             let mut dev = match FileDev::open_rdonly(&raw_path(disk)) {
                 Ok(value) => value,
                 Err(error) => {
@@ -412,6 +463,12 @@ fn provision_flow(runner: &SysRunner, action: ProvisionAction) -> i32 {
                         format!("错误: 无法只读打开 {}: {error}", raw_path(disk)),
                     )))
                 }
+            };
+            let mut prepared = match crate::application::provision::prepare_target_provision(
+                runner, disk, &request, &mut dev,
+            ) {
+                Ok(value) => value,
+                Err(error) => return finish(Err(error)),
             };
             if let Err(error) =
                 crate::application::provision::capture_manufacturer_lba3(&mut dev, &mut prepared)
@@ -463,8 +520,8 @@ fn provision_flow(runner: &SysRunner, action: ProvisionAction) -> i32 {
                     )))
                 }
             };
-            let mut prepared = match crate::application::provision::prepare_new_provision(
-                runner, disk, &request,
+            let mut prepared = match crate::application::provision::prepare_target_provision(
+                runner, disk, &request, &mut dev,
             ) {
                 Ok(value) => value,
                 Err(error) => return finish(Err(error)),
@@ -479,7 +536,7 @@ fn provision_flow(runner: &SysRunner, action: ProvisionAction) -> i32 {
                 true
             } else {
                 prompt.confirm_yes(&crate::ui::bold(&format!(
-                    "将破坏性重建 disk{} 为官方 mode{}，并原样保留制造商 LBA3。输入 YES: ",
+                    "将按上述 TargetProvisionPlan 写入 disk{} mode{}；PreserveExact 数据区不会写入，Rebuild 分区原数据不可原样保留，并原样保留制造商 LBA3。输入 YES: ",
                     disk, opts.mode
                 )))
             };
@@ -773,6 +830,65 @@ mod tests {
                 lba
             );
         }
+    }
+
+    #[test]
+    fn target_plan_summary_reports_exact_geometry_and_data_fate() {
+        use crate::protocol::edpf::EdpPartitionType;
+        use crate::provision::{
+            OfficialFilesystemFormat, OfficialPartitionMode, PartitionAction, PartitionRole,
+            TargetPartitionGeometry, TargetPartitionPlan, TargetProvisionPlan,
+        };
+
+        let plan = TargetProvisionPlan {
+            mode: OfficialPartitionMode::BootShareCombined,
+            partitions: vec![
+                TargetPartitionPlan {
+                    geometry: TargetPartitionGeometry {
+                        role: PartitionRole::BootShareCombined,
+                        partition_type: EdpPartitionType::Share,
+                        start_lba: 63,
+                        sector_count: 100,
+                        physically_encrypted: false,
+                        filesystem: Some(OfficialFilesystemFormat::ExFat),
+                    },
+                    action: PartitionAction::Rebuild,
+                    reason: "geometry changed".into(),
+                    preserved_record: None,
+                },
+                TargetPartitionPlan {
+                    geometry: TargetPartitionGeometry {
+                        role: PartitionRole::Encrypt,
+                        partition_type: EdpPartitionType::Encrypt,
+                        start_lba: 1000,
+                        sector_count: 200,
+                        physically_encrypted: true,
+                        filesystem: Some(OfficialFilesystemFormat::ExFat),
+                    },
+                    action: PartitionAction::PreserveExact,
+                    reason: "exact source match".into(),
+                    preserved_record: None,
+                },
+            ],
+            unallocated_sectors: 737,
+        };
+
+        let lines = target_plan_summary_lines(&plan);
+        assert!(lines
+            .iter()
+            .any(|line| line.contains("start=63 end=162 sectors=100")));
+        assert!(lines
+            .iter()
+            .any(|line| line.contains("Rebuild") && line.contains("原数据不可原样保留")));
+        assert!(lines
+            .iter()
+            .any(|line| line.contains("start=1000 end=1199 sectors=200")));
+        assert!(lines.iter().any(|line| line.contains("PreserveExact")
+            && line.contains("复用原 FileKey/LBA7/LBA12 key material")
+            && line.contains("不写数据区")));
+        assert!(lines
+            .iter()
+            .any(|line| line.contains("unallocated=737 sectors")));
     }
 
     #[test]

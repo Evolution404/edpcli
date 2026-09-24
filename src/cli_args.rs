@@ -74,6 +74,9 @@ pub struct InfoOpts {
 pub struct ProvisionNewOpts {
     pub disk: Option<u32>,
     pub mode: u8,
+    pub boot_start_lba: Option<u64>,
+    pub share_start_lba: Option<u64>,
+    pub encrypt_start_lba: Option<u64>,
     pub boot_mib: Option<u64>,
     pub boot_sectors: Option<u64>,
     pub share_mib: Option<u64>,
@@ -329,10 +332,14 @@ fn parse_provision_filesystem(
 
 fn parse_new_provision_opts(
     rest: &[String],
+    allow_prefill: bool,
 ) -> Result<(ProvisionNewOpts, Option<String>, bool), String> {
     let mut disk = None;
     let mut mode = None;
     let mut boot_mib = None;
+    let mut boot_start_lba = None;
+    let mut share_start_lba = None;
+    let mut encrypt_start_lba = None;
     let mut boot_sectors = None;
     let mut share_mib = None;
     let mut share_sectors = None;
@@ -373,6 +380,30 @@ fn parse_new_provision_opts(
                     &mut boot_mib,
                     parse_positive_u64(&value, "--boot-mib")?,
                     "--boot-mib",
+                )?;
+            }
+            "--boot-start-sector" => {
+                let value = take_value(rest, &mut i, "--boot-start-sector")?;
+                set_once(
+                    &mut boot_start_lba,
+                    parse_positive_u64(&value, "--boot-start-sector")?,
+                    "--boot-start-sector",
+                )?;
+            }
+            "--share-start-sector" => {
+                let value = take_value(rest, &mut i, "--share-start-sector")?;
+                set_once(
+                    &mut share_start_lba,
+                    parse_positive_u64(&value, "--share-start-sector")?,
+                    "--share-start-sector",
+                )?;
+            }
+            "--encrypt-start-sector" => {
+                let value = take_value(rest, &mut i, "--encrypt-start-sector")?;
+                set_once(
+                    &mut encrypt_start_lba,
+                    parse_positive_u64(&value, "--encrypt-start-sector")?,
+                    "--encrypt-start-sector",
                 )?;
             }
             "--boot-sectors" => {
@@ -507,13 +538,13 @@ fn parse_new_provision_opts(
     }
     match mode {
         0 => {
-            if share_mib.is_none() && share_sectors.is_none() {
+            if !allow_prefill && share_mib.is_none() && share_sectors.is_none() {
                 return Err("错误: mode0 必须指定 --share-mib 或 --share-sectors".into());
             }
-            if encrypt_mib.is_none() && encrypt_sectors.is_none() {
+            if !allow_prefill && encrypt_mib.is_none() && encrypt_sectors.is_none() {
                 return Err("错误: mode0 必须指定 --encrypt-mib 或 --encrypt-sectors".into());
             }
-            if boot_mib.is_none() && boot_sectors.is_none() {
+            if !allow_prefill && boot_mib.is_none() && boot_sectors.is_none() {
                 boot_sectors = Some(crate::provision::DEFAULT_MODE0_BOOT_SECTORS);
             }
         }
@@ -521,10 +552,10 @@ fn parse_new_provision_opts(
             if boot_sectors.is_some() {
                 return Err("错误: --boot-sectors 仅用于 mode0".into());
             }
-            if share_mib.is_none() && share_sectors.is_none() {
+            if !allow_prefill && share_mib.is_none() && share_sectors.is_none() {
                 return Err("错误: mode1 必须指定 --share-mib 或 --share-sectors".into());
             }
-            if encrypt_mib.is_none() && encrypt_sectors.is_none() {
+            if !allow_prefill && encrypt_mib.is_none() && encrypt_sectors.is_none() {
                 return Err("错误: mode1 必须指定 --encrypt-mib 或 --encrypt-sectors".into());
             }
         }
@@ -532,15 +563,15 @@ fn parse_new_provision_opts(
             if boot_sectors.is_some() {
                 return Err("错误: --boot-sectors 仅用于 mode0".into());
             }
-            if encrypt_mib.is_none() && encrypt_sectors.is_none() {
+            if !allow_prefill && encrypt_mib.is_none() && encrypt_sectors.is_none() {
                 return Err("错误: mode2 必须指定 --encrypt-mib 或 --encrypt-sectors".into());
             }
         }
         3 => {
-            if boot_mib.is_none() && boot_sectors.is_none() {
+            if !allow_prefill && boot_mib.is_none() && boot_sectors.is_none() {
                 return Err("错误: mode3 必须指定 --boot-mib 或 --boot-sectors".into());
             }
-            if share_mib.is_none() && share_sectors.is_none() {
+            if !allow_prefill && share_mib.is_none() && share_sectors.is_none() {
                 return Err("错误: mode3 必须指定 --share-mib 或 --share-sectors".into());
             }
         }
@@ -553,6 +584,9 @@ fn parse_new_provision_opts(
         ProvisionNewOpts {
             disk,
             mode,
+            boot_start_lba,
+            share_start_lba,
+            encrypt_start_lba,
             boot_mib,
             boot_sectors,
             share_mib,
@@ -561,13 +595,28 @@ fn parse_new_provision_opts(
             encrypt_sectors,
             label_id: match label_id {
                 Some(value) => value,
+                None if allow_prefill => String::new(),
                 None => crate::provision::OnlyId::random_candidate()?
                     .text()
                     .to_string(),
             },
-            user: user.ok_or("错误: provision 新盘操作必须指定 --user")?,
-            dept: dept.ok_or("错误: provision 新盘操作必须指定 --dept")?,
-            label: label.unwrap_or_else(|| crate::provision::DEFAULT_SAFE6_LABEL.into()),
+            user: if allow_prefill {
+                user.unwrap_or_default()
+            } else {
+                user.ok_or("错误: provision 新盘操作必须指定 --user")?
+            },
+            dept: if allow_prefill {
+                dept.unwrap_or_default()
+            } else {
+                dept.ok_or("错误: provision 新盘操作必须指定 --dept")?
+            },
+            label: label.unwrap_or_else(|| {
+                if allow_prefill {
+                    String::new()
+                } else {
+                    crate::provision::DEFAULT_SAFE6_LABEL.into()
+                }
+            }),
             password: password.unwrap_or_else(|| "0000aaaa".into()),
             volume_label: volume_label.clone(),
             format_boot,
@@ -1087,7 +1136,7 @@ pub fn parse_args(argv: &[String]) -> Result<Parsed, String> {
             let tail = &rest[1..];
             match action {
                 "plan" | "image" | "write" => {
-                    let (opts, out, yes) = parse_new_provision_opts(tail)?;
+                    let (opts, out, yes) = parse_new_provision_opts(tail, true)?;
                     match action {
                         "plan" => {
                             if out.is_some() || yes {

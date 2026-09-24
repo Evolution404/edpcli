@@ -1,5 +1,4 @@
 use edpcli::cli_args::{parse_args, BackupAction, InspectMode, Parsed, ProvisionAction};
-use edpcli::provision::{OnlyId, DEFAULT_MODE0_BOOT_SECTORS};
 
 fn args(values: &[&str]) -> Vec<String> {
     values.iter().map(|value| (*value).to_string()).collect()
@@ -103,7 +102,7 @@ fn provision_parses_all_four_product_actions_and_rejects_ambiguous_flags() {
 }
 
 #[test]
-fn provision_label_defaults_to_jiangsu_safe6_but_cli_can_override_it() {
+fn provision_label_prefills_from_target_unless_cli_overrides_it() {
     let base = [
         "provision",
         "plan",
@@ -126,7 +125,7 @@ fn provision_label_defaults_to_jiangsu_safe6_but_cli_can_override_it() {
     ];
     match parse_args(&args(&base)).expect("default provision label") {
         Parsed::Provision(ProvisionAction::Plan(opts)) => {
-            assert_eq!(opts.label, "江苏电力!SAFE6");
+            assert!(opts.label.is_empty());
             assert!(!opts.force_change_password);
         }
         _ => panic!("expected provision plan"),
@@ -188,6 +187,69 @@ fn provision_password_and_volume_label_have_product_defaults() {
             );
         }
         _ => panic!("expected provision plan"),
+    }
+}
+
+#[test]
+fn provision_actions_allow_capacity_and_identity_prefill() {
+    let plan = parse_args(&args(&["provision", "plan", "--disk", "4", "--mode", "1"]))
+        .expect("plan should allow source/system prefill");
+    let Parsed::Provision(ProvisionAction::Plan(plan_opts)) = plan else {
+        panic!("expected provision plan");
+    };
+
+    let image = parse_args(&args(&[
+        "provision",
+        "image",
+        "--disk",
+        "4",
+        "--mode",
+        "1",
+        "--out",
+        "/tmp/edp.img",
+    ]))
+    .expect("image should allow source/system prefill");
+    let Parsed::Provision(ProvisionAction::Image {
+        opts: image_opts, ..
+    }) = image
+    else {
+        panic!("expected provision image");
+    };
+
+    let write = parse_args(&args(&[
+        "provision",
+        "write",
+        "--disk",
+        "4",
+        "--mode",
+        "1",
+        "--share-start-sector",
+        "63",
+        "--encrypt-start-sector",
+        "4020480",
+        "--yes",
+    ]))
+    .expect("write should allow source/system prefill");
+    let Parsed::Provision(ProvisionAction::Write {
+        opts: write_opts,
+        yes,
+    }) = write
+    else {
+        panic!("expected provision write");
+    };
+    assert!(yes);
+    assert_eq!(write_opts.share_start_lba, Some(63));
+    assert_eq!(write_opts.encrypt_start_lba, Some(4_020_480));
+
+    for opts in [&plan_opts, &image_opts, &write_opts] {
+        assert_eq!(opts.share_mib, None);
+        assert_eq!(opts.share_sectors, None);
+        assert_eq!(opts.encrypt_mib, None);
+        assert_eq!(opts.encrypt_sectors, None);
+        assert!(opts.label_id.is_empty());
+        assert!(opts.user.is_empty());
+        assert!(opts.dept.is_empty());
+        assert!(opts.label.is_empty());
     }
 }
 
@@ -306,7 +368,7 @@ fn legacy_volume_label_is_a_fallback_for_each_partition_label() {
 }
 
 #[test]
-fn mode0_defaults_to_exact_boot_sectors_and_generates_onlyid_candidate() {
+fn mode0_parser_leaves_boot_and_identity_for_target_prefill() {
     let parsed = parse_args(&args(&[
         "provision",
         "plan",
@@ -327,8 +389,8 @@ fn mode0_defaults_to_exact_boot_sectors_and_generates_onlyid_candidate() {
     match parsed {
         Parsed::Provision(ProvisionAction::Plan(opts)) => {
             assert_eq!(opts.boot_mib, None);
-            assert_eq!(opts.boot_sectors, Some(DEFAULT_MODE0_BOOT_SECTORS));
-            assert!(OnlyId::parse(&opts.label_id).is_ok());
+            assert_eq!(opts.boot_sectors, None);
+            assert!(opts.label_id.is_empty());
         }
         _ => panic!("expected provision plan"),
     }

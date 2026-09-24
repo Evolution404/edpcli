@@ -28,7 +28,6 @@ use crate::provision::{
     ProvisionEntropy, ProvisionImage, ProvisionMetadata, ProvisionProfile, ProvisionSpec,
     QuickCapacityUnit, SparseFilesystemImage, TargetGeometryOverrides, TargetIdentity,
     TargetPartitionGeometry, TargetProvisionPlan, DEFAULT_MODE0_BOOT_SECTORS,
-    WHOLE_DISK_ENCRYPTED_COMPAT_BOOT_BYTES,
 };
 use crate::sysinfo::{self, CmdRunner};
 use encoding_rs::GBK;
@@ -626,6 +625,17 @@ fn override_capacity(
     }
 }
 
+fn target_encrypt_capacity_override(
+    _mode: OfficialPartitionMode,
+    mib: Option<u64>,
+    sectors: Option<u64>,
+) -> EdpCliResult<Option<CapacityInput>> {
+    // Quick and Exact always describe the target partition itself. In mode2
+    // the fixed 63-sector CompatibilityReserve is a separate canonical
+    // partition and must never be subtracted from the Encrypt input.
+    override_capacity(mib, sectors)
+}
+
 /// The physical path for both plain and registered USB media. Source mode is
 /// consulted only while deriving defaults and Preserve candidates.
 pub fn prepare_target_provision(
@@ -703,24 +713,11 @@ pub fn prepare_target_provision(
             format!("错误: 无法生成目标模式默认布局: {message}"),
         )
     })?;
-    let encrypt_override = override_capacity(request.encrypt_mib, request.encrypt_sectors)?
-        .map(|value| {
-            if selected_mode == OfficialPartitionMode::WholeDiskEncrypted
-                && request.encrypt_mib.is_some()
-            {
-                CapacityInput::from_exact(
-                    value
-                        .sectors()
-                        .checked_sub(WHOLE_DISK_ENCRYPTED_COMPAT_BOOT_BYTES / SECTOR as u64)
-                        .ok_or_else(|| err(EXIT_TARGET, "错误: 整盘加密容量小于兼容保留区"))?,
-                    CapacitySource::UserEdited,
-                )
-                .map_err(|message| err(EXIT_TARGET, message))
-            } else {
-                Ok(value)
-            }
-        })
-        .transpose()?;
+    let encrypt_override = target_encrypt_capacity_override(
+        selected_mode,
+        request.encrypt_mib,
+        request.encrypt_sectors,
+    )?;
     let prefill = apply_target_geometry_overrides(
         prefill,
         source.as_ref().map(|source| &source.profile),
@@ -1642,6 +1639,27 @@ mod tests {
         fn write_sector(&mut self, _lba: u32, _data: &[u8]) -> io::Result<()> {
             Err(io::Error::other("read-only test device"))
         }
+    }
+
+    #[test]
+    fn mode2_quick_and_exact_encrypt_capacity_are_partition_scoped() {
+        let quick = target_encrypt_capacity_override(
+            OfficialPartitionMode::WholeDiskEncrypted,
+            Some(128),
+            None,
+        )
+        .unwrap()
+        .unwrap();
+        let exact = target_encrypt_capacity_override(
+            OfficialPartitionMode::WholeDiskEncrypted,
+            None,
+            Some(128 * 2048),
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(quick.sectors(), 128 * 2048);
+        assert_eq!(exact.sectors(), 128 * 2048);
+        assert_eq!(quick.sectors(), exact.sectors());
     }
 
     #[test]
