@@ -29,6 +29,7 @@ fn provision_label_defaults_to_jiangsu_safe6_and_remains_editable() {
     assert_eq!(form.volume_label, "启动区");
     assert_eq!(form.size_mode, ProvisionSizeMode::Manual);
     assert_eq!(form.boot_sectors, "20417");
+    assert_eq!(form.encrypt_mib, "1024");
     assert!(edpcli::provision::OnlyId::parse(&form.label_id).is_ok());
     assert!(!form.force_change_password);
     assert!(!form.format_boot && !form.format_share && !form.format_encrypt);
@@ -134,7 +135,8 @@ fn provision_manual_ranges_follow_remaining_capacity_and_ratio_mode_fills_usable
     state.provision_mut().form.share_mib = "1024".into();
     let encrypt_hint = state.provision_field_hint(3).expect("encrypt range hint");
     let expected_max = (usable_sectors - 20_417 - 1024 * 2048) / 2048;
-    assert_eq!(encrypt_hint, format!("可填 1..{expected_max} MiB"));
+    assert!(encrypt_hint.contains(&format!("可填 1..{expected_max} MiB")));
+    assert!(encrypt_hint.contains("剩余"));
 
     state.provision_mut().field_selected = 0;
     assert!(state.provision_toggle_selected_option());
@@ -149,6 +151,72 @@ fn provision_manual_ranges_follow_remaining_capacity_and_ratio_mode_fills_usable
         request.share_mib.unwrap() + request.encrypt_mib.unwrap(),
         (usable_sectors - 20_417) / 2048
     );
+}
+
+#[test]
+fn mode0_defaults_share_to_remaining_space_once_without_linking_fields() {
+    let mut state = AppState::new();
+    state.replace_devices(vec![device(64_000_000_000)]);
+    state.navigate(NavCommand::WorkspaceProvision, 20);
+    assert_eq!(state.provision_begin_selected(), ProvisionKind::Mode0);
+
+    let total_sectors = 64_000_000_000u64 / 512;
+    let lce =
+        edpcli::protocol::lba7_compat::locate_lba7_compatibility_extent_from_verified_usb_capacity(
+            total_sectors,
+            512,
+        )
+        .unwrap();
+    let usable_sectors = lce.start_lba - edpcli::provision::OFFICIAL_PARTITION_START_SECTOR;
+    let expected_share_mib = (usable_sectors - 20_417 - 1024 * 2048) / 2048;
+
+    assert_eq!(state.provision().form.boot_sectors, "20417");
+    assert_eq!(state.provision().form.encrypt_mib, "1024");
+    assert_eq!(
+        state.provision().form.share_mib,
+        expected_share_mib.to_string()
+    );
+    let expected_remainder = usable_sectors - 20_417 - expected_share_mib * 2048 - 1024 * 2048;
+    let share_hint = state.provision_field_hint(2).expect("share capacity hint");
+    assert!(share_hint.contains(&format!("剩余 {expected_remainder} 扇区")));
+
+    let original_share = state.provision().form.share_mib.clone();
+    state.provision_mut().field_selected = 3;
+    for _ in 0..4 {
+        state.provision_backspace();
+    }
+    for ch in "512".chars() {
+        state.provision_push_char(ch);
+    }
+    assert_eq!(state.provision().form.encrypt_mib, "512");
+    assert_eq!(state.provision().form.share_mib, original_share);
+    assert!(state
+        .provision_field_hint(3)
+        .expect("encrypt capacity hint")
+        .contains("剩余"));
+
+    state.provision_begin_selected();
+    assert_eq!(state.provision().form.encrypt_mib, "512");
+    assert_eq!(state.provision().form.share_mib, original_share);
+
+    state.replace_devices(vec![device(32_000_000_000)]);
+    state.provision_begin_selected();
+    assert_eq!(state.provision().form.encrypt_mib, "1024");
+    assert_ne!(state.provision().form.share_mib, original_share);
+}
+
+#[test]
+fn mode0_capacity_hint_reports_overflow_without_rebalancing_other_fields() {
+    let mut state = AppState::new();
+    state.replace_devices(vec![device(64_000_000_000)]);
+    state.navigate(NavCommand::WorkspaceProvision, 20);
+    state.provision_begin_selected();
+    let original_encrypt = state.provision().form.encrypt_mib.clone();
+    state.provision_mut().form.share_mib = "999999999".into();
+
+    let hint = state.provision_field_hint(2).expect("overflow hint");
+    assert!(hint.contains("超出"));
+    assert_eq!(state.provision().form.encrypt_mib, original_encrypt);
 }
 
 #[test]

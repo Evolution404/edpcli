@@ -349,7 +349,7 @@ impl Default for ProvisionForm {
             boot_mib: "512".into(),
             boot_sectors: crate::provision::DEFAULT_MODE0_BOOT_SECTORS.to_string(),
             share_mib: "1024".into(),
-            encrypt_mib: "2048".into(),
+            encrypt_mib: "1024".into(),
             boot_ratio: "1".into(),
             share_ratio: "2".into(),
             encrypt_ratio: "4".into(),
@@ -388,6 +388,7 @@ pub struct ProvisionState {
     pub offline_field_selected: usize,
     pub offline_result: Option<OfflineConvertView>,
     pub message: Option<String>,
+    mode0_capacity_defaults_target: Option<(u32, u64, Option<String>)>,
 }
 
 impl Default for ProvisionState {
@@ -405,6 +406,7 @@ impl Default for ProvisionState {
             offline_field_selected: 0,
             offline_result: None,
             message: None,
+            mode0_capacity_defaults_target: None,
         }
     }
 }
@@ -1784,6 +1786,40 @@ impl AppState {
         }
     }
 
+    fn initialize_mode0_capacity_defaults(&mut self) {
+        const SECTORS_PER_MIB: u64 = 2048;
+        const DEFAULT_ENCRYPT_MIB: u64 = 1024;
+        if self.provision.kind != ProvisionKind::Mode0 {
+            return;
+        }
+        let Some(target) = self
+            .selected_device()
+            .map(|row| (row.disk, row.size, row.device_id.clone()))
+        else {
+            return;
+        };
+        if self.provision.mode0_capacity_defaults_target.as_ref() == Some(&target) {
+            return;
+        }
+        let Some(usable_sectors) = self.provision_total_usable_sectors() else {
+            return;
+        };
+        let boot_sectors = crate::provision::DEFAULT_MODE0_BOOT_SECTORS;
+        let Some(share_sectors) = usable_sectors.checked_sub(
+            boot_sectors.saturating_add(DEFAULT_ENCRYPT_MIB.saturating_mul(SECTORS_PER_MIB)),
+        ) else {
+            return;
+        };
+        let share_mib = share_sectors / SECTORS_PER_MIB;
+        if share_mib == 0 {
+            return;
+        }
+        self.provision.form.boot_sectors = boot_sectors.to_string();
+        self.provision.form.encrypt_mib = DEFAULT_ENCRYPT_MIB.to_string();
+        self.provision.form.share_mib = share_mib.to_string();
+        self.provision.mode0_capacity_defaults_target = Some(target);
+    }
+
     pub fn provision_begin_selected(&mut self) -> ProvisionKind {
         let index = self.selected.min(ProvisionKind::ALL.len() - 1);
         let kind = ProvisionKind::ALL[index];
@@ -1819,6 +1855,7 @@ impl AppState {
                 self.provision.form.user = user;
                 self.provision.form.dept = dept;
             }
+            self.initialize_mode0_capacity_defaults();
             self.provision.stage = ProvisionStage::Form;
         }
         kind
@@ -2286,6 +2323,54 @@ impl AppState {
         Ok(result)
     }
 
+    fn provision_manual_capacity_delta_hint(&self) -> Option<String> {
+        const SECTORS_PER_MIB: u64 = 2048;
+        if self.provision.form.size_mode != ProvisionSizeMode::Manual {
+            return None;
+        }
+        let usable = self.provision_total_usable_sectors()?;
+        let parse_mib = |value: &str| {
+            value
+                .parse::<u64>()
+                .ok()
+                .filter(|value| *value > 0)
+                .and_then(|value| value.checked_mul(SECTORS_PER_MIB))
+        };
+        let requested = match self.provision.kind {
+            ProvisionKind::Mode0 => self
+                .provision
+                .form
+                .boot_sectors
+                .parse::<u64>()
+                .ok()
+                .filter(|value| *value > 0)?
+                .checked_add(parse_mib(&self.provision.form.share_mib)?)?
+                .checked_add(parse_mib(&self.provision.form.encrypt_mib)?)?,
+            ProvisionKind::Mode1 => parse_mib(&self.provision.form.share_mib)?
+                .checked_add(parse_mib(&self.provision.form.encrypt_mib)?)?,
+            ProvisionKind::Mode2 => parse_mib(&self.provision.form.encrypt_mib)?,
+            ProvisionKind::Mode3 => parse_mib(&self.provision.form.boot_mib)?
+                .checked_add(parse_mib(&self.provision.form.share_mib)?)?,
+            ProvisionKind::Convert | ProvisionKind::Offline => return None,
+        };
+        let describe = |prefix: &str, sectors: u64| {
+            let mib = sectors / SECTORS_PER_MIB;
+            let tail = sectors % SECTORS_PER_MIB;
+            if mib == 0 {
+                format!("{prefix} {tail} 扇区")
+            } else if tail == 0 {
+                format!("{prefix} {mib} MiB")
+            } else {
+                format!("{prefix} {mib} MiB + {tail} 扇区")
+            }
+        };
+        Some(if requested <= usable {
+            describe("剩余", usable - requested)
+        } else {
+            describe("超出", requested - usable)
+        })
+    }
+
     pub fn provision_field_hint(&self, display_index: usize) -> Option<String> {
         let slot = self.provision_field_slot(display_index)?;
         const SECTORS_PER_MIB: u64 = 2048;
@@ -2295,6 +2380,8 @@ impl AppState {
             return usable.map(|value| {
                 if self.provision.form.size_mode == ProvisionSizeMode::Ratio {
                     format!("当前盘可分配 {value} MiB，将按权重自动分配")
+                } else if let Some(delta) = self.provision_manual_capacity_delta_hint() {
+                    format!("当前盘可分配 {value} MiB，已避开 LCE · {delta}")
                 } else {
                     format!("当前盘可分配 {value} MiB，已避开 LCE")
                 }
@@ -2311,13 +2398,17 @@ impl AppState {
                 .saturating_add(encrypt)
                 .saturating_mul(SECTORS_PER_MIB);
             let max = total.saturating_sub(reserved);
-            return Some(if max == 0 {
-                "容量已用尽或超限".into()
+            let range = if max == 0 {
+                "容量已用尽或超限".to_string()
             } else {
                 format!(
                     "可填 1..{max} 扇区 · 官方默认 {}（LBA63→20480）",
                     crate::provision::DEFAULT_MODE0_BOOT_SECTORS
                 )
+            };
+            return Some(match self.provision_manual_capacity_delta_hint() {
+                Some(delta) => format!("{range} · {delta}"),
+                None => range,
             });
         }
         if self.provision.form.size_mode == ProvisionSizeMode::Ratio {
@@ -2346,10 +2437,14 @@ impl AppState {
             reserved = reserved.saturating_add(value);
         }
         let max = usable.saturating_sub(reserved);
-        Some(if max == 0 {
-            "容量已用尽或超限".into()
+        let range = if max == 0 {
+            "容量已用尽或超限".to_string()
         } else {
             format!("可填 1..{max} MiB")
+        };
+        Some(match self.provision_manual_capacity_delta_hint() {
+            Some(delta) => format!("{range} · {delta}"),
+            None => range,
         })
     }
 
