@@ -3,22 +3,20 @@
 //! 扇区结构解析仍由 `inspect.rs` 负责；这里只处理显式备份文件或当前物理盘来源、
 //! 展示模式和导出，避免 `cli.rs` 直接承担 inspect 业务流程。
 
-use std::collections::BTreeMap;
 use std::fs;
-use std::io;
 use std::path::{Path, PathBuf};
 
+use crate::application::inspect::{
+    AdvancedInspectMode, AdvancedInspectRequest, AdvancedInspectWorkspace,
+};
 use crate::cli::StdPrompter;
 use crate::cli_args::{InspectMode, InspectOpts};
 use crate::common::{EXIT_BACKUP, EXIT_IO, EXIT_OK, EXIT_TARGET, EXIT_USAGE, SECTOR};
-use crate::diskio::{self, raw_path, FileDev};
+use crate::diskio;
 use crate::elevate;
-use crate::identify::identify;
 use crate::inspect::InspectMeta;
-use crate::inspect_target::{InspectDiskContext, SectorRegion};
 use crate::selectors::DeviceSelector;
-use crate::sha256::sha256_hex;
-use crate::sysinfo::{self, CmdRunner};
+use crate::sysinfo::CmdRunner;
 
 pub(crate) fn resolve_inspect_file(backup_dir: &Path, target: &str) -> Result<PathBuf, String> {
     let raw = Path::new(target);
@@ -68,34 +66,12 @@ fn plain_hex(data: &[u8]) -> String {
     out
 }
 
-fn export_bytes(dir: &Path, lba: u64, suffix: &str, data: &[u8]) -> io::Result<()> {
-    fs::create_dir_all(dir)?;
-    let base = format!("LBA{lba}_{suffix}");
-    fs::write(dir.join(format!("{base}.bin")), data)?;
-    fs::write(dir.join(format!("{base}.hex")), plain_hex(data))?;
-    Ok(())
-}
-
-fn export_meta(dir: &Path, lba: u64, text: &str) -> io::Result<()> {
-    fs::create_dir_all(dir)?;
-    fs::write(dir.join(format!("LBA{lba}_meta.txt")), text)
-}
-
 fn selected_lbas(opts: &InspectOpts) -> Vec<u64> {
     if opts.lbas.is_empty() {
         (0..crate::common::METADATA_SECTOR_COUNT as u64).collect()
     } else {
         opts.lbas.clone()
     }
-}
-
-fn region_labels(context: &InspectDiskContext, lba: u64) -> String {
-    context
-        .regions(lba)
-        .iter()
-        .map(SectorRegion::label)
-        .collect::<Vec<_>>()
-        .join("；")
 }
 
 fn print_inspect_meta(meta: &InspectMeta) {
@@ -122,86 +98,51 @@ fn print_inspect_meta(meta: &InspectMeta) {
     }
 }
 
-fn render_inspect_source<F>(
-    source_label: &str,
-    meta: &InspectMeta,
-    context: &InspectDiskContext,
-    opts: &InspectOpts,
-    mut read: F,
-) -> i32
-where
-    F: FnMut(u64) -> io::Result<Vec<u8>>,
-{
-    println!("{}  {}", crate::ui::bold("来源"), source_label);
-    print_inspect_meta(meta);
-    println!(
-        "{}  {}",
-        crate::ui::bold("模式"),
-        match opts.mode {
-            InspectMode::Raw => "raw",
-            InspectMode::Decode => "decode",
-            InspectMode::Meta => "meta",
-        }
-    );
+fn request_from_opts(opts: &InspectOpts) -> AdvancedInspectRequest {
+    AdvancedInspectRequest {
+        mode: match opts.mode {
+            InspectMode::Raw => AdvancedInspectMode::Raw,
+            InspectMode::Decode => AdvancedInspectMode::Decode,
+            InspectMode::Meta => AdvancedInspectMode::Meta,
+        },
+        lbas: selected_lbas(opts),
+        export_dir: opts.export.as_deref().map(PathBuf::from),
+        device_id_override: opts.device_id.clone(),
+    }
+}
 
-    let export_dir = opts.export.as_deref().map(PathBuf::from);
-    for lba in selected_lbas(opts) {
-        if let Err(error) = context.validate_lba(lba) {
-            eprintln!("{}", crate::ui::red(&format!("错误: {error}")));
-            return EXIT_TARGET;
-        }
-        let raw = match read(lba) {
-            Ok(raw) if raw.len() == SECTOR => raw,
-            Ok(raw) => {
-                eprintln!(
-                    "{}",
-                    crate::ui::red(&format!(
-                        "错误: LBA{lba} 返回 {}B，预期 {SECTOR}B",
-                        raw.len()
-                    ))
-                );
-                return EXIT_IO;
-            }
-            Err(error) => {
-                eprintln!(
-                    "{}",
-                    crate::ui::red(&format!("错误: 读取 LBA{lba} 失败: {error}"))
-                );
-                return EXIT_IO;
-            }
-        };
+fn inspect_error_code(message: &str, backup_source: bool) -> i32 {
+    if message.contains("越界") {
+        return EXIT_TARGET;
+    }
+    if message.contains("EDPB 未采集")
+        || message.contains("Artifact 截断")
+        || message.contains("读取 LBA")
+        || message.contains("读取协议上下文")
+        || message.contains("无法只读打开")
+        || message.contains("只读取到")
+        || message.contains("导出")
+    {
+        return EXIT_IO;
+    }
+    if backup_source {
+        EXIT_BACKUP
+    } else {
+        EXIT_TARGET
+    }
+}
 
-        let mut partition_boot = None;
-        let mut partition_boot_issue = None;
-        if opts.mode != InspectMode::Raw {
-            if let Some(partition) = context.partition_for_lba(lba) {
-                if partition.start_sector == lba {
-                    partition_boot = Some(raw.clone());
-                } else {
-                    match read(partition.start_sector) {
-                        Ok(boot) if boot.len() == SECTOR => partition_boot = Some(boot),
-                        Ok(boot) => {
-                            partition_boot_issue = Some(format!(
-                                "分区起始 LBA{} 只读取到 {}B",
-                                partition.start_sector,
-                                boot.len()
-                            ));
-                        }
-                        Err(error) => {
-                            partition_boot_issue = Some(format!(
-                                "无法读取分区起始 LBA{}: {error}",
-                                partition.start_sector
-                            ));
-                        }
-                    }
-                }
-            }
-        }
+fn render_workspace(workspace: &AdvancedInspectWorkspace) -> i32 {
+    println!("{}  {}", crate::ui::bold("来源"), workspace.source);
+    print_inspect_meta(&workspace.meta);
+    println!("{}  {}", crate::ui::bold("模式"), workspace.mode.label());
 
+    for item in &workspace.items {
         println!();
-        match opts.mode {
-            InspectMode::Raw => {
-                let offset = match lba.checked_mul(SECTOR as u64) {
+        let regions = item.regions.join("；");
+        match workspace.mode {
+            AdvancedInspectMode::Raw => {
+                let offset = match item.lba.checked_mul(SECTOR as u64) {
                     Some(offset) => offset,
                     None => {
                         eprintln!("{}", crate::ui::red("错误: LBA 字节偏移溢出"));
@@ -211,130 +152,51 @@ where
                 println!(
                     "{}",
                     crate::ui::bold(&format!(
-                        "LBA{lba}  offset=0x{offset:X}  区域={}  SHA-256={}  非零={}/512",
-                        region_labels(context, lba),
-                        sha256_hex(&raw),
-                        raw.iter().filter(|&&byte| byte != 0).count()
+                        "LBA{}  offset=0x{offset:X}  区域={}  SHA-256={}  非零={}/512",
+                        item.lba, regions, item.raw_sha256, item.raw_nonzero
                     ))
                 );
-                print!("{}", plain_hex(&raw));
-                if let Some(dir) = &export_dir {
-                    if let Err(error) = export_bytes(dir, lba, "raw", &raw) {
-                        eprintln!("{}", crate::ui::red(&format!("错误: 导出失败: {error}")));
-                        return EXIT_IO;
-                    }
-                }
+                print!("{}", plain_hex(&item.raw));
             }
-            InspectMode::Decode => {
-                let result = crate::application::inspect::decode_sector(
-                    context,
-                    meta,
-                    lba,
-                    &raw,
-                    partition_boot.as_deref(),
-                );
-                let (decoded, method) = match result {
-                    Ok(value) => value,
-                    Err(error) => {
-                        eprintln!("{}", crate::ui::red(&format!("错误: {error}")));
-                        return EXIT_TARGET;
-                    }
+            AdvancedInspectMode::Decode => {
+                let Some(decoded) = item.decoded.as_deref() else {
+                    eprintln!(
+                        "{}",
+                        crate::ui::red(&format!("错误: LBA{} 缺少 decoded 结果", item.lba))
+                    );
+                    return EXIT_TARGET;
                 };
-                println!("{}  {}", crate::ui::bold(&format!("LBA{lba}")), method);
+                let method = item.method.as_deref().unwrap_or("decode");
+                println!(
+                    "{}  {}",
+                    crate::ui::bold(&format!("LBA{}", item.lba)),
+                    method
+                );
                 println!(
                     "  区域: {}  decoded SHA-256={}",
-                    region_labels(context, lba),
-                    sha256_hex(&decoded)
+                    regions,
+                    item.decoded_sha256.as_deref().unwrap_or("<missing>")
                 );
-                print!("{}", plain_hex(&decoded));
-                if let Some(dir) = &export_dir {
-                    if let Err(error) = export_bytes(dir, lba, "decoded", &decoded) {
-                        eprintln!("{}", crate::ui::red(&format!("错误: 导出失败: {error}")));
-                        return EXIT_IO;
-                    }
-                }
+                print!("{}", plain_hex(decoded));
             }
-            InspectMode::Meta => {
-                let text = match crate::application::inspect::sector_meta_text(
-                    context,
-                    meta,
-                    lba,
-                    &raw,
-                    partition_boot.as_deref(),
-                    partition_boot_issue.as_deref(),
-                ) {
-                    Ok(text) => text,
-                    Err(error) => {
-                        eprintln!("{}", crate::ui::red(&format!("错误: {error}")));
-                        return EXIT_TARGET;
-                    }
+            AdvancedInspectMode::Meta => {
+                let Some(text) = item.meta_text.as_deref() else {
+                    eprintln!(
+                        "{}",
+                        crate::ui::red(&format!("错误: LBA{} 缺少 meta 结果", item.lba))
+                    );
+                    return EXIT_TARGET;
                 };
                 print!("{text}");
-                if let Some(dir) = &export_dir {
-                    if let Err(error) = export_meta(dir, lba, &text) {
-                        eprintln!("{}", crate::ui::red(&format!("错误: 导出失败: {error}")));
-                        return EXIT_IO;
-                    }
-                }
             }
         }
     }
-    if let Some(dir) = &export_dir {
+
+    if let Some(dir) = &workspace.export_dir {
         println!();
         println!("{}  {}", crate::ui::green("已导出"), dir.display());
     }
     EXIT_OK
-}
-
-struct BackupSectorReader {
-    path: PathBuf,
-    manifest: crate::edpb::Manifest,
-    protocol: Vec<u8>,
-    cache: BTreeMap<String, Vec<u8>>,
-}
-
-impl BackupSectorReader {
-    fn read_sector(&mut self, lba: u64) -> io::Result<Vec<u8>> {
-        if lba < crate::common::METADATA_SECTOR_COUNT as u64 {
-            let start = usize::try_from(lba).unwrap() * SECTOR;
-            return Ok(self.protocol[start..start + SECTOR].to_vec());
-        }
-
-        let found = self.manifest.extents.iter().find_map(|extent| {
-            let end = extent.start_lba.checked_add(extent.sector_count)?;
-            if lba < extent.start_lba || lba >= end {
-                return None;
-            }
-            let artifact = self.manifest.artifacts.iter().find(|artifact| {
-                artifact.kind == "raw_sectors"
-                    && artifact.source_extent_ids.iter().any(|id| id == &extent.id)
-            })?;
-            Some((extent.start_lba, artifact.id.clone()))
-        });
-        let Some((start_lba, artifact_id)) = found else {
-            return Err(io::Error::new(
-                io::ErrorKind::NotFound,
-                format!("EDPB 未采集 LBA{lba} 的原始扇区"),
-            ));
-        };
-
-        if !self.cache.contains_key(&artifact_id) {
-            let data =
-                crate::edpb::read_artifact(&self.path, &artifact_id).map_err(io::Error::other)?;
-            self.cache.insert(artifact_id.clone(), data);
-        }
-        let data = self
-            .cache
-            .get(&artifact_id)
-            .expect("刚插入的 Artifact 必须存在");
-        let offset = usize::try_from(lba - start_lba)
-            .ok()
-            .and_then(|sector| sector.checked_mul(SECTOR))
-            .ok_or_else(|| io::Error::other("EDPB Artifact 扇区偏移溢出"))?;
-        data.get(offset..offset + SECTOR)
-            .map(|sector| sector.to_vec())
-            .ok_or_else(|| io::Error::new(io::ErrorKind::UnexpectedEof, "EDPB Artifact 截断"))
-    }
 }
 
 fn inspect_backup_flow(opts: InspectOpts) -> i32 {
@@ -350,56 +212,14 @@ fn inspect_backup_flow(opts: InspectOpts) -> i32 {
             return EXIT_BACKUP;
         }
     };
-    let verified = match crate::edpb::verify_file(&path) {
-        Ok(container) => container,
+    let request = request_from_opts(&opts);
+    match crate::application::inspect::load_backup_advanced_inspect(&path, &request) {
+        Ok(workspace) => render_workspace(&workspace),
         Err(message) => {
-            eprintln!(
-                "{}",
-                crate::ui::red(&format!(
-                    "错误: EDPB 校验失败 {}: {message}",
-                    path.display()
-                ))
-            );
-            return EXIT_BACKUP;
+            eprintln!("{}", crate::ui::red(&format!("错误: {message}")));
+            inspect_error_code(&message, true)
         }
-    };
-    let protocol = match crate::edpb::read_raw_protocol(&path) {
-        Ok(data) => data,
-        Err(message) => {
-            eprintln!(
-                "{}",
-                crate::ui::red(&format!("错误: 读取 EDPB LBA0-LBA12 失败: {message}"))
-            );
-            return EXIT_BACKUP;
-        }
-    };
-    let mut meta = InspectMeta {
-        device_id: Some(verified.manifest.device.device_id.clone()),
-        vid: Some(verified.manifest.device.vid.clone()),
-        pid: Some(verified.manifest.device.pid.clone()),
-        size_bytes: verified.manifest.geometry.capacity_bytes,
-        onlyid: verified.manifest.device.onlyid.clone(),
-    };
-    if let Some(did) = &opts.device_id {
-        meta.device_id = Some(did.clone());
     }
-    let Some(total_sectors) = verified.manifest.geometry.total_sectors else {
-        eprintln!(
-            "{}",
-            crate::ui::red("错误: EDPB 缺少 total_sectors，无法校验任意 LBA")
-        );
-        return EXIT_BACKUP;
-    };
-    let context = InspectDiskContext::new(protocol.clone(), meta.device_id.clone(), total_sectors);
-    let mut reader = BackupSectorReader {
-        path: path.clone(),
-        manifest: verified.manifest,
-        protocol,
-        cache: BTreeMap::new(),
-    };
-    render_inspect_source(&path.display().to_string(), &meta, &context, &opts, |lba| {
-        reader.read_sector(lba)
-    })
 }
 
 fn inspect_disk_flow(runner: &dyn CmdRunner, mut opts: InspectOpts) -> i32 {
@@ -428,66 +248,14 @@ fn inspect_disk_flow(runner: &dyn CmdRunner, mut opts: InspectOpts) -> i32 {
         }
     };
     opts.disk = Some(n);
-    let path = raw_path(n);
-    let mut dev = match FileDev::open_rdonly(&path) {
-        Ok(dev) => dev,
-        Err(error) => {
-            eprintln!(
-                "{}",
-                crate::ui::red(&format!("错误: 无法只读打开 disk{n}: {error}"))
-            );
-            return EXIT_IO;
-        }
-    };
-
-    let Some(total_sectors) = sysinfo::disk_total_sectors(runner, n) else {
-        eprintln!("{}", crate::ui::red("错误: 无法取得设备总扇区数"));
-        return EXIT_TARGET;
-    };
-
-    let mut protocol = Vec::with_capacity(crate::common::METADATA_IMAGE_LEN);
-    for lba in 0..crate::common::METADATA_SECTOR_COUNT as u64 {
-        match dev.read_sector_u64(lba) {
-            Ok(raw) if raw.len() == SECTOR => protocol.extend_from_slice(&raw),
-            Ok(raw) => {
-                eprintln!(
-                    "{}",
-                    crate::ui::red(&format!("错误: LBA{lba} 只读取到 {}B", raw.len()))
-                );
-                return EXIT_IO;
-            }
-            Err(error) => {
-                eprintln!(
-                    "{}",
-                    crate::ui::red(&format!("错误: 读取协议上下文 LBA{lba} 失败: {error}"))
-                );
-                return EXIT_IO;
-            }
+    let request = request_from_opts(&opts);
+    match crate::application::inspect::load_disk_advanced_inspect(runner, n, &request) {
+        Ok(workspace) => render_workspace(&workspace),
+        Err(message) => {
+            eprintln!("{}", crate::ui::red(&format!("错误: {message}")));
+            inspect_error_code(&message, false)
         }
     }
-
-    let raw7 = &protocol[7 * SECTOR..8 * SECTOR];
-    let id = identify(runner, n, raw7).device_id;
-    let (vid, pid) = sysinfo::usb_vid_pid(runner, n);
-    let mut meta = InspectMeta {
-        device_id: id,
-        vid: (vid != "xxxx").then_some(vid),
-        pid: (pid != "xxxx").then_some(pid),
-        size_bytes: total_sectors.checked_mul(SECTOR as u64),
-        onlyid: diskio::lba4_label_id_from(&protocol[4 * SECTOR..5 * SECTOR]),
-    };
-    if let Some(did) = &opts.device_id {
-        meta.device_id = Some(did.clone());
-    }
-
-    let context = InspectDiskContext::new(protocol, meta.device_id.clone(), total_sectors);
-    render_inspect_source(
-        &format!("物理盘 disk{n} ({path})"),
-        &meta,
-        &context,
-        &opts,
-        |lba| dev.read_sector_u64(lba),
-    )
 }
 
 pub(crate) fn inspect_flow(runner: &dyn CmdRunner, opts: InspectOpts) -> i32 {

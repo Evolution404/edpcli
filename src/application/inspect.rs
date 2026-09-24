@@ -1,5 +1,6 @@
 //! Read-only inspect application service shared by CLI/TUI frontends.
 
+use std::io;
 use std::path::Path;
 
 use crate::common::{METADATA_IMAGE_LEN, METADATA_SECTOR_COUNT, SECTOR};
@@ -29,6 +30,63 @@ pub fn load_disk_inspect(
 }
 
 pub const MAX_ADVANCED_INSPECT_SECTORS: usize = 65_536;
+
+pub trait SectorReader {
+    fn read_sector(&mut self, lba: u64) -> io::Result<Vec<u8>>;
+
+    fn read_range(&mut self, start_lba: u64, sector_count: usize) -> io::Result<Vec<u8>> {
+        let capacity = sector_count
+            .checked_mul(SECTOR)
+            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "扇区范围字节长度溢出"))?;
+        let mut out = Vec::with_capacity(capacity);
+        for index in 0..sector_count {
+            let lba = start_lba
+                .checked_add(index as u64)
+                .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "LBA 范围溢出"))?;
+            let sector = self.read_sector(lba)?;
+            if sector.len() != SECTOR {
+                return Err(io::Error::new(
+                    io::ErrorKind::UnexpectedEof,
+                    format!("LBA{lba} 返回 {}B，预期 {SECTOR}B", sector.len()),
+                ));
+            }
+            out.extend_from_slice(&sector);
+        }
+        Ok(out)
+    }
+}
+
+impl SectorReader for FileDev {
+    fn read_sector(&mut self, lba: u64) -> io::Result<Vec<u8>> {
+        self.read_sector_u64(lba)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InspectDecoderKind {
+    Protocol,
+    Lce,
+    Partition,
+}
+
+pub const DECODER_REGISTRY: &[InspectDecoderKind] = &[
+    InspectDecoderKind::Protocol,
+    InspectDecoderKind::Lce,
+    InspectDecoderKind::Partition,
+];
+
+impl InspectDecoderKind {
+    fn matches(self, context: &crate::inspect_target::InspectDiskContext, lba: u64) -> bool {
+        match self {
+            Self::Protocol => lba <= u64::from(crate::common::METADATA_LAST_LBA),
+            Self::Lce => context.lce.as_ref().is_some_and(|extent| {
+                lba >= extent.start_lba
+                    && lba < extent.start_lba.saturating_add(extent.sector_count)
+            }),
+            Self::Partition => context.partition_for_lba(lba).is_some(),
+        }
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AdvancedInspectMode {
@@ -71,6 +129,123 @@ pub struct AdvancedInspectRequest {
     pub device_id_override: Option<String>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AbsoluteByteRange {
+    pub start: u64,
+    pub end_exclusive: u64,
+}
+
+impl AbsoluteByteRange {
+    pub fn len(self) -> u64 {
+        self.end_exclusive - self.start
+    }
+
+    pub fn start_lba(self) -> u64 {
+        self.start / SECTOR as u64
+    }
+
+    pub fn end_lba(self) -> u64 {
+        if self.end_exclusive == self.start {
+            return self.start_lba();
+        }
+        (self.end_exclusive - 1) / SECTOR as u64
+    }
+
+    pub fn spans_sectors(self) -> bool {
+        self.start_lba() != self.end_lba()
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InspectFieldType {
+    Magic,
+    Text,
+    Identity,
+    Address,
+    Size,
+    Flag,
+    Checksum,
+}
+
+impl From<crate::inspect::FieldStyle> for InspectFieldType {
+    fn from(style: crate::inspect::FieldStyle) -> Self {
+        match style {
+            crate::inspect::FieldStyle::Magic => Self::Magic,
+            crate::inspect::FieldStyle::Text => Self::Text,
+            crate::inspect::FieldStyle::Identity => Self::Identity,
+            crate::inspect::FieldStyle::Address => Self::Address,
+            crate::inspect::FieldStyle::Size => Self::Size,
+            crate::inspect::FieldStyle::Flag => Self::Flag,
+            crate::inspect::FieldStyle::Checksum => Self::Checksum,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InspectFieldStatus {
+    Known,
+    Unknown,
+    Reserved,
+    Preserved,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InspectField {
+    pub range: AbsoluteByteRange,
+    pub field_type: InspectFieldType,
+    pub raw: Vec<u8>,
+    pub decoded: Vec<u8>,
+    pub status: InspectFieldStatus,
+    pub label: String,
+    pub value: String,
+    pub style: crate::inspect::FieldStyle,
+    pub group: Option<String>,
+    pub children: Vec<crate::inspect::FieldChild>,
+}
+
+fn materialize_protocol_fields(
+    lba: u64,
+    raw: &[u8],
+    decoded: &[u8],
+    fields: &[crate::inspect::SectorField],
+) -> Result<Vec<InspectField>, String> {
+    let base = lba
+        .checked_mul(SECTOR as u64)
+        .ok_or_else(|| format!("LBA{lba} 字段绝对字节偏移溢出"))?;
+    fields
+        .iter()
+        .map(|field| {
+            if field.end < field.start || field.end > raw.len() || field.end > decoded.len() {
+                return Err(format!(
+                    "LBA{lba} 字段 {} range +0x{:X}..+0x{:X} 越界",
+                    field.label, field.start, field.end
+                ));
+            }
+            let start = base
+                .checked_add(field.start as u64)
+                .ok_or_else(|| format!("LBA{lba} 字段 {} 绝对起点溢出", field.label))?;
+            let end_exclusive = base
+                .checked_add(field.end as u64)
+                .ok_or_else(|| format!("LBA{lba} 字段 {} 绝对终点溢出", field.label))?;
+            Ok(InspectField {
+                range: AbsoluteByteRange {
+                    start,
+                    end_exclusive,
+                },
+                field_type: field.style.into(),
+                raw: raw[field.start..field.end].to_vec(),
+                decoded: decoded[field.start..field.end].to_vec(),
+                status: InspectFieldStatus::Known,
+                label: field.label.clone(),
+                value: field.value.clone(),
+                style: field.style,
+                group: field.group.clone(),
+                children: field.children.clone(),
+            })
+        })
+        .collect()
+}
+
 #[derive(Debug, Clone)]
 pub struct AdvancedInspectItem {
     pub lba: u64,
@@ -81,7 +256,7 @@ pub struct AdvancedInspectItem {
     pub decoded: Option<Vec<u8>>,
     pub decoded_sha256: Option<String>,
     pub method: Option<String>,
-    pub fields: Vec<crate::inspect::SectorField>,
+    pub fields: Vec<InspectField>,
     pub notes: Vec<String>,
     pub meta_text: Option<String>,
 }
@@ -237,13 +412,25 @@ pub fn decode_sector(
     raw: &[u8],
     partition_boot_raw: Option<&[u8]>,
 ) -> Result<(Vec<u8>, String), String> {
-    if lba <= u64::from(crate::common::METADATA_LAST_LBA) {
-        let lba32 = u32::try_from(lba).map_err(|_| format!("LBA{lba} 超出协议解析器范围"))?;
-        let view =
-            inspect::analyze_sector_with_context(lba32, raw, meta, Some(&context.protocol_image));
-        Ok((view.decoded, view.method))
-    } else {
-        context.decode_non_protocol_with_boot(lba, raw, partition_boot_raw)
+    let decoder = DECODER_REGISTRY
+        .iter()
+        .copied()
+        .find(|decoder| decoder.matches(context, lba))
+        .ok_or_else(|| format!("LBA{lba} 不属于已注册 decoder 区域；raw 可读，decode 拒绝猜测"))?;
+    match decoder {
+        InspectDecoderKind::Protocol => {
+            let lba32 = u32::try_from(lba).map_err(|_| format!("LBA{lba} 超出协议解析器范围"))?;
+            let view = inspect::analyze_sector_with_context(
+                lba32,
+                raw,
+                meta,
+                Some(&context.protocol_image),
+            );
+            Ok((view.decoded, view.method))
+        }
+        InspectDecoderKind::Lce | InspectDecoderKind::Partition => {
+            context.decode_non_protocol_with_boot(lba, raw, partition_boot_raw)
+        }
     }
 }
 
@@ -360,16 +547,13 @@ pub fn sector_meta_text(
     Ok(out)
 }
 
-fn run_advanced_source<F>(
+fn run_advanced_source<R: SectorReader + ?Sized>(
     source: String,
     meta: InspectMeta,
     context: crate::inspect_target::InspectDiskContext,
     request: &AdvancedInspectRequest,
-    mut read: F,
-) -> Result<AdvancedInspectWorkspace, String>
-where
-    F: FnMut(u64) -> std::io::Result<Vec<u8>>,
-{
+    reader: &mut R,
+) -> Result<AdvancedInspectWorkspace, String> {
     let lbas = if request.lbas.is_empty() {
         (0..METADATA_SECTOR_COUNT as u64).collect::<Vec<_>>()
     } else {
@@ -384,7 +568,9 @@ where
     let mut items = Vec::with_capacity(lbas.len());
     for lba in lbas {
         context.validate_lba(lba)?;
-        let raw = read(lba).map_err(|error| format!("读取 LBA{lba} 失败: {error}"))?;
+        let raw = reader
+            .read_sector(lba)
+            .map_err(|error| format!("读取 LBA{lba} 失败: {error}"))?;
         if raw.len() != SECTOR {
             return Err(format!("LBA{lba} 返回 {}B，预期 {SECTOR}B", raw.len()));
         }
@@ -396,7 +582,7 @@ where
                 if partition.start_sector == lba {
                     partition_boot = Some(raw.clone());
                 } else {
-                    match read(partition.start_sector) {
+                    match reader.read_sector(partition.start_sector) {
                         Ok(boot) if boot.len() == SECTOR => partition_boot = Some(boot),
                         Ok(boot) => {
                             partition_boot_issue = Some(format!(
@@ -435,6 +621,10 @@ where
             None
         };
 
+        let fields = match protocol_view.as_ref() {
+            Some(view) => materialize_protocol_fields(lba, &raw, &view.decoded, &view.fields)?,
+            None => Vec::new(),
+        };
         let mut item = AdvancedInspectItem {
             lba,
             regions,
@@ -444,10 +634,7 @@ where
             decoded: None,
             decoded_sha256: None,
             method: None,
-            fields: protocol_view
-                .as_ref()
-                .map(|view| view.fields.clone())
-                .unwrap_or_default(),
+            fields,
             notes: protocol_view
                 .as_ref()
                 .map(|view| view.notes.clone())
@@ -508,8 +695,8 @@ struct AdvancedBackupReader {
     cache: std::collections::BTreeMap<String, Vec<u8>>,
 }
 
-impl AdvancedBackupReader {
-    fn read_sector(&mut self, lba: u64) -> std::io::Result<Vec<u8>> {
+impl SectorReader for AdvancedBackupReader {
+    fn read_sector(&mut self, lba: u64) -> io::Result<Vec<u8>> {
         if lba < METADATA_SECTOR_COUNT as u64 {
             let start = usize::try_from(lba).unwrap() * SECTOR;
             return Ok(self.protocol[start..start + SECTOR].to_vec());
@@ -586,9 +773,13 @@ pub fn load_backup_advanced_inspect(
         protocol,
         cache: std::collections::BTreeMap::new(),
     };
-    run_advanced_source(path.display().to_string(), meta, context, request, |lba| {
-        reader.read_sector(lba)
-    })
+    run_advanced_source(
+        path.display().to_string(),
+        meta,
+        context,
+        request,
+        &mut reader,
+    )
 }
 
 pub fn load_disk_advanced_inspect(
@@ -603,16 +794,10 @@ pub fn load_disk_advanced_inspect(
     let total_sectors = sysinfo::disk_total_sectors(runner, disk)
         .ok_or_else(|| "无法取得设备总扇区数".to_string())?;
 
-    let mut protocol = Vec::with_capacity(METADATA_IMAGE_LEN);
-    for lba in 0..METADATA_SECTOR_COUNT as u64 {
-        let raw = dev
-            .read_sector_u64(lba)
-            .map_err(|error| format!("读取协议上下文 LBA{lba} 失败: {error}"))?;
-        if raw.len() != SECTOR {
-            return Err(format!("LBA{lba} 只读取到 {}B", raw.len()));
-        }
-        protocol.extend_from_slice(&raw);
-    }
+    let protocol = dev
+        .read_range(0, METADATA_SECTOR_COUNT)
+        .map_err(|error| format!("读取协议上下文 LBA0-12 失败: {error}"))?;
+    debug_assert_eq!(protocol.len(), METADATA_IMAGE_LEN);
 
     let raw7 = &protocol[7 * SECTOR..8 * SECTOR];
     let id = identify(runner, disk, raw7).device_id;
@@ -638,13 +823,96 @@ pub fn load_disk_advanced_inspect(
         meta,
         context,
         request,
-        |lba| dev.read_sector_u64(lba),
+        &mut dev,
     )
 }
 
 #[cfg(test)]
 mod advanced_tests {
     use super::*;
+
+    struct MemoryReader {
+        sectors: Vec<Vec<u8>>,
+    }
+
+    impl SectorReader for MemoryReader {
+        fn read_sector(&mut self, lba: u64) -> io::Result<Vec<u8>> {
+            self.sectors
+                .get(lba as usize)
+                .cloned()
+                .ok_or_else(|| io::Error::new(io::ErrorKind::UnexpectedEof, "missing sector"))
+        }
+    }
+
+    #[test]
+    fn sector_reader_range_is_checked_and_lossless() {
+        let mut reader = MemoryReader {
+            sectors: vec![vec![0x11; SECTOR], vec![0x22; SECTOR], vec![0x33; SECTOR]],
+        };
+        let range = reader.read_range(1, 2).unwrap();
+        assert_eq!(range.len(), 2 * SECTOR);
+        assert_eq!(&range[..SECTOR], vec![0x22; SECTOR].as_slice());
+        assert_eq!(&range[SECTOR..], vec![0x33; SECTOR].as_slice());
+
+        reader.sectors[2].truncate(SECTOR - 1);
+        let error = reader.read_range(2, 1).unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::UnexpectedEof);
+        assert!(error.to_string().contains("511B"));
+    }
+
+    #[test]
+    fn decoder_registry_fails_closed_outside_registered_regions() {
+        let context =
+            crate::inspect_target::InspectDiskContext::new(vec![0; METADATA_IMAGE_LEN], None, 4096);
+        let meta = InspectMeta::default();
+        assert_eq!(DECODER_REGISTRY[0], InspectDecoderKind::Protocol);
+        let (_, method) = decode_sector(&context, &meta, 0, &[0; SECTOR], None).unwrap();
+        assert!(!method.is_empty());
+
+        let error = decode_sector(&context, &meta, 100, &[0; SECTOR], None).unwrap_err();
+        assert!(error.contains("不属于已注册 decoder"), "{error}");
+    }
+
+    #[test]
+    fn field_range_is_absolute_and_cross_sector_capable() {
+        let range = AbsoluteByteRange {
+            start: 100 * SECTOR as u64 + 0x1f0,
+            end_exclusive: 101 * SECTOR as u64 + 0x30,
+        };
+        assert_eq!(range.start_lba(), 100);
+        assert_eq!(range.end_lba(), 101);
+        assert!(range.spans_sectors());
+        assert_eq!(range.len(), 64);
+    }
+
+    #[test]
+    fn protocol_fields_preserve_raw_decoded_and_absolute_range() {
+        let lba = 4u64;
+        let mut raw = vec![0u8; SECTOR];
+        raw[8..12].copy_from_slice(&[1, 2, 3, 4]);
+        let mut decoded = raw.clone();
+        decoded[8..12].copy_from_slice(&[5, 6, 7, 8]);
+        let fields = vec![crate::inspect::SectorField {
+            start: 8,
+            end: 12,
+            label: "test".into(),
+            value: "value".into(),
+            style: crate::inspect::FieldStyle::Identity,
+            group: Some("group".into()),
+            children: Vec::new(),
+        }];
+        let materialized = materialize_protocol_fields(lba, &raw, &decoded, &fields).unwrap();
+        assert_eq!(materialized.len(), 1);
+        let field = &materialized[0];
+        assert_eq!(field.range.start, 4 * SECTOR as u64 + 8);
+        assert_eq!(field.range.end_exclusive, 4 * SECTOR as u64 + 12);
+        assert_eq!(field.range.len(), 4);
+        assert_eq!(field.raw, [1, 2, 3, 4]);
+        assert_eq!(field.decoded, [5, 6, 7, 8]);
+        assert_eq!(field.field_type, InspectFieldType::Identity);
+        assert_eq!(field.status, InspectFieldStatus::Known);
+        assert_eq!(field.group.as_deref(), Some("group"));
+    }
 
     #[test]
     fn advanced_lba_parser_matches_cli_list_range_and_count_semantics() {
