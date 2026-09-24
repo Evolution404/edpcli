@@ -11,12 +11,14 @@ mod keys;
 mod layout;
 mod lce;
 mod profile;
+mod reprovision;
 mod spec;
 mod validate;
 mod write_plan;
 
 pub use conversion::{
-    build_passwordless_conversion, PasswordlessConversionImage, PasswordlessConversionPlan,
+    build_passwordless_conversion, is_mode0_source, PasswordlessConversionImage,
+    PasswordlessConversionPlan,
 };
 pub use filesystem::{
     build_empty_exfat, build_empty_fat16, build_official_exfat_partition,
@@ -38,6 +40,12 @@ pub use layout::{
 };
 pub use lce::{build_lce_ciphertext, lce_plaintext};
 pub use profile::{ProvisionProfile, DEFAULT_SAFE6_LABEL};
+pub use reprovision::{
+    decide_partition_action, parse_existing_provision, prefill_for_target_mode,
+    validate_target_geometry, CapacityInput, CapacityInputMode, CapacitySource, ExistingPartition,
+    ExistingPartitionRecord, ExistingProvisionProfile, ParsedExistingProvision, PartitionAction,
+    ProvisionPrefill, QuickCapacityUnit, TargetPartitionGeometry,
+};
 pub use spec::{OnlyId, ProvisionMetadata, ProvisionSpec, TargetIdentity};
 pub use validate::{
     OfficialProvisionValidation, OfficialProvisionValidator, ProvisionValidation,

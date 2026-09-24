@@ -82,7 +82,9 @@ pub struct OfficialPartitionSizes {
     pub boot_mib: u64,
     pub boot_sectors: Option<u64>,
     pub share_mib: u64,
+    pub share_sectors: Option<u64>,
     pub encrypt_mib: u64,
+    pub encrypt_sectors: Option<u64>,
 }
 
 impl OfficialPartitionSizes {
@@ -91,12 +93,24 @@ impl OfficialPartitionSizes {
             boot_mib,
             boot_sectors: None,
             share_mib,
+            share_sectors: None,
             encrypt_mib,
+            encrypt_sectors: None,
         }
     }
 
     pub const fn with_boot_sectors(mut self, boot_sectors: u64) -> Self {
         self.boot_sectors = Some(boot_sectors);
+        self
+    }
+
+    pub const fn with_share_sectors(mut self, share_sectors: u64) -> Self {
+        self.share_sectors = Some(share_sectors);
+        self
+    }
+
+    pub const fn with_encrypt_sectors(mut self, encrypt_sectors: u64) -> Self {
+        self.encrypt_sectors = Some(encrypt_sectors);
         self
     }
 }
@@ -336,8 +350,18 @@ pub fn build_official_partition_layout(
             .ok_or("boot partition sector count overflows bytes")?,
         None => mib_bytes(sizes.boot_mib)?,
     };
-    let share = mib_bytes(sizes.share_mib)?;
-    let encrypt = mib_bytes(sizes.encrypt_mib)?;
+    let share = match sizes.share_sectors {
+        Some(sectors) => sectors
+            .checked_mul(sector_size)
+            .ok_or("share partition sector count overflows bytes")?,
+        None => mib_bytes(sizes.share_mib)?,
+    };
+    let encrypt = match sizes.encrypt_sectors {
+        Some(sectors) => sectors
+            .checked_mul(sector_size)
+            .ok_or("encrypt partition sector count overflows bytes")?,
+        None => mib_bytes(sizes.encrypt_mib)?,
+    };
     let logical: Vec<(EdpPartitionType, u64)> = match mode {
         OfficialPartitionMode::DefaultThreePartition => vec![
             (EdpPartitionType::Boot, boot),
@@ -349,9 +373,13 @@ pub fn build_official_partition_layout(
             (EdpPartitionType::Encrypt, encrypt),
         ],
         OfficialPartitionMode::WholeDiskEncrypted => {
-            let encrypted = encrypt
-                .checked_sub(WHOLE_DISK_ENCRYPTED_COMPAT_BOOT_BYTES)
-                .ok_or("whole-disk encrypted size is smaller than 0x7E00 compatibility entry")?;
+            let encrypted = if sizes.encrypt_sectors.is_some() {
+                encrypt
+            } else {
+                encrypt
+                    .checked_sub(WHOLE_DISK_ENCRYPTED_COMPAT_BOOT_BYTES)
+                    .ok_or("whole-disk encrypted size is smaller than 0x7E00 compatibility entry")?
+            };
             vec![
                 (
                     EdpPartitionType::Boot,
