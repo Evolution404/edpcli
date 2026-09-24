@@ -485,10 +485,16 @@ pub fn prefill_for_target_mode(
         })
         .transpose()?
         .unwrap_or(first);
+    let compatible_encrypt_old = encrypt_old.filter(|old| match mode {
+        OfficialPartitionMode::DefaultThreePartition => old.start_lba > boot_end,
+        OfficialPartitionMode::BootShareCombined => old.start_lba > first,
+        OfficialPartitionMode::WholeDiskEncrypted => old.start_lba >= boot_end,
+        OfficialPartitionMode::IntranetExtranetDualPartition => false,
+    });
     let encrypt = if matches!(mode, OfficialPartitionMode::IntranetExtranetDualPartition) {
         None
     } else {
-        source_capacity(encrypt_old)?.or(Some(CapacityInput::from_quick(
+        source_capacity(compatible_encrypt_old)?.or(Some(CapacityInput::from_quick(
             1024,
             QuickCapacityUnit::MiB,
             CapacitySource::SystemDefault,
@@ -496,7 +502,7 @@ pub fn prefill_for_target_mode(
     };
     let encrypt_start = if encrypt.is_none() {
         None
-    } else if let Some(old) = encrypt_old {
+    } else if let Some(old) = compatible_encrypt_old {
         Some(old.start_lba)
     } else if matches!(mode, OfficialPartitionMode::WholeDiskEncrypted) {
         Some(boot_end)
@@ -523,7 +529,8 @@ pub fn prefill_for_target_mode(
     let share = if matches!(mode, OfficialPartitionMode::WholeDiskEncrypted) {
         None
     } else if let Some(old) = share_role_source {
-        if mode == OfficialPartitionMode::DefaultThreePartition && encrypt_old.is_none() {
+        if mode == OfficialPartitionMode::DefaultThreePartition && compatible_encrypt_old.is_none()
+        {
             let space_after =
                 usable_end_lba.saturating_sub(old.start_lba.saturating_add(old.sector_count));
             let new_encrypt = encrypt.ok_or("missing encrypt capacity")?.sectors();
@@ -568,17 +575,18 @@ pub fn prefill_for_target_mode(
             None
         }
     });
-    let encrypt =
-        if matches!(mode, OfficialPartitionMode::WholeDiskEncrypted) && encrypt_old.is_none() {
-            Some(exact(
-                usable_end_lba
-                    .checked_sub(encrypt_start.ok_or("missing encrypt start")?)
-                    .ok_or("no room for encrypt partition")?,
-                CapacitySource::SystemDefault,
-            )?)
-        } else {
-            encrypt
-        };
+    let encrypt = if matches!(mode, OfficialPartitionMode::WholeDiskEncrypted)
+        && compatible_encrypt_old.is_none()
+    {
+        Some(exact(
+            usable_end_lba
+                .checked_sub(encrypt_start.ok_or("missing encrypt start")?)
+                .ok_or("no room for encrypt partition")?,
+            CapacitySource::SystemDefault,
+        )?)
+    } else {
+        encrypt
+    };
     let result = ProvisionPrefill {
         mode,
         boot,

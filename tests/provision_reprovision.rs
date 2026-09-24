@@ -40,6 +40,108 @@ fn part(
     }
 }
 
+fn matrix_source(mode: OfficialPartitionMode, usable_end: u64) -> ExistingProvisionProfile {
+    let encrypt_start = 6_020_480;
+    let encrypt_sectors = 2_097_153;
+    let partitions = match mode {
+        OfficialPartitionMode::DefaultThreePartition => vec![
+            part(
+                PartitionRole::Boot,
+                EdpPartitionType::Boot,
+                63,
+                20_417,
+                false,
+            ),
+            part(
+                PartitionRole::Share,
+                EdpPartitionType::Share,
+                20_480,
+                encrypt_start - 20_480,
+                true,
+            ),
+            part(
+                PartitionRole::Encrypt,
+                EdpPartitionType::Encrypt,
+                encrypt_start,
+                encrypt_sectors,
+                true,
+            ),
+        ],
+        OfficialPartitionMode::BootShareCombined => vec![
+            part(
+                PartitionRole::BootShareCombined,
+                EdpPartitionType::Share,
+                63,
+                encrypt_start - 63,
+                false,
+            ),
+            part(
+                PartitionRole::Encrypt,
+                EdpPartitionType::Encrypt,
+                encrypt_start,
+                encrypt_sectors,
+                true,
+            ),
+        ],
+        OfficialPartitionMode::WholeDiskEncrypted => vec![
+            ExistingPartition {
+                role: PartitionRole::CompatibilityReserve,
+                partition_type: EdpPartitionType::Boot,
+                start_lba: 63,
+                sector_count: 63,
+                physically_encrypted: false,
+                filesystem: None,
+            },
+            part(
+                PartitionRole::Encrypt,
+                EdpPartitionType::Encrypt,
+                126,
+                usable_end - 126,
+                true,
+            ),
+        ],
+        OfficialPartitionMode::IntranetExtranetDualPartition => vec![
+            part(
+                PartitionRole::Boot,
+                EdpPartitionType::Boot,
+                63,
+                20_417,
+                false,
+            ),
+            part(
+                PartitionRole::Share,
+                EdpPartitionType::Share,
+                20_480,
+                6_000_000,
+                true,
+            ),
+        ],
+    };
+    ExistingProvisionProfile {
+        source_mode: mode,
+        partitions,
+    }
+}
+
+fn target_roles(mode: OfficialPartitionMode) -> &'static [PartitionRole] {
+    match mode {
+        OfficialPartitionMode::DefaultThreePartition => &[
+            PartitionRole::Boot,
+            PartitionRole::Share,
+            PartitionRole::Encrypt,
+        ],
+        OfficialPartitionMode::BootShareCombined => {
+            &[PartitionRole::BootShareCombined, PartitionRole::Encrypt]
+        }
+        OfficialPartitionMode::WholeDiskEncrypted => {
+            &[PartitionRole::CompatibilityReserve, PartitionRole::Encrypt]
+        }
+        OfficialPartitionMode::IntranetExtranetDualPartition => {
+            &[PartitionRole::Boot, PartitionRole::Share]
+        }
+    }
+}
+
 #[test]
 fn capacity_input_keeps_sector_canonical_for_quick_and_exact_values() {
     let quick =
@@ -93,6 +195,214 @@ fn preserve_exact_requires_identical_semantics_geometry_and_physical_state() {
         decide_partition_action(Some(&source), &different_role),
         PartitionAction::Rebuild
     );
+}
+
+#[test]
+fn prefill_matrix_covers_plain_and_all_four_by_four_transitions() {
+    const M0: OfficialPartitionMode = OfficialPartitionMode::DefaultThreePartition;
+    const M1: OfficialPartitionMode = OfficialPartitionMode::BootShareCombined;
+    const M2: OfficialPartitionMode = OfficialPartitionMode::WholeDiskEncrypted;
+    const M3: OfficialPartitionMode = OfficialPartitionMode::IntranetExtranetDualPartition;
+
+    #[derive(Clone, Copy)]
+    struct Case {
+        name: &'static str,
+        source: Option<OfficialPartitionMode>,
+        target: OfficialPartitionMode,
+        preserve: &'static [PartitionRole],
+    }
+
+    const NONE: &[PartitionRole] = &[];
+    const BOOT_SHARE: &[PartitionRole] = &[PartitionRole::Boot, PartitionRole::Share];
+    const ENCRYPT: &[PartitionRole] = &[PartitionRole::Encrypt];
+    const M0_ALL: &[PartitionRole] = &[
+        PartitionRole::Boot,
+        PartitionRole::Share,
+        PartitionRole::Encrypt,
+    ];
+    const M1_ALL: &[PartitionRole] = &[PartitionRole::BootShareCombined, PartitionRole::Encrypt];
+
+    let cases = [
+        Case {
+            name: "plain→0",
+            source: None,
+            target: M0,
+            preserve: NONE,
+        },
+        Case {
+            name: "plain→1",
+            source: None,
+            target: M1,
+            preserve: NONE,
+        },
+        Case {
+            name: "plain→2",
+            source: None,
+            target: M2,
+            preserve: NONE,
+        },
+        Case {
+            name: "plain→3",
+            source: None,
+            target: M3,
+            preserve: NONE,
+        },
+        Case {
+            name: "0→0",
+            source: Some(M0),
+            target: M0,
+            preserve: M0_ALL,
+        },
+        Case {
+            name: "0→1",
+            source: Some(M0),
+            target: M1,
+            preserve: ENCRYPT,
+        },
+        Case {
+            name: "0→2",
+            source: Some(M0),
+            target: M2,
+            preserve: ENCRYPT,
+        },
+        Case {
+            name: "0→3",
+            source: Some(M0),
+            target: M3,
+            preserve: BOOT_SHARE,
+        },
+        Case {
+            name: "1→0",
+            source: Some(M1),
+            target: M0,
+            preserve: ENCRYPT,
+        },
+        Case {
+            name: "1→1",
+            source: Some(M1),
+            target: M1,
+            preserve: M1_ALL,
+        },
+        Case {
+            name: "1→2",
+            source: Some(M1),
+            target: M2,
+            preserve: ENCRYPT,
+        },
+        Case {
+            name: "1→3",
+            source: Some(M1),
+            target: M3,
+            preserve: NONE,
+        },
+        Case {
+            name: "2→0",
+            source: Some(M2),
+            target: M0,
+            preserve: NONE,
+        },
+        Case {
+            name: "2→1",
+            source: Some(M2),
+            target: M1,
+            preserve: ENCRYPT,
+        },
+        Case {
+            name: "2→2",
+            source: Some(M2),
+            target: M2,
+            preserve: ENCRYPT,
+        },
+        Case {
+            name: "2→3",
+            source: Some(M2),
+            target: M3,
+            preserve: NONE,
+        },
+        Case {
+            name: "3→0",
+            source: Some(M3),
+            target: M0,
+            preserve: BOOT_SHARE,
+        },
+        Case {
+            name: "3→1",
+            source: Some(M3),
+            target: M1,
+            preserve: NONE,
+        },
+        Case {
+            name: "3→2",
+            source: Some(M3),
+            target: M2,
+            preserve: NONE,
+        },
+        Case {
+            name: "3→3",
+            source: Some(M3),
+            target: M3,
+            preserve: BOOT_SHARE,
+        },
+    ];
+    assert_eq!(cases.len(), 20);
+
+    let usable_end = 12_000_000;
+    for case in cases {
+        let source = case.source.map(|mode| matrix_source(mode, usable_end));
+        let prefill =
+            prefill_for_target_mode(source.as_ref(), case.target, usable_end, SECTOR_SIZE)
+                .unwrap_or_else(|error| panic!("{} prefill failed: {error}", case.name));
+        let targets = prefill
+            .target_partitions(SECTOR_SIZE)
+            .unwrap_or_else(|error| panic!("{} target geometry failed: {error}", case.name));
+        let roles: Vec<_> = targets.iter().map(|target| target.role).collect();
+        assert_eq!(roles, target_roles(case.target), "{} roles", case.name);
+
+        if let Some(source) = source.as_ref() {
+            for &role in case.preserve {
+                let old = source
+                    .partition(role)
+                    .unwrap_or_else(|| panic!("{} missing source {role:?}", case.name));
+                let target = targets
+                    .iter()
+                    .find(|target| target.role == role)
+                    .unwrap_or_else(|| panic!("{} missing target {role:?}", case.name));
+                assert_eq!(
+                    target.start_lba, old.start_lba,
+                    "{} {role:?} start",
+                    case.name
+                );
+                assert_eq!(
+                    target.sector_count, old.sector_count,
+                    "{} {role:?} size",
+                    case.name
+                );
+                assert_eq!(
+                    decide_partition_action(Some(old), target),
+                    PartitionAction::PreserveExact,
+                    "{} {role:?} preserve",
+                    case.name
+                );
+            }
+        }
+
+        if case.name == "2→0" {
+            let old_encrypt = source
+                .as_ref()
+                .unwrap()
+                .partition(PartitionRole::Encrypt)
+                .unwrap();
+            let target_encrypt = targets
+                .iter()
+                .find(|target| target.role == PartitionRole::Encrypt)
+                .unwrap();
+            assert_ne!(target_encrypt.start_lba, old_encrypt.start_lba);
+            assert_eq!(
+                decide_partition_action(Some(old_encrypt), target_encrypt),
+                PartitionAction::Rebuild
+            );
+        }
+    }
 }
 
 #[test]
