@@ -143,9 +143,9 @@ _edpcli() {
       fi
       if [[ "$cur" == -* ]]; then
         case "$action" in
-          plan)    compadd -- --disk --mode --boot-mib --share-mib --encrypt-mib --label-id --user --dept --label --password --volume-label --help ;;
-          image)   compadd -- --disk --mode --boot-mib --share-mib --encrypt-mib --label-id --user --dept --label --password --volume-label --out --help ;;
-          write)   compadd -- --disk --mode --boot-mib --share-mib --encrypt-mib --label-id --user --dept --label --password --volume-label --yes --help ;;
+          plan)    compadd -- --disk --mode --boot-mib --share-mib --encrypt-mib --label-id --user --dept --label --password --volume-label --force-change-password --help ;;
+          image)   compadd -- --disk --mode --boot-mib --share-mib --encrypt-mib --label-id --user --dept --label --password --volume-label --force-change-password --out --help ;;
+          write)   compadd -- --disk --mode --boot-mib --share-mib --encrypt-mib --label-id --user --dept --label --password --volume-label --force-change-password --yes --help ;;
           convert) compadd -- --disk --write --yes --backup-dir --help ;;
         esac
       fi
@@ -249,9 +249,9 @@ _edpcli() {
         COMPREPLY=( $(compgen -W 'plan image write convert' -- "$cur") )
       elif [[ "$cur" == -* ]]; then
         case "$action" in
-          plan)    vals='--disk --mode --boot-mib --share-mib --encrypt-mib --label-id --user --dept --label --password --volume-label --help' ;;
-          image)   vals='--disk --mode --boot-mib --share-mib --encrypt-mib --label-id --user --dept --label --password --volume-label --out --help' ;;
-          write)   vals='--disk --mode --boot-mib --share-mib --encrypt-mib --label-id --user --dept --label --password --volume-label --yes --help' ;;
+          plan)    vals='--disk --mode --boot-mib --share-mib --encrypt-mib --label-id --user --dept --label --password --volume-label --force-change-password --help' ;;
+          image)   vals='--disk --mode --boot-mib --share-mib --encrypt-mib --label-id --user --dept --label --password --volume-label --force-change-password --out --help' ;;
+          write)   vals='--disk --mode --boot-mib --share-mib --encrypt-mib --label-id --user --dept --label --password --volume-label --force-change-password --yes --help' ;;
           convert) vals='--disk --write --yes --backup-dir --help' ;;
         esac
         COMPREPLY=( $(compgen -W "$vals" -- "$cur") )

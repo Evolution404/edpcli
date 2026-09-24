@@ -893,6 +893,11 @@ fn run_loop(resume: Option<state::WriteIntent>) -> io::Result<LoopExit> {
                                     ct_event::KeyCode::Esc => {
                                         let _ = state.navigate(NavCommand::Escape, 1);
                                     }
+                                    ct_event::KeyCode::Char(' ') => {
+                                        if !state.provision_toggle_force_change_password() {
+                                            state.provision_push_char(' ');
+                                        }
+                                    }
                                     ct_event::KeyCode::Char(ch)
                                         if !key
                                             .modifiers

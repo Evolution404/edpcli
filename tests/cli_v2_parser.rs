@@ -130,7 +130,10 @@ fn provision_label_defaults_to_jiangsu_safe6_but_cli_can_override_it() {
         "ProofPass1!",
     ];
     match parse_args(&args(&base)).expect("default provision label") {
-        Parsed::Provision(ProvisionAction::Plan(opts)) => assert_eq!(opts.label, "江苏电力!SAFE6"),
+        Parsed::Provision(ProvisionAction::Plan(opts)) => {
+            assert_eq!(opts.label, "江苏电力!SAFE6");
+            assert!(!opts.force_change_password);
+        }
         _ => panic!("expected provision plan"),
     }
 
@@ -140,6 +143,13 @@ fn provision_label_defaults_to_jiangsu_safe6_but_cli_can_override_it() {
         Parsed::Provision(ProvisionAction::Plan(opts)) => {
             assert_eq!(opts.label, "自定义标签!SAFE6")
         }
+        _ => panic!("expected provision plan"),
+    }
+
+    let mut forced = base.to_vec();
+    forced.push("--force-change-password");
+    match parse_args(&args(&forced)).expect("force-change provision policy") {
+        Parsed::Provision(ProvisionAction::Plan(opts)) => assert!(opts.force_change_password),
         _ => panic!("expected provision plan"),
     }
 }

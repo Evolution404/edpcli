@@ -9,6 +9,10 @@ use edpcli::provision::{
 use edpcli::sectors::looks_nopwd;
 
 fn spec(onlyid: &str) -> ProvisionSpec {
+    spec_with_force_change(onlyid, false)
+}
+
+fn spec_with_force_change(onlyid: &str, force_change_password: bool) -> ProvisionSpec {
     let probe = HardwareProbe {
         vid: Some(0x0dd8),
         pid: Some(0x2005),
@@ -27,7 +31,12 @@ fn spec(onlyid: &str) -> ProvisionSpec {
         "江苏电力!SAFE6",
     )
     .unwrap();
-    ProvisionSpec::new(target, metadata, ProvisionProfile::canonical_v1()).unwrap()
+    ProvisionSpec::new(
+        target,
+        metadata,
+        ProvisionProfile::canonical_v1().with_force_change_password(force_change_password),
+    )
+    .unwrap()
 }
 
 fn target() -> TargetIdentity {
@@ -142,6 +151,14 @@ fn generated_image_is_structurally_complete_nopwd_metadata() {
         4
     );
     assert!(lba7.decoded[0x80..0xc0].iter().all(|byte| *byte == 0));
+    assert_eq!(
+        lba7.decoded[0xc2], 0,
+        "share force-change flag defaults off"
+    );
+    assert_eq!(
+        lba7.decoded[0xc5], 0,
+        "encrypt force-change flag defaults off"
+    );
 
     let ownership = ownership_from_lba8(sector(bytes, 8), &meta).unwrap();
     assert_eq!(ownership.user.as_deref(), Some("宋旭琳"));
@@ -178,6 +195,14 @@ fn generated_image_is_structurally_complete_nopwd_metadata() {
         4
     );
     assert!(lba12.decoded[0xc0..0x120].iter().all(|byte| *byte == 0));
+    assert_eq!(
+        lba12.decoded[0x122], 0,
+        "share force-change flag defaults off"
+    );
+    assert_eq!(
+        lba12.decoded[0x125], 0,
+        "encrypt force-change flag defaults off"
+    );
     let crc = crc32_bare(spec.target().device_id().as_bytes());
     let expected_tail = a7f0_full(&[0u8; 144], &crc.to_le_bytes(), 0x170);
     assert_eq!(&sector(bytes, 12)[0x170..], expected_tail.as_slice());
@@ -186,6 +211,25 @@ fn generated_image_is_structurally_complete_nopwd_metadata() {
         Ok(sector(bytes, lba as usize).to_vec())
     };
     assert!(looks_nopwd(&read, spec.target().device_id()).unwrap());
+}
+
+#[test]
+fn force_change_password_option_sets_both_pass_info_copies() {
+    let spec = spec_with_force_change("1402259934", true);
+    let image = generate_image(&spec, &entropy()).unwrap();
+    let bytes = image.as_bytes();
+    let meta = InspectMeta {
+        device_id: Some(spec.target().device_id().into()),
+        ..InspectMeta::default()
+    };
+
+    let lba7 = analyze_sector(7, sector(bytes, 7), &meta);
+    assert_eq!(lba7.decoded[0xc2], 1);
+    assert_eq!(lba7.decoded[0xc5], 1);
+
+    let lba12 = analyze_sector(12, sector(bytes, 12), &meta);
+    assert_eq!(lba12.decoded[0x122], 1);
+    assert_eq!(lba12.decoded[0x125], 1);
 }
 
 #[test]

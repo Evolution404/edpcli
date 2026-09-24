@@ -1,11 +1,27 @@
-use edpcli::tui::state::{AppState, InputMode, NavCommand, ProvisionForm, StateEffect};
+use edpcli::tui::state::{
+    AppState, InputMode, NavCommand, ProvisionForm, ProvisionKind, StateEffect,
+};
 
 #[test]
 fn provision_label_defaults_to_jiangsu_safe6_and_remains_editable() {
     let mut form = ProvisionForm::default();
     assert_eq!(form.label, "江苏电力!SAFE6");
+    assert!(!form.force_change_password);
     form.label = "自定义标签!SAFE6".into();
     assert_eq!(form.label, "自定义标签!SAFE6");
+}
+
+#[test]
+fn provision_force_change_password_checkbox_defaults_off_and_toggles() {
+    let mut state = AppState::new();
+    state.provision_mut().kind = ProvisionKind::Mode1;
+    state.provision_mut().field_selected = state.provision_field_count() - 1;
+
+    assert!(!state.provision().form.force_change_password);
+    assert!(state.provision_toggle_force_change_password());
+    assert!(state.provision().form.force_change_password);
+    assert!(state.provision_toggle_force_change_password());
+    assert!(!state.provision().form.force_change_password);
 }
 
 #[test]

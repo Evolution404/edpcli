@@ -262,6 +262,7 @@ fn provision_request(
         label: opts.label.clone(),
         password: opts.password.clone(),
         volume_label: opts.volume_label.clone(),
+        force_change_password: opts.force_change_password,
     }
 }
 

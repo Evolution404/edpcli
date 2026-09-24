@@ -846,6 +846,8 @@ fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppSta
                 Span::raw(" 切字段   "),
                 Span::styled("直接输入", secondary()),
                 Span::raw(" 修改   "),
+                Span::styled("Space", secondary()),
+                Span::raw(" 勾选   "),
                 Span::styled("Enter", success()),
                 Span::raw(" 生成计划   "),
                 Span::styled("Esc", warning()),
@@ -917,6 +919,14 @@ fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppSta
                                 prepared.write_image.highest_touched_lba().unwrap_or(0)
                             )),
                             Line::from("LBA3 已从目标盘捕获并绑定；写入前将再次复核。"),
+                            Line::from(format!(
+                                "首次强制改密: {}",
+                                if prepared.force_change_password {
+                                    "是"
+                                } else {
+                                    "否"
+                                }
+                            )),
                             Line::from(vec![
                                 Span::styled("E", secondary()),
                                 Span::raw(" 导出与该目标绑定的稀疏制盘镜像"),
@@ -2400,7 +2410,7 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
                     "Tab 页面  ·  j/k 选择方案  ·  Enter 打开  ·  r 刷新目标  ·  :provision 直达  ·  ? 帮助  ·  q 退出".to_string()
                 }
                 ProvisionStage::Form => {
-                    "↑/↓/Tab 字段  ·  输入编辑  ·  Enter 生成只读计划  ·  Esc 返回".to_string()
+                    "↑/↓/Tab 字段  ·  输入编辑  ·  Space 勾选  ·  Enter 生成只读计划  ·  Esc 返回".to_string()
                 }
                 ProvisionStage::Planning => "正在生成只读计划…".to_string(),
                 ProvisionStage::Review => {

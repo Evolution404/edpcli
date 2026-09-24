@@ -83,6 +83,7 @@ pub struct ProvisionNewOpts {
     pub label: String,
     pub password: String,
     pub volume_label: String,
+    pub force_change_password: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -232,6 +233,7 @@ fn print_topic_help(topic: &str) {
                 "标签默认值: {}；可通过 --label 自定义。",
                 crate::provision::DEFAULT_SAFE6_LABEL
             );
+            println!("密码策略: --force-change-password 表示首次插入时强制修改密码；默认关闭。");
             println!("分区参数: --boot-mib N --share-mib N --encrypt-mib N；仅当前模式实际使用的项必填。");
             println!("当前产品写入固定使用已验证的 exFAT + SM4(mode2) 路线。");
         }
@@ -322,6 +324,7 @@ fn parse_new_provision_opts(
     let mut label = None;
     let mut password = None;
     let mut volume_label = None;
+    let mut force_change_password = false;
     let mut out = None;
     let mut yes = false;
     let mut i = 0usize;
@@ -383,6 +386,13 @@ fn parse_new_provision_opts(
                 let value = take_value(rest, &mut i, "--volume-label")?;
                 set_once(&mut volume_label, value, "--volume-label")?;
             }
+            "--force-change-password" => {
+                set_switch(
+                    &mut force_change_password,
+                    &rest[i],
+                    "--force-change-password",
+                )?;
+            }
             "--out" => {
                 let value = take_value(rest, &mut i, "--out")?;
                 set_once(&mut out, value, "--out")?;
@@ -430,6 +440,7 @@ fn parse_new_provision_opts(
             label: label.unwrap_or_else(|| crate::provision::DEFAULT_SAFE6_LABEL.into()),
             password: password.ok_or("错误: provision 新盘操作必须指定 --password")?,
             volume_label: volume_label.unwrap_or_else(|| "SAFE6".into()),
+            force_change_password,
         },
         out,
         yes,

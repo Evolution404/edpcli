@@ -14,8 +14,7 @@ pub struct ProvisionProfile {
     lba4_profile_word: [u8; 4],
     lba7_material: [u8; 16],
     lba12_material: [u8; 24],
-    lba7_terminator: [u8; 8],
-    lba12_terminator: [u8; 8],
+    force_change_password: bool,
 }
 
 impl ProvisionProfile {
@@ -37,9 +36,17 @@ impl ProvisionProfile {
                 0x5d, 0x73, 0x29, 0x04, 0xcf, 0x18, 0x96, 0xfe, 0xee, 0xf4, 0x08, 0x82, 0x9e, 0xc2,
                 0xd5, 0xf5, 0x40, 0x66, 0x0f, 0x21, 0x3e, 0x70, 0x95, 0x2e,
             ],
-            lba7_terminator: [0xec, 0x00, 0x01, 0x77, 0x00, 0x01, 0x77, 0x00],
-            lba12_terminator: [0x8e, 0x02, 0x01, 0x77, 0x00, 0x01, 0x77, 0x00],
+            force_change_password: false,
         }
+    }
+
+    pub fn with_force_change_password(mut self, enabled: bool) -> Self {
+        self.force_change_password = enabled;
+        self
+    }
+
+    pub fn force_change_password(&self) -> bool {
+        self.force_change_password
     }
 
     pub fn id(&self) -> &'static str {
@@ -82,12 +89,14 @@ impl ProvisionProfile {
         &self.lba12_material
     }
 
-    pub(crate) fn lba7_terminator(&self) -> &[u8; 8] {
-        &self.lba7_terminator
+    pub(crate) fn lba7_pass_info_prefix(&self) -> [u8; 8] {
+        let force = u8::from(self.force_change_password);
+        [0xec, 0x00, force, 0x77, 0x00, force, 0x77, 0x00]
     }
 
-    pub(crate) fn lba12_terminator(&self) -> &[u8; 8] {
-        &self.lba12_terminator
+    pub(crate) fn lba12_pass_info_prefix(&self) -> [u8; 8] {
+        let force = u8::from(self.force_change_password);
+        [0x8e, 0x02, force, 0x77, 0x00, force, 0x77, 0x00]
     }
 
     pub(crate) fn safe6_template(&self) -> [u8; 512] {

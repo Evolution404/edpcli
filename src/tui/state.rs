@@ -281,6 +281,7 @@ pub struct ProvisionForm {
     pub label: String,
     pub password: String,
     pub volume_label: String,
+    pub force_change_password: bool,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -314,6 +315,7 @@ impl Default for ProvisionForm {
             label: crate::provision::DEFAULT_SAFE6_LABEL.into(),
             password: String::new(),
             volume_label: "SAFE6".into(),
+            force_change_password: false,
         }
     }
 }
@@ -1762,10 +1764,10 @@ impl AppState {
 
     pub fn provision_field_count(&self) -> usize {
         match self.provision.kind {
-            ProvisionKind::Mode0 => 9,
-            ProvisionKind::Mode1 => 8,
-            ProvisionKind::Mode2 => 7,
-            ProvisionKind::Mode3 => 8,
+            ProvisionKind::Mode0 => 10,
+            ProvisionKind::Mode1 => 9,
+            ProvisionKind::Mode2 => 8,
+            ProvisionKind::Mode3 => 9,
             ProvisionKind::Convert | ProvisionKind::Offline => 0,
         }
     }
@@ -1886,7 +1888,7 @@ impl AppState {
 
     fn provision_field_slot(&self, display_index: usize) -> Option<usize> {
         let mode = self.provision.kind.mode()?;
-        let mut slots = Vec::with_capacity(9);
+        let mut slots = Vec::with_capacity(10);
         if matches!(mode, 0 | 3) {
             slots.push(0);
         }
@@ -1896,7 +1898,7 @@ impl AppState {
         if matches!(mode, 0..=2) {
             slots.push(2);
         }
-        slots.extend([3, 4, 5, 6, 7, 8]);
+        slots.extend([3, 4, 5, 6, 7, 8, 9]);
         slots.get(display_index).copied()
     }
 
@@ -1926,6 +1928,15 @@ impl AppState {
             ("标签", self.provision.form.label.as_str(), false),
             ("密码", self.provision.form.password.as_str(), true),
             ("卷标", self.provision.form.volume_label.as_str(), false),
+            (
+                "首次强制改密",
+                if self.provision.form.force_change_password {
+                    "☑ 是"
+                } else {
+                    "☐ 否"
+                },
+                false,
+            ),
         ]);
         out
     }
@@ -1943,6 +1954,15 @@ impl AppState {
             8 => Some(&mut self.provision.form.volume_label),
             _ => None,
         }
+    }
+
+    pub fn provision_toggle_force_change_password(&mut self) -> bool {
+        if self.provision_field_slot(self.provision.field_selected) != Some(9) {
+            return false;
+        }
+        self.provision.form.force_change_password = !self.provision.form.force_change_password;
+        self.provision.message = None;
+        true
     }
 
     pub fn provision_push_char(&mut self, ch: char) {
@@ -2007,6 +2027,7 @@ impl AppState {
             label: self.provision.form.label.trim().to_string(),
             password: self.provision.form.password.clone(),
             volume_label: self.provision.form.volume_label.trim().to_string(),
+            force_change_password: self.provision.form.force_change_password,
         })
     }
 

@@ -44,6 +44,7 @@ pub struct NewProvisionRequest {
     pub label: String,
     pub password: String,
     pub volume_label: String,
+    pub force_change_password: bool,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -51,6 +52,7 @@ pub struct PreparedNewProvision {
     pub disk: u32,
     pub device_id: String,
     pub mode: OfficialPartitionMode,
+    pub force_change_password: bool,
     pub lce_start_lba: u64,
     pub write_image: OfficialProvisionWriteImage,
     expected_probe: crate::platform::HardwareProbe,
@@ -129,7 +131,9 @@ pub fn prepare_new_provision(
         request.label.clone(),
     )
     .map_err(|message| err(EXIT_TARGET, format!("错误: 制盘身份字段无效: {message}")))?;
-    let spec = ProvisionSpec::new(target, metadata, ProvisionProfile::canonical_v1())
+    let profile =
+        ProvisionProfile::canonical_v1().with_force_change_password(request.force_change_password);
+    let spec = ProvisionSpec::new(target, metadata, profile)
         .map_err(|message| err(EXIT_TARGET, format!("错误: 制盘元数据无法编码: {message}")))?;
 
     let file_key = random_array::<16>()?;
@@ -168,6 +172,7 @@ pub fn prepare_new_provision(
         disk,
         device_id,
         mode: selected_mode,
+        force_change_password: request.force_change_password,
         lce_start_lba: compatibility.start_lba,
         write_image,
         expected_probe: probe,
@@ -387,6 +392,7 @@ mod tests {
             disk: 4,
             device_id: "disk&ven_netac&prod_onlydisk".into(),
             mode: OfficialPartitionMode::BootShareCombined,
+            force_change_password: false,
             lce_start_lba: 900,
             write_image: OfficialProvisionWriteImage {
                 metadata,
