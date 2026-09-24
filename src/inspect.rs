@@ -1641,7 +1641,7 @@ pub fn analyze_sector_with_context(
                                 fields.push(field(
                                     0x10c,
                                     0x110,
-                                    "SAPF 起始 LBA",
+                                    "起始 LBA",
                                     sapf.partition.start_lba.to_string(),
                                     FieldStyle::Address,
                                 ));
