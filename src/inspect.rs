@@ -415,6 +415,7 @@ fn legacy_key_field(base: usize, group: String, entry: &EdpfEntry64) -> SectorFi
 
 fn elabel_field(start: usize, body: &[u8]) -> SectorField {
     let text = c_string_bytes(body);
+    let field_len = text.len();
     let body = text.strip_prefix(b"<ELABEL>").unwrap_or(text);
     let children = body
         .split(|byte| *byte == b'|')
@@ -443,7 +444,7 @@ fn elabel_field(start: usize, body: &[u8]) -> SectorField {
         .collect();
     field_with_children(
         start,
-        start + body.len(),
+        start + field_len,
         "[ELABEL]",
         "",
         children,
@@ -694,7 +695,11 @@ fn infer_lba8(
     raw: &[u8; SECTOR],
     device_crc: u32,
     onlyid: Option<u32>,
-) -> Option<(lba8::Lba8View, Lba8UsbOnlyInfo, HostHardinfoSource)> {
+) -> Option<(
+    lba8::Lba8View,
+    Vec<Lba8UsbOnlyInfo>,
+    Vec<HostHardinfoSource>,
+)> {
     let mut matches = Vec::new();
     for usb_only_info in [
         Lba8UsbOnlyInfo::Current,
@@ -715,14 +720,18 @@ fn infer_lba8(
             }
         }
     }
-    if matches.len() == 1 {
-        return Some(matches.remove(0));
+    let first = matches.first()?.0.clone();
+    let mut usb_profiles = Vec::new();
+    let mut host_profiles = Vec::new();
+    for (_, usb, host) in matches {
+        if !usb_profiles.contains(&usb) {
+            usb_profiles.push(usb);
+        }
+        if !host_profiles.contains(&host) {
+            host_profiles.push(host);
+        }
     }
-    // Host-hardinfo zero is valid under both "current-zero" and the permissive legacy axis.
-    // Prefer the constrained current-zero interpretation only when the stored value is actually zero.
-    matches
-        .into_iter()
-        .find(|(view, _, host)| view.host_hardinfo == 0 && *host == HostHardinfoSource::CurrentZero)
+    Some((first, usb_profiles, host_profiles))
 }
 
 fn infer_lba11(
@@ -1402,7 +1411,7 @@ pub fn analyze_sector_with_context(
         8 => {
             if let Some((crc, _)) = crc_key(meta) {
                 match infer_lba8(raw_sector, crc, meta_onlyid(meta)) {
-                    Some((view, usb_profile, host_profile)) => {
+                    Some((view, usb_profiles, host_profiles)) => {
                         decoded = view.mixed_plain().to_vec();
                         fields.push(field(0x000, 0x004, "LLGB magic", "LLGB", FieldStyle::Magic));
                         fields.push(field(
