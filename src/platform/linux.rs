@@ -348,6 +348,12 @@ pub(super) fn hardware_probe(disk: u32) -> Option<HardwareProbe> {
     })
 }
 
+pub(super) fn hardware_serial(disk: u32) -> Option<String> {
+    let name = block_name(disk)?;
+    let usb = usb_ancestor(&name)?;
+    read_trim(usb.join("serial"))
+}
+
 pub(super) fn fallback_hardware_probe(
     _runner: &dyn CmdRunner,
     _disk: u32,

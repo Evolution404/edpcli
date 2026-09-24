@@ -8,13 +8,12 @@
 
 use std::collections::BTreeMap;
 
-use crate::{
-    backup_deep::keys::sm4_encrypt_block, crypto::crc32_bare, protocol::edpf::EdpPartitionType,
-};
+use crate::{backup_deep::keys::sm4_encrypt_block, crypto::crc32_bare};
+use encoding_rs::GBK;
 
 use super::{
-    layout::{OfficialPartitionGeometry, OfficialProvisionPlan},
-    FileKeyWrapMode, OfficialPartitionMode,
+    layout::{OfficialPartitionGeometry, OfficialProvisionPlan, PartitionFormatTarget},
+    FileKeyWrapMode,
 };
 
 const SECTOR_SIZE: usize = 512;
@@ -23,6 +22,7 @@ const FAT_OFFSET: u64 = BOOT_REGION_SECTORS;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum OfficialFilesystemFormat {
+    Fat16,
     ExFat,
     Ntfs,
     Fat32,
@@ -49,6 +49,7 @@ impl OfficialFilesystemFormat {
 
     pub const fn config_token(self) -> &'static str {
         match self {
+            Self::Fat16 => "fat16",
             Self::ExFat => "exfat",
             Self::Ntfs => "ntfs",
             Self::Fat32 => "fat32",
@@ -57,6 +58,7 @@ impl OfficialFilesystemFormat {
 
     pub const fn windows_format_name(self) -> &'static str {
         match self {
+            Self::Fat16 => "FAT16",
             Self::ExFat => "exFat",
             Self::Ntfs => "NTFS",
             Self::Fat32 => "fat32",
@@ -122,6 +124,112 @@ fn align_up(value: u64, alignment: u64) -> Option<u64> {
     value
         .checked_add(alignment - 1)
         .map(|v| v / alignment * alignment)
+}
+
+fn fat16_label(label: &str) -> Result<[u8; 11], String> {
+    if label.is_empty()
+        || label
+            .chars()
+            .any(|ch| ch.is_control() || "\"*/:<>?\\|".contains(ch))
+    {
+        return Err("FAT16 volume label is empty or contains forbidden characters".into());
+    }
+    let uppercase = label.to_uppercase();
+    let (encoded, _, had_errors) = GBK.encode(&uppercase);
+    if had_errors || encoded.len() > 11 {
+        return Err("FAT16 volume label cannot be encoded in 11 GBK bytes".into());
+    }
+    let mut out = [b' '; 11];
+    out[..encoded.len()].copy_from_slice(&encoded);
+    Ok(out)
+}
+
+/// Construct a complete empty FAT16 boot sector, mirrored FATs and fixed root
+/// directory. The exact 20,417-sector official boot geometry is supported.
+pub fn build_empty_fat16(
+    partition_offset: u64,
+    volume_sectors: u64,
+    volume_serial: u32,
+    volume_label: &str,
+) -> Result<SparseFilesystemImage, String> {
+    let total = u32::try_from(volume_sectors).map_err(|_| "FAT16 volume exceeds u32 sectors")?;
+    let hidden = u32::try_from(partition_offset).map_err(|_| "FAT16 hidden sectors exceeds u32")?;
+    let label = fat16_label(volume_label)?;
+    const ROOT_ENTRIES: u16 = 512;
+    const ROOT_SECTORS: u64 = 32;
+    const RESERVED: u64 = 1;
+    const COPIES: u64 = 2;
+    let mut chosen = None;
+    for spc in [1u64, 2, 4, 8, 16, 32, 64, 128] {
+        let mut fat_sectors = 1u64;
+        for _ in 0..16 {
+            let overhead = RESERVED + COPIES * fat_sectors + ROOT_SECTORS;
+            if volume_sectors <= overhead {
+                break;
+            }
+            let clusters = (volume_sectors - overhead) / spc;
+            let next = ((clusters + 2) * 2).div_ceil(SECTOR_SIZE as u64);
+            if next == fat_sectors {
+                if (4_085..65_525).contains(&clusters) && fat_sectors <= u16::MAX as u64 {
+                    chosen = Some((spc as u8, fat_sectors as u16, clusters));
+                }
+                break;
+            }
+            fat_sectors = next;
+        }
+        if chosen.is_some() {
+            break;
+        }
+    }
+    let (spc, fat_sectors, _) = chosen.ok_or("volume size cannot be represented as FAT16")?;
+    let root_start = RESERVED + COPIES * fat_sectors as u64;
+    let mut boot = [0u8; SECTOR_SIZE];
+    boot[0..3].copy_from_slice(&[0xeb, 0x3c, 0x90]);
+    boot[3..11].copy_from_slice(b"EDPCLI  ");
+    put_u16(&mut boot, 11, 512);
+    boot[13] = spc;
+    put_u16(&mut boot, 14, RESERVED as u16);
+    boot[16] = COPIES as u8;
+    put_u16(&mut boot, 17, ROOT_ENTRIES);
+    if total <= u16::MAX as u32 {
+        put_u16(&mut boot, 19, total as u16);
+    }
+    boot[21] = 0xf8;
+    put_u16(&mut boot, 22, fat_sectors);
+    put_u16(&mut boot, 24, 63);
+    put_u16(&mut boot, 26, 255);
+    put_u32(&mut boot, 28, hidden);
+    if total > u16::MAX as u32 {
+        put_u32(&mut boot, 32, total);
+    }
+    boot[36] = 0x80;
+    boot[38] = 0x29;
+    put_u32(&mut boot, 39, volume_serial);
+    boot[43..54].copy_from_slice(&label);
+    boot[54..62].copy_from_slice(b"FAT16   ");
+    boot[510..512].copy_from_slice(&[0x55, 0xaa]);
+    let mut sectors = BTreeMap::new();
+    sectors.insert(0, boot);
+    for copy in 0..COPIES {
+        for offset in 0..fat_sectors as u64 {
+            let mut fat = [0u8; SECTOR_SIZE];
+            if offset == 0 {
+                fat[..4].copy_from_slice(&[0xf8, 0xff, 0xff, 0xff]);
+            }
+            sectors.insert(RESERVED + copy * fat_sectors as u64 + offset, fat);
+        }
+    }
+    let mut root = [0u8; SECTOR_SIZE];
+    root[..11].copy_from_slice(&label);
+    root[11] = 0x08;
+    sectors.insert(root_start, root);
+    for offset in 1..ROOT_SECTORS {
+        sectors.insert(root_start + offset, [0u8; SECTOR_SIZE]);
+    }
+    Ok(SparseFilesystemImage {
+        volume_sectors,
+        sectors,
+    })
 }
 
 fn choose_cluster_shift(volume_sectors: u64) -> u8 {
@@ -449,33 +557,103 @@ pub fn encrypt_sparse_mode2(
     }
 }
 
-fn physical_partition_encryption(
-    mode: OfficialPartitionMode,
-    index: usize,
-    partition_type: EdpPartitionType,
-) -> bool {
-    match partition_type {
-        EdpPartitionType::Boot => false,
-        EdpPartitionType::Share
-            if mode == OfficialPartitionMode::BootShareCombined && index == 0 =>
-        {
-            false
-        }
-        EdpPartitionType::Share | EdpPartitionType::Encrypt => true,
+pub fn build_official_exfat_partition(
+    plan: &OfficialProvisionPlan,
+    target: &PartitionFormatTarget,
+    file_key: &[u8; 16],
+    volume_label: &str,
+    volume_serial: u32,
+) -> Result<PartitionFilesystemImage, String> {
+    if plan.filesystem_format != OfficialFilesystemFormat::ExFat {
+        return Err(format!(
+            "portable filesystem writer does not yet implement {}",
+            plan.filesystem_format.config_token()
+        ));
     }
+    build_official_partition_filesystem_with_format(
+        plan,
+        target,
+        file_key,
+        volume_label,
+        volume_serial,
+        OfficialFilesystemFormat::ExFat,
+    )
 }
 
-fn is_whole_disk_compatibility_reserve(
-    mode: OfficialPartitionMode,
-    partition: OfficialPartitionGeometry,
-) -> bool {
-    mode == OfficialPartitionMode::WholeDiskEncrypted
-        && partition.partition_type == EdpPartitionType::Boot
-        && partition.size_bytes == super::WHOLE_DISK_ENCRYPTED_COMPAT_BOOT_BYTES
+pub fn build_official_partition_filesystem(
+    plan: &OfficialProvisionPlan,
+    target: &PartitionFormatTarget,
+    file_key: &[u8; 16],
+    volume_label: &str,
+    volume_serial: u32,
+) -> Result<PartitionFilesystemImage, String> {
+    let format = target
+        .filesystem
+        .ok_or("compatibility reserve is not a filesystem")?;
+    build_official_partition_filesystem_with_format(
+        plan,
+        target,
+        file_key,
+        volume_label,
+        volume_serial,
+        format,
+    )
 }
 
-/// Construct the default first-party exFAT filesystem stage for all logical
-/// partitions that carry a filesystem.
+fn build_official_partition_filesystem_with_format(
+    plan: &OfficialProvisionPlan,
+    target: &PartitionFormatTarget,
+    file_key: &[u8; 16],
+    volume_label: &str,
+    volume_serial: u32,
+    format: OfficialFilesystemFormat,
+) -> Result<PartitionFilesystemImage, String> {
+    if !target.format_capable || !plan.format_targets()?.contains(target) {
+        return Err("partition is not a format-capable target in this plan".into());
+    }
+    if crc32_bare(file_key) != plan.lba12_key_material.file_key_crc {
+        return Err("filesystem file key does not match LBA12 FileKeyCRC".into());
+    }
+    if target.physically_encrypted && plan.lba12_key_material.encrypt_mode != FileKeyWrapMode::Sm4 {
+        return Err(
+            "portable encrypted filesystem writer is validated only for current mode2 SM4".into(),
+        );
+    }
+    let plain = match format {
+        OfficialFilesystemFormat::Fat16 => build_empty_fat16(
+            target.geometry.start_sector,
+            target.geometry.sector_count(),
+            volume_serial,
+            volume_label,
+        )?,
+        OfficialFilesystemFormat::ExFat => build_empty_exfat(
+            target.geometry.start_sector,
+            target.geometry.sector_count(),
+            volume_serial,
+            volume_label,
+        )?,
+        OfficialFilesystemFormat::Fat32 | OfficialFilesystemFormat::Ntfs => {
+            return Err(format!(
+                "portable filesystem writer does not yet implement {}",
+                format.config_token()
+            ))
+        }
+    };
+    let image = if target.physically_encrypted {
+        encrypt_sparse_mode2(&plain, file_key)
+    } else {
+        plain
+    };
+    Ok(PartitionFilesystemImage {
+        geometry: target.geometry,
+        physically_encrypted: target.physically_encrypted,
+        image,
+    })
+}
+
+/// Construct the explicit legacy all-exFAT filesystem stage for all logical
+/// partitions that carry a filesystem. New provisioning uses each target's
+/// configured filesystem through `build_official_partition_filesystem`.
 ///
 /// The whole-disk-encrypted mode's 0x7E00 type1 compatibility entry is not a
 /// filesystem. The mode1 front type2 is physically plaintext because it is
@@ -496,47 +674,36 @@ pub fn build_official_exfat_partitions(
     if crc32_bare(file_key) != plan.lba12_key_material.file_key_crc {
         return Err("filesystem file key does not match LBA12 FileKeyCRC".into());
     }
-    let logical = plan.logical_partitions(SECTOR_SIZE as u64)?;
-    if volume_serials.len() != logical.len() {
+    let targets = plan.format_targets()?;
+    if volume_serials.len() != targets.len() {
         return Err(format!(
             "filesystem volume serial count mismatch: got {}, need {}",
             volume_serials.len(),
-            logical.len()
+            targets.len()
         ));
     }
-    if logical.iter().enumerate().any(|(index, partition)| {
-        !is_whole_disk_compatibility_reserve(plan.mode, *partition)
-            && physical_partition_encryption(plan.mode, index, partition.partition_type)
-    }) && plan.lba12_key_material.encrypt_mode != FileKeyWrapMode::Sm4
+    if targets
+        .iter()
+        .any(|target| target.format_capable && target.physically_encrypted)
+        && plan.lba12_key_material.encrypt_mode != FileKeyWrapMode::Sm4
     {
         return Err(
             "portable encrypted filesystem writer is validated only for current mode2 SM4".into(),
         );
     }
 
-    let mut out = Vec::with_capacity(logical.len());
-    for (index, partition) in logical.into_iter().enumerate() {
-        if is_whole_disk_compatibility_reserve(plan.mode, partition) {
+    let mut out = Vec::with_capacity(targets.len());
+    for (index, target) in targets.iter().enumerate() {
+        if !target.format_capable {
             continue;
         }
-        let plain = build_empty_exfat(
-            partition.start_sector,
-            partition.sector_count(),
-            volume_serials[index],
+        out.push(build_official_exfat_partition(
+            plan,
+            target,
+            file_key,
             volume_label,
-        )?;
-        let physically_encrypted =
-            physical_partition_encryption(plan.mode, index, partition.partition_type);
-        let image = if physically_encrypted {
-            encrypt_sparse_mode2(&plain, file_key)
-        } else {
-            plain
-        };
-        out.push(PartitionFilesystemImage {
-            geometry: partition,
-            physically_encrypted,
-            image,
-        });
+            volume_serials[index],
+        )?);
     }
     Ok(out)
 }

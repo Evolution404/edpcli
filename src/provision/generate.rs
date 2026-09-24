@@ -4,8 +4,8 @@ use crate::common::SECTOR;
 use crate::crypto::{a7f0_full, crc32_bare, lba6_checksum, xor_rolling, LBA6_K0};
 
 use super::{
-    build_official_partition_layout, official_mbr_partition_type, OfficialPartitionGeometry,
-    OfficialProvisionPlan, ProvisionImage, ProvisionSpec, PROVISION_IMAGE_LEN,
+    build_official_partition_layout, OfficialPartitionGeometry, OfficialProvisionPlan,
+    ProvisionImage, ProvisionSpec, PROVISION_IMAGE_LEN,
 };
 
 const LBA12_TABLE_LEN: usize = 0x170;
@@ -235,7 +235,7 @@ fn build_official_lba0(
         .ok_or("official partition layout is empty")?;
     let mut out = [0u8; SECTOR];
     let entry = 0x1be;
-    out[entry + 4] = official_mbr_partition_type(plan.mode);
+    out[entry + 4] = plan.visible_mbr_partition_type()?;
     let start = u32::try_from(first.start_sector).map_err(|_| "MBR start LBA overflows u32")?;
     let count =
         u32::try_from(first.sector_count()).map_err(|_| "MBR sector count overflows u32")?;
@@ -284,7 +284,7 @@ fn build_official_lba7(
         );
         plain[base..base + 0x40].copy_from_slice(&entry);
     }
-    plain[0xc0..0xc8].copy_from_slice(spec.profile().lba7_terminator());
+    plain[0xc0..0xc8].copy_from_slice(&spec.profile().lba7_pass_info_prefix());
     let crc = crc32_bare(spec.target().device_id().as_bytes());
     let k0 = (crc & 0xffff) ^ (crc >> 16);
     Ok(xor_rolling(&plain, k0).try_into().expect("sector length"))
@@ -327,7 +327,7 @@ fn build_official_lba12(
         );
         plain[base..base + 0x60].copy_from_slice(&entry);
     }
-    plain[0x120..0x128].copy_from_slice(spec.profile().lba12_terminator());
+    plain[0x120..0x128].copy_from_slice(&spec.profile().lba12_pass_info_prefix());
     let crc = crc32_bare(spec.target().device_id().as_bytes());
     Ok(a7f0_full(&plain, &crc.to_le_bytes(), 0)
         .try_into()
@@ -352,7 +352,7 @@ fn build_lba7(spec: &ProvisionSpec, layout: Layout) -> [u8; SECTOR] {
     );
     plain[..0x40].copy_from_slice(&share);
     plain[0x40..0x80].copy_from_slice(&type4);
-    plain[0xc0..0xc8].copy_from_slice(spec.profile().lba7_terminator());
+    plain[0xc0..0xc8].copy_from_slice(&spec.profile().lba7_pass_info_prefix());
     let crc = crc32_bare(spec.target().device_id().as_bytes());
     let k0 = (crc & 0xffff) ^ (crc >> 16);
     xor_rolling(&plain, k0).try_into().expect("sector length")
@@ -442,7 +442,7 @@ fn build_lba12(spec: &ProvisionSpec, layout: Layout) -> [u8; SECTOR] {
     );
     plain[..0x60].copy_from_slice(&share);
     plain[0x60..0xc0].copy_from_slice(&type4);
-    plain[0x120..0x128].copy_from_slice(spec.profile().lba12_terminator());
+    plain[0x120..0x128].copy_from_slice(&spec.profile().lba12_pass_info_prefix());
 
     let crc = crc32_bare(spec.target().device_id().as_bytes());
     let key = crc.to_le_bytes();

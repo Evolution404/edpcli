@@ -3,10 +3,11 @@ use edpcli::protocol::{
 };
 use edpcli::provision::{
     build_official_partition_layout, generate_official_image, official_mbr_partition_type,
-    wrap_file_key, wrap_legacy_lba7_file_key, FileKeyWrapMode, OfficialFilesystemFormat,
-    OfficialPartitionMode, OfficialPartitionSizes, OfficialProvisionPlan,
-    OfficialProvisionValidator, OnlyId, ProvisionEntropy, ProvisionImage, ProvisionMetadata,
-    ProvisionProfile, ProvisionSpec, TargetIdentity, OFFICIAL_PARTITION_START_SECTOR,
+    visible_mbr_partition_type, wrap_file_key, wrap_legacy_lba7_file_key, FileKeyWrapMode,
+    OfficialFilesystemFormat, OfficialPartitionFilesystems, OfficialPartitionMode,
+    OfficialPartitionSizes, OfficialProvisionPlan, OfficialProvisionValidator, OnlyId,
+    ProvisionEntropy, ProvisionImage, ProvisionMetadata, ProvisionProfile, ProvisionSpec,
+    TargetIdentity, DEFAULT_MODE0_BOOT_SECTORS, OFFICIAL_PARTITION_START_SECTOR,
     WHOLE_DISK_ENCRYPTED_COMPAT_BOOT_BYTES,
 };
 use edpcli::{
@@ -57,6 +58,73 @@ fn official_mbr_selector_matches_the_first_party_writer_branches() {
 }
 
 #[test]
+fn visible_mbr_type_tracks_the_front_filesystem_without_changing_edp_roles() {
+    for mode in [
+        OfficialPartitionMode::DefaultThreePartition,
+        OfficialPartitionMode::IntranetExtranetDualPartition,
+    ] {
+        let plan = official_plan(mode);
+        let default_front = plan.format_targets().unwrap().remove(0);
+        assert_eq!(
+            default_front.filesystem,
+            Some(OfficialFilesystemFormat::Fat16)
+        );
+        assert_eq!(plan.visible_mbr_partition_type().unwrap(), 0x0e);
+        let mut filesystems = OfficialPartitionFilesystems::defaults();
+        filesystems.boot = OfficialFilesystemFormat::ExFat;
+        let exfat = plan.with_filesystems(filesystems);
+        assert_eq!(exfat.visible_mbr_partition_type().unwrap(), 0x07);
+        assert_eq!(
+            exfat.logical_partitions(512).unwrap(),
+            plan.logical_partitions(512).unwrap()
+        );
+    }
+    let combined = official_plan(OfficialPartitionMode::BootShareCombined);
+    assert_eq!(
+        combined.format_targets().unwrap()[0].filesystem,
+        Some(OfficialFilesystemFormat::ExFat)
+    );
+    assert_eq!(combined.visible_mbr_partition_type().unwrap(), 0x07);
+    assert_eq!(
+        official_plan(OfficialPartitionMode::WholeDiskEncrypted)
+            .visible_mbr_partition_type()
+            .unwrap(),
+        0x0b
+    );
+    assert_eq!(
+        visible_mbr_partition_type(
+            OfficialPartitionMode::DefaultThreePartition,
+            OfficialFilesystemFormat::Fat32
+        ),
+        0x0c
+    );
+    assert_eq!(
+        visible_mbr_partition_type(
+            OfficialPartitionMode::DefaultThreePartition,
+            OfficialFilesystemFormat::Ntfs
+        ),
+        0x07
+    );
+}
+
+#[test]
+fn generated_mode0_exfat_front_uses_mbr_07_from_the_initial_protocol_image() {
+    let spec = official_spec();
+    let entropy = ProvisionEntropy::new([0x5a; 252]);
+    let fat16_plan = official_plan(OfficialPartitionMode::DefaultThreePartition);
+    let mut filesystems = OfficialPartitionFilesystems::defaults();
+    filesystems.boot = OfficialFilesystemFormat::ExFat;
+    let exfat_plan = fat16_plan.with_filesystems(filesystems);
+    let fat16 = generate_official_image(&spec, &entropy, &fat16_plan).unwrap();
+    let exfat = generate_official_image(&spec, &entropy, &exfat_plan).unwrap();
+    assert_eq!(fat16.as_bytes()[0x1c2], 0x0e);
+    assert_eq!(exfat.as_bytes()[0x1c2], 0x07);
+    assert_eq!(exfat.as_bytes()[..0x1c2], fat16.as_bytes()[..0x1c2]);
+    assert_eq!(exfat.as_bytes()[0x1c3..], fat16.as_bytes()[0x1c3..]);
+    OfficialProvisionValidator::validate(&spec, &exfat, &exfat_plan).unwrap();
+}
+
+#[test]
 fn official_plan_defaults_to_current_writer_exfat_but_accepts_other_configured_formats() {
     let default = official_plan(OfficialPartitionMode::BootShareCombined);
     assert_eq!(default.filesystem_format, OfficialFilesystemFormat::ExFat);
@@ -103,6 +171,20 @@ fn official_layouts_are_contiguous_from_lba63() {
             assert_eq!(pair[0].end_sector_exclusive(), pair[1].start_sector);
         }
     }
+}
+
+#[test]
+fn mode0_exact_boot_sector_geometry_reaches_lba20480() {
+    let layout = build_official_partition_layout(
+        OfficialPartitionMode::DefaultThreePartition,
+        OfficialPartitionSizes::new(1, 64, 128).with_boot_sectors(DEFAULT_MODE0_BOOT_SECTORS),
+        512,
+    )
+    .unwrap();
+    assert_eq!(layout[0].start_sector, 63);
+    assert_eq!(layout[0].sector_count(), 20_417);
+    assert_eq!(layout[0].end_sector_exclusive(), 20_480);
+    assert_eq!(layout[1].start_sector, 20_480);
 }
 
 #[test]

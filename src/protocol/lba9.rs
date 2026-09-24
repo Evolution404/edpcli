@@ -56,6 +56,11 @@ impl Lba9View {
     pub fn reconstruct(&self) -> [u8; 512] {
         self.wire.0
     }
+
+    /// Logical plaintext view used by read-only inspection.
+    pub fn decoded(&self) -> &[u8; 512] {
+        &self.plain
+    }
     pub fn reencode(&self) -> [u8; 512] {
         let mut out = self.plain;
         let key = self.crc.to_le_bytes();

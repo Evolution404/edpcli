@@ -887,6 +887,7 @@ fn lba6_autoid_matches_lba8_autonum_but_fixed_slot_tail_is_not_semantic_padding(
 
         let inspect_meta = InspectMeta {
             device_id: Some(meta.device_id.clone()),
+            onlyid: meta.onlyid.clone(),
             ..InspectMeta::default()
         };
         let ownership =
@@ -981,6 +982,7 @@ fn lba6_owner_office_and_label_slots_have_official_fixed_storage_boundaries() {
 
         let inspect_meta = InspectMeta {
             device_id: Some(meta.device_id.clone()),
+            onlyid: meta.onlyid.clone(),
             ..InspectMeta::default()
         };
         let ownership =
@@ -3502,6 +3504,7 @@ fn lba6_short_dept_slot_is_c_string_plus_uninitialized_backing() {
         let dept = &plain6[..0x40];
         let inspect_meta = InspectMeta {
             device_id: Some(meta.device_id.clone()),
+            onlyid: meta.onlyid.clone(),
             ..InspectMeta::default()
         };
         let ownership =

@@ -34,6 +34,16 @@ fn onlyid_accepts_real_signed_and_unsigned_32_bit_text_forms() {
 }
 
 #[test]
+fn generated_onlyid_candidate_is_nonzero_and_round_trips_through_the_existing_parser() {
+    let candidate = OnlyId::random_candidate().expect("onlyid candidate");
+    assert_ne!(candidate.bits(), 0);
+    assert_eq!(
+        OnlyId::parse(candidate.text()).unwrap().bits(),
+        candidate.bits()
+    );
+}
+
+#[test]
 fn target_identity_is_derived_from_complete_hardware_probe() {
     let uas = TargetIdentity::from_probe(&probe(NativeTransport::Uas), 122_880_000).unwrap();
     assert_eq!(uas.device_id(), "disk&ven_netac&prod_onlydisk");

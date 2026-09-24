@@ -254,6 +254,7 @@ fn provision_request(
     crate::application::provision::NewProvisionRequest {
         mode: opts.mode,
         boot_mib: opts.boot_mib,
+        boot_sectors: opts.boot_sectors,
         share_mib: opts.share_mib,
         encrypt_mib: opts.encrypt_mib,
         label_id: opts.label_id.clone(),
@@ -262,6 +263,18 @@ fn provision_request(
         label: opts.label.clone(),
         password: opts.password.clone(),
         volume_label: opts.volume_label.clone(),
+        format: crate::application::provision::FormatOptions {
+            boot: opts.format_boot,
+            share: opts.format_share,
+            encrypt: opts.format_encrypt,
+            boot_label: opts.boot_label.clone(),
+            share_label: opts.share_label.clone(),
+            encrypt_label: opts.encrypt_label.clone(),
+            boot_fs: opts.boot_fs,
+            share_fs: opts.share_fs,
+            encrypt_fs: opts.encrypt_fs,
+        },
+        force_change_password: opts.force_change_password,
     }
 }
 
@@ -287,11 +300,16 @@ fn print_new_provision_summary(
         prepared.lce_start_lba,
         prepared.write_image.touched_sector_count()
     );
-    println!(
-        "分区 MiB: boot={} share={} encrypt={}  文件系统=exFAT",
+    let boot = if let Some(sectors) = opts.boot_sectors {
+        format!("{sectors} sectors")
+    } else {
         opts.boot_mib
-            .map(|v| v.to_string())
-            .unwrap_or_else(|| "-".into()),
+            .map(|v| format!("{v} MiB"))
+            .unwrap_or_else(|| "-".into())
+    };
+    println!(
+        "分区: boot={} share={}MiB encrypt={}MiB",
+        boot,
         opts.share_mib
             .map(|v| v.to_string())
             .unwrap_or_else(|| "-".into()),
@@ -299,6 +317,42 @@ fn print_new_provision_summary(
             .map(|v| v.to_string())
             .unwrap_or_else(|| "-".into())
     );
+    println!("制盘后格式化:");
+    for choice in &prepared.format_targets {
+        let target = &choice.target;
+        println!(
+            "  {}  {} type{} {} {}{} 卷标={}",
+            if !target.format_capable {
+                "—"
+            } else if choice.selected {
+                "☑"
+            } else {
+                "☐"
+            },
+            target.role.label(),
+            target.geometry.partition_type.raw(),
+            if !target.format_capable {
+                "不可格式化"
+            } else if target.physically_encrypted {
+                "加密"
+            } else {
+                "明文"
+            },
+            choice
+                .filesystem
+                .map(|format| format.windows_format_name())
+                .unwrap_or("—"),
+            target
+                .visible_mbr_type
+                .map(|mbr| format!(" / MBR 0x{mbr:02X}"))
+                .unwrap_or_default(),
+            if target.format_capable {
+                choice.volume_label.as_str()
+            } else {
+                "—"
+            }
+        );
+    }
 }
 
 fn provision_flow(runner: &SysRunner, action: ProvisionAction) -> i32 {
@@ -431,12 +485,27 @@ fn provision_flow(runner: &SysRunner, action: ProvisionAction) -> i32 {
                 return finish(Err(EdpCliError::new(EXIT_CANCELLED, "已取消(未写盘)")));
             }
             match crate::application::provision::commit_new_provision(runner, &mut dev, &prepared) {
-                Ok(()) => {
+                Ok(report) => {
                     println!(
                         "{}",
-                        crate::ui::green("制盘完成，读回校验通过。请拔出重插。")
+                        crate::ui::green("制盘：成功，协议与几何读回校验通过。")
                     );
-                    EXIT_OK
+                    if report.formats.is_empty() {
+                        println!("格式化：未选择任何分区");
+                    }
+                    for item in &report.formats {
+                        match &item.result {
+                            Ok(()) => println!("格式化：✓ {}（读回验证通过）", item.role.label()),
+                            Err(message) => {
+                                println!("格式化：✗ {}：{}", item.role.label(), message)
+                            }
+                        }
+                    }
+                    if report.formats.iter().any(|item| item.result.is_err()) {
+                        EXIT_IO
+                    } else {
+                        EXIT_OK
+                    }
                 }
                 Err(error) => finish(Err(error)),
             }

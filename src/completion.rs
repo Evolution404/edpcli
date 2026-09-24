@@ -143,9 +143,9 @@ _edpcli() {
       fi
       if [[ "$cur" == -* ]]; then
         case "$action" in
-          plan)    compadd -- --disk --mode --boot-mib --share-mib --encrypt-mib --label-id --user --dept --label --password --volume-label --help ;;
-          image)   compadd -- --disk --mode --boot-mib --share-mib --encrypt-mib --label-id --user --dept --label --password --volume-label --out --help ;;
-          write)   compadd -- --disk --mode --boot-mib --share-mib --encrypt-mib --label-id --user --dept --label --password --volume-label --yes --help ;;
+          plan)    compadd -- --disk --mode --boot-mib --boot-sectors --share-mib --encrypt-mib --label-id --user --dept --label --password --volume-label --force-change-password --help ;;
+          image)   compadd -- --disk --mode --boot-mib --boot-sectors --share-mib --encrypt-mib --label-id --user --dept --label --password --volume-label --force-change-password --out --help ;;
+          write)   compadd -- --disk --mode --boot-mib --boot-sectors --share-mib --encrypt-mib --label-id --user --dept --label --password --volume-label --force-change-password --yes --help ;;
           convert) compadd -- --disk --write --yes --backup-dir --help ;;
         esac
       fi
@@ -249,9 +249,9 @@ _edpcli() {
         COMPREPLY=( $(compgen -W 'plan image write convert' -- "$cur") )
       elif [[ "$cur" == -* ]]; then
         case "$action" in
-          plan)    vals='--disk --mode --boot-mib --share-mib --encrypt-mib --label-id --user --dept --label --password --volume-label --help' ;;
-          image)   vals='--disk --mode --boot-mib --share-mib --encrypt-mib --label-id --user --dept --label --password --volume-label --out --help' ;;
-          write)   vals='--disk --mode --boot-mib --share-mib --encrypt-mib --label-id --user --dept --label --password --volume-label --yes --help' ;;
+          plan)    vals='--disk --mode --boot-mib --boot-sectors --share-mib --encrypt-mib --label-id --user --dept --label --password --volume-label --force-change-password --help' ;;
+          image)   vals='--disk --mode --boot-mib --boot-sectors --share-mib --encrypt-mib --label-id --user --dept --label --password --volume-label --force-change-password --out --help' ;;
+          write)   vals='--disk --mode --boot-mib --boot-sectors --share-mib --encrypt-mib --label-id --user --dept --label --password --volume-label --force-change-password --yes --help' ;;
           convert) vals='--disk --write --yes --backup-dir --help' ;;
         esac
         COMPREPLY=( $(compgen -W "$vals" -- "$cur") )
@@ -355,6 +355,7 @@ complete -c edpcli -n '__fish_seen_subcommand_from convert' -l dir -r
 complete -c edpcli -n '__fish_seen_subcommand_from convert' -l out -r
 complete -c edpcli -n '__fish_seen_subcommand_from provision' -l mode -r -a '0 1 2 3'
 complete -c edpcli -n '__fish_seen_subcommand_from provision' -l boot-mib -r
+complete -c edpcli -n '__fish_seen_subcommand_from provision' -l boot-sectors -r
 complete -c edpcli -n '__fish_seen_subcommand_from provision' -l share-mib -r
 complete -c edpcli -n '__fish_seen_subcommand_from provision' -l encrypt-mib -r
 complete -c edpcli -n '__fish_seen_subcommand_from provision' -l label-id -r

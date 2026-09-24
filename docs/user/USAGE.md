@@ -36,7 +36,8 @@ gh release download --repo Evolution404/edpcli \
   --pattern 'edpcli-v*-macos-arm64.tar.gz.sha256'
 shasum -a 256 -c edpcli-v*-macos-arm64.tar.gz.sha256
 tar -xzf edpcli-v*-macos-arm64.tar.gz
-sudo install -m 0755 edpcli /usr/local/bin/edpcli
+mkdir -p "$HOME/.local/bin"
+install -m 0755 edpcli "$HOME/.local/bin/edpcli"
 edpcli version
 ```
 
@@ -50,10 +51,20 @@ Intel Mac 将 `macos-arm64` 改为 `macos-x86_64`；需要通用二进制时改�
 ```bash
 tar -xzf edpcli-vX.Y.Z-macos-arm64.tar.gz
 chmod +x edpcli
-sudo install -m 0755 edpcli /usr/local/bin/edpcli
+mkdir -p "$HOME/.local/bin"
+install -m 0755 edpcli "$HOME/.local/bin/edpcli"
 edpcli --version
 edpcli version
 ```
+
+在本机开发/试用未发布版本时，统一使用：
+
+```bash
+scripts/install-local.sh target/release/edpcli
+```
+
+该脚本固定写入 `~/.local/bin/edpcli`，不会写 `/usr/local/bin`；安装后还会通过
+`zsh -lic 'command -v edpcli'` 和 SHA-256 对比确认用户终端实际运行的就是刚安装的二进制。
 
 Windows 将 `edpcli.exe` 放入固定目录并加入 `PATH`：
 
@@ -120,7 +131,13 @@ TUI 顶部有三个工作区：**设备 / 备份 / 制盘**。常用键位：
 | `?` | 帮助 |
 
 制盘工作区包含六个入口：官方模式 0/1/2/3、现有官方盘严格免密改造、离线 LBA 快照转换。
-四种新盘模式先填写分区/身份/密码参数，再生成只读计划；计划页可以按 `E` 导出与当前目标
+四种新盘模式先填写分区/身份/密码参数，再生成只读计划。TUI 默认密码为 `0000aaaa`，
+卷标默认为“启动区”；密码和卷标都可直接修改。交换区/保密区等容量字段默认手动输入 MiB，
+模式0启动区则使用精确扇区数。各分区会根据当前 U 盘容量实时提示可填范围；按 `Space`
+可切换为“按比例分配”，此时输入当前模式中参与比例分配的分区权重（例如模式0的交换区与
+保密区可填 `1:2`），程序会在保留精确启动区并避开 LCE 后按权重自动分配剩余容量。TUI 的
+“首次强制改密”复选项默认
+不勾选，只有用户主动勾选时，交换区和保密区才会在首次插入后进入强制改密码流程。计划页可以按 `E` 导出与当前目标
 硬件身份绑定的稀疏镜像，真实写盘仍需再次输入 `YES`。免密改造会先生成只读转换计划，写入前
 自动创建 EDPB 元数据备份；它保留原 type4 起点、大小和密钥材料。离线快照转换不要求插盘，
 只读取普通目录中的 `LBA*.bin`，并可选择仅预览或把转换后的 LBA00/06/07/09/12 写到普通目录。
@@ -214,9 +231,22 @@ edpcli apply --disk 4 --force --yes
 edpcli provision plan --disk 4 --mode 1 \
   --share-mib 1024 --encrypt-mib 2048 \
   --label-id 1402259934 --user USER06 \
-  --dept '江苏省电力有限公司' --label '江苏电力!SAFE6' \
-  --password '你的密码'
+  --dept '江苏省电力有限公司' --label '江苏电力!SAFE6'
 ```
+
+CLI 未指定 `--password` 时使用 `0000aaaa`，未指定 `--volume-label` 时使用“启动区”。
+两项都可以显式覆盖。
+
+模式 0 的启动区按扇区精确建模：默认从 LBA63 开始占用 **20417 扇区**，因此下一分区
+从 LBA20480 开始。TUI 直接显示并允许编辑“启动区扇区”；CLI 可用
+`--boot-sectors N` 显式指定，mode0 未指定 `--boot-mib/--boot-sectors` 时默认
+`20417`。
+
+标签标识（onlyid）同样允许手动修改。若当前目标盘扫描到了 onlyid，TUI 默认沿用该值；
+只有扫描不到时才生成一个合法的随机候选。CLI 未传 `--label-id` 时也会生成候选值。
+
+默认不会要求首次插入后再次改密码；如需下发“首次必须改密”策略，追加
+`--force-change-password`。
 
 导出与该目标盘绑定的稀疏制盘镜像：
 

@@ -5,8 +5,8 @@ use std::collections::BTreeMap;
 use crate::common::SECTOR;
 
 use super::{
-    build_lce_ciphertext, build_official_exfat_partitions, generate_official_image,
-    OfficialProvisionPlan, ProvisionEntropy, ProvisionImage, ProvisionSpec,
+    build_lce_ciphertext, generate_official_image, OfficialProvisionPlan, ProvisionEntropy,
+    ProvisionImage, ProvisionSpec,
 };
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -57,9 +57,19 @@ pub fn build_official_provision_write_image(
     spec: &ProvisionSpec,
     entropy: &ProvisionEntropy,
     plan: &OfficialProvisionPlan,
-    file_key: &[u8; 16],
-    volume_label: &str,
-    volume_serials: &[u32],
+    _file_key: &[u8; 16],
+    _volume_label: &str,
+    _volume_serials: &[u32],
+) -> Result<OfficialProvisionWriteImage, String> {
+    build_official_provision_protocol_image(spec, entropy, plan)
+}
+
+/// The physical provision phase writes only protocol metadata and LCE. Filesystems
+/// are a separately authorized, independently reported post-provision phase.
+pub fn build_official_provision_protocol_image(
+    spec: &ProvisionSpec,
+    entropy: &ProvisionEntropy,
+    plan: &OfficialProvisionPlan,
 ) -> Result<OfficialProvisionWriteImage, String> {
     let metadata = generate_official_image(spec, entropy, plan)?;
     let total_sectors = spec.target().total_sectors();
@@ -107,20 +117,7 @@ pub fn build_official_provision_write_image(
         }
     }
 
-    let filesystems =
-        build_official_exfat_partitions(plan, file_key, volume_label, volume_serials)?;
     let mut patch = BTreeMap::new();
-
-    for fs in filesystems {
-        for (&relative_lba, sector) in fs.image.sectors() {
-            let absolute = fs
-                .geometry
-                .start_sector
-                .checked_add(relative_lba)
-                .ok_or("filesystem absolute LBA overflow")?;
-            insert_sector(&mut patch, absolute, sector, total_sectors, "filesystem")?;
-        }
-    }
 
     let lce = build_lce_ciphertext(plan.lba7_compatibility_extent)?;
     for (index, sector) in lce.as_chunks::<SECTOR>().0.iter().enumerate() {

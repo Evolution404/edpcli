@@ -19,7 +19,8 @@ pub use conversion::{
     build_passwordless_conversion, PasswordlessConversionImage, PasswordlessConversionPlan,
 };
 pub use filesystem::{
-    build_empty_exfat, build_official_exfat_partitions, encrypt_sparse_mode2,
+    build_empty_exfat, build_empty_fat16, build_official_exfat_partition,
+    build_official_exfat_partitions, build_official_partition_filesystem, encrypt_sparse_mode2,
     OfficialFilesystemFormat, PartitionFilesystemImage, SparseFilesystemImage,
 };
 pub use generate::{generate_image, generate_official_image, ProvisionEntropy};
@@ -28,18 +29,24 @@ pub use keys::{
     ProvisionKeyMaterial,
 };
 pub use layout::{
-    build_official_partition_layout, official_mbr_partition_type, OfficialPartitionGeometry,
-    OfficialPartitionMode, OfficialPartitionSizes, OfficialProvisionPlan,
+    build_official_partition_layout, official_format_targets,
+    official_format_targets_with_filesystems, official_mbr_partition_type,
+    physical_partition_encryption, visible_mbr_partition_type, OfficialPartitionFilesystems,
+    OfficialPartitionGeometry, OfficialPartitionMode, OfficialPartitionSizes,
+    OfficialProvisionPlan, PartitionFormatTarget, PartitionRole, DEFAULT_MODE0_BOOT_SECTORS,
     OFFICIAL_PARTITION_START_SECTOR, WHOLE_DISK_ENCRYPTED_COMPAT_BOOT_BYTES,
 };
 pub use lce::{build_lce_ciphertext, lce_plaintext};
-pub use profile::ProvisionProfile;
+pub use profile::{ProvisionProfile, DEFAULT_SAFE6_LABEL};
 pub use spec::{OnlyId, ProvisionMetadata, ProvisionSpec, TargetIdentity};
 pub use validate::{
     OfficialProvisionValidation, OfficialProvisionValidator, ProvisionValidation,
     ProvisionValidator,
 };
-pub use write_plan::{build_official_provision_write_image, OfficialProvisionWriteImage};
+pub use write_plan::{
+    build_official_provision_protocol_image, build_official_provision_write_image,
+    OfficialProvisionWriteImage,
+};
 
 use crate::common::METADATA_IMAGE_LEN;
 

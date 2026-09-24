@@ -65,10 +65,12 @@ impl IoObject {
     }
 
     fn snapshot(&self) -> NodeSnapshot {
-        const STRING_KEYS: [&str; 3] = [
+        const STRING_KEYS: [&str; 5] = [
             "Vendor Identification",
             "Product Identification",
             "Product Revision Level",
+            "USB Serial Number",
+            "kUSBSerialNumberString",
         ];
         const INTEGER_KEYS: [&str; 2] = ["idVendor", "idProduct"];
 
@@ -166,6 +168,23 @@ fn summarize_nodes(nodes: &[NodeSnapshot]) -> HardwareProbe {
 
 /// 查询一个 BSD whole-disk 的 IOKit 祖先链。找不到设备返回 `None`。
 pub fn probe_disk(disk: u32) -> Option<HardwareProbe> {
+    let nodes = disk_nodes(disk)?;
+    Some(summarize_nodes(&nodes))
+}
+
+pub fn probe_disk_serial(disk: u32) -> Option<String> {
+    disk_nodes(disk)?.iter().find_map(|node| {
+        if !node.class_name.contains("USB") {
+            return None;
+        }
+        node.strings
+            .get("USB Serial Number")
+            .or_else(|| node.strings.get("kUSBSerialNumberString"))
+            .cloned()
+    })
+}
+
+fn disk_nodes(disk: u32) -> Option<Vec<NodeSnapshot>> {
     let name = CString::new(format!("disk{disk}")).ok()?;
     let main_port = unsafe { kIOMainPortDefault };
     let matching = unsafe { IOBSDNameMatching(main_port, 0, name.as_ptr()) }?;
@@ -185,7 +204,7 @@ pub fn probe_disk(disk: u32) -> Option<HardwareProbe> {
         nodes.push(object.snapshot());
         current = object.parent();
     }
-    Some(summarize_nodes(&nodes))
+    Some(nodes)
 }
 
 #[cfg(test)]

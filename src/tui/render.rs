@@ -748,7 +748,7 @@ fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppSta
                         Line::from("• LBA3 厂商数据原样保留"),
                         Line::from("• 写前固定硬件身份/容量"),
                         Line::from("• MBR 最后提交"),
-                        Line::from("• 逐扇区读回；失败整组回滚"),
+                        Line::from("• 协议写入失败回滚；格式化失败保留制盘"),
                         Line::from("• 免密改造不移动/重加密 type4"),
                     ]
                 })
@@ -820,13 +820,24 @@ fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppSta
                 Line::from(Span::styled(provision.kind.description(), muted())),
                 Line::from(""),
             ];
+            let mut shown_format_header = false;
+            let mut selected_line = 0usize;
             for (index, (label, value, secret)) in
                 state.provision_visible_fields().iter().enumerate()
             {
-                let shown = if *secret {
-                    "•".repeat(value.chars().count())
-                } else if value.is_empty() {
+                if !shown_format_header && (label.contains(" type") || label.contains("兼容保留区"))
+                {
+                    lines.push(Line::from(""));
+                    lines.push(Line::from(Span::styled(
+                        "制盘后格式化（默认全部不选）",
+                        secondary(),
+                    )));
+                    shown_format_header = true;
+                }
+                let shown = if value.is_empty() {
                     "〈请输入〉".into()
+                } else if *secret {
+                    "•".repeat(value.chars().count())
                 } else {
                     safe(value)
                 };
@@ -835,10 +846,17 @@ fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppSta
                 } else {
                     Style::default()
                 };
-                lines.push(Line::from(vec![
+                let mut spans = vec![
                     Span::styled(format!("{:>12}  ", label), muted()),
                     Span::styled(shown, value_style),
-                ]));
+                ];
+                if let Some(hint) = state.provision_field_hint(index) {
+                    spans.push(Span::styled(format!("  · {}", safe(&hint)), muted()));
+                }
+                if index == provision.field_selected {
+                    selected_line = lines.len();
+                }
+                lines.push(Line::from(spans));
             }
             lines.push(Line::from(""));
             lines.push(Line::from(vec![
@@ -846,6 +864,8 @@ fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppSta
                 Span::raw(" 切字段   "),
                 Span::styled("直接输入", secondary()),
                 Span::raw(" 修改   "),
+                Span::styled("Space", secondary()),
+                Span::raw(" 切换选项   "),
                 Span::styled("Enter", success()),
                 Span::raw(" 生成计划   "),
                 Span::styled("Esc", warning()),
@@ -854,6 +874,8 @@ fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppSta
             if let Some(message) = &provision.message {
                 lines.push(Line::from(Span::styled(safe(message), danger())));
             }
+            let visible_height = main_area.height.saturating_sub(2) as usize;
+            let scroll = selected_line.saturating_sub(visible_height.saturating_sub(3));
             frame.render_widget(
                 Paragraph::new(lines)
                     .block(
@@ -862,6 +884,7 @@ fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppSta
                             .border_style(provision_kind_style(provision.kind))
                             .title("参数表单"),
                     )
+                    .scroll((scroll as u16, 0))
                     .wrap(Wrap { trim: false }),
                 main_area,
             );
@@ -877,7 +900,7 @@ fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppSta
                             .as_deref()
                             .unwrap_or("正在只读检查目标盘…"),
                     )),
-                    Line::from("此阶段不写盘；正在计算 LCE、分区边界、文件系统与协议元数据。"),
+                    Line::from("此阶段不写盘；正在计算 LCE、分区边界与协议元数据。"),
                 ])
                 .alignment(Alignment::Center)
                 .block(
@@ -917,11 +940,56 @@ fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppSta
                                 prepared.write_image.highest_touched_lba().unwrap_or(0)
                             )),
                             Line::from("LBA3 已从目标盘捕获并绑定；写入前将再次复核。"),
-                            Line::from(vec![
-                                Span::styled("E", secondary()),
-                                Span::raw(" 导出与该目标绑定的稀疏制盘镜像"),
-                            ]),
+                            Line::from("先写协议/LCE 并验证，再对勾选的分区单独格式化并验证。"),
+                            Line::from(format!(
+                                "首次强制改密: {}",
+                                if prepared.force_change_password {
+                                    "是"
+                                } else {
+                                    "否"
+                                }
+                            )),
+                            Line::from("制盘后格式化:"),
                         ]);
+                        for choice in &prepared.format_targets {
+                            let target = &choice.target;
+                            lines.push(Line::from(format!(
+                                "{} {} type{} {} {}{} 卷标:{}",
+                                if !target.format_capable {
+                                    "—"
+                                } else if choice.selected {
+                                    "☑"
+                                } else {
+                                    "☐"
+                                },
+                                target.role.label(),
+                                target.geometry.partition_type.raw(),
+                                if !target.format_capable {
+                                    "不可格式化"
+                                } else if target.physically_encrypted {
+                                    "加密"
+                                } else {
+                                    "明文"
+                                },
+                                choice
+                                    .filesystem
+                                    .map(|format| format.windows_format_name())
+                                    .unwrap_or("—"),
+                                target
+                                    .visible_mbr_type
+                                    .map(|mbr| format!(" / MBR 0x{mbr:02X}"))
+                                    .unwrap_or_default(),
+                                if target.format_capable {
+                                    choice.volume_label.as_str()
+                                } else {
+                                    "—"
+                                }
+                            )));
+                        }
+                        lines.push(Line::from(vec![
+                            Span::styled("E", secondary()),
+                            Span::raw(" 导出与该目标绑定的稀疏制盘镜像"),
+                        ]));
                     }
                     ProvisionPrepared::Convert(prepared) => {
                         let plan = &prepared.conversion.plan;
@@ -1069,16 +1137,36 @@ fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppSta
             );
         }
         ProvisionStage::Result => {
+            let has_format_failure = provision
+                .message
+                .as_deref()
+                .is_some_and(|message| message.contains("格式化：✗"));
+            let mut lines = vec![
+                Line::from(Span::styled(
+                    "制盘流程已到达安全结束点",
+                    if has_format_failure {
+                        warning()
+                    } else {
+                        success()
+                    },
+                )),
+                Line::from(""),
+            ];
+            lines.extend(
+                provision
+                    .message
+                    .as_deref()
+                    .unwrap_or("操作结束")
+                    .lines()
+                    .map(|line| Line::from(safe(line))),
+            );
+            lines.push(Line::from(""));
+            lines.push(Line::from(Span::styled(
+                "Enter / Esc 返回制盘中心",
+                accent(),
+            )));
             frame.render_widget(
-                Paragraph::new(vec![
-                    Line::from(Span::styled("制盘流程已到达安全结束点", success())),
-                    Line::from(""),
-                    Line::from(safe(provision.message.as_deref().unwrap_or("操作结束"))),
-                    Line::from(""),
-                    Line::from(Span::styled("Enter / Esc 返回制盘中心", accent())),
-                ])
-                .alignment(Alignment::Center)
-                .block(
+                Paragraph::new(lines).alignment(Alignment::Center).block(
                     Block::default()
                         .borders(Borders::ALL)
                         .border_style(success())
@@ -2400,7 +2488,7 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
                     "Tab 页面  ·  j/k 选择方案  ·  Enter 打开  ·  r 刷新目标  ·  :provision 直达  ·  ? 帮助  ·  q 退出".to_string()
                 }
                 ProvisionStage::Form => {
-                    "↑/↓/Tab 字段  ·  输入编辑  ·  Enter 生成只读计划  ·  Esc 返回".to_string()
+                    "↑/↓/Tab 字段  ·  输入编辑  ·  Space 切换选项  ·  Enter 生成只读计划  ·  Esc 返回".to_string()
                 }
                 ProvisionStage::Planning => "正在生成只读计划…".to_string(),
                 ProvisionStage::Review => {

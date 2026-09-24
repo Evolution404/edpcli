@@ -22,6 +22,10 @@ pub trait CmdRunner {
     fn hardware_probe(&self, _disk: u32) -> Option<HardwareProbe> {
         None
     }
+
+    fn hardware_serial(&self, _disk: u32) -> Option<String> {
+        None
+    }
 }
 
 pub struct SysRunner;
@@ -78,6 +82,10 @@ impl CmdRunner for SysRunner {
 
     fn hardware_probe(&self, disk: u32) -> Option<HardwareProbe> {
         crate::platform::hardware_probe(disk)
+    }
+
+    fn hardware_serial(&self, disk: u32) -> Option<String> {
+        crate::platform::hardware_serial(disk)
     }
 }
 

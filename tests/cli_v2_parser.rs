@@ -1,4 +1,5 @@
 use edpcli::cli_args::{parse_args, BackupAction, InspectMode, Parsed, ProvisionAction};
+use edpcli::provision::{OnlyId, DEFAULT_MODE0_BOOT_SECTORS};
 
 fn args(values: &[&str]) -> Vec<String> {
     values.iter().map(|value| (*value).to_string()).collect()
@@ -64,7 +65,7 @@ fn provision_parses_all_four_product_actions_and_rejects_ambiguous_flags() {
         Parsed::Provision(ProvisionAction::Plan(opts)) => {
             assert_eq!(opts.mode, 1);
             assert_eq!(opts.disk, Some(4));
-            assert_eq!(opts.volume_label, "SAFE6");
+            assert_eq!(opts.volume_label, "启动区");
         }
         _ => panic!("expected provision plan"),
     }
@@ -105,6 +106,238 @@ fn provision_parses_all_four_product_actions_and_rejects_ambiguous_flags() {
     assert!(parse_args(&args(&["provision", "plan", "--onlyid", "1"])).is_err());
     assert!(parse_args(&args(&["provision", "convert", "--yes"])).is_err());
     assert!(parse_args(&args(&["provision", "plan", "--mode", "4"])).is_err());
+}
+
+#[test]
+fn provision_label_defaults_to_jiangsu_safe6_but_cli_can_override_it() {
+    let base = [
+        "provision",
+        "plan",
+        "--disk",
+        "4",
+        "--mode",
+        "1",
+        "--share-mib",
+        "64",
+        "--encrypt-mib",
+        "128",
+        "--label-id",
+        "1402259934",
+        "--user",
+        "USER06",
+        "--dept",
+        "江苏省电力有限公司",
+        "--password",
+        "ProofPass1!",
+    ];
+    match parse_args(&args(&base)).expect("default provision label") {
+        Parsed::Provision(ProvisionAction::Plan(opts)) => {
+            assert_eq!(opts.label, "江苏电力!SAFE6");
+            assert!(!opts.force_change_password);
+        }
+        _ => panic!("expected provision plan"),
+    }
+
+    let mut custom = base.to_vec();
+    custom.extend(["--label", "自定义标签!SAFE6"]);
+    match parse_args(&args(&custom)).expect("custom provision label") {
+        Parsed::Provision(ProvisionAction::Plan(opts)) => {
+            assert_eq!(opts.label, "自定义标签!SAFE6")
+        }
+        _ => panic!("expected provision plan"),
+    }
+
+    let mut forced = base.to_vec();
+    forced.push("--force-change-password");
+    match parse_args(&args(&forced)).expect("force-change provision policy") {
+        Parsed::Provision(ProvisionAction::Plan(opts)) => assert!(opts.force_change_password),
+        _ => panic!("expected provision plan"),
+    }
+}
+
+#[test]
+fn provision_password_and_volume_label_have_product_defaults() {
+    let args = args(&[
+        "provision",
+        "plan",
+        "--disk",
+        "4",
+        "--mode",
+        "1",
+        "--share-mib",
+        "64",
+        "--encrypt-mib",
+        "128",
+        "--label-id",
+        "1402259934",
+        "--user",
+        "USER06",
+        "--dept",
+        "江苏省电力有限公司",
+    ]);
+    match parse_args(&args).expect("default password and volume label") {
+        Parsed::Provision(ProvisionAction::Plan(opts)) => {
+            assert_eq!(opts.password, "0000aaaa");
+            assert_eq!(opts.volume_label, "启动区");
+            assert!(!opts.format_boot && !opts.format_share && !opts.format_encrypt);
+            assert_eq!(
+                opts.boot_fs,
+                edpcli::provision::OfficialFilesystemFormat::Fat16
+            );
+            assert_eq!(
+                opts.share_fs,
+                edpcli::provision::OfficialFilesystemFormat::ExFat
+            );
+            assert_eq!(
+                opts.encrypt_fs,
+                edpcli::provision::OfficialFilesystemFormat::ExFat
+            );
+        }
+        _ => panic!("expected provision plan"),
+    }
+}
+
+#[test]
+fn provision_format_flags_and_independent_labels_parse() {
+    let parsed = parse_args(&args(&[
+        "provision",
+        "write",
+        "--disk",
+        "4",
+        "--mode",
+        "0",
+        "--share-mib",
+        "64",
+        "--encrypt-mib",
+        "128",
+        "--user",
+        "USER06",
+        "--dept",
+        "江苏省电力有限公司",
+        "--format-boot",
+        "--format-share",
+        "--format-encrypt",
+        "--boot-label",
+        "启动",
+        "--share-label",
+        "交换",
+        "--encrypt-label",
+        "保密",
+        "--boot-fs",
+        "exfat",
+        "--share-fs",
+        "fat16",
+        "--encrypt-fs",
+        "exfat",
+    ]))
+    .unwrap();
+    match parsed {
+        Parsed::Provision(ProvisionAction::Write { opts, .. }) => {
+            assert!(opts.format_boot && opts.format_share && opts.format_encrypt);
+            assert_eq!(
+                (
+                    &opts.boot_label[..],
+                    &opts.share_label[..],
+                    &opts.encrypt_label[..]
+                ),
+                ("启动", "交换", "保密")
+            );
+            assert_eq!(
+                opts.boot_fs,
+                edpcli::provision::OfficialFilesystemFormat::ExFat
+            );
+            assert_eq!(
+                opts.share_fs,
+                edpcli::provision::OfficialFilesystemFormat::Fat16
+            );
+        }
+        _ => panic!("expected provision write"),
+    }
+}
+
+#[test]
+fn provision_cli_rejects_filesystems_without_a_writer() {
+    let base = [
+        "provision",
+        "plan",
+        "--disk",
+        "4",
+        "--mode",
+        "0",
+        "--share-mib",
+        "64",
+        "--encrypt-mib",
+        "128",
+        "--user",
+        "USER06",
+        "--dept",
+        "江苏省电力有限公司",
+    ];
+    for filesystem in ["fat32", "ntfs"] {
+        let mut command = base.to_vec();
+        command.extend(["--boot-fs", filesystem]);
+        assert!(parse_args(&args(&command)).is_err());
+    }
+}
+
+#[test]
+fn legacy_volume_label_is_a_fallback_for_each_partition_label() {
+    let parsed = parse_args(&args(&[
+        "provision",
+        "plan",
+        "--disk",
+        "4",
+        "--mode",
+        "0",
+        "--share-mib",
+        "64",
+        "--encrypt-mib",
+        "128",
+        "--user",
+        "USER06",
+        "--dept",
+        "江苏省电力有限公司",
+        "--volume-label",
+        "共同卷标",
+        "--share-label",
+        "独立交换",
+    ]))
+    .unwrap();
+    let Parsed::Provision(ProvisionAction::Plan(opts)) = parsed else {
+        panic!("expected provision plan");
+    };
+    assert_eq!(opts.boot_label, "共同卷标");
+    assert_eq!(opts.share_label, "独立交换");
+    assert_eq!(opts.encrypt_label, "共同卷标");
+}
+
+#[test]
+fn mode0_defaults_to_exact_boot_sectors_and_generates_onlyid_candidate() {
+    let parsed = parse_args(&args(&[
+        "provision",
+        "plan",
+        "--disk",
+        "4",
+        "--mode",
+        "0",
+        "--share-mib",
+        "64",
+        "--encrypt-mib",
+        "128",
+        "--user",
+        "USER06",
+        "--dept",
+        "江苏省电力有限公司",
+    ]))
+    .expect("mode0 defaults");
+    match parsed {
+        Parsed::Provision(ProvisionAction::Plan(opts)) => {
+            assert_eq!(opts.boot_mib, None);
+            assert_eq!(opts.boot_sectors, Some(DEFAULT_MODE0_BOOT_SECTORS));
+            assert!(OnlyId::parse(&opts.label_id).is_ok());
+        }
+        _ => panic!("expected provision plan"),
+    }
 }
 
 #[test]

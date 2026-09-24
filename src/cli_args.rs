@@ -75,6 +75,7 @@ pub struct ProvisionNewOpts {
     pub disk: Option<u32>,
     pub mode: u8,
     pub boot_mib: Option<u64>,
+    pub boot_sectors: Option<u64>,
     pub share_mib: Option<u64>,
     pub encrypt_mib: Option<u64>,
     pub label_id: String,
@@ -83,6 +84,16 @@ pub struct ProvisionNewOpts {
     pub label: String,
     pub password: String,
     pub volume_label: String,
+    pub format_boot: bool,
+    pub format_share: bool,
+    pub format_encrypt: bool,
+    pub boot_label: String,
+    pub share_label: String,
+    pub encrypt_label: String,
+    pub boot_fs: crate::provision::OfficialFilesystemFormat,
+    pub share_fs: crate::provision::OfficialFilesystemFormat,
+    pub encrypt_fs: crate::provision::OfficialFilesystemFormat,
+    pub force_change_password: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -226,10 +237,20 @@ fn print_topic_help(topic: &str) {
             println!("  provision plan  --disk N --mode 0|1|2|3 <身份/分区参数>");
             println!("  provision image --disk N --mode 0|1|2|3 <身份/分区参数> --out FILE");
             println!("  provision write --disk N --mode 0|1|2|3 <身份/分区参数> [--yes]");
+            println!("    可选格式化: --format-boot --format-share --format-encrypt");
+            println!("    文件系统: --boot-fs fat16|exfat --share-fs fat16|exfat --encrypt-fs fat16|exfat");
+            println!("    各区卷标: --boot-label LABEL --share-label LABEL --encrypt-label LABEL");
             println!("  provision convert [--disk N] [--write] [--yes] [--backup-dir D]");
-            println!("新盘身份参数: --label-id ID --user USER --dept DEPT --label LABEL --password PASSWORD");
-            println!("分区参数: --boot-mib N --share-mib N --encrypt-mib N；仅当前模式实际使用的项必填。");
-            println!("当前产品写入固定使用已验证的 exFAT + SM4(mode2) 路线。");
+            println!("新盘身份参数: [--label-id ID] --user USER --dept DEPT [--label LABEL] [--password PASSWORD]");
+            println!(
+                "标签默认值: {}；可通过 --label 自定义。",
+                crate::provision::DEFAULT_SAFE6_LABEL
+            );
+            println!("密码默认值: 0000aaaa；卷标默认值: 启动区。");
+            println!("标签标识未指定时自动生成一个合法 onlyid 候选；可通过 --label-id 手动覆盖。");
+            println!("密码策略: --force-change-password 表示首次插入时强制修改密码；默认关闭。");
+            println!("分区参数: --boot-mib N / --boot-sectors N、--share-mib N、--encrypt-mib N；mode0 未指定启动区时默认 20417 扇区。");
+            println!("当前可写文件系统为 FAT16/exFAT；加密分区使用已验证的 SM4(mode2) 扇区变换。");
         }
         "completion" => {
             println!("{}", bold("用法: edpcli completion <zsh|bash|fish>"));
@@ -304,12 +325,25 @@ fn parse_provision_mode(s: &str) -> Result<u8, String> {
     }
 }
 
+fn parse_provision_filesystem(
+    value: &str,
+) -> Result<crate::provision::OfficialFilesystemFormat, String> {
+    match value.to_ascii_lowercase().as_str() {
+        "fat16" => Ok(crate::provision::OfficialFilesystemFormat::Fat16),
+        "exfat" => Ok(crate::provision::OfficialFilesystemFormat::ExFat),
+        _ => Err(format!(
+            "错误: 当前仅支持 fat16/exfat 文件系统，得到 {value}"
+        )),
+    }
+}
+
 fn parse_new_provision_opts(
     rest: &[String],
 ) -> Result<(ProvisionNewOpts, Option<String>, bool), String> {
     let mut disk = None;
     let mut mode = None;
     let mut boot_mib = None;
+    let mut boot_sectors = None;
     let mut share_mib = None;
     let mut encrypt_mib = None;
     let mut label_id = None;
@@ -318,6 +352,16 @@ fn parse_new_provision_opts(
     let mut label = None;
     let mut password = None;
     let mut volume_label = None;
+    let mut format_boot = false;
+    let mut format_share = false;
+    let mut format_encrypt = false;
+    let mut boot_label = None;
+    let mut share_label = None;
+    let mut encrypt_label = None;
+    let mut boot_fs = None;
+    let mut share_fs = None;
+    let mut encrypt_fs = None;
+    let mut force_change_password = false;
     let mut out = None;
     let mut yes = false;
     let mut i = 0usize;
@@ -337,6 +381,14 @@ fn parse_new_provision_opts(
                     &mut boot_mib,
                     parse_positive_u64(&value, "--boot-mib")?,
                     "--boot-mib",
+                )?;
+            }
+            "--boot-sectors" => {
+                let value = take_value(rest, &mut i, "--boot-sectors")?;
+                set_once(
+                    &mut boot_sectors,
+                    parse_positive_u64(&value, "--boot-sectors")?,
+                    "--boot-sectors",
                 )?;
             }
             "--share-mib" => {
@@ -379,6 +431,52 @@ fn parse_new_provision_opts(
                 let value = take_value(rest, &mut i, "--volume-label")?;
                 set_once(&mut volume_label, value, "--volume-label")?;
             }
+            "--format-boot" => set_switch(&mut format_boot, &rest[i], "--format-boot")?,
+            "--format-share" => set_switch(&mut format_share, &rest[i], "--format-share")?,
+            "--format-encrypt" => set_switch(&mut format_encrypt, &rest[i], "--format-encrypt")?,
+            "--boot-label" => {
+                let value = take_value(rest, &mut i, "--boot-label")?;
+                set_once(&mut boot_label, value, "--boot-label")?;
+            }
+            "--share-label" => {
+                let value = take_value(rest, &mut i, "--share-label")?;
+                set_once(&mut share_label, value, "--share-label")?;
+            }
+            "--encrypt-label" => {
+                let value = take_value(rest, &mut i, "--encrypt-label")?;
+                set_once(&mut encrypt_label, value, "--encrypt-label")?;
+            }
+            "--boot-fs" => {
+                let value = take_value(rest, &mut i, "--boot-fs")?;
+                set_once(
+                    &mut boot_fs,
+                    parse_provision_filesystem(&value)?,
+                    "--boot-fs",
+                )?;
+            }
+            "--share-fs" => {
+                let value = take_value(rest, &mut i, "--share-fs")?;
+                set_once(
+                    &mut share_fs,
+                    parse_provision_filesystem(&value)?,
+                    "--share-fs",
+                )?;
+            }
+            "--encrypt-fs" => {
+                let value = take_value(rest, &mut i, "--encrypt-fs")?;
+                set_once(
+                    &mut encrypt_fs,
+                    parse_provision_filesystem(&value)?,
+                    "--encrypt-fs",
+                )?;
+            }
+            "--force-change-password" => {
+                set_switch(
+                    &mut force_change_password,
+                    &rest[i],
+                    "--force-change-password",
+                )?;
+            }
             "--out" => {
                 let value = take_value(rest, &mut i, "--out")?;
                 set_once(&mut out, value, "--out")?;
@@ -390,42 +488,76 @@ fn parse_new_provision_opts(
     }
 
     let mode = mode.ok_or("错误: provision 新盘操作必须指定 --mode 0|1|2|3")?;
+    if boot_mib.is_some() && boot_sectors.is_some() {
+        return Err("错误: --boot-mib 与 --boot-sectors 不能同时指定".into());
+    }
     let require = |value: Option<u64>, flag: &str| {
         value.ok_or_else(|| format!("错误: mode{mode} 必须指定 {flag}"))
     };
     match mode {
         0 => {
-            require(boot_mib, "--boot-mib")?;
             require(share_mib, "--share-mib")?;
             require(encrypt_mib, "--encrypt-mib")?;
+            if boot_mib.is_none() && boot_sectors.is_none() {
+                boot_sectors = Some(crate::provision::DEFAULT_MODE0_BOOT_SECTORS);
+            }
         }
         1 => {
+            if boot_sectors.is_some() {
+                return Err("错误: --boot-sectors 仅用于 mode0".into());
+            }
             require(share_mib, "--share-mib")?;
             require(encrypt_mib, "--encrypt-mib")?;
         }
         2 => {
+            if boot_sectors.is_some() {
+                return Err("错误: --boot-sectors 仅用于 mode0".into());
+            }
             require(encrypt_mib, "--encrypt-mib")?;
         }
         3 => {
+            if boot_sectors.is_some() {
+                return Err("错误: --boot-sectors 仅用于 mode0".into());
+            }
             require(boot_mib, "--boot-mib")?;
             require(share_mib, "--share-mib")?;
         }
         _ => unreachable!(),
     }
 
+    let shared_label = volume_label.clone();
+    let volume_label = volume_label.unwrap_or_else(|| "启动区".into());
     Ok((
         ProvisionNewOpts {
             disk,
             mode,
             boot_mib,
+            boot_sectors,
             share_mib,
             encrypt_mib,
-            label_id: label_id.ok_or("错误: provision 新盘操作必须指定 --label-id")?,
+            label_id: match label_id {
+                Some(value) => value,
+                None => crate::provision::OnlyId::random_candidate()?
+                    .text()
+                    .to_string(),
+            },
             user: user.ok_or("错误: provision 新盘操作必须指定 --user")?,
             dept: dept.ok_or("错误: provision 新盘操作必须指定 --dept")?,
-            label: label.ok_or("错误: provision 新盘操作必须指定 --label")?,
-            password: password.ok_or("错误: provision 新盘操作必须指定 --password")?,
-            volume_label: volume_label.unwrap_or_else(|| "SAFE6".into()),
+            label: label.unwrap_or_else(|| crate::provision::DEFAULT_SAFE6_LABEL.into()),
+            password: password.unwrap_or_else(|| "0000aaaa".into()),
+            volume_label: volume_label.clone(),
+            format_boot,
+            format_share,
+            format_encrypt,
+            boot_label: boot_label.unwrap_or(volume_label),
+            share_label: share_label
+                .unwrap_or_else(|| shared_label.clone().unwrap_or_else(|| "交换区".into())),
+            encrypt_label: encrypt_label
+                .unwrap_or_else(|| shared_label.unwrap_or_else(|| "保密区".into())),
+            boot_fs: boot_fs.unwrap_or(crate::provision::OfficialFilesystemFormat::Fat16),
+            share_fs: share_fs.unwrap_or(crate::provision::OfficialFilesystemFormat::ExFat),
+            encrypt_fs: encrypt_fs.unwrap_or(crate::provision::OfficialFilesystemFormat::ExFat),
+            force_change_password,
         },
         out,
         yes,

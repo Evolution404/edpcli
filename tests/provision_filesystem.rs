@@ -1,14 +1,15 @@
 use std::io;
 
 use edpcli::{
+    application::provision::{plan_format_targets, FormatOptions},
     backup_deep::{analyze_partition, keys::decrypt_mode2, AnalysisStatus, PartitionReader},
     backup_metadata::PartitionGeometry,
     protocol::lba7_compat::locate_lba7_compatibility_extent_from_geometry,
     provision::{
-        build_empty_exfat, build_official_exfat_partitions, encrypt_sparse_mode2, wrap_file_key,
-        wrap_legacy_lba7_file_key, FileKeyWrapMode, OfficialFilesystemFormat,
-        OfficialPartitionMode, OfficialPartitionSizes, OfficialProvisionPlan,
-        SparseFilesystemImage,
+        build_empty_exfat, build_official_exfat_partitions, build_official_partition_filesystem,
+        encrypt_sparse_mode2, wrap_file_key, wrap_legacy_lba7_file_key, FileKeyWrapMode,
+        OfficialFilesystemFormat, OfficialPartitionFilesystems, OfficialPartitionMode,
+        OfficialPartitionSizes, OfficialProvisionPlan, PartitionRole, SparseFilesystemImage,
     },
 };
 
@@ -73,7 +74,13 @@ fn first_party_filesystem_config_defaults_and_normalizes_like_the_writer() {
         OfficialFilesystemFormat::first_party_default(),
         OfficialFilesystemFormat::ExFat
     );
-    for value in [None, Some("exfat"), Some("exFat"), Some("unknown")] {
+    for value in [
+        None,
+        Some("exfat"),
+        Some("exFat"),
+        Some("unknown"),
+        Some("fat16"),
+    ] {
         assert_eq!(
             OfficialFilesystemFormat::from_first_party_config(value),
             OfficialFilesystemFormat::ExFat
@@ -186,6 +193,13 @@ fn all_four_modes_build_the_verified_plaintext_and_encrypted_exfat_matrix() {
         );
         for image in images {
             let raw = image.image.sectors().get(&0).unwrap();
+            if image.physically_encrypted {
+                assert_ne!(
+                    &raw[3..11],
+                    b"EXFAT   ",
+                    "encrypted physical boot leaked in mode {mode:?}"
+                );
+            }
             let boot = if image.physically_encrypted {
                 decrypt_mode2(raw, &FILE_KEY).unwrap()
             } else {
@@ -201,6 +215,94 @@ fn all_four_modes_build_the_verified_plaintext_and_encrypted_exfat_matrix() {
                 image.geometry.sector_count()
             );
         }
+    }
+}
+
+#[test]
+fn formatting_defaults_off_and_selects_only_actual_mode_targets() {
+    for mode in [
+        OfficialPartitionMode::DefaultThreePartition,
+        OfficialPartitionMode::BootShareCombined,
+        OfficialPartitionMode::WholeDiskEncrypted,
+        OfficialPartitionMode::IntranetExtranetDualPartition,
+    ] {
+        let plan = official_plan(mode);
+        let serials = (0..plan.logical_partitions(512).unwrap().len())
+            .map(|i| i as u32 + 1)
+            .collect::<Vec<_>>();
+        let defaults =
+            plan_format_targets(&plan, &FormatOptions::default(), &serials, &FILE_KEY).unwrap();
+        assert!(defaults.iter().all(|choice| !choice.selected));
+        assert!(defaults
+            .iter()
+            .all(|choice| choice.prepared_image.is_none()));
+        assert!(defaults
+            .iter()
+            .all(|choice| choice.verification_image.is_none()));
+        if mode == OfficialPartitionMode::WholeDiskEncrypted {
+            assert_eq!(defaults[0].target.role, PartitionRole::CompatibilityReserve);
+            assert!(!defaults[0].target.format_capable);
+            let mut invalid = FormatOptions::default();
+            invalid.boot = true;
+            assert!(plan_format_targets(&plan, &invalid, &serials, &FILE_KEY).is_err());
+        }
+        let mut options = FormatOptions::default();
+        if defaults.iter().any(|choice| {
+            choice.target.role == PartitionRole::Share
+                || choice.target.role == PartitionRole::BootShareCombined
+        }) {
+            options.share = true;
+            options.share_label = "自定义交换".into();
+        } else {
+            options.encrypt = true;
+            options.encrypt_label = "自定义数据".into();
+        }
+        let selected = plan_format_targets(&plan, &options, &serials, &FILE_KEY).unwrap();
+        assert_eq!(selected.iter().filter(|choice| choice.selected).count(), 1);
+        let choice = selected.iter().find(|choice| choice.selected).unwrap();
+        let image = choice.prepared_image.as_ref().unwrap();
+        assert!(choice.verification_image.is_some());
+        assert_eq!(
+            image.physically_encrypted,
+            choice.target.physically_encrypted
+        );
+        let raw = image.image.sectors().get(&0).unwrap();
+        if choice.target.physically_encrypted {
+            assert_ne!(&raw[3..11], b"EXFAT   ");
+        }
+        let boot = if choice.target.physically_encrypted {
+            decrypt_mode2(raw, &FILE_KEY).unwrap()
+        } else {
+            raw.to_vec()
+        };
+        assert_eq!(&boot[3..11], b"EXFAT   ");
+        assert_eq!(
+            u64::from_le_bytes(boot[64..72].try_into().unwrap()),
+            choice.target.geometry.start_sector
+        );
+        assert_eq!(
+            u64::from_le_bytes(boot[72..80].try_into().unwrap()),
+            choice.target.geometry.sector_count()
+        );
+        assert_eq!(
+            u32::from_le_bytes(boot[100..104].try_into().unwrap()),
+            choice.volume_serial
+        );
+        let mut reader = ImageReader {
+            image: &image.image,
+            decrypt_key: choice.target.physically_encrypted.then_some(FILE_KEY),
+        };
+        let report = analyze_partition(
+            &geometry(choice.target.geometry.sector_count()),
+            &mut reader,
+        );
+        assert_eq!(
+            report.status,
+            AnalysisStatus::Parsed,
+            "{mode:?}: {}",
+            report.reason
+        );
+        assert_eq!(report.file_count, Some(0));
     }
 }
 
@@ -234,6 +336,30 @@ fn filesystem_stage_fails_closed_on_wrong_key_or_unsupported_portable_profile() 
             .unwrap_err()
             .contains("does not yet implement ntfs")
     );
+    assert!(
+        plan_format_targets(&ntfs_plan, &FormatOptions::default(), &serials, &FILE_KEY).is_err()
+    );
+}
+
+#[test]
+fn fat16_and_exfat_can_each_be_physically_encrypted_when_selected() {
+    let plan = official_plan(OfficialPartitionMode::DefaultThreePartition).with_filesystems(
+        OfficialPartitionFilesystems {
+            boot: OfficialFilesystemFormat::ExFat,
+            share: OfficialFilesystemFormat::Fat16,
+            encrypt: OfficialFilesystemFormat::ExFat,
+        },
+    );
+    let targets = plan.format_targets().unwrap();
+    let front =
+        build_official_partition_filesystem(&plan, &targets[0], &FILE_KEY, "启动区", 1).unwrap();
+    assert_eq!(&front.image.sectors().get(&0).unwrap()[3..11], b"EXFAT   ");
+    let share =
+        build_official_partition_filesystem(&plan, &targets[1], &FILE_KEY, "交换区", 2).unwrap();
+    let raw = share.image.sectors().get(&0).unwrap();
+    assert_ne!(&raw[54..62], b"FAT16   ");
+    let plain = decrypt_mode2(raw, &FILE_KEY).unwrap();
+    assert_eq!(&plain[54..62], b"FAT16   ");
 }
 
 #[test]

@@ -68,6 +68,27 @@ fn three_workspaces_cycle_and_new_overlays_render_at_all_terminal_sizes() {
 }
 
 #[test]
+fn empty_secret_field_renders_input_placeholder_instead_of_black_value() {
+    let mut state = AppState::new();
+    state.navigate(NavCommand::WorkspaceProvision, 20);
+    state.provision_begin_selected();
+    state.provision_mut().form.password.clear();
+
+    let backend = TestBackend::new(100, 28);
+    let mut terminal = Terminal::new(backend).expect("test terminal");
+    terminal.draw(|frame| render::draw(frame, &state)).unwrap();
+    let text = terminal
+        .backend()
+        .buffer()
+        .content()
+        .iter()
+        .map(|cell| cell.symbol())
+        .collect::<String>();
+    let compact = text.replace(' ', "");
+    assert!(compact.contains("密码〈请输入〉"), "{text}");
+}
+
+#[test]
 fn apply_and_offline_convert_states_render_and_enforce_preview_before_write() {
     use edpcli::application::WriteEvent;
     use edpcli::tui::state::{ApplyStage, ExpectedIdentity, OfflineConvertView, ProvisionKind};

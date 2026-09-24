@@ -50,7 +50,7 @@ fn aigo_summary_contains_identity_and_ownership() {
     assert_eq!(summary.ownership.dept.as_deref(), Some("输电运检中心"));
     assert_eq!(summary.ownership.user.as_deref(), Some("张玉玺"));
     assert_eq!(summary.ownership.label.as_deref(), Some("江苏电力!SAFE6"));
-    assert_eq!(summary.safe6_label.as_deref(), Some("输电运检中心"));
+    assert_eq!(summary.safe6_label.as_deref(), Some("江苏电力!SAFE6"));
     assert_eq!(summary.safe6_user.as_deref(), Some("张玉玺"));
     assert!(!summary.partitions.is_empty());
 

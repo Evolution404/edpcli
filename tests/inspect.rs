@@ -4,6 +4,55 @@ use common::*;
 use edpcli::crypto::{a7f0_full, crc32_bare, xor_rolling};
 use edpcli::inspect::{analyze_sector, render_fields, render_hex, FieldStyle, InspectMeta};
 
+fn crc32_ieee_test(data: &[u8]) -> u32 {
+    let mut crc = 0xffff_ffffu32;
+    for &byte in data {
+        crc ^= byte as u32;
+        for _ in 0..8 {
+            crc = (crc >> 1) ^ (0xedb8_8320u32 & (0u32.wrapping_sub(crc & 1)));
+        }
+    }
+    !crc
+}
+
+#[test]
+fn inspect_protocol_semantics_stay_routed_to_canonical_parsers() {
+    let source = include_str!("../src/inspect.rs");
+    for parser in [
+        "lba0::parse_lba0",
+        "lba1::parse_lba1",
+        "lba2::parse_lba2",
+        "lba3::parse_lba3",
+        "lba4::parse_lba4",
+        "lba5::parse_lba5",
+        "lba6::parse_lba6",
+        "lba7::parse_lba7",
+        "lba8::parse_lba8",
+        "lba9::parse_lba9",
+        "lba10::parse_lba10",
+        "lba11::parse_lba11",
+        "lba12::parse_lba12",
+    ] {
+        assert!(
+            source.contains(parser),
+            "Inspect canonical parser link missing: {parser}"
+        );
+    }
+    for forbidden in [
+        "fn parse_lba6(",
+        "fn parse_edpf(",
+        "fn parse_llgb(",
+        "fn parse_sapf(",
+        "fn parse_eppe(",
+        "fn decode_lba11(",
+    ] {
+        assert!(
+            !source.contains(forbidden),
+            "Inspect reintroduced a parallel protocol parser: {forbidden}"
+        );
+    }
+}
+
 fn meta_for(key: &str) -> InspectMeta {
     let (device_id, vid, pid, sectors, onlyid) = match key {
         "netac" => (
@@ -89,7 +138,7 @@ fn lba6_reports_safe6_checksum_and_identity_fields() {
     assert!(v
         .fields
         .iter()
-        .any(|f| f.label == "模板/版本扩展区" && f.start == 0x1e0 && f.end == 0x1f0));
+        .any(|f| f.label == "legacy MBR snapshot" && f.start == 0x1e0 && f.end == 0x1ee));
     assert!(v
         .fields
         .iter()
@@ -128,18 +177,28 @@ fn lba5_is_reported_as_an_opaque_write_protection_probe_sector() {
 }
 
 #[test]
-fn lba1_recognizes_the_official_gpt_header_profile() {
+fn lba1_uses_the_canonical_gpt_header_parser() {
     let mut raw = [0u8; 512];
     raw[..8].copy_from_slice(b"EFI PART");
     raw[0x08..0x0c].copy_from_slice(&0x0001_0000u32.to_le_bytes());
     raw[0x0c..0x10].copy_from_slice(&92u32.to_le_bytes());
-    raw[0x10..0x14].copy_from_slice(&0x1234_5678u32.to_le_bytes());
     raw[0x18..0x20].copy_from_slice(&1u64.to_le_bytes());
     raw[0x20..0x28].copy_from_slice(&999u64.to_le_bytes());
+    raw[0x28..0x30].copy_from_slice(&34u64.to_le_bytes());
+    raw[0x30..0x38].copy_from_slice(&900u64.to_le_bytes());
     raw[0x48..0x50].copy_from_slice(&2u64.to_le_bytes());
+    raw[0x50..0x54].copy_from_slice(&128u32.to_le_bytes());
+    raw[0x54..0x58].copy_from_slice(&128u32.to_le_bytes());
+    raw[0x58..0x5c].copy_from_slice(&0x1234_5678u32.to_le_bytes());
+    let crc = crc32_ieee_test(&raw[..92]);
+    raw[0x10..0x14].copy_from_slice(&crc.to_le_bytes());
 
     let view = analyze_sector(1, &raw, &InspectMeta::default());
-    assert!(view.method.contains("GPT_Header"));
+    assert!(
+        view.method.contains("canonical protocol::lba1"),
+        "{}",
+        view.method
+    );
     assert!(view
         .fields
         .iter()
@@ -147,27 +206,30 @@ fn lba1_recognizes_the_official_gpt_header_profile() {
     assert!(view
         .fields
         .iter()
-        .any(|field| { field.label == "GPT partition table first LBA" && field.value == "2" }));
-    assert!(view.notes.iter().any(|note| {
-        note.contains("BuildSector1_Gpt")
-            && note.contains("语义状态 COMPLETE")
-            && note.contains("物理 profile 覆盖仍有缺口")
-            && note.contains("first-party virtual writer")
-    }));
+        .any(|field| field.label == "分区表首 LBA" && field.value == "2"));
+    assert!(view
+        .notes
+        .iter()
+        .any(|note| note.contains("protocol::lba1::parse_lba1")));
 }
 
 #[test]
-fn lba2_reports_complete_semantics_without_claiming_physical_positive_coverage() {
+fn lba2_uses_canonical_absent_profile_without_inventing_entries() {
     let raw = [0u8; 512];
     let view = analyze_sector(2, &raw, &InspectMeta::default());
-    assert!(view.method.contains("GPT partition-table profile"));
-    assert!(view.notes.iter().any(|note| {
-        note.contains("BuildSector2_Gpt")
-            && note.contains("4个×128B")
-            && note.contains("语义状态 COMPLETE")
-            && note.contains("物理 profile 覆盖仍有缺口")
-            && note.contains("first-party virtual writer")
-    }));
+    assert!(
+        view.method.contains("canonical protocol::lba2"),
+        "{}",
+        view.method
+    );
+    assert!(view
+        .fields
+        .iter()
+        .any(|field| { field.label == "GPT partition profile" && field.value.contains("Absent") }));
+    assert!(view
+        .notes
+        .iter()
+        .any(|note| note.contains("protocol::lba2::parse_lba2")));
 }
 
 #[test]
@@ -177,6 +239,7 @@ fn lba4_zero_ciphertext_byte_is_decrypted_unless_whole_short_gap_is_unwritten() 
     let mut plain = vec![0u8; 512];
     let header = b"$$$949028302$$$";
     plain[..header.len()].copy_from_slice(header);
+    plain[0x18..0x1c].copy_from_slice(&(onlyid ^ 0x8888_8888).to_le_bytes());
     plain[0x39..0x3d].copy_from_slice(b"LLGB");
     plain[0x1fc..0x200].copy_from_slice(b"LLGB");
 
@@ -330,7 +393,7 @@ fn lba10_decodes_only_the_eesi_head_and_preserves_tail_bytes() {
 }
 
 #[test]
-fn lba9_decodes_independent_eetu_sapf_and_eppe_regions() {
+fn lba9_decodes_eetu_and_sapf_without_inventing_overlapping_eppe() {
     let device_id = "disk&ven_test&prod_lba9";
     let crc = crc32_bare(device_id.as_bytes());
     let key = crc.to_le_bytes();
@@ -365,7 +428,11 @@ fn lba9_decodes_independent_eetu_sapf_and_eppe_regions() {
 
     assert_eq!(&view.decoded[..4], b"EETU");
     assert_eq!(&view.decoded[0x100..0x104], b"SAPF");
-    assert_eq!(&view.decoded[0x180..0x184], b"EPPE");
+    assert_ne!(
+        &view.decoded[0x180..0x184],
+        b"EPPE",
+        "SAPF and EPPE are alternative LBA9 overlay profiles"
+    );
     assert!(view.fields.iter().any(|field| field.label == "EETU magic"));
     assert!(view.fields.iter().any(|field| {
         field.label == "EETU 开始时间 (ullBTime)" && field.value == "0（不限制）"
@@ -377,7 +444,10 @@ fn lba9_decodes_independent_eetu_sapf_and_eppe_regions() {
         field.label == "EETU 使用次数 (useCount)" && field.value == "无限（0xFFFFFFFF）"
     }));
     assert!(view.notes.iter().any(|note| {
-        note.contains("time(NULL)") && note.contains("0xFFFFFFFF") && note.contains("reverse[104]")
+        note.contains("time(NULL)")
+            && note.contains("0xFFFFFFFF")
+            && note.contains("reverse[104]")
+            && note.contains("COMPLETE")
     }));
     assert!(view
         .fields
@@ -387,6 +457,31 @@ fn lba9_decodes_independent_eetu_sapf_and_eppe_regions() {
         .fields
         .iter()
         .any(|field| field.label == "起始 LBA" && field.value == "63"));
+}
+
+#[test]
+fn lba9_decodes_eppe_as_its_own_canonical_overlay_profile() {
+    let device_id = "disk&ven_test&prod_lba9_eppe";
+    let crc = crc32_bare(device_id.as_bytes());
+    let key = crc.to_le_bytes();
+    let mut raw = vec![0u8; 512];
+
+    let mut eppe = [0u8; 0x80];
+    eppe[..4].copy_from_slice(b"EPPE");
+    eppe[4..8].copy_from_slice(&8u32.to_le_bytes());
+    raw[0x180..0x200].copy_from_slice(&a7f0_full(&eppe, &key, 0));
+
+    let meta = InspectMeta {
+        device_id: Some(device_id.into()),
+        ..InspectMeta::default()
+    };
+    let view = analyze_sector(9, &raw, &meta);
+
+    assert_eq!(&view.decoded[0x180..0x184], b"EPPE");
+    assert!(!view
+        .fields
+        .iter()
+        .any(|field| field.label == "partition type"));
     assert!(view
         .fields
         .iter()
@@ -471,6 +566,41 @@ fn lba8_splits_elabel_bytes_before_gbk_decoding_each_value() {
     assert!(out.contains("张玉玺"), "{out}");
     assert!(out.contains("Label"), "{out}");
     assert!(out.contains("江苏电力!SAFE6"), "{out}");
+}
+
+#[test]
+fn lba8_preserves_a_malformed_label_value_instead_of_collapsing_it_to_safe6() {
+    let device_id = "disk&ven_test&prod_llgb_malformed_label";
+    let crc = crc32_bare(device_id.as_bytes());
+    let mut plain = vec![0u8; 368];
+    plain[..4].copy_from_slice(b"LLGB");
+    plain[8..12].copy_from_slice(&0x0100_0001u32.to_le_bytes());
+    plain[12..16].copy_from_slice(&0x222u32.to_le_bytes());
+    plain[0x3e..0x40].copy_from_slice(&0x80u16.to_le_bytes());
+
+    let mut elabel =
+        b"<ELABEL>GLab=322CA28A-D7D1448B-DCE2CED9||Dept=TEST||User=USER||Label=Label  ".to_vec();
+    elabel.extend_from_slice(&[0xbd, 0xad, 0xcb, 0xd5, 0xb5, 0xe7, 0xc1, 0xa6]);
+    elabel.extend_from_slice(b"!SAFE6||");
+    let logical_len = 0x80 + elabel.len();
+    plain[4..8].copy_from_slice(&(logical_len as u32).to_le_bytes());
+    plain[0x80..logical_len].copy_from_slice(&elabel);
+
+    let encrypted_len = (logical_len / 16 + 1) * 16;
+    let mut raw = vec![0u8; 512];
+    raw[..encrypted_len].copy_from_slice(&a7f0_full(
+        &plain[..encrypted_len],
+        &crc.to_le_bytes(),
+        0,
+    ));
+    let meta = InspectMeta {
+        device_id: Some(device_id.into()),
+        ..InspectMeta::default()
+    };
+    let view = analyze_sector(8, &raw, &meta);
+    let out = render_fields(&view);
+
+    assert!(out.contains("Label  江苏电力!SAFE6"), "{out}");
 }
 
 #[test]
