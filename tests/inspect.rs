@@ -33,7 +33,10 @@ fn inspect_protocol_semantics_stay_routed_to_canonical_parsers() {
         "lba11::parse_lba11",
         "lba12::parse_lba12",
     ] {
-        assert!(source.contains(parser), "Inspect canonical parser link missing: {parser}");
+        assert!(
+            source.contains(parser),
+            "Inspect canonical parser link missing: {parser}"
+        );
     }
     for forbidden in [
         "fn parse_lba6(",
@@ -475,7 +478,10 @@ fn lba9_decodes_eppe_as_its_own_canonical_overlay_profile() {
     let view = analyze_sector(9, &raw, &meta);
 
     assert_eq!(&view.decoded[0x180..0x184], b"EPPE");
-    assert!(!view.fields.iter().any(|field| field.label == "partition type"));
+    assert!(!view
+        .fields
+        .iter()
+        .any(|field| field.label == "partition type"));
     assert!(view
         .fields
         .iter()
