@@ -14,17 +14,15 @@ use crate::backup_deep::{analyze_partition, AnalysisStatus, PartitionReader};
 use crate::backup_metadata::PartitionGeometry;
 use crate::common::{EdpCliError, EdpCliResult, EXIT_IO, EXIT_TARGET, SECTOR};
 use crate::diskio::{self, SectorDev};
-use crate::identify::identify;
 use crate::protocol::lba7_compat::locate_lba7_compatibility_extent_from_verified_usb_capacity;
 use crate::provision::{
     apply_target_geometry_overrides, build_empty_exfat, build_empty_fat16,
     build_official_partition_filesystem, build_official_provision_protocol_image,
-    build_passwordless_conversion, is_mode0_source, parse_existing_provision,
-    prefill_for_target_mode, wrap_file_key, wrap_legacy_lba7_file_key, CapacityInput,
-    CapacitySource, FileKeyWrapMode, OfficialFilesystemFormat, OfficialPartitionFilesystems,
-    OfficialPartitionMode, OfficialPartitionSizes, OfficialProvisionPlan,
-    OfficialProvisionWriteImage, OnlyId, ParsedExistingProvision, PartitionAction,
-    PartitionFilesystemImage, PartitionFormatTarget, PartitionRole, PasswordlessConversionImage,
+    parse_existing_provision, prefill_for_target_mode, wrap_file_key, wrap_legacy_lba7_file_key,
+    CapacityInput, CapacitySource, FileKeyWrapMode, OfficialFilesystemFormat,
+    OfficialPartitionFilesystems, OfficialPartitionMode, OfficialPartitionSizes,
+    OfficialProvisionPlan, OfficialProvisionWriteImage, OnlyId, ParsedExistingProvision,
+    PartitionAction, PartitionFilesystemImage, PartitionFormatTarget, PartitionRole,
     ProvisionEntropy, ProvisionImage, ProvisionMetadata, ProvisionProfile, ProvisionSpec,
     QuickCapacityUnit, SparseFilesystemImage, TargetGeometryOverrides, TargetIdentity,
     TargetPartitionGeometry, TargetProvisionPlan, DEFAULT_MODE0_BOOT_SECTORS,
@@ -315,15 +313,6 @@ impl std::fmt::Debug for PreparedNewProvision {
             .field("expected_lba3", &self.expected_lba3)
             .finish_non_exhaustive()
     }
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct PreparedPasswordlessConversion {
-    pub disk: u32,
-    pub device_id: String,
-    pub source_metadata: Vec<u8>,
-    pub conversion: PasswordlessConversionImage,
-    pub patch: BTreeMap<u32, Vec<u8>>,
 }
 
 fn random_array<const N: usize>() -> EdpCliResult<[u8; N]> {
@@ -974,119 +963,6 @@ pub fn capture_manufacturer_lba3(
     prepared.write_image.patch.insert(3, lba3.to_vec());
     prepared.expected_lba3 = Some(lba3);
     Ok(())
-}
-
-fn build_conversion_patch(
-    conversion: &PasswordlessConversionImage,
-) -> EdpCliResult<BTreeMap<u32, Vec<u8>>> {
-    let mut patch = BTreeMap::new();
-    patch.insert(0, conversion.lba0.to_vec());
-    patch.insert(7, conversion.lba7.to_vec());
-    patch.insert(12, conversion.lba12.to_vec());
-    for (&relative, sector) in conversion.front_filesystem.sectors() {
-        let absolute = conversion
-            .plan
-            .front_start_lba
-            .checked_add(relative)
-            .ok_or_else(|| err(EXIT_TARGET, "错误: 前部文件系统 LBA 溢出"))?;
-        if absolute >= conversion.plan.encrypt_start_lba || absolute > u32::MAX as u64 {
-            return Err(err(
-                EXIT_TARGET,
-                format!("错误: 前部文件系统越过 type4 边界: LBA{absolute}"),
-            ));
-        }
-        patch.insert(absolute as u32, sector.to_vec());
-    }
-    Ok(patch)
-}
-
-pub fn try_prepare_mode1_from_existing_mode0(
-    runner: &dyn CmdRunner,
-    disk: u32,
-    dev: &mut dyn SectorDev,
-) -> EdpCliResult<Option<PreparedPasswordlessConversion>> {
-    guard_usb_disk(runner, disk)?;
-    let source_metadata = read_image(dev)?;
-    let identity = identify(runner, disk, &source_metadata[7 * SECTOR..8 * SECTOR]);
-    let Some(device_id) = identity.device_id else {
-        return Ok(None);
-    };
-    let source = ProvisionImage::from_bytes(source_metadata.clone())
-        .map_err(|message| err(EXIT_TARGET, format!("错误: 源协议镜像无效: {message}")))?;
-    if !is_mode0_source(&source, &device_id) {
-        return Ok(None);
-    }
-    let volume_serial = u32::from_le_bytes(random_array::<4>()?);
-    let conversion = build_passwordless_conversion(&source, &device_id, volume_serial, "SAFE6")
-        .map_err(|message| {
-            err(
-                EXIT_TARGET,
-                format!("错误: 无法生成模式1保留保密区重制计划: {message}"),
-            )
-        })?;
-    let patch = build_conversion_patch(&conversion)?;
-    Ok(Some(PreparedPasswordlessConversion {
-        disk,
-        device_id,
-        source_metadata,
-        conversion,
-        patch,
-    }))
-}
-
-pub fn prepare_passwordless_conversion(
-    runner: &dyn CmdRunner,
-    disk: u32,
-    dev: &mut dyn SectorDev,
-) -> EdpCliResult<PreparedPasswordlessConversion> {
-    guard_usb_disk(runner, disk)?;
-    let source_metadata = read_image(dev)?;
-    let identity = identify(runner, disk, &source_metadata[7 * SECTOR..8 * SECTOR]);
-    let device_id = identity.device_id.ok_or_else(|| {
-        err(
-            EXIT_TARGET,
-            "错误: 无法从现有官方盘识别 device_id，拒绝生成免密转换",
-        )
-    })?;
-    let source = ProvisionImage::from_bytes(source_metadata.clone())
-        .map_err(|message| err(EXIT_TARGET, format!("错误: 源协议镜像无效: {message}")))?;
-    let volume_serial = u32::from_le_bytes(random_array::<4>()?);
-    let conversion = build_passwordless_conversion(&source, &device_id, volume_serial, "SAFE6")
-        .map_err(|message| {
-            err(
-                EXIT_TARGET,
-                format!("错误: 无法生成严格免密转换: {message}"),
-            )
-        })?;
-    let patch = build_conversion_patch(&conversion)?;
-    Ok(PreparedPasswordlessConversion {
-        disk,
-        device_id,
-        source_metadata,
-        conversion,
-        patch,
-    })
-}
-
-pub fn commit_passwordless_conversion(
-    runner: &dyn CmdRunner,
-    dev: &mut dyn SectorDev,
-    prepared: &PreparedPasswordlessConversion,
-) -> EdpCliResult<()> {
-    let _guard = sysinfo::prepare_write(runner, prepared.disk).map_err(|error| {
-        err(
-            EXIT_IO,
-            format!("错误: 无法卸载/锁定 disk{}: {error}", prepared.disk),
-        )
-    })?;
-    dev.reopen_rdwr(OPEN_WAIT)
-        .map_err(|error| err(EXIT_IO, format!("错误: 无法以读写方式重开目标盘: {error}")))?;
-    verify_reopened_snapshot(dev, &prepared.source_metadata)?;
-    diskio::atomic_write_passwordless_conversion_sectors(
-        dev,
-        &prepared.patch,
-        prepared.conversion.plan.encrypt_start_lba,
-    )
 }
 
 pub fn commit_new_provision(
