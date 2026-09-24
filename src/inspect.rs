@@ -340,7 +340,7 @@ fn pass_info_fields(base: usize, pass: &PassInfo, group: &str) -> Vec<SectorFiel
         ("保密区当前错误次数", pass.current_encrypt_password_errors),
         ("免密标志", pass.no_password_set),
         ("免密跳过 IP 检查", pass.no_password_no_check_ip),
-        ("免密安全策略", pass.no_usb_check_password_safe),
+        ("取消密码复杂性验证", pass.no_usb_check_password_safe),
         ("重置 FileKey", pass.reset_file_key),
         ("交换区备份提示周期", pass.share_backup_prompt_period),
         ("保密区备份提示周期", pass.encrypt_backup_prompt_period),
@@ -2242,6 +2242,33 @@ pub fn overview_line(view: &SectorView) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn pass_info_uses_official_password_complexity_skip_label() {
+        let pass = PassInfo {
+            version: 0x0206,
+            force_change_share: 0,
+            max_share_password_errors: 0,
+            current_share_password_errors: 0,
+            force_change_encrypt: 0,
+            max_encrypt_password_errors: 0,
+            current_encrypt_password_errors: 0,
+            no_password_set: 0,
+            no_password_no_check_ip: 0,
+            no_usb_check_password_safe: 1,
+            reset_file_key: 0,
+            share_backup_prompt_period: 0,
+            encrypt_backup_prompt_period: 0,
+        };
+        let fields = pass_info_fields(0xc0, &pass, "PassInfo");
+        let field = fields
+            .iter()
+            .find(|field| field.label == "取消密码复杂性验证")
+            .expect("official complexity-skip field must be exposed");
+        assert_eq!(field.start, 0xca);
+        assert_eq!(field.end, 0xcb);
+        assert_eq!(field.value, "1");
+    }
 
     #[test]
     fn truncated_legacy_gbk_keeps_readable_prefix() {

@@ -48,6 +48,11 @@ pub struct PassInfo {
     pub current_encrypt_password_errors: u8,
     pub no_password_set: u8,
     pub no_password_no_check_ip: u8,
+    /// Official ABI name: `bNoUsbChkPasSafe`.
+    ///
+    /// The official label-tool UI exposes this exact byte as the
+    /// “取消密码复杂性验证” checkbox. `0` means the cancellation option is
+    /// not selected; `1` means password-complexity validation is cancelled.
     pub no_usb_check_password_safe: u8,
     pub reset_file_key: u8,
     pub share_backup_prompt_period: u8,

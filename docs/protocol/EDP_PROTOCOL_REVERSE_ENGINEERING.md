@@ -754,7 +754,7 @@ DWARF 中恢复出的原始声明文件/行号与本地函数地址：
 | LBA7 | 条目0 +0x010–+0x013 | COMPLETE | 条目0 `NeedDisturb` MBR 扰动/去扰门禁 | Windows `CreatePartitions` 对条目0 显式写入调用者传入的 `NeedDisturb=1`；旧版/新版 ABI 转换器双向保留该DWORD | 两版 Windows `vrvaud_c` 的 `NewCheckDisTurbUsb(*)` 直接检查紧凑布局条目0 `NeedDisturb@+0x10 != 0`；`SetProtect` 在该检查链后调用 `sub_1006ff80 -> sub_1006e580`，把 LBA0 `+0x1BE..+0x1FD` 的64B MBR表替换为静态扰动表；`UnsetProtect -> sub_1006ffd0 -> sub_1006e9b0` 则从 LBA2 读整扇恢复到 LBA0 并刷新磁盘属性 | 严格22份原始真实设备：22/22 条目0 `NeedDisturb=1`；另有真实免密 SanDisk 两条目配置类型同样条目0=1 | 字段不是泛化“防篡改”位，而是驱动侧是否进入系统可见 MBR 分区表扰动/去扰流程的门控；静态扰动表只有一条类型=0x04、start_lba=66、sector_count=1 的占位条目。条目1/条目2 的同名字段仍未找到独立消费端 |
 | LBA7 | 条目1/条目2 +0x010–+0x013 | COMPLETE | 按位置 `NeedDisturb` 兼容元数据 | 当前 `CreatePartitions` 的调用参数固定为1：条目0/条目1 显式写1，条目2无覆盖写而继承整表清零0；Windows 旧版/新版转换器双向结构保留该DWORD | 两版 `vrvaud_c` 的行为读取只命中条目0 `NeedDisturb`；条目1/条目2 没有条件分支或参数映射。Linux 对应旧版→新版转换器保留字段，但 `CDiskReader` 文件系统检查链不读 NeedDisturb | 已提交原始测试夹具全量门禁按**位置**锁定三条目 `(1,1,0)` 与两条目 `(1,1)`；独立真实免密 SanDisk 的 type4 位于条目1 且值为1，证明该字段不是 `PartionType -> NeedDisturb` 恒等式；扩展历史扫描没有第三种按位置配置类型 | 8B 闭合为当前写入端按位置兼容配置类型 + 结构性保留 + 跨平台负语义消费端；完全闭环不把条目1/2 解释成条目0 的 MBR 扰动行为，也不禁止未来其它写入端配置类型 |
 | LBA7 | 每条条目 +0x038–+0x03F | COMPLETE | 8B 旧版封装文件密钥 | Windows `sub_10028DB0` 以 `fold32(password)` 对两个32位半字做对称 XOR 包装；`sub_100125B0` 映射回旧版 0x40 条目；`SavePartionSector/sub_10028580 -> sub_10010FC0` 写 LBA7 | `sub_10026050` 对 v0x0064 固定解包8B，随后以 `sub_10038840` 计算 CRC32 并比较同条目 `FileKeyCRC(+0x34)`；改密后反向重包 | 22份原始真实设备中全部28条非零 type2/type4 旧版条目独立复算 28/28 PASS；默认 `fold32("0000aaaa")=0x91919191` | **LBA7 v0x0064 打包旧版文件密钥封装** 已闭合；FileKeyCRC 4B此前已经计入完全闭环，本轮仅新增3×8B=24B，禁止重复计数 |
-| LBA7 | 0x0CA | COMPLETE | 密码信息 `bNoUsbChkPasSafe` | 当前 Windows `CreatePartitions/sub_1003DB50` 明确从制标请求写 `tail+0x0A`；`WriteNormalULabel/sub_10046E80` 又把 `UsbWriteParam+0x7EC` 传入该请求字段 | 独立 Linux 官方 `checkdiskback::Update_EDPEDISKSHOWPARAM@0x406B70` 直接执行 `cmp byte [pass+0x0A],1; setne showparam+0x03`，随后 `CreateSafe6TmpPolicyFile@0x407D50` 将结果纳入 CRC/加密 SAFE6 策略；独立 `EdpEDiskBack::Safe6PolicyFile::GetSafe6Policy@0x4100B0` 与 `linuxedpedisk::Safe6PolicyFile::GetSafe6Policy@0x41EAA0` 解密并恢复该策略/运行时参数 | 严格22份原始盘：18×0、4×1；22/22 LBA7/LBA12 同盘取值一致；CI `pass_info_no_usb_safe_flag_varies_and_matches_between_lba7_and_lba12` 锁定0/1双值与跨扇区一致性 | 字段行为闭合到“值等于1时将 SAFE6 显示策略字节 +3 清零，否则置1”，不是仅不透明往返验证；写入端、真实行为消费端、跨独立客户端传递和实盘双值证据齐全 |
+| LBA7 | 0x0CA | COMPLETE | 密码信息 `bNoUsbChkPasSafe` / 官方 UI“取消密码复杂性验证” | `cemssafeudisklabeltool.exe`：`sub_4650a0` 以 `this+0x14` 为 `Ui_writeLabel` 基址；`Ui+0xE4=pwdComplexityCheckBox`，`retranslateUi/sub_487660` 的源字符串 `VA 0x4B5AD4` 精确为“取消密码复杂性验证”；`sub_466eb0` 调 `QAbstractButton::isChecked()` 原样写 `request+0x48`；`sub_42e8e0` 再原样写 `LabelInfo+0x7EC`。既有 Windows `WriteNormalULabel -> CreatePartitions` 链把 `UsbWriteParam+0x7EC` 写入 `PassInfo+0x0A` | 独立 Linux 官方 `checkdiskback::Update_EDPEDISKSHOWPARAM@0x406B70` 直接执行 `cmp byte [pass+0x0A],1; setne showparam+0x03`，随后 `CreateSafe6TmpPolicyFile@0x407D50` 将结果纳入 CRC/加密 SAFE6 策略；独立 `EdpEDiskBack::Safe6PolicyFile::GetSafe6Policy@0x4100B0` 与 `linuxedpedisk::Safe6PolicyFile::GetSafe6Policy@0x41EAA0` 解密并恢复该策略/运行时参数 | 严格22份原始盘：18×0、4×1；22/22 LBA7/LBA12 同盘取值一致；CI `pass_info_no_usb_safe_flag_varies_and_matches_between_lba7_and_lba12` 锁定0/1双值与跨扇区一致性 | **语义方向已由官方 UI 闭合**：未勾选=0；勾选“取消密码复杂性验证”=1；值在 UI→请求→LabelInfo→PassInfo 链不取反。保留 ABI 原名 `bNoUsbChkPasSafe`，人类可读语义解释为“取消/跳过密码复杂性验证” |
 | LBA7 | 0x0CC–0x0CD | COMPLETE | 未启用密码信息 `ShareBackuppromptPeriod / EncryptBackuppromptPeriod` 兼容字节 | Linux DWARF `edpdiskglobal.h:164/165` 明确给出两个独立 `BYTE` 字段，物理偏移 `+0x0C/+0x0D`；当前 `CreatePartitions/sub_1003DB50` 在 `0x1003DC16..0x1003DC26` 显式清零完整14B 密码信息，后续存储只到 `+0x0A`，因此当前写入端为0/0 | 四个不同哈希/代际的 `EdpEDiskCtrl` 读取端均把完整14B 密码信息结构复制到输出；已复核成功尾部只对 `Version(+0)`、共享重试 `(+3)`、加密重试 `(+6)` 做 XOR/值处理，`+0x0C/+0x0D` 只结构性保留。Linux 检查器同样保存完整14B但无这2B业务读取；两代 `vrvaud_c::BackupPromptInfo/BackupStartTime/BackupEndTime` 已证明是独立策略/字符串/DWORD 链，与密码信息无数据流 | 已提交原始样本的 LBA7/LBA12 两份副本逐盘0/0且一致；全目录去重扫描19个真实 LBA7 密文配置类型（覆盖密码信息 v0x0064 与 v0x0206）仍19/19=0/0 | 闭合语义是“正式命名但在已覆盖实现中未启用的兼容字节”：写入端=0、读取端结构性保留/负向语义消费端、跨代/跨LBA实盘一致。完全闭环不声称其历史设计单位是小时/天；未来非零配置类型必须保留并扩展，不得机械清零 |
 | LBA7 | 0x0CE–0x1FF | COMPLETE | 紧凑布局旧版表表后写入端负责的全零区域 | Windows `edpediskctrl.dll::sub_10010FC0` 先以 `sub_1004D110(...,0,0xFFF)` 明确 memset 暂存，随后只复制 `0xC0` 紧凑布局表 + `0x0E` 密码信息，再对完整512B 滚动并写 LBA7；`sub_1004D110` 机器码已复核为 memset 等价实现 | Windows `ReadPartionInfoExEx/sub_10010B40` 解密完整512B，但成功后只复制 `0xC0` 表和 `0x0E` 密码信息，完全不返回/解释 `0x0CE..0x1FF`；Linux 自然对齐 ABI 构造器也独立采用“整块清零→写结构→整扇滚动”的同原则，但其表尾在0xE6，只作原则佐证、不用于覆盖Windows物理偏移 | 严格22份原始生成参考（21 未转换备份 + 独立SanDisk）逐盘解密：22/22 `0x0CE..0x1FF == zero[306]`；CI门禁 `lba7_post_table_plaintext_is_zero_through_sector_end` 锁定已提交原始 subset | 306B 的写入端零来源、负向消费端、物理边界和原盘均闭合；这里的完全闭环表示写入端负责全零区域，不是靠“样本碰巧全零”推断 |
 | LBA8 | 0x000–0x003 | COMPLETE | LLGB 魔数 | Windows/Linux `BuildSector8` | 读取端先检查 LLGB | 22/22 | 完成 |
@@ -800,7 +800,7 @@ DWARF 中恢复出的原始声明文件/行号与本地函数地址：
 | LBA12 | 每条条目 +0x038–+0x047 | COMPLETE | 封装文件密钥材料 | 当前写入端的三条可达分支已经闭合：模式1 `sub_10001190`=A7F0、模式2 `sub_100036E0/sub_10011010`=SM4-ECB、模式3 `sub_1000FC10`=AES-128-ECB；密钥均来自 `MD5(effective_password)`，模式字节写入 `+0x58` | Windows `UserLogin/sub_10028AB0` 对1/2/3分别解包并统一做 FileKeyCRC；模式3 CRC失败还有按模式1重试的历史兼容；Linux当前检查器明确消费模式1/2 | 22盘44条加密真实设备条目全部模式2；隔离执行官方 `CreatePartitions` 又得到模式1/2/3三份确定性512B LBA12正向测试夹具：密码 `ProofPass1!` 三种16B 封装密钥分别经 A6B0、独立标准SM4-ECB、独立标准AES-128-ECB恢复同一 `147196f5a2ec7912edf13f75d766cb42`，三者CRC均=`0xFF4C1D36`且等于盘内 FileKeyCRC；CI锁定 | **一方运行时正向盘面闭环**：没有把虚拟测试夹具冒充物理采集；但官方写入端原生执行、UI→加密→模式可达链、独立读取端往返验证与既有真实设备模式2共同消除了该16B的语义不确定性，因此3×16B从部分闭环升完全闭环 |
 | LBA12 | 每条条目 +0x048–+0x057 | COMPLETE | `EncryptFileKey32[16]` 跨代兼容槽 | Windows `CreatePartitions` 对3×96B先 `memset(0,0x120)`；当前紧凑布局写入端后续只写 16B 封装密钥 `+0x38..47` 与模式 `+0x58`，所以该16B保持显式零。旧72B `tagEdpPartionInfo` **根本没有**该槽；Linux 检查器的旧版→新版 `GetPartionFromOld` 也只把旧8B 密钥搬到自然对齐 `+0x40`，不填自然对齐 `+0x50 EncryptFileKey32[16]` | 104B 检查器 DWARF正式命名 `EncryptFileKey32[16]@+0x50`，但 `DecryptFileKey/CheckFileKeyCrc/ReadFileSysSector0/DecryptFileSysSector0` 都不读取它；紧凑布局 `libedpedisk.so` 会在按值构造时结构缓存完整96B，但严格按 `PartitionHeader` 符号边界审计，映射到对象 `+0x88/+0x90` 的两个QWORD只在构造器写入，后续没有值相关读取；正对照封装密钥起点对象 `+0x78` 被 SMS4/AES128/OldEdp 解密实际消费。Windows UserLogin/改密同样只消费 `+0x38..47/+0x58` | 严格22份原始盘全部现存 EDPF 条目共66条，`+0x48..57` **66/66全零**；CI `lba12_encrypt_file_key32_compatibility_slots_are_zero_in_original_entries` 锁定 | **LBA12 EncryptFileKey32 兼容槽结构缓存 / 负语义消费端闭环**：旧ABI无槽、新ABI正式保留名字、当前写入端显式零、跨Windows/Linux只结构搬运不参与算法、原始实盘全零。完全闭环表示“兼容槽生命周期/无当前业务语义”闭合，不把它误称保留，也不禁止未来其它ABI结构性携带非零值 |
 | LBA12 | 每条条目 +0x059–+0x05F | COMPLETE | 紧凑布局 `Reserved[7]` | Windows `CreatePartitions` 对3×96B先 `memset(0,0x120)`，后续只写至 +0x58；Linux DWARF正式字段名 `Reserved[7]` | Windows UserLogin/改密只消费 16B 封装密钥与 +0x58；Linux 解密/改密同样不消费保留 | 22盘66/66 条目全零；CI原始夹具锁定 | **LBA12 打包 `Reserved[7]` 写入端/负消费端闭环**；与前面的 `EncryptFileKey32[16]` 兼容槽分开建模 |
-| LBA12 | 0x12A | COMPLETE | 密码信息 `bNoUsbChkPasSafe` | 与 LBA7 同一当前 CreatePartitions 请求输入，LBA12 构造器保存同一密码信息字节 | `checkdiskback::Update_EDPEDISKSHOWPARAM@0x406B70` 直接比较该字段并生成 SAFE6 显示策略字节 +3；策略经 `CreateSafe6TmpPolicyFile` 加密后被 `EdpEDiskBack` 与 `linuxedpedisk` 两套 `Safe6PolicyFile::GetSafe6Policy` 恢复 | 严格22份18×0+4×1，且22/22与同盘 LBA7 +0x0A相同；CI锁定双值/一致性 | 与 LBA7 同一逻辑字段、同一写入端/消费端链，1B 完全闭环 |
+| LBA12 | 0x12A | COMPLETE | 密码信息 `bNoUsbChkPasSafe` / 官方 UI“取消密码复杂性验证” | 与 LBA7 共用同一制标输入链：`pwdComplexityCheckBox.isChecked()` -> `request+0x48` -> `LabelInfo+0x7EC` -> `UsbWriteParam+0x7EC` -> `CreatePartitions` -> `PassInfo+0x0A`；LBA12 构造器保存同一密码信息字节 | `checkdiskback::Update_EDPEDISKSHOWPARAM@0x406B70` 直接比较该字段并生成 SAFE6 显示策略字节 +3；策略经 `CreateSafe6TmpPolicyFile` 加密后被 `EdpEDiskBack` 与 `linuxedpedisk` 两套 `Safe6PolicyFile::GetSafe6Policy` 恢复 | 严格22份18×0+4×1，且22/22与同盘 LBA7 +0x0A相同；CI锁定双值/一致性 | 1B 完全闭环；**1=官方 UI 勾选“取消密码复杂性验证”**，0=未勾选；不再使用含糊“免密安全策略”解释 |
 | LBA12 | 0x12C–0x12D | COMPLETE | 未启用密码信息 `ShareBackuppromptPeriod / EncryptBackuppromptPeriod` 兼容字节 | 与 LBA7 共用同一个当前密码信息写入端：完整14B先清零，写 LBA12 前只把版本切换为 `0x0206`，两个周期字节保持0/0；DWARF 正式字段定义同样适用 | Windows 旧版/当前读取端对完整14B结构复制但不消费最后2B；Linux 检查器保存整个密码信息，但实际解密/文件系统检查不读取这两个字段；独立 `vrvaud_c` 备份策略链已排除 | 已提交测试夹具逐盘与 LBA7 两字节一致且均0；历史去重配置类型跨 v0x0064/v0x0206 未见非零 | 与 LBA7 同一未启用兼容字段生命周期闭合；2B 升完全闭环，不推导未实现的时间单位 |
 | LBA12 | 0x12E–0x16F | COMPLETE | 表后全零初始化填充 | 写入端整块零初始化且不覆写 | 主读取端不消费该区 | 22/22解密为零 | 写入端+负向消费端+实盘闭合 |
 | LBA12 | 0x170–0x1FF | COMPLETE | 表后全零初始化填充 / 连续密文尾部 | Windows 当前 `sub_10014F30` 分配 `sector_size+1` 后整块清零，v0x206 只复制 `0x120+0x0E=0x12E` 结构字节，随后加密整扇；Linux `BuildSector12` 同样先把 `sector_size+1` 全零再只复制表/表尾并整扇加密 | Windows `sub_100160B0` 固定解密0x200B，但只复制 `0x120+0x0E` 返回；Linux主读取端同样只解释表/表尾，不消费表后区 | 严格22份 + 独立SanDisk 解密后 `0x12E..0x1FF` 全零；既有连续密文门禁同时证明 `0x170..` 不是原始尾 | 与 `0x12E..0x16F` 同属一个表后全零填充区；此前部分闭环行是主表陈旧状态，总进度表早已把这144B计入 LBA12 的393B 完全闭环，因此本次只纠账、不重复增加总数 |
@@ -4964,8 +4964,24 @@ Windows `ChangePwd/sub_10026050` 进一步证明：
 - 因而 `bNoUsbChkPasSafe` 已满足本项目严格完全闭环标准：
   **显式制标写入端 + 值相关行为消费端 + 加密策略跨组件传递 +
   22份原始实盘0/1双值与 LBA7/LBA12 同步证据**。LBA7 `0x0CA` 与
-  LBA12 `0x12A` 各1B均由部分闭环升完全闭环；不需要把字段英文名进一步
-  猜成未经证据支持的中文业务标签；
+  LBA12 `0x12A` 各1B均为完全闭环；
+- 2026-09-24 又从官方制盘 UI 向下补齐了生产端语义链。`WriteLabel`
+  构造函数 `sub_4650a0` 以 `this+0x14` 作为 `Ui_writeLabel` 基址调用
+  `setupUi/sub_479910`；其中 `Ui+0xE4` 的对象名明确为
+  `pwdComplexityCheckBox`，所以运行时对象地址是 `WriteLabel.this+0xF8`。
+  `retranslateUi/sub_487660` 对该控件调用 `QAbstractButton::setText` 时，
+  PE 中源字符串地址 `VA 0x4B5AD4` 解出精确中文 **“取消密码复杂性验证”**；
+- `sub_466eb0` 的原始机器码再从 `WriteLabel.this+0xF8` 调用
+  `QtGui4!QAbstractButton::isChecked()`，返回值不做任何取反，直接保存到
+  前端请求结构 `+0x48`；结构转换器 `sub_42e8e0` 又逐字节执行
+  `request+0x48 -> LabelInfo+0x7EC`。同一官方 DLL 的
+  `UsbtoolBusMgrInter::LabelInfo::Print` 把 `+0x7EC` 明确打印为
+  `complexity`。结合已经闭合的
+  `UsbWriteParam+0x7EC -> CreatePartitions request+0x109 -> PassInfo+0x0A`
+  写链，可以确定业务语义方向：
+  **0 = 未勾选“取消密码复杂性验证”；1 = 勾选，即取消/跳过密码复杂性验证**。
+  因此人类可读名称应更新为“取消密码复杂性验证”，同时保留正式 ABI 原名
+  `bNoUsbChkPasSafe` 以便和二进制/DWARF 对照；
 - `+0x0C/+0x0D` 当前 Windows 主 DLL、另一版 `out_raw_data/EdpEDiskCtrl.dll`、
   Linux `libcemsfilesyscheck.so`，以及本轮补扫的 Linux
   `EdpEDiskQt5/EdpEDiskBack/linuxedpedisk` 客户端路径均未找到直接消费者；
@@ -4976,9 +4992,11 @@ Windows `ChangePwd/sub_10026050` 进一步证明：
   本段是较早阶段结论；后续通过写入端 + 多代结构性保留 +
   跨平台负向语义消费端证明它们是**正式但未启用的
   兼容字段**，不再要求虚构一个当前实现中不存在的有效周期消费端；
-- `+0x0A` 当前可记为“真实可变状态 + Windows 初始化向外暴露”，但
-  `bNoUsbChkPasSafe` 这个字段名本身仍不足以证明具体的密码安全绕过策略；
-  在找到实际策略分支前不得把它翻译成“跳过安全检查”等确定行为。
+- 上述“不得把 `bNoUsbChkPasSafe` 翻译成确定业务行为”的旧限制已被
+  2026-09-24 的官方 UI 生产端证据解除：该字节就是
+  `pwdComplexityCheckBox` 的“取消密码复杂性验证”勾选状态，且 UI 到
+  `PassInfo+0x0A` 的已确认链路没有取反。后续文档与 inspect 均应使用这一
+  明确语义，不再称作泛化的“免密安全策略”。
 
 本轮又补做了**跨版本 Windows 消费端审计**，结果进一步收紧而没有升完全闭环：
 
