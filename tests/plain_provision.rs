@@ -1,5 +1,6 @@
 use edpcli::provision::{
-    max_plain_sector_count, OfficialFilesystemFormat, PlainPartitionSpec, PlainProvisionPlan,
+    build_plain_provision_write_plan, max_plain_sector_count, OfficialFilesystemFormat,
+    PlainCleanupExtent, PlainPartitionSpec, PlainProvisionPlan, PlainSectorOwner,
     DEFAULT_PLAIN_START_LBA,
 };
 
@@ -102,4 +103,95 @@ fn mbr_32_bit_boundaries_fail_closed() {
     assert!(
         PlainProvisionPlan::new(u32::MAX as u64 + 101, vec![part(2, u32::MAX as u64)]).is_err()
     );
+}
+
+#[test]
+fn write_plan_builds_plain_mbr_cleans_edp_and_preserves_lba3() {
+    let plan = PlainProvisionPlan::new(100_000, vec![part(2_048, 20_000)]).unwrap();
+    let write = build_plain_provision_write_plan(
+        &plan,
+        Some(PlainCleanupExtent::new(50_000, 6)),
+        &[0x1234_5678],
+    )
+    .unwrap();
+
+    assert_eq!(&write.mbr[510..512], &[0x55, 0xaa]);
+    let entry = &write.mbr[0x1be..0x1ce];
+    assert_eq!(entry[4], 0x07);
+    assert_eq!(u32::from_le_bytes(entry[8..12].try_into().unwrap()), 2_048);
+    assert_eq!(
+        u32::from_le_bytes(entry[12..16].try_into().unwrap()),
+        20_000
+    );
+    assert_eq!(write.preserved_lbas(), &[3]);
+    assert!(write.writes.get(&3).is_none());
+    for lba in [1u32, 2, 4, 5, 6, 7, 8, 9, 10, 11, 12] {
+        let sector = write.writes.get(&lba).unwrap();
+        assert_eq!(sector.owner, PlainSectorOwner::EdpMetadataCleanup);
+        assert_eq!(sector.bytes, [0; 512]);
+    }
+    for lba in 50_000u32..50_006 {
+        let sector = write.writes.get(&lba).unwrap();
+        assert_eq!(sector.owner, PlainSectorOwner::LceCleanup);
+        assert_eq!(sector.bytes, [0; 512]);
+    }
+    assert_eq!(
+        write.writes.get(&2_048).unwrap().owner,
+        PlainSectorOwner::Filesystem { partition_index: 0 }
+    );
+}
+
+#[test]
+fn filesystem_sector_owns_lba_when_old_lce_overlaps_it() {
+    let plan = PlainProvisionPlan::new(100_000, vec![part(2_048, 20_000)]).unwrap();
+    let write = build_plain_provision_write_plan(
+        &plan,
+        Some(PlainCleanupExtent::new(2_048, 6)),
+        &[0x1234_5678],
+    )
+    .unwrap();
+    let first = write.writes.get(&2_048).unwrap();
+    assert_eq!(
+        first.owner,
+        PlainSectorOwner::Filesystem { partition_index: 0 }
+    );
+    assert_ne!(first.bytes, [0; 512]);
+}
+
+#[test]
+fn plain_write_plan_rejects_a_partition_that_would_overwrite_lba3() {
+    let plan = PlainProvisionPlan::new(100_000, vec![part(1, 10_000)]).unwrap();
+    assert!(build_plain_provision_write_plan(&plan, None, &[1])
+        .unwrap_err()
+        .contains("LBA3"));
+}
+
+#[test]
+fn plain_mbr_contains_all_primary_partition_entries() {
+    let plan = PlainProvisionPlan::new(
+        100_000,
+        vec![
+            part(2_048, 10_000),
+            part(20_000, 5_000),
+            part(40_000, 8_000),
+        ],
+    )
+    .unwrap();
+    let write = build_plain_provision_write_plan(&plan, None, &[1, 2, 3]).unwrap();
+    for (index, expected) in [(2_048u32, 10_000u32), (20_000, 5_000), (40_000, 8_000)]
+        .into_iter()
+        .enumerate()
+    {
+        let offset = 0x1be + index * 16;
+        let entry = &write.mbr[offset..offset + 16];
+        assert_eq!(entry[4], 0x07);
+        assert_eq!(
+            u32::from_le_bytes(entry[8..12].try_into().unwrap()),
+            expected.0
+        );
+        assert_eq!(
+            u32::from_le_bytes(entry[12..16].try_into().unwrap()),
+            expected.1
+        );
+    }
 }

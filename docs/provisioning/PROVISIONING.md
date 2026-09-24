@@ -694,6 +694,7 @@ Real USB acceptance
 - Phase 2 已完成：Offline Convert 已从 TUI、palette、TaskHub、application service、CLI grammar/help/completion、`sectors.rs` conversion-only 写入 API、专用测试和 README/USAGE 产品文案中删除；
 - Phase 3 已完成：新增 `ProvisionTarget::{Plain, Official(...)}`；`NewProvisionRequest` 与 TUI→worker 边界携带目标类型而不是裸 `u8`/额外 UI kind，`OfficialPartitionMode` 只在官方 layout/generator 内部使用；
 - Phase 4 已完成：Plain planner 与动态 1～4 分区 TUI 已落地，默认 P1 从 LBA2048 占满剩余盘；每个分区独立 start/capacity/filesystem/label，支持 gap、`f` 填满、Insert/Delete，编辑一个分区绝不自动移动其它分区；overlap/overflow/MBR 32-bit 边界 fail-closed；当前 Plain Review 明确只读，Confirm/export/write 三层都拒绝进入物理写盘；
+- Phase 5 已完成：新增纯 `PlainProvisionWritePlan`，生成1～4个 MBR primary entries、MBR `0x55AA`、LBA1/2/4～12 EDP metadata cleanup、LBA3 preserve 集合、来源 LCE cleanup 与 sparse filesystem sector；所有同 LBA 候选先归一化到唯一 `PlainSectorOwner`，filesystem 实际扇区覆盖旧 LCE cleanup，不依赖写入先后决定最终内容；任何 Plain 分区覆盖 LBA3 时 fail-closed。
 - 原先依赖旧 `sectors::convert` 合成免密盘的测试夹具已迁移到正式 `provision::generate_image()`，识别/备份测试继续覆盖 mode1 免密样本；
 - `src/sectors.rs` 现在只保留只读盘状态识别与 LBA12 EDPF 解析，元数据写入只有 `provision` 一套正式实现。
 
@@ -705,14 +706,14 @@ Real USB acceptance
 - 顶层 `convert` 与 palette `offline-convert` 都由回归测试明确保持不可用；
 - README/USAGE 不再把 Offline Convert 描述为产品能力；协议文档只保留其历史验证背景；
 - Phase 4 `cargo check --all-targets` 通过；Plain planner 6/6、Plain/TUI/写盘安全定向回归 71/71 通过。
+- Phase 5 `cargo fmt --all -- --check`、`cargo check --all-targets` 通过；`plain_provision` 10/10 通过，覆盖 Plain MBR、EDP metadata cleanup、LBA3 preserve、LCE↔filesystem ownership 归一化、多分区 entries 与 LBA3 冲突拒绝。
 
 ### 8.5 下一步执行顺序
 
-1. Phase 5：生成 Plain MBR/filesystem/cleanup plan；
-2. Phase 6：泛化 touched-sector transaction writer；
-3. Phase 7：Virtual-HIL；
-4. Phase 8：真实 USB 验收；
-5. 并行按第 9 节实施 Inspect 全盘结构化浏览器，但不得复制 CLI/TUI 两套解析后端。
+1. Phase 6：泛化 touched-sector transaction writer，并让 official/Plain 共用同一事务设施；
+2. Phase 7：Virtual-HIL；
+3. Phase 8：真实 USB 验收；
+4. 并行按第 9 节实施 Inspect 全盘结构化浏览器，但不得复制 CLI/TUI 两套解析后端。
 
 最终产品定义：**edpcli 制盘中心统一面向五种磁盘目标状态，其中 mode0～mode3 是官方 EDP 模式，Plain 是非 EDP 普通盘目标而不是 mode4。所有目标共用同一套选盘、表单、实时布局、Review 和安全事务基础；容量以 sector 为唯一精确真相，UI 提供 MiB/GiB/sector、`f` 填满、字段级输入约束和统一焦点视觉。Plain 复用现有制盘界面并支持1～4个 MBR 普通分区，不自动移动其它分区，不宣称安全擦除。**
 

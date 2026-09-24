@@ -36,8 +36,10 @@ pub use layout::{
 };
 pub use lce::{build_lce_ciphertext, lce_plaintext};
 pub use plain::{
-    max_plain_sector_count, plain_gaps, validate_plain_partitions, PlainGap, PlainPartitionSpec,
-    PlainProvisionPlan, DEFAULT_PLAIN_START_LBA, MAX_PLAIN_PARTITIONS,
+    build_plain_provision_write_plan, max_plain_sector_count, plain_gaps,
+    validate_plain_partitions, PlainCleanupExtent, PlainGap, PlainPartitionSpec,
+    PlainProvisionPlan, PlainProvisionWritePlan, PlainSectorOwner, PlainSectorWrite,
+    DEFAULT_PLAIN_START_LBA, MAX_PLAIN_PARTITIONS,
 };
 pub use profile::{PassInfoPolicy, ProvisionProfile, DEFAULT_SAFE6_LABEL};
 pub use reprovision::{
