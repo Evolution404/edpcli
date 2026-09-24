@@ -1204,7 +1204,10 @@ pub fn analyze_sector_with_context(
                     FieldStyle::Magic,
                 ));
                 notes.push("字段结构来自 protocol::lba4::parse_lba4。Inspect 不凭身份形态猜 writer：encoding/second-key/HSerial/host-hardinfo profile 保持 Unknown，因此 producer flag 不伪判。".into());
-                format!("canonical protocol::lba4 labelOnlyId={}（writer provenance 未强猜）", view.onlyid_text)
+                format!(
+                    "canonical protocol::lba4 labelOnlyId={}（writer provenance 未强猜）",
+                    view.onlyid_text
+                )
             }
             Err(error) => {
                 notes.push(format!("canonical LBA4 parser 拒绝该扇区: {error}"));
@@ -1274,11 +1277,26 @@ pub fn analyze_sector_with_context(
                     hex_bytes(&view.template_0c0_0ff),
                     FieldStyle::Flag,
                 ));
+                let device_crc_value = match crc_key(meta) {
+                    Some((expected, _)) if view.device_crc == expected => {
+                        format!(
+                            "0x{:08X} / device_id 计算 0x{expected:08X} ✓",
+                            view.device_crc
+                        )
+                    }
+                    Some((expected, _)) => {
+                        format!(
+                            "0x{:08X} / device_id 计算 0x{expected:08X} ✗",
+                            view.device_crc
+                        )
+                    }
+                    None => format!("0x{:08X}（缺少 device_id，未校验）", view.device_crc),
+                };
                 fields.push(field(
                     0x100,
                     0x104,
                     "device_id CRC32",
-                    format!("0x{:08X}", view.device_crc),
+                    device_crc_value,
                     FieldStyle::Checksum,
                 ));
                 fields.push(field(
