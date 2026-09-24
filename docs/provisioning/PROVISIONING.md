@@ -723,3 +723,809 @@ Real USB acceptance
 8. 最后真实 USB 验收。
 
 最终产品定义：**edpcli 制盘中心统一面向五种磁盘目标状态，其中 mode0～mode3 是官方 EDP 模式，Plain 是非 EDP 普通盘目标而不是 mode4。所有目标共用同一套选盘、表单、实时布局、Review 和安全事务基础；容量以 sector 为唯一精确真相，UI 提供 MiB/GiB/sector、`f` 填满、字段级输入约束和统一焦点视觉。Plain 复用现有制盘界面并支持1～4个 MBR 普通分区，不自动移动其它分区，不宣称安全擦除。**
+
+## 9. Inspect 全盘结构化浏览器重构计划（2026-09-24）
+
+### 9.1 背景与目标
+
+当前 TUI Inspect 仍以 LBA0～12 为核心视图，这已经不能覆盖项目现有能力和后续协议分析需求。Inspect 必须从“查看 EDP LBA0～12”重构为：
+
+> **查看整个物理盘，并在已知区域叠加 EDP 协议语义。**
+
+核心目标：
+
+1. TUI Inspect 支持全盘任意 LBA / byte offset 浏览，不再限制 LBA0～12；
+2. LBA0～12 只是全盘结构树中的一个已解析区域；
+3. LCE、分区表、普通分区、数据区、尾部区域、未分配区等都能作为树节点浏览；
+4. 未知区域仍可完整查看 raw bytes，不因没有 decoder 而不可达；
+5. 单扇区查看升级为真正的 Sector Inspector：Hex、ASCII、字段、byte、bit、raw/decoded 三者联动；
+6. 已知字段与 Hex byte 双向高亮；
+7. 字段颜色与整套 TUI Theme 使用统一语义 token，不在 Inspect 内独立硬编码配色；
+8. 树节点统一使用 `o` 展开/折叠；
+9. 全盘浏览必须 lazy / virtualized，不允许为整盘预生成 sector 节点；
+10. CLI `inspect raw/decode/meta` 与 TUI 使用同一套 reader / decoder / metadata backend，不允许双轨解析。
+
+### 9.2 产品结构：三层浏览模型
+
+Inspect 统一分为三层：
+
+```text
+Disk
+└─ Region / Structure
+   └─ Sector
+      └─ Group / Field
+         └─ Byte / Bit
+```
+
+用户可以从整盘结构逐层进入，也可以通过跳转直接到任意扇区。
+
+#### 9.2.1 Disk 层
+
+负责显示：
+
+- 设备路径；
+- 容量；
+- sector size；
+- VID/PID/deviceid；
+- 当前识别状态：mode0 / mode1 / mode2 / mode3 / Plain；
+- 分区布局；
+- 已知协议区域；
+- 未知/未分配区域；
+- 尾部区域。
+
+#### 9.2.2 Region / Structure 层
+
+结构树建议：
+
+```text
+diskN
+├─ Device
+│  ├─ Identity
+│  └─ Geometry
+├─ EDP Metadata
+│  ├─ LBA0
+│  ├─ LBA1
+│  ├─ ...
+│  └─ LBA12
+├─ LCE
+│  ├─ extent
+│  └─ decoded fields
+├─ Partition Table
+│  ├─ Entry 0
+│  ├─ Entry 1
+│  └─ ...
+├─ Partitions
+│  ├─ Partition 1
+│  │  ├─ Boot sector
+│  │  └─ Data
+│  └─ Partition 2
+├─ Unallocated / Raw Range
+└─ Tail Area
+```
+
+未知区域不能伪造语义，统一显示为 `Unknown`、`Raw Range` 或已经验证过的其它状态。
+
+#### 9.2.3 Sector 层
+
+任意 sector 都可以进入单扇区查看器。已知 sector 叠加 decoder；未知 sector 仍显示完整 512B raw data。
+
+### 9.3 TUI 主布局
+
+宽屏默认采用三栏：
+
+```text
+┌ Inspect ────────────────────────────────────────────────────────────────────┐
+│ Disk: /dev/diskN   119.2 GiB   mode1   512 B/sector          [RO]          │
+├──────────────────────┬──────────────────────────────┬───────────────────────┤
+│ STRUCTURE            │ HEX / RAW                    │ FIELD DETAILS         │
+│                      │                              │                       │
+│ ▼ diskN              │ LBA 4                        │ ▼ Identity            │
+│   ├─ ▼ EDP Metadata  │ 0000  45 44 50 00 ...       │   onlyid   ...        │
+│   │   ├─ LBA0        │ 0010  01 00 00 00 ...       │   VID      0781       │
+│   │   ├─ ...         │ ...                          │   PID      5583       │
+│   │   └─ LBA12       │                              │                       │
+│   ├─ ▶ LCE           │                              │ ▼ Flags               │
+│   ├─ ▼ Partitions    │                              │   ...                 │
+│   ├─ ▶ Data Area     │                              │                       │
+│   └─ ▶ Tail Area     │                              │                       │
+├──────────────────────┴──────────────────────────────┴───────────────────────┤
+│ o 展开/折叠  Enter查看  g 跳转  / 搜索  Tab面板  ? 帮助  q返回             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+窄屏不复制另一套逻辑，只重排同一状态模型：
+
+1. Structure；
+2. Hex；
+3. Fields/Details；
+
+通过 Tab/Shift+Tab 切换焦点或视图。
+
+### 9.4 树状导航规则
+
+统一交互：
+
+```text
+j / ↓          下一项
+k / ↑          上一项
+o              展开 / 折叠当前树节点
+Enter          查看 / 进入当前节点
+gg             树顶部
+G              树底部
+Tab            下一个面板
+Shift+Tab      上一个面板
+Esc / q        返回
+```
+
+约束：
+
+- `o` 是唯一主展开/折叠快捷键；
+- 不再依赖左右箭头展开树；
+- `←/→` 保留给文本光标、Hex byte 光标和需要水平移动的内容；
+- `▶` 继续遵守全 TUI 规则：仅表示当前键盘焦点，不表示普通状态。
+
+### 9.5 全盘浏览必须 lazy / virtualized
+
+禁止建立：
+
+```text
+LBA0
+LBA1
+...
+LBA268435455
+```
+
+这样的全量节点。
+
+大范围节点只记录：
+
+```text
+start_lba
+sector_count
+kind
+decoder/metadata optional
+```
+
+例如：
+
+```text
+▶ Data Area
+  LBA 2048 – 243621887
+```
+
+进入后按屏幕窗口只实例化当前附近的少量 sector。Sector cache 应有明确上限，不因持续滚动无限增长。
+
+### 9.6 跳转能力
+
+`g` 打开统一 Jump 面板：
+
+```text
+Jump to
+
+LBA / offset:
+┌───────────────────────┐
+│ 243623933             │
+└───────────────────────┘
+
+Unit: LBA
+Space: LBA / byte offset
+```
+
+至少支持：
+
+- 十进制 LBA；
+- 十六进制 LBA；
+- 十进制 byte offset；
+- 十六进制 byte offset。
+
+跳转后：
+
+1. 结构树尽可能定位到该位置所属 Region；
+2. 打开对应 sector；
+3. Hex 光标定位到 offset 对应 byte；
+4. 若属于已知字段，字段树自动联动定位。
+
+### 9.7 单扇区 Sector Inspector
+
+#### 9.7.1 顶部位置元数据
+
+单扇区页面必须明确告诉用户“当前 512B 在整盘哪里”：
+
+```text
+LBA:             4
+Sector size:     512 B
+Absolute offset: 0x00000800
+Range:           0x800..0x9FF
+Region:          EDP Metadata
+Parser:          LBA4
+```
+
+未知扇区：
+
+```text
+Region:          Data Area
+Parser:          none
+```
+
+不允许用户只看到 Hex 而不知道磁盘位置和区域归属。
+
+#### 9.7.2 Hex 基础布局
+
+512B sector 固定按 16B/行显示，共 32 行：
+
+```text
+OFFSET  00 01 02 03 04 05 06 07 08 09 0A 0B 0C 0D 0E 0F   ASCII
+
+0000    45 44 50 00 01 00 00 00 37 41 46 32 31 39 00 00   EDP.....7AF219..
+0010    ...
+...
+01F0    ...
+```
+
+默认 offset 是 sector-relative：
+
+- `0000` = 当前 LBA + 0x000；
+- `0046` = 当前 LBA + 0x046；
+- `01FF` = 当前 LBA + 0x1FF。
+
+#### 9.7.3 相对/绝对 offset
+
+必须同时具备 sector-relative 与 disk-absolute 概念。
+
+例如 LBA4：
+
+```text
+absolute sector start = 4 * 512 = 0x800
+sector +0x046
+disk   +0x00000846
+```
+
+UI 可以默认显示 relative，提供切换或在 detail/status 中同时展示两者。内部定位始终使用无损 integer offset，不用浮点换算。
+
+#### 9.7.4 Byte 光标
+
+Hex panel 获得焦点后：
+
+```text
+←     前一个 byte
+→     后一个 byte
+↑     上一行同列
+↓     下一行同列
+```
+
+当前 byte detail 至少包括：
+
+```text
+offset       +0x045
+absolute     0x845
+hex          01
+decimal      1
+binary       00000001
+ASCII        .
+```
+
+移动 byte 光标不能触发 Tab 切换或树导航。
+
+#### 9.7.5 Hex → Field 联动
+
+若当前 byte 落在已知字段范围内，字段面板自动选中对应字段：
+
+```text
+Field
+name          bConnectServer
+range         +0x046
+size          1 byte
+raw           0x01
+decoded       true
+group         Flags
+```
+
+字段树同步定位：
+
+```text
+▼ Flags
+  > bConnectServer
+```
+
+#### 9.7.6 Field → Hex 联动
+
+选择一个字段后，Hex 必须高亮其完整 byte range。
+
+例如：
+
+```text
+onlyid
+offset +0x008..+0x027
+length 32 B
+```
+
+则 Hex 中对应 32B 连续高亮；状态栏同步显示：
+
+```text
+onlyid  +0x008..+0x027  32 B
+```
+
+如果字段跨行，跨行连续高亮；不能只高亮首 byte。
+
+#### 9.7.7 多字节字段解释
+
+已知 typed field 可以显示：
+
+```text
+VID
+offset       +0x018..+0x019
+length       2 B
+raw          81 07
+u16 LE       0x0781
+decimal      1921
+decoded      SanDisk VID
+```
+
+支持的数据表示可包括：
+
+- u8；
+- u16/u32/u64 LE；
+- 必要时 BE；
+- ASCII；
+- UTF-8；
+- hex；
+- bit field。
+
+但只显示 decoder 明确声明的主解释，不默认把所有可能的整数编码全部铺出来。
+
+#### 9.7.8 Bit 展开
+
+对 flag 字段，`o` 可继续展开到 bit：
+
+```text
+▼ flags +0x046 = 0x05
+  ├─ enable         bit0 = true
+  ├─ reserved       bit1 = false
+  └─ connectServer  bit2 = true
+```
+
+未知 bit 只能标 unknown/reserved，不能猜含义。
+
+#### 9.7.9 字段树层级
+
+统一支持：
+
+```text
+Sector
+└─ Group
+   └─ Field
+      ├─ range
+      ├─ raw
+      ├─ decoded
+      └─ bits / members
+```
+
+例如：
+
+```text
+▼ LBA4
+  ▼ Identity
+    ▶ onlyid
+    ▶ HSerial
+    ▶ HDSerial
+  ▼ Flags
+    ▶ Flags0
+    ▶ Flags1
+```
+
+`o` 始终作用于当前可展开节点。
+
+#### 9.7.10 Unknown / Reserved / Preserved 必须区分
+
+Inspect 不允许因为某段 bytes 当前全 0 就标记为 padding。
+
+状态至少区分：
+
+- `Unknown`：语义未闭环；
+- `Reserved`：已验证为保留字段；
+- `Preserved`：跨版本/跨代要求原样保留；
+- `Padding`：只有有明确证据时才允许使用。
+
+这些状态必须来自协议真相源/decoder metadata，不由 TUI 自行推断。
+
+#### 9.7.11 前后扇区
+
+单 sector 浏览至少支持：
+
+```text
+PageUp      previous sector
+PageDown    next sector
+```
+
+切换时：
+
+- 保持当前面板；
+- 尽量保持 byte column；
+- 更新 region/parser/offset；
+- 已知字段重新解析；
+- 不重新加载整盘。
+
+### 9.8 Raw / Decode / Mixed 三种查看模式
+
+保持与 CLI 概念一致：
+
+#### Raw
+
+最大化 Hex/ASCII，适合完全未知区域。
+
+#### Decode
+
+以结构树和字段语义为主，适合正常用户快速阅读。
+
+#### Mixed
+
+默认模式：
+
+```text
+Hex + Field Tree + Detail
+```
+
+适合协议分析，是 TUI Inspect 的主工作模式。
+
+`r` 可以在 Raw → Decode → Mixed 之间循环；若现有全局快捷键冲突，以统一 shortcut registry 为准，不允许页面私自覆盖。
+
+### 9.9 搜索
+
+`/` 打开 Inspect Search。
+
+第一阶段至少支持：
+
+- 字段名；
+- group 名；
+- LBA；
+- decoded value；
+- region 名。
+
+例如：
+
+```text
+/ onlyid
+/ bConnectServer
+/ LBA12
+/ type4
+```
+
+后续可增加：
+
+```text
+/hex DE AD BE EF
+```
+
+全盘 raw byte pattern 搜索。
+
+全盘 raw 搜索必须是流式、可取消、有进度的独立阶段，不能阻塞 TUI 主线程，也不能在第一版为了“功能齐全”直接同步扫整盘。
+
+### 9.10 颜色与整体风格
+
+Inspect 不再定义自己的“彩虹配色”，全部走全局 Theme semantic token。
+
+建议语义：
+
+| 语义 | 用途 |
+| --- | --- |
+| primary/accent | 字段名、关键结构 |
+| foreground | 普通 value |
+| secondary accent | enum / typed value |
+| success | valid / true / checksum pass |
+| warning | 可疑但可继续 |
+| error | invalid / checksum fail |
+| muted | unknown / reserved /辅助 offset |
+| selection | 当前 focus / 当前 byte / 当前 field |
+
+Hex 字段范围允许弱背景或下划线帮助区分 Identity / Flags / Checksum / Reserved 等，但必须：
+
+- 低饱和；
+- 不遮盖 raw byte 文本；
+- 当前 selection 的视觉优先级最高；
+- 同一主题 token 在 Devices / Backups / Provision / Inspect 含义一致；
+- 不在业务组件里写死 ANSI/RGB 颜色。
+
+### 9.11 数据模型
+
+禁止继续把 TUI Inspect 写成：
+
+```rust
+if lba <= 12 {
+    ...
+}
+```
+
+引入统一只读浏览节点模型，概念上至少包含：
+
+```text
+InspectNode
+├─ id
+├─ label
+├─ kind
+├─ range
+├─ children
+├─ decoder
+└─ status
+```
+
+建议 `kind` 支持：
+
+- Device；
+- Region；
+- Extent；
+- Sector；
+- Structure；
+- Group；
+- Field；
+- Partition；
+- UnknownRange。
+
+`range` 至少使用：
+
+```text
+start_lba
+sector_count
+optional byte subrange
+```
+
+与备份系统现有 `DeviceSnapshot / Region / Extent / Artifact` 概念尽可能复用公共磁盘区域抽象，但不要为了复用强行把 UI 状态塞入备份领域模型。
+
+### 9.12 Reader / Decoder / UI 分层
+
+统一数据流：
+
+```text
+Disk
+ │
+SectorReader
+ │
+raw bytes
+ ├──────────────→ Hex View
+ │
+ └──────────────→ Decoder Registry
+                    ├─ LBA0
+                    ├─ LBA4
+                    ├─ LBA12
+                    ├─ LCE
+                    └─ future decoders
+```
+
+原则：
+
+1. raw bytes 是唯一底层事实；
+2. decoder 是 raw bytes 上的语义 overlay；
+3. TUI 不重复实现 parser；
+4. CLI `inspect --lba ... --raw/--decode/--meta` 与 TUI 共用 backend；
+5. 已知 decoder 失败时必须 fail closed：仍可显示 raw，但不能显示伪 decoded 值；
+6. decoder 返回字段必须携带 range，才能实现 Hex↔Field 双向联动。
+
+### 9.13 缓存与性能
+
+第一版即纳入以下约束：
+
+- 当前 sector 必须按需读取；
+- 可预取少量前后 sector，但 cache 有硬上限；
+- 大 Region 不能展开成全量 child vector；
+- 树滚动只 materialize viewport 邻近节点；
+- decoder 仅对当前/预取 sector 执行；
+- 全盘 search 与 checksum 等重操作独立为可取消任务；
+- 切换 sector 不允许触发整盘重新扫描。
+
+### 9.14 复制能力
+
+协议分析高频需要复制。
+
+建议：
+
+```text
+y    copy current value/raw byte
+Y    copy full location + raw + decoded description
+```
+
+例如：
+
+```text
+LBA4 +0x018..+0x019 = 81 07 -> 0x0781
+```
+
+若全局已有 yank/copy shortcut，按统一快捷键体系实现，不在 Inspect 另造冲突键。
+
+### 9.15 跨扇区字段
+
+数据模型必须从第一版就允许字段跨 sector，即使 UI 第一阶段只做基础展示。
+
+例如：
+
+```text
+start = LBA100 +0x1F0
+length = 64 B
+```
+
+实际覆盖：
+
+```text
+LBA100 +0x1F0..+0x1FF
+LBA101 +0x000..+0x02F
+```
+
+Field range 必须使用绝对 byte range 或等价无损结构表达，不能假设所有字段都局限在单一 512B sector。
+
+### 9.16 快捷键目标方案
+
+最终目标：
+
+```text
+j / ↓          下一项
+k / ↑          上一项
+o              展开 / 折叠
+Enter          查看 / 进入
+Tab            下一个面板
+Shift+Tab      上一个面板
+
+g              跳转 LBA / offset
+/              搜索
+
+PageUp         上一个 sector
+PageDown       下一个 sector
+Home           当前 region 开头
+End            当前 region 末尾
+
+← / →          Hex byte 光标 / 输入框文本光标
+r              Raw / Decode / Mixed
+?              当前上下文快捷键帮助
+Esc / q        返回
+```
+
+底部状态栏不一次性列出所有快捷键，只显示当前上下文最有用的一组，例如：
+
+```text
+o 展开  Enter查看  g 跳转  / 搜索  Tab面板  ? 帮助
+```
+
+### 9.17 分阶段实施顺序
+
+#### Phase I1：现状审计与测试基线
+
+- 审计当前 CLI Inspect/TUI Advanced Inspect/backend；
+- 找出所有 LBA0～12 hard-coded 边界；
+- 找出现有 raw/decode/meta reader/decoder 的重复实现；
+- 记录现有 Theme token / focus marker / tabs / scrolling primitives；
+- 测试先行锁住当前已验证协议解析结果。
+
+#### Phase I2：统一 Inspect backend
+
+- 建立 `SectorReader` / range reader；
+- 建立 decoder registry；
+- Field 带 byte range/type/raw/decoded/status；
+- CLI raw/decode/meta 迁移到统一 backend；
+- 不改协议含义，只改变组织方式。
+
+#### Phase I3：全盘 InspectNode / Region 模型
+
+- Device → Region → Extent → Sector → Field；
+- LBA0～12、LCE、partition table、partitions、data、tail、unknown range 全部可表达；
+- 大区域 lazy children；
+- 任意 LBA 能映射到所属 region。
+
+#### Phase I4：树状 TUI
+
+- 三栏宽屏 / 同状态窄屏；
+- `o` 展开折叠；
+- j/k；
+- Enter；
+- Tab/Shift+Tab；
+- viewport virtualization；
+- selection 保持可见。
+
+#### Phase I5：Sector Inspector
+
+- 32×16 Hex；
+- ASCII；
+- relative / absolute offset；
+- byte cursor；
+- PageUp/PageDown；
+- Raw/Decode/Mixed；
+- typed value；
+- bit 展开。
+
+#### Phase I6：Hex ↔ Field 双向联动
+
+- byte → field；
+- field → byte range；
+- 多行 field range；
+- unknown/reserved/preserved 状态；
+- 跨 sector field range 数据模型；
+- copy/yank。
+
+#### Phase I7：Jump / Search
+
+- `g` LBA/offset；
+- `/` 结构化字段搜索；
+- 自动树定位；
+- 第二阶段再增加 raw full-disk pattern search。
+
+#### Phase I8：视觉统一与窄屏
+
+- Theme semantic token；
+- selected 高亮不铺满无关 padding；
+- `▶` 统一；
+- tabs 与其它页面一致；
+- 窄终端降级规则；
+- 不硬编码颜色。
+
+#### Phase I9：回归与真实盘只读验收
+
+- mock/sparse disk；
+- 大容量虚拟盘；
+- mode0～mode3；
+- Plain；
+- LCE 存在/不存在；
+- 未知 sector；
+- 真实 USB 只读 Inspect；
+- 验证不会写盘。
+
+### 9.18 测试门禁
+
+至少增加以下回归测试：
+
+1. TUI Inspect 不再限制 LBA0～12；
+2. 任意合法 LBA 可跳转；
+3. 超出设备范围的 LBA fail closed；
+4. 大磁盘不会建立与 sector_count 等量的节点；
+5. lazy range 滚动不会无限增长内存；
+6. `o` 只展开/折叠当前节点；
+7. `←/→` 在 Hex 内只移动 byte 光标；
+8. `←/→` 在文本输入框内只移动文本光标；
+9. Field → Hex 完整 range 高亮；
+10. Hex byte → Field 正确反查；
+11. 跨行字段高亮范围正确；
+12. multi-byte typed decode endian 正确；
+13. unknown byte 不被误标为 known/padding；
+14. Unknown / Reserved / Preserved 分类不混淆；
+15. PageUp/PageDown 正确切换 sector；
+16. relative/absolute offset 换算精确；
+17. CLI 与 TUI 对同一 sector 使用同一个 decoder 结果；
+18. decoder error 时仍能查看 raw；
+19. Theme 中不出现 Inspect 私有硬编码业务颜色；
+20. 窄屏布局不丢失选中节点/byte；
+21. 全盘 Inspect 所有常规路径保持只读；
+22. 真实 USB Inspect 不触发写盘、mount 改写或制盘事务。
+
+### 9.19 单扇区第一阶段完成标准
+
+单扇区查看器第一阶段只有同时满足以下条件才算完成：
+
+1. 任意合法 LBA 均能打开；
+2. 512B 完整显示为 32 行 × 16B；
+3. 同时具备 sector-relative 与 disk-absolute offset；
+4. byte 光标可以逐 byte 移动；
+5. 已知字段和 Hex 双向联动；
+6. 字段可用 `o` 展开 raw/decoded/range/bit；
+7. 未知区域明确标 Unknown，不猜；
+8. PageUp/PageDown 无缝切换前后 sector；
+9. 单 sector 浏览只读取当前和有界邻近 cache；
+10. CLI/TUI 共用 reader/decoder；
+11. 颜色、selection、focus marker 与全局 Theme 一致；
+12. 不改变任何已闭环协议字段含义。
+
+### 9.20 Inspect 整体完成标准
+
+只有同时满足以下条件才算新版 Inspect 完成：
+
+1. 全盘任意位置可浏览；
+2. LBA0～12 不再是 UI 上限，只是 EDP Metadata 节点；
+3. LCE、partition table、partitions、data、tail、unknown range 可被统一表达；
+4. 大区域 lazy/virtualized；
+5. Sector Inspector 完成；
+6. Hex↔Field 双向联动完成；
+7. `o` 树折叠/展开完成；
+8. `g` 任意 LBA/offset 跳转完成；
+9. 结构化搜索完成；
+10. Raw/Decode/Mixed 完成；
+11. Theme/焦点/Tab 与其它 TUI 页面统一；
+12. CLI/TUI decoder 同源；
+13. 所有新增门禁全绿；
+14. 真实 USB 只读验收通过；
+15. README/USAGE/本文件与真实实现保持一致。
+
+最终产品定义：**新版 Inspect 是 edpcli 的只读全盘结构化浏览器。树负责定位磁盘结构，Sector Inspector 负责研究具体数据，decoder 只在 raw bytes 上叠加经过验证的协议语义；无 decoder 的区域仍然可看，未知含义绝不猜测。**
