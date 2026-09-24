@@ -394,9 +394,18 @@ fn provision_uses_only_per_partition_quick_exact_inputs() {
         state.provision().form.encrypt_input_mode,
         CapacityInputMode::Quick
     );
-    assert!(fields.iter().any(|(label, _, _)| label == "启动区输入方式"));
-    assert!(fields.iter().any(|(label, _, _)| label == "交换区输入方式"));
-    assert!(fields.iter().any(|(label, _, _)| label == "保密区输入方式"));
+    assert!(!fields
+        .iter()
+        .any(|(label, _, _)| label.contains("输入方式")));
+    assert!(fields
+        .iter()
+        .any(|(label, _, _)| label == "启动区容量 (sector)"));
+    assert!(fields
+        .iter()
+        .any(|(label, _, _)| label == "交换区容量 (MiB)"));
+    assert!(fields
+        .iter()
+        .any(|(label, _, _)| label == "保密区容量 (MiB)"));
 }
 
 #[test]
@@ -413,12 +422,12 @@ fn provision_capacity_unit_cycles_mib_gib_sector_without_geometry_change() {
     state.provision_mut().form.share_input_mode = CapacityInputMode::Quick;
     state.provision_mut().form.share_quick_unit = QuickCapacityUnit::MiB;
     state.provision_mut().form.share_mib = "6644".into();
-    let mode_index = state
+    let capacity_index = state
         .provision_visible_fields()
         .iter()
-        .position(|(label, _, _)| label == "交换区输入方式")
-        .expect("share input mode field");
-    state.provision_mut().field_selected = mode_index;
+        .position(|(label, _, _)| label.starts_with("交换区容量"))
+        .expect("share capacity field");
+    state.provision_mut().field_selected = capacity_index;
 
     assert!(state.provision_toggle_selected_option());
     assert_eq!(
@@ -454,6 +463,62 @@ fn provision_capacity_unit_cycles_mib_gib_sector_without_geometry_change() {
 }
 
 #[test]
+fn provision_exact_sector_capacity_cycles_through_decimal_mib_and_gib_losslessly() {
+    use edpcli::provision::{CapacityInputMode, QuickCapacityUnit};
+
+    let mut state = AppState::new();
+    state.replace_devices(vec![device(64_000_000_000)]);
+    state.navigate(NavCommand::WorkspaceProvision, 20);
+    state.provision_select_disk();
+    state.provision_skip_backup();
+    assert_eq!(state.provision_begin_selected(), ProvisionKind::Mode0);
+
+    state.provision_mut().form.boot_input_mode = CapacityInputMode::Exact;
+    state.provision_mut().form.boot_sectors = "20417".into();
+    let capacity_index = state
+        .provision_visible_fields()
+        .iter()
+        .position(|(label, _, _)| label.starts_with("启动区容量"))
+        .expect("boot capacity field");
+    state.provision_mut().field_selected = capacity_index;
+
+    assert!(state.provision_toggle_selected_option());
+    assert_eq!(
+        state.provision().form.boot_input_mode,
+        CapacityInputMode::Quick
+    );
+    assert_eq!(
+        state.provision().form.boot_quick_unit,
+        QuickCapacityUnit::MiB
+    );
+    assert_eq!(state.provision().form.boot_mib, "9.96923828125");
+    assert!(state
+        .provision_visible_fields()
+        .iter()
+        .any(|(label, value, _)| label == "启动区容量 (MiB)" && *value == "9.96923828125"));
+    let request = state.provision_request().expect("decimal MiB request");
+    assert_eq!(request.boot_mib, None);
+    assert_eq!(request.boot_sectors, Some(20_417));
+
+    assert!(state.provision_toggle_selected_option());
+    assert_eq!(
+        state.provision().form.boot_quick_unit,
+        QuickCapacityUnit::GiB
+    );
+    assert!(state
+        .provision_visible_fields()
+        .iter()
+        .any(|(label, _, _)| label == "启动区容量 (GiB)"));
+
+    assert!(state.provision_toggle_selected_option());
+    assert_eq!(
+        state.provision().form.boot_input_mode,
+        CapacityInputMode::Exact
+    );
+    assert_eq!(state.provision().form.boot_sectors, "20417");
+}
+
+#[test]
 fn provision_capacity_hints_match_each_partition() {
     let mut state = AppState::new();
     state.replace_devices(vec![device(64_000_000_000)]);
@@ -474,9 +539,9 @@ fn provision_capacity_hints_match_each_partition() {
     let boot = hint_for("启动区");
     let share = hint_for("交换区");
     let encrypt = hint_for("保密区");
-    assert!(boot.starts_with("启动区"), "{boot}");
-    assert!(share.starts_with("交换区"), "{share}");
-    assert!(encrypt.starts_with("保密区"), "{encrypt}");
+    assert!(boot.contains("启动区"), "{boot}");
+    assert!(share.contains("交换区"), "{share}");
+    assert!(encrypt.contains("保密区"), "{encrypt}");
     assert_ne!(boot, share);
     assert_ne!(share, encrypt);
 }
@@ -563,7 +628,7 @@ fn provision_layout_editor_reports_total_space_and_selected_partition_limits() {
 }
 
 #[test]
-fn provision_compact_rows_keep_partition_capacity_mode_and_start_together() {
+fn provision_compact_rows_keep_partition_capacity_and_start_together() {
     let mut state = AppState::new();
     state.replace_devices(vec![device(64_000_000_000)]);
     state.navigate(NavCommand::WorkspaceProvision, 20);
@@ -588,16 +653,56 @@ fn provision_compact_rows_keep_partition_capacity_mode_and_start_together() {
         .collect::<Vec<_>>();
     assert_eq!(labels.len(), 2);
     assert!(labels[0].starts_with("交换区容量"));
-    assert_eq!(labels[1], "交换区输入方式");
-    let share_start_row = rows
-        .iter()
-        .find(|(_, indexes)| {
-            indexes
-                .iter()
-                .any(|index| fields[*index].0 == "交换区起点 LBA")
+    assert_eq!(labels[1], "交换区起点 LBA");
+}
+
+#[test]
+fn provision_layout_rows_are_sorted_by_start_lba_including_free_space() {
+    use edpcli::provision::{CapacityInputMode, QuickCapacityUnit};
+
+    let mut state = AppState::new();
+    state.replace_devices(vec![device(8_053_063_680)]);
+    state.navigate(NavCommand::WorkspaceProvision, 20);
+    state.provision_select_disk();
+    state.provision_skip_backup();
+    assert_eq!(state.provision_begin_selected(), ProvisionKind::Mode0);
+
+    state.provision_mut().form.boot_input_mode = CapacityInputMode::Exact;
+    state.provision_mut().form.boot_sectors = "20417".into();
+    state.provision_mut().form.boot_start_lba = "63".into();
+    state.provision_mut().form.share_input_mode = CapacityInputMode::Quick;
+    state.provision_mut().form.share_quick_unit = QuickCapacityUnit::GiB;
+    state.provision_mut().form.share_mib = "6".into();
+    state.provision_mut().form.share_start_lba = "20480".into();
+    state.provision_mut().form.encrypt_input_mode = CapacityInputMode::Quick;
+    state.provision_mut().form.encrypt_quick_unit = QuickCapacityUnit::GiB;
+    state.provision_mut().form.encrypt_mib = "1".into();
+    state.provision_mut().form.encrypt_start_lba = "13627392".into();
+
+    let rows = state
+        .provision_layout_editor_lines(40)
+        .into_iter()
+        .filter(|line| {
+            line.starts_with("启动区")
+                || line.starts_with("交换区")
+                || line.starts_with("保密区")
+                || line.starts_with("空闲")
         })
-        .expect("share start row");
-    assert_eq!(share_start_row.1.len(), 1);
+        .collect::<Vec<_>>();
+    let starts = rows
+        .iter()
+        .map(|line| {
+            let value = line
+                .split("LBA ")
+                .nth(1)
+                .expect("layout row LBA")
+                .split('–')
+                .next()
+                .expect("layout row start");
+            value.parse::<u64>().expect("numeric start LBA")
+        })
+        .collect::<Vec<_>>();
+    assert!(starts.windows(2).all(|pair| pair[0] < pair[1]), "{rows:?}");
 }
 
 #[test]

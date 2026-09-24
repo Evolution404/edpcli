@@ -18,6 +18,37 @@ fn safe(value: &str) -> String {
     crate::ui::sanitize_terminal_text(value)
 }
 
+fn fit_display_width(value: &str, width: usize) -> String {
+    let value = safe(value);
+    if width == 0 {
+        return String::new();
+    }
+    let current = crate::ui::disp_width(&value);
+    if current <= width {
+        return format!("{value}{}", " ".repeat(width - current));
+    }
+
+    let target = width.saturating_sub(1);
+    let mut out = String::new();
+    let mut used = 0usize;
+    for ch in value.chars() {
+        let ch_width = crate::ui::disp_width(&ch.to_string()).max(1);
+        if used + ch_width > target {
+            break;
+        }
+        out.push(ch);
+        used += ch_width;
+    }
+    if width > 0 {
+        out.push('…');
+        used += 1;
+    }
+    if used < width {
+        out.push_str(&" ".repeat(width - used));
+    }
+    out
+}
+
 fn hard_wrap_value(value: &str, width: usize) -> Vec<String> {
     let value = safe(value);
     let width = width.max(1);
@@ -892,6 +923,25 @@ fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppSta
             frame.render_stateful_widget(table, main_area, &mut table_state);
         }
         ProvisionStage::Form => {
+            let wide = main_area.width >= 96;
+            let (form_area, layout_area) = if wide {
+                let areas =
+                    Layout::horizontal([Constraint::Percentage(56), Constraint::Percentage(44)])
+                        .split(main_area);
+                (areas[0], areas[1])
+            } else {
+                let areas =
+                    Layout::vertical([Constraint::Percentage(62), Constraint::Percentage(38)])
+                        .split(main_area);
+                (areas[0], areas[1])
+            };
+            let content_width = form_area.width.saturating_sub(2) as usize;
+            let separator = " │ ";
+            let separator_width = crate::ui::disp_width(separator);
+            let left_column_width = content_width
+                .saturating_sub(separator_width)
+                .saturating_div(2);
+
             let fields = state.provision_visible_fields();
             let rows = state.provision_compact_field_rows();
             let mut form_lines = vec![Line::from(vec![
@@ -912,10 +962,8 @@ fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppSta
                 if row_selected {
                     selected_line = form_lines.len();
                 }
+                let two_columns = indexes.len() == 2;
                 for (position, index) in indexes.into_iter().enumerate() {
-                    if position > 0 {
-                        spans.push(Span::styled("   │   ", muted()));
-                    }
                     let (label, value, secret) = &fields[index];
                     let active = index == provision.field_selected;
                     let shown = if value.is_empty() {
@@ -925,16 +973,24 @@ fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppSta
                     } else {
                         safe(value)
                     };
+                    let cell = format!("{}{} {}", if active { "▶ " } else { "  " }, label, shown);
+                    if position > 0 {
+                        spans.push(Span::styled(separator, muted()));
+                    }
+                    let fitted = if two_columns {
+                        let width = if position == 0 {
+                            left_column_width
+                        } else {
+                            content_width
+                                .saturating_sub(left_column_width)
+                                .saturating_sub(separator_width)
+                        };
+                        fit_display_width(&cell, width)
+                    } else {
+                        fit_display_width(&cell, content_width)
+                    };
                     spans.push(Span::styled(
-                        if active { "▶ " } else { "  " },
-                        if active { selected() } else { muted() },
-                    ));
-                    spans.push(Span::styled(
-                        format!("{label} "),
-                        if active { accent() } else { muted() },
-                    ));
-                    spans.push(Span::styled(
-                        shown,
+                        fitted,
                         if active { selected() } else { Style::default() },
                     ));
                 }
@@ -963,19 +1019,6 @@ fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppSta
             if let Some(message) = &provision.message {
                 form_lines.push(Line::from(Span::styled(safe(message), danger())));
             }
-
-            let wide = main_area.width >= 96;
-            let (form_area, layout_area) = if wide {
-                let areas =
-                    Layout::horizontal([Constraint::Percentage(56), Constraint::Percentage(44)])
-                        .split(main_area);
-                (areas[0], areas[1])
-            } else {
-                let areas =
-                    Layout::vertical([Constraint::Percentage(62), Constraint::Percentage(38)])
-                        .split(main_area);
-                (areas[0], areas[1])
-            };
 
             let visible_height = form_area.height.saturating_sub(2) as usize;
             let scroll = selected_line.saturating_sub(visible_height.saturating_sub(3));

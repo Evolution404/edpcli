@@ -132,9 +132,33 @@ fn wide_provision_form_uses_two_columns_and_compact_partition_rows() {
     assert!(
         compact_rows
             .iter()
-            .any(|row| row.contains("交换区容量") && row.contains("交换区输入方式")),
+            .any(|row| row.contains("交换区容量") && row.contains("交换区起点LBA")),
         "{text}"
     );
+
+    let internal_separator_x = |needle: &str| {
+        cells
+            .chunks(width as usize)
+            .find(|row| {
+                row.iter()
+                    .map(|cell| cell.symbol())
+                    .collect::<String>()
+                    .replace(' ', "")
+                    .contains(needle)
+            })
+            .and_then(|row| {
+                row.iter()
+                    .enumerate()
+                    .find(|(x, cell)| *x > 8 && *x < 80 && cell.symbol() == "│")
+                    .map(|(x, _)| x)
+            })
+            .expect("internal group separator")
+    };
+    let identity_separator = internal_separator_x("标签标识");
+    let layout_separator = internal_separator_x("交换区容量");
+    let format_separator = internal_separator_x("交换区格式化");
+    assert_eq!(identity_separator, layout_separator);
+    assert_eq!(layout_separator, format_separator);
 }
 
 #[test]
