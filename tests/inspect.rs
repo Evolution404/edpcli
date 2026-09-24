@@ -237,7 +237,7 @@ fn lba4_zero_ciphertext_byte_is_decrypted_unless_whole_short_gap_is_unwritten() 
     let onlyid = 949_028_302u32;
     let k0 = (onlyid & 0xffff) ^ (onlyid >> 16);
     let mut plain = vec![0u8; 512];
-    let header = b"$$949028302$$";
+    let header = b"$$$949028302$$$";
     plain[..header.len()].copy_from_slice(header);
     plain[0x18..0x1c].copy_from_slice(&(onlyid ^ 0x8888_8888).to_le_bytes());
     plain[0x39..0x3d].copy_from_slice(b"LLGB");
