@@ -192,6 +192,15 @@ pub enum ProvisionBarKind {
 impl ProvisionKind {
     pub const ALL: [Self; 4] = [Self::Mode0, Self::Mode1, Self::Mode2, Self::Mode3];
 
+    pub const fn target(self) -> crate::provision::ProvisionTarget {
+        match self {
+            Self::Mode0 => crate::provision::ProvisionTarget::OFFICIAL[0],
+            Self::Mode1 => crate::provision::ProvisionTarget::OFFICIAL[1],
+            Self::Mode2 => crate::provision::ProvisionTarget::OFFICIAL[2],
+            Self::Mode3 => crate::provision::ProvisionTarget::OFFICIAL[3],
+        }
+    }
+
     pub const fn mode(self) -> Option<u8> {
         match self {
             Self::Mode0 => Some(0),
@@ -202,21 +211,11 @@ impl ProvisionKind {
     }
 
     pub const fn title(self) -> &'static str {
-        match self {
-            Self::Mode0 => "模式 0 · 缺省三分区",
-            Self::Mode1 => "模式 1 · 启动/交换二合一",
-            Self::Mode2 => "模式 2 · 整盘加密",
-            Self::Mode3 => "模式 3 · 内外网双分区",
-        }
+        self.target().full_name()
     }
 
     pub const fn description(self) -> &'static str {
-        match self {
-            Self::Mode0 => "启动区 + 交换区 + 保密区",
-            Self::Mode1 => "启动/交换二合一区 + 保密区",
-            Self::Mode2 => "兼容保留区 + 保密区（整盘加密）",
-            Self::Mode3 => "启动区 + 交换区（内外网双分区）",
-        }
+        self.target().description()
     }
 }
 
@@ -1949,14 +1948,10 @@ impl AppState {
                 self.provision.form.max_encrypt_password_errors = value.to_string();
             }
         }
-        let target_mode = match kind {
-            ProvisionKind::Mode0 => crate::provision::OfficialPartitionMode::DefaultThreePartition,
-            ProvisionKind::Mode1 => crate::provision::OfficialPartitionMode::BootShareCombined,
-            ProvisionKind::Mode2 => crate::provision::OfficialPartitionMode::WholeDiskEncrypted,
-            ProvisionKind::Mode3 => {
-                crate::provision::OfficialPartitionMode::IntranetExtranetDualPartition
-            }
-        };
+        let target_mode = kind
+            .target()
+            .official_mode()
+            .expect("TUI official mode menu cannot select Plain");
         let prefill = self.selected_device().and_then(|row| {
                 let source = row.existing_profile_for_prefill();
                 let total = row.size / crate::common::SECTOR as u64;
@@ -2351,20 +2346,7 @@ impl AppState {
     }
 
     fn provision_target_mode(&self) -> Option<crate::provision::OfficialPartitionMode> {
-        match self.provision.kind {
-            ProvisionKind::Mode0 => {
-                Some(crate::provision::OfficialPartitionMode::DefaultThreePartition)
-            }
-            ProvisionKind::Mode1 => {
-                Some(crate::provision::OfficialPartitionMode::BootShareCombined)
-            }
-            ProvisionKind::Mode2 => {
-                Some(crate::provision::OfficialPartitionMode::WholeDiskEncrypted)
-            }
-            ProvisionKind::Mode3 => {
-                Some(crate::provision::OfficialPartitionMode::IntranetExtranetDualPartition)
-            }
-        }
+        self.provision.kind.target().official_mode()
     }
 
     fn provision_resolved_prefill(
@@ -3253,7 +3235,7 @@ impl AppState {
             .parse::<u8>()
             .map_err(|_| "保密区密码最大错误次数必须为 0..255".to_string())?;
         Ok(crate::application::provision::NewProvisionRequest {
-            mode,
+            target: self.provision.kind.target(),
             boot_start_lba: matches!(mode, 0 | 3)
                 .then_some(resolved.boot_start_lba)
                 .flatten(),

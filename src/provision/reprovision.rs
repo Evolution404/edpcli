@@ -732,6 +732,81 @@ pub fn force_change_password_from_sectors(
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum ProvisionTarget {
+    #[default]
+    Plain,
+    Official(OfficialPartitionMode),
+}
+
+impl ProvisionTarget {
+    pub const OFFICIAL: [Self; 4] = [
+        Self::Official(OfficialPartitionMode::DefaultThreePartition),
+        Self::Official(OfficialPartitionMode::BootShareCombined),
+        Self::Official(OfficialPartitionMode::WholeDiskEncrypted),
+        Self::Official(OfficialPartitionMode::IntranetExtranetDualPartition),
+    ];
+
+    pub const fn official_mode(self) -> Option<OfficialPartitionMode> {
+        match self {
+            Self::Plain => None,
+            Self::Official(mode) => Some(mode),
+        }
+    }
+
+    pub const fn from_mode_number(mode: u8) -> Option<Self> {
+        match mode {
+            0 => Some(Self::OFFICIAL[0]),
+            1 => Some(Self::OFFICIAL[1]),
+            2 => Some(Self::OFFICIAL[2]),
+            3 => Some(Self::OFFICIAL[3]),
+            _ => None,
+        }
+    }
+
+    pub const fn mode_number(self) -> Option<u8> {
+        match self {
+            Self::Plain => None,
+            Self::Official(OfficialPartitionMode::DefaultThreePartition) => Some(0),
+            Self::Official(OfficialPartitionMode::BootShareCombined) => Some(1),
+            Self::Official(OfficialPartitionMode::WholeDiskEncrypted) => Some(2),
+            Self::Official(OfficialPartitionMode::IntranetExtranetDualPartition) => Some(3),
+        }
+    }
+
+    pub const fn full_name(self) -> &'static str {
+        match self {
+            Self::Plain => "普通盘",
+            Self::Official(OfficialPartitionMode::DefaultThreePartition) => "模式0 · 缺省三分区",
+            Self::Official(OfficialPartitionMode::BootShareCombined) => {
+                "模式1 · 启动区和交换区二合一"
+            }
+            Self::Official(OfficialPartitionMode::WholeDiskEncrypted) => "模式2 · 整盘加密",
+            Self::Official(OfficialPartitionMode::IntranetExtranetDualPartition) => {
+                "模式3 · 内外网通用双分区"
+            }
+        }
+    }
+
+    pub const fn description(self) -> &'static str {
+        match self {
+            Self::Plain => "标准 MBR 普通盘",
+            Self::Official(OfficialPartitionMode::DefaultThreePartition) => {
+                "启动区 + 交换区 + 保密区"
+            }
+            Self::Official(OfficialPartitionMode::BootShareCombined) => {
+                "启动/交换二合一区 + 保密区"
+            }
+            Self::Official(OfficialPartitionMode::WholeDiskEncrypted) => {
+                "兼容保留区 + 保密区（整盘加密）"
+            }
+            Self::Official(OfficialPartitionMode::IntranetExtranetDualPartition) => {
+                "启动区 + 交换区（内外网双分区）"
+            }
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum DiskProvisionKind {
     #[default]
     Plain,
@@ -742,14 +817,18 @@ pub enum DiskProvisionKind {
 }
 
 impl DiskProvisionKind {
-    pub const fn official_mode(self) -> Option<OfficialPartitionMode> {
+    pub const fn target(self) -> ProvisionTarget {
         match self {
-            Self::Plain => None,
-            Self::Mode0 => Some(OfficialPartitionMode::DefaultThreePartition),
-            Self::Mode1 => Some(OfficialPartitionMode::BootShareCombined),
-            Self::Mode2 => Some(OfficialPartitionMode::WholeDiskEncrypted),
-            Self::Mode3 => Some(OfficialPartitionMode::IntranetExtranetDualPartition),
+            Self::Plain => ProvisionTarget::Plain,
+            Self::Mode0 => ProvisionTarget::OFFICIAL[0],
+            Self::Mode1 => ProvisionTarget::OFFICIAL[1],
+            Self::Mode2 => ProvisionTarget::OFFICIAL[2],
+            Self::Mode3 => ProvisionTarget::OFFICIAL[3],
         }
+    }
+
+    pub const fn official_mode(self) -> Option<OfficialPartitionMode> {
+        self.target().official_mode()
     }
     pub const fn from_mode(mode: OfficialPartitionMode) -> Self {
         match mode {
@@ -761,13 +840,7 @@ impl DiskProvisionKind {
     }
 
     pub const fn full_name(self) -> &'static str {
-        match self {
-            Self::Plain => "普通盘",
-            Self::Mode0 => "模式0 · 缺省三分区",
-            Self::Mode1 => "模式1 · 启动区和交换区二合一",
-            Self::Mode2 => "模式2 · 整盘加密",
-            Self::Mode3 => "模式3 · 内外网通用双分区",
-        }
+        self.target().full_name()
     }
 
     pub const fn short_name(self) -> &'static str {

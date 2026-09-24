@@ -913,13 +913,10 @@ fn run_loop(resume: Option<state::WriteIntent>) -> io::Result<LoopExit> {
                                         };
                                         match state.provision_request() {
                                             Ok(request) => {
-                                                let kind = state.provision().kind;
                                                 state.provision_set_planning();
-                                                if let Err(message) = tasks.request_provision_plan(
-                                                    disk,
-                                                    kind,
-                                                    Some(request),
-                                                ) {
+                                                if let Err(message) = tasks
+                                                    .request_provision_plan(disk, Some(request))
+                                                {
                                                     state.provision_finish_plan(Err(
                                                         message.to_string()
                                                     ));

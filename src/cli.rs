@@ -181,7 +181,8 @@ fn provision_request(
     opts: &ProvisionNewOpts,
 ) -> crate::application::provision::NewProvisionRequest {
     crate::application::provision::NewProvisionRequest {
-        mode: opts.mode,
+        target: crate::provision::ProvisionTarget::from_mode_number(opts.mode)
+            .expect("CLI parser validates provision mode to 0..3"),
         boot_start_lba: opts.boot_start_lba,
         share_start_lba: opts.share_start_lba,
         encrypt_start_lba: opts.encrypt_start_lba,

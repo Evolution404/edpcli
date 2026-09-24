@@ -906,7 +906,6 @@ impl TaskHub {
     pub fn request_provision_plan(
         &mut self,
         disk: u32,
-        kind: crate::tui::state::ProvisionKind,
         request: Option<crate::application::provision::NewProvisionRequest>,
     ) -> Result<u64, &'static str> {
         if !self.provision_single_flight.try_start() {
@@ -920,7 +919,6 @@ impl TaskHub {
                 let path = crate::diskio::raw_path(disk);
                 let mut dev = crate::diskio::FileDev::open_rdonly(&path)
                     .map_err(|error| format!("错误: 无法只读打开 {path}: {error}"))?;
-                let _ = kind;
                 let request = request.ok_or_else(|| "错误: 新盘制盘缺少表单参数".to_string())?;
                 let mut prepared = crate::application::provision::prepare_target_provision(
                     &runner, disk, &request, &mut dev,

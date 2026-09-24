@@ -10,14 +10,31 @@ use edpcli::{
         DiskProvisionKind, ExistingPartition, ExistingProvisionProfile, FileKeyWrapMode,
         OfficialFilesystemFormat, OfficialPartitionMode, OfficialPartitionSizes,
         OfficialProvisionPlan, OnlyId, PartitionAction, PartitionRole, PassInfoPolicy,
-        ProvisionEntropy, ProvisionMetadata, ProvisionProfile, ProvisionSpec, QuickCapacityUnit,
-        TargetGeometryOverrides, TargetIdentity, TargetProvisionPlan,
+        ProvisionEntropy, ProvisionMetadata, ProvisionProfile, ProvisionSpec, ProvisionTarget,
+        QuickCapacityUnit, TargetGeometryOverrides, TargetIdentity, TargetProvisionPlan,
         OFFICIAL_PARTITION_START_SECTOR,
     },
 };
 
 const SECTOR_SIZE: u64 = 512;
 const MIB_SECTORS: u64 = 2048;
+
+#[test]
+fn provision_target_keeps_plain_outside_the_official_mode_domain() {
+    assert_eq!(ProvisionTarget::Plain.official_mode(), None);
+    assert_eq!(ProvisionTarget::Plain.mode_number(), None);
+    assert_eq!(ProvisionTarget::Plain.full_name(), "普通盘");
+    assert_eq!(
+        ProvisionTarget::OFFICIAL.map(|target| target.mode_number().expect("official mode number")),
+        [0, 1, 2, 3]
+    );
+    for mode in 0..=3 {
+        let target = ProvisionTarget::from_mode_number(mode).expect("official target");
+        assert_eq!(target.mode_number(), Some(mode));
+        assert!(target.official_mode().is_some());
+    }
+    assert_eq!(ProvisionTarget::from_mode_number(4), None);
+}
 
 fn part(
     role: PartitionRole,

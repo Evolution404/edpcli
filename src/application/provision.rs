@@ -24,8 +24,9 @@ use crate::provision::{
     OfficialProvisionPlan, OfficialProvisionWriteImage, OnlyId, ParsedExistingProvision,
     PartitionAction, PartitionFilesystemImage, PartitionFormatTarget, PartitionRole,
     PassInfoPolicy, ProvisionEntropy, ProvisionImage, ProvisionMetadata, ProvisionProfile,
-    ProvisionSpec, QuickCapacityUnit, SparseFilesystemImage, TargetGeometryOverrides,
-    TargetIdentity, TargetPartitionGeometry, TargetProvisionPlan, DEFAULT_MODE0_BOOT_SECTORS,
+    ProvisionSpec, ProvisionTarget, QuickCapacityUnit, SparseFilesystemImage,
+    TargetGeometryOverrides, TargetIdentity, TargetPartitionGeometry, TargetProvisionPlan,
+    DEFAULT_MODE0_BOOT_SECTORS,
 };
 use crate::sysinfo::{self, CmdRunner};
 use encoding_rs::GBK;
@@ -41,7 +42,7 @@ fn err(code: i32, message: impl Into<String>) -> EdpCliError {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct NewProvisionRequest {
-    pub mode: u8,
+    pub target: ProvisionTarget,
     pub boot_start_lba: Option<u64>,
     pub share_start_lba: Option<u64>,
     pub encrypt_start_lba: Option<u64>,
@@ -327,20 +328,19 @@ fn random_array<const N: usize>() -> EdpCliResult<[u8; N]> {
     Ok(bytes)
 }
 
-fn mode(value: u8) -> EdpCliResult<OfficialPartitionMode> {
-    match value {
-        0 => Ok(OfficialPartitionMode::DefaultThreePartition),
-        1 => Ok(OfficialPartitionMode::BootShareCombined),
-        2 => Ok(OfficialPartitionMode::WholeDiskEncrypted),
-        3 => Ok(OfficialPartitionMode::IntranetExtranetDualPartition),
-        _ => Err(err(
+fn official_mode(target: ProvisionTarget) -> EdpCliResult<OfficialPartitionMode> {
+    target.official_mode().ok_or_else(|| {
+        err(
             EXIT_TARGET,
-            format!("错误: 不支持的官方制盘模式 {value}"),
-        )),
-    }
+            "错误: 当前入口只接受官方模式目标；普通盘必须使用 Plain planner",
+        )
+    })
 }
 
-fn sizes(request: &NewProvisionRequest) -> EdpCliResult<OfficialPartitionSizes> {
+fn sizes(
+    request: &NewProvisionRequest,
+    mode: OfficialPartitionMode,
+) -> EdpCliResult<OfficialPartitionSizes> {
     if request.boot_mib.is_some() && request.boot_sectors.is_some() {
         return Err(err(
             EXIT_TARGET,
@@ -359,7 +359,13 @@ fn sizes(request: &NewProvisionRequest) -> EdpCliResult<OfficialPartitionSizes> 
             "错误: 保密区不能同时指定 MiB 和精确扇区数",
         ));
     }
-    if request.boot_sectors.is_some() && !matches!(request.mode, 0 | 3) {
+    if request.boot_sectors.is_some()
+        && !matches!(
+            mode,
+            OfficialPartitionMode::DefaultThreePartition
+                | OfficialPartitionMode::IntranetExtranetDualPartition
+        )
+    {
         return Err(err(EXIT_TARGET, "错误: 精确启动区扇区数仅用于官方模式0/3"));
     }
     // Unused fields are ignored by the official mode; keep a non-zero sentinel
@@ -375,7 +381,7 @@ fn sizes(request: &NewProvisionRequest) -> EdpCliResult<OfficialPartitionSizes> 
             return Err(err(EXIT_TARGET, "错误: 启动区扇区数必须大于 0"));
         }
         sizes = sizes.with_boot_sectors(boot_sectors);
-    } else if request.mode == 0 && request.boot_mib.is_none() {
+    } else if mode == OfficialPartitionMode::DefaultThreePartition && request.boot_mib.is_none() {
         sizes = sizes.with_boot_sectors(DEFAULT_MODE0_BOOT_SECTORS);
     }
     if let Some(share_sectors) = request.share_sectors {
@@ -441,10 +447,10 @@ pub fn prepare_new_provision(
     let entropy = ProvisionEntropy::new(random_array::<252>()?);
     let current_key = wrap_file_key(request.password.as_bytes(), file_key, FileKeyWrapMode::Sm4);
     let legacy_key = wrap_legacy_lba7_file_key(request.password.as_bytes(), legacy_file_key);
-    let selected_mode = mode(request.mode)?;
+    let selected_mode = official_mode(request.target)?;
     let plan = OfficialProvisionPlan::new(
         selected_mode,
-        sizes(request)?,
+        sizes(request, selected_mode)?,
         compatibility,
         legacy_key,
         current_key,
@@ -701,7 +707,7 @@ pub fn prepare_target_provision(
     } else {
         None
     };
-    let selected_mode = mode(request.mode)?;
+    let selected_mode = official_mode(request.target)?;
     let inherited_pass_info_policy = source
         .as_ref()
         .and_then(|source| source.pass_info_policy)
@@ -861,7 +867,7 @@ pub fn prepare_target_provision(
     }
     let mut plan = OfficialProvisionPlan::new(
         selected_mode,
-        sizes(request)?,
+        sizes(request, selected_mode)?,
         compatibility,
         wrap_legacy_lba7_file_key(request.password.as_bytes(), random_array::<8>()?),
         wrap_file_key(
