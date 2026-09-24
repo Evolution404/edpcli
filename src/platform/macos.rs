@@ -464,6 +464,46 @@ pub(super) fn prepare_write(runner: &dyn CmdRunner, disk: u32) -> io::Result<Wri
         .map(|_| WriteGuard)
 }
 
+#[cfg(feature = "ci-virtual-disk")]
+pub(super) fn ci_prepare_virtual_write(path: &str) -> io::Result<WriteGuard> {
+    let disk = parse_disk_selector(path)
+        .map_err(|message| io::Error::new(io::ErrorKind::InvalidInput, message))?;
+    if path != format!("/dev/rdisk{disk}") {
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            "CI 虚拟磁盘只允许 /dev/rdiskN 整盘 raw 设备",
+        ));
+    }
+
+    let runner = crate::sysinfo::SysRunner;
+    let info = disk_info(&runner, disk).ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            "无法读取 CI 虚拟磁盘 diskutil 身份",
+        )
+    })?;
+    let whole = info
+        .get("WholeDisk")
+        .and_then(|value| value.as_bool())
+        .unwrap_or(false);
+    let virtual_disk = info
+        .get("VirtualOrPhysical")
+        .and_then(|value| value.as_str())
+        == Some("Virtual");
+    let disk_image = info.get("BusProtocol").and_then(|value| value.as_str()) == Some("Disk Image");
+    let internal = info
+        .get("Internal")
+        .and_then(|value| value.as_bool())
+        .unwrap_or(true);
+    if !whole || !virtual_disk || !disk_image || internal {
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            "CI 虚拟磁盘拒绝非 WholeDisk/Virtual/Disk Image 外部目标",
+        ));
+    }
+    prepare_write(&runner, disk)
+}
+
 pub(super) const fn elevation_label() -> &'static str {
     "sudo"
 }
