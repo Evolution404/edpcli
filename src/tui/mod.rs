@@ -40,7 +40,6 @@ pub fn resume_argv(intent: &state::WriteIntent) -> Vec<String> {
         "tui".to_string(),
         RESUME_KIND_FLAG.to_string(),
         match intent.kind {
-            state::WriteKind::Apply => "apply".to_string(),
             state::WriteKind::Restore => "restore".to_string(),
             state::WriteKind::BackupCreate => "backup-create".to_string(),
             state::WriteKind::BackupCreateDeep => "backup-create-deep".to_string(),
@@ -99,7 +98,6 @@ pub fn parse_resume_args(argv: &[String]) -> Result<Option<state::WriteIntent>, 
                 saw_resume = true;
                 let value = take(RESUME_KIND_FLAG)?;
                 kind = Some(match value.as_str() {
-                    "apply" => state::WriteKind::Apply,
                     "restore" => state::WriteKind::Restore,
                     "backup-create" => state::WriteKind::BackupCreate,
                     "backup-create-deep" => state::WriteKind::BackupCreateDeep,
@@ -146,11 +144,7 @@ pub fn parse_resume_args(argv: &[String]) -> Result<Option<state::WriteIntent>, 
     let kind = kind.ok_or_else(|| format!("错误: 缺少 {RESUME_KIND_FLAG}"))?;
     let disk = disk.ok_or_else(|| format!("错误: 缺少 {RESUME_DISK_FLAG}"))?;
     match kind {
-        state::WriteKind::Apply
-        | state::WriteKind::BackupCreate
-        | state::WriteKind::BackupCreateDeep
-            if backup.is_some() =>
-        {
+        state::WriteKind::BackupCreate | state::WriteKind::BackupCreateDeep if backup.is_some() => {
             Err("错误: 非 Restore resume 不允许携带备份路径".into())
         }
         state::WriteKind::Restore if backup.is_none() => {
@@ -301,19 +295,6 @@ fn dispatch_nav_command(
             }
             StateEffect::None
         }
-        NavCommand::BeginApply => {
-            if let Some(row) = state.selected_device() {
-                let disk = row.disk;
-                let identity = state::ExpectedIdentity {
-                    onlyid: row.onlyid.clone(),
-                    device_id: row.device_id.clone(),
-                };
-                state.begin_apply(disk, identity);
-            } else {
-                state.set_notice("Apply 需要先在设备页选定目标 U 盘。");
-            }
-            StateEffect::None
-        }
         NavCommand::BeginRestore => {
             if let (Some(row), Some(backup)) =
                 (state.selected_device(), state.selected_backup_path())
@@ -429,7 +410,6 @@ fn palette_action_to_nav(action: command::PaletteAction) -> NavCommand {
         command::PaletteAction::OfflineConvert => NavCommand::WorkspaceProvision,
         command::PaletteAction::Inspect => NavCommand::OpenInspect,
         command::PaletteAction::AdvancedInspect => NavCommand::OpenAdvancedInspect,
-        command::PaletteAction::Apply => NavCommand::BeginApply,
         command::PaletteAction::Restore => NavCommand::BeginRestore,
         command::PaletteAction::BackupCreate => NavCommand::BeginBackupCreate,
         command::PaletteAction::BackupCreateDeep => NavCommand::BeginBackupCreateDeep,
@@ -452,6 +432,23 @@ fn workspace_switch_command(key: &ct_event::KeyEvent) -> Option<NavCommand> {
         ct_event::KeyCode::BackTab | ct_event::KeyCode::Left => Some(NavCommand::PreviousWorkspace),
         _ => None,
     }
+}
+
+fn handle_provision_form_cursor_key(state: &mut AppState, key: &ct_event::KeyEvent) -> bool {
+    if state.workspace() != state::Workspace::Provision
+        || state.provision().stage != state::ProvisionStage::Form
+        || !state.provision_selected_field_is_editable()
+    {
+        return false;
+    }
+    match key.code {
+        ct_event::KeyCode::Left => state.provision_move_cursor(-1),
+        ct_event::KeyCode::Right => state.provision_move_cursor(1),
+        ct_event::KeyCode::Home => state.provision_cursor_home(),
+        ct_event::KeyCode::End => state.provision_cursor_end(),
+        _ => return false,
+    }
+    true
 }
 
 fn vim_workspace_switch_command(key: &ct_event::KeyEvent) -> Option<NavCommand> {
@@ -482,6 +479,7 @@ fn run_loop(resume: Option<state::WriteIntent>) -> io::Result<LoopExit> {
     let mut last_animation_tick = Instant::now();
     let motion_mode = animation::MotionMode::from_env();
     let mut redraw_requested = true;
+    let mut notice_was_visible = false;
     let mut last_render_at: Option<Instant> = None;
     if let Some(intent) = resume {
         state.begin_write_wizard(intent.kind, intent.disk, intent.backup);
@@ -579,22 +577,6 @@ fn run_loop(resume: Option<state::WriteIntent>) -> io::Result<LoopExit> {
                     state.set_backup_scan_pending(true);
                 }
             }
-            if let Some(result) = updates.apply_preview {
-                state.apply_finish_preview(result);
-            }
-            if let Some((_operation_id, event)) = updates.apply_progress {
-                state.apply_set_progress(event);
-            }
-            if let Some((_operation_id, result)) = updates.apply_write {
-                let success = result.is_ok();
-                state.apply_finish_write(result);
-                if success {
-                    tasks.request_device_scan(backup_dir.clone());
-                    tasks.request_backup_scan(backup_dir.clone());
-                    state.set_device_scan_pending(true);
-                    state.set_backup_scan_pending(true);
-                }
-            }
             if let Some((_operation_id, result)) = updates.provision_backup {
                 let success = result.is_ok();
                 state.provision_finish_backup_save(result);
@@ -639,6 +621,12 @@ fn run_loop(resume: Option<state::WriteIntent>) -> io::Result<LoopExit> {
             }
             if state.take_deferred_exit() == StateEffect::ExitRequested {
                 break;
+            }
+
+            let notice_visible = state.notice().is_some();
+            if notice_visible != notice_was_visible {
+                notice_was_visible = notice_visible;
+                redraw_requested = true;
             }
 
             let now = Instant::now();
@@ -758,116 +746,10 @@ fn run_loop(resume: Option<state::WriteIntent>) -> io::Result<LoopExit> {
                             }
                         }
                     }
-                    if let Some(stage) = state.apply().map(|apply| apply.stage) {
-                        use state::ApplyStage;
-                        match stage {
-                            ApplyStage::Setup => {
-                                match key.code {
-                                    ct_event::KeyCode::Char('f')
-                                        if !key
-                                            .modifiers
-                                            .contains(ct_event::KeyModifiers::CONTROL) =>
-                                    {
-                                        state.apply_toggle_force();
-                                    }
-                                    ct_event::KeyCode::Char(ch)
-                                        if !key
-                                            .modifiers
-                                            .contains(ct_event::KeyModifiers::CONTROL) =>
-                                    {
-                                        state.apply_push_char(ch);
-                                    }
-                                    ct_event::KeyCode::Backspace => state.apply_backspace(),
-                                    ct_event::KeyCode::Enter => {
-                                        let (disk, expected_identity) = {
-                                            let Some(apply) = state.apply() else {
-                                                continue;
-                                            };
-                                            (apply.disk, apply.expected_identity.clone())
-                                        };
-                                        match state.apply_size_value() {
-                                            Ok(size_gb) => {
-                                                state.apply_start_preview();
-                                                if let Err(message) = tasks.request_apply_preview(
-                                                    disk,
-                                                    expected_identity,
-                                                    size_gb,
-                                                    backup_dir.clone(),
-                                                ) {
-                                                    state.apply_finish_preview(Err(
-                                                        message.to_string()
-                                                    ));
-                                                }
-                                            }
-                                            Err(message) => {
-                                                if let Some(apply) = state.apply_mut() {
-                                                    apply.message = Some(message);
-                                                }
-                                            }
-                                        }
-                                    }
-                                    ct_event::KeyCode::Esc => state.close_apply(),
-                                    _ => {}
-                                }
-                                continue;
-                            }
-                            ApplyStage::Previewing => {
-                                if key.code == ct_event::KeyCode::Esc {
-                                    state.set_notice("Apply 只读预览正在后台生成，请等待完成。");
-                                }
-                                continue;
-                            }
-                            ApplyStage::Review => {
-                                match key.code {
-                                    ct_event::KeyCode::Enter => state.apply_begin_confirm(),
-                                    ct_event::KeyCode::Esc => state.apply_back_to_setup(),
-                                    _ => {}
-                                }
-                                continue;
-                            }
-                            ApplyStage::Confirm => {
-                                match key.code {
-                                    ct_event::KeyCode::Char(ch)
-                                        if !key
-                                            .modifiers
-                                            .contains(ct_event::KeyModifiers::CONTROL) =>
-                                    {
-                                        state.apply_push_char(ch);
-                                    }
-                                    ct_event::KeyCode::Backspace => state.apply_backspace(),
-                                    ct_event::KeyCode::Enter => {
-                                        if let Some((disk, identity, size_gb, force)) =
-                                            state.apply_take_for_write()
-                                        {
-                                            if let Err(message) = tasks.request_apply_write(
-                                                disk,
-                                                identity,
-                                                size_gb,
-                                                force,
-                                                backup_dir.clone(),
-                                            ) {
-                                                state.apply_finish_write(Err(message.to_string()));
-                                            }
-                                        }
-                                    }
-                                    ct_event::KeyCode::Esc => state.apply_back_to_review(),
-                                    _ => {}
-                                }
-                                continue;
-                            }
-                            ApplyStage::Running => {}
-                            ApplyStage::Result => {
-                                if matches!(
-                                    key.code,
-                                    ct_event::KeyCode::Enter | ct_event::KeyCode::Esc
-                                ) {
-                                    state.close_apply();
-                                    continue;
-                                }
-                            }
-                        }
-                    }
                     if state.workspace() == state::Workspace::Provision {
+                        if handle_provision_form_cursor_key(&mut state, &key) {
+                            continue;
+                        }
                         if let Some(command) = workspace_switch_command(&key) {
                             let viewport_height =
                                 session.terminal.size()?.height.saturating_sub(9) as usize;
@@ -1484,6 +1366,18 @@ fn run_loop(resume: Option<state::WriteIntent>) -> io::Result<LoopExit> {
                                                     viewport_height,
                                                 );
                                                 state.provision_begin_offline();
+                                            } else if action == command::PaletteAction::Provision {
+                                                if state.workspace() != state::Workspace::Devices {
+                                                    let _ = state.navigate(
+                                                        NavCommand::WorkspaceDevices,
+                                                        viewport_height,
+                                                    );
+                                                    state.set_notice("请在设备页选定 USB 盘后按 Enter 进入制盘。");
+                                                } else if let Err(message) =
+                                                    state.begin_provision_for_selected_device()
+                                                {
+                                                    state.set_notice(message);
+                                                }
                                             } else {
                                                 let effect = dispatch_nav_command(
                                                     &mut state,
@@ -1504,6 +1398,15 @@ fn run_loop(resume: Option<state::WriteIntent>) -> io::Result<LoopExit> {
                             }
                             _ => {}
                         }
+                    }
+
+                    if state.workspace() == state::Workspace::Devices
+                        && key.code == ct_event::KeyCode::Enter
+                    {
+                        if let Err(message) = state.begin_provision_for_selected_device() {
+                            state.set_notice(message);
+                        }
+                        continue;
                     }
 
                     if let Some(command) = keys.map(key) {
@@ -1622,6 +1525,42 @@ mod tests {
         assert_eq!(row_navigation_command(&j), Some(NavCommand::Down));
         assert_eq!(row_navigation_command(&up), Some(NavCommand::Up));
         assert_eq!(row_navigation_command(&k), Some(NavCommand::Up));
+    }
+
+    #[test]
+    fn editable_provision_form_arrows_move_cursor_before_workspace_navigation() {
+        let mut state = AppState::new();
+        state.navigate(NavCommand::WorkspaceProvision, 20);
+        state.provision_mut().stage = state::ProvisionStage::Form;
+        state.provision_mut().field_selected = 0;
+        state.provision_mut().form.label_id = "12345".into();
+        state.provision_cursor_end();
+        let key = |code| ct_event::KeyEvent::new(code, ct_event::KeyModifiers::NONE);
+        assert!(handle_provision_form_cursor_key(
+            &mut state,
+            &key(ct_event::KeyCode::Left)
+        ));
+        assert_eq!(state.provision_field_cursor(), 4);
+        assert_eq!(state.workspace(), state::Workspace::Provision);
+        assert!(handle_provision_form_cursor_key(
+            &mut state,
+            &key(ct_event::KeyCode::Right)
+        ));
+        assert_eq!(state.provision_field_cursor(), 5);
+        assert!(handle_provision_form_cursor_key(
+            &mut state,
+            &key(ct_event::KeyCode::Home)
+        ));
+        assert_eq!(state.provision_field_cursor(), 0);
+        assert!(handle_provision_form_cursor_key(
+            &mut state,
+            &key(ct_event::KeyCode::End)
+        ));
+        assert_eq!(state.provision_field_cursor(), 5);
+        assert!(!handle_provision_form_cursor_key(
+            &mut state,
+            &key(ct_event::KeyCode::Tab)
+        ));
     }
 
     #[test]

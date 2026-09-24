@@ -66,7 +66,7 @@ pub trait SectorDev {
 ///
 /// `info` / `inspect` 可能先读取身份扇区，再由摘要/渲染阶段请求同一 LBA。
 /// 这些路径不承担写入前后的新鲜度校验，因此可以在一次命令会话内复用已读数据，
-/// 避免重复访问同一裸盘扇区。apply/restore 的安全复核不得使用该缓存。
+/// 避免重复访问同一裸盘扇区。restore/provision 的安全复核不得使用该缓存。
 pub struct SectorReadCache<'a> {
     dev: &'a mut dyn SectorDev,
     cache: BTreeMap<u32, Vec<u8>>,

@@ -56,11 +56,11 @@ mod tests {
 
     #[test]
     fn elevated_argv_appends_sentinel_once() {
-        let argv: Vec<String> = vec!["apply".into(), "--disk".into(), "6".into()];
+        let argv: Vec<String> = vec!["provision".into(), "--disk".into(), "6".into()];
         let v = elevated_argv(&argv);
-        assert_eq!(v, vec!["apply", "--disk", "6", ELEVATED_FLAG]);
+        assert_eq!(v, vec!["provision", "--disk", "6", ELEVATED_FLAG]);
         // 幂等: 已带哨兵不重复
-        let argv2: Vec<String> = vec!["apply".into(), ELEVATED_FLAG.into()];
-        assert_eq!(elevated_argv(&argv2), vec!["apply", ELEVATED_FLAG]);
+        let argv2: Vec<String> = vec!["provision".into(), ELEVATED_FLAG.into()];
+        assert_eq!(elevated_argv(&argv2), vec!["provision", ELEVATED_FLAG]);
     }
 }

@@ -26,17 +26,6 @@ fn info_replaces_meta_and_accepts_disk_or_backup_file() {
 }
 
 #[test]
-fn apply_owns_dry_run_instead_of_run_command() {
-    match parse_args(&args(&["apply", "--dry-run", "--disk", "4"])).expect("dry-run") {
-        Parsed::Apply { opts, dry_run, .. } => {
-            assert!(dry_run);
-            assert_eq!(opts.disk, Some(4));
-        }
-        _ => panic!("expected apply"),
-    }
-}
-
-#[test]
 fn provision_parses_all_four_product_actions_and_rejects_ambiguous_flags() {
     let common = [
         "--disk",
@@ -602,7 +591,7 @@ fn inspect_backup_dir_alone_never_selects_a_backup_source() {
 #[test]
 fn removed_v1_grammar_returns_migration_errors_not_compatibility_paths() {
     for (argv, replacement) in [
-        (&["run"][..], "apply --dry-run"),
+        (&["run"][..], "provision plan"),
         (&["meta"][..], "info"),
         (&["metainfo"][..], "info"),
         (&["restore"][..], "backup restore"),
@@ -621,7 +610,6 @@ fn v2_help_names_only_the_new_top_level_commands() {
     for command in [
         "list",
         "info",
-        "apply",
         "backup",
         "inspect",
         "convert",

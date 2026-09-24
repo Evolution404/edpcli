@@ -144,7 +144,6 @@ fn focused_help_works_inside_subcommands() {
         ["backup", "--help"].as_slice(),
         ["completion", "--help"].as_slice(),
         ["info", "--help"].as_slice(),
-        ["apply", "--help"].as_slice(),
     ] {
         let out = Command::new(env!("CARGO_BIN_EXE_edpcli"))
             .env("NO_COLOR", "1")

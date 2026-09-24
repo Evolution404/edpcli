@@ -76,7 +76,6 @@ pub struct AdvancedInspectState {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WriteKind {
-    Apply,
     Restore,
     BackupCreate,
     BackupCreateDeep,
@@ -114,28 +113,6 @@ pub struct WizardState {
     pub message: Option<String>,
     /// Running 阶段最新收到的类型化进度事件；渲染层映射为单行显示。
     pub progress: Option<crate::application::WriteEvent>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ApplyStage {
-    Setup,
-    Previewing,
-    Review,
-    Confirm,
-    Running,
-    Result,
-}
-
-#[derive(Debug, Clone)]
-pub struct ApplyState {
-    pub stage: ApplyStage,
-    pub disk: u32,
-    pub expected_identity: ExpectedIdentity,
-    pub size_gb: String,
-    pub force: bool,
-    pub events: Vec<crate::application::WriteEvent>,
-    pub confirmation: String,
-    pub message: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -202,6 +179,15 @@ pub enum ProvisionKind {
     Mode2,
     Mode3,
     Offline,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProvisionBarKind {
+    Free,
+    Boot,
+    Share,
+    Encrypt,
+    Compatibility,
 }
 
 impl ProvisionKind {
@@ -276,6 +262,9 @@ pub struct ProvisionForm {
     pub boot_quick_unit: crate::provision::QuickCapacityUnit,
     pub share_quick_unit: crate::provision::QuickCapacityUnit,
     pub encrypt_quick_unit: crate::provision::QuickCapacityUnit,
+    boot_capacity_edited: bool,
+    share_capacity_edited: bool,
+    encrypt_capacity_edited: bool,
     pub boot_capacity_source: crate::provision::CapacitySource,
     pub share_capacity_source: crate::provision::CapacitySource,
     pub encrypt_capacity_source: crate::provision::CapacitySource,
@@ -347,6 +336,9 @@ impl Default for ProvisionForm {
             boot_quick_unit: crate::provision::QuickCapacityUnit::MiB,
             share_quick_unit: crate::provision::QuickCapacityUnit::MiB,
             encrypt_quick_unit: crate::provision::QuickCapacityUnit::MiB,
+            boot_capacity_edited: false,
+            share_capacity_edited: false,
+            encrypt_capacity_edited: false,
             boot_capacity_source: crate::provision::CapacitySource::SystemDefault,
             share_capacity_source: crate::provision::CapacitySource::SystemDefault,
             encrypt_capacity_source: crate::provision::CapacitySource::SystemDefault,
@@ -384,22 +376,13 @@ impl Default for ProvisionForm {
 }
 
 impl ProvisionForm {
-    fn format_ratio_decimal(numerator: u64, denominator: u64) -> String {
-        let whole = numerator / denominator;
-        let mut remainder = numerator % denominator;
-        if remainder == 0 {
-            return whole.to_string();
-        }
-        let mut fraction = String::new();
-        while remainder != 0 {
-            remainder *= 10;
-            fraction.push(char::from(b'0' + (remainder / denominator) as u8));
-            remainder %= denominator;
-        }
-        format!("{whole}.{fraction}")
+    fn format_sector_unit_3(sectors: u64, sectors_per_unit: u64) -> String {
+        let scaled =
+            ((sectors as u128) * 1_000 + (sectors_per_unit as u128 / 2)) / sectors_per_unit as u128;
+        format!("{}.{:03}", scaled / 1_000, scaled % 1_000)
     }
 
-    fn parse_decimal_unit_to_sectors(
+    fn parse_decimal_unit_to_sectors_rounded(
         value: &str,
         sectors_per_unit: u64,
         unit_name: &str,
@@ -440,24 +423,51 @@ impl ProvisionForm {
         let scaled = numerator
             .checked_mul(sectors_per_unit as u128)
             .ok_or_else(|| format!("{label} {unit_name} 容量溢出"))?;
-        if scaled % denominator != 0 {
-            return Err(format!(
-                "{label} {unit_name} 不能精确对应完整 sector，请增加小数精度"
-            ));
-        }
-        u64::try_from(scaled / denominator).map_err(|_| format!("{label} {unit_name} 容量溢出"))
+        let quotient = scaled / denominator;
+        let remainder = scaled % denominator;
+        let rounded = quotient + u128::from(remainder.saturating_mul(2) >= denominator);
+        u64::try_from(rounded).map_err(|_| format!("{label} {unit_name} 容量溢出"))
     }
 
     fn parse_mib_to_sectors(value: &str, label: &str) -> Result<u64, String> {
-        Self::parse_decimal_unit_to_sectors(value, 2_048, "MiB", label)
+        Self::parse_decimal_unit_to_sectors_rounded(value, 2_048, "MiB", label)
     }
 
     fn parse_gib_to_sectors(value: &str, label: &str) -> Result<u64, String> {
-        Self::parse_decimal_unit_to_sectors(value, 2_097_152, "GiB", label)
+        Self::parse_decimal_unit_to_sectors_rounded(value, 2_097_152, "GiB", label)
+    }
+
+    fn resolve_quick_sectors(
+        quick: &str,
+        exact: &str,
+        unit: crate::provision::QuickCapacityUnit,
+        edited: bool,
+        label: &str,
+    ) -> Result<u64, String> {
+        if let Some(sectors) = exact.parse::<u64>().ok().filter(|_| !edited) {
+            let generated = match unit {
+                crate::provision::QuickCapacityUnit::MiB => {
+                    Self::format_sector_unit_3(sectors, 2_048)
+                }
+                crate::provision::QuickCapacityUnit::GiB => {
+                    Self::format_sector_unit_3(sectors, 2_097_152)
+                }
+            };
+            if quick == generated {
+                return Ok(sectors);
+            }
+        }
+        match unit {
+            crate::provision::QuickCapacityUnit::MiB => Self::parse_mib_to_sectors(quick, label),
+            crate::provision::QuickCapacityUnit::GiB => Self::parse_gib_to_sectors(quick, label),
+        }
     }
 
     fn apply_prefill(&mut self, prefill: &crate::provision::ProvisionPrefill) {
         use crate::provision::CapacityInputMode;
+        self.boot_capacity_edited = false;
+        self.share_capacity_edited = false;
+        self.encrypt_capacity_edited = false;
         let set = |input: Option<crate::provision::CapacityInput>,
                    mode: &mut CapacityInputMode,
                    mib: &mut String,
@@ -467,9 +477,7 @@ impl ProvisionForm {
                 *mode = input.mode();
                 *sectors = input.sectors().to_string();
                 *source = input.source();
-                if let Some(value) = input.whole_mib() {
-                    *mib = value.to_string();
-                }
+                *mib = Self::format_sector_unit_3(input.sectors(), 2_048);
             }
         };
         set(
@@ -506,24 +514,27 @@ impl ProvisionForm {
 
     fn toggle_capacity_input(&mut self, slot: usize) -> Result<(), String> {
         use crate::provision::{CapacityInputMode, QuickCapacityUnit};
-        let (mode, unit, quick, exact) = match slot {
+        let (mode, unit, quick, exact, edited) = match slot {
             0 | 21 => (
                 &mut self.boot_input_mode,
                 &mut self.boot_quick_unit,
                 &mut self.boot_mib,
                 &mut self.boot_sectors,
+                &mut self.boot_capacity_edited,
             ),
             1 | 22 => (
                 &mut self.share_input_mode,
                 &mut self.share_quick_unit,
                 &mut self.share_mib,
                 &mut self.share_sectors,
+                &mut self.share_capacity_edited,
             ),
             2 | 23 => (
                 &mut self.encrypt_input_mode,
                 &mut self.encrypt_quick_unit,
                 &mut self.encrypt_mib,
                 &mut self.encrypt_sectors,
+                &mut self.encrypt_capacity_edited,
             ),
             _ => return Err("不是容量输入方式字段".into()),
         };
@@ -532,21 +543,42 @@ impl ProvisionForm {
                 let sectors = exact
                     .parse::<u64>()
                     .map_err(|_| "请先输入有效的 sector 数".to_string())?;
-                *quick = Self::format_ratio_decimal(sectors, 2_048);
+                *quick = Self::format_sector_unit_3(sectors, 2_048);
                 *mode = CapacityInputMode::Quick;
                 *unit = QuickCapacityUnit::MiB;
             }
             (CapacityInputMode::Quick, QuickCapacityUnit::MiB) => {
-                let sectors = Self::parse_mib_to_sectors(quick, "当前容量")?;
-                *quick = Self::format_ratio_decimal(sectors, 2_097_152);
+                let sectors =
+                    Self::resolve_quick_sectors(quick, exact, *unit, *edited, "当前容量")?;
+                *exact = sectors.to_string();
+                *quick = Self::format_sector_unit_3(sectors, 2_097_152);
                 *unit = QuickCapacityUnit::GiB;
             }
             (CapacityInputMode::Quick, QuickCapacityUnit::GiB) => {
-                *exact = Self::parse_gib_to_sectors(quick, "当前容量")?.to_string();
+                let sectors =
+                    Self::resolve_quick_sectors(quick, exact, *unit, *edited, "当前容量")?;
+                *exact = sectors.to_string();
                 *mode = CapacityInputMode::Exact;
             }
         }
+        *edited = false;
         Ok(())
+    }
+
+    fn mark_quick_capacity_edit(&mut self, slot: Option<usize>) {
+        use crate::provision::CapacityInputMode;
+        match slot {
+            Some(0) if self.boot_input_mode == CapacityInputMode::Quick => {
+                self.boot_capacity_edited = true;
+            }
+            Some(1) if self.share_input_mode == CapacityInputMode::Quick => {
+                self.share_capacity_edited = true;
+            }
+            Some(2) if self.encrypt_input_mode == CapacityInputMode::Quick => {
+                self.encrypt_capacity_edited = true;
+            }
+            _ => {}
+        }
     }
 }
 
@@ -556,6 +588,7 @@ pub struct ProvisionState {
     pub kind: ProvisionKind,
     pub menu_selected: usize,
     pub field_selected: usize,
+    pub field_cursor: usize,
     pub form: ProvisionForm,
     pub prepared: Option<ProvisionPrepared>,
     pub confirmation: String,
@@ -575,6 +608,7 @@ impl Default for ProvisionState {
             kind: ProvisionKind::Mode0,
             menu_selected: 0,
             field_selected: 0,
+            field_cursor: 0,
             form: ProvisionForm::default(),
             prepared: None,
             confirmation: String::new(),
@@ -615,7 +649,6 @@ pub enum NavCommand {
     Quit,
     Help,
     Refresh,
-    BeginApply,
     BeginRestore,
     BeginBackupCreate,
     BeginBackupCreateDeep,
@@ -652,7 +685,6 @@ pub struct AppState {
     critical_operation: bool,
     exit_pending: bool,
     wizard: Option<WizardState>,
-    apply: Option<ApplyState>,
     backup_delete: Option<BackupDeleteState>,
     backup_batch_delete: Option<BackupBatchDeleteState>,
     backup_selection: std::collections::BTreeSet<std::path::PathBuf>,
@@ -664,6 +696,7 @@ pub struct AppState {
     advanced_inspect: Option<AdvancedInspectState>,
     inspect_pending: bool,
     notice: Option<String>,
+    notice_at: Option<std::time::Instant>,
     input_buffer: String,
     search_query: String,
     search_matches: Vec<usize>,
@@ -691,7 +724,6 @@ impl AppState {
             critical_operation: false,
             exit_pending: false,
             wizard: None,
-            apply: None,
             backup_delete: None,
             backup_batch_delete: None,
             backup_selection: std::collections::BTreeSet::new(),
@@ -703,6 +735,7 @@ impl AppState {
             advanced_inspect: None,
             inspect_pending: false,
             notice: None,
+            notice_at: None,
             input_buffer: String::new(),
             search_query: String::new(),
             search_matches: Vec::new(),
@@ -976,7 +1009,7 @@ impl AppState {
 
     pub fn begin_advanced_inspect(&mut self, source: AdvancedInspectSource) -> bool {
         if self.critical_operation {
-            self.notice = Some("关键操作仍在执行，完成前不能启动高级检查。".into());
+            self.set_notice("关键操作仍在执行，完成前不能启动高级检查。");
             return false;
         }
         let mut form = AdvancedInspectForm::default();
@@ -1193,21 +1226,25 @@ impl AppState {
     }
 
     pub fn notice(&self) -> Option<&str> {
-        self.notice.as_deref()
+        self.notice_at
+            .filter(|at| at.elapsed() < std::time::Duration::from_secs(4))
+            .and(self.notice.as_deref())
     }
 
     pub fn set_notice(&mut self, message: impl Into<String>) {
         self.notice = Some(message.into());
+        self.notice_at = Some(std::time::Instant::now());
     }
 
     pub fn clear_notice(&mut self) {
         self.notice = None;
+        self.notice_at = None;
     }
 
     pub fn set_inspect_pending(&mut self, pending: bool) {
         self.inspect_pending = pending;
         if pending {
-            self.notice = Some("正在后台读取 LBA0-12…".into());
+            self.set_notice("正在后台读取 LBA0-12…");
         }
     }
 
@@ -1226,7 +1263,7 @@ impl AppState {
         let count = workspace.views.len();
         self.inspect_data = Some(workspace);
         self.inspect_pending = false;
-        self.notice = None;
+        self.clear_notice();
         self.open_inspect(count);
     }
 
@@ -1262,212 +1299,6 @@ impl AppState {
         self.set_item_count(count);
     }
 
-    pub fn apply(&self) -> Option<&ApplyState> {
-        self.apply.as_ref()
-    }
-
-    pub fn apply_mut(&mut self) -> Option<&mut ApplyState> {
-        self.apply.as_mut()
-    }
-
-    pub fn begin_apply(&mut self, disk: u32, expected_identity: ExpectedIdentity) -> bool {
-        if self.critical_operation {
-            self.notice = Some("关键操作仍在执行，完成前不能启动 Apply。".into());
-            return false;
-        }
-        self.apply = Some(ApplyState {
-            stage: ApplyStage::Setup,
-            disk,
-            expected_identity,
-            size_gb: String::new(),
-            force: false,
-            events: Vec::new(),
-            confirmation: String::new(),
-            message: None,
-        });
-        self.input_mode = InputMode::Normal;
-        true
-    }
-
-    pub fn apply_push_char(&mut self, ch: char) {
-        if let Some(apply) = self.apply.as_mut() {
-            if apply.stage == ApplyStage::Setup
-                && (ch.is_ascii_digit() || ch == '.')
-                && apply.size_gb.len() < 16
-            {
-                apply.size_gb.push(ch);
-                apply.message = None;
-            } else if apply.stage == ApplyStage::Confirm && apply.confirmation.len() < 16 {
-                apply.confirmation.push(ch);
-                apply.message = None;
-            }
-        }
-    }
-
-    pub fn apply_backspace(&mut self) {
-        if let Some(apply) = self.apply.as_mut() {
-            match apply.stage {
-                ApplyStage::Setup => {
-                    apply.size_gb.pop();
-                    apply.message = None;
-                }
-                ApplyStage::Confirm => {
-                    apply.confirmation.pop();
-                    apply.message = None;
-                }
-                _ => {}
-            }
-        }
-    }
-
-    pub fn apply_toggle_force(&mut self) {
-        if let Some(apply) = self.apply.as_mut() {
-            if apply.stage == ApplyStage::Setup {
-                apply.force = !apply.force;
-                apply.message = None;
-            }
-        }
-    }
-
-    pub fn apply_size_value(&mut self) -> Result<Option<f64>, String> {
-        let apply = self
-            .apply
-            .as_mut()
-            .ok_or_else(|| "Apply 向导未打开".to_string())?;
-        let trimmed = apply.size_gb.trim();
-        if trimmed.is_empty() {
-            return Ok(None);
-        }
-        let value = trimmed
-            .parse::<f64>()
-            .ok()
-            .filter(|value| value.is_finite() && *value > 0.0)
-            .ok_or_else(|| "目标大小必须是大于 0 的 GiB 数值；留空表示自动布局".to_string())?;
-        Ok(Some(value))
-    }
-
-    pub fn apply_start_preview(&mut self) {
-        if let Some(apply) = self.apply.as_mut() {
-            apply.stage = ApplyStage::Previewing;
-            apply.events.clear();
-            apply.message = Some("正在只读识别目标、计算布局并检查既有备份…".into());
-        }
-    }
-
-    pub fn apply_finish_preview(
-        &mut self,
-        result: Result<Vec<crate::application::WriteEvent>, String>,
-    ) {
-        let Some(apply) = self.apply.as_mut() else {
-            return;
-        };
-        match result {
-            Ok(events) => {
-                apply.events = events;
-                apply.stage = ApplyStage::Review;
-                apply.message = None;
-            }
-            Err(message) => {
-                apply.stage = ApplyStage::Setup;
-                apply.message = Some(message);
-            }
-        }
-    }
-
-    pub fn apply_begin_confirm(&mut self) {
-        if let Some(apply) = self.apply.as_mut() {
-            if apply.stage != ApplyStage::Review {
-                return;
-            }
-            let needs_force = apply.events.iter().any(|event| {
-                matches!(
-                    event,
-                    crate::application::WriteEvent::DryRunPreview {
-                        needs_force: true,
-                        ..
-                    }
-                )
-            });
-            if needs_force && !apply.force {
-                apply.message = Some(
-                    "dry-run 判定该盘已是免密状态；请按 Esc 返回参数页，按 f 开启 force 后重新预览。"
-                        .into(),
-                );
-                return;
-            }
-            apply.stage = ApplyStage::Confirm;
-            apply.confirmation.clear();
-            apply.message = None;
-        }
-    }
-
-    pub fn apply_back_to_setup(&mut self) {
-        if let Some(apply) = self.apply.as_mut() {
-            if apply.stage == ApplyStage::Review {
-                apply.stage = ApplyStage::Setup;
-                apply.events.clear();
-                apply.message = None;
-            }
-        }
-    }
-
-    pub fn apply_back_to_review(&mut self) {
-        if let Some(apply) = self.apply.as_mut() {
-            if apply.stage == ApplyStage::Confirm {
-                apply.stage = ApplyStage::Review;
-                apply.confirmation.clear();
-                apply.message = None;
-            }
-        }
-    }
-
-    pub fn apply_take_for_write(&mut self) -> Option<(u32, ExpectedIdentity, Option<f64>, bool)> {
-        let size = self.apply_size_value().ok()?;
-        let apply = self.apply.as_mut()?;
-        if apply.stage != ApplyStage::Confirm {
-            return None;
-        }
-        if apply.confirmation != "YES" {
-            apply.message = Some("必须精确输入 YES 才会进入写盘阶段".into());
-            return None;
-        }
-        let result = (
-            apply.disk,
-            apply.expected_identity.clone(),
-            size,
-            apply.force,
-        );
-        apply.stage = ApplyStage::Running;
-        apply.message = Some("Apply 安全事务执行中；退出请求会延迟到安全检查点".into());
-        self.critical_operation = true;
-        Some(result)
-    }
-
-    pub fn apply_set_progress(&mut self, event: crate::application::WriteEvent) {
-        if let Some(apply) = self.apply.as_mut() {
-            if apply.stage == ApplyStage::Running {
-                apply.events.push(event);
-            }
-        }
-    }
-
-    pub fn apply_finish_write(&mut self, result: Result<(), String>) {
-        self.critical_operation = false;
-        if let Some(apply) = self.apply.as_mut() {
-            apply.stage = ApplyStage::Result;
-            apply.message = Some(match result {
-                Ok(()) => "Apply 完成，写入/同步/读回安全链全部通过。请拔出重插。".into(),
-                Err(message) => message,
-            });
-        }
-    }
-
-    pub fn close_apply(&mut self) {
-        if !self.critical_operation {
-            self.apply = None;
-        }
-    }
-
     pub fn wizard(&self) -> Option<&WizardState> {
         self.wizard.as_ref()
     }
@@ -1489,7 +1320,7 @@ impl AppState {
         expected_identity: Option<ExpectedIdentity>,
     ) -> bool {
         if self.critical_operation {
-            self.notice = Some("关键操作仍在执行，完成前不能启动其他任务。".to_string());
+            self.set_notice("关键操作仍在执行，完成前不能启动其他任务。".to_string());
             return false;
         }
         self.input_mode = InputMode::Normal;
@@ -1598,14 +1429,14 @@ impl AppState {
 
     pub fn toggle_selected_backup(&mut self) {
         let Some((path, expected_sha256)) = self.selected_backup_delete_target() else {
-            self.notice = Some("当前备份缺少固定 SHA-256，不能加入批量删除选择。".into());
+            self.set_notice("当前备份缺少固定 SHA-256，不能加入批量删除选择。");
             return;
         };
         debug_assert!(!expected_sha256.is_empty());
         if !self.backup_selection.remove(&path) {
             self.backup_selection.insert(path);
         }
-        self.notice = Some(format!(
+        self.set_notice(format!(
             "批量删除已勾选 {} 份备份；空格继续选择，X 生成删除计划。",
             self.backup_selection.len()
         ));
@@ -1625,12 +1456,12 @@ impl AppState {
 
     pub fn begin_backup_batch_delete(&mut self) -> Option<Vec<(std::path::PathBuf, String)>> {
         if self.critical_operation || self.backup_batch_delete.is_some() {
-            self.notice = Some("已有关键操作或批量删除向导正在执行。".into());
+            self.set_notice("已有关键操作或批量删除向导正在执行。");
             return None;
         }
         let targets = self.selected_backup_batch_targets();
         if targets.is_empty() {
-            self.notice = Some("先在备份页按空格勾选至少一份备份。".into());
+            self.set_notice("先在备份页按空格勾选至少一份备份。");
             return None;
         }
         self.backup_batch_delete = Some(BackupBatchDeleteState {
@@ -1879,7 +1710,7 @@ impl AppState {
         expected_sha256: String,
     ) -> bool {
         if self.critical_operation {
-            self.notice = Some("关键操作仍在执行，完成前不能启动其他任务。".to_string());
+            self.set_notice("关键操作仍在执行，完成前不能启动其他任务。".to_string());
             return false;
         }
         self.input_mode = InputMode::Normal;
@@ -2053,6 +1884,7 @@ impl AppState {
         self.provision.menu_selected = index;
         self.provision.kind = kind;
         self.provision.field_selected = 0;
+        self.provision.field_cursor = 0;
         self.provision.confirmation.clear();
         self.provision.message = None;
         self.provision.prepared = None;
@@ -2065,6 +1897,7 @@ impl AppState {
                 .map(|row| (row.disk, row.size, row.device_id.clone(), kind));
             if self.provision.form_initialized_for == current_target {
                 self.provision.stage = ProvisionStage::Form;
+                self.provision_sync_cursor_to_end();
                 return kind;
             }
             self.provision.form = ProvisionForm::default();
@@ -2140,6 +1973,7 @@ impl AppState {
             }
             self.provision.form_initialized_for = current_target;
             self.provision.stage = ProvisionStage::Form;
+            self.provision_sync_cursor_to_end();
         }
         kind
     }
@@ -2262,6 +2096,7 @@ impl AppState {
         } else {
             (self.provision.field_selected + delta as usize).min(count - 1)
         };
+        self.provision_sync_cursor_to_end();
     }
 
     fn provision_field_slot(&self, display_index: usize) -> Option<usize> {
@@ -2533,6 +2368,94 @@ impl AppState {
         }
     }
 
+    fn provision_selected_field(&self) -> Option<&str> {
+        match self.provision_field_slot(self.provision.field_selected)? {
+            0 => Some(
+                if self.provision.form.boot_input_mode == crate::provision::CapacityInputMode::Exact
+                {
+                    self.provision.form.boot_sectors.as_str()
+                } else {
+                    self.provision.form.boot_mib.as_str()
+                },
+            ),
+            1 => Some(
+                if self.provision.form.share_input_mode
+                    == crate::provision::CapacityInputMode::Exact
+                {
+                    self.provision.form.share_sectors.as_str()
+                } else {
+                    self.provision.form.share_mib.as_str()
+                },
+            ),
+            2 => Some(
+                if self.provision.form.encrypt_input_mode
+                    == crate::provision::CapacityInputMode::Exact
+                {
+                    self.provision.form.encrypt_sectors.as_str()
+                } else {
+                    self.provision.form.encrypt_mib.as_str()
+                },
+            ),
+            3 => Some(self.provision.form.label_id.as_str()),
+            4 => Some(self.provision.form.user.as_str()),
+            5 => Some(self.provision.form.dept.as_str()),
+            6 => Some(self.provision.form.label.as_str()),
+            7 => Some(self.provision.form.password.as_str()),
+            14 => Some(self.provision.form.volume_label.as_str()),
+            15 => Some(self.provision.form.share_label.as_str()),
+            16 => Some(self.provision.form.encrypt_label.as_str()),
+            24 => Some(self.provision.form.boot_start_lba.as_str()),
+            25 => Some(self.provision.form.share_start_lba.as_str()),
+            26 => Some(self.provision.form.encrypt_start_lba.as_str()),
+            28 => Some(self.provision.form.max_share_password_errors.as_str()),
+            29 => Some(self.provision.form.max_encrypt_password_errors.as_str()),
+            _ => None,
+        }
+    }
+
+    fn provision_sync_cursor_to_end(&mut self) {
+        self.provision.field_cursor = self
+            .provision_selected_field()
+            .map(|value| value.chars().count())
+            .unwrap_or(0);
+    }
+
+    pub fn provision_selected_field_is_editable(&self) -> bool {
+        self.provision_selected_field().is_some()
+    }
+
+    pub fn provision_field_cursor(&self) -> usize {
+        let len = self
+            .provision_selected_field()
+            .map(|value| value.chars().count())
+            .unwrap_or(0);
+        self.provision.field_cursor.min(len)
+    }
+
+    pub fn provision_move_cursor(&mut self, delta: isize) {
+        let Some(value) = self.provision_selected_field() else {
+            return;
+        };
+        let len = value.chars().count();
+        self.provision.field_cursor = if delta < 0 {
+            self.provision
+                .field_cursor
+                .saturating_sub(delta.unsigned_abs())
+        } else {
+            (self.provision.field_cursor + delta as usize).min(len)
+        };
+    }
+
+    pub fn provision_cursor_home(&mut self) {
+        if self.provision_selected_field().is_some() {
+            self.provision.field_cursor = 0;
+        }
+    }
+
+    pub fn provision_cursor_end(&mut self) {
+        self.provision_sync_cursor_to_end();
+    }
+
     fn provision_target_mode(&self) -> Option<crate::provision::OfficialPartitionMode> {
         match self.provision.kind {
             ProvisionKind::Mode0 => {
@@ -2589,6 +2512,7 @@ impl AppState {
                         unit: QuickCapacityUnit,
                         quick: &str,
                         exact: &str,
+                        edited: bool,
                         original: Option<CapacityInput>,
                         label: &str|
          -> Result<CapacityInput, String> {
@@ -2601,16 +2525,10 @@ impl AppState {
                         .ok_or_else(|| format!("{label}必须为正整数 sector"))?,
                     CapacitySource::UserEdited,
                 )?,
-                CapacityInputMode::Quick => match unit {
-                    QuickCapacityUnit::MiB => CapacityInput::from_quick_sectors(
-                        ProvisionForm::parse_mib_to_sectors(quick, label)?,
-                        CapacitySource::UserEdited,
-                    )?,
-                    QuickCapacityUnit::GiB => CapacityInput::from_quick_sectors(
-                        ProvisionForm::parse_gib_to_sectors(quick, label)?,
-                        CapacitySource::UserEdited,
-                    )?,
-                },
+                CapacityInputMode::Quick => CapacityInput::from_quick_sectors(
+                    ProvisionForm::resolve_quick_sectors(quick, exact, unit, edited, label)?,
+                    CapacitySource::UserEdited,
+                )?,
             };
             let source = original
                 .filter(|value| value.sectors() == provisional.sectors())
@@ -2653,6 +2571,7 @@ impl AppState {
                         form.boot_quick_unit,
                         &form.boot_mib,
                         &form.boot_sectors,
+                        form.boot_capacity_edited,
                         base.boot,
                         "启动区",
                     )
@@ -2665,6 +2584,7 @@ impl AppState {
                         form.share_quick_unit,
                         &form.share_mib,
                         &form.share_sectors,
+                        form.share_capacity_edited,
                         base.share,
                         "交换区",
                     )
@@ -2677,6 +2597,7 @@ impl AppState {
                         form.encrypt_quick_unit,
                         &form.encrypt_mib,
                         &form.encrypt_sectors,
+                        form.encrypt_capacity_edited,
                         base.encrypt,
                         "保密区",
                     )
@@ -2755,32 +2676,6 @@ impl AppState {
         lines
     }
 
-    fn provision_partition_hint(&self, slot: usize) -> Option<String> {
-        use crate::provision::PartitionRole;
-        let (resolved, _) = self.provision_resolved_prefill().ok()?;
-        let parts = resolved
-            .target_partitions(crate::common::SECTOR as u64)
-            .ok()?;
-        let part = parts.iter().find(|part| match slot {
-            0 => part.role == PartitionRole::Boot,
-            1 => matches!(
-                part.role,
-                PartitionRole::Share | PartitionRole::BootShareCombined
-            ),
-            2 => part.role == PartitionRole::Encrypt,
-            _ => false,
-        })?;
-        let end = part.start_lba + part.sector_count - 1;
-        Some(format!(
-            "{} · {} sector (~{} MiB) · LBA {}–{}",
-            part.role.label(),
-            part.sector_count,
-            part.sector_count / 2048,
-            part.start_lba,
-            end
-        ))
-    }
-
     pub fn provision_field_section(&self, display_index: usize) -> Option<&'static str> {
         let slot = self.provision_field_slot(display_index)?;
         match slot {
@@ -2850,7 +2745,7 @@ impl AppState {
         }
     }
 
-    pub fn provision_layout_editor_lines(&self, bar_width: usize) -> Vec<String> {
+    pub fn provision_layout_editor_lines(&self) -> Vec<String> {
         use crate::provision::PartitionRole;
 
         let Some(row) = self.selected_device() else {
@@ -2896,30 +2791,6 @@ impl AppState {
             Self::format_sector_size(unallocated)
         ));
 
-        let width = bar_width.clamp(24, 64);
-        let mut bar = vec!['·'; width];
-        if usable_sectors > 0 {
-            for part in &parts {
-                let start = part.start_lba.saturating_sub(usable_start);
-                let end = start.saturating_add(part.sector_count);
-                let mut left = ((start as u128 * width as u128) / usable_sectors as u128) as usize;
-                let mut right = ((end as u128 * width as u128 + usable_sectors as u128 - 1)
-                    / usable_sectors as u128) as usize;
-                left = left.min(width.saturating_sub(1));
-                right = right.clamp(left + 1, width);
-                let mark = match part.role {
-                    PartitionRole::Boot => 'B',
-                    PartitionRole::Share | PartitionRole::BootShareCombined => 'S',
-                    PartitionRole::Encrypt => 'E',
-                    PartitionRole::CompatibilityReserve => 'C',
-                };
-                for cell in &mut bar[left..right] {
-                    *cell = mark;
-                }
-            }
-        }
-        lines.push(format!("比例 [{}]", bar.into_iter().collect::<String>()));
-        lines.push("B启动  S交换/二合一  E保密  C兼容保留  ·空闲".into());
         lines.push(String::new());
 
         let mut cursor = usable_start;
@@ -3054,12 +2925,89 @@ impl AppState {
         lines
     }
 
+    pub fn provision_layout_bar(&self, width: usize) -> Vec<ProvisionBarKind> {
+        use crate::provision::PartitionRole;
+
+        let width = width.clamp(8, 96);
+        let Ok((resolved, _)) = self.provision_resolved_prefill() else {
+            return vec![ProvisionBarKind::Free; width];
+        };
+        let Ok(mut parts) = resolved.target_partitions(crate::common::SECTOR as u64) else {
+            return vec![ProvisionBarKind::Free; width];
+        };
+        parts.sort_by_key(|part| part.start_lba);
+        let usable_start = crate::provision::OFFICIAL_PARTITION_START_SECTOR;
+        let usable_sectors = resolved.usable_end_lba.saturating_sub(usable_start);
+        if usable_sectors == 0 {
+            return vec![ProvisionBarKind::Free; width];
+        }
+
+        let mut segments = Vec::<(ProvisionBarKind, u64)>::new();
+        let mut cursor = usable_start;
+        for part in &parts {
+            if part.start_lba > cursor {
+                segments.push((
+                    ProvisionBarKind::Free,
+                    part.start_lba.saturating_sub(cursor),
+                ));
+            }
+            let kind = match part.role {
+                PartitionRole::Boot => ProvisionBarKind::Boot,
+                PartitionRole::Share | PartitionRole::BootShareCombined => ProvisionBarKind::Share,
+                PartitionRole::Encrypt => ProvisionBarKind::Encrypt,
+                PartitionRole::CompatibilityReserve => ProvisionBarKind::Compatibility,
+            };
+            segments.push((kind, part.sector_count));
+            cursor = part.start_lba.saturating_add(part.sector_count);
+        }
+        if cursor < resolved.usable_end_lba {
+            segments.push((
+                ProvisionBarKind::Free,
+                resolved.usable_end_lba.saturating_sub(cursor),
+            ));
+        }
+        if segments.is_empty() {
+            return vec![ProvisionBarKind::Free; width];
+        }
+
+        let baseline = usize::from(segments.len() <= width);
+        let baseline_total = baseline * segments.len();
+        let remaining = width.saturating_sub(baseline_total);
+        let total_weight = segments
+            .iter()
+            .map(|(_, sectors)| *sectors as u128)
+            .sum::<u128>()
+            .max(1);
+        let mut allocations = Vec::with_capacity(segments.len());
+        let mut assigned = 0usize;
+        let mut remainders = Vec::with_capacity(segments.len());
+        for (index, (_, sectors)) in segments.iter().enumerate() {
+            let scaled = *sectors as u128 * remaining as u128;
+            let extra = (scaled / total_weight) as usize;
+            allocations.push(baseline + extra);
+            assigned += baseline + extra;
+            remainders.push((scaled % total_weight, index));
+        }
+        remainders.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.cmp(&b.1)));
+        for (_, index) in remainders.into_iter().take(width.saturating_sub(assigned)) {
+            allocations[index] += 1;
+        }
+
+        let mut cells = Vec::with_capacity(width);
+        for ((kind, _), count) in segments.into_iter().zip(allocations) {
+            cells.extend(std::iter::repeat_n(kind, count));
+        }
+        cells.truncate(width);
+        while cells.len() < width {
+            cells.push(ProvisionBarKind::Free);
+        }
+        cells
+    }
+
     pub fn provision_field_hint(&self, display_index: usize) -> Option<String> {
         let slot = self.provision_field_slot(display_index)?;
         match slot {
-            0..=2 => self
-                .provision_partition_hint(slot)
-                .map(|hint| format!("Space 切换 MiB / GiB / sector · {hint}")),
+            0..=2 => Some("Space 切换 MiB / GiB / sector".into()),
             7 => Some("交换区和保密区的初始密码".into()),
             9 | 11..=13 | 18..=20 | 27 => Some("Space 切换".into()),
             24..=26 => Some("通常无需修改；固定分区边界时再调整".into()),
@@ -3072,7 +3020,10 @@ impl AppState {
         match self.provision_field_slot(self.provision.field_selected) {
             Some(slot @ 0..=2) => {
                 match self.provision.form.toggle_capacity_input(slot) {
-                    Ok(()) => self.provision.message = None,
+                    Ok(()) => {
+                        self.provision.message = None;
+                        self.provision_sync_cursor_to_end();
+                    }
                     Err(message) => self.provision.message = Some(message),
                 }
                 true
@@ -3131,18 +3082,35 @@ impl AppState {
         if ch.is_control() {
             return;
         }
+        let cursor = self.provision_field_cursor();
+        let slot = self.provision_field_slot(self.provision.field_selected);
         if let Some(field) = self.provision_selected_field_mut() {
             if field.chars().count() < 128 {
-                field.push(ch);
+                let mut chars = field.chars().collect::<Vec<_>>();
+                chars.insert(cursor.min(chars.len()), ch);
+                *field = chars.into_iter().collect();
+                self.provision.field_cursor = cursor + 1;
+                self.provision.form.mark_quick_capacity_edit(slot);
                 self.provision.message = None;
             }
         }
     }
 
     pub fn provision_backspace(&mut self) {
+        let cursor = self.provision_field_cursor();
+        let slot = self.provision_field_slot(self.provision.field_selected);
+        if cursor == 0 {
+            return;
+        }
         if let Some(field) = self.provision_selected_field_mut() {
-            field.pop();
-            self.provision.message = None;
+            let mut chars = field.chars().collect::<Vec<_>>();
+            if cursor <= chars.len() {
+                chars.remove(cursor - 1);
+                *field = chars.into_iter().collect();
+                self.provision.field_cursor = cursor - 1;
+                self.provision.form.mark_quick_capacity_edit(slot);
+                self.provision.message = None;
+            }
         }
     }
 
@@ -3162,62 +3130,55 @@ impl AppState {
                 .ok_or_else(|| format!("{label} 必须为正整数扇区"))
         };
         let form = &self.provision.form;
-        let quick_mib = |value: &str,
-                         unit: crate::provision::QuickCapacityUnit,
-                         label: &str|
-         -> Result<(Option<u64>, Option<u64>), String> {
-            match unit {
-                crate::provision::QuickCapacityUnit::MiB => {
-                    if let Ok(mib) = value.parse::<u64>() {
-                        if mib > 0 {
-                            return Ok((Some(mib), None));
-                        }
-                    }
-                    Ok((
-                        None,
-                        Some(ProvisionForm::parse_mib_to_sectors(value, label)?),
-                    ))
-                }
-                crate::provision::QuickCapacityUnit::GiB => Ok((
-                    None,
-                    Some(ProvisionForm::parse_gib_to_sectors(value, label)?),
-                )),
-            }
-        };
         let exact = crate::provision::CapacityInputMode::Exact;
-        let boot_sectors = if matches!(mode, 0 | 3) && form.boot_input_mode == exact {
-            Some(parse_sectors(&form.boot_sectors, "启动区")?)
-        } else {
-            None
-        };
-        let (boot_mib, boot_quick_sectors) =
-            if matches!(mode, 0 | 3) && form.boot_input_mode != exact {
-                quick_mib(&form.boot_mib, form.boot_quick_unit, "启动区")?
+        let capacity_sectors = |active: bool,
+                                mode: crate::provision::CapacityInputMode,
+                                unit: crate::provision::QuickCapacityUnit,
+                                quick: &str,
+                                exact_value: &str,
+                                edited: bool,
+                                label: &str|
+         -> Result<Option<u64>, String> {
+            if !active {
+                return Ok(None);
+            }
+            let sectors = if mode == exact {
+                parse_sectors(exact_value, label)?
             } else {
-                (None, None)
+                ProvisionForm::resolve_quick_sectors(quick, exact_value, unit, edited, label)?
             };
-        let share_sectors = if matches!(mode, 0 | 1 | 3) && form.share_input_mode == exact {
-            Some(parse_sectors(&form.share_sectors, "交换区")?)
-        } else {
-            None
+            Ok(Some(sectors))
         };
-        let (share_mib, share_quick_sectors) =
-            if matches!(mode, 0 | 1 | 3) && form.share_input_mode != exact {
-                quick_mib(&form.share_mib, form.share_quick_unit, "交换区")?
-            } else {
-                (None, None)
-            };
-        let encrypt_sectors = if matches!(mode, 0..=2) && form.encrypt_input_mode == exact {
-            Some(parse_sectors(&form.encrypt_sectors, "保密区")?)
-        } else {
-            None
-        };
-        let (encrypt_mib, encrypt_quick_sectors) =
-            if matches!(mode, 0..=2) && form.encrypt_input_mode != exact {
-                quick_mib(&form.encrypt_mib, form.encrypt_quick_unit, "保密区")?
-            } else {
-                (None, None)
-            };
+        let boot_sectors = capacity_sectors(
+            matches!(mode, 0 | 3),
+            form.boot_input_mode,
+            form.boot_quick_unit,
+            &form.boot_mib,
+            &form.boot_sectors,
+            form.boot_capacity_edited,
+            "启动区",
+        )?;
+        let share_sectors = capacity_sectors(
+            matches!(mode, 0 | 1 | 3),
+            form.share_input_mode,
+            form.share_quick_unit,
+            &form.share_mib,
+            &form.share_sectors,
+            form.share_capacity_edited,
+            "交换区",
+        )?;
+        let encrypt_sectors = capacity_sectors(
+            matches!(mode, 0..=2),
+            form.encrypt_input_mode,
+            form.encrypt_quick_unit,
+            &form.encrypt_mib,
+            &form.encrypt_sectors,
+            form.encrypt_capacity_edited,
+            "保密区",
+        )?;
+        let boot_mib = None;
+        let share_mib = None;
+        let encrypt_mib = None;
         let (resolved, _) = self.provision_resolved_prefill()?;
         if self.provision.form.label_id.trim().is_empty()
             || self.provision.form.user.trim().is_empty()
@@ -3253,11 +3214,11 @@ impl AppState {
                 .then_some(resolved.encrypt_start_lba)
                 .flatten(),
             boot_mib,
-            boot_sectors: boot_sectors.or(boot_quick_sectors),
+            boot_sectors,
             share_mib,
-            share_sectors: share_sectors.or(share_quick_sectors),
+            share_sectors,
             encrypt_mib,
-            encrypt_sectors: encrypt_sectors.or(encrypt_quick_sectors),
+            encrypt_sectors,
             label_id: self.provision.form.label_id.trim().to_string(),
             user: self.provision.form.user.trim().to_string(),
             dept: self.provision.form.dept.trim().to_string(),
@@ -3607,6 +3568,27 @@ impl AppState {
         Some(disk)
     }
 
+    pub fn begin_provision_for_selected_device(&mut self) -> Result<u32, String> {
+        if self.workspace != Workspace::Devices {
+            return Err("请先在设备页选择目标 USB 盘。".into());
+        }
+        let row = self
+            .selected_device()
+            .ok_or_else(|| "请先选择目标 USB 盘。".to_string())?;
+        if row.proto != "USB" || row.denied || row.probe_error.is_some() {
+            return Err("制盘需要可读取的 USB 整盘目标。".into());
+        }
+        let disk = row.disk;
+        self.provision.target_disk = Some(disk);
+        self.switch_workspace(Workspace::Provision);
+        self.pinned_disk = Some(disk);
+        self.provision.stage = ProvisionStage::BackupPrompt;
+        self.provision.message = None;
+        self.selected = 0;
+        self.set_item_count(2);
+        Ok(disk)
+    }
+
     pub fn provision_begin_offline(&mut self) {
         self.provision.target_disk = None;
         self.pinned_disk = None;
@@ -3708,6 +3690,15 @@ impl AppState {
         }
         self.workspace = workspace;
         self.selected = 0;
+        if workspace == Workspace::Devices {
+            if let Some(disk) = self.provision.target_disk {
+                self.selected = self
+                    .devices
+                    .iter()
+                    .position(|row| row.disk == disk)
+                    .unwrap_or(0);
+            }
+        }
         let count = match workspace {
             Workspace::Devices => self.devices.len(),
             Workspace::Backups => self.backups.len(),
@@ -3773,7 +3764,7 @@ impl AppState {
         }
     }
 
-    /// Apply the one global command policy used while a destructive or otherwise
+    /// Enforce the one global command policy used while a destructive or otherwise
     /// critical worker owns the operation slot. Every command entry point (keys,
     /// command palette and direct dispatch) must pass through this guard.
     pub fn guard_critical_command(&mut self, command: NavCommand) -> Option<StateEffect> {
@@ -3784,11 +3775,12 @@ impl AppState {
             self.exit_pending = true;
             Some(StateEffect::ExitDeferred)
         } else if command == NavCommand::Escape {
-            self.notice =
-                Some("关键操作仍在执行，当前不能返回；操作完成后再按 Esc 返回。".to_string());
+            self.set_notice(
+                "关键操作仍在执行，当前不能返回；操作完成后再按 Esc 返回。".to_string(),
+            );
             Some(StateEffect::None)
         } else {
-            self.notice = Some("关键操作仍在执行，完成前不能切换页面或启动其他任务。".to_string());
+            self.set_notice("关键操作仍在执行，完成前不能切换页面或启动其他任务。".to_string());
             Some(StateEffect::None)
         }
     }
@@ -3805,12 +3797,7 @@ impl AppState {
                         self.switch_workspace(Workspace::Devices);
                     }
                     ProvisionStage::BackupPrompt => {
-                        self.pinned_disk = None;
-                        self.provision.target_disk = None;
-                        self.provision.stage = ProvisionStage::SelectDisk;
-                        self.provision.message = None;
-                        self.selected = 0;
-                        self.set_item_count(self.provision_selectable_devices().count());
+                        self.switch_workspace(Workspace::Devices);
                     }
                     ProvisionStage::Menu => {
                         self.provision.stage = ProvisionStage::BackupPrompt;
@@ -3819,7 +3806,7 @@ impl AppState {
                         self.set_item_count(2);
                     }
                     ProvisionStage::Running => {
-                        self.notice = Some("制盘安全事务正在执行，当前不能返回。".into());
+                        self.set_notice("制盘安全事务正在执行，当前不能返回。");
                     }
                     ProvisionStage::Confirm => {
                         self.provision.stage = ProvisionStage::Review;
@@ -3830,22 +3817,22 @@ impl AppState {
                     }
                     ProvisionStage::ExportPath => self.provision_cancel_export(),
                     ProvisionStage::Exporting => {
-                        self.notice = Some("镜像正在后台导出，请等待完成。".into());
+                        self.set_notice("镜像正在后台导出，请等待完成。");
                     }
                     ProvisionStage::OfflineForm | ProvisionStage::OfflineResult => {
                         self.provision_reset();
                     }
                     ProvisionStage::OfflineRunning => {
-                        self.notice = Some("离线转换正在后台执行，请等待完成。".into());
+                        self.set_notice("离线转换正在后台执行，请等待完成。");
                     }
                     ProvisionStage::Form | ProvisionStage::Result => {
                         self.provision_reset();
                     }
                     ProvisionStage::Planning => {
-                        self.notice = Some("制盘计划正在后台生成，请等待完成。".into());
+                        self.set_notice("制盘计划正在后台生成，请等待完成。");
                     }
                     ProvisionStage::BackupSaving => {
-                        self.notice = Some("正在保存当前盘，请等待完成。".into());
+                        self.set_notice("正在保存当前盘，请等待完成。");
                     }
                 }
                 return StateEffect::None;
@@ -3941,7 +3928,6 @@ impl AppState {
                 NavCommand::Quit => return StateEffect::ExitRequested,
                 NavCommand::Escape
                 | NavCommand::Refresh
-                | NavCommand::BeginApply
                 | NavCommand::BeginRestore
                 | NavCommand::BeginBackupCreate
                 | NavCommand::BeginBackupCreateDeep
@@ -3965,12 +3951,12 @@ impl AppState {
                         Workspace::Backups
                     }
                     Workspace::Backups if command == NavCommand::NextWorkspace => {
-                        Workspace::Provision
+                        Workspace::Devices
                     }
                     Workspace::Provision if command == NavCommand::NextWorkspace => {
                         Workspace::Devices
                     }
-                    Workspace::Devices => Workspace::Provision,
+                    Workspace::Devices => Workspace::Backups,
                     Workspace::Backups => Workspace::Devices,
                     Workspace::Provision => Workspace::Backups,
                 });
@@ -4011,7 +3997,7 @@ impl AppState {
             NavCommand::Help => self.input_mode = InputMode::Help,
             NavCommand::Left => {
                 let target = match self.workspace {
-                    Workspace::Devices => Workspace::Provision,
+                    Workspace::Devices => Workspace::Backups,
                     Workspace::Backups => Workspace::Devices,
                     Workspace::Provision => Workspace::Backups,
                 };
@@ -4020,13 +4006,12 @@ impl AppState {
             NavCommand::Right => {
                 let target = match self.workspace {
                     Workspace::Devices => Workspace::Backups,
-                    Workspace::Backups => Workspace::Provision,
+                    Workspace::Backups => Workspace::Devices,
                     Workspace::Provision => Workspace::Devices,
                 };
                 self.switch_workspace(target);
             }
             NavCommand::Refresh
-            | NavCommand::BeginApply
             | NavCommand::BeginRestore
             | NavCommand::BeginBackupCreate
             | NavCommand::BeginBackupCreateDeep

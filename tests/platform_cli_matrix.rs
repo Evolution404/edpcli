@@ -130,13 +130,14 @@ fn info_inspect_and_backup_work_offline_on_every_platform() {
 }
 
 #[test]
-fn apply_rejects_nonexistent_explicit_disk_on_every_platform() {
+fn provision_rejects_nonexistent_explicit_disk_on_every_platform() {
     assert_invalid_target_is_rejected_before_write(&[
-        "apply",
+        "provision",
+        "plan",
         "--disk",
         "4294967295",
-        "--force",
-        "--yes",
+        "--mode",
+        "0",
     ]);
 }
 

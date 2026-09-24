@@ -59,7 +59,6 @@ impl KeyMapper {
             KeyCode::Char('?') => Some(NavCommand::Help),
             KeyCode::Char('i') => Some(NavCommand::OpenInspect),
             KeyCode::Char('I') => Some(NavCommand::OpenAdvancedInspect),
-            KeyCode::Char('a') => Some(NavCommand::BeginApply),
             KeyCode::Char('b') => Some(NavCommand::BeginBackupCreate),
             KeyCode::Char('B') => Some(NavCommand::BeginBackupCreateDeep),
             KeyCode::Char('v') => Some(NavCommand::VerifyBackup),

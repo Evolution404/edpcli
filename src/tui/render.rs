@@ -1,5 +1,7 @@
 //! Ratatui rendering for the top-level shell.
 
+use std::collections::HashMap;
+
 use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout},
     style::{Color, Modifier, Style},
@@ -9,8 +11,8 @@ use ratatui::{
 };
 
 use super::state::{
-    AppState, ApplyStage, InputMode, InspectMode, ProvisionKind, ProvisionPrepared, ProvisionStage,
-    WizardStage, Workspace, WriteKind,
+    AppState, InputMode, InspectMode, ProvisionBarKind, ProvisionKind, ProvisionPrepared,
+    ProvisionStage, WizardStage, Workspace, WriteKind,
 };
 use super::{animation, animation::CoreMode};
 
@@ -22,6 +24,9 @@ fn fit_display_width(value: &str, width: usize) -> String {
     let value = safe(value);
     if width == 0 {
         return String::new();
+    }
+    if width == 1 {
+        return "│".into();
     }
     let current = crate::ui::disp_width(&value);
     if current <= width {
@@ -47,6 +52,63 @@ fn fit_display_width(value: &str, width: usize) -> String {
         out.push_str(&" ".repeat(width - used));
     }
     out
+}
+
+fn input_value_window(value: &str, cursor: usize, width: usize, secret: bool) -> String {
+    if width == 0 {
+        return String::new();
+    }
+    let sanitized = safe(value);
+    let chars = if secret {
+        vec!['•'; sanitized.chars().count()]
+    } else {
+        sanitized.chars().collect::<Vec<_>>()
+    };
+    let cursor = cursor.min(chars.len());
+    let content_budget = width.saturating_sub(2).max(1);
+    let mut start = cursor;
+    let mut end = cursor;
+    let mut used = 1usize; // cursor marker
+    loop {
+        let mut progressed = false;
+        if start > 0 {
+            let candidate = chars[start - 1];
+            let w = crate::ui::disp_width(&candidate.to_string()).max(1);
+            if used + w <= content_budget {
+                start -= 1;
+                used += w;
+                progressed = true;
+            }
+        }
+        if end < chars.len() {
+            let candidate = chars[end];
+            let w = crate::ui::disp_width(&candidate.to_string()).max(1);
+            if used + w <= content_budget {
+                end += 1;
+                used += w;
+                progressed = true;
+            }
+        }
+        if !progressed {
+            break;
+        }
+    }
+
+    let mut out = String::new();
+    if start > 0 {
+        out.push('‹');
+    }
+    for ch in &chars[start..cursor] {
+        out.push(*ch);
+    }
+    out.push('│');
+    for ch in &chars[cursor..end] {
+        out.push(*ch);
+    }
+    if end < chars.len() {
+        out.push('›');
+    }
+    fit_display_width(&out, width)
 }
 
 fn hard_wrap_value(value: &str, width: usize) -> Vec<String> {
@@ -160,6 +222,21 @@ fn device_status(row: &crate::disk_scan::Row) -> String {
     }
 }
 
+fn device_ven_prod(device_id: Option<&str>) -> String {
+    let mut ven = None;
+    let mut prod = None;
+    for part in device_id.unwrap_or_default().split('&') {
+        ven = ven.or_else(|| part.strip_prefix("ven_"));
+        prod = prod.or_else(|| part.strip_prefix("prod_"));
+    }
+    match (ven, prod) {
+        (Some(ven), Some(prod)) => safe(&format!("{ven}_{prod}")),
+        (Some(ven), None) => safe(ven),
+        (None, Some(prod)) => safe(prod),
+        _ => "—".into(),
+    }
+}
+
 fn workspace_sidebar_layout(
     area: ratatui::layout::Rect,
 ) -> (
@@ -210,7 +287,11 @@ fn visible_window(selected: usize, total: usize, area_height: u16) -> std::ops::
 }
 
 fn draw_devices(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState) {
-    let (list_area, sidebar) = workspace_sidebar_layout(area);
+    let (list_area, sidebar) = if area.width >= 150 {
+        workspace_sidebar_layout(area)
+    } else {
+        (area, None)
+    };
     let visible_count = state.visible_device_count();
     let total_count = state.devices().len();
     let count_label = if state.workspace_filter_active() {
@@ -275,23 +356,34 @@ fn draw_devices(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState
                         warning()
                     }),
                     Cell::from(format!("{}:{}", safe(&row.vid), safe(&row.pid))).style(secondary()),
+                    Cell::from(device_ven_prod(row.device_id.as_deref())),
+                    Cell::from(
+                        row.onlyid
+                            .as_deref()
+                            .map(safe)
+                            .unwrap_or_else(|| "—".into()),
+                    ),
                     Cell::from(row.user.as_deref().map(safe).unwrap_or_else(|| "—".into())),
                     Cell::from(row.dept.as_deref().map(safe).unwrap_or_else(|| "—".into())),
                     Cell::from(device_status(row)).style(device_status_style(row)),
                 ])
             });
-        let header = TableRow::new(["设备", "容量", "总线", "VID:PID", "姓名", "部门", "盘型"])
-            .style(accent());
+        let header = TableRow::new([
+            "设备", "容量", "总线", "VID:PID", "ven_prod", "onlyid", "姓名", "部门", "盘型",
+        ])
+        .style(accent());
         let table = Table::new(
             rows,
             [
                 Constraint::Length(9),
-                Constraint::Length(10),
-                Constraint::Length(7),
-                Constraint::Length(11),
+                Constraint::Length(9),
+                Constraint::Length(5),
+                Constraint::Length(9),
+                Constraint::Length(17),
                 Constraint::Length(12),
-                Constraint::Min(18),
-                Constraint::Length(23),
+                Constraint::Length(10),
+                Constraint::Min(10),
+                Constraint::Length(17),
             ],
         )
         .header(header)
@@ -352,12 +444,7 @@ fn draw_devices(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState
                     Span::styled("b", accent()),
                     Span::raw(" 新建备份"),
                 ]),
-                Line::from(vec![
-                    Span::styled("a", warning()),
-                    Span::raw(" Apply      "),
-                    Span::styled("r", success()),
-                    Span::raw(" 刷新"),
-                ]),
+                Line::from(vec![Span::styled("r", success()), Span::raw(" 刷新")]),
             ]);
             Paragraph::new(lines)
         } else {
@@ -938,12 +1025,33 @@ fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppSta
             let content_width = form_area.width.saturating_sub(2) as usize;
             let separator = " │ ";
             let separator_width = crate::ui::disp_width(separator);
-            let left_column_width = content_width
-                .saturating_sub(separator_width)
-                .saturating_div(2);
 
             let fields = state.provision_visible_fields();
             let rows = state.provision_compact_field_rows();
+            let mut section_metrics: HashMap<&str, (usize, usize, usize, usize)> = HashMap::new();
+            for (section, indexes) in &rows {
+                let entry = section_metrics.entry(*section).or_insert((0, 0, 0, 0));
+                for (position, index) in indexes.iter().copied().enumerate() {
+                    let (label, value, secret) = &fields[index];
+                    let label_width = crate::ui::disp_width(label);
+                    let shown_width = if value.is_empty() {
+                        crate::ui::disp_width("〈请输入〉")
+                    } else if *secret {
+                        value.chars().count()
+                    } else {
+                        crate::ui::disp_width(&safe(value))
+                    }
+                    .clamp(6, 24);
+                    if position == 0 {
+                        entry.0 = entry.0.max(label_width);
+                        entry.2 = entry.2.max(shown_width);
+                    } else {
+                        entry.1 = entry.1.max(label_width);
+                        entry.3 = entry.3.max(shown_width);
+                    }
+                }
+            }
+
             let mut form_lines = vec![Line::from(vec![
                 Span::styled(provision.kind.title(), provision_kind_style(provision.kind)),
                 Span::raw("  "),
@@ -966,31 +1074,62 @@ fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppSta
                 for (position, index) in indexes.into_iter().enumerate() {
                     let (label, value, secret) = &fields[index];
                     let active = index == provision.field_selected;
-                    let shown = if value.is_empty() {
-                        "〈请输入〉".into()
-                    } else if *secret {
-                        "•".repeat(value.chars().count())
-                    } else {
-                        safe(value)
-                    };
-                    let cell = format!("{}{} {}", if active { "▶ " } else { "  " }, label, shown);
                     if position > 0 {
                         spans.push(Span::styled(separator, muted()));
                     }
-                    let fitted = if two_columns {
-                        let width = if position == 0 {
-                            left_column_width
+                    let metrics = section_metrics
+                        .get(section)
+                        .copied()
+                        .unwrap_or((0, 0, 8, 8));
+                    let min_right_width = 2 + metrics.1 + 1 + metrics.3.max(8);
+                    let desired_left_width = 2 + metrics.0 + 1 + metrics.2.max(8);
+                    let max_left_width = content_width
+                        .saturating_sub(separator_width)
+                        .saturating_sub(min_right_width)
+                        .max(8);
+                    let section_left_width = desired_left_width.min(max_left_width);
+                    let cell_width = if two_columns {
+                        if position == 0 {
+                            section_left_width
                         } else {
                             content_width
-                                .saturating_sub(left_column_width)
+                                .saturating_sub(section_left_width)
                                 .saturating_sub(separator_width)
-                        };
-                        fit_display_width(&cell, width)
+                        }
                     } else {
-                        fit_display_width(&cell, content_width)
+                        content_width
+                    };
+                    let label_width = if position == 0 { metrics.0 } else { metrics.1 };
+                    let label_width = label_width.min(cell_width.saturating_sub(4));
+                    let value_width = cell_width
+                        .saturating_sub(2)
+                        .saturating_sub(label_width)
+                        .saturating_sub(1)
+                        .max(1);
+
+                    spans.push(Span::styled(
+                        if active { "▶ " } else { "  " },
+                        if active { accent() } else { Style::default() },
+                    ));
+                    spans.push(Span::styled(fit_display_width(label, label_width), muted()));
+                    spans.push(Span::raw(" "));
+
+                    let shown = if active && state.provision_selected_field_is_editable() {
+                        input_value_window(
+                            value,
+                            state.provision_field_cursor(),
+                            value_width,
+                            *secret,
+                        )
+                    } else if value.is_empty() {
+                        fit_display_width("〈请输入〉", value_width)
+                    } else if *secret {
+                        fit_display_width(&"•".repeat(value.chars().count()), value_width)
+                    } else {
+                        fit_display_width(value, value_width)
                     };
                     spans.push(Span::styled(
-                        fitted,
+                        shown,
                         if active { selected() } else { Style::default() },
                     ));
                 }
@@ -1004,18 +1143,24 @@ fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppSta
                 ]));
             }
             form_lines.push(Line::from(""));
-            form_lines.push(Line::from(vec![
-                Span::styled("↑/↓", accent()),
-                Span::raw(" 字段   "),
-                Span::styled("直接输入", secondary()),
-                Span::raw(" 编辑   "),
-                Span::styled("Space", secondary()),
-                Span::raw(" 切换   "),
+            let mut shortcuts = vec![Span::styled("↑/↓", accent()), Span::raw(" 字段   ")];
+            if state.provision_selected_field_is_editable() {
+                shortcuts.extend([
+                    Span::styled("←/→", accent()),
+                    Span::raw(" 光标   "),
+                    Span::styled("输入/Backspace", secondary()),
+                    Span::raw(" 编辑   "),
+                ]);
+            } else {
+                shortcuts.extend([Span::styled("Space", secondary()), Span::raw(" 切换   ")]);
+            }
+            shortcuts.extend([
                 Span::styled("Enter", success()),
                 Span::raw(" 生成计划   "),
                 Span::styled("Esc", warning()),
                 Span::raw(" 返回"),
-            ]));
+            ]);
+            form_lines.push(Line::from(shortcuts));
             if let Some(message) = &provision.message {
                 form_lines.push(Line::from(Span::styled(safe(message), danger())));
             }
@@ -1035,23 +1180,58 @@ fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppSta
                 form_area,
             );
 
-            let bar_width = layout_area.width.saturating_sub(12) as usize;
-            let layout_lines = state
-                .provision_layout_editor_lines(bar_width)
-                .into_iter()
-                .map(|line| {
-                    let style = if line.starts_with("✗") {
-                        danger()
-                    } else if line.starts_with("✓") {
-                        success()
-                    } else if line.starts_with("当前:") {
-                        accent()
-                    } else {
-                        muted()
-                    };
-                    Line::from(Span::styled(safe(&line), style))
-                })
-                .collect::<Vec<_>>();
+            let bar_width = layout_area.width.saturating_sub(10) as usize;
+            let bar = state.provision_layout_bar(bar_width);
+            let mut bar_spans = vec![Span::styled("比例 [", muted())];
+            let mut run_start = 0usize;
+            while run_start < bar.len() {
+                let kind = bar[run_start];
+                let mut run_end = run_start + 1;
+                while run_end < bar.len() && bar[run_end] == kind {
+                    run_end += 1;
+                }
+                let style = match kind {
+                    ProvisionBarKind::Free => Style::default().fg(Color::DarkGray),
+                    ProvisionBarKind::Boot => Style::default().fg(Color::Cyan),
+                    ProvisionBarKind::Share => Style::default().fg(Color::Green),
+                    ProvisionBarKind::Encrypt => Style::default().fg(Color::Magenta),
+                    ProvisionBarKind::Compatibility => Style::default().fg(Color::Yellow),
+                };
+                bar_spans.push(Span::styled("━".repeat(run_end - run_start), style));
+                run_start = run_end;
+            }
+            bar_spans.push(Span::styled("]", muted()));
+            let bar_line = Line::from(bar_spans);
+            let legend_line = Line::from(vec![
+                Span::styled("■", Style::default().fg(Color::Cyan)),
+                Span::raw(" 启动  "),
+                Span::styled("■", Style::default().fg(Color::Green)),
+                Span::raw(" 交换/二合一  "),
+                Span::styled("■", Style::default().fg(Color::Magenta)),
+                Span::raw(" 保密  "),
+                Span::styled("■", Style::default().fg(Color::Yellow)),
+                Span::raw(" 兼容  "),
+                Span::styled("■", Style::default().fg(Color::DarkGray)),
+                Span::raw(" 空闲"),
+            ]);
+            let raw_layout_lines = state.provision_layout_editor_lines();
+            let mut layout_lines = Vec::new();
+            for (index, line) in raw_layout_lines.into_iter().enumerate() {
+                if index == 3 {
+                    layout_lines.push(bar_line.clone());
+                    layout_lines.push(legend_line.clone());
+                }
+                let style = if line.starts_with("✗") {
+                    danger()
+                } else if line.starts_with("✓") {
+                    success()
+                } else if line.starts_with("当前:") {
+                    accent()
+                } else {
+                    muted()
+                };
+                layout_lines.push(Line::from(Span::styled(safe(&line), style)));
+            }
             frame.render_widget(
                 Paragraph::new(layout_lines)
                     .block(
@@ -1548,7 +1728,6 @@ fn draw_command_palette(frame: &mut Frame, area: ratatui::layout::Rect, state: &
         "offline-convert 离线 LBA 快照转换",
         "inspect  打开 Inspect",
         "advanced-inspect  任意 LBA / decode / meta / 导出",
-        "apply    Apply 安全向导",
         "restore  Restore 安全向导",
         "backup-create  备份当前设备",
         "backup-verify  校验当前备份",
@@ -2155,36 +2334,15 @@ fn draw_backup_prune(frame: &mut Frame, area: ratatui::layout::Rect, state: &App
 /// 直接从事件类型映射，不经 ANSI 文本反解析；调用方负责经 `safe` 消毒。
 fn write_progress_text(event: &crate::application::WriteEvent) -> String {
     use crate::application::WriteEvent;
-    use crate::sectors::ConvertReport;
     match event {
-        WriteEvent::ApplyDeviceHeader {
-            disk,
-            size_text,
-            vid,
-            pid,
-        } => format!("已选定 disk{disk}（{size_text}，USB {vid}:{pid}），读取元数据…"),
-        WriteEvent::ExistingBackupsHeader { count } => {
-            format!("本盘已有 {count} 份备份，写入时会自动再备份")
-        }
-        WriteEvent::ExistingBackupsMenu { .. } => "已列出本盘既有备份清单".to_string(),
-        WriteEvent::NoExistingBackups => "尚无备份；写入时自动创建首个备份".to_string(),
-        WriteEvent::AlreadyNopwdHint => "该盘已是免密盘（再次写入内容相同）".to_string(),
-        WriteEvent::DryRunPreview { .. } => "dry-run 预览完成，未写盘".to_string(),
-        WriteEvent::ForceRewriteNotice => "--force 继续重写；自动备份将标记免密状态".to_string(),
         WriteEvent::BackupCreated { path } => format!(
-            "写前备份完成：{}",
+            "备份完成：{}",
             path.file_name()
                 .map(|name| name.to_string_lossy().into_owned())
                 .unwrap_or_else(|| path.to_string_lossy().into_owned())
         ),
         WriteEvent::BackupCreatedIsNopwd => {
             "本份备份为免密状态快照（还原不会回到加密原盘）".to_string()
-        }
-        WriteEvent::RestoreCommandHint { .. } => {
-            "备份完成；可用 edpcli backup restore 还原".to_string()
-        }
-        WriteEvent::ApplyWriteCompleted => {
-            "已写入，读回校验通过；请拔出重插后格式化数据区".to_string()
         }
         WriteEvent::RestoreMatchesHeader { onlyid, count, .. } => {
             format!("onlyid={onlyid} 匹配 {count} 个备份")
@@ -2215,181 +2373,7 @@ fn write_progress_text(event: &crate::application::WriteEvent) -> String {
                 .unwrap_or_else(|| path.to_string_lossy().into_owned())
         ),
         WriteEvent::RestoreWriteCompleted => "已还原，读回校验通过；请拔出重插".to_string(),
-        WriteEvent::Convert(ConvertReport::Identity { crc, .. }) => {
-            format!("已解出盘标识（CRC32 0x{crc:08X}）")
-        }
-        WriteEvent::Convert(ConvertReport::Layout { .. }) => {
-            "已计算 Share/Encrypt 布局".to_string()
-        }
-        WriteEvent::Convert(ConvertReport::SectorPlan { clears_lba9, .. }) => {
-            if *clears_lba9 {
-                "扇区写入计划就绪（LBA9 将清零）".to_string()
-            } else {
-                "扇区写入计划就绪（LBA9 已为零）".to_string()
-            }
-        }
     }
-}
-
-fn draw_apply(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState) {
-    let Some(apply) = state.apply() else {
-        return;
-    };
-    let mut lines = vec![
-        Line::from(vec![
-            Span::styled("Apply 免密改造", secondary().add_modifier(Modifier::BOLD)),
-            Span::raw(format!("  ·  disk{}", apply.disk)),
-        ]),
-        Line::from("旧版兼容改造链；每次写入前强制执行完整 dry-run 预览。"),
-        Line::from(""),
-    ];
-
-    match apply.stage {
-        ApplyStage::Setup => {
-            lines.extend([
-                Line::from(vec![
-                    Span::styled("目标 Share 大小 GiB  ", muted()),
-                    Span::styled(
-                        if apply.size_gb.is_empty() {
-                            "自动（使用原 type4 边界）".into()
-                        } else {
-                            safe(&apply.size_gb)
-                        },
-                        selected(),
-                    ),
-                ]),
-                Line::from(vec![
-                    Span::styled("force               ", muted()),
-                    Span::styled(
-                        if apply.force { "ON" } else { "OFF" },
-                        if apply.force { warning() } else { success() },
-                    ),
-                ]),
-                Line::from(""),
-                Line::from(vec![
-                    Span::styled("数字 / .", accent()),
-                    Span::raw(" 编辑大小   "),
-                    Span::styled("Backspace", accent()),
-                    Span::raw(" 删除   "),
-                    Span::styled("f", warning()),
-                    Span::raw(" 切换 force   "),
-                    Span::styled("Enter", success()),
-                    Span::raw(" 只读预览"),
-                ]),
-            ]);
-            if let Some(message) = &apply.message {
-                lines.push(Line::from(Span::styled(safe(message), danger())));
-            }
-        }
-        ApplyStage::Previewing => {
-            lines.extend([
-                Line::from(Span::styled("◈ 正在执行只读预览", secondary())),
-                Line::from(
-                    apply
-                        .message
-                        .as_deref()
-                        .unwrap_or("正在识别目标和计算布局…"),
-                ),
-                Line::from("不会卸载、不会写盘。"),
-            ]);
-        }
-        ApplyStage::Review => {
-            lines.push(Line::from(Span::styled(
-                "dry-run 完成；以下计划均来自真实目标的只读计算",
-                success(),
-            )));
-            lines.push(Line::from(format!(
-                "size={}  force={}",
-                if apply.size_gb.is_empty() {
-                    "auto"
-                } else {
-                    apply.size_gb.as_str()
-                },
-                if apply.force { "ON" } else { "OFF" }
-            )));
-            lines.push(Line::from(""));
-            for event in &apply.events {
-                let text = write_progress_text(event);
-                let style = match event {
-                    crate::application::WriteEvent::AlreadyNopwdHint => warning(),
-                    crate::application::WriteEvent::DryRunPreview { .. } => success(),
-                    crate::application::WriteEvent::Convert(_) => secondary(),
-                    _ => Style::default(),
-                };
-                lines.push(Line::from(vec![
-                    Span::styled("• ", accent()),
-                    Span::styled(safe(&text), style),
-                ]));
-            }
-            if let Some(message) = &apply.message {
-                lines.push(Line::from(Span::styled(safe(message), warning())));
-            }
-            lines.extend([
-                Line::from(""),
-                Line::from(vec![
-                    Span::styled("Enter", danger()),
-                    Span::raw(" 进入最终 YES 确认   "),
-                    Span::styled("Esc", warning()),
-                    Span::raw(" 返回参数设置"),
-                ]),
-            ]);
-        }
-        ApplyStage::Confirm => {
-            lines.extend([
-                Line::from(Span::styled("破坏性写盘最终确认", danger())),
-                Line::from("确认后会自动写前备份、卸载/锁卷、复核目标、事务写入并读回。"),
-                Line::from(vec![
-                    Span::raw("精确输入 "),
-                    Span::styled("YES", danger()),
-                    Span::raw(" 后按 Enter： "),
-                    Span::styled(safe(&apply.confirmation), selected()),
-                ]),
-                Line::from(Span::styled("Esc 返回 dry-run 计划。", warning())),
-            ]);
-            if let Some(message) = &apply.message {
-                lines.push(Line::from(Span::styled(safe(message), danger())));
-            }
-        }
-        ApplyStage::Running => {
-            lines.push(Line::from(Span::styled(
-                "◆ Apply 安全事务执行中",
-                warning(),
-            )));
-            if let Some(event) = apply.events.last() {
-                lines.push(Line::from(safe(&write_progress_text(event))));
-            } else if let Some(message) = &apply.message {
-                lines.push(Line::from(safe(message)));
-            }
-            lines.push(Line::from(Span::styled(
-                "q / Esc / Ctrl-C 不会中断当前介质事务。",
-                danger(),
-            )));
-        }
-        ApplyStage::Result => {
-            lines.extend([
-                Line::from(Span::styled("Apply 已到达安全结束点", success())),
-                Line::from(safe(apply.message.as_deref().unwrap_or("操作结束"))),
-                Line::from("Enter / Esc 返回设备列表。"),
-            ]);
-        }
-    }
-
-    frame.render_widget(
-        Paragraph::new(lines)
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .border_style(match apply.stage {
-                        ApplyStage::Confirm => danger(),
-                        ApplyStage::Running => warning(),
-                        ApplyStage::Result => success(),
-                        _ => secondary(),
-                    })
-                    .title("Apply · 预览后写入"),
-            )
-            .wrap(Wrap { trim: true }),
-        area,
-    );
 }
 
 fn draw_wizard(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState) {
@@ -2397,7 +2381,6 @@ fn draw_wizard(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState)
         return;
     };
     let operation = match wizard.kind {
-        WriteKind::Apply => "Apply 免密转换",
         WriteKind::Restore => "Restore 备份还原",
         WriteKind::BackupCreate => "Create Backup 只读备份",
         WriteKind::BackupCreateDeep => "Deep Backup 深度备份",
@@ -2422,22 +2405,28 @@ fn draw_wizard(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState)
         WriteKind::BackupCreateDeep => {
             "只读链：完整读取可验证分区/文件系统证据并写入 Deep EDPB；耗时更长，但不会卸载或写 U 盘"
         }
-        WriteKind::Apply | WriteKind::Restore => {
+        WriteKind::Restore => {
             "安全链：系统盘/USB整盘检查 → selector pinning → 写前保护 → 卸载/锁卷 → reopen复核 → atomic write → sync/readback/rollback"
         }
     }));
     match wizard.stage {
         WizardStage::Confirm => {
-            lines.push(Line::from("确认后进入关键写盘阶段。请输入 YES："));
+            lines.push(Line::from(if wizard.kind == WriteKind::Restore {
+                "确认后进入关键写盘阶段。请输入 YES："
+            } else {
+                "确认后开始只读备份。请输入 YES："
+            }));
             lines.push(Line::from(format!("> {}", wizard.confirmation)));
             if let Some(message) = &wizard.message {
                 lines.push(Line::from(safe(message)));
             }
         }
         WizardStage::Running => {
-            lines.push(Line::from(
-                "关键写盘阶段进行中；q / Esc / Ctrl-C 不会中断当前事务。",
-            ));
+            lines.push(Line::from(if wizard.kind == WriteKind::Restore {
+                "关键写盘阶段进行中；q / Esc / Ctrl-C 不会中断当前事务。"
+            } else {
+                "只读备份进行中；q / Esc / Ctrl-C 不会中断当前事务。"
+            }));
             // 类型化事件映射为单行；尚无事件时回退到进入 Running 的初始提示。
             let progress_line = wizard.progress.as_ref().map(write_progress_text);
             if let Some(text) = progress_line.or_else(|| wizard.message.clone()) {
@@ -2469,8 +2458,7 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
         (CoreMode::Busy, "READ LBA0-12")
     } else if state.active_scan_pending() {
         (CoreMode::Busy, "BACKGROUND SCAN")
-    } else if state.apply().is_some()
-        || state.wizard().is_some()
+    } else if state.wizard().is_some()
         || (state.workspace() == Workspace::Provision
             && state.provision().stage != ProvisionStage::Menu)
     {
@@ -2478,14 +2466,19 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
     } else {
         (CoreMode::Stable, "INTERACTIVE")
     };
+    let has_notice = state.notice().is_some();
+    let mut constraints = vec![
+        Constraint::Length(3),
+        Constraint::Length(3),
+        Constraint::Min(4),
+    ];
+    if has_notice {
+        constraints.push(Constraint::Length(3));
+    }
+    constraints.push(Constraint::Length(3));
     let chunks = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(3),
-            Constraint::Length(3),
-            Constraint::Min(4),
-            Constraint::Length(3),
-        ])
+        .constraints(constraints)
         .split(area);
 
     let title = Paragraph::new(Line::from(vec![
@@ -2503,11 +2496,10 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
     frame.render_widget(title, chunks[0]);
 
     let workspace_index = match state.workspace() {
-        Workspace::Devices => 0,
+        Workspace::Devices | Workspace::Provision => 0,
         Workspace::Backups => 1,
-        Workspace::Provision => 2,
     };
-    let workspace_tabs = Tabs::new(["设备", "备份", "制盘"])
+    let workspace_tabs = Tabs::new(["设备", "备份"])
         .select(workspace_index)
         .block(
             Block::default()
@@ -2527,7 +2519,6 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
         || state.backup_delete().is_some()
         || state.backup_batch_delete().is_some()
         || state.backup_prune().is_some()
-        || state.apply().is_some()
         || state.wizard().is_some()
         || matches!(state.input_mode(), InputMode::Command | InputMode::Help);
     let (content_area, animation_area) = if overlay_active && body.width >= 118 && body.height >= 14
@@ -2551,8 +2542,6 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
         draw_backup_batch_delete(frame, content_area, state);
     } else if state.backup_prune().is_some() {
         draw_backup_prune(frame, content_area, state);
-    } else if state.apply().is_some() {
-        draw_apply(frame, content_area, state);
     } else if state.wizard().is_some() {
         draw_wizard(frame, content_area, state);
     } else {
@@ -2593,7 +2582,7 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
                     Line::from(vec![
                         Span::styled("制盘: ", secondary()),
                         Span::raw(
-                            "四种官方模式 + 现有盘免密改造 + 离线快照转换；物理写盘先预览再 YES",
+                            "四种官方模式 + 离线快照转换；物理写盘先预览再 YES",
                         ),
                     ]),
                     Line::from(vec![
@@ -2660,39 +2649,87 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
             )
         }
     } else if state.input_mode() == InputMode::Command {
-        format!(":{}", safe(state.input_buffer()))
-    } else if let Some(message) = state.notice() {
-        safe(message)
-    } else if let Some(search) = state.search_status() {
-        if state.inspect_data().is_some() {
-            format!("{}  ·  n/N 下一个/上一个", safe(&search))
-        } else {
-            safe(&search)
+        format!(
+            ":{}  ·  Enter 执行  ·  Backspace 删除  ·  Esc 取消",
+            safe(state.input_buffer())
+        )
+    } else if state.input_mode() == InputMode::Help {
+        "Esc 返回  ·  q 退出".to_string()
+    } else if state.wizard().is_some() {
+        match state.wizard().unwrap().stage {
+            WizardStage::Confirm => {
+                "输入 YES  ·  Backspace 删除  ·  Enter 执行  ·  Esc 返回".to_string()
+            }
+            WizardStage::Running => "q / Ctrl-C 延迟退出".to_string(),
+            WizardStage::Result => "Enter / Esc 关闭".to_string(),
         }
-    } else if state.inspect_pending() {
-        "后台读取 Inspect 数据中；界面可继续响应".to_string()
-    } else if state.active_scan_pending() {
-        "后台扫描中；界面可继续操作".to_string()
+    } else if let Some(delete) = state.backup_delete() {
+        match delete.stage {
+            WizardStage::Confirm => "输入 YES · Backspace 删除 · Enter 删除 · Esc 取消".to_string(),
+            WizardStage::Running => "q / Ctrl-C 延迟退出".to_string(),
+            WizardStage::Result => "Enter / Esc 关闭".to_string(),
+        }
+    } else if let Some(batch) = state.backup_batch_delete() {
+        use super::state::BackupBatchDeleteStage;
+        match batch.stage {
+            BackupBatchDeleteStage::Planning => "正在生成删除计划…".to_string(),
+            BackupBatchDeleteStage::Review => "Enter 确认 · Esc 取消".to_string(),
+            BackupBatchDeleteStage::Confirm => {
+                "输入 YES · Backspace 删除 · Enter 执行 · Esc 返回".to_string()
+            }
+            BackupBatchDeleteStage::Running => "q / Ctrl-C 延迟退出".to_string(),
+            BackupBatchDeleteStage::Result => "Enter / Esc 关闭".to_string(),
+        }
+    } else if let Some(prune) = state.backup_prune() {
+        use super::state::BackupPruneStage;
+        match prune.stage {
+            BackupPruneStage::Input => {
+                "输入保留份数 · Backspace 删除 · Enter 预览 · Esc 取消".to_string()
+            }
+            BackupPruneStage::Planning => "正在生成清理计划…".to_string(),
+            BackupPruneStage::Review => "Enter 确认 · Esc 取消".to_string(),
+            BackupPruneStage::Confirm => {
+                "输入 YES · Backspace 删除 · Enter 执行 · Esc 返回".to_string()
+            }
+            BackupPruneStage::Running => "q / Ctrl-C 延迟退出".to_string(),
+            BackupPruneStage::Result => "Enter / Esc 关闭".to_string(),
+        }
+    } else if state.inspect_data().is_some() {
+        "↑/↓/j/k LBA  ·  ←/→ 视图  ·  / 搜索  ·  Esc 返回".to_string()
     } else {
         match state.workspace() {
             Workspace::Devices => {
-                "Tab/Shift-Tab/h/l/←/→ 页面  ·  ↑/↓/j/k 移动  ·  i 快速 Inspect  ·  I 高级 Inspect  ·  b 备份  ·  a Apply  ·  r 刷新  ·  q 退出".to_string()
+                if state.selected_device().is_some() {
+                    "Tab/Shift-Tab/←/→ 页面  ·  ↑/↓/j/k 移动  ·  Enter 制盘  ·  i/I 检查  ·  b/B 备份  ·  r 刷新  ·  q 退出".to_string()
+                } else {
+                    "Tab/Shift-Tab/←/→ 页面  ·  r 刷新  ·  q 退出".to_string()
+                }
             }
             Workspace::Backups => {
-                "Tab/Shift-Tab/h/l/←/→ 页面 · ↑/↓/j/k 移动 · Space 勾选 · X 批删 · i/I 检查 · v 校验 · R 恢复 · D 单删 · q 退出".to_string()
+                if state.selected_backup().is_some() {
+                    "Tab/Shift-Tab/←/→ 页面 · ↑/↓/j/k 移动 · Space 勾选 · X 批删 · i/I 检查 · v 校验 · R 恢复 · D 单删 · q 退出".to_string()
+                } else {
+                    "Tab/Shift-Tab/←/→ 页面 · r 刷新 · q 退出".to_string()
+                }
             }
             Workspace::Provision => match state.provision().stage {
                 ProvisionStage::SelectDisk => "制盘选盘：↑/↓/j/k 选择 USB 盘  ·  Tab/Shift-Tab/h/l/←/→ 切页面  ·  Enter 固定目标  ·  Esc 返回设备页".to_string(),
                 ProvisionStage::BackupPrompt => {
-                    "制盘前保存：↑/↓/j/k 选择  ·  Tab/Shift-Tab/h/l/←/→ 切页面  ·  Enter 确认  ·  Esc 返回选盘".to_string()
+                    "制盘前保存：↑/↓/j/k 选择  ·  Tab/Shift-Tab/h/l/←/→ 切页面  ·  Enter 确认  ·  Esc 返回设备".to_string()
                 }
                 ProvisionStage::BackupSaving => "正在保存当前盘…".to_string(),
                 ProvisionStage::Menu => {
                     "Tab/Shift-Tab/h/l/←/→ 页面  ·  ↑/↓/j/k 选择方案  ·  Enter 打开  ·  r 刷新目标  ·  :provision 直达  ·  ? 帮助  ·  q 退出".to_string()
                 }
-                ProvisionStage::Form => {
-                    "↑/↓ 字段  ·  Tab/Shift-Tab/←/→ 切页面  ·  h/j/k/l 作为文本输入  ·  Space 切换选项  ·  Enter 生成只读计划  ·  Esc 返回".to_string()
+                ProvisionStage::Form if state.provision_selected_field_is_editable() => {
+                    let unit_key = state
+                        .provision_field_hint(state.provision().field_selected)
+                        .is_some_and(|hint| hint == "Space 切换 MiB / GiB / sector")
+                        .then_some(" · Space 单位")
+                        .unwrap_or("");
+                    format!("↑/↓ 字段 · ←/→ 光标 · Home/End 首尾 · 输入/Backspace 编辑{unit_key} · Tab/Shift-Tab 页面 · Enter 预览 · Esc 返回")
                 }
+                ProvisionStage::Form => "↑/↓ 字段 · Space 切换 · Tab/Shift-Tab/←/→ 页面 · Enter 预览 · Esc 返回".to_string(),
                 ProvisionStage::Planning => "正在生成只读计划…".to_string(),
                 ProvisionStage::Review => {
                     "Enter 最终确认  ·  E 导出镜像（新盘计划）  ·  Esc 返回修改".to_string()
@@ -2718,8 +2755,19 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
                 .borders(Borders::ALL)
                 .border_style(accent()),
         ),
-        chunks[3],
+        chunks[usize::from(has_notice) + 3],
     );
+    if let Some(message) = state.notice() {
+        frame.render_widget(
+            Paragraph::new(safe(message)).block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .border_style(warning())
+                    .title("提示"),
+            ),
+            chunks[3],
+        );
+    }
 }
 
 #[cfg(test)]

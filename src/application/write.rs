@@ -1,16 +1,15 @@
-//! Shared apply/restore application service.
+//! Shared backup/restore application service.
 //!
 //! CLI and TUI must enter raw-disk mutation through this module. The safety chain remains single-source:
-//! system-disk/USB whole-disk guard → selector pinning by callers → pre-write backup (apply) →
+//! system-disk/USB whole-disk guard → selector pinning by callers →
 //! unmount/lock → reopen identity recheck → atomic write → sync/readback/rollback.
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use crate::common::*;
-use crate::diskio::{self, backup_is_nopwd, find_backups, raw_path, Clock, DiskFacts, SectorDev};
+use crate::diskio::{self, raw_path, Clock, DiskFacts, SectorDev};
 use crate::identify::identify;
-use crate::sectors::{convert, looks_nopwd, ConvertReport};
 use crate::selectors::{BackupSelector, DeviceSelector};
 use crate::sysinfo::{self, CmdRunner};
 
@@ -24,34 +23,10 @@ const OPEN_WAIT: std::time::Duration = std::time::Duration::from_secs(10);
 /// confirm_yes)不属于进度，仍留在 Prompter。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum WriteEvent {
-    ApplyDeviceHeader {
-        disk: u32,
-        size_text: String,
-        vid: String,
-        pid: String,
-    },
-    ExistingBackupsHeader {
-        count: usize,
-    },
-    ExistingBackupsMenu {
-        rows: Vec<(String, bool)>,
-    },
-    NoExistingBackups,
-    AlreadyNopwdHint,
-    DryRunPreview {
-        disk: u32,
-        needs_force: bool,
-    },
-    ForceRewriteNotice,
     BackupCreated {
         path: PathBuf,
     },
     BackupCreatedIsNopwd,
-    RestoreCommandHint {
-        path: PathBuf,
-        disk: u32,
-    },
-    ApplyWriteCompleted,
     RestoreMatchesHeader {
         disk: u32,
         onlyid: String,
@@ -78,82 +53,17 @@ pub enum WriteEvent {
         path: PathBuf,
     },
     RestoreWriteCompleted,
-    Convert(ConvertReport),
 }
 
 /// 逐字节复刻旧 output!/outputln! 的文本(含样式与换行位置)。CLI 与测试黄金基线共用。
 pub fn render_event_text(event: &WriteEvent) -> String {
     match event {
-        WriteEvent::ApplyDeviceHeader {
-            disk,
-            size_text,
-            vid,
-            pid,
-        } => format!(
-            "{}  disk{} · {} · USB {}:{}\n",
-            crate::ui::bold("盘"),
-            disk,
-            size_text,
-            vid,
-            pid
-        ),
-        WriteEvent::ExistingBackupsHeader { count } => format!(
-            "\n{}  本盘已有 {} 份(写入时会自动再备份):\n",
-            crate::ui::bold("备份"),
-            count
-        ),
-        // 旧 output! 语义: 菜单表格自带尾换行，不再补
-        WriteEvent::ExistingBackupsMenu { rows } => crate::ui::backup_menu_str(rows),
-        WriteEvent::NoExistingBackups => format!(
-            "\n{}  尚无; 写入时自动创建首个备份\n",
-            crate::ui::bold("备份")
-        ),
-        WriteEvent::AlreadyNopwdHint => format!(
-            "\n{}\n",
-            crate::ui::yellow(
-                "提示: 该盘已是改造后的免密盘 — 再次写入只会重写相同内容(实测幂等)。"
-            )
-        ),
-        WriteEvent::DryRunPreview { disk, needs_force } => {
-            let tail = if *needs_force {
-                " (该盘已是免密盘, 须加 --force)"
-            } else {
-                ""
-            };
-            format!(
-                "{}\n",
-                crate::ui::dim(&format!(
-                    "操作  以上为预览(dry-run), 未写盘。执行写入: edpcli apply --disk {}{}",
-                    disk, tail
-                ))
-            )
+        WriteEvent::BackupCreated { path } => {
+            format!("{}  {}\n", crate::ui::green("备份"), path.display())
         }
-        WriteEvent::ForceRewriteNotice => format!(
-            "{}\n",
-            crate::ui::yellow(
-                "--force: 继续重写。本次自动备份将标记为免密状态(文件名含 _nopwd); 加密原盘备份是更早时间戳那份。"
-            )
-        ),
-        WriteEvent::BackupCreated { path } => format!(
-            "{}  {}\n",
-            crate::ui::green("备份"),
-            path.display()
-        ),
         WriteEvent::BackupCreatedIsNopwd => format!(
             "{}\n",
             crate::ui::yellow("注意: 本份备份为【免密状态】快照 — 还原它不会回到加密原盘。")
-        ),
-        WriteEvent::RestoreCommandHint { path, disk } => format!(
-            "{}  edpcli backup restore \"{}\" --disk {} --yes\n",
-            crate::ui::bold("还原"),
-            path.display(),
-            disk
-        ),
-        WriteEvent::ApplyWriteCompleted => format!(
-            "{}\n",
-            crate::ui::green(
-                "已写入, 读回校验通过。请拔出 U 盘重新插入, 数据区格式化 exFAT/NTFS 即得免密可写区。"
-            )
         ),
         WriteEvent::RestoreMatchesHeader {
             disk,
@@ -179,11 +89,9 @@ pub fn render_event_text(event: &WriteEvent) -> String {
         WriteEvent::RestoreSelectionRetry { message } => {
             format!("{}\n", crate::ui::yellow(message))
         }
-        WriteEvent::BackupShaVerified { digest } => format!(
-            "{}  {}\n",
-            crate::ui::green("SHA-256 校验通过"),
-            digest
-        ),
+        WriteEvent::BackupShaVerified { digest } => {
+            format!("{}  {}\n", crate::ui::green("SHA-256 校验通过"), digest)
+        }
         WriteEvent::RestoreSnapshotNopwdWarning => format!(
             "{}\n",
             crate::ui::yellow(
@@ -208,7 +116,6 @@ pub fn render_event_text(event: &WriteEvent) -> String {
             "{}\n",
             crate::ui::green("已还原, 读回校验通过。请拔出重插。")
         ),
-        WriteEvent::Convert(report) => crate::sectors::render_convert_report(report),
     }
 }
 
@@ -365,171 +272,10 @@ pub(crate) fn auto_pick_disk(
     DeviceSelector::new(None).resolve(runner, prompt)
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum ApplyMode {
-    DryRun,
-    Write { force: bool },
-}
-
-/// apply 的预览/真写共用主流程。disk 为已选定并通过系统盘防护的盘号。
-pub fn apply_flow(
-    mode: ApplyMode,
-    disk: u32,
-    size_gb: Option<f64>,
-    ctx: &mut Ctx,
-    dev: &mut dyn SectorDev,
-) -> EdpCliResult<i32> {
-    let (apply, force) = match mode {
-        ApplyMode::DryRun => (false, false),
-        ApplyMode::Write { force } => (true, force),
-    };
-    guard_usb_disk(ctx.runner, disk)?;
-    let runner = ctx.runner;
-
-    let secs = sysinfo::disk_total_sectors(runner, disk);
-    let (vid, pid) = sysinfo::usb_vid_pid(runner, disk);
-    let sz = match secs {
-        Some(s) => fmt_gb(s * SECTOR as u64),
-        None => "unknown 扇".to_string(),
-    };
-    ctx.prompt.write_event(WriteEvent::ApplyDeviceHeader {
-        disk,
-        size_text: sz,
-        vid: vid.clone(),
-        pid: pid.clone(),
-    });
-
-    let img = read_image(dev)?;
-    let id = identify(runner, disk, &img[7 * SECTOR..8 * SECTOR]);
-    let did = match id.device_id {
-        Some(d) => d,
-        None => {
-            return Err(err(
-                EXIT_TARGET,
-                "错误: 无法识别 device_id(LBA7 两候选均未解出 EDPF); 可插好盘重试",
-            ))
-        }
-    };
-    let lba4 = &img[4 * SECTOR..5 * SECTOR];
-    let label_id = diskio::lba4_label_id_from(lba4);
-    let facts = DiskFacts {
-        disk,
-        total_sectors: secs,
-        vid,
-        pid,
-        label_id,
-    };
-    let tag16 = diskio::lba4_tag16_from(lba4)
-        .ok_or_else(|| err(EXIT_IO, "错误: LBA4 缺少 16B 身份标签"))?;
-
-    let read = |lba: u32| -> EdpCliResult<Vec<u8>> {
-        Ok(img[lba as usize * SECTOR..(lba as usize + 1) * SECTOR].to_vec())
-    };
-    let mut convert_report =
-        |report: ConvertReport| ctx.prompt.write_event(WriteEvent::Convert(report));
-    let result = convert(&read, &did, size_gb, &mut convert_report)?;
-
-    let baks = find_backups(&ctx.backup_dir, &facts, Some(&did), Some(tag16));
-    if !baks.is_empty() {
-        ctx.prompt
-            .write_event(WriteEvent::ExistingBackupsHeader { count: baks.len() });
-        let entries: Vec<(String, bool)> = baks
-            .iter()
-            .map(|b| {
-                (
-                    diskio::backup_display_time(b, diskio::mtime_epoch(b)),
-                    backup_is_nopwd(b, &did),
-                )
-            })
-            .collect();
-        ctx.prompt
-            .write_event(WriteEvent::ExistingBackupsMenu { rows: entries });
-    } else {
-        ctx.prompt.write_event(WriteEvent::NoExistingBackups);
-    }
-
-    let already = looks_nopwd(&read, &did)?;
-    if already {
-        ctx.prompt.write_event(WriteEvent::AlreadyNopwdHint);
-    }
-    if !apply {
-        ctx.prompt.write_event(WriteEvent::DryRunPreview {
-            disk,
-            needs_force: already,
-        });
-        return Ok(EXIT_OK);
-    }
-    if already && !force {
-        return Err(err(
-            EXIT_ALREADY_NOPWD,
-            format!(
-                "错误: 该盘已是免密盘, 拒绝重复写入(重写内容相同, 实测幂等无害)。确需重写: edpcli apply --disk {} --force",
-                disk
-            ),
-        ));
-    }
-    if already {
-        ctx.prompt.write_event(WriteEvent::ForceRewriteNotice);
-    }
-
-    let total_sectors = facts.total_sectors.ok_or_else(|| {
-        err(
-            EXIT_BACKUP,
-            "错误: 无法获取磁盘总扇区数，无法创建 Metadata 级备份",
-        )
-    })?;
-    let metadata = crate::backup_metadata::acquire_metadata(dev, &img, &did, total_sectors)
-        .map_err(|message| {
-            err(
-                EXIT_BACKUP,
-                format!("错误: Metadata 级备份采集失败: {message}"),
-            )
-        })?;
-    let (bpath, backup_is_nopwd) =
-        diskio::create_metadata_backup(&facts, &img, &did, metadata, &ctx.backup_dir, ctx.clock)?;
-    ctx.prompt.write_event(WriteEvent::BackupCreated {
-        path: bpath.clone(),
-    });
-    if backup_is_nopwd {
-        ctx.prompt.write_event(WriteEvent::BackupCreatedIsNopwd);
-    }
-    ctx.prompt
-        .write_event(WriteEvent::RestoreCommandHint { path: bpath, disk });
-
-    if !ctx.prompt.confirm_yes(&crate::ui::bold(&format!(
-        "将改写 disk{} LBA0/6/7/12/9。输入 YES: ",
-        disk
-    ))) {
-        return Err(err(EXIT_CANCELLED, "已取消(未写盘)"));
-    }
-    let _write_guard = sysinfo::prepare_write(ctx.runner, disk)
-        .map_err(|e| err(EXIT_IO, format!("错误: 无法卸载 disk{}: {}", disk, e)))?;
-    // 卸载后才切 O_RDWR(挂载态打开读写会撞 EBUSY); 写序由 atomic_write_sectors
-    // 保证: LBA0(唯一改 MBR 的扇区)最后写, 单 fd 全程持有到写完校验完
-    dev.reopen_rdwr(OPEN_WAIT).map_err(|e| {
-        err(
-            EXIT_IO,
-            format!("错误: 无法以读写打开 {}: {}", raw_path(disk), e),
-        )
-    })?;
-    verify_reopened_snapshot(dev, &img)?;
-    let mut writes: BTreeMap<u32, Vec<u8>> = BTreeMap::new();
-    writes.insert(6, result.lba6);
-    writes.insert(7, result.lba7);
-    writes.insert(12, result.lba12);
-    if let Some(l9) = result.lba9 {
-        writes.insert(9, l9);
-    }
-    writes.insert(0, result.lba0);
-    diskio::atomic_write_sectors(dev, &writes)?;
-    ctx.prompt.write_event(WriteEvent::ApplyWriteCompleted);
-    Ok(EXIT_OK)
-}
-
 /// 为当前已选定 U 盘创建 Metadata 级 EDPB 备份。
 ///
 /// 这是纯只读介质路径：读取身份、LBA0-12、分区关键元数据和盘尾证据，
-/// 然后交给与 apply 写前备份完全相同的 Metadata writer。此函数不得调用
+/// 然后交给 Metadata writer。此函数不得调用
 /// prepare_write、reopen_rdwr 或任何扇区写入。
 pub fn backup_create_flow(
     disk: u32,

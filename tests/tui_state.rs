@@ -221,10 +221,9 @@ fn provision_escape_walks_back_one_level_without_exiting() {
     assert_eq!(state.provision_select_disk(), Some(6));
     assert_eq!(state.provision().stage, ProvisionStage::BackupPrompt);
     assert_eq!(state.navigate(NavCommand::Escape, 20), StateEffect::None);
-    assert_eq!(state.provision().stage, ProvisionStage::SelectDisk);
-    assert!(state.selected_device_disk().is_none());
+    assert_eq!(state.workspace(), Workspace::Devices);
 
-    assert_eq!(state.provision_select_disk(), Some(6));
+    assert_eq!(state.begin_provision_for_selected_device(), Ok(6));
     state.provision_skip_backup();
     assert_eq!(state.provision().stage, ProvisionStage::Menu);
     assert_eq!(state.navigate(NavCommand::Escape, 20), StateEffect::None);
@@ -239,7 +238,7 @@ fn provision_escape_walks_back_one_level_without_exiting() {
 }
 
 #[test]
-fn provision_tab_roundtrip_preserves_current_flow_state() {
+fn provision_flow_is_hidden_from_tab_cycle_and_explicit_reentry_preserves_state() {
     let mut state = AppState::new();
     state.replace_devices(vec![device(64_000_000_000)]);
     state.navigate(NavCommand::WorkspaceProvision, 20);
@@ -252,7 +251,10 @@ fn provision_tab_roundtrip_preserves_current_flow_state() {
     state.navigate(NavCommand::NextWorkspace, 20);
     assert_eq!(state.workspace(), Workspace::Devices);
     state.navigate(NavCommand::PreviousWorkspace, 20);
-
+    assert_eq!(state.workspace(), Workspace::Backups);
+    state.navigate(NavCommand::NextWorkspace, 20);
+    assert_eq!(state.workspace(), Workspace::Devices);
+    state.navigate(NavCommand::WorkspaceProvision, 20);
     assert_eq!(state.workspace(), Workspace::Provision);
     assert_eq!(state.provision().stage, ProvisionStage::Form);
     assert_eq!(state.selected_device_disk(), Some(6));
@@ -261,6 +263,8 @@ fn provision_tab_roundtrip_preserves_current_flow_state() {
     state.navigate(NavCommand::Right, 20);
     assert_eq!(state.workspace(), Workspace::Devices);
     state.navigate(NavCommand::Left, 20);
+    assert_eq!(state.workspace(), Workspace::Backups);
+    state.navigate(NavCommand::WorkspaceProvision, 20);
     assert_eq!(state.workspace(), Workspace::Provision);
     assert_eq!(state.provision().stage, ProvisionStage::Form);
     assert_eq!(state.selected_device_disk(), Some(6));
@@ -409,6 +413,33 @@ fn provision_uses_only_per_partition_quick_exact_inputs() {
 }
 
 #[test]
+fn provision_text_field_cursor_edits_in_place() {
+    let mut state = AppState::new();
+    state.replace_devices(vec![device(64_000_000_000)]);
+    state.navigate(NavCommand::WorkspaceProvision, 20);
+    state.provision_select_disk();
+    state.provision_skip_backup();
+    assert_eq!(state.provision_begin_selected(), ProvisionKind::Mode0);
+
+    state.provision_mut().form.label_id = "ABCDE".into();
+    state.provision_mut().field_selected = 0;
+    state.provision_cursor_end();
+    assert_eq!(state.provision_field_cursor(), 5);
+    state.provision_move_cursor(-2);
+    assert_eq!(state.provision_field_cursor(), 3);
+    state.provision_push_char('X');
+    assert_eq!(state.provision().form.label_id, "ABCXDE");
+    assert_eq!(state.provision_field_cursor(), 4);
+    state.provision_backspace();
+    assert_eq!(state.provision().form.label_id, "ABCDE");
+    assert_eq!(state.provision_field_cursor(), 3);
+    state.provision_cursor_home();
+    state.provision_push_char('Z');
+    assert_eq!(state.provision().form.label_id, "ZABCDE");
+    assert_eq!(state.provision_field_cursor(), 1);
+}
+
+#[test]
 fn provision_capacity_unit_cycles_mib_gib_sector_without_geometry_change() {
     use edpcli::provision::{CapacityInputMode, QuickCapacityUnit};
 
@@ -434,11 +465,11 @@ fn provision_capacity_unit_cycles_mib_gib_sector_without_geometry_change() {
         state.provision().form.share_quick_unit,
         QuickCapacityUnit::GiB
     );
-    assert_eq!(state.provision().form.share_mib, "6.48828125");
+    assert_eq!(state.provision().form.share_mib, "6.488");
     assert!(state
         .provision_visible_fields()
         .iter()
-        .any(|(label, value, _)| label == "交换区容量 (GiB)" && *value == "6.48828125"));
+        .any(|(label, value, _)| label == "交换区容量 (GiB)" && *value == "6.488"));
     let request = state.provision_request().expect("GiB request");
     assert_eq!(request.share_mib, None);
     assert_eq!(request.share_sectors, Some(13_606_912));
@@ -459,7 +490,48 @@ fn provision_capacity_unit_cycles_mib_gib_sector_without_geometry_change() {
         state.provision().form.share_quick_unit,
         QuickCapacityUnit::MiB
     );
-    assert_eq!(state.provision().form.share_mib, "6644");
+    assert_eq!(state.provision().form.share_mib, "6644.000");
+}
+
+#[test]
+fn editing_generated_gib_text_uses_user_value_even_if_display_text_is_identical() {
+    use edpcli::provision::{CapacityInputMode, QuickCapacityUnit};
+
+    let mut state = AppState::new();
+    state.replace_devices(vec![device(64_000_000_000)]);
+    state.navigate(NavCommand::WorkspaceProvision, 20);
+    state.provision_select_disk();
+    state.provision_skip_backup();
+    state.provision_begin_selected();
+    state.provision_mut().form.share_input_mode = CapacityInputMode::Exact;
+    state.provision_mut().form.share_sectors = "13606912".into();
+    state.provision_mut().field_selected = state
+        .provision_visible_fields()
+        .iter()
+        .position(|(label, _, _)| label.starts_with("交换区容量"))
+        .unwrap();
+    assert!(state.provision_toggle_selected_option());
+    assert!(state.provision_toggle_selected_option());
+    assert_eq!(
+        state.provision().form.share_quick_unit,
+        QuickCapacityUnit::GiB
+    );
+    assert_eq!(state.provision().form.share_mib, "6.488");
+    assert_eq!(
+        state.provision_request().unwrap().share_sectors,
+        Some(13_606_912)
+    );
+
+    state.provision_cursor_end();
+    state.provision_backspace();
+    state.provision_push_char('8');
+    assert_eq!(state.provision().form.share_mib, "6.488");
+    assert_eq!(
+        state.provision_request().unwrap().share_sectors,
+        Some(13_606_322)
+    );
+    assert!(state.provision_toggle_selected_option());
+    assert_eq!(state.provision().form.share_sectors, "13606322");
 }
 
 #[test]
@@ -491,11 +563,11 @@ fn provision_exact_sector_capacity_cycles_through_decimal_mib_and_gib_losslessly
         state.provision().form.boot_quick_unit,
         QuickCapacityUnit::MiB
     );
-    assert_eq!(state.provision().form.boot_mib, "9.96923828125");
+    assert_eq!(state.provision().form.boot_mib, "9.969");
     assert!(state
         .provision_visible_fields()
         .iter()
-        .any(|(label, value, _)| label == "启动区容量 (MiB)" && *value == "9.96923828125"));
+        .any(|(label, value, _)| label == "启动区容量 (MiB)" && *value == "9.969"));
     let request = state.provision_request().expect("decimal MiB request");
     assert_eq!(request.boot_mib, None);
     assert_eq!(request.boot_sectors, Some(20_417));
@@ -539,11 +611,9 @@ fn provision_capacity_hints_match_each_partition() {
     let boot = hint_for("启动区");
     let share = hint_for("交换区");
     let encrypt = hint_for("保密区");
-    assert!(boot.contains("启动区"), "{boot}");
-    assert!(share.contains("交换区"), "{share}");
-    assert!(encrypt.contains("保密区"), "{encrypt}");
-    assert_ne!(boot, share);
-    assert_ne!(share, encrypt);
+    assert_eq!(boot, "Space 切换 MiB / GiB / sector");
+    assert_eq!(share, boot);
+    assert_eq!(encrypt, boot);
 }
 
 #[test]
@@ -593,7 +663,7 @@ fn provision_layout_editor_reports_total_space_and_selected_partition_limits() {
         .position(|(label, _, _)| label.starts_with("保密区容量"))
         .expect("encrypt capacity");
     state.provision_mut().field_selected = encrypt;
-    let lines = state.provision_layout_editor_lines(40);
+    let lines = state.provision_layout_editor_lines();
 
     assert!(lines.iter().any(|line| line.contains("整盘")), "{lines:?}");
     assert!(
@@ -604,10 +674,14 @@ fn provision_layout_editor_reports_total_space_and_selected_partition_limits() {
         lines.iter().any(|line| line.contains("未分配")),
         "{lines:?}"
     );
-    assert!(
-        lines.iter().any(|line| line.starts_with("比例 [")),
-        "{lines:?}"
-    );
+    let bar = state.provision_layout_bar(40);
+    assert_eq!(bar.len(), 40);
+    assert!(bar
+        .iter()
+        .any(|kind| *kind == edpcli::tui::state::ProvisionBarKind::Encrypt));
+    assert!(bar
+        .iter()
+        .any(|kind| *kind == edpcli::tui::state::ProvisionBarKind::Free));
     assert!(lines.iter().any(|line| line == "当前: 保密区"), "{lines:?}");
     assert!(
         lines.iter().any(|line| line.contains("最大可设")),
@@ -680,7 +754,7 @@ fn provision_layout_rows_are_sorted_by_start_lba_including_free_space() {
     state.provision_mut().form.encrypt_start_lba = "13627392".into();
 
     let rows = state
-        .provision_layout_editor_lines(40)
+        .provision_layout_editor_lines()
         .into_iter()
         .filter(|line| {
             line.starts_with("启动区")
@@ -756,7 +830,7 @@ fn registered_mode0_to_mode1_preview_keeps_encrypt_anchor_and_blocks_overlap() {
         .position(|(label, _, _)| label.starts_with("交换区容量"))
         .expect("share capacity");
     state.provision_mut().field_selected = share_index;
-    let constraints = state.provision_layout_editor_lines(40);
+    let constraints = state.provision_layout_editor_lines();
     assert!(
         constraints.iter().any(|line| {
             line.contains(&format!("限制: 后续保密区固定起点 LBA {encrypt_start}"))
@@ -809,7 +883,7 @@ fn plain_mode0_preview_reflows_unanchored_share_after_boot_edit() {
         .position(|(label, _, _)| label.starts_with("启动区容量"))
         .expect("boot capacity");
     state.provision_mut().field_selected = boot_index;
-    let constraints = state.provision_layout_editor_lines(40);
+    let constraints = state.provision_layout_editor_lines();
     assert!(
         constraints
             .iter()
@@ -838,10 +912,10 @@ fn mode0_defaults_share_to_remaining_space_once_without_linking_fields() {
     let expected_share_mib = (usable_sectors - 20_417 - 1024 * 2048) / 2048;
 
     assert_eq!(state.provision().form.boot_sectors, "20417");
-    assert_eq!(state.provision().form.encrypt_mib, "1024");
+    assert_eq!(state.provision().form.encrypt_mib, "1024.000");
     assert_eq!(
         state.provision().form.share_mib,
-        expected_share_mib.to_string()
+        format!("{expected_share_mib}.000")
     );
     let expected_remainder = usable_sectors - 20_417 - expected_share_mib * 2048 - 1024 * 2048;
     assert!(state
@@ -855,7 +929,9 @@ fn mode0_defaults_share_to_remaining_space_once_without_linking_fields() {
         .iter()
         .position(|(label, _, _)| label == "保密区容量 (MiB)")
         .expect("encrypt field");
-    for _ in 0..4 {
+    state.provision_cursor_end();
+    let current_len = state.provision().form.encrypt_mib.chars().count();
+    for _ in 0..current_len {
         state.provision_backspace();
     }
     for ch in "512".chars() {
@@ -874,7 +950,7 @@ fn mode0_defaults_share_to_remaining_space_once_without_linking_fields() {
 
     state.replace_devices(vec![device(32_000_000_000)]);
     state.provision_begin_selected();
-    assert_eq!(state.provision().form.encrypt_mib, "1024");
+    assert_eq!(state.provision().form.encrypt_mib, "1024.000");
     assert_ne!(state.provision().form.share_mib, original_share);
 }
 

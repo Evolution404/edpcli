@@ -2,7 +2,7 @@
 //! - `render_event_text` / `render_convert_report` 在无色模式下逐字节锁死 CLI 文本
 //!   (黄金基线，防事件化改造造成输出漂移)；
 //! - 带 ANSI 的样式渲染仍经 ui::wrap；
-//! - apply/backup-create/restore 实际发出的事件序列(录制型 Prompter)。
+//! - backup-create/restore 实际发出的事件序列(录制型 Prompter)。
 //!
 //! 全部不碰真盘。
 
@@ -38,86 +38,6 @@ fn plain_convert(report: &ConvertReport) -> String {
 // ══════════════════════════════════════════════════════════════════
 // 渲染黄金基线(纯文本)
 // ══════════════════════════════════════════════════════════════════
-#[test]
-fn render_header_and_backup_listing_events() {
-    let event = WriteEvent::ApplyDeviceHeader {
-        disk: 6,
-        size_text: "29.8 GB".into(),
-        vid: "0dd8".into(),
-        pid: "170c".into(),
-    };
-    assert_eq!(plain(&event), "盘  disk6 · 29.8 GB · USB 0dd8:170c\n");
-
-    assert_eq!(
-        plain(&WriteEvent::ExistingBackupsHeader { count: 2 }),
-        "\n备份  本盘已有 2 份(写入时会自动再备份):\n"
-    );
-    let rows = vec![
-        ("2026-09-17 00:00".to_string(), true),
-        ("2026-09-10 08:00".to_string(), false),
-    ];
-    // 菜单直通 backup_menu_str，不额外补换行(旧 output! 语义)
-    assert_eq!(
-        plain(&WriteEvent::ExistingBackupsMenu { rows: rows.clone() }),
-        ui::backup_menu_str(&rows)
-    );
-    assert_eq!(
-        plain(&WriteEvent::NoExistingBackups),
-        "\n备份  尚无; 写入时自动创建首个备份\n"
-    );
-}
-
-#[test]
-fn render_hint_and_dry_run_events() {
-    assert_eq!(
-        plain(&WriteEvent::AlreadyNopwdHint),
-        "\n提示: 该盘已是改造后的免密盘 — 再次写入只会重写相同内容(实测幂等)。\n"
-    );
-    assert_eq!(
-        plain(&WriteEvent::DryRunPreview {
-            disk: 6,
-            needs_force: false
-        }),
-        "操作  以上为预览(dry-run), 未写盘。执行写入: edpcli apply --disk 6\n"
-    );
-    assert_eq!(
-        plain(&WriteEvent::DryRunPreview {
-            disk: 6,
-            needs_force: true
-        }),
-        "操作  以上为预览(dry-run), 未写盘。执行写入: edpcli apply --disk 6 (该盘已是免密盘, 须加 --force)\n"
-    );
-    assert_eq!(
-        plain(&WriteEvent::ForceRewriteNotice),
-        "--force: 继续重写。本次自动备份将标记为免密状态(文件名含 _nopwd); 加密原盘备份是更早时间戳那份。\n"
-    );
-}
-
-#[test]
-fn render_backup_and_completion_events() {
-    assert_eq!(
-        plain(&WriteEvent::BackupCreated {
-            path: "/b/disk6.bin".into()
-        }),
-        "备份  /b/disk6.bin\n"
-    );
-    assert_eq!(
-        plain(&WriteEvent::BackupCreatedIsNopwd),
-        "注意: 本份备份为【免密状态】快照 — 还原它不会回到加密原盘。\n"
-    );
-    assert_eq!(
-        plain(&WriteEvent::RestoreCommandHint {
-            path: "/b/disk6.bin".into(),
-            disk: 6,
-        }),
-        "还原  edpcli backup restore \"/b/disk6.bin\" --disk 6 --yes\n"
-    );
-    assert_eq!(
-        plain(&WriteEvent::ApplyWriteCompleted),
-        "已写入, 读回校验通过。请拔出 U 盘重新插入, 数据区格式化 exFAT/NTFS 即得免密可写区。\n"
-    );
-}
-
 #[test]
 fn render_restore_events() {
     assert_eq!(
@@ -233,22 +153,10 @@ fn render_convert_reports() {
 
 #[test]
 fn styled_events_keep_ansi_wrap() {
-    let header = styled(&WriteEvent::ApplyDeviceHeader {
-        disk: 6,
-        size_text: "29.8 GB".into(),
-        vid: "0dd8".into(),
-        pid: "170c".into(),
-    });
-    assert!(header.contains("\x1b[1m盘\x1b[0m"), "{header}");
     let created = styled(&WriteEvent::BackupCreated {
         path: "/b/disk6.bin".into(),
     });
     assert!(created.contains("\x1b[32m备份\x1b[0m"), "{created}");
-    let preview = styled(&WriteEvent::DryRunPreview {
-        disk: 6,
-        needs_force: false,
-    });
-    assert!(preview.contains("\x1b[2m操作"), "{preview}");
 }
 
 // ══════════════════════════════════════════════════════════════════
@@ -285,17 +193,8 @@ impl edpcli::cli::Prompter for EventRecorderPrompter {
 #[cfg(target_os = "macos")]
 fn tag(event: &WriteEvent) -> &'static str {
     match event {
-        WriteEvent::ApplyDeviceHeader { .. } => "apply-device-header",
-        WriteEvent::ExistingBackupsHeader { .. } => "existing-backups-header",
-        WriteEvent::ExistingBackupsMenu { .. } => "existing-backups-menu",
-        WriteEvent::NoExistingBackups => "no-existing-backups",
-        WriteEvent::AlreadyNopwdHint => "already-nopwd-hint",
-        WriteEvent::DryRunPreview { .. } => "dry-run-preview",
-        WriteEvent::ForceRewriteNotice => "force-rewrite-notice",
         WriteEvent::BackupCreated { .. } => "backup-created",
         WriteEvent::BackupCreatedIsNopwd => "backup-created-is-nopwd",
-        WriteEvent::RestoreCommandHint { .. } => "restore-command-hint",
-        WriteEvent::ApplyWriteCompleted => "apply-write-completed",
         WriteEvent::RestoreMatchesHeader { .. } => "restore-matches-header",
         WriteEvent::RestoreMatchRow { .. } => "restore-match-row",
         WriteEvent::RestoreSelectionRetry { .. } => "restore-selection-retry",
@@ -304,9 +203,6 @@ fn tag(event: &WriteEvent) -> &'static str {
         WriteEvent::RestoreDryRunNotice { .. } => "restore-dry-run-notice",
         WriteEvent::RestoreTargetHeader { .. } => "restore-target-header",
         WriteEvent::RestoreWriteCompleted => "restore-write-completed",
-        WriteEvent::Convert(ConvertReport::Identity { .. }) => "convert-identity",
-        WriteEvent::Convert(ConvertReport::Layout { .. }) => "convert-layout",
-        WriteEvent::Convert(ConvertReport::SectorPlan { .. }) => "convert-sector-plan",
     }
 }
 
@@ -324,62 +220,6 @@ impl edpcli::diskio::Clock for FixedClock {
     fn fmt_human(&self, _e: i64) -> String {
         "2026-09-17 00:00".into()
     }
-}
-
-#[test]
-#[cfg(target_os = "macos")]
-fn apply_dry_run_emits_typed_event_sequence() {
-    use common::*;
-    use edpcli::cli::{apply_flow, ApplyMode, Ctx};
-    use edpcli::common::EXIT_OK;
-    use edpcli::diskio::FileDev;
-
-    let Some((conv, _did)) = converted_image("netac") else {
-        eprintln!("跳过: 真实备份不可用");
-        return;
-    };
-    let runner = netac_runner(6);
-    let tmp = TmpDir::new("wp_dryrun");
-    let bak = tmp.0.join("bak");
-    std::fs::create_dir_all(&bak).unwrap();
-    let img_path = tmp.0.join("disk.img");
-    std::fs::write(&img_path, &conv).unwrap();
-    let mut prompt = EventRecorderPrompter::default();
-    let mut dev = FileDev::open_rdwr(
-        img_path.to_str().unwrap(),
-        std::time::Duration::from_secs(1),
-    )
-    .unwrap();
-    let mut ctx = Ctx {
-        runner: &runner,
-        clock: &FixedClock,
-        prompt: &mut prompt,
-        backup_dir: bak,
-    };
-    let code = apply_flow(ApplyMode::DryRun, 6, None, &mut ctx, &mut dev).unwrap();
-    assert_eq!(code, EXIT_OK);
-    let tags: Vec<&str> = prompt.events.iter().map(tag).collect();
-    assert_eq!(
-        tags,
-        vec![
-            "apply-device-header",
-            "convert-identity",
-            "convert-layout",
-            "convert-sector-plan",
-            "no-existing-backups",
-            "already-nopwd-hint",
-            "dry-run-preview",
-        ],
-        "{:?}",
-        prompt.events
-    );
-    assert!(matches!(
-        &prompt.events[6],
-        WriteEvent::DryRunPreview {
-            needs_force: true,
-            ..
-        }
-    ));
 }
 
 #[test]

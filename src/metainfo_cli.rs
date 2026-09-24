@@ -114,7 +114,7 @@ fn disk_flow(runner: &dyn CmdRunner, mut opts: InfoOpts) -> i32 {
         }
     }
     if !elevate::is_root() {
-        // 与 list/apply/backup create 一致：自动提权不能依赖提权后的环境变量继承。
+        // 与 list/provision/backup create 一致：自动提权不能依赖提权后的环境变量继承。
         // 当 backup_dir 来自 EDPCLI_BACKUP_DIR 时，将其转为显式 --backup-dir 跨过提权边界，
         // 否则 info 提权前后可能显示不同的备份数量。
         let mut argv = argv_with_backup_dir_for_elevation(opts.backup_dir.as_deref());

@@ -5,7 +5,7 @@ use edpcli::tui::{
     render,
     state::{AppState, NavCommand, ProvisionStage, Workspace},
 };
-use ratatui::{backend::TestBackend, Terminal};
+use ratatui::{backend::TestBackend, style::Color, Terminal};
 
 fn usb_device() -> edpcli::disk_scan::Row {
     edpcli::disk_scan::Row {
@@ -62,20 +62,61 @@ fn redraw_handles_small_and_large_terminal_sizes_without_panicking() {
 }
 
 #[test]
-fn three_workspaces_cycle_and_new_overlays_render_at_all_terminal_sizes() {
+fn device_list_shows_ven_prod_and_onlyid_and_enter_shortcut() {
+    let mut state = AppState::new();
+    let mut row = usb_device();
+    row.device_id = Some("disk&ven_aigo&prod_u335".into());
+    row.onlyid = Some("1987718388".into());
+    state.replace_devices(vec![row]);
+    let backend = TestBackend::new(130, 28);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal.draw(|frame| render::draw(frame, &state)).unwrap();
+    let text = terminal
+        .backend()
+        .buffer()
+        .content()
+        .iter()
+        .map(|cell| cell.symbol())
+        .collect::<String>();
+    assert!(text.contains("ven_prod"), "{text}");
+    assert!(text.contains("aigo_u335"), "{text}");
+    assert!(text.contains("1987718388"), "{text}");
+    assert!(text.replace(' ', "").contains("Enter制盘"), "{text}");
+    assert!(!text.contains("Apply"), "{text}");
+}
+
+#[test]
+fn transient_notice_has_its_own_area_and_expires() {
+    let mut state = AppState::new();
+    state.set_notice("批量选择只在备份页可用。");
+    let backend = TestBackend::new(130, 24);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal.draw(|frame| render::draw(frame, &state)).unwrap();
+    let rows = terminal.backend().buffer().content().chunks(130);
+    let lines = rows
+        .map(|row| row.iter().map(|cell| cell.symbol()).collect::<String>())
+        .collect::<Vec<_>>();
+    assert!(lines[19].replace(' ', "").contains("批量选择"), "{lines:?}");
+    assert!(lines[22].replace(' ', "").contains("页面"), "{lines:?}");
+    std::thread::sleep(std::time::Duration::from_millis(4_050));
+    assert_eq!(state.notice(), None);
+}
+
+#[test]
+fn two_tabs_cycle_and_provision_flow_renders_at_all_terminal_sizes() {
     let mut state = AppState::new();
     state.replace_devices(vec![usb_device()]);
     assert_eq!(state.workspace(), Workspace::Devices);
     state.navigate(NavCommand::NextWorkspace, 20);
     assert_eq!(state.workspace(), Workspace::Backups);
     state.navigate(NavCommand::NextWorkspace, 20);
-    assert_eq!(state.workspace(), Workspace::Provision);
-    state.navigate(NavCommand::NextWorkspace, 20);
     assert_eq!(state.workspace(), Workspace::Devices);
     state.navigate(NavCommand::PreviousWorkspace, 20);
+    assert_eq!(state.workspace(), Workspace::Backups);
+    state.navigate(NavCommand::NextWorkspace, 20);
+    assert_eq!(state.begin_provision_for_selected_device(), Ok(6));
     assert_eq!(state.workspace(), Workspace::Provision);
 
-    state.provision_select_disk();
     state.provision_skip_backup();
     state.provision_begin_selected();
     assert_eq!(state.provision().stage, ProvisionStage::Form);
@@ -149,16 +190,135 @@ fn wide_provision_form_uses_two_columns_and_compact_partition_rows() {
             .and_then(|row| {
                 row.iter()
                     .enumerate()
-                    .find(|(x, cell)| *x > 8 && *x < 80 && cell.symbol() == "│")
+                    .find(|(x, cell)| {
+                        *x > 8
+                            && *x < 80
+                            && cell.symbol() == "│"
+                            && cell.style().bg != Some(Color::Cyan)
+                    })
                     .map(|(x, _)| x)
             })
             .expect("internal group separator")
     };
     let identity_separator = internal_separator_x("标签标识");
-    let layout_separator = internal_separator_x("交换区容量");
-    let format_separator = internal_separator_x("交换区格式化");
-    assert_eq!(identity_separator, layout_separator);
-    assert_eq!(layout_separator, format_separator);
+    assert_eq!(identity_separator, internal_separator_x("部门"));
+    let layout_separator = internal_separator_x("启动区容量");
+    assert_eq!(layout_separator, internal_separator_x("交换区容量"));
+    assert_eq!(layout_separator, internal_separator_x("保密区容量"));
+    let format_separator = internal_separator_x("启动区格式化");
+    assert_eq!(format_separator, internal_separator_x("交换区格式化"));
+    assert_eq!(format_separator, internal_separator_x("保密区格式化"));
+    let password_separator = internal_separator_x("初始化密码强制修改");
+    assert_eq!(
+        password_separator,
+        internal_separator_x("交换区密码最大错误次数")
+    );
+    let distinct = [
+        identity_separator,
+        layout_separator,
+        format_separator,
+        password_separator,
+    ]
+    .into_iter()
+    .collect::<std::collections::HashSet<_>>();
+    assert!(
+        distinct.len() > 1,
+        "group separators must be independently aligned"
+    );
+
+    let ratio_row = cells
+        .chunks(width as usize)
+        .find(|row| row.iter().any(|cell| cell.symbol() == "比"))
+        .expect("ratio row");
+    assert!(ratio_row
+        .iter()
+        .any(|cell| cell.style().fg == Some(Color::Cyan)));
+    assert!(ratio_row
+        .iter()
+        .any(|cell| cell.style().fg == Some(Color::Green)));
+    assert!(ratio_row
+        .iter()
+        .any(|cell| cell.style().fg == Some(Color::Magenta)));
+}
+
+#[test]
+fn provision_selection_highlights_only_value_and_long_values_scroll_with_cursor() {
+    let mut state = AppState::new();
+    state.replace_devices(vec![usb_device()]);
+    state.navigate(NavCommand::WorkspaceProvision, 20);
+    state.provision_select_disk();
+    state.provision_skip_backup();
+    state.provision_begin_selected();
+    state.provision_mut().form.label_id = "3164177653".into();
+    state.provision_mut().field_selected = 0;
+    state.provision_cursor_end();
+
+    let width = 160u16;
+    let backend = TestBackend::new(width, 36);
+    let mut terminal = Terminal::new(backend).expect("test terminal");
+    terminal.draw(|frame| render::draw(frame, &state)).unwrap();
+    let cells = terminal.backend().buffer().content();
+    let row = cells
+        .chunks(width as usize)
+        .find(|row| {
+            row.iter()
+                .map(|cell| cell.symbol())
+                .collect::<String>()
+                .replace(' ', "")
+                .contains("标签标识")
+        })
+        .expect("label id row");
+    let label_cell = row
+        .iter()
+        .find(|cell| cell.symbol() == "标")
+        .expect("label cell");
+    assert_ne!(label_cell.style().bg, Some(Color::Cyan));
+    let highlighted = row
+        .iter()
+        .filter(|cell| cell.style().bg == Some(Color::Cyan))
+        .map(|cell| cell.symbol())
+        .collect::<String>();
+    assert!(
+        highlighted.chars().any(|ch| ch.is_ascii_digit()),
+        "selected value should contain highlighted input content: {highlighted}"
+    );
+    assert!(!highlighted.contains('标'));
+
+    let dept_index = state
+        .provision_visible_fields()
+        .iter()
+        .position(|(label, _, _)| label == "部门")
+        .expect("dept field");
+    state.provision_mut().field_selected = dept_index;
+    state.provision_mut().form.dept =
+        "江苏省电力有限公司/南京供电公司/输电运检中心/超长部门名称".into();
+    state.provision_cursor_end();
+    terminal.draw(|frame| render::draw(frame, &state)).unwrap();
+    let text = terminal
+        .backend()
+        .buffer()
+        .content()
+        .iter()
+        .map(|cell| cell.symbol())
+        .collect::<String>();
+    assert!(
+        text.contains('‹'),
+        "long active input should scroll from the left: {text}"
+    );
+
+    state.provision_cursor_home();
+    terminal.draw(|frame| render::draw(frame, &state)).unwrap();
+    let text = terminal
+        .backend()
+        .buffer()
+        .content()
+        .iter()
+        .map(|cell| cell.symbol())
+        .collect::<String>();
+    assert!(
+        text.contains('›'),
+        "long active input should expose right overflow: {text}"
+    );
 }
 
 #[test]
@@ -186,75 +346,8 @@ fn empty_secret_field_renders_input_placeholder_instead_of_black_value() {
 }
 
 #[test]
-fn apply_and_offline_convert_states_render_and_enforce_preview_before_write() {
-    use edpcli::application::WriteEvent;
-    use edpcli::tui::state::{ApplyStage, ExpectedIdentity, OfflineConvertView, ProvisionKind};
-
-    let mut apply = AppState::new();
-    assert!(apply.begin_apply(
-        7,
-        ExpectedIdentity {
-            onlyid: None,
-            device_id: None,
-        },
-    ));
-    assert_eq!(apply.apply().unwrap().stage, ApplyStage::Setup);
-    apply.apply_start_preview();
-    apply.apply_finish_preview(Ok(vec![WriteEvent::DryRunPreview {
-        disk: 7,
-        needs_force: false,
-    }]));
-    assert_eq!(apply.apply().unwrap().stage, ApplyStage::Review);
-    for (width, height) in [(40, 10), (80, 24), (160, 60)] {
-        let backend = TestBackend::new(width, height);
-        let mut terminal = Terminal::new(backend).expect("test terminal");
-        terminal.draw(|frame| render::draw(frame, &apply)).unwrap();
-    }
-    apply.apply_begin_confirm();
-    assert_eq!(apply.apply().unwrap().stage, ApplyStage::Confirm);
-    assert!(apply.apply_take_for_write().is_none(), "YES is mandatory");
-    for ch in ['Y', 'E', 'S'] {
-        apply.apply_push_char(ch);
-    }
-    assert!(apply.apply_take_for_write().is_some());
-    assert_eq!(apply.apply().unwrap().stage, ApplyStage::Running);
-    apply.apply_finish_write(Ok(()));
-    assert_eq!(apply.apply().unwrap().stage, ApplyStage::Result);
-
-    let mut force_gate = AppState::new();
-    assert!(force_gate.begin_apply(
-        8,
-        ExpectedIdentity {
-            onlyid: None,
-            device_id: None,
-        },
-    ));
-    force_gate.apply_start_preview();
-    force_gate.apply_finish_preview(Ok(vec![WriteEvent::DryRunPreview {
-        disk: 8,
-        needs_force: true,
-    }]));
-    force_gate.apply_begin_confirm();
-    assert_eq!(
-        force_gate.apply().unwrap().stage,
-        ApplyStage::Review,
-        "needs_force preview must block confirmation when force is off"
-    );
-    assert!(force_gate
-        .apply()
-        .unwrap()
-        .message
-        .as_deref()
-        .is_some_and(|message| message.contains("force")));
-    force_gate.apply_back_to_setup();
-    force_gate.apply_toggle_force();
-    force_gate.apply_start_preview();
-    force_gate.apply_finish_preview(Ok(vec![WriteEvent::DryRunPreview {
-        disk: 8,
-        needs_force: true,
-    }]));
-    force_gate.apply_begin_confirm();
-    assert_eq!(force_gate.apply().unwrap().stage, ApplyStage::Confirm);
+fn offline_convert_states_render_without_physical_disk() {
+    use edpcli::tui::state::{OfflineConvertView, ProvisionKind};
 
     let mut offline = AppState::new();
     offline.navigate(NavCommand::WorkspaceProvision, 20);

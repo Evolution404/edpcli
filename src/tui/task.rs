@@ -92,18 +92,6 @@ enum WorkerResult {
         operation_id: OperationId,
         event: crate::application::WriteEvent,
     },
-    ApplyPreview {
-        generation: u64,
-        result: Result<Vec<crate::application::WriteEvent>, String>,
-    },
-    ApplyProgress {
-        operation_id: OperationId,
-        event: crate::application::WriteEvent,
-    },
-    ApplyWrite {
-        operation_id: OperationId,
-        result: Result<(), String>,
-    },
     Inspect {
         generation: u64,
         result: Result<InspectWorkspace, String>,
@@ -182,9 +170,6 @@ pub struct TaskUpdates {
     pub backups: Option<Vec<BackupWorkspaceItem>>,
     pub write: Option<(OperationId, Result<(), String>)>,
     pub write_progress: Option<(OperationId, crate::application::WriteEvent)>,
-    pub apply_preview: Option<Result<Vec<crate::application::WriteEvent>, String>>,
-    pub apply_progress: Option<(OperationId, crate::application::WriteEvent)>,
-    pub apply_write: Option<(OperationId, Result<(), String>)>,
     pub inspect: Option<Result<InspectWorkspace, String>>,
     pub advanced_inspect:
         Option<Result<crate::application::inspect::AdvancedInspectWorkspace, String>>,
@@ -210,9 +195,6 @@ impl TaskUpdates {
             || self.backups.is_some()
             || self.write.is_some()
             || self.write_progress.is_some()
-            || self.apply_preview.is_some()
-            || self.apply_progress.is_some()
-            || self.apply_write.is_some()
             || self.inspect.is_some()
             || self.advanced_inspect.is_some()
             || self.device_error.is_some()
@@ -253,7 +235,6 @@ pub struct TaskHub {
     provision_generation: GenerationGate,
     provision_export_generation: GenerationGate,
     offline_convert_generation: GenerationGate,
-    apply_generation: GenerationGate,
     prune_generation: GenerationGate,
     batch_delete_generation: GenerationGate,
     device_single_flight: SingleFlightGate,
@@ -264,7 +245,6 @@ pub struct TaskHub {
     provision_single_flight: SingleFlightGate,
     provision_export_single_flight: SingleFlightGate,
     offline_convert_single_flight: SingleFlightGate,
-    apply_single_flight: SingleFlightGate,
     prune_single_flight: SingleFlightGate,
     batch_delete_single_flight: SingleFlightGate,
     pending_device_scan: Option<PathBuf>,
@@ -296,7 +276,6 @@ impl TaskHub {
             provision_generation: GenerationGate::new(),
             provision_export_generation: GenerationGate::new(),
             offline_convert_generation: GenerationGate::new(),
-            apply_generation: GenerationGate::new(),
             prune_generation: GenerationGate::new(),
             batch_delete_generation: GenerationGate::new(),
             device_single_flight: SingleFlightGate::new(),
@@ -307,7 +286,6 @@ impl TaskHub {
             provision_single_flight: SingleFlightGate::new(),
             provision_export_single_flight: SingleFlightGate::new(),
             offline_convert_single_flight: SingleFlightGate::new(),
-            apply_single_flight: SingleFlightGate::new(),
             prune_single_flight: SingleFlightGate::new(),
             batch_delete_single_flight: SingleFlightGate::new(),
             pending_device_scan: None,
@@ -840,155 +818,6 @@ impl TaskHub {
         Ok(operation_id)
     }
 
-    pub fn request_apply_preview(
-        &mut self,
-        disk: u32,
-        expected_identity: crate::tui::state::ExpectedIdentity,
-        size_gb: Option<f64>,
-        backup_dir: PathBuf,
-    ) -> Result<u64, &'static str> {
-        if !self.apply_single_flight.try_start() {
-            return Err("已有 Apply 预览正在生成");
-        }
-        let generation = self.apply_generation.begin();
-        let tx = self.tx.clone();
-        std::thread::spawn(move || {
-            let result = catch_unwind(AssertUnwindSafe(|| {
-                struct Collector {
-                    events: Vec<crate::application::WriteEvent>,
-                }
-                impl crate::application::write::Prompter for Collector {
-                    fn prompt_line(&mut self, _msg: &str) -> String {
-                        String::new()
-                    }
-                    fn confirm_yes(&mut self, _msg: &str) -> bool {
-                        false
-                    }
-                    fn write_event(&mut self, event: crate::application::WriteEvent) {
-                        self.events.push(event);
-                    }
-                    fn output(&mut self, _msg: &str) {}
-                }
-
-                let runner = SysRunner;
-                crate::application::write::guard_usb_disk(&runner, disk)
-                    .map_err(|error| error.msg)?;
-                let path = crate::diskio::raw_path(disk);
-                let mut dev = crate::diskio::FileDev::open_rdonly(&path)
-                    .map_err(|error| format!("错误: 无法只读打开 {path}: {error}"))?;
-                crate::application::write::verify_expected_identity(
-                    &runner,
-                    disk,
-                    expected_identity.onlyid.as_deref(),
-                    expected_identity.device_id.as_deref(),
-                    &mut dev,
-                )
-                .map_err(|error| error.msg)?;
-                let mut prompt = Collector { events: Vec::new() };
-                let mut ctx = crate::application::write::Ctx {
-                    runner: &runner,
-                    clock: &crate::diskio::SystemClock,
-                    prompt: &mut prompt,
-                    backup_dir,
-                };
-                crate::application::write::apply_flow(
-                    crate::application::write::ApplyMode::DryRun,
-                    disk,
-                    size_gb,
-                    &mut ctx,
-                    &mut dev,
-                )
-                .map_err(|error| error.msg)?;
-                Ok(prompt.events)
-            }))
-            .unwrap_or_else(|payload| {
-                Err(format!(
-                    "Apply 预览 worker 异常终止: {}",
-                    panic_message(payload)
-                ))
-            });
-            let _ = tx.send(WorkerResult::ApplyPreview { generation, result });
-        });
-        Ok(generation)
-    }
-
-    pub fn request_apply_write(
-        &mut self,
-        disk: u32,
-        expected_identity: crate::tui::state::ExpectedIdentity,
-        size_gb: Option<f64>,
-        force: bool,
-        backup_dir: PathBuf,
-    ) -> Result<OperationId, &'static str> {
-        let operation_id = self.begin_operation()?;
-        let tx = self.tx.clone();
-        self.critical_worker = Some(std::thread::spawn(move || {
-            let result = catch_unwind(AssertUnwindSafe(|| {
-                struct Progress {
-                    tx: Sender<WorkerResult>,
-                    operation_id: OperationId,
-                }
-                impl crate::application::write::Prompter for Progress {
-                    fn prompt_line(&mut self, _msg: &str) -> String {
-                        String::new()
-                    }
-                    fn confirm_yes(&mut self, _msg: &str) -> bool {
-                        true
-                    }
-                    fn write_event(&mut self, event: crate::application::WriteEvent) {
-                        let _ = self.tx.send(WorkerResult::ApplyProgress {
-                            operation_id: self.operation_id,
-                            event,
-                        });
-                    }
-                    fn output(&mut self, _msg: &str) {}
-                }
-
-                let runner = SysRunner;
-                crate::application::write::guard_usb_disk(&runner, disk)
-                    .map_err(|error| error.msg)?;
-                let path = crate::diskio::raw_path(disk);
-                let mut dev = crate::diskio::FileDev::open_rdonly(&path)
-                    .map_err(|error| format!("错误: 无法只读打开 {path}: {error}"))?;
-                crate::application::write::verify_expected_identity(
-                    &runner,
-                    disk,
-                    expected_identity.onlyid.as_deref(),
-                    expected_identity.device_id.as_deref(),
-                    &mut dev,
-                )
-                .map_err(|error| error.msg)?;
-                let mut prompt = Progress {
-                    tx: tx.clone(),
-                    operation_id,
-                };
-                let mut ctx = crate::application::write::Ctx {
-                    runner: &runner,
-                    clock: &crate::diskio::SystemClock,
-                    prompt: &mut prompt,
-                    backup_dir,
-                };
-                crate::application::write::apply_flow(
-                    crate::application::write::ApplyMode::Write { force },
-                    disk,
-                    size_gb,
-                    &mut ctx,
-                    &mut dev,
-                )
-                .map(|_| ())
-                .map_err(|error| error.msg)
-            }))
-            .unwrap_or_else(|payload| {
-                Err(format!("Apply worker 异常终止: {}", panic_message(payload)))
-            });
-            let _ = tx.send(WorkerResult::ApplyWrite {
-                operation_id,
-                result,
-            });
-        }));
-        Ok(operation_id)
-    }
-
     pub fn request_write(
         &mut self,
         intent: crate::tui::state::WriteIntent,
@@ -1049,17 +878,6 @@ impl TaskHub {
                         backup_dir,
                     };
                     match intent.kind {
-                        crate::tui::state::WriteKind::Apply => {
-                            crate::application::write::apply_flow(
-                                crate::application::write::ApplyMode::Write { force: false },
-                                intent.disk,
-                                None,
-                                &mut ctx,
-                                &mut dev,
-                            )
-                            .map(|_| ())
-                            .map_err(|error| error.msg)
-                        }
                         crate::tui::state::WriteKind::Restore => {
                             let backup = intent
                                 .backup
@@ -1290,28 +1108,6 @@ impl TaskHub {
                 } => {
                     if self.active_operation == Some(operation_id) {
                         updates.write_progress = Some((operation_id, event));
-                    }
-                }
-                WorkerResult::ApplyPreview { generation, result } => {
-                    self.apply_single_flight.finish();
-                    if self.apply_generation.is_current(generation) {
-                        updates.apply_preview = Some(result);
-                    }
-                }
-                WorkerResult::ApplyProgress {
-                    operation_id,
-                    event,
-                } => {
-                    if self.active_operation == Some(operation_id) {
-                        updates.apply_progress = Some((operation_id, event));
-                    }
-                }
-                WorkerResult::ApplyWrite {
-                    operation_id,
-                    result,
-                } => {
-                    if self.finish_operation(operation_id) {
-                        updates.apply_write = Some((operation_id, result));
                     }
                 }
                 WorkerResult::Inspect { generation, result } => {

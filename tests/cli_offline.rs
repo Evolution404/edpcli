@@ -1,5 +1,5 @@
 //! CLI 端到端: 子进程(离线 convert / 用法错误 / 系统盘防护)
-//! + 进程内 apply/restore 流程(防重复写入守卫、写扇集合、还原交互)。
+//! + 进程内 backup/restore 流程(只读备份与还原安全门禁)。
 //!
 //! 全部不碰真盘。
 
@@ -11,10 +11,9 @@ use std::fs;
 use std::process::Command;
 
 use common::*;
-use edpcli::cli::{apply_flow, backup_create_flow, restore_flow, ApplyMode, Ctx};
+use edpcli::cli::{backup_create_flow, restore_flow, Ctx};
 use edpcli::common::{
-    EXIT_ALREADY_NOPWD, EXIT_BACKUP, EXIT_CANCELLED, EXIT_OK, EXIT_TARGET, METADATA_IMAGE_LEN,
-    METADATA_SECTOR_COUNT, SECTOR,
+    EXIT_BACKUP, EXIT_CANCELLED, EXIT_OK, EXIT_TARGET, METADATA_SECTOR_COUNT, SECTOR,
 };
 use edpcli::diskio::FileDev;
 use edpcli::diskio::SectorDev;
@@ -95,7 +94,7 @@ fn system_disk_refused_without_elevation() {
         .find(|&disk| edpcli::platform::is_system_disk(&runner, disk))
         .expect("macOS system disk");
     let r = bin()
-        .args(["apply", "--dry-run", "--disk", &system_disk.to_string()])
+        .args(["backup", "restore", "--disk", &system_disk.to_string()])
         .output()
         .unwrap();
     assert_eq!(r.status.code(), Some(3));
@@ -110,7 +109,7 @@ fn usage_errors_exit_two() {
         vec!["bogus"],
         vec!["run", "--disk"],
         vec!["run", "--disk", "x"],
-        vec!["apply", "--size", "abc"],
+        vec!["apply"],
         vec!["run", "--force"],
     ] {
         let r = bin().args(&args).output().unwrap();
@@ -119,7 +118,7 @@ fn usage_errors_exit_two() {
 }
 
 // ══════════════════════════════════════════════════════════════════
-// 进程内流程测试(apply 守卫 / restore)
+// 进程内流程测试(backup / restore)
 // ══════════════════════════════════════════════════════════════════
 fn ctx<'a>(
     runner: &'a FakeRunner,
@@ -250,176 +249,8 @@ impl SectorDev for SwapOnReopenDev {
     }
 }
 
-fn assert_lbas(img: &[u8], expect: &[u8], lbas: &[usize]) {
-    for &l in lbas {
-        assert_eq!(
-            &img[l * SECTOR..(l + 1) * SECTOR],
-            &expect[l * SECTOR..(l + 1) * SECTOR],
-            "LBA{}",
-            l
-        );
-    }
-}
-
 #[test]
-fn apply_refuses_without_force() {
-    let Some((conv, did)) = converted_image("netac") else {
-        eprintln!("跳过: 真实备份不可用");
-        return;
-    };
-    let runner = netac_runner(6);
-    let tmp = TmpDir::new("apply_refuse");
-    let bak = tmp.0.join("bak");
-    fs::create_dir_all(&bak).unwrap();
-    let img_path = tmp.0.join("disk.img");
-    fs::write(&img_path, &conv).unwrap();
-    let mut prompt = ScriptPrompter::yes();
-    let mut dev = FileDev::open_rdwr(
-        img_path.to_str().unwrap(),
-        std::time::Duration::from_secs(1),
-    )
-    .unwrap();
-    let e = apply_flow(
-        ApplyMode::Write { force: false },
-        6,
-        None,
-        &mut ctx(&runner, &mut prompt, &bak),
-        &mut dev,
-    )
-    .unwrap_err();
-    assert_eq!(e.code, EXIT_ALREADY_NOPWD);
-    assert!(e.msg.contains("edpcli apply --disk 6 --force"), "{}", e.msg);
-    // 未备份未写盘: 镜像逐字节未动, 备份目录空
-    assert_eq!(fs::read(&img_path).unwrap(), conv);
-    assert!(fs::read_dir(&bak).unwrap().count() == 0);
-    let _ = did;
-}
-
-#[test]
-fn apply_force_writes_same_sectors_and_tags_backup() {
-    let Some((conv, did)) = converted_image("netac") else {
-        eprintln!("跳过: 真实备份不可用");
-        return;
-    };
-    let runner = netac_runner(6);
-    let tmp = TmpDir::new("apply_force");
-    let bak = tmp.0.join("bak");
-    let img_path = tmp.0.join("disk.img");
-    fs::write(&img_path, &conv).unwrap();
-    let mut prompt = ScriptPrompter::yes();
-    let mut dev = FileDev::open_rdwr(
-        img_path.to_str().unwrap(),
-        std::time::Duration::from_secs(1),
-    )
-    .unwrap();
-    let code = apply_flow(
-        ApplyMode::Write { force: true },
-        6,
-        None,
-        &mut ctx(&runner, &mut prompt, &bak),
-        &mut dev,
-    )
-    .unwrap();
-    assert_eq!(code, EXIT_OK);
-    let after = fs::read(&img_path).unwrap();
-    // 免密盘重写: 只写 {0,6,7,12}(LBA9 已零不写) — 内容不变
-    assert_lbas(&after, &conv, &[0, 6, 7, 12]);
-    assert_lbas(&after, &conv, &[9]); // 未动
-                                      // 备份已建且打 _nopwd 标
-    let mut names: Vec<String> = fs::read_dir(&bak)
-        .unwrap()
-        .flatten()
-        .map(|e| e.file_name().to_string_lossy().into_owned())
-        .collect();
-    names.retain(|n| n.ends_with(".edpb"));
-    assert_eq!(names.len(), 1);
-    assert!(names[0].contains("_nopwd"), "{:?}", names);
-    let _ = did;
-}
-
-#[test]
-fn apply_original_disk_not_blocked_and_dry_run_no_write() {
-    let (Some(orig), Some((conv, _))) = (load_disk_image("netac"), converted_image("netac")) else {
-        eprintln!("跳过: 真实备份不可用");
-        return;
-    };
-    let runner = netac_runner(6);
-    // 原盘: 正常写入 {0,6,7,12,9}
-    let tmp = TmpDir::new("apply_orig");
-    let bak = tmp.0.join("bak");
-    let img_path = tmp.0.join("disk.img");
-    fs::write(&img_path, &orig).unwrap();
-    let mut prompt = ScriptPrompter::yes();
-    let mut dev = FileDev::open_rdwr(
-        img_path.to_str().unwrap(),
-        std::time::Duration::from_secs(1),
-    )
-    .unwrap();
-    let code = apply_flow(
-        ApplyMode::Write { force: false },
-        6,
-        None,
-        &mut ctx(&runner, &mut prompt, &bak),
-        &mut dev,
-    )
-    .unwrap();
-    assert_eq!(code, EXIT_OK);
-    let after = fs::read(&img_path).unwrap();
-    assert_lbas(&after, &orig, &[1, 2, 3, 4, 5, 8, 10, 11]); // 非目标扇区不动
-                                                             // 5 个目标扇区 == 合成免密镜像；LBA6 仍保留历史兼容补丁。
-    assert_lbas(&after, &conv, &[0, 6, 7, 9, 12]);
-    // dry-run: 不写盘
-    let tmp2 = TmpDir::new("apply_dry");
-    let img2 = tmp2.0.join("disk.img");
-    fs::write(&img2, &orig).unwrap();
-    let mut prompt2 = ScriptPrompter::yes();
-    let mut dev2 =
-        FileDev::open_rdwr(img2.to_str().unwrap(), std::time::Duration::from_secs(1)).unwrap();
-    let code2 = apply_flow(
-        ApplyMode::DryRun,
-        6,
-        None,
-        &mut ctx(&runner, &mut prompt2, &tmp2.0.join("bak2")),
-        &mut dev2,
-    )
-    .unwrap();
-    assert_eq!(code2, EXIT_OK);
-    assert_eq!(fs::read(&img2).unwrap(), orig);
-}
-
-#[test]
-fn dry_run_never_enters_backup_prompt_reopen_or_write_phase() {
-    let Some(orig) = load_disk_image("netac") else {
-        eprintln!("跳过: 真实备份不可用");
-        return;
-    };
-    let runner = netac_runner(6);
-    let tmp = TmpDir::new("apply_dry_side_effect_contract");
-    let backup_dir = tmp.0.join("bak");
-    let mut prompt = ScriptPrompter {
-        inputs: vec![],
-        idx: 0,
-    };
-    let mut dev = SwapOnReopenDev::new(orig.clone(), orig);
-
-    let code = apply_flow(
-        ApplyMode::DryRun,
-        6,
-        None,
-        &mut ctx(&runner, &mut prompt, &backup_dir),
-        &mut dev,
-    )
-    .unwrap();
-
-    assert_eq!(code, EXIT_OK);
-    assert_eq!(prompt.idx, 0, "dry-run 不得进入确认提示");
-    assert!(!backup_dir.exists(), "dry-run 不得创建备份目录或备份文件");
-    assert!(!dev.switched, "dry-run 不得 reopen 为读写");
-    assert_eq!(dev.writes, 0, "dry-run 不得执行任何扇区写入");
-}
-
-#[test]
-fn backup_create_is_read_only_and_matches_apply_automatic_backup() {
+fn backup_create_is_read_only_and_verifiable() {
     let Some(orig) = load_disk_image("netac") else {
         eprintln!("跳过: 真实备份不可用");
         return;
@@ -433,7 +264,6 @@ fn backup_create_is_read_only_and_matches_apply_automatic_backup() {
         .remove("diskutil unmountDisk force disk6");
     let tmp = TmpDir::new("backup_create_readonly");
     let manual_dir = tmp.0.join("manual");
-    let auto_dir = tmp.0.join("auto");
     let mut manual_prompt = ScriptPrompter {
         inputs: vec![],
         idx: 0,
@@ -462,43 +292,8 @@ fn backup_create_is_read_only_and_matches_apply_automatic_backup() {
         .iter()
         .any(|artifact| artifact.id == "derived.capture_issues"));
 
-    // apply 写前自动备份：同一时间、同一设备事实、同一 LBA0-12 输入，应生成
-    // 完全相同的文件名/内容/SHA-256；随后在确认处取消，避免进入任何真写阶段。
-    let apply_runner = netac_runner(6);
-    let mut apply_prompt = ScriptPrompter {
-        inputs: vec!["NO".into()],
-        idx: 0,
-    };
-    let mut apply_dev = SwapOnReopenDev::new(orig.clone(), orig);
-    let error = apply_flow(
-        ApplyMode::Write { force: false },
-        6,
-        None,
-        &mut ctx(&apply_runner, &mut apply_prompt, &auto_dir),
-        &mut apply_dev,
-    )
-    .unwrap_err();
-    assert_eq!(error.code, EXIT_CANCELLED);
-
-    let auto_path = fs::read_dir(&auto_dir)
-        .unwrap()
-        .flatten()
-        .map(|entry| entry.path())
-        .find(|path| path.extension().and_then(|ext| ext.to_str()) == Some("edpb"))
-        .expect("apply 应生成写前自动备份");
-    assert_eq!(
-        manual_path.file_name(),
-        auto_path.file_name(),
-        "手动备份与 apply 自动备份必须使用同一命名规则"
-    );
-    assert_eq!(
-        fs::read(&manual_path).unwrap(),
-        fs::read(&auto_path).unwrap()
-    );
     assert!(edpb::verify_file(&manual_path).is_ok());
-    assert!(edpb::verify_file(&auto_path).is_ok());
     assert!(!std::path::PathBuf::from(format!("{}.sha256", manual_path.display())).exists());
-    assert!(!std::path::PathBuf::from(format!("{}.sha256", auto_path.display())).exists());
 }
 
 #[test]
@@ -536,39 +331,6 @@ fn restore_numeric_target_uses_backup_selector_and_current_disk_identity() {
     assert_eq!(prompt.idx, 1);
     assert!(!dev.switched);
     assert_eq!(dev.writes, 0);
-}
-
-#[test]
-fn apply_cancel_at_prompt_leaves_disk_untouched() {
-    let Some((_conv, _)) = converted_image("netac") else {
-        eprintln!("跳过: 真实备份不可用");
-        return;
-    };
-    let runner = netac_runner(6);
-    let tmp = TmpDir::new("apply_cancel");
-    let bak = tmp.0.join("bak");
-    let img_path = tmp.0.join("disk.img");
-    fs::write(&img_path, load_disk_image("netac").unwrap()).unwrap(); // 原盘 → 不会被拒
-    let orig = fs::read(&img_path).unwrap();
-    let mut prompt = ScriptPrompter {
-        inputs: vec!["no".into()],
-        idx: 0,
-    };
-    let mut dev = FileDev::open_rdwr(
-        img_path.to_str().unwrap(),
-        std::time::Duration::from_secs(1),
-    )
-    .unwrap();
-    let e = apply_flow(
-        ApplyMode::Write { force: false },
-        6,
-        None,
-        &mut ctx(&runner, &mut prompt, &bak),
-        &mut dev,
-    )
-    .unwrap_err();
-    assert_eq!(e.code, EXIT_CANCELLED);
-    assert_eq!(fs::read(&img_path).unwrap(), orig); // 已备份但未写盘
 }
 
 #[test]
@@ -942,95 +704,6 @@ fn restore_no_backup_found() {
 }
 
 #[test]
-fn apply_system_disk_guard_in_flow() {
-    // 流程内部按根文件系统实际 PhysicalStore 防护，而不是固定盘号。
-    let runner = netac_runner(1);
-    let tmp = TmpDir::new("guard");
-    let img = tmp.0.join("d.img");
-    fs::write(&img, vec![0u8; METADATA_IMAGE_LEN]).unwrap();
-    let mut prompt = ScriptPrompter::yes();
-    let mut dev =
-        FileDev::open_rdwr(img.to_str().unwrap(), std::time::Duration::from_secs(1)).unwrap();
-    let e = apply_flow(
-        ApplyMode::Write { force: false },
-        1,
-        None,
-        &mut ctx(&runner, &mut prompt, &tmp.0),
-        &mut dev,
-    )
-    .unwrap_err();
-    assert_eq!(e.code, EXIT_TARGET, "{}", e.msg);
-    assert!(e.msg.contains("系统盘"), "{}", e.msg);
-}
-
-#[test]
-fn apply_refuses_explicit_non_usb_whole_disk() {
-    let Some(netac) = load_disk_image("netac") else {
-        eprintln!("跳过: 真实备份不可用");
-        return;
-    };
-    let mut runner = netac_runner(6);
-    runner.canned.insert(
-        "diskutil list -plist".into(),
-        diskutil_list_plist(&["disk6"]),
-    );
-    runner.canned.insert(
-        "diskutil info -plist disk6".into(),
-        diskutil_info_plist(62_914_560_000)
-            .replace("<string>USB</string>", "<string>Thunderbolt</string>"),
-    );
-    let tmp = TmpDir::new("apply_non_usb_guard");
-    let img_path = tmp.0.join("disk.img");
-    fs::write(&img_path, &netac).unwrap();
-    let mut prompt = ScriptPrompter::yes();
-    let mut dev = FileDev::open_rdwr(
-        img_path.to_str().unwrap(),
-        std::time::Duration::from_secs(1),
-    )
-    .unwrap();
-
-    let e = apply_flow(
-        ApplyMode::DryRun,
-        6,
-        None,
-        &mut ctx(&runner, &mut prompt, &tmp.0),
-        &mut dev,
-    )
-    .unwrap_err();
-    assert_eq!(e.code, EXIT_TARGET, "{}", e.msg);
-    assert!(e.msg.contains("USB") || e.msg.contains("外接"), "{}", e.msg);
-    assert_eq!(fs::read(&img_path).unwrap(), netac);
-}
-
-#[test]
-fn apply_refuses_if_disk_identity_changes_after_reopen() {
-    let (Some(netac), Some(lexar)) = (load_disk_image("netac"), load_disk_image("lexar")) else {
-        eprintln!("跳过: 真实备份不可用");
-        return;
-    };
-    let runner = netac_runner(6);
-    let tmp = TmpDir::new("apply_swap_after_reopen");
-    let mut prompt = ScriptPrompter::yes();
-    let mut dev = SwapOnReopenDev::new(netac, lexar);
-
-    let e = apply_flow(
-        ApplyMode::Write { force: false },
-        6,
-        None,
-        &mut ctx(&runner, &mut prompt, &tmp.0),
-        &mut dev,
-    )
-    .unwrap_err();
-    assert_eq!(e.code, EXIT_TARGET, "{}", e.msg);
-    assert!(
-        e.msg.contains("身份") || e.msg.contains("换盘"),
-        "{}",
-        e.msg
-    );
-    assert_eq!(dev.writes, 0, "身份变化必须在第一笔写入前拦截");
-}
-
-#[test]
 fn restore_refuses_if_disk_identity_changes_after_reopen() {
     let (Some(netac), Some(lexar)) = (load_disk_image("netac"), load_disk_image("lexar")) else {
         eprintln!("跳过: 真实备份不可用");
@@ -1059,62 +732,6 @@ fn restore_refuses_if_disk_identity_changes_after_reopen() {
         e.msg
     );
     assert_eq!(dev.writes, 0, "身份变化必须在第一笔写入前拦截");
-}
-
-#[test]
-fn apply_refuses_when_unmount_fails_before_reopen_or_write() {
-    let Some(netac) = load_disk_image("netac") else {
-        eprintln!("跳过: 真实备份不可用");
-        return;
-    };
-    let mut runner = netac_runner(6);
-    runner.canned.remove("diskutil unmountDisk force disk6");
-    let tmp = TmpDir::new("apply_unmount_failure");
-    let mut prompt = ScriptPrompter::yes();
-    let mut dev = SwapOnReopenDev::new(netac.clone(), netac);
-
-    let e = apply_flow(
-        ApplyMode::Write { force: false },
-        6,
-        None,
-        &mut ctx(&runner, &mut prompt, &tmp.0),
-        &mut dev,
-    )
-    .unwrap_err();
-    assert_eq!(e.code, edpcli::common::EXIT_IO);
-    assert!(e.msg.contains("卸载"), "{}", e.msg);
-    assert!(!dev.switched, "卸载失败后不得 reopen");
-    assert_eq!(dev.writes, 0, "卸载失败后不得写盘");
-}
-
-#[test]
-fn apply_refuses_if_metadata_changes_after_backup_before_write() {
-    let Some(netac) = load_disk_image("netac") else {
-        eprintln!("跳过: 真实备份不可用");
-        return;
-    };
-    let mut changed = netac.clone();
-    changed[6 * SECTOR + 100] ^= 0x5a; // LBA4 身份不变，仅其它元数据变化
-    let runner = netac_runner(6);
-    let tmp = TmpDir::new("apply_metadata_changed_after_backup");
-    let mut prompt = ScriptPrompter::yes();
-    let mut dev = SwapOnReopenDev::new(netac, changed);
-
-    let e = apply_flow(
-        ApplyMode::Write { force: false },
-        6,
-        None,
-        &mut ctx(&runner, &mut prompt, &tmp.0),
-        &mut dev,
-    )
-    .unwrap_err();
-    assert_eq!(e.code, EXIT_TARGET);
-    assert!(
-        e.msg.contains("LBA6") || e.msg.contains("变化"),
-        "{}",
-        e.msg
-    );
-    assert_eq!(dev.writes, 0, "确认后的元数据变化必须在第一笔写入前拦截");
 }
 
 #[test]

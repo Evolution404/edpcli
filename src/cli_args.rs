@@ -125,12 +125,6 @@ pub enum Parsed {
     Inspect(InspectOpts),
     Info(InfoOpts),
     Provision(ProvisionAction),
-    Apply {
-        opts: DiskOpts,
-        dry_run: bool,
-        force: bool,
-        yes: bool,
-    },
     Convert {
         dir: Option<String>,
         id: Option<String>,
@@ -179,7 +173,6 @@ pub fn usage_text() -> String {
   list      查看当前插入的 U 盘\n\
   tui       交互式 TUI（Vim 键位）\n\
   info      查看 U 盘或备份详细信息\n\
-  apply     预览或执行 U 盘改造\n\
   backup    创建、查看、校验、恢复和清理备份\n\
   provision 制盘：官方四模式新盘与现有盘免密改造\n\
   inspect   高级：检查底层 LBA/hex 数据\n\n\
@@ -206,10 +199,6 @@ fn print_topic_help(topic: &str) {
                 bold("用法: edpcli info [备份.edpb] [--disk N] [--id DEVICE_ID] [--backup-dir D]")
             );
             println!("未指定来源且只有一个可用目标盘时自动选择；多盘时交互选择。");
-        }
-        "apply" => {
-            println!("{}", bold("用法: edpcli apply [--dry-run] [--disk N] [--size GB] [--force] [--yes] [--backup-dir D]"));
-            println!("--dry-run 只执行识别与布局计算，不提交写入。");
         }
         "inspect" => {
             println!("{}", bold("用法: edpcli inspect <raw|decode|meta> [备份.edpb] [--disk N] [--lba 列表或范围] [--count N] [--export DIR]"));
@@ -1238,49 +1227,7 @@ pub fn parse_args(argv: &[String]) -> Result<Parsed, String> {
                 )),
             }
         }
-        "apply" => {
-            if rest.iter().any(|a| a == "-h" || a == "--help") {
-                return Ok(Parsed::Help {
-                    topic: Some("apply".into()),
-                });
-            }
-            let mut opts = DiskOpts::default();
-            let mut dry_run = false;
-            let mut force = false;
-            let mut yes = false;
-            let mut i = 0;
-            while i < rest.len() {
-                match flag_name(&rest[i]) {
-                    "--disk" => {
-                        let v = take_value(&rest, &mut i, "--disk")?;
-                        set_once(&mut opts.disk, parse_disk_spec(&v)?, "--disk")?;
-                    }
-                    "--size" => {
-                        let v = take_value(&rest, &mut i, "--size")?;
-                        set_once(&mut opts.size, parse_size(&v)?, "--size")?;
-                    }
-                    "--backup-dir" => {
-                        let v = take_value(&rest, &mut i, "--backup-dir")?;
-                        set_once(&mut opts.backup_dir, v, "--backup-dir")?;
-                    }
-                    "--dry-run" => set_switch(&mut dry_run, &rest[i], "--dry-run")?,
-                    "--force" => set_switch(&mut force, &rest[i], "--force")?,
-                    "--yes" => set_switch(&mut yes, &rest[i], "--yes")?,
-                    other => return Err(format!("错误: apply 不认识选项 {}", other)),
-                }
-                i += 1;
-            }
-            if dry_run && (force || yes) {
-                return Err("错误: apply --dry-run 不接受 --force 或 --yes".into());
-            }
-            Ok(Parsed::Apply {
-                opts,
-                dry_run,
-                force,
-                yes,
-            })
-        }
-        "run" => Err("错误: v2 已取消 run。请使用: edpcli apply --dry-run".into()),
+        "run" => Err("错误: v2 已取消 run。请使用: edpcli provision plan".into()),
         "restore" => Err("错误: v2 已取消顶层 restore。请使用: edpcli backup restore".into()),
         "meta" | "metainfo" => Err("错误: v2 已取消 meta/metainfo。请使用: edpcli info".into()),
         "convert" => {

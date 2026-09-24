@@ -5,7 +5,7 @@ use edpcli::tui::state::{AppState, NavCommand, StateEffect, WizardStage, WriteIn
 #[test]
 fn write_wizard_requires_exact_yes_before_entering_critical_stage() {
     let mut state = AppState::new();
-    state.begin_write_wizard(WriteKind::Apply, 6, None);
+    state.begin_write_wizard(WriteKind::BackupCreate, 6, None);
     assert_eq!(state.wizard().expect("wizard").stage, WizardStage::Confirm);
 
     for ch in ['Y', 'E', 'S', 'x'] {
@@ -21,7 +21,7 @@ fn write_wizard_requires_exact_yes_before_entering_critical_stage() {
     assert_eq!(
         state.submit_wizard_confirmation(),
         Some(WriteIntent {
-            kind: WriteKind::Apply,
+            kind: WriteKind::BackupCreate,
             disk: 6,
             backup: None,
             expected_identity: None,
@@ -53,7 +53,7 @@ fn restore_intent_pins_both_disk_and_backup_path() {
 #[test]
 fn finishing_write_clears_critical_state_only_after_result_is_recorded() {
     let mut state = AppState::new();
-    state.begin_write_wizard(WriteKind::Apply, 6, None);
+    state.begin_write_wizard(WriteKind::BackupCreate, 6, None);
     for ch in ['Y', 'E', 'S'] {
         state.push_wizard_confirmation(ch);
     }
@@ -68,7 +68,7 @@ fn finishing_write_clears_critical_state_only_after_result_is_recorded() {
 #[test]
 fn running_operation_rejects_new_wizards_and_all_navigation() {
     let mut state = AppState::new();
-    assert!(state.begin_write_wizard(WriteKind::Apply, 6, None));
+    assert!(state.begin_write_wizard(WriteKind::BackupCreate, 6, None));
     for ch in ['Y', 'E', 'S'] {
         state.push_wizard_confirmation(ch);
     }

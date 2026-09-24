@@ -13,9 +13,9 @@ fn resume_disk_value(argv: &[String]) -> &str {
 }
 
 #[test]
-fn elevation_resume_argv_pins_apply_disk_as_native_selector() {
+fn elevation_resume_argv_pins_backup_create_disk_as_native_selector() {
     let intent = WriteIntent {
-        kind: WriteKind::Apply,
+        kind: WriteKind::BackupCreate,
         disk: 6,
         backup: None,
         expected_identity: None,
@@ -50,14 +50,14 @@ fn parse_resume_accepts_an_explicit_selector_without_weakening_native_pinning() 
     let argv = vec![
         "tui".to_string(),
         "--_resume-kind".to_string(),
-        "apply".to_string(),
+        "backup-create".to_string(),
         "--_resume-disk".to_string(),
         "6".to_string(),
     ];
     assert_eq!(
         parse_resume_args(&argv).expect("numeric selector remains accepted by platform parser"),
         Some(WriteIntent {
-            kind: WriteKind::Apply,
+            kind: WriteKind::BackupCreate,
             disk: 6,
             backup: None,
             expected_identity: None,
@@ -86,7 +86,7 @@ fn elevation_resume_preserves_the_identity_the_user_confirmed() {
     let argv = vec![
         "tui".to_string(),
         "--_resume-kind".to_string(),
-        "apply".to_string(),
+        "backup-create".to_string(),
         "--_resume-disk".to_string(),
         "6".to_string(),
         "--_resume-onlyid".to_string(),
@@ -97,7 +97,7 @@ fn elevation_resume_preserves_the_identity_the_user_confirmed() {
     assert_eq!(
         parse_resume_args(&argv).unwrap(),
         Some(WriteIntent {
-            kind: WriteKind::Apply,
+            kind: WriteKind::BackupCreate,
             disk: 6,
             backup: None,
             expected_identity: Some(ExpectedIdentity {

@@ -107,7 +107,7 @@ fn command_palette_has_task_semantics_not_shell_semantics() {
     assert_eq!(parse_command("devices").unwrap(), PaletteAction::Devices);
     assert_eq!(parse_command("backups").unwrap(), PaletteAction::Backups);
     assert_eq!(parse_command("inspect").unwrap(), PaletteAction::Inspect);
-    assert_eq!(parse_command("apply").unwrap(), PaletteAction::Apply);
+    assert!(parse_command("apply").is_err());
     assert_eq!(parse_command("restore").unwrap(), PaletteAction::Restore);
     assert_eq!(parse_command("refresh").unwrap(), PaletteAction::Refresh);
     assert_eq!(parse_command("help").unwrap(), PaletteAction::Help);

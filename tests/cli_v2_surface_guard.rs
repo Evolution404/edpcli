@@ -73,7 +73,7 @@ fn v2_surface_contains_required_task_commands() {
     for required in [
         "edpcli list",
         "edpcli info",
-        "edpcli apply --dry-run",
+        "edpcli provision plan",
         "edpcli backup create",
         "edpcli backup restore",
         "edpcli backup verify",

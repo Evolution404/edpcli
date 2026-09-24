@@ -4,13 +4,10 @@
 //!   edpcli                                     交互式 TTY 默认进入 TUI；非 TTY 等价于 list
 //!   edpcli list                                列出外接盘(只读)
 //!   edpcli info [备份.edpb] [--disk N]          查看设备/备份详情
-//!   edpcli apply --dry-run [--disk N]          预览改造
-//!   edpcli apply [--disk N] [--force] [--yes]  实际写入
 //!   edpcli backup restore [备份] [--disk N]    还原
 //!   edpcli convert --dir <快照目录> --id <device_id> [--size GB] [--out <目录>]
 //!
-//! 实测记录(2026-08-27, 均内网免密成功): aigo U335 128G / aigo U320 32G /
-//! Kingston DT3.0 64G (每盘改前自动备份, 可随时 edpcli backup restore 还原)。
+//! 历史备份可通过 edpcli backup restore 还原。
 
 use std::io::{self, IsTerminal, Write};
 use std::path::Path;
@@ -37,10 +34,8 @@ use crate::sysinfo::{ReadProbeCache, SysRunner};
 // ══════════════════════════════════════════════════════════════════
 #[cfg(test)]
 pub(crate) use crate::application::write::read_image;
-pub use crate::application::write::{
-    apply_flow, backup_create_flow, restore_flow, ApplyMode, Ctx, Prompter,
-};
 pub(crate) use crate::application::write::{auto_pick_disk, guard_usb_disk};
+pub use crate::application::write::{backup_create_flow, restore_flow, Ctx, Prompter};
 pub use crate::ui::{backup_menu_str, disk_menu_str};
 
 pub struct StdPrompter;
@@ -149,7 +144,6 @@ pub fn run() -> i32 {
                         "list"
                             | "tui"
                             | "info"
-                            | "apply"
                             | "backup"
                             | "inspect"
                             | "provision"
@@ -202,13 +196,9 @@ pub fn run() -> i32 {
                 }
                 BackupAction::List => backup_list(&bak),
                 BackupAction::Verify { target } => backup_verify(&bak, target.as_deref()),
-                BackupAction::Restore { target, disk } => real_flow(
-                    &runner,
-                    disk,
-                    None,
-                    backup_dir,
-                    FlowKind::Restore { bin: target, yes },
-                ),
+                BackupAction::Restore { target, disk } => {
+                    real_flow(&runner, disk, backup_dir, target, yes)
+                }
                 BackupAction::Prune => backup_prune(&bak, keep, yes),
                 BackupAction::Delete { targets } => {
                     let mut prompt = StdPrompter;
@@ -232,19 +222,6 @@ pub fn run() -> i32 {
                 EXIT_USAGE
             }
         },
-        Parsed::Apply {
-            opts,
-            dry_run,
-            force,
-            yes,
-        } => {
-            let flow = if dry_run {
-                FlowKind::Dry
-            } else {
-                FlowKind::Apply { force, yes }
-            };
-            real_flow(&runner, opts.disk, opts.size, opts.backup_dir, flow)
-        }
     }
 }
 
@@ -575,12 +552,6 @@ fn provision_flow(runner: &SysRunner, action: ProvisionAction) -> i32 {
     }
 }
 
-enum FlowKind {
-    Dry,
-    Apply { force: bool, yes: bool },
-    Restore { bin: Option<String>, yes: bool },
-}
-
 pub(crate) fn argv_with_backup_dir_for_elevation(backup_dir_flag: Option<&str>) -> Vec<String> {
     let mut argv: Vec<String> = std::env::args().skip(1).collect();
     if backup_dir_flag.is_none() {
@@ -672,21 +643,17 @@ fn backup_create_real_flow(
     )
 }
 
-/// apply/backup restore 的公共外壳:
+/// backup restore 的公共外壳:
 ///   1) 显式目标的系统盘拒绝无需管理员权限，提权前先判；
 ///   2) 未提权时把目标统一固定为平台原生选择器；未给 --disk 时先以用户身份选盘；
 ///   3) 提权路径：（必要时交互选盘）→ 打开平台裸盘设备 → 执行流程。
 fn real_flow(
     runner: &SysRunner,
     disk_opt: Option<u32>,
-    size: Option<f64>,
     backup_dir_flag: Option<String>,
-    kind: FlowKind,
+    bin: Option<String>,
+    yes: bool,
 ) -> i32 {
-    let yes = matches!(
-        kind,
-        FlowKind::Apply { yes: true, .. } | FlowKind::Restore { yes: true, .. }
-    );
     if let Some(n) = disk_opt {
         if let Err(e) = guard_usb_disk(runner, n) {
             eprintln!("{}", crate::ui::red(&e.msg));
@@ -764,13 +731,7 @@ fn real_flow(
             return EXIT_IO;
         }
     };
-    let r = match kind {
-        FlowKind::Dry => apply_flow(ApplyMode::DryRun, n, size, &mut ctx, &mut dev),
-        FlowKind::Apply { force, .. } => {
-            apply_flow(ApplyMode::Write { force }, n, size, &mut ctx, &mut dev)
-        }
-        FlowKind::Restore { bin, .. } => restore_flow(bin, n, &mut ctx, &mut dev),
-    };
+    let r = restore_flow(bin, n, &mut ctx, &mut dev);
     finish(r)
 }
 
@@ -916,41 +877,7 @@ mod tests {
             parse_args(&["version".into()]).unwrap(),
             Parsed::Version { detailed: true }
         ));
-        match parse_args(&[
-            "apply".into(),
-            "--disk".into(),
-            "6".into(),
-            "--force".into(),
-            "--yes".into(),
-        ])
-        .unwrap()
-        {
-            Parsed::Apply {
-                opts,
-                dry_run,
-                force,
-                yes,
-            } => {
-                assert_eq!(opts.disk, Some(6));
-                assert!(!dry_run);
-                assert!(force && yes);
-            }
-            _ => panic!("应解析为 Apply"),
-        }
-        match parse_args(&[
-            "apply".into(),
-            "--dry-run".into(),
-            "--disk".into(),
-            "4".into(),
-        ])
-        .unwrap()
-        {
-            Parsed::Apply { opts, dry_run, .. } => {
-                assert_eq!(opts.disk, Some(4));
-                assert!(dry_run);
-            }
-            _ => panic!("应解析为 apply --dry-run"),
-        }
+        assert!(parse_args(&["apply".into()]).is_err());
         match parse_args(&["info".into(), "backup.bin".into()]).unwrap() {
             Parsed::Info(opts) => {
                 assert_eq!(opts.backup.as_deref(), Some("backup.bin"));
@@ -1082,7 +1009,7 @@ mod tests {
         let selector = crate::platform::disk_selector_value(6);
 
         let mut split = vec![
-            "apply".to_string(),
+            "backup".to_string(),
             "--disk".to_string(),
             "6".to_string(),
             "--yes".to_string(),
@@ -1095,8 +1022,8 @@ mod tests {
         );
 
         let mut inline = vec![
-            "apply".to_string(),
-            "--dry-run".to_string(),
+            "backup".to_string(),
+            "restore".to_string(),
             "--disk=6".to_string(),
         ];
         DeviceSelector::new(Some(6)).pin_argv(&mut inline, 6);
@@ -1167,10 +1094,6 @@ mod tests {
         assert!(parse_args(&["run".into()]).is_err());
         assert!(parse_args(&["restore".into()]).is_err());
         assert!(parse_args(&["meta".into()]).is_err());
-        assert!(parse_args(&["apply".into(), "--disk".into()]).is_err());
-        assert!(parse_args(&["apply".into(), "--disk".into(), "x".into()]).is_err());
-        assert!(parse_args(&["apply".into(), "--size".into(), "-3".into()]).is_err());
-        assert!(parse_args(&["apply".into(), "--dry-run".into(), "--force".into()]).is_err());
         assert!(matches!(
             parse_args(&["backup".into()]).unwrap(),
             Parsed::Backup {
@@ -1243,22 +1166,20 @@ mod tests {
         // 哨兵旗标被剥离
         assert!(matches!(
             parse_args(&[
-                "apply".into(),
+                "backup".into(),
+                "restore".into(),
                 "--disk".into(),
                 "6".into(),
                 "--_elevated".into()
             ])
             .unwrap(),
-            Parsed::Apply { .. }
+            Parsed::Backup { .. }
         ));
     }
 
     #[test]
     fn boolean_flags_reject_inline_values() {
         for argv in [
-            vec!["apply", "--yes=no"],
-            vec!["apply", "--force=false"],
-            vec!["apply", "--dry-run=false"],
             vec!["backup", "prune", "--yes=0"],
             vec!["backup", "delete", "1", "--yes=no"],
             vec!["backup", "restore", "backup.bin", "--yes=false"],
@@ -1273,9 +1194,6 @@ mod tests {
     #[test]
     fn boolean_flags_reject_duplicates() {
         for argv in [
-            vec!["apply", "--yes", "--yes"],
-            vec!["apply", "--force", "--force"],
-            vec!["apply", "--dry-run", "--dry-run"],
             vec!["backup", "prune", "--yes", "--yes"],
             vec!["backup", "restore", "backup.bin", "--yes", "--yes"],
         ] {
@@ -1332,8 +1250,6 @@ mod tests {
     #[test]
     fn single_value_flags_reject_duplicates() {
         for argv in [
-            vec!["apply", "--disk", "4", "--disk", "6"],
-            vec!["apply", "--size", "10", "--size", "20"],
             vec!["backup", "restore", "--disk=4", "--disk=6"],
             vec!["backup", "create", "--disk=4", "--disk=6"],
             vec!["backup", "prune", "--keep", "1", "--keep", "2"],
