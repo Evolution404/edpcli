@@ -963,10 +963,39 @@ pub fn analyze_sector_with_context(
             }
         },
         2 => {
-            let profile = if raw.iter().all(|byte| *byte == 0) {
-                crate::protocol::profile::GptLayout::Absent
+            let (profile, profile_source) = if let Some(raw1) = protocol_sector(protocol_image, 1) {
+                match lba1::parse_lba1(raw1) {
+                    Ok(view) => (
+                        match view.header {
+                            lba1::GptHeaderState::Absent => {
+                                crate::protocol::profile::GptLayout::Absent
+                            }
+                            lba1::GptHeaderState::Enabled(_) => {
+                                crate::protocol::profile::GptLayout::Enabled
+                            }
+                        },
+                        "LBA1 canonical profile",
+                    ),
+                    Err(error) => {
+                        notes.push(format!(
+                            "LBA1 canonical parser 无法确定 GPT profile: {error}"
+                        ));
+                        (crate::protocol::profile::GptLayout::Unknown, "LBA1 invalid")
+                    }
+                }
             } else {
-                crate::protocol::profile::GptLayout::Enabled
+                notes.push(
+                    "未提供完整 LBA0–12 上下文；LBA2 单扇区 API 仅以全零/非零选择兼容 profile，CLI/TUI 会以 LBA1 为权威。"
+                        .into(),
+                );
+                (
+                    if raw.iter().all(|byte| *byte == 0) {
+                        crate::protocol::profile::GptLayout::Absent
+                    } else {
+                        crate::protocol::profile::GptLayout::Enabled
+                    },
+                    "single-sector fallback",
+                )
             };
             match lba2::parse_lba2(raw_sector, profile) {
                 Ok(view) => {
@@ -1049,7 +1078,9 @@ pub fn analyze_sector_with_context(
                             }
                         }
                     }
-                    notes.push("字段语义来自 protocol::lba2::parse_lba2；非零扇区按 enabled GPT profile 严格解析。".into());
+                    notes.push(format!(
+                        "字段语义来自 protocol::lba2::parse_lba2；profile 来源={profile_source}。"
+                    ));
                     "canonical protocol::lba2".into()
                 }
                 Err(error) => {
