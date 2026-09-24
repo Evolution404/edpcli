@@ -30,7 +30,8 @@ pub use keys::{
 pub use layout::{
     build_official_partition_layout, official_mbr_partition_type, OfficialPartitionGeometry,
     OfficialPartitionMode, OfficialPartitionSizes, OfficialProvisionPlan,
-    OFFICIAL_PARTITION_START_SECTOR, WHOLE_DISK_ENCRYPTED_COMPAT_BOOT_BYTES,
+    DEFAULT_MODE0_BOOT_SECTORS, OFFICIAL_PARTITION_START_SECTOR,
+    WHOLE_DISK_ENCRYPTED_COMPAT_BOOT_BYTES,
 };
 pub use lce::{build_lce_ciphertext, lce_plaintext};
 pub use profile::{ProvisionProfile, DEFAULT_SAFE6_LABEL};

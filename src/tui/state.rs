@@ -289,6 +289,7 @@ pub enum ProvisionPrepared {
 pub struct ProvisionForm {
     pub size_mode: ProvisionSizeMode,
     pub boot_mib: String,
+    pub boot_sectors: String,
     pub share_mib: String,
     pub encrypt_mib: String,
     pub boot_ratio: String,
@@ -327,12 +328,15 @@ impl Default for ProvisionForm {
         Self {
             size_mode: ProvisionSizeMode::Manual,
             boot_mib: "512".into(),
+            boot_sectors: crate::provision::DEFAULT_MODE0_BOOT_SECTORS.to_string(),
             share_mib: "1024".into(),
             encrypt_mib: "2048".into(),
             boot_ratio: "1".into(),
             share_ratio: "2".into(),
             encrypt_ratio: "4".into(),
-            label_id: String::new(),
+            label_id: crate::provision::OnlyId::random_candidate()
+                .map(|value| value.text().to_string())
+                .unwrap_or_else(|_| "1".into()),
             user: String::new(),
             dept: String::new(),
             label: crate::provision::DEFAULT_SAFE6_LABEL.into(),
@@ -1770,13 +1774,21 @@ impl AppState {
         } else {
             let defaults = self.selected_device().map(|row| {
                 (
-                    row.onlyid.clone().unwrap_or_default(),
+                    row.onlyid.clone(),
                     row.user.clone().unwrap_or_default(),
                     row.dept.clone().unwrap_or_default(),
                 )
             });
-            if let Some((label_id, user, dept)) = defaults {
-                self.provision.form.label_id = label_id;
+            let scanned_onlyid = defaults
+                .as_ref()
+                .and_then(|(onlyid, _, _)| onlyid.clone())
+                .filter(|value| !value.trim().is_empty());
+            self.provision.form.label_id = scanned_onlyid.unwrap_or_else(|| {
+                crate::provision::OnlyId::random_candidate()
+                    .map(|value| value.text().to_string())
+                    .unwrap_or_else(|_| "1".into())
+            });
+            if let Some((_, user, dept)) = defaults {
                 self.provision.form.user = user;
                 self.provision.form.dept = dept;
             }
@@ -1934,7 +1946,13 @@ impl AppState {
         };
         out.push(("分配方式", self.provision.form.size_mode.label(), false));
         let ratio = self.provision.form.size_mode == ProvisionSizeMode::Ratio;
-        if matches!(mode, 0 | 3) {
+        if mode == 0 {
+            out.push((
+                "启动区扇区",
+                self.provision.form.boot_sectors.as_str(),
+                false,
+            ));
+        } else if mode == 3 {
             out.push((
                 if ratio {
                     "启动区比例"
@@ -2001,13 +2019,13 @@ impl AppState {
 
     fn provision_selected_field_mut(&mut self) -> Option<&mut String> {
         match self.provision_field_slot(self.provision.field_selected)? {
-            0 => Some(
-                if self.provision.form.size_mode == ProvisionSizeMode::Ratio {
-                    &mut self.provision.form.boot_ratio
-                } else {
-                    &mut self.provision.form.boot_mib
-                },
-            ),
+            0 => Some(if self.provision.kind == ProvisionKind::Mode0 {
+                &mut self.provision.form.boot_sectors
+            } else if self.provision.form.size_mode == ProvisionSizeMode::Ratio {
+                &mut self.provision.form.boot_ratio
+            } else {
+                &mut self.provision.form.boot_mib
+            }),
             1 => Some(
                 if self.provision.form.size_mode == ProvisionSizeMode::Ratio {
                     &mut self.provision.form.share_ratio
@@ -2034,7 +2052,7 @@ impl AppState {
 
     fn provision_active_partition_slots(&self) -> &'static [usize] {
         match self.provision.kind {
-            ProvisionKind::Mode0 => &[0, 1, 2],
+            ProvisionKind::Mode0 => &[1, 2],
             ProvisionKind::Mode1 => &[1, 2],
             ProvisionKind::Mode2 => &[2],
             ProvisionKind::Mode3 => &[0, 1],
@@ -2042,8 +2060,7 @@ impl AppState {
         }
     }
 
-    fn provision_total_usable_mib(&self) -> Option<u64> {
-        const MIB: u64 = 1024 * 1024;
+    fn provision_total_usable_sectors(&self) -> Option<u64> {
         let row = self.selected_device()?;
         let total_sectors = row.size / crate::common::SECTOR as u64;
         let lce =
@@ -2051,16 +2068,21 @@ impl AppState {
                 total_sectors,
                 crate::common::SECTOR as u32,
             )?;
-        let usable_sectors = lce
-            .start_lba
-            .checked_sub(crate::provision::OFFICIAL_PARTITION_START_SECTOR)?;
-        usable_sectors
-            .checked_mul(crate::common::SECTOR as u64)
-            .map(|bytes| bytes / MIB)
+        lce.start_lba
+            .checked_sub(crate::provision::OFFICIAL_PARTITION_START_SECTOR)
+    }
+
+    fn provision_total_usable_mib(&self) -> Option<u64> {
+        const SECTORS_PER_MIB: u64 = 2048;
+        self.provision_total_usable_sectors()
+            .map(|sectors| sectors / SECTORS_PER_MIB)
     }
 
     fn provision_manual_text(&self, slot: usize) -> &str {
         match slot {
+            0 if self.provision.kind == ProvisionKind::Mode0 => {
+                self.provision.form.boot_sectors.as_str()
+            }
             0 => self.provision.form.boot_mib.as_str(),
             1 => self.provision.form.share_mib.as_str(),
             2 => self.provision.form.encrypt_mib.as_str(),
@@ -2078,10 +2100,28 @@ impl AppState {
     }
 
     fn provision_ratio_allocation(&self) -> Result<[Option<u64>; 3], String> {
+        const SECTORS_PER_MIB: u64 = 2048;
         let slots = self.provision_active_partition_slots();
-        let usable = self
+        let mut usable = self
             .provision_total_usable_mib()
             .ok_or_else(|| "无法取得当前目标盘可分配容量，不能按比例计算".to_string())?;
+        if self.provision.kind == ProvisionKind::Mode0 {
+            let boot_sectors = self
+                .provision
+                .form
+                .boot_sectors
+                .parse::<u64>()
+                .ok()
+                .filter(|value| *value > 0)
+                .ok_or_else(|| "启动区扇区数必须为大于 0 的整数".to_string())?;
+            let total_sectors = self
+                .provision_total_usable_sectors()
+                .ok_or_else(|| "无法取得当前目标盘可分配容量".to_string())?;
+            usable = total_sectors
+                .checked_sub(boot_sectors)
+                .ok_or_else(|| "启动区已超过当前盘可分配容量".to_string())?
+                / SECTORS_PER_MIB;
+        }
         if usable < slots.len() as u64 {
             return Err("当前目标盘可分配容量不足".into());
         }
@@ -2122,11 +2162,13 @@ impl AppState {
 
     pub fn provision_field_hint(&self, display_index: usize) -> Option<String> {
         let slot = self.provision_field_slot(display_index)?;
+        const SECTORS_PER_MIB: u64 = 2048;
         let usable = self.provision_total_usable_mib();
+        let usable_sectors = self.provision_total_usable_sectors();
         if slot == 10 {
             return usable.map(|value| {
                 if self.provision.form.size_mode == ProvisionSizeMode::Ratio {
-                    format!("当前盘可分配 {value} MiB，将按权重自动分满")
+                    format!("当前盘可分配 {value} MiB，将按权重自动分配")
                 } else {
                     format!("当前盘可分配 {value} MiB，已避开 LCE")
                 }
@@ -2135,13 +2177,35 @@ impl AppState {
         if !(0..=2).contains(&slot) {
             return None;
         }
+        if slot == 0 && self.provision.kind == ProvisionKind::Mode0 {
+            let total = usable_sectors?;
+            let share = self.provision.form.share_mib.parse::<u64>().unwrap_or(1);
+            let encrypt = self.provision.form.encrypt_mib.parse::<u64>().unwrap_or(1);
+            let reserved = share
+                .saturating_add(encrypt)
+                .saturating_mul(SECTORS_PER_MIB);
+            let max = total.saturating_sub(reserved);
+            return Some(if max == 0 {
+                "容量已用尽或超限".into()
+            } else {
+                format!(
+                    "可填 1..{max} 扇区 · 官方默认 {}（LBA63→20480）",
+                    crate::provision::DEFAULT_MODE0_BOOT_SECTORS
+                )
+            });
+        }
         if self.provision.form.size_mode == ProvisionSizeMode::Ratio {
             return match self.provision_ratio_allocation() {
                 Ok(allocation) => allocation[slot].map(|value| format!("预计 {value} MiB")),
                 Err(message) => Some(message),
             };
         }
-        let usable = usable?;
+        let usable = if self.provision.kind == ProvisionKind::Mode0 {
+            let boot = self.provision.form.boot_sectors.parse::<u64>().unwrap_or(1);
+            usable_sectors?.saturating_sub(boot) / SECTORS_PER_MIB
+        } else {
+            usable?
+        };
         let mut reserved = 0u64;
         for &other in self.provision_active_partition_slots() {
             if other == slot {
@@ -2219,40 +2283,53 @@ impl AppState {
             .kind
             .mode()
             .ok_or_else(|| "免密改造不使用新盘表单".to_string())?;
-        let parse = |value: &str, label: &str| -> Result<u64, String> {
+        const SECTORS_PER_MIB: u64 = 2048;
+        let parse_mib = |value: &str, label: &str| -> Result<u64, String> {
             value
                 .parse::<u64>()
                 .ok()
                 .filter(|value| *value > 0)
                 .ok_or_else(|| format!("{label} 必须为正整数 MiB"))
         };
+        let parse_sectors = |value: &str, label: &str| -> Result<u64, String> {
+            value
+                .parse::<u64>()
+                .ok()
+                .filter(|value| *value > 0)
+                .ok_or_else(|| format!("{label} 必须为正整数扇区"))
+        };
+        let boot_sectors = (mode == 0)
+            .then(|| parse_sectors(&self.provision.form.boot_sectors, "启动区"))
+            .transpose()?;
         let (boot_mib, share_mib, encrypt_mib) =
             if self.provision.form.size_mode == ProvisionSizeMode::Ratio {
                 let allocation = self.provision_ratio_allocation()?;
-                (allocation[0], allocation[1], allocation[2])
+                let boot_mib = if mode == 3 { allocation[0] } else { None };
+                (boot_mib, allocation[1], allocation[2])
             } else {
-                let boot_mib = matches!(mode, 0 | 3)
-                    .then(|| parse(&self.provision.form.boot_mib, "启动区"))
+                let boot_mib = (mode == 3)
+                    .then(|| parse_mib(&self.provision.form.boot_mib, "启动区"))
                     .transpose()?;
                 let share_mib = matches!(mode, 0 | 1 | 3)
-                    .then(|| parse(&self.provision.form.share_mib, "交换区"))
+                    .then(|| parse_mib(&self.provision.form.share_mib, "交换区"))
                     .transpose()?;
                 let encrypt_mib = matches!(mode, 0..=2)
-                    .then(|| parse(&self.provision.form.encrypt_mib, "保密区"))
+                    .then(|| parse_mib(&self.provision.form.encrypt_mib, "保密区"))
                     .transpose()?;
-                if let Some(usable) = self.provision_total_usable_mib() {
-                    let requested = [boot_mib, share_mib, encrypt_mib]
-                        .into_iter()
-                        .flatten()
-                        .sum::<u64>();
-                    if requested > usable {
-                        return Err(format!(
-                            "分区合计 {requested} MiB 超过当前盘可分配上限 {usable} MiB"
-                        ));
-                    }
-                }
                 (boot_mib, share_mib, encrypt_mib)
             };
+        if let Some(usable) = self.provision_total_usable_sectors() {
+            let requested = boot_sectors
+                .unwrap_or(0)
+                .saturating_add(boot_mib.unwrap_or(0).saturating_mul(SECTORS_PER_MIB))
+                .saturating_add(share_mib.unwrap_or(0).saturating_mul(SECTORS_PER_MIB))
+                .saturating_add(encrypt_mib.unwrap_or(0).saturating_mul(SECTORS_PER_MIB));
+            if requested > usable {
+                return Err(format!(
+                    "分区合计 {requested} 扇区超过当前盘可分配上限 {usable} 扇区"
+                ));
+            }
+        }
         if self.provision.form.label_id.trim().is_empty()
             || self.provision.form.user.trim().is_empty()
             || self.provision.form.dept.trim().is_empty()
@@ -2264,6 +2341,7 @@ impl AppState {
         Ok(crate::application::provision::NewProvisionRequest {
             mode,
             boot_mib,
+            boot_sectors,
             share_mib,
             encrypt_mib,
             label_id: self.provision.form.label_id.trim().to_string(),

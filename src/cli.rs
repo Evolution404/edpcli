@@ -254,6 +254,7 @@ fn provision_request(
     crate::application::provision::NewProvisionRequest {
         mode: opts.mode,
         boot_mib: opts.boot_mib,
+        boot_sectors: opts.boot_sectors,
         share_mib: opts.share_mib,
         encrypt_mib: opts.encrypt_mib,
         label_id: opts.label_id.clone(),
@@ -288,11 +289,16 @@ fn print_new_provision_summary(
         prepared.lce_start_lba,
         prepared.write_image.touched_sector_count()
     );
-    println!(
-        "分区 MiB: boot={} share={} encrypt={}  文件系统=exFAT",
+    let boot = if let Some(sectors) = opts.boot_sectors {
+        format!("{sectors} sectors")
+    } else {
         opts.boot_mib
-            .map(|v| v.to_string())
-            .unwrap_or_else(|| "-".into()),
+            .map(|v| format!("{v} MiB"))
+            .unwrap_or_else(|| "-".into())
+    };
+    println!(
+        "分区: boot={} share={}MiB encrypt={}MiB  文件系统=exFAT",
+        boot,
         opts.share_mib
             .map(|v| v.to_string())
             .unwrap_or_else(|| "-".into()),

@@ -14,6 +14,7 @@ pub type OfficialPartitionMode = Lba7PartitionMode;
 
 pub const OFFICIAL_PARTITION_START_SECTOR: u64 = 63;
 pub const WHOLE_DISK_ENCRYPTED_COMPAT_BOOT_BYTES: u64 = 0x7e00;
+pub const DEFAULT_MODE0_BOOT_SECTORS: u64 = 20_417;
 const MIB: u64 = 1024 * 1024;
 
 /// MBR partition-type byte selected by the current first-party writer for the
@@ -31,6 +32,7 @@ pub const fn official_mbr_partition_type(mode: OfficialPartitionMode) -> u8 {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct OfficialPartitionSizes {
     pub boot_mib: u64,
+    pub boot_sectors: Option<u64>,
     pub share_mib: u64,
     pub encrypt_mib: u64,
 }
@@ -39,9 +41,15 @@ impl OfficialPartitionSizes {
     pub const fn new(boot_mib: u64, share_mib: u64, encrypt_mib: u64) -> Self {
         Self {
             boot_mib,
+            boot_sectors: None,
             share_mib,
             encrypt_mib,
         }
+    }
+
+    pub const fn with_boot_sectors(mut self, boot_sectors: u64) -> Self {
+        self.boot_sectors = Some(boot_sectors);
+        self
     }
 }
 
@@ -143,7 +151,12 @@ pub fn build_official_partition_layout(
         return Err("sector size must be non-zero".into());
     }
 
-    let boot = mib_bytes(sizes.boot_mib)?;
+    let boot = match sizes.boot_sectors {
+        Some(sectors) => sectors
+            .checked_mul(sector_size)
+            .ok_or("boot partition sector count overflows bytes")?,
+        None => mib_bytes(sizes.boot_mib)?,
+    };
     let share = mib_bytes(sizes.share_mib)?;
     let encrypt = mib_bytes(sizes.encrypt_mib)?;
     let logical: Vec<(EdpPartitionType, u64)> = match mode {

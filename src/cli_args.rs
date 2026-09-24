@@ -75,6 +75,7 @@ pub struct ProvisionNewOpts {
     pub disk: Option<u32>,
     pub mode: u8,
     pub boot_mib: Option<u64>,
+    pub boot_sectors: Option<u64>,
     pub share_mib: Option<u64>,
     pub encrypt_mib: Option<u64>,
     pub label_id: String,
@@ -228,14 +229,15 @@ fn print_topic_help(topic: &str) {
             println!("  provision image --disk N --mode 0|1|2|3 <身份/分区参数> --out FILE");
             println!("  provision write --disk N --mode 0|1|2|3 <身份/分区参数> [--yes]");
             println!("  provision convert [--disk N] [--write] [--yes] [--backup-dir D]");
-            println!("新盘身份参数: --label-id ID --user USER --dept DEPT [--label LABEL] [--password PASSWORD]");
+            println!("新盘身份参数: [--label-id ID] --user USER --dept DEPT [--label LABEL] [--password PASSWORD]");
             println!(
                 "标签默认值: {}；可通过 --label 自定义。",
                 crate::provision::DEFAULT_SAFE6_LABEL
             );
             println!("密码默认值: 0000aaaa；卷标默认值: 启动区。");
+            println!("标签标识未指定时自动生成一个合法 onlyid 候选；可通过 --label-id 手动覆盖。");
             println!("密码策略: --force-change-password 表示首次插入时强制修改密码；默认关闭。");
-            println!("分区参数: --boot-mib N --share-mib N --encrypt-mib N；仅当前模式实际使用的项必填。");
+            println!("分区参数: --boot-mib N / --boot-sectors N、--share-mib N、--encrypt-mib N；mode0 未指定启动区时默认 20417 扇区。");
             println!("当前产品写入固定使用已验证的 exFAT + SM4(mode2) 路线。");
         }
         "completion" => {
@@ -317,6 +319,7 @@ fn parse_new_provision_opts(
     let mut disk = None;
     let mut mode = None;
     let mut boot_mib = None;
+    let mut boot_sectors = None;
     let mut share_mib = None;
     let mut encrypt_mib = None;
     let mut label_id = None;
@@ -345,6 +348,14 @@ fn parse_new_provision_opts(
                     &mut boot_mib,
                     parse_positive_u64(&value, "--boot-mib")?,
                     "--boot-mib",
+                )?;
+            }
+            "--boot-sectors" => {
+                let value = take_value(rest, &mut i, "--boot-sectors")?;
+                set_once(
+                    &mut boot_sectors,
+                    parse_positive_u64(&value, "--boot-sectors")?,
+                    "--boot-sectors",
                 )?;
             }
             "--share-mib" => {
@@ -405,23 +416,37 @@ fn parse_new_provision_opts(
     }
 
     let mode = mode.ok_or("错误: provision 新盘操作必须指定 --mode 0|1|2|3")?;
+    if boot_mib.is_some() && boot_sectors.is_some() {
+        return Err("错误: --boot-mib 与 --boot-sectors 不能同时指定".into());
+    }
     let require = |value: Option<u64>, flag: &str| {
         value.ok_or_else(|| format!("错误: mode{mode} 必须指定 {flag}"))
     };
     match mode {
         0 => {
-            require(boot_mib, "--boot-mib")?;
             require(share_mib, "--share-mib")?;
             require(encrypt_mib, "--encrypt-mib")?;
+            if boot_mib.is_none() && boot_sectors.is_none() {
+                boot_sectors = Some(crate::provision::DEFAULT_MODE0_BOOT_SECTORS);
+            }
         }
         1 => {
+            if boot_sectors.is_some() {
+                return Err("错误: --boot-sectors 仅用于 mode0".into());
+            }
             require(share_mib, "--share-mib")?;
             require(encrypt_mib, "--encrypt-mib")?;
         }
         2 => {
+            if boot_sectors.is_some() {
+                return Err("错误: --boot-sectors 仅用于 mode0".into());
+            }
             require(encrypt_mib, "--encrypt-mib")?;
         }
         3 => {
+            if boot_sectors.is_some() {
+                return Err("错误: --boot-sectors 仅用于 mode0".into());
+            }
             require(boot_mib, "--boot-mib")?;
             require(share_mib, "--share-mib")?;
         }
@@ -433,9 +458,15 @@ fn parse_new_provision_opts(
             disk,
             mode,
             boot_mib,
+            boot_sectors,
             share_mib,
             encrypt_mib,
-            label_id: label_id.ok_or("错误: provision 新盘操作必须指定 --label-id")?,
+            label_id: match label_id {
+                Some(value) => value,
+                None => crate::provision::OnlyId::random_candidate()?
+                    .text()
+                    .to_string(),
+            },
             user: user.ok_or("错误: provision 新盘操作必须指定 --user")?,
             dept: dept.ok_or("错误: provision 新盘操作必须指定 --dept")?,
             label: label.unwrap_or_else(|| crate::provision::DEFAULT_SAFE6_LABEL.into()),

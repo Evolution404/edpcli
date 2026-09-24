@@ -19,7 +19,7 @@ use crate::provision::{
     wrap_legacy_lba7_file_key, FileKeyWrapMode, OfficialPartitionMode, OfficialPartitionSizes,
     OfficialProvisionPlan, OfficialProvisionWriteImage, OnlyId, PasswordlessConversionImage,
     ProvisionEntropy, ProvisionImage, ProvisionMetadata, ProvisionProfile, ProvisionSpec,
-    TargetIdentity,
+    TargetIdentity, DEFAULT_MODE0_BOOT_SECTORS,
 };
 use crate::sysinfo::{self, CmdRunner};
 
@@ -36,6 +36,7 @@ fn err(code: i32, message: impl Into<String>) -> EdpCliError {
 pub struct NewProvisionRequest {
     pub mode: u8,
     pub boot_mib: Option<u64>,
+    pub boot_sectors: Option<u64>,
     pub share_mib: Option<u64>,
     pub encrypt_mib: Option<u64>,
     pub label_id: String,
@@ -88,15 +89,33 @@ fn mode(value: u8) -> EdpCliResult<OfficialPartitionMode> {
     }
 }
 
-fn sizes(request: &NewProvisionRequest) -> OfficialPartitionSizes {
+fn sizes(request: &NewProvisionRequest) -> EdpCliResult<OfficialPartitionSizes> {
+    if request.boot_mib.is_some() && request.boot_sectors.is_some() {
+        return Err(err(
+            EXIT_TARGET,
+            "错误: 启动区不能同时指定 MiB 和精确扇区数",
+        ));
+    }
+    if request.boot_sectors.is_some() && request.mode != 0 {
+        return Err(err(EXIT_TARGET, "错误: 精确启动区扇区数仅用于官方模式0"));
+    }
     // Unused fields are ignored by the official mode; keep a non-zero sentinel
     // so domain validation cannot accidentally turn an unused value into a
     // zero-size emitted partition if a mode definition changes later.
-    OfficialPartitionSizes::new(
+    let mut sizes = OfficialPartitionSizes::new(
         request.boot_mib.unwrap_or(1),
         request.share_mib.unwrap_or(1),
         request.encrypt_mib.unwrap_or(1),
-    )
+    );
+    if let Some(boot_sectors) = request.boot_sectors {
+        if boot_sectors == 0 {
+            return Err(err(EXIT_TARGET, "错误: 启动区扇区数必须大于 0"));
+        }
+        sizes = sizes.with_boot_sectors(boot_sectors);
+    } else if request.mode == 0 && request.boot_mib.is_none() {
+        sizes = sizes.with_boot_sectors(DEFAULT_MODE0_BOOT_SECTORS);
+    }
+    Ok(sizes)
 }
 
 pub fn prepare_new_provision(
@@ -144,7 +163,7 @@ pub fn prepare_new_provision(
     let selected_mode = mode(request.mode)?;
     let plan = OfficialProvisionPlan::new(
         selected_mode,
-        sizes(request),
+        sizes(request)?,
         compatibility,
         legacy_key,
         current_key,

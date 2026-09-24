@@ -28,9 +28,30 @@ fn provision_label_defaults_to_jiangsu_safe6_and_remains_editable() {
     assert_eq!(form.password, "0000aaaa");
     assert_eq!(form.volume_label, "启动区");
     assert_eq!(form.size_mode, ProvisionSizeMode::Manual);
+    assert_eq!(form.boot_sectors, "20417");
+    assert!(edpcli::provision::OnlyId::parse(&form.label_id).is_ok());
     assert!(!form.force_change_password);
     form.label = "自定义标签!SAFE6".into();
+    form.label_id = "123456789".into();
     assert_eq!(form.label, "自定义标签!SAFE6");
+    assert_eq!(form.label_id, "123456789");
+}
+
+#[test]
+fn provision_prefers_scanned_onlyid_and_generates_candidate_only_when_missing() {
+    let mut state = AppState::new();
+    state.replace_devices(vec![device(64_000_000_000)]);
+    state.navigate(NavCommand::WorkspaceProvision, 20);
+    state.provision_begin_selected();
+    assert_eq!(state.provision().form.label_id, "1402259934");
+
+    let mut missing = device(64_000_000_000);
+    missing.onlyid = None;
+    state.replace_devices(vec![missing]);
+    state.navigate(NavCommand::WorkspaceProvision, 20);
+    state.provision_begin_selected();
+    assert!(edpcli::provision::OnlyId::parse(&state.provision().form.label_id).is_ok());
+    assert!(!state.provision().form.label_id.is_empty());
 }
 
 #[test]
@@ -40,16 +61,23 @@ fn provision_manual_ranges_follow_remaining_capacity_and_ratio_mode_fills_usable
     state.navigate(NavCommand::WorkspaceProvision, 20);
     assert_eq!(state.provision_begin_selected(), ProvisionKind::Mode0);
 
-    let total_hint = state.provision_field_hint(0).expect("total capacity hint");
-    let usable = total_hint
-        .split_whitespace()
-        .find_map(|word| word.parse::<u64>().ok())
-        .expect("usable MiB in hint");
+    let boot_hint = state
+        .provision_field_hint(1)
+        .expect("boot sector range hint");
+    assert!(boot_hint.contains("20417"));
 
-    state.provision_mut().form.boot_mib = "512".into();
+    let total_sectors = 64_000_000_000u64 / 512;
+    let lce =
+        edpcli::protocol::lba7_compat::locate_lba7_compatibility_extent_from_verified_usb_capacity(
+            total_sectors,
+            512,
+        )
+        .unwrap();
+    let usable_sectors = lce.start_lba - edpcli::provision::OFFICIAL_PARTITION_START_SECTOR;
     state.provision_mut().form.share_mib = "1024".into();
     let encrypt_hint = state.provision_field_hint(3).expect("encrypt range hint");
-    assert_eq!(encrypt_hint, format!("可填 1..{} MiB", usable - 512 - 1024));
+    let expected_max = (usable_sectors - 20_417 - 1024 * 2048) / 2048;
+    assert_eq!(encrypt_hint, format!("可填 1..{expected_max} MiB"));
 
     state.provision_mut().field_selected = 0;
     assert!(state.provision_toggle_selected_option());
@@ -58,9 +86,11 @@ fn provision_manual_ranges_follow_remaining_capacity_and_ratio_mode_fills_usable
     state.provision_mut().form.user = "测试用户".into();
     state.provision_mut().form.dept = "输电运检中心".into();
     let request = state.provision_request().expect("ratio request");
+    assert_eq!(request.boot_mib, None);
+    assert_eq!(request.boot_sectors, Some(20_417));
     assert_eq!(
-        request.boot_mib.unwrap() + request.share_mib.unwrap() + request.encrypt_mib.unwrap(),
-        usable
+        request.share_mib.unwrap() + request.encrypt_mib.unwrap(),
+        (usable_sectors - 20_417) / 2048
     );
 }
 

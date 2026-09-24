@@ -12,6 +12,17 @@ pub struct OnlyId {
 }
 
 impl OnlyId {
+    pub fn random_candidate() -> Result<Self, String> {
+        let mut raw = [0u8; 4];
+        getrandom::fill(&mut raw)
+            .map_err(|error| format!("failed to generate onlyid candidate: {error}"))?;
+        let mut bits = u32::from_le_bytes(raw);
+        if bits == 0 {
+            bits = 1;
+        }
+        Self::parse(&bits.to_string())
+    }
+
     pub fn parse(value: &str) -> Result<Self, String> {
         if value.is_empty() || value.starts_with('+') || value.trim() != value {
             return Err(format!("invalid onlyid: {value:?}"));

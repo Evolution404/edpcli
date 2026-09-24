@@ -1,4 +1,5 @@
 use edpcli::cli_args::{parse_args, BackupAction, InspectMode, Parsed, ProvisionAction};
+use edpcli::provision::{OnlyId, DEFAULT_MODE0_BOOT_SECTORS};
 
 fn args(values: &[&str]) -> Vec<String> {
     values.iter().map(|value| (*value).to_string()).collect()
@@ -178,6 +179,35 @@ fn provision_password_and_volume_label_have_product_defaults() {
         Parsed::Provision(ProvisionAction::Plan(opts)) => {
             assert_eq!(opts.password, "0000aaaa");
             assert_eq!(opts.volume_label, "启动区");
+        }
+        _ => panic!("expected provision plan"),
+    }
+}
+
+#[test]
+fn mode0_defaults_to_exact_boot_sectors_and_generates_onlyid_candidate() {
+    let parsed = parse_args(&args(&[
+        "provision",
+        "plan",
+        "--disk",
+        "4",
+        "--mode",
+        "0",
+        "--share-mib",
+        "64",
+        "--encrypt-mib",
+        "128",
+        "--user",
+        "USER06",
+        "--dept",
+        "江苏省电力有限公司",
+    ]))
+    .expect("mode0 defaults");
+    match parsed {
+        Parsed::Provision(ProvisionAction::Plan(opts)) => {
+            assert_eq!(opts.boot_mib, None);
+            assert_eq!(opts.boot_sectors, Some(DEFAULT_MODE0_BOOT_SECTORS));
+            assert!(OnlyId::parse(&opts.label_id).is_ok());
         }
         _ => panic!("expected provision plan"),
     }

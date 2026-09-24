@@ -6,8 +6,8 @@ use edpcli::provision::{
     wrap_file_key, wrap_legacy_lba7_file_key, FileKeyWrapMode, OfficialFilesystemFormat,
     OfficialPartitionMode, OfficialPartitionSizes, OfficialProvisionPlan,
     OfficialProvisionValidator, OnlyId, ProvisionEntropy, ProvisionImage, ProvisionMetadata,
-    ProvisionProfile, ProvisionSpec, TargetIdentity, OFFICIAL_PARTITION_START_SECTOR,
-    WHOLE_DISK_ENCRYPTED_COMPAT_BOOT_BYTES,
+    ProvisionProfile, ProvisionSpec, TargetIdentity, DEFAULT_MODE0_BOOT_SECTORS,
+    OFFICIAL_PARTITION_START_SECTOR, WHOLE_DISK_ENCRYPTED_COMPAT_BOOT_BYTES,
 };
 use edpcli::{
     crypto::{a6b0_full, crc32_bare, xor_rolling},
@@ -103,6 +103,20 @@ fn official_layouts_are_contiguous_from_lba63() {
             assert_eq!(pair[0].end_sector_exclusive(), pair[1].start_sector);
         }
     }
+}
+
+#[test]
+fn mode0_exact_boot_sector_geometry_reaches_lba20480() {
+    let layout = build_official_partition_layout(
+        OfficialPartitionMode::DefaultThreePartition,
+        OfficialPartitionSizes::new(1, 64, 128).with_boot_sectors(DEFAULT_MODE0_BOOT_SECTORS),
+        512,
+    )
+    .unwrap();
+    assert_eq!(layout[0].start_sector, 63);
+    assert_eq!(layout[0].sector_count(), 20_417);
+    assert_eq!(layout[0].end_sector_exclusive(), 20_480);
+    assert_eq!(layout[1].start_sector, 20_480);
 }
 
 #[test]
