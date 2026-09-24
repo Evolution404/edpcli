@@ -952,7 +952,7 @@ fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppSta
             lines.push(Line::from(""));
             lines.push(Line::from(vec![
                 Span::styled("↑/↓", accent()),
-                Span::raw(" 切字段   Tab/Shift-Tab 切页面   "),
+                Span::raw(" 切字段   Tab/Shift-Tab/←/→ 切页面   "),
                 Span::styled("直接输入", secondary()),
                 Span::raw(" 修改   "),
                 Span::styled("Space", secondary()),
@@ -2429,7 +2429,7 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
             Block::default()
                 .borders(Borders::ALL)
                 .border_style(accent())
-                .title("页面 · Tab / h / l 切换"),
+                .title("页面 · Tab / ← / → / h / l 切换"),
         )
         .style(muted())
         .highlight_style(selected())
@@ -2479,7 +2479,7 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
             InputMode::Help => {
                 let help = Paragraph::new(vec![
                     Line::from(Span::styled("Vim 键位", accent())),
-                    Line::from("Tab 切换页面   j/k/h/l 移动   gg/G 首/尾   Ctrl-d/u 半页"),
+                    Line::from("Tab/Shift-Tab/h/l/←/→ 切换页面   ↑/↓/j/k 移动条目   gg/G 首/尾   Ctrl-d/u 半页"),
                     Line::from(vec![
                         Span::styled("/ 搜索/过滤", secondary()),
                         Span::raw("   "),
@@ -2592,22 +2592,22 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
     } else {
         match state.workspace() {
             Workspace::Devices => {
-                "Tab 页面  ·  j/k 移动  ·  i 快速 Inspect  ·  I 高级 Inspect  ·  b 备份  ·  a Apply  ·  r 刷新  ·  q 退出".to_string()
+                "Tab/Shift-Tab/h/l/←/→ 页面  ·  ↑/↓/j/k 移动  ·  i 快速 Inspect  ·  I 高级 Inspect  ·  b 备份  ·  a Apply  ·  r 刷新  ·  q 退出".to_string()
             }
             Workspace::Backups => {
-                "Tab 页面 · j/k 移动 · Space 勾选 · X 批删 · i/I 检查 · v 校验 · R 恢复 · D 单删 · q 退出".to_string()
+                "Tab/Shift-Tab/h/l/←/→ 页面 · ↑/↓/j/k 移动 · Space 勾选 · X 批删 · i/I 检查 · v 校验 · R 恢复 · D 单删 · q 退出".to_string()
             }
             Workspace::Provision => match state.provision().stage {
-                ProvisionStage::SelectDisk => "制盘选盘：↑/↓ 选择 USB 盘  ·  Enter 固定目标  ·  Esc 返回设备页".to_string(),
+                ProvisionStage::SelectDisk => "制盘选盘：↑/↓/j/k 选择 USB 盘  ·  Tab/Shift-Tab/h/l/←/→ 切页面  ·  Enter 固定目标  ·  Esc 返回设备页".to_string(),
                 ProvisionStage::BackupPrompt => {
-                    "制盘前保存：↑/↓ 选择  ·  Enter 确认  ·  Esc 返回选盘  ·  Tab 切页面".to_string()
+                    "制盘前保存：↑/↓/j/k 选择  ·  Tab/Shift-Tab/h/l/←/→ 切页面  ·  Enter 确认  ·  Esc 返回选盘".to_string()
                 }
                 ProvisionStage::BackupSaving => "正在保存当前盘…".to_string(),
                 ProvisionStage::Menu => {
-                    "Tab 页面  ·  j/k 选择方案  ·  Enter 打开  ·  r 刷新目标  ·  :provision 直达  ·  ? 帮助  ·  q 退出".to_string()
+                    "Tab/Shift-Tab/h/l/←/→ 页面  ·  ↑/↓/j/k 选择方案  ·  Enter 打开  ·  r 刷新目标  ·  :provision 直达  ·  ? 帮助  ·  q 退出".to_string()
                 }
                 ProvisionStage::Form => {
-                    "↑/↓ 字段  ·  Tab/Shift-Tab 切页面  ·  输入编辑  ·  Space 切换选项  ·  Enter 生成只读计划  ·  Esc 返回".to_string()
+                    "↑/↓ 字段  ·  Tab/Shift-Tab/←/→ 切页面  ·  h/j/k/l 作为文本输入  ·  Space 切换选项  ·  Enter 生成只读计划  ·  Esc 返回".to_string()
                 }
                 ProvisionStage::Planning => "正在生成只读计划…".to_string(),
                 ProvisionStage::Review => {
@@ -2619,7 +2619,7 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
                 ProvisionStage::Running => "安全事务执行中；Esc 不退出，q / Ctrl-C 的退出请求延迟到安全检查点".to_string(),
                 ProvisionStage::Result => "Enter / Esc 返回制盘中心".to_string(),
                 ProvisionStage::OfflineForm => {
-                    "↑/↓ 字段  ·  Tab/Shift-Tab 切页面  ·  Enter 离线转换  ·  Esc 返回制盘中心".to_string()
+                    "↑/↓ 字段  ·  Tab/Shift-Tab/←/→ 切页面  ·  Enter 离线转换  ·  Esc 返回制盘中心".to_string()
                 }
                 ProvisionStage::OfflineRunning => "离线转换后台执行中…".to_string(),
                 ProvisionStage::OfflineResult => {

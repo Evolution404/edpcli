@@ -257,6 +257,14 @@ fn provision_tab_roundtrip_preserves_current_flow_state() {
     assert_eq!(state.provision().stage, ProvisionStage::Form);
     assert_eq!(state.selected_device_disk(), Some(6));
     assert_eq!(state.provision().form.label, "保持当前制盘状态!SAFE6");
+
+    state.navigate(NavCommand::Right, 20);
+    assert_eq!(state.workspace(), Workspace::Devices);
+    state.navigate(NavCommand::Left, 20);
+    assert_eq!(state.workspace(), Workspace::Provision);
+    assert_eq!(state.provision().stage, ProvisionStage::Form);
+    assert_eq!(state.selected_device_disk(), Some(6));
+    assert_eq!(state.provision().form.label, "保持当前制盘状态!SAFE6");
 }
 
 #[test]

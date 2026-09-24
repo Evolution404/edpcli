@@ -443,13 +443,35 @@ fn palette_action_to_nav(action: command::PaletteAction) -> NavCommand {
     }
 }
 
-fn workspace_tab_command(key: &ct_event::KeyEvent) -> Option<NavCommand> {
+fn workspace_switch_command(key: &ct_event::KeyEvent) -> Option<NavCommand> {
     if key.modifiers.contains(ct_event::KeyModifiers::CONTROL) {
         return None;
     }
     match key.code {
-        ct_event::KeyCode::Tab => Some(NavCommand::NextWorkspace),
-        ct_event::KeyCode::BackTab => Some(NavCommand::PreviousWorkspace),
+        ct_event::KeyCode::Tab | ct_event::KeyCode::Right => Some(NavCommand::NextWorkspace),
+        ct_event::KeyCode::BackTab | ct_event::KeyCode::Left => Some(NavCommand::PreviousWorkspace),
+        _ => None,
+    }
+}
+
+fn vim_workspace_switch_command(key: &ct_event::KeyEvent) -> Option<NavCommand> {
+    if key.modifiers.contains(ct_event::KeyModifiers::CONTROL) {
+        return None;
+    }
+    match key.code {
+        ct_event::KeyCode::Char('l') => Some(NavCommand::NextWorkspace),
+        ct_event::KeyCode::Char('h') => Some(NavCommand::PreviousWorkspace),
+        _ => None,
+    }
+}
+
+fn row_navigation_command(key: &ct_event::KeyEvent) -> Option<NavCommand> {
+    if key.modifiers.contains(ct_event::KeyModifiers::CONTROL) {
+        return None;
+    }
+    match key.code {
+        ct_event::KeyCode::Down | ct_event::KeyCode::Char('j') => Some(NavCommand::Down),
+        ct_event::KeyCode::Up | ct_event::KeyCode::Char('k') => Some(NavCommand::Up),
         _ => None,
     }
 }
@@ -846,7 +868,7 @@ fn run_loop(resume: Option<state::WriteIntent>) -> io::Result<LoopExit> {
                         }
                     }
                     if state.workspace() == state::Workspace::Provision {
-                        if let Some(command) = workspace_tab_command(&key) {
+                        if let Some(command) = workspace_switch_command(&key) {
                             let viewport_height =
                                 session.terminal.size()?.height.saturating_sub(9) as usize;
                             match dispatch_nav_command(
@@ -860,6 +882,32 @@ fn run_loop(resume: Option<state::WriteIntent>) -> io::Result<LoopExit> {
                                 StateEffect::ExitDeferred | StateEffect::None => {}
                             }
                             continue;
+                        }
+                        if matches!(
+                            state.provision().stage,
+                            state::ProvisionStage::SelectDisk
+                                | state::ProvisionStage::BackupPrompt
+                                | state::ProvisionStage::Menu
+                        ) {
+                            if let Some(command) = vim_workspace_switch_command(&key) {
+                                let viewport_height =
+                                    session.terminal.size()?.height.saturating_sub(9) as usize;
+                                match dispatch_nav_command(
+                                    &mut state,
+                                    &mut tasks,
+                                    command,
+                                    &backup_dir,
+                                    viewport_height,
+                                ) {
+                                    StateEffect::ExitRequested => break,
+                                    StateEffect::ExitDeferred | StateEffect::None => {}
+                                }
+                                continue;
+                            }
+                            if let Some(command) = row_navigation_command(&key) {
+                                let _ = state.navigate(command, 2);
+                                continue;
+                            }
                         }
                         use state::ProvisionStage;
                         match state.provision().stage {
@@ -1534,15 +1582,46 @@ mod tests {
     use super::*;
 
     #[test]
-    fn provision_workspace_keeps_tab_navigation_global() {
+    fn provision_workspace_uses_one_global_tab_and_row_navigation_contract() {
         let tab = ct_event::KeyEvent::new(ct_event::KeyCode::Tab, ct_event::KeyModifiers::NONE);
         let backtab =
             ct_event::KeyEvent::new(ct_event::KeyCode::BackTab, ct_event::KeyModifiers::SHIFT);
-        assert_eq!(workspace_tab_command(&tab), Some(NavCommand::NextWorkspace));
+        let left = ct_event::KeyEvent::new(ct_event::KeyCode::Left, ct_event::KeyModifiers::NONE);
+        let right = ct_event::KeyEvent::new(ct_event::KeyCode::Right, ct_event::KeyModifiers::NONE);
+        let h = ct_event::KeyEvent::new(ct_event::KeyCode::Char('h'), ct_event::KeyModifiers::NONE);
+        let l = ct_event::KeyEvent::new(ct_event::KeyCode::Char('l'), ct_event::KeyModifiers::NONE);
+        let j = ct_event::KeyEvent::new(ct_event::KeyCode::Char('j'), ct_event::KeyModifiers::NONE);
+        let k = ct_event::KeyEvent::new(ct_event::KeyCode::Char('k'), ct_event::KeyModifiers::NONE);
+        let up = ct_event::KeyEvent::new(ct_event::KeyCode::Up, ct_event::KeyModifiers::NONE);
+        let down = ct_event::KeyEvent::new(ct_event::KeyCode::Down, ct_event::KeyModifiers::NONE);
         assert_eq!(
-            workspace_tab_command(&backtab),
+            workspace_switch_command(&tab),
+            Some(NavCommand::NextWorkspace)
+        );
+        assert_eq!(
+            workspace_switch_command(&backtab),
             Some(NavCommand::PreviousWorkspace)
         );
+        assert_eq!(
+            workspace_switch_command(&right),
+            Some(NavCommand::NextWorkspace)
+        );
+        assert_eq!(
+            vim_workspace_switch_command(&l),
+            Some(NavCommand::NextWorkspace)
+        );
+        assert_eq!(
+            workspace_switch_command(&left),
+            Some(NavCommand::PreviousWorkspace)
+        );
+        assert_eq!(
+            vim_workspace_switch_command(&h),
+            Some(NavCommand::PreviousWorkspace)
+        );
+        assert_eq!(row_navigation_command(&down), Some(NavCommand::Down));
+        assert_eq!(row_navigation_command(&j), Some(NavCommand::Down));
+        assert_eq!(row_navigation_command(&up), Some(NavCommand::Up));
+        assert_eq!(row_navigation_command(&k), Some(NavCommand::Up));
     }
 
     #[test]

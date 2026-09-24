@@ -51,7 +51,7 @@ impl KeyMapper {
             KeyCode::Char('j') | KeyCode::Down => Some(NavCommand::Down),
             KeyCode::Char('k') | KeyCode::Up => Some(NavCommand::Up),
             KeyCode::Char('h') | KeyCode::Left => Some(NavCommand::Left),
-            KeyCode::Char('l') | KeyCode::Right | KeyCode::Enter => Some(NavCommand::Right),
+            KeyCode::Char('l') | KeyCode::Right => Some(NavCommand::Right),
             KeyCode::Char('/') => Some(NavCommand::Search),
             KeyCode::Char('n') => Some(NavCommand::NextMatch),
             KeyCode::Char('N') => Some(NavCommand::PreviousMatch),
@@ -95,6 +95,7 @@ mod tests {
             mapper.map(key(KeyCode::Char('k'), KeyModifiers::NONE)),
             Some(NavCommand::Up)
         );
+        assert_eq!(mapper.map(key(KeyCode::Enter, KeyModifiers::NONE)), None);
         assert_eq!(
             mapper.map(key(KeyCode::Char('G'), KeyModifiers::SHIFT)),
             Some(NavCommand::Bottom)
