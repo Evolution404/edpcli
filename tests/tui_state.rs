@@ -150,7 +150,7 @@ fn registered_identity_prefills_custom_label_and_force_policy_but_remains_editab
 }
 
 #[test]
-fn provision_has_four_physical_modes_and_prompts_for_backup_first() {
+fn provision_has_four_official_modes_plus_plain_and_prompts_for_backup_first() {
     assert_eq!(
         ProvisionKind::ALL,
         [
@@ -158,6 +158,7 @@ fn provision_has_four_physical_modes_and_prompts_for_backup_first() {
             ProvisionKind::Mode1,
             ProvisionKind::Mode2,
             ProvisionKind::Mode3,
+            ProvisionKind::Plain,
         ]
     );
 
@@ -675,6 +676,115 @@ fn provision_input_policy_filters_invalid_characters_and_ranges() {
         state.provision_push_char(ch);
     }
     assert_eq!(state.provision().form.max_share_password_errors, "25");
+}
+
+fn enter_plain_form(state: &mut AppState) {
+    state.replace_devices(vec![device(64_000_000_000)]);
+    state.navigate(NavCommand::WorkspaceProvision, 20);
+    state.provision_select_disk();
+    state.provision_skip_backup();
+    for _ in 0..4 {
+        state.navigate(NavCommand::Down, 20);
+    }
+    assert_eq!(state.provision_begin_selected(), ProvisionKind::Plain);
+    assert_eq!(state.provision().stage, ProvisionStage::Form);
+}
+
+#[test]
+fn plain_form_defaults_to_one_partition_at_lba2048_filling_the_disk() {
+    let mut state = AppState::new();
+    enter_plain_form(&mut state);
+
+    let plan = state.provision_plain_plan().unwrap();
+    let total_sectors = 64_000_000_000u64 / edpcli::common::SECTOR as u64;
+    assert_eq!(plan.partitions.len(), 1);
+    assert_eq!(plan.partitions[0].start_lba, 2048);
+    assert_eq!(plan.partitions[0].sector_count, total_sectors - 2048);
+
+    let fields = state.provision_visible_fields();
+    assert_eq!(fields.len(), 4);
+    assert_eq!(fields[0].0, "P1 起点 LBA");
+    assert_eq!(fields[0].1, "2048");
+    assert!(fields[1].0.starts_with("P1 容量"));
+    assert_eq!(fields[2].0, "P1 文件系统");
+    assert_eq!(fields[3].0, "P1 卷标");
+}
+
+#[test]
+fn plain_add_gap_fill_and_delete_never_move_other_partitions() {
+    use edpcli::provision::CapacityInputMode;
+
+    let mut state = AppState::new();
+    enter_plain_form(&mut state);
+
+    {
+        let p1 = &mut state.provision_mut().plain_form.partitions[0];
+        p1.input_mode = CapacityInputMode::Exact;
+        p1.sector_count = "10000".into();
+    }
+    assert!(state.provision_plain_add_partition());
+    assert_eq!(state.provision().plain_form.partitions.len(), 2);
+    assert_eq!(
+        state.provision().plain_form.partitions[1].start_lba,
+        "12048"
+    );
+
+    state.provision_mut().plain_form.partitions[1].start_lba = "20000".into();
+    state.provision_mut().field_selected = 5; // P2 capacity
+    assert!(state.provision_fill_selected_capacity());
+    let p2_before = state.provision().plain_form.partitions[1].start_lba.clone();
+
+    state.provision_mut().field_selected = 1; // P1 capacity
+    assert!(state.provision_fill_selected_capacity());
+    let plan = state.provision_plain_plan().unwrap();
+    assert_eq!(plan.partitions[0].sector_count, 17_952);
+    assert_eq!(plan.partitions[1].start_lba, 20_000);
+    assert_eq!(
+        state.provision().plain_form.partitions[1].start_lba,
+        p2_before
+    );
+
+    state.provision_mut().field_selected = 4; // P2
+    assert!(state.provision_plain_delete_selected_partition());
+    assert_eq!(state.provision().plain_form.partitions.len(), 1);
+    assert_eq!(state.provision().plain_form.partitions[0].start_lba, "2048");
+    assert_eq!(
+        state.provision().plain_form.partitions[0].sector_count,
+        "17952"
+    );
+}
+
+#[test]
+fn plain_plan_rejects_overlap_and_review_is_read_only() {
+    use edpcli::provision::CapacityInputMode;
+
+    let mut state = AppState::new();
+    enter_plain_form(&mut state);
+    {
+        let p1 = &mut state.provision_mut().plain_form.partitions[0];
+        p1.input_mode = CapacityInputMode::Exact;
+        p1.sector_count = "30000".into();
+    }
+    assert!(state.provision_plain_add_partition());
+    state.provision_mut().plain_form.partitions[1].start_lba = "20000".into();
+    assert!(state.provision_plain_plan().unwrap_err().contains("重叠"));
+
+    state.provision_mut().plain_form.partitions[1].start_lba = "40000".into();
+    state.provision_mut().field_selected = 5;
+    assert!(state.provision_fill_selected_capacity());
+    state.provision_prepare_plain();
+    assert_eq!(state.provision().stage, ProvisionStage::Review);
+    assert!(matches!(
+        state.provision().prepared,
+        Some(edpcli::tui::state::ProvisionPrepared::Plain(_))
+    ));
+    state.provision_begin_confirm();
+    assert_eq!(state.provision().stage, ProvisionStage::Review);
+    assert!(state
+        .provision()
+        .message
+        .as_deref()
+        .is_some_and(|message| message.contains("只读计划")));
 }
 
 #[test]

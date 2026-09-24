@@ -9,6 +9,7 @@ mod generate;
 mod keys;
 mod layout;
 mod lce;
+mod plain;
 mod profile;
 mod reprovision;
 mod spec;
@@ -34,6 +35,10 @@ pub use layout::{
     OFFICIAL_PARTITION_START_SECTOR, WHOLE_DISK_ENCRYPTED_COMPAT_BOOT_BYTES,
 };
 pub use lce::{build_lce_ciphertext, lce_plaintext};
+pub use plain::{
+    max_plain_sector_count, plain_gaps, validate_plain_partitions, PlainGap, PlainPartitionSpec,
+    PlainProvisionPlan, DEFAULT_PLAIN_START_LBA, MAX_PLAIN_PARTITIONS,
+};
 pub use profile::{PassInfoPolicy, ProvisionProfile, DEFAULT_SAFE6_LABEL};
 pub use reprovision::{
     apply_target_geometry_overrides, decide_partition_action, force_change_password_from_sectors,

@@ -178,11 +178,13 @@ pub enum ProvisionKind {
     Mode1,
     Mode2,
     Mode3,
+    Plain,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ProvisionBarKind {
     Free,
+    Plain,
     Boot,
     Share,
     Encrypt,
@@ -190,7 +192,13 @@ pub enum ProvisionBarKind {
 }
 
 impl ProvisionKind {
-    pub const ALL: [Self; 4] = [Self::Mode0, Self::Mode1, Self::Mode2, Self::Mode3];
+    pub const ALL: [Self; 5] = [
+        Self::Mode0,
+        Self::Mode1,
+        Self::Mode2,
+        Self::Mode3,
+        Self::Plain,
+    ];
 
     pub const fn target(self) -> crate::provision::ProvisionTarget {
         match self {
@@ -198,6 +206,7 @@ impl ProvisionKind {
             Self::Mode1 => crate::provision::ProvisionTarget::OFFICIAL[1],
             Self::Mode2 => crate::provision::ProvisionTarget::OFFICIAL[2],
             Self::Mode3 => crate::provision::ProvisionTarget::OFFICIAL[3],
+            Self::Plain => crate::provision::ProvisionTarget::Plain,
         }
     }
 
@@ -207,6 +216,7 @@ impl ProvisionKind {
             Self::Mode1 => Some(1),
             Self::Mode2 => Some(2),
             Self::Mode3 => Some(3),
+            Self::Plain => None,
         }
     }
 
@@ -238,6 +248,7 @@ pub enum ProvisionStage {
 #[derive(Debug, Clone)]
 pub enum ProvisionPrepared {
     New(Box<crate::application::provision::PreparedNewProvision>),
+    Plain(crate::provision::PlainProvisionPlan),
 }
 
 #[derive(Debug, Clone)]
@@ -281,6 +292,131 @@ pub struct ProvisionForm {
     pub cancel_password_complexity_check: bool,
     pub max_share_password_errors: String,
     pub max_encrypt_password_errors: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct PlainPartitionForm {
+    pub start_lba: String,
+    pub input_mode: crate::provision::CapacityInputMode,
+    pub quick_unit: crate::provision::QuickCapacityUnit,
+    pub quick_capacity: String,
+    pub sector_count: String,
+    capacity_edited: bool,
+    pub filesystem: crate::provision::OfficialFilesystemFormat,
+    pub volume_label: String,
+}
+
+impl PlainPartitionForm {
+    fn from_spec(spec: &crate::provision::PlainPartitionSpec) -> Self {
+        Self {
+            start_lba: spec.start_lba.to_string(),
+            input_mode: crate::provision::CapacityInputMode::Quick,
+            quick_unit: crate::provision::QuickCapacityUnit::GiB,
+            quick_capacity: ProvisionForm::format_sector_unit_3(spec.sector_count, 2_097_152),
+            sector_count: spec.sector_count.to_string(),
+            capacity_edited: false,
+            filesystem: spec.filesystem,
+            volume_label: spec.volume_label.clone(),
+        }
+    }
+
+    fn resolve_sector_count(&self, label: &str) -> Result<u64, String> {
+        match self.input_mode {
+            crate::provision::CapacityInputMode::Exact => self
+                .sector_count
+                .trim()
+                .parse::<u64>()
+                .ok()
+                .filter(|value| *value > 0)
+                .ok_or_else(|| format!("{label} sector 必须是大于 0 的整数")),
+            crate::provision::CapacityInputMode::Quick => ProvisionForm::resolve_quick_sectors(
+                &self.quick_capacity,
+                &self.sector_count,
+                self.quick_unit,
+                self.capacity_edited,
+                label,
+            ),
+        }
+    }
+
+    fn set_sector_count(&mut self, sectors: u64) {
+        self.sector_count = sectors.to_string();
+        self.quick_capacity = match self.quick_unit {
+            crate::provision::QuickCapacityUnit::MiB => {
+                ProvisionForm::format_sector_unit_3(sectors, 2_048)
+            }
+            crate::provision::QuickCapacityUnit::GiB => {
+                ProvisionForm::format_sector_unit_3(sectors, 2_097_152)
+            }
+        };
+        self.capacity_edited = false;
+    }
+
+    fn cycle_capacity_unit(&mut self) -> Result<(), String> {
+        use crate::provision::{CapacityInputMode, QuickCapacityUnit};
+        let sectors = self.resolve_sector_count("普通分区容量")?;
+        self.sector_count = sectors.to_string();
+        match (self.input_mode, self.quick_unit) {
+            (CapacityInputMode::Exact, _) => {
+                self.input_mode = CapacityInputMode::Quick;
+                self.quick_unit = QuickCapacityUnit::MiB;
+                self.quick_capacity = ProvisionForm::format_sector_unit_3(sectors, 2_048);
+            }
+            (CapacityInputMode::Quick, QuickCapacityUnit::MiB) => {
+                self.quick_unit = QuickCapacityUnit::GiB;
+                self.quick_capacity = ProvisionForm::format_sector_unit_3(sectors, 2_097_152);
+            }
+            (CapacityInputMode::Quick, QuickCapacityUnit::GiB) => {
+                self.input_mode = CapacityInputMode::Exact;
+            }
+        }
+        self.capacity_edited = false;
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct PlainProvisionForm {
+    pub partitions: Vec<PlainPartitionForm>,
+}
+
+impl PlainProvisionForm {
+    fn default_for_disk(total_sectors: u64) -> Result<Self, String> {
+        let plan = crate::provision::PlainProvisionPlan::default_for_disk(total_sectors)?;
+        Ok(Self {
+            partitions: plan
+                .partitions
+                .iter()
+                .map(PlainPartitionForm::from_spec)
+                .collect(),
+        })
+    }
+
+    fn specs(&self) -> Result<Vec<crate::provision::PlainPartitionSpec>, String> {
+        self.partitions
+            .iter()
+            .enumerate()
+            .map(|(index, part)| {
+                let number = index + 1;
+                let start_lba = part
+                    .start_lba
+                    .trim()
+                    .parse::<u64>()
+                    .map_err(|_| format!("P{number} 起点 LBA 必须是整数"))?;
+                let sector_count = part.resolve_sector_count(&format!("P{number} 容量"))?;
+                Ok(crate::provision::PlainPartitionSpec::new(
+                    start_lba,
+                    sector_count,
+                    part.filesystem,
+                    part.volume_label.trim(),
+                ))
+            })
+            .collect()
+    }
+
+    fn plan(&self, total_sectors: u64) -> Result<crate::provision::PlainProvisionPlan, String> {
+        crate::provision::PlainProvisionPlan::new(total_sectors, self.specs()?)
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -597,6 +733,7 @@ pub struct ProvisionState {
     pub field_selected: usize,
     pub field_cursor: usize,
     pub form: ProvisionForm,
+    pub plain_form: PlainProvisionForm,
     pub prepared: Option<ProvisionPrepared>,
     pub confirmation: String,
     pub export_path: String,
@@ -614,6 +751,7 @@ impl Default for ProvisionState {
             field_selected: 0,
             field_cursor: 0,
             form: ProvisionForm::default(),
+            plain_form: PlainProvisionForm::default(),
             prepared: None,
             confirmation: String::new(),
             export_path: String::new(),
@@ -1897,6 +2035,27 @@ impl AppState {
             self.provision_sync_cursor_to_end();
             return kind;
         }
+        if kind == ProvisionKind::Plain {
+            let total_sectors = self
+                .selected_device()
+                .map(|row| row.size / crate::common::SECTOR as u64)
+                .unwrap_or_default();
+            match PlainProvisionForm::default_for_disk(total_sectors) {
+                Ok(form) => {
+                    self.provision.plain_form = form;
+                    self.provision.form_initialized_for = current_target;
+                    self.provision.stage = ProvisionStage::Form;
+                    self.provision.message = None;
+                    self.provision_sync_cursor_to_end();
+                }
+                Err(message) => {
+                    self.provision.plain_form = PlainProvisionForm::default();
+                    self.provision.stage = ProvisionStage::Form;
+                    self.provision.message = Some(message);
+                }
+            }
+            return kind;
+        }
         self.provision.form = ProvisionForm::default();
         let defaults = self.selected_device().map(|row| {
             (
@@ -1988,7 +2147,23 @@ impl AppState {
         self.provision_sync_cursor_to_end();
     }
 
+    fn plain_field_parts(slot: usize) -> Option<(usize, usize)> {
+        let relative = slot.checked_sub(100)?;
+        let partition = relative / 4;
+        let field = relative % 4;
+        (partition < crate::provision::MAX_PLAIN_PARTITIONS).then_some((partition, field))
+    }
+
+    fn provision_total_sectors(&self) -> Option<u64> {
+        self.selected_device()
+            .map(|row| row.size / crate::common::SECTOR as u64)
+    }
+
     fn provision_field_slot(&self, display_index: usize) -> Option<usize> {
+        if self.provision.kind == ProvisionKind::Plain {
+            let field_count = self.provision.plain_form.partitions.len() * 4;
+            return (display_index < field_count).then_some(100 + display_index);
+        }
         let mode = self.provision.kind.mode()?;
         let mut slots = Vec::with_capacity(30);
         slots.extend([3, 4, 5, 6, 7]);
@@ -2046,6 +2221,40 @@ impl AppState {
 
     pub fn provision_visible_fields(&self) -> Vec<(String, &str, bool)> {
         let mut out = Vec::new();
+        if self.provision.kind == ProvisionKind::Plain {
+            for (index, part) in self.provision.plain_form.partitions.iter().enumerate() {
+                let number = index + 1;
+                let (capacity_label, capacity_value) = match part.input_mode {
+                    crate::provision::CapacityInputMode::Exact => (
+                        format!("P{number} 容量 (sector)"),
+                        part.sector_count.as_str(),
+                    ),
+                    crate::provision::CapacityInputMode::Quick => (
+                        format!(
+                            "P{number} 容量 ({})",
+                            match part.quick_unit {
+                                crate::provision::QuickCapacityUnit::MiB => "MiB",
+                                crate::provision::QuickCapacityUnit::GiB => "GiB",
+                            }
+                        ),
+                        part.quick_capacity.as_str(),
+                    ),
+                };
+                out.push((
+                    format!("P{number} 起点 LBA"),
+                    part.start_lba.as_str(),
+                    false,
+                ));
+                out.push((capacity_label, capacity_value, false));
+                out.push((
+                    format!("P{number} 文件系统"),
+                    part.filesystem.windows_format_name(),
+                    false,
+                ));
+                out.push((format!("P{number} 卷标"), part.volume_label.as_str(), false));
+            }
+            return out;
+        }
         let mode = match self.provision.kind.mode() {
             Some(value) => value,
             None => return out,
@@ -2213,7 +2422,24 @@ impl AppState {
     }
 
     fn provision_selected_field_mut(&mut self) -> Option<&mut String> {
-        match self.provision_field_slot(self.provision.field_selected)? {
+        let slot = self.provision_field_slot(self.provision.field_selected)?;
+        if let Some((partition, field)) = Self::plain_field_parts(slot) {
+            let part = self.provision.plain_form.partitions.get_mut(partition)?;
+            return match field {
+                0 => Some(&mut part.start_lba),
+                1 => Some(
+                    if part.input_mode == crate::provision::CapacityInputMode::Exact {
+                        &mut part.sector_count
+                    } else {
+                        &mut part.quick_capacity
+                    },
+                ),
+                2 => None,
+                3 => Some(&mut part.volume_label),
+                _ => None,
+            };
+        }
+        match slot {
             0 => Some(
                 if self.provision.form.boot_input_mode == crate::provision::CapacityInputMode::Exact
                 {
@@ -2258,7 +2484,24 @@ impl AppState {
     }
 
     fn provision_selected_field(&self) -> Option<&str> {
-        match self.provision_field_slot(self.provision.field_selected)? {
+        let slot = self.provision_field_slot(self.provision.field_selected)?;
+        if let Some((partition, field)) = Self::plain_field_parts(slot) {
+            let part = self.provision.plain_form.partitions.get(partition)?;
+            return match field {
+                0 => Some(part.start_lba.as_str()),
+                1 => Some(
+                    if part.input_mode == crate::provision::CapacityInputMode::Exact {
+                        part.sector_count.as_str()
+                    } else {
+                        part.quick_capacity.as_str()
+                    },
+                ),
+                2 => None,
+                3 => Some(part.volume_label.as_str()),
+                _ => None,
+            };
+        }
+        match slot {
             0 => Some(
                 if self.provision.form.boot_input_mode == crate::provision::CapacityInputMode::Exact
                 {
@@ -2553,6 +2796,15 @@ impl AppState {
 
     pub fn provision_field_section(&self, display_index: usize) -> Option<&'static str> {
         let slot = self.provision_field_slot(display_index)?;
+        if let Some((partition, _)) = Self::plain_field_parts(slot) {
+            return Some(match partition {
+                0 => "普通分区 P1",
+                1 => "普通分区 P2",
+                2 => "普通分区 P3",
+                3 => "普通分区 P4",
+                _ => return None,
+            });
+        }
         match slot {
             0..=2 | 24..=26 => Some("分区布局"),
             3..=7 => Some("身份信息"),
@@ -2577,6 +2829,7 @@ impl AppState {
                 "格式化（可选）" if slot == 17 => 1,
                 "格式化（可选）" if matches!(slot, 11..=13) => 2,
                 "格式化（可选）" => 1,
+                _ if section.starts_with("普通分区 P") => 2,
                 _ => 1,
             };
             let mut end = index + 1;
@@ -2706,8 +2959,153 @@ impl AppState {
         )))
     }
 
+    fn provision_plain_layout_editor_lines(&self) -> Vec<String> {
+        let Some(row) = self.selected_device() else {
+            return vec!["未选择目标盘".into()];
+        };
+        let total_sectors = row.size / crate::common::SECTOR as u64;
+        let mut lines = vec![format!(
+            "disk{}  整盘 {}  ·  {} sector",
+            row.disk,
+            Self::format_sector_size(total_sectors),
+            total_sectors
+        )];
+        let plan = match self.provision.plain_form.plan(total_sectors) {
+            Ok(plan) => plan,
+            Err(message) => {
+                lines.push(format!("✗ 布局无效: {message}"));
+                lines.push("Insert 添加分区 · Delete 删除当前分区".into());
+                return lines;
+            }
+        };
+
+        let allocated = plan
+            .partitions
+            .iter()
+            .map(|part| part.sector_count)
+            .sum::<u64>();
+        let unallocated = plan.gaps.iter().map(|gap| gap.sector_count).sum::<u64>();
+        lines.push(format!(
+            "已分配 {}  ·  空闲 {}",
+            Self::format_sector_size(allocated),
+            Self::format_sector_size(unallocated)
+        ));
+        lines.push(String::new());
+
+        let mut entries = Vec::<(u64, String)>::new();
+        for gap in &plan.gaps {
+            entries.push((
+                gap.start_lba,
+                format!(
+                    "空闲  LBA {}–{}  ·  {}",
+                    gap.start_lba,
+                    gap.end_lba(),
+                    Self::format_sector_size(gap.sector_count)
+                ),
+            ));
+        }
+        for (index, part) in plan.partitions.iter().enumerate() {
+            entries.push((
+                part.start_lba,
+                format!(
+                    "P{}  LBA {}–{}  ·  {}  ·  {}",
+                    index + 1,
+                    part.start_lba,
+                    part.end_lba().unwrap_or(part.start_lba),
+                    Self::format_sector_size(part.sector_count),
+                    part.filesystem.windows_format_name()
+                ),
+            ));
+        }
+        entries.sort_by_key(|(start, _)| *start);
+        lines.extend(entries.into_iter().map(|(_, text)| text));
+
+        lines.push(String::new());
+        if let Some(slot) = self.provision_field_slot(self.provision.field_selected) {
+            if let Some((partition, _)) = Self::plain_field_parts(slot) {
+                if let Some(part) = plan.partitions.get(partition) {
+                    if let Ok(max_sectors) = plan.max_sector_count(partition) {
+                        lines.push(format!("当前: P{}", partition + 1));
+                        lines.push(format!(
+                            "大小 {} ({} sector)",
+                            Self::format_sector_size(part.sector_count),
+                            part.sector_count
+                        ));
+                        lines.push(format!(
+                            "最大可设 {} ({} sector)",
+                            Self::format_sector_size(max_sectors),
+                            max_sectors
+                        ));
+                        if let Some(next) = plan
+                            .partitions
+                            .iter()
+                            .filter(|candidate| candidate.start_lba > part.start_lba)
+                            .min_by_key(|candidate| candidate.start_lba)
+                        {
+                            lines.push(format!("限制: 下一分区固定起点 LBA {}", next.start_lba));
+                        } else {
+                            lines.push(format!(
+                                "限制: 磁盘末端 LBA {}",
+                                total_sectors.saturating_sub(1)
+                            ));
+                        }
+                    }
+                }
+            }
+        }
+        lines.push("✓ 当前布局无重叠、未越界；编辑一个分区不会移动其它分区".into());
+        lines.push("Insert 添加分区 · Delete 删除当前分区".into());
+        lines
+    }
+
+    fn provision_bar_from_segments(
+        width: usize,
+        segments: Vec<(ProvisionBarKind, u64)>,
+    ) -> Vec<ProvisionBarKind> {
+        let width = width.clamp(8, 96);
+        if segments.is_empty() {
+            return vec![ProvisionBarKind::Free; width];
+        }
+        let baseline = usize::from(segments.len() <= width);
+        let baseline_total = baseline * segments.len();
+        let remaining = width.saturating_sub(baseline_total);
+        let total_weight = segments
+            .iter()
+            .map(|(_, sectors)| *sectors as u128)
+            .sum::<u128>()
+            .max(1);
+        let mut allocations = Vec::with_capacity(segments.len());
+        let mut assigned = 0usize;
+        let mut remainders = Vec::with_capacity(segments.len());
+        for (index, (_, sectors)) in segments.iter().enumerate() {
+            let scaled = *sectors as u128 * remaining as u128;
+            let extra = (scaled / total_weight) as usize;
+            allocations.push(baseline + extra);
+            assigned += baseline + extra;
+            remainders.push((scaled % total_weight, index));
+        }
+        remainders.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.cmp(&b.1)));
+        for (_, index) in remainders.into_iter().take(width.saturating_sub(assigned)) {
+            allocations[index] += 1;
+        }
+
+        let mut cells = Vec::with_capacity(width);
+        for ((kind, _), count) in segments.into_iter().zip(allocations) {
+            cells.extend(std::iter::repeat_n(kind, count));
+        }
+        cells.truncate(width);
+        while cells.len() < width {
+            cells.push(ProvisionBarKind::Free);
+        }
+        cells
+    }
+
     pub fn provision_layout_editor_lines(&self) -> Vec<String> {
         use crate::provision::PartitionRole;
+
+        if self.provision.kind == ProvisionKind::Plain {
+            return self.provision_plain_layout_editor_lines();
+        }
 
         let Some(row) = self.selected_device() else {
             return vec!["未选择目标盘".into()];
@@ -2834,6 +3232,31 @@ impl AppState {
     pub fn provision_layout_bar(&self, width: usize) -> Vec<ProvisionBarKind> {
         use crate::provision::PartitionRole;
 
+        if self.provision.kind == ProvisionKind::Plain {
+            let Ok(plan) = self.provision_plain_plan() else {
+                return vec![ProvisionBarKind::Free; width.clamp(8, 96)];
+            };
+            let mut ordered = Vec::<(u64, ProvisionBarKind, u64)>::new();
+            ordered.extend(
+                plan.gaps
+                    .iter()
+                    .map(|gap| (gap.start_lba, ProvisionBarKind::Free, gap.sector_count)),
+            );
+            ordered.extend(
+                plan.partitions
+                    .iter()
+                    .map(|part| (part.start_lba, ProvisionBarKind::Plain, part.sector_count)),
+            );
+            ordered.sort_by_key(|(start, _, _)| *start);
+            return Self::provision_bar_from_segments(
+                width,
+                ordered
+                    .into_iter()
+                    .map(|(_, kind, sectors)| (kind, sectors))
+                    .collect(),
+            );
+        }
+
         let width = width.clamp(8, 96);
         let Ok((resolved, _)) = self.provision_resolved_prefill() else {
             return vec![ProvisionBarKind::Free; width];
@@ -2872,46 +3295,20 @@ impl AppState {
                 resolved.usable_end_lba.saturating_sub(cursor),
             ));
         }
-        if segments.is_empty() {
-            return vec![ProvisionBarKind::Free; width];
-        }
-
-        let baseline = usize::from(segments.len() <= width);
-        let baseline_total = baseline * segments.len();
-        let remaining = width.saturating_sub(baseline_total);
-        let total_weight = segments
-            .iter()
-            .map(|(_, sectors)| *sectors as u128)
-            .sum::<u128>()
-            .max(1);
-        let mut allocations = Vec::with_capacity(segments.len());
-        let mut assigned = 0usize;
-        let mut remainders = Vec::with_capacity(segments.len());
-        for (index, (_, sectors)) in segments.iter().enumerate() {
-            let scaled = *sectors as u128 * remaining as u128;
-            let extra = (scaled / total_weight) as usize;
-            allocations.push(baseline + extra);
-            assigned += baseline + extra;
-            remainders.push((scaled % total_weight, index));
-        }
-        remainders.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.cmp(&b.1)));
-        for (_, index) in remainders.into_iter().take(width.saturating_sub(assigned)) {
-            allocations[index] += 1;
-        }
-
-        let mut cells = Vec::with_capacity(width);
-        for ((kind, _), count) in segments.into_iter().zip(allocations) {
-            cells.extend(std::iter::repeat_n(kind, count));
-        }
-        cells.truncate(width);
-        while cells.len() < width {
-            cells.push(ProvisionBarKind::Free);
-        }
-        cells
+        Self::provision_bar_from_segments(width, segments)
     }
 
     pub fn provision_field_hint(&self, display_index: usize) -> Option<String> {
         let slot = self.provision_field_slot(display_index)?;
+        if let Some((_, field)) = Self::plain_field_parts(slot) {
+            return match field {
+                0 => Some("精确 LBA；不会自动移动其它分区".into()),
+                1 => Some("Space 切换 MiB / GiB / sector · f 填满".into()),
+                2 => Some("Space 切换 FAT16 / exFAT".into()),
+                3 => Some("普通卷标".into()),
+                _ => None,
+            };
+        }
         match slot {
             0..=2 => Some("Space 切换 MiB / GiB / sector · f 填满".into()),
             7 => Some("交换区和保密区的初始密码".into()),
@@ -2923,7 +3320,51 @@ impl AppState {
     }
 
     pub fn provision_fill_selected_capacity(&mut self) -> bool {
-        let Some(slot @ 0..=2) = self.provision_field_slot(self.provision.field_selected) else {
+        let Some(slot) = self.provision_field_slot(self.provision.field_selected) else {
+            return false;
+        };
+        if let Some((partition, 1)) = Self::plain_field_parts(slot) {
+            let Some(total_sectors) = self.provision_total_sectors() else {
+                self.provision.message = Some("目标 USB 已不存在".into());
+                return true;
+            };
+            let specs = self
+                .provision
+                .plain_form
+                .partitions
+                .iter()
+                .enumerate()
+                .map(|(index, part)| {
+                    let start_lba = part
+                        .start_lba
+                        .trim()
+                        .parse::<u64>()
+                        .map_err(|_| format!("P{} 起点 LBA 必须是整数", index + 1))?;
+                    Ok(crate::provision::PlainPartitionSpec::new(
+                        start_lba,
+                        1,
+                        part.filesystem,
+                        part.volume_label.clone(),
+                    ))
+                })
+                .collect::<Result<Vec<_>, String>>();
+            let max_sectors = specs.and_then(|specs| {
+                crate::provision::max_plain_sector_count(total_sectors, &specs, partition)
+            });
+            match max_sectors {
+                Ok(max_sectors) if max_sectors > 0 => {
+                    if let Some(part) = self.provision.plain_form.partitions.get_mut(partition) {
+                        part.set_sector_count(max_sectors);
+                        self.provision.message = None;
+                        self.provision_sync_cursor_to_end();
+                    }
+                }
+                Ok(_) => self.provision.message = Some("当前普通分区没有可填满的空间".into()),
+                Err(message) => self.provision.message = Some(message),
+            }
+            return true;
+        }
+        let Some(slot @ 0..=2) = Some(slot) else {
             return false;
         };
         // The selected capacity itself does not determine its upper boundary. Use a
@@ -3002,7 +3443,31 @@ impl AppState {
     }
 
     pub fn provision_toggle_selected_option(&mut self) -> bool {
-        match self.provision_field_slot(self.provision.field_selected) {
+        let selected_slot = self.provision_field_slot(self.provision.field_selected);
+        if let Some(slot) = selected_slot {
+            if let Some((partition, field)) = Self::plain_field_parts(slot) {
+                let Some(part) = self.provision.plain_form.partitions.get_mut(partition) else {
+                    return false;
+                };
+                match field {
+                    1 => {
+                        match part.cycle_capacity_unit() {
+                            Ok(()) => self.provision.message = None,
+                            Err(message) => self.provision.message = Some(message),
+                        }
+                        self.provision_sync_cursor_to_end();
+                        return true;
+                    }
+                    2 => {
+                        part.filesystem = toggle_supported_fs(part.filesystem);
+                        self.provision.message = None;
+                        return true;
+                    }
+                    _ => return false,
+                }
+            }
+        }
+        match selected_slot {
             Some(slot @ 0..=2) => {
                 match self.provision.form.toggle_capacity_input(slot) {
                     Ok(()) => {
@@ -3054,6 +3519,100 @@ impl AppState {
         }
     }
 
+    pub fn provision_plain_plan(&self) -> Result<crate::provision::PlainProvisionPlan, String> {
+        if self.provision.kind != ProvisionKind::Plain {
+            return Err("当前不是普通盘目标".into());
+        }
+        let total_sectors = self
+            .provision_total_sectors()
+            .ok_or_else(|| "目标 USB 已不存在".to_string())?;
+        self.provision.plain_form.plan(total_sectors)
+    }
+
+    pub fn provision_plain_add_partition(&mut self) -> bool {
+        if self.provision.kind != ProvisionKind::Plain {
+            return false;
+        }
+        if self.provision.plain_form.partitions.len() >= crate::provision::MAX_PLAIN_PARTITIONS {
+            self.provision.message = Some("普通盘最多支持 4 个 MBR 主分区".into());
+            return true;
+        }
+        let plan = match self.provision_plain_plan() {
+            Ok(plan) => plan,
+            Err(message) => {
+                self.provision.message = Some(format!("先修正当前布局: {message}"));
+                return true;
+            }
+        };
+        let next_start = plan
+            .partitions
+            .iter()
+            .filter_map(|part| part.end_exclusive().ok())
+            .max()
+            .unwrap_or(crate::provision::DEFAULT_PLAIN_START_LBA);
+        if next_start >= plan.total_sectors {
+            self.provision.message =
+                Some("当前最后一个分区已占满盘尾；请先缩小它再添加分区".into());
+            return true;
+        }
+        let number = self.provision.plain_form.partitions.len() + 1;
+        let spec = crate::provision::PlainPartitionSpec::new(
+            next_start,
+            plan.total_sectors - next_start,
+            crate::provision::OfficialFilesystemFormat::ExFat,
+            format!("普通卷{number}"),
+        );
+        self.provision
+            .plain_form
+            .partitions
+            .push(PlainPartitionForm::from_spec(&spec));
+        self.provision.field_selected = (number - 1) * 4;
+        self.provision.message = None;
+        self.provision_sync_cursor_to_end();
+        true
+    }
+
+    pub fn provision_plain_delete_selected_partition(&mut self) -> bool {
+        if self.provision.kind != ProvisionKind::Plain {
+            return false;
+        }
+        if self.provision.plain_form.partitions.len() <= 1 {
+            self.provision.message = Some("普通盘至少保留 1 个分区".into());
+            return true;
+        }
+        let Some(slot) = self.provision_field_slot(self.provision.field_selected) else {
+            return true;
+        };
+        let Some((partition, _)) = Self::plain_field_parts(slot) else {
+            return true;
+        };
+        if partition < self.provision.plain_form.partitions.len() {
+            self.provision.plain_form.partitions.remove(partition);
+            let count = self.provision_field_count();
+            self.provision.field_selected =
+                self.provision.field_selected.min(count.saturating_sub(1));
+            self.provision.message = None;
+            self.provision_sync_cursor_to_end();
+        }
+        true
+    }
+
+    pub fn provision_prepare_plain(&mut self) {
+        match self.provision_plain_plan() {
+            Ok(plan) => {
+                self.provision.prepared = Some(ProvisionPrepared::Plain(plan));
+                self.provision.stage = ProvisionStage::Review;
+                self.provision.message =
+                    Some("Plain 当前完成只读计划；物理写盘将在通用事务阶段启用。".into());
+            }
+            Err(message) => {
+                self.provision.prepared = None;
+                self.provision.stage = ProvisionStage::Form;
+                self.provision.message = Some(message);
+            }
+        }
+    }
+
     pub fn provision_toggle_force_change_password(&mut self) -> bool {
         if self.provision_field_slot(self.provision.field_selected) != Some(9) {
             return false;
@@ -3064,6 +3623,26 @@ impl AppState {
     }
 
     fn provision_input_policy(&self, slot: usize) -> ProvisionInputPolicy {
+        if let Some((partition, field)) = Self::plain_field_parts(slot) {
+            return match field {
+                0 => ProvisionInputPolicy::UnsignedInteger,
+                1 => self
+                    .provision
+                    .plain_form
+                    .partitions
+                    .get(partition)
+                    .map(|part| {
+                        if part.input_mode == crate::provision::CapacityInputMode::Exact {
+                            ProvisionInputPolicy::UnsignedInteger
+                        } else {
+                            ProvisionInputPolicy::DecimalCapacity
+                        }
+                    })
+                    .unwrap_or(ProvisionInputPolicy::UnsignedInteger),
+                3 => ProvisionInputPolicy::Text,
+                _ => ProvisionInputPolicy::Text,
+            };
+        }
         match slot {
             0 => {
                 if self.provision.form.boot_input_mode == crate::provision::CapacityInputMode::Exact
@@ -3098,6 +3677,21 @@ impl AppState {
         }
     }
 
+    fn provision_mark_capacity_edit(&mut self, slot: Option<usize>) {
+        self.provision.form.mark_quick_capacity_edit(slot);
+        let Some(slot) = slot else {
+            return;
+        };
+        let Some((partition, 1)) = Self::plain_field_parts(slot) else {
+            return;
+        };
+        if let Some(part) = self.provision.plain_form.partitions.get_mut(partition) {
+            if part.input_mode == crate::provision::CapacityInputMode::Quick {
+                part.capacity_edited = true;
+            }
+        }
+    }
+
     pub fn provision_push_char(&mut self, ch: char) {
         if ch.is_control() {
             return;
@@ -3123,7 +3717,7 @@ impl AppState {
         if let Some(field) = self.provision_selected_field_mut() {
             *field = candidate;
             self.provision.field_cursor = cursor + 1;
-            self.provision.form.mark_quick_capacity_edit(Some(slot));
+            self.provision_mark_capacity_edit(Some(slot));
             self.provision.message = None;
         }
     }
@@ -3140,7 +3734,7 @@ impl AppState {
                 chars.remove(cursor - 1);
                 *field = chars.into_iter().collect();
                 self.provision.field_cursor = cursor - 1;
-                self.provision.form.mark_quick_capacity_edit(slot);
+                self.provision_mark_capacity_edit(slot);
                 self.provision.message = None;
             }
         }
@@ -3340,6 +3934,7 @@ impl AppState {
         }
         let prepared = match self.provision.prepared.as_ref()? {
             ProvisionPrepared::New(prepared) => prepared.as_ref().clone(),
+            ProvisionPrepared::Plain(_) => return None,
         };
         let path = std::path::PathBuf::from(path);
         self.provision.stage = ProvisionStage::Exporting;
@@ -3363,6 +3958,10 @@ impl AppState {
     }
 
     pub fn provision_begin_confirm(&mut self) {
+        if matches!(self.provision.prepared, Some(ProvisionPrepared::Plain(_))) {
+            self.provision.message = Some("Plain 当前仅完成只读计划；物理写盘尚未启用。".into());
+            return;
+        }
         if self.provision.prepared.is_some() {
             self.provision.stage = ProvisionStage::Confirm;
             self.provision.confirmation.clear();
@@ -3387,6 +3986,10 @@ impl AppState {
 
     pub fn provision_take_for_write(&mut self) -> Option<ProvisionPrepared> {
         if self.provision.stage != ProvisionStage::Confirm {
+            return None;
+        }
+        if matches!(self.provision.prepared, Some(ProvisionPrepared::Plain(_))) {
+            self.provision.message = Some("Plain 当前仅完成只读计划；物理写盘尚未启用。".into());
             return None;
         }
         if self.provision.confirmation != "YES" {

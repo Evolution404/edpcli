@@ -904,7 +904,17 @@ fn run_loop(resume: Option<state::WriteIntent>) -> io::Result<LoopExit> {
                                     ct_event::KeyCode::Home => state.provision_cursor_home(),
                                     ct_event::KeyCode::End => state.provision_cursor_end(),
                                     ct_event::KeyCode::Backspace => state.provision_backspace(),
+                                    ct_event::KeyCode::Insert => {
+                                        state.provision_plain_add_partition();
+                                    }
+                                    ct_event::KeyCode::Delete => {
+                                        state.provision_plain_delete_selected_partition();
+                                    }
                                     ct_event::KeyCode::Enter => {
+                                        if state.provision().kind == state::ProvisionKind::Plain {
+                                            state.provision_prepare_plain();
+                                            continue;
+                                        }
                                         let Some(disk) = state.selected_device_disk() else {
                                             state.provision_mut().message = Some(
                                                 "目标 USB 已不存在，请返回设备页重新选择。".into(),

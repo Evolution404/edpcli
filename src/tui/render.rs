@@ -193,6 +193,7 @@ fn provision_kind_style(kind: ProvisionKind) -> Style {
         ProvisionKind::Mode1 => Color::LightMagenta,
         ProvisionKind::Mode2 => Color::LightYellow,
         ProvisionKind::Mode3 => Color::LightGreen,
+        ProvisionKind::Plain => Color::LightBlue,
     };
     Style::default().fg(color).add_modifier(Modifier::BOLD)
 }
@@ -1157,6 +1158,7 @@ fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppSta
                 }
                 let style = match kind {
                     ProvisionBarKind::Free => Style::default().fg(Color::DarkGray),
+                    ProvisionBarKind::Plain => Style::default().fg(Color::LightBlue),
                     ProvisionBarKind::Boot => Style::default().fg(Color::Cyan),
                     ProvisionBarKind::Share => Style::default().fg(Color::Green),
                     ProvisionBarKind::Encrypt => Style::default().fg(Color::Magenta),
@@ -1167,18 +1169,27 @@ fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppSta
             }
             bar_spans.push(Span::styled("]", muted()));
             let bar_line = Line::from(bar_spans);
-            let legend_line = Line::from(vec![
-                Span::styled("■", Style::default().fg(Color::Cyan)),
-                Span::raw(" 启动  "),
-                Span::styled("■", Style::default().fg(Color::Green)),
-                Span::raw(" 交换/二合一  "),
-                Span::styled("■", Style::default().fg(Color::Magenta)),
-                Span::raw(" 保密  "),
-                Span::styled("■", Style::default().fg(Color::Yellow)),
-                Span::raw(" 兼容  "),
-                Span::styled("■", Style::default().fg(Color::DarkGray)),
-                Span::raw(" 空闲"),
-            ]);
+            let legend_line = if provision.kind == ProvisionKind::Plain {
+                Line::from(vec![
+                    Span::styled("■", Style::default().fg(Color::LightBlue)),
+                    Span::raw(" 普通分区  "),
+                    Span::styled("■", Style::default().fg(Color::DarkGray)),
+                    Span::raw(" 空闲"),
+                ])
+            } else {
+                Line::from(vec![
+                    Span::styled("■", Style::default().fg(Color::Cyan)),
+                    Span::raw(" 启动  "),
+                    Span::styled("■", Style::default().fg(Color::Green)),
+                    Span::raw(" 交换/二合一  "),
+                    Span::styled("■", Style::default().fg(Color::Magenta)),
+                    Span::raw(" 保密  "),
+                    Span::styled("■", Style::default().fg(Color::Yellow)),
+                    Span::raw(" 兼容  "),
+                    Span::styled("■", Style::default().fg(Color::DarkGray)),
+                    Span::raw(" 空闲"),
+                ])
+            };
             let raw_layout_lines = state.provision_layout_editor_lines();
             let mut layout_lines = Vec::new();
             for (index, line) in raw_layout_lines.into_iter().enumerate() {
@@ -1243,6 +1254,36 @@ fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppSta
             ];
             if let Some(prepared) = provision.prepared.as_ref() {
                 match prepared {
+                    ProvisionPrepared::Plain(plan) => {
+                        lines.push(Line::from(format!(
+                            "普通盘只读计划 · {} 个 MBR 主分区 · {} sectors",
+                            plan.partitions.len(),
+                            plan.total_sectors
+                        )));
+                        for (index, part) in plan.partitions.iter().enumerate() {
+                            lines.push(Line::from(format!(
+                                "P{} LBA{}..{} · {} sectors · {} · 卷标:{}",
+                                index + 1,
+                                part.start_lba,
+                                part.end_lba().unwrap_or(part.start_lba),
+                                part.sector_count,
+                                part.filesystem.windows_format_name(),
+                                safe(&part.volume_label)
+                            )));
+                        }
+                        for gap in &plan.gaps {
+                            lines.push(Line::from(format!(
+                                "空闲 LBA{}..{} · {} sectors",
+                                gap.start_lba,
+                                gap.end_lba(),
+                                gap.sector_count
+                            )));
+                        }
+                        lines.push(Line::from(Span::styled(
+                            "Phase 4 仅生成只读计划；Plain 物理写盘尚未启用。",
+                            warning(),
+                        )));
+                    }
                     ProvisionPrepared::New(prepared) => {
                         lines.extend([
                             Line::from(format!(
@@ -1363,15 +1404,22 @@ fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppSta
             if let Some(message) = &provision.message {
                 lines.push(Line::from(Span::styled(safe(message), success())));
             }
-            lines.extend([
-                Line::from(""),
-                Line::from(vec![
+            lines.push(Line::from(""));
+            if matches!(provision.prepared, Some(ProvisionPrepared::Plain(_))) {
+                lines.push(Line::from(vec![
+                    Span::styled("Esc", warning()),
+                    Span::raw(" 返回修改   "),
+                    Span::styled("只读", secondary()),
+                    Span::raw(" Plain 写盘将在通用事务阶段启用"),
+                ]));
+            } else {
+                lines.push(Line::from(vec![
                     Span::styled("Enter", danger()),
                     Span::raw(" 进入最终 YES 确认   "),
                     Span::styled("Esc", warning()),
                     Span::raw(" 返回修改"),
-                ]),
-            ]);
+                ]));
+            }
             frame.render_widget(
                 Paragraph::new(lines)
                     .block(

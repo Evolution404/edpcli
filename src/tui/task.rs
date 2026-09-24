@@ -1010,6 +1010,9 @@ impl TaskHub {
                         })
                         .map_err(|error| error.msg)
                     }
+                    crate::tui::state::ProvisionPrepared::Plain(_) => {
+                        Err("普通盘当前仅支持只读计划，物理写盘尚未启用".to_string())
+                    }
                 }
             }))
             .unwrap_or_else(|payload| {
