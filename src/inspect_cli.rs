@@ -14,7 +14,7 @@ use crate::common::{EXIT_BACKUP, EXIT_IO, EXIT_OK, EXIT_TARGET, EXIT_USAGE, SECT
 use crate::diskio::{self, raw_path, FileDev};
 use crate::elevate;
 use crate::identify::identify;
-use crate::inspect::{self, InspectMeta};
+use crate::inspect::InspectMeta;
 use crate::inspect_target::{InspectDiskContext, SectorRegion};
 use crate::selectors::DeviceSelector;
 use crate::sha256::sha256_hex;
@@ -96,136 +96,6 @@ fn region_labels(context: &InspectDiskContext, lba: u64) -> String {
         .map(SectorRegion::label)
         .collect::<Vec<_>>()
         .join("；")
-}
-
-fn protocol_view(
-    context: &InspectDiskContext,
-    lba: u64,
-    raw: &[u8],
-    meta: &InspectMeta,
-) -> Result<inspect::SectorView, String> {
-    let lba32 = u32::try_from(lba).map_err(|_| format!("LBA{lba} 超出协议解析器范围"))?;
-    Ok(inspect::analyze_sector_with_context(
-        lba32,
-        raw,
-        meta,
-        Some(&context.protocol_image),
-    ))
-}
-
-fn render_meta(
-    context: &InspectDiskContext,
-    meta: &InspectMeta,
-    lba: u64,
-    raw: &[u8],
-    partition_boot_raw: Option<&[u8]>,
-    partition_boot_issue: Option<&str>,
-) -> Result<String, String> {
-    let offset = lba
-        .checked_mul(SECTOR as u64)
-        .ok_or_else(|| "LBA 字节偏移溢出".to_string())?;
-    let mut out = format!(
-        "LBA: {lba}\n物理字节偏移: {offset} (0x{offset:X})\nRAW SHA-256: {}\nRAW 非零字节: {}/512\n",
-        sha256_hex(raw),
-        raw.iter().filter(|&&byte| byte != 0).count()
-    );
-    let regions = context.regions(lba);
-    out.push_str("区域:\n");
-    for region in &regions {
-        out.push_str(&format!("  - {}\n", region.label()));
-    }
-    if let Some(primary) = regions.first() {
-        out.push_str(&format!("主区域: {}\n", primary.label()));
-    }
-    if regions.len() > 1 {
-        out.push_str(&format!(
-            "重叠区域: {}\n",
-            regions[1..]
-                .iter()
-                .map(SectorRegion::label)
-                .collect::<Vec<_>>()
-                .join("；")
-        ));
-    } else {
-        out.push_str("重叠区域: 无\n");
-    }
-
-    if lba <= u64::from(crate::common::METADATA_LAST_LBA) {
-        let view = protocol_view(context, lba, raw, meta)?;
-        out.push_str(&format!("协议解码: {}\n", view.method));
-        out.push_str(&inspect::render_fields(&view));
-        for note in &view.notes {
-            out.push_str(&format!("  └─ {note}\n"));
-        }
-    }
-
-    if let Some(partition) = context.partitions.iter().find(|partition| {
-        lba >= partition.start_sector
-            && lba
-                < partition
-                    .start_sector
-                    .saturating_add(partition.sector_count)
-    }) {
-        out.push_str(&format!(
-            "分区: index={} type={} relative_lba={} start={} sectors={}\n",
-            partition.index,
-            partition.partition_type,
-            lba - partition.start_sector,
-            partition.start_sector,
-            partition.sector_count,
-        ));
-        out.push_str(&format!(
-            "加密配置: NeedEncrypt={} EncryptMode={}\n",
-            partition.need_encrypt, partition.encrypt_mode
-        ));
-        out.push_str(&format!(
-            "MBR 直接暴露: {}\n",
-            context.partition_mbr_exposure(partition)
-        ));
-        out.push_str(&format!(
-            "密钥: FileKeyCRC=0x{:08X} 状态={}\n",
-            partition.file_key_crc,
-            context.partition_file_key_crc_status(partition)
-        ));
-        let state = match partition_boot_raw {
-            Some(boot) => context.partition_physical_state(partition, boot),
-            None => crate::inspect_target::PhysicalDataState::Unknown {
-                reason: partition_boot_issue
-                    .unwrap_or("缺少分区起始扇区证据")
-                    .to_string(),
-            },
-        };
-        out.push_str(&format!("物理数据状态: {}\n", state.label()));
-        out.push_str(&format!("decode 策略: {}\n", state.decode_strategy()));
-        out.push_str(&format!(
-            "文件系统识别: {}\n",
-            state
-                .filesystem()
-                .map(|filesystem| filesystem.label())
-                .unwrap_or("未确认")
-        ));
-    }
-
-    if let Some(lce) = &context.lce {
-        if lba >= lce.start_lba && lba < lce.start_lba + lce.sector_count {
-            out.push_str(&format!(
-                "LCE: start={} sectors={} pointers={:?} mode={:?} chs_crosscheck={:?}\n",
-                lce.start_lba,
-                lce.sector_count,
-                lce.lba7_pointer_entries
-                    .iter()
-                    .map(|pointer| (pointer.entry_index, pointer.partition_type))
-                    .collect::<Vec<_>>(),
-                lce.official_partition_mode,
-                lce.chs_expected_start_lba
-            ));
-            out.push_str("LCE 解码: EDPSECDISK200709/A6B0，zero8，64 位物理字节偏移 tweak\n");
-        }
-    }
-    for issue in &context.context_issues {
-        out.push_str(&format!("上下文提示: {issue}\n"));
-    }
-    Ok(out)
 }
 
 fn print_inspect_meta(meta: &InspectMeta) {
@@ -356,11 +226,13 @@ where
                 }
             }
             InspectMode::Decode => {
-                let result = if lba <= u64::from(crate::common::METADATA_LAST_LBA) {
-                    protocol_view(context, lba, &raw, meta).map(|view| (view.decoded, view.method))
-                } else {
-                    context.decode_non_protocol_with_boot(lba, &raw, partition_boot.as_deref())
-                };
+                let result = crate::application::inspect::decode_sector(
+                    context,
+                    meta,
+                    lba,
+                    &raw,
+                    partition_boot.as_deref(),
+                );
                 let (decoded, method) = match result {
                     Ok(value) => value,
                     Err(error) => {
@@ -383,7 +255,7 @@ where
                 }
             }
             InspectMode::Meta => {
-                let text = match render_meta(
+                let text = match crate::application::inspect::sector_meta_text(
                     context,
                     meta,
                     lba,

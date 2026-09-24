@@ -3,98 +3,29 @@
 use std::path::Path;
 
 use crate::common::{METADATA_IMAGE_LEN, METADATA_SECTOR_COUNT, SECTOR};
-use crate::diskio::{self, FileDev, SectorReadCache};
+use crate::diskio::{self, FileDev};
 use crate::identify::identify;
-use crate::inspect::{self, InspectMeta, SectorView};
+use crate::inspect::{self, InspectMeta};
 use crate::sysinfo::{self, CmdRunner};
 
-#[derive(Debug, Clone)]
-pub struct InspectWorkspace {
-    pub source: String,
-    pub meta: InspectMeta,
-    pub views: Vec<SectorView>,
-}
-
-fn analyze_image(
-    source: String,
-    data: &[u8],
-    meta: InspectMeta,
-) -> Result<InspectWorkspace, String> {
-    if data.len() != METADATA_IMAGE_LEN {
-        return Err(format!(
-            "错误: inspect 镜像长度 {}B，预期 {}B (LBA0-12)",
-            data.len(),
-            METADATA_IMAGE_LEN
-        ));
+fn default_protocol_request() -> AdvancedInspectRequest {
+    AdvancedInspectRequest {
+        mode: AdvancedInspectMode::Decode,
+        lbas: (0..METADATA_SECTOR_COUNT as u64).collect(),
+        export_dir: None,
+        device_id_override: None,
     }
-    let views = (0..METADATA_SECTOR_COUNT as u32)
-        .map(|lba| {
-            let start = lba as usize * SECTOR;
-            inspect::analyze_sector_with_context(
-                lba,
-                &data[start..start + SECTOR],
-                &meta,
-                Some(data),
-            )
-        })
-        .collect();
-    Ok(InspectWorkspace {
-        source,
-        meta,
-        views,
-    })
 }
 
-pub fn load_backup_inspect(path: &Path) -> Result<InspectWorkspace, String> {
-    let verified = crate::edpb::verify_file(path)
-        .map_err(|error| format!("错误: EDPB 校验失败 {}: {error}", path.display()))?;
-    let data = crate::edpb::read_raw_protocol(path)
-        .map_err(|error| format!("错误: 读取 EDPB LBA0-12 失败 {}: {error}", path.display()))?;
-    let manifest = &verified.manifest;
-    let meta = InspectMeta {
-        device_id: Some(manifest.device.device_id.clone()),
-        vid: Some(manifest.device.vid.clone()),
-        pid: Some(manifest.device.pid.clone()),
-        size_bytes: manifest.geometry.capacity_bytes,
-        onlyid: manifest.device.onlyid.clone(),
-    };
-    analyze_image(path.display().to_string(), &data, meta)
+pub fn load_backup_inspect(path: &Path) -> Result<AdvancedInspectWorkspace, String> {
+    load_backup_advanced_inspect(path, &default_protocol_request())
 }
 
-pub fn load_disk_inspect(runner: &dyn CmdRunner, disk: u32) -> Result<InspectWorkspace, String> {
-    crate::application::write::guard_usb_disk(runner, disk).map_err(|error| error.msg)?;
-    let path = diskio::raw_path(disk);
-    let mut dev = FileDev::open_rdonly(&path)
-        .map_err(|error| format!("错误: 无法只读打开 disk{disk}: {error}"))?;
-    let mut reader = SectorReadCache::new(&mut dev);
-    let mut sectors = Vec::with_capacity(METADATA_IMAGE_LEN);
-    for lba in 0..METADATA_SECTOR_COUNT as u32 {
-        let raw = reader
-            .read_sector(lba)
-            .map_err(|error| format!("错误: 读取 disk{disk} LBA{lba} 失败: {error}"))?;
-        if raw.len() != SECTOR {
-            return Err(format!(
-                "错误: disk{disk} LBA{lba} 长度 {}B，预期 {SECTOR}B",
-                raw.len()
-            ));
-        }
-        sectors.extend_from_slice(&raw);
-    }
-
-    let raw7 = &sectors[7 * SECTOR..8 * SECTOR];
-    let id = identify(runner, disk, raw7).device_id;
-    let (vid, pid) = sysinfo::usb_vid_pid(runner, disk);
-    let size_bytes = sysinfo::disk_total_sectors(runner, disk)
-        .and_then(|value| value.checked_mul(SECTOR as u64));
-    let onlyid = diskio::lba4_label_id_from(&sectors[4 * SECTOR..5 * SECTOR]);
-    let meta = InspectMeta {
-        device_id: id,
-        vid: (vid != "xxxx").then_some(vid),
-        pid: (pid != "xxxx").then_some(pid),
-        size_bytes,
-        onlyid,
-    };
-    analyze_image(format!("物理盘 disk{disk} ({path})"), &sectors, meta)
+pub fn load_disk_inspect(
+    runner: &dyn CmdRunner,
+    disk: u32,
+) -> Result<AdvancedInspectWorkspace, String> {
+    load_disk_advanced_inspect(runner, disk, &default_protocol_request())
 }
 
 pub const MAX_ADVANCED_INSPECT_SECTORS: usize = 65_536;
@@ -150,6 +81,8 @@ pub struct AdvancedInspectItem {
     pub decoded: Option<Vec<u8>>,
     pub decoded_sha256: Option<String>,
     pub method: Option<String>,
+    pub fields: Vec<crate::inspect::SectorField>,
+    pub notes: Vec<String>,
     pub meta_text: Option<String>,
 }
 
@@ -297,7 +230,24 @@ fn export_advanced_meta(dir: &Path, lba: u64, text: &str) -> Result<(), String> 
         .map_err(|error| format!("导出 LBA{lba}_meta.txt 失败: {error}"))
 }
 
-fn advanced_meta_text(
+pub fn decode_sector(
+    context: &crate::inspect_target::InspectDiskContext,
+    meta: &InspectMeta,
+    lba: u64,
+    raw: &[u8],
+    partition_boot_raw: Option<&[u8]>,
+) -> Result<(Vec<u8>, String), String> {
+    if lba <= u64::from(crate::common::METADATA_LAST_LBA) {
+        let lba32 = u32::try_from(lba).map_err(|_| format!("LBA{lba} 超出协议解析器范围"))?;
+        let view =
+            inspect::analyze_sector_with_context(lba32, raw, meta, Some(&context.protocol_image));
+        Ok((view.decoded, view.method))
+    } else {
+        context.decode_non_protocol_with_boot(lba, raw, partition_boot_raw)
+    }
+}
+
+pub fn sector_meta_text(
     context: &crate::inspect_target::InspectDiskContext,
     meta: &InspectMeta,
     lba: u64,
@@ -473,6 +423,17 @@ where
             .collect::<Vec<_>>();
         let raw_sha256 = crate::sha256::sha256_hex(&raw);
         let raw_nonzero = raw.iter().filter(|&&byte| byte != 0).count();
+        let protocol_view = if lba <= u64::from(crate::common::METADATA_LAST_LBA) {
+            let lba32 = u32::try_from(lba).map_err(|_| format!("LBA{lba} 超出协议解析器范围"))?;
+            Some(inspect::analyze_sector_with_context(
+                lba32,
+                &raw,
+                &meta,
+                Some(&context.protocol_image),
+            ))
+        } else {
+            None
+        };
 
         let mut item = AdvancedInspectItem {
             lba,
@@ -483,6 +444,14 @@ where
             decoded: None,
             decoded_sha256: None,
             method: None,
+            fields: protocol_view
+                .as_ref()
+                .map(|view| view.fields.clone())
+                .unwrap_or_default(),
+            notes: protocol_view
+                .as_ref()
+                .map(|view| view.notes.clone())
+                .unwrap_or_default(),
             meta_text: None,
         };
 
@@ -493,18 +462,10 @@ where
                 }
             }
             AdvancedInspectMode::Decode => {
-                let (decoded, method) = if lba <= u64::from(crate::common::METADATA_LAST_LBA) {
-                    let lba32 =
-                        u32::try_from(lba).map_err(|_| format!("LBA{lba} 超出协议解析器范围"))?;
-                    let view = inspect::analyze_sector_with_context(
-                        lba32,
-                        &raw,
-                        &meta,
-                        Some(&context.protocol_image),
-                    );
+                let (decoded, method) = if let Some(view) = protocol_view {
                     (view.decoded, view.method)
                 } else {
-                    context.decode_non_protocol_with_boot(lba, &raw, partition_boot.as_deref())?
+                    decode_sector(&context, &meta, lba, &raw, partition_boot.as_deref())?
                 };
                 item.decoded_sha256 = Some(crate::sha256::sha256_hex(&decoded));
                 item.method = Some(method);
@@ -514,7 +475,7 @@ where
                 item.decoded = Some(decoded);
             }
             AdvancedInspectMode::Meta => {
-                let text = advanced_meta_text(
+                let text = sector_meta_text(
                     &context,
                     &meta,
                     lba,

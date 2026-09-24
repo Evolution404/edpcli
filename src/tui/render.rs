@@ -1642,24 +1642,25 @@ fn draw_inspect(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState
     let Some(workspace) = state.inspect_data() else {
         return;
     };
-    let Some(lba) = state.inspect_selected_lba() else {
+    let Some(selected_index) = state.inspect_selected_lba() else {
         return;
     };
-    let Some(view) = workspace.views.get(lba as usize) else {
+    let Some(item) = workspace.items.get(selected_index as usize) else {
         return;
     };
     let mode = state.inspect_mode().unwrap_or(InspectMode::Fields);
+    let method = item.method.as_deref().unwrap_or("raw");
     let mut lines = vec![
         Line::from(format!("来源: {}", safe(&workspace.source))),
-        Line::from(format!("LBA{} · {}", view.lba, safe(&view.method))),
+        Line::from(format!("LBA{} · {}", item.lba, safe(method))),
         Line::from(""),
     ];
     match mode {
         InspectMode::Fields => {
-            if view.fields.is_empty() {
+            if item.fields.is_empty() {
                 lines.push(Line::from("未检测到已知结构化字段。"));
             } else {
-                for field in &view.fields {
+                for field in &item.fields {
                     let group = field
                         .group
                         .as_deref()
@@ -1679,12 +1680,14 @@ fn draw_inspect(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState
                     }
                 }
             }
-            for note in &view.notes {
+            for note in &item.notes {
                 lines.push(Line::from(format!("注: {}", safe(note))));
             }
         }
-        InspectMode::DecodedHex => lines.extend(plain_hex_lines(&view.decoded)),
-        InspectMode::RawHex => lines.extend(plain_hex_lines(&view.raw)),
+        InspectMode::DecodedHex => lines.extend(plain_hex_lines(
+            item.decoded.as_deref().unwrap_or(item.raw.as_slice()),
+        )),
+        InspectMode::RawHex => lines.extend(plain_hex_lines(&item.raw)),
     }
     let mode_index = match mode {
         InspectMode::Fields => 0,

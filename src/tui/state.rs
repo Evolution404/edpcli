@@ -831,7 +831,7 @@ pub struct AppState {
     provision: ProvisionState,
     pinned_disk: Option<u32>,
     inspect: Option<InspectState>,
-    inspect_data: Option<crate::application::inspect::InspectWorkspace>,
+    inspect_data: Option<crate::application::inspect::AdvancedInspectWorkspace>,
     advanced_inspect: Option<AdvancedInspectState>,
     inspect_pending: bool,
     notice: Option<String>,
@@ -1036,9 +1036,13 @@ impl AppState {
         }
 
         if let Some(workspace) = &self.inspect_data {
-            for (index, view) in workspace.views.iter().enumerate() {
-                let mut text = format!("lba{} {}", view.lba, view.method);
-                for field in &view.fields {
+            for (index, item) in workspace.items.iter().enumerate() {
+                let mut text = format!(
+                    "lba{} {}",
+                    item.lba,
+                    item.method.as_deref().unwrap_or("raw")
+                );
+                for field in &item.fields {
                     text.push(' ');
                     text.push_str(&field.label);
                     text.push(' ');
@@ -1050,11 +1054,11 @@ impl AppState {
                         text.push_str(&child.value);
                     }
                 }
-                for note in &view.notes {
+                for note in &item.notes {
                     text.push(' ');
                     text.push_str(note);
                 }
-                let ascii: String = view
+                let ascii: String = item
                     .raw
                     .iter()
                     .map(|byte| {
@@ -1068,7 +1072,7 @@ impl AppState {
                 text.push(' ');
                 text.push_str(&ascii);
                 text.push(' ');
-                for byte in &view.raw {
+                for byte in &item.raw {
                     text.push_str(&format!("{byte:02x}"));
                     text.push(' ');
                 }
@@ -1356,7 +1360,7 @@ impl AppState {
             self.advanced_inspect = None;
         }
     }
-    pub fn inspect_data(&self) -> Option<&crate::application::inspect::InspectWorkspace> {
+    pub fn inspect_data(&self) -> Option<&crate::application::inspect::AdvancedInspectWorkspace> {
         self.inspect_data.as_ref()
     }
 
@@ -1396,10 +1400,13 @@ impl AppState {
         });
     }
 
-    pub fn replace_inspect(&mut self, workspace: crate::application::inspect::InspectWorkspace) {
+    pub fn replace_inspect(
+        &mut self,
+        workspace: crate::application::inspect::AdvancedInspectWorkspace,
+    ) {
         self.clear_search_matches();
         self.search_query.clear();
-        let count = workspace.views.len();
+        let count = workspace.items.len();
         self.inspect_data = Some(workspace);
         self.inspect_pending = false;
         self.clear_notice();

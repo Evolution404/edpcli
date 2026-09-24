@@ -393,6 +393,8 @@ fn advanced_inspect_form_and_result_render_across_terminal_sizes() {
             decoded: None,
             decoded_sha256: None,
             method: None,
+            fields: Vec::new(),
+            notes: Vec::new(),
             meta_text: Some(format!(
                 "LBA: {lba}\n区域:\n  - 测试区域\n物理数据状态: 测试\ndecode 策略: fail-closed\n"
             )),

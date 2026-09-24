@@ -7,7 +7,7 @@ use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::path::PathBuf;
 use std::sync::mpsc::{self, Receiver, Sender};
 
-use crate::application::{inspect::InspectWorkspace, BackupWorkspaceItem};
+use crate::application::{inspect::AdvancedInspectWorkspace, BackupWorkspaceItem};
 use crate::disk_scan::Row;
 use crate::sysinfo::SysRunner;
 
@@ -94,7 +94,7 @@ enum WorkerResult {
     },
     Inspect {
         generation: u64,
-        result: Result<InspectWorkspace, String>,
+        result: Result<AdvancedInspectWorkspace, String>,
     },
     AdvancedInspect {
         generation: u64,
@@ -172,7 +172,7 @@ pub struct TaskUpdates {
     pub backups: Option<Vec<BackupWorkspaceItem>>,
     pub write: Option<(OperationId, Result<(), String>)>,
     pub write_progress: Option<(OperationId, crate::application::WriteEvent)>,
-    pub inspect: Option<Result<InspectWorkspace, String>>,
+    pub inspect: Option<Result<AdvancedInspectWorkspace, String>>,
     pub advanced_inspect:
         Option<Result<crate::application::inspect::AdvancedInspectWorkspace, String>>,
     pub device_error: Option<String>,

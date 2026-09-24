@@ -1526,3 +1526,9 @@ o 展开  Enter查看  g 跳转  / 搜索  Tab面板  ? 帮助
 15. README/USAGE/本文件与真实实现保持一致。
 
 最终产品定义：**新版 Inspect 是 edpcli 的只读全盘结构化浏览器。树负责定位磁盘结构，Sector Inspector 负责研究具体数据，decoder 只在 raw bytes 上叠加经过验证的协议语义；无 decoder 的区域仍然可看，未知含义绝不猜测。**
+
+### 9.21 当前实施状态（2026-09-25）
+
+- Phase I1 审计已完成：CLI 已支持任意 `u64` LBA/range/count，TUI Advanced 也具备任意合法 LBA 读取能力；确认历史主要双轨来自旧 `InspectWorkspace` 固定 LBA0～12 路径，以及 CLI/TUI 各自维护的 protocol/non-protocol decode 与 meta 决策。
+- Phase I2 进行中：application 层已统一 `decode_sector()` / `sector_meta_text()`，CLI `raw/decode/meta` 与 TUI 共用同一解码/元数据 backend；旧 `InspectWorkspace` 已删除，普通 Inspect 的 TaskHub/AppState/render 也直接消费 `AdvancedInspectWorkspace.items`，协议 LBA 的 fields/notes/decoded 只由统一 backend 生成。当前仍需完成显式 `SectorReader` / range reader、decoder registry，以及带 byte range/type/raw/decoded/status 的统一 Field 数据模型，因此尚不标记 I2 完成。
+- 本轮门禁：`cargo check --all-targets`、`cargo fmt --all -- --check`、`git diff --check` 通过；`application::inspect` 2/2、`inspect_cli` 6/6、`inspect_target` 9/9、`tui_inspect_scroll` 3/3、`tui_inspect_workspace` 5/5、`tui_lifecycle` 13/13、`tui_state` 37/37 通过。下一步完成 I2 reader/decoder/Field 基础模型，再进入全盘 `InspectNode/Region` lazy 模型。

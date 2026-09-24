@@ -43,11 +43,12 @@ fn backup_inspect_reuses_domain_analyzer_for_all_metadata_lbas() {
         return;
     };
     let workspace = load_backup_inspect(&path).expect("inspect backup");
-    assert_eq!(workspace.views.len(), METADATA_SECTOR_COUNT);
-    for (lba, view) in workspace.views.iter().enumerate() {
-        assert_eq!(view.lba, lba as u32);
-        assert_eq!(view.raw.len(), 512);
-        assert_eq!(view.decoded.len(), 512);
+    assert_eq!(workspace.items.len(), METADATA_SECTOR_COUNT);
+    for (lba, item) in workspace.items.iter().enumerate() {
+        assert_eq!(item.lba, lba as u64);
+        assert_eq!(item.raw.len(), 512);
+        assert_eq!(item.decoded.as_ref().map(Vec::len), Some(512));
+        assert!(item.method.is_some());
     }
 }
 
