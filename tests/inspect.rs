@@ -15,6 +15,41 @@ fn crc32_ieee_test(data: &[u8]) -> u32 {
     !crc
 }
 
+#[test]
+fn inspect_protocol_semantics_stay_routed_to_canonical_parsers() {
+    let source = include_str!("../src/inspect.rs");
+    for parser in [
+        "lba0::parse_lba0",
+        "lba1::parse_lba1",
+        "lba2::parse_lba2",
+        "lba3::parse_lba3",
+        "lba4::parse_lba4",
+        "lba5::parse_lba5",
+        "lba6::parse_lba6",
+        "lba7::parse_lba7",
+        "lba8::parse_lba8",
+        "lba9::parse_lba9",
+        "lba10::parse_lba10",
+        "lba11::parse_lba11",
+        "lba12::parse_lba12",
+    ] {
+        assert!(source.contains(parser), "Inspect canonical parser link missing: {parser}");
+    }
+    for forbidden in [
+        "fn parse_lba6(",
+        "fn parse_edpf(",
+        "fn parse_llgb(",
+        "fn parse_sapf(",
+        "fn parse_eppe(",
+        "fn decode_lba11(",
+    ] {
+        assert!(
+            !source.contains(forbidden),
+            "Inspect reintroduced a parallel protocol parser: {forbidden}"
+        );
+    }
+}
+
 fn meta_for(key: &str) -> InspectMeta {
     let (device_id, vid, pid, sectors, onlyid) = match key {
         "netac" => (
