@@ -18,8 +18,8 @@ use crate::identify::identify;
 use crate::protocol::lba7_compat::locate_lba7_compatibility_extent_from_verified_usb_capacity;
 use crate::provision::{
     build_empty_exfat, build_empty_fat16, build_official_partition_filesystem,
-    build_official_provision_protocol_image, build_passwordless_conversion, wrap_file_key,
-    wrap_legacy_lba7_file_key, FileKeyWrapMode, OfficialFilesystemFormat,
+    build_official_provision_protocol_image, build_passwordless_conversion, is_mode0_source,
+    wrap_file_key, wrap_legacy_lba7_file_key, FileKeyWrapMode, OfficialFilesystemFormat,
     OfficialPartitionFilesystems, OfficialPartitionMode, OfficialPartitionSizes,
     OfficialProvisionPlan, OfficialProvisionWriteImage, OnlyId, PartitionFilesystemImage,
     PartitionFormatTarget, PartitionRole, PasswordlessConversionImage, ProvisionEntropy,
@@ -44,7 +44,9 @@ pub struct NewProvisionRequest {
     pub boot_mib: Option<u64>,
     pub boot_sectors: Option<u64>,
     pub share_mib: Option<u64>,
+    pub share_sectors: Option<u64>,
     pub encrypt_mib: Option<u64>,
+    pub encrypt_sectors: Option<u64>,
     pub label_id: String,
     pub user: String,
     pub dept: String,
@@ -327,8 +329,20 @@ fn sizes(request: &NewProvisionRequest) -> EdpCliResult<OfficialPartitionSizes> 
             "错误: 启动区不能同时指定 MiB 和精确扇区数",
         ));
     }
-    if request.boot_sectors.is_some() && request.mode != 0 {
-        return Err(err(EXIT_TARGET, "错误: 精确启动区扇区数仅用于官方模式0"));
+    if request.share_mib.is_some() && request.share_sectors.is_some() {
+        return Err(err(
+            EXIT_TARGET,
+            "错误: 交换区不能同时指定 MiB 和精确扇区数",
+        ));
+    }
+    if request.encrypt_mib.is_some() && request.encrypt_sectors.is_some() {
+        return Err(err(
+            EXIT_TARGET,
+            "错误: 保密区不能同时指定 MiB 和精确扇区数",
+        ));
+    }
+    if request.boot_sectors.is_some() && !matches!(request.mode, 0 | 3) {
+        return Err(err(EXIT_TARGET, "错误: 精确启动区扇区数仅用于官方模式0/3"));
     }
     // Unused fields are ignored by the official mode; keep a non-zero sentinel
     // so domain validation cannot accidentally turn an unused value into a
@@ -345,6 +359,18 @@ fn sizes(request: &NewProvisionRequest) -> EdpCliResult<OfficialPartitionSizes> 
         sizes = sizes.with_boot_sectors(boot_sectors);
     } else if request.mode == 0 && request.boot_mib.is_none() {
         sizes = sizes.with_boot_sectors(DEFAULT_MODE0_BOOT_SECTORS);
+    }
+    if let Some(share_sectors) = request.share_sectors {
+        if share_sectors == 0 {
+            return Err(err(EXIT_TARGET, "错误: 交换区扇区数必须大于 0"));
+        }
+        sizes = sizes.with_share_sectors(share_sectors);
+    }
+    if let Some(encrypt_sectors) = request.encrypt_sectors {
+        if encrypt_sectors == 0 {
+            return Err(err(EXIT_TARGET, "错误: 保密区扇区数必须大于 0"));
+        }
+        sizes = sizes.with_encrypt_sectors(encrypt_sectors);
     }
     Ok(sizes)
 }
@@ -482,6 +508,40 @@ fn build_conversion_patch(
         patch.insert(absolute as u32, sector.to_vec());
     }
     Ok(patch)
+}
+
+pub fn try_prepare_mode1_from_existing_mode0(
+    runner: &dyn CmdRunner,
+    disk: u32,
+    dev: &mut dyn SectorDev,
+) -> EdpCliResult<Option<PreparedPasswordlessConversion>> {
+    guard_usb_disk(runner, disk)?;
+    let source_metadata = read_image(dev)?;
+    let identity = identify(runner, disk, &source_metadata[7 * SECTOR..8 * SECTOR]);
+    let Some(device_id) = identity.device_id else {
+        return Ok(None);
+    };
+    let source = ProvisionImage::from_bytes(source_metadata.clone())
+        .map_err(|message| err(EXIT_TARGET, format!("错误: 源协议镜像无效: {message}")))?;
+    if !is_mode0_source(&source, &device_id) {
+        return Ok(None);
+    }
+    let volume_serial = u32::from_le_bytes(random_array::<4>()?);
+    let conversion = build_passwordless_conversion(&source, &device_id, volume_serial, "SAFE6")
+        .map_err(|message| {
+            err(
+                EXIT_TARGET,
+                format!("错误: 无法生成模式1保留保密区重制计划: {message}"),
+            )
+        })?;
+    let patch = build_conversion_patch(&conversion)?;
+    Ok(Some(PreparedPasswordlessConversion {
+        disk,
+        device_id,
+        source_metadata,
+        conversion,
+        patch,
+    }))
 }
 
 pub fn prepare_passwordless_conversion(

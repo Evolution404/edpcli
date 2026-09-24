@@ -144,6 +144,9 @@ pub struct OfficialProvisionPlan {
     pub lba7_compatibility_extent: Lba7CompatibilityExtentLayout,
     pub lba7_key_material: LegacyLba7KeyMaterial,
     pub lba12_key_material: ProvisionKeyMaterial,
+    pub partition_layout: Option<[Option<OfficialPartitionGeometry>; 3]>,
+    pub partition_lba7_material: [Option<LegacyLba7KeyMaterial>; 3],
+    pub partition_lba12_material: [Option<ProvisionKeyMaterial>; 3],
 }
 
 impl OfficialProvisionPlan {
@@ -186,6 +189,9 @@ impl OfficialProvisionPlan {
             lba7_compatibility_extent,
             lba7_key_material,
             lba12_key_material,
+            partition_layout: None,
+            partition_lba7_material: [None; 3],
+            partition_lba12_material: [None; 3],
         })
     }
 
@@ -193,16 +199,68 @@ impl OfficialProvisionPlan {
         self,
         sector_size: u64,
     ) -> Result<Vec<OfficialPartitionGeometry>, String> {
-        build_official_partition_layout(self.mode, self.sizes, sector_size)
+        if let Some(layout) = self.partition_layout {
+            let parts = layout.into_iter().flatten().collect::<Vec<_>>();
+            if parts.iter().any(|part| part.sector_size != sector_size) {
+                return Err("target layout sector size differs from request".into());
+            }
+            Ok(parts)
+        } else {
+            build_official_partition_layout(self.mode, self.sizes, sector_size)
+        }
     }
 
     pub fn format_targets(self) -> Result<Vec<PartitionFormatTarget>, String> {
-        official_format_targets_with_filesystems(self.mode, self.sizes, 512, self.filesystems)
+        format_targets_for_geometry(self.mode, self.logical_partitions(512)?, self.filesystems)
     }
 
     pub fn with_filesystems(mut self, filesystems: OfficialPartitionFilesystems) -> Self {
         self.filesystems = filesystems;
         self
+    }
+
+    pub fn with_target_geometry(
+        mut self,
+        parts: &[super::TargetPartitionGeometry],
+        sector_size: u64,
+    ) -> Result<Self, String> {
+        if parts.len() != self.mode.partition_types().len() || parts.len() > 3 {
+            return Err("target partition count does not match official mode".into());
+        }
+        let mut layout = [None; 3];
+        for (index, part) in parts.iter().enumerate() {
+            if part.partition_type != self.mode.partition_types()[index] {
+                return Err(format!(
+                    "target partition type at slot {index} does not match official mode"
+                ));
+            }
+            let size_bytes = part
+                .sector_count
+                .checked_mul(sector_size)
+                .ok_or("target partition byte size overflows")?;
+            layout[index] = Some(OfficialPartitionGeometry {
+                partition_type: part.partition_type,
+                start_sector: part.start_lba,
+                sector_size,
+                size_bytes,
+            });
+        }
+        self.partition_layout = Some(layout);
+        Ok(self)
+    }
+
+    pub fn with_partition_key_material(
+        mut self,
+        index: usize,
+        lba7: LegacyLba7KeyMaterial,
+        lba12: ProvisionKeyMaterial,
+    ) -> Result<Self, String> {
+        if index >= self.mode.partition_types().len() {
+            return Err("target partition key slot is outside mode".into());
+        }
+        self.partition_lba7_material[index] = Some(lba7);
+        self.partition_lba12_material[index] = Some(lba12);
+        Ok(self)
     }
 
     pub fn visible_mbr_partition_type(self) -> Result<u8, String> {
@@ -284,6 +342,14 @@ pub fn official_format_targets_with_filesystems(
     filesystems: OfficialPartitionFilesystems,
 ) -> Result<Vec<PartitionFormatTarget>, String> {
     let geometries = build_official_partition_layout(mode, sizes, sector_size)?;
+    format_targets_for_geometry(mode, geometries, filesystems)
+}
+
+fn format_targets_for_geometry(
+    mode: OfficialPartitionMode,
+    geometries: Vec<OfficialPartitionGeometry>,
+    filesystems: OfficialPartitionFilesystems,
+) -> Result<Vec<PartitionFormatTarget>, String> {
     Ok(geometries
         .into_iter()
         .enumerate()

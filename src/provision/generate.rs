@@ -4,8 +4,8 @@ use crate::common::SECTOR;
 use crate::crypto::{a7f0_full, crc32_bare, lba6_checksum, xor_rolling, LBA6_K0};
 
 use super::{
-    build_official_partition_layout, OfficialPartitionGeometry, OfficialProvisionPlan,
-    ProvisionImage, ProvisionSpec, PROVISION_IMAGE_LEN,
+    OfficialPartitionGeometry, OfficialProvisionPlan, ProvisionImage, ProvisionSpec,
+    PROVISION_IMAGE_LEN,
 };
 
 const LBA12_TABLE_LEN: usize = 0x170;
@@ -205,7 +205,7 @@ fn validate_official_geometry(
     spec: &ProvisionSpec,
     plan: &OfficialProvisionPlan,
 ) -> Result<Vec<OfficialPartitionGeometry>, String> {
-    let logical = build_official_partition_layout(plan.mode, plan.sizes, SECTOR as u64)?;
+    let logical = plan.logical_partitions(SECTOR as u64)?;
     let end = logical
         .last()
         .ok_or("official partition layout is empty")?
@@ -267,7 +267,9 @@ fn build_official_lba7(
         let base = index * 0x40;
         let encrypted = need_encrypt(partition.partition_type.raw()) != 0;
         let material = if encrypted {
-            plan.lba7_key_material.packed16()
+            plan.partition_lba7_material[index]
+                .unwrap_or(plan.lba7_key_material)
+                .packed16()
         } else {
             [0u8; 16]
         };
@@ -306,7 +308,9 @@ fn build_official_lba12(
         let base = index * 0x60;
         let encrypted = need_encrypt(partition.partition_type.raw()) != 0;
         let material = if encrypted {
-            plan.lba12_key_material.packed24()
+            plan.partition_lba12_material[index]
+                .unwrap_or(plan.lba12_key_material)
+                .packed24()
         } else {
             [0u8; 24]
         };
@@ -320,7 +324,10 @@ fn build_official_lba12(
             partition.size_bytes,
             &material,
             if encrypted {
-                plan.lba12_key_material.encrypt_mode.raw()
+                plan.partition_lba12_material[index]
+                    .unwrap_or(plan.lba12_key_material)
+                    .encrypt_mode
+                    .raw()
             } else {
                 0
             },

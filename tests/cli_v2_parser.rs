@@ -86,23 +86,17 @@ fn provision_parses_all_four_product_actions_and_rejects_ambiguous_flags() {
         Parsed::Provision(ProvisionAction::Write { yes: true, .. })
     ));
 
-    assert!(matches!(
-        parse_args(&args(&[
-            "provision",
-            "convert",
-            "--disk",
-            "4",
-            "--write",
-            "--yes"
-        ]))
-        .unwrap(),
-        Parsed::Provision(ProvisionAction::Convert {
-            disk: Some(4),
-            write: true,
-            yes: true,
-            ..
-        })
-    ));
+    let removed = parse_args(&args(&[
+        "provision",
+        "convert",
+        "--disk",
+        "4",
+        "--write",
+        "--yes",
+    ]))
+    .err()
+    .expect("obsolete provision convert must stay removed");
+    assert!(removed.contains("plan / image / write"), "{removed}");
     assert!(parse_args(&args(&["provision", "plan", "--onlyid", "1"])).is_err());
     assert!(parse_args(&args(&["provision", "convert", "--yes"])).is_err());
     assert!(parse_args(&args(&["provision", "plan", "--mode", "4"])).is_err());

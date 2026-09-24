@@ -42,9 +42,9 @@ pub use lce::{build_lce_ciphertext, lce_plaintext};
 pub use profile::{ProvisionProfile, DEFAULT_SAFE6_LABEL};
 pub use reprovision::{
     decide_partition_action, parse_existing_provision, prefill_for_target_mode,
-    validate_target_geometry, CapacityInput, CapacityInputMode, CapacitySource, ExistingPartition,
-    ExistingPartitionRecord, ExistingProvisionProfile, ParsedExistingProvision, PartitionAction,
-    ProvisionPrefill, QuickCapacityUnit, TargetPartitionGeometry,
+    validate_target_geometry, CapacityInput, CapacityInputMode, CapacitySource, DiskProvisionKind,
+    ExistingPartition, ExistingPartitionRecord, ExistingProvisionProfile, ParsedExistingProvision,
+    PartitionAction, ProvisionPrefill, QuickCapacityUnit, TargetPartitionGeometry,
 };
 pub use spec::{OnlyId, ProvisionMetadata, ProvisionSpec, TargetIdentity};
 pub use validate::{

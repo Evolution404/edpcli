@@ -324,8 +324,15 @@ pub fn validate_target_geometry(
     let mut cursor = OFFICIAL_PARTITION_START_SECTOR;
     let mut gaps = 0u64;
     for part in ordered {
-        if part.sector_count == 0 || part.start_lba < cursor {
-            return Err(format!("partition overlap at LBA{}", part.start_lba));
+        if part.sector_count == 0 {
+            return Err(format!("zero-sized partition at LBA{}", part.start_lba));
+        }
+        if part.start_lba < cursor {
+            return Err(format!(
+                "partition overlap at LBA{} by {} sectors",
+                part.start_lba,
+                cursor - part.start_lba
+            ));
         }
         gaps = gaps
             .checked_add(part.start_lba - cursor)
@@ -338,7 +345,8 @@ pub fn validate_target_geometry(
             ));
         }
     }
-    Ok(gaps + usable_end_lba.saturating_sub(cursor))
+    gaps.checked_add(usable_end_lba.saturating_sub(cursor))
+        .ok_or_else(|| "gap count overflows".into())
 }
 
 fn exact(value: u64, source: CapacitySource) -> Result<CapacityInput, String> {
@@ -427,7 +435,24 @@ pub fn prefill_for_target_mode(
     let share = if matches!(mode, OfficialPartitionMode::WholeDiskEncrypted) {
         None
     } else if let Some(old) = share_role_source {
-        source_capacity(Some(old))?
+        if mode == OfficialPartitionMode::DefaultThreePartition && encrypt_old.is_none() {
+            let space_after =
+                usable_end_lba.saturating_sub(old.start_lba.saturating_add(old.sector_count));
+            let new_encrypt = encrypt.ok_or("missing encrypt capacity")?.sectors();
+            if space_after < new_encrypt {
+                Some(exact(
+                    usable_end_lba
+                        .checked_sub(old.start_lba)
+                        .and_then(|v| v.checked_sub(new_encrypt))
+                        .ok_or("no room for new encrypt partition")?,
+                    CapacitySource::ExistingBoundary,
+                )?)
+            } else {
+                source_capacity(Some(old))?
+            }
+        } else {
+            source_capacity(Some(old))?
+        }
     } else {
         let boundary = encrypt_start.unwrap_or_else(|| {
             usable_end_lba.saturating_sub(encrypt.map_or(0, CapacityInput::sectors))
@@ -489,12 +514,136 @@ pub struct ExistingPartitionRecord {
     pub lba12: EdpfEntry96,
 }
 
+impl ExistingPartitionRecord {
+    pub fn lba7_key_material(self) -> super::LegacyLba7KeyMaterial {
+        super::LegacyLba7KeyMaterial {
+            user_key_crc: self.lba7.user_key_crc,
+            file_key_crc: self.lba7.file_key_crc,
+            wrapped_file_key: self.lba7.encrypted_file_key,
+        }
+    }
+
+    pub fn lba12_key_material(self) -> Result<super::ProvisionKeyMaterial, String> {
+        let encrypt_mode = super::FileKeyWrapMode::from_raw(self.lba12.encrypt_mode)
+            .ok_or("existing partition uses unsupported FileKey wrap mode")?;
+        Ok(super::ProvisionKeyMaterial {
+            user_key_crc: self.lba12.user_key_crc,
+            file_key_crc: self.lba12.file_key_crc,
+            wrapped_file_key: self.lba12.encrypted_file_key,
+            encrypt_mode,
+        })
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ParsedExistingProvision {
     pub profile: ExistingProvisionProfile,
     pub records: Vec<ExistingPartitionRecord>,
     pub device_id: String,
     pub total_sectors: u64,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum DiskProvisionKind {
+    #[default]
+    Plain,
+    Mode0,
+    Mode1,
+    Mode2,
+    Mode3,
+}
+
+impl DiskProvisionKind {
+    pub const fn from_mode(mode: OfficialPartitionMode) -> Self {
+        match mode {
+            OfficialPartitionMode::DefaultThreePartition => Self::Mode0,
+            OfficialPartitionMode::BootShareCombined => Self::Mode1,
+            OfficialPartitionMode::WholeDiskEncrypted => Self::Mode2,
+            OfficialPartitionMode::IntranetExtranetDualPartition => Self::Mode3,
+        }
+    }
+
+    pub const fn full_name(self) -> &'static str {
+        match self {
+            Self::Plain => "普通盘",
+            Self::Mode0 => "模式0 · 缺省三分区",
+            Self::Mode1 => "模式1 · 启动区和交换区二合一",
+            Self::Mode2 => "模式2 · 整盘加密",
+            Self::Mode3 => "模式3 · 内外网通用双分区",
+        }
+    }
+
+    pub const fn short_name(self) -> &'static str {
+        match self {
+            Self::Plain => "普通盘",
+            Self::Mode0 => "mode0 · 缺省三分区",
+            Self::Mode1 => "mode1 · 二合一",
+            Self::Mode2 => "mode2 · 整盘加密",
+            Self::Mode3 => "mode3 · 内外网双分区",
+        }
+    }
+
+    pub fn from_metadata(image: &[u8], device_id: &str) -> Self {
+        let Some(lba7) = image.get(7 * SECTOR..8 * SECTOR) else {
+            return Self::Plain;
+        };
+        let Some(lba12) = image.get(12 * SECTOR..13 * SECTOR) else {
+            return Self::Plain;
+        };
+        Self::from_sectors(lba7, lba12, device_id)
+    }
+
+    pub fn from_sectors(lba7: &[u8], lba12: &[u8], device_id: &str) -> Self {
+        if lba7.len() != SECTOR || lba12.len() != SECTOR || device_id.is_empty() {
+            return Self::Plain;
+        }
+        let crc = crc32_bare(device_id.as_bytes());
+        let decoded7 = xor_rolling(lba7, (crc & 0xffff) ^ (crc >> 16));
+        let decoded12 = a6b0_full(lba12, &crc.to_le_bytes(), 0);
+        if decoded7.get(..4) != Some(b"EDPF") || decoded12.get(..4) != Some(b"EDPF") {
+            return Self::Plain;
+        }
+        let count = u32::from_le_bytes(decoded12[8..12].try_into().unwrap()) as usize;
+        if !(2..=3).contains(&count) {
+            return Self::Plain;
+        }
+        let mut types = Vec::with_capacity(count);
+        for index in 0..count {
+            let Ok(e7) = EdpfEntry64::parse(
+                decoded7[index * 0x40..(index + 1) * 0x40]
+                    .try_into()
+                    .unwrap(),
+            ) else {
+                return Self::Plain;
+            };
+            let Ok(e12) = EdpfEntry96::parse(
+                decoded12[index * 0x60..(index + 1) * 0x60]
+                    .try_into()
+                    .unwrap(),
+            ) else {
+                return Self::Plain;
+            };
+            if e7.partition_count as usize != count
+                || e12.partition_count as usize != count
+                || e7.partition_type != e12.partition_type
+                || e7.sector_size != 512
+                || e12.sector_size != 512
+                || e12.partition_size == 0
+                || !e12.partition_size.is_multiple_of(512)
+            {
+                return Self::Plain;
+            }
+            if index == 0
+                && (e7.start_sector != e12.start_sector || e7.partition_size != e12.partition_size)
+            {
+                return Self::Plain;
+            }
+            types.push(e12.partition_type);
+        }
+        OfficialPartitionMode::from_partition_types(&types)
+            .map(Self::from_mode)
+            .unwrap_or(Self::Plain)
+    }
 }
 
 impl ParsedExistingProvision {

@@ -1,15 +1,16 @@
 use edpcli::{
+    crypto::{a6b0_full, crc32_bare, xor_rolling},
     platform::{HardwareProbe, InquiryInfo, NativeTransport},
     protocol::edpf::EdpPartitionType,
     protocol::lba7_compat::locate_lba7_compatibility_extent_from_geometry,
     provision::{
         decide_partition_action, generate_official_image, parse_existing_provision,
         prefill_for_target_mode, wrap_file_key, wrap_legacy_lba7_file_key, CapacityInput,
-        CapacityInputMode, CapacitySource, ExistingPartition, ExistingProvisionProfile,
-        FileKeyWrapMode, OfficialFilesystemFormat, OfficialPartitionMode, OfficialPartitionSizes,
-        OfficialProvisionPlan, OnlyId, PartitionAction, PartitionRole, ProvisionEntropy,
-        ProvisionMetadata, ProvisionProfile, ProvisionSpec, QuickCapacityUnit, TargetIdentity,
-        OFFICIAL_PARTITION_START_SECTOR,
+        CapacityInputMode, CapacitySource, DiskProvisionKind, ExistingPartition,
+        ExistingProvisionProfile, FileKeyWrapMode, OfficialFilesystemFormat, OfficialPartitionMode,
+        OfficialPartitionSizes, OfficialProvisionPlan, OnlyId, PartitionAction, PartitionRole,
+        ProvisionEntropy, ProvisionMetadata, ProvisionProfile, ProvisionSpec, QuickCapacityUnit,
+        TargetIdentity, OFFICIAL_PARTITION_START_SECTOR,
     },
 };
 
@@ -263,7 +264,9 @@ fn same_mode_prefill_uses_exact_source_partition_sizes() {
     assert_eq!(prefill.share.as_ref().unwrap().sectors(), 4_000_003);
 }
 
-fn generated_source(mode: OfficialPartitionMode) -> (edpcli::provision::ProvisionImage, String) {
+fn generated_source(
+    mode: OfficialPartitionMode,
+) -> (ProvisionSpec, edpcli::provision::ProvisionImage, String) {
     let probe = HardwareProbe {
         vid: Some(0x0dd8),
         pid: Some(0x2005),
@@ -297,6 +300,7 @@ fn generated_source(mode: OfficialPartitionMode) -> (edpcli::provision::Provisio
     )
     .unwrap();
     (
+        spec.clone(),
         generate_official_image(&spec, &ProvisionEntropy::new([0x5a; 252]), &plan).unwrap(),
         did,
     )
@@ -310,7 +314,11 @@ fn existing_profile_decodes_all_four_modes_and_keeps_partition_owned_key_fields(
         OfficialPartitionMode::WholeDiskEncrypted,
         OfficialPartitionMode::IntranetExtranetDualPartition,
     ] {
-        let (image, did) = generated_source(mode);
+        let (_, image, did) = generated_source(mode);
+        assert_eq!(
+            DiskProvisionKind::from_metadata(image.as_bytes(), &did),
+            DiskProvisionKind::from_mode(mode)
+        );
         let parsed = parse_existing_provision(&image, &did, 16_777_216)
             .unwrap()
             .unwrap();
@@ -331,7 +339,81 @@ fn existing_profile_decodes_all_four_modes_and_keeps_partition_owned_key_fields(
         assert!(parse_existing_provision(&image, "wrong-device", 16_777_216)
             .unwrap()
             .is_none());
+        assert_eq!(
+            DiskProvisionKind::from_metadata(image.as_bytes(), "wrong-device"),
+            DiskProvisionKind::Plain
+        );
     }
+}
+
+#[test]
+fn moving_type4_from_slot_two_to_one_reencodes_headers_and_reuses_only_its_key_material() {
+    let (spec, source_image, did) = generated_source(OfficialPartitionMode::DefaultThreePartition);
+    let parsed = parse_existing_provision(&source_image, &did, 16_777_216)
+        .unwrap()
+        .unwrap();
+    let old_type4 = *parsed.record(PartitionRole::Encrypt).unwrap();
+    let prefill = prefill_for_target_mode(
+        Some(&parsed.profile),
+        OfficialPartitionMode::BootShareCombined,
+        16_000_000,
+        512,
+    )
+    .unwrap();
+    let targets = prefill.target_partitions(512).unwrap();
+    let compat = locate_lba7_compatibility_extent_from_geometry(1024, 255, 63, 512).unwrap();
+    let target_plan = OfficialProvisionPlan::new(
+        OfficialPartitionMode::BootShareCombined,
+        OfficialPartitionSizes::new(1, 1, 1),
+        compat,
+        wrap_legacy_lba7_file_key(b"other", [0x11; 8]),
+        wrap_file_key(b"other", [0x22; 16], FileKeyWrapMode::Sm4),
+    )
+    .unwrap()
+    .with_target_geometry(&targets, 512)
+    .unwrap()
+    .with_partition_key_material(
+        1,
+        old_type4.lba7_key_material(),
+        old_type4.lba12_key_material().unwrap(),
+    )
+    .unwrap();
+    let target_image =
+        generate_official_image(&spec, &ProvisionEntropy::new([0x5a; 252]), &target_plan).unwrap();
+    let crc = crc32_bare(did.as_bytes());
+    let old12 = a6b0_full(
+        &source_image.as_bytes()[12 * 512..13 * 512],
+        &crc.to_le_bytes(),
+        0,
+    );
+    let new12 = a6b0_full(
+        &target_image.as_bytes()[12 * 512..13 * 512],
+        &crc.to_le_bytes(),
+        0,
+    );
+    assert_eq!(
+        &new12[0x60 + 0x30..0x60 + 0x59],
+        &old12[2 * 0x60 + 0x30..2 * 0x60 + 0x59]
+    );
+    assert_eq!(
+        u32::from_le_bytes(new12[0x60 + 8..0x60 + 12].try_into().unwrap()),
+        2
+    );
+    assert_eq!(
+        u64::from_le_bytes(new12[0x60 + 0x18..0x60 + 0x20].try_into().unwrap()),
+        old_type4.lba12.start_sector
+    );
+    let k0 = (crc & 0xffff) ^ (crc >> 16);
+    let old7 = xor_rolling(&source_image.as_bytes()[7 * 512..8 * 512], k0);
+    let new7 = xor_rolling(&target_image.as_bytes()[7 * 512..8 * 512], k0);
+    assert_eq!(
+        &new7[0x40 + 0x30..0x40 + 0x40],
+        &old7[2 * 0x40 + 0x30..2 * 0x40 + 0x40]
+    );
+    assert_eq!(
+        u32::from_le_bytes(new7[0x40 + 8..0x40 + 12].try_into().unwrap()),
+        2
+    );
 }
 
 #[test]
@@ -389,4 +471,135 @@ fn shrinking_combined_keeps_encrypt_anchor_and_gap_but_overlap_fails_closed() {
         .unwrap_err()
         .contains("overlap"));
     assert_eq!(prefill.encrypt_start_lba, Some(anchored));
+}
+
+#[test]
+fn plain_and_four_registered_sources_prefill_every_target_mode() {
+    let boot = part(
+        PartitionRole::Boot,
+        EdpPartitionType::Boot,
+        63,
+        20_417,
+        false,
+    );
+    let share = part(
+        PartitionRole::Share,
+        EdpPartitionType::Share,
+        20_480,
+        5_000_000,
+        true,
+    );
+    let combined = part(
+        PartitionRole::BootShareCombined,
+        EdpPartitionType::Share,
+        63,
+        5_020_417,
+        false,
+    );
+    let reserve = part(
+        PartitionRole::CompatibilityReserve,
+        EdpPartitionType::Boot,
+        63,
+        63,
+        false,
+    );
+    let encrypt = part(
+        PartitionRole::Encrypt,
+        EdpPartitionType::Encrypt,
+        5_020_480,
+        2_097_000,
+        true,
+    );
+    let sources = [
+        None,
+        Some(ExistingProvisionProfile {
+            source_mode: OfficialPartitionMode::DefaultThreePartition,
+            partitions: vec![boot, share, encrypt],
+        }),
+        Some(ExistingProvisionProfile {
+            source_mode: OfficialPartitionMode::BootShareCombined,
+            partitions: vec![combined, encrypt],
+        }),
+        Some(ExistingProvisionProfile {
+            source_mode: OfficialPartitionMode::WholeDiskEncrypted,
+            partitions: vec![reserve, encrypt],
+        }),
+        Some(ExistingProvisionProfile {
+            source_mode: OfficialPartitionMode::IntranetExtranetDualPartition,
+            partitions: vec![boot, share],
+        }),
+    ];
+    let targets = [
+        OfficialPartitionMode::DefaultThreePartition,
+        OfficialPartitionMode::BootShareCombined,
+        OfficialPartitionMode::WholeDiskEncrypted,
+        OfficialPartitionMode::IntranetExtranetDualPartition,
+    ];
+    let mut cases = 0;
+    for source in &sources {
+        for mode in targets {
+            let prefill = prefill_for_target_mode(source.as_ref(), mode, 20_000_000, 512).unwrap();
+            let partitions = prefill.target_partitions(512).unwrap();
+            assert_eq!(partitions.len(), mode.partition_types().len());
+            if source
+                .as_ref()
+                .is_some_and(|source| source.source_mode == mode)
+            {
+                for target in &partitions {
+                    if target.role != PartitionRole::CompatibilityReserve {
+                        assert_eq!(
+                            decide_partition_action(
+                                source.as_ref().unwrap().partition(target.role),
+                                target
+                            ),
+                            PartitionAction::PreserveExact
+                        );
+                    }
+                }
+            }
+            cases += 1;
+        }
+    }
+    assert_eq!(cases, 20);
+}
+
+#[test]
+fn mode3_to_mode0_shrinks_share_only_when_new_encrypt_does_not_fit_in_gap() {
+    let source = ExistingProvisionProfile {
+        source_mode: OfficialPartitionMode::IntranetExtranetDualPartition,
+        partitions: vec![
+            part(
+                PartitionRole::Boot,
+                EdpPartitionType::Boot,
+                63,
+                20_417,
+                false,
+            ),
+            part(
+                PartitionRole::Share,
+                EdpPartitionType::Share,
+                20_480,
+                7_000_000,
+                true,
+            ),
+        ],
+    };
+    let prefill = prefill_for_target_mode(
+        Some(&source),
+        OfficialPartitionMode::DefaultThreePartition,
+        8_000_000,
+        512,
+    )
+    .unwrap();
+    let targets = prefill.target_partitions(512).unwrap();
+    assert_eq!(targets[0].sector_count, 20_417);
+    assert_eq!(
+        decide_partition_action(source.partition(PartitionRole::Boot), &targets[0]),
+        PartitionAction::PreserveExact
+    );
+    assert_eq!(targets[1].sector_count, 8_000_000 - 20_480 - 2_097_152);
+    assert_eq!(
+        decide_partition_action(source.partition(PartitionRole::Share), &targets[1]),
+        PartitionAction::Rebuild
+    );
 }

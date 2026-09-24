@@ -256,7 +256,9 @@ fn provision_request(
         boot_mib: opts.boot_mib,
         boot_sectors: opts.boot_sectors,
         share_mib: opts.share_mib,
+        share_sectors: opts.share_sectors,
         encrypt_mib: opts.encrypt_mib,
+        encrypt_sectors: opts.encrypt_sectors,
         label_id: opts.label_id.clone(),
         user: opts.user.clone(),
         dept: opts.dept.clone(),
@@ -452,12 +454,6 @@ fn provision_flow(runner: &SysRunner, action: ProvisionAction) -> i32 {
                 Err(error) => return finish(Err(error)),
             };
             let request = provision_request(&opts);
-            let mut prepared = match crate::application::provision::prepare_new_provision(
-                runner, disk, &request,
-            ) {
-                Ok(value) => value,
-                Err(error) => return finish(Err(error)),
-            };
             let mut dev = match FileDev::open_rdonly(&raw_path(disk)) {
                 Ok(value) => value,
                 Err(error) => {
@@ -466,6 +462,12 @@ fn provision_flow(runner: &SysRunner, action: ProvisionAction) -> i32 {
                         format!("错误: 无法只读打开 {}: {error}", raw_path(disk)),
                     )))
                 }
+            };
+            let mut prepared = match crate::application::provision::prepare_new_provision(
+                runner, disk, &request,
+            ) {
+                Ok(value) => value,
+                Err(error) => return finish(Err(error)),
             };
             if let Err(error) =
                 crate::application::provision::capture_manufacturer_lba3(&mut dev, &mut prepared)
@@ -506,100 +508,6 @@ fn provision_flow(runner: &SysRunner, action: ProvisionAction) -> i32 {
                     } else {
                         EXIT_OK
                     }
-                }
-                Err(error) => finish(Err(error)),
-            }
-        }
-        ProvisionAction::Convert {
-            disk: disk_opt,
-            write,
-            yes,
-            backup_dir,
-        } => {
-            if let Some(disk) = disk_opt {
-                if let Err(error) = guard_usb_disk(runner, disk) {
-                    return finish(Err(error));
-                }
-            }
-            if !elevate::is_root() {
-                let mut prompt = StdPrompter;
-                let disk = match provision_resolve_disk(runner, disk_opt, &mut prompt) {
-                    Ok(value) => value,
-                    Err(error) => return finish(Err(error)),
-                };
-                let mut argv = argv_with_backup_dir_for_elevation(backup_dir.as_deref());
-                DeviceSelector::new(disk_opt).pin_argv(&mut argv, disk);
-                elevate::ensure_elevated(&argv);
-                unreachable!();
-            }
-
-            let mut std_prompt = StdPrompter;
-            let disk = match provision_resolve_disk(runner, disk_opt, &mut std_prompt) {
-                Ok(value) => value,
-                Err(error) => return finish(Err(error)),
-            };
-            let mut dev = match FileDev::open_rdonly(&raw_path(disk)) {
-                Ok(value) => value,
-                Err(error) => {
-                    return finish(Err(EdpCliError::new(
-                        EXIT_IO,
-                        format!("错误: 无法打开 {}: {error}", raw_path(disk)),
-                    )))
-                }
-            };
-            let prepared = match crate::application::provision::prepare_passwordless_conversion(
-                runner, disk, &mut dev,
-            ) {
-                Ok(value) => value,
-                Err(error) => return finish(Err(error)),
-            };
-            println!(
-                "免密转换计划: disk{}  前部=LBA{}..{}  type4 保持 LBA{} / {}B",
-                disk,
-                prepared.conversion.plan.front_start_lba,
-                prepared.conversion.plan.encrypt_start_lba - 1,
-                prepared.conversion.plan.encrypt_start_lba,
-                prepared.conversion.plan.encrypt_size_bytes
-            );
-            println!(
-                "将重建前部 exFAT；type4 几何和密钥材料不移动、不重加密。计划写入={}扇区",
-                prepared.patch.len()
-            );
-            if !write {
-                println!("只读预览完成；执行写入需加 --write。");
-                return EXIT_OK;
-            }
-
-            let mut always = AlwaysYes(StdPrompter);
-            let prompt: &mut dyn Prompter = if yes { &mut always } else { &mut std_prompt };
-            let mut ctx = Ctx {
-                runner,
-                clock: &SystemClock,
-                prompt,
-                backup_dir: diskio::resolve_backup_dir(backup_dir.as_deref()),
-            };
-            if let Err(error) =
-                crate::application::write::backup_create_flow(disk, &mut ctx, &mut dev)
-            {
-                return finish(Err(error));
-            }
-            if !ctx.prompt.confirm_yes(&crate::ui::bold(&format!(
-                "已完成写前备份。将重建 disk{} 前部区域并切换免密布局。输入 YES: ",
-                disk
-            ))) {
-                return finish(Err(EdpCliError::new(EXIT_CANCELLED, "已取消(未写盘)")));
-            }
-            match crate::application::provision::commit_passwordless_conversion(
-                runner, &mut dev, &prepared,
-            ) {
-                Ok(()) => {
-                    println!(
-                        "{}",
-                        crate::ui::green(
-                            "免密改造完成，type4 保持原位且读回校验通过。请拔出重插。"
-                        )
-                    );
-                    EXIT_OK
                 }
                 Err(error) => finish(Err(error)),
             }
@@ -1103,6 +1011,7 @@ mod tests {
             denied: false,
             probe_error: None,
             is_nopwd: false,
+            provision_kind: crate::provision::DiskProvisionKind::Plain,
             partitions: None,
         };
         assert!(!list_needs_elevation(
@@ -1354,6 +1263,7 @@ mod tests {
                 denied: false,
                 probe_error: None,
                 is_nopwd: false,
+                provision_kind: crate::provision::DiskProvisionKind::Plain,
                 partitions: None,
             },
             Row {
@@ -1370,6 +1280,7 @@ mod tests {
                 denied: false,
                 probe_error: None,
                 is_nopwd: true,
+                provision_kind: crate::provision::DiskProvisionKind::Mode0,
                 partitions: Some(parts),
             },
             Row {
@@ -1386,6 +1297,7 @@ mod tests {
                 denied: false,
                 probe_error: None,
                 is_nopwd: false,
+                provision_kind: crate::provision::DiskProvisionKind::Plain,
                 partitions: None,
             },
         ];
@@ -1393,11 +1305,10 @@ mod tests {
         let lines: Vec<&str> = out.lines().collect();
         assert_eq!(lines[0], "外接盘 3 个:");
         let disk4_line = lines.iter().find(|l| l.contains("disk4")).unwrap();
-        assert!(disk4_line.contains("非 cems 盘"));
+        assert!(disk4_line.contains("普通盘"));
         let disk6_line = lines.iter().find(|l| l.contains("disk6")).unwrap();
         assert!(
-            disk6_line.contains("cems盘")
-                && disk6_line.contains("[免密]")
+            disk6_line.contains("mode0 · 缺省三分区")
                 && disk6_line.contains("宋旭琳")
                 && disk6_line.contains("泰州供电公司"),
             "{}",

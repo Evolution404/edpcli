@@ -77,7 +77,9 @@ pub struct ProvisionNewOpts {
     pub boot_mib: Option<u64>,
     pub boot_sectors: Option<u64>,
     pub share_mib: Option<u64>,
+    pub share_sectors: Option<u64>,
     pub encrypt_mib: Option<u64>,
+    pub encrypt_sectors: Option<u64>,
     pub label_id: String,
     pub user: String,
     pub dept: String,
@@ -99,20 +101,8 @@ pub struct ProvisionNewOpts {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ProvisionAction {
     Plan(ProvisionNewOpts),
-    Image {
-        opts: ProvisionNewOpts,
-        out: String,
-    },
-    Write {
-        opts: ProvisionNewOpts,
-        yes: bool,
-    },
-    Convert {
-        disk: Option<u32>,
-        write: bool,
-        yes: bool,
-        backup_dir: Option<String>,
-    },
+    Image { opts: ProvisionNewOpts, out: String },
+    Write { opts: ProvisionNewOpts, yes: bool },
 }
 
 pub enum Parsed {
@@ -232,15 +222,15 @@ fn print_topic_help(topic: &str) {
         "provision" => {
             println!(
                 "{}",
-                bold("用法: edpcli provision <plan|image|write|convert> [选项]")
+                bold("用法: edpcli provision <plan|image|write> [选项]")
             );
             println!("  provision plan  --disk N --mode 0|1|2|3 <身份/分区参数>");
             println!("  provision image --disk N --mode 0|1|2|3 <身份/分区参数> --out FILE");
             println!("  provision write --disk N --mode 0|1|2|3 <身份/分区参数> [--yes]");
+            println!("    mode1 若识别到现有 mode0，将保留原 type4 位置/密钥并让 type2 扩满前部。");
             println!("    可选格式化: --format-boot --format-share --format-encrypt");
             println!("    文件系统: --boot-fs fat16|exfat --share-fs fat16|exfat --encrypt-fs fat16|exfat");
             println!("    各区卷标: --boot-label LABEL --share-label LABEL --encrypt-label LABEL");
-            println!("  provision convert [--disk N] [--write] [--yes] [--backup-dir D]");
             println!("新盘身份参数: [--label-id ID] --user USER --dept DEPT [--label LABEL] [--password PASSWORD]");
             println!(
                 "标签默认值: {}；可通过 --label 自定义。",
@@ -345,7 +335,9 @@ fn parse_new_provision_opts(
     let mut boot_mib = None;
     let mut boot_sectors = None;
     let mut share_mib = None;
+    let mut share_sectors = None;
     let mut encrypt_mib = None;
+    let mut encrypt_sectors = None;
     let mut label_id = None;
     let mut user = None;
     let mut dept = None;
@@ -399,12 +391,28 @@ fn parse_new_provision_opts(
                     "--share-mib",
                 )?;
             }
+            "--share-sectors" => {
+                let value = take_value(rest, &mut i, "--share-sectors")?;
+                set_once(
+                    &mut share_sectors,
+                    parse_positive_u64(&value, "--share-sectors")?,
+                    "--share-sectors",
+                )?;
+            }
             "--encrypt-mib" => {
                 let value = take_value(rest, &mut i, "--encrypt-mib")?;
                 set_once(
                     &mut encrypt_mib,
                     parse_positive_u64(&value, "--encrypt-mib")?,
                     "--encrypt-mib",
+                )?;
+            }
+            "--encrypt-sectors" => {
+                let value = take_value(rest, &mut i, "--encrypt-sectors")?;
+                set_once(
+                    &mut encrypt_sectors,
+                    parse_positive_u64(&value, "--encrypt-sectors")?,
+                    "--encrypt-sectors",
                 )?;
             }
             "--label-id" => {
@@ -491,13 +499,20 @@ fn parse_new_provision_opts(
     if boot_mib.is_some() && boot_sectors.is_some() {
         return Err("错误: --boot-mib 与 --boot-sectors 不能同时指定".into());
     }
-    let require = |value: Option<u64>, flag: &str| {
-        value.ok_or_else(|| format!("错误: mode{mode} 必须指定 {flag}"))
-    };
+    if share_mib.is_some() && share_sectors.is_some() {
+        return Err("错误: --share-mib 与 --share-sectors 不能同时指定".into());
+    }
+    if encrypt_mib.is_some() && encrypt_sectors.is_some() {
+        return Err("错误: --encrypt-mib 与 --encrypt-sectors 不能同时指定".into());
+    }
     match mode {
         0 => {
-            require(share_mib, "--share-mib")?;
-            require(encrypt_mib, "--encrypt-mib")?;
+            if share_mib.is_none() && share_sectors.is_none() {
+                return Err("错误: mode0 必须指定 --share-mib 或 --share-sectors".into());
+            }
+            if encrypt_mib.is_none() && encrypt_sectors.is_none() {
+                return Err("错误: mode0 必须指定 --encrypt-mib 或 --encrypt-sectors".into());
+            }
             if boot_mib.is_none() && boot_sectors.is_none() {
                 boot_sectors = Some(crate::provision::DEFAULT_MODE0_BOOT_SECTORS);
             }
@@ -506,21 +521,28 @@ fn parse_new_provision_opts(
             if boot_sectors.is_some() {
                 return Err("错误: --boot-sectors 仅用于 mode0".into());
             }
-            require(share_mib, "--share-mib")?;
-            require(encrypt_mib, "--encrypt-mib")?;
+            if share_mib.is_none() && share_sectors.is_none() {
+                return Err("错误: mode1 必须指定 --share-mib 或 --share-sectors".into());
+            }
+            if encrypt_mib.is_none() && encrypt_sectors.is_none() {
+                return Err("错误: mode1 必须指定 --encrypt-mib 或 --encrypt-sectors".into());
+            }
         }
         2 => {
             if boot_sectors.is_some() {
                 return Err("错误: --boot-sectors 仅用于 mode0".into());
             }
-            require(encrypt_mib, "--encrypt-mib")?;
+            if encrypt_mib.is_none() && encrypt_sectors.is_none() {
+                return Err("错误: mode2 必须指定 --encrypt-mib 或 --encrypt-sectors".into());
+            }
         }
         3 => {
-            if boot_sectors.is_some() {
-                return Err("错误: --boot-sectors 仅用于 mode0".into());
+            if boot_mib.is_none() && boot_sectors.is_none() {
+                return Err("错误: mode3 必须指定 --boot-mib 或 --boot-sectors".into());
             }
-            require(boot_mib, "--boot-mib")?;
-            require(share_mib, "--share-mib")?;
+            if share_mib.is_none() && share_sectors.is_none() {
+                return Err("错误: mode3 必须指定 --share-mib 或 --share-sectors".into());
+            }
         }
         _ => unreachable!(),
     }
@@ -534,7 +556,9 @@ fn parse_new_provision_opts(
             boot_mib,
             boot_sectors,
             share_mib,
+            share_sectors,
             encrypt_mib,
+            encrypt_sectors,
             label_id: match label_id {
                 Some(value) => value,
                 None => crate::provision::OnlyId::random_candidate()?
@@ -1058,7 +1082,7 @@ pub fn parse_args(argv: &[String]) -> Result<Parsed, String> {
                 });
             }
             let Some(action) = rest.first().map(String::as_str) else {
-                return Err("错误: provision 需要动作 plan / image / write / convert".into());
+                return Err("错误: provision 需要动作 plan / image / write".into());
             };
             let tail = &rest[1..];
             match action {
@@ -1087,42 +1111,8 @@ pub fn parse_args(argv: &[String]) -> Result<Parsed, String> {
                         _ => unreachable!(),
                     }
                 }
-                "convert" => {
-                    let mut disk = None;
-                    let mut write = false;
-                    let mut yes = false;
-                    let mut backup_dir = None;
-                    let mut i = 0usize;
-                    while i < tail.len() {
-                        match flag_name(&tail[i]) {
-                            "--disk" => {
-                                let value = take_value(tail, &mut i, "--disk")?;
-                                set_once(&mut disk, parse_disk_spec(&value)?, "--disk")?;
-                            }
-                            "--backup-dir" => {
-                                let value = take_value(tail, &mut i, "--backup-dir")?;
-                                set_once(&mut backup_dir, value, "--backup-dir")?;
-                            }
-                            "--write" => set_switch(&mut write, &tail[i], "--write")?,
-                            "--yes" => set_switch(&mut yes, &tail[i], "--yes")?,
-                            other => {
-                                return Err(format!("错误: provision convert 不认识选项 {other}"))
-                            }
-                        }
-                        i += 1;
-                    }
-                    if yes && !write {
-                        return Err("错误: provision convert --yes 只能与 --write 同用".into());
-                    }
-                    Ok(Parsed::Provision(ProvisionAction::Convert {
-                        disk,
-                        write,
-                        yes,
-                        backup_dir,
-                    }))
-                }
                 other => Err(format!(
-                    "错误: 未知 provision 动作: {other} (可用 plan / image / write / convert)"
+                    "错误: 未知 provision 动作: {other} (可用 plan / image / write)"
                 )),
             }
         }
