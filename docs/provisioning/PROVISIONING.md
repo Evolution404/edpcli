@@ -693,10 +693,11 @@ Real USB acceptance
 - Phase 1 已完成：字段级输入过滤、容量 `f` 填满、输入框光标、三位小数显示、selected 高亮、section 对齐、最大可设/比例门禁与统一 focus marker 已落地；
 - Phase 2 已完成：Offline Convert 已从 TUI、palette、TaskHub、application service、CLI grammar/help/completion、`sectors.rs` conversion-only 写入 API、专用测试和 README/USAGE 产品文案中删除；
 - Phase 3 已完成：新增 `ProvisionTarget::{Plain, Official(...)}`；`NewProvisionRequest` 与 TUI→worker 边界携带目标类型而不是裸 `u8`/额外 UI kind，`OfficialPartitionMode` 只在官方 layout/generator 内部使用；
-- Phase 4 已完成：Plain planner 与动态 1～4 分区 TUI 已落地，默认 P1 从 LBA2048 占满剩余盘；每个分区独立 start/capacity/filesystem/label，支持 gap、`f` 填满、Insert/Delete，编辑一个分区绝不自动移动其它分区；overlap/overflow/MBR 32-bit 边界 fail-closed；当前 Plain Review 明确只读，Confirm/export/write 三层都拒绝进入物理写盘；
+- Phase 4 已完成：Plain planner 与动态 1～4 分区 TUI 已落地，默认 P1 从 LBA2048 占满剩余盘；每个分区独立 start/capacity/filesystem/label，支持 gap、`f` 填满、Insert/Delete，编辑一个分区绝不自动移动其它分区；overlap/overflow/MBR 32-bit 边界 fail-closed；该阶段曾用三层只读挡板隔离未完成 writer，现已在 Phase 5～7 后移除；
 - Phase 5 已完成：新增纯 `PlainProvisionWritePlan`，生成1～4个 MBR primary entries、MBR `0x55AA`、LBA1/2/4～12 EDP metadata cleanup、LBA3 preserve 集合、来源 LCE cleanup 与 sparse filesystem sector；所有同 LBA 候选先归一化到唯一 `PlainSectorOwner`，filesystem 实际扇区覆盖旧 LCE cleanup，不依赖写入先后决定最终内容；任何 Plain 分区覆盖 LBA3 时 fail-closed。
 - Phase 6 已完成：新增目标无关 `WriteTransactionPlan` / `SectorWriteStage` / `execute_write_transaction()`；唯一事务执行器统一负责写前 sync、snapshot 全部 touched sectors、Data→Metadata→Commit 排序、exact readback、失败后 exact rollback。旧 `atomic_write_sectors` 与 official writer 均迁移到该核心，删除两套重复 snapshot/readback/rollback；`PlainProvisionWritePlan` 可无歧义映射到同一事务模型，MBR=Commit、EDP metadata cleanup=Metadata、filesystem/LCE cleanup=Data。
 - Phase 7 已完成：新增默认可运行的 `plain_virtual_hil`，覆盖1～4分区、显式 gap、非2048起点、统一事务写入、LBA3 preserve、LCE cleanup、MBR entries、exFAT analyzer 与 post-write `Plain` 识别；新增 macOS disposable raw-disk HIL，只有 WholeDisk+Virtual+Disk Image 才允许进入测试写链，实际完成 raw image 制盘→eject/reattach→OS 识别 exFAT→mount→create/readback file→unmount。现有 Linux/Windows loop/VHD HIL 继续保留。
+- Plain 产品写入链已启用：TUI Plain Form 不再在 `AppState` 本地伪造只读 Review，而是通过 TaskHub 调用 application `prepare_plain_provision()`，固定 USB hardware probe/容量/LBA3，并从同一 LBA0～12 快照按 LBA7 实际 entry pointer 解析来源 LCE；Review→YES→critical worker 调用 `commit_plain_provision()`，复用 system/USB guard、unmount/lock、reopen、probe/容量/LBA3 复核和统一 transaction，写后再次验证 MBR/LBA3/Plain 分类。
 - 原先依赖旧 `sectors::convert` 合成免密盘的测试夹具已迁移到正式 `provision::generate_image()`，识别/备份测试继续覆盖 mode1 免密样本；
 - `src/sectors.rs` 现在只保留只读盘状态识别与 LBA12 EDPF 解析，元数据写入只有 `provision` 一套正式实现。
 
@@ -711,12 +712,12 @@ Real USB acceptance
 - Phase 5 `cargo fmt --all -- --check`、`cargo check --all-targets` 通过；`plain_provision` 10/10 通过，覆盖 Plain MBR、EDP metadata cleanup、LBA3 preserve、LCE↔filesystem ownership 归一化、多分区 entries 与 LBA3 冲突拒绝。
 - Phase 6 `atomic_write` + `provision_transaction_write` 16/16 通过；覆盖通用 stage 顺序、重复/越界拒绝、exact touched-set rollback、旧 metadata writer 回归、official writer 回归、Plain→通用事务映射。
 - Phase 7 `plain_virtual_hil` 1/1 通过；macOS OS-level Plain virtual-disk HIL 1/1 通过，并实测 `/dev/rdiskN` 写盘后重新 attach 可被 macOS 识别为可挂载 exFAT，文件创建/readback/unmount 成功。
+- Plain 产品链定向验证：application provision 8/8、TUI state 37/37、`plain_virtual_hil` 1/1、`provision_transaction_write` 7/7 全绿；`cargo check --all-targets` 通过。
 
 ### 8.5 下一步执行顺序
 
-1. 启用 Plain 产品真实写入链，移除 Phase 4 临时只读挡板，并保持与 official 同一安全链；
-2. Phase 8：真实 USB 验收；
-3. 并行按第 9 节实施 Inspect 全盘结构化浏览器，但不得复制 CLI/TUI 两套解析后端。
+1. Phase 8：真实 USB 验收；
+2. 并行按第 9 节实施 Inspect 全盘结构化浏览器，但不得复制 CLI/TUI 两套解析后端。
 
 最终产品定义：**edpcli 制盘中心统一面向五种磁盘目标状态，其中 mode0～mode3 是官方 EDP 模式，Plain 是非 EDP 普通盘目标而不是 mode4。所有目标共用同一套选盘、表单、实时布局、Review 和安全事务基础；容量以 sector 为唯一精确真相，UI 提供 MiB/GiB/sector、`f` 填满、字段级输入约束和统一焦点视觉。Plain 复用现有制盘界面并支持1～4个 MBR 普通分区，不自动移动其它分区，不宣称安全擦除。**
 

@@ -248,7 +248,7 @@ pub enum ProvisionStage {
 #[derive(Debug, Clone)]
 pub enum ProvisionPrepared {
     New(Box<crate::application::provision::PreparedNewProvision>),
-    Plain(crate::provision::PlainProvisionPlan),
+    Plain(Box<crate::application::provision::PreparedPlainProvision>),
 }
 
 #[derive(Debug, Clone)]
@@ -3597,22 +3597,6 @@ impl AppState {
         true
     }
 
-    pub fn provision_prepare_plain(&mut self) {
-        match self.provision_plain_plan() {
-            Ok(plan) => {
-                self.provision.prepared = Some(ProvisionPrepared::Plain(plan));
-                self.provision.stage = ProvisionStage::Review;
-                self.provision.message =
-                    Some("Plain 当前完成只读计划；物理写盘将在通用事务阶段启用。".into());
-            }
-            Err(message) => {
-                self.provision.prepared = None;
-                self.provision.stage = ProvisionStage::Form;
-                self.provision.message = Some(message);
-            }
-        }
-    }
-
     pub fn provision_toggle_force_change_password(&mut self) -> bool {
         if self.provision_field_slot(self.provision.field_selected) != Some(9) {
             return false;
@@ -3958,10 +3942,6 @@ impl AppState {
     }
 
     pub fn provision_begin_confirm(&mut self) {
-        if matches!(self.provision.prepared, Some(ProvisionPrepared::Plain(_))) {
-            self.provision.message = Some("Plain 当前仅完成只读计划；物理写盘尚未启用。".into());
-            return;
-        }
         if self.provision.prepared.is_some() {
             self.provision.stage = ProvisionStage::Confirm;
             self.provision.confirmation.clear();
@@ -3986,10 +3966,6 @@ impl AppState {
 
     pub fn provision_take_for_write(&mut self) -> Option<ProvisionPrepared> {
         if self.provision.stage != ProvisionStage::Confirm {
-            return None;
-        }
-        if matches!(self.provision.prepared, Some(ProvisionPrepared::Plain(_))) {
-            self.provision.message = Some("Plain 当前仅完成只读计划；物理写盘尚未启用。".into());
             return None;
         }
         if self.provision.confirmation != "YES" {

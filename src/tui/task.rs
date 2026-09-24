@@ -160,6 +160,12 @@ enum InspectRequest {
     Backup(PathBuf),
 }
 
+#[derive(Clone)]
+enum ProvisionPlanInput {
+    Official(crate::application::provision::NewProvisionRequest),
+    Plain(crate::provision::PlainProvisionPlan),
+}
+
 #[derive(Default)]
 pub struct TaskUpdates {
     pub devices: Option<Vec<Row>>,
@@ -906,7 +912,23 @@ impl TaskHub {
     pub fn request_provision_plan(
         &mut self,
         disk: u32,
-        request: Option<crate::application::provision::NewProvisionRequest>,
+        request: crate::application::provision::NewProvisionRequest,
+    ) -> Result<u64, &'static str> {
+        self.start_provision_plan(disk, ProvisionPlanInput::Official(request))
+    }
+
+    pub fn request_plain_provision_plan(
+        &mut self,
+        disk: u32,
+        plan: crate::provision::PlainProvisionPlan,
+    ) -> Result<u64, &'static str> {
+        self.start_provision_plan(disk, ProvisionPlanInput::Plain(plan))
+    }
+
+    fn start_provision_plan(
+        &mut self,
+        disk: u32,
+        input: ProvisionPlanInput,
     ) -> Result<u64, &'static str> {
         if !self.provision_single_flight.try_start() {
             return Err("已有制盘计划正在生成");
@@ -919,16 +941,31 @@ impl TaskHub {
                 let path = crate::diskio::raw_path(disk);
                 let mut dev = crate::diskio::FileDev::open_rdonly(&path)
                     .map_err(|error| format!("错误: 无法只读打开 {path}: {error}"))?;
-                let request = request.ok_or_else(|| "错误: 新盘制盘缺少表单参数".to_string())?;
-                let mut prepared = crate::application::provision::prepare_target_provision(
-                    &runner, disk, &request, &mut dev,
-                )
-                .map_err(|error| error.msg)?;
-                crate::application::provision::capture_manufacturer_lba3(&mut dev, &mut prepared)
-                    .map_err(|error| error.msg)?;
-                Ok(crate::tui::state::ProvisionPrepared::New(Box::new(
-                    prepared,
-                )))
+                match input {
+                    ProvisionPlanInput::Official(request) => {
+                        let mut prepared = crate::application::provision::prepare_target_provision(
+                            &runner, disk, &request, &mut dev,
+                        )
+                        .map_err(|error| error.msg)?;
+                        crate::application::provision::capture_manufacturer_lba3(
+                            &mut dev,
+                            &mut prepared,
+                        )
+                        .map_err(|error| error.msg)?;
+                        Ok(crate::tui::state::ProvisionPrepared::New(Box::new(
+                            prepared,
+                        )))
+                    }
+                    ProvisionPlanInput::Plain(plan) => {
+                        let prepared = crate::application::provision::prepare_plain_provision(
+                            &runner, disk, plan, &mut dev,
+                        )
+                        .map_err(|error| error.msg)?;
+                        Ok(crate::tui::state::ProvisionPrepared::Plain(Box::new(
+                            prepared,
+                        )))
+                    }
+                }
             }))
             .unwrap_or_else(|payload| {
                 Err(format!(
@@ -1010,8 +1047,26 @@ impl TaskHub {
                         })
                         .map_err(|error| error.msg)
                     }
-                    crate::tui::state::ProvisionPrepared::Plain(_) => {
-                        Err("普通盘当前仅支持只读计划，物理写盘尚未启用".to_string())
+                    crate::tui::state::ProvisionPrepared::Plain(prepared) => {
+                        let _ = tx.send(WorkerResult::ProvisionProgress {
+                            operation_id,
+                            message: "正在写入普通盘 MBR/文件系统/EDP cleanup，并逐扇区读回校验…".into(),
+                        });
+                        let path = crate::diskio::raw_path(prepared.disk);
+                        let mut dev = crate::diskio::FileDev::open_rdonly(&path)
+                            .map_err(|error| format!("错误: 无法只读打开 {path}: {error}"))?;
+                        crate::application::provision::commit_plain_provision(
+                            &runner,
+                            &mut dev,
+                            &prepared,
+                        )
+                        .map(|_| {
+                            format!(
+                                "恢复普通盘：成功，{} 个 MBR 主分区已写入并读回验证；LBA3 保留，EDP 状态已清除。",
+                                prepared.plan.partitions.len()
+                            )
+                        })
+                        .map_err(|error| error.msg)
                     }
                 }
             }))

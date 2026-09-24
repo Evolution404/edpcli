@@ -11,22 +11,22 @@ use std::path::Path;
 use std::time::Duration;
 
 use crate::backup_deep::{analyze_partition, AnalysisStatus, PartitionReader};
-use crate::backup_metadata::PartitionGeometry;
+use crate::backup_metadata::{parse_lba7_compatibility_geometry, PartitionGeometry};
 use crate::common::{EdpCliError, EdpCliResult, EXIT_IO, EXIT_TARGET, SECTOR};
 use crate::diskio::{self, SectorDev};
 use crate::protocol::lba7_compat::locate_lba7_compatibility_extent_from_verified_usb_capacity;
 use crate::provision::{
     apply_target_geometry_overrides, build_empty_exfat, build_empty_fat16,
     build_official_partition_filesystem, build_official_provision_protocol_image,
-    parse_existing_provision, prefill_for_target_mode, wrap_file_key, wrap_legacy_lba7_file_key,
-    CapacityInput, CapacitySource, FileKeyWrapMode, OfficialFilesystemFormat,
-    OfficialPartitionFilesystems, OfficialPartitionMode, OfficialPartitionSizes,
-    OfficialProvisionPlan, OfficialProvisionWriteImage, OnlyId, ParsedExistingProvision,
-    PartitionAction, PartitionFilesystemImage, PartitionFormatTarget, PartitionRole,
-    PassInfoPolicy, ProvisionEntropy, ProvisionImage, ProvisionMetadata, ProvisionProfile,
-    ProvisionSpec, ProvisionTarget, QuickCapacityUnit, SparseFilesystemImage,
-    TargetGeometryOverrides, TargetIdentity, TargetPartitionGeometry, TargetProvisionPlan,
-    DEFAULT_MODE0_BOOT_SECTORS,
+    build_plain_provision_write_plan, parse_existing_provision, prefill_for_target_mode,
+    wrap_file_key, wrap_legacy_lba7_file_key, CapacityInput, CapacitySource, FileKeyWrapMode,
+    OfficialFilesystemFormat, OfficialPartitionFilesystems, OfficialPartitionMode,
+    OfficialPartitionSizes, OfficialProvisionPlan, OfficialProvisionWriteImage, OnlyId,
+    ParsedExistingProvision, PartitionAction, PartitionFilesystemImage, PartitionFormatTarget,
+    PartitionRole, PassInfoPolicy, PlainCleanupExtent, PlainProvisionPlan, PlainProvisionWritePlan,
+    ProvisionEntropy, ProvisionImage, ProvisionMetadata, ProvisionProfile, ProvisionSpec,
+    ProvisionTarget, QuickCapacityUnit, SparseFilesystemImage, TargetGeometryOverrides,
+    TargetIdentity, TargetPartitionGeometry, TargetProvisionPlan, DEFAULT_MODE0_BOOT_SECTORS,
 };
 use crate::sysinfo::{self, CmdRunner};
 use encoding_rs::GBK;
@@ -296,6 +296,34 @@ pub struct PreparedNewProvision {
     expected_serial: Option<String>,
     expected_probe: crate::platform::HardwareProbe,
     expected_lba3: Option<[u8; SECTOR]>,
+}
+
+#[derive(Clone, Eq, PartialEq)]
+pub struct PreparedPlainProvision {
+    pub disk: u32,
+    pub device_id: String,
+    pub plan: PlainProvisionPlan,
+    pub write_plan: PlainProvisionWritePlan,
+    pub source_kind: crate::provision::DiskProvisionKind,
+    pub source_lce_start_lba: Option<u64>,
+    source_metadata: Vec<u8>,
+    expected_probe: crate::platform::HardwareProbe,
+}
+
+impl std::fmt::Debug for PreparedPlainProvision {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("PreparedPlainProvision")
+            .field("disk", &self.disk)
+            .field("device_id", &self.device_id)
+            .field("plan", &self.plan)
+            .field("write_plan", &self.write_plan)
+            .field("source_kind", &self.source_kind)
+            .field("source_lce_start_lba", &self.source_lce_start_lba)
+            .field("source_metadata_len", &self.source_metadata.len())
+            .field("expected_probe", &self.expected_probe)
+            .finish_non_exhaustive()
+    }
 }
 
 impl std::fmt::Debug for PreparedNewProvision {
@@ -984,6 +1012,140 @@ pub fn prepare_target_provision(
     })
 }
 
+pub fn prepare_plain_provision(
+    runner: &dyn CmdRunner,
+    disk: u32,
+    plan: PlainProvisionPlan,
+    dev: &mut dyn SectorDev,
+) -> EdpCliResult<PreparedPlainProvision> {
+    guard_usb_disk(runner, disk)?;
+    let total_sectors = sysinfo::disk_total_sectors(runner, disk)
+        .ok_or_else(|| err(EXIT_TARGET, "错误: 无法取得目标盘总扇区数"))?;
+    if total_sectors != plan.total_sectors {
+        return Err(err(
+            EXIT_TARGET,
+            format!(
+                "错误: Plain 计划容量 {} sectors 与当前目标 {} sectors 不一致",
+                plan.total_sectors, total_sectors
+            ),
+        ));
+    }
+    let probe = runner
+        .hardware_probe(disk)
+        .or_else(|| crate::platform::fallback_hardware_probe(runner, disk))
+        .ok_or_else(|| err(EXIT_TARGET, "错误: 无法取得目标盘 USB/SCSI 硬件身份"))?;
+    let target = TargetIdentity::from_probe(&probe, total_sectors)
+        .map_err(|message| err(EXIT_TARGET, format!("错误: 目标硬件身份不完整: {message}")))?;
+    let device_id = target.device_id().to_string();
+
+    let source_metadata = read_image(dev)?;
+    let lba7 = &source_metadata[7 * SECTOR..8 * SECTOR];
+    let lba12 = &source_metadata[12 * SECTOR..13 * SECTOR];
+    let source_kind = crate::provision::DiskProvisionKind::from_sectors(lba7, lba12, &device_id);
+    let source_lce =
+        if source_kind == crate::provision::DiskProvisionKind::Plain {
+            None
+        } else {
+            let geometry =
+                parse_lba7_compatibility_geometry(&source_metadata, &device_id, total_sectors)
+                    .map_err(|message| {
+                        err(
+                EXIT_TARGET,
+                format!("错误: 无法从来源 LBA7 实际 entry 解析 LCE，拒绝恢复普通盘: {message}"),
+            )
+                    })?;
+            Some(PlainCleanupExtent::new(
+                geometry.start_lba,
+                geometry.sector_count,
+            ))
+        };
+
+    let mut volume_serials = Vec::with_capacity(plan.partitions.len());
+    for _ in &plan.partitions {
+        volume_serials.push(u32::from_le_bytes(random_array::<4>()?));
+    }
+    let write_plan = build_plain_provision_write_plan(&plan, source_lce, &volume_serials).map_err(
+        |message| {
+            err(
+                EXIT_TARGET,
+                format!("错误: 无法构造 Plain 写盘计划: {message}"),
+            )
+        },
+    )?;
+
+    Ok(PreparedPlainProvision {
+        disk,
+        device_id,
+        plan,
+        write_plan,
+        source_kind,
+        source_lce_start_lba: source_lce.map(|extent| extent.start_lba),
+        source_metadata,
+        expected_probe: probe,
+    })
+}
+
+pub fn commit_plain_provision(
+    runner: &dyn CmdRunner,
+    dev: &mut dyn SectorDev,
+    prepared: &PreparedPlainProvision,
+) -> EdpCliResult<()> {
+    guard_usb_disk(runner, prepared.disk)?;
+    let _guard = sysinfo::prepare_write(runner, prepared.disk).map_err(|error| {
+        err(
+            EXIT_IO,
+            format!("错误: 无法卸载/锁定 disk{}: {error}", prepared.disk),
+        )
+    })?;
+    dev.reopen_rdwr(OPEN_WAIT)
+        .map_err(|error| err(EXIT_IO, format!("错误: 无法以读写方式重开目标盘: {error}")))?;
+    verify_reopened_snapshot(dev, &prepared.source_metadata)?;
+
+    let fresh_probe = runner
+        .hardware_probe(prepared.disk)
+        .or_else(|| crate::platform::fallback_hardware_probe(runner, prepared.disk))
+        .ok_or_else(|| err(EXIT_TARGET, "错误: 重开后无法复核目标硬件身份"))?;
+    let fresh_total = sysinfo::disk_total_sectors(runner, prepared.disk)
+        .ok_or_else(|| err(EXIT_TARGET, "错误: 重开后无法复核目标容量"))?;
+    if fresh_probe != prepared.expected_probe || fresh_total != prepared.plan.total_sectors {
+        return Err(err(
+            EXIT_TARGET,
+            "错误: Plain 确认/卸载期间目标硬件身份或容量发生变化，疑似换盘，拒绝写入",
+        ));
+    }
+    let transaction = diskio::WriteTransactionPlan::from_plain_provision(&prepared.write_plan)
+        .map_err(|message| err(EXIT_TARGET, format!("错误: Plain 事务计划无效: {message}")))?;
+    diskio::execute_write_transaction(dev, &transaction)?;
+
+    let mbr = dev
+        .read_sector(0)
+        .map_err(|error| err(EXIT_IO, format!("错误: Plain 写后读取 MBR 失败: {error}")))?;
+    if mbr.as_slice() != prepared.write_plan.mbr {
+        return Err(err(EXIT_IO, "错误: Plain 写后 MBR 与计划不一致"));
+    }
+    let verify_lba3 = dev
+        .read_sector(3)
+        .map_err(|error| err(EXIT_IO, format!("错误: Plain 写后读取 LBA3 失败: {error}")))?;
+    if verify_lba3.as_slice() != &prepared.source_metadata[3 * SECTOR..4 * SECTOR] {
+        return Err(err(
+            EXIT_IO,
+            "错误: Plain 写后 LBA3 未保持 byte-for-byte 一致",
+        ));
+    }
+    let lba7 = dev
+        .read_sector(7)
+        .map_err(|error| err(EXIT_IO, format!("错误: Plain 写后读取 LBA7 失败: {error}")))?;
+    let lba12 = dev
+        .read_sector(12)
+        .map_err(|error| err(EXIT_IO, format!("错误: Plain 写后读取 LBA12 失败: {error}")))?;
+    if crate::provision::DiskProvisionKind::from_sectors(&lba7, &lba12, &prepared.device_id)
+        != crate::provision::DiskProvisionKind::Plain
+    {
+        return Err(err(EXIT_IO, "错误: Plain 写后重新识别仍为 EDP 模式"));
+    }
+    Ok(())
+}
+
 pub fn capture_manufacturer_lba3(
     dev: &mut dyn SectorDev,
     prepared: &mut PreparedNewProvision,
@@ -1656,6 +1818,43 @@ mod tests {
             self.sectors.insert(lba, data.to_vec());
             Ok(())
         }
+    }
+
+    #[test]
+    fn plain_prewrite_snapshot_rejects_stale_lba7_metadata() {
+        let total_sectors = 100_000;
+        let plan = PlainProvisionPlan::default_for_disk(total_sectors).unwrap();
+        let write_plan = build_plain_provision_write_plan(&plan, None, &[0x1234_5678]).unwrap();
+        let probe = crate::platform::HardwareProbe {
+            vid: Some(0x3535),
+            pid: Some(0x6300),
+            transport: crate::platform::NativeTransport::Uas,
+            inquiry: None,
+        };
+        let mut source_metadata = vec![0u8; 13 * SECTOR];
+        source_metadata[3 * SECTOR..4 * SECTOR].fill(0xa5);
+        let prepared = PreparedPlainProvision {
+            disk: 4,
+            device_id: "disk&ven_aigo&prod_u335".into(),
+            plan,
+            write_plan,
+            source_kind: crate::provision::DiskProvisionKind::Plain,
+            source_lce_start_lba: None,
+            source_metadata: source_metadata.clone(),
+            expected_probe: probe,
+        };
+        let mut dev = MemoryDev::default();
+        for lba in 0..13u32 {
+            dev.sectors.insert(
+                lba,
+                source_metadata[lba as usize * SECTOR..(lba as usize + 1) * SECTOR].to_vec(),
+            );
+        }
+
+        verify_reopened_snapshot(&mut dev, &prepared.source_metadata).unwrap();
+        dev.sectors.get_mut(&7).unwrap()[0] ^= 1;
+        let error = verify_reopened_snapshot(&mut dev, &prepared.source_metadata).unwrap_err();
+        assert!(error.msg.contains("LBA7"));
     }
 
     fn format_test_plan(mode: OfficialPartitionMode, key: &[u8; 16]) -> OfficialProvisionPlan {

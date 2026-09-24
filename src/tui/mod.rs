@@ -911,21 +911,35 @@ fn run_loop(resume: Option<state::WriteIntent>) -> io::Result<LoopExit> {
                                         state.provision_plain_delete_selected_partition();
                                     }
                                     ct_event::KeyCode::Enter => {
-                                        if state.provision().kind == state::ProvisionKind::Plain {
-                                            state.provision_prepare_plain();
-                                            continue;
-                                        }
                                         let Some(disk) = state.selected_device_disk() else {
                                             state.provision_mut().message = Some(
                                                 "目标 USB 已不存在，请返回设备页重新选择。".into(),
                                             );
                                             continue;
                                         };
+                                        if state.provision().kind == state::ProvisionKind::Plain {
+                                            match state.provision_plain_plan() {
+                                                Ok(plan) => {
+                                                    state.provision_set_planning();
+                                                    if let Err(message) = tasks
+                                                        .request_plain_provision_plan(disk, plan)
+                                                    {
+                                                        state.provision_finish_plan(Err(
+                                                            message.to_string()
+                                                        ));
+                                                    }
+                                                }
+                                                Err(message) => {
+                                                    state.provision_mut().message = Some(message);
+                                                }
+                                            }
+                                            continue;
+                                        }
                                         match state.provision_request() {
                                             Ok(request) => {
                                                 state.provision_set_planning();
-                                                if let Err(message) = tasks
-                                                    .request_provision_plan(disk, Some(request))
+                                                if let Err(message) =
+                                                    tasks.request_provision_plan(disk, request)
                                                 {
                                                     state.provision_finish_plan(Err(
                                                         message.to_string()

@@ -755,7 +755,7 @@ fn plain_add_gap_fill_and_delete_never_move_other_partitions() {
 }
 
 #[test]
-fn plain_plan_rejects_overlap_and_review_is_read_only() {
+fn plain_plan_rejects_overlap_and_fill_produces_valid_layout() {
     use edpcli::provision::CapacityInputMode;
 
     let mut state = AppState::new();
@@ -772,19 +772,9 @@ fn plain_plan_rejects_overlap_and_review_is_read_only() {
     state.provision_mut().plain_form.partitions[1].start_lba = "40000".into();
     state.provision_mut().field_selected = 5;
     assert!(state.provision_fill_selected_capacity());
-    state.provision_prepare_plain();
-    assert_eq!(state.provision().stage, ProvisionStage::Review);
-    assert!(matches!(
-        state.provision().prepared,
-        Some(edpcli::tui::state::ProvisionPrepared::Plain(_))
-    ));
-    state.provision_begin_confirm();
-    assert_eq!(state.provision().stage, ProvisionStage::Review);
-    assert!(state
-        .provision()
-        .message
-        .as_deref()
-        .is_some_and(|message| message.contains("只读计划")));
+    let plan = state.provision_plain_plan().unwrap();
+    assert_eq!(plan.partitions.len(), 2);
+    assert!(plan.partitions[0].end_lba().unwrap() < plan.partitions[1].start_lba);
 }
 
 #[test]

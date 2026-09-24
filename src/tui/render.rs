@@ -1254,12 +1254,28 @@ fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppSta
             ];
             if let Some(prepared) = provision.prepared.as_ref() {
                 match prepared {
-                    ProvisionPrepared::Plain(plan) => {
+                    ProvisionPrepared::Plain(prepared) => {
+                        let plan = &prepared.plan;
                         lines.push(Line::from(format!(
-                            "普通盘只读计划 · {} 个 MBR 主分区 · {} sectors",
+                            "目标: disk{} · 恢复普通盘 · {} 个 MBR 主分区 · {} sectors",
+                            prepared.disk,
                             plan.partitions.len(),
                             plan.total_sectors
                         )));
+                        lines.push(Line::from(format!(
+                            "来源状态: {}   来源 LCE cleanup: {}",
+                            prepared.source_kind.short_name(),
+                            prepared
+                                .source_lce_start_lba
+                                .map(|lba| format!("LBA{lba}..{}", lba + 5))
+                                .unwrap_or_else(|| "无".into())
+                        )));
+                        lines.push(Line::from(format!(
+                            "事务触碰: {} sectors   最高写入 LBA: {}",
+                            prepared.write_plan.touched_sector_count(),
+                            prepared.write_plan.highest_touched_lba().unwrap_or(0)
+                        )));
+                        lines.push(Line::from("LBA3 已从目标盘捕获并绑定；写入前将再次复核。"));
                         for (index, part) in plan.partitions.iter().enumerate() {
                             lines.push(Line::from(format!(
                                 "P{} LBA{}..{} · {} sectors · {} · 卷标:{}",
@@ -1280,7 +1296,7 @@ fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppSta
                             )));
                         }
                         lines.push(Line::from(Span::styled(
-                            "Phase 4 仅生成只读计划；Plain 物理写盘尚未启用。",
+                            "将清除 EDP 协议状态并重建上述普通分区；这不是安全擦除。",
                             warning(),
                         )));
                     }
@@ -1405,21 +1421,12 @@ fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppSta
                 lines.push(Line::from(Span::styled(safe(message), success())));
             }
             lines.push(Line::from(""));
-            if matches!(provision.prepared, Some(ProvisionPrepared::Plain(_))) {
-                lines.push(Line::from(vec![
-                    Span::styled("Esc", warning()),
-                    Span::raw(" 返回修改   "),
-                    Span::styled("只读", secondary()),
-                    Span::raw(" Plain 写盘将在通用事务阶段启用"),
-                ]));
-            } else {
-                lines.push(Line::from(vec![
-                    Span::styled("Enter", danger()),
-                    Span::raw(" 进入最终 YES 确认   "),
-                    Span::styled("Esc", warning()),
-                    Span::raw(" 返回修改"),
-                ]));
-            }
+            lines.push(Line::from(vec![
+                Span::styled("Enter", danger()),
+                Span::raw(" 进入最终 YES 确认   "),
+                Span::styled("Esc", warning()),
+                Span::raw(" 返回修改"),
+            ]));
             frame.render_widget(
                 Paragraph::new(lines)
                     .block(
