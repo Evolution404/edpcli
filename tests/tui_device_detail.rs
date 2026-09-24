@@ -16,6 +16,7 @@ fn device() -> Row {
         denied: false,
         probe_error: None,
         is_nopwd: false,
+        provision_kind: edpcli::provision::DiskProvisionKind::Plain,
         partitions: None,
     }
 }

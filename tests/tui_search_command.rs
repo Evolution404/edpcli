@@ -21,6 +21,7 @@ fn device(disk: u32, user: &str, dept: &str) -> Row {
         denied: false,
         probe_error: None,
         is_nopwd: false,
+        provision_kind: edpcli::provision::DiskProvisionKind::Plain,
         partitions: None,
     }
 }

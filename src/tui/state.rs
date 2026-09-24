@@ -201,17 +201,15 @@ pub enum ProvisionKind {
     Mode1,
     Mode2,
     Mode3,
-    Convert,
     Offline,
 }
 
 impl ProvisionKind {
-    pub const ALL: [Self; 6] = [
+    pub const ALL: [Self; 5] = [
         Self::Mode0,
         Self::Mode1,
         Self::Mode2,
         Self::Mode3,
-        Self::Convert,
         Self::Offline,
     ];
 
@@ -221,7 +219,7 @@ impl ProvisionKind {
             Self::Mode1 => Some(1),
             Self::Mode2 => Some(2),
             Self::Mode3 => Some(3),
-            Self::Convert | Self::Offline => None,
+            Self::Offline => None,
         }
     }
 
@@ -231,7 +229,6 @@ impl ProvisionKind {
             Self::Mode1 => "模式 1 · 启动/交换二合一",
             Self::Mode2 => "模式 2 · 整盘加密",
             Self::Mode3 => "模式 3 · 内外网双分区",
-            Self::Convert => "现有官方盘 · 严格免密改造",
             Self::Offline => "离线工具 · LBA 快照转换",
         }
     }
@@ -239,10 +236,9 @@ impl ProvisionKind {
     pub const fn description(self) -> &'static str {
         match self {
             Self::Mode0 => "type1 启动区 + type2 交换区 + type4 保密区",
-            Self::Mode1 => "type2 二合一区 + type4 保密区",
+            Self::Mode1 => "type2 二合一区 + type4 保密区；按原盘精确几何判断数据保留",
             Self::Mode2 => "兼容 type1 + type4 整盘加密布局",
             Self::Mode3 => "type1 + type2 内外网双分区",
-            Self::Convert => "保留原 type4 几何/密钥，仅重建前部明文 exFAT",
             Self::Offline => "不碰真盘：快照目录 → 免密转换计划 / 可选导出扇区",
         }
     }
@@ -250,6 +246,9 @@ impl ProvisionKind {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ProvisionStage {
+    SelectDisk,
+    BackupPrompt,
+    BackupSaving,
     Menu,
     Form,
     Planning,
@@ -282,7 +281,6 @@ impl ProvisionSizeMode {
 #[derive(Debug, Clone)]
 pub enum ProvisionPrepared {
     New(Box<crate::application::provision::PreparedNewProvision>),
-    Convert(Box<crate::application::provision::PreparedPasswordlessConversion>),
 }
 
 #[derive(Debug, Clone)]
@@ -594,7 +592,7 @@ impl AppState {
 
     fn device_matches_query(row: &crate::disk_scan::Row, query: &str) -> bool {
         let text = format!(
-            "disk{} {} {} {}:{} {} {} {}",
+            "disk{} {} {} {}:{} {} {} {} {} {}",
             row.disk,
             row.device_id.as_deref().unwrap_or_default(),
             row.onlyid.as_deref().unwrap_or_default(),
@@ -602,24 +600,23 @@ impl AppState {
             row.pid,
             row.user.as_deref().unwrap_or_default(),
             row.dept.as_deref().unwrap_or_default(),
-            row.proto
+            row.proto,
+            row.provision_kind.short_name(),
+            row.provision_kind.full_name(),
         );
         text.to_ascii_lowercase().contains(query)
     }
 
     fn backup_matches_query(row: &crate::application::BackupWorkspaceItem, query: &str) -> bool {
         let text = format!(
-            "{} {} {} {} {} {}",
+            "{} {} {} {} {} {} {}",
             row.file_name,
             row.display_time,
             row.onlyid.as_deref().unwrap_or_default(),
             row.user.as_deref().unwrap_or_default(),
             row.dept.as_deref().unwrap_or_default(),
-            if row.is_nopwd {
-                "nopwd 免密"
-            } else {
-                "encrypted 加密"
-            }
+            row.provision_kind.short_name(),
+            row.provision_kind.full_name(),
         );
         text.to_ascii_lowercase().contains(query)
     }
@@ -1781,8 +1778,82 @@ impl AppState {
         self.provision.menu_selected = selected;
         self.provision.kind = ProvisionKind::ALL[selected];
         if self.workspace == Workspace::Provision {
-            self.set_item_count(ProvisionKind::ALL.len());
-            self.selected = selected;
+            if self.pinned_disk.is_some() {
+                self.set_item_count(ProvisionKind::ALL.len());
+                self.selected = selected;
+            } else {
+                self.provision.stage = ProvisionStage::SelectDisk;
+                self.set_item_count(self.provision_selectable_devices().count());
+                self.selected = 0;
+            }
+        }
+    }
+
+    pub fn provision_backup_summary(&self) -> String {
+        let Some(device) = self.selected_device() else {
+            return "未固定目标 USB，无法判断历史保存记录".into();
+        };
+        if self.backup_scan_pending {
+            return "正在扫描历史保存记录…".into();
+        }
+        let matches = device.onlyid.as_ref().map_or_else(Vec::new, |onlyid| {
+            self.backups
+                .iter()
+                .filter(|backup| backup.onlyid.as_ref() == Some(onlyid))
+                .collect::<Vec<_>>()
+        });
+        let count = matches.len().max(device.n_baks);
+        if count == 0 {
+            "此盘此前没有保存记录".into()
+        } else {
+            let latest = matches
+                .iter()
+                .map(|backup| backup.display_time.as_str())
+                .max()
+                .unwrap_or("时间未知");
+            format!("此盘此前已保存 {count} 份 · 最近 {latest}")
+        }
+    }
+
+    pub fn provision_skip_backup(&mut self) {
+        if self.provision.stage != ProvisionStage::BackupPrompt {
+            return;
+        }
+        self.provision.stage = ProvisionStage::Menu;
+        self.provision.message = Some("已选择不保存当前盘，继续选择制盘模式。".into());
+        self.set_item_count(ProvisionKind::ALL.len());
+        self.selected = self
+            .provision
+            .menu_selected
+            .min(ProvisionKind::ALL.len().saturating_sub(1));
+    }
+
+    pub fn provision_begin_backup_save(&mut self) {
+        if self.provision.stage == ProvisionStage::BackupPrompt {
+            self.provision.stage = ProvisionStage::BackupSaving;
+            self.provision.message = Some("正在保存当前盘…".into());
+            self.critical_operation = true;
+        }
+    }
+
+    pub fn provision_finish_backup_save(&mut self, result: Result<(), String>) {
+        self.critical_operation = false;
+        match result {
+            Ok(()) => {
+                self.provision.stage = ProvisionStage::Menu;
+                self.provision.message = Some("当前盘保存完成；继续选择制盘模式。".into());
+                self.set_item_count(ProvisionKind::ALL.len());
+                self.selected = self
+                    .provision
+                    .menu_selected
+                    .min(ProvisionKind::ALL.len().saturating_sub(1));
+            }
+            Err(message) => {
+                self.provision.stage = ProvisionStage::BackupPrompt;
+                self.provision.message = Some(message);
+                self.set_item_count(2);
+                self.selected = 0;
+            }
         }
     }
 
@@ -1823,6 +1894,12 @@ impl AppState {
     pub fn provision_begin_selected(&mut self) -> ProvisionKind {
         let index = self.selected.min(ProvisionKind::ALL.len() - 1);
         let kind = ProvisionKind::ALL[index];
+        if kind != ProvisionKind::Offline && self.selected_device().is_none() {
+            self.provision.stage = ProvisionStage::SelectDisk;
+            self.provision.message = Some("请先在制盘页明确选择 USB 目标盘。".into());
+            self.set_item_count(self.provision_selectable_devices().count());
+            return kind;
+        }
         self.provision.menu_selected = index;
         self.provision.kind = kind;
         self.provision.field_selected = 0;
@@ -1830,9 +1907,7 @@ impl AppState {
         self.provision.message = None;
         self.provision.prepared = None;
         self.provision.offline_result = None;
-        if kind == ProvisionKind::Convert {
-            self.provision.stage = ProvisionStage::Planning;
-        } else if kind == ProvisionKind::Offline {
+        if kind == ProvisionKind::Offline {
             self.provision.stage = ProvisionStage::OfflineForm;
         } else {
             let defaults = self.selected_device().map(|row| {
@@ -2219,7 +2294,7 @@ impl AppState {
             ProvisionKind::Mode1 => &[1, 2],
             ProvisionKind::Mode2 => &[2],
             ProvisionKind::Mode3 => &[0, 1],
-            ProvisionKind::Convert | ProvisionKind::Offline => &[],
+            ProvisionKind::Offline => &[],
         }
     }
 
@@ -2351,7 +2426,7 @@ impl AppState {
             ProvisionKind::Mode2 => parse_mib(&self.provision.form.encrypt_mib)?,
             ProvisionKind::Mode3 => parse_mib(&self.provision.form.boot_mib)?
                 .checked_add(parse_mib(&self.provision.form.share_mib)?)?,
-            ProvisionKind::Convert | ProvisionKind::Offline => return None,
+            ProvisionKind::Offline => return None,
         };
         let describe = |prefix: &str, sectors: u64| {
             let mib = sectors / SECTORS_PER_MIB;
@@ -2589,7 +2664,9 @@ impl AppState {
             boot_mib,
             boot_sectors,
             share_mib,
+            share_sectors: None,
             encrypt_mib,
+            encrypt_sectors: None,
             label_id: self.provision.form.label_id.trim().to_string(),
             user: self.provision.form.user.trim().to_string(),
             dept: self.provision.form.dept.trim().to_string(),
@@ -2624,11 +2701,7 @@ impl AppState {
                 self.provision.message = None;
             }
             Err(message) => {
-                self.provision.stage = if self.provision.kind == ProvisionKind::Convert {
-                    ProvisionStage::Menu
-                } else {
-                    ProvisionStage::Form
-                };
+                self.provision.stage = ProvisionStage::Form;
                 self.provision.message = Some(message);
             }
         }
@@ -2678,7 +2751,6 @@ impl AppState {
         }
         let prepared = match self.provision.prepared.as_ref()? {
             ProvisionPrepared::New(prepared) => prepared.as_ref().clone(),
-            ProvisionPrepared::Convert(_) => return None,
         };
         let path = std::path::PathBuf::from(path);
         self.provision.stage = ProvisionStage::Exporting;
@@ -2784,6 +2856,16 @@ impl AppState {
         }
         self.devices = devices;
         self.device_scan_pending = false;
+        if self.workspace == Workspace::Provision {
+            if self.pinned_disk.is_none() {
+                self.provision.stage = ProvisionStage::SelectDisk;
+                self.set_item_count(self.provision_selectable_devices().count());
+            } else if self.selected_device().is_none() {
+                self.pinned_disk = None;
+                self.provision.stage = ProvisionStage::SelectDisk;
+                self.set_item_count(self.provision_selectable_devices().count());
+            }
+        }
         if self.workspace == Workspace::Devices {
             self.rebuild_workspace_filter();
             if let Some(disk) = selected_disk {
@@ -2896,6 +2978,38 @@ impl AppState {
         }
     }
 
+    fn provision_selectable_devices(&self) -> impl Iterator<Item = &crate::disk_scan::Row> {
+        self.devices
+            .iter()
+            .filter(|row| row.proto == "USB" && !row.denied && row.probe_error.is_none())
+    }
+
+    pub fn provision_device_at(&self, index: usize) -> Option<&crate::disk_scan::Row> {
+        self.provision_selectable_devices().nth(index)
+    }
+
+    pub fn provision_select_disk(&mut self) -> Option<u32> {
+        if self.workspace != Workspace::Provision
+            || self.provision.stage != ProvisionStage::SelectDisk
+        {
+            return None;
+        }
+        let disk = self.provision_device_at(self.selected)?.disk;
+        self.pinned_disk = Some(disk);
+        self.provision.stage = ProvisionStage::BackupPrompt;
+        self.provision.message = None;
+        self.selected = 0;
+        self.set_item_count(2);
+        Some(disk)
+    }
+
+    pub fn provision_begin_offline(&mut self) {
+        self.provision.kind = ProvisionKind::Offline;
+        self.provision.stage = ProvisionStage::OfflineForm;
+        self.provision.message = None;
+        self.provision.offline_result = None;
+    }
+
     pub fn selected_device_disk(&self) -> Option<u32> {
         self.selected_device().map(|row| row.disk)
     }
@@ -2960,8 +3074,11 @@ impl AppState {
         if self.workspace == workspace {
             return;
         }
-        if self.workspace == Workspace::Devices && workspace != Workspace::Devices {
+        if self.workspace == Workspace::Devices && workspace == Workspace::Backups {
             self.pinned_disk = self.selected_device().map(|row| row.disk);
+        }
+        if workspace == Workspace::Provision {
+            self.pinned_disk = None;
         }
         self.clear_search_matches();
         self.search_query.clear();
@@ -2974,7 +3091,11 @@ impl AppState {
         let count = match workspace {
             Workspace::Devices => self.devices.len(),
             Workspace::Backups => self.backups.len(),
-            Workspace::Provision => ProvisionKind::ALL.len(),
+            Workspace::Provision => {
+                self.provision.stage = ProvisionStage::SelectDisk;
+                self.provision.message = None;
+                self.provision_selectable_devices().count()
+            }
         };
         self.set_item_count(count);
     }
@@ -3055,11 +3176,7 @@ impl AppState {
                         self.provision.confirmation.clear();
                     }
                     ProvisionStage::Review => {
-                        self.provision.stage = if self.provision.kind == ProvisionKind::Convert {
-                            ProvisionStage::Menu
-                        } else {
-                            ProvisionStage::Form
-                        };
+                        self.provision.stage = ProvisionStage::Form;
                     }
                     ProvisionStage::ExportPath => self.provision_cancel_export(),
                     ProvisionStage::Exporting => {
@@ -3074,7 +3191,12 @@ impl AppState {
                     ProvisionStage::Form | ProvisionStage::Planning | ProvisionStage::Result => {
                         self.provision_reset();
                     }
-                    ProvisionStage::Menu => {}
+                    ProvisionStage::BackupSaving => {
+                        self.notice = Some("正在保存当前盘，请等待完成。".into());
+                    }
+                    ProvisionStage::SelectDisk
+                    | ProvisionStage::BackupPrompt
+                    | ProvisionStage::Menu => {}
                 }
                 return StateEffect::None;
             }

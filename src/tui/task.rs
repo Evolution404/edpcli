@@ -149,6 +149,10 @@ enum WorkerResult {
         generation: u64,
         result: Result<crate::tui::state::ProvisionPrepared, String>,
     },
+    ProvisionBackup {
+        operation_id: OperationId,
+        result: Result<(), String>,
+    },
     ProvisionProgress {
         operation_id: OperationId,
         message: String,
@@ -193,6 +197,7 @@ pub struct TaskUpdates {
     pub backup_prune_plan: Option<Result<crate::tui::state::BackupPrunePrepared, String>>,
     pub backup_prune_execute: Option<(OperationId, Result<usize, String>)>,
     pub provision_plan: Option<Result<crate::tui::state::ProvisionPrepared, String>>,
+    pub provision_backup: Option<(OperationId, Result<(), String>)>,
     pub provision_progress: Option<(OperationId, String)>,
     pub provision_write: Option<(OperationId, Result<String, String>)>,
     pub provision_export: Option<Result<PathBuf, String>>,
@@ -219,6 +224,7 @@ impl TaskUpdates {
             || self.backup_prune_plan.is_some()
             || self.backup_prune_execute.is_some()
             || self.provision_plan.is_some()
+            || self.provision_backup.is_some()
             || self.provision_progress.is_some()
             || self.provision_write.is_some()
             || self.provision_export.is_some()
@@ -767,6 +773,67 @@ impl TaskHub {
         Ok(operation_id)
     }
 
+    pub fn request_provision_backup(
+        &mut self,
+        disk: u32,
+        expected_identity: crate::tui::state::ExpectedIdentity,
+        backup_dir: PathBuf,
+    ) -> Result<OperationId, &'static str> {
+        let operation_id = self.begin_operation()?;
+        let tx = self.tx.clone();
+        self.critical_worker = Some(std::thread::spawn(move || {
+            let result = catch_unwind(AssertUnwindSafe(|| {
+                let runner = SysRunner;
+                crate::application::write::guard_usb_disk(&runner, disk)
+                    .map_err(|error| error.msg)?;
+                let path = crate::diskio::raw_path(disk);
+                let mut dev = crate::diskio::FileDev::open_rdonly(&path)
+                    .map_err(|error| format!("错误: 无法只读打开 {path}: {error}"))?;
+                crate::application::write::verify_expected_identity(
+                    &runner,
+                    disk,
+                    expected_identity.onlyid.as_deref(),
+                    expected_identity.device_id.as_deref(),
+                    &mut dev,
+                )
+                .map_err(|error| error.msg)?;
+
+                struct ProvisionBackupPrompter;
+                impl crate::application::write::Prompter for ProvisionBackupPrompter {
+                    fn prompt_line(&mut self, _msg: &str) -> String {
+                        String::new()
+                    }
+                    fn confirm_yes(&mut self, _msg: &str) -> bool {
+                        true
+                    }
+                    fn output(&mut self, _msg: &str) {}
+                }
+
+                let mut prompt = ProvisionBackupPrompter;
+                let mut ctx = crate::application::write::Ctx {
+                    runner: &runner,
+                    clock: &crate::diskio::SystemClock,
+                    prompt: &mut prompt,
+                    backup_dir,
+                };
+                crate::application::write::backup_create_level_flow(disk, &mut ctx, &mut dev, false)
+                    .map(|_| ())
+                    .map_err(|error| error.msg)
+            }))
+            .unwrap_or_else(|payload| {
+                Err(format!(
+                    "制盘前保存 worker 异常终止: {}",
+                    panic_message(payload)
+                ))
+            });
+            let _ = tx.send(WorkerResult::ProvisionBackup {
+                operation_id,
+                result,
+            });
+        }));
+        Ok(operation_id)
+    }
+
     pub fn request_apply_preview(
         &mut self,
         disk: u32,
@@ -1036,36 +1103,19 @@ impl TaskHub {
         std::thread::spawn(move || {
             let result = catch_unwind(AssertUnwindSafe(|| {
                 let runner = SysRunner;
-                if kind == crate::tui::state::ProvisionKind::Convert {
-                    let path = crate::diskio::raw_path(disk);
-                    let mut dev = crate::diskio::FileDev::open_rdonly(&path)
-                        .map_err(|error| format!("错误: 无法只读打开 {path}: {error}"))?;
-                    crate::application::provision::prepare_passwordless_conversion(
-                        &runner, disk, &mut dev,
-                    )
-                    .map(|prepared| {
-                        crate::tui::state::ProvisionPrepared::Convert(Box::new(prepared))
-                    })
-                    .map_err(|error| error.msg)
-                } else {
-                    let request =
-                        request.ok_or_else(|| "错误: 新盘制盘缺少表单参数".to_string())?;
-                    let mut prepared = crate::application::provision::prepare_new_provision(
-                        &runner, disk, &request,
-                    )
+                let path = crate::diskio::raw_path(disk);
+                let mut dev = crate::diskio::FileDev::open_rdonly(&path)
+                    .map_err(|error| format!("错误: 无法只读打开 {path}: {error}"))?;
+                let _ = kind;
+                let request = request.ok_or_else(|| "错误: 新盘制盘缺少表单参数".to_string())?;
+                let mut prepared =
+                    crate::application::provision::prepare_new_provision(&runner, disk, &request)
+                        .map_err(|error| error.msg)?;
+                crate::application::provision::capture_manufacturer_lba3(&mut dev, &mut prepared)
                     .map_err(|error| error.msg)?;
-                    let path = crate::diskio::raw_path(disk);
-                    let mut dev = crate::diskio::FileDev::open_rdonly(&path)
-                        .map_err(|error| format!("错误: 无法只读打开 {path}: {error}"))?;
-                    crate::application::provision::capture_manufacturer_lba3(
-                        &mut dev,
-                        &mut prepared,
-                    )
-                    .map_err(|error| error.msg)?;
-                    Ok(crate::tui::state::ProvisionPrepared::New(Box::new(
-                        prepared,
-                    )))
-                }
+                Ok(crate::tui::state::ProvisionPrepared::New(Box::new(
+                    prepared,
+                )))
             }))
             .unwrap_or_else(|payload| {
                 Err(format!(
@@ -1142,7 +1192,7 @@ impl TaskHub {
     pub fn request_provision_write(
         &mut self,
         prepared: crate::tui::state::ProvisionPrepared,
-        backup_dir: PathBuf,
+        _backup_dir: PathBuf,
     ) -> Result<OperationId, &'static str> {
         let operation_id = self.begin_operation()?;
         let tx = self.tx.clone();
@@ -1179,51 +1229,6 @@ impl TaskHub {
                             }
                             lines.join("\n")
                         })
-                        .map_err(|error| error.msg)
-                    }
-                    crate::tui::state::ProvisionPrepared::Convert(prepared) => {
-                        let path = crate::diskio::raw_path(prepared.disk);
-                        let mut dev = crate::diskio::FileDev::open_rdonly(&path)
-                            .map_err(|error| format!("错误: 无法只读打开 {path}: {error}"))?;
-
-                        struct ConfirmedPrompter;
-                        impl crate::application::write::Prompter for ConfirmedPrompter {
-                            fn prompt_line(&mut self, _msg: &str) -> String {
-                                String::new()
-                            }
-                            fn confirm_yes(&mut self, _msg: &str) -> bool {
-                                true
-                            }
-                            fn output(&mut self, _msg: &str) {}
-                        }
-
-                        let _ = tx.send(WorkerResult::ProvisionProgress {
-                            operation_id,
-                            message: "正在创建写前元数据备份…".into(),
-                        });
-                        let mut prompt = ConfirmedPrompter;
-                        let mut ctx = crate::application::write::Ctx {
-                            runner: &runner,
-                            clock: &crate::diskio::SystemClock,
-                            prompt: &mut prompt,
-                            backup_dir,
-                        };
-                        crate::application::write::backup_create_flow(
-                            prepared.disk,
-                            &mut ctx,
-                            &mut dev,
-                        )
-                        .map_err(|error| error.msg)?;
-
-                        let _ = tx.send(WorkerResult::ProvisionProgress {
-                            operation_id,
-                            message: "写前备份完成；正在重建前部 exFAT 并提交 LBA7/LBA12/LBA0…"
-                                .into(),
-                        });
-                        crate::application::provision::commit_passwordless_conversion(
-                            &runner, &mut dev, &prepared,
-                        )
-                        .map(|()| "免密改造：成功，读回验证通过。".into())
                         .map_err(|error| error.msg)
                     }
                 }
@@ -1400,6 +1405,14 @@ impl TaskHub {
                     self.provision_single_flight.finish();
                     if self.provision_generation.is_current(generation) {
                         updates.provision_plan = Some(result);
+                    }
+                }
+                WorkerResult::ProvisionBackup {
+                    operation_id,
+                    result,
+                } => {
+                    if self.finish_operation(operation_id) {
+                        updates.provision_backup = Some((operation_id, result));
                     }
                 }
                 WorkerResult::ProvisionProgress {

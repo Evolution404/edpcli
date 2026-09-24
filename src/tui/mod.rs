@@ -562,6 +562,14 @@ fn run_loop(resume: Option<state::WriteIntent>) -> io::Result<LoopExit> {
                     state.set_backup_scan_pending(true);
                 }
             }
+            if let Some((_operation_id, result)) = updates.provision_backup {
+                let success = result.is_ok();
+                state.provision_finish_backup_save(result);
+                if success {
+                    tasks.request_backup_scan(backup_dir.clone());
+                    state.set_backup_scan_pending(true);
+                }
+            }
             if let Some(result) = updates.provision_plan {
                 state.provision_finish_plan(result);
             }
@@ -829,6 +837,80 @@ fn run_loop(resume: Option<state::WriteIntent>) -> io::Result<LoopExit> {
                     if state.workspace() == state::Workspace::Provision {
                         use state::ProvisionStage;
                         match state.provision().stage {
+                            ProvisionStage::SelectDisk => {
+                                match key.code {
+                                    ct_event::KeyCode::Up | ct_event::KeyCode::BackTab => {
+                                        let _ = state.navigate(NavCommand::Up, 2);
+                                    }
+                                    ct_event::KeyCode::Down | ct_event::KeyCode::Tab => {
+                                        let _ = state.navigate(NavCommand::Down, 2);
+                                    }
+                                    ct_event::KeyCode::Enter => {
+                                        if state.provision_select_disk().is_none() {
+                                            state.set_notice("请选择可读取的 USB 整盘目标。");
+                                        }
+                                    }
+                                    ct_event::KeyCode::Char('o') => state.provision_begin_offline(),
+                                    ct_event::KeyCode::Esc => {
+                                        let _ = state.navigate(NavCommand::WorkspaceDevices, 1);
+                                    }
+                                    _ => {}
+                                }
+                                continue;
+                            }
+                            ProvisionStage::BackupPrompt => {
+                                match key.code {
+                                    ct_event::KeyCode::Up | ct_event::KeyCode::BackTab => {
+                                        let _ = state.navigate(NavCommand::Up, 2);
+                                    }
+                                    ct_event::KeyCode::Down | ct_event::KeyCode::Tab => {
+                                        let _ = state.navigate(NavCommand::Down, 2);
+                                    }
+                                    ct_event::KeyCode::Enter => {
+                                        if state.selected() == 0 {
+                                            let Some((disk, onlyid, device_id)) =
+                                                state.selected_device().map(|row| {
+                                                    (
+                                                        row.disk,
+                                                        row.onlyid.clone(),
+                                                        row.device_id.clone(),
+                                                    )
+                                                })
+                                            else {
+                                                state.set_notice(
+                                                    "目标 USB 已不存在，请返回设备页重新选择。",
+                                                );
+                                                continue;
+                                            };
+                                            let identity =
+                                                state::ExpectedIdentity { onlyid, device_id };
+                                            state.provision_begin_backup_save();
+                                            if let Err(message) = tasks.request_provision_backup(
+                                                disk,
+                                                identity,
+                                                backup_dir.clone(),
+                                            ) {
+                                                state.provision_finish_backup_save(Err(
+                                                    message.to_string()
+                                                ));
+                                            }
+                                        } else {
+                                            state.provision_skip_backup();
+                                        }
+                                    }
+                                    ct_event::KeyCode::Esc => {
+                                        let _ = state.navigate(NavCommand::WorkspaceDevices, 1);
+                                    }
+                                    _ => {}
+                                }
+                                continue;
+                            }
+                            ProvisionStage::BackupSaving => {
+                                if key.code == ct_event::KeyCode::Esc {
+                                    state.set_notice("正在保存当前盘，请等待完成。");
+                                }
+                                continue;
+                            }
                             ProvisionStage::Menu => {
                                 if key.code == ct_event::KeyCode::Enter {
                                     let selected_kind = state::ProvisionKind::ALL
@@ -838,20 +920,11 @@ fn run_loop(resume: Option<state::WriteIntent>) -> io::Result<LoopExit> {
                                         && disk.is_none()
                                     {
                                         state.set_notice(
-                                            "物理制盘/改造需要先在设备页选定一个 USB 目标。",
+                                            "物理制盘需要先在制盘页明确选择 USB 目标。",
                                         );
                                         continue;
                                     }
-                                    let kind = state.provision_begin_selected();
-                                    if kind == state::ProvisionKind::Convert {
-                                        if let Err(message) = tasks.request_provision_plan(
-                                            disk.expect("physical provision requires disk"),
-                                            kind,
-                                            None,
-                                        ) {
-                                            state.provision_finish_plan(Err(message.to_string()));
-                                        }
-                                    }
+                                    state.provision_begin_selected();
                                     continue;
                                 }
                             }
@@ -1332,9 +1405,7 @@ fn run_loop(resume: Option<state::WriteIntent>) -> io::Result<LoopExit> {
                                                     NavCommand::WorkspaceProvision,
                                                     viewport_height,
                                                 );
-                                                let _ = state
-                                                    .navigate(NavCommand::Bottom, viewport_height);
-                                                state.provision_begin_selected();
+                                                state.provision_begin_offline();
                                             } else {
                                                 let effect = dispatch_nav_command(
                                                     &mut state,

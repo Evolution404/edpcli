@@ -100,7 +100,6 @@ fn provision_kind_style(kind: ProvisionKind) -> Style {
         ProvisionKind::Mode1 => Color::LightMagenta,
         ProvisionKind::Mode2 => Color::LightYellow,
         ProvisionKind::Mode3 => Color::LightGreen,
-        ProvisionKind::Convert => Color::LightBlue,
         ProvisionKind::Offline => Color::LightRed,
     };
     Style::default().fg(color).add_modifier(Modifier::BOLD)
@@ -111,10 +110,8 @@ fn device_status_style(row: &crate::disk_scan::Row) -> Style {
         warning()
     } else if row.probe_error.is_some() {
         danger()
-    } else if row.device_id.is_none() {
+    } else if row.provision_kind == crate::provision::DiskProvisionKind::Plain {
         muted()
-    } else if row.is_nopwd {
-        success()
     } else {
         accent()
     }
@@ -127,12 +124,8 @@ fn device_status(row: &crate::disk_scan::Row) -> String {
         "需要管理员权限".into()
     } else if let Some(error) = &row.probe_error {
         format!("读取异常: {}", safe(error))
-    } else if row.device_id.is_none() {
-        "非 cems 盘".into()
-    } else if row.is_nopwd {
-        "cems · 免密".into()
     } else {
-        "cems".into()
+        row.provision_kind.full_name().into()
     }
 }
 
@@ -256,7 +249,7 @@ fn draw_devices(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState
                     Cell::from(device_status(row)).style(device_status_style(row)),
                 ])
             });
-        let header = TableRow::new(["设备", "容量", "总线", "VID:PID", "姓名", "部门", "状态"])
+        let header = TableRow::new(["设备", "容量", "总线", "VID:PID", "姓名", "部门", "盘型"])
             .style(accent());
         let table = Table::new(
             rows,
@@ -267,7 +260,7 @@ fn draw_devices(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState
                 Constraint::Length(11),
                 Constraint::Length(12),
                 Constraint::Min(18),
-                Constraint::Length(14),
+                Constraint::Length(23),
             ],
         )
         .header(header)
@@ -290,7 +283,7 @@ fn draw_devices(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState
             let content_width = detail_area.width.saturating_sub(2) as usize;
             let mut lines = vec![
                 Line::from(vec![
-                    Span::styled("状态  ", muted()),
+                    Span::styled("盘型  ", muted()),
                     Span::styled(
                         device_status(row),
                         device_status_style(row).add_modifier(Modifier::BOLD),
@@ -388,8 +381,6 @@ fn draw_backups(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState
         .constraints([Constraint::Length(3), Constraint::Min(4)])
         .split(list_area);
 
-    let nopwd_count = state.backups().iter().filter(|row| row.is_nopwd).count();
-    let original_count = state.backups().len().saturating_sub(nopwd_count);
     let summary_parts = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([Constraint::Min(40), Constraint::Length(38)])
@@ -398,10 +389,6 @@ fn draw_backups(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState
         Paragraph::new(Line::from(vec![
             Span::styled("总计 ", muted()),
             Span::styled(state.backups().len().to_string(), accent()),
-            Span::styled("  ·  免密快照 ", muted()),
-            Span::styled(nopwd_count.to_string(), success()),
-            Span::styled("  ·  原盘备份 ", muted()),
-            Span::styled(original_count.to_string(), accent()),
             Span::styled("  ·  已选 ", muted()),
             Span::styled(state.backup_selection_count().to_string(), warning()),
         ]))
@@ -500,12 +487,7 @@ fn draw_backups(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState
                     }),
                     Cell::from(backup.index.to_string()).style(accent()),
                     Cell::from(safe(&backup.display_time)),
-                    Cell::from(if backup.is_nopwd {
-                        "免密状态"
-                    } else {
-                        "加密原盘"
-                    })
-                    .style(if backup.is_nopwd { success() } else { accent() }),
+                    Cell::from(backup.provision_kind.short_name()).style(accent()),
                     Cell::from(
                         backup
                             .user
@@ -524,14 +506,14 @@ fn draw_backups(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState
                 ])
             });
         let header =
-            TableRow::new(["选", "#", "时间", "状态", "姓名", "部门", "健康"]).style(accent());
+            TableRow::new(["选", "#", "时间", "盘型", "姓名", "部门", "健康"]).style(accent());
         let table = Table::new(
             rows,
             [
                 Constraint::Length(3),
                 Constraint::Length(4),
                 Constraint::Length(17),
-                Constraint::Length(10),
+                Constraint::Length(23),
                 Constraint::Length(12),
                 Constraint::Min(22),
                 Constraint::Length(11),
@@ -560,15 +542,8 @@ fn draw_backups(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState
                     Span::raw(safe(&backup.display_time)),
                 ]),
                 Line::from(vec![
-                    Span::styled("状态  ", muted()),
-                    Span::styled(
-                        if backup.is_nopwd {
-                            "免密状态"
-                        } else {
-                            "加密原盘"
-                        },
-                        if backup.is_nopwd { success() } else { accent() },
-                    ),
+                    Span::styled("盘型  ", muted()),
+                    Span::styled(backup.provision_kind.full_name(), accent()),
                 ]),
                 Line::from(format!(
                     "姓名  {}",
@@ -605,11 +580,7 @@ fn draw_backups(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState
             ));
             lines.extend([
                 Line::from(""),
-                Line::from(if backup.is_nopwd {
-                    "提示：这是免密状态快照；还原后不会回到加密原盘。"
-                } else {
-                    "提示：这是加密原盘备份，可用于恢复原始状态。"
-                }),
+                Line::from("提示：EDPB 保存协议与选定元数据范围，不保证包含普通分区全部用户文件。"),
                 Line::from(""),
                 Line::from(Span::styled(
                     "可用操作",
@@ -676,7 +647,11 @@ fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppSta
             Line::from("不读取、不卸载、不写入任何物理磁盘。"),
             Line::from("输入来自已导出的 LBA 快照目录。"),
         ]
-    } else if let Some(row) = state.selected_device() {
+    } else if let Some(row) = if provision.stage == ProvisionStage::SelectDisk {
+        state.provision_device_at(state.selected())
+    } else {
+        state.selected_device()
+    } {
         vec![
             Line::from(vec![
                 Span::styled(format!("disk{}", row.disk), accent()),
@@ -692,7 +667,7 @@ fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppSta
                 Span::styled(format!("{}:{}", safe(&row.vid), safe(&row.pid)), muted()),
             ]),
             Line::from(vec![
-                Span::styled("状态  ", muted()),
+                Span::styled("盘型  ", muted()),
                 Span::styled(device_status(row), device_status_style(row)),
             ]),
             Line::from(vec![
@@ -707,7 +682,7 @@ fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppSta
     } else {
         vec![
             Line::from(Span::styled("未固定目标 USB", danger())),
-            Line::from("物理制盘前请返回“设备”页选中目标盘。"),
+            Line::from("请在左侧列表选择可用 USB 目标盘。"),
         ]
     };
 
@@ -749,7 +724,7 @@ fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppSta
                         Line::from("• 写前固定硬件身份/容量"),
                         Line::from("• MBR 最后提交"),
                         Line::from("• 协议写入失败回滚；格式化失败保留制盘"),
-                        Line::from("• 免密改造不移动/重加密 type4"),
+                        Line::from("• 保留分区保持原位置与密钥材料"),
                     ]
                 })
                 .block(
@@ -773,6 +748,112 @@ fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppSta
     }
 
     match provision.stage {
+        ProvisionStage::SelectDisk => {
+            let rows = (0..state.item_count()).filter_map(|index| {
+                let row = state.provision_device_at(index)?;
+                Some(TableRow::new(vec![
+                    Cell::from(format!("disk{}", row.disk)),
+                    Cell::from(format!("{:.2} GiB", row.size as f64 / 1_073_741_824.0)),
+                    Cell::from(format!("{}:{}", safe(&row.vid), safe(&row.pid))),
+                    Cell::from(device_status(row)),
+                    Cell::from(safe(row.onlyid.as_deref().unwrap_or("—"))),
+                ]))
+            });
+            let table = Table::new(
+                rows,
+                [
+                    Constraint::Length(9),
+                    Constraint::Length(12),
+                    Constraint::Length(13),
+                    Constraint::Min(16),
+                    Constraint::Length(15),
+                ],
+            )
+            .header(TableRow::new(["设备", "容量", "USB 身份", "盘型", "onlyid"]).style(accent()))
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title("制盘 · 先选择 USB 目标"),
+            )
+            .row_highlight_style(selected())
+            .highlight_symbol("▶ ");
+            let mut table_state = ratatui::widgets::TableState::default();
+            if state.item_count() > 0 {
+                table_state.select(Some(state.selected()));
+            }
+            frame.render_stateful_widget(table, main_area, &mut table_state);
+        }
+        ProvisionStage::BackupPrompt => {
+            let choices = ["先保存当前盘，再选择制盘模式", "不保存，直接选择制盘模式"];
+            let mut lines = vec![
+                Line::from(Span::styled("制盘前是否保存当前盘？", secondary())),
+                Line::from(""),
+                Line::from(Span::styled(
+                    safe(&state.provision_backup_summary()),
+                    warning(),
+                )),
+                Line::from("保存会创建当前盘的 EDPB 元数据备份，不会修改 U 盘。"),
+                Line::from(""),
+            ];
+            for (index, choice) in choices.iter().enumerate() {
+                lines.push(Line::from(if index == state.selected() {
+                    vec![
+                        Span::styled("▶ ", selected()),
+                        Span::styled(*choice, selected()),
+                    ]
+                } else {
+                    vec![Span::raw("  "), Span::raw(*choice)]
+                }));
+            }
+            lines.extend([
+                Line::from(""),
+                Line::from(vec![
+                    Span::styled("↑/↓", accent()),
+                    Span::raw(" 选择   "),
+                    Span::styled("Enter", success()),
+                    Span::raw(" 确认   "),
+                    Span::styled("Esc", warning()),
+                    Span::raw(" 返回设备页"),
+                ]),
+            ]);
+            if let Some(message) = &provision.message {
+                lines.push(Line::from(Span::styled(safe(message), danger())));
+            }
+            frame.render_widget(
+                Paragraph::new(lines)
+                    .block(
+                        Block::default()
+                            .borders(Borders::ALL)
+                            .border_style(secondary())
+                            .title("制盘前保存"),
+                    )
+                    .wrap(Wrap { trim: true }),
+                main_area,
+            );
+        }
+        ProvisionStage::BackupSaving => {
+            frame.render_widget(
+                Paragraph::new(vec![
+                    Line::from(Span::styled("◈ 正在保存当前盘", secondary())),
+                    Line::from(""),
+                    Line::from(safe(
+                        provision
+                            .message
+                            .as_deref()
+                            .unwrap_or("正在创建制盘前 EDPB 备份…"),
+                    )),
+                    Line::from("完成前不会进入制盘模式选择。"),
+                ])
+                .alignment(Alignment::Center)
+                .block(
+                    Block::default()
+                        .borders(Borders::ALL)
+                        .border_style(secondary())
+                        .title("保存当前盘"),
+                ),
+                main_area,
+            );
+        }
         ProvisionStage::Menu => {
             let rows = ProvisionKind::ALL
                 .into_iter()
@@ -990,30 +1071,6 @@ fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppSta
                             Span::styled("E", secondary()),
                             Span::raw(" 导出与该目标绑定的稀疏制盘镜像"),
                         ]));
-                    }
-                    ProvisionPrepared::Convert(prepared) => {
-                        let plan = &prepared.conversion.plan;
-                        lines.extend([
-                            Line::from(format!(
-                                "目标: disk{}  {}",
-                                prepared.disk,
-                                safe(&prepared.device_id)
-                            )),
-                            Line::from(format!(
-                                "前部重建: LBA{}..{} → 明文 exFAT",
-                                plan.front_start_lba,
-                                plan.encrypt_start_lba.saturating_sub(1)
-                            )),
-                            Line::from(format!(
-                                "type4 保持: LBA{} / {} bytes",
-                                plan.encrypt_start_lba, plan.encrypt_size_bytes
-                            )),
-                            Line::from(format!("事务触碰: {} sectors", prepared.patch.len())),
-                            Line::from(Span::styled(
-                                "注意：当前不会迁移原 type1/type2 用户文件。",
-                                warning(),
-                            )),
-                        ]);
                     }
                 }
             }
@@ -2484,6 +2541,11 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
                 "Tab 页面 · j/k 移动 · Space 勾选 · X 批删 · i/I 检查 · v 校验 · R 恢复 · D 单删 · q 退出".to_string()
             }
             Workspace::Provision => match state.provision().stage {
+                ProvisionStage::SelectDisk => "制盘选盘：↑/↓ 选择 USB 盘  ·  Enter 固定目标  ·  Esc 返回设备页".to_string(),
+                ProvisionStage::BackupPrompt => {
+                    "制盘前保存：↑/↓ 选择  ·  Enter 确认  ·  Esc 返回设备页".to_string()
+                }
+                ProvisionStage::BackupSaving => "正在保存当前盘…".to_string(),
                 ProvisionStage::Menu => {
                     "Tab 页面  ·  j/k 选择方案  ·  Enter 打开  ·  r 刷新目标  ·  :provision 直达  ·  ? 帮助  ·  q 退出".to_string()
                 }

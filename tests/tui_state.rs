@@ -1,5 +1,6 @@
 use edpcli::tui::state::{
-    AppState, InputMode, NavCommand, ProvisionForm, ProvisionKind, ProvisionSizeMode, StateEffect,
+    AppState, InputMode, NavCommand, ProvisionForm, ProvisionKind, ProvisionSizeMode,
+    ProvisionStage, StateEffect,
 };
 
 fn device(size: u64) -> edpcli::disk_scan::Row {
@@ -17,8 +18,71 @@ fn device(size: u64) -> edpcli::disk_scan::Row {
         denied: false,
         probe_error: None,
         is_nopwd: false,
+        provision_kind: edpcli::provision::DiskProvisionKind::Plain,
         partitions: None,
     }
+}
+
+#[test]
+fn provision_has_four_physical_modes_plus_offline_and_prompts_for_backup_first() {
+    assert_eq!(
+        ProvisionKind::ALL,
+        [
+            ProvisionKind::Mode0,
+            ProvisionKind::Mode1,
+            ProvisionKind::Mode2,
+            ProvisionKind::Mode3,
+            ProvisionKind::Offline,
+        ]
+    );
+
+    let mut row = device(64_000_000_000);
+    row.n_baks = 2;
+    let mut state = AppState::new();
+    state.replace_devices(vec![row]);
+    state.navigate(NavCommand::WorkspaceProvision, 20);
+    assert_eq!(state.provision().stage, ProvisionStage::SelectDisk);
+    assert_eq!(state.item_count(), 1);
+    assert!(state.selected_device_disk().is_none());
+    assert_eq!(state.provision_select_disk(), Some(6));
+    assert_eq!(state.provision().stage, ProvisionStage::BackupPrompt);
+    assert!(state.provision_backup_summary().contains("已保存 2 份"));
+
+    state.provision_skip_backup();
+    assert_eq!(state.provision().stage, ProvisionStage::Menu);
+    assert_eq!(state.item_count(), ProvisionKind::ALL.len());
+}
+
+#[test]
+fn provision_backup_prompt_only_enters_menu_after_save_finishes() {
+    let mut state = AppState::new();
+    state.replace_devices(vec![device(64_000_000_000)]);
+    state.navigate(NavCommand::WorkspaceProvision, 20);
+    assert_eq!(state.provision().stage, ProvisionStage::SelectDisk);
+    state.provision_select_disk();
+    assert!(state.provision_backup_summary().contains("没有保存记录"));
+
+    state.provision_begin_backup_save();
+    assert_eq!(state.provision().stage, ProvisionStage::BackupSaving);
+    state.provision_finish_backup_save(Ok(()));
+    assert_eq!(state.provision().stage, ProvisionStage::Menu);
+    assert_eq!(state.item_count(), ProvisionKind::ALL.len());
+}
+
+#[test]
+fn provision_requires_a_new_explicit_usb_selection_after_other_workspace_selection() {
+    let mut state = AppState::new();
+    state.replace_devices(vec![device(64_000_000_000)]);
+    assert_eq!(state.selected_device_disk(), Some(6));
+    state.navigate(NavCommand::WorkspaceProvision, 20);
+    assert_eq!(state.provision().stage, ProvisionStage::SelectDisk);
+    assert!(state.selected_device_disk().is_none());
+    state.provision_begin_selected();
+    assert_eq!(state.provision().stage, ProvisionStage::SelectDisk);
+    assert_eq!(state.provision_select_disk(), Some(6));
+    state.provision_skip_backup();
+    state.provision_begin_selected();
+    assert_eq!(state.provision().stage, ProvisionStage::Form);
 }
 
 #[test]
@@ -100,6 +164,8 @@ fn provision_prefers_scanned_onlyid_and_generates_candidate_only_when_missing() 
     let mut state = AppState::new();
     state.replace_devices(vec![device(64_000_000_000)]);
     state.navigate(NavCommand::WorkspaceProvision, 20);
+    state.provision_select_disk();
+    state.provision_skip_backup();
     state.provision_begin_selected();
     assert_eq!(state.provision().form.label_id, "1402259934");
 
@@ -117,6 +183,8 @@ fn provision_manual_ranges_follow_remaining_capacity_and_ratio_mode_fills_usable
     let mut state = AppState::new();
     state.replace_devices(vec![device(64_000_000_000)]);
     state.navigate(NavCommand::WorkspaceProvision, 20);
+    state.provision_select_disk();
+    state.provision_skip_backup();
     assert_eq!(state.provision_begin_selected(), ProvisionKind::Mode0);
 
     let boot_hint = state
@@ -158,6 +226,8 @@ fn mode0_defaults_share_to_remaining_space_once_without_linking_fields() {
     let mut state = AppState::new();
     state.replace_devices(vec![device(64_000_000_000)]);
     state.navigate(NavCommand::WorkspaceProvision, 20);
+    state.provision_select_disk();
+    state.provision_skip_backup();
     assert_eq!(state.provision_begin_selected(), ProvisionKind::Mode0);
 
     let total_sectors = 64_000_000_000u64 / 512;
@@ -210,6 +280,8 @@ fn mode0_capacity_hint_reports_overflow_without_rebalancing_other_fields() {
     let mut state = AppState::new();
     state.replace_devices(vec![device(64_000_000_000)]);
     state.navigate(NavCommand::WorkspaceProvision, 20);
+    state.provision_select_disk();
+    state.provision_skip_backup();
     state.provision_begin_selected();
     let original_encrypt = state.provision().form.encrypt_mib.clone();
     state.provision_mut().form.share_mib = "999999999".into();

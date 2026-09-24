@@ -611,6 +611,7 @@ fn fake_entry(name: &str, onlyid: &str, mtime: i64, is_nopwd: bool) -> BackupEnt
         path: std::path::PathBuf::from(name),
         mtime,
         is_nopwd,
+        provision_kind: edpcli::provision::DiskProvisionKind::Plain,
         sha256_ok: Sha256Status::Ok,
         size_ok: true,
         lba8: None,

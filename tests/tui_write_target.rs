@@ -24,6 +24,7 @@ fn device(disk: u32) -> Row {
         denied: false,
         probe_error: None,
         is_nopwd: false,
+        provision_kind: edpcli::provision::DiskProvisionKind::Plain,
         partitions: None,
     }
 }
@@ -38,6 +39,7 @@ fn backup(index: usize, name: &str) -> BackupWorkspaceItem {
         user: None,
         dept: None,
         is_nopwd: false,
+        provision_kind: edpcli::provision::DiskProvisionKind::Plain,
         sha256_status: Sha256Status::Ok,
         size_ok: true,
         content_sha256: Some(

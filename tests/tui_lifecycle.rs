@@ -7,6 +7,26 @@ use edpcli::tui::{
 };
 use ratatui::{backend::TestBackend, Terminal};
 
+fn usb_device() -> edpcli::disk_scan::Row {
+    edpcli::disk_scan::Row {
+        disk: 6,
+        size: 64_000_000_000,
+        vid: "0dd8".into(),
+        pid: "2005".into(),
+        proto: "USB".into(),
+        device_id: None,
+        onlyid: None,
+        dept: None,
+        user: None,
+        n_baks: 0,
+        denied: false,
+        probe_error: None,
+        is_nopwd: false,
+        provision_kind: edpcli::provision::DiskProvisionKind::Plain,
+        partitions: None,
+    }
+}
+
 #[test]
 fn tui_fails_closed_without_an_interactive_tty() {
     let output = Command::new(env!("CARGO_BIN_EXE_edpcli"))
@@ -39,6 +59,7 @@ fn redraw_handles_small_and_large_terminal_sizes_without_panicking() {
 #[test]
 fn three_workspaces_cycle_and_new_overlays_render_at_all_terminal_sizes() {
     let mut state = AppState::new();
+    state.replace_devices(vec![usb_device()]);
     assert_eq!(state.workspace(), Workspace::Devices);
     state.navigate(NavCommand::NextWorkspace, 20);
     assert_eq!(state.workspace(), Workspace::Backups);
@@ -49,6 +70,8 @@ fn three_workspaces_cycle_and_new_overlays_render_at_all_terminal_sizes() {
     state.navigate(NavCommand::PreviousWorkspace, 20);
     assert_eq!(state.workspace(), Workspace::Provision);
 
+    state.provision_select_disk();
+    state.provision_skip_backup();
     state.provision_begin_selected();
     assert_eq!(state.provision().stage, ProvisionStage::Form);
     for (width, height) in [(40, 10), (80, 24), (160, 60)] {
@@ -70,7 +93,10 @@ fn three_workspaces_cycle_and_new_overlays_render_at_all_terminal_sizes() {
 #[test]
 fn empty_secret_field_renders_input_placeholder_instead_of_black_value() {
     let mut state = AppState::new();
+    state.replace_devices(vec![usb_device()]);
     state.navigate(NavCommand::WorkspaceProvision, 20);
+    state.provision_select_disk();
+    state.provision_skip_backup();
     state.provision_begin_selected();
     state.provision_mut().form.password.clear();
 
@@ -161,13 +187,9 @@ fn apply_and_offline_convert_states_render_and_enforce_preview_before_write() {
 
     let mut offline = AppState::new();
     offline.navigate(NavCommand::WorkspaceProvision, 20);
-    offline.navigate(NavCommand::Bottom, 20);
-    assert_eq!(
-        ProvisionKind::ALL[offline.selected()],
-        ProvisionKind::Offline,
-        "offline tool must remain the sixth provision entry"
-    );
-    assert_eq!(offline.provision_begin_selected(), ProvisionKind::Offline);
+    assert_eq!(offline.provision().stage, ProvisionStage::SelectDisk);
+    offline.provision_begin_offline();
+    assert_eq!(offline.provision().kind, ProvisionKind::Offline);
     assert_eq!(offline.provision().stage, ProvisionStage::OfflineForm);
     assert!(
         offline.selected_device_disk().is_none(),

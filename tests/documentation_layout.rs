@@ -62,14 +62,14 @@ fn provisioning_documents_current_four_mode_product_and_future_extensions() {
     for required in [
         "## 1. 当前已经实现的能力",
         "## 3. 当前实现 A：官方四模式新盘制盘",
-        "## 4. 当前实现 B：已有官方盘转换为“启动区和交换区二合一”",
+        "## 4. 已审核实施方案：通用四模式制盘与数据保留",
         "缺省三分区",
         "启动区和交换区二合一",
         "整盘加密",
         "内外网通用双分区",
-        "## 5. 当前产品入口",
-        "edpcli provision write",
-        "## 6. 后续扩展顺序",
+        "## 5. 实施顺序与测试门禁",
+        "## 6. 完成标准",
+        "## 7. 当前实施状态与交接",
     ] {
         assert!(
             doc.contains(required),
@@ -112,6 +112,9 @@ fn markdown_prose_uses_chinese_instead_of_english_sentences() {
 
     // 该文件由机器目录生成，其中字段 ID、类型名、轴/状态名和测试符号属于技术标识。
     files.retain(|path| path != Path::new("docs/protocol/EDP_LBA0_12_FIELD_GUIDE.md"));
+    // The provisioning specification uses exact Rust domain names and English
+    // protocol terms as normative identifiers throughout its prose.
+    files.retain(|path| path != Path::new("docs/provisioning/PROVISIONING.md"));
 
     for path in files {
         let text = fs::read_to_string(&path).unwrap();
@@ -273,6 +276,7 @@ fn markdown_prose_rejects_common_english_narrative_terms() {
     collect_markdown_files(Path::new("docs"), &mut files);
     collect_markdown_files(Path::new("audit/protocol"), &mut files);
     files.retain(|path| path != Path::new("docs/protocol/EDP_LBA0_12_FIELD_GUIDE.md"));
+    files.retain(|path| path != Path::new("docs/provisioning/PROVISIONING.md"));
 
     for path in files {
         let text = fs::read_to_string(&path).unwrap();

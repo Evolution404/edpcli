@@ -263,6 +263,7 @@ mod tests {
             path: PathBuf::from(name),
             mtime: 1,
             is_nopwd,
+            provision_kind: crate::provision::DiskProvisionKind::Plain,
             sha256_ok: Sha256Status::Ok,
             size_ok: true,
             lba8: None,

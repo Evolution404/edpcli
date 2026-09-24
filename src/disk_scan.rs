@@ -12,6 +12,7 @@ use crate::diskio::{self, find_backups, DiskFacts};
 use crate::identify::identify;
 use crate::inspect::InspectMeta;
 use crate::metainfo;
+use crate::provision::DiskProvisionKind;
 use crate::sectors::{looks_nopwd, parse_lba12, EdpfPartition};
 use crate::sysinfo::{self, CmdRunner};
 
@@ -29,6 +30,7 @@ pub struct Row {
     pub denied: bool,
     pub probe_error: Option<String>,
     pub is_nopwd: bool,
+    pub provision_kind: DiskProvisionKind,
     pub partitions: Option<Vec<EdpfPartition>>,
 }
 
@@ -55,6 +57,7 @@ pub fn scan_disks(
             denied: false,
             probe_error: None,
             is_nopwd: false,
+            provision_kind: DiskProvisionKind::Plain,
             partitions: None,
         };
         if d.proto == "USB" {
@@ -105,6 +108,7 @@ pub fn scan_disks(
                     };
                     row.is_nopwd = looks_nopwd(&read, did).map_err(|e| io::Error::other(e.msg))?;
                     let lba12 = read_exact(12)?;
+                    row.provision_kind = DiskProvisionKind::from_sectors(&lba7, &lba12, did);
                     row.partitions = parse_lba12(&lba12, did);
                     let tag = diskio::lba4_tag16_from(&lba4).ok_or_else(|| {
                         io::Error::new(io::ErrorKind::UnexpectedEof, "LBA4 缺少 16B 身份标签")
@@ -150,12 +154,15 @@ pub fn print_disk_table(rows: &[Row]) -> String {
                 ("需管理员权限才能识别".to_string(), Tone::Dim)
             } else if let Some(error) = &row.probe_error {
                 (format!("读取异常: {}", error), Tone::Yellow)
-            } else if row.device_id.is_none() {
-                ("非 cems 盘".to_string(), Tone::Dim)
-            } else if row.is_nopwd {
-                ("cems盘 [免密]".to_string(), Tone::Green)
             } else {
-                ("cems盘".to_string(), Tone::Plain)
+                (
+                    row.provision_kind.short_name().to_string(),
+                    if row.provision_kind == DiskProvisionKind::Plain {
+                        Tone::Dim
+                    } else {
+                        Tone::Green
+                    },
+                )
             };
             vec![
                 TableCell::left(format!("disk{}", row.disk), Tone::Bold),
@@ -198,7 +205,7 @@ pub fn print_disk_table(rows: &[Row]) -> String {
         })
         .collect::<Vec<_>>();
     out.push_str(&render_table(
-        &["设备", "容量", "总线", "VID:PID", "姓名", "部门", "状态"],
+        &["设备", "容量", "总线", "VID:PID", "姓名", "部门", "盘型"],
         &table_rows,
     ));
 

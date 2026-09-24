@@ -911,6 +911,7 @@ pub struct BackupEntry {
     pub path: PathBuf,
     pub mtime: i64,
     pub is_nopwd: bool,
+    pub provision_kind: crate::provision::DiskProvisionKind,
     pub sha256_ok: Sha256Status,
     pub size_ok: bool,
     /// 扫描时缓存的 LBA8 原始 512B；用于列表/元信息展示，避免随后再次打开同一备份。
@@ -1095,11 +1096,18 @@ pub fn scan_backup_file(path: &Path) -> Option<BackupEntry> {
         (Some(meta), Some(data)) => image_is_nopwd(data, &meta.device_id),
         _ => false,
     };
+    let provision_kind = match (&meta, &raw) {
+        (Some(meta), Some(data)) => {
+            crate::provision::DiskProvisionKind::from_metadata(data, &meta.device_id)
+        }
+        _ => crate::provision::DiskProvisionKind::Plain,
+    };
     Some(BackupEntry {
         meta,
         path: path.to_path_buf(),
         mtime: mtime_epoch(path),
         is_nopwd,
+        provision_kind,
         sha256_ok,
         size_ok,
         lba8,
