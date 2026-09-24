@@ -360,7 +360,7 @@ fn backup_collision_never_overwrites_existing_file() {
 
 #[test]
 fn backup_tagging_by_content() {
-    let Some((conv, did)) = converted_image("netac") else {
+    let Some((conv, did)) = passwordless_image("netac") else {
         eprintln!("跳过: 真实备份不可用");
         return;
     };
@@ -692,7 +692,7 @@ fn verify_and_prune_preview_exit_contract() {
         eprintln!("跳过: 真实备份不可用");
         return;
     };
-    let Some((converted, _)) = converted_image("netac") else {
+    let Some((converted, _)) = passwordless_image("netac") else {
         eprintln!("跳过: 真实备份不可用");
         return;
     };
@@ -1020,7 +1020,7 @@ fn prune_plan_composition_deletes_only_snapshots_beyond_keep() {
         eprintln!("跳过: 真实备份不可用");
         return;
     };
-    let Some((converted, _)) = converted_image("netac") else {
+    let Some((converted, _)) = passwordless_image("netac") else {
         eprintln!("跳过: 真实备份不可用");
         return;
     };

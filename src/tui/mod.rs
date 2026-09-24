@@ -407,7 +407,6 @@ fn palette_action_to_nav(action: command::PaletteAction) -> NavCommand {
         command::PaletteAction::Devices => NavCommand::WorkspaceDevices,
         command::PaletteAction::Backups => NavCommand::WorkspaceBackups,
         command::PaletteAction::Provision => NavCommand::WorkspaceProvision,
-        command::PaletteAction::OfflineConvert => NavCommand::WorkspaceProvision,
         command::PaletteAction::Inspect => NavCommand::OpenInspect,
         command::PaletteAction::AdvancedInspect => NavCommand::OpenAdvancedInspect,
         command::PaletteAction::Restore => NavCommand::BeginRestore,
@@ -603,9 +602,6 @@ fn run_loop(resume: Option<state::WriteIntent>) -> io::Result<LoopExit> {
             }
             if let Some(result) = updates.provision_export {
                 state.provision_finish_export(result);
-            }
-            if let Some(result) = updates.offline_convert {
-                state.offline_finish(result);
             }
             if let Some(result) = updates.inspect {
                 match result {
@@ -806,7 +802,6 @@ fn run_loop(resume: Option<state::WriteIntent>) -> io::Result<LoopExit> {
                                             state.set_notice("请选择可读取的 USB 整盘目标。");
                                         }
                                     }
-                                    ct_event::KeyCode::Char('o') => state.provision_begin_offline(),
                                     ct_event::KeyCode::Esc => {
                                         let _ = state.navigate(NavCommand::Escape, 1);
                                     }
@@ -869,12 +864,8 @@ fn run_loop(resume: Option<state::WriteIntent>) -> io::Result<LoopExit> {
                             }
                             ProvisionStage::Menu => {
                                 if key.code == ct_event::KeyCode::Enter {
-                                    let selected_kind = state::ProvisionKind::ALL
-                                        [state.selected().min(state::ProvisionKind::ALL.len() - 1)];
                                     let disk = state.selected_device_disk();
-                                    if selected_kind != state::ProvisionKind::Offline
-                                        && disk.is_none()
-                                    {
+                                    if disk.is_none() {
                                         state.set_notice(
                                             "物理制盘需要先在制盘页明确选择 USB 目标。",
                                         );
@@ -1058,54 +1049,6 @@ fn run_loop(resume: Option<state::WriteIntent>) -> io::Result<LoopExit> {
                                     state.provision_reset();
                                     continue;
                                 }
-                            }
-                            ProvisionStage::OfflineForm => {
-                                match key.code {
-                                    ct_event::KeyCode::Up => {
-                                        state.offline_move_field(-1);
-                                    }
-                                    ct_event::KeyCode::Down => {
-                                        state.offline_move_field(1);
-                                    }
-                                    ct_event::KeyCode::Backspace => state.offline_backspace(),
-                                    ct_event::KeyCode::Enter => match state.offline_request() {
-                                        Ok(request) => {
-                                            state.offline_start();
-                                            if let Err(message) =
-                                                tasks.request_offline_convert(request)
-                                            {
-                                                state.offline_finish(Err(message.to_string()));
-                                            }
-                                        }
-                                        Err(message) => {
-                                            state.provision_mut().message = Some(message);
-                                        }
-                                    },
-                                    ct_event::KeyCode::Esc => state.provision_reset(),
-                                    ct_event::KeyCode::Char(ch)
-                                        if !key
-                                            .modifiers
-                                            .contains(ct_event::KeyModifiers::CONTROL) =>
-                                    {
-                                        state.offline_push_char(ch);
-                                    }
-                                    _ => {}
-                                }
-                                continue;
-                            }
-                            ProvisionStage::OfflineRunning => {
-                                if key.code == ct_event::KeyCode::Esc {
-                                    state.set_notice("离线转换正在后台执行，请等待完成。");
-                                }
-                                continue;
-                            }
-                            ProvisionStage::OfflineResult => {
-                                match key.code {
-                                    ct_event::KeyCode::Enter => state.offline_back_to_form(),
-                                    ct_event::KeyCode::Esc => state.provision_reset(),
-                                    _ => {}
-                                }
-                                continue;
                             }
                         }
                     }
@@ -1381,13 +1324,7 @@ fn run_loop(resume: Option<state::WriteIntent>) -> io::Result<LoopExit> {
                                             let viewport_height =
                                                 session.terminal.size()?.height.saturating_sub(9)
                                                     as usize;
-                                            if action == command::PaletteAction::OfflineConvert {
-                                                let _ = state.navigate(
-                                                    NavCommand::WorkspaceProvision,
-                                                    viewport_height,
-                                                );
-                                                state.provision_begin_offline();
-                                            } else if action == command::PaletteAction::Provision {
+                                            if action == command::PaletteAction::Provision {
                                                 if state.workspace() != state::Workspace::Devices {
                                                     let _ = state.navigate(
                                                         NavCommand::WorkspaceDevices,

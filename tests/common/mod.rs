@@ -7,7 +7,11 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicU32, Ordering};
 
 use edpcli::common::SECTOR;
-use edpcli::sectors::convert;
+use edpcli::platform::{HardwareProbe, InquiryInfo, NativeTransport};
+use edpcli::provision::{
+    generate_image, OnlyId, ProvisionEntropy, ProvisionMetadata, ProvisionProfile, ProvisionSpec,
+    TargetIdentity,
+};
 use edpcli::sha256::sha256_hex;
 
 pub const FIXTURE_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/protocol");
@@ -61,90 +65,69 @@ pub fn read_fn_of(
     move |lba| Ok(data[lba as usize * SECTOR..(lba as usize + 1) * SECTOR].to_vec())
 }
 
-/// 金标 = 2026-09-16 拆包前单文件版对真实备份的实测输出(与 Python test_sectors.py 逐字一致)
-pub struct Golden {
-    pub share: u64,
-    pub enc_start: u64,
-    pub enc_size: u64,
-    pub crc: u32,
-    pub k0: u32,
-    pub lba9_none: bool,
-    pub lba0: &'static str,
-    pub lba6: &'static str,
-    pub lba7: &'static str,
-    pub lba12: &'static str,
-}
-
-pub fn golden(key: &str) -> Golden {
-    match key {
-        "netac" => Golden {
-            share: 116707265,
-            enc_start: 116707328,
-            enc_size: 3143761920,
-            crc: 0xF1A78819,
-            k0: 0x79BE,
-            lba9_none: false,
-            lba0: "78a2b41a827c97efe9914a7afe5e92d6711c4ad79d60f081752c3e7e8abe92ad",
-            lba6: "dd7dd0487f2888112e9c0df398835eda6bac9dbf5b8fbd2bc1330eba4a90e69c",
-            lba7: "bb9c3408edabe217be11bf6fba62a2951de0588e5c4bb215562e300a896358b9",
-            lba12: "2b3ae3c06962ba2b30d5deac2c7740cac95aa233fb31b4bc2217fe754a887df2",
-        },
-        "lexar" => Golden {
-            share: 231423937,
-            enc_start: 231424000,
-            enc_size: 6234963968,
-            crc: 0x6BBAEEFB,
-            k0: 0x8541,
-            lba9_none: false,
-            lba0: "093f6dc8af363b092c91df79d709983c6f103b9cfb90deb23837d0dbafdc29a5",
-            lba6: "cc66cd15d26a56cc38f8232441655f377d31920cb4b4e5c7b616866ca9ad300a",
-            lba7: "615023be42f14182e6a9d13568bbc158d09571e5978455959d8c216efe9f6adf",
-            lba12: "feaa4b2ca4d56f6300eb3276f9ec64ee9e5eacdcf74fa784464355a52c8055be",
-        },
-        "aigo" => Golden {
-            share: 243115997,
-            enc_start: 243116060,
-            enc_size: 1340720640,
-            crc: 0x2EEB4CE1,
-            k0: 0x620A,
-            lba9_none: true,
-            lba0: "6b85db3f0029e1396f480ad9a2efbada62464ce151f67b46eb789533d55970cf",
-            lba6: "931b1924baca6e39933e4b81379f4e47f6c1af9d7cda4a62fdfe3fc3f371a7e8",
-            lba7: "44f5167f9fd8f7cacda5912e64b46d09bceefb708fa211a14161c6bcaae94238",
-            lba12: "b319aa7a013477fe8778c51dcab719c6db95803992db5bb9df568abae06888b6",
-        },
-        "aigo_size50" => Golden {
-            share: 97656248,
-            enc_start: 243116060,
-            enc_size: 0,
-            crc: 0,
-            k0: 0,
-            lba9_none: true,
-            lba0: "090b9c91e0970a04bd32d4cd8e307ed6fceefdce2e1e18ba1ac29bdc67253606",
-            lba6: "931b1924baca6e39933e4b81379f4e47f6c1af9d7cda4a62fdfe3fc3f371a7e8",
-            lba7: "7e0ddd83d9d340af6ca5b9bc1cfb2acdaef981bdb37a9c0c215f731b27345e97",
-            lba12: "cf1832eaf98505a9cfcdbb7500d2b527a385d5a2f7629cb270fa2c6a55c04327",
-        },
-        _ => panic!("未知金标键 {}", key),
-    }
-}
-
-/// 合成免密盘镜像(原备份 + 改造后 LBA0/6/7/12, LBA9 清零) → (bytes, device_id)。
-pub fn converted_image(key: &str) -> Option<(Vec<u8>, String)> {
-    let data = load_disk_image(key)?;
-    let (_, did) = fixture(key)?;
-    let r = convert(&read_fn_of(&data), did, None, &mut |_| {}).ok()?;
-    let mut conv = data.clone();
-    for (lba, sector) in [
-        (0usize, &r.lba0),
-        (6, &r.lba6),
-        (7, &r.lba7),
-        (12, &r.lba12),
-    ] {
-        conv[lba * SECTOR..(lba + 1) * SECTOR].copy_from_slice(sector);
-    }
-    conv[9 * SECTOR..10 * SECTOR].fill(0);
-    Some((conv, did.to_string()))
+/// 用当前正式 provisioning builder 合成一张结构完整的 mode1 免密元数据镜像。
+/// 这类样本供识别/备份测试使用，不再依赖已废弃的离线转换业务。
+pub fn passwordless_image(key: &str) -> Option<(Vec<u8>, String)> {
+    let (vid, pid, total_sectors, transport, vendor, product, revision, onlyid) = match key {
+        "netac" => (
+            0x0dd8,
+            0x2005,
+            122_880_000,
+            NativeTransport::Uas,
+            "Netac",
+            "OnlyDisk",
+            "",
+            "1402259934",
+        ),
+        "lexar" => (
+            0x21c4,
+            0x0cd1,
+            243_625_984,
+            NativeTransport::Uas,
+            "Lexar",
+            "USB Flash Drive",
+            "",
+            "3164177653",
+        ),
+        "aigo" => (
+            0x3535,
+            0x6300,
+            245_760_000,
+            NativeTransport::Bot,
+            "aigo",
+            "U335",
+            "PMAP",
+            "1987718388",
+        ),
+        _ => return None,
+    };
+    let probe = HardwareProbe {
+        vid: Some(vid),
+        pid: Some(pid),
+        transport,
+        inquiry: Some(InquiryInfo {
+            vendor: vendor.into(),
+            product: product.into(),
+            revision: revision.into(),
+        }),
+    };
+    let target = TargetIdentity::from_probe(&probe, total_sectors).ok()?;
+    let device_id = target.device_id().to_string();
+    let metadata = ProvisionMetadata::new(
+        OnlyId::parse(onlyid).ok()?,
+        "测试",
+        "测试",
+        "江苏电力!SAFE6",
+    )
+    .ok()?;
+    let spec = ProvisionSpec::new(
+        target,
+        metadata,
+        ProvisionProfile::canonical_v1().with_force_change_password(true),
+    )
+    .ok()?;
+    let image = generate_image(&spec, &ProvisionEntropy::new([0u8; 252])).ok()?;
+    Some((image.into_bytes().to_vec(), device_id))
 }
 
 /// 临时目录 guard(Drop 清理)。

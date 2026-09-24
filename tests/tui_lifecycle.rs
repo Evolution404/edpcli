@@ -350,50 +350,6 @@ fn empty_secret_field_renders_input_placeholder_instead_of_black_value() {
 }
 
 #[test]
-fn offline_convert_states_render_without_physical_disk() {
-    use edpcli::tui::state::{OfflineConvertView, ProvisionKind};
-
-    let mut offline = AppState::new();
-    offline.navigate(NavCommand::WorkspaceProvision, 20);
-    assert_eq!(offline.provision().stage, ProvisionStage::SelectDisk);
-    offline.provision_begin_offline();
-    assert_eq!(offline.provision().kind, ProvisionKind::Offline);
-    assert_eq!(offline.provision().stage, ProvisionStage::OfflineForm);
-    assert!(
-        offline.selected_device_disk().is_none(),
-        "offline conversion must not require a physical disk"
-    );
-    for (width, height) in [(40, 10), (80, 24), (160, 60)] {
-        let backend = TestBackend::new(width, height);
-        let mut terminal = Terminal::new(backend).expect("test terminal");
-        terminal
-            .draw(|frame| render::draw(frame, &offline))
-            .unwrap();
-    }
-
-    offline.offline_finish(Ok(OfflineConvertView {
-        reports: vec![edpcli::sectors::ConvertReport::SectorPlan {
-            share: 100,
-            clears_lba9: true,
-        }],
-        share: 100,
-        enc_start: 200,
-        enc_size: 300,
-        crc: 0x1234_5678,
-        k0: 0x9abc,
-        output_dir: None,
-    }));
-    assert_eq!(offline.provision().stage, ProvisionStage::OfflineResult);
-    for (width, height) in [(40, 10), (80, 24), (160, 60)] {
-        let backend = TestBackend::new(width, height);
-        let mut terminal = Terminal::new(backend).expect("test terminal");
-        terminal
-            .draw(|frame| render::draw(frame, &offline))
-            .unwrap();
-    }
-}
-
-#[test]
 fn advanced_inspect_form_and_result_render_across_terminal_sizes() {
     use edpcli::application::inspect::{
         AdvancedInspectItem, AdvancedInspectMode, AdvancedInspectWorkspace,

@@ -1,6 +1,5 @@
 //! 写盘服务类型化进度事件的契约测试:
-//! - `render_event_text` / `render_convert_report` 在无色模式下逐字节锁死 CLI 文本
-//!   (黄金基线，防事件化改造造成输出漂移)；
+//! - `render_event_text` 在无色模式下逐字节锁死 CLI 文本；
 //! - 带 ANSI 的样式渲染仍经 ui::wrap；
 //! - backup-create/restore 实际发出的事件序列(录制型 Prompter)。
 //!
@@ -11,7 +10,6 @@ mod common;
 use edpcli::application::write::render_event_text;
 use edpcli::application::WriteEvent;
 use edpcli::common::METADATA_IMAGE_LEN;
-use edpcli::sectors::{render_convert_report, ConvertReport};
 use edpcli::ui;
 
 fn plain(event: &WriteEvent) -> String {
@@ -24,13 +22,6 @@ fn plain(event: &WriteEvent) -> String {
 fn styled(event: &WriteEvent) -> String {
     ui::set_enabled_for_tests(true);
     let text = render_event_text(event);
-    ui::reset_enabled_for_tests();
-    text
-}
-
-fn plain_convert(report: &ConvertReport) -> String {
-    ui::set_enabled_for_tests(false);
-    let text = render_convert_report(report);
     ui::reset_enabled_for_tests();
     text
 }
@@ -96,62 +87,6 @@ fn render_restore_events() {
 }
 
 #[test]
-fn render_convert_reports() {
-    let identity = ConvertReport::Identity {
-        device_id: "disk&ven_netac".into(),
-        crc: 0x1A2B3C4D,
-        k0: 0x3C4D,
-    };
-    assert_eq!(
-        plain_convert(&identity),
-        "标识  disk&ven_netac  (CRC32 0x1A2B3C4D, K0 0x3C4D)\n"
-    );
-
-    let layout = ConvertReport::Layout {
-        share: 1_000_008,
-        enc_start: 1_000_071,
-        enc_size: 1_000_000_000,
-    };
-    let layout_text = plain_convert(&layout);
-    assert!(layout_text.starts_with("布局\n"), "{layout_text}");
-    for anchor in [
-        "区域",
-        "LBA 范围",
-        "大小",
-        "说明",
-        "Share",
-        "Encrypt",
-        "明文数据区，系统直接挂载读写",
-        "原样保留不动",
-    ] {
-        assert!(layout_text.contains(anchor), "缺 {anchor}: {layout_text}");
-    }
-    assert!(layout_text.ends_with('\n'));
-
-    for clears in [false, true] {
-        let plan = ConvertReport::SectorPlan {
-            share: 1_000_008,
-            clears_lba9: clears,
-        };
-        let plan_text = plain_convert(&plan);
-        assert!(plan_text.starts_with("\n将写入 5 个扇区:\n"), "{plan_text}");
-        assert!(
-            plan_text.contains(if clears {
-                "清零(当前存在)"
-            } else {
-                "已是零，不写"
-            }),
-            "{plan_text}"
-        );
-        assert!(
-            plan_text.contains("不动   LBA4/8/11(盘身份) · 其余保留扇区 · 表尾状态 · LBA12 0x170..0x1FF 明文 · 盘尾区域"),
-            "{plan_text}"
-        );
-        assert!(plan_text.ends_with('\n'));
-    }
-}
-
-#[test]
 fn styled_events_keep_ansi_wrap() {
     let created = styled(&WriteEvent::BackupCreated {
         path: "/b/disk6.bin".into(),
@@ -160,7 +95,7 @@ fn styled_events_keep_ansi_wrap() {
 }
 
 // ══════════════════════════════════════════════════════════════════
-// 事件序列行为测试(进程内，镜像 cli_offline 装配)
+// 事件序列行为测试(进程内，镜像 CLI 写盘安全装配)
 // ══════════════════════════════════════════════════════════════════
 // 辅助项只被下方 macOS 门控的测试使用；非 macOS 目标上必须同样门控，
 // 否则 dead_code 会让 clippy -D warnings 失败。
@@ -230,7 +165,7 @@ fn backup_create_and_restore_dry_run_event_sequence() {
     use edpcli::common::EXIT_OK;
     use edpcli::diskio::FileDev;
 
-    let Some((conv, _did)) = converted_image("netac") else {
+    let Some((conv, _did)) = passwordless_image("netac") else {
         eprintln!("跳过: 真实备份不可用");
         return;
     };

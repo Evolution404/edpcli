@@ -153,10 +153,6 @@ enum WorkerResult {
         generation: u64,
         result: Result<PathBuf, String>,
     },
-    OfflineConvert {
-        generation: u64,
-        result: Result<crate::tui::state::OfflineConvertView, String>,
-    },
 }
 
 enum InspectRequest {
@@ -186,7 +182,6 @@ pub struct TaskUpdates {
     pub provision_progress: Option<(OperationId, String)>,
     pub provision_write: Option<(OperationId, Result<String, String>)>,
     pub provision_export: Option<Result<PathBuf, String>>,
-    pub offline_convert: Option<Result<crate::tui::state::OfflineConvertView, String>>,
 }
 
 impl TaskUpdates {
@@ -210,7 +205,6 @@ impl TaskUpdates {
             || self.provision_progress.is_some()
             || self.provision_write.is_some()
             || self.provision_export.is_some()
-            || self.offline_convert.is_some()
     }
 }
 
@@ -234,7 +228,6 @@ pub struct TaskHub {
     verify_generation: GenerationGate,
     provision_generation: GenerationGate,
     provision_export_generation: GenerationGate,
-    offline_convert_generation: GenerationGate,
     prune_generation: GenerationGate,
     batch_delete_generation: GenerationGate,
     device_single_flight: SingleFlightGate,
@@ -244,7 +237,6 @@ pub struct TaskHub {
     verify_single_flight: SingleFlightGate,
     provision_single_flight: SingleFlightGate,
     provision_export_single_flight: SingleFlightGate,
-    offline_convert_single_flight: SingleFlightGate,
     prune_single_flight: SingleFlightGate,
     batch_delete_single_flight: SingleFlightGate,
     pending_device_scan: Option<PathBuf>,
@@ -275,7 +267,6 @@ impl TaskHub {
             verify_generation: GenerationGate::new(),
             provision_generation: GenerationGate::new(),
             provision_export_generation: GenerationGate::new(),
-            offline_convert_generation: GenerationGate::new(),
             prune_generation: GenerationGate::new(),
             batch_delete_generation: GenerationGate::new(),
             device_single_flight: SingleFlightGate::new(),
@@ -285,7 +276,6 @@ impl TaskHub {
             verify_single_flight: SingleFlightGate::new(),
             provision_single_flight: SingleFlightGate::new(),
             provision_export_single_flight: SingleFlightGate::new(),
-            offline_convert_single_flight: SingleFlightGate::new(),
             prune_single_flight: SingleFlightGate::new(),
             batch_delete_single_flight: SingleFlightGate::new(),
             pending_device_scan: None,
@@ -980,40 +970,6 @@ impl TaskHub {
         Ok(generation)
     }
 
-    pub fn request_offline_convert(
-        &mut self,
-        request: crate::application::offline_convert::OfflineConvertRequest,
-    ) -> Result<u64, &'static str> {
-        if !self.offline_convert_single_flight.try_start() {
-            return Err("已有离线转换正在执行");
-        }
-        let generation = self.offline_convert_generation.begin();
-        let tx = self.tx.clone();
-        std::thread::spawn(move || {
-            let result = catch_unwind(AssertUnwindSafe(|| {
-                let output = crate::application::offline_convert::run(&request)
-                    .map_err(|error| error.msg)?;
-                Ok(crate::tui::state::OfflineConvertView {
-                    reports: output.reports,
-                    share: output.result.share,
-                    enc_start: output.result.enc_start,
-                    enc_size: output.result.enc_size,
-                    crc: output.result.crc,
-                    k0: output.result.k0,
-                    output_dir: output.output_dir,
-                })
-            }))
-            .unwrap_or_else(|payload| {
-                Err(format!(
-                    "离线转换 worker 异常终止: {}",
-                    panic_message(payload)
-                ))
-            });
-            let _ = tx.send(WorkerResult::OfflineConvert { generation, result });
-        });
-        Ok(generation)
-    }
-
     pub fn request_provision_write(
         &mut self,
         prepared: crate::tui::state::ProvisionPrepared,
@@ -1238,12 +1194,6 @@ impl TaskHub {
                     self.provision_export_single_flight.finish();
                     if self.provision_export_generation.is_current(generation) {
                         updates.provision_export = Some(result);
-                    }
-                }
-                WorkerResult::OfflineConvert { generation, result } => {
-                    self.offline_convert_single_flight.finish();
-                    if self.offline_convert_generation.is_current(generation) {
-                        updates.offline_convert = Some(result);
                     }
                 }
             }

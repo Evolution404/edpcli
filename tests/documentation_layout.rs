@@ -67,9 +67,11 @@ fn provisioning_documents_current_four_mode_product_and_future_extensions() {
         "启动区和交换区二合一",
         "整盘加密",
         "内外网通用双分区",
-        "## 5. 实施顺序与测试门禁",
-        "## 6. 完成标准",
-        "## 7. 当前实施状态与交接",
+        "## 5. 实施顺序",
+        "## 6. 测试门禁",
+        "## 7. 完成标准",
+        "## 8. 当前实施状态与交接",
+        "## 9. Inspect 全盘结构化浏览器重构计划",
     ] {
         assert!(
             doc.contains(required),

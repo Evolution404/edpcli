@@ -687,40 +687,31 @@ Real USB acceptance
 - official atomic write：snapshot touched sectors、data/LCE first、LBA1–12 next、MBR last、readback/rollback；
 - first-party sparse exFAT writer/analyzer 与已有 Virtual-HIL 经验。
 
-### 8.3 当前明确需要删除/重构的实现
+### 8.3 已完成阶段（2026-09-25）
 
-当前仍存在旧 Offline Convert：
+- Phase 0 已完成：本计划作为长期事实源独立提交并推送；
+- Phase 1 已完成：字段级输入过滤、容量 `f` 填满、输入框光标、三位小数显示、selected 高亮、section 对齐、最大可设/比例门禁与统一 focus marker 已落地；
+- Phase 2 已完成：Offline Convert 已从 TUI、palette、TaskHub、application service、CLI grammar/help/completion、`sectors.rs` conversion-only 写入 API、专用测试和 README/USAGE 产品文案中删除；
+- 原先依赖旧 `sectors::convert` 合成免密盘的测试夹具已迁移到正式 `provision::generate_image()`，识别/备份测试继续覆盖 mode1 免密样本；
+- `src/sectors.rs` 现在只保留只读盘状态识别与 LBA12 EDPF 解析，元数据写入只有 `provision` 一套正式实现。
 
-- `ProvisionKind::Offline`；
-- Offline TUI form/running/result；
-- palette `convert/offline-convert/offline/oc`；
-- Offline worker/task；
-- `src/application/offline_convert.rs`；
-- CLI `Parsed::Convert`/dispatch；
-- `src/sectors.rs` conversion-specific functions/types；
-- dedicated offline/golden/lifecycle tests 和 README/USAGE 文案。
+### 8.4 Phase 1/2 验证结果
 
-这些不再是兼容面，按 Phase 2 完全删除。通用 parser/crypto/source-profile 能力只有在仍被正式路径使用时才保留。
-
-### 8.4 已确认的 TUI 缺陷
-
-本轮审计确认：
-
-- `provision_push_char()` 当前只拦控制字符，缺少字段级输入过滤；
-- `input_value_window()` 最终通过 `fit_display_width()` 补齐整列，导致 selected 背景拖到行尾；
-- focus marker 不一致：Provision 多处已有 `▶`，但 Devices/Backups table 与 Advanced Inspect Form 等只做背景高亮；
-- 上述缺陷先按 Phase 1 做成全局统一能力，再实现 Plain 动态分区 UI。
+- `cargo check --all-targets` 通过；
+- Phase 2 定向 CLI/TUI/sector/write-event 测试 97/97 通过；
+- 夹具迁移后的 `backup` 27/27、`identify_list` 4/4 通过；
+- 顶层 `convert` 与 palette `offline-convert` 都由回归测试明确保持不可用；
+- README/USAGE 不再把 Offline Convert 描述为产品能力；协议文档只保留其历史验证背景。
 
 ### 8.5 下一步执行顺序
 
-1. 从 Phase 1 开始，测试先行修复通用 TUI 交互；
-2. 小步 commit/push；
-3. Phase 1 全绿后完整删除 Offline Convert；
-4. 引入 `ProvisionTarget::Plain`；
-5. 完成 Plain 只读 UI/planner；
-6. 再泛化 transaction writer 和 exFAT 写盘；
-7. Virtual-HIL；
-8. 最后真实 USB 验收。
+1. Phase 3：引入 `ProvisionTarget::{Plain, Official(...)}`，把目标类型与官方模式解耦；
+2. Phase 4：完成 Plain 动态 1～4 分区 Form/UI/planner，只读验证先行；
+3. Phase 5：生成 Plain MBR/filesystem/cleanup plan；
+4. Phase 6：泛化 touched-sector transaction writer；
+5. Phase 7：Virtual-HIL；
+6. Phase 8：真实 USB 验收；
+7. 并行按第 9 节实施 Inspect 全盘结构化浏览器，但不得复制 CLI/TUI 两套解析后端。
 
 最终产品定义：**edpcli 制盘中心统一面向五种磁盘目标状态，其中 mode0～mode3 是官方 EDP 模式，Plain 是非 EDP 普通盘目标而不是 mode4。所有目标共用同一套选盘、表单、实时布局、Review 和安全事务基础；容量以 sector 为唯一精确真相，UI 提供 MiB/GiB/sector、`f` 填满、字段级输入约束和统一焦点视觉。Plain 复用现有制盘界面并支持1～4个 MBR 普通分区，不自动移动其它分区，不宣称安全擦除。**
 

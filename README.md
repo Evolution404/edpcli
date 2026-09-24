@@ -89,7 +89,6 @@ edpcli inspect raw --disk 4 --lba 240250283-240250288
 edpcli inspect decode --disk 4 --lba 20480 --count 8
 edpcli inspect meta backup.edpb --lba 7,12
 
-edpcli convert --dir ./snapshot --id 'disk&ven_aigo&prod_u335' --out ./converted
 edpcli version
 ```
 
@@ -105,8 +104,7 @@ application/service，不维护第二套业务实现。来自 U 盘元数据、�
 stdout/stderr 输出。
 
 TUI 已覆盖用户业务流程：设备列表/详情、快速检查、高级检查、普通/深度备份、校验、恢复、单条/批量删除、
-keep-N 清理、官方四模式制盘、mode1 对现有 mode0 的保留重制、目标绑定稀疏镜像导出，以及离线 LBA 快照
-转换。在设备页选中 USB 盘按 Enter 进入制盘；选择模式前先明确是否保存当前盘。`i` 是 LBA0–12 快速检查；`I` 可检查任意 LBA 列表/范围或 count，支持 raw/decode/meta、device_id 覆盖与普通目录导出。制盘表单同时暴露完整 PassInfo 策略：初始化密码强制修改、取消密码复杂性验证，以及交换区/保密区密码最大错误次数；可靠注册盘会自动继承四项值，普通盘默认“否、否、255、255”。物理写盘统一遵循“先只读计划/预览，再精确输入 YES”的交互。离线快照转换不打开 raw device。
+keep-N 清理、官方四模式制盘、mode1 对现有 mode0 的保留重制，以及目标绑定稀疏镜像导出。在设备页选中 USB 盘按 Enter 进入制盘；选择模式前先明确是否保存当前盘。`i` 是 LBA0–12 快速检查；`I` 可检查任意 LBA 列表/范围或 count，支持 raw/decode/meta、device_id 覆盖与普通目录导出。制盘表单同时暴露完整 PassInfo 策略：初始化密码强制修改、取消密码复杂性验证，以及交换区/保密区密码最大错误次数；可靠注册盘会自动继承四项值，普通盘默认“否、否、255、255”。物理写盘统一遵循“先只读计划/预览，再精确输入 YES”的交互。
 
 核心键位为 `j/k` 上下选择、`Tab/h/l` 切换标签页、`Enter` 从设备进入制盘、`gg/G` 首尾、`Ctrl-d/Ctrl-u` 半页、
 `/` 搜索、`:` 命令面板、`i` 快速检查、`I` 高级检查、`b/B` 普通/深度备份、`R` Restore、

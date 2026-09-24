@@ -150,7 +150,7 @@ fn registered_identity_prefills_custom_label_and_force_policy_but_remains_editab
 }
 
 #[test]
-fn provision_has_four_physical_modes_plus_offline_and_prompts_for_backup_first() {
+fn provision_has_four_physical_modes_and_prompts_for_backup_first() {
     assert_eq!(
         ProvisionKind::ALL,
         [
@@ -158,7 +158,6 @@ fn provision_has_four_physical_modes_plus_offline_and_prompts_for_backup_first()
             ProvisionKind::Mode1,
             ProvisionKind::Mode2,
             ProvisionKind::Mode3,
-            ProvisionKind::Offline,
         ]
     );
 

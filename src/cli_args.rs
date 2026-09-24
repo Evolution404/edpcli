@@ -125,12 +125,6 @@ pub enum Parsed {
     Inspect(InspectOpts),
     Info(InfoOpts),
     Provision(ProvisionAction),
-    Convert {
-        dir: Option<String>,
-        id: Option<String>,
-        size: Option<f64>,
-        out: Option<String>,
-    },
     Completion {
         shell: Shell,
     },
@@ -177,7 +171,6 @@ pub fn usage_text() -> String {
   provision 制盘：官方四模式新盘与现有盘免密改造\n\
   inspect   高级：检查底层 LBA/hex 数据\n\n\
 其他:\n\
-  convert   高级：离线转换快照\n\
   completion Shell 补全\n\
   version   版本与构建信息\n\
   help      帮助\n\n\
@@ -252,10 +245,6 @@ fn print_topic_help(topic: &str) {
         }
         "list" => println!("{}", bold("用法: edpcli list [--backup-dir D]")),
         "tui" => println!("{}", bold("用法: edpcli tui")),
-        "convert" => println!(
-            "{}",
-            bold("用法: edpcli convert --dir <快照目录> --id <device_id> [--size GB] [--out DIR]")
-        ),
         _ => print_usage(),
     }
 }
@@ -288,13 +277,6 @@ fn parse_disk_spec(s: &str) -> Result<u32, String> {
             crate::platform::disk_selector_syntax()
         )
     })
-}
-
-fn parse_size(s: &str) -> Result<f64, String> {
-    match s.parse::<f64>() {
-        Ok(v) if v.is_finite() && v > 0.0 => Ok(v),
-        _ => Err(format!("错误: --size 须为正数(GB), 得到 {}", s)),
-    }
 }
 
 fn parse_positive_u64(s: &str, flag: &str) -> Result<u64, String> {
@@ -1230,41 +1212,6 @@ pub fn parse_args(argv: &[String]) -> Result<Parsed, String> {
         "run" => Err("错误: v2 已取消 run。请使用: edpcli provision plan".into()),
         "restore" => Err("错误: v2 已取消顶层 restore。请使用: edpcli backup restore".into()),
         "meta" | "metainfo" => Err("错误: v2 已取消 meta/metainfo。请使用: edpcli info".into()),
-        "convert" => {
-            if rest.iter().any(|a| a == "-h" || a == "--help") {
-                return Ok(Parsed::Help {
-                    topic: Some("convert".into()),
-                });
-            }
-            let mut dir = None;
-            let mut id = None;
-            let mut size = None;
-            let mut out = None;
-            let mut i = 0;
-            while i < rest.len() {
-                match flag_name(&rest[i]) {
-                    "--dir" => {
-                        let v = take_value(&rest, &mut i, "--dir")?;
-                        set_once(&mut dir, v, "--dir")?;
-                    }
-                    "--id" => {
-                        let v = take_value(&rest, &mut i, "--id")?;
-                        set_once(&mut id, v, "--id")?;
-                    }
-                    "--size" => {
-                        let v = take_value(&rest, &mut i, "--size")?;
-                        set_once(&mut size, parse_size(&v)?, "--size")?;
-                    }
-                    "--out" => {
-                        let v = take_value(&rest, &mut i, "--out")?;
-                        set_once(&mut out, v, "--out")?;
-                    }
-                    other => return Err(format!("错误: convert 不认识选项 {}", other)),
-                }
-                i += 1;
-            }
-            Ok(Parsed::Convert { dir, id, size, out })
-        }
         other if other.starts_with('-') => {
             Err(format!("错误: 未知选项 {} (首个参数应为子命令)", other))
         }

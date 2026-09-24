@@ -193,7 +193,6 @@ fn provision_kind_style(kind: ProvisionKind) -> Style {
         ProvisionKind::Mode1 => Color::LightMagenta,
         ProvisionKind::Mode2 => Color::LightYellow,
         ProvisionKind::Mode3 => Color::LightGreen,
-        ProvisionKind::Offline => Color::LightRed,
     };
     Style::default().fg(color).add_modifier(Modifier::BOLD)
 }
@@ -752,22 +751,7 @@ fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppSta
     let provision = state.provision();
     let (main_area, sidebar) = workspace_sidebar_layout(area);
 
-    let display_kind = if provision.stage == ProvisionStage::Menu {
-        ProvisionKind::ALL[state.selected().min(ProvisionKind::ALL.len() - 1)]
-    } else {
-        provision.kind
-    };
-    let offline = display_kind == ProvisionKind::Offline;
-    let target_lines = if offline {
-        vec![
-            Line::from(Span::styled(
-                "离线转换模式",
-                provision_kind_style(display_kind),
-            )),
-            Line::from("不读取、不卸载、不写入任何物理磁盘。"),
-            Line::from("输入来自已导出的 LBA 快照目录。"),
-        ]
-    } else if let Some(row) = if provision.stage == ProvisionStage::SelectDisk {
+    let target_lines = if let Some(row) = if provision.stage == ProvisionStage::SelectDisk {
         state.provision_device_at(state.selected())
     } else {
         state.selected_device()
@@ -812,54 +796,28 @@ fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppSta
                 .block(
                     Block::default()
                         .borders(Borders::ALL)
-                        .title(if offline {
-                            "离线工具"
-                        } else {
-                            "固定目标"
-                        })
-                        .title_style(if offline {
-                            provision_kind_style(display_kind)
-                        } else {
-                            accent()
-                        }),
+                        .title("固定目标")
+                        .title_style(accent()),
                 )
                 .wrap(Wrap { trim: true }),
             side_top,
         );
         if let Some(side_bottom) = side_bottom {
             frame.render_widget(
-                Paragraph::new(if offline {
-                    vec![
-                        Line::from(Span::styled("离线边界", provision_kind_style(display_kind))),
-                        Line::from("• 仅读取普通目录中的 LBA*.bin"),
-                        Line::from("• 不打开 raw device"),
-                        Line::from("• 输出为普通文件"),
-                        Line::from("• 与 CLI convert 共用 application service"),
-                    ]
-                } else {
-                    vec![
-                        Line::from(Span::styled("安全不变量", warning())),
-                        Line::from("• 仅允许 USB 整盘目标"),
-                        Line::from("• LBA3 厂商数据原样保留"),
-                        Line::from("• 写前固定硬件身份/容量"),
-                        Line::from("• MBR 最后提交"),
-                        Line::from("• 协议写入失败回滚；格式化失败保留制盘"),
-                        Line::from("• 保留分区保持原位置与密钥材料"),
-                    ]
-                })
+                Paragraph::new(vec![
+                    Line::from(Span::styled("安全不变量", warning())),
+                    Line::from("• 仅允许 USB 整盘目标"),
+                    Line::from("• LBA3 厂商数据原样保留"),
+                    Line::from("• 写前固定硬件身份/容量"),
+                    Line::from("• MBR 最后提交"),
+                    Line::from("• 协议写入失败回滚；格式化失败保留制盘"),
+                    Line::from("• 保留分区保持原位置与密钥材料"),
+                ])
                 .block(
                     Block::default()
                         .borders(Borders::ALL)
-                        .border_style(if offline {
-                            provision_kind_style(provision.kind)
-                        } else {
-                            warning()
-                        })
-                        .title(if offline {
-                            "离线边界"
-                        } else {
-                            "写盘保护"
-                        }),
+                        .border_style(warning())
+                        .title("写盘保护"),
                 )
                 .wrap(Wrap { trim: true }),
                 side_bottom,
@@ -1560,170 +1518,6 @@ fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppSta
                 main_area,
             );
         }
-        ProvisionStage::OfflineForm => {
-            let mut lines = vec![
-                Line::from(Span::styled(
-                    "离线 LBA 快照转换",
-                    provision_kind_style(ProvisionKind::Offline),
-                )),
-                Line::from("等价于 CLI convert；不访问任何物理磁盘。"),
-                Line::from(""),
-            ];
-            for (index, (label, value)) in state.offline_fields().iter().enumerate() {
-                let shown = if value.is_empty() {
-                    match index {
-                        2 => "〈可选：留空自动〉".to_string(),
-                        3 => "〈可选：留空仅预览〉".to_string(),
-                        _ => "〈必填〉".to_string(),
-                    }
-                } else {
-                    safe(value)
-                };
-                lines.push(Line::from(vec![
-                    Span::styled(format!("{:>14}  ", label), muted()),
-                    Span::styled(
-                        shown,
-                        if index == provision.offline_field_selected {
-                            selected()
-                        } else {
-                            Style::default()
-                        },
-                    ),
-                ]));
-            }
-            lines.extend([
-                Line::from(""),
-                Line::from(vec![
-                    Span::styled("↑/↓ Tab", accent()),
-                    Span::raw(" 切字段   "),
-                    Span::styled("直接输入", secondary()),
-                    Span::raw(" 编辑   "),
-                    Span::styled("Enter", success()),
-                    Span::raw(" 执行转换   "),
-                    Span::styled("Esc", warning()),
-                    Span::raw(" 返回"),
-                ]),
-            ]);
-            if let Some(message) = &provision.message {
-                lines.push(Line::from(Span::styled(safe(message), danger())));
-            }
-            frame.render_widget(
-                Paragraph::new(lines)
-                    .block(
-                        Block::default()
-                            .borders(Borders::ALL)
-                            .border_style(provision_kind_style(ProvisionKind::Offline))
-                            .title("离线转换参数"),
-                    )
-                    .wrap(Wrap { trim: false }),
-                main_area,
-            );
-        }
-        ProvisionStage::OfflineRunning => {
-            frame.render_widget(
-                Paragraph::new(vec![
-                    Line::from(Span::styled(
-                        "◈ 正在离线转换",
-                        provision_kind_style(ProvisionKind::Offline),
-                    )),
-                    Line::from(""),
-                    Line::from(safe(
-                        provision
-                            .message
-                            .as_deref()
-                            .unwrap_or("正在读取 LBA 快照并计算转换结果…"),
-                    )),
-                    Line::from("不会访问或修改物理磁盘。"),
-                ])
-                .alignment(Alignment::Center)
-                .block(
-                    Block::default()
-                        .borders(Borders::ALL)
-                        .border_style(provision_kind_style(ProvisionKind::Offline))
-                        .title("离线执行"),
-                ),
-                main_area,
-            );
-        }
-        ProvisionStage::OfflineResult => {
-            let mut lines = vec![
-                Line::from(Span::styled(
-                    "离线转换结果",
-                    provision_kind_style(ProvisionKind::Offline),
-                )),
-                Line::from(""),
-            ];
-            if let Some(view) = &provision.offline_result {
-                lines.extend([
-                    Line::from(format!(
-                        "CRC32: 0x{:08X}    K0: 0x{:08X}",
-                        view.crc, view.k0
-                    )),
-                    Line::from(format!("Share: {} sectors", view.share)),
-                    Line::from(format!(
-                        "Encrypt: start LBA {}  /  {} bytes",
-                        view.enc_start, view.enc_size
-                    )),
-                ]);
-                if let Some(output_dir) = &view.output_dir {
-                    lines.push(Line::from(vec![
-                        Span::styled("产物目录: ", muted()),
-                        Span::styled(safe(&output_dir.display().to_string()), success()),
-                    ]));
-                } else {
-                    lines.push(Line::from(Span::styled(
-                        "仅完成预览；未写出 LBA 文件。",
-                        warning(),
-                    )));
-                }
-                lines.push(Line::from(""));
-                for report in &view.reports {
-                    let text = match report {
-                        crate::sectors::ConvertReport::Identity { device_id, .. } => {
-                            format!("身份: {}", safe(device_id))
-                        }
-                        crate::sectors::ConvertReport::Layout {
-                            share,
-                            enc_start,
-                            enc_size,
-                        } => format!(
-                            "布局: share={share} sectors · enc_start={enc_start} · enc_size={enc_size}"
-                        ),
-                        crate::sectors::ConvertReport::SectorPlan {
-                            clears_lba9, ..
-                        } => format!(
-                            "扇区计划: LBA0/6/7/12{}",
-                            if *clears_lba9 { " + 清零 LBA9" } else { "" }
-                        ),
-                    };
-                    lines.push(Line::from(vec![
-                        Span::styled("• ", accent()),
-                        Span::raw(text),
-                    ]));
-                }
-            } else if let Some(message) = &provision.message {
-                lines.push(Line::from(Span::styled(safe(message), danger())));
-            }
-            lines.extend([
-                Line::from(""),
-                Line::from("Enter 返回参数继续转换 · Esc 返回制盘中心"),
-            ]);
-            frame.render_widget(
-                Paragraph::new(lines)
-                    .block(
-                        Block::default()
-                            .borders(Borders::ALL)
-                            .border_style(if provision.offline_result.is_some() {
-                                success()
-                            } else {
-                                danger()
-                            })
-                            .title("离线转换结果"),
-                    )
-                    .wrap(Wrap { trim: true }),
-                main_area,
-            );
-        }
     }
 }
 
@@ -1732,7 +1526,6 @@ fn draw_command_palette(frame: &mut Frame, area: ratatui::layout::Rect, state: &
         "devices  切到设备",
         "backups  切到备份",
         "provision 制盘/免密改造",
-        "offline-convert 离线 LBA 快照转换",
         "inspect  打开 Inspect",
         "advanced-inspect  任意 LBA / decode / meta / 导出",
         "restore  Restore 安全向导",
@@ -2747,13 +2540,6 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
                 ProvisionStage::Confirm => "输入 YES + Enter 执行  ·  Esc 返回计划".to_string(),
                 ProvisionStage::Running => "安全事务执行中；Esc 不退出，q / Ctrl-C 的退出请求延迟到安全检查点".to_string(),
                 ProvisionStage::Result => "Enter / Esc 返回制盘中心".to_string(),
-                ProvisionStage::OfflineForm => {
-                    "↑/↓ 字段  ·  Tab/Shift-Tab/←/→ 切页面  ·  Enter 离线转换  ·  Esc 返回制盘中心".to_string()
-                }
-                ProvisionStage::OfflineRunning => "离线转换后台执行中…".to_string(),
-                ProvisionStage::OfflineResult => {
-                    "Enter 返回参数  ·  Esc 返回制盘中心".to_string()
-                }
             },
         }
     };

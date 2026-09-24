@@ -5,7 +5,6 @@
 //!   edpcli list                                列出外接盘(只读)
 //!   edpcli info [备份.edpb] [--disk N]          查看设备/备份详情
 //!   edpcli backup restore [备份] [--disk N]    还原
-//!   edpcli convert --dir <快照目录> --id <device_id> [--size GB] [--out <目录>]
 //!
 //! 历史备份可通过 edpcli backup restore 还原。
 
@@ -70,39 +69,6 @@ impl<P: Prompter> Prompter for AlwaysYes<P> {
 // ══════════════════════════════════════════════════════════════════
 pub use crate::disk_scan::{print_disk_table, scan_disks, Row};
 
-/// 离线转换(不碰真盘)。
-pub fn convert_flow(
-    dir: String,
-    id: Option<String>,
-    size: Option<f64>,
-    out: Option<String>,
-) -> i32 {
-    let Some(id) = id else {
-        eprintln!("错误: 离线模式需 --id <device_id>");
-        return EXIT_USAGE;
-    };
-    let request = crate::application::offline_convert::OfflineConvertRequest {
-        source_dir: std::path::PathBuf::from(&dir),
-        device_id: id,
-        size_gb: size,
-        output_dir: out.as_ref().map(std::path::PathBuf::from),
-    };
-    let output = match crate::application::offline_convert::run(&request) {
-        Ok(output) => output,
-        Err(e) => {
-            eprintln!("{}", crate::ui::red(&e.msg));
-            return e.code;
-        }
-    };
-    for report in &output.reports {
-        print!("{}", crate::sectors::render_convert_report(report));
-    }
-    if let Some(out) = output.output_dir {
-        println!("\n产物已写入 {}/", out.display());
-    }
-    EXIT_OK
-}
-
 // ══════════════════════════════════════════════════════════════════
 // 7. 入口
 // ══════════════════════════════════════════════════════════════════
@@ -141,14 +107,7 @@ pub fn run() -> i32 {
                 let topic = argv.first().map(String::as_str).filter(|cmd| {
                     matches!(
                         *cmd,
-                        "list"
-                            | "tui"
-                            | "info"
-                            | "backup"
-                            | "inspect"
-                            | "provision"
-                            | "convert"
-                            | "completion"
+                        "list" | "tui" | "info" | "backup" | "inspect" | "provision" | "completion"
                     )
                 });
                 print_help(topic);
@@ -215,13 +174,6 @@ pub fn run() -> i32 {
             info_flow(&probe, opts)
         }
         Parsed::Provision(action) => provision_flow(&runner, action),
-        Parsed::Convert { dir, id, size, out } => match dir {
-            Some(d) => convert_flow(d, id, size, out),
-            None => {
-                eprintln!("错误: convert 需 --dir <快照目录>");
-                EXIT_USAGE
-            }
-        },
     }
 }
 
@@ -884,21 +836,10 @@ mod tests {
             }
             _ => panic!("应解析为 info"),
         }
-        match parse_args(&[
-            "convert".into(),
-            "--dir".into(),
-            "d".into(),
-            "--id".into(),
-            "i".into(),
-        ])
-        .unwrap()
-        {
-            Parsed::Convert { dir, id, .. } => {
-                assert_eq!(dir.as_deref(), Some("d"));
-                assert_eq!(id.as_deref(), Some("i"));
-            }
-            _ => panic!(),
-        }
+        assert!(
+            parse_args(&["convert".into()]).is_err(),
+            "removed top-level offline convert command must stay absent"
+        );
         match parse_args(&[
             "inspect".into(),
             "meta".into(),
@@ -1255,7 +1196,6 @@ mod tests {
             vec!["backup", "prune", "--keep", "1", "--keep", "2"],
             vec!["info", "--disk", "4", "--disk", "6"],
             vec!["inspect", "meta", "--lba", "1", "--lba", "2"],
-            vec!["convert", "--dir", "a", "--dir", "b", "--id", "x"],
         ] {
             let args: Vec<String> = argv.into_iter().map(str::to_string).collect();
             let err = parse_args(&args).err().expect("单值旗标重复必须报错");

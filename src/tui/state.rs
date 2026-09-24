@@ -178,7 +178,6 @@ pub enum ProvisionKind {
     Mode1,
     Mode2,
     Mode3,
-    Offline,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -191,13 +190,7 @@ pub enum ProvisionBarKind {
 }
 
 impl ProvisionKind {
-    pub const ALL: [Self; 5] = [
-        Self::Mode0,
-        Self::Mode1,
-        Self::Mode2,
-        Self::Mode3,
-        Self::Offline,
-    ];
+    pub const ALL: [Self; 4] = [Self::Mode0, Self::Mode1, Self::Mode2, Self::Mode3];
 
     pub const fn mode(self) -> Option<u8> {
         match self {
@@ -205,7 +198,6 @@ impl ProvisionKind {
             Self::Mode1 => Some(1),
             Self::Mode2 => Some(2),
             Self::Mode3 => Some(3),
-            Self::Offline => None,
         }
     }
 
@@ -215,7 +207,6 @@ impl ProvisionKind {
             Self::Mode1 => "模式 1 · 启动/交换二合一",
             Self::Mode2 => "模式 2 · 整盘加密",
             Self::Mode3 => "模式 3 · 内外网双分区",
-            Self::Offline => "离线工具 · LBA 快照转换",
         }
     }
 
@@ -225,7 +216,6 @@ impl ProvisionKind {
             Self::Mode1 => "启动/交换二合一区 + 保密区",
             Self::Mode2 => "兼容保留区 + 保密区（整盘加密）",
             Self::Mode3 => "启动区 + 交换区（内外网双分区）",
-            Self::Offline => "从快照生成离线转换结果，不写物理盘",
         }
     }
 }
@@ -244,9 +234,6 @@ pub enum ProvisionStage {
     Confirm,
     Running,
     Result,
-    OfflineForm,
-    OfflineRunning,
-    OfflineResult,
 }
 
 #[derive(Debug, Clone)]
@@ -346,25 +333,6 @@ fn toggle_supported_fs(
         }
         _ => crate::provision::OfficialFilesystemFormat::Fat16,
     }
-}
-
-#[derive(Debug, Clone, Default)]
-pub struct OfflineConvertForm {
-    pub source_dir: String,
-    pub device_id: String,
-    pub size_gb: String,
-    pub output_dir: String,
-}
-
-#[derive(Debug, Clone)]
-pub struct OfflineConvertView {
-    pub reports: Vec<crate::sectors::ConvertReport>,
-    pub share: u64,
-    pub enc_start: u64,
-    pub enc_size: u64,
-    pub crc: u32,
-    pub k0: u32,
-    pub output_dir: Option<std::path::PathBuf>,
 }
 
 impl Default for ProvisionForm {
@@ -633,9 +601,6 @@ pub struct ProvisionState {
     pub prepared: Option<ProvisionPrepared>,
     pub confirmation: String,
     pub export_path: String,
-    pub offline_form: OfflineConvertForm,
-    pub offline_field_selected: usize,
-    pub offline_result: Option<OfflineConvertView>,
     pub message: Option<String>,
     target_disk: Option<u32>,
     form_initialized_for: Option<(u32, u64, Option<String>, ProvisionKind)>,
@@ -653,9 +618,6 @@ impl Default for ProvisionState {
             prepared: None,
             confirmation: String::new(),
             export_path: String::new(),
-            offline_form: OfflineConvertForm::default(),
-            offline_field_selected: 0,
-            offline_result: None,
             message: None,
             target_disk: None,
             form_initialized_for: None,
@@ -1915,7 +1877,7 @@ impl AppState {
     pub fn provision_begin_selected(&mut self) -> ProvisionKind {
         let index = self.selected.min(ProvisionKind::ALL.len() - 1);
         let kind = ProvisionKind::ALL[index];
-        if kind != ProvisionKind::Offline && self.selected_device().is_none() {
+        if self.selected_device().is_none() {
             self.provision.stage = ProvisionStage::SelectDisk;
             self.provision.message = Some("请先在制盘页明确选择 USB 目标盘。".into());
             self.set_item_count(self.provision_selectable_devices().count());
@@ -1928,93 +1890,85 @@ impl AppState {
         self.provision.confirmation.clear();
         self.provision.message = None;
         self.provision.prepared = None;
-        self.provision.offline_result = None;
-        if kind == ProvisionKind::Offline {
-            self.provision.stage = ProvisionStage::OfflineForm;
-        } else {
-            let current_target = self
-                .selected_device()
-                .map(|row| (row.disk, row.size, row.device_id.clone(), kind));
-            if self.provision.form_initialized_for == current_target {
-                self.provision.stage = ProvisionStage::Form;
-                self.provision_sync_cursor_to_end();
-                return kind;
+        let current_target = self
+            .selected_device()
+            .map(|row| (row.disk, row.size, row.device_id.clone(), kind));
+        if self.provision.form_initialized_for == current_target {
+            self.provision.stage = ProvisionStage::Form;
+            self.provision_sync_cursor_to_end();
+            return kind;
+        }
+        self.provision.form = ProvisionForm::default();
+        let defaults = self.selected_device().map(|row| {
+            (
+                row.onlyid.clone(),
+                row.user.clone().unwrap_or_default(),
+                row.dept.clone().unwrap_or_default(),
+                row.label.clone(),
+                row.force_change_password,
+                row.cancel_password_complexity_check,
+                row.max_share_password_errors,
+                row.max_encrypt_password_errors,
+            )
+        });
+        let scanned_onlyid = defaults
+            .as_ref()
+            .and_then(|(onlyid, _, _, _, _, _, _, _)| onlyid.clone())
+            .filter(|value| !value.trim().is_empty());
+        self.provision.form.label_id = scanned_onlyid.unwrap_or_else(|| {
+            crate::provision::OnlyId::random_candidate()
+                .map(|value| value.text().to_string())
+                .unwrap_or_else(|_| "1".into())
+        });
+        if let Some((
+            _,
+            user,
+            dept,
+            label,
+            force_change_password,
+            cancel_password_complexity_check,
+            max_share_password_errors,
+            max_encrypt_password_errors,
+        )) = defaults
+        {
+            self.provision.form.user = user;
+            self.provision.form.dept = dept;
+            if let Some(label) = label.filter(|value| !value.trim().is_empty()) {
+                self.provision.form.label = label;
             }
-            self.provision.form = ProvisionForm::default();
-            let defaults = self.selected_device().map(|row| {
-                (
-                    row.onlyid.clone(),
-                    row.user.clone().unwrap_or_default(),
-                    row.dept.clone().unwrap_or_default(),
-                    row.label.clone(),
-                    row.force_change_password,
-                    row.cancel_password_complexity_check,
-                    row.max_share_password_errors,
-                    row.max_encrypt_password_errors,
-                )
-            });
-            let scanned_onlyid = defaults
-                .as_ref()
-                .and_then(|(onlyid, _, _, _, _, _, _, _)| onlyid.clone())
-                .filter(|value| !value.trim().is_empty());
-            self.provision.form.label_id = scanned_onlyid.unwrap_or_else(|| {
-                crate::provision::OnlyId::random_candidate()
-                    .map(|value| value.text().to_string())
-                    .unwrap_or_else(|_| "1".into())
-            });
-            if let Some((
-                _,
-                user,
-                dept,
-                label,
-                force_change_password,
-                cancel_password_complexity_check,
-                max_share_password_errors,
-                max_encrypt_password_errors,
-            )) = defaults
-            {
-                self.provision.form.user = user;
-                self.provision.form.dept = dept;
-                if let Some(label) = label.filter(|value| !value.trim().is_empty()) {
-                    self.provision.form.label = label;
-                }
-                if let Some(force_change_password) = force_change_password {
-                    self.provision.form.force_change_password = force_change_password;
-                }
-                if let Some(cancel) = cancel_password_complexity_check {
-                    self.provision.form.cancel_password_complexity_check = cancel;
-                }
-                if let Some(value) = max_share_password_errors {
-                    self.provision.form.max_share_password_errors = value.to_string();
-                }
-                if let Some(value) = max_encrypt_password_errors {
-                    self.provision.form.max_encrypt_password_errors = value.to_string();
-                }
+            if let Some(force_change_password) = force_change_password {
+                self.provision.form.force_change_password = force_change_password;
             }
-            let target_mode = match kind {
-                ProvisionKind::Mode0 => {
-                    crate::provision::OfficialPartitionMode::DefaultThreePartition
-                }
-                ProvisionKind::Mode1 => crate::provision::OfficialPartitionMode::BootShareCombined,
-                ProvisionKind::Mode2 => crate::provision::OfficialPartitionMode::WholeDiskEncrypted,
-                ProvisionKind::Mode3 => {
-                    crate::provision::OfficialPartitionMode::IntranetExtranetDualPartition
-                }
-                ProvisionKind::Offline => unreachable!(),
-            };
-            let prefill = self.selected_device().and_then(|row| {
+            if let Some(cancel) = cancel_password_complexity_check {
+                self.provision.form.cancel_password_complexity_check = cancel;
+            }
+            if let Some(value) = max_share_password_errors {
+                self.provision.form.max_share_password_errors = value.to_string();
+            }
+            if let Some(value) = max_encrypt_password_errors {
+                self.provision.form.max_encrypt_password_errors = value.to_string();
+            }
+        }
+        let target_mode = match kind {
+            ProvisionKind::Mode0 => crate::provision::OfficialPartitionMode::DefaultThreePartition,
+            ProvisionKind::Mode1 => crate::provision::OfficialPartitionMode::BootShareCombined,
+            ProvisionKind::Mode2 => crate::provision::OfficialPartitionMode::WholeDiskEncrypted,
+            ProvisionKind::Mode3 => {
+                crate::provision::OfficialPartitionMode::IntranetExtranetDualPartition
+            }
+        };
+        let prefill = self.selected_device().and_then(|row| {
                 let source = row.existing_profile_for_prefill();
                 let total = row.size / crate::common::SECTOR as u64;
                 let lce = crate::protocol::lba7_compat::locate_lba7_compatibility_extent_from_verified_usb_capacity(total, crate::common::SECTOR as u32)?;
                 crate::provision::prefill_for_target_mode(source.as_ref(), target_mode, lce.start_lba, crate::common::SECTOR as u64).ok()
             });
-            if let Some(prefill) = prefill {
-                self.provision.form.apply_prefill(&prefill);
-            }
-            self.provision.form_initialized_for = current_target;
-            self.provision.stage = ProvisionStage::Form;
-            self.provision_sync_cursor_to_end();
+        if let Some(prefill) = prefill {
+            self.provision.form.apply_prefill(&prefill);
         }
+        self.provision.form_initialized_for = current_target;
+        self.provision.stage = ProvisionStage::Form;
+        self.provision_sync_cursor_to_end();
         kind
     }
 
@@ -2022,106 +1976,6 @@ impl AppState {
         (0..)
             .take_while(|&index| self.provision_field_slot(index).is_some())
             .count()
-    }
-
-    pub fn offline_fields(&self) -> [(&'static str, &str); 4] {
-        [
-            ("快照目录", self.provision.offline_form.source_dir.as_str()),
-            ("device_id", self.provision.offline_form.device_id.as_str()),
-            ("目标大小 GiB", self.provision.offline_form.size_gb.as_str()),
-            ("输出目录", self.provision.offline_form.output_dir.as_str()),
-        ]
-    }
-
-    pub fn offline_move_field(&mut self, delta: isize) {
-        self.provision.offline_field_selected = if delta < 0 {
-            self.provision
-                .offline_field_selected
-                .saturating_sub(delta.unsigned_abs())
-        } else {
-            (self.provision.offline_field_selected + delta as usize).min(3)
-        };
-    }
-
-    fn offline_selected_field_mut(&mut self) -> &mut String {
-        match self.provision.offline_field_selected {
-            0 => &mut self.provision.offline_form.source_dir,
-            1 => &mut self.provision.offline_form.device_id,
-            2 => &mut self.provision.offline_form.size_gb,
-            _ => &mut self.provision.offline_form.output_dir,
-        }
-    }
-
-    pub fn offline_push_char(&mut self, ch: char) {
-        if !ch.is_control() {
-            let field = self.offline_selected_field_mut();
-            if field.chars().count() < 512 {
-                field.push(ch);
-                self.provision.message = None;
-            }
-        }
-    }
-
-    pub fn offline_backspace(&mut self) {
-        self.offline_selected_field_mut().pop();
-        self.provision.message = None;
-    }
-
-    pub fn offline_request(
-        &mut self,
-    ) -> Result<crate::application::offline_convert::OfflineConvertRequest, String> {
-        let source_dir = self.provision.offline_form.source_dir.trim();
-        let device_id = self.provision.offline_form.device_id.trim();
-        if source_dir.is_empty() || device_id.is_empty() {
-            return Err("快照目录和 device_id 不能为空".into());
-        }
-        let size_gb = if self.provision.offline_form.size_gb.trim().is_empty() {
-            None
-        } else {
-            Some(
-                self.provision
-                    .offline_form
-                    .size_gb
-                    .trim()
-                    .parse::<f64>()
-                    .ok()
-                    .filter(|value| value.is_finite() && *value > 0.0)
-                    .ok_or_else(|| "目标大小必须为大于 0 的 GiB 数值".to_string())?,
-            )
-        };
-        let output_dir = (!self.provision.offline_form.output_dir.trim().is_empty())
-            .then(|| std::path::PathBuf::from(self.provision.offline_form.output_dir.trim()));
-        Ok(crate::application::offline_convert::OfflineConvertRequest {
-            source_dir: std::path::PathBuf::from(source_dir),
-            device_id: device_id.to_string(),
-            size_gb,
-            output_dir,
-        })
-    }
-
-    pub fn offline_start(&mut self) {
-        self.provision.stage = ProvisionStage::OfflineRunning;
-        self.provision.message = Some("正在后台读取 LBA 快照并执行离线转换…".into());
-        self.provision.offline_result = None;
-    }
-
-    pub fn offline_finish(&mut self, result: Result<OfflineConvertView, String>) {
-        self.provision.stage = ProvisionStage::OfflineResult;
-        match result {
-            Ok(view) => {
-                self.provision.offline_result = Some(view);
-                self.provision.message = None;
-            }
-            Err(message) => {
-                self.provision.offline_result = None;
-                self.provision.message = Some(message);
-            }
-        }
-    }
-
-    pub fn offline_back_to_form(&mut self) {
-        self.provision.stage = ProvisionStage::OfflineForm;
-        self.provision.message = None;
     }
 
     pub fn provision_move_field(&mut self, delta: isize) {
@@ -2510,7 +2364,6 @@ impl AppState {
             ProvisionKind::Mode3 => {
                 Some(crate::provision::OfficialPartitionMode::IntranetExtranetDualPartition)
             }
-            ProvisionKind::Offline => None,
         }
     }
 
@@ -3786,15 +3639,6 @@ impl AppState {
         Ok(disk)
     }
 
-    pub fn provision_begin_offline(&mut self) {
-        self.provision.target_disk = None;
-        self.pinned_disk = None;
-        self.provision.kind = ProvisionKind::Offline;
-        self.provision.stage = ProvisionStage::OfflineForm;
-        self.provision.message = None;
-        self.provision.offline_result = None;
-    }
-
     pub fn selected_device_disk(&self) -> Option<u32> {
         self.selected_device().map(|row| row.disk)
     }
@@ -3863,16 +3707,8 @@ impl AppState {
             self.pinned_disk = self.selected_device().map(|row| row.disk);
         }
         if workspace == Workspace::Provision {
-            let preserve_offline = matches!(
-                self.provision.stage,
-                ProvisionStage::OfflineForm
-                    | ProvisionStage::OfflineRunning
-                    | ProvisionStage::OfflineResult
-            );
             if let Some(disk) = self.provision.target_disk {
                 self.pinned_disk = Some(disk);
-            } else if preserve_offline {
-                self.pinned_disk = None;
             } else {
                 self.pinned_disk = None;
                 self.provision.stage = ProvisionStage::SelectDisk;
@@ -3910,10 +3746,7 @@ impl AppState {
                 | ProvisionStage::Exporting
                 | ProvisionStage::Confirm
                 | ProvisionStage::Running
-                | ProvisionStage::Result
-                | ProvisionStage::OfflineForm
-                | ProvisionStage::OfflineRunning
-                | ProvisionStage::OfflineResult => 0,
+                | ProvisionStage::Result => 0,
             },
         };
         self.set_item_count(count);
@@ -4015,12 +3848,6 @@ impl AppState {
                     ProvisionStage::ExportPath => self.provision_cancel_export(),
                     ProvisionStage::Exporting => {
                         self.set_notice("镜像正在后台导出，请等待完成。");
-                    }
-                    ProvisionStage::OfflineForm | ProvisionStage::OfflineResult => {
-                        self.provision_reset();
-                    }
-                    ProvisionStage::OfflineRunning => {
-                        self.set_notice("离线转换正在后台执行，请等待完成。");
                     }
                     ProvisionStage::Form | ProvisionStage::Result => {
                         self.provision_reset();

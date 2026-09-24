@@ -135,7 +135,7 @@ fn scan_and_print_all_row_kinds() {
     );
 
     // 旧免密盘镜像应统一显示官方模式1盘型。
-    let (conv, _) = converted_image("netac").unwrap();
+    let (conv, _) = passwordless_image("netac").unwrap();
     let converted_read_calls = std::cell::RefCell::new(Vec::<(u32, u32)>::new());
     let read_conv = |_disk: u32, lba: u32| -> std::io::Result<Vec<u8>> {
         converted_read_calls.borrow_mut().push((6, lba));

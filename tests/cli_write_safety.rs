@@ -1,4 +1,4 @@
-//! CLI 端到端: 子进程(离线 convert / 用法错误 / 系统盘防护)
+//! CLI 端到端: 子进程(用法错误 / 系统盘防护)
 //! + 进程内 backup/restore 流程(只读备份与还原安全门禁)。
 //!
 //! 全部不碰真盘。
@@ -12,9 +12,7 @@ use std::process::Command;
 
 use common::*;
 use edpcli::cli::{backup_create_flow, restore_flow, Ctx};
-use edpcli::common::{
-    EXIT_BACKUP, EXIT_CANCELLED, EXIT_OK, EXIT_TARGET, METADATA_SECTOR_COUNT, SECTOR,
-};
+use edpcli::common::{EXIT_BACKUP, EXIT_CANCELLED, EXIT_OK, EXIT_TARGET, SECTOR};
 use edpcli::diskio::FileDev;
 use edpcli::diskio::SectorDev;
 use edpcli::edpb::{self, CoreCapture};
@@ -27,63 +25,9 @@ fn bin() -> Command {
 }
 
 #[test]
-fn offline_convert_matches_golden() {
-    let Some(data) = load_disk_image("netac") else {
-        eprintln!("跳过: 真实备份不可用");
-        return;
-    };
-    let tmp = TmpDir::new("cli_offline");
-    let snap = tmp.0.join("snap");
-    fs::create_dir_all(&snap).unwrap();
-    for lba in 0..METADATA_SECTOR_COUNT as u32 {
-        fs::write(
-            snap.join(format!("LBA{:02}.bin", lba)),
-            &data[lba as usize * SECTOR..(lba as usize + 1) * SECTOR],
-        )
-        .unwrap();
-    }
-    let out = tmp.0.join("out");
-    let r = bin()
-        .args([
-            "convert",
-            "--dir",
-            snap.to_str().unwrap(),
-            "--id",
-            "disk&ven_netac&prod_onlydisk",
-            "--out",
-            out.to_str().unwrap(),
-        ])
-        .output()
-        .unwrap();
-    assert_eq!(
-        r.status.code(),
-        Some(0),
-        "{}",
-        String::from_utf8_lossy(&r.stderr)
-    );
-    let g = golden("netac");
-    for (lba, want) in [(0u32, g.lba0), (6, g.lba6), (7, g.lba7), (12, g.lba12)] {
-        let got = sha256(&fs::read(out.join(format!("LBA{:02}.bin", lba))).unwrap());
-        assert_eq!(got, want, "LBA{}", lba);
-    }
-    // netac LBA9 非零 → 清零产物
-    assert_eq!(fs::read(out.join("LBA09.bin")).unwrap(), vec![0u8; SECTOR]);
-    let stdout = String::from_utf8_lossy(&r.stdout);
-    assert!(stdout.contains("59.75GB"), "{}", stdout); // 布局回显
-}
-
-#[test]
-fn offline_requires_id() {
-    let tmp = TmpDir::new("cli_noid");
-    let snap = tmp.0.join("snap");
-    fs::create_dir_all(&snap).unwrap();
-    let r = bin()
-        .args(["convert", "--dir", snap.to_str().unwrap()])
-        .output()
-        .unwrap();
+fn removed_offline_convert_command_is_a_usage_error() {
+    let r = bin().arg("convert").output().unwrap();
     assert_eq!(r.status.code(), Some(2));
-    let stderr = String::from_utf8_lossy(&r.stderr);
-    assert!(stderr.contains("--id"), "{}", stderr);
 }
 
 #[test]
@@ -335,7 +279,7 @@ fn restore_numeric_target_uses_backup_selector_and_current_disk_identity() {
 
 #[test]
 fn restore_explicit_nopwd_backup_blocked() {
-    let Some((conv, did)) = converted_image("netac") else {
+    let Some((conv, did)) = passwordless_image("netac") else {
         eprintln!("跳过: 真实备份不可用");
         return;
     };
@@ -367,7 +311,7 @@ fn restore_explicit_nopwd_backup_blocked() {
 
 #[test]
 fn restore_detects_nopwd_from_edpb_manifest_when_current_device_id_is_unavailable() {
-    let Some((conv, _)) = converted_image("netac") else {
+    let Some((conv, _)) = passwordless_image("netac") else {
         eprintln!("跳过: 真实备份不可用");
         return;
     };
@@ -410,7 +354,7 @@ fn restore_detects_nopwd_from_edpb_manifest_when_current_device_id_is_unavailabl
 
 #[test]
 fn restore_rejects_legacy_bin_when_device_id_is_unavailable() {
-    let Some((conv, _)) = converted_image("netac") else {
+    let Some((conv, _)) = passwordless_image("netac") else {
         eprintln!("跳过: 真实备份不可用");
         return;
     };
@@ -492,7 +436,7 @@ fn restore_picker_selects_newest_and_writes() {
         eprintln!("跳过: 真实备份不可用");
         return;
     };
-    let (Some((conv, _)),) = (converted_image("netac"),) else {
+    let (Some((conv, _)),) = (passwordless_image("netac"),) else {
         eprintln!("跳过: 真实备份不可用");
         return;
     };

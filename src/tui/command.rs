@@ -7,7 +7,6 @@ pub enum PaletteAction {
     Devices,
     Backups,
     Provision,
-    OfflineConvert,
     Inspect,
     AdvancedInspect,
     Restore,
@@ -32,7 +31,6 @@ pub fn parse_command(input: &str) -> Result<PaletteAction, String> {
         "devices" | "device" | "list" | "info" | "d" => Ok(PaletteAction::Devices),
         "backups" | "backup" | "b" => Ok(PaletteAction::Backups),
         "provision" | "make" | "p" => Ok(PaletteAction::Provision),
-        "convert" | "offline-convert" | "offline" | "oc" => Ok(PaletteAction::OfflineConvert),
         "inspect" | "i" => Ok(PaletteAction::Inspect),
         "advanced-inspect" | "inspect-advanced" | "ai" => Ok(PaletteAction::AdvancedInspect),
         "restore" | "r" => Ok(PaletteAction::Restore),
@@ -69,16 +67,10 @@ mod tests {
             parse_command("batch-delete").unwrap(),
             PaletteAction::BackupBatchDelete
         );
-        assert_eq!(
-            parse_command("offline-convert").unwrap(),
-            PaletteAction::OfflineConvert
-        );
+        assert!(parse_command("offline-convert").is_err());
         assert_eq!(parse_command("list").unwrap(), PaletteAction::Devices);
         assert_eq!(parse_command("info").unwrap(), PaletteAction::Devices);
-        assert_eq!(
-            parse_command("convert").unwrap(),
-            PaletteAction::OfflineConvert
-        );
+        assert!(parse_command("convert").is_err());
         assert_eq!(
             parse_command("advanced-inspect").unwrap(),
             PaletteAction::AdvancedInspect

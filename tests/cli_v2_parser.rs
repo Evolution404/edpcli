@@ -607,18 +607,17 @@ fn removed_v1_grammar_returns_migration_errors_not_compatibility_paths() {
 #[test]
 fn v2_help_names_only_the_new_top_level_commands() {
     let help = edpcli::cli_args::usage_text();
-    for command in [
-        "list",
-        "info",
-        "backup",
-        "inspect",
-        "convert",
-        "completion",
-        "version",
-    ] {
+    for command in ["list", "info", "backup", "inspect", "completion", "version"] {
         assert!(help.contains(command), "missing {command}: {help}");
     }
-    for removed in ["\n  run ", "\n  restore ", "\n  meta ", "\n  metainfo "] {
+    for removed in [
+        "\n  run ",
+        "\n  restore ",
+        "\n  meta ",
+        "\n  metainfo ",
+        "\nconvert ",
+        "offline-convert",
+    ] {
         assert!(
             !help.contains(removed),
             "legacy command leaked into help: {removed}\n{help}"
