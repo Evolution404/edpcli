@@ -82,6 +82,10 @@ fn device_list_shows_ven_prod_and_onlyid_and_enter_shortcut() {
     assert!(text.contains("aigo_u335"), "{text}");
     assert!(text.contains("1987718388"), "{text}");
     assert!(text.replace(' ', "").contains("Enter制盘"), "{text}");
+    assert!(
+        text.contains("▶"),
+        "focused device row must render ▶: {text}"
+    );
     assert!(!text.contains("Apply"), "{text}");
 }
 
@@ -407,6 +411,19 @@ fn advanced_inspect_form_and_result_render_across_terminal_sizes() {
         let backend = TestBackend::new(width, height);
         let mut terminal = Terminal::new(backend).expect("test terminal");
         terminal.draw(|frame| render::draw(frame, &state)).unwrap();
+        if width == 80 {
+            let text = terminal
+                .backend()
+                .buffer()
+                .content()
+                .iter()
+                .map(|cell| cell.symbol())
+                .collect::<String>();
+            assert!(
+                text.contains("▶"),
+                "focused advanced-inspect field must render ▶: {text}"
+            );
+        }
     }
 
     let items = [7u64, 12, 24_025_028]

@@ -108,7 +108,7 @@ fn input_value_window(value: &str, cursor: usize, width: usize, secret: bool) ->
     if end < chars.len() {
         out.push('›');
     }
-    fit_display_width(&out, width)
+    out
 }
 
 fn hard_wrap_value(value: &str, width: usize) -> Vec<String> {
@@ -393,7 +393,8 @@ fn draw_devices(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState
                 .title(title)
                 .title_style(secondary()),
         )
-        .row_highlight_style(selected());
+        .row_highlight_style(selected())
+        .highlight_symbol("▶ ");
         let mut table_state = TableState::default();
         table_state.select(Some(state.selected().saturating_sub(window_start)));
         frame.render_stateful_widget(table, list_area, &mut table_state);
@@ -644,7 +645,8 @@ fn draw_backups(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState
                 .title(title)
                 .title_style(secondary()),
         )
-        .row_highlight_style(selected());
+        .row_highlight_style(selected())
+        .highlight_symbol("▶ ");
         let mut table_state = TableState::default();
         table_state.select(Some(state.selected().saturating_sub(window_start)));
         frame.render_stateful_widget(table, backup_parts[1], &mut table_state);
@@ -1114,7 +1116,8 @@ fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppSta
                     spans.push(Span::styled(fit_display_width(label, label_width), muted()));
                     spans.push(Span::raw(" "));
 
-                    let shown = if active && state.provision_selected_field_is_editable() {
+                    let editable_active = active && state.provision_selected_field_is_editable();
+                    let shown = if editable_active {
                         input_value_window(
                             value,
                             state.provision_field_cursor(),
@@ -1128,10 +1131,14 @@ fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppSta
                     } else {
                         fit_display_width(value, value_width)
                     };
+                    let shown_width = crate::ui::disp_width(&shown).min(value_width);
                     spans.push(Span::styled(
                         shown,
                         if active { selected() } else { Style::default() },
                     ));
+                    if editable_active && shown_width < value_width {
+                        spans.push(Span::raw(" ".repeat(value_width - shown_width)));
+                    }
                 }
                 form_lines.push(Line::from(spans));
             }
@@ -1908,15 +1915,16 @@ fn draw_advanced_inspect(frame: &mut Frame, area: ratatui::layout::Rect, state: 
                 } else {
                     value
                 };
+                let active = index == advanced.form.field_selected;
                 lines.push(Line::from(vec![
+                    Span::styled(
+                        if active { "▶ " } else { "  " },
+                        if active { accent() } else { Style::default() },
+                    ),
                     Span::styled(format!("{label:>14}  "), muted()),
                     Span::styled(
                         safe(shown),
-                        if index == advanced.form.field_selected {
-                            selected()
-                        } else {
-                            Style::default()
-                        },
+                        if active { selected() } else { Style::default() },
                     ),
                 ]));
             }
@@ -2724,8 +2732,8 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
                 ProvisionStage::Form if state.provision_selected_field_is_editable() => {
                     let unit_key = state
                         .provision_field_hint(state.provision().field_selected)
-                        .is_some_and(|hint| hint == "Space 切换 MiB / GiB / sector")
-                        .then_some(" · Space 单位")
+                        .is_some_and(|hint| hint.starts_with("Space 切换 MiB / GiB / sector"))
+                        .then_some(" · Space 单位 · f 填满")
                         .unwrap_or("");
                     format!("↑/↓ 字段 · ←/→ 光标 · Home/End 首尾 · 输入/Backspace 编辑{unit_key} · Tab/Shift-Tab 页面 · Enter 预览 · Esc 返回")
                 }
@@ -2772,7 +2780,7 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
 
 #[cfg(test)]
 mod tests {
-    use super::{hard_wrap_value, visible_window, wrapped_field_lines};
+    use super::{hard_wrap_value, input_value_window, visible_window, wrapped_field_lines};
 
     #[test]
     fn hard_wrap_breaks_unspaced_values_by_terminal_display_width() {
@@ -2792,6 +2800,12 @@ mod tests {
         assert_eq!(lines[0].spans[1].content.as_ref(), "abcd");
         assert_eq!(lines[1].spans[1].content.as_ref(), "efgh");
         assert_eq!(lines[2].spans[1].content.as_ref(), "ijkl");
+    }
+
+    #[test]
+    fn active_input_window_does_not_pad_selected_background_to_cell_width() {
+        assert_eq!(input_value_window("abc", 3, 12, false), "abc│");
+        assert_eq!(input_value_window("secret", 6, 12, true), "••••••│");
     }
 
     #[test]

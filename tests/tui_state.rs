@@ -421,21 +421,21 @@ fn provision_text_field_cursor_edits_in_place() {
     state.provision_skip_backup();
     assert_eq!(state.provision_begin_selected(), ProvisionKind::Mode0);
 
-    state.provision_mut().form.label_id = "ABCDE".into();
-    state.provision_mut().field_selected = 0;
+    state.provision_mut().form.user = "ABCDE".into();
+    state.provision_mut().field_selected = 1;
     state.provision_cursor_end();
     assert_eq!(state.provision_field_cursor(), 5);
     state.provision_move_cursor(-2);
     assert_eq!(state.provision_field_cursor(), 3);
     state.provision_push_char('X');
-    assert_eq!(state.provision().form.label_id, "ABCXDE");
+    assert_eq!(state.provision().form.user, "ABCXDE");
     assert_eq!(state.provision_field_cursor(), 4);
     state.provision_backspace();
-    assert_eq!(state.provision().form.label_id, "ABCDE");
+    assert_eq!(state.provision().form.user, "ABCDE");
     assert_eq!(state.provision_field_cursor(), 3);
     state.provision_cursor_home();
     state.provision_push_char('Z');
-    assert_eq!(state.provision().form.label_id, "ZABCDE");
+    assert_eq!(state.provision().form.user, "ZABCDE");
     assert_eq!(state.provision_field_cursor(), 1);
 }
 
@@ -611,9 +611,140 @@ fn provision_capacity_hints_match_each_partition() {
     let boot = hint_for("启动区");
     let share = hint_for("交换区");
     let encrypt = hint_for("保密区");
-    assert_eq!(boot, "Space 切换 MiB / GiB / sector");
+    assert_eq!(boot, "Space 切换 MiB / GiB / sector · f 填满");
     assert_eq!(share, boot);
     assert_eq!(encrypt, boot);
+}
+
+#[test]
+fn provision_input_policy_filters_invalid_characters_and_ranges() {
+    use edpcli::provision::CapacityInputMode;
+
+    let mut state = AppState::new();
+    state.replace_devices(vec![device(64_000_000_000)]);
+    state.navigate(NavCommand::WorkspaceProvision, 20);
+    state.provision_select_disk();
+    state.provision_skip_backup();
+    assert_eq!(state.provision_begin_selected(), ProvisionKind::Mode0);
+
+    let field_index = |state: &AppState, prefix: &str| {
+        state
+            .provision_visible_fields()
+            .iter()
+            .position(|(label, _, _)| label.starts_with(prefix))
+            .expect("provision field")
+    };
+
+    state.provision_mut().form.label_id.clear();
+    state.provision_mut().field_selected = field_index(&state, "标签标识");
+    state.provision_cursor_home();
+    state.provision_push_char('x');
+    assert_eq!(state.provision().form.label_id, "");
+    state.provision_push_char('-');
+    state.provision_push_char('1');
+    state.provision_push_char('-');
+    assert_eq!(state.provision().form.label_id, "-1");
+
+    state.provision_mut().form.share_input_mode = CapacityInputMode::Quick;
+    state.provision_mut().form.share_mib.clear();
+    state.provision_mut().field_selected = field_index(&state, "交换区容量");
+    state.provision_cursor_home();
+    for ch in ['1', '.', '2', '.', 'x'] {
+        state.provision_push_char(ch);
+    }
+    assert_eq!(state.provision().form.share_mib, "1.2");
+
+    state.provision_mut().form.share_input_mode = CapacityInputMode::Exact;
+    state.provision_mut().form.share_sectors.clear();
+    state.provision_mut().field_selected = field_index(&state, "交换区容量");
+    state.provision_cursor_home();
+    state.provision_push_char('.');
+    state.provision_push_char('4');
+    assert_eq!(state.provision().form.share_sectors, "4");
+
+    state.provision_mut().form.share_start_lba.clear();
+    state.provision_mut().field_selected = field_index(&state, "交换区起点 LBA");
+    state.provision_cursor_home();
+    state.provision_push_char('x');
+    state.provision_push_char('2');
+    assert_eq!(state.provision().form.share_start_lba, "2");
+
+    state.provision_mut().form.max_share_password_errors.clear();
+    state.provision_mut().field_selected = field_index(&state, "交换区密码最大错误次数");
+    state.provision_cursor_home();
+    for ch in ['2', '5', '6'] {
+        state.provision_push_char(ch);
+    }
+    assert_eq!(state.provision().form.max_share_password_errors, "25");
+}
+
+#[test]
+fn provision_fill_selected_capacity_uses_same_maximum_as_layout_and_text_f_is_literal() {
+    let mut state = AppState::new();
+    state.replace_devices(vec![device(64_000_000_000)]);
+    state.navigate(NavCommand::WorkspaceProvision, 20);
+    state.provision_select_disk();
+    state.provision_skip_backup();
+    assert_eq!(state.provision_begin_selected(), ProvisionKind::Mode0);
+
+    let encrypt = state
+        .provision_visible_fields()
+        .iter()
+        .position(|(label, _, _)| label.starts_with("保密区容量"))
+        .expect("encrypt capacity");
+    state.provision_mut().field_selected = encrypt;
+    let max_sectors = state
+        .provision_layout_editor_lines()
+        .into_iter()
+        .find_map(|line| {
+            let marker = "最大可设 ";
+            line.strip_prefix(marker)
+                .and_then(|rest| rest.rsplit_once('('))
+                .and_then(|(_, tail)| tail.strip_suffix(" sector)"))
+                .and_then(|value| value.parse::<u64>().ok())
+        })
+        .expect("maximum sector count");
+    assert!(state.provision_fill_selected_capacity());
+    assert_eq!(
+        state.provision_request().unwrap().encrypt_sectors,
+        Some(max_sectors)
+    );
+
+    let user = state
+        .provision_visible_fields()
+        .iter()
+        .position(|(label, _, _)| label == "用户名")
+        .expect("user field");
+    state.provision_mut().form.user.clear();
+    state.provision_mut().field_selected = user;
+    state.provision_cursor_home();
+    assert!(!state.provision_fill_selected_capacity());
+    state.provision_push_char('f');
+    assert_eq!(state.provision().form.user, "f");
+}
+
+#[test]
+fn provision_fill_selected_capacity_recovers_from_empty_capacity_input() {
+    let mut state = AppState::new();
+    state.replace_devices(vec![device(64_000_000_000)]);
+    state.navigate(NavCommand::WorkspaceProvision, 20);
+    state.provision_select_disk();
+    state.provision_skip_backup();
+    assert_eq!(state.provision_begin_selected(), ProvisionKind::Mode0);
+
+    let encrypt = state
+        .provision_visible_fields()
+        .iter()
+        .position(|(label, _, _)| label.starts_with("保密区容量"))
+        .expect("encrypt capacity");
+    state.provision_mut().field_selected = encrypt;
+    state.provision_mut().form.encrypt_mib.clear();
+
+    assert!(state.provision_fill_selected_capacity());
+    let request = state
+        .provision_request()
+        .expect("fill should repair empty capacity");
+    assert!(request.encrypt_sectors.is_some_and(|sectors| sectors > 0));
 }
 
 #[test]

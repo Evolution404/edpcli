@@ -896,6 +896,22 @@ fn run_loop(resume: Option<state::WriteIntent>) -> io::Result<LoopExit> {
                                     ct_event::KeyCode::Down => {
                                         state.provision_move_field(1);
                                     }
+                                    ct_event::KeyCode::Left => {
+                                        if state.provision_selected_field_is_editable() {
+                                            state.provision_move_cursor(-1);
+                                        } else {
+                                            let _ = state.navigate(NavCommand::Left, 1);
+                                        }
+                                    }
+                                    ct_event::KeyCode::Right => {
+                                        if state.provision_selected_field_is_editable() {
+                                            state.provision_move_cursor(1);
+                                        } else {
+                                            let _ = state.navigate(NavCommand::Right, 1);
+                                        }
+                                    }
+                                    ct_event::KeyCode::Home => state.provision_cursor_home(),
+                                    ct_event::KeyCode::End => state.provision_cursor_end(),
                                     ct_event::KeyCode::Backspace => state.provision_backspace(),
                                     ct_event::KeyCode::Enter => {
                                         let Some(disk) = state.selected_device_disk() else {
@@ -929,6 +945,11 @@ fn run_loop(resume: Option<state::WriteIntent>) -> io::Result<LoopExit> {
                                     ct_event::KeyCode::Char(' ') => {
                                         if !state.provision_toggle_selected_option() {
                                             state.provision_push_char(' ');
+                                        }
+                                    }
+                                    ct_event::KeyCode::Char('f') => {
+                                        if !state.provision_fill_selected_capacity() {
+                                            state.provision_push_char('f');
                                         }
                                     }
                                     ct_event::KeyCode::Char(ch)

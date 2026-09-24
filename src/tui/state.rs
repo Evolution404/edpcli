@@ -297,6 +297,46 @@ pub struct ProvisionForm {
     pub max_encrypt_password_errors: String,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ProvisionInputPolicy {
+    DecimalCapacity,
+    UnsignedInteger,
+    U8,
+    OnlyId,
+    Text,
+}
+
+impl ProvisionInputPolicy {
+    fn accepts(self, candidate: &str) -> bool {
+        match self {
+            Self::DecimalCapacity => {
+                candidate.chars().all(|ch| ch.is_ascii_digit() || ch == '.')
+                    && candidate.chars().filter(|ch| *ch == '.').count() <= 1
+            }
+            Self::UnsignedInteger => candidate.chars().all(|ch| ch.is_ascii_digit()),
+            Self::U8 => {
+                candidate.chars().all(|ch| ch.is_ascii_digit()) && candidate.parse::<u8>().is_ok()
+            }
+            Self::OnlyId => {
+                candidate == "-"
+                    || candidate.parse::<i32>().is_ok()
+                    || candidate.parse::<u32>().is_ok()
+            }
+            Self::Text => candidate.chars().all(|ch| !ch.is_control()),
+        }
+    }
+
+    fn rejection_message(self) -> &'static str {
+        match self {
+            Self::DecimalCapacity => "容量只允许输入数字和一个小数点",
+            Self::UnsignedInteger => "当前字段仅允许输入整数",
+            Self::U8 => "该字段仅允许 0–255",
+            Self::OnlyId => "标签标识仅允许 u32 或 i32 整数",
+            Self::Text => "当前字段包含不支持的字符",
+        }
+    }
+}
+
 fn toggle_supported_fs(
     value: crate::provision::OfficialFilesystemFormat,
 ) -> crate::provision::OfficialFilesystemFormat {
@@ -2745,6 +2785,92 @@ impl AppState {
         }
     }
 
+    fn provision_selected_capacity_limit(
+        &self,
+    ) -> Result<
+        Option<(
+            crate::provision::PartitionRole,
+            u64,
+            u64,
+            Option<(crate::provision::PartitionRole, u64)>,
+            u64,
+        )>,
+        String,
+    > {
+        use crate::provision::PartitionRole;
+
+        let Some(role) = self.provision_selected_partition_role() else {
+            return Ok(None);
+        };
+        let (resolved, source) = self.provision_resolved_prefill()?;
+        let mut parts = resolved.target_partitions(crate::common::SECTOR as u64)?;
+        parts.sort_by_key(|part| part.start_lba);
+        let Some((index, current)) = parts.iter().enumerate().find(|(_, part)| part.role == role)
+        else {
+            return Ok(None);
+        };
+        let base = self.provision_target_mode().and_then(|mode| {
+            crate::provision::prefill_for_target_mode(
+                source.as_ref(),
+                mode,
+                resolved.usable_end_lba,
+                crate::common::SECTOR as u64,
+            )
+            .ok()
+        });
+        let explicit_start = |candidate: PartitionRole| -> bool {
+            let Some(base) = base.as_ref() else {
+                return false;
+            };
+            let (text, original) = match candidate {
+                PartitionRole::Boot | PartitionRole::CompatibilityReserve => (
+                    self.provision.form.boot_start_lba.as_str(),
+                    base.boot_start_lba,
+                ),
+                PartitionRole::Share | PartitionRole::BootShareCombined => (
+                    self.provision.form.share_start_lba.as_str(),
+                    base.share_start_lba,
+                ),
+                PartitionRole::Encrypt => (
+                    self.provision.form.encrypt_start_lba.as_str(),
+                    base.encrypt_start_lba,
+                ),
+            };
+            text.parse::<u64>()
+                .ok()
+                .is_some_and(|start| Some(start) != original)
+        };
+        let anchored = |candidate: PartitionRole| {
+            source
+                .as_ref()
+                .and_then(|profile| profile.partition(candidate))
+                .is_some()
+                || explicit_start(candidate)
+        };
+
+        let mut boundary = resolved.usable_end_lba;
+        let mut downstream_unanchored = 0u64;
+        let mut limiter = None;
+        for next in parts.iter().skip(index + 1) {
+            if anchored(next.role) {
+                boundary = next.start_lba;
+                limiter = Some((next.role, next.start_lba));
+                break;
+            }
+            downstream_unanchored = downstream_unanchored.saturating_add(next.sector_count);
+        }
+        let max_sectors = boundary
+            .saturating_sub(current.start_lba)
+            .saturating_sub(downstream_unanchored);
+        Ok(Some((
+            current.role,
+            current.sector_count,
+            max_sectors,
+            limiter,
+            resolved.usable_end_lba,
+        )))
+    }
+
     pub fn provision_layout_editor_lines(&self) -> Vec<String> {
         use crate::provision::PartitionRole;
 
@@ -2835,69 +2961,14 @@ impl AppState {
         }
 
         lines.push(String::new());
-        if let Some(role) = self.provision_selected_partition_role() {
-            if let Some((index, current)) =
-                parts.iter().enumerate().find(|(_, part)| part.role == role)
-            {
-                let base = self.provision_target_mode().and_then(|mode| {
-                    crate::provision::prefill_for_target_mode(
-                        source.as_ref(),
-                        mode,
-                        resolved.usable_end_lba,
-                        crate::common::SECTOR as u64,
-                    )
-                    .ok()
-                });
-                let explicit_start = |candidate: PartitionRole| -> bool {
-                    let Some(base) = base.as_ref() else {
-                        return false;
-                    };
-                    let (text, original) = match candidate {
-                        PartitionRole::Boot | PartitionRole::CompatibilityReserve => (
-                            self.provision.form.boot_start_lba.as_str(),
-                            base.boot_start_lba,
-                        ),
-                        PartitionRole::Share | PartitionRole::BootShareCombined => (
-                            self.provision.form.share_start_lba.as_str(),
-                            base.share_start_lba,
-                        ),
-                        PartitionRole::Encrypt => (
-                            self.provision.form.encrypt_start_lba.as_str(),
-                            base.encrypt_start_lba,
-                        ),
-                    };
-                    text.parse::<u64>()
-                        .ok()
-                        .is_some_and(|start| Some(start) != original)
-                };
-                let anchored = |candidate: PartitionRole| {
-                    source
-                        .as_ref()
-                        .and_then(|profile| profile.partition(candidate))
-                        .is_some()
-                        || explicit_start(candidate)
-                };
-
-                let mut boundary = usable_end_exclusive;
-                let mut downstream_unanchored = 0u64;
-                let mut limiter = None;
-                for next in parts.iter().skip(index + 1) {
-                    if anchored(next.role) {
-                        boundary = next.start_lba;
-                        limiter = Some((next.role, next.start_lba));
-                        break;
-                    }
-                    downstream_unanchored = downstream_unanchored.saturating_add(next.sector_count);
-                }
-                let max_sectors = boundary
-                    .saturating_sub(current.start_lba)
-                    .saturating_sub(downstream_unanchored);
-                let grow = max_sectors.saturating_sub(current.sector_count);
-                lines.push(format!("当前: {}", current.role.label()));
+        match self.provision_selected_capacity_limit() {
+            Ok(Some((role, current_sectors, max_sectors, limiter, usable_end_lba))) => {
+                let grow = max_sectors.saturating_sub(current_sectors);
+                lines.push(format!("当前: {}", role.label()));
                 lines.push(format!(
                     "大小 {} ({} sector)",
-                    Self::format_sector_size(current.sector_count),
-                    current.sector_count
+                    Self::format_sector_size(current_sectors),
+                    current_sectors
                 ));
                 lines.push(format!(
                     "最大可设 {} ({} sector)",
@@ -2914,12 +2985,12 @@ impl AppState {
                 } else {
                     lines.push(format!(
                         "限制: 可分区末端 LBA {}；后续未锚定分区可自动后移",
-                        usable_end_exclusive.saturating_sub(1)
+                        usable_end_lba.saturating_sub(1)
                     ));
                 }
             }
-        } else {
-            lines.push("选中分区容量/单位/起点，可查看最大可设范围".into());
+            Ok(None) => lines.push("选中分区容量/单位/起点，可查看最大可设范围".into()),
+            Err(message) => lines.push(format!("布局限制无效: {message}")),
         }
         lines.push("✓ 当前布局无重叠、未越界".into());
         lines
@@ -3007,13 +3078,92 @@ impl AppState {
     pub fn provision_field_hint(&self, display_index: usize) -> Option<String> {
         let slot = self.provision_field_slot(display_index)?;
         match slot {
-            0..=2 => Some("Space 切换 MiB / GiB / sector".into()),
+            0..=2 => Some("Space 切换 MiB / GiB / sector · f 填满".into()),
             7 => Some("交换区和保密区的初始密码".into()),
             9 | 11..=13 | 18..=20 | 27 => Some("Space 切换".into()),
             24..=26 => Some("通常无需修改；固定分区边界时再调整".into()),
             28 | 29 => Some("范围 0–255".into()),
             _ => None,
         }
+    }
+
+    pub fn provision_fill_selected_capacity(&mut self) -> bool {
+        let Some(slot @ 0..=2) = self.provision_field_slot(self.provision.field_selected) else {
+            return false;
+        };
+        // The selected capacity itself does not determine its upper boundary. Use a
+        // one-sector placeholder so f can recover even after the user clears
+        // or partially edits the current capacity field. All other form values
+        // remain subject to normal strict geometry validation.
+        let original_form = self.provision.form.clone();
+        match slot {
+            0 => {
+                self.provision.form.boot_input_mode = crate::provision::CapacityInputMode::Exact;
+                self.provision.form.boot_sectors = "1".into();
+                self.provision.form.boot_capacity_edited = true;
+            }
+            1 => {
+                self.provision.form.share_input_mode = crate::provision::CapacityInputMode::Exact;
+                self.provision.form.share_sectors = "1".into();
+                self.provision.form.share_capacity_edited = true;
+            }
+            2 => {
+                self.provision.form.encrypt_input_mode = crate::provision::CapacityInputMode::Exact;
+                self.provision.form.encrypt_sectors = "1".into();
+                self.provision.form.encrypt_capacity_edited = true;
+            }
+            _ => unreachable!(),
+        }
+        let capacity_limit = self.provision_selected_capacity_limit();
+        self.provision.form = original_form;
+
+        let max_sectors = match capacity_limit {
+            Ok(Some((_, _, max_sectors, _, _))) if max_sectors > 0 => max_sectors,
+            Ok(_) => {
+                self.provision.message = Some("当前容量没有可填满的有效空间".into());
+                return true;
+            }
+            Err(message) => {
+                self.provision.message = Some(message);
+                return true;
+            }
+        };
+
+        use crate::provision::{CapacitySource, QuickCapacityUnit};
+        let (unit, quick, exact, edited, source) = match slot {
+            0 => (
+                self.provision.form.boot_quick_unit,
+                &mut self.provision.form.boot_mib,
+                &mut self.provision.form.boot_sectors,
+                &mut self.provision.form.boot_capacity_edited,
+                &mut self.provision.form.boot_capacity_source,
+            ),
+            1 => (
+                self.provision.form.share_quick_unit,
+                &mut self.provision.form.share_mib,
+                &mut self.provision.form.share_sectors,
+                &mut self.provision.form.share_capacity_edited,
+                &mut self.provision.form.share_capacity_source,
+            ),
+            2 => (
+                self.provision.form.encrypt_quick_unit,
+                &mut self.provision.form.encrypt_mib,
+                &mut self.provision.form.encrypt_sectors,
+                &mut self.provision.form.encrypt_capacity_edited,
+                &mut self.provision.form.encrypt_capacity_source,
+            ),
+            _ => unreachable!(),
+        };
+        *exact = max_sectors.to_string();
+        *quick = match unit {
+            QuickCapacityUnit::MiB => ProvisionForm::format_sector_unit_3(max_sectors, 2_048),
+            QuickCapacityUnit::GiB => ProvisionForm::format_sector_unit_3(max_sectors, 2_097_152),
+        };
+        *edited = false;
+        *source = CapacitySource::UserEdited;
+        self.provision.message = None;
+        self.provision_sync_cursor_to_end();
+        true
     }
 
     pub fn provision_toggle_selected_option(&mut self) -> bool {
@@ -3078,21 +3228,68 @@ impl AppState {
         true
     }
 
+    fn provision_input_policy(&self, slot: usize) -> ProvisionInputPolicy {
+        match slot {
+            0 => {
+                if self.provision.form.boot_input_mode == crate::provision::CapacityInputMode::Exact
+                {
+                    ProvisionInputPolicy::UnsignedInteger
+                } else {
+                    ProvisionInputPolicy::DecimalCapacity
+                }
+            }
+            1 => {
+                if self.provision.form.share_input_mode
+                    == crate::provision::CapacityInputMode::Exact
+                {
+                    ProvisionInputPolicy::UnsignedInteger
+                } else {
+                    ProvisionInputPolicy::DecimalCapacity
+                }
+            }
+            2 => {
+                if self.provision.form.encrypt_input_mode
+                    == crate::provision::CapacityInputMode::Exact
+                {
+                    ProvisionInputPolicy::UnsignedInteger
+                } else {
+                    ProvisionInputPolicy::DecimalCapacity
+                }
+            }
+            3 => ProvisionInputPolicy::OnlyId,
+            24..=26 => ProvisionInputPolicy::UnsignedInteger,
+            28 | 29 => ProvisionInputPolicy::U8,
+            _ => ProvisionInputPolicy::Text,
+        }
+    }
+
     pub fn provision_push_char(&mut self, ch: char) {
         if ch.is_control() {
             return;
         }
         let cursor = self.provision_field_cursor();
-        let slot = self.provision_field_slot(self.provision.field_selected);
+        let Some(slot) = self.provision_field_slot(self.provision.field_selected) else {
+            return;
+        };
+        let Some(current) = self.provision_selected_field() else {
+            return;
+        };
+        if current.chars().count() >= 128 {
+            return;
+        }
+        let mut chars = current.chars().collect::<Vec<_>>();
+        chars.insert(cursor.min(chars.len()), ch);
+        let candidate = chars.into_iter().collect::<String>();
+        let policy = self.provision_input_policy(slot);
+        if !policy.accepts(&candidate) {
+            self.provision.message = Some(policy.rejection_message().into());
+            return;
+        }
         if let Some(field) = self.provision_selected_field_mut() {
-            if field.chars().count() < 128 {
-                let mut chars = field.chars().collect::<Vec<_>>();
-                chars.insert(cursor.min(chars.len()), ch);
-                *field = chars.into_iter().collect();
-                self.provision.field_cursor = cursor + 1;
-                self.provision.form.mark_quick_capacity_edit(slot);
-                self.provision.message = None;
-            }
+            *field = candidate;
+            self.provision.field_cursor = cursor + 1;
+            self.provision.form.mark_quick_capacity_edit(Some(slot));
+            self.provision.message = None;
         }
     }
 
