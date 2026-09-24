@@ -6,7 +6,7 @@ use std::collections::BTreeSet;
 use encoding_rs::GBK;
 
 use crate::common::SECTOR;
-use crate::crypto::crc32_bare;
+use crate::crypto::{crc32_bare, lba6_checksum};
 use crate::diskio::BackupMeta;
 use crate::protocol::{
     edpf::{EdpfEntry64, EdpfEntry96, PassInfo},
@@ -1368,11 +1368,28 @@ pub fn analyze_sector_with_context(
                     hex_bytes(&view.zero_tail),
                     FieldStyle::Flag,
                 ));
+                let calculated_checksum = lba6_checksum(&raw[..0x1fc]);
+                let checksum_value = if view.checksum == calculated_checksum {
+                    format!(
+                        "0x{:08X} / 计算 0x{:08X} ✓",
+                        view.checksum, calculated_checksum
+                    )
+                } else if view.checksum == calculated_checksum.wrapping_mul(2) {
+                    format!(
+                        "0x{:08X} / 计算 0x{:08X} ×2 profile ✓",
+                        view.checksum, calculated_checksum
+                    )
+                } else {
+                    format!(
+                        "0x{:08X} / 计算 0x{:08X} ✗",
+                        view.checksum, calculated_checksum
+                    )
+                };
                 fields.push(field(
                     0x1fc,
                     0x200,
                     "校验和",
-                    format!("0x{:08X}", view.checksum),
+                    checksum_value,
                     FieldStyle::Checksum,
                 ));
                 notes.push(format!(
