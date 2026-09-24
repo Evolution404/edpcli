@@ -758,9 +758,15 @@ impl TaskHub {
                     backup_dir,
                 };
                 let deep = intent.kind == crate::tui::state::WriteKind::BackupCreateDeep;
-                crate::application::write::backup_create_level_flow(disk, &mut ctx, &mut dev, deep)
-                    .map(|_| ())
-                    .map_err(|error| error.msg)
+                if deep {
+                    crate::application::write::backup_create_level_flow(
+                        disk, &mut ctx, &mut dev, true,
+                    )
+                } else {
+                    crate::application::write::backup_create_flow(disk, &mut ctx, &mut dev)
+                }
+                .map(|_| ())
+                .map_err(|error| error.msg)
             }))
             .unwrap_or_else(|payload| {
                 Err(format!("备份 worker 异常终止: {}", panic_message(payload)))
