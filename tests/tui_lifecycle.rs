@@ -96,6 +96,48 @@ fn three_workspaces_cycle_and_new_overlays_render_at_all_terminal_sizes() {
 }
 
 #[test]
+fn wide_provision_form_uses_two_columns_and_compact_partition_rows() {
+    let mut state = AppState::new();
+    state.replace_devices(vec![usb_device()]);
+    state.navigate(NavCommand::WorkspaceProvision, 20);
+    state.provision_select_disk();
+    state.provision_skip_backup();
+    state.provision_begin_selected();
+    let encrypt = state
+        .provision_visible_fields()
+        .iter()
+        .position(|(label, _, _)| label.starts_with("保密区容量"))
+        .expect("encrypt capacity");
+    state.provision_mut().field_selected = encrypt;
+
+    let width = 160u16;
+    let backend = TestBackend::new(width, 36);
+    let mut terminal = Terminal::new(backend).expect("test terminal");
+    terminal.draw(|frame| render::draw(frame, &state)).unwrap();
+    let cells = terminal.backend().buffer().content();
+    let rows = cells
+        .chunks(width as usize)
+        .map(|row| row.iter().map(|cell| cell.symbol()).collect::<String>())
+        .collect::<Vec<_>>();
+    let text = rows.join("\n");
+    let compact_text = text.replace(' ', "");
+    let compact_rows = rows
+        .iter()
+        .map(|row| row.replace(' ', ""))
+        .collect::<Vec<_>>();
+
+    assert!(compact_text.contains("实时布局"), "{text}");
+    assert!(compact_text.contains("最大可设"), "{text}");
+    assert!(compact_text.contains("还能增加"), "{text}");
+    assert!(
+        compact_rows
+            .iter()
+            .any(|row| row.contains("交换区容量") && row.contains("交换区输入方式")),
+        "{text}"
+    );
+}
+
+#[test]
 fn empty_secret_field_renders_input_placeholder_instead_of_black_value() {
     let mut state = AppState::new();
     state.replace_devices(vec![usb_device()]);

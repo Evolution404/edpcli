@@ -892,85 +892,63 @@ fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppSta
             frame.render_stateful_widget(table, main_area, &mut table_state);
         }
         ProvisionStage::Form => {
-            let mut lines = vec![
-                Line::from(vec![
-                    Span::styled(provision.kind.title(), provision_kind_style(provision.kind)),
-                    Span::raw("  "),
-                    Span::styled("制盘参数", accent()),
-                ]),
-                Line::from(Span::styled(provision.kind.description(), muted())),
-            ];
+            let fields = state.provision_visible_fields();
+            let rows = state.provision_compact_field_rows();
+            let mut form_lines = vec![Line::from(vec![
+                Span::styled(provision.kind.title(), provision_kind_style(provision.kind)),
+                Span::raw("  "),
+                Span::styled(provision.kind.description(), muted()),
+            ])];
             let mut current_section: Option<&str> = None;
             let mut selected_line = 0usize;
-            for (index, (label, value, secret)) in
-                state.provision_visible_fields().iter().enumerate()
-            {
-                let section = state.provision_field_section(index);
-                if section != current_section {
-                    lines.push(Line::from(""));
-                    lines.push(Line::from(Span::styled(
-                        section.unwrap_or("其他"),
-                        secondary(),
-                    )));
-                    current_section = section;
+            for (section, indexes) in rows {
+                if current_section != Some(section) {
+                    form_lines.push(Line::from(""));
+                    form_lines.push(Line::from(Span::styled(section, secondary())));
+                    current_section = Some(section);
                 }
-                let shown = if value.is_empty() {
-                    "〈请输入〉".into()
-                } else if *secret {
-                    "•".repeat(value.chars().count())
-                } else {
-                    safe(value)
-                };
-                let value_style = if index == provision.field_selected {
-                    selected()
-                } else {
-                    Style::default()
-                };
-                let mut spans = vec![
-                    Span::styled(
-                        if index == provision.field_selected {
-                            "▶ "
-                        } else {
-                            "  "
-                        },
-                        if index == provision.field_selected {
-                            selected()
-                        } else {
-                            muted()
-                        },
-                    ),
-                    Span::styled(
-                        format!("{label}  "),
-                        if index == provision.field_selected {
-                            accent()
-                        } else {
-                            muted()
-                        },
-                    ),
-                    Span::styled(shown, value_style),
-                ];
-                if index == provision.field_selected {
-                    if let Some(hint) = state.provision_field_hint(index) {
-                        spans.push(Span::styled(format!("  · {}", safe(&hint)), muted()));
+                let mut spans = Vec::new();
+                let row_selected = indexes.contains(&provision.field_selected);
+                if row_selected {
+                    selected_line = form_lines.len();
+                }
+                for (position, index) in indexes.into_iter().enumerate() {
+                    if position > 0 {
+                        spans.push(Span::styled("   │   ", muted()));
                     }
+                    let (label, value, secret) = &fields[index];
+                    let active = index == provision.field_selected;
+                    let shown = if value.is_empty() {
+                        "〈请输入〉".into()
+                    } else if *secret {
+                        "•".repeat(value.chars().count())
+                    } else {
+                        safe(value)
+                    };
+                    spans.push(Span::styled(
+                        if active { "▶ " } else { "  " },
+                        if active { selected() } else { muted() },
+                    ));
+                    spans.push(Span::styled(
+                        format!("{label} "),
+                        if active { accent() } else { muted() },
+                    ));
+                    spans.push(Span::styled(
+                        shown,
+                        if active { selected() } else { Style::default() },
+                    ));
                 }
-                if index == provision.field_selected {
-                    selected_line = lines.len();
-                }
-                lines.push(Line::from(spans));
+                form_lines.push(Line::from(spans));
             }
-            lines.push(Line::from(""));
-            lines.push(Line::from(Span::styled("布局预览", secondary())));
-            for preview in state.provision_geometry_preview_lines() {
-                let style = if preview.starts_with("布局无效:") {
-                    danger()
-                } else {
-                    muted()
-                };
-                lines.push(Line::from(Span::styled(safe(&preview), style)));
+            if let Some(hint) = state.provision_field_hint(provision.field_selected) {
+                form_lines.push(Line::from(""));
+                form_lines.push(Line::from(vec![
+                    Span::styled("提示  ", secondary()),
+                    Span::styled(safe(&hint), muted()),
+                ]));
             }
-            lines.push(Line::from(""));
-            lines.push(Line::from(vec![
+            form_lines.push(Line::from(""));
+            form_lines.push(Line::from(vec![
                 Span::styled("↑/↓", accent()),
                 Span::raw(" 字段   "),
                 Span::styled("直接输入", secondary()),
@@ -983,21 +961,64 @@ fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppSta
                 Span::raw(" 返回"),
             ]));
             if let Some(message) = &provision.message {
-                lines.push(Line::from(Span::styled(safe(message), danger())));
+                form_lines.push(Line::from(Span::styled(safe(message), danger())));
             }
-            let visible_height = main_area.height.saturating_sub(2) as usize;
+
+            let wide = main_area.width >= 96;
+            let (form_area, layout_area) = if wide {
+                let areas =
+                    Layout::horizontal([Constraint::Percentage(56), Constraint::Percentage(44)])
+                        .split(main_area);
+                (areas[0], areas[1])
+            } else {
+                let areas =
+                    Layout::vertical([Constraint::Percentage(62), Constraint::Percentage(38)])
+                        .split(main_area);
+                (areas[0], areas[1])
+            };
+
+            let visible_height = form_area.height.saturating_sub(2) as usize;
             let scroll = selected_line.saturating_sub(visible_height.saturating_sub(3));
             frame.render_widget(
-                Paragraph::new(lines)
+                Paragraph::new(form_lines)
                     .block(
                         Block::default()
                             .borders(Borders::ALL)
                             .border_style(provision_kind_style(provision.kind))
-                            .title("制盘参数"),
+                            .title("参数"),
                     )
                     .scroll((scroll as u16, 0))
                     .wrap(Wrap { trim: false }),
-                main_area,
+                form_area,
+            );
+
+            let bar_width = layout_area.width.saturating_sub(12) as usize;
+            let layout_lines = state
+                .provision_layout_editor_lines(bar_width)
+                .into_iter()
+                .map(|line| {
+                    let style = if line.starts_with("✗") {
+                        danger()
+                    } else if line.starts_with("✓") {
+                        success()
+                    } else if line.starts_with("当前:") {
+                        accent()
+                    } else {
+                        muted()
+                    };
+                    Line::from(Span::styled(safe(&line), style))
+                })
+                .collect::<Vec<_>>();
+            frame.render_widget(
+                Paragraph::new(layout_lines)
+                    .block(
+                        Block::default()
+                            .borders(Borders::ALL)
+                            .border_style(secondary())
+                            .title("实时布局"),
+                    )
+                    .wrap(Wrap { trim: false }),
+                layout_area,
             );
         }
         ProvisionStage::Planning => {

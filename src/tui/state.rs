@@ -384,6 +384,65 @@ impl Default for ProvisionForm {
 }
 
 impl ProvisionForm {
+    fn format_ratio_decimal(numerator: u64, denominator: u64) -> String {
+        let whole = numerator / denominator;
+        let mut remainder = numerator % denominator;
+        if remainder == 0 {
+            return whole.to_string();
+        }
+        let mut fraction = String::new();
+        while remainder != 0 {
+            remainder *= 10;
+            fraction.push(char::from(b'0' + (remainder / denominator) as u8));
+            remainder %= denominator;
+        }
+        format!("{whole}.{fraction}")
+    }
+
+    fn parse_gib_to_sectors(value: &str, label: &str) -> Result<u64, String> {
+        let value = value.trim();
+        if value.is_empty() {
+            return Err(format!("{label} GiB 不能为空"));
+        }
+        let (whole, fraction) = value.split_once('.').unwrap_or((value, ""));
+        if whole.is_empty()
+            || !whole.chars().all(|ch| ch.is_ascii_digit())
+            || !fraction.chars().all(|ch| ch.is_ascii_digit())
+            || fraction.len() > 12
+        {
+            return Err(format!("{label} GiB 必须是正数，最多 12 位小数"));
+        }
+        let denominator = 10u64
+            .checked_pow(fraction.len() as u32)
+            .ok_or_else(|| format!("{label} GiB 精度过高"))?;
+        let whole = whole
+            .parse::<u64>()
+            .map_err(|_| format!("{label} GiB 数值无效"))?;
+        let fraction = if fraction.is_empty() {
+            0
+        } else {
+            fraction
+                .parse::<u64>()
+                .map_err(|_| format!("{label} GiB 数值无效"))?
+        };
+        let numerator = whole
+            .checked_mul(denominator)
+            .and_then(|value| value.checked_add(fraction))
+            .ok_or_else(|| format!("{label} GiB 容量溢出"))?;
+        if numerator == 0 {
+            return Err(format!("{label} GiB 必须大于 0"));
+        }
+        let scaled = numerator
+            .checked_mul(2_097_152)
+            .ok_or_else(|| format!("{label} GiB 容量溢出"))?;
+        if scaled % denominator != 0 {
+            return Err(format!(
+                "{label} GiB 不能精确对应完整 sector，请增加小数精度"
+            ));
+        }
+        Ok(scaled / denominator)
+    }
+
     fn apply_prefill(&mut self, prefill: &crate::provision::ProvisionPrefill) {
         use crate::provision::CapacityInputMode;
         let set = |input: Option<crate::provision::CapacityInput>,
@@ -473,22 +532,11 @@ impl ProvisionForm {
                 let mib = quick
                     .parse::<u64>()
                     .map_err(|_| "请先输入有效的 MiB 数".to_string())?;
-                if mib.is_multiple_of(1024) {
-                    *quick = (mib / 1024).to_string();
-                    *unit = QuickCapacityUnit::GiB;
-                } else {
-                    *exact = mib.checked_mul(2048).ok_or("容量扇区数溢出")?.to_string();
-                    *mode = CapacityInputMode::Exact;
-                }
+                *quick = Self::format_ratio_decimal(mib, 1024);
+                *unit = QuickCapacityUnit::GiB;
             }
             (CapacityInputMode::Quick, QuickCapacityUnit::GiB) => {
-                let gib = quick
-                    .parse::<u64>()
-                    .map_err(|_| "请先输入有效的 GiB 数".to_string())?;
-                *exact = gib
-                    .checked_mul(2_097_152)
-                    .ok_or("容量扇区数溢出")?
-                    .to_string();
+                *exact = Self::parse_gib_to_sectors(quick, "当前容量")?.to_string();
                 *mode = CapacityInputMode::Exact;
             }
         }
@@ -2585,15 +2633,21 @@ impl AppState {
                         .ok_or_else(|| format!("{label}必须为正整数 sector"))?,
                     CapacitySource::UserEdited,
                 )?,
-                CapacityInputMode::Quick => CapacityInput::from_quick(
-                    quick
-                        .parse::<u64>()
-                        .ok()
-                        .filter(|value| *value > 0)
-                        .ok_or_else(|| format!("{label}必须为正整数 MiB/GiB"))?,
-                    unit,
-                    CapacitySource::UserEdited,
-                )?,
+                CapacityInputMode::Quick => match unit {
+                    QuickCapacityUnit::MiB => CapacityInput::from_quick(
+                        quick
+                            .parse::<u64>()
+                            .ok()
+                            .filter(|value| *value > 0)
+                            .ok_or_else(|| format!("{label}必须为正整数 MiB"))?,
+                        unit,
+                        CapacitySource::UserEdited,
+                    )?,
+                    QuickCapacityUnit::GiB => CapacityInput::from_quick_sectors(
+                        ProvisionForm::parse_gib_to_sectors(quick, label)?,
+                        CapacitySource::UserEdited,
+                    )?,
+                },
             };
             let source = original
                 .filter(|value| value.sectors() == provisional.sectors())
@@ -2603,13 +2657,18 @@ impl AppState {
                 CapacityInputMode::Exact => {
                     CapacityInput::from_exact(provisional.sectors(), source)
                 }
-                CapacityInputMode::Quick => CapacityInput::from_quick(
-                    quick
-                        .parse::<u64>()
-                        .map_err(|_| format!("{label}输入无效"))?,
-                    unit,
-                    source,
-                ),
+                CapacityInputMode::Quick => match unit {
+                    QuickCapacityUnit::MiB => CapacityInput::from_quick(
+                        quick
+                            .parse::<u64>()
+                            .map_err(|_| format!("{label}输入无效"))?,
+                        unit,
+                        source,
+                    ),
+                    QuickCapacityUnit::GiB => {
+                        CapacityInput::from_quick_sectors(provisional.sectors(), source)
+                    }
+                },
             }
         };
         let parse_start = |active: bool,
@@ -2774,6 +2833,272 @@ impl AppState {
         }
     }
 
+    pub fn provision_compact_field_rows(&self) -> Vec<(&'static str, Vec<usize>)> {
+        let fields = self.provision_visible_fields();
+        let mut rows = Vec::new();
+        let mut index = 0usize;
+        while index < fields.len() {
+            let section = self.provision_field_section(index).unwrap_or("其他");
+            let slot = self.provision_field_slot(index).unwrap_or(usize::MAX);
+            let width = match section {
+                "身份信息" => 2,
+                "分区布局" if matches!(slot, 0..=2) => 2,
+                "分区布局" => 1,
+                "密码策略" => 2,
+                "格式化（可选）" if slot == 17 => 1,
+                "格式化（可选）" if matches!(slot, 11..=13) => 2,
+                "格式化（可选）" => 1,
+                _ => 1,
+            };
+            let mut end = index + 1;
+            while end < fields.len()
+                && end < index + width
+                && self.provision_field_section(end) == Some(section)
+            {
+                end += 1;
+            }
+            rows.push((section, (index..end).collect()));
+            index = end;
+        }
+        rows
+    }
+
+    fn provision_selected_partition_role(&self) -> Option<crate::provision::PartitionRole> {
+        use crate::provision::PartitionRole;
+        let mode = self.provision.kind.mode()?;
+        let slot = self.provision_field_slot(self.provision.field_selected)?;
+        match slot {
+            0 | 21 | 24 | 11 | 14 | 18 => Some(PartitionRole::Boot),
+            1 | 22 | 25 | 12 | 15 | 19 => Some(if mode == 1 {
+                PartitionRole::BootShareCombined
+            } else {
+                PartitionRole::Share
+            }),
+            2 | 23 | 26 | 13 | 16 | 20 => Some(PartitionRole::Encrypt),
+            17 => Some(PartitionRole::CompatibilityReserve),
+            _ => None,
+        }
+    }
+
+    fn format_sector_size(sectors: u64) -> String {
+        let mib = sectors as f64 / 2048.0;
+        if mib >= 1024.0 {
+            format!("{:.2} GiB", mib / 1024.0)
+        } else if mib >= 1.0 {
+            format!("{mib:.1} MiB")
+        } else {
+            format!("{sectors} sector")
+        }
+    }
+
+    pub fn provision_layout_editor_lines(&self, bar_width: usize) -> Vec<String> {
+        use crate::provision::PartitionRole;
+
+        let Some(row) = self.selected_device() else {
+            return vec!["未选择目标盘".into()];
+        };
+        let total_sectors = row.size / crate::common::SECTOR as u64;
+        let mut lines = vec![format!(
+            "disk{}  整盘 {}  ·  {} sector",
+            row.disk,
+            Self::format_sector_size(total_sectors),
+            total_sectors
+        )];
+        let (resolved, source) = match self.provision_resolved_prefill() {
+            Ok(value) => value,
+            Err(message) => {
+                lines.push(format!("✗ 布局无效: {message}"));
+                return lines;
+            }
+        };
+        let mut parts = match resolved.target_partitions(crate::common::SECTOR as u64) {
+            Ok(parts) => parts,
+            Err(message) => {
+                lines.push(format!("✗ 布局无效: {message}"));
+                return lines;
+            }
+        };
+        parts.sort_by_key(|part| part.start_lba);
+        let usable_start = crate::provision::OFFICIAL_PARTITION_START_SECTOR;
+        let usable_end_exclusive = resolved.usable_end_lba;
+        let usable_sectors = usable_end_exclusive.saturating_sub(usable_start);
+        let allocated = parts.iter().map(|part| part.sector_count).sum::<u64>();
+        let unallocated = crate::provision::validate_target_geometry(&parts, usable_end_exclusive)
+            .unwrap_or_default();
+        lines.push(format!(
+            "可分区 LBA {}–{}  ·  {}",
+            usable_start,
+            usable_end_exclusive.saturating_sub(1),
+            Self::format_sector_size(usable_sectors)
+        ));
+        lines.push(format!(
+            "已分配 {}  ·  未分配 {}",
+            Self::format_sector_size(allocated),
+            Self::format_sector_size(unallocated)
+        ));
+
+        let width = bar_width.clamp(24, 64);
+        let mut bar = vec!['·'; width];
+        if usable_sectors > 0 {
+            for part in &parts {
+                let start = part.start_lba.saturating_sub(usable_start);
+                let end = start.saturating_add(part.sector_count);
+                let mut left = ((start as u128 * width as u128) / usable_sectors as u128) as usize;
+                let mut right = ((end as u128 * width as u128 + usable_sectors as u128 - 1)
+                    / usable_sectors as u128) as usize;
+                left = left.min(width.saturating_sub(1));
+                right = right.clamp(left + 1, width);
+                let mark = match part.role {
+                    PartitionRole::Boot => 'B',
+                    PartitionRole::Share | PartitionRole::BootShareCombined => 'S',
+                    PartitionRole::Encrypt => 'E',
+                    PartitionRole::CompatibilityReserve => 'C',
+                };
+                for cell in &mut bar[left..right] {
+                    *cell = mark;
+                }
+            }
+        }
+        lines.push(format!("比例 [{}]", bar.into_iter().collect::<String>()));
+        lines.push("B启动  S交换/二合一  E保密  C兼容保留  ·空闲".into());
+        lines.push(String::new());
+
+        for part in &parts {
+            let end = part.start_lba + part.sector_count - 1;
+            let candidate = source
+                .as_ref()
+                .and_then(|profile| profile.partition(part.role))
+                .is_some_and(|old| {
+                    part.role != PartitionRole::CompatibilityReserve
+                        && old.partition_type == part.partition_type
+                        && old.start_lba == part.start_lba
+                        && old.sector_count == part.sector_count
+                        && old.physically_encrypted == part.physically_encrypted
+                });
+            lines.push(format!(
+                "{}  LBA {}–{}  ·  {}  ·  {}",
+                part.role.label(),
+                part.start_lba,
+                end,
+                Self::format_sector_size(part.sector_count),
+                if candidate { "可保留" } else { "重建" }
+            ));
+        }
+        if unallocated > 0 {
+            let mut cursor = usable_start;
+            for part in &parts {
+                if part.start_lba > cursor {
+                    let gap = part.start_lba - cursor;
+                    lines.push(format!(
+                        "空闲  LBA {}–{}  ·  {}",
+                        cursor,
+                        part.start_lba - 1,
+                        Self::format_sector_size(gap)
+                    ));
+                }
+                cursor = part.start_lba.saturating_add(part.sector_count);
+            }
+            if cursor < usable_end_exclusive {
+                lines.push(format!(
+                    "空闲  LBA {}–{}  ·  {}",
+                    cursor,
+                    usable_end_exclusive - 1,
+                    Self::format_sector_size(usable_end_exclusive - cursor)
+                ));
+            }
+        }
+
+        lines.push(String::new());
+        if let Some(role) = self.provision_selected_partition_role() {
+            if let Some((index, current)) =
+                parts.iter().enumerate().find(|(_, part)| part.role == role)
+            {
+                let base = self.provision_target_mode().and_then(|mode| {
+                    crate::provision::prefill_for_target_mode(
+                        source.as_ref(),
+                        mode,
+                        resolved.usable_end_lba,
+                        crate::common::SECTOR as u64,
+                    )
+                    .ok()
+                });
+                let explicit_start = |candidate: PartitionRole| -> bool {
+                    let Some(base) = base.as_ref() else {
+                        return false;
+                    };
+                    let (text, original) = match candidate {
+                        PartitionRole::Boot | PartitionRole::CompatibilityReserve => (
+                            self.provision.form.boot_start_lba.as_str(),
+                            base.boot_start_lba,
+                        ),
+                        PartitionRole::Share | PartitionRole::BootShareCombined => (
+                            self.provision.form.share_start_lba.as_str(),
+                            base.share_start_lba,
+                        ),
+                        PartitionRole::Encrypt => (
+                            self.provision.form.encrypt_start_lba.as_str(),
+                            base.encrypt_start_lba,
+                        ),
+                    };
+                    text.parse::<u64>()
+                        .ok()
+                        .is_some_and(|start| Some(start) != original)
+                };
+                let anchored = |candidate: PartitionRole| {
+                    source
+                        .as_ref()
+                        .and_then(|profile| profile.partition(candidate))
+                        .is_some()
+                        || explicit_start(candidate)
+                };
+
+                let mut boundary = usable_end_exclusive;
+                let mut downstream_unanchored = 0u64;
+                let mut limiter = None;
+                for next in parts.iter().skip(index + 1) {
+                    if anchored(next.role) {
+                        boundary = next.start_lba;
+                        limiter = Some((next.role, next.start_lba));
+                        break;
+                    }
+                    downstream_unanchored = downstream_unanchored.saturating_add(next.sector_count);
+                }
+                let max_sectors = boundary
+                    .saturating_sub(current.start_lba)
+                    .saturating_sub(downstream_unanchored);
+                let grow = max_sectors.saturating_sub(current.sector_count);
+                lines.push(format!("当前: {}", current.role.label()));
+                lines.push(format!(
+                    "大小 {} ({} sector)",
+                    Self::format_sector_size(current.sector_count),
+                    current.sector_count
+                ));
+                lines.push(format!(
+                    "最大可设 {} ({} sector)",
+                    Self::format_sector_size(max_sectors),
+                    max_sectors
+                ));
+                lines.push(format!("还能增加 {}", Self::format_sector_size(grow)));
+                if let Some((next_role, next_start)) = limiter {
+                    lines.push(format!(
+                        "限制: 后续{}固定起点 LBA {}",
+                        next_role.label(),
+                        next_start
+                    ));
+                } else {
+                    lines.push(format!(
+                        "限制: 可分区末端 LBA {}；后续未锚定分区可自动后移",
+                        usable_end_exclusive.saturating_sub(1)
+                    ));
+                }
+            }
+        } else {
+            lines.push("选中分区容量/单位/起点，可查看最大可设范围".into());
+        }
+        lines.push("✓ 当前布局无重叠、未越界".into());
+        lines
+    }
+
     pub fn provision_field_hint(&self, display_index: usize) -> Option<String> {
         let slot = self.provision_field_slot(display_index)?;
         match slot {
@@ -2891,13 +3216,15 @@ impl AppState {
         let quick_mib = |value: &str,
                          unit: crate::provision::QuickCapacityUnit,
                          label: &str|
-         -> Result<u64, String> {
-            let value = parse_mib(value, label)?;
+         -> Result<(Option<u64>, Option<u64>), String> {
             match unit {
-                crate::provision::QuickCapacityUnit::MiB => Ok(value),
-                crate::provision::QuickCapacityUnit::GiB => value
-                    .checked_mul(1024)
-                    .ok_or_else(|| format!("{label} GiB 容量溢出")),
+                crate::provision::QuickCapacityUnit::MiB => {
+                    Ok((Some(parse_mib(value, label)?), None))
+                }
+                crate::provision::QuickCapacityUnit::GiB => Ok((
+                    None,
+                    Some(ProvisionForm::parse_gib_to_sectors(value, label)?),
+                )),
             }
         };
         let exact = crate::provision::CapacityInputMode::Exact;
@@ -2906,35 +3233,34 @@ impl AppState {
         } else {
             None
         };
-        let boot_mib = if matches!(mode, 0 | 3) && form.boot_input_mode != exact {
-            Some(quick_mib(&form.boot_mib, form.boot_quick_unit, "启动区")?)
-        } else {
-            None
-        };
+        let (boot_mib, boot_quick_sectors) =
+            if matches!(mode, 0 | 3) && form.boot_input_mode != exact {
+                quick_mib(&form.boot_mib, form.boot_quick_unit, "启动区")?
+            } else {
+                (None, None)
+            };
         let share_sectors = if matches!(mode, 0 | 1 | 3) && form.share_input_mode == exact {
             Some(parse_sectors(&form.share_sectors, "交换区")?)
         } else {
             None
         };
-        let share_mib = if matches!(mode, 0 | 1 | 3) && form.share_input_mode != exact {
-            Some(quick_mib(&form.share_mib, form.share_quick_unit, "交换区")?)
-        } else {
-            None
-        };
+        let (share_mib, share_quick_sectors) =
+            if matches!(mode, 0 | 1 | 3) && form.share_input_mode != exact {
+                quick_mib(&form.share_mib, form.share_quick_unit, "交换区")?
+            } else {
+                (None, None)
+            };
         let encrypt_sectors = if matches!(mode, 0..=2) && form.encrypt_input_mode == exact {
             Some(parse_sectors(&form.encrypt_sectors, "保密区")?)
         } else {
             None
         };
-        let encrypt_mib = if matches!(mode, 0..=2) && form.encrypt_input_mode != exact {
-            Some(quick_mib(
-                &form.encrypt_mib,
-                form.encrypt_quick_unit,
-                "保密区",
-            )?)
-        } else {
-            None
-        };
+        let (encrypt_mib, encrypt_quick_sectors) =
+            if matches!(mode, 0..=2) && form.encrypt_input_mode != exact {
+                quick_mib(&form.encrypt_mib, form.encrypt_quick_unit, "保密区")?
+            } else {
+                (None, None)
+            };
         let (resolved, _) = self.provision_resolved_prefill()?;
         if self.provision.form.label_id.trim().is_empty()
             || self.provision.form.user.trim().is_empty()
@@ -2970,11 +3296,11 @@ impl AppState {
                 .then_some(resolved.encrypt_start_lba)
                 .flatten(),
             boot_mib,
-            boot_sectors,
+            boot_sectors: boot_sectors.or(boot_quick_sectors),
             share_mib,
-            share_sectors,
+            share_sectors: share_sectors.or(share_quick_sectors),
             encrypt_mib,
-            encrypt_sectors,
+            encrypt_sectors: encrypt_sectors.or(encrypt_quick_sectors),
             label_id: self.provision.form.label_id.trim().to_string(),
             user: self.provision.form.user.trim().to_string(),
             dept: self.provision.form.dept.trim().to_string(),

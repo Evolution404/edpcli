@@ -74,6 +74,17 @@ impl CapacityInput {
         })
     }
 
+    pub fn from_quick_sectors(sectors: u64, source: CapacitySource) -> Result<Self, String> {
+        if sectors == 0 {
+            return Err("partition capacity must be non-zero".into());
+        }
+        Ok(Self {
+            sectors,
+            mode: CapacityInputMode::Quick,
+            source,
+        })
+    }
+
     pub const fn sectors(self) -> u64 {
         self.sectors
     }

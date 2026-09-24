@@ -400,6 +400,60 @@ fn provision_uses_only_per_partition_quick_exact_inputs() {
 }
 
 #[test]
+fn provision_capacity_unit_cycles_mib_gib_sector_without_geometry_change() {
+    use edpcli::provision::{CapacityInputMode, QuickCapacityUnit};
+
+    let mut state = AppState::new();
+    state.replace_devices(vec![device(64_000_000_000)]);
+    state.navigate(NavCommand::WorkspaceProvision, 20);
+    state.provision_select_disk();
+    state.provision_skip_backup();
+    assert_eq!(state.provision_begin_selected(), ProvisionKind::Mode0);
+
+    state.provision_mut().form.share_input_mode = CapacityInputMode::Quick;
+    state.provision_mut().form.share_quick_unit = QuickCapacityUnit::MiB;
+    state.provision_mut().form.share_mib = "6644".into();
+    let mode_index = state
+        .provision_visible_fields()
+        .iter()
+        .position(|(label, _, _)| label == "交换区输入方式")
+        .expect("share input mode field");
+    state.provision_mut().field_selected = mode_index;
+
+    assert!(state.provision_toggle_selected_option());
+    assert_eq!(
+        state.provision().form.share_quick_unit,
+        QuickCapacityUnit::GiB
+    );
+    assert_eq!(state.provision().form.share_mib, "6.48828125");
+    assert!(state
+        .provision_visible_fields()
+        .iter()
+        .any(|(label, value, _)| label == "交换区容量 (GiB)" && *value == "6.48828125"));
+    let request = state.provision_request().expect("GiB request");
+    assert_eq!(request.share_mib, None);
+    assert_eq!(request.share_sectors, Some(13_606_912));
+
+    assert!(state.provision_toggle_selected_option());
+    assert_eq!(
+        state.provision().form.share_input_mode,
+        CapacityInputMode::Exact
+    );
+    assert_eq!(state.provision().form.share_sectors, "13606912");
+
+    assert!(state.provision_toggle_selected_option());
+    assert_eq!(
+        state.provision().form.share_input_mode,
+        CapacityInputMode::Quick
+    );
+    assert_eq!(
+        state.provision().form.share_quick_unit,
+        QuickCapacityUnit::MiB
+    );
+    assert_eq!(state.provision().form.share_mib, "6644");
+}
+
+#[test]
 fn provision_capacity_hints_match_each_partition() {
     let mut state = AppState::new();
     state.replace_devices(vec![device(64_000_000_000)]);
@@ -460,6 +514,93 @@ fn provision_form_sections_are_compact_and_user_facing() {
 }
 
 #[test]
+fn provision_layout_editor_reports_total_space_and_selected_partition_limits() {
+    let mut state = AppState::new();
+    state.replace_devices(vec![device(64_000_000_000)]);
+    state.navigate(NavCommand::WorkspaceProvision, 20);
+    state.provision_select_disk();
+    state.provision_skip_backup();
+    assert_eq!(state.provision_begin_selected(), ProvisionKind::Mode0);
+
+    let encrypt = state
+        .provision_visible_fields()
+        .iter()
+        .position(|(label, _, _)| label.starts_with("保密区容量"))
+        .expect("encrypt capacity");
+    state.provision_mut().field_selected = encrypt;
+    let lines = state.provision_layout_editor_lines(40);
+
+    assert!(lines.iter().any(|line| line.contains("整盘")), "{lines:?}");
+    assert!(
+        lines.iter().any(|line| line.contains("可分区 LBA")),
+        "{lines:?}"
+    );
+    assert!(
+        lines.iter().any(|line| line.contains("未分配")),
+        "{lines:?}"
+    );
+    assert!(
+        lines.iter().any(|line| line.starts_with("比例 [")),
+        "{lines:?}"
+    );
+    assert!(lines.iter().any(|line| line == "当前: 保密区"), "{lines:?}");
+    assert!(
+        lines.iter().any(|line| line.contains("最大可设")),
+        "{lines:?}"
+    );
+    assert!(
+        lines.iter().any(|line| line.contains("还能增加")),
+        "{lines:?}"
+    );
+    assert!(
+        lines.iter().any(|line| line.contains("限制: 可分区末端")),
+        "{lines:?}"
+    );
+    assert!(
+        lines.iter().any(|line| line.starts_with("✓ 当前布局")),
+        "{lines:?}"
+    );
+}
+
+#[test]
+fn provision_compact_rows_keep_partition_capacity_mode_and_start_together() {
+    let mut state = AppState::new();
+    state.replace_devices(vec![device(64_000_000_000)]);
+    state.navigate(NavCommand::WorkspaceProvision, 20);
+    state.provision_select_disk();
+    state.provision_skip_backup();
+    assert_eq!(state.provision_begin_selected(), ProvisionKind::Mode0);
+
+    let fields = state.provision_visible_fields();
+    let rows = state.provision_compact_field_rows();
+    let share_row = rows
+        .iter()
+        .find(|(_, indexes)| {
+            indexes
+                .iter()
+                .any(|index| fields[*index].0.starts_with("交换区容量"))
+        })
+        .expect("share row");
+    let labels = share_row
+        .1
+        .iter()
+        .map(|index| fields[*index].0.as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(labels.len(), 2);
+    assert!(labels[0].starts_with("交换区容量"));
+    assert_eq!(labels[1], "交换区输入方式");
+    let share_start_row = rows
+        .iter()
+        .find(|(_, indexes)| {
+            indexes
+                .iter()
+                .any(|index| fields[*index].0 == "交换区起点 LBA")
+        })
+        .expect("share start row");
+    assert_eq!(share_start_row.1.len(), 1);
+}
+
+#[test]
 fn registered_mode0_to_mode1_preview_keeps_encrypt_anchor_and_blocks_overlap() {
     use edpcli::provision::{CapacityInputMode, DiskProvisionKind};
     use edpcli::sectors::EdpfPartition;
@@ -504,6 +645,19 @@ fn registered_mode0_to_mode1_preview_keeps_encrypt_anchor_and_blocks_overlap() {
         state.provision().form.encrypt_input_mode,
         CapacityInputMode::Exact
     );
+    let share_index = state
+        .provision_visible_fields()
+        .iter()
+        .position(|(label, _, _)| label.starts_with("交换区容量"))
+        .expect("share capacity");
+    state.provision_mut().field_selected = share_index;
+    let constraints = state.provision_layout_editor_lines(40);
+    assert!(
+        constraints.iter().any(|line| {
+            line.contains(&format!("限制: 后续保密区固定起点 LBA {encrypt_start}"))
+        }),
+        "{constraints:?}"
+    );
 
     let smaller = encrypt_start - 63 - 4096;
     state.provision_mut().form.share_sectors = smaller.to_string();
@@ -544,6 +698,19 @@ fn plain_mode0_preview_reflows_unanchored_share_after_boot_edit() {
         .provision_geometry_preview_lines()
         .iter()
         .any(|line| line.contains("LBA 10063–")));
+    let boot_index = state
+        .provision_visible_fields()
+        .iter()
+        .position(|(label, _, _)| label.starts_with("启动区容量"))
+        .expect("boot capacity");
+    state.provision_mut().field_selected = boot_index;
+    let constraints = state.provision_layout_editor_lines(40);
+    assert!(
+        constraints
+            .iter()
+            .any(|line| { line.contains("后续未锚定分区可自动后移") }),
+        "{constraints:?}"
+    );
 }
 
 #[test]
