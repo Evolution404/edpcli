@@ -4,13 +4,15 @@ use edpcli::{
     protocol::edpf::EdpPartitionType,
     protocol::lba7_compat::locate_lba7_compatibility_extent_from_geometry,
     provision::{
-        decide_partition_action, generate_official_image, parse_existing_provision,
-        prefill_for_target_mode, wrap_file_key, wrap_legacy_lba7_file_key, CapacityInput,
-        CapacityInputMode, CapacitySource, DiskProvisionKind, ExistingPartition,
-        ExistingProvisionProfile, FileKeyWrapMode, OfficialFilesystemFormat, OfficialPartitionMode,
-        OfficialPartitionSizes, OfficialProvisionPlan, OnlyId, PartitionAction, PartitionRole,
-        ProvisionEntropy, ProvisionMetadata, ProvisionProfile, ProvisionSpec, QuickCapacityUnit,
-        TargetIdentity, OFFICIAL_PARTITION_START_SECTOR,
+        apply_target_geometry_overrides, decide_partition_action, generate_official_image,
+        parse_existing_provision, prefill_for_target_mode, wrap_file_key,
+        wrap_legacy_lba7_file_key, CapacityInput, CapacityInputMode, CapacitySource,
+        DiskProvisionKind, ExistingPartition, ExistingProvisionProfile, FileKeyWrapMode,
+        OfficialFilesystemFormat, OfficialPartitionMode, OfficialPartitionSizes,
+        OfficialProvisionPlan, OnlyId, PartitionAction, PartitionRole, ProvisionEntropy,
+        ProvisionMetadata, ProvisionProfile, ProvisionSpec, QuickCapacityUnit,
+        TargetGeometryOverrides, TargetIdentity, TargetProvisionPlan,
+        OFFICIAL_PARTITION_START_SECTOR,
     },
 };
 
@@ -177,6 +179,113 @@ fn mode0_to_mode1_prefill_preserves_exact_encrypt_geometry_even_when_not_whole_m
         decide_partition_action(Some(source_encrypt), target_encrypt),
         PartitionAction::PreserveExact
     );
+}
+
+#[test]
+fn geometry_overrides_keep_registered_encrypt_anchored_and_reject_overlap() {
+    let encrypt_start = 6_291_457;
+    let encrypt_sectors = 2_097_000;
+    let source = ExistingProvisionProfile {
+        source_mode: OfficialPartitionMode::DefaultThreePartition,
+        partitions: vec![
+            part(
+                PartitionRole::Boot,
+                EdpPartitionType::Boot,
+                63,
+                20_417,
+                false,
+            ),
+            part(
+                PartitionRole::Share,
+                EdpPartitionType::Share,
+                20_480,
+                encrypt_start - 20_480,
+                true,
+            ),
+            part(
+                PartitionRole::Encrypt,
+                EdpPartitionType::Encrypt,
+                encrypt_start,
+                encrypt_sectors,
+                true,
+            ),
+        ],
+    };
+    let prefill = prefill_for_target_mode(
+        Some(&source),
+        OfficialPartitionMode::BootShareCombined,
+        encrypt_start + encrypt_sectors + 100_000,
+        SECTOR_SIZE,
+    )
+    .unwrap();
+
+    let shrunk = apply_target_geometry_overrides(
+        prefill.clone(),
+        Some(&source),
+        TargetGeometryOverrides {
+            share: Some(
+                CapacityInput::from_exact(
+                    encrypt_start - OFFICIAL_PARTITION_START_SECTOR - 4096,
+                    CapacitySource::UserEdited,
+                )
+                .unwrap(),
+            ),
+            ..TargetGeometryOverrides::default()
+        },
+    )
+    .unwrap();
+    assert_eq!(shrunk.encrypt_start_lba, Some(encrypt_start));
+    assert_eq!(
+        shrunk.target_partitions(SECTOR_SIZE).unwrap()[0]
+            .end_lba()
+            .unwrap(),
+        encrypt_start - 4096
+    );
+
+    let overlap = apply_target_geometry_overrides(
+        prefill,
+        Some(&source),
+        TargetGeometryOverrides {
+            share: Some(
+                CapacityInput::from_exact(
+                    encrypt_start - OFFICIAL_PARTITION_START_SECTOR + 1,
+                    CapacitySource::UserEdited,
+                )
+                .unwrap(),
+            ),
+            ..TargetGeometryOverrides::default()
+        },
+    )
+    .unwrap_err();
+    assert!(overlap.contains("overlap"));
+}
+
+#[test]
+fn geometry_overrides_reflow_only_unanchored_plain_partitions() {
+    let usable_end = OFFICIAL_PARTITION_START_SECTOR + 40_000_000;
+    let prefill = prefill_for_target_mode(
+        None,
+        OfficialPartitionMode::DefaultThreePartition,
+        usable_end,
+        SECTOR_SIZE,
+    )
+    .unwrap();
+    let boot = CapacityInput::from_exact(10_000, CapacitySource::UserEdited).unwrap();
+    let edited = apply_target_geometry_overrides(
+        prefill,
+        None,
+        TargetGeometryOverrides {
+            boot: Some(boot),
+            ..TargetGeometryOverrides::default()
+        },
+    )
+    .unwrap();
+    assert_eq!(
+        edited.share_start_lba,
+        Some(OFFICIAL_PARTITION_START_SECTOR + 10_000)
+    );
+    let share_end = edited.share_start_lba.unwrap() + edited.share.unwrap().sectors();
+    assert_eq!(edited.encrypt_start_lba, Some(share_end));
 }
 
 #[test]
@@ -414,6 +523,75 @@ fn moving_type4_from_slot_two_to_one_reencodes_headers_and_reuses_only_its_key_m
         u32::from_le_bytes(new7[0x40 + 8..0x40 + 12].try_into().unwrap()),
         2
     );
+}
+
+#[test]
+fn target_plan_preserves_only_verified_matching_data() {
+    let (_, source_image, did) = generated_source(OfficialPartitionMode::DefaultThreePartition);
+    let mut source = parse_existing_provision(&source_image, &did, 16_777_216)
+        .unwrap()
+        .unwrap();
+    let prefill = prefill_for_target_mode(
+        Some(&source.profile),
+        OfficialPartitionMode::BootShareCombined,
+        16_000_000,
+        512,
+    )
+    .unwrap();
+    let targets = prefill.target_partitions(512).unwrap();
+    let unknown_fs = TargetProvisionPlan::build(
+        Some(&source),
+        OfficialPartitionMode::BootShareCombined,
+        &targets,
+        16_000_000,
+        b"ProofPass1!",
+    )
+    .unwrap();
+    assert_eq!(unknown_fs.partitions[1].action, PartitionAction::Rebuild);
+
+    source
+        .confirm_filesystem(PartitionRole::Encrypt, OfficialFilesystemFormat::ExFat)
+        .unwrap();
+    let plan = TargetProvisionPlan::build(
+        Some(&source),
+        OfficialPartitionMode::BootShareCombined,
+        &targets,
+        16_000_000,
+        b"ProofPass1!",
+    )
+    .unwrap();
+    assert_eq!(plan.partitions[0].action, PartitionAction::Rebuild);
+    assert_eq!(plan.partitions[1].action, PartitionAction::PreserveExact);
+    assert_eq!(
+        plan.preserved_extents().collect::<Vec<_>>(),
+        vec![(targets[1].start_lba, targets[1].sector_count)]
+    );
+    assert_eq!(
+        plan.partitions[1]
+            .preserved_record
+            .unwrap()
+            .lba12
+            .file_key_crc,
+        source
+            .record(PartitionRole::Encrypt)
+            .unwrap()
+            .lba12
+            .file_key_crc
+    );
+
+    let wrong_password = TargetProvisionPlan::build(
+        Some(&source),
+        OfficialPartitionMode::BootShareCombined,
+        &targets,
+        16_000_000,
+        b"incorrect",
+    )
+    .unwrap();
+    assert_eq!(
+        wrong_password.partitions[1].action,
+        PartitionAction::Rebuild
+    );
+    assert!(wrong_password.partitions[1].reason.contains("FileKey"));
 }
 
 #[test]

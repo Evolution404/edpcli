@@ -315,6 +315,90 @@ impl ProvisionPrefill {
     }
 }
 
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct TargetGeometryOverrides {
+    pub boot: Option<CapacityInput>,
+    pub share: Option<CapacityInput>,
+    pub encrypt: Option<CapacityInput>,
+    pub boot_start_lba: Option<u64>,
+    pub share_start_lba: Option<u64>,
+    pub encrypt_start_lba: Option<u64>,
+}
+
+/// Apply user geometry edits without disturbing source-backed anchors that the
+/// user did not edit. Plain/unanchored targets remain compact; registered
+/// targets are allowed to leave gaps and fail closed on overlap.
+pub fn apply_target_geometry_overrides(
+    mut prefill: ProvisionPrefill,
+    source: Option<&ExistingProvisionProfile>,
+    overrides: TargetGeometryOverrides,
+) -> Result<ProvisionPrefill, String> {
+    if let Some(value) = overrides.boot {
+        if prefill.boot.is_some() {
+            prefill.boot = Some(value);
+        }
+    }
+    if let Some(value) = overrides.share {
+        if prefill.share.is_some() {
+            prefill.share = Some(value);
+        }
+    }
+    if let Some(value) = overrides.encrypt {
+        if prefill.encrypt.is_some() {
+            prefill.encrypt = Some(value);
+        }
+    }
+    if let Some(start) = overrides.boot_start_lba {
+        if prefill.boot.is_some() {
+            prefill.boot_start_lba = Some(start);
+        }
+    }
+    if let Some(start) = overrides.share_start_lba {
+        if prefill.share.is_some() {
+            prefill.share_start_lba = Some(start);
+        }
+    }
+    if let Some(start) = overrides.encrypt_start_lba {
+        if prefill.encrypt.is_some() {
+            prefill.encrypt_start_lba = Some(start);
+        }
+    }
+
+    if overrides.share_start_lba.is_none()
+        && source
+            .and_then(|source| source.partition(PartitionRole::Share))
+            .is_none()
+        && prefill.mode != OfficialPartitionMode::BootShareCombined
+        && prefill.share.is_some()
+    {
+        prefill.share_start_lba = prefill
+            .boot_start_lba
+            .zip(prefill.boot)
+            .and_then(|(start, size)| start.checked_add(size.sectors()));
+    }
+    if overrides.encrypt_start_lba.is_none()
+        && source
+            .and_then(|source| source.partition(PartitionRole::Encrypt))
+            .is_none()
+        && prefill.encrypt.is_some()
+    {
+        prefill.encrypt_start_lba = if prefill.mode == OfficialPartitionMode::WholeDiskEncrypted {
+            prefill
+                .boot_start_lba
+                .zip(prefill.boot)
+                .and_then(|(start, size)| start.checked_add(size.sectors()))
+        } else {
+            prefill
+                .share_start_lba
+                .zip(prefill.share)
+                .and_then(|(start, size)| start.checked_add(size.sectors()))
+        };
+    }
+
+    prefill.target_partitions(512)?;
+    Ok(prefill)
+}
+
 pub fn validate_target_geometry(
     parts: &[TargetPartitionGeometry],
     usable_end_lba: u64,
@@ -404,7 +488,11 @@ pub fn prefill_for_target_mode(
     let encrypt = if matches!(mode, OfficialPartitionMode::IntranetExtranetDualPartition) {
         None
     } else {
-        source_capacity(encrypt_old)?.or(Some(exact(2_097_152, CapacitySource::SystemDefault)?))
+        source_capacity(encrypt_old)?.or(Some(CapacityInput::from_quick(
+            1024,
+            QuickCapacityUnit::MiB,
+            CapacitySource::SystemDefault,
+        )?))
     };
     let encrypt_start = if encrypt.is_none() {
         None
@@ -533,6 +621,29 @@ impl ExistingPartitionRecord {
             encrypt_mode,
         })
     }
+
+    pub fn verified_sm4_file_key(self, password: &[u8]) -> Result<[u8; 16], String> {
+        if self.lba12.need_encrypt == 0
+            || self.lba12.encrypt_mode != super::FileKeyWrapMode::Sm4.raw()
+        {
+            return Err("existing partition does not use the verified SM4 key profile".into());
+        }
+        if self.lba12.user_key_crc != crc32_bare(password) {
+            return Err("password does not match existing partition key record".into());
+        }
+        let effective_password: &[u8] = if password == b"0000aaaa" {
+            b"LtSWi[2f)j"
+        } else {
+            password
+        };
+        let digest = super::keys::md5_digest(effective_password);
+        let key =
+            crate::backup_deep::keys::sm4_decrypt_block(&self.lba12.encrypted_file_key, &digest);
+        if crc32_bare(&key) != self.lba12.file_key_crc {
+            return Err("existing FileKeyCRC does not verify".into());
+        }
+        Ok(key)
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -554,6 +665,15 @@ pub enum DiskProvisionKind {
 }
 
 impl DiskProvisionKind {
+    pub const fn official_mode(self) -> Option<OfficialPartitionMode> {
+        match self {
+            Self::Plain => None,
+            Self::Mode0 => Some(OfficialPartitionMode::DefaultThreePartition),
+            Self::Mode1 => Some(OfficialPartitionMode::BootShareCombined),
+            Self::Mode2 => Some(OfficialPartitionMode::WholeDiskEncrypted),
+            Self::Mode3 => Some(OfficialPartitionMode::IntranetExtranetDualPartition),
+        }
+    }
     pub const fn from_mode(mode: OfficialPartitionMode) -> Self {
         match mode {
             OfficialPartitionMode::DefaultThreePartition => Self::Mode0,
@@ -653,6 +773,119 @@ impl ParsedExistingProvision {
             .iter()
             .position(|part| part.role == role)
             .map(|index| &self.records[index])
+    }
+
+    pub fn confirm_filesystem(
+        &mut self,
+        role: PartitionRole,
+        format: OfficialFilesystemFormat,
+    ) -> Result<(), String> {
+        let part = self
+            .profile
+            .partitions
+            .iter_mut()
+            .find(|part| part.role == role)
+            .ok_or("source has no partition with requested role")?;
+        part.filesystem = Some(format);
+        Ok(())
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct TargetPartitionPlan {
+    pub geometry: TargetPartitionGeometry,
+    pub action: PartitionAction,
+    pub reason: String,
+    /// Only present when a verified source key record belongs to this exact
+    /// target geometry. The writer re-encodes it for the target slot.
+    pub preserved_record: Option<ExistingPartitionRecord>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct TargetProvisionPlan {
+    pub mode: OfficialPartitionMode,
+    pub partitions: Vec<TargetPartitionPlan>,
+    pub unallocated_sectors: u64,
+}
+
+impl TargetProvisionPlan {
+    pub fn build(
+        source: Option<&ParsedExistingProvision>,
+        mode: OfficialPartitionMode,
+        targets: &[TargetPartitionGeometry],
+        usable_end_lba: u64,
+        password: &[u8],
+    ) -> Result<Self, String> {
+        if targets.len() != mode.partition_types().len() {
+            return Err("target partition count does not match official mode".into());
+        }
+        let gap = validate_target_geometry(targets, usable_end_lba)?;
+        let mut partitions = Vec::with_capacity(targets.len());
+        for (index, target) in targets.iter().enumerate() {
+            if target.partition_type != mode.partition_types()[index] {
+                return Err(format!(
+                    "target partition type at slot {index} does not match official mode"
+                ));
+            }
+            let mut action = PartitionAction::Rebuild;
+            let mut reason = "无兼容且已验证的来源分区；原数据不能原样保留".to_string();
+            let mut preserved_record = None;
+            if let Some(source) = source {
+                if let Some((source_index, old)) = source
+                    .profile
+                    .partitions
+                    .iter()
+                    .enumerate()
+                    .find(|(_, old)| old.role == target.role)
+                {
+                    if decide_partition_action(Some(old), target) == PartitionAction::PreserveExact
+                    {
+                        let record = source.records[source_index];
+                        let key_ok = if record.lba12.need_encrypt == 0 {
+                            true
+                        } else {
+                            record.verified_sm4_file_key(password).is_ok()
+                        };
+                        if key_ok {
+                            action = PartitionAction::PreserveExact;
+                            reason =
+                                "语义、精确几何、文件系统和密钥记录均已验证；数据区禁止写入".into();
+                            preserved_record = Some(record);
+                        } else {
+                            reason = "原密码或 FileKey 无法验证；原数据不能原样保留".into();
+                        }
+                    } else {
+                        reason =
+                            "语义、位置、大小、物理加密或文件系统与来源不一致；原数据不能原样保留"
+                                .into();
+                    }
+                }
+            }
+            partitions.push(TargetPartitionPlan {
+                geometry: *target,
+                action,
+                reason,
+                preserved_record,
+            });
+        }
+        Ok(Self {
+            mode,
+            partitions,
+            unallocated_sectors: gap,
+        })
+    }
+
+    pub fn preserved_extents(&self) -> impl Iterator<Item = (u64, u64)> + '_ {
+        self.partitions
+            .iter()
+            .filter(|part| part.action == PartitionAction::PreserveExact)
+            .map(|part| (part.geometry.start_lba, part.geometry.sector_count))
+    }
+
+    pub fn has_preserved_partitions(&self) -> bool {
+        self.partitions
+            .iter()
+            .any(|part| part.action == PartitionAction::PreserveExact)
     }
 }
 

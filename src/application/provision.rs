@@ -17,14 +17,18 @@ use crate::diskio::{self, SectorDev};
 use crate::identify::identify;
 use crate::protocol::lba7_compat::locate_lba7_compatibility_extent_from_verified_usb_capacity;
 use crate::provision::{
-    build_empty_exfat, build_empty_fat16, build_official_partition_filesystem,
-    build_official_provision_protocol_image, build_passwordless_conversion, is_mode0_source,
-    wrap_file_key, wrap_legacy_lba7_file_key, FileKeyWrapMode, OfficialFilesystemFormat,
-    OfficialPartitionFilesystems, OfficialPartitionMode, OfficialPartitionSizes,
-    OfficialProvisionPlan, OfficialProvisionWriteImage, OnlyId, PartitionFilesystemImage,
-    PartitionFormatTarget, PartitionRole, PasswordlessConversionImage, ProvisionEntropy,
-    ProvisionImage, ProvisionMetadata, ProvisionProfile, ProvisionSpec, SparseFilesystemImage,
-    TargetIdentity, DEFAULT_MODE0_BOOT_SECTORS,
+    apply_target_geometry_overrides, build_empty_exfat, build_empty_fat16,
+    build_official_partition_filesystem, build_official_provision_protocol_image,
+    build_passwordless_conversion, is_mode0_source, parse_existing_provision,
+    prefill_for_target_mode, wrap_file_key, wrap_legacy_lba7_file_key, CapacityInput,
+    CapacitySource, FileKeyWrapMode, OfficialFilesystemFormat, OfficialPartitionFilesystems,
+    OfficialPartitionMode, OfficialPartitionSizes, OfficialProvisionPlan,
+    OfficialProvisionWriteImage, OnlyId, ParsedExistingProvision, PartitionAction,
+    PartitionFilesystemImage, PartitionFormatTarget, PartitionRole, PasswordlessConversionImage,
+    ProvisionEntropy, ProvisionImage, ProvisionMetadata, ProvisionProfile, ProvisionSpec,
+    QuickCapacityUnit, SparseFilesystemImage, TargetGeometryOverrides, TargetIdentity,
+    TargetPartitionGeometry, TargetProvisionPlan, DEFAULT_MODE0_BOOT_SECTORS,
+    WHOLE_DISK_ENCRYPTED_COMPAT_BOOT_BYTES,
 };
 use crate::sysinfo::{self, CmdRunner};
 use encoding_rs::GBK;
@@ -41,6 +45,9 @@ fn err(code: i32, message: impl Into<String>) -> EdpCliError {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct NewProvisionRequest {
     pub mode: u8,
+    pub boot_start_lba: Option<u64>,
+    pub share_start_lba: Option<u64>,
+    pub encrypt_start_lba: Option<u64>,
     pub boot_mib: Option<u64>,
     pub boot_sectors: Option<u64>,
     pub share_mib: Option<u64>,
@@ -138,9 +145,19 @@ pub fn plan_format_targets(
     serials: &[u32],
     file_key: &[u8; 16],
 ) -> Result<Vec<PlannedPartitionFormat>, String> {
+    let keys = vec![*file_key; serials.len()];
+    plan_format_targets_with_keys(plan, options, serials, &keys)
+}
+
+fn plan_format_targets_with_keys(
+    plan: &OfficialProvisionPlan,
+    options: &FormatOptions,
+    serials: &[u32],
+    file_keys: &[[u8; 16]],
+) -> Result<Vec<PlannedPartitionFormat>, String> {
     let targets = plan.format_targets()?;
-    if targets.len() != serials.len() {
-        return Err("format serial count does not match partition count".into());
+    if targets.len() != serials.len() || targets.len() != file_keys.len() {
+        return Err("format serial/key count does not match partition count".into());
     }
     if options.boot
         && !targets
@@ -177,7 +194,7 @@ pub fn plan_format_targets(
             }
         })
         .collect::<Vec<_>>();
-    for choice in planned.iter().filter(|choice| choice.target.format_capable) {
+    for choice in planned.iter().filter(|choice| choice.selected) {
         if !matches!(
             choice.filesystem,
             Some(OfficialFilesystemFormat::Fat16 | OfficialFilesystemFormat::ExFat)
@@ -188,7 +205,11 @@ pub fn plan_format_targets(
             ));
         }
     }
-    for choice in planned.iter_mut().filter(|choice| choice.selected) {
+    for (index, choice) in planned
+        .iter_mut()
+        .enumerate()
+        .filter(|(_, choice)| choice.selected)
+    {
         let filesystem = choice
             .filesystem
             .ok_or("compatibility reserve is not a filesystem")?;
@@ -202,7 +223,7 @@ pub fn plan_format_targets(
         let prepared_image = build_official_partition_filesystem(
             plan,
             &choice.target,
-            file_key,
+            &file_keys[index],
             &choice.volume_label,
             choice.volume_serial,
         )
@@ -266,6 +287,8 @@ pub struct PreparedNewProvision {
     pub lce_start_lba: u64,
     pub write_image: OfficialProvisionWriteImage,
     pub format_targets: Vec<PlannedPartitionFormat>,
+    pub target_plan: Option<TargetProvisionPlan>,
+    source_metadata: Option<Vec<u8>>,
     plan: OfficialProvisionPlan,
     expected_onlyid: String,
     expected_serial: Option<String>,
@@ -284,6 +307,8 @@ impl std::fmt::Debug for PreparedNewProvision {
             .field("lce_start_lba", &self.lce_start_lba)
             .field("write_image", &self.write_image)
             .field("format_targets", &self.format_targets)
+            .field("target_plan", &self.target_plan)
+            .field("source_metadata_captured", &self.source_metadata.is_some())
             .field("plan", &self.plan)
             .field("expected_onlyid", &self.expected_onlyid)
             .field("expected_serial", &self.expected_serial)
@@ -451,6 +476,32 @@ pub fn prepare_new_provision(
     };
     let write_image = build_official_provision_protocol_image(&spec, &entropy, &plan)
         .map_err(|message| err(EXIT_TARGET, format!("错误: 无法构造制盘镜像: {message}")))?;
+    let target_geometry = plan
+        .format_targets()
+        .map_err(|message| err(EXIT_TARGET, message))?
+        .into_iter()
+        .map(|target| TargetPartitionGeometry {
+            role: target.role,
+            partition_type: target.geometry.partition_type,
+            start_lba: target.geometry.start_sector,
+            sector_count: target.geometry.sector_count(),
+            physically_encrypted: target.physically_encrypted,
+            filesystem: target.filesystem,
+        })
+        .collect::<Vec<_>>();
+    let target_plan = TargetProvisionPlan::build(
+        None,
+        selected_mode,
+        &target_geometry,
+        compatibility.start_lba,
+        request.password.as_bytes(),
+    )
+    .map_err(|message| {
+        err(
+            EXIT_TARGET,
+            format!("错误: 无法构造目标制盘计划: {message}"),
+        )
+    })?;
 
     Ok(PreparedNewProvision {
         disk,
@@ -460,8 +511,450 @@ pub fn prepare_new_provision(
         lce_start_lba: compatibility.start_lba,
         write_image,
         format_targets,
+        target_plan: Some(target_plan),
+        source_metadata: None,
         plan,
         expected_onlyid: request.label_id.clone(),
+        expected_serial,
+        expected_probe: probe,
+        expected_lba3: None,
+    })
+}
+
+fn confirmed_filesystem(
+    boot: &[u8],
+    start_lba: u64,
+    sectors: u64,
+) -> Option<OfficialFilesystemFormat> {
+    if boot.len() != SECTOR {
+        return None;
+    }
+    if boot.get(3..11) == Some(b"EXFAT   ")
+        && u64::from_le_bytes(boot.get(64..72)?.try_into().ok()?) == start_lba
+        && u64::from_le_bytes(boot.get(72..80)?.try_into().ok()?) == sectors
+    {
+        return Some(OfficialFilesystemFormat::ExFat);
+    }
+    if boot.get(54..62) == Some(b"FAT16   ")
+        && u32::from_le_bytes(boot.get(28..32)?.try_into().ok()?) as u64 == start_lba
+    {
+        let short = u16::from_le_bytes(boot.get(19..21)?.try_into().ok()?) as u64;
+        let total = if short != 0 {
+            short
+        } else {
+            u32::from_le_bytes(boot.get(32..36)?.try_into().ok()?) as u64
+        };
+        if total == sectors {
+            return Some(OfficialFilesystemFormat::Fat16);
+        }
+    }
+    None
+}
+
+fn inspect_source_profile(
+    dev: &mut dyn SectorDev,
+    source_metadata: &[u8],
+    device_id: &str,
+    total_sectors: u64,
+    password: &[u8],
+) -> EdpCliResult<Option<ParsedExistingProvision>> {
+    let image = ProvisionImage::from_bytes(source_metadata.to_vec())
+        .map_err(|message| err(EXIT_TARGET, format!("错误: 来源元数据长度无效: {message}")))?;
+    let mut source =
+        parse_existing_provision(&image, device_id, total_sectors).map_err(|message| {
+            err(
+                EXIT_TARGET,
+                format!("错误: 来源盘注册结构无法可靠解析: {message}"),
+            )
+        })?;
+    if let Some(source) = source.as_mut() {
+        let parts = source.profile.partitions.clone();
+        for (index, part) in parts.iter().enumerate() {
+            if part.role == PartitionRole::CompatibilityReserve {
+                continue;
+            }
+            let Ok(lba) = u32::try_from(part.start_lba) else {
+                continue;
+            };
+            let Ok(raw) = dev.read_sector(lba) else {
+                continue;
+            };
+            if raw.len() != SECTOR {
+                continue;
+            }
+            let plaintext = if part.physically_encrypted {
+                let Ok(key) = source.records[index].verified_sm4_file_key(password) else {
+                    continue;
+                };
+                let Ok(value) = crate::backup_deep::keys::decrypt_mode2(&raw, &key) else {
+                    continue;
+                };
+                value
+            } else {
+                raw
+            };
+            if let Some(filesystem) =
+                confirmed_filesystem(&plaintext, part.start_lba, part.sector_count)
+            {
+                source
+                    .confirm_filesystem(part.role, filesystem)
+                    .map_err(|message| err(EXIT_TARGET, message))?;
+            }
+        }
+    }
+    Ok(source)
+}
+
+fn override_capacity(
+    mib: Option<u64>,
+    sectors: Option<u64>,
+) -> EdpCliResult<Option<CapacityInput>> {
+    if mib.is_some() && sectors.is_some() {
+        return Err(err(EXIT_TARGET, "错误: 同一分区不能同时指定 MiB 与 sector"));
+    }
+    match (mib, sectors) {
+        (Some(value), None) => {
+            CapacityInput::from_quick(value, QuickCapacityUnit::MiB, CapacitySource::UserEdited)
+                .map(Some)
+                .map_err(|message| err(EXIT_TARGET, message))
+        }
+        (None, Some(value)) => CapacityInput::from_exact(value, CapacitySource::UserEdited)
+            .map(Some)
+            .map_err(|message| err(EXIT_TARGET, message)),
+        (None, None) => Ok(None),
+        _ => unreachable!(),
+    }
+}
+
+/// The physical path for both plain and registered USB media. Source mode is
+/// consulted only while deriving defaults and Preserve candidates.
+pub fn prepare_target_provision(
+    runner: &dyn CmdRunner,
+    disk: u32,
+    request: &NewProvisionRequest,
+    dev: &mut dyn SectorDev,
+) -> EdpCliResult<PreparedNewProvision> {
+    guard_usb_disk(runner, disk)?;
+    let total_sectors = sysinfo::disk_total_sectors(runner, disk)
+        .ok_or_else(|| err(EXIT_TARGET, "错误: 无法取得目标盘总扇区数"))?;
+    let probe = runner
+        .hardware_probe(disk)
+        .or_else(|| crate::platform::fallback_hardware_probe(runner, disk))
+        .ok_or_else(|| err(EXIT_TARGET, "错误: 无法取得目标盘 USB/SCSI 硬件身份"))?;
+    let target = TargetIdentity::from_probe(&probe, total_sectors)
+        .map_err(|message| err(EXIT_TARGET, format!("错误: 目标硬件身份不完整: {message}")))?;
+    let device_id = target.device_id().to_string();
+    let compatibility =
+        locate_lba7_compatibility_extent_from_verified_usb_capacity(total_sectors, SECTOR as u32)
+            .ok_or_else(|| {
+            err(
+                EXIT_TARGET,
+                "错误: 当前目标不符合已验证的 512B/255x63 USB LCE 几何",
+            )
+        })?;
+    let source_metadata = read_image(dev)?;
+    let source = inspect_source_profile(
+        dev,
+        &source_metadata,
+        &device_id,
+        total_sectors,
+        request.password.as_bytes(),
+    )?;
+    let source_identity = if source.is_some() {
+        let base = crate::inspect::InspectMeta {
+            device_id: Some(device_id.clone()),
+            vid: None,
+            pid: None,
+            size_bytes: Some(total_sectors * SECTOR as u64),
+            onlyid: None,
+        };
+        Some(
+            crate::metainfo::summarize(&base, |lba| {
+                source_metadata
+                    .get(lba as usize * SECTOR..(lba as usize + 1) * SECTOR)
+                    .map(|raw| raw.to_vec())
+                    .ok_or_else(|| {
+                        std::io::Error::new(
+                            std::io::ErrorKind::UnexpectedEof,
+                            "source metadata sector missing",
+                        )
+                    })
+            })
+            .map_err(|error| {
+                err(
+                    EXIT_TARGET,
+                    format!("错误: 无法继承来源盘身份字段: {error}"),
+                )
+            })?,
+        )
+    } else {
+        None
+    };
+    let selected_mode = mode(request.mode)?;
+    let prefill = prefill_for_target_mode(
+        source.as_ref().map(|source| &source.profile),
+        selected_mode,
+        compatibility.start_lba,
+        SECTOR as u64,
+    )
+    .map_err(|message| {
+        err(
+            EXIT_TARGET,
+            format!("错误: 无法生成目标模式默认布局: {message}"),
+        )
+    })?;
+    let encrypt_override = override_capacity(request.encrypt_mib, request.encrypt_sectors)?
+        .map(|value| {
+            if selected_mode == OfficialPartitionMode::WholeDiskEncrypted
+                && request.encrypt_mib.is_some()
+            {
+                CapacityInput::from_exact(
+                    value
+                        .sectors()
+                        .checked_sub(WHOLE_DISK_ENCRYPTED_COMPAT_BOOT_BYTES / SECTOR as u64)
+                        .ok_or_else(|| err(EXIT_TARGET, "错误: 整盘加密容量小于兼容保留区"))?,
+                    CapacitySource::UserEdited,
+                )
+                .map_err(|message| err(EXIT_TARGET, message))
+            } else {
+                Ok(value)
+            }
+        })
+        .transpose()?;
+    let prefill = apply_target_geometry_overrides(
+        prefill,
+        source.as_ref().map(|source| &source.profile),
+        TargetGeometryOverrides {
+            boot: override_capacity(request.boot_mib, request.boot_sectors)?,
+            share: override_capacity(request.share_mib, request.share_sectors)?,
+            encrypt: encrypt_override,
+            boot_start_lba: request.boot_start_lba,
+            share_start_lba: request.share_start_lba,
+            encrypt_start_lba: request.encrypt_start_lba,
+        },
+    )
+    .map_err(|message| err(EXIT_TARGET, format!("错误: 目标分区重叠或越界: {message}")))?;
+    let mut targets = prefill
+        .target_partitions(SECTOR as u64)
+        .map_err(|message| err(EXIT_TARGET, format!("错误: 目标分区重叠或越界: {message}")))?;
+    for target in &mut targets {
+        let selected_format = request.format.choice(target.role).0;
+        if !selected_format {
+            if let Some(old) = source
+                .as_ref()
+                .and_then(|source| source.profile.partition(target.role))
+            {
+                if old.filesystem.is_some() {
+                    target.filesystem = old.filesystem;
+                }
+            }
+        }
+    }
+    let mut target_plan = TargetProvisionPlan::build(
+        source.as_ref(),
+        selected_mode,
+        &targets,
+        compatibility.start_lba,
+        request.password.as_bytes(),
+    )
+    .map_err(|message| {
+        err(
+            EXIT_TARGET,
+            format!("错误: 无法生成统一目标制盘计划: {message}"),
+        )
+    })?;
+    for part in &mut target_plan.partitions {
+        if request.format.choice(part.geometry.role).0
+            && part.action == PartitionAction::PreserveExact
+        {
+            part.action = PartitionAction::Rebuild;
+            part.reason = "用户选择重新格式化；原数据不能原样保留".into();
+            part.preserved_record = None;
+        }
+    }
+    let source_onlyid = source.as_ref().and_then(|_| {
+        source_metadata
+            .get(4 * SECTOR..5 * SECTOR)
+            .and_then(diskio::lba4_label_id_from)
+    });
+    let onlyid = if request.label_id.trim().is_empty() {
+        match source_onlyid {
+            Some(value) => value,
+            None => OnlyId::random_candidate()
+                .map_err(|message| err(EXIT_TARGET, message))?
+                .text()
+                .to_string(),
+        }
+    } else {
+        request.label_id.clone()
+    };
+    let inherited = |value: &str, source: Option<&str>| -> String {
+        if value.trim().is_empty() {
+            source.unwrap_or_default().to_string()
+        } else {
+            value.to_string()
+        }
+    };
+    let user = inherited(
+        &request.user,
+        source_identity
+            .as_ref()
+            .and_then(|value| value.ownership.user.as_deref()),
+    );
+    let dept = inherited(
+        &request.dept,
+        source_identity
+            .as_ref()
+            .and_then(|value| value.ownership.dept.as_deref()),
+    );
+    let label = inherited(
+        &request.label,
+        source_identity
+            .as_ref()
+            .and_then(|value| value.safe6_label.as_deref()),
+    );
+    let label = if label.is_empty() {
+        crate::provision::DEFAULT_SAFE6_LABEL.to_string()
+    } else {
+        label
+    };
+    let metadata = ProvisionMetadata::new(
+        OnlyId::parse(&onlyid)
+            .map_err(|message| err(EXIT_TARGET, format!("错误: 标签标识无效: {message}")))?,
+        user,
+        dept,
+        label,
+    )
+    .map_err(|message| err(EXIT_TARGET, format!("错误: 制盘身份字段无效: {message}")))?;
+    let profile =
+        ProvisionProfile::canonical_v1().with_force_change_password(request.force_change_password);
+    let spec = ProvisionSpec::new(target, metadata, profile)
+        .map_err(|message| err(EXIT_TARGET, format!("错误: 制盘元数据无法编码: {message}")))?;
+    let mut filesystems = request.format.filesystems();
+    for part in &target_plan.partitions {
+        if let Some(format) = part.geometry.filesystem {
+            match part.geometry.role {
+                PartitionRole::Boot => filesystems.boot = format,
+                PartitionRole::Share | PartitionRole::BootShareCombined => {
+                    filesystems.share = format
+                }
+                PartitionRole::Encrypt => filesystems.encrypt = format,
+                PartitionRole::CompatibilityReserve => {}
+            }
+        }
+    }
+    let mut plan = OfficialProvisionPlan::new(
+        selected_mode,
+        sizes(request)?,
+        compatibility,
+        wrap_legacy_lba7_file_key(request.password.as_bytes(), random_array::<8>()?),
+        wrap_file_key(
+            request.password.as_bytes(),
+            random_array::<16>()?,
+            FileKeyWrapMode::Sm4,
+        ),
+    )
+    .map_err(|message| err(EXIT_TARGET, message))?
+    .with_filesystems(filesystems)
+    .with_target_geometry(&targets, SECTOR as u64)
+    .map_err(|message| err(EXIT_TARGET, message))?;
+    let mut file_keys = Vec::with_capacity(target_plan.partitions.len());
+    for (index, part) in target_plan.partitions.iter().enumerate() {
+        if let Some(record) = part.preserved_record {
+            let key = if record.lba12.need_encrypt != 0 {
+                record
+                    .verified_sm4_file_key(request.password.as_bytes())
+                    .map_err(|message| {
+                        err(
+                            EXIT_TARGET,
+                            format!("错误: 保留分区密钥无法验证: {message}"),
+                        )
+                    })?
+            } else {
+                [0; 16]
+            };
+            file_keys.push(key);
+            if record.lba12.need_encrypt != 0 {
+                plan = plan
+                    .with_partition_key_material(
+                        index,
+                        record.lba7_key_material(),
+                        record
+                            .lba12_key_material()
+                            .map_err(|message| err(EXIT_TARGET, message))?,
+                    )
+                    .map_err(|message| err(EXIT_TARGET, message))?;
+            }
+        } else {
+            let key = random_array::<16>()?;
+            file_keys.push(key);
+            plan = plan
+                .with_partition_key_material(
+                    index,
+                    wrap_legacy_lba7_file_key(request.password.as_bytes(), random_array::<8>()?),
+                    wrap_file_key(request.password.as_bytes(), key, FileKeyWrapMode::Sm4),
+                )
+                .map_err(|message| err(EXIT_TARGET, message))?;
+        }
+    }
+    let mut format_options = request.format.clone();
+    format_options.boot = target_plan.partitions.iter().any(|part| {
+        part.geometry.role == PartitionRole::Boot && part.action == PartitionAction::Rebuild
+    });
+    format_options.share = target_plan.partitions.iter().any(|part| {
+        matches!(
+            part.geometry.role,
+            PartitionRole::Share | PartitionRole::BootShareCombined
+        ) && part.action == PartitionAction::Rebuild
+    });
+    format_options.encrypt = target_plan.partitions.iter().any(|part| {
+        part.geometry.role == PartitionRole::Encrypt && part.action == PartitionAction::Rebuild
+    });
+    let mut serials = Vec::with_capacity(target_plan.partitions.len());
+    for _ in &target_plan.partitions {
+        serials.push(u32::from_le_bytes(random_array::<4>()?));
+    }
+    let format_result = plan_format_targets_with_keys(&plan, &format_options, &serials, &file_keys);
+    for key in &mut file_keys {
+        key.fill(0);
+    }
+    let format_targets = format_result.map_err(|message| {
+        err(
+            EXIT_TARGET,
+            format!("错误: 无法构造目标格式化计划: {message}"),
+        )
+    })?;
+    let expected_serial = if format_targets.iter().any(|choice| choice.selected) {
+        Some(
+            runner
+                .hardware_serial(disk)
+                .filter(|serial| !serial.trim().is_empty())
+                .ok_or_else(|| err(EXIT_TARGET, "错误: 无法读取 USB 硬件序列号，拒绝安排格式化"))?,
+        )
+    } else {
+        None
+    };
+    let entropy = ProvisionEntropy::new(random_array::<252>()?);
+    let write_image =
+        build_official_provision_protocol_image(&spec, &entropy, &plan).map_err(|message| {
+            err(
+                EXIT_TARGET,
+                format!("错误: 无法构造目标协议镜像: {message}"),
+            )
+        })?;
+    validate_target_write_set(&target_plan, &write_image.patch, &format_targets)?;
+    Ok(PreparedNewProvision {
+        disk,
+        device_id,
+        mode: selected_mode,
+        force_change_password: request.force_change_password,
+        lce_start_lba: compatibility.start_lba,
+        write_image,
+        format_targets,
+        target_plan: Some(target_plan),
+        source_metadata: Some(source_metadata),
+        plan,
+        expected_onlyid: onlyid,
         expected_serial,
         expected_probe: probe,
         expected_lba3: None,
@@ -604,6 +1097,19 @@ pub fn commit_new_provision(
     dev: &mut dyn SectorDev,
     prepared: &PreparedNewProvision,
 ) -> EdpCliResult<ProvisionCommitReport> {
+    let target_plan = prepared
+        .target_plan
+        .as_ref()
+        .ok_or_else(|| err(EXIT_TARGET, "错误: 缺少统一目标制盘计划，拒绝写盘"))?;
+    validate_target_write_set(
+        target_plan,
+        &prepared.write_image.patch,
+        &prepared.format_targets,
+    )?;
+    validate_preserve_source_snapshot(
+        target_plan.has_preserved_partitions(),
+        prepared.source_metadata.as_deref(),
+    )?;
     guard_usb_disk(runner, prepared.disk)?;
     let _guard = sysinfo::prepare_write(runner, prepared.disk).map_err(|error| {
         err(
@@ -613,6 +1119,9 @@ pub fn commit_new_provision(
     })?;
     dev.reopen_rdwr(OPEN_WAIT)
         .map_err(|error| err(EXIT_IO, format!("错误: 无法以读写方式重开目标盘: {error}")))?;
+    if let Some(source_metadata) = &prepared.source_metadata {
+        verify_reopened_snapshot(dev, source_metadata)?;
+    }
     let fresh_probe = runner
         .hardware_probe(prepared.disk)
         .or_else(|| crate::platform::fallback_hardware_probe(runner, prepared.disk))
@@ -670,6 +1179,65 @@ pub fn commit_new_provision(
         });
     }
     Ok(report)
+}
+
+fn validate_preserve_source_snapshot(
+    has_preserved_partitions: bool,
+    source_metadata: Option<&[u8]>,
+) -> EdpCliResult<()> {
+    if !has_preserved_partitions {
+        return Ok(());
+    }
+    let source_metadata = source_metadata.ok_or_else(|| {
+        err(
+            EXIT_TARGET,
+            "错误: PreserveExact 计划缺少准备阶段来源元数据快照，拒绝写盘",
+        )
+    })?;
+    if source_metadata.len() != 13 * SECTOR {
+        return Err(err(
+            EXIT_TARGET,
+            "错误: PreserveExact 计划的来源元数据快照长度异常，拒绝写盘",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_target_write_set(
+    target_plan: &TargetProvisionPlan,
+    patch: &BTreeMap<u32, Vec<u8>>,
+    formats: &[PlannedPartitionFormat],
+) -> EdpCliResult<()> {
+    for (start, count) in target_plan.preserved_extents() {
+        let end = start
+            .checked_add(count)
+            .ok_or_else(|| err(EXIT_TARGET, "错误: 保留分区 LBA 溢出"))?;
+        if patch
+            .keys()
+            .any(|lba| (start..end).contains(&u64::from(*lba)))
+        {
+            return Err(err(
+                EXIT_TARGET,
+                format!("错误: 协议写集合触碰保留分区 LBA{start}..{}", end - 1),
+            ));
+        }
+        if formats.iter().any(|choice| {
+            choice.selected
+                && choice.target.geometry.start_sector < end
+                && start < choice.target.geometry.end_sector_exclusive()
+        }) {
+            return Err(err(
+                EXIT_TARGET,
+                format!("错误: 格式化计划触碰保留分区 LBA{start}..{}", end - 1),
+            ));
+        }
+    }
+    if target_plan.partitions.iter().any(|part| {
+        part.action == PartitionAction::PreserveExact && part.preserved_record.is_none()
+    }) {
+        return Err(err(EXIT_TARGET, "错误: 保留分区缺少原 key material"));
+    }
+    Ok(())
 }
 
 fn verify_format_identity(
@@ -992,6 +1560,16 @@ pub fn export_sparse_provision_image(
     path: &Path,
     prepared: &PreparedNewProvision,
 ) -> EdpCliResult<()> {
+    if prepared.target_plan.as_ref().is_some_and(|plan| {
+        plan.partitions
+            .iter()
+            .any(|part| part.action == PartitionAction::PreserveExact)
+    }) {
+        return Err(err(
+            EXIT_TARGET,
+            "错误: 含保留数据的制盘计划不能导出为稀疏镜像；镜像不包含来源盘用户数据",
+        ));
+    }
     let byte_len = prepared
         .write_image
         .total_sectors
@@ -1067,6 +1645,14 @@ mod tests {
     }
 
     #[test]
+    fn preserve_requires_a_full_prewrite_source_metadata_snapshot() {
+        assert!(validate_preserve_source_snapshot(false, None).is_ok());
+        assert!(validate_preserve_source_snapshot(true, None).is_err());
+        assert!(validate_preserve_source_snapshot(true, Some(&vec![0; 12 * SECTOR])).is_err());
+        assert!(validate_preserve_source_snapshot(true, Some(&vec![0; 13 * SECTOR])).is_ok());
+    }
+
+    #[test]
     fn manufacturer_lba3_is_copied_verbatim_into_the_write_plan() {
         let metadata = ProvisionImage::from_bytes(vec![0; 13 * SECTOR]).unwrap();
         let mut patch = BTreeMap::new();
@@ -1089,6 +1675,8 @@ mod tests {
                 patch,
             },
             format_targets: Vec::new(),
+            target_plan: None,
+            source_metadata: None,
             plan: OfficialProvisionPlan::new(
                 OfficialPartitionMode::BootShareCombined,
                 OfficialPartitionSizes::new(32, 64, 128),
@@ -1267,6 +1855,8 @@ mod tests {
                 patch,
             },
             format_targets: choices,
+            target_plan: None,
+            source_metadata: None,
             plan,
             expected_onlyid: "1".into(),
             expected_serial: None,
@@ -1379,6 +1969,8 @@ mod tests {
             lce_start_lba: plan.lba7_compatibility_extent.start_lba,
             write_image,
             format_targets: vec![],
+            target_plan: None,
+            source_metadata: None,
             plan,
             expected_onlyid: "1402259934".into(),
             expected_serial: None,
