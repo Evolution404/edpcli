@@ -12,7 +12,9 @@ use crate::diskio::{self, find_backups, DiskFacts};
 use crate::identify::identify;
 use crate::inspect::InspectMeta;
 use crate::metainfo;
-use crate::provision::DiskProvisionKind;
+use crate::provision::{
+    DiskProvisionKind, ExistingPartition, ExistingProvisionProfile, PartitionRole,
+};
 use crate::sectors::{looks_nopwd, parse_lba12, EdpfPartition};
 use crate::sysinfo::{self, CmdRunner};
 
@@ -32,6 +34,55 @@ pub struct Row {
     pub is_nopwd: bool,
     pub provision_kind: DiskProvisionKind,
     pub partitions: Option<Vec<EdpfPartition>>,
+}
+
+impl Row {
+    /// UI-only prefill from the scan cache. The physical preparation path reads
+    /// and validates the source metadata again before allowing PreserveExact.
+    pub fn existing_profile_for_prefill(&self) -> Option<ExistingProvisionProfile> {
+        let mode = self.provision_kind.official_mode()?;
+        let parts = self.partitions.as_ref()?;
+        if parts.len() != mode.partition_types().len() {
+            return None;
+        }
+        let mut partitions = Vec::with_capacity(parts.len());
+        for (index, part) in parts.iter().enumerate() {
+            let partition_type = crate::protocol::edpf::EdpPartitionType::from_raw(part.ptype)?;
+            if partition_type != mode.partition_types()[index]
+                || part.size_bytes == 0
+                || part.size_bytes % SECTOR as u64 != 0
+            {
+                return None;
+            }
+            let role = match (mode, index) {
+                (crate::provision::OfficialPartitionMode::WholeDiskEncrypted, 0) => {
+                    PartitionRole::CompatibilityReserve
+                }
+                (crate::provision::OfficialPartitionMode::BootShareCombined, 0) => {
+                    PartitionRole::BootShareCombined
+                }
+                (_, 0) => PartitionRole::Boot,
+                (
+                    crate::provision::OfficialPartitionMode::DefaultThreePartition
+                    | crate::provision::OfficialPartitionMode::IntranetExtranetDualPartition,
+                    1,
+                ) => PartitionRole::Share,
+                _ => PartitionRole::Encrypt,
+            };
+            partitions.push(ExistingPartition {
+                role,
+                partition_type,
+                start_lba: part.start_lba,
+                sector_count: part.size_bytes / SECTOR as u64,
+                physically_encrypted: matches!(role, PartitionRole::Share | PartitionRole::Encrypt),
+                filesystem: None,
+            });
+        }
+        Some(ExistingProvisionProfile {
+            source_mode: mode,
+            partitions,
+        })
+    }
 }
 
 /// 外接盘一览数据: 编号/容量/接口; USB 盘再尽力识别 cems 身份、免密状态、

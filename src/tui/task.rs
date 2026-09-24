@@ -1108,9 +1108,10 @@ impl TaskHub {
                     .map_err(|error| format!("错误: 无法只读打开 {path}: {error}"))?;
                 let _ = kind;
                 let request = request.ok_or_else(|| "错误: 新盘制盘缺少表单参数".to_string())?;
-                let mut prepared =
-                    crate::application::provision::prepare_new_provision(&runner, disk, &request)
-                        .map_err(|error| error.msg)?;
+                let mut prepared = crate::application::provision::prepare_target_provision(
+                    &runner, disk, &request, &mut dev,
+                )
+                .map_err(|error| error.msg)?;
                 crate::application::provision::capture_manufacturer_lba3(&mut dev, &mut prepared)
                     .map_err(|error| error.msg)?;
                 Ok(crate::tui::state::ProvisionPrepared::New(Box::new(

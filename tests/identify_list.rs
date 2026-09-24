@@ -99,13 +99,9 @@ fn scan_and_print_all_row_kinds() {
     let rows = scan_disks(&runner, &bak.0, &read_ok);
     let out = print_disk_table(&rows);
     assert!(out.contains("外接盘 3 个:"), "{}", out);
+    assert!(out.contains("disk4") && out.contains("普通盘"), "{}", out);
     assert!(
-        out.contains("disk4") && out.contains("非 cems 盘"),
-        "{}",
-        out
-    );
-    assert!(
-        out.contains("disk6") && out.contains("cems盘") && out.contains("无备份"),
+        out.contains("disk6") && out.contains("mode0 · 缺省三分区") && out.contains("无备份"),
         "{}",
         out
     );
@@ -136,7 +132,7 @@ fn scan_and_print_all_row_kinds() {
         "list 同一次设备扫描不应重复读取 LBA12"
     );
 
-    // 免密盘镜像: [免密] 标记 + EDPF 2 条
+    // 旧免密盘镜像应统一显示官方模式1盘型。
     let (conv, _) = converted_image("netac").unwrap();
     let converted_read_calls = std::cell::RefCell::new(Vec::<(u32, u32)>::new());
     let read_conv = |_disk: u32, lba: u32| -> std::io::Result<Vec<u8>> {
@@ -145,7 +141,7 @@ fn scan_and_print_all_row_kinds() {
     };
     let rows2 = scan_disks(&runner, &bak.0, &read_conv);
     let out2 = print_disk_table(&rows2);
-    assert!(out2.contains("[免密]"), "{}", out2);
+    assert!(out2.contains("mode1 · 二合一"), "{}", out2);
     let row6b = rows2.iter().find(|r| r.disk == 6).unwrap();
     assert!(row6b.is_nopwd);
     assert_eq!(row6b.partitions.as_ref().unwrap().len(), 2);

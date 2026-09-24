@@ -940,6 +940,16 @@ fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppSta
                 lines.push(Line::from(spans));
             }
             lines.push(Line::from(""));
+            lines.push(Line::from(Span::styled("实时精确布局", secondary())));
+            for preview in state.provision_geometry_preview_lines() {
+                let style = if preview.starts_with("布局无效:") {
+                    danger()
+                } else {
+                    muted()
+                };
+                lines.push(Line::from(Span::styled(safe(&preview), style)));
+            }
+            lines.push(Line::from(""));
             lines.push(Line::from(vec![
                 Span::styled("↑/↓ Tab", accent()),
                 Span::raw(" 切字段   "),
@@ -1067,10 +1077,41 @@ fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppSta
                                 }
                             )));
                         }
-                        lines.push(Line::from(vec![
-                            Span::styled("E", secondary()),
-                            Span::raw(" 导出与该目标绑定的稀疏制盘镜像"),
-                        ]));
+                        if let Some(target_plan) = &prepared.target_plan {
+                            lines.push(Line::from(""));
+                            lines.push(Line::from(format!(
+                                "未分配空间: {} sectors",
+                                target_plan.unallocated_sectors
+                            )));
+                            for part in &target_plan.partitions {
+                                let end = part.geometry.start_lba + part.geometry.sector_count - 1;
+                                let action = match part.action {
+                                    crate::provision::PartitionAction::PreserveExact => {
+                                        "原数据可保留 · 复用原 FileKey · 不写数据区"
+                                    }
+                                    crate::provision::PartitionAction::Rebuild => {
+                                        "将重建 · 原数据不可原样保留"
+                                    }
+                                };
+                                lines.push(Line::from(format!(
+                                    "{} LBA{}..{} ({} sectors): {}",
+                                    part.geometry.role.label(),
+                                    part.geometry.start_lba,
+                                    end,
+                                    part.geometry.sector_count,
+                                    action
+                                )));
+                                lines.push(Line::from(format!("  {}", part.reason)));
+                            }
+                            if target_plan.partitions.iter().all(|part| {
+                                part.action == crate::provision::PartitionAction::Rebuild
+                            }) {
+                                lines.push(Line::from(vec![
+                                    Span::styled("E", secondary()),
+                                    Span::raw(" 导出与该目标绑定的稀疏制盘镜像"),
+                                ]));
+                            }
+                        }
                     }
                 }
             }

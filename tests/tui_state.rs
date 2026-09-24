@@ -1,6 +1,5 @@
 use edpcli::tui::state::{
-    AppState, InputMode, NavCommand, ProvisionForm, ProvisionKind, ProvisionSizeMode,
-    ProvisionStage, StateEffect,
+    AppState, InputMode, NavCommand, ProvisionForm, ProvisionKind, ProvisionStage, StateEffect,
 };
 
 fn device(size: u64) -> edpcli::disk_scan::Row {
@@ -21,6 +20,53 @@ fn device(size: u64) -> edpcli::disk_scan::Row {
         provision_kind: edpcli::provision::DiskProvisionKind::Plain,
         partitions: None,
     }
+}
+
+#[test]
+fn registered_mode0_to_mode1_form_keeps_exact_encrypt_geometry() {
+    use edpcli::provision::{CapacityInputMode, DiskProvisionKind};
+    use edpcli::sectors::EdpfPartition;
+    let mut row = device(64_000_000_000);
+    row.provision_kind = DiskProvisionKind::Mode0;
+    row.partitions = Some(vec![
+        EdpfPartition {
+            ptype: 1,
+            active: 1,
+            enc: 0,
+            start_lba: 63,
+            size_bytes: 20_417 * 512,
+        },
+        EdpfPartition {
+            ptype: 2,
+            active: 1,
+            enc: 1,
+            start_lba: 20_480,
+            size_bytes: 4_000_000 * 512,
+        },
+        EdpfPartition {
+            ptype: 4,
+            active: 1,
+            enc: 1,
+            start_lba: 4_020_480,
+            size_bytes: 2_097_153 * 512,
+        },
+    ]);
+    let mut state = AppState::new();
+    state.replace_devices(vec![row]);
+    state.navigate(NavCommand::WorkspaceProvision, 20);
+    state.provision_select_disk();
+    state.provision_skip_backup();
+    state.navigate(NavCommand::Down, 20);
+    state.provision_begin_selected();
+    let form = &state.provision().form;
+    assert_eq!(form.share_input_mode, CapacityInputMode::Exact);
+    assert_eq!(form.encrypt_input_mode, CapacityInputMode::Exact);
+    assert_eq!(form.encrypt_sectors, "2097153");
+    assert_eq!(form.encrypt_start_lba, "4020480");
+    let request = state.provision_request().unwrap();
+    assert_eq!(request.share_sectors, Some(4_020_417));
+    assert_eq!(request.encrypt_sectors, Some(2_097_153));
+    assert_eq!(request.encrypt_start_lba, Some(4_020_480));
 }
 
 #[test]
@@ -91,7 +137,6 @@ fn provision_label_defaults_to_jiangsu_safe6_and_remains_editable() {
     assert_eq!(form.label, "江苏电力!SAFE6");
     assert_eq!(form.password, "0000aaaa");
     assert_eq!(form.volume_label, "启动区");
-    assert_eq!(form.size_mode, ProvisionSizeMode::Manual);
     assert_eq!(form.boot_sectors, "20417");
     assert_eq!(form.encrypt_mib, "1024");
     assert!(edpcli::provision::OnlyId::parse(&form.label_id).is_ok());
@@ -179,7 +224,8 @@ fn provision_prefers_scanned_onlyid_and_generates_candidate_only_when_missing() 
 }
 
 #[test]
-fn provision_manual_ranges_follow_remaining_capacity_and_ratio_mode_fills_usable_space() {
+fn provision_uses_only_per_partition_quick_exact_inputs() {
+    use edpcli::provision::CapacityInputMode;
     let mut state = AppState::new();
     state.replace_devices(vec![device(64_000_000_000)]);
     state.navigate(NavCommand::WorkspaceProvision, 20);
@@ -187,38 +233,108 @@ fn provision_manual_ranges_follow_remaining_capacity_and_ratio_mode_fills_usable
     state.provision_skip_backup();
     assert_eq!(state.provision_begin_selected(), ProvisionKind::Mode0);
 
-    let boot_hint = state
-        .provision_field_hint(1)
-        .expect("boot sector range hint");
-    assert!(boot_hint.contains("20417"));
+    let fields = state.provision_visible_fields();
+    assert!(!fields.iter().any(|(label, _, _)| label == "分配方式"));
+    assert_eq!(
+        state.provision().form.boot_input_mode,
+        CapacityInputMode::Exact
+    );
+    assert_eq!(
+        state.provision().form.share_input_mode,
+        CapacityInputMode::Quick
+    );
+    assert_eq!(
+        state.provision().form.encrypt_input_mode,
+        CapacityInputMode::Quick
+    );
+    assert!(fields.iter().any(|(label, _, _)| label == "启动区输入方式"));
+    assert!(fields.iter().any(|(label, _, _)| label == "交换区输入方式"));
+    assert!(fields.iter().any(|(label, _, _)| label == "保密区输入方式"));
+}
 
-    let total_sectors = 64_000_000_000u64 / 512;
-    let lce =
-        edpcli::protocol::lba7_compat::locate_lba7_compatibility_extent_from_verified_usb_capacity(
-            total_sectors,
-            512,
-        )
-        .unwrap();
-    let usable_sectors = lce.start_lba - edpcli::provision::OFFICIAL_PARTITION_START_SECTOR;
-    state.provision_mut().form.share_mib = "1024".into();
-    let encrypt_hint = state.provision_field_hint(3).expect("encrypt range hint");
-    let expected_max = (usable_sectors - 20_417 - 1024 * 2048) / 2048;
-    assert!(encrypt_hint.contains(&format!("可填 1..{expected_max} MiB")));
-    assert!(encrypt_hint.contains("剩余"));
+#[test]
+fn registered_mode0_to_mode1_preview_keeps_encrypt_anchor_and_blocks_overlap() {
+    use edpcli::provision::{CapacityInputMode, DiskProvisionKind};
+    use edpcli::sectors::EdpfPartition;
+    let encrypt_start = 4_020_480u64;
+    let mut row = device(64_000_000_000);
+    row.provision_kind = DiskProvisionKind::Mode0;
+    row.partitions = Some(vec![
+        EdpfPartition {
+            ptype: 1,
+            active: 1,
+            enc: 0,
+            start_lba: 63,
+            size_bytes: 20_417 * 512,
+        },
+        EdpfPartition {
+            ptype: 2,
+            active: 1,
+            enc: 1,
+            start_lba: 20_480,
+            size_bytes: 4_000_000 * 512,
+        },
+        EdpfPartition {
+            ptype: 4,
+            active: 1,
+            enc: 1,
+            start_lba: encrypt_start,
+            size_bytes: 2_097_153 * 512,
+        },
+    ]);
+    let mut state = AppState::new();
+    state.replace_devices(vec![row]);
+    state.navigate(NavCommand::WorkspaceProvision, 20);
+    state.provision_select_disk();
+    state.provision_skip_backup();
+    state.navigate(NavCommand::Down, 20);
+    assert_eq!(state.provision_begin_selected(), ProvisionKind::Mode1);
+    assert_eq!(
+        state.provision().form.share_input_mode,
+        CapacityInputMode::Exact
+    );
+    assert_eq!(
+        state.provision().form.encrypt_input_mode,
+        CapacityInputMode::Exact
+    );
 
-    state.provision_mut().field_selected = 0;
-    assert!(state.provision_toggle_selected_option());
-    assert_eq!(state.provision().form.size_mode, ProvisionSizeMode::Ratio);
+    let smaller = encrypt_start - 63 - 4096;
+    state.provision_mut().form.share_sectors = smaller.to_string();
+    let preview = state.provision_geometry_preview_lines();
+    assert!(preview.iter().any(|line| line.contains("gap=4096 sectors")));
+    assert!(preview
+        .iter()
+        .any(|line| line.contains(&format!("start={encrypt_start}"))));
+    let request = state
+        .provision_request()
+        .expect("shrink must leave a legal gap");
+    assert_eq!(request.encrypt_start_lba, Some(encrypt_start));
+
+    state.provision_mut().form.share_sectors = (encrypt_start - 63 + 1).to_string();
+    let preview = state.provision_geometry_preview_lines();
+    assert!(preview.iter().any(|line| line.contains("overlap")));
+    assert!(state.provision_request().is_err());
+}
+
+#[test]
+fn plain_mode0_preview_reflows_unanchored_share_after_boot_edit() {
+    let mut state = AppState::new();
+    state.replace_devices(vec![device(64_000_000_000)]);
+    state.navigate(NavCommand::WorkspaceProvision, 20);
+    state.provision_select_disk();
+    state.provision_skip_backup();
+    assert_eq!(state.provision_begin_selected(), ProvisionKind::Mode0);
+    state.provision_mut().form.boot_sectors = "10000".into();
     state.provision_mut().form.label_id = "1402259934".into();
     state.provision_mut().form.user = "测试用户".into();
     state.provision_mut().form.dept = "输电运检中心".into();
-    let request = state.provision_request().expect("ratio request");
-    assert_eq!(request.boot_mib, None);
-    assert_eq!(request.boot_sectors, Some(20_417));
-    assert_eq!(
-        request.share_mib.unwrap() + request.encrypt_mib.unwrap(),
-        (usable_sectors - 20_417) / 2048
-    );
+    let request = state.provision_request().expect("plain mode0 request");
+    assert_eq!(request.boot_start_lba, Some(63));
+    assert_eq!(request.share_start_lba, Some(10_063));
+    assert!(state
+        .provision_geometry_preview_lines()
+        .iter()
+        .any(|line| line.contains("start=10063")));
 }
 
 #[test]
@@ -247,11 +363,17 @@ fn mode0_defaults_share_to_remaining_space_once_without_linking_fields() {
         expected_share_mib.to_string()
     );
     let expected_remainder = usable_sectors - 20_417 - expected_share_mib * 2048 - 1024 * 2048;
-    let share_hint = state.provision_field_hint(2).expect("share capacity hint");
-    assert!(share_hint.contains(&format!("剩余 {expected_remainder} 扇区")));
+    assert!(state
+        .provision_geometry_preview_lines()
+        .iter()
+        .any(|line| line == &format!("unallocated={expected_remainder} sectors")));
 
     let original_share = state.provision().form.share_mib.clone();
-    state.provision_mut().field_selected = 3;
+    state.provision_mut().field_selected = state
+        .provision_visible_fields()
+        .iter()
+        .position(|(label, _, _)| label == "保密区 MiB")
+        .expect("encrypt field");
     for _ in 0..4 {
         state.provision_backspace();
     }
@@ -261,9 +383,9 @@ fn mode0_defaults_share_to_remaining_space_once_without_linking_fields() {
     assert_eq!(state.provision().form.encrypt_mib, "512");
     assert_eq!(state.provision().form.share_mib, original_share);
     assert!(state
-        .provision_field_hint(3)
-        .expect("encrypt capacity hint")
-        .contains("剩余"));
+        .provision_geometry_preview_lines()
+        .iter()
+        .any(|line| line == &format!("unallocated={} sectors", expected_remainder + 512 * 2048)));
 
     state.provision_begin_selected();
     assert_eq!(state.provision().form.encrypt_mib, "512");
@@ -276,7 +398,7 @@ fn mode0_defaults_share_to_remaining_space_once_without_linking_fields() {
 }
 
 #[test]
-fn mode0_capacity_hint_reports_overflow_without_rebalancing_other_fields() {
+fn mode0_live_layout_reports_invalid_geometry_without_rebalancing_other_fields() {
     let mut state = AppState::new();
     state.replace_devices(vec![device(64_000_000_000)]);
     state.navigate(NavCommand::WorkspaceProvision, 20);
@@ -286,8 +408,9 @@ fn mode0_capacity_hint_reports_overflow_without_rebalancing_other_fields() {
     let original_encrypt = state.provision().form.encrypt_mib.clone();
     state.provision_mut().form.share_mib = "999999999".into();
 
-    let hint = state.provision_field_hint(2).expect("overflow hint");
-    assert!(hint.contains("超出"));
+    let preview = state.provision_geometry_preview_lines();
+    assert!(preview.iter().any(|line| line.starts_with("布局无效:")));
+    assert!(state.provision_request().is_err());
     assert_eq!(state.provision().form.encrypt_mib, original_encrypt);
 }
 
@@ -295,7 +418,11 @@ fn mode0_capacity_hint_reports_overflow_without_rebalancing_other_fields() {
 fn provision_force_change_password_checkbox_defaults_off_and_toggles() {
     let mut state = AppState::new();
     state.provision_mut().kind = ProvisionKind::Mode1;
-    state.provision_mut().field_selected = state.provision_field_count() - 1;
+    state.provision_mut().field_selected = state
+        .provision_visible_fields()
+        .iter()
+        .position(|(label, _, _)| label == "首次强制改密")
+        .unwrap();
 
     assert!(!state.provision().form.force_change_password);
     assert!(state.provision_toggle_force_change_password());
