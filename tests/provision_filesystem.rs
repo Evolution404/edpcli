@@ -6,11 +6,10 @@ use edpcli::{
     backup_metadata::PartitionGeometry,
     protocol::lba7_compat::locate_lba7_compatibility_extent_from_geometry,
     provision::{
-        build_empty_exfat, build_official_exfat_partition, build_official_exfat_partitions,
-        build_official_partition_filesystem, encrypt_sparse_mode2, wrap_file_key,
-        wrap_legacy_lba7_file_key, FileKeyWrapMode, OfficialFilesystemFormat,
-        OfficialPartitionFilesystems, OfficialPartitionMode, OfficialPartitionSizes,
-        OfficialProvisionPlan, PartitionRole, SparseFilesystemImage,
+        build_empty_exfat, build_official_exfat_partitions, build_official_partition_filesystem,
+        encrypt_sparse_mode2, wrap_file_key, wrap_legacy_lba7_file_key, FileKeyWrapMode,
+        OfficialFilesystemFormat, OfficialPartitionFilesystems, OfficialPartitionMode,
+        OfficialPartitionSizes, OfficialProvisionPlan, PartitionRole, SparseFilesystemImage,
     },
 };
 
@@ -234,6 +233,12 @@ fn formatting_defaults_off_and_selects_only_actual_mode_targets() {
         let defaults =
             plan_format_targets(&plan, &FormatOptions::default(), &serials, &FILE_KEY).unwrap();
         assert!(defaults.iter().all(|choice| !choice.selected));
+        assert!(defaults
+            .iter()
+            .all(|choice| choice.prepared_image.is_none()));
+        assert!(defaults
+            .iter()
+            .all(|choice| choice.verification_image.is_none()));
         if mode == OfficialPartitionMode::WholeDiskEncrypted {
             assert_eq!(defaults[0].target.role, PartitionRole::CompatibilityReserve);
             assert!(!defaults[0].target.format_capable);
@@ -255,14 +260,8 @@ fn formatting_defaults_off_and_selects_only_actual_mode_targets() {
         let selected = plan_format_targets(&plan, &options, &serials, &FILE_KEY).unwrap();
         assert_eq!(selected.iter().filter(|choice| choice.selected).count(), 1);
         let choice = selected.iter().find(|choice| choice.selected).unwrap();
-        let image = build_official_exfat_partition(
-            &plan,
-            &choice.target,
-            &FILE_KEY,
-            &choice.volume_label,
-            choice.volume_serial,
-        )
-        .unwrap();
+        let image = choice.prepared_image.as_ref().unwrap();
+        assert!(choice.verification_image.is_some());
         assert_eq!(
             image.physically_encrypted,
             choice.target.physically_encrypted

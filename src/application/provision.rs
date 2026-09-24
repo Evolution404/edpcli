@@ -10,20 +10,21 @@ use std::io::{Seek, SeekFrom, Write};
 use std::path::Path;
 use std::time::Duration;
 
-use crate::backup_deep::{analyze_partition, keys::decrypt_mode2, AnalysisStatus, PartitionReader};
+use crate::backup_deep::{analyze_partition, AnalysisStatus, PartitionReader};
 use crate::backup_metadata::PartitionGeometry;
 use crate::common::{EdpCliError, EdpCliResult, EXIT_IO, EXIT_TARGET, SECTOR};
 use crate::diskio::{self, SectorDev};
 use crate::identify::identify;
 use crate::protocol::lba7_compat::locate_lba7_compatibility_extent_from_verified_usb_capacity;
 use crate::provision::{
-    build_official_partition_filesystem, build_official_provision_protocol_image,
-    build_passwordless_conversion, wrap_file_key, wrap_legacy_lba7_file_key, FileKeyWrapMode,
-    OfficialFilesystemFormat, OfficialPartitionFilesystems, OfficialPartitionMode,
-    OfficialPartitionSizes, OfficialProvisionPlan, OfficialProvisionWriteImage, OnlyId,
+    build_empty_exfat, build_empty_fat16, build_official_partition_filesystem,
+    build_official_provision_protocol_image, build_passwordless_conversion, wrap_file_key,
+    wrap_legacy_lba7_file_key, FileKeyWrapMode, OfficialFilesystemFormat,
+    OfficialPartitionFilesystems, OfficialPartitionMode, OfficialPartitionSizes,
+    OfficialProvisionPlan, OfficialProvisionWriteImage, OnlyId, PartitionFilesystemImage,
     PartitionFormatTarget, PartitionRole, PasswordlessConversionImage, ProvisionEntropy,
-    ProvisionImage, ProvisionMetadata, ProvisionProfile, ProvisionSpec, TargetIdentity,
-    DEFAULT_MODE0_BOOT_SECTORS,
+    ProvisionImage, ProvisionMetadata, ProvisionProfile, ProvisionSpec, SparseFilesystemImage,
+    TargetIdentity, DEFAULT_MODE0_BOOT_SECTORS,
 };
 use crate::sysinfo::{self, CmdRunner};
 use encoding_rs::GBK;
@@ -103,6 +104,32 @@ impl FormatOptions {
     }
 }
 
+fn build_plain_format_image(
+    target: &PartitionFormatTarget,
+    filesystem: OfficialFilesystemFormat,
+    volume_label: &str,
+    volume_serial: u32,
+) -> Result<SparseFilesystemImage, String> {
+    match filesystem {
+        OfficialFilesystemFormat::Fat16 => build_empty_fat16(
+            target.geometry.start_sector,
+            target.geometry.sector_count(),
+            volume_serial,
+            volume_label,
+        ),
+        OfficialFilesystemFormat::ExFat => build_empty_exfat(
+            target.geometry.start_sector,
+            target.geometry.sector_count(),
+            volume_serial,
+            volume_label,
+        ),
+        OfficialFilesystemFormat::Fat32 | OfficialFilesystemFormat::Ntfs => Err(format!(
+            "portable filesystem writer does not yet implement {}",
+            filesystem.config_token()
+        )),
+    }
+}
+
 pub fn plan_format_targets(
     plan: &OfficialProvisionPlan,
     options: &FormatOptions,
@@ -132,7 +159,7 @@ pub fn plan_format_targets(
     {
         return Err("当前模式不包含所选的可格式化分区".into());
     }
-    let planned = targets
+    let mut planned = targets
         .into_iter()
         .enumerate()
         .map(|(index, target)| {
@@ -143,6 +170,8 @@ pub fn plan_format_targets(
                 filesystem: target.filesystem,
                 volume_label: label.to_string(),
                 volume_serial: serials[index],
+                prepared_image: None,
+                verification_image: None,
             }
         })
         .collect::<Vec<_>>();
@@ -157,8 +186,18 @@ pub fn plan_format_targets(
             ));
         }
     }
-    for choice in planned.iter().filter(|choice| choice.selected) {
-        build_official_partition_filesystem(
+    for choice in planned.iter_mut().filter(|choice| choice.selected) {
+        let filesystem = choice
+            .filesystem
+            .ok_or("compatibility reserve is not a filesystem")?;
+        let verification_image = build_plain_format_image(
+            &choice.target,
+            filesystem,
+            &choice.volume_label,
+            choice.volume_serial,
+        )
+        .map_err(|message| format!("{} 格式化计划无效: {message}", choice.target.role.label()))?;
+        let prepared_image = build_official_partition_filesystem(
             plan,
             &choice.target,
             file_key,
@@ -166,17 +205,42 @@ pub fn plan_format_targets(
             choice.volume_serial,
         )
         .map_err(|message| format!("{} 格式化计划无效: {message}", choice.target.role.label()))?;
+        if !choice.target.physically_encrypted && prepared_image.image != verification_image {
+            return Err(format!(
+                "{} 明文格式化镜像与验证镜像不一致",
+                choice.target.role.label()
+            ));
+        }
+        choice.prepared_image = Some(prepared_image);
+        choice.verification_image = Some(verification_image);
     }
     Ok(planned)
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Eq, PartialEq)]
 pub struct PlannedPartitionFormat {
     pub target: PartitionFormatTarget,
     pub selected: bool,
     pub filesystem: Option<OfficialFilesystemFormat>,
     pub volume_label: String,
     pub volume_serial: u32,
+    pub prepared_image: Option<PartitionFilesystemImage>,
+    pub verification_image: Option<SparseFilesystemImage>,
+}
+
+impl std::fmt::Debug for PlannedPartitionFormat {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("PlannedPartitionFormat")
+            .field("target", &self.target)
+            .field("selected", &self.selected)
+            .field("filesystem", &self.filesystem)
+            .field("volume_label", &self.volume_label)
+            .field("volume_serial", &self.volume_serial)
+            .field("prepared_image", &self.prepared_image.is_some())
+            .field("verification_image", &self.verification_image.is_some())
+            .finish()
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -201,7 +265,6 @@ pub struct PreparedNewProvision {
     pub write_image: OfficialProvisionWriteImage,
     pub format_targets: Vec<PlannedPartitionFormat>,
     plan: OfficialProvisionPlan,
-    file_key: [u8; 16],
     expected_onlyid: String,
     expected_serial: Option<String>,
     expected_probe: crate::platform::HardwareProbe,
@@ -323,7 +386,7 @@ pub fn prepare_new_provision(
     let spec = ProvisionSpec::new(target, metadata, profile)
         .map_err(|message| err(EXIT_TARGET, format!("错误: 制盘元数据无法编码: {message}")))?;
 
-    let file_key = random_array::<16>()?;
+    let mut file_key = random_array::<16>()?;
     let legacy_file_key = random_array::<8>()?;
     let entropy = ProvisionEntropy::new(random_array::<252>()?);
     let current_key = wrap_file_key(request.password.as_bytes(), file_key, FileKeyWrapMode::Sm4);
@@ -346,8 +409,10 @@ pub fn prepare_new_provision(
     for _ in 0..logical_count {
         serials.push(u32::from_le_bytes(random_array::<4>()?));
     }
-    let format_targets = plan_format_targets(&plan, &request.format, &serials, &file_key)
-        .map_err(|message| err(EXIT_TARGET, format!("错误: {message}")))?;
+    let format_targets_result = plan_format_targets(&plan, &request.format, &serials, &file_key);
+    file_key.fill(0);
+    let format_targets =
+        format_targets_result.map_err(|message| err(EXIT_TARGET, format!("错误: {message}")))?;
     let expected_serial = if format_targets.iter().any(|choice| choice.selected) {
         Some(
             runner
@@ -370,7 +435,6 @@ pub fn prepare_new_provision(
         write_image,
         format_targets,
         plan,
-        file_key,
         expected_onlyid: request.label_id.clone(),
         expected_serial,
         expected_probe: probe,
@@ -653,33 +717,16 @@ fn verify_protocol_readback(
     Ok(())
 }
 
-struct FormatReader<'a> {
-    dev: &'a mut dyn SectorDev,
-    target: PartitionFormatTarget,
-    file_key: &'a [u8; 16],
+struct PreparedImageReader<'a> {
+    image: &'a SparseFilesystemImage,
 }
 
-impl PartitionReader for FormatReader<'_> {
+impl PartitionReader for PreparedImageReader<'_> {
     fn read_sector(&mut self, relative_lba: u64) -> std::io::Result<Vec<u8>> {
-        if relative_lba >= self.target.geometry.sector_count() {
-            return Err(std::io::Error::other("format read outside partition"));
-        }
-        let absolute = self
-            .target
-            .geometry
-            .start_sector
-            .checked_add(relative_lba)
-            .and_then(|lba| u32::try_from(lba).ok())
-            .ok_or_else(|| std::io::Error::other("format LBA overflow"))?;
-        let raw = self.dev.read_sector(absolute)?;
-        if raw.len() != SECTOR {
-            return Err(std::io::Error::other("truncated format readback"));
-        }
-        if self.target.physically_encrypted {
-            decrypt_mode2(&raw, self.file_key).map_err(std::io::Error::other)
-        } else {
-            Ok(raw)
-        }
+        self.image
+            .sector_or_zero(relative_lba)
+            .map(|sector| sector.to_vec())
+            .ok_or_else(|| std::io::Error::other("format read outside partition"))
     }
 }
 
@@ -690,7 +737,7 @@ fn format_partition(
     choice: &PlannedPartitionFormat,
 ) -> EdpCliResult<()> {
     verify_format_identity(runner, dev, prepared)?;
-    execute_partition_format(dev, &prepared.plan, &prepared.file_key, choice)?;
+    execute_partition_format(dev, choice)?;
     verify_format_identity(runner, dev, prepared)?;
     Ok(())
 }
@@ -699,21 +746,26 @@ fn format_partition(
 /// protocol verification; this operation never writes the protocol region.
 fn execute_partition_format(
     dev: &mut dyn SectorDev,
-    plan: &OfficialProvisionPlan,
-    file_key: &[u8; 16],
     choice: &PlannedPartitionFormat,
 ) -> EdpCliResult<()> {
     let filesystem = choice
         .filesystem
         .ok_or_else(|| err(EXIT_TARGET, "错误: 兼容保留区不可格式化"))?;
-    let built = build_official_partition_filesystem(
-        plan,
-        &choice.target,
-        file_key,
-        &choice.volume_label,
-        choice.volume_serial,
-    )
-    .map_err(|message| err(EXIT_TARGET, message))?;
+    let built = choice
+        .prepared_image
+        .as_ref()
+        .ok_or_else(|| err(EXIT_TARGET, "错误: 格式化计划缺少预生成物理镜像"))?;
+    let verification_image = choice
+        .verification_image
+        .as_ref()
+        .ok_or_else(|| err(EXIT_TARGET, "错误: 格式化计划缺少验证镜像"))?;
+    if built.geometry != choice.target.geometry
+        || built.physically_encrypted != choice.target.physically_encrypted
+        || built.image.volume_sectors() != choice.target.geometry.sector_count()
+        || verification_image.volume_sectors() != choice.target.geometry.sector_count()
+    {
+        return Err(err(EXIT_TARGET, "错误: 预生成格式化镜像与目标几何不一致"));
+    }
     for (&relative, sector) in built.image.sectors() {
         let absolute = choice
             .target
@@ -772,10 +824,8 @@ fn execute_partition_format(
         file_key_crc: 0,
         encrypt_mode: 0,
     };
-    let mut reader = FormatReader {
-        dev,
-        target: choice.target,
-        file_key,
+    let mut reader = PreparedImageReader {
+        image: verification_image,
     };
     let boot = reader
         .read_sector(0)
@@ -905,6 +955,32 @@ pub fn export_sparse_provision_image(
             .and_then(|_| file.write_all(sector))
             .map_err(|error| err(EXIT_IO, format!("错误: 写入镜像 LBA{lba} 失败: {error}")))?;
     }
+    for choice in prepared
+        .format_targets
+        .iter()
+        .filter(|choice| choice.selected)
+    {
+        let built = choice
+            .prepared_image
+            .as_ref()
+            .ok_or_else(|| err(EXIT_TARGET, "错误: 导出计划缺少预生成格式化镜像"))?;
+        for (&relative_lba, sector) in built.image.sectors() {
+            let absolute_lba = choice
+                .target
+                .geometry
+                .start_sector
+                .checked_add(relative_lba)
+                .ok_or_else(|| err(EXIT_TARGET, "错误: 导出格式化 LBA 溢出"))?;
+            file.seek(SeekFrom::Start(absolute_lba * SECTOR as u64))
+                .and_then(|_| file.write_all(sector))
+                .map_err(|error| {
+                    err(
+                        EXIT_IO,
+                        format!("错误: 写入格式化镜像 LBA{absolute_lba} 失败: {error}"),
+                    )
+                })?;
+        }
+    }
     file.sync_all()
         .map_err(|error| err(EXIT_IO, format!("错误: 镜像同步失败: {error}")))?;
     Ok(())
@@ -967,7 +1043,6 @@ mod tests {
                 wrap_file_key(b"0000aaaa", [0; 16], FileKeyWrapMode::Sm4),
             )
             .unwrap(),
-            file_key: [0; 16],
             expected_onlyid: "1".into(),
             expected_serial: None,
             expected_probe: probe,
@@ -1044,7 +1119,7 @@ mod tests {
                 dev.sectors.insert(lba, vec![lba as u8; SECTOR]);
             }
             for choice in choices.iter().filter(|choice| choice.selected) {
-                execute_partition_format(&mut dev, &plan, &key, choice).unwrap();
+                execute_partition_format(&mut dev, choice).unwrap();
                 let raw = dev
                     .read_sector(choice.target.geometry.start_sector as u32)
                     .unwrap();
@@ -1085,9 +1160,9 @@ mod tests {
         for lba in 0..13u32 {
             dev.sectors.insert(lba, vec![0xa5; SECTOR]);
         }
-        execute_partition_format(&mut dev, &plan, &key, &choices[0]).unwrap();
+        execute_partition_format(&mut dev, &choices[0]).unwrap();
         dev.fail_at = Some(choices[1].target.geometry.start_sector as u32);
-        assert!(execute_partition_format(&mut dev, &plan, &key, &choices[1]).is_err());
+        assert!(execute_partition_format(&mut dev, &choices[1]).is_err());
         assert_eq!(
             &dev.read_sector(choices[0].target.geometry.start_sector as u32)
                 .unwrap()[54..62],
@@ -1096,6 +1171,65 @@ mod tests {
         for lba in 0..13u32 {
             assert_eq!(dev.read_sector(lba).unwrap(), vec![0xa5; SECTOR]);
         }
+    }
+
+    #[test]
+    fn sparse_export_includes_selected_format_images() {
+        let key = [0x42; 16];
+        let plan = format_test_plan(OfficialPartitionMode::DefaultThreePartition, &key);
+        let choices = plan_format_targets(
+            &plan,
+            &FormatOptions {
+                boot: true,
+                ..FormatOptions::default()
+            },
+            &[0x1234_5678, 2, 3],
+            &key,
+        )
+        .unwrap();
+        let mut patch = BTreeMap::new();
+        patch.insert(0, vec![0x5a; SECTOR]);
+        let probe = crate::platform::HardwareProbe {
+            vid: Some(0x3535),
+            pid: Some(0x6300),
+            transport: crate::platform::NativeTransport::Uas,
+            inquiry: None,
+        };
+        let prepared = PreparedNewProvision {
+            disk: 4,
+            device_id: "disk&ven_aigo&prod_u335".into(),
+            mode: plan.mode,
+            force_change_password: false,
+            lce_start_lba: plan.lba7_compatibility_extent.start_lba,
+            write_image: OfficialProvisionWriteImage {
+                metadata: ProvisionImage::from_bytes(vec![0; 13 * SECTOR]).unwrap(),
+                total_sectors: 1_000_000,
+                patch,
+            },
+            format_targets: choices,
+            plan,
+            expected_onlyid: "1".into(),
+            expected_serial: None,
+            expected_probe: probe,
+            expected_lba3: None,
+        };
+        let path = std::env::temp_dir().join(format!(
+            "edpcli-provision-export-{}-{}.img",
+            std::process::id(),
+            std::thread::current().name().unwrap_or("test")
+        ));
+        let _ = std::fs::remove_file(&path);
+        export_sparse_provision_image(&path, &prepared).unwrap();
+        let mut file = std::fs::File::open(&path).unwrap();
+        use std::io::{Read, Seek};
+        let mut mbr = [0u8; SECTOR];
+        file.read_exact(&mut mbr).unwrap();
+        assert_eq!(mbr, [0x5a; SECTOR]);
+        file.seek(SeekFrom::Start(63 * SECTOR as u64)).unwrap();
+        let mut boot = [0u8; SECTOR];
+        file.read_exact(&mut boot).unwrap();
+        assert_eq!(&boot[54..62], b"FAT16   ");
+        std::fs::remove_file(path).unwrap();
     }
 
     #[test]
@@ -1186,7 +1320,6 @@ mod tests {
             write_image,
             format_targets: vec![],
             plan,
-            file_key: [0x42; 16],
             expected_onlyid: "1402259934".into(),
             expected_serial: None,
             expected_probe: probe,

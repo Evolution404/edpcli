@@ -250,7 +250,7 @@ fn print_topic_help(topic: &str) {
             println!("标签标识未指定时自动生成一个合法 onlyid 候选；可通过 --label-id 手动覆盖。");
             println!("密码策略: --force-change-password 表示首次插入时强制修改密码；默认关闭。");
             println!("分区参数: --boot-mib N / --boot-sectors N、--share-mib N、--encrypt-mib N；mode0 未指定启动区时默认 20417 扇区。");
-            println!("当前产品写入固定使用已验证的 exFAT + SM4(mode2) 路线。");
+            println!("当前可写文件系统为 FAT16/exFAT；加密分区使用已验证的 SM4(mode2) 扇区变换。");
         }
         "completion" => {
             println!("{}", bold("用法: edpcli completion <zsh|bash|fish>"));
