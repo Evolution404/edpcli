@@ -1204,7 +1204,7 @@ pub fn analyze_sector_with_context(
                     FieldStyle::Magic,
                 ));
                 notes.push("字段结构来自 protocol::lba4::parse_lba4。Inspect 不凭身份形态猜 writer：encoding/second-key/HSerial/host-hardinfo profile 保持 Unknown，因此 producer flag 不伪判。".into());
-                "canonical protocol::lba4（writer provenance 未强猜）".into()
+                format!("canonical protocol::lba4 labelOnlyId={}（writer provenance 未强猜）", view.onlyid_text)
             }
             Err(error) => {
                 notes.push(format!("canonical LBA4 parser 拒绝该扇区: {error}"));
