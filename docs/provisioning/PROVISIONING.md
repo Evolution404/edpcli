@@ -146,7 +146,7 @@ TargetProvisionPlan
 统一协议生成 + 统一事务 writer
 ```
 
-从 `TargetProvisionPlan` 开始，writer 不允许再依据来源是 mode0/1/2/3 做分支；它只能依据目标模式、最终分区几何和每个分区的 `PartitionAction` 工作。
+从 `TargetProvisionPlan` 开始，writer 不允许再依据来源盘型做专用分支；它只能依据统一目标 `ProvisionTarget`、最终分区几何、最终 sector write-set 和每个分区的 `PartitionAction` 工作。
 
 ### 4.1.1 统一“盘型”命名与展示
 
@@ -172,7 +172,7 @@ enum DiskProvisionKind {
 }
 ```
 
-其中 `Plain` 表示未识别到有效 EDP mode0/1/2/3 注册结构。盘型与“是否存在备份”“备份创建时间”“是否是某次历史快照”是不同维度，禁止继续用“免密快照/加密原盘”混合作为盘型。
+其中 `Plain` 表示普通、非 EDP mode0/1/2/3 的磁盘状态。它既是设备分类之一，也是新的“恢复普通盘”目标状态，但**不是 mode4，也不是第五个官方 EDP 模式**。盘型与“是否存在备份”“备份创建时间”“是否是某次历史快照”是不同维度，禁止继续用“免密快照/加密原盘”混合作为盘型。
 
 设备页的每个 USB 设备必须显示盘型；备份页每条备份也必须通过备份中的协议镜像识别并显示盘型。空间不足时用短名称，详情区显示完整官方名称。
 
@@ -210,83 +210,172 @@ enum DiskProvisionKind {
 
 例如 mode0 的 type2 与 mode1 的 type2 虽然数值同为2，但物理语义分别是加密 Share 与明文 BootShareCombined，禁止直接 Preserve。
 
-### 4.4 容量 canonical 单位与新 UI
+### 4.4 统一目标模型：四个官方模式 + Plain
 
-所有容量和位置的 canonical 单位统一为 sector：`start_lba`、`sector_count`、`end_lba`。MiB/GiB 仅为 UI 快捷输入和显示单位，禁止将已注册盘的精确 sector 值先四舍五入为 MiB 再反算。
+制盘目标不再只用 `OfficialPartitionMode` 表达，统一引入：
 
-每个可编辑分区独立支持两种输入方式：
-
-1. **快速输入**：MiB/GiB，适合普通新盘和快速调整；
-2. **精确输入**：sector，适合已注册盘互转和需要保持旧几何的场景。
-
-普通未注册盘默认快速输入；已注册盘中能直接继承或由旧边界精确推导的容量默认精确输入。一个表单允许混合输入，例如 Boot 使用官方默认快速值、Share/Encrypt 使用精确 sector。
-
-快速→精确为无损整数转换。精确→快速若不是整 MiB/GiB，必须明确提示舍入将改变几何，用户主动确认后才能改变 canonical sector 值。
-
-“剩余全部”属于一次性快捷填入：点击时计算并写入当前字段，此后修改其它字段不得联动改值，只刷新最终 LBA、剩余/超出和 Preserve/Rebuild 状态。
-
-### 4.5 普通盘默认值
-
-普通未注册盘没有可保留数据，所有目标分区均为 Rebuild。
-
-PassInfo 制盘策略使用完整 14B 结构生成并同步写入 LBA7/LBA12。TUI 表单统一显示“初始化密码强制修改”“取消密码复杂性验证”“交换区密码最大错误次数”“保密区密码最大错误次数”；两个最大错误次数使用逻辑值 `0..255`，存储层负责协议规定的 XOR `0x88` 变换，表单层不得直接填写线上的变换后字节。
-
-- mode0：Boot=LBA63 起、默认20417 sectors、FAT16；Encrypt默认1024 MiB、exFAT；Share一次性填入扣除 Boot/Encrypt/LCE 后的最大可用值；
-- mode1：Encrypt默认1024 MiB；BootShareCombined一次性填入其余可用空间；
-- mode2：按 canonical 规则生成0x7E00 CompatibilityReserve，Encrypt占用 mode2 允许的数据空间；
-- mode3：Boot 使用当前已验证官方默认，Share一次性填入其余可用空间。
-
-### 4.6 已注册盘 Prefill 原则
-
-已注册盘默认目标从“空间利用最大化”改为“可保留数据最大化”，优先级固定为：
-
-1. 同语义来源分区存在时，优先继承精确 start/sector_count；
-2. 可通过旧分区边界精确推导目标字段时，使用精确 sector；
-3. 目标新增字段无来源时，使用该目标模式系统默认；
-4. 目标删除字段不带入目标；
-5. 若保留旧分区需要留下未分配空间，允许默认留下未分配空间，不得为了“自动占满”破坏原本可 Preserve 的分区。
-
-身份字段在可可靠解析时默认带入 `onlyid`、User、Dept、SAFE6 label。PassInfo 策略只有在 LBA7/LBA12 两份记录版本有效且四项值完全一致时才继承：初始化密码强制修改、取消密码复杂性验证、交换区密码最大错误次数、保密区密码最大错误次数。普通未注册盘默认分别为“否、否、255、255”。任一副本不一致或字段值非法时不得猜测，回退到默认值。明文密码只有在系统实际掌握/可靠确认时才带入，不能从 CRC/wrapped key 假装恢复。
-
-#### 4.6.1 Preserve 分区的位置锚定与未分配空间
-
-已注册盘重制时，凡来源中已经判定为 Preserve candidate 的分区，默认具有**位置锚定**语义：其 `start_lba` 与 `sector_count` 不会因为用户修改其它分区容量而被自动联动改变。用户只修改前一个分区时，系统优先保留后续可 Preserve 分区的原始几何，因此允许在两个目标分区之间出现未分配空间。
-
-以 mode0→mode1 为例，默认 Combined 精确延伸到原 Encrypt(type4) 起点，Encrypt 保持原 `start_lba` 和 `sector_count`。若用户缩小 Combined：
-
-```text
-LBA63
-├──── 新 Combined ────┤
-                      ├── 未分配空间 ──┤
-                                         old Encrypt start
-                                         ├── 原 Encrypt ──┤
+```rust
+enum ProvisionTarget {
+    Plain,
+    Official(OfficialPartitionMode),
+}
 ```
 
-此时 Encrypt 的起点、大小、FileKey 和 data extent 均未变化，因此仍为 `PreserveExact`；UI 只显示新增未分配空间，不得自动把 Encrypt 向前移动。
+固定规则：
 
-若用户增大 Combined，但仍未触碰锚定 Encrypt，则只消耗原有未分配空间，Encrypt 继续 Preserve。若 Combined 的新末端达到或越过 Encrypt 起点，则当前布局进入**重叠无效状态**：UI 显示超出/重叠的精确 sector 数，禁止提交，但仍不得自动移动 Encrypt。
+- `OfficialPartitionMode` 仍然只有 mode0～mode3；
+- `Plain` 是非 EDP 目标状态，**不得命名为 mode4**；
+- TUI 制盘菜单最终固定为：mode0、mode1、mode2、mode3、恢复普通盘；
+- source/target 逻辑按五种盘型统一建模，但四个 EDP 官方模式的协议事实与命名保持不变；
+- writer 只消费最终 `ProvisionTarget` / `TargetProvisionPlan`，不得出现 source-mode 专用 writer。
 
-只有在用户明确修改 Encrypt 的起点/大小，或主动执行未来的“紧凑布局/重新排列后续分区”操作时，才允许解除该锚定；一旦最终 `start_lba` 或 `sector_count` 与来源不一致，Encrypt 立即转为 `Rebuild`，并明确提示原数据不能原样保留。
+### 4.5 容量 canonical、单位与通用 `f` 填满
 
-因此新布局模型不得继续假设所有目标分区必须首尾连续排列。`TargetPartitionGeometry` 必须独立保存每个分区的 `start_lba` 和 `sector_count`，并允许合法 gap；合法性检查分别处理 overlap、设备边界、LCE 边界和未分配空间。普通未注册盘默认仍采用紧凑连续布局，只有已注册盘的 Preserve 优先 Prefill 才默认锚定来源分区。
+所有容量和位置的 canonical 单位统一为 sector：`start_lba`、`sector_count`、`end_lba`。MiB/GiB 仅为 UI 输入/显示层，任何单位切换都不得损失 canonical sector 精度。
 
-### 4.7 4×4 模式互转默认规则
+所有容量字段统一支持：
 
-同模式重制（0→0、1→1、2→2、3→3）优先精确继承所有同语义分区；用户不改时应尽可能全部 Preserve。
+- `MiB`；
+- `GiB`；
+- `sector`；
+- `Space` 循环切换单位；
+- MiB/GiB 显示固定保留 3 位小数并四舍五入；
+- sector 显示精确整数。
 
-关键交叉转换默认：
+容量提示只保留：
 
-- **0→1**：Encrypt 精确继承原 type4；Combined 精确取 `old_encrypt_start - 63`，默认保持 type4 起点，因此 Encrypt 可成为 Preserve candidate；前部 Combined 必须 Rebuild。
-- **1→0**：Encrypt 精确继承；Boot 使用 mode0 官方20417 sectors；Share 精确反推到原 Encrypt 起点，使 Encrypt 默认保持原位；Boot/Share Rebuild。
-- **0→3**：Boot/Share 若目标几何保持一致均可 Preserve；原 Encrypt 在目标模式中不存在。为了保留 Share，允许默认留下原 Encrypt 区域为未分配空间，只有用户主动“占满剩余”后 Share 才转为 Rebuild。
-- **3→0**：Boot 可精确继承；若新增 Encrypt 需要缩小 Share，则 Share Rebuild；若来源盘原本存在足够未分配空间，则可继续 Preserve Share。
-- **0/1/2 之间的 Encrypt(type4)**：只要最终语义、start、sector_count、物理加密、文件系统解释和 crypto profile 全部兼容，均可作为 Preserve candidate；否则 Rebuild。
-- mode1 Combined 与 mode0/mode3 Share 语义不同，禁止直接 Preserve。
-- mode2 CompatibilityReserve 不作为普通用户数据分区 Preserve；它按目标 mode2 canonical 规则重新生成。
+```text
+Space 切换 MiB / GiB / sector · f 填满
+```
 
-最终是否 Preserve 不由 source/target mode 组合直接决定，而由来源分区与最终目标分区逐项兼容判断决定。
+`f` 是所有制盘目标共同能力，mode0～mode3 与 Plain 都支持。只有当前焦点位于“容量字段”时 `f` 才表示“填满当前最大可设范围”；在用户名、部门、标签、卷标、密码等文本字段中，字符 `f` 必须正常输入。
 
-### 4.8 PartitionAction
+`f` 必须与实时布局显示的 `max_sectors` 使用同一算法：
+
+- 当前分区后方存在锚定分区时，只填到下一锚定分区起点之前；
+- 当前分区后方只有连续空闲空间时，填满该连续空闲空间；
+- 最后一个分区可填到目标可用区末端；
+- 不得为了“填满”自动移动其它锚定分区；
+- Plain 中不得跨越后续分区去吞并更远的 gap。
+
+`f` 是一次性修改当前 `sector_count` 的动作，不建立后续联动关系。
+
+### 4.6 字段级输入约束与编辑行为
+
+当前 `provision_push_char()` 不能继续把任意非控制字符写入任意字段。新增字段级输入策略（例如 `ProvisionInputPolicy`），由字段类型决定合法输入。
+
+约束固定如下：
+
+- Quick 容量（MiB/GiB）：只允许 `0-9` 和一个 `.`；允许编辑中的 `12.`，禁止第二个小数点、负号、字母和空格；
+- Exact sector / `start_lba` / sector count：只允许 `0-9`；
+- `0..255` 逻辑字段：只允许数字，并在输入阶段阻止大于255的值；
+- `onlyid`：按现有协议解析语义允许无符号 `u32` 或负 `i32` 文本，因此只允许数字，以及首字符位置唯一的 `-`；
+- 用户名、部门、SAFE6 标签、卷标、密码等文本字段：允许对应安全可打印字符，同时继续执行既有协议长度/编码限制；
+- 文件系统、布尔开关、单位等枚举字段不作为自由文本输入框，继续用 `Space` 或明确快捷键切换。
+
+非法字符不得进入字段；UI 给出短提示，例如“起始 LBA 仅允许输入整数”，而不是等用户提交后才发现解析失败。
+
+输入框获得焦点后：
+
+- `←/→` 只移动输入光标；
+- `Home/End` 到行首/行尾；
+- 不能再用 `←/→` 切换 workspace/tab；
+- 非编辑状态下 `←/→` 才可承担页面/选项切换。
+
+### 4.7 Plain / 恢复普通盘
+
+#### 4.7.1 产品语义
+
+“恢复普通盘”表示将目标 USB 重建为普通、非 EDP 管理的磁盘布局。它是破坏性重新分区/格式化操作，但**不是安全擦除**：未被最终 write-set 覆盖的历史扇区可能仍残留旧内容，文档和 Review 不得宣称数据已安全抹除。
+
+当前磁盘已经是 Plain 时，UI 应明确显示“当前已是普通盘”；如仍允许进入该目标，语义是重新分区/格式化，而不是重复“解除 EDP”。
+
+#### 4.7.2 第一阶段分区表范围
+
+第一阶段只实现：
+
+- MBR；
+- 最多4个主分区；
+- 暂不实现 GPT、扩展分区和逻辑分区。
+
+领域模型应预留未来 `PartitionTableKind::{Mbr, Gpt}`，但 GPT 不在本轮验收范围。实现前额外审计真实/官方 EDP 来源盘是否可能残留 GPT primary/backup header 或 partition entry array；只有证据证明存在 OS 混淆风险时才扩展清理范围，禁止凭猜测擦盘尾。
+
+#### 4.7.3 默认布局
+
+第一次进入 Plain 表单时自动创建 P1：
+
+```text
+P1.start_lba    = 2048
+P1.sector_count = total_sectors - 2048
+P1.filesystem   = exFAT
+```
+
+即默认从 LBA2048 开始占满剩余磁盘。`2048` 只是默认值，不是强制对齐规则；用户可自行修改起点和容量，程序不得偷偷改回默认值。
+
+底层新增动态 Plain 表单模型，例如：
+
+```rust
+struct PlainProvisionForm {
+    partitions: Vec<PlainPartitionForm>,
+}
+
+struct PlainPartitionForm {
+    start_lba: u64,
+    sector_count: u64,
+    unit: QuickCapacityUnit,
+    filesystem: PlainFilesystem,
+    volume_label: String,
+}
+```
+
+canonical 只保存 `start_lba + sector_count`；MiB/GiB 只属于编辑视图。
+
+#### 4.7.4 多分区规则
+
+Plain 支持1～4个 MBR 主分区。默认 P1 已占满整个可用区，因此第一次“添加分区”如果没有连续空闲空间，必须提示用户先缩小已有分区，不能自动缩 P1。
+
+存在空闲区后，“添加分区”默认使用当前布局中可用的连续空闲区，初始容量占满该连续空闲区。用户随后可自行缩小或修改起点。
+
+核心不变量：**任何普通编辑动作都不得自动移动其它分区。**
+
+- 缩小 P1：产生或扩大 gap，P2/P3/P4 起点不变；
+- 扩大 P1 撞到 P2：立即显示 overlap，禁止生成计划；
+- 删除 P2：原区域变为未分配，不扩大 P1、不前移 P3；
+- 修改任一分区起点/容量：只改变该分区本身，实时布局负责显示 gap/overlap/越界。
+
+删除采用统一键盘交互：当前焦点属于 Plain 某分区字段时，`D` 请求删除该分区并进入明确确认；不得做隐式删除。
+
+#### 4.7.5 Plain 文件系统
+
+第一阶段默认使用项目已有、可验证的 first-party sparse exFAT builder，不依赖 `diskutil eraseDisk/partitionDisk` 完成核心格式化。Plain 分区不生成 FileKey、LBA7/LBA12 partition entry 或 EDP 加密材料。
+
+未来可扩展 FAT32/NTFS 等，但未完成 first-party writer + analyzer + HIL 前不得提前暴露为可选能力。
+
+### 4.8 已注册盘 Prefill、锚定与五状态转换
+
+已注册 EDP 盘仍坚持“可保留数据最大化”：
+
+1. 同语义来源分区存在时，优先继承精确 `start_lba/sector_count`；
+2. 可通过旧边界精确推导时使用 exact sector；
+3. 目标新增字段无来源时使用目标模式系统默认；
+4. 目标删除字段不带入目标；
+5. 为 Preserve 留下 gap 是合法布局，不能为了“自动占满”破坏可 Preserve 分区。
+
+Preserve candidate 默认具有位置锚定语义：修改前置分区不得自动移动后续 Preserve 分区；前置分区缩小产生 gap，增大撞到锚定分区时进入 overlap 无效状态。只有用户明确修改该分区自身起点/大小，才解除其原几何并转为 Rebuild。
+
+总体 source/target 盘型是五种：Plain、mode0、mode1、mode2、mode3。Plain 作为 target 时使用本节 Plain planner；四个官方模式之间的默认规则继续遵守现有已验证结论：
+
+- 0→1：Encrypt 精确继承，Combined 重建；
+- 1→0：Encrypt 精确继承，Boot/Share 重建；
+- 0→3：Boot/Share 几何兼容时可 Preserve；
+- 3→0：Boot 可继承，新增 Encrypt 是否迫使 Share Rebuild 由最终几何决定；
+- mode0/1/2 间 type4 Encrypt 只有在语义、位置、大小、物理加密、filesystem/crypto profile 全兼容时才是 Preserve candidate；
+- mode1 Combined 与 mode0/mode3 Share 语义不同，禁止直接 Preserve；
+- mode2 CompatibilityReserve 按 canonical 规则重建。
+
+最终 Preserve/Rebuild 由逐分区兼容判定决定，不由 source/target mode 组合直接决定。
+
+### 4.9 PartitionAction 与 key material
 
 统一动作模型：
 
@@ -296,257 +385,341 @@ PreserveWithRewrap
 Rebuild
 ```
 
-**PreserveExact** 必须同时满足：语义角色一致、`PartionType`一致、start LBA 完全一致、sector_count 完全一致、物理加密语义一致、文件系统解释兼容、crypto profile 兼容、原记录可可靠解析。行为是：数据 extent 不写、文件系统不重建、FileKey/加密参数复用，目标协议重新组装时复用属于该分区的 key material。
+`PreserveExact` 必须同时满足：语义、PartionType、start LBA、sector_count、物理加密、文件系统解释和 crypto profile 全兼容；对应 data extent 禁止进入 write-set，并复用原 FileKey/key material。
 
-**PreserveWithRewrap** 用于几何/数据完全保持但用户修改密码的场景：FileKey 和 ciphertext 不变，仅重新包装认证/key record。只有旧 FileKey 可可靠取得、认证状态可验证且目标 crypto profile 兼容时才允许。第一阶段实现证据不足时可暂缓，仅开放 PreserveExact + Rebuild。
+`PreserveWithRewrap` 只用于几何/数据完全保持但用户改变认证包装的场景；证据不足时可继续后置，不得通过猜测提前开放。
 
-**Rebuild**：任意 Preserve 条件不满足时采用。重新生成 FileKey、分区记录和文件系统，必要时重新加密并写数据 extent。UI 必须明确提示原数据不能原样保留。
-
-### 4.9 FileKey 与协议记录复用
-
-Preserve 分区必须继续使用原 FileKey，否则旧 ciphertext 无法正常读取。目标 LBA7/LBA12 的表头、entry count、entry order 和目标模式专属字段仍按目标模式重新生成。
-
-不能先假设“来源 entry 整条 byte-for-byte 搬到新 slot”总是安全。实现 Preserve 前必须通过测试证明哪些字节属于 partition-owned material、哪些与 slot/index/header 绑定。特别要验证 mode0 的 type4 entry2 移到 mode1 的 type4 entry1 时，`UserKeyCRC`、`FileKeyCRC`、wrapped FileKey、`EncryptMode` 等数据解密相关字段的复用边界。
+`Rebuild`：任一 Preserve 条件不满足即采用；重新生成必要协议/文件系统/加密材料，并在 UI/Review 明确提示原数据不能原样保留。
 
 ### 4.10 制盘选盘与制盘前保存
 
-“制盘”工作区不能直接默认当前设备或依赖其它页面的临时选择。进入制盘后第一步必须显示可用 USB 设备列表，由用户明确选择目标盘；选盘后固定该 `diskN`/硬件身份作为本次制盘目标，再显示该盘当前盘型和历史 EDPB 保存状态。随后才进入保存提示和目标模式选择。
+制盘 workspace 第一阶段必须显式选择物理 USB，不得静默复用其它页面当前选择。流程固定为：
 
-选盘页面每条设备至少显示：disk 编号、容量、USB 身份摘要、盘型；已注册盘还可显示 `onlyid`。系统盘/非 USB 整盘继续按现有安全门禁排除或明确标记不可选。
+```text
+选择 USB
+→ 显示当前盘型和历史备份状态
+→ 选择是否先保存
+→ 选择 mode0 / mode1 / mode2 / mode3 / 恢复普通盘
+→ 表单
+→ Planning
+→ Review
+→ YES
+→ 安全事务写盘
+```
 
-目标盘固定后显示历史 EDPB 保存状态：
+设备页、备份页、制盘页统一显示 `DiskProvisionKind::{Plain,Mode0,Mode1,Mode2,Mode3}`；旧“免密状态/加密原盘/cems·免密”不得继续作为主分类。
 
-- 没有保存记录；
-- 或已保存 N 份及最近保存时间。
+### 4.11 统一 TUI 表单与视觉规范
 
-用户明确选择“先保存当前盘”或“不保存，继续制盘”。选择保存则保存成功后进入模式菜单；选择跳过则直接进入模式菜单。后续统一 writer 不允许再偷偷强制创建第二份备份。
+#### 4.11.1 复用现有布局
 
-UI 还必须说明 EDPB 的实际覆盖范围，不能把元数据/快照备份描述成必然包含普通分区所有用户文件。
+Plain 不另起一套卡片式编辑器。所有目标继续复用当前 `ProvisionStage::Form`：
 
-设备页和备份页也必须同步改造盘型显示：
+- 宽屏：左56%“参数” + 右44%“实时布局”；
+- 窄屏：自动切换上下布局；
+- mode0～mode3 提供固定语义分区字段；
+- Plain 提供动态 P1～P4 字段；
+- Review/Confirm/Running/Result 共用现有流程。
 
-- 设备页原“非 cems 盘 / cems盘 / cems · 免密”等状态改为统一盘型；
-- 备份页原“免密状态 / 加密原盘”列改为“盘型”，值为普通盘或 mode0/1/2/3；
-- 备份详情页使用同一盘型名称；
-- 搜索关键字应支持 `普通盘`、`mode0`、`mode1`、`mode2`、`mode3` 及官方模式名称；
-- 旧 `is_nopwd` 可在兼容/迁移阶段保留为内部历史字段，但不得继续驱动主 UI 分类，最终应由统一盘型识别替代。
+#### 4.11.2 分组内部对齐
 
-### 4.11 实时 UI 状态与 Review
+字段只在当前 section 内对齐，不能跨“身份信息 / 分区布局 / 格式化 / 密码策略”做全表单统一列宽。Plain 的 P1～P4 同样只在所属 section 内对齐。
 
-每个分区卡片显示：
+#### 4.11.3 输入高亮范围
 
-- 语义角色和状态 badge（原数据可保留 / 将重建）；
-- 快速/精确输入方式；
-- canonical sector_count 及约等 MiB/GiB；
-- start/end LBA；
-- 默认值来源（系统默认、旧分区、旧边界推导、用户编辑）；
-- Preserve/Rebuild 原因；
-- Preserve 时是否复用 FileKey、是否禁止写 data extent。
+当前输入框不能把用于布局对齐的 padding 一起套 `selected()`。输入渲染拆成：
 
-用户编辑任何容量后立即重新计算布局、gap/overlap 和 `PartitionAction`。修改前置分区容量时不得自动移动后续锚定的 Preserve 分区：缩小前置分区产生 gap，后续分区继续 Preserve；增大到发生 overlap 时布局禁止提交。只有用户明确改变后续分区自身的 `start_lba` 或 `sector_count`，该分区才从 PreserveExact 转为 Rebuild；改回原精确几何后状态可恢复。
+```text
+selected(actual visible content)
++ unstyled padding
+```
 
-Final Review 必须逐分区列出 Preserve/Rebuild、最终精确 LBA、FileKey 处理和预计数据损失，真实写盘仍需输入 YES。
+`input_value_window()` 只负责内容窗口、左右溢出标记、光标和 secret mask，不负责把字符串补齐到整列宽度。静态枚举/checkbox 同样只高亮实际值，不能把背景色拖到行尾。
 
-### 4.12 TargetProvisionPlan 与统一 writer
+#### 4.11.4 `▶` 统一表示键盘焦点
 
-最终新增统一 `TargetProvisionPlan` / `TargetPartitionPlan`，每个目标分区携带 `PartitionAction` 与 key material 策略。writer 只消费该计划：
+全 TUI 固定语义：
 
-- PreserveExact：禁止写对应 data extent；
-- PreserveWithRewrap：禁止写 data extent，只允许必要认证/key record 更新；
-- Rebuild：生成文件系统、必要时加密、写 data extent 并读回。
+```text
+▶ = 当前键盘焦点
+```
 
-协议/LCE/MBR 仍按目标模式统一生成，事务层统一执行目标复核、写前镜像、写入、sync、readback 和 rollback。不得再出现 mode0→mode1 writer、conversion writer 等 source-mode 专用实现。
+所有可用 `↑/↓` 或 `j/k` 纵向移动焦点的 table/list/menu/form 都必须显示 `▶`，包括：Devices、Backups、Provision SelectDisk、BackupPrompt、Provision Menu、Provision Form、Advanced Inspect Form/列表等。
 
-## 5. 实施顺序与测试门禁
+以下不使用 `▶`：Tabs、静态状态、Review/Result、持久 checkbox。备份页必须能明确表达：
 
-本重构采用“测试规格先行，再实现”的顺序。
+```text
+▶ ☑ backup1
+  ☑ backup2
+  ☐ backup3
+```
 
-### 5.1 Phase 1：领域模型与红灯测试
+其中 `▶` 是 focus，`☑` 是持久勾选，两种状态不能混用。实现应抽公共 `FOCUS_MARKER = "▶ "` / empty marker helper，避免各页面手写。
 
-先新增测试并锁定：
+#### 4.11.5 实时布局与比例条
 
-- sector-backed `CapacityInput`，Quick/Exact 双输入及无损/有损切换；
-- `PartitionSemanticRole`；
-- `ExistingProvisionProfile` / `ExistingPartition`；
-- `PartitionAction` 兼容判定；
-- 普通盘→4模式默认值；
-- 4×4 来源/目标 Prefill 矩阵；
-- mode0→mode1 默认 Encrypt Preserve；缩小/增大 Combined 只产生 gap 或 overlap，不得自动移动 Encrypt；明确改变 Encrypt 起点或大小1 sector即 Rebuild，改回恢复 Preserve；
-- 同模式不改时 Preserve；
-- “剩余全部”只执行一次且不联动。
-- 已注册盘允许合法未分配 gap；前置分区缩小时后续 Preserve 分区保持锚定；前置分区扩大撞到锚定分区时必须报 overlap 并禁止提交；
-- “紧凑布局/重新排列”若未来开放，必须是显式用户动作，并在会导致 Preserve→Rebuild 时先显示数据丢失警告。
-- `DiskProvisionKind` 五分类：普通盘、mode0、mode1、mode2、mode3；设备页和备份页必须显示一致盘型；
-- 制盘工作区进入后必须先选盘，固定目标后再显示盘型/备份状态，再进入目标模式选择；不得静默复用其它工作区当前选中的设备。
+继续使用现有右侧“实时布局”与细粒度 `━` 比例条，比例来自真实 sector 几何。mode0～mode3 图例保持启动/交换(二合一)/保密/兼容/空闲；Plain 图例变为 P1/P2/P3/P4/空闲，不得借用 EDP role 颜色语义冒充普通分区。
 
-### 5.2 Phase 2：来源盘通用解析
+右侧必须显示：
 
-将旧 conversion 模块中仍有价值的 LBA7/LBA12 几何与 key material 解析迁入通用来源分析。解析失败/证据不足必须 fail-closed，不得把未知盘误判为已注册盘。
+- 整盘容量和 sector；
+- 可分区范围；
+- 已分配/未分配；
+- 中间 gap，而不只显示总未分配；
+- 每分区 start/end LBA、容量；
+- 当前分区最大可设值与还能增加；
+- overlap/越界精确错误；
+- Preserve/Rebuild 状态（官方模式目标）。
 
-### 5.3 Phase 3：双输入 TUI/CLI
+### 4.12 Plain 写盘语义与通用事务 writer
 
-TUI 每个分区独立支持 Quick/Exact；CLI 增加 `--boot-sectors`、`--share-sectors`、`--encrypt-sectors` 与对应 MiB 参数互斥。底层最终请求转为 sector canonical。
+#### 4.12.1 Plain 最终内容
 
-### 5.4 Phase 4：Prefill engine 与 Preserve planner
+EDP→Plain 至少需要：
 
-实现通用 `prefill_for_target_mode()` 和逐分区兼容 planner；来源模式只能影响 Prefill 与 source partition 候选，不得直接进入 writer 分支。
+- LBA0 写入目标 MBR；
+- LBA1、LBA2、LBA4～LBA12 不再构成有效 EDP 协议状态；
+- LBA3 **byte-for-byte 保留**，继续视为 opaque manufacturer metadata；
+- 从当前来源实际解析得到的 LCE 六扇区不再保留旧 EDP 有效内容；
+- 建立用户最终确定的1～4个普通 MBR 分区；
+- 每个选择格式化的 Plain 分区建立可验证 exFAT。
 
-### 5.5 Phase 5：协议 producer 支持 per-partition key material
+MBR exFAT 普通主分区使用标准 type `0x07`。
 
-当前 `OfficialProvisionPlan` 对加密分区共用一组 LBA7/LBA12 key material，需重构为每个目标分区可选择“复用来源材料”或“生成新材料”。同时以测试确定 slot/index 相关字段的重新编码边界。
+若旧 LCE 落在新 Plain 分区范围内，transaction planner 必须先归一化同一 LBA 的最终 ownership：新文件系统实际需要的 sector 内容优先；未被新文件系统占用但仍含旧 LCE 内容的 sector 可清零。禁止依赖“先写A后写B碰巧覆盖”决定最终结果。
 
-### 5.6 Phase 6：统一 writer
+#### 4.12.2 通用 sector transaction
 
-扩展现有 `commit_new_provision()` 或替换为统一目标计划 writer，使 Preserve 分区 data extent 永不进入 write set，Rebuild 分区按现有格式化/加密路径生成并写入。
+当前 official writer 需要泛化为统一 write transaction，例如：
 
-### 5.7 Phase 7：删除旧 conversion
+```text
+SectorWrite { lba, bytes, stage, owner }
+WriteTransactionPlan { touched_sectors, ordered_writes }
+```
 
-通用 planner/writer 覆盖后，彻底删除第五模式、`provision convert`、`PasswordlessConversion*`、`build/prepare/commit_passwordless_conversion`、`atomic_write_passwordless_conversion_sectors` 以及专用测试和过时文档。
+统一顺序：
 
-### 5.8 Phase 8：完整回归与真实盘验收
+1. snapshot 全部 touched sectors；
+2. 数据/文件系统/cleanup extent；
+3. 非 MBR metadata；
+4. LBA0/MBR 最后 commit；
+5. sync；
+6. exact readback；
+7. verify；
+8. 任意失败对 touched set 精确 rollback。
 
-至少通过：
+mode0～mode3 与 Plain 必须共用该事务设施，不允许新增弱化安全链的 Plain writer。
 
-- `cargo fmt --all -- --check`
-- `git diff --check`
-- `cargo check --all-targets`
-- 完整 `cargo test --all-targets`（Runner 有时限时分批覆盖全部 target）
-- 普通盘→mode0/1/2/3
-- 关键互转 mode0→mode1：默认精确值下 type4 FileKey/数据保持可读；修改几何后明确转 Rebuild。
+现有安全链继续保持：system disk guard → USB whole-disk guard → selector pinning → 可选备份 → unmount/lock → reopen rdwr → identity/serial/capacity/LBA3 复核 → atomic write → sync/readback → rollback。
 
-## 6. 完成标准
+### 4.13 Review 与 post-write 验证
+
+Plain Review 至少列出：目标=普通盘、MBR、分区数、每个 Pn 的精确 LBA/容量/filesystem/卷标、将移除 EDP 协议布局、LBA3 保留、旧 LCE 失去 EDP 语义，以及“不是安全擦除”警告。真实写盘继续要求精确输入 `YES`。
+
+Plain 成功必须通过：
+
+1. LBA0 精确等于计划 MBR；
+2. MBR entries 与计划一致；
+3. LBA3 与写前完全一致；
+4. LBA1/2/4～12 不再形成有效 EDP state；
+5. 来源 LCE 不再保持旧 EDP 有效内容；
+6. 重新 scan 分类为 `Plain`；
+7. P1～Pn geometry 精确；
+8. 每个格式化分区通过 filesystem analyzer；
+9. exFAT boot/FAT/bitmap/root 验证；
+10. Virtual-HIL 可 mount、create file、readback、unmount。
+
+## 5. 实施顺序
+
+本轮按“先通用交互和门禁，再 Plain，再 writer/HIL”的顺序推进，禁止在已知 UI 基础问题未收口时先堆 Plain 特殊代码。
+
+### 5.1 Phase 0：计划落盘
+
+- 本文作为唯一长期制盘实施事实源；
+- 刷新实际 HEAD/worktree 状态；
+- 单独 commit/push 文档计划，不与产品代码混合。
+
+### 5.2 Phase 1：通用 TUI 交互修复
+
+测试先行完成：
+
+1. selected 高亮只覆盖实际值，不覆盖 padding；
+2. 全 TUI `▶ = focus` 统一；
+3. 字段级 `ProvisionInputPolicy`；
+4. mode0～mode3 所有容量字段加入 `f` 填满；
+5. 输入框 `←/→` 只移动光标；
+6. MiB/GiB 三位小数显示、sector canonical 无损；
+7. capacity hint 精简；
+8. section 内对齐回归；
+9. 实时比例条/最大可设算法门禁。
+
+### 5.3 Phase 2：彻底删除 Offline Convert
+
+完整删除 Offline Convert 产品路径：TUI menu/stage/form/result、palette aliases、task/worker、CLI `convert`、`src/application/offline_convert.rs`、conversion-only `sectors.rs` 函数/类型、专用测试和 README/USAGE 文案。
+
+删除前审计调用关系，只保留仍被通用协议解析/crypto/source-profile 使用的公共能力。
+
+### 5.4 Phase 3：目标领域模型
+
+引入 `ProvisionTarget::{Plain,Official(...)}`，清除把 `OfficialPartitionMode` 当作全部目标域的假设。保持 `DiskProvisionKind` 五分类与设备/备份/制盘识别同源。
+
+### 5.5 Phase 4：Plain UI/Planner（只读）
+
+先实现 `PlainProvisionForm` / `Vec<PlainPartitionForm>`、P1默认、添加/删除、1～4分区、gap、`f`、自定义起点/容量、overlap/overflow validation 和实时布局；此阶段不写物理盘。
+
+### 5.6 Phase 5：Plain MBR + filesystem plan
+
+生成最终 MBR、partition entries、filesystem plans、EDP metadata cleanup、LBA3 preserve、LCE cleanup 和 overlap-normalized sector ownership。先完成 plan/review/read-only tests。
+
+### 5.7 Phase 6：通用 transaction writer
+
+把现有 official transaction 泛化为目标无关的 touched-sector transaction；保持官方四模式全回归，并让 Plain 使用同一安全链。
+
+### 5.8 Phase 7：Virtual-HIL
+
+覆盖：1/2/3/4分区、gap、非2048起点；验证 OS 解析、mount、文件写入/readback、unmount、重新 scan 为 Plain。
+
+### 5.9 Phase 8：真实 USB 验收
+
+Virtual-HIL 全绿后再做真实盘，至少覆盖：真实 mode0→Plain、mode1→Plain、Plain→mode0、Plain 多分区。真实盘仍遵循写前备份提示和全部设备身份复核。
+
+## 6. 测试门禁
+
+### 6.1 Offline removal
+
+- `ProvisionKind::ALL` 不再包含 Offline；
+- CLI/palette/help/completion 不再接受旧 convert/offline 入口；
+- 不再存在 Offline worker/stage/service。
+
+### 6.2 Plain planner
+
+- 默认 P1 `start_lba=2048` 且占满剩余盘；
+- 1～4 MBR primary；
+- 支持 gap 和非2048起点；
+- 删除分区不移动其它分区；
+- overlap/overflow fail-closed；
+- 第5个分区拒绝；
+- Plain 不是 Official mode4。
+
+### 6.3 `f` 填满
+
+mode0、mode1、mode2、mode3、Plain 全覆盖：容量字段 `f`→max；文本字段 `f`→普通字符；不跨锚定/后续分区；canonical sector 精确。
+
+### 6.4 输入过滤
+
+覆盖 Quick decimal、Exact integer、LBA、0..255、onlyid、文本字段；非法字符不进入字段，并有短提示。
+
+### 6.5 高亮与 focus marker
+
+渲染测试保证 selected background 不覆盖布局 padding；Devices、Backups、Provision 各 stage、Advanced Inspect 等所有纵向导航控件都有统一 `▶`，Tabs/checkbox/static state 不误用箭头。
+
+### 6.6 transaction
+
+覆盖：MBR last write、snapshot all touched sectors、任一失败 rollback、readback mismatch rollback、reopen target swap/serial/capacity/LBA3 变化拒绝、system disk/non-USB 拒绝。
+
+### 6.7 状态转换与真实语义
+
+至少：mode0→Plain、mode1→Plain、mode2→Plain、mode3→Plain、Plain→Plain；以及现有 Plain→mode0/1/2/3 与关键官方模式互转继续全绿。
+
+### 6.8 最终仓库门禁
+
+```text
+cargo fmt --all -- --check
+git diff --check
+cargo check --all-targets
+cargo test --all-targets
+Virtual-HIL
+Real USB acceptance
+```
+
+## 7. 完成标准
 
 只有同时满足以下条件才算完成：
 
-1. TUI/CLI 不存在第五物理改造模式；
-2. 不存在 conversion-specific writer；
-3. 普通盘可制 mode0/1/2/3；
-4. 四种已注册模式可选择任意目标模式；
-5. 已注册盘自动带入可可靠继承的身份和精确分区参数；
-6. 设备页、备份页、制盘页统一使用五种“盘型”：普通盘、模式0·缺省三分区、模式1·启动区和交换区二合一、模式2·整盘加密、模式3·内外网通用双分区；
-7. 制盘工作区第一步必须由用户明确选盘，选盘后才显示当前盘型/历史备份并进入模式选择；
-8. 容量支持 Quick(MiB/GiB) + Exact(sector)，sector 为 canonical；
-9. 用户编辑一个字段不联动修改其它容量或移动其它锚定分区；
-10. 已注册盘允许合法 gap，overlap 必须 fail-closed 且不得自动重排；
-11. UI 实时显示最终 LBA、gap/overlap、剩余/超出和 Preserve/Rebuild；
-12. PreserveExact 分区复用原 FileKey，data extent 不写；
-13. Rebuild 分区明确提示原数据会丢失；
-14. 制盘前显示历史保存情况并由用户明确选择是否先保存；
-15. 所有目标通过同一 `TargetProvisionPlan` 和统一 writer；
-16. 4×4 Prefill/Preserve 测试矩阵和完整回归全绿；
-17. 关键真实盘互转验收通过。
+1. Offline Convert 从 TUI/CLI/service/tests/docs 产品路径彻底消失；
+2. 制盘目标固定为 mode0、mode1、mode2、mode3、恢复普通盘；
+3. Plain 明确不是 mode4；
+4. Plain 默认 LBA2048 开始并占满剩余盘；
+5. Plain 支持1～4个 MBR 主分区和合法 gap；
+6. 用户可精确修改每个 Plain 分区 start_lba/sector_count；
+7. 编辑一个分区不得自动移动其它分区；
+8. 所有目标模式容量字段统一支持 `f` 填满；
+9. 所有自由输入字段执行字段级字符/范围约束；
+10. 输入框 `←/→` 只移动光标；
+11. MiB/GiB 只显示3位小数，内部 sector 精度不丢失；
+12. 输入值高亮不再拖到列尾；
+13. `▶` 全 TUI 统一只表示键盘焦点；
+14. section 只做内部对齐；
+15. 实时布局正确显示比例、每个 gap、最大可设、overlap/越界；
+16. 设备页、备份页、制盘页五种盘型识别同源；
+17. LBA3 byte-for-byte preserve；
+18. 来源 LCE cleanup 与新 filesystem sector ownership 无冲突；
+19. Plain 与官方四模式共用统一 atomic transaction/readback/rollback；
+20. Plain post-write 重新识别为 `Plain`；
+21. Virtual-HIL 全绿；
+22. 完整 tests/fmt/check/diff-check 全绿；
+23. 关键真实 USB 验收通过；
+24. README/USAGE/本文件与真实代码一致。
 
-## 7. 当前实施状态与交接（2026-09-24）
+## 8. 当前实施状态与交接（2026-09-24）
 
-### 7.1 仓库基线
+### 8.1 仓库基线
 
 - 仓库：`/Users/zhangyuxi/Desktop/edpcli`
 - 分支：`main`
-- 基线 HEAD：`d8efb2b4f6654aa837f80f720ba5fb5add11af8a`
-- `origin/main` 与该基线一致。
-- 当前工作区**有意保留未提交 WIP**，约 16 个已修改文件 + 新增 `tests/provision_reprovision.rs`。禁止 `git reset --hard`、`git clean` 或覆盖这些修改；必须先审阅 diff 后继续。
+- 当前计划编写前 HEAD：`e38e1dc317609cc7a558a7f604d968cfe6bf6dfc`
+- `origin/main` 与该 HEAD 一致；
+- 计划编写前工作区 clean；
+- 禁止后续 AI 使用 `git reset/clean` 覆盖其它工作；每次开始必须重新核对实际 status/HEAD/log。
 
-当前主要修改文件包括：
+### 8.2 已存在、应直接复用的实现
 
-- `docs/provisioning/PROVISIONING.md`
-- `README.md` / `docs/user/USAGE.md`
-- `src/application/provision.rs`
-- `src/cli.rs` / `src/cli_args.rs`
-- `src/provision/conversion.rs` / `src/provision/mod.rs`
-- `src/tui/state.rs` / `src/tui/task.rs` / `src/tui/mod.rs` / `src/tui/render.rs`
-- `tests/cli_v2_parser.rs`
-- `tests/provision_conversion.rs`
-- `tests/tui_lifecycle.rs`
-- `tests/tui_state.rs`
-- `tests/provision_reprovision.rs`
+当前代码已经具备并应保留：
 
-### 7.2 已完成且应保留的方向
+- 制盘显式选盘 → BackupPrompt → Menu → Form → Planning → Review → Confirm → Running → Result；
+- Form 宽屏 56/44“参数 + 实时布局”、窄屏上下布局；
+- sector-backed Quick/Exact 容量编辑、MiB/GiB/sector 单位切换基础；
+- 独立 start LBA、合法 gap、overlap fail-closed；
+- 右侧实时 layout bar、最大可设/grow/limiter 计算；
+- `DiskProvisionKind::{Plain,Mode0,Mode1,Mode2,Mode3}`；
+- 已注册盘 Prefill/Preserve candidate 基础；
+- system-disk/USB guard、unmount/lock、reopen 身份复核、LBA3 保护；
+- official atomic write：snapshot touched sectors、data/LCE first、LBA1–12 next、MBR last、readback/rollback；
+- first-party sparse exFAT writer/analyzer 与已有 Virtual-HIL 经验。
 
-1. 独立第五物理“改造”入口已经开始从 TUI/CLI surface 删除，`provision convert` 的用户入口不应恢复。
-2. 制盘前保存提示已经开始接入：进入物理制盘前显示目标盘历史 EDPB 保存情况，并让用户选择“先保存”或“跳过”。
-3. 本文第4～6节已经写入并作为**唯一正式设计**：四模式通用 Prefill、Quick/Exact、sector canonical、Preserve/Rebuild、位置锚定、合法 gap、overlap fail-closed、统一 TargetProvisionPlan/writer。
-4. 已新增 `tests/provision_reprovision.rs`，开始锁定：
-   - Quick/Exact 的 sector canonical；
-   - PreserveExact 对语义/位置/大小变化的严格判断；
-   - 普通盘 mode0 默认；
-   - mode0→mode1 非整 MiB 精确 Encrypt 带入；
-   - mode1→mode0 通过精确 Share 反推保持 Encrypt 起点；
-   - 同模式精确容量继承。
-5. 最新补充规则：已注册盘可 Preserve 分区默认**位置锚定**。mode0→mode1 缩小 Combined 只产生 gap，不移动 type4；增大撞到 type4 时报告 overlap 并禁止提交；只有用户显式改变 type4 几何/执行重新排列才转 Rebuild。
-6. 最新 UI 需求：统一引入五种“盘型”分类（普通盘、mode0/1/2/3，mode 名称沿用官方命名）；设备页和备份页都显示盘型，替代现有“免密状态/加密原盘/cems·免密”等主分类。
-7. 制盘流程必须改为“进入制盘 → 先选盘 → 显示该盘盘型和历史备份 → 选择是否先保存 → 选择目标 mode0/1/2/3”，不得默认继承其它工作区当前选盘。
+### 8.3 当前明确需要删除/重构的实现
 
-### 7.3 当前 WIP 中需要纠正的旧方向
+当前仍存在旧 Offline Convert：
 
-在用户最终确认“删除旧改造算法、改为通用 Preserve planner”之前，WIP 曾临时把旧 conversion 内嵌进 mode1，因此目前代码仍残留：
+- `ProvisionKind::Offline`；
+- Offline TUI form/running/result；
+- palette `convert/offline-convert/offline/oc`；
+- Offline worker/task；
+- `src/application/offline_convert.rs`；
+- CLI `Parsed::Convert`/dispatch；
+- `src/sectors.rs` conversion-specific functions/types；
+- dedicated offline/golden/lifecycle tests 和 README/USAGE 文案。
 
-- `Mode1Preserved`
-- `Mode1NeedsForm`
-- `try_prepare_mode1_from_existing_mode0()`
-- `is_mode0_source()`
-- `build_passwordless_conversion()`
-- `commit_passwordless_conversion()`
-- conversion-specific writer / `PasswordlessConversion*`
+这些不再是兼容面，按 Phase 2 完全删除。通用 parser/crypto/source-profile 能力只有在仍被正式路径使用时才保留。
 
-这些**不是最终设计**。不要继续修补这条专用 mode1 路线。应把其中有价值的“读取旧盘几何/key material”能力迁入通用 `ExistingProvisionProfile`，之后删除 conversion-specific 模型和 writer。
+### 8.4 已确认的 TUI 缺陷
 
-同样，当前 `README.md`、`docs/user/USAGE.md`、部分测试里可能仍有“mode1 自动走旧保留重制”的过渡文案；最终应按本文统一方案重写。
+本轮审计确认：
 
-### 7.4 当前验证状态
+- `provision_push_char()` 当前只拦控制字符，缺少字段级输入过滤；
+- `input_value_window()` 最终通过 `fit_display_width()` 补齐整列，导致 selected 背景拖到行尾；
+- focus marker 不一致：Provision 多处已有 `▶`，但 Devices/Backups table 与 Advanced Inspect Form 等只做背景高亮；
+- 上述缺陷先按 Phase 1 做成全局统一能力，再实现 Plain 动态分区 UI。
 
-当前 WIP **尚未达到可提交状态**。
+### 8.5 下一步执行顺序
 
-最近执行：
+1. 从 Phase 1 开始，测试先行修复通用 TUI 交互；
+2. 小步 commit/push；
+3. Phase 1 全绿后完整删除 Offline Convert；
+4. 引入 `ProvisionTarget::Plain`；
+5. 完成 Plain 只读 UI/planner；
+6. 再泛化 transaction writer 和 exFAT 写盘；
+7. Virtual-HIL；
+8. 最后真实 USB 验收。
 
-```text
-cargo test --test provision_reprovision -- --nocapture
-```
-
-编译阶段先被前一版 WIP 阻塞：
-
-```text
-src/tui/render.rs:
-non-exhaustive patterns:
-&ProvisionPrepared::Mode1NeedsForm not covered
-```
-
-这不是新设计需要补一个 match arm 的问题，而是提示专用 `Mode1NeedsForm/Mode1Preserved` 方向应被移除/重构。不要为了过编译继续扩大这些临时枚举。
-
-在引入该临时枚举之前，曾有一轮 `cargo check --all-targets` 通过；但**当前最新工作区不能视为 green**，必须重新验证。
-
-### 7.5 下一步严格执行顺序
-
-1. 先执行 `git status --short --branch`、`git rev-parse HEAD`、`git log -6 --oneline --decorate`，确认仍在上述基线，禁止 reset/clean。
-2. 审阅当前 diff，区分“应保留的新方案修改”和“旧 mode1 conversion 临时分支”。
-3. 清除 `Mode1Preserved/Mode1NeedsForm` 及 mode1 专用 conversion 调用，使 TUI/CLI 重新只有通用制盘计划入口；保留制盘前备份提示。
-4. 不要立刻删除 `conversion.rs`：先把其中可靠的旧盘 LBA7/LBA12 几何/key material 解析迁移成通用 `ExistingProvisionProfile`，测试覆盖后再删除原文件。
-5. 实现纯领域模型，优先让 `tests/provision_reprovision.rs` 通过：
-   - `CapacityInputMode::{Quick, Exact}`
-   - `QuickCapacityUnit::{MiB, GiB}`
-   - `CapacitySource`
-   - `ExistingProvisionProfile` / `ExistingPartition`
-   - `TargetPartitionGeometry`
-   - `PartitionAction::{PreserveExact, Rebuild}`（Rewrap 可后置）
-   - `prefill_for_target_mode()`
-6. 将现有 `OfficialPartitionSizes`/layout 扩展到 Boot/Share/Encrypt 都能接受 exact-sector override；旧 MiB API 可兼容，但新 canonical 必须是 sector。
-7. Prefill/planner 必须支持独立 `start_lba`，不能继续假设目标分区自动连续排列；已注册盘允许 gap，overlap 必须 fail-closed。
-8. 补完整 20 条基础 Prefill 矩阵（plain→4 + 4×4），再接 TUI Quick/Exact UI。
-9. 增加统一盘型识别 `DiskProvisionKind`，复用 canonical LBA12/LBA7 模式识别；把 `disk_scan`、设备页、备份目录/详情、搜索和制盘选盘页统一迁移到五种盘型显示。旧 `is_nopwd` 仅作为历史兼容信息，不再作为 UI 主分类。
-10. 重构 TUI 制盘入口为显式选盘 stage：先列 USB 盘并显示盘型，用户确认目标后再进入 BackupPrompt/Mode Menu；目标固定后继续沿用 reopen 身份复核。
-11. 在实现 FileKey Preserve 前，单独测试/审计 LBA12/LBA7 entry 从不同 slot 移动时哪些字段可复用，不能假设整条 entry byte-for-byte 可搬。
-12. 通用 `TargetProvisionPlan` 和 writer 覆盖 Preserve/Rebuild 后，再删除全部 `PasswordlessConversion*` / conversion-specific writer / 旧专用测试。
-13. 每个阶段小步提交；最终必须 `cargo fmt --all -- --check`、`git diff --check`、`cargo check --all-targets`、完整 tests 全绿，再 push。
-
-### 7.6 不可违反的实现约束
-
-- 不因修改一个容量字段自动修改其它容量字段。
-- 不因前置分区缩小自动前移后续 Preserve 分区；允许 gap。
-- 不因前置分区扩大自动后移 Preserve 分区；发生 overlap 就禁止提交。
-- Preserve 必须 fail-closed：语义、start、sector_count、物理加密、filesystem/crypto compatibility 有一项不确定即 Rebuild。
-- Preserve 数据区必须不进入 write set，并复用原 FileKey/key material。
-- Rebuild 必须在 UI/Review 明确说明原数据不可原样保留。
-- 盘型识别必须统一来源：设备页、备份页、制盘页不得各自维护不同的“免密/加密”判断逻辑。
-- 制盘页必须先选盘；未固定目标盘前不得进入目标模式表单，也不得开始备份或写盘准备。
-- 不新增第二份并行制盘计划文档；本文是唯一长期实施事实源。
-
-最终产品定义：**普通盘使用目标模式系统默认值；已注册盘依据原盘精确参数和目标模式生成可编辑默认表单。用户确定最终布局后，系统逐分区判断是否与原分区在语义、位置、大小、物理加密、文件系统和 crypto profile 上完全兼容；兼容则复用原 key material/FileKey 和原数据，不兼容则重建并明确提示数据损失。所有模式统一由同一套目标计划和 writer 完成。**
+最终产品定义：**edpcli 制盘中心统一面向五种磁盘目标状态，其中 mode0～mode3 是官方 EDP 模式，Plain 是非 EDP 普通盘目标而不是 mode4。所有目标共用同一套选盘、表单、实时布局、Review 和安全事务基础；容量以 sector 为唯一精确真相，UI 提供 MiB/GiB/sector、`f` 填满、字段级输入约束和统一焦点视觉。Plain 复用现有制盘界面并支持1～4个 MBR 普通分区，不自动移动其它分区，不宣称安全擦除。**
