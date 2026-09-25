@@ -31,6 +31,7 @@ use crate::provision::{
 use crate::sysinfo::{self, CmdRunner};
 use encoding_rs::GBK;
 
+use super::device::open_readonly_usb_disk;
 use super::target_session::{ReadOnly, ReopenAndVerifyError, TargetSession};
 use super::write::{read_image, verify_reopened_snapshot};
 
@@ -569,6 +570,23 @@ pub use export::{
 #[cfg(test)]
 use prepare::target_encrypt_capacity_override;
 pub use prepare::{prepare_plain_provision, prepare_provision, prepare_target_provision};
+
+pub fn prepare_provision_on_disk(
+    runner: &dyn CmdRunner,
+    disk: u32,
+    request: &ProvisionRequest,
+) -> EdpCliResult<PreparedProvision> {
+    let mut dev = open_readonly_usb_disk(runner, disk)?;
+    prepare_provision(runner, disk, request, &mut dev)
+}
+
+pub fn commit_provision_on_disk(
+    runner: &dyn CmdRunner,
+    prepared: &PreparedProvision,
+) -> EdpCliResult<ProvisionCommitOutcome> {
+    let mut dev = open_readonly_usb_disk(runner, prepared.disk())?;
+    commit_provision(runner, &mut dev, prepared)
+}
 
 use commit::validate_target_write_set;
 #[cfg(test)]

@@ -255,38 +255,20 @@ impl TaskHub {
                 }
 
                 let runner = SysRunner;
-                crate::application::write::guard_usb_disk(&runner, disk)
-                    .map_err(|error| error.msg)?;
-                let path = crate::diskio::raw_path(disk);
-                let mut dev = crate::diskio::FileDev::open_rdonly(&path)
-                    .map_err(|error| format!("错误: 无法只读打开 {path}: {error}"))?;
                 let expected = intent.expected_identity.as_ref();
-                crate::application::write::verify_expected_identity(
-                    &runner,
-                    disk,
-                    expected.and_then(|value| value.onlyid.as_deref()),
-                    expected.and_then(|value| value.device_id.as_deref()),
-                    &mut dev,
-                )
-                .map_err(|error| error.msg)?;
                 let mut prompt = BackupPrompter {
                     tx: tx.clone(),
                     operation_id,
                 };
-                let mut ctx = crate::application::write::Ctx {
-                    runner: &runner,
-                    clock: &crate::diskio::SystemClock,
-                    prompt: &mut prompt,
+                crate::application::write::backup_create_on_disk(
+                    &runner,
+                    disk,
                     backup_dir,
-                };
-                let deep = intent.kind == crate::tui::state::WriteKind::BackupCreateDeep;
-                if deep {
-                    crate::application::write::backup_create_level_flow(
-                        disk, &mut ctx, &mut dev, true,
-                    )
-                } else {
-                    crate::application::write::backup_create_flow(disk, &mut ctx, &mut dev)
-                }
+                    &mut prompt,
+                    expected.and_then(|value| value.onlyid.as_deref()),
+                    expected.and_then(|value| value.device_id.as_deref()),
+                    intent.kind == crate::tui::state::WriteKind::BackupCreateDeep,
+                )
                 .map(|_| ())
                 .map_err(|error| error.msg)
             }))

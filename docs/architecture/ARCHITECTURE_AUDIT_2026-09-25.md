@@ -1077,6 +1077,16 @@ application 返回结构化 `ProvisionReport/BackupReport/InspectReport`，CLI/T
 - 全仓源码扫描确认 `Sha256Status`、`NoSidecar`、`sha256_ok`、`sha256_status` 已清零；真实介质协议兼容与历史 EDPB 清单只读兼容未改。
 - 定向 `backup_suite` **61/61**、`tui_suite` **161/161** 通过。
 
+## Phase D3：TUI 裸盘访问边界收口
+
+**COMPLETE。**
+
+- 新增应用层只读整盘打开入口，并在备份、还原与制盘应用服务中提供面向前端的整盘操作封装。TUI 不再自行拼接裸盘路径、构造 `FileDev`、持有 `SystemClock` 或直接调用平台层。
+- 制盘计划、制盘提交、制盘前备份、普通备份与还原均由 TUI 只传递业务请求、固定身份与目标路径；只读打开、USB/系统盘保护和选择后身份复核由应用层统一执行。
+- 写入服务内部原有 `TargetSession`、卸载/锁卷、读写重开、写前快照复核、原子写、逐扇区读回与回滚链保持原样；本阶段只移动资源获取职责，没有降低任何安全门槛。
+- 新增全 TUI 递归架构门禁，禁止 `src/tui/` 重新引用 `crate::platform`、`crate::diskio`、`FileDev::open_rdonly`、`raw_path(` 或 `SystemClock`；备份创建契约同步锁定应用层整盘入口。
+- 源码扫描确认上述 TUI 直接依赖均为 **0**。
+
 ---
 
 # 第八部分：完成标准

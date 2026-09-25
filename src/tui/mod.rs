@@ -602,7 +602,7 @@ fn run_loop(resume: Option<state::WriteIntent>) -> io::Result<LoopExit> {
     }
     let mut keys = KeyMapper::new();
     let mut tasks = TaskHub::new();
-    let backup_dir = crate::diskio::resolve_backup_dir(None);
+    let backup_dir = crate::application::resolve_backup_dir(None);
     tasks.request_device_scan(backup_dir.clone());
     tasks.request_backup_scan(backup_dir.clone());
     state.set_device_scan_pending(true);

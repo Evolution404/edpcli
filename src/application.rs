@@ -12,6 +12,7 @@ pub mod inspect_tree;
 pub mod provision;
 pub mod target_session;
 pub mod write;
+pub use crate::diskio::BackupIntegrityStatus;
 pub use backup::delete_backup_exact;
 use std::cell::RefCell;
 use std::io;
@@ -73,7 +74,7 @@ pub struct BackupWorkspaceItem {
     pub dept: Option<String>,
     pub is_nopwd: bool,
     pub provision_kind: crate::provision::DiskProvisionKind,
-    pub integrity_status: crate::diskio::BackupIntegrityStatus,
+    pub integrity_status: BackupIntegrityStatus,
     pub size_ok: bool,
     pub content_sha256: Option<String>,
 }
@@ -81,6 +82,10 @@ pub struct BackupWorkspaceItem {
 /// Load the canonical selector used by every backup frontend.
 pub fn load_backup_selector(root: &Path) -> crate::selectors::BackupSelector {
     crate::selectors::BackupSelector::load(root)
+}
+
+pub fn resolve_backup_dir(flag: Option<&str>) -> std::path::PathBuf {
+    crate::diskio::resolve_backup_dir(flag)
 }
 
 /// Build the backup-workspace rows from the exact same global numbering used by CLI restore,

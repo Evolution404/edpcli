@@ -1,6 +1,7 @@
 //! Shared device safety policy used before read and write application flows.
 
-use crate::common::{EdpCliError, EdpCliResult, EXIT_TARGET};
+use crate::common::{EdpCliError, EdpCliResult, EXIT_IO, EXIT_TARGET};
+use crate::diskio::{raw_path, FileDev};
 use crate::sysinfo::{self, CmdRunner};
 
 pub fn guard_system_disk(runner: &dyn CmdRunner, disk: u32) -> EdpCliResult<()> {
@@ -25,4 +26,11 @@ pub fn guard_usb_disk(runner: &dyn CmdRunner, disk: u32) -> EdpCliResult<()> {
             disk
         ),
     ))
+}
+
+pub(crate) fn open_readonly_usb_disk(runner: &dyn CmdRunner, disk: u32) -> EdpCliResult<FileDev> {
+    guard_usb_disk(runner, disk)?;
+    let path = raw_path(disk);
+    FileDev::open_rdonly(&path)
+        .map_err(|error| EdpCliError::new(EXIT_IO, format!("错误: 无法只读打开 {path}: {error}")))
 }

@@ -12,20 +12,6 @@ impl TaskHub {
         self.critical_worker = Some(std::thread::spawn(move || {
             let result = catch_unwind(AssertUnwindSafe(|| {
                 let runner = SysRunner;
-                crate::application::write::guard_usb_disk(&runner, disk)
-                    .map_err(|error| error.msg)?;
-                let path = crate::diskio::raw_path(disk);
-                let mut dev = crate::diskio::FileDev::open_rdonly(&path)
-                    .map_err(|error| format!("错误: 无法只读打开 {path}: {error}"))?;
-                crate::application::write::verify_expected_identity(
-                    &runner,
-                    disk,
-                    expected_identity.onlyid.as_deref(),
-                    expected_identity.device_id.as_deref(),
-                    &mut dev,
-                )
-                .map_err(|error| error.msg)?;
-
                 struct ProvisionBackupPrompter;
                 impl crate::application::write::Prompter for ProvisionBackupPrompter {
                     fn prompt_line(&mut self, _msg: &str) -> String {
@@ -37,15 +23,17 @@ impl TaskHub {
                 }
 
                 let mut prompt = ProvisionBackupPrompter;
-                let mut ctx = crate::application::write::Ctx {
-                    runner: &runner,
-                    clock: &crate::diskio::SystemClock,
-                    prompt: &mut prompt,
+                crate::application::write::backup_create_on_disk(
+                    &runner,
+                    disk,
                     backup_dir,
-                };
-                crate::application::write::backup_create_level_flow(disk, &mut ctx, &mut dev, false)
-                    .map(|_| ())
-                    .map_err(|error| error.msg)
+                    &mut prompt,
+                    expected_identity.onlyid.as_deref(),
+                    expected_identity.device_id.as_deref(),
+                    false,
+                )
+                .map(|_| ())
+                .map_err(|error| error.msg)
             }))
             .unwrap_or_else(|payload| {
                 Err(format!(
@@ -74,10 +62,7 @@ impl TaskHub {
         std::thread::spawn(move || {
             let result = catch_unwind(AssertUnwindSafe(|| {
                 let runner = SysRunner;
-                let path = crate::diskio::raw_path(disk);
-                let mut dev = crate::diskio::FileDev::open_rdonly(&path)
-                    .map_err(|error| format!("错误: 无法只读打开 {path}: {error}"))?;
-                crate::application::provision::prepare_provision(&runner, disk, &request, &mut dev)
+                crate::application::provision::prepare_provision_on_disk(&runner, disk, &request)
                     .map_err(|error| error.msg)
             }))
             .unwrap_or_else(|payload| {
@@ -140,11 +125,7 @@ impl TaskHub {
                     operation_id,
                     message: message.into(),
                 });
-                let path = crate::diskio::raw_path(prepared.disk());
-                let mut dev = crate::diskio::FileDev::open_rdonly(&path)
-                    .map_err(|error| format!("错误: 无法只读打开 {path}: {error}"))?;
-
-                crate::application::provision::commit_provision(&runner, &mut dev, &prepared)
+                crate::application::provision::commit_provision_on_disk(&runner, &prepared)
                     .map(|outcome| match outcome {
                         crate::application::provision::ProvisionCommitOutcome::Official(report) => {
                             let mut lines =

@@ -9,11 +9,12 @@ use std::path::PathBuf;
 
 use super::target_session::{ReadOnly, ReopenAndVerifyError, TargetSession};
 use crate::common::*;
-use crate::diskio::{self, raw_path, Clock, DiskFacts, SectorDev};
+use crate::diskio::{self, raw_path, Clock, DiskFacts, SectorDev, SystemClock};
 use crate::identify::identify;
 use crate::selectors::{BackupSelector, DeviceSelector};
 use crate::sysinfo::{self, CmdRunner};
 
+use super::device::open_readonly_usb_disk;
 pub use super::device::{guard_system_disk, guard_usb_disk};
 pub use super::Prompter;
 
@@ -291,6 +292,26 @@ pub fn backup_create_level_flow(
     Ok(report)
 }
 
+pub fn backup_create_on_disk(
+    runner: &dyn CmdRunner,
+    disk: u32,
+    backup_dir: PathBuf,
+    prompt: &mut dyn Prompter,
+    expected_onlyid: Option<&str>,
+    expected_device_id: Option<&str>,
+    deep: bool,
+) -> EdpCliResult<BackupReport> {
+    let mut dev = open_readonly_usb_disk(runner, disk)?;
+    verify_expected_identity(runner, disk, expected_onlyid, expected_device_id, &mut dev)?;
+    let mut ctx = Ctx {
+        runner,
+        clock: &SystemClock,
+        prompt,
+        backup_dir,
+    };
+    backup_create_level_flow(disk, &mut ctx, &mut dev, deep)
+}
+
 /// restore 主流程: bin=None 时交互列出本盘备份并选择。
 pub fn restore_flow(
     bin: Option<String>,
@@ -470,4 +491,24 @@ pub fn restore_flow(
     diskio::atomic_write_sectors(dev, &writes)?;
     ctx.prompt.write_event(WriteEvent::RestoreWriteCompleted);
     Ok(EXIT_OK)
+}
+
+pub fn restore_on_disk(
+    runner: &dyn CmdRunner,
+    bin: Option<String>,
+    disk: u32,
+    backup_dir: PathBuf,
+    prompt: &mut dyn Prompter,
+    expected_onlyid: Option<&str>,
+    expected_device_id: Option<&str>,
+) -> EdpCliResult<i32> {
+    let mut dev = open_readonly_usb_disk(runner, disk)?;
+    verify_expected_identity(runner, disk, expected_onlyid, expected_device_id, &mut dev)?;
+    let mut ctx = Ctx {
+        runner,
+        clock: &SystemClock,
+        prompt,
+        backup_dir,
+    };
+    restore_flow(bin, disk, &mut ctx, &mut dev)
 }

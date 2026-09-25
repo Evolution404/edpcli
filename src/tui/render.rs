@@ -38,8 +38,8 @@ fn backup_health(backup: &crate::application::BackupWorkspaceItem) -> (&'static 
         ("大小异常", danger())
     } else {
         match backup.integrity_status {
-            crate::diskio::BackupIntegrityStatus::Verified => ("EDPB ✓", success()),
-            crate::diskio::BackupIntegrityStatus::Invalid => ("EDPB ✗", danger()),
+            crate::application::BackupIntegrityStatus::Verified => ("EDPB ✓", success()),
+            crate::application::BackupIntegrityStatus::Invalid => ("EDPB ✗", danger()),
         }
     }
 }

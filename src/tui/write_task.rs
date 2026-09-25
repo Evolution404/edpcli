@@ -33,29 +33,10 @@ impl TaskHub {
 
                 let result = (|| -> Result<(), String> {
                     let runner = SysRunner;
-                    crate::application::write::guard_usb_disk(&runner, intent.disk)
-                        .map_err(|error| error.msg)?;
-                    let path = crate::diskio::raw_path(intent.disk);
-                    let mut dev = crate::diskio::FileDev::open_rdonly(&path)
-                        .map_err(|error| format!("错误: 无法只读打开 {path}: {error}"))?;
                     let expected = intent.expected_identity.as_ref();
-                    crate::application::write::verify_expected_identity(
-                        &runner,
-                        intent.disk,
-                        expected.and_then(|value| value.onlyid.as_deref()),
-                        expected.and_then(|value| value.device_id.as_deref()),
-                        &mut dev,
-                    )
-                    .map_err(|error| error.msg)?;
                     let mut prompt = ConfirmedPrompter {
                         tx: tx.clone(),
                         operation_id,
-                    };
-                    let mut ctx = crate::application::write::Ctx {
-                        runner: &runner,
-                        clock: &crate::diskio::SystemClock,
-                        prompt: &mut prompt,
-                        backup_dir,
                     };
                     match intent.kind {
                         crate::tui::state::WriteKind::Restore => {
@@ -63,11 +44,14 @@ impl TaskHub {
                                 .backup
                                 .as_ref()
                                 .ok_or_else(|| "错误: restore 缺少固定备份路径".to_string())?;
-                            crate::application::write::restore_flow(
+                            crate::application::write::restore_on_disk(
+                                &runner,
                                 Some(backup.to_string_lossy().into_owned()),
                                 intent.disk,
-                                &mut ctx,
-                                &mut dev,
+                                backup_dir,
+                                &mut prompt,
+                                expected.and_then(|value| value.onlyid.as_deref()),
+                                expected.and_then(|value| value.device_id.as_deref()),
                             )
                             .map(|_| ())
                             .map_err(|error| error.msg)

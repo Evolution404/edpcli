@@ -51,6 +51,8 @@ fn numeric_backup_create_resume_parses_without_becoming_a_write_wizard() {
 fn tui_backup_create_reuses_the_existing_read_only_application_flow() {
     let task = include_str!("../src/tui/backups/task.rs");
     assert!(task.contains("request_backup_create"));
-    assert!(task.contains("backup_create_flow"));
-    assert!(!task.contains("backup_create_flow_reimplemented"));
+    assert!(task.contains("backup_create_on_disk"));
+    assert!(!task.contains("crate::diskio"));
+    assert!(!task.contains("FileDev::open_rdonly"));
+    assert!(!task.contains("raw_path("));
 }

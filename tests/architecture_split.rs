@@ -125,6 +125,21 @@ fn workspace_modules_do_not_import_platform_or_diskio_directly() {
 }
 
 #[test]
+fn entire_tui_uses_application_boundary_for_platform_and_raw_disk_access() {
+    let tui = rust_sources_under("src/tui");
+    assert_sources_exclude(
+        tui,
+        &[
+            "crate::platform",
+            "crate::diskio",
+            "FileDev::open_rdonly",
+            "raw_path(",
+            "SystemClock",
+        ],
+    );
+}
+
+#[test]
 fn semantic_consumers_do_not_depend_on_inspect_presentation() {
     exists("src/protocol/semantic.rs");
 
