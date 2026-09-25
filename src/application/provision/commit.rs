@@ -5,16 +5,23 @@ pub fn commit_plain_provision(
     dev: &mut dyn SectorDev,
     prepared: &PreparedPlainProvision,
 ) -> EdpCliResult<()> {
-    guard_usb_disk(runner, prepared.disk)?;
-    let _guard = sysinfo::prepare_write(runner, prepared.disk).map_err(|error| {
+    let session = TargetSession::<ReadOnly>::open_usb(runner, prepared.disk)?;
+    let session = session.prepare_write().map_err(|error| {
         err(
             EXIT_IO,
             format!("错误: 无法卸载/锁定 disk{}: {error}", prepared.disk),
         )
     })?;
-    dev.reopen_rdwr(OPEN_WAIT)
-        .map_err(|error| err(EXIT_IO, format!("错误: 无法以读写方式重开目标盘: {error}")))?;
-    verify_reopened_snapshot(dev, &prepared.source_metadata)?;
+    let _session = session
+        .reopen_and_verify(dev, OPEN_WAIT, |dev| {
+            verify_reopened_snapshot(dev, &prepared.source_metadata)
+        })
+        .map_err(|error| match error {
+            ReopenAndVerifyError::Reopen(error) => {
+                err(EXIT_IO, format!("错误: 无法以读写方式重开目标盘: {error}"))
+            }
+            ReopenAndVerifyError::Verify(error) => error,
+        })?;
 
     let fresh_probe = runner
         .hardware_probe(prepared.disk)
@@ -114,18 +121,26 @@ pub fn commit_new_provision(
         target_plan.has_preserved_partitions(),
         prepared.source_metadata.as_deref(),
     )?;
-    guard_usb_disk(runner, prepared.disk)?;
-    let _guard = sysinfo::prepare_write(runner, prepared.disk).map_err(|error| {
+    let session = TargetSession::<ReadOnly>::open_usb(runner, prepared.disk)?;
+    let session = session.prepare_write().map_err(|error| {
         err(
             EXIT_IO,
             format!("错误: 无法卸载/锁定 disk{}: {error}", prepared.disk),
         )
     })?;
-    dev.reopen_rdwr(OPEN_WAIT)
-        .map_err(|error| err(EXIT_IO, format!("错误: 无法以读写方式重开目标盘: {error}")))?;
-    if let Some(source_metadata) = &prepared.source_metadata {
-        verify_reopened_snapshot(dev, source_metadata)?;
-    }
+    let _session = session
+        .reopen_and_verify(dev, OPEN_WAIT, |dev| {
+            if let Some(source_metadata) = &prepared.source_metadata {
+                verify_reopened_snapshot(dev, source_metadata)?;
+            }
+            Ok(())
+        })
+        .map_err(|error| match error {
+            ReopenAndVerifyError::Reopen(error) => {
+                err(EXIT_IO, format!("错误: 无法以读写方式重开目标盘: {error}"))
+            }
+            ReopenAndVerifyError::Verify(error) => error,
+        })?;
     let fresh_probe = runner
         .hardware_probe(prepared.disk)
         .or_else(|| crate::platform::fallback_hardware_probe(runner, prepared.disk))
@@ -249,13 +264,14 @@ fn verify_format_identity(
     dev: &mut dyn SectorDev,
     prepared: &PreparedNewProvision,
 ) -> EdpCliResult<()> {
-    guard_usb_disk(runner, prepared.disk)?;
-    let fresh_probe = runner
-        .hardware_probe(prepared.disk)
-        .or_else(|| crate::platform::fallback_hardware_probe(runner, prepared.disk))
+    let session = TargetSession::<ReadOnly>::open_usb(runner, prepared.disk)?;
+    let fresh_probe = session
+        .hardware_probe()
         .ok_or_else(|| err(EXIT_TARGET, "错误: 格式化前无法复核硬件身份"))?;
-    let fresh_total = sysinfo::disk_total_sectors(runner, prepared.disk)
+    let fresh_total = session
+        .total_sectors()
         .ok_or_else(|| err(EXIT_TARGET, "错误: 格式化前无法复核容量"))?;
+    let fresh_serial = session.hardware_serial();
     verify_format_hardware(
         &prepared.expected_probe,
         prepared.write_image.total_sectors,
@@ -263,7 +279,7 @@ fn verify_format_identity(
         prepared.expected_serial.as_deref(),
         &fresh_probe,
         fresh_total,
-        runner.hardware_serial(prepared.disk).as_deref(),
+        fresh_serial.as_deref(),
     )?;
     verify_protocol_readback(dev, prepared)
 }

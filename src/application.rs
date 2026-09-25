@@ -9,6 +9,7 @@ pub mod device;
 pub mod inspect;
 pub mod inspect_tree;
 pub mod provision;
+pub mod target_session;
 pub mod write;
 pub use backup::delete_backup_exact;
 use std::cell::RefCell;

@@ -114,3 +114,24 @@ fn protocol_semantic_does_not_depend_on_presentation_or_application_layers() {
         );
     }
 }
+
+#[test]
+fn raw_write_flows_use_target_session_for_safety_transition() {
+    exists("src/application/target_session.rs");
+
+    for path in [
+        "src/application/provision/commit.rs",
+        "src/application/write.rs",
+    ] {
+        let source = fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join(path))
+            .unwrap_or_else(|error| panic!("read {path}: {error}"));
+        assert!(
+            !source.contains("sysinfo::prepare_write"),
+            "{path} must enter write state through application::target_session"
+        );
+        assert!(
+            !source.contains("reopen_rdwr("),
+            "{path} must reopen raw devices through application::target_session"
+        );
+    }
+}

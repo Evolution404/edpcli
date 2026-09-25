@@ -31,7 +31,7 @@ use crate::provision::{
 use crate::sysinfo::{self, CmdRunner};
 use encoding_rs::GBK;
 
-use super::device::guard_usb_disk;
+use super::target_session::{ReadOnly, ReopenAndVerifyError, TargetSession};
 use super::write::{read_image, verify_reopened_snapshot};
 
 const OPEN_WAIT: Duration = Duration::from_secs(10);

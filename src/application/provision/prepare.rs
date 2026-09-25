@@ -124,12 +124,12 @@ pub fn prepare_target_provision(
     request: &OfficialProvisionRequest,
     dev: &mut dyn SectorDev,
 ) -> EdpCliResult<PreparedNewProvision> {
-    guard_usb_disk(runner, disk)?;
-    let total_sectors = sysinfo::disk_total_sectors(runner, disk)
+    let target_session = TargetSession::<ReadOnly>::open_usb(runner, disk)?;
+    let total_sectors = target_session
+        .total_sectors()
         .ok_or_else(|| err(EXIT_TARGET, "错误: 无法取得目标盘总扇区数"))?;
-    let probe = runner
-        .hardware_probe(disk)
-        .or_else(|| crate::platform::fallback_hardware_probe(runner, disk))
+    let probe = target_session
+        .hardware_probe()
         .ok_or_else(|| err(EXIT_TARGET, "错误: 无法取得目标盘 USB/SCSI 硬件身份"))?;
     let target = TargetIdentity::from_probe(&probe, total_sectors)
         .map_err(|message| err(EXIT_TARGET, format!("错误: 目标硬件身份不完整: {message}")))?;
@@ -490,8 +490,9 @@ pub fn prepare_plain_provision(
     plan: PlainProvisionPlan,
     dev: &mut dyn SectorDev,
 ) -> EdpCliResult<PreparedPlainProvision> {
-    guard_usb_disk(runner, disk)?;
-    let total_sectors = sysinfo::disk_total_sectors(runner, disk)
+    let target_session = TargetSession::<ReadOnly>::open_usb(runner, disk)?;
+    let total_sectors = target_session
+        .total_sectors()
         .ok_or_else(|| err(EXIT_TARGET, "错误: 无法取得目标盘总扇区数"))?;
     if total_sectors != plan.total_sectors {
         return Err(err(
@@ -502,9 +503,8 @@ pub fn prepare_plain_provision(
             ),
         ));
     }
-    let probe = runner
-        .hardware_probe(disk)
-        .or_else(|| crate::platform::fallback_hardware_probe(runner, disk))
+    let probe = target_session
+        .hardware_probe()
         .ok_or_else(|| err(EXIT_TARGET, "错误: 无法取得目标盘 USB/SCSI 硬件身份"))?;
     let target = TargetIdentity::from_probe(&probe, total_sectors)
         .map_err(|message| err(EXIT_TARGET, format!("错误: 目标硬件身份不完整: {message}")))?;

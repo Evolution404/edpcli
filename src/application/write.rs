@@ -7,6 +7,7 @@
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
+use super::target_session::{ReadOnly, ReopenAndVerifyError, TargetSession};
 use crate::common::*;
 use crate::diskio::{self, raw_path, Clock, DiskFacts, SectorDev};
 use crate::identify::identify;
@@ -355,7 +356,7 @@ pub fn restore_flow(
     ctx: &mut Ctx,
     dev: &mut dyn SectorDev,
 ) -> EdpCliResult<i32> {
-    guard_usb_disk(ctx.runner, disk)?;
+    let target_session = TargetSession::<ReadOnly>::open_usb(ctx.runner, disk)?;
     let img = read_image(dev)?;
     let lba4 = &img[4 * SECTOR..5 * SECTOR];
     let label_id = diskio::lba4_label_id_from(lba4);
@@ -504,15 +505,18 @@ pub fn restore_flow(
     ))) {
         return Err(err(EXIT_CANCELLED, "已取消"));
     }
-    let _write_guard = sysinfo::prepare_write(ctx.runner, disk)
+    let target_session = target_session
+        .prepare_write()
         .map_err(|e| err(EXIT_IO, format!("错误: 无法卸载 disk{}: {}", disk, e)))?;
-    dev.reopen_rdwr(OPEN_WAIT).map_err(|e| {
-        err(
-            EXIT_IO,
-            format!("错误: 无法以读写打开 {}: {}", raw_path(disk), e),
-        )
-    })?;
-    verify_reopened_snapshot(dev, &img)?;
+    let _target_session = target_session
+        .reopen_and_verify(dev, OPEN_WAIT, |dev| verify_reopened_snapshot(dev, &img))
+        .map_err(|error| match error {
+            ReopenAndVerifyError::Reopen(e) => err(
+                EXIT_IO,
+                format!("错误: 无法以读写打开 {}: {}", raw_path(disk), e),
+            ),
+            ReopenAndVerifyError::Verify(error) => error,
+        })?;
     let writes: BTreeMap<u32, Vec<u8>> = (0..METADATA_SECTOR_COUNT as u32)
         .map(|lba| {
             (

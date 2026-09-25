@@ -968,6 +968,16 @@ application 返回结构化 `ProvisionReport/BackupReport/InspectReport`，CLI/T
 - test `profile` benchmark
 - timing regression gate
 
+### R6.1 `TargetSession` 实施状态（2026-09-25）
+
+**COMPLETE。**
+
+- 新增 `application::target_session` 类型状态安全会话，显式区分 `ReadOnly`、`PreparedWrite`、`WriteLocked`。
+- Plain 制盘、Official 制盘与备份还原的真实写入口统一通过 `TargetSession` 完成 USB/系统盘保护、卸载/锁卷、读写重开与写前原始快照复核；平台 `WriteGuard` 生命周期由 `WriteLocked` 会话持有到写阶段结束。
+- 制盘业务侧的硬件身份、容量、序列号、LBA3、协议读回与 transaction/readback/rollback 校验保持原逻辑，未降低安全门槛。
+- 新增架构门禁，禁止 `application/provision/commit.rs` 与 `application/write.rs` 重新直接调用 `sysinfo::prepare_write` 或 `reopen_rdwr`。
+- 定向测试：架构门禁 **1/1**、制盘套件 **176/176**、备份套件 **61/61** 全绿；`fast` 冷缓存 **52.27s / 0 失败**，同一工作区暖缓存复跑 **5.70s / 0 失败**。
+
 ---
 
 # 第八部分：完成标准
