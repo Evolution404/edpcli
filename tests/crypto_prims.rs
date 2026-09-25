@@ -1,7 +1,7 @@
 //! 真实盘密文可解性测试(Python test_crypto.py::TestAgainstRealDisks)
 //! + sha256 对仓库 .sha256 sidecar 的实数据校验。
 
-mod common;
+use crate::common;
 
 use common::*;
 use edpcli::common::SECTOR;

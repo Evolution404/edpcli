@@ -1,3 +1,6 @@
+#[path = "common/mod.rs"]
+pub mod common;
+
 #[path = "tui_animation.rs"]
 mod tui_animation;
 #[path = "tui_backup_create.rs"]

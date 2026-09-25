@@ -1,3 +1,6 @@
+#[path = "common/mod.rs"]
+pub mod common;
+
 #[path = "inspect.rs"]
 mod inspect;
 #[path = "inspect_backup_workspace.rs"]

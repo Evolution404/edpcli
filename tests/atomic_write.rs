@@ -1,7 +1,7 @@
 //! 原子写入三态(成功/中途失败回滚/读回不符回滚) + 短写循环。
 //! 全部跑在文件镜像上, 不碰真盘。故障注入经 FlakyDev 包装器(Rust 无 monkeypatch)。
 
-mod common;
+use crate::common;
 
 use std::collections::BTreeMap;
 use std::fs;

@@ -124,7 +124,7 @@ fn write_plan_builds_plain_mbr_cleans_edp_and_preserves_lba3() {
         20_000
     );
     assert_eq!(write.preserved_lbas(), &[3]);
-    assert!(write.writes.get(&3).is_none());
+    assert!(!write.writes.contains_key(&3));
     for lba in [1u32, 2, 4, 5, 6, 7, 8, 9, 10, 11, 12] {
         let sector = write.writes.get(&lba).unwrap();
         assert_eq!(sector.owner, PlainSectorOwner::EdpMetadataCleanup);

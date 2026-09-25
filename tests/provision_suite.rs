@@ -1,3 +1,8 @@
+#[path = "common/mod.rs"]
+pub mod common;
+#[path = "support/gold_name.rs"]
+pub mod gold_name;
+
 #[path = "atomic_write.rs"]
 mod atomic_write;
 #[path = "plain_provision.rs"]

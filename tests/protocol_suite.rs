@@ -1,6 +1,8 @@
+#[path = "common/mod.rs"]
+pub mod common;
+
 #[path = "crypto_prims.rs"]
 mod crypto_prims;
-#[allow(dead_code)]
 #[path = "support/gold_name.rs"]
 pub mod gold_name;
 #[path = "iir.rs"]

@@ -242,8 +242,10 @@ fn formatting_defaults_off_and_selects_only_actual_mode_targets() {
         if mode == OfficialPartitionMode::WholeDiskEncrypted {
             assert_eq!(defaults[0].target.role, PartitionRole::CompatibilityReserve);
             assert!(!defaults[0].target.format_capable);
-            let mut invalid = FormatOptions::default();
-            invalid.boot = true;
+            let invalid = FormatOptions {
+                boot: true,
+                ..Default::default()
+            };
             assert!(plan_format_targets(&plan, &invalid, &serials, &FILE_KEY).is_err());
         }
         let mut options = FormatOptions::default();

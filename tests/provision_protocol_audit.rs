@@ -3,10 +3,8 @@
 //! These tests intentionally use curated real-device LBA0-12 protocol fixtures as evidence.
 //! They do not open or mutate a physical disk.
 
-mod common;
-
-#[path = "support/gold_name.rs"]
-mod gold_name;
+use crate::common;
+use crate::gold_name;
 
 use std::{collections::HashSet, fs};
 

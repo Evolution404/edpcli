@@ -5,7 +5,7 @@
 
 #![cfg(target_os = "macos")]
 
-mod common;
+use crate::common;
 
 use std::fs;
 use std::process::Command;

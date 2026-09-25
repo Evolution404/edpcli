@@ -1,3 +1,6 @@
+#[path = "common/mod.rs"]
+pub mod common;
+
 #[path = "cli_ux.rs"]
 mod cli_ux;
 #[path = "cli_v2_parser.rs"]

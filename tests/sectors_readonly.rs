@@ -1,6 +1,6 @@
 //! 只读扇区解析与免密状态识别门禁。
 
-mod common;
+use crate::common;
 
 use common::*;
 use edpcli::common::SECTOR;

@@ -2,8 +2,7 @@
 //! Most observations are census constraints; the MyHardinfo/HDSerialInfo mirror also locks the
 //! physical side of their field-level host-identity lifecycle.
 
-#[path = "support/gold_name.rs"]
-mod gold_name;
+use crate::gold_name;
 
 use edpcli::crypto::{a6b0_full, crc32_bare, lba6_checksum, lba6_decode, xor_rolling};
 use edpcli::inspect::{analyze_sector, InspectMeta};

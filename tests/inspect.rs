@@ -1,4 +1,4 @@
-mod common;
+use crate::common;
 
 use common::*;
 use edpcli::crypto::{a7f0_full, crc32_bare, xor_rolling};

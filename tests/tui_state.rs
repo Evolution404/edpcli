@@ -927,12 +927,8 @@ fn provision_layout_editor_reports_total_space_and_selected_partition_limits() {
     );
     let bar = state.provision_layout_bar(40);
     assert_eq!(bar.len(), 40);
-    assert!(bar
-        .iter()
-        .any(|kind| *kind == edpcli::tui::state::ProvisionBarKind::Encrypt));
-    assert!(bar
-        .iter()
-        .any(|kind| *kind == edpcli::tui::state::ProvisionBarKind::Free));
+    assert!(bar.contains(&edpcli::tui::state::ProvisionBarKind::Encrypt));
+    assert!(bar.contains(&edpcli::tui::state::ProvisionBarKind::Free));
     assert!(lines.iter().any(|line| line == "当前: 保密区"), "{lines:?}");
     assert!(
         lines.iter().any(|line| line.contains("最大可设")),

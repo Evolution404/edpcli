@@ -1,7 +1,7 @@
 //! 备份/还原体系测试: 历史命名解析、按盘匹配(LBA4 终验)、备份落盘、免密打标。
 //! 全部纯文件系统操作 + 注入 DiskFacts/FixedClock, 不碰真盘。
 
-mod common;
+use crate::common;
 
 use std::fs;
 

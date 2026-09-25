@@ -89,7 +89,7 @@ fn selected_device_identity_is_rechecked_before_the_operation_starts() {
         .expect_err("changed onlyid must fail closed");
     assert!(error.msg.contains("选择/确认期间发生变化"), "{}", error.msg);
 }
-mod common;
+use crate::common;
 
 use std::io;
 

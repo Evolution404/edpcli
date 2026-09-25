@@ -1,4 +1,4 @@
-mod common;
+use crate::common;
 
 use edpcli::application::scan_backup_workspace;
 use edpcli::tui::{

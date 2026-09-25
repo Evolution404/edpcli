@@ -1,6 +1,5 @@
-mod common;
-#[path = "support/gold_name.rs"]
-mod gold_name;
+use crate::common;
+use crate::gold_name;
 
 use edpcli::backup_deep::{assess_partition, AnalysisStatus};
 use edpcli::backup_metadata::PartitionGeometry;
