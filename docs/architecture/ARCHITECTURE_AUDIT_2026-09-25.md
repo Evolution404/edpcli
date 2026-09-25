@@ -877,6 +877,18 @@ application 返回结构化 `ProvisionReport/BackupReport/InspectReport`，CLI/T
 4. 完善 removed-surface guard；
 5. 更新 Cargo/lib 描述。
 
+### R2 实施状态（2026-09-25）
+
+**COMPLETE。**
+
+- 新增 `src/command_spec.rs`，以 `CommandSpec / ActionSpec / OptionSpec` 统一描述顶层命令、子动作、usage、说明和公开 flags。
+- 全局 `usage_text` 与 topic help 的命令/动作清单改由 `CommandSpec` 渲染；parser 继续独立承担值解析、互斥关系和安全语义校验。
+- zsh/bash/fish 三种 Shell 补全均从同一命令目录注入顶层命令、各子动作与选项；R1 新增的 `--target`、`--partition` 已进入补全。
+- completion 中已完全删除旧 `convert` 动作；顶层补全补齐 `tui`，并新增 schema/surface 门禁防止用户命令面再次漂移。
+- `Cargo.toml` 与 `src/lib.rs` 产品描述从旧“免密转换”更新为“安全制盘”。
+- R2 完整 CLI suite **63/63** 通过；completion 源码中 `convert`、旧硬编码顶层命令串与产品描述“免密转换”扫描均为 0。
+- R2 fast 门禁 **6.08s / 0 failures**，full 门禁 **5.68s / 0 failures**；8 个非 HIL suite 与 doctest 全绿。
+
 ## Phase R3：删除明确死代码和旧产品兼容
 
 优先高置信候选：

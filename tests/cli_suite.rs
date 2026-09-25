@@ -6,6 +6,8 @@ mod cli_v2_parser;
 mod cli_v2_surface_guard;
 #[path = "cli_write_safety.rs"]
 mod cli_write_safety;
+#[path = "command_spec.rs"]
+mod command_spec;
 #[path = "identify_list.rs"]
 mod identify_list;
 #[path = "selectors.rs"]

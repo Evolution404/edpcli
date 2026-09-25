@@ -161,23 +161,19 @@ pub enum BackupAction {
 }
 
 pub fn usage_text() -> String {
-    format!(
-        "edpcli — EDP/cems U 盘管理 CLI v{}\n\n\
-用法: edpcli [命令] [选项]\n\n\
-常用:\n\
-  list      查看当前插入的 U 盘\n\
-  tui       交互式 TUI（Vim 键位）\n\
-  info      查看 U 盘或备份详细信息\n\
-  backup    创建、查看、校验、恢复和清理备份\n\
-  provision 制盘：mode0～mode3 官方模式与 Plain 普通盘\n\
-  inspect   高级：检查底层 LBA/hex 数据\n\n\
-其他:\n\
-  completion Shell 补全\n\
-  version   版本与构建信息\n\
-  help      帮助\n\n\
-交互式终端中无参数 edpcli 默认进入 TUI；管道/重定向等非 TTY 环境仍等价于 edpcli list。\n",
+    use std::fmt::Write as _;
+
+    let mut out = format!(
+        "edpcli — EDP/cems U 盘管理 CLI v{}\n\n用法: edpcli [命令] [选项]\n\n",
         env!("CARGO_PKG_VERSION")
-    )
+    );
+    for spec in crate::command_spec::top_level_specs() {
+        let _ = writeln!(out, "  {:<10} {}", spec.name, spec.summary);
+    }
+    out.push_str(
+        "\n交互式终端中无参数 edpcli 默认进入 TUI；管道/重定向等非 TTY 环境仍等价于 edpcli list。\n",
+    );
+    out
 }
 
 pub fn print_usage() {
@@ -186,38 +182,31 @@ pub fn print_usage() {
 
 fn print_topic_help(topic: &str) {
     use crate::ui::bold;
+
+    let Some(spec) = crate::command_spec::command(topic) else {
+        print_usage();
+        return;
+    };
+    println!("{}", bold(&format!("用法: {}", spec.usage)));
+    if !spec.actions.is_empty() {
+        for action in spec.actions {
+            println!("  {:<10} {}", action.name, action.summary);
+        }
+    }
+
     match topic {
         "info" => {
-            println!(
-                "{}",
-                bold("用法: edpcli info [备份.edpb] [--disk N] [--id DEVICE_ID] [--backup-dir D]")
-            );
             println!("未指定来源且只有一个可用目标盘时自动选择；多盘时交互选择。");
         }
         "inspect" => {
-            println!("{}", bold("用法: edpcli inspect <raw|decode|meta> [备份.edpb] [--disk N] [--lba 列表或范围] [--count N] [--export DIR]"));
             println!("raw=物理原始字节；decode=按已验证区域算法解码；meta=结构化区域与字段语义。");
             println!("--lba 支持 7,12,240250283 或 240250283-240250288；--count 仅能与单个起始 LBA 同用。");
         }
         "backup" => {
-            println!("{}", bold("用法: edpcli backup [动作] [选项]"));
-            println!("  backup create [--disk N] [--deep]     只读备份；--deep 增加文件系统分析");
-            println!("  backup [list]                          查看备份");
-            println!("  backup restore [编号|文件] [--disk N] 恢复备份");
-            println!("  backup verify [编号|文件]              校验备份");
-            println!("  backup delete [编号|文件]...           删除备份");
-            println!("  backup prune [--keep N]                按策略清理");
+            println!("create 可加 --deep 执行只读文件系统分析；backup 无动作时等价于 list。");
         }
         "provision" => {
-            println!(
-                "{}",
-                bold("用法: edpcli provision <plan|image|write> [选项]")
-            );
-            println!("  provision plan  --disk N --target mode0|mode1|mode2|mode3|plain [参数]");
-            println!("  provision image --disk N --target mode0|mode1|mode2|mode3|plain [参数] --out FILE");
-            println!(
-                "  provision write --disk N --target mode0|mode1|mode2|mode3|plain [参数] [--yes]"
-            );
+            println!("目标: --target mode0|mode1|mode2|mode3|plain");
             println!("    兼容输入: --mode 0|1|2|3；Plain 不是 mode4，--mode 4 永远非法。");
             println!("    Plain 分区: 可重复 --partition START:SIZE:fat16|exfat[:LABEL]；SIZE 支持 sectors/MiB/GiB/fill。");
             println!("    Plain 未指定 --partition 时默认 P1 从 LBA2048 占满至盘尾。");
@@ -244,14 +233,11 @@ fn print_topic_help(topic: &str) {
             println!("当前可写文件系统为 FAT16/exFAT；加密分区使用已验证的 SM4(mode2) 扇区变换。");
         }
         "completion" => {
-            println!("{}", bold("用法: edpcli completion <zsh|bash|fish>"));
             println!("zsh : eval \"$(edpcli completion zsh)\"");
             println!("bash: eval \"$(edpcli completion bash)\"");
             println!("fish: edpcli completion fish | source");
         }
-        "list" => println!("{}", bold("用法: edpcli list [--backup-dir D]")),
-        "tui" => println!("{}", bold("用法: edpcli tui")),
-        _ => print_usage(),
+        _ => {}
     }
 }
 

@@ -54,12 +54,105 @@ pub fn dynamic_values(
     }
 }
 
-pub fn script(shell: Shell) -> &'static str {
-    match shell {
+fn action_words(command: &str) -> String {
+    crate::command_spec::command(command)
+        .map(|spec| crate::command_spec::words(spec.actions.iter().map(|action| action.name)))
+        .unwrap_or_default()
+}
+
+fn option_words(command: &str, action: Option<&str>) -> String {
+    crate::command_spec::command(command)
+        .map(|spec| crate::command_spec::words(spec.option_names(action)))
+        .unwrap_or_default()
+}
+
+fn fish_option_lines() -> String {
+    use std::collections::BTreeMap;
+
+    let mut lines = Vec::new();
+    for spec in crate::command_spec::top_level_specs() {
+        let mut options = BTreeMap::new();
+        for option in spec.options {
+            options.insert(option.name, option.takes_value);
+        }
+        for action in spec.actions {
+            for option in action.options {
+                options.insert(option.name, option.takes_value);
+            }
+        }
+        for (name, takes_value) in options {
+            let long = name.trim_start_matches("--");
+            let value = if takes_value { " -r" } else { "" };
+            lines.push(format!(
+                "complete -c edpcli -n '__fish_seen_subcommand_from {}' -l {}{}",
+                spec.name, long, value
+            ));
+        }
+    }
+    lines.join("\n")
+}
+
+fn render_schema(template: &str) -> String {
+    let top = crate::command_spec::words(
+        crate::command_spec::top_level_specs()
+            .iter()
+            .map(|command| command.name),
+    );
+    template
+        .replace("__TOP__", &top)
+        .replace("__HELP_TOPICS__", &top)
+        .replace("__BACKUP_ACTIONS__", &action_words("backup"))
+        .replace("__PROVISION_ACTIONS__", &action_words("provision"))
+        .replace("__INSPECT_ACTIONS__", &action_words("inspect"))
+        .replace("__COMPLETION_ACTIONS__", &action_words("completion"))
+        .replace(
+            "__BACKUP_CREATE_OPTIONS__",
+            &option_words("backup", Some("create")),
+        )
+        .replace(
+            "__BACKUP_LIST_OPTIONS__",
+            &option_words("backup", Some("list")),
+        )
+        .replace(
+            "__BACKUP_RESTORE_OPTIONS__",
+            &option_words("backup", Some("restore")),
+        )
+        .replace(
+            "__BACKUP_VERIFY_OPTIONS__",
+            &option_words("backup", Some("verify")),
+        )
+        .replace(
+            "__BACKUP_DELETE_OPTIONS__",
+            &option_words("backup", Some("delete")),
+        )
+        .replace(
+            "__BACKUP_PRUNE_OPTIONS__",
+            &option_words("backup", Some("prune")),
+        )
+        .replace(
+            "__PROVISION_PLAN_OPTIONS__",
+            &option_words("provision", Some("plan")),
+        )
+        .replace(
+            "__PROVISION_IMAGE_OPTIONS__",
+            &option_words("provision", Some("image")),
+        )
+        .replace(
+            "__PROVISION_WRITE_OPTIONS__",
+            &option_words("provision", Some("write")),
+        )
+        .replace("__INFO_OPTIONS__", &option_words("info", None))
+        .replace("__INSPECT_OPTIONS__", &option_words("inspect", None))
+        .replace("__LIST_OPTIONS__", &option_words("list", None))
+        .replace("__FISH_OPTIONS__", &fish_option_lines())
+}
+
+pub fn script(shell: Shell) -> String {
+    render_schema(match shell {
         Shell::Zsh => ZSH,
         Shell::Bash => BASH,
         Shell::Fish => FISH,
-    }
+    })
 }
 
 const ZSH: &str = r#"#compdef edpcli
@@ -107,7 +200,7 @@ _edpcli() {
   _edpcli_flag_value --backup-dir; bak="$REPLY"
 
   if (( CURRENT == 2 )); then
-    compadd -- list info backup provision inspect completion version help
+    compadd -- __TOP__
     return
   fi
 
@@ -120,17 +213,17 @@ _edpcli() {
   case "$cmd" in
     backup)
       if (( CURRENT == 3 )); then
-        compadd -- create list restore verify delete prune
+        compadd -- __BACKUP_ACTIONS__
         return
       fi
       if [[ "$cur" == -* ]]; then
         case "$action" in
-          create)  compadd -- --disk --deep --backup-dir --help ;;
-          restore) compadd -- --disk --yes --backup-dir --help ;;
-          verify)  compadd -- --backup-dir --help ;;
-          delete)  compadd -- --yes --backup-dir --help ;;
-          prune)   compadd -- --keep --yes --backup-dir --help ;;
-          list)    compadd -- --backup-dir --help ;;
+          create)  compadd -- __BACKUP_CREATE_OPTIONS__ ;;
+          restore) compadd -- __BACKUP_RESTORE_OPTIONS__ ;;
+          verify)  compadd -- __BACKUP_VERIFY_OPTIONS__ ;;
+          delete)  compadd -- __BACKUP_DELETE_OPTIONS__ ;;
+          prune)   compadd -- __BACKUP_PRUNE_OPTIONS__ ;;
+          list)    compadd -- __BACKUP_LIST_OPTIONS__ ;;
         esac
       elif [[ "$action" == restore || "$action" == verify || "$action" == delete ]]; then
         _edpcli_backup_targets "$bak"
@@ -138,37 +231,36 @@ _edpcli() {
       ;;
     provision)
       if (( CURRENT == 3 )); then
-        compadd -- plan image write convert
+        compadd -- __PROVISION_ACTIONS__
         return
       fi
       if [[ "$cur" == -* ]]; then
         case "$action" in
-          plan)    compadd -- --disk --mode --boot-mib --boot-sectors --share-mib --encrypt-mib --label-id --user --dept --label --password --volume-label --force-change-password --no-force-change-password --cancel-password-complexity-check --enforce-password-complexity-check --share-max-password-errors --encrypt-max-password-errors --help ;;
-          image)   compadd -- --disk --mode --boot-mib --boot-sectors --share-mib --encrypt-mib --label-id --user --dept --label --password --volume-label --force-change-password --no-force-change-password --cancel-password-complexity-check --enforce-password-complexity-check --share-max-password-errors --encrypt-max-password-errors --out --help ;;
-          write)   compadd -- --disk --mode --boot-mib --boot-sectors --share-mib --encrypt-mib --label-id --user --dept --label --password --volume-label --force-change-password --no-force-change-password --cancel-password-complexity-check --enforce-password-complexity-check --share-max-password-errors --encrypt-max-password-errors --yes --help ;;
-          convert) compadd -- --disk --write --yes --backup-dir --help ;;
+          plan)    compadd -- __PROVISION_PLAN_OPTIONS__ ;;
+          image)   compadd -- __PROVISION_IMAGE_OPTIONS__ ;;
+          write)   compadd -- __PROVISION_WRITE_OPTIONS__ ;;
         esac
       fi
       ;;
     info)
       if [[ "$cur" == -* ]]; then
-        compadd -- --disk --id --backup-dir --help
+        compadd -- __INFO_OPTIONS__
       else
         _edpcli_backup_targets "$bak"
       fi
       ;;
     inspect)
       if (( CURRENT == 3 )); then
-        compadd -- raw decode meta
+        compadd -- __INSPECT_ACTIONS__
       elif [[ "$cur" == -* ]]; then
-        compadd -- --disk --lba --count --export --id --backup-dir --help
+        compadd -- __INSPECT_OPTIONS__
       else
         _edpcli_backup_targets "$bak"
       fi
       ;;
-    list)    [[ "$cur" == -* ]] && compadd -- --backup-dir --help ;;
-    completion) (( CURRENT == 3 )) && compadd -- zsh bash fish ;;
-    help) (( CURRENT == 3 )) && compadd -- list info backup provision inspect completion version ;;
+    list)    [[ "$cur" == -* ]] && compadd -- __LIST_OPTIONS__ ;;
+    completion) (( CURRENT == 3 )) && compadd -- __COMPLETION_ACTIONS__ ;;
+    help) (( CURRENT == 3 )) && compadd -- __HELP_TOPICS__ ;;
   esac
 }
 
@@ -210,7 +302,7 @@ _edpcli() {
   _edpcli_flag_value --backup-dir; bak="$EDPCLI_VALUE"
 
   if (( COMP_CWORD == 1 )); then
-    COMPREPLY=( $(compgen -W 'list info backup provision inspect completion version help' -- "$cur") )
+    COMPREPLY=( $(compgen -W '__TOP__' -- "$cur") )
     return
   fi
 
@@ -228,15 +320,15 @@ _edpcli() {
   case "$cmd" in
     backup)
       if (( COMP_CWORD == 2 )); then
-        COMPREPLY=( $(compgen -W 'create list restore verify delete prune' -- "$cur") )
+        COMPREPLY=( $(compgen -W '__BACKUP_ACTIONS__' -- "$cur") )
       elif [[ "$cur" == -* ]]; then
         case "$action" in
-          create)  vals='--disk --deep --backup-dir --help' ;;
-          restore) vals='--disk --yes --backup-dir --help' ;;
-          verify)  vals='--backup-dir --help' ;;
-          delete)  vals='--yes --backup-dir --help' ;;
-          prune)   vals='--keep --yes --backup-dir --help' ;;
-          list)    vals='--backup-dir --help' ;;
+          create)  vals='__BACKUP_CREATE_OPTIONS__' ;;
+          restore) vals='__BACKUP_RESTORE_OPTIONS__' ;;
+          verify)  vals='__BACKUP_VERIFY_OPTIONS__' ;;
+          delete)  vals='__BACKUP_DELETE_OPTIONS__' ;;
+          prune)   vals='__BACKUP_PRUNE_OPTIONS__' ;;
+          list)    vals='__BACKUP_LIST_OPTIONS__' ;;
         esac
         COMPREPLY=( $(compgen -W "$vals" -- "$cur") )
       elif [[ "$action" == restore || "$action" == verify || "$action" == delete ]]; then
@@ -244,35 +336,34 @@ _edpcli() {
       fi ;;
     provision)
       if (( COMP_CWORD == 2 )); then
-        COMPREPLY=( $(compgen -W 'plan image write convert' -- "$cur") )
+        COMPREPLY=( $(compgen -W '__PROVISION_ACTIONS__' -- "$cur") )
       elif [[ "$cur" == -* ]]; then
         case "$action" in
-          plan)    vals='--disk --mode --boot-mib --boot-sectors --share-mib --encrypt-mib --label-id --user --dept --label --password --volume-label --force-change-password --no-force-change-password --cancel-password-complexity-check --enforce-password-complexity-check --share-max-password-errors --encrypt-max-password-errors --help' ;;
-          image)   vals='--disk --mode --boot-mib --boot-sectors --share-mib --encrypt-mib --label-id --user --dept --label --password --volume-label --force-change-password --no-force-change-password --cancel-password-complexity-check --enforce-password-complexity-check --share-max-password-errors --encrypt-max-password-errors --out --help' ;;
-          write)   vals='--disk --mode --boot-mib --boot-sectors --share-mib --encrypt-mib --label-id --user --dept --label --password --volume-label --force-change-password --no-force-change-password --cancel-password-complexity-check --enforce-password-complexity-check --share-max-password-errors --encrypt-max-password-errors --yes --help' ;;
-          convert) vals='--disk --write --yes --backup-dir --help' ;;
+          plan)    vals='__PROVISION_PLAN_OPTIONS__' ;;
+          image)   vals='__PROVISION_IMAGE_OPTIONS__' ;;
+          write)   vals='__PROVISION_WRITE_OPTIONS__' ;;
         esac
         COMPREPLY=( $(compgen -W "$vals" -- "$cur") )
       fi ;;
     info)
       if [[ "$cur" == -* ]]; then
-        vals='--disk --id --backup-dir --help'
+        vals='__INFO_OPTIONS__'
         COMPREPLY=( $(compgen -W "$vals" -- "$cur") )
       else
         _edpcli_backup_targets "$bak" "$cur"
       fi ;;
     inspect)
       if (( COMP_CWORD == 2 )); then
-        COMPREPLY=( $(compgen -W 'raw decode meta' -- "$cur") )
+        COMPREPLY=( $(compgen -W '__INSPECT_ACTIONS__' -- "$cur") )
       elif [[ "$cur" == -* ]]; then
-        vals='--disk --lba --count --export --id --backup-dir --help'
+        vals='__INSPECT_OPTIONS__'
         COMPREPLY=( $(compgen -W "$vals" -- "$cur") )
       else
         _edpcli_backup_targets "$bak" "$cur"
       fi ;;
-    list) vals='--backup-dir --help'; COMPREPLY=( $(compgen -W "$vals" -- "$cur") ) ;;
-    completion) COMPREPLY=( $(compgen -W 'zsh bash fish' -- "$cur") ) ;;
-    help) COMPREPLY=( $(compgen -W 'list info backup provision inspect completion version' -- "$cur") ) ;;
+    list) vals='__LIST_OPTIONS__'; COMPREPLY=( $(compgen -W "$vals" -- "$cur") ) ;;
+    completion) COMPREPLY=( $(compgen -W '__COMPLETION_ACTIONS__' -- "$cur") ) ;;
+    help) COMPREPLY=( $(compgen -W '__HELP_TOPICS__' -- "$cur") ) ;;
   esac
 }
 
@@ -330,39 +421,14 @@ function __edpcli_wants_backup_target
 end
 
 complete -c edpcli -f
-complete -c edpcli -n '__fish_use_subcommand' -a 'list info backup provision inspect completion version help'
-complete -c edpcli -n '__fish_seen_subcommand_from backup' -a 'create list restore verify delete prune'
-complete -c edpcli -n '__fish_seen_subcommand_from provision' -a 'plan image write convert'
-complete -c edpcli -n '__fish_seen_subcommand_from backup; and __fish_seen_subcommand_from create' -l deep -d '只读文件系统分析'
+complete -c edpcli -n '__fish_use_subcommand' -a '__TOP__'
+complete -c edpcli -n '__fish_seen_subcommand_from backup' -a '__BACKUP_ACTIONS__'
+complete -c edpcli -n '__fish_seen_subcommand_from provision' -a '__PROVISION_ACTIONS__'
+__FISH_OPTIONS__
 complete -c edpcli -n '__edpcli_wants_backup_target' -a '(__edpcli_backup_numbers) (__edpcli_backup_files)'
 complete -c edpcli -n '__fish_seen_subcommand_from inspect info backup provision' -l disk -r -a '(edpcli __complete disk 2>/dev/null)'
-complete -c edpcli -n '__fish_seen_subcommand_from inspect' -a 'raw decode meta'
 complete -c edpcli -n '__fish_seen_subcommand_from inspect' -l lba -r -a '(edpcli __complete lba 2>/dev/null)'
-complete -c edpcli -n '__fish_seen_subcommand_from inspect' -l count -r
-complete -c edpcli -n '__fish_seen_subcommand_from inspect' -l export -r
-complete -c edpcli -n '__fish_seen_subcommand_from inspect info' -l id -r
-complete -c edpcli -n '__fish_seen_subcommand_from backup inspect info list provision' -l backup-dir -r
-complete -c edpcli -n '__fish_seen_subcommand_from backup provision' -l yes
-complete -c edpcli -n '__fish_seen_subcommand_from backup' -l keep -r
-complete -c edpcli -n '__fish_seen_subcommand_from provision' -l mode -r -a '0 1 2 3'
-complete -c edpcli -n '__fish_seen_subcommand_from provision' -l boot-mib -r
-complete -c edpcli -n '__fish_seen_subcommand_from provision' -l boot-sectors -r
-complete -c edpcli -n '__fish_seen_subcommand_from provision' -l share-mib -r
-complete -c edpcli -n '__fish_seen_subcommand_from provision' -l encrypt-mib -r
-complete -c edpcli -n '__fish_seen_subcommand_from provision' -l label-id -r
-complete -c edpcli -n '__fish_seen_subcommand_from provision' -l user -r
-complete -c edpcli -n '__fish_seen_subcommand_from provision' -l dept -r
-complete -c edpcli -n '__fish_seen_subcommand_from provision' -l label -r
-complete -c edpcli -n '__fish_seen_subcommand_from provision' -l password -r
-complete -c edpcli -n '__fish_seen_subcommand_from provision' -l volume-label -r
-complete -c edpcli -n '__fish_seen_subcommand_from provision' -l force-change-password
-complete -c edpcli -n '__fish_seen_subcommand_from provision' -l no-force-change-password
-complete -c edpcli -n '__fish_seen_subcommand_from provision' -l cancel-password-complexity-check
-complete -c edpcli -n '__fish_seen_subcommand_from provision' -l enforce-password-complexity-check
-complete -c edpcli -n '__fish_seen_subcommand_from provision' -l share-max-password-errors -r
-complete -c edpcli -n '__fish_seen_subcommand_from provision' -l encrypt-max-password-errors -r
-complete -c edpcli -n '__fish_seen_subcommand_from provision' -l write
-complete -c edpcli -n '__fish_seen_subcommand_from completion' -a 'zsh bash fish'
+complete -c edpcli -n '__fish_seen_subcommand_from completion' -a '__COMPLETION_ACTIONS__'
 
 # v2 backup create / backup restore / backup verify / backup delete / backup prune
 "#;

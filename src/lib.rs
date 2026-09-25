@@ -1,4 +1,4 @@
-//! edpcli — EDP/cems U 盘管理 CLI（识别、元信息、备份、恢复与免密转换）。
+//! edpcli — EDP/cems U 盘管理 CLI（识别、元信息、备份、恢复与安全制盘）。
 //!
 //! 分层: common → platform / crypto → sectors / diskio → identify → cli。
 //! 操作系统差异统一收敛在 platform；业务核心不得直接依赖 macOS/Linux/Windows API。
@@ -11,6 +11,7 @@ pub mod backup_metadata;
 pub mod build_info;
 pub mod cli;
 pub mod cli_args;
+pub mod command_spec;
 pub mod common;
 pub mod completion;
 pub mod crypto;
