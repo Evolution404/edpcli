@@ -1043,9 +1043,12 @@ fn run_loop(resume: Option<state::WriteIntent>) -> io::Result<LoopExit> {
                                         if state.provision().kind == state::ProvisionKind::Plain {
                                             match state.provision_plain_plan() {
                                                 Ok(plan) => {
+                                                    let request = crate::application::provision::ProvisionRequest::Plain(
+                                                        crate::application::provision::PlainProvisionRequest::from_plan(&plan),
+                                                    );
                                                     state.provision_set_planning();
-                                                    if let Err(message) = tasks
-                                                        .request_plain_provision_plan(disk, plan)
+                                                    if let Err(message) =
+                                                        tasks.request_provision_plan(disk, request)
                                                     {
                                                         state.provision_finish_plan(Err(
                                                             message.to_string()
@@ -1060,6 +1063,7 @@ fn run_loop(resume: Option<state::WriteIntent>) -> io::Result<LoopExit> {
                                         }
                                         match state.provision_request() {
                                             Ok(request) => {
+                                                let request = crate::application::provision::ProvisionRequest::Official(request);
                                                 state.provision_set_planning();
                                                 if let Err(message) =
                                                     tasks.request_provision_plan(disk, request)

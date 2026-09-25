@@ -3,7 +3,7 @@
 `edpcli` 是 EDP/cems U 盘管理命令行工具，支持 macOS、Linux、Windows。普通使用只需要
 理解“设备、制盘、备份”三个对象，不需要手工输入内部 onlyid 或备份索引参数。
 
-> `backup restore` 和 `provision write/convert --write` 会真实写入物理盘。工具会执行系统盘保护、USB 整盘
+> `backup restore` 和 `provision write` 会真实写入物理盘。工具会执行系统盘保护、USB 整盘
 > 校验、目标选择器固定、卸载/锁卷、重新打开后身份复核、事务写入、同步、读回校验和
 > 失败回滚。任何关键事实无法确认时都会拒绝继续。
 
@@ -174,9 +174,9 @@ edpcli info backup.bin
 输出分为 **设备 / 身份 / 状态 / 备份** 四块，包括 onlyid、device_id、Dept、User、
 SAFE6、分区和当前盘匹配备份数量。
 
-### 2.6 官方四模式制盘与 mode1 保留重制
+### 2.6 官方四模式、普通盘与 mode1 保留重制
 
-新盘制盘使用 `provision` 命令。模式与官方工具一致：
+`provision` 同时支持四种官方模式和 Plain 普通盘目标。四种官方模式与官方工具一致：
 
 | 模式 | 含义 | 逻辑分区 |
 |---:|---|---|
@@ -188,11 +188,34 @@ SAFE6、分区和当前盘匹配备份数量。
 先只读检查目标和布局：
 
 ```bash
-edpcli provision plan --disk 4 --mode 1 \
+edpcli provision plan --disk 4 --target mode1 \
   --share-mib 1024 --encrypt-mib 2048 \
   --label-id 1402259934 --user USER06 \
   --dept '江苏省电力有限公司' --label '江苏电力!SAFE6'
 ```
+
+
+CLI 的正式目标参数是 `--target mode0|mode1|mode2|mode3|plain`；原有
+`--mode 0|1|2|3` 继续作为四种官方模式的兼容输入。**Plain 是独立目标，不是 mode4，
+`--mode 4` 与 `--target mode4` 都会拒绝。**
+
+恢复普通盘时，未指定分区默认建立 P1：从 LBA2048 占满到盘尾、exFAT、卷标“普通卷”。
+也可以重复使用 `--partition START:SIZE:FS[:LABEL]` 建立 1～4 个 MBR 主分区；
+`SIZE` 支持扇区数、`MiB`、`GiB` 和 `fill`，显式起点之间的空间会保留为空闲区：
+
+```bash
+edpcli provision plan --disk 4 --target plain
+edpcli provision plan --disk 4 --target plain \
+  --partition 2048:512MiB:exfat:DATA \
+  --partition 1100000:fill:fat16:TOOLS
+edpcli provision image --disk 4 --target plain --out ./edp-plain.img
+edpcli provision write --disk 4 --target plain --yes
+```
+
+Plain 的 `plan/image/write` 与 TUI 使用同一套 application 制盘事务：整盘 USB/系统盘
+保护、目标身份与容量复核、写前 reopen、逐扇区读回以及失败回滚都不在 CLI 内重复实现。
+Plain 镜像同样保留目标盘原始 LBA3。
+
 
 CLI 未指定 `--password` 时使用 `0000aaaa`，未指定 `--volume-label` 时使用“启动区”。
 两项都可以显式覆盖。
@@ -219,7 +242,7 @@ PassInfo 四项策略均可通过 CLI 显式覆盖；未指定时，已注册盘
 导出与该目标盘绑定的稀疏制盘镜像：
 
 ```bash
-edpcli provision image --disk 4 --mode 1 \
+edpcli provision image --disk 4 --target mode1 \
   --share-mib 1024 --encrypt-mib 2048 \
   --label-id 1402259934 --user USER06 \
   --dept '江苏省电力有限公司' --label '江苏电力!SAFE6' \
@@ -236,12 +259,12 @@ USB/SCSI 身份，保留目标盘原有 LBA3 制造商元数据，生成随机�
 已有模式0官方盘需要重制为二合一盘时，直接选择 mode1：
 
 ```bash
-edpcli provision write --disk 4 --mode 1 \
+edpcli provision write --disk 4 --target mode1 \
   --share-mib 1024 --encrypt-mib 2048 \
   --user USER06 --dept '江苏省电力有限公司'
 ```
 
-`write --mode 1` 会先只读识别现有布局。若确认源盘为 mode0，则普通 mode1 的新盘容量参数不参与最终几何：程序保持原 type4 起点、大小和密钥材料不变，不移动或重加密 type4；LBA63 到原 type4 起点前的区域重建为空的明文 exFAT，并按二合一 type2 写满前部。**当前版本不会迁移原 type1/type2 中已有的用户文件**。TUI 会在进入模式选择前询问是否创建 EDPB 保存；CLI 如需保存可先执行 `edpcli backup create --disk 4`。
+`write --target mode1` 会先只读识别现有布局（`--mode 1` 仍兼容）。若确认源盘为 mode0，则普通 mode1 的新盘容量参数不参与最终几何：程序保持原 type4 起点、大小和密钥材料不变，不移动或重加密 type4；LBA63 到原 type4 起点前的区域重建为空的明文 exFAT，并按二合一 type2 写满前部。**当前版本不会迁移原 type1/type2 中已有的用户文件**。TUI 会在进入模式选择前询问是否创建 EDPB 保存；CLI 如需保存可先执行 `edpcli backup create --disk 4`。
 
 ### 2.7 管理备份
 

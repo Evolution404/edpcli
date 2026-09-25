@@ -23,10 +23,11 @@ use crate::provision::{
     OfficialFilesystemFormat, OfficialPartitionFilesystems, OfficialPartitionMode,
     OfficialPartitionSizes, OfficialProvisionPlan, OfficialProvisionWriteImage, OnlyId,
     ParsedExistingProvision, PartitionAction, PartitionFilesystemImage, PartitionFormatTarget,
-    PartitionRole, PassInfoPolicy, PlainCleanupExtent, PlainProvisionPlan, PlainProvisionWritePlan,
-    ProvisionEntropy, ProvisionImage, ProvisionMetadata, ProvisionProfile, ProvisionSpec,
-    ProvisionTarget, QuickCapacityUnit, SparseFilesystemImage, TargetGeometryOverrides,
-    TargetIdentity, TargetPartitionGeometry, TargetProvisionPlan, DEFAULT_MODE0_BOOT_SECTORS,
+    PartitionRole, PassInfoPolicy, PlainCleanupExtent, PlainPartitionSpec, PlainProvisionPlan,
+    PlainProvisionWritePlan, ProvisionEntropy, ProvisionImage, ProvisionMetadata, ProvisionProfile,
+    ProvisionSpec, ProvisionTarget, QuickCapacityUnit, SparseFilesystemImage,
+    TargetGeometryOverrides, TargetIdentity, TargetPartitionGeometry, TargetProvisionPlan,
+    DEFAULT_MODE0_BOOT_SECTORS,
 };
 use crate::sysinfo::{self, CmdRunner};
 use encoding_rs::GBK;
@@ -41,7 +42,7 @@ fn err(code: i32, message: impl Into<String>) -> EdpCliError {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct NewProvisionRequest {
+pub struct OfficialProvisionRequest {
     pub target: ProvisionTarget,
     pub boot_start_lba: Option<u64>,
     pub share_start_lba: Option<u64>,
@@ -63,6 +64,107 @@ pub struct NewProvisionRequest {
     pub cancel_password_complexity_check: Option<bool>,
     pub max_share_password_errors: Option<u8>,
     pub max_encrypt_password_errors: Option<u8>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum PlainPartitionSize {
+    Sectors(u64),
+    MiB(u64),
+    GiB(u64),
+    Fill,
+}
+
+impl PlainPartitionSize {
+    fn sectors(self) -> Result<Option<u64>, String> {
+        match self {
+            Self::Sectors(value) => Ok(Some(value)),
+            Self::MiB(value) => value
+                .checked_mul(1024 * 1024 / SECTOR as u64)
+                .map(Some)
+                .ok_or_else(|| "普通分区 MiB 容量溢出".to_string()),
+            Self::GiB(value) => value
+                .checked_mul(1024 * 1024 * 1024 / SECTOR as u64)
+                .map(Some)
+                .ok_or_else(|| "普通分区 GiB 容量溢出".to_string()),
+            Self::Fill => Ok(None),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PlainPartitionRequest {
+    pub start_lba: u64,
+    pub size: PlainPartitionSize,
+    pub filesystem: OfficialFilesystemFormat,
+    pub volume_label: String,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct PlainProvisionRequest {
+    pub partitions: Vec<PlainPartitionRequest>,
+}
+
+impl PlainProvisionRequest {
+    pub fn from_plan(plan: &PlainProvisionPlan) -> Self {
+        Self {
+            partitions: plan
+                .partitions
+                .iter()
+                .map(|partition| PlainPartitionRequest {
+                    start_lba: partition.start_lba,
+                    size: PlainPartitionSize::Sectors(partition.sector_count),
+                    filesystem: partition.filesystem,
+                    volume_label: partition.volume_label.clone(),
+                })
+                .collect(),
+        }
+    }
+
+    pub fn resolve(&self, total_sectors: u64) -> Result<PlainProvisionPlan, String> {
+        if self.partitions.is_empty() {
+            return PlainProvisionPlan::default_for_disk(total_sectors);
+        }
+        if self.partitions.len() > crate::provision::MAX_PLAIN_PARTITIONS {
+            return Err(format!(
+                "普通盘最多支持 {} 个 MBR 主分区",
+                crate::provision::MAX_PLAIN_PARTITIONS
+            ));
+        }
+
+        let mut partitions = Vec::with_capacity(self.partitions.len());
+        for (index, request) in self.partitions.iter().enumerate() {
+            let next_start = self
+                .partitions
+                .iter()
+                .enumerate()
+                .filter(|(other_index, other)| {
+                    *other_index != index && other.start_lba > request.start_lba
+                })
+                .map(|(_, other)| other.start_lba)
+                .min()
+                .unwrap_or(total_sectors);
+            let sector_count = match request.size.sectors()? {
+                Some(value) => value,
+                None => next_start
+                    .checked_sub(request.start_lba)
+                    .filter(|value| *value > 0)
+                    .ok_or_else(|| format!("P{} fill 后没有可用空间", index.saturating_add(1)))?,
+            };
+            partitions.push(PlainPartitionSpec::new(
+                request.start_lba,
+                sector_count,
+                request.filesystem,
+                request.volume_label.clone(),
+            ));
+        }
+        PlainProvisionPlan::new(total_sectors, partitions)
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum ProvisionRequest {
+    Official(OfficialProvisionRequest),
+    Plain(PlainProvisionRequest),
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -279,6 +381,12 @@ pub struct ProvisionCommitReport {
     pub formats: Vec<PartitionFormatResult>,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum ProvisionCommitOutcome {
+    Official(ProvisionCommitReport),
+    Plain { partition_count: usize },
+}
+
 #[derive(Clone, Eq, PartialEq)]
 pub struct PreparedNewProvision {
     pub disk: u32,
@@ -349,6 +457,28 @@ impl std::fmt::Debug for PreparedNewProvision {
     }
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum PreparedProvision {
+    Official(Box<PreparedNewProvision>),
+    Plain(Box<PreparedPlainProvision>),
+}
+
+impl PreparedProvision {
+    pub const fn target(&self) -> ProvisionTarget {
+        match self {
+            Self::Official(prepared) => ProvisionTarget::Official(prepared.mode),
+            Self::Plain(_) => ProvisionTarget::Plain,
+        }
+    }
+
+    pub const fn disk(&self) -> u32 {
+        match self {
+            Self::Official(prepared) => prepared.disk,
+            Self::Plain(prepared) => prepared.disk,
+        }
+    }
+}
+
 fn random_array<const N: usize>() -> EdpCliResult<[u8; N]> {
     let mut bytes = [0u8; N];
     getrandom::fill(&mut bytes)
@@ -366,7 +496,7 @@ fn official_mode(target: ProvisionTarget) -> EdpCliResult<OfficialPartitionMode>
 }
 
 fn sizes(
-    request: &NewProvisionRequest,
+    request: &OfficialProvisionRequest,
     mode: OfficialPartitionMode,
 ) -> EdpCliResult<OfficialPartitionSizes> {
     if request.boot_mib.is_some() && request.boot_sectors.is_some() {
@@ -430,7 +560,7 @@ fn sizes(
 pub fn prepare_new_provision(
     runner: &dyn CmdRunner,
     disk: u32,
-    request: &NewProvisionRequest,
+    request: &OfficialProvisionRequest,
 ) -> EdpCliResult<PreparedNewProvision> {
     guard_usb_disk(runner, disk)?;
     let total_sectors = sysinfo::disk_total_sectors(runner, disk)
@@ -676,7 +806,7 @@ fn target_encrypt_capacity_override(
 pub fn prepare_target_provision(
     runner: &dyn CmdRunner,
     disk: u32,
-    request: &NewProvisionRequest,
+    request: &OfficialProvisionRequest,
     dev: &mut dyn SectorDev,
 ) -> EdpCliResult<PreparedNewProvision> {
     guard_usb_disk(runner, disk)?;
@@ -1012,6 +1142,33 @@ pub fn prepare_target_provision(
     })
 }
 
+pub fn prepare_provision(
+    runner: &dyn CmdRunner,
+    disk: u32,
+    request: &ProvisionRequest,
+    dev: &mut dyn SectorDev,
+) -> EdpCliResult<PreparedProvision> {
+    match request {
+        ProvisionRequest::Official(request) => {
+            let mut prepared = prepare_target_provision(runner, disk, request, dev)?;
+            capture_manufacturer_lba3(dev, &mut prepared)?;
+            Ok(PreparedProvision::Official(Box::new(prepared)))
+        }
+        ProvisionRequest::Plain(request) => {
+            let total_sectors = sysinfo::disk_total_sectors(runner, disk)
+                .ok_or_else(|| err(EXIT_TARGET, "错误: 无法取得目标盘总扇区数"))?;
+            let plan = request.resolve(total_sectors).map_err(|message| {
+                err(
+                    EXIT_TARGET,
+                    format!("错误: 无法构造 Plain 分区计划: {message}"),
+                )
+            })?;
+            prepare_plain_provision(runner, disk, plan, dev)
+                .map(|prepared| PreparedProvision::Plain(Box::new(prepared)))
+        }
+    }
+}
+
 pub fn prepare_plain_provision(
     runner: &dyn CmdRunner,
     disk: u32,
@@ -1144,6 +1301,23 @@ pub fn commit_plain_provision(
         return Err(err(EXIT_IO, "错误: Plain 写后重新识别仍为 EDP 模式"));
     }
     Ok(())
+}
+
+pub fn commit_provision(
+    runner: &dyn CmdRunner,
+    dev: &mut dyn SectorDev,
+    prepared: &PreparedProvision,
+) -> EdpCliResult<ProvisionCommitOutcome> {
+    match prepared {
+        PreparedProvision::Official(prepared) => {
+            commit_new_provision(runner, dev, prepared).map(ProvisionCommitOutcome::Official)
+        }
+        PreparedProvision::Plain(prepared) => {
+            let partition_count = prepared.plan.partitions.len();
+            commit_plain_provision(runner, dev, prepared)
+                .map(|()| ProvisionCommitOutcome::Plain { partition_count })
+        }
+    }
 }
 
 pub fn capture_manufacturer_lba3(
@@ -1694,6 +1868,55 @@ pub fn export_sparse_provision_image(
     file.sync_all()
         .map_err(|error| err(EXIT_IO, format!("错误: 镜像同步失败: {error}")))?;
     Ok(())
+}
+
+pub fn export_sparse_plain_provision_image(
+    path: &Path,
+    prepared: &PreparedPlainProvision,
+) -> EdpCliResult<()> {
+    let byte_len = prepared
+        .plan
+        .total_sectors
+        .checked_mul(SECTOR as u64)
+        .ok_or_else(|| err(EXIT_IO, "错误: Plain 镜像长度溢出"))?;
+    let mut file = OpenOptions::new()
+        .create(true)
+        .truncate(true)
+        .write(true)
+        .open(path)
+        .map_err(|error| {
+            err(
+                EXIT_IO,
+                format!("错误: 无法创建 {}: {error}", path.display()),
+            )
+        })?;
+    file.set_len(byte_len)
+        .map_err(|error| err(EXIT_IO, format!("错误: 无法设置 Plain 镜像长度: {error}")))?;
+
+    for (&lba, sector) in &prepared.write_plan.writes {
+        file.seek(SeekFrom::Start(u64::from(lba) * SECTOR as u64))
+            .and_then(|_| file.write_all(&sector.bytes))
+            .map_err(|error| {
+                err(
+                    EXIT_IO,
+                    format!("错误: 写入 Plain 镜像 LBA{lba} 失败: {error}"),
+                )
+            })?;
+    }
+    let lba3 = &prepared.source_metadata[3 * SECTOR..4 * SECTOR];
+    file.seek(SeekFrom::Start(3 * SECTOR as u64))
+        .and_then(|_| file.write_all(lba3))
+        .map_err(|error| err(EXIT_IO, format!("错误: 写入 Plain 镜像 LBA3 失败: {error}")))?;
+    file.sync_all()
+        .map_err(|error| err(EXIT_IO, format!("错误: Plain 镜像同步失败: {error}")))?;
+    Ok(())
+}
+
+pub fn export_provision_image(path: &Path, prepared: &PreparedProvision) -> EdpCliResult<()> {
+    match prepared {
+        PreparedProvision::Official(prepared) => export_sparse_provision_image(path, prepared),
+        PreparedProvision::Plain(prepared) => export_sparse_plain_provision_image(path, prepared),
+    }
 }
 
 #[cfg(test)]

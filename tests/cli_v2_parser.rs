@@ -51,7 +51,7 @@ fn provision_parses_all_four_product_actions_and_rejects_ambiguous_flags() {
     plan.extend(common);
     match parse_args(&args(&plan)).expect("provision plan") {
         Parsed::Provision(ProvisionAction::Plan(opts)) => {
-            assert_eq!(opts.mode, 1);
+            assert_eq!(opts.target.mode_number(), Some(1));
             assert_eq!(opts.disk, Some(4));
             assert_eq!(opts.volume_label, "启动区");
         }
@@ -88,6 +88,73 @@ fn provision_parses_all_four_product_actions_and_rejects_ambiguous_flags() {
     assert!(parse_args(&args(&["provision", "plan", "--onlyid", "1"])).is_err());
     assert!(parse_args(&args(&["provision", "convert", "--yes"])).is_err());
     assert!(parse_args(&args(&["provision", "plan", "--mode", "4"])).is_err());
+}
+
+#[test]
+fn provision_plain_is_a_typed_target_and_never_mode4() {
+    assert!(parse_args(&args(&[
+        "provision",
+        "plan",
+        "--disk",
+        "4",
+        "--target",
+        "plain"
+    ]))
+    .is_ok());
+
+    assert!(parse_args(&args(&[
+        "provision",
+        "write",
+        "--disk",
+        "4",
+        "--target",
+        "plain",
+        "--partition",
+        "2048:64MiB:exfat:DATA",
+        "--partition",
+        "200000:fill:fat16:TOOLS",
+        "--yes",
+    ]))
+    .is_ok());
+
+    assert!(parse_args(&args(&[
+        "provision",
+        "image",
+        "--disk",
+        "4",
+        "--target",
+        "plain",
+        "--out",
+        "/tmp/plain.img",
+    ]))
+    .is_ok());
+
+    assert!(parse_args(&args(&[
+        "provision",
+        "plan",
+        "--disk",
+        "4",
+        "--target",
+        "mode2"
+    ]))
+    .is_ok());
+
+    for invalid in [
+        vec!["provision", "plan", "--disk", "4", "--target", "mode4"],
+        vec!["provision", "plan", "--disk", "4", "--mode", "4"],
+        vec![
+            "provision",
+            "plan",
+            "--disk",
+            "4",
+            "--target",
+            "plain",
+            "--mode",
+            "1",
+        ],
+    ] {
+        assert!(parse_args(&args(&invalid)).is_err(), "{invalid:?}");
+    }
 }
 
 #[test]

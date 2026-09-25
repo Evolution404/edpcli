@@ -1,7 +1,7 @@
 # edpcli — EDP/cems U 盘管理 CLI
 
 Rust 单二进制工具，支持 **macOS / Linux / Windows**。三平台共享同一套 EDP/cems
-识别、备份、元信息、扇区检查、转换与安全写入核心；操作系统差异统一收敛在
+识别、备份、元信息、扇区检查、制盘与安全写入核心；操作系统差异统一收敛在
 `src/platform/`。
 
 CLI v2 的日常工作流包括：
@@ -10,7 +10,7 @@ CLI v2 的日常工作流包括：
 edpcli list       查看当前插入的 U 盘
 edpcli info       查看 U 盘或备份详细信息
 edpcli backup     创建、查看、校验、恢复和清理备份
-edpcli provision  官方四模式制盘；mode1 可保留重制现有 mode0
+edpcli provision  mode0～mode3 官方制盘、Plain 普通盘；mode1 可保留重制现有 mode0
 edpcli inspect    高级：检查底层 LBA/hex 数据
 ```
 
@@ -76,14 +76,17 @@ edpcli backup delete
 edpcli backup delete 2,4,5
 edpcli backup prune --keep 2
 
-edpcli provision plan --disk 4 --mode 1 --share-mib 1024 --encrypt-mib 2048 \
+edpcli provision plan --disk 4 --target mode1 --share-mib 1024 --encrypt-mib 2048 \
   --label-id 1402259934 --user USER06 --dept '江苏省电力有限公司' \
   --label '江苏电力!SAFE6' --password '你的密码'
-edpcli provision write --disk 4 --mode 1 --share-mib 1024 --encrypt-mib 2048 \
+edpcli provision write --disk 4 --target mode1 --share-mib 1024 --encrypt-mib 2048 \
   --user USER06 --dept '江苏省电力有限公司' --yes
-edpcli provision plan --disk 4 --mode 1 \
+edpcli provision plan --disk 4 --target mode1 \
   --force-change-password --cancel-password-complexity-check \
   --share-max-password-errors 5 --encrypt-max-password-errors 5
+edpcli provision plan --disk 4 --target plain
+edpcli provision write --disk 4 --target plain --partition 2048:512MiB:exfat:DATA --yes
+edpcli provision image --disk 4 --target plain --out ./edp-plain.img
 edpcli inspect meta --lba 7
 edpcli inspect raw --disk 4 --lba 240250283-240250288
 edpcli inspect decode --disk 4 --lba 20480 --count 8

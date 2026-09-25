@@ -856,6 +856,19 @@ application 返回结构化 `ProvisionReport/BackupReport/InspectReport`，CLI/T
 4. 两端共用 application prepare/commit；
 5. 建 capability parity test。
 
+### R1 实施状态（2026-09-25）
+
+**COMPLETE。**
+
+- application 已建立统一 `ProvisionRequest::{Official,Plain}`、`PreparedProvision::{Official,Plain}`、`prepare_provision`、`commit_provision` 和 `export_provision_image`；CLI/TUI 的实际制盘执行不再各自直调 Official/Plain 写入实现。
+- CLI 正式支持 `--target mode0|mode1|mode2|mode3|plain`；原 `--mode 0|1|2|3` 仅保留为四种官方模式的兼容输入。`--mode 4` 和 `--target mode4` 均明确拒绝，Plain 从未进入官方模式编号域。
+- CLI Plain 已覆盖 `plan/write/image`。默认 P1 从 LBA2048 占满盘尾；可重复 `--partition START:SIZE:FS[:LABEL]` 建 1～4 个 MBR 主分区，支持扇区数、MiB、GiB、`fill` 与显式空闲区。
+- Plain 稀疏镜像已由 application 统一导出，并保留目标盘 LBA3；TUI Review 阶段不再禁止 Plain 导出。
+- TUI plan/write/export 已收敛到与 CLI 相同的 application prepare/commit/export 入口；TUI 表单层继续保留自身编辑状态，但不再维护第二套制盘执行路径。
+- 新增 capability parity 门禁，检查 CLI/TUI 必须共享统一入口、不得回退到 `prepare_target_provision/prepare_plain_provision/commit_new_provision/commit_plain_provision` 直调，并锁定 Plain 非 mode4。
+- R1 定向验证共 **371/371** 通过；R1 fast 门禁耗时 **37.53s**、0 个失败，仍满足 R0 的 `<45s` 目标。
+- 本阶段未改变 LBA0～12/LCE 已闭环协议语义，也未降低 USB/系统盘保护、目标身份与容量复核、reopen、事务写入、逐扇区读回和 rollback 安全链。
+
 ## Phase R2：命令单一事实源
 
 1. 建 CommandSpec；

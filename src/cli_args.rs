@@ -73,7 +73,8 @@ pub struct InfoOpts {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProvisionNewOpts {
     pub disk: Option<u32>,
-    pub mode: u8,
+    pub target: crate::provision::ProvisionTarget,
+    pub plain_partitions: Vec<crate::application::provision::PlainPartitionRequest>,
     pub boot_start_lba: Option<u64>,
     pub share_start_lba: Option<u64>,
     pub encrypt_start_lba: Option<u64>,
@@ -168,7 +169,7 @@ pub fn usage_text() -> String {
   tui       交互式 TUI（Vim 键位）\n\
   info      查看 U 盘或备份详细信息\n\
   backup    创建、查看、校验、恢复和清理备份\n\
-  provision 制盘：官方四模式新盘与现有盘免密改造\n\
+  provision 制盘：mode0～mode3 官方模式与 Plain 普通盘\n\
   inspect   高级：检查底层 LBA/hex 数据\n\n\
 其他:\n\
   completion Shell 补全\n\
@@ -212,9 +213,14 @@ fn print_topic_help(topic: &str) {
                 "{}",
                 bold("用法: edpcli provision <plan|image|write> [选项]")
             );
-            println!("  provision plan  --disk N --mode 0|1|2|3 <身份/分区参数>");
-            println!("  provision image --disk N --mode 0|1|2|3 <身份/分区参数> --out FILE");
-            println!("  provision write --disk N --mode 0|1|2|3 <身份/分区参数> [--yes]");
+            println!("  provision plan  --disk N --target mode0|mode1|mode2|mode3|plain [参数]");
+            println!("  provision image --disk N --target mode0|mode1|mode2|mode3|plain [参数] --out FILE");
+            println!(
+                "  provision write --disk N --target mode0|mode1|mode2|mode3|plain [参数] [--yes]"
+            );
+            println!("    兼容输入: --mode 0|1|2|3；Plain 不是 mode4，--mode 4 永远非法。");
+            println!("    Plain 分区: 可重复 --partition START:SIZE:fat16|exfat[:LABEL]；SIZE 支持 sectors/MiB/GiB/fill。");
+            println!("    Plain 未指定 --partition 时默认 P1 从 LBA2048 占满至盘尾。");
             println!("    mode1 若识别到现有 mode0，将保留原 type4 位置/密钥并让 type2 扩满前部。");
             println!("    可选格式化: --format-boot --format-share --format-encrypt");
             println!("    文件系统: --boot-fs fat16|exfat --share-fs fat16|exfat --encrypt-fs fat16|exfat");
@@ -289,13 +295,28 @@ fn parse_positive_u64(s: &str, flag: &str) -> Result<u64, String> {
     }
 }
 
-fn parse_provision_mode(s: &str) -> Result<u8, String> {
-    match s {
-        "0" => Ok(0),
-        "1" => Ok(1),
-        "2" => Ok(2),
-        "3" => Ok(3),
-        _ => Err(format!("错误: --mode 只接受 0/1/2/3，得到 {s}")),
+fn parse_provision_mode(s: &str) -> Result<crate::provision::ProvisionTarget, String> {
+    let mode = match s {
+        "0" => 0,
+        "1" => 1,
+        "2" => 2,
+        "3" => 3,
+        _ => return Err(format!("错误: --mode 只接受 0/1/2/3，得到 {s}")),
+    };
+    crate::provision::ProvisionTarget::from_mode_number(mode)
+        .ok_or_else(|| format!("错误: 无效官方模式 {mode}"))
+}
+
+fn parse_provision_target(s: &str) -> Result<crate::provision::ProvisionTarget, String> {
+    match s.to_ascii_lowercase().as_str() {
+        "plain" => Ok(crate::provision::ProvisionTarget::Plain),
+        "mode0" => parse_provision_mode("0"),
+        "mode1" => parse_provision_mode("1"),
+        "mode2" => parse_provision_mode("2"),
+        "mode3" => parse_provision_mode("3"),
+        _ => Err(format!(
+            "错误: --target 只接受 mode0/mode1/mode2/mode3/plain，得到 {s}"
+        )),
     }
 }
 
@@ -311,12 +332,67 @@ fn parse_provision_filesystem(
     }
 }
 
+fn parse_plain_partition(
+    value: &str,
+) -> Result<crate::application::provision::PlainPartitionRequest, String> {
+    let mut fields = value.splitn(4, ':');
+    let start = fields
+        .next()
+        .ok_or_else(|| "错误: --partition 缺少 start LBA".to_string())?;
+    let size = fields
+        .next()
+        .ok_or_else(|| "错误: --partition 格式应为 START:SIZE:FS[:LABEL]".to_string())?;
+    let filesystem = fields
+        .next()
+        .ok_or_else(|| "错误: --partition 格式应为 START:SIZE:FS[:LABEL]".to_string())?;
+    let volume_label = fields.next().unwrap_or("普通卷").to_string();
+
+    let start_lba = parse_positive_u64(start, "--partition START")?;
+    let lower_size = size.to_ascii_lowercase();
+    let size = if lower_size == "fill" {
+        crate::application::provision::PlainPartitionSize::Fill
+    } else if let Some(value) = lower_size.strip_suffix("mib") {
+        crate::application::provision::PlainPartitionSize::MiB(parse_positive_u64(
+            value,
+            "--partition SIZE",
+        )?)
+    } else if let Some(value) = lower_size.strip_suffix("gib") {
+        crate::application::provision::PlainPartitionSize::GiB(parse_positive_u64(
+            value,
+            "--partition SIZE",
+        )?)
+    } else if let Some(value) = lower_size.strip_suffix("sectors") {
+        crate::application::provision::PlainPartitionSize::Sectors(parse_positive_u64(
+            value,
+            "--partition SIZE",
+        )?)
+    } else if let Some(value) = lower_size.strip_suffix('s') {
+        crate::application::provision::PlainPartitionSize::Sectors(parse_positive_u64(
+            value,
+            "--partition SIZE",
+        )?)
+    } else {
+        crate::application::provision::PlainPartitionSize::Sectors(parse_positive_u64(
+            size,
+            "--partition SIZE",
+        )?)
+    };
+
+    Ok(crate::application::provision::PlainPartitionRequest {
+        start_lba,
+        size,
+        filesystem: parse_provision_filesystem(filesystem)?,
+        volume_label,
+    })
+}
+
 fn parse_new_provision_opts(
     rest: &[String],
     allow_prefill: bool,
 ) -> Result<(ProvisionNewOpts, Option<String>, bool), String> {
     let mut disk = None;
-    let mut mode = None;
+    let mut target = None;
+    let mut plain_partitions = Vec::new();
     let mut boot_mib = None;
     let mut boot_start_lba = None;
     let mut share_start_lba = None;
@@ -356,7 +432,29 @@ fn parse_new_provision_opts(
             }
             "--mode" => {
                 let value = take_value(rest, &mut i, "--mode")?;
-                set_once(&mut mode, parse_provision_mode(&value)?, "--mode")?;
+                set_once(
+                    &mut target,
+                    parse_provision_mode(&value)?,
+                    "--target/--mode",
+                )?;
+            }
+            "--target" => {
+                let value = take_value(rest, &mut i, "--target")?;
+                set_once(
+                    &mut target,
+                    parse_provision_target(&value)?,
+                    "--target/--mode",
+                )?;
+            }
+            "--partition" => {
+                let value = take_value(rest, &mut i, "--partition")?;
+                if plain_partitions.len() >= crate::provision::MAX_PLAIN_PARTITIONS {
+                    return Err(format!(
+                        "错误: 普通盘最多支持 {} 个 MBR 主分区",
+                        crate::provision::MAX_PLAIN_PARTITIONS
+                    ));
+                }
+                plain_partitions.push(parse_plain_partition(&value)?);
             }
             "--boot-mib" => {
                 let value = take_value(rest, &mut i, "--boot-mib")?;
@@ -567,7 +665,88 @@ fn parse_new_provision_opts(
         i += 1;
     }
 
-    let mode = mode.ok_or("错误: provision 新盘操作必须指定 --mode 0|1|2|3")?;
+    let target = target.ok_or(
+        "错误: provision 必须指定 --target mode0|mode1|mode2|mode3|plain（兼容 --mode 0|1|2|3）",
+    )?;
+    if target == crate::provision::ProvisionTarget::Plain {
+        let has_official_only = boot_mib.is_some()
+            || boot_start_lba.is_some()
+            || share_start_lba.is_some()
+            || encrypt_start_lba.is_some()
+            || boot_sectors.is_some()
+            || share_mib.is_some()
+            || share_sectors.is_some()
+            || encrypt_mib.is_some()
+            || encrypt_sectors.is_some()
+            || label_id.is_some()
+            || user.is_some()
+            || dept.is_some()
+            || label.is_some()
+            || password.is_some()
+            || volume_label.is_some()
+            || format_boot
+            || format_share
+            || format_encrypt
+            || boot_label.is_some()
+            || share_label.is_some()
+            || encrypt_label.is_some()
+            || boot_fs.is_some()
+            || share_fs.is_some()
+            || encrypt_fs.is_some()
+            || force_change_password.is_some()
+            || cancel_password_complexity_check.is_some()
+            || max_share_password_errors.is_some()
+            || max_encrypt_password_errors.is_some();
+        if has_official_only {
+            return Err(
+                "错误: --target plain 只接受 --disk/--partition/--out/--yes；官方模式参数不能混用"
+                    .into(),
+            );
+        }
+        return Ok((
+            ProvisionNewOpts {
+                disk,
+                target,
+                plain_partitions,
+                boot_start_lba: None,
+                share_start_lba: None,
+                encrypt_start_lba: None,
+                boot_mib: None,
+                boot_sectors: None,
+                share_mib: None,
+                share_sectors: None,
+                encrypt_mib: None,
+                encrypt_sectors: None,
+                label_id: String::new(),
+                user: String::new(),
+                dept: String::new(),
+                label: String::new(),
+                password: String::new(),
+                volume_label: String::new(),
+                format_boot: false,
+                format_share: false,
+                format_encrypt: false,
+                boot_label: String::new(),
+                share_label: String::new(),
+                encrypt_label: String::new(),
+                boot_fs: crate::provision::OfficialFilesystemFormat::Fat16,
+                share_fs: crate::provision::OfficialFilesystemFormat::ExFat,
+                encrypt_fs: crate::provision::OfficialFilesystemFormat::ExFat,
+                force_change_password: None,
+                cancel_password_complexity_check: None,
+                max_share_password_errors: None,
+                max_encrypt_password_errors: None,
+            },
+            out,
+            yes,
+        ));
+    }
+    if !plain_partitions.is_empty() {
+        return Err("错误: --partition 仅用于 --target plain".into());
+    }
+    let mode = target
+        .mode_number()
+        .expect("non-Plain target always has an official mode number");
     if boot_mib.is_some() && boot_sectors.is_some() {
         return Err("错误: --boot-mib 与 --boot-sectors 不能同时指定".into());
     }
@@ -624,7 +803,8 @@ fn parse_new_provision_opts(
     Ok((
         ProvisionNewOpts {
             disk,
-            mode,
+            target,
+            plain_partitions,
             boot_start_lba,
             share_start_lba,
             encrypt_start_lba,

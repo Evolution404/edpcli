@@ -1,3 +1,6 @@
+use edpcli::application::provision::{
+    PlainPartitionRequest, PlainPartitionSize, PlainProvisionRequest,
+};
 use edpcli::platform::{HardwareProbe, InquiryInfo, NativeTransport};
 use edpcli::provision::{
     OnlyId, ProvisionImage, ProvisionMetadata, ProvisionProfile, ProvisionSpec, TargetIdentity,
@@ -15,6 +18,54 @@ fn probe(transport: NativeTransport) -> HardwareProbe {
             revision: "1.00".into(),
         }),
     }
+}
+
+#[test]
+fn plain_request_defaults_to_one_partition_from_lba2048_to_disk_end() {
+    let plan = PlainProvisionRequest::default().resolve(100_000).unwrap();
+    assert_eq!(plan.partitions.len(), 1);
+    assert_eq!(plan.partitions[0].start_lba, 2_048);
+    assert_eq!(plan.partitions[0].sector_count, 97_952);
+}
+
+#[test]
+fn plain_request_resolves_mib_gib_fill_and_keeps_explicit_gaps() {
+    let request = PlainProvisionRequest {
+        partitions: vec![
+            PlainPartitionRequest {
+                start_lba: 2_048,
+                size: PlainPartitionSize::MiB(16),
+                filesystem: edpcli::provision::OfficialFilesystemFormat::ExFat,
+                volume_label: "DATA".into(),
+            },
+            PlainPartitionRequest {
+                start_lba: 50_000,
+                size: PlainPartitionSize::Fill,
+                filesystem: edpcli::provision::OfficialFilesystemFormat::Fat16,
+                volume_label: "TOOLS".into(),
+            },
+        ],
+    };
+    let plan = request.resolve(100_000).unwrap();
+    assert_eq!(plan.partitions[0].sector_count, 32_768);
+    assert_eq!(plan.partitions[1].sector_count, 50_000);
+    assert!(plan
+        .gaps
+        .iter()
+        .any(|gap| gap.start_lba == 34_816 && gap.sector_count == 15_184));
+
+    let gib = PlainProvisionRequest {
+        partitions: vec![PlainPartitionRequest {
+            start_lba: 2_048,
+            size: PlainPartitionSize::GiB(1),
+            filesystem: edpcli::provision::OfficialFilesystemFormat::ExFat,
+            volume_label: "BIG".into(),
+        }],
+    };
+    assert_eq!(
+        gib.resolve(3_000_000).unwrap().partitions[0].sector_count,
+        2_097_152
+    );
 }
 
 #[test]

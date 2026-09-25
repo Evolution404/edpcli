@@ -177,42 +177,52 @@ pub fn run() -> i32 {
     }
 }
 
-fn provision_request(
-    opts: &ProvisionNewOpts,
-) -> crate::application::provision::NewProvisionRequest {
-    crate::application::provision::NewProvisionRequest {
-        target: crate::provision::ProvisionTarget::from_mode_number(opts.mode)
-            .expect("CLI parser validates provision mode to 0..3"),
-        boot_start_lba: opts.boot_start_lba,
-        share_start_lba: opts.share_start_lba,
-        encrypt_start_lba: opts.encrypt_start_lba,
-        boot_mib: opts.boot_mib,
-        boot_sectors: opts.boot_sectors,
-        share_mib: opts.share_mib,
-        share_sectors: opts.share_sectors,
-        encrypt_mib: opts.encrypt_mib,
-        encrypt_sectors: opts.encrypt_sectors,
-        label_id: opts.label_id.clone(),
-        user: opts.user.clone(),
-        dept: opts.dept.clone(),
-        label: opts.label.clone(),
-        password: opts.password.clone(),
-        volume_label: opts.volume_label.clone(),
-        format: crate::application::provision::FormatOptions {
-            boot: opts.format_boot,
-            share: opts.format_share,
-            encrypt: opts.format_encrypt,
-            boot_label: opts.boot_label.clone(),
-            share_label: opts.share_label.clone(),
-            encrypt_label: opts.encrypt_label.clone(),
-            boot_fs: opts.boot_fs,
-            share_fs: opts.share_fs,
-            encrypt_fs: opts.encrypt_fs,
-        },
-        force_change_password: opts.force_change_password,
-        cancel_password_complexity_check: opts.cancel_password_complexity_check,
-        max_share_password_errors: opts.max_share_password_errors,
-        max_encrypt_password_errors: opts.max_encrypt_password_errors,
+fn provision_request(opts: &ProvisionNewOpts) -> crate::application::provision::ProvisionRequest {
+    match opts.target {
+        crate::provision::ProvisionTarget::Plain => {
+            crate::application::provision::ProvisionRequest::Plain(
+                crate::application::provision::PlainProvisionRequest {
+                    partitions: opts.plain_partitions.clone(),
+                },
+            )
+        }
+        crate::provision::ProvisionTarget::Official(_) => {
+            crate::application::provision::ProvisionRequest::Official(
+                crate::application::provision::OfficialProvisionRequest {
+                    target: opts.target,
+                    boot_start_lba: opts.boot_start_lba,
+                    share_start_lba: opts.share_start_lba,
+                    encrypt_start_lba: opts.encrypt_start_lba,
+                    boot_mib: opts.boot_mib,
+                    boot_sectors: opts.boot_sectors,
+                    share_mib: opts.share_mib,
+                    share_sectors: opts.share_sectors,
+                    encrypt_mib: opts.encrypt_mib,
+                    encrypt_sectors: opts.encrypt_sectors,
+                    label_id: opts.label_id.clone(),
+                    user: opts.user.clone(),
+                    dept: opts.dept.clone(),
+                    label: opts.label.clone(),
+                    password: opts.password.clone(),
+                    volume_label: opts.volume_label.clone(),
+                    format: crate::application::provision::FormatOptions {
+                        boot: opts.format_boot,
+                        share: opts.format_share,
+                        encrypt: opts.format_encrypt,
+                        boot_label: opts.boot_label.clone(),
+                        share_label: opts.share_label.clone(),
+                        encrypt_label: opts.encrypt_label.clone(),
+                        boot_fs: opts.boot_fs,
+                        share_fs: opts.share_fs,
+                        encrypt_fs: opts.encrypt_fs,
+                    },
+                    force_change_password: opts.force_change_password,
+                    cancel_password_complexity_check: opts.cancel_password_complexity_check,
+                    max_share_password_errors: opts.max_share_password_errors,
+                    max_encrypt_password_errors: opts.max_encrypt_password_errors,
+                },
+            )
+        }
     }
 }
 
@@ -261,13 +271,13 @@ fn target_plan_summary_lines(plan: &crate::provision::TargetProvisionPlan) -> Ve
     lines
 }
 
-fn print_new_provision_summary(
-    opts: &ProvisionNewOpts,
-    prepared: &crate::application::provision::PreparedNewProvision,
-) {
+fn print_new_provision_summary(prepared: &crate::application::provision::PreparedNewProvision) {
+    let mode = crate::provision::ProvisionTarget::Official(prepared.mode)
+        .mode_number()
+        .expect("official mode always has a mode number");
     println!(
         "制盘计划: disk{} mode{}  device_id={}",
-        prepared.disk, opts.mode, prepared.device_id
+        prepared.disk, mode, prepared.device_id
     );
     println!(
         "目标扇区={}  LCE=LBA{}  计划写入={}扇区",
@@ -336,6 +346,56 @@ fn print_new_provision_summary(
     }
 }
 
+fn print_plain_provision_summary(prepared: &crate::application::provision::PreparedPlainProvision) {
+    println!(
+        "制盘计划: disk{} Plain  device_id={}",
+        prepared.disk, prepared.device_id
+    );
+    println!(
+        "目标扇区={}  分区={}  计划写入={}扇区",
+        prepared.plan.total_sectors,
+        prepared.plan.partitions.len(),
+        prepared.write_plan.writes.len()
+    );
+    for (index, partition) in prepared.plan.partitions.iter().enumerate() {
+        let end = partition
+            .start_lba
+            .saturating_add(partition.sector_count)
+            .saturating_sub(1);
+        println!(
+            "  P{} start={} end={} sectors={} fs={} label={}",
+            index + 1,
+            partition.start_lba,
+            end,
+            partition.sector_count,
+            partition.filesystem.windows_format_name(),
+            partition.volume_label
+        );
+    }
+    for gap in &prepared.plan.gaps {
+        println!("  gap start={} sectors={}", gap.start_lba, gap.sector_count);
+    }
+    println!(
+        "来源状态={}  来源 LCE cleanup={}",
+        prepared.source_kind.short_name(),
+        prepared
+            .source_lce_start_lba
+            .map(|lba| format!("LBA{lba}"))
+            .unwrap_or_else(|| "无".into())
+    );
+}
+
+fn print_provision_summary(prepared: &crate::application::provision::PreparedProvision) {
+    match prepared {
+        crate::application::provision::PreparedProvision::Official(prepared) => {
+            print_new_provision_summary(prepared)
+        }
+        crate::application::provision::PreparedProvision::Plain(prepared) => {
+            print_plain_provision_summary(prepared)
+        }
+    }
+}
+
 fn provision_flow(runner: &SysRunner, action: ProvisionAction) -> i32 {
     match action {
         ProvisionAction::Plan(opts) => {
@@ -354,11 +414,10 @@ fn provision_flow(runner: &SysRunner, action: ProvisionAction) -> i32 {
                     )))
                 }
             };
-            match crate::application::provision::prepare_target_provision(
-                runner, disk, &request, &mut dev,
-            ) {
+            match crate::application::provision::prepare_provision(runner, disk, &request, &mut dev)
+            {
                 Ok(prepared) => {
-                    print_new_provision_summary(&opts, &prepared);
+                    print_provision_summary(&prepared);
                     EXIT_OK
                 }
                 Err(error) => finish(Err(error)),
@@ -397,22 +456,15 @@ fn provision_flow(runner: &SysRunner, action: ProvisionAction) -> i32 {
                     )))
                 }
             };
-            let mut prepared = match crate::application::provision::prepare_target_provision(
+            let prepared = match crate::application::provision::prepare_provision(
                 runner, disk, &request, &mut dev,
             ) {
                 Ok(value) => value,
                 Err(error) => return finish(Err(error)),
             };
-            if let Err(error) =
-                crate::application::provision::capture_manufacturer_lba3(&mut dev, &mut prepared)
+            print_provision_summary(&prepared);
+            match crate::application::provision::export_provision_image(Path::new(&out), &prepared)
             {
-                return finish(Err(error));
-            }
-            print_new_provision_summary(&opts, &prepared);
-            match crate::application::provision::export_sparse_provision_image(
-                Path::new(&out),
-                &prepared,
-            ) {
                 Ok(()) => {
                     println!("稀疏制盘镜像已写入 {}（已保留目标盘原始 LBA3）", out);
                     EXIT_OK
@@ -453,31 +505,26 @@ fn provision_flow(runner: &SysRunner, action: ProvisionAction) -> i32 {
                     )))
                 }
             };
-            let mut prepared = match crate::application::provision::prepare_target_provision(
+            let prepared = match crate::application::provision::prepare_provision(
                 runner, disk, &request, &mut dev,
             ) {
                 Ok(value) => value,
                 Err(error) => return finish(Err(error)),
             };
-            if let Err(error) =
-                crate::application::provision::capture_manufacturer_lba3(&mut dev, &mut prepared)
-            {
-                return finish(Err(error));
-            }
-            print_new_provision_summary(&opts, &prepared);
+            print_provision_summary(&prepared);
             let confirmed = if yes {
                 true
             } else {
                 prompt.confirm_yes(&crate::ui::bold(&format!(
-                    "将按上述 TargetProvisionPlan 写入 disk{} mode{}；PreserveExact 数据区不会写入，Rebuild 分区原数据不可原样保留，并原样保留制造商 LBA3。输入 YES: ",
-                    disk, opts.mode
+                    "将按上述制盘计划写入 disk{}（{}）；将保留制造商 LBA3，并按共享 application 安全事务执行。输入 YES: ",
+                    disk, opts.target.full_name()
                 )))
             };
             if !confirmed {
                 return finish(Err(EdpCliError::new(EXIT_CANCELLED, "已取消(未写盘)")));
             }
-            match crate::application::provision::commit_new_provision(runner, &mut dev, &prepared) {
-                Ok(report) => {
+            match crate::application::provision::commit_provision(runner, &mut dev, &prepared) {
+                Ok(crate::application::provision::ProvisionCommitOutcome::Official(report)) => {
                     println!(
                         "{}",
                         crate::ui::green("制盘：成功，协议与几何读回校验通过。")
@@ -498,6 +545,18 @@ fn provision_flow(runner: &SysRunner, action: ProvisionAction) -> i32 {
                     } else {
                         EXIT_OK
                     }
+                }
+                Ok(crate::application::provision::ProvisionCommitOutcome::Plain {
+                    partition_count,
+                }) => {
+                    println!(
+                        "{}",
+                        crate::ui::green(&format!(
+                            "普通盘恢复：成功，{} 个 MBR 主分区与文件系统读回校验通过。",
+                            partition_count
+                        ))
+                    );
+                    EXIT_OK
                 }
                 Err(error) => finish(Err(error)),
             }

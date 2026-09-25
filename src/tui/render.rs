@@ -1323,7 +1323,7 @@ fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppSta
                             warning(),
                         )));
                     }
-                    ProvisionPrepared::New(prepared) => {
+                    ProvisionPrepared::Official(prepared) => {
                         lines.extend([
                             Line::from(format!(
                                 "目标: disk{}  {}",
@@ -2982,7 +2982,7 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
                 ProvisionStage::Form => "↑/↓ 字段 · Space 切换 · Tab/Shift-Tab/←/→ 页面 · Enter 预览 · Esc 返回".to_string(),
                 ProvisionStage::Planning => "正在生成只读计划…".to_string(),
                 ProvisionStage::Review => {
-                    "Enter 最终确认  ·  E 导出镜像（新盘计划）  ·  Esc 返回修改".to_string()
+                    "Enter 最终确认  ·  E 导出镜像  ·  Esc 返回修改".to_string()
                 }
                 ProvisionStage::ExportPath => "输入导出路径  ·  Enter 导出  ·  Esc 返回计划".to_string(),
                 ProvisionStage::Exporting => "镜像正在后台导出…".to_string(),

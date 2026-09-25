@@ -349,11 +349,7 @@ pub enum ProvisionStage {
     Result,
 }
 
-#[derive(Debug, Clone)]
-pub enum ProvisionPrepared {
-    New(Box<crate::application::provision::PreparedNewProvision>),
-    Plain(Box<crate::application::provision::PreparedPlainProvision>),
-}
+pub type ProvisionPrepared = crate::application::provision::PreparedProvision;
 
 #[derive(Debug, Clone)]
 pub struct ProvisionForm {
@@ -4660,7 +4656,7 @@ impl AppState {
 
     pub fn provision_request(
         &mut self,
-    ) -> Result<crate::application::provision::NewProvisionRequest, String> {
+    ) -> Result<crate::application::provision::OfficialProvisionRequest, String> {
         let mode = self
             .provision
             .kind
@@ -4746,7 +4742,7 @@ impl AppState {
             .trim()
             .parse::<u8>()
             .map_err(|_| "保密区密码最大错误次数必须为 0..255".to_string())?;
-        Ok(crate::application::provision::NewProvisionRequest {
+        Ok(crate::application::provision::OfficialProvisionRequest {
             target: self.provision.kind.target(),
             boot_start_lba: matches!(mode, 0 | 3)
                 .then_some(resolved.boot_start_lba)
@@ -4809,12 +4805,13 @@ impl AppState {
     }
 
     pub fn provision_begin_export(&mut self) {
-        let is_new = matches!(self.provision.prepared, Some(ProvisionPrepared::New(_)));
-        if self.provision.stage != ProvisionStage::Review || !is_new {
+        if self.provision.stage != ProvisionStage::Review || self.provision.prepared.is_none() {
             return;
         }
-        let mode = self.provision.kind.mode().unwrap_or(0);
-        self.provision.export_path = format!("./edp-mode{mode}.img");
+        self.provision.export_path = match self.provision.kind.mode() {
+            Some(mode) => format!("./edp-mode{mode}.img"),
+            None => "./edp-plain.img".into(),
+        };
         self.provision.stage = ProvisionStage::ExportPath;
         self.provision.message = None;
     }
@@ -4839,7 +4836,7 @@ impl AppState {
     pub fn provision_take_export(
         &mut self,
     ) -> Option<(
-        crate::application::provision::PreparedNewProvision,
+        crate::application::provision::PreparedProvision,
         std::path::PathBuf,
     )> {
         if self.provision.stage != ProvisionStage::ExportPath {
@@ -4850,10 +4847,7 @@ impl AppState {
             self.provision.message = Some("镜像导出路径不能为空".into());
             return None;
         }
-        let prepared = match self.provision.prepared.as_ref()? {
-            ProvisionPrepared::New(prepared) => prepared.as_ref().clone(),
-            ProvisionPrepared::Plain(_) => return None,
-        };
+        let prepared = self.provision.prepared.as_ref()?.clone();
         let path = std::path::PathBuf::from(path);
         self.provision.stage = ProvisionStage::Exporting;
         self.provision.message = Some(format!("正在后台导出 {}…", path.display()));
