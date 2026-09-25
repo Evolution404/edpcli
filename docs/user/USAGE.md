@@ -369,7 +369,7 @@ edpcli backup delete
 edpcli backup delete 2
 edpcli backup delete 2,4,5
 edpcli backup delete 2-4
-edpcli backup delete backup.bin
+edpcli backup delete backup.edpb
 ```
 
 无参数进入全局编号交互多选。默认显示待删除内容并要求 YES；`--yes` 可在已经明确指定
@@ -379,7 +379,7 @@ edpcli backup delete backup.bin
 
 - 目标必须位于当前备份根目录；
 - 确认后删除前再次比较扫描时的内容摘要，防止同名文件被替换；
-- `.bin` 和对应 `.sha256` 配对处理；
+- 只处理自校验 `.edpb` 容器，不再依赖外部摘要旁挂文件；
 - 任一可识别物理盘组至少保留 1 份备份。
 
 ### 策略清理

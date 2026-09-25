@@ -402,10 +402,6 @@ fn write_container(
 
         let mut manifest = base_manifest(capture);
         manifest.snapshot.capture_level = capture_level;
-        if capture_level == CaptureLevel::LegacyMigrated {
-            manifest.provenance.capture_source = "legacy_backup_file".into();
-            manifest.provenance.source_format = "legacy_raw_lba0_12_bin".into();
-        }
         manifest.regions.extend_from_slice(extra_regions);
         manifest.extents.extend_from_slice(extra_extents);
         manifest.provenance.notes.extend_from_slice(extra_notes);
@@ -495,52 +491,6 @@ fn write_container(
 
 pub fn write_core_backup(path: &Path, capture: &CoreCapture<'_>) -> Result<Manifest, String> {
     write_container(path, capture, CaptureLevel::Core, &[], &[], &[], &[])
-}
-
-/// 一次性把旧 6656B .bin 迁移为 EDPB v1。
-///
-/// 正式运行时不读取旧 .bin；本函数只供离线迁移工具调用。
-/// 旧格式没有采集 Metadata/Deep 新增信息，因此用 not_captured
-/// 占位 Artifact 明确表达缺失，绝不填零冒充真实采集数据。
-pub fn write_legacy_migrated_backup(
-    path: &Path,
-    capture: &CoreCapture<'_>,
-    notes: &[String],
-) -> Result<Manifest, String> {
-    let missing = [
-        (
-            "legacy.not_captured.partition_metadata",
-            "partition_metadata",
-        ),
-        ("legacy.not_captured.device_tail", "device_tail_window"),
-        (
-            "legacy.not_captured.filesystem_stats",
-            "filesystem_statistics",
-        ),
-        ("legacy.not_captured.file_list", "filesystem_file_list"),
-    ]
-    .into_iter()
-    .map(|(id, kind)| ArtifactInput {
-        id: id.into(),
-        kind: kind.into(),
-        media_type: "application/octet-stream".into(),
-        source_extent_ids: Vec::new(),
-        derivation: None,
-        restore_policy: RestorePolicy::DerivedOnly,
-        completeness: ArtifactCompleteness::NotCaptured,
-        data: Vec::new(),
-    })
-    .collect::<Vec<_>>();
-
-    write_container(
-        path,
-        capture,
-        CaptureLevel::LegacyMigrated,
-        &[],
-        &[],
-        &missing,
-        notes,
-    )
 }
 
 pub fn write_metadata_backup(

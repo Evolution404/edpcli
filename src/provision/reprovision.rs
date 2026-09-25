@@ -723,14 +723,6 @@ pub fn pass_info_policy_from_sectors(
     reliable_pass_info_policy(&plain7, &plain12)
 }
 
-pub fn force_change_password_from_sectors(
-    lba7: &[u8],
-    lba12: &[u8],
-    device_id: &str,
-) -> Option<bool> {
-    pass_info_policy_from_sectors(lba7, lba12, device_id).map(|policy| policy.force_change_password)
-}
-
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum ProvisionTarget {
     #[default]

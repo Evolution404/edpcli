@@ -770,22 +770,6 @@ pub fn lba4_tag16_from(raw: &[u8]) -> Option<[u8; 16]> {
     raw.get(..16)?.try_into().ok()
 }
 
-/// 直接从备份快照的 LBA4 读取 labelOnlyId，不依赖当前插入的真盘。
-pub fn backup_label_id(path: &Path) -> Option<String> {
-    crate::edpb::read_raw_protocol(path).ok().and_then(|data| {
-        data.get(4 * SECTOR..5 * SECTOR)
-            .and_then(lba4_label_id_from)
-    })
-}
-
-/// 备份文件是否为免密状态快照(按内容检测, 与文件名无关)。
-pub fn backup_is_nopwd(path: &Path, device_id: &str) -> bool {
-    let Ok(data) = crate::edpb::read_raw_protocol(path) else {
-        return false;
-    };
-    image_is_nopwd(&data, device_id)
-}
-
 /// 已在内存中的 LBA0-12 镜像是否为免密状态。
 /// 供扫描、restore、备份创建共用，避免上层重复构造扇区闭包或二次读文件。
 pub fn image_is_nopwd(data: &[u8], device_id: &str) -> bool {
@@ -820,7 +804,7 @@ pub fn ts_suffix_pos(name: &str) -> Option<usize> {
     }
 }
 
-/// 备份文件名尾部 `_YYYYMMDD_HHMMSS.bin` 转为可直接比较的 YYYYMMDDHHMMSS 数值。
+/// 备份文件名尾部 `_YYYYMMDD_HHMMSS.edpb` 转为可直接比较的 YYYYMMDDHHMMSS 数值。
 /// 这是备份真实创建时间；文件系统 mtime 可能因复制/touch 改变，只作为旧文件兜底。
 pub fn backup_name_time_key(path: &Path) -> Option<u64> {
     let name = path.file_name()?.to_str()?;
@@ -987,46 +971,11 @@ pub fn parse_backup_name(name: &str) -> Option<BackupMeta> {
     })
 }
 
-pub fn sha256_sidecar_path(path: &Path) -> PathBuf {
-    PathBuf::from(format!("{}.sha256", path.display()))
-}
-
-/// 读取 `<备份.bin>.sha256` 的首个摘要 token。
-/// 同时兼容本工具的“仅摘要”格式与标准 `sha256sum` 风格的 `HASH  filename`。
-pub fn read_backup_sha256(path: &Path) -> io::Result<Option<String>> {
-    let sidecar = sha256_sidecar_path(path);
-    let metadata = match fs::symlink_metadata(&sidecar) {
-        Ok(metadata) => metadata,
-        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(None),
-        Err(e) => return Err(e),
-    };
-    if !metadata.file_type().is_file() {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            format!("{} 不是普通校验文件", sidecar.display()),
-        ));
-    }
-    let content = fs::read_to_string(&sidecar)?;
-    let Some(expected) = content.split_whitespace().next() else {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            format!("{} 为空", sidecar.display()),
-        ));
-    };
-    if expected.len() != 64 || !expected.bytes().all(|b| b.is_ascii_hexdigit()) {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            format!("{} 不含合法 64 位 SHA-256", sidecar.display()),
-        ));
-    }
-    Ok(Some(expected.to_ascii_lowercase()))
-}
-
 /// 扫描备份目录并给出跨盘管理所需的完整元数据。
 ///
 /// 扫描必须是只读操作：文件名仅用于解析设备信息；只要备份内容可读且包含完整
 /// LBA4，onlyid 始终以 LBA4 为权威（即使文件名声称了另一个 onlyid）。旧 `_lid`
-/// 与无 onlyid 文件因此都无需改名即可正确归组。未识别 `.bin` 仍保留。
+/// 与无 onlyid 文件因此都无需改名即可正确归组；正式运行时仅扫描 `.edpb`。
 pub fn scan_backup_dir(dir: &Path) -> Vec<BackupEntry> {
     if !dir.is_dir() {
         return Vec::new();
@@ -1301,38 +1250,6 @@ pub fn create_deep_backup(
     Ok((path, is_nopwd))
 }
 
-/// 只支持 `*` 的通配匹配(device_id/文件名只含 &/_/字母数字, 无其它元字符)。
-pub fn wildcard_match(pat: &str, text: &str) -> bool {
-    let parts: Vec<&str> = pat.split('*').collect();
-    if parts.len() == 1 {
-        return pat == text;
-    }
-    let first = parts[0];
-    let last = parts[parts.len() - 1];
-    if !text.starts_with(first) || !text.ends_with(last) {
-        return false;
-    }
-    if first.len() + last.len() > text.len() {
-        return false;
-    }
-    let mut idx = first.len();
-    let bound = text.len() - last.len();
-    for part in &parts[1..parts.len() - 1] {
-        match find_in_range(text, idx, bound, part) {
-            Some(end) => idx = end,
-            None => return false,
-        }
-    }
-    true
-}
-
-fn find_in_range(text: &str, from: usize, to: usize, part: &str) -> Option<usize> {
-    if from > to {
-        return if part.is_empty() { Some(from) } else { None };
-    }
-    text[from..to].find(part).map(|p| from + p + part.len())
-}
-
 pub fn mtime_epoch(path: &Path) -> i64 {
     path.metadata()
         .and_then(|m| m.modified())
@@ -1386,26 +1303,6 @@ pub fn find_backups(
         })
         .map(|entry| entry.path)
         .collect()
-}
-
-// ══════════════════════════════════════════════════════════════════
-// 4. 快照读取
-// ══════════════════════════════════════════════════════════════════
-/// 快照目录读扇区, 兼容 LBA7.bin / LBA07.bin 命名。缺失返回全零扇区。
-pub fn read_lba_file(dir: &Path, lba: u32) -> Vec<u8> {
-    for name in [format!("LBA{}.bin", lba), format!("LBA{:02}.bin", lba)] {
-        let p = dir.join(name);
-        if p.exists() {
-            if let Ok(data) = fs::read(&p) {
-                // Python f.read(SECTOR): 截到 512; 不足补零(短文件在 Python 会半路崩, 这里安全失败)
-                let mut v = data;
-                v.truncate(SECTOR);
-                v.resize(SECTOR, 0);
-                return v;
-            }
-        }
-    }
-    vec![0u8; SECTOR]
 }
 
 #[cfg(test)]
@@ -1529,33 +1426,6 @@ mod tests {
         assert_eq!(lba4_label_id_from(b"@@@1@@@"), None);
         assert_eq!(lba4_label_id_from(b"$$$-$$$"), None); // '-' 后无数字
         assert_eq!(lba4_label_id_from(b"$$$$$$"), None); // 无数字
-    }
-
-    #[test]
-    fn wildcard_only_star() {
-        assert!(wildcard_match("a*c*", "abc"));
-        assert!(wildcard_match(
-            "disk*_122880000_vid0dd8_pid2005_x_*.bin",
-            "disk6_122880000_vid0dd8_pid2005_x_onlyid1402259934_20260910_172300.bin"
-        ));
-        assert!(!wildcard_match("disk*_999_*", "disk6_122880000_x"));
-        assert!(wildcard_match("abc", "abc"));
-        assert!(!wildcard_match("abc", "abcd"));
-        assert!(wildcard_match("*", "anything"));
-        assert!(wildcard_match("a**b", "ab"));
-        assert!(!wildcard_match("a*b", "a")); // 尾段放不下
-    }
-
-    #[test]
-    fn read_lba_file_naming() {
-        let d = std::env::temp_dir().join(format!("edpcli_test_{}_lbafile", std::process::id()));
-        fs::create_dir_all(&d).unwrap();
-        fs::write(d.join("LBA7.bin"), vec![b'7'; SECTOR]).unwrap();
-        fs::write(d.join("LBA12.bin"), vec![b'c'; SECTOR]).unwrap();
-        assert_eq!(read_lba_file(&d, 7), vec![b'7'; SECTOR]); // 无前导零
-        assert_eq!(read_lba_file(&d, 12), vec![b'c'; SECTOR]);
-        assert_eq!(read_lba_file(&d, 9), vec![0u8; SECTOR]); // 缺失→全零
-        let _ = fs::remove_dir_all(&d);
     }
 
     #[test]

@@ -903,6 +903,18 @@ application 返回结构化 `ProvisionReport/BackupReport/InspectReport`，CLI/T
 
 再盘点旧 EDPB 后处理 `.bin/.sha256` migration 链。
 
+### R3 实施状态（2026-09-25）
+
+**COMPLETE。**
+
+- 删除无业务调用、仅由自测维持的 `wildcard_match`、`read_lba_file`、`backup_label_id`、`backup_is_nopwd`、`prepare_new_provision`、`force_change_password_from_sectors`，并清理对应辅助函数、导出与自测。
+- 删除旧备份 SHA-256 旁挂文件读取入口 `sha256_sidecar_path/read_backup_sha256`；当前备份扫描、校验、删除与恢复统一依赖自包含 EDPB 容器及其内容摘要。
+- 删除旧 `.bin`→EDPB 的写入/迁移入口 `write_legacy_migrated_backup` 以及仅服务该入口的写入分支；正式运行时只扫描 `.edpb`。
+- 保留 `CaptureLevel::LegacyMigrated` 作为已经迁移成 EDPB 的历史清单反序列化值，并新增测试锁定这一只读兼容边界；真实 LBA0～12/LCE 协议兼容代码未删除。
+- 备份与 EDPB 测试改为直接覆盖仍在使用的 `read_raw_protocol`、`lba4_label_id_from`、`image_is_nopwd` 等底层能力，不再通过已删除包装层自证存在。
+- R3 定向验证 **239/239** 通过；上述高置信旧入口在 `src` 中扫描均为 0。
+- R3 full 门禁 **24.58s / 0 failures**；重新编译后的首轮 fast 为 **48.61s**，随后暖缓存 fast **2.01s / 0 failures**，满足日常 `<45s` 目标。
+
 ## Phase R4：拆大模块
 
 按边界逐步拆：

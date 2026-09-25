@@ -10,8 +10,8 @@ use edpcli::cli::{backup_delete, backup_list, backup_prune, backup_verify};
 use edpcli::common::{METADATA_IMAGE_LEN, SECTOR};
 use edpcli::diskio::Clock;
 use edpcli::diskio::{
-    backup_is_nopwd, backup_label_id, create_backup, find_backups, parse_backup_name,
-    prune_candidates, scan_backup_dir, BackupEntry, BackupMeta, DiskFacts, Sha256Status,
+    create_backup, find_backups, parse_backup_name, prune_candidates, scan_backup_dir, BackupEntry,
+    BackupMeta, DiskFacts, Sha256Status,
 };
 use edpcli::edpb::{self, CoreCapture};
 
@@ -77,7 +77,11 @@ fn edpb_backup_label_id_comes_from_raw_lba4() {
         "disk6_122880000_vid0dd8_pid2005_disk&ven_netac&prod_onlydisk_onlyid9999999999_20260910_172300.edpb",
         &data,
     );
-    assert_eq!(backup_label_id(&path).as_deref(), Some("1402259934"));
+    let raw = edpb::read_raw_protocol(&path).unwrap();
+    assert_eq!(
+        edpcli::diskio::lba4_label_id_from(&raw[4 * SECTOR..5 * SECTOR]).as_deref(),
+        Some("1402259934")
+    );
 }
 
 #[test]
@@ -370,17 +374,12 @@ fn backup_tagging_by_content() {
     let name = path.file_name().unwrap().to_string_lossy().into_owned();
     assert!(name.contains("_nopwd"), "{}", name);
     assert!(is_nopwd);
-    // backup_is_nopwd 按内容检测(与文件名无关)
-    assert!(backup_is_nopwd(&path, &did));
-    assert!(!backup_is_nopwd(&path, "disk&ven_bogus&prod_x"));
-    assert!(!backup_is_nopwd(
-        std::path::Path::new("/nonexistent.edpb"),
-        &did
+    let raw = edpb::read_raw_protocol(&path).unwrap();
+    assert!(edpcli::diskio::image_is_nopwd(&raw, &did));
+    assert!(!edpcli::diskio::image_is_nopwd(
+        &raw,
+        "disk&ven_bogus&prod_x"
     ));
-    // 短文件安全返回 false
-    let short = tmp.0.join("short.edpb");
-    fs::write(&short, vec![0u8; 100]).unwrap();
-    assert!(!backup_is_nopwd(&short, &did));
 }
 
 #[test]

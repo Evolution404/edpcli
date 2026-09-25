@@ -26,8 +26,7 @@ use crate::provision::{
     PartitionRole, PassInfoPolicy, PlainCleanupExtent, PlainPartitionSpec, PlainProvisionPlan,
     PlainProvisionWritePlan, ProvisionEntropy, ProvisionImage, ProvisionMetadata, ProvisionProfile,
     ProvisionSpec, ProvisionTarget, QuickCapacityUnit, SparseFilesystemImage,
-    TargetGeometryOverrides, TargetIdentity, TargetPartitionGeometry, TargetProvisionPlan,
-    DEFAULT_MODE0_BOOT_SECTORS,
+    TargetGeometryOverrides, TargetIdentity, TargetProvisionPlan, DEFAULT_MODE0_BOOT_SECTORS,
 };
 use crate::sysinfo::{self, CmdRunner};
 use encoding_rs::GBK;
@@ -555,134 +554,6 @@ fn sizes(
         sizes = sizes.with_encrypt_sectors(encrypt_sectors);
     }
     Ok(sizes)
-}
-
-pub fn prepare_new_provision(
-    runner: &dyn CmdRunner,
-    disk: u32,
-    request: &OfficialProvisionRequest,
-) -> EdpCliResult<PreparedNewProvision> {
-    guard_usb_disk(runner, disk)?;
-    let total_sectors = sysinfo::disk_total_sectors(runner, disk)
-        .ok_or_else(|| err(EXIT_TARGET, "错误: 无法取得目标盘总扇区数"))?;
-    let probe = runner
-        .hardware_probe(disk)
-        .or_else(|| crate::platform::fallback_hardware_probe(runner, disk))
-        .ok_or_else(|| err(EXIT_TARGET, "错误: 无法取得目标盘 USB/SCSI 硬件身份"))?;
-    let target = TargetIdentity::from_probe(&probe, total_sectors)
-        .map_err(|message| err(EXIT_TARGET, format!("错误: 目标硬件身份不完整: {message}")))?;
-    let device_id = target.device_id().to_string();
-    let compatibility =
-        locate_lba7_compatibility_extent_from_verified_usb_capacity(total_sectors, SECTOR as u32)
-            .ok_or_else(|| {
-            err(
-                EXIT_TARGET,
-                "错误: 当前目标不符合已验证的 512B/255x63 USB LCE 几何",
-            )
-        })?;
-
-    let metadata = ProvisionMetadata::new(
-        OnlyId::parse(&request.label_id)
-            .map_err(|message| err(EXIT_TARGET, format!("错误: 标签标识无效: {message}")))?,
-        request.user.clone(),
-        request.dept.clone(),
-        request.label.clone(),
-    )
-    .map_err(|message| err(EXIT_TARGET, format!("错误: 制盘身份字段无效: {message}")))?;
-    let pass_info_policy = PassInfoPolicy {
-        force_change_password: request.force_change_password.unwrap_or(false),
-        cancel_password_complexity_check: request.cancel_password_complexity_check.unwrap_or(false),
-        max_share_password_errors: request.max_share_password_errors.unwrap_or(u8::MAX),
-        max_encrypt_password_errors: request.max_encrypt_password_errors.unwrap_or(u8::MAX),
-    };
-    let force_change_password = pass_info_policy.force_change_password;
-    let profile = ProvisionProfile::canonical_v1().with_pass_info_policy(pass_info_policy);
-    let spec = ProvisionSpec::new(target, metadata, profile)
-        .map_err(|message| err(EXIT_TARGET, format!("错误: 制盘元数据无法编码: {message}")))?;
-
-    let mut file_key = random_array::<16>()?;
-    let legacy_file_key = random_array::<8>()?;
-    let entropy = ProvisionEntropy::new(random_array::<252>()?);
-    let current_key = wrap_file_key(request.password.as_bytes(), file_key, FileKeyWrapMode::Sm4);
-    let legacy_key = wrap_legacy_lba7_file_key(request.password.as_bytes(), legacy_file_key);
-    let selected_mode = official_mode(request.target)?;
-    let plan = OfficialProvisionPlan::new(
-        selected_mode,
-        sizes(request, selected_mode)?,
-        compatibility,
-        legacy_key,
-        current_key,
-    )
-    .map_err(|message| err(EXIT_TARGET, format!("错误: 制盘布局无效: {message}")))?
-    .with_filesystems(request.format.filesystems());
-    let logical_count = plan
-        .logical_partitions(SECTOR as u64)
-        .map_err(|message| err(EXIT_TARGET, format!("错误: 制盘布局无效: {message}")))?
-        .len();
-    let mut serials = Vec::with_capacity(logical_count);
-    for _ in 0..logical_count {
-        serials.push(u32::from_le_bytes(random_array::<4>()?));
-    }
-    let format_targets_result = plan_format_targets(&plan, &request.format, &serials, &file_key);
-    file_key.fill(0);
-    let format_targets =
-        format_targets_result.map_err(|message| err(EXIT_TARGET, format!("错误: {message}")))?;
-    let expected_serial = if format_targets.iter().any(|choice| choice.selected) {
-        Some(
-            runner
-                .hardware_serial(disk)
-                .filter(|serial| !serial.trim().is_empty())
-                .ok_or_else(|| err(EXIT_TARGET, "错误: 无法读取 USB 硬件序列号，拒绝安排格式化"))?,
-        )
-    } else {
-        None
-    };
-    let write_image = build_official_provision_protocol_image(&spec, &entropy, &plan)
-        .map_err(|message| err(EXIT_TARGET, format!("错误: 无法构造制盘镜像: {message}")))?;
-    let target_geometry = plan
-        .format_targets()
-        .map_err(|message| err(EXIT_TARGET, message))?
-        .into_iter()
-        .map(|target| TargetPartitionGeometry {
-            role: target.role,
-            partition_type: target.geometry.partition_type,
-            start_lba: target.geometry.start_sector,
-            sector_count: target.geometry.sector_count(),
-            physically_encrypted: target.physically_encrypted,
-            filesystem: target.filesystem,
-        })
-        .collect::<Vec<_>>();
-    let target_plan = TargetProvisionPlan::build(
-        None,
-        selected_mode,
-        &target_geometry,
-        compatibility.start_lba,
-        request.password.as_bytes(),
-    )
-    .map_err(|message| {
-        err(
-            EXIT_TARGET,
-            format!("错误: 无法构造目标制盘计划: {message}"),
-        )
-    })?;
-
-    Ok(PreparedNewProvision {
-        disk,
-        device_id,
-        mode: selected_mode,
-        force_change_password,
-        pass_info_policy,
-        lce_start_lba: compatibility.start_lba,
-        write_image,
-        format_targets,
-        target_plan: Some(target_plan),
-        source_metadata: None,
-        plan,
-        expected_onlyid: request.label_id.clone(),
-        expected_serial,
-        expected_probe: probe,
-        expected_lba3: None,
-    })
 }
 
 fn confirmed_filesystem(
