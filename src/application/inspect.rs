@@ -974,6 +974,51 @@ mod advanced_tests {
     }
 
     #[test]
+    fn inspect_reader_boundary_is_read_only_and_reads_only_requested_raw_sectors() {
+        struct AuditReader {
+            reads: Vec<u64>,
+        }
+
+        impl SectorReader for AuditReader {
+            fn read_sector(&mut self, lba: u64) -> io::Result<Vec<u8>> {
+                self.reads.push(lba);
+                Ok(vec![(lba & 0xff) as u8; SECTOR])
+            }
+        }
+
+        let context =
+            crate::inspect_target::InspectDiskContext::new(vec![0; METADATA_IMAGE_LEN], None, 4096);
+        let request = AdvancedInspectRequest {
+            mode: AdvancedInspectMode::Raw,
+            lbas: vec![100, 3_000],
+            export_dir: None,
+            device_id_override: None,
+            fail_soft_decode: false,
+        };
+        let mut reader = AuditReader { reads: Vec::new() };
+        let workspace = run_advanced_source(
+            "audit-reader".into(),
+            InspectMeta::default(),
+            context,
+            &request,
+            &mut reader,
+        )
+        .unwrap();
+
+        assert_eq!(reader.reads, vec![100, 3_000]);
+        assert_eq!(
+            workspace
+                .items
+                .iter()
+                .map(|item| item.lba)
+                .collect::<Vec<_>>(),
+            vec![100, 3_000]
+        );
+        assert_eq!(workspace.items[0].raw[0], 100);
+        assert_eq!(workspace.items[1].raw[0], (3_000 & 0xff) as u8);
+    }
+
+    #[test]
     fn advanced_lba_parser_matches_cli_list_range_and_count_semantics() {
         assert_eq!(
             parse_advanced_lbas("", "").unwrap(),
