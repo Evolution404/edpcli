@@ -608,16 +608,24 @@ fn build_official_partition_filesystem_with_format(
     volume_serial: u32,
     format: OfficialFilesystemFormat,
 ) -> Result<PartitionFilesystemImage, String> {
-    if !target.format_capable || !plan.format_targets()?.contains(target) {
+    let targets = plan.format_targets()?;
+    let Some(index) = targets.iter().position(|candidate| candidate == target) else {
+        return Err("partition is not a format-capable target in this plan".into());
+    };
+    if !target.format_capable {
         return Err("partition is not a format-capable target in this plan".into());
     }
-    if crc32_bare(file_key) != plan.lba12_key_material.file_key_crc {
-        return Err("filesystem file key does not match LBA12 FileKeyCRC".into());
-    }
-    if target.physically_encrypted && plan.lba12_key_material.encrypt_mode != FileKeyWrapMode::Sm4 {
-        return Err(
-            "portable encrypted filesystem writer is validated only for current mode2 SM4".into(),
-        );
+    if target.physically_encrypted {
+        let material = plan.partition_lba12_material[index].unwrap_or(plan.lba12_key_material);
+        if crc32_bare(file_key) != material.file_key_crc {
+            return Err("filesystem file key does not match LBA12 FileKeyCRC".into());
+        }
+        if material.encrypt_mode != FileKeyWrapMode::Sm4 {
+            return Err(
+                "portable encrypted filesystem writer is validated only for current mode2 SM4"
+                    .into(),
+            );
+        }
     }
     let plain = match format {
         OfficialFilesystemFormat::Fat16 => build_empty_fat16(
@@ -671,9 +679,6 @@ pub fn build_official_exfat_partitions(
             plan.filesystem_format.config_token()
         ));
     }
-    if crc32_bare(file_key) != plan.lba12_key_material.file_key_crc {
-        return Err("filesystem file key does not match LBA12 FileKeyCRC".into());
-    }
     let targets = plan.format_targets()?;
     if volume_serials.len() != targets.len() {
         return Err(format!(
@@ -682,16 +687,6 @@ pub fn build_official_exfat_partitions(
             targets.len()
         ));
     }
-    if targets
-        .iter()
-        .any(|target| target.format_capable && target.physically_encrypted)
-        && plan.lba12_key_material.encrypt_mode != FileKeyWrapMode::Sm4
-    {
-        return Err(
-            "portable encrypted filesystem writer is validated only for current mode2 SM4".into(),
-        );
-    }
-
     let mut out = Vec::with_capacity(targets.len());
     for (index, target) in targets.iter().enumerate() {
         if !target.format_capable {

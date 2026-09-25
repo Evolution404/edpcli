@@ -363,6 +363,68 @@ fn fat16_and_exfat_can_each_be_physically_encrypted_when_selected() {
 }
 
 #[test]
+fn partition_filesystem_uses_partition_key_material_and_plaintext_skips_file_key_crc() {
+    let mut plan = official_plan(OfficialPartitionMode::DefaultThreePartition);
+    let keys = [[0x11; 16], [0x22; 16], [0x33; 16]];
+    for (index, key) in keys.into_iter().enumerate() {
+        plan = plan
+            .with_partition_key_material(
+                index,
+                wrap_legacy_lba7_file_key(b"ProofPass1!", [index as u8 + 1; 8]),
+                wrap_file_key(b"ProofPass1!", key, FileKeyWrapMode::Sm4),
+            )
+            .unwrap();
+    }
+    let targets = plan.format_targets().unwrap();
+
+    let plaintext = build_official_partition_filesystem(&plan, &targets[0], &[0x99; 16], "BOOT", 1)
+        .expect("plaintext type1 must not require a FileKeyCRC match");
+    assert!(!plaintext.physically_encrypted);
+
+    let encrypted =
+        build_official_partition_filesystem(&plan, &targets[1], &[0x22; 16], "SHARE", 2)
+            .expect("encrypted partition must validate against its own partition key material");
+    assert!(encrypted.physically_encrypted);
+    assert!(
+        build_official_partition_filesystem(&plan, &targets[1], &[0x33; 16], "SHARE", 2,)
+            .unwrap_err()
+            .contains("FileKeyCRC")
+    );
+
+    let mut mode2 = official_plan(OfficialPartitionMode::WholeDiskEncrypted);
+    mode2 = mode2
+        .with_partition_key_material(
+            0,
+            wrap_legacy_lba7_file_key(b"ProofPass1!", [0x44; 8]),
+            wrap_file_key(b"ProofPass1!", [0x44; 16], FileKeyWrapMode::Sm4),
+        )
+        .unwrap()
+        .with_partition_key_material(
+            1,
+            wrap_legacy_lba7_file_key(b"ProofPass1!", [0x55; 8]),
+            wrap_file_key(b"ProofPass1!", [0x55; 16], FileKeyWrapMode::Sm4),
+        )
+        .unwrap();
+    let mode2_targets = mode2.format_targets().unwrap();
+    assert_eq!(mode2_targets[0].role, PartitionRole::CompatibilityReserve);
+    assert!(!mode2_targets[0].format_capable);
+    assert!(mode2_targets[1].physically_encrypted);
+    build_official_partition_filesystem(&mode2, &mode2_targets[1], &[0x55; 16], "ENCRYPT", 3)
+        .expect(
+            "mode2 encrypted partition must keep partition slot index after compatibility reserve",
+        );
+    assert!(build_official_partition_filesystem(
+        &mode2,
+        &mode2_targets[1],
+        &[0x44; 16],
+        "ENCRYPT",
+        3,
+    )
+    .unwrap_err()
+    .contains("FileKeyCRC"));
+}
+
+#[test]
 fn exfat_builder_rejects_oversized_labels_and_tiny_volumes() {
     assert!(build_empty_exfat(63, 16, 1, "EDP").is_err());
     assert!(build_empty_exfat(63, 1_000_000, 1, "123456789012").is_err());

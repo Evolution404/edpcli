@@ -392,19 +392,7 @@ pub fn prepare_target_provision(
                 .map_err(|message| err(EXIT_TARGET, message))?;
         }
     }
-    let mut format_options = request.format.clone();
-    format_options.boot = target_plan.partitions.iter().any(|part| {
-        part.geometry.role == PartitionRole::Boot && part.action == PartitionAction::Rebuild
-    });
-    format_options.share = target_plan.partitions.iter().any(|part| {
-        matches!(
-            part.geometry.role,
-            PartitionRole::Share | PartitionRole::BootShareCombined
-        ) && part.action == PartitionAction::Rebuild
-    });
-    format_options.encrypt = target_plan.partitions.iter().any(|part| {
-        part.geometry.role == PartitionRole::Encrypt && part.action == PartitionAction::Rebuild
-    });
+    let format_options = request.format.clone();
     let mut serials = Vec::with_capacity(target_plan.partitions.len());
     for _ in &target_plan.partitions {
         serials.push(u32::from_le_bytes(random_array::<4>()?));

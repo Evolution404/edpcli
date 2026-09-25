@@ -615,7 +615,9 @@ fn validate_official_lba7(
         };
         let encrypted = expected_need_encrypt(partition.partition_type.raw()) != 0;
         let material = if encrypted {
-            plan.lba7_key_material.packed16()
+            plan.partition_lba7_material[index]
+                .unwrap_or(plan.lba7_key_material)
+                .packed16()
         } else {
             [0u8; 16]
         };
@@ -654,7 +656,9 @@ fn validate_official_lba12(
     for (index, partition) in logical.iter().enumerate() {
         let encrypted = expected_need_encrypt(partition.partition_type.raw()) != 0;
         let material = if encrypted {
-            plan.lba12_key_material.packed24()
+            plan.partition_lba12_material[index]
+                .unwrap_or(plan.lba12_key_material)
+                .packed24()
         } else {
             [0u8; 24]
         };
@@ -669,7 +673,10 @@ fn validate_official_lba12(
             partition.size_bytes,
             &material,
             if encrypted {
-                plan.lba12_key_material.encrypt_mode.raw()
+                plan.partition_lba12_material[index]
+                    .unwrap_or(plan.lba12_key_material)
+                    .encrypt_mode
+                    .raw()
             } else {
                 0
             },

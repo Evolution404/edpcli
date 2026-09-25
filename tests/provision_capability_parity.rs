@@ -57,6 +57,21 @@ fn plain_is_a_first_class_target_and_not_mode4() {
 }
 
 #[test]
+fn optional_format_choices_are_not_forced_on_by_rebuild_actions() {
+    let prepare = source("src/application/provision/prepare.rs");
+    assert!(prepare.contains("let format_options = request.format.clone();"));
+    assert!(
+        !prepare.contains("format_options.boot = target_plan.partitions"),
+        "Rebuild must not silently override the user's optional format checkbox"
+    );
+    assert!(
+        !prepare.contains("format_options.share = target_plan.partitions")
+            && !prepare.contains("format_options.encrypt = target_plan.partitions"),
+        "all three format checkboxes must remain user-controlled"
+    );
+}
+
+#[test]
 fn plain_export_is_available_in_tui_review_flow() {
     let state = source("src/tui/provision/state.rs");
     let render = source("src/tui/render.rs");

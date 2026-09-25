@@ -398,6 +398,25 @@ fn official_generator_serializes_all_three_current_lba12_wrap_modes() {
 }
 
 #[test]
+fn official_validator_uses_per_partition_lba7_and_lba12_key_material() {
+    let spec = official_spec();
+    let entropy = ProvisionEntropy::new([0x5a; 252]);
+    let mut plan = official_plan(OfficialPartitionMode::DefaultThreePartition);
+    for (index, fill) in [0x11u8, 0x22, 0x33].into_iter().enumerate() {
+        plan = plan
+            .with_partition_key_material(
+                index,
+                wrap_legacy_lba7_file_key(b"ProofPass1!", [fill; 8]),
+                wrap_file_key(b"ProofPass1!", [fill; 16], FileKeyWrapMode::Sm4),
+            )
+            .unwrap();
+    }
+    let image = generate_official_image(&spec, &entropy, &plan).unwrap();
+    OfficialProvisionValidator::validate(&spec, &image, &plan)
+        .expect("validator must compare each encrypted entry with its partition key material");
+}
+
+#[test]
 fn official_validator_rejects_mbr_and_lba12_tamper() {
     let spec = official_spec();
     let entropy = ProvisionEntropy::new([0x5a; 252]);
