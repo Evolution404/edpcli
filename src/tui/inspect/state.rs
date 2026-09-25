@@ -164,6 +164,7 @@ pub struct AdvancedInspectState {
     pub lazy_offsets: std::collections::BTreeMap<String, u64>,
     pub sector: Option<SectorInspectorState>,
     pub sector_cache_order: std::collections::VecDeque<u64>,
+    pub preview_attempted: std::collections::BTreeSet<u64>,
     pub yank_register: Option<String>,
     pub prompt: Option<AdvancedInspectPrompt>,
     pub message: Option<String>,
@@ -232,6 +233,7 @@ impl AppState {
             lazy_offsets: std::collections::BTreeMap::new(),
             sector: None,
             sector_cache_order: std::collections::VecDeque::new(),
+            preview_attempted: std::collections::BTreeSet::new(),
             yank_register: None,
             prompt: None,
             message: Some("正在后台读取协议上下文并建立全盘结构树…".into()),
@@ -288,6 +290,7 @@ impl AppState {
         state.detail_scroll = 0;
         state.sector = None;
         state.sector_cache_order.clear();
+        state.preview_attempted.clear();
         state.prompt = None;
         state.search_query.clear();
         state.search_matches.clear();
@@ -1145,6 +1148,34 @@ impl AppState {
         let row = rows.get(state.tree_selected)?;
         (row.kind == crate::application::inspect_tree::InspectNodeKind::Sector)
             .then_some(row.range.start_lba)
+    }
+
+    pub fn advanced_inspect_preview_request(&self) -> Option<(AdvancedInspectSource, u64)> {
+        let advanced = self.advanced_inspect.as_ref()?;
+        if advanced.stage != AdvancedInspectStage::Browser || advanced.sector.is_some() {
+            return None;
+        }
+        let rows = self.advanced_inspect_tree_rows();
+        let row = rows.get(advanced.tree_selected)?;
+        if row.kind != crate::application::inspect_tree::InspectNodeKind::Sector
+            || row.status != crate::edpb::SemanticStatus::Identified
+        {
+            return None;
+        }
+        let lba = row.range.start_lba;
+        let workspace = advanced.result.as_ref()?;
+        if workspace.items.iter().any(|item| item.lba == lba)
+            || advanced.preview_attempted.contains(&lba)
+        {
+            return None;
+        }
+        Some((advanced.source.clone(), lba))
+    }
+
+    pub fn advanced_inspect_mark_preview_attempted(&mut self, lba: u64) {
+        if let Some(advanced) = self.advanced_inspect.as_mut() {
+            advanced.preview_attempted.insert(lba);
+        }
     }
 
     pub fn advanced_inspect_open_selected_sector(

@@ -123,6 +123,88 @@ fn select_protocol_lba0(state: &mut AppState) {
 }
 
 #[test]
+fn selecting_lba12_shows_canonical_fields_before_enter() {
+    let mut sector = item(12, true);
+    sector.fields = vec![InspectField {
+        range: AbsoluteByteRange {
+            start: 12 * 512 + 16,
+            end_exclusive: 12 * 512 + 20,
+        },
+        field_type: InspectFieldType::Identity,
+        raw: vec![2, 0, 0, 0],
+        decoded: vec![2, 0, 0, 0],
+        status: InspectFieldStatus::Known,
+        label: "PartionType".into(),
+        value: "type2".into(),
+        style: FieldStyle::Identity,
+        group: Some("Partition entries".into()),
+        children: vec![FieldChild {
+            label: "Start LBA".into(),
+            value: "20480".into(),
+        }],
+    }];
+    let mut state = AppState::new();
+    assert!(state.begin_advanced_inspect(AdvancedInspectSource::Disk(6)));
+    state.advanced_inspect_finish(Ok(workspace(vec![sector])));
+    select_protocol_lba0(&mut state);
+    let rows = state.advanced_inspect_tree_rows();
+    let lba12 = rows
+        .iter()
+        .position(|row| row.id.ends_with("/sector.12"))
+        .unwrap();
+    let current = state.advanced_inspect().unwrap().tree_selected;
+    state.advanced_inspect_move_tree(lba12 as isize - current as isize);
+    assert!(state.advanced_inspect_sector().is_none());
+
+    let mut terminal = Terminal::new(TestBackend::new(160, 50)).unwrap();
+    terminal.draw(|frame| render::draw(frame, &state)).unwrap();
+    let text = terminal
+        .backend()
+        .buffer()
+        .content()
+        .iter()
+        .map(|cell| cell.symbol())
+        .collect::<String>();
+    assert!(text.contains("PartionType"), "{text}");
+    assert!(text.contains("type2"), "{text}");
+    assert!(text.contains("Start LBA"), "{text}");
+    assert!(text.contains("20480"), "{text}");
+}
+
+#[test]
+fn selecting_known_partition_sector_requests_read_only_preview() {
+    let mut state = AppState::new();
+    assert!(state.begin_advanced_inspect(AdvancedInspectSource::Disk(6)));
+    state.advanced_inspect_finish(Ok(workspace_with_partition(Vec::new())));
+    let rows = state.advanced_inspect_tree_rows();
+    let region = rows
+        .iter()
+        .position(|row| row.id.ends_with("/region.partition.0"))
+        .unwrap();
+    state.advanced_inspect_move_tree(region as isize);
+    state.advanced_inspect_toggle_selected();
+    let rows = state.advanced_inspect_tree_rows();
+    let extent = rows
+        .iter()
+        .position(|row| row.id.ends_with("/region.partition.0.extent"))
+        .unwrap();
+    let current = state.advanced_inspect().unwrap().tree_selected;
+    state.advanced_inspect_move_tree(extent as isize - current as isize);
+    state.advanced_inspect_toggle_selected();
+    let rows = state.advanced_inspect_tree_rows();
+    let sector = rows
+        .iter()
+        .position(|row| row.id.ends_with("/sector.2048"))
+        .unwrap();
+    let current = state.advanced_inspect().unwrap().tree_selected;
+    state.advanced_inspect_move_tree(sector as isize - current as isize);
+    assert_eq!(state.advanced_inspect_preview_request().unwrap().1, 2_048);
+    state.advanced_inspect_mark_preview_attempted(2_048);
+    assert!(state.advanced_inspect_preview_request().is_none());
+    assert!(state.advanced_inspect_sector().is_none());
+}
+
+#[test]
 fn sector_inspector_loads_on_demand_navigates_bytes_and_bounds_cache() {
     let mut state = AppState::new();
     assert!(state.begin_advanced_inspect(AdvancedInspectSource::Disk(6)));

@@ -711,6 +711,11 @@ fn run_loop(resume: Option<state::WriteIntent>) -> io::Result<LoopExit> {
             if let Some((lba, result)) = updates.advanced_inspect_sector {
                 state.advanced_inspect_sector_finish(lba, result);
             }
+            if let Some((source, lba)) = state.advanced_inspect_preview_request() {
+                if tasks.request_advanced_inspect_preview(source, lba).is_ok() {
+                    state.advanced_inspect_mark_preview_attempted(lba);
+                }
+            }
             if state.take_deferred_exit() == StateEffect::ExitRequested {
                 break;
             }

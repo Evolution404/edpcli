@@ -37,6 +37,31 @@ impl TaskHub {
         source: crate::tui::state::AdvancedInspectSource,
         lba: u64,
     ) -> Result<u64, &'static str> {
+        self.request_advanced_inspect_sector_mode(
+            source,
+            lba,
+            crate::application::inspect::AdvancedInspectMode::Decode,
+        )
+    }
+
+    pub fn request_advanced_inspect_preview(
+        &mut self,
+        source: crate::tui::state::AdvancedInspectSource,
+        lba: u64,
+    ) -> Result<u64, &'static str> {
+        self.request_advanced_inspect_sector_mode(
+            source,
+            lba,
+            crate::application::inspect::AdvancedInspectMode::Meta,
+        )
+    }
+
+    fn request_advanced_inspect_sector_mode(
+        &mut self,
+        source: crate::tui::state::AdvancedInspectSource,
+        lba: u64,
+        mode: crate::application::inspect::AdvancedInspectMode,
+    ) -> Result<u64, &'static str> {
         if !self.advanced_inspect_sector_single_flight.try_start() {
             return Err("已有扇区读取正在执行");
         }
@@ -44,7 +69,7 @@ impl TaskHub {
         let tx = self.tx.clone();
         std::thread::spawn(move || {
             let request = crate::application::inspect::AdvancedInspectRequest {
-                mode: crate::application::inspect::AdvancedInspectMode::Decode,
+                mode,
                 lbas: vec![lba],
                 export_dir: None,
                 device_id_override: None,

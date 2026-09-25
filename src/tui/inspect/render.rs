@@ -471,6 +471,10 @@ pub(super) fn draw_advanced_inspect(
                         .unwrap_or_else(|| "[空区间]".into())
                     )),
                     Line::from(format!("Sector count: {}", row.range.sector_count)),
+                    Line::from(format!(
+                        "大小: {} B",
+                        u128::from(row.range.sector_count) * crate::common::SECTOR as u128
+                    )),
                     Line::from(format!("状态: {status}")),
                 ]);
                 if let Some(byte_range) = row.range.byte_range {
@@ -487,17 +491,45 @@ pub(super) fn draw_advanced_inspect(
                     InspectNodeKind::Sector => {
                         let lba = row.range.start_lba;
                         if let Some(item) = workspace.items.iter().find(|item| item.lba == lba) {
-                            detail_lines.push(Line::from(vec![
-                                Span::styled("已缓存  ", success()),
-                                Span::raw(format!("LBA{lba}")),
-                            ]));
-                            detail_lines.push(Line::from(format!(
-                                "RAW SHA-256: {}",
-                                safe(&item.raw_sha256)
-                            )));
-                            detail_lines.push(Line::from(
-                                "Enter 打开 Sector Inspector；首次进入自动补齐 Decode。",
-                            ));
+                            if !item.fields.is_empty() {
+                                let mut previous_group: Option<&str> = None;
+                                for field in &item.fields {
+                                    let group = field.group.as_deref();
+                                    if group != previous_group {
+                                        if let Some(group) = group {
+                                            detail_lines.push(Line::from(Span::styled(
+                                                safe(group),
+                                                accent().add_modifier(Modifier::BOLD),
+                                            )));
+                                        }
+                                        previous_group = group;
+                                    }
+                                    detail_lines.push(Line::from(format!(
+                                        "{}: {}",
+                                        safe(&field.label),
+                                        safe(&field.value)
+                                    )));
+                                    for child in &field.children {
+                                        detail_lines.push(Line::from(format!(
+                                            "  {}: {}",
+                                            safe(&child.label),
+                                            safe(&child.value)
+                                        )));
+                                    }
+                                }
+                            } else if let Some(meta_text) = &item.meta_text {
+                                detail_lines
+                                    .extend(meta_text.lines().map(|line| Line::from(safe(line))));
+                            } else {
+                                detail_lines.push(Line::from(format!(
+                                    "RAW SHA-256: {}",
+                                    safe(&item.raw_sha256)
+                                )));
+                            }
+                            for note in &item.notes {
+                                detail_lines.push(Line::from(safe(note)));
+                            }
+                            detail_lines.push(Line::from("Enter 打开 Sector Inspector/Hex"));
                         } else {
                             detail_lines
                                 .push(Line::from(Span::styled("该扇区尚未按需读取。", warning())));
