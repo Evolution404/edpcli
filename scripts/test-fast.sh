@@ -6,4 +6,4 @@ cd "$ROOT"
 
 cargo fmt --all -- --check
 git diff --check
-exec python3 scripts/test-full.py --profile fast "$@"
+exec python3 scripts/test-full.py --profile fast --max-seconds "${EDPCLI_FAST_MAX_SECONDS:-45}" "$@"

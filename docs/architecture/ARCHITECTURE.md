@@ -8,7 +8,7 @@
 
 - `src/cli*.rs`：CLI 参数解析与文本入口；公开命令目录统一由 `src/command_spec.rs` 描述，并供 help/completion 共用。
 - `src/tui/`：交互式前端；制盘、检查、备份、设备工作区分别维护状态/渲染/任务逻辑，不直接实现裸盘安全策略。
-- `src/application/`：CLI/TUI 共用应用服务；制盘按 prepare/commit/export 分离，真实写盘安全事务只存在于这一层。
+- `src/application/`：CLI/TUI 共用应用服务；制盘按 `prepare/commit/export` 分离，`TargetSession` 统一写盘状态转换，`EvidenceSource` 统一物理盘/EDPB 只读证据入口。
 - `src/provision/`：纯内存制盘领域模型与验证器；Plain 与官方 mode0～3 都通过统一 `ProvisionRequest` 进入应用层。
 - `src/protocol/`：LBA0～12、IIR、LCE 的类型化协议模型；`protocol::semantic` 提供跨业务语义，不包含 UI 字段名、颜色或渲染结构。
 - `src/diskio/`：块设备、写事务、备份配置、备份目录和备份创建按职责拆分。
@@ -17,11 +17,11 @@
 
 ## 读写边界
 
-只读路径使用只读设备句柄；`list/info/inspect/backup create/deep` 不进入写盘准备流程。真实写盘必须经过应用层安全服务：系统盘保护、USB 整盘确认、写前备份、卸载/锁卷、重新打开后的身份复核、原子写、同步/读回、失败回滚。
+只读路径使用只读设备句柄；`list/info/inspect/backup create/deep` 不进入写盘准备流程。真实写盘必须经 `TargetSession<ReadOnly> -> TargetSession<PreparedWrite> -> TargetSession<WriteLocked>` 显式状态转换，并保持系统盘保护、USB 整盘确认、写前备份、卸载/锁卷、重新打开后的身份复核、原子写、同步/读回、失败回滚。
 
 CLI 与 TUI 的制盘能力共用同一 `ProvisionRequest::{Official, Plain}` 和 prepare/commit 服务。Plain 是普通 MBR 磁盘目标，不属于官方 mode 编号，也不得映射为 mode4。
 
-TUI 后台任务只返回结构化结果，不直接向终端写输出。进入关键写入阶段后，退出请求延迟到安全收尾完成。
+应用层通过 `WriteEvent`、`BackupReport`、制盘报告和检查工作区返回结构化结果；ANSI/CLI 文本渲染位于前端层。TUI 后台任务只传递结构化结果，不直接向终端写输出；进入关键写入阶段后，退出请求延迟到安全收尾完成。
 
 ## 协议与语义事实源
 
@@ -41,4 +41,4 @@ LBA0～12 的类型化解析器、配置类型轴和跨 LBA 语义位于 `src/pr
 
 ## 验证
 
-日常开发使用 `scripts/test-fast.sh`；合并、发布和大范围重构使用 `python3 scripts/test-full.py --profile full`。Virtual-HIL 独立运行，不混入普通 fast/full。所有提交前执行 `cargo fmt --all` 与 `git diff --check`；协议相关修改还必须通过协议字段、真实样本和文档契约门禁。
+日常开发使用 `scripts/test-fast.sh`，默认总耗时预算 **45 秒**；合并、发布和大范围重构使用 `python3 scripts/test-full.py --profile full`，CI 总耗时预算 **120 秒**。运行器在存在 `sccache` 时自动启用编译缓存并关闭 Cargo 增量编译，缺少缓存程序时自动退回直接 `rustc`。`scripts/test-benchmark.py` 复用正式测试运行器统计最小值/中位数/最大值。Virtual-HIL 独立运行，不混入普通 `fast/full`。所有提交前执行 `cargo fmt --all` 与 `git diff --check`；协议相关修改还必须通过协议字段、真实样本和文档契约门禁。

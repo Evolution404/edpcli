@@ -1027,6 +1027,15 @@ application 返回结构化 `ProvisionReport/BackupReport/InspectReport`，CLI/T
 - 本机 3 次暖缓存基线：`fast` **1.39 / 1.52 / 1.69s**，中位数 **1.52s**；`full` **8.90 / 9.16 / 9.85s**，中位数 **9.16s**；全部 0 失败。
 - 机器可读 JSON 已验证生成，便于后续趋势统计与耗时回归门禁消费。
 
+### R6.7 耗时回归门禁实施状态（2026-09-25）
+
+**COMPLETE。**
+
+- `scripts/test-full.py` 新增 `--max-seconds`，并支持环境变量 `EDPCLI_TEST_MAX_SECONDS`；功能失败优先报告，功能全部通过后才检查总耗时预算。
+- `scripts/test-fast.sh` 默认传入 **45 秒**预算，可用 `EDPCLI_FAST_MAX_SECONDS` 显式覆盖；GitHub Actions 的完整非 HIL 门禁设置 **120 秒**性能预算。该预算只判断性能回归，不是同步命令执行超时。
+- 静态基础设施门禁 **1/1** 通过；负向运行以 **0.001 秒**预算执行时，测试本身全部通过后明确输出 `timing budget exceeded` 并以 **exit 1** 结束，证明门禁实际生效。
+- 正式 `scripts/test-fast.sh` 在默认 45 秒预算下 **10.57s / 0 失败 / exit 0**，当前性能满足门槛。
+
 ---
 
 # 第八部分：完成标准

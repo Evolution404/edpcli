@@ -84,3 +84,19 @@ fn test_profile_benchmark_reuses_repository_runner_and_reports_distribution() {
     assert!(benchmark.contains("--json"));
     assert!(benchmark.contains("[benchmark]"));
 }
+
+#[test]
+fn timing_regression_gate_is_explicit_and_overrideable() {
+    let fast = read("scripts/test-fast.sh");
+    assert!(fast.contains("EDPCLI_FAST_MAX_SECONDS"));
+    assert!(fast.contains("--max-seconds"));
+    assert!(fast.contains("45"));
+
+    let runner = read("scripts/test-full.py");
+    assert!(runner.contains("--max-seconds"));
+    assert!(runner.contains("EDPCLI_TEST_MAX_SECONDS"));
+    assert!(runner.contains("timing budget exceeded"));
+
+    let ci = read(".github/workflows/ci.yml");
+    assert!(ci.contains("EDPCLI_TEST_MAX_SECONDS: \"120\""));
+}

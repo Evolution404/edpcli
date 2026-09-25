@@ -388,6 +388,13 @@ def parse_args() -> argparse.Namespace:
         type=int,
         default=int(os.environ.get("EDPCLI_TEST_BINARY_TIMEOUT_SECS", "180")),
     )
+    max_seconds = os.environ.get("EDPCLI_TEST_MAX_SECONDS")
+    parser.add_argument(
+        "--max-seconds",
+        type=float,
+        default=float(max_seconds) if max_seconds else None,
+        help="fail after a successful run if total profile duration exceeds this budget",
+    )
     return parser.parse_args()
 
 
@@ -397,6 +404,8 @@ def main() -> int:
         raise SystemExit("--workers must be between 1 and 8")
     if args.timeout < 1:
         raise SystemExit("--timeout must be positive")
+    if args.max_seconds is not None and args.max_seconds <= 0:
+        raise SystemExit("--max-seconds must be positive")
 
     env = compiler_env()
     announce_compiler_cache(env)
@@ -447,6 +456,14 @@ def main() -> int:
             f"{result.name} exit={result.returncode}" for result in failures
         )
         annotate_failure(summary)
+        return 1
+    if args.max_seconds is not None and total > args.max_seconds:
+        summary = (
+            "timing budget exceeded: "
+            f"profile={args.profile} duration={total:.2f}s budget={args.max_seconds:.2f}s"
+        )
+        annotate_failure(summary)
+        print(f"[FAIL] {summary}", file=sys.stderr)
         return 1
     return 0
 
