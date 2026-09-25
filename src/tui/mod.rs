@@ -469,6 +469,11 @@ fn dispatch_tui_action(
 ) -> StateEffect {
     use keymap::TuiAction;
 
+    if state.inspect_data().is_some() && action == TuiAction::ViewOrVerify {
+        state.inspect_cycle_mode();
+        return StateEffect::None;
+    }
+
     if let Some(command) = keymap_action_to_nav(action) {
         return dispatch_nav_command(state, tasks, command, backup_dir, viewport_height);
     }
@@ -1268,67 +1273,74 @@ fn run_loop(resume: Option<state::WriteIntent>) -> io::Result<LoopExit> {
                         use state::BackupBatchDeleteStage;
                         match stage {
                             BackupBatchDeleteStage::Planning => {
-                                if key.code == ct_event::KeyCode::Esc {
+                                if keys.map(state::InputMode::Normal, key)
+                                    == Some(keymap::TuiAction::Back)
+                                {
                                     state.set_notice("批量删除计划正在后台生成，请等待完成。");
                                 }
                                 continue;
                             }
                             BackupBatchDeleteStage::Review => {
-                                match key.code {
-                                    ct_event::KeyCode::Enter => {
-                                        state.backup_batch_delete_begin_confirm();
+                                if let Some(action) = keys.map(state::InputMode::Normal, key) {
+                                    match action {
+                                        keymap::TuiAction::Activate => {
+                                            state.backup_batch_delete_begin_confirm();
+                                        }
+                                        keymap::TuiAction::Back => {
+                                            state.close_backup_batch_delete();
+                                        }
+                                        _ => {}
                                     }
-                                    ct_event::KeyCode::Esc => {
-                                        state.close_backup_batch_delete();
-                                    }
-                                    _ => {}
                                 }
                                 continue;
                             }
                             BackupBatchDeleteStage::Confirm => {
-                                match key.code {
-                                    ct_event::KeyCode::Char(ch)
-                                        if !key
-                                            .modifiers
-                                            .contains(ct_event::KeyModifiers::CONTROL) =>
-                                    {
-                                        state.backup_batch_delete_push_confirmation(ch);
-                                    }
-                                    ct_event::KeyCode::Backspace => {
-                                        state.backup_batch_delete_backspace();
-                                    }
-                                    ct_event::KeyCode::Enter => {
-                                        if let Some(plan) =
-                                            state.backup_batch_delete_take_for_execute()
-                                        {
-                                            if let Err(message) = tasks
-                                                .request_backup_batch_delete_execute(
-                                                    plan,
-                                                    backup_dir.clone(),
-                                                )
+                                if let Some(action) = keys.map(state::InputMode::Confirm, key) {
+                                    match action {
+                                        keymap::TuiAction::Text(ch) => {
+                                            state.backup_batch_delete_push_confirmation(ch);
+                                        }
+                                        keymap::TuiAction::Backspace => {
+                                            state.backup_batch_delete_backspace();
+                                        }
+                                        keymap::TuiAction::Submit => {
+                                            if let Some(plan) =
+                                                state.backup_batch_delete_take_for_execute()
                                             {
-                                                state.backup_batch_delete_finish_execute(Err(
-                                                    message.to_string(),
-                                                ));
+                                                if let Err(message) = tasks
+                                                    .request_backup_batch_delete_execute(
+                                                        plan,
+                                                        backup_dir.clone(),
+                                                    )
+                                                {
+                                                    state.backup_batch_delete_finish_execute(Err(
+                                                        message.to_string(),
+                                                    ));
+                                                }
                                             }
                                         }
+                                        keymap::TuiAction::Cancel | keymap::TuiAction::Back => {
+                                            state.close_backup_batch_delete();
+                                        }
+                                        keymap::TuiAction::Confirm => state.set_notice(
+                                            "批量删除仍需精确输入大写 YES 后按 Enter。",
+                                        ),
+                                        _ => {}
                                     }
-                                    ct_event::KeyCode::Esc => {
-                                        state.close_backup_batch_delete();
-                                    }
-                                    _ => {}
                                 }
                                 continue;
                             }
                             BackupBatchDeleteStage::Running => {}
                             BackupBatchDeleteStage::Result => {
-                                if matches!(
-                                    key.code,
-                                    ct_event::KeyCode::Enter | ct_event::KeyCode::Esc
-                                ) {
-                                    state.close_backup_batch_delete();
-                                    continue;
+                                if let Some(action) = keys.map(state::InputMode::Normal, key) {
+                                    if matches!(
+                                        action,
+                                        keymap::TuiAction::Activate | keymap::TuiAction::Back
+                                    ) {
+                                        state.close_backup_batch_delete();
+                                    }
                                 }
+                                continue;
                             }
                         }
                     }
@@ -1336,173 +1348,224 @@ fn run_loop(resume: Option<state::WriteIntent>) -> io::Result<LoopExit> {
                         use state::BackupPruneStage;
                         match stage {
                             BackupPruneStage::Input => {
-                                match key.code {
-                                    ct_event::KeyCode::Char(ch) if ch.is_ascii_digit() => {
-                                        state.backup_prune_push_digit(ch);
+                                if let Some(action) = keys.map(state::InputMode::Insert, key) {
+                                    match action {
+                                        keymap::TuiAction::Text(ch) if ch.is_ascii_digit() => {
+                                            state.backup_prune_push_digit(ch);
+                                        }
+                                        keymap::TuiAction::Backspace => {
+                                            state.backup_prune_backspace()
+                                        }
+                                        keymap::TuiAction::Submit => {
+                                            match state.backup_prune_start_plan() {
+                                                Ok(keep) => {
+                                                    if let Err(message) = tasks
+                                                        .request_backup_prune_plan(
+                                                            backup_dir.clone(),
+                                                            keep,
+                                                        )
+                                                    {
+                                                        state.backup_prune_finish_plan(Err(
+                                                            message.to_string(),
+                                                        ));
+                                                    }
+                                                }
+                                                Err(message) => {
+                                                    if let Some(prune) = state.backup_prune_mut() {
+                                                        prune.message = Some(message);
+                                                    }
+                                                }
+                                            }
+                                        }
+                                        keymap::TuiAction::Back => state.close_backup_prune(),
+                                        _ => {}
                                     }
-                                    ct_event::KeyCode::Backspace => state.backup_prune_backspace(),
-                                    ct_event::KeyCode::Enter => match state
-                                        .backup_prune_start_plan()
-                                    {
-                                        Ok(keep) => {
-                                            if let Err(message) = tasks
-                                                .request_backup_prune_plan(backup_dir.clone(), keep)
-                                            {
-                                                state.backup_prune_finish_plan(Err(
-                                                    message.to_string()
-                                                ));
-                                            }
-                                        }
-                                        Err(message) => {
-                                            if let Some(prune) = state.backup_prune_mut() {
-                                                prune.message = Some(message);
-                                            }
-                                        }
-                                    },
-                                    ct_event::KeyCode::Esc => state.close_backup_prune(),
-                                    _ => {}
                                 }
                                 continue;
                             }
                             BackupPruneStage::Planning => {
-                                if key.code == ct_event::KeyCode::Esc {
+                                if keys.map(state::InputMode::Normal, key)
+                                    == Some(keymap::TuiAction::Back)
+                                {
                                     state.set_notice("清理计划正在后台生成，请等待完成。");
                                 }
                                 continue;
                             }
                             BackupPruneStage::Review => {
-                                match key.code {
-                                    ct_event::KeyCode::Enter => state.backup_prune_begin_confirm(),
-                                    ct_event::KeyCode::Esc => state.close_backup_prune(),
-                                    _ => {}
+                                if let Some(action) = keys.map(state::InputMode::Normal, key) {
+                                    match action {
+                                        keymap::TuiAction::Activate => {
+                                            state.backup_prune_begin_confirm()
+                                        }
+                                        keymap::TuiAction::Back => state.close_backup_prune(),
+                                        _ => {}
+                                    }
                                 }
                                 continue;
                             }
                             BackupPruneStage::Confirm => {
-                                match key.code {
-                                    ct_event::KeyCode::Char(ch)
-                                        if !key
-                                            .modifiers
-                                            .contains(ct_event::KeyModifiers::CONTROL) =>
-                                    {
-                                        state.backup_prune_push_confirmation(ch);
-                                    }
-                                    ct_event::KeyCode::Backspace => state.backup_prune_backspace(),
-                                    ct_event::KeyCode::Enter => {
-                                        if let Some(prepared) =
-                                            state.backup_prune_take_for_execute()
-                                        {
-                                            if let Err(message) = tasks
-                                                .request_backup_prune_execute(
-                                                    prepared,
-                                                    backup_dir.clone(),
-                                                )
+                                if let Some(action) = keys.map(state::InputMode::Confirm, key) {
+                                    match action {
+                                        keymap::TuiAction::Text(ch) => {
+                                            state.backup_prune_push_confirmation(ch);
+                                        }
+                                        keymap::TuiAction::Backspace => {
+                                            state.backup_prune_backspace()
+                                        }
+                                        keymap::TuiAction::Submit => {
+                                            if let Some(prepared) =
+                                                state.backup_prune_take_for_execute()
                                             {
-                                                state.backup_prune_finish_execute(Err(
-                                                    message.to_string()
-                                                ));
+                                                if let Err(message) = tasks
+                                                    .request_backup_prune_execute(
+                                                        prepared,
+                                                        backup_dir.clone(),
+                                                    )
+                                                {
+                                                    state.backup_prune_finish_execute(Err(
+                                                        message.to_string()
+                                                    ));
+                                                }
                                             }
                                         }
+                                        keymap::TuiAction::Cancel | keymap::TuiAction::Back => {
+                                            state.close_backup_prune()
+                                        }
+                                        keymap::TuiAction::Confirm => state.set_notice(
+                                            "备份清理仍需精确输入大写 YES 后按 Enter。",
+                                        ),
+                                        _ => {}
                                     }
-                                    ct_event::KeyCode::Esc => state.close_backup_prune(),
-                                    _ => {}
                                 }
                                 continue;
                             }
                             BackupPruneStage::Running => {}
                             BackupPruneStage::Result => {
-                                if matches!(
-                                    key.code,
-                                    ct_event::KeyCode::Enter | ct_event::KeyCode::Esc
-                                ) {
-                                    state.close_backup_prune();
-                                    continue;
-                                }
-                            }
-                        }
-                    }
-                    if state
-                        .backup_delete()
-                        .is_some_and(|delete| delete.stage == state::WizardStage::Confirm)
-                    {
-                        match key.code {
-                            ct_event::KeyCode::Char(ch)
-                                if !key.modifiers.contains(ct_event::KeyModifiers::CONTROL) =>
-                            {
-                                state.push_backup_delete_confirmation(ch);
-                                continue;
-                            }
-                            ct_event::KeyCode::Backspace => {
-                                state.backspace_backup_delete_confirmation();
-                                continue;
-                            }
-                            ct_event::KeyCode::Enter => {
-                                if let Some((path, expected_sha256)) =
-                                    state.submit_backup_delete_confirmation()
-                                {
-                                    if let Err(message) = tasks.request_backup_delete(
-                                        path,
-                                        expected_sha256,
-                                        backup_dir.clone(),
+                                if let Some(action) = keys.map(state::InputMode::Normal, key) {
+                                    if matches!(
+                                        action,
+                                        keymap::TuiAction::Activate | keymap::TuiAction::Back
                                     ) {
-                                        state.finish_backup_delete(Err(message.to_string()));
+                                        state.close_backup_prune();
                                     }
                                 }
                                 continue;
                             }
-                            ct_event::KeyCode::Esc => {
-                                let _ = state.navigate(NavCommand::Escape, 1);
+                        }
+                    }
+                    if let Some(stage) = state.backup_delete().map(|delete| delete.stage) {
+                        match stage {
+                            state::WizardStage::Confirm => {
+                                if let Some(action) = keys.map(state::InputMode::Confirm, key) {
+                                    match action {
+                                        keymap::TuiAction::Text(ch) => {
+                                            state.push_backup_delete_confirmation(ch);
+                                        }
+                                        keymap::TuiAction::Backspace => {
+                                            state.backspace_backup_delete_confirmation();
+                                        }
+                                        keymap::TuiAction::Submit => {
+                                            if let Some((path, expected_sha256)) =
+                                                state.submit_backup_delete_confirmation()
+                                            {
+                                                if let Err(message) = tasks.request_backup_delete(
+                                                    path,
+                                                    expected_sha256,
+                                                    backup_dir.clone(),
+                                                ) {
+                                                    state.finish_backup_delete(Err(
+                                                        message.to_string()
+                                                    ));
+                                                }
+                                            }
+                                        }
+                                        keymap::TuiAction::Cancel | keymap::TuiAction::Back => {
+                                            let _ = state.navigate(NavCommand::Escape, 1);
+                                        }
+                                        keymap::TuiAction::Confirm => state.set_notice(
+                                            "删除备份仍需精确输入大写 YES 后按 Enter。",
+                                        ),
+                                        _ => {}
+                                    }
+                                }
                                 continue;
                             }
-                            _ => {}
+                            state::WizardStage::Running => {}
+                            state::WizardStage::Result => {
+                                if let Some(action) = keys.map(state::InputMode::Normal, key) {
+                                    if matches!(
+                                        action,
+                                        keymap::TuiAction::Activate | keymap::TuiAction::Back
+                                    ) {
+                                        let _ = state.navigate(NavCommand::Escape, 1);
+                                    }
+                                }
+                                continue;
+                            }
                         }
                     }
 
-                    if state
-                        .wizard()
-                        .is_some_and(|wizard| wizard.stage == state::WizardStage::Confirm)
-                    {
-                        match key.code {
-                            ct_event::KeyCode::Char(ch)
-                                if !key.modifiers.contains(ct_event::KeyModifiers::CONTROL) =>
-                            {
-                                state.push_wizard_confirmation(ch);
-                                continue;
-                            }
-                            ct_event::KeyCode::Backspace => {
-                                state.backspace_wizard_confirmation();
-                                continue;
-                            }
-                            ct_event::KeyCode::Enter => {
-                                if let Some(intent) = state.submit_wizard_confirmation() {
-                                    if !crate::elevate::is_root() {
-                                        return Ok(LoopExit::Elevate(intent));
-                                    }
-                                    if matches!(
-                                        intent.kind,
-                                        state::WriteKind::BackupCreate
-                                            | state::WriteKind::BackupCreateDeep
-                                    ) {
-                                        if let Err(message) =
-                                            tasks.request_backup_create(intent, backup_dir.clone())
-                                        {
-                                            state.finish_write(Err(message.to_string()));
+                    if let Some(stage) = state.wizard().map(|wizard| wizard.stage) {
+                        match stage {
+                            state::WizardStage::Confirm => {
+                                if let Some(action) = keys.map(state::InputMode::Confirm, key) {
+                                    match action {
+                                        keymap::TuiAction::Text(ch) => {
+                                            state.push_wizard_confirmation(ch);
                                         }
-                                    } else {
-                                        if let Err(message) =
-                                            tasks.request_write(intent, backup_dir.clone())
-                                        {
-                                            state.finish_write(Err(message.to_string()));
+                                        keymap::TuiAction::Backspace => {
+                                            state.backspace_wizard_confirmation();
                                         }
+                                        keymap::TuiAction::Submit => {
+                                            if let Some(intent) = state.submit_wizard_confirmation()
+                                            {
+                                                if !crate::elevate::is_root() {
+                                                    return Ok(LoopExit::Elevate(intent));
+                                                }
+                                                if matches!(
+                                                    intent.kind,
+                                                    state::WriteKind::BackupCreate
+                                                        | state::WriteKind::BackupCreateDeep
+                                                ) {
+                                                    if let Err(message) = tasks
+                                                        .request_backup_create(
+                                                            intent,
+                                                            backup_dir.clone(),
+                                                        )
+                                                    {
+                                                        state
+                                                            .finish_write(Err(message.to_string()));
+                                                    }
+                                                } else if let Err(message) =
+                                                    tasks.request_write(intent, backup_dir.clone())
+                                                {
+                                                    state.finish_write(Err(message.to_string()));
+                                                }
+                                            }
+                                        }
+                                        keymap::TuiAction::Cancel | keymap::TuiAction::Back => {
+                                            let _ = state.navigate(NavCommand::Escape, 1);
+                                        }
+                                        keymap::TuiAction::Confirm => state.set_notice(
+                                            "破坏性操作仍需精确输入大写 YES 后按 Enter。",
+                                        ),
+                                        _ => {}
                                     }
                                 }
                                 continue;
                             }
-                            ct_event::KeyCode::Esc => {
-                                let _ = state.navigate(NavCommand::Escape, 1);
+                            state::WizardStage::Running => {}
+                            state::WizardStage::Result => {
+                                if let Some(action) = keys.map(state::InputMode::Normal, key) {
+                                    if matches!(
+                                        action,
+                                        keymap::TuiAction::Activate | keymap::TuiAction::Back
+                                    ) {
+                                        let _ = state.navigate(NavCommand::Escape, 1);
+                                    }
+                                }
                                 continue;
                             }
-                            _ => {}
                         }
                     }
 
@@ -1510,64 +1573,68 @@ fn run_loop(resume: Option<state::WriteIntent>) -> io::Result<LoopExit> {
                         state.input_mode(),
                         state::InputMode::Search | state::InputMode::Command
                     ) {
-                        match key.code {
-                            ct_event::KeyCode::Char(ch)
-                                if !key.modifiers.contains(ct_event::KeyModifiers::CONTROL) =>
-                            {
-                                state.push_input_char(ch);
-                                continue;
-                            }
-                            ct_event::KeyCode::Backspace => {
-                                state.backspace_input();
-                                continue;
-                            }
-                            ct_event::KeyCode::Esc => {
-                                let _ = state.navigate(NavCommand::Escape, 1);
-                                continue;
-                            }
-                            ct_event::KeyCode::Enter => {
-                                if state.input_mode() == state::InputMode::Search {
-                                    state.submit_search();
-                                } else {
-                                    let input = state.take_input();
-                                    state.cancel_input();
-                                    match command::parse_command(&input) {
-                                        Ok(action) => {
-                                            let viewport_height =
-                                                session.terminal.size()?.height.saturating_sub(9)
+                        if let Some(action) = keys.map(state.input_mode(), key) {
+                            match action {
+                                keymap::TuiAction::Text(ch) => {
+                                    state.push_input_char(ch);
+                                }
+                                keymap::TuiAction::Backspace => {
+                                    state.backspace_input();
+                                }
+                                keymap::TuiAction::Back => {
+                                    let _ = state.navigate(NavCommand::Escape, 1);
+                                }
+                                keymap::TuiAction::Submit => {
+                                    if state.input_mode() == state::InputMode::Search {
+                                        state.submit_search();
+                                    } else {
+                                        let input = state.take_input();
+                                        state.cancel_input();
+                                        match command::parse_command(&input) {
+                                            Ok(action) => {
+                                                let viewport_height = session
+                                                    .terminal
+                                                    .size()?
+                                                    .height
+                                                    .saturating_sub(9)
                                                     as usize;
-                                            if action == command::PaletteAction::Provision {
-                                                if state.workspace() != state::Workspace::Devices {
-                                                    let _ = state.navigate(
-                                                        NavCommand::WorkspaceDevices,
+                                                if action == command::PaletteAction::Provision {
+                                                    if state.workspace()
+                                                        != state::Workspace::Devices
+                                                    {
+                                                        let _ = state.navigate(
+                                                            NavCommand::WorkspaceDevices,
+                                                            viewport_height,
+                                                        );
+                                                        state.set_notice(
+                                                            "请在设备页选定 USB 盘后按 Enter 进入制盘。",
+                                                        );
+                                                    } else if let Err(message) =
+                                                        state.begin_provision_for_selected_device()
+                                                    {
+                                                        state.set_notice(message);
+                                                    }
+                                                } else {
+                                                    let effect = dispatch_nav_command(
+                                                        &mut state,
+                                                        &mut tasks,
+                                                        palette_action_to_nav(action),
+                                                        &backup_dir,
                                                         viewport_height,
                                                     );
-                                                    state.set_notice("请在设备页选定 USB 盘后按 Enter 进入制盘。");
-                                                } else if let Err(message) =
-                                                    state.begin_provision_for_selected_device()
-                                                {
-                                                    state.set_notice(message);
-                                                }
-                                            } else {
-                                                let effect = dispatch_nav_command(
-                                                    &mut state,
-                                                    &mut tasks,
-                                                    palette_action_to_nav(action),
-                                                    &backup_dir,
-                                                    viewport_height,
-                                                );
-                                                if effect == StateEffect::ExitRequested {
-                                                    break;
+                                                    if effect == StateEffect::ExitRequested {
+                                                        break;
+                                                    }
                                                 }
                                             }
+                                            Err(message) => state.set_notice(message),
                                         }
-                                        Err(message) => state.set_notice(message),
                                     }
                                 }
-                                continue;
+                                _ => {}
                             }
-                            _ => {}
                         }
+                        continue;
                     }
 
                     if let Some(action) = keys.map(state.input_mode(), key) {

@@ -260,9 +260,9 @@ fn provision_flow_is_hidden_from_tab_cycle_and_explicit_reentry_preserves_state(
     assert_eq!(state.selected_device_disk(), Some(6));
     assert_eq!(state.provision().form.label, "保持当前制盘状态!SAFE6");
 
-    state.navigate(NavCommand::Right, 20);
+    state.navigate(NavCommand::WorkspaceDevices, 20);
     assert_eq!(state.workspace(), Workspace::Devices);
-    state.navigate(NavCommand::Left, 20);
+    state.navigate(NavCommand::WorkspaceBackups, 20);
     assert_eq!(state.workspace(), Workspace::Backups);
     state.navigate(NavCommand::WorkspaceProvision, 20);
     assert_eq!(state.workspace(), Workspace::Provision);

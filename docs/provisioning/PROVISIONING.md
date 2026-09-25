@@ -830,7 +830,7 @@ diskN
 │   ├─ ▶ Data Area     │                              │                       │
 │   └─ ▶ Tail Area     │                              │                       │
 ├──────────────────────┴──────────────────────────────┴───────────────────────┤
-│ o 展开/折叠  Enter查看  g 跳转  / 搜索  Tab面板  ? 帮助  q返回             │
+│ o 展开/折叠  Enter查看  gl 跳转  / 搜索  Tab面板  ? 帮助  q返回            │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -1363,7 +1363,7 @@ Enter          查看 / 进入
 Tab            下一个面板
 Shift+Tab      上一个面板
 
-g              跳转 LBA / offset
+gl             跳转 LBA / offset
 /              搜索
 
 PageUp         上一个 sector
@@ -1372,7 +1372,7 @@ Home           当前 region 开头
 End            当前 region 末尾
 
 ← / →          Hex byte 光标 / 输入框文本光标
-r              Raw / Decode / Mixed
+v              Raw / Decode / Mixed
 ?              当前上下文快捷键帮助
 Esc / q        返回
 ```
@@ -1380,7 +1380,7 @@ Esc / q        返回
 底部状态栏不一次性列出所有快捷键，只显示当前上下文最有用的一组，例如：
 
 ```text
-o 展开  Enter查看  g 跳转  / 搜索  Tab面板  ? 帮助
+o 展开  Enter查看  gl 跳转  / 搜索  Tab面板  ? 帮助
 ```
 
 ### 9.17 分阶段实施顺序
@@ -1543,7 +1543,7 @@ o 展开  Enter查看  g 跳转  / 搜索  Tab面板  ? 帮助
 - 树交互已落地：`j/k` 与上下键移动，`o` 展开/折叠，Enter 查看/进入，Tab 正向 Tree→Overview→Detail、Shift+Tab 反向切换，Esc 返回；selection 通过 `visible_window()` 始终保持在可视窗口内。旧 `AdvancedInspectStage::Form/Result`、`AdvancedInspectForm`、旧 result navigation 与参数表单文案均已清零。
 - viewport virtualization 已落地：每个 lazy extent 独立维护 sector window offset，每页最多 materialize 64 个 Sector，并通过“上一页/下一页”控制行翻窗；200-sector 回归样本验证第一页仅 LBA2048..2111、第二页仅 LBA2112..2175，旧页节点立即退出树，树规模不随分区总容量线性增长。I4 定向门禁：TUI lifecycle 13/13、TUI state 38/38、Inspect workspace 5/5、Inspect scroll 3/3，`cargo check --all-targets` 与 `git diff --check` 通过。
 - Phase I5 已完成：Sector 行 Enter 后通过独立 generation + single-flight worker 按需读取，不把 I/O 放进 TUI state；同一 application backend 新增 Sector Inspector 专用 fail-soft decode，decoder 不适用时仍返回 512B raw 并携带 `decode_error`，CLI `decode` 仍保持严格 fail-closed。
-- Sector Inspector 固定逻辑视图为 32×16B Hex + ASCII，显示 sector-relative offset 与 disk-absolute byte offset，支持 byte cursor（←/→ ±1B、j/k 或 ↑/↓ ±16B）、PageUp/PageDown 跨 Sector且保留 cursor、`r/d/m` 直接切 Raw/Decode/Mixed；小终端仅滚动可视行，不改变 32×16 数据模型。
+- Sector Inspector 固定逻辑视图为 32×16B Hex + ASCII，显示 sector-relative offset 与 disk-absolute byte offset，支持 byte cursor（←/→ ±1B、j/k 或 ↑/↓ ±16B）、PageUp/PageDown 跨 Sector且保留 cursor、`v` 循环 Raw/Decode/Mixed；小终端仅滚动可视行，不改变 32×16 数据模型。
 - 当前 byte 会映射同源 `InspectField`，详情显示 typed value、field type/status、绝对 byte range；无已知 field 时明确显示 Unknown，不推测语义。按 `o` 展开当前 byte bit 与已验证 Field child。metadata LBA0～12 常驻，非 metadata 按需缓存最多 5 个 Sector，避免全盘浏览退化为无界内存增长。
 - I5 专项门禁：application Inspect 12/12、CLI Inspect 6/6、Sector Inspector 2/2、TUI lifecycle 13/13、TUI state 39/39 通过；完整 `cargo fmt --all -- --check`、`cargo check --all-targets`、`cargo test --all-targets`、`git diff --check` 均通过。下一步进入 Phase I6：完成 Hex ↔ Field 双向定位、多行 range、Unknown/Reserved/Preserved 可视语义和 copy/yank。
 - Phase I6 已完成：Hex byte → Field 继续直接使用 canonical `InspectField` 绝对 byte range 反查；树中 Field → Hex 新增反向入口，Enter Field 后直接打开 Sector Inspector、跳到字段起始 byte，并 pin 当前 Field。完整 Field range 使用绝对 byte range 高亮，可跨 16B 行；跨 sector Field 通过 PageUp/PageDown 保留 pin 并在相邻 sector 定位到 range 交集起点，手动移动 byte 后自动退出 pinned Field，恢复 cursor-driven 反查。

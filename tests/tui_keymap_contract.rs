@@ -217,6 +217,15 @@ fn confirm_mode_has_uniform_yes_no_escape_contract_without_weakening_typed_yes()
 }
 
 #[test]
+fn event_loop_does_not_parse_text_or_confirmation_chars_outside_keymap() {
+    let source = include_str!("../src/tui/mod.rs");
+    assert!(
+        !source.contains("ct_event::KeyCode::Char(ch)"),
+        "text/confirmation character handling must go through KeyMapper"
+    );
+}
+
+#[test]
 fn release_events_never_reach_keymap() {
     let event = KeyEvent::new_with_kind(
         KeyCode::Char('x'),

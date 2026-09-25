@@ -79,7 +79,10 @@ fn running_operation_rejects_new_wizards_and_all_navigation() {
         "old.bin".into(),
         "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef".into(),
     ));
-    assert_eq!(state.navigate(NavCommand::Right, 20), StateEffect::None);
+    assert_eq!(
+        state.navigate(NavCommand::WorkspaceBackups, 20),
+        StateEffect::None
+    );
     assert_eq!(state.wizard().expect("original running wizard").disk, 6);
 
     assert_eq!(

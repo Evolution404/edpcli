@@ -63,7 +63,7 @@ fn backup_inspect_rejects_legacy_bin_images() {
 }
 
 #[test]
-fn inspect_overlay_has_vim_lba_navigation_and_hex_mode_switching() {
+fn inspect_overlay_has_vim_lba_navigation_and_v_view_mode_cycle() {
     let mut state = AppState::new();
     state.open_inspect(METADATA_SECTOR_COUNT);
 
@@ -77,12 +77,12 @@ fn inspect_overlay_has_vim_lba_navigation_and_hex_mode_switching() {
     );
 
     assert_eq!(state.inspect_mode(), Some(InspectMode::Fields));
-    state.navigate(NavCommand::Right, 20);
+    state.inspect_cycle_mode();
     assert_eq!(state.inspect_mode(), Some(InspectMode::DecodedHex));
-    state.navigate(NavCommand::Right, 20);
+    state.inspect_cycle_mode();
     assert_eq!(state.inspect_mode(), Some(InspectMode::RawHex));
-    state.navigate(NavCommand::Left, 20);
-    assert_eq!(state.inspect_mode(), Some(InspectMode::DecodedHex));
+    state.inspect_cycle_mode();
+    assert_eq!(state.inspect_mode(), Some(InspectMode::Fields));
 }
 
 fn render_inspect(state: &AppState) -> (String, String) {
@@ -124,7 +124,7 @@ fn inspect_renders_all_tabs_and_moves_highlight_with_mode() {
         "{highlighted}"
     );
 
-    state.navigate(NavCommand::Right, 20);
+    state.inspect_cycle_mode();
     let (text, highlighted) = render_inspect(&state);
     assert!(
         text.contains('字')
@@ -134,7 +134,7 @@ fn inspect_renders_all_tabs_and_moves_highlight_with_mode() {
     );
     assert!(highlighted.contains("Decoded Hex"), "{highlighted}");
 
-    state.navigate(NavCommand::Right, 20);
+    state.inspect_cycle_mode();
     let (text, highlighted) = render_inspect(&state);
     assert!(
         text.contains('字')

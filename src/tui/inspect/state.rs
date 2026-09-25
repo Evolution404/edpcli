@@ -1377,6 +1377,17 @@ impl AppState {
         self.inspect.as_ref().map(|inspect| inspect.mode)
     }
 
+    pub fn inspect_cycle_mode(&mut self) {
+        if let Some(inspect) = self.inspect.as_mut() {
+            inspect.mode = match inspect.mode {
+                InspectMode::Fields => InspectMode::DecodedHex,
+                InspectMode::DecodedHex => InspectMode::RawHex,
+                InspectMode::RawHex => InspectMode::Fields,
+            };
+            inspect.scroll = 0;
+        }
+    }
+
     pub fn inspect_scroll(&self) -> Option<usize> {
         self.inspect.as_ref().map(|inspect| inspect.scroll)
     }

@@ -60,7 +60,7 @@ fn switching_to_backups_pins_the_selected_device() {
     state.navigate(NavCommand::Down, 20);
     assert_eq!(state.selected_device_disk(), Some(7));
 
-    state.navigate(NavCommand::Right, 20);
+    state.navigate(NavCommand::WorkspaceBackups, 20);
     assert_eq!(state.selected_device_disk(), Some(7));
 }
 
@@ -69,7 +69,7 @@ fn selected_backup_path_is_stable_for_restore_intent() {
     let mut state = AppState::new();
     state.replace_devices(vec![device(7)]);
     state.replace_backups(vec![backup(1, "one.bin"), backup(2, "two.bin")]);
-    state.navigate(NavCommand::Right, 20);
+    state.navigate(NavCommand::WorkspaceBackups, 20);
     state.navigate(NavCommand::Down, 20);
 
     assert_eq!(state.selected_device_disk(), Some(7));
@@ -85,7 +85,7 @@ fn refresh_preserves_targets_by_stable_identity_after_reordering() {
     assert_eq!(state.selected_device_disk(), Some(7));
 
     state.replace_backups(vec![backup(1, "one.bin"), backup(2, "two.bin")]);
-    state.navigate(NavCommand::Right, 20);
+    state.navigate(NavCommand::WorkspaceBackups, 20);
     state.navigate(NavCommand::Down, 20);
     state.replace_backups(vec![backup(2, "two.bin"), backup(1, "one.bin")]);
     assert_eq!(state.selected_backup_path(), Some(PathBuf::from("two.bin")));
@@ -96,7 +96,7 @@ fn filtered_backup_selection_maps_to_the_real_backup_for_actions() {
     let mut state = AppState::new();
     state.replace_devices(vec![device(7)]);
     state.replace_backups(vec![backup(1, "one.bin"), backup(2, "two.bin")]);
-    state.navigate(NavCommand::Right, 20);
+    state.navigate(NavCommand::WorkspaceBackups, 20);
     state.navigate(NavCommand::Search, 20);
     for ch in "two".chars() {
         state.push_input_char(ch);
@@ -120,7 +120,7 @@ fn filtered_backup_workspace_renders_only_matching_rows() {
     let mut two = backup(2, "two.bin");
     two.user = Some("Bob".into());
     state.replace_backups(vec![one, two]);
-    state.navigate(NavCommand::Right, 20);
+    state.navigate(NavCommand::WorkspaceBackups, 20);
     state.navigate(NavCommand::Search, 20);
     for ch in "bob".chars() {
         state.push_input_char(ch);
@@ -156,7 +156,7 @@ fn backup_multi_selection_is_path_pinned_and_reconciles_after_refresh() {
         backup(2, "two.bin"),
         backup(3, "three.bin"),
     ]);
-    state.navigate(NavCommand::Right, 20);
+    state.navigate(NavCommand::WorkspaceBackups, 20);
 
     state.toggle_selected_backup();
     state.navigate(NavCommand::Down, 20);
@@ -212,6 +212,6 @@ fn switching_to_backups_pins_the_real_device_selected_through_a_filter() {
     assert_eq!(state.item_count(), 1);
     assert_eq!(state.selected_device_disk(), Some(7));
 
-    state.navigate(NavCommand::Right, 20);
+    state.navigate(NavCommand::WorkspaceBackups, 20);
     assert_eq!(state.selected_device_disk(), Some(7));
 }

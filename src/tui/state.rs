@@ -76,8 +76,6 @@ pub enum InputMode {
 pub enum NavCommand {
     Up,
     Down,
-    Left,
-    Right,
     Top,
     Bottom,
     HalfPageDown,
@@ -486,7 +484,7 @@ impl AppState {
             self.set_notice("关键操作仍在执行，完成前不能启动其他任务。".to_string());
             return false;
         }
-        self.input_mode = InputMode::Normal;
+        self.input_mode = InputMode::Confirm;
         self.wizard = Some(WizardState {
             stage: WizardStage::Confirm,
             kind,
@@ -542,6 +540,7 @@ impl AppState {
         };
         wizard.stage = WizardStage::Running;
         wizard.message = Some("关键写盘阶段进行中，不可中断".to_string());
+        self.input_mode = InputMode::Normal;
         self.critical_operation = true;
         Some(intent)
     }
@@ -1014,10 +1013,12 @@ impl AppState {
             }
             if self.wizard.is_some() {
                 self.wizard = None;
+                self.input_mode = InputMode::Normal;
                 return StateEffect::None;
             }
             if self.backup_delete.is_some() {
                 self.backup_delete = None;
+                self.input_mode = InputMode::Normal;
                 return StateEffect::None;
             }
             if self.input_mode != InputMode::Normal {
@@ -1065,22 +1066,6 @@ impl AppState {
                 }
                 NavCommand::HalfPageUp => {
                     inspect.scroll = inspect.scroll.saturating_sub((viewport_height / 2).max(1));
-                }
-                NavCommand::Left => {
-                    inspect.mode = match inspect.mode {
-                        InspectMode::Fields => InspectMode::Fields,
-                        InspectMode::DecodedHex => InspectMode::Fields,
-                        InspectMode::RawHex => InspectMode::DecodedHex,
-                    };
-                    inspect.scroll = 0;
-                }
-                NavCommand::Right => {
-                    inspect.mode = match inspect.mode {
-                        InspectMode::Fields => InspectMode::DecodedHex,
-                        InspectMode::DecodedHex => InspectMode::RawHex,
-                        InspectMode::RawHex => InspectMode::RawHex,
-                    };
-                    inspect.scroll = 0;
                 }
                 NavCommand::NextWorkspace
                 | NavCommand::PreviousWorkspace
@@ -1166,22 +1151,6 @@ impl AppState {
                 self.input_mode = InputMode::Command;
             }
             NavCommand::Help => self.input_mode = InputMode::Help,
-            NavCommand::Left => {
-                let target = match self.workspace {
-                    Workspace::Devices => Workspace::Backups,
-                    Workspace::Backups => Workspace::Devices,
-                    Workspace::Provision => Workspace::Backups,
-                };
-                self.switch_workspace(target);
-            }
-            NavCommand::Right => {
-                let target = match self.workspace {
-                    Workspace::Devices => Workspace::Backups,
-                    Workspace::Backups => Workspace::Devices,
-                    Workspace::Provision => Workspace::Devices,
-                };
-                self.switch_workspace(target);
-            }
             NavCommand::Refresh
             | NavCommand::BeginRestore
             | NavCommand::BeginBackupCreate

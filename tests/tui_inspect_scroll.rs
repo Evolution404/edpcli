@@ -4,7 +4,7 @@ use edpcli::tui::state::{AppState, InspectMode, NavCommand};
 fn inspect_hex_half_page_keys_scroll_content_without_changing_lba() {
     let mut state = AppState::new();
     state.open_inspect(14);
-    state.navigate(NavCommand::Right, 20);
+    state.inspect_cycle_mode();
     assert_eq!(state.inspect_mode(), Some(InspectMode::DecodedHex));
 
     let lba = state.inspect_selected_lba();
@@ -20,7 +20,7 @@ fn inspect_hex_half_page_keys_scroll_content_without_changing_lba() {
 fn changing_lba_or_hex_mode_resets_inspect_scroll() {
     let mut state = AppState::new();
     state.open_inspect(14);
-    state.navigate(NavCommand::Right, 20);
+    state.inspect_cycle_mode();
     state.navigate(NavCommand::HalfPageDown, 20);
     assert!(state.inspect_scroll().unwrap_or_default() > 0);
 
@@ -29,7 +29,7 @@ fn changing_lba_or_hex_mode_resets_inspect_scroll() {
     assert_eq!(state.inspect_scroll(), Some(0));
 
     state.navigate(NavCommand::HalfPageDown, 20);
-    state.navigate(NavCommand::Right, 20);
+    state.inspect_cycle_mode();
     assert_eq!(state.inspect_mode(), Some(InspectMode::RawHex));
     assert_eq!(state.inspect_scroll(), Some(0));
 }

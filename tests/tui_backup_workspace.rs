@@ -16,19 +16,14 @@ fn backup_workspace_uses_one_based_global_selector_indices() {
 }
 
 #[test]
-fn vim_horizontal_navigation_switches_workspaces() {
-    let mut state = AppState::new();
-    assert_eq!(state.workspace(), Workspace::Devices);
-
-    state.navigate(NavCommand::Right, 20);
-    assert_eq!(state.workspace(), Workspace::Backups);
-
-    state.navigate(NavCommand::Left, 20);
-    assert_eq!(state.workspace(), Workspace::Devices);
+fn legacy_horizontal_workspace_navigation_is_removed_from_state_commands() {
+    let state_source = include_str!("../src/tui/state.rs");
+    assert!(!state_source.contains("NavCommand::Left"));
+    assert!(!state_source.contains("NavCommand::Right"));
 }
 
 #[test]
-fn tab_navigation_switches_workspaces_without_removing_vim_navigation() {
+fn workspace_navigation_uses_explicit_gt_style_commands() {
     let mut state = AppState::new();
     assert_eq!(state.workspace(), Workspace::Devices);
     state.navigate(NavCommand::NextWorkspace, 20);

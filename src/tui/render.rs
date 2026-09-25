@@ -692,7 +692,7 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
             BackupPruneStage::Result => "Enter / Esc 关闭".to_string(),
         }
     } else if state.inspect_data().is_some() {
-        "↑/↓/j/k LBA  ·  ←/→ 视图  ·  / 搜索  ·  Esc 返回".to_string()
+        "j/k LBA  ·  v 循环 Fields/Decode/Raw  ·  / 搜索  ·  Esc/q 返回".to_string()
     } else {
         match state.workspace() {
             Workspace::Devices => {
@@ -732,7 +732,7 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
                 ProvisionStage::Form => "j/k 字段 · h/l 或 Space 切换 · p 预览 · gt/gT 工作区 · Esc 返回".to_string(),
                 ProvisionStage::Planning => "正在生成只读计划…".to_string(),
                 ProvisionStage::Review => {
-                    "Enter 最终确认  ·  E 导出镜像  ·  Esc 返回修改".to_string()
+                    "Enter 最终确认  ·  e 导出镜像  ·  Esc 返回修改".to_string()
                 }
                 ProvisionStage::ExportPath => "输入导出路径  ·  Enter 导出  ·  Esc 返回计划".to_string(),
                 ProvisionStage::Exporting => "镜像正在后台导出…".to_string(),

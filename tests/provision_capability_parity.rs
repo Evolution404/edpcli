@@ -65,6 +65,6 @@ fn plain_export_is_available_in_tui_review_flow() {
         !state.contains("ProvisionPrepared::Plain(_) => return None"),
         "Plain export must not be blocked by TUI state"
     );
-    assert!(render.contains("E 导出镜像"));
-    assert!(!render.contains("E 导出镜像（新盘计划）"));
+    assert!(render.contains("e 导出镜像"));
+    assert!(!render.contains("e 导出镜像（新盘计划）"));
 }
