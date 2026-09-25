@@ -1,5 +1,13 @@
 use super::*;
 
+type ProvisionCapacityLimit = (
+    crate::provision::PartitionRole,
+    u64,
+    u64,
+    Option<(crate::provision::PartitionRole, u64)>,
+    u64,
+);
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ProvisionKind {
     Mode0,
@@ -1545,18 +1553,7 @@ impl AppState {
         }
     }
 
-    fn provision_selected_capacity_limit(
-        &self,
-    ) -> Result<
-        Option<(
-            crate::provision::PartitionRole,
-            u64,
-            u64,
-            Option<(crate::provision::PartitionRole, u64)>,
-            u64,
-        )>,
-        String,
-    > {
+    fn provision_selected_capacity_limit(&self) -> Result<Option<ProvisionCapacityLimit>, String> {
         use crate::provision::PartitionRole;
 
         let Some(role) = self.provision_selected_partition_role() else {

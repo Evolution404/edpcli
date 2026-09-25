@@ -274,7 +274,7 @@ impl AppState {
             }
         }
 
-        fn page_row(
+        struct PageRowSpec {
             id: String,
             label: String,
             depth: usize,
@@ -284,21 +284,23 @@ impl AppState {
             extent_id: String,
             offset: u64,
             target_id: String,
-        ) -> AdvancedInspectTreeRow {
+        }
+
+        fn page_row(spec: PageRowSpec) -> AdvancedInspectTreeRow {
             AdvancedInspectTreeRow {
-                id,
-                label,
-                depth,
+                id: spec.id,
+                label: spec.label,
+                depth: spec.depth,
                 kind: crate::application::inspect_tree::InspectNodeKind::Group,
-                range,
-                decoder,
-                status,
+                range: spec.range,
+                decoder: spec.decoder,
+                status: spec.status,
                 expandable: false,
                 expanded: false,
                 action: AdvancedInspectTreeAction::SetLazyOffset {
-                    extent_id,
-                    offset,
-                    target_id,
+                    extent_id: spec.extent_id,
+                    offset: spec.offset,
+                    target_id: spec.target_id,
                 },
             }
         }
@@ -366,20 +368,20 @@ impl AppState {
                     if offset > 0 {
                         let previous_offset = offset.saturating_sub(page);
                         let previous_lba = start_lba.saturating_add(previous_offset);
-                        rows.push(page_row(
-                            format!("{row_id}/page.prev.{offset}"),
-                            format!("← 上一页 · 从 LBA{previous_lba}"),
-                            depth + 1,
-                            crate::application::inspect_tree::InspectNodeRange::sectors(
+                        rows.push(page_row(PageRowSpec {
+                            id: format!("{row_id}/page.prev.{offset}"),
+                            label: format!("← 上一页 · 从 LBA{previous_lba}"),
+                            depth: depth + 1,
+                            range: crate::application::inspect_tree::InspectNodeRange::sectors(
                                 previous_lba,
                                 page.min(*sector_count - previous_offset),
                             ),
-                            node.decoder,
-                            node.status,
-                            row_id.clone(),
-                            previous_offset,
-                            format!("{row_id}/sector.{previous_lba}"),
-                        ));
+                            decoder: node.decoder,
+                            status: node.status,
+                            extent_id: row_id.clone(),
+                            offset: previous_offset,
+                            target_id: format!("{row_id}/sector.{previous_lba}"),
+                        }));
                     }
 
                     let children = node.materialize_sector_page(offset, SECTOR_PAGE);
@@ -416,20 +418,20 @@ impl AppState {
                     let next_offset = offset.saturating_add(materialized_count);
                     if next_offset < *sector_count {
                         let next_lba = start_lba.saturating_add(next_offset);
-                        rows.push(page_row(
-                            format!("{row_id}/page.next.{next_offset}"),
-                            format!("下一页 → · 从 LBA{next_lba}"),
-                            depth + 1,
-                            crate::application::inspect_tree::InspectNodeRange::sectors(
+                        rows.push(page_row(PageRowSpec {
+                            id: format!("{row_id}/page.next.{next_offset}"),
+                            label: format!("下一页 → · 从 LBA{next_lba}"),
+                            depth: depth + 1,
+                            range: crate::application::inspect_tree::InspectNodeRange::sectors(
                                 next_lba,
                                 page.min(*sector_count - next_offset),
                             ),
-                            node.decoder,
-                            node.status,
-                            row_id.clone(),
-                            next_offset,
-                            format!("{row_id}/sector.{next_lba}"),
-                        ));
+                            decoder: node.decoder,
+                            status: node.status,
+                            extent_id: row_id.clone(),
+                            offset: next_offset,
+                            target_id: format!("{row_id}/sector.{next_lba}"),
+                        }));
                     }
                 }
             }

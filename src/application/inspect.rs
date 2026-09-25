@@ -110,6 +110,10 @@ impl AbsoluteByteRange {
         self.end_exclusive - self.start
     }
 
+    pub fn is_empty(self) -> bool {
+        self.start == self.end_exclusive
+    }
+
     pub fn start_lba(self) -> u64 {
         self.start / SECTOR as u64
     }

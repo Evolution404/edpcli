@@ -743,11 +743,14 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
                     "Tab/Shift-Tab/h/l/←/→ 页面  ·  ↑/↓/j/k 选择方案  ·  Enter 打开  ·  r 刷新目标  ·  :provision 直达  ·  ? 帮助  ·  q 退出".to_string()
                 }
                 ProvisionStage::Form if state.provision_selected_field_is_editable() => {
-                    let unit_key = state
+                    let unit_key = if state
                         .provision_field_hint(state.provision().field_selected)
                         .is_some_and(|hint| hint.starts_with("Space 切换 MiB / GiB / sector"))
-                        .then_some(" · Space 单位 · f 填满")
-                        .unwrap_or("");
+                    {
+                        " · Space 单位 · f 填满"
+                    } else {
+                        ""
+                    };
                     format!("↑/↓ 字段 · ←/→ 光标 · Home/End 首尾 · 输入/Backspace 编辑{unit_key} · Tab/Shift-Tab 页面 · Enter 预览 · Esc 返回")
                 }
                 ProvisionStage::Form => "↑/↓ 字段 · Space 切换 · Tab/Shift-Tab/←/→ 页面 · Enter 预览 · Esc 返回".to_string(),

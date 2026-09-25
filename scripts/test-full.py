@@ -23,6 +23,13 @@ from typing import Iterable
 
 ROOT = Path(__file__).resolve().parents[1]
 
+def configure_console_encoding() -> None:
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is not None:
+            reconfigure(encoding="utf-8", errors="replace")
+
+
 ALL_SUITES = (
     "cli_suite",
     "backup_suite",
@@ -399,6 +406,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> int:
+    configure_console_encoding()
     args = parse_args()
     if args.workers < 1 or args.workers > 8:
         raise SystemExit("--workers must be between 1 and 8")

@@ -854,10 +854,10 @@ fn run_loop(resume: Option<state::WriteIntent>) -> io::Result<LoopExit> {
                                     {
                                         state.advanced_inspect_scroll_detail(10);
                                     }
-                                    ct_event::KeyCode::Esc => {
-                                        if !state.advanced_inspect_close_sector() {
-                                            state.close_advanced_inspect();
-                                        }
+                                    ct_event::KeyCode::Esc
+                                        if !state.advanced_inspect_close_sector() =>
+                                    {
+                                        state.close_advanced_inspect();
                                     }
                                     _ => {}
                                 }
@@ -1063,7 +1063,7 @@ fn run_loop(resume: Option<state::WriteIntent>) -> io::Result<LoopExit> {
                                         }
                                         match state.provision_request() {
                                             Ok(request) => {
-                                                let request = crate::application::provision::ProvisionRequest::Official(request);
+                                                let request = crate::application::provision::ProvisionRequest::Official(Box::new(request));
                                                 state.provision_set_planning();
                                                 if let Err(message) =
                                                     tasks.request_provision_plan(disk, request)

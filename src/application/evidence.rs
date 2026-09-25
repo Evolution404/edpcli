@@ -120,7 +120,7 @@ impl SectorReader for BackupSectorReader {
 
 enum EvidenceReader {
     Disk(FileDev),
-    Backup(BackupSectorReader),
+    Backup(Box<BackupSectorReader>),
 }
 
 pub struct EvidenceSource {
@@ -160,12 +160,12 @@ impl EvidenceSource {
             total_sectors,
             protocol: protocol.clone(),
             identity,
-            reader: EvidenceReader::Backup(BackupSectorReader {
+            reader: EvidenceReader::Backup(Box::new(BackupSectorReader {
                 path: path.to_path_buf(),
                 manifest,
                 protocol,
                 cache: BTreeMap::new(),
-            }),
+            })),
         })
     }
 

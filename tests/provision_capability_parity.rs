@@ -50,7 +50,7 @@ fn plain_is_a_first_class_target_and_not_mode4() {
     assert!(!args.contains(r#""4" => Ok"#));
 
     assert!(application.contains("enum ProvisionRequest"));
-    assert!(application.contains("Official(OfficialProvisionRequest)"));
+    assert!(application.contains("Official(Box<OfficialProvisionRequest>)"));
     assert!(application.contains("Plain(PlainProvisionRequest)"));
     assert!(application.contains("enum PreparedProvision"));
     assert!(tui_state.contains("./edp-plain.img"));

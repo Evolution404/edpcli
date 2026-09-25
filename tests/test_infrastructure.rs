@@ -65,6 +65,8 @@ fn compiler_cache_is_optional_locally_and_pinned_in_ci() {
     assert!(runner.contains("RUSTC_WRAPPER"));
     assert!(runner.contains("CARGO_INCREMENTAL"));
     assert!(runner.contains("[cache] sccache"));
+    assert!(runner.contains("configure_console_encoding"));
+    assert!(runner.contains("encoding=\"utf-8\""));
 
     let ci = read(".github/workflows/ci.yml");
     assert!(ci.contains("mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba"));

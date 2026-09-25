@@ -107,9 +107,15 @@ pub struct ProvisionNewOpts {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ProvisionAction {
-    Plan(ProvisionNewOpts),
-    Image { opts: ProvisionNewOpts, out: String },
-    Write { opts: ProvisionNewOpts, yes: bool },
+    Plan(Box<ProvisionNewOpts>),
+    Image {
+        opts: Box<ProvisionNewOpts>,
+        out: String,
+    },
+    Write {
+        opts: Box<ProvisionNewOpts>,
+        yes: bool,
+    },
 }
 
 pub enum Parsed {
@@ -1352,20 +1358,26 @@ pub fn parse_args(argv: &[String]) -> Result<Parsed, String> {
                             if out.is_some() || yes {
                                 return Err("错误: provision plan 不接受 --out 或 --yes".into());
                             }
-                            Ok(Parsed::Provision(ProvisionAction::Plan(opts)))
+                            Ok(Parsed::Provision(ProvisionAction::Plan(Box::new(opts))))
                         }
                         "image" => {
                             if yes {
                                 return Err("错误: provision image 不接受 --yes".into());
                             }
                             let out = out.ok_or("错误: provision image 必须指定 --out FILE")?;
-                            Ok(Parsed::Provision(ProvisionAction::Image { opts, out }))
+                            Ok(Parsed::Provision(ProvisionAction::Image {
+                                opts: Box::new(opts),
+                                out,
+                            }))
                         }
                         "write" => {
                             if out.is_some() {
                                 return Err("错误: provision write 不接受 --out".into());
                             }
-                            Ok(Parsed::Provision(ProvisionAction::Write { opts, yes }))
+                            Ok(Parsed::Provision(ProvisionAction::Write {
+                                opts: Box::new(opts),
+                                yes,
+                            }))
                         }
                         _ => unreachable!(),
                     }

@@ -162,7 +162,7 @@ impl PlainProvisionRequest {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ProvisionRequest {
-    Official(OfficialProvisionRequest),
+    Official(Box<OfficialProvisionRequest>),
     Plain(PlainProvisionRequest),
 }
 

@@ -200,7 +200,7 @@ fn provision_request(opts: &ProvisionNewOpts) -> crate::application::provision::
             )
         }
         crate::provision::ProvisionTarget::Official(_) => {
-            crate::application::provision::ProvisionRequest::Official(
+            crate::application::provision::ProvisionRequest::Official(Box::new(
                 crate::application::provision::OfficialProvisionRequest {
                     target: opts.target,
                     boot_start_lba: opts.boot_start_lba,
@@ -234,7 +234,7 @@ fn provision_request(opts: &ProvisionNewOpts) -> crate::application::provision::
                     max_share_password_errors: opts.max_share_password_errors,
                     max_encrypt_password_errors: opts.max_encrypt_password_errors,
                 },
-            )
+            ))
         }
     }
 }
