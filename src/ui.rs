@@ -86,6 +86,64 @@ pub fn magenta(s: &str) -> String {
     wrap("35", s)
 }
 
+pub fn render_write_event(event: &crate::application::WriteEvent) -> String {
+    use crate::application::WriteEvent;
+
+    match event {
+        WriteEvent::BackupCreated { path } => format!("{}  {}\n", green("备份"), path.display()),
+        WriteEvent::BackupCreatedIsNopwd => format!(
+            "{}\n",
+            yellow("注意: 本份备份为【免密状态】快照 — 还原它不会回到加密原盘。")
+        ),
+        WriteEvent::RestoreMatchesHeader {
+            disk,
+            onlyid,
+            count,
+        } => format!("disk{} · onlyid={} 匹配备份 {} 个:\n", disk, onlyid, count),
+        WriteEvent::RestoreMatchRow {
+            index,
+            time,
+            is_nopwd,
+            file_name,
+        } => format!(
+            "  [{}] {}   {}   {}\n",
+            index,
+            time,
+            if *is_nopwd {
+                "免密状态"
+            } else {
+                "加密原盘"
+            },
+            file_name
+        ),
+        WriteEvent::RestoreSelectionRetry { message } => format!("{}\n", yellow(message)),
+        WriteEvent::BackupShaVerified { digest } => {
+            format!("{}  {}\n", green("SHA-256 校验通过"), digest)
+        }
+        WriteEvent::RestoreSnapshotNopwdWarning => format!(
+            "{}\n",
+            yellow("注意: 该备份为【免密状态】快照 — 还原后仍是免密盘, 不会回到加密原盘。")
+        ),
+        WriteEvent::RestoreDryRunNotice { path, disk } => format!(
+            "{}\n",
+            dim(&format!(
+                "[dry-run] 将还原 {} → disk{} LBA0-12 ({}B) — 未写入(免密快照不作还原)。",
+                path.display(),
+                disk,
+                crate::common::METADATA_IMAGE_LEN
+            ))
+        ),
+        WriteEvent::RestoreTargetHeader { path } => format!(
+            "{}  {}\n",
+            bold("还原"),
+            truncate_mid(&path.display().to_string(), 64)
+        ),
+        WriteEvent::RestoreWriteCompleted => {
+            format!("{}\n", green("已还原, 读回校验通过。请拔出重插。"))
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Align {
     Left,

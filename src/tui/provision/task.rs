@@ -34,7 +34,6 @@ impl TaskHub {
                     fn confirm_yes(&mut self, _msg: &str) -> bool {
                         true
                     }
-                    fn output(&mut self, _msg: &str) {}
                 }
 
                 let mut prompt = ProvisionBackupPrompter;

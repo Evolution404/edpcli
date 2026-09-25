@@ -26,18 +26,12 @@ use crate::sysinfo::{CmdRunner, ReadProbeCache};
 pub trait Prompter {
     fn prompt_line(&mut self, msg: &str) -> String;
     fn confirm_yes(&mut self, msg: &str) -> bool;
-
-    /// 类型化进度事件。默认实现按 CLI 文本契约渲染后经 `output` 输出；
-    /// 交互前端覆写以获得结构化阶段。
-    fn write_event(&mut self, event: WriteEvent) {
-        self.output(&write::render_event_text(&event));
+    fn confirm_write_yes(&mut self, msg: &str) -> bool {
+        self.confirm_yes(msg)
     }
 
-    fn output(&mut self, msg: &str) {
-        let mut stdout = std::io::stdout();
-        let _ = std::io::Write::write_all(&mut stdout, msg.as_bytes());
-        let _ = std::io::Write::flush(&mut stdout);
-    }
+    /// UI-neutral typed progress event. Frontends decide how to render or store it.
+    fn write_event(&mut self, _event: WriteEvent) {}
 }
 
 /// Build the device-dashboard model using the same read-only probing path for every frontend.

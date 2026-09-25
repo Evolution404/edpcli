@@ -50,6 +50,13 @@ impl Prompter for StdPrompter {
     fn confirm_yes(&mut self, msg: &str) -> bool {
         self.prompt_line(msg).trim() == "YES"
     }
+    fn confirm_write_yes(&mut self, msg: &str) -> bool {
+        self.prompt_line(&crate::ui::bold(msg)).trim() == "YES"
+    }
+    fn write_event(&mut self, event: crate::application::WriteEvent) {
+        print!("{}", crate::ui::render_write_event(&event));
+        let _ = io::stdout().flush();
+    }
 }
 
 /// --yes: 一切确认自动通过。
@@ -61,6 +68,12 @@ impl<P: Prompter> Prompter for AlwaysYes<P> {
     }
     fn confirm_yes(&mut self, _msg: &str) -> bool {
         true
+    }
+    fn confirm_write_yes(&mut self, _msg: &str) -> bool {
+        true
+    }
+    fn write_event(&mut self, event: crate::application::WriteEvent) {
+        self.0.write_event(event);
     }
 }
 

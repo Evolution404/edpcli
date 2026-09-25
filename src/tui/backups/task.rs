@@ -249,9 +249,6 @@ impl TaskHub {
                             event,
                         });
                     }
-
-                    // 写流程只允许经 write_event 上报；兜底丢弃，防止文本直接写进备用屏。
-                    fn output(&mut self, _msg: &str) {}
                 }
 
                 let runner = SysRunner;

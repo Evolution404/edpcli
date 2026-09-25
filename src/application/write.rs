@@ -19,9 +19,8 @@ pub use super::Prompter;
 
 const OPEN_WAIT: std::time::Duration = std::time::Duration::from_secs(10);
 
-/// 写盘流程的类型化进度阶段。每个变体对应旧版一处文本输出；CLI 文本契约由
-/// `render_event_text` 逐字节复刻(含 ui:: 样式与换行位置)，交互确认(prompt_line/
-/// confirm_yes)不属于进度，仍留在 Prompter。
+/// UI-neutral typed progress events emitted by backup/restore application flows.
+/// Frontends own text, ANSI and TUI presentation; interactive confirmation remains on `Prompter`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum WriteEvent {
     BackupCreated {
@@ -56,68 +55,10 @@ pub enum WriteEvent {
     RestoreWriteCompleted,
 }
 
-/// 逐字节复刻旧 output!/outputln! 的文本(含样式与换行位置)。CLI 与测试黄金基线共用。
-pub fn render_event_text(event: &WriteEvent) -> String {
-    match event {
-        WriteEvent::BackupCreated { path } => {
-            format!("{}  {}\n", crate::ui::green("备份"), path.display())
-        }
-        WriteEvent::BackupCreatedIsNopwd => format!(
-            "{}\n",
-            crate::ui::yellow("注意: 本份备份为【免密状态】快照 — 还原它不会回到加密原盘。")
-        ),
-        WriteEvent::RestoreMatchesHeader {
-            disk,
-            onlyid,
-            count,
-        } => format!("disk{} · onlyid={} 匹配备份 {} 个:\n", disk, onlyid, count),
-        WriteEvent::RestoreMatchRow {
-            index,
-            time,
-            is_nopwd,
-            file_name,
-        } => format!(
-            "  [{}] {}   {}   {}\n",
-            index,
-            time,
-            if *is_nopwd {
-                "免密状态"
-            } else {
-                "加密原盘"
-            },
-            file_name
-        ),
-        WriteEvent::RestoreSelectionRetry { message } => {
-            format!("{}\n", crate::ui::yellow(message))
-        }
-        WriteEvent::BackupShaVerified { digest } => {
-            format!("{}  {}\n", crate::ui::green("SHA-256 校验通过"), digest)
-        }
-        WriteEvent::RestoreSnapshotNopwdWarning => format!(
-            "{}\n",
-            crate::ui::yellow(
-                "注意: 该备份为【免密状态】快照 — 还原后仍是免密盘, 不会回到加密原盘。"
-            )
-        ),
-        WriteEvent::RestoreDryRunNotice { path, disk } => format!(
-            "{}\n",
-            crate::ui::dim(&format!(
-                "[dry-run] 将还原 {} → disk{} LBA0-12 ({}B) — 未写入(免密快照不作还原)。",
-                path.display(),
-                disk,
-                METADATA_IMAGE_LEN
-            ))
-        ),
-        WriteEvent::RestoreTargetHeader { path } => format!(
-            "{}  {}\n",
-            crate::ui::bold("还原"),
-            crate::ui::truncate_mid(&path.display().to_string(), 64)
-        ),
-        WriteEvent::RestoreWriteCompleted => format!(
-            "{}\n",
-            crate::ui::green("已还原, 读回校验通过。请拔出重插。")
-        ),
-    }
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BackupReport {
+    pub path: PathBuf,
+    pub is_nopwd: bool,
 }
 
 pub struct Ctx<'a> {
@@ -282,7 +223,7 @@ pub fn backup_create_flow(
     disk: u32,
     ctx: &mut Ctx,
     dev: &mut dyn SectorDev,
-) -> EdpCliResult<(PathBuf, bool)> {
+) -> EdpCliResult<BackupReport> {
     backup_create_level_flow(disk, ctx, dev, false)
 }
 
@@ -292,7 +233,7 @@ pub fn backup_create_level_flow(
     ctx: &mut Ctx,
     dev: &mut dyn SectorDev,
     deep: bool,
-) -> EdpCliResult<(PathBuf, bool)> {
+) -> EdpCliResult<BackupReport> {
     guard_usb_disk(ctx.runner, disk)?;
     let img = read_image(dev)?;
     let id = identify(ctx.runner, disk, &img[7 * SECTOR..8 * SECTOR]);
@@ -332,7 +273,7 @@ pub fn backup_create_level_flow(
     } else {
         diskio::create_metadata_backup
     };
-    let created = save(
+    let (path, is_nopwd) = save(
         &facts,
         &img,
         &device_id,
@@ -340,13 +281,14 @@ pub fn backup_create_level_flow(
         &ctx.backup_dir,
         ctx.clock,
     )?;
+    let report = BackupReport { path, is_nopwd };
     ctx.prompt.write_event(WriteEvent::BackupCreated {
-        path: created.0.clone(),
+        path: report.path.clone(),
     });
-    if created.1 {
+    if report.is_nopwd {
         ctx.prompt.write_event(WriteEvent::BackupCreatedIsNopwd);
     }
-    Ok(created)
+    Ok(report)
 }
 
 /// restore 主流程: bin=None 时交互列出本盘备份并选择。
@@ -499,10 +441,10 @@ pub fn restore_flow(
     }
     ctx.prompt
         .write_event(WriteEvent::RestoreTargetHeader { path: path.clone() });
-    if !ctx.prompt.confirm_yes(&crate::ui::bold(&format!(
-        "  → disk{} LBA0-12? 输入 YES: ",
-        disk
-    ))) {
+    if !ctx
+        .prompt
+        .confirm_write_yes(&format!("  → disk{} LBA0-12? 输入 YES: ", disk))
+    {
         return Err(err(EXIT_CANCELLED, "已取消"));
     }
     let target_session = target_session

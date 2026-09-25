@@ -158,3 +158,22 @@ fn inspect_disk_and_backup_sources_use_evidence_source() {
     assert!(source.contains("EvidenceSource::open_backup"));
     assert!(source.contains("EvidenceSource::open_disk"));
 }
+
+#[test]
+fn typed_write_events_are_rendered_outside_application_layer() {
+    let write =
+        fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("src/application/write.rs"))
+            .expect("read application write");
+    assert!(!write.contains("crate::ui::"));
+    assert!(!write.contains("render_event_text"));
+
+    let application =
+        fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("src/application.rs"))
+            .expect("read application root");
+    assert!(!application.contains("std::io::stdout"));
+    assert!(!application.contains("render_event_text"));
+
+    let ui = fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("src/ui.rs"))
+        .expect("read ui renderer");
+    assert!(ui.contains("pub fn render_write_event"));
+}

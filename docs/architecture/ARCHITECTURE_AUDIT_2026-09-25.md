@@ -988,6 +988,16 @@ application 返回结构化 `ProvisionReport/BackupReport/InspectReport`，CLI/T
 - 新增架构门禁，禁止 `application::inspect` 重新直接调用 EDPB 容器读取或 `FileDev::open_rdonly`。
 - 定向测试：证据源架构门禁 **1/1**、检查套件 **53/53**、TUI 检查 **5/5** 全绿；`fast` 冷缓存 **48.44s / 0 失败**，暖缓存复跑 **4.24s / 0 失败**。
 
+### R6.3 类型化报告/事件实施状态（2026-09-25）
+
+**COMPLETE。**
+
+- `WriteEvent` 保持为应用层的结构化进度事件，但 ANSI、颜色和 CLI 文本渲染已迁出应用层，由 `ui::render_write_event` 统一负责；`application` 不再写标准输出或依赖 `crate::ui`。
+- CLI 的 `StdPrompter` 显式渲染事件，TUI worker 继续直接转发 `WriteEvent`；确认提示保留业务文本，并由 CLI 在前端恢复原有加粗样式。
+- 新增 `BackupReport { path, is_nopwd }`，替代备份应用服务的匿名 `(PathBuf, bool)` 返回值；制盘已有 `ProvisionCommitReport/Outcome`，检查已有 `AdvancedInspectWorkspace`，跨前端结果边界均使用具名类型。
+- 新增架构门禁，禁止 `application/write.rs` 重新依赖 `crate::ui` 或文本事件渲染，并禁止应用根模块直接向标准输出写入。
+- 事件文本/ANSI 黄金基线与事件序列 **3/3**、CLI **63/63**、制盘 **176/176**、备份 **61/61**、TUI **132/132** 全绿；正式 `fast` **35.33s / 0 失败**。
+
 ---
 
 # 第八部分：完成标准

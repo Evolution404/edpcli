@@ -213,19 +213,19 @@ fn backup_create_is_read_only_and_verifiable() {
         idx: 0,
     };
     let mut manual_dev = SwapOnReopenDev::new(orig.clone(), orig.clone());
-    let (manual_path, manual_nopwd) = backup_create_flow(
+    let manual = backup_create_flow(
         6,
         &mut ctx(&readonly_runner, &mut manual_prompt, &manual_dir),
         &mut manual_dev,
     )
     .unwrap();
 
-    assert!(!manual_nopwd);
+    assert!(!manual.is_nopwd);
     assert_eq!(manual_prompt.idx, 0, "backup create 不应要求写盘确认");
     assert!(!manual_dev.switched, "backup create 不得 reopen 为读写");
     assert_eq!(manual_dev.writes, 0, "backup create 不得写 U 盘");
-    assert_eq!(edpb::read_raw_protocol(&manual_path).unwrap(), orig);
-    let manual_verified = edpb::verify_file(&manual_path).unwrap();
+    assert_eq!(edpb::read_raw_protocol(&manual.path).unwrap(), orig);
+    let manual_verified = edpb::verify_file(&manual.path).unwrap();
     assert_eq!(
         manual_verified.manifest.snapshot.capture_level,
         edpcli::edpb::CaptureLevel::Metadata
@@ -236,8 +236,8 @@ fn backup_create_is_read_only_and_verifiable() {
         .iter()
         .any(|artifact| artifact.id == "derived.capture_issues"));
 
-    assert!(edpb::verify_file(&manual_path).is_ok());
-    assert!(!std::path::PathBuf::from(format!("{}.sha256", manual_path.display())).exists());
+    assert!(edpb::verify_file(&manual.path).is_ok());
+    assert!(!std::path::PathBuf::from(format!("{}.sha256", manual.path.display())).exists());
 }
 
 #[test]
@@ -689,7 +689,7 @@ fn deep_backup_create_never_unmounts_reopens_or_writes() {
         idx: 0,
     };
     let mut dev = SwapOnReopenDev::new(orig.clone(), orig.clone());
-    let (path, _) = edpcli::application::write::backup_create_level_flow(
+    let report = edpcli::application::write::backup_create_level_flow(
         6,
         &mut ctx(&runner, &mut prompt, &tmp.0),
         &mut dev,
@@ -699,12 +699,12 @@ fn deep_backup_create_never_unmounts_reopens_or_writes() {
     assert!(!dev.switched);
     assert_eq!(dev.writes, 0);
     assert_eq!(prompt.idx, 0);
-    let v = edpb::verify_file(&path).unwrap();
+    let v = edpb::verify_file(&report.path).unwrap();
     assert_eq!(v.manifest.snapshot.capture_level, edpb::CaptureLevel::Deep);
     assert!(v
         .manifest
         .artifacts
         .iter()
         .any(|a| a.kind == "filesystem_summary"));
-    assert_eq!(edpb::read_raw_protocol(&path).unwrap(), orig);
+    assert_eq!(edpb::read_raw_protocol(&report.path).unwrap(), orig);
 }

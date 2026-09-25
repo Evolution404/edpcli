@@ -1,5 +1,5 @@
 //! 写盘服务类型化进度事件的契约测试:
-//! - `render_event_text` 在无色模式下逐字节锁死 CLI 文本；
+//! - UI 层 `render_write_event` 在无色模式下逐字节锁死 CLI 文本；
 //! - 带 ANSI 的样式渲染仍经 ui::wrap；
 //! - backup-create/restore 实际发出的事件序列(录制型 Prompter)。
 //!
@@ -7,21 +7,21 @@
 
 mod common;
 
-use edpcli::application::write::render_event_text;
 use edpcli::application::WriteEvent;
 use edpcli::common::METADATA_IMAGE_LEN;
 use edpcli::ui;
+use edpcli::ui::render_write_event;
 
 fn plain(event: &WriteEvent) -> String {
     ui::set_enabled_for_tests(false);
-    let text = render_event_text(event);
+    let text = render_write_event(event);
     ui::reset_enabled_for_tests();
     text
 }
 
 fn styled(event: &WriteEvent) -> String {
     ui::set_enabled_for_tests(true);
-    let text = render_event_text(event);
+    let text = render_write_event(event);
     ui::reset_enabled_for_tests();
     text
 }
@@ -118,11 +118,6 @@ impl edpcli::cli::Prompter for EventRecorderPrompter {
     fn write_event(&mut self, event: WriteEvent) {
         self.events.push(event);
     }
-
-    // 写流程必须全部经 write_event 上报；绕过即视为违规。
-    fn output(&mut self, _msg: &str) {
-        panic!("写流程不得经 output 直出文本");
-    }
 }
 
 #[cfg(target_os = "macos")]
@@ -188,8 +183,8 @@ fn backup_create_and_restore_dry_run_event_sequence() {
         prompt: &mut create_prompt,
         backup_dir: bak.clone(),
     };
-    let (created_path, is_nopwd) = backup_create_flow(6, &mut ctx, &mut dev).unwrap();
-    assert!(is_nopwd);
+    let created = backup_create_flow(6, &mut ctx, &mut dev).unwrap();
+    assert!(created.is_nopwd);
     let tags: Vec<&str> = create_prompt.events.iter().map(tag).collect();
     assert_eq!(
         tags,
@@ -206,7 +201,7 @@ fn backup_create_and_restore_dry_run_event_sequence() {
         backup_dir: bak,
     };
     let code = restore_flow(
-        Some(created_path.to_string_lossy().into_owned()),
+        Some(created.path.to_string_lossy().into_owned()),
         6,
         &mut ctx,
         &mut dev,
