@@ -50,13 +50,40 @@ fn fast_and_full_gate_entrypoints_are_repository_owned() {
 #[test]
 fn ci_and_agent_policy_use_the_full_runner_instead_of_all_targets_shell_chains() {
     let ci = read(".github/workflows/ci.yml");
+    let release = read(".github/workflows/release.yml");
+    let compatibility = read(".github/workflows/compatibility.yml");
     let agents = read("AGENTS.md");
     assert!(ci.contains("scripts/test-full.py"));
     assert!(!ci.contains("run-cargo-test-ci.py"));
+    assert!(release.contains("scripts/test-full.py"));
+    assert!(compatibility.contains("scripts/test-full.py"));
+    assert!(!release.contains("cargo test --all-targets"));
+    assert!(!compatibility.contains("cargo test --all-targets"));
+    assert!(release.contains("cargo clippy --all-targets --locked -- -D warnings"));
+    assert!(compatibility.contains("cargo clippy --all-targets --locked -- -D warnings"));
+    assert!(!release.contains("cargo build --release\n"));
+    assert!(release.contains("cargo build --release --locked"));
+    assert!(release.contains("cargo metadata --locked"));
     assert!(agents.contains("scripts/test-fast.sh"));
     assert!(agents.contains("scripts/test-full.py"));
     assert!(agents.contains("120"));
     assert!(agents.contains("durable"));
+}
+
+#[test]
+fn dependency_policy_is_pinned_and_automatically_refreshed() {
+    let ci = read(".github/workflows/ci.yml");
+    let deny = read("deny.toml");
+    let dependabot = read(".github/dependabot.yml");
+
+    assert!(ci.contains("cargo install cargo-deny --locked --version 0.20.2"));
+    assert!(ci.contains("cargo deny check"));
+    assert!(deny.contains("[advisories]"));
+    assert!(deny.contains("[licenses]"));
+    assert!(deny.contains("unknown-registry = \"deny\""));
+    assert!(deny.contains("unknown-git = \"deny\""));
+    assert!(dependabot.contains("package-ecosystem: cargo"));
+    assert!(dependabot.contains("package-ecosystem: github-actions"));
 }
 
 #[test]

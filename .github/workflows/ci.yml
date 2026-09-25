@@ -20,6 +20,20 @@ jobs:
       - name: Verify checked-in LBA0-LBA12 gold set
         run: python3 scripts/protocol/audit_baseline.py
 
+  supply-chain:
+    name: dependency policy
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install pinned Rust
+        uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87
+        with:
+          toolchain: 1.98.1
+      - name: Install pinned cargo-deny
+        run: cargo install cargo-deny --locked --version 0.20.2
+      - name: Check advisories, licenses and sources
+        run: cargo deny check
+
   quality:
     name: ${{ matrix.label }} / test-clippy-release
     strategy:

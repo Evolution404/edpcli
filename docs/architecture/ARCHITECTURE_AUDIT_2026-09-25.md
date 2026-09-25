@@ -1087,6 +1087,17 @@ application 返回结构化 `ProvisionReport/BackupReport/InspectReport`，CLI/T
 - 新增全 TUI 递归架构门禁，禁止 `src/tui/` 重新引用 `crate::platform`、`crate::diskio`、`FileDev::open_rdonly`、`raw_path(` 或 `SystemClock`；备份创建契约同步锁定应用层整盘入口。
 - 源码扫描确认上述 TUI 直接依赖均为 **0**。
 
+## Phase D4：发布门禁与依赖供应链治理
+
+**COMPLETE。**
+
+- 发布工作流与未来兼容工作流不再直接执行旧的 `cargo test --all-targets`，统一调用仓库自有 `scripts/test-full.py --profile full`；发布元数据、Clippy 与构建命令全部使用锁文件，避免发布路径与主 CI 的依赖解析和测试口径漂移。
+- 新增 `deny.toml` 与固定版本 `cargo-deny 0.20.2` 的独立供应链门禁，检查 RustSec 公告、许可证、依赖来源和通配版本要求；该工具只作为 CI/显式审计工具，不成为本地快速门禁的安装前置条件。
+- 第一次真实执行供应链检查发现 `ratatui 0.29.0` 唯一引入已停止维护的 `paste 1.0.15`（RUSTSEC-2024-0436）。没有添加忽略项，而是升级到 `ratatui 0.30.2`，并将直接 `crossterm` 升到 `0.29.0`，使 `paste` 清零且终端后端只保留一个 crossterm 版本。
+- 新增 Dependabot 周期更新，分别跟踪 Cargo 与 GitHub Actions；架构测试锁定发布/兼容工作流必须继续使用仓库全量门禁、锁依赖，并锁定供应链检查与自动更新配置存在。
+- 实际验证：`cargo deny check` 的公告、禁止项、许可证和来源检查均为 **通过**；终端依赖升级后 `repository_suite` **30/30**、`tui_suite` **161/161**；全目标 Clippy **0 条警告**；快速门禁暖缓存 **10/10 产物、4.75s**；全量门禁 **8 suites / 10 产物 / doctest，7.56s**。
+- 供应链检查继续以警告形式暴露 `ratatui` 内部无法由本项目直接统一的 `hashbrown` / `syn` 多版本，不用全局允许项隐藏；一旦上游依赖树收敛，门禁会自然反映变化。
+
 ---
 
 # 第八部分：完成标准

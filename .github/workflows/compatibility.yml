@@ -36,6 +36,6 @@ jobs:
           toolchain: stable
           components: clippy
       - name: Test all targets
-        run: cargo test --all-targets
+        run: python scripts/test-full.py --profile full
       - name: Clippy is warning-free
-        run: cargo clippy --all-targets -- -D warnings
+        run: cargo clippy --all-targets --locked -- -D warnings

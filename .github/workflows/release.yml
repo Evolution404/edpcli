@@ -22,7 +22,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          package_version="$(cargo metadata --no-deps --format-version 1 | python3 -c 'import json,sys; print(json.load(sys.stdin)["packages"][0]["version"])')"
+          package_version="$(cargo metadata --locked --no-deps --format-version 1 | python3 -c 'import json,sys; print(json.load(sys.stdin)["packages"][0]["version"])')"
           expected_tag="v${package_version}"
           if [[ "${GITHUB_REF_NAME}" != "${expected_tag}" ]]; then
             echo "release tag ${GITHUB_REF_NAME} does not match Cargo.toml ${expected_tag}" >&2
@@ -42,13 +42,13 @@ jobs:
           components: clippy
       - name: Test and lint
         run: |
-          cargo test --all-targets
-          cargo clippy --all-targets -- -D warnings
+          python scripts/test-full.py --profile full
+          cargo clippy --all-targets --locked -- -D warnings
       - name: Build and package macOS arm64
         shell: bash
         run: |
           set -euo pipefail
-          cargo build --release
+          cargo build --release --locked
           ./target/release/edpcli version
           mkdir -p dist package
           cp target/release/edpcli dist/edpcli
@@ -77,13 +77,13 @@ jobs:
           components: clippy
       - name: Test and lint
         run: |
-          cargo test --all-targets
-          cargo clippy --all-targets -- -D warnings
+          python scripts/test-full.py --profile full
+          cargo clippy --all-targets --locked -- -D warnings
       - name: Build and package macOS x86_64
         shell: bash
         run: |
           set -euo pipefail
-          cargo build --release
+          cargo build --release --locked
           ./target/release/edpcli version
           mkdir -p dist package
           cp target/release/edpcli dist/edpcli
@@ -148,13 +148,13 @@ jobs:
           components: clippy
       - name: Test and lint
         run: |
-          cargo test --all-targets
-          cargo clippy --all-targets -- -D warnings
+          python scripts/test-full.py --profile full
+          cargo clippy --all-targets --locked -- -D warnings
       - name: Build and package Linux arm64
         shell: bash
         run: |
           set -euo pipefail
-          cargo build --release
+          cargo build --release --locked
           ./target/release/edpcli version
           mkdir -p dist package
           cp target/release/edpcli dist/edpcli
@@ -183,13 +183,13 @@ jobs:
           components: clippy
       - name: Test and lint
         run: |
-          cargo test --all-targets
-          cargo clippy --all-targets -- -D warnings
+          python scripts/test-full.py --profile full
+          cargo clippy --all-targets --locked -- -D warnings
       - name: Build and package Linux x86_64
         shell: bash
         run: |
           set -euo pipefail
-          cargo build --release
+          cargo build --release --locked
           ./target/release/edpcli version
           mkdir -p dist package
           cp target/release/edpcli dist/edpcli
@@ -218,13 +218,13 @@ jobs:
           components: clippy
       - name: Test and lint
         run: |
-          cargo test --all-targets
-          cargo clippy --all-targets -- -D warnings
+          python scripts/test-full.py --profile full
+          cargo clippy --all-targets --locked -- -D warnings
       - name: Build and package Windows arm64
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
-          cargo build --release
+          cargo build --release --locked
           $versionInfo = (& .\target\release\edpcli.exe version | Out-String)
           $versionInfo | Write-Host
           if ($versionInfo -notmatch "架构: arm64 \(aarch64\)") {
@@ -260,13 +260,13 @@ jobs:
           components: clippy
       - name: Test and lint
         run: |
-          cargo test --all-targets
-          cargo clippy --all-targets -- -D warnings
+          python scripts/test-full.py --profile full
+          cargo clippy --all-targets --locked -- -D warnings
       - name: Build and package Windows x86_64
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
-          cargo build --release
+          cargo build --release --locked
           $versionInfo = (& .\target\release\edpcli.exe version | Out-String)
           $versionInfo | Write-Host
           if ($versionInfo -notmatch "架构: x86_64 \(x86_64\)") {
