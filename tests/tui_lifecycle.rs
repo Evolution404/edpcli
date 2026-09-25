@@ -408,6 +408,57 @@ fn advanced_inspect_tree_browser_renders_and_navigates_across_terminal_sizes() {
         AdvancedInspectStage::Browser
     );
 
+    let backend = TestBackend::new(120, 32);
+    let mut terminal = Terminal::new(backend).expect("test terminal");
+    terminal.draw(|frame| render::draw(frame, &state)).unwrap();
+    let buffer = terminal.backend().buffer();
+    let text = buffer
+        .content()
+        .iter()
+        .map(|cell| cell.symbol())
+        .collect::<String>();
+    let highlighted = buffer
+        .content()
+        .iter()
+        .filter(|cell| cell.style().bg == Some(Color::Cyan))
+        .map(|cell| cell.symbol())
+        .collect::<String>();
+    assert!(
+        highlighted.replace(' ', "").contains("结构树"),
+        "active Inspect panel tab should use the shared selection style: {highlighted}"
+    );
+    assert_eq!(
+        text.matches('▶').count(),
+        1,
+        "▶ must identify the single keyboard-focused tree row: {text}"
+    );
+    let focus_row = buffer
+        .content()
+        .chunks(120)
+        .find(|row| row.iter().any(|cell| cell.symbol() == "▶"))
+        .expect("focused tree row");
+    let last_highlighted = focus_row
+        .iter()
+        .rposition(|cell| cell.style().bg == Some(Color::Cyan))
+        .expect("selected content cells");
+    let border = focus_row
+        .iter()
+        .enumerate()
+        .skip(last_highlighted + 1)
+        .find(|(_, cell)| cell.symbol() == "│")
+        .map(|(x, _)| x)
+        .expect("tree right border");
+    assert!(
+        border > last_highlighted + 1,
+        "selection should not extend to the panel border"
+    );
+    assert!(
+        focus_row[last_highlighted + 1..border]
+            .iter()
+            .all(|cell| cell.style().bg != Some(Color::Cyan)),
+        "selected background must not paint unrelated layout padding"
+    );
+
     let initial_rows = state.advanced_inspect_tree_rows();
     assert!(initial_rows.len() > 1);
     assert_eq!(initial_rows[0].id, "device");
@@ -453,7 +504,51 @@ fn advanced_inspect_tree_browser_renders_and_navigates_across_terminal_sizes() {
         assert!(compact.contains("结构树"), "{text}");
         assert!(compact.contains("节点概览"), "{text}");
         assert!(compact.contains("节点详情"), "{text}");
+        let highlighted = terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .filter(|cell| cell.style().bg == Some(Color::Cyan))
+            .map(|cell| cell.symbol())
+            .collect::<String>();
+        assert!(
+            highlighted.replace(' ', "").contains("节点详情"),
+            "Detail focus must be visible in the shared Inspect tabs: {highlighted}"
+        );
     }
+
+    state.advanced_inspect_shift_panel(true);
+    state.advanced_inspect_shift_panel(true);
+    assert_eq!(
+        state.advanced_inspect().unwrap().panel,
+        AdvancedInspectPanel::Tree
+    );
+    let selected_before = state.advanced_inspect().unwrap().tree_selected;
+    let selected_label = state.advanced_inspect_tree_rows()[selected_before]
+        .label
+        .clone();
+    let backend = TestBackend::new(60, 18);
+    let mut terminal = Terminal::new(backend).expect("narrow test terminal");
+    terminal.draw(|frame| render::draw(frame, &state)).unwrap();
+    let text = terminal
+        .backend()
+        .buffer()
+        .content()
+        .iter()
+        .map(|cell| cell.symbol())
+        .collect::<String>();
+    assert!(
+        text.replace(' ', "")
+            .contains(&selected_label.replace(' ', "")),
+        "narrow layout lost selected tree node {selected_label}: {text}"
+    );
+    assert_eq!(text.matches('▶').count(), 1, "{text}");
+    assert_eq!(
+        state.advanced_inspect().unwrap().tree_selected,
+        selected_before,
+        "narrow rendering must not mutate selection"
+    );
 
     state.close_advanced_inspect();
     assert!(state.advanced_inspect().is_none());

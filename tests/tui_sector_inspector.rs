@@ -547,3 +547,36 @@ fn jump_and_search_prompts_render_at_small_medium_and_wide_sizes() {
         state.advanced_inspect_cancel_prompt();
     }
 }
+
+#[test]
+fn narrow_sector_inspector_keeps_selected_byte_visible_without_mutating_cursor() {
+    let mut state = AppState::new();
+    assert!(state.begin_advanced_inspect(AdvancedInspectSource::Disk(6)));
+    state.advanced_inspect_finish(Ok(workspace(vec![item(0, true)])));
+    select_protocol_lba0(&mut state);
+    assert!(state.advanced_inspect_open_selected_sector().is_none());
+
+    state.advanced_inspect_sector_move_cursor(511);
+    assert_eq!(state.advanced_inspect_sector().unwrap().cursor, 511);
+
+    let backend = TestBackend::new(60, 18);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal.draw(|frame| render::draw(frame, &state)).unwrap();
+    let text = terminal
+        .backend()
+        .buffer()
+        .content()
+        .iter()
+        .map(|cell| cell.symbol())
+        .collect::<String>();
+
+    assert!(
+        text.contains("+0x1F0"),
+        "narrow Sector Inspector must keep the selected byte row visible: {text}"
+    );
+    assert_eq!(
+        state.advanced_inspect_sector().unwrap().cursor,
+        511,
+        "responsive rendering must not rewrite byte selection"
+    );
+}

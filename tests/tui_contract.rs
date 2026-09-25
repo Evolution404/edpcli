@@ -66,6 +66,27 @@ fn tui_theme_uses_the_same_semantic_color_family_as_cli_output() {
 }
 
 #[test]
+fn advanced_inspect_uses_global_semantic_theme_tokens_without_private_colors() {
+    let source = include_str!("../src/tui/render.rs");
+    assert!(
+        source.contains("enum ThemeToken") && source.contains("theme_style(ThemeToken::"),
+        "TUI should expose one semantic Theme token layer instead of feature-private colors"
+    );
+
+    let inspect_start = source
+        .find("fn inspect_field_status_style")
+        .expect("Inspect renderer start");
+    let inspect_end = source
+        .find("fn draw_backup_delete")
+        .expect("Inspect renderer end");
+    let inspect = &source[inspect_start..inspect_end];
+    assert!(
+        !inspect.contains("Color::"),
+        "Inspect business rendering must consume semantic Theme tokens, not hard-code colors"
+    );
+}
+
+#[test]
 fn tui_remains_within_the_cli_v2_compatible_release_line() {
     let major = env!("CARGO_PKG_VERSION")
         .split('.')

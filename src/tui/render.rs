@@ -154,37 +154,60 @@ fn wrapped_field_lines(
         .collect()
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ThemeToken {
+    Accent,
+    SecondaryAccent,
+    Success,
+    Warning,
+    Error,
+    Muted,
+    Selection,
+}
+
+fn theme_style(token: ThemeToken) -> Style {
+    match token {
+        ThemeToken::Accent => Style::default()
+            .fg(Color::Cyan)
+            .add_modifier(Modifier::BOLD),
+        ThemeToken::SecondaryAccent => Style::default().fg(Color::Magenta),
+        ThemeToken::Success => Style::default().fg(Color::Green),
+        ThemeToken::Warning => Style::default().fg(Color::Yellow),
+        ThemeToken::Error => Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+        ThemeToken::Muted => Style::default().fg(Color::DarkGray),
+        ThemeToken::Selection => Style::default()
+            .fg(Color::Black)
+            .bg(Color::Cyan)
+            .add_modifier(Modifier::BOLD),
+    }
+}
+
 fn accent() -> Style {
-    Style::default()
-        .fg(Color::Cyan)
-        .add_modifier(Modifier::BOLD)
+    theme_style(ThemeToken::Accent)
 }
 
 fn secondary() -> Style {
-    Style::default().fg(Color::Magenta)
+    theme_style(ThemeToken::SecondaryAccent)
 }
 
 fn success() -> Style {
-    Style::default().fg(Color::Green)
+    theme_style(ThemeToken::Success)
 }
 
 fn warning() -> Style {
-    Style::default().fg(Color::Yellow)
+    theme_style(ThemeToken::Warning)
 }
 
 fn danger() -> Style {
-    Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)
+    theme_style(ThemeToken::Error)
 }
 
 fn muted() -> Style {
-    Style::default().fg(Color::DarkGray)
+    theme_style(ThemeToken::Muted)
 }
 
 fn selected() -> Style {
-    Style::default()
-        .fg(Color::Black)
-        .bg(Color::Cyan)
-        .add_modifier(Modifier::BOLD)
+    theme_style(ThemeToken::Selection)
 }
 
 fn provision_kind_style(kind: ProvisionKind) -> Style {
@@ -1725,8 +1748,8 @@ fn draw_inspect(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState
 fn inspect_field_status_style(status: crate::application::inspect::InspectFieldStatus) -> Style {
     match status {
         crate::application::inspect::InspectFieldStatus::Known => accent(),
-        crate::application::inspect::InspectFieldStatus::Unknown => warning(),
-        crate::application::inspect::InspectFieldStatus::Reserved => danger(),
+        crate::application::inspect::InspectFieldStatus::Unknown
+        | crate::application::inspect::InspectFieldStatus::Reserved => muted(),
         crate::application::inspect::InspectFieldStatus::Preserved => success(),
     }
 }
@@ -1931,7 +1954,7 @@ fn draw_sector_inspector(frame: &mut Frame, area: ratatui::layout::Rect, state: 
                 details.push(Line::from("o 展开 bit / child 详情"));
             }
         } else {
-            details.push(Line::from(Span::styled("Unknown byte", warning())));
+            details.push(Line::from(Span::styled("Unknown byte", muted())));
             details.push(Line::from("当前 byte 不属于已知 Field；不推测语义。"));
             if sector.field_expanded {
                 details.push(Line::from(format!("bits: {:08b}", raw)));
@@ -2035,8 +2058,32 @@ fn draw_advanced_inspect(frame: &mut Frame, area: ratatui::layout::Rect, state: 
             let rows = state.advanced_inspect_tree_rows();
             let selected_index = advanced.tree_selected.min(rows.len().saturating_sub(1));
             let selected_row = rows.get(selected_index);
-            let (tree_area, overview_area, detail_area) = if area.width >= 140 && area.height >= 10
-            {
+            let panel_index = match advanced.panel {
+                AdvancedInspectPanel::Tree => 0,
+                AdvancedInspectPanel::Overview => 1,
+                AdvancedInspectPanel::Detail => 2,
+            };
+            let browser = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([Constraint::Length(1), Constraint::Min(1)])
+                .split(area);
+            frame.render_widget(
+                Tabs::new(["结构树", "节点概览", "节点详情"])
+                    .select(panel_index)
+                    .style(muted())
+                    .highlight_style(selected())
+                    .divider(Span::styled(" │ ", muted())),
+                browser[0],
+            );
+            let content_area = browser[1];
+            let compact = content_area.width < 92 || content_area.height < 14;
+            let (tree_area, overview_area, detail_area) = if compact {
+                match advanced.panel {
+                    AdvancedInspectPanel::Tree => (Some(content_area), None, None),
+                    AdvancedInspectPanel::Overview => (None, Some(content_area), None),
+                    AdvancedInspectPanel::Detail => (None, None, Some(content_area)),
+                }
+            } else if content_area.width >= 140 {
                 let parts = Layout::default()
                     .direction(Direction::Horizontal)
                     .constraints([
@@ -2044,91 +2091,89 @@ fn draw_advanced_inspect(frame: &mut Frame, area: ratatui::layout::Rect, state: 
                         Constraint::Percentage(27),
                         Constraint::Percentage(31),
                     ])
-                    .split(area);
-                (parts[0], parts[1], parts[2])
-            } else if area.width >= 92 && area.height >= 12 {
+                    .split(content_area);
+                (Some(parts[0]), Some(parts[1]), Some(parts[2]))
+            } else {
                 let parts = Layout::default()
                     .direction(Direction::Horizontal)
                     .constraints([Constraint::Percentage(46), Constraint::Percentage(54)])
-                    .split(area);
+                    .split(content_area);
                 let right = Layout::default()
                     .direction(Direction::Vertical)
                     .constraints([Constraint::Length(9), Constraint::Min(4)])
                     .split(parts[1]);
-                (parts[0], right[0], right[1])
-            } else {
-                let parts = Layout::default()
-                    .direction(Direction::Vertical)
-                    .constraints([
-                        Constraint::Percentage(50),
-                        Constraint::Percentage(25),
-                        Constraint::Percentage(25),
-                    ])
-                    .split(area);
-                (parts[0], parts[1], parts[2])
+                (Some(parts[0]), Some(right[0]), Some(right[1]))
             };
 
-            let visible = visible_window(selected_index, rows.len(), tree_area.height);
-            let tree_lines = visible.map(|index| {
-                let row = &rows[index];
-                let indent = "  ".repeat(row.depth);
-                let marker = if row.expandable {
-                    if row.expanded {
-                        "▾ "
-                    } else {
-                        "▸ "
-                    }
-                } else {
-                    "· "
-                };
-                let icon = match row.kind {
-                    InspectNodeKind::Device => "◆ ",
-                    InspectNodeKind::Region => "◇ ",
-                    InspectNodeKind::Extent => "▰ ",
-                    InspectNodeKind::Sector => "□ ",
-                    InspectNodeKind::Structure => "▱ ",
-                    InspectNodeKind::Group => "≡ ",
-                    InspectNodeKind::Field => "• ",
-                    InspectNodeKind::Partition => "▣ ",
-                    InspectNodeKind::UnknownRange => "? ",
-                };
-                let kind_style = match row.kind {
-                    InspectNodeKind::Device => secondary().add_modifier(Modifier::BOLD),
-                    InspectNodeKind::Region | InspectNodeKind::Partition => accent(),
-                    InspectNodeKind::Extent | InspectNodeKind::Structure => success(),
-                    InspectNodeKind::Sector | InspectNodeKind::Field => Style::default(),
-                    InspectNodeKind::Group => muted(),
-                    InspectNodeKind::UnknownRange => warning(),
-                };
-                let text = format!(
-                    "{indent}{marker}{icon}{}  [{}..{})",
-                    safe(&row.label),
-                    row.range.start_lba,
-                    row.range.end_lba_exclusive()
-                );
-                if index == selected_index {
-                    Line::from(Span::styled(text, selected()))
-                } else {
-                    Line::from(Span::styled(text, kind_style))
-                }
-            });
-
             let tree_focus = advanced.panel == AdvancedInspectPanel::Tree;
-            frame.render_widget(
-                Paragraph::new(tree_lines.collect::<Vec<_>>())
-                    .block(
-                        Block::default()
-                            .borders(Borders::ALL)
-                            .border_style(if tree_focus { accent() } else { muted() })
-                            .title(format!(
-                                "结构树  {}/{}",
-                                selected_index.saturating_add(1),
-                                rows.len()
-                            )),
-                    )
-                    .wrap(Wrap { trim: false }),
-                tree_area,
-            );
+            if let Some(tree_area) = tree_area {
+                let visible = visible_window(selected_index, rows.len(), tree_area.height);
+                let tree_lines = visible.map(|index| {
+                    let row = &rows[index];
+                    let indent = "  ".repeat(row.depth);
+                    let marker = if row.expandable {
+                        if row.expanded {
+                            "− "
+                        } else {
+                            "+ "
+                        }
+                    } else {
+                        "· "
+                    };
+                    let icon = match row.kind {
+                        InspectNodeKind::Device => "◆ ",
+                        InspectNodeKind::Region => "◇ ",
+                        InspectNodeKind::Extent => "▰ ",
+                        InspectNodeKind::Sector => "□ ",
+                        InspectNodeKind::Structure => "▱ ",
+                        InspectNodeKind::Group => "≡ ",
+                        InspectNodeKind::Field => "• ",
+                        InspectNodeKind::Partition => "▣ ",
+                        InspectNodeKind::UnknownRange => "? ",
+                    };
+                    let kind_style = match row.kind {
+                        InspectNodeKind::Device => secondary().add_modifier(Modifier::BOLD),
+                        InspectNodeKind::Region | InspectNodeKind::Partition => accent(),
+                        InspectNodeKind::Extent | InspectNodeKind::Structure => success(),
+                        InspectNodeKind::Sector | InspectNodeKind::Field => Style::default(),
+                        InspectNodeKind::Group | InspectNodeKind::UnknownRange => muted(),
+                    };
+                    let content = format!(
+                        "{marker}{icon}{}  [{}..{})",
+                        safe(&row.label),
+                        row.range.start_lba,
+                        row.range.end_lba_exclusive()
+                    );
+                    let focused = tree_focus && index == selected_index;
+                    Line::from(vec![
+                        Span::raw(indent),
+                        Span::styled(
+                            if focused { "▶ " } else { "  " },
+                            if focused {
+                                selected()
+                            } else {
+                                Style::default()
+                            },
+                        ),
+                        Span::styled(content, if focused { selected() } else { kind_style }),
+                    ])
+                });
+                frame.render_widget(
+                    Paragraph::new(tree_lines.collect::<Vec<_>>())
+                        .block(
+                            Block::default()
+                                .borders(Borders::ALL)
+                                .border_style(if tree_focus { accent() } else { muted() })
+                                .title(format!(
+                                    "结构树  {}/{}",
+                                    selected_index.saturating_add(1),
+                                    rows.len()
+                                )),
+                        )
+                        .wrap(Wrap { trim: false }),
+                    tree_area,
+                );
+            }
 
             let mut overview_lines = vec![Line::from(vec![
                 Span::styled("来源  ", muted()),
@@ -2275,36 +2320,40 @@ fn draw_advanced_inspect(frame: &mut Frame, area: ratatui::layout::Rect, state: 
                 detail_lines.push(Line::from(Span::styled(safe(message), danger())));
             }
 
-            frame.render_widget(
-                Paragraph::new(overview_lines)
-                    .block(
-                        Block::default()
-                            .borders(Borders::ALL)
-                            .border_style(if advanced.panel == AdvancedInspectPanel::Overview {
-                                accent()
-                            } else {
-                                muted()
-                            })
-                            .title("节点概览"),
-                    )
-                    .wrap(Wrap { trim: false }),
-                overview_area,
-            );
+            if let Some(overview_area) = overview_area {
+                frame.render_widget(
+                    Paragraph::new(overview_lines)
+                        .block(
+                            Block::default()
+                                .borders(Borders::ALL)
+                                .border_style(if advanced.panel == AdvancedInspectPanel::Overview {
+                                    accent()
+                                } else {
+                                    muted()
+                                })
+                                .title("节点概览"),
+                        )
+                        .wrap(Wrap { trim: false }),
+                    overview_area,
+                );
+            }
 
-            let detail_focus = advanced.panel == AdvancedInspectPanel::Detail;
-            let scroll = advanced.detail_scroll.min(u16::MAX as usize) as u16;
-            frame.render_widget(
-                Paragraph::new(detail_lines)
-                    .block(
-                        Block::default()
-                            .borders(Borders::ALL)
-                            .border_style(if detail_focus { accent() } else { muted() })
-                            .title("节点详情"),
-                    )
-                    .wrap(Wrap { trim: false })
-                    .scroll((scroll, 0)),
-                detail_area,
-            );
+            if let Some(detail_area) = detail_area {
+                let detail_focus = advanced.panel == AdvancedInspectPanel::Detail;
+                let scroll = advanced.detail_scroll.min(u16::MAX as usize) as u16;
+                frame.render_widget(
+                    Paragraph::new(detail_lines)
+                        .block(
+                            Block::default()
+                                .borders(Borders::ALL)
+                                .border_style(if detail_focus { accent() } else { muted() })
+                                .title("节点详情"),
+                        )
+                        .wrap(Wrap { trim: false })
+                        .scroll((scroll, 0)),
+                    detail_area,
+                );
+            }
         }
     }
 }
