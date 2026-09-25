@@ -1,51 +1,51 @@
 # TUI TrueColor / Vim 迁移基线（2026-09-25）
 
-本文件记录 `docs/provisioning/PROVISIONING.md` 第 10 章 Phase T0 的实际基线与迁移表。第 10 章仍是设计事实源；本文件只记录实施前现状、冲突和迁移落点。
+本文件记录 `docs/provisioning/PROVISIONING.md` 第 10 章阶段 T0 的实际基线与迁移表。第 10 章仍是设计事实源；本文件只记录实施前现状、冲突和迁移落点。
 
 ## 基线
 
 - 分支：`main`
 - 起始 HEAD：`d5f518a1b289571ed2e6efcda9a6f4ca818c901a`
-- `cargo test --test tui_suite`：132 passed / 0 failed
+- `cargo test --test tui_suite`：132 项通过，0 项失败
 - `src/tui/**` 直接 `Color::*`：40 处
 - `src/tui/**` 中 `KeyCode::Char/Tab/BackTab/Left/Right/PageUp/PageDown/Home/End`：107 处
-- 工作区开始时已有 11 个未提交文件；这些修改属于既有工作，实施中必须保留，不得 reset/clean 或覆盖。
+- 工作区开始时已有 11 个未提交文件；这些修改属于既有工作，实施中必须完整保留，禁止使用会丢弃或覆盖现有改动的工作区清理命令。
 
 ## 视觉冲突清单
 
 | 现状 | 新语义 | 迁移 |
 | --- | --- | --- |
-| `render.rs` 自有 `ThemeToken` + ANSI 基础色 | 全局 Theme 单一事实源 | 迁移到 `src/tui/theme.rs` |
-| Selection = Black on Cyan | 低亮度 selection + Accent 标记 | Theme selection token |
-| Provision bar 直接 LightBlue/Cyan/Green/Magenta/Yellow | 六种低饱和 partition token | Theme partition token |
-| animation 自有 Green/Yellow/Red/Cyan/Magenta | Theme animation token | 删除私有 palette |
-| workspace render 可直接使用高饱和 `Color::*` | workspace 只使用语义 style | 增加静态门禁 |
+| `render.rs` 自有 `ThemeToken` + ANSI 基础色 | 全局主题单一事实源 | 迁移到 `src/tui/theme.rs` |
+| 选中态使用 `Black` 配 `Cyan` | 低亮度选中背景 + `Accent` 标记 | 统一主题选中态语义 |
+| 制盘比例条直接使用 `LightBlue/Cyan/Green/Magenta/Yellow` | 六种低饱和分区语义色 | 统一主题分区语义 |
+| 动画模块自有 `Green/Yellow/Red/Cyan/Magenta` | 统一主题动画语义 | 删除私有调色板 |
+| 工作区渲染层可直接使用高饱和 `Color::*` | 工作区只使用语义样式 | 增加静态门禁 |
 
 ## 键位迁移表
 
 | 现有键 | 当前语义 | 新键/新语义 |
 | --- | --- | --- |
-| `Tab` / `Shift-Tab` | Workspace 前后切换 | Panel Next / Previous |
-| `Left/Right`（普通页面） | Workspace 切换 | `h/l` 仅局部导航；Workspace 改 `gt/gT` |
-| `h/l`（部分页面） | Workspace 切换 | List/Tree/Form/Hex 左右语义 |
-| `g`（Inspect） | Jump | `gl` |
-| `g g` | Top | 保留 |
-| 无 | 下/上一个 Workspace | `gt/gT` |
-| 无 | Devices/Backups/Provision/Inspect | `gd/gb/gp/gi` |
-| 无 | Panel 左/下/上/右/下一个/上一个 | `Ctrl-w h/j/k/l/w/W` |
-| `i/I` | 打开 Inspect | `gi`；`i` 回归 Insert |
-| `D` | 单条 Backup 删除 | `d` + Confirm |
-| `X` | 批量 Backup 删除 | `d` 根据 selection 决定 + Confirm |
-| `r/d/m`（Sector） | Raw/Decode/Mixed | `v` 循环 |
-| `r` | Refresh（多数页面） | 全局 Refresh |
-| `d` | 页面局部语义 | 全局 Delete，必须 Confirm |
-| `/` | Search | 保留，进入 Search mode |
-| `:` | Command | 保留，进入 Command mode |
-| 文本字段直接接收字符 | 表单编辑 | Normal 下 `i/Enter` 进入 Insert；Insert 字母不触发命令 |
+| `Tab` / `Shift-Tab` | 工作区前后切换 | 面板下一个 / 上一个 |
+| `Left/Right`（普通页面） | 工作区切换 | `h/l` 仅局部导航；工作区改用 `gt/gT` |
+| `h/l`（部分页面） | 工作区切换 | 列表/树/表单/十六进制视图的左右语义 |
+| `g`（检查页） | 单键跳转 | `gl` |
+| `g g` | 跳到顶部 | 保留 |
+| 无 | 下/上一个工作区 | `gt/gT` |
+| 无 | 设备/备份/制盘/检查工作区 | `gd/gb/gp/gi` |
+| 无 | 面板左/下/上/右/下一个/上一个 | `Ctrl-w h/j/k/l/w/W` |
+| `i/I` | 打开检查页 | `gi`；`i` 回归插入模式 |
+| `D` | 单条备份删除 | `d` + 确认模式 |
+| `X` | 批量备份删除 | `d` 根据选中集合决定 + 确认模式 |
+| `r/d/m`（扇区视图） | 原始/解码/混合视图 | `v` 循环 |
+| `r` | 刷新（多数页面） | 全局刷新 |
+| `d` | 页面局部语义 | 全局删除，必须进入确认模式 |
+| `/` | 搜索 | 保留，进入搜索模式 |
+| `:` | 命令 | 保留，进入命令模式 |
+| 文本字段直接接收字符 | 表单编辑 | 普通模式下 `i/Enter` 进入插入模式；插入模式字母不触发命令 |
 
 ## 历史测试处理原则
 
-- 不删除已有 shortcut 测试来规避冲突。
+- 不删除已有快捷键测试来规避冲突。
 - 旧测试若锁定被第 10 章明确废止的映射，改为断言新映射并新增“旧映射不再生效”的反向门禁。
-- 协议解析、ProvisionRequest、事务写入、安全 guard 测试不得因 TUI 重构而弱化。
-- 典型终端尺寸继续覆盖 40×10、60×18、80×24、120×36；新增 Theme/keymap 契约测试。
+- 协议解析、`ProvisionRequest`、事务写入、安全门禁测试不得因 TUI 重构而弱化。
+- 典型终端尺寸继续覆盖 40×10、60×18、80×24、120×36；新增主题与键位映射契约测试。
