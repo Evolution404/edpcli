@@ -2227,16 +2227,18 @@ Insert：
 
 ### 10.10.1 实施状态（2026-09-25）
 
-第 10 章主体功能已落地，剩余确认弹窗的统一动作分发仍待收口：
+第 10 章已全部完成，T0～T5 与 10.11/10.12 验收项均已收口：
 
 - T0：完成现状盘点、旧键冲突清单和迁移基线；
 - T1：统一主题层已落地，支持 24-bit TrueColor、ANSI256 与 ANSI16 自动回退；
 - T2：Devices、Backups、Provision、Inspect、动画、容量条、footer/help/modal 已使用统一视觉语义；
 - T3：集中式 `keymap.rs`、Normal/Insert/Search/Command/Confirm、`g` prefix、`Ctrl-w` prefix 与帮助元数据已经建立；
-- T4：Devices/Backups、Provision Insert、Inspect Tree/Panel、Sector Inspector/Hex、Search/Command 输入已迁移；部分备份及恢复确认弹窗仍保留局部按键分支；
-- T5：旧 `g=Jump`、`r/d/m` view mode、`h/l=Workspace`、Backup `D/X`、`i/I=Inspect` 冲突已经移除；README、USAGE、Help、footer 已同步。
+- T4：Devices/Backups、Provision Insert、Inspect Tree/Panel、Sector Inspector/Hex、Search/Command 以及备份批量删除、清理、单条删除、恢复/写盘确认弹窗均通过统一 KeyMapper 分发；事件循环不再直接解析业务字符输入；
+- T5：旧 `g=Jump`、`r/d/m` view mode、`h/l/Left/Right=Workspace`、Backup `D/X`、`i/I=Inspect` 双状态机已经移除；简单 Inspect 也统一为 `v` 循环视图；README、USAGE、Help、footer 与第 9 章仍具现行含义的快捷键示例已同步。
 
-此前已提交版本的验证：`tui_suite` 147/147；正式 fast gate 全绿；正式 full gate 8 suites / 10 artifacts / doctest 全绿；macOS Plain Virtual-HIL 通过。重构未修改 LBA0～12/LCE 协议语义，也未降低精确 `YES`、目标身份复核、系统盘保护、atomic write、readback/rollback 等写盘安全门槛。
+本轮验收结果：`tui_suite` 148/148；`provision_suite` 176/176；`inspect_suite` 53/53；macOS Plain Virtual-HIL 1/1，并通过 detach/reattach 后的 exFAT 挂载与文件读回；代码变更阶段正式 fast gate 5 suites / 7 artifacts、0 failures，最终文档状态下 fast gate 3 suites / 5 artifacts、0 failures；正式 full gate 8 suites / 10 artifacts / doctest、0 failures，Chapter 10 状态更新前后均复验通过；`cargo fmt --all -- --check` 与 `git diff --check` 通过。全仓审计确认旧快捷键仅保留在“已废止/旧→新”迁移说明和历史审计记录中，不再存在于现行用户帮助或第二套业务状态机。
+
+重构未修改 LBA0～12/LCE 协议语义，也未降低任何真实写盘安全门槛：系统盘保护、USB 整盘确认、写前备份、卸载/锁卷、reopen 身份复核、atomic write、readback、rollback 均保持原有边界；真实制盘仍必须精确输入大写 `YES`。
 
 ### 10.11 回归门禁
 
