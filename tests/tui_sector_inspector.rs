@@ -205,6 +205,60 @@ fn selecting_known_partition_sector_requests_read_only_preview() {
 }
 
 #[test]
+fn inspect_subworkspace_cycle_preserves_sector_cursor_and_return_target() {
+    use edpcli::tui::state::AdvancedInspectPanel;
+
+    let mut state = AppState::new();
+    assert!(state.begin_advanced_inspect(AdvancedInspectSource::Disk(6)));
+    state.advanced_inspect_finish(Ok(workspace(vec![item(0, true)])));
+    select_protocol_lba0(&mut state);
+    let breadcrumb = state.advanced_inspect_breadcrumb().unwrap();
+    assert!(breadcrumb.display().contains("LBA0"));
+    assert_eq!(breadcrumb.escape_hint(), "Esc 返回：设备列表");
+    assert!(state.advanced_inspect_open_selected_sector().is_none());
+    state.advanced_inspect_sector_set_cursor(37);
+    assert_eq!(
+        state.advanced_inspect_breadcrumb().unwrap().escape_hint(),
+        "Esc 返回：Inspect"
+    );
+    for expected in [
+        AdvancedInspectPanel::Tree,
+        AdvancedInspectPanel::Overview,
+        AdvancedInspectPanel::Detail,
+    ] {
+        state.advanced_inspect_shift_panel(false);
+        assert_eq!(state.advanced_inspect().unwrap().panel, expected);
+        assert_eq!(state.advanced_inspect_sector().unwrap().cursor, 37);
+    }
+    state.advanced_inspect_shift_panel(true);
+    assert_eq!(
+        state.advanced_inspect().unwrap().panel,
+        AdvancedInspectPanel::Overview
+    );
+    let mut terminal = Terminal::new(TestBackend::new(60, 18)).unwrap();
+    terminal.draw(|frame| render::draw(frame, &state)).unwrap();
+    let text = terminal
+        .backend()
+        .buffer()
+        .content()
+        .iter()
+        .map(|cell| cell.symbol())
+        .collect::<String>()
+        .replace(' ', "");
+    assert!(text.contains("Esc返回：Inspect"), "{text}");
+    assert!(text.contains("节点概览"), "{text}");
+    assert!(state.advanced_inspect_close_sector());
+    assert_eq!(
+        state.advanced_inspect().unwrap().panel,
+        AdvancedInspectPanel::Tree
+    );
+    assert_eq!(
+        state.advanced_inspect_breadcrumb().unwrap().escape_hint(),
+        "Esc 返回：设备列表"
+    );
+}
+
+#[test]
 fn sector_inspector_loads_on_demand_navigates_bytes_and_bounds_cache() {
     let mut state = AppState::new();
     assert!(state.begin_advanced_inspect(AdvancedInspectSource::Disk(6)));

@@ -9,9 +9,33 @@ fn inspect_field_status_style(status: crate::application::inspect::InspectFieldS
     }
 }
 
+fn draw_inspect_breadcrumb(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState) {
+    let Some(model) = state.advanced_inspect_breadcrumb() else {
+        return;
+    };
+    let parts = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Min(0), Constraint::Length(20)])
+        .split(area);
+    frame.render_widget(
+        Paragraph::new(safe(&model.display())).style(muted()),
+        parts[0],
+    );
+    frame.render_widget(
+        Paragraph::new(model.escape_hint()).style(accent()),
+        parts[1],
+    );
+}
+
 fn draw_sector_inspector(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState) {
     use super::super::state::SectorInspectMode;
 
+    let outer = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(1), Constraint::Min(1)])
+        .split(area);
+    draw_inspect_breadcrumb(frame, outer[0], state);
+    let area = outer[1];
     let Some(sector) = state.advanced_inspect_sector() else {
         return;
     };
@@ -284,7 +308,7 @@ pub(super) fn draw_advanced_inspect(
             );
         }
         AdvancedInspectStage::Browser => {
-            if advanced.sector.is_some() {
+            if advanced.sector.is_some() && advanced.panel == AdvancedInspectPanel::Detail {
                 draw_sector_inspector(frame, area, state);
                 return;
             }
@@ -332,11 +356,13 @@ pub(super) fn draw_advanced_inspect(
             let browser = Layout::default()
                 .direction(Direction::Vertical)
                 .constraints([
+                    Constraint::Length(1),
                     Constraint::Length(layout_height),
                     Constraint::Length(1),
                     Constraint::Min(1),
                 ])
                 .split(area);
+            draw_inspect_breadcrumb(frame, browser[0], state);
             let total = disk_layout.total_sectors;
             let gib = total as f64 * crate::common::SECTOR as f64 / 1_073_741_824.0;
             let disk_status = match &advanced.source {
@@ -353,13 +379,13 @@ pub(super) fn draw_advanced_inspect(
                 safe(&workspace.source),
                 safe(&disk_status)
             ))];
-            layout_lines.push(disk_layout.bar_line(browser[0].width.saturating_sub(4) as usize));
+            layout_lines.push(disk_layout.bar_line(browser[1].width.saturating_sub(4) as usize));
             layout_lines.extend(disk_layout.legend_lines().into_iter().map(Line::from));
             frame.render_widget(
                 Paragraph::new(layout_lines)
                     .block(Block::default().borders(Borders::ALL).title("磁盘布局"))
                     .wrap(Wrap { trim: false }),
-                browser[0],
+                browser[1],
             );
             frame.render_widget(
                 Tabs::new(["结构树", "节点概览", "节点详情"])
@@ -367,9 +393,9 @@ pub(super) fn draw_advanced_inspect(
                     .style(tab())
                     .highlight_style(active_tab())
                     .divider(Span::styled(" │ ", muted())),
-                browser[1],
+                browser[2],
             );
-            let content_area = browser[2];
+            let content_area = browser[3];
             let compact = content_area.width < 92 || content_area.height < 14;
             let (tree_area, overview_area, detail_area) = if compact {
                 match advanced.panel {

@@ -128,6 +128,11 @@ pub const NORMAL_HELP: &[HelpBinding] = &[
 
 pub const INSPECT_HELP: &[HelpBinding] = &[
     HelpBinding {
+        keys: "Tab/Shift-Tab",
+        label: "子工作区",
+        action: TuiAction::WorkspaceNext,
+    },
+    HelpBinding {
         keys: "j/k",
         label: "Move",
         action: TuiAction::MoveDown,

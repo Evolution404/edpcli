@@ -557,7 +557,7 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
                         .map(|binding| Line::from(format!("{}  {}", binding.keys, binding.label))),
                 );
                 help_lines.push(Line::from(
-                    "顶层标签: Tab/Shift-Tab 设备↔备份 · Panel: Ctrl-w h/j/k/l/w/W",
+                    "顶层 Tab/Shift-Tab 设备↔备份 · Inspect 内 Tab/Shift-Tab 切结构树/概览/详情 · Ctrl-w 面板别名",
                 ));
                 help_lines.push(Line::from(
                     "设备: Enter 制盘 · i Inspect · b 新建备份 · 备份: Enter/i Inspect · b 新建 · v 校验 · R 恢复 · d 删除",
@@ -609,13 +609,17 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
         match advanced.stage {
             AdvancedInspectStage::Running => "全盘检查后台只读建立结构树…".to_string(),
             AdvancedInspectStage::Browser => {
+                let escape = state
+                    .advanced_inspect_breadcrumb()
+                    .map(|model| model.escape_hint())
+                    .unwrap_or_else(|| "Esc 返回".into());
                 if let Some((query, index, total)) = state.advanced_inspect_search_status() {
                     format!(
-                        "全盘检查：j/k 移动 · h/l 折叠/展开 · Enter 查看 · / 搜索 · n/N 匹配 · gl 跳转 · 当前 {index}/{total}: {}",
+                        "Inspect：Tab/Shift-Tab 子工作区 · Enter Sector Inspector · {escape} · q 退出 · 当前 {index}/{total}: {}",
                         safe(query)
                     )
                 } else {
-                    "全盘检查：j/k 移动 · h/l 折叠/展开 · Enter 查看 · / 搜索 · n/N 匹配 · gl 跳转 · Ctrl-w 面板 · Esc 返回".to_string()
+                    format!("Inspect：Tab/Shift-Tab 子工作区 · j/k 选择 · h/l 树折叠/展开 · Enter Sector Inspector · {escape} · q 退出")
                 }
             }
         }
