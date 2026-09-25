@@ -1034,7 +1034,17 @@ application 返回结构化 `ProvisionReport/BackupReport/InspectReport`，CLI/T
 - `scripts/test-full.py` 新增 `--max-seconds`，并支持环境变量 `EDPCLI_TEST_MAX_SECONDS`；功能失败优先报告，功能全部通过后才检查总耗时预算。
 - `scripts/test-fast.sh` 默认传入 **45 秒**预算，可用 `EDPCLI_FAST_MAX_SECONDS` 显式覆盖；GitHub Actions 的完整非 HIL 门禁设置 **120 秒**性能预算。该预算只判断性能回归，不是同步命令执行超时。
 - 静态基础设施门禁 **1/1** 通过；负向运行以 **0.001 秒**预算执行时，测试本身全部通过后明确输出 `timing budget exceeded` 并以 **exit 1** 结束，证明门禁实际生效。
-- 正式 `scripts/test-fast.sh` 在默认 45 秒预算下 **10.57s / 0 失败 / exit 0**，当前性能满足门槛。
+- 正式 `scripts/test-fast.sh` 在默认 45 秒预算下通过；最终已提交代码重跑为 **41.27s / 0 失败 / 退出码 0**，当前性能满足门槛。
+
+### Phase R6 总体实施状态（2026-09-25）
+
+**COMPLETE。**
+
+- R6.1～R6.7 已全部完成：`TargetSession`、`EvidenceSource`、类型化报告/事件、架构导入门禁、`sccache`、测试性能基准、耗时回归门禁均已落地并具备自动回归检查。
+- 最终代码门禁：`cargo fmt --all -- --check` 与 `git diff --check` 通过；`fast` **41.27s / 0 失败 / 退出码 0**。
+- 最终完整非 HIL 门禁通过持久任务执行：8 个正式测试组 + doctest，**39.53s / 0 失败 / 退出码 0**，并显式应用与 CI 一致的 **120 秒性能预算**。
+- macOS Plain Virtual-HIL **1/1 通过 / 退出码 0**；完成虚拟盘制盘、重新识别、弹出/重新挂载与 exFAT 文件读回。`hdiutil attach -nomount` 仅产生弃用警告，不影响结果。
+- 本轮未执行真实 USB Phase 8；其真实硬件验收仍明确保持 **未执行/未验收**，没有被架构重构或虚拟 HIL 结果替代。
 
 ---
 
