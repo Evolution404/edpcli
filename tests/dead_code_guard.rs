@@ -28,6 +28,12 @@ fn removed_dead_and_legacy_write_helpers_do_not_return() {
 
     let edpb = source("src/edpb.rs");
     assert!(!edpb.contains("fn write_legacy_migrated_backup("));
+    assert!(
+        !Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("examples/migrate_legacy_backups.rs")
+            .exists(),
+        "removed legacy backup migration example must not return"
+    );
 }
 
 #[test]

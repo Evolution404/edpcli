@@ -41,6 +41,7 @@ fn fast_and_full_gate_entrypoints_are_repository_owned() {
     let fast = read("scripts/test-fast.sh");
     let full = read("scripts/test-full.py");
     assert!(fast.contains("test-full.py"));
+    assert!(fast.contains("cargo clippy --all-targets --locked -- -D warnings"));
     assert!(full.contains("--message-format=json"));
     assert!(full.contains("ThreadPoolExecutor"));
     assert!(full.contains("duration"));

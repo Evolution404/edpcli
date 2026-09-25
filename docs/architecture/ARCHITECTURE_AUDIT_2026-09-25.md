@@ -1046,6 +1046,17 @@ application 返回结构化 `ProvisionReport/BackupReport/InspectReport`，CLI/T
 - macOS Plain Virtual-HIL **1/1 通过 / 退出码 0**；完成虚拟盘制盘、重新识别、弹出/重新挂载与 exFAT 文件读回。`hdiutil attach -nomount` 仅产生弃用警告，不影响结果。
 - 本轮未执行真实 USB Phase 8；其真实硬件验收仍明确保持 **未执行/未验收**，没有被架构重构或虚拟 HIL 结果替代。
 
+## Phase D0：测试聚合、Clippy 与失效迁移入口收口
+
+**COMPLETE。**
+
+- 全量技术债复审发现，R0 将 integration tests 聚合为 suite 后，多个子测试仍各自 \`mod common\` / \`mod gold_name\`，导致 \`cargo clippy --all-targets --locked -- -D warnings\` 触发 \`duplicate_mod\` / \`duplicated_attributes\`；同时两处普通测试 lint 也会使发布门禁失败。
+- 六个聚合 suite 现在各自只装载一次共享 \`common\`，需要历史金标文件名适配的 suite 也只装载一次 \`gold_name\`；子测试通过 suite 根模块复用共享支持代码，避免同一源文件在一个 crate 中重复编译。
+- 删除已经失效的 \`examples/migrate_legacy_backups.rs\`。该 example 仍调用 R3 已删除的 \`read_backup_sha256\` / \`write_legacy_migrated_backup\`，属于明确的旧 \`.bin/.sha256\` 产品迁移残留；\`dead_code_guard\` 新增约束，禁止该入口再次出现。
+- \`scripts/test-fast.sh\` 已把 \`cargo clippy --all-targets --locked -- -D warnings\` 纳入仓库自有日常门禁，\`tests/test_infrastructure.rs\` 锁定这一契约，避免以后出现“fast/full 测试绿但正式 Clippy 红”的分裂状态。
+- 修复相关测试自身的 \`manual_contains\`、\`unnecessary_get_then_check\` 与 \`field_reassign_with_default\`；当前全目标 Clippy 已实际以 **exit 0 / 0 warnings** 通过。
+- 本阶段只治理测试基础设施与已废弃产品入口，没有修改 LBA0～12/LCE 协议语义、真实介质兼容解析或任何写盘安全门槛。
+
 ---
 
 # 第八部分：完成标准
