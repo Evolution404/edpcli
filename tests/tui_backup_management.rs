@@ -17,7 +17,7 @@ fn backup_workspace_has_explicit_verify_and_delete_actions() {
 
 #[test]
 fn backup_delete_uses_shared_application_service_not_direct_filesystem_removal() {
-    let task = include_str!("../src/tui/task.rs");
+    let task = include_str!("../src/tui/backups/task.rs");
     assert!(task.contains("delete_backup_exact"));
     assert!(!task.contains("remove_file("));
 

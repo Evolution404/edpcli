@@ -57,8 +57,8 @@ fn shared_write_service_does_not_print_directly_into_tui_terminal() {
     assert!(!service.contains("print!("));
     assert!(service.contains(".write_event("));
 
-    let diskio = include_str!("../src/diskio.rs");
-    let atomic = diskio
+    let transaction = include_str!("../src/diskio/transaction.rs");
+    let atomic = transaction
         .split("pub fn atomic_write_sectors")
         .nth(1)
         .expect("atomic write source");

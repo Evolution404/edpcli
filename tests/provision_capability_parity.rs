@@ -9,7 +9,7 @@ fn source(path: &str) -> String {
 #[test]
 fn cli_and_tui_share_provision_prepare_commit_and_export_entrypoints() {
     let cli = source("src/cli.rs");
-    let task = source("src/tui/task.rs");
+    let task = source("src/tui/provision/task.rs");
 
     for entrypoint in [
         "prepare_provision",
@@ -42,7 +42,7 @@ fn cli_and_tui_share_provision_prepare_commit_and_export_entrypoints() {
 fn plain_is_a_first_class_target_and_not_mode4() {
     let args = source("src/cli_args.rs");
     let application = source("src/application/provision.rs");
-    let tui_state = source("src/tui/state.rs");
+    let tui_state = source("src/tui/provision/state.rs");
 
     assert!(args.contains("mode0|mode1|mode2|mode3|plain"));
     assert!(args.contains("--partition"));
@@ -58,7 +58,7 @@ fn plain_is_a_first_class_target_and_not_mode4() {
 
 #[test]
 fn plain_export_is_available_in_tui_review_flow() {
-    let state = source("src/tui/state.rs");
+    let state = source("src/tui/provision/state.rs");
     let render = source("src/tui/render.rs");
 
     assert!(

@@ -1,3 +1,5 @@
+#[path = "architecture_split.rs"]
+mod architecture_split;
 #[path = "dead_code_guard.rs"]
 mod dead_code_guard;
 #[path = "dev_format_hook.rs"]

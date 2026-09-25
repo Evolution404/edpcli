@@ -39,7 +39,7 @@ fn selected_device_is_exposed_for_dashboard_detail_panel() {
 
 #[test]
 fn device_dashboard_renders_identity_detail_fields() {
-    let render = include_str!("../src/tui/render.rs");
+    let render = include_str!("../src/tui/devices/render.rs");
     for field in ["onlyid", "device_id", "已有备份"] {
         assert!(
             render.contains(field),

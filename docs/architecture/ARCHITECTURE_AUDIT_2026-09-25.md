@@ -927,6 +927,17 @@ application 返回结构化 `ProvisionReport/BackupReport/InspectReport`，CLI/T
 
 每次只移动一个领域，保持测试绿。
 
+### R4 实施状态（2026-09-25）
+
+**COMPLETE。**
+
+- `application/provision.rs` 已按 prepare/commit/export 拆分，并将模块内测试迁出；门面文件由 2215 行降至 **579 行**。
+- `diskio.rs` 已拆为 device/transaction/backup_config/backup_catalog/backup_create，门面文件由 1537 行降至 **264 行**；块设备事务与备份目录/配置职责分离。
+- TUI 已按制盘、检查、备份、设备工作区拆分状态、渲染和任务逻辑，并将独立写盘任务拆到 `write_task.rs`；主状态文件 **1199 行**、主渲染文件 **811 行**、主任务文件 **660 行**。
+- 新增 `architecture_split` 门禁，锁定领域模块存在、超大文件规模上限，并禁止各工作区的状态/渲染层直接依赖平台层或磁盘输入输出层。
+- provision suite **176/176**、TUI suite **132/132**、R4 architecture gate **2/2** 通过；拆分只迁移职责边界，没有改变 LBA0～12/LCE 协议语义或写盘安全服务。
+- R4 最终 fast 门禁 **5.59s / 0 failures**，full 门禁 **29.83s / 0 failures**，8 个非 HIL suite 与 doctest 全绿。
+
 ## Phase R5：`Inspect` `semantic` dependency 收敛
 
 1. 跨业务语义移入 typed protocol `semantic`；

@@ -105,7 +105,7 @@ fn override_capacity(
     }
 }
 
-fn target_encrypt_capacity_override(
+pub(super) fn target_encrypt_capacity_override(
     _mode: OfficialPartitionMode,
     mib: Option<u64>,
     sectors: Option<u64>,
