@@ -8,8 +8,8 @@ fn backup_create_has_a_tui_navigation_and_palette_action() {
         parse_command("backup-create").expect("backup-create palette command"),
         PaletteAction::BackupCreate
     );
-    let event = include_str!("../src/tui/event.rs");
-    assert!(event.contains("NavCommand::BeginBackupCreate"));
+    let keymap = include_str!("../src/tui/keymap.rs");
+    assert!(keymap.contains("KeyCode::Char('a') => Some(TuiAction::Add)"));
 }
 
 #[test]

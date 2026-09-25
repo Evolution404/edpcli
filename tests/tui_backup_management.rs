@@ -1,17 +1,31 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-use edpcli::tui::event::KeyMapper;
-use edpcli::tui::state::NavCommand;
+use edpcli::tui::keymap::{KeyMapper, TuiAction};
+use edpcli::tui::state::InputMode;
 
 #[test]
 fn backup_workspace_has_explicit_verify_and_delete_actions() {
     let mut mapper = KeyMapper::new();
     assert_eq!(
-        mapper.map(KeyEvent::new(KeyCode::Char('v'), KeyModifiers::NONE)),
-        Some(NavCommand::VerifyBackup)
+        mapper.map(
+            InputMode::Normal,
+            KeyEvent::new(KeyCode::Char('v'), KeyModifiers::NONE)
+        ),
+        Some(TuiAction::ViewOrVerify)
     );
     assert_eq!(
-        mapper.map(KeyEvent::new(KeyCode::Char('D'), KeyModifiers::SHIFT)),
-        Some(NavCommand::BeginBackupDelete)
+        mapper.map(
+            InputMode::Normal,
+            KeyEvent::new(KeyCode::Char('d'), KeyModifiers::NONE)
+        ),
+        Some(TuiAction::Delete)
+    );
+    assert_eq!(
+        mapper.map(
+            InputMode::Normal,
+            KeyEvent::new(KeyCode::Char('D'), KeyModifiers::SHIFT)
+        ),
+        None,
+        "legacy D delete binding must not survive the unified keymap"
     );
 }
 

@@ -65,8 +65,10 @@ pub enum Workspace {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum InputMode {
     Normal,
+    Insert,
     Search,
     Command,
+    Confirm,
     Help,
 }
 

@@ -6,6 +6,7 @@
 pub mod animation;
 pub mod command;
 pub mod event;
+pub mod keymap;
 pub mod render;
 pub mod state;
 pub mod task;
@@ -430,6 +431,35 @@ fn palette_action_to_nav(action: command::PaletteAction) -> NavCommand {
         command::PaletteAction::Help => NavCommand::Help,
         command::PaletteAction::Quit => NavCommand::Quit,
     }
+}
+
+fn keymap_action_to_nav(action: keymap::TuiAction) -> Option<NavCommand> {
+    use keymap::TuiAction;
+
+    Some(match action {
+        TuiAction::MoveUp => NavCommand::Up,
+        TuiAction::MoveDown => NavCommand::Down,
+        TuiAction::MoveLeft => NavCommand::Left,
+        TuiAction::MoveRight => NavCommand::Right,
+        TuiAction::Top => NavCommand::Top,
+        TuiAction::Bottom => NavCommand::Bottom,
+        TuiAction::HalfPageUp => NavCommand::HalfPageUp,
+        TuiAction::HalfPageDown => NavCommand::HalfPageDown,
+        TuiAction::Back => NavCommand::Escape,
+        TuiAction::Quit => NavCommand::Quit,
+        TuiAction::Help => NavCommand::Help,
+        TuiAction::Search => NavCommand::Search,
+        TuiAction::NextMatch => NavCommand::NextMatch,
+        TuiAction::PreviousMatch => NavCommand::PreviousMatch,
+        TuiAction::Command => NavCommand::CommandPalette,
+        TuiAction::Refresh => NavCommand::Refresh,
+        TuiAction::WorkspaceNext => NavCommand::NextWorkspace,
+        TuiAction::WorkspacePrevious => NavCommand::PreviousWorkspace,
+        TuiAction::WorkspaceDevices => NavCommand::WorkspaceDevices,
+        TuiAction::WorkspaceBackups => NavCommand::WorkspaceBackups,
+        TuiAction::WorkspaceProvision => NavCommand::WorkspaceProvision,
+        _ => return None,
+    })
 }
 
 fn workspace_switch_command(key: &ct_event::KeyEvent) -> Option<NavCommand> {
@@ -1516,18 +1546,20 @@ fn run_loop(resume: Option<state::WriteIntent>) -> io::Result<LoopExit> {
                         continue;
                     }
 
-                    if let Some(command) = keys.map(key) {
-                        let viewport_height =
-                            session.terminal.size()?.height.saturating_sub(9) as usize;
-                        match dispatch_nav_command(
-                            &mut state,
-                            &mut tasks,
-                            command,
-                            &backup_dir,
-                            viewport_height,
-                        ) {
-                            StateEffect::ExitRequested => break,
-                            StateEffect::ExitDeferred | StateEffect::None => {}
+                    if let Some(action) = keys.map(state.input_mode(), key) {
+                        if let Some(command) = keymap_action_to_nav(action) {
+                            let viewport_height =
+                                session.terminal.size()?.height.saturating_sub(9) as usize;
+                            match dispatch_nav_command(
+                                &mut state,
+                                &mut tasks,
+                                command,
+                                &backup_dir,
+                                viewport_height,
+                            ) {
+                                StateEffect::ExitRequested => break,
+                                StateEffect::ExitDeferred | StateEffect::None => {}
+                            }
                         }
                     }
                 }

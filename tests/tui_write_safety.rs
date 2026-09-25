@@ -42,10 +42,10 @@ fn write_safety_primitives_live_only_in_application_service() {
 
 #[test]
 fn critical_exit_contract_covers_ctrl_c_through_quit_intent() {
-    let event = include_str!("../src/tui/event.rs");
+    let keymap = include_str!("../src/tui/keymap.rs");
     let state = include_str!("../src/tui/state.rs");
-    assert!(event.contains("KeyModifiers::CONTROL"));
-    assert!(event.contains("NavCommand::Quit"));
+    assert!(keymap.contains("KeyModifiers::CONTROL"));
+    assert!(keymap.contains("Some(TuiAction::Quit)"));
     assert!(state.contains("ExitDeferred"));
     assert!(state.contains("critical_operation"));
 }

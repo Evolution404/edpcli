@@ -18,6 +18,8 @@ mod tui_elevation_resume;
 mod tui_inspect_scroll;
 #[path = "tui_inspect_workspace.rs"]
 mod tui_inspect_workspace;
+#[path = "tui_keymap_contract.rs"]
+mod tui_keymap_contract;
 #[path = "tui_lifecycle.rs"]
 mod tui_lifecycle;
 #[path = "tui_nonblocking.rs"]
