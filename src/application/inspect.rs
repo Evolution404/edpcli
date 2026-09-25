@@ -1,13 +1,12 @@
 //! Read-only inspect application service shared by CLI/TUI frontends.
 
-use std::io;
 use std::path::Path;
 
-use crate::common::{METADATA_IMAGE_LEN, METADATA_SECTOR_COUNT, SECTOR};
-use crate::diskio::{self, FileDev};
-use crate::identify::identify;
+use super::evidence::EvidenceSource;
+pub use super::evidence::SectorReader;
+use crate::common::{METADATA_SECTOR_COUNT, SECTOR};
 use crate::inspect::{self, InspectMeta};
-use crate::sysinfo::{self, CmdRunner};
+use crate::sysinfo::CmdRunner;
 
 fn default_protocol_request() -> AdvancedInspectRequest {
     AdvancedInspectRequest {
@@ -31,37 +30,6 @@ pub fn load_disk_inspect(
 }
 
 pub const MAX_ADVANCED_INSPECT_SECTORS: usize = 65_536;
-
-pub trait SectorReader {
-    fn read_sector(&mut self, lba: u64) -> io::Result<Vec<u8>>;
-
-    fn read_range(&mut self, start_lba: u64, sector_count: usize) -> io::Result<Vec<u8>> {
-        let capacity = sector_count
-            .checked_mul(SECTOR)
-            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "扇区范围字节长度溢出"))?;
-        let mut out = Vec::with_capacity(capacity);
-        for index in 0..sector_count {
-            let lba = start_lba
-                .checked_add(index as u64)
-                .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "LBA 范围溢出"))?;
-            let sector = self.read_sector(lba)?;
-            if sector.len() != SECTOR {
-                return Err(io::Error::new(
-                    io::ErrorKind::UnexpectedEof,
-                    format!("LBA{lba} 返回 {}B，预期 {SECTOR}B", sector.len()),
-                ));
-            }
-            out.extend_from_slice(&sector);
-        }
-        Ok(out)
-    }
-}
-
-impl SectorReader for FileDev {
-    fn read_sector(&mut self, lba: u64) -> io::Result<Vec<u8>> {
-        self.read_sector_u64(lba)
-    }
-}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum InspectDecoderKind {
@@ -704,98 +672,35 @@ fn run_advanced_source<R: SectorReader + ?Sized>(
     })
 }
 
-struct AdvancedBackupReader {
-    path: std::path::PathBuf,
-    manifest: crate::edpb::Manifest,
-    protocol: Vec<u8>,
-    cache: std::collections::BTreeMap<String, Vec<u8>>,
-}
-
-impl SectorReader for AdvancedBackupReader {
-    fn read_sector(&mut self, lba: u64) -> io::Result<Vec<u8>> {
-        if lba < METADATA_SECTOR_COUNT as u64 {
-            let start = usize::try_from(lba).unwrap() * SECTOR;
-            return Ok(self.protocol[start..start + SECTOR].to_vec());
-        }
-        let found = self.manifest.extents.iter().find_map(|extent| {
-            let end = extent.start_lba.checked_add(extent.sector_count)?;
-            if lba < extent.start_lba || lba >= end {
-                return None;
-            }
-            let artifact = self.manifest.artifacts.iter().find(|artifact| {
-                artifact.kind == "raw_sectors"
-                    && artifact.source_extent_ids.iter().any(|id| id == &extent.id)
-            })?;
-            Some((extent.start_lba, artifact.id.clone()))
-        });
-        let Some((start_lba, artifact_id)) = found else {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::NotFound,
-                format!("EDPB 未采集 LBA{lba} 的原始扇区"),
-            ));
-        };
-        if !self.cache.contains_key(&artifact_id) {
-            let data = crate::edpb::read_artifact(&self.path, &artifact_id)
-                .map_err(std::io::Error::other)?;
-            self.cache.insert(artifact_id.clone(), data);
-        }
-        let data = self
-            .cache
-            .get(&artifact_id)
-            .expect("刚插入的 Artifact 必须存在");
-        let offset = usize::try_from(lba - start_lba)
-            .ok()
-            .and_then(|sector| sector.checked_mul(SECTOR))
-            .ok_or_else(|| std::io::Error::other("EDPB Artifact 扇区偏移溢出"))?;
-        data.get(offset..offset + SECTOR)
-            .map(|sector| sector.to_vec())
-            .ok_or_else(|| {
-                std::io::Error::new(std::io::ErrorKind::UnexpectedEof, "EDPB Artifact 截断")
-            })
+fn run_evidence_source(
+    mut evidence: EvidenceSource,
+    request: &AdvancedInspectRequest,
+) -> Result<AdvancedInspectWorkspace, String> {
+    let identity = evidence.identity().clone();
+    let mut meta = InspectMeta {
+        device_id: identity.device_id,
+        vid: identity.vid,
+        pid: identity.pid,
+        size_bytes: identity.size_bytes,
+        onlyid: identity.onlyid,
+    };
+    if let Some(device_id) = request.device_id_override.as_ref() {
+        meta.device_id = Some(device_id.clone());
     }
+    let context = crate::inspect_target::InspectDiskContext::new(
+        evidence.protocol().to_vec(),
+        meta.device_id.clone(),
+        evidence.total_sectors(),
+    );
+    let source = evidence.source_label().to_string();
+    run_advanced_source(source, meta, context, request, &mut evidence)
 }
 
 pub fn load_backup_advanced_inspect(
     path: &Path,
     request: &AdvancedInspectRequest,
 ) -> Result<AdvancedInspectWorkspace, String> {
-    let verified = crate::edpb::verify_file(path)
-        .map_err(|error| format!("EDPB 校验失败 {}: {error}", path.display()))?;
-    let protocol = crate::edpb::read_raw_protocol(path)
-        .map_err(|error| format!("读取 EDPB LBA0-12 失败 {}: {error}", path.display()))?;
-    let mut meta = InspectMeta {
-        device_id: Some(verified.manifest.device.device_id.clone()),
-        vid: Some(verified.manifest.device.vid.clone()),
-        pid: Some(verified.manifest.device.pid.clone()),
-        size_bytes: verified.manifest.geometry.capacity_bytes,
-        onlyid: verified.manifest.device.onlyid.clone(),
-    };
-    if let Some(device_id) = request.device_id_override.as_ref() {
-        meta.device_id = Some(device_id.clone());
-    }
-    let total_sectors = verified
-        .manifest
-        .geometry
-        .total_sectors
-        .ok_or_else(|| "EDPB 缺少 total_sectors，无法校验任意 LBA".to_string())?;
-    let context = crate::inspect_target::InspectDiskContext::new(
-        protocol.clone(),
-        meta.device_id.clone(),
-        total_sectors,
-    );
-    let mut reader = AdvancedBackupReader {
-        path: path.to_path_buf(),
-        manifest: verified.manifest,
-        protocol,
-        cache: std::collections::BTreeMap::new(),
-    };
-    run_advanced_source(
-        path.display().to_string(),
-        meta,
-        context,
-        request,
-        &mut reader,
-    )
+    run_evidence_source(EvidenceSource::open_backup(path)?, request)
 }
 
 pub fn load_disk_advanced_inspect(
@@ -803,49 +708,15 @@ pub fn load_disk_advanced_inspect(
     disk: u32,
     request: &AdvancedInspectRequest,
 ) -> Result<AdvancedInspectWorkspace, String> {
-    crate::application::write::guard_usb_disk(runner, disk).map_err(|error| error.msg)?;
-    let path = diskio::raw_path(disk);
-    let mut dev =
-        FileDev::open_rdonly(&path).map_err(|error| format!("无法只读打开 disk{disk}: {error}"))?;
-    let total_sectors = sysinfo::disk_total_sectors(runner, disk)
-        .ok_or_else(|| "无法取得设备总扇区数".to_string())?;
-
-    let protocol = dev
-        .read_range(0, METADATA_SECTOR_COUNT)
-        .map_err(|error| format!("读取协议上下文 LBA0-12 失败: {error}"))?;
-    debug_assert_eq!(protocol.len(), METADATA_IMAGE_LEN);
-
-    let raw7 = &protocol[7 * SECTOR..8 * SECTOR];
-    let id = identify(runner, disk, raw7).device_id;
-    let (vid, pid) = sysinfo::usb_vid_pid(runner, disk);
-    let mut meta = InspectMeta {
-        device_id: id,
-        vid: (vid != "xxxx").then_some(vid),
-        pid: (pid != "xxxx").then_some(pid),
-        size_bytes: total_sectors.checked_mul(SECTOR as u64),
-        onlyid: diskio::lba4_label_id_from(&protocol[4 * SECTOR..5 * SECTOR]),
-    };
-    if let Some(device_id) = request.device_id_override.as_ref() {
-        meta.device_id = Some(device_id.clone());
-    }
-    let context = crate::inspect_target::InspectDiskContext::new(
-        protocol,
-        meta.device_id.clone(),
-        total_sectors,
-    );
-
-    run_advanced_source(
-        format!("物理盘 disk{disk} ({path})"),
-        meta,
-        context,
-        request,
-        &mut dev,
-    )
+    run_evidence_source(EvidenceSource::open_disk(runner, disk)?, request)
 }
 
 #[cfg(test)]
 mod advanced_tests {
     use super::*;
+    use std::io;
+
+    use crate::common::METADATA_IMAGE_LEN;
 
     struct MemoryReader {
         sectors: Vec<Vec<u8>>,

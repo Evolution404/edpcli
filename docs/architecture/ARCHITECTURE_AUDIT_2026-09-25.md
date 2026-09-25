@@ -978,6 +978,16 @@ application 返回结构化 `ProvisionReport/BackupReport/InspectReport`，CLI/T
 - 新增架构门禁，禁止 `application/provision/commit.rs` 与 `application/write.rs` 重新直接调用 `sysinfo::prepare_write` 或 `reopen_rdwr`。
 - 定向测试：架构门禁 **1/1**、制盘套件 **176/176**、备份套件 **61/61** 全绿；`fast` 冷缓存 **52.27s / 0 失败**，同一工作区暖缓存复跑 **5.70s / 0 失败**。
 
+### R6.2 `EvidenceSource` 实施状态（2026-09-25）
+
+**COMPLETE。**
+
+- 新增 `application::evidence`，统一物理盘与 EDPB 的只读证据入口，集中提供来源标签、总扇区数、LBA0～12 协议镜像、设备身份元数据、扇区读取与 EDPB `Artifact` 查找。
+- `application::inspect` 不再自行打开物理裸盘或解析 EDPB 的 `Manifest`/`Artifact`；物理盘与 EDPB 均先构造 `EvidenceSource`，随后进入同一 `run_advanced_source` 解码路径。
+- 原 `SectorReader` 契约迁入证据层并保持再导出，任意 LBA 的容量边界、未采集 EDPB 扇区报错、LCE/分区解码语义不变。
+- 新增架构门禁，禁止 `application::inspect` 重新直接调用 EDPB 容器读取或 `FileDev::open_rdonly`。
+- 定向测试：证据源架构门禁 **1/1**、检查套件 **53/53**、TUI 检查 **5/5** 全绿；`fast` 冷缓存 **48.44s / 0 失败**，暖缓存复跑 **4.24s / 0 失败**。
+
 ---
 
 # 第八部分：完成标准

@@ -135,3 +135,26 @@ fn raw_write_flows_use_target_session_for_safety_transition() {
         );
     }
 }
+
+#[test]
+fn inspect_disk_and_backup_sources_use_evidence_source() {
+    exists("src/application/evidence.rs");
+    let source = fs::read_to_string(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("src/application/inspect.rs"),
+    )
+    .expect("read application inspect");
+
+    for forbidden in [
+        "struct AdvancedBackupReader",
+        "crate::edpb::verify_file",
+        "crate::edpb::read_raw_protocol",
+        "FileDev::open_rdonly",
+    ] {
+        assert!(
+            !source.contains(forbidden),
+            "application inspect must acquire source evidence through EvidenceSource: {forbidden}"
+        );
+    }
+    assert!(source.contains("EvidenceSource::open_backup"));
+    assert!(source.contains("EvidenceSource::open_disk"));
+}

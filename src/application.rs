@@ -6,6 +6,7 @@
 
 pub mod backup;
 pub mod device;
+pub mod evidence;
 pub mod inspect;
 pub mod inspect_tree;
 pub mod provision;
