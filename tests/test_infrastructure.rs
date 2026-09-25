@@ -1,0 +1,59 @@
+use std::fs;
+use std::path::{Path, PathBuf};
+
+fn repo_root() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).to_path_buf()
+}
+
+fn read(path: &str) -> String {
+    fs::read_to_string(repo_root().join(path))
+        .unwrap_or_else(|error| panic!("read {path}: {error}"))
+}
+
+#[test]
+fn cargo_registers_bounded_integration_suites() {
+    let cargo = read("Cargo.toml");
+    assert!(cargo.contains("autotests = false"));
+    assert_eq!(
+        cargo.matches("[[test]]").count(),
+        10,
+        "keep eight non-HIL suites plus two explicit virtual-HIL targets"
+    );
+    for suite in [
+        "cli_suite",
+        "backup_suite",
+        "inspect_suite",
+        "protocol_suite",
+        "provision_suite",
+        "tui_suite",
+        "platform_suite",
+        "repository_suite",
+    ] {
+        assert!(
+            cargo.contains(&format!("name = \"{suite}\"")),
+            "missing suite {suite}"
+        );
+    }
+}
+
+#[test]
+fn fast_and_full_gate_entrypoints_are_repository_owned() {
+    let fast = read("scripts/test-fast.sh");
+    let full = read("scripts/test-full.py");
+    assert!(fast.contains("test-full.py"));
+    assert!(full.contains("--message-format=json"));
+    assert!(full.contains("ThreadPoolExecutor"));
+    assert!(full.contains("duration"));
+}
+
+#[test]
+fn ci_and_agent_policy_use_the_full_runner_instead_of_all_targets_shell_chains() {
+    let ci = read(".github/workflows/ci.yml");
+    let agents = read("AGENTS.md");
+    assert!(ci.contains("scripts/test-full.py"));
+    assert!(!ci.contains("run-cargo-test-ci.py"));
+    assert!(agents.contains("scripts/test-fast.sh"));
+    assert!(agents.contains("scripts/test-full.py"));
+    assert!(agents.contains("120"));
+    assert!(agents.contains("durable"));
+}

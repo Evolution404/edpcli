@@ -836,6 +836,18 @@ application 返回结构化 `ProvisionReport/BackupReport/InspectReport`，CLI/T
 - full gate 可用 durable/detached Job 稳定拿最终 exit code；
 - 后续 AI 不再直接用 120s shell 硬跑 `cargo test --all-targets`。
 
+### R0 实施状态（2026-09-25）
+
+**COMPLETE。**
+
+- `Cargo` 已关闭自动集成测试目标发现：70 个顶层测试源收敛为 **8 个正式非 HIL 测试组 + 2 个显式功能开关控制的虚拟 HIL 目标**；测试用例本身未删减。
+- `scripts/test-fast.sh` 已成为日常门禁：`fmt --check` + `git diff --check` + 核心测试组 + 按改动路径选择的领域测试组。当前 Mac 实测 **21.7s**，满足 `<45s` 目标。
+- `scripts/test-full.py` 已成为正式完整非 HIL 门禁：一次 `cargo test --no-run --message-format=json` 获取真实测试可执行文件，随后以受控并发直接运行，每个测试程序具有独立超时，并输出各测试组耗时；文档测试单独执行。
+- 完整门禁首次验证在 30 秒同步等待后被提升为持久任务，并通过观察**同一个任务**取得最终退出码；修正旧 CI 契约测试后，当前暖缓存完整门禁实测 **12.0s，0 个失败**。
+- CI 已直接调用 `python scripts/test-full.py --profile full`；旧 `scripts/ci/run-cargo-test-ci.py` 暂保留为薄兼容入口，但不再自行执行 `cargo test --all-targets`。
+- `AGENTS.md` 已写入 120 秒硬规则：AI 不得再在单个同步命令调用中串行硬跑 `cargo check --all-targets + cargo test --all-targets`，完整门禁必须使用仓库测试运行器与不少于 600 秒的持久任务观察模式。
+- 虚拟 HIL、真实 HIL 与日常/完整门禁保持分离；本阶段未改变 LBA0～12/LCE 协议语义，也未降低任何写盘安全门槛。
+
 ## Phase R1：CLI/TUI 能力对齐
 
 1. 抽统一 `ProvisionRequest::{Official,Plain}`；

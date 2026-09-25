@@ -2,3 +2,5 @@
 mod dev_format_hook;
 #[path = "documentation_layout.rs"]
 mod documentation_layout;
+#[path = "test_infrastructure.rs"]
+mod test_infrastructure;

@@ -8,6 +8,13 @@
 - Keep CI `cargo fmt --all -- --check` enabled as the final repository-level guard.
 - Do not bypass the hook with `--no-verify` unless the user explicitly requests it.
 
+## Test gates and long-running validation
+
+- Use `scripts/test-fast.sh` for routine local/AI validation. It runs formatting/diff checks plus the core suites and suites affected by the current change.
+- Use `python3 scripts/test-full.py --profile full` before merge/release and after broad refactors. The full runner compiles once from Cargo JSON artifacts, runs non-HIL test binaries with bounded parallelism/per-binary timeouts, reports per-suite duration, and runs doctests separately.
+- Virtual/real HIL remains separate from fast/full. Do not enable `ci-virtual-disk` in ordinary gates.
+- WebCodex/AI must not serialize `cargo check --all-targets` and `cargo test --all-targets` inside one 120-second synchronous shell call. Launch the repository full runner with a >=600-second budget; when the environment returns a durable Job, observe that same Job to its final exit code instead of retrying it.
+
 ## Local developer install on macOS
 
 - The user's active edpcli installation is the user-local binary at `~/.local/bin/edpcli`. Do not install development/test builds to `/usr/local/bin/edpcli` unless the user explicitly asks for a system-wide install.

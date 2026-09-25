@@ -48,8 +48,8 @@ jobs:
           components: clippy,rustfmt
       - name: Rustfmt
         run: cargo fmt --all -- --check
-      - name: Test all targets
-        run: python scripts/ci/run-cargo-test-ci.py
+      - name: Full non-HIL test gate
+        run: python scripts/test-full.py --profile full
       - name: Clippy is warning-free
         run: cargo clippy --all-targets --locked -- -D warnings
       - name: Build release binary
