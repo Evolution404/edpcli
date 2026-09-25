@@ -2,12 +2,57 @@ use std::time::{Duration, Instant};
 
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use edpcli::tui::{
-    keymap::{KeyMapper, TuiAction, INSPECT_HELP, NORMAL_HELP},
+    keymap::{KeyMapper, TuiAction, WidgetRole, INSPECT_HELP, NORMAL_HELP},
     state::InputMode,
 };
 
 fn key(code: KeyCode) -> KeyEvent {
     KeyEvent::new(code, KeyModifiers::NONE)
+}
+
+#[test]
+fn h_l_follow_widget_role_without_changing_insert_text() {
+    let mut mapper = KeyMapper::new();
+    assert_eq!(
+        mapper.map_for_role(
+            InputMode::Normal,
+            WidgetRole::Table,
+            key(KeyCode::Char('h'))
+        ),
+        Some(TuiAction::TableScrollLeft)
+    );
+    assert_eq!(
+        mapper.map_for_role(
+            InputMode::Normal,
+            WidgetRole::Table,
+            key(KeyCode::Char('l'))
+        ),
+        Some(TuiAction::TableScrollRight)
+    );
+    assert_eq!(
+        mapper.map_for_role(InputMode::Normal, WidgetRole::Tree, key(KeyCode::Char('h'))),
+        Some(TuiAction::MoveLeft)
+    );
+    assert_eq!(
+        mapper.map_for_role(InputMode::Normal, WidgetRole::Tree, key(KeyCode::Char('l'))),
+        Some(TuiAction::MoveRight)
+    );
+    assert_eq!(
+        mapper.map_for_role(
+            InputMode::Insert,
+            WidgetRole::Input,
+            key(KeyCode::Char('h'))
+        ),
+        Some(TuiAction::Text('h'))
+    );
+    assert_eq!(
+        mapper.map_for_role(
+            InputMode::Insert,
+            WidgetRole::Input,
+            key(KeyCode::Char('l'))
+        ),
+        Some(TuiAction::Text('l'))
+    );
 }
 
 #[test]

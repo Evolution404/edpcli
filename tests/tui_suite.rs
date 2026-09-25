@@ -28,6 +28,8 @@ mod tui_sector_inspector;
 mod tui_singleflight;
 #[path = "tui_state.rs"]
 mod tui_state;
+#[path = "tui_table_layout.rs"]
+mod tui_table_layout;
 #[path = "tui_terminal_safety.rs"]
 mod tui_terminal_safety;
 #[path = "tui_theme_contract.rs"]

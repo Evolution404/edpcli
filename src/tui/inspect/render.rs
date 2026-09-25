@@ -30,12 +30,6 @@ fn draw_inspect_breadcrumb(frame: &mut Frame, area: ratatui::layout::Rect, state
 fn draw_sector_inspector(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState) {
     use super::super::state::SectorInspectMode;
 
-    let outer = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([Constraint::Length(1), Constraint::Min(1)])
-        .split(area);
-    draw_inspect_breadcrumb(frame, outer[0], state);
-    let area = outer[1];
     let Some(sector) = state.advanced_inspect_sector() else {
         return;
     };
@@ -43,29 +37,41 @@ fn draw_sector_inspector(frame: &mut Frame, area: ratatui::layout::Rect, state: 
     let active_field = state.advanced_inspect_sector_active_field();
     let absolute = (sector.lba as u128) * crate::common::SECTOR as u128 + sector.cursor as u128;
     let decode_issue = item.and_then(|item| item.decode_error.as_deref());
+    let breadcrumb = state.advanced_inspect_breadcrumb();
     let header = vec![
+        Line::from(
+            breadcrumb
+                .as_ref()
+                .map(|model| safe(&model.display()))
+                .unwrap_or_default(),
+        ),
         Line::from(vec![
             Span::styled(
                 format!("LBA{}  ", sector.lba),
                 secondary().add_modifier(Modifier::BOLD),
             ),
             Span::styled(sector.mode.label(), accent().add_modifier(Modifier::BOLD)),
-            Span::raw(if sector.pending { "  · 读取中" } else { "" }),
+            Span::raw(format!(
+                "  · byte +0x{:03X} / absolute 0x{:X} / row {:02}/32{}",
+                sector.cursor,
+                absolute,
+                sector.cursor / 16 + 1,
+                if sector.pending { "  · 读取中" } else { "" }
+            )),
         ]),
         Line::from(format!(
-            "byte +0x{:03X} / absolute 0x{:X} / row {:02}/32",
-            sector.cursor,
-            absolute,
-            sector.cursor / 16 + 1
-        )),
-        Line::from(
+            "{} · {}",
+            breadcrumb
+                .as_ref()
+                .map(|model| model.escape_hint())
+                .unwrap_or_else(|| "Esc 返回".into()),
             sector
                 .error
                 .as_deref()
                 .or(decode_issue)
                 .map(|value| format!("decode: {}", safe(value)))
-                .unwrap_or_else(|| "decode: available/raw".into()),
-        ),
+                .unwrap_or_else(|| "decode: available/raw".into())
+        )),
     ];
     let vertical = Layout::default()
         .direction(Direction::Vertical)
@@ -696,18 +702,102 @@ pub(super) fn draw_advanced_inspect(
             if let Some(detail_area) = detail_area {
                 let detail_focus = advanced.panel == AdvancedInspectPanel::Detail;
                 let scroll = advanced.detail_scroll.min(u16::MAX as usize) as u16;
-                frame.render_widget(
-                    Paragraph::new(detail_lines)
-                        .block(
+                let field_item = selected_row
+                    .filter(|row| row.kind == InspectNodeKind::Sector)
+                    .and_then(|row| {
+                        workspace
+                            .items
+                            .iter()
+                            .find(|item| item.lba == row.range.start_lba)
+                    })
+                    .filter(|item| !item.fields.is_empty());
+                if let Some(item) = field_item {
+                    use crate::tui::table_layout::{
+                        display_width, layout_for, truncate_cell, TableKind,
+                    };
+                    let headings = ["字段", "值", "分组"];
+                    let mut values = Vec::<[String; 3]>::new();
+                    for field in &item.fields {
+                        values.push([
+                            safe(&field.label),
+                            safe(&field.value),
+                            field.group.as_deref().map(safe).unwrap_or_default(),
+                        ]);
+                        for child in &field.children {
+                            values.push([
+                                format!("  {}", safe(&child.label)),
+                                safe(&child.value),
+                                String::new(),
+                            ]);
+                        }
+                    }
+                    let mut content_widths = headings.map(display_width);
+                    for row in &values {
+                        for (index, value) in row.iter().enumerate() {
+                            content_widths[index] = content_widths[index].max(display_width(value));
+                        }
+                    }
+                    let layout = layout_for(TableKind::InspectFields);
+                    let viewport = layout.layout(
+                        detail_area.width.saturating_sub(3),
+                        &content_widths,
+                        state.table_scroll_offset(TableKind::InspectFields),
+                    );
+                    let rows = values.iter().map(|values| {
+                        TableRow::new(
+                            viewport
+                                .columns
+                                .iter()
+                                .map(|column| {
+                                    Cell::from(truncate_cell(
+                                        &values[column.index],
+                                        usize::from(column.width),
+                                        column.truncate_policy,
+                                    ))
+                                })
+                                .collect::<Vec<_>>(),
+                        )
+                    });
+                    let header = TableRow::new(
+                        viewport
+                            .columns
+                            .iter()
+                            .map(|column| {
+                                truncate_cell(
+                                    headings[column.index],
+                                    usize::from(column.width),
+                                    column.truncate_policy,
+                                )
+                            })
+                            .collect::<Vec<_>>(),
+                    )
+                    .style(accent());
+                    frame.render_widget(
+                        Table::new(rows, viewport.widths()).header(header).block(
                             Block::default()
                                 .borders(Borders::ALL)
                                 .border_style(if detail_focus { accent() } else { muted() })
-                                .title("节点详情"),
-                        )
-                        .wrap(Wrap { trim: false })
-                        .scroll((scroll, 0)),
-                    detail_area,
-                );
+                                .title(format!(
+                                    "节点详情 · h/l 横向滚动 · {}",
+                                    viewport.position_label()
+                                )),
+                        ),
+                        detail_area,
+                    );
+                } else {
+                    frame.render_widget(
+                        Paragraph::new(detail_lines)
+                            .block(
+                                Block::default()
+                                    .borders(Borders::ALL)
+                                    .border_style(if detail_focus { accent() } else { muted() })
+                                    .title("节点详情"),
+                            )
+                            .wrap(Wrap { trim: false })
+                            .scroll((scroll, 0)),
+                        detail_area,
+                    );
+                }
             }
         }
     }

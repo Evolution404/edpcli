@@ -1193,6 +1193,7 @@ impl AppState {
             panel: Some(panel),
             tree_selection,
             detail_scroll,
+            table_scroll: None,
         });
         let state = self.advanced_inspect.as_mut()?;
         let ready = state.result.as_ref().is_some_and(|workspace| {

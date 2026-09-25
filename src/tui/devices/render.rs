@@ -1,5 +1,41 @@
 use super::*;
 
+fn device_table_values(row: &crate::disk_scan::Row) -> Vec<(String, Style)> {
+    vec![
+        (format!("disk{}", row.disk), accent()),
+        (crate::common::fmt_gb(row.size), Style::default()),
+        (
+            safe(&row.proto),
+            if row.proto == "USB" {
+                success()
+            } else {
+                warning()
+            },
+        ),
+        (
+            format!("{}:{}", safe(&row.vid), safe(&row.pid)),
+            secondary(),
+        ),
+        (device_ven_prod(row.device_id.as_deref()), Style::default()),
+        (
+            row.onlyid
+                .as_deref()
+                .map(safe)
+                .unwrap_or_else(|| "—".into()),
+            Style::default(),
+        ),
+        (
+            row.user.as_deref().map(safe).unwrap_or_else(|| "—".into()),
+            Style::default(),
+        ),
+        (
+            row.dept.as_deref().map(safe).unwrap_or_else(|| "—".into()),
+            Style::default(),
+        ),
+        (device_status(row), device_status_style(row)),
+    ]
+}
+
 pub(super) fn draw_devices(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState) {
     let (list_area, sidebar) = if area.width >= 150 {
         workspace_sidebar_layout(area)
@@ -56,60 +92,72 @@ pub(super) fn draw_devices(frame: &mut Frame, area: ratatui::layout::Rect, state
             inner,
         );
     } else {
+        use crate::tui::table_layout::{display_width, layout_for, truncate_cell, TableKind};
+        let headings = [
+            "设备", "容量", "总线", "VID:PID", "ven_prod", "onlyid", "姓名", "部门", "盘型",
+        ];
+        let mut content_widths = headings.map(display_width);
+        for row in state.devices() {
+            for (index, (value, _)) in device_table_values(row).iter().enumerate() {
+                content_widths[index] = content_widths[index].max(display_width(value));
+            }
+        }
+        let layout = layout_for(TableKind::Devices);
+        let viewport = layout.layout(
+            list_area.width.saturating_sub(4),
+            &content_widths,
+            state.table_scroll_offset(TableKind::Devices),
+        );
         let window = visible_window(state.selected(), visible_count, list_area.height);
         let window_start = window.start;
         let rows = window
             .filter_map(|position| state.device_at_visible(position))
             .map(|row| {
-                TableRow::new(vec![
-                    Cell::from(format!("disk{}", row.disk)).style(accent()),
-                    Cell::from(crate::common::fmt_gb(row.size)),
-                    Cell::from(safe(&row.proto)).style(if row.proto == "USB" {
-                        success()
-                    } else {
-                        warning()
-                    }),
-                    Cell::from(format!("{}:{}", safe(&row.vid), safe(&row.pid))).style(secondary()),
-                    Cell::from(device_ven_prod(row.device_id.as_deref())),
-                    Cell::from(
-                        row.onlyid
-                            .as_deref()
-                            .map(safe)
-                            .unwrap_or_else(|| "—".into()),
-                    ),
-                    Cell::from(row.user.as_deref().map(safe).unwrap_or_else(|| "—".into())),
-                    Cell::from(row.dept.as_deref().map(safe).unwrap_or_else(|| "—".into())),
-                    Cell::from(device_status(row)).style(device_status_style(row)),
-                ])
+                let values = device_table_values(row);
+                TableRow::new(
+                    viewport
+                        .columns
+                        .iter()
+                        .map(|column| {
+                            let (value, style) = &values[column.index];
+                            Cell::from(truncate_cell(
+                                value,
+                                usize::from(column.width),
+                                column.truncate_policy,
+                            ))
+                            .style(*style)
+                        })
+                        .collect::<Vec<_>>(),
+                )
             });
-        let header = TableRow::new([
-            "设备", "容量", "总线", "VID:PID", "ven_prod", "onlyid", "姓名", "部门", "盘型",
-        ])
+        let header = TableRow::new(
+            viewport
+                .columns
+                .iter()
+                .map(|column| {
+                    truncate_cell(
+                        headings[column.index],
+                        usize::from(column.width),
+                        column.truncate_policy,
+                    )
+                })
+                .collect::<Vec<_>>(),
+        )
         .style(accent());
-        let table = Table::new(
-            rows,
-            [
-                Constraint::Length(9),
-                Constraint::Length(9),
-                Constraint::Length(5),
-                Constraint::Length(9),
-                Constraint::Length(17),
-                Constraint::Length(12),
-                Constraint::Length(10),
-                Constraint::Min(10),
-                Constraint::Length(17),
-            ],
-        )
-        .header(header)
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .border_style(focused_panel())
-                .title(title)
-                .title_style(secondary()),
-        )
-        .row_highlight_style(selected())
-        .highlight_symbol("▌ ");
+        let table = Table::new(rows, viewport.widths())
+            .header(header)
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .border_style(focused_panel())
+                    .title(format!(
+                        "{title} · h/l 横向滚动 · {}",
+                        viewport.position_label()
+                    ))
+                    .title_style(secondary()),
+            )
+            .row_highlight_style(selected())
+            .highlight_symbol("▌ ");
         let mut table_state = TableState::default();
         table_state.select(Some(state.selected().saturating_sub(window_start)));
         frame.render_stateful_widget(table, list_area, &mut table_state);

@@ -678,29 +678,43 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
         match state.workspace() {
             Workspace::Devices => {
                 if state.selected_device().is_some() {
-                    "Tab/Shift-Tab 标签 · j/k 移动 · Enter 制盘 · i Inspect · b 新建备份 · r 刷新 · q 退出".to_string()
+                    let kind = crate::tui::table_layout::TableKind::Devices;
+                    let count = crate::tui::table_layout::layout_for(kind).scrollable_count();
+                    format!("Tab/Shift-Tab 标签 · j/k 移动 · h/l 横向滚动 · {}/{} 列 · Enter 制盘 · i Inspect · b 新建备份 · r 刷新 · q 退出", state.table_scroll_offset(kind) + 1, count)
                 } else {
                     "Tab/Shift-Tab 标签 · r 刷新 · q 退出".to_string()
                 }
             }
             Workspace::Backups => {
                 if state.selected_backup().is_some() {
-                    "Tab/Shift-Tab 标签 · j/k 移动 · Space 勾选 · Enter/i Inspect · b 新建 · v 校验 · R 恢复 · d 删除 · r 刷新 · q 退出".to_string()
+                    let kind = crate::tui::table_layout::TableKind::Backups;
+                    let count = crate::tui::table_layout::layout_for(kind).scrollable_count();
+                    format!("Tab/Shift-Tab 标签 · j/k 移动 · h/l 横向滚动 · {}/{} 列 · Space 勾选 · Enter/i Inspect · b 新建 · v 校验 · R 恢复 · d 删除 · r 刷新 · q 退出", state.table_scroll_offset(kind) + 1, count)
                 } else {
                     "Tab/Shift-Tab 标签 · b 新建 · r 刷新 · q 退出".to_string()
                 }
             }
             Workspace::Provision => match state.provision().stage {
-                ProvisionStage::SelectDisk => "制盘选盘：j/k 选择 USB 盘 · Tab/Shift-Tab 标签 · Enter 固定目标 · Esc 返回设备页".to_string(),
+                ProvisionStage::SelectDisk => {
+                    let kind = crate::tui::table_layout::TableKind::ProvisionDevices;
+                    format!("制盘选盘：j/k 选择 · h/l 横向滚动 · {}/{} 列 · Enter 固定目标 · Esc 返回设备页", state.table_scroll_offset(kind) + 1, crate::tui::table_layout::layout_for(kind).scrollable_count())
+                }
                 ProvisionStage::BackupPrompt => {
-                    "制盘前保存：j/k 选择 · Tab/Shift-Tab 标签 · Enter 确认 · Esc 返回设备".to_string()
+                    "制盘前保存：j/k 选择 · Tab/Shift-Tab 标签 · Enter 确认 · Esc 返回设备"
+                        .to_string()
                 }
                 ProvisionStage::BackupSaving => "正在保存当前盘…".to_string(),
                 ProvisionStage::Menu => {
-                    "Tab/Shift-Tab 标签 · j/k 选择方案 · Enter 打开 · r 刷新目标 · ? 帮助 · q 退出".to_string()
+                    let kind = crate::tui::table_layout::TableKind::ProvisionMenu;
+                    format!(
+                        "j/k 选择方案 · h/l 横向滚动 · {}/{} 列 · Enter 打开 · Esc 返回 · q 退出",
+                        state.table_scroll_offset(kind) + 1,
+                        crate::tui::table_layout::layout_for(kind).scrollable_count()
+                    )
                 }
                 ProvisionStage::Form if state.input_mode() == InputMode::Insert => {
-                    "INSERT · ←/→ 光标 · Home/End 首尾 · 输入/Backspace 编辑 · Enter/Esc 完成编辑".to_string()
+                    "INSERT · ←/→ 光标 · Home/End 首尾 · 输入/Backspace 编辑 · Enter/Esc 完成编辑"
+                        .to_string()
                 }
                 ProvisionStage::Form if state.provision_selected_field_is_editable() => {
                     let unit_key = if state
@@ -713,15 +727,22 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
                     };
                     format!("NORMAL · j/k 字段 · i 编辑{unit_key} · Enter 生成计划 · Tab/Shift-Tab 标签 · Esc 返回")
                 }
-                ProvisionStage::Form => "NORMAL · j/k 字段 · i 编辑 · h/l 或 Space 切换 · Enter 生成计划 · Esc 返回".to_string(),
+                ProvisionStage::Form => {
+                    "NORMAL · j/k 字段 · i 编辑 · h/l 或 Space 切换 · Enter 生成计划 · Esc 返回"
+                        .to_string()
+                }
                 ProvisionStage::Planning => "正在生成只读计划…".to_string(),
                 ProvisionStage::Review => {
                     "Enter 最终确认  ·  e 导出镜像  ·  Esc 返回修改".to_string()
                 }
-                ProvisionStage::ExportPath => "输入导出路径  ·  Enter 导出  ·  Esc 返回计划".to_string(),
+                ProvisionStage::ExportPath => {
+                    "输入导出路径  ·  Enter 导出  ·  Esc 返回计划".to_string()
+                }
                 ProvisionStage::Exporting => "镜像正在后台导出…".to_string(),
                 ProvisionStage::Confirm => "输入 YES + Enter 执行  ·  Esc 返回计划".to_string(),
-                ProvisionStage::Running => "安全事务执行中；Esc 不退出，q / Ctrl-C 的退出请求延迟到安全检查点".to_string(),
+                ProvisionStage::Running => {
+                    "安全事务执行中；Esc 不退出，q / Ctrl-C 的退出请求延迟到安全检查点".to_string()
+                }
                 ProvisionStage::Result => "Enter / Esc 返回制盘中心".to_string(),
             },
         }

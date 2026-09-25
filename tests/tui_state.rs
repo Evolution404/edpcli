@@ -5,6 +5,7 @@ use edpcli::tui::state::{
 
 #[test]
 fn chapter_11_provision_escape_restores_device_selection() {
+    use edpcli::tui::table_layout::TableKind;
     let mut state = AppState::new();
     let first = device(64_000_000_000);
     let mut second = device(128_000_000_000);
@@ -12,11 +13,14 @@ fn chapter_11_provision_escape_restores_device_selection() {
     state.replace_devices(vec![first, second]);
     state.navigate(NavCommand::Down, 20);
     assert_eq!(state.selected_device_disk(), Some(7));
+    state.scroll_table(TableKind::Devices, false);
+    state.scroll_table(TableKind::Devices, false);
     state.begin_provision_for_selected_device().unwrap();
     assert_eq!(state.navigation().depth(), 1);
     assert_eq!(state.navigate(NavCommand::Escape, 20), StateEffect::None);
     assert_eq!(state.workspace(), Workspace::Devices);
     assert_eq!(state.selected_device_disk(), Some(7));
+    assert_eq!(state.table_scroll_offset(TableKind::Devices), 2);
     assert_eq!(state.navigation().depth(), 0);
 }
 

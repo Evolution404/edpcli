@@ -135,6 +135,10 @@ pub struct AppState {
     pinned_disk: Option<u32>,
     advanced_inspect: Option<AdvancedInspectState>,
     navigation: NavigationStack,
+    horizontal_scroll: std::collections::BTreeMap<
+        super::table_layout::TableKind,
+        super::table_layout::HorizontalScrollState,
+    >,
     notice: Option<String>,
     notice_at: Option<std::time::Instant>,
     input_buffer: String,
@@ -173,6 +177,7 @@ impl AppState {
             pinned_disk: None,
             advanced_inspect: None,
             navigation: NavigationStack::default(),
+            horizontal_scroll: std::collections::BTreeMap::new(),
             notice: None,
             notice_at: None,
             input_buffer: String::new(),
@@ -798,7 +803,32 @@ impl AppState {
         &self.navigation
     }
 
+    pub fn table_scroll_offset(&self, kind: super::table_layout::TableKind) -> usize {
+        self.horizontal_scroll
+            .get(&kind)
+            .copied()
+            .unwrap_or_default()
+            .offset()
+    }
+
+    pub fn scroll_table(&mut self, kind: super::table_layout::TableKind, reverse: bool) -> bool {
+        let layout = super::table_layout::layout_for(kind);
+        let scroll = self.horizontal_scroll.entry(kind).or_default();
+        if reverse {
+            scroll.left()
+        } else {
+            scroll.right(&layout)
+        }
+    }
+
     pub fn push_navigation_frame(&mut self, location: NavigationLocation) {
+        let table_kind = match location {
+            NavigationLocation::Devices => Some(super::table_layout::TableKind::Devices),
+            NavigationLocation::Backups => Some(super::table_layout::TableKind::Backups),
+            NavigationLocation::Provision => Some(super::table_layout::TableKind::ProvisionDevices),
+            NavigationLocation::Inspect | NavigationLocation::SectorInspector => None,
+        };
+        let table_scroll = table_kind.map(|kind| (kind, self.table_scroll_offset(kind)));
         self.navigation.push(NavigationFrame {
             location,
             selection: self.selected,
@@ -806,6 +836,7 @@ impl AppState {
             panel: None,
             tree_selection: 0,
             detail_scroll: 0,
+            table_scroll,
         });
     }
 
@@ -823,6 +854,12 @@ impl AppState {
             };
             self.switch_workspace(workspace);
             self.selected = frame.selection.min(self.item_count.saturating_sub(1));
+            if let Some((kind, offset)) = frame.table_scroll {
+                self.horizontal_scroll
+                    .entry(kind)
+                    .or_default()
+                    .set_offset(offset, &super::table_layout::layout_for(kind));
+            }
         } else {
             self.switch_workspace(Workspace::Devices);
         }

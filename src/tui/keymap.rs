@@ -57,6 +57,8 @@ pub enum TuiAction {
     PanelRight,
     PanelNext,
     PanelPrevious,
+    TableScrollLeft,
+    TableScrollRight,
     Text(char),
     Backspace,
     DeleteChar,
@@ -86,6 +88,15 @@ pub struct HelpBinding {
     pub keys: &'static str,
     pub label: &'static str,
     pub action: TuiAction,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WidgetRole {
+    Tree,
+    Table,
+    Input,
+    SectorInspector,
+    Other,
 }
 
 pub const NORMAL_HELP: &[HelpBinding] = &[
@@ -194,6 +205,23 @@ impl KeyMapper {
 
     pub fn map(&mut self, mode: InputMode, event: KeyEvent) -> Option<TuiAction> {
         self.map_at(mode, event, Instant::now())
+    }
+
+    pub fn map_for_role(
+        &mut self,
+        mode: InputMode,
+        role: WidgetRole,
+        event: KeyEvent,
+    ) -> Option<TuiAction> {
+        let action = self.map(mode, event)?;
+        if mode == InputMode::Normal && role == WidgetRole::Table {
+            return Some(match action {
+                TuiAction::MoveLeft => TuiAction::TableScrollLeft,
+                TuiAction::MoveRight => TuiAction::TableScrollRight,
+                other => other,
+            });
+        }
+        Some(action)
     }
 
     pub fn map_at(&mut self, mode: InputMode, event: KeyEvent, now: Instant) -> Option<TuiAction> {

@@ -10,6 +10,7 @@ pub mod event;
 pub mod keymap;
 pub mod render;
 pub mod state;
+pub mod table_layout;
 pub mod task;
 pub mod theme;
 
@@ -448,6 +449,15 @@ fn dispatch_tui_action(
     }
 
     match action {
+        TuiAction::TableScrollLeft | TuiAction::TableScrollRight => {
+            let kind = match state.workspace() {
+                state::Workspace::Devices => crate::tui::table_layout::TableKind::Devices,
+                state::Workspace::Backups => crate::tui::table_layout::TableKind::Backups,
+                state::Workspace::Provision => return StateEffect::None,
+            };
+            state.scroll_table(kind, action == TuiAction::TableScrollLeft);
+            StateEffect::None
+        }
         TuiAction::Insert
             if matches!(
                 state.workspace(),
@@ -919,7 +929,29 @@ fn run_loop(resume: Option<state::WriteIntent>) -> io::Result<LoopExit> {
                                     continue;
                                 }
 
-                                let Some(action) = keys.map(state::InputMode::Normal, key) else {
+                                let role = if state.advanced_inspect().is_some_and(|advanced| {
+                                    advanced.panel == state::AdvancedInspectPanel::Tree
+                                }) {
+                                    keymap::WidgetRole::Tree
+                                } else if state.advanced_inspect().is_some_and(|advanced| {
+                                    advanced.panel == state::AdvancedInspectPanel::Detail
+                                        && state.advanced_inspect_selected_sector_lba().is_some_and(
+                                            |lba| {
+                                                advanced.result.as_ref().is_some_and(|workspace| {
+                                                    workspace.items.iter().any(|item| {
+                                                        item.lba == lba && !item.fields.is_empty()
+                                                    })
+                                                })
+                                            },
+                                        )
+                                }) {
+                                    keymap::WidgetRole::Table
+                                } else {
+                                    keymap::WidgetRole::Other
+                                };
+                                let Some(action) =
+                                    keys.map_for_role(state::InputMode::Normal, role, key)
+                                else {
                                     continue;
                                 };
                                 use keymap::TuiAction;
@@ -945,10 +977,16 @@ fn run_loop(resume: Option<state::WriteIntent>) -> io::Result<LoopExit> {
                                     }
                                     TuiAction::MoveUp => state.advanced_inspect_move_tree(-1),
                                     TuiAction::MoveDown => state.advanced_inspect_move_tree(1),
-                                    TuiAction::MoveLeft => {
+                                    TuiAction::TableScrollLeft | TuiAction::TableScrollRight => {
+                                        state.scroll_table(
+                                            crate::tui::table_layout::TableKind::InspectFields,
+                                            action == TuiAction::TableScrollLeft,
+                                        );
+                                    }
+                                    TuiAction::MoveLeft if role == keymap::WidgetRole::Tree => {
                                         state.advanced_inspect_collapse_or_parent();
                                     }
-                                    TuiAction::MoveRight => {
+                                    TuiAction::MoveRight if role == keymap::WidgetRole::Tree => {
                                         state.advanced_inspect_expand_or_child();
                                     }
                                     TuiAction::Top => state.advanced_inspect_tree_top(),
@@ -1003,7 +1041,15 @@ fn run_loop(resume: Option<state::WriteIntent>) -> io::Result<LoopExit> {
                         use keymap::TuiAction;
                         use state::ProvisionStage;
 
-                        let Some(action) = keys.map(state.input_mode(), key) else {
+                        let role = if matches!(
+                            state.provision().stage,
+                            ProvisionStage::SelectDisk | ProvisionStage::Menu
+                        ) {
+                            keymap::WidgetRole::Table
+                        } else {
+                            keymap::WidgetRole::Other
+                        };
+                        let Some(action) = keys.map_for_role(state.input_mode(), role, key) else {
                             continue;
                         };
                         let viewport_height =
@@ -1011,11 +1057,7 @@ fn run_loop(resume: Option<state::WriteIntent>) -> io::Result<LoopExit> {
 
                         if matches!(
                             action,
-                            TuiAction::WorkspaceNext
-                                | TuiAction::WorkspacePrevious
-                                | TuiAction::Refresh
-                                | TuiAction::Help
-                                | TuiAction::Command
+                            TuiAction::Refresh | TuiAction::Help | TuiAction::Command
                         ) {
                             match dispatch_tui_action(
                                 &mut state,
@@ -1032,6 +1074,12 @@ fn run_loop(resume: Option<state::WriteIntent>) -> io::Result<LoopExit> {
 
                         match state.provision().stage {
                             ProvisionStage::SelectDisk => match action {
+                                TuiAction::TableScrollLeft | TuiAction::TableScrollRight => {
+                                    state.scroll_table(
+                                        crate::tui::table_layout::TableKind::ProvisionDevices,
+                                        action == TuiAction::TableScrollLeft,
+                                    );
+                                }
                                 TuiAction::MoveUp => {
                                     let _ = state.navigate(NavCommand::Up, viewport_height);
                                 }
@@ -1104,6 +1152,12 @@ fn run_loop(resume: Option<state::WriteIntent>) -> io::Result<LoopExit> {
                                 }
                             }
                             ProvisionStage::Menu => match action {
+                                TuiAction::TableScrollLeft | TuiAction::TableScrollRight => {
+                                    state.scroll_table(
+                                        crate::tui::table_layout::TableKind::ProvisionMenu,
+                                        action == TuiAction::TableScrollLeft,
+                                    );
+                                }
                                 TuiAction::MoveUp => {
                                     let _ = state.navigate(NavCommand::Up, viewport_height);
                                 }
@@ -1669,7 +1723,9 @@ fn run_loop(resume: Option<state::WriteIntent>) -> io::Result<LoopExit> {
                         continue;
                     }
 
-                    if let Some(action) = keys.map(state.input_mode(), key) {
+                    if let Some(action) =
+                        keys.map_for_role(state.input_mode(), keymap::WidgetRole::Table, key)
+                    {
                         let viewport_height =
                             session.terminal.size()?.height.saturating_sub(9) as usize;
                         match dispatch_tui_action(

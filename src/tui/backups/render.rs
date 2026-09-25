@@ -1,5 +1,38 @@
 use super::*;
 
+fn backup_table_values(
+    backup: &crate::application::BackupWorkspaceItem,
+    checked: bool,
+) -> Vec<(String, Style)> {
+    let (health, health_style) = backup_health(backup);
+    vec![
+        (
+            if checked { "✓".into() } else { String::new() },
+            if checked { warning() } else { muted() },
+        ),
+        (backup.index.to_string(), accent()),
+        (safe(&backup.display_time), Style::default()),
+        (backup.provision_kind.short_name().into(), accent()),
+        (
+            backup
+                .user
+                .as_deref()
+                .map(safe)
+                .unwrap_or_else(|| "—".into()),
+            Style::default(),
+        ),
+        (
+            backup
+                .dept
+                .as_deref()
+                .map(safe)
+                .unwrap_or_else(|| "—".into()),
+            Style::default(),
+        ),
+        (health.into(), health_style),
+    ]
+}
+
 pub(super) fn draw_backup_create_choice(
     frame: &mut Frame,
     area: ratatui::layout::Rect,
@@ -157,67 +190,70 @@ pub(super) fn draw_backups(frame: &mut Frame, area: ratatui::layout::Rect, state
             inner,
         );
     } else {
+        use crate::tui::table_layout::{display_width, layout_for, truncate_cell, TableKind};
+        let headings = ["选", "#", "时间", "盘型", "姓名", "部门", "健康"];
+        let mut content_widths = headings.map(display_width);
+        for backup in state.backups() {
+            for (index, (value, _)) in backup_table_values(backup, false).iter().enumerate() {
+                content_widths[index] = content_widths[index].max(display_width(value));
+            }
+        }
+        let layout = layout_for(TableKind::Backups);
+        let viewport = layout.layout(
+            backup_parts[1].width.saturating_sub(4),
+            &content_widths,
+            state.table_scroll_offset(TableKind::Backups),
+        );
         let window = visible_window(state.selected(), visible_count, backup_parts[1].height);
         let window_start = window.start;
         let rows = window
             .filter_map(|position| state.backup_at_visible(position))
             .map(|backup| {
-                let (health, health_style) = backup_health(backup);
-                TableRow::new(vec![
-                    Cell::from(if state.backup_is_selected(&backup.path) {
-                        "✓"
-                    } else {
-                        ""
-                    })
-                    .style(if state.backup_is_selected(&backup.path) {
-                        warning()
-                    } else {
-                        muted()
-                    }),
-                    Cell::from(backup.index.to_string()).style(accent()),
-                    Cell::from(safe(&backup.display_time)),
-                    Cell::from(backup.provision_kind.short_name()).style(accent()),
-                    Cell::from(
-                        backup
-                            .user
-                            .as_deref()
-                            .map(safe)
-                            .unwrap_or_else(|| "—".into()),
-                    ),
-                    Cell::from(
-                        backup
-                            .dept
-                            .as_deref()
-                            .map(safe)
-                            .unwrap_or_else(|| "—".into()),
-                    ),
-                    Cell::from(health).style(health_style),
-                ])
+                let values = backup_table_values(backup, state.backup_is_selected(&backup.path));
+                TableRow::new(
+                    viewport
+                        .columns
+                        .iter()
+                        .map(|column| {
+                            let (value, style) = &values[column.index];
+                            Cell::from(truncate_cell(
+                                value,
+                                usize::from(column.width),
+                                column.truncate_policy,
+                            ))
+                            .style(*style)
+                        })
+                        .collect::<Vec<_>>(),
+                )
             });
-        let header =
-            TableRow::new(["选", "#", "时间", "盘型", "姓名", "部门", "健康"]).style(accent());
-        let table = Table::new(
-            rows,
-            [
-                Constraint::Length(3),
-                Constraint::Length(4),
-                Constraint::Length(17),
-                Constraint::Length(23),
-                Constraint::Length(12),
-                Constraint::Min(22),
-                Constraint::Length(11),
-            ],
+        let header = TableRow::new(
+            viewport
+                .columns
+                .iter()
+                .map(|column| {
+                    truncate_cell(
+                        headings[column.index],
+                        usize::from(column.width),
+                        column.truncate_policy,
+                    )
+                })
+                .collect::<Vec<_>>(),
         )
-        .header(header)
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .border_style(focused_panel())
-                .title(title)
-                .title_style(secondary()),
-        )
-        .row_highlight_style(selected())
-        .highlight_symbol("▌ ");
+        .style(accent());
+        let table = Table::new(rows, viewport.widths())
+            .header(header)
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .border_style(focused_panel())
+                    .title(format!(
+                        "{title} · h/l 横向滚动 · {}",
+                        viewport.position_label()
+                    ))
+                    .title_style(secondary()),
+            )
+            .row_highlight_style(selected())
+            .highlight_symbol("▌ ");
         let mut table_state = TableState::default();
         table_state.select(Some(state.selected().saturating_sub(window_start)));
         frame.render_stateful_widget(table, backup_parts[1], &mut table_state);

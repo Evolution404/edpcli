@@ -90,6 +90,41 @@ fn device_list_shows_ven_prod_and_onlyid_and_enter_shortcut() {
 }
 
 #[test]
+fn long_department_keeps_disk_kind_visible_and_scrolls_by_column() {
+    use edpcli::tui::table_layout::TableKind;
+    let mut state = AppState::new();
+    let mut row = usb_device();
+    row.dept = Some("输电运检中心非常非常长的部门名称第一分部".repeat(4));
+    state.replace_devices(vec![row]);
+    let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
+    terminal.draw(|frame| render::draw(frame, &state)).unwrap();
+    let compact = terminal
+        .backend()
+        .buffer()
+        .content()
+        .iter()
+        .map(|cell| cell.symbol())
+        .collect::<String>()
+        .replace(' ', "");
+    assert!(compact.contains("盘型"), "{compact}");
+    assert!(compact.contains("普通盘"), "{compact}");
+    assert!(compact.contains("h/l横向滚动"), "{compact}");
+    assert!(state.scroll_table(TableKind::Devices, false));
+    assert_eq!(state.table_scroll_offset(TableKind::Devices), 1);
+    terminal.draw(|frame| render::draw(frame, &state)).unwrap();
+    let compact = terminal
+        .backend()
+        .buffer()
+        .content()
+        .iter()
+        .map(|cell| cell.symbol())
+        .collect::<String>()
+        .replace(' ', "");
+    assert!(compact.contains("盘型"), "{compact}");
+    assert!(compact.contains("普通盘"), "{compact}");
+}
+
+#[test]
 fn transient_notice_has_its_own_area_and_expires() {
     let mut state = AppState::new();
     state.set_notice("批量选择只在备份页可用。");

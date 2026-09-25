@@ -39,6 +39,7 @@ pub struct NavigationFrame {
     pub panel: Option<AdvancedInspectPanel>,
     pub tree_selection: usize,
     pub detail_scroll: usize,
+    pub table_scroll: Option<(super::super::table_layout::TableKind, usize)>,
 }
 
 #[derive(Debug, Default, Clone)]

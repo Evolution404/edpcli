@@ -109,8 +109,12 @@ impl DiskLayoutModel {
     }
 
     pub fn bar_line(&self, width: usize) -> Line<'static> {
+        self.bar_line_with_label(width, "")
+    }
+
+    pub fn bar_line_with_label(&self, width: usize, label: &'static str) -> Line<'static> {
         let bar = self.bar(width);
-        let mut spans = vec![Span::raw("[")];
+        let mut spans = vec![Span::raw(label), Span::raw("[")];
         let mut start = 0;
         while start < bar.len() {
             let kind = bar[start];

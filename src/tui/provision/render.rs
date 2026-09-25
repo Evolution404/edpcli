@@ -82,34 +82,71 @@ pub(super) fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, sta
 
     match provision.stage {
         ProvisionStage::SelectDisk => {
+            use crate::tui::table_layout::{display_width, layout_for, truncate_cell, TableKind};
+            let headings = ["设备", "容量", "USB 身份", "盘型", "onlyid"];
+            let values = (0..state.item_count())
+                .filter_map(|index| {
+                    let row = state.provision_device_at(index)?;
+                    Some(vec![
+                        format!("disk{}", row.disk),
+                        format!("{:.2} GiB", row.size as f64 / 1_073_741_824.0),
+                        format!("{}:{}", safe(&row.vid), safe(&row.pid)),
+                        device_status(row),
+                        safe(row.onlyid.as_deref().unwrap_or("—")),
+                    ])
+                })
+                .collect::<Vec<_>>();
+            let mut content_widths = headings.map(display_width);
+            for row in &values {
+                for (index, value) in row.iter().enumerate() {
+                    content_widths[index] = content_widths[index].max(display_width(value));
+                }
+            }
+            let layout = layout_for(TableKind::ProvisionDevices);
+            let viewport = layout.layout(
+                main_area.width.saturating_sub(4),
+                &content_widths,
+                state.table_scroll_offset(TableKind::ProvisionDevices),
+            );
             let rows = (0..state.item_count()).filter_map(|index| {
-                let row = state.provision_device_at(index)?;
-                Some(TableRow::new(vec![
-                    Cell::from(format!("disk{}", row.disk)),
-                    Cell::from(format!("{:.2} GiB", row.size as f64 / 1_073_741_824.0)),
-                    Cell::from(format!("{}:{}", safe(&row.vid), safe(&row.pid))),
-                    Cell::from(device_status(row)),
-                    Cell::from(safe(row.onlyid.as_deref().unwrap_or("—"))),
-                ]))
+                let row = values.get(index)?;
+                Some(TableRow::new(
+                    viewport
+                        .columns
+                        .iter()
+                        .map(|column| {
+                            Cell::from(truncate_cell(
+                                &row[column.index],
+                                usize::from(column.width),
+                                column.truncate_policy,
+                            ))
+                        })
+                        .collect::<Vec<_>>(),
+                ))
             });
-            let table = Table::new(
-                rows,
-                [
-                    Constraint::Length(9),
-                    Constraint::Length(12),
-                    Constraint::Length(13),
-                    Constraint::Min(16),
-                    Constraint::Length(15),
-                ],
-            )
-            .header(TableRow::new(["设备", "容量", "USB 身份", "盘型", "onlyid"]).style(accent()))
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .title("制盘 · 先选择 USB 目标"),
-            )
-            .row_highlight_style(selected())
-            .highlight_symbol("▌ ");
+            let table = Table::new(rows, viewport.widths())
+                .header(
+                    TableRow::new(
+                        viewport
+                            .columns
+                            .iter()
+                            .map(|column| {
+                                truncate_cell(
+                                    headings[column.index],
+                                    usize::from(column.width),
+                                    column.truncate_policy,
+                                )
+                            })
+                            .collect::<Vec<_>>(),
+                    )
+                    .style(accent()),
+                )
+                .block(Block::default().borders(Borders::ALL).title(format!(
+                    "制盘 · 先选择 USB 目标 · h/l 横向滚动 · {}",
+                    viewport.position_label()
+                )))
+                .row_highlight_style(selected())
+                .highlight_symbol("▌ ");
             let mut table_state = ratatui::widgets::TableState::default();
             if state.item_count() > 0 {
                 table_state.select(Some(state.selected()));
@@ -188,38 +225,81 @@ pub(super) fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, sta
             );
         }
         ProvisionStage::Menu => {
+            use crate::tui::table_layout::{display_width, layout_for, truncate_cell, TableKind};
+            let headings = ["#", "制盘方案", "布局 / 行为"];
+            let mut content_widths = headings.map(display_width);
+            for (index, kind) in ProvisionKind::ALL.into_iter().enumerate() {
+                for (column, value) in [
+                    index.to_string(),
+                    kind.title().into(),
+                    kind.description().into(),
+                ]
+                .iter()
+                .enumerate()
+                {
+                    content_widths[column] = content_widths[column].max(display_width(value));
+                }
+            }
+            let layout = layout_for(TableKind::ProvisionMenu);
+            let viewport = layout.layout(
+                main_area.width.saturating_sub(4),
+                &content_widths,
+                state.table_scroll_offset(TableKind::ProvisionMenu),
+            );
             let rows = ProvisionKind::ALL
                 .into_iter()
                 .enumerate()
                 .map(|(index, kind)| {
-                    TableRow::new(vec![
-                        Cell::from(Span::styled(format!("{index}"), provision_kind_style(kind))),
-                        Cell::from(Span::styled(kind.title(), provision_kind_style(kind))),
-                        Cell::from(kind.description()),
-                    ])
+                    let values = [
+                        index.to_string(),
+                        kind.title().into(),
+                        kind.description().into(),
+                    ];
+                    TableRow::new(
+                        viewport
+                            .columns
+                            .iter()
+                            .map(|column| {
+                                Cell::from(truncate_cell(
+                                    &values[column.index],
+                                    usize::from(column.width),
+                                    column.truncate_policy,
+                                ))
+                                .style(provision_kind_style(kind))
+                            })
+                            .collect::<Vec<_>>(),
+                    )
                 });
-            let table = Table::new(
-                rows,
-                [
-                    Constraint::Length(4),
-                    Constraint::Length(30),
-                    Constraint::Min(28),
-                ],
-            )
-            .header(
-                TableRow::new(["#", "制盘方案", "布局 / 行为"])
+            let table = Table::new(rows, viewport.widths())
+                .header(
+                    TableRow::new(
+                        viewport
+                            .columns
+                            .iter()
+                            .map(|column| {
+                                truncate_cell(
+                                    headings[column.index],
+                                    usize::from(column.width),
+                                    column.truncate_policy,
+                                )
+                            })
+                            .collect::<Vec<_>>(),
+                    )
                     .style(accent())
                     .bottom_margin(1),
-            )
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .border_style(focused_panel())
-                    .title("制盘中心 · 选择方案")
-                    .title_style(secondary()),
-            )
-            .row_highlight_style(selected())
-            .highlight_symbol("▌ ");
+                )
+                .block(
+                    Block::default()
+                        .borders(Borders::ALL)
+                        .border_style(focused_panel())
+                        .title(format!(
+                            "制盘中心 · 选择方案 · h/l 横向滚动 · {}",
+                            viewport.position_label()
+                        ))
+                        .title_style(secondary()),
+                )
+                .row_highlight_style(selected())
+                .highlight_symbol("▌ ");
             let mut table_state = TableState::default();
             table_state.select(Some(state.selected()));
             frame.render_stateful_widget(table, main_area, &mut table_state);
@@ -423,7 +503,9 @@ pub(super) fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, sta
             );
 
             let bar_width = layout_area.width.saturating_sub(10) as usize;
-            let bar_line = state.provision_layout_model().bar_line(bar_width);
+            let bar_line = state
+                .provision_layout_model()
+                .bar_line_with_label(bar_width, "比例 ");
             let legend_line = if provision.kind == ProvisionKind::Plain {
                 Line::from(vec![
                     Span::styled("■", partition_style(ProvisionBarKind::Plain)),
