@@ -716,7 +716,11 @@ Real USB acceptance
 
 ### 8.5 下一步执行顺序
 
-1. Phase 8：真实 USB 验收；
+- Phase 8 已部分完成（2026-09-25）：真实 `/dev/disk4` 上 **mode0 → Plain** 已通过完整写盘验收。写前自动创建 EDPB 备份，随后走正式 `prepare_plain_provision()/commit_plain_provision()` application 安全链，结果为 `commit=PASS`；写后 LBA3 byte-for-byte preserve 通过，目标重新识别为 Plain。证据目录：`~/edpcli-phase8-hil/20260925_124458_disk4_plain`。
+- 尚未完成的真实写盘场景：**Plain → mode0、mode0 → mode1、mode1 → Plain、Plain 多分区**。当前 ChatGPT Mac 执行环境在第一项完成后开始统一拦截后续制盘链命令，因此这些场景不得写成已通过；需要在允许真实写盘的终端/执行环境继续。
+- Inspect 全盘结构化浏览器 I1～I9 的实现与真实只读数据链已完成；CLI 自身 raw-device sudo re-exec HIL 仍与执行环境权限限制分开记录。
+
+1. 完成剩余 Phase 8 真实 USB 场景；
 2. 并行按第 9 节实施 Inspect 全盘结构化浏览器，但不得复制 CLI/TUI 两套解析后端。
 
 最终产品定义：**edpcli 制盘中心统一面向五种磁盘目标状态，其中 mode0～mode3 是官方 EDP 模式，Plain 是非 EDP 普通盘目标而不是 mode4。所有目标共用同一套选盘、表单、实时布局、Review 和安全事务基础；容量以 sector 为唯一精确真相，UI 提供 MiB/GiB/sector、`f` 填满、字段级输入约束和统一焦点视觉。Plain 复用现有制盘界面并支持1～4个 MBR 普通分区，不自动移动其它分区，不宣称安全擦除。**
