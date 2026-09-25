@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 use crate::backup_catalog;
 use crate::cli::Prompter;
 use crate::common::{EXIT_BACKUP, EXIT_CANCELLED, EXIT_OK, SECTOR};
-use crate::diskio::{self, BackupEntry, BackupMeta, Sha256Status};
+use crate::diskio::{self, BackupEntry, BackupIntegrityStatus, BackupMeta};
 use crate::metainfo;
 
 fn backup_model_name(meta: &BackupMeta) -> String {
@@ -56,10 +56,9 @@ fn backup_health(entry: &BackupEntry) -> String {
     if !entry.size_ok {
         return crate::ui::red("EDPB ✗ 核心数据异常");
     }
-    match entry.sha256_ok {
-        Sha256Status::Ok => crate::ui::green("EDPB ✓"),
-        Sha256Status::Mismatch => crate::ui::red("EDPB ✗ 损坏"),
-        Sha256Status::NoSidecar => crate::ui::red("EDPB ✗ 未校验"),
+    match entry.integrity_status {
+        BackupIntegrityStatus::Verified => crate::ui::green("EDPB ✓"),
+        BackupIntegrityStatus::Invalid => crate::ui::red("EDPB ✗ 损坏"),
     }
 }
 

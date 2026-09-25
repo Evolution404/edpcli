@@ -37,10 +37,9 @@ fn backup_health(backup: &crate::application::BackupWorkspaceItem) -> (&'static 
     if !backup.size_ok {
         ("大小异常", danger())
     } else {
-        match backup.sha256_status {
-            crate::diskio::Sha256Status::Ok => ("SHA-256 ✓", success()),
-            crate::diskio::Sha256Status::Mismatch => ("SHA-256 ✗", danger()),
-            crate::diskio::Sha256Status::NoSidecar => ("缺 SHA-256", warning()),
+        match backup.integrity_status {
+            crate::diskio::BackupIntegrityStatus::Verified => ("EDPB ✓", success()),
+            crate::diskio::BackupIntegrityStatus::Invalid => ("EDPB ✗", danger()),
         }
     }
 }

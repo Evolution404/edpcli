@@ -247,7 +247,7 @@ pub fn delete_backup_exact(root: &Path, path: &Path, expected_sha256: &str) -> R
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::diskio::{BackupMeta, Sha256Status};
+    use crate::diskio::{BackupIntegrityStatus, BackupMeta};
 
     fn entry(name: &str, onlyid: &str, is_nopwd: bool) -> BackupEntry {
         BackupEntry {
@@ -264,7 +264,7 @@ mod tests {
             mtime: 1,
             is_nopwd,
             provision_kind: crate::provision::DiskProvisionKind::Plain,
-            sha256_ok: Sha256Status::Ok,
+            integrity_status: BackupIntegrityStatus::Verified,
             size_ok: true,
             lba8: None,
             content_sha256: None,

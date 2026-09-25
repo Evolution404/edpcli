@@ -73,7 +73,7 @@ pub struct BackupWorkspaceItem {
     pub dept: Option<String>,
     pub is_nopwd: bool,
     pub provision_kind: crate::provision::DiskProvisionKind,
-    pub sha256_status: crate::diskio::Sha256Status,
+    pub integrity_status: crate::diskio::BackupIntegrityStatus,
     pub size_ok: bool,
     pub content_sha256: Option<String>,
 }
@@ -107,7 +107,7 @@ pub fn scan_backup_workspace(root: &Path) -> Vec<BackupWorkspaceItem> {
                 dept: ownership.as_ref().and_then(|value| value.dept.clone()),
                 is_nopwd: entry.is_nopwd,
                 provision_kind: entry.provision_kind,
-                sha256_status: entry.sha256_ok,
+                integrity_status: entry.integrity_status,
                 size_ok: entry.size_ok,
                 content_sha256: entry.content_sha256.clone(),
             }

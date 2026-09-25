@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use edpcli::application::BackupWorkspaceItem;
 use edpcli::disk_scan::Row;
-use edpcli::diskio::Sha256Status;
+use edpcli::diskio::BackupIntegrityStatus;
 use edpcli::tui::{
     render,
     state::{AppState, NavCommand},
@@ -45,7 +45,7 @@ fn backup(index: usize, name: &str) -> BackupWorkspaceItem {
         dept: None,
         is_nopwd: false,
         provision_kind: edpcli::provision::DiskProvisionKind::Plain,
-        sha256_status: Sha256Status::Ok,
+        integrity_status: BackupIntegrityStatus::Verified,
         size_ok: true,
         content_sha256: Some(
             "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef".into(),

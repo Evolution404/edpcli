@@ -1067,6 +1067,16 @@ application 返回结构化 `ProvisionReport/BackupReport/InspectReport`，CLI/T
 - 定向 `tui_suite` **161/161** 通过；全目标 Clippy **0 条警告**；包含 Clippy 的正式快速门禁 **退出码 0 / 约 41s**。
 - 本阶段只改变后台任务编排结构，不改变设备扫描、备份、全盘检查、制盘的业务结果，也不改变任何真实盘写入事务边界。
 
+## Phase D2：EDPB 完整性状态去历史旁挂语义
+
+**COMPLETE。**
+
+- 备份运行时早已收敛到自包含、自校验的 EDPB，但类型仍保留旧旁挂文件时代的 `Sha256Status::NoSidecar`。该状态在现行扫描路径不可达，且让应用层、命令行和 TUI 继续暴露“缺 SHA-256”这一过时概念。
+- 统一改为 `BackupIntegrityStatus::{Verified, Invalid}`，`BackupEntry` 与 `BackupWorkspaceItem` 对应字段统一为 `integrity_status`；命令行和 TUI 只呈现 EDPB 完整/损坏状态，不再假设存在外部摘要旁挂文件。
+- `scan_backup_names` 的过时 `.bin` 注释已修正为现行 `.edpb` 轻量索引语义；内容摘要字段仍保留用于删除前同名替换防护，它与旧旁挂文件无关。
+- 全仓源码扫描确认 `Sha256Status`、`NoSidecar`、`sha256_ok`、`sha256_status` 已清零；真实介质协议兼容与历史 EDPB 清单只读兼容未改。
+- 定向 `backup_suite` **61/61**、`tui_suite` **161/161** 通过。
+
 ---
 
 # 第八部分：完成标准

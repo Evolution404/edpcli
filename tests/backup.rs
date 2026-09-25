@@ -11,7 +11,7 @@ use edpcli::common::{METADATA_IMAGE_LEN, SECTOR};
 use edpcli::diskio::Clock;
 use edpcli::diskio::{
     create_backup, find_backups, parse_backup_name, prune_candidates, scan_backup_dir, BackupEntry,
-    BackupMeta, DiskFacts, Sha256Status,
+    BackupIntegrityStatus, BackupMeta, DiskFacts,
 };
 use edpcli::edpb::{self, CoreCapture};
 
@@ -476,18 +476,18 @@ fn scan_backup_dir_reports_edpb_integrity_and_ignores_legacy_bin() {
     let by_path = |path: &std::path::Path| entries.iter().find(|entry| entry.path == path).unwrap();
 
     let ok_e = by_path(&ok);
-    assert_eq!(ok_e.sha256_ok, Sha256Status::Ok);
+    assert_eq!(ok_e.integrity_status, BackupIntegrityStatus::Verified);
     assert!(ok_e.size_ok);
     assert!(!ok_e.is_nopwd);
     assert!(ok_e.meta.is_some());
 
     let damaged_e = by_path(&damaged);
-    assert_eq!(damaged_e.sha256_ok, Sha256Status::Mismatch);
+    assert_eq!(damaged_e.integrity_status, BackupIntegrityStatus::Invalid);
     assert!(!damaged_e.size_ok);
     assert!(damaged_e.meta.is_none());
 
     let invalid_e = by_path(&invalid);
-    assert_eq!(invalid_e.sha256_ok, Sha256Status::Mismatch);
+    assert_eq!(invalid_e.integrity_status, BackupIntegrityStatus::Invalid);
     assert!(!invalid_e.size_ok);
     assert!(invalid_e.meta.is_none());
 }
@@ -509,7 +509,7 @@ fn scan_backup_dir_rejects_raw_7168_bytes_disguised_as_edpb() {
     let entries = scan_backup_dir(&tmp.0);
     let entry = entries.iter().find(|entry| entry.path == path).unwrap();
     assert_eq!(legacy.len(), METADATA_IMAGE_LEN + SECTOR);
-    assert_eq!(entry.sha256_ok, Sha256Status::Mismatch);
+    assert_eq!(entry.integrity_status, BackupIntegrityStatus::Invalid);
     assert!(!entry.size_ok);
     assert!(entry.meta.is_none());
 }
@@ -611,7 +611,7 @@ fn fake_entry(name: &str, onlyid: &str, mtime: i64, is_nopwd: bool) -> BackupEnt
         mtime,
         is_nopwd,
         provision_kind: edpcli::provision::DiskProvisionKind::Plain,
-        sha256_ok: Sha256Status::Ok,
+        integrity_status: BackupIntegrityStatus::Verified,
         size_ok: true,
         lba8: None,
         content_sha256: None,

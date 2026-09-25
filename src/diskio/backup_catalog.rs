@@ -142,10 +142,9 @@ pub struct BackupMeta {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Sha256Status {
-    Ok,
-    Mismatch,
-    NoSidecar,
+pub enum BackupIntegrityStatus {
+    Verified,
+    Invalid,
 }
 
 #[derive(Debug, Clone)]
@@ -155,7 +154,7 @@ pub struct BackupEntry {
     pub mtime: i64,
     pub is_nopwd: bool,
     pub provision_kind: crate::provision::DiskProvisionKind,
-    pub sha256_ok: Sha256Status,
+    pub integrity_status: BackupIntegrityStatus,
     pub size_ok: bool,
     /// 扫描时缓存的 LBA8 原始 512B；用于列表/元信息展示，避免随后再次打开同一备份。
     pub lba8: Option<[u8; SECTOR]>,
@@ -295,10 +294,10 @@ pub fn scan_backup_file(path: &Path) -> Option<BackupEntry> {
         .as_ref()
         .map(|data| data.len() == crate::common::METADATA_IMAGE_LEN)
         .unwrap_or(false);
-    let sha256_ok = if verified.is_some() && size_ok {
-        Sha256Status::Ok
+    let integrity_status = if verified.is_some() && size_ok {
+        BackupIntegrityStatus::Verified
     } else {
-        Sha256Status::Mismatch
+        BackupIntegrityStatus::Invalid
     };
     let is_nopwd = match (&meta, &raw) {
         (Some(meta), Some(data)) => image_is_nopwd(data, &meta.device_id),
@@ -316,7 +315,7 @@ pub fn scan_backup_file(path: &Path) -> Option<BackupEntry> {
         mtime: mtime_epoch(path),
         is_nopwd,
         provision_kind,
-        sha256_ok,
+        integrity_status,
         size_ok,
         lba8,
         content_sha256,
@@ -325,8 +324,8 @@ pub fn scan_backup_file(path: &Path) -> Option<BackupEntry> {
 
 /// Shell completion 专用的轻量备份索引。
 ///
-/// 这里只判断普通 `.bin` 文件以及文件名是否符合本工具备份命名；绝不读取备份内容、
-/// 计算 SHA-256 或解析 LBA。完整健康状态仍由 `scan_backup_dir` 负责。
+/// 这里只判断普通 `.edpb` 文件并按文件名时间排序；绝不读取备份内容、
+/// 计算内容摘要或解析 LBA。完整健康状态仍由 `scan_backup_dir` 负责。
 pub fn scan_backup_names(dir: &Path) -> Vec<PathBuf> {
     let Ok(read_dir) = fs::read_dir(dir) else {
         return Vec::new();

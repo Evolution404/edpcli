@@ -7,7 +7,7 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
-use crate::diskio::{self, BackupEntry, Sha256Status};
+use crate::diskio::{self, BackupEntry, BackupIntegrityStatus};
 
 #[derive(Debug, Clone)]
 pub struct BackupCatalog {
@@ -76,7 +76,7 @@ pub fn file_name(entry: &BackupEntry) -> &str {
 }
 
 pub fn is_healthy(entry: &BackupEntry) -> bool {
-    entry.size_ok && entry.sha256_ok == Sha256Status::Ok
+    entry.size_ok && entry.integrity_status == BackupIntegrityStatus::Verified
 }
 
 /// Delete one already-scanned backup entry using content identity, not only its pathname.
