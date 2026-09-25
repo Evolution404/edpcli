@@ -1007,6 +1007,16 @@ application 返回结构化 `ProvisionReport/BackupReport/InspectReport`，CLI/T
 - `provision::validate` 不得依赖 `crate::inspect` 的展示模型继续由同一门禁锁定；已有 TUI 工作区→应用层、`protocol::semantic`→底层协议、`TargetSession`/`EvidenceSource` 边界门禁继续保留。
 - 新增导入方向门禁 **1/1** 通过，当前代码无需为过门禁改写业务逻辑。
 
+### R6.5 编译缓存实施状态（2026-09-25）
+
+**COMPLETE。**
+
+- `scripts/test-full.py` 在未显式设置 `RUSTC_WRAPPER` 时自动探测本机 `sccache`；存在时启用，缺失时明确提示并直接使用 `rustc`，不会把开发环境依赖变成测试前置条件。
+- 使用 `sccache` 时自动补充 `CARGO_INCREMENTAL=0`，满足 Rust 编译缓存前提；CI 同样固定该变量。
+- GitHub Actions 使用 commit SHA `fc920bf0ec8de6ee65d409111f7ec508035751ba` 固定 `mozilla-actions/sccache-action` v0.0.11，并固定跨现有 CI 平台已确认发布资产的 `sccache` v0.17.0。
+- 本机通过 Homebrew 安装并验证 `sccache 0.18.0`。同一 target 路径清空产物后重建：首次 **14.88s**，缓存复用重建 **8.93s**；累计 Rust 命中 **71** 次，命中率 **49.31%**。
+- 缺少缓存程序路径也已验证：运行器输出降级提示后正常完成，不改变 fast/full 正确性门禁。
+
 ---
 
 # 第八部分：完成标准

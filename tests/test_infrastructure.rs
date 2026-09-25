@@ -57,3 +57,19 @@ fn ci_and_agent_policy_use_the_full_runner_instead_of_all_targets_shell_chains()
     assert!(agents.contains("120"));
     assert!(agents.contains("durable"));
 }
+
+#[test]
+fn compiler_cache_is_optional_locally_and_pinned_in_ci() {
+    let runner = read("scripts/test-full.py");
+    assert!(runner.contains("shutil.which(\"sccache\")"));
+    assert!(runner.contains("RUSTC_WRAPPER"));
+    assert!(runner.contains("CARGO_INCREMENTAL"));
+    assert!(runner.contains("[cache] sccache"));
+
+    let ci = read(".github/workflows/ci.yml");
+    assert!(ci.contains("mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba"));
+    assert!(ci.contains("version: \"v0.17.0\""));
+    assert!(ci.contains("SCCACHE_GHA_ENABLED: \"true\""));
+    assert!(ci.contains("RUSTC_WRAPPER: \"sccache\""));
+    assert!(ci.contains("CARGO_INCREMENTAL: \"0\""));
+}

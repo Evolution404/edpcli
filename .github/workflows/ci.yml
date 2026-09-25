@@ -39,6 +39,10 @@ jobs:
           - os: windows-2025
             label: windows-x86_64
     runs-on: ${{ matrix.os }}
+    env:
+      SCCACHE_GHA_ENABLED: "true"
+      RUSTC_WRAPPER: "sccache"
+      CARGO_INCREMENTAL: "0"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install pinned Rust
@@ -46,6 +50,10 @@ jobs:
         with:
           toolchain: 1.98.1
           components: clippy,rustfmt
+      - name: Install compiler cache
+        uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
+        with:
+          version: "v0.17.0"
       - name: Rustfmt
         run: cargo fmt --all -- --check
       - name: Full non-HIL test gate

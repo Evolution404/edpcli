@@ -14,6 +14,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 import json
 import os
+import shutil
 from pathlib import Path
 import subprocess
 import sys
@@ -34,6 +35,25 @@ ALL_SUITES = (
 )
 
 HIL_TARGETS = {"virtual_disk_hil", "plain_macos_virtual_hil"}
+
+def compiler_env() -> dict[str, str]:
+    env = os.environ.copy()
+    wrapper = env.get("RUSTC_WRAPPER")
+    if not wrapper and shutil.which("sccache"):
+        wrapper = "sccache"
+        env["RUSTC_WRAPPER"] = wrapper
+    if wrapper and Path(wrapper).name == "sccache":
+        env.setdefault("CARGO_INCREMENTAL", "0")
+    return env
+
+
+def announce_compiler_cache(env: dict[str, str]) -> None:
+    wrapper = env.get("RUSTC_WRAPPER")
+    if wrapper:
+        print(f"[cache] rustc wrapper={wrapper}", flush=True)
+    else:
+        print("[cache] sccache unavailable; using rustc directly", flush=True)
+
 CORE_FAST_SUITES = {"protocol_suite", "platform_suite", "repository_suite"}
 
 TEST_SOURCE_SUITES = {
@@ -181,7 +201,7 @@ def suites_for_paths(paths: Iterable[str]) -> set[str]:
     return selected
 
 
-def cargo_compile(suites: list[str]) -> list[TestArtifact]:
+def cargo_compile(suites: list[str], env: dict[str, str]) -> list[TestArtifact]:
     command = [
         "cargo",
         "test",
@@ -206,6 +226,7 @@ def cargo_compile(suites: list[str]) -> list[TestArtifact]:
         encoding="utf-8",
         errors="replace",
         bufsize=1,
+        env=env,
     )
     assert process.stdout is not None
 
@@ -322,9 +343,19 @@ def run_artifacts(
     return sorted(results, key=lambda item: item.duration, reverse=True)
 
 
-def run_doctests() -> TestResult:
+def run_doctests(env: dict[str, str]) -> TestResult:
     started = time.monotonic()
-    completed = run_text(["cargo", "test", "--doc", "--locked", "--quiet"])
+    completed = subprocess.run(
+        ["cargo", "test", "--doc", "--locked", "--quiet"],
+        cwd=ROOT,
+        env=env,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
     return TestResult(
         "doctest",
         time.monotonic() - started,
@@ -367,6 +398,9 @@ def main() -> int:
     if args.timeout < 1:
         raise SystemExit("--timeout must be positive")
 
+    env = compiler_env()
+    announce_compiler_cache(env)
+
     if args.suite:
         suites = sorted(set(args.suite), key=ALL_SUITES.index)
     elif args.profile == "full":
@@ -380,7 +414,7 @@ def main() -> int:
 
     started = time.monotonic()
     try:
-        artifacts = cargo_compile(suites)
+        artifacts = cargo_compile(suites, env)
     except RuntimeError as error:
         annotate_failure(str(error))
         print(f"[FAIL] {error}", file=sys.stderr)
@@ -388,7 +422,7 @@ def main() -> int:
 
     results = run_artifacts(artifacts, args.workers, args.timeout)
     if args.profile == "full":
-        doctest = run_doctests()
+        doctest = run_doctests(env)
         results.append(doctest)
         state = "PASS" if doctest.returncode == 0 else "FAIL"
         print(f"[{state}] doctest duration={doctest.duration:.2f}s")
