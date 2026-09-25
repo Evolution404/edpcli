@@ -69,8 +69,8 @@ required-features = ["ci-virtual-disk"]
 strip = true
 
 [dependencies]
-ratatui = "0.29.0"
-crossterm = "0.28.1"
+ratatui = "0.30.2"
+crossterm = "0.29.0"
 encoding_rs = "0.8"
 getrandom = "0.3"
 libc = "0.2"
