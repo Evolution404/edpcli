@@ -4,7 +4,7 @@ use std::collections::HashMap;
 
 use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout},
-    style::{Color, Modifier, Style},
+    style::{Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Cell, Paragraph, Row as TableRow, Table, TableState, Tabs, Wrap},
     Frame,
@@ -183,71 +183,40 @@ fn wrapped_field_lines(
         .collect()
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum ThemeToken {
-    Accent,
-    SecondaryAccent,
-    Success,
-    Warning,
-    Error,
-    Muted,
-    Selection,
-}
-
-fn theme_style(token: ThemeToken) -> Style {
-    match token {
-        ThemeToken::Accent => Style::default()
-            .fg(Color::Cyan)
-            .add_modifier(Modifier::BOLD),
-        ThemeToken::SecondaryAccent => Style::default().fg(Color::Magenta),
-        ThemeToken::Success => Style::default().fg(Color::Green),
-        ThemeToken::Warning => Style::default().fg(Color::Yellow),
-        ThemeToken::Error => Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
-        ThemeToken::Muted => Style::default().fg(Color::DarkGray),
-        ThemeToken::Selection => Style::default()
-            .fg(Color::Black)
-            .bg(Color::Cyan)
-            .add_modifier(Modifier::BOLD),
-    }
-}
-
 fn accent() -> Style {
-    theme_style(ThemeToken::Accent)
+    super::theme::current().accent()
 }
 
 fn secondary() -> Style {
-    theme_style(ThemeToken::SecondaryAccent)
+    super::theme::current().secondary_accent()
 }
 
 fn success() -> Style {
-    theme_style(ThemeToken::Success)
+    super::theme::current().success()
 }
 
 fn warning() -> Style {
-    theme_style(ThemeToken::Warning)
+    super::theme::current().warning()
 }
 
 fn danger() -> Style {
-    theme_style(ThemeToken::Error)
+    super::theme::current().danger()
 }
 
 fn muted() -> Style {
-    theme_style(ThemeToken::Muted)
+    super::theme::current().muted()
 }
 
 fn selected() -> Style {
-    theme_style(ThemeToken::Selection)
+    super::theme::current().selection()
 }
 
 fn provision_kind_style(kind: ProvisionKind) -> Style {
-    let color = match kind {
-        ProvisionKind::Mode0 => Color::LightCyan,
-        ProvisionKind::Mode1 => Color::LightMagenta,
-        ProvisionKind::Mode2 => Color::LightYellow,
-        ProvisionKind::Mode3 => Color::LightGreen,
-        ProvisionKind::Plain => Color::LightBlue,
-    };
-    Style::default().fg(color).add_modifier(Modifier::BOLD)
+    super::theme::current().provision_kind(kind)
+}
+
+fn partition_style(kind: ProvisionBarKind) -> Style {
+    super::theme::current().partition(kind)
 }
 
 fn device_status_style(row: &crate::disk_scan::Row) -> Style {

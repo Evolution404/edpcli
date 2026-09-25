@@ -9,6 +9,7 @@ pub mod event;
 pub mod render;
 pub mod state;
 pub mod task;
+pub mod theme;
 
 use std::io::{self, IsTerminal, Stdout};
 use std::time::{Duration, Instant};

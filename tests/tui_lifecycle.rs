@@ -5,7 +5,7 @@ use edpcli::tui::{
     render,
     state::{AppState, NavCommand, ProvisionStage, Workspace},
 };
-use ratatui::{backend::TestBackend, style::Color, Terminal};
+use ratatui::{backend::TestBackend, Terminal};
 
 fn usb_device() -> edpcli::disk_scan::Row {
     edpcli::disk_scan::Row {
@@ -181,6 +181,7 @@ fn wide_provision_form_uses_two_columns_and_compact_partition_rows() {
         "{text}"
     );
 
+    let palette = edpcli::tui::theme::current().palette();
     let internal_separator_x = |needle: &str| {
         cells
             .chunks(width as usize)
@@ -198,7 +199,7 @@ fn wide_provision_form_uses_two_columns_and_compact_partition_rows() {
                         *x > 8
                             && *x < 80
                             && cell.symbol() == "│"
-                            && cell.style().bg != Some(Color::Cyan)
+                            && cell.style().bg != Some(palette.selection)
                     })
                     .map(|(x, _)| x)
             })
@@ -236,13 +237,13 @@ fn wide_provision_form_uses_two_columns_and_compact_partition_rows() {
         .expect("ratio row");
     assert!(ratio_row
         .iter()
-        .any(|cell| cell.style().fg == Some(Color::Cyan)));
+        .any(|cell| cell.style().fg == Some(palette.partition_boot)));
     assert!(ratio_row
         .iter()
-        .any(|cell| cell.style().fg == Some(Color::Green)));
+        .any(|cell| cell.style().fg == Some(palette.partition_share)));
     assert!(ratio_row
         .iter()
-        .any(|cell| cell.style().fg == Some(Color::Magenta)));
+        .any(|cell| cell.style().fg == Some(palette.partition_encrypt)));
 }
 
 #[test]
@@ -272,14 +273,15 @@ fn provision_selection_highlights_only_value_and_long_values_scroll_with_cursor(
                 .contains("标签标识")
         })
         .expect("label id row");
+    let selection = edpcli::tui::theme::current().palette().selection;
     let label_cell = row
         .iter()
         .find(|cell| cell.symbol() == "标")
         .expect("label cell");
-    assert_ne!(label_cell.style().bg, Some(Color::Cyan));
+    assert_ne!(label_cell.style().bg, Some(selection));
     let highlighted = row
         .iter()
-        .filter(|cell| cell.style().bg == Some(Color::Cyan))
+        .filter(|cell| cell.style().bg == Some(selection))
         .map(|cell| cell.symbol())
         .collect::<String>();
     assert!(
@@ -417,10 +419,11 @@ fn advanced_inspect_tree_browser_renders_and_navigates_across_terminal_sizes() {
         .iter()
         .map(|cell| cell.symbol())
         .collect::<String>();
+    let selection = edpcli::tui::theme::current().palette().selection;
     let highlighted = buffer
         .content()
         .iter()
-        .filter(|cell| cell.style().bg == Some(Color::Cyan))
+        .filter(|cell| cell.style().bg == Some(selection))
         .map(|cell| cell.symbol())
         .collect::<String>();
     assert!(
@@ -439,7 +442,7 @@ fn advanced_inspect_tree_browser_renders_and_navigates_across_terminal_sizes() {
         .expect("focused tree row");
     let last_highlighted = focus_row
         .iter()
-        .rposition(|cell| cell.style().bg == Some(Color::Cyan))
+        .rposition(|cell| cell.style().bg == Some(selection))
         .expect("selected content cells");
     let border = focus_row
         .iter()
@@ -455,7 +458,7 @@ fn advanced_inspect_tree_browser_renders_and_navigates_across_terminal_sizes() {
     assert!(
         focus_row[last_highlighted + 1..border]
             .iter()
-            .all(|cell| cell.style().bg != Some(Color::Cyan)),
+            .all(|cell| cell.style().bg != Some(selection)),
         "selected background must not paint unrelated layout padding"
     );
 
@@ -509,7 +512,7 @@ fn advanced_inspect_tree_browser_renders_and_navigates_across_terminal_sizes() {
             .buffer()
             .content()
             .iter()
-            .filter(|cell| cell.style().bg == Some(Color::Cyan))
+            .filter(|cell| cell.style().bg == Some(selection))
             .map(|cell| cell.symbol())
             .collect::<String>();
         assert!(

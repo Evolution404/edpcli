@@ -49,34 +49,38 @@ fn tui_startup_elevates_before_entering_the_alternate_screen() {
 }
 
 #[test]
-fn tui_theme_uses_the_same_semantic_color_family_as_cli_output() {
-    let source = include_str!("../src/tui/render.rs");
-    for color in [
-        "Color::Cyan",
-        "Color::Green",
-        "Color::Yellow",
-        "Color::Red",
-        "Color::Magenta",
+fn tui_theme_exposes_one_low_saturation_semantic_palette() {
+    let theme = include_str!("../src/tui/theme.rs");
+    for token in [
+        "pub struct Theme",
+        "pub struct Palette",
+        "Color::Rgb",
+        "pub fn accent",
+        "pub fn success",
+        "pub fn warning",
+        "pub fn danger",
+        "pub fn selection",
     ] {
         assert!(
-            source.contains(color),
-            "TUI semantic palette is missing {color}"
+            theme.contains(token),
+            "TUI semantic Theme is missing {token}"
         );
     }
 }
 
 #[test]
-fn advanced_inspect_uses_global_semantic_theme_tokens_without_private_colors() {
-    let theme = include_str!("../src/tui/render.rs");
+fn advanced_inspect_uses_global_semantic_theme_without_private_colors() {
+    let theme = include_str!("../src/tui/theme.rs");
+    let render = include_str!("../src/tui/render.rs");
     assert!(
-        theme.contains("enum ThemeToken") && theme.contains("theme_style(ThemeToken::"),
-        "TUI should expose one semantic Theme token layer instead of feature-private colors"
+        theme.contains("pub struct Theme") && render.contains("super::theme::current()"),
+        "TUI should expose one centralized semantic Theme instead of feature-private colors"
     );
 
     let inspect = include_str!("../src/tui/inspect/render.rs");
     assert!(
         !inspect.contains("Color::"),
-        "Inspect business rendering must consume semantic Theme tokens, not hard-code colors"
+        "Inspect business rendering must consume semantic Theme styles, not hard-code colors"
     );
 }
 

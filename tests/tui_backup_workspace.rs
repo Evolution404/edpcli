@@ -5,7 +5,7 @@ use edpcli::tui::{
     render,
     state::{AppState, NavCommand, Workspace},
 };
-use ratatui::{backend::TestBackend, style::Color, Terminal};
+use ratatui::{backend::TestBackend, Terminal};
 
 #[test]
 fn backup_workspace_uses_one_based_global_selector_indices() {
@@ -43,12 +43,13 @@ fn highlighted_text(state: &AppState) -> String {
     terminal
         .draw(|frame| render::draw(frame, state))
         .expect("draw TUI");
+    let selection = edpcli::tui::theme::current().palette().selection;
     terminal
         .backend()
         .buffer()
         .content()
         .iter()
-        .filter(|cell| cell.style().bg == Some(Color::Cyan))
+        .filter(|cell| cell.style().bg == Some(selection))
         .map(|cell| cell.symbol())
         .collect()
 }

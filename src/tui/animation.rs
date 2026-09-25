@@ -8,11 +8,13 @@ use std::time::Duration;
 
 use ratatui::{
     layout::{Alignment, Rect},
-    style::{Color, Modifier, Style},
+    style::{Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Paragraph},
     Frame,
 };
+
+use super::theme::{self, AnimationTone};
 
 pub const TICK_INTERVAL_MS: u64 = 80;
 pub const REDUCED_TICK_INTERVAL_MS: u64 = 240;
@@ -60,9 +62,11 @@ impl CoreMode {
 
     fn style(self) -> Style {
         match self {
-            Self::Stable => Style::default().fg(Color::Green),
-            Self::Busy => Style::default().fg(Color::Yellow),
-            Self::Guard => Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+            Self::Stable => theme::current().success(),
+            Self::Busy => theme::current().warning(),
+            Self::Guard => theme::current()
+                .animation(AnimationTone::Guard)
+                .add_modifier(Modifier::BOLD),
         }
     }
 }
@@ -108,13 +112,13 @@ impl Dot {
     fn style(self) -> Style {
         match self {
             Self::Empty => Style::default(),
-            Self::Dim => Style::default().fg(Color::DarkGray),
-            Self::Accent => Style::default().fg(Color::Cyan),
-            Self::Hot => Style::default()
-                .fg(Color::Magenta)
+            Self::Dim => theme::current().animation(AnimationTone::Dim),
+            Self::Accent => theme::current().animation(AnimationTone::Accent),
+            Self::Hot => theme::current()
+                .animation(AnimationTone::Accent)
                 .add_modifier(Modifier::BOLD),
-            Self::Core => Style::default()
-                .fg(Color::Cyan)
+            Self::Core => theme::current()
+                .animation(AnimationTone::Core)
                 .add_modifier(Modifier::BOLD),
         }
     }
@@ -253,11 +257,11 @@ pub fn compact_indicator(tick: u64, mode: CoreMode) -> Span<'static> {
 pub fn draw(frame: &mut Frame, area: Rect, tick: u64, mode: CoreMode, activity: &str) {
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::DarkGray))
+        .border_style(theme::current().panel())
         .title(" EDP CORE · LIVE ")
         .title_style(
-            Style::default()
-                .fg(Color::Magenta)
+            theme::current()
+                .secondary_accent()
                 .add_modifier(Modifier::BOLD),
         );
     let inner = block.inner(area);
@@ -274,23 +278,23 @@ pub fn draw(frame: &mut Frame, area: Rect, tick: u64, mode: CoreMode, activity: 
 
     let mut lines = Vec::with_capacity(height);
     lines.push(Line::from(vec![
-        Span::styled("STABILITY // ", Style::default().fg(Color::DarkGray)),
+        Span::styled("STABILITY // ", theme::current().muted()),
         Span::styled(mode.label(), mode.style()),
     ]));
     lines.push(Line::from(Span::styled(
         format!("ACTIVITY  // {activity}"),
-        Style::default().fg(Color::DarkGray),
+        theme::current().muted(),
     )));
     lines.extend(centered_grid_lines(tick, width, visual_height));
     lines.push(Line::from(Span::styled(
         "SECTOR VIEW // LBA 00-12",
-        Style::default().fg(Color::DarkGray),
+        theme::current().muted(),
     )));
     lines.push(Line::from(vec![
-        Span::styled("FRAME      // ", Style::default().fg(Color::DarkGray)),
+        Span::styled("FRAME      // ", theme::current().muted()),
         Span::styled(
             format!("{:06}", tick % 1_000_000),
-            Style::default().fg(Color::Cyan),
+            theme::current().animation(AnimationTone::Accent),
         ),
     ]));
 

@@ -32,6 +32,8 @@ mod tui_singleflight;
 mod tui_state;
 #[path = "tui_terminal_safety.rs"]
 mod tui_terminal_safety;
+#[path = "tui_theme_contract.rs"]
+mod tui_theme_contract;
 #[path = "tui_write_safety.rs"]
 mod tui_write_safety;
 #[path = "tui_write_target.rs"]

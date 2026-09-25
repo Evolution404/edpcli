@@ -408,14 +408,7 @@ pub(super) fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, sta
                 while run_end < bar.len() && bar[run_end] == kind {
                     run_end += 1;
                 }
-                let style = match kind {
-                    ProvisionBarKind::Free => Style::default().fg(Color::DarkGray),
-                    ProvisionBarKind::Plain => Style::default().fg(Color::LightBlue),
-                    ProvisionBarKind::Boot => Style::default().fg(Color::Cyan),
-                    ProvisionBarKind::Share => Style::default().fg(Color::Green),
-                    ProvisionBarKind::Encrypt => Style::default().fg(Color::Magenta),
-                    ProvisionBarKind::Compatibility => Style::default().fg(Color::Yellow),
-                };
+                let style = partition_style(kind);
                 bar_spans.push(Span::styled("━".repeat(run_end - run_start), style));
                 run_start = run_end;
             }
@@ -423,22 +416,22 @@ pub(super) fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, sta
             let bar_line = Line::from(bar_spans);
             let legend_line = if provision.kind == ProvisionKind::Plain {
                 Line::from(vec![
-                    Span::styled("■", Style::default().fg(Color::LightBlue)),
+                    Span::styled("■", partition_style(ProvisionBarKind::Plain)),
                     Span::raw(" 普通分区  "),
-                    Span::styled("■", Style::default().fg(Color::DarkGray)),
+                    Span::styled("■", partition_style(ProvisionBarKind::Free)),
                     Span::raw(" 空闲"),
                 ])
             } else {
                 Line::from(vec![
-                    Span::styled("■", Style::default().fg(Color::Cyan)),
+                    Span::styled("■", partition_style(ProvisionBarKind::Boot)),
                     Span::raw(" 启动  "),
-                    Span::styled("■", Style::default().fg(Color::Green)),
+                    Span::styled("■", partition_style(ProvisionBarKind::Share)),
                     Span::raw(" 交换/二合一  "),
-                    Span::styled("■", Style::default().fg(Color::Magenta)),
+                    Span::styled("■", partition_style(ProvisionBarKind::Encrypt)),
                     Span::raw(" 保密  "),
-                    Span::styled("■", Style::default().fg(Color::Yellow)),
+                    Span::styled("■", partition_style(ProvisionBarKind::Compatibility)),
                     Span::raw(" 兼容  "),
-                    Span::styled("■", Style::default().fg(Color::DarkGray)),
+                    Span::styled("■", partition_style(ProvisionBarKind::Free)),
                     Span::raw(" 空闲"),
                 ])
             };
