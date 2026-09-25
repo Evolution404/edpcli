@@ -6,6 +6,7 @@ rust-version = "1.98"
 description = "EDP/cems U 盘管理 CLI（识别、元信息、备份、恢复与免密转换）"
 license = "MIT"
 publish = false
+autotests = false
 
 [lib]
 name = "edpcli"
@@ -20,6 +21,49 @@ default = []
 # 仅供 CI 在 GitHub-hosted Runner 的临时 loop/VHD 上做 HIL-lite。
 # 正式 Release 永不启用；平台实现还会再次验证目标确实是虚拟块设备。
 ci-virtual-disk = []
+
+
+[[test]]
+name = "cli_suite"
+path = "tests/cli_suite.rs"
+
+[[test]]
+name = "backup_suite"
+path = "tests/backup_suite.rs"
+
+[[test]]
+name = "inspect_suite"
+path = "tests/inspect_suite.rs"
+
+[[test]]
+name = "protocol_suite"
+path = "tests/protocol_suite.rs"
+
+[[test]]
+name = "provision_suite"
+path = "tests/provision_suite.rs"
+
+[[test]]
+name = "tui_suite"
+path = "tests/tui_suite.rs"
+
+[[test]]
+name = "platform_suite"
+path = "tests/platform_suite.rs"
+
+[[test]]
+name = "repository_suite"
+path = "tests/repository_suite.rs"
+
+[[test]]
+name = "virtual_disk_hil"
+path = "tests/virtual_disk_hil.rs"
+required-features = ["ci-virtual-disk"]
+
+[[test]]
+name = "plain_macos_virtual_hil"
+path = "tests/plain_macos_virtual_hil.rs"
+required-features = ["ci-virtual-disk"]
 
 [profile.release]
 strip = true
