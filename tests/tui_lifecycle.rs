@@ -406,6 +406,13 @@ fn advanced_inspect_form_and_result_render_across_terminal_sizes() {
         mode: AdvancedInspectMode::Meta,
         items,
         export_dir: None,
+        topology: edpcli::application::inspect_tree::build_inspect_topology(
+            &edpcli::inspect_target::InspectDiskContext::new(
+                vec![0; edpcli::common::METADATA_IMAGE_LEN],
+                None,
+                24_025_029,
+            ),
+        ),
     }));
     assert_eq!(
         state.advanced_inspect().unwrap().stage,

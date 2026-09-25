@@ -268,6 +268,7 @@ pub struct AdvancedInspectWorkspace {
     pub mode: AdvancedInspectMode,
     pub items: Vec<AdvancedInspectItem>,
     pub export_dir: Option<std::path::PathBuf>,
+    pub topology: super::inspect_tree::InspectTopology,
 }
 
 fn parse_u64_decimal(value: &str, label: &str) -> Result<u64, String> {
@@ -679,12 +680,14 @@ fn run_advanced_source<R: SectorReader + ?Sized>(
         items.push(item);
     }
 
+    let topology = super::inspect_tree::build_inspect_topology(&context);
     Ok(AdvancedInspectWorkspace {
         source,
         meta,
         mode: request.mode,
         items,
         export_dir: request.export_dir.clone(),
+        topology,
     })
 }
 
