@@ -1555,7 +1555,7 @@ o 展开  Enter查看  gl 跳转  / 搜索  Tab面板  ? 帮助
 - `/` 结构化搜索已完成：搜索 canonical topology 的 Region / Extent / Structure / Group / Field label，以及当前已知/cached `InspectField.value`；纯 topology 路径查找和 cached sector 结构匹配位于 `application::inspect_tree`，TUI 不复制 decoder/parser。命中会自动展开 Tree 路径并定位目标；`n/N` 在当前匹配集合中循环下一个/上一个，Field 命中可直接继续既有 Field→Hex。搜索不会为大分区 materialize 全量 Sector，也不会执行同步 full-disk raw scan；raw pattern search 仍明确留在第二阶段。
 - I7 已完成全部门禁：Sector Inspector 9/9（含 LBA jump、hex LBA、absolute byte offset 精确 cursor、lazy extent 自动翻页、invalid/overflow/out-of-range、Field label/typed value 搜索、40×10/80×24/120×36 prompt 渲染与 cache/virtualization 不退化）、TUI state 39/39、TUI lifecycle 13/13、Inspect tree 5/5、documentation layout 5/5 均通过；`cargo fmt --all -- --check`、`cargo check --all-targets` 通过，长时 `cargo test --all-targets` 最终 `exit_code=0`、680/680 tests passed、0 failed。下一步进入 Phase I8：视觉统一与窄屏收口。
 - Phase I8 已完成实现：全局渲染入口新增 `ThemeToken` 语义层，原有 accent/secondary/success/warning/error/muted/selection 全部经统一 token 映射；Advanced Inspect 区域不再直接引用 `Color::*`。Unknown/Reserved 使用 muted 语义，Preserved 使用 success，当前 byte/field/panel selection 继续使用统一 selection token。
-- Advanced Inspect 新增与其它页面一致的 `结构树 / 节点概览 / 节点详情` Tabs；`Tab/Shift+Tab` 继续只切换既有 `AdvancedInspectPanel` 状态。Tree 的 `▶` 仅表示当前键盘焦点且全屏唯一，展开/折叠改用 `−/+`，避免与 focus marker 混淆；selected 背景只覆盖箭头和实际 row 内容，不涂满到 panel padding/border。
+- Advanced Inspect 新增与其它页面一致的 `结构树 / 节点概览 / 节点详情` Panel；I8 当时曾用 `Tab/Shift+Tab` 切换 `AdvancedInspectPanel`，该历史键位已被第 10 章最终规则取代，现行只允许 `Ctrl-w*` 切换 Panel，`Tab/Shift+Tab` 专用于顶层 Devices/Backups 标签。Tree 的 `▶` 仅表示当前键盘焦点且全屏唯一，展开/折叠改用 `−/+`，避免与 focus marker 混淆；selected 背景只覆盖箭头和实际 row 内容，不涂满到 panel padding/border。
 - I8 窄屏采用同状态单面板降级：宽屏仍为三栏，中屏仍为左树 + 右侧上下两栏；当宽度 <92 或有效高度 <14 时只渲染当前 active panel，Tree selection、detail scroll、Sector byte cursor 都不被响应式布局改写。Sector Inspector 在 60×18 下仍会自动滚到 cursor 所在 16B 行，并保留精确 byte selection。
 - I8 已完成全部门禁：TUI contract 8/8、TUI lifecycle 13/13、Sector Inspector 10/10、Backup workspace 5/5、旧 Inspect workspace 5/5、Search/Command 4/4、documentation layout 5/5 均通过；`cargo fmt --all -- --check`、`cargo check --all-targets`、`git diff --check` 通过，长时 `cargo test --all-targets` 最终 `exit_code=0`、682/682 tests passed、0 failed。下一步进入 Phase I9：回归与真实盘只读验收。
 - Phase I9 自动验收已完成：新增 `inspect_full_disk_acceptance`，用正式 `generate_official_image()` 生成 mode0～mode3 四种官方协议形态，逐一验证 LBA12 logical partitions 与 LCE 同时进入统一 full-disk topology，且 LBA0 MBR 对同一官方分区的可见映射不会再生成重复 Region；4,000,000,000-sector sparse disk 的高 LBA Jump 仍只 materialize 至多 64 个 Sector，Unknown decode 保持 fail-closed。
@@ -1565,7 +1565,7 @@ o 展开  Enter查看  gl 跳转  / 搜索  Tab面板  ? 帮助
 - 真实盘生产解析链验证通过：`SysRunner + identify()` 从真实 LBA7 与硬件探测得到 `disk&ven_aigo&prod_u335&rev_1100`，VID/PID=`3535/6300`，容量与物理盘一致；生产 `decode_sector()` 对 LBA0、4、7、11、12 分别进入 canonical `lba0/lba4/lba7/lba11/lba12`，其中 LBA7=rolling XOR、LBA11=DRKB+PDKB、LBA12=A6B0 512B，均未回退 RAW。真实 `InspectDiskContext` 解出 3 个 partition 与 LCE：type1 从 LBA63 开始并识别为 FAT16 明文；type2 从 LBA20480 开始、type4 从 LBA13627392 开始，两者均 `SM4-ECB + FileKeyCRC=PASS`，解密后识别为 exFAT；LCE 位于 LBA15725843～15725848，6/6 sectors 均按 EDPSECDISK zero8 + 64-bit physical-offset tweak 解码；未知 LBA20 明确 fail-closed。
 - 仍需区分的一层是 CLI 自身的 raw-device 二次提权启动：当前非交互 Runner 中 `edpcli inspect --disk 4` 会重新执行 `sudo`，该 sudo 会话不能复用外部 helper 的认证票据，因此 CLI 进程级 raw-device 入口尚未直接跑通。这个限制不影响上述“真实物理扇区读取 + 当前生产 reader/context/decoder 语义”验收结果，但在获得可供 Runner 复用的受限 raw-device 权限前，不把“CLI 自身 sudo re-exec HIL”写成已通过。
 
-- 2026-09-25 收口：Inspect 双轨已从运行时删除，而不只是隐藏入口。`NavCommand` 只保留单一 `OpenInspect`，`:advanced-inspect` / `:inspect-advanced` / `:ai` 不再作为命令面板别名；旧 `InspectState`、`inspect_data/inspect_pending`、旧 LBA0～12 worker/queue、旧 flat renderer 与对应旧滚动测试均已删除，原有两个有价值的 EDPB backend 测试迁入 `inspect_suite`。`:inspect`、`gi` 和备份页 Enter 均直接进入同一全盘结构树。Sector Inspector 补齐此前文档声明但事件循环未接线的 `Space`、`0/$`、`gg/G`、`Ctrl-u/Ctrl-d`，并新增真实 `n/N` 循环搜索状态。专项回归 `provision_suite` 178/178、`inspect_suite` 55/55、`tui_suite` 147/147；正式 fast gate 6 suites / 8 artifacts、0 failures，正式 full gate 8 suites / 10 artifacts / doctest、0 failures。
+- 2026-09-25 收口：Inspect 双轨已从运行时删除，而不只是隐藏入口。`NavCommand` 只保留单一 `OpenInspect`，`:advanced-inspect` / `:inspect-advanced` / `:ai` 不再作为命令面板别名；旧 `InspectState`、`inspect_data/inspect_pending`、旧 LBA0～12 worker/queue、旧 flat renderer 与对应旧滚动测试均已删除，原有两个有价值的 EDPB backend 测试迁入 `inspect_suite`。`:inspect`、设备/备份页单键 `i` 和备份页 Enter 均直接进入同一全盘结构树。Sector Inspector 补齐此前文档声明但事件循环未接线的 `Space`、`0/$`、`gg/G`、`Ctrl-u/Ctrl-d`，并新增真实 `n/N` 循环搜索状态。专项回归 `provision_suite` 178/178、`inspect_suite` 55/55、`tui_suite` 147/147；正式 fast gate 6 suites / 8 artifacts、0 failures，正式 full gate 8 suites / 10 artifacts / doctest、0 failures。
 
 ---
 
@@ -1841,20 +1841,17 @@ Confirm
 
 `h/l` **不得再用于切换 Workspace**。
 
-#### 10.4.3 Workspace 与 Panel 使用 Vim 原生类比
+#### 10.4.3 顶层标签与 Panel
 
-Workspace 对应 Vim tab：
+当前顶层 UI **只有两个真实标签：Devices 与 Backups**。Provision 是从设备页进入的功能流程，Inspect 是从设备/备份进入的检查界面，都不是顶层标签。
 
 | 动作 | 键 |
 | --- | --- |
-| 下一个 Workspace | `gt` |
-| 上一个 Workspace | `gT` |
-| Devices | `gd` |
-| Backups | `gb` |
-| Provision | `gp` |
-| Inspect | `gi` |
+| 下一个顶层标签 | `Tab` |
+| 上一个顶层标签 | `Shift+Tab` |
+| Devices ↔ Backups | `Tab / Shift+Tab` 循环 |
 
-Panel 对应 Vim window：
+页面内部 Panel 继续使用 Vim window 类比：
 
 | 动作 | 键 |
 | --- | --- |
@@ -1865,29 +1862,18 @@ Panel 对应 Vim window：
 | 下一 Panel | `Ctrl-w w` |
 | 上一 Panel | `Ctrl-w W` |
 
-可保留：
+硬规则：`Tab/Shift+Tab` 不再承担 Panel focus；Panel 只由 `Ctrl-w*` 管理。`gt/gT`、`gd/gb/gp/gi` 全部删除，不保留第二套入口。
 
-- `Tab` = 下一 Panel；
-- `Shift+Tab` = 上一 Panel；
+#### 10.4.4 `g` 仅保留必要的导航前缀
 
-但 Tab/Shift+Tab 不再切 Workspace。
-
-#### 10.4.4 `g` 是统一导航前缀
-
-`g` 不允许再作为按一次即立刻执行的单键动作。统一解析：
+`g` 不允许作为按一次即执行的动作，也不再承载页面/功能跳转。只保留：
 
 ```text
 gg      top
-gt      next workspace
-gT      previous workspace
-gd      Devices
-gb      Backups
-gp      Provision
-gi      Inspect
 gl      Inspect: go to LBA/absolute byte offset
 ```
 
-因此当前 Inspect “单按 `g` 打开 Jump”必须迁移为 `gl`。无效或超时 prefix 应取消 pending 状态，不触发其它动作。
+`gt/gT/gd/gb/gp/gi` 均为无效组合。无效或超时 prefix 应取消 pending 状态，不触发其它动作。
 
 #### 10.4.5 搜索
 
@@ -1912,7 +1898,8 @@ j/k       上下字段
 h/l       枚举/选项左移右移
 Space     toggle
 i         编辑当前文本/数字字段
-Enter     默认动作；可编辑字段可进入编辑
+Enter     生成只读计划
+p         生成/预览计划
 f         填满剩余容量
 Esc/q     返回
 ```
@@ -1925,7 +1912,8 @@ Esc/q     返回
 Home/End   首尾
 Backspace
 Delete
-Esc        回 Normal
+Enter      完成编辑并回 Normal
+Esc        完成编辑并回 Normal
 ```
 
 硬规则：
@@ -1954,31 +1942,34 @@ Esc        回 Normal
 #### 10.5.1 Devices
 
 ```text
-j/k       移动
-gg/G      首尾
-Enter/o   详情/默认打开
-r         重新扫描
-gi        去 Inspect
-gp        去 Provision
-/ n N     搜索
-?         帮助
-q/Esc     返回/退出
+Tab/Shift-Tab  设备 / 备份标签切换
+j/k            移动
+gg/G           首尾
+p / Enter      进入 Provision
+i              进入 Inspect
+a              新建备份
+r              重新扫描
+/ n N          搜索
+?              帮助
+q/Esc          返回/退出
 ```
 
 #### 10.5.2 Backups
 
 ```text
-j/k       移动
-gg/G      首尾
-Space     选中/取消
-Enter/o   查看详情
-a         创建备份，类型在 modal 中选择 Metadata/Deep
-v         Verify
-d         删除当前或已选
-r         刷新 catalog
-/ n N     搜索
-?         帮助
-q/Esc     返回
+Tab/Shift-Tab  设备 / 备份标签切换
+j/k            移动
+gg/G           首尾
+Space          选中/取消
+i / Enter      进入 Inspect
+a              创建备份，类型在 modal 中选择 Metadata/Deep
+v              Verify
+R              进入 Restore 安全向导
+d              删除当前或已选
+r              刷新 catalog
+/ n N          搜索
+?              帮助
+q/Esc          返回
 ```
 
 删除单条/批量不再使用 `D/X` 两套按键；`d` 根据 selection 自动决定对象，并进入统一确认。
@@ -2106,7 +2097,9 @@ enum TuiAction {
     SearchPrevious,
     WorkspaceNext,
     WorkspacePrevious,
-    Workspace(Workspace),
+    Plan,
+    Insert,
+    Restore,
     PanelLeft,
     PanelDown,
     PanelUp,
@@ -2138,7 +2131,7 @@ Workspace handler
 - `src/tui/event.rs` / `src/tui/mod.rs` 不再作为大量业务字母键的散落事实源；
 - workspace handler 消费 `TuiAction`，只处理本 workspace 是否支持该 action；
 - Insert/Search/Command 优先消费文本；
-- `g` 与 `Ctrl-w` 是有状态 prefix，由 keymap 统一管理；
+- `g` 与 `Ctrl-w` 是有状态 prefix，由 keymap 统一管理；其中 `g` 只接受 `gg/gl`，`Ctrl-w` 只管理 Panel；
 - 新快捷键必须先登记 keymap + help registry + tests，不允许页面私加；
 - Help/footer 从同一 key binding metadata 生成或校验，避免文案与行为漂移。
 
@@ -2225,7 +2218,7 @@ Insert：
 - 删除 `h/l/Left/Right=Workspace`；
 - 删除 Backup `D/X` 双删除；
 - 删除 `i/I` 作为 Inspect 打开动作，`i` 回归 Insert；
-- Tab/Shift+Tab 只作为 Panel alias；
+- Tab/Shift+Tab 只切顶层 Devices/Backups 标签；Panel 仅保留 `Ctrl-w*`；
 - 更新 README/USAGE/Help/本文件；
 - 审计所有 footer 文案与实际 keymap 一致。
 
@@ -2238,9 +2231,9 @@ Insert：
 - T2：Devices、Backups、Provision、Inspect、动画、容量条、footer/help/modal 已使用统一视觉语义；
 - T3：集中式 `keymap.rs`、Normal/Insert/Search/Command/Confirm、`g` prefix、`Ctrl-w` prefix 与帮助元数据已经建立；
 - T4：Devices/Backups、Provision Insert、Inspect Tree/Panel、Sector Inspector/Hex、Search/Command 以及备份批量删除、清理、单条删除、恢复/写盘确认弹窗均通过统一 KeyMapper 分发；事件循环不再直接解析业务字符输入；
-- T5：旧 `g=Jump`、`r/d/m` view mode、`h/l/Left/Right=Workspace`、Backup `D/X`、`i/I=Inspect` 双状态机已经移除；旧平铺 Inspect 的 state、worker、renderer 和专用滚动测试均已删除，所有入口统一进入全盘结构树；README、USAGE、Help、footer 与第 9 章仍具现行含义的快捷键示例已同步。
+- T5：旧 `g=Jump`、`r/d/m` view mode、`h/l/Left/Right=Workspace`、Backup `D/X` 双状态机已经移除；旧平铺 Inspect 的 state、worker、renderer 和专用滚动测试均已删除，所有入口统一进入全盘结构树。最终交互进一步收敛为：`Tab/Shift-Tab` 只切 Devices/Backups 两个顶层标签，Panel 只由 `Ctrl-w*` 管理，删除 `gt/gT/gd/gb/gp/gi`，设备/备份 Normal 模式使用 `p/i/a/R` 单键执行对应功能；README、USAGE、Help、footer 与第 9 章仍具现行含义的快捷键示例已同步。
 
-2026-09-25 本轮回归补充后的专项验收结果：`tui_suite` 147/147；`provision_suite` 178/178；`inspect_suite` 55/55；`cargo fmt --all -- --check` 与 `git diff --check` 通过。此前 macOS Plain Virtual-HIL 1/1 的 detach/reattach、exFAT 挂载与文件读回结论继续有效。本轮新增门禁覆盖：Form Enter 生成计划、Normal/Insert 可视区分与输入框冗余宽度、逐分区 FileKeyCRC（含 mode2 兼容保留区后的槽位索引）、用户格式化选择不被 Rebuild 覆盖、单一全盘 Inspect 入口、旧 flat Inspect 运行时删除、Sector Inspector 完整 Vim 导航及 `n/N` 循环搜索。正式 fast gate 6 suites / 8 artifacts、0 failures，正式 full gate 8 suites / 10 artifacts / doctest、0 failures。
+2026-09-25 本轮回归补充后的专项验收结果：`tui_suite` 148/148；`provision_suite` 178/178；`inspect_suite` 55/55；`cargo fmt --all -- --check` 与 `git diff --check` 通过。此前 macOS Plain Virtual-HIL 1/1 的 detach/reattach、exFAT 挂载与文件读回结论继续有效。本轮新增门禁覆盖：Form Enter 生成计划、Normal/Insert 可视区分与输入框冗余宽度、逐分区 FileKeyCRC（含 mode2 兼容保留区后的槽位索引）、用户格式化选择不被 Rebuild 覆盖、单一全盘 Inspect 入口、旧 flat Inspect 运行时删除、Sector Inspector 完整 Vim 导航及 `n/N` 循环搜索，以及最终快捷键模型：`Tab/Shift-Tab` 切顶层标签、`Ctrl-w*` 切 Panel、`p/i/a/R` 仅在无输入的对应页面执行单键功能、输入模式优先消费文本。正式 fast gate 4 suites / 6 artifacts、0 failures，正式 full gate 8 suites / 10 artifacts / doctest、0 failures。
 
 重构未修改 LBA0～12/LCE 协议语义，也未降低任何真实写盘安全门槛：系统盘保护、USB 整盘确认、写前备份、卸载/锁卷、reopen 身份复核、atomic write、readback、rollback 均保持原有边界；真实制盘仍必须精确输入大写 `YES`。
 
@@ -2259,12 +2252,12 @@ Insert：
 9. Normal 下 `j/k/h/l` 语义统一；
 10. Insert 下 `h/j/k/l/g/d/r/f` 被作为文本字符；
 11. 输入框 Left/Right 只移动光标；
-12. `gt/gT` 只切 Workspace；
-13. `gd/gb/gp/gi` 精确直达对应 Workspace；
+12. `Tab/Shift+Tab` 只在 Devices / Backups 两个顶层标签间切换；
+13. `p/i/a/R` 在对应无输入页面直接执行 Provision / Inspect / Backup / Restore 功能；
 14. 单按 `g` 不触发 Jump；
-15. `gl` 才进入 Inspect Jump；
+15. `gl` 才进入 Inspect Jump，`gt/gT/gd/gb/gp/gi` 均无效；
 16. `Ctrl-w h/j/k/l/w/W` 只改变 Panel focus；
-17. Tab/Shift+Tab 不切 Workspace；
+17. Tab/Shift+Tab 不再改变 Panel focus；
 18. `gg/G/Ctrl-u/Ctrl-d` 在列表/树语义一致；
 19. `/ n N` 在支持搜索的 workspace 一致；
 20. `r` 不再被页面重定义为 view mode；
@@ -2286,8 +2279,8 @@ Insert：
 5. Selection、Focus、Input、Tabs、Modal、Status 视觉一致；
 6. Devices/Backups/Provision/Inspect/animation 使用同一设计语言；
 7. Normal/Insert/Search/Command/Confirm 模式明确；
-8. `gt/gT` 与 `Ctrl-w*` 分别统一 Workspace/Panel；
-9. `h/l` 不再切 Workspace；
+8. `Tab/Shift+Tab` 与 `Ctrl-w*` 分别统一顶层标签/Panel；
+9. `gt/gT/gd/gb/gp/gi` 已删除，`h/l` 不再切顶层标签；
 10. 输入框方向键永不切 Tab/Panel/Workspace；
 11. `g` 统一为 prefix，Inspect Jump 迁移为 `gl`；
 12. 搜索、列表导航、树导航、删除、刷新、帮助语义全局一致；
