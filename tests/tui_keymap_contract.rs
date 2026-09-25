@@ -10,6 +10,20 @@ fn key(code: KeyCode) -> KeyEvent {
     KeyEvent::new(code, KeyModifiers::NONE)
 }
 
+#[test]
+fn chapter_11_single_key_actions_and_exit_contract() {
+    let mut mapper = KeyMapper::new();
+    for (code, expected) in [
+        (KeyCode::Char('b'), Some(TuiAction::BackupCreate)),
+        (KeyCode::Char('a'), Some(TuiAction::Add)),
+        (KeyCode::Char('p'), None),
+        (KeyCode::Char('q'), Some(TuiAction::Quit)),
+        (KeyCode::Esc, Some(TuiAction::Back)),
+    ] {
+        assert_eq!(mapper.map(InputMode::Normal, key(code)), expected);
+    }
+}
+
 fn ctrl(ch: char) -> KeyEvent {
     KeyEvent::new(KeyCode::Char(ch), KeyModifiers::CONTROL)
 }
@@ -135,19 +149,16 @@ fn tab_switches_top_level_tabs_and_ctrl_w_owns_panel_navigation() {
 }
 
 #[test]
-fn normal_mode_keeps_provision_and_inspect_as_single_key_actions() {
+fn normal_mode_keeps_inspect_and_backup_as_single_key_actions() {
     let mut mapper = KeyMapper::new();
-    assert_eq!(
-        mapper.map(InputMode::Normal, key(KeyCode::Char('p'))),
-        Some(TuiAction::Plan)
-    );
+    assert_eq!(mapper.map(InputMode::Normal, key(KeyCode::Char('p'))), None);
     assert_eq!(
         mapper.map(InputMode::Normal, key(KeyCode::Char('i'))),
         Some(TuiAction::Insert)
     );
     assert_eq!(
-        mapper.map(InputMode::Normal, key(KeyCode::Char('a'))),
-        Some(TuiAction::Add)
+        mapper.map(InputMode::Normal, key(KeyCode::Char('b'))),
+        Some(TuiAction::BackupCreate)
     );
     assert_eq!(
         mapper.map(InputMode::Normal, key(KeyCode::Char('R'))),
@@ -156,10 +167,10 @@ fn normal_mode_keeps_provision_and_inspect_as_single_key_actions() {
 
     let event_loop = include_str!("../src/tui/mod.rs");
     assert!(
-        event_loop.contains("TuiAction::Plan if state.workspace() == state::Workspace::Devices")
+        !event_loop.contains("TuiAction::Plan if state.workspace() == state::Workspace::Devices")
     );
     assert!(event_loop.contains("TuiAction::Insert\n            if matches!(\n                state.workspace(),\n                state::Workspace::Devices | state::Workspace::Backups\n            )"));
-    assert!(event_loop.contains("TuiAction::Add\n            if matches!(\n                state.workspace(),\n                state::Workspace::Devices | state::Workspace::Backups\n            )"));
+    assert!(event_loop.contains("TuiAction::BackupCreate\n            if matches!(\n                state.workspace(),\n                state::Workspace::Devices | state::Workspace::Backups\n            )"));
     assert!(
         event_loop.contains("TuiAction::Restore if state.workspace() == state::Workspace::Backups")
     );
@@ -252,8 +263,8 @@ fn confirm_mode_has_uniform_yes_no_escape_contract_without_weakening_typed_yes()
 fn provision_form_enter_generates_plan_instead_of_editing_or_toggling() {
     let event_loop = include_str!("../src/tui/mod.rs");
     assert!(
-        event_loop.contains("TuiAction::Activate | TuiAction::Plan | TuiAction::Write"),
-        "Provision Form Enter/Activate must share the generate-plan path with p/w"
+        event_loop.contains("TuiAction::Activate | TuiAction::Write"),
+        "Provision Form Enter/Activate must generate the plan"
     );
     assert!(
         !event_loop.contains("TuiAction::Activate => {\n                                    if !state.provision_begin_insert()"),
@@ -275,7 +286,7 @@ fn provision_form_enter_generates_plan_instead_of_editing_or_toggling() {
 fn user_visible_inspect_hints_point_to_full_disk_tree_entry() {
     let devices = include_str!("../src/tui/devices/render.rs");
     assert!(devices.contains("Span::styled(\"i\", accent())"));
-    assert!(devices.contains("Span::styled(\"p\", accent())"));
+    assert!(devices.contains("Span::styled(\"Enter\", accent())"));
     assert!(!devices.contains("gi"));
 
     let event_loop = include_str!("../src/tui/mod.rs");

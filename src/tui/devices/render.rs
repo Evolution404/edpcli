@@ -155,13 +155,13 @@ pub(super) fn draw_devices(frame: &mut Frame, area: ratatui::layout::Rect, state
                     secondary().add_modifier(Modifier::BOLD),
                 )),
                 Line::from(vec![
-                    Span::styled("p", accent()),
+                    Span::styled("Enter", accent()),
                     Span::raw(" 制盘      "),
                     Span::styled("i", accent()),
                     Span::raw(" Inspect"),
                 ]),
                 Line::from(vec![
-                    Span::styled("a", accent()),
+                    Span::styled("b", accent()),
                     Span::raw(" 新建备份  "),
                     Span::styled("r", success()),
                     Span::raw(" 刷新"),

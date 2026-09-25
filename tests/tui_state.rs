@@ -3,6 +3,23 @@ use edpcli::tui::state::{
     Workspace,
 };
 
+#[test]
+fn chapter_11_provision_escape_restores_device_selection() {
+    let mut state = AppState::new();
+    let first = device(64_000_000_000);
+    let mut second = device(128_000_000_000);
+    second.disk = 7;
+    state.replace_devices(vec![first, second]);
+    state.navigate(NavCommand::Down, 20);
+    assert_eq!(state.selected_device_disk(), Some(7));
+    state.begin_provision_for_selected_device().unwrap();
+    assert_eq!(state.navigation().depth(), 1);
+    assert_eq!(state.navigate(NavCommand::Escape, 20), StateEffect::None);
+    assert_eq!(state.workspace(), Workspace::Devices);
+    assert_eq!(state.selected_device_disk(), Some(7));
+    assert_eq!(state.navigation().depth(), 0);
+}
+
 fn device(size: u64) -> edpcli::disk_scan::Row {
     edpcli::disk_scan::Row {
         disk: 6,

@@ -7,11 +7,14 @@
 mod backups_state;
 #[path = "inspect/state.rs"]
 mod inspect_state;
+#[path = "navigation.rs"]
+mod navigation;
 #[path = "provision/state.rs"]
 mod provision_state;
 
 pub use backups_state::*;
 pub use inspect_state::*;
+pub use navigation::*;
 pub use provision_state::*;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -131,6 +134,7 @@ pub struct AppState {
     provision: ProvisionState,
     pinned_disk: Option<u32>,
     advanced_inspect: Option<AdvancedInspectState>,
+    navigation: NavigationStack,
     notice: Option<String>,
     notice_at: Option<std::time::Instant>,
     input_buffer: String,
@@ -168,6 +172,7 @@ impl AppState {
             provision: ProvisionState::default(),
             pinned_disk: None,
             advanced_inspect: None,
+            navigation: NavigationStack::default(),
             notice: None,
             notice_at: None,
             input_buffer: String::new(),
@@ -661,6 +666,7 @@ impl AppState {
             return Err("制盘需要可读取的 USB 整盘目标。".into());
         }
         let disk = row.disk;
+        self.push_navigation_frame(NavigationLocation::Devices);
         self.provision.target_disk = Some(disk);
         self.switch_workspace(Workspace::Provision);
         self.pinned_disk = Some(disk);
@@ -788,6 +794,38 @@ impl AppState {
         self.selected
     }
 
+    pub fn navigation(&self) -> &NavigationStack {
+        &self.navigation
+    }
+
+    pub fn push_navigation_frame(&mut self, location: NavigationLocation) {
+        self.navigation.push(NavigationFrame {
+            location,
+            selection: self.selected,
+            item_count: self.item_count,
+            panel: None,
+            tree_selection: 0,
+            detail_scroll: 0,
+        });
+    }
+
+    pub fn pop_navigation_frame(&mut self) -> Option<NavigationFrame> {
+        self.navigation.pop()
+    }
+
+    fn restore_workspace_frame(&mut self) {
+        if let Some(frame) = self.pop_navigation_frame() {
+            let workspace = match frame.location {
+                NavigationLocation::Devices => Workspace::Devices,
+                NavigationLocation::Backups => Workspace::Backups,
+                NavigationLocation::Provision => Workspace::Provision,
+                NavigationLocation::Inspect | NavigationLocation::SectorInspector => return,
+            };
+            self.switch_workspace(workspace);
+            self.selected = frame.selection.min(self.item_count.saturating_sub(1));
+        }
+    }
+
     pub const fn item_count(&self) -> usize {
         self.item_count
     }
@@ -856,10 +894,10 @@ impl AppState {
             if self.workspace == Workspace::Provision {
                 match self.provision.stage {
                     ProvisionStage::SelectDisk => {
-                        self.switch_workspace(Workspace::Devices);
+                        self.restore_workspace_frame();
                     }
                     ProvisionStage::BackupPrompt => {
-                        self.switch_workspace(Workspace::Devices);
+                        self.restore_workspace_frame();
                     }
                     ProvisionStage::Menu => {
                         self.provision.stage = ProvisionStage::BackupPrompt;

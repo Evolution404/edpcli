@@ -173,6 +173,42 @@ pub struct AdvancedInspectState {
 }
 
 impl AppState {
+    pub fn advanced_inspect_breadcrumb(&self) -> Option<BreadcrumbModel> {
+        let advanced = self.advanced_inspect.as_ref()?;
+        let source = match &advanced.source {
+            AdvancedInspectSource::Disk(disk) => vec!["设备".into(), format!("disk{disk}")],
+            AdvancedInspectSource::Backup(path) => vec![
+                "备份".into(),
+                path.file_name()
+                    .unwrap_or_default()
+                    .to_string_lossy()
+                    .into_owned(),
+            ],
+        };
+        let mut path = source;
+        path.push("Inspect".into());
+        if let Some(row) = self
+            .advanced_inspect_tree_rows()
+            .get(advanced.tree_selected)
+        {
+            let rows = self.advanced_inspect_tree_rows();
+            let ids = row.id.split('/').collect::<Vec<_>>();
+            for prefix_len in 2..=ids.len() {
+                let id = ids[..prefix_len].join("/");
+                if let Some(ancestor) = rows.iter().find(|candidate| candidate.id == id) {
+                    path.push(ancestor.label.clone());
+                }
+            }
+        }
+        if advanced.sector.is_some() {
+            path.push("Sector Inspector".into());
+        }
+        Some(BreadcrumbModel {
+            path,
+            back_target: self.navigation.back_target(),
+        })
+    }
+
     pub fn advanced_inspect(&self) -> Option<&AdvancedInspectState> {
         self.advanced_inspect.as_ref()
     }
@@ -182,6 +218,7 @@ impl AppState {
             self.set_notice("关键操作仍在执行，完成前不能启动全盘检查。");
             return false;
         }
+        self.push_navigation_frame(NavigationLocation::from_workspace(self.workspace));
         let mut expanded = std::collections::BTreeSet::new();
         expanded.insert("device".to_string());
         self.advanced_inspect = Some(AdvancedInspectState {
@@ -1114,6 +1151,18 @@ impl AppState {
         &mut self,
     ) -> Option<(AdvancedInspectSource, u64)> {
         let lba = self.advanced_inspect_selected_sector_lba()?;
+        let (panel, tree_selection, detail_scroll) = {
+            let state = self.advanced_inspect.as_ref()?;
+            (state.panel, state.tree_selected, state.detail_scroll)
+        };
+        self.navigation.push(NavigationFrame {
+            location: NavigationLocation::Inspect,
+            selection: self.selected,
+            item_count: self.item_count,
+            panel: Some(panel),
+            tree_selection,
+            detail_scroll,
+        });
         let state = self.advanced_inspect.as_mut()?;
         let ready = state.result.as_ref().is_some_and(|workspace| {
             workspace.items.iter().any(|item| {
@@ -1405,8 +1454,11 @@ impl AppState {
             return false;
         };
         if state.sector.take().is_some() {
-            state.panel = AdvancedInspectPanel::Overview;
-            state.detail_scroll = 0;
+            if let Some(frame) = self.navigation.pop() {
+                state.panel = frame.panel.unwrap_or(AdvancedInspectPanel::Tree);
+                state.tree_selected = frame.tree_selection;
+                state.detail_scroll = frame.detail_scroll;
+            }
             true
         } else {
             false
@@ -1432,6 +1484,9 @@ impl AppState {
             .is_some_and(|state| state.stage != AdvancedInspectStage::Running)
         {
             self.advanced_inspect = None;
+            if let Some(frame) = self.navigation.pop() {
+                self.selected = frame.selection.min(self.item_count.saturating_sub(1));
+            }
         }
     }
 }

@@ -35,6 +35,7 @@ pub enum TuiAction {
     Refresh,
     Delete,
     Add,
+    BackupCreate,
     Restore,
     Fill,
     Plan,
@@ -195,6 +196,11 @@ impl KeyMapper {
             return None;
         }
 
+        if event.code == KeyCode::Char('q') && event.modifiers.is_empty() {
+            self.pending = None;
+            return Some(TuiAction::Quit);
+        }
+
         if self
             .pending
             .is_some_and(|pending| now.duration_since(pending.since) > PREFIX_TIMEOUT)
@@ -208,7 +214,7 @@ impl KeyMapper {
             InputMode::Confirm => return self.map_confirm(event),
             InputMode::Help => {
                 return match event.code {
-                    KeyCode::Esc | KeyCode::Char('q') => Some(TuiAction::Back),
+                    KeyCode::Esc => Some(TuiAction::Back),
                     _ => None,
                 };
             }
@@ -277,9 +283,9 @@ impl KeyMapper {
             KeyCode::Char('r') => Some(TuiAction::Refresh),
             KeyCode::Char('d') => Some(TuiAction::Delete),
             KeyCode::Char('a') => Some(TuiAction::Add),
+            KeyCode::Char('b') => Some(TuiAction::BackupCreate),
             KeyCode::Char('R') => Some(TuiAction::Restore),
             KeyCode::Char('f') => Some(TuiAction::Fill),
-            KeyCode::Char('p') => Some(TuiAction::Plan),
             KeyCode::Char('w') => Some(TuiAction::Write),
             KeyCode::Char('e') => Some(TuiAction::Export),
             KeyCode::Char('v') => Some(TuiAction::ViewOrVerify),
@@ -290,7 +296,7 @@ impl KeyMapper {
             KeyCode::PageDown => Some(TuiAction::PageDown),
             KeyCode::Char('0') => Some(TuiAction::RowStart),
             KeyCode::Char('$') => Some(TuiAction::RowEnd),
-            KeyCode::Esc | KeyCode::Char('q') => Some(TuiAction::Back),
+            KeyCode::Esc => Some(TuiAction::Back),
             _ => None,
         }
     }

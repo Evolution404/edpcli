@@ -447,12 +447,6 @@ fn dispatch_tui_action(
     }
 
     match action {
-        TuiAction::Plan if state.workspace() == state::Workspace::Devices => {
-            if let Err(message) = state.begin_provision_for_selected_device() {
-                state.set_notice(message);
-            }
-            StateEffect::None
-        }
         TuiAction::Insert
             if matches!(
                 state.workspace(),
@@ -509,7 +503,7 @@ fn dispatch_tui_action(
             };
             dispatch_nav_command(state, tasks, command, backup_dir, viewport_height)
         }
-        TuiAction::Add
+        TuiAction::BackupCreate
             if matches!(
                 state.workspace(),
                 state::Workspace::Devices | state::Workspace::Backups
@@ -752,6 +746,13 @@ fn run_loop(resume: Option<state::WriteIntent>) -> io::Result<LoopExit> {
             match ct_event::read()? {
                 ct_event::Event::Key(key) => {
                     if !event::is_actionable_key(&key) {
+                        continue;
+                    }
+                    if key.code == ct_event::KeyCode::Char('q') && key.modifiers.is_empty() {
+                        let effect = state.navigate(NavCommand::Quit, 1);
+                        if effect == StateEffect::ExitRequested {
+                            break;
+                        }
                         continue;
                     }
                     if let Some(stage) = state.advanced_inspect().map(|advanced| advanced.stage) {
@@ -1156,11 +1157,13 @@ fn run_loop(resume: Option<state::WriteIntent>) -> io::Result<LoopExit> {
                                 TuiAction::Delete => {
                                     state.provision_plain_delete_selected_partition();
                                 }
-                                TuiAction::Activate | TuiAction::Plan | TuiAction::Write => {
+                                TuiAction::Activate | TuiAction::Write => {
                                     start_provision_plan(&mut state, &mut tasks);
                                 }
                                 TuiAction::Export => {
-                                    state.set_notice("请先按 p 生成只读计划，再从计划页导出镜像。");
+                                    state.set_notice(
+                                        "请先按 Enter 生成只读计划，再从计划页导出镜像。",
+                                    );
                                 }
                                 TuiAction::Back => {
                                     let _ = state.navigate(NavCommand::Escape, viewport_height);

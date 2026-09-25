@@ -290,7 +290,7 @@ pub(super) fn draw_backups(frame: &mut Frame, area: ratatui::layout::Rect, state
                     Span::raw(" 删除"),
                 ]),
                 Line::from(vec![
-                    Span::styled("a", accent()),
+                    Span::styled("b", accent()),
                     Span::raw(" 新建备份   "),
                     Span::styled("r", success()),
                     Span::raw(" 刷新"),

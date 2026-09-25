@@ -9,7 +9,7 @@ fn backup_create_has_a_tui_navigation_and_palette_action() {
         PaletteAction::BackupCreate
     );
     let keymap = include_str!("../src/tui/keymap.rs");
-    assert!(keymap.contains("KeyCode::Char('a') => Some(TuiAction::Add)"));
+    assert!(keymap.contains("KeyCode::Char('b') => Some(TuiAction::BackupCreate)"));
 }
 
 #[test]

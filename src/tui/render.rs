@@ -560,7 +560,7 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
                     "顶层标签: Tab/Shift-Tab 设备↔备份 · Panel: Ctrl-w h/j/k/l/w/W",
                 ));
                 help_lines.push(Line::from(
-                    "设备: p 制盘 · i Inspect · a 新建备份 · 备份: i Inspect · v 校验 · R 恢复 · d 删除 · a 新建",
+                    "设备: Enter 制盘 · i Inspect · b 新建备份 · 备份: Enter/i Inspect · b 新建 · v 校验 · R 恢复 · d 删除",
                 ));
                 help_lines.push(Line::from(
                     "Inspect: / 搜索 · n/N 匹配 · gl 跳转 · Sector 0/$、gg/G、v",
@@ -674,16 +674,16 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
         match state.workspace() {
             Workspace::Devices => {
                 if state.selected_device().is_some() {
-                    "Tab/Shift-Tab 标签 · j/k 移动 · p/Enter 制盘 · i Inspect · a 新建备份 · r 刷新 · q 退出".to_string()
+                    "Tab/Shift-Tab 标签 · j/k 移动 · Enter 制盘 · i Inspect · b 新建备份 · r 刷新 · q 退出".to_string()
                 } else {
                     "Tab/Shift-Tab 标签 · r 刷新 · q 退出".to_string()
                 }
             }
             Workspace::Backups => {
                 if state.selected_backup().is_some() {
-                    "Tab/Shift-Tab 标签 · j/k 移动 · Space 勾选 · i/Enter Inspect · v 校验 · R 恢复 · d 删除 · a 新建 · r 刷新 · q 退出".to_string()
+                    "Tab/Shift-Tab 标签 · j/k 移动 · Space 勾选 · Enter/i Inspect · b 新建 · v 校验 · R 恢复 · d 删除 · r 刷新 · q 退出".to_string()
                 } else {
-                    "Tab/Shift-Tab 标签 · a 新建 · r 刷新 · q 退出".to_string()
+                    "Tab/Shift-Tab 标签 · b 新建 · r 刷新 · q 退出".to_string()
                 }
             }
             Workspace::Provision => match state.provision().stage {
@@ -709,7 +709,7 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
                     };
                     format!("NORMAL · j/k 字段 · i 编辑{unit_key} · Enter 生成计划 · Tab/Shift-Tab 标签 · Esc 返回")
                 }
-                ProvisionStage::Form => "NORMAL · j/k 字段 · h/l 或 Space 切换 · Enter 生成计划 · p 预览 · Tab/Shift-Tab 标签 · Esc 返回".to_string(),
+                ProvisionStage::Form => "NORMAL · j/k 字段 · i 编辑 · h/l 或 Space 切换 · Enter 生成计划 · Esc 返回".to_string(),
                 ProvisionStage::Planning => "正在生成只读计划…".to_string(),
                 ProvisionStage::Review => {
                     "Enter 最终确认  ·  e 导出镜像  ·  Esc 返回修改".to_string()
