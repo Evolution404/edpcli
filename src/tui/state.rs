@@ -35,42 +35,51 @@ impl AdvancedInspectSource {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AdvancedInspectStage {
-    Form,
     Running,
-    Result,
+    Browser,
 }
 
-#[derive(Debug, Clone)]
-pub struct AdvancedInspectForm {
-    pub mode: crate::application::inspect::AdvancedInspectMode,
-    pub lba_spec: String,
-    pub count: String,
-    pub device_id: String,
-    pub export_dir: String,
-    pub field_selected: usize,
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AdvancedInspectPanel {
+    Tree,
+    Overview,
+    Detail,
 }
 
-impl Default for AdvancedInspectForm {
-    fn default() -> Self {
-        Self {
-            mode: crate::application::inspect::AdvancedInspectMode::Meta,
-            lba_spec: "0-12".into(),
-            count: String::new(),
-            device_id: String::new(),
-            export_dir: String::new(),
-            field_selected: 0,
-        }
-    }
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AdvancedInspectTreeAction {
+    None,
+    SetLazyOffset {
+        extent_id: String,
+        offset: u64,
+        target_id: String,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AdvancedInspectTreeRow {
+    pub id: String,
+    pub label: String,
+    pub depth: usize,
+    pub kind: crate::application::inspect_tree::InspectNodeKind,
+    pub range: crate::application::inspect_tree::InspectNodeRange,
+    pub decoder: Option<crate::application::inspect::InspectDecoderKind>,
+    pub status: crate::edpb::SemanticStatus,
+    pub expandable: bool,
+    pub expanded: bool,
+    pub action: AdvancedInspectTreeAction,
 }
 
 #[derive(Debug, Clone)]
 pub struct AdvancedInspectState {
     pub source: AdvancedInspectSource,
     pub stage: AdvancedInspectStage,
-    pub form: AdvancedInspectForm,
     pub result: Option<crate::application::inspect::AdvancedInspectWorkspace>,
-    pub selected: usize,
-    pub scroll: usize,
+    pub tree_selected: usize,
+    pub detail_scroll: usize,
+    pub panel: AdvancedInspectPanel,
+    pub expanded: std::collections::BTreeSet<String>,
+    pub lazy_offsets: std::collections::BTreeMap<String, u64>,
     pub message: Option<String>,
 }
 
@@ -1146,104 +1155,30 @@ impl AppState {
         self.advanced_inspect.as_ref()
     }
 
-    pub fn advanced_inspect_mut(&mut self) -> Option<&mut AdvancedInspectState> {
-        self.advanced_inspect.as_mut()
-    }
-
     pub fn begin_advanced_inspect(&mut self, source: AdvancedInspectSource) -> bool {
         if self.critical_operation {
-            self.set_notice("关键操作仍在执行，完成前不能启动高级检查。");
+            self.set_notice("关键操作仍在执行，完成前不能启动全盘检查。");
             return false;
         }
-        let mut form = AdvancedInspectForm::default();
-        if let AdvancedInspectSource::Disk(disk) = &source {
-            if let Some(row) = self.devices.iter().find(|row| row.disk == *disk) {
-                form.device_id = row.device_id.clone().unwrap_or_default();
-            }
-        }
+        let mut expanded = std::collections::BTreeSet::new();
+        expanded.insert("device".to_string());
         self.advanced_inspect = Some(AdvancedInspectState {
             source,
-            stage: AdvancedInspectStage::Form,
-            form,
+            stage: AdvancedInspectStage::Running,
             result: None,
-            selected: 0,
-            scroll: 0,
-            message: None,
+            tree_selected: 0,
+            detail_scroll: 0,
+            panel: AdvancedInspectPanel::Tree,
+            expanded,
+            lazy_offsets: std::collections::BTreeMap::new(),
+            message: Some("正在后台读取协议上下文并建立全盘结构树…".into()),
         });
         self.input_mode = InputMode::Normal;
         true
     }
 
-    pub fn advanced_inspect_shift_mode(&mut self, reverse: bool) {
-        if let Some(state) = self.advanced_inspect.as_mut() {
-            if state.stage == AdvancedInspectStage::Form {
-                state.form.mode = if reverse {
-                    state.form.mode.previous()
-                } else {
-                    state.form.mode.next()
-                };
-                state.message = None;
-            }
-        }
-    }
-
-    pub fn advanced_inspect_move_field(&mut self, delta: isize) {
-        let Some(state) = self.advanced_inspect.as_mut() else {
-            return;
-        };
-        if state.stage != AdvancedInspectStage::Form {
-            return;
-        }
-        const COUNT: usize = 4;
-        state.form.field_selected = if delta < 0 {
-            state
-                .form
-                .field_selected
-                .saturating_sub(delta.unsigned_abs())
-        } else {
-            (state.form.field_selected + delta as usize).min(COUNT - 1)
-        };
-    }
-
-    fn advanced_selected_field_mut(&mut self) -> Option<&mut String> {
-        let state = self.advanced_inspect.as_mut()?;
-        if state.stage != AdvancedInspectStage::Form {
-            return None;
-        }
-        match state.form.field_selected {
-            0 => Some(&mut state.form.lba_spec),
-            1 => Some(&mut state.form.count),
-            2 => Some(&mut state.form.device_id),
-            3 => Some(&mut state.form.export_dir),
-            _ => None,
-        }
-    }
-
-    pub fn advanced_inspect_push_char(&mut self, ch: char) {
-        if ch.is_control() {
-            return;
-        }
-        if let Some(field) = self.advanced_selected_field_mut() {
-            if field.chars().count() < 512 {
-                field.push(ch);
-            }
-        }
-        if let Some(state) = self.advanced_inspect.as_mut() {
-            state.message = None;
-        }
-    }
-
-    pub fn advanced_inspect_backspace(&mut self) {
-        if let Some(field) = self.advanced_selected_field_mut() {
-            field.pop();
-        }
-        if let Some(state) = self.advanced_inspect.as_mut() {
-            state.message = None;
-        }
-    }
-
     pub fn advanced_inspect_request(
-        &mut self,
+        &self,
     ) -> Result<
         (
             AdvancedInspectSource,
@@ -1253,31 +1188,25 @@ impl AppState {
     > {
         let state = self
             .advanced_inspect
-            .as_mut()
-            .ok_or_else(|| "高级检查未打开".to_string())?;
-        let lbas = crate::application::inspect::parse_advanced_lbas(
-            &state.form.lba_spec,
-            &state.form.count,
-        )?;
-        let request = crate::application::inspect::AdvancedInspectRequest {
-            mode: state.form.mode,
-            lbas,
-            export_dir: (!state.form.export_dir.trim().is_empty())
-                .then(|| std::path::PathBuf::from(state.form.export_dir.trim())),
-            device_id_override: (!state.form.device_id.trim().is_empty())
-                .then(|| state.form.device_id.trim().to_string()),
+            .as_ref()
+            .ok_or_else(|| "全盘检查未打开".to_string())?;
+        let device_id_override = match &state.source {
+            AdvancedInspectSource::Disk(disk) => self
+                .devices
+                .iter()
+                .find(|row| row.disk == *disk)
+                .and_then(|row| row.device_id.clone()),
+            AdvancedInspectSource::Backup(_) => None,
         };
-        Ok((state.source.clone(), request))
-    }
-
-    pub fn advanced_inspect_start(&mut self) {
-        if let Some(state) = self.advanced_inspect.as_mut() {
-            state.stage = AdvancedInspectStage::Running;
-            state.result = None;
-            state.selected = 0;
-            state.scroll = 0;
-            state.message = Some("正在后台读取并解析指定扇区…".into());
-        }
+        Ok((
+            state.source.clone(),
+            crate::application::inspect::AdvancedInspectRequest {
+                mode: crate::application::inspect::AdvancedInspectMode::Meta,
+                lbas: (0..crate::common::METADATA_SECTOR_COUNT as u64).collect(),
+                export_dir: None,
+                device_id_override,
+            },
+        ))
     }
 
     pub fn advanced_inspect_finish(
@@ -1287,66 +1216,319 @@ impl AppState {
         let Some(state) = self.advanced_inspect.as_mut() else {
             return;
         };
+        state.stage = AdvancedInspectStage::Browser;
+        state.tree_selected = 0;
+        state.detail_scroll = 0;
         match result {
             Ok(workspace) => {
-                state.stage = AdvancedInspectStage::Result;
                 state.result = Some(workspace);
-                state.selected = 0;
-                state.scroll = 0;
                 state.message = None;
             }
             Err(message) => {
-                state.stage = AdvancedInspectStage::Form;
                 state.result = None;
                 state.message = Some(message);
             }
         }
     }
 
-    pub fn advanced_inspect_move_result(&mut self, delta: isize) {
+    pub fn advanced_inspect_tree_rows(&self) -> Vec<AdvancedInspectTreeRow> {
+        const SECTOR_PAGE: usize = 64;
+
+        fn path_id(parent: Option<&str>, node_id: &str) -> String {
+            match parent {
+                Some(parent) => format!("{parent}/{node_id}"),
+                None => node_id.to_string(),
+            }
+        }
+
+        fn page_row(
+            id: String,
+            label: String,
+            depth: usize,
+            range: crate::application::inspect_tree::InspectNodeRange,
+            decoder: Option<crate::application::inspect::InspectDecoderKind>,
+            status: crate::edpb::SemanticStatus,
+            extent_id: String,
+            offset: u64,
+            target_id: String,
+        ) -> AdvancedInspectTreeRow {
+            AdvancedInspectTreeRow {
+                id,
+                label,
+                depth,
+                kind: crate::application::inspect_tree::InspectNodeKind::Group,
+                range,
+                decoder,
+                status,
+                expandable: false,
+                expanded: false,
+                action: AdvancedInspectTreeAction::SetLazyOffset {
+                    extent_id,
+                    offset,
+                    target_id,
+                },
+            }
+        }
+
+        fn push_rows(
+            node: &crate::application::inspect_tree::InspectNode,
+            depth: usize,
+            parent_path: Option<&str>,
+            expanded: &std::collections::BTreeSet<String>,
+            lazy_offsets: &std::collections::BTreeMap<String, u64>,
+            workspace: &crate::application::inspect::AdvancedInspectWorkspace,
+            rows: &mut Vec<AdvancedInspectTreeRow>,
+        ) {
+            use crate::application::inspect_tree::{InspectChildren, InspectNodeKind};
+
+            let row_id = path_id(parent_path, &node.id);
+            let expandable = match &node.children {
+                InspectChildren::None => false,
+                InspectChildren::Materialized(children) => !children.is_empty(),
+                InspectChildren::LazySectors { sector_count, .. } => *sector_count > 0,
+            };
+            let is_expanded = expandable && expanded.contains(&row_id);
+            rows.push(AdvancedInspectTreeRow {
+                id: row_id.clone(),
+                label: node.label.clone(),
+                depth,
+                kind: node.kind,
+                range: node.range,
+                decoder: node.decoder,
+                status: node.status,
+                expandable,
+                expanded: is_expanded,
+                action: AdvancedInspectTreeAction::None,
+            });
+            if !is_expanded {
+                return;
+            }
+
+            match &node.children {
+                InspectChildren::None => {}
+                InspectChildren::Materialized(children) => {
+                    for child in children {
+                        push_rows(
+                            child,
+                            depth + 1,
+                            Some(&row_id),
+                            expanded,
+                            lazy_offsets,
+                            workspace,
+                            rows,
+                        );
+                    }
+                }
+                InspectChildren::LazySectors {
+                    start_lba,
+                    sector_count,
+                } => {
+                    let page = SECTOR_PAGE as u64;
+                    let max_offset = sector_count.saturating_sub(1) / page * page;
+                    let offset = lazy_offsets
+                        .get(&row_id)
+                        .copied()
+                        .unwrap_or(0)
+                        .min(max_offset);
+                    if offset > 0 {
+                        let previous_offset = offset.saturating_sub(page);
+                        let previous_lba = start_lba.saturating_add(previous_offset);
+                        rows.push(page_row(
+                            format!("{row_id}/page.prev.{offset}"),
+                            format!("← 上一页 · 从 LBA{previous_lba}"),
+                            depth + 1,
+                            crate::application::inspect_tree::InspectNodeRange::sectors(
+                                previous_lba,
+                                page.min(*sector_count - previous_offset),
+                            ),
+                            node.decoder,
+                            node.status,
+                            row_id.clone(),
+                            previous_offset,
+                            format!("{row_id}/sector.{previous_lba}"),
+                        ));
+                    }
+
+                    let children = node.materialize_sector_page(offset, SECTOR_PAGE);
+                    let materialized_count = children.len() as u64;
+                    for child in children {
+                        let child = if child.kind == InspectNodeKind::Sector {
+                            workspace
+                                .items
+                                .iter()
+                                .find(|item| item.lba == child.range.start_lba)
+                                .map(|item| {
+                                    crate::application::inspect_tree::sector_node_with_fields(
+                                        child.range.start_lba,
+                                        child.decoder,
+                                        child.status,
+                                        &item.fields,
+                                    )
+                                })
+                                .unwrap_or(child)
+                        } else {
+                            child
+                        };
+                        push_rows(
+                            &child,
+                            depth + 1,
+                            Some(&row_id),
+                            expanded,
+                            lazy_offsets,
+                            workspace,
+                            rows,
+                        );
+                    }
+
+                    let next_offset = offset.saturating_add(materialized_count);
+                    if next_offset < *sector_count {
+                        let next_lba = start_lba.saturating_add(next_offset);
+                        rows.push(page_row(
+                            format!("{row_id}/page.next.{next_offset}"),
+                            format!("下一页 → · 从 LBA{next_lba}"),
+                            depth + 1,
+                            crate::application::inspect_tree::InspectNodeRange::sectors(
+                                next_lba,
+                                page.min(*sector_count - next_offset),
+                            ),
+                            node.decoder,
+                            node.status,
+                            row_id.clone(),
+                            next_offset,
+                            format!("{row_id}/sector.{next_lba}"),
+                        ));
+                    }
+                }
+            }
+        }
+
+        let Some(state) = self.advanced_inspect.as_ref() else {
+            return Vec::new();
+        };
+        let Some(workspace) = state.result.as_ref() else {
+            return Vec::new();
+        };
+        let mut rows = Vec::new();
+        push_rows(
+            &workspace.topology.root,
+            0,
+            None,
+            &state.expanded,
+            &state.lazy_offsets,
+            workspace,
+            &mut rows,
+        );
+        rows
+    }
+
+    pub fn advanced_inspect_move_tree(&mut self, delta: isize) {
+        let count = self.advanced_inspect_tree_rows().len();
         let Some(state) = self.advanced_inspect.as_mut() else {
             return;
         };
-        if state.stage != AdvancedInspectStage::Result {
+        if state.stage != AdvancedInspectStage::Browser || count == 0 {
             return;
         }
-        let count = state
-            .result
-            .as_ref()
-            .map(|value| value.items.len())
-            .unwrap_or(0);
-        if count == 0 {
-            state.selected = 0;
-            return;
-        }
-        state.selected = if delta < 0 {
-            state.selected.saturating_sub(delta.unsigned_abs())
+        state.tree_selected = if delta < 0 {
+            state.tree_selected.saturating_sub(delta.unsigned_abs())
         } else {
-            (state.selected + delta as usize).min(count - 1)
+            (state.tree_selected + delta as usize).min(count - 1)
         };
-        state.scroll = 0;
+        state.detail_scroll = 0;
     }
 
-    pub fn advanced_inspect_scroll(&mut self, delta: isize) {
+    pub fn advanced_inspect_toggle_selected(&mut self) {
+        let rows = self.advanced_inspect_tree_rows();
+        let selected = self
+            .advanced_inspect
+            .as_ref()
+            .filter(|state| state.stage == AdvancedInspectStage::Browser)
+            .map(|state| state.tree_selected);
+        let Some(row) = selected.and_then(|index| rows.get(index)).cloned() else {
+            return;
+        };
+
+        match row.action {
+            AdvancedInspectTreeAction::SetLazyOffset {
+                extent_id,
+                offset,
+                target_id,
+            } => {
+                if let Some(state) = self.advanced_inspect.as_mut() {
+                    state.lazy_offsets.insert(extent_id, offset);
+                    state.detail_scroll = 0;
+                }
+                let rows = self.advanced_inspect_tree_rows();
+                if let Some(target_index) = rows.iter().position(|row| row.id == target_id) {
+                    if let Some(state) = self.advanced_inspect.as_mut() {
+                        state.tree_selected = target_index;
+                    }
+                }
+            }
+            AdvancedInspectTreeAction::None => {
+                if !row.expandable {
+                    return;
+                }
+                if let Some(state) = self.advanced_inspect.as_mut() {
+                    if !state.expanded.remove(&row.id) {
+                        state.expanded.insert(row.id.clone());
+                    }
+                    state.detail_scroll = 0;
+                }
+                let count = self.advanced_inspect_tree_rows().len();
+                if let Some(state) = self.advanced_inspect.as_mut() {
+                    state.tree_selected = state.tree_selected.min(count.saturating_sub(1));
+                }
+            }
+        }
+    }
+
+    pub fn advanced_inspect_shift_panel(&mut self, reverse: bool) {
         if let Some(state) = self.advanced_inspect.as_mut() {
-            if state.stage == AdvancedInspectStage::Result {
-                state.scroll = if delta < 0 {
-                    state.scroll.saturating_sub(delta.unsigned_abs())
+            if state.stage == AdvancedInspectStage::Browser {
+                state.panel = if reverse {
+                    match state.panel {
+                        AdvancedInspectPanel::Tree => AdvancedInspectPanel::Detail,
+                        AdvancedInspectPanel::Overview => AdvancedInspectPanel::Tree,
+                        AdvancedInspectPanel::Detail => AdvancedInspectPanel::Overview,
+                    }
                 } else {
-                    state.scroll.saturating_add(delta as usize)
+                    match state.panel {
+                        AdvancedInspectPanel::Tree => AdvancedInspectPanel::Overview,
+                        AdvancedInspectPanel::Overview => AdvancedInspectPanel::Detail,
+                        AdvancedInspectPanel::Detail => AdvancedInspectPanel::Tree,
+                    }
                 };
             }
         }
     }
 
-    pub fn advanced_inspect_back_to_form(&mut self) {
+    pub fn advanced_inspect_enter_selected(&mut self) {
+        let rows = self.advanced_inspect_tree_rows();
+        let selected = self
+            .advanced_inspect
+            .as_ref()
+            .filter(|state| state.stage == AdvancedInspectStage::Browser)
+            .map(|state| state.tree_selected);
+        let Some(row) = selected.and_then(|index| rows.get(index)) else {
+            return;
+        };
+        if row.expandable || row.action != AdvancedInspectTreeAction::None {
+            self.advanced_inspect_toggle_selected();
+        } else if let Some(state) = self.advanced_inspect.as_mut() {
+            state.panel = AdvancedInspectPanel::Overview;
+            state.detail_scroll = 0;
+        }
+    }
+
+    pub fn advanced_inspect_scroll_detail(&mut self, delta: isize) {
         if let Some(state) = self.advanced_inspect.as_mut() {
-            if state.stage == AdvancedInspectStage::Result {
-                state.stage = AdvancedInspectStage::Form;
-                state.result = None;
-                state.selected = 0;
-                state.scroll = 0;
-                state.message = None;
+            if state.stage == AdvancedInspectStage::Browser {
+                state.detail_scroll = if delta < 0 {
+                    state.detail_scroll.saturating_sub(delta.unsigned_abs())
+                } else {
+                    state.detail_scroll.saturating_add(delta as usize)
+                };
             }
         }
     }

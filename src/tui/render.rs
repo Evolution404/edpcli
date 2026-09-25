@@ -1726,235 +1726,326 @@ fn draw_advanced_inspect(frame: &mut Frame, area: ratatui::layout::Rect, state: 
     let Some(advanced) = state.advanced_inspect() else {
         return;
     };
-    use super::state::AdvancedInspectStage;
-    use crate::application::inspect::AdvancedInspectMode;
+    use super::state::{AdvancedInspectPanel, AdvancedInspectStage};
+    use crate::application::inspect_tree::InspectNodeKind;
 
     match advanced.stage {
-        AdvancedInspectStage::Form => {
-            let fields = [
-                ("LBA 列表/范围", advanced.form.lba_spec.as_str()),
-                ("count", advanced.form.count.as_str()),
-                ("device_id 覆盖", advanced.form.device_id.as_str()),
-                ("导出目录", advanced.form.export_dir.as_str()),
-            ];
-            let mut lines = vec![
-                Line::from(vec![
-                    Span::styled("高级检查", secondary().add_modifier(Modifier::BOLD)),
-                    Span::raw("  ·  "),
-                    Span::styled(safe(&advanced.source.label()), accent()),
-                ]),
-                Line::from(""),
-                Line::from(vec![
-                    Span::styled("模式  ", muted()),
-                    Span::styled(
-                        advanced.form.mode.label(),
-                        match advanced.form.mode {
-                            AdvancedInspectMode::Meta => success(),
-                            AdvancedInspectMode::Decode => secondary(),
-                            AdvancedInspectMode::Raw => warning(),
-                        },
-                    ),
-                    Span::raw("   "),
-                    Span::styled("←/→", accent()),
-                    Span::raw(" 切换 meta/decode/raw"),
-                ]),
-                Line::from(""),
-            ];
-            for (index, (label, value)) in fields.iter().enumerate() {
-                let shown = if value.is_empty() {
-                    "〈留空〉"
-                } else {
-                    value
-                };
-                let active = index == advanced.form.field_selected;
-                lines.push(Line::from(vec![
-                    Span::styled(
-                        if active { "▶ " } else { "  " },
-                        if active { accent() } else { Style::default() },
-                    ),
-                    Span::styled(format!("{label:>14}  "), muted()),
-                    Span::styled(
-                        safe(shown),
-                        if active { selected() } else { Style::default() },
-                    ),
-                ]));
-            }
-            lines.extend([
-                Line::from(""),
-                Line::from(
-                    "LBA 示例：7,12,240250283 或 240250283-240250288；count 只与单个起点同用。",
-                ),
-                Line::from(
-                    "导出目录留空=只查看；填写后 raw/decode 输出 .bin+.hex，meta 输出 .txt。",
-                ),
-                Line::from(vec![
-                    Span::styled("↑/↓ Tab", accent()),
-                    Span::raw(" 切字段   "),
-                    Span::styled("Enter", success()),
-                    Span::raw(" 后台执行   "),
-                    Span::styled("Esc", warning()),
-                    Span::raw(" 关闭"),
-                ]),
-            ]);
-            if let Some(message) = &advanced.message {
-                lines.push(Line::from(Span::styled(safe(message), danger())));
-            }
-            frame.render_widget(
-                Paragraph::new(lines)
-                    .block(
-                        Block::default()
-                            .borders(Borders::ALL)
-                            .border_style(secondary())
-                            .title("高级检查 · 任意 LBA"),
-                    )
-                    .wrap(Wrap { trim: false }),
-                area,
-            );
-        }
         AdvancedInspectStage::Running => {
             frame.render_widget(
                 Paragraph::new(vec![
-                    Line::from(Span::styled("◈ 高级检查后台执行中", secondary())),
+                    Line::from(Span::styled(
+                        "◈ 正在建立全盘结构树",
+                        secondary().add_modifier(Modifier::BOLD),
+                    )),
                     Line::from(""),
                     Line::from(safe(
                         advanced
                             .message
                             .as_deref()
-                            .unwrap_or("正在读取、区域识别与解码…"),
+                            .unwrap_or("正在读取协议上下文并识别磁盘区域…"),
                     )),
-                    Line::from("只读任务不会写物理盘；如设置导出目录，仅写普通文件。"),
+                    Line::from("只读任务不会修改物理盘。"),
                 ])
                 .alignment(Alignment::Center)
                 .block(
                     Block::default()
                         .borders(Borders::ALL)
                         .border_style(secondary())
-                        .title("高级检查"),
+                        .title("Inspect · 全盘浏览"),
                 ),
                 area,
             );
         }
-        AdvancedInspectStage::Result => {
+        AdvancedInspectStage::Browser => {
             let Some(workspace) = advanced.result.as_ref() else {
-                return;
-            };
-            let Some(item) = workspace.items.get(advanced.selected) else {
-                return;
-            };
-
-            let (list_area, detail_area) = if area.width >= 100 && area.height >= 12 {
-                let parts = Layout::default()
-                    .direction(Direction::Horizontal)
-                    .constraints([Constraint::Length(34), Constraint::Min(48)])
-                    .split(area);
-                (Some(parts[0]), parts[1])
-            } else {
-                (None, area)
-            };
-
-            if let Some(list_area) = list_area {
-                let window =
-                    visible_window(advanced.selected, workspace.items.len(), list_area.height);
-                let start = window.start;
-                let rows = window.map(|index| {
-                    let value = &workspace.items[index];
-                    let region = value.regions.first().map(String::as_str).unwrap_or("未知");
-                    TableRow::new(vec![
-                        Cell::from(format!("LBA{}", value.lba)).style(accent()),
-                        Cell::from(safe(region)),
+                frame.render_widget(
+                    Paragraph::new(vec![
+                        Line::from(Span::styled("全盘结构加载失败", danger())),
+                        Line::from(""),
+                        Line::from(safe(
+                            advanced
+                                .message
+                                .as_deref()
+                                .unwrap_or("未取得 Inspect workspace"),
+                        )),
+                        Line::from(""),
+                        Line::from("Esc 关闭"),
                     ])
-                });
-                let mut table_state = TableState::default();
-                table_state.select(Some(advanced.selected.saturating_sub(start)));
-                frame.render_stateful_widget(
-                    Table::new(rows, [Constraint::Length(14), Constraint::Min(12)])
-                        .block(
-                            Block::default()
-                                .borders(Borders::ALL)
-                                .border_style(accent())
-                                .title(format!(
-                                    "LBA {}/{}",
-                                    advanced.selected + 1,
-                                    workspace.items.len()
-                                )),
-                        )
-                        .row_highlight_style(selected())
-                        .highlight_symbol("▶ "),
-                    list_area,
-                    &mut table_state,
-                );
-            }
-
-            let mut lines = vec![
-                Line::from(vec![
-                    Span::styled(format!("LBA{}", item.lba), accent()),
-                    Span::raw("  ·  "),
-                    Span::styled(workspace.mode.label(), secondary()),
-                ]),
-                Line::from(format!("来源: {}", safe(&workspace.source))),
-                Line::from(format!(
-                    "区域: {}",
-                    safe(&if item.regions.is_empty() {
-                        "未知".to_string()
-                    } else {
-                        item.regions.join("；")
-                    })
-                )),
-                Line::from(format!(
-                    "RAW SHA-256: {}   非零={}/512",
-                    safe(&item.raw_sha256),
-                    item.raw_nonzero
-                )),
-            ];
-
-            match workspace.mode {
-                AdvancedInspectMode::Raw => {
-                    lines.push(Line::from(""));
-                    lines.extend(plain_hex_lines(&item.raw));
-                }
-                AdvancedInspectMode::Decode => {
-                    lines.push(Line::from(format!(
-                        "方法: {}",
-                        safe(item.method.as_deref().unwrap_or("未解码"))
-                    )));
-                    if let Some(hash) = &item.decoded_sha256 {
-                        lines.push(Line::from(format!("Decoded SHA-256: {}", safe(hash))));
-                    }
-                    lines.push(Line::from(""));
-                    if let Some(decoded) = &item.decoded {
-                        lines.extend(plain_hex_lines(decoded));
-                    }
-                }
-                AdvancedInspectMode::Meta => {
-                    lines.push(Line::from(""));
-                    if let Some(text) = &item.meta_text {
-                        lines.extend(text.lines().map(|line| Line::from(safe(line))));
-                    }
-                }
-            }
-
-            if let Some(dir) = &workspace.export_dir {
-                lines.insert(
-                    1,
-                    Line::from(vec![
-                        Span::styled("已导出  ", success()),
-                        Span::raw(safe(&dir.display().to_string())),
-                    ]),
-                );
-            }
-
-            let scroll = advanced.scroll.min(u16::MAX as usize) as u16;
-            frame.render_widget(
-                Paragraph::new(lines)
                     .block(
                         Block::default()
                             .borders(Borders::ALL)
-                            .border_style(match workspace.mode {
-                                AdvancedInspectMode::Meta => success(),
-                                AdvancedInspectMode::Decode => secondary(),
-                                AdvancedInspectMode::Raw => warning(),
+                            .border_style(danger())
+                            .title("Inspect · 全盘浏览"),
+                    )
+                    .wrap(Wrap { trim: false }),
+                    area,
+                );
+                return;
+            };
+
+            let rows = state.advanced_inspect_tree_rows();
+            let selected_index = advanced.tree_selected.min(rows.len().saturating_sub(1));
+            let selected_row = rows.get(selected_index);
+            let (tree_area, overview_area, detail_area) = if area.width >= 140 && area.height >= 10
+            {
+                let parts = Layout::default()
+                    .direction(Direction::Horizontal)
+                    .constraints([
+                        Constraint::Percentage(42),
+                        Constraint::Percentage(27),
+                        Constraint::Percentage(31),
+                    ])
+                    .split(area);
+                (parts[0], parts[1], parts[2])
+            } else if area.width >= 92 && area.height >= 12 {
+                let parts = Layout::default()
+                    .direction(Direction::Horizontal)
+                    .constraints([Constraint::Percentage(46), Constraint::Percentage(54)])
+                    .split(area);
+                let right = Layout::default()
+                    .direction(Direction::Vertical)
+                    .constraints([Constraint::Length(9), Constraint::Min(4)])
+                    .split(parts[1]);
+                (parts[0], right[0], right[1])
+            } else {
+                let parts = Layout::default()
+                    .direction(Direction::Vertical)
+                    .constraints([
+                        Constraint::Percentage(50),
+                        Constraint::Percentage(25),
+                        Constraint::Percentage(25),
+                    ])
+                    .split(area);
+                (parts[0], parts[1], parts[2])
+            };
+
+            let visible = visible_window(selected_index, rows.len(), tree_area.height);
+            let tree_lines = visible.map(|index| {
+                let row = &rows[index];
+                let indent = "  ".repeat(row.depth);
+                let marker = if row.expandable {
+                    if row.expanded {
+                        "▾ "
+                    } else {
+                        "▸ "
+                    }
+                } else {
+                    "· "
+                };
+                let icon = match row.kind {
+                    InspectNodeKind::Device => "◆ ",
+                    InspectNodeKind::Region => "◇ ",
+                    InspectNodeKind::Extent => "▰ ",
+                    InspectNodeKind::Sector => "□ ",
+                    InspectNodeKind::Structure => "▱ ",
+                    InspectNodeKind::Group => "≡ ",
+                    InspectNodeKind::Field => "• ",
+                    InspectNodeKind::Partition => "▣ ",
+                    InspectNodeKind::UnknownRange => "? ",
+                };
+                let kind_style = match row.kind {
+                    InspectNodeKind::Device => secondary().add_modifier(Modifier::BOLD),
+                    InspectNodeKind::Region | InspectNodeKind::Partition => accent(),
+                    InspectNodeKind::Extent | InspectNodeKind::Structure => success(),
+                    InspectNodeKind::Sector | InspectNodeKind::Field => Style::default(),
+                    InspectNodeKind::Group => muted(),
+                    InspectNodeKind::UnknownRange => warning(),
+                };
+                let text = format!(
+                    "{indent}{marker}{icon}{}  [{}..{})",
+                    safe(&row.label),
+                    row.range.start_lba,
+                    row.range.end_lba_exclusive()
+                );
+                if index == selected_index {
+                    Line::from(Span::styled(text, selected()))
+                } else {
+                    Line::from(Span::styled(text, kind_style))
+                }
+            });
+
+            let tree_focus = advanced.panel == AdvancedInspectPanel::Tree;
+            frame.render_widget(
+                Paragraph::new(tree_lines.collect::<Vec<_>>())
+                    .block(
+                        Block::default()
+                            .borders(Borders::ALL)
+                            .border_style(if tree_focus { accent() } else { muted() })
+                            .title(format!(
+                                "结构树  {}/{}",
+                                selected_index.saturating_add(1),
+                                rows.len()
+                            )),
+                    )
+                    .wrap(Wrap { trim: false }),
+                tree_area,
+            );
+
+            let mut overview_lines = vec![Line::from(vec![
+                Span::styled("来源  ", muted()),
+                Span::styled(safe(&workspace.source), accent()),
+            ])];
+            let mut detail_lines = Vec::new();
+            if let Some(row) = selected_row {
+                let kind = match row.kind {
+                    InspectNodeKind::Device => "Device",
+                    InspectNodeKind::Region => "Region",
+                    InspectNodeKind::Extent => "Extent",
+                    InspectNodeKind::Sector => "Sector",
+                    InspectNodeKind::Structure => "Structure",
+                    InspectNodeKind::Group => "Group",
+                    InspectNodeKind::Field => "Field",
+                    InspectNodeKind::Partition => "Partition",
+                    InspectNodeKind::UnknownRange => "UnknownRange",
+                };
+                let status = match row.status {
+                    crate::edpb::SemanticStatus::Identified => "identified",
+                    crate::edpb::SemanticStatus::Unknown => "unknown",
+                };
+                overview_lines.extend([
+                    Line::from(""),
+                    Line::from(vec![
+                        Span::styled("节点  ", muted()),
+                        Span::styled(safe(&row.label), secondary().add_modifier(Modifier::BOLD)),
+                    ]),
+                    Line::from(format!("类型: {kind}")),
+                    Line::from(format!(
+                        "LBA: {}..{}",
+                        row.range.start_lba,
+                        row.range.end_lba_exclusive()
+                    )),
+                    Line::from(format!("Sector count: {}", row.range.sector_count)),
+                    Line::from(format!("状态: {status}")),
+                ]);
+                if let Some(byte_range) = row.range.byte_range {
+                    overview_lines.push(Line::from(format!(
+                        "Byte: 0x{:X}..0x{:X}",
+                        byte_range.start, byte_range.end_exclusive
+                    )));
+                }
+                if let Some(decoder) = row.decoder {
+                    overview_lines.push(Line::from(format!("Decoder: {decoder:?}")));
+                }
+
+                match row.kind {
+                    InspectNodeKind::Sector => {
+                        let lba = row.range.start_lba;
+                        if let Some(item) = workspace.items.iter().find(|item| item.lba == lba) {
+                            detail_lines.push(Line::from(vec![
+                                Span::styled("已读取  ", success()),
+                                Span::raw(format!("LBA{lba}")),
+                            ]));
+                            detail_lines.push(Line::from(format!(
+                                "RAW SHA-256: {}",
+                                safe(&item.raw_sha256)
+                            )));
+                            detail_lines
+                                .push(Line::from(format!("非零字节: {}/512", item.raw_nonzero)));
+                            if let Some(method) = item.method.as_deref() {
+                                detail_lines.push(Line::from(format!("方法: {}", safe(method))));
+                            }
+                            if !item.fields.is_empty() {
+                                detail_lines.push(Line::from(""));
+                                detail_lines.push(Line::from(Span::styled(
+                                    format!("Fields ({})", item.fields.len()),
+                                    accent(),
+                                )));
+                                for field in &item.fields {
+                                    detail_lines.push(Line::from(format!(
+                                        "0x{:X}..0x{:X}  {} = {}",
+                                        field.range.start,
+                                        field.range.end_exclusive,
+                                        safe(&field.label),
+                                        safe(&field.value)
+                                    )));
+                                }
+                            }
+                            if let Some(text) = item.meta_text.as_deref() {
+                                detail_lines.push(Line::from(""));
+                                detail_lines
+                                    .extend(text.lines().map(|line| Line::from(safe(line))));
+                            }
+                        } else {
+                            detail_lines
+                                .push(Line::from(Span::styled("该扇区尚未按需读取。", warning())));
+                            detail_lines.push(Line::from(
+                                "I5 Sector Inspector 将在进入扇区时读取当前 sector。",
+                            ));
+                        }
+                    }
+                    InspectNodeKind::Field => {
+                        let field = row.range.byte_range.and_then(|range| {
+                            workspace
+                                .items
+                                .iter()
+                                .flat_map(|item| item.fields.iter())
+                                .find(|field| field.range == range)
+                        });
+                        if let Some(field) = field {
+                            detail_lines.push(Line::from(Span::styled(
+                                safe(&field.label),
+                                accent().add_modifier(Modifier::BOLD),
+                            )));
+                            detail_lines.push(Line::from(format!("Value: {}", safe(&field.value))));
+                            detail_lines.push(Line::from(format!(
+                                "Type: {:?}   Status: {:?}",
+                                field.field_type, field.status
+                            )));
+                            let raw = field
+                                .raw
+                                .iter()
+                                .take(32)
+                                .map(|byte| format!("{byte:02X}"))
+                                .collect::<Vec<_>>()
+                                .join(" ");
+                            detail_lines.push(Line::from(format!("Raw: {raw}")));
+                        } else {
+                            detail_lines.push(Line::from("字段详情尚未 materialize。"));
+                        }
+                    }
+                    InspectNodeKind::Group => {
+                        detail_lines.push(Line::from("分页控制节点。"));
+                        detail_lines.push(Line::from("Enter / o 切换当前 lazy sector 窗口。"));
+                    }
+                    _ => {
+                        detail_lines.push(Line::from("o 展开/折叠当前节点。"));
+                        detail_lines.push(Line::from("Enter 查看或进入当前节点。"));
+                    }
+                }
+            } else {
+                overview_lines.push(Line::from("当前没有可选节点。"));
+                detail_lines.push(Line::from("当前没有可选节点。"));
+            }
+            if let Some(message) = advanced.message.as_deref() {
+                detail_lines.push(Line::from(""));
+                detail_lines.push(Line::from(Span::styled(safe(message), danger())));
+            }
+
+            frame.render_widget(
+                Paragraph::new(overview_lines)
+                    .block(
+                        Block::default()
+                            .borders(Borders::ALL)
+                            .border_style(if advanced.panel == AdvancedInspectPanel::Overview {
+                                accent()
+                            } else {
+                                muted()
                             })
-                            .title("高级检查 · j/k LBA · Ctrl-d/u 滚动 · Enter 参数"),
+                            .title("节点概览"),
+                    )
+                    .wrap(Wrap { trim: false }),
+                overview_area,
+            );
+
+            let detail_focus = advanced.panel == AdvancedInspectPanel::Detail;
+            let scroll = advanced.detail_scroll.min(u16::MAX as usize) as u16;
+            frame.render_widget(
+                Paragraph::new(detail_lines)
+                    .block(
+                        Block::default()
+                            .borders(Borders::ALL)
+                            .border_style(if detail_focus { accent() } else { muted() })
+                            .title("节点详情"),
                     )
                     .wrap(Wrap { trim: false })
                     .scroll((scroll, 0)),
@@ -2487,12 +2578,9 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
     } else if let Some(advanced) = state.advanced_inspect() {
         use super::state::AdvancedInspectStage;
         match advanced.stage {
-            AdvancedInspectStage::Form => {
-                "高级检查参数：←/→ 模式 · Tab/↑↓ 字段 · Enter 执行 · Esc 关闭".to_string()
-            }
-            AdvancedInspectStage::Running => "高级检查后台只读执行中…".to_string(),
-            AdvancedInspectStage::Result => {
-                "高级检查：j/k LBA · Ctrl-d/u 滚动 · Enter 参数 · Esc 关闭".to_string()
+            AdvancedInspectStage::Running => "全盘检查后台只读建立结构树…".to_string(),
+            AdvancedInspectStage::Browser => {
+                "全盘检查：j/k 移动 · o 展开 · Enter 查看 · Tab 面板 · Esc 返回".to_string()
             }
         }
     } else if state.input_mode() == InputMode::Search {

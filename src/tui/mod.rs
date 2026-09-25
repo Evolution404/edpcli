@@ -289,9 +289,18 @@ fn dispatch_nav_command(
                     .map(state::AdvancedInspectSource::Backup),
             };
             if let Some(source) = source {
-                state.begin_advanced_inspect(source);
+                if state.begin_advanced_inspect(source) {
+                    match state.advanced_inspect_request() {
+                        Ok((source, request)) => {
+                            if let Err(message) = tasks.request_advanced_inspect(source, request) {
+                                state.advanced_inspect_finish(Err(message.to_string()));
+                            }
+                        }
+                        Err(message) => state.advanced_inspect_finish(Err(message)),
+                    }
+                }
             } else {
-                state.set_notice("高级检查需要先选定物理盘或 EDPB 备份。");
+                state.set_notice("全盘检查需要先选定物理盘或 EDPB 备份。");
             }
             StateEffect::None
         }
@@ -655,85 +664,45 @@ fn run_loop(resume: Option<state::WriteIntent>) -> io::Result<LoopExit> {
                     if let Some(stage) = state.advanced_inspect().map(|advanced| advanced.stage) {
                         use state::AdvancedInspectStage;
                         match stage {
-                            AdvancedInspectStage::Form => {
-                                match key.code {
-                                    ct_event::KeyCode::Left => {
-                                        state.advanced_inspect_shift_mode(true);
-                                    }
-                                    ct_event::KeyCode::Right => {
-                                        state.advanced_inspect_shift_mode(false);
-                                    }
-                                    ct_event::KeyCode::Up | ct_event::KeyCode::BackTab => {
-                                        state.advanced_inspect_move_field(-1);
-                                    }
-                                    ct_event::KeyCode::Down | ct_event::KeyCode::Tab => {
-                                        state.advanced_inspect_move_field(1);
-                                    }
-                                    ct_event::KeyCode::Backspace => {
-                                        state.advanced_inspect_backspace();
-                                    }
-                                    ct_event::KeyCode::Enter => {
-                                        match state.advanced_inspect_request() {
-                                            Ok((source, request)) => {
-                                                state.advanced_inspect_start();
-                                                if let Err(message) =
-                                                    tasks.request_advanced_inspect(source, request)
-                                                {
-                                                    state.advanced_inspect_finish(Err(
-                                                        message.to_string()
-                                                    ));
-                                                }
-                                            }
-                                            Err(message) => {
-                                                if let Some(advanced) = state.advanced_inspect_mut()
-                                                {
-                                                    advanced.message = Some(message);
-                                                }
-                                            }
-                                        }
-                                    }
-                                    ct_event::KeyCode::Esc => state.close_advanced_inspect(),
-                                    ct_event::KeyCode::Char(ch)
-                                        if !key
-                                            .modifiers
-                                            .contains(ct_event::KeyModifiers::CONTROL) =>
-                                    {
-                                        state.advanced_inspect_push_char(ch);
-                                    }
-                                    _ => {}
-                                }
-                                continue;
-                            }
                             AdvancedInspectStage::Running => {
                                 if key.code == ct_event::KeyCode::Esc {
-                                    state.set_notice("高级检查正在后台读取，请等待完成。");
+                                    state.set_notice("全盘检查正在后台读取结构，请等待完成。");
                                 }
                                 continue;
                             }
-                            AdvancedInspectStage::Result => {
+                            AdvancedInspectStage::Browser => {
                                 match key.code {
                                     ct_event::KeyCode::Up | ct_event::KeyCode::Char('k') => {
-                                        state.advanced_inspect_move_result(-1);
+                                        state.advanced_inspect_move_tree(-1);
                                     }
                                     ct_event::KeyCode::Down | ct_event::KeyCode::Char('j') => {
-                                        state.advanced_inspect_move_result(1);
+                                        state.advanced_inspect_move_tree(1);
+                                    }
+                                    ct_event::KeyCode::Char('o') => {
+                                        state.advanced_inspect_toggle_selected();
+                                    }
+                                    ct_event::KeyCode::Enter => {
+                                        state.advanced_inspect_enter_selected();
+                                    }
+                                    ct_event::KeyCode::Tab => {
+                                        state.advanced_inspect_shift_panel(false);
+                                    }
+                                    ct_event::KeyCode::BackTab => {
+                                        state.advanced_inspect_shift_panel(true);
                                     }
                                     ct_event::KeyCode::Char('u')
                                         if key
                                             .modifiers
                                             .contains(ct_event::KeyModifiers::CONTROL) =>
                                     {
-                                        state.advanced_inspect_scroll(-10);
+                                        state.advanced_inspect_scroll_detail(-10);
                                     }
                                     ct_event::KeyCode::Char('d')
                                         if key
                                             .modifiers
                                             .contains(ct_event::KeyModifiers::CONTROL) =>
                                     {
-                                        state.advanced_inspect_scroll(10);
-                                    }
-                                    ct_event::KeyCode::Enter => {
-                                        state.advanced_inspect_back_to_form();
+                                        state.advanced_inspect_scroll_detail(10);
                                     }
                                     ct_event::KeyCode::Esc => state.close_advanced_inspect(),
                                     _ => {}

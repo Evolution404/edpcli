@@ -350,39 +350,27 @@ fn empty_secret_field_renders_input_placeholder_instead_of_black_value() {
 }
 
 #[test]
-fn advanced_inspect_form_and_result_render_across_terminal_sizes() {
+fn advanced_inspect_tree_browser_renders_and_navigates_across_terminal_sizes() {
     use edpcli::application::inspect::{
         AdvancedInspectItem, AdvancedInspectMode, AdvancedInspectWorkspace,
     };
     use edpcli::inspect::InspectMeta;
-    use edpcli::tui::state::{AdvancedInspectSource, AdvancedInspectStage};
+    use edpcli::tui::state::{AdvancedInspectPanel, AdvancedInspectSource, AdvancedInspectStage};
 
     let mut state = AppState::new();
     assert!(state.begin_advanced_inspect(AdvancedInspectSource::Disk(9)));
     assert_eq!(
         state.advanced_inspect().unwrap().stage,
-        AdvancedInspectStage::Form
+        AdvancedInspectStage::Running
     );
+
     for (width, height) in [(40, 10), (80, 24), (160, 60)] {
         let backend = TestBackend::new(width, height);
         let mut terminal = Terminal::new(backend).expect("test terminal");
         terminal.draw(|frame| render::draw(frame, &state)).unwrap();
-        if width == 80 {
-            let text = terminal
-                .backend()
-                .buffer()
-                .content()
-                .iter()
-                .map(|cell| cell.symbol())
-                .collect::<String>();
-            assert!(
-                text.contains("▶"),
-                "focused advanced-inspect field must render ▶: {text}"
-            );
-        }
     }
 
-    let items = [7u64, 12, 24_025_028]
+    let items = [0u64, 7, 12]
         .into_iter()
         .map(|lba| AdvancedInspectItem {
             lba,
@@ -416,24 +404,56 @@ fn advanced_inspect_form_and_result_render_across_terminal_sizes() {
     }));
     assert_eq!(
         state.advanced_inspect().unwrap().stage,
-        AdvancedInspectStage::Result
+        AdvancedInspectStage::Browser
     );
-    state.advanced_inspect_move_result(1);
-    state.advanced_inspect_scroll(10);
-    assert_eq!(state.advanced_inspect().unwrap().selected, 1);
-    assert_eq!(state.advanced_inspect().unwrap().scroll, 10);
+
+    let initial_rows = state.advanced_inspect_tree_rows();
+    assert!(initial_rows.len() > 1);
+    assert_eq!(initial_rows[0].id, "device");
+    state.advanced_inspect_move_tree(1);
+    assert_eq!(state.advanced_inspect().unwrap().tree_selected, 1);
+
+    let collapsed_len = state.advanced_inspect_tree_rows().len();
+    state.advanced_inspect_toggle_selected();
+    let expanded_len = state.advanced_inspect_tree_rows().len();
+    assert!(expanded_len > collapsed_len);
+
+    state.advanced_inspect_shift_panel(false);
+    assert_eq!(
+        state.advanced_inspect().unwrap().panel,
+        AdvancedInspectPanel::Overview
+    );
+    state.advanced_inspect_shift_panel(false);
+    assert_eq!(
+        state.advanced_inspect().unwrap().panel,
+        AdvancedInspectPanel::Detail
+    );
+    state.advanced_inspect_shift_panel(true);
+    assert_eq!(
+        state.advanced_inspect().unwrap().panel,
+        AdvancedInspectPanel::Overview
+    );
+    state.advanced_inspect_shift_panel(false);
+    state.advanced_inspect_scroll_detail(10);
+    assert_eq!(state.advanced_inspect().unwrap().detail_scroll, 10);
 
     for (width, height) in [(40, 10), (80, 24), (160, 60)] {
         let backend = TestBackend::new(width, height);
         let mut terminal = Terminal::new(backend).expect("test terminal");
         terminal.draw(|frame| render::draw(frame, &state)).unwrap();
+        let text = terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect::<String>();
+        let compact = text.replace(' ', "");
+        assert!(compact.contains("结构树"), "{text}");
+        assert!(compact.contains("节点概览"), "{text}");
+        assert!(compact.contains("节点详情"), "{text}");
     }
 
-    state.advanced_inspect_back_to_form();
-    assert_eq!(
-        state.advanced_inspect().unwrap().stage,
-        AdvancedInspectStage::Form
-    );
     state.close_advanced_inspect();
     assert!(state.advanced_inspect().is_none());
 }

@@ -228,20 +228,23 @@ pub fn sector_node_with_fields(
     status: SemanticStatus,
     fields: &[InspectField],
 ) -> InspectNode {
-    let children = fields
-        .iter()
-        .enumerate()
-        .map(|(index, field)| field_node(index, field))
-        .collect::<Vec<_>>();
-    InspectNode {
-        id: format!("sector.{lba}"),
-        label: format!("LBA{lba}"),
-        kind: InspectNodeKind::Sector,
-        range: InspectNodeRange::sectors(lba, 1),
-        children: InspectChildren::Materialized(children),
-        decoder,
-        status,
-    }
+    let mut node = sector_stub(lba, decoder, status);
+    let mut children = match node.children {
+        InspectChildren::Materialized(children) => children,
+        InspectChildren::None | InspectChildren::LazySectors { .. } => Vec::new(),
+    };
+    children.extend(
+        fields
+            .iter()
+            .enumerate()
+            .map(|(index, field)| field_node(index, field)),
+    );
+    node.children = if children.is_empty() {
+        InspectChildren::None
+    } else {
+        InspectChildren::Materialized(children)
+    };
+    node
 }
 
 fn clip_range(start: u64, count: u64, total: u64) -> Option<(u64, u64)> {

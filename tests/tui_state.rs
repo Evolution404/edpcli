@@ -1314,3 +1314,107 @@ fn empty_lists_never_underflow_selection() {
         assert_eq!(state.selected(), 0);
     }
 }
+
+#[test]
+fn advanced_inspect_lazy_sector_window_is_bounded_and_pageable() {
+    use edpcli::application::inspect::{AdvancedInspectMode, AdvancedInspectWorkspace};
+    use edpcli::application::inspect_tree::InspectNodeKind;
+    use edpcli::backup_metadata::PartitionGeometry;
+    use edpcli::inspect::InspectMeta;
+    use edpcli::inspect_target::InspectDiskContext;
+    use edpcli::tui::state::AdvancedInspectSource;
+
+    let mut context =
+        InspectDiskContext::new(vec![0; edpcli::common::METADATA_IMAGE_LEN], None, 10_000);
+    context.partitions.push(PartitionGeometry {
+        index: 0,
+        partition_type: 2,
+        partition_count: 1,
+        need_disturb: 0,
+        need_encrypt: 0,
+        start_sector: 2_048,
+        sector_size: edpcli::common::SECTOR as u64,
+        partition_size: 200 * edpcli::common::SECTOR as u64,
+        sector_count: 200,
+        user_key_crc: 0,
+        file_key_crc: 0,
+        encrypt_mode: 0,
+    });
+
+    let mut state = AppState::new();
+    assert!(state.begin_advanced_inspect(AdvancedInspectSource::Disk(6)));
+    state.advanced_inspect_finish(Ok(AdvancedInspectWorkspace {
+        source: "disk6".into(),
+        meta: InspectMeta::default(),
+        mode: AdvancedInspectMode::Meta,
+        items: Vec::new(),
+        export_dir: None,
+        topology: edpcli::application::inspect_tree::build_inspect_topology(&context),
+    }));
+
+    let rows = state.advanced_inspect_tree_rows();
+    let partition_index = rows
+        .iter()
+        .position(|row| row.id.ends_with("/region.partition.0"))
+        .expect("partition region");
+    state.advanced_inspect_move_tree(partition_index as isize);
+    state.advanced_inspect_toggle_selected();
+
+    let rows = state.advanced_inspect_tree_rows();
+    let extent_index = rows
+        .iter()
+        .position(|row| row.id.ends_with("/region.partition.0.extent"))
+        .expect("partition extent");
+    let current = state.advanced_inspect().unwrap().tree_selected;
+    state.advanced_inspect_move_tree(extent_index as isize - current as isize);
+    state.advanced_inspect_toggle_selected();
+
+    let first_page = state.advanced_inspect_tree_rows();
+    let first_page_sectors = first_page
+        .iter()
+        .filter(|row| {
+            row.kind == InspectNodeKind::Sector
+                && row.range.start_lba >= 2_048
+                && row.range.start_lba < 2_248
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(first_page_sectors.len(), 64);
+    assert_eq!(first_page_sectors.first().unwrap().range.start_lba, 2_048);
+    assert_eq!(first_page_sectors.last().unwrap().range.start_lba, 2_111);
+    assert!(first_page.iter().any(|row| row.label.starts_with("下一页")));
+    assert!(
+        first_page.len() < 100,
+        "tree unexpectedly eager: {}",
+        first_page.len()
+    );
+
+    let next_index = first_page
+        .iter()
+        .position(|row| row.label.starts_with("下一页"))
+        .expect("next page row");
+    let current = state.advanced_inspect().unwrap().tree_selected;
+    state.advanced_inspect_move_tree(next_index as isize - current as isize);
+    state.advanced_inspect_toggle_selected();
+
+    let second_page = state.advanced_inspect_tree_rows();
+    let second_page_sectors = second_page
+        .iter()
+        .filter(|row| {
+            row.kind == InspectNodeKind::Sector
+                && row.range.start_lba >= 2_048
+                && row.range.start_lba < 2_248
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(second_page_sectors.len(), 64);
+    assert_eq!(second_page_sectors.first().unwrap().range.start_lba, 2_112);
+    assert_eq!(second_page_sectors.last().unwrap().range.start_lba, 2_175);
+    assert!(!second_page
+        .iter()
+        .any(|row| { row.kind == InspectNodeKind::Sector && row.range.start_lba == 2_048 }));
+    assert!(second_page.iter().any(|row| row.label.contains("上一页")));
+    assert!(
+        second_page.len() < 101,
+        "tree unexpectedly eager: {}",
+        second_page.len()
+    );
+}
