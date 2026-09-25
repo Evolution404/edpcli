@@ -20,6 +20,7 @@ pub enum ProvisionKind {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ProvisionBarKind {
     Free,
+    Unknown,
     Plain,
     Boot,
     Share,
@@ -1746,48 +1747,6 @@ impl AppState {
         lines
     }
 
-    fn provision_bar_from_segments(
-        width: usize,
-        segments: Vec<(ProvisionBarKind, u64)>,
-    ) -> Vec<ProvisionBarKind> {
-        let width = width.clamp(8, 96);
-        if segments.is_empty() {
-            return vec![ProvisionBarKind::Free; width];
-        }
-        let baseline = usize::from(segments.len() <= width);
-        let baseline_total = baseline * segments.len();
-        let remaining = width.saturating_sub(baseline_total);
-        let total_weight = segments
-            .iter()
-            .map(|(_, sectors)| *sectors as u128)
-            .sum::<u128>()
-            .max(1);
-        let mut allocations = Vec::with_capacity(segments.len());
-        let mut assigned = 0usize;
-        let mut remainders = Vec::with_capacity(segments.len());
-        for (index, (_, sectors)) in segments.iter().enumerate() {
-            let scaled = *sectors as u128 * remaining as u128;
-            let extra = (scaled / total_weight) as usize;
-            allocations.push(baseline + extra);
-            assigned += baseline + extra;
-            remainders.push((scaled % total_weight, index));
-        }
-        remainders.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.cmp(&b.1)));
-        for (_, index) in remainders.into_iter().take(width.saturating_sub(assigned)) {
-            allocations[index] += 1;
-        }
-
-        let mut cells = Vec::with_capacity(width);
-        for ((kind, _), count) in segments.into_iter().zip(allocations) {
-            cells.extend(std::iter::repeat_n(kind, count));
-        }
-        cells.truncate(width);
-        while cells.len() < width {
-            cells.push(ProvisionBarKind::Free);
-        }
-        cells
-    }
-
     pub fn provision_layout_editor_lines(&self) -> Vec<String> {
         use crate::provision::PartitionRole;
 
@@ -1917,56 +1876,55 @@ impl AppState {
         lines
     }
 
-    pub fn provision_layout_bar(&self, width: usize) -> Vec<ProvisionBarKind> {
+    pub fn provision_layout_model(&self) -> crate::tui::disk_layout::DiskLayoutModel {
         use crate::provision::PartitionRole;
+        use crate::tui::disk_layout::{DiskLayoutModel, DiskLayoutSegment};
 
         if self.provision.kind == ProvisionKind::Plain {
             let Ok(plan) = self.provision_plain_plan() else {
-                return vec![ProvisionBarKind::Free; width.clamp(8, 96)];
+                return DiskLayoutModel::new(0, Vec::new());
             };
-            let mut ordered = Vec::<(u64, ProvisionBarKind, u64)>::new();
-            ordered.extend(
-                plan.gaps
-                    .iter()
-                    .map(|gap| (gap.start_lba, ProvisionBarKind::Free, gap.sector_count)),
-            );
-            ordered.extend(
-                plan.partitions
-                    .iter()
-                    .map(|part| (part.start_lba, ProvisionBarKind::Plain, part.sector_count)),
-            );
-            ordered.sort_by_key(|(start, _, _)| *start);
-            return Self::provision_bar_from_segments(
-                width,
-                ordered
-                    .into_iter()
-                    .map(|(_, kind, sectors)| (kind, sectors))
-                    .collect(),
-            );
+            let mut segments = Vec::new();
+            segments.extend(plan.gaps.iter().map(|gap| DiskLayoutSegment {
+                label: "空闲".into(),
+                start_lba: gap.start_lba,
+                sector_count: gap.sector_count,
+                kind: ProvisionBarKind::Free,
+            }));
+            segments.extend(plan.partitions.iter().enumerate().map(|(index, part)| {
+                DiskLayoutSegment {
+                    label: format!("普通分区[{}]", index),
+                    start_lba: part.start_lba,
+                    sector_count: part.sector_count,
+                    kind: ProvisionBarKind::Plain,
+                }
+            }));
+            return DiskLayoutModel::new(plan.total_sectors, segments);
         }
 
-        let width = width.clamp(8, 96);
         let Ok((resolved, _)) = self.provision_resolved_prefill() else {
-            return vec![ProvisionBarKind::Free; width];
+            return DiskLayoutModel::new(0, Vec::new());
         };
         let Ok(mut parts) = resolved.target_partitions(crate::common::SECTOR as u64) else {
-            return vec![ProvisionBarKind::Free; width];
+            return DiskLayoutModel::new(0, Vec::new());
         };
         parts.sort_by_key(|part| part.start_lba);
         let usable_start = crate::provision::OFFICIAL_PARTITION_START_SECTOR;
         let usable_sectors = resolved.usable_end_lba.saturating_sub(usable_start);
         if usable_sectors == 0 {
-            return vec![ProvisionBarKind::Free; width];
+            return DiskLayoutModel::new(0, Vec::new());
         }
 
-        let mut segments = Vec::<(ProvisionBarKind, u64)>::new();
+        let mut segments = Vec::<DiskLayoutSegment>::new();
         let mut cursor = usable_start;
         for part in &parts {
             if part.start_lba > cursor {
-                segments.push((
-                    ProvisionBarKind::Free,
-                    part.start_lba.saturating_sub(cursor),
-                ));
+                segments.push(DiskLayoutSegment {
+                    label: "空闲".into(),
+                    start_lba: cursor,
+                    sector_count: part.start_lba.saturating_sub(cursor),
+                    kind: ProvisionBarKind::Free,
+                });
             }
             let kind = match part.role {
                 PartitionRole::Boot => ProvisionBarKind::Boot,
@@ -1974,16 +1932,27 @@ impl AppState {
                 PartitionRole::Encrypt => ProvisionBarKind::Encrypt,
                 PartitionRole::CompatibilityReserve => ProvisionBarKind::Compatibility,
             };
-            segments.push((kind, part.sector_count));
+            segments.push(DiskLayoutSegment {
+                label: part.role.label().into(),
+                start_lba: part.start_lba,
+                sector_count: part.sector_count,
+                kind,
+            });
             cursor = part.start_lba.saturating_add(part.sector_count);
         }
         if cursor < resolved.usable_end_lba {
-            segments.push((
-                ProvisionBarKind::Free,
-                resolved.usable_end_lba.saturating_sub(cursor),
-            ));
+            segments.push(DiskLayoutSegment {
+                label: "空闲".into(),
+                start_lba: cursor,
+                sector_count: resolved.usable_end_lba.saturating_sub(cursor),
+                kind: ProvisionBarKind::Free,
+            });
         }
-        Self::provision_bar_from_segments(width, segments)
+        DiskLayoutModel::new(usable_sectors, segments)
+    }
+
+    pub fn provision_layout_bar(&self, width: usize) -> Vec<ProvisionBarKind> {
+        self.provision_layout_model().bar(width)
     }
 
     pub fn provision_field_hint(&self, display_index: usize) -> Option<String> {

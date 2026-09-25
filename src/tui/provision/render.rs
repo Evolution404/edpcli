@@ -423,21 +423,7 @@ pub(super) fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, sta
             );
 
             let bar_width = layout_area.width.saturating_sub(10) as usize;
-            let bar = state.provision_layout_bar(bar_width);
-            let mut bar_spans = vec![Span::styled("比例 [", muted())];
-            let mut run_start = 0usize;
-            while run_start < bar.len() {
-                let kind = bar[run_start];
-                let mut run_end = run_start + 1;
-                while run_end < bar.len() && bar[run_end] == kind {
-                    run_end += 1;
-                }
-                let style = partition_style(kind);
-                bar_spans.push(Span::styled("━".repeat(run_end - run_start), style));
-                run_start = run_end;
-            }
-            bar_spans.push(Span::styled("]", muted()));
-            let bar_line = Line::from(bar_spans);
+            let bar_line = state.provision_layout_model().bar_line(bar_width);
             let legend_line = if provision.kind == ProvisionKind::Plain {
                 Line::from(vec![
                     Span::styled("■", partition_style(ProvisionBarKind::Plain)),

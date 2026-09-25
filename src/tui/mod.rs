@@ -5,6 +5,7 @@
 
 pub mod animation;
 pub mod command;
+pub mod disk_layout;
 pub mod event;
 pub mod keymap;
 pub mod render;

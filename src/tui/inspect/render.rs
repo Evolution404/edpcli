@@ -322,19 +322,54 @@ pub(super) fn draw_advanced_inspect(
                 AdvancedInspectPanel::Overview => 1,
                 AdvancedInspectPanel::Detail => 2,
             };
+            let disk_layout =
+                crate::tui::disk_layout::DiskLayoutModel::from_topology(&workspace.topology);
+            let layout_height = if area.height >= 18 {
+                (disk_layout.segments.len() as u16 + 4).min(area.height.saturating_sub(8))
+            } else {
+                3
+            };
             let browser = Layout::default()
                 .direction(Direction::Vertical)
-                .constraints([Constraint::Length(1), Constraint::Min(1)])
+                .constraints([
+                    Constraint::Length(layout_height),
+                    Constraint::Length(1),
+                    Constraint::Min(1),
+                ])
                 .split(area);
+            let total = disk_layout.total_sectors;
+            let gib = total as f64 * crate::common::SECTOR as f64 / 1_073_741_824.0;
+            let disk_status = match &advanced.source {
+                crate::tui::state::AdvancedInspectSource::Disk(disk) => state
+                    .devices()
+                    .iter()
+                    .find(|row| row.disk == *disk)
+                    .map(device_status)
+                    .unwrap_or_else(|| "状态未读取".into()),
+                crate::tui::state::AdvancedInspectSource::Backup(_) => "备份镜像".into(),
+            };
+            let mut layout_lines = vec![Line::from(format!(
+                "{gib:.2} GiB / {total} sectors · {} · {}",
+                safe(&workspace.source),
+                safe(&disk_status)
+            ))];
+            layout_lines.push(disk_layout.bar_line(browser[0].width.saturating_sub(4) as usize));
+            layout_lines.extend(disk_layout.legend_lines().into_iter().map(Line::from));
+            frame.render_widget(
+                Paragraph::new(layout_lines)
+                    .block(Block::default().borders(Borders::ALL).title("磁盘布局"))
+                    .wrap(Wrap { trim: false }),
+                browser[0],
+            );
             frame.render_widget(
                 Tabs::new(["结构树", "节点概览", "节点详情"])
                     .select(panel_index)
                     .style(tab())
                     .highlight_style(active_tab())
                     .divider(Span::styled(" │ ", muted())),
-                browser[0],
+                browser[1],
             );
-            let content_area = browser[1];
+            let content_area = browser[2];
             let compact = content_area.width < 92 || content_area.height < 14;
             let (tree_area, overview_area, detail_area) = if compact {
                 match advanced.panel {

@@ -291,7 +291,7 @@ impl Theme {
 
     pub fn partition(self, kind: ProvisionBarKind) -> Style {
         let color = match kind {
-            ProvisionBarKind::Free => self.palette.partition_free,
+            ProvisionBarKind::Free | ProvisionBarKind::Unknown => self.palette.partition_free,
             ProvisionBarKind::Plain => self.palette.partition_plain,
             ProvisionBarKind::Boot => self.palette.partition_boot,
             ProvisionBarKind::Share => self.palette.partition_share,
