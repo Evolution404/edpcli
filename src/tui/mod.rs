@@ -1131,11 +1131,6 @@ fn run_loop(resume: Option<state::WriteIntent>) -> io::Result<LoopExit> {
                                 TuiAction::Insert => {
                                     state.provision_begin_insert();
                                 }
-                                TuiAction::Activate => {
-                                    if !state.provision_begin_insert() {
-                                        state.provision_toggle_selected_option();
-                                    }
-                                }
                                 TuiAction::Fill => {
                                     state.provision_fill_selected_capacity();
                                 }
@@ -1145,7 +1140,7 @@ fn run_loop(resume: Option<state::WriteIntent>) -> io::Result<LoopExit> {
                                 TuiAction::Delete => {
                                     state.provision_plain_delete_selected_partition();
                                 }
-                                TuiAction::Plan | TuiAction::Write => {
+                                TuiAction::Activate | TuiAction::Plan | TuiAction::Write => {
                                     start_provision_plan(&mut state, &mut tasks);
                                 }
                                 TuiAction::Export => {

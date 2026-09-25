@@ -94,29 +94,29 @@ fn input_value_window(value: &str, cursor: usize, width: usize, secret: bool) ->
         sanitized.chars().collect::<Vec<_>>()
     };
     let cursor = cursor.min(chars.len());
-    let content_budget = width.saturating_sub(2).max(1);
+    if width == 1 {
+        return "│".into();
+    }
+
+    let window_width = |start: usize, end: usize| {
+        let content = chars[start..end]
+            .iter()
+            .map(|ch| crate::ui::disp_width(&ch.to_string()).max(1))
+            .sum::<usize>();
+        1 + content + usize::from(start > 0) + usize::from(end < chars.len())
+    };
+
     let mut start = cursor;
     let mut end = cursor;
-    let mut used = 1usize; // cursor marker
     loop {
         let mut progressed = false;
-        if start > 0 {
-            let candidate = chars[start - 1];
-            let w = crate::ui::disp_width(&candidate.to_string()).max(1);
-            if used + w <= content_budget {
-                start -= 1;
-                used += w;
-                progressed = true;
-            }
+        if start > 0 && window_width(start - 1, end) <= width {
+            start -= 1;
+            progressed = true;
         }
-        if end < chars.len() {
-            let candidate = chars[end];
-            let w = crate::ui::disp_width(&candidate.to_string()).max(1);
-            if used + w <= content_budget {
-                end += 1;
-                used += w;
-                progressed = true;
-            }
+        if end < chars.len() && window_width(start, end + 1) <= width {
+            end += 1;
+            progressed = true;
         }
         if !progressed {
             break;
@@ -506,10 +506,19 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
         .constraints(constraints)
         .split(area);
 
+    let (input_mode_label, input_mode_style) = match state.input_mode() {
+        InputMode::Normal => ("NORMAL", muted()),
+        InputMode::Insert => ("INSERT", accent().add_modifier(Modifier::BOLD)),
+        InputMode::Search => ("SEARCH", secondary().add_modifier(Modifier::BOLD)),
+        InputMode::Command => ("COMMAND", secondary().add_modifier(Modifier::BOLD)),
+        InputMode::Confirm => ("CONFIRM", warning().add_modifier(Modifier::BOLD)),
+        InputMode::Help => ("HELP", muted().add_modifier(Modifier::BOLD)),
+    };
     let title = Paragraph::new(Line::from(vec![
         Span::styled("edpcli", accent()),
         Span::styled(format!(" v{}", env!("CARGO_PKG_VERSION")), muted()),
         Span::styled("  TUI", secondary().add_modifier(Modifier::BOLD)),
+        Span::styled(format!("  [{input_mode_label}]"), input_mode_style),
         Span::styled("  ·  管理员模式", success()),
         animation::compact_indicator(state.animation_frame(), core_mode),
     ]))
@@ -587,7 +596,7 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
                     "Inspect: gl 跳转 · Sector v 循环 Raw/Decode/Mixed · 备份: Space 多选 · d 删除 · a 新建",
                 ));
                 help_lines.push(Line::from(
-                    "制盘: i/Enter 进入 Insert；物理写盘保持精确输入 YES 的安全确认",
+                    "制盘: Normal 下 i 编辑、Enter 生成计划；Insert 下 Enter/Esc 完成编辑；物理写盘保持精确输入 YES 的安全确认",
                 ));
                 let help = Paragraph::new(help_lines)
                     .block(
@@ -718,6 +727,9 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
                 ProvisionStage::Menu => {
                     "gt/gT 工作区 · j/k 选择方案 · Enter 打开 · r 刷新目标 · gp 直达 · ? 帮助 · q 退出".to_string()
                 }
+                ProvisionStage::Form if state.input_mode() == InputMode::Insert => {
+                    "INSERT · ←/→ 光标 · Home/End 首尾 · 输入/Backspace 编辑 · Enter/Esc 完成编辑".to_string()
+                }
                 ProvisionStage::Form if state.provision_selected_field_is_editable() => {
                     let unit_key = if state
                         .provision_field_hint(state.provision().field_selected)
@@ -727,9 +739,9 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
                     } else {
                         ""
                     };
-                    format!("j/k 字段 · i/Enter 进入 Insert · Insert 内 ←/→ 光标、Home/End 首尾、输入/Backspace 编辑{unit_key} · gt/gT 工作区 · Esc 返回")
+                    format!("NORMAL · j/k 字段 · i 编辑{unit_key} · Enter 生成计划 · gt/gT 工作区 · Esc 返回")
                 }
-                ProvisionStage::Form => "j/k 字段 · h/l 或 Space 切换 · p 预览 · gt/gT 工作区 · Esc 返回".to_string(),
+                ProvisionStage::Form => "NORMAL · j/k 字段 · h/l 或 Space 切换 · Enter 生成计划 · p 预览 · gt/gT 工作区 · Esc 返回".to_string(),
                 ProvisionStage::Planning => "正在生成只读计划…".to_string(),
                 ProvisionStage::Review => {
                     "Enter 最终确认  ·  e 导出镜像  ·  Esc 返回修改".to_string()
@@ -788,6 +800,14 @@ mod tests {
     fn active_input_window_does_not_pad_selected_background_to_cell_width() {
         assert_eq!(input_value_window("abc", 3, 12, false), "abc│");
         assert_eq!(input_value_window("secret", 6, 12, true), "••••••│");
+        assert_eq!(
+            input_value_window("1486288249", 10, 12, false),
+            "1486288249│"
+        );
+        assert_eq!(
+            crate::ui::disp_width(&input_value_window("1486288249", 10, 10, false)),
+            10
+        );
     }
 
     #[test]

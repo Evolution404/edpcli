@@ -1,5 +1,7 @@
 use super::*;
 
+const INPUT_EDITING_SLACK: usize = 2;
+
 pub(super) fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState) {
     let provision = state.provision();
     let (main_area, sidebar) = workspace_sidebar_layout(area);
@@ -254,7 +256,8 @@ pub(super) fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, sta
                     } else {
                         crate::ui::disp_width(&safe(value))
                     }
-                    .clamp(6, 24);
+                    .saturating_add(INPUT_EDITING_SLACK)
+                    .clamp(8, 26);
                     if position == 0 {
                         entry.0 = entry.0.max(label_width);
                         entry.2 = entry.2.max(shown_width);
@@ -332,7 +335,8 @@ pub(super) fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, sta
                     spans.push(Span::raw(" "));
 
                     let editable_active = active && state.provision_selected_field_is_editable();
-                    let shown = if editable_active {
+                    let editing_active = editable_active && state.input_mode() == InputMode::Insert;
+                    let shown = if editing_active {
                         input_value_window(
                             value,
                             state.provision_field_cursor(),
@@ -349,7 +353,7 @@ pub(super) fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, sta
                     let shown_width = crate::ui::disp_width(&shown).min(value_width);
                     spans.push(Span::styled(
                         shown,
-                        if editable_active {
+                        if editing_active {
                             input_focused()
                         } else if active {
                             selected()
@@ -357,7 +361,7 @@ pub(super) fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, sta
                             input()
                         },
                     ));
-                    if editable_active && shown_width < value_width {
+                    if editing_active && shown_width < value_width {
                         spans.push(Span::raw(" ".repeat(value_width - shown_width)));
                     }
                 }
@@ -371,23 +375,33 @@ pub(super) fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, sta
                 ]));
             }
             form_lines.push(Line::from(""));
-            let mut shortcuts = vec![Span::styled("↑/↓", accent()), Span::raw(" 字段   ")];
-            if state.provision_selected_field_is_editable() {
+            let mut shortcuts = Vec::new();
+            if state.input_mode() == InputMode::Insert {
                 shortcuts.extend([
+                    Span::styled("INSERT", accent().add_modifier(Modifier::BOLD)),
+                    Span::raw("   "),
                     Span::styled("←/→", accent()),
                     Span::raw(" 光标   "),
                     Span::styled("输入/Backspace", secondary()),
                     Span::raw(" 编辑   "),
+                    Span::styled("Enter/Esc", success()),
+                    Span::raw(" 完成编辑"),
                 ]);
             } else {
-                shortcuts.extend([Span::styled("Space", secondary()), Span::raw(" 切换   ")]);
+                shortcuts.extend([Span::styled("NORMAL", muted()), Span::raw("   ")]);
+                shortcuts.extend([Span::styled("↑/↓", accent()), Span::raw(" 字段   ")]);
+                if state.provision_selected_field_is_editable() {
+                    shortcuts.extend([Span::styled("i", secondary()), Span::raw(" 编辑   ")]);
+                } else {
+                    shortcuts.extend([Span::styled("Space", secondary()), Span::raw(" 切换   ")]);
+                }
+                shortcuts.extend([
+                    Span::styled("Enter", success()),
+                    Span::raw(" 生成计划   "),
+                    Span::styled("Esc", warning()),
+                    Span::raw(" 返回"),
+                ]);
             }
-            shortcuts.extend([
-                Span::styled("Enter", success()),
-                Span::raw(" 生成计划   "),
-                Span::styled("Esc", warning()),
-                Span::raw(" 返回"),
-            ]);
             form_lines.push(Line::from(shortcuts));
             if let Some(message) = &provision.message {
                 form_lines.push(Line::from(Span::styled(safe(message), danger())));

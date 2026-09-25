@@ -217,6 +217,29 @@ fn confirm_mode_has_uniform_yes_no_escape_contract_without_weakening_typed_yes()
 }
 
 #[test]
+fn provision_form_enter_generates_plan_instead_of_editing_or_toggling() {
+    let event_loop = include_str!("../src/tui/mod.rs");
+    assert!(
+        event_loop.contains("TuiAction::Activate | TuiAction::Plan | TuiAction::Write"),
+        "Provision Form Enter/Activate must share the generate-plan path with p/w"
+    );
+    assert!(
+        !event_loop.contains("TuiAction::Activate => {\n                                    if !state.provision_begin_insert()"),
+        "Provision Form Enter must not enter Insert mode or toggle checkbox state"
+    );
+
+    let render = include_str!("../src/tui/render.rs");
+    assert!(
+        !render.contains("i/Enter 进入 Insert"),
+        "help/footer must not advertise the regressed Enter-to-edit behavior"
+    );
+    assert!(
+        render.contains("Enter 生成计划"),
+        "Provision Form footer must advertise Enter as generate-plan"
+    );
+}
+
+#[test]
 fn event_loop_does_not_parse_text_or_confirmation_chars_outside_keymap() {
     let source = include_str!("../src/tui/mod.rs");
     assert!(

@@ -308,8 +308,31 @@ fn provision_selection_highlights_only_value_and_long_values_scroll_with_cursor(
         .map(|cell| cell.symbol())
         .collect::<String>();
     assert!(
+        text.contains("[NORMAL]"),
+        "normal mode badge missing: {text}"
+    );
+    assert!(
+        !text.contains('‹') && !text.contains('›'),
+        "Normal selection must not show input overflow markers: {text}"
+    );
+
+    assert!(state.provision_begin_insert());
+    state.provision_cursor_end();
+    terminal.draw(|frame| render::draw(frame, &state)).unwrap();
+    let text = terminal
+        .backend()
+        .buffer()
+        .content()
+        .iter()
+        .map(|cell| cell.symbol())
+        .collect::<String>();
+    assert!(
+        text.contains("[INSERT]"),
+        "insert mode badge missing: {text}"
+    );
+    assert!(
         text.contains('‹'),
-        "long active input should scroll from the left: {text}"
+        "long Insert input should scroll from the left: {text}"
     );
 
     state.provision_cursor_home();
@@ -323,7 +346,7 @@ fn provision_selection_highlights_only_value_and_long_values_scroll_with_cursor(
         .collect::<String>();
     assert!(
         text.contains('›'),
-        "long active input should expose right overflow: {text}"
+        "long Insert input should expose right overflow: {text}"
     );
 }
 
