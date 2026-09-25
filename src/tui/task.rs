@@ -39,6 +39,79 @@ pub struct SingleFlightGate {
     running: bool,
 }
 
+#[derive(Debug)]
+struct TaskSlot<P> {
+    generation: GenerationGate,
+    single_flight: SingleFlightGate,
+    pending_latest: Option<(u64, P)>,
+}
+
+#[derive(Debug)]
+enum LatestRequest<P> {
+    Started { generation: u64, request: P },
+    Queued { generation: u64 },
+}
+
+#[derive(Debug)]
+enum LatestCompletion<P> {
+    Restart { generation: u64, request: P },
+    Deliver(bool),
+}
+
+impl<P> Default for TaskSlot<P> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl<P> TaskSlot<P> {
+    const fn new() -> Self {
+        Self {
+            generation: GenerationGate::new(),
+            single_flight: SingleFlightGate::new(),
+            pending_latest: None,
+        }
+    }
+
+    fn try_begin(&mut self) -> Option<u64> {
+        self.single_flight
+            .try_start()
+            .then(|| self.generation.begin())
+    }
+
+    fn request_latest(&mut self, request: P) -> LatestRequest<P> {
+        let generation = self.generation.begin();
+        if self.single_flight.try_start() {
+            LatestRequest::Started {
+                generation,
+                request,
+            }
+        } else {
+            self.pending_latest = Some((generation, request));
+            LatestRequest::Queued { generation }
+        }
+    }
+
+    fn finish(&mut self, generation: u64) -> bool {
+        self.single_flight.finish();
+        self.generation.is_current(generation)
+    }
+
+    fn finish_latest(&mut self, generation: u64) -> LatestCompletion<P> {
+        self.single_flight.finish();
+        if let Some((next_generation, request)) = self.pending_latest.take() {
+            let started = self.single_flight.try_start();
+            debug_assert!(started);
+            LatestCompletion::Restart {
+                generation: next_generation,
+                request,
+            }
+        } else {
+            LatestCompletion::Deliver(self.generation.is_current(generation))
+        }
+    }
+}
+
 impl SingleFlightGate {
     pub const fn new() -> Self {
         Self { running: false }
@@ -229,27 +302,15 @@ fn panic_message(payload: Box<dyn std::any::Any + Send>) -> String {
 pub struct TaskHub {
     tx: Sender<WorkerResult>,
     rx: Receiver<WorkerResult>,
-    device_generation: GenerationGate,
-    backup_generation: GenerationGate,
-    advanced_inspect_generation: GenerationGate,
-    advanced_inspect_sector_generation: GenerationGate,
-    verify_generation: GenerationGate,
-    provision_generation: GenerationGate,
-    provision_export_generation: GenerationGate,
-    prune_generation: GenerationGate,
-    batch_delete_generation: GenerationGate,
-    device_single_flight: SingleFlightGate,
-    backup_single_flight: SingleFlightGate,
-    advanced_inspect_single_flight: SingleFlightGate,
-    advanced_inspect_sector_single_flight: SingleFlightGate,
-    verify_single_flight: SingleFlightGate,
-    provision_single_flight: SingleFlightGate,
-    provision_export_single_flight: SingleFlightGate,
-    prune_single_flight: SingleFlightGate,
-    batch_delete_single_flight: SingleFlightGate,
-    pending_device_scan: Option<PathBuf>,
-    pending_backup_scan: Option<PathBuf>,
-    pending_verify: Option<(u64, PathBuf, PathBuf)>,
+    device_slot: TaskSlot<PathBuf>,
+    backup_slot: TaskSlot<PathBuf>,
+    advanced_inspect_slot: TaskSlot<()>,
+    advanced_inspect_sector_slot: TaskSlot<()>,
+    verify_slot: TaskSlot<(PathBuf, PathBuf)>,
+    provision_slot: TaskSlot<()>,
+    provision_export_slot: TaskSlot<()>,
+    prune_slot: TaskSlot<()>,
+    batch_delete_slot: TaskSlot<()>,
     next_operation_id: u64,
     active_operation: Option<OperationId>,
     critical_worker: Option<std::thread::JoinHandle<()>>,
@@ -267,27 +328,15 @@ impl TaskHub {
         Self {
             tx,
             rx,
-            device_generation: GenerationGate::new(),
-            backup_generation: GenerationGate::new(),
-            advanced_inspect_generation: GenerationGate::new(),
-            advanced_inspect_sector_generation: GenerationGate::new(),
-            verify_generation: GenerationGate::new(),
-            provision_generation: GenerationGate::new(),
-            provision_export_generation: GenerationGate::new(),
-            prune_generation: GenerationGate::new(),
-            batch_delete_generation: GenerationGate::new(),
-            device_single_flight: SingleFlightGate::new(),
-            backup_single_flight: SingleFlightGate::new(),
-            advanced_inspect_single_flight: SingleFlightGate::new(),
-            advanced_inspect_sector_single_flight: SingleFlightGate::new(),
-            verify_single_flight: SingleFlightGate::new(),
-            provision_single_flight: SingleFlightGate::new(),
-            provision_export_single_flight: SingleFlightGate::new(),
-            prune_single_flight: SingleFlightGate::new(),
-            batch_delete_single_flight: SingleFlightGate::new(),
-            pending_device_scan: None,
-            pending_backup_scan: None,
-            pending_verify: None,
+            device_slot: TaskSlot::new(),
+            backup_slot: TaskSlot::new(),
+            advanced_inspect_slot: TaskSlot::new(),
+            advanced_inspect_sector_slot: TaskSlot::new(),
+            verify_slot: TaskSlot::new(),
+            provision_slot: TaskSlot::new(),
+            provision_export_slot: TaskSlot::new(),
+            prune_slot: TaskSlot::new(),
+            batch_delete_slot: TaskSlot::new(),
             next_operation_id: 0,
             active_operation: None,
             critical_worker: None,
@@ -333,15 +382,19 @@ impl TaskHub {
     }
 
     pub fn request_device_scan(&mut self, backup_dir: PathBuf) -> u64 {
-        if !self.device_single_flight.try_start() {
-            self.pending_device_scan = Some(backup_dir);
-            return self.device_generation.current();
+        match self.device_slot.request_latest(backup_dir) {
+            LatestRequest::Started {
+                generation,
+                request,
+            } => {
+                self.start_device_scan(generation, request);
+                generation
+            }
+            LatestRequest::Queued { generation } => generation,
         }
-        self.start_device_scan(backup_dir)
     }
 
-    fn start_device_scan(&mut self, backup_dir: PathBuf) -> u64 {
-        let generation = self.device_generation.begin();
+    fn start_device_scan(&mut self, generation: u64, backup_dir: PathBuf) {
         let tx = self.tx.clone();
         std::thread::spawn(move || {
             let outcome = catch_unwind(AssertUnwindSafe(|| {
@@ -357,19 +410,22 @@ impl TaskHub {
             };
             let _ = tx.send(message);
         });
-        generation
     }
 
     pub fn request_backup_scan(&mut self, backup_dir: PathBuf) -> u64 {
-        if !self.backup_single_flight.try_start() {
-            self.pending_backup_scan = Some(backup_dir);
-            return self.backup_generation.current();
+        match self.backup_slot.request_latest(backup_dir) {
+            LatestRequest::Started {
+                generation,
+                request,
+            } => {
+                self.start_backup_scan(generation, request);
+                generation
+            }
+            LatestRequest::Queued { generation } => generation,
         }
-        self.start_backup_scan(backup_dir)
     }
 
-    fn start_backup_scan(&mut self, backup_dir: PathBuf) -> u64 {
-        let generation = self.backup_generation.begin();
+    fn start_backup_scan(&mut self, generation: u64, backup_dir: PathBuf) {
         let tx = self.tx.clone();
         std::thread::spawn(move || {
             let outcome = catch_unwind(AssertUnwindSafe(|| {
@@ -384,7 +440,6 @@ impl TaskHub {
             };
             let _ = tx.send(message);
         });
-        generation
     }
 
     /// Drain all ready messages exactly once so one result kind cannot consume another.
@@ -393,23 +448,23 @@ impl TaskHub {
         while let Ok(message) = self.rx.try_recv() {
             match message {
                 WorkerResult::Devices { generation, rows } => {
-                    self.device_single_flight.finish();
-                    if let Some(backup_dir) = self.pending_device_scan.take() {
-                        let started = self.device_single_flight.try_start();
-                        debug_assert!(started);
-                        self.start_device_scan(backup_dir);
-                    } else if self.device_generation.is_current(generation) {
-                        updates.devices = Some(rows);
+                    match self.device_slot.finish_latest(generation) {
+                        LatestCompletion::Restart {
+                            generation,
+                            request,
+                        } => self.start_device_scan(generation, request),
+                        LatestCompletion::Deliver(true) => updates.devices = Some(rows),
+                        LatestCompletion::Deliver(false) => {}
                     }
                 }
                 WorkerResult::Backups { generation, rows } => {
-                    self.backup_single_flight.finish();
-                    if let Some(backup_dir) = self.pending_backup_scan.take() {
-                        let started = self.backup_single_flight.try_start();
-                        debug_assert!(started);
-                        self.start_backup_scan(backup_dir);
-                    } else if self.backup_generation.is_current(generation) {
-                        updates.backups = Some(rows);
+                    match self.backup_slot.finish_latest(generation) {
+                        LatestCompletion::Restart {
+                            generation,
+                            request,
+                        } => self.start_backup_scan(generation, request),
+                        LatestCompletion::Deliver(true) => updates.backups = Some(rows),
+                        LatestCompletion::Deliver(false) => {}
                     }
                 }
                 WorkerResult::Write {
@@ -429,8 +484,7 @@ impl TaskHub {
                     }
                 }
                 WorkerResult::AdvancedInspect { generation, result } => {
-                    self.advanced_inspect_single_flight.finish();
-                    if self.advanced_inspect_generation.is_current(generation) {
+                    if self.advanced_inspect_slot.finish(generation) {
                         updates.advanced_inspect = Some(result);
                     }
                 }
@@ -439,56 +493,46 @@ impl TaskHub {
                     lba,
                     result,
                 } => {
-                    self.advanced_inspect_sector_single_flight.finish();
-                    if self
-                        .advanced_inspect_sector_generation
-                        .is_current(generation)
-                    {
+                    if self.advanced_inspect_sector_slot.finish(generation) {
                         updates.advanced_inspect_sector = Some((lba, result));
                     }
                 }
                 WorkerResult::DeviceError {
                     generation,
                     message,
-                } => {
-                    self.device_single_flight.finish();
-                    if let Some(backup_dir) = self.pending_device_scan.take() {
-                        let started = self.device_single_flight.try_start();
-                        debug_assert!(started);
-                        self.start_device_scan(backup_dir);
-                    } else if self.device_generation.is_current(generation) {
-                        updates.device_error = Some(message);
-                    }
-                }
+                } => match self.device_slot.finish_latest(generation) {
+                    LatestCompletion::Restart {
+                        generation,
+                        request,
+                    } => self.start_device_scan(generation, request),
+                    LatestCompletion::Deliver(true) => updates.device_error = Some(message),
+                    LatestCompletion::Deliver(false) => {}
+                },
                 WorkerResult::BackupError {
                     generation,
                     message,
-                } => {
-                    self.backup_single_flight.finish();
-                    if let Some(backup_dir) = self.pending_backup_scan.take() {
-                        let started = self.backup_single_flight.try_start();
-                        debug_assert!(started);
-                        self.start_backup_scan(backup_dir);
-                    } else if self.backup_generation.is_current(generation) {
-                        updates.backup_error = Some(message);
-                    }
-                }
+                } => match self.backup_slot.finish_latest(generation) {
+                    LatestCompletion::Restart {
+                        generation,
+                        request,
+                    } => self.start_backup_scan(generation, request),
+                    LatestCompletion::Deliver(true) => updates.backup_error = Some(message),
+                    LatestCompletion::Deliver(false) => {}
+                },
                 WorkerResult::BackupVerify {
                     generation,
                     path,
                     result,
-                } => {
-                    self.verify_single_flight.finish();
-                    if let Some((next_generation, next_path, backup_dir)) =
-                        self.pending_verify.take()
-                    {
-                        let started = self.verify_single_flight.try_start();
-                        debug_assert!(started);
-                        self.start_backup_verify(next_generation, next_path, backup_dir);
-                    } else if self.verify_generation.is_current(generation) {
+                } => match self.verify_slot.finish_latest(generation) {
+                    LatestCompletion::Restart {
+                        generation,
+                        request: (next_path, backup_dir),
+                    } => self.start_backup_verify(generation, next_path, backup_dir),
+                    LatestCompletion::Deliver(true) => {
                         updates.backup_verify = Some((path, result));
                     }
-                }
+                    LatestCompletion::Deliver(false) => {}
+                },
                 WorkerResult::BackupDelete {
                     operation_id,
                     result,
@@ -498,8 +542,7 @@ impl TaskHub {
                     }
                 }
                 WorkerResult::BackupBatchDeletePlan { generation, result } => {
-                    self.batch_delete_single_flight.finish();
-                    if self.batch_delete_generation.is_current(generation) {
+                    if self.batch_delete_slot.finish(generation) {
                         updates.backup_batch_delete_plan = Some(result);
                     }
                 }
@@ -512,8 +555,7 @@ impl TaskHub {
                     }
                 }
                 WorkerResult::BackupPrunePlan { generation, result } => {
-                    self.prune_single_flight.finish();
-                    if self.prune_generation.is_current(generation) {
+                    if self.prune_slot.finish(generation) {
                         updates.backup_prune_plan = Some(result);
                     }
                 }
@@ -526,8 +568,7 @@ impl TaskHub {
                     }
                 }
                 WorkerResult::ProvisionPlan { generation, result } => {
-                    self.provision_single_flight.finish();
-                    if self.provision_generation.is_current(generation) {
+                    if self.provision_slot.finish(generation) {
                         updates.provision_plan = Some(result);
                     }
                 }
@@ -556,8 +597,7 @@ impl TaskHub {
                     }
                 }
                 WorkerResult::ProvisionExport { generation, result } => {
-                    self.provision_export_single_flight.finish();
-                    if self.provision_export_generation.is_current(generation) {
+                    if self.provision_export_slot.finish(generation) {
                         updates.provision_export = Some(result);
                     }
                 }
@@ -602,24 +642,30 @@ mod tests {
     #[test]
     fn refresh_while_scanning_keeps_one_latest_follow_up() {
         let mut hub = TaskHub::new();
-        assert!(hub.device_single_flight.try_start());
+        assert!(hub.device_slot.single_flight.try_start());
 
         hub.request_device_scan(PathBuf::from("first"));
         hub.request_device_scan(PathBuf::from("latest"));
 
-        assert_eq!(hub.pending_device_scan, Some(PathBuf::from("latest")));
-        assert!(hub.device_single_flight.is_running());
+        assert_eq!(
+            hub.device_slot
+                .pending_latest
+                .as_ref()
+                .map(|(_, path)| path.as_path()),
+            Some(std::path::Path::new("latest"))
+        );
+        assert!(hub.device_slot.single_flight.is_running());
     }
 
     #[test]
     fn verify_keeps_only_the_latest_queued_target() {
         let mut hub = TaskHub::new();
-        assert!(hub.verify_single_flight.try_start());
+        assert!(hub.verify_slot.single_flight.try_start());
         hub.request_backup_verify(PathBuf::from("one.bin"), PathBuf::from("backups"));
         hub.request_backup_verify(PathBuf::from("two.bin"), PathBuf::from("backups"));
         assert!(matches!(
-            hub.pending_verify,
-            Some((_, ref path, _)) if path == &PathBuf::from("two.bin")
+            hub.verify_slot.pending_latest.as_ref(),
+            Some((_, (path, _))) if path == &PathBuf::from("two.bin")
         ));
     }
 }

@@ -2,13 +2,16 @@ use super::*;
 
 impl TaskHub {
     pub fn request_backup_verify(&mut self, path: PathBuf, backup_dir: PathBuf) -> u64 {
-        let generation = self.verify_generation.begin();
-        if !self.verify_single_flight.try_start() {
-            self.pending_verify = Some((generation, path, backup_dir));
-            return generation;
+        match self.verify_slot.request_latest((path, backup_dir)) {
+            LatestRequest::Started {
+                generation,
+                request: (path, backup_dir),
+            } => {
+                self.start_backup_verify(generation, path, backup_dir);
+                generation
+            }
+            LatestRequest::Queued { generation } => generation,
         }
-        self.start_backup_verify(generation, path, backup_dir);
-        generation
     }
 
     pub(super) fn start_backup_verify(
@@ -67,10 +70,10 @@ impl TaskHub {
         targets: Vec<(PathBuf, String)>,
         backup_dir: PathBuf,
     ) -> Result<u64, &'static str> {
-        if !self.batch_delete_single_flight.try_start() {
-            return Err("已有批量删除计划正在生成");
-        }
-        let generation = self.batch_delete_generation.begin();
+        let generation = self
+            .batch_delete_slot
+            .try_begin()
+            .ok_or("已有批量删除计划正在生成")?;
         let tx = self.tx.clone();
         std::thread::spawn(move || {
             let result = catch_unwind(AssertUnwindSafe(|| {
@@ -141,10 +144,10 @@ impl TaskHub {
         backup_dir: PathBuf,
         keep: usize,
     ) -> Result<u64, &'static str> {
-        if !self.prune_single_flight.try_start() {
-            return Err("已有备份清理计划正在生成");
-        }
-        let generation = self.prune_generation.begin();
+        let generation = self
+            .prune_slot
+            .try_begin()
+            .ok_or("已有备份清理计划正在生成")?;
         let tx = self.tx.clone();
         std::thread::spawn(move || {
             let result = catch_unwind(AssertUnwindSafe(|| {

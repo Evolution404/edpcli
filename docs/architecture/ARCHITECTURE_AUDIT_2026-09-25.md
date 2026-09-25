@@ -1057,6 +1057,16 @@ application 返回结构化 `ProvisionReport/BackupReport/InspectReport`，CLI/T
 - 修复相关测试自身的 \`manual_contains\`、\`unnecessary_get_then_check\` 与 \`field_reassign_with_default\`；当前全目标 Clippy 已实际以 **exit 0 / 0 warnings** 通过。
 - 本阶段只治理测试基础设施与已废弃产品入口，没有修改 LBA0～12/LCE 协议语义、真实介质兼容解析或任何写盘安全门槛。
 
+## Phase D1：TUI 后台任务槽收敛
+
+**COMPLETE。**
+
+- `TaskHub` 原有 9 组 `GenerationGate + SingleFlightGate` 平铺字段已收敛为统一泛型 `TaskSlot<P>`；设备扫描、备份扫描和备份校验通过 `pending_latest` 只保留最新请求，全盘检查、制盘计划、备份清理、批量删除等拒绝并发的任务使用同一任务槽的 `try_begin/finish` 生命周期。
+- `GenerationGate` / `SingleFlightGate` 的既有公开行为保留，现有并发契约测试继续覆盖过期结果丢弃与单任务执行；新增源码契约锁定 `device_slot / backup_slot / verify_slot`，禁止重新长回成成对平铺字段。
+- 关键写盘 `active_operation + critical_worker` 完全保持独立，没有进入普通后台任务槽；终端异常时等待关键工作线程完成读回与回滚安全链的行为未改变。
+- 定向 `tui_suite` **161/161** 通过；全目标 Clippy **0 条警告**；包含 Clippy 的正式快速门禁 **退出码 0 / 约 41s**。
+- 本阶段只改变后台任务编排结构，不改变设备扫描、备份、全盘检查、制盘的业务结果，也不改变任何真实盘写入事务边界。
+
 ---
 
 # 第八部分：完成标准

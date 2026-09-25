@@ -6,10 +6,10 @@ impl TaskHub {
         source: crate::tui::state::AdvancedInspectSource,
         request: crate::application::inspect::AdvancedInspectRequest,
     ) -> Result<u64, &'static str> {
-        if !self.advanced_inspect_single_flight.try_start() {
-            return Err("已有高级检查正在执行");
-        }
-        let generation = self.advanced_inspect_generation.begin();
+        let generation = self
+            .advanced_inspect_slot
+            .try_begin()
+            .ok_or("已有高级检查正在执行")?;
         let tx = self.tx.clone();
         std::thread::spawn(move || {
             let result = catch_unwind(AssertUnwindSafe(|| match source {
@@ -62,10 +62,10 @@ impl TaskHub {
         lba: u64,
         mode: crate::application::inspect::AdvancedInspectMode,
     ) -> Result<u64, &'static str> {
-        if !self.advanced_inspect_sector_single_flight.try_start() {
-            return Err("已有扇区读取正在执行");
-        }
-        let generation = self.advanced_inspect_sector_generation.begin();
+        let generation = self
+            .advanced_inspect_sector_slot
+            .try_begin()
+            .ok_or("已有扇区读取正在执行")?;
         let tx = self.tx.clone();
         std::thread::spawn(move || {
             let request = crate::application::inspect::AdvancedInspectRequest {

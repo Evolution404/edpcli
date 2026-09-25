@@ -66,10 +66,10 @@ impl TaskHub {
         disk: u32,
         request: crate::application::provision::ProvisionRequest,
     ) -> Result<u64, &'static str> {
-        if !self.provision_single_flight.try_start() {
-            return Err("已有制盘计划正在生成");
-        }
-        let generation = self.provision_generation.begin();
+        let generation = self
+            .provision_slot
+            .try_begin()
+            .ok_or("已有制盘计划正在生成")?;
         let tx = self.tx.clone();
         std::thread::spawn(move || {
             let result = catch_unwind(AssertUnwindSafe(|| {
@@ -96,10 +96,10 @@ impl TaskHub {
         prepared: crate::application::provision::PreparedProvision,
         path: PathBuf,
     ) -> Result<u64, &'static str> {
-        if !self.provision_export_single_flight.try_start() {
-            return Err("已有制盘镜像正在导出");
-        }
-        let generation = self.provision_export_generation.begin();
+        let generation = self
+            .provision_export_slot
+            .try_begin()
+            .ok_or("已有制盘镜像正在导出")?;
         let tx = self.tx.clone();
         std::thread::spawn(move || {
             let result = catch_unwind(AssertUnwindSafe(|| {
