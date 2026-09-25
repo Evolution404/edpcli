@@ -73,3 +73,14 @@ fn compiler_cache_is_optional_locally_and_pinned_in_ci() {
     assert!(ci.contains("RUSTC_WRAPPER: \"sccache\""));
     assert!(ci.contains("CARGO_INCREMENTAL: \"0\""));
 }
+
+#[test]
+fn test_profile_benchmark_reuses_repository_runner_and_reports_distribution() {
+    let benchmark = read("scripts/test-benchmark.py");
+    assert!(benchmark.contains("test-full.py"));
+    assert!(benchmark.contains("ROOT / \"scripts\""));
+    assert!(benchmark.contains("statistics.median"));
+    assert!(benchmark.contains("--repeat"));
+    assert!(benchmark.contains("--json"));
+    assert!(benchmark.contains("[benchmark]"));
+}
