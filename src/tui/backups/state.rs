@@ -1,5 +1,26 @@
 use super::*;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BackupCreateChoice {
+    Metadata,
+    Deep,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BackupCreateChoiceState {
+    pub selected: usize,
+}
+
+impl BackupCreateChoiceState {
+    pub const fn choice(self) -> BackupCreateChoice {
+        if self.selected == 0 {
+            BackupCreateChoice::Metadata
+        } else {
+            BackupCreateChoice::Deep
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct BackupDeleteState {
     pub stage: WizardStage,
@@ -51,6 +72,45 @@ pub struct BackupPruneState {
 }
 
 impl AppState {
+    pub fn backup_create_choice(&self) -> Option<BackupCreateChoiceState> {
+        self.backup_create_choice
+    }
+
+    pub fn begin_backup_create_choice(&mut self) -> bool {
+        if self.critical_operation || self.wizard.is_some() {
+            self.set_notice("已有关键操作或向导正在执行。");
+            return false;
+        }
+        if self.selected_device().is_none() {
+            self.set_notice("创建备份需要先在设备页选定目标 U 盘，再进入备份页。");
+            return false;
+        }
+        self.backup_create_choice = Some(BackupCreateChoiceState { selected: 0 });
+        self.input_mode = InputMode::Normal;
+        true
+    }
+
+    pub fn move_backup_create_choice(&mut self, delta: isize) {
+        let Some(choice) = self.backup_create_choice.as_mut() else {
+            return;
+        };
+        choice.selected = if delta < 0 {
+            choice.selected.saturating_sub(delta.unsigned_abs())
+        } else {
+            choice.selected.saturating_add(delta as usize).min(1)
+        };
+    }
+
+    pub fn take_backup_create_choice(&mut self) -> Option<BackupCreateChoice> {
+        self.backup_create_choice
+            .take()
+            .map(BackupCreateChoiceState::choice)
+    }
+
+    pub fn cancel_backup_create_choice(&mut self) {
+        self.backup_create_choice = None;
+    }
+
     pub fn backup_delete(&self) -> Option<&BackupDeleteState> {
         self.backup_delete.as_ref()
     }
@@ -77,7 +137,7 @@ impl AppState {
             self.backup_selection.insert(path);
         }
         self.set_notice(format!(
-            "批量删除已勾选 {} 份备份；空格继续选择，X 生成删除计划。",
+            "批量删除已勾选 {} 份备份；空格继续选择，d 进入统一删除流程。",
             self.backup_selection.len()
         ));
     }
@@ -353,7 +413,7 @@ impl AppState {
             self.set_notice("关键操作仍在执行，完成前不能启动其他任务。".to_string());
             return false;
         }
-        self.input_mode = InputMode::Normal;
+        self.input_mode = InputMode::Confirm;
         self.backup_delete = Some(BackupDeleteState {
             stage: WizardStage::Confirm,
             path,

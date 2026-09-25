@@ -462,6 +462,77 @@ fn keymap_action_to_nav(action: keymap::TuiAction) -> Option<NavCommand> {
     })
 }
 
+fn dispatch_tui_action(
+    state: &mut AppState,
+    tasks: &mut TaskHub,
+    action: keymap::TuiAction,
+    backup_dir: &std::path::Path,
+    viewport_height: usize,
+) -> StateEffect {
+    use keymap::TuiAction;
+
+    if let Some(command) = keymap_action_to_nav(action) {
+        return dispatch_nav_command(state, tasks, command, backup_dir, viewport_height);
+    }
+
+    match action {
+        TuiAction::WorkspaceInspect => dispatch_nav_command(
+            state,
+            tasks,
+            NavCommand::OpenAdvancedInspect,
+            backup_dir,
+            viewport_height,
+        ),
+        TuiAction::Activate => match state.workspace() {
+            state::Workspace::Devices => {
+                if let Err(message) = state.begin_provision_for_selected_device() {
+                    state.set_notice(message);
+                }
+                StateEffect::None
+            }
+            state::Workspace::Backups => dispatch_nav_command(
+                state,
+                tasks,
+                NavCommand::OpenInspect,
+                backup_dir,
+                viewport_height,
+            ),
+            state::Workspace::Provision => StateEffect::None,
+        },
+        TuiAction::Toggle if state.workspace() == state::Workspace::Backups => {
+            dispatch_nav_command(
+                state,
+                tasks,
+                NavCommand::ToggleBackupSelection,
+                backup_dir,
+                viewport_height,
+            )
+        }
+        TuiAction::ViewOrVerify if state.workspace() == state::Workspace::Backups => {
+            dispatch_nav_command(
+                state,
+                tasks,
+                NavCommand::VerifyBackup,
+                backup_dir,
+                viewport_height,
+            )
+        }
+        TuiAction::Delete if state.workspace() == state::Workspace::Backups => {
+            let command = if state.backup_selection_count() > 0 {
+                NavCommand::BeginBackupBatchDelete
+            } else {
+                NavCommand::BeginBackupDelete
+            };
+            dispatch_nav_command(state, tasks, command, backup_dir, viewport_height)
+        }
+        TuiAction::Add if state.workspace() == state::Workspace::Backups => {
+            state.begin_backup_create_choice();
+            StateEffect::None
+        }
+        _ => StateEffect::None,
+    }
+}
+
 fn workspace_switch_command(key: &ct_event::KeyEvent) -> Option<NavCommand> {
     if key.modifiers.contains(ct_event::KeyModifiers::CONTROL) {
         return None;
@@ -1231,6 +1302,44 @@ fn run_loop(resume: Option<state::WriteIntent>) -> io::Result<LoopExit> {
                             }
                         }
                     }
+                    if state.backup_create_choice().is_some() {
+                        if let Some(action) = keys.map(state::InputMode::Normal, key) {
+                            match action {
+                                keymap::TuiAction::MoveUp => {
+                                    state.move_backup_create_choice(-1);
+                                }
+                                keymap::TuiAction::MoveDown => {
+                                    state.move_backup_create_choice(1);
+                                }
+                                keymap::TuiAction::Activate => {
+                                    if let Some(choice) = state.take_backup_create_choice() {
+                                        let command = match choice {
+                                            state::BackupCreateChoice::Metadata => {
+                                                NavCommand::BeginBackupCreate
+                                            }
+                                            state::BackupCreateChoice::Deep => {
+                                                NavCommand::BeginBackupCreateDeep
+                                            }
+                                        };
+                                        let viewport_height =
+                                            session.terminal.size()?.height.saturating_sub(9)
+                                                as usize;
+                                        let _ = dispatch_nav_command(
+                                            &mut state,
+                                            &mut tasks,
+                                            command,
+                                            &backup_dir,
+                                            viewport_height,
+                                        );
+                                    }
+                                }
+                                keymap::TuiAction::Back => state.cancel_backup_create_choice(),
+                                _ => {}
+                            }
+                        }
+                        continue;
+                    }
+
                     if let Some(stage) = state.backup_batch_delete().map(|batch| batch.stage) {
                         use state::BackupBatchDeleteStage;
                         match stage {
@@ -1537,29 +1646,18 @@ fn run_loop(resume: Option<state::WriteIntent>) -> io::Result<LoopExit> {
                         }
                     }
 
-                    if state.workspace() == state::Workspace::Devices
-                        && key.code == ct_event::KeyCode::Enter
-                    {
-                        if let Err(message) = state.begin_provision_for_selected_device() {
-                            state.set_notice(message);
-                        }
-                        continue;
-                    }
-
                     if let Some(action) = keys.map(state.input_mode(), key) {
-                        if let Some(command) = keymap_action_to_nav(action) {
-                            let viewport_height =
-                                session.terminal.size()?.height.saturating_sub(9) as usize;
-                            match dispatch_nav_command(
-                                &mut state,
-                                &mut tasks,
-                                command,
-                                &backup_dir,
-                                viewport_height,
-                            ) {
-                                StateEffect::ExitRequested => break,
-                                StateEffect::ExitDeferred | StateEffect::None => {}
-                            }
+                        let viewport_height =
+                            session.terminal.size()?.height.saturating_sub(9) as usize;
+                        match dispatch_tui_action(
+                            &mut state,
+                            &mut tasks,
+                            action,
+                            &backup_dir,
+                            viewport_height,
+                        ) {
+                            StateEffect::ExitRequested => break,
+                            StateEffect::ExitDeferred | StateEffect::None => {}
                         }
                     }
                 }

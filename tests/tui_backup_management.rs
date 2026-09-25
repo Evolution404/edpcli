@@ -30,6 +30,32 @@ fn backup_workspace_has_explicit_verify_and_delete_actions() {
 }
 
 #[test]
+fn backup_workspace_uses_one_create_modal_and_removes_legacy_action_keys() {
+    let keymap = include_str!("../src/tui/keymap.rs");
+    for legacy in [
+        "KeyCode::Char('D')",
+        "KeyCode::Char('X')",
+        "KeyCode::Char('I')",
+        "KeyCode::Char('B')",
+        "KeyCode::Char('R')",
+        "KeyCode::Char('P')",
+    ] {
+        assert!(
+            !keymap.contains(legacy),
+            "legacy backup binding must stay removed: {legacy}"
+        );
+    }
+
+    let state = include_str!("../src/tui/backups/state.rs");
+    let render = include_str!("../src/tui/backups/render.rs");
+    assert!(state.contains("begin_backup_create_choice"));
+    assert!(state.contains("BackupCreateChoice::Metadata"));
+    assert!(state.contains("BackupCreateChoice::Deep"));
+    assert!(render.contains("(\"Metadata\","));
+    assert!(render.contains("(\"Deep\","));
+}
+
+#[test]
 fn backup_delete_uses_shared_application_service_not_direct_filesystem_removal() {
     let task = include_str!("../src/tui/backups/task.rs");
     assert!(task.contains("delete_backup_exact"));

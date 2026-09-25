@@ -1,5 +1,61 @@
 use super::*;
 
+pub(super) fn draw_backup_create_choice(
+    frame: &mut Frame,
+    area: ratatui::layout::Rect,
+    state: &AppState,
+) {
+    let Some(choice) = state.backup_create_choice() else {
+        return;
+    };
+    let options = [
+        ("Metadata", "协议/分区元数据与盘尾证据，速度快"),
+        ("Deep", "进一步采集可验证分区/文件系统证据，耗时更长"),
+    ];
+    let mut lines = vec![
+        Line::from(Span::styled("创建备份", accent())),
+        Line::from(""),
+    ];
+    for (index, (name, description)) in options.into_iter().enumerate() {
+        let active = index == choice.selected;
+        lines.push(Line::from(vec![
+            Span::styled(
+                if active { "▌ " } else { "  " },
+                if active {
+                    selection_marker()
+                } else {
+                    Style::default()
+                },
+            ),
+            Span::styled(name, if active { selected() } else { Style::default() }),
+            Span::raw("  "),
+            Span::styled(description, muted()),
+        ]));
+    }
+    lines.extend([
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("j/k", accent()),
+            Span::raw(" 选择   "),
+            Span::styled("Enter/o", success()),
+            Span::raw(" 确认   "),
+            Span::styled("Esc/q", warning()),
+            Span::raw(" 取消"),
+        ]),
+    ]);
+    frame.render_widget(
+        Paragraph::new(lines)
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .border_style(focused_panel())
+                    .title("备份类型"),
+            )
+            .wrap(Wrap { trim: true }),
+        area,
+    );
+}
+
 pub(super) fn draw_backups(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState) {
     let (list_area, sidebar) = workspace_sidebar_layout(area);
     let visible_count = state.visible_backup_count();

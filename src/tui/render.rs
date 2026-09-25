@@ -26,8 +26,8 @@ mod inspect_render;
 mod provision_render;
 
 use backups_render::{
-    draw_backup_batch_delete, draw_backup_delete, draw_backup_prune, draw_backups,
-    write_progress_text,
+    draw_backup_batch_delete, draw_backup_create_choice, draw_backup_delete, draw_backup_prune,
+    draw_backups, write_progress_text,
 };
 use devices_render::draw_devices;
 use inspect_render::{draw_advanced_inspect, draw_inspect};
@@ -539,6 +539,7 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
         || state.inspect_data().is_some()
         || state.backup_delete().is_some()
         || state.backup_batch_delete().is_some()
+        || state.backup_create_choice().is_some()
         || state.backup_prune().is_some()
         || state.wizard().is_some()
         || matches!(state.input_mode(), InputMode::Command | InputMode::Help);
@@ -557,6 +558,8 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
         draw_advanced_inspect(frame, content_area, state);
     } else if state.inspect_data().is_some() {
         draw_inspect(frame, content_area, state);
+    } else if state.backup_create_choice().is_some() {
+        draw_backup_create_choice(frame, content_area, state);
     } else if state.backup_delete().is_some() {
         draw_backup_delete(frame, content_area, state);
     } else if state.backup_batch_delete().is_some() {
