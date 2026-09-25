@@ -1562,3 +1562,723 @@ o 展开  Enter查看  g 跳转  / 搜索  Tab面板  ? 帮助
 - 真实盘只读验收已取得实盘证据：2026-09-25 对 `/dev/disk4`（8.1GB 外置物理 USB，15,728,640 × 512B）使用独立只读 raw-sector helper 成功读取 LBA0～12、LCE 6 sectors、三个真实分区起始/相邻 sector、未知 LBA20 与盘尾 16 sectors；未执行 mount/unmount/eject/provision/write。LBA0～12 首次/末次物理读取均为 6656B，SHA-256 同为 `55438b4b0fc04eb8e0b323d49807eea96a56f776f4cc04a3ebbaf05ed9c2c95b`，`cmp` byte-for-byte IDENTICAL，证明本轮测试未改写主协议区。
 - 真实盘生产解析链验证通过：`SysRunner + identify()` 从真实 LBA7 与硬件探测得到 `disk&ven_aigo&prod_u335&rev_1100`，VID/PID=`3535/6300`，容量与物理盘一致；生产 `decode_sector()` 对 LBA0、4、7、11、12 分别进入 canonical `lba0/lba4/lba7/lba11/lba12`，其中 LBA7=rolling XOR、LBA11=DRKB+PDKB、LBA12=A6B0 512B，均未回退 RAW。真实 `InspectDiskContext` 解出 3 个 partition 与 LCE：type1 从 LBA63 开始并识别为 FAT16 明文；type2 从 LBA20480 开始、type4 从 LBA13627392 开始，两者均 `SM4-ECB + FileKeyCRC=PASS`，解密后识别为 exFAT；LCE 位于 LBA15725843～15725848，6/6 sectors 均按 EDPSECDISK zero8 + 64-bit physical-offset tweak 解码；未知 LBA20 明确 fail-closed。
 - 仍需区分的一层是 CLI 自身的 raw-device 二次提权启动：当前非交互 Runner 中 `edpcli inspect --disk 4` 会重新执行 `sudo`，该 sudo 会话不能复用外部 helper 的认证票据，因此 CLI 进程级 raw-device 入口尚未直接跑通。这个限制不影响上述“真实物理扇区读取 + 当前生产 reader/context/decoder 语义”验收结果，但在获得可供 Runner 复用的受限 raw-device 权限前，不把“CLI 自身 sudo re-exec HIL”写成已通过。
+
+---
+
+## 10. TUI 现代视觉与 Vim 键位统一重构计划（2026-09-25）
+
+本节是后续 TUI 视觉与快捷键实现的**全局事实源**。第 9 节中已经完成的 Inspect 功能、数据模型、只读边界和验收结论继续有效；但第 9.16、9.17 以及各历史实施状态中涉及 `g`、`o`、`Tab`、`r/d/m` 等具体按键的描述仅代表当时实现。**凡与本节冲突的视觉和键位规则，一律以本节为准。**
+
+本节只调整 TUI 表现层和输入映射，不改变 LBA0～12/LCE 已闭环协议语义，不改变 CLI 业务语义，也不得降低 system-disk guard、整盘确认、写前备份、卸载/锁卷、reopen identity、事务写入、readback、rollback 等写盘安全门槛。
+
+### 10.1 总体目标
+
+TUI 从当前“高饱和 ANSI 基础色 + 页面局部硬编码快捷键”重构为：
+
+1. 支持现代终端 24-bit TrueColor，默认采用低饱和深色主题；
+2. 不使用纯黑/纯白和高饱和 Cyan/Magenta/Green/Yellow/Red 作为大面积常规 UI；
+3. 主色只有一种低饱和蓝青色，成功/警告/危险只表达语义，不承担装饰；
+4. Selection、Focus、Panel、Input、Status 使用统一视觉层级；
+5. 页面代码只表达语义 token，不直接决定 RGB；
+6. 快捷键采用统一 Vim 交互语言，形成稳定肌肉记忆；
+7. 明确 Normal / Insert / Search / Command / Confirm 输入状态，文本编辑时快捷键不得抢字符；
+8. Workspace、Panel、List、Tree、Form、Hex、Search 使用一致的导航语义；
+9. 所有快捷键由统一 keymap/action 层解释，禁止 workspace 在 event loop 中私自增加冲突的 `KeyCode::Char(...)`；
+10. 帮助栏只显示当前上下文最重要的 4～6 个动作，完整映射统一由 `?` 展示。
+
+### 10.2 现代低饱和 TrueColor 视觉系统
+
+#### 10.2.1 默认 Dark Palette
+
+TrueColor 默认主题固定从下面的语义调色板起步，后续如需微调必须保持相同层级关系，不重新引入高饱和基础色：
+
+| 语义 | RGB | 用途 |
+| --- | --- | --- |
+| Background | `#11161C` | 应用背景 |
+| Surface | `#171D24` | 普通面板/输入区域 |
+| SurfaceActive | `#1D2530` | 当前行、当前区域 |
+| Selection | `#263442` | 低对比选中背景 |
+| Border | `#303945` | 普通边框 |
+| BorderFocus | `#58758D` | 当前焦点面板边框 |
+| TextPrimary | `#D7DCE2` | 正文 |
+| TextSecondary | `#9BA7B3` | 次级信息 |
+| TextMuted | `#687481` | hint/disabled/unknown |
+| Accent | `#78A9C1` | 唯一主强调色 |
+| AccentSoft | `#52758A` | 次级强调 |
+| Success | `#7FA68A` | 成功 |
+| Warning | `#B49A68` | 注意 |
+| Danger | `#B77C7C` | 错误/危险 |
+| Violet | `#9687A8` | 少量第二语义色 |
+
+要求：
+
+- 普通正文禁止 `Color::White`，背景禁止 `Color::Black` 作为设计目标；
+- 常规选中态禁止“黑字 + Cyan 大色块”；
+- `Success/Warning/Danger` 只在需要表达状态时出现；
+- 不因为 mode、workspace、panel 不同而随意增加新 hue；
+- 色彩差异不足以单独承载关键含义，仍需文字、符号或位置共同表达。
+
+#### 10.2.2 Selection 与 Focus
+
+当前选中行改为“低亮度背景 + 左侧 Accent 标记 + 正常文本”，例如：
+
+```text
+  SanDisk Ultra              disk5    58.4 GiB
+▌ Kingston DataTraveler      disk6    29.1 GiB
+  Generic Flash Disk         disk7    14.8 GiB
+```
+
+规则：
+
+- Selection 背景只覆盖真实 row/content，不延伸到 panel padding 或行尾；
+- `▌` 仅表示当前 selection，不替代全局 focus marker 语义；
+- Panel focus 主要通过 `BorderFocus` 和标题 Accent 表达；
+- 当前可编辑输入框通过 SurfaceActive + BorderFocus 表达，不把 label 一起高亮；
+- disabled 使用 TextMuted，不使用高饱和颜色。
+
+#### 10.2.3 Panel 与边框
+
+减少“所有内容都套框”的视觉噪声：
+
+- 顶层页面依靠留白、分组标题和文本层级组织；
+- 真正独立的区域才使用边框；
+- 非焦点 panel 使用 `Border`；
+- 当前 panel 使用 `BorderFocus`；
+- 标题默认 TextSecondary，焦点标题才使用 Accent；
+- 不允许多个相邻 panel 同时使用高亮边框。
+
+#### 10.2.4 Tabs
+
+Tabs 不再使用高亮大背景块。建议：
+
+```text
+ Devices    Backups    Provision    Inspect
+                       ─────────
+```
+
+当前 Tab：
+
+- Accent 前景；
+- Bold；
+- 可配合短下划线/细分隔；
+- 只使用微弱 SurfaceActive，不使用 Cyan/Magenta 高饱和背景。
+
+#### 10.2.5 Provision 容量条
+
+容量布局仍需要颜色区分不同区域，但全部改为低饱和语义色：
+
+| 区域 | RGB |
+| --- | --- |
+| Plain | `#7693AE` |
+| Boot | `#6E9CA5` |
+| Share | `#789782` |
+| Encrypt | `#8F819E` |
+| Compatibility | `#A08D68` |
+| Free | `#46515C` |
+
+要求：
+
+- 禁止继续直接使用 `LightBlue/Cyan/Green/Magenta/Yellow`；
+- legend、bar、detail 使用同一 token；
+- 保持 sector 为精确真相，视觉颜色不影响几何计算；
+- 空闲区域必须比有效分区更弱，不抢焦点。
+
+#### 10.2.6 状态颜色
+
+普通状态默认 TextSecondary，而不是“一切 Ready 都绿色”：
+
+```text
+Status    Ready
+Mode      mode1
+Device    disk5
+```
+
+只有明确结果才使用状态色：
+
+```text
+✓ Backup verified
+! Partition table will be overwritten
+```
+
+危险提示不默认整行红底；只对符号和关键短语使用 Danger。
+
+#### 10.2.7 动画
+
+`animation.rs` 不再维护独立的 Green/Yellow/Red/Cyan/Magenta 体系。普通动画主要依靠同一 hue 的亮度变化：
+
+| 动画语义 | RGB |
+| --- | --- |
+| Dim | `#46515C` |
+| Accent | `#6F91A5` |
+| Core | `#8CB1C3` |
+| Guard | `#B77C7C` |
+
+正常动画禁止不断切换 hue；只有真实 Guard/Error 才使用 Danger。
+
+#### 10.2.8 TrueColor 能力与回退
+
+新增主题能力层，默认 `Auto`：
+
+```text
+Auto
+ ├─ 24-bit terminal -> TrueColorDark
+ ├─ ANSI256 terminal -> Ansi256Dark
+ └─ fallback         -> Ansi16
+```
+
+实现要求：
+
+- TrueColor 使用 `Color::Rgb(r,g,b)`；
+- 可利用 `COLORTERM=truecolor/24bit` 及终端能力信息判断；
+- 检测失败必须安全回退，不影响交互功能；
+- ANSI256/ANSI16 是视觉降级，不得改变语义；
+- 允许通过环境变量显式覆盖，例如 `EDPCLI_TUI_THEME=dark|ansi256|ansi16`；
+- 第一阶段只要求高质量 Dark theme，不为“完整 light theme”扩大范围。
+
+### 10.3 Theme 架构
+
+新增或收敛到：
+
+```text
+src/tui/theme.rs
+```
+
+建议核心结构：
+
+```rust
+struct Palette {
+    background: Color,
+    surface: Color,
+    surface_active: Color,
+    selection: Color,
+    border: Color,
+    border_focus: Color,
+    text_primary: Color,
+    text_secondary: Color,
+    text_muted: Color,
+    accent: Color,
+    accent_soft: Color,
+    success: Color,
+    warning: Color,
+    danger: Color,
+    violet: Color,
+}
+```
+
+业务页面只调用语义接口，例如：
+
+```text
+theme.text()
+theme.secondary()
+theme.muted()
+theme.selection()
+theme.panel()
+theme.focused_panel()
+theme.input()
+theme.input_focused()
+theme.success()
+theme.warning()
+theme.danger()
+theme.partition(kind)
+theme.animation(kind)
+```
+
+硬规则：
+
+- `src/tui/theme.rs` 是 TUI 颜色单一事实源；
+- workspace render 禁止新增 `Color::Cyan/Red/Green/Magenta/Yellow/Light*` 等直接业务颜色；
+- 已有 `ThemeToken` 可以迁移/扩展，但不能形成第二套 palette；
+- Inspect、Provision、Backup、Devices、动画全部复用同一 Theme。
+
+### 10.4 Vim 风格统一输入模型
+
+#### 10.4.1 输入模式
+
+TUI 至少明确以下输入状态：
+
+```text
+Normal
+Insert
+Search
+Command
+Confirm
+```
+
+语义：
+
+- Normal：导航、打开、选择、执行动作；
+- Insert：编辑表单字段；
+- Search：输入搜索条件；
+- Command：输入 `:` 命令；
+- Confirm：确认/取消当前动作。
+
+**Insert/Search/Command 中，字母必须首先作为文本输入，不允许 Normal 快捷键抢占。**
+
+`Esc` 始终只退出当前最内层 mode/modal，不跨层级跳跃。
+
+#### 10.4.2 全局导航基础
+
+所有列表、树和可滚动选择区域统一：
+
+| 动作 | 主键 | 辅助键 |
+| --- | --- | --- |
+| 下一项 | `j` | `↓` |
+| 上一项 | `k` | `↑` |
+| 左/折叠/父级 | `h` | `←`（仅非文本/非 Hex） |
+| 右/展开/子级 | `l` | `→`（仅非文本/非 Hex） |
+| 顶部 | `gg` | `Home` 可作为 alias |
+| 底部 | `G` | `End` 可作为 alias |
+| 半页上 | `Ctrl-u` | - |
+| 半页下 | `Ctrl-d` | - |
+| 打开/默认动作 | `Enter` / `o` | - |
+| 返回 | `Esc` / `q` | - |
+| 帮助 | `?` | - |
+| 命令 | `:` | - |
+
+`h/l` **不得再用于切换 Workspace**。
+
+#### 10.4.3 Workspace 与 Panel 使用 Vim 原生类比
+
+Workspace 对应 Vim tab：
+
+| 动作 | 键 |
+| --- | --- |
+| 下一个 Workspace | `gt` |
+| 上一个 Workspace | `gT` |
+| Devices | `gd` |
+| Backups | `gb` |
+| Provision | `gp` |
+| Inspect | `gi` |
+
+Panel 对应 Vim window：
+
+| 动作 | 键 |
+| --- | --- |
+| 左 Panel | `Ctrl-w h` |
+| 下 Panel | `Ctrl-w j` |
+| 上 Panel | `Ctrl-w k` |
+| 右 Panel | `Ctrl-w l` |
+| 下一 Panel | `Ctrl-w w` |
+| 上一 Panel | `Ctrl-w W` |
+
+可保留：
+
+- `Tab` = 下一 Panel；
+- `Shift+Tab` = 上一 Panel；
+
+但 Tab/Shift+Tab 不再切 Workspace。
+
+#### 10.4.4 `g` 是统一导航前缀
+
+`g` 不允许再作为按一次即立刻执行的单键动作。统一解析：
+
+```text
+gg      top
+gt      next workspace
+gT      previous workspace
+gd      Devices
+gb      Backups
+gp      Provision
+gi      Inspect
+gl      Inspect: go to LBA/absolute byte offset
+```
+
+因此当前 Inspect “单按 `g` 打开 Jump”必须迁移为 `gl`。无效或超时 prefix 应取消 pending 状态，不触发其它动作。
+
+#### 10.4.5 搜索
+
+所有 Workspace 统一：
+
+```text
+/       进入 Search
+n       下一个匹配
+N       上一个匹配
+Enter   确认搜索
+Esc     退出搜索输入
+```
+
+进入 Search 后按 Insert-like 文本输入处理。
+
+#### 10.4.6 表单与 Insert mode
+
+Provision 等表单在 Normal mode：
+
+```text
+j/k       上下字段
+h/l       枚举/选项左移右移
+Space     toggle
+i         编辑当前文本/数字字段
+Enter     默认动作；可编辑字段可进入编辑
+f         填满剩余容量
+Esc/q     返回
+```
+
+进入 Insert：
+
+```text
+-- INSERT --
+←/→        文本光标
+Home/End   首尾
+Backspace
+Delete
+Esc        回 Normal
+```
+
+硬规则：
+
+- Insert 中 `h/j/k/l/g/d/r/f` 等都是普通字符；
+- 数字字段继续由 `ProvisionInputPolicy` 拒绝非法字符；
+- 输入框内 `←/→` 永远只移动文本光标，不切 Workspace/Panel；
+- 不再通过“当前字段是否 editable”决定左右箭头是否突然切页面。
+
+#### 10.4.7 通用动作语义
+
+| 动作 | 键 | 规则 |
+| --- | --- | --- |
+| Refresh | `r` | 所有 workspace 一致 |
+| Select | `Space` | 多选/toggle |
+| Delete | `d` | 当前或 selected；必须进入确认 |
+| Yank | `y` | 当前语义值/byte |
+| Yank raw/full | `Y` | 更完整表示 |
+| Help | `?` | 当前上下文完整帮助 |
+| Command | `:` | 低频动作入口 |
+
+禁止某页面私自把 `r` 改成 view mode、把 `d` 改成 decode 等其它含义。
+
+### 10.5 各 Workspace 键位
+
+#### 10.5.1 Devices
+
+```text
+j/k       移动
+gg/G      首尾
+Enter/o   详情/默认打开
+r         重新扫描
+gi        去 Inspect
+gp        去 Provision
+/ n N     搜索
+?         帮助
+q/Esc     返回/退出
+```
+
+#### 10.5.2 Backups
+
+```text
+j/k       移动
+gg/G      首尾
+Space     选中/取消
+Enter/o   查看详情
+a         创建备份，类型在 modal 中选择 Metadata/Deep
+v         Verify
+d         删除当前或已选
+r         刷新 catalog
+/ n N     搜索
+?         帮助
+q/Esc     返回
+```
+
+删除单条/批量不再使用 `D/X` 两套按键；`d` 根据 selection 自动决定对象，并进入统一确认。
+
+#### 10.5.3 Provision
+
+Normal：
+
+```text
+j/k       字段移动
+gg/G      第一/最后字段
+h/l       修改枚举/选项
+Space     toggle
+i         编辑
+f         fill remaining capacity
+a         添加 Plain partition（允许时）
+d         删除当前 Plain partition（允许时）
+p         plan/preview
+w         write
+e         export
+?         帮助
+Esc/q     返回
+```
+
+`w` 只触发进入既有写盘安全流程，不能绕过 whole-disk confirmation、backup、lock、identity、transaction/readback/rollback。
+
+#### 10.5.4 Inspect Tree
+
+```text
+j/k       上下节点
+h         折叠；已折叠时去 parent
+l         展开；已展开时可进入 child
+o         toggle alias
+Enter     打开/查看
+gg/G      首尾
+Ctrl-u/d  半页
+/ n N     搜索
+gl        Jump LBA / absolute byte offset
+Ctrl-w*   Panel focus
+?         帮助
+Esc/q     返回
+```
+
+树的主折叠/展开语义由 `h/l` 承担，`o` 仅作为兼容/可发现 alias，不再是唯一主键。
+
+#### 10.5.5 Sector Inspector / Hex
+
+```text
+h/l       byte -1 / +1
+j/k       byte -16 / +16
+0         当前行首
+$         当前行尾
+gg        sector 首 byte
+G         sector 末 byte
+PageUp    上一 sector
+PageDown  下一 sector
+Ctrl-u/d  详情/viewport 半页滚动
+Space     field/bit 展示 toggle
+v         Raw / Decode / Mixed 循环
+y         yank 当前 byte/field
+Y         yank 当前 field raw / sector full raw
+/ n N     搜索
+Esc/q     回 Tree
+```
+
+当前 `r/d/m` 切 Raw/Decode/Mixed 的局部映射废止，避免与全局 refresh/delete 冲突，由 `v` 统一循环 view mode。
+
+### 10.6 Confirm 统一规则
+
+普通确认 modal：
+
+```text
+y       confirm
+n       cancel
+Esc     cancel
+```
+
+但真实 destructive disk write 的确认强度继续由现有安全模型决定；不得为了 Vim 风格把高风险整盘确认简化成单个 `y`。
+
+### 10.7 Command Palette
+
+`:` 作为低频动作入口，第一阶段至少支持可发现的 command list，不要求一次实现完整 Vim Ex。
+
+建议逐步支持：
+
+```text
+:q
+:quit
+:devices
+:backups
+:provision
+:inspect
+:refresh
+:help
+```
+
+低频的 prune、restore、export 等功能优先进入 command palette 或上下文 modal，不为了每个动作占用顶层单字母。
+
+### 10.8 Keymap 架构
+
+新增：
+
+```text
+src/tui/keymap.rs
+```
+
+键盘事件统一转换为 UI-neutral action：
+
+```rust
+enum TuiAction {
+    MoveUp,
+    MoveDown,
+    MoveLeft,
+    MoveRight,
+    Top,
+    Bottom,
+    HalfPageUp,
+    HalfPageDown,
+    Open,
+    Back,
+    Edit,
+    Select,
+    Search,
+    SearchNext,
+    SearchPrevious,
+    WorkspaceNext,
+    WorkspacePrevious,
+    Workspace(Workspace),
+    PanelLeft,
+    PanelDown,
+    PanelUp,
+    PanelRight,
+    PanelNext,
+    PanelPrevious,
+    Refresh,
+    Delete,
+    Yank,
+    Help,
+    Command,
+}
+```
+
+数据流：
+
+```text
+KeyEvent
+   ↓
+KeyMap(mode + pending prefix)
+   ↓
+TuiAction
+   ↓
+Workspace handler
+```
+
+硬规则：
+
+- `src/tui/event.rs` / `src/tui/mod.rs` 不再作为大量业务字母键的散落事实源；
+- workspace handler 消费 `TuiAction`，只处理本 workspace 是否支持该 action；
+- Insert/Search/Command 优先消费文本；
+- `g` 与 `Ctrl-w` 是有状态 prefix，由 keymap 统一管理；
+- 新快捷键必须先登记 keymap + help registry + tests，不允许页面私加；
+- Help/footer 从同一 key binding metadata 生成或校验，避免文案与行为漂移。
+
+### 10.9 底部帮助栏
+
+底部不展示整张键表，只显示当前上下文 4～6 个高频动作。
+
+普通列表：
+
+```text
+j/k Move   Enter Open   / Search   r Refresh   ? Help
+```
+
+Inspect Tree：
+
+```text
+j/k Move   h/l Fold   Enter Open   / Search   gl Goto   ? Help
+```
+
+Insert：
+
+```text
+-- INSERT --   Esc Done   ←/→ Cursor
+```
+
+完整帮助统一由 `?` 打开，内容按当前 mode/workspace 分组显示。
+
+### 10.10 实施阶段
+
+#### Phase T0：基线与冲突清单
+
+- 测试先行锁住现有 TUI 业务行为；
+- 全仓统计 `src/tui/**` 的直接 `Color::*`；
+- 全仓统计 `KeyCode::Char`、Tab、Left/Right、PageUp/PageDown；
+- 生成“现有键 → 当前语义 → 新键”迁移表；
+- 明确历史 shortcut 测试哪些需要更新，不能通过删除测试逃避冲突。
+
+#### Phase T1：Theme 基础层
+
+- 新增/重构 `theme.rs`；
+- 实现 TrueColorDark + ANSI256 + ANSI16 fallback；
+- 建立 Palette + semantic style；
+- 迁移全局 Selection/Focus/Input/Panel/Tabs；
+- 增加静态门禁，业务 workspace 不得新增高饱和直接 `Color::*`。
+
+#### Phase T2：视觉 Workspace 收口
+
+- Devices；
+- Backups；
+- Provision；
+- Inspect；
+- animation；
+- Provision capacity bar；
+- 统一 footer/help/modal。
+
+每迁移一个 workspace 都要有 buffer/snapshot 或等价渲染回归测试。
+
+#### Phase T3：Keymap / Mode 架构
+
+- 新增 `keymap.rs`；
+- `Normal/Insert/Search/Command/Confirm`；
+- `g` prefix；
+- `Ctrl-w` prefix；
+- 全局动作 enum；
+- help registry 同源；
+- 先写键位契约测试再迁移 workspace。
+
+#### Phase T4：Workspace Vim 迁移
+
+依次迁移：
+
+1. Devices/Backups；
+2. Provision 表单与 Insert；
+3. Inspect Tree/Panel；
+4. Sector Inspector/Hex；
+5. Search/Command/Confirm。
+
+每个阶段删除对应旧分支，不长期保留“双键盘状态机”。
+
+#### Phase T5：冲突清理与 UX 收口
+
+- 删除旧 `g=Jump` 单键；
+- 删除 `r/d/m=Raw/Decode/Mixed`；
+- 删除 `h/l/Left/Right=Workspace`；
+- 删除 Backup `D/X` 双删除；
+- 删除 `i/I` 作为 Inspect 打开动作，`i` 回归 Insert；
+- Tab/Shift+Tab 只作为 Panel alias；
+- 更新 README/USAGE/Help/本文件；
+- 审计所有 footer 文案与实际 keymap 一致。
+
+### 10.11 回归门禁
+
+至少增加以下自动门禁：
+
+1. TrueColor palette 的 RGB 值稳定；
+2. ANSI256/ANSI16 fallback 可创建且不 panic；
+3. workspace render 不直接新增高饱和 ANSI 业务色；
+4. Selection 不再使用 Black-on-Cyan；
+5. selected 背景不铺到 row padding；
+6. focus panel 与 non-focus panel 使用不同语义 token；
+7. Provision bar 六种区域使用 Theme partition token；
+8. animation 不再私有硬编码 Green/Yellow/Red/Cyan/Magenta；
+9. Normal 下 `j/k/h/l` 语义统一；
+10. Insert 下 `h/j/k/l/g/d/r/f` 被作为文本字符；
+11. 输入框 Left/Right 只移动光标；
+12. `gt/gT` 只切 Workspace；
+13. `gd/gb/gp/gi` 精确直达对应 Workspace；
+14. 单按 `g` 不触发 Jump；
+15. `gl` 才进入 Inspect Jump；
+16. `Ctrl-w h/j/k/l/w/W` 只改变 Panel focus；
+17. Tab/Shift+Tab 不切 Workspace；
+18. `gg/G/Ctrl-u/Ctrl-d` 在列表/树语义一致；
+19. `/ n N` 在支持搜索的 workspace 一致；
+20. `r` 不再被页面重定义为 view mode；
+21. `d` 删除必须进入确认；
+22. Sector Inspector `v` 正确循环 Raw/Decode/Mixed；
+23. `?` 展示的绑定与实际 keymap 同源或有契约测试；
+24. 40×10、60×18、80×24、120×36 典型终端尺寸不出现布局回退；
+25. 窄屏切 panel 不丢 selection/cursor；
+26. Theme/keymap 重构不改变协议 parse、ProvisionRequest、write transaction、安全 guard。
+
+### 10.12 完成标准
+
+只有同时满足以下条件才算 TUI 视觉与快捷键重构完成：
+
+1. 默认现代终端使用低饱和 24-bit TrueColor；
+2. 不支持 TrueColor 时自动回退且功能完整；
+3. 全 TUI 颜色来自统一 Theme；
+4. Cyan/Magenta/Green/Yellow/Red 不再作为 workspace 私有高饱和装饰色；
+5. Selection、Focus、Input、Tabs、Modal、Status 视觉一致；
+6. Devices/Backups/Provision/Inspect/animation 使用同一设计语言；
+7. Normal/Insert/Search/Command/Confirm 模式明确；
+8. `gt/gT` 与 `Ctrl-w*` 分别统一 Workspace/Panel；
+9. `h/l` 不再切 Workspace；
+10. 输入框方向键永不切 Tab/Panel/Workspace；
+11. `g` 统一为 prefix，Inspect Jump 迁移为 `gl`；
+12. 搜索、列表导航、树导航、删除、刷新、帮助语义全局一致；
+13. Sector Inspector 不再用 `r/d/m` 占用全局动作键；
+14. workspace 内散落的业务 `KeyCode::Char` 显著收敛到 keymap；
+15. Footer/Help 与真实绑定同源；
+16. 所有新增专项测试通过；
+17. `cargo fmt --all -- --check`、`git diff --check`、正式 fast/full gate 全绿；
+18. 如触及 Provision/Inspect 行为边界，Virtual-HIL/只读验收按影响范围补跑；
+19. 不改变 LBA0～12/LCE 协议语义；
+20. 不降低任何真实写盘安全门槛。
+
+最终产品定义：**edpcli TUI 使用克制的低饱和 TrueColor 视觉系统，以统一语义 Theme 提供现代终端观感；交互以 Vim 的 tab/window/navigation 思路组织 Workspace、Panel、列表、树、表单和 Hex，文本编辑通过明确 Insert mode 与导航彻底隔离。用户不需要记忆“每个页面自己的快捷键”，同一动作在整个应用中始终使用同一种交互语言。**
