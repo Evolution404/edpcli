@@ -38,8 +38,6 @@ pub enum TuiAction {
     BackupCreate,
     Restore,
     Fill,
-    Plan,
-    Write,
     Export,
     ViewOrVerify,
     Yank,
@@ -109,11 +107,6 @@ pub const NORMAL_HELP: &[HelpBinding] = &[
         keys: "Enter",
         label: "Open",
         action: TuiAction::Activate,
-    },
-    HelpBinding {
-        keys: "o",
-        label: "Open",
-        action: TuiAction::Open,
     },
     HelpBinding {
         keys: "/",
@@ -319,7 +312,6 @@ impl KeyMapper {
             KeyCode::Char('b') => Some(TuiAction::BackupCreate),
             KeyCode::Char('R') => Some(TuiAction::Restore),
             KeyCode::Char('f') => Some(TuiAction::Fill),
-            KeyCode::Char('w') => Some(TuiAction::Write),
             KeyCode::Char('e') => Some(TuiAction::Export),
             KeyCode::Char('v') => Some(TuiAction::ViewOrVerify),
             KeyCode::Char(' ') => Some(TuiAction::Toggle),

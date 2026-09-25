@@ -62,6 +62,7 @@ fn chapter_11_single_key_actions_and_exit_contract() {
         (KeyCode::Char('b'), Some(TuiAction::BackupCreate)),
         (KeyCode::Char('a'), Some(TuiAction::Add)),
         (KeyCode::Char('p'), None),
+        (KeyCode::Char('w'), None),
         (KeyCode::Char('q'), Some(TuiAction::Quit)),
         (KeyCode::Esc, Some(TuiAction::Back)),
     ] {
@@ -214,6 +215,9 @@ fn normal_mode_keeps_inspect_and_backup_as_single_key_actions() {
     assert!(
         !event_loop.contains("TuiAction::Plan if state.workspace() == state::Workspace::Devices")
     );
+    assert!(
+        !event_loop.contains("TuiAction::Activate | TuiAction::Open => match state.workspace()")
+    );
     assert!(event_loop.contains("TuiAction::Insert\n            if matches!(\n                state.workspace(),\n                state::Workspace::Devices | state::Workspace::Backups\n            )"));
     assert!(event_loop.contains("TuiAction::BackupCreate\n            if matches!(\n                state.workspace(),\n                state::Workspace::Devices | state::Workspace::Backups\n            )"));
     assert!(
@@ -308,7 +312,9 @@ fn confirm_mode_has_uniform_yes_no_escape_contract_without_weakening_typed_yes()
 fn provision_form_enter_generates_plan_instead_of_editing_or_toggling() {
     let event_loop = include_str!("../src/tui/mod.rs");
     assert!(
-        event_loop.contains("TuiAction::Activate | TuiAction::Write"),
+        event_loop.contains(
+            "TuiAction::Activate => {\n                                    start_provision_plan"
+        ),
         "Provision Form Enter/Activate must generate the plan"
     );
     assert!(

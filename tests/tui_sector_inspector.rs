@@ -259,6 +259,68 @@ fn inspect_subworkspace_cycle_preserves_sector_cursor_and_return_target() {
 }
 
 #[test]
+fn escape_pops_sector_then_inspect_without_exiting_app() {
+    use edpcli::tui::state::{NavCommand, StateEffect};
+    let mut state = AppState::new();
+    assert!(state.begin_advanced_inspect(AdvancedInspectSource::Disk(6)));
+    state.advanced_inspect_finish(Ok(workspace(vec![item(0, true)])));
+    select_protocol_lba0(&mut state);
+    state.advanced_inspect_open_selected_sector();
+    assert_eq!(state.navigation().depth(), 2);
+    assert_eq!(state.navigate(NavCommand::Escape, 24), StateEffect::None);
+    assert!(state.advanced_inspect_sector().is_none());
+    assert_eq!(state.navigation().depth(), 1);
+    assert_eq!(state.navigate(NavCommand::Escape, 24), StateEffect::None);
+    assert!(state.advanced_inspect().is_none());
+    assert_eq!(state.navigation().depth(), 0);
+    assert_eq!(
+        state.navigate(NavCommand::Quit, 24),
+        StateEffect::ExitRequested
+    );
+}
+
+#[test]
+fn inspect_browser_renders_across_required_terminal_sizes() {
+    let mut state = AppState::new();
+    assert!(state.begin_advanced_inspect(AdvancedInspectSource::Disk(6)));
+    state.advanced_inspect_finish(Ok(workspace(vec![item(0, true)])));
+    select_protocol_lba0(&mut state);
+    for (width, height) in [(40, 10), (60, 18), (80, 24), (120, 36), (240, 60)] {
+        let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+        terminal
+            .draw(|frame| render::draw(frame, &state))
+            .unwrap_or_else(|error| panic!("{width}x{height}: {error}"));
+        state.advanced_inspect_shift_panel(false);
+        terminal
+            .draw(|frame| render::draw(frame, &state))
+            .unwrap_or_else(|error| panic!("{width}x{height}: {error}"));
+        state.advanced_inspect_shift_panel(false);
+        terminal
+            .draw(|frame| render::draw(frame, &state))
+            .unwrap_or_else(|error| panic!("{width}x{height}: {error}"));
+        state.advanced_inspect_shift_panel(false);
+    }
+}
+
+#[test]
+fn sector_decode_waits_for_inflight_preview_then_retries() {
+    let mut metadata = item(0, true);
+    metadata.decoded = None;
+    metadata.decoded_sha256 = None;
+    metadata.decode_error = None;
+    metadata.meta_text = Some("canonical meta".into());
+    let mut state = AppState::new();
+    assert!(state.begin_advanced_inspect(AdvancedInspectSource::Disk(6)));
+    state.advanced_inspect_finish(Ok(workspace(vec![metadata])));
+    select_protocol_lba0(&mut state);
+    assert_eq!(state.advanced_inspect_open_selected_sector().unwrap().1, 0);
+    state.advanced_inspect_mark_decode_pending(0, false);
+    assert_eq!(state.advanced_inspect_decode_request().unwrap().1, 0);
+    state.advanced_inspect_mark_decode_pending(0, true);
+    assert!(state.advanced_inspect_decode_request().is_none());
+}
+
+#[test]
 fn sector_inspector_loads_on_demand_navigates_bytes_and_bounds_cache() {
     let mut state = AppState::new();
     assert!(state.begin_advanced_inspect(AdvancedInspectSource::Disk(6)));
@@ -417,6 +479,7 @@ fn field_to_hex_link_preserves_cross_sector_range_and_yank_register() {
         .expect("tree Field must resolve to the canonical InspectField");
     assert_eq!(selected.range, cross.range);
     assert!(state.advanced_inspect_open_selected_field().is_none());
+    assert_eq!(state.navigation().depth(), 2);
     let sector = state.advanced_inspect_sector().unwrap();
     assert_eq!(sector.lba, 0);
     assert_eq!(sector.cursor, 0x1f0);
@@ -424,7 +487,6 @@ fn field_to_hex_link_preserves_cross_sector_range_and_yank_register() {
         state.advanced_inspect_sector_active_field().unwrap().range,
         cross.range
     );
-
     assert_eq!(
         state.advanced_inspect_sector_yank(false).as_deref(),
         Some("CrossField = cross-value")
@@ -449,6 +511,8 @@ fn field_to_hex_link_preserves_cross_sector_range_and_yank_register() {
 
     state.advanced_inspect_sector_move_cursor(0x40);
     assert!(state.advanced_inspect_sector_active_field().is_none());
+    assert!(state.advanced_inspect_close_sector());
+    assert_eq!(state.navigation().depth(), 1);
 }
 
 #[test]

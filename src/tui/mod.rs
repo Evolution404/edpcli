@@ -472,7 +472,7 @@ fn dispatch_tui_action(
                 viewport_height,
             )
         }
-        TuiAction::Activate | TuiAction::Open => match state.workspace() {
+        TuiAction::Activate => match state.workspace() {
             state::Workspace::Devices => {
                 if let Err(message) = state.begin_provision_for_selected_device() {
                     state.set_notice(message);
@@ -548,7 +548,11 @@ fn open_advanced_inspect_selection(state: &mut AppState, tasks: &mut TaskHub) {
 
     if let Some((source, lba)) = request {
         if let Err(message) = tasks.request_advanced_inspect_sector(source, lba) {
-            state.advanced_inspect_sector_finish(lba, Err(message.to_string()));
+            if message == "已有扇区读取正在执行" {
+                state.advanced_inspect_mark_decode_pending(lba, false);
+            } else {
+                state.advanced_inspect_sector_finish(lba, Err(message.to_string()));
+            }
         }
     }
 }
@@ -722,6 +726,11 @@ fn run_loop(resume: Option<state::WriteIntent>) -> io::Result<LoopExit> {
             if let Some((lba, result)) = updates.advanced_inspect_sector {
                 state.advanced_inspect_sector_finish(lba, result);
             }
+            if let Some((source, lba)) = state.advanced_inspect_decode_request() {
+                if tasks.request_advanced_inspect_sector(source, lba).is_ok() {
+                    state.advanced_inspect_mark_decode_pending(lba, true);
+                }
+            }
             if let Some((source, lba)) = state.advanced_inspect_preview_request() {
                 if tasks.request_advanced_inspect_preview(source, lba).is_ok() {
                     state.advanced_inspect_mark_preview_attempted(lba);
@@ -806,10 +815,16 @@ fn run_loop(resume: Option<state::WriteIntent>) -> io::Result<LoopExit> {
                                                                 source, lba,
                                                             )
                                                         {
-                                                            state.advanced_inspect_sector_finish(
-                                                                lba,
-                                                                Err(message.to_string()),
-                                                            );
+                                                            if message == "已有扇区读取正在执行"
+                                                            {
+                                                                state.advanced_inspect_mark_decode_pending(lba, false);
+                                                            } else {
+                                                                state
+                                                                    .advanced_inspect_sector_finish(
+                                                                        lba,
+                                                                        Err(message.to_string()),
+                                                                    );
+                                                            }
                                                         }
                                                     }
                                                     Ok(None) => {}
@@ -899,15 +914,21 @@ fn run_loop(resume: Option<state::WriteIntent>) -> io::Result<LoopExit> {
                                                 if let Err(message) = tasks
                                                     .request_advanced_inspect_sector(source, lba)
                                                 {
-                                                    state.advanced_inspect_sector_finish(
-                                                        lba,
-                                                        Err(message.to_string()),
-                                                    );
+                                                    if message == "已有扇区读取正在执行" {
+                                                        state.advanced_inspect_mark_decode_pending(
+                                                            lba, false,
+                                                        );
+                                                    } else {
+                                                        state.advanced_inspect_sector_finish(
+                                                            lba,
+                                                            Err(message.to_string()),
+                                                        );
+                                                    }
                                                 }
                                             }
                                         }
                                         TuiAction::Back => {
-                                            state.advanced_inspect_close_sector();
+                                            let _ = state.navigate(NavCommand::Escape, 1);
                                         }
                                         TuiAction::InspectJump => {
                                             state.advanced_inspect_begin_jump();
@@ -1024,9 +1045,7 @@ fn run_loop(resume: Option<state::WriteIntent>) -> io::Result<LoopExit> {
                                         }
                                     }
                                     TuiAction::Back => {
-                                        if !state.advanced_inspect_close_sector() {
-                                            state.close_advanced_inspect();
-                                        }
+                                        let _ = state.navigate(NavCommand::Escape, 1);
                                     }
                                     TuiAction::Help => {
                                         let _ = state.navigate(NavCommand::Help, 1);
@@ -1229,7 +1248,7 @@ fn run_loop(resume: Option<state::WriteIntent>) -> io::Result<LoopExit> {
                                 TuiAction::Delete => {
                                     state.provision_plain_delete_selected_partition();
                                 }
-                                TuiAction::Activate | TuiAction::Write => {
+                                TuiAction::Activate => {
                                     start_provision_plan(&mut state, &mut tasks);
                                 }
                                 TuiAction::Export => {
@@ -1248,7 +1267,7 @@ fn run_loop(resume: Option<state::WriteIntent>) -> io::Result<LoopExit> {
                                 }
                             }
                             ProvisionStage::Review => match action {
-                                TuiAction::Activate | TuiAction::Write => {
+                                TuiAction::Activate => {
                                     state.provision_begin_confirm();
                                 }
                                 TuiAction::Export => state.provision_begin_export(),

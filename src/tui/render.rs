@@ -680,18 +680,18 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
                 if state.selected_device().is_some() {
                     let kind = crate::tui::table_layout::TableKind::Devices;
                     let count = crate::tui::table_layout::layout_for(kind).scrollable_count();
-                    format!("Tab/Shift-Tab 标签 · j/k 移动 · h/l 横向滚动 · {}/{} 列 · Enter 制盘 · i Inspect · b 新建备份 · r 刷新 · q 退出", state.table_scroll_offset(kind) + 1, count)
+                    format!("Tab/Shift-Tab 标签 · j/k 移动 · h/l 横向滚动 · {}/{} 列 · Enter 制盘 · i Inspect · b 新建备份 · Esc 当前标签 · q 退出", state.table_scroll_offset(kind) + 1, count)
                 } else {
-                    "Tab/Shift-Tab 标签 · r 刷新 · q 退出".to_string()
+                    "Tab/Shift-Tab 标签 · r 刷新 · Esc 当前标签 · q 退出".to_string()
                 }
             }
             Workspace::Backups => {
                 if state.selected_backup().is_some() {
                     let kind = crate::tui::table_layout::TableKind::Backups;
                     let count = crate::tui::table_layout::layout_for(kind).scrollable_count();
-                    format!("Tab/Shift-Tab 标签 · j/k 移动 · h/l 横向滚动 · {}/{} 列 · Space 勾选 · Enter/i Inspect · b 新建 · v 校验 · R 恢复 · d 删除 · r 刷新 · q 退出", state.table_scroll_offset(kind) + 1, count)
+                    format!("Tab/Shift-Tab 标签 · j/k 移动 · h/l 横向滚动 · {}/{} 列 · Space 勾选 · Enter/i Inspect · b 新建 · v 校验 · R 恢复 · d 删除 · Esc 当前标签 · q 退出", state.table_scroll_offset(kind) + 1, count)
                 } else {
-                    "Tab/Shift-Tab 标签 · b 新建 · r 刷新 · q 退出".to_string()
+                    "Tab/Shift-Tab 标签 · b 新建 · r 刷新 · Esc 当前标签 · q 退出".to_string()
                 }
             }
             Workspace::Provision => match state.provision().stage {
@@ -700,8 +700,7 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
                     format!("制盘选盘：j/k 选择 · h/l 横向滚动 · {}/{} 列 · Enter 固定目标 · Esc 返回设备页", state.table_scroll_offset(kind) + 1, crate::tui::table_layout::layout_for(kind).scrollable_count())
                 }
                 ProvisionStage::BackupPrompt => {
-                    "制盘前保存：j/k 选择 · Tab/Shift-Tab 标签 · Enter 确认 · Esc 返回设备"
-                        .to_string()
+                    "制盘前保存：j/k 选择 · Enter 确认 · Esc 返回设备".to_string()
                 }
                 ProvisionStage::BackupSaving => "正在保存当前盘…".to_string(),
                 ProvisionStage::Menu => {
@@ -725,7 +724,7 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
                     } else {
                         ""
                     };
-                    format!("NORMAL · j/k 字段 · i 编辑{unit_key} · Enter 生成计划 · Tab/Shift-Tab 标签 · Esc 返回")
+                    format!("NORMAL · j/k 字段 · i 编辑{unit_key} · Enter 生成计划 · Esc 返回")
                 }
                 ProvisionStage::Form => {
                     "NORMAL · j/k 字段 · i 编辑 · h/l 或 Space 切换 · Enter 生成计划 · Esc 返回"

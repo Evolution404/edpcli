@@ -1119,6 +1119,19 @@ impl AppState {
         let field = self.advanced_inspect_selected_field()?;
         let lba = field.range.start / crate::common::SECTOR as u64;
         let cursor = (field.range.start % crate::common::SECTOR as u64) as usize;
+        let (panel, tree_selection, detail_scroll) = {
+            let state = self.advanced_inspect.as_ref()?;
+            (state.panel, state.tree_selected, state.detail_scroll)
+        };
+        self.navigation.push(NavigationFrame {
+            location: NavigationLocation::Inspect,
+            selection: self.selected,
+            item_count: self.item_count,
+            panel: Some(panel),
+            tree_selection,
+            detail_scroll,
+            table_scroll: None,
+        });
         let state = self.advanced_inspect.as_mut()?;
         let ready = state.result.as_ref().is_some_and(|workspace| {
             workspace.items.iter().any(|item| {
@@ -1219,6 +1232,32 @@ impl AppState {
         self.advanced_inspect.as_ref()?.sector.as_ref()
     }
 
+    pub fn advanced_inspect_decode_request(&self) -> Option<(AdvancedInspectSource, u64)> {
+        let advanced = self.advanced_inspect.as_ref()?;
+        let sector = advanced.sector.as_ref()?;
+        if sector.pending || sector.error.is_some() {
+            return None;
+        }
+        let ready = advanced.result.as_ref()?.items.iter().any(|item| {
+            item.lba == sector.lba && (item.decoded.is_some() || item.decode_error.is_some())
+        });
+        (!ready).then(|| (advanced.source.clone(), sector.lba))
+    }
+
+    pub fn advanced_inspect_mark_decode_pending(&mut self, lba: u64, pending: bool) {
+        if let Some(sector) = self
+            .advanced_inspect
+            .as_mut()
+            .and_then(|advanced| advanced.sector.as_mut())
+            .filter(|sector| sector.lba == lba)
+        {
+            sector.pending = pending;
+            if pending {
+                sector.error = None;
+            }
+        }
+    }
+
     pub fn advanced_inspect_sector_item(
         &self,
     ) -> Option<&crate::application::inspect::AdvancedInspectItem> {
@@ -1269,6 +1308,7 @@ impl AppState {
                                 continue;
                             }
                             workspace.items.retain(|value| value.lba != evicted);
+                            state.preview_attempted.remove(&evicted);
                         }
                     }
                 }

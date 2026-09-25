@@ -50,8 +50,18 @@ impl DiskLayoutModel {
                         ProvisionBarKind::Compatibility
                     } else if node.id.starts_with("region.unknown") {
                         ProvisionBarKind::Unknown
+                    } else if node.id.starts_with("region.conflict") {
+                        ProvisionBarKind::Compatibility
                     } else if node.id.starts_with("region.partition") {
-                        ProvisionBarKind::Share
+                        if node.label.ends_with("type1") {
+                            ProvisionBarKind::Boot
+                        } else if node.label.ends_with("type2") {
+                            ProvisionBarKind::Share
+                        } else if node.label.ends_with("type4") {
+                            ProvisionBarKind::Encrypt
+                        } else {
+                            ProvisionBarKind::Plain
+                        }
                     } else if node.id == "region.tail" {
                         ProvisionBarKind::Compatibility
                     } else {

@@ -930,6 +930,16 @@ impl AppState {
         }
 
         if command == NavCommand::Escape {
+            if let Some(advanced) = self.advanced_inspect.as_ref() {
+                if advanced.stage == AdvancedInspectStage::Running {
+                    self.set_notice("全盘检查正在后台读取结构，请等待完成。");
+                } else if advanced.prompt.is_some() {
+                    self.advanced_inspect_cancel_prompt();
+                } else if !self.advanced_inspect_close_sector() {
+                    self.close_advanced_inspect();
+                }
+                return StateEffect::None;
+            }
             if self.workspace == Workspace::Provision {
                 match self.provision.stage {
                     ProvisionStage::SelectDisk => {
