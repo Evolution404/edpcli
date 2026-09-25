@@ -15,6 +15,7 @@ fn default_protocol_request() -> AdvancedInspectRequest {
         lbas: (0..METADATA_SECTOR_COUNT as u64).collect(),
         export_dir: None,
         device_id_override: None,
+        fail_soft_decode: false,
     }
 }
 
@@ -127,6 +128,7 @@ pub struct AdvancedInspectRequest {
     pub lbas: Vec<u64>,
     pub export_dir: Option<std::path::PathBuf>,
     pub device_id_override: Option<String>,
+    pub fail_soft_decode: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -256,6 +258,7 @@ pub struct AdvancedInspectItem {
     pub decoded: Option<Vec<u8>>,
     pub decoded_sha256: Option<String>,
     pub method: Option<String>,
+    pub decode_error: Option<String>,
     pub fields: Vec<InspectField>,
     pub notes: Vec<String>,
     pub meta_text: Option<String>,
@@ -635,6 +638,7 @@ fn run_advanced_source<R: SectorReader + ?Sized>(
             decoded: None,
             decoded_sha256: None,
             method: None,
+            decode_error: None,
             fields,
             notes: protocol_view
                 .as_ref()
@@ -650,17 +654,26 @@ fn run_advanced_source<R: SectorReader + ?Sized>(
                 }
             }
             AdvancedInspectMode::Decode => {
-                let (decoded, method) = if let Some(view) = protocol_view {
-                    (view.decoded, view.method)
+                let decoded = if let Some(view) = protocol_view {
+                    Ok((view.decoded, view.method))
                 } else {
-                    decode_sector(&context, &meta, lba, &raw, partition_boot.as_deref())?
+                    decode_sector(&context, &meta, lba, &raw, partition_boot.as_deref())
                 };
-                item.decoded_sha256 = Some(crate::sha256::sha256_hex(&decoded));
-                item.method = Some(method);
-                if let Some(dir) = &request.export_dir {
-                    export_advanced_bytes(dir, lba, "decoded", &decoded)?;
+                match decoded {
+                    Ok((decoded, method)) => {
+                        item.decoded_sha256 = Some(crate::sha256::sha256_hex(&decoded));
+                        item.method = Some(method);
+                        if let Some(dir) = &request.export_dir {
+                            export_advanced_bytes(dir, lba, "decoded", &decoded)?;
+                        }
+                        item.decoded = Some(decoded);
+                    }
+                    Err(error) if request.fail_soft_decode => {
+                        item.decode_error = Some(error);
+                        item.method = Some("raw-only".into());
+                    }
+                    Err(error) => return Err(error),
                 }
-                item.decoded = Some(decoded);
             }
             AdvancedInspectMode::Meta => {
                 let text = sector_meta_text(
@@ -915,6 +928,49 @@ mod advanced_tests {
         assert_eq!(field.field_type, InspectFieldType::Identity);
         assert_eq!(field.status, InspectFieldStatus::Known);
         assert_eq!(field.group.as_deref(), Some("group"));
+    }
+
+    #[test]
+    fn sector_inspector_decode_failure_preserves_raw_without_weakening_strict_decode() {
+        let context =
+            crate::inspect_target::InspectDiskContext::new(vec![0; METADATA_IMAGE_LEN], None, 4096);
+        let meta = InspectMeta::default();
+        let mut sectors = vec![vec![0; SECTOR]; 101];
+        sectors[100] = vec![0x5a; SECTOR];
+        let mut reader = MemoryReader {
+            sectors: sectors.clone(),
+        };
+        let fail_soft = AdvancedInspectRequest {
+            mode: AdvancedInspectMode::Decode,
+            lbas: vec![100],
+            export_dir: None,
+            device_id_override: None,
+            fail_soft_decode: true,
+        };
+        let workspace = run_advanced_source(
+            "memory".into(),
+            meta.clone(),
+            context.clone(),
+            &fail_soft,
+            &mut reader,
+        )
+        .unwrap();
+        let item = &workspace.items[0];
+        assert_eq!(item.raw, vec![0x5a; SECTOR]);
+        assert!(item.decoded.is_none());
+        assert!(item
+            .decode_error
+            .as_deref()
+            .is_some_and(|error| { error.contains("不属于已注册 decoder") }));
+
+        let strict = AdvancedInspectRequest {
+            fail_soft_decode: false,
+            ..fail_soft
+        };
+        let mut reader = MemoryReader { sectors };
+        let error =
+            run_advanced_source("memory".into(), meta, context, &strict, &mut reader).unwrap_err();
+        assert!(error.contains("不属于已注册 decoder"), "{error}");
     }
 
     #[test]

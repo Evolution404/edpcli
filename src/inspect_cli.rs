@@ -108,6 +108,7 @@ fn request_from_opts(opts: &InspectOpts) -> AdvancedInspectRequest {
         lbas: selected_lbas(opts),
         export_dir: opts.export.as_deref().map(PathBuf::from),
         device_id_override: opts.device_id.clone(),
+        fail_soft_decode: false,
     }
 }
 

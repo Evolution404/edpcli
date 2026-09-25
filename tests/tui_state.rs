@@ -1418,3 +1418,156 @@ fn advanced_inspect_lazy_sector_window_is_bounded_and_pageable() {
         second_page.len()
     );
 }
+
+#[test]
+fn advanced_sector_inspector_is_on_demand_bounded_and_fail_soft() {
+    use edpcli::application::inspect::{
+        AdvancedInspectItem, AdvancedInspectMode, AdvancedInspectWorkspace,
+    };
+    use edpcli::application::inspect_tree::InspectNodeKind;
+    use edpcli::inspect::InspectMeta;
+    use edpcli::inspect_target::InspectDiskContext;
+    use edpcli::tui::state::{AdvancedInspectSource, SectorInspectMode};
+
+    fn item(
+        lba: u64,
+        decoded: Option<Vec<u8>>,
+        decode_error: Option<&str>,
+        meta_text: Option<&str>,
+    ) -> AdvancedInspectItem {
+        AdvancedInspectItem {
+            lba,
+            regions: vec![format!("LBA{lba}")],
+            raw: vec![0x5a; edpcli::common::SECTOR],
+            raw_sha256: format!("raw-{lba}"),
+            raw_nonzero: edpcli::common::SECTOR,
+            decoded_sha256: decoded.as_ref().map(|_| format!("decoded-{lba}")),
+            decoded,
+            method: Some(if decode_error.is_some() {
+                "raw-only".into()
+            } else {
+                "test".into()
+            }),
+            decode_error: decode_error.map(str::to_string),
+            fields: Vec::new(),
+            notes: Vec::new(),
+            meta_text: meta_text.map(str::to_string),
+        }
+    }
+
+    let context = InspectDiskContext::new(vec![0; edpcli::common::METADATA_IMAGE_LEN], None, 5_000);
+    let mut state = AppState::new();
+    assert!(state.begin_advanced_inspect(AdvancedInspectSource::Disk(9)));
+    state.advanced_inspect_finish(Ok(AdvancedInspectWorkspace {
+        source: "disk9".into(),
+        meta: InspectMeta::default(),
+        mode: AdvancedInspectMode::Meta,
+        items: vec![item(0, None, None, Some("meta-lba0"))],
+        export_dir: None,
+        topology: edpcli::application::inspect_tree::build_inspect_topology(&context),
+    }));
+
+    let rows = state.advanced_inspect_tree_rows();
+    let protocol = rows
+        .iter()
+        .position(|row| row.id.ends_with("/region.protocol"))
+        .unwrap();
+    state.advanced_inspect_move_tree(protocol as isize);
+    state.advanced_inspect_toggle_selected();
+
+    let rows = state.advanced_inspect_tree_rows();
+    let extent = rows
+        .iter()
+        .position(|row| row.id.ends_with("/region.protocol.extent"))
+        .unwrap();
+    let current = state.advanced_inspect().unwrap().tree_selected;
+    state.advanced_inspect_move_tree(extent as isize - current as isize);
+    state.advanced_inspect_toggle_selected();
+
+    let rows = state.advanced_inspect_tree_rows();
+    let sector0 = rows
+        .iter()
+        .position(|row| row.kind == InspectNodeKind::Sector && row.range.start_lba == 0)
+        .unwrap();
+    let current = state.advanced_inspect().unwrap().tree_selected;
+    state.advanced_inspect_move_tree(sector0 as isize - current as isize);
+
+    let request = state
+        .advanced_inspect_open_selected_sector()
+        .expect("Meta-only LBA0 must request Decode supplement");
+    assert_eq!(request.1, 0);
+    let sector = state.advanced_inspect_sector().unwrap();
+    assert_eq!(sector.lba, 0);
+    assert_eq!(sector.mode, SectorInspectMode::Mixed);
+    assert!(sector.pending);
+
+    state.advanced_inspect_sector_finish(
+        0,
+        Ok(item(
+            0,
+            Some(vec![0xa5; edpcli::common::SECTOR]),
+            None,
+            None,
+        )),
+    );
+    let merged = state.advanced_inspect_sector_item().unwrap();
+    assert_eq!(merged.meta_text.as_deref(), Some("meta-lba0"));
+    assert_eq!(merged.decoded.as_ref().unwrap()[0], 0xa5);
+    assert!(!state.advanced_inspect_sector().unwrap().pending);
+
+    state.advanced_inspect_sector_move_cursor(10_000);
+    assert_eq!(
+        state.advanced_inspect_sector().unwrap().cursor,
+        edpcli::common::SECTOR - 1
+    );
+    state.advanced_inspect_sector_move_cursor(-10_000);
+    assert_eq!(state.advanced_inspect_sector().unwrap().cursor, 0);
+    state.advanced_inspect_sector_set_mode(SectorInspectMode::Raw);
+    assert_eq!(
+        state.advanced_inspect_sector().unwrap().mode,
+        SectorInspectMode::Raw
+    );
+    state.advanced_inspect_sector_set_mode(SectorInspectMode::Decode);
+    assert_eq!(
+        state.advanced_inspect_sector().unwrap().mode,
+        SectorInspectMode::Decode
+    );
+    state.advanced_inspect_sector_set_mode(SectorInspectMode::Mixed);
+    assert_eq!(
+        state.advanced_inspect_sector().unwrap().mode,
+        SectorInspectMode::Mixed
+    );
+
+    let request = state
+        .advanced_inspect_shift_sector(1)
+        .expect("uncached LBA1 must request on-demand read");
+    assert_eq!(request.1, 1);
+    state.advanced_inspect_sector_finish(1, Ok(item(1, None, Some("decoder unavailable"), None)));
+    let sector = state.advanced_inspect_sector().unwrap();
+    assert_eq!(sector.lba, 1);
+    assert!(!sector.pending);
+    assert_eq!(sector.error.as_deref(), Some("decoder unavailable"));
+    assert_eq!(state.advanced_inspect_sector_item().unwrap().raw[0], 0x5a);
+    assert!(state.advanced_inspect_shift_sector(-1).is_none());
+    assert_eq!(state.advanced_inspect_sector().unwrap().lba, 0);
+
+    for lba in 13..=18 {
+        state.advanced_inspect_sector_finish(
+            lba,
+            Ok(item(
+                lba,
+                Some(vec![lba as u8; edpcli::common::SECTOR]),
+                None,
+                None,
+            )),
+        );
+    }
+    let workspace = state.advanced_inspect().unwrap().result.as_ref().unwrap();
+    let on_demand = workspace
+        .items
+        .iter()
+        .filter(|value| value.lba >= 13)
+        .map(|value| value.lba)
+        .collect::<Vec<_>>();
+    assert_eq!(on_demand, vec![14, 15, 16, 17, 18]);
+}

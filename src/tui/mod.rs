@@ -624,6 +624,9 @@ fn run_loop(resume: Option<state::WriteIntent>) -> io::Result<LoopExit> {
             if let Some(result) = updates.advanced_inspect {
                 state.advanced_inspect_finish(result);
             }
+            if let Some((lba, result)) = updates.advanced_inspect_sector {
+                state.advanced_inspect_sector_finish(lba, result);
+            }
             if state.take_deferred_exit() == StateEffect::ExitRequested {
                 break;
             }
@@ -671,6 +674,70 @@ fn run_loop(resume: Option<state::WriteIntent>) -> io::Result<LoopExit> {
                                 continue;
                             }
                             AdvancedInspectStage::Browser => {
+                                let sector_detail =
+                                    state.advanced_inspect().is_some_and(|advanced| {
+                                        advanced.panel == state::AdvancedInspectPanel::Detail
+                                            && advanced.sector.is_some()
+                                    });
+                                if sector_detail {
+                                    match key.code {
+                                        ct_event::KeyCode::Left => {
+                                            state.advanced_inspect_sector_move_cursor(-1);
+                                        }
+                                        ct_event::KeyCode::Right => {
+                                            state.advanced_inspect_sector_move_cursor(1);
+                                        }
+                                        ct_event::KeyCode::Up | ct_event::KeyCode::Char('k') => {
+                                            state.advanced_inspect_sector_move_cursor(-16);
+                                        }
+                                        ct_event::KeyCode::Down | ct_event::KeyCode::Char('j') => {
+                                            state.advanced_inspect_sector_move_cursor(16);
+                                        }
+                                        ct_event::KeyCode::Char('r') => {
+                                            state.advanced_inspect_sector_set_mode(
+                                                state::SectorInspectMode::Raw,
+                                            );
+                                        }
+                                        ct_event::KeyCode::Char('d') => {
+                                            state.advanced_inspect_sector_set_mode(
+                                                state::SectorInspectMode::Decode,
+                                            );
+                                        }
+                                        ct_event::KeyCode::Char('m') => {
+                                            state.advanced_inspect_sector_set_mode(
+                                                state::SectorInspectMode::Mixed,
+                                            );
+                                        }
+                                        ct_event::KeyCode::Char('o') => {
+                                            state.advanced_inspect_sector_toggle_field();
+                                        }
+                                        ct_event::KeyCode::PageUp | ct_event::KeyCode::PageDown => {
+                                            let delta = if key.code == ct_event::KeyCode::PageUp {
+                                                -1
+                                            } else {
+                                                1
+                                            };
+                                            if let Some((source, lba)) =
+                                                state.advanced_inspect_shift_sector(delta)
+                                            {
+                                                if let Err(message) = tasks
+                                                    .request_advanced_inspect_sector(source, lba)
+                                                {
+                                                    state.advanced_inspect_sector_finish(
+                                                        lba,
+                                                        Err(message.to_string()),
+                                                    );
+                                                }
+                                            }
+                                        }
+                                        ct_event::KeyCode::Esc => {
+                                            state.advanced_inspect_close_sector();
+                                        }
+                                        _ => {}
+                                    }
+                                    continue;
+                                }
+
                                 match key.code {
                                     ct_event::KeyCode::Up | ct_event::KeyCode::Char('k') => {
                                         state.advanced_inspect_move_tree(-1);
@@ -682,7 +749,22 @@ fn run_loop(resume: Option<state::WriteIntent>) -> io::Result<LoopExit> {
                                         state.advanced_inspect_toggle_selected();
                                     }
                                     ct_event::KeyCode::Enter => {
-                                        state.advanced_inspect_enter_selected();
+                                        if state.advanced_inspect_selected_sector_lba().is_some() {
+                                            if let Some((source, lba)) =
+                                                state.advanced_inspect_open_selected_sector()
+                                            {
+                                                if let Err(message) = tasks
+                                                    .request_advanced_inspect_sector(source, lba)
+                                                {
+                                                    state.advanced_inspect_sector_finish(
+                                                        lba,
+                                                        Err(message.to_string()),
+                                                    );
+                                                }
+                                            }
+                                        } else {
+                                            state.advanced_inspect_enter_selected();
+                                        }
                                     }
                                     ct_event::KeyCode::Tab => {
                                         state.advanced_inspect_shift_panel(false);
@@ -704,7 +786,11 @@ fn run_loop(resume: Option<state::WriteIntent>) -> io::Result<LoopExit> {
                                     {
                                         state.advanced_inspect_scroll_detail(10);
                                     }
-                                    ct_event::KeyCode::Esc => state.close_advanced_inspect(),
+                                    ct_event::KeyCode::Esc => {
+                                        if !state.advanced_inspect_close_sector() {
+                                            state.close_advanced_inspect();
+                                        }
+                                    }
                                     _ => {}
                                 }
                                 continue;

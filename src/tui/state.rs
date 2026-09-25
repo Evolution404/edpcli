@@ -46,6 +46,33 @@ pub enum AdvancedInspectPanel {
     Detail,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SectorInspectMode {
+    Raw,
+    Decode,
+    Mixed,
+}
+
+impl SectorInspectMode {
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Raw => "Raw",
+            Self::Decode => "Decode",
+            Self::Mixed => "Mixed",
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct SectorInspectorState {
+    pub lba: u64,
+    pub mode: SectorInspectMode,
+    pub cursor: usize,
+    pub pending: bool,
+    pub error: Option<String>,
+    pub field_expanded: bool,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AdvancedInspectTreeAction {
     None,
@@ -80,6 +107,8 @@ pub struct AdvancedInspectState {
     pub panel: AdvancedInspectPanel,
     pub expanded: std::collections::BTreeSet<String>,
     pub lazy_offsets: std::collections::BTreeMap<String, u64>,
+    pub sector: Option<SectorInspectorState>,
+    pub sector_cache_order: std::collections::VecDeque<u64>,
     pub message: Option<String>,
 }
 
@@ -1171,6 +1200,8 @@ impl AppState {
             panel: AdvancedInspectPanel::Tree,
             expanded,
             lazy_offsets: std::collections::BTreeMap::new(),
+            sector: None,
+            sector_cache_order: std::collections::VecDeque::new(),
             message: Some("正在后台读取协议上下文并建立全盘结构树…".into()),
         });
         self.input_mode = InputMode::Normal;
@@ -1205,6 +1236,7 @@ impl AppState {
                 lbas: (0..crate::common::METADATA_SECTOR_COUNT as u64).collect(),
                 export_dir: None,
                 device_id_override,
+                fail_soft_decode: false,
             },
         ))
     }
@@ -1219,6 +1251,8 @@ impl AppState {
         state.stage = AdvancedInspectStage::Browser;
         state.tree_selected = 0;
         state.detail_scroll = 0;
+        state.sector = None;
+        state.sector_cache_order.clear();
         match result {
             Ok(workspace) => {
                 state.result = Some(workspace);
@@ -1435,6 +1469,7 @@ impl AppState {
             (state.tree_selected + delta as usize).min(count - 1)
         };
         state.detail_scroll = 0;
+        state.sector = None;
     }
 
     pub fn advanced_inspect_toggle_selected(&mut self) {
@@ -1504,6 +1539,8 @@ impl AppState {
     }
 
     pub fn advanced_inspect_enter_selected(&mut self) {
+        // Sector rows are opened by `advanced_inspect_open_selected_sector()`
+        // so the event loop can schedule the read without putting I/O in state.
         let rows = self.advanced_inspect_tree_rows();
         let selected = self
             .advanced_inspect
@@ -1518,6 +1555,196 @@ impl AppState {
         } else if let Some(state) = self.advanced_inspect.as_mut() {
             state.panel = AdvancedInspectPanel::Overview;
             state.detail_scroll = 0;
+        }
+    }
+
+    pub fn advanced_inspect_selected_sector_lba(&self) -> Option<u64> {
+        let state = self
+            .advanced_inspect
+            .as_ref()
+            .filter(|state| state.stage == AdvancedInspectStage::Browser)?;
+        let rows = self.advanced_inspect_tree_rows();
+        let row = rows.get(state.tree_selected)?;
+        (row.kind == crate::application::inspect_tree::InspectNodeKind::Sector)
+            .then_some(row.range.start_lba)
+    }
+
+    pub fn advanced_inspect_open_selected_sector(
+        &mut self,
+    ) -> Option<(AdvancedInspectSource, u64)> {
+        let lba = self.advanced_inspect_selected_sector_lba()?;
+        let state = self.advanced_inspect.as_mut()?;
+        let ready = state.result.as_ref().is_some_and(|workspace| {
+            workspace.items.iter().any(|item| {
+                item.lba == lba && (item.decoded.is_some() || item.decode_error.is_some())
+            })
+        });
+        state.sector = Some(SectorInspectorState {
+            lba,
+            mode: SectorInspectMode::Mixed,
+            cursor: 0,
+            pending: !ready,
+            error: None,
+            field_expanded: false,
+        });
+        state.panel = AdvancedInspectPanel::Detail;
+        state.detail_scroll = 0;
+        (!ready).then(|| (state.source.clone(), lba))
+    }
+
+    pub fn advanced_inspect_sector(&self) -> Option<&SectorInspectorState> {
+        self.advanced_inspect.as_ref()?.sector.as_ref()
+    }
+
+    pub fn advanced_inspect_sector_item(
+        &self,
+    ) -> Option<&crate::application::inspect::AdvancedInspectItem> {
+        let state = self.advanced_inspect.as_ref()?;
+        let sector = state.sector.as_ref()?;
+        state
+            .result
+            .as_ref()?
+            .items
+            .iter()
+            .find(|item| item.lba == sector.lba)
+    }
+
+    pub fn advanced_inspect_sector_finish(
+        &mut self,
+        lba: u64,
+        result: Result<crate::application::inspect::AdvancedInspectItem, String>,
+    ) {
+        let Some(state) = self.advanced_inspect.as_mut() else {
+            return;
+        };
+        match result {
+            Ok(mut item) => {
+                const ON_DEMAND_CACHE_LIMIT: usize = 5;
+                if let Some(workspace) = state.result.as_mut() {
+                    if let Some(index) = workspace.items.iter().position(|old| old.lba == lba) {
+                        if item.meta_text.is_none() {
+                            item.meta_text = workspace.items[index].meta_text.clone();
+                        }
+                        workspace.items[index] = item;
+                    } else {
+                        workspace.items.push(item);
+                        workspace.items.sort_by_key(|item| item.lba);
+                    }
+                    if lba >= crate::common::METADATA_SECTOR_COUNT as u64 {
+                        state.sector_cache_order.retain(|cached| *cached != lba);
+                        state.sector_cache_order.push_back(lba);
+                        while state.sector_cache_order.len() > ON_DEMAND_CACHE_LIMIT {
+                            let Some(evicted) = state.sector_cache_order.pop_front() else {
+                                break;
+                            };
+                            if state
+                                .sector
+                                .as_ref()
+                                .is_some_and(|sector| sector.lba == evicted)
+                            {
+                                state.sector_cache_order.push_back(evicted);
+                                continue;
+                            }
+                            workspace.items.retain(|value| value.lba != evicted);
+                        }
+                    }
+                }
+                if let Some(sector) = state.sector.as_mut().filter(|sector| sector.lba == lba) {
+                    sector.pending = false;
+                    sector.error = state
+                        .result
+                        .as_ref()
+                        .and_then(|workspace| workspace.items.iter().find(|item| item.lba == lba))
+                        .and_then(|item| item.decode_error.clone());
+                }
+            }
+            Err(message) => {
+                if let Some(sector) = state.sector.as_mut().filter(|sector| sector.lba == lba) {
+                    sector.pending = false;
+                    sector.error = Some(message);
+                }
+            }
+        }
+    }
+
+    pub fn advanced_inspect_sector_move_cursor(&mut self, delta: isize) {
+        let Some(sector) = self
+            .advanced_inspect
+            .as_mut()
+            .and_then(|state| state.sector.as_mut())
+        else {
+            return;
+        };
+        sector.cursor = if delta < 0 {
+            sector.cursor.saturating_sub(delta.unsigned_abs())
+        } else {
+            sector
+                .cursor
+                .saturating_add(delta as usize)
+                .min(crate::common::SECTOR - 1)
+        };
+    }
+
+    pub fn advanced_inspect_sector_set_mode(&mut self, mode: SectorInspectMode) {
+        if let Some(sector) = self
+            .advanced_inspect
+            .as_mut()
+            .and_then(|state| state.sector.as_mut())
+        {
+            sector.mode = mode;
+        }
+    }
+
+    pub fn advanced_inspect_sector_toggle_field(&mut self) {
+        if let Some(sector) = self
+            .advanced_inspect
+            .as_mut()
+            .and_then(|state| state.sector.as_mut())
+        {
+            sector.field_expanded = !sector.field_expanded;
+        }
+    }
+
+    pub fn advanced_inspect_shift_sector(
+        &mut self,
+        delta: i64,
+    ) -> Option<(AdvancedInspectSource, u64)> {
+        let state = self.advanced_inspect.as_mut()?;
+        let sector = state.sector.as_mut()?;
+        let total = state.result.as_ref()?.topology.root.range.sector_count;
+        if total == 0 {
+            return None;
+        }
+        let next = if delta < 0 {
+            sector.lba.saturating_sub(delta.unsigned_abs())
+        } else {
+            sector.lba.saturating_add(delta as u64).min(total - 1)
+        };
+        if next == sector.lba {
+            return None;
+        }
+        sector.lba = next;
+        sector.error = None;
+        sector.field_expanded = false;
+        let ready = state.result.as_ref().is_some_and(|workspace| {
+            workspace.items.iter().any(|item| {
+                item.lba == next && (item.decoded.is_some() || item.decode_error.is_some())
+            })
+        });
+        sector.pending = !ready;
+        (!ready).then(|| (state.source.clone(), next))
+    }
+
+    pub fn advanced_inspect_close_sector(&mut self) -> bool {
+        let Some(state) = self.advanced_inspect.as_mut() else {
+            return false;
+        };
+        if state.sector.take().is_some() {
+            state.panel = AdvancedInspectPanel::Overview;
+            state.detail_scroll = 0;
+            true
+        } else {
+            false
         }
     }
 

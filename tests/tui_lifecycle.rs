@@ -381,6 +381,7 @@ fn advanced_inspect_tree_browser_renders_and_navigates_across_terminal_sizes() {
             decoded: None,
             decoded_sha256: None,
             method: None,
+            decode_error: None,
             fields: Vec::new(),
             notes: Vec::new(),
             meta_text: Some(format!(
