@@ -43,6 +43,20 @@ fn large_modules_are_split_by_domain_boundary() {
     assert!(lines("src/tui/state.rs") < 3_500);
     assert!(lines("src/tui/render.rs") < 1_500);
     assert!(lines("src/tui/task.rs") < 1_000);
+    let semantic =
+        fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("src/protocol/semantic.rs"))
+            .expect("read protocol semantic layer");
+    for forbidden in [
+        "crate::inspect",
+        "crate::application",
+        "crate::tui",
+        "crate::cli",
+    ] {
+        assert!(
+            !semantic.contains(forbidden),
+            "protocol semantic layer must not depend on presentation/application layer: {forbidden}"
+        );
+    }
 }
 
 #[test]
@@ -65,6 +79,38 @@ fn workspace_modules_do_not_import_platform_or_diskio_directly() {
         assert!(
             !source.contains("crate::diskio"),
             "{path} bypasses application boundary"
+        );
+    }
+}
+
+#[test]
+fn semantic_consumers_do_not_depend_on_inspect_presentation() {
+    exists("src/protocol/semantic.rs");
+
+    for path in ["src/metainfo.rs", "src/provision/validate.rs"] {
+        let source = fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join(path))
+            .unwrap_or_else(|error| panic!("read {path}: {error}"));
+        assert!(
+            !source.contains("crate::inspect"),
+            "{path} must consume typed protocol semantics instead of inspect presentation"
+        );
+    }
+}
+
+#[test]
+fn protocol_semantic_does_not_depend_on_presentation_or_application_layers() {
+    let source =
+        fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("src/protocol/semantic.rs"))
+            .expect("read protocol semantic");
+    for forbidden in [
+        "crate::inspect",
+        "crate::metainfo",
+        "crate::application",
+        "crate::tui",
+    ] {
+        assert!(
+            !source.contains(forbidden),
+            "protocol semantic must not depend on higher layer {forbidden}"
         );
     }
 }

@@ -3,14 +3,13 @@
 //! `inspect` 负责按扇区查看协议结构；本模块把多个已知扇区的结果汇总成一张设备/备份
 //! 元信息卡片，重点突出 onlyid、device_id、Dept、User、SAFE6 与分区摘要。
 
-use std::collections::BTreeMap;
 use std::io;
 use std::path::Path;
 
 use crate::common::SECTOR;
 use crate::crypto::crc32_bare;
 use crate::diskio::{self, BackupEntry};
-use crate::inspect::{self, InspectMeta, SectorView};
+use crate::protocol::semantic::{self, SemanticContext, SemanticContextSource};
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct OwnershipInfo {
@@ -51,64 +50,61 @@ pub struct MetaInfoSummary {
     pub partitions: Vec<PartitionInfo>,
 }
 
-fn field_value(view: &SectorView, label: &str) -> Option<String> {
-    view.fields
-        .iter()
-        .find(|field| field.label == label && !field.value.is_empty())
-        .map(|field| field.value.clone())
-}
-
-fn field_value_any(view: &SectorView, labels: &[&str]) -> Option<String> {
-    labels.iter().find_map(|label| field_value(view, label))
-}
-
-pub fn safe6_label_from_lba6(raw: &[u8], inspect_meta: &InspectMeta) -> Option<String> {
-    if raw.len() != SECTOR {
-        return None;
+fn context_from_backup_meta(meta: &diskio::BackupMeta) -> SemanticContext {
+    SemanticContext {
+        device_id: Some(meta.device_id.clone()),
+        vid: Some(meta.vid.clone()),
+        pid: Some(meta.pid.clone()),
+        size_bytes: meta
+            .secs
+            .and_then(|sectors| sectors.checked_mul(SECTOR as u64)),
+        onlyid: meta.onlyid.clone(),
     }
-    let view = inspect::analyze_sector(6, raw, inspect_meta);
-    field_value_any(&view, &["Label", "标签"])
 }
 
-fn child_value(view: &SectorView, label: &str) -> Option<String> {
-    view.fields
-        .iter()
-        .flat_map(|field| field.children.iter())
-        .find(|child| child.label == label && child.value != "<空>")
-        .map(|child| child.value.clone())
-}
-
-fn partitions(view: &SectorView, source: &str) -> Vec<PartitionInfo> {
-    let mut groups: BTreeMap<String, PartitionInfo> = BTreeMap::new();
-    for field in &view.fields {
-        let Some(group) = field.group.as_deref() else {
-            continue;
-        };
-        if !group.starts_with("Entry[") {
-            continue;
-        }
-        let item = groups
-            .entry(group.to_string())
-            .or_insert_with(|| PartitionInfo {
-                source: source.to_string(),
-                name: group.to_string(),
-                ..Default::default()
-            });
-        match field.label.as_str() {
-            "类型" => item.kind = Some(field.value.clone()),
-            "状态" => item.status = Some(field.value.clone()),
-            "起始 LBA" => item.start_lba = Some(field.value.clone()),
-            "大小" => item.size = Some(field.value.clone()),
-            _ => {}
-        }
+fn human_bytes(value: u64) -> String {
+    if value >= 1_000_000_000 {
+        format!("{:.2} GB", value as f64 / 1_000_000_000.0)
+    } else if value >= 1_000_000 {
+        format!("{:.2} MB", value as f64 / 1_000_000.0)
+    } else if value >= 1_000 {
+        format!("{:.2} KB", value as f64 / 1_000.0)
+    } else {
+        format!("{} B", value)
     }
-    groups.into_values().collect()
 }
 
-pub fn summarize<F>(base: &InspectMeta, mut read: F) -> io::Result<MetaInfoSummary>
+fn partition_info(partition: semantic::PartitionSemantics) -> PartitionInfo {
+    let role = match partition.partition_type {
+        1 => "Boot",
+        2 => "Share",
+        4 => "Encrypt",
+        _ => "未知",
+    };
+    PartitionInfo {
+        source: partition.source.to_string(),
+        name: format!("Entry[{}]", partition.index),
+        kind: Some(format!("{role} ({})", partition.partition_type)),
+        status: None,
+        start_lba: Some(partition.start_sector.to_string()),
+        size: Some(format!(
+            "{} B / {}",
+            partition.partition_size,
+            human_bytes(partition.partition_size)
+        )),
+    }
+}
+
+pub fn safe6_label_from_lba6<C: SemanticContextSource>(raw: &[u8], _context: &C) -> Option<String> {
+    semantic::safe6_label(raw)
+}
+
+pub fn summarize<C, F>(base: &C, mut read: F) -> io::Result<MetaInfoSummary>
 where
+    C: SemanticContextSource,
     F: FnMut(u32) -> io::Result<Vec<u8>>,
 {
+    let base = base.semantic_context();
     let raw0 = read(0)?;
     let raw4 = read(4)?;
     let raw6 = read(6)?;
@@ -133,11 +129,8 @@ where
         }
     }
 
-    let v6 = inspect::analyze_sector(6, &raw6, base);
-    let v7 = inspect::analyze_sector(7, &raw7, base);
-    let v8 = inspect::analyze_sector(8, &raw8, base);
-    let v11 = inspect::analyze_sector(11, &raw11, base);
-    let v12 = inspect::analyze_sector(12, &raw12, base);
+    let lba6 = semantic::lba6_view(&raw6);
+    let ownership = semantic::ownership_from_lba8(&raw8, &base).unwrap_or_default();
 
     let onlyid = diskio::lba4_label_id_from(&raw4).or_else(|| base.onlyid.clone());
     let device_crc32 = base
@@ -145,8 +138,15 @@ where
         .as_deref()
         .map(|id| format!("0x{:08X}", crc32_bare(id.as_bytes())));
 
-    let mut partition_rows = partitions(&v7, "LBA7");
-    partition_rows.extend(partitions(&v12, "LBA12"));
+    let mut partition_rows = semantic::lba7_partitions(&raw7, &base)
+        .into_iter()
+        .map(partition_info)
+        .collect::<Vec<_>>();
+    partition_rows.extend(
+        semantic::lba12_partitions(&raw12, &base)
+            .into_iter()
+            .map(partition_info),
+    );
 
     let is_nopwd = base.device_id.as_deref().and_then(|device_id| {
         let snapshot = |lba| match lba {
@@ -169,19 +169,31 @@ where
         pid: base.pid.clone(),
         size_bytes: base.size_bytes,
         ownership: OwnershipInfo {
-            glab: child_value(&v8, "GLab"),
-            dept: child_value(&v8, "Dept"),
-            user: child_value(&v8, "User"),
-            label: child_value(&v8, "Label"),
-            rmark: child_value(&v8, "Rmark"),
-            autonum: child_value(&v8, "Autonum"),
+            glab: ownership.glab,
+            dept: ownership.dept,
+            user: ownership.user,
+            label: ownership.label,
+            rmark: ownership.rmark,
+            autonum: ownership.autonum,
         },
-        safe6_label: field_value_any(&v6, &["Label", "标签"]),
-        safe6_user: field_value_any(&v6, &["User", "用户"]),
-        safe6_serial: field_value_any(&v6, &["m_usbGSerial 槽", "序列"]),
-        safe6_register: field_value(&v6, "注册标志"),
-        safe6_checksum: field_value(&v6, "校验和"),
-        pdkb_device_id: field_value(&v11, "PDKB device_id"),
+        safe6_label: semantic::safe6_label(&raw6),
+        safe6_user: semantic::safe6_user(&raw6),
+        safe6_serial: semantic::safe6_gserial(&raw6),
+        safe6_register: None,
+        safe6_checksum: lba6.as_ref().map(|view| {
+            let calculated = crate::crypto::lba6_checksum(&raw6[..0x1fc]);
+            if view.checksum == calculated {
+                format!("0x{:08X} / 计算 0x{:08X} ✓", view.checksum, calculated)
+            } else if view.checksum == calculated.wrapping_mul(2) {
+                format!(
+                    "0x{:08X} / 计算 0x{:08X} ×2 profile ✓",
+                    view.checksum, calculated
+                )
+            } else {
+                format!("0x{:08X} / 计算 0x{:08X} ✗", view.checksum, calculated)
+            }
+        }),
+        pdkb_device_id: semantic::pdkb_device_id(&raw11, &base),
         is_nopwd,
         partitions: partition_rows,
     })
@@ -189,23 +201,24 @@ where
 
 pub fn backup_ownership(entry: &BackupEntry) -> Option<OwnershipInfo> {
     let meta = entry.meta.as_ref()?;
-    let inspect_meta = InspectMeta::from_backup_meta(meta);
+    let context = context_from_backup_meta(meta);
     let raw = entry.lba8.as_ref()?;
-    ownership_from_lba8(raw, &inspect_meta)
+    ownership_from_lba8(raw, &context)
 }
 
-pub fn ownership_from_lba8(raw: &[u8], inspect_meta: &InspectMeta) -> Option<OwnershipInfo> {
-    if raw.len() != SECTOR {
-        return None;
-    }
-    let view = inspect::analyze_sector(8, raw, inspect_meta);
+pub fn ownership_from_lba8<C: SemanticContextSource>(
+    raw: &[u8],
+    context: &C,
+) -> Option<OwnershipInfo> {
+    let context = context.semantic_context();
+    let ownership = semantic::ownership_from_lba8(raw, &context)?;
     Some(OwnershipInfo {
-        glab: child_value(&view, "GLab"),
-        dept: child_value(&view, "Dept"),
-        user: child_value(&view, "User"),
-        label: child_value(&view, "Label"),
-        rmark: child_value(&view, "Rmark"),
-        autonum: child_value(&view, "Autonum"),
+        glab: ownership.glab,
+        dept: ownership.dept,
+        user: ownership.user,
+        label: ownership.label,
+        rmark: ownership.rmark,
+        autonum: ownership.autonum,
     })
 }
 
@@ -424,7 +437,10 @@ pub fn render_with_source(summary: &MetaInfoSummary, source: Option<&str>) -> St
     out
 }
 
-pub fn summarize_backup(path: &Path, meta: &InspectMeta) -> io::Result<MetaInfoSummary> {
+pub fn summarize_backup<C: SemanticContextSource>(
+    path: &Path,
+    meta: &C,
+) -> io::Result<MetaInfoSummary> {
     let data = crate::edpb::read_raw_protocol(path)
         .map_err(|message| io::Error::new(io::ErrorKind::InvalidData, message))?;
     summarize(meta, |lba| {

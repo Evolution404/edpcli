@@ -18,6 +18,7 @@ fn crc32_ieee_test(data: &[u8]) -> u32 {
 #[test]
 fn inspect_protocol_semantics_stay_routed_to_canonical_parsers() {
     let source = include_str!("../src/inspect.rs");
+    let semantic = include_str!("../src/protocol/semantic.rs");
     for parser in [
         "lba0::parse_lba0",
         "lba1::parse_lba1",
@@ -26,16 +27,34 @@ fn inspect_protocol_semantics_stay_routed_to_canonical_parsers() {
         "lba4::parse_lba4",
         "lba5::parse_lba5",
         "lba6::parse_lba6",
-        "lba7::parse_lba7",
-        "lba8::parse_lba8",
         "lba9::parse_lba9",
         "lba10::parse_lba10",
-        "lba11::parse_lba11",
-        "lba12::parse_lba12",
     ] {
         assert!(
             source.contains(parser),
             "Inspect canonical parser link missing: {parser}"
+        );
+    }
+    for parser in [
+        "lba7::parse_lba7",
+        "lba8::parse_lba8",
+        "lba11::parse_lba11",
+        "lba12::parse_lba12",
+    ] {
+        assert!(
+            semantic.contains(parser),
+            "typed semantic canonical parser link missing: {parser}"
+        );
+    }
+    for semantic_route in [
+        "semantic::infer_lba7",
+        "semantic::infer_lba8",
+        "semantic::infer_lba11",
+        "semantic::infer_lba12",
+    ] {
+        assert!(
+            source.contains(semantic_route),
+            "Inspect semantic route missing: {semantic_route}"
         );
     }
     for forbidden in [

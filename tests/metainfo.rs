@@ -1,10 +1,10 @@
 mod common;
 
 use common::*;
-use edpcli::inspect::InspectMeta;
 use edpcli::metainfo::{render, summarize};
+use edpcli::protocol::semantic::SemanticContext;
 
-fn meta_for(key: &str) -> InspectMeta {
+fn meta_for(key: &str) -> SemanticContext {
     let (device_id, vid, pid, sectors, onlyid) = match key {
         "netac" => (
             "disk&ven_netac&prod_onlydisk",
@@ -22,7 +22,7 @@ fn meta_for(key: &str) -> InspectMeta {
         ),
         other => panic!("unknown fixture metadata key: {other}"),
     };
-    InspectMeta {
+    SemanticContext {
         device_id: Some(device_id.into()),
         vid: Some(vid.into()),
         pid: Some(pid.into()),
@@ -53,6 +53,24 @@ fn aigo_summary_contains_identity_and_ownership() {
     assert_eq!(summary.safe6_label.as_deref(), Some("江苏电力!SAFE6"));
     assert_eq!(summary.safe6_user.as_deref(), Some("张玉玺"));
     assert!(!summary.partitions.is_empty());
+    for partition in &summary.partitions {
+        assert!(
+            partition
+                .kind
+                .as_deref()
+                .is_some_and(|kind| kind.contains(" (")),
+            "partition type presentation changed: {partition:?}"
+        );
+        assert!(
+            partition
+                .size
+                .as_deref()
+                .is_some_and(|size| size.contains(" / ")),
+            "partition size presentation changed: {partition:?}"
+        );
+        assert!(partition.status.is_none());
+    }
+    assert!(summary.safe6_register.is_none());
 
     edpcli::ui::set_enabled_for_tests(false);
     let out = render(&summary);

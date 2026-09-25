@@ -15,6 +15,7 @@ pub mod lba4;
 pub mod lba5;
 pub mod lba7_compat;
 pub mod profile;
+pub mod semantic;
 pub mod types;
 
 pub mod lba6;

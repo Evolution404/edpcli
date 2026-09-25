@@ -4,8 +4,11 @@ use encoding_rs::GBK;
 
 use crate::common::SECTOR;
 use crate::crypto::{a6b0_full, crc32_bare, lba6_checksum, lba6_decode, xor_rolling};
-use crate::inspect::{analyze_sector, InspectMeta};
 use crate::metainfo::{ownership_from_lba8, summarize};
+use crate::protocol::{
+    lba4,
+    semantic::{self, SemanticContext},
+};
 use crate::sectors::looks_nopwd;
 
 use super::{
@@ -65,12 +68,12 @@ impl ProvisionValidator {
         }
         validate_reserved(bytes)?;
         validate_mbr(spec, sector(bytes, 0))?;
-        let inspect_meta = inspect_meta(spec);
-        validate_lba4(spec, sector(bytes, 4), &inspect_meta)?;
+        let context = semantic_context(spec);
+        validate_lba4(spec, sector(bytes, 4))?;
         validate_lba6(spec, sector(bytes, 6))?;
         validate_lba7(spec, sector(bytes, 7))?;
-        validate_lba8(spec, sector(bytes, 8), &inspect_meta)?;
-        validate_lba11(spec, sector(bytes, 11), &inspect_meta)?;
+        validate_lba8(spec, sector(bytes, 8), &context)?;
+        validate_lba11(spec, sector(bytes, 11), &context)?;
         validate_lba12(spec, sector(bytes, 12))?;
 
         let snapshot = |lba: u32| -> crate::common::EdpCliResult<Vec<u8>> {
@@ -82,7 +85,7 @@ impl ProvisionValidator {
             return Err("generated image does not satisfy existing nopwd detector".into());
         }
 
-        let summary = summarize(&inspect_meta, |lba| {
+        let summary = summarize(&context, |lba| {
             Ok::<Vec<u8>, io::Error>(sector(bytes, lba as usize).to_vec())
         })
         .map_err(|err| format!("metainfo validation failed: {err}"))?;
@@ -109,8 +112,8 @@ fn sector(bytes: &[u8], lba: usize) -> &[u8] {
     &bytes[lba * SECTOR..(lba + 1) * SECTOR]
 }
 
-fn inspect_meta(spec: &ProvisionSpec) -> InspectMeta {
-    InspectMeta {
+fn semantic_context(spec: &ProvisionSpec) -> SemanticContext {
+    SemanticContext {
         device_id: Some(spec.target().device_id().to_string()),
         vid: Some(spec.target().vid_hex()),
         pid: Some(spec.target().pid_hex()),
@@ -161,19 +164,18 @@ fn validate_mbr(spec: &ProvisionSpec, raw: &[u8]) -> Result<(), String> {
     Ok(())
 }
 
-fn validate_lba4(spec: &ProvisionSpec, raw: &[u8], meta: &InspectMeta) -> Result<(), String> {
-    let view = analyze_sector(4, raw, meta);
+fn validate_lba4(spec: &ProvisionSpec, raw: &[u8]) -> Result<(), String> {
+    let raw_sector: &[u8; SECTOR] = raw.try_into().map_err(|_| "LBA4 sector length mismatch")?;
+    let view = lba4::parse_lba4(raw_sector, lba4::Lba4Context::default())
+        .map_err(|_| "LBA4 canonical parser rejected generated sector")?;
     let tag = ["$$$", spec.metadata().onlyid().text(), "$$$"].concat();
     if raw.get(..tag.len()) != Some(tag.as_bytes()) {
         return Err("LBA4 onlyid clear tag mismatch".into());
     }
-    if !view
-        .method
-        .contains(&format!("labelOnlyId={}", spec.metadata().onlyid().text()))
-    {
+    if view.onlyid_text != spec.metadata().onlyid().text() {
         return Err("LBA4 onlyid decoder round-trip failed".into());
     }
-    if view.decoded.get(0x39..0x3d) != Some(b"LLGB") {
+    if view.reader.bytes().get(0x39..0x3d) != Some(b"LLGB") {
         return Err("LBA4 LLGB magic mismatch".into());
     }
     let bits = spec.metadata().onlyid().bits();
@@ -185,7 +187,8 @@ fn validate_lba4(spec: &ProvisionSpec, raw: &[u8], meta: &InspectMeta) -> Result
     expected_node[0x25..0x29].copy_from_slice(&1u32.to_le_bytes());
     expected_node[0x29..0x2d].copy_from_slice(&[0x08, 0x04, 0x0c, 0x01]);
     let mut producer_node = view
-        .decoded
+        .reader
+        .bytes()
         .get(0x18..0x47)
         .ok_or("LBA4 decoded restore-node range missing")?
         .to_vec();
@@ -198,7 +201,7 @@ fn validate_lba4(spec: &ProvisionSpec, raw: &[u8], meta: &InspectMeta) -> Result
     if producer_node != expected_node {
         return Err("LBA4 current-writer restore-node profile mismatch".into());
     }
-    if view.decoded.get(0x1fc..0x200) != Some(b"LLGB") {
+    if view.reader.bytes().get(0x1fc..0x200) != Some(b"LLGB") {
         return Err("LBA4 trailing LLGB marker mismatch".into());
     }
 
@@ -360,7 +363,11 @@ fn expected_lba8_plain(spec: &ProvisionSpec) -> Result<[u8; SECTOR], String> {
     Ok(expected)
 }
 
-fn validate_lba8(spec: &ProvisionSpec, raw: &[u8], meta: &InspectMeta) -> Result<(), String> {
+fn validate_lba8(
+    spec: &ProvisionSpec,
+    raw: &[u8],
+    context: &SemanticContext,
+) -> Result<(), String> {
     let crc = crc32_bare(spec.target().device_id().as_bytes());
     let expected = expected_lba8_plain(spec)?;
     let logical_len = u32::from_le_bytes(expected[4..8].try_into().unwrap()) as usize;
@@ -371,7 +378,7 @@ fn validate_lba8(spec: &ProvisionSpec, raw: &[u8], meta: &InspectMeta) -> Result
     if decoded != expected {
         return Err("LBA8 LLGB/profile bytes mismatch".into());
     }
-    let ownership = ownership_from_lba8(raw, meta).ok_or("LBA8 ownership decoder failed")?;
+    let ownership = ownership_from_lba8(raw, context).ok_or("LBA8 ownership decoder failed")?;
     if ownership.glab.as_deref() != Some(spec.profile().glab())
         || ownership.user.as_deref() != Some(spec.metadata().user())
         || ownership.dept.as_deref() != Some(spec.metadata().dept())
@@ -383,17 +390,20 @@ fn validate_lba8(spec: &ProvisionSpec, raw: &[u8], meta: &InspectMeta) -> Result
     Ok(())
 }
 
-fn validate_lba11(spec: &ProvisionSpec, raw: &[u8], meta: &InspectMeta) -> Result<(), String> {
-    let view = analyze_sector(11, raw, meta);
-    if view.decoded.get(0x100..0x104) != Some(b"PDKB") {
+fn validate_lba11(
+    spec: &ProvisionSpec,
+    raw: &[u8],
+    context: &SemanticContext,
+) -> Result<(), String> {
+    let raw_sector: &[u8; SECTOR] = raw.try_into().map_err(|_| "LBA11 sector length mismatch")?;
+    let (view, _) = semantic::infer_lba11(raw_sector, context)
+        .ok_or("LBA11 PDKB decrypt failed for target VID/PID/capacity")?;
+    if view.decoded_pdkb().get(..4) != Some(b"PDKB") {
         return Err("LBA11 PDKB decrypt failed for target VID/PID/capacity".into());
     }
     let expected = spec.target().device_id();
-    let ok = view
-        .fields
-        .iter()
-        .any(|field| field.label == "PDKB device_id" && field.value == expected);
-    if !ok {
+    let actual = semantic::pdkb_device_id(raw, context).ok_or("LBA11 PDKB device_id missing")?;
+    if actual != expected {
         return Err("LBA11 PDKB device_id mismatch".into());
     }
     Ok(())
@@ -467,11 +477,11 @@ impl OfficialProvisionValidator {
     ) -> Result<OfficialProvisionValidation, String> {
         let bytes = image.as_bytes();
         validate_reserved(bytes)?;
-        let meta = inspect_meta(spec);
-        validate_lba4(spec, sector(bytes, 4), &meta)?;
+        let context = semantic_context(spec);
+        validate_lba4(spec, sector(bytes, 4))?;
         validate_lba6(spec, sector(bytes, 6))?;
-        validate_lba8(spec, sector(bytes, 8), &meta)?;
-        validate_lba11(spec, sector(bytes, 11), &meta)?;
+        validate_lba8(spec, sector(bytes, 8), &context)?;
+        validate_lba11(spec, sector(bytes, 11), &context)?;
 
         let logical = plan.logical_partitions(SECTOR as u64)?;
         let end = logical

@@ -10,9 +10,9 @@ use crate::common::{EXIT_BACKUP, EXIT_IO, EXIT_OK, SECTOR};
 use crate::diskio::{self, find_backups, raw_path, DiskFacts, FileDev, SectorReadCache};
 use crate::elevate;
 use crate::identify::identify;
-use crate::inspect::InspectMeta;
 use crate::inspect_cli::resolve_inspect_file;
 use crate::metainfo;
+use crate::protocol::semantic::SemanticContext;
 use crate::selectors::DeviceSelector;
 use crate::sysinfo::{self, CmdRunner};
 
@@ -78,7 +78,7 @@ fn backup_flow(opts: InfoOpts) -> i32 {
     };
     let source_label = path.display().to_string();
     let manifest = &verified.manifest;
-    let mut inspect_meta = InspectMeta {
+    let mut inspect_meta = SemanticContext {
         device_id: Some(manifest.device.device_id.clone()),
         vid: Some(manifest.device.vid.clone()),
         pid: Some(manifest.device.pid.clone()),
@@ -174,7 +174,7 @@ fn disk_flow(runner: &dyn CmdRunner, mut opts: InfoOpts) -> i32 {
     let size_bytes = total_sectors.and_then(|s| s.checked_mul(SECTOR as u64));
     let raw4 = reader.read_sector(4).ok();
     let onlyid = raw4.as_deref().and_then(diskio::lba4_label_id_from);
-    let inspect_meta = InspectMeta {
+    let inspect_meta = SemanticContext {
         device_id: device_id.clone(),
         vid: (vid != "xxxx").then_some(vid.clone()),
         pid: (pid != "xxxx").then_some(pid.clone()),

@@ -151,7 +151,7 @@ pub fn prepare_target_provision(
         request.password.as_bytes(),
     )?;
     let source_identity = if source.is_some() {
-        let base = crate::inspect::InspectMeta {
+        let base = crate::protocol::semantic::SemanticContext {
             device_id: Some(device_id.clone()),
             vid: None,
             pid: None,

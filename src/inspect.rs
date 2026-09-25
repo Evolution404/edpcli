@@ -66,6 +66,12 @@ impl InspectMeta {
     }
 }
 
+impl crate::protocol::semantic::SemanticContextSource for InspectMeta {
+    fn semantic_context(&self) -> crate::protocol::semantic::SemanticContext {
+        semantic_context(self)
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct SectorView {
     pub lba: u32,
@@ -673,22 +679,21 @@ fn edpf96_fields(base: usize, index: usize, entry: &EdpfEntry96) -> Vec<SectorFi
     ]
 }
 
+fn semantic_context(meta: &InspectMeta) -> crate::protocol::semantic::SemanticContext {
+    crate::protocol::semantic::SemanticContext {
+        device_id: meta.device_id.clone(),
+        vid: meta.vid.clone(),
+        pid: meta.pid.clone(),
+        size_bytes: meta.size_bytes,
+        onlyid: meta.onlyid.clone(),
+    }
+}
+
 fn infer_lba7(
     raw: &[u8; SECTOR],
     device_crc: u32,
 ) -> Option<(lba7::Lba7View, Lba7EntryCount, Lba7PassinfoVersion)> {
-    let mut matches = Vec::new();
-    for entry_count in [Lba7EntryCount::TwoEntry, Lba7EntryCount::ThreeEntry] {
-        for passinfo in [
-            Lba7PassinfoVersion::LegacyV0064,
-            Lba7PassinfoVersion::CurrentV0206,
-        ] {
-            if let Ok(view) = lba7::parse_lba7(raw, device_crc, entry_count, passinfo) {
-                matches.push((view, entry_count, passinfo));
-            }
-        }
-    }
-    (matches.len() == 1).then(|| matches.remove(0))
+    crate::protocol::semantic::infer_lba7(raw, device_crc)
 }
 
 fn infer_lba8(
@@ -700,74 +705,18 @@ fn infer_lba8(
     Vec<Lba8UsbOnlyInfo>,
     Vec<HostHardinfoSource>,
 )> {
-    let mut matches = Vec::new();
-    for usb_only_info in [
-        Lba8UsbOnlyInfo::Current,
-        Lba8UsbOnlyInfo::Transitional2019,
-        Lba8UsbOnlyInfo::StrictLegacyAbsent,
-    ] {
-        for host_hardinfo_source in [
-            HostHardinfoSource::CurrentZero,
-            HostHardinfoSource::LegacyHostIdentity,
-        ] {
-            let context = lba8::Lba8Context {
-                usb_only_info,
-                host_hardinfo_source,
-                main_onlyid: onlyid,
-            };
-            if let Ok(view) = lba8::parse_lba8(raw, device_crc, context) {
-                matches.push((view, usb_only_info, host_hardinfo_source));
-            }
-        }
-    }
-    let first = matches.first()?.0.clone();
-    let mut usb_profiles = Vec::new();
-    let mut host_profiles = Vec::new();
-    for (_, usb, host) in matches {
-        if !usb_profiles.contains(&usb) {
-            usb_profiles.push(usb);
-        }
-        if !host_profiles.contains(&host) {
-            host_profiles.push(host);
-        }
-    }
-    Some((first, usb_profiles, host_profiles))
+    crate::protocol::semantic::infer_lba8(raw, device_crc, onlyid)
 }
 
 fn infer_lba11(
     raw: &[u8; SECTOR],
     meta: &InspectMeta,
 ) -> Option<(lba11::Lba11View, Vec<Lba11Capacity>)> {
-    let vid = meta.vid.as_deref()?;
-    let pid = meta.pid.as_deref()?;
-    let size = meta.size_bytes?;
-    let mut matches = Vec::new();
-    for profile in [Lba11Capacity::DiskSize, Lba11Capacity::RepairChs] {
-        if let Ok(view) = lba11::parse_lba11(raw, vid, pid, size, profile) {
-            matches.push((view, profile));
-        }
-    }
-    let first = matches.first()?.0.clone();
-    Some((
-        first,
-        matches.into_iter().map(|(_, profile)| profile).collect(),
-    ))
+    crate::protocol::semantic::infer_lba11(raw, &semantic_context(meta))
 }
 
 fn infer_lba12(raw: &[u8; SECTOR], device_crc: u32) -> Option<(lba12::Lba12View, Vec<Lba12Mode>)> {
-    let mut matches = Vec::new();
-    for mode in [
-        Lba12Mode::LegacyV0064,
-        Lba12Mode::Mode1,
-        Lba12Mode::Mode2,
-        Lba12Mode::Mode3,
-    ] {
-        if let Ok(view) = lba12::parse_lba12(raw, device_crc, mode) {
-            matches.push((view, mode));
-        }
-    }
-    let first = matches.first()?.0.clone();
-    Some((first, matches.into_iter().map(|(_, mode)| mode).collect()))
+    crate::protocol::semantic::infer_lba12(raw, device_crc)
 }
 
 pub fn analyze_sector(lba: u32, raw: &[u8], meta: &InspectMeta) -> SectorView {

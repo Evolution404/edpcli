@@ -10,8 +10,8 @@ use std::path::Path;
 use crate::common::{fmt_gb, group_digits, EdpCliError, EXIT_IO, SECTOR};
 use crate::diskio::{self, find_backups, DiskFacts};
 use crate::identify::identify;
-use crate::inspect::InspectMeta;
 use crate::metainfo;
+use crate::protocol::semantic::SemanticContext;
 use crate::provision::{
     DiskProvisionKind, ExistingPartition, ExistingProvisionProfile, PartitionRole,
 };
@@ -150,7 +150,7 @@ pub fn scan_disks(
                 let lba4 = read_exact(4)?;
                 row.onlyid = diskio::lba4_label_id_from(&lba4);
                 if let Some(did) = &id.device_id {
-                    let meta = InspectMeta {
+                    let meta = SemanticContext {
                         device_id: Some(did.clone()),
                         vid: Some(d.vid.clone()),
                         pid: Some(d.pid.clone()),

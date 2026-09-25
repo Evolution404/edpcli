@@ -938,13 +938,25 @@ application 返回结构化 `ProvisionReport/BackupReport/InspectReport`，CLI/T
 - provision suite **176/176**、TUI suite **132/132**、R4 architecture gate **2/2** 通过；拆分只迁移职责边界，没有改变 LBA0～12/LCE 协议语义或写盘安全服务。
 - R4 最终 fast 门禁 **5.59s / 0 failures**，full 门禁 **29.83s / 0 failures**，8 个非 HIL suite 与 doctest 全绿。
 
-## Phase R5：`Inspect` `semantic` dependency 收敛
+## Phase R5：`Inspect` 与语义层依赖收敛
 
-1. 跨业务语义移入 typed protocol `semantic`；
-2. metainfo 改用 typed `semantic`；
-3. provision `validator` 改用 typed `semantic`；
-4. application::`inspect` 映射为 Field/View；
-5. `inspect`.rs 不再是其它 domain 的依赖中心。
+1. 跨业务语义移入类型化协议层 `protocol::semantic`；
+2. `metainfo` 改用类型化语义层；
+3. `provision::validate` 改用类型化语义层；
+4. `application::inspect` 消费检查展示适配结果并映射为应用层字段/视图；
+5. `inspect.rs` 不再是其它业务领域的依赖中心。
+
+### R5 实施状态（2026-09-25）
+
+**COMPLETE。**
+
+- 新增 `protocol::semantic` 类型化跨业务语义层，集中提供设备上下文、LBA6 SAFE6 文本、LBA7/LBA8/LBA11/LBA12 配置类型推断、LBA8 身份字段、PDKB `device_id` 与分区语义。
+- `metainfo` 已移除对 `crate::inspect`、`SectorView` 和展示字段名称/分组的依赖，直接消费类型化语义。
+- `provision::validate` 已移除对检查器展示模型的依赖；LBA4 直接调用规范解析器，LBA8/LBA11 通过语义层做往返语义验证。
+- 检查器的 LBA7/LBA8/LBA11/LBA12 配置类型推断改为调用同一语义层，再映射为 `Field/View`；不再复制跨业务推断逻辑。
+- 新增架构门禁：`metainfo.rs` 与 `provision/validate.rs` 禁止重新依赖 `crate::inspect`；`protocol::semantic` 禁止反向依赖展示层与应用层。
+- R5 定向验证：检查套件 **53/53**、制盘套件 **176/176**；架构门禁同时锁定消费侧和语义层反向依赖。
+- R5 最终 `fast` 门禁 **4.37s / 0 失败**，`full` 门禁 **9.30s / 退出码 0 / 0 失败**；macOS Plain `Virtual-HIL` **1/1** 通过，并完成弹出/重新挂载后的 exFAT 文件读回。真实 USB Phase 8 本轮未执行，仍保持未验收状态。
 
 ## Phase R6：进一步工程优化
 
