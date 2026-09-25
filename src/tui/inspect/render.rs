@@ -58,7 +58,8 @@ pub(super) fn draw_inspect(frame: &mut Frame, area: ratatui::layout::Rect, state
     };
     let block = Block::default()
         .borders(Borders::ALL)
-        .title("Inspect · h/l 切换 Tab · Ctrl-d/u 滚动");
+        .border_style(focused_panel())
+        .title("Inspect");
     let inner = block.inner(area);
     frame.render_widget(block, area);
     if inner.width == 0 || inner.height == 0 {
@@ -70,8 +71,8 @@ pub(super) fn draw_inspect(frame: &mut Frame, area: ratatui::layout::Rect, state
         .split(inner);
     let tabs = Tabs::new(["字段", "Decoded Hex", "Raw Hex"])
         .select(mode_index)
-        .style(muted())
-        .highlight_style(selected())
+        .style(tab())
+        .highlight_style(active_tab())
         .divider(Span::styled(" │ ", muted()));
     frame.render_widget(tabs, inspect_chunks[0]);
 
@@ -413,8 +414,8 @@ pub(super) fn draw_advanced_inspect(
             frame.render_widget(
                 Tabs::new(["结构树", "节点概览", "节点详情"])
                     .select(panel_index)
-                    .style(muted())
-                    .highlight_style(selected())
+                    .style(tab())
+                    .highlight_style(active_tab())
                     .divider(Span::styled(" │ ", muted())),
                 browser[0],
             );
@@ -491,9 +492,9 @@ pub(super) fn draw_advanced_inspect(
                     Line::from(vec![
                         Span::raw(indent),
                         Span::styled(
-                            if focused { "▶ " } else { "  " },
+                            if focused { "▌ " } else { "  " },
                             if focused {
-                                selected()
+                                selection_marker()
                             } else {
                                 Style::default()
                             },
@@ -506,7 +507,7 @@ pub(super) fn draw_advanced_inspect(
                         .block(
                             Block::default()
                                 .borders(Borders::ALL)
-                                .border_style(if tree_focus { accent() } else { muted() })
+                                .border_style(if tree_focus { focused_panel() } else { panel() })
                                 .title(format!(
                                     "结构树  {}/{}",
                                     selected_index.saturating_add(1),

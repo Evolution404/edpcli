@@ -9,7 +9,7 @@ use edpcli::tui::{
     render,
     state::{AppState, InspectMode, NavCommand},
 };
-use ratatui::{backend::TestBackend, Terminal};
+use ratatui::{backend::TestBackend, style::Modifier, Terminal};
 
 fn netac_edpb(tag: &str) -> Option<(common::TmpDir, PathBuf)> {
     let data = common::load_disk_image("netac")?;
@@ -93,13 +93,16 @@ fn render_inspect(state: &AppState) -> (String, String) {
         .expect("draw inspect");
     let cells = terminal.backend().buffer().content();
     let text = cells.iter().map(|cell| cell.symbol()).collect::<String>();
-    let selection = edpcli::tui::theme::current().palette().selection;
-    let highlighted = cells
+    let accent = edpcli::tui::theme::current().palette().accent;
+    let active_tab = cells
         .iter()
-        .filter(|cell| cell.style().bg == Some(selection))
+        .filter(|cell| {
+            cell.style().fg == Some(accent)
+                && cell.style().add_modifier.contains(Modifier::UNDERLINED)
+        })
         .map(|cell| cell.symbol())
         .collect::<String>();
-    (text, highlighted)
+    (text, active_tab)
 }
 
 #[test]

@@ -211,6 +211,34 @@ fn selected() -> Style {
     super::theme::current().selection()
 }
 
+fn selection_marker() -> Style {
+    super::theme::current().selection_marker()
+}
+
+fn panel() -> Style {
+    super::theme::current().panel()
+}
+
+fn focused_panel() -> Style {
+    super::theme::current().focused_panel()
+}
+
+fn tab() -> Style {
+    super::theme::current().tab()
+}
+
+fn active_tab() -> Style {
+    super::theme::current().active_tab()
+}
+
+fn input() -> Style {
+    super::theme::current().input()
+}
+
+fn input_focused() -> Style {
+    super::theme::current().input_focused()
+}
+
 fn provision_kind_style(kind: ProvisionKind) -> Style {
     super::theme::current().provision_kind(kind)
 }
@@ -443,6 +471,10 @@ fn draw_wizard(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState)
 
 pub fn draw(frame: &mut Frame, state: &AppState) {
     let area = frame.area();
+    frame.render_widget(
+        Block::default().style(super::theme::current().background()),
+        area,
+    );
     let (core_mode, core_activity) = if state.is_critical_operation() {
         (CoreMode::Guard, "SAFE TRANSACTION")
     } else if state.advanced_inspect().is_some() {
@@ -481,11 +513,7 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
         Span::styled("  ·  管理员模式", success()),
         animation::compact_indicator(state.animation_frame(), core_mode),
     ]))
-    .block(
-        Block::default()
-            .borders(Borders::ALL)
-            .border_style(accent()),
-    );
+    .block(Block::default().borders(Borders::ALL).border_style(panel()));
     frame.render_widget(title, chunks[0]);
 
     let workspace_index = match state.workspace() {
@@ -497,11 +525,11 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
         .block(
             Block::default()
                 .borders(Borders::ALL)
-                .border_style(accent())
-                .title("页面 · Tab / ← / → / h / l 切换"),
+                .border_style(focused_panel())
+                .title("工作区"),
         )
-        .style(muted())
-        .highlight_style(selected())
+        .style(tab())
+        .highlight_style(active_tab())
         .divider(Span::styled(" │ ", muted()))
         .padding("  ", "  ");
     frame.render_widget(workspace_tabs, chunks[1]);
@@ -736,11 +764,8 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
         }
     };
     frame.render_widget(
-        Paragraph::new(safe(&status)).block(
-            Block::default()
-                .borders(Borders::ALL)
-                .border_style(accent()),
-        ),
+        Paragraph::new(safe(&status))
+            .block(Block::default().borders(Borders::ALL).border_style(panel())),
         chunks[usize::from(has_notice) + 3],
     );
     if let Some(message) = state.notice() {

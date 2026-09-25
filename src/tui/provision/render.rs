@@ -107,7 +107,7 @@ pub(super) fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, sta
                     .title("制盘 · 先选择 USB 目标"),
             )
             .row_highlight_style(selected())
-            .highlight_symbol("▶ ");
+            .highlight_symbol("▌ ");
             let mut table_state = ratatui::widgets::TableState::default();
             if state.item_count() > 0 {
                 table_state.select(Some(state.selected()));
@@ -129,7 +129,7 @@ pub(super) fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, sta
             for (index, choice) in choices.iter().enumerate() {
                 lines.push(Line::from(if index == state.selected() {
                     vec![
-                        Span::styled("▶ ", selected()),
+                        Span::styled("▌ ", selection_marker()),
                         Span::styled(*choice, selected()),
                     ]
                 } else {
@@ -155,7 +155,7 @@ pub(super) fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, sta
                     .block(
                         Block::default()
                             .borders(Borders::ALL)
-                            .border_style(secondary())
+                            .border_style(focused_panel())
                             .title("制盘前保存"),
                     )
                     .wrap(Wrap { trim: true }),
@@ -179,7 +179,7 @@ pub(super) fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, sta
                 .block(
                     Block::default()
                         .borders(Borders::ALL)
-                        .border_style(secondary())
+                        .border_style(focused_panel())
                         .title("保存当前盘"),
                 ),
                 main_area,
@@ -212,12 +212,12 @@ pub(super) fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, sta
             .block(
                 Block::default()
                     .borders(Borders::ALL)
-                    .border_style(secondary())
+                    .border_style(focused_panel())
                     .title("制盘中心 · 选择方案")
                     .title_style(secondary()),
             )
             .row_highlight_style(selected())
-            .highlight_symbol("▶ ");
+            .highlight_symbol("▌ ");
             let mut table_state = TableState::default();
             table_state.select(Some(state.selected()));
             frame.render_stateful_widget(table, main_area, &mut table_state);
@@ -321,8 +321,12 @@ pub(super) fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, sta
                         .max(1);
 
                     spans.push(Span::styled(
-                        if active { "▶ " } else { "  " },
-                        if active { accent() } else { Style::default() },
+                        if active { "▌ " } else { "  " },
+                        if active {
+                            selection_marker()
+                        } else {
+                            Style::default()
+                        },
                     ));
                     spans.push(Span::styled(fit_display_width(label, label_width), muted()));
                     spans.push(Span::raw(" "));
@@ -345,7 +349,13 @@ pub(super) fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, sta
                     let shown_width = crate::ui::disp_width(&shown).min(value_width);
                     spans.push(Span::styled(
                         shown,
-                        if active { selected() } else { Style::default() },
+                        if editable_active {
+                            input_focused()
+                        } else if active {
+                            selected()
+                        } else {
+                            input()
+                        },
                     ));
                     if editable_active && shown_width < value_width {
                         spans.push(Span::raw(" ".repeat(value_width - shown_width)));
@@ -458,7 +468,7 @@ pub(super) fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, sta
                     .block(
                         Block::default()
                             .borders(Borders::ALL)
-                            .border_style(secondary())
+                            .border_style(focused_panel())
                             .title("实时布局"),
                     )
                     .wrap(Wrap { trim: false }),
@@ -482,7 +492,7 @@ pub(super) fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, sta
                 .block(
                     Block::default()
                         .borders(Borders::ALL)
-                        .border_style(secondary())
+                        .border_style(focused_panel())
                         .title("只读规划"),
                 ),
                 main_area,
@@ -692,7 +702,7 @@ pub(super) fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, sta
                     Line::from("镜像包含目标盘硬件身份和原始 LBA3，不应写入另一块不同 U 盘。"),
                     Line::from(vec![
                         Span::styled("输出路径  ", muted()),
-                        Span::styled(safe(&provision.export_path), selected()),
+                        Span::styled(safe(&provision.export_path), input_focused()),
                     ]),
                     Line::from(""),
                     Line::from("直接输入编辑路径 · Backspace 删除 · Enter 开始导出 · Esc 返回"),
@@ -700,7 +710,7 @@ pub(super) fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, sta
                 .block(
                     Block::default()
                         .borders(Borders::ALL)
-                        .border_style(secondary())
+                        .border_style(focused_panel())
                         .title("镜像导出"),
                 )
                 .wrap(Wrap { trim: true }),
@@ -724,7 +734,7 @@ pub(super) fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, sta
                 .block(
                     Block::default()
                         .borders(Borders::ALL)
-                        .border_style(secondary())
+                        .border_style(focused_panel())
                         .title("镜像导出"),
                 ),
                 main_area,
@@ -740,7 +750,7 @@ pub(super) fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, sta
                         Span::raw("精确输入 "),
                         Span::styled("YES", danger()),
                         Span::raw(" 后按 Enter： "),
-                        Span::styled(safe(&provision.confirmation), selected()),
+                        Span::styled(safe(&provision.confirmation), input_focused()),
                     ]),
                     Line::from(""),
                     Line::from(Span::styled("Esc 返回计划页，不会写盘。", warning())),

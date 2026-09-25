@@ -141,8 +141,8 @@ fn filtered_backup_workspace_renders_only_matching_rows() {
     assert!(text.contains("Bob"), "{text}");
     assert!(!text.contains("Alice"), "{text}");
     assert!(
-        text.contains("▶"),
-        "focused backup row must render ▶: {text}"
+        text.contains("▌"),
+        "focused backup row must render ▌: {text}"
     );
     assert!(text.contains("1/2"), "{text}");
 }

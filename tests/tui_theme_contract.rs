@@ -1,8 +1,12 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use edpcli::tui::theme::{Theme, ThemeMode};
-use ratatui::style::Color;
+use edpcli::tui::{
+    render,
+    state::AppState,
+    theme::{Theme, ThemeMode},
+};
+use ratatui::{backend::TestBackend, style::Color, Terminal};
 
 fn rust_files(root: &Path, out: &mut Vec<PathBuf>) {
     for entry in
@@ -96,4 +100,20 @@ fn selection_is_not_the_old_black_on_cyan_highlight() {
     assert_eq!(style.bg, Some(Color::Rgb(0x26, 0x34, 0x42)));
     assert_ne!(style.fg, Some(Color::Black));
     assert_ne!(style.bg, Some(Color::Cyan));
+}
+
+#[test]
+fn root_canvas_uses_theme_background_at_supported_sizes() {
+    let state = AppState::new();
+    let background = edpcli::tui::theme::current().palette().background;
+    for (width, height) in [(40, 10), (60, 18), (80, 24), (120, 36)] {
+        let backend = TestBackend::new(width, height);
+        let mut terminal = Terminal::new(backend).expect("test terminal");
+        terminal.draw(|frame| render::draw(frame, &state)).unwrap();
+        assert_eq!(
+            terminal.backend().buffer()[(0, 0)].style().bg,
+            Some(background),
+            "root background at {width}x{height}"
+        );
+    }
 }

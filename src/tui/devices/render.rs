@@ -104,11 +104,12 @@ pub(super) fn draw_devices(frame: &mut Frame, area: ratatui::layout::Rect, state
         .block(
             Block::default()
                 .borders(Borders::ALL)
+                .border_style(focused_panel())
                 .title(title)
                 .title_style(secondary()),
         )
         .row_highlight_style(selected())
-        .highlight_symbol("▶ ");
+        .highlight_symbol("▌ ");
         let mut table_state = TableState::default();
         table_state.select(Some(state.selected().saturating_sub(window_start)));
         frame.render_stateful_widget(table, list_area, &mut table_state);

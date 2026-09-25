@@ -156,11 +156,12 @@ pub(super) fn draw_backups(frame: &mut Frame, area: ratatui::layout::Rect, state
         .block(
             Block::default()
                 .borders(Borders::ALL)
+                .border_style(focused_panel())
                 .title(title)
                 .title_style(secondary()),
         )
         .row_highlight_style(selected())
-        .highlight_symbol("▶ ");
+        .highlight_symbol("▌ ");
         let mut table_state = TableState::default();
         table_state.select(Some(state.selected().saturating_sub(window_start)));
         frame.render_stateful_widget(table, backup_parts[1], &mut table_state);
@@ -355,7 +356,7 @@ pub(super) fn draw_backup_batch_delete(
                     Span::raw("精确输入 "),
                     Span::styled("YES", danger()),
                     Span::raw(" 后按 Enter： "),
-                    Span::styled(safe(&batch.confirmation), selected()),
+                    Span::styled(safe(&batch.confirmation), input_focused()),
                 ]),
             ]);
         }
@@ -409,7 +410,7 @@ pub(super) fn draw_backup_prune(frame: &mut Frame, area: ratatui::layout::Rect, 
             lines.extend([
                 Line::from(vec![
                     Span::styled("每组保留最近 N 份快照: ", accent()),
-                    Span::styled(safe(&prune.keep_input), selected()),
+                    Span::styled(safe(&prune.keep_input), input_focused()),
                 ]),
                 Line::from("仅输入正整数；Enter 生成只读清理计划，Esc 取消。"),
             ]);
@@ -453,7 +454,7 @@ pub(super) fn draw_backup_prune(frame: &mut Frame, area: ratatui::layout::Rect, 
                     Span::raw("精确输入 "),
                     Span::styled("YES", danger()),
                     Span::raw(" 后按 Enter： "),
-                    Span::styled(safe(&prune.confirmation), selected()),
+                    Span::styled(safe(&prune.confirmation), input_focused()),
                 ]),
             ]);
         }

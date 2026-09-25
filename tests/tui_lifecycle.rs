@@ -5,7 +5,7 @@ use edpcli::tui::{
     render,
     state::{AppState, NavCommand, ProvisionStage, Workspace},
 };
-use ratatui::{backend::TestBackend, Terminal};
+use ratatui::{backend::TestBackend, style::Modifier, Terminal};
 
 fn usb_device() -> edpcli::disk_scan::Row {
     edpcli::disk_scan::Row {
@@ -83,8 +83,8 @@ fn device_list_shows_ven_prod_and_onlyid_and_enter_shortcut() {
     assert!(text.contains("1987718388"), "{text}");
     assert!(text.replace(' ', "").contains("Enter制盘"), "{text}");
     assert!(
-        text.contains("▶"),
-        "focused device row must render ▶: {text}"
+        text.contains("▌"),
+        "focused device row must render ▌: {text}"
     );
     assert!(!text.contains("Apply"), "{text}");
 }
@@ -419,26 +419,30 @@ fn advanced_inspect_tree_browser_renders_and_navigates_across_terminal_sizes() {
         .iter()
         .map(|cell| cell.symbol())
         .collect::<String>();
-    let selection = edpcli::tui::theme::current().palette().selection;
-    let highlighted = buffer
+    let palette = edpcli::tui::theme::current().palette();
+    let selection = palette.selection;
+    let active_tab = buffer
         .content()
         .iter()
-        .filter(|cell| cell.style().bg == Some(selection))
+        .filter(|cell| {
+            cell.style().fg == Some(palette.accent)
+                && cell.style().add_modifier.contains(Modifier::UNDERLINED)
+        })
         .map(|cell| cell.symbol())
         .collect::<String>();
     assert!(
-        highlighted.replace(' ', "").contains("结构树"),
-        "active Inspect panel tab should use the shared selection style: {highlighted}"
+        active_tab.replace(' ', "").contains("结构树"),
+        "active Inspect panel tab should use active-tab style: {active_tab}"
     );
     assert_eq!(
-        text.matches('▶').count(),
+        text.matches('▌').count(),
         1,
-        "▶ must identify the single keyboard-focused tree row: {text}"
+        "▌ must identify the single keyboard-focused tree row: {text}"
     );
     let focus_row = buffer
         .content()
         .chunks(120)
-        .find(|row| row.iter().any(|cell| cell.symbol() == "▶"))
+        .find(|row| row.iter().any(|cell| cell.symbol() == "▌"))
         .expect("focused tree row");
     let last_highlighted = focus_row
         .iter()
@@ -507,17 +511,20 @@ fn advanced_inspect_tree_browser_renders_and_navigates_across_terminal_sizes() {
         assert!(compact.contains("结构树"), "{text}");
         assert!(compact.contains("节点概览"), "{text}");
         assert!(compact.contains("节点详情"), "{text}");
-        let highlighted = terminal
+        let active_tab = terminal
             .backend()
             .buffer()
             .content()
             .iter()
-            .filter(|cell| cell.style().bg == Some(selection))
+            .filter(|cell| {
+                cell.style().fg == Some(palette.accent)
+                    && cell.style().add_modifier.contains(Modifier::UNDERLINED)
+            })
             .map(|cell| cell.symbol())
             .collect::<String>();
         assert!(
-            highlighted.replace(' ', "").contains("节点详情"),
-            "Detail focus must be visible in the shared Inspect tabs: {highlighted}"
+            active_tab.replace(' ', "").contains("节点详情"),
+            "Detail focus must be visible in the shared Inspect tabs: {active_tab}"
         );
     }
 
@@ -546,7 +553,7 @@ fn advanced_inspect_tree_browser_renders_and_navigates_across_terminal_sizes() {
             .contains(&selected_label.replace(' ', "")),
         "narrow layout lost selected tree node {selected_label}: {text}"
     );
-    assert_eq!(text.matches('▶').count(), 1, "{text}");
+    assert_eq!(text.matches('▌').count(), 1, "{text}");
     assert_eq!(
         state.advanced_inspect().unwrap().tree_selected,
         selected_before,
