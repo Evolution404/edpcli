@@ -549,6 +549,82 @@ fn jump_and_search_prompts_render_at_small_medium_and_wide_sizes() {
 }
 
 #[test]
+fn structured_search_next_and_previous_cycle_all_cached_matches() {
+    let mut first = item(0, true);
+    let mut second = item(1, true);
+    second.fields = vec![InspectField {
+        range: AbsoluteByteRange {
+            start: edpcli::common::SECTOR as u64,
+            end_exclusive: edpcli::common::SECTOR as u64 + 2,
+        },
+        field_type: InspectFieldType::Identity,
+        raw: vec![0x12, 0x01],
+        decoded: vec![0xA5, 0x01],
+        status: InspectFieldStatus::Known,
+        label: "KnownField".into(),
+        value: "second-match".into(),
+        style: FieldStyle::Identity,
+        group: Some("test".into()),
+        children: Vec::new(),
+    }];
+    first.fields[0].value = "first-match".into();
+
+    let mut state = AppState::new();
+    assert!(state.begin_advanced_inspect(AdvancedInspectSource::Disk(6)));
+    state.advanced_inspect_finish(Ok(workspace(vec![first, second])));
+
+    state.advanced_inspect_search("KnownField").unwrap();
+    assert_eq!(
+        state.advanced_inspect_selected_field().unwrap().value,
+        "first-match"
+    );
+    state.advanced_inspect_search_next(false).unwrap();
+    assert_eq!(
+        state.advanced_inspect_selected_field().unwrap().value,
+        "second-match"
+    );
+    state.advanced_inspect_search_next(false).unwrap();
+    assert_eq!(
+        state.advanced_inspect_selected_field().unwrap().value,
+        "first-match"
+    );
+    state.advanced_inspect_search_next(true).unwrap();
+    assert_eq!(
+        state.advanced_inspect_selected_field().unwrap().value,
+        "second-match"
+    );
+}
+
+#[test]
+fn sector_inspector_supports_row_sector_and_half_page_vim_navigation() {
+    let mut state = AppState::new();
+    assert!(state.begin_advanced_inspect(AdvancedInspectSource::Disk(6)));
+    state.advanced_inspect_finish(Ok(workspace(vec![item(0, true)])));
+    select_protocol_lba0(&mut state);
+    assert!(state.advanced_inspect_open_selected_sector().is_none());
+
+    state.advanced_inspect_sector_set_cursor(37);
+    state.advanced_inspect_sector_row_start();
+    assert_eq!(state.advanced_inspect_sector().unwrap().cursor, 32);
+    state.advanced_inspect_sector_row_end();
+    assert_eq!(state.advanced_inspect_sector().unwrap().cursor, 47);
+    state.advanced_inspect_sector_top();
+    assert_eq!(state.advanced_inspect_sector().unwrap().cursor, 0);
+    state.advanced_inspect_sector_half_page(false);
+    assert_eq!(state.advanced_inspect_sector().unwrap().cursor, 128);
+    state.advanced_inspect_sector_half_page(true);
+    assert_eq!(state.advanced_inspect_sector().unwrap().cursor, 0);
+    state.advanced_inspect_sector_bottom();
+    assert_eq!(state.advanced_inspect_sector().unwrap().cursor, 511);
+
+    state.advanced_inspect_sector_toggle_field();
+    assert!(state.advanced_inspect_sector().unwrap().field_expanded);
+    state.advanced_inspect_begin_search();
+    assert!(state.advanced_inspect_sector().is_none());
+    assert!(state.advanced_inspect_prompt().is_some());
+}
+
+#[test]
 fn narrow_sector_inspector_keeps_selected_byte_visible_without_mutating_cursor() {
     let mut state = AppState::new();
     assert!(state.begin_advanced_inspect(AdvancedInspectSource::Disk(6)));

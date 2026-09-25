@@ -150,6 +150,11 @@ pub const INSPECT_HELP: &[HelpBinding] = &[
         action: TuiAction::Search,
     },
     HelpBinding {
+        keys: "n/N",
+        label: "Match",
+        action: TuiAction::NextMatch,
+    },
+    HelpBinding {
         keys: "gl",
         label: "Goto",
         action: TuiAction::InspectJump,

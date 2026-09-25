@@ -240,12 +240,68 @@ fn provision_form_enter_generates_plan_instead_of_editing_or_toggling() {
 }
 
 #[test]
+fn user_visible_inspect_hints_point_to_full_disk_tree_entry() {
+    let devices = include_str!("../src/tui/devices/render.rs");
+    assert!(devices.contains("gi"));
+    assert!(!devices
+        .contains("Span::styled(\"i\", accent()),\n                    Span::raw(\" Inspect"));
+
+    let event_loop = include_str!("../src/tui/mod.rs");
+    assert!(event_loop.contains("NavCommand::OpenInspect =>"));
+    assert!(!event_loop.contains("OpenAdvancedInspect"));
+}
+
+#[test]
+fn legacy_flat_inspect_state_worker_and_renderer_are_removed() {
+    let state = include_str!("../src/tui/state.rs");
+    let inspect_state = include_str!("../src/tui/inspect/state.rs");
+    let task = include_str!("../src/tui/task.rs");
+    let inspect_task = include_str!("../src/tui/inspect/task.rs");
+    let render = include_str!("../src/tui/inspect/render.rs");
+
+    assert!(!state.contains("inspect_data:"));
+    assert!(!state.contains("inspect_pending:"));
+    assert!(!inspect_state.contains("struct InspectState"));
+    assert!(!task.contains("WorkerResult::Inspect"));
+    assert!(!task.contains("InspectRequest"));
+    assert!(!inspect_task.contains("request_inspect_disk"));
+    assert!(!inspect_task.contains("request_inspect_backup"));
+    assert!(!render.contains("fn draw_inspect("));
+}
+
+#[test]
 fn event_loop_does_not_parse_text_or_confirmation_chars_outside_keymap() {
     let source = include_str!("../src/tui/mod.rs");
     assert!(
         !source.contains("ct_event::KeyCode::Char(ch)"),
         "text/confirmation character handling must go through KeyMapper"
     );
+}
+
+#[test]
+fn sector_inspector_dispatches_the_documented_vim_actions() {
+    let source = include_str!("../src/tui/mod.rs");
+    for action in [
+        "TuiAction::Toggle",
+        "TuiAction::RowStart",
+        "TuiAction::RowEnd",
+        "TuiAction::Top",
+        "TuiAction::Bottom",
+        "TuiAction::HalfPageUp",
+        "TuiAction::HalfPageDown",
+        "TuiAction::NextMatch",
+        "TuiAction::PreviousMatch",
+    ] {
+        assert!(
+            source.contains(action),
+            "Sector Inspector event loop missing {action}"
+        );
+    }
+    let render = include_str!("../src/tui/inspect/render.rs");
+    assert!(render.contains("0/$"));
+    assert!(render.contains("gg/G"));
+    assert!(render.contains("Ctrl-u/d"));
+    assert!(render.contains("/ n/N"));
 }
 
 #[test]

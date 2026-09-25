@@ -14,10 +14,6 @@ mod tui_contract;
 mod tui_device_detail;
 #[path = "tui_elevation_resume.rs"]
 mod tui_elevation_resume;
-#[path = "tui_inspect_scroll.rs"]
-mod tui_inspect_scroll;
-#[path = "tui_inspect_workspace.rs"]
-mod tui_inspect_workspace;
 #[path = "tui_keymap_contract.rs"]
 mod tui_keymap_contract;
 #[path = "tui_lifecycle.rs"]

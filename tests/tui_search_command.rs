@@ -120,6 +120,18 @@ fn command_palette_has_task_semantics_not_shell_semantics() {
 }
 
 #[test]
+fn inspect_palette_has_one_user_visible_full_disk_action() {
+    assert_eq!(parse_command("inspect").unwrap(), PaletteAction::Inspect);
+    assert!(parse_command("advanced-inspect").is_err());
+    assert!(parse_command("inspect-advanced").is_err());
+    assert!(parse_command("ai").is_err());
+    let source = include_str!("../src/tui/mod.rs");
+    assert!(source.contains("NavCommand::OpenInspect =>"));
+    assert!(!source.contains("OpenAdvancedInspect"));
+    assert!(source.contains("state.begin_advanced_inspect(source)"));
+}
+
+#[test]
 fn escape_clears_palette_input_without_exiting() {
     let mut state = AppState::new();
     state.navigate(NavCommand::CommandPalette, 20);

@@ -11,8 +11,8 @@ use ratatui::{
 };
 
 use super::state::{
-    AppState, InputMode, InspectMode, ProvisionBarKind, ProvisionKind, ProvisionPrepared,
-    ProvisionStage, WizardStage, Workspace, WriteKind,
+    AppState, InputMode, ProvisionBarKind, ProvisionKind, ProvisionPrepared, ProvisionStage,
+    WizardStage, Workspace, WriteKind,
 };
 use super::{animation, animation::CoreMode};
 
@@ -30,7 +30,7 @@ use backups_render::{
     draw_backups, write_progress_text,
 };
 use devices_render::draw_devices;
-use inspect_render::{draw_advanced_inspect, draw_inspect};
+use inspect_render::draw_advanced_inspect;
 use provision_render::draw_provision;
 
 fn backup_health(backup: &crate::application::BackupWorkspaceItem) -> (&'static str, Style) {
@@ -340,8 +340,7 @@ fn draw_command_palette(frame: &mut Frame, area: ratatui::layout::Rect, state: &
         "devices  切到设备",
         "backups  切到备份",
         "provision 制盘/免密改造",
-        "inspect  打开 Inspect",
-        "advanced-inspect  任意 LBA / decode / meta / 导出",
+        "inspect  全盘结构树 / Sector Inspector",
         "restore  Restore 安全向导",
         "backup-create  备份当前设备",
         "backup-verify  校验当前备份",
@@ -368,33 +367,6 @@ fn draw_command_palette(frame: &mut Frame, area: ratatui::layout::Rect, state: &
             .wrap(Wrap { trim: true }),
         area,
     );
-}
-
-fn plain_hex_lines(data: &[u8]) -> Vec<Line<'static>> {
-    data.chunks(16)
-        .enumerate()
-        .map(|(line_no, chunk)| {
-            let offset = line_no * 16;
-            let mut hex = String::new();
-            let mut ascii = String::new();
-            for i in 0..16 {
-                if i == 8 {
-                    hex.push(' ');
-                }
-                if let Some(byte) = chunk.get(i) {
-                    hex.push_str(&format!("{byte:02X} "));
-                    ascii.push(if (0x20..=0x7e).contains(byte) {
-                        *byte as char
-                    } else {
-                        '.'
-                    });
-                } else {
-                    hex.push_str("   ");
-                }
-            }
-            Line::from(format!("+0x{offset:03X}: {hex} {ascii}"))
-        })
-        .collect()
 }
 
 fn draw_wizard(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState) {
@@ -478,9 +450,7 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
     let (core_mode, core_activity) = if state.is_critical_operation() {
         (CoreMode::Guard, "SAFE TRANSACTION")
     } else if state.advanced_inspect().is_some() {
-        (CoreMode::Busy, "高级检查")
-    } else if state.inspect_pending() {
-        (CoreMode::Busy, "READ LBA0-12")
+        (CoreMode::Busy, "全盘检查")
     } else if state.active_scan_pending() {
         (CoreMode::Busy, "BACKGROUND SCAN")
     } else if state.wizard().is_some()
@@ -545,7 +515,6 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
 
     let body = chunks[2];
     let overlay_active = state.advanced_inspect().is_some()
-        || state.inspect_data().is_some()
         || state.backup_delete().is_some()
         || state.backup_batch_delete().is_some()
         || state.backup_create_choice().is_some()
@@ -565,8 +534,6 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
 
     if state.advanced_inspect().is_some() {
         draw_advanced_inspect(frame, content_area, state);
-    } else if state.inspect_data().is_some() {
-        draw_inspect(frame, content_area, state);
     } else if state.backup_create_choice().is_some() {
         draw_backup_create_choice(frame, content_area, state);
     } else if state.backup_delete().is_some() {
@@ -593,7 +560,7 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
                     "工作区: gt/gT 循环 · gd/gb/gp/gi 直达 · Panel: Tab/Shift-Tab 或 Ctrl-w h/j/k/l/w/W",
                 ));
                 help_lines.push(Line::from(
-                    "Inspect: gl 跳转 · Sector v 循环 Raw/Decode/Mixed · 备份: Space 多选 · d 删除 · a 新建",
+                    "Inspect: / 搜索 · n/N 匹配 · gl 跳转 · Sector 0/$、gg/G、v · 备份: Space 多选 · d 删除 · a 新建",
                 ));
                 help_lines.push(Line::from(
                     "制盘: Normal 下 i 编辑、Enter 生成计划；Insert 下 Enter/Esc 完成编辑；物理写盘保持精确输入 YES 的安全确认",
@@ -639,21 +606,21 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
         match advanced.stage {
             AdvancedInspectStage::Running => "全盘检查后台只读建立结构树…".to_string(),
             AdvancedInspectStage::Browser => {
-                "全盘检查：j/k 移动 · h/l 折叠/展开 · o 切换 · Enter 查看 · gl 跳转 · Tab/Ctrl-w 面板 · Esc 返回".to_string()
+                if let Some((query, index, total)) = state.advanced_inspect_search_status() {
+                    format!(
+                        "全盘检查：j/k 移动 · h/l 折叠/展开 · Enter 查看 · / 搜索 · n/N 匹配 · gl 跳转 · 当前 {index}/{total}: {}",
+                        safe(query)
+                    )
+                } else {
+                    "全盘检查：j/k 移动 · h/l 折叠/展开 · Enter 查看 · / 搜索 · n/N 匹配 · gl 跳转 · Tab/Ctrl-w 面板 · Esc 返回".to_string()
+                }
             }
         }
     } else if state.input_mode() == InputMode::Search {
-        if state.inspect_data().is_some() {
-            format!(
-                "/{}  ·  Enter 搜索  ·  Esc 取消编辑",
-                safe(state.input_buffer())
-            )
-        } else {
-            format!(
-                "/{}  ·  输入即过滤  ·  Enter 确认  ·  Esc 取消编辑",
-                safe(state.input_buffer())
-            )
-        }
+        format!(
+            "/{}  ·  输入即过滤  ·  Enter 确认  ·  Esc 取消编辑",
+            safe(state.input_buffer())
+        )
     } else if state.input_mode() == InputMode::Command {
         format!(
             ":{}  ·  Enter 执行  ·  Backspace 删除  ·  Esc 取消",
@@ -700,8 +667,6 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
             BackupPruneStage::Running => "q / Ctrl-C 延迟退出".to_string(),
             BackupPruneStage::Result => "Enter / Esc 关闭".to_string(),
         }
-    } else if state.inspect_data().is_some() {
-        "j/k LBA  ·  v 循环 Fields/Decode/Raw  ·  / 搜索  ·  Esc/q 返回".to_string()
     } else {
         match state.workspace() {
             Workspace::Devices => {

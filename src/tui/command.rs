@@ -8,7 +8,6 @@ pub enum PaletteAction {
     Backups,
     Provision,
     Inspect,
-    AdvancedInspect,
     Restore,
     BackupCreate,
     BackupCreateDeep,
@@ -32,7 +31,6 @@ pub fn parse_command(input: &str) -> Result<PaletteAction, String> {
         "backups" | "backup" | "b" => Ok(PaletteAction::Backups),
         "provision" | "make" | "p" => Ok(PaletteAction::Provision),
         "inspect" | "i" => Ok(PaletteAction::Inspect),
-        "advanced-inspect" | "inspect-advanced" | "ai" => Ok(PaletteAction::AdvancedInspect),
         "restore" | "r" => Ok(PaletteAction::Restore),
         "backup-create" | "create-backup" | "bc" => Ok(PaletteAction::BackupCreate),
         "backup-deep" | "deep-backup" | "bdp" => Ok(PaletteAction::BackupCreateDeep),
@@ -71,9 +69,8 @@ mod tests {
         assert_eq!(parse_command("list").unwrap(), PaletteAction::Devices);
         assert_eq!(parse_command("info").unwrap(), PaletteAction::Devices);
         assert!(parse_command("convert").is_err());
-        assert_eq!(
-            parse_command("advanced-inspect").unwrap(),
-            PaletteAction::AdvancedInspect
-        );
+        assert!(parse_command("advanced-inspect").is_err());
+        assert!(parse_command("inspect-advanced").is_err());
+        assert!(parse_command("ai").is_err());
     }
 }

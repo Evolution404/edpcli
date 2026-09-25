@@ -155,7 +155,7 @@ pub(super) fn draw_devices(frame: &mut Frame, area: ratatui::layout::Rect, state
                     secondary().add_modifier(Modifier::BOLD),
                 )),
                 Line::from(vec![
-                    Span::styled("i", accent()),
+                    Span::styled("gi", accent()),
                     Span::raw(" Inspect    "),
                     Span::styled("b", accent()),
                     Span::raw(" 新建备份"),

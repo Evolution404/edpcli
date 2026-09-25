@@ -1,90 +1,5 @@
 use super::*;
 
-pub(super) fn draw_inspect(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState) {
-    let Some(workspace) = state.inspect_data() else {
-        return;
-    };
-    let Some(selected_index) = state.inspect_selected_lba() else {
-        return;
-    };
-    let Some(item) = workspace.items.get(selected_index as usize) else {
-        return;
-    };
-    let mode = state.inspect_mode().unwrap_or(InspectMode::Fields);
-    let method = item.method.as_deref().unwrap_or("raw");
-    let mut lines = vec![
-        Line::from(format!("来源: {}", safe(&workspace.source))),
-        Line::from(format!("LBA{} · {}", item.lba, safe(method))),
-        Line::from(""),
-    ];
-    match mode {
-        InspectMode::Fields => {
-            if item.fields.is_empty() {
-                lines.push(Line::from("未检测到已知结构化字段。"));
-            } else {
-                for field in &item.fields {
-                    let group = field
-                        .group
-                        .as_deref()
-                        .map(|value| format!("{} · ", safe(value)))
-                        .unwrap_or_default();
-                    lines.push(Line::from(format!(
-                        "{group}{}  {}",
-                        safe(&field.label),
-                        safe(&field.value)
-                    )));
-                    for child in &field.children {
-                        lines.push(Line::from(format!(
-                            "  └─ {}  {}",
-                            safe(&child.label),
-                            safe(&child.value)
-                        )));
-                    }
-                }
-            }
-            for note in &item.notes {
-                lines.push(Line::from(format!("注: {}", safe(note))));
-            }
-        }
-        InspectMode::DecodedHex => lines.extend(plain_hex_lines(
-            item.decoded.as_deref().unwrap_or(item.raw.as_slice()),
-        )),
-        InspectMode::RawHex => lines.extend(plain_hex_lines(&item.raw)),
-    }
-    let mode_index = match mode {
-        InspectMode::Fields => 0,
-        InspectMode::DecodedHex => 1,
-        InspectMode::RawHex => 2,
-    };
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .border_style(focused_panel())
-        .title("Inspect");
-    let inner = block.inner(area);
-    frame.render_widget(block, area);
-    if inner.width == 0 || inner.height == 0 {
-        return;
-    }
-    let inspect_chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([Constraint::Length(1), Constraint::Min(1)])
-        .split(inner);
-    let tabs = Tabs::new(["字段", "Decoded Hex", "Raw Hex"])
-        .select(mode_index)
-        .style(tab())
-        .highlight_style(active_tab())
-        .divider(Span::styled(" │ ", muted()));
-    frame.render_widget(tabs, inspect_chunks[0]);
-
-    let scroll = state.inspect_scroll().unwrap_or(0).min(u16::MAX as usize) as u16;
-    frame.render_widget(
-        Paragraph::new(lines)
-            .wrap(Wrap { trim: false })
-            .scroll((scroll, 0)),
-        inspect_chunks[1],
-    );
-}
-
 fn inspect_field_status_style(status: crate::application::inspect::InspectFieldStatus) -> Style {
     match status {
         crate::application::inspect::InspectFieldStatus::Known => accent(),
@@ -323,7 +238,7 @@ fn draw_sector_inspector(frame: &mut Frame, area: ratatui::layout::Rect, state: 
 
     frame.render_widget(
         Paragraph::new(Line::from(
-            "h/l byte · j/k ±16B · PgUp/PgDn sector · v mode · o bit · y value · Y raw · gl 跳转 · Esc 返回树",
+            "h/l byte · j/k ±16B · 0/$ 行首尾 · gg/G 扇区首尾 · Ctrl-u/d 半页 · PgUp/PgDn sector · v mode · Space/o bit · / n/N 搜索 · gl 跳转 · Esc 返回树",
         ))
         .block(Block::default().borders(Borders::TOP)),
         vertical[2],

@@ -1,20 +1,5 @@
 use super::*;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum InspectMode {
-    Fields,
-    DecodedHex,
-    RawHex,
-}
-
-#[derive(Debug, Clone)]
-pub struct InspectState {
-    pub(super) selected: usize,
-    pub(super) item_count: usize,
-    pub(super) mode: InspectMode,
-    pub(super) scroll: usize,
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AdvancedInspectSource {
     Disk(u32),
@@ -83,6 +68,15 @@ pub enum AdvancedInspectPrompt {
     },
     Search {
         input: String,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum AdvancedInspectSearchTarget {
+    Topology(Vec<String>),
+    CachedSector {
+        lba: u64,
+        relative_path: Vec<String>,
     },
 }
 
@@ -173,6 +167,9 @@ pub struct AdvancedInspectState {
     pub yank_register: Option<String>,
     pub prompt: Option<AdvancedInspectPrompt>,
     pub message: Option<String>,
+    search_query: String,
+    search_matches: Vec<AdvancedInspectSearchTarget>,
+    search_cursor: usize,
 }
 
 impl AppState {
@@ -201,6 +198,9 @@ impl AppState {
             yank_register: None,
             prompt: None,
             message: Some("正在后台读取协议上下文并建立全盘结构树…".into()),
+            search_query: String::new(),
+            search_matches: Vec::new(),
+            search_cursor: 0,
         });
         self.input_mode = InputMode::Normal;
         true
@@ -252,6 +252,9 @@ impl AppState {
         state.sector = None;
         state.sector_cache_order.clear();
         state.prompt = None;
+        state.search_query.clear();
+        state.search_matches.clear();
+        state.search_cursor = 0;
         match result {
             Ok(workspace) => {
                 state.result = Some(workspace);
@@ -464,8 +467,11 @@ impl AppState {
         if let Some(state) = self
             .advanced_inspect
             .as_mut()
-            .filter(|state| state.stage == AdvancedInspectStage::Browser && state.sector.is_none())
+            .filter(|state| state.stage == AdvancedInspectStage::Browser)
         {
+            state.sector = None;
+            state.panel = AdvancedInspectPanel::Tree;
+            state.detail_scroll = 0;
             state.prompt = Some(AdvancedInspectPrompt::Jump {
                 unit: AdvancedInspectJumpUnit::Lba,
                 input: String::new(),
@@ -478,8 +484,11 @@ impl AppState {
         if let Some(state) = self
             .advanced_inspect
             .as_mut()
-            .filter(|state| state.stage == AdvancedInspectStage::Browser && state.sector.is_none())
+            .filter(|state| state.stage == AdvancedInspectStage::Browser)
         {
+            state.sector = None;
+            state.panel = AdvancedInspectPanel::Tree;
+            state.detail_scroll = 0;
             state.prompt = Some(AdvancedInspectPrompt::Search {
                 input: String::new(),
             });
@@ -690,7 +699,7 @@ impl AppState {
             return Err("结构化搜索不能为空".into());
         }
 
-        let topology_path = {
+        let matches = {
             let state = self
                 .advanced_inspect
                 .as_ref()
@@ -700,40 +709,15 @@ impl AppState {
                 .result
                 .as_ref()
                 .ok_or_else(|| "Inspect workspace 不可用".to_string())?;
-            workspace.topology.find_label_path(query)
-        };
-        if let Some(node_path) = topology_path {
-            let row_path = inspect_row_path(&node_path);
-            let target_id = row_path.last().cloned().unwrap_or_default();
-            if let Some(state) = self.advanced_inspect.as_mut() {
-                state
-                    .expanded
-                    .extend(row_path.into_iter().take(node_path.len().saturating_sub(1)));
-                state.sector = None;
-                state.panel = AdvancedInspectPanel::Tree;
-                state.detail_scroll = 0;
-                state.message = None;
-            }
-            let rows = self.advanced_inspect_tree_rows();
-            let target = rows
-                .iter()
-                .position(|row| row.id == target_id)
-                .ok_or_else(|| "搜索命中节点未能在 Tree 中定位".to_string())?;
-            if let Some(state) = self.advanced_inspect.as_mut() {
-                state.tree_selected = target;
-            }
-            return Ok(());
-        }
-
-        let cached_target = {
-            let workspace = self
-                .advanced_inspect
-                .as_ref()
-                .and_then(|state| state.result.as_ref())
-                .ok_or_else(|| "Inspect workspace 不可用".to_string())?;
-            workspace.items.iter().find_map(|item| {
+            let mut matches = workspace
+                .topology
+                .find_label_paths(query)
+                .into_iter()
+                .map(AdvancedInspectSearchTarget::Topology)
+                .collect::<Vec<_>>();
+            for item in &workspace.items {
                 let region = workspace.topology.primary_region_for_lba(item.lba);
-                crate::application::inspect_tree::find_sector_structured_path(
+                for relative_path in crate::application::inspect_tree::find_sector_structured_paths(
                     item.lba,
                     region.and_then(|value| value.decoder),
                     region
@@ -741,51 +725,132 @@ impl AppState {
                         .unwrap_or(crate::edpb::SemanticStatus::Unknown),
                     &item.fields,
                     query,
-                )
-                .map(|path| (item.lba, path))
-            })
-        };
-
-        let Some((lba, relative_path)) = cached_target else {
-            return Err(format!("未找到结构化匹配: {query}"));
-        };
-        self.advanced_inspect_jump_lba(lba)?;
-        let rows = self.advanced_inspect_tree_rows();
-        let base_id = rows
-            .get(
-                self.advanced_inspect
-                    .as_ref()
-                    .map(|state| state.tree_selected)
-                    .unwrap_or(0),
-            )
-            .filter(|row| row.kind == crate::application::inspect_tree::InspectNodeKind::Sector)
-            .map(|row| row.id.clone())
-            .ok_or_else(|| format!("LBA{lba} Sector 定位失败"))?;
-
-        let mut target_id = base_id.clone();
-        if let Some(state) = self.advanced_inspect.as_mut() {
-            if relative_path.len() > 1 {
-                state.expanded.insert(base_id.clone());
-            }
-            for (index, node_id) in relative_path.iter().skip(1).enumerate() {
-                target_id = format!("{target_id}/{node_id}");
-                if index + 2 < relative_path.len() {
-                    state.expanded.insert(target_id.clone());
+                ) {
+                    matches.push(AdvancedInspectSearchTarget::CachedSector {
+                        lba: item.lba,
+                        relative_path,
+                    });
                 }
             }
+            matches
+        };
+        if matches.is_empty() {
+            return Err(format!("未找到结构化匹配: {query}"));
         }
-        let rows = self.advanced_inspect_tree_rows();
-        let target = rows
-            .iter()
-            .position(|row| row.id == target_id)
-            .ok_or_else(|| "搜索命中结构未能自动展开到目标节点".to_string())?;
+        let first = matches[0].clone();
         if let Some(state) = self.advanced_inspect.as_mut() {
-            state.tree_selected = target;
-            state.panel = AdvancedInspectPanel::Tree;
-            state.detail_scroll = 0;
-            state.message = None;
+            state.search_query = query.to_string();
+            state.search_matches = matches;
+            state.search_cursor = 0;
         }
-        Ok(())
+        self.advanced_inspect_focus_search_target(first)
+    }
+
+    pub fn advanced_inspect_search_next(&mut self, reverse: bool) -> Result<(), String> {
+        let target = {
+            let state = self
+                .advanced_inspect
+                .as_mut()
+                .filter(|state| state.stage == AdvancedInspectStage::Browser)
+                .ok_or_else(|| "全盘检查未处于 Browser 状态".to_string())?;
+            if state.search_matches.is_empty() {
+                return Err("请先使用 / 执行结构化搜索".into());
+            }
+            let len = state.search_matches.len();
+            state.search_cursor = if reverse {
+                (state.search_cursor + len - 1) % len
+            } else {
+                (state.search_cursor + 1) % len
+            };
+            state.search_matches[state.search_cursor].clone()
+        };
+        self.advanced_inspect_focus_search_target(target)
+    }
+
+    pub fn advanced_inspect_search_status(&self) -> Option<(&str, usize, usize)> {
+        let state = self.advanced_inspect.as_ref()?;
+        if state.search_matches.is_empty() {
+            return None;
+        }
+        Some((
+            state.search_query.as_str(),
+            state.search_cursor + 1,
+            state.search_matches.len(),
+        ))
+    }
+
+    fn advanced_inspect_focus_search_target(
+        &mut self,
+        target: AdvancedInspectSearchTarget,
+    ) -> Result<(), String> {
+        match target {
+            AdvancedInspectSearchTarget::Topology(node_path) => {
+                let row_path = inspect_row_path(&node_path);
+                let target_id = row_path.last().cloned().unwrap_or_default();
+                if let Some(state) = self.advanced_inspect.as_mut() {
+                    state.expanded.extend(
+                        row_path
+                            .iter()
+                            .take(node_path.len().saturating_sub(1))
+                            .cloned(),
+                    );
+                    state.sector = None;
+                    state.panel = AdvancedInspectPanel::Tree;
+                    state.detail_scroll = 0;
+                    state.message = None;
+                }
+                let rows = self.advanced_inspect_tree_rows();
+                let selected = rows
+                    .iter()
+                    .position(|row| row.id == target_id)
+                    .ok_or_else(|| "搜索命中节点未能在 Tree 中定位".to_string())?;
+                if let Some(state) = self.advanced_inspect.as_mut() {
+                    state.tree_selected = selected;
+                }
+                Ok(())
+            }
+            AdvancedInspectSearchTarget::CachedSector { lba, relative_path } => {
+                self.advanced_inspect_jump_lba(lba)?;
+                let rows = self.advanced_inspect_tree_rows();
+                let base_id = rows
+                    .get(
+                        self.advanced_inspect
+                            .as_ref()
+                            .map(|state| state.tree_selected)
+                            .unwrap_or(0),
+                    )
+                    .filter(|row| {
+                        row.kind == crate::application::inspect_tree::InspectNodeKind::Sector
+                    })
+                    .map(|row| row.id.clone())
+                    .ok_or_else(|| format!("LBA{lba} Sector 定位失败"))?;
+
+                let mut target_id = base_id.clone();
+                if let Some(state) = self.advanced_inspect.as_mut() {
+                    if relative_path.len() > 1 {
+                        state.expanded.insert(base_id.clone());
+                    }
+                    for (index, node_id) in relative_path.iter().skip(1).enumerate() {
+                        target_id = format!("{target_id}/{node_id}");
+                        if index + 2 < relative_path.len() {
+                            state.expanded.insert(target_id.clone());
+                        }
+                    }
+                }
+                let rows = self.advanced_inspect_tree_rows();
+                let selected = rows
+                    .iter()
+                    .position(|row| row.id == target_id)
+                    .ok_or_else(|| "搜索命中结构未能自动展开到目标节点".to_string())?;
+                if let Some(state) = self.advanced_inspect.as_mut() {
+                    state.tree_selected = selected;
+                    state.panel = AdvancedInspectPanel::Tree;
+                    state.detail_scroll = 0;
+                    state.message = None;
+                }
+                Ok(())
+            }
+        }
     }
 
     pub fn advanced_inspect_move_tree(&mut self, delta: isize) {
@@ -1144,6 +1209,45 @@ impl AppState {
         }
     }
 
+    pub fn advanced_inspect_sector_set_cursor(&mut self, cursor: usize) {
+        let Some(sector) = self
+            .advanced_inspect
+            .as_mut()
+            .and_then(|state| state.sector.as_mut())
+        else {
+            return;
+        };
+        sector.cursor = cursor.min(crate::common::SECTOR - 1);
+        sector.pinned_field = None;
+        sector.field_expanded = false;
+    }
+
+    pub fn advanced_inspect_sector_row_start(&mut self) {
+        if let Some(cursor) = self.advanced_inspect_sector().map(|sector| sector.cursor) {
+            self.advanced_inspect_sector_set_cursor((cursor / 16) * 16);
+        }
+    }
+
+    pub fn advanced_inspect_sector_row_end(&mut self) {
+        if let Some(cursor) = self.advanced_inspect_sector().map(|sector| sector.cursor) {
+            self.advanced_inspect_sector_set_cursor(
+                ((cursor / 16) * 16 + 15).min(crate::common::SECTOR - 1),
+            );
+        }
+    }
+
+    pub fn advanced_inspect_sector_top(&mut self) {
+        self.advanced_inspect_sector_set_cursor(0);
+    }
+
+    pub fn advanced_inspect_sector_bottom(&mut self) {
+        self.advanced_inspect_sector_set_cursor(crate::common::SECTOR - 1);
+    }
+
+    pub fn advanced_inspect_sector_half_page(&mut self, up: bool) {
+        self.advanced_inspect_sector_move_cursor(if up { -128 } else { 128 });
+    }
+
     pub fn advanced_inspect_sector_move_cursor(&mut self, delta: isize) {
         let Some(sector) = self
             .advanced_inspect
@@ -1329,84 +1433,5 @@ impl AppState {
         {
             self.advanced_inspect = None;
         }
-    }
-    pub fn inspect_data(&self) -> Option<&crate::application::inspect::AdvancedInspectWorkspace> {
-        self.inspect_data.as_ref()
-    }
-
-    pub const fn inspect_pending(&self) -> bool {
-        self.inspect_pending
-    }
-
-    pub fn set_inspect_pending(&mut self, pending: bool) {
-        self.inspect_pending = pending;
-        if pending {
-            self.set_notice("正在后台读取 LBA0-12…");
-        }
-    }
-
-    pub fn open_inspect(&mut self, item_count: usize) {
-        self.inspect = Some(InspectState {
-            selected: 0,
-            item_count,
-            mode: InspectMode::Fields,
-            scroll: 0,
-        });
-    }
-
-    pub fn replace_inspect(
-        &mut self,
-        workspace: crate::application::inspect::AdvancedInspectWorkspace,
-    ) {
-        self.clear_search_matches();
-        self.search_query.clear();
-        let count = workspace.items.len();
-        self.inspect_data = Some(workspace);
-        self.inspect_pending = false;
-        self.clear_notice();
-        self.open_inspect(count);
-    }
-
-    pub fn inspect_selected_lba(&self) -> Option<u32> {
-        self.inspect
-            .as_ref()
-            .and_then(|inspect| (inspect.item_count > 0).then_some(inspect.selected as u32))
-    }
-
-    pub fn inspect_mode(&self) -> Option<InspectMode> {
-        self.inspect.as_ref().map(|inspect| inspect.mode)
-    }
-
-    pub fn inspect_cycle_mode(&mut self) {
-        if let Some(inspect) = self.inspect.as_mut() {
-            inspect.mode = match inspect.mode {
-                InspectMode::Fields => InspectMode::DecodedHex,
-                InspectMode::DecodedHex => InspectMode::RawHex,
-                InspectMode::RawHex => InspectMode::Fields,
-            };
-            inspect.scroll = 0;
-        }
-    }
-
-    pub fn inspect_scroll(&self) -> Option<usize> {
-        self.inspect.as_ref().map(|inspect| inspect.scroll)
-    }
-
-    pub fn close_inspect(&mut self) {
-        self.inspect = None;
-        self.inspect_data = None;
-        self.inspect_pending = false;
-        self.clear_search_matches();
-        self.search_query.clear();
-        self.input_buffer.clear();
-        if self.input_mode == InputMode::Search {
-            self.input_mode = InputMode::Normal;
-        }
-        let count = match self.workspace {
-            Workspace::Devices => self.devices.len(),
-            Workspace::Backups => self.backups.len(),
-            Workspace::Provision => ProvisionKind::ALL.len(),
-        };
-        self.set_item_count(count);
     }
 }

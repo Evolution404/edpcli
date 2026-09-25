@@ -97,7 +97,6 @@ pub enum NavCommand {
     BeginBackupPrune,
     VerifyBackup,
     OpenInspect,
-    OpenAdvancedInspect,
     NextWorkspace,
     PreviousWorkspace,
     WorkspaceDevices,
@@ -131,10 +130,7 @@ pub struct AppState {
     backup_prune: Option<BackupPruneState>,
     provision: ProvisionState,
     pinned_disk: Option<u32>,
-    inspect: Option<InspectState>,
-    inspect_data: Option<crate::application::inspect::AdvancedInspectWorkspace>,
     advanced_inspect: Option<AdvancedInspectState>,
-    inspect_pending: bool,
     notice: Option<String>,
     notice_at: Option<std::time::Instant>,
     input_buffer: String,
@@ -171,10 +167,7 @@ impl AppState {
             backup_prune: None,
             provision: ProvisionState::default(),
             pinned_disk: None,
-            inspect: None,
-            inspect_data: None,
             advanced_inspect: None,
-            inspect_pending: false,
             notice: None,
             notice_at: None,
             input_buffer: String::new(),
@@ -203,7 +196,7 @@ impl AppState {
             && !ch.is_control()
         {
             self.input_buffer.push(ch);
-            if self.input_mode == InputMode::Search && self.inspect.is_none() {
+            if self.input_mode == InputMode::Search {
                 self.rebuild_workspace_filter();
             }
         }
@@ -212,7 +205,7 @@ impl AppState {
     pub fn backspace_input(&mut self) {
         if matches!(self.input_mode, InputMode::Search | InputMode::Command) {
             self.input_buffer.pop();
-            if self.input_mode == InputMode::Search && self.inspect.is_none() {
+            if self.input_mode == InputMode::Search {
                 self.rebuild_workspace_filter();
             }
         }
@@ -226,7 +219,7 @@ impl AppState {
         let was_search = self.input_mode == InputMode::Search;
         self.input_buffer.clear();
         self.input_mode = InputMode::Normal;
-        if was_search && self.inspect.is_none() {
+        if was_search {
             self.rebuild_workspace_filter();
         }
     }
@@ -312,135 +305,44 @@ impl AppState {
     }
 
     fn activate_search_match(&mut self, match_index: usize) {
-        let Some(&target) = self.search_matches.get(match_index) else {
+        if self.search_matches.get(match_index).is_none() {
             return;
-        };
-        if let Some(inspect) = self.inspect.as_mut() {
-            inspect.selected = target.min(inspect.item_count.saturating_sub(1));
-        } else if !self.active_search_query().is_empty() {
-            self.selected = match_index.min(self.item_count.saturating_sub(1));
-        } else {
-            self.selected = target.min(self.item_count.saturating_sub(1));
         }
+        self.selected = match_index.min(self.item_count.saturating_sub(1));
     }
 
     pub fn submit_search(&mut self) -> usize {
         self.search_query = self.input_buffer.trim().to_ascii_lowercase();
         self.input_buffer.clear();
         self.input_mode = InputMode::Normal;
-        self.search_matches.clear();
-        self.search_cursor = 0;
-        if self.search_query.is_empty() {
-            if self.inspect.is_none() {
-                self.rebuild_workspace_filter();
-            }
-            return 0;
-        }
-
-        if let Some(workspace) = &self.inspect_data {
-            for (index, item) in workspace.items.iter().enumerate() {
-                let mut text = format!(
-                    "lba{} {}",
-                    item.lba,
-                    item.method.as_deref().unwrap_or("raw")
-                );
-                for field in &item.fields {
-                    text.push(' ');
-                    text.push_str(&field.label);
-                    text.push(' ');
-                    text.push_str(&field.value);
-                    for child in &field.children {
-                        text.push(' ');
-                        text.push_str(&child.label);
-                        text.push(' ');
-                        text.push_str(&child.value);
-                    }
-                }
-                for note in &item.notes {
-                    text.push(' ');
-                    text.push_str(note);
-                }
-                let ascii: String = item
-                    .raw
-                    .iter()
-                    .map(|byte| {
-                        if (0x20..=0x7e).contains(byte) {
-                            *byte as char
-                        } else {
-                            ' '
-                        }
-                    })
-                    .collect();
-                text.push(' ');
-                text.push_str(&ascii);
-                text.push(' ');
-                for byte in &item.raw {
-                    text.push_str(&format!("{byte:02x}"));
-                    text.push(' ');
-                }
-                if text.to_ascii_lowercase().contains(&self.search_query) {
-                    self.search_matches.push(index);
-                }
-            }
-        } else {
-            self.rebuild_workspace_filter();
-            return self.search_matches.len();
-        }
-        if !self.search_matches.is_empty() {
-            self.activate_search_match(0);
-        }
+        self.rebuild_workspace_filter();
         self.search_matches.len()
     }
 
     fn cycle_search(&mut self, reverse: bool) {
-        if self.search_matches.is_empty() {
+        if self.search_matches.is_empty() || !self.workspace_filter_active() {
             return;
         }
-        if self.inspect.is_none() && self.workspace_filter_active() {
-            self.selected = if reverse {
-                if self.selected == 0 {
-                    self.item_count.saturating_sub(1)
-                } else {
-                    self.selected - 1
-                }
+        self.selected = if reverse {
+            if self.selected == 0 {
+                self.item_count.saturating_sub(1)
             } else {
-                (self.selected + 1) % self.item_count.max(1)
-            };
-            self.search_cursor = self.selected;
-            return;
-        }
-        if reverse {
-            self.search_cursor = if self.search_cursor == 0 {
-                self.search_matches.len() - 1
-            } else {
-                self.search_cursor - 1
-            };
+                self.selected - 1
+            }
         } else {
-            self.search_cursor = (self.search_cursor + 1) % self.search_matches.len();
-        }
+            (self.selected + 1) % self.item_count.max(1)
+        };
+        self.search_cursor = self.selected;
         self.activate_search_match(self.search_cursor);
     }
 
     pub fn search_status(&self) -> Option<String> {
         (!self.search_query.is_empty()).then(|| {
-            if self.inspect.is_some() {
-                format!(
-                    "/{}  {}/{}",
-                    self.search_query,
-                    if self.search_matches.is_empty() {
-                        0
-                    } else {
-                        self.search_cursor + 1
-                    },
-                    self.search_matches.len()
-                )
-            } else {
-                format!(
-                    "/{}  {} 条结果",
-                    self.search_query,
-                    self.search_matches.len()
-                )
-            }
+            format!(
+                "/{}  {} 条结果",
+                self.search_query,
+                self.search_matches.len()
+            )
         })
     }
 
@@ -648,10 +550,7 @@ impl AppState {
     }
 
     pub fn visible_device_indices(&self) -> Vec<usize> {
-        if self.workspace == Workspace::Devices
-            && self.inspect.is_none()
-            && !self.active_search_query().is_empty()
-        {
+        if self.workspace == Workspace::Devices && !self.active_search_query().is_empty() {
             self.search_matches.clone()
         } else {
             (0..self.devices.len()).collect()
@@ -659,10 +558,7 @@ impl AppState {
     }
 
     pub fn visible_device_count(&self) -> usize {
-        if self.workspace == Workspace::Devices
-            && self.inspect.is_none()
-            && !self.active_search_query().is_empty()
-        {
+        if self.workspace == Workspace::Devices && !self.active_search_query().is_empty() {
             self.search_matches.len()
         } else {
             self.devices.len()
@@ -670,22 +566,17 @@ impl AppState {
     }
 
     pub fn device_at_visible(&self, position: usize) -> Option<&crate::disk_scan::Row> {
-        let index = if self.workspace == Workspace::Devices
-            && self.inspect.is_none()
-            && !self.active_search_query().is_empty()
-        {
-            *self.search_matches.get(position)?
-        } else {
-            position
-        };
+        let index =
+            if self.workspace == Workspace::Devices && !self.active_search_query().is_empty() {
+                *self.search_matches.get(position)?
+            } else {
+                position
+            };
         self.devices.get(index)
     }
 
     pub fn visible_backup_indices(&self) -> Vec<usize> {
-        if self.workspace == Workspace::Backups
-            && self.inspect.is_none()
-            && !self.active_search_query().is_empty()
-        {
+        if self.workspace == Workspace::Backups && !self.active_search_query().is_empty() {
             self.search_matches.clone()
         } else {
             (0..self.backups.len()).collect()
@@ -693,10 +584,7 @@ impl AppState {
     }
 
     pub fn visible_backup_count(&self) -> usize {
-        if self.workspace == Workspace::Backups
-            && self.inspect.is_none()
-            && !self.active_search_query().is_empty()
-        {
+        if self.workspace == Workspace::Backups && !self.active_search_query().is_empty() {
             self.search_matches.len()
         } else {
             self.backups.len()
@@ -707,19 +595,17 @@ impl AppState {
         &self,
         position: usize,
     ) -> Option<&crate::application::BackupWorkspaceItem> {
-        let index = if self.workspace == Workspace::Backups
-            && self.inspect.is_none()
-            && !self.active_search_query().is_empty()
-        {
-            *self.search_matches.get(position)?
-        } else {
-            position
-        };
+        let index =
+            if self.workspace == Workspace::Backups && !self.active_search_query().is_empty() {
+                *self.search_matches.get(position)?
+            } else {
+                position
+            };
         self.backups.get(index)
     }
 
     pub fn workspace_filter_active(&self) -> bool {
-        self.inspect.is_none() && !self.active_search_query().is_empty()
+        !self.active_search_query().is_empty()
     }
 
     pub fn selected_device(&self) -> Option<&crate::disk_scan::Row> {
@@ -1007,10 +893,6 @@ impl AppState {
                 }
                 return StateEffect::None;
             }
-            if self.inspect.is_some() {
-                self.close_inspect();
-                return StateEffect::None;
-            }
             if self.wizard.is_some() {
                 self.wizard = None;
                 self.input_mode = InputMode::Normal;
@@ -1038,65 +920,6 @@ impl AppState {
         }
         if command == NavCommand::PreviousMatch {
             self.cycle_search(true);
-            return StateEffect::None;
-        }
-
-        if let Some(inspect) = self.inspect.as_mut() {
-            match command {
-                NavCommand::Up => {
-                    inspect.selected = inspect.selected.saturating_sub(1);
-                    inspect.scroll = 0;
-                }
-                NavCommand::Down => {
-                    if inspect.item_count > 0 {
-                        inspect.selected = (inspect.selected + 1).min(inspect.item_count - 1);
-                        inspect.scroll = 0;
-                    }
-                }
-                NavCommand::Top => {
-                    inspect.selected = 0;
-                    inspect.scroll = 0;
-                }
-                NavCommand::Bottom => {
-                    inspect.selected = inspect.item_count.saturating_sub(1);
-                    inspect.scroll = 0;
-                }
-                NavCommand::HalfPageDown => {
-                    inspect.scroll = inspect.scroll.saturating_add((viewport_height / 2).max(1));
-                }
-                NavCommand::HalfPageUp => {
-                    inspect.scroll = inspect.scroll.saturating_sub((viewport_height / 2).max(1));
-                }
-                NavCommand::NextWorkspace
-                | NavCommand::PreviousWorkspace
-                | NavCommand::WorkspaceDevices
-                | NavCommand::WorkspaceBackups
-                | NavCommand::WorkspaceProvision => {}
-                NavCommand::Search => {
-                    self.input_buffer = self.search_query.clone();
-                    self.input_mode = InputMode::Search;
-                }
-                NavCommand::CommandPalette => {
-                    self.input_buffer.clear();
-                    self.input_mode = InputMode::Command;
-                }
-                NavCommand::Help => self.input_mode = InputMode::Help,
-                NavCommand::Quit => return StateEffect::ExitRequested,
-                NavCommand::Escape
-                | NavCommand::Refresh
-                | NavCommand::BeginRestore
-                | NavCommand::BeginBackupCreate
-                | NavCommand::BeginBackupCreateDeep
-                | NavCommand::BeginBackupDelete
-                | NavCommand::ToggleBackupSelection
-                | NavCommand::BeginBackupBatchDelete
-                | NavCommand::BeginBackupPrune
-                | NavCommand::VerifyBackup
-                | NavCommand::OpenInspect
-                | NavCommand::OpenAdvancedInspect
-                | NavCommand::NextMatch
-                | NavCommand::PreviousMatch => {}
-            }
             return StateEffect::None;
         }
 
@@ -1161,7 +984,6 @@ impl AppState {
             | NavCommand::BeginBackupPrune
             | NavCommand::VerifyBackup
             | NavCommand::OpenInspect
-            | NavCommand::OpenAdvancedInspect
             | NavCommand::NextMatch
             | NavCommand::PreviousMatch
             | NavCommand::Escape

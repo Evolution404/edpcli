@@ -110,27 +110,24 @@ pub struct InspectLazySectorLocation {
     pub sector_count: u64,
 }
 
-fn node_path_match<F>(
+fn node_paths_match<F>(
     node: &InspectNode,
     path: &mut Vec<String>,
     predicate: &F,
-) -> Option<Vec<String>>
-where
+    out: &mut Vec<Vec<String>>,
+) where
     F: Fn(&InspectNode) -> bool,
 {
     path.push(node.id.clone());
     if predicate(node) {
-        return Some(path.clone());
+        out.push(path.clone());
     }
     if let InspectChildren::Materialized(children) = &node.children {
         for child in children {
-            if let Some(found) = node_path_match(child, path, predicate) {
-                return Some(found);
-            }
+            node_paths_match(child, path, predicate, out);
         }
     }
     path.pop();
-    None
 }
 
 fn lazy_sector_location(
@@ -194,13 +191,22 @@ impl InspectTopology {
     }
 
     pub fn find_label_path(&self, query: &str) -> Option<Vec<String>> {
+        self.find_label_paths(query).into_iter().next()
+    }
+
+    pub fn find_label_paths(&self, query: &str) -> Vec<Vec<String>> {
         let query = query.trim().to_lowercase();
         if query.is_empty() {
-            return None;
+            return Vec::new();
         }
-        node_path_match(&self.root, &mut Vec::new(), &|node| {
-            node.label.to_lowercase().contains(&query)
-        })
+        let mut out = Vec::new();
+        node_paths_match(
+            &self.root,
+            &mut Vec::new(),
+            &|node| node.label.to_lowercase().contains(&query),
+            &mut out,
+        );
+        out
     }
 }
 
@@ -565,20 +571,39 @@ pub fn find_sector_structured_path(
     fields: &[InspectField],
     query: &str,
 ) -> Option<Vec<String>> {
+    find_sector_structured_paths(lba, decoder, status, fields, query)
+        .into_iter()
+        .next()
+}
+
+pub fn find_sector_structured_paths(
+    lba: u64,
+    decoder: Option<InspectDecoderKind>,
+    status: SemanticStatus,
+    fields: &[InspectField],
+    query: &str,
+) -> Vec<Vec<String>> {
     let query = query.trim().to_lowercase();
     if query.is_empty() {
-        return None;
+        return Vec::new();
     }
     let sector = sector_node_with_fields(lba, decoder, status, fields);
-    node_path_match(&sector, &mut Vec::new(), &|node| {
-        if node.label.to_lowercase().contains(&query) {
-            return true;
-        }
-        node.range
-            .byte_range
-            .and_then(|range| fields.iter().find(|field| field.range == range))
-            .is_some_and(|field| field.value.to_lowercase().contains(&query))
-    })
+    let mut out = Vec::new();
+    node_paths_match(
+        &sector,
+        &mut Vec::new(),
+        &|node| {
+            if node.label.to_lowercase().contains(&query) {
+                return true;
+            }
+            node.range
+                .byte_range
+                .and_then(|range| fields.iter().find(|field| field.range == range))
+                .is_some_and(|field| field.value.to_lowercase().contains(&query))
+        },
+        &mut out,
+    );
+    out
 }
 
 #[cfg(test)]

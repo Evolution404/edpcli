@@ -259,29 +259,6 @@ fn dispatch_nav_command(
             StateEffect::None
         }
         NavCommand::OpenInspect => {
-            match state.workspace() {
-                state::Workspace::Devices => {
-                    if let Some(disk) = state.selected_device_disk() {
-                        tasks.request_inspect_disk(disk);
-                        state.set_inspect_pending(true);
-                    }
-                }
-                state::Workspace::Backups => {
-                    if let Some(path) = state.selected_backup_path() {
-                        tasks.request_inspect_backup(path);
-                        state.set_inspect_pending(true);
-                    }
-                }
-                state::Workspace::Provision => {
-                    if let Some(disk) = state.selected_device_disk() {
-                        tasks.request_inspect_disk(disk);
-                        state.set_inspect_pending(true);
-                    }
-                }
-            }
-            StateEffect::None
-        }
-        NavCommand::OpenAdvancedInspect => {
             let source = match state.workspace() {
                 state::Workspace::Devices | state::Workspace::Provision => state
                     .selected_device_disk()
@@ -419,7 +396,6 @@ fn palette_action_to_nav(action: command::PaletteAction) -> NavCommand {
         command::PaletteAction::Backups => NavCommand::WorkspaceBackups,
         command::PaletteAction::Provision => NavCommand::WorkspaceProvision,
         command::PaletteAction::Inspect => NavCommand::OpenInspect,
-        command::PaletteAction::AdvancedInspect => NavCommand::OpenAdvancedInspect,
         command::PaletteAction::Restore => NavCommand::BeginRestore,
         command::PaletteAction::BackupCreate => NavCommand::BeginBackupCreate,
         command::PaletteAction::BackupCreateDeep => NavCommand::BeginBackupCreateDeep,
@@ -469,11 +445,6 @@ fn dispatch_tui_action(
 ) -> StateEffect {
     use keymap::TuiAction;
 
-    if state.inspect_data().is_some() && action == TuiAction::ViewOrVerify {
-        state.inspect_cycle_mode();
-        return StateEffect::None;
-    }
-
     if let Some(command) = keymap_action_to_nav(action) {
         return dispatch_nav_command(state, tasks, command, backup_dir, viewport_height);
     }
@@ -482,11 +453,11 @@ fn dispatch_tui_action(
         TuiAction::WorkspaceInspect => dispatch_nav_command(
             state,
             tasks,
-            NavCommand::OpenAdvancedInspect,
+            NavCommand::OpenInspect,
             backup_dir,
             viewport_height,
         ),
-        TuiAction::Activate => match state.workspace() {
+        TuiAction::Activate | TuiAction::Open => match state.workspace() {
             state::Workspace::Devices => {
                 if let Err(message) = state.begin_provision_for_selected_device() {
                     state.set_notice(message);
@@ -716,15 +687,6 @@ fn run_loop(resume: Option<state::WriteIntent>) -> io::Result<LoopExit> {
             if let Some(result) = updates.provision_export {
                 state.provision_finish_export(result);
             }
-            if let Some(result) = updates.inspect {
-                match result {
-                    Ok(workspace) => state.replace_inspect(workspace),
-                    Err(message) => {
-                        state.set_inspect_pending(false);
-                        state.set_notice(message);
-                    }
-                }
-            }
             if let Some(result) = updates.advanced_inspect {
                 state.advanced_inspect_finish(result);
             }
@@ -854,8 +816,26 @@ fn run_loop(resume: Option<state::WriteIntent>) -> io::Result<LoopExit> {
                                         TuiAction::ViewOrVerify => {
                                             state.advanced_inspect_sector_cycle_mode();
                                         }
-                                        TuiAction::Open => {
+                                        TuiAction::Open | TuiAction::Toggle => {
                                             state.advanced_inspect_sector_toggle_field();
+                                        }
+                                        TuiAction::RowStart => {
+                                            state.advanced_inspect_sector_row_start();
+                                        }
+                                        TuiAction::RowEnd => {
+                                            state.advanced_inspect_sector_row_end();
+                                        }
+                                        TuiAction::Top => {
+                                            state.advanced_inspect_sector_top();
+                                        }
+                                        TuiAction::Bottom => {
+                                            state.advanced_inspect_sector_bottom();
+                                        }
+                                        TuiAction::HalfPageUp => {
+                                            state.advanced_inspect_sector_half_page(true);
+                                        }
+                                        TuiAction::HalfPageDown => {
+                                            state.advanced_inspect_sector_half_page(false);
                                         }
                                         TuiAction::Yank => {
                                             let _ = state.advanced_inspect_sector_yank(false);
@@ -888,6 +868,15 @@ fn run_loop(resume: Option<state::WriteIntent>) -> io::Result<LoopExit> {
                                         TuiAction::Search => {
                                             state.advanced_inspect_begin_search();
                                         }
+                                        TuiAction::NextMatch | TuiAction::PreviousMatch => {
+                                            if let Err(message) = state
+                                                .advanced_inspect_search_next(
+                                                    action == TuiAction::PreviousMatch,
+                                                )
+                                            {
+                                                state.set_notice(message);
+                                            }
+                                        }
                                         _ => {}
                                     }
                                     continue;
@@ -903,6 +892,13 @@ fn run_loop(resume: Option<state::WriteIntent>) -> io::Result<LoopExit> {
                                     }
                                     TuiAction::Search => {
                                         state.advanced_inspect_begin_search();
+                                    }
+                                    TuiAction::NextMatch | TuiAction::PreviousMatch => {
+                                        if let Err(message) = state.advanced_inspect_search_next(
+                                            action == TuiAction::PreviousMatch,
+                                        ) {
+                                            state.set_notice(message);
+                                        }
                                     }
                                     TuiAction::MoveUp => state.advanced_inspect_move_tree(-1),
                                     TuiAction::MoveDown => state.advanced_inspect_move_tree(1),

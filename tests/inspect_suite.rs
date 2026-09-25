@@ -1,5 +1,7 @@
 #[path = "inspect.rs"]
 mod inspect;
+#[path = "inspect_backup_workspace.rs"]
+mod inspect_backup_workspace;
 #[path = "inspect_cli.rs"]
 mod inspect_cli;
 #[path = "inspect_full_disk_acceptance.rs"]

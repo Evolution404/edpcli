@@ -7,7 +7,7 @@ use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::path::PathBuf;
 use std::sync::mpsc::{self, Receiver, Sender};
 
-use crate::application::{inspect::AdvancedInspectWorkspace, BackupWorkspaceItem};
+use crate::application::BackupWorkspaceItem;
 use crate::disk_scan::Row;
 use crate::sysinfo::SysRunner;
 
@@ -101,10 +101,6 @@ enum WorkerResult {
         operation_id: OperationId,
         event: crate::application::WriteEvent,
     },
-    Inspect {
-        generation: u64,
-        result: Result<AdvancedInspectWorkspace, String>,
-    },
     AdvancedInspect {
         generation: u64,
         result: Result<crate::application::inspect::AdvancedInspectWorkspace, String>,
@@ -169,18 +165,12 @@ enum WorkerResult {
     },
 }
 
-enum InspectRequest {
-    Disk(u32),
-    Backup(PathBuf),
-}
-
 #[derive(Default)]
 pub struct TaskUpdates {
     pub devices: Option<Vec<Row>>,
     pub backups: Option<Vec<BackupWorkspaceItem>>,
     pub write: Option<(OperationId, Result<(), String>)>,
     pub write_progress: Option<(OperationId, crate::application::WriteEvent)>,
-    pub inspect: Option<Result<AdvancedInspectWorkspace, String>>,
     pub advanced_inspect:
         Option<Result<crate::application::inspect::AdvancedInspectWorkspace, String>>,
     pub advanced_inspect_sector: Option<(
@@ -208,7 +198,6 @@ impl TaskUpdates {
             || self.backups.is_some()
             || self.write.is_some()
             || self.write_progress.is_some()
-            || self.inspect.is_some()
             || self.advanced_inspect.is_some()
             || self.advanced_inspect_sector.is_some()
             || self.device_error.is_some()
@@ -242,7 +231,6 @@ pub struct TaskHub {
     rx: Receiver<WorkerResult>,
     device_generation: GenerationGate,
     backup_generation: GenerationGate,
-    inspect_generation: GenerationGate,
     advanced_inspect_generation: GenerationGate,
     advanced_inspect_sector_generation: GenerationGate,
     verify_generation: GenerationGate,
@@ -252,7 +240,6 @@ pub struct TaskHub {
     batch_delete_generation: GenerationGate,
     device_single_flight: SingleFlightGate,
     backup_single_flight: SingleFlightGate,
-    inspect_single_flight: SingleFlightGate,
     advanced_inspect_single_flight: SingleFlightGate,
     advanced_inspect_sector_single_flight: SingleFlightGate,
     verify_single_flight: SingleFlightGate,
@@ -262,7 +249,6 @@ pub struct TaskHub {
     batch_delete_single_flight: SingleFlightGate,
     pending_device_scan: Option<PathBuf>,
     pending_backup_scan: Option<PathBuf>,
-    pending_inspect: Option<(u64, InspectRequest)>,
     pending_verify: Option<(u64, PathBuf, PathBuf)>,
     next_operation_id: u64,
     active_operation: Option<OperationId>,
@@ -283,7 +269,6 @@ impl TaskHub {
             rx,
             device_generation: GenerationGate::new(),
             backup_generation: GenerationGate::new(),
-            inspect_generation: GenerationGate::new(),
             advanced_inspect_generation: GenerationGate::new(),
             advanced_inspect_sector_generation: GenerationGate::new(),
             verify_generation: GenerationGate::new(),
@@ -293,7 +278,6 @@ impl TaskHub {
             batch_delete_generation: GenerationGate::new(),
             device_single_flight: SingleFlightGate::new(),
             backup_single_flight: SingleFlightGate::new(),
-            inspect_single_flight: SingleFlightGate::new(),
             advanced_inspect_single_flight: SingleFlightGate::new(),
             advanced_inspect_sector_single_flight: SingleFlightGate::new(),
             verify_single_flight: SingleFlightGate::new(),
@@ -303,7 +287,6 @@ impl TaskHub {
             batch_delete_single_flight: SingleFlightGate::new(),
             pending_device_scan: None,
             pending_backup_scan: None,
-            pending_inspect: None,
             pending_verify: None,
             next_operation_id: 0,
             active_operation: None,
@@ -443,16 +426,6 @@ impl TaskHub {
                 } => {
                     if self.active_operation == Some(operation_id) {
                         updates.write_progress = Some((operation_id, event));
-                    }
-                }
-                WorkerResult::Inspect { generation, result } => {
-                    self.inspect_single_flight.finish();
-                    if let Some((next_generation, request)) = self.pending_inspect.take() {
-                        let started = self.inspect_single_flight.try_start();
-                        debug_assert!(started);
-                        self.start_inspect(next_generation, request);
-                    } else if self.inspect_generation.is_current(generation) {
-                        updates.inspect = Some(result);
                     }
                 }
                 WorkerResult::AdvancedInspect { generation, result } => {
@@ -639,16 +612,8 @@ mod tests {
     }
 
     #[test]
-    fn inspect_and_verify_keep_only_the_latest_queued_target() {
+    fn verify_keeps_only_the_latest_queued_target() {
         let mut hub = TaskHub::new();
-        assert!(hub.inspect_single_flight.try_start());
-        hub.request_inspect_disk(6);
-        hub.request_inspect_disk(7);
-        assert!(matches!(
-            hub.pending_inspect,
-            Some((_, InspectRequest::Disk(7)))
-        ));
-
         assert!(hub.verify_single_flight.try_start());
         hub.request_backup_verify(PathBuf::from("one.bin"), PathBuf::from("backups"));
         hub.request_backup_verify(PathBuf::from("two.bin"), PathBuf::from("backups"));

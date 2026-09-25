@@ -1,46 +1,6 @@
 use super::*;
 
 impl TaskHub {
-    pub fn request_inspect_disk(&mut self, disk: u32) -> u64 {
-        self.request_inspect(InspectRequest::Disk(disk))
-    }
-
-    pub fn request_inspect_backup(&mut self, path: PathBuf) -> u64 {
-        self.request_inspect(InspectRequest::Backup(path))
-    }
-
-    fn request_inspect(&mut self, request: InspectRequest) -> u64 {
-        let generation = self.inspect_generation.begin();
-        if !self.inspect_single_flight.try_start() {
-            self.pending_inspect = Some((generation, request));
-            return generation;
-        }
-        self.start_inspect(generation, request);
-        generation
-    }
-
-    pub(super) fn start_inspect(&mut self, generation: u64, request: InspectRequest) {
-        let tx = self.tx.clone();
-        std::thread::spawn(move || {
-            let result = catch_unwind(AssertUnwindSafe(|| match request {
-                InspectRequest::Disk(disk) => {
-                    let runner = SysRunner;
-                    crate::application::inspect::load_disk_inspect(&runner, disk)
-                }
-                InspectRequest::Backup(path) => {
-                    crate::application::inspect::load_backup_inspect(&path)
-                }
-            }))
-            .unwrap_or_else(|payload| {
-                Err(format!(
-                    "Inspect worker 异常终止: {}",
-                    panic_message(payload)
-                ))
-            });
-            let _ = tx.send(WorkerResult::Inspect { generation, result });
-        });
-    }
-
     pub fn request_advanced_inspect(
         &mut self,
         source: crate::tui::state::AdvancedInspectSource,
