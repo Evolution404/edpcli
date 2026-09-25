@@ -998,6 +998,15 @@ application 返回结构化 `ProvisionReport/BackupReport/InspectReport`，CLI/T
 - 新增架构门禁，禁止 `application/write.rs` 重新依赖 `crate::ui` 或文本事件渲染，并禁止应用根模块直接向标准输出写入。
 - 事件文本/ANSI 黄金基线与事件序列 **3/3**、CLI **63/63**、制盘 **176/176**、备份 **61/61**、TUI **132/132** 全绿；正式 `fast` **35.33s / 0 失败**。
 
+### R6.4 架构导入门禁实施状态（2026-09-25）
+
+**COMPLETE。**
+
+- `architecture_split` 新增递归 Rust 源文件扫描，直接对领域层和应用层的导入方向做静态回归检查，不依赖人工审查。
+- `src/provision/` 与 `src/protocol/` 禁止反向依赖 `crate::tui` / `crate::cli`；`src/application/` 与 `src/application.rs` 禁止依赖 `ratatui`、`crossterm`、`crate::tui`、`crate::cli`。
+- `provision::validate` 不得依赖 `crate::inspect` 的展示模型继续由同一门禁锁定；已有 TUI 工作区→应用层、`protocol::semantic`→底层协议、`TargetSession`/`EvidenceSource` 边界门禁继续保留。
+- 新增导入方向门禁 **1/1** 通过，当前代码无需为过门禁改写业务逻辑。
+
 ---
 
 # 第八部分：完成标准

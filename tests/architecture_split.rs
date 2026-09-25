@@ -1,5 +1,5 @@
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 fn lines(path: &str) -> usize {
     fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join(path))
@@ -13,6 +13,47 @@ fn exists(path: &str) {
         Path::new(env!("CARGO_MANIFEST_DIR")).join(path).is_file(),
         "missing architecture module {path}"
     );
+}
+
+fn rust_sources_under(path: &str) -> Vec<PathBuf> {
+    fn collect(path: &Path, out: &mut Vec<PathBuf>) {
+        if path.is_file() {
+            if path.extension().is_some_and(|ext| ext == "rs") {
+                out.push(path.to_path_buf());
+            }
+            return;
+        }
+        let mut entries = fs::read_dir(path)
+            .unwrap_or_else(|error| panic!("read {}: {error}", path.display()))
+            .map(|entry| entry.expect("read dir entry").path())
+            .collect::<Vec<_>>();
+        entries.sort();
+        for entry in entries {
+            if entry.is_dir() {
+                collect(&entry, out);
+            } else if entry.extension().is_some_and(|ext| ext == "rs") {
+                out.push(entry);
+            }
+        }
+    }
+
+    let mut out = Vec::new();
+    collect(&Path::new(env!("CARGO_MANIFEST_DIR")).join(path), &mut out);
+    out
+}
+
+fn assert_sources_exclude(paths: impl IntoIterator<Item = PathBuf>, forbidden: &[&str]) {
+    for path in paths {
+        let source = fs::read_to_string(&path)
+            .unwrap_or_else(|error| panic!("read {}: {error}", path.display()));
+        for needle in forbidden {
+            assert!(
+                !source.contains(needle),
+                "{} violates architecture import direction with {needle}",
+                path.display()
+            );
+        }
+    }
 }
 
 #[test]
@@ -176,4 +217,26 @@ fn typed_write_events_are_rendered_outside_application_layer() {
     let ui = fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("src/ui.rs"))
         .expect("read ui renderer");
     assert!(ui.contains("pub fn render_write_event"));
+}
+
+#[test]
+fn domain_and_application_import_direction_is_guarded() {
+    let mut domain = rust_sources_under("src/provision");
+    domain.extend(rust_sources_under("src/protocol"));
+    assert_sources_exclude(domain, &["crate::tui", "crate::cli"]);
+
+    let mut application = rust_sources_under("src/application");
+    application.extend(rust_sources_under("src/application.rs"));
+    assert_sources_exclude(
+        application,
+        &["ratatui", "crossterm", "crate::tui", "crate::cli"],
+    );
+
+    let validator =
+        fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("src/provision/validate.rs"))
+            .expect("read provision validator");
+    assert!(
+        !validator.contains("crate::inspect"),
+        "provision validator must not depend on inspect presentation"
+    );
 }
