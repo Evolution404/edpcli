@@ -773,44 +773,51 @@ fn run_loop(resume: Option<state::WriteIntent>) -> io::Result<LoopExit> {
                                 continue;
                             }
                             AdvancedInspectStage::Browser => {
-                                if state.advanced_inspect_prompt().is_some() {
-                                    match key.code {
-                                        ct_event::KeyCode::Esc => {
-                                            state.advanced_inspect_cancel_prompt();
-                                        }
-                                        ct_event::KeyCode::Backspace => {
-                                            state.advanced_inspect_prompt_backspace();
-                                        }
-                                        ct_event::KeyCode::Enter => {
-                                            match state.advanced_inspect_submit_prompt() {
-                                                Ok(Some((source, lba))) => {
-                                                    if let Err(message) = tasks
-                                                        .request_advanced_inspect_sector(
-                                                            source, lba,
-                                                        )
-                                                    {
-                                                        state.advanced_inspect_sector_finish(
-                                                            lba,
-                                                            Err(message.to_string()),
-                                                        );
-                                                    }
-                                                }
-                                                Ok(None) => {}
-                                                Err(message) => state.set_notice(message),
+                                if let Some(prompt) = state.advanced_inspect_prompt() {
+                                    let mode = if matches!(
+                                        prompt,
+                                        state::AdvancedInspectPrompt::Jump { .. }
+                                    ) {
+                                        state::InputMode::Command
+                                    } else {
+                                        state::InputMode::Search
+                                    };
+                                    if let Some(action) = keys.map(mode, key) {
+                                        match action {
+                                            keymap::TuiAction::Back => {
+                                                state.advanced_inspect_cancel_prompt();
                                             }
+                                            keymap::TuiAction::Backspace => {
+                                                state.advanced_inspect_prompt_backspace();
+                                            }
+                                            keymap::TuiAction::Submit => {
+                                                match state.advanced_inspect_submit_prompt() {
+                                                    Ok(Some((source, lba))) => {
+                                                        if let Err(message) = tasks
+                                                            .request_advanced_inspect_sector(
+                                                                source, lba,
+                                                            )
+                                                        {
+                                                            state.advanced_inspect_sector_finish(
+                                                                lba,
+                                                                Err(message.to_string()),
+                                                            );
+                                                        }
+                                                    }
+                                                    Ok(None) => {}
+                                                    Err(message) => state.set_notice(message),
+                                                }
+                                            }
+                                            keymap::TuiAction::Text(' ')
+                                                if mode == state::InputMode::Command =>
+                                            {
+                                                state.advanced_inspect_toggle_jump_unit();
+                                            }
+                                            keymap::TuiAction::Text(ch) => {
+                                                state.advanced_inspect_prompt_push(ch);
+                                            }
+                                            _ => {}
                                         }
-                                        ct_event::KeyCode::Char(' ')
-                                            if matches!(
-                                                state.advanced_inspect_prompt(),
-                                                Some(state::AdvancedInspectPrompt::Jump { .. })
-                                            ) =>
-                                        {
-                                            state.advanced_inspect_toggle_jump_unit();
-                                        }
-                                        ct_event::KeyCode::Char(ch) => {
-                                            state.advanced_inspect_prompt_push(ch);
-                                        }
-                                        _ => {}
                                     }
                                     continue;
                                 }

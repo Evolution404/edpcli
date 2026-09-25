@@ -2225,6 +2225,19 @@ Insert：
 - 更新 README/USAGE/Help/本文件；
 - 审计所有 footer 文案与实际 keymap 一致。
 
+### 10.10.1 实施状态（2026-09-25）
+
+第 10 章实现已经完成：
+
+- T0：完成现状盘点、旧键冲突清单和迁移基线；
+- T1：统一主题层已落地，支持 24-bit TrueColor、ANSI256 与 ANSI16 自动回退；
+- T2：Devices、Backups、Provision、Inspect、动画、容量条、footer/help/modal 已使用统一视觉语义；
+- T3：集中式 `keymap.rs`、Normal/Insert/Search/Command/Confirm、`g` prefix、`Ctrl-w` prefix 与帮助元数据已经建立；
+- T4：Devices/Backups、Provision Insert、Inspect Tree/Panel、Sector Inspector/Hex、Search/Command/Confirm 已迁移到统一动作分发；
+- T5：旧 `g=Jump`、`r/d/m` view mode、`h/l=Workspace`、Backup `D/X`、`i/I=Inspect` 冲突已经移除；README、USAGE、Help、footer 已同步。
+
+最终验证：`tui_suite` 147/147；正式 fast gate 全绿；正式 full gate 8 suites / 10 artifacts / doctest 全绿；macOS Plain Virtual-HIL 通过。重构未修改 LBA0～12/LCE 协议语义，也未降低精确 `YES`、目标身份复核、系统盘保护、atomic write、readback/rollback 等写盘安全门槛。
+
 ### 10.11 回归门禁
 
 至少增加以下自动门禁：
