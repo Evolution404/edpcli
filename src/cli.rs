@@ -19,9 +19,6 @@ pub use crate::cli_args::{
 };
 use crate::common::*;
 use crate::completion;
-#[cfg(test)]
-use crate::diskio::SectorDev;
-use crate::diskio::{self, raw_path, FileDev, SystemClock};
 use crate::elevate::{self, ELEVATED_FLAG};
 use crate::inspect_cli::inspect_flow;
 use crate::metainfo_cli::info_flow;
@@ -31,10 +28,8 @@ use crate::sysinfo::{ReadProbeCache, SysRunner};
 // ══════════════════════════════════════════════════════════════════
 // 1. 交互提示抽象(测试注入)
 // ══════════════════════════════════════════════════════════════════
-#[cfg(test)]
-pub(crate) use crate::application::write::read_image;
+pub use crate::application::write::Prompter;
 pub(crate) use crate::application::write::{auto_pick_disk, guard_usb_disk};
-pub use crate::application::write::{backup_create_flow, restore_flow, Ctx, Prompter};
 pub use crate::ui::{backup_menu_str, disk_menu_str};
 
 pub struct StdPrompter;
@@ -161,7 +156,7 @@ pub fn run() -> i32 {
             yes,
             backup_dir,
         } => {
-            let bak = diskio::resolve_backup_dir(backup_dir.as_deref());
+            let bak = crate::application::resolve_backup_dir(backup_dir.as_deref());
             match action {
                 BackupAction::Create { disk, deep } => {
                     backup_create_real_flow(&runner, disk, backup_dir, deep)
@@ -418,17 +413,7 @@ fn provision_flow(runner: &SysRunner, action: ProvisionAction) -> i32 {
                 Err(error) => return finish(Err(error)),
             };
             let request = provision_request(&opts);
-            let mut dev = match FileDev::open_rdonly(&raw_path(disk)) {
-                Ok(value) => value,
-                Err(error) => {
-                    return finish(Err(EdpCliError::new(
-                        EXIT_IO,
-                        format!("错误: 无法只读打开 {}: {error}", raw_path(disk)),
-                    )))
-                }
-            };
-            match crate::application::provision::prepare_provision(runner, disk, &request, &mut dev)
-            {
+            match crate::application::provision::prepare_provision_on_disk(runner, disk, &request) {
                 Ok(prepared) => {
                     print_provision_summary(&prepared);
                     EXIT_OK
@@ -460,17 +445,8 @@ fn provision_flow(runner: &SysRunner, action: ProvisionAction) -> i32 {
                 Err(error) => return finish(Err(error)),
             };
             let request = provision_request(&opts);
-            let mut dev = match FileDev::open_rdonly(&raw_path(disk)) {
-                Ok(value) => value,
-                Err(error) => {
-                    return finish(Err(EdpCliError::new(
-                        EXIT_IO,
-                        format!("错误: 无法只读打开 {}: {error}", raw_path(disk)),
-                    )))
-                }
-            };
-            let prepared = match crate::application::provision::prepare_provision(
-                runner, disk, &request, &mut dev,
+            let prepared = match crate::application::provision::prepare_provision_on_disk(
+                runner, disk, &request,
             ) {
                 Ok(value) => value,
                 Err(error) => return finish(Err(error)),
@@ -509,17 +485,8 @@ fn provision_flow(runner: &SysRunner, action: ProvisionAction) -> i32 {
                 Err(error) => return finish(Err(error)),
             };
             let request = provision_request(&opts);
-            let mut dev = match FileDev::open_rdonly(&raw_path(disk)) {
-                Ok(value) => value,
-                Err(error) => {
-                    return finish(Err(EdpCliError::new(
-                        EXIT_IO,
-                        format!("错误: 无法只读打开 {}: {error}", raw_path(disk)),
-                    )))
-                }
-            };
-            let prepared = match crate::application::provision::prepare_provision(
-                runner, disk, &request, &mut dev,
+            let prepared = match crate::application::provision::prepare_provision_on_disk(
+                runner, disk, &request,
             ) {
                 Ok(value) => value,
                 Err(error) => return finish(Err(error)),
@@ -536,7 +503,7 @@ fn provision_flow(runner: &SysRunner, action: ProvisionAction) -> i32 {
             if !confirmed {
                 return finish(Err(EdpCliError::new(EXIT_CANCELLED, "已取消(未写盘)")));
             }
-            match crate::application::provision::commit_provision(runner, &mut dev, &prepared) {
+            match crate::application::provision::commit_provision_on_disk(runner, &prepared) {
                 Ok(crate::application::provision::ProvisionCommitOutcome::Official(report)) => {
                     println!(
                         "{}",
@@ -580,7 +547,7 @@ fn provision_flow(runner: &SysRunner, action: ProvisionAction) -> i32 {
 pub(crate) fn argv_with_backup_dir_for_elevation(backup_dir_flag: Option<&str>) -> Vec<String> {
     let mut argv: Vec<String> = std::env::args().skip(1).collect();
     if backup_dir_flag.is_none() {
-        argv.extend(diskio::backup_dir_argv_suffix(
+        argv.extend(crate::application::backup_dir_argv_suffix(
             std::env::var("EDPCLI_BACKUP_DIR").ok(),
         ));
     }
@@ -592,7 +559,7 @@ fn list_needs_elevation(rows: &[Row], elevated: bool, has_sentinel: bool) -> boo
 }
 
 fn list_flow(runner: &SysRunner, backup_dir_flag: Option<String>) -> i32 {
-    let bak = diskio::resolve_backup_dir(backup_dir_flag.as_deref());
+    let bak = crate::application::resolve_backup_dir(backup_dir_flag.as_deref());
     let rows = crate::application::scan_device_dashboard(runner, &bak);
 
     // 先无特权只读探测；只有真实遇到 PermissionDenied 才自动请求平台管理员授权。
@@ -645,26 +612,17 @@ fn backup_create_real_flow(
             return error.code;
         }
     };
-    let mut dev = match FileDev::open_rdonly(&raw_path(disk)) {
-        Ok(dev) => dev,
-        Err(error) => {
-            eprintln!(
-                "错误: 无法只读打开 {}: {}（需要管理员权限？）",
-                raw_path(disk),
-                error
-            );
-            return EXIT_IO;
-        }
-    };
-    let mut ctx = Ctx {
-        runner,
-        clock: &SystemClock,
-        prompt: &mut prompt,
-        backup_dir: diskio::resolve_backup_dir(backup_dir_flag.as_deref()),
-    };
     finish(
-        crate::application::write::backup_create_level_flow(disk, &mut ctx, &mut dev, deep)
-            .map(|_| EXIT_OK),
+        crate::application::write::backup_create_on_disk(
+            runner,
+            disk,
+            crate::application::resolve_backup_dir(backup_dir_flag.as_deref()),
+            &mut prompt,
+            None,
+            None,
+            deep,
+        )
+        .map(|_| EXIT_OK),
     )
 }
 
@@ -705,7 +663,7 @@ fn real_flow(
         elevate::ensure_elevated(&argv); // 内部以子进程退出码结束, 不返回
         unreachable!();
     }
-    let bak = diskio::resolve_backup_dir(backup_dir_flag.as_deref());
+    let bak = crate::application::resolve_backup_dir(backup_dir_flag.as_deref());
     // 手动管理员会话且旗标/配置都未命中时，明确告知备份去向。
     // 自动提权的子进程带哨兵，不重复提示。
     let has_sentinel = std::env::args().any(|a| a == ELEVATED_FLAG);
@@ -715,7 +673,7 @@ fn real_flow(
         && std::env::var("EDPCLI_BACKUP_DIR")
             .unwrap_or_default()
             .is_empty()
-        && diskio::conf_backup_dir().is_none()
+        && !crate::application::has_configured_backup_dir()
     {
         let cwd_bak = std::env::current_dir().unwrap_or_default().join("backup");
         eprintln!(
@@ -729,15 +687,9 @@ fn real_flow(
     let mut std_prompter = StdPrompter;
     let mut always = AlwaysYes(StdPrompter); // 无状态, 独立实例
     let prompter: &mut dyn Prompter = if yes { &mut always } else { &mut std_prompter };
-    let mut ctx = Ctx {
-        runner,
-        clock: &SystemClock,
-        prompt: prompter,
-        backup_dir: bak,
-    };
     let n = match disk_opt {
         Some(n) => n,
-        None => match auto_pick_disk(runner, &mut *ctx.prompt) {
+        None => match auto_pick_disk(runner, &mut *prompter) {
             Ok(n) => n,
             Err(e) => {
                 eprintln!("{}", crate::ui::red(&e.msg));
@@ -745,18 +697,7 @@ fn real_flow(
             }
         },
     };
-    if let Err(e) = guard_usb_disk(runner, n) {
-        eprintln!("{}", crate::ui::red(&e.msg));
-        return e.code;
-    }
-    let mut dev = match FileDev::open_rdonly(&raw_path(n)) {
-        Ok(d) => d,
-        Err(e) => {
-            eprintln!("错误: 无法打开 {}: {}（需要管理员权限？）", raw_path(n), e);
-            return EXIT_IO;
-        }
-    };
-    let r = restore_flow(bin, n, &mut ctx, &mut dev);
+    let r = crate::application::write::restore_on_disk(runner, bin, n, bak, prompter, None, None);
     finish(r)
 }
 
@@ -774,52 +715,6 @@ fn finish(r: EdpCliResult<i32>) -> i32 {
 mod tests {
     use super::*;
     use crate::sectors::EdpfPartition;
-
-    struct ShortSectorDev;
-
-    impl SectorDev for ShortSectorDev {
-        fn read_sector(&mut self, _lba: u32) -> io::Result<Vec<u8>> {
-            Ok(vec![0u8; SECTOR - 1])
-        }
-
-        fn write_sector(&mut self, _lba: u32, _data: &[u8]) -> io::Result<()> {
-            Ok(())
-        }
-    }
-
-    #[test]
-    fn read_image_rejects_short_sector_without_panicking() {
-        let err = read_image(&mut ShortSectorDev).unwrap_err();
-        assert_eq!(err.code, EXIT_IO);
-        assert!(err.msg.contains("512B"), "{}", err.msg);
-    }
-
-    struct PatternSectorDev;
-
-    impl SectorDev for PatternSectorDev {
-        fn read_sector(&mut self, lba: u32) -> io::Result<Vec<u8>> {
-            Ok(vec![lba as u8; SECTOR])
-        }
-
-        fn write_sector(&mut self, _lba: u32, _data: &[u8]) -> io::Result<()> {
-            Ok(())
-        }
-    }
-
-    #[test]
-    fn read_image_preserves_lba_zero_to_twelve_order() {
-        let image = read_image(&mut PatternSectorDev).unwrap();
-        assert_eq!(image.len(), METADATA_IMAGE_LEN);
-        for lba in 0..METADATA_SECTOR_COUNT {
-            assert!(
-                image[lba * SECTOR..(lba + 1) * SECTOR]
-                    .iter()
-                    .all(|&byte| byte == lba as u8),
-                "LBA{} 在拼接镜像中的位置错误",
-                lba
-            );
-        }
-    }
 
     #[test]
     fn target_plan_summary_reports_exact_geometry_and_data_fate() {

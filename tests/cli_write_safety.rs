@@ -11,7 +11,7 @@ use std::fs;
 use std::process::Command;
 
 use common::*;
-use edpcli::cli::{backup_create_flow, restore_flow, Ctx};
+use edpcli::application::write::{backup_create_flow, restore_flow, Ctx};
 use edpcli::common::{EXIT_BACKUP, EXIT_CANCELLED, EXIT_OK, EXIT_TARGET, SECTOR};
 use edpcli::diskio::FileDev;
 use edpcli::diskio::SectorDev;

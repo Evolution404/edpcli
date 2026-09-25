@@ -512,3 +512,55 @@ pub fn restore_on_disk(
     };
     restore_flow(bin, disk, &mut ctx, &mut dev)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io;
+
+    struct ShortSectorDev;
+
+    impl SectorDev for ShortSectorDev {
+        fn read_sector(&mut self, _lba: u32) -> io::Result<Vec<u8>> {
+            Ok(vec![0u8; SECTOR - 1])
+        }
+
+        fn write_sector(&mut self, _lba: u32, _data: &[u8]) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn read_image_rejects_short_sector_without_panicking() {
+        let error = read_image(&mut ShortSectorDev).unwrap_err();
+        assert_eq!(error.code, EXIT_IO);
+        assert!(error.msg.contains("512B"), "{}", error.msg);
+    }
+
+    struct PatternSectorDev;
+
+    impl SectorDev for PatternSectorDev {
+        fn read_sector(&mut self, lba: u32) -> io::Result<Vec<u8>> {
+            Ok(vec![lba as u8; SECTOR])
+        }
+
+        fn write_sector(&mut self, _lba: u32, _data: &[u8]) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn read_image_preserves_lba_zero_to_twelve_order() {
+        let image = read_image(&mut PatternSectorDev).unwrap();
+        assert_eq!(image.len(), METADATA_IMAGE_LEN);
+        for lba in 0..METADATA_SECTOR_COUNT {
+            assert!(
+                image[lba * SECTOR..(lba + 1) * SECTOR]
+                    .iter()
+                    .all(|&byte| byte == lba as u8),
+                "LBA{} 在拼接镜像中的位置错误",
+                lba
+            );
+        }
+    }
+}

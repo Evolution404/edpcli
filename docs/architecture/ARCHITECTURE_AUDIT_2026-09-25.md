@@ -1098,6 +1098,17 @@ application 返回结构化 `ProvisionReport/BackupReport/InspectReport`，CLI/T
 - 实际验证：`cargo deny check` 的公告、禁止项、许可证和来源检查均为 **通过**；终端依赖升级后 `repository_suite` **30/30**、`tui_suite` **161/161**；全目标 Clippy **0 条警告**；快速门禁暖缓存 **10/10 产物、4.75s**；全量门禁 **8 suites / 10 产物 / doctest，7.56s**。
 - 供应链检查继续以警告形式暴露 `ratatui` 内部无法由本项目直接统一的 `hashbrown` / `syn` 多版本，不用全局允许项隐藏；一旦上游依赖树收敛，门禁会自然反映变化。
 
+## Phase D5：CLI 裸盘访问边界收口
+
+**COMPLETE。**
+
+- CLI 保留命令解析、交互确认、提权与目标选择职责，但不再自行拼接裸盘路径、构造 `FileDev`、持有 `SystemClock` 或组装写入业务上下文。Provision 计划/镜像/写入、备份创建与还原均改为调用 application 的整盘服务入口。
+- 备份目录解析、配置存在性判断以及提权 argv 的目录桥接也经 application 暴露，避免为了非业务细节重新引入 `crate::diskio`。
+- 原先寄居在 `cli.rs` 的两条 `read_image`/伪 `SectorDev` 测试迁回 `application/write.rs`；相关集成测试改为直接引用 `application::write::{Ctx, backup_create_flow, restore_flow}`，CLI 不再充当 application API 转发层。
+- 新增架构门禁，禁止 `src/cli.rs` 出现 `crate::diskio`、`FileDev::open_rdonly`、`raw_path(` 或 `SystemClock`，并锁定四个整盘应用入口 `prepare_provision_on_disk / commit_provision_on_disk / backup_create_on_disk / restore_on_disk`。
+- 源码扫描确认上述 CLI 直接裸盘依赖全部为 **0**；写盘事务内部的 `TargetSession`、USB/系统盘保护、写前备份、卸载/锁卷、重开身份复核、原子写、读回与回滚逻辑均未改变。
+- 定向 `backup_suite` **61/61**、`cli_suite` **63/63**、`provision_suite` **178/178**、`repository_suite` **31/31**，共 **333/333** 通过。
+
 ---
 
 # 第八部分：完成标准

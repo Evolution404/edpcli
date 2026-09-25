@@ -140,6 +140,27 @@ fn entire_tui_uses_application_boundary_for_platform_and_raw_disk_access() {
 }
 
 #[test]
+fn cli_uses_application_boundary_for_raw_disk_access() {
+    let source = fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("src/cli.rs"))
+        .expect("read cli");
+    for forbidden in [
+        "crate::diskio",
+        "FileDev::open_rdonly",
+        "raw_path(",
+        "SystemClock",
+    ] {
+        assert!(
+            !source.contains(forbidden),
+            "cli must acquire raw disks through application service: {forbidden}"
+        );
+    }
+    assert!(source.contains("prepare_provision_on_disk"));
+    assert!(source.contains("commit_provision_on_disk"));
+    assert!(source.contains("backup_create_on_disk"));
+    assert!(source.contains("restore_on_disk"));
+}
+
+#[test]
 fn semantic_consumers_do_not_depend_on_inspect_presentation() {
     exists("src/protocol/semantic.rs");
 

@@ -88,6 +88,14 @@ pub fn resolve_backup_dir(flag: Option<&str>) -> std::path::PathBuf {
     crate::diskio::resolve_backup_dir(flag)
 }
 
+pub fn has_configured_backup_dir() -> bool {
+    crate::diskio::conf_backup_dir().is_some()
+}
+
+pub fn backup_dir_argv_suffix(env_val: Option<String>) -> Vec<String> {
+    crate::diskio::backup_dir_argv_suffix(env_val)
+}
+
 /// Build the backup-workspace rows from the exact same global numbering used by CLI restore,
 /// verify and delete. No frontend invents its own index.
 pub fn scan_backup_workspace(root: &Path) -> Vec<BackupWorkspaceItem> {

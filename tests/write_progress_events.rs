@@ -156,7 +156,7 @@ impl edpcli::diskio::Clock for FixedClock {
 #[cfg(target_os = "macos")]
 fn backup_create_and_restore_dry_run_event_sequence() {
     use common::*;
-    use edpcli::cli::{backup_create_flow, restore_flow, Ctx};
+    use edpcli::application::write::{backup_create_flow, restore_flow, Ctx};
     use edpcli::common::EXIT_OK;
     use edpcli::diskio::FileDev;
 
