@@ -35,6 +35,7 @@ pub enum TuiAction {
     Refresh,
     Delete,
     Add,
+    Restore,
     Fill,
     Plan,
     Write,
@@ -48,10 +49,6 @@ pub enum TuiAction {
     RowEnd,
     WorkspaceNext,
     WorkspacePrevious,
-    WorkspaceDevices,
-    WorkspaceBackups,
-    WorkspaceProvision,
-    WorkspaceInspect,
     InspectJump,
     PanelLeft,
     PanelDown,
@@ -115,6 +112,11 @@ pub const NORMAL_HELP: &[HelpBinding] = &[
         keys: "r",
         label: "Refresh",
         action: TuiAction::Refresh,
+    },
+    HelpBinding {
+        keys: "Tab/Shift-Tab",
+        label: "Tabs",
+        action: TuiAction::WorkspaceNext,
     },
     HelpBinding {
         keys: "?",
@@ -217,12 +219,6 @@ impl KeyMapper {
             return match pending.prefix {
                 PendingPrefix::G => match event.code {
                     KeyCode::Char('g') => Some(TuiAction::Top),
-                    KeyCode::Char('t') => Some(TuiAction::WorkspaceNext),
-                    KeyCode::Char('T') => Some(TuiAction::WorkspacePrevious),
-                    KeyCode::Char('d') => Some(TuiAction::WorkspaceDevices),
-                    KeyCode::Char('b') => Some(TuiAction::WorkspaceBackups),
-                    KeyCode::Char('p') => Some(TuiAction::WorkspaceProvision),
-                    KeyCode::Char('i') => Some(TuiAction::WorkspaceInspect),
                     KeyCode::Char('l') => Some(TuiAction::InspectJump),
                     _ => None,
                 },
@@ -262,8 +258,8 @@ impl KeyMapper {
                 });
                 None
             }
-            KeyCode::Tab => Some(TuiAction::PanelNext),
-            KeyCode::BackTab => Some(TuiAction::PanelPrevious),
+            KeyCode::Tab => Some(TuiAction::WorkspaceNext),
+            KeyCode::BackTab => Some(TuiAction::WorkspacePrevious),
             KeyCode::Char('j') | KeyCode::Down => Some(TuiAction::MoveDown),
             KeyCode::Char('k') | KeyCode::Up => Some(TuiAction::MoveUp),
             KeyCode::Char('h') | KeyCode::Left => Some(TuiAction::MoveLeft),
@@ -281,6 +277,7 @@ impl KeyMapper {
             KeyCode::Char('r') => Some(TuiAction::Refresh),
             KeyCode::Char('d') => Some(TuiAction::Delete),
             KeyCode::Char('a') => Some(TuiAction::Add),
+            KeyCode::Char('R') => Some(TuiAction::Restore),
             KeyCode::Char('f') => Some(TuiAction::Fill),
             KeyCode::Char('p') => Some(TuiAction::Plan),
             KeyCode::Char('w') => Some(TuiAction::Write),

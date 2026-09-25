@@ -54,23 +54,22 @@ fn normal_navigation_uses_vim_semantics_without_workspace_side_effects() {
 }
 
 #[test]
-fn g_prefix_owns_workspace_navigation_and_inspect_jump() {
+fn g_prefix_is_reserved_for_vim_top_and_inspect_jump_only() {
     let mut mapper = KeyMapper::new();
-    for (second, expected) in [
-        ('g', TuiAction::Top),
-        ('t', TuiAction::WorkspaceNext),
-        ('T', TuiAction::WorkspacePrevious),
-        ('d', TuiAction::WorkspaceDevices),
-        ('b', TuiAction::WorkspaceBackups),
-        ('p', TuiAction::WorkspaceProvision),
-        ('i', TuiAction::WorkspaceInspect),
-        ('l', TuiAction::InspectJump),
-    ] {
+    for (second, expected) in [('g', TuiAction::Top), ('l', TuiAction::InspectJump)] {
         assert_eq!(mapper.map(InputMode::Normal, key(KeyCode::Char('g'))), None);
         assert_eq!(
             mapper.map(InputMode::Normal, key(KeyCode::Char(second))),
             Some(expected),
             "g{second}"
+        );
+    }
+    for second in ['t', 'T', 'd', 'b', 'p', 'i'] {
+        assert_eq!(mapper.map(InputMode::Normal, key(KeyCode::Char('g'))), None);
+        assert_eq!(
+            mapper.map(InputMode::Normal, key(KeyCode::Char(second))),
+            None,
+            "g{second} must not remain a workspace/function shortcut"
         );
     }
 }
@@ -108,7 +107,7 @@ fn single_g_invalid_or_timed_out_prefix_never_executes_jump() {
 }
 
 #[test]
-fn ctrl_w_prefix_and_tab_are_panel_navigation_only() {
+fn tab_switches_top_level_tabs_and_ctrl_w_owns_panel_navigation() {
     let mut mapper = KeyMapper::new();
     for (second, expected) in [
         (KeyCode::Char('h'), TuiAction::PanelLeft),
@@ -124,21 +123,52 @@ fn ctrl_w_prefix_and_tab_are_panel_navigation_only() {
 
     assert_eq!(
         mapper.map(InputMode::Normal, key(KeyCode::Tab)),
-        Some(TuiAction::PanelNext)
+        Some(TuiAction::WorkspaceNext)
     );
     assert_eq!(
         mapper.map(
             InputMode::Normal,
             KeyEvent::new(KeyCode::BackTab, KeyModifiers::SHIFT)
         ),
-        Some(TuiAction::PanelPrevious)
+        Some(TuiAction::WorkspacePrevious)
+    );
+}
+
+#[test]
+fn normal_mode_keeps_provision_and_inspect_as_single_key_actions() {
+    let mut mapper = KeyMapper::new();
+    assert_eq!(
+        mapper.map(InputMode::Normal, key(KeyCode::Char('p'))),
+        Some(TuiAction::Plan)
+    );
+    assert_eq!(
+        mapper.map(InputMode::Normal, key(KeyCode::Char('i'))),
+        Some(TuiAction::Insert)
+    );
+    assert_eq!(
+        mapper.map(InputMode::Normal, key(KeyCode::Char('a'))),
+        Some(TuiAction::Add)
+    );
+    assert_eq!(
+        mapper.map(InputMode::Normal, key(KeyCode::Char('R'))),
+        Some(TuiAction::Restore)
+    );
+
+    let event_loop = include_str!("../src/tui/mod.rs");
+    assert!(
+        event_loop.contains("TuiAction::Plan if state.workspace() == state::Workspace::Devices")
+    );
+    assert!(event_loop.contains("TuiAction::Insert\n            if matches!(\n                state.workspace(),\n                state::Workspace::Devices | state::Workspace::Backups\n            )"));
+    assert!(event_loop.contains("TuiAction::Add\n            if matches!(\n                state.workspace(),\n                state::Workspace::Devices | state::Workspace::Backups\n            )"));
+    assert!(
+        event_loop.contains("TuiAction::Restore if state.workspace() == state::Workspace::Backups")
     );
 }
 
 #[test]
 fn insert_mode_treats_vim_action_letters_as_text_and_arrows_as_cursor_motion() {
     let mut mapper = KeyMapper::new();
-    for ch in ['h', 'j', 'k', 'l', 'g', 'd', 'r', 'f'] {
+    for ch in ['h', 'j', 'k', 'l', 'g', 'd', 'r', 'f', 'p', 'i', 'a', 'R'] {
         assert_eq!(
             mapper.map(InputMode::Insert, key(KeyCode::Char(ch))),
             Some(TuiAction::Text(ch)),
@@ -169,6 +199,7 @@ fn insert_mode_treats_vim_action_letters_as_text_and_arrows_as_cursor_motion() {
         mapper.map(InputMode::Insert, key(KeyCode::End)),
         Some(TuiAction::CursorEnd)
     );
+    assert_eq!(mapper.map(InputMode::Insert, key(KeyCode::Tab)), None);
 }
 
 #[test]
@@ -188,6 +219,7 @@ fn search_and_command_modes_consume_text_before_normal_bindings() {
             Some(TuiAction::Submit)
         );
         assert_eq!(mapper.map(mode, key(KeyCode::Esc)), Some(TuiAction::Back));
+        assert_eq!(mapper.map(mode, key(KeyCode::Tab)), None);
     }
 }
 
@@ -242,9 +274,9 @@ fn provision_form_enter_generates_plan_instead_of_editing_or_toggling() {
 #[test]
 fn user_visible_inspect_hints_point_to_full_disk_tree_entry() {
     let devices = include_str!("../src/tui/devices/render.rs");
-    assert!(devices.contains("gi"));
-    assert!(!devices
-        .contains("Span::styled(\"i\", accent()),\n                    Span::raw(\" Inspect"));
+    assert!(devices.contains("Span::styled(\"i\", accent())"));
+    assert!(devices.contains("Span::styled(\"p\", accent())"));
+    assert!(!devices.contains("gi"));
 
     let event_loop = include_str!("../src/tui/mod.rs");
     assert!(event_loop.contains("NavCommand::OpenInspect =>"));
@@ -322,6 +354,9 @@ fn help_registry_is_the_same_metadata_source_for_core_and_inspect_hints() {
     assert!(NORMAL_HELP
         .iter()
         .any(|binding| binding.keys == "r" && binding.action == TuiAction::Refresh));
+    assert!(NORMAL_HELP.iter().any(|binding| {
+        binding.keys == "Tab/Shift-Tab" && binding.action == TuiAction::WorkspaceNext
+    }));
     assert!(INSPECT_HELP
         .iter()
         .any(|binding| binding.keys == "gl" && binding.action == TuiAction::InspectJump));

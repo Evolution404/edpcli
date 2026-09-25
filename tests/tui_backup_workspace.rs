@@ -23,7 +23,7 @@ fn legacy_horizontal_workspace_navigation_is_removed_from_state_commands() {
 }
 
 #[test]
-fn workspace_navigation_uses_explicit_gt_style_commands() {
+fn workspace_navigation_uses_explicit_next_previous_commands() {
     let mut state = AppState::new();
     assert_eq!(state.workspace(), Workspace::Devices);
     state.navigate(NavCommand::NextWorkspace, 20);

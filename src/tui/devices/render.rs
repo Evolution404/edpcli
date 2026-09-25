@@ -49,7 +49,7 @@ pub(super) fn draw_devices(frame: &mut Frame, area: ratatui::layout::Rect, state
                 Line::from(message),
                 Line::from(hint),
                 Line::from(""),
-                Line::from("gt/gT 切换工作区；gb 直达备份，gi 打开 Inspect。"),
+                Line::from("Tab / Shift-Tab 切换设备与备份标签。"),
             ])
             .alignment(Alignment::Center)
             .wrap(Wrap { trim: true }),
@@ -155,12 +155,17 @@ pub(super) fn draw_devices(frame: &mut Frame, area: ratatui::layout::Rect, state
                     secondary().add_modifier(Modifier::BOLD),
                 )),
                 Line::from(vec![
-                    Span::styled("gi", accent()),
-                    Span::raw(" Inspect    "),
-                    Span::styled("b", accent()),
-                    Span::raw(" 新建备份"),
+                    Span::styled("p", accent()),
+                    Span::raw(" 制盘      "),
+                    Span::styled("i", accent()),
+                    Span::raw(" Inspect"),
                 ]),
-                Line::from(vec![Span::styled("r", success()), Span::raw(" 刷新")]),
+                Line::from(vec![
+                    Span::styled("a", accent()),
+                    Span::raw(" 新建备份  "),
+                    Span::styled("r", success()),
+                    Span::raw(" 刷新"),
+                ]),
             ]);
             Paragraph::new(lines)
         } else {
@@ -174,7 +179,7 @@ pub(super) fn draw_devices(frame: &mut Frame, area: ratatui::layout::Rect, state
                 Line::from(""),
                 Line::from("r  刷新设备"),
                 Line::from("/  搜索设备"),
-                Line::from("Tab  切换页面"),
+                Line::from("Tab / Shift-Tab  切换设备 / 备份标签"),
             ])
         }
         .block(

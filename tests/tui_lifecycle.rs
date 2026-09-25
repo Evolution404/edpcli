@@ -101,7 +101,10 @@ fn transient_notice_has_its_own_area_and_expires() {
         .map(|row| row.iter().map(|cell| cell.symbol()).collect::<String>())
         .collect::<Vec<_>>();
     assert!(lines[19].replace(' ', "").contains("批量选择"), "{lines:?}");
-    assert!(lines[22].replace(' ', "").contains("工作区"), "{lines:?}");
+    assert!(
+        lines[22].replace(' ', "").contains("Tab/Shift-Tab标签"),
+        "{lines:?}"
+    );
     std::thread::sleep(std::time::Duration::from_millis(4_050));
     assert_eq!(state.notice(), None);
 }

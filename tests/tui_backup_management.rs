@@ -30,14 +30,13 @@ fn backup_workspace_has_explicit_verify_and_delete_actions() {
 }
 
 #[test]
-fn backup_workspace_uses_one_create_modal_and_removes_legacy_action_keys() {
+fn backup_workspace_uses_one_create_modal_and_only_keeps_explicit_single_key_actions() {
     let keymap = include_str!("../src/tui/keymap.rs");
     for legacy in [
         "KeyCode::Char('D')",
         "KeyCode::Char('X')",
         "KeyCode::Char('I')",
         "KeyCode::Char('B')",
-        "KeyCode::Char('R')",
         "KeyCode::Char('P')",
     ] {
         assert!(
@@ -47,6 +46,8 @@ fn backup_workspace_uses_one_create_modal_and_removes_legacy_action_keys() {
     }
 
     let state = include_str!("../src/tui/backups/state.rs");
+    assert!(keymap.contains("KeyCode::Char('R') => Some(TuiAction::Restore)"));
+
     let render = include_str!("../src/tui/backups/render.rs");
     assert!(state.contains("begin_backup_create_choice"));
     assert!(state.contains("BackupCreateChoice::Metadata"));
@@ -77,7 +78,14 @@ fn backup_delete_uses_shared_application_service_not_direct_filesystem_removal()
 #[test]
 fn backup_page_exposes_the_complete_management_shortcuts() {
     let render = include_str!("../src/tui/render.rs");
-    for label in ["v 校验", "d 删除", "a 新建", "gi Inspect", "Space 勾选"] {
+    for label in [
+        "v 校验",
+        "d 删除",
+        "R 恢复",
+        "a 新建",
+        "i Inspect",
+        "Space 勾选",
+    ] {
         assert!(
             render.contains(label),
             "missing backup shortcut hint: {label}"

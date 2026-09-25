@@ -429,9 +429,6 @@ fn keymap_action_to_nav(action: keymap::TuiAction) -> Option<NavCommand> {
         TuiAction::Refresh => NavCommand::Refresh,
         TuiAction::WorkspaceNext => NavCommand::NextWorkspace,
         TuiAction::WorkspacePrevious => NavCommand::PreviousWorkspace,
-        TuiAction::WorkspaceDevices => NavCommand::WorkspaceDevices,
-        TuiAction::WorkspaceBackups => NavCommand::WorkspaceBackups,
-        TuiAction::WorkspaceProvision => NavCommand::WorkspaceProvision,
         _ => return None,
     })
 }
@@ -450,13 +447,26 @@ fn dispatch_tui_action(
     }
 
     match action {
-        TuiAction::WorkspaceInspect => dispatch_nav_command(
-            state,
-            tasks,
-            NavCommand::OpenInspect,
-            backup_dir,
-            viewport_height,
-        ),
+        TuiAction::Plan if state.workspace() == state::Workspace::Devices => {
+            if let Err(message) = state.begin_provision_for_selected_device() {
+                state.set_notice(message);
+            }
+            StateEffect::None
+        }
+        TuiAction::Insert
+            if matches!(
+                state.workspace(),
+                state::Workspace::Devices | state::Workspace::Backups
+            ) =>
+        {
+            dispatch_nav_command(
+                state,
+                tasks,
+                NavCommand::OpenInspect,
+                backup_dir,
+                viewport_height,
+            )
+        }
         TuiAction::Activate | TuiAction::Open => match state.workspace() {
             state::Workspace::Devices => {
                 if let Err(message) = state.begin_provision_for_selected_device() {
@@ -499,9 +509,23 @@ fn dispatch_tui_action(
             };
             dispatch_nav_command(state, tasks, command, backup_dir, viewport_height)
         }
-        TuiAction::Add if state.workspace() == state::Workspace::Backups => {
+        TuiAction::Add
+            if matches!(
+                state.workspace(),
+                state::Workspace::Devices | state::Workspace::Backups
+            ) =>
+        {
             state.begin_backup_create_choice();
             StateEffect::None
+        }
+        TuiAction::Restore if state.workspace() == state::Workspace::Backups => {
+            dispatch_nav_command(
+                state,
+                tasks,
+                NavCommand::BeginRestore,
+                backup_dir,
+                viewport_height,
+            )
         }
         _ => StateEffect::None,
     }
@@ -970,10 +994,6 @@ fn run_loop(resume: Option<state::WriteIntent>) -> io::Result<LoopExit> {
                             action,
                             TuiAction::WorkspaceNext
                                 | TuiAction::WorkspacePrevious
-                                | TuiAction::WorkspaceDevices
-                                | TuiAction::WorkspaceBackups
-                                | TuiAction::WorkspaceProvision
-                                | TuiAction::WorkspaceInspect
                                 | TuiAction::Refresh
                                 | TuiAction::Help
                                 | TuiAction::Command
