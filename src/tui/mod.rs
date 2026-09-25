@@ -439,8 +439,6 @@ fn keymap_action_to_nav(action: keymap::TuiAction) -> Option<NavCommand> {
     Some(match action {
         TuiAction::MoveUp => NavCommand::Up,
         TuiAction::MoveDown => NavCommand::Down,
-        TuiAction::MoveLeft => NavCommand::Left,
-        TuiAction::MoveRight => NavCommand::Right,
         TuiAction::Top => NavCommand::Top,
         TuiAction::Bottom => NavCommand::Bottom,
         TuiAction::HalfPageUp => NavCommand::HalfPageUp,
@@ -533,53 +531,35 @@ fn dispatch_tui_action(
     }
 }
 
-fn workspace_switch_command(key: &ct_event::KeyEvent) -> Option<NavCommand> {
-    if key.modifiers.contains(ct_event::KeyModifiers::CONTROL) {
-        return None;
-    }
-    match key.code {
-        ct_event::KeyCode::Tab | ct_event::KeyCode::Right => Some(NavCommand::NextWorkspace),
-        ct_event::KeyCode::BackTab | ct_event::KeyCode::Left => Some(NavCommand::PreviousWorkspace),
-        _ => None,
-    }
-}
-
-fn handle_provision_form_cursor_key(state: &mut AppState, key: &ct_event::KeyEvent) -> bool {
-    if state.workspace() != state::Workspace::Provision
-        || state.provision().stage != state::ProvisionStage::Form
-        || !state.provision_selected_field_is_editable()
-    {
-        return false;
-    }
-    match key.code {
-        ct_event::KeyCode::Left => state.provision_move_cursor(-1),
-        ct_event::KeyCode::Right => state.provision_move_cursor(1),
-        ct_event::KeyCode::Home => state.provision_cursor_home(),
-        ct_event::KeyCode::End => state.provision_cursor_end(),
-        _ => return false,
-    }
-    true
-}
-
-fn vim_workspace_switch_command(key: &ct_event::KeyEvent) -> Option<NavCommand> {
-    if key.modifiers.contains(ct_event::KeyModifiers::CONTROL) {
-        return None;
-    }
-    match key.code {
-        ct_event::KeyCode::Char('l') => Some(NavCommand::NextWorkspace),
-        ct_event::KeyCode::Char('h') => Some(NavCommand::PreviousWorkspace),
-        _ => None,
-    }
-}
-
-fn row_navigation_command(key: &ct_event::KeyEvent) -> Option<NavCommand> {
-    if key.modifiers.contains(ct_event::KeyModifiers::CONTROL) {
-        return None;
-    }
-    match key.code {
-        ct_event::KeyCode::Down | ct_event::KeyCode::Char('j') => Some(NavCommand::Down),
-        ct_event::KeyCode::Up | ct_event::KeyCode::Char('k') => Some(NavCommand::Up),
-        _ => None,
+fn start_provision_plan(state: &mut AppState, tasks: &mut TaskHub) {
+    let Some(disk) = state.selected_device_disk() else {
+        state.provision_mut().message = Some("目标 USB 已不存在，请返回设备页重新选择。".into());
+        return;
+    };
+    let request = if state.provision().kind == state::ProvisionKind::Plain {
+        match state.provision_plain_plan() {
+            Ok(plan) => crate::application::provision::ProvisionRequest::Plain(
+                crate::application::provision::PlainProvisionRequest::from_plan(&plan),
+            ),
+            Err(message) => {
+                state.provision_mut().message = Some(message);
+                return;
+            }
+        }
+    } else {
+        match state.provision_request() {
+            Ok(request) => {
+                crate::application::provision::ProvisionRequest::Official(Box::new(request))
+            }
+            Err(message) => {
+                state.provision_mut().message = Some(message);
+                return;
+            }
+        }
+    };
+    state.provision_set_planning();
+    if let Err(message) = tasks.request_provision_plan(disk, request) {
+        state.provision_finish_plan(Err(message.to_string()));
     }
 }
 
@@ -968,16 +948,31 @@ fn run_loop(resume: Option<state::WriteIntent>) -> io::Result<LoopExit> {
                         }
                     }
                     if state.workspace() == state::Workspace::Provision {
-                        if handle_provision_form_cursor_key(&mut state, &key) {
+                        use keymap::TuiAction;
+                        use state::ProvisionStage;
+
+                        let Some(action) = keys.map(state.input_mode(), key) else {
                             continue;
-                        }
-                        if let Some(command) = workspace_switch_command(&key) {
-                            let viewport_height =
-                                session.terminal.size()?.height.saturating_sub(9) as usize;
-                            match dispatch_nav_command(
+                        };
+                        let viewport_height =
+                            session.terminal.size()?.height.saturating_sub(9) as usize;
+
+                        if matches!(
+                            action,
+                            TuiAction::WorkspaceNext
+                                | TuiAction::WorkspacePrevious
+                                | TuiAction::WorkspaceDevices
+                                | TuiAction::WorkspaceBackups
+                                | TuiAction::WorkspaceProvision
+                                | TuiAction::WorkspaceInspect
+                                | TuiAction::Refresh
+                                | TuiAction::Help
+                                | TuiAction::Command
+                        ) {
+                            match dispatch_tui_action(
                                 &mut state,
                                 &mut tasks,
-                                command,
+                                action,
                                 &backup_dir,
                                 viewport_height,
                             ) {
@@ -986,321 +981,242 @@ fn run_loop(resume: Option<state::WriteIntent>) -> io::Result<LoopExit> {
                             }
                             continue;
                         }
-                        if matches!(
-                            state.provision().stage,
-                            state::ProvisionStage::SelectDisk
-                                | state::ProvisionStage::BackupPrompt
-                                | state::ProvisionStage::Menu
-                        ) {
-                            if let Some(command) = vim_workspace_switch_command(&key) {
-                                let viewport_height =
-                                    session.terminal.size()?.height.saturating_sub(9) as usize;
-                                match dispatch_nav_command(
+
+                        match state.provision().stage {
+                            ProvisionStage::SelectDisk => match action {
+                                TuiAction::MoveUp => {
+                                    let _ = state.navigate(NavCommand::Up, viewport_height);
+                                }
+                                TuiAction::MoveDown => {
+                                    let _ = state.navigate(NavCommand::Down, viewport_height);
+                                }
+                                TuiAction::Top => {
+                                    let _ = state.navigate(NavCommand::Top, viewport_height);
+                                }
+                                TuiAction::Bottom => {
+                                    let _ = state.navigate(NavCommand::Bottom, viewport_height);
+                                }
+                                TuiAction::Activate => {
+                                    if state.provision_select_disk().is_none() {
+                                        state.set_notice("请选择可读取的 USB 整盘目标。");
+                                    }
+                                }
+                                TuiAction::Back => {
+                                    let _ = state.navigate(NavCommand::Escape, viewport_height);
+                                }
+                                _ => {}
+                            },
+                            ProvisionStage::BackupPrompt => match action {
+                                TuiAction::MoveUp => {
+                                    let _ = state.navigate(NavCommand::Up, viewport_height);
+                                }
+                                TuiAction::MoveDown => {
+                                    let _ = state.navigate(NavCommand::Down, viewport_height);
+                                }
+                                TuiAction::Activate => {
+                                    if state.selected() == 0 {
+                                        let Some((disk, onlyid, device_id)) =
+                                            state.selected_device().map(|row| {
+                                                (
+                                                    row.disk,
+                                                    row.onlyid.clone(),
+                                                    row.device_id.clone(),
+                                                )
+                                            })
+                                        else {
+                                            state.set_notice(
+                                                "目标 USB 已不存在，请返回设备页重新选择。",
+                                            );
+                                            continue;
+                                        };
+                                        let identity =
+                                            state::ExpectedIdentity { onlyid, device_id };
+                                        state.provision_begin_backup_save();
+                                        if let Err(message) = tasks.request_provision_backup(
+                                            disk,
+                                            identity,
+                                            backup_dir.clone(),
+                                        ) {
+                                            state.provision_finish_backup_save(Err(
+                                                message.to_string()
+                                            ));
+                                        }
+                                    } else {
+                                        state.provision_skip_backup();
+                                    }
+                                }
+                                TuiAction::Back => {
+                                    let _ = state.navigate(NavCommand::Escape, viewport_height);
+                                }
+                                _ => {}
+                            },
+                            ProvisionStage::BackupSaving => {
+                                if action == TuiAction::Back {
+                                    state.set_notice("正在保存当前盘，请等待完成。");
+                                }
+                            }
+                            ProvisionStage::Menu => match action {
+                                TuiAction::MoveUp => {
+                                    let _ = state.navigate(NavCommand::Up, viewport_height);
+                                }
+                                TuiAction::MoveDown => {
+                                    let _ = state.navigate(NavCommand::Down, viewport_height);
+                                }
+                                TuiAction::Top => {
+                                    let _ = state.navigate(NavCommand::Top, viewport_height);
+                                }
+                                TuiAction::Bottom => {
+                                    let _ = state.navigate(NavCommand::Bottom, viewport_height);
+                                }
+                                TuiAction::Activate => {
+                                    if state.selected_device_disk().is_none() {
+                                        state.set_notice(
+                                            "物理制盘需要先在制盘页明确选择 USB 目标。",
+                                        );
+                                    } else {
+                                        state.provision_begin_selected();
+                                    }
+                                }
+                                TuiAction::Back => {
+                                    let _ = state.navigate(NavCommand::Escape, viewport_height);
+                                }
+                                _ => {}
+                            },
+                            ProvisionStage::Form
+                                if state.input_mode() == state::InputMode::Insert =>
+                            {
+                                match action {
+                                    TuiAction::Text(ch) => state.provision_push_char(ch),
+                                    TuiAction::Backspace => state.provision_backspace(),
+                                    TuiAction::DeleteChar => state.provision_delete_char(),
+                                    TuiAction::CursorLeft => state.provision_move_cursor(-1),
+                                    TuiAction::CursorRight => state.provision_move_cursor(1),
+                                    TuiAction::CursorHome => state.provision_cursor_home(),
+                                    TuiAction::CursorEnd => state.provision_cursor_end(),
+                                    TuiAction::Submit | TuiAction::Back => {
+                                        state.provision_end_insert()
+                                    }
+                                    _ => {}
+                                }
+                            }
+                            ProvisionStage::Form => match action {
+                                TuiAction::MoveUp => state.provision_move_field(-1),
+                                TuiAction::MoveDown => state.provision_move_field(1),
+                                TuiAction::Top => {
+                                    let count = state.provision_field_count();
+                                    state.provision_move_field(-(count as isize));
+                                }
+                                TuiAction::Bottom => {
+                                    let count = state.provision_field_count();
+                                    state.provision_move_field(count as isize);
+                                }
+                                TuiAction::HalfPageUp => state.provision_move_field(-5),
+                                TuiAction::HalfPageDown => state.provision_move_field(5),
+                                TuiAction::MoveLeft | TuiAction::MoveRight | TuiAction::Toggle => {
+                                    state.provision_toggle_selected_option();
+                                }
+                                TuiAction::Insert => {
+                                    state.provision_begin_insert();
+                                }
+                                TuiAction::Activate => {
+                                    if !state.provision_begin_insert() {
+                                        state.provision_toggle_selected_option();
+                                    }
+                                }
+                                TuiAction::Fill => {
+                                    state.provision_fill_selected_capacity();
+                                }
+                                TuiAction::Add => {
+                                    state.provision_plain_add_partition();
+                                }
+                                TuiAction::Delete => {
+                                    state.provision_plain_delete_selected_partition();
+                                }
+                                TuiAction::Plan | TuiAction::Write => {
+                                    start_provision_plan(&mut state, &mut tasks);
+                                }
+                                TuiAction::Export => {
+                                    state.set_notice("请先按 p 生成只读计划，再从计划页导出镜像。");
+                                }
+                                TuiAction::Back => {
+                                    let _ = state.navigate(NavCommand::Escape, viewport_height);
+                                }
+                                _ => {}
+                            },
+                            ProvisionStage::Planning => {
+                                if action == TuiAction::Back {
+                                    state.set_notice("制盘计划正在后台生成，请等待完成。");
+                                }
+                            }
+                            ProvisionStage::Review => match action {
+                                TuiAction::Activate | TuiAction::Write => {
+                                    state.provision_begin_confirm();
+                                }
+                                TuiAction::Export => state.provision_begin_export(),
+                                TuiAction::Back => {
+                                    let _ = state.navigate(NavCommand::Escape, viewport_height);
+                                }
+                                _ => {}
+                            },
+                            ProvisionStage::ExportPath => match action {
+                                TuiAction::Text(ch) => state.provision_export_push_char(ch),
+                                TuiAction::Backspace => state.provision_export_backspace(),
+                                TuiAction::Submit => {
+                                    if let Some((prepared, path)) = state.provision_take_export() {
+                                        if let Err(message) =
+                                            tasks.request_provision_export(prepared, path)
+                                        {
+                                            state.provision_finish_export(Err(message.to_string()));
+                                        }
+                                    }
+                                }
+                                TuiAction::Back => state.provision_cancel_export(),
+                                _ => {}
+                            },
+                            ProvisionStage::Exporting => {
+                                if action == TuiAction::Back {
+                                    state.set_notice("镜像正在后台导出，请等待完成。");
+                                }
+                            }
+                            ProvisionStage::Confirm => match action {
+                                TuiAction::Text(ch) => state.provision_push_confirmation(ch),
+                                TuiAction::Backspace => state.provision_backspace_confirmation(),
+                                TuiAction::Submit => {
+                                    if let Some(prepared) = state.provision_take_for_write() {
+                                        if let Err(message) = tasks
+                                            .request_provision_write(prepared, backup_dir.clone())
+                                        {
+                                            state.provision_finish_write(Err(message.to_string()));
+                                        }
+                                    }
+                                }
+                                TuiAction::Cancel | TuiAction::Back => {
+                                    let _ = state.navigate(NavCommand::Escape, viewport_height);
+                                }
+                                TuiAction::Confirm => {
+                                    state.set_notice("破坏性写盘仍需精确输入大写 YES 后按 Enter。")
+                                }
+                                _ => {}
+                            },
+                            ProvisionStage::Running => {
+                                match dispatch_tui_action(
                                     &mut state,
                                     &mut tasks,
-                                    command,
+                                    action,
                                     &backup_dir,
                                     viewport_height,
                                 ) {
                                     StateEffect::ExitRequested => break,
                                     StateEffect::ExitDeferred | StateEffect::None => {}
                                 }
-                                continue;
                             }
-                            if let Some(command) = row_navigation_command(&key) {
-                                let _ = state.navigate(command, 2);
-                                continue;
-                            }
-                        }
-                        use state::ProvisionStage;
-                        match state.provision().stage {
-                            ProvisionStage::SelectDisk => {
-                                match key.code {
-                                    ct_event::KeyCode::Up => {
-                                        let _ = state.navigate(NavCommand::Up, 2);
-                                    }
-                                    ct_event::KeyCode::Down => {
-                                        let _ = state.navigate(NavCommand::Down, 2);
-                                    }
-                                    ct_event::KeyCode::Enter => {
-                                        if state.provision_select_disk().is_none() {
-                                            state.set_notice("请选择可读取的 USB 整盘目标。");
-                                        }
-                                    }
-                                    ct_event::KeyCode::Esc => {
-                                        let _ = state.navigate(NavCommand::Escape, 1);
-                                    }
-                                    _ => {}
-                                }
-                                continue;
-                            }
-                            ProvisionStage::BackupPrompt => {
-                                match key.code {
-                                    ct_event::KeyCode::Up => {
-                                        let _ = state.navigate(NavCommand::Up, 2);
-                                    }
-                                    ct_event::KeyCode::Down => {
-                                        let _ = state.navigate(NavCommand::Down, 2);
-                                    }
-                                    ct_event::KeyCode::Enter => {
-                                        if state.selected() == 0 {
-                                            let Some((disk, onlyid, device_id)) =
-                                                state.selected_device().map(|row| {
-                                                    (
-                                                        row.disk,
-                                                        row.onlyid.clone(),
-                                                        row.device_id.clone(),
-                                                    )
-                                                })
-                                            else {
-                                                state.set_notice(
-                                                    "目标 USB 已不存在，请返回设备页重新选择。",
-                                                );
-                                                continue;
-                                            };
-                                            let identity =
-                                                state::ExpectedIdentity { onlyid, device_id };
-                                            state.provision_begin_backup_save();
-                                            if let Err(message) = tasks.request_provision_backup(
-                                                disk,
-                                                identity,
-                                                backup_dir.clone(),
-                                            ) {
-                                                state.provision_finish_backup_save(Err(
-                                                    message.to_string()
-                                                ));
-                                            }
-                                        } else {
-                                            state.provision_skip_backup();
-                                        }
-                                    }
-                                    ct_event::KeyCode::Esc => {
-                                        let _ = state.navigate(NavCommand::Escape, 1);
-                                    }
-                                    _ => {}
-                                }
-                                continue;
-                            }
-                            ProvisionStage::BackupSaving => {
-                                if key.code == ct_event::KeyCode::Esc {
-                                    state.set_notice("正在保存当前盘，请等待完成。");
-                                }
-                                continue;
-                            }
-                            ProvisionStage::Menu => {
-                                if key.code == ct_event::KeyCode::Enter {
-                                    let disk = state.selected_device_disk();
-                                    if disk.is_none() {
-                                        state.set_notice(
-                                            "物理制盘需要先在制盘页明确选择 USB 目标。",
-                                        );
-                                        continue;
-                                    }
-                                    state.provision_begin_selected();
-                                    continue;
-                                }
-                                if key.code == ct_event::KeyCode::Esc {
-                                    let _ = state.navigate(NavCommand::Escape, 1);
-                                    continue;
-                                }
-                            }
-                            ProvisionStage::Form => {
-                                match key.code {
-                                    ct_event::KeyCode::Up => {
-                                        state.provision_move_field(-1);
-                                    }
-                                    ct_event::KeyCode::Down => {
-                                        state.provision_move_field(1);
-                                    }
-                                    ct_event::KeyCode::Left => {
-                                        if state.provision_selected_field_is_editable() {
-                                            state.provision_move_cursor(-1);
-                                        } else {
-                                            let _ = state.navigate(NavCommand::Left, 1);
-                                        }
-                                    }
-                                    ct_event::KeyCode::Right => {
-                                        if state.provision_selected_field_is_editable() {
-                                            state.provision_move_cursor(1);
-                                        } else {
-                                            let _ = state.navigate(NavCommand::Right, 1);
-                                        }
-                                    }
-                                    ct_event::KeyCode::Home => state.provision_cursor_home(),
-                                    ct_event::KeyCode::End => state.provision_cursor_end(),
-                                    ct_event::KeyCode::Backspace => state.provision_backspace(),
-                                    ct_event::KeyCode::Insert => {
-                                        state.provision_plain_add_partition();
-                                    }
-                                    ct_event::KeyCode::Delete => {
-                                        state.provision_plain_delete_selected_partition();
-                                    }
-                                    ct_event::KeyCode::Enter => {
-                                        let Some(disk) = state.selected_device_disk() else {
-                                            state.provision_mut().message = Some(
-                                                "目标 USB 已不存在，请返回设备页重新选择。".into(),
-                                            );
-                                            continue;
-                                        };
-                                        if state.provision().kind == state::ProvisionKind::Plain {
-                                            match state.provision_plain_plan() {
-                                                Ok(plan) => {
-                                                    let request = crate::application::provision::ProvisionRequest::Plain(
-                                                        crate::application::provision::PlainProvisionRequest::from_plan(&plan),
-                                                    );
-                                                    state.provision_set_planning();
-                                                    if let Err(message) =
-                                                        tasks.request_provision_plan(disk, request)
-                                                    {
-                                                        state.provision_finish_plan(Err(
-                                                            message.to_string()
-                                                        ));
-                                                    }
-                                                }
-                                                Err(message) => {
-                                                    state.provision_mut().message = Some(message);
-                                                }
-                                            }
-                                            continue;
-                                        }
-                                        match state.provision_request() {
-                                            Ok(request) => {
-                                                let request = crate::application::provision::ProvisionRequest::Official(Box::new(request));
-                                                state.provision_set_planning();
-                                                if let Err(message) =
-                                                    tasks.request_provision_plan(disk, request)
-                                                {
-                                                    state.provision_finish_plan(Err(
-                                                        message.to_string()
-                                                    ));
-                                                }
-                                            }
-                                            Err(message) => {
-                                                state.provision_mut().message = Some(message);
-                                            }
-                                        }
-                                    }
-                                    ct_event::KeyCode::Esc => {
-                                        let _ = state.navigate(NavCommand::Escape, 1);
-                                    }
-                                    ct_event::KeyCode::Char(' ') => {
-                                        if !state.provision_toggle_selected_option() {
-                                            state.provision_push_char(' ');
-                                        }
-                                    }
-                                    ct_event::KeyCode::Char('f') => {
-                                        if !state.provision_fill_selected_capacity() {
-                                            state.provision_push_char('f');
-                                        }
-                                    }
-                                    ct_event::KeyCode::Char(ch)
-                                        if !key
-                                            .modifiers
-                                            .contains(ct_event::KeyModifiers::CONTROL) =>
-                                    {
-                                        state.provision_push_char(ch);
-                                    }
-                                    _ => {}
-                                }
-                                continue;
-                            }
-                            ProvisionStage::Planning => {
-                                if key.code == ct_event::KeyCode::Esc {
-                                    state.set_notice("制盘计划正在后台生成，请等待完成。");
-                                }
-                                continue;
-                            }
-                            ProvisionStage::Review => {
-                                match key.code {
-                                    ct_event::KeyCode::Enter => state.provision_begin_confirm(),
-                                    ct_event::KeyCode::Char('E') => {
-                                        state.provision_begin_export();
-                                    }
-                                    ct_event::KeyCode::Esc => {
-                                        let _ = state.navigate(NavCommand::Escape, 1);
-                                    }
-                                    _ => {}
-                                }
-                                continue;
-                            }
-                            ProvisionStage::ExportPath => {
-                                match key.code {
-                                    ct_event::KeyCode::Enter => {
-                                        if let Some((prepared, path)) =
-                                            state.provision_take_export()
-                                        {
-                                            if let Err(message) =
-                                                tasks.request_provision_export(prepared, path)
-                                            {
-                                                state.provision_finish_export(Err(
-                                                    message.to_string()
-                                                ));
-                                            }
-                                        }
-                                    }
-                                    ct_event::KeyCode::Backspace => {
-                                        state.provision_export_backspace();
-                                    }
-                                    ct_event::KeyCode::Esc => state.provision_cancel_export(),
-                                    ct_event::KeyCode::Char(ch)
-                                        if !key
-                                            .modifiers
-                                            .contains(ct_event::KeyModifiers::CONTROL) =>
-                                    {
-                                        state.provision_export_push_char(ch);
-                                    }
-                                    _ => {}
-                                }
-                                continue;
-                            }
-                            ProvisionStage::Exporting => {
-                                if key.code == ct_event::KeyCode::Esc {
-                                    state.set_notice("镜像正在后台导出，请等待完成。");
-                                }
-                                continue;
-                            }
-                            ProvisionStage::Confirm => {
-                                match key.code {
-                                    ct_event::KeyCode::Char(ch)
-                                        if !key
-                                            .modifiers
-                                            .contains(ct_event::KeyModifiers::CONTROL) =>
-                                    {
-                                        state.provision_push_confirmation(ch);
-                                    }
-                                    ct_event::KeyCode::Backspace => {
-                                        state.provision_backspace_confirmation();
-                                    }
-                                    ct_event::KeyCode::Enter => {
-                                        if let Some(prepared) = state.provision_take_for_write() {
-                                            if let Err(message) = tasks.request_provision_write(
-                                                prepared,
-                                                backup_dir.clone(),
-                                            ) {
-                                                state.provision_finish_write(Err(
-                                                    message.to_string()
-                                                ));
-                                            }
-                                        }
-                                    }
-                                    ct_event::KeyCode::Esc => {
-                                        let _ = state.navigate(NavCommand::Escape, 1);
-                                    }
-                                    _ => {}
-                                }
-                                continue;
-                            }
-                            ProvisionStage::Running => {}
                             ProvisionStage::Result => {
-                                if matches!(
-                                    key.code,
-                                    ct_event::KeyCode::Enter | ct_event::KeyCode::Esc
-                                ) {
+                                if matches!(action, TuiAction::Activate | TuiAction::Back) {
                                     state.provision_reset();
-                                    continue;
                                 }
                             }
                         }
+                        continue;
                     }
                     if state.backup_create_choice().is_some() {
                         if let Some(action) = keys.map(state::InputMode::Normal, key) {
@@ -1722,82 +1638,22 @@ mod tests {
     use super::*;
 
     #[test]
-    fn provision_workspace_uses_one_global_tab_and_row_navigation_contract() {
-        let tab = ct_event::KeyEvent::new(ct_event::KeyCode::Tab, ct_event::KeyModifiers::NONE);
-        let backtab =
-            ct_event::KeyEvent::new(ct_event::KeyCode::BackTab, ct_event::KeyModifiers::SHIFT);
-        let left = ct_event::KeyEvent::new(ct_event::KeyCode::Left, ct_event::KeyModifiers::NONE);
-        let right = ct_event::KeyEvent::new(ct_event::KeyCode::Right, ct_event::KeyModifiers::NONE);
-        let h = ct_event::KeyEvent::new(ct_event::KeyCode::Char('h'), ct_event::KeyModifiers::NONE);
-        let l = ct_event::KeyEvent::new(ct_event::KeyCode::Char('l'), ct_event::KeyModifiers::NONE);
-        let j = ct_event::KeyEvent::new(ct_event::KeyCode::Char('j'), ct_event::KeyModifiers::NONE);
-        let k = ct_event::KeyEvent::new(ct_event::KeyCode::Char('k'), ct_event::KeyModifiers::NONE);
-        let up = ct_event::KeyEvent::new(ct_event::KeyCode::Up, ct_event::KeyModifiers::NONE);
-        let down = ct_event::KeyEvent::new(ct_event::KeyCode::Down, ct_event::KeyModifiers::NONE);
-        assert_eq!(
-            workspace_switch_command(&tab),
-            Some(NavCommand::NextWorkspace)
-        );
-        assert_eq!(
-            workspace_switch_command(&backtab),
-            Some(NavCommand::PreviousWorkspace)
-        );
-        assert_eq!(
-            workspace_switch_command(&right),
-            Some(NavCommand::NextWorkspace)
-        );
-        assert_eq!(
-            vim_workspace_switch_command(&l),
-            Some(NavCommand::NextWorkspace)
-        );
-        assert_eq!(
-            workspace_switch_command(&left),
-            Some(NavCommand::PreviousWorkspace)
-        );
-        assert_eq!(
-            vim_workspace_switch_command(&h),
-            Some(NavCommand::PreviousWorkspace)
-        );
-        assert_eq!(row_navigation_command(&down), Some(NavCommand::Down));
-        assert_eq!(row_navigation_command(&j), Some(NavCommand::Down));
-        assert_eq!(row_navigation_command(&up), Some(NavCommand::Up));
-        assert_eq!(row_navigation_command(&k), Some(NavCommand::Up));
-    }
-
-    #[test]
-    fn editable_provision_form_arrows_move_cursor_before_workspace_navigation() {
+    fn provision_form_uses_explicit_insert_mode_for_text_editing() {
         let mut state = AppState::new();
         state.navigate(NavCommand::WorkspaceProvision, 20);
         state.provision_mut().stage = state::ProvisionStage::Form;
         state.provision_mut().field_selected = 0;
         state.provision_mut().form.label_id = "12345".into();
-        state.provision_cursor_end();
-        let key = |code| ct_event::KeyEvent::new(code, ct_event::KeyModifiers::NONE);
-        assert!(handle_provision_form_cursor_key(
-            &mut state,
-            &key(ct_event::KeyCode::Left)
-        ));
-        assert_eq!(state.provision_field_cursor(), 4);
+
+        assert!(state.provision_begin_insert());
+        assert_eq!(state.input_mode(), state::InputMode::Insert);
         assert_eq!(state.workspace(), state::Workspace::Provision);
-        assert!(handle_provision_form_cursor_key(
-            &mut state,
-            &key(ct_event::KeyCode::Right)
-        ));
-        assert_eq!(state.provision_field_cursor(), 5);
-        assert!(handle_provision_form_cursor_key(
-            &mut state,
-            &key(ct_event::KeyCode::Home)
-        ));
-        assert_eq!(state.provision_field_cursor(), 0);
-        assert!(handle_provision_form_cursor_key(
-            &mut state,
-            &key(ct_event::KeyCode::End)
-        ));
-        assert_eq!(state.provision_field_cursor(), 5);
-        assert!(!handle_provision_form_cursor_key(
-            &mut state,
-            &key(ct_event::KeyCode::Tab)
-        ));
+
+        state.provision_move_cursor(-1);
+        assert_eq!(state.provision_field_cursor(), 4);
+        state.provision_end_insert();
+        assert_eq!(state.input_mode(), state::InputMode::Normal);
+        assert_eq!(state.workspace(), state::Workspace::Provision);
     }
 
     #[test]

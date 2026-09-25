@@ -599,7 +599,26 @@ impl AppState {
         &mut self.provision
     }
 
+    pub fn provision_begin_insert(&mut self) -> bool {
+        if self.workspace != Workspace::Provision
+            || self.provision.stage != ProvisionStage::Form
+            || !self.provision_selected_field_is_editable()
+        {
+            return false;
+        }
+        self.input_mode = InputMode::Insert;
+        self.provision_sync_cursor_to_end();
+        true
+    }
+
+    pub fn provision_end_insert(&mut self) {
+        if self.input_mode == InputMode::Insert {
+            self.input_mode = InputMode::Normal;
+        }
+    }
+
     pub fn provision_reset(&mut self) {
+        self.input_mode = InputMode::Normal;
         let selected = self
             .provision
             .menu_selected
@@ -2393,6 +2412,20 @@ impl AppState {
         }
     }
 
+    pub fn provision_delete_char(&mut self) {
+        let cursor = self.provision_field_cursor();
+        let slot = self.provision_field_slot(self.provision.field_selected);
+        if let Some(field) = self.provision_selected_field_mut() {
+            let mut chars = field.chars().collect::<Vec<_>>();
+            if cursor < chars.len() {
+                chars.remove(cursor);
+                *field = chars.into_iter().collect();
+                self.provision_mark_capacity_edit(slot);
+                self.provision.message = None;
+            }
+        }
+    }
+
     pub fn provision_request(
         &mut self,
     ) -> Result<crate::application::provision::OfficialProvisionRequest, String> {
@@ -2526,6 +2559,7 @@ impl AppState {
 
     pub fn provision_set_planning(&mut self) {
         self.provision.stage = ProvisionStage::Planning;
+        self.input_mode = InputMode::Normal;
         self.provision.message = Some("正在只读检查目标并生成精确制盘计划…".into());
     }
 
@@ -2552,6 +2586,7 @@ impl AppState {
             None => "./edp-plain.img".into(),
         };
         self.provision.stage = ProvisionStage::ExportPath;
+        self.input_mode = InputMode::Insert;
         self.provision.message = None;
     }
 
@@ -2595,6 +2630,7 @@ impl AppState {
 
     pub fn provision_finish_export(&mut self, result: Result<std::path::PathBuf, String>) {
         self.provision.stage = ProvisionStage::Review;
+        self.input_mode = InputMode::Normal;
         self.provision.message = Some(match result {
             Ok(path) => format!("镜像导出完成：{}", path.display()),
             Err(message) => message,
@@ -2605,12 +2641,14 @@ impl AppState {
         if self.provision.stage == ProvisionStage::ExportPath {
             self.provision.stage = ProvisionStage::Review;
             self.provision.message = None;
+            self.input_mode = InputMode::Normal;
         }
     }
 
     pub fn provision_begin_confirm(&mut self) {
         if self.provision.prepared.is_some() {
             self.provision.stage = ProvisionStage::Confirm;
+            self.input_mode = InputMode::Confirm;
             self.provision.confirmation.clear();
             self.provision.message = None;
         }
@@ -2641,6 +2679,7 @@ impl AppState {
         }
         let prepared = self.provision.prepared.take()?;
         self.provision.stage = ProvisionStage::Running;
+        self.input_mode = InputMode::Normal;
         self.provision.message = Some("事务写盘进行中；退出请求会延迟到安全检查点".into());
         self.critical_operation = true;
         Some(prepared)
@@ -2649,6 +2688,7 @@ impl AppState {
     pub fn provision_finish_write(&mut self, result: Result<String, String>) {
         self.critical_operation = false;
         self.provision.stage = ProvisionStage::Result;
+        self.input_mode = InputMode::Normal;
         self.provision.message = Some(match result {
             Ok(message) => message,
             Err(message) => message,

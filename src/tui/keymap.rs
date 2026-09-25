@@ -285,6 +285,7 @@ impl KeyMapper {
         self.pending = None;
         match event.code {
             KeyCode::Esc => Some(TuiAction::Back),
+            KeyCode::Enter => Some(TuiAction::Submit),
             KeyCode::Left => Some(TuiAction::CursorLeft),
             KeyCode::Right => Some(TuiAction::CursorRight),
             KeyCode::Home => Some(TuiAction::CursorHome),

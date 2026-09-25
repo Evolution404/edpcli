@@ -148,6 +148,14 @@ fn insert_mode_treats_vim_action_letters_as_text_and_arrows_as_cursor_motion() {
         Some(TuiAction::CursorHome)
     );
     assert_eq!(
+        mapper.map(InputMode::Insert, key(KeyCode::Enter)),
+        Some(TuiAction::Submit)
+    );
+    assert_eq!(
+        mapper.map(InputMode::Insert, key(KeyCode::Esc)),
+        Some(TuiAction::Back)
+    );
+    assert_eq!(
         mapper.map(InputMode::Insert, key(KeyCode::End)),
         Some(TuiAction::CursorEnd)
     );
