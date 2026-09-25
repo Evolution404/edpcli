@@ -63,6 +63,12 @@ impl InspectNodeRange {
     }
 }
 
+/// Render a non-empty half-open LBA extent as a single closed UI range.
+/// Invalid or empty extents have no visible closed-range representation.
+pub fn format_lba_closed_range(start: u64, end_exclusive: u64) -> Option<String> {
+    (end_exclusive > start).then(|| format!("[{start}..{}]", end_exclusive - 1))
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum InspectChildren {
     None,
@@ -255,7 +261,11 @@ fn region_with_extent(
     InspectNode {
         id,
         label: label.into(),
-        kind: InspectNodeKind::Region,
+        kind: if extent_kind == InspectNodeKind::UnknownRange {
+            InspectNodeKind::UnknownRange
+        } else {
+            InspectNodeKind::Region
+        },
         range: InspectNodeRange::sectors(start_lba, sector_count),
         children: InspectChildren::Materialized(vec![extent]),
         decoder,
@@ -379,6 +389,48 @@ fn unknown_gaps(claimed: &[(u64, u64)], total: u64) -> Vec<(u64, u64)> {
     out
 }
 
+fn collapse_overlapping_regions(mut regions: Vec<InspectNode>) -> Vec<InspectNode> {
+    regions.sort_by_key(|region| region.range.start_lba);
+    let mut groups: Vec<Vec<InspectNode>> = Vec::new();
+    for region in regions {
+        if let Some(group) = groups.last_mut() {
+            let group_end = group
+                .iter()
+                .map(|member| member.range.end_lba_exclusive())
+                .max()
+                .unwrap_or(0);
+            if region.range.start_lba < group_end {
+                group.push(region);
+                continue;
+            }
+        }
+        groups.push(vec![region]);
+    }
+    groups
+        .into_iter()
+        .map(|mut group| {
+            if group.len() == 1 {
+                return group.pop().expect("one region");
+            }
+            let start = group[0].range.start_lba;
+            let end = group
+                .iter()
+                .map(|member| member.range.end_lba_exclusive())
+                .max()
+                .expect("overlap group");
+            InspectNode {
+                id: format!("region.conflict.{start}"),
+                label: "重叠证据".into(),
+                kind: InspectNodeKind::Region,
+                range: InspectNodeRange::sectors(start, end - start),
+                children: InspectChildren::Materialized(group),
+                decoder: None,
+                status: SemanticStatus::Unknown,
+            }
+        })
+        .collect()
+}
+
 fn tail_region(total_sectors: u64) -> Option<InspectNode> {
     let tail_count = total_sectors.min(DEVICE_TAIL_WINDOW_SECTORS);
     if tail_count == 0 {
@@ -486,7 +538,7 @@ pub fn build_inspect_topology(context: &InspectDiskContext) -> InspectTopology {
     if let Some((start, count)) = clip_range(0, 13, total) {
         regions.push(region_with_extent(
             "region.protocol",
-            "EDP 主协议区 LBA0-12",
+            "EDP 主协议区",
             start,
             count,
             Some(InspectDecoderKind::Protocol),
@@ -542,7 +594,7 @@ pub fn build_inspect_topology(context: &InspectDiskContext) -> InspectTopology {
     for (index, (start, count)) in unknown_gaps(&claimed, total).into_iter().enumerate() {
         regions.push(region_with_extent(
             format!("region.unknown.{index}"),
-            format!("未知区域 LBA{start}..{}", start + count - 1),
+            "未知区域",
             start,
             count,
             None,
@@ -550,6 +602,9 @@ pub fn build_inspect_topology(context: &InspectDiskContext) -> InspectTopology {
             InspectNodeKind::UnknownRange,
         ));
     }
+
+    let mut regions = collapse_overlapping_regions(regions);
+    regions.sort_by_key(|region| region.range.start_lba);
 
     InspectTopology {
         root: InspectNode {
@@ -704,6 +759,76 @@ mod tests {
             vec![3_048, 3_049, 3_050]
         );
         assert!(page.iter().all(|node| node.kind == InspectNodeKind::Sector));
+    }
+
+    #[test]
+    fn root_regions_follow_physical_lba_order_with_unknown_gaps() {
+        let mut ctx = context(10_000);
+        ctx.lce = Some(Lba7CompatibilityGeometry {
+            start_lba: 4_500,
+            sector_count: 6,
+            lba7_pointer_entries: Vec::new(),
+            official_partition_mode: None,
+            chs_expected_start_lba: None,
+        });
+        ctx.partitions.push(partition(0, 2_048, 2_000, 2));
+        let topology = build_inspect_topology(&ctx);
+        let InspectChildren::Materialized(regions) = topology.root.children else {
+            panic!("root regions must be materialized");
+        };
+        assert!(regions
+            .windows(2)
+            .all(|pair| { pair[0].range.end_lba_exclusive() <= pair[1].range.start_lba }));
+        let positions = regions
+            .iter()
+            .map(|node| node.range.start_lba)
+            .collect::<Vec<_>>();
+        assert_eq!(positions, vec![0, 13, 2_048, 4_048, 4_500, 4_506, 7_952]);
+        assert_eq!(regions[3].kind, InspectNodeKind::UnknownRange);
+        assert_eq!(regions[5].kind, InspectNodeKind::UnknownRange);
+    }
+
+    #[test]
+    fn ui_lba_ranges_are_closed_but_model_ranges_remain_half_open() {
+        assert_eq!(format_lba_closed_range(12, 13).as_deref(), Some("[12..12]"));
+        assert_eq!(format_lba_closed_range(13, 63).as_deref(), Some("[13..62]"));
+        assert_eq!(format_lba_closed_range(0, 0), None);
+        assert_eq!(format_lba_closed_range(8, 7), None);
+        assert_eq!(
+            format_lba_closed_range(u64::MAX - 1, u64::MAX).as_deref(),
+            Some("[18446744073709551614..18446744073709551614]")
+        );
+        assert_eq!(InspectNodeRange::sectors(13, 50).end_lba_exclusive(), 63);
+    }
+
+    #[test]
+    fn overlapping_known_evidence_is_explicit_and_root_remains_non_overlapping() {
+        let mut ctx = context(10_000);
+        ctx.partitions.push(partition(0, 2_048, 2_000, 2));
+        ctx.lce = Some(Lba7CompatibilityGeometry {
+            start_lba: 3_000,
+            sector_count: 6,
+            lba7_pointer_entries: Vec::new(),
+            official_partition_mode: None,
+            chs_expected_start_lba: None,
+        });
+        let topology = build_inspect_topology(&ctx);
+        let InspectChildren::Materialized(regions) = topology.root.children else {
+            panic!("root regions must be materialized");
+        };
+        assert!(regions
+            .windows(2)
+            .all(|pair| pair[0].range.end_lba_exclusive() <= pair[1].range.start_lba));
+        let conflict = regions
+            .iter()
+            .find(|region| region.label == "重叠证据")
+            .unwrap();
+        assert_eq!(conflict.range, InspectNodeRange::sectors(2_048, 2_000));
+        let InspectChildren::Materialized(evidence) = &conflict.children else {
+            panic!("conflict must retain original evidence");
+        };
+        assert!(evidence.iter().any(|node| node.id == "region.lce"));
+        assert!(evidence.iter().any(|node| node.id == "region.partition.0"));
     }
 
     #[test]

@@ -823,6 +823,8 @@ impl AppState {
             };
             self.switch_workspace(workspace);
             self.selected = frame.selection.min(self.item_count.saturating_sub(1));
+        } else {
+            self.switch_workspace(Workspace::Devices);
         }
     }
 

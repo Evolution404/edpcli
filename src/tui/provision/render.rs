@@ -536,7 +536,11 @@ pub(super) fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, sta
                             prepared.source_kind.short_name(),
                             prepared
                                 .source_lce_start_lba
-                                .map(|lba| format!("LBA{lba}..{}", lba + 5))
+                                .and_then(|lba| lba.checked_add(6).and_then(|end| {
+                                    crate::application::inspect_tree::format_lba_closed_range(
+                                        lba, end,
+                                    )
+                                }))
                                 .unwrap_or_else(|| "无".into())
                         )));
                         lines.push(Line::from(format!(
@@ -547,10 +551,17 @@ pub(super) fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, sta
                         lines.push(Line::from("LBA3 已从目标盘捕获并绑定；写入前将再次复核。"));
                         for (index, part) in plan.partitions.iter().enumerate() {
                             lines.push(Line::from(format!(
-                                "P{} LBA{}..{} · {} sectors · {} · 卷标:{}",
+                                "P{} {} · {} sectors · {} · 卷标:{}",
                                 index + 1,
-                                part.start_lba,
-                                part.end_lba().unwrap_or(part.start_lba),
+                                part.end_exclusive()
+                                    .ok()
+                                    .and_then(|end| {
+                                        crate::application::inspect_tree::format_lba_closed_range(
+                                            part.start_lba,
+                                            end,
+                                        )
+                                    })
+                                    .unwrap_or_else(|| "[无效范围]".into()),
                                 part.sector_count,
                                 part.filesystem.windows_format_name(),
                                 safe(&part.volume_label)
@@ -558,9 +569,16 @@ pub(super) fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, sta
                         }
                         for gap in &plan.gaps {
                             lines.push(Line::from(format!(
-                                "空闲 LBA{}..{} · {} sectors",
-                                gap.start_lba,
-                                gap.end_lba(),
+                                "空闲 {} · {} sectors",
+                                gap.start_lba
+                                    .checked_add(gap.sector_count)
+                                    .and_then(|end| {
+                                        crate::application::inspect_tree::format_lba_closed_range(
+                                            gap.start_lba,
+                                            end,
+                                        )
+                                    })
+                                    .unwrap_or_else(|| "[无效范围]".into()),
                                 gap.sector_count
                             )));
                         }
@@ -655,7 +673,6 @@ pub(super) fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, sta
                                 target_plan.unallocated_sectors
                             )));
                             for part in &target_plan.partitions {
-                                let end = part.geometry.start_lba + part.geometry.sector_count - 1;
                                 let action = match part.action {
                                     crate::provision::PartitionAction::PreserveExact => {
                                         "原数据可保留 · 复用原 FileKey · 不写数据区"
@@ -665,10 +682,9 @@ pub(super) fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, sta
                                     }
                                 };
                                 lines.push(Line::from(format!(
-                                    "{} LBA{}..{} ({} sectors): {}",
+                                    "{} {} ({} sectors): {}",
                                     part.geometry.role.label(),
-                                    part.geometry.start_lba,
-                                    end,
+                                    part.geometry.start_lba.checked_add(part.geometry.sector_count).and_then(|end| crate::application::inspect_tree::format_lba_closed_range(part.geometry.start_lba, end)).unwrap_or_else(|| "[无效范围]".into()),
                                     part.geometry.sector_count,
                                     action
                                 )));
