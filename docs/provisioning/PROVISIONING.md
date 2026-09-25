@@ -2294,3 +2294,492 @@ Insert：
 20. 不降低任何真实写盘安全门槛。
 
 最终产品定义：**edpcli TUI 使用克制的低饱和 TrueColor 视觉系统，以统一语义 Theme 提供现代终端观感；交互以 Vim 的 tab/window/navigation 思路组织 Workspace、Panel、列表、树、表单和 Hex，文本编辑通过明确 Insert mode 与导航彻底隔离。用户不需要记忆“每个页面自己的快捷键”，同一动作在整个应用中始终使用同一种交互语言。**
+
+---
+
+## 11. TUI 导航、Inspect 信息架构与统一表格系统重构计划（2026-09-25）
+
+### 11.1 背景与覆盖关系
+
+本章来自 2026-09-25 实机验收反馈，目标不是继续修补单个快捷键或单个渲染问题，而是一次性收口 **导航语义、Inspect 信息架构、磁盘布局表达、区间显示和表格布局**。本章实施完成后，凡与第 10 章快捷键/Panel 规则冲突的地方，**以本章为最终产品定义**；第 10 章保留为上一轮已完成重构的历史记录。
+
+本轮必须解决以下十项用户验收问题：
+
+1. `b` 是 Backup 快捷键，废止当前 `a=Backup`；
+2. 设备页 Enter 进入 Provision，删除 `p=Provision`；Provision Form 也只用 Enter 生成计划，不再保留 `p` 预览/生成别名；
+3. `q` 是全局退出意图，`Esc` 只负责返回上一级；
+4. 所有 Sector/LBA 范围只显示一次，并统一为闭区间 `[start..end]`；
+5. Inspect 选中 LBA12 等已知节点时，详情区立即显示该节点的结构化解析数据，而不是只显示 SHA-256 再要求 Enter；
+6. Inspect 顶部直接显示当前磁盘布局、各区域比例和布局条，并与 Provision 共用同一视觉/计算模型；
+7. Inspect 根结构树严格按物理 LBA 起点排序，Unknown 必须插回真实位置，不允许统一堆到末尾；
+8. Inspect 内 `Tab/Shift-Tab` 必须有效，循环切换“结构树 / 节点概览 / 节点详情”子工作区；
+9. 增加面包屑和明确的 `Esc 返回：<目标>` 提示，用户必须知道当前层级和返回目标；
+10. 所有 Table 使用统一自适应列宽算法，并支持 `h/l` 横向滚动；长“部门”等字段不能挤掉更重要的“盘型”等右侧列。
+
+硬约束继续保持：
+
+- 不改变 LBA0～12/LCE 协议语义；
+- 不猜测 Unknown 区域用途，Unknown 不得伪装成 free space；
+- 不降低系统盘保护、USB 整盘确认、写前备份、卸载/锁卷、reopen 身份复核、atomic write、readback、rollback、精确大写 `YES` 等写盘安全门槛；
+- Inspect 本轮仍是只读能力；
+- 所有区间内部计算继续使用 half-open `[start, end_exclusive)`，闭区间只属于 UI formatter，禁止因为显示规则修改底层边界数学。
+
+### 11.2 最终导航与快捷键契约
+
+#### 11.2.1 顶层标签
+
+顶层只有两个真实标签：
+
+```text
+Devices  |  Backups
+```
+
+Provision 和 Inspect 都是从当前对象进入的子工作区，不属于顶层 Tab。
+
+- 顶层 Devices/Backups：`Tab` = 下一个标签，`Shift-Tab` = 上一个标签；两个标签循环切换；
+- 进入 Inspect 后：`Tab/Shift-Tab` 不离开 Inspect，而是切 Inspect 内部子工作区，见 11.7；
+- 进入其它 modal/Confirm/Input 时，由当前模式优先消费键盘，不能误触顶层切换。
+
+#### 11.2.2 单键动作
+
+无文本输入的 Normal 页面统一遵循“一个常用动作一个键”：
+
+| 场景 | 键 | 行为 |
+| --- | --- | --- |
+| Devices | `Enter` | 对当前设备进入 Provision |
+| Devices | `i` | Inspect 当前设备 |
+| Devices | `b` | 对当前设备进入既有 Backup 创建流程 |
+| Backups | `Enter` / `i` | Inspect 当前备份 |
+| Backups | `b` | 进入既有 Backup 创建流程（按当前产品上下文选择目标盘，不另造旁路） |
+| Backups | `v` | Verify 当前备份 |
+| Backups | `R` | 进入 Restore 既有安全向导 |
+| Backups | `d` | 删除当前/已选备份并进入确认 |
+| 全局 | `q` | 发出退出整个 App 的全局退出意图 |
+| 全局 | `Esc` | 返回上一级，不承担退出 App |
+
+删除/禁止：
+
+- `p=Provision`；
+- `a=Backup`；
+- `gt/gT/gd/gb/gp/gi`；
+- 任何与以上动作重复的第二套用户可见快捷键。
+
+Provision Form：
+
+- Normal：`Enter` = 生成只读计划；
+- `i` = 编辑当前可编辑字段；
+- Insert：Enter/Esc 完成当前字段编辑并回 Normal；
+- 不再保留 `p` 作为计划生成/预览别名。
+
+`q` 的优先级必须高于 workspace 业务动作，不能再有页面把 `q` 重定义成“返回”。如果处于不可安全中断的真实写盘 critical section，仍必须服从既有 fail-closed transaction/shutdown 保护，不能通过 `q` 绕过写盘安全边界；其它状态下退出意图应立即结束 App。
+
+### 11.3 NavigationStack 与面包屑
+
+新增统一导航抽象，建议命名：
+
+```text
+NavigationStack
+NavigationFrame
+BreadcrumbModel
+```
+
+不要继续让 Esc 行为散落在各 workspace 的临时 `match` 中。
+
+基本规则：
+
+- `Esc` = `navigation.pop()`；
+- 每个 frame 保存来源、selection、scroll、panel focus 等恢复所需状态；
+- 从 Devices 进入 Inspect，Inspect 根的返回目标必须是原 Devices selection；
+- 从 Backups 进入 Inspect，Inspect 根的返回目标必须是原 Backups selection；
+- 从 LBA12 打开 Sector Inspector，Esc 返回 LBA12 所在 Inspect 状态，而不是重新加载/丢 selection；
+- 从 Provision 子步骤 Esc 按现有业务层级逐层返回，不能直接退出 App。
+
+Inspect 顶部至少显示两类信息：
+
+```text
+设备 > disk4 > Inspect > EDP 主协议区 > LBA12
+Esc 返回：设备列表
+```
+
+注意：树上“当前选中节点路径”与“真实导航栈”不是同一个概念。仅用 `j/k` 移动选择时，不应为了每个节点都 push navigation frame；breadcrumb 可以显示 selected node path，但必须单独显示真实 `Esc 返回：...`，避免用户误以为 Esc 会回树父节点。
+
+### 11.4 Sector/LBA 区间统一 formatter
+
+新增一个单一事实源 formatter，例如：
+
+```text
+format_lba_closed_range(start, end_exclusive) -> "[start..end]"
+```
+
+UI 禁止自己拼 `LBAxxx..yyy`、`[x..y)` 或同时显示两套范围。
+
+显示规范：
+
+```text
+LBA12 [12..12]
+未知区域 [13..62]
+分区[0] type1 [63..20479]
+LCE [15725843..15725848]
+```
+
+内部数据仍保持：
+
+```text
+start
+end_exclusive
+length = end_exclusive - start
+```
+
+显示端唯一转换：
+
+```text
+end_inclusive = end_exclusive - 1
+```
+
+必须覆盖空区间/溢出防护，禁止 off-by-one 回归。
+
+### 11.5 Inspect topology：按物理 LBA 顺序构建完整空间图
+
+根节点下所有 extent 必须以 `start_lba ASC` 排序。Unknown 不能作为一个“类别”统一 append 到末尾，而必须作为已知 extent 的 complement 插入真实物理位置。
+
+以当前实盘截图为例，根节点应按类似顺序展示：
+
+```text
+EDP 主协议区 [0..12]
+未知区域 [13..62]
+分区[0] type1 [63..20479]
+分区[1] type2 [20480..13627391]
+分区[2] type4 [13627392..15724543]
+未知区域 [15724544..15725842]
+LCE [15725843..15725848]
+未知区域 [15725849..15726591]
+盘尾区域 [15726592..15728639]
+```
+
+Topology builder 推荐流程：
+
+1. 收集所有 canonical known extents；
+2. 按 `start_lba` 排序；
+3. 校验 overlap；
+4. 计算 known extent 之间的 gap，并生成 Unknown extent；
+5. 合并 known + Unknown，再按 start 输出；
+6. 如存在尾部已知区域/盘尾证据，同样放回真实位置。
+
+不变量测试至少包括：
+
+- root extents 的 start LBA 单调递增；
+- 不允许 overlap；
+- gap 生成的 Unknown 边界正确；
+- LCE 前后的 Unknown 不被错误合并跨过 LCE；
+- UI formatter 显示为闭区间但内部仍是 half-open。
+
+### 11.6 Inspect 顶部磁盘布局条
+
+抽出 Provision 当前已经存在的布局视觉能力，形成共享抽象，建议：
+
+```text
+DiskLayoutModel
+DiskLayoutSegment
+DiskLayoutBar
+```
+
+Provision 和 Inspect 禁止各自维护两套比例/颜色/区间计算。
+
+Inspect 顶部显示：
+
+- 总容量/总 sector；
+- 设备状态/盘型；
+- 一条连续磁盘布局条；
+- 各 segment 的名称、范围、sector 数、百分比；
+- 颜色继续来自统一 Theme 的 partition tokens；
+- 极小区域（例如 LCE 6 sectors）即使比例无法在 bar 中肉眼分辨，也必须在图例中保留精确数字。
+
+示意：
+
+```text
+磁盘布局  8.05 GiB / 15728640 sectors
+[EDP][未知][type1][type2................][type4......][未知][LCE][未知][Tail]
+
+type1  [63..20479]              20417 sectors   0.13%
+type2  [20480..13627391]        ...             ...
+type4  [13627392..15724543]     ...             ...
+LCE    [15725843..15725848]     6 sectors       <0.01%
+```
+
+Unknown 只能标为“未知区域/Unknown”，不能推断为 free/unused。
+
+### 11.7 Inspect 三个子工作区与 Tab 行为
+
+Inspect 保留三个并列子工作区：
+
+```text
+结构树  |  节点概览  |  节点详情
+```
+
+最终键位：
+
+- Inspect 内 `Tab`：结构树 → 节点概览 → 节点详情 → 结构树；
+- `Shift-Tab`：反向循环；
+- 宽屏：三栏可同时存在，Tab 只改变 focus/highlight；
+- 窄屏：允许只渲染当前 focus 子工作区，因此 Tab 变成实际视图切换；
+- `Ctrl-w h/j/k/l/w/W` 可继续作为高级 Panel focus alias，但不能让 Tab 在 Inspect 中失效；
+- 退出 Inspect 只能用 Esc 返回来源或 q 全局退出，Tab 不能跳回 Devices/Backups。
+
+这条规则覆盖第 10 章“Tab 只切顶层、Panel 只用 Ctrl-w”的旧规则：**顶层页面 Tab 切顶层标签；Inspect 内 Tab 切 Inspect 子工作区，按当前 navigation context 解释。**
+
+### 11.8 Inspect 选中节点即显示结构化解析
+
+当前“选中 LBA12 → 右侧只显示 RAW SHA-256 → Enter 才进一步看”的 UX 必须改掉。
+
+新规则：树 selection 改变时，中间/右侧立即消费 application/canonical decoder 已经产生的结构化数据，禁止 TUI 重写协议 parser。
+
+例如选中 `LBA12 [12..12]` 后：
+
+**节点概览**至少显示：
+
+```text
+名称：LBA12
+类型：Sector
+范围：[12..12]
+大小：512 B
+状态：identified
+Decoder：Protocol / LBA12
+```
+
+**节点详情**直接显示 LBA12 的已解析 group/field/entry，例如 Header、partition entries、PartionType、start LBA、sector count、CRC/校验状态等已有 canonical 字段。字段具体名称和语义必须来自现有 decoder，不能在 TUI 猜写。
+
+相同规则覆盖 LBA0～12、LCE、分区 boot sector、已知 Field/Structure 节点。
+
+Enter 的职责重新定义为：
+
+- Sector 节点：打开 Sector Inspector/Hex；
+- Field/Group：根据现有结构进入更细视图或定位 Hex；
+- 普通节点：展开/进入；
+
+**Enter 不再是“查看正常解析数据”的前置条件。**
+
+Sector Inspector 继续承担底层分析：Raw/Decode/Mixed、byte cursor、field range、`0/$`、`gg/G`、`Ctrl-u/d`、PageUp/PageDown、`v`、`Space/o`、`gl` 等。
+
+### 11.9 统一 AdaptiveTableLayout
+
+新增全局表格布局单一事实源，建议：
+
+```text
+AdaptiveTableLayout
+AdaptiveColumnSpec
+TableViewport
+HorizontalScrollState
+```
+
+所有普通表格统一使用，不再每张表手写固定 `Constraint::Length(...)`。
+
+每列至少声明：
+
+```text
+min_width
+preferred_width
+max_width
+priority
+weight
+truncate_policy
+```
+
+算法要求：
+
+1. 使用 terminal display width（CJK 宽字符必须按 cell width），禁止用 UTF-8 byte length；
+2. 先满足所有可见列 `min_width`；
+3. 剩余空间优先补到 `preferred_width`；
+4. 再按 `weight` 向高弹性列分配；
+5. 宽度不足时按 `priority` 压缩低优先级列；
+6. 仍放不下时进入 horizontal viewport，而不是让最右侧列直接消失；
+7. 可选固定第一标识列（如设备名/备份名），其余列水平滚动；
+8. 单元格 truncate 必须有一致省略策略，不能破坏边框和列对齐。
+
+设备表当前验收重点：
+
+- “部门”允许弹性增长/截断；
+- “盘型”必须有更高显示优先级，不能因部门过长完全看不到；
+- 容量、总线、VID:PID 等稳定字段按合理 min/preferred 控制；
+- `ven_prod`、onlyid、姓名、部门等按真实数据宽度参与计算。
+
+统一迁移范围至少包括：
+
+- Devices table；
+- Backups table；
+- Inspect field/partition entry table；
+- Provision review/plan 中的真正 Table；
+- 后续新增表格必须复用同一算法。
+
+### 11.10 Table 的 h/l 横向滚动
+
+普通 Table context：
+
+- `h` = 向左滚；
+- `l` = 向右滚；
+- 滚动单位优先按“下一列边界/可读 viewport step”，不要每次只挪一个字符；
+- footer 显示当前位置，例如 `h/l 横向滚动 · 3/9 列`；
+- 到最左/最右必须 clamp，不 wrap。
+
+上下文冲突按 widget role 解决：
+
+- Tree：`h/l` = 折叠/展开；
+- Table：`h/l` = 水平滚动；
+- Input/Insert：`h/l` = 文本字符，不触发导航；
+- Sector Inspector：继续使用其已有 byte/navigation 语义。
+
+KeyMapper 需要能够结合当前 widget/context role 分发，不允许重新回到“所有页面同一个字符硬编码成同一业务动作”的做法。
+
+### 11.11 推荐 Inspect 最终布局
+
+宽屏目标：
+
+```text
+┌ Inspect · disk4 · 8.05 GiB · 模式0 ───────────────────────────────┐
+│ 设备 > disk4 > Inspect > EDP 主协议区 > LBA12    Esc 返回：设备列表 │
+├───────────────────────────────────────────────────────────────────┤
+│ 磁盘布局                                                          │
+│ [EDP][未知][type1][type2................][type4......][未知][LCE]… │
+│ type1 0.13% · type2 ... · type4 ... · LCE 6 sectors ...          │
+├结构树────────────────┬节点概览──────────────┬节点详情──────────────┤
+│ EDP [0..12]          │ LBA12                │ LBA12 Header         │
+│ ├ LBA0 [0..0]        │ 范围 [12..12]        │ Partition entries    │
+│ ...                  │ Decoder: Protocol    │ Entry 0 ...          │
+│ > LBA12 [12..12]     │ 512 B                │ PartionType ...      │
+│ 未知 [13..62]        │ identified           │ Start LBA ...        │
+│ type1 [...]          │                      │ Sector count ...     │
+│ type2 [...]          │                      │ ...                  │
+│ type4 [...]          │                      │                      │
+│ 未知 [...]           │                      │                      │
+│ LCE [...]            │                      │                      │
+└───────────────────────────────────────────────────────────────────┘
+Tab/Shift-Tab 子工作区 · Enter Sector Inspector · Esc 返回 · q 退出
+```
+
+窄屏目标：
+
+- 顶部 breadcrumb + Esc target 不允许消失；
+- layout bar 可降级为紧凑条 + 一行摘要；
+- 三个 Inspect 子工作区一次只显示当前一个，由 Tab/Shift-Tab 切换；
+- selection、scroll、cursor 在切换后必须保持。
+
+### 11.12 分阶段实施
+
+#### Phase U0：契约与失败测试
+
+在改业务代码前先建立 red tests：
+
+- `b` 是 Backup，`a` 不再触发 Backup；
+- Devices `Enter` = Provision，`p` 不再触发 Provision；
+- `q` 是全局退出意图，Esc 只返回上一级；
+- range formatter 只输出一个闭区间；
+- Inspect Tab/Shift-Tab 子工作区循环；
+- topology root 物理顺序；
+- LBA12 selection 自动出现结构化详情；
+- AdaptiveTableLayout 的 CJK/窄屏/优先级；
+- Table `h/l` 横滚。
+
+#### Phase U1：Keymap + NavigationStack
+
+- 收口 `b/Enter/i/q/Esc`；
+- 删除 `p=Provision`、`a=Backup`；
+- 建立 NavigationStack/BreadcrumbModel；
+- 恢复来源 selection/scroll；
+- 更新 footer/help 同源门禁。
+
+#### Phase U2：Range formatter + topology ordering
+
+- 建立统一 closed-range formatter；
+- 删除树上重复区间；
+- known extent 排序、gap→Unknown、全盘物理顺序；
+- 加 overlap/gap/off-by-one 门禁。
+
+#### Phase U3：Inspect immediate details
+
+- tree selection 驱动 overview/detail；
+- LBA0～12/LCE/partition 已知 decoder 结果直接可见；
+- Enter 下沉到 Sector Inspector；
+- 禁止 TUI 复制 protocol parser。
+
+#### Phase U4：共享 DiskLayoutModel
+
+- 抽取 Provision 现有布局算法/renderer；
+- Inspect 复用；
+- 增加精确 sector/占比图例；
+- 小 segment 保留文本图例。
+
+#### Phase U5：Inspect sub-workspace + breadcrumb UX
+
+- Tab/Shift-Tab 三工作区循环；
+- 宽屏 focus、窄屏单 pane；
+- breadcrumb/`Esc 返回：...`；
+- Ctrl-w 作为高级 alias，不再是唯一入口。
+
+#### Phase U6：AdaptiveTableLayout + horizontal viewport
+
+- 公共列规格和宽度算法；
+- Devices/Backups/Inspect/Provision 表格迁移；
+- `h/l` 横滚；
+- CJK/超长部门/盘型可见性专项测试。
+
+#### Phase U7：清理、文档与验收
+
+- 删除所有旧 `p=Provision`、`a=Backup`、重复 range、无效 Tab/Panel 文案和死代码；
+- 更新 README、USAGE、Help、footer、本文件；
+- `cargo fmt --all -- --check`、`git diff --check`；
+- `tui_suite` / `inspect_suite` / `provision_suite`；
+- `scripts/test-fast.sh`；
+- `python3 scripts/test-full.py --profile full`；
+- Inspect 只读真实盘验收；本轮若未改写盘路径，不要求真实写盘 HIL。
+
+### 11.13 必须新增的回归门禁
+
+至少覆盖：
+
+1. Devices：Enter Provision、`i` Inspect、`b` Backup；
+2. `p` 在 Devices 不再触发 Provision；
+3. `a` 不再触发 Backup；
+4. Backups：Enter/i Inspect、b Backup、v Verify、R Restore、d Delete；
+5. q 在非 critical 状态触发全局 ExitRequested，Esc 不退出 App；
+6. critical write 状态下 q 不绕过 transaction safety；
+7. `[start..end_exclusive)` 内部转换到 `[start..end]` UI 无 off-by-one；
+8. UI 不出现 `LBAx..y [x..z)` 双份范围；
+9. topology 根节点 start LBA 单调递增；
+10. known extents 不 overlap；
+11. Unknown gap 边界正确且位于真实位置；
+12. 选择 LBA12 后无需 Enter 即可看到 canonical structured fields；
+13. Enter LBA12 才进入 Sector Inspector；
+14. Inspect Tab/Shift-Tab 按 Tree→Overview→Detail 循环，且不退出 Inspect；
+15. 窄屏切子工作区不丢 selection/scroll/cursor；
+16. breadcrumb 与真实 NavigationStack/返回目标一致；
+17. Devices 长部门名时盘型仍可访问/显示；
+18. display width 正确处理中文、ASCII、emoji；
+19. 所有统一 Table 在窄屏可 h/l 横滚；
+20. Tree h/l 仍折叠展开，不被 Table 横滚规则污染；
+21. Insert 中 h/l 是文本字符；
+22. 40×10、60×18、80×24、120×36、超宽终端无 panic/越界；
+23. Provision/Inspect 共用 DiskLayoutModel 后 segment range/比例一致；
+24. Help/footer 的快捷键与真实 KeyMapper 有契约测试；
+25. 不改变 LBA0～12/LCE parser golden tests；
+26. 不降低任何写盘安全 guard。
+
+### 11.14 完成标准
+
+只有以下条件同时满足，本章才允许标记 COMPLETE：
+
+1. 用户从任意主要页面都能明确回答“我在哪里、Tab 会去哪、Esc 会去哪、q 做什么”；
+2. Devices/Backups 常用动作均为最终单键模型，无重复别名；
+3. Inspect 根树按物理 LBA 顺序完整表达整盘空间；
+4. Sector/LBA 范围只显示一次且统一闭区间；
+5. 选中 LBA12 等已知节点立即显示人类可读的 canonical 解析数据；
+6. Provision/Inspect 使用同一磁盘布局组件；
+7. Inspect Tab/Shift-Tab 可用且语义稳定；
+8. breadcrumb 与 Esc 返回行为严格一致；
+9. 所有表格使用统一自适应算法，长字段不会永久挤掉关键列；
+10. 表格 h/l 横滚、树 h/l 折叠、输入 h/l 文本三种 context 不冲突；
+11. 所有现行 Help/footer/USAGE/PROVISIONING 与实际键位一致；
+12. 专项、fast、full 全绿；
+13. 真实盘 Inspect 只读验收通过；
+14. 工作区 clean，HEAD==origin/main；
+15. 本地安装版与 release 构建 SHA-256 一致。
+
+最终产品原则：**顶层标签简单、常用动作单键、q 退出/Esc 返回语义固定；Inspect 首屏就是可读的磁盘空间图和协议解析器，而不是一个必须继续钻取才能理解的数据树；所有表格和布局由共享基础设施统一计算，避免同类 UI 在不同页面重复漂移。**
