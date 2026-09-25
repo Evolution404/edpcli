@@ -425,6 +425,53 @@ fn tail_region(total_sectors: u64) -> Option<InspectNode> {
     })
 }
 
+fn mbr_primary_regions(context: &InspectDiskContext) -> Vec<InspectNode> {
+    let Some(mbr) = context.protocol_image.get(..crate::common::SECTOR) else {
+        return Vec::new();
+    };
+    if mbr.get(510..512) != Some(&[0x55, 0xaa]) {
+        return Vec::new();
+    }
+
+    let mut out = Vec::new();
+    for slot in 0..4usize {
+        let offset = 0x1be + slot * 16;
+        let partition_type = mbr[offset + 4];
+        let start_lba =
+            u32::from_le_bytes(mbr[offset + 8..offset + 12].try_into().expect("MBR field")) as u64;
+        let sector_count =
+            u32::from_le_bytes(mbr[offset + 12..offset + 16].try_into().expect("MBR field")) as u64;
+        if partition_type == 0 || start_lba == 0 || sector_count == 0 {
+            continue;
+        }
+        let Some(end_lba) = start_lba.checked_add(sector_count) else {
+            continue;
+        };
+        if end_lba > context.total_sectors {
+            continue;
+        }
+        if context.partitions.iter().any(|partition| {
+            partition.start_sector == start_lba && partition.sector_count == sector_count
+        }) {
+            continue;
+        }
+
+        out.push(region_with_extent(
+            format!("region.mbr_partition.{slot}"),
+            format!(
+                "MBR P{} type=0x{partition_type:02X}",
+                slot.saturating_add(1)
+            ),
+            start_lba,
+            sector_count,
+            None,
+            SemanticStatus::Identified,
+            InspectNodeKind::Partition,
+        ));
+    }
+    out
+}
+
 pub fn build_inspect_topology(context: &InspectDiskContext) -> InspectTopology {
     let total = context.total_sectors;
     let mut regions = Vec::new();
@@ -473,6 +520,11 @@ pub fn build_inspect_topology(context: &InspectDiskContext) -> InspectTopology {
             ));
             claimed.push((start, count));
         }
+    }
+
+    for region in mbr_primary_regions(context) {
+        claimed.push((region.range.start_lba, region.range.sector_count));
+        regions.push(region);
     }
 
     if let Some(tail) = tail_region(total) {
@@ -627,6 +679,80 @@ mod tests {
             vec![3_048, 3_049, 3_050]
         );
         assert!(page.iter().all(|node| node.kind == InspectNodeKind::Sector));
+    }
+
+    #[test]
+    fn plain_mbr_primary_partition_becomes_lazy_partition_region() {
+        let mut ctx = context(20_000);
+        let mbr = &mut ctx.protocol_image[..SECTOR];
+        let entry = 0x1be;
+        mbr[entry + 4] = 0x07;
+        mbr[entry + 8..entry + 12].copy_from_slice(&2_048u32.to_le_bytes());
+        mbr[entry + 12..entry + 16].copy_from_slice(&10_000u32.to_le_bytes());
+        mbr[510..512].copy_from_slice(&[0x55, 0xaa]);
+
+        let topology = build_inspect_topology(&ctx);
+        let region = topology
+            .regions_for_lba(3_000)
+            .into_iter()
+            .find(|node| node.id == "region.mbr_partition.0")
+            .expect("plain MBR partition must be a first-class region");
+        assert_eq!(region.range, InspectNodeRange::sectors(2_048, 10_000));
+        assert!(region.label.contains("MBR P1"));
+        assert_eq!(region.decoder, None);
+
+        let InspectChildren::Materialized(children) = &region.children else {
+            panic!("MBR partition must own one lazy extent");
+        };
+        assert!(matches!(
+            children[0].children,
+            InspectChildren::LazySectors {
+                start_lba: 2_048,
+                sector_count: 10_000
+            }
+        ));
+    }
+
+    #[test]
+    fn mbr_partition_matching_edp_geometry_is_not_duplicated() {
+        let mut ctx = context(20_000);
+        ctx.partitions.push(partition(0, 2_048, 10_000, 2));
+        let mbr = &mut ctx.protocol_image[..SECTOR];
+        let entry = 0x1be;
+        mbr[entry + 4] = 0x07;
+        mbr[entry + 8..entry + 12].copy_from_slice(&2_048u32.to_le_bytes());
+        mbr[entry + 12..entry + 16].copy_from_slice(&10_000u32.to_le_bytes());
+        mbr[510..512].copy_from_slice(&[0x55, 0xaa]);
+
+        let topology = build_inspect_topology(&ctx);
+        let regions = topology.regions_for_lba(3_000);
+        assert!(regions.iter().any(|node| node.id == "region.partition.0"));
+        assert!(
+            regions
+                .iter()
+                .all(|node| !node.id.starts_with("region.mbr_partition.")),
+            "official EDP partition and its MBR exposure must not produce duplicate regions"
+        );
+    }
+
+    #[test]
+    fn malformed_mbr_primary_partition_does_not_claim_disk_space() {
+        let mut ctx = context(20_000);
+        let mbr = &mut ctx.protocol_image[..SECTOR];
+        let entry = 0x1be;
+        mbr[entry + 4] = 0x07;
+        mbr[entry + 8..entry + 12].copy_from_slice(&19_000u32.to_le_bytes());
+        mbr[entry + 12..entry + 16].copy_from_slice(&2_000u32.to_le_bytes());
+        mbr[510..512].copy_from_slice(&[0x55, 0xaa]);
+
+        let topology = build_inspect_topology(&ctx);
+        assert!(
+            topology
+                .regions_for_lba(19_500)
+                .iter()
+                .all(|node| !node.id.starts_with("region.mbr_partition.")),
+            "out-of-range MBR geometry must fail closed instead of being silently clipped"
+        );
     }
 
     #[test]
