@@ -711,6 +711,12 @@ fn run_loop(resume: Option<state::WriteIntent>) -> io::Result<LoopExit> {
                                         ct_event::KeyCode::Char('o') => {
                                             state.advanced_inspect_sector_toggle_field();
                                         }
+                                        ct_event::KeyCode::Char('y') => {
+                                            let _ = state.advanced_inspect_sector_yank(false);
+                                        }
+                                        ct_event::KeyCode::Char('Y') => {
+                                            let _ = state.advanced_inspect_sector_yank(true);
+                                        }
                                         ct_event::KeyCode::PageUp | ct_event::KeyCode::PageDown => {
                                             let delta = if key.code == ct_event::KeyCode::PageUp {
                                                 -1
@@ -752,6 +758,20 @@ fn run_loop(resume: Option<state::WriteIntent>) -> io::Result<LoopExit> {
                                         if state.advanced_inspect_selected_sector_lba().is_some() {
                                             if let Some((source, lba)) =
                                                 state.advanced_inspect_open_selected_sector()
+                                            {
+                                                if let Err(message) = tasks
+                                                    .request_advanced_inspect_sector(source, lba)
+                                                {
+                                                    state.advanced_inspect_sector_finish(
+                                                        lba,
+                                                        Err(message.to_string()),
+                                                    );
+                                                }
+                                            }
+                                        } else if state.advanced_inspect_selected_field().is_some()
+                                        {
+                                            if let Some((source, lba)) =
+                                                state.advanced_inspect_open_selected_field()
                                             {
                                                 if let Err(message) = tasks
                                                     .request_advanced_inspect_sector(source, lba)

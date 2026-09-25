@@ -1722,6 +1722,15 @@ fn draw_inspect(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState
     );
 }
 
+fn inspect_field_status_style(status: crate::application::inspect::InspectFieldStatus) -> Style {
+    match status {
+        crate::application::inspect::InspectFieldStatus::Known => accent(),
+        crate::application::inspect::InspectFieldStatus::Unknown => warning(),
+        crate::application::inspect::InspectFieldStatus::Reserved => danger(),
+        crate::application::inspect::InspectFieldStatus::Preserved => success(),
+    }
+}
+
 fn draw_sector_inspector(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState) {
     use super::state::SectorInspectMode;
 
@@ -1729,6 +1738,7 @@ fn draw_sector_inspector(frame: &mut Frame, area: ratatui::layout::Rect, state: 
         return;
     };
     let item = state.advanced_inspect_sector_item();
+    let active_field = state.advanced_inspect_sector_active_field();
     let absolute = (sector.lba as u128) * crate::common::SECTOR as u128 + sector.cursor as u128;
     let decode_issue = item.and_then(|item| item.decode_error.as_deref());
     let header = vec![
@@ -1805,12 +1815,22 @@ fn draw_sector_inspector(frame: &mut Frame, area: ratatui::layout::Rect, state: 
             for column in 0..16usize {
                 let index = offset + column;
                 let byte = display[index];
+                let absolute = sector
+                    .lba
+                    .saturating_mul(crate::common::SECTOR as u64)
+                    .saturating_add(index as u64);
+                let active_status = active_field.as_ref().and_then(|field| {
+                    (absolute >= field.range.start && absolute < field.range.end_exclusive)
+                        .then_some(field.status)
+                });
                 let style = if index == sector.cursor {
                     selected()
+                } else if let Some(status) = active_status {
+                    inspect_field_status_style(status)
                 } else if sector.mode == SectorInspectMode::Mixed
                     && decoded.is_some_and(|decoded| decoded[index] != item.raw[index])
                 {
-                    accent()
+                    secondary()
                 } else {
                     Style::default()
                 };
@@ -1869,26 +1889,20 @@ fn draw_sector_inspector(frame: &mut Frame, area: ratatui::layout::Rect, state: 
         if let Some(decoded) = decoded {
             details.push(Line::from(format!("Decoded:  0x{decoded:02X} ({decoded})")));
         }
-        let abs_u64 = sector
-            .lba
-            .checked_mul(crate::common::SECTOR as u64)
-            .and_then(|base| base.checked_add(sector.cursor as u64));
-        let field = abs_u64.and_then(|offset| {
-            item.fields
-                .iter()
-                .find(|field| offset >= field.range.start && offset < field.range.end_exclusive)
-        });
         details.push(Line::from(""));
-        if let Some(field) = field {
+        if let Some(field) = active_field.as_ref() {
             details.push(Line::from(Span::styled(
                 safe(&field.label),
                 accent().add_modifier(Modifier::BOLD),
             )));
             details.push(Line::from(format!("Value: {}", safe(&field.value))));
-            details.push(Line::from(format!(
-                "Type: {:?} / Status: {:?}",
-                field.field_type, field.status
-            )));
+            details.push(Line::from(vec![
+                Span::raw(format!("Type: {:?} / Status: ", field.field_type)),
+                Span::styled(
+                    format!("{:?}", field.status),
+                    inspect_field_status_style(field.status).add_modifier(Modifier::BOLD),
+                ),
+            ]));
             details.push(Line::from(format!(
                 "Range: 0x{:X}..0x{:X}",
                 field.range.start, field.range.end_exclusive
@@ -1926,6 +1940,13 @@ fn draw_sector_inspector(frame: &mut Frame, area: ratatui::layout::Rect, state: 
     } else if let Some(error) = sector.error.as_deref() {
         details.push(Line::from(Span::styled(safe(error), danger())));
     }
+    if let Some(yank) = state.advanced_inspect_yank_register() {
+        details.push(Line::from(""));
+        details.push(Line::from(vec![
+            Span::styled("Yank  ", muted()),
+            Span::styled(safe(yank), secondary()),
+        ]));
+    }
     frame.render_widget(
         Paragraph::new(details)
             .block(
@@ -1939,7 +1960,7 @@ fn draw_sector_inspector(frame: &mut Frame, area: ratatui::layout::Rect, state: 
 
     frame.render_widget(
         Paragraph::new(Line::from(
-            "←/→ byte · j/k ±16B · PgUp/PgDn sector · r Raw · d Decode · m Mixed · o bit · Esc 返回树",
+            "←/→ byte · j/k ±16B · PgUp/PgDn sector · r/d/m mode · o bit · y value · Y raw · Esc 返回树",
         ))
         .block(Block::default().borders(Borders::TOP)),
         vertical[2],

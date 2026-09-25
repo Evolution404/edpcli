@@ -71,6 +71,7 @@ pub struct SectorInspectorState {
     pub pending: bool,
     pub error: Option<String>,
     pub field_expanded: bool,
+    pub pinned_field: Option<crate::application::inspect::InspectField>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -109,6 +110,7 @@ pub struct AdvancedInspectState {
     pub lazy_offsets: std::collections::BTreeMap<String, u64>,
     pub sector: Option<SectorInspectorState>,
     pub sector_cache_order: std::collections::VecDeque<u64>,
+    pub yank_register: Option<String>,
     pub message: Option<String>,
 }
 
@@ -1202,6 +1204,7 @@ impl AppState {
             lazy_offsets: std::collections::BTreeMap::new(),
             sector: None,
             sector_cache_order: std::collections::VecDeque::new(),
+            yank_register: None,
             message: Some("正在后台读取协议上下文并建立全盘结构树…".into()),
         });
         self.input_mode = InputMode::Normal;
@@ -1558,6 +1561,53 @@ impl AppState {
         }
     }
 
+    pub fn advanced_inspect_selected_field(
+        &self,
+    ) -> Option<crate::application::inspect::InspectField> {
+        let state = self
+            .advanced_inspect
+            .as_ref()
+            .filter(|state| state.stage == AdvancedInspectStage::Browser)?;
+        let rows = self.advanced_inspect_tree_rows();
+        let row = rows.get(state.tree_selected)?;
+        if row.kind != crate::application::inspect_tree::InspectNodeKind::Field {
+            return None;
+        }
+        let range = row.range.byte_range?;
+        state
+            .result
+            .as_ref()?
+            .items
+            .iter()
+            .flat_map(|item| item.fields.iter())
+            .find(|field| field.range == range)
+            .cloned()
+    }
+
+    pub fn advanced_inspect_open_selected_field(&mut self) -> Option<(AdvancedInspectSource, u64)> {
+        let field = self.advanced_inspect_selected_field()?;
+        let lba = field.range.start / crate::common::SECTOR as u64;
+        let cursor = (field.range.start % crate::common::SECTOR as u64) as usize;
+        let state = self.advanced_inspect.as_mut()?;
+        let ready = state.result.as_ref().is_some_and(|workspace| {
+            workspace.items.iter().any(|item| {
+                item.lba == lba && (item.decoded.is_some() || item.decode_error.is_some())
+            })
+        });
+        state.sector = Some(SectorInspectorState {
+            lba,
+            mode: SectorInspectMode::Mixed,
+            cursor,
+            pending: !ready,
+            error: None,
+            field_expanded: true,
+            pinned_field: Some(field),
+        });
+        state.panel = AdvancedInspectPanel::Detail;
+        state.detail_scroll = 0;
+        (!ready).then(|| (state.source.clone(), lba))
+    }
+
     pub fn advanced_inspect_selected_sector_lba(&self) -> Option<u64> {
         let state = self
             .advanced_inspect
@@ -1586,6 +1636,7 @@ impl AppState {
             pending: !ready,
             error: None,
             field_expanded: false,
+            pinned_field: None,
         });
         state.panel = AdvancedInspectPanel::Detail;
         state.detail_scroll = 0;
@@ -1683,6 +1734,62 @@ impl AppState {
                 .saturating_add(delta as usize)
                 .min(crate::common::SECTOR - 1)
         };
+        sector.pinned_field = None;
+        sector.field_expanded = false;
+    }
+
+    pub fn advanced_inspect_sector_active_field(
+        &self,
+    ) -> Option<crate::application::inspect::InspectField> {
+        let state = self.advanced_inspect.as_ref()?;
+        let sector = state.sector.as_ref()?;
+        let absolute = sector
+            .lba
+            .checked_mul(crate::common::SECTOR as u64)?
+            .checked_add(sector.cursor as u64)?;
+        if let Some(field) = sector
+            .pinned_field
+            .as_ref()
+            .filter(|field| absolute >= field.range.start && absolute < field.range.end_exclusive)
+        {
+            return Some(field.clone());
+        }
+        state
+            .result
+            .as_ref()?
+            .items
+            .iter()
+            .find(|item| item.lba == sector.lba)?
+            .fields
+            .iter()
+            .find(|field| absolute >= field.range.start && absolute < field.range.end_exclusive)
+            .cloned()
+    }
+
+    pub fn advanced_inspect_sector_yank(&mut self, raw_range: bool) -> Option<String> {
+        let field = self.advanced_inspect_sector_active_field();
+        let byte = self.advanced_inspect_sector_item().and_then(|item| {
+            let cursor = self.advanced_inspect_sector()?.cursor;
+            item.raw.get(cursor).copied()
+        });
+        let value = match (raw_range, field) {
+            (true, Some(field)) => field
+                .raw
+                .iter()
+                .map(|byte| format!("{byte:02X}"))
+                .collect::<Vec<_>>()
+                .join(" "),
+            (false, Some(field)) => format!("{} = {}", field.label, field.value),
+            (_, None) => format!("0x{:02X}", byte?),
+        };
+        if let Some(state) = self.advanced_inspect.as_mut() {
+            state.yank_register = Some(value.clone());
+        }
+        Some(value)
+    }
+
+    pub fn advanced_inspect_yank_register(&self) -> Option<&str> {
+        self.advanced_inspect.as_ref()?.yank_register.as_deref()
     }
 
     pub fn advanced_inspect_sector_set_mode(&mut self, mode: SectorInspectMode) {
@@ -1726,6 +1833,19 @@ impl AppState {
         sector.lba = next;
         sector.error = None;
         sector.field_expanded = false;
+        if let Some(field) = sector.pinned_field.as_ref() {
+            let sector_start = next.saturating_mul(crate::common::SECTOR as u64);
+            let sector_end = sector_start.saturating_add(crate::common::SECTOR as u64);
+            if field.range.start < sector_end && field.range.end_exclusive > sector_start {
+                sector.cursor = field
+                    .range
+                    .start
+                    .max(sector_start)
+                    .saturating_sub(sector_start) as usize;
+            } else {
+                sector.pinned_field = None;
+            }
+        }
         let ready = state.result.as_ref().is_some_and(|workspace| {
             workspace.items.iter().any(|item| {
                 item.lba == next && (item.decoded.is_some() || item.decode_error.is_some())

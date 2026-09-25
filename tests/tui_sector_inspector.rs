@@ -206,3 +206,147 @@ fn sector_inspector_renders_32x16_offsets_ascii_typed_and_unknown_views() {
         terminal.draw(|frame| render::draw(frame, &state)).unwrap();
     }
 }
+
+#[test]
+fn field_to_hex_link_preserves_cross_sector_range_and_yank_register() {
+    let mut first = item(0, true);
+    let cross = InspectField {
+        range: AbsoluteByteRange {
+            start: 0x1f0,
+            end_exclusive: edpcli::common::SECTOR as u64 + 0x30,
+        },
+        field_type: InspectFieldType::Identity,
+        raw: (0..64).map(|value| value as u8).collect(),
+        decoded: (0..64).map(|value| (value as u8) ^ 0x5a).collect(),
+        status: InspectFieldStatus::Preserved,
+        label: "CrossField".into(),
+        value: "cross-value".into(),
+        style: FieldStyle::Identity,
+        group: Some("cross".into()),
+        children: vec![FieldChild {
+            label: "cross-child".into(),
+            value: "kept".into(),
+        }],
+    };
+    first.fields.push(cross.clone());
+
+    let second = item(1, true);
+    let mut state = AppState::new();
+    assert!(state.begin_advanced_inspect(AdvancedInspectSource::Disk(6)));
+    state.advanced_inspect_finish(Ok(workspace(vec![first, second])));
+    select_protocol_lba0(&mut state);
+    state.advanced_inspect_toggle_selected();
+
+    let rows = state.advanced_inspect_tree_rows();
+    let field_index = rows
+        .iter()
+        .position(|row| {
+            row.kind == edpcli::application::inspect_tree::InspectNodeKind::Field
+                && row.label == "CrossField"
+        })
+        .expect("cross-sector field must be visible in the tree");
+    let current = state.advanced_inspect().unwrap().tree_selected;
+    state.advanced_inspect_move_tree(field_index as isize - current as isize);
+
+    let selected = state
+        .advanced_inspect_selected_field()
+        .expect("tree Field must resolve to the canonical InspectField");
+    assert_eq!(selected.range, cross.range);
+    assert!(state.advanced_inspect_open_selected_field().is_none());
+    let sector = state.advanced_inspect_sector().unwrap();
+    assert_eq!(sector.lba, 0);
+    assert_eq!(sector.cursor, 0x1f0);
+    assert_eq!(
+        state.advanced_inspect_sector_active_field().unwrap().range,
+        cross.range
+    );
+
+    assert_eq!(
+        state.advanced_inspect_sector_yank(false).as_deref(),
+        Some("CrossField = cross-value")
+    );
+    let raw_yank = state
+        .advanced_inspect_sector_yank(true)
+        .expect("raw field yank");
+    assert_eq!(raw_yank.split_whitespace().count(), 64);
+    assert_eq!(
+        state.advanced_inspect_yank_register(),
+        Some(raw_yank.as_str())
+    );
+
+    assert!(state.advanced_inspect_shift_sector(1).is_none());
+    let sector = state.advanced_inspect_sector().unwrap();
+    assert_eq!(sector.lba, 1);
+    assert_eq!(sector.cursor, 0);
+    assert_eq!(
+        state.advanced_inspect_sector_active_field().unwrap().range,
+        cross.range
+    );
+
+    state.advanced_inspect_sector_move_cursor(0x40);
+    assert!(state.advanced_inspect_sector_active_field().is_none());
+}
+
+#[test]
+fn field_statuses_remain_distinct_and_unknown_byte_stays_unclassified() {
+    let mut entry = item(0, true);
+    entry.fields = [
+        (0x10, InspectFieldStatus::Known, "Known"),
+        (0x20, InspectFieldStatus::Unknown, "UnknownField"),
+        (0x30, InspectFieldStatus::Reserved, "Reserved"),
+        (0x40, InspectFieldStatus::Preserved, "Preserved"),
+    ]
+    .into_iter()
+    .map(|(start, status, label)| InspectField {
+        range: AbsoluteByteRange {
+            start,
+            end_exclusive: start + 2,
+        },
+        field_type: InspectFieldType::Flag,
+        raw: vec![start as u8, 0],
+        decoded: vec![start as u8, 0],
+        status,
+        label: label.into(),
+        value: format!("value-{start:02X}"),
+        style: FieldStyle::Flag,
+        group: None,
+        children: Vec::new(),
+    })
+    .collect();
+
+    let mut state = AppState::new();
+    assert!(state.begin_advanced_inspect(AdvancedInspectSource::Disk(6)));
+    state.advanced_inspect_finish(Ok(workspace(vec![entry])));
+    select_protocol_lba0(&mut state);
+    assert!(state.advanced_inspect_open_selected_sector().is_none());
+
+    for (offset, expected) in [
+        (0x10, InspectFieldStatus::Known),
+        (0x20, InspectFieldStatus::Unknown),
+        (0x30, InspectFieldStatus::Reserved),
+        (0x40, InspectFieldStatus::Preserved),
+    ] {
+        let current = state.advanced_inspect_sector().unwrap().cursor;
+        state.advanced_inspect_sector_move_cursor(offset as isize - current as isize);
+        assert_eq!(
+            state.advanced_inspect_sector_active_field().unwrap().status,
+            expected
+        );
+    }
+
+    let current = state.advanced_inspect_sector().unwrap().cursor;
+    state.advanced_inspect_sector_move_cursor(0x50 - current as isize);
+    assert!(state.advanced_inspect_sector_active_field().is_none());
+
+    let backend = TestBackend::new(160, 50);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal.draw(|frame| render::draw(frame, &state)).unwrap();
+    let text = terminal
+        .backend()
+        .buffer()
+        .content()
+        .iter()
+        .map(|cell| cell.symbol())
+        .collect::<String>();
+    assert!(text.replace(' ', "").contains("Unknownbyte"), "{text}");
+}
