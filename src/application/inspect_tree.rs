@@ -104,6 +104,72 @@ impl InspectNode {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InspectLazySectorLocation {
+    pub node_path: Vec<String>,
+    pub start_lba: u64,
+    pub sector_count: u64,
+}
+
+fn node_path_match<F>(
+    node: &InspectNode,
+    path: &mut Vec<String>,
+    predicate: &F,
+) -> Option<Vec<String>>
+where
+    F: Fn(&InspectNode) -> bool,
+{
+    path.push(node.id.clone());
+    if predicate(node) {
+        return Some(path.clone());
+    }
+    if let InspectChildren::Materialized(children) = &node.children {
+        for child in children {
+            if let Some(found) = node_path_match(child, path, predicate) {
+                return Some(found);
+            }
+        }
+    }
+    path.pop();
+    None
+}
+
+fn lazy_sector_location(
+    node: &InspectNode,
+    lba: u64,
+    path: &mut Vec<String>,
+) -> Option<InspectLazySectorLocation> {
+    if !node.range.contains_lba(lba) {
+        return None;
+    }
+    path.push(node.id.clone());
+    match &node.children {
+        InspectChildren::LazySectors {
+            start_lba,
+            sector_count,
+        } if lba >= *start_lba && lba < start_lba.saturating_add(*sector_count) => {
+            Some(InspectLazySectorLocation {
+                node_path: path.clone(),
+                start_lba: *start_lba,
+                sector_count: *sector_count,
+            })
+        }
+        InspectChildren::Materialized(children) => {
+            for child in children {
+                if let Some(found) = lazy_sector_location(child, lba, path) {
+                    return Some(found);
+                }
+            }
+            path.pop();
+            None
+        }
+        _ => {
+            path.pop();
+            None
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InspectTopology {
     pub root: InspectNode,
 }
@@ -121,6 +187,20 @@ impl InspectTopology {
 
     pub fn primary_region_for_lba(&self, lba: u64) -> Option<&InspectNode> {
         self.regions_for_lba(lba).into_iter().next()
+    }
+
+    pub fn lazy_sector_location(&self, lba: u64) -> Option<InspectLazySectorLocation> {
+        lazy_sector_location(&self.root, lba, &mut Vec::new())
+    }
+
+    pub fn find_label_path(&self, query: &str) -> Option<Vec<String>> {
+        let query = query.trim().to_lowercase();
+        if query.is_empty() {
+            return None;
+        }
+        node_path_match(&self.root, &mut Vec::new(), &|node| {
+            node.label.to_lowercase().contains(&query)
+        })
     }
 }
 
@@ -424,6 +504,29 @@ pub fn build_inspect_topology(context: &InspectDiskContext) -> InspectTopology {
             status: SemanticStatus::Identified,
         },
     }
+}
+
+pub fn find_sector_structured_path(
+    lba: u64,
+    decoder: Option<InspectDecoderKind>,
+    status: SemanticStatus,
+    fields: &[InspectField],
+    query: &str,
+) -> Option<Vec<String>> {
+    let query = query.trim().to_lowercase();
+    if query.is_empty() {
+        return None;
+    }
+    let sector = sector_node_with_fields(lba, decoder, status, fields);
+    node_path_match(&sector, &mut Vec::new(), &|node| {
+        if node.label.to_lowercase().contains(&query) {
+            return true;
+        }
+        node.range
+            .byte_range
+            .and_then(|range| fields.iter().find(|field| field.range == range))
+            .is_some_and(|field| field.value.to_lowercase().contains(&query))
+    })
 }
 
 #[cfg(test)]

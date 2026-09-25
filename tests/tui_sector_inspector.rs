@@ -2,6 +2,7 @@ use edpcli::application::inspect::{
     AbsoluteByteRange, AdvancedInspectItem, AdvancedInspectMode, AdvancedInspectWorkspace,
     InspectField, InspectFieldStatus, InspectFieldType,
 };
+use edpcli::backup_metadata::PartitionGeometry;
 use edpcli::inspect::{FieldChild, FieldStyle, InspectMeta};
 use edpcli::inspect_target::InspectDiskContext;
 use edpcli::tui::{
@@ -14,6 +15,33 @@ fn workspace(items: Vec<AdvancedInspectItem>) -> AdvancedInspectWorkspace {
     let context = InspectDiskContext::new(vec![0; edpcli::common::METADATA_IMAGE_LEN], None, 4_096);
     AdvancedInspectWorkspace {
         source: "test-disk".into(),
+        meta: InspectMeta::default(),
+        mode: AdvancedInspectMode::Meta,
+        items,
+        export_dir: None,
+        topology: edpcli::application::inspect_tree::build_inspect_topology(&context),
+    }
+}
+
+fn workspace_with_partition(items: Vec<AdvancedInspectItem>) -> AdvancedInspectWorkspace {
+    let mut context =
+        InspectDiskContext::new(vec![0; edpcli::common::METADATA_IMAGE_LEN], None, 10_000);
+    context.partitions.push(PartitionGeometry {
+        index: 0,
+        partition_type: 2,
+        partition_count: 1,
+        need_disturb: 0,
+        need_encrypt: 0,
+        start_sector: 2_048,
+        sector_size: edpcli::common::SECTOR as u64,
+        partition_size: 300 * edpcli::common::SECTOR as u64,
+        sector_count: 300,
+        user_key_crc: 0,
+        file_key_crc: 0,
+        encrypt_mode: 0,
+    });
+    AdvancedInspectWorkspace {
+        source: "partitioned-test-disk".into(),
         meta: InspectMeta::default(),
         mode: AdvancedInspectMode::Meta,
         items,
@@ -349,4 +377,173 @@ fn field_statuses_remain_distinct_and_unknown_byte_stays_unclassified() {
         .map(|cell| cell.symbol())
         .collect::<String>();
     assert!(text.replace(' ', "").contains("Unknownbyte"), "{text}");
+}
+
+#[test]
+fn jump_lba_repositions_lazy_extent_without_eager_materialization() {
+    use edpcli::application::inspect_tree::InspectNodeKind;
+
+    let mut state = AppState::new();
+    assert!(state.begin_advanced_inspect(AdvancedInspectSource::Disk(6)));
+    state.advanced_inspect_finish(Ok(workspace_with_partition(Vec::new())));
+
+    state.advanced_inspect_jump_lba(2_177).unwrap();
+
+    let rows = state.advanced_inspect_tree_rows();
+    let selected = state.advanced_inspect().unwrap().tree_selected;
+    assert_eq!(rows[selected].kind, InspectNodeKind::Sector);
+    assert_eq!(rows[selected].range.start_lba, 2_177);
+
+    let visible_partition_sectors = rows
+        .iter()
+        .filter(|row| {
+            row.kind == InspectNodeKind::Sector && (2_048..2_348).contains(&row.range.start_lba)
+        })
+        .map(|row| row.range.start_lba)
+        .collect::<Vec<_>>();
+    assert_eq!(visible_partition_sectors.len(), 64);
+    assert_eq!(visible_partition_sectors.first().copied(), Some(2_176));
+    assert_eq!(visible_partition_sectors.last().copied(), Some(2_239));
+    assert!(!visible_partition_sectors.contains(&2_048));
+    assert!(
+        rows.len() < 100,
+        "jump unexpectedly materialized too much topology: {} rows",
+        rows.len()
+    );
+    assert!(
+        state
+            .advanced_inspect()
+            .unwrap()
+            .result
+            .as_ref()
+            .unwrap()
+            .items
+            .is_empty(),
+        "tree jump must not read sectors"
+    );
+}
+
+#[test]
+fn jump_prompt_accepts_hex_lba_and_exact_absolute_byte_offset() {
+    let mut state = AppState::new();
+    assert!(state.begin_advanced_inspect(AdvancedInspectSource::Disk(6)));
+    state.advanced_inspect_finish(Ok(workspace_with_partition(Vec::new())));
+
+    state.advanced_inspect_begin_jump();
+    for ch in "0x881".chars() {
+        state.advanced_inspect_prompt_push(ch);
+    }
+    assert!(state.advanced_inspect_submit_prompt().unwrap().is_none());
+
+    let rows = state.advanced_inspect_tree_rows();
+    let selected = state.advanced_inspect().unwrap().tree_selected;
+    assert_eq!(rows[selected].range.start_lba, 2_177);
+
+    let absolute = 2_177 * edpcli::common::SECTOR as u64 + 123;
+    state.advanced_inspect_begin_jump();
+    state.advanced_inspect_toggle_jump_unit();
+    for ch in format!("0x{absolute:X}").chars() {
+        state.advanced_inspect_prompt_push(ch);
+    }
+    let request = state
+        .advanced_inspect_submit_prompt()
+        .unwrap()
+        .expect("uncached byte-offset jump must request the target sector");
+    assert_eq!(request.1, 2_177);
+
+    let sector = state.advanced_inspect_sector().unwrap();
+    assert_eq!(sector.lba, 2_177);
+    assert_eq!(sector.cursor, 123);
+    assert!(sector.pending);
+}
+
+#[test]
+fn jump_rejects_invalid_overflow_and_out_of_range_without_clamping() {
+    let mut state = AppState::new();
+    assert!(state.begin_advanced_inspect(AdvancedInspectSource::Disk(6)));
+    state.advanced_inspect_finish(Ok(workspace_with_partition(Vec::new())));
+    let initial = state.advanced_inspect().unwrap().tree_selected;
+
+    for input in ["0xGG", "18446744073709551616", "10000"] {
+        state.advanced_inspect_begin_jump();
+        for ch in input.chars() {
+            state.advanced_inspect_prompt_push(ch);
+        }
+        assert!(state.advanced_inspect_submit_prompt().is_err(), "{input}");
+        assert_eq!(state.advanced_inspect().unwrap().tree_selected, initial);
+        assert!(state.advanced_inspect_prompt().is_some());
+        state.advanced_inspect_cancel_prompt();
+    }
+
+    state.advanced_inspect_begin_jump();
+    state.advanced_inspect_toggle_jump_unit();
+    let total_bytes = 10_000 * edpcli::common::SECTOR as u64;
+    for ch in total_bytes.to_string().chars() {
+        state.advanced_inspect_prompt_push(ch);
+    }
+    assert!(state.advanced_inspect_submit_prompt().is_err());
+    assert_eq!(state.advanced_inspect().unwrap().tree_selected, initial);
+    assert!(state.advanced_inspect_sector().is_none());
+}
+
+#[test]
+fn structured_search_expands_field_path_and_keeps_field_to_hex_flow() {
+    use edpcli::application::inspect_tree::InspectNodeKind;
+
+    let mut state = AppState::new();
+    assert!(state.begin_advanced_inspect(AdvancedInspectSource::Disk(6)));
+    state.advanced_inspect_finish(Ok(workspace(vec![item(0, true)])));
+
+    state.advanced_inspect_search("KnownField").unwrap();
+    let rows = state.advanced_inspect_tree_rows();
+    let selected = state.advanced_inspect().unwrap().tree_selected;
+    assert_eq!(rows[selected].kind, InspectNodeKind::Field);
+    assert_eq!(rows[selected].label, "KnownField");
+
+    state.advanced_inspect_search("typed-value").unwrap();
+    let field = state
+        .advanced_inspect_selected_field()
+        .expect("typed-value search must locate the canonical field");
+    assert_eq!(field.label, "KnownField");
+    assert_eq!(field.value, "typed-value");
+
+    assert!(state.advanced_inspect_open_selected_field().is_none());
+    let sector = state.advanced_inspect_sector().unwrap();
+    assert_eq!(sector.lba, 0);
+    assert_eq!(sector.cursor, 0);
+    assert_eq!(
+        sector
+            .pinned_field
+            .as_ref()
+            .map(|field| field.label.as_str()),
+        Some("KnownField")
+    );
+}
+
+#[test]
+fn jump_and_search_prompts_render_at_small_medium_and_wide_sizes() {
+    let mut state = AppState::new();
+    assert!(state.begin_advanced_inspect(AdvancedInspectSource::Disk(6)));
+    state.advanced_inspect_finish(Ok(workspace(vec![item(0, true)])));
+
+    for begin_search in [false, true] {
+        if begin_search {
+            state.advanced_inspect_begin_search();
+            for ch in "KnownField".chars() {
+                state.advanced_inspect_prompt_push(ch);
+            }
+        } else {
+            state.advanced_inspect_begin_jump();
+            for ch in "0x20".chars() {
+                state.advanced_inspect_prompt_push(ch);
+            }
+        }
+
+        for (width, height) in [(40, 10), (80, 24), (120, 36)] {
+            let backend = TestBackend::new(width, height);
+            let mut terminal = Terminal::new(backend).unwrap();
+            terminal.draw(|frame| render::draw(frame, &state)).unwrap();
+        }
+        state.advanced_inspect_cancel_prompt();
+    }
 }

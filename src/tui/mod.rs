@@ -674,6 +674,48 @@ fn run_loop(resume: Option<state::WriteIntent>) -> io::Result<LoopExit> {
                                 continue;
                             }
                             AdvancedInspectStage::Browser => {
+                                if state.advanced_inspect_prompt().is_some() {
+                                    match key.code {
+                                        ct_event::KeyCode::Esc => {
+                                            state.advanced_inspect_cancel_prompt();
+                                        }
+                                        ct_event::KeyCode::Backspace => {
+                                            state.advanced_inspect_prompt_backspace();
+                                        }
+                                        ct_event::KeyCode::Enter => {
+                                            match state.advanced_inspect_submit_prompt() {
+                                                Ok(Some((source, lba))) => {
+                                                    if let Err(message) = tasks
+                                                        .request_advanced_inspect_sector(
+                                                            source, lba,
+                                                        )
+                                                    {
+                                                        state.advanced_inspect_sector_finish(
+                                                            lba,
+                                                            Err(message.to_string()),
+                                                        );
+                                                    }
+                                                }
+                                                Ok(None) => {}
+                                                Err(message) => state.set_notice(message),
+                                            }
+                                        }
+                                        ct_event::KeyCode::Char(' ')
+                                            if matches!(
+                                                state.advanced_inspect_prompt(),
+                                                Some(state::AdvancedInspectPrompt::Jump { .. })
+                                            ) =>
+                                        {
+                                            state.advanced_inspect_toggle_jump_unit();
+                                        }
+                                        ct_event::KeyCode::Char(ch) => {
+                                            state.advanced_inspect_prompt_push(ch);
+                                        }
+                                        _ => {}
+                                    }
+                                    continue;
+                                }
+
                                 let sector_detail =
                                     state.advanced_inspect().is_some_and(|advanced| {
                                         advanced.panel == state::AdvancedInspectPanel::Detail
@@ -745,6 +787,12 @@ fn run_loop(resume: Option<state::WriteIntent>) -> io::Result<LoopExit> {
                                 }
 
                                 match key.code {
+                                    ct_event::KeyCode::Char('g') => {
+                                        state.advanced_inspect_begin_jump();
+                                    }
+                                    ct_event::KeyCode::Char('/') => {
+                                        state.advanced_inspect_begin_search();
+                                    }
                                     ct_event::KeyCode::Up | ct_event::KeyCode::Char('k') => {
                                         state.advanced_inspect_move_tree(-1);
                                     }
