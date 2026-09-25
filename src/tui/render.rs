@@ -574,53 +574,29 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
                 draw_command_palette(frame, content_area, state);
             }
             InputMode::Help => {
-                let help = Paragraph::new(vec![
-                    Line::from(Span::styled("Vim 键位", accent())),
-                    Line::from("Tab/Shift-Tab/h/l/←/→ 切换页面   ↑/↓/j/k 移动条目   gg/G 首/尾   Ctrl-d/u 半页"),
-                    Line::from(vec![
-                        Span::styled("/ 搜索/过滤", secondary()),
-                        Span::raw("   "),
-                        Span::styled("I 高级 Inspect", warning()),
-                        Span::raw("   n/N 搜索结果   "),
-                        Span::styled(": 命令", secondary()),
-                        Span::raw("   Esc 返回   q 退出   ? 帮助"),
-                    ]),
-                    Line::from(vec![
-                        Span::styled("备份: ", accent()),
-                        Span::styled("i 查看", secondary()),
-                        Span::raw("   "),
-                        Span::styled("v 校验", success()),
-                        Span::raw("   "),
-                        Span::styled("D 删除", danger()),
-                        Span::raw("   "),
-                        Span::styled("Space 勾选 / X 批删", danger()),
-                        Span::raw("   "),
-                        Span::styled("R 恢复", warning()),
-                        Span::raw("   "),
-                        Span::styled("b 新建", accent()),
-                        Span::raw("   "),
-                        Span::styled("B 深度备份", secondary()),
-                        Span::raw("   "),
-                        Span::styled("P 清理旧备份", warning()),
-                    ]),
-                    Line::from(vec![
-                        Span::styled("制盘: ", secondary()),
-                        Span::raw(
-                            "四种官方模式 + Plain 普通盘；物理写盘先预览再 YES",
-                        ),
-                    ]),
-                    Line::from(vec![
-                        Span::styled("r", accent()),
-                        Span::raw(" 刷新当前工作区"),
-                    ]),
-                ])
-                .block(
-                    Block::default()
-                        .borders(Borders::ALL)
-                        .title("帮助")
-                        .title_style(secondary()),
-                )
-                .wrap(Wrap { trim: true });
+                let mut help_lines = vec![Line::from(Span::styled("Vim 键位", accent()))];
+                help_lines.extend(
+                    super::keymap::NORMAL_HELP
+                        .iter()
+                        .map(|binding| Line::from(format!("{}  {}", binding.keys, binding.label))),
+                );
+                help_lines.push(Line::from(
+                    "工作区: gt/gT 循环 · gd/gb/gp/gi 直达 · Panel: Tab/Shift-Tab 或 Ctrl-w h/j/k/l/w/W",
+                ));
+                help_lines.push(Line::from(
+                    "Inspect: gl 跳转 · Sector v 循环 Raw/Decode/Mixed · 备份: Space 多选 · d 删除 · a 新建",
+                ));
+                help_lines.push(Line::from(
+                    "制盘: i/Enter 进入 Insert；物理写盘保持精确输入 YES 的安全确认",
+                ));
+                let help = Paragraph::new(help_lines)
+                    .block(
+                        Block::default()
+                            .borders(Borders::ALL)
+                            .title("帮助")
+                            .title_style(secondary()),
+                    )
+                    .wrap(Wrap { trim: true });
                 frame.render_widget(help, content_area);
             }
             _ => match state.workspace() {
@@ -654,7 +630,7 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
         match advanced.stage {
             AdvancedInspectStage::Running => "全盘检查后台只读建立结构树…".to_string(),
             AdvancedInspectStage::Browser => {
-                "全盘检查：j/k 移动 · o 展开 · Enter 查看 · Tab 面板 · Esc 返回".to_string()
+                "全盘检查：j/k 移动 · h/l 折叠/展开 · o 切换 · Enter 查看 · gl 跳转 · Tab/Ctrl-w 面板 · Esc 返回".to_string()
             }
         }
     } else if state.input_mode() == InputMode::Search {
@@ -721,26 +697,26 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
         match state.workspace() {
             Workspace::Devices => {
                 if state.selected_device().is_some() {
-                    "Tab/Shift-Tab/←/→ 页面  ·  ↑/↓/j/k 移动  ·  Enter 制盘  ·  i/I 检查  ·  b/B 备份  ·  r 刷新  ·  q 退出".to_string()
+                    "gt/gT 工作区 · gd/gb/gp/gi 直达 · j/k 移动 · Enter 制盘 · r 刷新 · q 退出".to_string()
                 } else {
-                    "Tab/Shift-Tab/←/→ 页面  ·  r 刷新  ·  q 退出".to_string()
+                    "gt/gT 工作区 · gd/gb/gp/gi 直达 · r 刷新 · q 退出".to_string()
                 }
             }
             Workspace::Backups => {
                 if state.selected_backup().is_some() {
-                    "Tab/Shift-Tab/←/→ 页面 · ↑/↓/j/k 移动 · Space 勾选 · X 批删 · i/I 检查 · v 校验 · R 恢复 · D 单删 · q 退出".to_string()
+                    "gt/gT 工作区 · j/k 移动 · Space 勾选 · d 删除 · a 新建 · v 校验 · gi Inspect · r 刷新 · q 退出".to_string()
                 } else {
-                    "Tab/Shift-Tab/←/→ 页面 · r 刷新 · q 退出".to_string()
+                    "gt/gT 工作区 · a 新建 · r 刷新 · q 退出".to_string()
                 }
             }
             Workspace::Provision => match state.provision().stage {
-                ProvisionStage::SelectDisk => "制盘选盘：↑/↓/j/k 选择 USB 盘  ·  Tab/Shift-Tab/h/l/←/→ 切页面  ·  Enter 固定目标  ·  Esc 返回设备页".to_string(),
+                ProvisionStage::SelectDisk => "制盘选盘：j/k 选择 USB 盘 · gt/gT 工作区 · Enter 固定目标 · Esc 返回设备页".to_string(),
                 ProvisionStage::BackupPrompt => {
-                    "制盘前保存：↑/↓/j/k 选择  ·  Tab/Shift-Tab/h/l/←/→ 切页面  ·  Enter 确认  ·  Esc 返回设备".to_string()
+                    "制盘前保存：j/k 选择 · gt/gT 工作区 · Enter 确认 · Esc 返回设备".to_string()
                 }
                 ProvisionStage::BackupSaving => "正在保存当前盘…".to_string(),
                 ProvisionStage::Menu => {
-                    "Tab/Shift-Tab/h/l/←/→ 页面  ·  ↑/↓/j/k 选择方案  ·  Enter 打开  ·  r 刷新目标  ·  :provision 直达  ·  ? 帮助  ·  q 退出".to_string()
+                    "gt/gT 工作区 · j/k 选择方案 · Enter 打开 · r 刷新目标 · gp 直达 · ? 帮助 · q 退出".to_string()
                 }
                 ProvisionStage::Form if state.provision_selected_field_is_editable() => {
                     let unit_key = if state
@@ -751,9 +727,9 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
                     } else {
                         ""
                     };
-                    format!("↑/↓ 字段 · ←/→ 光标 · Home/End 首尾 · 输入/Backspace 编辑{unit_key} · Tab/Shift-Tab 页面 · Enter 预览 · Esc 返回")
+                    format!("j/k 字段 · i/Enter 进入 Insert · Insert 内 ←/→ 光标、Home/End 首尾、输入/Backspace 编辑{unit_key} · gt/gT 工作区 · Esc 返回")
                 }
-                ProvisionStage::Form => "↑/↓ 字段 · Space 切换 · Tab/Shift-Tab/←/→ 页面 · Enter 预览 · Esc 返回".to_string(),
+                ProvisionStage::Form => "j/k 字段 · h/l 或 Space 切换 · p 预览 · gt/gT 工作区 · Esc 返回".to_string(),
                 ProvisionStage::Planning => "正在生成只读计划…".to_string(),
                 ProvisionStage::Review => {
                     "Enter 最终确认  ·  E 导出镜像  ·  Esc 返回修改".to_string()

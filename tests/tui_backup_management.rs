@@ -77,7 +77,7 @@ fn backup_delete_uses_shared_application_service_not_direct_filesystem_removal()
 #[test]
 fn backup_page_exposes_the_complete_management_shortcuts() {
     let render = include_str!("../src/tui/render.rs");
-    for label in ["v 校验", "D 删除", "R 恢复", "b 新建", "i 查看"] {
+    for label in ["v 校验", "d 删除", "a 新建", "gi Inspect", "Space 勾选"] {
         assert!(
             render.contains(label),
             "missing backup shortcut hint: {label}"

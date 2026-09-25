@@ -323,7 +323,7 @@ fn draw_sector_inspector(frame: &mut Frame, area: ratatui::layout::Rect, state: 
 
     frame.render_widget(
         Paragraph::new(Line::from(
-            "←/→ byte · j/k ±16B · PgUp/PgDn sector · r/d/m mode · o bit · y value · Y raw · Esc 返回树",
+            "h/l byte · j/k ±16B · PgUp/PgDn sector · v mode · o bit · y value · Y raw · gl 跳转 · Esc 返回树",
         ))
         .block(Block::default().borders(Borders::TOP)),
         vertical[2],

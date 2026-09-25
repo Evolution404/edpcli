@@ -22,6 +22,7 @@ pub enum TuiAction {
     HalfPageUp,
     HalfPageDown,
     Activate,
+    Open,
     Toggle,
     Back,
     Quit,
@@ -96,9 +97,14 @@ pub const NORMAL_HELP: &[HelpBinding] = &[
         action: TuiAction::MoveDown,
     },
     HelpBinding {
-        keys: "Enter/o",
+        keys: "Enter",
         label: "Open",
         action: TuiAction::Activate,
+    },
+    HelpBinding {
+        keys: "o",
+        label: "Open",
+        action: TuiAction::Open,
     },
     HelpBinding {
         keys: "/",
@@ -129,9 +135,14 @@ pub const INSPECT_HELP: &[HelpBinding] = &[
         action: TuiAction::MoveLeft,
     },
     HelpBinding {
-        keys: "Enter/o",
+        keys: "Enter",
         label: "Open",
         action: TuiAction::Activate,
+    },
+    HelpBinding {
+        keys: "o",
+        label: "Toggle",
+        action: TuiAction::Open,
     },
     HelpBinding {
         keys: "/",
@@ -254,7 +265,8 @@ impl KeyMapper {
             KeyCode::Char('l') | KeyCode::Right => Some(TuiAction::MoveRight),
             KeyCode::Home => Some(TuiAction::Top),
             KeyCode::End | KeyCode::Char('G') => Some(TuiAction::Bottom),
-            KeyCode::Enter | KeyCode::Char('o') => Some(TuiAction::Activate),
+            KeyCode::Enter => Some(TuiAction::Activate),
+            KeyCode::Char('o') => Some(TuiAction::Open),
             KeyCode::Char('/') => Some(TuiAction::Search),
             KeyCode::Char('n') => Some(TuiAction::NextMatch),
             KeyCode::Char('N') => Some(TuiAction::PreviousMatch),

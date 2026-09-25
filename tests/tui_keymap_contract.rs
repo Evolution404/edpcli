@@ -16,6 +16,16 @@ fn ctrl(ch: char) -> KeyEvent {
 
 #[test]
 fn normal_navigation_uses_vim_semantics_without_workspace_side_effects() {
+    let mut open_mapper = KeyMapper::new();
+    assert_eq!(
+        open_mapper.map(InputMode::Normal, key(KeyCode::Enter)),
+        Some(TuiAction::Activate)
+    );
+    assert_eq!(
+        open_mapper.map(InputMode::Normal, key(KeyCode::Char('o'))),
+        Some(TuiAction::Open)
+    );
+
     let mut mapper = KeyMapper::new();
     assert_eq!(
         mapper.map(InputMode::Normal, key(KeyCode::Char('j'))),
@@ -230,4 +240,7 @@ fn help_registry_is_the_same_metadata_source_for_core_and_inspect_hints() {
     assert!(INSPECT_HELP
         .iter()
         .any(|binding| binding.keys == "h/l" && binding.label == "Fold"));
+    assert!(INSPECT_HELP
+        .iter()
+        .any(|binding| binding.keys == "o" && binding.action == TuiAction::Open));
 }

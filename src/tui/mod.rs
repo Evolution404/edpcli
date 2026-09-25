@@ -531,6 +531,23 @@ fn dispatch_tui_action(
     }
 }
 
+fn open_advanced_inspect_selection(state: &mut AppState, tasks: &mut TaskHub) {
+    let request = if state.advanced_inspect_selected_sector_lba().is_some() {
+        state.advanced_inspect_open_selected_sector()
+    } else if state.advanced_inspect_selected_field().is_some() {
+        state.advanced_inspect_open_selected_field()
+    } else {
+        state.advanced_inspect_enter_selected();
+        None
+    };
+
+    if let Some((source, lba)) = request {
+        if let Err(message) = tasks.request_advanced_inspect_sector(source, lba) {
+            state.advanced_inspect_sector_finish(lba, Err(message.to_string()));
+        }
+    }
+}
+
 fn start_provision_plan(state: &mut AppState, tasks: &mut TaskHub) {
     let Some(disk) = state.selected_device_disk() else {
         state.provision_mut().message = Some("目标 USB 已不存在，请返回设备页重新选择。".into());
@@ -804,49 +821,39 @@ fn run_loop(resume: Option<state::WriteIntent>) -> io::Result<LoopExit> {
                                             && advanced.sector.is_some()
                                     });
                                 if sector_detail {
-                                    match key.code {
-                                        ct_event::KeyCode::Left => {
+                                    let Some(action) = keys.map(state::InputMode::Normal, key)
+                                    else {
+                                        continue;
+                                    };
+                                    use keymap::TuiAction;
+                                    match action {
+                                        TuiAction::MoveLeft => {
                                             state.advanced_inspect_sector_move_cursor(-1);
                                         }
-                                        ct_event::KeyCode::Right => {
+                                        TuiAction::MoveRight => {
                                             state.advanced_inspect_sector_move_cursor(1);
                                         }
-                                        ct_event::KeyCode::Up | ct_event::KeyCode::Char('k') => {
+                                        TuiAction::MoveUp => {
                                             state.advanced_inspect_sector_move_cursor(-16);
                                         }
-                                        ct_event::KeyCode::Down | ct_event::KeyCode::Char('j') => {
+                                        TuiAction::MoveDown => {
                                             state.advanced_inspect_sector_move_cursor(16);
                                         }
-                                        ct_event::KeyCode::Char('r') => {
-                                            state.advanced_inspect_sector_set_mode(
-                                                state::SectorInspectMode::Raw,
-                                            );
+                                        TuiAction::ViewOrVerify => {
+                                            state.advanced_inspect_sector_cycle_mode();
                                         }
-                                        ct_event::KeyCode::Char('d') => {
-                                            state.advanced_inspect_sector_set_mode(
-                                                state::SectorInspectMode::Decode,
-                                            );
-                                        }
-                                        ct_event::KeyCode::Char('m') => {
-                                            state.advanced_inspect_sector_set_mode(
-                                                state::SectorInspectMode::Mixed,
-                                            );
-                                        }
-                                        ct_event::KeyCode::Char('o') => {
+                                        TuiAction::Open => {
                                             state.advanced_inspect_sector_toggle_field();
                                         }
-                                        ct_event::KeyCode::Char('y') => {
+                                        TuiAction::Yank => {
                                             let _ = state.advanced_inspect_sector_yank(false);
                                         }
-                                        ct_event::KeyCode::Char('Y') => {
+                                        TuiAction::YankRaw => {
                                             let _ = state.advanced_inspect_sector_yank(true);
                                         }
-                                        ct_event::KeyCode::PageUp | ct_event::KeyCode::PageDown => {
-                                            let delta = if key.code == ct_event::KeyCode::PageUp {
-                                                -1
-                                            } else {
-                                                1
-                                            };
+                                        TuiAction::PageUp | TuiAction::PageDown => {
+                                            let delta =
+                                                if action == TuiAction::PageUp { -1 } else { 1 };
                                             if let Some((source, lba)) =
                                                 state.advanced_inspect_shift_sector(delta)
                                             {
@@ -860,86 +867,80 @@ fn run_loop(resume: Option<state::WriteIntent>) -> io::Result<LoopExit> {
                                                 }
                                             }
                                         }
-                                        ct_event::KeyCode::Esc => {
+                                        TuiAction::Back => {
                                             state.advanced_inspect_close_sector();
+                                        }
+                                        TuiAction::InspectJump => {
+                                            state.advanced_inspect_begin_jump();
+                                        }
+                                        TuiAction::Search => {
+                                            state.advanced_inspect_begin_search();
                                         }
                                         _ => {}
                                     }
                                     continue;
                                 }
 
-                                match key.code {
-                                    ct_event::KeyCode::Char('g') => {
+                                let Some(action) = keys.map(state::InputMode::Normal, key) else {
+                                    continue;
+                                };
+                                use keymap::TuiAction;
+                                match action {
+                                    TuiAction::InspectJump => {
                                         state.advanced_inspect_begin_jump();
                                     }
-                                    ct_event::KeyCode::Char('/') => {
+                                    TuiAction::Search => {
                                         state.advanced_inspect_begin_search();
                                     }
-                                    ct_event::KeyCode::Up | ct_event::KeyCode::Char('k') => {
-                                        state.advanced_inspect_move_tree(-1);
+                                    TuiAction::MoveUp => state.advanced_inspect_move_tree(-1),
+                                    TuiAction::MoveDown => state.advanced_inspect_move_tree(1),
+                                    TuiAction::MoveLeft => {
+                                        state.advanced_inspect_collapse_or_parent();
                                     }
-                                    ct_event::KeyCode::Down | ct_event::KeyCode::Char('j') => {
-                                        state.advanced_inspect_move_tree(1);
+                                    TuiAction::MoveRight => {
+                                        state.advanced_inspect_expand_or_child();
                                     }
-                                    ct_event::KeyCode::Char('o') => {
-                                        state.advanced_inspect_toggle_selected();
+                                    TuiAction::Top => state.advanced_inspect_tree_top(),
+                                    TuiAction::Bottom => state.advanced_inspect_tree_bottom(),
+                                    TuiAction::Open => state.advanced_inspect_toggle_selected(),
+                                    TuiAction::Activate => {
+                                        open_advanced_inspect_selection(&mut state, &mut tasks);
                                     }
-                                    ct_event::KeyCode::Enter => {
-                                        if state.advanced_inspect_selected_sector_lba().is_some() {
-                                            if let Some((source, lba)) =
-                                                state.advanced_inspect_open_selected_sector()
-                                            {
-                                                if let Err(message) = tasks
-                                                    .request_advanced_inspect_sector(source, lba)
-                                                {
-                                                    state.advanced_inspect_sector_finish(
-                                                        lba,
-                                                        Err(message.to_string()),
-                                                    );
-                                                }
-                                            }
-                                        } else if state.advanced_inspect_selected_field().is_some()
-                                        {
-                                            if let Some((source, lba)) =
-                                                state.advanced_inspect_open_selected_field()
-                                            {
-                                                if let Err(message) = tasks
-                                                    .request_advanced_inspect_sector(source, lba)
-                                                {
-                                                    state.advanced_inspect_sector_finish(
-                                                        lba,
-                                                        Err(message.to_string()),
-                                                    );
-                                                }
-                                            }
-                                        } else {
-                                            state.advanced_inspect_enter_selected();
-                                        }
-                                    }
-                                    ct_event::KeyCode::Tab => {
+                                    TuiAction::PanelNext
+                                    | TuiAction::PanelRight
+                                    | TuiAction::PanelDown => {
                                         state.advanced_inspect_shift_panel(false);
                                     }
-                                    ct_event::KeyCode::BackTab => {
+                                    TuiAction::PanelPrevious
+                                    | TuiAction::PanelLeft
+                                    | TuiAction::PanelUp => {
                                         state.advanced_inspect_shift_panel(true);
                                     }
-                                    ct_event::KeyCode::Char('u')
-                                        if key
-                                            .modifiers
-                                            .contains(ct_event::KeyModifiers::CONTROL) =>
-                                    {
-                                        state.advanced_inspect_scroll_detail(-10);
+                                    TuiAction::HalfPageUp => {
+                                        if state.advanced_inspect().is_some_and(|advanced| {
+                                            advanced.panel == state::AdvancedInspectPanel::Tree
+                                        }) {
+                                            state.advanced_inspect_move_tree(-10);
+                                        } else {
+                                            state.advanced_inspect_scroll_detail(-10);
+                                        }
                                     }
-                                    ct_event::KeyCode::Char('d')
-                                        if key
-                                            .modifiers
-                                            .contains(ct_event::KeyModifiers::CONTROL) =>
-                                    {
-                                        state.advanced_inspect_scroll_detail(10);
+                                    TuiAction::HalfPageDown => {
+                                        if state.advanced_inspect().is_some_and(|advanced| {
+                                            advanced.panel == state::AdvancedInspectPanel::Tree
+                                        }) {
+                                            state.advanced_inspect_move_tree(10);
+                                        } else {
+                                            state.advanced_inspect_scroll_detail(10);
+                                        }
                                     }
-                                    ct_event::KeyCode::Esc
-                                        if !state.advanced_inspect_close_sector() =>
-                                    {
-                                        state.close_advanced_inspect();
+                                    TuiAction::Back => {
+                                        if !state.advanced_inspect_close_sector() {
+                                            state.close_advanced_inspect();
+                                        }
+                                    }
+                                    TuiAction::Help => {
+                                        let _ = state.navigate(NavCommand::Help, 1);
                                     }
                                     _ => {}
                                 }

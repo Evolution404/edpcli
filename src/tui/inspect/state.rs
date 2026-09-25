@@ -805,6 +805,102 @@ impl AppState {
         state.sector = None;
     }
 
+    pub fn advanced_inspect_tree_top(&mut self) {
+        if let Some(state) = self
+            .advanced_inspect
+            .as_mut()
+            .filter(|state| state.stage == AdvancedInspectStage::Browser)
+        {
+            state.tree_selected = 0;
+            state.detail_scroll = 0;
+            state.sector = None;
+        }
+    }
+
+    pub fn advanced_inspect_tree_bottom(&mut self) {
+        let count = self.advanced_inspect_tree_rows().len();
+        if let Some(state) = self
+            .advanced_inspect
+            .as_mut()
+            .filter(|state| state.stage == AdvancedInspectStage::Browser)
+        {
+            state.tree_selected = count.saturating_sub(1);
+            state.detail_scroll = 0;
+            state.sector = None;
+        }
+    }
+
+    pub fn advanced_inspect_collapse_or_parent(&mut self) {
+        let rows = self.advanced_inspect_tree_rows();
+        let Some(selected) = self
+            .advanced_inspect
+            .as_ref()
+            .filter(|state| state.stage == AdvancedInspectStage::Browser)
+            .map(|state| state.tree_selected)
+        else {
+            return;
+        };
+        let Some(row) = rows.get(selected).cloned() else {
+            return;
+        };
+
+        if row.expandable && row.expanded {
+            self.advanced_inspect_toggle_selected();
+            return;
+        }
+
+        let Some(parent_index) = rows[..selected]
+            .iter()
+            .rposition(|candidate| candidate.depth < row.depth)
+        else {
+            return;
+        };
+        if let Some(state) = self.advanced_inspect.as_mut() {
+            state.tree_selected = parent_index;
+            state.detail_scroll = 0;
+            state.sector = None;
+        }
+    }
+
+    pub fn advanced_inspect_expand_or_child(&mut self) {
+        let rows = self.advanced_inspect_tree_rows();
+        let Some(selected) = self
+            .advanced_inspect
+            .as_ref()
+            .filter(|state| state.stage == AdvancedInspectStage::Browser)
+            .map(|state| state.tree_selected)
+        else {
+            return;
+        };
+        let Some(row) = rows.get(selected).cloned() else {
+            return;
+        };
+
+        if row.expandable && !row.expanded {
+            self.advanced_inspect_toggle_selected();
+            return;
+        }
+
+        let refreshed = self.advanced_inspect_tree_rows();
+        let Some(row) = refreshed.get(selected) else {
+            return;
+        };
+        if let Some(child_index) = refreshed
+            .iter()
+            .enumerate()
+            .skip(selected + 1)
+            .take_while(|(_, candidate)| candidate.depth > row.depth)
+            .find(|(_, candidate)| candidate.depth == row.depth + 1)
+            .map(|(index, _)| index)
+        {
+            if let Some(state) = self.advanced_inspect.as_mut() {
+                state.tree_selected = child_index;
+                state.detail_scroll = 0;
+                state.sector = None;
+            }
+        }
+    }
+
     pub fn advanced_inspect_toggle_selected(&mut self) {
         let rows = self.advanced_inspect_tree_rows();
         let selected = self
@@ -1130,6 +1226,21 @@ impl AppState {
         {
             sector.mode = mode;
         }
+    }
+
+    pub fn advanced_inspect_sector_cycle_mode(&mut self) {
+        let Some(sector) = self
+            .advanced_inspect
+            .as_mut()
+            .and_then(|state| state.sector.as_mut())
+        else {
+            return;
+        };
+        sector.mode = match sector.mode {
+            SectorInspectMode::Raw => SectorInspectMode::Decode,
+            SectorInspectMode::Decode => SectorInspectMode::Mixed,
+            SectorInspectMode::Mixed => SectorInspectMode::Raw,
+        };
     }
 
     pub fn advanced_inspect_sector_toggle_field(&mut self) {

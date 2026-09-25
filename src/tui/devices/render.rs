@@ -49,7 +49,7 @@ pub(super) fn draw_devices(frame: &mut Frame, area: ratatui::layout::Rect, state
                 Line::from(message),
                 Line::from(hint),
                 Line::from(""),
-                Line::from("Tab / h / l 可切换到备份页面。"),
+                Line::from("gt/gT 切换工作区；gb 直达备份，gi 打开 Inspect。"),
             ])
             .alignment(Alignment::Center)
             .wrap(Wrap { trim: true }),
