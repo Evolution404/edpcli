@@ -285,9 +285,8 @@ pub fn prepare_target_provision(
         if request.format.choice(part.geometry.role).0 && part.disposition.preserves_extent() {
             part.action = PartitionAction::Rebuild;
             part.disposition = RegionDisposition::Rebuild;
-            part.target_password_policy =
-                KeyDomainRole::from_partition_role(part.geometry.role)
-                    .map(|_| TargetPasswordPolicy::InitializeNew);
+            part.target_password_policy = KeyDomainRole::from_partition_role(part.geometry.role)
+                .map(|_| TargetPasswordPolicy::InitializeNew);
             part.reason = "用户选择重新格式化；Preserve family 已显式转为 Rebuild".into();
             part.preserved_record = None;
         }
@@ -467,8 +466,7 @@ pub fn prepare_target_provision(
                     .map_err(|message| err(EXIT_TARGET, message))?;
                 let lba7_material = wrap_legacy_lba7_file_key(target_password, legacy_key);
                 legacy_key.fill(0);
-                let lba12_material =
-                    wrap_file_key(target_password, file_key, FileKeyWrapMode::Sm4);
+                let lba12_material = wrap_file_key(target_password, file_key, FileKeyWrapMode::Sm4);
                 file_keys.push(file_key);
                 plan = plan
                     .with_partition_key_material(index, lba7_material, lba12_material)
@@ -484,10 +482,7 @@ pub fn prepare_target_provision(
                         .ok_or_else(|| {
                             err(
                                 EXIT_TARGET,
-                                format!(
-                                    "错误: {}目标密码不能为空",
-                                    part.geometry.role.label()
-                                ),
+                                format!("错误: {}目标密码不能为空", part.geometry.role.label()),
                             )
                         })?;
                     let key = random_array::<16>()?;
@@ -595,12 +590,13 @@ pub fn probe_provision_key_domains_on_disk(
     let source_metadata = read_image(&mut dev)?;
     let image = ProvisionImage::from_bytes(source_metadata.clone())
         .map_err(|message| err(EXIT_TARGET, format!("错误: 来源元数据长度无效: {message}")))?;
-    let parsed = parse_existing_provision(&image, &device_id, total_sectors).map_err(|message| {
-        err(
-            EXIT_TARGET,
-            format!("错误: 来源盘注册结构无法可靠解析: {message}"),
-        )
-    })?;
+    let parsed =
+        parse_existing_provision(&image, &device_id, total_sectors).map_err(|message| {
+            err(
+                EXIT_TARGET,
+                format!("错误: 来源盘注册结构无法可靠解析: {message}"),
+            )
+        })?;
     let source_kind = DiskProvisionKind::from_metadata(&source_metadata, &device_id);
     let domain_status = |domain: KeyDomainRole| {
         parsed.as_ref().and_then(|source| {
