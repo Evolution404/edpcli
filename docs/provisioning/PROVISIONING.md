@@ -3438,7 +3438,7 @@ K0 基线审计曾确认：
 12. 代表性真实 USB 转换验收通过；
 13. 文档、TUI、CLI Review 与实际 planner 单一事实源一致。
 
-**2026-09-26 完成审计：13/13 PASS，Chapter 12 COMPLETE。** 已确认：源码不存在全局 `request.password`；`KeyDomainSecrets` 支持 Share/Encrypt 独立 source/target；逐域默认密码验证、Opaque Preserve、Opaque 禁改密码/数据零写入、Rewrap `K_old`、`K_new` 强制初始化均有自动门禁；`chapter_12_five_by_five_conversion_golden_is_complete` 明确验证 25/25 source×target golden cells；mode1 Combined、mode2 CompatibilityReserve、LBA0～12/LCE 金标、真实 USB K8、CLI/TUI/application 单一事实源均已有证据。最终正式 fast=`3 suites / 5 artifacts / 0 failures / 44.08s`；full=`8 suites / 10 artifacts + doctest / 0 failures / 49.11s`。K6 `Migrate` 不属于上述 13 条完成条件，继续 DEFERRED / fail-closed。
+**2026-09-26 完成审计：13/13 PASS，Chapter 12 COMPLETE。** 已确认：源码不存在全局 `request.password`；`KeyDomainSecrets` 支持 Share/Encrypt 独立 source/target；逐域默认密码验证、Opaque Preserve、Opaque 禁改密码/数据零写入、Rewrap `K_old`、`K_new` 强制初始化均有自动门禁；`chapter_12_five_by_five_conversion_golden_is_complete` 明确验证 25/25 source×target golden cells；mode1 Combined、mode2 CompatibilityReserve、LBA0～12/LCE 金标、真实 USB K8、CLI/TUI/application 单一事实源均已有证据。最终正式 fast=`3 suites / 5 artifacts / 0 failures`；full=`8 suites / 10 artifacts + doctest / 0 failures`。K6 `Migrate` 不属于上述 13 条完成条件，继续 DEFERRED / fail-closed。
 
 最终原则：**五种盘型只定义布局；区域语义决定能否保留；密码属于独立 key domain；不知道密码不等于必须破坏数据；改密码不等于换 FileKey；一旦换 FileKey 就必须重建对应数据区。**
 
