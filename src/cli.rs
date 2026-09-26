@@ -569,6 +569,9 @@ fn provision_flow(runner: &SysRunner, action: ProvisionAction) -> i32 {
                 Err(error) => return finish(Err(error)),
             };
             println!("制盘前自动备份：{}", write.backup.path.display());
+            for warning in &write.warnings {
+                println!("{}", crate::ui::yellow(&warning.message()));
+            }
             match write.commit {
                 crate::application::provision::ProvisionCommitOutcome::Official(report) => {
                     println!(

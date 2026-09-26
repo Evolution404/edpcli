@@ -8602,6 +8602,8 @@ observe_media_identity_readonly(...)
 
 #### I6 — Provision identity pin + host lineage
 
+**实施状态（2026-09-26）：COMPLETE（软件门禁）。** Official/Plain prepare 均保存 canonical `MediaIdentityPin`（硬件/协议证据及 LBA0–12 SHA-256），强制 EDPB 备份在 commit 前通过已验证 manifest 的 canonical identity 与原始 Artifact 重新绑定到 before pin。unmount/lock/reopen 后保留原有逐扇区快照检查，并重新读取硬件与协议证据复核 pin；格式化阶段原先保留的 raw serial 已改为只保留 normalized serial SHA-256。成功写入、sync、读回后采集 after identity，并以一事务一文件写入 `<backup_dir>/.edpcli/identity-lineage/v1/`：临时文件、文件 fsync、rename、目录 fsync；重复事务 ID 不覆盖既有记录。写后观察或 lineage 保存失败作为 `ProvisionWarning` 返回，CLI/TUI 展示警告，不把已成功的盘事务转成失败；格式化未完成时不记录成功 lineage。lineage 仍不参与 destructive restore authorization，也不能覆盖硬件 hard conflict。专项测试覆盖 pin 的 raw serial non-escape/reopen 冲突、强制备份 pin 绑定、host record 不可变；完整门禁见阶段提交记录。
+
 - provision prepare 保存 canonical before snapshot/pin；
 - mandatory backup 与 before snapshot 绑定；
 - reopen 使用 fresh observation；

@@ -4,12 +4,13 @@
 //! authorize writes.  It describes evidence collected elsewhere and derives an explainable
 //! relationship/confidence result.  Destructive operations must apply their own stricter policy.
 
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::platform::NativeTransport;
 use crate::provision::DiskProvisionKind;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum SerialQuality {
     Usable,
     Suspicious,
@@ -22,7 +23,7 @@ pub struct SerialDigestEvidence {
     pub quality: SerialQuality,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HardwareIdentityEvidence {
     pub vid: Option<u16>,
     pub pid: Option<u16>,
@@ -54,7 +55,7 @@ impl Default for HardwareIdentityEvidence {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct ProtocolIdentityEvidence {
     /// Only an EDP device_id actually observed/verified from the EDP protocol belongs here.
     pub device_id: Option<String>,
@@ -63,7 +64,7 @@ pub struct ProtocolIdentityEvidence {
     pub lba4_identity_digest: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct DerivedProtocolEvidence {
     /// Hardware-derived EDP device_id candidates. These are not observed protocol identity.
     pub device_id_candidates: Vec<String>,
@@ -71,7 +72,7 @@ pub struct DerivedProtocolEvidence {
     pub legacy_derived_candidate: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct IdentityObservation {
     pub platform: Option<String>,
     /// Ephemeral selector/session locator. It is observation metadata, never a permanent ID.
@@ -79,7 +80,7 @@ pub struct IdentityObservation {
     pub captured_epoch: Option<i64>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct MediaIdentitySnapshot {
     pub hardware: HardwareIdentityEvidence,
     pub protocol: ProtocolIdentityEvidence,
@@ -105,6 +106,56 @@ impl MediaIdentitySnapshot {
             derived,
             observation,
         }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MediaIdentityPin {
+    pub snapshot: MediaIdentitySnapshot,
+    pub protocol_image_sha256: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MediaIdentityPinConflict {
+    SerialChangedOrLost,
+    VidPidChangedOrLost,
+    GeometryChangedOrLost,
+    ProtocolImageChanged,
+}
+
+impl MediaIdentityPin {
+    pub fn new(snapshot: MediaIdentitySnapshot, protocol_image: &[u8]) -> Self {
+        Self {
+            snapshot,
+            protocol_image_sha256: format!("{:x}", Sha256::digest(protocol_image)),
+        }
+    }
+
+    pub fn verify(
+        &self,
+        observed: &MediaIdentitySnapshot,
+        protocol_image: &[u8],
+    ) -> Result<(), MediaIdentityPinConflict> {
+        if self.snapshot.hardware.serial_quality == SerialQuality::Usable
+            && (observed.hardware.serial_quality != SerialQuality::Usable
+                || self.snapshot.hardware.serial_sha256 != observed.hardware.serial_sha256)
+        {
+            return Err(MediaIdentityPinConflict::SerialChangedOrLost);
+        }
+        if self.snapshot.hardware.vid != observed.hardware.vid
+            || self.snapshot.hardware.pid != observed.hardware.pid
+        {
+            return Err(MediaIdentityPinConflict::VidPidChangedOrLost);
+        }
+        if self.snapshot.hardware.total_sectors != observed.hardware.total_sectors
+            || self.snapshot.hardware.logical_sector_size != observed.hardware.logical_sector_size
+        {
+            return Err(MediaIdentityPinConflict::GeometryChangedOrLost);
+        }
+        if self.protocol_image_sha256 != format!("{:x}", Sha256::digest(protocol_image)) {
+            return Err(MediaIdentityPinConflict::ProtocolImageChanged);
+        }
+        Ok(())
     }
 }
 

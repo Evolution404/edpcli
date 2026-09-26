@@ -34,6 +34,8 @@ use crate::sysinfo::{self, CmdRunner};
 use encoding_rs::GBK;
 
 use super::device::open_readonly_usb_disk;
+use super::media_identity::MediaIdentityPin;
+use super::media_identity_observer::media_identity_from_protocol_image;
 use super::target_session::{ReadOnly, ReopenAndVerifyError, TargetSession};
 use super::write::{read_image, verify_reopened_snapshot};
 
@@ -393,6 +395,28 @@ pub enum ProvisionCommitOutcome {
 pub struct ProvisionWriteOutcome {
     pub backup: super::write::BackupReport,
     pub commit: ProvisionCommitOutcome,
+    pub warnings: Vec<ProvisionWarning>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum ProvisionWarning {
+    IncompleteFormat,
+    AfterIdentityObservationFailed(String),
+    HostLineagePersistenceFailed(String),
+}
+
+impl ProvisionWarning {
+    pub fn message(&self) -> String {
+        match self {
+            Self::IncompleteFormat => "部分格式化步骤未完成；未记录成功的介质历史".into(),
+            Self::AfterIdentityObservationFailed(message) => {
+                format!("制盘已完成，但无法采集写后介质身份：{message}")
+            }
+            Self::HostLineagePersistenceFailed(message) => {
+                format!("制盘已完成，但主机介质历史保存失败：{message}")
+            }
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -416,9 +440,10 @@ pub struct PreparedNewProvision {
     pub format_targets: Vec<PlannedPartitionFormat>,
     pub target_plan: Option<TargetProvisionPlan>,
     source_metadata: Option<Vec<u8>>,
+    before_pin: MediaIdentityPin,
     plan: OfficialProvisionPlan,
     expected_onlyid: String,
-    expected_serial: Option<String>,
+    expected_serial_digest: Option<String>,
     expected_probe: crate::platform::HardwareProbe,
     expected_lba3: Option<[u8; SECTOR]>,
 }
@@ -432,6 +457,7 @@ pub struct PreparedPlainProvision {
     pub source_kind: crate::provision::DiskProvisionKind,
     pub source_lce_start_lba: Option<u64>,
     source_metadata: Vec<u8>,
+    before_pin: MediaIdentityPin,
     expected_probe: crate::platform::HardwareProbe,
 }
 
@@ -446,6 +472,7 @@ impl std::fmt::Debug for PreparedPlainProvision {
             .field("source_kind", &self.source_kind)
             .field("source_lce_start_lba", &self.source_lce_start_lba)
             .field("source_metadata_len", &self.source_metadata.len())
+            .field("before_pin", &self.before_pin)
             .field("expected_probe", &self.expected_probe)
             .finish_non_exhaustive()
     }
@@ -467,7 +494,8 @@ impl std::fmt::Debug for PreparedNewProvision {
             .field("source_metadata_captured", &self.source_metadata.is_some())
             .field("plan", &self.plan)
             .field("expected_onlyid", &self.expected_onlyid)
-            .field("expected_serial", &self.expected_serial)
+            .field("expected_serial_digest", &self.expected_serial_digest)
+            .field("before_pin", &self.before_pin)
             .field("expected_probe", &self.expected_probe)
             .field("expected_lba3", &self.expected_lba3)
             .finish_non_exhaustive()
@@ -499,6 +527,13 @@ impl PreparedProvision {
         match self {
             Self::Official(prepared) => &prepared.device_id,
             Self::Plain(prepared) => &prepared.device_id,
+        }
+    }
+
+    fn before_pin(&self) -> &MediaIdentityPin {
+        match self {
+            Self::Official(prepared) => &prepared.before_pin,
+            Self::Plain(prepared) => &prepared.before_pin,
         }
     }
 
@@ -603,6 +638,7 @@ fn sizes(
 
 mod commit;
 mod export;
+mod identity_lineage;
 mod prepare;
 
 pub use commit::{
@@ -645,7 +681,93 @@ where
 {
     let backup = backup()?;
     let commit = commit()?;
-    Ok(ProvisionWriteOutcome { backup, commit })
+    Ok(ProvisionWriteOutcome {
+        backup,
+        commit,
+        warnings: Vec::new(),
+    })
+}
+
+fn verify_mandatory_backup_pin(
+    report: &super::write::BackupReport,
+    pin: &MediaIdentityPin,
+) -> EdpCliResult<String> {
+    let verified = crate::edpb::verify_file(&report.path).map_err(|message| {
+        err(
+            EXIT_TARGET,
+            format!("错误: 强制备份 EDPB 校验失败: {message}"),
+        )
+    })?;
+    let identity =
+        crate::edpb::canonical_media_identity(&verified.manifest).map_err(|message| {
+            err(
+                EXIT_TARGET,
+                format!("错误: 强制备份 canonical identity 无效: {message}"),
+            )
+        })?;
+    let raw = crate::edpb::read_raw_protocol(&report.path).map_err(|message| {
+        err(
+            EXIT_TARGET,
+            format!("错误: 强制备份来源快照不可读: {message}"),
+        )
+    })?;
+    pin.verify(&identity, &raw).map_err(|conflict| {
+        err(
+            EXIT_TARGET,
+            format!("错误: 强制备份与制盘准备阶段介质身份不一致: {conflict:?}"),
+        )
+    })?;
+    Ok(verified.file_sha256)
+}
+
+fn record_lineage_after_commit(
+    runner: &dyn CmdRunner,
+    prepared: &PreparedProvision,
+    backup_dir: &Path,
+    backup: &super::write::BackupReport,
+    backup_sha256: String,
+) -> Result<PathBuf, ProvisionWarning> {
+    use sha2::{Digest, Sha256};
+
+    let mut dev = open_readonly_usb_disk(runner, prepared.disk())
+        .map_err(|error| ProvisionWarning::AfterIdentityObservationFailed(error.msg))?;
+    let after = super::media_identity_observer::observe_media_identity_readonly(
+        runner,
+        prepared.disk(),
+        &mut dev,
+    )
+    .map_err(|error| ProvisionWarning::AfterIdentityObservationFailed(error.msg))?;
+    let mut random = [0u8; 16];
+    getrandom::fill(&mut random).map_err(|error| {
+        ProvisionWarning::HostLineagePersistenceFailed(format!("transaction id: {error}"))
+    })?;
+    let transaction_id = random.iter().map(|byte| format!("{byte:02x}")).collect();
+    let epoch_seconds = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_err(|error| {
+            ProvisionWarning::HostLineagePersistenceFailed(format!("system clock: {error}"))
+        })?
+        .as_secs();
+    let created_epoch = i64::try_from(epoch_seconds).map_err(|error| {
+        ProvisionWarning::HostLineagePersistenceFailed(format!("system clock range: {error}"))
+    })?;
+    let operation = match prepared.target() {
+        ProvisionTarget::Plain => "Plain".to_string(),
+        ProvisionTarget::Official(mode) => format!("Official::{mode:?}"),
+    };
+    let record = identity_lineage::IdentityTransitionRecord {
+        schema: identity_lineage::SCHEMA.into(),
+        transaction_id,
+        created_epoch,
+        operation,
+        before_identity: prepared.before_pin().snapshot.clone(),
+        after_identity: after.snapshot,
+        mandatory_backup_path: backup.path.clone(),
+        mandatory_backup_sha256: backup_sha256,
+        provision_summary_digest: format!("{:x}", Sha256::digest(&after.protocol_image)),
+    };
+    identity_lineage::persist(backup_dir, &record)
+        .map_err(ProvisionWarning::HostLineagePersistenceFailed)
 }
 
 /// Mandatory provisioning safety chain shared by CLI and TUI.
@@ -661,20 +783,46 @@ pub fn commit_provision_with_backup_on_disk(
     prompt: &mut dyn super::Prompter,
 ) -> EdpCliResult<ProvisionWriteOutcome> {
     let expected_onlyid = prepared.source_backup_onlyid()?;
-    run_mandatory_backup_before_commit(
+    let mut backup_sha256 = None;
+    let mut outcome = run_mandatory_backup_before_commit(
         || {
-            super::write::backup_create_on_disk(
+            let report = super::write::backup_create_on_disk(
                 runner,
                 prepared.disk(),
-                backup_dir,
+                backup_dir.clone(),
                 prompt,
                 expected_onlyid.as_deref(),
                 Some(prepared.device_id()),
                 false,
-            )
+            )?;
+            backup_sha256 = Some(verify_mandatory_backup_pin(&report, prepared.before_pin())?);
+            Ok(report)
         },
         || commit_provision_on_disk(runner, prepared),
-    )
+    )?;
+    if matches!(&outcome.commit, ProvisionCommitOutcome::Official(report) if report.formats.iter().any(|format| format.result.is_err()))
+    {
+        outcome.warnings.push(ProvisionWarning::IncompleteFormat);
+        return Ok(outcome);
+    }
+    let Some(backup_sha256) = backup_sha256 else {
+        outcome
+            .warnings
+            .push(ProvisionWarning::HostLineagePersistenceFailed(
+                "已完成制盘，但强制备份摘要未保留".into(),
+            ));
+        return Ok(outcome);
+    };
+    if let Err(warning) = record_lineage_after_commit(
+        runner,
+        prepared,
+        &backup_dir,
+        &outcome.backup,
+        backup_sha256,
+    ) {
+        outcome.warnings.push(warning);
+    }
+    Ok(outcome)
 }
 
 #[cfg(test)]

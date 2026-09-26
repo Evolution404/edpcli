@@ -150,6 +150,11 @@ impl TaskHub {
                             "制盘前自动备份：{}",
                             write.backup.path.display()
                         );
+                        let warning_lines: Vec<String> = write
+                            .warnings
+                            .iter()
+                            .map(crate::application::provision::ProvisionWarning::message)
+                            .collect();
                         let outcome = write.commit;
                         let result = match outcome {
                         crate::application::provision::ProvisionCommitOutcome::Official(report) => {
@@ -177,7 +182,11 @@ impl TaskHub {
                                 partition_count
                             ),
                         };
-                        format!("{backup_line}\n{result}")
+                        if warning_lines.is_empty() {
+                            format!("{backup_line}\n{result}")
+                        } else {
+                            format!("{backup_line}\n{result}\n{}", warning_lines.join("\n"))
+                        }
                     })
                     .map_err(|error| error.msg)
             }))

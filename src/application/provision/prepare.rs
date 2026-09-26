@@ -166,6 +166,10 @@ pub fn prepare_target_provision(
             )
         })?;
     let source_metadata = read_image(dev)?;
+    let before_pin = MediaIdentityPin::new(
+        media_identity_from_protocol_image(runner, disk, &source_metadata)?,
+        &source_metadata,
+    );
     let source = inspect_source_profile(
         dev,
         &source_metadata,
@@ -532,13 +536,17 @@ pub fn prepare_target_provision(
             format!("错误: 无法构造目标格式化计划: {message}"),
         )
     })?;
-    let expected_serial = if format_targets.iter().any(|choice| choice.selected) {
-        Some(
-            runner
-                .hardware_serial(disk)
-                .filter(|serial| !serial.trim().is_empty())
-                .ok_or_else(|| err(EXIT_TARGET, "错误: 无法读取 USB 硬件序列号，拒绝安排格式化"))?,
-        )
+    let expected_serial_digest = if format_targets.iter().any(|choice| choice.selected) {
+        let evidence = super::super::media_identity::serial_digest_evidence(
+            runner.hardware_serial(disk).as_deref(),
+        );
+        if evidence.quality != super::super::media_identity::SerialQuality::Usable {
+            return Err(err(
+                EXIT_TARGET,
+                "错误: 无法读取可用 USB 硬件序列号，拒绝安排格式化",
+            ));
+        }
+        evidence.sha256
     } else {
         None
     };
@@ -563,9 +571,10 @@ pub fn prepare_target_provision(
         format_targets,
         target_plan: Some(target_plan),
         source_metadata: Some(source_metadata),
+        before_pin,
         plan,
         expected_onlyid: onlyid,
-        expected_serial,
+        expected_serial_digest,
         expected_probe: probe,
         expected_lba3: None,
     })
@@ -723,6 +732,10 @@ pub fn prepare_plain_provision(
     let device_id = target.device_id().to_string();
 
     let source_metadata = read_image(dev)?;
+    let before_pin = MediaIdentityPin::new(
+        media_identity_from_protocol_image(runner, disk, &source_metadata)?,
+        &source_metadata,
+    );
     let lba7 = &source_metadata[7 * SECTOR..8 * SECTOR];
     let lba12 = &source_metadata[12 * SECTOR..13 * SECTOR];
     let source_kind = crate::provision::DiskProvisionKind::from_sectors(lba7, lba12, &device_id);
@@ -765,6 +778,7 @@ pub fn prepare_plain_provision(
         source_kind,
         source_lce_start_lba: source_lce.map(|extent| extent.start_lba),
         source_metadata,
+        before_pin,
         expected_probe: probe,
     })
 }

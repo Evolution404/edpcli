@@ -14,7 +14,21 @@ pub fn commit_plain_provision(
     })?;
     let _session = session
         .reopen_and_verify(dev, OPEN_WAIT, |dev| {
-            verify_reopened_snapshot(dev, &prepared.source_metadata)
+            verify_reopened_snapshot(dev, &prepared.source_metadata)?;
+            let fresh = super::super::media_identity_observer::observe_media_identity_readonly(
+                runner,
+                prepared.disk,
+                dev,
+            )?;
+            prepared
+                .before_pin
+                .verify(&fresh.snapshot, &fresh.protocol_image)
+                .map_err(|conflict| {
+                    err(
+                        EXIT_TARGET,
+                        format!("错误: Plain 重开后介质身份 pin 不一致: {conflict:?}"),
+                    )
+                })
         })
         .map_err(|error| match error {
             ReopenAndVerifyError::Reopen(error) => {
@@ -134,7 +148,20 @@ pub fn commit_new_provision(
             if let Some(source_metadata) = &prepared.source_metadata {
                 verify_reopened_snapshot(dev, source_metadata)?;
             }
-            Ok(())
+            let fresh = super::super::media_identity_observer::observe_media_identity_readonly(
+                runner,
+                prepared.disk,
+                dev,
+            )?;
+            prepared
+                .before_pin
+                .verify(&fresh.snapshot, &fresh.protocol_image)
+                .map_err(|conflict| {
+                    err(
+                        EXIT_TARGET,
+                        format!("错误: 制盘重开后介质身份 pin 不一致: {conflict:?}"),
+                    )
+                })
         })
         .map_err(|error| match error {
             ReopenAndVerifyError::Reopen(error) => {
@@ -154,8 +181,11 @@ pub fn commit_new_provision(
             "错误: 制盘确认/卸载期间目标硬件身份或容量发生变化，疑似换盘，拒绝写入",
         ));
     }
-    if let Some(serial) = &prepared.expected_serial {
-        if runner.hardware_serial(prepared.disk).as_ref() != Some(serial) {
+    if let Some(digest) = &prepared.expected_serial_digest {
+        let fresh = super::super::media_identity::serial_digest_evidence(
+            runner.hardware_serial(prepared.disk).as_deref(),
+        );
+        if fresh.sha256.as_ref() != Some(digest) {
             return Err(err(
                 EXIT_TARGET,
                 "错误: 制盘确认期间 USB 硬件序列号发生变化",
@@ -494,7 +524,7 @@ fn verify_format_identity(
         &prepared.expected_probe,
         prepared.write_image.total_sectors,
         &prepared.device_id,
-        prepared.expected_serial.as_deref(),
+        prepared.expected_serial_digest.as_deref(),
         &fresh_probe,
         fresh_total,
         fresh_serial.as_deref(),
@@ -506,7 +536,7 @@ pub(super) fn verify_format_hardware(
     expected_probe: &crate::platform::HardwareProbe,
     expected_total: u64,
     expected_device_id: &str,
-    expected_serial: Option<&str>,
+    expected_serial_digest: Option<&str>,
     fresh_probe: &crate::platform::HardwareProbe,
     fresh_total: u64,
     fresh_serial: Option<&str>,
@@ -527,7 +557,8 @@ pub(super) fn verify_format_hardware(
             "错误: 格式化前硬件身份、容量或 device_id 已变化",
         ));
     }
-    if expected_serial.is_none_or(|serial| Some(serial) != fresh_serial) {
+    let fresh_digest = super::super::media_identity::serial_digest_evidence(fresh_serial);
+    if expected_serial_digest.is_none_or(|digest| fresh_digest.sha256.as_deref() != Some(digest)) {
         return Err(err(
             EXIT_TARGET,
             "错误: 格式化前 USB 硬件序列号缺失或已变化",

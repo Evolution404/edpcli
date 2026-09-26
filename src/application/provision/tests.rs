@@ -4,6 +4,90 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 static TEST_TEMP_FILE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
+fn fixture_pin() -> MediaIdentityPin {
+    MediaIdentityPin::new(
+        super::super::media_identity::MediaIdentitySnapshot::default(),
+        &[0; 13 * SECTOR],
+    )
+}
+
+#[test]
+fn host_lineage_record_is_immutable_and_stays_under_backup_dir() {
+    let root = std::env::temp_dir().join(format!(
+        "edpcli-lineage-{}-{}",
+        std::process::id(),
+        TEST_TEMP_FILE_SEQUENCE.fetch_add(1, Ordering::Relaxed)
+    ));
+    let record = identity_lineage::IdentityTransitionRecord {
+        schema: "edpcli.identity-lineage.v1".into(),
+        transaction_id: "test-transaction-001".into(),
+        created_epoch: 1_789_603_200,
+        operation: "PlainToMode0".into(),
+        before_identity: super::super::media_identity::MediaIdentitySnapshot::default(),
+        after_identity: super::super::media_identity::MediaIdentitySnapshot::default(),
+        mandatory_backup_path: root.join("source.edpb"),
+        mandatory_backup_sha256: "a".repeat(64),
+        provision_summary_digest: "b".repeat(64),
+    };
+    let path = identity_lineage::persist(&root, &record).unwrap();
+    assert!(path.starts_with(root.join(".edpcli/identity-lineage/v1")));
+    assert_eq!(path.extension().and_then(|ext| ext.to_str()), Some("json"));
+    assert!(identity_lineage::persist(&root, &record).is_err());
+    let saved: identity_lineage::IdentityTransitionRecord =
+        serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    assert_eq!(saved, record);
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn mandatory_backup_must_match_prepared_canonical_pin() {
+    let root = std::env::temp_dir().join(format!(
+        "edpcli-backup-pin-{}-{}",
+        std::process::id(),
+        TEST_TEMP_FILE_SEQUENCE.fetch_add(1, Ordering::Relaxed)
+    ));
+    std::fs::create_dir_all(&root).unwrap();
+    let path = root.join("plain.edpb");
+    let image = vec![0; 13 * SECTOR];
+    crate::edpb::write_core_backup(
+        &path,
+        &crate::edpb::CoreCapture {
+            snapshot_id: "pin-test".into(),
+            created_epoch: 1_789_603_200,
+            disk_number: Some(4),
+            vid: "3535".into(),
+            pid: "6300".into(),
+            device_id: "disk&ven_aigo&prod_u335".into(),
+            onlyid: None,
+            total_sectors: Some(1_000_000),
+            logical_sector_size: SECTOR as u32,
+            edpcli_version: env!("CARGO_PKG_VERSION").into(),
+            device_state: "plain".into(),
+            lba0_12: &image,
+        },
+    )
+    .unwrap();
+    let verified = crate::edpb::verify_file(&path).unwrap();
+    let identity = crate::edpb::canonical_media_identity(&verified.manifest).unwrap();
+    let report = super::super::write::BackupReport {
+        path,
+        is_nopwd: false,
+    };
+    let pin = MediaIdentityPin::new(identity.clone(), &image);
+    assert_eq!(
+        verify_mandatory_backup_pin(&report, &pin).unwrap(),
+        verified.file_sha256
+    );
+    let mut conflicting = identity;
+    conflicting.hardware.serial_quality = super::super::media_identity::SerialQuality::Usable;
+    conflicting.hardware.serial_sha256 = Some("a".repeat(64));
+    let pin = MediaIdentityPin::new(conflicting, &image);
+    let error = verify_mandatory_backup_pin(&report, &pin).unwrap_err();
+    assert_eq!(error.code, EXIT_TARGET);
+    assert!(error.msg.contains("SerialChangedOrLost"), "{}", error.msg);
+    std::fs::remove_dir_all(root).unwrap();
+}
+
 fn portable_test_temp_file(stem: &str, extension: &str) -> std::path::PathBuf {
     let sequence = TEST_TEMP_FILE_SEQUENCE.fetch_add(1, Ordering::Relaxed);
     std::env::temp_dir().join(format!(
@@ -126,6 +210,7 @@ fn manufacturer_lba3_is_copied_verbatim_into_the_write_plan() {
         format_targets: Vec::new(),
         target_plan: None,
         source_metadata: None,
+        before_pin: fixture_pin(),
         plan: OfficialProvisionPlan::new(
             OfficialPartitionMode::BootShareCombined,
             OfficialPartitionSizes::new(32, 64, 128),
@@ -141,7 +226,7 @@ fn manufacturer_lba3_is_copied_verbatim_into_the_write_plan() {
         )
         .unwrap(),
         expected_onlyid: "1".into(),
-        expected_serial: None,
+        expected_serial_digest: None,
         expected_probe: probe,
         expected_lba3: None,
     };
@@ -196,6 +281,7 @@ fn plain_prewrite_snapshot_rejects_stale_lba7_metadata() {
         source_kind: crate::provision::DiskProvisionKind::Plain,
         source_lce_start_lba: None,
         source_metadata: source_metadata.clone(),
+        before_pin: fixture_pin(),
         expected_probe: probe,
     };
     let mut dev = MemoryDev::default();
@@ -357,9 +443,10 @@ fn sparse_export_includes_selected_format_images() {
         format_targets: choices,
         target_plan: None,
         source_metadata: None,
+        before_pin: fixture_pin(),
         plan,
         expected_onlyid: "1".into(),
-        expected_serial: None,
+        expected_serial_digest: None,
         expected_probe: probe,
         expected_lba3: None,
     };
@@ -397,7 +484,16 @@ fn format_hardware_gate_rejects_changed_serial_probe_capacity_and_device_id() {
         .to_string();
     let check =
         |fresh: &crate::platform::HardwareProbe, capacity, serial: Option<&str>, id: &str| {
-            verify_format_hardware(&probe, total, id, Some("SERIAL-1"), fresh, capacity, serial)
+            let digest = super::super::media_identity::serial_digest_evidence(Some("SERIAL-1"));
+            verify_format_hardware(
+                &probe,
+                total,
+                id,
+                digest.sha256.as_deref(),
+                fresh,
+                capacity,
+                serial,
+            )
         };
     assert!(check(&probe, total, Some("SERIAL-1"), &device_id).is_ok());
     assert!(check(&probe, total, Some("SERIAL-2"), &device_id).is_err());
@@ -465,9 +561,10 @@ fn protocol_readback_gate_rejects_changed_onlyid_and_layout() {
         format_targets: vec![],
         target_plan: None,
         source_metadata: None,
+        before_pin: fixture_pin(),
         plan,
         expected_onlyid: "1402259934".into(),
-        expected_serial: None,
+        expected_serial_digest: None,
         expected_probe: probe,
         expected_lba3: Some([0; SECTOR]),
     };
