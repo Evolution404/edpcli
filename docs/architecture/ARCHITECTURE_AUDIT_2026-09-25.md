@@ -1217,6 +1217,19 @@ application 返回结构化 `ProvisionReport/BackupReport/InspectReport`，CLI/T
 - `application::inspect` 与 `application::inspect_tree` 是现有检查工作区的显式桥接模块；它们负责将检查适配结果转为应用工作区结构和导出文本，不作为协议或通用领域真相源。该例外在门禁中列明，避免以后把其它 application 模块接到检查展示层。
 - D7-C 的公开门面、字段模型、LBA 范围适配、元数据/目录适配和渲染已按职责分开，规范协议解析器仍是唯一真相源。依赖方向架构测试 **1/1**、fast **37.92s / 0 失败**、full **36.15s / 0 失败**、全目标 Clippy、rustfmt 与 diff 检查通过。下一阶段执行 D7-D 生产路径输入与索引安全审计。
 
+## Phase D7-D：外部输入与生产路径断言治理
+
+**COMPLETE。** 逐项审计 raw sector、EDPB、文件系统与设备读取路径；固定长度内部不变量和外部输入错误路径分别记录如下。
+
+- `default_file_key_checked` 返回 `DefaultFileKeyError`；检查器按 `FileKeyCrcMismatch` 类型决定 FAIL，兼容用的 `default_file_key` 仍把类型化错误转换成原有文本。损坏 FileKeyCRC 回归测试通过，不再用本地化消息做控制流。
+- FAT parser 在访问引导扇区固定偏移前检查恰好 512B，短扇区单元测试覆盖 0、1、510、511B；短文件名 UTF-8 转换改为显式错误。exFAT parser 已在固定偏移前检查 512B，簇数上限 4,194,304 限制后续 FAT 下标和 `cluster_count + 2`。
+- EDPB 证据读取器对协议镜像缺失、产物缺失、偏移溢出与截断返回 `io::Error`，不再依赖 `unwrap/expect`；MBR 检查树的字段转换亦显式处理缺失字段。制盘校验中由只读回调提供的 LBA 改用溢出/边界检查，保持固定 13 扇区镜像的直接字段读取。
+- 盘列表中来自 EDPF 的 `end_lba` 使用饱和加法处理损坏几何；只读设备缓存缺失和事务回滚循环的兜底改为可返回错误；深度分析报告 JSON 形状缺失返回错误。新增仓库架构门禁，禁止 EDPB 证据读取器重新引入 `panic/unwrap/expect`，并检查 FAT 长度门禁先于固定偏移读取。
+- `TargetIdentity::from_probe` 拒绝扇区数乘以 512 后溢出 `u64` 的容量，防止后续制盘协议图像和校验的字节容量计算溢出；有极值回归测试。
+- XML 属性文本解析在字符迭代结束时安全退出，不再对外部文本使用 `unwrap`；仓库架构门禁检查生产解析代码。
+- `protocol::types` 的字节序辅助函数由 `[u8; 512]` 协议扇区及固定大小的规范字段切片调用；`inspect_target` 的启动扇区字段读取受 512B 长度门禁保护，MBR 读取由 `get(..512)` 保护；`backup_metadata` 的 `expect` 在 13 扇区长度门禁和最多三个 EDPF 条目上界之后，属于固定长度内部不变量。对应协议、检查器与备份回归测试保留。
+- D7-D 定向测试、仓库架构门禁、fast **5.15s / 0 失败**、full **7.67s / 0 失败**、全目标 Clippy、rustfmt 与 diff 检查通过。该阶段未更改 LBA0～12/LCE 的协议语义或真实盘写入门槛。
+
 ---
 
 # 第八部分：完成标准

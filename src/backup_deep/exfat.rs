@@ -9,6 +9,8 @@ pub(super) struct Inventory {
     pub entries: Vec<FileEntry>,
 }
 
+// All parser entry points check 512-byte sectors or complete 32-byte records;
+// offsets passed here are fixed exFAT layout fields.
 fn u16le(bytes: &[u8], offset: usize) -> u16 {
     u16::from_le_bytes(bytes[offset..offset + 2].try_into().unwrap())
 }

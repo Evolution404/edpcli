@@ -351,6 +351,50 @@ fn inspect_presentation_stays_downstream_of_protocol_and_application_domains() {
 }
 
 #[test]
+fn inspect_key_status_uses_typed_errors() {
+    let source =
+        fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("src/inspect_target.rs"))
+            .expect("read inspect target");
+    assert!(source.contains("default_file_key_checked"));
+    assert!(!source.contains("error.contains(\"FileKeyCRC\")"));
+}
+
+#[test]
+fn critical_io_paths_have_no_panicking_shortcuts() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    for path in [
+        "src/application/evidence.rs",
+        "src/diskio/device.rs",
+        "src/diskio/transaction.rs",
+        "src/backup_deep.rs",
+    ] {
+        let source = fs::read_to_string(root.join(path))
+            .unwrap_or_else(|error| panic!("read {path}: {error}"));
+        for forbidden in [".unwrap(", ".expect(", "panic!", "unreachable!"] {
+            assert!(
+                !source.contains(forbidden),
+                "{path} must return an error instead of using {forbidden}"
+            );
+        }
+    }
+    let fat =
+        fs::read_to_string(root.join("src/backup_deep/fat.rs")).expect("read FAT parser source");
+    let parse = fat
+        .split("pub(super) fn parse(")
+        .nth(1)
+        .expect("FAT parser");
+    let length_guard = parse.find("boot.len() != 512").expect("boot length guard");
+    let first_boot_access = parse.find("boot[510..512]").expect("boot signature access");
+    assert!(length_guard < first_boot_access);
+    let validator = fs::read_to_string(root.join("src/provision/validate.rs"))
+        .expect("read provision validator source");
+    assert!(validator.contains("checked_sector(bytes, lba as usize)"));
+    let plist = fs::read_to_string(root.join("src/plist.rs")).expect("read plist source");
+    let production = plist.split("#[cfg(test)]").next().expect("plist parser");
+    assert!(!production.contains(".unwrap("));
+}
+
+#[test]
 fn protocol_semantic_does_not_depend_on_presentation_or_application_layers() {
     let source =
         fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("src/protocol/semantic.rs"))

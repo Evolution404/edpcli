@@ -77,7 +77,14 @@ impl ProvisionValidator {
         validate_lba12(spec, sector(bytes, 12))?;
 
         let snapshot = |lba: u32| -> crate::common::EdpCliResult<Vec<u8>> {
-            Ok(sector(bytes, lba as usize).to_vec())
+            checked_sector(bytes, lba as usize)
+                .map(|sector| sector.to_vec())
+                .ok_or_else(|| {
+                    crate::common::EdpCliError::new(
+                        crate::common::EXIT_TARGET,
+                        "LBA 不在制盘镜像内",
+                    )
+                })
         };
         let is_nopwd = looks_nopwd(&snapshot, spec.target().device_id())
             .map_err(|err| format!("nopwd validation failed: {}", err.msg))?;
@@ -86,7 +93,9 @@ impl ProvisionValidator {
         }
 
         let summary = summarize(&context, |lba| {
-            Ok::<Vec<u8>, io::Error>(sector(bytes, lba as usize).to_vec())
+            checked_sector(bytes, lba as usize)
+                .map(|sector| sector.to_vec())
+                .ok_or_else(|| io::Error::new(io::ErrorKind::UnexpectedEof, "LBA 不在制盘镜像内"))
         })
         .map_err(|err| format!("metainfo validation failed: {err}"))?;
         if summary.onlyid.as_deref() != Some(spec.metadata().onlyid().text()) {
@@ -110,6 +119,29 @@ impl ProvisionValidator {
 
 fn sector(bytes: &[u8], lba: usize) -> &[u8] {
     &bytes[lba * SECTOR..(lba + 1) * SECTOR]
+}
+
+fn checked_sector(bytes: &[u8], lba: usize) -> Option<&[u8]> {
+    let start = lba.checked_mul(SECTOR)?;
+    let end = start.checked_add(SECTOR)?;
+    bytes.get(start..end)
+}
+
+#[cfg(test)]
+mod sector_bounds_tests {
+    use super::{checked_sector, SECTOR};
+
+    #[test]
+    fn callbacks_reject_missing_truncated_and_overflowed_sectors() {
+        let bytes = vec![0; SECTOR * 2];
+        assert_eq!(
+            checked_sector(&bytes, 1).map(|sector| sector.len()),
+            Some(SECTOR)
+        );
+        assert!(checked_sector(&bytes, 2).is_none());
+        assert!(checked_sector(&bytes[..SECTOR + 1], 1).is_none());
+        assert!(checked_sector(&bytes, usize::MAX).is_none());
+    }
 }
 
 fn semantic_context(spec: &ProvisionSpec) -> SemanticContext {

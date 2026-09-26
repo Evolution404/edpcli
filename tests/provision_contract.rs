@@ -107,6 +107,12 @@ fn target_identity_is_derived_from_complete_hardware_probe() {
 }
 
 #[test]
+fn target_identity_rejects_capacity_that_overflows_bytes() {
+    assert!(TargetIdentity::from_probe(&probe(NativeTransport::Uas), u64::MAX).is_err());
+    assert!(TargetIdentity::from_probe(&probe(NativeTransport::Uas), u64::MAX / 512 + 1).is_err());
+}
+
+#[test]
 fn target_identity_fails_closed_when_probe_is_ambiguous() {
     let mut missing_vid = probe(NativeTransport::Uas);
     missing_vid.vid = None;
