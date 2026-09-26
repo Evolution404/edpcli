@@ -6201,3 +6201,662 @@ P2 优化
 ```
 
 审计结论：**第 14 章方向正确，但在真正实现前必须先收口“字段身份、Pane 状态、progress transport、最终 outcome、Unknown/Plain”这五个基础契约；否则直接从 renderer 开始改，会在第 12 章或慢盘日志接入时产生第二轮重构。Q0～Q8 是后续唯一执行顺序。**
+
+### 14.12 第二轮审计：把剩余结构性技术债一并纳入本次治理
+
+第二轮继续从当前源码反查第 14 章的可落地性。本节新增的项目**全部纳入本次治理范围**，但仍然遵循 14.11 的 Q0～Q8 顺序；不是再开一套平行阶段，也不提前开始第 12 章。
+
+#### 14.12.1 DiskLayout 不能继续从节点文案猜物理语义
+
+当前 `tui/disk_layout.rs::DiskLayoutModel::from_topology()` 仍在通过以下文本判断区域类型：
+
+```text
+node.id == "region.protocol"
+node.id.starts_with("region.partition")
+node.label.starts_with("MBR P")
+node.label.ends_with("type1")
+node.label.ends_with("type2")
+node.label.ends_with("type4")
+node.label.contains("type=0x0E")
+```
+
+这意味着修改树节点名称、中文文案或协议标签格式，就可能悄悄改变磁盘布局颜色和区域分类。展示字符串已经事实上成为了业务协议，这是不可接受的耦合。
+
+本次治理增加稳定的区域语义，例如：
+
+```rust
+DiskRegionSemantic
+  Protocol
+  Reserved
+  Unknown
+  Free
+  Partition {
+      role,
+      partition_type,
+      filesystem_hint,
+  }
+  Compatibility
+  Lce
+  Tail
+```
+
+具体类型名可以调整，但要求：
+
+- Inspect topology 在 application 层就携带 typed semantic；
+- `DiskLayoutModel` 只消费 typed semantic，不读 `label` 推导业务含义；
+- `label` 只用于最终显示；
+- MBR `0x0E`、EDP type1/2/4 到角色的映射由 canonical parser / application adapter 决定；
+- 增加源码门禁，`DiskLayout` adapter 不得再次出现 `label.starts_with/ends_with/contains` 的协议判断。
+
+同时当前 `src/tui/disk_layout.rs` 混合了：
+
+```text
+完整物理盘几何模型
+区域优先级/归一化
+Inspect/Provision adapter
+ratatui Frame/Line/Span renderer
+主题映射
+```
+
+本次治理将**UI-neutral 的 `DiskLayoutModel / DiskLayoutSegment / region adapter` 移出 `tui` 层**；TUI 只保留 ratatui renderer、theme token 和 viewport。这样 CLI、测试和未来其它前端都能复用同一物理布局模型，也避免 application 真相模型反向依赖 TUI。
+
+#### 14.12.2 Provision 表单的 magic slot 必须收口成 typed Field Schema
+
+当前 Provision 表单大量使用整数 slot 表达字段身份：
+
+```text
+0 / 1 / 2
+3..7
+11..20
+24..29
+Plain => 100 + display_index
+```
+
+同一套 slot 语义分别散落在：
+
+```text
+provision_field_slot
+provision_selected_field_mut
+provision_selected_field
+provision_field_section
+provision_compact_field_rows
+provision_field_hint
+provision_input_policy
+provision_selected_partition_role
+capacity editor / toggle / fill
+footer action hint
+```
+
+还有 UI 代码通过：
+
+```text
+hint.starts_with("Space 切换 MiB / GiB / sector")
+```
+
+判断当前字段是否支持单位切换。这和前面的字符串业务判断属于同一种技术债。
+
+本次治理新增稳定字段身份：
+
+```rust
+ProvisionFieldId
+  IdentityLabel
+  IdentityUser
+  IdentityDept
+  InitialPassword
+  ForceChangePassword
+  MaxSharePasswordErrors
+  MaxEncryptPasswordErrors
+  PartitionCapacity(role)
+  PartitionStartLba(role)
+  FormatEnabled(role)
+  Filesystem(role)
+  VolumeLabel(role)
+  PlainStart(index)
+  PlainCapacity(index)
+  PlainFilesystem(index)
+  PlainLabel(index)
+  ...
+```
+
+并由一个 descriptor/schema 提供：
+
+```text
+id
+section_id
+label
+value
+secret
+editable
+input_policy
+partition_role
+capabilities
+compact_group
+hint
+```
+
+`capabilities` 至少能表达：
+
+```text
+EditText
+ToggleOption
+ToggleCapacityUnit
+FillCapacity
+AddPartition
+DeletePartition
+```
+
+要求：
+
+- display index 只用于当前可见列表位置，不承担业务身份；
+- mutation / validation / footer / render / compact layout 全部从 `ProvisionFieldId` 或 descriptor 工作；
+- section 使用 enum/id，不比较“身份信息”“分区布局”等中文字符串；
+- 输入策略不再在多处重复 match slot；
+- 不为减少代码而把密码或写盘规则搬进 TUI schema；schema 只描述表单交互，真正 planner/validation 仍在 application/provision 层；
+- 当前 `format_capable => filesystem.unwrap()` 这类隐含不变量改成 typed construction 或显式验证，避免状态漂移后 UI panic。
+
+#### 14.12.3 表格列定义收敛为单一 Column Schema
+
+当前一张表的“列”实际上分散在三处：
+
+```text
+1. renderer 的 headings 数组
+2. row formatter 返回的 values 顺序
+3. table_layout.rs 中 AdaptiveColumnSpec 的 min/preferred/max/priority/pinned
+```
+
+Devices/Backups 扩展到 10～11 列后，这三处非常容易数量或顺序漂移，而且当前测试没有锁定三者 arity 一致。
+
+本次治理把列契约收敛为 typed schema，例如：
+
+```rust
+TableColumnSpec {
+    id,
+    header,
+    min_width,
+    preferred_width,
+    max_width,
+    priority,
+    weight,
+    pinned,
+    alignment,
+    truncate_policy,
+}
+```
+
+共享身份列使用稳定 ID：
+
+```text
+Capacity
+VidPid
+Model
+OnlyId
+User
+Dept
+ProvisionKind
+```
+
+Devices/Backups 只在共享列前后组合自己的专属列。
+
+同时把数值对齐纳入共享 table infra：
+
+```text
+LBA / sectors / 容量 / 百分比 -> Right
+名称 / 状态 / 文本             -> Left
+```
+
+实现必须使用 `unicode-width` 做 cell padding/truncation，不能重新回到手写空格。
+
+新增硬门禁：
+
+```text
+schema 列数 == header 列数 == row cell 列数
+共享 identity column 的 header/spec/formatter 两边一致
+所有 ColumnId 唯一
+极窄宽度进入显式 breakpoint，不越界、不 panic
+```
+
+#### 14.12.4 Review / Result / Layout 全面去除“字符串就是状态”的做法
+
+第二轮源码审计还发现：
+
+```text
+provision_review_summary_lines() -> Vec<String>
+provision_review_change_lines()  -> Vec<String>
+renderer 用 starts_with('✓') / starts_with('⚠') 选 style
+Result 用 contains("格式化：✗") 判断失败
+DiskLayoutPane.details           -> &[String]
+```
+
+第 14 章不能只修其中一处。统一引入轻量 typed presentation rows，例如：
+
+```rust
+UiSeverity { Normal, Info, Success, Warning, Error }
+KeyValueRow { key, value, severity }
+NoticeRow   { message, severity }
+ReviewSection { title, rows }
+ChangeRow   { subject, action, detail, severity }
+```
+
+名称可以调整，但要求：
+
+- glyph `✓ / ⚠ / ✗` 由 renderer 根据 severity/action 生成；
+- renderer 不解析 glyph、中文前缀或 message 内容来恢复业务状态；
+- Review/Result/DiskLayout/Progress summary 可以复用 presentation primitives；
+- typed business outcome 与 presentation severity 分层，不能把 `Warning` 当成业务 outcome。
+
+源码门禁至少拒绝新的：
+
+```text
+starts_with('✓')
+starts_with('⚠')
+contains("格式化：✗")
+```
+
+出现在 Provision renderer 的业务分支里。
+
+#### 14.12.5 Help / Footer 也要从当前上下文的真实动作生成
+
+项目已经有集中式 `TuiAction`、`HelpBinding`，但当前 Help 页面仍然：
+
+```text
+只遍历 NORMAL_HELP
++ 手工追加 Inspect 文案
++ 手工追加 Provision 文案
+```
+
+Footer 又有另一套巨大的 workspace/stage match，并且部分能力还靠 field hint 字符串判断。
+
+这会导致第 14 章增加 Detail row、日志滚动、Field→Hex 等动作后，实际按键和帮助再次漂移。
+
+本次治理增加 context-aware action presentation：
+
+```text
+当前 Workspace
+当前 Stage
+当前 focused Pane / WidgetRole
+当前 Field capabilities
+是否处于 critical operation
+        ↓
+available actions
+        ↓
+Help + Footer
+```
+
+要求：
+
+- `KeyMapper` 仍是物理按键到 `TuiAction` 的唯一事实源；
+- Workspace/Pane controller 决定某 action 在当前上下文是否可执行；
+- Help/Footer 从同一 action metadata 生成，不再手写另一套快捷键表；
+- 安全相关文案（YES、事务期间 q/Esc 延迟退出）仍允许显式固定展示，不能因为自动帮助而弱化；
+- Inspect `INSPECT_HELP` 必须真正参与 Inspect 上下文，而不是定义后闲置；
+- 回归测试保证已启用动作在 Help/Footer 中有对应提示，已禁用动作不会误导用户。
+
+#### 14.12.6 Inspect diagnostics 与 FieldStatus 目前还不足以支撑新 Detail
+
+当前 parser 大量把关键状态写进：
+
+```text
+method: String
+notes: Vec<String>
+decode_error: Option<String>
+```
+
+例如：
+
+```text
+profile 未唯一确定
+缺 device_id
+canonical parser 拒绝
+单扇区上下文不足
+固定结构异常
+```
+
+同时 `InspectFieldStatus` 虽然定义了：
+
+```text
+Known
+Unknown
+Reserved
+Preserved
+```
+
+但当前 materialization 实际把所有 protocol fields 都硬编码为 `Known`；`Unknown/Reserved/Preserved` 只在 renderer 有样式，没有真实生产来源。
+
+如果直接实现 14.7 的 `Status` 列，会造成“看起来有状态体系，实际全是 Known”的假完整性。
+
+本次治理补 typed diagnostics：
+
+```rust
+InspectParseState
+  Parsed
+  Ambiguous
+  MissingContext
+  Unsupported
+  Invalid
+
+InspectDiagnostic {
+    code,
+    severity,
+    message,
+    field_key: Option<...>,
+    range: Option<...>,
+}
+```
+
+并让字段模型真实携带 semantic status。
+
+要求：
+
+- `notes` 可以继续保留人类解释，但不再作为 Overview alert / 状态判断唯一来源；
+- parser ambiguity、missing context、invalid 要有稳定 diagnostic code；
+- Overview 的警告区从 typed diagnostic 生成；
+- CLI/TUI 对同一 diagnostic 使用同一事实，不要求相同排版；
+- Reserved/Preserved/Unknown 如果在本轮无法建立可靠来源，就删掉假分支或补齐来源，不能保留“永远不会出现”的状态 API；
+- golden protocol semantics 不因增加诊断模型而改变。
+
+#### 14.12.7 Inspect 被动预览失败后必须允许显式重试
+
+当前 `preview_attempted: BTreeSet<u64>` 的行为是：
+
+```text
+选中未缓存 Sector
+→ 发起 passive preview
+→ request 接受后立即记 preview_attempted
+→ 如果读取失败，失败路径不会清除此标记
+→ 后续选中同一 LBA 不再自动 preview
+```
+
+只有缓存驱逐或整个 Inspect 重置后才会移除；对偶发 USB 读取错误来说，这会形成“失败一次后当前会话一直不再尝试”的隐蔽问题。
+
+本次治理改成明确加载状态：
+
+```text
+Idle
+Pending
+Ready
+Failed { message, attempts }
+```
+
+规则：
+
+- 同一 LBA `Pending` 时禁止重复并发请求；
+- `Failed` 不自动无限重试，防止慢/坏盘产生请求风暴；
+- Overview 明确显示“读取失败”；
+- `Enter` 或明确 Retry/Refresh 动作允许用户重试；
+- 重试后变 Pending，成功变 Ready；
+- cache eviction 同步清理对应 load state；
+- generation/single-flight 语义保持不变；
+- 测试覆盖“第一次失败、第二次显式重试成功”。
+
+#### 14.12.8 Progress transport 治理扩大到 Backup / Restore，不只 Provision
+
+项目现有 Backup/Restore 已经有 typed `WriteEvent`，这是正确方向；但 transport 同样存在：
+
+```text
+TaskUpdates.write_progress: Option<(OperationId, WriteEvent)>
+```
+
+`TaskHub::poll()` 一次排空 channel 时，多条 `WriteProgress` 也会互相覆盖，只留下最后一条。当前向导只展示“最后一条消息”，所以问题不明显，但它和 14.11.5 的 Provision event 丢失本质完全相同。
+
+本次治理要求 Task transport 一次解决：
+
+```text
+write_progress      -> ordered Vec / event batch
+provision_progress  -> ordered Vec / event batch
+```
+
+但**不强制把两个领域的 event enum 合并成一个巨型 enum**。推荐：
+
+```text
+共同：OperationId + ordered transport + reducer/log plumbing
+独立：WriteEvent / ProvisionProgressEvent 的领域语义
+```
+
+规则：
+
+- Backup/Restore milestone 不丢；
+- Provision stage boundary 不丢；
+- final result 与同轮 progress 同时到达时，先消费全部 progress，再消费 final；
+- event batch 顺序严格等于 channel 到达顺序；
+- UI 慢不能阻塞介质 worker；
+- 现有 Backup/Restore 可以暂时只保存短 timeline，而不要求和 Provision 一样做完整大日志 Pane，但 transport 必须正确。
+
+#### 14.12.9 Running 阶段增加专用 action controller，禁止日志导航落到全局导航
+
+当前 `ProvisionStage::Running` 的输入处理直接回落到通用 `dispatch_tui_action()`。第 14 章增加：
+
+```text
+j/k
+Ctrl-u/d
+PageUp/Down
+G
+```
+
+日志导航后，不能让这些动作同时影响 workspace selection 或其它全局状态。
+
+治理规则：
+
+- Running 阶段先由专用 controller 消费日志 viewport action；
+- `q/Esc/Ctrl-C` 仍走 critical deferred-exit 安全语义；
+- 未声明的写盘控制动作一律不生效；
+- 日志滚动绝不能调用任何 disk I/O；
+- 增加测试：连续按 100 次 `j/k/PageDown`，目标 disk、prepared plan、operation id、write-set 均不变。
+
+#### 14.12.10 列表与 Inspect 可见树的重复重建纳入性能治理
+
+当前 Devices/Backups 每次 render 都会遍历**完整数据集**：
+
+```text
+format 每一行所有 cell
+计算每一列 content_width
+再只渲染当前 visible window
+```
+
+设备通常不多，但备份数量增长后，第 14 章再扩成 11 列会明显增加每帧分配。动画、notice、timer 都可能触发 redraw，因此不应把“数据没变化”的全量格式化重复做几十次/秒。
+
+本次治理在 Q3 增加只读表格 view data cache：
+
+```text
+dataset generation
+preformatted row projection 或轻量 identity projection
+content_widths
+```
+
+只在以下事件失效：
+
+```text
+scan rows replaced
+metadata changed
+filter/schema changed（按需要）
+```
+
+selection / scroll / animation tick 不重新扫描所有 backing rows。
+
+Inspect 也存在类似问题：`advanced_inspect_tree_rows()` 每次创建新的 `Vec`、clone path/label，并在多处重复调用；当前 state/render 中有大量调用点。
+
+Q2 增加 `InspectTreeViewModel` / revision cache：
+
+```text
+revision inputs:
+  topology
+  expanded set
+  lazy offsets
+  cached sector items
+
+outputs:
+  visible rows
+  id -> row index
+```
+
+这样：
+
+- 一次状态变更只重建一次 visible tree；
+- search/jump 不再反复 `iter().position()` 扫全量 rows；
+- renderer 只读现成 rows；
+- topology 仍保持 lazy sectors，不展开全盘百万 sector；
+- 优化必须以行为测试为前提，不为了 benchmark 引入复杂异步缓存。
+
+性能门禁使用合成数据、固定时间/计数器，不依赖真实慢机器：
+
+```text
+1000/10000 backup rows
+大 extent + 64-sector lazy page
+多次 render without state mutation
+```
+
+验证“没有重复 backing scan / tree rebuild”，而不是设置脆弱的绝对毫秒阈值。
+
+#### 14.12.11 第 14 章实施时同步拆分 TUI 维护性热点
+
+当前主要文件规模：
+
+```text
+src/tui/mod.rs                 2037 lines
+src/tui/inspect/state.rs       1755 lines
+src/tui/inspect/render.rs       843 lines
+src/tui/provision/render.rs     817 lines
+src/tui/task.rs                 671 lines
+src/tui/provision/fields.rs     662 lines
+src/tui/disk_layout.rs          552 lines
+```
+
+本身“行数多”不是 bug，但第 14 章会继续加入 summary、diagnostics、progress、logs、column schema，如果继续塞进现有文件，会明显增加冲突和重复判断。
+
+本次治理要求**随功能自然拆分，不另做大爆炸重写**：
+
+```text
+tui/mod.rs
+  -> event loop + 通用 orchestration
+  -> workspace/stage action controller 分模块
+
+inspect/state.rs
+  -> tree view-model/search
+  -> sector cache/controller
+  -> pane/summary interaction
+
+provision
+  -> form schema/controller
+  -> review presentation
+  -> run/progress state
+
+disk layout
+  -> UI-neutral model/adapter
+  -> TUI renderer
+```
+
+约束：
+
+- 每次拆分前后专项测试结果一致；
+- 不因为“文件太长”新增抽象层；只有明确 ownership 的职责才拆；
+- 禁止同时做协议算法重写；
+- Q8 增加源码边界门禁，防止 UI-neutral model 再回流 `tui`。
+
+#### 14.12.12 本次治理补充的统一源码门禁
+
+除前文功能测试外，新增静态/源码级门禁：
+
+1. DiskLayout 业务分类不得读取 `InspectNode.label`；
+2. Provision renderer 不得通过 `starts_with/contains` 解析状态 glyph/中文消息；
+3. Provision 字段行为不得通过 hint 文本判断 capability；
+4. 设备/备份表共享 identity 列必须来自同一 column schema；
+5. table schema/header/cell arity 必须严格相等；
+6. Pane-owned scroll/selection 不新增页面级影子状态；
+7. `TaskUpdates.write_progress` 与 `provision_progress` 都不得退回单个 `Option`；
+8. Inspect summary 不得按 display label 查 canonical field；
+9. Inspect diagnostic 状态不得只存在于 `notes` 文本；
+10. renderer/sidebar/search 不得直接打开 `.edpb` 或物理盘；
+11. progress/log path 不得记录 password、FileKey、完整 raw sector；
+12. UI-neutral DiskLayout/Progress/Inspect semantic model 不得依赖 ratatui 类型。
+
+这些门禁的目的不是限制正常文案格式化，而是防止**展示字符串再次变成隐藏业务 API**。
+
+#### 14.12.13 Q0～Q8 的增补映射
+
+14.11.12 的阶段编号保持不变，本节新增任务按以下方式并入：
+
+```text
+Q0  基线与失败测试
+    + string-derived semantic source guards
+    + event batch ordering failing tests
+    + passive preview retry failing test
+    + table schema arity failing tests
+
+Q1  Inspect 数据契约
+    + InspectFieldKey
+    + typed FieldTransform
+    + typed InspectDiagnostic / ParseState
+    + 让 FieldStatus 成为真实数据，不保留死枚举
+    + InspectNode / region typed semantic
+
+Q2  Inspect topology + presentation
+    + tail primary spans
+    + Overview/Detail
+    + passive preview load state / explicit retry
+    + InspectTreeViewModel revision cache + id index
+    + Summary/diagnostic 不增加 I/O
+
+Q3  Device / Backup identity contract
+    + Known/Unknown provision identification
+    + shared identity projection
+    + shared TableColumnSchema + alignment
+    + cached content widths / row projection
+    + render/search/sidebar 零额外 I/O
+
+Q4  DiskLayout / Provision presentation
+    + UI-neutral DiskLayoutModel 移出 TUI
+    + typed region semantic adapter
+    + ProvisionFieldId / FieldDescriptor / capabilities
+    + typed Review/Change/Notice rows
+    + application PreserveAssessment
+    + 窄屏 card breakpoint
+    + context-aware Help/Footer
+
+Q5  Progress application core
+    + frozen ProvisionWorkPlan denominator
+    + typed events / sink isolation
+    + 事务与格式化 instrumentation
+
+Q6  Progress transport + TUI
+    + WriteEvent 与 ProvisionProgress 两条 ordered batch transport
+    + boundary event 不丢
+    + Running 专用 action controller
+    + ProvisionRunLog Pane / PaneViewport
+    + elapsed / last activity / throughput / follow-tail
+
+Q7  Outcome + CLI 收口
+    + typed ProvisionExecutionOutcome
+    + PartialFormatFailure
+    + CLI/TUI final semantics
+    + Result stage duration summary
+    + retained operation timeline/log
+
+Q8  清理与门禁
+    + 删除 magic slot 的重复消费路径
+    + 删除 label/hint/message/glyph 业务解析
+    + 拆分 TUI 维护性热点
+    + synthetic performance counters
+    + fmt / fast / full / Virtual Disk HIL
+    + 有真实慢盘时做最终 UI 验收
+```
+
+#### 14.12.14 本次治理的新增完成标准
+
+除 14.1～14.11 已列标准外，本次治理只有在以下条件也全部满足时才能结束：
+
+1. 改节点中文名称不会改变 DiskLayout region kind；
+2. 改字段帮助文案不会改变 Provision 可执行动作；
+3. 改 Review 文案不会改变 success/warning/error 判断；
+4. Devices/Backups 新增或删列时，列 schema 会在编译/测试阶段暴露 arity 不一致；
+5. `Known(Plain)` 与 `Unknown` 在设备和备份两端都不可混淆；
+6. LBA8 等 Overview 关键字段通过 stable key 获取，不依赖 label；
+7. Detail 的 `Known/Unknown/Reserved/Preserved` 均有真实模型来源，或未实现的状态已删除；
+8. passive Inspect 读取失败可显式重试，不会形成自动重试风暴；
+9. 同一 poll 中连续多个 Backup/Restore/Provision progress milestone 不丢失且顺序不变；
+10. Running 日志导航只改变 PaneViewport，不改变磁盘事务或 workspace selection；
+11. 不变数据集连续 redraw 不重复全量扫描备份 rows；
+12. 不变 Inspect state 连续查询不重复重建整棵 visible tree；
+13. UI-neutral DiskLayout/Inspect/Progress semantic model 不依赖 ratatui；
+14. Help/Footer 与当前真实 action capability 一致；
+15. Q8 完成后不存在为了第 12 章已知 `Rewrap/Migrate/Drop` 扩展而必须推翻第 14 章 UI 基础设施的结构性障碍。
+
+第二轮审计后的治理目标从“把几个界面画得更清楚”提升为：**把 TUI 中仍然依赖数字 slot、中文文案、glyph、最后一条 message 的隐式协议全部替换为 typed contract；同时收口事件传输、视图缓存和模块 ownership。完成后，第 12 章可以在这些稳定接口上增加新的业务语义，而不需要再次重写表格、磁盘布局、进度系统和 Pane 交互。**
