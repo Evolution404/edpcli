@@ -88,6 +88,8 @@ mod layout;
 mod pane;
 #[path = "plain_editor.rs"]
 mod plain_editor;
+#[path = "review.rs"]
+mod review;
 #[path = "validation.rs"]
 mod validation;
 
@@ -377,6 +379,7 @@ impl AppState {
             Ok(prepared) => {
                 self.provision.prepared = Some(prepared);
                 self.provision.stage = ProvisionStage::Review;
+                self.provision.pane_focus = crate::tui::pane::PaneFocus::provision_review();
                 self.provision.message = None;
             }
             Err(message) => {
