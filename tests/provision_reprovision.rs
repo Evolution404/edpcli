@@ -1012,6 +1012,52 @@ fn target_plan_preserves_only_verified_matching_data() {
 }
 
 #[test]
+fn exact_encrypted_extent_with_unknown_password_stays_a_preserve_candidate() {
+    let (_, source_image, did) = generated_source(OfficialPartitionMode::DefaultThreePartition);
+    let mut source = parse_existing_provision(&source_image, &did, 16_777_216)
+        .unwrap()
+        .unwrap();
+    source
+        .confirm_filesystem(PartitionRole::Encrypt, OfficialFilesystemFormat::ExFat)
+        .unwrap();
+
+    let prefill = prefill_for_target_mode(
+        Some(&source.profile),
+        OfficialPartitionMode::BootShareCombined,
+        16_000_000,
+        512,
+    )
+    .unwrap();
+    let targets = prefill.target_partitions(512).unwrap();
+
+    let plan = TargetProvisionPlan::build(
+        Some(&source),
+        OfficialPartitionMode::BootShareCombined,
+        &targets,
+        16_000_000,
+        b"unknown-password",
+    )
+    .unwrap();
+
+    let encrypt = plan
+        .partitions
+        .iter()
+        .find(|part| part.geometry.role == PartitionRole::Encrypt)
+        .expect("mode1 encrypt target");
+
+    assert_ne!(
+        encrypt.action,
+        PartitionAction::Rebuild,
+        "Chapter 12 requires exact compatible encrypted extents to remain eligible for opaque preserve even when the password is unknown"
+    );
+    assert_eq!(
+        encrypt.preserved_record,
+        source.record(PartitionRole::Encrypt).copied(),
+        "opaque preserve must retain the exact source key record without unwrap"
+    );
+}
+
+#[test]
 fn shrinking_combined_keeps_encrypt_anchor_and_gap_but_overlap_fails_closed() {
     let source = ExistingProvisionProfile {
         source_mode: OfficialPartitionMode::DefaultThreePartition,
