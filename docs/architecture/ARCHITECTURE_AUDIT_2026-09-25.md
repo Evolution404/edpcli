@@ -1140,6 +1140,102 @@ application 返回结构化 `ProvisionReport/BackupReport/InspectReport`，CLI/T
 - 该拆分只移动纯 TUI 状态/换算逻辑；`ProvisionState` 阶段编排、事件循环、application Provision 服务以及 system-disk guard、USB guard、写前备份、unmount/lock、reopen identity、atomic write、readback、rollback 全部保持原路径。
 - D7-B 后续继续拆分 Plain 分区编辑、字段导航与输入、校验与复核、布局展示等职责；本小阶段完成不代表 Provision 状态治理全部结束。
 
+## Phase D7-B2.1：Plain 分区编辑职责拆分
+
+**COMPLETE；D7-B 继续。**
+
+- 新增 `src/tui/provision/plain_editor.rs`，承载 Plain 字段槽解析、表单到 `PlainProvisionPlan` 的转换、容量填满、容量单位与文件系统切换、分区增删。`state.rs` 只保留目标盘容量读取、消息与光标同步等工作区编排。
+- Plain 继续使用独立的 `ProvisionTarget::Plain`，分区布局、容量上界与计划合法性仍调用 `crate::provision` 的规范实现；没有引入 mode4 或复制协议解析器。
+- 架构门禁要求 Plain 编辑模块存在、保持小规模，并禁止依赖 `AppState`、application、platform 或 diskio；`state.rs` 上限进一步收紧为 2160 行。
+- `state.rs` 为 **2147 行**、`form.rs` 为 **447 行**、`plain_editor.rs` 为 **139 行**。TUI suite **161/161**、架构测试、fast **4.66s / 0 失败**、full **33.25s / 0 失败**、全目标 Clippy、rustfmt 与 diff 检查通过。首次冷缓存 fast 功能测试全过，但 **48.06s** 超过 45s 性能预算；暖缓存正式复跑通过。
+- 本阶段没有修改 LBA0～12/LCE、设备写入路径或写盘安全门槛；真实 USB HIL 仍待独立验收。
+
+## Phase D7-B2.2：字段导航与输入编辑拆分
+
+**COMPLETE；D7-B 继续。**
+
+- 新增 `src/tui/provision/fields.rs`，集中管理 Official/Plain 字段槽与可见行映射、字段分组和紧凑布局、选中字段读取、光标移动、输入策略、字符插入、退格与删除。现有 `AppState` 方法签名与 TUI 键位调用保持原样。
+- `state.rs` 为 **1490 行**、`fields.rs` 为 **662 行**。架构门禁要求字段模块存在、保留关键方法且不回迁到编排文件，并收紧 `state.rs < 1500`、`fields.rs < 900`。
+- TUI suite **161/161** 与架构测试通过；fast 暖缓存 **4.50s / 0 失败**、full **32.40s / 0 失败**，全目标 Clippy、rustfmt 与 diff 检查通过。首次冷缓存 fast 功能测试全过，但 **47.38s** 超过 45s 性能预算；暖缓存正式复跑通过。字段移动没有修改业务验证、协议解析或写盘服务。后续继续拆出表单请求转换与布局展示。
+
+## Phase D7-B2.3：预填解析、容量边界与请求适配拆分
+
+**COMPLETE；D7-B 继续。**
+
+- 新增 `src/tui/provision/validation.rs`，集中承载目标模式适配、现有配置预填解析、容量边界计算以及 Official 表单到 `OfficialProvisionRequest` 的转换。Plain 表单计划转换保留在独立的 `plain_editor.rs`。
+- LCE 几何、预填、分区几何与容量上界继续调用 `crate::protocol` 和 `crate::provision` 规范实现；TUI 只保留目标盘与表单适配，不新增协议解析器或写盘验证真相源。
+- `state.rs` 为 **1105 行**，`validation.rs` 为 **394 行**。架构门禁要求适配模块存在、保持小规模，并收紧 `state.rs < 1200`。
+- TUI suite **161/161**、Provision suite **178/178** 与架构测试通过；fast 暖缓存 **4.53s / 0 失败**、full **33.06s / 0 失败**，全目标 Clippy、rustfmt 与 diff 检查通过。首次冷缓存 fast 功能测试全过，但 **46.89s** 超过 45s 性能预算；暖缓存正式复跑通过。后续拆分布局展示。
+
+## Phase D7-B2.4：布局展示拆分
+
+**COMPLETE；D7-B 继续。**
+
+- 新增 `src/tui/provision/layout.rs`，集中承载几何预览、Plain 与 Official 布局编辑行、布局模型和容量条展示。展示层继续消费 `plain_form.plan`、`provision_resolved_prefill` 与 `crate::provision` 几何校验，不生成新的协议或分区真相源。
+- `state.rs` 为 **739 行**、`layout.rs` 为 **371 行**；架构门禁要求布局模块存在、保持小规模，并收紧 `state.rs < 800`。
+- TUI suite **161/161** 与架构测试通过；fast 暖缓存 **4.56s / 0 失败**、full **34.45s / 0 失败**，全目标 Clippy、rustfmt 与 diff 检查通过。首次冷缓存 fast 功能测试全过，但 **48.05s** 超过 45s 性能预算；暖缓存正式复跑通过。后续收口表单编辑动作，使 `state.rs` 只保留工作区阶段与任务协调。
+
+## Phase D7-B2.5：表单编辑动作收口
+
+**COMPLETE；D7-B 完成。**
+
+- 新增 `src/tui/provision/editor.rs`，集中承载容量填满、选项切换、Plain 计划与分区增删、密码选项切换等表单交互动作。纯 Plain 编辑规则仍由 `plain_editor.rs` 执行；`editor.rs` 负责消息、选中字段和光标同步。
+- `state.rs` 降至 **501 行**，保留 Provision 工作区初始化、备份提示、阶段转换、导出确认与写盘任务协调；`editor.rs` 为 **243 行**。架构门禁收紧为 `state.rs < 520`、`editor.rs < 300`，并锁定编辑入口不回迁。
+- TUI suite **161/161** 与架构测试通过；fast **4.60s / 0 失败**、full **32.70s / 0 失败**，全目标 Clippy、rustfmt 与 diff 检查通过。首次冷缓存运行发现本报告中一处英文叙述词，被文档门禁拒绝；修正后正式复跑通过。D7-B 的表单、Plain 编辑、字段输入、校验适配、布局展示与编辑动作均已按职责分离；后续进入 D7-C `inspect.rs` 拆分。
+
+## Phase D7-C1：检查器模型、LBA 适配与渲染分层
+
+**COMPLETE；D7-C 继续。**
+
+- `src/inspect.rs` 收敛为公开 API 门面，字段模型与展示字段构建移至 `src/inspect/model.rs`，LBA0～12 只读适配移至 `src/inspect/lba_adapter.rs`，十六进制和字段文本渲染移至 `src/inspect/render.rs`。
+- 原有 `analyze_sector`、`render_fields` 等公开入口继续从门面重新导出，调用方接口不变；各 LBA 仍调用 `protocol::*` 与 `protocol::semantic` 的规范解析器，未重写协议语义或删除真实介质兼容分支。
+- 架构门禁锁定模块存在和规模；检查源码契约与平台边界测试覆盖新子模块，防止迁移后检查范围缩窄。`inspect.rs` 为 **75 行**，字段模型 **706 行**，LBA 适配 **1201 行**，渲染 **270 行**。
+- 检查套件 **55/55**、仓库套件 **34/34** 通过；fast **1.67s / 0 失败**、full **31.89s / 0 失败**，全目标 Clippy、rustfmt 与 diff 检查通过。首次运行被本报告中的英文叙述词触发文档门禁；中文化后正式复跑通过。后续继续细分 LBA 适配与元数据职责，并约束协议与应用层依赖方向。
+
+## Phase D7-C2：LBA 展示适配按范围拆分
+
+**COMPLETE；D7-C 继续。**
+
+- `lba_adapter.rs` 收敛为扇区长度检查、范围分派和 `SectorView` 组装；LBA0～4、5～8、9～12 分别迁入 `lba_early.rs`、`lba_middle.rs`、`lba_late.rs`。原有每个 LBA 分支的规范解析器调用和字段/备注构造保持原样。
+- 范围函数仅接收只读扇区、元数据及可变展示缓冲；`protocol::*` 继续是协议真相源。`lba_adapter.rs` 为 **65 行**，三个范围模块分别为 **432 / 400 / 372 行**，均受架构规模门禁约束。
+- 检查源码契约和平台边界测试现覆盖所有范围模块；检查套件 **55/55**、架构测试、fast **43.17s / 0 失败**、full **32.34s / 0 失败**、全目标 Clippy、rustfmt 与 diff 检查通过。后续继续拆元数据与目录适配职责。
+
+## Phase D7-C3：检查元数据与备份目录适配拆分
+
+**COMPLETE；D7-C 继续。**
+
+- 新增 `src/inspect/metadata.rs`，集中承载检查来源身份、设备 CRC、onlyid 与 LBA7/8/11/12 语义推断的展示适配；新增 `src/inspect/catalog.rs`，只负责将备份目录元数据转换为检查来源身份。
+- `src/inspect/model.rs` 现在仅保留字段模型、文本解码与字段构造；备份目录类型不再进入字段模块。公开 `InspectMeta::from_backup_meta` 保持可用，协议推断继续委托 `protocol::semantic`。
+- `model.rs` 为 **623 行**、`metadata.rs` 为 **72 行**、`catalog.rs` 为 **14 行**；架构门禁限制三个模块的规模，并禁止字段模型重新引用磁盘目录类型。
+- 检查套件 **55/55** 与架构测试通过；fast **42.57s / 0 失败**、full **32.60s / 0 失败**、全目标 Clippy、rustfmt 与 diff 检查通过。后续补足展示依赖方向门禁。
+
+## Phase D7-C4：检查器依赖方向门禁
+
+**COMPLETE；D7-C 模块拆分完成。**
+
+- 初版架构门禁禁止 `protocol`、`provision` 和非检查专用 `application` 模块引用检查展示门面；检查器字段模型、元数据与 LBA 适配模块不得反向依赖 application，也不得调用文本或十六进制渲染。
+- 初版仍允许 `application::inspect` 的展示桥接；这一例外在 D7-C5 收口。
+- D7-C 的公开门面、字段模型、LBA 范围适配、元数据/目录适配和渲染已按职责分开，规范协议解析器仍是唯一真相源。依赖方向架构测试 **1/1**、fast **37.92s / 0 失败**、full **36.15s / 0 失败**、全目标 Clippy、rustfmt 与 diff 检查通过。下一阶段执行 D7-D 生产路径输入与索引安全审计。
+
+## Phase D7-C5：收口检查器展示依赖方向
+
+**COMPLETE。** 把原来的桥接例外收口为独立 `inspect_adapter`：`application::inspect` 与检查拓扑只引用适配层，不再引用 `inspect` 展示门面；字段文本导出由 application 服务提供，展示门面复用同一文本格式。架构门禁现在检查全部 `application` 模块，禁止直接依赖检查展示门面。公开 `inspect` API 保持兼容；规范协议解析器仍是唯一真相源。
+
+严格依赖门禁、检查器 **55/55**、仓库 **37/37**、平台 **8/8**、fast **4.62s / 0 失败**、full **84.21s / 0 失败**（首次冷运行）和全目标 Clippy 通过；输出格式和写盘路径未改变。
+
+## Phase D7-D：外部输入与生产路径断言治理
+
+**COMPLETE。** 逐项审计 raw sector、EDPB、文件系统与设备读取路径；固定长度内部不变量和外部输入错误路径分别记录如下。
+
+- `default_file_key_checked` 返回 `DefaultFileKeyError`；检查器按 `FileKeyCrcMismatch` 类型决定 FAIL，兼容用的 `default_file_key` 仍把类型化错误转换成原有文本。损坏 FileKeyCRC 回归测试通过，不再用本地化消息做控制流。
+- FAT parser 在访问引导扇区固定偏移前检查恰好 512B，短扇区单元测试覆盖 0、1、510、511B；短文件名 UTF-8 转换改为显式错误。exFAT parser 已在固定偏移前检查 512B，簇数上限 4,194,304 限制后续 FAT 下标和 `cluster_count + 2`。
+- EDPB 证据读取器对协议镜像缺失、产物缺失、偏移溢出与截断返回 `io::Error`，不再依赖 `unwrap/expect`；MBR 检查树的字段转换亦显式处理缺失字段。制盘校验中由只读回调提供的 LBA 改用溢出/边界检查，保持固定 13 扇区镜像的直接字段读取。
+- 盘列表中来自 EDPF 的 `end_lba` 使用饱和加法处理损坏几何；只读设备缓存缺失和事务回滚循环的兜底改为可返回错误；深度分析报告 JSON 形状缺失返回错误。新增仓库架构门禁，禁止 EDPB 证据读取器重新引入 `panic/unwrap/expect`，并检查 FAT 长度门禁先于固定偏移读取。
+- `TargetIdentity::from_probe` 拒绝扇区数乘以 512 后溢出 `u64` 的容量，防止后续制盘协议图像和校验的字节容量计算溢出；有极值回归测试。
+- XML 属性文本解析在字符迭代结束时安全退出，不再对外部文本使用 `unwrap`；仓库架构门禁检查生产解析代码。
+- `protocol::types` 的字节序辅助函数由 `[u8; 512]` 协议扇区及固定大小的规范字段切片调用；`inspect_target` 的启动扇区字段读取受 512B 长度门禁保护，MBR 读取由 `get(..512)` 保护；`backup_metadata` 的 `expect` 在 13 扇区长度门禁和最多三个 EDPF 条目上界之后，属于固定长度内部不变量。对应协议、检查器与备份回归测试保留。
+- D7-D 定向测试、仓库架构门禁、fast **5.15s / 0 失败**、full **7.67s / 0 失败**、全目标 Clippy、rustfmt 与 diff 检查通过。该阶段未更改 LBA0～12/LCE 的协议语义或真实盘写入门槛。
+
 ---
 
 # 第八部分：完成标准

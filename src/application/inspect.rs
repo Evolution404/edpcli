@@ -5,7 +5,7 @@ use std::path::Path;
 pub use super::evidence::SectorReader;
 use super::evidence::{EvidenceError, EvidenceSource};
 use crate::common::{METADATA_SECTOR_COUNT, SECTOR};
-use crate::inspect::{self, InspectMeta};
+use crate::inspect_adapter::{self as inspect, InspectMeta};
 use crate::sysinfo::CmdRunner;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -215,16 +215,16 @@ pub enum InspectFieldType {
     Checksum,
 }
 
-impl From<crate::inspect::FieldStyle> for InspectFieldType {
-    fn from(style: crate::inspect::FieldStyle) -> Self {
+impl From<crate::inspect_adapter::FieldStyle> for InspectFieldType {
+    fn from(style: crate::inspect_adapter::FieldStyle) -> Self {
         match style {
-            crate::inspect::FieldStyle::Magic => Self::Magic,
-            crate::inspect::FieldStyle::Text => Self::Text,
-            crate::inspect::FieldStyle::Identity => Self::Identity,
-            crate::inspect::FieldStyle::Address => Self::Address,
-            crate::inspect::FieldStyle::Size => Self::Size,
-            crate::inspect::FieldStyle::Flag => Self::Flag,
-            crate::inspect::FieldStyle::Checksum => Self::Checksum,
+            crate::inspect_adapter::FieldStyle::Magic => Self::Magic,
+            crate::inspect_adapter::FieldStyle::Text => Self::Text,
+            crate::inspect_adapter::FieldStyle::Identity => Self::Identity,
+            crate::inspect_adapter::FieldStyle::Address => Self::Address,
+            crate::inspect_adapter::FieldStyle::Size => Self::Size,
+            crate::inspect_adapter::FieldStyle::Flag => Self::Flag,
+            crate::inspect_adapter::FieldStyle::Checksum => Self::Checksum,
         }
     }
 }
@@ -246,16 +246,16 @@ pub struct InspectField {
     pub status: InspectFieldStatus,
     pub label: String,
     pub value: String,
-    pub style: crate::inspect::FieldStyle,
+    pub style: crate::inspect_adapter::FieldStyle,
     pub group: Option<String>,
-    pub children: Vec<crate::inspect::FieldChild>,
+    pub children: Vec<crate::inspect_adapter::FieldChild>,
 }
 
 fn materialize_protocol_fields(
     lba: u64,
     raw: &[u8],
     decoded: &[u8],
-    fields: &[crate::inspect::SectorField],
+    fields: &[crate::inspect_adapter::SectorField],
 ) -> Result<Vec<InspectField>, InspectError> {
     let base = lba
         .checked_mul(SECTOR as u64)
@@ -553,7 +553,7 @@ pub fn sector_meta_text(
         let view =
             inspect::analyze_sector_with_context(lba32, raw, meta, Some(&context.protocol_image));
         out.push_str(&format!("协议解码: {}\n", view.method));
-        out.push_str(&inspect::render_fields(&view));
+        out.push_str(&super::inspect_text::render_fields(&view));
         for note in &view.notes {
             out.push_str(&format!("  └─ {note}\n"));
         }
@@ -889,12 +889,12 @@ mod advanced_tests {
         raw[8..12].copy_from_slice(&[1, 2, 3, 4]);
         let mut decoded = raw.clone();
         decoded[8..12].copy_from_slice(&[5, 6, 7, 8]);
-        let fields = vec![crate::inspect::SectorField {
+        let fields = vec![crate::inspect_adapter::SectorField {
             start: 8,
             end: 12,
             label: "test".into(),
             value: "value".into(),
-            style: crate::inspect::FieldStyle::Identity,
+            style: crate::inspect_adapter::FieldStyle::Identity,
             group: Some("group".into()),
             children: Vec::new(),
         }];

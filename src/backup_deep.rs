@@ -448,7 +448,7 @@ pub fn acquire_deep(
         let mut summary_json = serde_json::to_value(&report).map_err(|e| e.to_string())?;
         summary_json
             .as_object_mut()
-            .expect("analysis object")
+            .ok_or_else(|| "Deep analysis serialization is not an object".to_string())?
             .remove("entries");
         summary.data = serde_json::to_vec_pretty(&summary_json).map_err(|e| e.to_string())?;
         out.artifacts.push(summary);

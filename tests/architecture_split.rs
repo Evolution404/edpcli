@@ -69,6 +69,11 @@ fn large_modules_are_split_by_domain_boundary() {
         "src/diskio/backup_create.rs",
         "src/tui/provision/state.rs",
         "src/tui/provision/form.rs",
+        "src/tui/provision/plain_editor.rs",
+        "src/tui/provision/fields.rs",
+        "src/tui/provision/validation.rs",
+        "src/tui/provision/layout.rs",
+        "src/tui/provision/editor.rs",
         "src/tui/provision/render.rs",
         "src/tui/provision/task.rs",
         "src/tui/inspect/state.rs",
@@ -76,6 +81,16 @@ fn large_modules_are_split_by_domain_boundary() {
         "src/tui/backups/state.rs",
         "src/tui/backups/render.rs",
         "src/tui/devices/render.rs",
+        "src/inspect/model.rs",
+        "src/inspect_adapter.rs",
+        "src/application/inspect_text.rs",
+        "src/inspect/metadata.rs",
+        "src/inspect/catalog.rs",
+        "src/inspect/lba_adapter.rs",
+        "src/inspect/lba_early.rs",
+        "src/inspect/lba_middle.rs",
+        "src/inspect/lba_late.rs",
+        "src/inspect/render.rs",
     ] {
         exists(path);
     }
@@ -85,13 +100,91 @@ fn large_modules_are_split_by_domain_boundary() {
     assert!(lines("src/tui/state.rs") < 3_500);
     assert!(lines("src/tui/render.rs") < 1_500);
     assert!(lines("src/tui/task.rs") < 1_000);
+    assert!(lines("src/inspect.rs") < 150);
+    assert!(lines("src/inspect_adapter.rs") < 150);
+    assert!(lines("src/application/inspect_text.rs") < 260);
+    assert!(lines("src/inspect/model.rs") < 650);
+    assert!(lines("src/inspect/metadata.rs") < 150);
+    assert!(lines("src/inspect/catalog.rs") < 50);
+    let inspect_model =
+        fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("src/inspect/model.rs"))
+            .expect("read inspect field model");
+    assert!(!inspect_model.contains("crate::diskio"));
+    assert!(!inspect_model.contains("BackupMeta"));
+    assert!(lines("src/inspect/lba_adapter.rs") < 100);
+    for path in [
+        "src/inspect/lba_early.rs",
+        "src/inspect/lba_middle.rs",
+        "src/inspect/lba_late.rs",
+    ] {
+        assert!(
+            lines(path) < 500,
+            "LBA presentation adapter is oversized: {path}"
+        );
+    }
+    assert!(lines("src/inspect/render.rs") < 400);
     assert!(
-        lines("src/tui/provision/state.rs") < 2_250,
+        lines("src/tui/provision/state.rs") < 520,
         "Provision orchestration state must not absorb form/capacity/plain model again"
     );
     assert!(
+        lines("src/tui/provision/editor.rs") < 300,
+        "Provision edit actions must stay bounded"
+    );
+    let editor_source = fs::read_to_string(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("src/tui/provision/editor.rs"),
+    )
+    .expect("read provision editor");
+    for name in [
+        "provision_fill_selected_capacity",
+        "provision_plain_add_partition",
+    ] {
+        assert!(
+            editor_source.contains(name),
+            "editor module is missing {name}"
+        );
+    }
+    assert!(
+        lines("src/tui/provision/layout.rs") < 500,
+        "Provision layout presentation must stay responsibility-bounded"
+    );
+    assert!(
+        lines("src/tui/provision/validation.rs") < 500,
+        "Provision validation adapter must not duplicate canonical protocol or domain parsers"
+    );
+    assert!(
+        lines("src/tui/provision/fields.rs") < 900,
+        "Provision field navigation and input editing must stay responsibility-bounded"
+    );
+    let field_source = fs::read_to_string(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("src/tui/provision/fields.rs"),
+    )
+    .expect("read provision fields module");
+    let orchestration_source = fs::read_to_string(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("src/tui/provision/state.rs"),
+    )
+    .expect("read provision orchestration state");
+    for name in [
+        "provision_field_slot",
+        "provision_push_char",
+        "provision_delete_char",
+    ] {
+        assert!(
+            field_source.contains(name),
+            "fields module is missing {name}"
+        );
+        assert!(
+            !orchestration_source.contains(&format!("fn {name}(")),
+            "orchestration state must not reabsorb {name}"
+        );
+    }
+    assert!(
         lines("src/tui/provision/form.rs") < 650,
         "Provision form model must stay responsibility-bounded"
+    );
+    assert!(
+        lines("src/tui/provision/plain_editor.rs") < 250,
+        "Plain editor must contain only pure partition editing and form conversion"
     );
     let provision_form =
         fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("src/tui/provision/form.rs"))
@@ -105,6 +198,21 @@ fn large_modules_are_split_by_domain_boundary() {
         assert!(
             !provision_form.contains(forbidden),
             "Provision form model must stay pure and independent of orchestration/I/O: {forbidden}"
+        );
+    }
+    let plain_editor = fs::read_to_string(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("src/tui/provision/plain_editor.rs"),
+    )
+    .expect("read plain partition editor");
+    for forbidden in [
+        "AppState",
+        "crate::application",
+        "crate::platform",
+        "crate::diskio",
+    ] {
+        assert!(
+            !plain_editor.contains(forbidden),
+            "Plain partition editor must remain a pure form adapter: {forbidden}"
         );
     }
     let semantic =
@@ -208,6 +316,88 @@ fn semantic_consumers_do_not_depend_on_inspect_presentation() {
             "{path} must consume typed protocol semantics instead of inspect presentation"
         );
     }
+}
+
+#[test]
+fn inspect_presentation_stays_downstream_of_protocol_and_application_domains() {
+    let mut domain_sources = rust_sources_under("src/protocol");
+    domain_sources.extend(rust_sources_under("src/provision"));
+    domain_sources.extend(rust_sources_under("src/application"));
+    assert_sources_exclude(domain_sources, &["crate::inspect::", "crate::inspect{"]);
+
+    let adapter =
+        fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("src/inspect_adapter.rs"))
+            .expect("read inspect adapter");
+    assert!(!adapter.contains("crate::application"));
+    assert!(!adapter.contains("mod render;"));
+
+    for path in [
+        "src/inspect/model.rs",
+        "src/inspect/metadata.rs",
+        "src/inspect/lba_adapter.rs",
+        "src/inspect/lba_early.rs",
+        "src/inspect/lba_middle.rs",
+        "src/inspect/lba_late.rs",
+    ] {
+        let source = fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join(path))
+            .unwrap_or_else(|error| panic!("read {path}: {error}"));
+        assert!(
+            !source.contains("crate::application"),
+            "{path} imports application"
+        );
+        assert!(
+            !source.contains("render_fields("),
+            "{path} imports display rendering"
+        );
+        assert!(
+            !source.contains("render_hex("),
+            "{path} imports display rendering"
+        );
+    }
+}
+
+#[test]
+fn inspect_key_status_uses_typed_errors() {
+    let source =
+        fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("src/inspect_target.rs"))
+            .expect("read inspect target");
+    assert!(source.contains("default_file_key_checked"));
+    assert!(!source.contains("error.contains(\"FileKeyCRC\")"));
+}
+
+#[test]
+fn critical_io_paths_have_no_panicking_shortcuts() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    for path in [
+        "src/application/evidence.rs",
+        "src/diskio/device.rs",
+        "src/diskio/transaction.rs",
+        "src/backup_deep.rs",
+    ] {
+        let source = fs::read_to_string(root.join(path))
+            .unwrap_or_else(|error| panic!("read {path}: {error}"));
+        for forbidden in [".unwrap(", ".expect(", "panic!", "unreachable!"] {
+            assert!(
+                !source.contains(forbidden),
+                "{path} must return an error instead of using {forbidden}"
+            );
+        }
+    }
+    let fat =
+        fs::read_to_string(root.join("src/backup_deep/fat.rs")).expect("read FAT parser source");
+    let parse = fat
+        .split("pub(super) fn parse(")
+        .nth(1)
+        .expect("FAT parser");
+    let length_guard = parse.find("boot.len() != 512").expect("boot length guard");
+    let first_boot_access = parse.find("boot[510..512]").expect("boot signature access");
+    assert!(length_guard < first_boot_access);
+    let validator = fs::read_to_string(root.join("src/provision/validate.rs"))
+        .expect("read provision validator source");
+    assert!(validator.contains("checked_sector(bytes, lba as usize)"));
+    let plist = fs::read_to_string(root.join("src/plist.rs")).expect("read plist source");
+    let production = plist.split("#[cfg(test)]").next().expect("plist parser");
+    assert!(!production.contains(".unwrap("));
 }
 
 #[test]

@@ -77,6 +77,8 @@ pub enum EvolutionKind {
     ProducerChanged,
 }
 
+// Callers pass a checked 512-byte WireSector or fixed catalog field slice;
+// every offset below is a protocol layout constant, never an input offset.
 pub(crate) fn u32le(bytes: &[u8], offset: usize) -> u32 {
     u32::from_le_bytes(bytes[offset..offset + 4].try_into().unwrap())
 }

@@ -71,6 +71,9 @@ impl TargetIdentity {
                 "target is too small for the canonical EDP metadata layout: {total_sectors} sectors"
             ));
         }
+        if total_sectors > u64::MAX / crate::common::SECTOR as u64 {
+            return Err("target byte capacity overflows u64".into());
+        }
         let vid = probe.vid.ok_or("hardware probe is missing USB VID")?;
         let pid = probe.pid.ok_or("hardware probe is missing USB PID")?;
         let inquiry = probe

@@ -97,29 +97,81 @@ pub fn sm4_encrypt_block(plaintext: &[u8; 16], key: &[u8; 16]) -> [u8; 16] {
 /// The first-party default-password substitution and the entry's FileKeyCRC
 /// must both agree before the key can be used for partition-sector reads.
 pub fn default_file_key(image: &[u8], device_id: &str, index: usize) -> Result<[u8; 16], String> {
+    default_file_key_checked(image, device_id, index).map_err(|error| error.to_string())
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DefaultFileKeyError {
+    InvalidImageOrIndex,
+    DeviceIdMismatch,
+    UnsupportedPassInfo,
+    InvalidEntry(crate::protocol::types::ProtocolError),
+    NotEncryptedMode2,
+    NotDefaultPassword,
+    FileKeyCrcMismatch,
+}
+
+impl std::fmt::Display for DefaultFileKeyError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::InvalidImageOrIndex => {
+                formatter.write_str("invalid protocol image or partition index")
+            }
+            Self::DeviceIdMismatch => {
+                formatter.write_str("LBA12 does not decode to EDPF with current device_id")
+            }
+            Self::UnsupportedPassInfo => {
+                formatter.write_str("default key unwrap supports PassInfo v0x0206 only")
+            }
+            Self::InvalidEntry(error) => error.fmt(formatter),
+            Self::NotEncryptedMode2 => {
+                formatter.write_str("default key unwrap requires an encrypted mode2 entry")
+            }
+            Self::NotDefaultPassword => {
+                formatter.write_str("partition does not advertise the default password")
+            }
+            Self::FileKeyCrcMismatch => formatter.write_str("default password FileKeyCRC mismatch"),
+        }
+    }
+}
+
+impl std::error::Error for DefaultFileKeyError {}
+
+pub fn default_file_key_checked(
+    image: &[u8],
+    device_id: &str,
+    index: usize,
+) -> Result<[u8; 16], DefaultFileKeyError> {
     use crate::crypto::{a6b0_full, crc32_bare};
     use crate::protocol::edpf::{EdpfEntry96, PassInfo};
 
     if image.len() != 13 * 512 || index >= 3 {
-        return Err("invalid protocol image or partition index".into());
+        return Err(DefaultFileKeyError::InvalidImageOrIndex);
     }
     let device_crc = crc32_bare(device_id.as_bytes());
     let plain = a6b0_full(&image[12 * 512..13 * 512], &device_crc.to_le_bytes(), 0);
     if &plain[..4] != b"EDPF" {
-        return Err("LBA12 does not decode to EDPF with current device_id".into());
+        return Err(DefaultFileKeyError::DeviceIdMismatch);
     }
-    let pass = PassInfo::decode_stored(plain[0x120..0x12e].try_into().unwrap());
+    let pass_bytes = plain
+        .get(0x120..0x12e)
+        .and_then(|bytes| bytes.try_into().ok())
+        .ok_or(DefaultFileKeyError::InvalidImageOrIndex)?;
+    let pass = PassInfo::decode_stored(pass_bytes);
     if pass.version != 0x0206 {
-        return Err("default key unwrap supports PassInfo v0x0206 only".into());
+        return Err(DefaultFileKeyError::UnsupportedPassInfo);
     }
-    let entry = EdpfEntry96::parse(plain[index * 96..(index + 1) * 96].try_into().unwrap())
-        .map_err(|e| e.to_string())?;
+    let entry_bytes = plain
+        .get(index * 96..(index + 1) * 96)
+        .and_then(|bytes| bytes.try_into().ok())
+        .ok_or(DefaultFileKeyError::InvalidImageOrIndex)?;
+    let entry = EdpfEntry96::parse(entry_bytes).map_err(DefaultFileKeyError::InvalidEntry)?;
     if index >= entry.partition_count as usize || entry.need_encrypt == 0 || entry.encrypt_mode != 2
     {
-        return Err("default key unwrap requires an encrypted mode2 entry".into());
+        return Err(DefaultFileKeyError::NotEncryptedMode2);
     }
     if entry.user_key_crc != crc32_bare(b"0000aaaa") {
-        return Err("partition does not advertise the default password".into());
+        return Err(DefaultFileKeyError::NotDefaultPassword);
     }
     // v0x0206 substitutes LtSWi[2f)j before MD5. This digest is pinned by
     // the first-party producer and consumer evidence in the protocol audit.
@@ -129,7 +181,7 @@ pub fn default_file_key(image: &[u8], device_id: &str, index: usize) -> Result<[
     ];
     let key = sm4_decrypt_block(&entry.encrypted_file_key, &EFFECTIVE_MD5);
     if crc32_bare(&key) != entry.file_key_crc {
-        return Err("default password FileKeyCRC mismatch".into());
+        return Err(DefaultFileKeyError::FileKeyCrcMismatch);
     }
     Ok(key)
 }

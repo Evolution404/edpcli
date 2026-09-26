@@ -103,7 +103,8 @@ impl EdpfPartition {
     }
     pub fn end_lba(&self) -> u64 {
         if self.size_bytes >= SECTOR as u64 {
-            self.start_lba + self.size_bytes / SECTOR as u64 - 1
+            self.start_lba
+                .saturating_add(self.size_bytes / SECTOR as u64 - 1)
         } else {
             self.start_lba
         }
@@ -137,4 +138,21 @@ pub fn parse_lba12(raw12: &[u8], device_id: &str) -> Option<Vec<EdpfPartition>> 
         });
     }
     Some(out)
+}
+
+#[cfg(test)]
+mod bounds_tests {
+    use super::EdpfPartition;
+
+    #[test]
+    fn corrupted_partition_end_is_bounded_for_display() {
+        let part = EdpfPartition {
+            ptype: 2,
+            active: 1,
+            enc: 0,
+            start_lba: u64::MAX - 1,
+            size_bytes: u64::MAX,
+        };
+        assert_eq!(part.end_lba(), u64::MAX);
+    }
 }
