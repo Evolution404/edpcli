@@ -109,14 +109,8 @@ impl KeyDomainSecrets {
 
     pub fn default_targets() -> Self {
         Self {
-            share: KeyDomainSecretPair::new(
-                None::<&[u8]>,
-                Some(DEFAULT_KEY_DOMAIN_PASSWORD),
-            ),
-            encrypt: KeyDomainSecretPair::new(
-                None::<&[u8]>,
-                Some(DEFAULT_KEY_DOMAIN_PASSWORD),
-            ),
+            share: KeyDomainSecretPair::new(None::<&[u8]>, Some(DEFAULT_KEY_DOMAIN_PASSWORD)),
+            encrypt: KeyDomainSecretPair::new(None::<&[u8]>, Some(DEFAULT_KEY_DOMAIN_PASSWORD)),
         }
     }
 
