@@ -66,6 +66,13 @@ fn usage_errors_exit_two() {
     }
 }
 
+#[test]
+fn provision_write_bridges_the_same_backup_dir_across_elevation_and_commit() {
+    let source = include_str!("../src/cli.rs");
+    assert!(source.contains("argv_with_backup_dir_for_elevation(backup_dir.as_deref())"));
+    assert!(source.contains("crate::application::resolve_backup_dir(backup_dir.as_deref())"));
+}
+
 // ══════════════════════════════════════════════════════════════════
 // 进程内流程测试(backup / restore)
 // ══════════════════════════════════════════════════════════════════

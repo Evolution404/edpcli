@@ -513,7 +513,11 @@ fn provision_flow(runner: &SysRunner, action: ProvisionAction) -> i32 {
                 Err(error) => finish(Err(error)),
             }
         }
-        ProvisionAction::Write { opts, yes } => {
+        ProvisionAction::Write {
+            opts,
+            yes,
+            backup_dir,
+        } => {
             if let Some(disk) = opts.disk {
                 if let Err(error) = guard_usb_disk(runner, disk) {
                     return finish(Err(error));
@@ -525,7 +529,7 @@ fn provision_flow(runner: &SysRunner, action: ProvisionAction) -> i32 {
                     Ok(value) => value,
                     Err(error) => return finish(Err(error)),
                 };
-                let mut argv: Vec<String> = std::env::args().skip(1).collect();
+                let mut argv = argv_with_backup_dir_for_elevation(backup_dir.as_deref());
                 DeviceSelector::new(opts.disk).pin_argv(&mut argv, disk);
                 elevate::ensure_elevated(&argv);
                 unreachable!();
@@ -558,7 +562,7 @@ fn provision_flow(runner: &SysRunner, action: ProvisionAction) -> i32 {
             let write = match crate::application::provision::commit_provision_with_backup_on_disk(
                 runner,
                 &prepared,
-                crate::application::resolve_backup_dir(None),
+                crate::application::resolve_backup_dir(backup_dir.as_deref()),
                 &mut prompt,
             ) {
                 Ok(value) => value,

@@ -137,6 +137,7 @@ pub enum ProvisionAction {
     Write {
         opts: Box<ProvisionNewOpts>,
         yes: bool,
+        backup_dir: Option<String>,
     },
 }
 
@@ -411,7 +412,7 @@ fn parse_plain_partition(
 fn parse_new_provision_opts(
     rest: &[String],
     allow_prefill: bool,
-) -> Result<(ProvisionNewOpts, Option<String>, bool), String> {
+) -> Result<(ProvisionNewOpts, Option<String>, bool, Option<String>), String> {
     let mut disk = None;
     let mut target = None;
     let mut plain_partitions = Vec::new();
@@ -447,6 +448,7 @@ fn parse_new_provision_opts(
     let mut max_share_password_errors = None;
     let mut max_encrypt_password_errors = None;
     let mut out = None;
+    let mut backup_dir = None;
     let mut yes = false;
     let mut i = 0usize;
     while i < rest.len() {
@@ -704,6 +706,10 @@ fn parse_new_provision_opts(
                 let value = take_value(rest, &mut i, "--out")?;
                 set_once(&mut out, value, "--out")?;
             }
+            "--backup-dir" => {
+                let value = take_value(rest, &mut i, "--backup-dir")?;
+                set_once(&mut backup_dir, value, "--backup-dir")?;
+            }
             "--yes" => set_switch(&mut yes, &rest[i], "--yes")?,
             other => return Err(format!("错误: provision 不认识选项 {other}")),
         }
@@ -747,7 +753,7 @@ fn parse_new_provision_opts(
             || max_encrypt_password_errors.is_some();
         if has_official_only {
             return Err(
-                "错误: --target plain 只接受 --disk/--partition/--out/--yes；官方模式参数不能混用"
+                "错误: --target plain 只接受 --disk/--partition/--out/--yes/--backup-dir；官方模式参数不能混用"
                     .into(),
             );
         }
@@ -790,6 +796,7 @@ fn parse_new_provision_opts(
             },
             out,
             yes,
+            backup_dir,
         ));
     }
     if !plain_partitions.is_empty() {
@@ -912,6 +919,7 @@ fn parse_new_provision_opts(
         },
         out,
         yes,
+        backup_dir,
     ))
 }
 
@@ -1414,17 +1422,22 @@ pub fn parse_args(argv: &[String]) -> Result<Parsed, String> {
             let tail = &rest[1..];
             match action {
                 "plan" | "image" | "write" => {
-                    let (opts, out, yes) = parse_new_provision_opts(tail, true)?;
+                    let (opts, out, yes, backup_dir) = parse_new_provision_opts(tail, true)?;
                     match action {
                         "plan" => {
-                            if out.is_some() || yes {
-                                return Err("错误: provision plan 不接受 --out 或 --yes".into());
+                            if out.is_some() || yes || backup_dir.is_some() {
+                                return Err(
+                                    "错误: provision plan 不接受 --out、--yes 或 --backup-dir"
+                                        .into(),
+                                );
                             }
                             Ok(Parsed::Provision(ProvisionAction::Plan(Box::new(opts))))
                         }
                         "image" => {
-                            if yes {
-                                return Err("错误: provision image 不接受 --yes".into());
+                            if yes || backup_dir.is_some() {
+                                return Err(
+                                    "错误: provision image 不接受 --yes 或 --backup-dir".into()
+                                );
                             }
                             let out = out.ok_or("错误: provision image 必须指定 --out FILE")?;
                             Ok(Parsed::Provision(ProvisionAction::Image {
@@ -1439,6 +1452,7 @@ pub fn parse_args(argv: &[String]) -> Result<Parsed, String> {
                             Ok(Parsed::Provision(ProvisionAction::Write {
                                 opts: Box::new(opts),
                                 yes,
+                                backup_dir,
                             }))
                         }
                         _ => unreachable!(),

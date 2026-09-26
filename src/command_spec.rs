@@ -169,7 +169,7 @@ const PROVISION_COMMON_OPTIONS: &[OptionSpec] = &[
 ];
 const PROVISION_PLAN_OPTIONS: &[OptionSpec] = &[];
 const PROVISION_IMAGE_OPTIONS: &[OptionSpec] = &[value("--out")];
-const PROVISION_WRITE_OPTIONS: &[OptionSpec] = &[switch("--yes")];
+const PROVISION_WRITE_OPTIONS: &[OptionSpec] = &[switch("--yes"), value("--backup-dir")];
 
 const PROVISION_ACTIONS: &[ActionSpec] = &[
     ActionSpec {

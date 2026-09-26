@@ -97,6 +97,55 @@ fn provision_parses_all_four_product_actions_and_rejects_ambiguous_flags() {
 }
 
 #[test]
+fn provision_write_accepts_backup_dir_but_plan_and_image_do_not() {
+    let write = args(&[
+        "provision",
+        "write",
+        "--disk",
+        "4",
+        "--target",
+        "plain",
+        "--partition",
+        "2048:fill:exfat:DATA",
+        "--backup-dir",
+        "/tmp/edpcli-provision-backup",
+        "--yes",
+    ]);
+    match parse_args(&write).expect("provision write with explicit backup dir") {
+        Parsed::Provision(ProvisionAction::Write { backup_dir, .. }) => {
+            assert_eq!(backup_dir.as_deref(), Some("/tmp/edpcli-provision-backup"));
+        }
+        _ => panic!("expected provision write"),
+    }
+
+    let plan = args(&[
+        "provision",
+        "plan",
+        "--disk",
+        "4",
+        "--target",
+        "plain",
+        "--backup-dir",
+        "/tmp/edpcli-provision-backup",
+    ]);
+    assert!(parse_args(&plan).is_err());
+
+    let image = args(&[
+        "provision",
+        "image",
+        "--disk",
+        "4",
+        "--target",
+        "plain",
+        "--backup-dir",
+        "/tmp/edpcli-provision-backup",
+        "--out",
+        "/tmp/plain.img",
+    ]);
+    assert!(parse_args(&image).is_err());
+}
+
+#[test]
 fn provision_plain_is_a_typed_target_and_never_mode4() {
     assert!(parse_args(&args(&[
         "provision",
@@ -356,6 +405,7 @@ fn provision_actions_allow_capacity_and_identity_prefill() {
     let Parsed::Provision(ProvisionAction::Write {
         opts: write_opts,
         yes,
+        ..
     }) = write
     else {
         panic!("expected provision write");
