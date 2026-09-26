@@ -610,11 +610,11 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
                     .unwrap_or_else(|| "Esc 返回".into());
                 if let Some((query, index, total)) = state.advanced_inspect_search_status() {
                     format!(
-                        "Inspect：Tab/Shift-Tab 子工作区 · Enter Sector Inspector · {escape} · q 退出 · 当前 {index}/{total}: {}",
+                        "Inspect：Tab/Shift-Tab Pane · Ctrl-w h/j/k/l focus · j/k 当前 Pane · Enter Sector Inspector · {escape} · q 退出 · 当前 {index}/{total}: {}",
                         safe(query)
                     )
                 } else {
-                    format!("Inspect：Tab/Shift-Tab 子工作区 · j/k 选择 · h/l 树折叠/展开 · Enter Sector Inspector · {escape} · q 退出")
+                    format!("Inspect：Tab/Shift-Tab Pane · Ctrl-w h/j/k/l focus · j/k 当前 Pane · Ctrl-u/d/PgUp/PgDn 滚动 · gg/G 首尾 · Enter Sector Inspector · {escape} · q 退出")
                 }
             }
         }
