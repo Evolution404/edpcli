@@ -444,6 +444,27 @@ impl AppState {
     pub fn provision_finish_plan(&mut self, result: Result<ProvisionPrepared, String>) {
         match result {
             Ok(prepared) => {
+                if let ProvisionPrepared::Official(official) = &prepared {
+                    if let Some(target_plan) = &official.target_plan {
+                        for part in &target_plan.partitions {
+                            match crate::provision::KeyDomainRole::from_partition_role(
+                                part.geometry.role,
+                            ) {
+                                Some(crate::provision::KeyDomainRole::Share) => {
+                                    if let Some(knowledge) = part.source_password_knowledge {
+                                        self.provision.form.share_source_knowledge = knowledge;
+                                    }
+                                }
+                                Some(crate::provision::KeyDomainRole::Encrypt) => {
+                                    if let Some(knowledge) = part.source_password_knowledge {
+                                        self.provision.form.encrypt_source_knowledge = knowledge;
+                                    }
+                                }
+                                None => {}
+                            }
+                        }
+                    }
+                }
                 self.provision.prepared = Some(prepared);
                 self.provision.stage = ProvisionStage::Review;
                 self.provision.pane_focus = crate::tui::pane::PaneFocus::provision_review();
