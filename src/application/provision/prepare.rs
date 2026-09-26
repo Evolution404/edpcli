@@ -1,4 +1,5 @@
 use super::*;
+use crate::provision::DiskProvisionKind;
 
 fn confirmed_filesystem(
     boot: &[u8],

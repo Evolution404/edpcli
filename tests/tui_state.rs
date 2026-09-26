@@ -719,9 +719,9 @@ fn provision_capacity_hints_match_each_partition() {
         state.provision_field_hint(index).expect("partition hint")
     };
 
-    let boot = hint_for("启动区");
-    let share = hint_for("交换区");
-    let encrypt = hint_for("保密区");
+    let boot = hint_for("启动区容量");
+    let share = hint_for("交换区容量");
+    let encrypt = hint_for("保密区容量");
     assert_eq!(boot, "Space 切换 MiB / GiB / sector · f 填满");
     assert_eq!(share, boot);
     assert_eq!(encrypt, boot);
@@ -985,7 +985,13 @@ fn provision_form_sections_are_compact_and_user_facing() {
     }
     assert_eq!(
         sections,
-        vec!["身份信息", "分区布局", "格式化（可选）", "密码策略"]
+        vec![
+            "身份信息",
+            "密码域",
+            "分区布局",
+            "格式化（可选）",
+            "密码策略",
+        ]
     );
 }
 

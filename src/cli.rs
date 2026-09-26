@@ -732,7 +732,8 @@ mod tests {
         use crate::protocol::edpf::EdpPartitionType;
         use crate::provision::{
             OfficialFilesystemFormat, OfficialPartitionMode, PartitionAction, PartitionRole,
-            TargetPartitionGeometry, TargetPartitionPlan, TargetProvisionPlan,
+            RegionDisposition, SourcePasswordKnowledge, TargetPartitionGeometry,
+            TargetPartitionPlan, TargetPasswordPolicy, TargetProvisionPlan,
         };
 
         let plan = TargetProvisionPlan {
@@ -748,6 +749,9 @@ mod tests {
                         filesystem: Some(OfficialFilesystemFormat::ExFat),
                     },
                     action: PartitionAction::Rebuild,
+                    disposition: RegionDisposition::Rebuild,
+                    source_password_knowledge: None,
+                    target_password_policy: Some(TargetPasswordPolicy::InitializeNew),
                     reason: "geometry changed".into(),
                     preserved_record: None,
                 },
@@ -761,6 +765,9 @@ mod tests {
                         filesystem: Some(OfficialFilesystemFormat::ExFat),
                     },
                     action: PartitionAction::PreserveExact,
+                    disposition: RegionDisposition::PreserveVerified,
+                    source_password_knowledge: Some(SourcePasswordKnowledge::UserVerified),
+                    target_password_policy: Some(TargetPasswordPolicy::ReuseVerified),
                     reason: "exact source match".into(),
                     preserved_record: None,
                 },
