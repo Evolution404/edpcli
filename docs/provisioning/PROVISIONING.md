@@ -4291,3 +4291,3171 @@ python3 scripts/test-full.py --profile full
 15. 不改变任何已闭环 LBA0～12/LCE 协议语义和写盘安全门槛。
 
 最终原则：**页面只组织 Pane；Pane 决定按键如何作用于自己的内容；Tab/Ctrl-w 只移动焦点；j/k 永远服务当前 Pane；Inspect、Provision、Review 的磁盘布局全部来自同一份完整物理盘模型，并从 LBA0 连续覆盖到最后一个 sector。**
+
+## 14. 后续计划：TUI 信息架构、磁盘布局与制盘可观测性收口（2026-09-26）
+
+> 状态：**PLAN ONLY / 持续收集**。本章用于当前计划分支继续收集 Inspect 细节问题；本章提交只允许补充调查结论、实现方案与回归门禁，不修改生产代码。后续用户提出的同类问题继续追加到本章，待问题清单确认后再单独进入实现分支。
+
+### 14.1 结构树单扇区节点去掉冗余 `[n..n]`
+
+当前 `src/tui/inspect/render.rs` 的结构树 renderer 对所有节点统一调用 `format_lba_closed_range(start, end_exclusive)`，再无条件拼到节点 label 后，因此 `LBA0` 会显示为 `LBA0 [0..0]`、`LBA12` 会显示为 `LBA12 [12..12]`。这对单个扇区节点重复表达同一信息，降低结构树信息密度。
+
+目标显示规则：
+
+```text
+单扇区 Sector 节点：
+  LBA0
+  LBA1
+  ...
+  LBA12
+
+多扇区 Region / Extent / Partition / UnknownRange：
+  EDP 主协议区 [0..12]
+  未知区域 [13..62]
+  ...
+```
+
+实现约束：
+
+- 只改变**结构树行文本**；内部 `InspectNodeRange` 仍保持 `[start, end_exclusive)`，不改变任何定位、搜索、折叠、懒加载和导航语义；
+- `InspectNodeKind::Sector` 不再追加 range suffix；其它节点继续使用统一闭区间 formatter；
+- 节点概览中的“范围”仍保留，因为 Overview 的职责就是展示完整元数据，不能因为结构树精简而丢失范围信息；
+- 不通过字符串判断 `label.starts_with("LBA")`，必须依据 `InspectNodeKind::Sector`，避免未来本地化或 label 变化造成行为漂移。
+
+回归门禁至少覆盖：
+
+1. Sector `LBA0` 渲染结果不含 `[0..0]`；
+2. Sector `LBA12` 渲染结果不含 `[12..12]`；
+3. 多扇区 `EDP 主协议区` 仍显示 `[0..12]`；
+4. `UnknownRange / Partition / Extent` 的范围显示不受影响；
+5. Tree selection、搜索、`gl` 跳转和 lazy sector 分页行为不变。
+
+### 14.2 `Decoded: 0x77 (119)` 与“保密区最大错误次数=255”并不矛盾
+
+当前界面把两层不同的“解码”混在一起显示，因此视觉上像是解析结果不一致。以 LBA12 的 `PassInfo` 为例，真实处理链是：
+
+```text
+物理 LBA12 raw sector
+  │
+  ├─ A6B0 整扇解密（device CRC key）
+  ▼
+sector plaintext / 当前 UI 的 `Decoded`
+  │
+  │ PassInfo 内部仍保留字段级存储编码
+  │ 对 PassInfo offset 0 / 3 / 6 再 XOR 0x88
+  ▼
+PassInfo logical value / 当前字段 `Value`
+```
+
+代码证据：
+
+- `protocol::lba12::parse_lba12()` 先对完整 512B 执行 A6B0 解密，并把结果保存在 `Lba12View::plain`；`decoded()` 返回的就是这一级 `plain`；
+- 随后从 `plain[0x120..0x12e]` 取 14B `stored_pass`，再调用 `PassInfo::decode_stored()`；
+- `PassInfo::decode_stored()` 对 offset `0 / 3 / 6` 执行 `^ 0x88`；
+- “保密区最大错误次数”正好位于 PassInfo offset `6`。
+
+因此默认逻辑值 `255 = 0xFF` 在 PassInfo 的存储表示中是：
+
+```text
+0xFF ^ 0x88 = 0x77
+```
+
+所以当前界面看到：
+
+```text
+Decoded: 0x77 (119)
+Value:   255
+```
+
+实际含义是：
+
+```text
+Sector decoded byte: 0x77   # 外层扇区已经解密，但 PassInfo 字段级 XOR 尚未解除
+Field logical value: 0xFF   # PassInfo::decode_stored() 再 XOR 0x88 后的真正字段值
+```
+
+协议解析本身没有把 119 错当成 255；问题在于 UI 把“外层 sector decode”简称成了过于宽泛的 `Decoded`，没有把字段级二次变换展示出来。
+
+### 14.3 计划中的 UI 修正
+
+Sector Inspector 不应继续让用户猜“Decoded 到底解了几层”。目标是把数据层级明确写出来：
+
+```text
+Raw byte:          0x.. (...)
+Sector decoded:    0x77 (119)
+Field decoded:     0xFF (255)      # 仅字段存在额外变换时显示
+Transform:         XOR 0x88        # 仅有已证实字段级变换时显示
+
+保密区最大错误次数
+Value: 255
+```
+
+设计原则：
+
+- `Sector decoded` 只表示 sector-level decoder 的输出，例如 LBA12 A6B0、LBA7 rolling XOR 等；
+- `Field decoded` 表示字段模型完成其自身存储编码/解码后的字节值；没有字段级二次变换时不重复显示；
+- `Value` 继续表示类型化语义值，例如整数、布尔、枚举、文本；
+- renderer 不允许硬编码“PassInfo offset 6 要 XOR 0x88”。字段级变换信息必须来自 inspect/protocol 模型；
+- 对无法证明的变换只显示 sector decoded/raw，不推测 `Field decoded`；
+- 现有 Raw / Decode / Mixed 三种 sector 视图语义保持不变，本项只修正详情区命名和字段级 provenance 展示。
+
+建议在 `SectorField` 或等价只读 inspection DTO 中增加可选的字段级表示信息，例如：
+
+```text
+stored_bytes       # sector decoded 后、字段自身 decode 前
+logical_bytes      # 字段自身 decode 后；仅可可靠重建时存在
+transform_note     # 例如 "XOR 0x88"，必须来自协议事实
+```
+
+具体字段名可在实现时调整，但不能让 TUI renderer 自己重新实现协议算法。
+
+### 14.4 回归门禁
+
+至少新增：
+
+1. LBA12 PassInfo 保密区最大错误次数为 `255` 时，sector decoded byte 固定显示 `0x77 (119)`；
+2. 同一字段的 field decoded/logical byte 显示 `0xFF (255)`；
+3. 回归验证 `0x77 ^ 0x88 == 0xFF`，并锁定 PassInfo offset 6 的字段映射；
+4. 交换区最大错误次数（PassInfo offset 3）同样遵循字段级 XOR 展示；
+5. 不需要字段级变换的普通字段不出现伪造的 `Field decoded`；
+6. LBA12 `Value` 仍来自 canonical `PassInfo` parser，不从 UI 显示字节反推；
+7. Raw / Decode / Mixed 切换、byte cursor、高亮和 active field range 均不回归；
+8. LBA0～12/LCE golden protocol tests 保持不变。
+
+### 14.5 实施顺序
+
+后续真正实现时按以下顺序执行：
+
+```text
+I0  先补失败测试：单扇区 Tree 文案 + PassInfo 多层 decode 展示
+I1  Tree renderer 对 Sector 去掉 range suffix
+I2  inspection DTO 增加字段级 stored/logical/provenance（只读）
+I3  Sector Inspector 将 `Decoded` 改为 `Sector decoded`
+I4  有可靠字段变换时增加 `Field decoded` / `Transform`
+I5  更新 Help / USAGE 中对 Raw / Decode / Mixed 的术语说明
+I6  跑 inspect/tui 专项、fast/full；只读真实盘验收，不触发写盘
+```
+
+本章当前只记录计划。**不得在这个计划分支直接实现 I1～I6。**
+
+### 14.6 盘尾区域子节点必须按物理空间顺序、且不能用重叠兄弟节点表达
+
+当前截图中的盘尾树看起来“没有按顺序排列”，根因不是简单缺少 `sort_by(start_lba)`，而是 `tail_region()` 的建模方式本身存在层级问题。
+
+当前 `src/application/inspect_tree.rs::tail_region()` 先创建一个覆盖**完整 2048 扇区盘尾窗口**的子节点：
+
+```text
+盘尾取证窗口 [total-2048 .. total-1]
+```
+
+然后又把两个位于这个窗口内部的已知范围作为它的**兄弟节点**追加：
+
+```text
+盘尾历史 9 扇区镜像 [total-1024 .. total-1016]
+盘尾 end-4 restore-node [total-4 .. total-4]
+```
+
+因此三个 child 的 `start_lba` 实际已经是递增的，但第一个 child 覆盖了后两个 child。问题是**兄弟节点彼此重叠**，所以视觉上无法形成“从前到后”的物理磁盘序列。
+
+以当前截图 `total_sectors = 15728640` 为例：
+
+```text
+当前：
+盘尾取证窗口              [15726592..15728639]
+盘尾历史 9 扇区镜像       [15727616..15727624]   # 被上一行包含
+盘尾 end-4 restore-node   [15728636..15728636]   # 也被上一行包含
+```
+
+这不是理想的物理拓扑树。`盘尾取证窗口` 本质上是“盘尾区域为什么被采集”的**覆盖/证据概念**，不是应与内部特殊扇区并列的互斥 extent。
+
+目标 topology 应把同一层 child 规范化成**不重叠、按 LBA 连续排列**的物理区段，例如：
+
+```text
+盘尾区域 [15726592..15728639]
+  ├─ 盘尾未分类              [15726592..15727615]
+  ├─ 盘尾历史 9 扇区镜像     [15727616..15727624]
+  ├─ 盘尾未分类              [15727625..15728635]
+  ├─ 盘尾 end-4 restore-node [15728636]
+  └─ 盘尾未分类              [15728637..15728639]
+```
+
+`盘尾取证窗口 = 最后 2048 扇区` 这一事实仍需保留，但不再作为与内部 extents 重叠的 sibling。可采用以下任一等价设计，实施时优先选择模型最简洁的一种：
+
+1. `盘尾区域` 本身就是该 2048-sector forensic window，Overview/metadata 中注明“取证窗口”；或
+2. 在 `盘尾区域` 下增加一个非物理范围的 `Group/Structure` 说明“取证窗口”，但真正的物理 Extent children 仍必须互斥连续。
+
+关键约束：
+
+- **物理 Tree 的同级 Extent 必须按 `start_lba ASC`，且不得 overlap；**
+- 一个 sector 可以在语义分类 API 中同时属于多个角色，例如 `TailMetadataMirror + DeviceTailWindow`；这种多重 membership 可以继续由 `inspect_target::regions_for_lba()` 保留；
+- 但 Tree 的物理空间表示必须选一个 primary segmentation，次级“被某证据窗口覆盖”的关系通过 annotation/group/metadata 表达，不能制造重叠 sibling；
+- `盘尾历史 9 扇区镜像` 和 `end-4 restore-node` 的真实 LBA、协议意义、备份/恢复用途不变；
+- 不改变 `DEVICE_TAIL_WINDOW_SECTORS=2048`、`TAIL_METADATA_MIRROR_OFFSET_SECTORS=1024`、`TAIL_METADATA_MIRROR_SECTORS=9`、`TAIL_END4_MIRROR_OFFSET_SECTORS=4` 等已验证常量；
+- UI 仍使用闭区间显示，内部继续使用 `[start, end_exclusive)`。
+
+需要新增的 topology 不变量：
+
+```text
+对任何表示物理空间分割的 Materialized children：
+  child[i].start_lba <= child[i+1].start_lba
+  child[i].end_exclusive <= child[i+1].start_lba
+
+对要求完整覆盖 parent 的 Region：
+  first.start_lba == parent.start_lba
+  child[i].end_exclusive == child[i+1].start_lba
+  last.end_exclusive == parent.end_exclusive
+```
+
+盘尾专项回归至少覆盖：
+
+1. 15,728,640-sector 示例严格得到上述五段顺序；
+2. 9-sector mirror 前后 gap 边界无 off-by-one；
+3. `end-4` 后仍保留最后 3 个 sector 的未分类区段；
+4. 同级物理 children 无 overlap；
+5. 所有 child 合集完整覆盖盘尾 parent；
+6. `regions_for_lba()` 对镜像区/end-4 仍可同时返回 forensic tail membership，不因 Tree 去重丢失语义；
+7. `gl` 跳转、搜索、lazy sector materialization 仍能精确落到对应物理 span；
+8. 备份元数据中的 forensic-tail、historical mirror、restore-node evidence 不改变。
+
+因此该问题应作为后续实现中的独立步骤加入：
+
+```text
+I2a  重构 tail topology：将重叠 sibling extents 归一化为按 LBA 连续的 primary spans，保留 secondary evidence membership
+```
+
+它属于 Inspect topology/UI 表达修正，不涉及任何盘面协议或写盘行为。
+
+### 14.7 节点概览与节点详情重新分工：Overview 看结论，Detail 看证据
+
+当前两个 Pane 的信息架构不清晰：Overview 主要重复 `节点/类型/范围/Sector count/大小/状态/Decoder` 这类结构元数据，而 Sector 的真正语义字段几乎全部堆进 Detail。结果是用户选中 LBA8 后，第一眼看不到“这个扇区最重要的信息是什么”；Detail 又只有 `字段 / 值 / 分组` 三列，缺少 offset、长度、原始表示、状态等取证维度。
+
+目标原则：
+
+```text
+Overview = 回答“这是什么、是否正常、最重要的值是什么”
+Detail   = 回答“所有字段在哪里、占多少字节、原始/解码值是什么、证据状态是什么”
+Hex      = 回答“具体每个字节长什么样”
+```
+
+三层必须互补，不能重复堆同一批信息。
+
+#### 14.7.1 Overview 改为语义摘要，不再以通用元数据为主体
+
+Overview 首屏应优先容纳 3～6 个用户真正关心的语义结论，通用范围信息压成一行即可。
+
+统一结构建议：
+
+```text
+┌ 节点概览 · LBA8 ─────────────────────────────┐
+│ 设备身份与电子标签                           │
+│ ✓ 已识别 · canonical LBA8 · A6B0 prefix      │
+│ LBA 8 · 512 B · byte 0x1000..0x11FF          │
+│                                               │
+│ [身份]                                        │
+│ UsbOnlyInfo      140225993400000000            │
+│ HostHardinfo     0x00000000 · current-zero    │
+│                                               │
+│ [电子标签]                                    │
+│ <从 ELABEL children 提取的关键键值，最多若干> │
+│                                               │
+│ [版本 / 写入]                                 │
+│ Tool              01 00 00 01                 │
+│ Lab               0x00000222                  │
+│ writeTime         12345678                    │
+│                                               │
+│ [存储布局]                                    │
+│ logical 0x... B · encrypted prefix ... B      │
+│ raw tail ... B                                │
+│                                               │
+│ 无异常                                        │
+└───────────────────────────────────────────────┘
+```
+
+这里的重点不是固定这些具体排版字符，而是建立**信息优先级**：
+
+1. 第一行：用户可读的节点语义名，例如 `LBA8 · 设备身份与电子标签`，而不是只显示 `Sector`；
+2. 第二行：解析状态 + canonical decoder/profile，一眼确认“能不能信”；
+3. 第三行：LBA/范围/大小压缩成一行，不再占 5～7 行；
+4. 中间：按该节点语义选出的关键字段；
+5. 最后：异常、候选 profile、不确定性；正常的固定零/保留字段不要占 Overview 主体。
+
+Overview 的一条重要规则：**正常且固定的协议校验字段默认折叠成状态，不逐项展示。** 例如 LBA8 的 `LLGB magic`、`MacInfo=0`、`UsbOnlyInfo suffix=0`、`reserved header=0`、`ELABEL offset=0x80` 都属于完整 Detail 的证据，但正常时不应挤占 Overview；只有异常时才提升为警告。
+
+#### 14.7.2 LBA8 的建议摘要字段
+
+LBA8 当前 canonical parser 已提供足够数据，可直接建立高价值摘要，不需要 TUI 猜协议。
+
+一级摘要（默认始终展示）：
+
+```text
+语义             设备身份与电子标签
+解析状态         已识别 / 未唯一确定 / 缺 device_id
+UsbOnlyInfo      当前解析值 + profile
+HostHardinfo     0x........ + source/profile
+ELABEL           关键键值摘要，或“已解析 N 项”
+```
+
+二级摘要（空间足够时展示）：
+
+```text
+Tool version
+Lab version
+writeTime         只按当前已证实表示显示，不擅自转日期
+logical length
+A6B0 encrypted prefix length
+raw tail length
+```
+
+仅异常时展示：
+
+```text
+magic 不匹配
+UsbOnlyInfo profile 多候选
+host-hardinfo profile 多候选
+固定零字段出现非零
+ELABEL terminator/offset 异常
+其他 parser 拒绝原因
+```
+
+明确不应在 Overview 展开的内容：
+
+```text
+64B reserved header 的十六进制全文
+UsbOnlyInfo suffix 的16B零
+raw tail backing 全量 hex
+encrypted backing 全量 hex
+每个 ELABEL 子字段的完整列表
+```
+
+这些全部属于 Detail/Hex。
+
+#### 14.7.3 Detail 改成真正的“字段证据表”
+
+当前 Detail 只有：
+
+```text
+字段 | 值 | 分组
+```
+
+不足以承担“所有字段细节”的职责。目标表建议至少包含这些逻辑列：
+
+```text
+Offset | Len | Group | Field | Value | Raw/Stored | Type | Status
+```
+
+宽屏优先显示：
+
+```text
+Offset  Len   Field                    Value                  Status
+0x000   4     LLGB magic               LLGB                   Known
+0x004   4     logical length           ...                    Known
+0x008   4     tool version             01 00 00 01            Known
+0x00C   4     lab version              0x00000222             Known
+0x010   4     writeTime                ...                    Known
+0x014   4     HDSerialInfo/MyHardinfo  0x00000000             Known
+0x018   6     MacInfo                  00 00 00 00 00 00      Known
+0x01E   16    UsbOnlyInfo              ...                    Known
+...
+```
+
+通过 `h/l` 横向列 viewport 继续访问：
+
+```text
+Group
+Raw/Stored
+Decoded/logical
+Type
+Status
+Transform / provenance
+```
+
+这与 14.2～14.4 的多层 decode 计划统一：Detail 应明确区分 `stored/raw representation` 与 `logical value`，不能把两者塞进同一个“值”列。
+
+#### 14.7.4 Detail 从“滚动表”升级为“可选字段表”
+
+Detail 需要逻辑选中行，但**禁止再新增独立 `detail_selected_row` 状态**；必须复用第 13 章已经建立的 `PaneViewport.selected`：
+
+```text
+j/k          选择上一/下一字段
+Ctrl-u/d     半页移动并保持选择
+PageUp/Down  整页
+ gg/G        首/末字段
+h/l          横向列 viewport
+Enter        打开 Sector Inspector，并定位/Pin 到该 Field 起始 byte
+o            展开/折叠当前字段 children（如 ELABEL 子项）
+y            复制 semantic value
+Y            复制 raw/stored bytes
+```
+
+这样 Detail 不只是“能滚到底”，而是一个真正可导航的字段检查器。选中行使用统一 selection token，不能只靠滚动位置猜当前字段。
+
+对于 `ELABEL` 这类有 children 的字段：
+
+```text
+▸ ELABEL
+```
+
+按 `o` 后：
+
+```text
+▾ ELABEL
+    KeyA    ValueA
+    KeyB    ValueB
+    ...
+```
+
+默认折叠，避免几十个子项淹没其它字段。
+
+#### 14.7.5 引入 UI-neutral 的 Summary 模型，禁止 renderer 按 LBA 写 if/else
+
+不能在 `render.rs` 中写：
+
+```text
+if lba == 8 { 显示 UsbOnlyInfo ... }
+```
+
+建议 application/inspect 层新增只读摘要 DTO，名称可实现时调整：
+
+```rust
+InspectNodeSummary {
+    title,
+    subtitle,
+    status,
+    location,
+    sections: Vec<SummarySection>,
+    alerts: Vec<SummaryAlert>,
+}
+
+SummarySection {
+    title,
+    items: Vec<SummaryItem>,
+}
+
+SummaryItem {
+    label,
+    value,
+    importance,
+    source_range,
+    status,
+}
+```
+
+由 canonical parser / inspect adapter 决定哪些字段是摘要字段；TUI renderer 只负责排版、颜色和 viewport。
+
+`importance` 至少可区分：
+
+```text
+Primary    首屏关键语义
+Secondary  空间足够时展示
+Diagnostic 只在异常或显式展开时展示
+```
+
+这样未来 LBA0～12、LCE、Partition、Region 都能各自提供摘要，但仍共享同一个 Overview renderer。
+
+#### 14.7.6 各节点类型的 Overview 语义
+
+不要只给 LBA8 特判，最终统一为：
+
+```text
+Device:
+  型号/容量/设备身份/当前盘型/协议识别状态
+
+Region / Extent:
+  语义角色/范围/大小/覆盖状态/关键子区域
+
+Partition:
+  type/起点/大小/文件系统/NeedEncrypt/物理明密文状态/FileKey 状态
+
+Sector:
+  本 LBA 的协议语义 + 关键字段 + decoder/profile + 异常
+
+Field:
+  字段语义值/范围/类型/状态/变换摘要
+
+UnknownRange:
+  范围/大小/为何未知/已有证据，禁止伪造摘要
+```
+
+#### 14.7.7 Overview 与 Detail 的视觉规则
+
+- Overview 使用“短 label + 对齐 value”的 key/value 版式，不用长篇 prose；
+- 每个 section 之间空一行或轻分隔，不使用大量高饱和颜色；
+- `Primary` 值用普通前景或轻 accent，状态/警告才使用 success/warning/error；
+- 固定正常值不反复绿色高亮，避免满屏“正常”造成噪音；
+- Detail 是密集表格，颜色只表达 status/type/selection，不给每列随机配色；
+- 长 value 必须截断并允许横向 viewport/Enter 深入，禁止把整行撑爆；
+- Overview/Detail 都继续拥有独立 vertical viewport，宽/窄屏状态不丢失。
+
+#### 14.7.8 回归门禁
+
+至少新增：
+
+1. 选中 LBA8 时 Overview 首屏必须出现 UsbOnlyInfo、HostHardinfo、解析/profile 状态；
+2. LBA8 正常固定零 reserved 字段不占 Overview 主体；
+3. profile 多候选或 parser 异常必须进入 Overview alerts；
+4. Overview 不复制完整 raw backing；
+5. Detail 必须包含所有 canonical `InspectField`，数量与模型一致；
+6. Detail 每个字段都能看到 offset + length；
+7. 有 stored/logical 两层表示的字段可分别查看；
+8. `j/k` 能选择所有 Detail 行且不会改变 Tree selection；
+9. `Enter` 从 Detail 选中字段精确进入 Sector Inspector 对应 byte；
+10. children 展开/折叠不会丢失父字段选择；
+11. resize 后 Overview scroll、Detail selection/scroll/column viewport 均保留；
+12. Overview 摘要生成位于 inspect/application 层，源码门禁禁止 `render.rs` 出现 LBA-specific 业务判断；
+13. LBA0～12/LCE canonical parser 与 golden tests 不改变。
+
+后续实现顺序增加：
+
+```text
+I2b  建 InspectNodeSummary / SummarySection / SummaryItem，只读语义摘要模型
+I2c  先为 LBA8 建 summary adapter 与失败测试，再覆盖其它 LBA/Partition/Region
+I3a  Overview renderer 改为统一 sectioned key/value dashboard
+I3b  Detail 增加 offset/len/stored/logical/type/status/provenance 列
+I3c  Detail 增加 selected row、Field→Hex、children 折叠
+```
+
+最终标准：**Overview 让用户 3 秒内看懂当前节点最重要的信息；Detail 能完整回答每个字段在哪里、是什么、原始字节如何、如何解码、证据状态如何；Hex 再负责逐字节核验。**
+
+### 14.8 设备列表与备份列表统一身份字段契约
+
+当前 Devices 与 Backups 两张表的信息层级不一致。设备列表已经显示：
+
+```text
+设备 | 容量 | 总线 | VID:PID | ven_prod | onlyid | 姓名 | 部门 | 盘型
+```
+
+备份列表却只有：
+
+```text
+选 | # | 时间 | 盘型 | 姓名 | 部门 | 健康
+```
+
+因此同一块盘从“设备”切到“备份”后，最重要的硬件身份信息消失，无法快速确认这份备份到底属于哪块物理盘。
+
+调查确认这不是备份格式缺数据：当前 `.edpb` manifest / `BackupMeta` 已经包含 `secs / vid / pid / device_id / onlyid`，Inspect 也已经能从 `BackupMeta` 构造 `VID/PID/size/onlyid`。真正的问题是 `scan_backup_workspace()` 构造 `BackupWorkspaceItem` 时只向 TUI 暴露了 `onlyid/user/dept/盘型/健康`，把 `vid/pid/secs/device_id` 丢在了 application row 之外。
+
+#### 14.8.1 定义共享 Identity Columns
+
+设备与备份不应各自发明一套列。定义一组**完全同名、同顺序、同格式化规则**的共享身份列：
+
+```text
+容量 | VID:PID | 型号 | onlyid | 姓名 | 部门 | 盘型
+```
+
+其中：
+
+- `容量`：统一按磁盘总容量显示，来源分别是 `Row.size` 与 `BackupMeta.secs * 512`；
+- `VID:PID`：统一 `vvvv:pppp` 表示；
+- `型号`：沿用当前 `device_ven_prod(device_id)` 的语义，但把面向用户的列名从实现味很重的 `ven_prod` 改成“型号”；
+- `onlyid`：大小写命名保持当前项目习惯，不改协议字段语义；
+- `姓名 / 部门`：都来自已解析 ownership；
+- `盘型`：严格只显示 `DiskProvisionKind`，不能再混入“读取异常/需要权限”等运行状态。
+
+共享列必须由一个 UI-neutral row/display adapter 或共享 formatter 产生，禁止 Devices/Backups 分别格式化 `VID:PID`、容量、型号、onlyid。
+
+#### 14.8.2 两张表的最终列顺序
+
+设备表建议改为：
+
+```text
+设备 | 容量 | VID:PID | 型号 | onlyid | 姓名 | 部门 | 盘型 | 总线 | 状态
+```
+
+备份表建议改为：
+
+```text
+选 | # | 时间 | 容量 | VID:PID | 型号 | onlyid | 姓名 | 部门 | 盘型 | 健康
+```
+
+这样中间这一段：
+
+```text
+容量 | VID:PID | 型号 | onlyid | 姓名 | 部门 | 盘型
+```
+
+在两个工作区中完全一致。
+
+设备专属列：
+
+```text
+设备      当前系统 disk 编号
+总线      USB / 其它总线
+状态      可用 / 需要管理员权限 / 读取异常 / 非 USB
+```
+
+备份专属列：
+
+```text
+选        批量选择
+#         全局备份编号
+时间      备份创建/命名时间
+健康      EDPB 校验状态 / 大小异常
+```
+
+“盘型”和“状态”必须拆开。当前设备表最后一列标题虽然叫“盘型”，但 `device_status()` 在异常时会返回“需要管理员权限”“读取异常”等运行状态，这会破坏两张表的字段一致性。后续应：
+
+```text
+盘型 = provision_kind.short_name/full_name
+状态 = probe/access/support status
+```
+
+备份同理：
+
+```text
+盘型 = provision_kind
+健康 = container integrity
+```
+
+#### 14.8.3 BackupWorkspaceItem 补齐身份字段，但不复制协议真相源
+
+`BackupWorkspaceItem` 后续至少需要暴露：
+
+```text
+size_bytes: Option<u64>
+vid: Option<String>
+pid: Option<String>
+device_id: Option<String>
+onlyid: Option<String>   # 已有
+```
+
+值直接来自已验证 `BackupMeta`：
+
+```text
+meta.secs       -> size_bytes = secs * 512（checked_mul）
+meta.vid        -> vid
+meta.pid        -> pid
+meta.device_id  -> device_id
+meta.onlyid     -> onlyid
+```
+
+不允许 TUI 自己重新打开 `.edpb` 或重新解析 manifest；备份扫描仍是唯一 read-side 数据入口。
+
+若未来进一步收敛，可以定义共享：
+
+```text
+WorkspaceIdentity {
+    size_bytes,
+    vid,
+    pid,
+    device_id,
+    onlyid,
+    user,
+    dept,
+    provision_kind,
+}
+```
+
+`Device Row` 与 `BackupWorkspaceItem` 各自提供这个 projection。这样“设备/备份字段统一”成为模型契约，而不是两个 renderer 恰好写了相同字符串。
+
+#### 14.8.4 缺失值必须诚实显示，不猜测
+
+对无法取得的数据统一显示：
+
+```text
+—
+```
+
+规则：
+
+- `meta == None` 的损坏/无法验证 `.edpb`：容量、VID/PID、型号、onlyid 都显示 `—`；
+- `secs == None`：容量显示 `—`，不能拿文件大小冒充磁盘容量；
+- `device_id` 缺失或无法提取 `ven_/prod_`：型号显示 `—`；
+- onlyid 未知：`—`；
+- VID 或 PID 单独缺失时整个 `VID:PID` 显示 `—`，不显示半截 `xxxx:`；
+- 禁止为了填表从文件名猜出一个“看起来合理”的值覆盖 manifest/verified metadata；
+- 健康异常的备份仍保留在列表中，并明确显示健康状态，不能因为身份字段缺失而从 UI 隐藏。
+
+旧文件名解析器可继续服务兼容/识别流程，但 TUI 身份信息的优先级必须是：
+
+```text
+verified EDPB manifest / canonical metadata
+> 已验证协议派生值
+> 缺失
+```
+
+不得把未经验证的文件名文本提升为与 manifest 同等级的事实。
+
+#### 14.8.5 两边详情侧栏也按同一顺序展示身份
+
+当前设备详情和备份详情顺序也不同。统一为：
+
+```text
+盘型
+容量
+VID:PID
+型号
+device_id
+onlyid
+姓名
+部门
+```
+
+然后追加来源特有信息：
+
+设备：
+
+```text
+设备 diskN
+总线
+当前状态
+已有备份 N 份
+```
+
+备份：
+
+```text
+备份时间
+健康
+文件名
+备份编号
+```
+
+这样用户从设备切换到备份，视觉位置不会重新学习。
+
+#### 14.8.6 自适应列宽与横向 viewport
+
+因为统一后备份表会从 7 列扩展到 11 列，不能试图在窄终端一次塞下所有列。
+
+建议优先级：
+
+```text
+最高固定：
+设备表：设备、盘型
+备份表：选、#、盘型
+
+高优先级：
+容量、VID:PID、onlyid
+
+中优先级：
+型号、姓名、健康/状态
+
+低优先级：
+部门、总线、时间（时间对备份仍需可横向访问）
+```
+
+但**列的逻辑顺序不可因宽度改变**；AdaptiveTable 只决定当前 viewport 看哪些列，不得重新排序。
+
+两张表的共享列必须使用同一 `AdaptiveColumnSpec`，例如共享一个：
+
+```text
+identity_column_specs()
+```
+
+Devices/Backups 再在前后组合自己的专属列。这样同一个“onlyid”不会在设备表宽 12、备份表宽 7，造成切换时抖动。
+
+#### 14.8.7 搜索字段同步统一
+
+当前备份搜索只覆盖 `file_name/time/onlyid/user/dept/盘型`，新增身份字段后必须同步加入：
+
+```text
+VID
+PID
+VID:PID
+型号/device_id
+容量文本
+onlyid
+姓名
+部门
+盘型
+文件名/时间（备份专属）
+```
+
+设备搜索同样使用共享 identity text formatter，再追加 `diskN/proto/status`。
+
+要求：同一个 VID/PID、onlyid、姓名或部门查询，在 Devices 与 Backups 标签中都能命中对应记录。
+
+#### 14.8.8 排序与“设备 ↔ 备份”关联
+
+本轮不强制增加交互式列排序，但要固定默认语义：
+
+- Devices 保持系统扫描稳定顺序/当前磁盘编号顺序；
+- Backups 保持当前“最新备份优先”；
+- 不因为列统一改变现有编号、选择、删除、恢复语义。
+
+后续可增加“查看该设备备份”快捷过滤，但必须基于稳定身份匹配，不应仅用 `diskN`。建议关联键优先级：
+
+```text
+exact device_id + VID + PID + capacity + onlyid（可用字段组合）
+```
+
+具体关联规则需另行设计，不能在本项中凭 UI 列值拼字符串作为设备身份。
+
+#### 14.8.9 回归门禁
+
+至少新增：
+
+1. Devices 与 Backups 的共享列名、相对顺序完全一致；
+2. 备份表显示容量、VID:PID、型号、onlyid；
+3. 备份容量严格来自 `total_sectors * 512`，checked overflow；
+4. BackupWorkspaceItem 不要求 renderer 重新读取文件；
+5. 设备/备份的 `VID:PID` formatter 为同一实现；
+6. 设备/备份的型号 formatter 为同一实现；
+7. 盘型列只包含 `DiskProvisionKind`，设备访问错误进入独立“状态”列；
+8. 无 metadata 的损坏备份显示 `—` 而不是猜值，并保留“EDPB ✗/大小异常”；
+9. 搜索 VID/PID、onlyid、姓名、部门时两个工作区行为一致；
+10. 120 列、80 列、窄屏下均可通过 `h/l` 访问所有列；
+11. 横向滚动不改变 row selection；
+12. Devices/Backups 共享列使用共享 column spec，源码门禁防止再次漂移；
+13. 详情侧栏身份字段顺序一致；
+14. 备份全局编号、时间倒序、批量选择、Inspect/Verify/Restore/Delete 行为不变；
+15. 设备扫描与备份扫描不增加额外同步 I/O。
+
+后续实现顺序增加：
+
+```text
+I2d  扩展 BackupWorkspaceItem，透传 size/VID/PID/device_id
+I2e  建共享 WorkspaceIdentity projection + formatter + shared column specs
+I3d  重排 Devices 表为“专属前缀 + 共享身份列 + 状态”
+I3e  扩展 Backups 表为“选/#/时间 + 共享身份列 + 健康”
+I3f  统一两侧详情 sidebar 与搜索索引
+I3g  增加宽度/横滚/缺字段/损坏备份回归测试
+```
+
+最终标准：**同一块盘在“设备”和“备份”两个标签里，容量、VID:PID、型号、onlyid、姓名、部门、盘型必须出现在相同顺序、使用相同格式；工作区只额外展示自己独有的运行状态或备份管理信息。**
+
+### 14.9 磁盘布局信息重排：表格化对齐，分区处理状态置于视觉第一优先级
+
+当前制盘页的磁盘布局 Pane 存在两个可读性问题：
+
+1. `DiskLayoutModel::legend_lines()` 和 `provision_layout_editor_lines()` 大量使用 `·` 拼接信息，导致名称、LBA、容量、状态随着文本长度漂移，用户无法纵向比较；
+2. 三个业务分区最关键的“可保留 / 重建”被放在每行末尾且与其它普通文本同级，视觉权重过低。
+
+本项的目标不是增加更多文字，而是把已有信息重新分层：**磁盘几何用对齐列展示，分区动作单独成为固定状态列，并在选中分区详情中再次强调原因。**
+
+#### 14.9.1 顶部完整磁盘图例也取消 `·` 分隔
+
+当前类似：
+
+```text
+EDP 主协议区 [0..12] · 13 sectors · <0.01%
+交换区       [...]    · ... sectors · 86.52%
+```
+
+改为对齐列：
+
+```text
+区域                      LBA 范围                 扇区数        占比
+■ EDP 主协议区            [0..12]                       13      <0.01%
+■ 协议后保留区            [13..62]                      50      <0.01%
+■ 启动区                  [63..20479]                20417       0.13%
+■ 交换区                  [20480..13628690]       13608211      86.52%
+■ 保密区                  [13628691..15725842]      2097152      13.33%
+■ LCE                     [15725843..15725848]            6      <0.01%
+■ LCE 后保留区            [15725849..15726591]          743      <0.01%
+■ 盘尾区域                [15726592..15728639]         2048       0.01%
+```
+
+这部分仍由共享 `DiskLayoutModel` 提供，Inspect 与 Provision 继续同源；不能只在 Provision 私有实现。
+
+#### 14.9.2 制盘编辑区改成“磁盘摘要 + 分区处理表 + 当前分区详情”
+
+建议布局：
+
+```text
+磁盘
+设备        disk4
+总容量      7.50 GiB
+总扇区      15728640
+可分区      LBA 63–15725842
+已分配      7.50 GiB
+未分配      0 sector
+
+分区布局
+分区       LBA 范围                  容量          处理
+启动区     63–20479                  10.0 MiB       ✓ 候选保留
+交换区     20480–13628690            6.49 GiB       ✓ 候选保留
+保密区     13628691–15725842         1.00 GiB       ⚠ 需重建
+
+当前分区  保密区
+处理      ⚠ 需重建
+原因      容量/起点/物理加密属性与原分区不一致
+大小      1.00 GiB   (2097152 sector)
+最大可设  1.00 GiB   (2097152 sector)
+还能增加  0 sector
+限制      可分区末端 LBA 15725842；后续未锚定分区可自动后移
+
+✓ 布局无重叠、未越界
+```
+
+不再出现：
+
+```text
+启动区  LBA ... · 10.0 MiB · 可保留
+```
+
+这类“靠符号分词”的自由文本。
+
+#### 14.9.3 分区状态必须是独立、固定宽度、高权重列
+
+状态列固定在分区表最右侧，并且不参与普通 muted 文本风格。
+
+编辑阶段当前只完成 geometry/profile 候选判断，因此文案必须诚实区分“候选”与最终执行计划：
+
+```text
+✓ 候选保留    # geometry/profile 匹配，但最终 plan 尚未完成读盘校验
+⚠ 需重建      # 已知当前编辑目标不能 PreserveExact
+```
+
+进入 Review、`PartitionAction` 已经正式生成后再使用：
+
+```text
+✓ 保留        # PreserveExact
+⚠ 重建        # Rebuild
+```
+
+不能在编辑阶段提前把 `candidate == true` 写成最终“保留”，避免用户误以为已经完成 FileKey/readback 等最终安全判断。
+
+视觉规则：
+
+- `候选保留 / 保留`：`success` token + bold；
+- `需重建 / 重建`：`warning` token + bold；如果意味着已有数据必然不能原样保留，Review 中可升级为 `danger`；
+- 不使用高饱和整行背景色，避免破坏当前低饱和主题；
+- 状态只给状态单元格着色，不把整行涂绿/红；
+- 当前选中分区仍使用统一 selection 样式，状态颜色在 selected 状态下仍应可辨识。
+
+#### 14.9.4 “为什么重建”只在当前分区详情中展开
+
+表格主体只保持短状态：
+
+```text
+✓ 候选保留
+⚠ 需重建
+```
+
+当用户选中分区后，下方详情给出结构化原因。例如 PreserveExact 候选必须比较的现有条件：
+
+```text
+分区类型       一致 / 不一致
+起点 LBA       一致 / 已改变
+扇区数         一致 / 已改变
+物理加密状态   一致 / 已改变
+```
+
+可进一步归纳成一行用户文案：
+
+```text
+原因  起点已改变，因此不能原样保留原数据
+```
+
+具体 reason 必须来自 planner/profile comparison，不允许 renderer 猜原因。
+
+这样用户一眼先看动作，需要时再看证据，而不是每一行都塞成长句。
+
+#### 14.9.5 引入 typed layout rows，停止让 renderer 解析字符串前缀
+
+当前 `DiskLayoutPane.details: &[String]` 只能通过：
+
+```text
+starts_with('✗')
+starts_with('✓')
+starts_with("当前:")
+```
+
+判断颜色，这已经限制了结构化显示。
+
+建议把共享磁盘布局 Pane 改成 typed presentation model，例如：
+
+```text
+DiskLayoutPaneModel
+  summary_rows: Vec<KeyValueRow>
+  region_rows: Vec<DiskRegionRow>
+  partition_rows: Vec<PartitionLayoutRow>
+  selected_detail: Vec<KeyValueRow>
+  notices: Vec<NoticeRow>
+```
+
+其中：
+
+```text
+PartitionLayoutRow {
+    role,
+    start_lba,
+    end_lba,
+    sector_count,
+    size_text,
+    disposition,
+    reason,
+}
+
+PartitionDisposition {
+    PreserveCandidate,
+    RebuildRequired,
+    PreserveExact,
+    Rebuild,
+}
+```
+
+renderer 只根据 enum 选 theme token，不根据中文字符串决定业务含义。
+
+#### 14.9.6 对齐实现不要靠手工空格
+
+禁止通过：
+
+```text
+format!("{:<10} {:<24} ...")
+```
+
+硬编码 ASCII 宽度，因为中文、全角字符和终端 cell width 会导致再次错位。
+
+优先复用现有 `tui::table_layout`：
+
+```text
+TableKind::DiskRegions
+TableKind::ProvisionPartitions
+```
+
+通过 `unicode-width` 计算真实 cell width，和 Devices / Backups / InspectFields 使用同一套 `AdaptiveTableLayout`。
+
+建议逻辑列：
+
+```text
+DiskRegions:
+区域 | LBA 范围 | 扇区数 | 占比
+
+ProvisionPartitions:
+分区 | LBA 范围 | 容量 | 处理
+```
+
+`LBA 范围`、`扇区数`、`容量` 推荐右对齐数值视觉；如果现有 Table 不支持 cell alignment，可先统一左对齐但固定列宽，后续再补 numeric alignment，不能退回 `·` 分隔。
+
+#### 14.9.7 窄屏退化
+
+宽屏：完整四列表格。
+
+中等宽度：仍保持表格，但可以通过 `h/l` 横向 viewport 查看次要列；**“分区”和“处理”应 pinned**，确保用户始终能看到哪一行会保留、哪一行会重建。
+
+很窄终端不能把状态隐藏到横向页末。退化为每分区两行：
+
+```text
+启动区                         ✓ 候选保留
+LBA 63–20479      10.0 MiB
+
+交换区                         ✓ 候选保留
+LBA 20480–13628690  6.49 GiB
+
+保密区                         ⚠ 需重建
+LBA 13628691–15725842  1.00 GiB
+```
+
+仍然不用 `·`。
+
+#### 14.9.8 顶部摘要也改成 key/value 对齐
+
+截图中当前：
+
+```text
+disk4  整盘 7.50 GiB · 15728640 sector
+可分区 LBA ... · 7.50 GiB
+已分配 7.50 GiB · 未分配 0 sector
+```
+
+改成：
+
+```text
+设备      disk4
+整盘      7.50 GiB        15728640 sector
+可分区    LBA 63–15725842 7.50 GiB
+已分配    7.50 GiB
+未分配    0 sector
+```
+
+如果横向空间充足，也可采用双 key/value 栅格，但 label/value 的起点必须对齐，不使用点号当布局系统。
+
+#### 14.9.9 回归门禁
+
+至少新增：
+
+1. Provision 分区表固定存在 `分区 / LBA 范围 / 容量 / 处理` 四个逻辑列；
+2. 三个业务分区的 `处理` 状态始终可见，不因横向 viewport 被隐藏；
+3. 编辑阶段使用 `候选保留 / 需重建`，Review 阶段使用 `保留 / 重建`，状态语义不混淆；
+4. `PreserveExact` 与 `Rebuild` 的 Review UI 必须使用不同 semantic style；
+5. renderer 不再通过中文字符串前缀推断 disposition；
+6. layout/provision 主视图不再使用 `·` 作为字段布局分隔符；
+7. DiskLayout legend 改为对齐列，Inspect 与 Provision 共享；
+8. 中文分区名、超长 LBA、GiB/MiB 混合时列仍按 terminal cell width 对齐；
+9. 120/100/80/60 列宽均有 snapshot/contract 测试；
+10. 窄屏下每个分区状态仍在首行可见；
+11. 选中分区时详情区显示 disposition reason；
+12. 几何编辑后状态实时更新，但不触发额外磁盘 I/O；
+13. 当前分区容量限制、最大可设、还能增加、边界限制等现有信息不得丢失；
+14. `DiskLayoutModel` 的完整覆盖/无重叠语义和写盘 planner 不发生改变。
+
+后续实现顺序增加：
+
+```text
+I2f  定义 PartitionDisposition 与 typed DiskLayoutPane rows
+I3h  DiskLayout legend 改用共享自适应表格，移除 `·` 布局
+I3i  Provision 编辑区改为摘要 + 分区状态表 + 当前分区详情
+I3j  Review 复用同一 disposition renderer，显示最终 PreserveExact/Rebuild
+I3k  增加宽屏/窄屏/中文宽度/状态实时更新回归测试
+```
+
+最终标准：**用户不需要逐句阅读磁盘布局；扫一眼三行分区表，就能立即看出启动区、交换区、保密区分别是“候选保留/保留”还是“需重建/重建”，同时所有 LBA、容量、扇区数都纵向对齐可比较。**
+
+### 14.10 制盘执行过程：结构化进度 + 实时日志 + 慢盘可观测性
+
+当前制盘 `Running` 阶段的可观测性不足。审计确认：
+
+- `request_provision_write()` 在真正调用 `commit_provision_on_disk()` 前只发送**一次** `ProvisionProgress { message }`；
+- `TaskUpdates.provision_progress` 只保存一条字符串，`tui/mod.rs` 收到后直接覆盖 `ProvisionState.message`；
+- `ProvisionState` 没有阶段、计数、开始时间、最近活动时间或日志缓冲；
+- `ProvisionStage::Running` UI 最终只显示一条“正在写入…”消息，因此某些慢 U 盘在 `sync/read/write/reopen` 阻塞数十秒时，界面看起来与卡死无异；
+- 底层实际上已有明确的可观测边界：锁卷/重开/身份复核、事务写前镜像、按 stage 写 sector、sync、逐扇区 readback、协议复核、逐分区格式化、格式化 readback、失败后的最多 3 次 rollback。
+
+所以不能继续用“更新一行 message”的方式解决。应建立**application 层 typed progress event**，CLI/TUI 共用同一事件语义；TUI 再在此基础上维护实时运行状态与滚动日志。
+
+#### 14.10.1 Running 页面目标
+
+宽屏建议：
+
+```text
+┌ 制盘执行 · disk4 ─────────────────────────────────────┐
+│ 总进度   63%  [━━━━━━━━━━━━━━━━━━━━────────────]       │
+│ 阶段     5 / 8   格式化交换区                         │
+│ 阶段进度 128 / 236 planned sectors   54.2%            │
+│ 当前     写入 LBA 20543                               │
+│ 速度     1.8 MiB/s   3520 sector/s                    │
+│ 已耗时   00:42.7     最近活动 0.2s 前                 │
+│ 状态     ◆ 正在执行安全事务                           │
+├ 实时日志 ─────────────────────────────────────────────┤
+│ 00:00.0  INFO  锁定并卸载 disk4                       │
+│ 00:00.8  OK    重开与硬件身份复核通过                 │
+│ 00:01.0  INFO  写前镜像 78 个 touched sectors         │
+│ 00:01.8  OK    写前镜像完成                           │
+│ 00:02.0  INFO  写入协议/LCE 1/78                      │
+│ ...                                                    │
+│ 00:40.1  INFO  交换区格式化：写入 64/236             │
+│ 00:42.7  INFO  交换区格式化：写入 128/236            │
+└────────────────────────────────────────────────────────┘
+q / Esc / Ctrl-C 仍只登记退出请求；不会中断介质事务
+```
+
+核心要求：用户任何时候至少知道：
+
+```text
+现在在哪个阶段
+这个阶段完成多少
+整个计划大致完成多少
+当前具体在做什么
+最近一次真实 I/O 进展是什么时候
+事务是否仍然处于安全执行状态
+```
+
+#### 14.10.2 进度必须来自真实工作量，不能做假的时间百分比
+
+禁止用：
+
+```text
+运行 10 秒 = 30%
+运行 20 秒 = 60%
+```
+
+这对不同 U 盘完全没有意义。
+
+应按**计划中的真实操作单元**计数：
+
+事务写盘 `execute_write_transaction()` 已知 touched sector 数 `N`，可精确拆为：
+
+```text
+写前镜像读取    N
+正式写入        N
+正式读回校验    N
+```
+
+即主要可计数工作量为 `3*N` 个 sector I/O。`sync()`、锁卷、重开等没有合理 byte 百分比的操作作为独立 milestone，不伪造内部进度。
+
+分区格式化同理。当前 `execute_partition_format()` 实际只写 `built.image.sectors()` 中的 planned/sparse sectors，并随后读回这些 sectors，因此阶段总量必须使用：
+
+```text
+planned_sectors = built.image.sectors().len()
+```
+
+不能拿整个分区的 `partition sector_count` 冒充“将逐扇区写完整个 6.49 GiB 分区”，否则 UI 会严重误导用户。
+
+建议总体进度定义为 deterministic work units：
+
+```text
+固定 milestone + 已知 sector I/O units
+```
+
+百分比表示“计划工作单元完成度”，**不是 ETA，也不是按时间预测**。在 `sync/reopen` 等未知时长阶段，百分比保持不动，但阶段名、耗时和“等待设备响应”持续更新。
+
+#### 14.10.3 统一的阶段模型
+
+Official 制盘至少拆成：
+
+```text
+1  安全预检 / write-set 校验
+2  锁卷、卸载、读写重开
+3  硬件身份 / 容量 / serial / LBA3 复核
+4  touched sectors 写前镜像
+5  协议 + LCE / 数据事务写入
+6  sync + 事务 readback
+7  LBA0–12 / onlyid / 分区布局协议复核
+8  逐个选中分区格式化与文件系统 readback
+9  完成
+```
+
+Plain 至少拆成：
+
+```text
+1  安全预检
+2  锁卷、卸载、读写重开
+3  身份 / 容量复核
+4  touched sectors 写前镜像
+5  MBR / cleanup / 文件系统事务写入
+6  sync + readback
+7  MBR / LBA3 / LBA7 / LBA12 / Plain 状态复核
+8  完成
+```
+
+失败时切换到独立 Recovery 状态：
+
+```text
+回滚 1/3：写回镜像
+回滚 1/3：sync
+回滚 1/3：读回校验
+...
+```
+
+正常进度不能在回滚时倒退成 20%。一旦进入 rollback，UI 主状态改为：
+
+```text
+⚠ 正在回滚，勿拔盘
+```
+
+并显示独立 rollback progress。
+
+#### 14.10.4 application 层新增 typed event，不让 TUI 猜业务
+
+建议引入名称可调整的模型：
+
+```text
+ProvisionProgressEvent
+  RunStarted
+  StageStarted
+  StageProgress
+  StageCompleted
+  SyncStarted
+  SyncCompleted
+  RollbackStarted
+  RollbackProgress
+  RollbackCompleted
+  Warning
+  Completed
+```
+
+核心字段示意：
+
+```text
+operation_phase
+partition_role: Option<PartitionRole>
+current: Option<u64>
+total: Option<u64>
+unit: Sector | Byte | Item
+current_lba: Option<u64>
+message
+```
+
+同时提供 UI-neutral sink/callback：
+
+```text
+commit_provision_with_progress(..., sink)
+execute_write_transaction_with_progress(..., sink)
+execute_partition_format_with_progress(..., sink)
+```
+
+现有无 progress 的 API 可以作为 wrapper 调用 `NoopProgressSink`，避免 CLI/测试被迫依赖 TUI。
+
+**事件上报绝不能改变写盘正确性。** progress sink 的失败、TUI channel 暂时消费不及等情况，不能导致磁盘事务失败或跳过 rollback；安全事务仍以原有 I/O 返回值为唯一成败依据。
+
+#### 14.10.5 事件粒度要可见，但不能每 512B 把 UI channel 打爆
+
+规则：
+
+- stage start/end、sync start/end、错误、rollback start/end：始终发；
+- sector loop：按“时间或数量”节流；
+- 建议达到任一条件即发一次：
+  - 自上次事件 >= 100ms；或
+  - 新完成 >= 64 sectors；
+- 如果慢盘单个 sector 就超过 100ms，那么每完成一个 sector 都能自然产生可见更新；
+- 每个阶段最后一个单位必须强制发 `current == total`。
+
+TUI 不需要保存每个 sector 一行日志。高频 `StageProgress` 更新状态卡片即可；日志只追加 milestone 或按节流周期追加简化记录，避免上千行噪音。
+
+#### 14.10.6 “没有事件”时也不能看起来死机
+
+有些最慢的操作可能阻塞在：
+
+```text
+prepare_write / unmount
+reopen
+hardware probe
+sync
+单次设备 read/write
+```
+
+worker 被阻塞时无法凭空产生真实 I/O progress。因此 TUI 自己基于 monotonic clock 显示：
+
+```text
+阶段耗时       00:18.4
+最近活动       18.4s 前
+状态           等待设备响应…
+```
+
+例如：
+
+```text
+< 3s    正常显示
+>= 3s   “等待设备响应 3.2s”
+>= 15s  warning： “设备响应较慢，事务仍在执行，请勿拔盘”
+```
+
+阈值实现时可以常量化并测试，但不能因为“15 秒无事件”自动取消、重试或重开设备。**慢不等于失败。** 原有安全事务没有超时语义的地方，本项不能私自新增破坏性 timeout。
+
+“最近活动”必须表示最后一个真实 progress event 的时间，不得把动画 tick 当成设备活动。
+
+#### 14.10.7 速度显示只基于真实 completed units
+
+当连续收到 sector progress 时，使用最近几秒滑动窗口计算：
+
+```text
+sector/s
+KiB/s 或 MiB/s
+```
+
+无新 sector 完成时速度降为：
+
+```text
+—
+```
+
+而不是继续显示旧速度。
+
+对于 `reopen/sync/hardware probe` 这种没有 byte 单位的阶段，不显示伪造吞吐率。
+
+#### 14.10.8 实时日志使用 ring buffer，并保留到 Result 页面
+
+`ProvisionState` 增加独立运行态，而不是继续复用单个 `message`：
+
+```text
+ProvisionRunState
+  started_at
+  stage_started_at
+  last_activity_at
+  phase
+  overall_progress
+  stage_progress
+  current_action
+  rollback_state
+  log: VecDeque<ProvisionLogEntry>
+  follow_tail
+  # vertical/horizontal scroll 与 selected 不存这里，统一使用 PaneViewport
+```
+
+日志建议限制最近 200～500 条，防止长事务无限增长。被淘汰时保留一条：
+
+```text
+… 更早 324 条运行记录已折叠
+```
+
+`Result` 页面不能马上丢掉运行日志。成功后保留完整运行摘要；失败后自动把失败阶段、错误和 rollback 结果固定在顶部，下面仍可滚动查看此前日志。
+
+#### 14.10.9 日志内容与安全边界
+
+可以记录：
+
+```text
+阶段
+partition role
+LBA / LBA range
+planned sector count
+写入/读回计数
+sync 开始/结束
+目标 disk 编号
+身份复核通过/失败
+rollback attempt
+耗时
+错误文本
+```
+
+禁止记录：
+
+```text
+用户密码
+FileKey / 原始 key material
+PassInfo 密码内容
+完整 raw sector 数据
+任何为了日志而新增读取敏感内容的行为
+```
+
+日志只是现有事务的观察面，不能增加新的写盘动作，也不能为了“显示得更详细”重新读目标介质。
+
+#### 14.10.10 Running 页面交互
+
+写盘期间仍遵循现有安全规则：
+
+```text
+q / Esc / Ctrl-C  -> 只登记退出请求，安全检查点后处理
+```
+
+但允许纯 UI 的日志浏览：
+
+```text
+j/k          上下滚动日志
+Ctrl-u/d     半页
+PageUp/Down  整页
+G            回到日志末尾并恢复 follow-tail
+```
+
+用户手动向上滚动后暂停自动追尾；新日志继续进入 buffer，但不抢走阅读位置。按 `G` 恢复自动追尾。
+
+这些键只影响 viewport，绝不能触发/取消任何介质操作。
+
+#### 14.10.11 宽屏与窄屏
+
+宽屏：上方状态卡 + 下方日志 Pane。
+
+中等宽度仍纵向堆叠，状态信息压为：
+
+```text
+63%  阶段 5/8  格式化交换区
+128/236 sectors  00:42.7  最近活动 0.2s
+```
+
+窄屏优先保留：
+
+```text
+阶段名
+阶段 current/total
+总进度
+已耗时 / 最近活动
+最后 3～5 条日志
+```
+
+吞吐率、详细 LBA 可在空间不足时省略，但“当前阶段”和“最近活动”不能省略。
+
+#### 14.10.12 CLI 也应复用同一事件语义
+
+虽然本需求首先解决 TUI 慢盘无反馈，但 progress 事件应来自 application 层，因此 CLI 可以按行输出相同 milestone：
+
+```text
+[1/8] 锁定目标盘…
+[2/8] 重开并复核身份… OK
+[4/8] 写前镜像 78/78 sectors
+[5/8] 写入 64/78 sectors
+...
+```
+
+CLI 不需要实现 TUI 进度条，但不能拥有另一套独立阶段定义。
+
+#### 14.10.13 回归门禁
+
+至少新增：
+
+1. 当前“只发一次 ProvisionProgress 字符串”的路径被 typed events 取代；
+2. Official 与 Plain 都有确定的 stage start/end 序列；
+3. transaction 镜像/写入/readback 的 `current/total` 与真实 touched sectors 一致；
+4. partition format 的 total 使用 `built.image.sectors().len()`，禁止用整个分区容量冒充实际写入量；
+5. stage progress 单调、`0 <= current <= total`，最后必达 `total`；
+6. overall progress 单调且不超过 100%，不依赖 wall-clock 推算；
+7. `sync/reopen` 长时间无 progress 时 UI 显示 elapsed + last activity + 等待设备响应，不伪造百分比变化；
+8. progress sink 不得改变事务成功/失败/rollback 结果；
+9. 写盘失败进入 rollback 时有独立 Recovery 状态和 1/3～3/3 attempt 日志；
+10. rollback 成功/失败的最终安全含义与现有 `EXIT_ROLLED_BACK / EXIT_INTERMEDIATE` 完全不变；
+11. 日志 ring buffer 有上限，超限不会导致内存持续增长；
+12. 日志不包含密码、FileKey、raw sector payload；
+13. Running 中 `j/k/G` 只改变日志 viewport，不改变事务；
+14. 手工滚日志后不被新事件强制跳到底，`G` 恢复 follow-tail；
+15. Result 页面保留运行日志与失败阶段；
+16. 120/100/80/60 列宽都有 Running snapshot/contract 测试；
+17. 使用 fake slow `SectorDev` / fixed clock 测试“长时间等待设备响应”提示，不依赖真实 sleep 做慢测试；
+18. 原有卸载/锁卷、reopen 身份复核、atomic write、readback、rollback 安全门槛一个都不能删除或绕过。
+
+后续实现顺序增加：
+
+```text
+I2g  定义 ProvisionProgressEvent / phase / unit / NoopProgressSink
+I2h  transaction executor 增加镜像/写入/readback/rollback progress hook
+I2i  provision commit 增加锁卷/身份复核/protocol/format 阶段事件
+I3l  ProvisionRunState：计时、stage/overall progress、ring log、follow-tail
+I3m  Running 页面重做为状态卡 + 进度条 + 实时日志
+I3n  Result 页面保留 execution summary / log / rollback outcome
+I3o  CLI 复用同一 progress event milestone renderer
+I3p  fake slow device + fixed clock + rollback + 宽度回归门禁
+```
+
+最终标准：**即使某块 U 盘每次 sync 或单个 sector I/O 都非常慢，用户也不会再面对一块“完全不动”的界面；能明确看到当前阶段、真实完成量、已耗时、最近活动、滚动日志，以及失败时正在回滚到什么程度，同时不牺牲现有任何写盘安全门槛。**
+
+### 14.11 计划审计与统一修正（2026-09-26）
+
+本节是对 14.1～14.10 的实现前审计。**如本节与前文局部建议冲突，以本节为准。** 本轮只修正规划，不实现生产代码。
+
+本次重新基于 GitHub 当前 `main=26df947` 审计：第 13 章 P0～P8 仍为 COMPLETE；同时 PR #24 已合并，第 12 章已不再是纯计划——K0～K5、K7 已落地，K6 `Migrate` 仍 DEFERRED/fail-closed，K8 真实 USB 验收仍 PENDING。因此第 14 章必须建立在**现有 Pane/DiskLayout 基础设施 + 已实现的 Chapter 12 key-domain/RegionDisposition 模型**上，禁止再按旧基线重复设计。
+
+#### 14.11.1 问题一：第 14 章局部 Phase 编号已经失去全局顺序
+
+前文先出现：
+
+```text
+I0 / I1 / I2 / I3 / I4 / I5 / I6
+```
+
+后续又继续追加：
+
+```text
+I2a ... I2i
+I3a ... I3p
+```
+
+同时仓库更早章节已经使用过“Phase I2 / I3”表示 Inspect backend/topology 的已完成阶段。继续沿用这些编号会让后续执行者误以为是旧 Phase 的续项，也无法从字母顺序判断真实依赖。
+
+修正：前文所有 `I*` 只视为局部说明，**真正实施必须按 14.11.12 的唯一 Q0～Q8 顺序**。后续不再新增 `I2j/I3q`。
+
+#### 14.11.2 问题二：Inspect 字节模型名称会重复现有 `raw/decoded`
+
+当前 application 层已经有：
+
+```text
+InspectField.raw
+InspectField.decoded
+```
+
+其真实含义是：
+
+```text
+raw      = 物理 sector 原始字节切片
+ decoded = sector-level decoder 输出字节切片
+```
+
+14.3 再新增 `stored_bytes / logical_bytes` 如果不先定语义，会出现四套名字互相覆盖。
+
+统一成四层概念：
+
+```text
+PhysicalRaw       物理介质上的字节
+SectorDecoded     整扇区 decoder 后的字节
+FieldLogical      字段自身存储变换解除后的字节，可选
+SemanticValue     parser 给出的类型化/人类可读值
+```
+
+落地原则：
+
+- 现有 `InspectField.raw` 可继续对应 `PhysicalRaw`；
+- 现有 `InspectField.decoded` 明确重命名/文档化为 `SectorDecoded`，不再称泛化的 Decoded；
+- 只新增一个可选 `field_logical: Option<Vec<u8>>`（名称实现时可调整），不要同时再造 `stored_bytes`；
+- 字段级变换使用 typed provenance，例如 `FieldTransform::Xor(0x88)`，不要只塞字符串；
+- `SemanticValue` 仍由 canonical parser 产生，TUI 不根据字节反推。
+
+这样 `0x77 -> 0xFF -> 255` 的链路只有一个事实模型，不会为了 UI 再复制解码算法。
+
+#### 14.11.3 问题三：Overview 缺少稳定 Field ID，不能靠中文 label 找关键字段
+
+当前 `SectorField / InspectField` 只有 `label`，没有稳定机器标识。14.7 如果实现 LBA8 summary 时这样做：
+
+```text
+find(|field| field.label == "UsbOnlyInfo")
+```
+
+会把展示文案变成业务 API；后续中文化、重命名或同名字段都会破坏摘要。
+
+必须先增加稳定语义键，例如：
+
+```text
+InspectFieldKey::Lba8UsbOnlyInfo
+InspectFieldKey::Lba8HostHardinfo
+InspectFieldKey::Lba12MaxEncryptPasswordErrors
+```
+
+或等价稳定 key registry。
+
+要求：
+
+- label 只是展示；
+- summary selection、测试、Field→Hex、搜索精确定位均优先使用 stable key/range；
+- 不要求一次给所有 unknown 字段创造枚举，可允许 `ProtocolField(String)` / registry key，但 key 必须稳定且不依赖本地化文本。
+
+另外当前 `FieldChild` 只有 `label/value`，没有 byte range。Detail 展开 children 后：
+
+- 有 range 的 child 才允许 `Enter -> Hex` / `Y raw`；
+- 没有 range 的 child 只能作为语义子项展示；
+- 如果未来需要 ELABEL 每个子项精确跳 byte，再把 `FieldChild.range` 做成 `Option<RelativeByteRange>`，不能凭显示顺序猜 offset。
+
+#### 14.11.4 问题四：不能重新引入第 13 章刚删除的 Pane 私有滚动状态
+
+第 13 章已经确立：
+
+```text
+PaneViewport.scroll_y / scroll_x / selected
+```
+
+是 Pane 交互状态容器。
+
+因此第 14 章明确修正：
+
+- Detail row selection 使用 `PaneViewport.selected`；
+- Overview/Detail/DiskLayout 的垂直滚动继续使用 `PaneViewport.scroll_y`；
+- Pane 内表格的横向 viewport 优先迁到 `PaneViewport.scroll_x`，不要再扩散页面级 `horizontal_scroll`；
+- `ProvisionRunState` 不拥有 `log_scroll`；
+- Running/Result 日志增加正式 `PaneId::ProvisionRunLog`（以及需要时 `ProvisionRunSummary`），使用统一 PaneFocus/PaneViewport；
+- 如果 Running 只有一个可交互 Pane，也仍然使用 PaneViewport，避免以后 Result 双 Pane 再迁移一次。
+
+Devices/Backups 这类不是 Pane 内部的顶层 workspace table 可以继续使用 `TableKind` 横向状态；**Pane-owned Table 与 workspace-owned Table 不混用状态事实源。**
+
+#### 14.11.5 问题五：当前 TaskUpdates 会吞掉同一帧内的大部分 progress event
+
+这是 14.10 最大的实现风险。
+
+当前 `TaskHub::poll()` 会 `while try_recv()` 一次排空 channel，但：
+
+```text
+TaskUpdates.provision_progress: Option<...>
+```
+
+每收到一条就：
+
+```text
+updates.provision_progress = Some(...)
+```
+
+所以同一次 poll 中如果收到：
+
+```text
+StageStarted
+StageProgress
+StageCompleted
+NextStageStarted
+```
+
+最终 TUI 只能拿到最后一条。对于现在“一次只发一条字符串”无所谓，但对实时日志会直接丢 milestone。
+
+必须改为有序批次：
+
+```text
+provision_progress: Vec<(OperationId, ProvisionProgressEvent)>
+```
+
+或者等价的 event batch/reducer。
+
+规则：
+
+- StageStarted/Completed、Warning、Rollback、Completed 等 boundary event 一条都不能丢；
+- 高频 `StageProgress` 可以在**进入 TaskUpdates 之前或 reducer 内**按同 phase 合并为最后状态；
+- 合并不得跨越 boundary event；
+- 同一个 `operation_id` 的事件严格保持 channel 顺序；
+- final `ProvisionWrite` 与此前 progress 在同一次 poll 中到达时，先 apply 全部 progress，再 apply final outcome。
+
+源头仍按 100ms / 64 sectors 节流。不要为了“防爆”改成会阻塞磁盘 worker 的同步 channel；UI 慢不能反向阻塞安全事务。
+
+#### 14.11.6 问题六：progress sink 本身也必须是“不可影响事务”的故障域
+
+14.10 已要求 progress 失败不能改变介质事务，但实现方式还要进一步锁死。
+
+要求：
+
+- application/diskio 不依赖 TUI channel 类型；
+- `ProgressSink::emit()` 是 best-effort side channel；
+- channel receiver 已关闭时忽略发送失败；
+- sink 内部 panic 必须被隔离，不能因为日志 UI bug 触发写盘 rollback 或留下 intermediate state；
+- 测试至少覆盖 `DisconnectedSink` 与 `PanickingSink`，同一 fake device 下事务最终结果必须与 `NoopProgressSink` 完全一致。
+
+如果实现者不愿允许第三方 trait object，可使用内部 `ProgressReporter` + 闭包包装，但“不影响事务”是硬门禁。
+
+#### 14.11.7 问题七：总体百分比必须在 RunStarted 前冻结 denominator
+
+14.10 的“固定 milestone + sector units”方向正确，但仍需避免运行过程中总工作量不断变化，否则总体百分比会倒退或跳变。
+
+在 worker 启动前从 `PreparedProvision` 构造：
+
+```text
+ProvisionWorkPlan
+  phases[]
+    id
+    role/partition
+    unit
+    total_work_units
+    contributes_to_overall
+```
+
+已知 work：
+
+- transaction touched sectors：mirror/write/readback 均可提前得到 N；
+- selected partition format：`prepared_image.sectors().len()` 可提前得到；
+- protocol readback 固定读数可提前得到；
+- lock/reopen/sync 只作为 milestone，不伪造 bytes。
+
+`RunStarted` 后 overall denominator 不再变化。Rollback 是异常 recovery 计划，单独显示自己的 progress，不塞回正常 0～100% denominator。
+
+同时为第 12 章 K6 尚未实现的 `Migrate` 预留：
+
+```text
+ProgressUnit::Sector
+ProgressUnit::Byte
+ProgressUnit::File
+ProgressUnit::Item
+```
+
+不要把进度 API 写死成“sector only”，否则五状态迁移一实现就要重构。
+
+#### 14.11.8 问题八：TUI 与 CLI 当前对“格式化部分失败”的最终结果语义并不一致
+
+当前 application 的 `ProvisionCommitReport` 可以表示：
+
+```text
+协议写入成功
+启动区格式化成功
+交换区格式化失败
+保密区格式化成功
+```
+
+CLI 会检测 `report.formats.any(error)` 并返回 `EXIT_IO`。
+
+但 TUI worker 当前把这个 report 映射为 `Ok(String)`；`tui/mod.rs` 用 `result.is_ok()` 判断 success，于是“部分格式化失败”仍被当作成功路径。Result renderer 再靠：
+
+```text
+message.contains("格式化：✗")
+```
+
+猜是否有失败，而且外框仍固定 `success()`。
+
+第 14 章必须顺便收口，不然新增进度/日志后状态仍会自相矛盾。
+
+建议定义 typed final outcome，例如：
+
+```text
+ProvisionExecutionOutcome
+  Success
+  PartialFormatFailure { failed_roles, ... }
+  RolledBack { cause }
+  Intermediate { cause }
+  FailedBeforeWrite { cause }
+```
+
+名称可调整，但：
+
+- CLI exit code 从 typed outcome 映射；
+- TUI title/border/tone 从 typed outcome 映射；
+- Result 页面不解析中文 message 判断成功失败；
+- `PartialFormatFailure` 明确写“协议制盘成功，部分分区格式化失败”，不能笼统显示“全部成功”；
+- 设备/备份刷新是否执行由 outcome policy 明确决定，不再简单 `result.is_ok()`。
+
+#### 14.11.9 问题九：14.9 不得另造 `PartitionDisposition`，必须复用当前 main 已实现的 RegionDisposition
+
+14.9 当前草案：
+
+```text
+PreserveCandidate
+RebuildRequired
+PreserveExact
+Rebuild
+```
+
+当前 main（PR #24 已合并）已经实现并在 TUI Review 中直接消费：
+
+```text
+PreserveOpaque
+PreserveVerified
+RewrapVerified
+Migrate
+Rebuild
+Drop
+```
+
+如果现在在 TUI 再造一个业务 enum，后面一定二次迁移。
+
+修正：
+
+- application planner / assessment 是业务真相源；
+- UI 只消费 typed decision，不自己定义另一套“真实处置类型”；
+- 当前编辑阶段需要的“候选保留/需重建”应来自 application 层 `PreserveAssessment` 或等价结构，不能继续在 `tui/provision/layout.rs` 重复比较 type/start/count/encryption；
+- presentation 层可以有 `DispositionTone/Badge`，但它只是展示映射，不拥有业务语义；
+- 直接复用现有 `RegionDisposition / SourcePasswordKnowledge / TargetPasswordPolicy` 作为业务真相源；本章只新增 presentation adapter/badge，不再创建平行业务枚举。K6 `Migrate` 仍按当前 fail-closed 语义处理，未来实现 K6 时只扩 application decision，不推翻磁盘布局表格。
+
+#### 14.11.10 问题十：设备/备份的“未知盘型”当前会被错误表示成 Plain
+
+这是 14.8 必须修掉的基础语义问题。
+
+当前：
+
+- `disk_scan::Row` 初始化 `provision_kind = Plain`，即使后续 USB probe 失败；
+- `BackupEntry` 在 `meta/raw` 不可用时也把 `provision_kind` 设为 `Plain`。
+
+现有 UI 因为把“读取异常”塞进盘型列，部分遮住了这个问题；14.8 一旦把“盘型”和“状态”拆开，就可能出现：
+
+```text
+盘型  Plain
+状态  读取异常
+```
+
+这会错误暗示已经确认它是普通盘。
+
+必须把“已识别 Plain”和“未能识别”分开。推荐 read-side presentation 使用：
+
+```text
+Option<DiskProvisionKind>
+```
+
+或：
+
+```text
+ProvisionIdentification::Known(DiskProvisionKind)
+ProvisionIdentification::Unknown
+```
+
+要求：
+
+- probe 成功且 canonical classifier 明确为 Plain，才显示“普通盘”；
+- denied/probe_error/损坏 backup 缺有效 metadata 时盘型显示 `—` 或“未识别”；
+- health/status 列继续解释为什么未知；
+- `DiskProvisionKind::Plain` 不能再兼任错误默认值。
+
+这条既适用于 Devices，也适用于 Backups，必须在统一身份表之前完成。
+
+#### 14.11.11 其它可优化项
+
+1. **容量格式统一范围要明确**：Devices/Backups 身份表共享 `common::fmt_gb` 或一个新的统一 formatter，保证同一块盘两张表完全相同；Provision 几何编辑可以继续用 MiB/GiB + sector，因为那是精确布局语境。不要一张身份表写 `8.00GB`、另一张写 `7.45GiB`。
+2. **窄屏 pinned 列不能只靠当前 AdaptiveTableLayout**：现实现极窄时会移除除第 0 列外的 pinned column，因此 14.9 的“处理状态永远可见”必须通过明确 breakpoint 切换到两行 card layout，而不是假设 pinned 永不消失。
+3. **Tail topology 与 DiskLayout 分开验收**：Tree 的 tail children 改成互斥 primary spans 后，完整磁盘比例条仍应把最后 2048 sectors 视为 Tail 语义覆盖；新增测试防止 tree 修复意外改变 DiskLayout 颜色/占比。
+4. **Overview 生成不得触发新 I/O**：Summary 必须只消费当前 workspace/item/parser 已有结果，切 Tree selection 不能重新打开备份或物理盘。
+5. **Backup 身份扩列不得增加 I/O**：14.8 已写原则，再加性能门禁：一次 backup scan 后 renderer/search/sidebar 只能读 `BackupWorkspaceItem`；用测试 spy/计数器锁死“render 不读文件”。
+6. **Running Result 增加阶段耗时摘要**：除实时日志外，完成页列出各阶段 duration，能直接看出慢盘到底慢在 unmount、sync、写、readback 还是 format。
+7. **日志持久化暂不做强制需求**：本轮先保证 TUI Result 内保留 ring log。若以后要导出诊断日志，应做显式“导出运行日志”，并复用敏感信息过滤，不默认把运行日志写进备份目录。
+8. **写盘 instrumentation 需要 HIL**：即使 progress hook 理论上“不改业务语义”，它会进入 `diskio::transaction` 热路径，因此最终合并门禁除 fast/full 外必须跑现有 Virtual Disk HIL；真实 U 盘验收重点验证慢设备 UI，不以真实盘作为单元测试前置条件。
+
+#### 14.11.12 唯一实施顺序（覆盖前文所有局部 I* 顺序）
+
+为降低回归面，第 14 章拆成 9 个可独立提交/PR 的阶段：
+
+```text
+Q0  基线与失败测试
+    - 最新 origin/main
+    - Chapter 13 COMPLETE
+    - 为本章关键问题先写 contract/failing tests
+
+Q1  Inspect 数据契约
+    - stable InspectFieldKey
+    - PhysicalRaw / SectorDecoded / FieldLogical / SemanticValue 四层语义
+    - typed FieldTransform provenance
+    - 不改 renderer
+
+Q2  Inspect topology + presentation
+    - 单 sector Tree 去 [n..n]
+    - tail primary spans / secondary membership
+    - Summary model
+    - Overview dashboard
+    - Detail selected row 复用 PaneViewport.selected
+    - Field/child -> Hex 能力按 range 严格启用
+
+Q3  Device / Backup identity contract
+    - Known vs Unknown provision kind
+    - BackupWorkspaceItem 透传 secs/VID/PID/device_id
+    - shared identity projection / formatter / column specs
+    - 两张表、sidebar、search 统一
+
+Q4  DiskLayout / Provision decision presentation
+    - typed layout rows
+    - application PreserveAssessment，删除 TUI 重复业务比较
+    - region legend 对齐 table
+    - partition action table + selected reason
+    - 窄屏 card breakpoint
+    - 直接复用已落地的 Chapter 12 RegionDisposition / KeyDomain；只为 K6 Migrate 保留扩展位
+
+Q5  Progress application core
+    - ProvisionWorkPlan 冻结 denominator
+    - ProvisionProgressEvent / ProgressUnit / sink
+    - transaction mirror/write/readback/rollback instrumentation
+    - provision lock/reopen/identity/protocol/format instrumentation
+    - progress sink failure isolation
+
+Q6  Progress transport + TUI
+    - TaskUpdates progress 改 ordered Vec/batch，禁止 milestone 丢失
+    - ProvisionRunState
+    - ProvisionRunLog Pane + PaneViewport
+    - status card / progress / elapsed / last activity / throughput
+    - follow-tail / j-k / G
+
+Q7  Outcome + CLI 收口
+    - typed ProvisionExecutionOutcome
+    - TUI/CLI 同一 final semantics
+    - PartialFormatFailure 正确状态
+    - CLI milestone renderer
+    - Result summary + stage timings + retained log
+
+Q8  清理与门禁
+    - 删除旧 message-prefix / contains("格式化：✗") 业务判断
+    - 删除被取代的重复 scroll/selection/business comparison
+    - fmt + diff-check + affected suites + fast
+    - full profile
+    - Virtual Disk HIL
+    - 最后做真实慢盘 TUI 可观测性验收（有盘时）
+```
+
+依赖关系：
+
+```text
+Q1 -> Q2
+Q3 独立，可在 Q1/Q2 后执行
+Q4 依赖 Chapter 13 DiskLayout，但不依赖 Q5
+Q5 -> Q6 -> Q7
+Q8 最后统一收口
+```
+
+第 12 章当前状态是 **K0～K5、K7 COMPLETE；K6 Migrate DEFERRED；K8 真实 USB PENDING**。Q4 必须直接消费现有 RegionDisposition/KeyDomain，不重复实现密码域；Q5/Q6 的 progress/outcome 改造不得降低 Chapter 12 已落地的 Opaque/Verified/Rewrap/Rebuild、双域独立密码、secret redaction、prepare/commit 双层安全门禁。
+
+#### 14.11.13 审计后的优先级
+
+按“用户可见问题 + 架构返工风险”排序：
+
+```text
+P0 必须先修
+  1. progress event 批次丢失风险
+  2. Unknown 被误当 Plain
+  3. Inspect 四层 byte semantics + stable FieldKey
+  4. PaneViewport 单一状态源
+  5. TUI/CLI PartialFormatFailure 结果语义
+
+P1 本章核心体验
+  6. Overview/Detail 重构
+  7. 设备/备份身份表统一
+  8. DiskLayout 对齐 + 保留/重建醒目
+  9. Running 实时进度/日志
+
+P2 优化
+  10. stage duration summary
+  11. child optional range
+  12. 日志显式导出（未来，不作为本章完成门槛）
+```
+
+审计结论：**第 14 章方向正确，但在真正实现前必须先收口“字段身份、Pane 状态、progress transport、最终 outcome、Unknown/Plain”这五个基础契约；否则直接从 renderer 开始改，会与当前 main 已落地的 Chapter 12 业务模型产生重复事实源，并在慢盘日志接入时触发第二轮重构。Q0～Q8 是后续唯一执行顺序。**
+
+### 14.12 第二轮审计：把剩余结构性技术债一并纳入本次治理
+
+第二轮继续从当前源码反查第 14 章的可落地性。本节新增的项目**全部纳入本次治理范围**，但仍然遵循 14.11 的 Q0～Q8 顺序；不是再开一套平行阶段，也**不重新实现 Chapter 12**，而是与当前 main 已落地的 key-domain / region-mapping / TUI 验证流程集成。
+
+#### 14.12.1 DiskLayout 不能继续从节点文案猜物理语义
+
+当前 `tui/disk_layout.rs::DiskLayoutModel::from_topology()` 仍在通过以下文本判断区域类型：
+
+```text
+node.id == "region.protocol"
+node.id.starts_with("region.partition")
+node.label.starts_with("MBR P")
+node.label.ends_with("type1")
+node.label.ends_with("type2")
+node.label.ends_with("type4")
+node.label.contains("type=0x0E")
+```
+
+这意味着修改树节点名称、中文文案或协议标签格式，就可能悄悄改变磁盘布局颜色和区域分类。展示字符串已经事实上成为了业务协议，这是不可接受的耦合。
+
+本次治理增加稳定的区域语义，例如：
+
+```rust
+DiskRegionSemantic
+  Protocol
+  Reserved
+  Unknown
+  Free
+  Partition {
+      role,
+      partition_type,
+      filesystem_hint,
+  }
+  Compatibility
+  Lce
+  Tail
+```
+
+具体类型名可以调整，但要求：
+
+- Inspect topology 在 application 层就携带 typed semantic；
+- `DiskLayoutModel` 只消费 typed semantic，不读 `label` 推导业务含义；
+- `label` 只用于最终显示；
+- MBR `0x0E`、EDP type1/2/4 到角色的映射由 canonical parser / application adapter 决定；
+- 增加源码门禁，`DiskLayout` adapter 不得再次出现 `label.starts_with/ends_with/contains` 的协议判断。
+
+同时当前 `src/tui/disk_layout.rs` 混合了：
+
+```text
+完整物理盘几何模型
+区域优先级/归一化
+Inspect/Provision adapter
+ratatui Frame/Line/Span renderer
+主题映射
+```
+
+本次治理将**UI-neutral 的 `DiskLayoutModel / DiskLayoutSegment / region adapter` 移出 `tui` 层**；TUI 只保留 ratatui renderer、theme token 和 viewport。这样 CLI、测试和未来其它前端都能复用同一物理布局模型，也避免 application 真相模型反向依赖 TUI。
+
+#### 14.12.2 Provision 表单的 magic slot 必须收口成 typed Field Schema
+
+当前 Provision 表单大量使用整数 slot 表达字段身份：
+
+```text
+0 / 1 / 2
+3..7
+11..20
+24..29
+Plain => 100 + display_index
+```
+
+同一套 slot 语义分别散落在：
+
+```text
+provision_field_slot
+provision_selected_field_mut
+provision_selected_field
+provision_field_section
+provision_compact_field_rows
+provision_field_hint
+provision_input_policy
+provision_selected_partition_role
+capacity editor / toggle / fill
+footer action hint
+```
+
+还有 UI 代码通过：
+
+```text
+hint.starts_with("Space 切换 MiB / GiB / sector")
+```
+
+判断当前字段是否支持单位切换。这和前面的字符串业务判断属于同一种技术债。
+
+本次治理新增稳定字段身份：
+
+```rust
+ProvisionFieldId
+  IdentityLabel
+  IdentityUser
+  IdentityDept
+  InitialPassword
+  ForceChangePassword
+  MaxSharePasswordErrors
+  MaxEncryptPasswordErrors
+  PartitionCapacity(role)
+  PartitionStartLba(role)
+  FormatEnabled(role)
+  Filesystem(role)
+  VolumeLabel(role)
+  PlainStart(index)
+  PlainCapacity(index)
+  PlainFilesystem(index)
+  PlainLabel(index)
+  ...
+```
+
+并由一个 descriptor/schema 提供：
+
+```text
+id
+section_id
+label
+value
+secret
+editable
+input_policy
+partition_role
+capabilities
+compact_group
+hint
+```
+
+`capabilities` 至少能表达：
+
+```text
+EditText
+ToggleOption
+ToggleCapacityUnit
+FillCapacity
+AddPartition
+DeletePartition
+```
+
+要求：
+
+- display index 只用于当前可见列表位置，不承担业务身份；
+- mutation / validation / footer / render / compact layout 全部从 `ProvisionFieldId` 或 descriptor 工作；
+- section 使用 enum/id，不比较“身份信息”“分区布局”等中文字符串；
+- 输入策略不再在多处重复 match slot；
+- 不为减少代码而把密码或写盘规则搬进 TUI schema；schema 只描述表单交互，真正 planner/validation 仍在 application/provision 层；
+- 当前 `format_capable => filesystem.unwrap()` 这类隐含不变量改成 typed construction 或显式验证，避免状态漂移后 UI panic。
+
+#### 14.12.3 表格列定义收敛为单一 Column Schema
+
+当前一张表的“列”实际上分散在三处：
+
+```text
+1. renderer 的 headings 数组
+2. row formatter 返回的 values 顺序
+3. table_layout.rs 中 AdaptiveColumnSpec 的 min/preferred/max/priority/pinned
+```
+
+Devices/Backups 扩展到 10～11 列后，这三处非常容易数量或顺序漂移，而且当前测试没有锁定三者 arity 一致。
+
+本次治理把列契约收敛为 typed schema，例如：
+
+```rust
+TableColumnSpec {
+    id,
+    header,
+    min_width,
+    preferred_width,
+    max_width,
+    priority,
+    weight,
+    pinned,
+    alignment,
+    truncate_policy,
+}
+```
+
+共享身份列使用稳定 ID：
+
+```text
+Capacity
+VidPid
+Model
+OnlyId
+User
+Dept
+ProvisionKind
+```
+
+Devices/Backups 只在共享列前后组合自己的专属列。
+
+同时把数值对齐纳入共享 table infra：
+
+```text
+LBA / sectors / 容量 / 百分比 -> Right
+名称 / 状态 / 文本             -> Left
+```
+
+实现必须使用 `unicode-width` 做 cell padding/truncation，不能重新回到手写空格。
+
+新增硬门禁：
+
+```text
+schema 列数 == header 列数 == row cell 列数
+共享 identity column 的 header/spec/formatter 两边一致
+所有 ColumnId 唯一
+极窄宽度进入显式 breakpoint，不越界、不 panic
+```
+
+#### 14.12.4 Review / Result / Layout 全面去除“字符串就是状态”的做法
+
+第二轮源码审计还发现：
+
+```text
+provision_review_summary_lines() -> Vec<String>
+provision_review_change_lines()  -> Vec<String>
+renderer 用 starts_with('✓') / starts_with('⚠') 选 style
+Result 用 contains("格式化：✗") 判断失败
+DiskLayoutPane.details           -> &[String]
+```
+
+第 14 章不能只修其中一处。统一引入轻量 typed presentation rows，例如：
+
+```rust
+UiSeverity { Normal, Info, Success, Warning, Error }
+KeyValueRow { key, value, severity }
+NoticeRow   { message, severity }
+ReviewSection { title, rows }
+ChangeRow   { subject, action, detail, severity }
+```
+
+名称可以调整，但要求：
+
+- glyph `✓ / ⚠ / ✗` 由 renderer 根据 severity/action 生成；
+- renderer 不解析 glyph、中文前缀或 message 内容来恢复业务状态；
+- Review/Result/DiskLayout/Progress summary 可以复用 presentation primitives；
+- typed business outcome 与 presentation severity 分层，不能把 `Warning` 当成业务 outcome。
+
+源码门禁至少拒绝新的：
+
+```text
+starts_with('✓')
+starts_with('⚠')
+contains("格式化：✗")
+```
+
+出现在 Provision renderer 的业务分支里。
+
+#### 14.12.5 Help / Footer 也要从当前上下文的真实动作生成
+
+项目已经有集中式 `TuiAction`、`HelpBinding`，但当前 Help 页面仍然：
+
+```text
+只遍历 NORMAL_HELP
++ 手工追加 Inspect 文案
++ 手工追加 Provision 文案
+```
+
+Footer 又有另一套巨大的 workspace/stage match，并且部分能力还靠 field hint 字符串判断。
+
+这会导致第 14 章增加 Detail row、日志滚动、Field→Hex 等动作后，实际按键和帮助再次漂移。
+
+本次治理增加 context-aware action presentation：
+
+```text
+当前 Workspace
+当前 Stage
+当前 focused Pane / WidgetRole
+当前 Field capabilities
+是否处于 critical operation
+        ↓
+available actions
+        ↓
+Help + Footer
+```
+
+要求：
+
+- `KeyMapper` 仍是物理按键到 `TuiAction` 的唯一事实源；
+- Workspace/Pane controller 决定某 action 在当前上下文是否可执行；
+- Help/Footer 从同一 action metadata 生成，不再手写另一套快捷键表；
+- 安全相关文案（YES、事务期间 q/Esc 延迟退出）仍允许显式固定展示，不能因为自动帮助而弱化；
+- Inspect `INSPECT_HELP` 必须真正参与 Inspect 上下文，而不是定义后闲置；
+- 回归测试保证已启用动作在 Help/Footer 中有对应提示，已禁用动作不会误导用户。
+
+#### 14.12.6 Inspect diagnostics 与 FieldStatus 目前还不足以支撑新 Detail
+
+当前 parser 大量把关键状态写进：
+
+```text
+method: String
+notes: Vec<String>
+decode_error: Option<String>
+```
+
+例如：
+
+```text
+profile 未唯一确定
+缺 device_id
+canonical parser 拒绝
+单扇区上下文不足
+固定结构异常
+```
+
+同时 `InspectFieldStatus` 虽然定义了：
+
+```text
+Known
+Unknown
+Reserved
+Preserved
+```
+
+但当前 materialization 实际把所有 protocol fields 都硬编码为 `Known`；`Unknown/Reserved/Preserved` 只在 renderer 有样式，没有真实生产来源。
+
+如果直接实现 14.7 的 `Status` 列，会造成“看起来有状态体系，实际全是 Known”的假完整性。
+
+本次治理补 typed diagnostics：
+
+```rust
+InspectParseState
+  Parsed
+  Ambiguous
+  MissingContext
+  Unsupported
+  Invalid
+
+InspectDiagnostic {
+    code,
+    severity,
+    message,
+    field_key: Option<...>,
+    range: Option<...>,
+}
+```
+
+并让字段模型真实携带 semantic status。
+
+要求：
+
+- `notes` 可以继续保留人类解释，但不再作为 Overview alert / 状态判断唯一来源；
+- parser ambiguity、missing context、invalid 要有稳定 diagnostic code；
+- Overview 的警告区从 typed diagnostic 生成；
+- CLI/TUI 对同一 diagnostic 使用同一事实，不要求相同排版；
+- Reserved/Preserved/Unknown 如果在本轮无法建立可靠来源，就删掉假分支或补齐来源，不能保留“永远不会出现”的状态 API；
+- golden protocol semantics 不因增加诊断模型而改变。
+
+#### 14.12.7 Inspect 被动预览失败后必须允许显式重试
+
+当前 `preview_attempted: BTreeSet<u64>` 的行为是：
+
+```text
+选中未缓存 Sector
+→ 发起 passive preview
+→ request 接受后立即记 preview_attempted
+→ 如果读取失败，失败路径不会清除此标记
+→ 后续选中同一 LBA 不再自动 preview
+```
+
+只有缓存驱逐或整个 Inspect 重置后才会移除；对偶发 USB 读取错误来说，这会形成“失败一次后当前会话一直不再尝试”的隐蔽问题。
+
+本次治理改成明确加载状态：
+
+```text
+Idle
+Pending
+Ready
+Failed { message, attempts }
+```
+
+规则：
+
+- 同一 LBA `Pending` 时禁止重复并发请求；
+- `Failed` 不自动无限重试，防止慢/坏盘产生请求风暴；
+- Overview 明确显示“读取失败”；
+- `Enter` 或明确 Retry/Refresh 动作允许用户重试；
+- 重试后变 Pending，成功变 Ready；
+- cache eviction 同步清理对应 load state；
+- generation/single-flight 语义保持不变；
+- 测试覆盖“第一次失败、第二次显式重试成功”。
+
+#### 14.12.8 Progress transport 治理扩大到 Backup / Restore，不只 Provision
+
+项目现有 Backup/Restore 已经有 typed `WriteEvent`，这是正确方向；但 transport 同样存在：
+
+```text
+TaskUpdates.write_progress: Option<(OperationId, WriteEvent)>
+```
+
+`TaskHub::poll()` 一次排空 channel 时，多条 `WriteProgress` 也会互相覆盖，只留下最后一条。当前向导只展示“最后一条消息”，所以问题不明显，但它和 14.11.5 的 Provision event 丢失本质完全相同。
+
+本次治理要求 Task transport 一次解决：
+
+```text
+write_progress      -> ordered Vec / event batch
+provision_progress  -> ordered Vec / event batch
+```
+
+但**不强制把两个领域的 event enum 合并成一个巨型 enum**。推荐：
+
+```text
+共同：OperationId + ordered transport + reducer/log plumbing
+独立：WriteEvent / ProvisionProgressEvent 的领域语义
+```
+
+规则：
+
+- Backup/Restore milestone 不丢；
+- Provision stage boundary 不丢；
+- final result 与同轮 progress 同时到达时，先消费全部 progress，再消费 final；
+- event batch 顺序严格等于 channel 到达顺序；
+- UI 慢不能阻塞介质 worker；
+- 现有 Backup/Restore 可以暂时只保存短 timeline，而不要求和 Provision 一样做完整大日志 Pane，但 transport 必须正确。
+
+#### 14.12.9 Running 阶段增加专用 action controller，禁止日志导航落到全局导航
+
+当前 `ProvisionStage::Running` 的输入处理直接回落到通用 `dispatch_tui_action()`。第 14 章增加：
+
+```text
+j/k
+Ctrl-u/d
+PageUp/Down
+G
+```
+
+日志导航后，不能让这些动作同时影响 workspace selection 或其它全局状态。
+
+治理规则：
+
+- Running 阶段先由专用 controller 消费日志 viewport action；
+- `q/Esc/Ctrl-C` 仍走 critical deferred-exit 安全语义；
+- 未声明的写盘控制动作一律不生效；
+- 日志滚动绝不能调用任何 disk I/O；
+- 增加测试：连续按 100 次 `j/k/PageDown`，目标 disk、prepared plan、operation id、write-set 均不变。
+
+#### 14.12.10 列表与 Inspect 可见树的重复重建纳入性能治理
+
+当前 Devices/Backups 每次 render 都会遍历**完整数据集**：
+
+```text
+format 每一行所有 cell
+计算每一列 content_width
+再只渲染当前 visible window
+```
+
+设备通常不多，但备份数量增长后，第 14 章再扩成 11 列会明显增加每帧分配。动画、notice、timer 都可能触发 redraw，因此不应把“数据没变化”的全量格式化重复做几十次/秒。
+
+本次治理在 Q3 增加只读表格 view data cache：
+
+```text
+dataset generation
+preformatted row projection 或轻量 identity projection
+content_widths
+```
+
+只在以下事件失效：
+
+```text
+scan rows replaced
+metadata changed
+filter/schema changed（按需要）
+```
+
+selection / scroll / animation tick 不重新扫描所有 backing rows。
+
+Inspect 也存在类似问题：`advanced_inspect_tree_rows()` 每次创建新的 `Vec`、clone path/label，并在多处重复调用；当前 state/render 中有大量调用点。
+
+Q2 增加 `InspectTreeViewModel` / revision cache：
+
+```text
+revision inputs:
+  topology
+  expanded set
+  lazy offsets
+  cached sector items
+
+outputs:
+  visible rows
+  id -> row index
+```
+
+这样：
+
+- 一次状态变更只重建一次 visible tree；
+- search/jump 不再反复 `iter().position()` 扫全量 rows；
+- renderer 只读现成 rows；
+- topology 仍保持 lazy sectors，不展开全盘百万 sector；
+- 优化必须以行为测试为前提，不为了 benchmark 引入复杂异步缓存。
+
+性能门禁使用合成数据、固定时间/计数器，不依赖真实慢机器：
+
+```text
+1000/10000 backup rows
+大 extent + 64-sector lazy page
+多次 render without state mutation
+```
+
+验证“没有重复 backing scan / tree rebuild”，而不是设置脆弱的绝对毫秒阈值。
+
+#### 14.12.11 第 14 章实施时同步拆分 TUI 维护性热点
+
+当前主要文件规模：
+
+```text
+src/tui/mod.rs                 2037 lines
+src/tui/inspect/state.rs       1755 lines
+src/tui/inspect/render.rs       843 lines
+src/tui/provision/render.rs     817 lines
+src/tui/task.rs                 671 lines
+src/tui/provision/fields.rs     662 lines
+src/tui/disk_layout.rs          552 lines
+```
+
+本身“行数多”不是 bug，但第 14 章会继续加入 summary、diagnostics、progress、logs、column schema，如果继续塞进现有文件，会明显增加冲突和重复判断。
+
+本次治理要求**随功能自然拆分，不另做大爆炸重写**：
+
+```text
+tui/mod.rs
+  -> event loop + 通用 orchestration
+  -> workspace/stage action controller 分模块
+
+inspect/state.rs
+  -> tree view-model/search
+  -> sector cache/controller
+  -> pane/summary interaction
+
+provision
+  -> form schema/controller
+  -> review presentation
+  -> run/progress state
+
+disk layout
+  -> UI-neutral model/adapter
+  -> TUI renderer
+```
+
+约束：
+
+- 每次拆分前后专项测试结果一致；
+- 不因为“文件太长”新增抽象层；只有明确 ownership 的职责才拆；
+- 禁止同时做协议算法重写；
+- Q8 增加源码边界门禁，防止 UI-neutral model 再回流 `tui`。
+
+#### 14.12.12 本次治理补充的统一源码门禁
+
+除前文功能测试外，新增静态/源码级门禁：
+
+1. DiskLayout 业务分类不得读取 `InspectNode.label`；
+2. Provision renderer 不得通过 `starts_with/contains` 解析状态 glyph/中文消息；
+3. Provision 字段行为不得通过 hint 文本判断 capability；
+4. 设备/备份表共享 identity 列必须来自同一 column schema；
+5. table schema/header/cell arity 必须严格相等；
+6. Pane-owned scroll/selection 不新增页面级影子状态；
+7. `TaskUpdates.write_progress` 与 `provision_progress` 都不得退回单个 `Option`；
+8. Inspect summary 不得按 display label 查 canonical field；
+9. Inspect diagnostic 状态不得只存在于 `notes` 文本；
+10. renderer/sidebar/search 不得直接打开 `.edpb` 或物理盘；
+11. progress/log path 不得记录 password、FileKey、完整 raw sector；
+12. UI-neutral DiskLayout/Progress/Inspect semantic model 不得依赖 ratatui 类型。
+
+这些门禁的目的不是限制正常文案格式化，而是防止**展示字符串再次变成隐藏业务 API**。
+
+#### 14.12.13 Q0～Q8 的增补映射
+
+14.11.12 的阶段编号保持不变，本节新增任务按以下方式并入：
+
+```text
+Q0  基线与失败测试
+    + string-derived semantic source guards
+    + event batch ordering failing tests
+    + passive preview retry failing test
+    + table schema arity failing tests
+
+Q1  Inspect 数据契约
+    + InspectFieldKey
+    + typed FieldTransform
+    + typed InspectDiagnostic / ParseState
+    + 让 FieldStatus 成为真实数据，不保留死枚举
+    + InspectNode / region typed semantic
+
+Q2  Inspect topology + presentation
+    + tail primary spans
+    + Overview/Detail
+    + passive preview load state / explicit retry
+    + InspectTreeViewModel revision cache + id index
+    + Summary/diagnostic 不增加 I/O
+
+Q3  Device / Backup identity contract
+    + Known/Unknown provision identification
+    + shared identity projection
+    + shared TableColumnSchema + alignment
+    + cached content widths / row projection
+    + render/search/sidebar 零额外 I/O
+
+Q4  DiskLayout / Provision presentation
+    + UI-neutral DiskLayoutModel 移出 TUI
+    + typed region semantic adapter
+    + ProvisionFieldId / FieldDescriptor / capabilities
+    + typed Review/Change/Notice rows
+    + application PreserveAssessment
+    + 窄屏 card breakpoint
+    + context-aware Help/Footer
+
+Q5  Progress application core
+    + frozen ProvisionWorkPlan denominator
+    + typed events / sink isolation
+    + 事务与格式化 instrumentation
+
+Q6  Progress transport + TUI
+    + WriteEvent 与 ProvisionProgress 两条 ordered batch transport
+    + boundary event 不丢
+    + Running 专用 action controller
+    + ProvisionRunLog Pane / PaneViewport
+    + elapsed / last activity / throughput / follow-tail
+
+Q7  Outcome + CLI 收口
+    + typed ProvisionExecutionOutcome
+    + PartialFormatFailure
+    + CLI/TUI final semantics
+    + Result stage duration summary
+    + retained operation timeline/log
+
+Q8  清理与门禁
+    + 删除 magic slot 的重复消费路径
+    + 删除 label/hint/message/glyph 业务解析
+    + 拆分 TUI 维护性热点
+    + synthetic performance counters
+    + fmt / fast / full / Virtual Disk HIL
+    + 有真实慢盘时做最终 UI 验收
+```
+
+#### 14.12.14 本次治理的新增完成标准
+
+除 14.1～14.11 已列标准外，本次治理只有在以下条件也全部满足时才能结束：
+
+1. 改节点中文名称不会改变 DiskLayout region kind；
+2. 改字段帮助文案不会改变 Provision 可执行动作；
+3. 改 Review 文案不会改变 success/warning/error 判断；
+4. Devices/Backups 新增或删列时，列 schema 会在编译/测试阶段暴露 arity 不一致；
+5. `Known(Plain)` 与 `Unknown` 在设备和备份两端都不可混淆；
+6. LBA8 等 Overview 关键字段通过 stable key 获取，不依赖 label；
+7. Detail 的 `Known/Unknown/Reserved/Preserved` 均有真实模型来源，或未实现的状态已删除；
+8. passive Inspect 读取失败可显式重试，不会形成自动重试风暴；
+9. 同一 poll 中连续多个 Backup/Restore/Provision progress milestone 不丢失且顺序不变；
+10. Running 日志导航只改变 PaneViewport，不改变磁盘事务或 workspace selection；
+11. 不变数据集连续 redraw 不重复全量扫描备份 rows；
+12. 不变 Inspect state 连续查询不重复重建整棵 visible tree；
+13. UI-neutral DiskLayout/Inspect/Progress semantic model 不依赖 ratatui；
+14. Help/Footer 与当前真实 action capability 一致；
+15. Q8 完成后，当前已实现的 `PreserveOpaque / PreserveVerified / RewrapVerified / Rebuild / Drop` 可直接映射到第 14 章 UI 基础设施；未来 K6 `Migrate` 实现时无需推翻表格、磁盘布局、进度系统或 Pane 交互。
+
+第二轮审计后的治理目标从“把几个界面画得更清楚”提升为：**把 TUI 中仍然依赖数字 slot、中文文案、glyph、最后一条 message 的隐式协议全部替换为 typed contract；同时收口事件传输、视图缓存和模块 ownership。当前 Chapter 12 的已实现语义直接接入这些稳定接口，未来仅 K6 Migrate 等新增业务扩展，而不再次重写表格、磁盘布局、进度系统和 Pane 交互。**
+
+### 14.13 exFAT 生成器 / 解析器能力闭环：禁止生成自己无法验证的文件系统
+
+本轮实际验收暴露一个需要纳入治理的生产级边界问题：Mode1 的启动/交换二合一区约 `487357 MiB`（`998107136 sectors`，约 `475.93 GiB`）选择 exFAT 时，计划生成阶段报错：
+
+```text
+exFAT cluster count exceeds edpcli validated parser range
+```
+
+根因已定位：
+
+```text
+src/provision/filesystem.rs::choose_cluster_shift()
+```
+
+当前仅按卷大小做固定分段：
+
+```text
+>= 64 GiB  -> cluster_shift = 7
+               128 sectors/cluster
+               64 KiB/cluster
+```
+
+在该约 `475.93 GiB` 分区上，`exfat_geometry()` 得到约 `7,797,235` clusters；但 formatter 随后又强制：
+
+```text
+cluster_count <= 4_194_304
+```
+
+而 `backup_deep/exfat.rs` 的 exFAT parser 也使用相同的 `4_194_304` clusters 验证预算。因此问题不是用户输入非法，也不是 exFAT 无法支持该容量，而是：
+
+> **formatter 的 cluster-size policy 可以构造出一个超出 edpcli 自己 parser 验证预算的 geometry。**
+
+这是 producer / consumer capability 不闭环，必须作为本章治理项修掉，而不是让用户缩小分区规避。
+
+#### 14.13.1 核心不变量：Producer output 必须落在 Consumer validated domain 内
+
+对 edpcli 自己生成的任意受支持文件系统镜像，必须满足：
+
+```text
+FormatterSupported(volume, options)
+        =>
+DeepParserAccepts(formatter_output)
+        &&
+ReadbackVerifierAccepts(formatter_output)
+```
+
+至少对 exFAT 明确为：
+
+```text
+build_exfat_sparse_image(...)
+  -> geometry.cluster_count <= EXFAT_MAX_VALIDATED_CLUSTERS
+  -> backup_deep::exfat parser 接受同一 boot geometry
+```
+
+如果 formatter 无法在当前验证能力内找到合法 geometry，则必须在**计划生成阶段**返回明确的“当前 edpcli 不支持该 geometry”错误，绝不能先构造一个自己后续无法验证的文件系统。
+
+该不变量以后同样适用于 FAT16/FAT32/NTFS：生成器的输出域不能大于 parser/readback verifier 的已验证输入域。
+
+#### 14.13.2 共享验证上限，删除 magic `4_194_304`
+
+当前 `4_194_304` 至少分别出现在：
+
+```text
+provision/filesystem.rs
+backup_deep/exfat.rs
+```
+
+本次治理将它提升为 UI-neutral / filesystem-domain 的共享 capability 常量或结构，例如：
+
+```rust
+ExFatValidatedLimits {
+    max_cluster_count,
+    min_cluster_shift,
+    max_cluster_shift,
+    ...
+}
+```
+
+或至少：
+
+```rust
+EXFAT_MAX_VALIDATED_CLUSTERS
+```
+
+要求：
+
+- formatter 与 parser 使用同一事实源；
+- 常量命名必须表达“edpcli 当前验证预算”，不能冒充 exFAT 规范本身的理论上限；
+- 如果未来 Deep parser 扩大预算，只修改 canonical capability 定义并跑 compatibility tests；
+- 禁止 generator/parser 两侧再次复制相同 magic number。
+
+#### 14.13.3 cluster size 选择改为 geometry-driven，而不是只看容量阈值
+
+`choose_cluster_shift(volume_sectors)` 不再只返回一个固定 shift。目标算法：
+
+```text
+1. 根据卷容量得到首选/最小候选 cluster shift；
+2. 计算 exfat_geometry(volume_sectors, shift)；
+3. 如果 geometry 合法且 cluster_count <= validated limit：接受；
+4. 否则增大 cluster shift，重新计算 geometry；
+5. 选择“满足所有验证约束的最小 cluster size”；
+6. 候选耗尽仍无法满足时，返回结构化 UnsupportedGeometry。
+```
+
+即：
+
+```text
+for shift in allowed_candidate_shifts:
+    geometry = exfat_geometry(volume, shift)?
+    if geometry.cluster_count <= validated_limit
+       && geometry satisfies formatter/parser invariants:
+        return geometry
+return UnsupportedGeometry
+```
+
+这样对本次约 `475.93 GiB` 的 case，64 KiB cluster 不满足预算时，会自动尝试更大的 cluster；例如 128 KiB cluster 的 cluster count 约减半，可落回当前 `4,194,304` 验证预算内。
+
+注意：
+
+- 不硬编码“475 GiB 就用 128 KiB”；必须由 geometry 计算决定；
+- 不把 cluster 数量压到预算以下作为唯一条件，还必须满足现有 FAT/heap/root/bitmap/upcase 等 geometry 不变量；
+- 选择策略应稳定、确定，同样输入产生同样 geometry；
+- UI 不让用户手工处理这个实现约束，除非未来明确增加高级 cluster-size override；本轮默认自动选安全 geometry。
+
+#### 14.13.4 把文件系统能力检查提前到计划验证
+
+当前错误虽然发生在“生成计划”阶段，方向是对的，但错误文案暴露了底层 parser budget，且用户不知道如何处理。
+
+本次治理增加 typed validation error，例如：
+
+```text
+FilesystemPlanError::UnsupportedGeometry {
+    filesystem,
+    volume_sectors,
+    attempted_cluster_sizes,
+    reason,
+}
+```
+
+正常情况下 adaptive geometry 应自动消除此类错误；真正无法支持时，TUI/CLI 映射为用户可执行的提示，例如：
+
+```text
+无法为当前分区生成受 edpcli 验证支持的 exFAT 布局。
+分区大小：475.93 GiB
+已尝试的簇大小：...
+请改用其它文件系统或调整分区大小。
+```
+
+不能再直接把：
+
+```text
+validated parser range
+```
+
+这类内部实现术语作为主要用户错误。
+
+#### 14.13.5 增加 formatter -> parser round-trip contract test
+
+这是防止同类问题再次出现的核心门禁。
+
+对每一个 edpcli 自己支持“创建 + 深度解析/读回”的文件系统，建立 contract：
+
+```text
+formatter(input)
+   ↓
+sparse image / virtual sector device
+   ↓
+canonical parser
+   ↓
+parser accepts + geometry matches formatter intent
+```
+
+exFAT 至少验证：
+
+```text
+VolumeLength
+FatOffset
+FatLength
+ClusterHeapOffset
+ClusterCount
+RootDirectoryCluster
+BytesPerSectorShift
+SectorsPerClusterShift
+NumberOfFats
+boot checksum
+```
+
+测试不能只断言“build 返回 Ok”；必须证明**生成结果能被自己的 consumer 重新读取**。
+
+如果 Deep parser 需要块设备接口，使用测试内的 sparse/fake SectorDev 映射 formatter 输出，不写真实盘。
+
+#### 14.13.6 exFAT 容量边界矩阵
+
+新增系统化容量矩阵，至少覆盖：
+
+```text
+小卷边界：
+  64 MiB 前后
+
+常见卷：
+  1 GiB
+  8 GiB
+  32 GiB
+  64 GiB 前后
+  128 GiB
+  256 GiB 前后
+
+当前 bug 区间：
+  300 GiB
+  475.93 GiB（本次真实回归样本）
+  512 GiB
+
+更大容量：
+  1 TiB
+  当前 edpcli 声明支持范围内的更大代表值
+```
+
+每一个样本检查：
+
+```text
+geometry succeeds 或返回明确 UnsupportedGeometry
+cluster_count <= validated limit（若 succeeds）
+cluster shift 在允许范围
+FAT/heap 不越界
+formatter -> parser round-trip PASS
+```
+
+尤其对 threshold 做 `boundary - 1 / boundary / boundary + 1`，防止容量分段出现 off-by-one。
+
+#### 14.13.7 cluster-budget 精确边界测试
+
+不能只按 GiB 测试，还要围绕真正的能力边界构造 case：
+
+```text
+cluster_count == 4_194_304       -> 必须接受
+cluster_count == 4_194_305       -> 当前 shift 必须被拒绝/自动升级 shift
+升级 shift 后重新进入预算         -> 必须接受
+所有允许 shift 均超预算/geometry 非法 -> 明确 UnsupportedGeometry
+```
+
+这些测试直接针对 capability invariant，比只测某几个容量更能防止以后修改 FAT offset/alignment 时重新越界。
+
+#### 14.13.8 property / sweep test：避免只修当前 476 GiB 一个点
+
+增加确定性的容量 sweep，不使用随机 flaky 测试。例如在声明支持范围内按：
+
+```text
+对数级代表容量
++ 所有 policy threshold 邻域
++ validated cluster limit 邻域
++ 若干固定 seed 的伪随机容量
+```
+
+循环验证：
+
+```text
+if formatter returns Ok(image):
+    assert parser accepts image
+    assert geometry is internally consistent
+```
+
+核心 property：
+
+```text
+不存在 formatter=Ok 但 canonical parser=Err 的容量点
+```
+
+如果测试成本较高，可把大 sweep 放 full profile；fast profile 保留关键边界 + 本次真实回归样本。
+
+#### 14.13.9 其它文件系统增加同类 capability contract
+
+本次 bug 虽然来自 exFAT，但门禁不能只修 exFAT。
+
+审计/测试 FAT16、FAT32、NTFS 的 formatter 和 parser/readback verifier，建立统一规则：
+
+```text
+Producer capability <= Consumer validated capability
+```
+
+至少增加：
+
+- 最小支持容量附近；
+- FAT 类型切换阈值附近；
+- 最大已验证 geometry 附近；
+- formatter 生成镜像后自身 parser/readback 可接受；
+- 超出预算时必须在写盘前失败。
+
+不要求本轮扩大所有 parser 的能力范围；重点是**不能生成自己不支持验证的输出**。
+
+#### 14.13.10 本次真实回归样本固定进测试资产
+
+加入一个不依赖真实 U 盘的 regression fixture：
+
+```text
+Mode1
+whole disk / layout representative of screenshot
+combined boot/share:
+  start = 63
+  sectors = 998107136
+filesystem = exFAT
+```
+
+验收：
+
+```text
+plan generation PASS
+selected exFAT geometry within validated budget
+formatter PASS
+canonical exFAT parser PASS
+不再出现 "exFAT cluster count exceeds edpcli validated parser range"
+```
+
+测试应直接使用 sector 数，不使用截图中的四舍五入 MiB 文本作为输入。
+
+#### 14.13.11 与 Q0～Q8 合并
+
+本项不新增平行阶段，纳入现有治理：
+
+```text
+Q0
+  + 先加入 475.93 GiB exFAT 失败回归测试
+  + cluster limit boundary tests
+  + formatter->parser contract failing test
+
+Q4
+  + Filesystem capability / validation error typed presentation
+  + 用户错误不直接暴露 parser budget 内部术语
+
+Q5 前的 filesystem-domain 子任务
+  + 共享 ExFatValidatedLimits
+  + geometry-driven cluster shift selection
+  + formatter/parser 共享 capability source
+
+Q8
+  + exFAT capacity matrix
+  + deterministic property/sweep test
+  + FAT16/FAT32/NTFS producer-consumer capability audit
+  + fast/full 分层门禁
+```
+
+实际执行顺序中，**exFAT formatter 修复必须在任何真实盘 Mode1 大容量制盘验收之前完成。**
+
+#### 14.13.12 完成标准
+
+本次治理增加以下硬门禁：
+
+1. `4_194_304` 不再在 exFAT formatter/parser 两侧重复定义；
+2. `choose_cluster_shift` 不再只凭容量阈值返回一个必然接受的固定结果；
+3. 本次 `998107136-sector` exFAT 回归样本可以成功生成受支持 geometry；
+4. formatter 成功的 exFAT 镜像必须能被 canonical exFAT parser 接受；
+5. `cluster_count == limit` 与 `limit + 1` 都有精确测试；
+6. 64 MiB、1 GiB、64 GiB、256 GiB 等策略边界前后都有测试；
+7. fast suite 至少覆盖关键边界与真实回归样本；full suite 覆盖 deterministic sweep；
+8. 不存在“formatter 返回 Ok，但自身 parser 因 geometry budget 拒绝”的已支持容量；
+9. 无法支持的 geometry 在写盘前失败，且 TUI/CLI 给出结构化、可操作错误；
+10. 其它受支持文件系统也建立 producer -> consumer compatibility contract，防止同类能力漂移。
+
+最终原则：**edpcli 只允许创建自己能够可靠解析、读回和验证的文件系统。formatter 与 parser 的能力边界必须来自同一个事实源，并由 round-trip + boundary + sweep tests 持续证明。**
+
+### 14.14 基于 GitHub 当前 main 的第三轮审计（main 26df947，2026-09-26）
+
+本节覆盖 14.11/14.12 中基于旧 main 的事实判断。审计仅使用 GitHub 当前 main，不依赖本机工作区。
+
+#### 14.14.1 当前 main 相对旧计划基线的关键变化
+
+计划分支原先最后一次同步的 merge-base 是 `f436e4f`；当前 GitHub main 已推进到 `26df947`，中间包含 108 个提交，最重要的是 PR #24 已合并 Chapter 12 key-domain/region-mapping 实现。
+
+当前事实：
+
+```text
+Chapter 12:
+  K0–K5   COMPLETE
+  K6      DEFERRED / Migrate fail-closed
+  K7      COMPLETE
+  K8      PENDING（真实 USB 验收）
+
+Chapter 13:
+  P0–P8   COMPLETE
+```
+
+因此第 14 章不再面对“未来可能出现的 Chapter 12 类型”，而是必须与已经存在的实现对齐。
+
+#### 14.14.2 已确认仍然存在、无需从计划删除的问题
+
+基于当前 main 源码再次核对：
+
+```text
+src/tui/task.rs
+  write_progress:     Option<(OperationId, WriteEvent)>
+  provision_progress: Option<(OperationId, String)>
+```
+
+同一 poll 内多 progress event 被后事件覆盖的风险仍存在，14.11.5 / 14.12.8 保持原计划。
+
+```text
+src/tui/provision/fields.rs
+  provision_field_slot()
+  0/1/2/3.. 等 magic slot
+  Chapter 12 新增 30/31/32/33 等密码域 slot
+  section.starts_with("普通分区 P")
+```
+
+所以 typed `ProvisionFieldId / FieldDescriptor / capabilities` 不仅仍有必要，而且现在必须覆盖 Chapter 12 新增的**来源密码、目标密码、逐域验证状态、PreserveOpaque 禁用目标密码**等字段。
+
+```text
+src/tui/disk_layout.rs
+  node.id.starts_with(...)
+  node.label.starts_with("MBR P")
+  detail.starts_with('✓'/'✗')
+```
+
+DiskLayout typed semantic / typed presentation row 治理仍然有效。
+
+```text
+src/provision/filesystem.rs
+  choose_cluster_shift()
+  cluster_count > 4_194_304
+
+src/backup_deep/exfat.rs
+  cluster_count > 4_194_304
+```
+
+14.13 的 exFAT producer/consumer capability 闭环问题在当前 main 仍未修复，必须保留。
+
+#### 14.14.3 Chapter 12 已落地后，第 14 章需要新增的兼容门禁
+
+当前 main 已有：
+
+```text
+RegionDisposition:
+  PreserveOpaque
+  PreserveVerified
+  RewrapVerified
+  Migrate
+  Rebuild
+  Drop
+
+SourcePasswordKnowledge:
+  DefaultVerified
+  UserVerified
+  Unknown
+
+RegionMappingKind:
+  PreserveCandidate
+  Rebuild
+  Drop
+  MigrateUnsupported
+```
+
+因此 Q4 的目标从“预留未来 enum”改为：
+
+1. **直接消费现有 RegionDisposition**，不创建第二套业务处置枚举；
+2. `PreserveAssessment` 若新增，只能是对现有 planner/compatibility failure 的只读解释层，不能重新计算 disposition；
+3. Review / DiskLayout 的“保留、重包、重建、Drop、Migrate unsupported”必须来自现有 application plan；
+4. `PreserveOpaque` 时目标密码继续禁用；
+5. `RewrapVerified` 必须保持 `K_old`，data extent 继续 0 写入；
+6. K6 未实现前，任何 `MigrateUnsupported` 仍必须 fail-closed，不允许 UI 优化把它静默改成 Rebuild；
+7. Share/Encrypt 两个 source/target password domain 保持完全独立；
+8. secret Debug redaction 门禁必须继续通过。
+
+新增回归测试应至少锁定：
+
+```text
+改 UI 表格/字段 schema 后：
+  PreserveOpaque target password 仍禁用
+  v 只验证当前 domain
+  Share password 不污染 Encrypt
+  Encrypt password 不污染 Share
+  Rewrap 只改 wrapper
+  Opaque/Verified preserved extent 仍不进 write-set
+  MigrateUnsupported 仍显式拒绝
+  password / FileKey 不进入 Debug / log / progress
+```
+
+#### 14.14.4 ProvisionField schema 必须吸收当前 main 新增的密码域字段
+
+14.12.2 的建议 FieldId 需要按当前 main 扩充，至少包含：
+
+```text
+ShareSourcePassword
+ShareTargetPassword
+EncryptSourcePassword
+EncryptTargetPassword
+SharePasswordKnowledge
+EncryptPasswordKnowledge
+VerifySourcePassword(domain)
+```
+
+但 knowledge 可以作为 field state 而非独立可编辑 field，具体结构实现时决定。
+
+关键不是名字，而是保证：
+
+```text
+field identity
+editable/secret
+input policy
+domain
+capabilities
+disabled reason
+validation state
+```
+
+都有 typed source，而不是继续通过 slot、label、hint 或 “PreserveOpaque 禁用”字符串反推。
+
+#### 14.14.5 Review typed presentation 必须建立在现有 typed business model 之上
+
+当前 main 的 Review 已经正确 match `RegionDisposition`，但随后仍把它扁平化成 `Vec<String>`。
+
+因此 14.12.4 的正确迁移顺序是：
+
+```text
+RegionDisposition / PasswordKnowledge / TargetPasswordPolicy
+        ↓
+typed ReviewSection / ChangeRow / KeyValueRow
+        ↓
+renderer
+```
+
+禁止退化为：
+
+```text
+typed business state
+  -> 拼中文字符串
+  -> renderer 再 starts_with/contains 猜回状态
+```
+
+#### 14.14.6 Q0～Q8 执行顺序更新
+
+Q0～Q8 仍是唯一实施顺序，但执行前提更新为：
+
+```text
+Q0
+  基线固定为当前 GitHub main（至少包含 PR #24 / 26df947）
+  把 Chapter 12 已落地行为加入“不允许回归”测试
+
+Q1–Q3
+  继续 Inspect / identity contract 治理
+
+Q4
+  直接集成现有 RegionDisposition / KeyDomain / PasswordKnowledge
+  不另建业务 enum
+  ProvisionField schema 覆盖 Chapter 12 新密码域字段
+
+Q5–Q7
+  progress/outcome 改造不得改变 Chapter 12 prepare/commit/write-set 安全语义
+
+Q8
+  除原门禁外，必须跑 Chapter 12 key-domain suites + Virtual Disk HIL
+```
+
+真实 USB K8 属于 Chapter 12 独立验收状态：第 14 章不能擅自把它标 COMPLETE；但第 14 章如果修改了真实制盘 Running/Result/Review 路径，最终真实盘验收必须同时观察这些 UI 改造是否正确。
+
+#### 14.14.7 PR / 实施分支策略
+
+旧计划分支已经落后 main 108 个提交，不应直接在其上继续实现。正确方式：
+
+```text
+current main
+  ↓
+本次 refreshed plan PR
+  ↓ merge
+最新 main
+  ↓
+新建 Chapter 14 implementation branch
+  ↓
+严格 Q0 → Q8
+```
+
+不要把旧 `plan/inspect-tree-decode-consistency-20260926` 当作实现基线，也不要在实现分支 cherry-pick 旧生产代码；旧分支只作为计划历史来源。
+
+第三轮审计结论：**计划需要更新，但主体 Q0～Q8 不需要推翻。真正变化的是：Chapter 12 已从“未来设计”变成“现有事实”，第 14 章必须直接复用并保护其 typed business model；同时 exFAT、progress transport、magic slot、DiskLayout 字符串语义等问题在当前 main 仍然存在，继续作为本次治理任务。**
+
