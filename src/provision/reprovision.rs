@@ -1039,9 +1039,10 @@ impl TargetProvisionPlan {
                     .enumerate()
                     .find(|(_, old)| old.role == target.role)
                 {
-                    if decide_partition_action(Some(old), target) == PartitionAction::PreserveExact
-                    {
-                        let record = source.records[source_index];
+                    let record = source.records[source_index];
+                    let source_region = super::SourceRegion::from_existing(*old, record);
+                    let target_region = super::TargetRegion::from_target(*target);
+                    if super::preserve_compatibility(source_region, target_region).is_ok() {
                         disposition = if record.lba12.need_encrypt == 0 {
                             RegionDisposition::PreserveVerified
                         } else if let Some(domain) =
