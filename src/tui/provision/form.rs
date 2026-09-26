@@ -1,4 +1,4 @@
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct ProvisionForm {
     pub boot_input_mode: crate::provision::CapacityInputMode,
     pub share_input_mode: crate::provision::CapacityInputMode,
@@ -46,6 +46,24 @@ pub struct ProvisionForm {
     pub cancel_password_complexity_check: bool,
     pub max_share_password_errors: String,
     pub max_encrypt_password_errors: String,
+}
+
+impl std::fmt::Debug for ProvisionForm {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("ProvisionForm")
+            .field("label_id", &self.label_id)
+            .field("user", &self.user)
+            .field("dept", &self.dept)
+            .field("label", &self.label)
+            .field("share_source_knowledge", &self.share_source_knowledge)
+            .field("share_source_password", &"[REDACTED]")
+            .field("share_target_password", &"[REDACTED]")
+            .field("encrypt_source_knowledge", &self.encrypt_source_knowledge)
+            .field("encrypt_source_password", &"[REDACTED]")
+            .field("encrypt_target_password", &"[REDACTED]")
+            .finish_non_exhaustive()
+    }
 }
 
 #[derive(Debug, Clone)]

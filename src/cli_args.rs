@@ -70,7 +70,7 @@ pub struct InfoOpts {
     pub backup_dir: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct ProvisionNewOpts {
     pub disk: Option<u32>,
     pub target: crate::provision::ProvisionTarget,
@@ -106,6 +106,25 @@ pub struct ProvisionNewOpts {
     pub cancel_password_complexity_check: Option<bool>,
     pub max_share_password_errors: Option<u8>,
     pub max_encrypt_password_errors: Option<u8>,
+}
+
+impl std::fmt::Debug for ProvisionNewOpts {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("ProvisionNewOpts")
+            .field("disk", &self.disk)
+            .field("target", &self.target)
+            .field("plain_partitions", &self.plain_partitions)
+            .field("label_id", &self.label_id)
+            .field("user", &self.user)
+            .field("dept", &self.dept)
+            .field("label", &self.label)
+            .field("share_source_password", &"[REDACTED]")
+            .field("share_target_password", &"[REDACTED]")
+            .field("encrypt_source_password", &"[REDACTED]")
+            .field("encrypt_target_password", &"[REDACTED]")
+            .finish_non_exhaustive()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

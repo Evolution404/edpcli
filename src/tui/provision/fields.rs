@@ -778,6 +778,7 @@ impl AppState {
                 chars.remove(cursor);
                 *field = chars.into_iter().collect();
                 self.provision_mark_capacity_edit(slot);
+                self.provision_mark_source_password_unverified(slot);
                 self.provision.message = None;
             }
         }
