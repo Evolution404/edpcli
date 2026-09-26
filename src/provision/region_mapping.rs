@@ -41,7 +41,7 @@ pub struct RegionKeyProfile {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct SourceRegion {
     pub role: PartitionRole,
-    pub partition_type: u8,
+    pub partition_type: u32,
     pub extent: Extent,
     pub physical_crypto: PhysicalCryptoProfile,
     pub filesystem: FilesystemProfile,
@@ -51,7 +51,7 @@ pub struct SourceRegion {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct TargetRegion {
     pub role: PartitionRole,
-    pub partition_type: u8,
+    pub partition_type: u32,
     pub extent: Extent,
     pub physical_crypto: PhysicalCryptoProfile,
     pub filesystem: FilesystemProfile,
