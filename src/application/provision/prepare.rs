@@ -282,12 +282,37 @@ pub fn prepare_target_provision(
         )
     })?;
     for part in &mut target_plan.partitions {
-        if request.format.choice(part.geometry.role).0
-            && part.action == PartitionAction::PreserveExact
-        {
+        if request.format.choice(part.geometry.role).0 && part.disposition.preserves_extent() {
             part.action = PartitionAction::Rebuild;
-            part.reason = "用户选择重新格式化；原数据不能原样保留".into();
+            part.disposition = RegionDisposition::Rebuild;
+            part.target_password_policy =
+                KeyDomainRole::from_partition_role(part.geometry.role)
+                    .map(|_| TargetPasswordPolicy::InitializeNew);
+            part.reason = "用户选择重新格式化；Preserve family 已显式转为 Rebuild".into();
             part.preserved_record = None;
+        }
+    }
+    for part in &target_plan.partitions {
+        if part.disposition == RegionDisposition::Migrate {
+            return Err(err(
+                EXIT_TARGET,
+                format!(
+                    "错误: {}需要数据迁移；K6 尚未实现，禁止静默降级",
+                    part.geometry.role.label()
+                ),
+            ));
+        }
+        if part.disposition == RegionDisposition::Rebuild
+            && part.geometry.role != PartitionRole::CompatibilityReserve
+            && !request.format.choice(part.geometry.role).0
+        {
+            return Err(err(
+                EXIT_TARGET,
+                format!(
+                    "错误: {}为 Rebuild，必须显式启用完整文件系统初始化；拒绝 K_new + old ciphertext",
+                    part.geometry.role.label()
+                ),
+            ));
         }
     }
     let source_onlyid = source.as_ref().and_then(|_| {
@@ -377,65 +402,125 @@ pub fn prepare_target_provision(
     .map_err(|message| err(EXIT_TARGET, message))?;
     let mut file_keys = Vec::with_capacity(target_plan.partitions.len());
     for (index, part) in target_plan.partitions.iter().enumerate() {
-        if let Some(record) = part.preserved_record {
-            let key = if record.lba12.need_encrypt != 0 {
-                let (_, Some(password)) = resolved_source_password(
-                    source
-                        .as_ref()
-                        .ok_or_else(|| err(EXIT_TARGET, "错误: 保留计划缺少来源注册信息"))?,
-                    &request.key_domains,
-                    part.geometry.role,
-                ) else {
+        match part.disposition {
+            RegionDisposition::PreserveOpaque | RegionDisposition::PreserveVerified => {
+                let record = part.preserved_record.ok_or_else(|| {
+                    err(
+                        EXIT_TARGET,
+                        format!(
+                            "错误: {}保留计划缺少来源 key record",
+                            part.geometry.role.label()
+                        ),
+                    )
+                })?;
+                file_keys.push([0; 16]);
+                if record.lba12.need_encrypt != 0 {
+                    plan = plan
+                        .with_partition_key_material(
+                            index,
+                            record.lba7_key_material(),
+                            record
+                                .lba12_key_material()
+                                .map_err(|message| err(EXIT_TARGET, message))?,
+                        )
+                        .map_err(|message| err(EXIT_TARGET, message))?;
+                }
+            }
+            RegionDisposition::RewrapVerified => {
+                let record = part.preserved_record.ok_or_else(|| {
+                    err(
+                        EXIT_TARGET,
+                        format!(
+                            "错误: {}Rewrap 计划缺少来源 key record",
+                            part.geometry.role.label()
+                        ),
+                    )
+                })?;
+                let source = source
+                    .as_ref()
+                    .ok_or_else(|| err(EXIT_TARGET, "错误: Rewrap 计划缺少来源注册信息"))?;
+                let (_, Some(source_password)) =
+                    resolved_source_password(source, &request.key_domains, part.geometry.role)
+                else {
                     return Err(err(
                         EXIT_TARGET,
                         format!(
-                            "错误: {}来源密码未知，不能执行需要解包 FileKey 的保留路径",
+                            "错误: {}Rewrap 需要已验证来源密码",
                             part.geometry.role.label()
                         ),
                     ));
                 };
-                record.verified_sm4_file_key(password).map_err(|message| {
-                    err(
-                        EXIT_TARGET,
-                        format!("错误: 保留分区密钥无法验证: {message}"),
-                    )
-                })?
-            } else {
-                [0; 16]
-            };
-            file_keys.push(key);
-            if record.lba12.need_encrypt != 0 {
+                let target_password = request
+                    .key_domains
+                    .target_password(part.geometry.role)
+                    .ok_or_else(|| {
+                        err(
+                            EXIT_TARGET,
+                            format!("错误: {}Rewrap 需要目标密码", part.geometry.role.label()),
+                        )
+                    })?;
+                let mut legacy_key =
+                    unwrap_legacy_lba7_file_key(source_password, record.lba7_key_material())
+                        .map_err(|message| err(EXIT_TARGET, message))?;
+                let file_key = record
+                    .verified_sm4_file_key(source_password)
+                    .map_err(|message| err(EXIT_TARGET, message))?;
+                let lba7_material = wrap_legacy_lba7_file_key(target_password, legacy_key);
+                legacy_key.fill(0);
+                let lba12_material =
+                    wrap_file_key(target_password, file_key, FileKeyWrapMode::Sm4);
+                file_keys.push(file_key);
                 plan = plan
-                    .with_partition_key_material(
-                        index,
-                        record.lba7_key_material(),
-                        record
-                            .lba12_key_material()
-                            .map_err(|message| err(EXIT_TARGET, message))?,
-                    )
+                    .with_partition_key_material(index, lba7_material, lba12_material)
                     .map_err(|message| err(EXIT_TARGET, message))?;
             }
-        } else if KeyDomainRole::from_partition_role(part.geometry.role).is_some() {
-            let password = request
-                .key_domains
-                .target_password(part.geometry.role)
-                .ok_or_else(|| {
-                    err(
-                        EXIT_TARGET,
-                        format!("错误: {}目标密码不能为空", part.geometry.role.label()),
-                    )
-                })?;
-            let key = random_array::<16>()?;
-            file_keys.push(key);
-            plan = plan
-                .with_partition_key_material(
-                    index,
-                    wrap_legacy_lba7_file_key(password, random_array::<8>()?),
-                    wrap_file_key(password, key, FileKeyWrapMode::Sm4),
-                )
-                .map_err(|message| err(EXIT_TARGET, message))?;
-        } else {
-            file_keys.push([0; 16]);
+            RegionDisposition::Rebuild => {
+                if part.geometry.physically_encrypted
+                    && KeyDomainRole::from_partition_role(part.geometry.role).is_some()
+                {
+                    let password = request
+                        .key_domains
+                        .target_password(part.geometry.role)
+                        .ok_or_else(|| {
+                            err(
+                                EXIT_TARGET,
+                                format!(
+                                    "错误: {}目标密码不能为空",
+                                    part.geometry.role.label()
+                                ),
+                            )
+                        })?;
+                    let key = random_array::<16>()?;
+                    file_keys.push(key);
+                    plan = plan
+                        .with_partition_key_material(
+                            index,
+                            wrap_legacy_lba7_file_key(password, random_array::<8>()?),
+                            wrap_file_key(password, key, FileKeyWrapMode::Sm4),
+                        )
+                        .map_err(|message| err(EXIT_TARGET, message))?;
+                } else {
+                    file_keys.push([0; 16]);
+                }
+            }
+            RegionDisposition::Migrate => {
+                return Err(err(
+                    EXIT_TARGET,
+                    format!(
+                        "错误: {}需要 Migrate，但当前版本未实现 K6",
+                        part.geometry.role.label()
+                    ),
+                ));
+            }
+            RegionDisposition::Drop => {
+                return Err(err(
+                    EXIT_TARGET,
+                    format!(
+                        "错误: 目标分区 {}不能使用 Drop disposition",
+                        part.geometry.role.label()
+                    ),
+                ));
+            }
         }
     }
     let format_options = request.format.clone();
