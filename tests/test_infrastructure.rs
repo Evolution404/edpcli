@@ -232,5 +232,5 @@ fn timing_regression_gate_is_explicit_and_overrideable() {
     assert!(runner.contains("timing budget exceeded"));
 
     let ci = read(".github/workflows/ci.yml");
-    assert!(ci.contains("EDPCLI_TEST_MAX_SECONDS: \"120\""));
+    assert!(ci.contains("EDPCLI_TEST_MAX_SECONDS: \"180\""));
 }

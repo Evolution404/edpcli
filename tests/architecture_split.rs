@@ -68,6 +68,7 @@ fn large_modules_are_split_by_domain_boundary() {
         "src/diskio/backup_catalog.rs",
         "src/diskio/backup_create.rs",
         "src/tui/provision/state.rs",
+        "src/tui/provision/form.rs",
         "src/tui/provision/render.rs",
         "src/tui/provision/task.rs",
         "src/tui/inspect/state.rs",
@@ -84,6 +85,28 @@ fn large_modules_are_split_by_domain_boundary() {
     assert!(lines("src/tui/state.rs") < 3_500);
     assert!(lines("src/tui/render.rs") < 1_500);
     assert!(lines("src/tui/task.rs") < 1_000);
+    assert!(
+        lines("src/tui/provision/state.rs") < 2_250,
+        "Provision orchestration state must not absorb form/capacity/plain model again"
+    );
+    assert!(
+        lines("src/tui/provision/form.rs") < 650,
+        "Provision form model must stay responsibility-bounded"
+    );
+    let provision_form =
+        fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("src/tui/provision/form.rs"))
+            .expect("read provision form model");
+    for forbidden in [
+        "AppState",
+        "crate::application",
+        "crate::platform",
+        "crate::diskio",
+    ] {
+        assert!(
+            !provision_form.contains(forbidden),
+            "Provision form model must stay pure and independent of orchestration/I/O: {forbidden}"
+        );
+    }
     let semantic =
         fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("src/protocol/semantic.rs"))
             .expect("read protocol semantic layer");
