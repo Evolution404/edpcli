@@ -8,7 +8,8 @@ use edpcli::{
         parse_existing_provision, prefill_for_target_mode, wrap_file_key,
         wrap_legacy_lba7_file_key, CapacityInput, CapacityInputMode, CapacitySource,
         DiskProvisionKind, ExistingPartition, ExistingProvisionProfile, FileKeyWrapMode,
-        OfficialFilesystemFormat, OfficialPartitionMode, OfficialPartitionSizes,
+        KeyDomainSecretPair, KeyDomainSecrets, OfficialFilesystemFormat, OfficialPartitionMode,
+        OfficialPartitionSizes,
         OfficialProvisionPlan, OnlyId, PartitionAction, PartitionRole, PassInfoPolicy,
         ProvisionEntropy, ProvisionMetadata, ProvisionProfile, ProvisionSpec, ProvisionTarget,
         QuickCapacityUnit, TargetGeometryOverrides, TargetIdentity, TargetProvisionPlan,
@@ -18,6 +19,14 @@ use edpcli::{
 
 const SECTOR_SIZE: u64 = 512;
 const MIB_SECTORS: u64 = 2048;
+
+fn domain_secrets(source: Option<&[u8]>, target: &[u8]) -> KeyDomainSecrets {
+    KeyDomainSecrets::new(
+        KeyDomainSecretPair::new(source, Some(target)),
+        KeyDomainSecretPair::new(source, Some(target)),
+    )
+}
+
 
 #[test]
 fn provision_target_keeps_plain_outside_the_official_mode_domain() {
@@ -961,7 +970,7 @@ fn target_plan_preserves_only_verified_matching_data() {
         OfficialPartitionMode::BootShareCombined,
         &targets,
         16_000_000,
-        b"ProofPass1!",
+        &domain_secrets(Some(b"ProofPass1!"), b"ProofPass1!"),
     )
     .unwrap();
     assert_eq!(unknown_fs.partitions[1].action, PartitionAction::Rebuild);
@@ -974,7 +983,7 @@ fn target_plan_preserves_only_verified_matching_data() {
         OfficialPartitionMode::BootShareCombined,
         &targets,
         16_000_000,
-        b"ProofPass1!",
+        &domain_secrets(Some(b"ProofPass1!"), b"ProofPass1!"),
     )
     .unwrap();
     assert_eq!(plan.partitions[0].action, PartitionAction::Rebuild);
@@ -1001,7 +1010,7 @@ fn target_plan_preserves_only_verified_matching_data() {
         OfficialPartitionMode::BootShareCombined,
         &targets,
         16_000_000,
-        b"incorrect",
+        &domain_secrets(Some(b"incorrect"), b"ProofPass1!"),
     )
     .unwrap();
     assert_eq!(
@@ -1035,7 +1044,7 @@ fn exact_encrypted_extent_with_unknown_password_stays_a_preserve_candidate() {
         OfficialPartitionMode::BootShareCombined,
         &targets,
         16_000_000,
-        b"unknown-password",
+        &domain_secrets(None, b"ProofPass1!"),
     )
     .unwrap();
 
