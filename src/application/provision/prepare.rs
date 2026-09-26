@@ -473,9 +473,7 @@ pub fn prepare_target_provision(
                     .map_err(|message| err(EXIT_TARGET, message))?;
             }
             RegionDisposition::Rebuild => {
-                if part.geometry.physically_encrypted
-                    && KeyDomainRole::from_partition_role(part.geometry.role).is_some()
-                {
+                if KeyDomainRole::from_partition_role(part.geometry.role).is_some() {
                     let password = request
                         .key_domains
                         .target_password(part.geometry.role)
