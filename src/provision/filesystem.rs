@@ -28,6 +28,27 @@ pub enum OfficialFilesystemFormat {
     Fat32,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum FilesystemPlanError {
+    UnsupportedGeometry {
+        filesystem: OfficialFilesystemFormat,
+        volume_sectors: u64,
+        attempted_cluster_shifts: Vec<u8>,
+    },
+}
+
+impl std::fmt::Display for FilesystemPlanError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::UnsupportedGeometry { filesystem, volume_sectors, attempted_cluster_shifts } => write!(
+                formatter,
+                "无法为 {volume_sectors} 扇区的分区生成受支持的 {} 布局（已尝试簇大小 shift {:?}）；请调整分区大小或文件系统",
+                filesystem.windows_format_name(), attempted_cluster_shifts,
+            ),
+        }
+    }
+}
+
 impl OfficialFilesystemFormat {
     pub const fn first_party_default() -> Self {
         Self::ExFat
@@ -232,7 +253,7 @@ pub fn build_empty_fat16(
     })
 }
 
-fn choose_cluster_shift(volume_sectors: u64) -> u8 {
+fn preferred_cluster_shift(volume_sectors: u64) -> u8 {
     const GIB_SECTORS: u64 = 1024 * 1024 * 1024 / 512;
     const MIB_SECTORS: u64 = 1024 * 1024 / 512;
     if volume_sectors >= 64 * GIB_SECTORS {
@@ -244,6 +265,25 @@ fn choose_cluster_shift(volume_sectors: u64) -> u8 {
     } else {
         3
     }
+}
+
+fn choose_cluster_shift(volume_sectors: u64) -> Result<u8, FilesystemPlanError> {
+    let mut attempted_cluster_shifts = Vec::new();
+    for shift in preferred_cluster_shift(volume_sectors)
+        ..=crate::filesystem_capability::EXFAT_MAX_VALIDATED_CLUSTER_SHIFT
+    {
+        attempted_cluster_shifts.push(shift);
+        if let Ok((_, _, cluster_count)) = exfat_geometry(volume_sectors, shift) {
+            if cluster_count <= crate::filesystem_capability::EXFAT_MAX_VALIDATED_CLUSTERS {
+                return Ok(shift);
+            }
+        }
+    }
+    Err(FilesystemPlanError::UnsupportedGeometry {
+        filesystem: OfficialFilesystemFormat::ExFat,
+        volume_sectors,
+        attempted_cluster_shifts,
+    })
 }
 
 fn exfat_geometry(volume_sectors: u64, cluster_shift: u8) -> Result<(u64, u64, u32), String> {
@@ -393,12 +433,10 @@ pub fn build_empty_exfat(
     if label_utf16.len() > 11 {
         return Err("exFAT volume label exceeds 11 UTF-16 code units".into());
     }
-    let cluster_shift = choose_cluster_shift(volume_sectors);
+    let cluster_shift = choose_cluster_shift(volume_sectors).map_err(|error| error.to_string())?;
     let sectors_per_cluster = 1u64 << cluster_shift;
     let (fat_length, heap_offset, cluster_count) = exfat_geometry(volume_sectors, cluster_shift)?;
-    if cluster_count > 4_194_304 {
-        return Err("exFAT cluster count exceeds edpcli validated parser range".into());
-    }
+    debug_assert!(cluster_count <= crate::filesystem_capability::EXFAT_MAX_VALIDATED_CLUSTERS);
 
     let cluster_bytes = sectors_per_cluster * SECTOR_SIZE as u64;
     let bitmap_len = (cluster_count as u64).div_ceil(8);
@@ -722,14 +760,42 @@ mod ch14_q0_geometry_contracts {
     }
 
     #[test]
-    #[ignore = "Q0 red contract: enable with geometry-driven exFAT selection before Q8"]
     fn validated_cluster_budget_accepts_limit_and_upgrades_limit_plus_one() {
-        const LIMIT: u32 = 4_194_304;
+        const LIMIT: u32 = crate::filesystem_capability::EXFAT_MAX_VALIDATED_CLUSTERS;
         let at_limit = first_volume_with_cluster_count(LIMIT, 7);
         let over_limit = first_volume_with_cluster_count(LIMIT + 1, 7);
         assert_eq!(exfat_geometry(at_limit, 7).unwrap().2, LIMIT);
         assert_eq!(exfat_geometry(over_limit, 7).unwrap().2, LIMIT + 1);
-        assert_eq!(choose_cluster_shift(at_limit), 7);
-        assert_eq!(choose_cluster_shift(over_limit), 8);
+        assert_eq!(choose_cluster_shift(at_limit).unwrap(), 7);
+        assert_eq!(choose_cluster_shift(over_limit).unwrap(), 8);
+    }
+
+    #[test]
+    fn deterministic_geometry_sweep_stays_within_parser_capability() {
+        const GIB: u64 = 2_097_152;
+        let mut volumes = (1..=1024)
+            .step_by(7)
+            .map(|gib| gib * GIB)
+            .collect::<Vec<_>>();
+        for threshold in [64 * GIB, 256 * GIB, 512 * GIB] {
+            volumes.extend([threshold - 1, threshold, threshold + 1]);
+        }
+        for volume in volumes {
+            let shift = choose_cluster_shift(volume).unwrap();
+            let (_, heap_offset, count) = exfat_geometry(volume, shift).unwrap();
+            assert!(count <= crate::filesystem_capability::EXFAT_MAX_VALIDATED_CLUSTERS);
+            assert!(heap_offset + count as u64 * (1u64 << shift) <= volume);
+            assert!(shift <= crate::filesystem_capability::EXFAT_MAX_VALIDATED_CLUSTER_SHIFT);
+        }
+    }
+
+    #[test]
+    fn unsupported_geometry_is_typed_and_user_actionable() {
+        let error = choose_cluster_shift(u64::MAX).unwrap_err();
+        assert!(matches!(
+            error,
+            super::FilesystemPlanError::UnsupportedGeometry { .. }
+        ));
+        assert!(error.to_string().contains("请调整分区大小或文件系统"));
     }
 }

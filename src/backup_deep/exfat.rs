@@ -323,7 +323,9 @@ pub(super) fn parse(
     }
     let sector_shift = boot[108];
     let cluster_shift = boot[109];
-    if sector_shift != 9 || cluster_shift > 7 {
+    if sector_shift != 9
+        || cluster_shift > crate::filesystem_capability::EXFAT_MAX_VALIDATED_CLUSTER_SHIFT
+    {
         return Err("unsupported exFAT sector or cluster size".into());
     }
     let sectors_per_cluster = 1u64 << cluster_shift;
@@ -343,7 +345,7 @@ pub(super) fn parse(
         || fat_offset < 24
         || fat_length == 0
         || cluster_count == 0
-        || cluster_count > 4_194_304
+        || cluster_count > crate::filesystem_capability::EXFAT_MAX_VALIDATED_CLUSTERS
         || root_cluster < 2
         || root_cluster >= cluster_count + 2
     {

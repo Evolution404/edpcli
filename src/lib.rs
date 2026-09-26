@@ -19,6 +19,7 @@ pub mod disk_scan;
 pub mod diskio;
 pub mod edpb;
 pub mod elevate;
+pub mod filesystem_capability;
 pub mod identify;
 pub mod inspect;
 pub(crate) mod inspect_adapter;

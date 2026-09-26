@@ -6,10 +6,11 @@ use edpcli::{
     backup_metadata::PartitionGeometry,
     protocol::lba7_compat::locate_lba7_compatibility_extent_from_geometry,
     provision::{
-        build_empty_exfat, build_official_exfat_partitions, build_official_partition_filesystem,
-        encrypt_sparse_mode2, wrap_file_key, wrap_legacy_lba7_file_key, FileKeyWrapMode,
-        OfficialFilesystemFormat, OfficialPartitionFilesystems, OfficialPartitionMode,
-        OfficialPartitionSizes, OfficialProvisionPlan, PartitionRole, SparseFilesystemImage,
+        build_empty_exfat, build_empty_fat16, build_official_exfat_partitions,
+        build_official_partition_filesystem, encrypt_sparse_mode2, wrap_file_key,
+        wrap_legacy_lba7_file_key, FileKeyWrapMode, OfficialFilesystemFormat,
+        OfficialPartitionFilesystems, OfficialPartitionMode, OfficialPartitionSizes,
+        OfficialProvisionPlan, PartitionRole, SparseFilesystemImage,
     },
 };
 
@@ -132,14 +133,26 @@ fn portable_empty_exfat_round_trips_through_the_existing_deep_parser() {
 }
 
 #[test]
-#[ignore = "Q0 red contract: enable when adaptive exFAT geometry is implemented before Q8"]
+fn canonical_fat16_producer_stays_inside_consumer_domain() {
+    let volume = 20_417;
+    let image = build_empty_fat16(63, volume, 0x1234_5678, "BOOT").unwrap();
+    let mut reader = ImageReader {
+        image: &image,
+        decrypt_key: None,
+    };
+    let report = analyze_partition(&geometry(volume), &mut reader);
+    assert_eq!(report.status, AnalysisStatus::Parsed, "{}", report.reason);
+    assert_eq!(report.filesystem.as_deref(), Some("fat16"));
+}
+
+#[test]
 fn ch14_q0_475_gib_exfat_formatter_round_trips_through_canonical_parser() {
     const VOLUME_SECTORS: u64 = 998_107_136;
     let image = build_empty_exfat(63, VOLUME_SECTORS, 0x1234_5678, "EDPTEST")
         .expect("formatter must choose a geometry within the parser's validated domain");
     let boot = image.sector_or_zero(0).unwrap();
     let cluster_count = u32::from_le_bytes(boot[92..96].try_into().unwrap());
-    assert!(cluster_count <= 4_194_304);
+    assert!(cluster_count <= edpcli::filesystem_capability::EXFAT_MAX_VALIDATED_CLUSTERS);
     assert!(
         boot[109] >= 8,
         "64 KiB clusters exceed this geometry's budget"
@@ -152,6 +165,99 @@ fn ch14_q0_475_gib_exfat_formatter_round_trips_through_canonical_parser() {
     let report = analyze_partition(&geometry(VOLUME_SECTORS), &mut reader);
     assert_eq!(report.status, AnalysisStatus::Parsed, "{}", report.reason);
     assert_eq!(report.filesystem.as_deref(), Some("exfat"));
+}
+
+fn assert_exfat_boot_geometry(boot: &[u8; 512], volume: u64) {
+    let u32_at = |offset| u32::from_le_bytes(boot[offset..offset + 4].try_into().unwrap());
+    let u64_at = |offset| u64::from_le_bytes(boot[offset..offset + 8].try_into().unwrap());
+    assert_eq!(u64_at(72), volume);
+    let fat_offset = u32_at(80) as u64;
+    let fat_length = u32_at(84) as u64;
+    let heap_offset = u32_at(88) as u64;
+    let clusters = u32_at(92) as u64;
+    assert_eq!(fat_offset, 24);
+    assert!(fat_length > 0);
+    assert!(heap_offset >= fat_offset + fat_length);
+    assert!(heap_offset + clusters * (1u64 << boot[109]) <= volume);
+    assert_eq!(u32_at(96), 2);
+    assert_eq!(boot[108], 9);
+    assert!(boot[109] <= edpcli::filesystem_capability::EXFAT_MAX_VALIDATED_CLUSTER_SHIFT);
+    assert_eq!(boot[110], 1);
+}
+
+#[test]
+fn exfat_boundary_matrix_round_trips_through_canonical_parser() {
+    const MIB: u64 = 2048;
+    const GIB: u64 = 1024 * MIB;
+    let volumes = [
+        64 * MIB - 1,
+        64 * MIB,
+        64 * MIB + 1,
+        GIB,
+        8 * GIB,
+        32 * GIB,
+        64 * GIB - 1,
+        64 * GIB,
+        64 * GIB + 1,
+        128 * GIB,
+        256 * GIB - 1,
+        256 * GIB,
+        256 * GIB + 1,
+        300 * GIB,
+        998_107_136,
+        512 * GIB,
+        1024 * GIB,
+    ];
+    for volume in volumes {
+        let image = build_empty_exfat(63, volume, 0x1234_5678, "EDPTEST")
+            .unwrap_or_else(|error| panic!("{volume} sectors: {error}"));
+        let boot = image.sector_or_zero(0).unwrap();
+        assert_exfat_boot_geometry(&boot, volume);
+        let cluster_count = u32::from_le_bytes(boot[92..96].try_into().unwrap());
+        assert!(cluster_count <= edpcli::filesystem_capability::EXFAT_MAX_VALIDATED_CLUSTERS);
+        let mut reader = ImageReader {
+            image: &image,
+            decrypt_key: None,
+        };
+        let report = analyze_partition(&geometry(volume), &mut reader);
+        assert_eq!(
+            report.status,
+            AnalysisStatus::Parsed,
+            "{volume}: {}",
+            report.reason
+        );
+    }
+}
+
+#[test]
+fn exfat_deterministic_sweep_never_emits_a_parser_rejected_layout() {
+    const GIB: u64 = 2_097_152;
+    let mut volumes = (1..=1024)
+        .step_by(7)
+        .map(|gib| gib * GIB)
+        .collect::<Vec<_>>();
+    for threshold in [64 * GIB, 256 * GIB, 512 * GIB] {
+        volumes.extend([threshold - 1, threshold, threshold + 1]);
+    }
+    volumes.sort_unstable();
+    volumes.dedup();
+    for volume in volumes {
+        let Ok(image) = build_empty_exfat(63, volume, 0x1234_5678, "EDPTEST") else {
+            continue;
+        };
+        let mut reader = ImageReader {
+            image: &image,
+            decrypt_key: None,
+        };
+        let report = analyze_partition(&geometry(volume), &mut reader);
+        assert_eq!(
+            report.status,
+            AnalysisStatus::Parsed,
+            "formatter accepted {volume} sectors, parser rejected: {}",
+            report.reason
+        );
+        assert_eq!(report.filesystem.as_deref(), Some("exfat"));
+    }
 }
 
 #[test]
