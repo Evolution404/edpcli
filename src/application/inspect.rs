@@ -269,16 +269,12 @@ fn materialize_protocol_fields(
                     field.label, field.start, field.end
                 )));
             }
-            let start = base
-                .checked_add(field.start as u64)
-                .ok_or_else(|| {
-                    InspectError::decode(format!("LBA{lba} 字段 {} 绝对起点溢出", field.label))
-                })?;
-            let end_exclusive = base
-                .checked_add(field.end as u64)
-                .ok_or_else(|| {
-                    InspectError::decode(format!("LBA{lba} 字段 {} 绝对终点溢出", field.label))
-                })?;
+            let start = base.checked_add(field.start as u64).ok_or_else(|| {
+                InspectError::decode(format!("LBA{lba} 字段 {} 绝对起点溢出", field.label))
+            })?;
+            let end_exclusive = base.checked_add(field.end as u64).ok_or_else(|| {
+                InspectError::decode(format!("LBA{lba} 字段 {} 绝对终点溢出", field.label))
+            })?;
             Ok(InspectField {
                 range: AbsoluteByteRange {
                     start,
