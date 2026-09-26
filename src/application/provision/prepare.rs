@@ -556,6 +556,7 @@ pub fn prepare_target_provision(
                 format!("错误: 无法构造目标协议镜像: {message}"),
             )
         })?;
+    validate_key_disposition_plan(&target_plan, &plan, &format_targets)?;
     validate_target_write_set(&target_plan, &write_image.patch, &format_targets)?;
     Ok(PreparedNewProvision {
         disk,
