@@ -1,4 +1,6 @@
-use edpcli::application::inspect::{decode_sector, AdvancedInspectMode, AdvancedInspectWorkspace};
+use edpcli::application::inspect::{
+    decode_sector, AdvancedInspectMode, AdvancedInspectWorkspace, InspectErrorKind,
+};
 use edpcli::application::inspect_tree::{build_inspect_topology, InspectNodeKind};
 use edpcli::common::{METADATA_IMAGE_LEN, SECTOR};
 use edpcli::inspect::InspectMeta;
@@ -173,15 +175,16 @@ fn huge_sparse_disk_jump_and_unknown_decode_remain_bounded_and_fail_closed() {
         .primary_region_for_lba(target)
         .expect("target must belong to an unknown region");
     assert!(unknown.id.starts_with("region.unknown."));
-    assert!(decode_sector(
+    let decode_error = decode_sector(
         &context,
         &InspectMeta::default(),
         target,
         &[0x5a; SECTOR],
-        None
+        None,
     )
-    .unwrap_err()
-    .contains("不属于已注册 decoder"));
+    .unwrap_err();
+    assert_eq!(decode_error.kind(), InspectErrorKind::Decode);
+    assert!(decode_error.message().contains("不属于已注册 decoder"));
 
     let mut state = AppState::new();
     assert!(state.begin_advanced_inspect(AdvancedInspectSource::Disk(100)));

@@ -68,7 +68,12 @@ fn delete_rejects_a_backup_replaced_after_selection() {
     fs::write(&target, changed).expect("replace target bytes");
 
     let error = delete_backup_exact(&tmp.0, &target, &expected).expect_err("must fail closed");
-    assert!(error.contains("已变化"), "{error}");
+    assert!(matches!(
+        error,
+        edpcli::application::backup::BackupDeleteError::Plan(
+            edpcli::application::backup::DeletePlanError::Changed { .. }
+        )
+    ));
     assert!(target.exists(), "stale replacement must never be deleted");
 }
 
@@ -92,6 +97,11 @@ fn delete_refuses_to_remove_the_last_backup_for_a_device() {
     let expected = expected_sha256(&tmp.0, &target);
 
     let error = delete_backup_exact(&tmp.0, &target, &expected).expect_err("must keep one backup");
-    assert!(error.contains("至少保留 1 份"), "{error}");
+    assert!(matches!(
+        error,
+        edpcli::application::backup::BackupDeleteError::Plan(
+            edpcli::application::backup::DeletePlanError::RetentionFloor
+        )
+    ));
     assert!(target.exists());
 }

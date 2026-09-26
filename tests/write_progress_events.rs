@@ -5,8 +5,6 @@
 //!
 //! 全部不碰真盘。
 
-use crate::common;
-
 use edpcli::application::WriteEvent;
 use edpcli::common::METADATA_IMAGE_LEN;
 use edpcli::ui;
@@ -155,7 +153,7 @@ impl edpcli::diskio::Clock for FixedClock {
 #[test]
 #[cfg(target_os = "macos")]
 fn backup_create_and_restore_dry_run_event_sequence() {
-    use common::*;
+    use crate::common::*;
     use edpcli::application::write::{backup_create_flow, restore_flow, Ctx};
     use edpcli::common::EXIT_OK;
     use edpcli::diskio::FileDev;

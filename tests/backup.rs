@@ -960,7 +960,12 @@ fn cli_and_tui_delete_share_retention_floor_and_execution() {
     let second_sha = edpcli::sha256::sha256_hex(&fs::read(&second_path).unwrap());
     let refusal = edpcli::application::delete_backup_exact(&tui_tmp.0, &second_path, &second_sha)
         .unwrap_err();
-    assert!(refusal.contains("至少保留 1 份"), "{refusal}");
+    assert!(matches!(
+        refusal,
+        edpcli::application::backup::BackupDeleteError::Plan(
+            edpcli::application::backup::DeletePlanError::RetentionFloor
+        )
+    ));
     assert!(cli_tmp.0.join(SHARED_GROUP_B).exists());
     assert!(tui_tmp.0.join(SHARED_GROUP_B).exists());
 }

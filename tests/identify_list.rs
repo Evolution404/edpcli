@@ -1,11 +1,9 @@
 //! device_id 识别(真备份当"盘") + 外接盘一览(罐头 diskutil/ioreg) + list CLI 冒烟。
 
-use crate::common;
-
 use std::process::Command;
 
 #[cfg(target_os = "macos")]
-use common::*;
+use crate::common::*;
 #[cfg(target_os = "macos")]
 use edpcli::cli::{print_disk_table, scan_disks};
 #[cfg(target_os = "macos")]

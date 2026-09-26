@@ -1,5 +1,16 @@
 use super::*;
 use std::io;
+use std::sync::atomic::{AtomicU64, Ordering};
+
+static TEST_TEMP_FILE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
+
+fn portable_test_temp_file(stem: &str, extension: &str) -> std::path::PathBuf {
+    let sequence = TEST_TEMP_FILE_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+    std::env::temp_dir().join(format!(
+        "{stem}-{}-{sequence}.{extension}",
+        std::process::id()
+    ))
+}
 
 struct Lba3Dev([u8; SECTOR]);
 
@@ -253,6 +264,19 @@ fn format_failure_keeps_the_protocol_and_prior_successful_partition() {
 }
 
 #[test]
+fn portable_test_temp_file_name_uses_safe_ascii_components() {
+    let path = portable_test_temp_file("edpcli-provision-export", "img");
+    let name = path
+        .file_name()
+        .and_then(|value| value.to_str())
+        .expect("portable test temp path must have a UTF-8 file name");
+    assert!(name
+        .bytes()
+        .all(|byte| { byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.') }));
+    assert!(!name.contains(':'));
+}
+
+#[test]
 fn sparse_export_includes_selected_format_images() {
     let key = [0x42; 16];
     let plan = format_test_plan(OfficialPartitionMode::DefaultThreePartition, &key);
@@ -295,11 +319,7 @@ fn sparse_export_includes_selected_format_images() {
         expected_probe: probe,
         expected_lba3: None,
     };
-    let path = std::env::temp_dir().join(format!(
-        "edpcli-provision-export-{}-{}.img",
-        std::process::id(),
-        std::thread::current().name().unwrap_or("test")
-    ));
+    let path = portable_test_temp_file("edpcli-provision-export", "img");
     let _ = std::fs::remove_file(&path);
     export_sparse_provision_image(&path, &prepared).unwrap();
     let mut file = std::fs::File::open(&path).unwrap();

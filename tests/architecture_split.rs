@@ -161,6 +161,19 @@ fn cli_uses_application_boundary_for_raw_disk_access() {
 }
 
 #[test]
+fn inspect_cli_uses_typed_application_error_kinds() {
+    let source =
+        fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("src/inspect_cli.rs"))
+            .expect("read inspect cli");
+    assert!(source.contains("InspectErrorKind"));
+    assert!(source.contains("fn inspect_error_code(error: &InspectError)"));
+    assert!(
+        !source.contains("message.contains("),
+        "inspect CLI must not infer control flow from localized error text"
+    );
+}
+
+#[test]
 fn semantic_consumers_do_not_depend_on_inspect_presentation() {
     exists("src/protocol/semantic.rs");
 

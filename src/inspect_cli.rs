@@ -7,7 +7,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::application::inspect::{
-    AdvancedInspectMode, AdvancedInspectRequest, AdvancedInspectWorkspace,
+    AdvancedInspectMode, AdvancedInspectRequest, AdvancedInspectWorkspace, InspectError,
+    InspectErrorKind,
 };
 use crate::cli::StdPrompter;
 use crate::cli_args::{InspectMode, InspectOpts};
@@ -112,24 +113,14 @@ fn request_from_opts(opts: &InspectOpts) -> AdvancedInspectRequest {
     }
 }
 
-fn inspect_error_code(message: &str, backup_source: bool) -> i32 {
-    if message.contains("越界") {
-        return EXIT_TARGET;
-    }
-    if message.contains("EDPB 未采集")
-        || message.contains("Artifact 截断")
-        || message.contains("读取 LBA")
-        || message.contains("读取协议上下文")
-        || message.contains("无法只读打开")
-        || message.contains("只读取到")
-        || message.contains("导出")
-    {
-        return EXIT_IO;
-    }
-    if backup_source {
-        EXIT_BACKUP
-    } else {
-        EXIT_TARGET
+fn inspect_error_code(error: &InspectError) -> i32 {
+    match error.kind() {
+        InspectErrorKind::InvalidRequest => EXIT_USAGE,
+        InspectErrorKind::OutOfRange | InspectErrorKind::Decode | InspectErrorKind::Target => {
+            EXIT_TARGET
+        }
+        InspectErrorKind::Backup => EXIT_BACKUP,
+        InspectErrorKind::Io => EXIT_IO,
     }
 }
 
@@ -216,9 +207,9 @@ fn inspect_backup_flow(opts: InspectOpts) -> i32 {
     let request = request_from_opts(&opts);
     match crate::application::inspect::load_backup_advanced_inspect(&path, &request) {
         Ok(workspace) => render_workspace(&workspace),
-        Err(message) => {
-            eprintln!("{}", crate::ui::red(&format!("错误: {message}")));
-            inspect_error_code(&message, true)
+        Err(error) => {
+            eprintln!("{}", crate::ui::red(&format!("错误: {error}")));
+            inspect_error_code(&error)
         }
     }
 }
@@ -252,9 +243,9 @@ fn inspect_disk_flow(runner: &dyn CmdRunner, mut opts: InspectOpts) -> i32 {
     let request = request_from_opts(&opts);
     match crate::application::inspect::load_disk_advanced_inspect(runner, n, &request) {
         Ok(workspace) => render_workspace(&workspace),
-        Err(message) => {
-            eprintln!("{}", crate::ui::red(&format!("错误: {message}")));
-            inspect_error_code(&message, false)
+        Err(error) => {
+            eprintln!("{}", crate::ui::red(&format!("错误: {error}")));
+            inspect_error_code(&error)
         }
     }
 }

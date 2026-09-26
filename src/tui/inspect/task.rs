@@ -12,14 +12,19 @@ impl TaskHub {
             .ok_or("已有高级检查正在执行")?;
         let tx = self.tx.clone();
         std::thread::spawn(move || {
-            let result = catch_unwind(AssertUnwindSafe(|| match source {
-                crate::tui::state::AdvancedInspectSource::Disk(disk) => {
-                    let runner = SysRunner;
-                    crate::application::inspect::load_disk_advanced_inspect(&runner, disk, &request)
+            let result = catch_unwind(AssertUnwindSafe(|| {
+                match source {
+                    crate::tui::state::AdvancedInspectSource::Disk(disk) => {
+                        let runner = SysRunner;
+                        crate::application::inspect::load_disk_advanced_inspect(
+                            &runner, disk, &request,
+                        )
+                    }
+                    crate::tui::state::AdvancedInspectSource::Backup(path) => {
+                        crate::application::inspect::load_backup_advanced_inspect(&path, &request)
+                    }
                 }
-                crate::tui::state::AdvancedInspectSource::Backup(path) => {
-                    crate::application::inspect::load_backup_advanced_inspect(&path, &request)
-                }
+                .map_err(|error| error.to_string())
             }))
             .unwrap_or_else(|payload| {
                 Err(format!(
@@ -86,7 +91,8 @@ impl TaskHub {
                     crate::tui::state::AdvancedInspectSource::Backup(path) => {
                         crate::application::inspect::load_backup_advanced_inspect(&path, &request)
                     }
-                }?;
+                }
+                .map_err(|error| error.to_string())?;
                 workspace
                     .items
                     .into_iter()
