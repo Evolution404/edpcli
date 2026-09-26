@@ -62,7 +62,7 @@ fn redraw_handles_small_and_large_terminal_sizes_without_panicking() {
 }
 
 #[test]
-fn device_list_shows_ven_prod_and_onlyid_and_enter_shortcut() {
+fn device_list_shows_model_and_onlyid_and_enter_shortcut() {
     let mut state = AppState::new();
     let mut row = usb_device();
     row.device_id = Some("disk&ven_aigo&prod_u335".into());
@@ -78,7 +78,7 @@ fn device_list_shows_ven_prod_and_onlyid_and_enter_shortcut() {
         .iter()
         .map(|cell| cell.symbol())
         .collect::<String>();
-    assert!(text.contains("ven_prod"), "{text}");
+    assert!(text.replace(' ', "").contains("型号"), "{text}");
     assert!(text.contains("aigo_u335"), "{text}");
     assert!(text.contains("1987718388"), "{text}");
     assert!(text.replace(' ', "").contains("Enter制盘"), "{text}");
@@ -94,6 +94,7 @@ fn long_department_keeps_disk_kind_visible_and_scrolls_by_column() {
     use edpcli::tui::table_layout::TableKind;
     let mut state = AppState::new();
     let mut row = usb_device();
+    row.device_id = Some("disk&ven_test&prod_device".into());
     row.dept = Some("输电运检中心非常非常长的部门名称第一分部".repeat(4));
     state.replace_devices(vec![row]);
     let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();

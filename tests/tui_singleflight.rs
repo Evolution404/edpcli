@@ -42,7 +42,6 @@ fn ch14_q0_failed_passive_preview_has_explicit_retry_state() {
 }
 
 #[test]
-#[ignore = "Q0 red contract: enable after Q3 shared column schema"]
 fn ch14_q0_device_and_backup_tables_use_shared_column_schema() {
     let source = include_str!("../src/tui/table_layout.rs");
     assert!(source.contains("TableColumnSpec"));

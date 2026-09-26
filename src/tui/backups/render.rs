@@ -3,34 +3,32 @@ use super::*;
 fn backup_table_values(
     backup: &crate::application::BackupWorkspaceItem,
     checked: bool,
+    columns: &[crate::tui::table_layout::TableColumnSpec],
 ) -> Vec<(String, Style)> {
+    use crate::tui::table_layout::ColumnId;
     let (health, health_style) = backup_health(backup);
-    vec![
-        (
-            if checked { "✓".into() } else { String::new() },
-            if checked { warning() } else { muted() },
-        ),
-        (backup.index.to_string(), accent()),
-        (safe(&backup.display_time), Style::default()),
-        (backup.provision_kind.short_name().into(), accent()),
-        (
-            backup
-                .user
-                .as_deref()
-                .map(safe)
-                .unwrap_or_else(|| "—".into()),
-            Style::default(),
-        ),
-        (
-            backup
-                .dept
-                .as_deref()
-                .map(safe)
-                .unwrap_or_else(|| "—".into()),
-            Style::default(),
-        ),
-        (health.into(), health_style),
-    ]
+    let identity = crate::application::identity::WorkspaceIdentity::from_backup(backup);
+    let cells = identity.display_cells();
+    columns
+        .iter()
+        .map(|column| match column.id {
+            ColumnId::Selected => (
+                if checked { "✓".into() } else { String::new() },
+                if checked { warning() } else { muted() },
+            ),
+            ColumnId::Index => (backup.index.to_string(), accent()),
+            ColumnId::Time => (safe(&backup.display_time), Style::default()),
+            ColumnId::Capacity => (safe(&cells[0]), Style::default()),
+            ColumnId::VidPid => (safe(&cells[1]), secondary()),
+            ColumnId::Model => (safe(&cells[2]), Style::default()),
+            ColumnId::Onlyid => (safe(&cells[3]), Style::default()),
+            ColumnId::User => (safe(&cells[4]), Style::default()),
+            ColumnId::Dept => (safe(&cells[5]), Style::default()),
+            ColumnId::ProvisionKind => (safe(&cells[6]), accent()),
+            ColumnId::Health => (health.into(), health_style),
+            _ => unreachable!("backup schema only contains backup and identity columns"),
+        })
+        .collect()
 }
 
 pub(super) fn draw_backup_create_choice(
@@ -124,7 +122,7 @@ pub(super) fn draw_backups(frame: &mut Frame, area: ratatui::layout::Rect, state
     } else if let Some(status) = state.search_status() {
         status
     } else {
-        "/ 搜索姓名、部门、onlyid".to_string()
+        "/ 搜索身份、容量、型号、文件名".to_string()
     };
     let search_style = if search_active {
         accent()
@@ -190,11 +188,23 @@ pub(super) fn draw_backups(frame: &mut Frame, area: ratatui::layout::Rect, state
             inner,
         );
     } else {
-        use crate::tui::table_layout::{display_width, layout_for, truncate_cell, TableKind};
-        let headings = ["选", "#", "时间", "盘型", "姓名", "部门", "健康"];
-        let mut content_widths = headings.map(display_width);
+        use crate::tui::table_layout::{
+            display_width, layout_for, table_column_schema, truncate_cell, TableKind,
+        };
+        let columns = table_column_schema(TableKind::Backups).expect("backup schema");
+        let headings = columns
+            .iter()
+            .map(|column| column.heading)
+            .collect::<Vec<_>>();
+        let mut content_widths = headings
+            .iter()
+            .map(|heading| display_width(heading))
+            .collect::<Vec<_>>();
         for backup in state.backups() {
-            for (index, (value, _)) in backup_table_values(backup, false).iter().enumerate() {
+            for (index, (value, _)) in backup_table_values(backup, false, &columns)
+                .iter()
+                .enumerate()
+            {
                 content_widths[index] = content_widths[index].max(display_width(value));
             }
         }
@@ -209,7 +219,8 @@ pub(super) fn draw_backups(frame: &mut Frame, area: ratatui::layout::Rect, state
         let rows = window
             .filter_map(|position| state.backup_at_visible(position))
             .map(|backup| {
-                let values = backup_table_values(backup, state.backup_is_selected(&backup.path));
+                let values =
+                    backup_table_values(backup, state.backup_is_selected(&backup.path), &columns);
                 TableRow::new(
                     viewport
                         .columns
@@ -262,43 +273,32 @@ pub(super) fn draw_backups(frame: &mut Frame, area: ratatui::layout::Rect, state
     if let Some((detail_area, animation_area)) = sidebar {
         let detail = if let Some(backup) = state.selected_backup() {
             let (health, health_style) = backup_health(backup);
+            let identity = crate::application::identity::WorkspaceIdentity::from_backup(backup);
+            let cells = identity.display_cells();
             let content_width = detail_area.width.saturating_sub(2) as usize;
             let mut lines = vec![
                 Line::from(vec![
-                    Span::styled("时间  ", muted()),
-                    Span::raw(safe(&backup.display_time)),
-                ]),
-                Line::from(vec![
                     Span::styled("盘型  ", muted()),
-                    Span::styled(backup.provision_kind.full_name(), accent()),
+                    Span::styled(safe(&cells[6]), accent()),
                 ]),
+                Line::from(format!("容量  {}", safe(&cells[0]))),
+                Line::from(format!("VID:PID  {}", safe(&cells[1]))),
+                Line::from(format!("型号  {}", safe(&cells[2]))),
                 Line::from(format!(
-                    "姓名  {}",
-                    backup
-                        .user
-                        .as_deref()
-                        .map(safe)
-                        .unwrap_or_else(|| "—".into())
+                    "device_id  {}",
+                    safe(identity.device_id.as_deref().unwrap_or("—"))
                 )),
+                Line::from(format!("onlyid  {}", safe(&cells[3]))),
+                Line::from(format!("姓名  {}", safe(&cells[4]))),
             ];
-            lines.extend(wrapped_field_lines(
-                "部门  ",
-                backup.dept.as_deref().unwrap_or("—"),
-                content_width,
-            ));
+            lines.extend(wrapped_field_lines("部门  ", &cells[5], content_width));
             lines.extend([
-                Line::from(format!(
-                    "onlyid  {}",
-                    backup
-                        .onlyid
-                        .as_deref()
-                        .map(safe)
-                        .unwrap_or_else(|| "—".into())
-                )),
+                Line::from(format!("备份时间  {}", safe(&backup.display_time))),
                 Line::from(vec![
                     Span::styled("健康  ", muted()),
                     Span::styled(health, health_style.add_modifier(Modifier::BOLD)),
                 ]),
+                Line::from(format!("备份编号  #{}", backup.index)),
             ]);
             lines.extend(wrapped_field_lines(
                 "文件  ",

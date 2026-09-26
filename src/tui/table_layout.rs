@@ -18,6 +18,204 @@ pub enum TableKind {
     InspectFields,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ColumnId {
+    Device,
+    Selected,
+    Index,
+    Time,
+    Capacity,
+    VidPid,
+    Model,
+    Onlyid,
+    User,
+    Dept,
+    ProvisionKind,
+    Bus,
+    State,
+    Health,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TableColumnSpec {
+    pub id: ColumnId,
+    pub heading: &'static str,
+    pub layout: AdaptiveColumnSpec,
+}
+
+fn table_column(
+    id: ColumnId,
+    heading: &'static str,
+    layout: AdaptiveColumnSpec,
+) -> TableColumnSpec {
+    TableColumnSpec {
+        id,
+        heading,
+        layout,
+    }
+}
+
+pub fn identity_column_specs() -> [TableColumnSpec; 7] {
+    use ColumnId::*;
+    [
+        table_column(Capacity, "容量", column(8, 9, 12, 80, 1, false)),
+        table_column(VidPid, "VID:PID", column(9, 9, 12, 75, 1, false)),
+        table_column(Model, "型号", column(10, 17, 28, 50, 2, false)),
+        table_column(Onlyid, "onlyid", column(8, 12, 20, 70, 1, false)),
+        table_column(User, "姓名", column(6, 10, 20, 45, 1, false)),
+        table_column(Dept, "部门", column(8, 16, 40, 20, 3, false)),
+        table_column(ProvisionKind, "盘型", column(12, 20, 26, 95, 1, true)),
+    ]
+}
+
+pub fn table_column_schema(kind: TableKind) -> Option<Vec<TableColumnSpec>> {
+    use ColumnId::*;
+    let identity = identity_column_specs();
+    match kind {
+        TableKind::Devices => {
+            let mut columns = vec![table_column(Device, "设备", column(7, 9, 12, 100, 1, true))];
+            columns.extend(identity);
+            columns.push(table_column(Bus, "总线", column(4, 5, 7, 30, 1, false)));
+            columns.push(table_column(State, "状态", column(12, 18, 30, 98, 1, true)));
+            Some(columns)
+        }
+        TableKind::Backups => {
+            let mut columns = vec![
+                table_column(Selected, "选", column(3, 3, 4, 99, 1, true)),
+                table_column(Index, "#", column(3, 4, 6, 90, 1, true)),
+                table_column(Time, "时间", column(12, 17, 20, 25, 1, false)),
+            ];
+            columns.extend(identity);
+            columns.push(table_column(
+                Health,
+                "健康",
+                column(8, 11, 15, 85, 1, false),
+            ));
+            Some(columns)
+        }
+        _ => None,
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct TableViewData {
+    pub generation: u64,
+    pub rows: Vec<Vec<String>>,
+    pub content_widths: Vec<usize>,
+}
+
+impl TableViewData {
+    fn from_rows(generation: u64, columns: &[TableColumnSpec], rows: Vec<Vec<String>>) -> Self {
+        let mut content_widths = columns
+            .iter()
+            .map(|column| display_width(column.heading))
+            .collect::<Vec<_>>();
+        for row in &rows {
+            assert_eq!(
+                row.len(),
+                columns.len(),
+                "table projection/schema arity mismatch"
+            );
+            for (index, value) in row.iter().enumerate() {
+                content_widths[index] = content_widths[index].max(display_width(value));
+            }
+        }
+        Self {
+            generation,
+            rows,
+            content_widths,
+        }
+    }
+}
+
+fn safe(value: &str) -> String {
+    crate::ui::sanitize_terminal_text(value)
+}
+
+pub fn backup_health_text(backup: &crate::application::BackupWorkspaceItem) -> &'static str {
+    if !backup.size_ok {
+        "大小异常"
+    } else if backup.integrity_status == crate::diskio::BackupIntegrityStatus::Verified {
+        "EDPB ✓"
+    } else {
+        "EDPB ✗"
+    }
+}
+
+pub fn device_table_view(rows: &[crate::disk_scan::Row], generation: u64) -> TableViewData {
+    let columns = table_column_schema(TableKind::Devices).expect("device column schema");
+    let projected = rows
+        .iter()
+        .map(|row| {
+            let identity = crate::application::identity::WorkspaceIdentity::from_device(row);
+            let cells = identity.display_cells();
+            columns
+                .iter()
+                .map(|column| {
+                    safe(&match column.id {
+                        ColumnId::Device => format!("disk{}", row.disk),
+                        ColumnId::Capacity => cells[0].clone(),
+                        ColumnId::VidPid => cells[1].clone(),
+                        ColumnId::Model => cells[2].clone(),
+                        ColumnId::Onlyid => cells[3].clone(),
+                        ColumnId::User => cells[4].clone(),
+                        ColumnId::Dept => cells[5].clone(),
+                        ColumnId::ProvisionKind => cells[6].clone(),
+                        ColumnId::Bus => row.proto.clone(),
+                        ColumnId::State => {
+                            if row.proto != "USB" {
+                                "非 USB / 不支持".into()
+                            } else if row.denied {
+                                "需要管理员权限".into()
+                            } else if let Some(error) = &row.probe_error {
+                                format!("读取异常: {error}")
+                            } else {
+                                "可用".into()
+                            }
+                        }
+                        _ => unreachable!("device schema"),
+                    })
+                })
+                .collect::<Vec<_>>()
+        })
+        .collect();
+    TableViewData::from_rows(generation, &columns, projected)
+}
+
+pub fn backup_table_view(
+    rows: &[crate::application::BackupWorkspaceItem],
+    generation: u64,
+) -> TableViewData {
+    let columns = table_column_schema(TableKind::Backups).expect("backup column schema");
+    let projected = rows
+        .iter()
+        .map(|row| {
+            let identity = crate::application::identity::WorkspaceIdentity::from_backup(row);
+            let cells = identity.display_cells();
+            columns
+                .iter()
+                .map(|column| {
+                    safe(&match column.id {
+                        ColumnId::Selected => String::new(),
+                        ColumnId::Index => row.index.to_string(),
+                        ColumnId::Time => row.display_time.clone(),
+                        ColumnId::Capacity => cells[0].clone(),
+                        ColumnId::VidPid => cells[1].clone(),
+                        ColumnId::Model => cells[2].clone(),
+                        ColumnId::Onlyid => cells[3].clone(),
+                        ColumnId::User => cells[4].clone(),
+                        ColumnId::Dept => cells[5].clone(),
+                        ColumnId::ProvisionKind => cells[6].clone(),
+                        ColumnId::Health => backup_health_text(row).into(),
+                        _ => unreachable!("backup schema"),
+                    })
+                })
+                .collect::<Vec<_>>()
+        })
+        .collect();
+    TableViewData::from_rows(generation, &columns, projected)
+}
+
 fn column(
     min: u16,
     preferred: u16,
@@ -40,26 +238,11 @@ fn column(
 pub fn layout_for(kind: TableKind) -> AdaptiveTableLayout {
     use TableKind::*;
     let specs = match kind {
-        Devices => vec![
-            column(7, 9, 12, 100, 1, true),
-            column(8, 9, 12, 80, 1, false),
-            column(4, 5, 7, 75, 1, false),
-            column(9, 9, 12, 70, 1, false),
-            column(10, 17, 28, 30, 2, false),
-            column(8, 12, 20, 40, 1, false),
-            column(6, 10, 20, 35, 1, false),
-            column(8, 16, 40, 10, 3, false),
-            column(12, 17, 25, 95, 1, true),
-        ],
-        Backups => vec![
-            column(3, 3, 4, 95, 1, true),
-            column(3, 4, 6, 90, 1, false),
-            column(12, 17, 20, 70, 1, false),
-            column(12, 20, 25, 100, 1, true),
-            column(6, 12, 20, 40, 1, false),
-            column(8, 18, 40, 20, 3, false),
-            column(8, 11, 15, 80, 1, false),
-        ],
+        Devices | Backups => table_column_schema(kind)
+            .expect("workspace tables have a column schema")
+            .into_iter()
+            .map(|column| column.layout)
+            .collect(),
         ProvisionDevices => vec![
             column(7, 9, 12, 100, 1, true),
             column(8, 12, 14, 80, 1, false),

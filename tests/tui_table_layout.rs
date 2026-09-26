@@ -1,7 +1,20 @@
 use edpcli::tui::table_layout::{
-    display_width, truncate_cell, AdaptiveColumnSpec, AdaptiveTableLayout, HorizontalScrollState,
-    TruncatePolicy,
+    display_width, identity_column_specs, table_column_schema, truncate_cell, AdaptiveColumnSpec,
+    AdaptiveTableLayout, ColumnId, HorizontalScrollState, TableKind, TruncatePolicy,
 };
+
+#[test]
+fn ch14_identity_column_schema_is_identical_between_workspaces() {
+    let shared = identity_column_specs();
+    let devices = table_column_schema(TableKind::Devices).unwrap();
+    let backups = table_column_schema(TableKind::Backups).unwrap();
+    assert_eq!(devices.len(), 10);
+    assert_eq!(backups.len(), 11);
+    assert_eq!(devices[1..8], shared);
+    assert_eq!(backups[3..10], shared);
+    assert_eq!(devices[7].id, ColumnId::ProvisionKind);
+    assert_eq!(backups[9].id, ColumnId::ProvisionKind);
+}
 
 fn spec(min: u16, preferred: u16, max: u16, priority: u8, pinned: bool) -> AdaptiveColumnSpec {
     AdaptiveColumnSpec {
