@@ -617,11 +617,32 @@ pub(super) fn draw_advanced_inspect(
                             }
                             detail_lines.push(Line::from("Enter 打开 Sector Inspector/Hex"));
                         } else {
-                            detail_lines
-                                .push(Line::from(Span::styled("该扇区尚未按需读取。", warning())));
-                            detail_lines.push(Line::from(
-                                "Enter 打开 Sector Inspector 并后台读取当前 sector。",
-                            ));
+                            match state.advanced_inspect_preview_state(lba) {
+                                crate::tui::state::PreviewLoadState::Failed {
+                                    message,
+                                    attempts,
+                                } => {
+                                    overview_lines.push(Line::from(Span::styled(
+                                        format!("读取失败（第 {attempts} 次）：{}", safe(&message)),
+                                        warning(),
+                                    )));
+                                    detail_lines.push(Line::from(
+                                        "按 r 显式重试预览，或 Enter 打开 Sector Inspector 重试。",
+                                    ));
+                                }
+                                crate::tui::state::PreviewLoadState::Pending { .. } => {
+                                    detail_lines.push(Line::from("正在后台读取当前扇区…"));
+                                }
+                                _ => {
+                                    detail_lines.push(Line::from(Span::styled(
+                                        "该扇区尚未按需读取。",
+                                        warning(),
+                                    )));
+                                    detail_lines.push(Line::from(
+                                        "Enter 打开 Sector Inspector 并后台读取当前 sector。",
+                                    ));
+                                }
+                            }
                         }
                     }
                     InspectNodeKind::Field => {

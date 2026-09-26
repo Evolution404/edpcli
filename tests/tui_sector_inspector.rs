@@ -230,9 +230,78 @@ fn selecting_known_partition_sector_requests_read_only_preview() {
     let current = state.advanced_inspect().unwrap().tree_selected;
     state.advanced_inspect_move_tree(sector as isize - current as isize);
     assert_eq!(state.advanced_inspect_preview_request().unwrap().1, 2_048);
-    state.advanced_inspect_mark_preview_attempted(2_048);
+    state.advanced_inspect_mark_preview_pending(2_048);
     assert!(state.advanced_inspect_preview_request().is_none());
     assert!(state.advanced_inspect_sector().is_none());
+}
+
+#[test]
+fn ch14_failed_passive_preview_requires_explicit_retry_then_recovers() {
+    use edpcli::tui::state::PreviewLoadState;
+
+    let mut state = AppState::new();
+    assert!(state.begin_advanced_inspect(AdvancedInspectSource::Disk(6)));
+    state.advanced_inspect_finish(Ok(workspace_with_partition(Vec::new())));
+    let rows = state.advanced_inspect_tree_rows();
+    let partition = rows
+        .iter()
+        .position(|row| row.id.ends_with("/region.partition.0"))
+        .unwrap();
+    state.advanced_inspect_move_tree(partition as isize);
+    state.advanced_inspect_toggle_selected();
+    let rows = state.advanced_inspect_tree_rows();
+    let extent = rows
+        .iter()
+        .position(|row| row.id.ends_with("/region.partition.0.extent"))
+        .unwrap();
+    let current = state.advanced_inspect().unwrap().tree_selected;
+    state.advanced_inspect_move_tree(extent as isize - current as isize);
+    state.advanced_inspect_toggle_selected();
+    let rows = state.advanced_inspect_tree_rows();
+    let sector = rows
+        .iter()
+        .position(|row| row.id.ends_with("/sector.2048"))
+        .unwrap();
+    let current = state.advanced_inspect().unwrap().tree_selected;
+    state.advanced_inspect_move_tree(sector as isize - current as isize);
+
+    assert_eq!(state.advanced_inspect_preview_request().unwrap().1, 2_048);
+    state.advanced_inspect_mark_preview_pending(2_048);
+    assert_eq!(
+        state.advanced_inspect_preview_state(2_048),
+        PreviewLoadState::Pending { attempts: 1 }
+    );
+    state.advanced_inspect_sector_finish(2_048, Err("transient read".into()));
+    assert!(matches!(
+        state.advanced_inspect_preview_state(2_048),
+        PreviewLoadState::Failed { attempts: 1, .. }
+    ));
+    assert!(state.advanced_inspect_preview_request().is_none());
+    let mut terminal = Terminal::new(TestBackend::new(160, 50)).unwrap();
+    terminal.draw(|frame| render::draw(frame, &state)).unwrap();
+    let text = terminal
+        .backend()
+        .buffer()
+        .content()
+        .iter()
+        .map(|cell| cell.symbol())
+        .collect::<String>()
+        .replace(' ', "");
+    assert!(text.contains("读取失败"), "{text}");
+    assert!(text.contains("按r显式重试"), "{text}");
+    assert_eq!(
+        state.advanced_inspect_retry_selected_preview().unwrap().1,
+        2_048
+    );
+    assert_eq!(
+        state.advanced_inspect_preview_state(2_048),
+        PreviewLoadState::Pending { attempts: 2 }
+    );
+    state.advanced_inspect_sector_finish(2_048, Ok(item(2_048, true)));
+    assert_eq!(
+        state.advanced_inspect_preview_state(2_048),
+        PreviewLoadState::Ready
+    );
 }
 
 #[test]

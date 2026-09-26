@@ -35,7 +35,6 @@ fn ch14_q0_progress_transport_preserves_event_batches() {
 }
 
 #[test]
-#[ignore = "Q0 red contract: enable after Q2 explicit Inspect retry"]
 fn ch14_q0_failed_passive_preview_has_explicit_retry_state() {
     let source = include_str!("../src/tui/inspect/state.rs");
     assert!(!source.contains("preview_attempted: std::collections::BTreeSet"));

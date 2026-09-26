@@ -4300,7 +4300,7 @@ python3 scripts/test-full.py --profile full
 | --- | --- | --- |
 | Q0 基线与失败测试 | COMPLETE | 基线 `9206d8a`；exFAT 998107136-sector round-trip、cluster limit/limit+1 与 Inspect/TUI 契约均已写成 ignored red tests，显式执行确认失败；Chapter 12 现有 key-domain 测试继续作为保护门禁。 |
 | Q1 Inspect 数据契约 | COMPLETE | 稳定 `InspectFieldKey`、PhysicalRaw/SectorDecoded/FieldLogical/SemanticValue、typed XOR provenance、parse state/diagnostic、真实字段 status 与 typed region semantic 已落地；Inspect/TUI/协议专项与 fast gate 通过。 |
-| Q2 Inspect topology + presentation | IN PROGRESS | 单扇区 Tree 去冗余范围与盘尾五段互斥连续 primary spans 已实现；Inspect/TUI 专项通过。Summary、Detail、retry、view-model cache 仍在实施。 |
+| Q2 Inspect topology + presentation | IN PROGRESS | 单扇区 Tree 去冗余范围、盘尾五段互斥连续 primary spans、被动预览失败的显式 `r` retry 已实现；Inspect/TUI 专项通过。Summary、Detail、view-model cache 仍在实施。 |
 | Q3 Device / Backup identity contract | PENDING | — |
 | Q4 DiskLayout / Provision presentation | PENDING | — |
 | Q5 Progress application core | PENDING | — |

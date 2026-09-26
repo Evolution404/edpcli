@@ -767,7 +767,7 @@ fn run_loop(resume: Option<state::WriteIntent>) -> io::Result<LoopExit> {
             }
             if let Some((source, lba)) = state.advanced_inspect_preview_request() {
                 if tasks.request_advanced_inspect_preview(source, lba).is_ok() {
-                    state.advanced_inspect_mark_preview_attempted(lba);
+                    state.advanced_inspect_mark_preview_pending(lba);
                 }
             }
             if state.take_deferred_exit() == StateEffect::ExitRequested {
@@ -1074,6 +1074,20 @@ fn run_loop(resume: Option<state::WriteIntent>) -> io::Result<LoopExit> {
                                     TuiAction::Top => state.advanced_inspect_focused_top(),
                                     TuiAction::Bottom => state.advanced_inspect_focused_bottom(),
                                     TuiAction::Open => state.advanced_inspect_toggle_selected(),
+                                    TuiAction::Refresh => {
+                                        if let Some((source, lba)) =
+                                            state.advanced_inspect_retry_selected_preview()
+                                        {
+                                            if let Err(message) =
+                                                tasks.request_advanced_inspect_preview(source, lba)
+                                            {
+                                                state.advanced_inspect_sector_finish(
+                                                    lba,
+                                                    Err(message.to_string()),
+                                                );
+                                            }
+                                        }
+                                    }
                                     TuiAction::Activate => {
                                         open_advanced_inspect_selection(&mut state, &mut tasks);
                                     }

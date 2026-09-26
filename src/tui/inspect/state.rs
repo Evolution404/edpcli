@@ -176,6 +176,20 @@ pub struct AdvancedInspectTreeRow {
     pub action: AdvancedInspectTreeAction,
 }
 
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub enum PreviewLoadState {
+    #[default]
+    Idle,
+    Pending {
+        attempts: u32,
+    },
+    Ready,
+    Failed {
+        message: String,
+        attempts: u32,
+    },
+}
+
 #[derive(Debug, Clone)]
 pub struct AdvancedInspectState {
     pub source: AdvancedInspectSource,
@@ -188,7 +202,7 @@ pub struct AdvancedInspectState {
     pub lazy_offsets: std::collections::BTreeMap<String, u64>,
     pub sector: Option<SectorInspectorState>,
     pub sector_cache_order: std::collections::VecDeque<u64>,
-    pub preview_attempted: std::collections::BTreeSet<u64>,
+    pub preview_load: std::collections::BTreeMap<u64, PreviewLoadState>,
     pub yank_register: Option<String>,
     pub prompt: Option<AdvancedInspectPrompt>,
     pub message: Option<String>,
@@ -420,7 +434,7 @@ impl AppState {
             lazy_offsets: std::collections::BTreeMap::new(),
             sector: None,
             sector_cache_order: std::collections::VecDeque::new(),
-            preview_attempted: std::collections::BTreeSet::new(),
+            preview_load: std::collections::BTreeMap::new(),
             yank_register: None,
             prompt: None,
             message: Some("正在后台读取协议上下文并建立全盘结构树…".into()),
@@ -476,7 +490,7 @@ impl AppState {
         state.tree_selected = 0;
         state.sector = None;
         state.sector_cache_order.clear();
-        state.preview_attempted.clear();
+        state.preview_load.clear();
         state.prompt = None;
         state.search_query.clear();
         state.search_matches.clear();
@@ -1368,17 +1382,52 @@ impl AppState {
         let lba = row.range.start_lba;
         let workspace = advanced.result.as_ref()?;
         if workspace.items.iter().any(|item| item.lba == lba)
-            || advanced.preview_attempted.contains(&lba)
+            || !matches!(
+                advanced.preview_load.get(&lba),
+                None | Some(PreviewLoadState::Idle)
+            )
         {
             return None;
         }
         Some((advanced.source.clone(), lba))
     }
 
-    pub fn advanced_inspect_mark_preview_attempted(&mut self, lba: u64) {
+    pub fn advanced_inspect_preview_state(&self, lba: u64) -> PreviewLoadState {
+        self.advanced_inspect
+            .as_ref()
+            .and_then(|advanced| advanced.preview_load.get(&lba))
+            .cloned()
+            .unwrap_or_default()
+    }
+
+    pub fn advanced_inspect_mark_preview_pending(&mut self, lba: u64) {
         if let Some(advanced) = self.advanced_inspect.as_mut() {
-            advanced.preview_attempted.insert(lba);
+            let attempts = match advanced.preview_load.get(&lba) {
+                Some(
+                    PreviewLoadState::Pending { attempts }
+                    | PreviewLoadState::Failed { attempts, .. },
+                ) => attempts.saturating_add(1),
+                _ => 1,
+            };
+            advanced
+                .preview_load
+                .insert(lba, PreviewLoadState::Pending { attempts });
         }
+    }
+
+    pub fn advanced_inspect_retry_selected_preview(
+        &mut self,
+    ) -> Option<(AdvancedInspectSource, u64)> {
+        let lba = self.advanced_inspect_selected_sector_lba()?;
+        let source = self.advanced_inspect.as_ref()?.source.clone();
+        if !matches!(
+            self.advanced_inspect_preview_state(lba),
+            PreviewLoadState::Failed { .. }
+        ) {
+            return None;
+        }
+        self.advanced_inspect_mark_preview_pending(lba);
+        Some((source, lba))
     }
 
     pub fn advanced_inspect_open_selected_sector(
@@ -1473,6 +1522,7 @@ impl AppState {
         };
         match result {
             Ok(mut item) => {
+                state.preview_load.insert(lba, PreviewLoadState::Ready);
                 const ON_DEMAND_CACHE_LIMIT: usize = 5;
                 if let Some(workspace) = state.result.as_mut() {
                     if let Some(index) = workspace.items.iter().position(|old| old.lba == lba) {
@@ -1500,7 +1550,7 @@ impl AppState {
                                 continue;
                             }
                             workspace.items.retain(|value| value.lba != evicted);
-                            state.preview_attempted.remove(&evicted);
+                            state.preview_load.remove(&evicted);
                         }
                     }
                 }
@@ -1514,6 +1564,20 @@ impl AppState {
                 }
             }
             Err(message) => {
+                let attempts = match state.preview_load.get(&lba) {
+                    Some(
+                        PreviewLoadState::Pending { attempts }
+                        | PreviewLoadState::Failed { attempts, .. },
+                    ) => *attempts,
+                    _ => 1,
+                };
+                state.preview_load.insert(
+                    lba,
+                    PreviewLoadState::Failed {
+                        message: message.clone(),
+                        attempts,
+                    },
+                );
                 if let Some(sector) = state.sector.as_mut().filter(|sector| sector.lba == lba) {
                     sector.pending = false;
                     sector.error = Some(message);
