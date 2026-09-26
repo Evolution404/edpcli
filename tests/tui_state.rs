@@ -314,8 +314,16 @@ fn provision_label_defaults_to_jiangsu_safe6_and_remains_editable() {
     let mut form = ProvisionForm::default();
     assert_eq!(form.label, "江苏电力!SAFE6");
     assert!(form.share_source_password.is_empty());
+    assert_eq!(
+        form.share_source_knowledge,
+        edpcli::provision::SourcePasswordKnowledge::Unknown
+    );
     assert_eq!(form.share_target_password, "0000aaaa");
     assert!(form.encrypt_source_password.is_empty());
+    assert_eq!(
+        form.encrypt_source_knowledge,
+        edpcli::provision::SourcePasswordKnowledge::Unknown
+    );
     assert_eq!(form.encrypt_target_password, "0000aaaa");
     assert_eq!(form.volume_label, "启动区");
     assert_eq!(form.boot_sectors, "20417");
@@ -335,6 +343,89 @@ fn provision_label_defaults_to_jiangsu_safe6_and_remains_editable() {
     form.label_id = "123456789".into();
     assert_eq!(form.label, "自定义标签!SAFE6");
     assert_eq!(form.label_id, "123456789");
+}
+
+#[test]
+fn provision_key_probe_prefills_only_verified_default_domains() {
+    let mut state = AppState::new();
+    state.replace_devices(vec![device(64_000_000_000)]);
+    state.navigate(NavCommand::WorkspaceProvision, 20);
+    state.provision_select_disk();
+    state.provision_skip_backup();
+    state.provision_begin_selected();
+
+    state.provision_finish_key_probe(Ok(
+        edpcli::application::provision::ProvisionKeyProbe {
+            source_kind: edpcli::provision::DiskProvisionKind::Mode0,
+            share: Some(edpcli::provision::SourcePasswordKnowledge::DefaultVerified),
+            encrypt: Some(edpcli::provision::SourcePasswordKnowledge::Unknown),
+        },
+    ));
+
+    assert_eq!(state.provision().form.share_source_password, "0000aaaa");
+    assert_eq!(
+        state.provision().form.share_source_knowledge,
+        edpcli::provision::SourcePasswordKnowledge::DefaultVerified
+    );
+    assert!(state.provision().form.encrypt_source_password.is_empty());
+    assert_eq!(
+        state.provision().form.encrypt_source_knowledge,
+        edpcli::provision::SourcePasswordKnowledge::Unknown
+    );
+}
+
+#[test]
+fn provision_key_probe_never_overwrites_user_entered_source_password() {
+    let mut state = AppState::new();
+    state.replace_devices(vec![device(64_000_000_000)]);
+    state.navigate(NavCommand::WorkspaceProvision, 20);
+    state.provision_select_disk();
+    state.provision_skip_backup();
+    state.provision_begin_selected();
+    state.provision_mut().form.share_source_password = "ManualOldPass!".into();
+
+    state.provision_finish_key_probe(Ok(
+        edpcli::application::provision::ProvisionKeyProbe {
+            source_kind: edpcli::provision::DiskProvisionKind::Mode0,
+            share: Some(edpcli::provision::SourcePasswordKnowledge::DefaultVerified),
+            encrypt: None,
+        },
+    ));
+
+    assert_eq!(
+        state.provision().form.share_source_password,
+        "ManualOldPass!"
+    );
+    assert_eq!(
+        state.provision().form.share_source_knowledge,
+        edpcli::provision::SourcePasswordKnowledge::Unknown
+    );
+}
+
+#[test]
+fn editing_source_password_invalidates_cached_verification_state() {
+    let mut state = AppState::new();
+    state.replace_devices(vec![device(64_000_000_000)]);
+    state.navigate(NavCommand::WorkspaceProvision, 20);
+    state.provision_select_disk();
+    state.provision_skip_backup();
+    state.provision_begin_selected();
+    state.provision_mut().form.share_source_password = "0000aaaa".into();
+    state.provision_mut().form.share_source_knowledge =
+        edpcli::provision::SourcePasswordKnowledge::DefaultVerified;
+
+    let index = state
+        .provision_visible_fields()
+        .iter()
+        .position(|(label, _, _)| label.contains("交换区来源密码"))
+        .unwrap();
+    state.provision_mut().field_selected = index;
+    state.provision_push_char('x');
+
+    assert_eq!(
+        state.provision().form.share_source_knowledge,
+        edpcli::provision::SourcePasswordKnowledge::Unknown
+    );
 }
 
 #[test]
