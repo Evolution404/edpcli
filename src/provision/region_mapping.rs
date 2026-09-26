@@ -59,18 +59,14 @@ pub struct TargetRegion {
 }
 
 impl SourceRegion {
-    pub fn from_existing(
-        partition: ExistingPartition,
-        record: ExistingPartitionRecord,
-    ) -> Self {
-        let key_profile = KeyDomainRole::from_partition_role(partition.role).map(|domain| {
-            RegionKeyProfile {
+    pub fn from_existing(partition: ExistingPartition, record: ExistingPartitionRecord) -> Self {
+        let key_profile =
+            KeyDomainRole::from_partition_role(partition.role).map(|domain| RegionKeyProfile {
                 domain,
                 wrap_mode: (record.lba12.need_encrypt != 0)
                     .then(|| FileKeyWrapMode::from_raw(record.lba12.encrypt_mode))
                     .flatten(),
-            }
-        });
+            });
         Self {
             role: partition.role,
             partition_type: partition.partition_type.raw(),
@@ -94,12 +90,11 @@ impl SourceRegion {
 
 impl TargetRegion {
     pub fn from_target(partition: TargetPartitionGeometry) -> Self {
-        let key_profile = KeyDomainRole::from_partition_role(partition.role).map(|domain| {
-            RegionKeyProfile {
+        let key_profile =
+            KeyDomainRole::from_partition_role(partition.role).map(|domain| RegionKeyProfile {
                 domain,
                 wrap_mode: Some(FileKeyWrapMode::Sm4),
-            }
-        });
+            });
         Self {
             role: partition.role,
             partition_type: partition.partition_type.raw(),
