@@ -211,7 +211,18 @@ fn provision_request(opts: &ProvisionNewOpts) -> crate::application::provision::
                     user: opts.user.clone(),
                     dept: opts.dept.clone(),
                     label: opts.label.clone(),
-                    password: opts.password.clone(),
+                    key_domains: crate::provision::KeyDomainSecrets::new(
+                        crate::provision::KeyDomainSecretPair::new(
+                            (!opts.share_source_password.is_empty())
+                                .then_some(opts.share_source_password.as_bytes()),
+                            Some(opts.share_target_password.as_bytes()),
+                        ),
+                        crate::provision::KeyDomainSecretPair::new(
+                            (!opts.encrypt_source_password.is_empty())
+                                .then_some(opts.encrypt_source_password.as_bytes()),
+                            Some(opts.encrypt_target_password.as_bytes()),
+                        ),
+                    ),
                     volume_label: opts.volume_label.clone(),
                     format: crate::application::provision::FormatOptions {
                         boot: opts.format_boot,
