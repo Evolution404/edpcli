@@ -296,7 +296,10 @@ fn chapter_12_review_must_expose_domain_disposition_and_password_state() {
         "来源密码 Unknown",
         "目标密码禁用（Opaque）",
     ] {
-        assert!(review.contains(token), "missing Chapter 12 review token: {token}");
+        assert!(
+            review.contains(token),
+            "missing Chapter 12 review token: {token}"
+        );
     }
 }
 
