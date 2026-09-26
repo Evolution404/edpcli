@@ -378,6 +378,8 @@ impl AppState {
         match result {
             Ok(probe) => {
                 let mut status = Vec::new();
+                self.provision.form.share_opaque_profile = probe.share_opaque_profile;
+                self.provision.form.encrypt_opaque_profile = probe.encrypt_opaque_profile;
                 if let Some(knowledge) = probe.share {
                     if self.provision.form.share_source_password.is_empty() {
                         self.provision.form.share_source_knowledge = knowledge;
@@ -434,6 +436,36 @@ impl AppState {
             }
             Err(message) => {
                 self.provision.message = Some(format!("来源密码域只读探测失败: {message}"));
+            }
+        }
+    }
+
+    pub fn provision_finish_source_password_verify(
+        &mut self,
+        domain: crate::provision::KeyDomainRole,
+        result: Result<crate::provision::SourcePasswordKnowledge, String>,
+    ) {
+        if self.provision.stage != ProvisionStage::Form {
+            return;
+        }
+        match (domain, result) {
+            (crate::provision::KeyDomainRole::Share, Ok(knowledge)) => {
+                self.provision.form.share_source_knowledge = knowledge;
+                self.provision.message = Some("交换域来源密码验证通过。".into());
+            }
+            (crate::provision::KeyDomainRole::Encrypt, Ok(knowledge)) => {
+                self.provision.form.encrypt_source_knowledge = knowledge;
+                self.provision.message = Some("保密域来源密码验证通过。".into());
+            }
+            (crate::provision::KeyDomainRole::Share, Err(message)) => {
+                self.provision.form.share_source_knowledge =
+                    crate::provision::SourcePasswordKnowledge::Unknown;
+                self.provision.message = Some(message);
+            }
+            (crate::provision::KeyDomainRole::Encrypt, Err(message)) => {
+                self.provision.form.encrypt_source_knowledge =
+                    crate::provision::SourcePasswordKnowledge::Unknown;
+                self.provision.message = Some(message);
             }
         }
     }
