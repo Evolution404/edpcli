@@ -87,8 +87,8 @@ pub type ProvisionPrepared = crate::application::provision::PreparedProvision;
 #[path = "form.rs"]
 mod form;
 
-pub use form::{PlainPartitionForm, PlainProvisionForm, ProvisionForm};
 use form::{toggle_supported_fs, ProvisionInputPolicy};
+pub use form::{PlainPartitionForm, PlainProvisionForm, ProvisionForm};
 
 #[derive(Debug, Clone)]
 pub struct ProvisionState {
