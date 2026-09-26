@@ -1,4 +1,7 @@
-use edpcli::provision::ProvisionTarget;
+use edpcli::provision::{
+    KeyDomainRole, SecretBytes, SourcePasswordKnowledge, TargetPasswordPolicy, ProvisionTarget,
+    PartitionRole,
+};
 use std::collections::BTreeSet;
 
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
@@ -164,6 +167,48 @@ const GOLDEN: [GoldenCell; 25] = [
         contract: "per-domain-preserve-rewrap-rebuild",
     },
 ];
+
+
+#[test]
+fn key_domain_roles_match_protocol_semantics() {
+    assert_eq!(
+        KeyDomainRole::from_partition_role(PartitionRole::Share),
+        Some(KeyDomainRole::Share)
+    );
+    assert_eq!(
+        KeyDomainRole::from_partition_role(PartitionRole::BootShareCombined),
+        Some(KeyDomainRole::Share)
+    );
+    assert_eq!(
+        KeyDomainRole::from_partition_role(PartitionRole::Encrypt),
+        Some(KeyDomainRole::Encrypt)
+    );
+    assert_eq!(
+        KeyDomainRole::from_partition_role(PartitionRole::Boot),
+        None
+    );
+    assert_eq!(
+        KeyDomainRole::from_partition_role(PartitionRole::CompatibilityReserve),
+        None
+    );
+}
+
+#[test]
+fn key_domain_secret_debug_is_redacted_and_states_are_explicit() {
+    let secret = SecretBytes::new(b"domain-secret");
+    let debug = format!("{secret:?}");
+    assert!(debug.contains("REDACTED"));
+    assert!(!debug.contains("domain-secret"));
+
+    assert_ne!(
+        SourcePasswordKnowledge::Unknown,
+        SourcePasswordKnowledge::DefaultVerified
+    );
+    assert_ne!(
+        TargetPasswordPolicy::PreserveOpaque,
+        TargetPasswordPolicy::InitializeNew
+    );
+}
 
 #[test]
 fn chapter_12_five_by_five_conversion_golden_is_complete() {
