@@ -97,6 +97,67 @@ fn selected_device_identity_is_rechecked_before_the_operation_starts() {
         .expect_err("changed onlyid must fail closed");
     assert!(error.msg.contains("选择/确认期间发生变化"), "{}", error.msg);
 }
+
+#[test]
+fn plain_identity_recheck_accepts_exact_hardware_candidate_only_when_lba4_is_zero() {
+    use edpcli::platform::{HardwareProbe, InquiryInfo, NativeTransport};
+    use edpcli::sysinfo::CmdRunner;
+    use std::time::Duration;
+
+    struct NativeRunner;
+    impl CmdRunner for NativeRunner {
+        fn check_output(&self, _cmd: &[&str], _timeout: Duration) -> io::Result<String> {
+            Err(io::Error::other("native-only test runner"))
+        }
+
+        fn hardware_probe(&self, _disk: u32) -> Option<HardwareProbe> {
+            Some(HardwareProbe {
+                vid: Some(0x3535),
+                pid: Some(0x6300),
+                transport: NativeTransport::Bot,
+                inquiry: Some(InquiryInfo {
+                    vendor: "aigo".into(),
+                    product: "U335".into(),
+                    revision: "1100".into(),
+                }),
+            })
+        }
+    }
+
+    struct PlainDev {
+        lba4: Vec<u8>,
+    }
+    impl SectorDev for PlainDev {
+        fn read_sector(&mut self, lba: u32) -> io::Result<Vec<u8>> {
+            match lba {
+                4 => Ok(self.lba4.clone()),
+                7 => Ok(vec![0; 512]),
+                _ => Err(io::Error::other("unexpected LBA")),
+            }
+        }
+
+        fn write_sector(&mut self, _lba: u32, _data: &[u8]) -> io::Result<()> {
+            unreachable!("identity verification is read-only")
+        }
+    }
+
+    let runner = NativeRunner;
+    let expected = "disk&ven_aigo&prod_u335&rev_1100";
+    let mut plain = PlainDev { lba4: vec![0; 512] };
+    verify_expected_identity(&runner, 4, None, Some(expected), &mut plain)
+        .expect("zero-LBA4 Plain media should bind to exact hardware-derived device_id");
+
+    let mut damaged = PlainDev { lba4: vec![0; 512] };
+    damaged.lba4[0] = 1;
+    let error = verify_expected_identity(&runner, 4, None, Some(expected), &mut damaged)
+        .expect_err("nonzero LBA4 must block Plain hardware fallback");
+    assert!(
+        error.msg.contains("LBA4") || error.msg.contains("变化"),
+        "{}",
+        error.msg
+    );
+}
+
 use crate::common;
 
 use std::io;

@@ -285,14 +285,54 @@ pub fn verify_expected_identity(
             ));
         }
         let actual = identify(runner, disk, &raw).device_id;
-        if actual.as_deref() != Some(expected) {
-            return Err(err(
-                EXIT_TARGET,
-                format!(
-                    "错误: 设备在选择/确认期间发生变化(expected device_id={expected}, actual device_id={})，拒绝继续",
-                    actual.as_deref().unwrap_or("未知")
-                ),
-            ));
+        if let Some(actual) = actual {
+            if actual != expected {
+                return Err(err(
+                    EXIT_TARGET,
+                    format!(
+                        "错误: 设备在选择/确认期间发生变化(expected device_id={expected}, actual device_id={actual})，拒绝继续"
+                    ),
+                ));
+            }
+        } else {
+            // Plain media intentionally has no EDPF identity in LBA7. Only
+            // permit the hardware-derived fallback when LBA4 is also fully
+            // cleared; a nonzero LBA4 with unreadable LBA7 is treated as
+            // suspected damaged EDP metadata and remains fail-closed.
+            let lba4 = dev.read_sector(4).map_err(|error| {
+                err(
+                    EXIT_IO,
+                    format!("错误: Plain 身份复核读取 LBA4 失败: {error}"),
+                )
+            })?;
+            if lba4.len() != SECTOR {
+                return Err(err(
+                    EXIT_IO,
+                    format!(
+                        "错误: Plain 身份复核 LBA4 读取 {}B，预期 {SECTOR}B",
+                        lba4.len()
+                    ),
+                ));
+            }
+            let tag = diskio::lba4_tag16_from(&lba4)
+                .ok_or_else(|| err(EXIT_IO, "错误: Plain 身份复核无法读取 LBA4 身份标签"))?;
+            if tag.iter().any(|&byte| byte != 0) {
+                return Err(err(
+                    EXIT_TARGET,
+                    "错误: LBA7 无法识别但 LBA4 仍非零；疑似损坏 EDP，拒绝按 Plain 硬件身份继续",
+                ));
+            }
+            if !generate_candidates(runner, disk)
+                .iter()
+                .any(|candidate| candidate == expected)
+            {
+                return Err(err(
+                    EXIT_TARGET,
+                    format!(
+                        "错误: 设备在选择/确认期间发生变化(expected Plain device_id={expected}, 当前硬件候选不匹配)，拒绝继续"
+                    ),
+                ));
+            }
         }
     }
     Ok(())
