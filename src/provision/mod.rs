@@ -12,6 +12,7 @@ mod layout;
 mod lce;
 mod plain;
 mod profile;
+mod region_mapping;
 mod reprovision;
 mod spec;
 mod validate;
@@ -47,6 +48,11 @@ pub use plain::{
     DEFAULT_PLAIN_START_LBA, MAX_PLAIN_PARTITIONS,
 };
 pub use profile::{PassInfoPolicy, ProvisionProfile, DEFAULT_SAFE6_LABEL};
+pub use region_mapping::{
+    migration_candidate, preserve_compatibility, CompatibilityFailure, Extent, FilesystemProfile,
+    PhysicalCryptoProfile, RegionKeyProfile, RegionMapping, RegionMappingKind, RegionMappingPlan,
+    RegionMappingPlanner, SourceRegion, TargetRegion,
+};
 pub use reprovision::{
     apply_target_geometry_overrides, decide_partition_action, parse_existing_provision,
     pass_info_policy_from_sectors, prefill_for_target_mode, validate_target_geometry,
