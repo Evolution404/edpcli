@@ -12,6 +12,7 @@ pub enum PaneId {
     ProvisionDiskLayout,
     ProvisionSummary,
     ProvisionChanges,
+    ProvisionRunLog,
 }
 
 impl PaneId {
@@ -134,6 +135,10 @@ impl PaneFocus {
 
     pub fn provision_review() -> Self {
         Self::new(PaneId::ProvisionSummary, PaneId::PROVISION_REVIEW_ORDER)
+    }
+
+    pub fn provision_running() -> Self {
+        Self::new(PaneId::ProvisionRunLog, [PaneId::ProvisionRunLog])
     }
 
     pub const fn focused(&self) -> PaneId {

@@ -404,11 +404,17 @@ fn draw_wizard(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState)
             if let Some(text) = progress_line.or_else(|| wizard.message.clone()) {
                 lines.push(Line::from(safe(&text)));
             }
+            for event in wizard.progress_log.iter().rev().take(6).rev() {
+                lines.push(Line::from(safe(&write_progress_text(event))));
+            }
         }
         WizardStage::Result => {
             lines.push(Line::from("操作已到达安全结束点；Esc 返回。"));
             if let Some(message) = &wizard.message {
                 lines.push(Line::from(safe(message)));
+            }
+            for event in wizard.progress_log.iter().rev().take(6).rev() {
+                lines.push(Line::from(safe(&write_progress_text(event))));
             }
         }
     }

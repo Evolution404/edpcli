@@ -52,6 +52,7 @@ pub struct WizardState {
     pub message: Option<String>,
     /// Running 阶段最新收到的类型化进度事件；渲染层映射为单行显示。
     pub progress: Option<crate::application::WriteEvent>,
+    pub progress_log: std::collections::VecDeque<crate::application::WriteEvent>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -405,6 +406,7 @@ impl AppState {
             confirmation: String::new(),
             message: None,
             progress: None,
+            progress_log: std::collections::VecDeque::new(),
         });
         true
     }
@@ -459,7 +461,11 @@ impl AppState {
     pub fn set_write_progress(&mut self, event: crate::application::WriteEvent) {
         if let Some(wizard) = self.wizard.as_mut() {
             if wizard.stage == WizardStage::Running {
-                wizard.progress = Some(event);
+                wizard.progress = Some(event.clone());
+                if wizard.progress_log.len() == 200 {
+                    wizard.progress_log.pop_front();
+                }
+                wizard.progress_log.push_back(event);
             }
         }
     }

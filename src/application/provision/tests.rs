@@ -156,6 +156,70 @@ fn mandatory_backup_success_runs_commit_after_backup() {
 }
 
 #[test]
+fn typed_execution_status_is_shared_across_cli_and_tui() {
+    let backup = super::super::write::BackupReport {
+        path: std::path::PathBuf::from("test.edpb"),
+        is_nopwd: false,
+    };
+    let mut outcome = ProvisionWriteOutcome {
+        backup,
+        commit: ProvisionCommitOutcome::Official(ProvisionCommitReport {
+            provision_succeeded: true,
+            formats: vec![PartitionFormatResult {
+                role: PartitionRole::Share,
+                result: Ok(()),
+            }],
+        }),
+        warnings: Vec::new(),
+    };
+    assert_eq!(
+        outcome.execution_status(),
+        ProvisionExecutionStatus::Success
+    );
+    outcome
+        .warnings
+        .push(ProvisionWarning::AfterIdentityObservationFailed(
+            "offline".into(),
+        ));
+    assert_eq!(
+        outcome.execution_status(),
+        ProvisionExecutionStatus::CompletedWithWarnings
+    );
+    if let ProvisionCommitOutcome::Official(report) = &mut outcome.commit {
+        report.formats[0].result = Err("format failure".into());
+    }
+    assert_eq!(
+        outcome.execution_status(),
+        ProvisionExecutionStatus::PartialFormatFailure
+    );
+    assert_eq!(outcome.execution_status().exit_code(), EXIT_IO);
+}
+
+#[test]
+fn editor_preserve_assessment_reports_typed_geometry_reason() {
+    let source = crate::provision::ExistingPartition {
+        role: PartitionRole::Share,
+        partition_type: crate::protocol::edpf::EdpPartitionType::Share,
+        start_lba: 20480,
+        sector_count: 4096,
+        physically_encrypted: true,
+        filesystem: Some(OfficialFilesystemFormat::ExFat),
+    };
+    let same = source.as_target();
+    assert!(PreserveAssessment::for_partition(Some(&source), &same).candidate);
+    let moved = crate::provision::TargetPartitionGeometry {
+        start_lba: 20481,
+        ..same
+    };
+    let assessment = PreserveAssessment::for_partition(Some(&source), &moved);
+    assert_eq!(
+        assessment.failure,
+        Some(crate::provision::CompatibilityFailure::StartLba)
+    );
+    assert!(!assessment.candidate);
+}
+
+#[test]
 fn mode2_quick_and_exact_encrypt_capacity_are_partition_scoped() {
     let quick = target_encrypt_capacity_override(
         OfficialPartitionMode::WholeDiskEncrypted,

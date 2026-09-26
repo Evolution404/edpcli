@@ -5,6 +5,21 @@ pub fn commit_plain_provision(
     dev: &mut dyn SectorDev,
     prepared: &PreparedPlainProvision,
 ) -> EdpCliResult<()> {
+    commit_plain_provision_with_progress(runner, dev, prepared, &mut |_, _, _| {})
+}
+
+pub(super) fn commit_plain_provision_with_progress(
+    runner: &dyn CmdRunner,
+    dev: &mut dyn SectorDev,
+    prepared: &PreparedPlainProvision,
+    progress: &mut dyn FnMut(
+        crate::application::progress::Phase,
+        crate::application::progress::Step,
+        Option<diskio::TransactionActivity>,
+    ),
+) -> EdpCliResult<()> {
+    use crate::application::progress::{Phase, Step};
+    progress(Phase::Identity, Step::LockAndReopen, None);
     let session = TargetSession::<ReadOnly>::open_usb(runner, prepared.disk)?;
     let session = session.prepare_write().map_err(|error| {
         err(
@@ -51,7 +66,10 @@ pub fn commit_plain_provision(
     }
     let transaction = diskio::WriteTransactionPlan::from_plain_provision(&prepared.write_plan)
         .map_err(|message| err(EXIT_TARGET, format!("错误: Plain 事务计划无效: {message}")))?;
-    diskio::execute_write_transaction(dev, &transaction)?;
+    diskio::execute_write_transaction_observed(dev, &transaction, &mut |activity| {
+        progress(Phase::Transaction, Step::ProtocolWrite, Some(activity));
+    })?;
+    progress(Phase::Transaction, Step::ProtocolWrite, None);
 
     let mbr = dev
         .read_sector(0)
@@ -79,6 +97,7 @@ pub fn commit_plain_provision(
     {
         return Err(err(EXIT_IO, "错误: Plain 写后重新识别仍为 EDP 模式"));
     }
+    progress(Phase::Readback, Step::ProtocolReadback, None);
     Ok(())
 }
 
@@ -87,13 +106,27 @@ pub fn commit_provision(
     dev: &mut dyn SectorDev,
     prepared: &PreparedProvision,
 ) -> EdpCliResult<ProvisionCommitOutcome> {
+    commit_provision_with_progress(runner, dev, prepared, &mut |_, _, _| {})
+}
+
+pub(super) fn commit_provision_with_progress(
+    runner: &dyn CmdRunner,
+    dev: &mut dyn SectorDev,
+    prepared: &PreparedProvision,
+    progress: &mut dyn FnMut(
+        crate::application::progress::Phase,
+        crate::application::progress::Step,
+        Option<diskio::TransactionActivity>,
+    ),
+) -> EdpCliResult<ProvisionCommitOutcome> {
     match prepared {
         PreparedProvision::Official(prepared) => {
-            commit_new_provision(runner, dev, prepared).map(ProvisionCommitOutcome::Official)
+            commit_new_provision_with_progress(runner, dev, prepared, progress)
+                .map(ProvisionCommitOutcome::Official)
         }
         PreparedProvision::Plain(prepared) => {
             let partition_count = prepared.plan.partitions.len();
-            commit_plain_provision(runner, dev, prepared)
+            commit_plain_provision_with_progress(runner, dev, prepared, progress)
                 .map(|()| ProvisionCommitOutcome::Plain { partition_count })
         }
     }
@@ -122,6 +155,20 @@ pub fn commit_new_provision(
     dev: &mut dyn SectorDev,
     prepared: &PreparedNewProvision,
 ) -> EdpCliResult<ProvisionCommitReport> {
+    commit_new_provision_with_progress(runner, dev, prepared, &mut |_, _, _| {})
+}
+
+pub(super) fn commit_new_provision_with_progress(
+    runner: &dyn CmdRunner,
+    dev: &mut dyn SectorDev,
+    prepared: &PreparedNewProvision,
+    progress: &mut dyn FnMut(
+        crate::application::progress::Phase,
+        crate::application::progress::Step,
+        Option<diskio::TransactionActivity>,
+    ),
+) -> EdpCliResult<ProvisionCommitReport> {
+    use crate::application::progress::{Phase, Step};
     let target_plan = prepared
         .target_plan
         .as_ref()
@@ -136,6 +183,7 @@ pub fn commit_new_provision(
         target_plan.has_preserved_partitions(),
         prepared.source_metadata.as_deref(),
     )?;
+    progress(Phase::Identity, Step::LockAndReopen, None);
     let session = TargetSession::<ReadOnly>::open_usb(runner, prepared.disk)?;
     let session = session.prepare_write().map_err(|error| {
         err(
@@ -207,12 +255,15 @@ pub fn commit_new_provision(
             "错误: 制盘确认/卸载期间制造商 LBA3 发生变化，拒绝写入",
         ));
     }
-    diskio::atomic_write_official_provision_sectors(
+    diskio::atomic_write_official_provision_sectors_observed(
         dev,
         &prepared.write_image.patch,
         prepared.write_image.total_sectors,
+        &mut |activity| progress(Phase::Transaction, Step::ProtocolWrite, Some(activity)),
     )?;
+    progress(Phase::Transaction, Step::ProtocolWrite, None);
     verify_protocol_readback(dev, prepared)?;
+    progress(Phase::Readback, Step::ProtocolReadback, None);
     let mut report = ProvisionCommitReport {
         provision_succeeded: true,
         formats: Vec::new(),
@@ -222,11 +273,23 @@ pub fn commit_new_provision(
         .iter()
         .filter(|choice| choice.selected)
     {
-        let result = format_partition(runner, dev, prepared, choice);
+        let result =
+            format_partition_with_progress(runner, dev, prepared, choice, &mut |activity| {
+                progress(
+                    Phase::Format,
+                    Step::PartitionFormat(choice.target.role),
+                    Some(activity),
+                );
+            });
         report.formats.push(PartitionFormatResult {
             role: choice.target.role,
             result: result.map_err(|error| error.msg),
         });
+        progress(
+            Phase::Format,
+            Step::PartitionFormat(choice.target.role),
+            None,
+        );
     }
     Ok(report)
 }
@@ -627,23 +690,33 @@ impl PartitionReader for PreparedImageReader<'_> {
     }
 }
 
-fn format_partition(
+fn format_partition_with_progress(
     runner: &dyn CmdRunner,
     dev: &mut dyn SectorDev,
     prepared: &PreparedNewProvision,
     choice: &PlannedPartitionFormat,
+    observer: &mut dyn FnMut(diskio::TransactionActivity),
 ) -> EdpCliResult<()> {
     verify_format_identity(runner, dev, prepared)?;
-    execute_partition_format(dev, choice)?;
+    execute_partition_format_observed(dev, choice, observer)?;
     verify_format_identity(runner, dev, prepared)?;
     Ok(())
 }
 
 /// Format one verified official partition. The caller owns device identity and
 /// protocol verification; this operation never writes the protocol region.
+#[cfg(test)]
 pub(super) fn execute_partition_format(
     dev: &mut dyn SectorDev,
     choice: &PlannedPartitionFormat,
+) -> EdpCliResult<()> {
+    execute_partition_format_observed(dev, choice, &mut |_| {})
+}
+
+fn execute_partition_format_observed(
+    dev: &mut dyn SectorDev,
+    choice: &PlannedPartitionFormat,
+    observer: &mut dyn FnMut(diskio::TransactionActivity),
 ) -> EdpCliResult<()> {
     let filesystem = choice
         .filesystem
@@ -663,7 +736,8 @@ pub(super) fn execute_partition_format(
     {
         return Err(err(EXIT_TARGET, "错误: 预生成格式化镜像与目标几何不一致"));
     }
-    for (&relative, sector) in built.image.sectors() {
+    let format_sectors = built.image.sectors().len() as u64;
+    for (index, (&relative, sector)) in built.image.sectors().iter().enumerate() {
         let absolute = choice
             .target
             .geometry
@@ -677,10 +751,16 @@ pub(super) fn execute_partition_format(
                 format!("错误: 格式化 LBA{absolute} 写入失败: {error}"),
             )
         })?;
+        let event = diskio::TransactionActivity {
+            phase: diskio::TransactionActivityPhase::FormatWrite,
+            current: index as u64 + 1,
+            total: format_sectors,
+        };
+        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| observer(event)));
     }
     dev.sync()
         .map_err(|error| err(EXIT_IO, format!("错误: 格式化同步失败: {error}")))?;
-    for (&relative, expected) in built.image.sectors() {
+    for (index, (&relative, expected)) in built.image.sectors().iter().enumerate() {
         let absolute = u32::try_from(choice.target.geometry.start_sector + relative)
             .map_err(|_| err(EXIT_TARGET, "错误: 格式化读回 LBA 溢出"))?;
         let actual = dev.read_sector(absolute).map_err(|error| {
@@ -695,6 +775,12 @@ pub(super) fn execute_partition_format(
                 format!("错误: 格式化 LBA{absolute} 读回不一致"),
             ));
         }
+        let event = diskio::TransactionActivity {
+            phase: diskio::TransactionActivityPhase::FormatReadback,
+            current: index as u64 + 1,
+            total: format_sectors,
+        };
+        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| observer(event)));
     }
     let raw_boot = dev
         .read_sector(

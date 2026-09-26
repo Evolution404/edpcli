@@ -4,8 +4,9 @@ use std::io;
 use edpcli::{
     common::{EXIT_IO, EXIT_ROLLED_BACK, SECTOR},
     diskio::{
-        atomic_write_official_provision_sectors, execute_write_transaction, SectorDev,
-        SectorWriteStage, WriteTransactionPlan,
+        atomic_write_official_provision_sectors, execute_write_transaction,
+        execute_write_transaction_observed, SectorDev, SectorWriteStage, TransactionActivityPhase,
+        WriteTransactionPlan,
     },
     provision::{
         build_plain_provision_write_plan, OfficialFilesystemFormat, PlainCleanupExtent,
@@ -76,6 +77,34 @@ fn generic_transaction_orders_by_stage_then_lba_and_commits_last() {
     let mut dev = MemoryDev::default();
     execute_write_transaction(&mut dev, &plan).unwrap();
     assert_eq!(dev.writes, vec![63, 900, 4, 12, 0]);
+}
+
+#[test]
+fn transaction_activity_reports_actual_mirror_write_and_readback_work() {
+    let mut plan = WriteTransactionPlan::new(100);
+    plan.insert(10, vec![1; SECTOR], SectorWriteStage::Data, "data")
+        .unwrap();
+    plan.insert(0, vec![2; SECTOR], SectorWriteStage::Commit, "mbr")
+        .unwrap();
+    let mut events = Vec::new();
+    let mut dev = MemoryDev::default();
+    execute_write_transaction_observed(&mut dev, &plan, &mut |event| events.push(event)).unwrap();
+    assert_eq!(events.len(), 6);
+    assert_eq!(events[0].phase, TransactionActivityPhase::Mirror);
+    assert_eq!(events[1].current, 2);
+    assert_eq!(events[2].phase, TransactionActivityPhase::Write);
+    assert_eq!(events[4].phase, TransactionActivityPhase::Readback);
+    assert!(events.iter().all(|event| event.total == 2));
+}
+
+#[test]
+fn progress_sink_panic_cannot_interrupt_transaction_or_rollback() {
+    let mut plan = WriteTransactionPlan::new(100);
+    plan.insert(0, vec![2; SECTOR], SectorWriteStage::Commit, "mbr")
+        .unwrap();
+    let mut dev = MemoryDev::default();
+    execute_write_transaction_observed(&mut dev, &plan, &mut |_| panic!("sink failed")).unwrap();
+    assert_eq!(dev.sectors[&0], vec![2; SECTOR]);
 }
 
 #[test]

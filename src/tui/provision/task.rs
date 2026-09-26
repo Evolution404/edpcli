@@ -13,12 +13,7 @@ impl TaskHub {
                 crate::application::provision::probe_provision_key_domains_on_disk(&runner, disk)
                     .map_err(|error| error.msg)
             }))
-            .unwrap_or_else(|payload| {
-                Err(format!(
-                    "来源密码域探测 worker 异常终止: {}",
-                    panic_message(payload)
-                ))
-            });
+            .unwrap_or_else(|_| Err("来源密码域探测 worker 异常终止".into()));
             let _ = tx.send(WorkerResult::ProvisionKeyProbe { generation, result });
         });
         Ok(generation)
@@ -46,12 +41,7 @@ impl TaskHub {
                 )
                 .map_err(|error| error.msg)
             }))
-            .unwrap_or_else(|payload| {
-                Err(format!(
-                    "来源密码验证 worker 异常终止: {}",
-                    panic_message(payload)
-                ))
-            });
+            .unwrap_or_else(|_| Err("来源密码验证 worker 异常终止".into()));
             let _ = tx.send(WorkerResult::ProvisionKeyVerify {
                 generation,
                 domain,
@@ -122,13 +112,10 @@ impl TaskHub {
     ) -> Result<OperationId, &'static str> {
         let operation_id = self.begin_operation()?;
         let tx = self.tx.clone();
-        self.critical_worker = Some(std::thread::spawn(move || {
-            let result = catch_unwind(AssertUnwindSafe(|| {
+        self.critical_worker =
+            Some(std::thread::spawn(move || {
+                let result = catch_unwind(AssertUnwindSafe(|| {
                 let runner = SysRunner;
-                let _ = tx.send(WorkerResult::ProvisionProgress {
-                    operation_id,
-                    message: "正在创建制盘前强制 EDPB 备份…".into(),
-                });
                 struct ProvisionWritePrompter;
                 impl crate::application::write::Prompter for ProvisionWritePrompter {
                     fn prompt_line(&mut self, _msg: &str) -> String {
@@ -139,65 +126,23 @@ impl TaskHub {
                     }
                 }
                 let mut prompt = ProvisionWritePrompter;
-                crate::application::provision::commit_provision_with_backup_on_disk(
+                crate::application::provision::commit_provision_with_backup_on_disk_with_progress(
                     &runner,
                     &prepared,
                     backup_dir,
                     &mut prompt,
+                    &mut |event| {
+                        let _ = tx.send(WorkerResult::ProvisionProgress { operation_id, event });
+                    },
                 )
-                    .map(|write| {
-                        let backup_line = format!(
-                            "制盘前自动备份：{}",
-                            write.backup.path.display()
-                        );
-                        let warning_lines: Vec<String> = write
-                            .warnings
-                            .iter()
-                            .map(crate::application::provision::ProvisionWarning::message)
-                            .collect();
-                        let outcome = write.commit;
-                        let result = match outcome {
-                        crate::application::provision::ProvisionCommitOutcome::Official(report) => {
-                            let mut lines =
-                                vec!["制盘：成功，协议与几何读回验证通过。".to_string()];
-                            if report.formats.is_empty() {
-                                lines.push("格式化：未选择任何分区".into());
-                            }
-                            for item in report.formats {
-                                lines.push(match item.result {
-                                    Ok(()) => {
-                                        format!("格式化：✓ {}，读回验证通过", item.role.label())
-                                    }
-                                    Err(message) => {
-                                        format!("格式化：✗ {}：{message}", item.role.label())
-                                    }
-                                });
-                            }
-                            lines.join("\n")
-                        }
-                            crate::application::provision::ProvisionCommitOutcome::Plain {
-                                partition_count,
-                            } => format!(
-                                "恢复普通盘：成功，{} 个 MBR 主分区已写入并读回验证；LBA3 保留，EDP 状态已清除。",
-                                partition_count
-                            ),
-                        };
-                        if warning_lines.is_empty() {
-                            format!("{backup_line}\n{result}")
-                        } else {
-                            format!("{backup_line}\n{result}\n{}", warning_lines.join("\n"))
-                        }
-                    })
-                    .map_err(|error| error.msg)
+                .map_err(|error| error.msg)
             }))
-            .unwrap_or_else(|payload| {
-                Err(format!("制盘 worker 异常终止: {}", panic_message(payload)))
-            });
-            let _ = tx.send(WorkerResult::ProvisionWrite {
-                operation_id,
-                result,
-            });
-        }));
+            .unwrap_or_else(|_| Err("制盘 worker 异常终止".into()));
+                let _ = tx.send(WorkerResult::ProvisionWrite {
+                    operation_id,
+                    result,
+                });
+            }));
         Ok(operation_id)
     }
 }

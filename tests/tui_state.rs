@@ -52,6 +52,55 @@ fn device(size: u64) -> edpcli::disk_scan::Row {
 }
 
 #[test]
+fn ch14_partition_layout_has_typed_status_column_and_reason() {
+    use edpcli::tui::disk_layout::DiskLayoutDetailTone;
+    let mut state = AppState::new();
+    state.replace_devices(vec![device(64_000_000_000)]);
+    state.navigate(NavCommand::WorkspaceProvision, 20);
+    state.provision_select_disk();
+    assert_eq!(state.provision_begin_selected(), ProvisionKind::Mode0);
+    let encrypt = state
+        .provision_visible_fields()
+        .iter()
+        .position(|(label, _, _)| label.starts_with("保密区容量"))
+        .unwrap();
+    state.provision_mut().field_selected = encrypt;
+    let details = state.provision_layout_editor_details();
+    let partitions = details
+        .iter()
+        .filter_map(|row| row.columns.as_ref())
+        .collect::<Vec<_>>();
+    assert_eq!(partitions.len(), 3);
+    assert!(partitions.iter().all(|columns| columns[3] == "⚠ 需重建"));
+    assert!(details.iter().any(|row| row.text.starts_with("原因      ")));
+    assert!(details
+        .iter()
+        .any(|row| row.tone == DiskLayoutDetailTone::Success));
+}
+
+#[test]
+fn ch14_write_progress_batch_reaches_tui_state_without_losing_milestones() {
+    use edpcli::application::WriteEvent;
+    use edpcli::tui::state::WriteKind;
+    let mut state = AppState::new();
+    assert!(state.begin_write_wizard(WriteKind::BackupCreate, 6, None));
+    for ch in "YES".chars() {
+        state.push_wizard_confirmation(ch);
+    }
+    assert!(state.submit_wizard_confirmation().is_some());
+    for event in [
+        WriteEvent::BackupCreatedIsNopwd,
+        WriteEvent::RestoreWriteCompleted,
+    ] {
+        state.set_write_progress(event);
+    }
+    let log = &state.wizard().unwrap().progress_log;
+    assert_eq!(log.len(), 2);
+    assert!(matches!(log[0], WriteEvent::BackupCreatedIsNopwd));
+    assert!(matches!(log[1], WriteEvent::RestoreWriteCompleted));
+}
+
+#[test]
 fn registered_mode0_to_mode1_form_keeps_exact_encrypt_geometry() {
     use edpcli::provision::{CapacityInputMode, DiskProvisionKind};
     use edpcli::sectors::EdpfPartition;

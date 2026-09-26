@@ -12,7 +12,7 @@ use std::time::Duration;
 
 use crate::backup_deep::{analyze_partition, AnalysisStatus, PartitionReader};
 use crate::backup_metadata::{parse_lba7_compatibility_geometry, PartitionGeometry};
-use crate::common::{EdpCliError, EdpCliResult, EXIT_IO, EXIT_TARGET, SECTOR};
+use crate::common::{EdpCliError, EdpCliResult, EXIT_IO, EXIT_OK, EXIT_TARGET, SECTOR};
 use crate::diskio::{self, SectorDev};
 use crate::protocol::lba7_compat::locate_lba7_compatibility_extent_from_verified_usb_capacity;
 use crate::provision::{
@@ -398,6 +398,70 @@ pub struct ProvisionWriteOutcome {
     pub warnings: Vec<ProvisionWarning>,
 }
 
+mod assessment;
+pub use assessment::PreserveAssessment;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ProvisionExecutionStatus {
+    Success,
+    CompletedWithWarnings,
+    PartialFormatFailure,
+    FatalFailure,
+}
+
+impl ProvisionExecutionStatus {
+    pub const fn exit_code(self) -> i32 {
+        match self {
+            Self::Success | Self::CompletedWithWarnings => EXIT_OK,
+            Self::PartialFormatFailure | Self::FatalFailure => EXIT_IO,
+        }
+    }
+}
+
+impl ProvisionWriteOutcome {
+    pub fn execution_status(&self) -> ProvisionExecutionStatus {
+        if self
+            .warnings
+            .iter()
+            .any(|warning| matches!(warning, ProvisionWarning::IncompleteFormat))
+            || matches!(
+                &self.commit,
+                ProvisionCommitOutcome::Official(report)
+                    if report.formats.iter().any(|format| format.result.is_err())
+            )
+        {
+            ProvisionExecutionStatus::PartialFormatFailure
+        } else if self.warnings.is_empty() {
+            ProvisionExecutionStatus::Success
+        } else {
+            ProvisionExecutionStatus::CompletedWithWarnings
+        }
+    }
+
+    pub fn summary_lines(&self) -> Vec<String> {
+        let mut lines = vec![format!("制盘前自动备份：{}", self.backup.path.display())];
+        match &self.commit {
+            ProvisionCommitOutcome::Official(report) => {
+                lines.push("制盘：成功，协议与几何读回验证通过。".into());
+                if report.formats.is_empty() {
+                    lines.push("格式化：未选择任何分区".into());
+                }
+                for item in &report.formats {
+                    lines.push(match &item.result {
+                        Ok(()) => format!("格式化：✓ {}，读回验证通过", item.role.label()),
+                        Err(message) => format!("格式化：✗ {}：{message}", item.role.label()),
+                    });
+                }
+            }
+            ProvisionCommitOutcome::Plain { partition_count } => lines.push(format!(
+                "恢复普通盘：成功，{partition_count} 个 MBR 主分区已写入并读回验证；LBA3 保留，EDP 状态已清除。"
+            )),
+        }
+        lines.extend(self.warnings.iter().map(ProvisionWarning::message));
+        lines
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ProvisionWarning {
     IncompleteFormat,
@@ -671,6 +735,20 @@ pub fn commit_provision_on_disk(
     commit_provision(runner, &mut dev, prepared)
 }
 
+fn commit_provision_on_disk_with_progress(
+    runner: &dyn CmdRunner,
+    prepared: &PreparedProvision,
+    progress: &mut dyn FnMut(
+        crate::application::progress::Phase,
+        crate::application::progress::Step,
+        Option<diskio::TransactionActivity>,
+    ),
+) -> EdpCliResult<ProvisionCommitOutcome> {
+    let mut dev = open_readonly_usb_disk(runner, prepared.disk())?;
+    commit::commit_provision_with_progress(runner, &mut dev, prepared, progress)
+}
+
+#[cfg(test)]
 fn run_mandatory_backup_before_commit<B, C>(
     backup: B,
     commit: C,
@@ -782,37 +860,77 @@ pub fn commit_provision_with_backup_on_disk(
     backup_dir: PathBuf,
     prompt: &mut dyn super::Prompter,
 ) -> EdpCliResult<ProvisionWriteOutcome> {
+    commit_provision_with_backup_on_disk_with_progress(
+        runner,
+        prepared,
+        backup_dir,
+        prompt,
+        &mut |_| {},
+    )
+}
+
+pub fn commit_provision_with_backup_on_disk_with_progress(
+    runner: &dyn CmdRunner,
+    prepared: &PreparedProvision,
+    backup_dir: PathBuf,
+    prompt: &mut dyn super::Prompter,
+    sink: &mut dyn FnMut(crate::application::progress::ProgressEvent),
+) -> EdpCliResult<ProvisionWriteOutcome> {
+    use crate::application::progress::{emit_isolated, Phase, ProgressEvent, Step};
+    let format_count = match prepared {
+        PreparedProvision::Official(official) => official
+            .format_targets
+            .iter()
+            .filter(|choice| choice.selected)
+            .count(),
+        PreparedProvision::Plain(_) => 0,
+    } as u64;
+    let total = 5 + format_count;
+    let mut current = 0;
+    emit_isolated(
+        sink,
+        ProgressEvent::new(Phase::Backup, Step::MandatoryBackup, current, total),
+    );
     let expected_onlyid = prepared.source_backup_onlyid()?;
-    let mut backup_sha256 = None;
-    let mut outcome = run_mandatory_backup_before_commit(
-        || {
-            let report = super::write::backup_create_on_disk(
-                runner,
-                prepared.disk(),
-                backup_dir.clone(),
-                prompt,
-                expected_onlyid.as_deref(),
-                Some(prepared.device_id()),
-                false,
-            )?;
-            backup_sha256 = Some(verify_mandatory_backup_pin(&report, prepared.before_pin())?);
-            Ok(report)
-        },
-        || commit_provision_on_disk(runner, prepared),
+    let backup = super::write::backup_create_on_disk(
+        runner,
+        prepared.disk(),
+        backup_dir.clone(),
+        prompt,
+        expected_onlyid.as_deref(),
+        Some(prepared.device_id()),
+        false,
     )?;
+    current += 1;
+    emit_isolated(
+        sink,
+        ProgressEvent::new(Phase::Backup, Step::MandatoryBackup, current, total),
+    );
+    let backup_sha256 = verify_mandatory_backup_pin(&backup, prepared.before_pin())?;
+    current += 1;
+    emit_isolated(
+        sink,
+        ProgressEvent::new(Phase::Identity, Step::BackupVerification, current, total),
+    );
+    let commit =
+        commit_provision_on_disk_with_progress(runner, prepared, &mut |phase, step, work| {
+            if work.is_none() && step != Step::LockAndReopen {
+                current += 1;
+            }
+            let mut event = ProgressEvent::new(phase, step, current, total);
+            event.work = work;
+            emit_isolated(sink, event);
+        })?;
+    let mut outcome = ProvisionWriteOutcome {
+        backup,
+        commit,
+        warnings: Vec::new(),
+    };
     if matches!(&outcome.commit, ProvisionCommitOutcome::Official(report) if report.formats.iter().any(|format| format.result.is_err()))
     {
         outcome.warnings.push(ProvisionWarning::IncompleteFormat);
         return Ok(outcome);
     }
-    let Some(backup_sha256) = backup_sha256 else {
-        outcome
-            .warnings
-            .push(ProvisionWarning::HostLineagePersistenceFailed(
-                "已完成制盘，但强制备份摘要未保留".into(),
-            ));
-        return Ok(outcome);
-    };
     if let Err(warning) = record_lineage_after_commit(
         runner,
         prepared,
@@ -822,6 +940,11 @@ pub fn commit_provision_with_backup_on_disk(
     ) {
         outcome.warnings.push(warning);
     }
+    current += 1;
+    emit_isolated(
+        sink,
+        ProgressEvent::new(Phase::Lineage, Step::PostWriteIdentity, current, total),
+    );
     Ok(outcome)
 }
 

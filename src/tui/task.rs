@@ -231,11 +231,11 @@ enum WorkerResult {
     },
     ProvisionProgress {
         operation_id: OperationId,
-        message: String,
+        event: crate::application::progress::ProgressEvent,
     },
     ProvisionWrite {
         operation_id: OperationId,
-        result: Result<String, String>,
+        result: Result<crate::application::provision::ProvisionWriteOutcome, String>,
     },
     ProvisionExport {
         generation: u64,
@@ -248,7 +248,7 @@ pub struct TaskUpdates {
     pub devices: Option<Vec<Row>>,
     pub backups: Option<Vec<BackupWorkspaceItem>>,
     pub write: Option<(OperationId, Result<(), String>)>,
-    pub write_progress: Option<(OperationId, crate::application::WriteEvent)>,
+    pub write_progress: Vec<(OperationId, crate::application::WriteEvent)>,
     pub advanced_inspect:
         Option<Result<crate::application::inspect::AdvancedInspectWorkspace, String>>,
     pub advanced_inspect_sector: Option<(
@@ -270,8 +270,11 @@ pub struct TaskUpdates {
         Result<crate::provision::SourcePasswordKnowledge, String>,
     )>,
     pub provision_plan: Option<Result<crate::tui::state::ProvisionPrepared, String>>,
-    pub provision_progress: Option<(OperationId, String)>,
-    pub provision_write: Option<(OperationId, Result<String, String>)>,
+    pub provision_progress: Vec<(OperationId, crate::application::progress::ProgressEvent)>,
+    pub provision_write: Option<(
+        OperationId,
+        Result<crate::application::provision::ProvisionWriteOutcome, String>,
+    )>,
     pub provision_export: Option<Result<PathBuf, String>>,
 }
 
@@ -280,7 +283,7 @@ impl TaskUpdates {
         self.devices.is_some()
             || self.backups.is_some()
             || self.write.is_some()
-            || self.write_progress.is_some()
+            || !self.write_progress.is_empty()
             || self.advanced_inspect.is_some()
             || self.advanced_inspect_sector.is_some()
             || self.device_error.is_some()
@@ -294,7 +297,7 @@ impl TaskUpdates {
             || self.provision_key_probe.is_some()
             || self.provision_key_verify.is_some()
             || self.provision_plan.is_some()
-            || self.provision_progress.is_some()
+            || !self.provision_progress.is_empty()
             || self.provision_write.is_some()
             || self.provision_export.is_some()
     }
@@ -493,7 +496,7 @@ impl TaskHub {
                     event,
                 } => {
                     if self.active_operation == Some(operation_id) {
-                        updates.write_progress = Some((operation_id, event));
+                        updates.write_progress.push((operation_id, event));
                     }
                 }
                 WorkerResult::AdvancedInspect { generation, result } => {
@@ -601,10 +604,10 @@ impl TaskHub {
                 }
                 WorkerResult::ProvisionProgress {
                     operation_id,
-                    message,
+                    event,
                 } => {
                     if self.active_operation == Some(operation_id) {
-                        updates.provision_progress = Some((operation_id, message));
+                        updates.provision_progress.push((operation_id, event));
                     }
                 }
                 WorkerResult::ProvisionWrite {
@@ -640,6 +643,72 @@ mod tests {
 
         let second = hub.begin_operation().expect("second operation");
         assert_ne!(first, second);
+    }
+
+    #[test]
+    fn progress_batch_retains_every_worker_event_in_order() {
+        let mut hub = TaskHub::new();
+        let operation_id = hub.begin_operation().unwrap();
+        for (index, phase) in [
+            crate::application::progress::Phase::Backup,
+            crate::application::progress::Phase::Metadata,
+            crate::application::progress::Phase::Readback,
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            hub.tx
+                .send(WorkerResult::ProvisionProgress {
+                    operation_id,
+                    event: crate::application::progress::ProgressEvent::new(
+                        phase,
+                        crate::application::progress::Step::ProtocolReadback,
+                        index as u64,
+                        3,
+                    ),
+                })
+                .unwrap();
+        }
+        let updates = hub.poll();
+        assert_eq!(
+            updates
+                .provision_progress
+                .into_iter()
+                .map(|(_, event)| event.phase)
+                .collect::<Vec<_>>(),
+            [
+                crate::application::progress::Phase::Backup,
+                crate::application::progress::Phase::Metadata,
+                crate::application::progress::Phase::Readback,
+            ]
+        );
+    }
+
+    #[test]
+    fn backup_restore_progress_batch_retains_every_event_in_order() {
+        let mut hub = TaskHub::new();
+        let operation_id = hub.begin_operation().unwrap();
+        for event in [
+            crate::application::WriteEvent::BackupCreatedIsNopwd,
+            crate::application::WriteEvent::RestoreWriteCompleted,
+        ] {
+            hub.tx
+                .send(WorkerResult::WriteProgress {
+                    operation_id,
+                    event,
+                })
+                .unwrap();
+        }
+        let updates = hub.poll();
+        assert_eq!(updates.write_progress.len(), 2);
+        assert!(matches!(
+            updates.write_progress[0].1,
+            crate::application::WriteEvent::BackupCreatedIsNopwd
+        ));
+        assert!(matches!(
+            updates.write_progress[1].1,
+            crate::application::WriteEvent::RestoreWriteCompleted
+        ));
     }
 
     #[test]

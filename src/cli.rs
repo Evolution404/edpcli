@@ -559,55 +559,31 @@ fn provision_flow(runner: &SysRunner, action: ProvisionAction) -> i32 {
             if !confirmed {
                 return finish(Err(EdpCliError::new(EXIT_CANCELLED, "已取消(未写盘)")));
             }
-            let write = match crate::application::provision::commit_provision_with_backup_on_disk(
+            let write = match crate::application::provision::commit_provision_with_backup_on_disk_with_progress(
                 runner,
                 &prepared,
                 crate::application::resolve_backup_dir(backup_dir.as_deref()),
                 &mut prompt,
+                &mut |event| {
+                    if event.work.is_none() {
+                        println!(
+                            "[制盘进度 {}/{}] {}：{}",
+                            event.current,
+                            event.total,
+                            event.phase.label(),
+                            event.step.label(),
+                        );
+                    }
+                },
             ) {
                 Ok(value) => value,
                 Err(error) => return finish(Err(error)),
             };
-            println!("制盘前自动备份：{}", write.backup.path.display());
-            for warning in &write.warnings {
-                println!("{}", crate::ui::yellow(&warning.message()));
+            let status = write.execution_status();
+            for line in write.summary_lines() {
+                println!("{line}");
             }
-            match write.commit {
-                crate::application::provision::ProvisionCommitOutcome::Official(report) => {
-                    println!(
-                        "{}",
-                        crate::ui::green("制盘：成功，协议与几何读回校验通过。")
-                    );
-                    if report.formats.is_empty() {
-                        println!("格式化：未选择任何分区");
-                    }
-                    for item in &report.formats {
-                        match &item.result {
-                            Ok(()) => println!("格式化：✓ {}（读回验证通过）", item.role.label()),
-                            Err(message) => {
-                                println!("格式化：✗ {}：{}", item.role.label(), message)
-                            }
-                        }
-                    }
-                    if report.formats.iter().any(|item| item.result.is_err()) {
-                        EXIT_IO
-                    } else {
-                        EXIT_OK
-                    }
-                }
-                crate::application::provision::ProvisionCommitOutcome::Plain {
-                    partition_count,
-                } => {
-                    println!(
-                        "{}",
-                        crate::ui::green(&format!(
-                            "普通盘恢复：成功，{} 个 MBR 主分区与文件系统读回校验通过。",
-                            partition_count
-                        ))
-                    );
-                    EXIT_OK
-                }
-            }
+            status.exit_code()
         }
     }
 }

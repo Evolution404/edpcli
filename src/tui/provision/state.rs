@@ -151,18 +151,26 @@ pub type ProvisionPrepared = crate::application::provision::PreparedProvision;
 mod editor;
 #[path = "fields.rs"]
 mod fields;
+#[path = "fields_access.rs"]
+mod fields_access;
 #[path = "form.rs"]
 mod form;
 #[path = "key_domains.rs"]
 mod key_domains;
 #[path = "layout.rs"]
 mod layout;
+#[path = "layout_presentation.rs"]
+mod layout_presentation;
 #[path = "pane.rs"]
 mod pane;
 #[path = "plain_editor.rs"]
 mod plain_editor;
 #[path = "review.rs"]
 mod review;
+#[path = "run.rs"]
+mod run;
+pub(crate) use review::{ProvisionReviewRowKind, ProvisionReviewTone};
+pub use run::ProvisionRunState;
 #[path = "validation.rs"]
 mod validation;
 
@@ -182,6 +190,8 @@ pub struct ProvisionState {
     pub confirmation: String,
     pub export_path: String,
     pub message: Option<String>,
+    pub result_status: Option<crate::application::provision::ProvisionExecutionStatus>,
+    pub run: Option<ProvisionRunState>,
     pub pane_focus: crate::tui::pane::PaneFocus,
     pub(super) target_disk: Option<u32>,
     form_initialized_for: Option<(u32, u64, Option<String>, ProvisionKind)>,
@@ -201,6 +211,8 @@ impl Default for ProvisionState {
             confirmation: String::new(),
             export_path: String::new(),
             message: None,
+            result_status: None,
+            run: None,
             pane_focus: crate::tui::pane::PaneFocus::provision_form(),
             target_disk: None,
             form_initialized_for: None,
@@ -476,17 +488,30 @@ impl AppState {
         self.provision.stage = ProvisionStage::Running;
         self.input_mode = InputMode::Normal;
         self.provision.message = Some("事务写盘进行中；退出请求会延迟到安全检查点".into());
+        self.provision.result_status = None;
+        self.provision.run = Some(ProvisionRunState::new());
+        self.provision.pane_focus = crate::tui::pane::PaneFocus::provision_running();
         self.critical_operation = true;
         Some(prepared)
     }
 
-    pub fn provision_finish_write(&mut self, result: Result<String, String>) {
+    pub fn provision_finish_write(
+        &mut self,
+        result: Result<crate::application::provision::ProvisionWriteOutcome, String>,
+    ) {
         self.critical_operation = false;
         self.provision.stage = ProvisionStage::Result;
         self.input_mode = InputMode::Normal;
-        self.provision.message = Some(match result {
-            Ok(message) => message,
-            Err(message) => message,
-        });
+        match result {
+            Ok(outcome) => {
+                self.provision.result_status = Some(outcome.execution_status());
+                self.provision.message = Some(outcome.summary_lines().join("\n"));
+            }
+            Err(message) => {
+                self.provision.result_status =
+                    Some(crate::application::provision::ProvisionExecutionStatus::FatalFailure);
+                self.provision.message = Some(message);
+            }
+        }
     }
 }

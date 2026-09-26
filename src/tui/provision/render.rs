@@ -1,5 +1,6 @@
 use super::*;
 use crate::tui::state::ProvisionFieldSection;
+use crate::tui::state::{ProvisionReviewRowKind, ProvisionReviewTone};
 
 const INPUT_EDITING_SLACK: usize = 2;
 
@@ -445,7 +446,7 @@ pub(super) fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, sta
 
             if let Some(layout_area) = layout_area {
                 let layout_model = state.provision_layout_model();
-                let layout_details = state.provision_layout_editor_lines();
+                let layout_details = state.provision_layout_editor_details();
                 let layout_summary = format!(
                     "{} · {} sectors",
                     provision.kind.title(),
@@ -510,18 +511,20 @@ pub(super) fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, sta
             };
 
             if let Some(summary_area) = summary_area {
-                let summary = state.provision_review_summary_lines();
+                let summary = state.provision_review_summary_rows();
                 let lines = summary
                     .iter()
-                    .map(|line| {
-                        let style = if line.starts_with('✓') {
-                            success()
-                        } else if line.starts_with('⚠') {
-                            warning()
-                        } else {
-                            muted()
+                    .map(|row| {
+                        let style = match row.tone {
+                            ProvisionReviewTone::Muted => match row.kind {
+                                ProvisionReviewRowKind::Action => accent(),
+                                _ => muted(),
+                            },
+                            ProvisionReviewTone::Accent => accent(),
+                            ProvisionReviewTone::Success => success(),
+                            ProvisionReviewTone::Warning => warning(),
                         };
-                        Line::from(Span::styled(safe(line), style))
+                        Line::from(Span::styled(safe(&row.text), style))
                     })
                     .collect::<Vec<_>>();
                 let scroll = state
@@ -573,16 +576,17 @@ pub(super) fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, sta
             }
 
             if let Some(changes_area) = changes_area {
-                let changes = state.provision_review_change_lines();
+                let changes = state.provision_review_change_rows();
                 let lines = changes
                     .iter()
-                    .map(|line| {
-                        let style = if line.starts_with('⚠') {
-                            warning()
-                        } else {
-                            muted()
+                    .map(|row| {
+                        let style = match row.tone {
+                            ProvisionReviewTone::Muted => muted(),
+                            ProvisionReviewTone::Accent => accent(),
+                            ProvisionReviewTone::Success => success(),
+                            ProvisionReviewTone::Warning => warning(),
                         };
-                        Line::from(Span::styled(safe(line), style))
+                        Line::from(Span::styled(safe(&row.text), style))
                     })
                     .collect::<Vec<_>>();
                 let scroll = state
@@ -682,21 +686,85 @@ pub(super) fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, sta
             );
         }
         ProvisionStage::Running => {
+            let mut lines = vec![Line::from(Span::styled(
+                format!(
+                    "{}  安全事务执行中",
+                    ["◐", "◓", "◑", "◒"][(state.animation_frame() % 4) as usize]
+                ),
+                warning(),
+            ))];
+            if let Some(run) = &provision.run {
+                let now = std::time::Instant::now();
+                lines.push(Line::from(format!(
+                    "已运行 {} 秒  上次活动 {} 秒前",
+                    now.duration_since(run.started_at).as_secs(),
+                    now.duration_since(run.last_activity_at).as_secs(),
+                )));
+                if let Some(event) = &run.latest {
+                    lines.push(Line::from(format!("当前阶段  {}", event.phase.label())));
+                    lines.push(Line::from(format!(
+                        "总体进度  {}/{} 步",
+                        event.current, event.total
+                    )));
+                    lines.push(Line::from(format!("当前步骤  {}", event.step.label())));
+                    if let Some(work) = event.work {
+                        lines.push(Line::from(format!(
+                            "扇区活动  {:?} {}/{}",
+                            work.phase, work.current, work.total
+                        )));
+                    }
+                }
+                lines.push(Line::from(""));
+                lines.push(Line::from(Span::styled(
+                    "运行日志  j/k 滚动 · G 跟随末尾",
+                    accent(),
+                )));
+                let viewport = provision
+                    .pane_focus
+                    .viewport(crate::tui::pane::PaneId::ProvisionRunLog);
+                let available = main_area.height.saturating_sub(12) as usize;
+                let log_offset = if viewport.selected.is_none() {
+                    run.log.len().saturating_sub(available)
+                } else {
+                    viewport.scroll_y.offset
+                };
+                lines.extend(
+                    run.log
+                        .iter()
+                        .skip(log_offset)
+                        .take(available)
+                        .map(|event| {
+                            let detail = match event.step {
+                                crate::application::progress::Step::PartitionFormat(role) => {
+                                    format!(" {}", role.label())
+                                }
+                                _ => String::new(),
+                            };
+                            let work = event
+                                .work
+                                .map(|work| {
+                                    format!("  {:?} {}/{}", work.phase, work.current, work.total)
+                                })
+                                .unwrap_or_default();
+                            Line::from(safe(&format!(
+                                "[{}/{}] {}  {}{}{}",
+                                event.current,
+                                event.total,
+                                event.phase.label(),
+                                event.step.label(),
+                                detail,
+                                work
+                            )))
+                        }),
+                );
+            }
+            lines.push(Line::from(""));
+            lines.push(Line::from(Span::styled(
+                "q / Esc / Ctrl-C 不会中断介质事务；退出请求只会在安全检查点生效。",
+                danger(),
+            )));
             frame.render_widget(
-                Paragraph::new(vec![
-                    Line::from(Span::styled("◆  安全事务执行中", warning())),
-                    Line::from(""),
-                    Line::from(safe(
-                        provision.message.as_deref().unwrap_or("正在执行事务写盘…"),
-                    )),
-                    Line::from(""),
-                    Line::from(Span::styled(
-                        "q / Esc / Ctrl-C 不会中断介质事务；退出请求只会在安全检查点生效。",
-                        danger(),
-                    )),
-                ])
-                .alignment(Alignment::Center)
-                .block(
+                Paragraph::new(lines).alignment(Alignment::Center).block(
                     Block::default()
                         .borders(Borders::ALL)
                         .border_style(warning())
@@ -706,19 +774,20 @@ pub(super) fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, sta
             );
         }
         ProvisionStage::Result => {
-            let has_format_failure = provision
-                .message
-                .as_deref()
-                .is_some_and(|message| message.contains("格式化：✗"));
+            use crate::application::provision::ProvisionExecutionStatus as Status;
+            let result_style = match provision.result_status {
+                Some(Status::Success) => success(),
+                Some(Status::CompletedWithWarnings | Status::PartialFormatFailure) => warning(),
+                Some(Status::FatalFailure) | None => danger(),
+            };
+            let result_title = match provision.result_status {
+                Some(Status::Success) => "制盘成功",
+                Some(Status::CompletedWithWarnings) => "制盘完成，存在警告",
+                Some(Status::PartialFormatFailure) => "部分完成：格式化失败",
+                Some(Status::FatalFailure) | None => "制盘失败",
+            };
             let mut lines = vec![
-                Line::from(Span::styled(
-                    "制盘流程已到达安全结束点",
-                    if has_format_failure {
-                        warning()
-                    } else {
-                        success()
-                    },
-                )),
+                Line::from(Span::styled(result_title, result_style)),
                 Line::from(""),
             ];
             lines.extend(
@@ -729,6 +798,39 @@ pub(super) fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, sta
                     .lines()
                     .map(|line| Line::from(safe(line))),
             );
+            if let Some(run) = &provision.run {
+                let elapsed = run
+                    .last_activity_at
+                    .duration_since(run.started_at)
+                    .as_secs();
+                lines.push(Line::from(format!("总耗时  {elapsed} 秒")));
+                let mut phases = std::collections::BTreeMap::new();
+                for event in &run.log {
+                    phases
+                        .entry(event.phase)
+                        .and_modify(|last: &mut (std::time::Instant, std::time::Instant)| {
+                            last.1 = event.emitted_at
+                        })
+                        .or_insert((event.emitted_at, event.emitted_at));
+                }
+                for (phase, (first, last)) in phases {
+                    lines.push(Line::from(format!(
+                        "{}  {} 秒",
+                        phase.label(),
+                        last.duration_since(first).as_secs()
+                    )));
+                }
+                lines.push(Line::from(Span::styled("最近进度事件", accent())));
+                for event in run.log.iter().rev().take(6).rev() {
+                    lines.push(Line::from(safe(&format!(
+                        "[{}/{}] {}  {}",
+                        event.current,
+                        event.total,
+                        event.phase.label(),
+                        event.step.label()
+                    ))));
+                }
+            }
             lines.push(Line::from(""));
             lines.push(Line::from(Span::styled(
                 "Enter / Esc 返回制盘中心",
@@ -738,7 +840,7 @@ pub(super) fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, sta
                 Paragraph::new(lines).alignment(Alignment::Center).block(
                     Block::default()
                         .borders(Borders::ALL)
-                        .border_style(success())
+                        .border_style(result_style)
                         .title("结果"),
                 ),
                 main_area,

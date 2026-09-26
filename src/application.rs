@@ -6,6 +6,7 @@
 
 pub mod backup;
 pub mod device;
+pub mod disk_layout;
 pub mod evidence;
 pub mod identity;
 pub mod inspect;
@@ -14,6 +15,7 @@ pub(crate) mod inspect_text;
 pub mod inspect_tree;
 pub mod media_identity;
 pub mod media_identity_observer;
+pub mod progress;
 pub mod provision;
 pub mod target_session;
 pub mod write;

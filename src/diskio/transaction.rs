@@ -4,18 +4,66 @@ fn write_and_verify(
     dev: &mut dyn SectorDev,
     sectors: &BTreeMap<u32, Vec<u8>>,
     order: &[u32],
+    rollback: bool,
+    observer: &mut dyn FnMut(TransactionActivity),
 ) -> io::Result<()> {
-    for &lba in order {
+    for (index, &lba) in order.iter().enumerate() {
         dev.write_sector(lba, &sectors[&lba])?;
+        notify_activity(
+            observer,
+            TransactionActivity {
+                phase: if rollback {
+                    TransactionActivityPhase::RollbackWrite
+                } else {
+                    TransactionActivityPhase::Write
+                },
+                current: index as u64 + 1,
+                total: order.len() as u64,
+            },
+        );
     }
     // 读回前先把写缓存提交到介质；否则紧随其后的 pread 可能只验证到内核缓存。
     dev.sync()?;
-    for &lba in sectors.keys() {
+    for (index, &lba) in sectors.keys().enumerate() {
         if dev.read_sector(lba)? != sectors[&lba] {
             return Err(io::Error::other(format!("LBA{} 读回校验不符", lba)));
         }
+        notify_activity(
+            observer,
+            TransactionActivity {
+                phase: if rollback {
+                    TransactionActivityPhase::RollbackReadback
+                } else {
+                    TransactionActivityPhase::Readback
+                },
+                current: index as u64 + 1,
+                total: sectors.len() as u64,
+            },
+        );
     }
     Ok(())
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum TransactionActivityPhase {
+    Mirror,
+    Write,
+    Readback,
+    RollbackWrite,
+    RollbackReadback,
+    FormatWrite,
+    FormatReadback,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct TransactionActivity {
+    pub phase: TransactionActivityPhase,
+    pub current: u64,
+    pub total: u64,
+}
+
+fn notify_activity(observer: &mut dyn FnMut(TransactionActivity), event: TransactionActivity) {
+    let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| observer(event)));
 }
 
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
@@ -140,6 +188,14 @@ pub fn execute_write_transaction(
     dev: &mut dyn SectorDev,
     plan: &WriteTransactionPlan,
 ) -> EdpCliResult<()> {
+    execute_write_transaction_observed(dev, plan, &mut |_| {})
+}
+
+pub fn execute_write_transaction_observed(
+    dev: &mut dyn SectorDev,
+    plan: &WriteTransactionPlan,
+    observer: &mut dyn FnMut(TransactionActivity),
+) -> EdpCliResult<()> {
     if plan.writes.is_empty() {
         return Ok(());
     }
@@ -160,19 +216,27 @@ pub fn execute_write_transaction(
     let sectors = plan.sector_map();
     let order = plan.ordered_lbas();
     let mut mirror = BTreeMap::new();
-    for &lba in sectors.keys() {
+    for (index, &lba) in sectors.keys().enumerate() {
         mirror.insert(
             lba,
             dev.read_sector(lba)
                 .map_err(|e| EdpCliError::new(EXIT_IO, format!("错误: {e}")))?,
         );
+        notify_activity(
+            observer,
+            TransactionActivity {
+                phase: TransactionActivityPhase::Mirror,
+                current: index as u64 + 1,
+                total: sectors.len() as u64,
+            },
+        );
     }
 
-    match write_and_verify(dev, &sectors, &order) {
+    match write_and_verify(dev, &sectors, &order, false, observer) {
         Ok(()) => Ok(()),
         Err(_write_error) => {
             for attempt in 0..3 {
-                match write_and_verify(dev, &mirror, &order) {
+                match write_and_verify(dev, &mirror, &order, true, observer) {
                     Ok(()) => {
                         return Err(EdpCliError::new(
                             EXIT_ROLLED_BACK,
@@ -247,6 +311,15 @@ pub fn atomic_write_official_provision_sectors(
     patch: &BTreeMap<u32, Vec<u8>>,
     total_sectors: u64,
 ) -> EdpCliResult<()> {
+    atomic_write_official_provision_sectors_observed(dev, patch, total_sectors, &mut |_| {})
+}
+
+pub fn atomic_write_official_provision_sectors_observed(
+    dev: &mut dyn SectorDev,
+    patch: &BTreeMap<u32, Vec<u8>>,
+    total_sectors: u64,
+    observer: &mut dyn FnMut(TransactionActivity),
+) -> EdpCliResult<()> {
     if total_sectors == 0 || total_sectors > u32::MAX as u64 {
         return Err(EdpCliError::new(
             EXIT_IO,
@@ -302,7 +375,7 @@ pub fn atomic_write_official_provision_sectors(
         plan.insert(lba, data.clone(), stage, "official provision")
             .map_err(|message| EdpCliError::new(EXIT_IO, format!("错误: {message}")))?;
     }
-    execute_write_transaction(dev, &plan)
+    execute_write_transaction_observed(dev, &plan, observer)
 }
 
 // ══════════════════════════════════════════════════════════════════

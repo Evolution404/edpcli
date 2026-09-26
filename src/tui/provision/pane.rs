@@ -34,7 +34,7 @@ impl AppState {
             PaneId::ProvisionParameters => self.provision_field_count(),
             PaneId::ProvisionDiskLayout => {
                 let model = self.provision_layout_model();
-                let details = self.provision_layout_editor_lines();
+                let details = self.provision_layout_editor_details();
                 model.pane_line_count("summary", &details)
             }
             PaneId::ProvisionSummary => self.provision_review_summary_lines().len(),

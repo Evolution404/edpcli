@@ -670,7 +670,7 @@ fn run_loop(resume: Option<state::WriteIntent>) -> io::Result<LoopExit> {
                 state.set_backup_scan_pending(false);
                 state.set_notice(message);
             }
-            if let Some((_operation_id, event)) = updates.write_progress {
+            for (_operation_id, event) in updates.write_progress {
                 state.set_write_progress(event);
             }
             if let Some((_operation_id, result)) = updates.write {
@@ -737,8 +737,8 @@ fn run_loop(resume: Option<state::WriteIntent>) -> io::Result<LoopExit> {
             if let Some(result) = updates.provision_plan {
                 state.provision_finish_plan(result);
             }
-            if let Some((_operation_id, message)) = updates.provision_progress {
-                state.provision_mut().message = Some(message);
+            for (_operation_id, event) in updates.provision_progress {
+                state.provision_push_progress(event);
             }
             if let Some((_operation_id, result)) = updates.provision_write {
                 let success = result.is_ok();
@@ -1534,6 +1534,38 @@ fn run_loop(resume: Option<state::WriteIntent>) -> io::Result<LoopExit> {
                                 _ => {}
                             },
                             ProvisionStage::Running => {
+                                let log_visible = viewport_height.saturating_sub(12).max(1);
+                                let log_navigation = matches!(
+                                    action,
+                                    TuiAction::MoveUp
+                                        | TuiAction::MoveDown
+                                        | TuiAction::PageUp
+                                        | TuiAction::PageDown
+                                        | TuiAction::Bottom
+                                );
+                                match action {
+                                    TuiAction::MoveUp => {
+                                        state.provision_scroll_run_log(-1, log_visible)
+                                    }
+                                    TuiAction::MoveDown => {
+                                        state.provision_scroll_run_log(1, log_visible)
+                                    }
+                                    TuiAction::PageUp => state.provision_scroll_run_log(
+                                        -(log_visible as isize),
+                                        log_visible,
+                                    ),
+                                    TuiAction::PageDown => state.provision_scroll_run_log(
+                                        log_visible as isize,
+                                        log_visible,
+                                    ),
+                                    TuiAction::Bottom => {
+                                        state.provision_follow_run_log(log_visible)
+                                    }
+                                    _ => {}
+                                }
+                                if log_navigation {
+                                    continue;
+                                }
                                 match dispatch_tui_action(
                                     &mut state,
                                     &mut tasks,

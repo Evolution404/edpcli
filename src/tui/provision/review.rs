@@ -1,6 +1,181 @@
 use super::*;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ProvisionReviewRowKind {
+    Status,
+    KeyValue,
+    Change,
+    Notice,
+    Action,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ProvisionReviewTone {
+    Muted,
+    Accent,
+    Success,
+    Warning,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ProvisionReviewRow {
+    pub kind: ProvisionReviewRowKind,
+    pub tone: ProvisionReviewTone,
+    pub text: String,
+}
+
+impl ProvisionReviewRow {
+    fn new(
+        kind: ProvisionReviewRowKind,
+        tone: ProvisionReviewTone,
+        text: impl Into<String>,
+    ) -> Self {
+        Self {
+            kind,
+            tone,
+            text: text.into(),
+        }
+    }
+}
+
 impl AppState {
+    pub(crate) fn provision_review_summary_rows(&self) -> Vec<ProvisionReviewRow> {
+        let lines = self.provision_review_summary_lines();
+        let message_index = self
+            .provision
+            .message
+            .as_ref()
+            .map(|_| lines.len().saturating_sub(3));
+        let last_action_start = lines.len().saturating_sub(2);
+        lines
+            .into_iter()
+            .enumerate()
+            .map(|(index, text)| {
+                let (kind, tone) = if index == 0 {
+                    (ProvisionReviewRowKind::Status, ProvisionReviewTone::Success)
+                } else if Some(index) == message_index {
+                    (ProvisionReviewRowKind::Notice, ProvisionReviewTone::Warning)
+                } else if index >= last_action_start {
+                    (ProvisionReviewRowKind::Action, ProvisionReviewTone::Accent)
+                } else {
+                    (ProvisionReviewRowKind::KeyValue, ProvisionReviewTone::Muted)
+                };
+                ProvisionReviewRow::new(kind, tone, text)
+            })
+            .collect()
+    }
+
+    pub(crate) fn provision_review_change_rows(&self) -> Vec<ProvisionReviewRow> {
+        use crate::provision::RegionDisposition;
+        let mut rows = Vec::new();
+        match self.provision.prepared.as_ref() {
+            Some(ProvisionPrepared::Official(prepared)) => {
+                rows.push(ProvisionReviewRow::new(
+                    ProvisionReviewRowKind::Notice,
+                    ProvisionReviewTone::Accent,
+                    "先写协议/LCE 并验证，再逐分区格式化和读回。",
+                ));
+                for choice in &prepared.format_targets {
+                    rows.push(ProvisionReviewRow::new(
+                        ProvisionReviewRowKind::Change,
+                        if choice.selected {
+                            ProvisionReviewTone::Warning
+                        } else {
+                            ProvisionReviewTone::Muted
+                        },
+                        format!(
+                            "{}  格式化 {}  {}",
+                            choice.target.role.label(),
+                            if choice.selected { "是" } else { "否" },
+                            choice
+                                .filesystem
+                                .map(|fs| fs.windows_format_name())
+                                .unwrap_or("—")
+                        ),
+                    ));
+                }
+                if let Some(plan) = &prepared.target_plan {
+                    for part in &plan.partitions {
+                        let (action, tone) = match part.disposition {
+                            RegionDisposition::PreserveOpaque => (
+                                "保留（Opaque，原 key material）",
+                                ProvisionReviewTone::Success,
+                            ),
+                            RegionDisposition::PreserveVerified => {
+                                ("保留（已验证）", ProvisionReviewTone::Success)
+                            }
+                            RegionDisposition::RewrapVerified => {
+                                ("仅重包 wrapper；数据保持", ProvisionReviewTone::Success)
+                            }
+                            RegionDisposition::Migrate => {
+                                ("Migrate 不支持，禁止执行", ProvisionReviewTone::Warning)
+                            }
+                            RegionDisposition::Rebuild => {
+                                ("重建并初始化文件系统", ProvisionReviewTone::Warning)
+                            }
+                            RegionDisposition::Drop => {
+                                ("丢弃来源区域", ProvisionReviewTone::Warning)
+                            }
+                        };
+                        rows.push(ProvisionReviewRow::new(
+                            ProvisionReviewRowKind::Change,
+                            tone,
+                            format!(
+                                "{}  {}  {} sector",
+                                part.geometry.role.label(),
+                                action,
+                                part.geometry.sector_count
+                            ),
+                        ));
+                        rows.push(ProvisionReviewRow::new(
+                            ProvisionReviewRowKind::KeyValue,
+                            ProvisionReviewTone::Muted,
+                            format!(
+                                "  密码域: {:?}  来源状态: {:?}  目标策略: {:?}",
+                                crate::provision::KeyDomainRole::from_partition_role(
+                                    part.geometry.role
+                                ),
+                                part.source_password_knowledge,
+                                part.target_password_policy,
+                            ),
+                        ));
+                        rows.push(ProvisionReviewRow::new(
+                            ProvisionReviewRowKind::Notice,
+                            tone,
+                            format!("  原因: {}", part.reason),
+                        ));
+                    }
+                }
+            }
+            Some(ProvisionPrepared::Plain(prepared)) => {
+                for (index, part) in prepared.plan.partitions.iter().enumerate() {
+                    rows.push(ProvisionReviewRow::new(
+                        ProvisionReviewRowKind::Change,
+                        ProvisionReviewTone::Warning,
+                        format!(
+                            "P{}  LBA {}–{}  {} sector  重建",
+                            index + 1,
+                            part.start_lba,
+                            part.end_lba().unwrap_or(part.start_lba),
+                            part.sector_count
+                        ),
+                    ));
+                }
+                rows.push(ProvisionReviewRow::new(
+                    ProvisionReviewRowKind::Notice,
+                    ProvisionReviewTone::Warning,
+                    "将清除 EDP 协议状态并重建普通分区；这不是安全擦除。",
+                ));
+            }
+            None => rows.push(ProvisionReviewRow::new(
+                ProvisionReviewRowKind::Notice,
+                ProvisionReviewTone::Muted,
+                "暂无变更明细。",
+            )),
+        }
+        rows
+    }
+
     pub fn provision_review_summary_lines(&self) -> Vec<String> {
         let mut lines = vec![
             "✓ 计划已通过全部只读校验".into(),

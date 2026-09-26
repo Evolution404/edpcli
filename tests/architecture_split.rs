@@ -164,11 +164,7 @@ fn large_modules_are_split_by_domain_boundary() {
         Path::new(env!("CARGO_MANIFEST_DIR")).join("src/tui/provision/state.rs"),
     )
     .expect("read provision orchestration state");
-    for name in [
-        "provision_field_slot",
-        "provision_push_char",
-        "provision_delete_char",
-    ] {
+    for name in ["provision_push_char", "provision_delete_char"] {
         assert!(
             field_source.contains(name),
             "fields module is missing {name}"
@@ -178,6 +174,14 @@ fn large_modules_are_split_by_domain_boundary() {
             "orchestration state must not reabsorb {name}"
         );
     }
+    assert!(
+        field_source.contains("ProvisionFieldId"),
+        "fields module must use typed field identifiers"
+    );
+    assert!(
+        !field_source.contains("provision_field_slot"),
+        "fields module must not reintroduce numeric field slots"
+    );
     assert!(
         lines("src/tui/provision/form.rs") < 650,
         "Provision form model must stay responsibility-bounded"

@@ -2,7 +2,6 @@ use super::*;
 
 impl AppState {
     pub fn provision_geometry_preview_lines(&self) -> Vec<String> {
-        use crate::provision::PartitionRole;
         let (resolved, source) = match self.provision_resolved_prefill() {
             Ok(value) => value,
             Err(message) => return vec![format!("布局无效: {message}")],
@@ -18,16 +17,13 @@ impl AppState {
                 lines.push(format!("空隙  {} sector", part.start_lba - cursor));
             }
             let end = part.start_lba + part.sector_count - 1;
-            let candidate = source
-                .as_ref()
-                .and_then(|profile| profile.partition(part.role))
-                .is_some_and(|old| {
-                    part.role != PartitionRole::CompatibilityReserve
-                        && old.partition_type == part.partition_type
-                        && old.start_lba == part.start_lba
-                        && old.sector_count == part.sector_count
-                        && old.physically_encrypted == part.physically_encrypted
-                });
+            let candidate = crate::application::provision::PreserveAssessment::for_partition(
+                source
+                    .as_ref()
+                    .and_then(|profile| profile.partition(part.role)),
+                part,
+            )
+            .candidate;
             let action = if candidate {
                 "可保留（待校验）"
             } else {
@@ -51,7 +47,7 @@ impl AppState {
         lines
     }
 
-    fn format_sector_size(sectors: u64) -> String {
+    pub(super) fn format_sector_size(sectors: u64) -> String {
         let mib = sectors as f64 / 2048.0;
         if mib >= 1024.0 {
             format!("{:.2} GiB", mib / 1024.0)
@@ -162,8 +158,6 @@ impl AppState {
     }
 
     pub fn provision_layout_editor_lines(&self) -> Vec<String> {
-        use crate::provision::PartitionRole;
-
         if self.provision.kind == ProvisionKind::Plain {
             return self.provision_plain_layout_editor_lines();
         }
@@ -225,16 +219,13 @@ impl AppState {
                 ));
             }
             let end = part.start_lba + part.sector_count - 1;
-            let candidate = source
-                .as_ref()
-                .and_then(|profile| profile.partition(part.role))
-                .is_some_and(|old| {
-                    part.role != PartitionRole::CompatibilityReserve
-                        && old.partition_type == part.partition_type
-                        && old.start_lba == part.start_lba
-                        && old.sector_count == part.sector_count
-                        && old.physically_encrypted == part.physically_encrypted
-                });
+            let candidate = crate::application::provision::PreserveAssessment::for_partition(
+                source
+                    .as_ref()
+                    .and_then(|profile| profile.partition(part.role)),
+                part,
+            )
+            .candidate;
             lines.push(format!(
                 "{}  LBA {}–{}  ·  {}  ·  {}",
                 part.role.label(),

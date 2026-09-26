@@ -25,7 +25,6 @@ fn scan_task_source_uses_typed_slots_for_background_workers() {
 }
 
 #[test]
-#[ignore = "Q0 red contract: enable after Q6 ordered progress transport"]
 fn ch14_q0_progress_transport_preserves_event_batches() {
     let source = include_str!("../src/tui/task.rs");
     assert!(!source.contains("write_progress: Option<"));
@@ -49,7 +48,6 @@ fn ch14_q0_device_and_backup_tables_use_shared_column_schema() {
 }
 
 #[test]
-#[ignore = "Q0 red contract: enable after Q4 typed layout and review presentation"]
 fn ch14_q0_renderers_do_not_infer_business_state_from_display_text() {
     let layout = include_str!("../src/tui/disk_layout.rs");
     let provision = include_str!("../src/tui/provision/render.rs");

@@ -196,10 +196,8 @@ impl AppState {
         let Some(old) = source.partition(target.role) else {
             return false;
         };
-        old.partition_type == target.partition_type
-            && old.start_lba == target.start_lba
-            && old.sector_count == target.sector_count
-            && old.physically_encrypted == target.physically_encrypted
+        crate::application::provision::PreserveAssessment::for_partition(Some(old), target)
+            .candidate
     }
 
     pub(super) fn provision_selected_partition_role(
