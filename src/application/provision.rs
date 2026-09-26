@@ -20,18 +20,15 @@ use crate::provision::{
     build_official_partition_filesystem, build_official_provision_protocol_image,
     build_plain_provision_write_plan, parse_existing_provision, prefill_for_target_mode,
     unwrap_legacy_lba7_file_key, wrap_file_key, wrap_legacy_lba7_file_key, CapacityInput,
-    CapacitySource, FileKeyWrapMode,
-    KeyDomainRole, KeyDomainSecrets, OfficialFilesystemFormat, OfficialPartitionFilesystems,
-    OfficialPartitionMode, OfficialPartitionSizes, OfficialProvisionPlan,
-    OfficialProvisionWriteImage, OnlyId, ParsedExistingProvision, PartitionAction,
-    PartitionFilesystemImage, PartitionFormatTarget, PartitionRole, PassInfoPolicy,
-    RegionDisposition,
-    PlainCleanupExtent, PlainPartitionSpec, PlainProvisionPlan, PlainProvisionWritePlan,
-    ProvisionEntropy, ProvisionImage, ProvisionMetadata, ProvisionProfile, ProvisionSpec,
-    ProvisionTarget, QuickCapacityUnit, SourcePasswordKnowledge, SparseFilesystemImage,
-    TargetGeometryOverrides, TargetIdentity, TargetPasswordPolicy, TargetProvisionPlan,
-    DEFAULT_KEY_DOMAIN_PASSWORD,
-    DEFAULT_MODE0_BOOT_SECTORS,
+    CapacitySource, FileKeyWrapMode, KeyDomainRole, KeyDomainSecrets, OfficialFilesystemFormat,
+    OfficialPartitionFilesystems, OfficialPartitionMode, OfficialPartitionSizes,
+    OfficialProvisionPlan, OfficialProvisionWriteImage, OnlyId, ParsedExistingProvision,
+    PartitionAction, PartitionFilesystemImage, PartitionFormatTarget, PartitionRole,
+    PassInfoPolicy, PlainCleanupExtent, PlainPartitionSpec, PlainProvisionPlan,
+    PlainProvisionWritePlan, ProvisionEntropy, ProvisionImage, ProvisionMetadata, ProvisionProfile,
+    ProvisionSpec, ProvisionTarget, QuickCapacityUnit, RegionDisposition, SourcePasswordKnowledge,
+    SparseFilesystemImage, TargetGeometryOverrides, TargetIdentity, TargetPasswordPolicy,
+    TargetProvisionPlan, DEFAULT_KEY_DOMAIN_PASSWORD, DEFAULT_MODE0_BOOT_SECTORS,
 };
 use crate::sysinfo::{self, CmdRunner};
 use encoding_rs::GBK;
@@ -399,7 +396,6 @@ pub struct ProvisionKeyProbe {
     pub encrypt: Option<SourcePasswordKnowledge>,
 }
 
-
 #[derive(Clone, Eq, PartialEq)]
 pub struct PreparedNewProvision {
     pub disk: u32,
@@ -604,12 +600,12 @@ pub fn commit_provision_on_disk(
     commit_provision(runner, &mut dev, prepared)
 }
 
-use commit::{validate_key_disposition_plan, validate_target_write_set};
 #[cfg(test)]
 use commit::{
     execute_partition_format, validate_preserve_source_snapshot, verify_format_hardware,
     verify_protocol_readback,
 };
+use commit::{validate_key_disposition_plan, validate_target_write_set};
 
 #[cfg(test)]
 mod tests;
