@@ -96,7 +96,12 @@ fn large_modules_are_split_by_domain_boundary() {
     let provision_form =
         fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("src/tui/provision/form.rs"))
             .expect("read provision form model");
-    for forbidden in ["AppState", "crate::application", "crate::platform", "crate::diskio"] {
+    for forbidden in [
+        "AppState",
+        "crate::application",
+        "crate::platform",
+        "crate::diskio",
+    ] {
         assert!(
             !provision_form.contains(forbidden),
             "Provision form model must stay pure and independent of orchestration/I/O: {forbidden}"
