@@ -3293,7 +3293,7 @@ Share default FAIL / Encrypt default FAIL
 
 ### 12.12 分阶段实施顺序（后续独立开发）
 
-**实施状态（2026-09-26）：K0～K5 COMPLETE；K6 NOT IMPLEMENTED（所有 Migrate 继续 fail-closed）；K7 COMPLETE；K8 PENDING。** 本章整体仍为 IN PROGRESS，只有代表性真实 USB 验收完成后才允许按 12.13 收口。
+**实施状态（2026-09-26）：K0～K5 COMPLETE；K6 NOT IMPLEMENTED（所有 Migrate 继续 fail-closed）；K7 COMPLETE；K8 COMPLETE。** 代表性真实 USB 验收已完成，并已按 12.13 收口为 13/13 PASS。
 
 #### Phase K0：现状审计与红测试
 
@@ -4320,14 +4320,14 @@ python3 scripts/test-full.py --profile full
 | Q0 基线与失败测试 | COMPLETE | 基线 `9206d8a`；exFAT 998107136-sector round-trip、cluster limit/limit+1 与 Inspect/TUI 契约均已写成 ignored red tests，显式执行确认失败；Chapter 12 现有 key-domain 测试继续作为保护门禁。 |
 | Q1 Inspect 数据契约 | COMPLETE | 稳定 `InspectFieldKey`、PhysicalRaw/SectorDecoded/FieldLogical/SemanticValue、typed XOR provenance、parse state/diagnostic、真实字段 status 与 typed region semantic 已落地；Inspect/TUI/协议专项与 fast gate 通过。 |
 | Q2 Inspect topology + presentation | COMPLETE | 单扇区 Tree、盘尾连续互斥 primary spans、显式 preview retry、UI-neutral Summary/Overview、可选 Detail 证据表与 Field→Hex 已实现；Detail 行选择复用 PaneViewport，children 默认折叠且仅有 byte range 的子项可进入 Hex；InspectTreeViewModel 按 revision 缓存 rows/id index。 |
-| Q3 Device / Backup identity contract | PENDING | — |
+| Q3 Device / Backup identity contract | COMPLETE | `WorkspaceIdentity` 统一设备/备份容量、VID:PID、型号、onlyid、用户、部门与盘型投影；无可信探测/无效备份保持 Unknown（显示 `—`，不伪装 Plain）；`BackupWorkspaceItem` 已透传容量、VID/PID、device_id；设备/备份共用 identity column schema，表格、sidebar、search 均消费同一投影。专项 `ch14_identity_projection_is_shared_and_unknown_kind_is_honest`、`ch14_identity_search_matches_both_workspaces`、`ch14_identity_column_schema_is_identical_between_workspaces` 与 shared-schema contract 均 PASS。 |
 | Q4 DiskLayout / Provision presentation | PENDING | — |
 | Q5 Progress application core | PENDING | — |
 | Q6 Progress transport + TUI | PENDING | — |
 | Q7 Outcome + CLI | PENDING | — |
 | Q8 清理与最终门禁 | PENDING | — |
 
-Q0 的 `#[ignore]` 只标记预期失败的未来契约；对应功能落地的阶段必须移除 ignore 并令测试通过。Chapter 12 K6 Migrate 仍 DEFERRED/fail-closed，K8 真实 USB 仍 PENDING。
+Q0 的 `#[ignore]` 只标记预期失败的未来契约；对应功能落地的阶段必须移除 ignore 并令测试通过。Chapter 12 K6 Migrate 仍 DEFERRED/fail-closed；K8 真实 USB 已 COMPLETE。
 
 ### 14.1 结构树单扇区节点去掉冗余 `[n..n]`
 
@@ -7294,7 +7294,7 @@ Chapter 12:
   K0–K5   COMPLETE
   K6      DEFERRED / Migrate fail-closed
   K7      COMPLETE
-  K8      PENDING（真实 USB 验收）
+  K8      COMPLETE（真实 USB 验收已闭环）
 
 Chapter 13:
   P0–P8   COMPLETE
@@ -7470,7 +7470,7 @@ Q8
   除原门禁外，必须跑 Chapter 12 key-domain suites + Virtual Disk HIL
 ```
 
-真实 USB K8 属于 Chapter 12 独立验收状态：第 14 章不能擅自把它标 COMPLETE；但第 14 章如果修改了真实制盘 Running/Result/Review 路径，最终真实盘验收必须同时观察这些 UI 改造是否正确。
+真实 USB K8 属于 Chapter 12 独立验收状态，现已 COMPLETE；第 14 章后续若修改真实制盘 Running/Result/Review 路径，仍必须重新观察这些 UI 改造是否影响既有真实盘验收结论。
 
 #### 14.14.7 PR / 实施分支策略
 
