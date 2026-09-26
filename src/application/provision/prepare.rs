@@ -35,7 +35,7 @@ fn inspect_source_profile(
     source_metadata: &[u8],
     device_id: &str,
     total_sectors: u64,
-    password: &[u8],
+    key_domains: &KeyDomainSecrets,
 ) -> EdpCliResult<Option<ParsedExistingProvision>> {
     let image = ProvisionImage::from_bytes(source_metadata.to_vec())
         .map_err(|message| err(EXIT_TARGET, format!("错误: 来源元数据长度无效: {message}")))?;
@@ -62,6 +62,9 @@ fn inspect_source_profile(
                 continue;
             }
             let plaintext = if part.physically_encrypted {
+                let Some(password) = key_domains.source_password(part.role) else {
+                    continue;
+                };
                 let Ok(key) = source.records[index].verified_sm4_file_key(password) else {
                     continue;
                 };
@@ -148,7 +151,7 @@ pub fn prepare_target_provision(
         &source_metadata,
         &device_id,
         total_sectors,
-        request.password.as_bytes(),
+        &request.key_domains,
     )?;
     let source_identity = if source.is_some() {
         let base = crate::protocol::semantic::SemanticContext {
@@ -251,7 +254,7 @@ pub fn prepare_target_provision(
         selected_mode,
         &targets,
         compatibility.start_lba,
-        request.password.as_bytes(),
+        &request.key_domains,
     )
     .map_err(|message| {
         err(
@@ -342,9 +345,12 @@ pub fn prepare_target_provision(
         selected_mode,
         sizes(request, selected_mode)?,
         compatibility,
-        wrap_legacy_lba7_file_key(request.password.as_bytes(), random_array::<8>()?),
+        wrap_legacy_lba7_file_key(
+            DEFAULT_KEY_DOMAIN_PASSWORD,
+            random_array::<8>()?,
+        ),
         wrap_file_key(
-            request.password.as_bytes(),
+            DEFAULT_KEY_DOMAIN_PASSWORD,
             random_array::<16>()?,
             FileKeyWrapMode::Sm4,
         ),
@@ -357,14 +363,24 @@ pub fn prepare_target_provision(
     for (index, part) in target_plan.partitions.iter().enumerate() {
         if let Some(record) = part.preserved_record {
             let key = if record.lba12.need_encrypt != 0 {
-                record
-                    .verified_sm4_file_key(request.password.as_bytes())
-                    .map_err(|message| {
+                let password = request
+                    .key_domains
+                    .source_password(part.geometry.role)
+                    .ok_or_else(|| {
                         err(
                             EXIT_TARGET,
-                            format!("错误: 保留分区密钥无法验证: {message}"),
+                            format!(
+                                "错误: {}来源密码未知，不能执行需要解包 FileKey 的保留路径",
+                                part.geometry.role.label()
+                            ),
                         )
-                    })?
+                    })?;
+                record.verified_sm4_file_key(password).map_err(|message| {
+                    err(
+                        EXIT_TARGET,
+                        format!("错误: 保留分区密钥无法验证: {message}"),
+                    )
+                })?
             } else {
                 [0; 16]
             };
@@ -380,16 +396,27 @@ pub fn prepare_target_provision(
                     )
                     .map_err(|message| err(EXIT_TARGET, message))?;
             }
-        } else {
+        } else if KeyDomainRole::from_partition_role(part.geometry.role).is_some() {
+            let password = request
+                .key_domains
+                .target_password(part.geometry.role)
+                .ok_or_else(|| {
+                    err(
+                        EXIT_TARGET,
+                        format!("错误: {}目标密码不能为空", part.geometry.role.label()),
+                    )
+                })?;
             let key = random_array::<16>()?;
             file_keys.push(key);
             plan = plan
                 .with_partition_key_material(
                     index,
-                    wrap_legacy_lba7_file_key(request.password.as_bytes(), random_array::<8>()?),
-                    wrap_file_key(request.password.as_bytes(), key, FileKeyWrapMode::Sm4),
+                    wrap_legacy_lba7_file_key(password, random_array::<8>()?),
+                    wrap_file_key(password, key, FileKeyWrapMode::Sm4),
                 )
                 .map_err(|message| err(EXIT_TARGET, message))?;
+        } else {
+            file_keys.push([0; 16]);
         }
     }
     let format_options = request.format.clone();
