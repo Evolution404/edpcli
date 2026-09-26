@@ -3,7 +3,7 @@
 use std::process::Command;
 
 #[cfg(target_os = "macos")]
-use common::*;
+use crate::common::*;
 #[cfg(target_os = "macos")]
 use edpcli::cli::{print_disk_table, scan_disks};
 #[cfg(target_os = "macos")]
