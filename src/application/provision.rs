@@ -393,7 +393,9 @@ pub enum ProvisionCommitOutcome {
 pub struct ProvisionKeyProbe {
     pub source_kind: crate::provision::DiskProvisionKind,
     pub share: Option<SourcePasswordKnowledge>,
+    pub share_opaque_profile: bool,
     pub encrypt: Option<SourcePasswordKnowledge>,
+    pub encrypt_opaque_profile: bool,
 }
 
 #[derive(Clone, Eq, PartialEq)]
@@ -580,7 +582,7 @@ pub use export::{
 use prepare::target_encrypt_capacity_override;
 pub use prepare::{
     prepare_plain_provision, prepare_provision, prepare_target_provision,
-    probe_provision_key_domains_on_disk,
+    probe_provision_key_domains_on_disk, verify_provision_source_password_on_disk,
 };
 
 pub fn prepare_provision_on_disk(
