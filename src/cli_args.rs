@@ -224,13 +224,19 @@ fn print_topic_help(topic: &str) {
             println!("    文件系统: --boot-fs fat16|exfat --share-fs fat16|exfat --encrypt-fs fat16|exfat");
             println!("    各区卷标: --boot-label LABEL --share-label LABEL --encrypt-label LABEL");
             println!("新盘身份参数: [--label-id ID] --user USER --dept DEPT [--label LABEL]");
-            println!("密码域: [--share-source-password PASSWORD] [--share-target-password PASSWORD]");
-            println!("        [--encrypt-source-password PASSWORD] [--encrypt-target-password PASSWORD]");
+            println!(
+                "密码域: [--share-source-password PASSWORD] [--share-target-password PASSWORD]"
+            );
+            println!(
+                "        [--encrypt-source-password PASSWORD] [--encrypt-target-password PASSWORD]"
+            );
             println!(
                 "标签默认值: {}；可通过 --label 自定义。",
                 crate::provision::DEFAULT_SAFE6_LABEL
             );
-            println!("来源密码未指定表示 Unknown；存在的目标密码域默认 0000aaaa；卷标默认值: 启动区。");
+            println!(
+                "来源密码未指定表示 Unknown；存在的目标密码域默认 0000aaaa；卷标默认值: 启动区。"
+            );
             println!("标签标识未指定时自动生成一个合法 onlyid 候选；可通过 --label-id 手动覆盖。");
             println!("密码策略: 未指定时继承注册盘可靠 PassInfo；普通盘默认 强制改密=否、取消复杂性验证=否、两区最大错误次数=255。");
             println!("    --force-change-password / --no-force-change-password");
@@ -546,19 +552,11 @@ fn parse_new_provision_opts(
             }
             "--share-source-password" => {
                 let value = take_value(rest, &mut i, "--share-source-password")?;
-                set_once(
-                    &mut share_source_password,
-                    value,
-                    "--share-source-password",
-                )?;
+                set_once(&mut share_source_password, value, "--share-source-password")?;
             }
             "--share-target-password" => {
                 let value = take_value(rest, &mut i, "--share-target-password")?;
-                set_once(
-                    &mut share_target_password,
-                    value,
-                    "--share-target-password",
-                )?;
+                set_once(&mut share_target_password, value, "--share-target-password")?;
             }
             "--encrypt-source-password" => {
                 let value = take_value(rest, &mut i, "--encrypt-source-password")?;
@@ -875,8 +873,7 @@ fn parse_new_provision_opts(
             share_source_password: share_source_password.unwrap_or_default(),
             share_target_password: share_target_password.unwrap_or_else(|| "0000aaaa".into()),
             encrypt_source_password: encrypt_source_password.unwrap_or_default(),
-            encrypt_target_password: encrypt_target_password
-                .unwrap_or_else(|| "0000aaaa".into()),
+            encrypt_target_password: encrypt_target_password.unwrap_or_else(|| "0000aaaa".into()),
             volume_label: volume_label.clone(),
             format_boot,
             format_share,
