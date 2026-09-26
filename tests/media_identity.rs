@@ -1,10 +1,16 @@
+use std::io;
+use std::time::Duration;
+
 use edpcli::application::media_identity::{
     match_media_identity, serial_digest_evidence, ControlledLineageEvidence,
     DerivedProtocolEvidence, HardwareIdentityEvidence, IdentityConfidence, IdentityObservation,
     MediaIdentitySnapshot, MediaRelationship, ProtocolIdentityEvidence, SerialQuality,
 };
-use edpcli::platform::NativeTransport;
+use edpcli::application::media_identity_observer::observe_media_identity_readonly;
+use edpcli::diskio::SectorDev;
+use edpcli::platform::{HardwareProbe, InquiryInfo, NativeTransport};
 use edpcli::provision::DiskProvisionKind;
+use edpcli::sysinfo::CmdRunner;
 
 fn hardware(serial: Option<&str>, vid: u16, pid: u16, sectors: u64) -> HardwareIdentityEvidence {
     let serial = serial_digest_evidence(serial);
@@ -203,4 +209,114 @@ fn suspicious_serial_never_creates_physical_strong() {
     let b = a.clone();
     let matched = match_media_identity(&a, &b, None);
     assert_ne!(matched.confidence, IdentityConfidence::PhysicalStrong);
+}
+
+struct ObservationRunner;
+
+impl CmdRunner for ObservationRunner {
+    fn check_output(&self, _cmd: &[&str], _timeout: Duration) -> io::Result<String> {
+        Err(io::Error::other(
+            "platform geometry unavailable in unit fixture",
+        ))
+    }
+
+    fn hardware_probe(&self, _disk: u32) -> Option<HardwareProbe> {
+        Some(HardwareProbe {
+            vid: Some(0x3535),
+            pid: Some(0x6300),
+            transport: NativeTransport::Uas,
+            inquiry: Some(InquiryInfo {
+                vendor: "AIGO".into(),
+                product: "U335".into(),
+                revision: "PMAP".into(),
+            }),
+        })
+    }
+
+    fn hardware_serial(&self, _disk: u32) -> Option<String> {
+        Some("RAW-SERIAL-MUST-NOT-ESCAPE".into())
+    }
+}
+
+struct ReadOnlyAuditDev {
+    image: Vec<u8>,
+    reads: usize,
+    writes: usize,
+    reopens: usize,
+}
+
+impl ReadOnlyAuditDev {
+    fn plain() -> Self {
+        Self {
+            image: vec![0u8; 13 * 512],
+            reads: 0,
+            writes: 0,
+            reopens: 0,
+        }
+    }
+}
+
+impl SectorDev for ReadOnlyAuditDev {
+    fn read_sector(&mut self, lba: u32) -> io::Result<Vec<u8>> {
+        self.reads += 1;
+        let start = lba as usize * 512;
+        let end = start + 512;
+        self.image
+            .get(start..end)
+            .map(|bytes| bytes.to_vec())
+            .ok_or_else(|| io::Error::other("out of fixture range"))
+    }
+
+    fn write_sector(&mut self, _lba: u32, _data: &[u8]) -> io::Result<()> {
+        self.writes += 1;
+        Err(io::Error::other("identity observation attempted a write"))
+    }
+
+    fn reopen_rdwr(&mut self, _wait: Duration) -> io::Result<()> {
+        self.reopens += 1;
+        Err(io::Error::other(
+            "identity observation attempted a read-write reopen",
+        ))
+    }
+}
+
+#[test]
+fn readonly_observation_collects_plain_identity_without_any_write_transition() {
+    let runner = ObservationRunner;
+    let mut dev = ReadOnlyAuditDev::plain();
+
+    let observed =
+        observe_media_identity_readonly(&runner, 6, &mut dev).expect("read-only observation");
+
+    assert_eq!(
+        dev.reads, 13,
+        "identity observation should read LBA0-12 once"
+    );
+    assert_eq!(
+        dev.writes, 0,
+        "identity observation must perform zero writes"
+    );
+    assert_eq!(
+        dev.reopens, 0,
+        "identity observation must never reopen read-write"
+    );
+    assert_eq!(observed.protocol_image.len(), 13 * 512);
+    assert_eq!(observed.snapshot.protocol.device_id, None);
+    assert_eq!(observed.snapshot.protocol.onlyid, None);
+    assert_eq!(
+        observed.snapshot.protocol.provision_kind,
+        Some(DiskProvisionKind::Plain)
+    );
+    assert!(!observed.snapshot.derived.device_id_candidates.is_empty());
+    assert_eq!(
+        observed.snapshot.hardware.serial_quality,
+        SerialQuality::Usable
+    );
+    assert!(observed.snapshot.hardware.serial_sha256.is_some());
+
+    let debug = format!("{:?}", observed.snapshot);
+    assert!(
+        !debug.contains("RAW-SERIAL-MUST-NOT-ESCAPE"),
+        "raw USB serial must never enter canonical snapshot/debug output"
+    );
 }

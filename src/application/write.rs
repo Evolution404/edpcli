@@ -164,26 +164,7 @@ fn verify_hardware_bound_restore(
 }
 
 pub(crate) fn read_image(dev: &mut dyn SectorDev) -> EdpCliResult<Vec<u8>> {
-    let mut img = Vec::with_capacity(METADATA_IMAGE_LEN);
-    // 镜像布局必须严格保持 LBA0→12 的连续顺序；后续所有固定偏移都依赖此契约。
-    for lba in 0..METADATA_SECTOR_COUNT as u32 {
-        let sector = dev
-            .read_sector(lba)
-            .map_err(|e| err(EXIT_IO, format!("错误: {}", e)))?;
-        if sector.len() != SECTOR {
-            return Err(err(
-                EXIT_IO,
-                format!(
-                    "错误: LBA{} 读取 {}B，预期完整扇区 {}B",
-                    lba,
-                    sector.len(),
-                    SECTOR
-                ),
-            ));
-        }
-        img.extend_from_slice(&sector);
-    }
-    Ok(img)
+    super::media_identity_observer::read_protocol_image_readonly(dev)
 }
 
 /// `reopen_rdwr` 会重新打开平台裸盘设备。确认期间既可能换盘，也可能有别的程序

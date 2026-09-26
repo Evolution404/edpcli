@@ -8517,6 +8517,8 @@ IdentityMatchSummary
 
 #### I0 — 固定基线与失败测试
 
+**实施状态（2026-09-26）：COMPLETE。** 基线确认 `main == origin/main @ 188ffbb`、workspace clean；matcher/Plain observed-device-id red tests 已先失败后由 I1 转绿。另已固定后续阶段 red evidence：当前 writer 仍输出 `edpb.manifest.v1`、同 EDP 协议身份但 USB serial 不同的 clone restore 当前仍会错误放行、Plain 无 usable serial 的 standalone backup 当前仍会错误拒绝；这些 red tests 保留给 I3/I5/I3 observation-policy 收口，不作为 I1 放宽写盘安全链的理由。
+
 - 记录 `git status/HEAD/log`；
 - 确认 main clean；若不 clean，先审计并保留；
 - 加 matcher red tests；
@@ -8527,6 +8529,8 @@ IdentityMatchSummary
 - 不改生产逻辑前先确认失败原因正确。
 
 #### I1 — Canonical identity domain
+
+**实施状态（2026-09-26）：COMPLETE。** 已新增 `src/application/media_identity.rs`，建立 UI-neutral evidence/domain、deterministic `SerialQuality`、A/B/C/D/E confidence、relationship/conflict 分离以及无 I/O pure matcher。Focused gate：`cargo test --test repository_suite media_identity` = 9 passed / 0 failed；serial/VID/PID hard conflict 优先级与 lineage 不覆盖 hard conflict 已锁定。
 
 新增 `application/media_identity.rs`：
 
@@ -8540,6 +8544,8 @@ IdentityMatchSummary
 先让 matcher tests 全绿。
 
 #### I2 — 统一只读 observation
+
+**实施状态（2026-09-26）：COMPLETE。** 已新增 `application::media_identity_observer::observe_media_identity_readonly` 与共享 `read_protocol_image_readonly`；统一采集 platform hardware evidence、serial digest/quality、total sectors、LBA0-12、verified `identify()`、LBA4/onlyid、`DiskProvisionKind` 与 derived candidates。观察路径无 `prepare_write`/unmount/`reopen_rdwr`/sector write；损坏 EDP evidence 不降级为 canonical Plain。Focused gate：`cargo test --test repository_suite media_identity` = 10 passed / 0 failed，含 13 reads、0 writes、0 reopen 与 raw-serial non-escape 回归门禁。
 
 新增 application 入口：
 
