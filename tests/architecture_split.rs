@@ -82,6 +82,8 @@ fn large_modules_are_split_by_domain_boundary() {
         "src/tui/backups/render.rs",
         "src/tui/devices/render.rs",
         "src/inspect/model.rs",
+        "src/inspect_adapter.rs",
+        "src/application/inspect_text.rs",
         "src/inspect/metadata.rs",
         "src/inspect/catalog.rs",
         "src/inspect/lba_adapter.rs",
@@ -99,6 +101,8 @@ fn large_modules_are_split_by_domain_boundary() {
     assert!(lines("src/tui/render.rs") < 1_500);
     assert!(lines("src/tui/task.rs") < 1_000);
     assert!(lines("src/inspect.rs") < 150);
+    assert!(lines("src/inspect_adapter.rs") < 150);
+    assert!(lines("src/application/inspect_text.rs") < 260);
     assert!(lines("src/inspect/model.rs") < 650);
     assert!(lines("src/inspect/metadata.rs") < 150);
     assert!(lines("src/inspect/catalog.rs") < 50);
@@ -318,12 +322,14 @@ fn semantic_consumers_do_not_depend_on_inspect_presentation() {
 fn inspect_presentation_stays_downstream_of_protocol_and_application_domains() {
     let mut domain_sources = rust_sources_under("src/protocol");
     domain_sources.extend(rust_sources_under("src/provision"));
-    domain_sources.extend(
-        rust_sources_under("src/application")
-            .into_iter()
-            .filter(|path| !path.ends_with("inspect.rs") && !path.ends_with("inspect_tree.rs")),
-    );
+    domain_sources.extend(rust_sources_under("src/application"));
     assert_sources_exclude(domain_sources, &["crate::inspect::", "crate::inspect{"]);
+
+    let adapter =
+        fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("src/inspect_adapter.rs"))
+            .expect("read inspect adapter");
+    assert!(!adapter.contains("crate::application"));
+    assert!(!adapter.contains("mod render;"));
 
     for path in [
         "src/inspect/model.rs",

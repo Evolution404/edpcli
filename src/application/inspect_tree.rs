@@ -676,7 +676,7 @@ mod tests {
     use super::*;
     use crate::backup_metadata::{Lba7CompatibilityGeometry, PartitionGeometry};
     use crate::common::{METADATA_IMAGE_LEN, SECTOR};
-    use crate::inspect::{FieldChild, FieldStyle};
+    use crate::inspect_adapter::{FieldChild, FieldStyle};
 
     fn partition(index: usize, start: u64, count: u64, partition_type: u32) -> PartitionGeometry {
         PartitionGeometry {

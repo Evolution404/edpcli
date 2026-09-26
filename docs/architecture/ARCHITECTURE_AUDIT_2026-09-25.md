@@ -1213,9 +1213,15 @@ application 返回结构化 `ProvisionReport/BackupReport/InspectReport`，CLI/T
 
 **COMPLETE；D7-C 模块拆分完成。**
 
-- 新增架构门禁，禁止 `protocol`、`provision` 领域源文件和非检查专用 application 模块引用检查展示模型；检查器字段模型、元数据与 LBA 适配模块不得反向依赖 application，也不得调用文本或十六进制渲染。
-- `application::inspect` 与 `application::inspect_tree` 是现有检查工作区的显式桥接模块；它们负责将检查适配结果转为应用工作区结构和导出文本，不作为协议或通用领域真相源。该例外在门禁中列明，避免以后把其它 application 模块接到检查展示层。
+- 初版架构门禁禁止 `protocol`、`provision` 和非检查专用 `application` 模块引用检查展示门面；检查器字段模型、元数据与 LBA 适配模块不得反向依赖 application，也不得调用文本或十六进制渲染。
+- 初版仍允许 `application::inspect` 的展示桥接；这一例外在 D7-C5 收口。
 - D7-C 的公开门面、字段模型、LBA 范围适配、元数据/目录适配和渲染已按职责分开，规范协议解析器仍是唯一真相源。依赖方向架构测试 **1/1**、fast **37.92s / 0 失败**、full **36.15s / 0 失败**、全目标 Clippy、rustfmt 与 diff 检查通过。下一阶段执行 D7-D 生产路径输入与索引安全审计。
+
+## Phase D7-C5：收口检查器展示依赖方向
+
+**COMPLETE。** 把原来的桥接例外收口为独立 `inspect_adapter`：`application::inspect` 与检查拓扑只引用适配层，不再引用 `inspect` 展示门面；字段文本导出由 application 服务提供，展示门面复用同一文本格式。架构门禁现在检查全部 `application` 模块，禁止直接依赖检查展示门面。公开 `inspect` API 保持兼容；规范协议解析器仍是唯一真相源。
+
+严格依赖门禁、检查器 **55/55**、仓库 **37/37**、平台 **8/8**、fast **4.62s / 0 失败**、full **84.21s / 0 失败**（首次冷运行）和全目标 Clippy 通过；输出格式和写盘路径未改变。
 
 ## Phase D7-D：外部输入与生产路径断言治理
 
