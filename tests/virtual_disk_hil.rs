@@ -301,7 +301,6 @@ fn raw_virtual_disk_atomic_roundtrip_and_restore() {
         RegionDisposition::RewrapVerified
     );
 
-    let boot_record = *source.record(PartitionRole::Boot).unwrap();
     let share_record = *source.record(PartitionRole::Share).unwrap();
     let encrypt_record = *source.record(PartitionRole::Encrypt).unwrap();
     let raw_legacy =
@@ -318,8 +317,8 @@ fn raw_virtual_disk_atomic_roundtrip_and_restore() {
         OfficialPartitionMode::DefaultThreePartition,
         OfficialPartitionSizes::new(8, 16, 32),
         compatibility,
-        boot_record.lba7_key_material(),
-        boot_record.lba12_key_material().unwrap(),
+        wrap_legacy_lba7_file_key(b"0000aaaa", [0x11; 8]),
+        wrap_file_key(b"0000aaaa", [0x21; 16], FileKeyWrapMode::Sm4),
     )
     .unwrap()
     .with_target_geometry(&exact_targets, SECTOR as u64)
