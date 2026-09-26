@@ -22,12 +22,14 @@ use crate::provision::{
     wrap_file_key, wrap_legacy_lba7_file_key, CapacityInput, CapacitySource, FileKeyWrapMode,
     OfficialFilesystemFormat, OfficialPartitionFilesystems, OfficialPartitionMode,
     OfficialPartitionSizes, OfficialProvisionPlan, OfficialProvisionWriteImage, OnlyId,
-    KeyDomainSecrets, ParsedExistingProvision, PartitionAction, PartitionFilesystemImage,
+    KeyDomainRole, KeyDomainSecrets, ParsedExistingProvision, PartitionAction,
+    PartitionFilesystemImage,
     PartitionFormatTarget,
     PartitionRole, PassInfoPolicy, PlainCleanupExtent, PlainPartitionSpec, PlainProvisionPlan,
     PlainProvisionWritePlan, ProvisionEntropy, ProvisionImage, ProvisionMetadata, ProvisionProfile,
     ProvisionSpec, ProvisionTarget, QuickCapacityUnit, SparseFilesystemImage,
-    TargetGeometryOverrides, TargetIdentity, TargetProvisionPlan, DEFAULT_MODE0_BOOT_SECTORS,
+    TargetGeometryOverrides, TargetIdentity, TargetProvisionPlan, DEFAULT_KEY_DOMAIN_PASSWORD,
+    DEFAULT_MODE0_BOOT_SECTORS,
 };
 use crate::sysinfo::{self, CmdRunner};
 use encoding_rs::GBK;
