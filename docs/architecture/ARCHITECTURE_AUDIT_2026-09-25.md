@@ -1118,7 +1118,7 @@ application 返回结构化 `ProvisionReport/BackupReport/InspectReport`，CLI/T
 - 备份删除链新增 `DeletePlanError`、`DeleteExecuteError` 与 `BackupDeleteError`，测试直接断言错误 variant；TUI 只在 worker/消息边界调用 `.to_string()`，应用层保留结构化错误。
 - Windows 测试基础设施同步治理：Provision 稀疏镜像测试临时文件改用安全 ASCII stem + process id + atomic sequence，不再把包含 `::` 的 Rust test name 拼入文件名；`tui_keymap_contract` 改为函数/阶段区间内的关键 token 顺序契约，不再依赖 CRLF、缩进或 rustfmt 的多行布局。
 - 最终 PR #18 head 的 Rust CI 六个平台（macOS arm64/x86_64、Linux arm64/x86_64、Windows arm64/x86_64）均通过 Rustfmt、正式 full、Clippy `-D warnings` 与 release build；checked-in protocol gold audit、dependency policy/cargo-deny 与四平台 Virtual Disk HIL 全部通过。
-- 本阶段未改变 LBA0～12/LCE 已闭环协议语义，也未降低 system-disk guard、USB guard、写前备份、unmount/lock、reopen identity、atomic write、readback 或 rollback。Virtual HIL 仍不替代真实 USB：Chapter 11 实盘只读 Inspect acceptance 与旧 Phase 8 destructive real USB write HIL 继续保持未最终验收状态。
+- 本阶段未改变 LBA0～12/LCE 已闭环协议语义，也未降低 `system-disk guard`、`USB guard`、写前备份、`unmount/lock`、`reopen identity`、`atomic write`、`readback` 或 `rollback`。Virtual HIL 仍不替代真实 USB：Chapter 11 实盘只读检查验收与旧 Phase 8 真实 USB 破坏性写入 HIL 继续保持未最终验收状态。
 
 ---
 
