@@ -161,7 +161,10 @@ impl PlainProvisionForm {
             .collect()
     }
 
-    pub(super) fn plan(&self, total_sectors: u64) -> Result<crate::provision::PlainProvisionPlan, String> {
+    pub(super) fn plan(
+        &self,
+        total_sectors: u64,
+    ) -> Result<crate::provision::PlainProvisionPlan, String> {
         crate::provision::PlainProvisionPlan::new(total_sectors, self.specs()?)
     }
 }
