@@ -558,8 +558,14 @@ fn advanced_inspect_tree_browser_renders_and_navigates_across_terminal_sizes() {
     );
     state.advanced_inspect_shift_panel(false);
     state.advanced_inspect_shift_panel(false);
-    state.advanced_inspect_scroll_detail(10);
-    assert_eq!(state.advanced_inspect().unwrap().detail_scroll, 10);
+    state.advanced_inspect_move_focused_vertical(10, 1, 100);
+    assert_eq!(
+        state
+            .pane_viewport(edpcli::tui::pane::PaneId::InspectDetail)
+            .scroll_y
+            .offset,
+        10
+    );
 
     for (width, height) in [(40, 10), (80, 24), (160, 60)] {
         let backend = TestBackend::new(width, height);
