@@ -354,13 +354,11 @@ fn provision_key_probe_prefills_only_verified_default_domains() {
     state.provision_skip_backup();
     state.provision_begin_selected();
 
-    state.provision_finish_key_probe(Ok(
-        edpcli::application::provision::ProvisionKeyProbe {
-            source_kind: edpcli::provision::DiskProvisionKind::Mode0,
-            share: Some(edpcli::provision::SourcePasswordKnowledge::DefaultVerified),
-            encrypt: Some(edpcli::provision::SourcePasswordKnowledge::Unknown),
-        },
-    ));
+    state.provision_finish_key_probe(Ok(edpcli::application::provision::ProvisionKeyProbe {
+        source_kind: edpcli::provision::DiskProvisionKind::Mode0,
+        share: Some(edpcli::provision::SourcePasswordKnowledge::DefaultVerified),
+        encrypt: Some(edpcli::provision::SourcePasswordKnowledge::Unknown),
+    }));
 
     assert_eq!(state.provision().form.share_source_password, "0000aaaa");
     assert_eq!(
@@ -384,13 +382,11 @@ fn provision_key_probe_never_overwrites_user_entered_source_password() {
     state.provision_begin_selected();
     state.provision_mut().form.share_source_password = "ManualOldPass!".into();
 
-    state.provision_finish_key_probe(Ok(
-        edpcli::application::provision::ProvisionKeyProbe {
-            source_kind: edpcli::provision::DiskProvisionKind::Mode0,
-            share: Some(edpcli::provision::SourcePasswordKnowledge::DefaultVerified),
-            encrypt: None,
-        },
-    ));
+    state.provision_finish_key_probe(Ok(edpcli::application::provision::ProvisionKeyProbe {
+        source_kind: edpcli::provision::DiskProvisionKind::Mode0,
+        share: Some(edpcli::provision::SourcePasswordKnowledge::DefaultVerified),
+        encrypt: None,
+    }));
 
     assert_eq!(
         state.provision().form.share_source_password,
