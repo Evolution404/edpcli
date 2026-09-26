@@ -4266,7 +4266,7 @@ python3 scripts/test-full.py --profile full
 
 最终原则：**页面只组织 Pane；Pane 决定按键如何作用于自己的内容；Tab/Ctrl-w 只移动焦点；j/k 永远服务当前 Pane；Inspect、Provision、Review 的磁盘布局全部来自同一份完整物理盘模型，并从 LBA0 连续覆盖到最后一个 sector。**
 
-## 14. 后续计划：Inspect 信息密度与多层解码语义（2026-09-26）
+## 14. 后续计划：TUI 信息架构、磁盘布局与制盘可观测性收口（2026-09-26）
 
 > 状态：**PLAN ONLY / 持续收集**。本章用于当前计划分支继续收集 Inspect 细节问题；本章提交只允许补充调查结论、实现方案与回归门禁，不修改生产代码。后续用户提出的同类问题继续追加到本章，待问题清单确认后再单独进入实现分支。
 
@@ -4647,7 +4647,7 @@ Transform / provenance
 
 #### 14.7.4 Detail 从“滚动表”升级为“可选字段表”
 
-建议增加独立 `detail_selected_row`：
+Detail 需要逻辑选中行，但**禁止再新增独立 `detail_selected_row` 状态**；必须复用第 13 章已经建立的 `PaneViewport.selected`：
 
 ```text
 j/k          选择上一/下一字段
@@ -5624,7 +5624,7 @@ ProvisionRunState
   rollback_state
   log: VecDeque<ProvisionLogEntry>
   follow_tail
-  log_scroll
+  # vertical/horizontal scroll 与 selected 不存这里，统一使用 PaneViewport
 ```
 
 日志建议限制最近 200～500 条，防止长事务无限增长。被淘汰时保留一条：
@@ -5760,3 +5760,444 @@ I3p  fake slow device + fixed clock + rollback + 宽度回归门禁
 ```
 
 最终标准：**即使某块 U 盘每次 sync 或单个 sector I/O 都非常慢，用户也不会再面对一块“完全不动”的界面；能明确看到当前阶段、真实完成量、已耗时、最近活动、滚动日志，以及失败时正在回滚到什么程度，同时不牺牲现有任何写盘安全门槛。**
+
+### 14.11 计划审计与统一修正（2026-09-26）
+
+本节是对 14.1～14.10 的实现前审计。**如本节与前文局部建议冲突，以本节为准。** 本轮只修正规划，不实现生产代码。
+
+审计前先同步计划分支到最新 `origin/main=f436e4f`；第 13 章现已正式标记 P0～P8 COMPLETE，六平台 CI 与 Virtual Disk HIL 均通过。因此第 14 章可以直接建立在统一 Pane / DiskLayout 基础设施上，不再把“第 13 章等待 CI”当成阻塞条件。
+
+#### 14.11.1 问题一：第 14 章局部 Phase 编号已经失去全局顺序
+
+前文先出现：
+
+```text
+I0 / I1 / I2 / I3 / I4 / I5 / I6
+```
+
+后续又继续追加：
+
+```text
+I2a ... I2i
+I3a ... I3p
+```
+
+同时仓库更早章节已经使用过“Phase I2 / I3”表示 Inspect backend/topology 的已完成阶段。继续沿用这些编号会让后续执行者误以为是旧 Phase 的续项，也无法从字母顺序判断真实依赖。
+
+修正：前文所有 `I*` 只视为局部说明，**真正实施必须按 14.11.12 的唯一 Q0～Q8 顺序**。后续不再新增 `I2j/I3q`。
+
+#### 14.11.2 问题二：Inspect 字节模型名称会重复现有 `raw/decoded`
+
+当前 application 层已经有：
+
+```text
+InspectField.raw
+InspectField.decoded
+```
+
+其真实含义是：
+
+```text
+raw      = 物理 sector 原始字节切片
+ decoded = sector-level decoder 输出字节切片
+```
+
+14.3 再新增 `stored_bytes / logical_bytes` 如果不先定语义，会出现四套名字互相覆盖。
+
+统一成四层概念：
+
+```text
+PhysicalRaw       物理介质上的字节
+SectorDecoded     整扇区 decoder 后的字节
+FieldLogical      字段自身存储变换解除后的字节，可选
+SemanticValue     parser 给出的类型化/人类可读值
+```
+
+落地原则：
+
+- 现有 `InspectField.raw` 可继续对应 `PhysicalRaw`；
+- 现有 `InspectField.decoded` 明确重命名/文档化为 `SectorDecoded`，不再称泛化的 Decoded；
+- 只新增一个可选 `field_logical: Option<Vec<u8>>`（名称实现时可调整），不要同时再造 `stored_bytes`；
+- 字段级变换使用 typed provenance，例如 `FieldTransform::Xor(0x88)`，不要只塞字符串；
+- `SemanticValue` 仍由 canonical parser 产生，TUI 不根据字节反推。
+
+这样 `0x77 -> 0xFF -> 255` 的链路只有一个事实模型，不会为了 UI 再复制解码算法。
+
+#### 14.11.3 问题三：Overview 缺少稳定 Field ID，不能靠中文 label 找关键字段
+
+当前 `SectorField / InspectField` 只有 `label`，没有稳定机器标识。14.7 如果实现 LBA8 summary 时这样做：
+
+```text
+find(|field| field.label == "UsbOnlyInfo")
+```
+
+会把展示文案变成业务 API；后续中文化、重命名或同名字段都会破坏摘要。
+
+必须先增加稳定语义键，例如：
+
+```text
+InspectFieldKey::Lba8UsbOnlyInfo
+InspectFieldKey::Lba8HostHardinfo
+InspectFieldKey::Lba12MaxEncryptPasswordErrors
+```
+
+或等价稳定 key registry。
+
+要求：
+
+- label 只是展示；
+- summary selection、测试、Field→Hex、搜索精确定位均优先使用 stable key/range；
+- 不要求一次给所有 unknown 字段创造枚举，可允许 `ProtocolField(String)` / registry key，但 key 必须稳定且不依赖本地化文本。
+
+另外当前 `FieldChild` 只有 `label/value`，没有 byte range。Detail 展开 children 后：
+
+- 有 range 的 child 才允许 `Enter -> Hex` / `Y raw`；
+- 没有 range 的 child 只能作为语义子项展示；
+- 如果未来需要 ELABEL 每个子项精确跳 byte，再把 `FieldChild.range` 做成 `Option<RelativeByteRange>`，不能凭显示顺序猜 offset。
+
+#### 14.11.4 问题四：不能重新引入第 13 章刚删除的 Pane 私有滚动状态
+
+第 13 章已经确立：
+
+```text
+PaneViewport.scroll_y / scroll_x / selected
+```
+
+是 Pane 交互状态容器。
+
+因此第 14 章明确修正：
+
+- Detail row selection 使用 `PaneViewport.selected`；
+- Overview/Detail/DiskLayout 的垂直滚动继续使用 `PaneViewport.scroll_y`；
+- Pane 内表格的横向 viewport 优先迁到 `PaneViewport.scroll_x`，不要再扩散页面级 `horizontal_scroll`；
+- `ProvisionRunState` 不拥有 `log_scroll`；
+- Running/Result 日志增加正式 `PaneId::ProvisionRunLog`（以及需要时 `ProvisionRunSummary`），使用统一 PaneFocus/PaneViewport；
+- 如果 Running 只有一个可交互 Pane，也仍然使用 PaneViewport，避免以后 Result 双 Pane 再迁移一次。
+
+Devices/Backups 这类不是 Pane 内部的顶层 workspace table 可以继续使用 `TableKind` 横向状态；**Pane-owned Table 与 workspace-owned Table 不混用状态事实源。**
+
+#### 14.11.5 问题五：当前 TaskUpdates 会吞掉同一帧内的大部分 progress event
+
+这是 14.10 最大的实现风险。
+
+当前 `TaskHub::poll()` 会 `while try_recv()` 一次排空 channel，但：
+
+```text
+TaskUpdates.provision_progress: Option<...>
+```
+
+每收到一条就：
+
+```text
+updates.provision_progress = Some(...)
+```
+
+所以同一次 poll 中如果收到：
+
+```text
+StageStarted
+StageProgress
+StageCompleted
+NextStageStarted
+```
+
+最终 TUI 只能拿到最后一条。对于现在“一次只发一条字符串”无所谓，但对实时日志会直接丢 milestone。
+
+必须改为有序批次：
+
+```text
+provision_progress: Vec<(OperationId, ProvisionProgressEvent)>
+```
+
+或者等价的 event batch/reducer。
+
+规则：
+
+- StageStarted/Completed、Warning、Rollback、Completed 等 boundary event 一条都不能丢；
+- 高频 `StageProgress` 可以在**进入 TaskUpdates 之前或 reducer 内**按同 phase 合并为最后状态；
+- 合并不得跨越 boundary event；
+- 同一个 `operation_id` 的事件严格保持 channel 顺序；
+- final `ProvisionWrite` 与此前 progress 在同一次 poll 中到达时，先 apply 全部 progress，再 apply final outcome。
+
+源头仍按 100ms / 64 sectors 节流。不要为了“防爆”改成会阻塞磁盘 worker 的同步 channel；UI 慢不能反向阻塞安全事务。
+
+#### 14.11.6 问题六：progress sink 本身也必须是“不可影响事务”的故障域
+
+14.10 已要求 progress 失败不能改变介质事务，但实现方式还要进一步锁死。
+
+要求：
+
+- application/diskio 不依赖 TUI channel 类型；
+- `ProgressSink::emit()` 是 best-effort side channel；
+- channel receiver 已关闭时忽略发送失败；
+- sink 内部 panic 必须被隔离，不能因为日志 UI bug 触发写盘 rollback 或留下 intermediate state；
+- 测试至少覆盖 `DisconnectedSink` 与 `PanickingSink`，同一 fake device 下事务最终结果必须与 `NoopProgressSink` 完全一致。
+
+如果实现者不愿允许第三方 trait object，可使用内部 `ProgressReporter` + 闭包包装，但“不影响事务”是硬门禁。
+
+#### 14.11.7 问题七：总体百分比必须在 RunStarted 前冻结 denominator
+
+14.10 的“固定 milestone + sector units”方向正确，但仍需避免运行过程中总工作量不断变化，否则总体百分比会倒退或跳变。
+
+在 worker 启动前从 `PreparedProvision` 构造：
+
+```text
+ProvisionWorkPlan
+  phases[]
+    id
+    role/partition
+    unit
+    total_work_units
+    contributes_to_overall
+```
+
+已知 work：
+
+- transaction touched sectors：mirror/write/readback 均可提前得到 N；
+- selected partition format：`prepared_image.sectors().len()` 可提前得到；
+- protocol readback 固定读数可提前得到；
+- lock/reopen/sync 只作为 milestone，不伪造 bytes。
+
+`RunStarted` 后 overall denominator 不再变化。Rollback 是异常 recovery 计划，单独显示自己的 progress，不塞回正常 0～100% denominator。
+
+同时为第 12 章未来的 `Migrate` 预留：
+
+```text
+ProgressUnit::Sector
+ProgressUnit::Byte
+ProgressUnit::File
+ProgressUnit::Item
+```
+
+不要把进度 API 写死成“sector only”，否则五状态迁移一实现就要重构。
+
+#### 14.11.8 问题八：TUI 与 CLI 当前对“格式化部分失败”的最终结果语义并不一致
+
+当前 application 的 `ProvisionCommitReport` 可以表示：
+
+```text
+协议写入成功
+启动区格式化成功
+交换区格式化失败
+保密区格式化成功
+```
+
+CLI 会检测 `report.formats.any(error)` 并返回 `EXIT_IO`。
+
+但 TUI worker 当前把这个 report 映射为 `Ok(String)`；`tui/mod.rs` 用 `result.is_ok()` 判断 success，于是“部分格式化失败”仍被当作成功路径。Result renderer 再靠：
+
+```text
+message.contains("格式化：✗")
+```
+
+猜是否有失败，而且外框仍固定 `success()`。
+
+第 14 章必须顺便收口，不然新增进度/日志后状态仍会自相矛盾。
+
+建议定义 typed final outcome，例如：
+
+```text
+ProvisionExecutionOutcome
+  Success
+  PartialFormatFailure { failed_roles, ... }
+  RolledBack { cause }
+  Intermediate { cause }
+  FailedBeforeWrite { cause }
+```
+
+名称可调整，但：
+
+- CLI exit code 从 typed outcome 映射；
+- TUI title/border/tone 从 typed outcome 映射；
+- Result 页面不解析中文 message 判断成功失败；
+- `PartialFormatFailure` 明确写“协议制盘成功，部分分区格式化失败”，不能笼统显示“全部成功”；
+- 设备/备份刷新是否执行由 outcome policy 明确决定，不再简单 `result.is_ok()`。
+
+#### 14.11.9 问题九：14.9 的 `PartitionDisposition` 会和第 12 章未来六类 RegionDisposition 冲突
+
+14.9 当前草案：
+
+```text
+PreserveCandidate
+RebuildRequired
+PreserveExact
+Rebuild
+```
+
+第 12 章已经规划：
+
+```text
+PreserveOpaque
+PreserveVerified
+RewrapVerified
+Migrate
+Rebuild
+Drop
+```
+
+如果现在在 TUI 再造一个业务 enum，后面一定二次迁移。
+
+修正：
+
+- application planner / assessment 是业务真相源；
+- UI 只消费 typed decision，不自己定义另一套“真实处置类型”；
+- 当前编辑阶段需要的“候选保留/需重建”应来自 application 层 `PreserveAssessment` 或等价结构，不能继续在 `tui/provision/layout.rs` 重复比较 type/start/count/encryption；
+- presentation 层可以有 `DispositionTone/Badge`，但它只是展示映射，不拥有业务语义；
+- 设计现在就允许未来映射 `Rewrap/Migrate/Drop`，这样第 12 章实施时只扩 application decision，不推翻磁盘布局表格。
+
+#### 14.11.10 问题十：设备/备份的“未知盘型”当前会被错误表示成 Plain
+
+这是 14.8 必须修掉的基础语义问题。
+
+当前：
+
+- `disk_scan::Row` 初始化 `provision_kind = Plain`，即使后续 USB probe 失败；
+- `BackupEntry` 在 `meta/raw` 不可用时也把 `provision_kind` 设为 `Plain`。
+
+现有 UI 因为把“读取异常”塞进盘型列，部分遮住了这个问题；14.8 一旦把“盘型”和“状态”拆开，就可能出现：
+
+```text
+盘型  Plain
+状态  读取异常
+```
+
+这会错误暗示已经确认它是普通盘。
+
+必须把“已识别 Plain”和“未能识别”分开。推荐 read-side presentation 使用：
+
+```text
+Option<DiskProvisionKind>
+```
+
+或：
+
+```text
+ProvisionIdentification::Known(DiskProvisionKind)
+ProvisionIdentification::Unknown
+```
+
+要求：
+
+- probe 成功且 canonical classifier 明确为 Plain，才显示“普通盘”；
+- denied/probe_error/损坏 backup 缺有效 metadata 时盘型显示 `—` 或“未识别”；
+- health/status 列继续解释为什么未知；
+- `DiskProvisionKind::Plain` 不能再兼任错误默认值。
+
+这条既适用于 Devices，也适用于 Backups，必须在统一身份表之前完成。
+
+#### 14.11.11 其它可优化项
+
+1. **容量格式统一范围要明确**：Devices/Backups 身份表共享 `common::fmt_gb` 或一个新的统一 formatter，保证同一块盘两张表完全相同；Provision 几何编辑可以继续用 MiB/GiB + sector，因为那是精确布局语境。不要一张身份表写 `8.00GB`、另一张写 `7.45GiB`。
+2. **窄屏 pinned 列不能只靠当前 AdaptiveTableLayout**：现实现极窄时会移除除第 0 列外的 pinned column，因此 14.9 的“处理状态永远可见”必须通过明确 breakpoint 切换到两行 card layout，而不是假设 pinned 永不消失。
+3. **Tail topology 与 DiskLayout 分开验收**：Tree 的 tail children 改成互斥 primary spans 后，完整磁盘比例条仍应把最后 2048 sectors 视为 Tail 语义覆盖；新增测试防止 tree 修复意外改变 DiskLayout 颜色/占比。
+4. **Overview 生成不得触发新 I/O**：Summary 必须只消费当前 workspace/item/parser 已有结果，切 Tree selection 不能重新打开备份或物理盘。
+5. **Backup 身份扩列不得增加 I/O**：14.8 已写原则，再加性能门禁：一次 backup scan 后 renderer/search/sidebar 只能读 `BackupWorkspaceItem`；用测试 spy/计数器锁死“render 不读文件”。
+6. **Running Result 增加阶段耗时摘要**：除实时日志外，完成页列出各阶段 duration，能直接看出慢盘到底慢在 unmount、sync、写、readback 还是 format。
+7. **日志持久化暂不做强制需求**：本轮先保证 TUI Result 内保留 ring log。若以后要导出诊断日志，应做显式“导出运行日志”，并复用敏感信息过滤，不默认把运行日志写进备份目录。
+8. **写盘 instrumentation 需要 HIL**：即使 progress hook 理论上“不改业务语义”，它会进入 `diskio::transaction` 热路径，因此最终合并门禁除 fast/full 外必须跑现有 Virtual Disk HIL；真实 U 盘验收重点验证慢设备 UI，不以真实盘作为单元测试前置条件。
+
+#### 14.11.12 唯一实施顺序（覆盖前文所有局部 I* 顺序）
+
+为降低回归面，第 14 章拆成 9 个可独立提交/PR 的阶段：
+
+```text
+Q0  基线与失败测试
+    - 最新 origin/main
+    - Chapter 13 COMPLETE
+    - 为本章关键问题先写 contract/failing tests
+
+Q1  Inspect 数据契约
+    - stable InspectFieldKey
+    - PhysicalRaw / SectorDecoded / FieldLogical / SemanticValue 四层语义
+    - typed FieldTransform provenance
+    - 不改 renderer
+
+Q2  Inspect topology + presentation
+    - 单 sector Tree 去 [n..n]
+    - tail primary spans / secondary membership
+    - Summary model
+    - Overview dashboard
+    - Detail selected row 复用 PaneViewport.selected
+    - Field/child -> Hex 能力按 range 严格启用
+
+Q3  Device / Backup identity contract
+    - Known vs Unknown provision kind
+    - BackupWorkspaceItem 透传 secs/VID/PID/device_id
+    - shared identity projection / formatter / column specs
+    - 两张表、sidebar、search 统一
+
+Q4  DiskLayout / Provision decision presentation
+    - typed layout rows
+    - application PreserveAssessment，删除 TUI 重复业务比较
+    - region legend 对齐 table
+    - partition action table + selected reason
+    - 窄屏 card breakpoint
+    - 为第 12 章 disposition 扩展留接口
+
+Q5  Progress application core
+    - ProvisionWorkPlan 冻结 denominator
+    - ProvisionProgressEvent / ProgressUnit / sink
+    - transaction mirror/write/readback/rollback instrumentation
+    - provision lock/reopen/identity/protocol/format instrumentation
+    - progress sink failure isolation
+
+Q6  Progress transport + TUI
+    - TaskUpdates progress 改 ordered Vec/batch，禁止 milestone 丢失
+    - ProvisionRunState
+    - ProvisionRunLog Pane + PaneViewport
+    - status card / progress / elapsed / last activity / throughput
+    - follow-tail / j-k / G
+
+Q7  Outcome + CLI 收口
+    - typed ProvisionExecutionOutcome
+    - TUI/CLI 同一 final semantics
+    - PartialFormatFailure 正确状态
+    - CLI milestone renderer
+    - Result summary + stage timings + retained log
+
+Q8  清理与门禁
+    - 删除旧 message-prefix / contains("格式化：✗") 业务判断
+    - 删除被取代的重复 scroll/selection/business comparison
+    - fmt + diff-check + affected suites + fast
+    - full profile
+    - Virtual Disk HIL
+    - 最后做真实慢盘 TUI 可观测性验收（有盘时）
+```
+
+依赖关系：
+
+```text
+Q1 -> Q2
+Q3 独立，可在 Q1/Q2 后执行
+Q4 依赖 Chapter 13 DiskLayout，但不依赖 Q5
+Q5 -> Q6 -> Q7
+Q8 最后统一收口
+```
+
+第 12 章仍保持 PLAN ONLY；Q4/Q5 的接口必须为未来六类 RegionDisposition 和 Migrate progress 留扩展位，但**本章不提前实现第 12 章密码域/迁移业务。**
+
+#### 14.11.13 审计后的优先级
+
+按“用户可见问题 + 架构返工风险”排序：
+
+```text
+P0 必须先修
+  1. progress event 批次丢失风险
+  2. Unknown 被误当 Plain
+  3. Inspect 四层 byte semantics + stable FieldKey
+  4. PaneViewport 单一状态源
+  5. TUI/CLI PartialFormatFailure 结果语义
+
+P1 本章核心体验
+  6. Overview/Detail 重构
+  7. 设备/备份身份表统一
+  8. DiskLayout 对齐 + 保留/重建醒目
+  9. Running 实时进度/日志
+
+P2 优化
+  10. stage duration summary
+  11. child optional range
+  12. 日志显式导出（未来，不作为本章完成门槛）
+```
+
+审计结论：**第 14 章方向正确，但在真正实现前必须先收口“字段身份、Pane 状态、progress transport、最终 outcome、Unknown/Plain”这五个基础契约；否则直接从 renderer 开始改，会在第 12 章或慢盘日志接入时产生第二轮重构。Q0～Q8 是后续唯一执行顺序。**
