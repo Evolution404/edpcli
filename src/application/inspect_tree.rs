@@ -464,38 +464,66 @@ fn tail_region(total_sectors: u64) -> Option<InspectNode> {
         return None;
     }
     let tail_start = total_sectors - tail_count;
-    let mut children = vec![lazy_extent(
-        "region.tail.extent",
-        "盘尾取证窗口",
-        tail_start,
-        tail_count,
-        None,
-        SemanticStatus::Unknown,
-        Some(DiskRegionSemantic::TailForensic),
-    )];
-
+    let mut special = Vec::new();
     if total_sectors >= TAIL_METADATA_MIRROR_OFFSET_SECTORS + TAIL_METADATA_MIRROR_SECTORS {
         let start = total_sectors - TAIL_METADATA_MIRROR_OFFSET_SECTORS;
-        children.push(lazy_extent(
-            "region.tail.metadata_mirror",
-            "盘尾历史 9 扇区镜像",
+        special.push((
             start,
             TAIL_METADATA_MIRROR_SECTORS,
-            None,
-            SemanticStatus::Identified,
-            Some(DiskRegionSemantic::TailMetadataMirror),
+            "region.tail.metadata_mirror",
+            "盘尾历史 9 扇区镜像",
+            DiskRegionSemantic::TailMetadataMirror,
         ));
     }
     if total_sectors > TAIL_END4_MIRROR_OFFSET_SECTORS {
         let start = total_sectors - TAIL_END4_MIRROR_OFFSET_SECTORS;
-        children.push(lazy_extent(
-            "region.tail.restore_node_end4",
-            "盘尾 end-4 restore-node",
+        special.push((
             start,
             1,
+            "region.tail.restore_node_end4",
+            "盘尾 end-4 restore-node",
+            DiskRegionSemantic::TailRestoreNode,
+        ));
+    }
+    special.sort_by_key(|(start, ..)| *start);
+    let mut children = Vec::new();
+    let mut cursor = tail_start;
+    for (start, count, id, label, semantic) in special {
+        if start < cursor || start >= total_sectors {
+            continue;
+        }
+        if cursor < start {
+            children.push(lazy_extent(
+                format!("region.tail.unclassified.{}", children.len()),
+                "盘尾未分类",
+                cursor,
+                start - cursor,
+                None,
+                SemanticStatus::Unknown,
+                None,
+            ));
+        }
+        let count = count.min(total_sectors - start);
+        children.push(lazy_extent(
+            id,
+            label,
+            start,
+            count,
             None,
             SemanticStatus::Identified,
-            Some(DiskRegionSemantic::TailRestoreNode),
+            Some(semantic),
+        ));
+        cursor = start + count;
+    }
+    if cursor < total_sectors {
+        children.push(lazy_extent(
+            format!("region.tail.unclassified.{}", children.len()),
+            "盘尾未分类",
+            cursor,
+            total_sectors - cursor,
+            None,
+            SemanticStatus::Unknown,
+            None,
         ));
     }
 
@@ -756,6 +784,44 @@ mod tests {
                 .map(|node| node.id.as_str()),
             Some("region.tail")
         );
+    }
+
+    #[test]
+    fn tail_primary_extents_are_ordered_disjoint_and_cover_parent() {
+        let total = 15_728_640;
+        let tail = tail_region(total).expect("tail region");
+        let InspectChildren::Materialized(children) = tail.children else {
+            panic!("tail extents must be materialized");
+        };
+        let spans = children
+            .iter()
+            .map(|child| {
+                (
+                    child.range.start_lba,
+                    child.range.end_lba_exclusive(),
+                    child.region_semantic,
+                )
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            spans,
+            [
+                (15_726_592, 15_727_616, None),
+                (
+                    15_727_616,
+                    15_727_625,
+                    Some(DiskRegionSemantic::TailMetadataMirror),
+                ),
+                (15_727_625, 15_728_636, None),
+                (
+                    15_728_636,
+                    15_728_637,
+                    Some(DiskRegionSemantic::TailRestoreNode),
+                ),
+                (15_728_637, 15_728_640, None),
+            ]
+        );
+        assert!(spans.windows(2).all(|pair| pair[0].1 == pair[1].0));
     }
 
     #[test]

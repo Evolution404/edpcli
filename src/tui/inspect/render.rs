@@ -479,12 +479,16 @@ pub(super) fn draw_advanced_inspect(
                         InspectNodeKind::Sector | InspectNodeKind::Field => Style::default(),
                         InspectNodeKind::Group | InspectNodeKind::UnknownRange => muted(),
                     };
-                    let range = crate::application::inspect_tree::format_lba_closed_range(
-                        row.range.start_lba,
-                        row.range.end_lba_exclusive(),
-                    )
-                    .unwrap_or_else(|| "[空区间]".into());
-                    let content = format!("{marker}{icon}{} {range}", safe(&row.label));
+                    let content = if row.kind == InspectNodeKind::Sector {
+                        format!("{marker}{icon}{}", safe(&row.label))
+                    } else {
+                        let range = crate::application::inspect_tree::format_lba_closed_range(
+                            row.range.start_lba,
+                            row.range.end_lba_exclusive(),
+                        )
+                        .unwrap_or_else(|| "[空区间]".into());
+                        format!("{marker}{icon}{} {range}", safe(&row.label))
+                    };
                     let focused = tree_focus && index == selected_index;
                     Line::from(vec![
                         Span::raw(indent),

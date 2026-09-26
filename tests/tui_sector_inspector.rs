@@ -180,6 +180,29 @@ fn selecting_lba12_shows_canonical_fields_before_enter() {
 }
 
 #[test]
+fn ch14_single_sector_tree_rows_omit_redundant_closed_range() {
+    let mut state = AppState::new();
+    assert!(state.begin_advanced_inspect(AdvancedInspectSource::Disk(6)));
+    state.advanced_inspect_finish(Ok(workspace(vec![item(0, true)])));
+    select_protocol_lba0(&mut state);
+    let mut terminal = Terminal::new(TestBackend::new(160, 50)).unwrap();
+    terminal.draw(|frame| render::draw(frame, &state)).unwrap();
+    let text = terminal
+        .backend()
+        .buffer()
+        .content()
+        .iter()
+        .map(|cell| cell.symbol())
+        .collect::<String>();
+    assert!(!text.contains("LBA0 [0..0]"), "{text}");
+    assert!(!text.contains("LBA12 [12..12]"), "{text}");
+    assert!(
+        text.replace(' ', "").contains("EDP主协议区[0..12]"),
+        "{text}"
+    );
+}
+
+#[test]
 fn selecting_known_partition_sector_requests_read_only_preview() {
     let mut state = AppState::new();
     assert!(state.begin_advanced_inspect(AdvancedInspectSource::Disk(6)));
