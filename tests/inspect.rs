@@ -17,7 +17,11 @@ fn crc32_ieee_test(data: &[u8]) -> u32 {
 
 #[test]
 fn inspect_protocol_semantics_stay_routed_to_canonical_parsers() {
-    let source = include_str!("../src/inspect.rs");
+    let source = concat!(
+        include_str!("../src/inspect/model.rs"),
+        include_str!("../src/inspect/lba_adapter.rs"),
+        include_str!("../src/inspect/render.rs"),
+    );
     let semantic = include_str!("../src/protocol/semantic.rs");
     for parser in [
         "lba0::parse_lba0",

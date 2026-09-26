@@ -1183,6 +1183,15 @@ application 返回结构化 `ProvisionReport/BackupReport/InspectReport`，CLI/T
 - `state.rs` 降至 **501 行**，保留 Provision 工作区初始化、备份提示、阶段转换、导出确认与写盘任务协调；`editor.rs` 为 **243 行**。架构门禁收紧为 `state.rs < 520`、`editor.rs < 300`，并锁定编辑入口不回迁。
 - TUI suite **161/161** 与架构测试通过；fast **4.60s / 0 失败**、full **32.70s / 0 失败**，全目标 Clippy、rustfmt 与 diff 检查通过。首次冷缓存运行发现本报告中一处英文叙述词，被文档门禁拒绝；修正后正式复跑通过。D7-B 的表单、Plain 编辑、字段输入、校验适配、布局展示与编辑动作均已按职责分离；后续进入 D7-C `inspect.rs` 拆分。
 
+## Phase D7-C1：检查器模型、LBA 适配与渲染分层
+
+**COMPLETE；D7-C 继续。**
+
+- `src/inspect.rs` 收敛为公开 API 门面，字段模型与展示字段构建移至 `src/inspect/model.rs`，LBA0～12 只读适配移至 `src/inspect/lba_adapter.rs`，十六进制和字段文本渲染移至 `src/inspect/render.rs`。
+- 原有 `analyze_sector`、`render_fields` 等公开入口继续从门面重新导出，调用方接口不变；各 LBA 仍调用 `protocol::*` 与 `protocol::semantic` 的规范解析器，未重写协议语义或删除真实介质兼容分支。
+- 架构门禁锁定模块存在和规模；检查源码契约与平台边界测试覆盖新子模块，防止迁移后检查范围缩窄。`inspect.rs` 为 **75 行**，字段模型 **706 行**，LBA 适配 **1201 行**，渲染 **270 行**。
+- 检查套件 **55/55**、仓库套件 **34/34** 通过；fast **1.67s / 0 失败**、full **31.89s / 0 失败**，全目标 Clippy、rustfmt 与 diff 检查通过。首次运行被本报告中的英文叙述词触发文档门禁；中文化后正式复跑通过。后续继续细分 LBA 适配与元数据职责，并约束协议与应用层依赖方向。
+
 ---
 
 # 第八部分：完成标准

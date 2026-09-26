@@ -81,6 +81,9 @@ fn large_modules_are_split_by_domain_boundary() {
         "src/tui/backups/state.rs",
         "src/tui/backups/render.rs",
         "src/tui/devices/render.rs",
+        "src/inspect/model.rs",
+        "src/inspect/lba_adapter.rs",
+        "src/inspect/render.rs",
     ] {
         exists(path);
     }
@@ -90,6 +93,10 @@ fn large_modules_are_split_by_domain_boundary() {
     assert!(lines("src/tui/state.rs") < 3_500);
     assert!(lines("src/tui/render.rs") < 1_500);
     assert!(lines("src/tui/task.rs") < 1_000);
+    assert!(lines("src/inspect.rs") < 150);
+    assert!(lines("src/inspect/model.rs") < 800);
+    assert!(lines("src/inspect/lba_adapter.rs") < 1_300);
+    assert!(lines("src/inspect/render.rs") < 400);
     assert!(
         lines("src/tui/provision/state.rs") < 520,
         "Provision orchestration state must not absorb form/capacity/plain model again"
