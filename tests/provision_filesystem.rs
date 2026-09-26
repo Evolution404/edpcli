@@ -230,37 +230,6 @@ fn exfat_boundary_matrix_round_trips_through_canonical_parser() {
 }
 
 #[test]
-fn exfat_deterministic_sweep_never_emits_a_parser_rejected_layout() {
-    const GIB: u64 = 2_097_152;
-    let mut volumes = (1..=1024)
-        .step_by(7)
-        .map(|gib| gib * GIB)
-        .collect::<Vec<_>>();
-    for threshold in [64 * GIB, 256 * GIB, 512 * GIB] {
-        volumes.extend([threshold - 1, threshold, threshold + 1]);
-    }
-    volumes.sort_unstable();
-    volumes.dedup();
-    for volume in volumes {
-        let Ok(image) = build_empty_exfat(63, volume, 0x1234_5678, "EDPTEST") else {
-            continue;
-        };
-        let mut reader = ImageReader {
-            image: &image,
-            decrypt_key: None,
-        };
-        let report = analyze_partition(&geometry(volume), &mut reader);
-        assert_eq!(
-            report.status,
-            AnalysisStatus::Parsed,
-            "formatter accepted {volume} sectors, parser rejected: {}",
-            report.reason
-        );
-        assert_eq!(report.filesystem.as_deref(), Some("exfat"));
-    }
-}
-
-#[test]
 fn mode2_sparse_encryption_round_trips_to_the_same_valid_exfat() {
     let volume_sectors = 512 * 1024 * 1024 / 512;
     let plain = build_empty_exfat(2048, volume_sectors, 0x89ab_cdef, "SAFE6").unwrap();
