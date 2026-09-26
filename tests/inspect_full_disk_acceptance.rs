@@ -180,7 +180,7 @@ fn huge_sparse_disk_jump_and_unknown_decode_remain_bounded_and_fail_closed() {
         &InspectMeta::default(),
         target,
         &[0x5a; SECTOR],
-        None
+        None,
     )
     .unwrap_err();
     assert_eq!(decode_error.kind(), InspectErrorKind::Decode);
