@@ -1158,6 +1158,15 @@ application 返回结构化 `ProvisionReport/BackupReport/InspectReport`，CLI/T
 - `state.rs` 为 **1490 行**、`fields.rs` 为 **662 行**。架构门禁要求字段模块存在、保留关键方法且不回迁到编排文件，并收紧 `state.rs < 1500`、`fields.rs < 900`。
 - TUI suite **161/161** 与架构测试通过；fast 暖缓存 **4.50s / 0 失败**、full **32.40s / 0 失败**，全目标 Clippy、rustfmt 与 diff 检查通过。首次冷缓存 fast 功能测试全过，但 **47.38s** 超过 45s 性能预算；暖缓存正式复跑通过。字段移动没有修改业务验证、协议解析或写盘服务。后续继续拆出表单请求转换与布局展示。
 
+## Phase D7-B2.3：预填解析、容量边界与请求适配拆分
+
+**COMPLETE；D7-B 继续。**
+
+- 新增 `src/tui/provision/validation.rs`，集中承载目标模式适配、现有配置预填解析、容量边界计算以及 Official 表单到 `OfficialProvisionRequest` 的转换。Plain 表单计划转换保留在独立的 `plain_editor.rs`。
+- LCE 几何、预填、分区几何与容量上界继续调用 `crate::protocol` 和 `crate::provision` 规范实现；TUI 只保留目标盘与表单适配，不新增协议解析器或写盘验证真相源。
+- `state.rs` 为 **1105 行**，`validation.rs` 为 **394 行**。架构门禁要求适配模块存在、保持小规模，并收紧 `state.rs < 1200`。
+- TUI suite **161/161**、Provision suite **178/178** 与架构测试通过；fast 暖缓存 **4.53s / 0 失败**、full **33.06s / 0 失败**，全目标 Clippy、rustfmt 与 diff 检查通过。首次冷缓存 fast 功能测试全过，但 **46.89s** 超过 45s 性能预算；暖缓存正式复跑通过。后续拆分布局展示。
+
 ---
 
 # 第八部分：完成标准
