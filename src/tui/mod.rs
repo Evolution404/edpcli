@@ -702,6 +702,9 @@ fn run_loop(resume: Option<state::WriteIntent>) -> io::Result<LoopExit> {
                     state.set_backup_scan_pending(true);
                 }
             }
+            if let Some(result) = updates.provision_key_probe {
+                state.provision_finish_key_probe(result);
+            }
             if let Some(result) = updates.provision_plan {
                 state.provision_finish_plan(result);
             }
@@ -1251,7 +1254,18 @@ fn run_loop(resume: Option<state::WriteIntent>) -> io::Result<LoopExit> {
                                             "物理制盘需要先在制盘页明确选择 USB 目标。",
                                         );
                                     } else {
-                                        state.provision_begin_selected();
+                                        let kind = state.provision_begin_selected();
+                                        if kind != state::ProvisionKind::Plain {
+                                            if let Some(disk) = state.selected_device_disk() {
+                                                if let Err(message) =
+                                                    tasks.request_provision_key_probe(disk)
+                                                {
+                                                    state.provision_finish_key_probe(Err(
+                                                        message.to_string(),
+                                                    ));
+                                                }
+                                            }
+                                        }
                                     }
                                 }
                                 TuiAction::Back => {
