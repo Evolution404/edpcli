@@ -996,6 +996,8 @@ pub struct TargetPartitionPlan {
     pub geometry: TargetPartitionGeometry,
     pub action: PartitionAction,
     pub disposition: RegionDisposition,
+    pub source_password_knowledge: Option<super::SourcePasswordKnowledge>,
+    pub target_password_policy: Option<super::TargetPasswordPolicy>,
     pub reason: String,
     /// Only present when a verified source key record belongs to this exact
     /// target geometry. The writer re-encodes it for the target slot.
@@ -1029,6 +1031,10 @@ impl TargetProvisionPlan {
                 ));
             }
             let mut disposition = RegionDisposition::Rebuild;
+            let mut source_password_knowledge = None;
+            let mut target_password_policy =
+                super::KeyDomainRole::from_partition_role(target.role)
+                    .map(|_| super::TargetPasswordPolicy::InitializeNew);
             let mut reason = "无全兼容来源分区；目标区域必须重建".to_string();
             let mut preserved_record = None;
             if let Some(source) = source {
@@ -1049,23 +1055,36 @@ impl TargetProvisionPlan {
                             super::KeyDomainRole::from_partition_role(target.role)
                         {
                             let user_password = key_domains.source_password(target.role);
-                            match source.source_password_knowledge(domain, user_password) {
+                            let knowledge =
+                                source.source_password_knowledge(domain, user_password);
+                            source_password_knowledge = Some(knowledge);
+                            match knowledge {
                                 super::SourcePasswordKnowledge::Unknown => {
+                                    target_password_policy =
+                                        Some(super::TargetPasswordPolicy::PreserveOpaque);
                                     RegionDisposition::PreserveOpaque
                                 }
                                 super::SourcePasswordKnowledge::DefaultVerified => {
                                     if key_domains.target_password(target.role)
                                         == Some(super::DEFAULT_KEY_DOMAIN_PASSWORD)
                                     {
+                                        target_password_policy =
+                                            Some(super::TargetPasswordPolicy::ReuseVerified);
                                         RegionDisposition::PreserveVerified
                                     } else {
+                                        target_password_policy =
+                                            Some(super::TargetPasswordPolicy::ReplaceVerified);
                                         RegionDisposition::RewrapVerified
                                     }
                                 }
                                 super::SourcePasswordKnowledge::UserVerified => {
                                     if key_domains.target_password(target.role) == user_password {
+                                        target_password_policy =
+                                            Some(super::TargetPasswordPolicy::ReuseVerified);
                                         RegionDisposition::PreserveVerified
                                     } else {
+                                        target_password_policy =
+                                            Some(super::TargetPasswordPolicy::ReplaceVerified);
                                         RegionDisposition::RewrapVerified
                                     }
                                 }
@@ -1101,6 +1120,8 @@ impl TargetProvisionPlan {
                 geometry: *target,
                 action,
                 disposition,
+                source_password_knowledge,
+                target_password_policy,
                 reason,
                 preserved_record,
             });
