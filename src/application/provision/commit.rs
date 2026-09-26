@@ -117,6 +117,7 @@ pub fn commit_new_provision(
         &prepared.write_image.patch,
         &prepared.format_targets,
     )?;
+    validate_key_disposition_plan(target_plan, &prepared.plan, &prepared.format_targets)?;
     validate_preserve_source_snapshot(
         target_plan.has_preserved_partitions(),
         prepared.source_metadata.as_deref(),
@@ -218,6 +219,223 @@ pub(super) fn validate_preserve_source_snapshot(
             EXIT_TARGET,
             "错误: PreserveExact 计划的来源元数据快照长度异常，拒绝写盘",
         ));
+    }
+    Ok(())
+}
+
+pub(super) fn validate_key_disposition_plan(
+    target_plan: &TargetProvisionPlan,
+    plan: &OfficialProvisionPlan,
+    formats: &[PlannedPartitionFormat],
+) -> EdpCliResult<()> {
+    if target_plan.partitions.len() != plan.mode.partition_types().len() {
+        return Err(err(
+            EXIT_TARGET,
+            "错误: disposition 计划与目标协议分区数量不一致",
+        ));
+    }
+    for (index, part) in target_plan.partitions.iter().enumerate() {
+        let selected_format = formats
+            .iter()
+            .find(|choice| choice.target.role == part.geometry.role)
+            .is_some_and(|choice| choice.selected && choice.prepared_image.is_some());
+        match part.disposition {
+            RegionDisposition::PreserveOpaque => {
+                if part.source_password_knowledge != Some(SourcePasswordKnowledge::Unknown)
+                    || part.target_password_policy != Some(TargetPasswordPolicy::PreserveOpaque)
+                {
+                    return Err(err(
+                        EXIT_TARGET,
+                        format!(
+                            "错误: {} PreserveOpaque 的密码状态/目标策略不一致",
+                            part.geometry.role.label()
+                        ),
+                    ));
+                }
+                let record = part.preserved_record.ok_or_else(|| {
+                    err(
+                        EXIT_TARGET,
+                        format!(
+                            "错误: {} PreserveOpaque 缺少来源 key material",
+                            part.geometry.role.label()
+                        ),
+                    )
+                })?;
+                if record.lba12.need_encrypt == 0 {
+                    return Err(err(
+                        EXIT_TARGET,
+                        format!(
+                            "错误: {} 非加密记录不能标记 PreserveOpaque",
+                            part.geometry.role.label()
+                        ),
+                    ));
+                }
+                let expected_lba12 = record
+                    .lba12_key_material()
+                    .map_err(|message| err(EXIT_TARGET, message))?;
+                if plan.partition_lba7_material[index] != Some(record.lba7_key_material())
+                    || plan.partition_lba12_material[index] != Some(expected_lba12)
+                {
+                    return Err(err(
+                        EXIT_TARGET,
+                        format!(
+                            "错误: {} PreserveOpaque 未逐字段复用来源 key material",
+                            part.geometry.role.label()
+                        ),
+                    ));
+                }
+                if selected_format {
+                    return Err(err(
+                        EXIT_TARGET,
+                        format!(
+                            "错误: {} PreserveOpaque 禁止格式化/data extent 写入",
+                            part.geometry.role.label()
+                        ),
+                    ));
+                }
+            }
+            RegionDisposition::PreserveVerified => {
+                let record = part.preserved_record.ok_or_else(|| {
+                    err(
+                        EXIT_TARGET,
+                        format!(
+                            "错误: {} PreserveVerified 缺少来源记录",
+                            part.geometry.role.label()
+                        ),
+                    )
+                })?;
+                if record.lba12.need_encrypt != 0 {
+                    let expected_lba12 = record
+                        .lba12_key_material()
+                        .map_err(|message| err(EXIT_TARGET, message))?;
+                    if plan.partition_lba7_material[index] != Some(record.lba7_key_material())
+                        || plan.partition_lba12_material[index] != Some(expected_lba12)
+                    {
+                        return Err(err(
+                            EXIT_TARGET,
+                            format!(
+                                "错误: {} PreserveVerified 改变了来源 key material",
+                                part.geometry.role.label()
+                            ),
+                        ));
+                    }
+                }
+                if selected_format {
+                    return Err(err(
+                        EXIT_TARGET,
+                        format!(
+                            "错误: {} PreserveVerified 禁止格式化/data extent 写入",
+                            part.geometry.role.label()
+                        ),
+                    ));
+                }
+            }
+            RegionDisposition::RewrapVerified => {
+                if matches!(
+                    part.source_password_knowledge,
+                    None | Some(SourcePasswordKnowledge::Unknown)
+                ) || part.target_password_policy != Some(TargetPasswordPolicy::ReplaceVerified)
+                {
+                    return Err(err(
+                        EXIT_TARGET,
+                        format!(
+                            "错误: {} RewrapVerified 缺少已验证来源密码状态",
+                            part.geometry.role.label()
+                        ),
+                    ));
+                }
+                let record = part.preserved_record.ok_or_else(|| {
+                    err(
+                        EXIT_TARGET,
+                        format!(
+                            "错误: {} RewrapVerified 缺少来源 key record",
+                            part.geometry.role.label()
+                        ),
+                    )
+                })?;
+                let source_lba12 = record
+                    .lba12_key_material()
+                    .map_err(|message| err(EXIT_TARGET, message))?;
+                let target_lba12 = plan.partition_lba12_material[index].ok_or_else(|| {
+                    err(
+                        EXIT_TARGET,
+                        format!(
+                            "错误: {} RewrapVerified 缺少目标 LBA12 key material",
+                            part.geometry.role.label()
+                        ),
+                    )
+                })?;
+                let target_lba7 = plan.partition_lba7_material[index].ok_or_else(|| {
+                    err(
+                        EXIT_TARGET,
+                        format!(
+                            "错误: {} RewrapVerified 缺少目标 LBA7 key material",
+                            part.geometry.role.label()
+                        ),
+                    )
+                })?;
+                if source_lba12.file_key_crc != target_lba12.file_key_crc
+                    || record.lba7.file_key_crc != target_lba7.file_key_crc
+                {
+                    return Err(err(
+                        EXIT_TARGET,
+                        format!(
+                            "错误: {} RewrapVerified 改变了 raw FileKey",
+                            part.geometry.role.label()
+                        ),
+                    ));
+                }
+                if selected_format {
+                    return Err(err(
+                        EXIT_TARGET,
+                        format!(
+                            "错误: {} RewrapVerified 禁止格式化/data extent 写入",
+                            part.geometry.role.label()
+                        ),
+                    ));
+                }
+            }
+            RegionDisposition::Rebuild => {
+                if part.geometry.role != PartitionRole::CompatibilityReserve && !selected_format {
+                    return Err(err(
+                        EXIT_TARGET,
+                        format!(
+                            "错误: {} Rebuild 缺少完整 filesystem initialization image",
+                            part.geometry.role.label()
+                        ),
+                    ));
+                }
+                if part.geometry.physically_encrypted
+                    && plan.partition_lba12_material[index].is_none()
+                {
+                    return Err(err(
+                        EXIT_TARGET,
+                        format!(
+                            "错误: {} Rebuild 缺少新 FileKey material",
+                            part.geometry.role.label()
+                        ),
+                    ));
+                }
+            }
+            RegionDisposition::Migrate => {
+                return Err(err(
+                    EXIT_TARGET,
+                    format!(
+                        "错误: {} Migrate 当前 unsupported，拒绝 commit",
+                        part.geometry.role.label()
+                    ),
+                ));
+            }
+            RegionDisposition::Drop => {
+                return Err(err(
+                    EXIT_TARGET,
+                    format!(
+                        "错误: 目标分区 {}不能使用 Drop disposition",
+                        part.geometry.role.label()
+                    ),
+                ));
+            }
+        }
     }
     Ok(())
 }
