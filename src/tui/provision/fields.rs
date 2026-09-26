@@ -133,13 +133,12 @@ impl AppState {
             Some(value) => value,
             None => return out,
         };
-        let knowledge_suffix = |knowledge: crate::provision::SourcePasswordKnowledge| {
-            match knowledge {
+        let knowledge_suffix =
+            |knowledge: crate::provision::SourcePasswordKnowledge| match knowledge {
                 crate::provision::SourcePasswordKnowledge::DefaultVerified => "✓ 默认已验证",
                 crate::provision::SourcePasswordKnowledge::UserVerified => "✓ 用户已验证",
                 crate::provision::SourcePasswordKnowledge::Unknown => "⚠ Unknown",
-            }
-        };
+            };
         out.extend([
             (
                 "标签标识".into(),
