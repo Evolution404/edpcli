@@ -405,7 +405,7 @@ pub(super) fn validate_key_disposition_plan(
                         ),
                     ));
                 }
-                if part.geometry.physically_encrypted
+                if KeyDomainRole::from_partition_role(part.geometry.role).is_some()
                     && plan.partition_lba12_material[index].is_none()
                 {
                     return Err(err(
