@@ -1138,6 +1138,58 @@ fn target_plan_preserves_only_verified_matching_data() {
 }
 
 #[test]
+fn unknown_password_can_opaque_preserve_without_decrypting_filesystem() {
+    let (_, source_image, did) = generated_source(OfficialPartitionMode::DefaultThreePartition);
+    let source = parse_existing_provision(&source_image, &did, 16_777_216)
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        source
+            .profile
+            .partition(PartitionRole::Encrypt)
+            .unwrap()
+            .filesystem,
+        None
+    );
+
+    let prefill = prefill_for_target_mode(
+        Some(&source.profile),
+        OfficialPartitionMode::BootShareCombined,
+        16_000_000,
+        512,
+    )
+    .unwrap();
+    let targets = prefill.target_partitions(512).unwrap();
+    let plan = TargetProvisionPlan::build(
+        Some(&source),
+        OfficialPartitionMode::BootShareCombined,
+        &targets,
+        16_000_000,
+        &KeyDomainSecrets::default_targets(),
+    )
+    .unwrap();
+    let encrypt = plan
+        .partitions
+        .iter()
+        .find(|part| part.geometry.role == PartitionRole::Encrypt)
+        .unwrap();
+
+    assert_eq!(encrypt.disposition, RegionDisposition::PreserveOpaque);
+    assert_eq!(
+        encrypt.source_password_knowledge,
+        Some(SourcePasswordKnowledge::Unknown)
+    );
+    assert_eq!(
+        encrypt.target_password_policy,
+        Some(edpcli::provision::TargetPasswordPolicy::PreserveOpaque)
+    );
+    assert_eq!(
+        encrypt.preserved_record,
+        source.record(PartitionRole::Encrypt).copied()
+    );
+}
+
+#[test]
 fn exact_encrypted_extent_with_unknown_password_stays_a_preserve_candidate() {
     let (_, source_image, did) = generated_source(OfficialPartitionMode::DefaultThreePartition);
     let mut source = parse_existing_provision(&source_image, &did, 16_777_216)
