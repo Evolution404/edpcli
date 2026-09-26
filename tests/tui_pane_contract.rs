@@ -255,7 +255,6 @@ fn plain_provision_disk_layout_covers_mbr_free_and_partitions_to_last_sector() {
         .any(|segment| segment.kind == DiskRegionKind::Plain));
 }
 
-
 fn render_text(state: &AppState, width: u16, height: u16) -> String {
     let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
     terminal.draw(|frame| render::draw(frame, state)).unwrap();
