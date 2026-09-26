@@ -282,3 +282,30 @@ fn chapter_12_tui_must_model_share_and_encrypt_passwords_independently() {
         );
     }
 }
+
+#[test]
+fn chapter_12_review_must_expose_domain_disposition_and_password_state() {
+    let review = include_str!("../src/tui/provision/review.rs");
+    for token in [
+        "PreserveOpaque",
+        "PreserveVerified",
+        "RewrapVerified",
+        "Rebuild",
+        "默认密码已验证",
+        "用户旧密码已验证",
+        "来源密码 Unknown",
+        "目标密码禁用（Opaque）",
+    ] {
+        assert!(review.contains(token), "missing Chapter 12 review token: {token}");
+    }
+}
+
+#[test]
+fn chapter_12_cli_must_not_restore_global_password_fallback() {
+    let cli = include_str!("../src/cli_args.rs");
+    assert!(!cli.contains("\"--password\" =>"));
+    assert!(cli.contains("--share-source-password"));
+    assert!(cli.contains("--share-target-password"));
+    assert!(cli.contains("--encrypt-source-password"));
+    assert!(cli.contains("--encrypt-target-password"));
+}
