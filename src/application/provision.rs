@@ -23,6 +23,7 @@ use crate::provision::{
     OfficialFilesystemFormat, OfficialPartitionFilesystems, OfficialPartitionMode,
     OfficialPartitionSizes, OfficialProvisionPlan, OfficialProvisionWriteImage, OnlyId,
     KeyDomainRole, KeyDomainSecrets, ParsedExistingProvision, PartitionAction,
+    SourcePasswordKnowledge,
     PartitionFilesystemImage,
     PartitionFormatTarget,
     PartitionRole, PassInfoPolicy, PlainCleanupExtent, PlainPartitionSpec, PlainProvisionPlan,
