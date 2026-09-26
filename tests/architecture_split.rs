@@ -323,6 +323,44 @@ fn provision_write_frontends_cannot_bypass_mandatory_application_backup() {
 }
 
 #[test]
+fn real_usb_password_hil_keeps_secrets_off_argv_and_is_default_off() {
+    let source = fs::read_to_string(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/real_usb_password_hil.rs"),
+    )
+    .expect("real USB password HIL must exist");
+
+    for required in [
+        "EDPCLI_REAL_USB_PASSWORD_HIL",
+        "guard_usb_disk",
+        "commit_provision_with_backup_on_disk",
+        "--stdin-secrets",
+        "/dev/tty",
+        "stty",
+        "impl Drop for SecretBundle",
+    ] {
+        assert!(
+            source.contains(required),
+            "missing HIL safety token: {required}"
+        );
+    }
+    for forbidden in [
+        "SharePass1!",
+        "EncryptPass1!",
+        "EncryptPass2!",
+        "0000aaaa",
+        "--share-source-password",
+        "--share-target-password",
+        "--encrypt-source-password",
+        "--encrypt-target-password",
+    ] {
+        assert!(
+            !source.contains(forbidden),
+            "HIL source must not contain plaintext password/CLI secret token: {forbidden}"
+        );
+    }
+}
+
+#[test]
 fn inspect_cli_uses_typed_application_error_kinds() {
     let source =
         fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("src/inspect_cli.rs"))
