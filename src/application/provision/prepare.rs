@@ -80,8 +80,7 @@ fn inspect_source_profile(
                 continue;
             }
             let plaintext = if part.physically_encrypted {
-                let (_, Some(password)) =
-                    resolved_source_password(source, key_domains, part.role)
+                let (_, Some(password)) = resolved_source_password(source, key_domains, part.role)
                 else {
                     continue;
                 };
@@ -365,10 +364,7 @@ pub fn prepare_target_provision(
         selected_mode,
         sizes(request, selected_mode)?,
         compatibility,
-        wrap_legacy_lba7_file_key(
-            DEFAULT_KEY_DOMAIN_PASSWORD,
-            random_array::<8>()?,
-        ),
+        wrap_legacy_lba7_file_key(DEFAULT_KEY_DOMAIN_PASSWORD, random_array::<8>()?),
         wrap_file_key(
             DEFAULT_KEY_DOMAIN_PASSWORD,
             random_array::<16>()?,
@@ -383,15 +379,13 @@ pub fn prepare_target_provision(
     for (index, part) in target_plan.partitions.iter().enumerate() {
         if let Some(record) = part.preserved_record {
             let key = if record.lba12.need_encrypt != 0 {
-                let (_, Some(password)) =
-                    resolved_source_password(
-                        source.as_ref().ok_or_else(|| {
-                            err(EXIT_TARGET, "错误: 保留计划缺少来源注册信息")
-                        })?,
-                        &request.key_domains,
-                        part.geometry.role,
-                    )
-                else {
+                let (_, Some(password)) = resolved_source_password(
+                    source
+                        .as_ref()
+                        .ok_or_else(|| err(EXIT_TARGET, "错误: 保留计划缺少来源注册信息"))?,
+                    &request.key_domains,
+                    part.geometry.role,
+                ) else {
                     return Err(err(
                         EXIT_TARGET,
                         format!(
