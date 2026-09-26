@@ -4294,7 +4294,21 @@ python3 scripts/test-full.py --profile full
 
 ## 14. 后续计划：TUI 信息架构、磁盘布局与制盘可观测性收口（2026-09-26）
 
-> 状态：**PLAN ONLY / 持续收集**。本章用于当前计划分支继续收集 Inspect 细节问题；本章提交只允许补充调查结论、实现方案与回归门禁，不修改生产代码。后续用户提出的同类问题继续追加到本章，待问题清单确认后再单独进入实现分支。
+> 状态：**IMPLEMENTING**。PR #25 已合并为 `9206d8a`；实施分支从该最新 main 建立。以下 Q0～Q8 状态仅记录实施进度，唯一实施顺序仍以 14.11.12、14.12.13、14.13.11、14.14.6 为准。
+
+| 阶段 | 实施状态 | 验证记录 |
+| --- | --- | --- |
+| Q0 基线与失败测试 | COMPLETE | 基线 `9206d8a`；exFAT 998107136-sector round-trip、cluster limit/limit+1 与 Inspect/TUI 契约均已写成 ignored red tests，显式执行确认失败；Chapter 12 现有 key-domain 测试继续作为保护门禁。 |
+| Q1 Inspect 数据契约 | PENDING | — |
+| Q2 Inspect topology + presentation | PENDING | — |
+| Q3 Device / Backup identity contract | PENDING | — |
+| Q4 DiskLayout / Provision presentation | PENDING | — |
+| Q5 Progress application core | PENDING | — |
+| Q6 Progress transport + TUI | PENDING | — |
+| Q7 Outcome + CLI | PENDING | — |
+| Q8 清理与最终门禁 | PENDING | — |
+
+Q0 的 `#[ignore]` 只标记预期失败的未来契约；对应功能落地的阶段必须移除 ignore 并令测试通过。Chapter 12 K6 Migrate 仍 DEFERRED/fail-closed，K8 真实 USB 仍 PENDING。
 
 ### 14.1 结构树单扇区节点去掉冗余 `[n..n]`
 
@@ -7458,4 +7472,3 @@ current main
 不要把旧 `plan/inspect-tree-decode-consistency-20260926` 当作实现基线，也不要在实现分支 cherry-pick 旧生产代码；旧分支只作为计划历史来源。
 
 第三轮审计结论：**计划需要更新，但主体 Q0～Q8 不需要推翻。真正变化的是：Chapter 12 已从“未来设计”变成“现有事实”，第 14 章必须直接复用并保护其 typed business model；同时 exFAT、progress transport、magic slot、DiskLayout 字符串语义等问题在当前 main 仍然存在，继续作为本次治理任务。**
-

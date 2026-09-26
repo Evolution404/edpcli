@@ -702,3 +702,34 @@ pub fn build_official_exfat_partitions(
     }
     Ok(out)
 }
+
+#[cfg(test)]
+mod ch14_q0_geometry_contracts {
+    use super::{choose_cluster_shift, exfat_geometry};
+
+    fn first_volume_with_cluster_count(target: u32, shift: u8) -> u64 {
+        let mut low = target as u64 * (1u64 << shift);
+        let mut high = (target as u64 + 100_000) * (1u64 << shift);
+        while low < high {
+            let mid = low + (high - low) / 2;
+            if exfat_geometry(mid, shift).unwrap().2 < target {
+                low = mid + 1;
+            } else {
+                high = mid;
+            }
+        }
+        low
+    }
+
+    #[test]
+    #[ignore = "Q0 red contract: enable with geometry-driven exFAT selection before Q8"]
+    fn validated_cluster_budget_accepts_limit_and_upgrades_limit_plus_one() {
+        const LIMIT: u32 = 4_194_304;
+        let at_limit = first_volume_with_cluster_count(LIMIT, 7);
+        let over_limit = first_volume_with_cluster_count(LIMIT + 1, 7);
+        assert_eq!(exfat_geometry(at_limit, 7).unwrap().2, LIMIT);
+        assert_eq!(exfat_geometry(over_limit, 7).unwrap().2, LIMIT + 1);
+        assert_eq!(choose_cluster_shift(at_limit), 7);
+        assert_eq!(choose_cluster_shift(over_limit), 8);
+    }
+}
