@@ -719,8 +719,10 @@ Real USB acceptance
 ### 8.5 下一步执行顺序
 
 - Phase 8 已部分完成（2026-09-25）：真实 `/dev/disk4` 上 **mode0 → Plain** 已通过完整写盘验收。写前自动创建 EDPB 备份，随后走正式 `prepare_plain_provision()/commit_plain_provision()` application 安全链，结果为 `commit=PASS`；写后 LBA3 byte-for-byte preserve 通过，目标重新识别为 Plain。证据目录：`~/edpcli-phase8-hil/20260925_124458_disk4_plain`。
-- 尚未完成的真实写盘场景：**Plain → mode0、mode0 → mode1、mode1 → Plain、Plain 多分区**。当前 ChatGPT Mac 执行环境在第一项完成后开始统一拦截后续制盘链命令，因此这些场景不得写成已通过；需要在允许真实写盘的终端/执行环境继续。
-- Inspect 全盘结构化浏览器 I1～I9 的实现与真实只读数据链已完成；CLI 自身 raw-device sudo re-exec HIL 仍与执行环境权限限制分开记录。
+- 2026-09-26 实盘补测：同一 `/dev/disk4` 上 **mode0 → mode1** 已通过正式 transaction、协议/几何 readback、LBA3 preserve；原 type4 首扇区 SHA-256 写前写后一致，证明 `PreserveOpaque` data extent 0 写入；mode1 明文交换区被 macOS 识别为 exFAT，mount→文件写入/readback→unmount 通过。随后 **mode1 → Plain** 通过 MBR/filesystem readback，LBA3 继续 preserve、原 LCE 清零，Plain exFAT mount→文件写入/readback→unmount 通过。
+- 因此旧 Phase 8 剩余真实写盘场景收敛为：**Plain → mode0、Plain 多分区**。这两项仍不得写成已通过。
+- 2026-09-26 权限/身份链治理：CLI 自身 raw-device `inspect` sudo re-exec 已实盘通过；`provision plan` 已统一加入与 image/write 相同的 USB guard + 自动提权，普通用户进程在真实 Plain `/dev/disk4` 上可自动 sudo 后生成计划。Plain `backup create` 现可用硬件 `device_id` + VID/PID + 容量创建 Core EDPB，并只保存硬件序列号 SHA-256 绑定；真实 Plain 盘已生成 `_plain.edpb` 且容器校验通过。
+- Plain 恢复不降低旧身份门禁：LBA4 非零仍做原始 16B 精确终验；LBA4 为零时仅显式备份可进入，且必须同时通过序列号哈希、VID/PID、容量、硬件 `device_id` 候选，并在 unmount 后再次复核。旧的无硬件绑定 EDPB 在 Plain 状态继续 fail-closed。因此本轮测试开始前创建的旧 mode0 EDPB不能被新逻辑追溯补绑定，当前测试盘不通过绕过身份门禁强行恢复。
 
 1. 完成剩余 Phase 8 真实 USB 场景；
 2. 并行按第 9 节实施 Inspect 全盘结构化浏览器，但不得复制 CLI/TUI 两套解析后端。
@@ -3389,7 +3391,7 @@ K0 基线审计曾确认：
 
 #### Phase K8：真实 USB 验收
 
-**实施状态（2026-09-26）：PENDING。** 尚未执行代表性真实盘转换与逐域实际解锁验收；在取得自动备份、写盘、readback、rollback 与制盘后密码域可用性证据前，本章不得标 COMPLETE。
+**实施状态（2026-09-26）：PENDING（已取得部分实盘证据）。** 已完成 mode0→mode1 的真实写盘/readback/`PreserveOpaque` 数据零写入证据，以及 mode1→Plain 的真实写盘/readback；Plain/EDP 备份现具备前向硬件序列号哈希绑定，真实 Plain 盘 Core EDPB 创建与校验已通过。仍缺少代表性双密码域逐域实际解锁、真实介质故障注入 rollback、Plain→mode0 与 Plain 多分区等证据，因此本章不得标 COMPLETE。
 
 按风险由低到高选择代表性转换，不一次性对 25 格全部写盘。每次必须：
 

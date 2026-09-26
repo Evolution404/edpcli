@@ -297,13 +297,19 @@ edpcli backup prune --keep 3 --yes
 `backup create` 是纯只读介质流程。多盘时使用和其他物理盘命令相同的
 `DeviceSelector`；读取裸盘需要权限时由 CLI 自己提权并固定平台原生目标选择器。
 
-它与改造写前自动备份共用唯一 `create_backup` service：
+已注册 EDP 盘继续创建元数据级或深度级 EDPB；当 LBA7/LBA4 已被 Plain 制盘清理时，普通
+`backup create` 改为创建核心级 EDPB，并从 USB/SCSI 硬件信息生成 `device_id`。Plain 盘必须
+能读取稳定的硬件序列号；备份只保存其 SHA-256 绑定，不把明文序列号写进容器。Plain 不具备
+EDP 分区语义，因此 `backup create --deep` 会明确拒绝，而不会伪造深度备份结果。
+
+它与写前备份共用同一套 EDPB 写入和持久化约束：
 
 - 输入固定为 LBA0-12，`13 * 512 = 6656B`；
-- onlyid 从备份自身 LBA4 重新解析；
+- onlyid 从备份自身 LBA4 重新解析；Plain 允许 onlyid 为空；
 - 相同 device_id / VID / PID / 容量元数据；
-- 相同文件名和 `_nopwd` 状态标记；
-- 相同 SHA-256 旁挂文件；
+- EDP 盘在可取得硬件序列号时也写入不可逆的序列号哈希绑定，供后续 EDP→Plain 后恢复终验；
+- 文件名按状态使用 `_nopwd` 或 `_plain` 标记；
+- EDPB 容器内工件与文件级 SHA-256 完整性校验；
 - 相同仅新建方式防覆盖；
 - 相同 `fsync` 与目录持久化。
 
@@ -321,7 +327,7 @@ edpcli backup list
 不会在每个 onlyid 分组里重新从 1 编号。
 
 每项显示时间、原始/免密状态、健康状态和真实文件名，分组同时展示型号、onlyid、Dept、
-User。备份健康检查包含固定大小和 SHA-256 旁挂文件。
+User。备份健康检查包含固定大小和 EDPB 容器完整性校验。
 
 备份目录优先级：
 
@@ -350,7 +356,12 @@ edpcli backup restore --disk 4
 7. 卸载/锁卷、reopen 复核后执行原子恢复。
 
 数字目标先经过统一 `BackupSelector`；若全局编号指向其他物理盘，恢复会拒绝。
-显式文件也不会绕过身份门禁，最终仍以当前盘和备份的 LBA4 16B 身份标签终验。
+当前 LBA4 身份非零时，显式文件也不能绕过原有 16B LBA4 身份终验。
+
+若当前盘已经被转换为 Plain、LBA4 身份为零，则只允许**显式指定备份**进入恢复，并要求该
+EDPB 带有新版本写入的硬件序列号 SHA-256 绑定；程序同时复核序列号哈希、VID/PID、容量和
+当前 USB/SCSI 硬件能够生成的 `device_id` 候选，并在 unmount/lock 后、reopen 写入前再次复核。
+旧 EDPB 若没有这项硬件绑定会继续 fail-closed，绝不会仅凭容量或同型号 VID/PID 放行。
 
 免密状态快照会明确提示，并保持既有防误恢复语义。
 
