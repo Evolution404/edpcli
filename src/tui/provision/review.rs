@@ -46,7 +46,11 @@ impl AppState {
                     "LBA3 已从目标盘捕获并绑定；写入前将再次复核。".into(),
                     format!(
                         "初始化密码强制修改: {}",
-                        if prepared.force_change_password { "是" } else { "否" }
+                        if prepared.force_change_password {
+                            "是"
+                        } else {
+                            "否"
+                        }
                     ),
                     format!(
                         "取消密码复杂性验证: {}",
