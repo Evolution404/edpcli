@@ -73,6 +73,7 @@ fn large_modules_are_split_by_domain_boundary() {
         "src/tui/provision/fields.rs",
         "src/tui/provision/validation.rs",
         "src/tui/provision/layout.rs",
+        "src/tui/provision/editor.rs",
         "src/tui/provision/render.rs",
         "src/tui/provision/task.rs",
         "src/tui/inspect/state.rs",
@@ -90,9 +91,26 @@ fn large_modules_are_split_by_domain_boundary() {
     assert!(lines("src/tui/render.rs") < 1_500);
     assert!(lines("src/tui/task.rs") < 1_000);
     assert!(
-        lines("src/tui/provision/state.rs") < 800,
+        lines("src/tui/provision/state.rs") < 520,
         "Provision orchestration state must not absorb form/capacity/plain model again"
     );
+    assert!(
+        lines("src/tui/provision/editor.rs") < 300,
+        "Provision edit actions must stay bounded"
+    );
+    let editor_source = fs::read_to_string(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("src/tui/provision/editor.rs"),
+    )
+    .expect("read provision editor");
+    for name in [
+        "provision_fill_selected_capacity",
+        "provision_plain_add_partition",
+    ] {
+        assert!(
+            editor_source.contains(name),
+            "editor module is missing {name}"
+        );
+    }
     assert!(
         lines("src/tui/provision/layout.rs") < 500,
         "Provision layout presentation must stay responsibility-bounded"

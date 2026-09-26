@@ -1175,6 +1175,14 @@ application 返回结构化 `ProvisionReport/BackupReport/InspectReport`，CLI/T
 - `state.rs` 为 **739 行**、`layout.rs` 为 **371 行**；架构门禁要求布局模块存在、保持小规模，并收紧 `state.rs < 800`。
 - TUI suite **161/161** 与架构测试通过；fast 暖缓存 **4.56s / 0 失败**、full **34.45s / 0 失败**，全目标 Clippy、rustfmt 与 diff 检查通过。首次冷缓存 fast 功能测试全过，但 **48.05s** 超过 45s 性能预算；暖缓存正式复跑通过。后续收口表单编辑动作，使 `state.rs` 只保留工作区阶段与任务协调。
 
+## Phase D7-B2.5：表单编辑动作收口
+
+**COMPLETE；D7-B 完成。**
+
+- 新增 `src/tui/provision/editor.rs`，集中承载容量填满、选项切换、Plain 计划与分区增删、密码选项切换等表单交互动作。纯 Plain 编辑规则仍由 `plain_editor.rs` 执行；`editor.rs` 负责消息、选中字段和光标同步。
+- `state.rs` 降至 **501 行**，保留 Provision 工作区初始化、备份提示、阶段转换、导出确认与写盘任务协调；`editor.rs` 为 **243 行**。架构门禁收紧为 `state.rs < 520`、`editor.rs < 300`，并锁定编辑入口不回迁。
+- TUI suite **161/161** 与架构测试通过；fast **4.60s / 0 失败**、full **32.70s / 0 失败**，全目标 Clippy、rustfmt 与 diff 检查通过。首次冷缓存运行发现本报告中一处英文叙述词，被文档门禁拒绝；修正后正式复跑通过。D7-B 的表单、Plain 编辑、字段输入、校验适配、布局展示与编辑动作均已按职责分离；后续进入 D7-C `inspect.rs` 拆分。
+
 ---
 
 # 第八部分：完成标准
