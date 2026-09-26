@@ -49,6 +49,32 @@ impl TaskHub {
         Ok(operation_id)
     }
 
+    pub fn request_provision_key_probe(
+        &mut self,
+        disk: u32,
+    ) -> Result<u64, &'static str> {
+        let generation = self
+            .provision_key_probe_slot
+            .try_begin()
+            .ok_or("已有来源密码域探测正在执行")?;
+        let tx = self.tx.clone();
+        std::thread::spawn(move || {
+            let result = catch_unwind(AssertUnwindSafe(|| {
+                let runner = SysRunner;
+                crate::application::provision::probe_provision_key_domains_on_disk(&runner, disk)
+                    .map_err(|error| error.msg)
+            }))
+            .unwrap_or_else(|payload| {
+                Err(format!(
+                    "来源密码域探测 worker 异常终止: {}",
+                    panic_message(payload)
+                ))
+            });
+            let _ = tx.send(WorkerResult::ProvisionKeyProbe { generation, result });
+        });
+        Ok(generation)
+    }
+
     pub fn request_provision_plan(
         &mut self,
         disk: u32,
