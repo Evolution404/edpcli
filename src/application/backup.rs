@@ -43,6 +43,14 @@ pub enum DeletePlanError {
     RetentionFloor,
 }
 
+impl std::fmt::Display for DeletePlanError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(&self.message())
+    }
+}
+
+impl std::error::Error for DeletePlanError {}
+
 impl DeletePlanError {
     pub fn message(&self) -> String {
         match self {
@@ -59,6 +67,40 @@ impl DeletePlanError {
         }
     }
 }
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DeleteExecuteError {
+    Verification(String),
+}
+
+impl std::fmt::Display for DeleteExecuteError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Verification(message) => formatter.write_str(message),
+        }
+    }
+}
+
+impl std::error::Error for DeleteExecuteError {}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BackupDeleteError {
+    Plan(DeletePlanError),
+    Execute(DeleteExecuteError),
+    EmptyPlan,
+}
+
+impl std::fmt::Display for BackupDeleteError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Plan(error) => error.fmt(formatter),
+            Self::Execute(error) => error.fmt(formatter),
+            Self::EmptyPlan => formatter.write_str("删除计划为空"),
+        }
+    }
+}
+
+impl std::error::Error for BackupDeleteError {}
 
 impl DeleteSession {
     pub fn open(root: &Path) -> Self {
@@ -91,7 +133,7 @@ impl DeleteSession {
         path: &Path,
         expected_sha256: &str,
     ) -> Result<DeletePlan, DeletePlanError> {
-        let entry = scanned_backup_by_path(&self.selector, path).map_err(|_| {
+        let entry = scanned_backup_by_path(&self.selector, path).ok_or_else(|| {
             DeletePlanError::Vanished {
                 path: path.to_path_buf(),
             }
@@ -116,7 +158,7 @@ impl DeleteSession {
             if !seen.insert(canonical.clone()) {
                 continue;
             }
-            let entry = scanned_backup_by_path(&self.selector, &canonical).map_err(|_| {
+            let entry = scanned_backup_by_path(&self.selector, &canonical).ok_or_else(|| {
                 DeletePlanError::Vanished {
                     path: path.to_path_buf(),
                 }
@@ -176,12 +218,13 @@ impl DeleteSession {
     }
 
     /// 逐条 delete_entry_verified；单条失败不阻断后续，呈现与退出码由前端决定。
-    pub fn execute(&self, plan: &DeletePlan) -> Vec<(PathBuf, Result<(), String>)> {
+    pub fn execute(&self, plan: &DeletePlan) -> Vec<(PathBuf, Result<(), DeleteExecuteError>)> {
         plan.targets
             .iter()
             .map(|entry| {
                 let path = canonical_entry_path(&entry.path);
-                let result = backup_catalog::delete_entry_verified(entry);
+                let result = backup_catalog::delete_entry_verified(entry)
+                    .map_err(DeleteExecuteError::Verification);
                 (path, result)
             })
             .collect()
@@ -191,14 +234,13 @@ impl DeleteSession {
 fn scanned_backup_by_path<'a>(
     selector: &'a BackupSelector,
     path: &Path,
-) -> Result<&'a BackupEntry, String> {
+) -> Option<&'a BackupEntry> {
     let target = canonical_entry_path(path);
     selector
         .catalog()
         .entries()
         .iter()
         .find(|entry| canonical_entry_path(&entry.path) == target)
-        .ok_or_else(|| format!("备份已不存在或不再属于当前备份目录: {}", path.display()))
 }
 
 /// 单一保留底线：任一同盘组“删除数 ≥ 组内总数且总数 > 0”即拒绝。
@@ -232,15 +274,19 @@ fn enforce_retention_floor(
 }
 
 /// TUI 单删入口的兼容薄封装：一次新鲜扫描 → plan_exact → execute。
-pub fn delete_backup_exact(root: &Path, path: &Path, expected_sha256: &str) -> Result<(), String> {
+pub fn delete_backup_exact(
+    root: &Path,
+    path: &Path,
+    expected_sha256: &str,
+) -> Result<(), BackupDeleteError> {
     let session = DeleteSession::open(root);
     let plan = session
         .plan_exact(path, expected_sha256)
-        .map_err(|error| error.message())?;
+        .map_err(BackupDeleteError::Plan)?;
     match session.execute(&plan).into_iter().next() {
         Some((_, Ok(()))) => Ok(()),
-        Some((_, Err(message))) => Err(message),
-        None => Err("删除计划为空".to_string()),
+        Some((_, Err(error))) => Err(BackupDeleteError::Execute(error)),
+        None => Err(BackupDeleteError::EmptyPlan),
     }
 }
 
