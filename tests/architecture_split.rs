@@ -315,6 +315,42 @@ fn semantic_consumers_do_not_depend_on_inspect_presentation() {
 }
 
 #[test]
+fn inspect_presentation_stays_downstream_of_protocol_and_application_domains() {
+    let mut domain_sources = rust_sources_under("src/protocol");
+    domain_sources.extend(rust_sources_under("src/provision"));
+    domain_sources.extend(
+        rust_sources_under("src/application")
+            .into_iter()
+            .filter(|path| !path.ends_with("inspect.rs") && !path.ends_with("inspect_tree.rs")),
+    );
+    assert_sources_exclude(domain_sources, &["crate::inspect::", "crate::inspect{"]);
+
+    for path in [
+        "src/inspect/model.rs",
+        "src/inspect/metadata.rs",
+        "src/inspect/lba_adapter.rs",
+        "src/inspect/lba_early.rs",
+        "src/inspect/lba_middle.rs",
+        "src/inspect/lba_late.rs",
+    ] {
+        let source = fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join(path))
+            .unwrap_or_else(|error| panic!("read {path}: {error}"));
+        assert!(
+            !source.contains("crate::application"),
+            "{path} imports application"
+        );
+        assert!(
+            !source.contains("render_fields("),
+            "{path} imports display rendering"
+        );
+        assert!(
+            !source.contains("render_hex("),
+            "{path} imports display rendering"
+        );
+    }
+}
+
+#[test]
 fn protocol_semantic_does_not_depend_on_presentation_or_application_layers() {
     let source =
         fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("src/protocol/semantic.rs"))

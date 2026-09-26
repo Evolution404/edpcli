@@ -1209,6 +1209,14 @@ application 返回结构化 `ProvisionReport/BackupReport/InspectReport`，CLI/T
 - `model.rs` 为 **623 行**、`metadata.rs` 为 **72 行**、`catalog.rs` 为 **14 行**；架构门禁限制三个模块的规模，并禁止字段模型重新引用磁盘目录类型。
 - 检查套件 **55/55** 与架构测试通过；fast **42.57s / 0 失败**、full **32.60s / 0 失败**、全目标 Clippy、rustfmt 与 diff 检查通过。后续补足展示依赖方向门禁。
 
+## Phase D7-C4：检查器依赖方向门禁
+
+**COMPLETE；D7-C 模块拆分完成。**
+
+- 新增架构门禁，禁止 `protocol`、`provision` 领域源文件和非检查专用 application 模块引用检查展示模型；检查器字段模型、元数据与 LBA 适配模块不得反向依赖 application，也不得调用文本或十六进制渲染。
+- `application::inspect` 与 `application::inspect_tree` 是现有检查工作区的显式桥接模块；它们负责将检查适配结果转为应用工作区结构和导出文本，不作为协议或通用领域真相源。该例外在门禁中列明，避免以后把其它 application 模块接到检查展示层。
+- D7-C 的公开门面、字段模型、LBA 范围适配、元数据/目录适配和渲染已按职责分开，规范协议解析器仍是唯一真相源。依赖方向架构测试 **1/1**、fast **37.92s / 0 失败**、full **36.15s / 0 失败**、全目标 Clippy、rustfmt 与 diff 检查通过。下一阶段执行 D7-D 生产路径输入与索引安全审计。
+
 ---
 
 # 第八部分：完成标准
