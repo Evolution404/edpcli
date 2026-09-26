@@ -1,6 +1,9 @@
 use edpcli::{
     crypto::{a6b0_full, crc32_bare, xor_rolling},
-    provision::{wrap_file_key, wrap_legacy_lba7_file_key, FileKeyWrapMode},
+    provision::{
+        unwrap_legacy_lba7_file_key, wrap_file_key, wrap_legacy_lba7_file_key,
+        FileKeyWrapMode,
+    },
 };
 
 const DEVICE_ID: &[u8] = b"disk&ven_virtual&prod_writerproof&rev_0001";
@@ -76,4 +79,24 @@ fn key_material_crc_fields_are_over_original_password_and_plain_file_key() {
     let material = wrap_file_key(PASSWORD, FILE_KEY, FileKeyWrapMode::Sm4);
     assert_eq!(material.user_key_crc, 0xe5a0_95a1);
     assert_eq!(material.file_key_crc, 0xff4c_1d36);
+}
+
+#[test]
+fn legacy_lba7_rewrap_changes_only_password_wrapper_not_raw_file_key() {
+    let raw = [0x7d, 0x9e, 0xe4, 0xe8, 0x75, 0x4a, 0xd4, 0x38];
+    let old_password = b"OldPass1!";
+    let new_password = b"NewPass2!";
+
+    let old = wrap_legacy_lba7_file_key(old_password, raw);
+    assert_eq!(unwrap_legacy_lba7_file_key(old_password, old).unwrap(), raw);
+    assert!(unwrap_legacy_lba7_file_key(new_password, old).is_err());
+
+    let recovered = unwrap_legacy_lba7_file_key(old_password, old).unwrap();
+    let new = wrap_legacy_lba7_file_key(new_password, recovered);
+
+    assert_eq!(new.file_key_crc, old.file_key_crc);
+    assert_ne!(new.user_key_crc, old.user_key_crc);
+    assert_ne!(new.wrapped_file_key, old.wrapped_file_key);
+    assert_eq!(unwrap_legacy_lba7_file_key(new_password, new).unwrap(), raw);
+    assert!(unwrap_legacy_lba7_file_key(old_password, new).is_err());
 }
