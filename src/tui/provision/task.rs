@@ -49,10 +49,7 @@ impl TaskHub {
         Ok(operation_id)
     }
 
-    pub fn request_provision_key_probe(
-        &mut self,
-        disk: u32,
-    ) -> Result<u64, &'static str> {
+    pub fn request_provision_key_probe(&mut self, disk: u32) -> Result<u64, &'static str> {
         let generation = self
             .provision_key_probe_slot
             .try_begin()
