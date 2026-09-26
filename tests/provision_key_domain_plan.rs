@@ -38,35 +38,131 @@ struct GoldenCell {
 }
 
 const GOLDEN: [GoldenCell; 25] = [
-    GoldenCell { source: State::Plain, target: State::Plain, contract: "plain-preserve-or-rebuild" },
-    GoldenCell { source: State::Plain, target: State::Mode0, contract: "new-boot-share-encrypt" },
-    GoldenCell { source: State::Plain, target: State::Mode1, contract: "new-combined-encrypt" },
-    GoldenCell { source: State::Plain, target: State::Mode2, contract: "new-reserve-encrypt" },
-    GoldenCell { source: State::Plain, target: State::Mode3, contract: "new-boot-share" },
-
-    GoldenCell { source: State::Mode0, target: State::Plain, contract: "migrate-or-rebuild" },
-    GoldenCell { source: State::Mode0, target: State::Mode0, contract: "per-domain-preserve-rewrap-rebuild" },
-    GoldenCell { source: State::Mode0, target: State::Mode1, contract: "encrypt-preserve-candidate-combined-migrate-rebuild" },
-    GoldenCell { source: State::Mode0, target: State::Mode2, contract: "encrypt-compatible-preserve-reserve-rebuild" },
-    GoldenCell { source: State::Mode0, target: State::Mode3, contract: "boot-share-compatible-preserve-encrypt-drop-migrate" },
-
-    GoldenCell { source: State::Mode1, target: State::Plain, contract: "migrate-or-rebuild" },
-    GoldenCell { source: State::Mode1, target: State::Mode0, contract: "encrypt-preserve-candidate-combined-migrate-rebuild" },
-    GoldenCell { source: State::Mode1, target: State::Mode1, contract: "per-domain-preserve-rewrap-rebuild" },
-    GoldenCell { source: State::Mode1, target: State::Mode2, contract: "encrypt-compatible-preserve-reserve-rebuild" },
-    GoldenCell { source: State::Mode1, target: State::Mode3, contract: "combined-not-share-encrypt-drop-migrate" },
-
-    GoldenCell { source: State::Mode2, target: State::Plain, contract: "decrypt-migrate-or-rebuild" },
-    GoldenCell { source: State::Mode2, target: State::Mode0, contract: "encrypt-compatible-preserve-boot-share-new" },
-    GoldenCell { source: State::Mode2, target: State::Mode1, contract: "encrypt-compatible-preserve-combined-new" },
-    GoldenCell { source: State::Mode2, target: State::Mode2, contract: "reserve-rebuild-encrypt-preserve-rewrap-rebuild" },
-    GoldenCell { source: State::Mode2, target: State::Mode3, contract: "type4-to-type2-migrate-rebuild-boot-new" },
-
-    GoldenCell { source: State::Mode3, target: State::Plain, contract: "migrate-or-rebuild" },
-    GoldenCell { source: State::Mode3, target: State::Mode0, contract: "boot-share-compatible-preserve-encrypt-new" },
-    GoldenCell { source: State::Mode3, target: State::Mode1, contract: "boot-share-to-combined-migrate-rebuild-encrypt-new" },
-    GoldenCell { source: State::Mode3, target: State::Mode2, contract: "share-to-encrypt-migrate-rebuild-reserve-rebuild" },
-    GoldenCell { source: State::Mode3, target: State::Mode3, contract: "per-domain-preserve-rewrap-rebuild" },
+    GoldenCell {
+        source: State::Plain,
+        target: State::Plain,
+        contract: "plain-preserve-or-rebuild",
+    },
+    GoldenCell {
+        source: State::Plain,
+        target: State::Mode0,
+        contract: "new-boot-share-encrypt",
+    },
+    GoldenCell {
+        source: State::Plain,
+        target: State::Mode1,
+        contract: "new-combined-encrypt",
+    },
+    GoldenCell {
+        source: State::Plain,
+        target: State::Mode2,
+        contract: "new-reserve-encrypt",
+    },
+    GoldenCell {
+        source: State::Plain,
+        target: State::Mode3,
+        contract: "new-boot-share",
+    },
+    GoldenCell {
+        source: State::Mode0,
+        target: State::Plain,
+        contract: "migrate-or-rebuild",
+    },
+    GoldenCell {
+        source: State::Mode0,
+        target: State::Mode0,
+        contract: "per-domain-preserve-rewrap-rebuild",
+    },
+    GoldenCell {
+        source: State::Mode0,
+        target: State::Mode1,
+        contract: "encrypt-preserve-candidate-combined-migrate-rebuild",
+    },
+    GoldenCell {
+        source: State::Mode0,
+        target: State::Mode2,
+        contract: "encrypt-compatible-preserve-reserve-rebuild",
+    },
+    GoldenCell {
+        source: State::Mode0,
+        target: State::Mode3,
+        contract: "boot-share-compatible-preserve-encrypt-drop-migrate",
+    },
+    GoldenCell {
+        source: State::Mode1,
+        target: State::Plain,
+        contract: "migrate-or-rebuild",
+    },
+    GoldenCell {
+        source: State::Mode1,
+        target: State::Mode0,
+        contract: "encrypt-preserve-candidate-combined-migrate-rebuild",
+    },
+    GoldenCell {
+        source: State::Mode1,
+        target: State::Mode1,
+        contract: "per-domain-preserve-rewrap-rebuild",
+    },
+    GoldenCell {
+        source: State::Mode1,
+        target: State::Mode2,
+        contract: "encrypt-compatible-preserve-reserve-rebuild",
+    },
+    GoldenCell {
+        source: State::Mode1,
+        target: State::Mode3,
+        contract: "combined-not-share-encrypt-drop-migrate",
+    },
+    GoldenCell {
+        source: State::Mode2,
+        target: State::Plain,
+        contract: "decrypt-migrate-or-rebuild",
+    },
+    GoldenCell {
+        source: State::Mode2,
+        target: State::Mode0,
+        contract: "encrypt-compatible-preserve-boot-share-new",
+    },
+    GoldenCell {
+        source: State::Mode2,
+        target: State::Mode1,
+        contract: "encrypt-compatible-preserve-combined-new",
+    },
+    GoldenCell {
+        source: State::Mode2,
+        target: State::Mode2,
+        contract: "reserve-rebuild-encrypt-preserve-rewrap-rebuild",
+    },
+    GoldenCell {
+        source: State::Mode2,
+        target: State::Mode3,
+        contract: "type4-to-type2-migrate-rebuild-boot-new",
+    },
+    GoldenCell {
+        source: State::Mode3,
+        target: State::Plain,
+        contract: "migrate-or-rebuild",
+    },
+    GoldenCell {
+        source: State::Mode3,
+        target: State::Mode0,
+        contract: "boot-share-compatible-preserve-encrypt-new",
+    },
+    GoldenCell {
+        source: State::Mode3,
+        target: State::Mode1,
+        contract: "boot-share-to-combined-migrate-rebuild-encrypt-new",
+    },
+    GoldenCell {
+        source: State::Mode3,
+        target: State::Mode2,
+        contract: "share-to-encrypt-migrate-rebuild-reserve-rebuild",
+    },
+    GoldenCell {
+        source: State::Mode3,
+        target: State::Mode3,
+        contract: "per-domain-preserve-rewrap-rebuild",
+    },
 ];
 
 #[test]
