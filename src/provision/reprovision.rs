@@ -1032,9 +1032,8 @@ impl TargetProvisionPlan {
             }
             let mut disposition = RegionDisposition::Rebuild;
             let mut source_password_knowledge = None;
-            let mut target_password_policy =
-                super::KeyDomainRole::from_partition_role(target.role)
-                    .map(|_| super::TargetPasswordPolicy::InitializeNew);
+            let mut target_password_policy = super::KeyDomainRole::from_partition_role(target.role)
+                .map(|_| super::TargetPasswordPolicy::InitializeNew);
             let mut reason = "无全兼容来源分区；目标区域必须重建".to_string();
             let mut preserved_record = None;
             if let Some(source) = source {
