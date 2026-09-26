@@ -11,6 +11,8 @@ use std::collections::HashMap;
 use std::fs;
 use std::io;
 use std::process::Command;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::time::Duration;
 
 use common::*;
@@ -182,6 +184,35 @@ fn netac_serial_runner(disk: u32, serial: &str) -> SerialRunner {
     }
 }
 
+struct ProbeRunner {
+    inner: SerialRunner,
+    vid: u16,
+    pid: u16,
+}
+
+impl CmdRunner for ProbeRunner {
+    fn check_output(&self, cmd: &[&str], timeout: Duration) -> io::Result<String> {
+        self.inner.check_output(cmd, timeout)
+    }
+
+    fn hardware_serial(&self, disk: u32) -> Option<String> {
+        self.inner.hardware_serial(disk)
+    }
+
+    fn hardware_probe(&self, _disk: u32) -> Option<edpcli::platform::HardwareProbe> {
+        Some(edpcli::platform::HardwareProbe {
+            vid: Some(self.vid),
+            pid: Some(self.pid),
+            transport: edpcli::platform::NativeTransport::Uas,
+            inquiry: Some(edpcli::platform::InquiryInfo {
+                vendor: "Netac".into(),
+                product: "OnlyDisk".into(),
+                revision: "1.00".into(),
+            }),
+        })
+    }
+}
+
 fn plain_metadata(mut image: Vec<u8>) -> Vec<u8> {
     for lba in 1..13usize {
         if lba != 3 {
@@ -192,14 +223,14 @@ fn plain_metadata(mut image: Vec<u8>) -> Vec<u8> {
 }
 
 fn write_netac_edpb(path: &std::path::Path, data: &[u8], state: &str) {
-    write_test_edpb(
+    write_test_edpb_with_notes(
         path,
         data,
         "disk&ven_netac&prod_onlydisk",
         "0dd8",
         "2005",
         122_880_000,
-        state,
+        (state, vec![hardware_serial_note("NETAC-HIL-SERIAL-001")]),
     );
 }
 
@@ -263,6 +294,49 @@ impl SectorDev for SwapOnReopenDev {
 
     fn reopen_rdwr(&mut self, _wait: std::time::Duration) -> std::io::Result<()> {
         self.switched = true;
+        Ok(())
+    }
+}
+
+struct ReopenSerialRunner {
+    inner: SerialRunner,
+    reopened: Arc<AtomicBool>,
+}
+
+impl CmdRunner for ReopenSerialRunner {
+    fn check_output(&self, cmd: &[&str], timeout: Duration) -> io::Result<String> {
+        self.inner.check_output(cmd, timeout)
+    }
+
+    fn hardware_serial(&self, _disk: u32) -> Option<String> {
+        Some(
+            if self.reopened.load(Ordering::SeqCst) {
+                "CLONED-USB-SERIAL-002"
+            } else {
+                "SOURCE-USB-SERIAL-001"
+            }
+            .into(),
+        )
+    }
+}
+
+struct ReopenSerialDev {
+    inner: SwapOnReopenDev,
+    reopened: Arc<AtomicBool>,
+}
+
+impl SectorDev for ReopenSerialDev {
+    fn read_sector(&mut self, lba: u32) -> io::Result<Vec<u8>> {
+        self.inner.read_sector(lba)
+    }
+
+    fn write_sector(&mut self, lba: u32, data: &[u8]) -> io::Result<()> {
+        self.inner.write_sector(lba, data)
+    }
+
+    fn reopen_rdwr(&mut self, wait: Duration) -> io::Result<()> {
+        self.inner.reopen_rdwr(wait)?;
+        self.reopened.store(true, Ordering::SeqCst);
         Ok(())
     }
 }
@@ -347,6 +421,318 @@ fn edp_backup_records_hardware_serial_binding_when_available() {
         .notes
         .iter()
         .all(|note| !note.starts_with("hardware_serial_sha256=")));
+}
+
+#[test]
+fn restore_clone_with_same_edp_identity_but_different_usb_serial_is_rejected_before_write() {
+    let Some(original) = load_disk_image("netac") else {
+        eprintln!("跳过: 真实备份不可用");
+        return;
+    };
+    let tmp = TmpDir::new("restore_edp_clone_serial_conflict");
+    let backup = tmp.0.join("same-protocol-clone.edpb");
+    write_test_edpb_with_notes(
+        &backup,
+        &original,
+        "disk&ven_netac&prod_onlydisk",
+        "0dd8",
+        "2005",
+        122_880_000,
+        (
+            "encrypted",
+            vec![hardware_serial_note("SOURCE-USB-SERIAL-001")],
+        ),
+    );
+    let runner = netac_serial_runner(6, "CLONED-USB-SERIAL-002");
+    let mut prompt = ScriptPrompter::yes();
+    let mut dev = SwapOnReopenDev::new(original.clone(), original);
+
+    let error = restore_flow(
+        Some(backup.to_string_lossy().into_owned()),
+        6,
+        &mut ctx(&runner, &mut prompt, &tmp.0),
+        &mut dev,
+    )
+    .unwrap_err();
+
+    assert_eq!(error.code, EXIT_BACKUP, "{}", error.msg);
+    assert!(
+        error.msg.contains("DifferentMedia") || error.msg.contains("serial"),
+        "{}",
+        error.msg
+    );
+    assert_eq!(
+        dev.writes, 0,
+        "serial conflict must stop before first write"
+    );
+}
+
+#[test]
+fn restore_numeric_selector_cannot_bypass_serial_authorization() {
+    let Some(original) = load_disk_image("netac") else {
+        return;
+    };
+    let tmp = TmpDir::new("restore_numeric_clone_conflict");
+    let backup = tmp.0.join("clone.edpb");
+    write_test_edpb_with_notes(
+        &backup,
+        &original,
+        "disk&ven_netac&prod_onlydisk",
+        "0dd8",
+        "2005",
+        122_880_000,
+        (
+            "encrypted",
+            vec![hardware_serial_note("SOURCE-USB-SERIAL-001")],
+        ),
+    );
+    let runner = netac_serial_runner(6, "CLONED-USB-SERIAL-002");
+    let mut prompt = ScriptPrompter::yes();
+    let mut dev = SwapOnReopenDev::new(original.clone(), original);
+    let error = restore_flow(
+        Some("1".into()),
+        6,
+        &mut ctx(&runner, &mut prompt, &tmp.0),
+        &mut dev,
+    )
+    .unwrap_err();
+    assert_eq!(error.code, EXIT_BACKUP);
+    assert!(error.msg.contains("UsableSerialMismatch"), "{}", error.msg);
+    assert_eq!(dev.writes, 0);
+}
+
+#[test]
+fn restore_weak_backup_cannot_authorize_destructive_write() {
+    let Some(original) = load_disk_image("netac") else {
+        return;
+    };
+    let tmp = TmpDir::new("restore_weak_backup");
+    let backup = tmp.0.join("weak.edpb");
+    write_test_edpb(
+        &backup,
+        &original,
+        "disk&ven_netac&prod_onlydisk",
+        "0dd8",
+        "2005",
+        122_880_000,
+        "encrypted",
+    );
+    let runner = netac_serial_runner(6, "NETAC-HIL-SERIAL-001");
+    let mut prompt = ScriptPrompter::yes();
+    let mut dev = SwapOnReopenDev::new(original.clone(), original);
+    let error = restore_flow(
+        Some(backup.to_string_lossy().into_owned()),
+        6,
+        &mut ctx(&runner, &mut prompt, &tmp.0),
+        &mut dev,
+    )
+    .unwrap_err();
+    assert_eq!(error.code, EXIT_BACKUP);
+    assert!(error.msg.contains("WeakHardwareBinding"), "{}", error.msg);
+    assert_eq!(dev.writes, 0);
+}
+
+#[test]
+fn restore_geometry_conflict_rejected_before_write() {
+    let Some(original) = load_disk_image("netac") else {
+        return;
+    };
+    let tmp = TmpDir::new("restore_geometry_conflict");
+    let backup = tmp.0.join("wrong-geometry.edpb");
+    write_test_edpb_with_notes(
+        &backup,
+        &original,
+        "disk&ven_netac&prod_onlydisk",
+        "0dd8",
+        "2005",
+        122_880_001,
+        (
+            "encrypted",
+            vec![hardware_serial_note("NETAC-HIL-SERIAL-001")],
+        ),
+    );
+    let runner = netac_serial_runner(6, "NETAC-HIL-SERIAL-001");
+    let mut prompt = ScriptPrompter::yes();
+    let mut dev = SwapOnReopenDev::new(original.clone(), original);
+    let error = restore_flow(
+        Some(backup.to_string_lossy().into_owned()),
+        6,
+        &mut ctx(&runner, &mut prompt, &tmp.0),
+        &mut dev,
+    )
+    .unwrap_err();
+    assert_eq!(error.code, EXIT_BACKUP);
+    assert!(error.msg.contains("GeometryMismatch"), "{}", error.msg);
+    assert_eq!(dev.writes, 0);
+}
+
+#[test]
+fn restore_vid_pid_hard_conflict_rejected_before_write() {
+    let Some(original) = load_disk_image("netac") else {
+        return;
+    };
+    let tmp = TmpDir::new("restore_vid_pid_conflict");
+    let backup = tmp.0.join("source.edpb");
+    write_netac_edpb(&backup, &original, "encrypted");
+    for (vid, pid) in [(0x9999, 0x2005), (0x0dd8, 0x9999)] {
+        let runner = ProbeRunner {
+            inner: netac_serial_runner(6, "NETAC-HIL-SERIAL-001"),
+            vid,
+            pid,
+        };
+        let mut prompt = ScriptPrompter::yes();
+        let mut dev = SwapOnReopenDev::new(original.clone(), original.clone());
+        let error = restore_flow(
+            Some(backup.to_string_lossy().into_owned()),
+            6,
+            &mut ctx(&runner, &mut prompt, &tmp.0),
+            &mut dev,
+        )
+        .unwrap_err();
+        assert_eq!(error.code, EXIT_BACKUP);
+        assert!(error.msg.contains("VidPidMismatch"), "{}", error.msg);
+        assert_eq!(dev.writes, 0);
+    }
+}
+
+#[test]
+fn restore_same_protocol_clone_swapped_after_reopen_has_zero_writes() {
+    let Some(original) = load_disk_image("netac") else {
+        return;
+    };
+    let tmp = TmpDir::new("restore_same_protocol_reopen_clone");
+    let backup = tmp.0.join("source.edpb");
+    write_test_edpb_with_notes(
+        &backup,
+        &original,
+        "disk&ven_netac&prod_onlydisk",
+        "0dd8",
+        "2005",
+        122_880_000,
+        (
+            "encrypted",
+            vec![hardware_serial_note("SOURCE-USB-SERIAL-001")],
+        ),
+    );
+    let reopened = Arc::new(AtomicBool::new(false));
+    let runner = ReopenSerialRunner {
+        inner: netac_serial_runner(6, "SOURCE-USB-SERIAL-001"),
+        reopened: Arc::clone(&reopened),
+    };
+    let mut dev = ReopenSerialDev {
+        inner: SwapOnReopenDev::new(original.clone(), original),
+        reopened: Arc::clone(&reopened),
+    };
+    let mut prompt = ScriptPrompter::yes();
+    let error = restore_flow(
+        Some(backup.to_string_lossy().into_owned()),
+        6,
+        &mut ctx(&runner, &mut prompt, &tmp.0),
+        &mut dev,
+    )
+    .unwrap_err();
+    assert!(reopened.load(Ordering::SeqCst));
+    assert_eq!(error.code, EXIT_BACKUP, "{}", error.msg);
+    assert!(error.msg.contains("UsableSerialMismatch"), "{}", error.msg);
+    assert_eq!(dev.inner.writes, 0);
+}
+
+#[test]
+fn restore_v1_and_v2_canonical_identity_share_hard_conflict_authorization() {
+    let Some(original) = load_disk_image("netac") else {
+        return;
+    };
+    let tmp = TmpDir::new("restore_v1_v2_authorization");
+    let v1 = tmp.0.join("historical-v1.edpb");
+    let v2 = tmp.0.join("typed-v2.edpb");
+    write_test_edpb_with_notes(
+        &v1,
+        &original,
+        "disk&ven_netac&prod_onlydisk",
+        "0dd8",
+        "2005",
+        122_880_000,
+        (
+            "encrypted",
+            vec![hardware_serial_note("SOURCE-USB-SERIAL-001")],
+        ),
+    );
+    let source_runner = netac_serial_runner(6, "SOURCE-USB-SERIAL-001");
+    let identity =
+        edpcli::application::media_identity_observer::media_identity_from_protocol_image(
+            &source_runner,
+            6,
+            &original,
+        )
+        .unwrap();
+    let capture = CoreCapture {
+        snapshot_id: "typed-v2".into(),
+        created_epoch: 1_789_603_200,
+        disk_number: Some(6),
+        vid: "0dd8".into(),
+        pid: "2005".into(),
+        device_id: "disk&ven_netac&prod_onlydisk".into(),
+        onlyid: edpcli::diskio::lba4_label_id_from(&original[4 * SECTOR..5 * SECTOR]),
+        total_sectors: Some(122_880_000),
+        logical_sector_size: SECTOR as u32,
+        edpcli_version: env!("CARGO_PKG_VERSION").into(),
+        device_state: "encrypted".into(),
+        lba0_12: &original,
+    };
+    edpb::write_core_backup_with_identity(&v2, &capture, &identity).unwrap();
+    assert_eq!(
+        edpb::verify_file(&v1).unwrap().manifest.schema,
+        "edpb.manifest.v1"
+    );
+    assert_eq!(
+        edpb::verify_file(&v2).unwrap().manifest.schema,
+        "edpb.manifest.v2"
+    );
+
+    let target_runner = netac_serial_runner(6, "CLONED-USB-SERIAL-002");
+    for path in [v1, v2] {
+        let mut prompt = ScriptPrompter::yes();
+        let mut dev = SwapOnReopenDev::new(original.clone(), original.clone());
+        let error = restore_flow(
+            Some(path.to_string_lossy().into_owned()),
+            6,
+            &mut ctx(&target_runner, &mut prompt, &tmp.0),
+            &mut dev,
+        )
+        .unwrap_err();
+        assert_eq!(error.code, EXIT_BACKUP, "{}", error.msg);
+        assert!(error.msg.contains("UsableSerialMismatch"), "{}", error.msg);
+        assert_eq!(dev.writes, 0);
+    }
+}
+
+#[test]
+fn restore_corrupt_edp_with_nonzero_lba4_does_not_fallback_plain() {
+    let Some(original) = load_disk_image("netac") else {
+        return;
+    };
+    let tmp = TmpDir::new("restore_corrupt_edp_not_plain");
+    let backup = tmp.0.join("source.edpb");
+    write_netac_edpb(&backup, &original, "encrypted");
+    let mut corrupt = original;
+    corrupt[7 * SECTOR..8 * SECTOR].fill(0);
+    let runner = netac_serial_runner(6, "NETAC-HIL-SERIAL-001");
+    let mut prompt = ScriptPrompter::yes();
+    let mut dev = SwapOnReopenDev::new(corrupt.clone(), corrupt);
+    let error = restore_flow(
+        Some(backup.to_string_lossy().into_owned()),
+        6,
+        &mut ctx(&runner, &mut prompt, &tmp.0),
+        &mut dev,
+    )
+    .unwrap_err();
+    assert_eq!(error.code, EXIT_BACKUP, "{}", error.msg);
+    assert!(
+        error.msg.contains("LBA4") && error.msg.contains("EDP"),
+        "{}",
+        error.msg
+    );
+    assert_eq!(dev.writes, 0);
 }
 
 #[test]
@@ -662,7 +1048,7 @@ fn restore_plain_lba4_zero_rejects_wrong_hardware_serial() {
     .unwrap_err();
 
     assert_eq!(error.code, EXIT_BACKUP);
-    assert!(error.msg.contains("硬件") || error.msg.contains("序列号"));
+    assert!(error.msg.contains("UsableSerialMismatch"), "{}", error.msg);
     assert_eq!(fs::read(&img_path).unwrap(), current);
 }
 
@@ -774,7 +1160,7 @@ fn restore_picker_selects_newest_and_writes() {
         eprintln!("跳过: 真实备份不可用");
         return;
     };
-    let runner = netac_runner(26);
+    let runner = netac_serial_runner(26, "NETAC-HIL-SERIAL-001");
     let tmp = TmpDir::new("restore_pick");
     let bak = tmp.0.join("bak");
     fs::create_dir_all(&bak).unwrap();
@@ -856,7 +1242,7 @@ fn restore_valid_edpb_needs_no_external_sidecar() {
         eprintln!("跳过: 真实备份不可用");
         return;
     };
-    let runner = netac_runner(26);
+    let runner = netac_serial_runner(26, "NETAC-HIL-SERIAL-001");
     let tmp = TmpDir::new("restore_edpb_no_sidecar");
     let bakfile = tmp.0.join(
         "disk26_122880000_vid0dd8_pid2005_disk&ven_netac&prod_onlydisk_onlyid1402259934_20260917_120000.edpb",
@@ -944,7 +1330,11 @@ fn restore_explicit_backup_from_other_disk_is_rejected() {
     .unwrap_err();
 
     assert_eq!(err.code, EXIT_BACKUP);
-    assert!(err.msg.contains("另一块盘"), "{}", err.msg);
+    assert!(
+        err.msg.contains("DifferentMedia") && err.msg.contains("VidPidMismatch"),
+        "{}",
+        err.msg
+    );
     assert_eq!(
         fs::read(&img_path).unwrap(),
         current,
@@ -987,7 +1377,7 @@ fn restore_refuses_if_disk_identity_changes_after_reopen() {
         eprintln!("跳过: 真实备份不可用");
         return;
     };
-    let runner = netac_runner(6);
+    let runner = netac_serial_runner(6, "NETAC-HIL-SERIAL-001");
     let tmp = TmpDir::new("restore_swap_after_reopen");
     let backup = tmp.0.join(
         "disk6_122880000_vid0dd8_pid2005_disk&ven_netac&prod_onlydisk_onlyid1402259934_20260917_120000.edpb",
@@ -1133,9 +1523,13 @@ fn restore_deep_edpb_restores_lba0_12_and_validated_lce_together() {
         }],
         notes: vec![],
     };
-    edpcli::edpb::write_metadata_backup(&backup, &capture).unwrap();
-
-    let runner = netac_runner(6);
+    let runner = netac_serial_runner(6, "NETAC-HIL-SERIAL-001");
+    let identity =
+        edpcli::application::media_identity_observer::media_identity_from_protocol_image(
+            &runner, 6, &original,
+        )
+        .unwrap();
+    edpcli::edpb::write_metadata_backup_with_identity(&backup, &capture, &identity).unwrap();
     let mut prompt = ScriptPrompter::yes();
     let mut dev = RestorableSparseDev {
         metadata: original.clone(),

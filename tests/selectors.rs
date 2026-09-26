@@ -3,6 +3,9 @@ use crate::common;
 use std::fs;
 
 use common::{fixture, fixture_bin, TmpDir};
+use edpcli::application::media_identity::{
+    match_media_identity, BackupAffinity, BackupAffinityPolicy,
+};
 use edpcli::cli::Prompter;
 use edpcli::selectors::{BackupSelector, DeviceSelector};
 use edpcli::sysinfo::ExtDisk;
@@ -145,7 +148,7 @@ fn backup_selector_uses_one_global_stable_numbering_for_list_and_actions() {
 }
 
 #[test]
-fn backup_selector_supports_ranges_and_internal_identity_filtering() {
+fn backup_selector_supports_ranges_and_caller_identity_filtering() {
     let Some((tmp, _)) = copied_backups() else {
         eprintln!("跳过: 真实备份不可用");
         return;
@@ -154,18 +157,43 @@ fn backup_selector_supports_ranges_and_internal_identity_filtering() {
     let selected = selector.resolve_many(&["1,3".into()]).unwrap();
     assert_eq!(selected.len(), 2);
 
-    let netac = selector.for_onlyid("1402259934");
-    assert_eq!(netac.numbered().len(), 1);
+    let global = selector.numbered();
+    let netac_identity = global
+        .iter()
+        .find_map(|entry| {
+            let meta = entry.meta.as_ref()?;
+            (meta.onlyid.as_deref() == Some("1402259934"))
+                .then(|| meta.identity.clone())
+                .flatten()
+        })
+        .expect("netac canonical identity");
+    let netac: Vec<_> = selector
+        .numbered_with_indices()
+        .into_iter()
+        .filter(|(_, entry)| {
+            entry
+                .meta
+                .as_ref()
+                .and_then(|meta| meta.identity.as_ref())
+                .is_some_and(|identity| {
+                    BackupAffinityPolicy::classify(&match_media_identity(
+                        identity,
+                        &netac_identity,
+                        None,
+                    )) == BackupAffinity::Confirmed
+                })
+        })
+        .collect();
+    assert_eq!(netac.len(), 1);
     assert_eq!(
-        netac.numbered()[0]
+        netac[0]
+            .1
             .meta
             .as_ref()
             .and_then(|meta| meta.onlyid.as_deref()),
         Some("1402259934")
     );
-    assert!(netac.resolve_one("2").is_err());
 
-    let global = selector.numbered();
     let aigo_global_index = global
         .iter()
         .position(|entry| {
@@ -173,10 +201,9 @@ fn backup_selector_supports_ranges_and_internal_identity_filtering() {
         })
         .map(|index| index + 1)
         .expect("aigo backup");
-    let aigo = selector.for_onlyid("1987718388");
-    let selected = aigo
+    let selected = selector
         .resolve_one(&aigo_global_index.to_string())
-        .expect("filtered restore selector must preserve global numbering");
+        .expect("selector must preserve global numbering");
     assert_eq!(
         selected
             .meta

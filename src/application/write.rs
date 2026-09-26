@@ -6,6 +6,11 @@
 
 use std::path::PathBuf;
 
+use super::media_identity::{
+    match_media_identity, BackupAffinity, BackupAffinityPolicy, MediaIdentitySnapshot,
+    RestoreAuthorizationDecision, RestoreAuthorizationPolicy, RestoreGeometryRequirements,
+};
+use super::media_identity_observer::media_identity_from_protocol_image;
 use super::target_session::{ReadOnly, ReopenAndVerifyError, TargetSession};
 use crate::common::*;
 use crate::diskio::{self, raw_path, Clock, DiskFacts, SectorDev, SystemClock};
@@ -72,13 +77,6 @@ fn err(code: i32, msg: impl Into<String>) -> EdpCliError {
     EdpCliError::new(code, msg)
 }
 
-fn parse_usb_hex(value: &str) -> Option<u16> {
-    let value = value.trim().trim_start_matches("0x");
-    (value.len() <= 4)
-        .then(|| u16::from_str_radix(value, 16).ok())
-        .flatten()
-}
-
 fn backup_identity(
     manifest: &crate::edpb::Manifest,
 ) -> EdpCliResult<super::media_identity::MediaIdentitySnapshot> {
@@ -86,52 +84,54 @@ fn backup_identity(
         .map_err(|message| err(EXIT_BACKUP, format!("错误: EDPB 身份证据无效: {message}")))
 }
 
-fn verify_hardware_bound_restore(
-    runner: &dyn CmdRunner,
-    disk: u32,
-    manifest: &crate::edpb::Manifest,
+fn authorize_restore(
+    backup: &MediaIdentitySnapshot,
+    target: &MediaIdentitySnapshot,
+    backup_tag16: &[u8],
+    target_tag16: &[u8],
+    target_lba4_nonzero: bool,
+    geometry: RestoreGeometryRequirements,
 ) -> EdpCliResult<()> {
-    use super::media_identity::{serial_digest_evidence, SerialQuality};
-
-    let expected = backup_identity(manifest)?;
-    if expected.hardware.serial_quality != SerialQuality::Usable {
-        return Err(err(
-            EXIT_BACKUP,
-            "错误: 当前盘 LBA4 身份已清空，而该备份没有可用的 USB 硬件序列号绑定；拒绝还原",
-        ));
-    }
-    let expected_serial = expected
-        .hardware
-        .serial_sha256
-        .as_deref()
-        .ok_or_else(|| err(EXIT_BACKUP, "错误: EDPB 缺少硬件序列号摘要，拒绝还原"))?;
-
-    let raw_current_serial = runner.hardware_serial(disk);
-    let current = serial_digest_evidence(raw_current_serial.as_deref());
-    if current.quality != SerialQuality::Usable
-        || current.sha256.as_deref() != Some(expected_serial)
+    if target_lba4_nonzero
+        && (target_tag16.iter().all(|byte| *byte == 0)
+            || target.protocol.device_id.is_none()
+            || target.protocol.provision_kind.is_none())
     {
         return Err(err(
             EXIT_BACKUP,
-            "错误: 当前 USB 硬件序列号与备份绑定不一致，拒绝还原",
+            "错误: 当前盘 LBA4 非零但 EDP 协议身份损坏，拒绝 fallback Plain 或写入",
         ));
     }
-
-    let (vid, pid) = sysinfo::usb_vid_pid(runner, disk);
-    let current_vid = parse_usb_hex(&vid);
-    let current_pid = parse_usb_hex(&pid);
-    if expected.hardware.vid.is_none()
-        || expected.hardware.pid.is_none()
-        || current_vid != expected.hardware.vid
-        || current_pid != expected.hardware.pid
-    {
-        return Err(err(
-            EXIT_BACKUP,
-            format!(
-                "错误: 当前 USB VID/PID {}:{} 与备份 typed identity 不一致，拒绝还原",
-                vid, pid
-            ),
-        ));
+    let identity_match = match_media_identity(backup, target, None);
+    match RestoreAuthorizationPolicy::evaluate(backup, target, &identity_match, geometry, None) {
+        RestoreAuthorizationDecision::Authorized => {}
+        RestoreAuthorizationDecision::Reject(reason) => {
+            return Err(err(
+                EXIT_BACKUP,
+                format!(
+                    "错误: restore authorization 拒绝写入: relationship={:?}, conflict={reason:?}",
+                    identity_match.relationship
+                ),
+            ));
+        }
+    }
+    if target_tag16.iter().any(|byte| *byte != 0) {
+        if target.protocol.device_id.is_none() || target.protocol.provision_kind.is_none() {
+            return Err(err(
+                EXIT_BACKUP,
+                "错误: 当前盘 LBA4 非零但 EDP 协议身份损坏，拒绝 fallback Plain 或写入",
+            ));
+        }
+        if backup_tag16 != target_tag16 {
+            return Err(err(
+                EXIT_BACKUP,
+                format!(
+                    "错误: 备份属于另一块盘(current onlyid={}, backup onlyid={})，拒绝还原",
+                    target.protocol.onlyid.as_deref().unwrap_or("未知"),
+                    backup.protocol.onlyid.as_deref().unwrap_or("未知")
+                ),
+            ));
+        }
     }
     Ok(())
 }
@@ -471,31 +471,41 @@ pub fn restore_flow(
     let label_id = diskio::lba4_label_id_from(lba4);
     let tag16 = diskio::lba4_tag16_from(lba4)
         .ok_or_else(|| err(EXIT_IO, "错误: LBA4 缺少 16B 身份标签"))?;
+    let target_identity = media_identity_from_protocol_image(ctx.runner, disk, &img)?;
+    let target_lba4_nonzero = lba4.iter().any(|byte| *byte != 0);
     let selector = BackupSelector::load(&ctx.backup_dir);
-    let path: PathBuf = match (bin, label_id.as_deref()) {
-        (Some(target), Some(onlyid)) => selector
-            .resolve_restore_target(&target, onlyid)
-            .map(|entry| entry.path.clone())
-            .map_err(|message| err(EXIT_BACKUP, format!("错误: {message}")))?,
-        (Some(target), None) => selector
+    let path: PathBuf = match bin {
+        Some(target) => selector
             .resolve_one(&target)
             .map(|entry| entry.path.clone())
             .map_err(|message| err(EXIT_BACKUP, format!("错误: {message}")))?,
-        (None, Some(onlyid)) => {
-            let view = selector.for_onlyid(onlyid);
-            let choices = view.numbered_with_indices();
+        None => {
+            let choices: Vec<_> = selector
+                .numbered_with_indices()
+                .into_iter()
+                .filter(|(_, entry)| {
+                    entry
+                        .meta
+                        .as_ref()
+                        .and_then(|meta| meta.identity.as_ref())
+                        .is_some_and(|backup| {
+                            BackupAffinityPolicy::classify(&match_media_identity(
+                                backup,
+                                &target_identity,
+                                None,
+                            )) == BackupAffinity::Confirmed
+                        })
+                })
+                .collect();
             if choices.is_empty() {
                 return Err(err(
                     EXIT_BACKUP,
-                    format!(
-                        "错误: 备份目录未找到本盘备份 (onlyid={}); 可先执行 edpcli backup create",
-                        onlyid
-                    ),
+                    "错误: 备份目录未找到本盘备份；可先执行 edpcli backup create",
                 ));
             }
             ctx.prompt.write_event(WriteEvent::RestoreMatchesHeader {
                 disk,
-                onlyid: onlyid.to_string(),
+                onlyid: label_id.clone().unwrap_or_else(|| "未知".into()),
                 count: choices.len(),
             });
             for (index, entry) in &choices {
@@ -517,19 +527,18 @@ pub fn restore_flow(
                 if input.is_empty() {
                     return Err(err(EXIT_CANCELLED, "已取消"));
                 }
-                match view.resolve_one(input) {
-                    Ok(entry) => break entry.path.clone(),
+                match selector.resolve_one(input) {
+                    Ok(entry) if choices.iter().any(|(_, choice)| choice.path == entry.path) => {
+                        break entry.path.clone();
+                    }
+                    Ok(_) => ctx.prompt.write_event(WriteEvent::RestoreSelectionRetry {
+                        message: "备份编号不在当前介质的匹配候选中".into(),
+                    }),
                     Err(message) => ctx
                         .prompt
                         .write_event(WriteEvent::RestoreSelectionRetry { message }),
                 }
             }
-        }
-        (None, None) => {
-            return Err(err(
-                EXIT_BACKUP,
-                "错误: 当前盘无法读取 onlyid，无法安全筛选可恢复备份，拒绝交互还原",
-            ));
         }
     };
 
@@ -572,39 +581,17 @@ pub fn restore_flow(
         digest: verified.file_sha256.clone(),
     });
 
-    // 非零 LBA4 继续以原始 16B 协议身份终验；Plain/LBA4=0 仅允许走强硬件绑定终验。
+    // Protocol tag remains a separate consistency check; it cannot override hardware conflict.
     let backup_lba4 = &data[4 * SECTOR..5 * SECTOR];
     let backup_tag16 = diskio::lba4_tag16_from(backup_lba4)
         .ok_or_else(|| err(EXIT_BACKUP, "错误: 备份 LBA4 缺少 16B 身份标签"))?;
-    if tag16.iter().any(|&b| b != 0) {
-        if backup_tag16 != tag16 {
-            let current_id = label_id.as_deref().unwrap_or("未知");
-            let backup_id =
-                diskio::lba4_label_id_from(backup_lba4).unwrap_or_else(|| "未知".into());
-            return Err(err(
-                EXIT_BACKUP,
-                format!(
-                    "错误: 备份属于另一块盘(current onlyid={}, backup onlyid={})，拒绝还原",
-                    current_id, backup_id
-                ),
-            ));
-        }
-    } else {
-        verify_hardware_bound_restore(ctx.runner, disk, &verified.manifest)?;
-    }
+    let backup_identity = backup_identity(&verified.manifest)?;
     let current_total_sectors = sysinfo::disk_total_sectors(ctx.runner, disk)
         .ok_or_else(|| err(EXIT_TARGET, "错误: 无法取得当前目标盘总扇区数，拒绝恢复"))?;
-    if let Some(backup_total_sectors) = verified.manifest.geometry.total_sectors {
-        if backup_total_sectors != current_total_sectors {
-            return Err(err(
-                EXIT_TARGET,
-                format!(
-                    "错误: 备份容量 {} sectors 与当前盘 {} sectors 不一致，拒绝恢复",
-                    backup_total_sectors, current_total_sectors
-                ),
-            ));
-        }
-    }
+    let geometry = RestoreGeometryRequirements {
+        total_sectors: current_total_sectors,
+        logical_sector_size: SECTOR as u32,
+    };
 
     // Deep EDPB may carry the active six-sector LBA7 compatibility extent.
     // It is restorable only when its Manifest extent is bound back to the exact
@@ -694,14 +681,32 @@ pub fn restore_flow(
     {
         return Err(err(EXIT_CANCELLED, "已取消"));
     }
+    authorize_restore(
+        &backup_identity,
+        &target_identity,
+        &backup_tag16,
+        &tag16,
+        target_lba4_nonzero,
+        geometry,
+    )?;
     let target_session = target_session
         .prepare_write()
         .map_err(|e| err(EXIT_IO, format!("错误: 无法卸载 disk{}: {}", disk, e)))?;
-    if tag16.iter().all(|&byte| byte == 0) {
-        verify_hardware_bound_restore(ctx.runner, disk, &verified.manifest)?;
-    }
     let _target_session = target_session
-        .reopen_and_verify(dev, OPEN_WAIT, |dev| verify_reopened_snapshot(dev, &img))
+        .reopen_and_verify(dev, OPEN_WAIT, |dev| {
+            verify_reopened_snapshot(dev, &img)?;
+            let fresh = super::media_identity_observer::observe_media_identity_readonly(
+                ctx.runner, disk, dev,
+            )?;
+            authorize_restore(
+                &backup_identity,
+                &fresh.snapshot,
+                &backup_tag16,
+                &tag16,
+                target_lba4_nonzero,
+                geometry,
+            )
+        })
         .map_err(|error| match error {
             ReopenAndVerifyError::Reopen(e) => err(
                 EXIT_IO,

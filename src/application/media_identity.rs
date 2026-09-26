@@ -221,6 +221,110 @@ impl BackupAffinityPolicy {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RestoreGeometryRequirements {
+    pub total_sectors: u64,
+    pub logical_sector_size: u32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RestoreRejection {
+    UsableSerialMismatch,
+    VidPidMismatch,
+    GeometryMismatch,
+    GeometryUnavailable,
+    WeakHardwareBinding,
+    DifferentMedia,
+    InsufficientPhysicalEvidence,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RestoreAuthorizationDecision {
+    Authorized,
+    Reject(RestoreRejection),
+}
+
+/// Destructive restore requires matching, usable hardware evidence and exact geometry.
+/// Protocol identity and controlled lineage are independent evidence, never write grants.
+pub struct RestoreAuthorizationPolicy;
+
+impl RestoreAuthorizationPolicy {
+    pub fn evaluate(
+        backup: &MediaIdentitySnapshot,
+        target: &MediaIdentitySnapshot,
+        identity_match: &IdentityMatch,
+        geometry: RestoreGeometryRequirements,
+        _lineage: Option<&ControlledLineageEvidence>,
+    ) -> RestoreAuthorizationDecision {
+        use RestoreAuthorizationDecision::{Authorized, Reject};
+
+        if identity_match
+            .conflicts
+            .iter()
+            .any(|conflict| conflict.kind == IdentityConflictKind::UsableSerialMismatch)
+        {
+            return Reject(RestoreRejection::UsableSerialMismatch);
+        }
+        if identity_match
+            .conflicts
+            .iter()
+            .any(|conflict| conflict.kind == IdentityConflictKind::VidPidMismatch)
+        {
+            return Reject(RestoreRejection::VidPidMismatch);
+        }
+        if backup
+            .hardware
+            .total_sectors
+            .is_some_and(|value| value != geometry.total_sectors)
+            || target
+                .hardware
+                .total_sectors
+                .is_some_and(|value| value != geometry.total_sectors)
+            || backup
+                .hardware
+                .logical_sector_size
+                .is_some_and(|value| value != geometry.logical_sector_size)
+            || target
+                .hardware
+                .logical_sector_size
+                .is_some_and(|value| value != geometry.logical_sector_size)
+            || identity_match
+                .conflicts
+                .iter()
+                .any(|conflict| conflict.kind == IdentityConflictKind::GeometryMismatch)
+        {
+            return Reject(RestoreRejection::GeometryMismatch);
+        }
+        if backup.hardware.total_sectors != Some(geometry.total_sectors)
+            || target.hardware.total_sectors != Some(geometry.total_sectors)
+            || backup.hardware.logical_sector_size != Some(geometry.logical_sector_size)
+            || target.hardware.logical_sector_size != Some(geometry.logical_sector_size)
+        {
+            return Reject(RestoreRejection::GeometryUnavailable);
+        }
+        if identity_match.relationship == MediaRelationship::DifferentMedia {
+            return Reject(RestoreRejection::DifferentMedia);
+        }
+        if backup.hardware.vid.is_none()
+            || backup.hardware.pid.is_none()
+            || backup.hardware.vid != target.hardware.vid
+            || backup.hardware.pid != target.hardware.pid
+            || backup.hardware.serial_quality != SerialQuality::Usable
+            || target.hardware.serial_quality != SerialQuality::Usable
+            || backup.hardware.serial_sha256.is_none()
+            || target.hardware.serial_sha256.is_none()
+        {
+            return Reject(RestoreRejection::WeakHardwareBinding);
+        }
+        if backup.hardware.serial_sha256 != target.hardware.serial_sha256
+            || identity_match.relationship != MediaRelationship::SamePhysicalMedia
+        {
+            return Reject(RestoreRejection::InsufficientPhysicalEvidence);
+        }
+        Authorized
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct ControlledLineageEvidence {
     pub linked: bool,

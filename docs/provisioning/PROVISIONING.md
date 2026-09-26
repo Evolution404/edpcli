@@ -8591,6 +8591,8 @@ observe_media_identity_readonly(...)
 
 #### I5 — Restore selector / authorization
 
+**实施状态（2026-09-26）：COMPLETE。** 恢复候选使用 canonical matcher + 读侧 `BackupAffinityPolicy`；`BackupSelector` 仅保留全局稳定编号与受备份根目录约束的路径解析，移除 `for_onlyid/matches_onlyid` 归属逻辑。新增独立 typed `RestoreAuthorizationPolicy`，destructive restore 要求 backup/current 均有相同 usable serial digest、VID/PID 与精确容量/逻辑扇区大小；EDP LBA4 tag 仍作为协议一致性终验，不能覆盖硬件冲突。显式路径、数字编号统一在 `prepare_write` 前授权，reopen 后重新采集 LBA0-12 与硬件证据并再次授权，首笔写入前拒绝同协议 clone 换盘。v1/v2 均经 `canonical_media_identity()` 进入相同策略；弱备份、损坏 EDP、serial/VID/PID/geometry 冲突均 fail-closed。专项验证包括 CLI restore 23 项与 repository policy 4 项；完整 CLI/backup/repository suite 和格式检查见本阶段提交记录。
+
 - 迁移 `for_onlyid/matches_onlyid`；
 - typed affinity policy；
 - typed strict authorization policy；

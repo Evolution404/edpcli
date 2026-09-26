@@ -453,9 +453,11 @@ fn inferred_manifest_identity(capture: &CoreCapture<'_>) -> ManifestIdentity {
             lba4_identity_digest: None,
         },
         derived: ManifestDerivedIdentity {
-            device_id_candidates: (!capture.device_id.is_empty())
-                .then(|| vec![capture.device_id.clone()])
-                .unwrap_or_default(),
+            device_id_candidates: if capture.device_id.is_empty() {
+                Vec::new()
+            } else {
+                vec![capture.device_id.clone()]
+            },
             legacy_derived_candidate: plain.then(|| capture.device_id.clone()),
         },
     }
@@ -544,6 +546,8 @@ fn validate_core_capture(capture: &CoreCapture<'_>) -> Result<(), String> {
     Ok(())
 }
 
+// One internal entry point carries the complete EDPB capture graph and identity provenance.
+#[allow(clippy::too_many_arguments)]
 fn write_container(
     path: &Path,
     capture: &CoreCapture<'_>,

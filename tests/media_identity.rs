@@ -4,7 +4,9 @@ use std::time::Duration;
 use edpcli::application::media_identity::{
     match_media_identity, serial_digest_evidence, ControlledLineageEvidence,
     DerivedProtocolEvidence, HardwareIdentityEvidence, IdentityConfidence, IdentityObservation,
-    MediaIdentitySnapshot, MediaRelationship, ProtocolIdentityEvidence, SerialQuality,
+    MediaIdentitySnapshot, MediaRelationship, ProtocolIdentityEvidence,
+    RestoreAuthorizationDecision, RestoreAuthorizationPolicy, RestoreGeometryRequirements,
+    RestoreRejection, SerialQuality,
 };
 use edpcli::application::media_identity_observer::observe_media_identity_readonly;
 use edpcli::diskio::SectorDev;
@@ -209,6 +211,138 @@ fn suspicious_serial_never_creates_physical_strong() {
     let b = a.clone();
     let matched = match_media_identity(&a, &b, None);
     assert_ne!(matched.confidence, IdentityConfidence::PhysicalStrong);
+}
+
+fn authorize(
+    backup: &MediaIdentitySnapshot,
+    target: &MediaIdentitySnapshot,
+) -> RestoreAuthorizationDecision {
+    let matched = match_media_identity(backup, target, None);
+    RestoreAuthorizationPolicy::evaluate(
+        backup,
+        target,
+        &matched,
+        RestoreGeometryRequirements {
+            total_sectors: 1_000_000,
+            logical_sector_size: 512,
+        },
+        None,
+    )
+}
+
+#[test]
+fn restore_authorization_rejects_same_protocol_clone_with_different_usable_serial() {
+    let source = snapshot(
+        hardware(Some("SOURCE-USB-SERIAL-001"), 0x1234, 0x5678, 1_000_000),
+        Some("edp"),
+        Some("42"),
+        DiskProvisionKind::Mode0,
+    );
+    let clone = snapshot(
+        hardware(Some("CLONED-USB-SERIAL-002"), 0x1234, 0x5678, 1_000_000),
+        Some("edp"),
+        Some("42"),
+        DiskProvisionKind::Mode0,
+    );
+    assert_eq!(
+        authorize(&source, &clone),
+        RestoreAuthorizationDecision::Reject(RestoreRejection::UsableSerialMismatch)
+    );
+}
+
+#[test]
+fn restore_authorization_rejects_vid_pid_and_geometry_conflicts() {
+    let source = snapshot(
+        hardware(Some("SERIAL-001"), 0x1234, 0x5678, 1_000_000),
+        Some("edp"),
+        Some("42"),
+        DiskProvisionKind::Mode0,
+    );
+    let wrong_vid = snapshot(
+        hardware(Some("SERIAL-001"), 0x9999, 0x5678, 1_000_000),
+        Some("edp"),
+        Some("42"),
+        DiskProvisionKind::Mode0,
+    );
+    let wrong_pid = snapshot(
+        hardware(Some("SERIAL-001"), 0x1234, 0x9999, 1_000_000),
+        Some("edp"),
+        Some("42"),
+        DiskProvisionKind::Mode0,
+    );
+    let wrong_size = snapshot(
+        hardware(Some("SERIAL-001"), 0x1234, 0x5678, 1_000_001),
+        Some("edp"),
+        Some("42"),
+        DiskProvisionKind::Mode0,
+    );
+    assert_eq!(
+        authorize(&source, &wrong_vid),
+        RestoreAuthorizationDecision::Reject(RestoreRejection::VidPidMismatch)
+    );
+    assert_eq!(
+        authorize(&source, &wrong_pid),
+        RestoreAuthorizationDecision::Reject(RestoreRejection::VidPidMismatch)
+    );
+    assert_eq!(
+        authorize(&source, &wrong_size),
+        RestoreAuthorizationDecision::Reject(RestoreRejection::GeometryMismatch)
+    );
+}
+
+#[test]
+fn restore_authorization_requires_usable_serial_even_for_same_edp_instance() {
+    let source = snapshot(
+        hardware(None, 0x1234, 0x5678, 1_000_000),
+        Some("edp"),
+        Some("42"),
+        DiskProvisionKind::Mode0,
+    );
+    assert_eq!(
+        authorize(&source, &source),
+        RestoreAuthorizationDecision::Reject(RestoreRejection::WeakHardwareBinding)
+    );
+}
+
+#[test]
+fn restore_authorization_keeps_physical_and_protocol_identity_separate() {
+    let source = snapshot(
+        hardware(Some("SERIAL-001"), 0x1234, 0x5678, 1_000_000),
+        Some("edp"),
+        Some("42"),
+        DiskProvisionKind::Mode0,
+    );
+    let reprovisioned = snapshot(
+        hardware(Some("SERIAL-001"), 0x1234, 0x5678, 1_000_000),
+        Some("edp"),
+        Some("99"),
+        DiskProvisionKind::Mode2,
+    );
+    assert_eq!(
+        authorize(&source, &reprovisioned),
+        RestoreAuthorizationDecision::Authorized
+    );
+    let weak = snapshot(
+        hardware(None, 0x1234, 0x5678, 1_000_000),
+        Some("edp"),
+        Some("99"),
+        DiskProvisionKind::Mode2,
+    );
+    let lineage = ControlledLineageEvidence { linked: true };
+    let matched = match_media_identity(&source, &weak, Some(&lineage));
+    assert_eq!(
+        RestoreAuthorizationPolicy::evaluate(
+            &source,
+            &weak,
+            &matched,
+            RestoreGeometryRequirements {
+                total_sectors: 1_000_000,
+                logical_sector_size: 512
+            },
+            Some(&lineage)
+        ),
+        RestoreAuthorizationDecision::Reject(RestoreRejection::WeakHardwareBinding)
+    );
 }
 
 struct ObservationRunner;
