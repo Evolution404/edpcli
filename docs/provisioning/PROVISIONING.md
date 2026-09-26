@@ -7491,3 +7491,1201 @@ current main
 不要把旧 `plan/inspect-tree-decode-consistency-20260926` 当作实现基线，也不要在实现分支 cherry-pick 旧生产代码；旧分支只作为计划历史来源。
 
 第三轮审计结论：**计划需要更新，但主体 Q0～Q8 不需要推翻。真正变化的是：Chapter 12 已从“未来设计”变成“现有事实”，第 14 章必须直接复用并保护其 typed business model；同时 exFAT、progress transport、magic slot、DiskLayout 字符串语义等问题在当前 main 仍然存在，继续作为本次治理任务。**
+
+## 15. 只读多证据介质身份：跨 Plain / EDP 制盘状态的稳定识别与可信度分级
+
+### 15.1 目标与不可违反的边界
+
+本章解决的问题是：**同一块物理 U 盘在 Plain → mode0/mode1/mode2/mode3 → Plain、重新分区、改密码、重建协议区之后，盘内参数会变化，edpcli 仍需要尽可能把历史备份、当前设备和受控制盘历史关联到同一介质；同时不能把“高概率相同”冒充为绝对物理唯一，更不能为了识别而向 U 盘额外写标记。**
+
+本章属于主机侧识别/备份治理，不修改 EDP 协议定义。以下约束是硬门槛：
+
+1. **`device_id` 保持 EDP 协议专有名词和既有协议语义。**
+   - `identify.rs` 中通过 LBA7/EDPF 验证得到的 `device_id` 才是“已观测 EDP device_id”。
+   - `provision::TargetIdentity` 用硬件信息构造将要写入 EDP 协议的目标 `device_id`，仍属于协议生成过程。
+   - 禁止把新的主机侧唯一标识命名为 `device_id`，禁止重命名/重解释现有协议字段。
+2. **`onlyid` 仍是 EDP 协议状态证据，不是物理 U 盘永久 ID。**
+   - 相同 `onlyid` 是同一 EDP 制盘实例的强正证据；
+   - `onlyid` 变化不能单独推出“不是同一物理 U 盘”。
+3. **绝不向 U 盘写任何新增身份标记。**
+   - 不写 LBA3；
+   - 不占用保留扇区；
+   - 不新增隐藏分区、文件、卷标、文件系统 xattr 或其它介质内标记；
+   - 身份采集路径必须是只读的。
+4. **主机侧 identity match 不能绕过任何写盘安全门槛。**
+   - system-disk protection；
+   - USB whole-disk guard；
+   - selector pinning；
+   - mandatory backup；
+   - unmount/lock；
+   - reopen identity；
+   - atomic write；
+   - sync/readback；
+   - rollback。
+5. **lineage 只能作为归组/解释证据，永远不能单独授权 destructive write。**
+6. K6 `Migrate` 继续 DEFERRED / fail-closed；本章不得借身份治理改变 Chapter 12 的 disposition / key-domain / write-set 语义。
+7. 原始 USB serial 默认只在进程内短暂使用；持久化只保存规范化后的摘要和质量结论，禁止把原始 serial 写入日志、progress、EDPB、lineage 或 CLI 提权参数。
+
+最终目标不是制造一个虚假的“绝对唯一 ID”，而是建立：
+
+```text
+HardwareEvidence
+      +
+EDP ProtocolEvidence
+      +
+Current StateEvidence
+      +
+Host ControlledLineage
+      ↓
+MediaIdentityMatcher
+      ↓
+relationship + confidence + evidence + conflicts
+```
+
+### 15.2 当前 main 审计结论与明确改造点
+
+基线：`main = b2b61f4`，工作区 clean。当前项目已经有部分硬件绑定能力，但分散在 backup / restore / provision 内，没有形成统一的 application identity contract。
+
+#### 15.2.1 平台层已经能读硬件 serial，不需要重新发明探测
+
+现有：
+
+```text
+src/platform/mod.rs
+  HardwareProbe { vid, pid, transport, inquiry }
+  InquiryInfo { vendor, product, revision }
+  hardware_serial(disk)
+
+src/platform/macos_native.rs
+  IOKit parent chain
+  "USB Serial Number"
+  "kUSBSerialNumberString"
+
+src/platform/linux.rs
+  USB ancestor / serial
+
+src/platform/windows.rs
+  SetupAPI USB identity / serial
+```
+
+改造方向：
+
+- 复用这些入口；
+- 将 `HardwareProbe + hardware_serial + total_sectors + logical_sector_size` 统一投影为 application-owned `HardwareIdentityEvidence`；
+- platform 只负责“观察”，不负责给出 Same/Different 结论；
+- 不让 TUI/CLI 自己重复拼硬件身份。
+
+#### 15.2.2 `generate_candidates()` 与 `identify()` 的协议边界必须保留
+
+现有：
+
+```text
+src/identify.rs
+  generate_candidates()
+  identify()
+```
+
+语义固定为：
+
+- `generate_candidates()`：根据硬件/SCSI inquiry 生成**可能的 EDP device_id 候选**；
+- `identify()`：用候选实际解码/验证 LBA7 EDPF，成功后才得到**已观测 EDP device_id**。
+
+禁止把候选值本身当作已存在于 Plain 盘上的 `device_id`。
+
+#### 15.2.3 Plain 备份目前把候选 `device_id` 当成真实 `device_id`，必须治理
+
+现有 `src/application/write.rs::backup_create_level_flow()`：
+
+```text
+LBA7 无法识别
++ LBA4 全零
++ DiskProvisionKind == Plain
+    ↓
+generate_candidates(...).next()
+    ↓
+device_id
+    ↓
+写入 EDPB manifest / 备份文件名
+```
+
+这只是“未来若写 EDP 协议可能使用的候选”，并不是 Plain 盘当前已观测到的协议 `device_id`。
+
+本章实施后：
+
+```text
+Plain:
+  observed protocol device_id = None
+  onlyid                     = None
+  derived device_id candidates = optional evidence
+```
+
+历史 EDPB 中 Plain 快照已经写入的 `device.device_id` 不能删文件或强行改写；兼容读取时按 `snapshot.device_state == plain` 降级解释为 `LegacyDerivedCandidate`，绝不能升级成“ObservedEdpDeviceId”。
+
+#### 15.2.4 USB serial 已经被用于安全绑定，但目前藏在 `provenance.notes`
+
+现有 `src/application/write.rs`：
+
+```text
+hardware_serial_sha256=<digest>
+```
+
+通过自由文本写入：
+
+```text
+manifest.provenance.notes
+```
+
+并由：
+
+```text
+manifest_hardware_serial_digest()
+verify_hardware_bound_restore()
+```
+
+重新解析文本。
+
+问题：
+
+- typed identity 被塞进自由文本；
+- 同一证据无法统一用于 backup grouping / TUI / provision / reopen；
+- notes 变成隐藏业务 API；
+- 不利于版本迁移与冲突检测。
+
+本章必须把它迁到 typed manifest identity evidence；旧 note 只作为 v1 legacy reader 的兼容输入。
+
+#### 15.2.5 EDPB 当前 identity schema 不能表达“Plain 没有 observed device_id”
+
+现有：
+
+```rust
+DeviceIdentity {
+    vid: String,
+    pid: String,
+    device_id: String,
+    onlyid: Option<String>,
+}
+```
+
+以及：
+
+```text
+edpb.manifest.v1
+FORMAT_MAJOR=1
+FORMAT_MINOR=0
+```
+
+需要建立新的 manifest identity schema，使：
+
+- observed EDP `device_id` 可以为 `None`；
+- hardware serial digest 是 typed 字段；
+- hardware / protocol / derived evidence 分层；
+- v1 备份继续只读兼容；
+- 不修改历史 EDPB 文件。
+
+具体版本策略见 15.7。
+
+#### 15.2.6 Backup catalog / selector 仍把 onlyid / device_id 当成主要归属键
+
+当前改造点：
+
+```text
+src/diskio/backup_catalog.rs
+  BackupMeta { secs, vid, pid, device_id, onlyid, ... }
+  scan_backup_file()
+
+src/diskio/backup_create.rs
+  find_backups()
+    exact vid/pid
+    exact sectors
+    optional device_id
+    optional LBA4 tag
+
+src/selectors.rs
+  BackupSelector::for_onlyid()
+  resolve_restore_target(... onlyid ...)
+  matches_onlyid()
+
+src/application/write.rs
+  restore interactive picker
+    当前 onlyid 缺失 -> 无法筛选 -> fail
+```
+
+本章要用统一 matcher 取代“单字段等值 = 同盘”的归组逻辑；但 restore 最终写盘仍使用更严格的 authorization policy，不因为列表里显示“很像”就允许写。
+
+#### 15.2.7 TUI 的 `ExpectedIdentity` 只有 onlyid/device_id
+
+当前：
+
+```rust
+src/tui/state.rs
+
+ExpectedIdentity {
+    onlyid: Option<String>,
+    device_id: Option<String>,
+}
+```
+
+且自动提权 resume argv 只传这两项。
+
+本章后要由 application 层提供 typed `MediaIdentityPin` / `IdentitySnapshotDigest`：
+
+- TUI 只持有/传递安全的摘要与 typed fields；
+- 不传 raw serial；
+- 提权边界继续走 argv，不依赖 env；
+- worker/reopen 重新采集当前身份再比较，不信任展示层缓存。
+
+#### 15.2.8 Provision 已经有比 backup 更强的硬件复核，必须复用而不是削弱
+
+当前：
+
+```text
+prepare.rs
+  expected_probe
+  expected_serial（需要格式化时缺失则拒绝）
+
+commit.rs
+  fresh_probe == expected_probe
+  fresh_total == expected_total
+  fresh_serial == expected_serial
+  verify_format_hardware()
+  reopen_and_verify()
+```
+
+本章不得把这些检查替换成较弱的“identity grade >= X”。
+
+正确方向：
+
+- 抽取公共 observation / compare primitives；
+- provision 继续使用 strict policy；
+- matcher 的分级用于解释、归组、UI 和候选筛选；
+- strict provision guard 可以消费同一证据模型，但门槛不得降低。
+
+### 15.3 新增 application-domain 类型
+
+建议新增：
+
+```text
+src/application/media_identity.rs
+```
+
+该模块 UI-neutral、无 ratatui、无磁盘写入，负责纯模型和纯比较。
+
+核心模型：
+
+```rust
+HardwareIdentityEvidence {
+    vid: Option<u16>,
+    pid: Option<u16>,
+    serial_sha256: Option<String>,
+    serial_quality: SerialQuality,
+    vendor: Option<String>,
+    product: Option<String>,
+    revision: Option<String>,
+    transport: Option<NativeTransport>,
+    total_sectors: Option<u64>,
+    logical_sector_size: Option<u32>,
+}
+
+ProtocolIdentityEvidence {
+    device_id: Option<String>,     // 仅“已观测 EDP device_id”
+    onlyid: Option<String>,
+    provision_kind: Identification<DiskProvisionKind>,
+    lba4_identity_digest: Option<String>,
+}
+
+DerivedProtocolEvidence {
+    device_id_candidates: Vec<String>,
+}
+
+MediaIdentitySnapshot {
+    hardware: HardwareIdentityEvidence,
+    protocol: ProtocolIdentityEvidence,
+    derived: DerivedProtocolEvidence,
+    observation: IdentityObservation,
+}
+
+IdentityObservation {
+    platform,
+    disk_selector/session locator（仅本次连接使用，不作为长期 ID）,
+    captured_epoch,
+}
+
+IdentityMatch {
+    relationship: MediaRelationship,
+    confidence: IdentityConfidence,
+    evidence: Vec<IdentityEvidenceResult>,
+    conflicts: Vec<IdentityConflict>,
+}
+```
+
+`device_id_candidates` 是**派生证据**，不能赋值给 `protocol.device_id`。
+
+另外提供：
+
+```rust
+IdentityEvidenceResult {
+    kind,
+    outcome: Match | Compatible | ChangedExpected | Missing | Conflict,
+    strength,
+}
+
+IdentityConflict {
+    kind,
+    severity,
+    explanation,
+}
+```
+
+matcher 必须是纯函数：
+
+```text
+match_media_identity(a, b, optional_lineage) -> IdentityMatch
+```
+
+内部不得打开物理盘、不得扫描备份目录、不得修改文件。
+
+### 15.4 USB serial 规范化和质量分级
+
+raw USB serial 不是无条件可信。增加：
+
+```rust
+SerialQuality {
+    Usable,
+    Suspicious,
+    Missing,
+}
+```
+
+规范化规则至少覆盖：
+
+- trim；
+- 空串 -> Missing；
+- 全 `0` / 全 `F` / 常见占位字符串 -> Suspicious；
+- 明显过短、只有固定占位模式 -> Suspicious；
+- 正常值 -> Usable。
+
+持久化只保存：
+
+```text
+SHA256(normalized serial)
+```
+
+不保存 raw serial。
+
+如果 catalog 中发现“同一 serial digest + 明显冲突的 VID/PID/产品描述/容量”：
+
+- 不把它继续当 A 级；
+- 标记 `SerialCollisionSuspected`；
+- 至少降级到 Ambiguous，禁止自动 destructive restore。
+
+serial 是“最强可用硬件证据”，不是不可伪造的硬件根信任。UI/文档不得写成“绝对唯一”。
+
+### 15.5 证据语义：相同和不同不是对称规则
+
+统一规则必须写进 matcher，不允许调用方各自解释。
+
+| 证据 | 相同 | 不同 |
+|---|---|---|
+| usable serial digest | 极强物理正证据 | **硬冲突** |
+| VID/PID | 中等正证据 | **硬冲突** |
+| vendor/product/revision | 辅助正证据 | 中等冲突/需结合其它证据 |
+| total_sectors | 中等正证据 | restore/provision 目标硬冲突 |
+| logical sector size | 中等正证据 | restore/provision 目标硬冲突 |
+| observed `device_id` | EDP 协议强正证据 | 负协议证据，但不能单独推出物理盘不同 |
+| `onlyid` | 同一 EDP instance 强正证据 | **不属于物理盘硬冲突**；重制盘后允许变化 |
+| LBA4 identity | 同一协议状态强正证据 | 重制盘后允许变化 |
+| mode / partition layout / filesystem UUID | 当前状态证据 | 不用于物理排除 |
+| derived device_id candidate | 兼容性佐证 | 不能替代 observed device_id |
+| controlled lineage | 跨状态强佐证 | 不能单独授权写盘 |
+
+特别锁定：
+
+```text
+onlyid same    => 强正证据
+onlyid changed => NOT DifferentPhysicalMedia
+
+device_id same => 强 EDP 正证据
+device_id changed / absent across Plain<->EDP
+               => NOT automatically DifferentPhysicalMedia
+```
+
+### 15.6 可靠性等级与 relationship
+
+不使用 0～100 的黑箱打分。使用可解释 enum，并把 relationship 与 confidence 分开。
+
+#### A — PhysicalStrong
+
+典型条件：
+
+- usable serial digest 精确一致；
+- VID/PID 精确一致；
+- sector geometry 无硬冲突。
+
+含义：
+
+> 在“不向介质写身份标记”的约束下，当前拿到的最强跨状态硬件证据。
+
+可用于：
+
+- 自动归组历史备份；
+- Plain ↔ EDP 状态变化后的同盘展示；
+- 作为 restore/provision strict guard 的一个输入。
+
+不能用于：
+
+- 跳过 reopen；
+- 跳过 backup；
+- 跳过 readback/rollback。
+
+#### B — EdpInstanceStrong
+
+典型条件：
+
+- 当前和历史都可确认是 EDP；
+- observed `device_id` 一致；
+- `onlyid` 一致；
+- VID/PID、容量、LBA4 协议身份一致；
+- 但没有 usable serial。
+
+含义：
+
+> 很强的“同一 EDP 制盘实例”证据，但协议数据可被整盘克隆，因此不是物理唯一证明。
+
+可用于归组/候选排序；不能替代缺失的硬件绑定去放宽 Plain restore。
+
+#### C — ControlledLineage
+
+典型条件：
+
+- edpcli 在主机侧记录了一个已完成并 readback 成功的受控制盘转换：
+  `before_snapshot -> transaction -> after_snapshot`；
+- 当前证据与 lineage 某一端兼容；
+- 无 usable serial 冲突、VID/PID 冲突、geometry 硬冲突。
+
+含义：
+
+> 很强的跨状态“历史连续性”证据，尤其适合 Plain → mode0 → mode2 → Plain。
+
+限制：
+
+- lineage 文件可复制/删除/篡改；
+- **永远不能单独授权 raw write / restore**；
+- 只能用于归组、解释、候选排序和 UI。
+
+#### D — HardwareProfileMatch
+
+只有：
+
+- VID/PID；
+- vendor/product/revision；
+- 容量/sector size；
+
+等型号级证据一致，没有 usable serial，也没有足够协议/lineage 证据。
+
+含义：
+
+> “像同一型号同一容量介质”，无法区分两块相同 U 盘。
+
+用途：
+
+- 显示候选；
+- 手工比较。
+
+禁止：
+
+- 自动选择 destructive restore target；
+- 自动声明“就是原盘”。
+
+#### E — Ambiguous / Insufficient
+
+证据不足或互相冲突，无法可靠归属。
+
+另外 relationship 独立表达：
+
+```rust
+MediaRelationship {
+    SamePhysicalMedia,
+    SameEdpInstance,
+    SameControlledLineage,
+    ProbableSameMedia,
+    ModelOnlyMatch,
+    Ambiguous,
+    DifferentMedia,
+}
+```
+
+硬冲突优先于所有正证据：
+
+1. usable serial mismatch -> `DifferentMedia`；
+2. VID/PID mismatch -> `DifferentMedia`；
+3. restore/provision 中 total_sectors / sector_size mismatch -> target conflict / fail closed；
+4. typed EDPB identity 自相矛盾 -> invalid evidence / fail closed；
+5. lineage 不能覆盖以上任一硬冲突。
+
+### 15.7 EDPB manifest identity schema 迁移
+
+目标：不再从 `provenance.notes` 解析业务身份，同时正确表达 Plain 无 observed `device_id`。
+
+采用**manifest schema v2，容器 framing 继续使用现有 EDPB 容器格式**：
+
+```text
+binary container:
+  EDPB framing 保持兼容
+
+manifest:
+  edpb.manifest.v1  继续只读兼容
+  edpb.manifest.v2  新 writer 默认输出
+```
+
+v2 至少包含：
+
+```rust
+ManifestV2 {
+    ...
+    identity: MediaIdentityManifest,
+    ...
+}
+
+MediaIdentityManifest {
+    hardware: PersistedHardwareEvidence,
+    protocol: PersistedProtocolEvidence,
+    derived: PersistedDerivedEvidence,
+}
+
+PersistedHardwareEvidence {
+    vid,
+    pid,
+    serial_sha256,
+    serial_quality,
+    vendor,
+    product,
+    revision,
+    transport,
+}
+
+PersistedProtocolEvidence {
+    device_id: Option<String>,   // 只有 identify/protocol validation 成功才 Some
+    onlyid: Option<String>,
+    provision_kind,
+    lba4_identity_digest,
+}
+
+PersistedDerivedEvidence {
+    device_id_candidates: Vec<String>,
+}
+```
+
+迁移策略：
+
+1. `verify_file/read_manifest` 支持 v1 + v2；
+2. v1 解析后通过 adapter 生成 canonical `MediaIdentitySnapshot`；
+3. v1 的 `hardware_serial_sha256=...` note 作为 legacy serial binding；
+4. 如果未来迁移工具同时看到 typed serial 与 legacy note 且不一致 -> Invalid，fail closed；
+5. v1 `device_state == plain` 时：
+   - `device.device_id` 只能进入 `LegacyDerivedCandidate`；
+   - canonical `protocol.device_id = None`；
+6. v1 EDP 快照仍按现有协议校验确认其 `device_id`；
+7. 不原地改写历史 EDPB；
+8. 新备份只写 v2；
+9. 老版本 edpcli 对 v2 不理解时应安全拒绝，而不是误读；
+10. EDPB content SHA / artifact integrity 规则不降低。
+
+新增兼容测试：
+
+- v1 encrypted；
+- v1 passwordless；
+- v1 Plain + legacy candidate；
+- v1 serial note；
+- v2 EDP；
+- v2 Plain；
+- malformed v2；
+- typed/legacy conflict；
+- v1/v2 raw protocol artifact 一致。
+
+### 15.8 Backup 创建：只读采集完整 evidence，Plain 不再伪造 `device_id`
+
+改造：
+
+```text
+src/application/write.rs
+src/diskio/backup_create.rs
+src/edpb.rs
+```
+
+建立统一：
+
+```text
+observe_media_identity_readonly(runner, disk, dev)
+```
+
+顺序：
+
+1. guard USB；
+2. 读取硬件 probe / serial / geometry；
+3. 读取 LBA0-12；
+4. `identify()`；
+5. 解析 onlyid / provision kind；
+6. 生成 derived `device_id_candidates`；
+7. 构建 `MediaIdentitySnapshot`；
+8. 写 EDPB v2。
+
+Plain：
+
+```text
+protocol.device_id = None
+protocol.onlyid    = None
+derived.device_id_candidates = [...]
+```
+
+EDP：
+
+```text
+protocol.device_id = Some(identify verified id)
+protocol.onlyid    = decoded/observed onlyid
+```
+
+Standalone `backup create` 本身是只读操作，因此：
+
+- 没有 usable serial 时**允许创建弱身份备份**；
+- EDPB 明确记录 `serial_quality=Missing/Suspicious` 和可用证据；
+- UI 标记“恢复绑定较弱”；
+- 不能因此降低后续 restore 的写盘门槛。
+
+而 `provision write` 的 mandatory backup 后是否允许继续写，仍由 provision strict identity policy 决定；如果当前操作按现有规则要求 serial，则继续 fail closed。
+
+### 15.9 Backup 文件名、catalog 与归组
+
+文件名只是展示/导航信息，不能继续承担 identity truth。
+
+新文件名建议使用非权威短摘要，而不是强塞 `device_id`：
+
+```text
+disk<N>_<sectors>_vid<VID>_pid<PID>_<state>_<identity-slug>_<timestamp>.edpb
+```
+
+其中 `identity-slug`：
+
+- 优先取 serial digest 的短前缀；
+- 否则取 hardware profile fingerprint 短前缀；
+- 明确仅用于文件名稳定性/人工辨认，不参与最终授权。
+
+历史文件名继续可解析。
+
+`BackupMeta` 扩展/替换为能携带 canonical identity snapshot 的结构，`scan_backup_file()` 只从**已校验 manifest**构造 identity；文件名只用于 legacy fallback/display。
+
+`find_backups()` 改为：
+
+```text
+current MediaIdentitySnapshot
+  x
+each verified BackupIdentitySnapshot
+  ↓
+IdentityMatch
+  ↓
+按 policy 过滤/排序
+```
+
+设备列表的 `n_baks` 统计：
+
+- A/B/C 可以自动归组；
+- D 可以单列“可能相关”但默认不计入严格“本盘备份”数量，或以独立 possible_count 展示；
+- E/Mismatch 不归组。
+
+具体 UI 同时显示：
+
+```text
+本盘备份: 3
+可能相关: 2
+```
+
+避免把 D 级同型号盘误算成确定历史。
+
+### 15.10 Restore candidate policy 与最终写盘 authorization 必须分离
+
+新增两个概念：
+
+```rust
+BackupAffinityPolicy
+RestoreAuthorizationPolicy
+```
+
+#### BackupAffinityPolicy
+
+用于：
+
+- 备份列表归组；
+- restore picker 候选筛选；
+- 排序。
+
+允许 A/B/C 自动出现；D 作为“可能相关”候选但不自动选；E 隐藏或明确冲突。
+
+#### RestoreAuthorizationPolicy
+
+用于真正写盘前，必须比 affinity 更严格。
+
+至少保持当前安全语义：
+
+- 当前盘具有有效 EDP LBA4/onlyid 时，协议身份必须按现有 restore contract 终验；
+- 当前是 Plain / LBA4=0 时：
+  - 仍要求强硬件绑定；
+  - usable serial digest 必须匹配；
+  - VID/PID 必须匹配；
+  - geometry 必须匹配；
+  - derived `device_id` candidate 只能是附加一致性检查；
+  - C/D 不能替代缺失 serial 放行。
+- 明确路径选择备份也不能跳过最终 authorization；
+- numerical picker 不再只靠 `onlyid`；
+- hard conflict 一律 fail closed。
+
+`src/selectors.rs` 中：
+
+```text
+for_onlyid
+matches_onlyid
+resolve_restore_target(... onlyid)
+```
+
+逐步迁移为 typed matcher/policy，最终删除“onlyid 是唯一归属键”的消费路径。
+
+### 15.11 Provision / reopen：统一 observation，但 strict 门槛不降级
+
+`PreparedNewProvision` 当前已有：
+
+- `expected_probe`；
+- `expected_serial`；
+- `expected_onlyid`；
+- `device_id`；
+- source metadata。
+
+本章新增：
+
+```text
+expected_identity_snapshot / MediaIdentityPin
+```
+
+但现有 strict checks 不删除。
+
+推荐：
+
+```rust
+MediaIdentityPin {
+    hardware_serial_sha256,
+    vid,
+    pid,
+    vendor_product_revision,
+    total_sectors,
+    logical_sector_size,
+    observed_device_id,
+    onlyid,
+    snapshot_digest,
+}
+```
+
+流程：
+
+```text
+selection
+  ↓
+read-only observe snapshot
+  ↓
+mandatory backup
+  ↓
+prepare_write / unmount / lock
+  ↓
+reopen
+  ↓
+fresh read-only identity observation
+  ↓
+strict compare + existing source snapshot verification
+  ↓
+atomic write
+  ↓
+readback
+```
+
+不得把：
+
+```text
+confidence == A
+```
+
+写成“直接放行”。
+
+### 15.12 主机侧 Controlled Lineage
+
+为了处理：
+
+```text
+Plain -> mode0 -> mode2 -> Plain
+```
+
+过程中 `onlyid`、LBA4、分区结构、mode 等变化，新增**主机侧 immutable transition records**。
+
+位置：
+
+```text
+<backup_dir>/.edpcli/identity-lineage/v1/<transaction-id>.json
+```
+
+采用“一事务一文件”，避免中心 JSON 文件并发覆盖。
+
+结构：
+
+```rust
+IdentityTransitionRecord {
+    schema,
+    transaction_id,
+    created_epoch,
+    operation,
+    before_identity,
+    after_identity,
+    mandatory_backup_path,
+    mandatory_backup_sha256,
+    provision_summary_digest,
+}
+```
+
+写入时机：
+
+1. provision protocol write / format / readback 全部成功；
+2. 重新只读观察 after identity；
+3. 主机侧创建 temp record；
+4. file fsync；
+5. atomic rename；
+6. directory sync。
+
+lineage 写失败时：
+
+- **已经成功的磁盘事务不能为了主机元数据失败而反向重写/rollback U 盘**；
+- 返回 typed warning；
+- 记录“lineage persistence failed”；
+- 用户可稍后重建 host index；
+- 不把本次磁盘成功误报成失败中间态。
+
+lineage 读取：
+
+- 校验 schema；
+- 校验 mandatory backup path 对应的 SHA（若文件仍存在）；
+- 记录损坏时忽略该 edge 并给 diagnostic；
+- lineage edge 永远不能覆盖 serial/VID/PID/geometry hard conflict。
+
+### 15.13 TUI / CLI 展示
+
+复用 Chapter 14 已完成的 shared identity projection，不让 renderer 自己匹配。
+
+`application::WorkspaceIdentity` 扩展为消费：
+
+```text
+MediaIdentitySnapshot
+IdentityMatchSummary
+```
+
+设备/备份详情增加：
+
+```text
+介质识别
+  可信度        Physical Strong / EDP Instance Strong / ...
+  关系          同一物理介质 / 同一 EDP 实例 / 受控历史 / 可能相关
+  Serial        已绑定 / 缺失 / 可疑
+  VID:PID       ...
+  device_id     ... / —
+  onlyid        ... / —
+  容量          ...
+```
+
+证据详情示例：
+
+```text
+✓ USB serial 摘要一致
+✓ VID/PID 一致
+✓ 总扇区一致
+△ onlyid 已变化（重制盘允许）
+△ 当前 Plain，无 observed device_id
+✓ 主机记录存在受控制盘转换
+```
+
+要求：
+
+- raw serial 不展示；
+- Unknown 不显示成 Plain；
+- D 级明确写“同型号候选/无法唯一确认”，不能显示“同一设备”；
+- hard conflict 要醒目；
+- renderer/search/sidebar 不产生额外磁盘 I/O；
+- 设备列表/备份列表共用 cached identity projection。
+
+### 15.14 自动提权 / TUI resume identity pin
+
+当前 `ExpectedIdentity { onlyid, device_id }` 迁移到 application-owned pin。
+
+要求：
+
+- argv 只带非秘密、稳定的摘要/typed scalar；
+- 不传 raw serial；
+- 不依赖环境变量继承；
+- 子进程必须重新 probe 当前盘；
+- resume pin 只是“预期值”，不能代替 fresh observation；
+- disk selector 仍使用现有 platform-native pin；
+- 任何 mismatch 在写前 fail closed。
+
+### 15.15 测试矩阵
+
+#### 15.15.1 纯 matcher 单测
+
+至少覆盖：
+
+1. 同 serial + VID/PID + geometry，Plain ↔ EDP -> A；
+2. serial mismatch，即使 `device_id/onlyid` 完全相同 -> DifferentMedia；
+3. VID/PID mismatch -> DifferentMedia；
+4. same EDP `device_id + onlyid`、无 serial -> B；
+5. same `device_id`、different `onlyid` -> 不是 SameEdpInstance，但不能推出 DifferentPhysicalMedia；
+6. Plain 无 device_id 与 EDP 有 device_id -> 不构成硬冲突；
+7. D 级两块同型号同容量盘 -> Ambiguous/ModelOnlyMatch；
+8. lineage edge + compatible weak hardware -> C；
+9. lineage + serial mismatch -> DifferentMedia，lineage 不得覆盖；
+10. suspicious/all-zero serial 不得生成 A。
+
+#### 15.15.2 EDPB compatibility
+
+- v1 EDP；
+- v1 passwordless；
+- v1 Plain legacy candidate；
+- v1 serial note；
+- v2 EDP；
+- v2 Plain；
+- v2 serial Missing/Suspicious/Usable；
+- malformed identity；
+- legacy/typed serial conflict；
+- v1/v2 verify + raw protocol read；
+- 历史文件不修改。
+
+#### 15.15.3 Backup / selector
+
+- Plain backup 新格式 `protocol.device_id == None`；
+- EDP backup observed device_id 保持正确；
+- backup create 不写目标盘；
+- 无 serial 的 standalone Plain backup 可创建但为 weak；
+- A/B/C grouping；
+- D 只显示 possible，不自动严格归组；
+- historical filename 不影响 manifest truth；
+- 重命名 EDPB 不改变 identity match；
+- `n_baks` 不把 D 级候选误算成确定备份。
+
+#### 15.15.4 Restore safety
+
+保留并迁移当前测试：
+
+- corrupt EDP + nonzero LBA4 永不降级成 Plain；
+- Plain LBA4=0 + matching serial 可进入现有 restore 安全链；
+- wrong serial 必须拒绝且 0 writes；
+- missing serial 的 weak backup 不能直接 destructive restore；
+- clone EDP 到不同 serial 设备，即使 device_id/onlyid 一样也拒绝；
+- explicit backup path 不能绕过 authorization；
+- numeric picker 不再仅凭 onlyid；
+- mismatch 在 unmount/write 前尽早失败；
+- reopen 后换盘仍失败。
+
+#### 15.15.5 Provision / lineage
+
+- Plain → mode0 成功后生成 lineage edge；
+- mode0 → mode2 再生成 edge；
+- mode2 → Plain 再生成 edge；
+- onlyid 变化不打断 lineage；
+- lineage persistence 失败只产生 host warning，不回写已成功磁盘；
+- lineage 损坏不授权写盘；
+- mandatory backup SHA 与 transition record 绑定；
+- K6 仍 fail-closed；
+- PreserveOpaque / PreserveVerified / RewrapVerified write-set 语义不变。
+
+#### 15.15.6 Secret / privacy / static gates
+
+源码门禁：
+
+1. 新业务代码不得解析 `hardware_serial_sha256=` 自由文本；仅 legacy v1 adapter 可出现；
+2. new Plain canonical protocol identity 不得填充 observed `device_id`；
+3. `device_id` 仍只在 EDP protocol/identify/provision 语义中使用；
+4. raw serial 不得进入 EDPB / lineage / Debug / log / progress / argv；
+5. matcher 必须无 I/O；
+6. identity observation 不得调用 `prepare_write` 或任意扇区写入；
+7. lineage 文件路径只在主机 backup_dir 下；
+8. 不得出现任何“为了 identity 写 LBA3/保留扇区”的代码；
+9. identity grade 不得跳过 mandatory backup / reopen / atomic write / readback / rollback；
+10. TUI renderer 不得打开 EDPB/物理盘重新匹配。
+
+### 15.16 实施顺序：I0 → I8
+
+本章严格按以下顺序执行；测试先行，小步 commit，及时 push。
+
+#### I0 — 固定基线与失败测试
+
+- 记录 `git status/HEAD/log`；
+- 确认 main clean；若不 clean，先审计并保留；
+- 加 matcher red tests；
+- 加 Plain observed-device-id red test；
+- 加 v1/v2 EDPB compatibility red tests；
+- 加 restore serial-conflict red test；
+- 加 lineage 不能覆盖 hard conflict 的 red test；
+- 不改生产逻辑前先确认失败原因正确。
+
+#### I1 — Canonical identity domain
+
+新增 `application/media_identity.rs`：
+
+- evidence structs；
+- serial normalization/quality；
+- relationship/confidence；
+- pure matcher；
+- conflict precedence；
+- display-neutral explanations。
+
+先让 matcher tests 全绿。
+
+#### I2 — 统一只读 observation
+
+新增 application 入口：
+
+```text
+observe_media_identity_readonly(...)
+```
+
+复用：
+
+- `HardwareProbe`；
+- `hardware_serial`；
+- total sectors；
+- `identify()`；
+- LBA4/onlyid；
+- `DiskProvisionKind`。
+
+删除 backup/provision/TUI 重复拼 identity 的新增长路径，但暂不改变 write authorization。
+
+#### I3 — EDPB manifest v2 + v1 adapter
+
+- 新 writer 输出 manifest v2；
+- v1 read adapter；
+- typed serial digest；
+- Plain `protocol.device_id=None`；
+- legacy Plain candidate 降级；
+- notes 不再作为新 writer 的 identity source；
+- 旧备份全部可读。
+
+完成后跑 EDPB / backup 专项。
+
+#### I4 — Backup catalog / grouping
+
+- `BackupMeta` 接入 canonical identity；
+- 新备份文件名去掉“Plain 冒充 device_id”的依赖；
+- `find_backups` 改 matcher；
+- `BackupWorkspaceItem` 携带 match-ready projection；
+- `disk_scan n_baks` 区分 confirmed / possible；
+- 无额外 renderer I/O。
+
+#### I5 — Restore selector / authorization
+
+- 迁移 `for_onlyid/matches_onlyid`；
+- typed affinity policy；
+- typed strict authorization policy；
+- 保留 Plain serial-binding fail-closed；
+- explicit/numeric 两条路径统一终验；
+- reopen safety 不变。
+
+#### I6 — Provision identity pin + host lineage
+
+- provision prepare 保存 canonical before snapshot/pin；
+- mandatory backup 与 before snapshot 绑定；
+- reopen 使用 fresh observation；
+- provision 成功 readback 后采集 after snapshot；
+- 原子写 host lineage record；
+- lineage failure typed warning；
+- 不改变已完成磁盘事务。
+
+#### I7 — CLI/TUI 展示与 elevation bridge
+
+- `WorkspaceIdentity` 投影 match grade / relationship；
+- Device/Backup 统一列/详情；
+- TUI ExpectedIdentity 迁移 typed pin；
+- resume argv 不带 raw serial；
+- D/E 级明确显示不确定性；
+- search/sidebar 不增加 I/O。
+
+#### I8 — 清理、全门禁与 HIL
+
+删除/收口：
+
+- 新写入路径中的 `hardware_serial_sha256=...` notes；
+- Plain fake observed device_id；
+- onlyid-only backup ownership；
+- 分散的 identity comparison；
+- filename-as-truth。
+
+验证：
+
+```text
+cargo fmt --check
+repository_suite
+identity focused suites
+backup/restore suites
+Chapter 12 key-domain suites
+test-fast
+test-full
+Virtual Disk HIL
+```
+
+真实 USB：
+
+- 仅在已知/受控密码状态下进行 password-dependent HIL；
+- 当前若盘上密码不可恢复，不猜密码、不绕过验证；
+- HIL 至少观察一次：
+  Plain backup -> provision -> backup -> restore/grouping
+  并证明状态变化后仍能正确关联；
+- 真实 HIL 每完成一个 case 再更新文档状态，不提前写 PASS。
+
+### 15.17 与 Chapter 14 的关系
+
+当前 Chapter 14：
+
+```text
+Q0-Q3 COMPLETE
+Q4-Q8 PENDING
+```
+
+本章身份治理是独立的 application/backup 安全治理，不把 Q4-Q8 自动标 COMPLETE。
+
+执行策略：
+
+1. 先完成 Chapter 15 I0→I8；
+2. Chapter 15 完成并 push 后，再回到 Chapter 14 Q4；
+3. 如果 Chapter 15 修改 `WorkspaceIdentity` / TUI resume / backup list，必须保持 Chapter 14 Q3 已完成的 shared schema、Unknown honesty、zero renderer I/O 门禁；
+4. 不顺手把 Chapter 14 Q4 的 DiskLayout/Provision presentation 重构混入 identity commit。
+
+### 15.18 完成标准
+
+只有以下全部满足，Chapter 15 才能标 COMPLETE：
+
+1. `device_id` 的 EDP 协议语义未改变；
+2. `onlyid` 未被当作物理永久 ID；
+3. 不向 U 盘任何 LBA/分区/文件写 identity marker；
+4. Plain canonical snapshot 没有 observed EDP `device_id`；
+5. EDP snapshot 的 `device_id` 必须经过协议识别/验证；
+6. usable serial 仅持久化 digest，不持久化 raw serial；
+7. v1 EDPB 继续可读，新 writer 使用 typed identity；
+8. backup grouping 不再只靠 onlyid/device_id；
+9. A/B/C/D/E 结果均有确定、可测试、可解释规则；
+10. serial/VID/PID/geometry hard conflict 优先于 lineage；
+11. lineage 永远不能单独授权 destructive write；
+12. Plain restore 的强硬件绑定没有被 C/D 级证据放宽；
+13. provision 原有 expected probe/serial/reopen/readback 安全不弱化；
+14. clone 到另一 serial 的盘必定被拒绝 destructive restore；
+15. 两块无 serial 的同型号同容量盘不会被自动宣称为同一物理盘；
+16. standalone backup 可记录 weak identity，但 UI 明确其恢复限制；
+17. TUI/CLI 展示 confidence + evidence，不只给 true/false；
+18. renderer 不产生 identity I/O；
+19. lineage 只写主机 backup_dir 且原子持久化；
+20. lineage 写失败不触碰已成功的 U 盘事务；
+21. secrets/raw serial 不进 Debug/log/progress/argv；
+22. fmt/fast/full/受影响专项/Virtual Disk HIL 全绿；
+23. 真实 USB case 只在实际执行成功后记录 PASS；
+24. 工作区 clean，提交已 push 到远程。
+
+最终原则：
+
+> **edpcli 不制造不存在的“绝对唯一 ID”。它只读采集硬件证据、EDP 协议证据、当前状态证据，并利用主机侧受控 lineage 建立可解释的介质关系和可信等级；归组可以使用多证据推断，破坏性写盘仍必须走独立且更严格的安全授权链。**
