@@ -419,7 +419,10 @@ impl AppState {
                     ));
                 }
                 self.provision.message = Some(if status.is_empty() {
-                    format!("来源状态: {} · 无 EDP 用户密码域", probe.source_kind.short_name())
+                    format!(
+                        "来源状态: {} · 无 EDP 用户密码域",
+                        probe.source_kind.short_name()
+                    )
                 } else {
                     format!(
                         "来源状态: {} · {}",
