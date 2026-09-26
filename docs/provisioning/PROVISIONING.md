@@ -4263,3 +4263,149 @@ python3 scripts/test-full.py --profile full
 15. 不改变任何已闭环 LBA0～12/LCE 协议语义和写盘安全门槛。
 
 最终原则：**页面只组织 Pane；Pane 决定按键如何作用于自己的内容；Tab/Ctrl-w 只移动焦点；j/k 永远服务当前 Pane；Inspect、Provision、Review 的磁盘布局全部来自同一份完整物理盘模型，并从 LBA0 连续覆盖到最后一个 sector。**
+
+## 14. 后续计划：Inspect 信息密度与多层解码语义（2026-09-26）
+
+> 状态：**PLAN ONLY / 持续收集**。本章用于当前计划分支继续收集 Inspect 细节问题；本章提交只允许补充调查结论、实现方案与回归门禁，不修改生产代码。后续用户提出的同类问题继续追加到本章，待问题清单确认后再单独进入实现分支。
+
+### 14.1 结构树单扇区节点去掉冗余 `[n..n]`
+
+当前 `src/tui/inspect/render.rs` 的结构树 renderer 对所有节点统一调用 `format_lba_closed_range(start, end_exclusive)`，再无条件拼到节点 label 后，因此 `LBA0` 会显示为 `LBA0 [0..0]`、`LBA12` 会显示为 `LBA12 [12..12]`。这对单个扇区节点重复表达同一信息，降低结构树信息密度。
+
+目标显示规则：
+
+```text
+单扇区 Sector 节点：
+  LBA0
+  LBA1
+  ...
+  LBA12
+
+多扇区 Region / Extent / Partition / UnknownRange：
+  EDP 主协议区 [0..12]
+  未知区域 [13..62]
+  ...
+```
+
+实现约束：
+
+- 只改变**结构树行文本**；内部 `InspectNodeRange` 仍保持 `[start, end_exclusive)`，不改变任何定位、搜索、折叠、懒加载和导航语义；
+- `InspectNodeKind::Sector` 不再追加 range suffix；其它节点继续使用统一闭区间 formatter；
+- 节点概览中的“范围”仍保留，因为 Overview 的职责就是展示完整元数据，不能因为结构树精简而丢失范围信息；
+- 不通过字符串判断 `label.starts_with("LBA")`，必须依据 `InspectNodeKind::Sector`，避免未来本地化或 label 变化造成行为漂移。
+
+回归门禁至少覆盖：
+
+1. Sector `LBA0` 渲染结果不含 `[0..0]`；
+2. Sector `LBA12` 渲染结果不含 `[12..12]`；
+3. 多扇区 `EDP 主协议区` 仍显示 `[0..12]`；
+4. `UnknownRange / Partition / Extent` 的范围显示不受影响；
+5. Tree selection、搜索、`gl` 跳转和 lazy sector 分页行为不变。
+
+### 14.2 `Decoded: 0x77 (119)` 与“保密区最大错误次数=255”并不矛盾
+
+当前界面把两层不同的“解码”混在一起显示，因此视觉上像是解析结果不一致。以 LBA12 的 `PassInfo` 为例，真实处理链是：
+
+```text
+物理 LBA12 raw sector
+  │
+  ├─ A6B0 整扇解密（device CRC key）
+  ▼
+sector plaintext / 当前 UI 的 `Decoded`
+  │
+  │ PassInfo 内部仍保留字段级存储编码
+  │ 对 PassInfo offset 0 / 3 / 6 再 XOR 0x88
+  ▼
+PassInfo logical value / 当前字段 `Value`
+```
+
+代码证据：
+
+- `protocol::lba12::parse_lba12()` 先对完整 512B 执行 A6B0 解密，并把结果保存在 `Lba12View::plain`；`decoded()` 返回的就是这一级 `plain`；
+- 随后从 `plain[0x120..0x12e]` 取 14B `stored_pass`，再调用 `PassInfo::decode_stored()`；
+- `PassInfo::decode_stored()` 对 offset `0 / 3 / 6` 执行 `^ 0x88`；
+- “保密区最大错误次数”正好位于 PassInfo offset `6`。
+
+因此默认逻辑值 `255 = 0xFF` 在 PassInfo 的存储表示中是：
+
+```text
+0xFF ^ 0x88 = 0x77
+```
+
+所以当前界面看到：
+
+```text
+Decoded: 0x77 (119)
+Value:   255
+```
+
+实际含义是：
+
+```text
+Sector decoded byte: 0x77   # 外层扇区已经解密，但 PassInfo 字段级 XOR 尚未解除
+Field logical value: 0xFF   # PassInfo::decode_stored() 再 XOR 0x88 后的真正字段值
+```
+
+协议解析本身没有把 119 错当成 255；问题在于 UI 把“外层 sector decode”简称成了过于宽泛的 `Decoded`，没有把字段级二次变换展示出来。
+
+### 14.3 计划中的 UI 修正
+
+Sector Inspector 不应继续让用户猜“Decoded 到底解了几层”。目标是把数据层级明确写出来：
+
+```text
+Raw byte:          0x.. (...)
+Sector decoded:    0x77 (119)
+Field decoded:     0xFF (255)      # 仅字段存在额外变换时显示
+Transform:         XOR 0x88        # 仅有已证实字段级变换时显示
+
+保密区最大错误次数
+Value: 255
+```
+
+设计原则：
+
+- `Sector decoded` 只表示 sector-level decoder 的输出，例如 LBA12 A6B0、LBA7 rolling XOR 等；
+- `Field decoded` 表示字段模型完成其自身存储编码/解码后的字节值；没有字段级二次变换时不重复显示；
+- `Value` 继续表示类型化语义值，例如整数、布尔、枚举、文本；
+- renderer 不允许硬编码“PassInfo offset 6 要 XOR 0x88”。字段级变换信息必须来自 inspect/protocol 模型；
+- 对无法证明的变换只显示 sector decoded/raw，不推测 `Field decoded`；
+- 现有 Raw / Decode / Mixed 三种 sector 视图语义保持不变，本项只修正详情区命名和字段级 provenance 展示。
+
+建议在 `SectorField` 或等价只读 inspection DTO 中增加可选的字段级表示信息，例如：
+
+```text
+stored_bytes       # sector decoded 后、字段自身 decode 前
+logical_bytes      # 字段自身 decode 后；仅可可靠重建时存在
+transform_note     # 例如 "XOR 0x88"，必须来自协议事实
+```
+
+具体字段名可在实现时调整，但不能让 TUI renderer 自己重新实现协议算法。
+
+### 14.4 回归门禁
+
+至少新增：
+
+1. LBA12 PassInfo 保密区最大错误次数为 `255` 时，sector decoded byte 固定显示 `0x77 (119)`；
+2. 同一字段的 field decoded/logical byte 显示 `0xFF (255)`；
+3. 回归验证 `0x77 ^ 0x88 == 0xFF`，并锁定 PassInfo offset 6 的字段映射；
+4. 交换区最大错误次数（PassInfo offset 3）同样遵循字段级 XOR 展示；
+5. 不需要字段级变换的普通字段不出现伪造的 `Field decoded`；
+6. LBA12 `Value` 仍来自 canonical `PassInfo` parser，不从 UI 显示字节反推；
+7. Raw / Decode / Mixed 切换、byte cursor、高亮和 active field range 均不回归；
+8. LBA0～12/LCE golden protocol tests 保持不变。
+
+### 14.5 实施顺序
+
+后续真正实现时按以下顺序执行：
+
+```text
+I0  先补失败测试：单扇区 Tree 文案 + PassInfo 多层 decode 展示
+I1  Tree renderer 对 Sector 去掉 range suffix
+I2  inspection DTO 增加字段级 stored/logical/provenance（只读）
+I3  Sector Inspector 将 `Decoded` 改为 `Sector decoded`
+I4  有可靠字段变换时增加 `Field decoded` / `Transform`
+I5  更新 Help / USAGE 中对 Raw / Decode / Mixed 的术语说明
+I6  跑 inspect/tui 专项、fast/full；只读真实盘验收，不触发写盘
+```
+
+本章当前只记录计划。**不得在这个计划分支直接实现 I1～I6。**
