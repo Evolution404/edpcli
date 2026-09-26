@@ -5363,3 +5363,398 @@ I3k  增加宽屏/窄屏/中文宽度/状态实时更新回归测试
 ```
 
 最终标准：**用户不需要逐句阅读磁盘布局；扫一眼三行分区表，就能立即看出启动区、交换区、保密区分别是“候选保留/保留”还是“需重建/重建”，同时所有 LBA、容量、扇区数都纵向对齐可比较。**
+
+### 14.10 制盘执行过程：结构化进度 + 实时日志 + 慢盘可观测性
+
+当前制盘 `Running` 阶段的可观测性不足。审计确认：
+
+- `request_provision_write()` 在真正调用 `commit_provision_on_disk()` 前只发送**一次** `ProvisionProgress { message }`；
+- `TaskUpdates.provision_progress` 只保存一条字符串，`tui/mod.rs` 收到后直接覆盖 `ProvisionState.message`；
+- `ProvisionState` 没有阶段、计数、开始时间、最近活动时间或日志缓冲；
+- `ProvisionStage::Running` UI 最终只显示一条“正在写入…”消息，因此某些慢 U 盘在 `sync/read/write/reopen` 阻塞数十秒时，界面看起来与卡死无异；
+- 底层实际上已有明确的可观测边界：锁卷/重开/身份复核、事务写前镜像、按 stage 写 sector、sync、逐扇区 readback、协议复核、逐分区格式化、格式化 readback、失败后的最多 3 次 rollback。
+
+所以不能继续用“更新一行 message”的方式解决。应建立**application 层 typed progress event**，CLI/TUI 共用同一事件语义；TUI 再在此基础上维护实时运行状态与滚动日志。
+
+#### 14.10.1 Running 页面目标
+
+宽屏建议：
+
+```text
+┌ 制盘执行 · disk4 ─────────────────────────────────────┐
+│ 总进度   63%  [━━━━━━━━━━━━━━━━━━━━────────────]       │
+│ 阶段     5 / 8   格式化交换区                         │
+│ 阶段进度 128 / 236 planned sectors   54.2%            │
+│ 当前     写入 LBA 20543                               │
+│ 速度     1.8 MiB/s   3520 sector/s                    │
+│ 已耗时   00:42.7     最近活动 0.2s 前                 │
+│ 状态     ◆ 正在执行安全事务                           │
+├ 实时日志 ─────────────────────────────────────────────┤
+│ 00:00.0  INFO  锁定并卸载 disk4                       │
+│ 00:00.8  OK    重开与硬件身份复核通过                 │
+│ 00:01.0  INFO  写前镜像 78 个 touched sectors         │
+│ 00:01.8  OK    写前镜像完成                           │
+│ 00:02.0  INFO  写入协议/LCE 1/78                      │
+│ ...                                                    │
+│ 00:40.1  INFO  交换区格式化：写入 64/236             │
+│ 00:42.7  INFO  交换区格式化：写入 128/236            │
+└────────────────────────────────────────────────────────┘
+q / Esc / Ctrl-C 仍只登记退出请求；不会中断介质事务
+```
+
+核心要求：用户任何时候至少知道：
+
+```text
+现在在哪个阶段
+这个阶段完成多少
+整个计划大致完成多少
+当前具体在做什么
+最近一次真实 I/O 进展是什么时候
+事务是否仍然处于安全执行状态
+```
+
+#### 14.10.2 进度必须来自真实工作量，不能做假的时间百分比
+
+禁止用：
+
+```text
+运行 10 秒 = 30%
+运行 20 秒 = 60%
+```
+
+这对不同 U 盘完全没有意义。
+
+应按**计划中的真实操作单元**计数：
+
+事务写盘 `execute_write_transaction()` 已知 touched sector 数 `N`，可精确拆为：
+
+```text
+写前镜像读取    N
+正式写入        N
+正式读回校验    N
+```
+
+即主要可计数工作量为 `3*N` 个 sector I/O。`sync()`、锁卷、重开等没有合理 byte 百分比的操作作为独立 milestone，不伪造内部进度。
+
+分区格式化同理。当前 `execute_partition_format()` 实际只写 `built.image.sectors()` 中的 planned/sparse sectors，并随后读回这些 sectors，因此阶段总量必须使用：
+
+```text
+planned_sectors = built.image.sectors().len()
+```
+
+不能拿整个分区的 `partition sector_count` 冒充“将逐扇区写完整个 6.49 GiB 分区”，否则 UI 会严重误导用户。
+
+建议总体进度定义为 deterministic work units：
+
+```text
+固定 milestone + 已知 sector I/O units
+```
+
+百分比表示“计划工作单元完成度”，**不是 ETA，也不是按时间预测**。在 `sync/reopen` 等未知时长阶段，百分比保持不动，但阶段名、耗时和“等待设备响应”持续更新。
+
+#### 14.10.3 统一的阶段模型
+
+Official 制盘至少拆成：
+
+```text
+1  安全预检 / write-set 校验
+2  锁卷、卸载、读写重开
+3  硬件身份 / 容量 / serial / LBA3 复核
+4  touched sectors 写前镜像
+5  协议 + LCE / 数据事务写入
+6  sync + 事务 readback
+7  LBA0–12 / onlyid / 分区布局协议复核
+8  逐个选中分区格式化与文件系统 readback
+9  完成
+```
+
+Plain 至少拆成：
+
+```text
+1  安全预检
+2  锁卷、卸载、读写重开
+3  身份 / 容量复核
+4  touched sectors 写前镜像
+5  MBR / cleanup / 文件系统事务写入
+6  sync + readback
+7  MBR / LBA3 / LBA7 / LBA12 / Plain 状态复核
+8  完成
+```
+
+失败时切换到独立 Recovery 状态：
+
+```text
+回滚 1/3：写回镜像
+回滚 1/3：sync
+回滚 1/3：读回校验
+...
+```
+
+正常进度不能在回滚时倒退成 20%。一旦进入 rollback，UI 主状态改为：
+
+```text
+⚠ 正在回滚，勿拔盘
+```
+
+并显示独立 rollback progress。
+
+#### 14.10.4 application 层新增 typed event，不让 TUI 猜业务
+
+建议引入名称可调整的模型：
+
+```text
+ProvisionProgressEvent
+  RunStarted
+  StageStarted
+  StageProgress
+  StageCompleted
+  SyncStarted
+  SyncCompleted
+  RollbackStarted
+  RollbackProgress
+  RollbackCompleted
+  Warning
+  Completed
+```
+
+核心字段示意：
+
+```text
+operation_phase
+partition_role: Option<PartitionRole>
+current: Option<u64>
+total: Option<u64>
+unit: Sector | Byte | Item
+current_lba: Option<u64>
+message
+```
+
+同时提供 UI-neutral sink/callback：
+
+```text
+commit_provision_with_progress(..., sink)
+execute_write_transaction_with_progress(..., sink)
+execute_partition_format_with_progress(..., sink)
+```
+
+现有无 progress 的 API 可以作为 wrapper 调用 `NoopProgressSink`，避免 CLI/测试被迫依赖 TUI。
+
+**事件上报绝不能改变写盘正确性。** progress sink 的失败、TUI channel 暂时消费不及等情况，不能导致磁盘事务失败或跳过 rollback；安全事务仍以原有 I/O 返回值为唯一成败依据。
+
+#### 14.10.5 事件粒度要可见，但不能每 512B 把 UI channel 打爆
+
+规则：
+
+- stage start/end、sync start/end、错误、rollback start/end：始终发；
+- sector loop：按“时间或数量”节流；
+- 建议达到任一条件即发一次：
+  - 自上次事件 >= 100ms；或
+  - 新完成 >= 64 sectors；
+- 如果慢盘单个 sector 就超过 100ms，那么每完成一个 sector 都能自然产生可见更新；
+- 每个阶段最后一个单位必须强制发 `current == total`。
+
+TUI 不需要保存每个 sector 一行日志。高频 `StageProgress` 更新状态卡片即可；日志只追加 milestone 或按节流周期追加简化记录，避免上千行噪音。
+
+#### 14.10.6 “没有事件”时也不能看起来死机
+
+有些最慢的操作可能阻塞在：
+
+```text
+prepare_write / unmount
+reopen
+hardware probe
+sync
+单次设备 read/write
+```
+
+worker 被阻塞时无法凭空产生真实 I/O progress。因此 TUI 自己基于 monotonic clock 显示：
+
+```text
+阶段耗时       00:18.4
+最近活动       18.4s 前
+状态           等待设备响应…
+```
+
+例如：
+
+```text
+< 3s    正常显示
+>= 3s   “等待设备响应 3.2s”
+>= 15s  warning： “设备响应较慢，事务仍在执行，请勿拔盘”
+```
+
+阈值实现时可以常量化并测试，但不能因为“15 秒无事件”自动取消、重试或重开设备。**慢不等于失败。** 原有安全事务没有超时语义的地方，本项不能私自新增破坏性 timeout。
+
+“最近活动”必须表示最后一个真实 progress event 的时间，不得把动画 tick 当成设备活动。
+
+#### 14.10.7 速度显示只基于真实 completed units
+
+当连续收到 sector progress 时，使用最近几秒滑动窗口计算：
+
+```text
+sector/s
+KiB/s 或 MiB/s
+```
+
+无新 sector 完成时速度降为：
+
+```text
+—
+```
+
+而不是继续显示旧速度。
+
+对于 `reopen/sync/hardware probe` 这种没有 byte 单位的阶段，不显示伪造吞吐率。
+
+#### 14.10.8 实时日志使用 ring buffer，并保留到 Result 页面
+
+`ProvisionState` 增加独立运行态，而不是继续复用单个 `message`：
+
+```text
+ProvisionRunState
+  started_at
+  stage_started_at
+  last_activity_at
+  phase
+  overall_progress
+  stage_progress
+  current_action
+  rollback_state
+  log: VecDeque<ProvisionLogEntry>
+  follow_tail
+  log_scroll
+```
+
+日志建议限制最近 200～500 条，防止长事务无限增长。被淘汰时保留一条：
+
+```text
+… 更早 324 条运行记录已折叠
+```
+
+`Result` 页面不能马上丢掉运行日志。成功后保留完整运行摘要；失败后自动把失败阶段、错误和 rollback 结果固定在顶部，下面仍可滚动查看此前日志。
+
+#### 14.10.9 日志内容与安全边界
+
+可以记录：
+
+```text
+阶段
+partition role
+LBA / LBA range
+planned sector count
+写入/读回计数
+sync 开始/结束
+目标 disk 编号
+身份复核通过/失败
+rollback attempt
+耗时
+错误文本
+```
+
+禁止记录：
+
+```text
+用户密码
+FileKey / 原始 key material
+PassInfo 密码内容
+完整 raw sector 数据
+任何为了日志而新增读取敏感内容的行为
+```
+
+日志只是现有事务的观察面，不能增加新的写盘动作，也不能为了“显示得更详细”重新读目标介质。
+
+#### 14.10.10 Running 页面交互
+
+写盘期间仍遵循现有安全规则：
+
+```text
+q / Esc / Ctrl-C  -> 只登记退出请求，安全检查点后处理
+```
+
+但允许纯 UI 的日志浏览：
+
+```text
+j/k          上下滚动日志
+Ctrl-u/d     半页
+PageUp/Down  整页
+G            回到日志末尾并恢复 follow-tail
+```
+
+用户手动向上滚动后暂停自动追尾；新日志继续进入 buffer，但不抢走阅读位置。按 `G` 恢复自动追尾。
+
+这些键只影响 viewport，绝不能触发/取消任何介质操作。
+
+#### 14.10.11 宽屏与窄屏
+
+宽屏：上方状态卡 + 下方日志 Pane。
+
+中等宽度仍纵向堆叠，状态信息压为：
+
+```text
+63%  阶段 5/8  格式化交换区
+128/236 sectors  00:42.7  最近活动 0.2s
+```
+
+窄屏优先保留：
+
+```text
+阶段名
+阶段 current/total
+总进度
+已耗时 / 最近活动
+最后 3～5 条日志
+```
+
+吞吐率、详细 LBA 可在空间不足时省略，但“当前阶段”和“最近活动”不能省略。
+
+#### 14.10.12 CLI 也应复用同一事件语义
+
+虽然本需求首先解决 TUI 慢盘无反馈，但 progress 事件应来自 application 层，因此 CLI 可以按行输出相同 milestone：
+
+```text
+[1/8] 锁定目标盘…
+[2/8] 重开并复核身份… OK
+[4/8] 写前镜像 78/78 sectors
+[5/8] 写入 64/78 sectors
+...
+```
+
+CLI 不需要实现 TUI 进度条，但不能拥有另一套独立阶段定义。
+
+#### 14.10.13 回归门禁
+
+至少新增：
+
+1. 当前“只发一次 ProvisionProgress 字符串”的路径被 typed events 取代；
+2. Official 与 Plain 都有确定的 stage start/end 序列；
+3. transaction 镜像/写入/readback 的 `current/total` 与真实 touched sectors 一致；
+4. partition format 的 total 使用 `built.image.sectors().len()`，禁止用整个分区容量冒充实际写入量；
+5. stage progress 单调、`0 <= current <= total`，最后必达 `total`；
+6. overall progress 单调且不超过 100%，不依赖 wall-clock 推算；
+7. `sync/reopen` 长时间无 progress 时 UI 显示 elapsed + last activity + 等待设备响应，不伪造百分比变化；
+8. progress sink 不得改变事务成功/失败/rollback 结果；
+9. 写盘失败进入 rollback 时有独立 Recovery 状态和 1/3～3/3 attempt 日志；
+10. rollback 成功/失败的最终安全含义与现有 `EXIT_ROLLED_BACK / EXIT_INTERMEDIATE` 完全不变；
+11. 日志 ring buffer 有上限，超限不会导致内存持续增长；
+12. 日志不包含密码、FileKey、raw sector payload；
+13. Running 中 `j/k/G` 只改变日志 viewport，不改变事务；
+14. 手工滚日志后不被新事件强制跳到底，`G` 恢复 follow-tail；
+15. Result 页面保留运行日志与失败阶段；
+16. 120/100/80/60 列宽都有 Running snapshot/contract 测试；
+17. 使用 fake slow `SectorDev` / fixed clock 测试“长时间等待设备响应”提示，不依赖真实 sleep 做慢测试；
+18. 原有卸载/锁卷、reopen 身份复核、atomic write、readback、rollback 安全门槛一个都不能删除或绕过。
+
+后续实现顺序增加：
+
+```text
+I2g  定义 ProvisionProgressEvent / phase / unit / NoopProgressSink
+I2h  transaction executor 增加镜像/写入/readback/rollback progress hook
+I2i  provision commit 增加锁卷/身份复核/protocol/format 阶段事件
+I3l  ProvisionRunState：计时、stage/overall progress、ring log、follow-tail
+I3m  Running 页面重做为状态卡 + 进度条 + 实时日志
+I3n  Result 页面保留 execution summary / log / rollback outcome
+I3o  CLI 复用同一 progress event milestone renderer
+I3p  fake slow device + fixed clock + rollback + 宽度回归门禁
+```
+
+最终标准：**即使某块 U 盘每次 sync 或单个 sector I/O 都非常慢，用户也不会再面对一块“完全不动”的界面；能明确看到当前阶段、真实完成量、已耗时、最近活动、滚动日志，以及失败时正在回滚到什么程度，同时不牺牲现有任何写盘安全门槛。**
