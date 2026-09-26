@@ -3396,3 +3396,837 @@ Share default FAIL / Encrypt default FAIL
 13. 文档、TUI、CLI Review 与实际 planner 单一事实源一致。
 
 最终原则：**五种盘型只定义布局；区域语义决定能否保留；密码属于独立 key domain；不知道密码不等于必须破坏数据；改密码不等于换 FileKey；一旦换 FileKey 就必须重建对应数据区。**
+
+## 13. 后续计划：统一 Pane 架构与全盘 DiskLayout（2026-09-26）
+
+> 状态：**PLAN ONLY / 暂不实施**。本章只固化后续 TUI 重构方案，不在当前提交中修改生产代码。本章与第 10、11 章共同构成 TUI 设计约束；如有冲突，以本章对“窗口焦点、窗口滚动、Inspect 四 Pane、Provision 多 Pane、全盘 DiskLayout”的规则为准。
+
+### 13.1 当前结构性问题
+
+当前 main 已有两个应继续复用的基础：
+
+- `src/tui/disk_layout.rs` 已有共享 `DiskLayoutModel`，Inspect 与 Provision 都在调用；
+- Inspect topology 已经能按物理 LBA 顺序描述从盘头到盘尾的区域。
+
+但当前 UI 仍有四个架构问题：
+
+1. **Inspect 的磁盘布局不是 Pane。** `AdvancedInspectPanel` 只有 `Tree / Overview / Detail`，但屏幕实际同时存在“磁盘布局 / 结构树 / 节点概览 / 节点详情”四块内容。磁盘布局有边框、有长内容，却没有 focus 和 viewport。
+2. **Inspect 的 `j/k` 仍是页面级 tree move。** 当前 Browser 中 `MoveUp/MoveDown` 直接移动 tree selection；切到 Overview/Detail 后，`j/k` 仍会影响 Tree，而不是当前窗口。
+3. **Detail 的纵向浏览不完整。** 纯文本 Detail 能用 `detail_scroll`，但 Sector 字段一旦渲染成 Table，目前只有 `h/l` 横向 column viewport，没有 vertical row viewport，长表下半部分无法访问。
+4. **Provision 的磁盘布局只覆盖可分区区间。** 官方模式 `provision_layout_model()` 从 `OFFICIAL_PARTITION_START_SECTOR = 63` 开始，并以 `usable_end_lba - 63` 作为总长度，因此没有显示 LBA0～62、LCE 后区域、盘尾等完整物理空间。
+
+本章目标不是继续给各页面补特殊键位，而是建立统一的：
+
+```text
+Workspace
+  ↓
+Pane
+  ↓
+WidgetRole
+  ↓
+Pane-local Action
+```
+
+### 13.2 Pane 是一等交互单元
+
+建议引入统一 Pane 状态模型，具体类型名可在实现时调整：
+
+```rust
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+enum PaneId {
+    InspectDiskLayout,
+    InspectTree,
+    InspectOverview,
+    InspectDetail,
+
+    ProvisionParameters,
+    ProvisionDiskLayout,
+    ProvisionSummary,
+    ProvisionChanges,
+}
+
+#[derive(Debug, Clone, Default)]
+struct PaneViewport {
+    scroll_y: usize,
+    scroll_x: usize,
+    selected: Option<usize>,
+}
+
+struct PaneFocusState {
+    focused: PaneId,
+    viewports: BTreeMap<PaneId, PaneViewport>,
+}
+```
+
+硬性要求：
+
+- focus 与业务 selection 分离；
+- 每个可能溢出的 Pane 都拥有自己的纵向 viewport；
+- Table 可额外维护横向 viewport；
+- Pane 切换、终端 resize、进入/退出 Sector Inspector 后都能恢复原 focus/scroll/selection；
+- NavigationStack 保存 Pane focus 和必要 viewport，不再只保存一个页面级 `detail_scroll`。
+
+### 13.3 多 Pane 页面统一键位
+
+Normal mode 下统一：
+
+| 按键 | 语义 |
+| --- | --- |
+| `Tab` | 下一个 Pane |
+| `Shift-Tab` | 上一个 Pane |
+| `Ctrl-w h/j/k/l` | 按空间方向切换 Pane |
+| `Ctrl-w w / W` | 下一个 / 上一个 Pane |
+| `j/k` | 当前 Pane 的纵向操作 |
+| `Ctrl-d/u` | 当前 Pane 半页下/上 |
+| `PageDown/PageUp` | 当前 Pane 整页下/上 |
+| `gg/G` | 当前 Pane 顶部/底部 |
+| `Esc` | 返回上一层 |
+| `q` | 全局退出，仍受 critical-operation 安全门禁保护 |
+
+`j/k` 的具体行为由 focused Pane 的 WidgetRole 决定：
+
+```text
+Tree:
+  j/k = 下一/上一节点
+
+Overview:
+  j/k = 当前内容滚动一行
+
+Detail Paragraph:
+  j/k = 当前内容滚动一行
+
+Detail Table:
+  j/k = row viewport 下一/上一行
+
+DiskLayout:
+  j/k = 区域明细滚动一行
+
+Provision Parameters:
+  j/k = 下一/上一字段
+```
+
+禁止再出现“Inspect 页面所有 `j/k` 都直接调用 `move_tree()`”这种页面级硬编码。
+
+### 13.4 h/l 继续按 WidgetRole 解释
+
+保留第 11 章 context-sensitive h/l 原则：
+
+```text
+Tree:
+  h/l = 折叠/展开、父/子
+
+Table:
+  h/l = 横向 column viewport
+
+Input/Insert:
+  ←/→ = 文本光标
+  h/l = 输入字符或按输入模式定义
+
+纯文本 Overview / Detail / DiskLayout:
+  默认不占用 h/l；未来若增加横向 viewport，由 Pane 自己声明
+```
+
+KeyMapper 后续至少需要知道：
+
+```text
+InputMode
+Workspace
+Focused Pane
+WidgetRole
+```
+
+### 13.5 Sector Inspector：扇区切换与滚动分离
+
+上一/下一 sector 属于数据导航，不属于 viewport scroll。
+
+目标语义：
+
+```text
+[ / ]       上一个 / 下一个 sector
+j / k       当前 Hex/字段视图纵向移动
+h / l       当前 Hex/字段视图横向/字节导航
+Ctrl-u/d    半页
+PageUp/Down 整页
+gg / G      顶/底
+```
+
+因此：
+
+- `PageUp/PageDown` 不再用于切换 LBA；
+- `j/k` 绝不能切换 sector；
+- sector navigation 必须有独立 action 和 Help 文案；
+- 若 `[`/`]` 与现有绑定冲突，实现阶段可以换成其它独立键，但“扇区切换与窗口滚动分离”不能妥协。
+
+### 13.6 DiskLayoutModel 升级为完整物理盘契约
+
+现有 `DiskLayoutModel` 继续作为共享单一事实源，不新增 InspectLayout / ProvisionLayout 两套模型。
+
+当 `total_sectors > 0` 时必须满足：
+
+```text
+first.start_lba == 0
+
+任意相邻 segment:
+previous.end_exclusive == next.start_lba
+
+last.end_exclusive == total_sectors
+
+所有 segment:
+sector_count > 0
+无 overlap
+无 hole
+```
+
+内部统一使用 `[start, end_exclusive)`；UI 统一显示闭区间 `[start..end]`，禁止 renderer 自己重复算范围。
+
+### 13.7 RegionKind 与 RegionState 分离
+
+颜色表达“区域是什么”，操作状态表达“这个区域会怎么处理”，两者不能混在一个枚举里。
+
+建议语义：
+
+```rust
+enum DiskRegionKind {
+    Protocol,
+    Reserved,
+    Unknown,
+    Plain,
+    Boot,
+    Share,
+    Combined,
+    Encrypt,
+    Compatibility,
+    Lce,
+    Tail,
+}
+
+enum DiskRegionState {
+    Existing,
+    Preserved,
+    Rebuilt,
+    New,
+    Free,
+    Dropped,
+}
+```
+
+例如“保密区 + Rebuild”仍然使用保密区颜色，只额外显示 `Rebuild` 状态；不能因为要重建就换成另一种区域颜色。
+
+### 13.8 Unknown / Reserved / Free / Tail 严格区分
+
+全盘视图至少区分：
+
+```text
+Unknown
+= Inspect 当前无法确定语义
+
+Reserved
+= canonical target 明确要求保留、不允许用户分配
+
+Free
+= planner 明确允许分区占用
+
+Tail
+= 盘尾保护区域
+
+Protocol
+= EDP 协议区域
+```
+
+因此 Provision 不得把“不是用户分区”的所有 gap 都叫“空闲”。
+
+例如 `[13..62]`：
+
+- Inspect 可显示“未知区域”；
+- canonical Provision 可显示“保留区域 · 不写入”；
+- 只有 planner 明确可分配的范围才能标记为 `Free`。
+
+### 13.9 Provision 必须从 LBA0 显示到最后一个 sector
+
+所有目标模式都改为完整物理盘视图，而不是只显示 LBA63 之后的可分区区间。
+
+mode0 示例应按顺序覆盖：
+
+```text
+EDP 主协议区        [0..12]
+保留/未知区域       [13..62]
+启动区              [63..20479]
+交换区              [...]
+保密区              [...]
+LCE                 [...]
+LCE 后保留/未知区    [...]
+盘尾区域            [last-2047..last]
+```
+
+具体边界只能来自 canonical planner / protocol geometry，禁止 TUI 猜测。
+
+mode1 / mode2 / mode3 同样必须完整覆盖 `[0..total_sectors-1]`。
+
+Plain 使用自己的完整磁盘模型，不硬套 EDP 标签；可以是 MBR/保留区、普通分区、Free/Reserved 等，但仍必须从 0 连续到 last sector。
+
+### 13.10 抽取共享 DiskLayoutPane
+
+Inspect 与 Provision 不再各自拼：
+
+```text
+bar_line
+legend
+layout_lines
+Paragraph
+```
+
+而是共享一个 Pane renderer。
+
+建议模型：
+
+```rust
+struct DiskLayoutPaneModel {
+    title: String,
+    disk_label: String,
+    total_sectors: u64,
+    total_bytes: u64,
+    regions: Vec<DiskLayoutRegion>,
+    status_line: Option<String>,
+}
+```
+
+统一显示：
+
+1. 整盘摘要；
+2. `[0..last_sector]`；
+3. 比例条；
+4. 色标；
+5. 按 LBA 排序的区域明细；
+6. range / sectors / size / percent；
+7. 可选 Preserve / Rebuild / New / Drop 等状态；
+8. coverage 验证结果。
+
+Inspect、Provision Form、Provision Review 只负责生成不同 model：
+
+```text
+Inspect:
+  current / observed
+
+Provision Form:
+  target / planned
+
+Provision Review:
+  current + target / before + after
+```
+
+renderer、比例算法、颜色、legend、range formatter 必须共用。
+
+### 13.11 DiskLayoutPane 自己拥有 vertical viewport
+
+获得焦点后：
+
+```text
+j/k         一行
+Ctrl-u/d    半页
+PageUp/Down 一页
+gg/G        首尾
+```
+
+建议固定 summary / 比例条 / legend，只让 region detail list 滚动。
+
+窗口高度不足时：
+
+- summary 可压缩；
+- bar 保留；
+- legend 可折行或压缩；
+- 明细始终可以通过 viewport 浏览；
+- 不允许简单截断后让底部区域永久不可访问。
+
+### 13.12 Inspect 从三 Pane 升级为四 Pane
+
+最终：
+
+```text
+DiskLayout
+Tree
+Overview
+Detail
+```
+
+Tab 顺序：
+
+```text
+DiskLayout
+→ Tree
+→ Overview
+→ Detail
+→ DiskLayout
+```
+
+Shift-Tab 反向。
+
+此规则覆盖第 11.7 章旧的 `Tree → Overview → Detail` 三 Pane 循环。
+
+### 13.13 Inspect 宽屏布局
+
+继续保留当前视觉方向：
+
+```text
+设备 > disk4 > Inspect                         Esc 返回：设备列表
+
+┌ 磁盘布局 ────────────────────────────────────────────────┐
+│ summary / bar / legend / region details                 │
+└──────────────────────────────────────────────────────────┘
+
+ 磁盘布局 │ 结构树 │ 节点概览 │ 节点详情
+
+┌ 结构树 ──────────┬ 节点概览 ───────┬ 节点详情 ───────────┐
+│                  │                  │                     │
+│                  │                  │                     │
+└──────────────────┴──────────────────┴─────────────────────┘
+```
+
+宽屏四个 Pane 可以同时渲染；当前 Pane 只改变 focus border，不决定其它 Pane 是否存在。
+
+### 13.14 Inspect 窄屏布局
+
+窄屏显示四个 Pane 标签：
+
+```text
+[磁盘布局] [结构树] [节点概览] [节点详情]
+```
+
+一次只显示 focused Pane。
+
+宽/窄屏必须共用同一状态，resize 后保持：
+
+```text
+Tree selection + viewport
+Overview scroll
+Detail row/scroll
+Detail column viewport
+DiskLayout scroll
+focused Pane
+```
+
+### 13.15 Tree / Overview / Detail 的独立行为
+
+Tree：
+
+```text
+j/k      节点
+h/l      折叠/展开、父/子
+o        toggle
+Enter    进入/打开
+gg/G     第一/最后节点
+Ctrl-u/d 半页节点
+```
+
+Tree selection 变化后，Overview/Detail 内容跟随新节点，并将新节点对应的 Overview/Detail viewport 归零；Tree 自己的 viewport 不受影响。
+
+Overview 是纯只读 scroll Pane：
+
+```text
+j/k
+Ctrl-u/d
+PageUp/Down
+gg/G
+```
+
+全部只修改 `overview.scroll_y`，禁止改变 tree selection。
+
+Detail：
+
+- Paragraph：`j/k` 纵向 scroll；
+- Table：`j/k` row viewport，`h/l` column viewport；
+- `Ctrl-u/d`、`PageUp/Down`、`gg/G` 都作用于当前 Detail 内容。
+
+### 13.16 Detail Table 同时显示行、列位置
+
+当前字段表只有横向 `1/2 列`。
+
+后续标题至少显示：
+
+```text
+节点详情 · 行 18–41 / 67 · 列 1/2
+```
+
+窄屏可压缩为：
+
+```text
+详情 18-41/67 · 1/2列
+```
+
+用户必须能判断上方、下方、左右是否还有内容。
+
+### 13.17 Provision Form 变成真正双 Pane
+
+当前视觉已经是：
+
+```text
+参数 56%
+实时布局 44%
+```
+
+但后续必须有真实：
+
+```text
+ProvisionParameters
+ProvisionDiskLayout
+```
+
+Tab 可切换。
+
+Parameters focused：
+
+```text
+j/k      字段
+i        编辑
+Space    切换 option
+f        填满
+Enter    生成计划
+```
+
+DiskLayout focused：
+
+```text
+j/k
+Ctrl-u/d
+PageUp/Down
+gg/G
+```
+
+只滚目标整盘布局。
+
+硬门禁：
+
+```text
+ProvisionDiskLayout focused + j/k
+不得改变 field_selected
+```
+
+### 13.18 Provision Review 也纳入 Pane 系统
+
+建议 Review：
+
+```text
+ProvisionSummary
+ProvisionDiskLayout
+ProvisionChanges
+```
+
+- Summary：模式、目标盘、备份、风险、确认摘要；
+- DiskLayout：目标整盘空间图，可扩展 Before/After；
+- Changes：touched sectors、Preserve/Rebuild/Drop、格式化、数据区动作。
+
+宽屏多 Pane 同时显示，窄屏通过 Tab 切换。长内容必须可滚。
+
+### 13.19 其它 Provision Stage 的原则
+
+不强制一次性把所有 Stage 都拆成复杂 Pane，但遵守：
+
+> **只要一个带边框区域承载独立内容、可能超出可视范围、且用户合理期待能查看完整内容，它就是 Pane，必须有 focus/viewport。**
+
+建议：
+
+| Stage | Pane |
+| --- | --- |
+| SelectDisk | DeviceList + DeviceSummary（如存在独立详情框） |
+| BackupPrompt | Prompt |
+| Menu | ModeList + CurrentDiskSummary（如存在独立框） |
+| Form | Parameters + DiskLayout |
+| Review | Summary + DiskLayout + Changes |
+| Confirm | Confirm |
+| Running | Progress |
+| Result | ResultSummary + VerificationDetails（长内容时） |
+
+### 13.20 Visual focus 与真实 focus 必须一致
+
+以后只有统一 `PaneFocusState.focused` 可以决定 `focused_panel()`。
+
+禁止某个 Pane 画出高亮边框，但事件路由实际无法进入。
+
+测试必须锁住：
+
+```text
+focused border
+↔ PaneId
+↔ keyboard dispatch target
+```
+
+三者一致。
+
+### 13.21 统一 VerticalViewport
+
+不再让各页面自己手工算滚动。
+
+建议公共 helper：
+
+```rust
+struct VerticalViewport {
+    offset: usize,
+}
+
+impl VerticalViewport {
+    fn line_up(&mut self);
+    fn line_down(&mut self, content_len: usize, visible_len: usize);
+    fn half_page_up(&mut self, visible_len: usize);
+    fn half_page_down(&mut self, content_len: usize, visible_len: usize);
+    fn page_up(&mut self, visible_len: usize);
+    fn page_down(&mut self, content_len: usize, visible_len: usize);
+    fn top(&mut self);
+    fn bottom(&mut self, content_len: usize, visible_len: usize);
+    fn clamp(&mut self, content_len: usize, visible_len: usize);
+}
+```
+
+内容变化或 resize 后必须 `clamp()`，不再依赖无限增长的 offset + renderer 容错。
+
+### 13.22 Selection Pane / Scroll Pane / Table Pane 分型
+
+Selection Pane：
+
+```text
+Tree
+Provision Parameters
+Device list
+```
+
+`j/k` 改 selection，viewport 自动跟随。
+
+Scroll Pane：
+
+```text
+Overview
+DiskLayout
+纯文本 Detail
+```
+
+`j/k` 只改 `scroll_y`，没有业务 selection。
+
+Table Pane：
+
+```text
+Inspect Detail Fields
+```
+
+`j/k` 改 row cursor/viewport，`h/l` 改 column viewport。
+
+这样 KeyMapper 只需根据 Pane behavior 分发，不再理解每个页面的业务细节。
+
+### 13.23 视觉统一
+
+整体以当前 Provision 的低饱和 TrueColor 方案为准，同一 RegionKind 在 Inspect / Provision / Review 使用同一 theme token。
+
+建议：
+
+```text
+Boot              青色系
+Share/Combined    低饱和绿色系
+Encrypt           紫色系
+Compatibility/LCE 黄褐色系
+Unknown/Reserved/Tail 深灰系
+Plain             中性蓝灰
+Protocol          轻 metadata accent
+```
+
+Preserve/Rebuild/New/Drop 用低干扰符号 + 文本，不改变区域主色：
+
+```text
+✓ Preserve
+↻ Rebuild
+＋ New
+− Drop
+? Unknown
+```
+
+### 13.24 覆盖旧规则
+
+本章明确覆盖：
+
+- 11.7 “Inspect 三个子工作区” → 四 Pane；
+- 11.11 顶部 DiskLayout 从只读固定块 → 可 focus Pane；
+- 11.10 Table 只强调 h/l 横滚 → 增加 vertical row viewport；
+- 页面级单一 `detail_scroll` → per-pane viewport；
+- Provision “实时布局”只读 render block → `ProvisionDiskLayout` Pane；
+- Sector Inspector `PageUp/PageDown = 前后 sector` → viewport 翻页；sector 使用独立 action。
+
+继续保持：
+
+- `q` 全局退出；
+- `Esc` 返回上一级；
+- critical write guard 不变；
+- Insert 内左右键只做文本光标；
+- LBA0～12/LCE 协议语义和任何写盘安全门槛不变。
+
+### 13.25 Phase P0：失败测试先行
+
+至少先建立：
+
+```text
+Inspect Tree focused:
+  j/k → tree_selected 改变
+
+Inspect Overview focused:
+  j/k → overview.scroll_y 改变
+  tree_selected 不变
+
+Inspect Detail focused:
+  j/k → detail row/scroll 改变
+  tree_selected 不变
+
+Inspect DiskLayout focused:
+  j/k → layout.scroll_y 改变
+  tree_selected 不变
+
+Provision Parameters focused:
+  j/k → field_selected 改变
+
+Provision DiskLayout focused:
+  j/k → layout.scroll_y 改变
+  field_selected 不变
+
+Tab:
+  只改变 focused Pane
+  不改变其它 Pane selection
+```
+
+### 13.26 Phase P1：Pane 基础设施
+
+- 引入 PaneId / PaneFocus / PaneViewport；
+- NavigationStack 保存/恢复 Pane focus；
+- Pane next/previous + spatial neighbor resolver；
+- KeyMapper 按 Pane + WidgetRole 解释；
+- focus border 单一事实源。
+
+### 13.27 Phase P2：Full-Disk DiskLayoutModel
+
+- 把 DiskLayoutModel contract 改为整盘连续覆盖；
+- Inspect topology adapter 维持真实全盘；
+- Provision adapter 从 LBA0 开始；
+- 补齐 protocol / reserved / partition / LCE / post-LCE / tail；
+- Plain 使用自己的完整区域模型；
+- Unknown / Reserved / Free 分离；
+- 建 overlap / hole / last-sector 门禁。
+
+### 13.28 Phase P3：共享 DiskLayoutPane renderer
+
+- 抽 summary / bar / legend / details；
+- Inspect 删除自己的 layout_lines 拼接；
+- Provision 删除自己的 bar + legend + editor-layout 拼接；
+- 两边共用 renderer / theme / percent / range formatter；
+- 增加 layout vertical viewport。
+
+### 13.29 Phase P4：Inspect 四 Pane
+
+- AdvancedInspectPanel 增加 DiskLayout，或迁移到通用 PaneId；
+- Tab/Shift-Tab 四 Pane 循环；
+- Ctrl-w spatial focus；
+- 宽屏多 Pane 同显；
+- 窄屏单 Pane；
+- resize 保持 focus/scroll。
+
+### 13.30 Phase P5：Overview/Detail 完整滚动
+
+- Overview 独立 scroll_y；
+- Detail Paragraph 独立 scroll_y；
+- InspectFields Table 增加 row viewport；
+- j/k、Ctrl-u/d、PageUp/Down、gg/G 完整支持；
+- 标题显示 row + column position。
+
+### 13.31 Phase P6：Sector Inspector 解耦
+
+- 前后 sector 移出 PageUp/PageDown；
+- 新增独立 sector action；
+- j/k 与 PageUp/PageDown 只负责当前视图；
+- Help/footer/USAGE 同步；
+- raw/decode/mixed、byte cursor、解析逻辑不变。
+
+### 13.32 Phase P7：Provision 多 Pane
+
+- Form：Parameters + DiskLayout；
+- Review：Summary + DiskLayout + Changes；
+- 宽屏多 Pane、窄屏单 Pane；
+- layout focused 时 j/k 不再修改字段；
+- Parameters 保持现有 Insert/Space/f 语义；
+- Review 长内容全部可滚。
+
+### 13.33 Phase P8：清理与正式门禁
+
+清理：
+
+- 页面级 `detail_scroll` 旧路径；
+- Inspect Browser 全局 `MoveUp/MoveDown => move_tree`；
+- Provision 独立 bar/legend 重复 renderer；
+- 旧三 Pane Help/footer；
+- Sector Inspector PageUp/PageDown=换 sector 文案；
+- 所有“假 focused border”。
+
+验证：
+
+```text
+cargo fmt --all -- --check
+git diff --check
+tui_suite
+inspect_suite
+provision_suite
+scripts/test-fast.sh
+python3 scripts/test-full.py --profile full
+```
+
+若不改变真实写盘业务语义，本轮只要求真实盘 Inspect 只读视觉/导航验收，不额外增加写盘 HIL。
+
+### 13.34 必须新增的回归门禁
+
+至少覆盖：
+
+1. Inspect Pane 顺序 DiskLayout→Tree→Overview→Detail；
+2. Shift-Tab 反向；
+3. Ctrl-w h/j/k/l 按屏幕邻接移动 focus；
+4. Overview focused 时 j/k 不改 tree selection；
+5. Detail focused 时 j/k 不改 tree selection；
+6. DiskLayout focused 时 j/k 不改 tree selection；
+7. Tree focused 时 j/k 仍选节点；
+8. Tree h/l 仍折叠/展开；
+9. Detail Table h/l 横滚列；
+10. Detail Table j/k 可访问所有行；
+11. Detail title 显示正确 row/column position；
+12. Overview 可访问末行；
+13. DiskLayout 可访问最后 region；
+14. Provision Parameters j/k 仍选字段；
+15. Provision DiskLayout j/k 不改 field_selected；
+16. Provision Form Tab 真正切两个 Pane；
+17. Provision Review 长内容都可访问；
+18. Inspect/Provision 同 RegionKind 使用同 theme token；
+19. DiskLayout 第一段从 LBA0 开始；
+20. 最后一段结束于 `total_sectors - 1`；
+21. 相邻 segments 连续无 hole；
+22. segments 无 overlap；
+23. mode0/1/2/3 target 都完整覆盖整盘；
+24. Plain target 完整覆盖整盘；
+25. Unknown / Reserved / Free 不混用；
+26. Inspect current layout 与 topology range 一致；
+27. Provision target layout 与 planner/protocol geometry 一致；
+28. 宽→窄→宽不丢 focus；
+29. resize 不丢各 Pane scroll/selection；
+30. Esc/q 安全语义不变；
+31. sector previous/next 与 viewport 翻页完全分离；
+32. LBA0～12/LCE golden tests 不变；
+33. critical write guard 不变。
+
+### 13.35 完成标准
+
+只有以下条件全部满足，本章才能从 PLAN 标为 COMPLETE：
+
+1. Inspect 拥有四个真实可 focus Pane；
+2. DiskLayout 能通过 Tab/Ctrl-w 获得焦点并完整滚动；
+3. Overview/Detail 的 j/k 只操作当前 Pane；
+4. Detail 长 Table 所有行可访问；
+5. sector 切换与内容滚动是不同动作；
+6. Provision Form 的 Parameters/DiskLayout 都是真实 Pane；
+7. Provision Review 关键区域都可 focus/scroll；
+8. Inspect 与 Provision 共用唯一 DiskLayout renderer/model/theme；
+9. Provision 从 LBA0 连续显示到最后 sector；
+10. Unknown / Reserved / Free / Tail / Protocol 语义正确；
+11. DiskLayout 自动验证连续、无重叠、无缺口；
+12. 宽屏与窄屏使用同一 Pane state；
+13. Help/footer 与实际 focused-pane 行为一致；
+14. fast/full 与专项门禁全绿；
+15. 不改变任何已闭环 LBA0～12/LCE 协议语义和写盘安全门槛。
+
+最终原则：**页面只组织 Pane；Pane 决定按键如何作用于自己的内容；Tab/Ctrl-w 只移动焦点；j/k 永远服务当前 Pane；Inspect、Provision、Review 的磁盘布局全部来自同一份完整物理盘模型，并从 LBA0 连续覆盖到最后一个 sector。**
