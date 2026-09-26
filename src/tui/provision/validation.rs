@@ -165,6 +165,44 @@ impl AppState {
         Ok((resolved, source))
     }
 
+    pub(super) fn provision_domain_opaque_candidate(
+        &self,
+        domain: crate::provision::KeyDomainRole,
+    ) -> bool {
+        let (knowledge, profile_capable) = match domain {
+            crate::provision::KeyDomainRole::Share => (
+                self.provision.form.share_source_knowledge,
+                self.provision.form.share_opaque_profile,
+            ),
+            crate::provision::KeyDomainRole::Encrypt => (
+                self.provision.form.encrypt_source_knowledge,
+                self.provision.form.encrypt_opaque_profile,
+            ),
+        };
+        if knowledge != crate::provision::SourcePasswordKnowledge::Unknown || !profile_capable {
+            return false;
+        }
+        let Ok((resolved, Some(source))) = self.provision_resolved_prefill() else {
+            return false;
+        };
+        let Ok(targets) = resolved.target_partitions(crate::common::SECTOR as u64) else {
+            return false;
+        };
+        let Some(target) = targets
+            .iter()
+            .find(|part| crate::provision::KeyDomainRole::from_partition_role(part.role) == Some(domain))
+        else {
+            return false;
+        };
+        let Some(old) = source.partition(target.role) else {
+            return false;
+        };
+        old.partition_type == target.partition_type
+            && old.start_lba == target.start_lba
+            && old.sector_count == target.sector_count
+            && old.physically_encrypted == target.physically_encrypted
+    }
+
     pub(super) fn provision_selected_partition_role(
         &self,
     ) -> Option<crate::provision::PartitionRole> {
@@ -276,6 +314,10 @@ impl AppState {
                 .filter(|value| *value > 0)
                 .ok_or_else(|| format!("{label} 必须为正整数扇区"))
         };
+        let share_opaque =
+            self.provision_domain_opaque_candidate(crate::provision::KeyDomainRole::Share);
+        let encrypt_opaque =
+            self.provision_domain_opaque_candidate(crate::provision::KeyDomainRole::Encrypt);
         let form = &self.provision.form;
         let exact = crate::provision::CapacityInputMode::Exact;
         let capacity_sectors = |active: bool,
@@ -334,10 +376,16 @@ impl AppState {
         {
             return Err("标签标识、用户、部门和标签均不能为空".into());
         }
-        if matches!(mode, 0 | 1 | 3) && self.provision.form.share_target_password.is_empty() {
+        if matches!(mode, 0 | 1 | 3)
+            && !share_opaque
+            && self.provision.form.share_target_password.is_empty()
+        {
             return Err("交换密钥域目标密码不能为空".into());
         }
-        if matches!(mode, 0..=2) && self.provision.form.encrypt_target_password.is_empty() {
+        if matches!(mode, 0..=2)
+            && !encrypt_opaque
+            && self.provision.form.encrypt_target_password.is_empty()
+        {
             return Err("保密密钥域目标密码不能为空".into());
         }
         let max_share_password_errors = self
@@ -379,13 +427,13 @@ impl AppState {
                 crate::provision::KeyDomainSecretPair::new(
                     (!self.provision.form.share_source_password.is_empty())
                         .then_some(self.provision.form.share_source_password.as_bytes()),
-                    matches!(mode, 0 | 1 | 3)
+                    (matches!(mode, 0 | 1 | 3) && !share_opaque)
                         .then_some(self.provision.form.share_target_password.as_bytes()),
                 ),
                 crate::provision::KeyDomainSecretPair::new(
                     (!self.provision.form.encrypt_source_password.is_empty())
                         .then_some(self.provision.form.encrypt_source_password.as_bytes()),
-                    matches!(mode, 0..=2)
+                    (matches!(mode, 0..=2) && !encrypt_opaque)
                         .then_some(self.provision.form.encrypt_target_password.as_bytes()),
                 ),
             ),
