@@ -497,8 +497,7 @@ pub(super) fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, sta
                             Block::default()
                                 .borders(Borders::ALL)
                                 .border_style(
-                                    if focused_pane
-                                        == crate::tui::pane::PaneId::ProvisionParameters
+                                    if focused_pane == crate::tui::pane::PaneId::ProvisionParameters
                                     {
                                         focused_panel()
                                     } else {
@@ -528,8 +527,7 @@ pub(super) fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, sta
                         title: "磁盘布局",
                         summary: &layout_summary,
                         details: &layout_details,
-                        focused: focused_pane
-                            == crate::tui::pane::PaneId::ProvisionDiskLayout,
+                        focused: focused_pane == crate::tui::pane::PaneId::ProvisionDiskLayout,
                         scroll_y: state
                             .pane_viewport(crate::tui::pane::PaneId::ProvisionDiskLayout)
                             .scroll_y
@@ -574,12 +572,8 @@ pub(super) fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, sta
                 (Some(areas[0]), Some(areas[1]), Some(areas[2]))
             } else {
                 match focused_pane {
-                    crate::tui::pane::PaneId::ProvisionDiskLayout => {
-                        (None, Some(main_area), None)
-                    }
-                    crate::tui::pane::PaneId::ProvisionChanges => {
-                        (None, None, Some(main_area))
-                    }
+                    crate::tui::pane::PaneId::ProvisionDiskLayout => (None, Some(main_area), None),
+                    crate::tui::pane::PaneId::ProvisionChanges => (None, None, Some(main_area)),
                     _ => (Some(main_area), None, None),
                 }
             };
@@ -610,9 +604,7 @@ pub(super) fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, sta
                             Block::default()
                                 .borders(Borders::ALL)
                                 .border_style(
-                                    if focused_pane
-                                        == crate::tui::pane::PaneId::ProvisionSummary
-                                    {
+                                    if focused_pane == crate::tui::pane::PaneId::ProvisionSummary {
                                         focused_panel()
                                     } else {
                                         panel()
@@ -674,9 +666,7 @@ pub(super) fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, sta
                             Block::default()
                                 .borders(Borders::ALL)
                                 .border_style(
-                                    if focused_pane
-                                        == crate::tui::pane::PaneId::ProvisionChanges
-                                    {
+                                    if focused_pane == crate::tui::pane::PaneId::ProvisionChanges {
                                         focused_panel()
                                     } else {
                                         panel()
