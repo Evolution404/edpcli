@@ -18,6 +18,7 @@ fn device() -> Row {
         max_share_password_errors: None,
         max_encrypt_password_errors: None,
         n_baks: 3,
+        n_possible_baks: 0,
         denied: false,
         probe_error: None,
         is_nopwd: false,

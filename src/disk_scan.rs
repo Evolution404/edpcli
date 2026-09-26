@@ -8,7 +8,7 @@ use std::io;
 use std::path::Path;
 
 use crate::common::{fmt_gb, group_digits, EdpCliError, EXIT_IO, SECTOR};
-use crate::diskio::{self, find_backups, DiskFacts};
+use crate::diskio::{self, find_backups};
 use crate::identify::identify;
 use crate::metainfo;
 use crate::protocol::semantic::SemanticContext;
@@ -34,6 +34,7 @@ pub struct Row {
     pub max_share_password_errors: Option<u8>,
     pub max_encrypt_password_errors: Option<u8>,
     pub n_baks: usize,
+    pub n_possible_baks: usize,
     pub denied: bool,
     pub probe_error: Option<String>,
     pub is_nopwd: bool,
@@ -115,6 +116,7 @@ pub fn scan_disks(
             max_share_password_errors: None,
             max_encrypt_password_errors: None,
             n_baks: 0,
+            n_possible_baks: 0,
             denied: false,
             probe_error: None,
             is_nopwd: false,
@@ -187,18 +189,17 @@ pub fn scan_disks(
                                 Some(policy.max_encrypt_password_errors);
                         }
                     }
-                    let tag = diskio::lba4_tag16_from(&lba4).ok_or_else(|| {
-                        io::Error::new(io::ErrorKind::UnexpectedEof, "LBA4 缺少 16B 身份标签")
-                    })?;
-                    let facts = DiskFacts {
-                        disk: d.n,
-                        total_sectors: sysinfo::disk_total_sectors(runner, d.n),
-                        vid: d.vid.clone(),
-                        pid: d.pid.clone(),
-                        label_id: row.onlyid.clone(),
-                    };
-                    row.n_baks = find_backups(backup_dir, &facts, Some(did), Some(tag)).len();
                 }
+                let mut protocol_image = Vec::with_capacity(crate::common::METADATA_IMAGE_LEN);
+                for lba in 0..crate::common::METADATA_SECTOR_COUNT as u32 {
+                    protocol_image.extend_from_slice(&read_exact(lba)?);
+                }
+                let identity = crate::application::media_identity_observer::
+                    media_identity_from_protocol_image(runner, d.n, &protocol_image)
+                    .map_err(|error| io::Error::other(error.msg))?;
+                let matches = find_backups(backup_dir, &identity);
+                row.n_baks = matches.confirmed.len();
+                row.n_possible_baks = matches.possible.len();
                 Ok(())
             })();
             if let Err(e) = probe {
@@ -309,10 +310,13 @@ pub fn print_disk_table(rows: &[Row]) -> String {
             if let Some(onlyid) = &row.onlyid {
                 meta.push(format!("onlyid={}", onlyid));
             }
-            meta.push(if row.n_baks > 0 {
-                format!("备份 {} 份", row.n_baks)
-            } else {
-                "无备份".to_string()
+            meta.push(match (row.n_baks, row.n_possible_baks) {
+                (0, 0) => "无备份".to_string(),
+                (confirmed, 0) => format!("备份 {confirmed} 份"),
+                (0, possible) => format!("可能相关 {possible} 份"),
+                (confirmed, possible) => {
+                    format!("备份 {confirmed} 份 · 可能相关 {possible} 份")
+                }
             });
             details.push(format!("   {}", meta.join(" · ")));
             out.push_str(&format!(

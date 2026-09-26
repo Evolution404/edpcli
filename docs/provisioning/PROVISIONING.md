@@ -8580,6 +8580,8 @@ observe_media_identity_readonly(...)
 
 #### I4 — Backup catalog / grouping
 
+**实施状态（2026-09-26）：COMPLETE。** `BackupMeta` 与 `BackupWorkspaceItem` 已携带 canonical `MediaIdentitySnapshot`；`find_backups` 已改为 pure matcher + 独立 `BackupAffinityPolicy`，A/B/C 仅归入 confirmed，D 只归入 possible，Different/Ambiguous 不归属。自动 prune grouping 不再使用 onlyid-only/文件名 truth：usable serial digest 优先，否则要求 observed `device_id+onlyid`；弱型号/容量证据不得形成自动删除组。Plain 新备份文件名使用显式 `plain` token，不再编码 derived EDP device_id；历史文件名仍可扫描。`disk_scan` 分别缓存 `n_baks` confirmed 与 `n_possible_baks`，CLI/TUI 只渲染缓存结果且 renderer 无备份/设备 I/O。验证：backup suite 70/70、lib 134/134（1 个既有 Chapter 14 ignored）、CLI 72/72、TUI 195/195（2 个既有 Chapter 14 ignored）、repository 49/49；fmt/diff-check 通过。
+
 - `BackupMeta` 接入 canonical identity；
 - 新备份文件名去掉“Plain 冒充 device_id”的依赖；
 - `find_backups` 改 matcher；

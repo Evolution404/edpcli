@@ -1051,6 +1051,7 @@ mod tests {
             max_share_password_errors: None,
             max_encrypt_password_errors: None,
             n_baks: 0,
+            n_possible_baks: 0,
             denied: false,
             probe_error: None,
             is_nopwd: false,
@@ -1296,6 +1297,7 @@ mod tests {
                 max_share_password_errors: None,
                 max_encrypt_password_errors: None,
                 n_baks: 0,
+                n_possible_baks: 0,
                 denied: false,
                 probe_error: None,
                 is_nopwd: false,
@@ -1318,6 +1320,7 @@ mod tests {
                 max_share_password_errors: Some(255),
                 max_encrypt_password_errors: Some(255),
                 n_baks: 3,
+                n_possible_baks: 2,
                 denied: false,
                 probe_error: None,
                 is_nopwd: true,
@@ -1340,6 +1343,7 @@ mod tests {
                 max_share_password_errors: None,
                 max_encrypt_password_errors: None,
                 n_baks: 0,
+                n_possible_baks: 0,
                 denied: false,
                 probe_error: None,
                 is_nopwd: false,
@@ -1374,7 +1378,11 @@ mod tests {
         );
         assert!(edpf.contains("Boot 0.00GB (LBA 32~63)"), "{}", edpf);
         let meta = lines.iter().find(|l| l.contains("onlyid")).unwrap();
-        assert!(meta.contains("onlyid=1402259934") && meta.contains("备份 3 份"));
+        assert!(
+            meta.contains("onlyid=1402259934")
+                && meta.contains("备份 3 份")
+                && meta.contains("可能相关 2 份")
+        );
         let disk7_line = lines.iter().find(|l| l.contains("disk7")).unwrap();
         assert!(disk7_line.contains("非 USB") && disk7_line.contains("不支持"));
         assert_eq!(print_disk_table(&[]).trim(), "未检测到外接盘。");

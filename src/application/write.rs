@@ -388,7 +388,7 @@ pub fn backup_create_level_flow(
         if identity.protocol.provision_kind != Some(crate::provision::DiskProvisionKind::Plain) {
             return Err(err(
                 EXIT_BACKUP,
-                "错误: 当前介质保留非零/损坏的 EDP 协议身份；拒绝误判为 Plain 备份",
+                "错误: 当前介质 LBA4 保留非零/损坏的 EDP 协议身份；拒绝误判为 Plain 备份",
             ));
         }
         let legacy_candidate = identity

@@ -139,6 +139,7 @@ pub struct BackupMeta {
     pub device_id: String,
     pub onlyid: Option<String>,
     pub tagged_nopwd: bool,
+    pub identity: Option<crate::application::media_identity::MediaIdentitySnapshot>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -237,6 +238,7 @@ pub fn parse_backup_name(name: &str) -> Option<BackupMeta> {
         device_id: device_id.to_string(),
         onlyid,
         tagged_nopwd,
+        identity: None,
     })
 }
 
@@ -274,9 +276,19 @@ pub fn scan_backup_file(path: &Path) -> Option<BackupEntry> {
     let raw = verified
         .as_ref()
         .and_then(|_| crate::edpb::read_raw_protocol(path).ok());
-    let meta = verified.as_ref().map(|container| {
+    let meta = verified.as_ref().and_then(|container| {
         let manifest = &container.manifest;
-        BackupMeta {
+        let mut identity = crate::edpb::canonical_media_identity(manifest).ok()?;
+        if identity.protocol.provision_kind.is_none() {
+            if let (Some(device_id), Some(raw)) =
+                (identity.protocol.device_id.as_deref(), raw.as_ref())
+            {
+                identity.protocol.provision_kind = Some(
+                    crate::provision::DiskProvisionKind::from_metadata(raw, device_id),
+                );
+            }
+        }
+        Some(BackupMeta {
             disk: manifest.observation.disk_number.unwrap_or(0),
             secs: manifest.geometry.total_sectors,
             vid: manifest.device.vid.clone(),
@@ -284,7 +296,8 @@ pub fn scan_backup_file(path: &Path) -> Option<BackupEntry> {
             device_id: manifest.device.device_id.clone(),
             onlyid: manifest.device.onlyid.clone(),
             tagged_nopwd: manifest.snapshot.device_state == "passwordless",
-        }
+            identity: Some(identity),
+        })
     });
     let lba8 = raw.as_ref().and_then(|data| {
         data.get(8 * SECTOR..9 * SECTOR)
@@ -355,20 +368,27 @@ pub fn scan_backup_names(dir: &Path) -> Vec<PathBuf> {
     paths
 }
 
-/// 同一物理盘的备份分组键。现代命名优先使用 onlyid；历史/缺失 onlyid 时退化为
-/// (device_id, total sectors)。未识别文件不参与自动清理策略。
+/// Automatic prune grouping requires strong canonical identity evidence.
+///
+/// Prefer usable USB serial digest (physical media). Without it, require an observed EDP
+/// device_id + onlyid pair (EDP instance). Model/capacity-only evidence and filename-derived
+/// metadata never form an automatic deletion group.
 pub fn backup_group_key(entry: &BackupEntry) -> Option<String> {
-    let meta = entry.meta.as_ref()?;
-    Some(match &meta.onlyid {
-        Some(id) => format!("onlyid:{id}"),
-        None => format!(
-            "legacy:{}:{}",
-            meta.device_id,
-            meta.secs
-                .map(|v| v.to_string())
-                .unwrap_or_else(|| "unknown".into())
-        ),
-    })
+    use crate::application::media_identity::SerialQuality;
+
+    let identity = entry.meta.as_ref()?.identity.as_ref()?;
+    if identity.hardware.serial_quality == SerialQuality::Usable {
+        if let Some(serial) = identity.hardware.serial_sha256.as_deref() {
+            return Some(format!("serial:{serial}"));
+        }
+    }
+    match (
+        identity.protocol.device_id.as_deref(),
+        identity.protocol.onlyid.as_deref(),
+    ) {
+        (Some(device_id), Some(onlyid)) => Some(format!("edp:{device_id}:{onlyid}")),
+        _ => None,
+    }
 }
 
 /// `backup prune` 的纯策略层：

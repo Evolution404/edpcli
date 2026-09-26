@@ -727,6 +727,17 @@ fn plain_backup_uses_hardware_identity_and_serial_binding() {
     .unwrap();
     let verified = edpb::verify_file(&report.path).unwrap();
 
+    let file_name = report
+        .path
+        .file_name()
+        .and_then(|value| value.to_str())
+        .expect("plain backup filename");
+    assert!(file_name.contains("_plain_"), "{file_name}");
+    assert!(
+        !file_name.contains("disk&ven_netac&prod_onlydisk"),
+        "Plain filename must not encode a derived EDP device_id: {file_name}"
+    );
+
     assert_eq!(verified.manifest.snapshot.device_state, "plain");
     assert_eq!(verified.manifest.device.vid, "0dd8");
     assert_eq!(verified.manifest.device.pid, "2005");

@@ -94,16 +94,21 @@ fn lba4_digest(lba4: &[u8]) -> Option<String> {
         .then(|| format!("{:x}", Sha256::digest(lba4)))
 }
 
-/// Observe media identity using only read/probe operations.
-///
-/// Raw USB serial text exists only long enough to normalize/hash it. It is not retained in the
-/// returned snapshot or protocol image.
-pub fn observe_media_identity_readonly(
+pub fn media_identity_from_protocol_image(
     runner: &dyn CmdRunner,
     disk: u32,
-    dev: &mut dyn SectorDev,
-) -> EdpCliResult<ReadonlyMediaObservation> {
-    let protocol_image = read_protocol_image_readonly(dev)?;
+    protocol_image: &[u8],
+) -> EdpCliResult<MediaIdentitySnapshot> {
+    if protocol_image.len() != METADATA_IMAGE_LEN {
+        return Err(EdpCliError::new(
+            EXIT_IO,
+            format!(
+                "错误: 身份观察镜像长度 {}B，预期 {}B",
+                protocol_image.len(),
+                METADATA_IMAGE_LEN
+            ),
+        ));
+    }
     let lba4 = &protocol_image[4 * SECTOR..5 * SECTOR];
     let lba7 = &protocol_image[7 * SECTOR..8 * SECTOR];
 
@@ -151,10 +156,7 @@ pub fn observe_media_identity_readonly(
     };
 
     let snapshot = if let Some(device_id) = identified.device_id {
-        let detected = DiskProvisionKind::from_metadata(&protocol_image, &device_id);
-        // identify() proves an observed EDP device_id from LBA7. If LBA12 is damaged,
-        // from_metadata() returns Plain; do not mislabel that corrupt EDP state as canonical
-        // Plain. A destructive policy will fail it closed.
+        let detected = DiskProvisionKind::from_metadata(protocol_image, &device_id);
         let provision_kind = (detected != DiskProvisionKind::Plain).then_some(detected);
         MediaIdentitySnapshot {
             hardware,
@@ -170,8 +172,6 @@ pub fn observe_media_identity_readonly(
     } else if lba4.iter().all(|byte| *byte == 0) {
         MediaIdentitySnapshot::plain(hardware, derived, observation)
     } else {
-        // Nonzero LBA4 without a verified LBA7 identity is not canonical Plain. Preserve the
-        // observed protocol evidence so restore/provision policies can fail closed.
         MediaIdentitySnapshot {
             hardware,
             protocol: ProtocolIdentityEvidence {
@@ -184,7 +184,20 @@ pub fn observe_media_identity_readonly(
             observation,
         }
     };
+    Ok(snapshot)
+}
 
+/// Observe media identity using only read/probe operations.
+///
+/// Raw USB serial text exists only long enough to normalize/hash it. It is not retained in the
+/// returned snapshot or protocol image.
+pub fn observe_media_identity_readonly(
+    runner: &dyn CmdRunner,
+    disk: u32,
+    dev: &mut dyn SectorDev,
+) -> EdpCliResult<ReadonlyMediaObservation> {
+    let protocol_image = read_protocol_image_readonly(dev)?;
+    let snapshot = media_identity_from_protocol_image(runner, disk, &protocol_image)?;
     Ok(ReadonlyMediaObservation {
         snapshot,
         protocol_image,

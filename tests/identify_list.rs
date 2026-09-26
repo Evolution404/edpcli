@@ -135,8 +135,8 @@ fn scan_and_print_all_row_kinds() {
     // 旧免密盘镜像应统一显示官方模式1盘型。
     let (conv, _) = passwordless_image("netac").unwrap();
     let converted_read_calls = std::cell::RefCell::new(Vec::<(u32, u32)>::new());
-    let read_conv = |_disk: u32, lba: u32| -> std::io::Result<Vec<u8>> {
-        converted_read_calls.borrow_mut().push((6, lba));
+    let read_conv = |disk: u32, lba: u32| -> std::io::Result<Vec<u8>> {
+        converted_read_calls.borrow_mut().push((disk, lba));
         Ok(conv[lba as usize * SECTOR..(lba as usize + 1) * SECTOR].to_vec())
     };
     let rows2 = scan_disks(&runner, &bak.0, &read_conv);
@@ -151,7 +151,7 @@ fn scan_and_print_all_row_kinds() {
         converted_read_calls
             .borrow()
             .iter()
-            .filter(|&&(_disk, lba)| lba == 12)
+            .filter(|&&(disk, lba)| disk == 6 && lba == 12)
             .count(),
         1,
         "免密盘 list 扫描也不应为状态判断和分区展示重复读取 LBA12"

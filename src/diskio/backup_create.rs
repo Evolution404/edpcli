@@ -72,14 +72,15 @@ fn prepare_backup_capture_with_state<'a>(
         .map(|value| format!("_onlyid{}", value))
         .unwrap_or_default();
     let is_nopwd = device_state.is_none() && image_is_nopwd(data, device_id);
-    let state_part = match device_state {
-        Some("plain") => "_plain",
-        _ if is_nopwd => "_nopwd",
-        _ => "",
+    let file_identity = if device_state == Some("plain") {
+        "plain"
+    } else {
+        device_id
     };
+    let state_part = if is_nopwd { "_nopwd" } else { "" };
     let base = format!(
         "disk{}_{}_vid{}_pid{}_{}{}{}_{}",
-        facts.disk, secs, facts.vid, facts.pid, device_id, onlyid_part, state_part, ts
+        facts.disk, secs, facts.vid, facts.pid, file_identity, onlyid_part, state_part, ts
     );
     let path = bak_dir.join(format!("{}.edpb", base));
     let capture = crate::edpb::CoreCapture {
@@ -202,48 +203,35 @@ pub fn mtime_epoch(path: &Path) -> i64 {
         .unwrap_or(0)
 }
 
-/// 匹配备份目录中本盘备份, 新→旧排序。
-/// 身份来自 EDPB manifest；非零 LBA4 16B 标签仍作为同盘终验。
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct BackupMatches {
+    pub confirmed: Vec<PathBuf>,
+    pub possible: Vec<PathBuf>,
+}
+
+/// Read-side backup affinity derived from verified EDPB canonical identity.
+///
+/// A/B/C relationships are confirmed. D-level same-model evidence is shown only as possible and
+/// must never be silently promoted to ownership or destructive authorization.
 pub fn find_backups(
     bak_dir: &Path,
-    facts: &DiskFacts,
-    device_id: Option<&str>,
-    my_tag: Option<[u8; 16]>,
-) -> Vec<PathBuf> {
-    let tag = my_tag.filter(|value| value.iter().any(|&byte| byte != 0));
-    scan_backup_dir(bak_dir)
-        .into_iter()
-        .filter(|entry| {
-            let Some(meta) = entry.meta.as_ref() else {
-                return false;
-            };
-            if meta.vid != facts.vid || meta.pid != facts.pid {
-                return false;
-            }
-            if let Some(total) = facts.total_sectors {
-                if meta.secs != Some(total) {
-                    return false;
-                }
-            }
-            if let Some(expected_device_id) = device_id {
-                if meta.device_id != expected_device_id {
-                    return false;
-                }
-            }
-            if let Some(expected_tag) = tag {
-                let Ok(raw) = crate::edpb::read_raw_protocol(&entry.path) else {
-                    return false;
-                };
-                let Some(actual_tag) = raw.get(4 * SECTOR..5 * SECTOR).and_then(lba4_tag16_from)
-                else {
-                    return false;
-                };
-                if actual_tag != expected_tag {
-                    return false;
-                }
-            }
-            true
-        })
-        .map(|entry| entry.path)
-        .collect()
+    current: &crate::application::media_identity::MediaIdentitySnapshot,
+) -> BackupMatches {
+    use crate::application::media_identity::{
+        match_media_identity, BackupAffinity, BackupAffinityPolicy,
+    };
+
+    let mut matches = BackupMatches::default();
+    for entry in scan_backup_dir(bak_dir) {
+        let Some(identity) = entry.meta.as_ref().and_then(|meta| meta.identity.as_ref()) else {
+            continue;
+        };
+        let identity_match = match_media_identity(current, identity, None);
+        match BackupAffinityPolicy::classify(&identity_match) {
+            BackupAffinity::Confirmed => matches.confirmed.push(entry.path),
+            BackupAffinity::Possible => matches.possible.push(entry.path),
+            BackupAffinity::Unrelated => {}
+        }
+    }
+    matches
 }

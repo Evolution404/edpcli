@@ -3,9 +3,15 @@ use crate::common;
 use std::fs;
 
 use common::*;
+use edpcli::application::media_identity::{
+    match_media_identity, BackupAffinity, BackupAffinityPolicy, ControlledLineageEvidence,
+    DerivedProtocolEvidence, HardwareIdentityEvidence, IdentityObservation, MediaIdentitySnapshot,
+    ProtocolIdentityEvidence, SerialQuality,
+};
 use edpcli::backup_catalog::BackupCatalog;
 use edpcli::edpb::{self, CoreCapture};
 use edpcli::metainfo::backup_ownership;
+use edpcli::provision::DiskProvisionKind;
 
 fn write_edpb(path: &std::path::Path, data: &[u8], snapshot_id: &str) {
     let capture = CoreCapture {
@@ -23,6 +29,40 @@ fn write_edpb(path: &std::path::Path, data: &[u8], snapshot_id: &str) {
         lba0_12: data,
     };
     edpb::write_core_backup(path, &capture).unwrap();
+}
+
+fn identity(
+    serial: Option<&str>,
+    device_id: Option<&str>,
+    onlyid: Option<&str>,
+    kind: DiskProvisionKind,
+) -> MediaIdentitySnapshot {
+    MediaIdentitySnapshot {
+        hardware: HardwareIdentityEvidence {
+            vid: Some(0x0dd8),
+            pid: Some(0x2005),
+            serial_sha256: serial.map(str::to_string),
+            serial_quality: if serial.is_some() {
+                SerialQuality::Usable
+            } else {
+                SerialQuality::Missing
+            },
+            vendor: Some("Netac".into()),
+            product: Some("OnlyDisk".into()),
+            revision: Some("1.00".into()),
+            transport: None,
+            total_sectors: Some(122_880_000),
+            logical_sector_size: Some(512),
+        },
+        protocol: ProtocolIdentityEvidence {
+            device_id: device_id.map(str::to_string),
+            onlyid: onlyid.map(str::to_string),
+            provision_kind: Some(kind),
+            lba4_identity_digest: None,
+        },
+        derived: DerivedProtocolEvidence::default(),
+        observation: IdentityObservation::default(),
+    }
 }
 
 fn copied_catalog() -> Option<(TmpDir, BackupCatalog)> {
@@ -47,6 +87,73 @@ fn copied_catalog() -> Option<(TmpDir, BackupCatalog)> {
 
     let catalog = BackupCatalog::load(&tmp.0);
     Some((tmp, catalog))
+}
+
+#[test]
+fn backup_affinity_policy_confirms_a_b_c_and_keeps_d_possible_only() {
+    let a1 = identity(Some(&"11".repeat(32)), None, None, DiskProvisionKind::Plain);
+    let a2 = identity(
+        Some(&"11".repeat(32)),
+        Some("disk&ven_netac&prod_onlydisk"),
+        Some("42"),
+        DiskProvisionKind::Mode0,
+    );
+    assert_eq!(
+        BackupAffinityPolicy::classify(&match_media_identity(&a1, &a2, None)),
+        BackupAffinity::Confirmed
+    );
+
+    let b1 = identity(
+        None,
+        Some("disk&ven_netac&prod_onlydisk"),
+        Some("42"),
+        DiskProvisionKind::Mode0,
+    );
+    let b2 = b1.clone();
+    assert_eq!(
+        BackupAffinityPolicy::classify(&match_media_identity(&b1, &b2, None)),
+        BackupAffinity::Confirmed
+    );
+
+    let lineage = ControlledLineageEvidence { linked: true };
+    let c_target = identity(
+        None,
+        Some("disk&ven_netac&prod_onlydisk"),
+        Some("99"),
+        DiskProvisionKind::Mode2,
+    );
+    assert_eq!(
+        BackupAffinityPolicy::classify(&match_media_identity(&a1, &c_target, Some(&lineage))),
+        BackupAffinity::Confirmed
+    );
+
+    let d1 = identity(None, None, None, DiskProvisionKind::Plain);
+    let d2 = d1.clone();
+    assert_eq!(
+        BackupAffinityPolicy::classify(&match_media_identity(&d1, &d2, None)),
+        BackupAffinity::Possible
+    );
+}
+
+#[test]
+fn scanned_verified_backup_exposes_canonical_identity_projection() {
+    let Some((_tmp, catalog)) = copied_catalog() else {
+        return;
+    };
+    let meta = catalog.entries()[0].meta.as_ref().expect("verified meta");
+    let identity = meta
+        .identity
+        .as_ref()
+        .expect("verified EDPB must expose canonical identity");
+    assert_eq!(
+        identity.protocol.device_id.as_deref(),
+        Some("disk&ven_netac&prod_onlydisk")
+    );
+    assert_eq!(identity.protocol.onlyid.as_deref(), Some("1402259934"));
+    assert_eq!(
+        identity.protocol.provision_kind,
+        Some(DiskProvisionKind::Mode0)
+    );
 }
 
 #[test]

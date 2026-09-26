@@ -196,6 +196,31 @@ pub struct IdentityMatch {
     pub conflicts: Vec<IdentityConflict>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BackupAffinity {
+    Confirmed,
+    Possible,
+    Unrelated,
+}
+
+/// Read-side grouping policy only. This policy never authorizes destructive writes.
+pub struct BackupAffinityPolicy;
+
+impl BackupAffinityPolicy {
+    pub fn classify(identity_match: &IdentityMatch) -> BackupAffinity {
+        if identity_match.relationship == MediaRelationship::DifferentMedia {
+            return BackupAffinity::Unrelated;
+        }
+        match identity_match.confidence {
+            IdentityConfidence::PhysicalStrong
+            | IdentityConfidence::EdpInstanceStrong
+            | IdentityConfidence::ControlledLineage => BackupAffinity::Confirmed,
+            IdentityConfidence::HardwareProfileMatch => BackupAffinity::Possible,
+            IdentityConfidence::AmbiguousInsufficient => BackupAffinity::Unrelated,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct ControlledLineageEvidence {
     pub linked: bool,

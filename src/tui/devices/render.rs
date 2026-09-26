@@ -165,7 +165,10 @@ pub(super) fn draw_devices(frame: &mut Frame, area: ratatui::layout::Rect, state
                 Line::from(format!("设备  disk{}", row.disk)),
                 Line::from(format!("总线  {}", safe(&row.proto))),
                 Line::from(format!("当前状态  {}", device_status(row))),
-                Line::from(format!("已有备份  {} 份", row.n_baks)),
+                Line::from(match row.n_possible_baks {
+                    0 => format!("已有备份  {} 份", row.n_baks),
+                    possible => format!("已有备份  {} 份 · 可能相关 {} 份", row.n_baks, possible),
+                }),
                 Line::from(""),
                 Line::from(Span::styled(
                     "可用操作",

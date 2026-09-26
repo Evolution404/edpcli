@@ -295,6 +295,28 @@ mod tests {
     use super::*;
     use crate::diskio::{BackupIntegrityStatus, BackupMeta};
 
+    fn identity(onlyid: &str) -> crate::application::media_identity::MediaIdentitySnapshot {
+        use crate::application::media_identity::{
+            HardwareIdentityEvidence, MediaIdentitySnapshot, ProtocolIdentityEvidence,
+        };
+        MediaIdentitySnapshot {
+            hardware: HardwareIdentityEvidence {
+                vid: Some(0x0dd8),
+                pid: Some(0x2005),
+                total_sectors: Some(122_880_000),
+                logical_sector_size: Some(crate::common::SECTOR as u32),
+                ..HardwareIdentityEvidence::default()
+            },
+            protocol: ProtocolIdentityEvidence {
+                device_id: Some("disk&ven_netac&prod_onlydisk".into()),
+                onlyid: Some(onlyid.into()),
+                provision_kind: Some(crate::provision::DiskProvisionKind::Mode0),
+                lba4_identity_digest: None,
+            },
+            ..MediaIdentitySnapshot::default()
+        }
+    }
+
     fn entry(name: &str, onlyid: &str, is_nopwd: bool) -> BackupEntry {
         BackupEntry {
             meta: Some(BackupMeta {
@@ -305,6 +327,7 @@ mod tests {
                 device_id: "disk&ven_netac&prod_onlydisk".into(),
                 onlyid: Some(onlyid.into()),
                 tagged_nopwd: is_nopwd,
+                identity: Some(identity(onlyid)),
             }),
             path: PathBuf::from(name),
             mtime: 1,

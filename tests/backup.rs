@@ -6,6 +6,10 @@ use crate::common;
 use std::fs;
 
 use common::*;
+use edpcli::application::media_identity::{
+    DerivedProtocolEvidence, HardwareIdentityEvidence, IdentityObservation, MediaIdentitySnapshot,
+    ProtocolIdentityEvidence, SerialQuality,
+};
 use edpcli::cli::{backup_delete, backup_list, backup_prune, backup_verify};
 use edpcli::common::{METADATA_IMAGE_LEN, SECTOR};
 use edpcli::diskio::Clock;
@@ -35,6 +39,33 @@ fn netac_facts() -> DiskFacts {
         vid: "0dd8".into(),
         pid: "2005".into(),
         label_id: Some("1402259934".into()),
+    }
+}
+
+fn current_identity(data: &[u8], device_id: &str) -> MediaIdentitySnapshot {
+    MediaIdentitySnapshot {
+        hardware: HardwareIdentityEvidence {
+            vid: Some(0x0dd8),
+            pid: Some(0x2005),
+            serial_sha256: None,
+            serial_quality: SerialQuality::Missing,
+            vendor: None,
+            product: None,
+            revision: None,
+            transport: None,
+            total_sectors: Some(122_880_000),
+            logical_sector_size: Some(SECTOR as u32),
+        },
+        protocol: ProtocolIdentityEvidence {
+            device_id: Some(device_id.to_string()),
+            onlyid: edpcli::diskio::lba4_label_id_from(&data[4 * SECTOR..5 * SECTOR]),
+            provision_kind: Some(edpcli::provision::DiskProvisionKind::from_metadata(
+                data, device_id,
+            )),
+            lba4_identity_digest: None,
+        },
+        derived: DerivedProtocolEvidence::default(),
+        observation: IdentityObservation::default(),
     }
 }
 
@@ -106,24 +137,16 @@ fn find_backups_lba4_final_filter() {
         "disk6_122880000_vid0dd8_pid2005_disk&ven_netac&prod_onlydisk_onlyid9999999999_20260910_173000.edpb",
         &lexar,
     );
-    let my_tag: [u8; 16] = netac[4 * 512..4 * 512 + 16].try_into().unwrap();
-    let found = find_backups(
-        &tmp.0,
-        &netac_facts(),
-        Some("disk&ven_netac&prod_onlydisk"),
-        Some(my_tag),
-    );
-    assert_eq!(found, vec![real.clone()]);
+    let current = current_identity(&netac, "disk&ven_netac&prod_onlydisk");
+    let found = find_backups(&tmp.0, &current);
+    assert_eq!(found.confirmed, vec![real.clone()]);
+    assert!(found.possible.is_empty());
 
     // 空目录 → 空
     let empty = TmpDir::new("find_empty");
-    assert!(find_backups(
-        &empty.0,
-        &netac_facts(),
-        Some("disk&ven_netac&prod_onlydisk"),
-        None
-    )
-    .is_empty());
+    let empty_matches = find_backups(&empty.0, &current);
+    assert!(empty_matches.confirmed.is_empty());
+    assert!(empty_matches.possible.is_empty());
     let _ = real_bin;
 }
 
@@ -153,15 +176,11 @@ fn backup_written_as_single_edpb_with_internal_hashes_and_onlyid() {
         Some("1402259934")
     );
     assert!(!std::path::PathBuf::from(format!("{}.sha256", path.display())).exists());
-    // 备份可被 find_backups 找回
-    let my_tag: [u8; 16] = data[4 * 512..4 * 512 + 16].try_into().unwrap();
-    let found = find_backups(
-        &tmp.0,
-        &netac_facts(),
-        Some("disk&ven_netac&prod_onlydisk"),
-        Some(my_tag),
-    );
-    assert_eq!(found, vec![path]);
+    // 备份可被 typed affinity 找回
+    let current = current_identity(&data, "disk&ven_netac&prod_onlydisk");
+    let found = find_backups(&tmp.0, &current);
+    assert_eq!(found.confirmed, vec![path]);
+    assert!(found.possible.is_empty());
 }
 
 #[test]
@@ -227,22 +246,17 @@ fn find_backups_ignores_matching_non_bin_files() {
         &data,
     )
     .unwrap();
-    let tag: [u8; 16] = data[4 * SECTOR..4 * SECTOR + 16].try_into().unwrap();
-    let found = find_backups(
-        &tmp.0,
-        &netac_facts(),
-        Some("disk&ven_netac&prod_onlydisk"),
-        Some(tag),
-    );
-    assert_eq!(found, vec![bin]);
+    let current = current_identity(&data, "disk&ven_netac&prod_onlydisk");
+    let found = find_backups(&tmp.0, &current);
+    assert_eq!(found.confirmed, vec![bin]);
+    assert!(found.possible.is_empty());
 }
 
 #[test]
 fn find_backups_prefers_device_id_tier_before_generic_fallback() {
     let tmp = TmpDir::new("find_tier_priority");
     let mut data = vec![0u8; METADATA_IMAGE_LEN];
-    let tag: [u8; 16] = *b"0123456789ABCDEF";
-    data[4 * SECTOR..4 * SECTOR + 16].copy_from_slice(&tag);
+    data[4 * SECTOR..4 * SECTOR + 7].copy_from_slice(b"$$$1$$$");
 
     let exact = write_backup(
         &tmp.0,
@@ -255,13 +269,10 @@ fn find_backups_prefers_device_id_tier_before_generic_fallback() {
         &data,
     );
 
-    let found = find_backups(
-        &tmp.0,
-        &netac_facts(),
-        Some("disk&ven_netac&prod_onlydisk"),
-        Some(tag),
-    );
-    assert_eq!(found, vec![exact]);
+    let current = current_identity(&data, "disk&ven_netac&prod_onlydisk");
+    let found = find_backups(&tmp.0, &current);
+    assert_eq!(found.confirmed, vec![exact]);
+    assert!(found.possible.is_empty());
 }
 
 #[test]
@@ -398,6 +409,7 @@ fn parse_backup_name_modern_nopwd_legacy_and_invalid() {
             device_id: "disk&ven_aigo&prod_u335&rev_pmap".into(),
             onlyid: Some("1987718388".into()),
             tagged_nopwd: false,
+            identity: None,
         }
     );
 
@@ -596,6 +608,26 @@ fn scan_prefers_lba4_identity_over_filename_onlyid() {
     );
 }
 
+fn grouped_identity(onlyid: &str) -> MediaIdentitySnapshot {
+    MediaIdentitySnapshot {
+        hardware: HardwareIdentityEvidence {
+            vid: Some(0x0dd8),
+            pid: Some(0x2005),
+            total_sectors: Some(122_880_000),
+            logical_sector_size: Some(SECTOR as u32),
+            ..HardwareIdentityEvidence::default()
+        },
+        protocol: ProtocolIdentityEvidence {
+            device_id: Some("disk&ven_netac&prod_onlydisk".into()),
+            onlyid: Some(onlyid.into()),
+            provision_kind: Some(edpcli::provision::DiskProvisionKind::Mode0),
+            lba4_identity_digest: None,
+        },
+        derived: DerivedProtocolEvidence::default(),
+        observation: IdentityObservation::default(),
+    }
+}
+
 fn fake_entry(name: &str, onlyid: &str, mtime: i64, is_nopwd: bool) -> BackupEntry {
     BackupEntry {
         meta: Some(BackupMeta {
@@ -606,6 +638,7 @@ fn fake_entry(name: &str, onlyid: &str, mtime: i64, is_nopwd: bool) -> BackupEnt
             device_id: "disk&ven_netac&prod_onlydisk".into(),
             onlyid: Some(onlyid.into()),
             tagged_nopwd: is_nopwd,
+            identity: Some(grouped_identity(onlyid)),
         }),
         path: std::path::PathBuf::from(name),
         mtime,

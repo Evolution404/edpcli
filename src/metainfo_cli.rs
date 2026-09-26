@@ -7,7 +7,7 @@ use crate::cli::{
     argv_with_backup_dir_for_elevation, auto_pick_disk, guard_usb_disk, InfoOpts, StdPrompter,
 };
 use crate::common::{EXIT_BACKUP, EXIT_IO, EXIT_OK, SECTOR};
-use crate::diskio::{self, find_backups, raw_path, DiskFacts, FileDev, SectorReadCache};
+use crate::diskio::{self, find_backups, raw_path, FileDev, SectorReadCache};
 use crate::elevate;
 use crate::identify::identify;
 use crate::inspect_cli::resolve_inspect_file;
@@ -191,16 +191,34 @@ fn disk_flow(runner: &dyn CmdRunner, mut opts: InfoOpts) -> i32 {
             return EXIT_IO;
         }
     };
-    let facts = DiskFacts {
-        disk: n,
-        total_sectors,
-        vid,
-        pid,
-        label_id: onlyid,
-    };
-    let tag16 = raw4.as_deref().and_then(diskio::lba4_tag16_from);
+    let mut protocol_image = Vec::with_capacity(crate::common::METADATA_IMAGE_LEN);
+    for lba in 0..crate::common::METADATA_SECTOR_COUNT as u32 {
+        match reader.read_sector(lba) {
+            Ok(sector) => protocol_image.extend_from_slice(&sector),
+            Err(error) => {
+                eprintln!(
+                    "{}",
+                    crate::ui::red(&format!("错误: 读取 disk{n} 身份镜像失败: {error}"))
+                );
+                return EXIT_IO;
+            }
+        }
+    }
+    let identity =
+        match crate::application::media_identity_observer::media_identity_from_protocol_image(
+            runner,
+            n,
+            &protocol_image,
+        ) {
+            Ok(identity) => identity,
+            Err(error) => {
+                eprintln!("{}", crate::ui::red(&error.msg));
+                return error.code;
+            }
+        };
     let backup_dir = diskio::resolve_backup_dir(opts.backup_dir.as_deref());
-    let backups = find_backups(&backup_dir, &facts, device_id.as_deref(), tag16);
+    let backup_matches = find_backups(&backup_dir, &identity);
+    let backups = backup_matches.confirmed;
     print_summary(
         &format!("物理盘 disk{n} ({path})"),
         &summary,
