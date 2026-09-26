@@ -283,7 +283,9 @@ fn decode_entities(raw: &[u8]) -> String {
                 }
             }
         }
-        let ch = s[i..].chars().next().unwrap();
+        let Some(ch) = s[i..].chars().next() else {
+            break;
+        };
         out.push(ch);
         i += ch.len_utf8();
     }

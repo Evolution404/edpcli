@@ -9,6 +9,34 @@ pub(super) struct Inventory {
     pub free: u64,
     pub entries: Vec<FileEntry>,
 }
+
+#[cfg(test)]
+mod boot_bounds_tests {
+    use super::*;
+    use std::io;
+
+    struct UnusedReader;
+
+    impl PartitionReader for UnusedReader {
+        fn read_sector(&mut self, _: u64) -> io::Result<Vec<u8>> {
+            panic!("short boot must fail before sector reads")
+        }
+    }
+
+    #[test]
+    fn short_boot_is_a_parse_error() {
+        for length in [0, 1, 510, 511] {
+            assert_eq!(
+                parse(&mut UnusedReader, 1, &vec![0; length])
+                    .err()
+                    .as_deref(),
+                Some("truncated FAT boot sector")
+            );
+        }
+    }
+}
+// Callers have exact 512-byte sectors or complete directory entries, and
+// offsets are fixed FAT layout fields.
 fn u16le(b: &[u8], n: usize) -> u16 {
     u16::from_le_bytes([b[n], b[n + 1]])
 }
@@ -62,6 +90,9 @@ pub(super) fn parse(
     partition_sectors: u64,
     boot: &[u8],
 ) -> Result<Inventory, String> {
+    if boot.len() != 512 {
+        return Err("truncated FAT boot sector".into());
+    }
     if boot[510..512] != [0x55, 0xaa] || u16le(boot, 11) != 512 {
         return Err("invalid FAT boot signature or sector size".into());
     }
@@ -333,12 +364,12 @@ impl LongName {
             if e[..11].iter().any(|&c| !(32..128).contains(&c)) {
                 return Err("non-ASCII short name needs an explicit OEM code page".into());
             }
-            let mut base = String::from_utf8(e[..8].to_vec())
-                .unwrap()
+            let mut base = std::str::from_utf8(&e[..8])
+                .map_err(|_| "invalid ASCII short filename")?
                 .trim_end()
                 .to_string();
-            let mut ext = String::from_utf8(e[8..11].to_vec())
-                .unwrap()
+            let mut ext = std::str::from_utf8(&e[8..11])
+                .map_err(|_| "invalid ASCII short filename extension")?
                 .trim_end()
                 .to_string();
             if e[12] & 8 != 0 {

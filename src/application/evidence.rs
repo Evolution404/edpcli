@@ -138,8 +138,15 @@ impl BackupSectorReader {
 impl SectorReader for BackupSectorReader {
     fn read_sector(&mut self, lba: u64) -> io::Result<Vec<u8>> {
         if lba < METADATA_SECTOR_COUNT as u64 {
-            let start = usize::try_from(lba).unwrap() * SECTOR;
-            return Ok(self.protocol[start..start + SECTOR].to_vec());
+            let start = usize::try_from(lba)
+                .ok()
+                .and_then(|sector| sector.checked_mul(SECTOR))
+                .ok_or_else(|| io::Error::other("EDPB 协议扇区偏移溢出"))?;
+            return self
+                .protocol
+                .get(start..start + SECTOR)
+                .map(|sector| sector.to_vec())
+                .ok_or_else(|| io::Error::new(io::ErrorKind::UnexpectedEof, "EDPB 协议镜像截断"));
         }
         let found = self.manifest.extents.iter().find_map(|extent| {
             let end = extent.start_lba.checked_add(extent.sector_count)?;
@@ -160,7 +167,7 @@ impl SectorReader for BackupSectorReader {
         };
         let data = self
             .read_artifact(&artifact_id)?
-            .expect("manifest 中已确认的 Artifact 必须存在");
+            .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "EDPB Artifact 缺失"))?;
         let offset = usize::try_from(lba - start_lba)
             .ok()
             .and_then(|sector| sector.checked_mul(SECTOR))

@@ -190,7 +190,10 @@ pub fn execute_write_transaction(
                     Err(_) => thread::sleep(Duration::from_millis(500)),
                 }
             }
-            unreachable!()
+            Err(EdpCliError::new(
+                EXIT_INTERMEDIATE,
+                "错误: 事务回滚重试次数耗尽，目标可能处于中间状态；禁止继续使用该盘。",
+            ))
         }
     }
 }

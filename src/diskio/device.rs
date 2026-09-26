@@ -75,7 +75,7 @@ where
         }
         self.devices
             .get_mut(&disk)
-            .expect("刚插入的只读设备必须存在")
+            .ok_or_else(|| io::Error::other("只读设备缓存缺失"))?
             .read_sector(lba)
     }
 }

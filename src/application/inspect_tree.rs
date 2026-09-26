@@ -495,10 +495,20 @@ fn mbr_primary_regions(context: &InspectDiskContext) -> Vec<InspectNode> {
     for slot in 0..4usize {
         let offset = 0x1be + slot * 16;
         let partition_type = mbr[offset + 4];
-        let start_lba =
-            u32::from_le_bytes(mbr[offset + 8..offset + 12].try_into().expect("MBR field")) as u64;
-        let sector_count =
-            u32::from_le_bytes(mbr[offset + 12..offset + 16].try_into().expect("MBR field")) as u64;
+        let Some(start_bytes) = mbr
+            .get(offset + 8..offset + 12)
+            .and_then(|bytes| bytes.try_into().ok())
+        else {
+            continue;
+        };
+        let Some(count_bytes) = mbr
+            .get(offset + 12..offset + 16)
+            .and_then(|bytes| bytes.try_into().ok())
+        else {
+            continue;
+        };
+        let start_lba = u32::from_le_bytes(start_bytes) as u64;
+        let sector_count = u32::from_le_bytes(count_bytes) as u64;
         if partition_type == 0 || start_lba == 0 || sector_count == 0 {
             continue;
         }
