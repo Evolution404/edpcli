@@ -50,6 +50,7 @@ impl TaskHub {
         self.critical_worker = Some(std::thread::spawn(move || {
             let result = catch_unwind(AssertUnwindSafe(|| {
                 crate::application::delete_backup_exact(&backup_dir, &path, &expected_sha256)
+                    .map_err(|error| error.to_string())
             }))
             .unwrap_or_else(|payload| {
                 Err(format!(
