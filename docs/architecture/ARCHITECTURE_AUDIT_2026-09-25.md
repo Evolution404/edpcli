@@ -1032,9 +1032,9 @@ application 返回结构化 `ProvisionReport/BackupReport/InspectReport`，CLI/T
 **COMPLETE。**
 
 - `scripts/test-full.py` 新增 `--max-seconds`，并支持环境变量 `EDPCLI_TEST_MAX_SECONDS`；功能失败优先报告，功能全部通过后才检查总耗时预算。
-- `scripts/test-fast.sh` 默认传入 **45 秒**预算，可用 `EDPCLI_FAST_MAX_SECONDS` 显式覆盖；GitHub Actions 的完整非 HIL 门禁设置 **120 秒**性能预算。该预算只判断性能回归，不是同步命令执行超时。
+- 当前 `scripts/test-fast.sh` 默认传入 **60 秒**预算，可用 `EDPCLI_FAST_MAX_SECONDS` 显式覆盖；GitHub Actions 的完整非 HIL 门禁设置 **180 秒**性能预算。该预算只判断性能回归，不是同步命令执行超时。
 - 静态基础设施门禁 **1/1** 通过；负向运行以 **0.001 秒**预算执行时，测试本身全部通过后明确输出 `timing budget exceeded` 并以 **exit 1** 结束，证明门禁实际生效。
-- 正式 `scripts/test-fast.sh` 在默认 45 秒预算下通过；最终已提交代码重跑为 **41.27s / 0 失败 / 退出码 0**，当前性能满足门槛。
+- 2026-09-25 当时 `scripts/test-fast.sh` 在默认 45 秒预算下通过；最终已提交代码重跑为 **41.27s / 0 失败 / 退出码 0**。2026-09-27 随 Chapter 14/15 测试面扩大，提交后冷/半冷路径实测 **51.62s / 0 功能失败**，因此默认预算校准为 **60 秒**，仍与 180 秒 full gate 保持明显分层。
 
 ### Phase R6 总体实施状态（2026-09-25）
 
