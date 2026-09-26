@@ -1,6 +1,6 @@
 use edpcli::provision::{
-    KeyDomainRole, SecretBytes, SourcePasswordKnowledge, TargetPasswordPolicy, ProvisionTarget,
-    PartitionRole,
+    KeyDomainRole, PartitionRole, ProvisionTarget, SecretBytes, SourcePasswordKnowledge,
+    TargetPasswordPolicy,
 };
 use std::collections::BTreeSet;
 
@@ -167,7 +167,6 @@ const GOLDEN: [GoldenCell; 25] = [
         contract: "per-domain-preserve-rewrap-rebuild",
     },
 ];
-
 
 #[test]
 fn key_domain_roles_match_protocol_semantics() {
