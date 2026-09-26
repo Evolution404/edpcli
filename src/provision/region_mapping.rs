@@ -129,6 +129,51 @@ pub enum CompatibilityFailure {
     WrapMode,
 }
 
+pub fn opaque_preserve_compatibility(
+    source: SourceRegion,
+    target: TargetRegion,
+) -> Result<(), CompatibilityFailure> {
+    if source.role == PartitionRole::CompatibilityReserve
+        || target.role == PartitionRole::CompatibilityReserve
+    {
+        return Err(CompatibilityFailure::CompatibilityReserveIsCanonicalRebuild);
+    }
+    if source.role != target.role {
+        return Err(CompatibilityFailure::SemanticRole);
+    }
+    if source.partition_type != target.partition_type {
+        return Err(CompatibilityFailure::PartitionType);
+    }
+    if source.extent.start_lba != target.extent.start_lba {
+        return Err(CompatibilityFailure::StartLba);
+    }
+    if source.extent.sector_count != target.extent.sector_count {
+        return Err(CompatibilityFailure::SectorCount);
+    }
+    if source.physical_crypto != target.physical_crypto {
+        return Err(CompatibilityFailure::PhysicalCrypto);
+    }
+    if source.filesystem != FilesystemProfile::Unknown
+        && target.filesystem != FilesystemProfile::Unknown
+        && source.filesystem != target.filesystem
+    {
+        return Err(CompatibilityFailure::Filesystem);
+    }
+    match (source.key_profile, target.key_profile) {
+        (None, None) => {}
+        (Some(source), Some(target)) => {
+            if source.domain != target.domain {
+                return Err(CompatibilityFailure::KeyDomain);
+            }
+            if source.wrap_mode != target.wrap_mode {
+                return Err(CompatibilityFailure::WrapMode);
+            }
+        }
+        _ => return Err(CompatibilityFailure::KeyDomain),
+    }
+    Ok(())
+}
+
 pub fn preserve_compatibility(
     source: SourceRegion,
     target: TargetRegion,
