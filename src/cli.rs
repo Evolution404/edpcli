@@ -442,6 +442,23 @@ fn print_provision_summary(prepared: &crate::application::provision::PreparedPro
 fn provision_flow(runner: &SysRunner, action: ProvisionAction) -> i32 {
     match action {
         ProvisionAction::Plan(opts) => {
+            if let Some(disk) = opts.disk {
+                if let Err(error) = guard_usb_disk(runner, disk) {
+                    return finish(Err(error));
+                }
+            }
+            if !elevate::is_root() {
+                let mut prompt = StdPrompter;
+                let disk = match provision_resolve_disk(runner, opts.disk, &mut prompt) {
+                    Ok(value) => value,
+                    Err(error) => return finish(Err(error)),
+                };
+                let mut argv: Vec<String> = std::env::args().skip(1).collect();
+                DeviceSelector::new(opts.disk).pin_argv(&mut argv, disk);
+                elevate::ensure_elevated(&argv);
+                unreachable!();
+            }
+
             let mut prompt = StdPrompter;
             let disk = match provision_resolve_disk(runner, opts.disk, &mut prompt) {
                 Ok(value) => value,
@@ -750,6 +767,14 @@ fn finish(r: EdpCliResult<i32>) -> i32 {
 mod tests {
     use super::*;
     use crate::sectors::EdpfPartition;
+
+    #[test]
+    fn finish_preserves_business_error_exit_code() {
+        assert_eq!(
+            finish(Err(EdpCliError::new(EXIT_IO, "expected failure"))),
+            EXIT_IO
+        );
+    }
 
     #[test]
     fn target_plan_summary_reports_exact_geometry_and_data_fate() {

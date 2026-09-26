@@ -9,14 +9,18 @@ use crate::common;
 
 use std::collections::HashMap;
 use std::fs;
+use std::io;
 use std::process::Command;
+use std::time::Duration;
 
 use common::*;
 use edpcli::application::write::{backup_create_flow, restore_flow, Ctx};
 use edpcli::common::{EXIT_BACKUP, EXIT_CANCELLED, EXIT_OK, EXIT_TARGET, SECTOR};
 use edpcli::diskio::FileDev;
 use edpcli::diskio::SectorDev;
-use edpcli::edpb::{self, CoreCapture};
+use edpcli::edpb::{self, CoreCapture, MetadataCapture};
+use edpcli::sysinfo::CmdRunner;
+use sha2::{Digest, Sha256};
 
 // ══════════════════════════════════════════════════════════════════
 // 子进程测试(真二进制)
@@ -66,7 +70,7 @@ fn usage_errors_exit_two() {
 // 进程内流程测试(backup / restore)
 // ══════════════════════════════════════════════════════════════════
 fn ctx<'a>(
-    runner: &'a FakeRunner,
+    runner: &'a dyn CmdRunner,
     prompt: &'a mut dyn edpcli::cli::Prompter,
     bak: &'a std::path::Path,
 ) -> Ctx<'a> {
@@ -100,6 +104,27 @@ fn write_test_edpb(
     total_sectors: u64,
     state: &str,
 ) {
+    write_test_edpb_with_notes(
+        path,
+        data,
+        device_id,
+        vid,
+        pid,
+        total_sectors,
+        (state, Vec::new()),
+    );
+}
+
+fn write_test_edpb_with_notes(
+    path: &std::path::Path,
+    data: &[u8],
+    device_id: &str,
+    vid: &str,
+    pid: &str,
+    total_sectors: u64,
+    state_and_notes: (&str, Vec<String>),
+) {
+    let (state, notes) = state_and_notes;
     let onlyid = edpcli::diskio::lba4_label_id_from(&data[4 * SECTOR..5 * SECTOR]);
     let capture = CoreCapture {
         snapshot_id: path.file_name().unwrap().to_string_lossy().into_owned(),
@@ -115,7 +140,57 @@ fn write_test_edpb(
         device_state: state.into(),
         lba0_12: data,
     };
-    edpb::write_core_backup(path, &capture).unwrap();
+    if notes.is_empty() {
+        edpb::write_core_backup(path, &capture).unwrap();
+    } else {
+        edpb::write_metadata_backup(
+            path,
+            &MetadataCapture {
+                core: capture,
+                regions: Vec::new(),
+                extents: Vec::new(),
+                artifacts: Vec::new(),
+                notes,
+            },
+        )
+        .unwrap();
+    }
+}
+
+fn hardware_serial_note(serial: &str) -> String {
+    let digest = Sha256::digest(serial.trim().as_bytes());
+    format!("hardware_serial_sha256={digest:x}")
+}
+
+struct SerialRunner {
+    inner: FakeRunner,
+    serial: String,
+}
+
+impl CmdRunner for SerialRunner {
+    fn check_output(&self, cmd: &[&str], timeout: Duration) -> io::Result<String> {
+        self.inner.check_output(cmd, timeout)
+    }
+
+    fn hardware_serial(&self, _disk: u32) -> Option<String> {
+        Some(self.serial.clone())
+    }
+}
+
+fn netac_serial_runner(disk: u32, serial: &str) -> SerialRunner {
+    SerialRunner {
+        inner: netac_runner(disk),
+        serial: serial.into(),
+    }
+}
+
+fn plain_metadata(mut image: Vec<u8>) -> Vec<u8> {
+    for lba in 1..13usize {
+        if lba != 3 {
+            image[lba * SECTOR..(lba + 1) * SECTOR].fill(0);
+        }
+    }
+    image
 }
 
 fn write_netac_edpb(path: &std::path::Path, data: &[u8], state: &str) {
@@ -239,6 +314,31 @@ fn backup_create_is_read_only_and_verifiable() {
 
     assert!(edpb::verify_file(&manual.path).is_ok());
     assert!(!std::path::PathBuf::from(format!("{}.sha256", manual.path.display())).exists());
+}
+
+#[test]
+fn edp_backup_records_hardware_serial_binding_when_available() {
+    let Some(orig) = load_disk_image("netac") else {
+        eprintln!("跳过: 真实备份不可用");
+        return;
+    };
+    let serial = "NETAC-HIL-SERIAL-001";
+    let runner = netac_serial_runner(6, serial);
+    let tmp = TmpDir::new("backup_create_serial_binding");
+    let mut prompt = ScriptPrompter {
+        inputs: vec![],
+        idx: 0,
+    };
+    let mut dev = SwapOnReopenDev::new(orig.clone(), orig);
+
+    let report = backup_create_flow(6, &mut ctx(&runner, &mut prompt, &tmp.0), &mut dev).unwrap();
+    let verified = edpb::verify_file(&report.path).unwrap();
+
+    assert!(verified
+        .manifest
+        .provenance
+        .notes
+        .contains(&hardware_serial_note(serial)));
 }
 
 #[test]
@@ -429,6 +529,175 @@ fn restore_refuses_when_current_disk_identity_tag_is_zero() {
     assert_eq!(e.code, EXIT_BACKUP);
     assert!(e.msg.contains("身份"), "{}", e.msg);
     assert_eq!(fs::read(&img_path).unwrap(), current);
+}
+
+#[test]
+fn corrupt_edp_with_nonzero_lba4_never_falls_back_to_plain_backup() {
+    let Some(mut original) = load_disk_image("netac") else {
+        eprintln!("跳过: 真实备份不可用");
+        return;
+    };
+    original[7 * SECTOR..8 * SECTOR].fill(0);
+    let runner = netac_serial_runner(26, "NETAC-HIL-SERIAL-001");
+    let tmp = TmpDir::new("corrupt_edp_not_plain");
+    let img_path = tmp.0.join("corrupt.img");
+    fs::write(&img_path, &original).unwrap();
+    let mut dev = FileDev::open_rdonly(img_path.to_str().unwrap()).unwrap();
+    let mut prompt = ScriptPrompter::yes();
+
+    let error = backup_create_flow(
+        26,
+        &mut Ctx {
+            runner: &runner,
+            clock: &FixedClockForCli,
+            prompt: &mut prompt,
+            backup_dir: tmp.0.join("bak"),
+        },
+        &mut dev,
+    )
+    .unwrap_err();
+
+    assert_eq!(error.code, EXIT_BACKUP);
+    assert!(error.msg.contains("LBA4") && error.msg.contains("EDP"));
+}
+
+#[test]
+fn restore_allows_plain_lba4_zero_only_with_matching_hardware_binding() {
+    let Some(original) = load_disk_image("netac") else {
+        eprintln!("跳过: 真实备份不可用");
+        return;
+    };
+    let serial = "NETAC-HIL-SERIAL-001";
+    let runner = netac_serial_runner(26, serial);
+    let tmp = TmpDir::new("restore_plain_matching_hardware");
+    let bakfile = tmp.0.join("serial-bound.edpb");
+    write_test_edpb_with_notes(
+        &bakfile,
+        &original,
+        "disk&ven_netac&prod_onlydisk",
+        "0dd8",
+        "2005",
+        122_880_000,
+        ("encrypted", vec![hardware_serial_note(serial)]),
+    );
+
+    let current = plain_metadata(original.clone());
+    let img_path = tmp.0.join("disk.img");
+    fs::write(&img_path, &current).unwrap();
+    let mut prompt = ScriptPrompter::yes();
+    let mut dev = FileDev::open_rdwr(
+        img_path.to_str().unwrap(),
+        std::time::Duration::from_secs(1),
+    )
+    .unwrap();
+
+    let code = restore_flow(
+        Some(bakfile.to_string_lossy().into_owned()),
+        26,
+        &mut Ctx {
+            runner: &runner,
+            clock: &FixedClockForCli,
+            prompt: &mut prompt,
+            backup_dir: tmp.0.clone(),
+        },
+        &mut dev,
+    )
+    .unwrap();
+
+    assert_eq!(code, EXIT_OK);
+    assert_eq!(fs::read(&img_path).unwrap(), original);
+}
+
+#[test]
+fn restore_plain_lba4_zero_rejects_wrong_hardware_serial() {
+    let Some(original) = load_disk_image("netac") else {
+        eprintln!("跳过: 真实备份不可用");
+        return;
+    };
+    let tmp = TmpDir::new("restore_plain_wrong_hardware");
+    let bakfile = tmp.0.join("serial-bound.edpb");
+    write_test_edpb_with_notes(
+        &bakfile,
+        &original,
+        "disk&ven_netac&prod_onlydisk",
+        "0dd8",
+        "2005",
+        122_880_000,
+        (
+            "encrypted",
+            vec![hardware_serial_note("NETAC-HIL-SERIAL-001")],
+        ),
+    );
+
+    let current = plain_metadata(original);
+    let img_path = tmp.0.join("disk.img");
+    fs::write(&img_path, &current).unwrap();
+    let runner = netac_serial_runner(26, "OTHER-SERIAL");
+    let mut prompt = ScriptPrompter::yes();
+    let mut dev = FileDev::open_rdwr(
+        img_path.to_str().unwrap(),
+        std::time::Duration::from_secs(1),
+    )
+    .unwrap();
+
+    let error = restore_flow(
+        Some(bakfile.to_string_lossy().into_owned()),
+        26,
+        &mut Ctx {
+            runner: &runner,
+            clock: &FixedClockForCli,
+            prompt: &mut prompt,
+            backup_dir: tmp.0.clone(),
+        },
+        &mut dev,
+    )
+    .unwrap_err();
+
+    assert_eq!(error.code, EXIT_BACKUP);
+    assert!(error.msg.contains("硬件") || error.msg.contains("序列号"));
+    assert_eq!(fs::read(&img_path).unwrap(), current);
+}
+
+#[test]
+fn plain_backup_uses_hardware_identity_and_serial_binding() {
+    let Some(original) = load_disk_image("netac") else {
+        eprintln!("跳过: 真实备份不可用");
+        return;
+    };
+    let serial = "NETAC-HIL-SERIAL-001";
+    let runner = netac_serial_runner(26, serial);
+    let tmp = TmpDir::new("plain_backup_hardware_identity");
+    let current = plain_metadata(original);
+    let img_path = tmp.0.join("plain.img");
+    fs::write(&img_path, &current).unwrap();
+    let mut dev = FileDev::open_rdonly(img_path.to_str().unwrap()).unwrap();
+    let mut prompt = ScriptPrompter::yes();
+
+    let report = backup_create_flow(
+        26,
+        &mut Ctx {
+            runner: &runner,
+            clock: &FixedClockForCli,
+            prompt: &mut prompt,
+            backup_dir: tmp.0.join("bak"),
+        },
+        &mut dev,
+    )
+    .unwrap();
+    let verified = edpb::verify_file(&report.path).unwrap();
+
+    assert_eq!(verified.manifest.snapshot.device_state, "plain");
+    assert_eq!(verified.manifest.device.vid, "0dd8");
+    assert_eq!(verified.manifest.device.pid, "2005");
+    assert_eq!(
+        verified.manifest.device.device_id,
+        "disk&ven_netac&prod_onlydisk&rev_1.00"
+    );
+    assert!(verified
+        .manifest
+        .provenance
+        .notes
+        .contains(&hardware_serial_note(serial)));
 }
 
 #[test]

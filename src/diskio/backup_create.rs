@@ -37,6 +37,17 @@ fn prepare_backup_capture<'a>(
     bak_dir: &Path,
     clock: &dyn Clock,
 ) -> EdpCliResult<(PathBuf, bool, crate::edpb::CoreCapture<'a>)> {
+    prepare_backup_capture_with_state(facts, data, device_id, bak_dir, clock, None)
+}
+
+fn prepare_backup_capture_with_state<'a>(
+    facts: &DiskFacts,
+    data: &'a [u8],
+    device_id: &str,
+    bak_dir: &Path,
+    clock: &dyn Clock,
+    device_state: Option<&str>,
+) -> EdpCliResult<(PathBuf, bool, crate::edpb::CoreCapture<'a>)> {
     validate_backup_device_id(device_id)?;
     if data.len() != crate::common::METADATA_IMAGE_LEN {
         return Err(EdpCliError::new(
@@ -60,8 +71,12 @@ fn prepare_backup_capture<'a>(
         .as_ref()
         .map(|value| format!("_onlyid{}", value))
         .unwrap_or_default();
-    let is_nopwd = image_is_nopwd(data, device_id);
-    let state_part = if is_nopwd { "_nopwd" } else { "" };
+    let is_nopwd = device_state.is_none() && image_is_nopwd(data, device_id);
+    let state_part = match device_state {
+        Some("plain") => "_plain",
+        _ if is_nopwd => "_nopwd",
+        _ => "",
+    };
     let base = format!(
         "disk{}_{}_vid{}_pid{}_{}{}{}_{}",
         facts.disk, secs, facts.vid, facts.pid, device_id, onlyid_part, state_part, ts
@@ -78,11 +93,14 @@ fn prepare_backup_capture<'a>(
         total_sectors: facts.total_sectors,
         logical_sector_size: SECTOR as u32,
         edpcli_version: env!("CARGO_PKG_VERSION").to_string(),
-        device_state: if is_nopwd {
-            "passwordless".into()
-        } else {
-            "encrypted".into()
-        },
+        device_state: device_state.map(str::to_string).unwrap_or_else(|| {
+            if is_nopwd {
+                "passwordless"
+            } else {
+                "encrypted"
+            }
+            .into()
+        }),
         lba0_12: data,
     };
     Ok((path, is_nopwd, capture))
@@ -99,6 +117,22 @@ pub fn create_backup(
 ) -> EdpCliResult<(PathBuf, bool)> {
     let (path, is_nopwd, capture) = prepare_backup_capture(facts, data, device_id, bak_dir, clock)?;
     crate::edpb::write_core_backup(&path, &capture)
+        .map_err(|error| EdpCliError::new(EXIT_BACKUP, format!("错误: {error}")))?;
+    sync_dir(bak_dir)?;
+    Ok((path, is_nopwd))
+}
+
+pub fn create_plain_backup(
+    facts: &DiskFacts,
+    data: &[u8],
+    device_id: &str,
+    notes: &[String],
+    bak_dir: &Path,
+    clock: &dyn Clock,
+) -> EdpCliResult<(PathBuf, bool)> {
+    let (path, is_nopwd, capture) =
+        prepare_backup_capture_with_state(facts, data, device_id, bak_dir, clock, Some("plain"))?;
+    crate::edpb::write_core_backup_with_notes(&path, &capture, notes)
         .map_err(|error| EdpCliError::new(EXIT_BACKUP, format!("错误: {error}")))?;
     sync_dir(bak_dir)?;
     Ok((path, is_nopwd))
