@@ -48,7 +48,13 @@ pub fn unwrap_legacy_lba7_file_key(
     }
     let folded = legacy_password_fold32(password);
     let mut file_key = [0u8; 8];
-    for (index, chunk) in material.wrapped_file_key.as_chunks::<4>().0.iter().enumerate() {
+    for (index, chunk) in material
+        .wrapped_file_key
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .enumerate()
+    {
         let word = u32::from_le_bytes(*chunk) ^ folded;
         file_key[index * 4..index * 4 + 4].copy_from_slice(&word.to_le_bytes());
     }
