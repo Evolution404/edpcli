@@ -632,8 +632,7 @@ pub(super) fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, sta
                         title: "磁盘布局",
                         summary: &layout_summary,
                         details: &[],
-                        focused: focused_pane
-                            == crate::tui::pane::PaneId::ProvisionDiskLayout,
+                        focused: focused_pane == crate::tui::pane::PaneId::ProvisionDiskLayout,
                         scroll_y: state
                             .pane_viewport(crate::tui::pane::PaneId::ProvisionDiskLayout)
                             .scroll_y
