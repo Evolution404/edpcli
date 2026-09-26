@@ -555,8 +555,18 @@ fn provision_flow(runner: &SysRunner, action: ProvisionAction) -> i32 {
             if !confirmed {
                 return finish(Err(EdpCliError::new(EXIT_CANCELLED, "已取消(未写盘)")));
             }
-            match crate::application::provision::commit_provision_on_disk(runner, &prepared) {
-                Ok(crate::application::provision::ProvisionCommitOutcome::Official(report)) => {
+            let write = match crate::application::provision::commit_provision_with_backup_on_disk(
+                runner,
+                &prepared,
+                crate::application::resolve_backup_dir(None),
+                &mut prompt,
+            ) {
+                Ok(value) => value,
+                Err(error) => return finish(Err(error)),
+            };
+            println!("制盘前自动备份：{}", write.backup.path.display());
+            match write.commit {
+                crate::application::provision::ProvisionCommitOutcome::Official(report) => {
                     println!(
                         "{}",
                         crate::ui::green("制盘：成功，协议与几何读回校验通过。")
@@ -578,9 +588,9 @@ fn provision_flow(runner: &SysRunner, action: ProvisionAction) -> i32 {
                         EXIT_OK
                     }
                 }
-                Ok(crate::application::provision::ProvisionCommitOutcome::Plain {
+                crate::application::provision::ProvisionCommitOutcome::Plain {
                     partition_count,
-                }) => {
+                } => {
                     println!(
                         "{}",
                         crate::ui::green(&format!(
@@ -590,7 +600,6 @@ fn provision_flow(runner: &SysRunner, action: ProvisionAction) -> i32 {
                     );
                     EXIT_OK
                 }
-                Err(error) => finish(Err(error)),
             }
         }
     }

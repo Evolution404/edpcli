@@ -7,7 +7,7 @@
 use std::collections::BTreeMap;
 use std::fs::OpenOptions;
 use std::io::{Seek, SeekFrom, Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use crate::backup_deep::{analyze_partition, AnalysisStatus, PartitionReader};
@@ -389,6 +389,12 @@ pub enum ProvisionCommitOutcome {
     Plain { partition_count: usize },
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ProvisionWriteOutcome {
+    pub backup: super::write::BackupReport,
+    pub commit: ProvisionCommitOutcome,
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct ProvisionKeyProbe {
     pub source_kind: crate::provision::DiskProvisionKind,
@@ -487,6 +493,33 @@ impl PreparedProvision {
             Self::Official(prepared) => prepared.disk,
             Self::Plain(prepared) => prepared.disk,
         }
+    }
+
+    pub fn device_id(&self) -> &str {
+        match self {
+            Self::Official(prepared) => &prepared.device_id,
+            Self::Plain(prepared) => &prepared.device_id,
+        }
+    }
+
+    fn source_metadata(&self) -> EdpCliResult<&[u8]> {
+        match self {
+            Self::Official(prepared) => prepared.source_metadata.as_deref().ok_or_else(|| {
+                err(
+                    EXIT_TARGET,
+                    "错误: 制盘前缺少来源 LBA0–12 快照，无法创建强制备份",
+                )
+            }),
+            Self::Plain(prepared) => Ok(&prepared.source_metadata),
+        }
+    }
+
+    fn source_backup_onlyid(&self) -> EdpCliResult<Option<String>> {
+        let source = self.source_metadata()?;
+        let lba4 = source
+            .get(4 * SECTOR..5 * SECTOR)
+            .ok_or_else(|| err(EXIT_TARGET, "错误: 来源快照缺少 LBA4，无法绑定强制备份身份"))?;
+        Ok(diskio::lba4_label_id_from(lba4))
     }
 }
 
@@ -600,6 +633,48 @@ pub fn commit_provision_on_disk(
 ) -> EdpCliResult<ProvisionCommitOutcome> {
     let mut dev = open_readonly_usb_disk(runner, prepared.disk())?;
     commit_provision(runner, &mut dev, prepared)
+}
+
+fn run_mandatory_backup_before_commit<B, C>(
+    backup: B,
+    commit: C,
+) -> EdpCliResult<ProvisionWriteOutcome>
+where
+    B: FnOnce() -> EdpCliResult<super::write::BackupReport>,
+    C: FnOnce() -> EdpCliResult<ProvisionCommitOutcome>,
+{
+    let backup = backup()?;
+    let commit = commit()?;
+    Ok(ProvisionWriteOutcome { backup, commit })
+}
+
+/// Mandatory provisioning safety chain shared by CLI and TUI.
+///
+/// A metadata EDPB backup of the currently selected physical USB must complete
+/// successfully before the write path is allowed to enter unmount/lock. The
+/// backup is bound to the prepared source identity and a backup failure aborts
+/// the operation without reaching `commit_provision_on_disk`.
+pub fn commit_provision_with_backup_on_disk(
+    runner: &dyn CmdRunner,
+    prepared: &PreparedProvision,
+    backup_dir: PathBuf,
+    prompt: &mut dyn super::Prompter,
+) -> EdpCliResult<ProvisionWriteOutcome> {
+    let expected_onlyid = prepared.source_backup_onlyid()?;
+    run_mandatory_backup_before_commit(
+        || {
+            super::write::backup_create_on_disk(
+                runner,
+                prepared.disk(),
+                backup_dir,
+                prompt,
+                expected_onlyid.as_deref(),
+                Some(prepared.device_id()),
+                false,
+            )
+        },
+        || commit_provision_on_disk(runner, prepared),
+    )
 }
 
 #[cfg(test)]

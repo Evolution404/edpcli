@@ -286,9 +286,40 @@ fn cli_uses_application_boundary_for_raw_disk_access() {
         );
     }
     assert!(source.contains("prepare_provision_on_disk"));
-    assert!(source.contains("commit_provision_on_disk"));
+    assert!(source.contains("commit_provision_with_backup_on_disk"));
     assert!(source.contains("backup_create_on_disk"));
     assert!(source.contains("restore_on_disk"));
+}
+
+#[test]
+fn provision_write_frontends_cannot_bypass_mandatory_application_backup() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let application = fs::read_to_string(root.join("src/application/provision.rs"))
+        .expect("read provision application");
+    let cli = fs::read_to_string(root.join("src/cli.rs")).expect("read cli");
+    let tui = fs::read_to_string(root.join("src/tui/provision/task.rs"))
+        .expect("read tui provision task");
+
+    let start = application
+        .find("pub fn commit_provision_with_backup_on_disk")
+        .expect("application must own mandatory provision backup chain");
+    let body = &application[start..];
+    let backup = body
+        .find("backup_create_on_disk")
+        .expect("mandatory chain must create backup");
+    let commit = body
+        .find("commit_provision_on_disk")
+        .expect("mandatory chain must commit after backup");
+    assert!(
+        backup < commit,
+        "backup must complete before provision commit"
+    );
+
+    assert!(cli.contains("commit_provision_with_backup_on_disk"));
+    assert!(!cli.contains("match crate::application::provision::commit_provision_on_disk"));
+    assert!(tui.contains("commit_provision_with_backup_on_disk"));
+    assert!(!tui.contains("_backup_dir: PathBuf"));
+    assert!(!tui.contains("commit_provision_on_disk(&runner, &prepared)"));
 }
 
 #[test]

@@ -3415,6 +3415,7 @@ K0 基线审计曾确认：
 - **mode2 CompatibilityReserve：PASS。** type1 精确为 LBA63..125 共 63 sectors，MBR entry type=0x0B；原 type4 Encrypt 首扇区 SHA-256 保持不变且仍可用默认密码解密为 exFAT。
 - **真实介质 rollback：PASS。** 专用 `examples/real_usb_rollback_hil.rs` 默认拒绝运行，只有显式 HIL 开关后才允许外接 USB；测试在经分区/盘尾/全零未分配区门禁确认后的 LBA1024..1026 注入第 2 次写失败，生产 `execute_write_transaction()` 返回 `EXIT_ROLLED_BACK`，独立重开 raw device 与外部 `dd + SHA-256` 均证明三个 touched sectors 完全恢复。
 - **Plain 双分区：PASS。** P1 DATA 1GiB + P2 TOOLS fill 均为 exFAT，LBA3 byte-for-byte preserve；macOS 对两个分区分别完成 mount/write/readback/unmount，最终 Plain `_plain.edpb` 再次创建并校验通过。
+- **制盘前强制自动备份安全链：代码门禁 PASS。** 本轮审计确认旧实现中 CLI `provision write` 可直接进入 commit、TUI 也允许跳过保存，备份并非 application 写盘链的强制步骤。现已统一为 `backup_create_on_disk → commit_provision_on_disk` 的 application 单一入口；备份失败时 commit 必须 0 次调用，CLI/TUI 均不可绕过。该项只表示代码与自动门禁已收口，不作为新的真实 USB 场景 PASS。
 - **仍缺：真实双域异密码 + password-only rewrap。** K7 Virtual-HIL 已覆盖该语义，但 K8 真实 USB CLI 调用在当前执行环境被安全层拦截；不得用变形命令绕过，也不得把虚拟盘证据冒充真实盘证据。
 
 ### 12.13 本章完成标准

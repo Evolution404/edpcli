@@ -154,15 +154,18 @@ pub(super) fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, sta
             frame.render_stateful_widget(table, main_area, &mut table_state);
         }
         ProvisionStage::BackupPrompt => {
-            let choices = ["先保存当前盘，再选择制盘模式", "不保存，直接选择制盘模式"];
+            let choices = [
+                "现在额外保存一份，再选择制盘模式",
+                "继续；正式写盘前由安全链强制自动备份",
+            ];
             let mut lines = vec![
-                Line::from(Span::styled("制盘前是否保存当前盘？", secondary())),
+                Line::from(Span::styled("可选：现在额外保存一份当前盘", secondary())),
                 Line::from(""),
                 Line::from(Span::styled(
                     safe(&state.provision_backup_summary()),
                     warning(),
                 )),
-                Line::from("保存会创建当前盘的 EDPB 元数据备份，不会修改 U 盘。"),
+                Line::from("无论此处如何选择，正式写盘前 application 安全链都会强制创建 EDPB 备份；备份失败则不写盘。"),
                 Line::from(""),
             ];
             for (index, choice) in choices.iter().enumerate() {

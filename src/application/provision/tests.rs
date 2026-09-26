@@ -28,6 +28,50 @@ impl SectorDev for Lba3Dev {
 }
 
 #[test]
+fn mandatory_backup_failure_prevents_provision_commit() {
+    let commit_called = std::cell::Cell::new(false);
+    let error = run_mandatory_backup_before_commit(
+        || Err(err(EXIT_IO, "backup failed")),
+        || {
+            commit_called.set(true);
+            Ok(ProvisionCommitOutcome::Plain { partition_count: 1 })
+        },
+    )
+    .unwrap_err();
+
+    assert_eq!(error.code, EXIT_IO);
+    assert!(
+        !commit_called.get(),
+        "commit must not run when mandatory backup fails"
+    );
+}
+
+#[test]
+fn mandatory_backup_success_runs_commit_after_backup() {
+    let order = std::cell::RefCell::new(Vec::new());
+    let report = run_mandatory_backup_before_commit(
+        || {
+            order.borrow_mut().push("backup");
+            Ok(super::super::write::BackupReport {
+                path: std::path::PathBuf::from("test.edpb"),
+                is_nopwd: false,
+            })
+        },
+        || {
+            order.borrow_mut().push("commit");
+            Ok(ProvisionCommitOutcome::Plain { partition_count: 2 })
+        },
+    )
+    .unwrap();
+
+    assert_eq!(&*order.borrow(), &["backup", "commit"]);
+    assert_eq!(
+        report.commit,
+        ProvisionCommitOutcome::Plain { partition_count: 2 }
+    );
+}
+
+#[test]
 fn mode2_quick_and_exact_encrypt_capacity_are_partition_scoped() {
     let quick = target_encrypt_capacity_override(
         OfficialPartitionMode::WholeDiskEncrypted,
