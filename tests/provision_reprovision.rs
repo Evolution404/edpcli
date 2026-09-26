@@ -8,12 +8,13 @@ use edpcli::{
         parse_existing_provision, prefill_for_target_mode, wrap_file_key,
         wrap_legacy_lba7_file_key, CapacityInput, CapacityInputMode, CapacitySource,
         DiskProvisionKind, ExistingPartition, ExistingProvisionProfile, FileKeyWrapMode,
-        KeyDomainSecretPair, KeyDomainSecrets, OfficialFilesystemFormat, OfficialPartitionMode,
+        KeyDomainRole, KeyDomainSecretPair, KeyDomainSecrets, OfficialFilesystemFormat,
+        OfficialPartitionMode,
         OfficialPartitionSizes,
         OfficialProvisionPlan, OnlyId, PartitionAction, PartitionRole, PassInfoPolicy,
         ProvisionEntropy, ProvisionMetadata, ProvisionProfile, ProvisionSpec, ProvisionTarget,
-        QuickCapacityUnit, TargetGeometryOverrides, TargetIdentity, TargetProvisionPlan,
-        OFFICIAL_PARTITION_START_SECTOR,
+        QuickCapacityUnit, SourcePasswordKnowledge, TargetGeometryOverrides, TargetIdentity,
+        TargetProvisionPlan, OFFICIAL_PARTITION_START_SECTOR,
     },
 };
 
@@ -707,6 +708,123 @@ fn same_mode_prefill_uses_exact_source_partition_sizes() {
     );
     assert_eq!(prefill.boot.as_ref().unwrap().sectors(), 1_048_577);
     assert_eq!(prefill.share.as_ref().unwrap().sectors(), 4_000_003);
+}
+
+
+fn generated_mode0_with_domain_passwords(
+    share_password: &[u8],
+    encrypt_password: &[u8],
+) -> (edpcli::provision::ProvisionImage, String) {
+    let probe = HardwareProbe {
+        vid: Some(0x0dd8),
+        pid: Some(0x2005),
+        transport: NativeTransport::Uas,
+        inquiry: Some(InquiryInfo {
+            vendor: "Netac".into(),
+            product: "OnlyDisk".into(),
+            revision: "1.00".into(),
+        }),
+    };
+    let target = TargetIdentity::from_probe(&probe, 16_777_216).unwrap();
+    let did = target.device_id().to_string();
+    let metadata = ProvisionMetadata::new(
+        OnlyId::parse("1402259934").unwrap(),
+        "USER06",
+        "江苏省电力有限公司",
+        "江苏电力!SAFE6",
+    )
+    .unwrap();
+    let spec = ProvisionSpec::new(target, metadata, ProvisionProfile::canonical_v1()).unwrap();
+    let compat = locate_lba7_compatibility_extent_from_geometry(1024, 255, 63, 512).unwrap();
+    let plan = OfficialProvisionPlan::new(
+        OfficialPartitionMode::DefaultThreePartition,
+        OfficialPartitionSizes::new(32, 64, 128),
+        compat,
+        wrap_legacy_lba7_file_key(b"0000aaaa", [0x01; 8]),
+        wrap_file_key(b"0000aaaa", [0x02; 16], FileKeyWrapMode::Sm4),
+    )
+    .unwrap()
+    .with_partition_key_material(
+        1,
+        wrap_legacy_lba7_file_key(share_password, [0x31; 8]),
+        wrap_file_key(share_password, [0x41; 16], FileKeyWrapMode::Sm4),
+    )
+    .unwrap()
+    .with_partition_key_material(
+        2,
+        wrap_legacy_lba7_file_key(encrypt_password, [0x51; 8]),
+        wrap_file_key(encrypt_password, [0x61; 16], FileKeyWrapMode::Sm4),
+    )
+    .unwrap();
+    (
+        generate_official_image(&spec, &ProvisionEntropy::new([0x5a; 252]), &plan).unwrap(),
+        did,
+    )
+}
+
+#[test]
+fn source_password_probe_is_independent_per_key_domain() {
+    let (image, did) =
+        generated_mode0_with_domain_passwords(b"SharePass1!", b"EncryptPass1!");
+    let parsed = parse_existing_provision(&image, &did, 16_777_216)
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(
+        parsed.source_password_knowledge(KeyDomainRole::Share, Some(b"SharePass1!")),
+        SourcePasswordKnowledge::UserVerified
+    );
+    assert_eq!(
+        parsed.source_password_knowledge(KeyDomainRole::Encrypt, Some(b"SharePass1!")),
+        SourcePasswordKnowledge::Unknown
+    );
+    assert_eq!(
+        parsed.source_password_knowledge(KeyDomainRole::Encrypt, Some(b"EncryptPass1!")),
+        SourcePasswordKnowledge::UserVerified
+    );
+}
+
+#[test]
+fn default_password_probe_is_per_domain_and_enables_verified_preserve() {
+    let (image, did) = generated_mode0_with_domain_passwords(b"SharePass1!", b"0000aaaa");
+    let mut source = parse_existing_provision(&image, &did, 16_777_216)
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(
+        source.source_password_knowledge(KeyDomainRole::Share, None),
+        SourcePasswordKnowledge::Unknown
+    );
+    assert_eq!(
+        source.source_password_knowledge(KeyDomainRole::Encrypt, None),
+        SourcePasswordKnowledge::DefaultVerified
+    );
+
+    source
+        .confirm_filesystem(PartitionRole::Encrypt, OfficialFilesystemFormat::ExFat)
+        .unwrap();
+    let prefill = prefill_for_target_mode(
+        Some(&source.profile),
+        OfficialPartitionMode::BootShareCombined,
+        16_000_000,
+        512,
+    )
+    .unwrap();
+    let targets = prefill.target_partitions(512).unwrap();
+    let plan = TargetProvisionPlan::build(
+        Some(&source),
+        OfficialPartitionMode::BootShareCombined,
+        &targets,
+        16_000_000,
+        &KeyDomainSecrets::default_targets(),
+    )
+    .unwrap();
+    let encrypt = plan
+        .partitions
+        .iter()
+        .find(|part| part.geometry.role == PartitionRole::Encrypt)
+        .unwrap();
+    assert_eq!(encrypt.action, PartitionAction::PreserveExact);
 }
 
 fn generated_source_with_force_change(
