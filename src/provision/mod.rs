@@ -49,7 +49,8 @@ pub use plain::{
 };
 pub use profile::{PassInfoPolicy, ProvisionProfile, DEFAULT_SAFE6_LABEL};
 pub use region_mapping::{
-    migration_candidate, preserve_compatibility, CompatibilityFailure, Extent, FilesystemProfile,
+    migration_candidate, opaque_preserve_compatibility, preserve_compatibility,
+    CompatibilityFailure, Extent, FilesystemProfile,
     PhysicalCryptoProfile, RegionKeyProfile, RegionMapping, RegionMappingKind, RegionMappingPlan,
     RegionMappingPlanner, SourceRegion, TargetRegion,
 };
