@@ -1048,17 +1048,34 @@ impl TargetProvisionPlan {
                     let record = source.records[source_index];
                     let source_region = super::SourceRegion::from_existing(*old, record);
                     let target_region = super::TargetRegion::from_target(*target);
-                    if super::preserve_compatibility(source_region, target_region).is_ok() {
-                        disposition = if record.lba12.need_encrypt == 0 {
+                    let domain = super::KeyDomainRole::from_partition_role(target.role);
+                    let user_password = key_domains.source_password(target.role);
+                    if record.lba12.need_encrypt != 0 {
+                        if let Some(domain) = domain {
+                            source_password_knowledge =
+                                Some(source.source_password_knowledge(domain, user_password));
+                        }
+                    }
+
+                    let strict_compatible =
+                        super::preserve_compatibility(source_region, target_region).is_ok();
+                    let opaque_compatible = record.lba12.need_encrypt != 0
+                        && source_password_knowledge
+                            == Some(super::SourcePasswordKnowledge::Unknown)
+                        && super::opaque_preserve_compatibility(source_region, target_region)
+                            .is_ok();
+
+                    if strict_compatible || opaque_compatible {
+                        disposition = if opaque_compatible && !strict_compatible {
+                            target_password_policy =
+                                Some(super::TargetPasswordPolicy::PreserveOpaque);
+                            RegionDisposition::PreserveOpaque
+                        } else if record.lba12.need_encrypt == 0 {
                             RegionDisposition::PreserveVerified
-                        } else if let Some(domain) =
-                            super::KeyDomainRole::from_partition_role(target.role)
-                        {
-                            let user_password = key_domains.source_password(target.role);
-                            let knowledge =
-                                source.source_password_knowledge(domain, user_password);
-                            source_password_knowledge = Some(knowledge);
-                            match knowledge {
+                        } else {
+                            match source_password_knowledge
+                                .unwrap_or(super::SourcePasswordKnowledge::Unknown)
+                            {
                                 super::SourcePasswordKnowledge::Unknown => {
                                     target_password_policy =
                                         Some(super::TargetPasswordPolicy::PreserveOpaque);
@@ -1089,13 +1106,11 @@ impl TargetProvisionPlan {
                                     }
                                 }
                             }
-                        } else {
-                            RegionDisposition::Rebuild
                         };
                         if disposition.preserves_extent() {
                             reason = match disposition {
                                 RegionDisposition::PreserveOpaque => {
-                                    "物理/语义/几何/filesystem 全兼容；来源密码未知，原 key material 与密文区域必须原样透传"
+                                    "role/type/extent/physical crypto/key profile 精确兼容；来源密码未知，文件系统不解读，原 key material 与密文区域逐字节透传"
                                 }
                                 RegionDisposition::PreserveVerified => {
                                     "物理/语义/几何/filesystem 与来源密钥均已验证；原 FileKey 与 data extent 保持不变"
@@ -1110,7 +1125,7 @@ impl TargetProvisionPlan {
                         }
                     } else {
                         reason =
-                            "语义、位置、大小、物理加密或文件系统与来源不一致；不能进入 Preserve family"
+                            "语义、位置、大小、物理加密、文件系统或 key profile 与来源不兼容；不能进入 Preserve family"
                                 .into();
                     }
                 }
