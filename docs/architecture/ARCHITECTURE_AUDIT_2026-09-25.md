@@ -1140,6 +1140,16 @@ application 返回结构化 `ProvisionReport/BackupReport/InspectReport`，CLI/T
 - 该拆分只移动纯 TUI 状态/换算逻辑；`ProvisionState` 阶段编排、事件循环、application Provision 服务以及 system-disk guard、USB guard、写前备份、unmount/lock、reopen identity、atomic write、readback、rollback 全部保持原路径。
 - D7-B 后续继续拆分 Plain 分区编辑、字段导航与输入、校验与复核、布局展示等职责；本小阶段完成不代表 Provision 状态治理全部结束。
 
+## Phase D7-B2.1：Plain 分区编辑职责拆分
+
+**COMPLETE；D7-B 继续。**
+
+- 新增 `src/tui/provision/plain_editor.rs`，承载 Plain 字段槽解析、表单到 `PlainProvisionPlan` 的转换、容量填满、容量单位与文件系统切换、分区增删。`state.rs` 只保留目标盘容量读取、消息与光标同步等工作区编排。
+- Plain 继续使用独立的 `ProvisionTarget::Plain`，分区布局、容量上界与计划合法性仍调用 `crate::provision` 的规范实现；没有引入 mode4 或复制协议解析器。
+- 架构门禁要求 Plain 编辑模块存在、保持小规模，并禁止依赖 `AppState`、application、platform 或 diskio；`state.rs` 上限进一步收紧为 2160 行。
+- `state.rs` 为 **2147 行**、`form.rs` 为 **447 行**、`plain_editor.rs` 为 **139 行**。TUI suite **161/161**、架构测试、fast **4.66s / 0 失败**、full **33.25s / 0 失败**、全目标 Clippy、rustfmt 与 diff 检查通过。首次冷缓存 fast 功能测试全过，但 **48.06s** 超过 45s 性能预算；暖缓存正式复跑通过。
+- 本阶段没有修改 LBA0～12/LCE、设备写入路径或写盘安全门槛；真实 USB HIL 仍待独立验收。
+
 ---
 
 # 第八部分：完成标准

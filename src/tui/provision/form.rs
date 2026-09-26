@@ -67,7 +67,7 @@ impl PlainPartitionForm {
         }
     }
 
-    fn resolve_sector_count(&self, label: &str) -> Result<u64, String> {
+    pub(super) fn resolve_sector_count(&self, label: &str) -> Result<u64, String> {
         match self.input_mode {
             crate::provision::CapacityInputMode::Exact => self
                 .sector_count
@@ -137,35 +137,6 @@ impl PlainProvisionForm {
                 .map(PlainPartitionForm::from_spec)
                 .collect(),
         })
-    }
-
-    fn specs(&self) -> Result<Vec<crate::provision::PlainPartitionSpec>, String> {
-        self.partitions
-            .iter()
-            .enumerate()
-            .map(|(index, part)| {
-                let number = index + 1;
-                let start_lba = part
-                    .start_lba
-                    .trim()
-                    .parse::<u64>()
-                    .map_err(|_| format!("P{number} 起点 LBA 必须是整数"))?;
-                let sector_count = part.resolve_sector_count(&format!("P{number} 容量"))?;
-                Ok(crate::provision::PlainPartitionSpec::new(
-                    start_lba,
-                    sector_count,
-                    part.filesystem,
-                    part.volume_label.trim(),
-                ))
-            })
-            .collect()
-    }
-
-    pub(super) fn plan(
-        &self,
-        total_sectors: u64,
-    ) -> Result<crate::provision::PlainProvisionPlan, String> {
-        crate::provision::PlainProvisionPlan::new(total_sectors, self.specs()?)
     }
 }
 

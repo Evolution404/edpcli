@@ -69,6 +69,7 @@ fn large_modules_are_split_by_domain_boundary() {
         "src/diskio/backup_create.rs",
         "src/tui/provision/state.rs",
         "src/tui/provision/form.rs",
+        "src/tui/provision/plain_editor.rs",
         "src/tui/provision/render.rs",
         "src/tui/provision/task.rs",
         "src/tui/inspect/state.rs",
@@ -86,12 +87,16 @@ fn large_modules_are_split_by_domain_boundary() {
     assert!(lines("src/tui/render.rs") < 1_500);
     assert!(lines("src/tui/task.rs") < 1_000);
     assert!(
-        lines("src/tui/provision/state.rs") < 2_250,
+        lines("src/tui/provision/state.rs") < 2_160,
         "Provision orchestration state must not absorb form/capacity/plain model again"
     );
     assert!(
         lines("src/tui/provision/form.rs") < 650,
         "Provision form model must stay responsibility-bounded"
+    );
+    assert!(
+        lines("src/tui/provision/plain_editor.rs") < 250,
+        "Plain editor must contain only pure partition editing and form conversion"
     );
     let provision_form =
         fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("src/tui/provision/form.rs"))
@@ -105,6 +110,21 @@ fn large_modules_are_split_by_domain_boundary() {
         assert!(
             !provision_form.contains(forbidden),
             "Provision form model must stay pure and independent of orchestration/I/O: {forbidden}"
+        );
+    }
+    let plain_editor = fs::read_to_string(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("src/tui/provision/plain_editor.rs"),
+    )
+    .expect("read plain partition editor");
+    for forbidden in [
+        "AppState",
+        "crate::application",
+        "crate::platform",
+        "crate::diskio",
+    ] {
+        assert!(
+            !plain_editor.contains(forbidden),
+            "Plain partition editor must remain a pure form adapter: {forbidden}"
         );
     }
     let semantic =

@@ -86,9 +86,12 @@ pub type ProvisionPrepared = crate::application::provision::PreparedProvision;
 
 #[path = "form.rs"]
 mod form;
+#[path = "plain_editor.rs"]
+mod plain_editor;
 
 use form::{toggle_supported_fs, ProvisionInputPolicy};
 pub use form::{PlainPartitionForm, PlainProvisionForm, ProvisionForm};
+use plain_editor::plain_field_parts;
 
 #[derive(Debug, Clone)]
 pub struct ProvisionState {
@@ -379,13 +382,6 @@ impl AppState {
         self.provision_sync_cursor_to_end();
     }
 
-    fn plain_field_parts(slot: usize) -> Option<(usize, usize)> {
-        let relative = slot.checked_sub(100)?;
-        let partition = relative / 4;
-        let field = relative % 4;
-        (partition < crate::provision::MAX_PLAIN_PARTITIONS).then_some((partition, field))
-    }
-
     fn provision_total_sectors(&self) -> Option<u64> {
         self.selected_device()
             .map(|row| row.size / crate::common::SECTOR as u64)
@@ -655,7 +651,7 @@ impl AppState {
 
     fn provision_selected_field_mut(&mut self) -> Option<&mut String> {
         let slot = self.provision_field_slot(self.provision.field_selected)?;
-        if let Some((partition, field)) = Self::plain_field_parts(slot) {
+        if let Some((partition, field)) = plain_field_parts(slot) {
             let part = self.provision.plain_form.partitions.get_mut(partition)?;
             return match field {
                 0 => Some(&mut part.start_lba),
@@ -717,7 +713,7 @@ impl AppState {
 
     fn provision_selected_field(&self) -> Option<&str> {
         let slot = self.provision_field_slot(self.provision.field_selected)?;
-        if let Some((partition, field)) = Self::plain_field_parts(slot) {
+        if let Some((partition, field)) = plain_field_parts(slot) {
             let part = self.provision.plain_form.partitions.get(partition)?;
             return match field {
                 0 => Some(part.start_lba.as_str()),
@@ -1028,7 +1024,7 @@ impl AppState {
 
     pub fn provision_field_section(&self, display_index: usize) -> Option<&'static str> {
         let slot = self.provision_field_slot(display_index)?;
-        if let Some((partition, _)) = Self::plain_field_parts(slot) {
+        if let Some((partition, _)) = plain_field_parts(slot) {
             return Some(match partition {
                 0 => "普通分区 P1",
                 1 => "普通分区 P2",
@@ -1243,7 +1239,7 @@ impl AppState {
 
         lines.push(String::new());
         if let Some(slot) = self.provision_field_slot(self.provision.field_selected) {
-            if let Some((partition, _)) = Self::plain_field_parts(slot) {
+            if let Some((partition, _)) = plain_field_parts(slot) {
                 if let Some(part) = plan.partitions.get(partition) {
                     if let Ok(max_sectors) = plan.max_sector_count(partition) {
                         lines.push(format!("当前: P{}", partition + 1));
@@ -1489,7 +1485,7 @@ impl AppState {
 
     pub fn provision_field_hint(&self, display_index: usize) -> Option<String> {
         let slot = self.provision_field_slot(display_index)?;
-        if let Some((_, field)) = Self::plain_field_parts(slot) {
+        if let Some((_, field)) = plain_field_parts(slot) {
             return match field {
                 0 => Some("精确 LBA；不会自动移动其它分区".into()),
                 1 => Some("Space 切换 MiB / GiB / sector · f 填满".into()),
@@ -1512,43 +1508,20 @@ impl AppState {
         let Some(slot) = self.provision_field_slot(self.provision.field_selected) else {
             return false;
         };
-        if let Some((partition, 1)) = Self::plain_field_parts(slot) {
+        if let Some((partition, 1)) = plain_field_parts(slot) {
             let Some(total_sectors) = self.provision_total_sectors() else {
                 self.provision.message = Some("目标 USB 已不存在".into());
                 return true;
             };
-            let specs = self
+            match self
                 .provision
                 .plain_form
-                .partitions
-                .iter()
-                .enumerate()
-                .map(|(index, part)| {
-                    let start_lba = part
-                        .start_lba
-                        .trim()
-                        .parse::<u64>()
-                        .map_err(|_| format!("P{} 起点 LBA 必须是整数", index + 1))?;
-                    Ok(crate::provision::PlainPartitionSpec::new(
-                        start_lba,
-                        1,
-                        part.filesystem,
-                        part.volume_label.clone(),
-                    ))
-                })
-                .collect::<Result<Vec<_>, String>>();
-            let max_sectors = specs.and_then(|specs| {
-                crate::provision::max_plain_sector_count(total_sectors, &specs, partition)
-            });
-            match max_sectors {
-                Ok(max_sectors) if max_sectors > 0 => {
-                    if let Some(part) = self.provision.plain_form.partitions.get_mut(partition) {
-                        part.set_sector_count(max_sectors);
-                        self.provision.message = None;
-                        self.provision_sync_cursor_to_end();
-                    }
+                .fill_partition_capacity(total_sectors, partition)
+            {
+                Ok(()) => {
+                    self.provision.message = None;
+                    self.provision_sync_cursor_to_end();
                 }
-                Ok(_) => self.provision.message = Some("当前普通分区没有可填满的空间".into()),
                 Err(message) => self.provision.message = Some(message),
             }
             return true;
@@ -1634,25 +1607,29 @@ impl AppState {
     pub fn provision_toggle_selected_option(&mut self) -> bool {
         let selected_slot = self.provision_field_slot(self.provision.field_selected);
         if let Some(slot) = selected_slot {
-            if let Some((partition, field)) = Self::plain_field_parts(slot) {
-                let Some(part) = self.provision.plain_form.partitions.get_mut(partition) else {
-                    return false;
-                };
-                match field {
-                    1 => {
-                        match part.cycle_capacity_unit() {
-                            Ok(()) => self.provision.message = None,
-                            Err(message) => self.provision.message = Some(message),
-                        }
+            if let Some((partition, field)) = plain_field_parts(slot) {
+                let result = self
+                    .provision
+                    .plain_form
+                    .toggle_partition_option(partition, field);
+                match result {
+                    Ok(true) if field == 1 => {
+                        self.provision.message = None;
                         self.provision_sync_cursor_to_end();
                         return true;
                     }
-                    2 => {
-                        part.filesystem = toggle_supported_fs(part.filesystem);
+                    Ok(true) => {
                         self.provision.message = None;
                         return true;
                     }
-                    _ => return false,
+                    Ok(false) => return false,
+                    Err(message) => {
+                        self.provision.message = Some(message);
+                        if field == 1 {
+                            self.provision_sync_cursor_to_end();
+                        }
+                        return true;
+                    }
                 }
             }
         }
@@ -1722,42 +1699,17 @@ impl AppState {
         if self.provision.kind != ProvisionKind::Plain {
             return false;
         }
-        if self.provision.plain_form.partitions.len() >= crate::provision::MAX_PLAIN_PARTITIONS {
-            self.provision.message = Some("普通盘最多支持 4 个 MBR 主分区".into());
-            return true;
-        }
-        let plan = match self.provision_plain_plan() {
-            Ok(plan) => plan,
-            Err(message) => {
-                self.provision.message = Some(format!("先修正当前布局: {message}"));
-                return true;
+        let total_sectors = self.provision_total_sectors();
+        match self.provision.plain_form.add_partition(total_sectors) {
+            Ok(index) => {
+                self.provision.field_selected = index * 4;
+                self.provision.message = None;
+                self.provision_sync_cursor_to_end();
             }
-        };
-        let next_start = plan
-            .partitions
-            .iter()
-            .filter_map(|part| part.end_exclusive().ok())
-            .max()
-            .unwrap_or(crate::provision::DEFAULT_PLAIN_START_LBA);
-        if next_start >= plan.total_sectors {
-            self.provision.message =
-                Some("当前最后一个分区已占满盘尾；请先缩小它再添加分区".into());
-            return true;
+            Err(message) => {
+                self.provision.message = Some(message);
+            }
         }
-        let number = self.provision.plain_form.partitions.len() + 1;
-        let spec = crate::provision::PlainPartitionSpec::new(
-            next_start,
-            plan.total_sectors - next_start,
-            crate::provision::OfficialFilesystemFormat::ExFat,
-            format!("普通卷{number}"),
-        );
-        self.provision
-            .plain_form
-            .partitions
-            .push(PlainPartitionForm::from_spec(&spec));
-        self.provision.field_selected = (number - 1) * 4;
-        self.provision.message = None;
-        self.provision_sync_cursor_to_end();
         true
     }
 
@@ -1765,23 +1717,20 @@ impl AppState {
         if self.provision.kind != ProvisionKind::Plain {
             return false;
         }
-        if self.provision.plain_form.partitions.len() <= 1 {
-            self.provision.message = Some("普通盘至少保留 1 个分区".into());
-            return true;
-        }
-        let Some(slot) = self.provision_field_slot(self.provision.field_selected) else {
-            return true;
-        };
-        let Some((partition, _)) = Self::plain_field_parts(slot) else {
-            return true;
-        };
-        if partition < self.provision.plain_form.partitions.len() {
-            self.provision.plain_form.partitions.remove(partition);
-            let count = self.provision_field_count();
-            self.provision.field_selected =
-                self.provision.field_selected.min(count.saturating_sub(1));
-            self.provision.message = None;
-            self.provision_sync_cursor_to_end();
+        let partition = self
+            .provision_field_slot(self.provision.field_selected)
+            .and_then(plain_field_parts)
+            .map(|(partition, _)| partition);
+        match self.provision.plain_form.delete_partition(partition) {
+            Ok(true) => {
+                let count = self.provision_field_count();
+                self.provision.field_selected =
+                    self.provision.field_selected.min(count.saturating_sub(1));
+                self.provision.message = None;
+                self.provision_sync_cursor_to_end();
+            }
+            Ok(false) => {}
+            Err(message) => self.provision.message = Some(message),
         }
         true
     }
@@ -1796,7 +1745,7 @@ impl AppState {
     }
 
     fn provision_input_policy(&self, slot: usize) -> ProvisionInputPolicy {
-        if let Some((partition, field)) = Self::plain_field_parts(slot) {
+        if let Some((partition, field)) = plain_field_parts(slot) {
             return match field {
                 0 => ProvisionInputPolicy::UnsignedInteger,
                 1 => self
@@ -1855,7 +1804,7 @@ impl AppState {
         let Some(slot) = slot else {
             return;
         };
-        let Some((partition, 1)) = Self::plain_field_parts(slot) else {
+        let Some((partition, 1)) = plain_field_parts(slot) else {
             return;
         };
         if let Some(part) = self.provision.plain_form.partitions.get_mut(partition) {
