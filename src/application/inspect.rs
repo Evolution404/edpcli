@@ -2,11 +2,60 @@
 
 use std::path::Path;
 
-use super::evidence::EvidenceSource;
+use super::evidence::{EvidenceError, EvidenceSource};
 pub use super::evidence::SectorReader;
 use crate::common::{METADATA_SECTOR_COUNT, SECTOR};
 use crate::inspect::{self, InspectMeta};
 use crate::sysinfo::CmdRunner;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InspectErrorKind {
+    InvalidRequest,
+    OutOfRange,
+    Backup,
+    Io,
+    Decode,
+    Target,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InspectError {
+    kind: InspectErrorKind,
+    message: String,
+}
+
+impl InspectError {
+    pub fn new(kind: InspectErrorKind, message: impl Into<String>) -> Self {
+        Self { kind, message: message.into() }
+    }
+    pub const fn kind(&self) -> InspectErrorKind { self.kind }
+    pub fn message(&self) -> &str { &self.message }
+    fn invalid(message: impl Into<String>) -> Self { Self::new(InspectErrorKind::InvalidRequest, message) }
+    fn out_of_range(message: impl Into<String>) -> Self { Self::new(InspectErrorKind::OutOfRange, message) }
+    fn io(message: impl Into<String>) -> Self { Self::new(InspectErrorKind::Io, message) }
+    fn decode(message: impl Into<String>) -> Self { Self::new(InspectErrorKind::Decode, message) }
+}
+
+impl std::fmt::Display for InspectError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(&self.message)
+    }
+}
+impl std::error::Error for InspectError {}
+
+impl From<EvidenceError> for InspectError {
+    fn from(error: EvidenceError) -> Self {
+        let kind = match &error {
+            EvidenceError::BackupVerify { .. }
+            | EvidenceError::BackupProtocolRead { .. }
+            | EvidenceError::BackupProtocolLength { .. }
+            | EvidenceError::BackupMissingGeometry { .. } => InspectErrorKind::Backup,
+            EvidenceError::Target(_) | EvidenceError::DiskMissingGeometry { .. } => InspectErrorKind::Target,
+            EvidenceError::DiskOpen { .. } | EvidenceError::DiskProtocolRead { .. } => InspectErrorKind::Io,
+        };
+        Self::new(kind, error.to_string())
+    }
+}
 
 fn default_protocol_request() -> AdvancedInspectRequest {
     AdvancedInspectRequest {
@@ -18,14 +67,14 @@ fn default_protocol_request() -> AdvancedInspectRequest {
     }
 }
 
-pub fn load_backup_inspect(path: &Path) -> Result<AdvancedInspectWorkspace, String> {
+pub fn load_backup_inspect(path: &Path) -> Result<AdvancedInspectWorkspace, InspectError> {
     load_backup_advanced_inspect(path, &default_protocol_request())
 }
 
 pub fn load_disk_inspect(
     runner: &dyn CmdRunner,
     disk: u32,
-) -> Result<AdvancedInspectWorkspace, String> {
+) -> Result<AdvancedInspectWorkspace, InspectError> {
     load_disk_advanced_inspect(runner, disk, &default_protocol_request())
 }
 
@@ -182,10 +231,10 @@ fn materialize_protocol_fields(
     raw: &[u8],
     decoded: &[u8],
     fields: &[crate::inspect::SectorField],
-) -> Result<Vec<InspectField>, String> {
+) -> Result<Vec<InspectField>, InspectError> {
     let base = lba
         .checked_mul(SECTOR as u64)
-        .ok_or_else(|| format!("LBA{lba} 字段绝对字节偏移溢出"))?;
+        .ok_or_else(|| InspectError::decode(format!("LBA{lba} 字段绝对字节偏移溢出")))?;
     fields
         .iter()
         .map(|field| {
@@ -246,17 +295,17 @@ pub struct AdvancedInspectWorkspace {
     pub topology: super::inspect_tree::InspectTopology,
 }
 
-fn parse_u64_decimal(value: &str, label: &str) -> Result<u64, String> {
+fn parse_u64_decimal(value: &str, label: &str) -> Result<u64, InspectError> {
     let value = value.trim();
     if value.is_empty() || !value.bytes().all(|byte| byte.is_ascii_digit()) {
-        return Err(format!("{label} 必须为非负十进制整数"));
+        return Err(InspectError::invalid(format!("{label} 必须为非负十进制整数")));
     }
     value
         .parse::<u64>()
-        .map_err(|_| format!("{label} 超出 u64 范围"))
+        .map_err(|_| InspectError::invalid(format!("{label} 超出 u64 范围")))
 }
 
-pub fn parse_advanced_lbas(spec: &str, count: &str) -> Result<Vec<u64>, String> {
+pub fn parse_advanced_lbas(spec: &str, count: &str) -> Result<Vec<u64>, InspectError> {
     use std::collections::HashSet;
 
     let spec = spec.trim();
@@ -266,25 +315,25 @@ pub fn parse_advanced_lbas(spec: &str, count: &str) -> Result<Vec<u64>, String> 
 
     if spec.is_empty() {
         if !count.is_empty() {
-            return Err("填写 count 时必须先填写单个起始 LBA".into());
+            return Err(InspectError::invalid("填写 count 时必须先填写单个起始 LBA"));
         }
         return Ok((0..METADATA_SECTOR_COUNT as u64).collect());
     }
 
     for token in spec.split(',').map(str::trim) {
         if token.is_empty() {
-            return Err("LBA 列表包含空项".into());
+            return Err(InspectError::invalid("LBA 列表包含空项"));
         }
         if let Some((start, end)) = token.split_once('-') {
             let start = parse_u64_decimal(start, "LBA 范围起点")?;
             let end = parse_u64_decimal(end, "LBA 范围终点")?;
             if start > end {
-                return Err(format!("LBA 范围起点大于终点: {token}"));
+                return Err(InspectError::invalid(format!("LBA 范围起点大于终点: {token}")));
             }
             let span = end
                 .checked_sub(start)
                 .and_then(|value| value.checked_add(1))
-                .ok_or_else(|| format!("LBA 范围溢出: {token}"))?;
+                .ok_or_else(|| InspectError::invalid(format!("LBA 范围溢出: {token}")))?;
             if span > MAX_ADVANCED_INSPECT_SECTORS as u64 {
                 return Err(format!(
                     "单个 LBA 范围最多包含 {MAX_ADVANCED_INSPECT_SECTORS} 个扇区"
@@ -315,11 +364,11 @@ pub fn parse_advanced_lbas(spec: &str, count: &str) -> Result<Vec<u64>, String> 
 
     if !count.is_empty() {
         if out.len() != 1 {
-            return Err("count 只能与单个起始 LBA 同时使用".into());
+            return Err(InspectError::invalid("count 只能与单个起始 LBA 同时使用"));
         }
         let count = parse_u64_decimal(count, "count")?;
         if count == 0 || count > MAX_ADVANCED_INSPECT_SECTORS as u64 {
-            return Err(format!("count 必须为 1..={MAX_ADVANCED_INSPECT_SECTORS}"));
+            return Err(InspectError::invalid(format!("count 必须为 1..={MAX_ADVANCED_INSPECT_SECTORS}")));
         }
         let start = out[0];
         out.clear();
@@ -327,7 +376,7 @@ pub fn parse_advanced_lbas(spec: &str, count: &str) -> Result<Vec<u64>, String> 
             out.push(
                 start
                     .checked_add(offset)
-                    .ok_or_else(|| "count 产生的 LBA 范围溢出".to_string())?,
+                    .ok_or_else(|| InspectError::invalid("count 产生的 LBA 范围溢出"))?,
             );
         }
     }
@@ -363,22 +412,22 @@ fn advanced_plain_hex(data: &[u8]) -> String {
     out
 }
 
-fn export_advanced_bytes(dir: &Path, lba: u64, suffix: &str, data: &[u8]) -> Result<(), String> {
+fn export_advanced_bytes(dir: &Path, lba: u64, suffix: &str, data: &[u8]) -> Result<(), InspectError> {
     std::fs::create_dir_all(dir)
-        .map_err(|error| format!("创建 Inspect 导出目录 {} 失败: {error}", dir.display()))?;
+        .map_err(|error| InspectError::io(format!("创建 Inspect 导出目录 {} 失败: {error}", dir.display())))?;
     let base = format!("LBA{lba}_{suffix}");
     std::fs::write(dir.join(format!("{base}.bin")), data)
-        .map_err(|error| format!("导出 {base}.bin 失败: {error}"))?;
+        .map_err(|error| InspectError::io(format!("导出 {base}.bin 失败: {error}")))?;
     std::fs::write(dir.join(format!("{base}.hex")), advanced_plain_hex(data))
-        .map_err(|error| format!("导出 {base}.hex 失败: {error}"))?;
+        .map_err(|error| InspectError::io(format!("导出 {base}.hex 失败: {error}")))?;
     Ok(())
 }
 
-fn export_advanced_meta(dir: &Path, lba: u64, text: &str) -> Result<(), String> {
+fn export_advanced_meta(dir: &Path, lba: u64, text: &str) -> Result<(), InspectError> {
     std::fs::create_dir_all(dir)
-        .map_err(|error| format!("创建 Inspect 导出目录 {} 失败: {error}", dir.display()))?;
+        .map_err(|error| InspectError::io(format!("创建 Inspect 导出目录 {} 失败: {error}", dir.display())))?;
     std::fs::write(dir.join(format!("LBA{lba}_meta.txt")), text)
-        .map_err(|error| format!("导出 LBA{lba}_meta.txt 失败: {error}"))
+        .map_err(|error| InspectError::io(format!("导出 LBA{lba}_meta.txt 失败: {error}")))
 }
 
 pub fn decode_sector(
@@ -387,15 +436,15 @@ pub fn decode_sector(
     lba: u64,
     raw: &[u8],
     partition_boot_raw: Option<&[u8]>,
-) -> Result<(Vec<u8>, String), String> {
+) -> Result<(Vec<u8>, String), InspectError> {
     let decoder = DECODER_REGISTRY
         .iter()
         .copied()
         .find(|decoder| decoder.matches(context, lba))
-        .ok_or_else(|| format!("LBA{lba} 不属于已注册 decoder 区域；raw 可读，decode 拒绝猜测"))?;
+        .ok_or_else(|| InspectError::decode(format!("LBA{lba} 不属于已注册 decoder 区域；raw 可读，decode 拒绝猜测")))?;
     match decoder {
         InspectDecoderKind::Protocol => {
-            let lba32 = u32::try_from(lba).map_err(|_| format!("LBA{lba} 超出协议解析器范围"))?;
+            let lba32 = u32::try_from(lba).map_err(|_| InspectError::out_of_range(format!("LBA{lba} 超出协议解析器范围")))?;
             let view = inspect::analyze_sector_with_context(
                 lba32,
                 raw,
@@ -405,7 +454,7 @@ pub fn decode_sector(
             Ok((view.decoded, view.method))
         }
         InspectDecoderKind::Lce | InspectDecoderKind::Partition => {
-            context.decode_non_protocol_with_boot(lba, raw, partition_boot_raw)
+            context.decode_non_protocol_with_boot(lba, raw, partition_boot_raw).map_err(InspectError::decode)
         }
     }
 }
@@ -417,12 +466,12 @@ pub fn sector_meta_text(
     raw: &[u8],
     partition_boot_raw: Option<&[u8]>,
     partition_boot_issue: Option<&str>,
-) -> Result<String, String> {
+) -> Result<String, InspectError> {
     use crate::inspect_target::PhysicalDataState;
 
     let offset = lba
         .checked_mul(SECTOR as u64)
-        .ok_or_else(|| "LBA 字节偏移溢出".to_string())?;
+        .ok_or_else(|| InspectError::out_of_range("LBA 字节偏移溢出"))?;
     let mut out = format!(
         "LBA: {lba}\n物理字节偏移: {offset} (0x{offset:X})\nRAW SHA-256: {}\nRAW 非零字节: {}/512\n",
         crate::sha256::sha256_hex(raw),
@@ -450,7 +499,7 @@ pub fn sector_meta_text(
     }
 
     if lba <= u64::from(crate::common::METADATA_LAST_LBA) {
-        let lba32 = u32::try_from(lba).map_err(|_| format!("LBA{lba} 超出协议解析器范围"))?;
+        let lba32 = u32::try_from(lba).map_err(|_| InspectError::out_of_range(format!("LBA{lba} 超出协议解析器范围")))?;
         let view =
             inspect::analyze_sector_with_context(lba32, raw, meta, Some(&context.protocol_image));
         out.push_str(&format!("协议解码: {}\n", view.method));
@@ -529,7 +578,7 @@ fn run_advanced_source<R: SectorReader + ?Sized>(
     context: crate::inspect_target::InspectDiskContext,
     request: &AdvancedInspectRequest,
     reader: &mut R,
-) -> Result<AdvancedInspectWorkspace, String> {
+) -> Result<AdvancedInspectWorkspace, InspectError> {
     let lbas = if request.lbas.is_empty() {
         (0..METADATA_SECTOR_COUNT as u64).collect::<Vec<_>>()
     } else {
@@ -543,12 +592,12 @@ fn run_advanced_source<R: SectorReader + ?Sized>(
 
     let mut items = Vec::with_capacity(lbas.len());
     for lba in lbas {
-        context.validate_lba(lba)?;
+        context.validate_lba(lba).map_err(InspectError::out_of_range)?;
         let raw = reader
             .read_sector(lba)
-            .map_err(|error| format!("读取 LBA{lba} 失败: {error}"))?;
+            .map_err(|error| InspectError::io(format!("读取 LBA{lba} 失败: {error}")))?;
         if raw.len() != SECTOR {
-            return Err(format!("LBA{lba} 返回 {}B，预期 {SECTOR}B", raw.len()));
+            return Err(InspectError::io(format!("LBA{lba} 返回 {}B，预期 {SECTOR}B", raw.len())));
         }
 
         let mut partition_boot = None;
@@ -586,7 +635,7 @@ fn run_advanced_source<R: SectorReader + ?Sized>(
         let raw_sha256 = crate::sha256::sha256_hex(&raw);
         let raw_nonzero = raw.iter().filter(|&&byte| byte != 0).count();
         let protocol_view = if lba <= u64::from(crate::common::METADATA_LAST_LBA) {
-            let lba32 = u32::try_from(lba).map_err(|_| format!("LBA{lba} 超出协议解析器范围"))?;
+            let lba32 = u32::try_from(lba).map_err(|_| InspectError::out_of_range(format!("LBA{lba} 超出协议解析器范围")))?;
             Some(inspect::analyze_sector_with_context(
                 lba32,
                 &raw,
@@ -641,7 +690,7 @@ fn run_advanced_source<R: SectorReader + ?Sized>(
                         item.decoded = Some(decoded);
                     }
                     Err(error) if request.fail_soft_decode => {
-                        item.decode_error = Some(error);
+                        item.decode_error = Some(error.to_string());
                         item.method = Some("raw-only".into());
                     }
                     Err(error) => return Err(error),
@@ -679,7 +728,7 @@ fn run_advanced_source<R: SectorReader + ?Sized>(
 fn run_evidence_source(
     mut evidence: EvidenceSource,
     request: &AdvancedInspectRequest,
-) -> Result<AdvancedInspectWorkspace, String> {
+) -> Result<AdvancedInspectWorkspace, InspectError> {
     let identity = evidence.identity().clone();
     let mut meta = InspectMeta {
         device_id: identity.device_id,
@@ -703,7 +752,7 @@ fn run_evidence_source(
 pub fn load_backup_advanced_inspect(
     path: &Path,
     request: &AdvancedInspectRequest,
-) -> Result<AdvancedInspectWorkspace, String> {
+) -> Result<AdvancedInspectWorkspace, InspectError> {
     run_evidence_source(EvidenceSource::open_backup(path)?, request)
 }
 
@@ -711,7 +760,7 @@ pub fn load_disk_advanced_inspect(
     runner: &dyn CmdRunner,
     disk: u32,
     request: &AdvancedInspectRequest,
-) -> Result<AdvancedInspectWorkspace, String> {
+) -> Result<AdvancedInspectWorkspace, InspectError> {
     run_evidence_source(EvidenceSource::open_disk(runner, disk)?, request)
 }
 
@@ -761,7 +810,8 @@ mod advanced_tests {
         assert!(!method.is_empty());
 
         let error = decode_sector(&context, &meta, 100, &[0; SECTOR], None).unwrap_err();
-        assert!(error.contains("不属于已注册 decoder"), "{error}");
+        assert_eq!(error.kind(), InspectErrorKind::Decode);
+        assert!(error.message().contains("不属于已注册 decoder"), "{error}");
     }
 
     #[test]
@@ -845,7 +895,8 @@ mod advanced_tests {
         let mut reader = MemoryReader { sectors };
         let error =
             run_advanced_source("memory".into(), meta, context, &strict, &mut reader).unwrap_err();
-        assert!(error.contains("不属于已注册 decoder"), "{error}");
+        assert_eq!(error.kind(), InspectErrorKind::Decode);
+        assert!(error.message().contains("不属于已注册 decoder"), "{error}");
     }
 
     #[test]
@@ -911,6 +962,10 @@ mod advanced_tests {
         assert!(parse_advanced_lbas("22-20", "").is_err());
         assert!(parse_advanced_lbas("", "2").is_err());
         assert!(parse_advanced_lbas("0", "0").is_err());
+        assert_eq!(
+            parse_advanced_lbas("", "2").unwrap_err().kind(),
+            InspectErrorKind::InvalidRequest
+        );
     }
 
     #[test]
