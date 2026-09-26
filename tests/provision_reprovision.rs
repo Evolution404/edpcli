@@ -9,13 +9,11 @@ use edpcli::{
         wrap_legacy_lba7_file_key, CapacityInput, CapacityInputMode, CapacitySource,
         DiskProvisionKind, ExistingPartition, ExistingProvisionProfile, FileKeyWrapMode,
         KeyDomainRole, KeyDomainSecretPair, KeyDomainSecrets, OfficialFilesystemFormat,
-        OfficialPartitionMode,
-        OfficialPartitionSizes,
-        OfficialProvisionPlan, OnlyId, PartitionAction, PartitionRole, PassInfoPolicy,
-        ProvisionEntropy, ProvisionMetadata, ProvisionProfile, ProvisionSpec, ProvisionTarget,
-        QuickCapacityUnit, RegionDisposition, SourcePasswordKnowledge, TargetGeometryOverrides,
-        TargetIdentity,
-        TargetProvisionPlan, OFFICIAL_PARTITION_START_SECTOR,
+        OfficialPartitionMode, OfficialPartitionSizes, OfficialProvisionPlan, OnlyId,
+        PartitionAction, PartitionRole, PassInfoPolicy, ProvisionEntropy, ProvisionMetadata,
+        ProvisionProfile, ProvisionSpec, ProvisionTarget, QuickCapacityUnit, RegionDisposition,
+        SourcePasswordKnowledge, TargetGeometryOverrides, TargetIdentity, TargetProvisionPlan,
+        OFFICIAL_PARTITION_START_SECTOR,
     },
 };
 
@@ -28,7 +26,6 @@ fn domain_secrets(source: Option<&[u8]>, target: &[u8]) -> KeyDomainSecrets {
         KeyDomainSecretPair::new(source, Some(target)),
     )
 }
-
 
 #[test]
 fn provision_target_keeps_plain_outside_the_official_mode_domain() {
@@ -711,7 +708,6 @@ fn same_mode_prefill_uses_exact_source_partition_sizes() {
     assert_eq!(prefill.share.as_ref().unwrap().sectors(), 4_000_003);
 }
 
-
 fn generated_mode0_with_domain_passwords(
     share_password: &[u8],
     encrypt_password: &[u8],
@@ -765,8 +761,7 @@ fn generated_mode0_with_domain_passwords(
 
 #[test]
 fn source_password_probe_is_independent_per_key_domain() {
-    let (image, did) =
-        generated_mode0_with_domain_passwords(b"SharePass1!", b"EncryptPass1!");
+    let (image, did) = generated_mode0_with_domain_passwords(b"SharePass1!", b"EncryptPass1!");
     let parsed = parse_existing_provision(&image, &did, 16_777_216)
         .unwrap()
         .unwrap();
