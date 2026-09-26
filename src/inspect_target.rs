@@ -124,6 +124,8 @@ impl PhysicalDataState {
     }
 }
 
+// Only called after the boot sector's exact 512-byte length or MBR get(..512)
+// guard. Offsets are fixed format fields, not caller-supplied positions.
 fn u16le(raw: &[u8], offset: usize) -> u16 {
     u16::from_le_bytes(raw[offset..offset + 2].try_into().unwrap())
 }
@@ -410,9 +412,11 @@ impl InspectDiskContext {
         let Some(did) = self.device_id.as_deref() else {
             return "未验证（缺少 device_id）".into();
         };
-        match keys::default_file_key(&self.protocol_image, did, partition.index) {
+        match keys::default_file_key_checked(&self.protocol_image, did, partition.index) {
             Ok(_) => "PASS".into(),
-            Err(error) if error.contains("FileKeyCRC") => format!("FAIL（{error}）"),
+            Err(error @ keys::DefaultFileKeyError::FileKeyCrcMismatch) => {
+                format!("FAIL（{error}）")
+            }
             Err(error) => format!("未验证（{error}）"),
         }
     }

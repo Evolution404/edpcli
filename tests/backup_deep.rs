@@ -709,7 +709,9 @@ fn parsed_deep_inventory_cites_captured_raw_metadata() {
 
 #[test]
 fn default_mode2_key_unwrap_requires_valid_crc() {
-    use edpcli::backup_deep::keys::default_file_key;
+    use edpcli::backup_deep::keys::{
+        default_file_key, default_file_key_checked, DefaultFileKeyError,
+    };
     use edpcli::crypto::{a6b0_full, a7f0_full, crc32_bare};
     let mut image=include_bytes!("fixtures/protocol/disk4_243625984_vid21c4_pid0cd1_disk&ven_lexar&prod_usb_flash_drive_onlyid3164177653_20260827_221910.bin").to_vec();
     let did = "disk&ven_lexar&prod_usb_flash_drive";
@@ -722,6 +724,10 @@ fn default_mode2_key_unwrap_requires_valid_crc() {
     assert!(default_file_key(&image, did, 1)
         .unwrap_err()
         .contains("FileKeyCRC"));
+    assert!(matches!(
+        default_file_key_checked(&image, did, 1),
+        Err(DefaultFileKeyError::FileKeyCrcMismatch)
+    ));
 }
 
 #[test]
