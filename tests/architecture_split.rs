@@ -83,6 +83,9 @@ fn large_modules_are_split_by_domain_boundary() {
         "src/tui/devices/render.rs",
         "src/inspect/model.rs",
         "src/inspect/lba_adapter.rs",
+        "src/inspect/lba_early.rs",
+        "src/inspect/lba_middle.rs",
+        "src/inspect/lba_late.rs",
         "src/inspect/render.rs",
     ] {
         exists(path);
@@ -95,7 +98,17 @@ fn large_modules_are_split_by_domain_boundary() {
     assert!(lines("src/tui/task.rs") < 1_000);
     assert!(lines("src/inspect.rs") < 150);
     assert!(lines("src/inspect/model.rs") < 800);
-    assert!(lines("src/inspect/lba_adapter.rs") < 1_300);
+    assert!(lines("src/inspect/lba_adapter.rs") < 100);
+    for path in [
+        "src/inspect/lba_early.rs",
+        "src/inspect/lba_middle.rs",
+        "src/inspect/lba_late.rs",
+    ] {
+        assert!(
+            lines(path) < 500,
+            "LBA presentation adapter is oversized: {path}"
+        );
+    }
     assert!(lines("src/inspect/render.rs") < 400);
     assert!(
         lines("src/tui/provision/state.rs") < 520,

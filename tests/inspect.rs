@@ -20,6 +20,9 @@ fn inspect_protocol_semantics_stay_routed_to_canonical_parsers() {
     let source = concat!(
         include_str!("../src/inspect/model.rs"),
         include_str!("../src/inspect/lba_adapter.rs"),
+        include_str!("../src/inspect/lba_early.rs"),
+        include_str!("../src/inspect/lba_middle.rs"),
+        include_str!("../src/inspect/lba_late.rs"),
         include_str!("../src/inspect/render.rs"),
     );
     let semantic = include_str!("../src/protocol/semantic.rs");

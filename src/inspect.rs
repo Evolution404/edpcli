@@ -18,6 +18,9 @@ use crate::protocol::{
 };
 
 mod lba_adapter;
+mod lba_early;
+mod lba_late;
+mod lba_middle;
 mod model;
 mod render;
 
