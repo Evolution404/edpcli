@@ -52,6 +52,7 @@ pub use reprovision::{
     pass_info_policy_from_sectors, prefill_for_target_mode, validate_target_geometry,
     CapacityInput, CapacityInputMode, CapacitySource, DiskProvisionKind, ExistingPartition,
     ExistingPartitionRecord, ExistingProvisionProfile, ParsedExistingProvision, PartitionAction,
+    RegionDisposition,
     ProvisionPrefill, ProvisionTarget, QuickCapacityUnit, TargetGeometryOverrides,
     TargetPartitionGeometry, TargetPartitionPlan, TargetProvisionPlan,
 };
