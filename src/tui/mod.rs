@@ -726,14 +726,6 @@ fn run_loop(resume: Option<state::WriteIntent>) -> io::Result<LoopExit> {
                     state.set_backup_scan_pending(true);
                 }
             }
-            if let Some((_operation_id, result)) = updates.provision_backup {
-                let success = result.is_ok();
-                state.provision_finish_backup_save(result);
-                if success {
-                    tasks.request_backup_scan(backup_dir.clone());
-                    state.set_backup_scan_pending(true);
-                }
-            }
             if let Some(result) = updates.provision_key_probe {
                 state.provision_finish_key_probe(result);
             }
@@ -1253,55 +1245,6 @@ fn run_loop(resume: Option<state::WriteIntent>) -> io::Result<LoopExit> {
                                 }
                                 _ => {}
                             },
-                            ProvisionStage::BackupPrompt => match action {
-                                TuiAction::MoveUp => {
-                                    let _ = state.navigate(NavCommand::Up, viewport_height);
-                                }
-                                TuiAction::MoveDown => {
-                                    let _ = state.navigate(NavCommand::Down, viewport_height);
-                                }
-                                TuiAction::Activate => {
-                                    if state.selected() == 0 {
-                                        let Some((disk, onlyid, device_id)) =
-                                            state.selected_device().map(|row| {
-                                                (
-                                                    row.disk,
-                                                    row.onlyid.clone(),
-                                                    row.device_id.clone(),
-                                                )
-                                            })
-                                        else {
-                                            state.set_notice(
-                                                "目标 USB 已不存在，请返回设备页重新选择。",
-                                            );
-                                            continue;
-                                        };
-                                        let identity =
-                                            state::ExpectedIdentity { onlyid, device_id };
-                                        state.provision_begin_backup_save();
-                                        if let Err(message) = tasks.request_provision_backup(
-                                            disk,
-                                            identity,
-                                            backup_dir.clone(),
-                                        ) {
-                                            state.provision_finish_backup_save(Err(
-                                                message.to_string()
-                                            ));
-                                        }
-                                    } else {
-                                        state.provision_skip_backup();
-                                    }
-                                }
-                                TuiAction::Back => {
-                                    let _ = state.navigate(NavCommand::Escape, viewport_height);
-                                }
-                                _ => {}
-                            },
-                            ProvisionStage::BackupSaving => {
-                                if action == TuiAction::Back {
-                                    state.set_notice("正在保存当前盘，请等待完成。");
-                                }
-                            }
                             ProvisionStage::Menu => match action {
                                 TuiAction::TableScrollLeft | TuiAction::TableScrollRight => {
                                     state.scroll_table(

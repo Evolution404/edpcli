@@ -1,54 +1,6 @@
 use super::*;
 
 impl TaskHub {
-    pub fn request_provision_backup(
-        &mut self,
-        disk: u32,
-        expected_identity: crate::tui::state::ExpectedIdentity,
-        backup_dir: PathBuf,
-    ) -> Result<OperationId, &'static str> {
-        let operation_id = self.begin_operation()?;
-        let tx = self.tx.clone();
-        self.critical_worker = Some(std::thread::spawn(move || {
-            let result = catch_unwind(AssertUnwindSafe(|| {
-                let runner = SysRunner;
-                struct ProvisionBackupPrompter;
-                impl crate::application::write::Prompter for ProvisionBackupPrompter {
-                    fn prompt_line(&mut self, _msg: &str) -> String {
-                        String::new()
-                    }
-                    fn confirm_yes(&mut self, _msg: &str) -> bool {
-                        true
-                    }
-                }
-
-                let mut prompt = ProvisionBackupPrompter;
-                crate::application::write::backup_create_on_disk(
-                    &runner,
-                    disk,
-                    backup_dir,
-                    &mut prompt,
-                    expected_identity.onlyid.as_deref(),
-                    expected_identity.device_id.as_deref(),
-                    false,
-                )
-                .map(|_| ())
-                .map_err(|error| error.msg)
-            }))
-            .unwrap_or_else(|payload| {
-                Err(format!(
-                    "制盘前保存 worker 异常终止: {}",
-                    panic_message(payload)
-                ))
-            });
-            let _ = tx.send(WorkerResult::ProvisionBackup {
-                operation_id,
-                result,
-            });
-        }));
-        Ok(operation_id)
-    }
-
     pub fn request_provision_key_probe(&mut self, disk: u32) -> Result<u64, &'static str> {
         let generation = self
             .provision_key_probe_slot

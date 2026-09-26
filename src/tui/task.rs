@@ -229,10 +229,6 @@ enum WorkerResult {
         generation: u64,
         result: Result<crate::tui::state::ProvisionPrepared, String>,
     },
-    ProvisionBackup {
-        operation_id: OperationId,
-        result: Result<(), String>,
-    },
     ProvisionProgress {
         operation_id: OperationId,
         message: String,
@@ -274,7 +270,6 @@ pub struct TaskUpdates {
         Result<crate::provision::SourcePasswordKnowledge, String>,
     )>,
     pub provision_plan: Option<Result<crate::tui::state::ProvisionPrepared, String>>,
-    pub provision_backup: Option<(OperationId, Result<(), String>)>,
     pub provision_progress: Option<(OperationId, String)>,
     pub provision_write: Option<(OperationId, Result<String, String>)>,
     pub provision_export: Option<Result<PathBuf, String>>,
@@ -299,7 +294,6 @@ impl TaskUpdates {
             || self.provision_key_probe.is_some()
             || self.provision_key_verify.is_some()
             || self.provision_plan.is_some()
-            || self.provision_backup.is_some()
             || self.provision_progress.is_some()
             || self.provision_write.is_some()
             || self.provision_export.is_some()
@@ -603,14 +597,6 @@ impl TaskHub {
                 WorkerResult::ProvisionPlan { generation, result } => {
                     if self.provision_slot.finish(generation) {
                         updates.provision_plan = Some(result);
-                    }
-                }
-                WorkerResult::ProvisionBackup {
-                    operation_id,
-                    result,
-                } => {
-                    if self.finish_operation(operation_id) {
-                        updates.provision_backup = Some((operation_id, result));
                     }
                 }
                 WorkerResult::ProvisionProgress {

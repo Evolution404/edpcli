@@ -678,10 +678,6 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
                     let kind = crate::tui::table_layout::TableKind::ProvisionDevices;
                     format!("制盘选盘：j/k 选择 · h/l 横向滚动 · {}/{} 列 · Enter 固定目标 · Esc 返回设备页", state.table_scroll_offset(kind) + 1, crate::tui::table_layout::layout_for(kind).scrollable_count())
                 }
-                ProvisionStage::BackupPrompt => {
-                    "制盘前保存：j/k 选择 · Enter 确认 · Esc 返回设备".to_string()
-                }
-                ProvisionStage::BackupSaving => "正在保存当前盘…".to_string(),
                 ProvisionStage::Menu => {
                     let kind = crate::tui::table_layout::TableKind::ProvisionMenu;
                     format!(

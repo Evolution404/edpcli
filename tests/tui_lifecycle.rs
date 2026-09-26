@@ -160,7 +160,6 @@ fn two_tabs_cycle_and_provision_flow_renders_at_all_terminal_sizes() {
     assert_eq!(state.begin_provision_for_selected_device(), Ok(6));
     assert_eq!(state.workspace(), Workspace::Provision);
 
-    state.provision_skip_backup();
     state.provision_begin_selected();
     assert_eq!(state.provision().stage, ProvisionStage::Form);
     for (width, height) in [(40, 10), (80, 24), (160, 60)] {
@@ -185,7 +184,6 @@ fn wide_provision_form_uses_two_columns_and_compact_partition_rows() {
     state.replace_devices(vec![usb_device()]);
     state.navigate(NavCommand::WorkspaceProvision, 20);
     state.provision_select_disk();
-    state.provision_skip_backup();
     state.provision_begin_selected();
     let encrypt = state
         .provision_visible_fields()
@@ -295,7 +293,6 @@ fn provision_selection_highlights_only_value_and_long_values_scroll_with_cursor(
     state.replace_devices(vec![usb_device()]);
     state.navigate(NavCommand::WorkspaceProvision, 20);
     state.provision_select_disk();
-    state.provision_skip_backup();
     state.provision_begin_selected();
     state.provision_mut().form.label_id = "3164177653".into();
     state.provision_mut().field_selected = 0;
@@ -399,7 +396,6 @@ fn empty_secret_field_renders_input_placeholder_instead_of_black_value() {
     state.replace_devices(vec![usb_device()]);
     state.navigate(NavCommand::WorkspaceProvision, 20);
     state.provision_select_disk();
-    state.provision_skip_backup();
     state.provision_begin_selected();
     state.provision_mut().form.share_target_password.clear();
 

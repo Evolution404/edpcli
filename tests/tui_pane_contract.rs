@@ -59,7 +59,6 @@ fn provision_state() -> AppState {
     state.replace_devices(vec![device()]);
     state.navigate(NavCommand::WorkspaceProvision, 20);
     assert_eq!(state.provision_select_disk(), Some(6));
-    state.provision_skip_backup();
     assert_eq!(state.provision_begin_selected(), ProvisionKind::Mode0);
     state
 }
@@ -69,7 +68,6 @@ fn plain_provision_state() -> AppState {
     state.replace_devices(vec![device()]);
     state.navigate(NavCommand::WorkspaceProvision, 20);
     assert_eq!(state.provision_select_disk(), Some(6));
-    state.provision_skip_backup();
     state.navigate(NavCommand::Bottom, 20);
     assert_eq!(state.provision_begin_selected(), ProvisionKind::Plain);
     state

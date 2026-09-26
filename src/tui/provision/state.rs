@@ -61,8 +61,6 @@ impl ProvisionKind {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ProvisionStage {
     SelectDisk,
-    BackupPrompt,
-    BackupSaving,
     Menu,
     Form,
     Planning,
@@ -181,74 +179,6 @@ impl AppState {
             } else {
                 self.provision.stage = ProvisionStage::SelectDisk;
                 self.set_item_count(self.provision_selectable_devices().count());
-                self.selected = 0;
-            }
-        }
-    }
-
-    pub fn provision_backup_summary(&self) -> String {
-        let Some(device) = self.selected_device() else {
-            return "未固定目标 USB，无法判断历史保存记录".into();
-        };
-        if self.backup_scan_pending {
-            return "正在扫描历史保存记录…".into();
-        }
-        let matches = device.onlyid.as_ref().map_or_else(Vec::new, |onlyid| {
-            self.backups
-                .iter()
-                .filter(|backup| backup.onlyid.as_ref() == Some(onlyid))
-                .collect::<Vec<_>>()
-        });
-        let count = matches.len().max(device.n_baks);
-        if count == 0 {
-            "此盘此前没有保存记录".into()
-        } else {
-            let latest = matches
-                .iter()
-                .map(|backup| backup.display_time.as_str())
-                .max()
-                .unwrap_or("时间未知");
-            format!("此盘此前已保存 {count} 份 · 最近 {latest}")
-        }
-    }
-
-    pub fn provision_skip_backup(&mut self) {
-        if self.provision.stage != ProvisionStage::BackupPrompt {
-            return;
-        }
-        self.provision.stage = ProvisionStage::Menu;
-        self.provision.message = Some("已选择不保存当前盘，继续选择制盘模式。".into());
-        self.set_item_count(ProvisionKind::ALL.len());
-        self.selected = self
-            .provision
-            .menu_selected
-            .min(ProvisionKind::ALL.len().saturating_sub(1));
-    }
-
-    pub fn provision_begin_backup_save(&mut self) {
-        if self.provision.stage == ProvisionStage::BackupPrompt {
-            self.provision.stage = ProvisionStage::BackupSaving;
-            self.provision.message = Some("正在保存当前盘…".into());
-            self.critical_operation = true;
-        }
-    }
-
-    pub fn provision_finish_backup_save(&mut self, result: Result<(), String>) {
-        self.critical_operation = false;
-        match result {
-            Ok(()) => {
-                self.provision.stage = ProvisionStage::Menu;
-                self.provision.message = Some("当前盘保存完成；继续选择制盘模式。".into());
-                self.set_item_count(ProvisionKind::ALL.len());
-                self.selected = self
-                    .provision
-                    .menu_selected
-                    .min(ProvisionKind::ALL.len().saturating_sub(1));
-            }
-            Err(message) => {
-                self.provision.stage = ProvisionStage::BackupPrompt;
-                self.provision.message = Some(message);
-                self.set_item_count(2);
                 self.selected = 0;
             }
         }

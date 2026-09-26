@@ -49,6 +49,17 @@ fn write_safety_primitives_live_only_in_application_service() {
 }
 
 #[test]
+fn provision_tui_has_one_mandatory_backup_path_and_no_optional_prebackup_worker() {
+    let state = include_str!("../src/tui/provision/state.rs");
+    let task = include_str!("../src/tui/provision/task.rs");
+    assert!(!state.contains("BackupPrompt"));
+    assert!(!state.contains("BackupSaving"));
+    assert!(!task.contains("request_provision_backup"));
+    assert!(task.contains("request_provision_write"));
+    assert!(task.contains("commit_provision_with_backup_on_disk"));
+}
+
+#[test]
 fn critical_exit_contract_covers_ctrl_c_through_quit_intent() {
     let keymap = include_str!("../src/tui/keymap.rs");
     let state = include_str!("../src/tui/state.rs");

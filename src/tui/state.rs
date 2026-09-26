@@ -691,10 +691,13 @@ impl AppState {
         let disk = self.provision_device_at(self.selected)?.disk;
         self.pinned_disk = Some(disk);
         self.provision.target_disk = Some(disk);
-        self.provision.stage = ProvisionStage::BackupPrompt;
+        self.provision.stage = ProvisionStage::Menu;
         self.provision.message = None;
-        self.selected = 0;
-        self.set_item_count(2);
+        self.selected = self
+            .provision
+            .menu_selected
+            .min(ProvisionKind::ALL.len().saturating_sub(1));
+        self.set_item_count(ProvisionKind::ALL.len());
         Some(disk)
     }
 
@@ -713,10 +716,13 @@ impl AppState {
         self.provision.target_disk = Some(disk);
         self.switch_workspace(Workspace::Provision);
         self.pinned_disk = Some(disk);
-        self.provision.stage = ProvisionStage::BackupPrompt;
+        self.provision.stage = ProvisionStage::Menu;
         self.provision.message = None;
-        self.selected = 0;
-        self.set_item_count(2);
+        self.selected = self
+            .provision
+            .menu_selected
+            .min(ProvisionKind::ALL.len().saturating_sub(1));
+        self.set_item_count(ProvisionKind::ALL.len());
         Ok(disk)
     }
 
@@ -822,7 +828,6 @@ impl AppState {
             Workspace::Backups => self.backups.len(),
             Workspace::Provision => match self.provision.stage {
                 ProvisionStage::SelectDisk => self.provision_selectable_devices().count(),
-                ProvisionStage::BackupPrompt | ProvisionStage::BackupSaving => 2,
                 ProvisionStage::Menu => ProvisionKind::ALL.len(),
                 ProvisionStage::Form
                 | ProvisionStage::Planning
@@ -1024,17 +1029,8 @@ impl AppState {
             }
             if self.workspace == Workspace::Provision {
                 match self.provision.stage {
-                    ProvisionStage::SelectDisk => {
+                    ProvisionStage::SelectDisk | ProvisionStage::Menu => {
                         self.restore_workspace_frame();
-                    }
-                    ProvisionStage::BackupPrompt => {
-                        self.restore_workspace_frame();
-                    }
-                    ProvisionStage::Menu => {
-                        self.provision.stage = ProvisionStage::BackupPrompt;
-                        self.provision.message = None;
-                        self.selected = 0;
-                        self.set_item_count(2);
                     }
                     ProvisionStage::Running => {
                         self.set_notice("制盘安全事务正在执行，当前不能返回。");
@@ -1055,9 +1051,6 @@ impl AppState {
                     }
                     ProvisionStage::Planning => {
                         self.set_notice("制盘计划正在后台生成，请等待完成。");
-                    }
-                    ProvisionStage::BackupSaving => {
-                        self.set_notice("正在保存当前盘，请等待完成。");
                     }
                 }
                 return StateEffect::None;
