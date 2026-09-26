@@ -1167,6 +1167,14 @@ application 返回结构化 `ProvisionReport/BackupReport/InspectReport`，CLI/T
 - `state.rs` 为 **1105 行**，`validation.rs` 为 **394 行**。架构门禁要求适配模块存在、保持小规模，并收紧 `state.rs < 1200`。
 - TUI suite **161/161**、Provision suite **178/178** 与架构测试通过；fast 暖缓存 **4.53s / 0 失败**、full **33.06s / 0 失败**，全目标 Clippy、rustfmt 与 diff 检查通过。首次冷缓存 fast 功能测试全过，但 **46.89s** 超过 45s 性能预算；暖缓存正式复跑通过。后续拆分布局展示。
 
+## Phase D7-B2.4：布局展示拆分
+
+**COMPLETE；D7-B 继续。**
+
+- 新增 `src/tui/provision/layout.rs`，集中承载几何预览、Plain 与 Official 布局编辑行、布局模型和容量条展示。展示层继续消费 `plain_form.plan`、`provision_resolved_prefill` 与 `crate::provision` 几何校验，不生成新的协议或分区真相源。
+- `state.rs` 为 **739 行**、`layout.rs` 为 **371 行**；架构门禁要求布局模块存在、保持小规模，并收紧 `state.rs < 800`。
+- TUI suite **161/161** 与架构测试通过；fast 暖缓存 **4.56s / 0 失败**、full **34.45s / 0 失败**，全目标 Clippy、rustfmt 与 diff 检查通过。首次冷缓存 fast 功能测试全过，但 **48.05s** 超过 45s 性能预算；暖缓存正式复跑通过。后续收口表单编辑动作，使 `state.rs` 只保留工作区阶段与任务协调。
+
 ---
 
 # 第八部分：完成标准

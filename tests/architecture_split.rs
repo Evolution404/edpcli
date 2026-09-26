@@ -72,6 +72,7 @@ fn large_modules_are_split_by_domain_boundary() {
         "src/tui/provision/plain_editor.rs",
         "src/tui/provision/fields.rs",
         "src/tui/provision/validation.rs",
+        "src/tui/provision/layout.rs",
         "src/tui/provision/render.rs",
         "src/tui/provision/task.rs",
         "src/tui/inspect/state.rs",
@@ -89,8 +90,12 @@ fn large_modules_are_split_by_domain_boundary() {
     assert!(lines("src/tui/render.rs") < 1_500);
     assert!(lines("src/tui/task.rs") < 1_000);
     assert!(
-        lines("src/tui/provision/state.rs") < 1_200,
+        lines("src/tui/provision/state.rs") < 800,
         "Provision orchestration state must not absorb form/capacity/plain model again"
+    );
+    assert!(
+        lines("src/tui/provision/layout.rs") < 500,
+        "Provision layout presentation must stay responsibility-bounded"
     );
     assert!(
         lines("src/tui/provision/validation.rs") < 500,
