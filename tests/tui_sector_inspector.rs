@@ -865,6 +865,13 @@ fn sector_inspector_supports_row_sector_and_half_page_vim_navigation() {
     assert_eq!(state.advanced_inspect_sector().unwrap().cursor, 128);
     state.advanced_inspect_sector_half_page(true);
     assert_eq!(state.advanced_inspect_sector().unwrap().cursor, 0);
+    let lba = state.advanced_inspect_sector().unwrap().lba;
+    state.advanced_inspect_sector_page(false);
+    assert_eq!(state.advanced_inspect_sector().unwrap().cursor, 256);
+    assert_eq!(state.advanced_inspect_sector().unwrap().lba, lba);
+    state.advanced_inspect_sector_page(true);
+    assert_eq!(state.advanced_inspect_sector().unwrap().cursor, 0);
+    assert_eq!(state.advanced_inspect_sector().unwrap().lba, lba);
     state.advanced_inspect_sector_bottom();
     assert_eq!(state.advanced_inspect_sector().unwrap().cursor, 511);
 

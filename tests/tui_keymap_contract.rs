@@ -432,8 +432,46 @@ fn event_loop_does_not_parse_text_or_confirmation_chars_outside_keymap() {
 }
 
 #[test]
+fn sector_inspector_sector_navigation_is_separate_from_page_scroll() {
+    let mut mapper = KeyMapper::new();
+    assert_eq!(
+        mapper.map(InputMode::Normal, key(KeyCode::Char('['))),
+        Some(TuiAction::SectorPrevious)
+    );
+    assert_eq!(
+        mapper.map(InputMode::Normal, key(KeyCode::Char(']'))),
+        Some(TuiAction::SectorNext)
+    );
+    assert_eq!(
+        mapper.map(InputMode::Normal, key(KeyCode::PageUp)),
+        Some(TuiAction::PageUp)
+    );
+    assert_eq!(
+        mapper.map(InputMode::Normal, key(KeyCode::PageDown)),
+        Some(TuiAction::PageDown)
+    );
+
+    let mut insert = KeyMapper::new();
+    assert_eq!(
+        insert.map(InputMode::Insert, key(KeyCode::Char('['))),
+        Some(TuiAction::Text('['))
+    );
+    assert_eq!(
+        insert.map(InputMode::Insert, key(KeyCode::Char(']'))),
+        Some(TuiAction::Text(']'))
+    );
+}
+
+#[test]
 fn sector_inspector_dispatches_the_documented_vim_actions() {
     let source = include_str!("../src/tui/mod.rs");
+    let page_section = source_section(
+        source,
+        "TuiAction::PageUp => {",
+        "TuiAction::SectorPrevious",
+    );
+    assert!(page_section.contains("advanced_inspect_sector_page"));
+    assert!(!page_section.contains("advanced_inspect_shift_sector"));
     for action in [
         "TuiAction::Toggle",
         "TuiAction::RowStart",
@@ -442,6 +480,10 @@ fn sector_inspector_dispatches_the_documented_vim_actions() {
         "TuiAction::Bottom",
         "TuiAction::HalfPageUp",
         "TuiAction::HalfPageDown",
+        "TuiAction::PageUp",
+        "TuiAction::PageDown",
+        "TuiAction::SectorPrevious",
+        "TuiAction::SectorNext",
         "TuiAction::NextMatch",
         "TuiAction::PreviousMatch",
     ] {

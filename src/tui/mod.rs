@@ -908,9 +908,18 @@ fn run_loop(resume: Option<state::WriteIntent>) -> io::Result<LoopExit> {
                                         TuiAction::YankRaw => {
                                             let _ = state.advanced_inspect_sector_yank(true);
                                         }
-                                        TuiAction::PageUp | TuiAction::PageDown => {
-                                            let delta =
-                                                if action == TuiAction::PageUp { -1 } else { 1 };
+                                        TuiAction::PageUp => {
+                                            state.advanced_inspect_sector_page(true);
+                                        }
+                                        TuiAction::PageDown => {
+                                            state.advanced_inspect_sector_page(false);
+                                        }
+                                        TuiAction::SectorPrevious | TuiAction::SectorNext => {
+                                            let delta = if action == TuiAction::SectorPrevious {
+                                                -1
+                                            } else {
+                                                1
+                                            };
                                             if let Some((source, lba)) =
                                                 state.advanced_inspect_shift_sector(delta)
                                             {

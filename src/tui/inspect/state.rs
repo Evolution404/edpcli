@@ -1595,6 +1595,10 @@ impl AppState {
         self.advanced_inspect_sector_move_cursor(if up { -128 } else { 128 });
     }
 
+    pub fn advanced_inspect_sector_page(&mut self, up: bool) {
+        self.advanced_inspect_sector_move_cursor(if up { -256 } else { 256 });
+    }
+
     pub fn advanced_inspect_sector_move_cursor(&mut self, delta: isize) {
         let Some(sector) = self
             .advanced_inspect
