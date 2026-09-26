@@ -30,6 +30,24 @@ fn confirmed_filesystem(
     None
 }
 
+fn resolved_source_password<'a>(
+    source: &ParsedExistingProvision,
+    key_domains: &'a KeyDomainSecrets,
+    role: PartitionRole,
+) -> (SourcePasswordKnowledge, Option<&'a [u8]>) {
+    let Some(domain) = KeyDomainRole::from_partition_role(role) else {
+        return (SourcePasswordKnowledge::Unknown, None);
+    };
+    let user_password = key_domains.source_password(role);
+    let knowledge = source.source_password_knowledge(domain, user_password);
+    let password = match knowledge {
+        SourcePasswordKnowledge::DefaultVerified => Some(DEFAULT_KEY_DOMAIN_PASSWORD),
+        SourcePasswordKnowledge::UserVerified => user_password,
+        SourcePasswordKnowledge::Unknown => None,
+    };
+    (knowledge, password)
+}
+
 fn inspect_source_profile(
     dev: &mut dyn SectorDev,
     source_metadata: &[u8],
@@ -62,7 +80,9 @@ fn inspect_source_profile(
                 continue;
             }
             let plaintext = if part.physically_encrypted {
-                let Some(password) = key_domains.source_password(part.role) else {
+                let (_, Some(password)) =
+                    resolved_source_password(source, key_domains, part.role)
+                else {
                     continue;
                 };
                 let Ok(key) = source.records[index].verified_sm4_file_key(password) else {
@@ -363,18 +383,23 @@ pub fn prepare_target_provision(
     for (index, part) in target_plan.partitions.iter().enumerate() {
         if let Some(record) = part.preserved_record {
             let key = if record.lba12.need_encrypt != 0 {
-                let password = request
-                    .key_domains
-                    .source_password(part.geometry.role)
-                    .ok_or_else(|| {
-                        err(
-                            EXIT_TARGET,
-                            format!(
-                                "错误: {}来源密码未知，不能执行需要解包 FileKey 的保留路径",
-                                part.geometry.role.label()
-                            ),
-                        )
-                    })?;
+                let (_, Some(password)) =
+                    resolved_source_password(
+                        source.as_ref().ok_or_else(|| {
+                            err(EXIT_TARGET, "错误: 保留计划缺少来源注册信息")
+                        })?,
+                        &request.key_domains,
+                        part.geometry.role,
+                    )
+                else {
+                    return Err(err(
+                        EXIT_TARGET,
+                        format!(
+                            "错误: {}来源密码未知，不能执行需要解包 FileKey 的保留路径",
+                            part.geometry.role.label()
+                        ),
+                    ));
+                };
                 record.verified_sm4_file_key(password).map_err(|message| {
                     err(
                         EXIT_TARGET,
