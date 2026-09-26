@@ -123,6 +123,80 @@ pub enum MediaIdentityPinConflict {
     ProtocolImageChanged,
 }
 
+/// Compact, non-secret projection safe to carry through a TUI elevation argv.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MediaIdentityResumePin {
+    pub serial_sha256: Option<String>,
+    pub serial_quality: SerialQuality,
+    pub vid: Option<u16>,
+    pub pid: Option<u16>,
+    pub total_sectors: Option<u64>,
+    pub logical_sector_size: Option<u32>,
+    pub device_id: Option<String>,
+    pub onlyid: Option<String>,
+    pub protocol_image_sha256: String,
+}
+
+impl MediaIdentityResumePin {
+    pub fn from_pin(pin: &MediaIdentityPin) -> Self {
+        Self {
+            serial_sha256: pin.snapshot.hardware.serial_sha256.clone(),
+            serial_quality: pin.snapshot.hardware.serial_quality,
+            vid: pin.snapshot.hardware.vid,
+            pid: pin.snapshot.hardware.pid,
+            total_sectors: pin.snapshot.hardware.total_sectors,
+            logical_sector_size: pin.snapshot.hardware.logical_sector_size,
+            device_id: pin.snapshot.protocol.device_id.clone(),
+            onlyid: pin.snapshot.protocol.onlyid.clone(),
+            protocol_image_sha256: pin.protocol_image_sha256.clone(),
+        }
+    }
+
+    pub fn validate(&self) -> Result<(), &'static str> {
+        let valid_sha =
+            |value: &str| value.len() == 64 && value.bytes().all(|byte| byte.is_ascii_hexdigit());
+        if !valid_sha(&self.protocol_image_sha256)
+            || self
+                .serial_sha256
+                .as_deref()
+                .is_some_and(|value| !valid_sha(value))
+            || (self.serial_quality == SerialQuality::Usable && self.serial_sha256.is_none())
+        {
+            return Err("invalid identity pin digest");
+        }
+        Ok(())
+    }
+
+    pub fn verify(
+        &self,
+        observed: &MediaIdentitySnapshot,
+        protocol_image: &[u8],
+    ) -> Result<(), MediaIdentityPinConflict> {
+        if self.serial_quality == SerialQuality::Usable
+            && (observed.hardware.serial_quality != SerialQuality::Usable
+                || self.serial_sha256 != observed.hardware.serial_sha256)
+        {
+            return Err(MediaIdentityPinConflict::SerialChangedOrLost);
+        }
+        if self.vid != observed.hardware.vid || self.pid != observed.hardware.pid {
+            return Err(MediaIdentityPinConflict::VidPidChangedOrLost);
+        }
+        if self.total_sectors != observed.hardware.total_sectors
+            || self.logical_sector_size != observed.hardware.logical_sector_size
+        {
+            return Err(MediaIdentityPinConflict::GeometryChangedOrLost);
+        }
+        if self.device_id != observed.protocol.device_id
+            || self.onlyid != observed.protocol.onlyid
+            || self.protocol_image_sha256 != format!("{:x}", Sha256::digest(protocol_image))
+        {
+            return Err(MediaIdentityPinConflict::ProtocolImageChanged);
+        }
+        Ok(())
+    }
+}
+
 impl MediaIdentityPin {
     pub fn new(snapshot: MediaIdentitySnapshot, protocol_image: &[u8]) -> Self {
         Self {

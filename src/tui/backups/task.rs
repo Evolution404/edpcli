@@ -256,18 +256,20 @@ impl TaskHub {
                 }
 
                 let runner = SysRunner;
-                let expected = intent.expected_identity.as_ref();
+                let expected = intent
+                    .expected_identity
+                    .as_ref()
+                    .ok_or_else(|| "错误: TUI 备份缺少 typed 介质身份 pin".to_string())?;
                 let mut prompt = BackupPrompter {
                     tx: tx.clone(),
                     operation_id,
                 };
-                crate::application::write::backup_create_on_disk(
+                crate::application::write::backup_create_on_disk_with_pin(
                     &runner,
                     disk,
                     backup_dir,
                     &mut prompt,
-                    expected.and_then(|value| value.onlyid.as_deref()),
-                    expected.and_then(|value| value.device_id.as_deref()),
+                    expected,
                     intent.kind == crate::tui::state::WriteKind::BackupCreateDeep,
                 )
                 .map(|_| ())

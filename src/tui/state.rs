@@ -31,11 +31,7 @@ pub enum WizardStage {
     Result,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ExpectedIdentity {
-    pub onlyid: Option<String>,
-    pub device_id: Option<String>,
-}
+pub type ExpectedIdentity = crate::application::media_identity::MediaIdentityResumePin;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WriteIntent {

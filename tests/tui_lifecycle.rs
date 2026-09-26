@@ -15,6 +15,7 @@ fn usb_device() -> edpcli::disk_scan::Row {
         pid: "2005".into(),
         proto: "USB".into(),
         device_id: None,
+        identity_pin: None,
         onlyid: None,
         dept: None,
         user: None,

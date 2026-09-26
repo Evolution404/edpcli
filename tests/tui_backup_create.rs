@@ -2,6 +2,20 @@ use edpcli::tui::command::{parse_command, PaletteAction};
 use edpcli::tui::state::{WriteIntent, WriteKind};
 use edpcli::tui::{parse_resume_args, resume_argv};
 
+fn pin() -> edpcli::tui::state::ExpectedIdentity {
+    edpcli::tui::state::ExpectedIdentity {
+        serial_sha256: Some("a".repeat(64)),
+        serial_quality: edpcli::application::media_identity::SerialQuality::Usable,
+        vid: Some(0x0dd8),
+        pid: Some(0x2005),
+        total_sectors: Some(122_880_000),
+        logical_sector_size: Some(512),
+        device_id: Some("disk&ven_netac&prod_onlydisk".into()),
+        onlyid: Some("1402259934".into()),
+        protocol_image_sha256: "b".repeat(64),
+    }
+}
+
 #[test]
 fn backup_create_has_a_tui_navigation_and_palette_action() {
     assert_eq!(
@@ -18,7 +32,7 @@ fn backup_create_resume_pins_only_the_device() {
         kind: WriteKind::BackupCreate,
         disk: 6,
         backup: None,
-        expected_identity: None,
+        expected_identity: Some(pin()),
     };
     let argv = resume_argv(&intent);
     assert!(argv
@@ -35,6 +49,8 @@ fn numeric_backup_create_resume_parses_without_becoming_a_write_wizard() {
         "backup-create".to_string(),
         "--_resume-disk".to_string(),
         "6".to_string(),
+        "--_resume-identity-pin".to_string(),
+        serde_json::to_string(&pin()).unwrap(),
     ];
     assert_eq!(
         parse_resume_args(&argv).expect("backup create resume"),
@@ -42,7 +58,7 @@ fn numeric_backup_create_resume_parses_without_becoming_a_write_wizard() {
             kind: WriteKind::BackupCreate,
             disk: 6,
             backup: None,
-            expected_identity: None,
+            expected_identity: Some(pin()),
         })
     );
 }

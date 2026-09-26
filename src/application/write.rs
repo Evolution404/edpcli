@@ -7,8 +7,9 @@
 use std::path::PathBuf;
 
 use super::media_identity::{
-    match_media_identity, BackupAffinity, BackupAffinityPolicy, MediaIdentitySnapshot,
-    RestoreAuthorizationDecision, RestoreAuthorizationPolicy, RestoreGeometryRequirements,
+    match_media_identity, BackupAffinity, BackupAffinityPolicy, MediaIdentityResumePin,
+    MediaIdentitySnapshot, RestoreAuthorizationDecision, RestoreAuthorizationPolicy,
+    RestoreGeometryRequirements,
 };
 use super::media_identity_observer::media_identity_from_protocol_image;
 use super::target_session::{ReadOnly, ReopenAndVerifyError, TargetSession};
@@ -292,6 +293,23 @@ pub fn verify_expected_identity(
     Ok(())
 }
 
+fn verify_resume_identity_pin(
+    runner: &dyn CmdRunner,
+    disk: u32,
+    expected: &MediaIdentityResumePin,
+    dev: &mut dyn SectorDev,
+) -> EdpCliResult<()> {
+    let fresh = super::media_identity_observer::observe_media_identity_readonly(runner, disk, dev)?;
+    expected
+        .verify(&fresh.snapshot, &fresh.protocol_image)
+        .map_err(|conflict| {
+            err(
+                EXIT_TARGET,
+                format!("错误: TUI resume 目标介质身份 pin 不一致: {conflict:?}"),
+            )
+        })
+}
+
 pub(crate) fn auto_pick_disk(
     runner: &dyn CmdRunner,
     prompt: &mut dyn Prompter,
@@ -449,6 +467,25 @@ pub fn backup_create_on_disk(
 ) -> EdpCliResult<BackupReport> {
     let mut dev = open_readonly_usb_disk(runner, disk)?;
     verify_expected_identity(runner, disk, expected_onlyid, expected_device_id, &mut dev)?;
+    let mut ctx = Ctx {
+        runner,
+        clock: &SystemClock,
+        prompt,
+        backup_dir,
+    };
+    backup_create_level_flow(disk, &mut ctx, &mut dev, deep)
+}
+
+pub fn backup_create_on_disk_with_pin(
+    runner: &dyn CmdRunner,
+    disk: u32,
+    backup_dir: PathBuf,
+    prompt: &mut dyn Prompter,
+    expected: &MediaIdentityResumePin,
+    deep: bool,
+) -> EdpCliResult<BackupReport> {
+    let mut dev = open_readonly_usb_disk(runner, disk)?;
+    verify_resume_identity_pin(runner, disk, expected, &mut dev)?;
     let mut ctx = Ctx {
         runner,
         clock: &SystemClock,
@@ -792,6 +829,25 @@ pub fn restore_on_disk(
 ) -> EdpCliResult<i32> {
     let mut dev = open_readonly_usb_disk(runner, disk)?;
     verify_expected_identity(runner, disk, expected_onlyid, expected_device_id, &mut dev)?;
+    let mut ctx = Ctx {
+        runner,
+        clock: &SystemClock,
+        prompt,
+        backup_dir,
+    };
+    restore_flow(bin, disk, &mut ctx, &mut dev)
+}
+
+pub fn restore_on_disk_with_pin(
+    runner: &dyn CmdRunner,
+    bin: Option<String>,
+    disk: u32,
+    backup_dir: PathBuf,
+    prompt: &mut dyn Prompter,
+    expected: &MediaIdentityResumePin,
+) -> EdpCliResult<i32> {
+    let mut dev = open_readonly_usb_disk(runner, disk)?;
+    verify_resume_identity_pin(runner, disk, expected, &mut dev)?;
     let mut ctx = Ctx {
         runner,
         clock: &SystemClock,

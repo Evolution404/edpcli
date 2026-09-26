@@ -32,6 +32,7 @@ fn device(size: u64) -> edpcli::disk_scan::Row {
         pid: "5678".into(),
         proto: "USB".into(),
         device_id: Some("disk&ven_test&prod_test".into()),
+        identity_pin: None,
         onlyid: Some("1402259934".into()),
         dept: Some("输电运检中心".into()),
         user: Some("测试用户".into()),

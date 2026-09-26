@@ -158,8 +158,18 @@ pub(super) fn draw_devices(frame: &mut Frame, area: ratatui::layout::Rect, state
                 Line::from(format!("型号  {}", safe(&cells[2]))),
                 Line::from(format!("device_id  {}", safe(device_id))),
                 Line::from(format!("onlyid  {}", safe(&cells[3]))),
+                Line::from(format!("介质识别  {}", safe(identity.canonical_status()))),
                 Line::from(format!("姓名  {}", safe(&cells[4]))),
             ];
+            if let Some(canonical) = &identity.canonical {
+                lines.extend(
+                    canonical
+                        .evidence_lines()
+                        .into_iter()
+                        .take(3)
+                        .map(|line| Line::from(safe(&line))),
+                );
+            }
             lines.extend(wrapped_field_lines("部门  ", &cells[5], content_width));
             lines.extend([
                 Line::from(format!("设备  disk{}", row.disk)),

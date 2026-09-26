@@ -103,6 +103,14 @@ fn backup_flow(opts: InfoOpts) -> i32 {
         }
     };
     print_summary(&source_label, &summary, BackupSummary::File(&path));
+    if let Ok(identity) = crate::edpb::canonical_media_identity(manifest) {
+        let identity_view =
+            crate::application::identity::CanonicalIdentityProjection::from_snapshot(&identity);
+        println!("介质识别：{}", identity_view.status());
+        for line in identity_view.evidence_lines() {
+            println!("  {line}");
+        }
+    }
     EXIT_OK
 }
 
@@ -224,6 +232,12 @@ fn disk_flow(runner: &dyn CmdRunner, mut opts: InfoOpts) -> i32 {
         &summary,
         BackupSummary::Device(&backups),
     );
+    let identity_view =
+        crate::application::identity::CanonicalIdentityProjection::from_snapshot(&identity);
+    println!("介质识别：{}", identity_view.status());
+    for line in identity_view.evidence_lines() {
+        println!("  {line}");
+    }
     EXIT_OK
 }
 

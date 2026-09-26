@@ -9,6 +9,7 @@ fn device() -> Row {
         pid: "5678".into(),
         proto: "USB".into(),
         device_id: Some("disk&ven_demo&prod_u335".into()),
+        identity_pin: None,
         onlyid: Some("ABCDEF0123456789".into()),
         dept: Some("输电运检中心".into()),
         user: Some("张三".into()),

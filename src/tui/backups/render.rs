@@ -273,7 +273,10 @@ pub(super) fn draw_backups(frame: &mut Frame, area: ratatui::layout::Rect, state
     if let Some((detail_area, animation_area)) = sidebar {
         let detail = if let Some(backup) = state.selected_backup() {
             let (health, health_style) = backup_health(backup);
-            let identity = crate::application::identity::WorkspaceIdentity::from_backup(backup);
+            let identity = crate::application::identity::WorkspaceIdentity::from_backup_against(
+                backup,
+                state.selected_device(),
+            );
             let cells = identity.display_cells();
             let content_width = detail_area.width.saturating_sub(2) as usize;
             let mut lines = vec![
@@ -289,8 +292,18 @@ pub(super) fn draw_backups(frame: &mut Frame, area: ratatui::layout::Rect, state
                     safe(identity.device_id.as_deref().unwrap_or("—"))
                 )),
                 Line::from(format!("onlyid  {}", safe(&cells[3]))),
+                Line::from(format!("介质识别  {}", safe(identity.canonical_status()))),
                 Line::from(format!("姓名  {}", safe(&cells[4]))),
             ];
+            if let Some(canonical) = &identity.canonical {
+                lines.extend(
+                    canonical
+                        .evidence_lines()
+                        .into_iter()
+                        .take(3)
+                        .map(|line| Line::from(safe(&line))),
+                );
+            }
             lines.extend(wrapped_field_lines("部门  ", &cells[5], content_width));
             lines.extend([
                 Line::from(format!("备份时间  {}", safe(&backup.display_time))),

@@ -4,9 +4,9 @@ use std::time::Duration;
 use edpcli::application::media_identity::{
     match_media_identity, serial_digest_evidence, ControlledLineageEvidence,
     DerivedProtocolEvidence, HardwareIdentityEvidence, IdentityConfidence, IdentityObservation,
-    MediaIdentityPin, MediaIdentityPinConflict, MediaIdentitySnapshot, MediaRelationship,
-    ProtocolIdentityEvidence, RestoreAuthorizationDecision, RestoreAuthorizationPolicy,
-    RestoreGeometryRequirements, RestoreRejection, SerialQuality,
+    MediaIdentityPin, MediaIdentityPinConflict, MediaIdentityResumePin, MediaIdentitySnapshot,
+    MediaRelationship, ProtocolIdentityEvidence, RestoreAuthorizationDecision,
+    RestoreAuthorizationPolicy, RestoreGeometryRequirements, RestoreRejection, SerialQuality,
 };
 use edpcli::application::media_identity_observer::observe_media_identity_readonly;
 use edpcli::diskio::SectorDev;
@@ -368,6 +368,31 @@ fn provision_pin_hides_raw_serial_and_rejects_reopen_clone() {
     assert_eq!(
         pin.verify(&source, &[0x41; 13 * 512]),
         Err(MediaIdentityPinConflict::ProtocolImageChanged)
+    );
+}
+
+#[test]
+fn elevation_pin_contains_only_digest_and_rejects_reopened_clone() {
+    let source = snapshot(
+        hardware(Some("RAW-USB-SERIAL-001"), 0x1234, 0x5678, 1_000_000),
+        Some("edp"),
+        Some("42"),
+        DiskProvisionKind::Mode0,
+    );
+    let clone = snapshot(
+        hardware(Some("CLONED-USB-SERIAL-002"), 0x1234, 0x5678, 1_000_000),
+        Some("edp"),
+        Some("42"),
+        DiskProvisionKind::Mode0,
+    );
+    let pin =
+        MediaIdentityResumePin::from_pin(&MediaIdentityPin::new(source.clone(), &[0; 13 * 512]));
+    let argv_value = serde_json::to_string(&pin).unwrap();
+    assert!(!argv_value.contains("RAW-USB-SERIAL-001"));
+    assert!(pin.validate().is_ok());
+    assert_eq!(
+        pin.verify(&clone, &[0; 13 * 512]),
+        Err(MediaIdentityPinConflict::SerialChangedOrLost)
     );
 }
 

@@ -1,11 +1,80 @@
 //! Shared, read-only identity projection for device and backup workspaces.
 
+use super::media_identity::{
+    match_media_identity, IdentityConfidence, IdentityEvidenceKind, IdentityEvidenceOutcome,
+    IdentityEvidenceResult, IdentityMatch, MediaIdentitySnapshot, MediaRelationship,
+};
 use crate::provision::DiskProvisionKind;
 
 use super::BackupWorkspaceItem;
 
 pub const IDENTITY_HEADINGS: [&str; 7] =
     ["容量", "VID:PID", "型号", "onlyid", "姓名", "部门", "盘型"];
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CanonicalIdentityProjection {
+    pub relationship: MediaRelationship,
+    pub confidence: IdentityConfidence,
+    pub evidence: Vec<IdentityEvidenceResult>,
+}
+
+impl CanonicalIdentityProjection {
+    pub fn from_snapshot(snapshot: &MediaIdentitySnapshot) -> Self {
+        Self::from_match(match_media_identity(snapshot, snapshot, None))
+    }
+
+    pub fn between(backup: &MediaIdentitySnapshot, target: &MediaIdentitySnapshot) -> Self {
+        Self::from_match(match_media_identity(backup, target, None))
+    }
+
+    fn from_match(matched: IdentityMatch) -> Self {
+        Self {
+            relationship: matched.relationship,
+            confidence: matched.confidence,
+            evidence: matched.evidence,
+        }
+    }
+
+    pub fn status(&self) -> &'static str {
+        match self.relationship {
+            MediaRelationship::SamePhysicalMedia => "已确认 · 物理介质一致",
+            MediaRelationship::SameEdpInstance => "协议实例一致 · 物理未确认",
+            MediaRelationship::SameControlledLineage => "受控历史关联 · 物理未确认",
+            MediaRelationship::ProbableSameMedia | MediaRelationship::ModelOnlyMatch => {
+                "可能相关 · 不能唯一确认"
+            }
+            MediaRelationship::Ambiguous => "证据不足 · 不能确认",
+            MediaRelationship::DifferentMedia => "硬件冲突 · 不同介质",
+        }
+    }
+
+    pub fn evidence_lines(&self) -> Vec<String> {
+        self.evidence
+            .iter()
+            .map(|result| {
+                let label = match result.kind {
+                    IdentityEvidenceKind::UsbSerialDigest => "USB serial 摘要",
+                    IdentityEvidenceKind::VidPid => "VID/PID",
+                    IdentityEvidenceKind::Geometry => "容量/扇区大小",
+                    IdentityEvidenceKind::Onlyid => "onlyid",
+                    IdentityEvidenceKind::ObservedDeviceId => "EDP device_id",
+                    IdentityEvidenceKind::ControlledLineage => "主机历史",
+                    IdentityEvidenceKind::Lba4Identity => "LBA4 身份",
+                    IdentityEvidenceKind::VendorProductRevision => "硬件型号",
+                    IdentityEvidenceKind::DerivedDeviceIdCandidate => "派生候选",
+                };
+                let outcome = match result.outcome {
+                    IdentityEvidenceOutcome::Match => "一致",
+                    IdentityEvidenceOutcome::Compatible => "兼容（弱证据）",
+                    IdentityEvidenceOutcome::ChangedExpected => "已变化",
+                    IdentityEvidenceOutcome::Missing => "缺失",
+                    IdentityEvidenceOutcome::Conflict => "冲突",
+                };
+                format!("{label}：{outcome}")
+            })
+            .collect()
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WorkspaceIdentity {
@@ -18,6 +87,7 @@ pub struct WorkspaceIdentity {
     pub dept: Option<String>,
     /// None means the provision kind was not established by a completed probe.
     pub provision_kind: Option<DiskProvisionKind>,
+    pub canonical: Option<CanonicalIdentityProjection>,
 }
 
 impl WorkspaceIdentity {
@@ -35,6 +105,10 @@ impl WorkspaceIdentity {
                 && row.probe_error.is_none()
                 && row.device_id.is_some())
             .then_some(row.provision_kind),
+            canonical: row
+                .identity_pin
+                .as_ref()
+                .map(|pin| CanonicalIdentityProjection::from_snapshot(&pin.snapshot)),
         }
     }
 
@@ -51,7 +125,35 @@ impl WorkspaceIdentity {
                 == crate::diskio::BackupIntegrityStatus::Verified
                 && backup.size_ok)
                 .then_some(backup.provision_kind),
+            canonical: backup
+                .identity
+                .as_ref()
+                .map(CanonicalIdentityProjection::from_snapshot),
         }
+    }
+
+    pub fn from_backup_against(
+        backup: &BackupWorkspaceItem,
+        target: Option<&crate::disk_scan::Row>,
+    ) -> Self {
+        let mut view = Self::from_backup(backup);
+        if let (Some(backup_identity), Some(target_identity)) = (
+            backup.identity.as_ref(),
+            target.and_then(|row| row.identity_pin.as_ref()),
+        ) {
+            view.canonical = Some(CanonicalIdentityProjection::between(
+                backup_identity,
+                &target_identity.snapshot,
+            ));
+        }
+        view
+    }
+
+    pub fn canonical_status(&self) -> &str {
+        self.canonical
+            .as_ref()
+            .map(CanonicalIdentityProjection::status)
+            .unwrap_or("身份未验证")
     }
 
     pub fn vid_pid(&self) -> String {

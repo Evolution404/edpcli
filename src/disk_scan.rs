@@ -25,6 +25,8 @@ pub struct Row {
     pub pid: String,
     pub proto: String,
     pub device_id: Option<String>,
+    /// Read-only canonical snapshot pinned to the protocol image seen by this scan.
+    pub identity_pin: Option<crate::application::media_identity::MediaIdentityPin>,
     pub onlyid: Option<String>,
     pub dept: Option<String>,
     pub user: Option<String>,
@@ -107,6 +109,7 @@ pub fn scan_disks(
             pid: d.pid.clone(),
             proto: d.proto.clone(),
             device_id: None,
+            identity_pin: None,
             onlyid: None,
             dept: None,
             user: None,
@@ -198,6 +201,10 @@ pub fn scan_disks(
                     media_identity_from_protocol_image(runner, d.n, &protocol_image)
                     .map_err(|error| io::Error::other(error.msg))?;
                 let matches = find_backups(backup_dir, &identity);
+                row.identity_pin = Some(crate::application::media_identity::MediaIdentityPin::new(
+                    identity,
+                    &protocol_image,
+                ));
                 row.n_baks = matches.confirmed.len();
                 row.n_possible_baks = matches.possible.len();
                 Ok(())

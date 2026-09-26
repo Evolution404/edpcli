@@ -33,8 +33,7 @@ use task::TaskHub;
 const RESUME_KIND_FLAG: &str = "--_resume-kind";
 const RESUME_DISK_FLAG: &str = "--_resume-disk";
 const RESUME_BACKUP_FLAG: &str = "--_resume-backup";
-const RESUME_ONLYID_FLAG: &str = "--_resume-onlyid";
-const RESUME_DEVICE_ID_FLAG: &str = "--_resume-device-id";
+const RESUME_IDENTITY_PIN_FLAG: &str = "--_resume-identity-pin";
 
 /// Serialize a confirmed write intent for an elevated TUI restart.
 ///
@@ -57,14 +56,8 @@ pub fn resume_argv(intent: &state::WriteIntent) -> Vec<String> {
         argv.push(path.to_string_lossy().into_owned());
     }
     if let Some(identity) = &intent.expected_identity {
-        if let Some(onlyid) = &identity.onlyid {
-            argv.push(RESUME_ONLYID_FLAG.to_string());
-            argv.push(onlyid.clone());
-        }
-        if let Some(device_id) = &identity.device_id {
-            argv.push(RESUME_DEVICE_ID_FLAG.to_string());
-            argv.push(device_id.clone());
-        }
+        argv.push(RESUME_IDENTITY_PIN_FLAG.to_string());
+        argv.push(serde_json::to_string(identity).unwrap_or_else(|_| "{}".into()));
     }
     argv
 }
@@ -77,8 +70,7 @@ pub fn parse_resume_args(argv: &[String]) -> Result<Option<state::WriteIntent>, 
     let mut kind = None;
     let mut disk = None;
     let mut backup = None;
-    let mut onlyid = None;
-    let mut device_id = None;
+    let mut identity_pin = None;
     let mut saw_resume = false;
 
     let mut i = usize::from(argv.first().is_some_and(|arg| arg == "tui"));
@@ -124,19 +116,16 @@ pub fn parse_resume_args(argv: &[String]) -> Result<Option<state::WriteIntent>, 
                 saw_resume = true;
                 backup = Some(std::path::PathBuf::from(take(RESUME_BACKUP_FLAG)?));
             }
-            RESUME_ONLYID_FLAG => {
-                if onlyid.is_some() {
-                    return Err(format!("错误: {RESUME_ONLYID_FLAG} 重复指定"));
+            RESUME_IDENTITY_PIN_FLAG => {
+                if identity_pin.is_some() {
+                    return Err(format!("错误: {RESUME_IDENTITY_PIN_FLAG} 重复指定"));
                 }
                 saw_resume = true;
-                onlyid = Some(take(RESUME_ONLYID_FLAG)?);
-            }
-            RESUME_DEVICE_ID_FLAG => {
-                if device_id.is_some() {
-                    return Err(format!("错误: {RESUME_DEVICE_ID_FLAG} 重复指定"));
-                }
-                saw_resume = true;
-                device_id = Some(take(RESUME_DEVICE_ID_FLAG)?);
+                let raw = take(RESUME_IDENTITY_PIN_FLAG)?;
+                let pin: state::ExpectedIdentity = serde_json::from_str(&raw)
+                    .map_err(|error| format!("错误: TUI resume identity pin 无效: {error}"))?;
+                pin.validate().map_err(|error| format!("错误: {error}"))?;
+                identity_pin = Some(pin);
             }
             other => return Err(format!("错误: tui 不认识内部 resume 参数 {other}")),
         }
@@ -148,6 +137,8 @@ pub fn parse_resume_args(argv: &[String]) -> Result<Option<state::WriteIntent>, 
     }
     let kind = kind.ok_or_else(|| format!("错误: 缺少 {RESUME_KIND_FLAG}"))?;
     let disk = disk.ok_or_else(|| format!("错误: 缺少 {RESUME_DISK_FLAG}"))?;
+    let identity_pin =
+        identity_pin.ok_or_else(|| format!("错误: TUI resume 缺少 {RESUME_IDENTITY_PIN_FLAG}"))?;
     match kind {
         state::WriteKind::BackupCreate | state::WriteKind::BackupCreateDeep if backup.is_some() => {
             Err("错误: 非 Restore resume 不允许携带备份路径".into())
@@ -159,8 +150,7 @@ pub fn parse_resume_args(argv: &[String]) -> Result<Option<state::WriteIntent>, 
             kind,
             disk,
             backup,
-            expected_identity: (onlyid.is_some() || device_id.is_some())
-                .then_some(state::ExpectedIdentity { onlyid, device_id }),
+            expected_identity: Some(identity_pin),
         })),
     }
 }
@@ -291,16 +281,20 @@ fn dispatch_nav_command(
                 (state.selected_device(), state.selected_backup_path())
             {
                 let disk = row.disk;
-                let identity = state::ExpectedIdentity {
-                    onlyid: row.onlyid.clone(),
-                    device_id: row.device_id.clone(),
-                };
-                state.begin_write_wizard_for_identity(
-                    state::WriteKind::Restore,
-                    disk,
-                    Some(backup),
-                    Some(identity),
-                );
+                let identity = row
+                    .identity_pin
+                    .as_ref()
+                    .map(state::ExpectedIdentity::from_pin);
+                if let Some(identity) = identity {
+                    state.begin_write_wizard_for_identity(
+                        state::WriteKind::Restore,
+                        disk,
+                        Some(backup),
+                        Some(identity),
+                    );
+                } else {
+                    state.set_notice("目标介质身份尚未完成只读采集，请刷新设备后重试。");
+                }
             } else {
                 state.set_notice("恢复需要先在设备页选定目标 U 盘，再进入备份页选择备份。");
             }
@@ -309,16 +303,20 @@ fn dispatch_nav_command(
         NavCommand::BeginBackupCreate => {
             if let Some(row) = state.selected_device() {
                 let disk = row.disk;
-                let identity = state::ExpectedIdentity {
-                    onlyid: row.onlyid.clone(),
-                    device_id: row.device_id.clone(),
-                };
-                state.begin_write_wizard_for_identity(
-                    state::WriteKind::BackupCreate,
-                    disk,
-                    None,
-                    Some(identity),
-                );
+                let identity = row
+                    .identity_pin
+                    .as_ref()
+                    .map(state::ExpectedIdentity::from_pin);
+                if let Some(identity) = identity {
+                    state.begin_write_wizard_for_identity(
+                        state::WriteKind::BackupCreate,
+                        disk,
+                        None,
+                        Some(identity),
+                    );
+                } else {
+                    state.set_notice("目标介质身份尚未完成只读采集，请刷新设备后重试。");
+                }
             } else {
                 state.set_notice("创建备份需要先在设备页选定 U 盘。");
             }
@@ -327,16 +325,20 @@ fn dispatch_nav_command(
         NavCommand::BeginBackupCreateDeep => {
             if let Some(row) = state.selected_device() {
                 let disk = row.disk;
-                let identity = state::ExpectedIdentity {
-                    onlyid: row.onlyid.clone(),
-                    device_id: row.device_id.clone(),
-                };
-                state.begin_write_wizard_for_identity(
-                    state::WriteKind::BackupCreateDeep,
-                    disk,
-                    None,
-                    Some(identity),
-                );
+                let identity = row
+                    .identity_pin
+                    .as_ref()
+                    .map(state::ExpectedIdentity::from_pin);
+                if let Some(identity) = identity {
+                    state.begin_write_wizard_for_identity(
+                        state::WriteKind::BackupCreateDeep,
+                        disk,
+                        None,
+                        Some(identity),
+                    );
+                } else {
+                    state.set_notice("目标介质身份尚未完成只读采集，请刷新设备后重试。");
+                }
             } else {
                 state.set_notice("深度备份需要先在设备页选定 U 盘。");
             }

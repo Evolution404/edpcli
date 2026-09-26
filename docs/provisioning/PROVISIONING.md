@@ -8614,6 +8614,8 @@ observe_media_identity_readonly(...)
 
 #### I7 — CLI/TUI 展示与 elevation bridge
 
+**实施状态（2026-09-26）：COMPLETE（软件门禁）。** `WorkspaceIdentity` 增加统一的 `CanonicalIdentityProjection`，以纯 `match_media_identity` 投影 relationship、confidence 与 typed evidence；设备扫描缓存 `MediaIdentityPin`，备份工作区继续消费已校验 EDPB 的 canonical snapshot。TUI Device/Backup 详情和 CLI `info` 共用 application 投影，区分“已确认物理介质”“协议实例一致但物理未确认”“可能相关/证据不足”与“硬件冲突”，只显示 serial 摘要状态，不显示 raw serial；renderer 无新增设备/备份 I/O。TUI `ExpectedIdentity` 现为 application-owned `MediaIdentityResumePin`；elevation argv 使用单个 typed JSON pin（digest/VID/PID/geometry/协议 ID），解析校验并拒绝缺失、畸形或未知字段；子进程重新只读观察目标盘后复核 pin，restore 仍经 I5 strict authorization。CLI/TUI 共用 application write service，旧 `--_resume-onlyid/--_resume-device-id` 内部参数退出。专项测试覆盖 confirmed/possible/conflict 展示、raw serial 不进 argv、clone pin 冲突；完整门禁见阶段提交记录。
+
 - `WorkspaceIdentity` 投影 match grade / relationship；
 - Device/Backup 统一列/详情；
 - TUI ExpectedIdentity 迁移 typed pin；

@@ -17,6 +17,7 @@ fn device(disk: u32) -> Row {
         pid: "5678".into(),
         proto: "USB".into(),
         device_id: Some("disk&ven_test&prod_test".into()),
+        identity_pin: None,
         onlyid: Some(format!("{disk}001")),
         dept: None,
         user: None,
@@ -86,6 +87,54 @@ fn ch14_identity_projection_is_shared_and_unknown_kind_is_honest() {
     assert_eq!(
         cells[6], "—",
         "invalid backup must not report Plain as known"
+    );
+}
+
+#[test]
+fn canonical_identity_projection_distinguishes_confirmed_possible_and_conflict() {
+    use edpcli::application::identity::WorkspaceIdentity;
+    use edpcli::application::media_identity::{
+        serial_digest_evidence, MediaIdentityPin, MediaIdentitySnapshot,
+    };
+
+    let identity = |raw_serial: Option<&str>| {
+        let mut snapshot = MediaIdentitySnapshot::default();
+        let serial = serial_digest_evidence(raw_serial);
+        snapshot.hardware.serial_sha256 = serial.sha256;
+        snapshot.hardware.serial_quality = serial.quality;
+        snapshot.hardware.vid = Some(0x1234);
+        snapshot.hardware.pid = Some(0x5678);
+        snapshot.hardware.total_sectors = Some(125_000_000);
+        snapshot.hardware.logical_sector_size = Some(512);
+        snapshot.hardware.vendor = Some("test".into());
+        snapshot.hardware.product = Some("test".into());
+        snapshot.hardware.revision = Some("1.0".into());
+        snapshot
+    };
+    let mut target = device(6);
+    target.identity_pin = Some(MediaIdentityPin::new(
+        identity(Some("SERIAL-001")),
+        &[0; 13 * 512],
+    ));
+    let mut saved = backup(1, "identity.edpb");
+    saved.identity = Some(identity(Some("SERIAL-001")));
+    assert!(
+        WorkspaceIdentity::from_backup_against(&saved, Some(&target))
+            .canonical_status()
+            .contains("已确认")
+    );
+    saved.identity = Some(identity(Some("SERIAL-002")));
+    assert!(
+        WorkspaceIdentity::from_backup_against(&saved, Some(&target))
+            .canonical_status()
+            .contains("硬件冲突")
+    );
+    target.identity_pin = Some(MediaIdentityPin::new(identity(None), &[0; 13 * 512]));
+    saved.identity = Some(identity(None));
+    assert!(
+        WorkspaceIdentity::from_backup_against(&saved, Some(&target))
+            .canonical_status()
+            .contains("可能相关")
     );
 }
 
