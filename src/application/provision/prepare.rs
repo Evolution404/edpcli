@@ -577,6 +577,45 @@ pub fn prepare_target_provision(
     })
 }
 
+pub fn probe_provision_key_domains_on_disk(
+    runner: &dyn CmdRunner,
+    disk: u32,
+) -> EdpCliResult<ProvisionKeyProbe> {
+    let target_session = TargetSession::<ReadOnly>::open_usb(runner, disk)?;
+    let total_sectors = target_session
+        .total_sectors()
+        .ok_or_else(|| err(EXIT_TARGET, "错误: 无法取得目标盘总扇区数"))?;
+    let probe = target_session
+        .hardware_probe()
+        .ok_or_else(|| err(EXIT_TARGET, "错误: 无法取得目标盘 USB/SCSI 硬件身份"))?;
+    let target = TargetIdentity::from_probe(&probe, total_sectors)
+        .map_err(|message| err(EXIT_TARGET, format!("错误: 目标硬件身份不完整: {message}")))?;
+    let device_id = target.device_id().to_string();
+    let mut dev = open_readonly_usb_disk(runner, disk)?;
+    let source_metadata = read_image(&mut dev)?;
+    let image = ProvisionImage::from_bytes(source_metadata.clone())
+        .map_err(|message| err(EXIT_TARGET, format!("错误: 来源元数据长度无效: {message}")))?;
+    let parsed = parse_existing_provision(&image, &device_id, total_sectors).map_err(|message| {
+        err(
+            EXIT_TARGET,
+            format!("错误: 来源盘注册结构无法可靠解析: {message}"),
+        )
+    })?;
+    let source_kind = DiskProvisionKind::from_metadata(&source_metadata, &device_id);
+    let domain_status = |domain: KeyDomainRole| {
+        parsed.as_ref().and_then(|source| {
+            source
+                .record_for_domain(domain)
+                .map(|_| source.source_password_knowledge(domain, None))
+        })
+    };
+    Ok(ProvisionKeyProbe {
+        source_kind,
+        share: domain_status(KeyDomainRole::Share),
+        encrypt: domain_status(KeyDomainRole::Encrypt),
+    })
+}
+
 pub fn prepare_provision(
     runner: &dyn CmdRunner,
     disk: u32,
