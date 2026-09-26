@@ -4,6 +4,7 @@ use std::sync::OnceLock;
 
 use ratatui::style::{Color, Modifier, Style};
 
+use super::disk_layout::DiskRegionKind;
 use super::state::{ProvisionBarKind, ProvisionKind};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -297,6 +298,23 @@ impl Theme {
             ProvisionBarKind::Share => self.palette.partition_share,
             ProvisionBarKind::Encrypt => self.palette.partition_encrypt,
             ProvisionBarKind::Compatibility => self.palette.partition_compatibility,
+        };
+        Style::default().fg(color)
+    }
+
+    pub fn disk_region(self, kind: DiskRegionKind) -> Style {
+        let color = match kind {
+            DiskRegionKind::Protocol => self.palette.accent,
+            DiskRegionKind::Reserved => self.palette.partition_compatibility,
+            DiskRegionKind::Unknown => self.palette.text_muted,
+            DiskRegionKind::Free => self.palette.partition_free,
+            DiskRegionKind::Plain => self.palette.partition_plain,
+            DiskRegionKind::Boot => self.palette.partition_boot,
+            DiskRegionKind::Share | DiskRegionKind::Combined => self.palette.partition_share,
+            DiskRegionKind::Encrypt => self.palette.partition_encrypt,
+            DiskRegionKind::Compatibility => self.palette.partition_compatibility,
+            DiskRegionKind::Lce => self.palette.violet,
+            DiskRegionKind::Tail => self.palette.accent_soft,
         };
         Style::default().fg(color)
     }

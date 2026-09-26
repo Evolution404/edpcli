@@ -1,18 +1,90 @@
 //! Shared sector geometry and proportional disk bar for Provision and Inspect.
 
-use ratatui::text::{Line, Span};
+use ratatui::{
+    layout::Rect,
+    text::{Line, Span},
+    widgets::{Block, Borders, Paragraph, Wrap},
+    Frame,
+};
 
 use super::state::ProvisionBarKind;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum DiskRegionKind {
+    Protocol,
+    Reserved,
+    Unknown,
+    Free,
+    Plain,
+    Boot,
+    Share,
+    Combined,
+    Encrypt,
+    Compatibility,
+    Lce,
+    Tail,
+}
+
+impl DiskRegionKind {
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Protocol => "EDP 协议区",
+            Self::Reserved => "保留区域",
+            Self::Unknown => "未知区域",
+            Self::Free => "空闲",
+            Self::Plain => "普通分区",
+            Self::Boot => "启动区",
+            Self::Share => "交换区",
+            Self::Combined => "二合一区",
+            Self::Encrypt => "保密区",
+            Self::Compatibility => "兼容保留区",
+            Self::Lce => "LCE",
+            Self::Tail => "盘尾区域",
+        }
+    }
+
+    const fn priority(self) -> u8 {
+        match self {
+            Self::Protocol => 120,
+            Self::Lce => 115,
+            Self::Boot | Self::Share | Self::Combined | Self::Encrypt | Self::Plain => 110,
+            Self::Compatibility => 105,
+            Self::Tail => 100,
+            Self::Reserved => 90,
+            Self::Free => 80,
+            Self::Unknown => 10,
+        }
+    }
+
+    pub const fn visual_kind(self) -> ProvisionBarKind {
+        match self {
+            Self::Protocol | Self::Boot => ProvisionBarKind::Boot,
+            Self::Share | Self::Combined => ProvisionBarKind::Share,
+            Self::Encrypt => ProvisionBarKind::Encrypt,
+            Self::Compatibility | Self::Reserved | Self::Lce | Self::Tail => {
+                ProvisionBarKind::Compatibility
+            }
+            Self::Plain => ProvisionBarKind::Plain,
+            Self::Free | Self::Unknown => ProvisionBarKind::Free,
+        }
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DiskLayoutSegment {
     pub label: String,
     pub start_lba: u64,
     pub sector_count: u64,
-    pub kind: ProvisionBarKind,
+    pub kind: DiskRegionKind,
 }
 
 impl DiskLayoutSegment {
+    pub fn end_exclusive(&self) -> Result<u64, String> {
+        self.start_lba
+            .checked_add(self.sector_count)
+            .ok_or_else(|| format!("{} LBA range overflows", self.label))
+    }
+
     pub fn closed_range(&self) -> String {
         self.start_lba
             .checked_add(self.sector_count)
@@ -29,6 +101,14 @@ pub struct DiskLayoutModel {
     pub segments: Vec<DiskLayoutSegment>,
 }
 
+pub struct DiskLayoutPane<'a> {
+    pub title: &'a str,
+    pub summary: &'a str,
+    pub details: &'a [String],
+    pub focused: bool,
+    pub scroll_y: usize,
+}
+
 impl DiskLayoutModel {
     pub fn new(total_sectors: u64, mut segments: Vec<DiskLayoutSegment>) -> Self {
         segments.sort_by_key(|segment| segment.start_lba);
@@ -38,52 +118,177 @@ impl DiskLayoutModel {
         }
     }
 
-    pub fn from_topology(topology: &crate::application::inspect_tree::InspectTopology) -> Self {
-        use crate::application::inspect_tree::InspectChildren;
-        let segments = match &topology.root.children {
-            InspectChildren::Materialized(children) => children
-                .iter()
-                .map(|node| {
-                    let kind = if node.id == "region.protocol" {
-                        ProvisionBarKind::Boot
-                    } else if node.id == "region.lce" {
-                        ProvisionBarKind::Compatibility
-                    } else if node.id.starts_with("region.unknown") {
-                        ProvisionBarKind::Unknown
-                    } else if node.id.starts_with("region.conflict") {
-                        ProvisionBarKind::Compatibility
-                    } else if node.id.starts_with("region.partition") {
-                        if node.label.ends_with("type1") {
-                            ProvisionBarKind::Boot
-                        } else if node.label.ends_with("type2") {
-                            ProvisionBarKind::Share
-                        } else if node.label.ends_with("type4") {
-                            ProvisionBarKind::Encrypt
-                        } else {
-                            ProvisionBarKind::Plain
-                        }
-                    } else if node.id == "region.tail" {
-                        ProvisionBarKind::Compatibility
-                    } else {
-                        ProvisionBarKind::Plain
-                    };
-                    DiskLayoutSegment {
-                        label: node.label.clone(),
-                        start_lba: node.range.start_lba,
-                        sector_count: node.range.sector_count,
-                        kind,
-                    }
-                })
-                .collect(),
-            _ => Vec::new(),
+    pub fn validate_complete(&self) -> Result<(), String> {
+        if self.total_sectors == 0 {
+            return if self.segments.is_empty() {
+                Ok(())
+            } else {
+                Err("zero-sector disk layout must not contain segments".into())
+            };
+        }
+        let Some(first) = self.segments.first() else {
+            return Err("non-empty disk has no layout segments".into());
         };
-        Self::new(topology.root.range.sector_count, segments)
+        if first.start_lba != 0 {
+            return Err(format!(
+                "disk layout starts at LBA{} instead of LBA0",
+                first.start_lba
+            ));
+        }
+        for segment in &self.segments {
+            if segment.sector_count == 0 {
+                return Err(format!("{} has zero sectors", segment.label));
+            }
+            if segment.end_exclusive()? > self.total_sectors {
+                return Err(format!("{} exceeds physical disk", segment.label));
+            }
+        }
+        for pair in self.segments.windows(2) {
+            let left_end = pair[0].end_exclusive()?;
+            if left_end != pair[1].start_lba {
+                return Err(if left_end < pair[1].start_lba {
+                    format!("disk layout hole [{}..{})", left_end, pair[1].start_lba)
+                } else {
+                    format!("disk layout overlap at LBA{}", pair[1].start_lba)
+                });
+            }
+        }
+        let end = self.segments.last().expect("non-empty").end_exclusive()?;
+        if end != self.total_sectors {
+            return Err(format!(
+                "disk layout ends at LBA{} instead of {}",
+                end, self.total_sectors
+            ));
+        }
+        Ok(())
     }
 
-    pub fn bar(&self, width: usize) -> Vec<ProvisionBarKind> {
+    pub fn from_claims(
+        total_sectors: u64,
+        claims: Vec<DiskLayoutSegment>,
+        default_kind: DiskRegionKind,
+    ) -> Self {
+        if total_sectors == 0 {
+            return Self::new(0, Vec::new());
+        }
+        let mut boundaries = vec![0, total_sectors];
+        for claim in &claims {
+            if claim.sector_count == 0 || claim.start_lba >= total_sectors {
+                continue;
+            }
+            boundaries.push(claim.start_lba);
+            boundaries.push(
+                claim
+                    .end_exclusive()
+                    .unwrap_or(total_sectors)
+                    .min(total_sectors),
+            );
+        }
+        boundaries.sort_unstable();
+        boundaries.dedup();
+
+        let mut segments: Vec<DiskLayoutSegment> = Vec::new();
+        for pair in boundaries.windows(2) {
+            let start = pair[0];
+            let end = pair[1];
+            if start >= end {
+                continue;
+            }
+            let winner = claims
+                .iter()
+                .filter(|claim| {
+                    claim.sector_count > 0
+                        && claim.start_lba <= start
+                        && claim
+                            .end_exclusive()
+                            .is_ok_and(|claim_end| claim_end >= end)
+                })
+                .max_by_key(|claim| claim.kind.priority());
+            let (kind, label) = winner
+                .map(|claim| (claim.kind, claim.label.clone()))
+                .unwrap_or((default_kind, default_kind.label().into()));
+            if let Some(last) = segments.last_mut() {
+                if last.kind == kind
+                    && last.label == label
+                    && last.end_exclusive().ok() == Some(start)
+                {
+                    last.sector_count = last.sector_count.saturating_add(end - start);
+                    continue;
+                }
+            }
+            segments.push(DiskLayoutSegment {
+                label,
+                start_lba: start,
+                sector_count: end - start,
+                kind,
+            });
+        }
+        let model = Self::new(total_sectors, segments);
+        debug_assert!(model.validate_complete().is_ok());
+        model
+    }
+
+    pub fn from_topology(topology: &crate::application::inspect_tree::InspectTopology) -> Self {
+        use crate::application::inspect_tree::{InspectChildren, InspectNode};
+
+        fn node_kind(node: &InspectNode) -> DiskRegionKind {
+            if node.id == "region.protocol" {
+                DiskRegionKind::Protocol
+            } else if node.id == "region.lce" {
+                DiskRegionKind::Lce
+            } else if node.id == "region.tail" {
+                DiskRegionKind::Tail
+            } else if node.id.starts_with("region.unknown") {
+                DiskRegionKind::Unknown
+            } else if node.id.starts_with("region.partition") || node.label.starts_with("MBR P") {
+                if node.label.ends_with("type1") || node.label.contains("type=0x0E") {
+                    DiskRegionKind::Boot
+                } else if node.label.ends_with("type2") {
+                    DiskRegionKind::Share
+                } else if node.label.ends_with("type4") {
+                    DiskRegionKind::Encrypt
+                } else {
+                    DiskRegionKind::Plain
+                }
+            } else {
+                DiskRegionKind::Unknown
+            }
+        }
+
+        fn collect(node: &InspectNode, claims: &mut Vec<DiskLayoutSegment>) {
+            if node.id.starts_with("region.conflict") {
+                if let InspectChildren::Materialized(children) = &node.children {
+                    for child in children {
+                        collect(child, claims);
+                    }
+                }
+                return;
+            }
+            claims.push(DiskLayoutSegment {
+                label: node.label.clone(),
+                start_lba: node.range.start_lba,
+                sector_count: node.range.sector_count,
+                kind: node_kind(node),
+            });
+        }
+
+        let mut claims = Vec::new();
+        if let InspectChildren::Materialized(children) = &topology.root.children {
+            for node in children {
+                collect(node, &mut claims);
+            }
+        }
+        Self::from_claims(
+            topology.root.range.sector_count,
+            claims,
+            DiskRegionKind::Unknown,
+        )
+    }
+
+    pub fn bar(&self, width: usize) -> Vec<DiskRegionKind> {
         let width = width.clamp(8, 96);
         if self.segments.is_empty() {
-            return vec![ProvisionBarKind::Free; width];
+            return vec![DiskRegionKind::Free; width];
         }
         let baseline = usize::from(self.segments.len() <= width);
         let remaining = width.saturating_sub(baseline * self.segments.len());
@@ -113,7 +318,7 @@ impl DiskLayoutModel {
         }
         cells.truncate(width);
         while cells.len() < width {
-            cells.push(ProvisionBarKind::Free);
+            cells.push(DiskRegionKind::Free);
         }
         cells
     }
@@ -134,7 +339,7 @@ impl DiskLayoutModel {
             }
             spans.push(Span::styled(
                 "━".repeat(end - start),
-                super::theme::current().partition(kind),
+                super::theme::current().disk_region(kind),
             ));
             start = end;
         }
@@ -165,6 +370,67 @@ impl DiskLayoutModel {
             })
             .collect()
     }
+
+    pub fn pane_line_count(&self, summary: &str, details: &[String]) -> usize {
+        usize::from(!summary.is_empty())
+            + 1
+            + usize::from(!self.segments.is_empty())
+            + self.segments.len()
+            + usize::from(!details.is_empty())
+            + details.len()
+    }
+
+    pub fn render_pane(&self, frame: &mut Frame<'_>, area: Rect, pane: DiskLayoutPane<'_>) {
+        let theme = super::theme::current();
+        let mut lines = Vec::<Line<'static>>::new();
+        if !pane.summary.is_empty() {
+            lines.push(Line::from(Span::styled(
+                pane.summary.to_string(),
+                theme.secondary_text(),
+            )));
+        }
+        lines.push(self.bar_line(area.width.saturating_sub(4) as usize));
+        if !self.segments.is_empty() {
+            lines.push(Line::from(""));
+        }
+        for (segment, text) in self.segments.iter().zip(self.legend_lines()) {
+            lines.push(Line::from(vec![
+                Span::styled("■ ", theme.disk_region(segment.kind)),
+                Span::styled(text, theme.muted()),
+            ]));
+        }
+        if !pane.details.is_empty() {
+            lines.push(Line::from(""));
+        }
+        for detail in pane.details {
+            let style = if detail.starts_with('✗') {
+                theme.danger()
+            } else if detail.starts_with('✓') {
+                theme.success()
+            } else if detail.starts_with("当前:") {
+                theme.accent()
+            } else {
+                theme.muted()
+            };
+            lines.push(Line::from(Span::styled(detail.clone(), style)));
+        }
+        frame.render_widget(
+            Paragraph::new(lines)
+                .block(
+                    Block::default()
+                        .borders(Borders::ALL)
+                        .border_style(if pane.focused {
+                            theme.focused_panel()
+                        } else {
+                            theme.panel()
+                        })
+                        .title(pane.title.to_string()),
+                )
+                .scroll((pane.scroll_y.min(u16::MAX as usize) as u16, 0))
+                .wrap(Wrap { trim: false }),
+            area,
+        );
+    }
 }
 
 #[cfg(test)]
@@ -182,20 +448,72 @@ mod tests {
                     label: "未知区域".into(),
                     start_lba: 0,
                     sector_count: 999_994,
-                    kind: ProvisionBarKind::Unknown,
+                    kind: DiskRegionKind::Unknown,
                 },
                 DiskLayoutSegment {
                     label: "LCE".into(),
                     start_lba: 999_994,
                     sector_count: 6,
-                    kind: ProvisionBarKind::Compatibility,
+                    kind: DiskRegionKind::Lce,
                 },
             ],
         );
         assert_eq!(model.bar(40).len(), 40);
-        assert!(model.bar(40).contains(&ProvisionBarKind::Compatibility));
+        assert!(model.bar(40).contains(&DiskRegionKind::Lce));
         assert!(model.legend_lines()[1].contains("[999994..999999] · 6 sectors · <0.01%"));
         assert!(model.legend_lines()[0].starts_with("未知区域"));
+    }
+
+    #[test]
+    fn complete_contract_rejects_holes_overlap_and_wrong_last_sector() {
+        let hole = DiskLayoutModel::new(
+            10,
+            vec![
+                DiskLayoutSegment {
+                    label: "a".into(),
+                    start_lba: 0,
+                    sector_count: 4,
+                    kind: DiskRegionKind::Protocol,
+                },
+                DiskLayoutSegment {
+                    label: "b".into(),
+                    start_lba: 5,
+                    sector_count: 5,
+                    kind: DiskRegionKind::Unknown,
+                },
+            ],
+        );
+        assert!(hole.validate_complete().unwrap_err().contains("hole"));
+
+        let overlap = DiskLayoutModel::new(
+            10,
+            vec![
+                DiskLayoutSegment {
+                    label: "a".into(),
+                    start_lba: 0,
+                    sector_count: 6,
+                    kind: DiskRegionKind::Protocol,
+                },
+                DiskLayoutSegment {
+                    label: "b".into(),
+                    start_lba: 5,
+                    sector_count: 5,
+                    kind: DiskRegionKind::Unknown,
+                },
+            ],
+        );
+        assert!(overlap.validate_complete().unwrap_err().contains("overlap"));
+
+        let short = DiskLayoutModel::new(
+            10,
+            vec![DiskLayoutSegment {
+                label: "a".into(),
+                start_lba: 0,
+                sector_count: 9,
+                kind: DiskRegionKind::Unknown,
+            }],
+        );
+        assert!(short.validate_complete().unwrap_err().contains("ends at"));
     }
 
     #[test]

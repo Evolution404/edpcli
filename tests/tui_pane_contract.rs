@@ -1,6 +1,7 @@
 use edpcli::application::inspect::{AdvancedInspectMode, AdvancedInspectWorkspace};
 use edpcli::inspect::InspectMeta;
 use edpcli::inspect_target::InspectDiskContext;
+use edpcli::tui::disk_layout::{DiskLayoutModel, DiskRegionKind};
 use edpcli::tui::pane::PaneId;
 use edpcli::tui::state::{AdvancedInspectSource, AppState, NavCommand, ProvisionKind};
 
@@ -56,6 +57,17 @@ fn provision_state() -> AppState {
     assert_eq!(state.provision_select_disk(), Some(6));
     state.provision_skip_backup();
     assert_eq!(state.provision_begin_selected(), ProvisionKind::Mode0);
+    state
+}
+
+fn plain_provision_state() -> AppState {
+    let mut state = AppState::new();
+    state.replace_devices(vec![device()]);
+    state.navigate(NavCommand::WorkspaceProvision, 20);
+    assert_eq!(state.provision_select_disk(), Some(6));
+    state.provision_skip_backup();
+    state.navigate(NavCommand::Bottom, 20);
+    assert_eq!(state.provision_begin_selected(), ProvisionKind::Plain);
     state
 }
 
@@ -163,4 +175,78 @@ fn provision_form_tab_changes_focus_without_changing_field_selection() {
     state.provision_shift_pane(true);
     assert_eq!(state.provision_focused_pane(), PaneId::ProvisionParameters);
     assert_eq!(state.provision().field_selected, selected);
+}
+
+fn assert_complete_layout(model: &DiskLayoutModel) {
+    assert!(model.total_sectors > 0);
+    assert_eq!(model.segments.first().unwrap().start_lba, 0);
+    for pair in model.segments.windows(2) {
+        assert_eq!(pair[0].end_exclusive().unwrap(), pair[1].start_lba);
+    }
+    assert_eq!(
+        model.segments.last().unwrap().end_exclusive().unwrap(),
+        model.total_sectors
+    );
+    assert!(model
+        .segments
+        .iter()
+        .all(|segment| segment.sector_count > 0));
+    model.validate_complete().unwrap();
+}
+
+#[test]
+fn inspect_disk_layout_is_complete_and_semantically_distinct() {
+    let workspace = inspect_workspace();
+    let model = DiskLayoutModel::from_topology(&workspace.topology);
+    assert_complete_layout(&model);
+    let kinds = model
+        .segments
+        .iter()
+        .map(|segment| segment.kind)
+        .collect::<Vec<_>>();
+    assert!(kinds.contains(&DiskRegionKind::Protocol));
+    assert!(kinds.contains(&DiskRegionKind::Unknown));
+    assert!(kinds.contains(&DiskRegionKind::Tail));
+}
+
+#[test]
+fn official_provision_disk_layout_covers_the_whole_physical_disk() {
+    let state = provision_state();
+    let model = state.provision_layout_model();
+    assert_complete_layout(&model);
+    assert_eq!(
+        model.total_sectors,
+        device().size / edpcli::common::SECTOR as u64
+    );
+    let kinds = model
+        .segments
+        .iter()
+        .map(|segment| segment.kind)
+        .collect::<Vec<_>>();
+    assert!(kinds.contains(&DiskRegionKind::Protocol));
+    assert!(kinds.contains(&DiskRegionKind::Reserved));
+    assert!(kinds.contains(&DiskRegionKind::Lce));
+    assert!(kinds.contains(&DiskRegionKind::Tail));
+}
+
+#[test]
+fn plain_provision_disk_layout_covers_mbr_free_and_partitions_to_last_sector() {
+    let state = plain_provision_state();
+    let model = state.provision_layout_model();
+    assert_complete_layout(&model);
+    assert_eq!(
+        model.total_sectors,
+        device().size / edpcli::common::SECTOR as u64
+    );
+    assert_eq!(model.segments[0].kind, DiskRegionKind::Reserved);
+    assert_eq!(model.segments[0].start_lba, 0);
+    assert_eq!(model.segments[0].sector_count, 1);
+    assert!(model
+        .segments
+        .iter()
+        .any(|segment| segment.kind == DiskRegionKind::Free));
+    assert!(model
+        .segments
+        .iter()
+        .any(|segment| segment.kind == DiskRegionKind::Plain));
 }

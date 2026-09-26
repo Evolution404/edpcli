@@ -355,92 +355,96 @@ pub(super) fn draw_advanced_inspect(
             };
             let disk_layout =
                 crate::tui::disk_layout::DiskLayoutModel::from_topology(&workspace.topology);
-            let layout_height = if area.height >= 18 {
-                (disk_layout.segments.len() as u16 + 4).min(area.height.saturating_sub(8))
-            } else {
-                3
-            };
             let browser = Layout::default()
                 .direction(Direction::Vertical)
                 .constraints([
                     Constraint::Length(1),
-                    Constraint::Length(layout_height),
                     Constraint::Length(1),
                     Constraint::Min(1),
                 ])
                 .split(area);
             draw_inspect_breadcrumb(frame, browser[0], state);
-            let total = disk_layout.total_sectors;
-            let gib = total as f64 * crate::common::SECTOR as f64 / 1_073_741_824.0;
-            let disk_status = match &advanced.source {
-                crate::tui::state::AdvancedInspectSource::Disk(disk) => state
-                    .devices()
-                    .iter()
-                    .find(|row| row.disk == *disk)
-                    .map(device_status)
-                    .unwrap_or_else(|| "状态未读取".into()),
-                crate::tui::state::AdvancedInspectSource::Backup(_) => "备份镜像".into(),
-            };
-            let mut layout_lines = vec![Line::from(format!(
-                "{gib:.2} GiB / {total} sectors · {} · {}",
-                safe(&workspace.source),
-                safe(&disk_status)
-            ))];
-            layout_lines.push(disk_layout.bar_line(browser[1].width.saturating_sub(4) as usize));
-            layout_lines.extend(disk_layout.legend_lines().into_iter().map(Line::from));
-            frame.render_widget(
-                Paragraph::new(layout_lines)
-                    .block(
-                        Block::default()
-                            .borders(Borders::ALL)
-                            .border_style(if advanced.panel == AdvancedInspectPanel::DiskLayout {
-                                focused_panel()
-                            } else {
-                                panel()
-                            })
-                            .title("磁盘布局"),
-                    )
-                    .wrap(Wrap { trim: false }),
-                browser[1],
-            );
             frame.render_widget(
                 Tabs::new(["磁盘布局", "结构树", "节点概览", "节点详情"])
                     .select(panel_index)
                     .style(tab())
                     .highlight_style(active_tab())
                     .divider(Span::styled(" │ ", muted())),
-                browser[2],
+                browser[1],
             );
-            let content_area = browser[3];
+            let content_area = browser[2];
             let compact = content_area.width < 92 || content_area.height < 14;
-            let (tree_area, overview_area, detail_area) = if compact {
+            let (disk_layout_area, tree_area, overview_area, detail_area) = if compact {
                 match advanced.panel {
-                    AdvancedInspectPanel::DiskLayout => (None, None, None),
-                    AdvancedInspectPanel::Tree => (Some(content_area), None, None),
-                    AdvancedInspectPanel::Overview => (None, Some(content_area), None),
-                    AdvancedInspectPanel::Detail => (None, None, Some(content_area)),
+                    AdvancedInspectPanel::DiskLayout => (Some(content_area), None, None, None),
+                    AdvancedInspectPanel::Tree => (None, Some(content_area), None, None),
+                    AdvancedInspectPanel::Overview => (None, None, Some(content_area), None),
+                    AdvancedInspectPanel::Detail => (None, None, None, Some(content_area)),
                 }
-            } else if content_area.width >= 140 {
-                let parts = Layout::default()
-                    .direction(Direction::Horizontal)
-                    .constraints([
-                        Constraint::Percentage(42),
-                        Constraint::Percentage(27),
-                        Constraint::Percentage(31),
-                    ])
-                    .split(content_area);
-                (Some(parts[0]), Some(parts[1]), Some(parts[2]))
             } else {
-                let parts = Layout::default()
-                    .direction(Direction::Horizontal)
-                    .constraints([Constraint::Percentage(46), Constraint::Percentage(54)])
-                    .split(content_area);
-                let right = Layout::default()
+                let vertical = Layout::default()
                     .direction(Direction::Vertical)
-                    .constraints([Constraint::Length(9), Constraint::Min(4)])
-                    .split(parts[1]);
-                (Some(parts[0]), Some(right[0]), Some(right[1]))
+                    .constraints([Constraint::Percentage(36), Constraint::Percentage(64)])
+                    .split(content_area);
+                let lower = if content_area.width >= 140 {
+                    Layout::default()
+                        .direction(Direction::Horizontal)
+                        .constraints([
+                            Constraint::Percentage(42),
+                            Constraint::Percentage(27),
+                            Constraint::Percentage(31),
+                        ])
+                        .split(vertical[1])
+                } else {
+                    Layout::default()
+                        .direction(Direction::Horizontal)
+                        .constraints([
+                            Constraint::Percentage(40),
+                            Constraint::Percentage(30),
+                            Constraint::Percentage(30),
+                        ])
+                        .split(vertical[1])
+                };
+                (
+                    Some(vertical[0]),
+                    Some(lower[0]),
+                    Some(lower[1]),
+                    Some(lower[2]),
+                )
             };
+
+            if let Some(layout_area) = disk_layout_area {
+                let total = disk_layout.total_sectors;
+                let gib = total as f64 * crate::common::SECTOR as f64 / 1_073_741_824.0;
+                let disk_status = match &advanced.source {
+                    crate::tui::state::AdvancedInspectSource::Disk(disk) => state
+                        .devices()
+                        .iter()
+                        .find(|row| row.disk == *disk)
+                        .map(device_status)
+                        .unwrap_or_else(|| "状态未读取".into()),
+                    crate::tui::state::AdvancedInspectSource::Backup(_) => "备份镜像".into(),
+                };
+                let summary = format!(
+                    "{gib:.2} GiB / {total} sectors · {} · {}",
+                    safe(&workspace.source),
+                    safe(&disk_status)
+                );
+                disk_layout.render_pane(
+                    frame,
+                    layout_area,
+                    crate::tui::disk_layout::DiskLayoutPane {
+                        title: "磁盘布局",
+                        summary: &summary,
+                        details: &[],
+                        focused: advanced.panel == AdvancedInspectPanel::DiskLayout,
+                        scroll_y: state
+                            .pane_viewport(crate::tui::pane::PaneId::InspectDiskLayout)
+                            .scroll_y
+                            .offset,
+                    },
+                );
+            }
 
             let tree_focus = advanced.panel == AdvancedInspectPanel::Tree;
             if let Some(tree_area) = tree_area {
@@ -693,18 +697,24 @@ pub(super) fn draw_advanced_inspect(
             }
 
             if let Some(overview_area) = overview_area {
+                let overview_scroll = state
+                    .pane_viewport(crate::tui::pane::PaneId::InspectOverview)
+                    .scroll_y
+                    .offset
+                    .min(overview_lines.len().saturating_sub(1));
                 frame.render_widget(
                     Paragraph::new(overview_lines)
                         .block(
                             Block::default()
                                 .borders(Borders::ALL)
                                 .border_style(if advanced.panel == AdvancedInspectPanel::Overview {
-                                    accent()
+                                    focused_panel()
                                 } else {
-                                    muted()
+                                    panel()
                                 })
                                 .title("节点概览"),
                         )
+                        .scroll((overview_scroll.min(u16::MAX as usize) as u16, 0))
                         .wrap(Wrap { trim: false }),
                     overview_area,
                 );
@@ -712,7 +722,10 @@ pub(super) fn draw_advanced_inspect(
 
             if let Some(detail_area) = detail_area {
                 let detail_focus = advanced.panel == AdvancedInspectPanel::Detail;
-                let scroll = advanced.detail_scroll.min(u16::MAX as usize) as u16;
+                let detail_offset = state
+                    .pane_viewport(crate::tui::pane::PaneId::InspectDetail)
+                    .scroll_y
+                    .offset;
                 let field_item = selected_row
                     .filter(|row| row.kind == InspectNodeKind::Sector)
                     .and_then(|row| {
@@ -754,7 +767,10 @@ pub(super) fn draw_advanced_inspect(
                         &content_widths,
                         state.table_scroll_offset(TableKind::InspectFields),
                     );
-                    let rows = values.iter().map(|values| {
+                    let visible_rows = detail_area.height.saturating_sub(3).max(1) as usize;
+                    let row_start = detail_offset.min(values.len().saturating_sub(1));
+                    let row_end = row_start.saturating_add(visible_rows).min(values.len());
+                    let rows = values[row_start..row_end].iter().map(|values| {
                         TableRow::new(
                             viewport
                                 .columns
@@ -787,25 +803,37 @@ pub(super) fn draw_advanced_inspect(
                         Table::new(rows, viewport.widths()).header(header).block(
                             Block::default()
                                 .borders(Borders::ALL)
-                                .border_style(if detail_focus { accent() } else { muted() })
+                                .border_style(if detail_focus {
+                                    focused_panel()
+                                } else {
+                                    panel()
+                                })
                                 .title(format!(
-                                    "节点详情 · h/l 横向滚动 · {}",
+                                    "节点详情 · 行 {}–{} / {} · 列 {}",
+                                    if values.is_empty() { 0 } else { row_start + 1 },
+                                    row_end,
+                                    values.len(),
                                     viewport.position_label()
                                 )),
                         ),
                         detail_area,
                     );
                 } else {
+                    let detail_scroll = detail_offset.min(detail_lines.len().saturating_sub(1));
                     frame.render_widget(
                         Paragraph::new(detail_lines)
                             .block(
                                 Block::default()
                                     .borders(Borders::ALL)
-                                    .border_style(if detail_focus { accent() } else { muted() })
+                                    .border_style(if detail_focus {
+                                        focused_panel()
+                                    } else {
+                                        panel()
+                                    })
                                     .title("节点详情"),
                             )
                             .wrap(Wrap { trim: false })
-                            .scroll((scroll, 0)),
+                            .scroll((detail_scroll.min(u16::MAX as usize) as u16, 0)),
                         detail_area,
                     );
                 }

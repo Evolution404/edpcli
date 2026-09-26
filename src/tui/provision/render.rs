@@ -502,59 +502,27 @@ pub(super) fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, sta
                 form_area,
             );
 
-            let bar_width = layout_area.width.saturating_sub(10) as usize;
-            let bar_line = state
-                .provision_layout_model()
-                .bar_line_with_label(bar_width, "比例 ");
-            let legend_line = if provision.kind == ProvisionKind::Plain {
-                Line::from(vec![
-                    Span::styled("■", partition_style(ProvisionBarKind::Plain)),
-                    Span::raw(" 普通分区  "),
-                    Span::styled("■", partition_style(ProvisionBarKind::Free)),
-                    Span::raw(" 空闲"),
-                ])
-            } else {
-                Line::from(vec![
-                    Span::styled("■", partition_style(ProvisionBarKind::Boot)),
-                    Span::raw(" 启动  "),
-                    Span::styled("■", partition_style(ProvisionBarKind::Share)),
-                    Span::raw(" 交换/二合一  "),
-                    Span::styled("■", partition_style(ProvisionBarKind::Encrypt)),
-                    Span::raw(" 保密  "),
-                    Span::styled("■", partition_style(ProvisionBarKind::Compatibility)),
-                    Span::raw(" 兼容  "),
-                    Span::styled("■", partition_style(ProvisionBarKind::Free)),
-                    Span::raw(" 空闲"),
-                ])
-            };
-            let raw_layout_lines = state.provision_layout_editor_lines();
-            let mut layout_lines = Vec::new();
-            for (index, line) in raw_layout_lines.into_iter().enumerate() {
-                if index == 3 {
-                    layout_lines.push(bar_line.clone());
-                    layout_lines.push(legend_line.clone());
-                }
-                let style = if line.starts_with("✗") {
-                    danger()
-                } else if line.starts_with("✓") {
-                    success()
-                } else if line.starts_with("当前:") {
-                    accent()
-                } else {
-                    muted()
-                };
-                layout_lines.push(Line::from(Span::styled(safe(&line), style)));
-            }
-            frame.render_widget(
-                Paragraph::new(layout_lines)
-                    .block(
-                        Block::default()
-                            .borders(Borders::ALL)
-                            .border_style(focused_panel())
-                            .title("实时布局"),
-                    )
-                    .wrap(Wrap { trim: false }),
+            let layout_model = state.provision_layout_model();
+            let layout_details = state.provision_layout_editor_lines();
+            let layout_summary = format!(
+                "{} · {} sectors",
+                provision.kind.title(),
+                layout_model.total_sectors
+            );
+            layout_model.render_pane(
+                frame,
                 layout_area,
+                crate::tui::disk_layout::DiskLayoutPane {
+                    title: "磁盘布局",
+                    summary: &layout_summary,
+                    details: &layout_details,
+                    focused: state.provision_focused_pane()
+                        == crate::tui::pane::PaneId::ProvisionDiskLayout,
+                    scroll_y: state
+                        .pane_viewport(crate::tui::pane::PaneId::ProvisionDiskLayout)
+                        .scroll_y
+                        .offset,
+                },
             );
         }
         ProvisionStage::Planning => {

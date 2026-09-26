@@ -272,6 +272,114 @@ impl AppState {
         }
     }
 
+    pub fn advanced_inspect_focused_content_len(&self) -> usize {
+        use crate::application::inspect_tree::InspectNodeKind;
+        use crate::tui::pane::PaneId;
+
+        let Some(state) = self
+            .advanced_inspect
+            .as_ref()
+            .filter(|state| state.stage == AdvancedInspectStage::Browser)
+        else {
+            return 0;
+        };
+        match state.pane_focus.focused() {
+            PaneId::InspectTree => self.advanced_inspect_tree_rows().len(),
+            PaneId::InspectDiskLayout => state
+                .result
+                .as_ref()
+                .map(|workspace| {
+                    crate::tui::disk_layout::DiskLayoutModel::from_topology(&workspace.topology)
+                        .pane_line_count("summary", &[])
+                })
+                .unwrap_or(0),
+            PaneId::InspectOverview => {
+                let rows = self.advanced_inspect_tree_rows();
+                let Some(row) = rows.get(state.tree_selected) else {
+                    return 2;
+                };
+                8 + usize::from(row.range.byte_range.is_some()) + usize::from(row.decoder.is_some())
+            }
+            PaneId::InspectDetail => {
+                let rows = self.advanced_inspect_tree_rows();
+                let Some(row) = rows.get(state.tree_selected) else {
+                    return 1;
+                };
+                let mut count = match row.kind {
+                    InspectNodeKind::Sector => state
+                        .result
+                        .as_ref()
+                        .and_then(|workspace| {
+                            workspace
+                                .items
+                                .iter()
+                                .find(|item| item.lba == row.range.start_lba)
+                        })
+                        .map(|item| {
+                            let body = if !item.fields.is_empty() {
+                                item.fields
+                                    .iter()
+                                    .map(|field| 1 + field.children.len())
+                                    .sum::<usize>()
+                            } else if let Some(meta_text) = &item.meta_text {
+                                meta_text.lines().count()
+                            } else {
+                                1
+                            };
+                            body + item.notes.len() + 1
+                        })
+                        .unwrap_or(2),
+                    InspectNodeKind::Field => {
+                        if self.advanced_inspect_selected_field().is_some() {
+                            4
+                        } else {
+                            1
+                        }
+                    }
+                    InspectNodeKind::Group => 2,
+                    _ => 2,
+                };
+                if state.prompt.is_some() {
+                    count += 5;
+                }
+                if state.message.is_some() {
+                    count += 2;
+                }
+                count.max(1)
+            }
+            _ => 0,
+        }
+    }
+
+    pub fn advanced_inspect_focused_top(&mut self) {
+        let Some(pane) = self.advanced_inspect_focused_pane() else {
+            return;
+        };
+        if pane == crate::tui::pane::PaneId::InspectTree {
+            self.advanced_inspect_tree_top();
+        } else if let Some(state) = self.advanced_inspect.as_mut() {
+            state.pane_focus.viewport_mut(pane).scroll_y.top();
+        }
+    }
+
+    pub fn advanced_inspect_focused_bottom(&mut self) {
+        let Some(pane) = self.advanced_inspect_focused_pane() else {
+            return;
+        };
+        if pane == crate::tui::pane::PaneId::InspectTree {
+            self.advanced_inspect_tree_bottom();
+            return;
+        }
+        let content_len = self.advanced_inspect_focused_content_len();
+        if let Some(state) = self.advanced_inspect.as_mut() {
+            state
+                .pane_focus
+                .viewport_mut(pane)
+                .scroll_y
+                .bottom(content_len, 1);
+        }
+    }
+
     pub fn advanced_inspect_move_focused_vertical(
         &mut self,
         delta: isize,

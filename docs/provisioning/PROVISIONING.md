@@ -4100,7 +4100,7 @@ Tab:
 - P1 已新增统一 `PaneId / PaneFocus / PaneViewport / VerticalViewport`，Inspect 使用 `DiskLayout / Tree / Overview / Detail` 四 Pane，Provision Form 使用 `Parameters / DiskLayout`，Review 预留 `Summary / DiskLayout / Changes`；`NavigationFrame` 可保存/恢复 Pane focus + viewport。
 - `Tab/Shift-Tab` 已按当前页面 Pane 顺序切换，`Ctrl-w h/j/k/l` 已接空间邻接 resolver；Inspect 与 Provision 的 `j/k` 已改为按 focused Pane 分发，Provision `DiskLayout` focused 时不会再修改 `field_selected`。
 - Pane 行为从 `provision/state.rs` 拆入 `provision/pane.rs`，保持 Provision orchestration 模块边界；正式 fast gate 热缓存复跑为 4 suites / 6 artifacts、0 failures、4.49s。首次冷缓存复跑所有 suite 也为 0 failures，仅因 50.12s 超过 45s timing budget 退出，未发现功能或架构回归。
-- 尚未实施 P2～P8；第 12 章继续保持 PLAN ONLY，未修改任何 LBA0～12/LCE 协议语义或写盘安全链。
+- 第 12 章继续保持 PLAN ONLY；本章实现始终未修改任何 LBA0～12/LCE 协议语义或写盘安全链。
 
 ### 13.27 Phase P2：Full-Disk DiskLayoutModel
 
@@ -4136,6 +4136,15 @@ Tab:
 - InspectFields Table 增加 row viewport；
 - j/k、Ctrl-u/d、PageUp/Down、gg/G 完整支持；
 - 标题显示 row + column position。
+
+**实施状态（2026-09-26）：P2～P5 COMPLETE。**
+
+- P2：`DiskLayoutModel` 已升级为 `[0..total_sectors)` 连续物理盘契约，新增 `DiskRegionKind` 与 `validate_complete/from_claims`；Inspect、官方 Provision、Plain 三类 adapter 均覆盖 LBA0 到最后 sector，并把 `Protocol / Reserved / Unknown / Free / LCE / Tail` 分离。新增 hole / overlap / last-sector 门禁。
+- P3：新增共享 `DiskLayoutPane` renderer，统一 summary、比例条、语义颜色、闭区间 range、百分比、legend、details、focus border 与 vertical viewport；Inspect/Provision 已删除各自的磁盘布局拼接路径，Provision 旧 `partition_style` helper 也已移除。
+- P4：Inspect 已成为 `DiskLayout / Tree / Overview / Detail` 四个真实 Pane；宽屏四 Pane 同显，窄屏只显示 focused Pane，Tab/Shift-Tab 与 `Ctrl-w h/j/k/l` 均使用统一 PaneFocus，focus/viewport 状态不依赖终端尺寸。
+- P5：Overview 与 Detail Paragraph 使用独立 `PaneViewport.scroll_y`；Detail 字段 Table 新增 vertical row viewport，并保留原有 h/l column viewport，标题显示 `行 start–end / total · 列 position`；`j/k`、`Ctrl-u/d`、`PageUp/Down`、`gg/G` 已按 focused Pane 分发并使用真实内容长度。30 行字段表回归可滚动到第 21 行且首行退出视图。
+- 正式 `scripts/test-fast.sh`：4 suites / 6 artifacts，0 failures，13.17s；P2/P5 专项以及共享 renderer 的 Inspect/Provision 生命周期测试均通过。
+- 下一阶段仅进入 P6，不开始第 12 章。
 
 ### 13.31 Phase P6：Sector Inspector 解耦
 

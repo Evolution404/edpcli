@@ -292,30 +292,52 @@ impl AppState {
 
     pub fn provision_layout_model(&self) -> crate::tui::disk_layout::DiskLayoutModel {
         use crate::provision::PartitionRole;
-        use crate::tui::disk_layout::{DiskLayoutModel, DiskLayoutSegment};
+        use crate::tui::disk_layout::{DiskLayoutModel, DiskLayoutSegment, DiskRegionKind};
 
         if self.provision.kind == ProvisionKind::Plain {
             let Ok(plan) = self.provision_plain_plan() else {
                 return DiskLayoutModel::new(0, Vec::new());
             };
-            let mut segments = Vec::new();
+            let mut segments = vec![DiskLayoutSegment {
+                label: "MBR 保留扇区".into(),
+                start_lba: 0,
+                sector_count: 1,
+                kind: DiskRegionKind::Reserved,
+            }];
             segments.extend(plan.gaps.iter().map(|gap| DiskLayoutSegment {
                 label: "空闲".into(),
                 start_lba: gap.start_lba,
                 sector_count: gap.sector_count,
-                kind: ProvisionBarKind::Free,
+                kind: DiskRegionKind::Free,
             }));
             segments.extend(plan.partitions.iter().enumerate().map(|(index, part)| {
                 DiskLayoutSegment {
-                    label: format!("普通分区[{}]", index),
+                    label: format!("普通分区[{}]", index + 1),
                     start_lba: part.start_lba,
                     sector_count: part.sector_count,
-                    kind: ProvisionBarKind::Plain,
+                    kind: DiskRegionKind::Plain,
                 }
             }));
-            return DiskLayoutModel::new(plan.total_sectors, segments);
+            let model = DiskLayoutModel::new(plan.total_sectors, segments);
+            debug_assert!(model.validate_complete().is_ok());
+            return model;
         }
 
+        let total_sectors = self
+            .selected_device()
+            .map(|row| row.size / crate::common::SECTOR as u64)
+            .unwrap_or_default();
+        if total_sectors == 0 {
+            return DiskLayoutModel::new(0, Vec::new());
+        }
+        let Some(lce) =
+            crate::protocol::lba7_compat::locate_lba7_compatibility_extent_from_verified_usb_capacity(
+                total_sectors,
+                crate::common::SECTOR as u32,
+            )
+        else {
+            return DiskLayoutModel::new(0, Vec::new());
+        };
         let Ok((resolved, _)) = self.provision_resolved_prefill() else {
             return DiskLayoutModel::new(0, Vec::new());
         };
@@ -323,49 +345,75 @@ impl AppState {
             return DiskLayoutModel::new(0, Vec::new());
         };
         parts.sort_by_key(|part| part.start_lba);
-        let usable_start = crate::provision::OFFICIAL_PARTITION_START_SECTOR;
-        let usable_sectors = resolved.usable_end_lba.saturating_sub(usable_start);
-        if usable_sectors == 0 {
-            return DiskLayoutModel::new(0, Vec::new());
-        }
 
-        let mut segments = Vec::<DiskLayoutSegment>::new();
-        let mut cursor = usable_start;
-        for part in &parts {
-            if part.start_lba > cursor {
-                segments.push(DiskLayoutSegment {
-                    label: "空闲".into(),
-                    start_lba: cursor,
-                    sector_count: part.start_lba.saturating_sub(cursor),
-                    kind: ProvisionBarKind::Free,
+        let mut claims = Vec::<DiskLayoutSegment>::new();
+        let mut push = |label: &str, start_lba: u64, sector_count: u64, kind: DiskRegionKind| {
+            let count = sector_count.min(total_sectors.saturating_sub(start_lba));
+            if count > 0 && start_lba < total_sectors {
+                claims.push(DiskLayoutSegment {
+                    label: label.into(),
+                    start_lba,
+                    sector_count: count,
+                    kind,
                 });
             }
+        };
+        push("EDP 主协议区", 0, 13, DiskRegionKind::Protocol);
+        push(
+            "协议后保留区",
+            13,
+            crate::provision::OFFICIAL_PARTITION_START_SECTOR.saturating_sub(13),
+            DiskRegionKind::Reserved,
+        );
+        let usable_start = crate::provision::OFFICIAL_PARTITION_START_SECTOR;
+        if resolved.usable_end_lba > usable_start {
+            push(
+                "可分配空间",
+                usable_start,
+                resolved.usable_end_lba - usable_start,
+                DiskRegionKind::Free,
+            );
+        }
+        for part in &parts {
             let kind = match part.role {
-                PartitionRole::Boot => ProvisionBarKind::Boot,
-                PartitionRole::Share | PartitionRole::BootShareCombined => ProvisionBarKind::Share,
-                PartitionRole::Encrypt => ProvisionBarKind::Encrypt,
-                PartitionRole::CompatibilityReserve => ProvisionBarKind::Compatibility,
+                PartitionRole::Boot => DiskRegionKind::Boot,
+                PartitionRole::Share => DiskRegionKind::Share,
+                PartitionRole::BootShareCombined => DiskRegionKind::Combined,
+                PartitionRole::Encrypt => DiskRegionKind::Encrypt,
+                PartitionRole::CompatibilityReserve => DiskRegionKind::Compatibility,
             };
-            segments.push(DiskLayoutSegment {
-                label: part.role.label().into(),
-                start_lba: part.start_lba,
-                sector_count: part.sector_count,
-                kind,
-            });
-            cursor = part.start_lba.saturating_add(part.sector_count);
+            push(part.role.label(), part.start_lba, part.sector_count, kind);
         }
-        if cursor < resolved.usable_end_lba {
-            segments.push(DiskLayoutSegment {
-                label: "空闲".into(),
-                start_lba: cursor,
-                sector_count: resolved.usable_end_lba.saturating_sub(cursor),
-                kind: ProvisionBarKind::Free,
-            });
+        push(
+            "LCE legacy compatibility extent",
+            lce.start_lba,
+            lce.size_sectors,
+            DiskRegionKind::Lce,
+        );
+        let lce_end = lce.start_lba.saturating_add(lce.size_sectors);
+        if lce_end < total_sectors {
+            push(
+                "LCE 后保留区",
+                lce_end,
+                total_sectors - lce_end,
+                DiskRegionKind::Reserved,
+            );
         }
-        DiskLayoutModel::new(usable_sectors, segments)
+        let tail_count = total_sectors.min(crate::backup_metadata::DEVICE_TAIL_WINDOW_SECTORS);
+        push(
+            "盘尾区域",
+            total_sectors - tail_count,
+            tail_count,
+            DiskRegionKind::Tail,
+        );
+
+        DiskLayoutModel::from_claims(total_sectors, claims, DiskRegionKind::Reserved)
     }
 
-    pub fn provision_layout_bar(&self, width: usize) -> Vec<ProvisionBarKind> {
+    pub fn provision_layout_bar(
+        &self,
+        width: usize,
+    ) -> Vec<crate::tui::disk_layout::DiskRegionKind> {
         self.provision_layout_model().bar(width)
     }
 }

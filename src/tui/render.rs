@@ -11,8 +11,8 @@ use ratatui::{
 };
 
 use super::state::{
-    AppState, InputMode, ProvisionBarKind, ProvisionKind, ProvisionPrepared, ProvisionStage,
-    WizardStage, Workspace, WriteKind,
+    AppState, InputMode, ProvisionKind, ProvisionPrepared, ProvisionStage, WizardStage, Workspace,
+    WriteKind,
 };
 use super::{animation, animation::CoreMode};
 
@@ -240,10 +240,6 @@ fn input_focused() -> Style {
 
 fn provision_kind_style(kind: ProvisionKind) -> Style {
     super::theme::current().provision_kind(kind)
-}
-
-fn partition_style(kind: ProvisionBarKind) -> Style {
-    super::theme::current().partition(kind)
 }
 
 fn device_status_style(row: &crate::disk_scan::Row) -> Style {

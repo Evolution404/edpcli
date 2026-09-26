@@ -209,9 +209,10 @@ fn wide_provision_form_uses_two_columns_and_compact_partition_rows() {
         .map(|row| row.replace(' ', ""))
         .collect::<Vec<_>>();
 
-    assert!(compact_text.contains("实时布局"), "{text}");
-    assert!(compact_text.contains("最大可设"), "{text}");
-    assert!(compact_text.contains("还能增加"), "{text}");
+    assert!(compact_text.contains("磁盘布局"), "{text}");
+    assert!(compact_text.contains("EDP主协议区"), "{text}");
+    assert!(compact_text.contains("LCE"), "{text}");
+    assert!(compact_text.contains("盘尾区域"), "{text}");
     assert!(
         compact_rows
             .iter()
@@ -271,8 +272,8 @@ fn wide_provision_form_uses_two_columns_and_compact_partition_rows() {
 
     let ratio_row = cells
         .chunks(width as usize)
-        .find(|row| row.iter().any(|cell| cell.symbol() == "比"))
-        .expect("ratio row");
+        .find(|row| row.iter().any(|cell| cell.symbol() == "━"))
+        .expect("shared disk layout ratio row");
     assert!(ratio_row
         .iter()
         .any(|cell| cell.style().fg == Some(palette.partition_boot)));

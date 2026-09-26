@@ -999,18 +999,24 @@ fn run_loop(resume: Option<state::WriteIntent>) -> io::Result<LoopExit> {
                                             state.set_notice(message);
                                         }
                                     }
-                                    TuiAction::MoveUp => state
-                                        .advanced_inspect_move_focused_vertical(
+                                    TuiAction::MoveUp => {
+                                        let content_len =
+                                            state.advanced_inspect_focused_content_len();
+                                        state.advanced_inspect_move_focused_vertical(
                                             -1,
-                                            viewport_height,
-                                            usize::MAX,
-                                        ),
-                                    TuiAction::MoveDown => state
-                                        .advanced_inspect_move_focused_vertical(
                                             1,
-                                            viewport_height,
-                                            usize::MAX,
-                                        ),
+                                            content_len,
+                                        );
+                                    }
+                                    TuiAction::MoveDown => {
+                                        let content_len =
+                                            state.advanced_inspect_focused_content_len();
+                                        state.advanced_inspect_move_focused_vertical(
+                                            1,
+                                            1,
+                                            content_len,
+                                        );
+                                    }
                                     TuiAction::TableScrollLeft | TuiAction::TableScrollRight => {
                                         state.scroll_table(
                                             crate::tui::table_layout::TableKind::InspectFields,
@@ -1023,8 +1029,8 @@ fn run_loop(resume: Option<state::WriteIntent>) -> io::Result<LoopExit> {
                                     TuiAction::MoveRight if role == keymap::WidgetRole::Tree => {
                                         state.advanced_inspect_expand_or_child();
                                     }
-                                    TuiAction::Top => state.advanced_inspect_tree_top(),
-                                    TuiAction::Bottom => state.advanced_inspect_tree_bottom(),
+                                    TuiAction::Top => state.advanced_inspect_focused_top(),
+                                    TuiAction::Bottom => state.advanced_inspect_focused_bottom(),
                                     TuiAction::Open => state.advanced_inspect_toggle_selected(),
                                     TuiAction::Activate => {
                                         open_advanced_inspect_selection(&mut state, &mut tasks);
@@ -1049,18 +1055,40 @@ fn run_loop(resume: Option<state::WriteIntent>) -> io::Result<LoopExit> {
                                     }
                                     TuiAction::HalfPageUp => {
                                         let delta = -((viewport_height / 2).max(1) as isize);
+                                        let content_len =
+                                            state.advanced_inspect_focused_content_len();
                                         state.advanced_inspect_move_focused_vertical(
                                             delta,
-                                            viewport_height,
-                                            usize::MAX,
+                                            1,
+                                            content_len,
                                         );
                                     }
                                     TuiAction::HalfPageDown => {
                                         let delta = (viewport_height / 2).max(1) as isize;
+                                        let content_len =
+                                            state.advanced_inspect_focused_content_len();
                                         state.advanced_inspect_move_focused_vertical(
                                             delta,
-                                            viewport_height,
-                                            usize::MAX,
+                                            1,
+                                            content_len,
+                                        );
+                                    }
+                                    TuiAction::PageUp => {
+                                        let content_len =
+                                            state.advanced_inspect_focused_content_len();
+                                        state.advanced_inspect_move_focused_vertical(
+                                            -(viewport_height.max(1) as isize),
+                                            1,
+                                            content_len,
+                                        );
+                                    }
+                                    TuiAction::PageDown => {
+                                        let content_len =
+                                            state.advanced_inspect_focused_content_len();
+                                        state.advanced_inspect_move_focused_vertical(
+                                            viewport_height.max(1) as isize,
+                                            1,
+                                            content_len,
                                         );
                                     }
                                     TuiAction::Back => {

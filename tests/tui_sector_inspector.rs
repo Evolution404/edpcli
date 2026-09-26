@@ -259,6 +259,57 @@ fn inspect_subworkspace_cycle_preserves_sector_cursor_and_return_target() {
 }
 
 #[test]
+fn detail_field_table_has_vertical_row_viewport_and_row_column_position() {
+    use edpcli::tui::pane::PaneId;
+
+    let mut entry = item(0, true);
+    entry.fields = (0..30)
+        .map(|index| InspectField {
+            range: AbsoluteByteRange {
+                start: index,
+                end_exclusive: index + 1,
+            },
+            field_type: InspectFieldType::Identity,
+            raw: vec![index as u8],
+            decoded: vec![index as u8],
+            status: InspectFieldStatus::Known,
+            label: format!("Field{index:02}"),
+            value: format!("value-{index:02}"),
+            style: FieldStyle::Identity,
+            group: None,
+            children: Vec::new(),
+        })
+        .collect();
+
+    let mut state = AppState::new();
+    assert!(state.begin_advanced_inspect(AdvancedInspectSource::Disk(6)));
+    state.advanced_inspect_finish(Ok(workspace(vec![entry])));
+    select_protocol_lba0(&mut state);
+    state.advanced_inspect_focus_pane(PaneId::InspectDetail);
+    state
+        .pane_viewport_mut(PaneId::InspectDetail)
+        .scroll_y
+        .offset = 20;
+
+    let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
+    terminal.draw(|frame| render::draw(frame, &state)).unwrap();
+    let text = terminal
+        .backend()
+        .buffer()
+        .content()
+        .iter()
+        .map(|cell| cell.symbol())
+        .collect::<String>()
+        .replace(' ', "");
+
+    assert!(text.contains("行21"), "{text}");
+    assert!(text.contains("/30"), "{text}");
+    assert!(text.contains("列"), "{text}");
+    assert!(text.contains("Field20"), "{text}");
+    assert!(!text.contains("Field00"), "{text}");
+}
+
+#[test]
 fn escape_pops_sector_then_inspect_without_exiting_app() {
     use edpcli::tui::state::{NavCommand, StateEffect};
     let mut state = AppState::new();
