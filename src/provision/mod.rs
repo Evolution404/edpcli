@@ -6,6 +6,7 @@
 
 mod filesystem;
 mod generate;
+mod key_domain;
 mod keys;
 mod layout;
 mod lce;
@@ -22,6 +23,10 @@ pub use filesystem::{
     OfficialFilesystemFormat, PartitionFilesystemImage, SparseFilesystemImage,
 };
 pub use generate::{generate_image, generate_official_image, ProvisionEntropy};
+pub use key_domain::{
+    KeyDomainRole, KeyDomainSecretPair, KeyDomainSecrets, SecretBytes, SourcePasswordKnowledge,
+    TargetPasswordPolicy, DEFAULT_KEY_DOMAIN_PASSWORD,
+};
 pub use keys::{
     wrap_file_key, wrap_legacy_lba7_file_key, FileKeyWrapMode, LegacyLba7KeyMaterial,
     ProvisionKeyMaterial,
