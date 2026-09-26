@@ -956,7 +956,7 @@ impl TargetProvisionPlan {
         mode: OfficialPartitionMode,
         targets: &[TargetPartitionGeometry],
         usable_end_lba: u64,
-        password: &[u8],
+        key_domains: &super::KeyDomainSecrets,
     ) -> Result<Self, String> {
         if targets.len() != mode.partition_types().len() {
             return Err("target partition count does not match official mode".into());
@@ -986,7 +986,11 @@ impl TargetProvisionPlan {
                         let key_ok = if record.lba12.need_encrypt == 0 {
                             true
                         } else {
-                            record.verified_sm4_file_key(password).is_ok()
+                            key_domains
+                                .source_password(target.role)
+                                .is_some_and(|password| {
+                                    record.verified_sm4_file_key(password).is_ok()
+                                })
                         };
                         if key_ok {
                             action = PartitionAction::PreserveExact;
