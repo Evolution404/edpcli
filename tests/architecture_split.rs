@@ -573,3 +573,75 @@ fn domain_and_application_import_direction_is_guarded() {
         "provision validator must not depend on inspect presentation"
     );
 }
+
+#[test]
+fn chapter_15_identity_write_boundaries_remain_separate() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let source = |path: &str| {
+        fs::read_to_string(root.join(path)).unwrap_or_else(|error| panic!("read {path}: {error}"))
+    };
+    let restore = source("src/application/write.rs");
+    let selector = source("src/selectors.rs");
+    let observer = source("src/application/media_identity_observer.rs");
+    let matcher = source("src/application/media_identity.rs");
+    let edpb = source("src/edpb.rs");
+    let backup_writer = source("src/diskio/backup_create.rs");
+    let lineage = source("src/application/provision/identity_lineage.rs");
+
+    let authorize = restore
+        .split("fn authorize_restore(")
+        .nth(1)
+        .and_then(|tail| tail.split("pub(crate) fn read_image(").next())
+        .expect("restore authorization boundary");
+    assert!(authorize.contains("RestoreAuthorizationPolicy::evaluate"));
+    assert!(!authorize.contains("BackupAffinityPolicy"));
+    assert!(!authorize.contains("identity_grade >="));
+    assert!(!selector.contains("for_onlyid"));
+    assert!(!selector.contains("matches_onlyid"));
+    assert!(!restore.contains("for_onlyid"));
+    assert!(!restore.contains("matches_onlyid"));
+
+    let writer = edpb
+        .split("const LEGACY_HARDWARE_SERIAL_NOTE_PREFIX")
+        .next()
+        .expect("EDPB writer before legacy adapter");
+    assert!(!writer.contains("hardware_serial_sha256="));
+    assert!(!backup_writer.contains("hardware_serial_sha256="));
+    assert!(edpb.contains("fn legacy_hardware_serial_digest("));
+    assert!(edpb.contains("edpb.manifest.v2"));
+
+    for forbidden in ["prepare_write(", "reopen_rdwr(", "write_sector("] {
+        assert!(
+            !observer.contains(forbidden),
+            "observer contains {forbidden}"
+        );
+        assert!(!matcher.contains(forbidden), "matcher contains {forbidden}");
+    }
+    assert!(observer.contains("MediaIdentitySnapshot::plain("));
+    assert!(lineage.contains("backup_dir.join(\".edpcli/identity-lineage/v1\")"));
+    assert!(!lineage.contains("write_sector("));
+
+    for path in [
+        "src/tui/devices/render.rs",
+        "src/tui/backups/render.rs",
+        "src/tui/inspect/render.rs",
+    ] {
+        let renderer = source(path);
+        for forbidden in [
+            "FileDev::open_",
+            "verify_file(",
+            "read_raw_protocol(",
+            "find_backups(",
+            "observe_media_identity_readonly(",
+        ] {
+            assert!(!renderer.contains(forbidden), "{path} contains {forbidden}");
+        }
+    }
+
+    let prepare = source("src/application/provision/prepare.rs");
+    let commit = source("src/application/provision/commit.rs");
+    assert!(prepare.contains("RegionDisposition::Migrate =>"));
+    assert!(commit.contains("RegionDisposition::Migrate =>"));
+    assert!(prepare.contains("K6"));
+    assert!(commit.contains("unsupported"));
+}

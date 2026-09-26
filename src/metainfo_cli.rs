@@ -78,6 +78,16 @@ fn backup_flow(opts: InfoOpts) -> i32 {
     };
     let source_label = path.display().to_string();
     let manifest = &verified.manifest;
+    let identity = match crate::edpb::canonical_media_identity(manifest) {
+        Ok(identity) => identity,
+        Err(message) => {
+            eprintln!(
+                "{}",
+                crate::ui::red(&format!("错误: EDPB 身份证据无效: {message}"))
+            );
+            return EXIT_BACKUP;
+        }
+    };
     let mut inspect_meta = SemanticContext {
         device_id: Some(manifest.device.device_id.clone()),
         vid: Some(manifest.device.vid.clone()),
@@ -88,28 +98,35 @@ fn backup_flow(opts: InfoOpts) -> i32 {
     if let Some(device_id) = opts.device_id {
         inspect_meta.device_id = Some(device_id);
     }
-    let summary = match metainfo::summarize_backup(&path, &inspect_meta) {
-        Ok(summary) => summary,
-        Err(e) => {
-            eprintln!(
-                "{}",
-                crate::ui::red(&format!(
-                    "错误: 读取备份元信息失败 {}: {}",
-                    path.display(),
-                    e
-                ))
-            );
-            return EXIT_IO;
-        }
-    };
+    let summary =
+        if identity.protocol.provision_kind == Some(crate::provision::DiskProvisionKind::Plain) {
+            metainfo::MetaInfoSummary::plain(
+                Some(manifest.device.vid.clone()),
+                Some(manifest.device.pid.clone()),
+                manifest.geometry.capacity_bytes,
+            )
+        } else {
+            match metainfo::summarize_backup(&path, &inspect_meta) {
+                Ok(summary) => summary,
+                Err(e) => {
+                    eprintln!(
+                        "{}",
+                        crate::ui::red(&format!(
+                            "错误: 读取备份元信息失败 {}: {}",
+                            path.display(),
+                            e
+                        ))
+                    );
+                    return EXIT_IO;
+                }
+            }
+        };
     print_summary(&source_label, &summary, BackupSummary::File(&path));
-    if let Ok(identity) = crate::edpb::canonical_media_identity(manifest) {
-        let identity_view =
-            crate::application::identity::CanonicalIdentityProjection::from_snapshot(&identity);
-        println!("介质识别：{}", identity_view.status());
-        for line in identity_view.evidence_lines() {
-            println!("  {line}");
-        }
+    let identity_view =
+        crate::application::identity::CanonicalIdentityProjection::from_snapshot(&identity);
+    println!("介质识别：{}", identity_view.status());
+    for line in identity_view.evidence_lines() {
+        println!("  {line}");
     }
     EXIT_OK
 }
@@ -189,16 +206,6 @@ fn disk_flow(runner: &dyn CmdRunner, mut opts: InfoOpts) -> i32 {
         size_bytes,
         onlyid: onlyid.clone(),
     };
-    let summary = match metainfo::summarize(&inspect_meta, |lba| reader.read_sector(lba)) {
-        Ok(summary) => summary,
-        Err(e) => {
-            eprintln!(
-                "{}",
-                crate::ui::red(&format!("错误: 读取 disk{n} 元信息失败: {e}"))
-            );
-            return EXIT_IO;
-        }
-    };
     let mut protocol_image = Vec::with_capacity(crate::common::METADATA_IMAGE_LEN);
     for lba in 0..crate::common::METADATA_SECTOR_COUNT as u32 {
         match reader.read_sector(lba) {
@@ -222,6 +229,25 @@ fn disk_flow(runner: &dyn CmdRunner, mut opts: InfoOpts) -> i32 {
             Err(error) => {
                 eprintln!("{}", crate::ui::red(&error.msg));
                 return error.code;
+            }
+        };
+    let summary =
+        if identity.protocol.provision_kind == Some(crate::provision::DiskProvisionKind::Plain) {
+            metainfo::MetaInfoSummary::plain(
+                (vid != "xxxx").then_some(vid),
+                (pid != "xxxx").then_some(pid),
+                size_bytes,
+            )
+        } else {
+            match metainfo::summarize(&inspect_meta, |lba| reader.read_sector(lba)) {
+                Ok(summary) => summary,
+                Err(e) => {
+                    eprintln!(
+                        "{}",
+                        crate::ui::red(&format!("错误: 读取 disk{n} 元信息失败: {e}"))
+                    );
+                    return EXIT_IO;
+                }
             }
         };
     let backup_dir = diskio::resolve_backup_dir(opts.backup_dir.as_deref());

@@ -370,3 +370,18 @@ fn piping_output_to_head_does_not_panic_on_broken_pipe() {
         "管道提前关闭不应触发 Rust panic: {stderr}"
     );
 }
+
+#[test]
+fn plain_info_card_does_not_claim_edp_protocol_or_decode_filesystem_as_safe6() {
+    let summary = edpcli::metainfo::MetaInfoSummary::plain(
+        Some("3535".into()),
+        Some("6300".into()),
+        Some(8_053_063_680),
+    );
+    let rendered = edpcli::metainfo::render_with_source(&summary, Some("disk4"));
+    assert!(rendered.contains("普通盘 (Plain)"));
+    assert!(rendered.contains("3535:6300"));
+    for bogus in ["device_id", "EDP/cems", "LBA8 未解析", "SAFE6", "onlyid"] {
+        assert!(!rendered.contains(bogus), "Plain card contains {bogus}");
+    }
+}

@@ -7494,6 +7494,8 @@ current main
 
 ## 15. 只读多证据介质身份：跨 Plain / EDP 制盘状态的稳定识别与可信度分级
 
+**实施状态（2026-09-26）：COMPLETE（I0→I8）。** 软件门禁、macOS 虚拟盘 HIL 与受控真实 USB 闭环均已通过；Chapter 14 Q4～Q8 和 Chapter 12 K6 不随本章改变状态。
+
 ### 15.1 目标与不可违反的边界
 
 本章解决的问题是：**同一块物理 U 盘在 Plain → mode0/mode1/mode2/mode3 → Plain、重新分区、改密码、重建协议区之后，盘内参数会变化，edpcli 仍需要尽可能把历史备份、当前设备和受控制盘历史关联到同一介质；同时不能把“高概率相同”冒充为绝对物理唯一，更不能为了识别而向 U 盘额外写标记。**
@@ -8624,6 +8626,12 @@ observe_media_identity_readonly(...)
 - search/sidebar 不增加 I/O。
 
 #### I8 — 清理、全门禁与 HIL
+
+**实施状态（2026-09-26）：COMPLETE。** 新增仓库静态护栏，锁定独立 restore 授权、selector 不按 onlyid 决定归属、v2 writer 不写 serial 自由文本、legacy note 只由 v1 adapter 解析、只读 matcher/observer、主机侧 lineage 路径、renderer 无身份 I/O、K6 `Migrate` 双层拒绝。真实盘验收发现 `ReadProbeCache` 未转发 `hardware_serial`，先以失败单测复现，再修复为直接转发且不缓存 raw serial；`info --disk 4` 的已确认备份数由错误的 1 恢复为 5。Plain 的 `info` 卡片现在只显示硬件/容量与普通盘状态，不把文件系统扇区或旧派生候选误报为 EDP/SAFE6 协议身份。
+
+最终正式门禁：`scripts/test-fast.sh` 为 8 suites / 10 artifacts / 0 failures（本机耗时阈值设为 180 秒）；`python3 scripts/test-full.py --profile full --max-seconds 600` 为 8 suites / 10 artifacts + doctest / 0 failures；fast 同时覆盖 `cargo fmt --all -- --check`、`git diff --check` 与 `cargo clippy --all-targets --locked -- -D warnings`。macOS Plain 虚拟盘 HIL 在可丢弃镜像上实际制盘、断开重连、挂载 exFAT 并读回文件，1/1 PASS。
+
+真实 USB HIL：专用 `/dev/disk4` 只读探测绑定 VID:PID=`3535:6300`、`15728640` 个 512B 扇区、既有 EDP `device_id` 与 usable USB serial 摘要。起始 mode0 的旧双域密码不可恢复，先创建 EDPB，再经强制备份与读回门禁受控重建为单分区 Plain；macOS 确认 `/dev/disk4s1` 可挂载为 exFAT。创建 Plain EDPB 后，以专用 HIL helper 在相同 serial 绑定下执行 Plain→mode0，Share/Encrypt 使用不同的一次性测试密码，FileKeyCRC、SM4 与 exFAT 校验均 PASS；再创建 mode0 EDPB，执行该备份的真实 restore，SHA-256 与扇区读回 PASS。备份列表把跨 Plain/mode0、跨 `onlyid=2629250033→3258829885` 的 5 份 EDPB 归在同一物理介质；修复后的 `info --disk 4` 报告 5 份已确认备份与强物理关联。`~/edpcli-hil/ch15-20260926/.edpcli/identity-lineage/v1/` 的两份记录分别对应 mode0→Plain、Plain→mode0，记录中的 mandatory backup SHA-256 均与文件实算值相同。helper 退出后一次性密码不留存；当前盘为 mode0，未来涉及密码的真实 HIL 仍须先建立新的受控状态。
 
 删除/收口：
 

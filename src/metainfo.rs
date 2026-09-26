@@ -33,6 +33,7 @@ pub struct PartitionInfo {
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct MetaInfoSummary {
+    pub is_plain: bool,
     pub onlyid: Option<String>,
     pub device_id: Option<String>,
     pub device_crc32: Option<String>,
@@ -48,6 +49,19 @@ pub struct MetaInfoSummary {
     pub pdkb_device_id: Option<String>,
     pub is_nopwd: Option<bool>,
     pub partitions: Vec<PartitionInfo>,
+}
+
+impl MetaInfoSummary {
+    /// Plain media has no EDP protocol fields to decode from its filesystem sectors.
+    pub fn plain(vid: Option<String>, pid: Option<String>, size_bytes: Option<u64>) -> Self {
+        Self {
+            is_plain: true,
+            vid,
+            pid,
+            size_bytes,
+            ..Self::default()
+        }
+    }
 }
 
 fn context_from_backup_meta(meta: &diskio::BackupMeta) -> SemanticContext {
@@ -162,6 +176,7 @@ where
     });
 
     Ok(MetaInfoSummary {
+        is_plain: false,
         onlyid,
         device_id: base.device_id.clone(),
         device_crc32,
@@ -277,6 +292,16 @@ pub fn render_with_source(summary: &MetaInfoSummary, source: Option<&str>) -> St
         summary.pdkb_device_id.as_deref(),
         crate::ui::yellow,
     );
+
+    if summary.is_plain {
+        out.push_str(&format!(
+            "\n{}\n  {}  {}\n",
+            crate::ui::bold_cyan("状态"),
+            crate::ui::dim(&crate::ui::pad_to("盘型", 18)),
+            crate::ui::green("普通盘 (Plain)")
+        ));
+        return out;
+    }
 
     out.push('\n');
     out.push_str(&format!("{}\n", crate::ui::bold_cyan("身份")));

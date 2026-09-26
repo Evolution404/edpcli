@@ -180,6 +180,11 @@ impl CmdRunner for ReadProbeCache<'_> {
         self.hardware.borrow_mut().insert(disk, value.clone());
         value
     }
+
+    fn hardware_serial(&self, disk: u32) -> Option<String> {
+        // Keep raw serial transient; canonical observation hashes it immediately.
+        self.inner.hardware_serial(disk)
+    }
 }
 
 /// 当前平台整盘总扇区数；失败/缺失返回 None。
@@ -446,5 +451,29 @@ mod tests {
         assert_eq!(inner.calls.get(), 1, "同一 disk 的 IOKit 探测应只执行一次");
         assert_eq!(cached.hardware_probe(7).unwrap().vid, Some(7));
         assert_eq!(inner.calls.get(), 2, "不同 disk 必须独立探测");
+    }
+
+    #[test]
+    fn read_probe_cache_preserves_hardware_serial_for_canonical_identity() {
+        struct SerialRunner {
+            calls: Cell<usize>,
+        }
+        impl CmdRunner for SerialRunner {
+            fn check_output(&self, _cmd: &[&str], _timeout: Duration) -> io::Result<String> {
+                Err(io::Error::other("not used"))
+            }
+
+            fn hardware_serial(&self, disk: u32) -> Option<String> {
+                self.calls.set(self.calls.get() + 1);
+                Some(format!("SERIAL-{disk}"))
+            }
+        }
+
+        let inner = SerialRunner {
+            calls: Cell::new(0),
+        };
+        let cached = ReadProbeCache::new(&inner);
+        assert_eq!(cached.hardware_serial(4).as_deref(), Some("SERIAL-4"));
+        assert_eq!(inner.calls.get(), 1);
     }
 }
