@@ -133,6 +133,13 @@ impl AppState {
             Some(value) => value,
             None => return out,
         };
+        let knowledge_suffix = |knowledge: crate::provision::SourcePasswordKnowledge| {
+            match knowledge {
+                crate::provision::SourcePasswordKnowledge::DefaultVerified => "✓ 默认已验证",
+                crate::provision::SourcePasswordKnowledge::UserVerified => "✓ 用户已验证",
+                crate::provision::SourcePasswordKnowledge::Unknown => "⚠ Unknown",
+            }
+        };
         out.extend([
             (
                 "标签标识".into(),
@@ -154,7 +161,10 @@ impl AppState {
                 "交换区"
             };
             out.push((
-                format!("{domain}来源密码（可空）"),
+                format!(
+                    "{domain}来源密码（可空） {}",
+                    knowledge_suffix(self.provision.form.share_source_knowledge)
+                ),
                 self.provision.form.share_source_password.as_str(),
                 true,
             ));
@@ -166,7 +176,10 @@ impl AppState {
         }
         if matches!(mode, 0..=2) {
             out.push((
-                "保密区来源密码（可空）".into(),
+                format!(
+                    "保密区来源密码（可空） {}",
+                    knowledge_suffix(self.provision.form.encrypt_source_knowledge)
+                ),
                 self.provision.form.encrypt_source_password.as_str(),
                 true,
             ));
@@ -636,6 +649,20 @@ impl AppState {
         }
     }
 
+    fn provision_mark_source_password_unverified(&mut self, slot: Option<usize>) {
+        match slot {
+            Some(30) => {
+                self.provision.form.share_source_knowledge =
+                    crate::provision::SourcePasswordKnowledge::Unknown;
+            }
+            Some(32) => {
+                self.provision.form.encrypt_source_knowledge =
+                    crate::provision::SourcePasswordKnowledge::Unknown;
+            }
+            _ => {}
+        }
+    }
+
     pub fn provision_push_char(&mut self, ch: char) {
         if ch.is_control() {
             return;
@@ -662,6 +689,7 @@ impl AppState {
             *field = candidate;
             self.provision.field_cursor = cursor + 1;
             self.provision_mark_capacity_edit(Some(slot));
+            self.provision_mark_source_password_unverified(Some(slot));
             self.provision.message = None;
         }
     }
@@ -679,6 +707,7 @@ impl AppState {
                 *field = chars.into_iter().collect();
                 self.provision.field_cursor = cursor - 1;
                 self.provision_mark_capacity_edit(slot);
+                self.provision_mark_source_password_unverified(slot);
                 self.provision.message = None;
             }
         }
