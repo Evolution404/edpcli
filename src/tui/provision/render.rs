@@ -1,4 +1,5 @@
 use super::*;
+use crate::tui::state::ProvisionFieldSection;
 
 const INPUT_EDITING_SLACK: usize = 2;
 
@@ -252,8 +253,9 @@ pub(super) fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, sta
             let separator_width = crate::ui::disp_width(separator);
 
             let fields = state.provision_visible_fields();
-            let rows = state.provision_compact_field_rows();
-            let mut section_metrics: HashMap<&str, (usize, usize, usize, usize)> = HashMap::new();
+            let rows = state.provision_compact_field_rows_typed();
+            let mut section_metrics: HashMap<ProvisionFieldSection, (usize, usize, usize, usize)> =
+                HashMap::new();
             for (section, indexes) in &rows {
                 let entry = section_metrics.entry(*section).or_insert((0, 0, 0, 0));
                 for (position, index) in indexes.iter().copied().enumerate() {
@@ -283,12 +285,12 @@ pub(super) fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, sta
                 Span::raw("  "),
                 Span::styled(provision.kind.description(), muted()),
             ])];
-            let mut current_section: Option<&str> = None;
+            let mut current_section: Option<ProvisionFieldSection> = None;
             let mut selected_line = 0usize;
             for (section, indexes) in rows {
                 if current_section != Some(section) {
                     form_lines.push(Line::from(""));
-                    form_lines.push(Line::from(Span::styled(section, secondary())));
+                    form_lines.push(Line::from(Span::styled(section.label(), secondary())));
                     current_section = Some(section);
                 }
                 let mut spans = Vec::new();
@@ -304,7 +306,7 @@ pub(super) fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, sta
                         spans.push(Span::styled(separator, muted()));
                     }
                     let metrics = section_metrics
-                        .get(section)
+                        .get(&section)
                         .copied()
                         .unwrap_or((0, 0, 8, 8));
                     let min_right_width = 2 + metrics.1 + 1 + metrics.3.max(8);

@@ -2,9 +2,7 @@ use super::*;
 
 impl AppState {
     pub fn provision_field_count(&self) -> usize {
-        (0..)
-            .take_while(|&index| self.provision_field_slot(index).is_some())
-            .count()
+        self.provision_field_descriptors().len()
     }
 
     pub fn provision_move_field(&mut self, delta: isize) {
@@ -27,47 +25,261 @@ impl AppState {
             .map(|row| row.size / crate::common::SECTOR as u64)
     }
 
-    pub(super) fn provision_field_slot(&self, display_index: usize) -> Option<usize> {
+    pub(super) fn provision_field_descriptor(
+        &self,
+        display_index: usize,
+    ) -> Option<ProvisionFieldDescriptor> {
+        self.provision_field_descriptors()
+            .get(display_index)
+            .copied()
+    }
+
+    pub(super) fn provision_field_id(&self, display_index: usize) -> Option<ProvisionFieldId> {
+        self.provision_field_descriptor(display_index)
+            .map(|descriptor| descriptor.id)
+    }
+
+    fn provision_field_descriptors(&self) -> Vec<ProvisionFieldDescriptor> {
+        let descriptor =
+            |id, section, editable, secret, toggle, fill_capacity, verify_source_password| {
+                ProvisionFieldDescriptor {
+                    id,
+                    section,
+                    capabilities: ProvisionFieldCapabilities {
+                        editable,
+                        secret,
+                        toggle,
+                        fill_capacity,
+                        verify_source_password,
+                    },
+                }
+            };
         if self.provision.kind == ProvisionKind::Plain {
-            let field_count = self.provision.plain_form.partitions.len() * 4;
-            return (display_index < field_count).then_some(100 + display_index);
+            let mut fields = Vec::with_capacity(self.provision.plain_form.partitions.len() * 4);
+            for partition in 0..self.provision.plain_form.partitions.len() {
+                let section = ProvisionFieldSection::PlainPartition(partition);
+                fields.extend([
+                    descriptor(
+                        ProvisionFieldId::Plain {
+                            partition,
+                            kind: PlainProvisionFieldKind::StartLba,
+                        },
+                        section,
+                        true,
+                        false,
+                        false,
+                        false,
+                        false,
+                    ),
+                    descriptor(
+                        ProvisionFieldId::Plain {
+                            partition,
+                            kind: PlainProvisionFieldKind::Capacity,
+                        },
+                        section,
+                        true,
+                        false,
+                        true,
+                        true,
+                        false,
+                    ),
+                    descriptor(
+                        ProvisionFieldId::Plain {
+                            partition,
+                            kind: PlainProvisionFieldKind::Filesystem,
+                        },
+                        section,
+                        false,
+                        false,
+                        true,
+                        false,
+                        false,
+                    ),
+                    descriptor(
+                        ProvisionFieldId::Plain {
+                            partition,
+                            kind: PlainProvisionFieldKind::VolumeLabel,
+                        },
+                        section,
+                        true,
+                        false,
+                        false,
+                        false,
+                        false,
+                    ),
+                ]);
+            }
+            return fields;
         }
-        let mode = self.provision.kind.mode()?;
-        let mut slots = Vec::with_capacity(34);
-        slots.extend([3, 4, 5, 6]);
+        let Some(mode) = self.provision.kind.mode() else {
+            return Vec::new();
+        };
+        let mut fields = Vec::with_capacity(34);
+        for id in [
+            ProvisionFieldId::LabelId,
+            ProvisionFieldId::User,
+            ProvisionFieldId::Department,
+            ProvisionFieldId::Safe6Label,
+        ] {
+            fields.push(descriptor(
+                id,
+                ProvisionFieldSection::Identity,
+                true,
+                false,
+                false,
+                false,
+                false,
+            ));
+        }
         if matches!(mode, 0 | 1 | 3) {
-            slots.extend([30, 31]);
+            let domain = crate::provision::KeyDomainRole::Share;
+            let opaque = self.provision_domain_opaque_candidate(domain);
+            fields.push(descriptor(
+                ProvisionFieldId::SourcePassword(domain),
+                ProvisionFieldSection::PasswordDomain,
+                true,
+                true,
+                false,
+                false,
+                true,
+            ));
+            fields.push(descriptor(
+                ProvisionFieldId::TargetPassword(domain),
+                ProvisionFieldSection::PasswordDomain,
+                !opaque,
+                true,
+                false,
+                false,
+                false,
+            ));
         }
         if matches!(mode, 0..=2) {
-            slots.extend([32, 33]);
+            let domain = crate::provision::KeyDomainRole::Encrypt;
+            let opaque = self.provision_domain_opaque_candidate(domain);
+            fields.push(descriptor(
+                ProvisionFieldId::SourcePassword(domain),
+                ProvisionFieldSection::PasswordDomain,
+                true,
+                true,
+                false,
+                false,
+                true,
+            ));
+            fields.push(descriptor(
+                ProvisionFieldId::TargetPassword(domain),
+                ProvisionFieldSection::PasswordDomain,
+                !opaque,
+                true,
+                false,
+                false,
+                false,
+            ));
         }
         if matches!(mode, 0 | 3) {
-            slots.extend([0, 24]);
+            for id in [
+                ProvisionFieldId::Capacity(crate::provision::PartitionRole::Boot),
+                ProvisionFieldId::StartLba(crate::provision::PartitionRole::Boot),
+            ] {
+                fields.push(descriptor(
+                    id,
+                    ProvisionFieldSection::PartitionLayout,
+                    true,
+                    false,
+                    matches!(id, ProvisionFieldId::Capacity(_)),
+                    matches!(id, ProvisionFieldId::Capacity(_)),
+                    false,
+                ));
+            }
         }
         if matches!(mode, 0 | 1 | 3) {
-            slots.extend([1, 25]);
+            let role = if mode == 1 {
+                crate::provision::PartitionRole::BootShareCombined
+            } else {
+                crate::provision::PartitionRole::Share
+            };
+            for id in [
+                ProvisionFieldId::Capacity(role),
+                ProvisionFieldId::StartLba(role),
+            ] {
+                fields.push(descriptor(
+                    id,
+                    ProvisionFieldSection::PartitionLayout,
+                    true,
+                    false,
+                    matches!(id, ProvisionFieldId::Capacity(_)),
+                    matches!(id, ProvisionFieldId::Capacity(_)),
+                    false,
+                ));
+            }
         }
         if matches!(mode, 0..=2) {
-            slots.extend([2, 26]);
+            for id in [
+                ProvisionFieldId::Capacity(crate::provision::PartitionRole::Encrypt),
+                ProvisionFieldId::StartLba(crate::provision::PartitionRole::Encrypt),
+            ] {
+                fields.push(descriptor(
+                    id,
+                    ProvisionFieldSection::PartitionLayout,
+                    true,
+                    false,
+                    matches!(id, ProvisionFieldId::Capacity(_)),
+                    matches!(id, ProvisionFieldId::Capacity(_)),
+                    false,
+                ));
+            }
         }
         for target in self.provision_format_template() {
-            let (toggle, filesystem, label) = match target.role {
-                crate::provision::PartitionRole::Boot => (11, Some(18), Some(14)),
-                crate::provision::PartitionRole::Share
-                | crate::provision::PartitionRole::BootShareCombined => (12, Some(19), Some(15)),
-                crate::provision::PartitionRole::Encrypt => (13, Some(20), Some(16)),
-                crate::provision::PartitionRole::CompatibilityReserve => (17, None, None),
-            };
-            slots.push(toggle);
-            if let Some(filesystem) = filesystem {
-                slots.push(filesystem);
-            }
-            if let Some(label) = label {
-                slots.push(label);
+            fields.push(descriptor(
+                ProvisionFieldId::FormatEnabled(target.role),
+                ProvisionFieldSection::Formatting,
+                false,
+                false,
+                target.format_capable,
+                false,
+                false,
+            ));
+            if target.format_capable {
+                fields.push(descriptor(
+                    ProvisionFieldId::Filesystem(target.role),
+                    ProvisionFieldSection::Formatting,
+                    false,
+                    false,
+                    true,
+                    false,
+                    false,
+                ));
+                fields.push(descriptor(
+                    ProvisionFieldId::VolumeLabel(target.role),
+                    ProvisionFieldSection::Formatting,
+                    true,
+                    false,
+                    false,
+                    false,
+                    false,
+                ));
             }
         }
-        slots.extend([9, 27, 28, 29]);
-        slots.get(display_index).copied()
+        for id in [
+            ProvisionFieldId::ForceChangePassword,
+            ProvisionFieldId::CancelPasswordComplexityCheck,
+            ProvisionFieldId::MaxPasswordErrors(crate::provision::KeyDomainRole::Share),
+            ProvisionFieldId::MaxPasswordErrors(crate::provision::KeyDomainRole::Encrypt),
+        ] {
+            fields.push(descriptor(
+                id,
+                ProvisionFieldSection::PasswordPolicy,
+                matches!(id, ProvisionFieldId::MaxPasswordErrors(_)),
+                false,
+                matches!(
+                    id,
+                    ProvisionFieldId::ForceChangePassword
+                        | ProvisionFieldId::CancelPasswordComplexityCheck
+                ),
+                false,
+                false,
+            ));
+        }
+        fields
     }
 
     pub(super) fn provision_format_template(&self) -> Vec<crate::provision::PartitionFormatTarget> {
@@ -340,33 +552,37 @@ impl AppState {
             self.provision.form.max_encrypt_password_errors.as_str(),
             false,
         ));
+        for (index, (_, _, secret)) in out.iter_mut().enumerate() {
+            if let Some(descriptor) = self.provision_field_descriptor(index) {
+                *secret = descriptor.capabilities.secret;
+            }
+        }
         out
     }
 
     pub(super) fn provision_selected_field_mut(&mut self) -> Option<&mut String> {
-        let slot = self.provision_field_slot(self.provision.field_selected)?;
-        if let Some((partition, field)) = plain_field_parts(slot) {
+        let id = self.provision_field_id(self.provision.field_selected)?;
+        if let ProvisionFieldId::Plain { partition, kind } = id {
             let part = self.provision.plain_form.partitions.get_mut(partition)?;
-            return match field {
-                0 => Some(&mut part.start_lba),
-                1 => Some(
+            return match kind {
+                PlainProvisionFieldKind::StartLba => Some(&mut part.start_lba),
+                PlainProvisionFieldKind::Capacity => Some(
                     if part.input_mode == crate::provision::CapacityInputMode::Exact {
                         &mut part.sector_count
                     } else {
                         &mut part.quick_capacity
                     },
                 ),
-                2 => None,
-                3 => Some(&mut part.volume_label),
-                _ => None,
+                PlainProvisionFieldKind::Filesystem => None,
+                PlainProvisionFieldKind::VolumeLabel => Some(&mut part.volume_label),
             };
         }
         let share_opaque =
             self.provision_domain_opaque_candidate(crate::provision::KeyDomainRole::Share);
         let encrypt_opaque =
             self.provision_domain_opaque_candidate(crate::provision::KeyDomainRole::Encrypt);
-        match slot {
-            0 => Some(
+        match id {
+            ProvisionFieldId::Capacity(crate::provision::PartitionRole::Boot) => Some(
                 if self.provision.form.boot_input_mode == crate::provision::CapacityInputMode::Exact
                 {
                     &mut self.provision.form.boot_sectors
@@ -374,7 +590,10 @@ impl AppState {
                     &mut self.provision.form.boot_mib
                 },
             ),
-            1 => Some(
+            ProvisionFieldId::Capacity(
+                crate::provision::PartitionRole::Share
+                | crate::provision::PartitionRole::BootShareCombined,
+            ) => Some(
                 if self.provision.form.share_input_mode
                     == crate::provision::CapacityInputMode::Exact
                 {
@@ -383,7 +602,7 @@ impl AppState {
                     &mut self.provision.form.share_mib
                 },
             ),
-            2 => Some(
+            ProvisionFieldId::Capacity(crate::provision::PartitionRole::Encrypt) => Some(
                 if self.provision.form.encrypt_input_mode
                     == crate::provision::CapacityInputMode::Exact
                 {
@@ -392,50 +611,79 @@ impl AppState {
                     &mut self.provision.form.encrypt_mib
                 },
             ),
-            3 => Some(&mut self.provision.form.label_id),
-            4 => Some(&mut self.provision.form.user),
-            5 => Some(&mut self.provision.form.dept),
-            6 => Some(&mut self.provision.form.label),
-            14 => Some(&mut self.provision.form.volume_label),
-            15 => Some(&mut self.provision.form.share_label),
-            16 => Some(&mut self.provision.form.encrypt_label),
-            24 => Some(&mut self.provision.form.boot_start_lba),
-            25 => Some(&mut self.provision.form.share_start_lba),
-            26 => Some(&mut self.provision.form.encrypt_start_lba),
-            28 => Some(&mut self.provision.form.max_share_password_errors),
-            29 => Some(&mut self.provision.form.max_encrypt_password_errors),
-            30 => Some(&mut self.provision.form.share_source_password),
-            31 if !share_opaque => Some(&mut self.provision.form.share_target_password),
-            32 => Some(&mut self.provision.form.encrypt_source_password),
-            33 if !encrypt_opaque => Some(&mut self.provision.form.encrypt_target_password),
+            ProvisionFieldId::LabelId => Some(&mut self.provision.form.label_id),
+            ProvisionFieldId::User => Some(&mut self.provision.form.user),
+            ProvisionFieldId::Department => Some(&mut self.provision.form.dept),
+            ProvisionFieldId::Safe6Label => Some(&mut self.provision.form.label),
+            ProvisionFieldId::VolumeLabel(crate::provision::PartitionRole::Boot) => {
+                Some(&mut self.provision.form.volume_label)
+            }
+            ProvisionFieldId::VolumeLabel(
+                crate::provision::PartitionRole::Share
+                | crate::provision::PartitionRole::BootShareCombined,
+            ) => Some(&mut self.provision.form.share_label),
+            ProvisionFieldId::VolumeLabel(crate::provision::PartitionRole::Encrypt) => {
+                Some(&mut self.provision.form.encrypt_label)
+            }
+            ProvisionFieldId::StartLba(crate::provision::PartitionRole::Boot) => {
+                Some(&mut self.provision.form.boot_start_lba)
+            }
+            ProvisionFieldId::StartLba(
+                crate::provision::PartitionRole::Share
+                | crate::provision::PartitionRole::BootShareCombined,
+            ) => Some(&mut self.provision.form.share_start_lba),
+            ProvisionFieldId::StartLba(crate::provision::PartitionRole::Encrypt) => {
+                Some(&mut self.provision.form.encrypt_start_lba)
+            }
+            ProvisionFieldId::MaxPasswordErrors(crate::provision::KeyDomainRole::Share) => {
+                Some(&mut self.provision.form.max_share_password_errors)
+            }
+            ProvisionFieldId::MaxPasswordErrors(crate::provision::KeyDomainRole::Encrypt) => {
+                Some(&mut self.provision.form.max_encrypt_password_errors)
+            }
+            ProvisionFieldId::SourcePassword(crate::provision::KeyDomainRole::Share) => {
+                Some(&mut self.provision.form.share_source_password)
+            }
+            ProvisionFieldId::TargetPassword(crate::provision::KeyDomainRole::Share)
+                if !share_opaque =>
+            {
+                Some(&mut self.provision.form.share_target_password)
+            }
+            ProvisionFieldId::SourcePassword(crate::provision::KeyDomainRole::Encrypt) => {
+                Some(&mut self.provision.form.encrypt_source_password)
+            }
+            ProvisionFieldId::TargetPassword(crate::provision::KeyDomainRole::Encrypt)
+                if !encrypt_opaque =>
+            {
+                Some(&mut self.provision.form.encrypt_target_password)
+            }
             _ => None,
         }
     }
 
     pub(super) fn provision_selected_field(&self) -> Option<&str> {
-        let slot = self.provision_field_slot(self.provision.field_selected)?;
-        if let Some((partition, field)) = plain_field_parts(slot) {
+        let id = self.provision_field_id(self.provision.field_selected)?;
+        if let ProvisionFieldId::Plain { partition, kind } = id {
             let part = self.provision.plain_form.partitions.get(partition)?;
-            return match field {
-                0 => Some(part.start_lba.as_str()),
-                1 => Some(
+            return match kind {
+                PlainProvisionFieldKind::StartLba => Some(part.start_lba.as_str()),
+                PlainProvisionFieldKind::Capacity => Some(
                     if part.input_mode == crate::provision::CapacityInputMode::Exact {
                         part.sector_count.as_str()
                     } else {
                         part.quick_capacity.as_str()
                     },
                 ),
-                2 => None,
-                3 => Some(part.volume_label.as_str()),
-                _ => None,
+                PlainProvisionFieldKind::Filesystem => None,
+                PlainProvisionFieldKind::VolumeLabel => Some(part.volume_label.as_str()),
             };
         }
         let share_opaque =
             self.provision_domain_opaque_candidate(crate::provision::KeyDomainRole::Share);
         let encrypt_opaque =
             self.provision_domain_opaque_candidate(crate::provision::KeyDomainRole::Encrypt);
-        match slot {
-            0 => Some(
+        match id {
+            ProvisionFieldId::Capacity(crate::provision::PartitionRole::Boot) => Some(
                 if self.provision.form.boot_input_mode == crate::provision::CapacityInputMode::Exact
                 {
                     self.provision.form.boot_sectors.as_str()
@@ -443,7 +691,10 @@ impl AppState {
                     self.provision.form.boot_mib.as_str()
                 },
             ),
-            1 => Some(
+            ProvisionFieldId::Capacity(
+                crate::provision::PartitionRole::Share
+                | crate::provision::PartitionRole::BootShareCombined,
+            ) => Some(
                 if self.provision.form.share_input_mode
                     == crate::provision::CapacityInputMode::Exact
                 {
@@ -452,7 +703,7 @@ impl AppState {
                     self.provision.form.share_mib.as_str()
                 },
             ),
-            2 => Some(
+            ProvisionFieldId::Capacity(crate::provision::PartitionRole::Encrypt) => Some(
                 if self.provision.form.encrypt_input_mode
                     == crate::provision::CapacityInputMode::Exact
                 {
@@ -461,22 +712,52 @@ impl AppState {
                     self.provision.form.encrypt_mib.as_str()
                 },
             ),
-            3 => Some(self.provision.form.label_id.as_str()),
-            4 => Some(self.provision.form.user.as_str()),
-            5 => Some(self.provision.form.dept.as_str()),
-            6 => Some(self.provision.form.label.as_str()),
-            14 => Some(self.provision.form.volume_label.as_str()),
-            15 => Some(self.provision.form.share_label.as_str()),
-            16 => Some(self.provision.form.encrypt_label.as_str()),
-            24 => Some(self.provision.form.boot_start_lba.as_str()),
-            25 => Some(self.provision.form.share_start_lba.as_str()),
-            26 => Some(self.provision.form.encrypt_start_lba.as_str()),
-            28 => Some(self.provision.form.max_share_password_errors.as_str()),
-            29 => Some(self.provision.form.max_encrypt_password_errors.as_str()),
-            30 => Some(self.provision.form.share_source_password.as_str()),
-            31 if !share_opaque => Some(self.provision.form.share_target_password.as_str()),
-            32 => Some(self.provision.form.encrypt_source_password.as_str()),
-            33 if !encrypt_opaque => Some(self.provision.form.encrypt_target_password.as_str()),
+            ProvisionFieldId::LabelId => Some(self.provision.form.label_id.as_str()),
+            ProvisionFieldId::User => Some(self.provision.form.user.as_str()),
+            ProvisionFieldId::Department => Some(self.provision.form.dept.as_str()),
+            ProvisionFieldId::Safe6Label => Some(self.provision.form.label.as_str()),
+            ProvisionFieldId::VolumeLabel(crate::provision::PartitionRole::Boot) => {
+                Some(self.provision.form.volume_label.as_str())
+            }
+            ProvisionFieldId::VolumeLabel(
+                crate::provision::PartitionRole::Share
+                | crate::provision::PartitionRole::BootShareCombined,
+            ) => Some(self.provision.form.share_label.as_str()),
+            ProvisionFieldId::VolumeLabel(crate::provision::PartitionRole::Encrypt) => {
+                Some(self.provision.form.encrypt_label.as_str())
+            }
+            ProvisionFieldId::StartLba(crate::provision::PartitionRole::Boot) => {
+                Some(self.provision.form.boot_start_lba.as_str())
+            }
+            ProvisionFieldId::StartLba(
+                crate::provision::PartitionRole::Share
+                | crate::provision::PartitionRole::BootShareCombined,
+            ) => Some(self.provision.form.share_start_lba.as_str()),
+            ProvisionFieldId::StartLba(crate::provision::PartitionRole::Encrypt) => {
+                Some(self.provision.form.encrypt_start_lba.as_str())
+            }
+            ProvisionFieldId::MaxPasswordErrors(crate::provision::KeyDomainRole::Share) => {
+                Some(self.provision.form.max_share_password_errors.as_str())
+            }
+            ProvisionFieldId::MaxPasswordErrors(crate::provision::KeyDomainRole::Encrypt) => {
+                Some(self.provision.form.max_encrypt_password_errors.as_str())
+            }
+            ProvisionFieldId::SourcePassword(crate::provision::KeyDomainRole::Share) => {
+                Some(self.provision.form.share_source_password.as_str())
+            }
+            ProvisionFieldId::TargetPassword(crate::provision::KeyDomainRole::Share)
+                if !share_opaque =>
+            {
+                Some(self.provision.form.share_target_password.as_str())
+            }
+            ProvisionFieldId::SourcePassword(crate::provision::KeyDomainRole::Encrypt) => {
+                Some(self.provision.form.encrypt_source_password.as_str())
+            }
+            ProvisionFieldId::TargetPassword(crate::provision::KeyDomainRole::Encrypt)
+                if !encrypt_opaque =>
+            {
+                Some(self.provision.form.encrypt_target_password.as_str())
+            }
             _ => None,
         }
     }
@@ -489,7 +770,9 @@ impl AppState {
     }
 
     pub fn provision_selected_field_is_editable(&self) -> bool {
-        self.provision_selected_field().is_some()
+        self.provision_field_descriptor(self.provision.field_selected)
+            .is_some_and(|descriptor| descriptor.capabilities.editable)
+            && self.provision_selected_field().is_some()
     }
 
     pub fn provision_field_cursor(&self) -> usize {
@@ -524,49 +807,52 @@ impl AppState {
         self.provision_sync_cursor_to_end();
     }
 
-    pub fn provision_field_section(&self, display_index: usize) -> Option<&'static str> {
-        let slot = self.provision_field_slot(display_index)?;
-        if let Some((partition, _)) = plain_field_parts(slot) {
-            return Some(match partition {
-                0 => "普通分区 P1",
-                1 => "普通分区 P2",
-                2 => "普通分区 P3",
-                3 => "普通分区 P4",
-                _ => return None,
-            });
-        }
-        match slot {
-            0..=2 | 24..=26 => Some("分区布局"),
-            3..=6 => Some("身份信息"),
-            30..=33 => Some("密码域"),
-            11..=20 => Some("格式化（可选）"),
-            9 | 27..=29 => Some("密码策略"),
-            _ => None,
-        }
+    pub(crate) fn provision_field_section_typed(
+        &self,
+        display_index: usize,
+    ) -> Option<ProvisionFieldSection> {
+        self.provision_field_descriptor(display_index)
+            .map(|descriptor| descriptor.section)
     }
 
-    pub fn provision_compact_field_rows(&self) -> Vec<(&'static str, Vec<usize>)> {
+    pub fn provision_field_section(&self, display_index: usize) -> Option<&'static str> {
+        self.provision_field_section_typed(display_index)
+            .map(ProvisionFieldSection::label)
+    }
+
+    pub(crate) fn provision_compact_field_rows_typed(
+        &self,
+    ) -> Vec<(ProvisionFieldSection, Vec<usize>)> {
         let fields = self.provision_visible_fields();
         let mut rows = Vec::new();
         let mut index = 0usize;
         while index < fields.len() {
-            let section = self.provision_field_section(index).unwrap_or("其他");
-            let slot = self.provision_field_slot(index).unwrap_or(usize::MAX);
-            let width = match section {
-                "身份信息" => 2,
-                "分区布局" if matches!(slot, 0..=2) => 2,
-                "分区布局" => 1,
-                "密码策略" | "密码域" => 2,
-                "格式化（可选）" if slot == 17 => 1,
-                "格式化（可选）" if matches!(slot, 11..=13) => 2,
-                "格式化（可选）" => 1,
-                _ if section.starts_with("普通分区 P") => 2,
-                _ => 1,
+            let Some(descriptor) = self.provision_field_descriptor(index) else {
+                break;
+            };
+            let section = descriptor.section;
+            let width = match (section, descriptor.id) {
+                (ProvisionFieldSection::Identity, _) => 2,
+                (ProvisionFieldSection::PartitionLayout, ProvisionFieldId::Capacity(_)) => 2,
+                (ProvisionFieldSection::PartitionLayout, _) => 1,
+                (
+                    ProvisionFieldSection::PasswordPolicy | ProvisionFieldSection::PasswordDomain,
+                    _,
+                ) => 2,
+                (
+                    ProvisionFieldSection::Formatting,
+                    ProvisionFieldId::FormatEnabled(
+                        crate::provision::PartitionRole::CompatibilityReserve,
+                    ),
+                ) => 1,
+                (ProvisionFieldSection::Formatting, ProvisionFieldId::FormatEnabled(_)) => 2,
+                (ProvisionFieldSection::Formatting, _) => 1,
+                (ProvisionFieldSection::PlainPartition(_), _) => 2,
             };
             let mut end = index + 1;
             while end < fields.len()
                 && end < index + width
-                && self.provision_field_section(end) == Some(section)
+                && self.provision_field_section_typed(end) == Some(section)
             {
                 end += 1;
             }
@@ -576,47 +862,59 @@ impl AppState {
         rows
     }
 
+    pub fn provision_compact_field_rows(&self) -> Vec<(&'static str, Vec<usize>)> {
+        self.provision_compact_field_rows_typed()
+            .into_iter()
+            .map(|(section, indexes)| (section.label(), indexes))
+            .collect()
+    }
+
     pub fn provision_field_hint(&self, display_index: usize) -> Option<String> {
-        let slot = self.provision_field_slot(display_index)?;
-        if let Some((_, field)) = plain_field_parts(slot) {
-            return match field {
-                0 => Some("精确 LBA；不会自动移动其它分区".into()),
-                1 => Some("Space 切换 MiB / GiB / sector · f 填满".into()),
-                2 => Some("Space 切换 FAT16 / exFAT".into()),
-                3 => Some("普通卷标".into()),
-                _ => None,
+        let id = self.provision_field_id(display_index)?;
+        if let ProvisionFieldId::Plain { kind, .. } = id {
+            return match kind {
+                PlainProvisionFieldKind::StartLba => Some("精确 LBA；不会自动移动其它分区".into()),
+                PlainProvisionFieldKind::Capacity => {
+                    Some("Space 切换 MiB / GiB / sector · f 填满".into())
+                }
+                PlainProvisionFieldKind::Filesystem => Some("Space 切换 FAT16 / exFAT".into()),
+                PlainProvisionFieldKind::VolumeLabel => Some("普通卷标".into()),
             };
         }
-        match slot {
-            0..=2 => Some("Space 切换 MiB / GiB / sector · f 填满".into()),
-            30 | 32 => Some("来源密码可留空表示 Unknown · v 验证当前域旧密码".into()),
-            31 => Some(
-                if self.provision_domain_opaque_candidate(crate::provision::KeyDomainRole::Share) {
+        match id {
+            ProvisionFieldId::Capacity(_) => Some("Space 切换 MiB / GiB / sector · f 填满".into()),
+            ProvisionFieldId::SourcePassword(_) => {
+                Some("来源密码可留空表示 Unknown · v 验证当前域旧密码".into())
+            }
+            ProvisionFieldId::TargetPassword(domain) => {
+                Some(if self.provision_domain_opaque_candidate(domain) {
                     "PreserveOpaque：目标密码禁用；先验证旧密码才能改密".into()
                 } else {
-                    "目标密码只作用于交换密钥域，不会同步到保密域".into()
-                },
-            ),
-            33 => Some(
-                if self.provision_domain_opaque_candidate(crate::provision::KeyDomainRole::Encrypt)
-                {
-                    "PreserveOpaque：目标密码禁用；先验证旧密码才能改密".into()
-                } else {
-                    "目标密码只作用于保密密钥域，不会同步到交换域".into()
-                },
-            ),
-            9 | 11..=13 | 18..=20 | 27 => Some("Space 切换".into()),
-            24..=26 => Some("通常无需修改；固定分区边界时再调整".into()),
-            28 | 29 => Some("范围 0–255".into()),
+                    match domain {
+                        crate::provision::KeyDomainRole::Share => {
+                            "目标密码只作用于交换密钥域，不会同步到保密域".into()
+                        }
+                        crate::provision::KeyDomainRole::Encrypt => {
+                            "目标密码只作用于保密密钥域，不会同步到交换域".into()
+                        }
+                    }
+                })
+            }
+            ProvisionFieldId::ForceChangePassword
+            | ProvisionFieldId::CancelPasswordComplexityCheck
+            | ProvisionFieldId::FormatEnabled(_)
+            | ProvisionFieldId::Filesystem(_) => Some("Space 切换".into()),
+            ProvisionFieldId::StartLba(_) => Some("通常无需修改；固定分区边界时再调整".into()),
+            ProvisionFieldId::MaxPasswordErrors(_) => Some("范围 0–255".into()),
             _ => None,
         }
     }
 
-    pub(super) fn provision_input_policy(&self, slot: usize) -> ProvisionInputPolicy {
-        if let Some((partition, field)) = plain_field_parts(slot) {
-            return match field {
-                0 => ProvisionInputPolicy::UnsignedInteger,
-                1 => self
+    pub(super) fn provision_input_policy(&self, id: ProvisionFieldId) -> ProvisionInputPolicy {
+        if let ProvisionFieldId::Plain { partition, kind } = id {
+            return match kind {
+                PlainProvisionFieldKind::StartLba => ProvisionInputPolicy::UnsignedInteger,
+                PlainProvisionFieldKind::Capacity => self
                     .provision
                     .plain_form
                     .partitions
@@ -629,12 +927,13 @@ impl AppState {
                         }
                     })
                     .unwrap_or(ProvisionInputPolicy::UnsignedInteger),
-                3 => ProvisionInputPolicy::Text,
-                _ => ProvisionInputPolicy::Text,
+                PlainProvisionFieldKind::Filesystem | PlainProvisionFieldKind::VolumeLabel => {
+                    ProvisionInputPolicy::Text
+                }
             };
         }
-        match slot {
-            0 => {
+        match id {
+            ProvisionFieldId::Capacity(crate::provision::PartitionRole::Boot) => {
                 if self.provision.form.boot_input_mode == crate::provision::CapacityInputMode::Exact
                 {
                     ProvisionInputPolicy::UnsignedInteger
@@ -642,7 +941,10 @@ impl AppState {
                     ProvisionInputPolicy::DecimalCapacity
                 }
             }
-            1 => {
+            ProvisionFieldId::Capacity(
+                crate::provision::PartitionRole::Share
+                | crate::provision::PartitionRole::BootShareCombined,
+            ) => {
                 if self.provision.form.share_input_mode
                     == crate::provision::CapacityInputMode::Exact
                 {
@@ -651,7 +953,7 @@ impl AppState {
                     ProvisionInputPolicy::DecimalCapacity
                 }
             }
-            2 => {
+            ProvisionFieldId::Capacity(crate::provision::PartitionRole::Encrypt) => {
                 if self.provision.form.encrypt_input_mode
                     == crate::provision::CapacityInputMode::Exact
                 {
@@ -660,35 +962,39 @@ impl AppState {
                     ProvisionInputPolicy::DecimalCapacity
                 }
             }
-            3 => ProvisionInputPolicy::OnlyId,
-            24..=26 => ProvisionInputPolicy::UnsignedInteger,
-            28 | 29 => ProvisionInputPolicy::U8,
+            ProvisionFieldId::LabelId => ProvisionInputPolicy::OnlyId,
+            ProvisionFieldId::StartLba(_) => ProvisionInputPolicy::UnsignedInteger,
+            ProvisionFieldId::MaxPasswordErrors(_) => ProvisionInputPolicy::U8,
             _ => ProvisionInputPolicy::Text,
         }
     }
 
-    pub(super) fn provision_mark_capacity_edit(&mut self, slot: Option<usize>) {
-        self.provision.form.mark_quick_capacity_edit(slot);
-        let Some(slot) = slot else {
-            return;
-        };
-        let Some((partition, 1)) = plain_field_parts(slot) else {
-            return;
-        };
-        if let Some(part) = self.provision.plain_form.partitions.get_mut(partition) {
-            if part.input_mode == crate::provision::CapacityInputMode::Quick {
-                part.capacity_edited = true;
+    pub(super) fn provision_mark_capacity_edit(&mut self, id: Option<ProvisionFieldId>) {
+        let role = id.and_then(|id| match id {
+            ProvisionFieldId::Capacity(role) => Some(role),
+            _ => None,
+        });
+        self.provision.form.mark_quick_capacity_edit(role);
+        if let Some(ProvisionFieldId::Plain {
+            partition,
+            kind: PlainProvisionFieldKind::Capacity,
+        }) = id
+        {
+            if let Some(part) = self.provision.plain_form.partitions.get_mut(partition) {
+                if part.input_mode == crate::provision::CapacityInputMode::Quick {
+                    part.capacity_edited = true;
+                }
             }
         }
     }
 
-    fn provision_mark_source_password_unverified(&mut self, slot: Option<usize>) {
-        match slot {
-            Some(30) => {
+    fn provision_mark_source_password_unverified(&mut self, id: Option<ProvisionFieldId>) {
+        match id {
+            Some(ProvisionFieldId::SourcePassword(crate::provision::KeyDomainRole::Share)) => {
                 self.provision.form.share_source_knowledge =
                     crate::provision::SourcePasswordKnowledge::Unknown;
             }
-            Some(32) => {
+            Some(ProvisionFieldId::SourcePassword(crate::provision::KeyDomainRole::Encrypt)) => {
                 self.provision.form.encrypt_source_knowledge =
                     crate::provision::SourcePasswordKnowledge::Unknown;
             }
@@ -699,15 +1005,20 @@ impl AppState {
     pub fn provision_source_password_verify_request(
         &self,
     ) -> Result<Option<(crate::provision::KeyDomainRole, String)>, String> {
-        let Some(slot) = self.provision_field_slot(self.provision.field_selected) else {
+        let Some(descriptor) = self.provision_field_descriptor(self.provision.field_selected)
+        else {
             return Ok(None);
         };
-        let (domain, password) = match slot {
-            30 => (
+        if !descriptor.capabilities.verify_source_password {
+            return Ok(None);
+        }
+        let id = descriptor.id;
+        let (domain, password) = match id {
+            ProvisionFieldId::SourcePassword(crate::provision::KeyDomainRole::Share) => (
                 crate::provision::KeyDomainRole::Share,
                 self.provision.form.share_source_password.as_str(),
             ),
-            32 => (
+            ProvisionFieldId::SourcePassword(crate::provision::KeyDomainRole::Encrypt) => (
                 crate::provision::KeyDomainRole::Encrypt,
                 self.provision.form.encrypt_source_password.as_str(),
             ),
@@ -724,7 +1035,7 @@ impl AppState {
             return;
         }
         let cursor = self.provision_field_cursor();
-        let Some(slot) = self.provision_field_slot(self.provision.field_selected) else {
+        let Some(id) = self.provision_field_id(self.provision.field_selected) else {
             return;
         };
         let Some(current) = self.provision_selected_field() else {
@@ -736,7 +1047,7 @@ impl AppState {
         let mut chars = current.chars().collect::<Vec<_>>();
         chars.insert(cursor.min(chars.len()), ch);
         let candidate = chars.into_iter().collect::<String>();
-        let policy = self.provision_input_policy(slot);
+        let policy = self.provision_input_policy(id);
         if !policy.accepts(&candidate) {
             self.provision.message = Some(policy.rejection_message().into());
             return;
@@ -744,15 +1055,15 @@ impl AppState {
         if let Some(field) = self.provision_selected_field_mut() {
             *field = candidate;
             self.provision.field_cursor = cursor + 1;
-            self.provision_mark_capacity_edit(Some(slot));
-            self.provision_mark_source_password_unverified(Some(slot));
+            self.provision_mark_capacity_edit(Some(id));
+            self.provision_mark_source_password_unverified(Some(id));
             self.provision.message = None;
         }
     }
 
     pub fn provision_backspace(&mut self) {
         let cursor = self.provision_field_cursor();
-        let slot = self.provision_field_slot(self.provision.field_selected);
+        let id = self.provision_field_id(self.provision.field_selected);
         if cursor == 0 {
             return;
         }
@@ -762,8 +1073,8 @@ impl AppState {
                 chars.remove(cursor - 1);
                 *field = chars.into_iter().collect();
                 self.provision.field_cursor = cursor - 1;
-                self.provision_mark_capacity_edit(slot);
-                self.provision_mark_source_password_unverified(slot);
+                self.provision_mark_capacity_edit(id);
+                self.provision_mark_source_password_unverified(id);
                 self.provision.message = None;
             }
         }
@@ -771,14 +1082,14 @@ impl AppState {
 
     pub fn provision_delete_char(&mut self) {
         let cursor = self.provision_field_cursor();
-        let slot = self.provision_field_slot(self.provision.field_selected);
+        let id = self.provision_field_id(self.provision.field_selected);
         if let Some(field) = self.provision_selected_field_mut() {
             let mut chars = field.chars().collect::<Vec<_>>();
             if cursor < chars.len() {
                 chars.remove(cursor);
                 *field = chars.into_iter().collect();
-                self.provision_mark_capacity_edit(slot);
-                self.provision_mark_source_password_unverified(slot);
+                self.provision_mark_capacity_edit(id);
+                self.provision_mark_source_password_unverified(id);
                 self.provision.message = None;
             }
         }

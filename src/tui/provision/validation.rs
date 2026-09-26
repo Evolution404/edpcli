@@ -205,18 +205,12 @@ impl AppState {
     pub(super) fn provision_selected_partition_role(
         &self,
     ) -> Option<crate::provision::PartitionRole> {
-        use crate::provision::PartitionRole;
-        let mode = self.provision.kind.mode()?;
-        let slot = self.provision_field_slot(self.provision.field_selected)?;
-        match slot {
-            0 | 24 | 11 | 14 | 18 => Some(PartitionRole::Boot),
-            1 | 25 | 12 | 15 | 19 => Some(if mode == 1 {
-                PartitionRole::BootShareCombined
-            } else {
-                PartitionRole::Share
-            }),
-            2 | 26 | 13 | 16 | 20 => Some(PartitionRole::Encrypt),
-            17 => Some(PartitionRole::CompatibilityReserve),
+        match self.provision_field_id(self.provision.field_selected)? {
+            ProvisionFieldId::Capacity(role)
+            | ProvisionFieldId::StartLba(role)
+            | ProvisionFieldId::FormatEnabled(role)
+            | ProvisionFieldId::Filesystem(role)
+            | ProvisionFieldId::VolumeLabel(role) => Some(role),
             _ => None,
         }
     }

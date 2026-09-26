@@ -124,34 +124,34 @@ impl AppState {
         lines.extend(entries.into_iter().map(|(_, text)| text));
 
         lines.push(String::new());
-        if let Some(slot) = self.provision_field_slot(self.provision.field_selected) {
-            if let Some((partition, _)) = plain_field_parts(slot) {
-                if let Some(part) = plan.partitions.get(partition) {
-                    if let Ok(max_sectors) = plan.max_sector_count(partition) {
-                        lines.push(format!("当前: P{}", partition + 1));
+        if let Some(ProvisionFieldId::Plain { partition, .. }) =
+            self.provision_field_id(self.provision.field_selected)
+        {
+            if let Some(part) = plan.partitions.get(partition) {
+                if let Ok(max_sectors) = plan.max_sector_count(partition) {
+                    lines.push(format!("当前: P{}", partition + 1));
+                    lines.push(format!(
+                        "大小 {} ({} sector)",
+                        Self::format_sector_size(part.sector_count),
+                        part.sector_count
+                    ));
+                    lines.push(format!(
+                        "最大可设 {} ({} sector)",
+                        Self::format_sector_size(max_sectors),
+                        max_sectors
+                    ));
+                    if let Some(next) = plan
+                        .partitions
+                        .iter()
+                        .filter(|candidate| candidate.start_lba > part.start_lba)
+                        .min_by_key(|candidate| candidate.start_lba)
+                    {
+                        lines.push(format!("限制: 下一分区固定起点 LBA {}", next.start_lba));
+                    } else {
                         lines.push(format!(
-                            "大小 {} ({} sector)",
-                            Self::format_sector_size(part.sector_count),
-                            part.sector_count
+                            "限制: 磁盘末端 LBA {}",
+                            total_sectors.saturating_sub(1)
                         ));
-                        lines.push(format!(
-                            "最大可设 {} ({} sector)",
-                            Self::format_sector_size(max_sectors),
-                            max_sectors
-                        ));
-                        if let Some(next) = plan
-                            .partitions
-                            .iter()
-                            .filter(|candidate| candidate.start_lba > part.start_lba)
-                            .min_by_key(|candidate| candidate.start_lba)
-                        {
-                            lines.push(format!("限制: 下一分区固定起点 LBA {}", next.start_lba));
-                        } else {
-                            lines.push(format!(
-                                "限制: 磁盘末端 LBA {}",
-                                total_sectors.saturating_sub(1)
-                            ));
-                        }
                     }
                 }
             }

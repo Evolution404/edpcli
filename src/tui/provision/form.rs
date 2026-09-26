@@ -408,31 +408,37 @@ impl ProvisionForm {
             .map_or_else(String::new, |value| value.to_string());
     }
 
-    pub(super) fn toggle_capacity_input(&mut self, slot: usize) -> Result<(), String> {
+    pub(super) fn toggle_capacity_input(
+        &mut self,
+        role: crate::provision::PartitionRole,
+    ) -> Result<(), String> {
         use crate::provision::{CapacityInputMode, QuickCapacityUnit};
-        let (mode, unit, quick, exact, edited) = match slot {
-            0 | 21 => (
+        let (mode, unit, quick, exact, edited) = match role {
+            crate::provision::PartitionRole::Boot => (
                 &mut self.boot_input_mode,
                 &mut self.boot_quick_unit,
                 &mut self.boot_mib,
                 &mut self.boot_sectors,
                 &mut self.boot_capacity_edited,
             ),
-            1 | 22 => (
+            crate::provision::PartitionRole::Share
+            | crate::provision::PartitionRole::BootShareCombined => (
                 &mut self.share_input_mode,
                 &mut self.share_quick_unit,
                 &mut self.share_mib,
                 &mut self.share_sectors,
                 &mut self.share_capacity_edited,
             ),
-            2 | 23 => (
+            crate::provision::PartitionRole::Encrypt => (
                 &mut self.encrypt_input_mode,
                 &mut self.encrypt_quick_unit,
                 &mut self.encrypt_mib,
                 &mut self.encrypt_sectors,
                 &mut self.encrypt_capacity_edited,
             ),
-            _ => return Err("不是容量输入方式字段".into()),
+            crate::provision::PartitionRole::CompatibilityReserve => {
+                return Err("兼容保留区没有可编辑容量字段".into())
+            }
         };
         match (*mode, *unit) {
             (CapacityInputMode::Exact, _) => {
@@ -461,16 +467,26 @@ impl ProvisionForm {
         Ok(())
     }
 
-    pub(super) fn mark_quick_capacity_edit(&mut self, slot: Option<usize>) {
+    pub(super) fn mark_quick_capacity_edit(
+        &mut self,
+        role: Option<crate::provision::PartitionRole>,
+    ) {
         use crate::provision::CapacityInputMode;
-        match slot {
-            Some(0) if self.boot_input_mode == CapacityInputMode::Quick => {
+        match role {
+            Some(crate::provision::PartitionRole::Boot)
+                if self.boot_input_mode == CapacityInputMode::Quick =>
+            {
                 self.boot_capacity_edited = true;
             }
-            Some(1) if self.share_input_mode == CapacityInputMode::Quick => {
+            Some(
+                crate::provision::PartitionRole::Share
+                | crate::provision::PartitionRole::BootShareCombined,
+            ) if self.share_input_mode == CapacityInputMode::Quick => {
                 self.share_capacity_edited = true;
             }
-            Some(2) if self.encrypt_input_mode == CapacityInputMode::Quick => {
+            Some(crate::provision::PartitionRole::Encrypt)
+                if self.encrypt_input_mode == CapacityInputMode::Quick =>
+            {
                 self.encrypt_capacity_edited = true;
             }
             _ => {}

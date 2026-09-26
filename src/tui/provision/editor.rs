@@ -2,10 +2,19 @@ use super::*;
 
 impl AppState {
     pub fn provision_fill_selected_capacity(&mut self) -> bool {
-        let Some(slot) = self.provision_field_slot(self.provision.field_selected) else {
+        let Some(descriptor) = self.provision_field_descriptor(self.provision.field_selected)
+        else {
             return false;
         };
-        if let Some((partition, 1)) = plain_field_parts(slot) {
+        if !descriptor.capabilities.fill_capacity {
+            return false;
+        }
+        let id = descriptor.id;
+        if let ProvisionFieldId::Plain {
+            partition,
+            kind: PlainProvisionFieldKind::Capacity,
+        } = id
+        {
             let Some(total_sectors) = self.provision_total_sectors() else {
                 self.provision.message = Some("目标 USB 已不存在".into());
                 return true;
@@ -23,7 +32,7 @@ impl AppState {
             }
             return true;
         }
-        let Some(slot @ 0..=2) = Some(slot) else {
+        let ProvisionFieldId::Capacity(role) = id else {
             return false;
         };
         // The selected capacity itself does not determine its upper boundary. Use a
@@ -31,23 +40,24 @@ impl AppState {
         // or partially edits the current capacity field. All other form values
         // remain subject to normal strict geometry validation.
         let original_form = self.provision.form.clone();
-        match slot {
-            0 => {
+        match role {
+            crate::provision::PartitionRole::Boot => {
                 self.provision.form.boot_input_mode = crate::provision::CapacityInputMode::Exact;
                 self.provision.form.boot_sectors = "1".into();
                 self.provision.form.boot_capacity_edited = true;
             }
-            1 => {
+            crate::provision::PartitionRole::Share
+            | crate::provision::PartitionRole::BootShareCombined => {
                 self.provision.form.share_input_mode = crate::provision::CapacityInputMode::Exact;
                 self.provision.form.share_sectors = "1".into();
                 self.provision.form.share_capacity_edited = true;
             }
-            2 => {
+            crate::provision::PartitionRole::Encrypt => {
                 self.provision.form.encrypt_input_mode = crate::provision::CapacityInputMode::Exact;
                 self.provision.form.encrypt_sectors = "1".into();
                 self.provision.form.encrypt_capacity_edited = true;
             }
-            _ => unreachable!(),
+            crate::provision::PartitionRole::CompatibilityReserve => return false,
         }
         let capacity_limit = self.provision_selected_capacity_limit();
         self.provision.form = original_form;
@@ -65,29 +75,30 @@ impl AppState {
         };
 
         use crate::provision::{CapacitySource, QuickCapacityUnit};
-        let (unit, quick, exact, edited, source) = match slot {
-            0 => (
+        let (unit, quick, exact, edited, source) = match role {
+            crate::provision::PartitionRole::Boot => (
                 self.provision.form.boot_quick_unit,
                 &mut self.provision.form.boot_mib,
                 &mut self.provision.form.boot_sectors,
                 &mut self.provision.form.boot_capacity_edited,
                 &mut self.provision.form.boot_capacity_source,
             ),
-            1 => (
+            crate::provision::PartitionRole::Share
+            | crate::provision::PartitionRole::BootShareCombined => (
                 self.provision.form.share_quick_unit,
                 &mut self.provision.form.share_mib,
                 &mut self.provision.form.share_sectors,
                 &mut self.provision.form.share_capacity_edited,
                 &mut self.provision.form.share_capacity_source,
             ),
-            2 => (
+            crate::provision::PartitionRole::Encrypt => (
                 self.provision.form.encrypt_quick_unit,
                 &mut self.provision.form.encrypt_mib,
                 &mut self.provision.form.encrypt_sectors,
                 &mut self.provision.form.encrypt_capacity_edited,
                 &mut self.provision.form.encrypt_capacity_source,
             ),
-            _ => unreachable!(),
+            crate::provision::PartitionRole::CompatibilityReserve => return false,
         };
         *exact = max_sectors.to_string();
         *quick = match unit {
@@ -102,37 +113,39 @@ impl AppState {
     }
 
     pub fn provision_toggle_selected_option(&mut self) -> bool {
-        let selected_slot = self.provision_field_slot(self.provision.field_selected);
-        if let Some(slot) = selected_slot {
-            if let Some((partition, field)) = plain_field_parts(slot) {
-                let result = self
-                    .provision
-                    .plain_form
-                    .toggle_partition_option(partition, field);
-                match result {
-                    Ok(true) if field == 1 => {
-                        self.provision.message = None;
+        let descriptor = self.provision_field_descriptor(self.provision.field_selected);
+        if descriptor.is_some_and(|descriptor| !descriptor.capabilities.toggle) {
+            return false;
+        }
+        let selected_id = descriptor.map(|descriptor| descriptor.id);
+        if let Some(ProvisionFieldId::Plain { partition, kind }) = selected_id {
+            let result = self
+                .provision
+                .plain_form
+                .toggle_partition_option(partition, kind);
+            match result {
+                Ok(true) if kind == PlainProvisionFieldKind::Capacity => {
+                    self.provision.message = None;
+                    self.provision_sync_cursor_to_end();
+                    return true;
+                }
+                Ok(true) => {
+                    self.provision.message = None;
+                    return true;
+                }
+                Ok(false) => return false,
+                Err(message) => {
+                    self.provision.message = Some(message);
+                    if kind == PlainProvisionFieldKind::Capacity {
                         self.provision_sync_cursor_to_end();
-                        return true;
                     }
-                    Ok(true) => {
-                        self.provision.message = None;
-                        return true;
-                    }
-                    Ok(false) => return false,
-                    Err(message) => {
-                        self.provision.message = Some(message);
-                        if field == 1 {
-                            self.provision_sync_cursor_to_end();
-                        }
-                        return true;
-                    }
+                    return true;
                 }
             }
         }
-        match selected_slot {
-            Some(slot @ 0..=2) => {
-                match self.provision.form.toggle_capacity_input(slot) {
+        match selected_id {
+            Some(ProvisionFieldId::Capacity(role)) => {
+                match self.provision.form.toggle_capacity_input(role) {
                     Ok(()) => {
                         self.provision.message = None;
                         self.provision_sync_cursor_to_end();
@@ -141,41 +154,51 @@ impl AppState {
                 }
                 true
             }
-            Some(9) => {
+            Some(ProvisionFieldId::ForceChangePassword) => {
                 self.provision.form.force_change_password =
                     !self.provision.form.force_change_password;
                 self.provision.message = None;
                 true
             }
-            Some(27) => {
+            Some(ProvisionFieldId::CancelPasswordComplexityCheck) => {
                 self.provision.form.cancel_password_complexity_check =
                     !self.provision.form.cancel_password_complexity_check;
                 self.provision.message = None;
                 true
             }
-            Some(11) => {
-                self.provision.form.format_boot = !self.provision.form.format_boot;
+            Some(ProvisionFieldId::FormatEnabled(role)) => {
+                match role {
+                    crate::provision::PartitionRole::Boot => {
+                        self.provision.form.format_boot = !self.provision.form.format_boot;
+                    }
+                    crate::provision::PartitionRole::Share
+                    | crate::provision::PartitionRole::BootShareCombined => {
+                        self.provision.form.format_share = !self.provision.form.format_share;
+                    }
+                    crate::provision::PartitionRole::Encrypt => {
+                        self.provision.form.format_encrypt = !self.provision.form.format_encrypt;
+                    }
+                    crate::provision::PartitionRole::CompatibilityReserve => {}
+                }
                 true
             }
-            Some(12) => {
-                self.provision.form.format_share = !self.provision.form.format_share;
-                true
-            }
-            Some(13) => {
-                self.provision.form.format_encrypt = !self.provision.form.format_encrypt;
-                true
-            }
-            Some(18) => {
-                self.provision.form.boot_fs = toggle_supported_fs(self.provision.form.boot_fs);
-                true
-            }
-            Some(19) => {
-                self.provision.form.share_fs = toggle_supported_fs(self.provision.form.share_fs);
-                true
-            }
-            Some(20) => {
-                self.provision.form.encrypt_fs =
-                    toggle_supported_fs(self.provision.form.encrypt_fs);
+            Some(ProvisionFieldId::Filesystem(role)) => {
+                match role {
+                    crate::provision::PartitionRole::Boot => {
+                        self.provision.form.boot_fs =
+                            toggle_supported_fs(self.provision.form.boot_fs);
+                    }
+                    crate::provision::PartitionRole::Share
+                    | crate::provision::PartitionRole::BootShareCombined => {
+                        self.provision.form.share_fs =
+                            toggle_supported_fs(self.provision.form.share_fs);
+                    }
+                    crate::provision::PartitionRole::Encrypt => {
+                        self.provision.form.encrypt_fs =
+                            toggle_supported_fs(self.provision.form.encrypt_fs);
+                    }
+                    crate::provision::PartitionRole::CompatibilityReserve => return false,
+                }
                 true
             }
             _ => false,
@@ -214,10 +237,10 @@ impl AppState {
         if self.provision.kind != ProvisionKind::Plain {
             return false;
         }
-        let partition = self
-            .provision_field_slot(self.provision.field_selected)
-            .and_then(plain_field_parts)
-            .map(|(partition, _)| partition);
+        let partition = match self.provision_field_id(self.provision.field_selected) {
+            Some(ProvisionFieldId::Plain { partition, .. }) => Some(partition),
+            _ => None,
+        };
         match self.provision.plain_form.delete_partition(partition) {
             Ok(true) => {
                 let count = self.provision_field_count();
@@ -233,7 +256,9 @@ impl AppState {
     }
 
     pub fn provision_toggle_force_change_password(&mut self) -> bool {
-        if self.provision_field_slot(self.provision.field_selected) != Some(9) {
+        if self.provision_field_id(self.provision.field_selected)
+            != Some(ProvisionFieldId::ForceChangePassword)
+        {
             return false;
         }
         self.provision.form.force_change_password = !self.provision.form.force_change_password;

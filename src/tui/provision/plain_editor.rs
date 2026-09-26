@@ -1,11 +1,4 @@
-use super::{toggle_supported_fs, PlainPartitionForm, PlainProvisionForm};
-
-pub(super) fn plain_field_parts(slot: usize) -> Option<(usize, usize)> {
-    let relative = slot.checked_sub(100)?;
-    let partition = relative / 4;
-    let field = relative % 4;
-    (partition < crate::provision::MAX_PLAIN_PARTITIONS).then_some((partition, field))
-}
+use super::{toggle_supported_fs, PlainPartitionForm, PlainProvisionFieldKind, PlainProvisionForm};
 
 impl PlainProvisionForm {
     fn specs(&self) -> Result<Vec<crate::provision::PlainPartitionSpec>, String> {
@@ -76,21 +69,21 @@ impl PlainProvisionForm {
     pub(super) fn toggle_partition_option(
         &mut self,
         partition: usize,
-        field: usize,
+        kind: PlainProvisionFieldKind,
     ) -> Result<bool, String> {
         let Some(part) = self.partitions.get_mut(partition) else {
             return Ok(false);
         };
-        match field {
-            1 => {
+        match kind {
+            PlainProvisionFieldKind::Capacity => {
                 part.cycle_capacity_unit()?;
                 Ok(true)
             }
-            2 => {
+            PlainProvisionFieldKind::Filesystem => {
                 part.filesystem = toggle_supported_fs(part.filesystem);
                 Ok(true)
             }
-            _ => Ok(false),
+            PlainProvisionFieldKind::StartLba | PlainProvisionFieldKind::VolumeLabel => Ok(false),
         }
     }
 
