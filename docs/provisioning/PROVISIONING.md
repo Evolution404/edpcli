@@ -4321,10 +4321,10 @@ python3 scripts/test-full.py --profile full
 | Q1 Inspect 数据契约 | COMPLETE | 稳定 `InspectFieldKey`、PhysicalRaw/SectorDecoded/FieldLogical/SemanticValue、typed XOR provenance、parse state/diagnostic、真实字段 status 与 typed region semantic 已落地；Inspect/TUI/协议专项与 fast gate 通过。 |
 | Q2 Inspect topology + presentation | COMPLETE | 单扇区 Tree、盘尾连续互斥 primary spans、显式 preview retry、UI-neutral Summary/Overview、可选 Detail 证据表与 Field→Hex 已实现；Detail 行选择复用 PaneViewport，children 默认折叠且仅有 byte range 的子项可进入 Hex；InspectTreeViewModel 按 revision 缓存 rows/id index。 |
 | Q3 Device / Backup identity contract | COMPLETE | `WorkspaceIdentity` 统一设备/备份容量、VID:PID、型号、onlyid、用户、部门与盘型投影；无可信探测/无效备份保持 Unknown（显示 `—`，不伪装 Plain）；`BackupWorkspaceItem` 已透传容量、VID/PID、device_id；设备/备份共用 identity column schema，表格、sidebar、search 均消费同一投影。专项 `ch14_identity_projection_is_shared_and_unknown_kind_is_honest`、`ch14_identity_search_matches_both_workspaces`、`ch14_identity_column_schema_is_identical_between_workspaces` 与 shared-schema contract 均 PASS。 |
-| Q4 DiskLayout / Provision presentation | PENDING | — |
-| Q5 Progress application core | PENDING | — |
-| Q6 Progress transport + TUI | PENDING | — |
-| Q7 Outcome + CLI | PENDING | — |
+| Q4 DiskLayout / Provision presentation | COMPLETE | `af80763`：application-owned `DiskLayoutModel` 直接映射 typed `DiskRegionSemantic`；Review 行由 disposition、密码域及 knowledge 生成，renderer 不再从 node 名称或显示文本推断业务状态。`ch14_q0_renderers_do_not_infer_business_state_from_display_text` 已解除 ignore 并 PASS；60/80/100/120 列布局与 Chapter 12 密码域回归 PASS。 |
+| Q5 Progress application core | COMPLETE | `af80763`：application-owned operation/phase/step/current/total/unit/severity 事件；制盘启动时冻结总步数，备份、身份、协议事务、真实扇区写入/读回、格式化和 lineage 由实际操作发出事件；panic 隔离 progress sink，日志不携带 password/FileKey。full profile PASS。 |
+| Q6 Progress transport + TUI | COMPLETE | `af80763`：worker progress 批次按序保留，Running 页显示 phase、真实工作量、持续活动指示与有界日志；critical write 期间延迟退出。`ch14_q0_progress_transport_preserves_event_batches` 已解除 ignore 并 PASS；transport 顺序测试、TUI suite PASS。 |
+| Q7 Outcome + CLI | COMPLETE | `af80763`：`ProvisionWriteOutcome` 统一计算成功、警告、部分格式化失败及 exit code；CLI/TUI 共用 typed status 与 summary，Result 不解析消息判断状态。部分格式化失败回归及 CLI/TUI suite PASS。 |
 | Q8 清理与最终门禁 | PENDING | — |
 
 Q0 的 `#[ignore]` 只标记预期失败的未来契约；对应功能落地的阶段必须移除 ignore 并令测试通过。Chapter 12 K6 Migrate 仍 DEFERRED/fail-closed；K8 真实 USB 已 COMPLETE。
