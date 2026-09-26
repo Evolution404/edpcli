@@ -397,7 +397,7 @@ fn empty_secret_field_renders_input_placeholder_instead_of_black_value() {
     state.provision_select_disk();
     state.provision_skip_backup();
     state.provision_begin_selected();
-    state.provision_mut().form.password.clear();
+    state.provision_mut().form.share_target_password.clear();
 
     let backend = TestBackend::new(100, 28);
     let mut terminal = Terminal::new(backend).expect("test terminal");
