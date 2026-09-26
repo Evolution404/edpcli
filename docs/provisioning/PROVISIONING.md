@@ -3290,7 +3290,7 @@ Share default FAIL / Encrypt default FAIL
 
 ### 12.12 分阶段实施顺序（后续独立开发）
 
-**实施状态（2026-09-26）：K0～K5 COMPLETE；K6 NOT IMPLEMENTED（所有 Migrate 继续 fail-closed）；K7/K8 PENDING。** 本章整体仍为 IN PROGRESS，只有 Virtual-HIL 与代表性真实 USB 验收完成后才允许按 12.13 收口。
+**实施状态（2026-09-26）：K0～K5 COMPLETE；K6 NOT IMPLEMENTED（所有 Migrate 继续 fail-closed）；K7 COMPLETE；K8 PENDING。** 本章整体仍为 IN PROGRESS，只有代表性真实 USB 验收完成后才允许按 12.13 收口。
 
 #### Phase K0：现状审计与红测试
 
@@ -3375,7 +3375,7 @@ K0 基线审计曾确认：
 
 #### Phase K7：Virtual-HIL
 
-**实施状态（2026-09-26）：PENDING。** 软件 fast/full 门禁已通过，但本轮尚未取得覆盖 Chapter 12 五态/密码域场景的 Virtual-HIL 完整证据，因此不得标 COMPLETE。
+**实施状态（2026-09-26）：COMPLETE。** 新增 Chapter 12 Virtual Disk HIL，在 disposable Linux loop / Windows VHD 上实际写入并读回 mode0 协议镜像，覆盖双域不同密码、unknown-password `PreserveOpaque`、exact `PreserveVerified`、仅改密码 `RewrapVerified`（验证 `K_old` 不变且 Encrypt data sector 0 写入）、geometry change forced rebuild、mode1 Combined 物理明文与 mode2 63-sector CompatibilityReserve。GitHub Actions run `36226417227` 的 Linux arm64/x86_64、Windows arm64/x86_64 四个平台 **4/4 全绿**；本机 Linux/Windows x86_64 交叉编译与 full gate 8 suites / 10 artifacts + doctest 亦为 0 failures。
 
 覆盖五态矩阵的协议、key material、文件系统和挂载结果。至少验证：
 
