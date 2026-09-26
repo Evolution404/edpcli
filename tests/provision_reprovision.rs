@@ -13,7 +13,8 @@ use edpcli::{
         OfficialPartitionSizes,
         OfficialProvisionPlan, OnlyId, PartitionAction, PartitionRole, PassInfoPolicy,
         ProvisionEntropy, ProvisionMetadata, ProvisionProfile, ProvisionSpec, ProvisionTarget,
-        QuickCapacityUnit, SourcePasswordKnowledge, TargetGeometryOverrides, TargetIdentity,
+        QuickCapacityUnit, RegionDisposition, SourcePasswordKnowledge, TargetGeometryOverrides,
+        TargetIdentity,
         TargetProvisionPlan, OFFICIAL_PARTITION_START_SECTOR,
     },
 };
@@ -1133,9 +1134,12 @@ fn target_plan_preserves_only_verified_matching_data() {
     .unwrap();
     assert_eq!(
         wrong_password.partitions[1].action,
-        PartitionAction::Rebuild
+        PartitionAction::PreserveExact
     );
-    assert!(wrong_password.partitions[1].reason.contains("FileKey"));
+    assert_eq!(
+        wrong_password.partitions[1].disposition,
+        RegionDisposition::PreserveOpaque
+    );
 }
 
 #[test]
@@ -1172,15 +1176,50 @@ fn exact_encrypted_extent_with_unknown_password_stays_a_preserve_candidate() {
         .find(|part| part.geometry.role == PartitionRole::Encrypt)
         .expect("mode1 encrypt target");
 
-    assert_ne!(
-        encrypt.action,
-        PartitionAction::Rebuild,
-        "Chapter 12 requires exact compatible encrypted extents to remain eligible for opaque preserve even when the password is unknown"
-    );
+    assert_eq!(encrypt.action, PartitionAction::PreserveExact);
+    assert_eq!(encrypt.disposition, RegionDisposition::PreserveOpaque);
     assert_eq!(
         encrypt.preserved_record,
         source.record(PartitionRole::Encrypt).copied(),
         "opaque preserve must retain the exact source key record without unwrap"
+    );
+}
+
+#[test]
+fn verified_source_with_different_target_password_plans_rewrap_without_rebuild() {
+    let (_, source_image, did) = generated_source(OfficialPartitionMode::DefaultThreePartition);
+    let mut source = parse_existing_provision(&source_image, &did, 16_777_216)
+        .unwrap()
+        .unwrap();
+    source
+        .confirm_filesystem(PartitionRole::Encrypt, OfficialFilesystemFormat::ExFat)
+        .unwrap();
+    let prefill = prefill_for_target_mode(
+        Some(&source.profile),
+        OfficialPartitionMode::BootShareCombined,
+        16_000_000,
+        512,
+    )
+    .unwrap();
+    let targets = prefill.target_partitions(512).unwrap();
+    let plan = TargetProvisionPlan::build(
+        Some(&source),
+        OfficialPartitionMode::BootShareCombined,
+        &targets,
+        16_000_000,
+        &domain_secrets(Some(b"ProofPass1!"), b"NewEncryptPass2!"),
+    )
+    .unwrap();
+    let encrypt = plan
+        .partitions
+        .iter()
+        .find(|part| part.geometry.role == PartitionRole::Encrypt)
+        .unwrap();
+    assert_eq!(encrypt.action, PartitionAction::PreserveExact);
+    assert_eq!(encrypt.disposition, RegionDisposition::RewrapVerified);
+    assert_eq!(
+        encrypt.preserved_record,
+        source.record(PartitionRole::Encrypt).copied()
     );
 }
 
