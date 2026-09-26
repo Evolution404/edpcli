@@ -224,7 +224,7 @@ fn timing_regression_gate_is_explicit_and_overrideable() {
     let fast = read("scripts/test-fast.sh");
     assert!(fast.contains("EDPCLI_FAST_MAX_SECONDS"));
     assert!(fast.contains("--max-seconds"));
-    assert!(fast.contains("45"));
+    assert!(fast.contains("60"));
 
     let runner = read("scripts/test-full.py");
     assert!(runner.contains("--max-seconds"));
