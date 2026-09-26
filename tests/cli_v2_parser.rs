@@ -44,7 +44,13 @@ fn provision_parses_all_four_product_actions_and_rejects_ambiguous_flags() {
         "江苏省电力有限公司",
         "--label",
         "江苏电力!SAFE6",
-        "--password",
+        "--share-source-password",
+        "ProofPass1!",
+        "--share-target-password",
+        "ProofPass1!",
+        "--encrypt-source-password",
+        "ProofPass1!",
+        "--encrypt-target-password",
         "ProofPass1!",
     ];
     let mut plan = vec!["provision", "plan"];
@@ -176,7 +182,13 @@ fn provision_label_prefills_from_target_unless_cli_overrides_it() {
         "USER06",
         "--dept",
         "江苏省电力有限公司",
-        "--password",
+        "--share-source-password",
+        "ProofPass1!",
+        "--share-target-password",
+        "ProofPass1!",
+        "--encrypt-source-password",
+        "ProofPass1!",
+        "--encrypt-target-password",
         "ProofPass1!",
     ];
     match parse_args(&args(&base)).expect("default provision label") {
@@ -278,7 +290,10 @@ fn provision_password_and_volume_label_have_product_defaults() {
     ]);
     match parse_args(&args).expect("default password and volume label") {
         Parsed::Provision(ProvisionAction::Plan(opts)) => {
-            assert_eq!(opts.password, "0000aaaa");
+            assert!(opts.share_source_password.is_empty());
+            assert_eq!(opts.share_target_password, "0000aaaa");
+            assert!(opts.encrypt_source_password.is_empty());
+            assert_eq!(opts.encrypt_target_password, "0000aaaa");
             assert_eq!(opts.volume_label, "启动区");
             assert!(!opts.format_boot && !opts.format_share && !opts.format_encrypt);
             assert_eq!(
