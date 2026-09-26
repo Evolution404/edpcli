@@ -70,6 +70,7 @@ fn large_modules_are_split_by_domain_boundary() {
         "src/tui/provision/state.rs",
         "src/tui/provision/form.rs",
         "src/tui/provision/plain_editor.rs",
+        "src/tui/provision/fields.rs",
         "src/tui/provision/render.rs",
         "src/tui/provision/task.rs",
         "src/tui/inspect/state.rs",
@@ -87,9 +88,35 @@ fn large_modules_are_split_by_domain_boundary() {
     assert!(lines("src/tui/render.rs") < 1_500);
     assert!(lines("src/tui/task.rs") < 1_000);
     assert!(
-        lines("src/tui/provision/state.rs") < 2_160,
+        lines("src/tui/provision/state.rs") < 1_500,
         "Provision orchestration state must not absorb form/capacity/plain model again"
     );
+    assert!(
+        lines("src/tui/provision/fields.rs") < 900,
+        "Provision field navigation and input editing must stay responsibility-bounded"
+    );
+    let field_source = fs::read_to_string(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("src/tui/provision/fields.rs"),
+    )
+    .expect("read provision fields module");
+    let orchestration_source = fs::read_to_string(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("src/tui/provision/state.rs"),
+    )
+    .expect("read provision orchestration state");
+    for name in [
+        "provision_field_slot",
+        "provision_push_char",
+        "provision_delete_char",
+    ] {
+        assert!(
+            field_source.contains(name),
+            "fields module is missing {name}"
+        );
+        assert!(
+            !orchestration_source.contains(&format!("fn {name}(")),
+            "orchestration state must not reabsorb {name}"
+        );
+    }
     assert!(
         lines("src/tui/provision/form.rs") < 650,
         "Provision form model must stay responsibility-bounded"

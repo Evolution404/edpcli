@@ -1150,6 +1150,14 @@ application 返回结构化 `ProvisionReport/BackupReport/InspectReport`，CLI/T
 - `state.rs` 为 **2147 行**、`form.rs` 为 **447 行**、`plain_editor.rs` 为 **139 行**。TUI suite **161/161**、架构测试、fast **4.66s / 0 失败**、full **33.25s / 0 失败**、全目标 Clippy、rustfmt 与 diff 检查通过。首次冷缓存 fast 功能测试全过，但 **48.06s** 超过 45s 性能预算；暖缓存正式复跑通过。
 - 本阶段没有修改 LBA0～12/LCE、设备写入路径或写盘安全门槛；真实 USB HIL 仍待独立验收。
 
+## Phase D7-B2.2：字段导航与输入编辑拆分
+
+**COMPLETE；D7-B 继续。**
+
+- 新增 `src/tui/provision/fields.rs`，集中管理 Official/Plain 字段槽与可见行映射、字段分组和紧凑布局、选中字段读取、光标移动、输入策略、字符插入、退格与删除。现有 `AppState` 方法签名与 TUI 键位调用保持原样。
+- `state.rs` 为 **1490 行**、`fields.rs` 为 **662 行**。架构门禁要求字段模块存在、保留关键方法且不回迁到编排文件，并收紧 `state.rs < 1500`、`fields.rs < 900`。
+- TUI suite **161/161** 与架构测试通过；fast 暖缓存 **4.50s / 0 失败**、full **32.40s / 0 失败**，全目标 Clippy、rustfmt 与 diff 检查通过。首次冷缓存 fast 功能测试全过，但 **47.38s** 超过 45s 性能预算；暖缓存正式复跑通过。字段移动没有修改业务验证、协议解析或写盘服务。后续继续拆出表单请求转换与布局展示。
+
 ---
 
 # 第八部分：完成标准
