@@ -2797,7 +2797,7 @@ Tab/Shift-Tab 子工作区 · Enter Sector Inspector · Esc 返回 · q 退出
 
 ## 12. 后续计划：五状态互转、独立密码域与 FileKey 保留策略（2026-09-26）
 
-> 状态：**PLAN ONLY / 暂不实施**。本章用于后续独立开发阶段；当前 worktree 只固化设计，不修改生产代码、协议构造器、TUI 或写盘链。后续实现必须在当时最新 `main` 上重新核对本章与协议真相源，禁止直接把本章中的“建议类型名”当成已经实现的事实。
+> 状态：**IN PROGRESS / 2026-09-26 开始实施**。基线为合入第 13 章后的 `main`（merge `90d0137`）。严格按 K0→K8 执行；K0 先审计和红测试，不修改协议 writer 语义。
 
 本章补全 4.8/4.9 中尚未展开的五状态互转密码语义。核心变化不是增加 20 套 source→target 特例，而是把“盘型布局”“区域语义”“密码知识”“FileKey 处理”“数据处置”拆成正交轴，由统一 planner 对每个语义区域独立决策。
 
@@ -3298,6 +3298,16 @@ Share default FAIL / Encrypt default FAIL
 - 把当前“单密码同时承担 source/target”行为写成失败测试；
 - 建 5×5 conversion golden matrix；
 - 不改协议生成语义。
+
+**K0 审计状态（2026-09-26）：IN PROGRESS。**
+
+已核对最新 `main`：
+- `ProvisionRequest` 仍只有一个全局 `password: String`；
+- `prepare` 同一个 `request.password` 同时用于来源探测、`TargetProvisionPlan::build`、来源 FileKey unwrap、LBA7/LBA12 新 key material 生成；
+- `TargetProvisionPlan` 当前只有 `PreserveExact / Rebuild`，且 encrypted exact extent 只有密码验证成功才允许 Preserve；未知密码会被直接降级 Rebuild；
+- TUI `ProvisionForm` 仍只有一个 `password` / “初始密码”字段，没有 Share/Encrypt 独立 source/target password；
+- 现有预填测试只覆盖 Plain→四官方模式 + 4×4 官方模式，即 20 格；第 12 章已新增独立 5×5（25 格）golden contract；
+- 已新增红测试：禁止全局单密码 API、要求四个独立 TUI 密码字段、要求 exact encrypted extent + unknown password 保持 opaque-preserve candidate。K0 不修改 writer。
 
 #### Phase K1：KeyDomain / PasswordKnowledge 领域模型
 
