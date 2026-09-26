@@ -1130,6 +1130,16 @@ application 返回结构化 `ProvisionReport/BackupReport/InspectReport`，CLI/T
 - 测试先行分两步提交：先增加 ownership/runner 契约门禁，再实现自动派生映射。最终 PR #19 head 六平台 Rustfmt/full/Clippy/release、checked-in protocol gold audit、dependency policy/cargo-deny 与四平台 Virtual Disk HIL 全部通过。
 - 本阶段只治理测试基础设施，不改变 LBA0～12/LCE 协议、Provision 业务语义或任何真实盘写入安全门槛。
 
+## Phase D7-B1：Provision form/capacity/plain model 拆分
+
+**COMPLETE；D7-B 继续。**
+
+- `src/tui/provision/state.rs` 原为 **2667 行**，同时承载 Provision 阶段编排、Official/Plain 表单数据、容量单位换算、Plain 分区表单、输入策略、字段编辑、布局预览与确认/执行状态，职责仍过密。
+- 新增 `src/tui/provision/form.rs`，集中承载 `ProvisionForm`、`PlainPartitionForm`、`PlainProvisionForm`、容量 MiB/GiB/sector 精确换算、容量单位切换、输入策略与 filesystem toggle。原公开表单类型继续由 `tui::state` re-export，外部 API 不变；仅父 orchestration 模块确实需要的内部状态使用 `pub(super)`。
+- `state.rs` 降至 **2199 行**，`form.rs` **474 行**。新增架构门禁要求 `state.rs < 2250`、`form.rs < 650`，并禁止 form model 依赖 `AppState`、`crate::application`、`crate::platform` 或 `crate::diskio`，防止纯表单层重新吸收编排/I/O 责任。
+- 该拆分只移动纯 TUI 状态/换算逻辑；`ProvisionState` 阶段编排、事件循环、application Provision 服务以及 system-disk guard、USB guard、写前备份、unmount/lock、reopen identity、atomic write、readback、rollback 全部保持原路径。
+- D7-B 后续继续拆分 Plain editor / field navigation-input、validation-review / layout presentation 等职责；本小阶段完成不代表 Provision state 全部治理结束。
+
 ---
 
 # 第八部分：完成标准
