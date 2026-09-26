@@ -331,9 +331,14 @@ impl AppState {
             || self.provision.form.user.trim().is_empty()
             || self.provision.form.dept.trim().is_empty()
             || self.provision.form.label.trim().is_empty()
-            || self.provision.form.password.is_empty()
         {
-            return Err("标签标识、用户、部门、标签和密码均不能为空".into());
+            return Err("标签标识、用户、部门和标签均不能为空".into());
+        }
+        if matches!(mode, 0 | 1 | 3) && self.provision.form.share_target_password.is_empty() {
+            return Err("交换密钥域目标密码不能为空".into());
+        }
+        if matches!(mode, 0..=2) && self.provision.form.encrypt_target_password.is_empty() {
+            return Err("保密密钥域目标密码不能为空".into());
         }
         let max_share_password_errors = self
             .provision
@@ -370,7 +375,20 @@ impl AppState {
             user: self.provision.form.user.trim().to_string(),
             dept: self.provision.form.dept.trim().to_string(),
             label: self.provision.form.label.trim().to_string(),
-            password: self.provision.form.password.clone(),
+            key_domains: crate::provision::KeyDomainSecrets::new(
+                crate::provision::KeyDomainSecretPair::new(
+                    (!self.provision.form.share_source_password.is_empty())
+                        .then_some(self.provision.form.share_source_password.as_bytes()),
+                    matches!(mode, 0 | 1 | 3)
+                        .then_some(self.provision.form.share_target_password.as_bytes()),
+                ),
+                crate::provision::KeyDomainSecretPair::new(
+                    (!self.provision.form.encrypt_source_password.is_empty())
+                        .then_some(self.provision.form.encrypt_source_password.as_bytes()),
+                    matches!(mode, 0..=2)
+                        .then_some(self.provision.form.encrypt_target_password.as_bytes()),
+                ),
+            ),
             volume_label: self.provision.form.volume_label.trim().to_string(),
             format: crate::application::provision::FormatOptions {
                 boot: self.provision.form.format_boot,
