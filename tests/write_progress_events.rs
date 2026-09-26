@@ -5,7 +5,6 @@
 //!
 //! 全部不碰真盘。
 
-use crate::common;
 
 use edpcli::application::WriteEvent;
 use edpcli::common::METADATA_IMAGE_LEN;
