@@ -2794,3 +2794,605 @@ Tab/Shift-Tab 子工作区 · Enter Sector Inspector · Esc 返回 · q 退出
 - 因此 11.14 第 13 项“真实盘全盘检查只读验收通过”当前仍为 **未验收**。在该项实际成功前，本章不得写成 COMPLETE；其余完成标准均已达到或已具自动门禁证据。
 
 最终产品原则：**顶层标签简单、常用动作单键、q 退出/Esc 返回语义固定；Inspect 首屏就是可读的磁盘空间图和协议解析器，而不是一个必须继续钻取才能理解的数据树；所有表格和布局由共享基础设施统一计算，避免同类 UI 在不同页面重复漂移。**
+
+## 12. 后续计划：五状态互转、独立密码域与 FileKey 保留策略（2026-09-26）
+
+> 状态：**PLAN ONLY / 暂不实施**。本章用于后续独立开发阶段；当前 worktree 只固化设计，不修改生产代码、协议构造器、TUI 或写盘链。后续实现必须在当时最新 `main` 上重新核对本章与协议真相源，禁止直接把本章中的“建议类型名”当成已经实现的事实。
+
+本章补全 4.8/4.9 中尚未展开的五状态互转密码语义。核心变化不是增加 20 套 source→target 特例，而是把“盘型布局”“区域语义”“密码知识”“FileKey 处理”“数据处置”拆成正交轴，由统一 planner 对每个语义区域独立决策。
+
+### 12.1 不变量与术语
+
+五种 source/target 状态继续固定为：
+
+| 状态 | 含义 |
+| --- | --- |
+| `Plain` | 普通盘；不是 mode4，不生成 EDP key material |
+| `Mode0` | 模式0 · 缺省三分区 |
+| `Mode1` | 模式1 · 启动区和交换区二合一 |
+| `Mode2` | 模式2 · 整盘加密 |
+| `Mode3` | 模式3 · 内外网通用双分区 |
+
+已闭环的物理/协议事实继续优先于本章任何产品设计：
+
+- mode0：type1 Boot 明文、type2 Share 加密、type4 Encrypt 加密；
+- mode1：type2 BootShareCombined 物理明文、type4 Encrypt 加密；不能因为 type2 的协议字段含 `NeedEncrypt=1` 就把 Combined 数据区机械按密文处理；
+- mode2：type1 CompatibilityReserve 为 canonical 兼容保留结构、不创建用户文件系统，type4 Encrypt 加密；
+- mode3：type1 Boot 明文、type2 Share 加密；
+- type1 / type2 / type4 的协议角色、物理加密、文件系统和 key material 是独立维度，不允许只看 `PartionType` 或 `NeedEncrypt` 推导数据写法。
+
+**密码属于 key domain，而不是属于整块 U 盘。** mode0 中 Share 与 Encrypt 至少是两个独立密码域；两者密码可以相同，也可以完全不同。后续任何代码都禁止用一个全局 `request.password` 同时代表“所有来源旧密码 + 所有目标新密码”。
+
+对于 mode1 等“协议存在 key material、但物理数据区语义特殊”的区域，也必须按 canonical profile 独立建模，不能把“有密码/key record”和“数据区一定逐扇区加密”画等号。
+
+### 12.2 密码知识必须逐域探测
+
+每个来源 key domain 独立保存密码知识状态，建议模型：
+
+```rust
+enum SourcePasswordKnowledge {
+    DefaultVerified,
+    UserVerified,
+    Unknown,
+}
+```
+
+默认密码探测逐域执行。当前 v0x0206 默认密码仍为 `0000aaaa`，但“默认密码通过”必须是完整密码学验证，不是只比较一个 CRC：
+
+```text
+读取该域 canonical LBA12 key record
+        ↓
+UserKeyCRC == crc32("0000aaaa") ?
+        ↓ yes
+按当前已验证规则得到 effective password
+        ↓
+按 EncryptMode unwrap FileKey
+        ↓
+FileKeyCRC == crc32(raw FileKey) ?
+        ↓ yes
+DefaultVerified
+```
+
+任一步失败只能得到：
+
+```text
+Unknown / 当前密码不是已验证的默认密码
+```
+
+UI 不得显示“密码错误”，因为系统只证明了默认密码未通过，并不知道真正密码是什么。
+
+LBA12 当前 key record 作为密码/FileKey 验证的 canonical 主路径；LBA7 legacy material 只能按已验证协议规则做一致性校验或原样保留，不能因为 LBA12 验证失败而猜测另一套密码算法。
+
+### 12.3 来源密码与目标密码彻底分离
+
+后续请求模型至少要能表达“一个区域的旧密码”和“同一区域制盘后的新密码”不同，建议方向：
+
+```rust
+struct KeyDomainPlan {
+    role: KeyDomainRole,
+    source_password: SourcePasswordKnowledge,
+    target_password: TargetPasswordPolicy,
+    disposition: RegionDisposition,
+}
+```
+
+其中目标密码策略建议至少能表达：
+
+```rust
+enum TargetPasswordPolicy {
+    PreserveOpaque,      // 不知道旧密码，密码/key material 全部透传
+    ReuseVerified,       // 已验证旧密码，目标继续使用同一密码
+    ReplaceVerified,     // 已验证旧密码，目标改成新密码
+    InitializeNew,       // 放弃旧数据/新区域，创建新 FileKey + 新密码
+}
+```
+
+具体 Secret 类型以后按项目现有 secret/zeroize 设施落地。本章只要求以下语义：
+
+- `source_password` 只用于验证/解开来源 FileKey；
+- `target_password` 只决定目标 key record 的认证包装；
+- Share 与 Encrypt 分别持有自己的 source/target password；
+- 一个域验证失败不得把另一个已经验证或可透传的域降级成 Rebuild；
+- 密码明文不得写入日志、备份元数据、Review 文本或进度日志；只在必要内存生命周期内存在并尽快清零。
+
+### 12.4 区域数据处置统一为六类
+
+4.9 当前的 `PreserveExact / PreserveWithRewrap / Rebuild` 继续是已实现基线。后续五态互转 planner 建议提升到更明确的区域处置模型；名称可在实施时调整，但语义必须覆盖：
+
+```text
+PreserveOpaque
+PreserveVerified
+RewrapVerified
+Migrate
+Rebuild
+Drop
+```
+
+#### 12.4.1 PreserveOpaque：不知道密码也能原样透传
+
+适用于“用户不知道旧密码，但目标仍然可以保持同一份密文和同一份 key material”的情况。
+
+必须同时满足：
+
+1. 来源/目标语义角色兼容；
+2. `PartionType` / canonical crypto profile 兼容；
+3. start LBA 完全一致；
+4. sector_count 完全一致；
+5. 物理加密属性一致；
+6. 文件系统解释一致；
+7. 对应数据 extent 完全不进入 write-set；
+8. 对应来源 LBA7/LBA12 key material 只允许**逐字段原值搬运到目标对应语义槽位**，禁止 unwrap、重算 FileKey、改密码或随机生成新 key。
+
+因此：
+
+```text
+旧密码未知
++ extent/key profile 完全可保留
+→ PreserveOpaque
+→ 原 ciphertext 不动
+→ 原 wrapped FileKey / CRC / EncryptMode 不动
+→ 制盘后继续使用原密码
+```
+
+如果目标 slot/index 发生变化，只能把同一份已验证结构的 key material 搬到新的对应语义 entry；“搬槽位”不等于“重新生成”。
+
+#### 12.4.2 PreserveVerified：验证后保持原密码
+
+用户输入旧密码并通过完整 FileKeyCRC 验证后，如果几何和数据完全可保留：
+
+```text
+P_old → unwrap K_old → CRC PASS
+→ 数据区不动
+→ 目标继续使用 P_old
+```
+
+可以继续复用原 key record，或按 canonical writer 重新序列化等价 material；无论实现选哪种，都必须证明 raw FileKey 仍为 `K_old` 且 data extent 零写入。
+
+#### 12.4.3 RewrapVerified：只改密码，不改 FileKey
+
+这是“保留数据但修改密码”的唯一正确模型：
+
+```text
+P_old
+  ↓ unwrap
+K_old
+  ↓ wrap with P_new
+new wrapped FileKey
+```
+
+要求：
+
+- 旧密码必须验证成功；
+- raw FileKey 必须保持 `K_old`；
+- ciphertext/data extent 完全不写；
+- 只更新认证/封装相关 key material；
+- 不得因为“目标密码变化”而生成 `K_new`。
+
+#### 12.4.4 Migrate：语义/几何改变但用户要求保数据
+
+`Migrate` 表示必须读取来源文件系统/数据并写入目标文件系统，不能伪装成 Preserve。
+
+来源为加密域时：
+
+```text
+验证 P_source
+→ unwrap K_source
+→ 读取/解密来源
+→ 建立目标区域
+→ 使用目标域自己的 K_target / P_target
+→ 迁移数据
+```
+
+第一阶段如果未实现文件级/分区级迁移，planner 必须把 `Migrate` 标记为“不支持，需用户改选 Rebuild/Drop”，而不是静默降级成 Preserve。
+
+#### 12.4.5 Rebuild：新 FileKey 必须伴随完整初始化
+
+`Rebuild` 只在用户明确放弃该区域原数据、或目标区域本来就是新增区域时使用：
+
+```text
+随机 K_new
+→ 用 P_target wrap
+→ 写入新 key material
+→ 完整初始化/格式化目标文件系统
+```
+
+硬门禁：
+
+> **任何 `K_new` 都必须有对应的完整目标文件系统初始化；禁止 `K_new + 旧 ciphertext`。**
+
+这条门禁要在 prepare 阶段和 commit/write-set 校验阶段同时存在，不能只靠 TUI checkbox。
+
+#### 12.4.6 Drop：来源区域明确不进入目标
+
+来源区域在目标模式中没有语义映射且用户不迁移数据时，使用 `Drop`。UI/Review 必须明确列出“该来源区域不会保留”，避免把“没有目标 entry”误解成已经备份或已经迁移。
+
+### 12.5 TUI：每个密码域独立显示、验证和决策
+
+制盘表单在来源分析完成后，对每个 key domain 独立显示状态。mode0 示例：
+
+```text
+交换区
+  来源密码  [0000aaaa              ]  ✓ 默认密码已验证
+  数据处理  ● 保留原数据
+  目标密码  [0000aaaa              ]
+
+保密区
+  来源密码  [                      ]  ⚠ 当前密码不是已验证的默认密码
+            [验证]
+  数据处理  ● 直接透传原加密区域
+            ○ 输入旧密码后保留/改密码
+            ○ 放弃并重新初始化
+  目标密码  —  （透传时禁用）
+```
+
+规则：
+
+1. 默认密码完整验证通过后，来源密码字段自动显示/填入默认密码，目标密码默认继承同一值，但用户可改；
+2. 默认密码验证失败时只标注“非默认密码/尚未验证”；
+3. 用户可输入该域旧密码并显式触发验证；
+4. 用户也可在满足 `PreserveOpaque` 条件时直接选择“透传”；
+5. 透传时目标密码输入必须禁用，因为系统不知道 raw FileKey，不能安全换密码；
+6. 用户选择“重新初始化”时才允许直接设置全新的目标密码，并必须显示数据丢失警告；
+7. Share/Encrypt UI 状态完全独立，不做自动同步；
+8. Review 页逐域显示：来源状态、密码验证状态、数据处置、FileKey 动作、是否写 data extent、最终风险。
+
+### 12.6 五状态互转总矩阵
+
+本表描述**默认规划方向**，最终仍由逐区域 compatibility 判定决定；同一个 source→target 中不同区域可以同时出现 PreserveOpaque、Rewrap、Rebuild 等不同动作。
+
+| Source ↓ / Target → | Plain | Mode0 | Mode1 | Mode2 | Mode3 |
+| --- | --- | --- | --- | --- | --- |
+| Plain | 精确布局可保留，否则普通重分区/重建 | 新建 Boot/Share/Encrypt；Share/Encrypt 独立新密码域 | 新建 Combined/Encrypt；按 canonical profile 建 key material | 新建 CompatibilityReserve + Encrypt | 新建 Boot/Share |
+| Mode0 | 需导出/迁移可用数据，否则恢复普通盘重建 | Boot/Share/Encrypt 逐域 Preserve/Rewrap/Rebuild | Encrypt 优先精确保留；Boot+Share→Combined 需 Migrate/Rebuild | type4 Encrypt 仅在全兼容时可 Preserve；CompatibilityReserve 重建；其余 Drop/Migrate | Boot/Share 逐域兼容时 Preserve；Encrypt Drop/Migrate |
+| Mode1 | 需导出/迁移可用数据，否则重建 Plain | Encrypt 优先精确保留；Combined→Boot+Share 需 Migrate/Rebuild | Combined/Encrypt 逐域 Preserve/Rewrap/Rebuild | type4 Encrypt 全兼容时可 Preserve；CompatibilityReserve 重建；Combined Drop/Migrate | Combined 与 mode3 Share 语义不同，需 Migrate/Rebuild；目标 Boot 新建；Encrypt Drop/Migrate |
+| Mode2 | type4 数据需解密迁移到 Plain，否则重建 | type4 Encrypt 全兼容时可 Preserve；Boot/Share 新建；CompatibilityReserve 丢弃 | type4 Encrypt 全兼容时可 Preserve；Combined 新建；CompatibilityReserve 丢弃 | CompatibilityReserve 按 canonical 规则重建；type4 Encrypt 可 Preserve/Rewrap/Rebuild | type4 Encrypt→type2 Share 语义不同，需 Migrate/Rebuild；Boot 新建 |
+| Mode3 | 明文/加密数据按区域迁移，否则重建 Plain | Boot/Share 全兼容时可 Preserve；Encrypt 新建 | Boot+Share→Combined 语义变化，需 Migrate/Rebuild；Encrypt 新建 | Share(type2)→Encrypt(type4) 语义不同，需 Migrate/Rebuild；CompatibilityReserve 重建 | Boot/Share 逐域 Preserve/Rewrap/Rebuild |
+
+“可 Preserve”永远不是仅看 mode 组合，而必须经过 12.7 的逐区域判定。
+
+### 12.7 逐区域 mapping 决策算法
+
+后续实现禁止新增 20 个 `modeX_to_modeY()` writer。模式只负责生成 canonical source/target region model，统一 planner 再做 mapping：
+
+```text
+Source Disk
+   ↓ decode
+SourceRegions
+
+Target Kind + Form
+   ↓ canonical layout
+TargetRegions
+
+SourceRegions × TargetRegions
+   ↓ semantic mapper
+RegionMappingPlan
+   ↓ compatibility + password knowledge
+RegionDisposition
+```
+
+建议区域模型至少包含：
+
+```rust
+struct SourceRegion {
+    role: RegionRole,
+    partion_type: Option<u8>,
+    extent: Extent,
+    physical_crypto: PhysicalCryptoProfile,
+    filesystem: FilesystemProfile,
+    key_domain: Option<SourceKeyDomain>,
+}
+
+struct TargetRegion {
+    role: RegionRole,
+    partion_type: Option<u8>,
+    extent: Extent,
+    physical_crypto: PhysicalCryptoProfile,
+    filesystem: FilesystemProfile,
+    key_domain: Option<TargetKeyDomain>,
+}
+```
+
+Preserve compatibility 按顺序 fail-closed：
+
+```text
+semantic role compatible?
+  ↓
+PartionType / canonical target profile compatible?
+  ↓
+start_lba exact?
+  ↓
+sector_count exact?
+  ↓
+physical crypto exact?
+  ↓
+filesystem interpretation exact?
+  ↓
+key profile/wrap mode compatible?
+  ↓
+YES → 可以进入 Preserve family
+NO  → Migrate / Rebuild / Drop
+```
+
+其中“密码未知”不在前六项中自动否决 Preserve；它只决定 Preserve family 里能否做 `RewrapVerified`。如果全部物理条件满足，`Unknown` 可以选择 `PreserveOpaque`。
+
+### 12.8 各模式重点转换规则
+
+#### 12.8.1 Mode0 ↔ Mode1
+
+0→1：
+
+- type4 Encrypt 若语义/几何/crypto/filesystem 全兼容，允许 `PreserveOpaque`，因此保密区旧密码未知也不妨碍转换；
+- mode0 Boot + Share 与 mode1 Combined 语义不同，不能直接 Preserve；
+- 当前未实现 Migrate 时，Combined 只能 Rebuild；
+- Share 密码是否已知不能影响 Encrypt 的独立透传。
+
+1→0：
+
+- type4 Encrypt 同样优先精确保留；
+- Combined 不能直接当成 mode0 Share；Boot/Share 需要 Migrate/Rebuild；
+- Encrypt 旧密码未知时仍可在 exact preserve 条件下透传。
+
+#### 12.8.2 Mode0/Mode1 ↔ Mode2
+
+type4 Encrypt 在 mode0、mode1、mode2 之间只有在 4.8 已定义的全兼容条件全部满足时才是 Preserve candidate，不能因为都是 type4 就直接保留。
+
+mode2 CompatibilityReserve 始终按 canonical 规则重建，不承载用户密码/用户文件数据。
+
+因此可以出现：
+
+```text
+来源 mode0:
+  Share      → Drop/Rebuild/Migrate
+  Encrypt    → PreserveOpaque
+目标 mode2:
+  Reserve    → Rebuild canonical
+  Encrypt    → 原 extent + 原 key material
+```
+
+这种情况下只保留 Encrypt 域，完全不要求知道 Share 密码。
+
+#### 12.8.3 Mode0 ↔ Mode3
+
+沿用 4.8 已验证方向：Boot/Share 只有语义、位置、大小、物理属性、filesystem/crypto profile 全兼容时才 Preserve。mode0 Encrypt 在 mode3 中没有直接同语义目标，默认 Drop；未来若保数据只能 Migrate。
+
+3→0 时 Boot/Share 独立判断；新增 Encrypt 是独立新域，不能复用 Share 的 FileKey 或密码。
+
+#### 12.8.4 Mode1 ↔ Mode3
+
+mode1 Combined 与 mode3 Share 语义不同，禁止直接 Preserve；mode3 Boot 也不存在 mode1 中的直接同语义来源。第一阶段按 Rebuild，未来通过 Migrate 保数据。
+
+mode1 Encrypt 与 mode3 不存在 type4 同语义目标，因此不能把 Encrypt 密文“改标签”为 Share。
+
+#### 12.8.5 Mode2 ↔ Mode3
+
+mode2 type4 Encrypt 与 mode3 type2 Share 虽然都可能是加密用户区，但 `PartionType` 与语义不同，禁止 Opaque Preserve。保数据必须 Migrate；否则 Rebuild。
+
+#### 12.8.6 任一 EDP 模式 ↔ Plain
+
+Plain 不使用 EDP key material。
+
+EDP→Plain：
+
+- 如果用户要求保留数据，必须把可读来源区域迁移到目标 Plain 分区；
+- 加密来源必须验证其自己的来源密码后才能解密迁移；
+- 未知密码可以选择放弃该来源区域，但不能把 EDP ciphertext 直接当 Plain 文件系统；
+- “恢复普通盘”若不做迁移仍是破坏性重建，不得描述为解密或安全擦除。
+
+Plain→EDP：
+
+- 没有可复用的 EDP key record；
+- 新增的每个目标 key domain 独立生成随机 FileKey；
+- Share/Encrypt 的目标密码独立；
+- 新 FileKey 必须伴随对应文件系统初始化；
+- Plain 原文件若要保留，未来走 Migrate，不得通过“保留旧扇区 + 写新 EDP key record”实现。
+
+### 12.9 密码变化与数据变化的正交关系
+
+后续 Review 必须能明确区分：
+
+| 用户意图 | raw FileKey | wrapped FileKey | data extent |
+| --- | --- | --- | --- |
+| 不知道密码，直接透传 | `K_old`（未知但保留） | 原样 | 0 写入 |
+| 验证旧密码，不改密码 | `K_old` | 原样/等价重序列化 | 0 写入 |
+| 验证旧密码，改密码 | `K_old` | 用 `P_new` 重新 wrap | 0 写入 |
+| 调整布局并保数据 | 视目标策略而定 | 目标 canonical | Migrate 写入 |
+| 放弃旧数据/新区域 | `K_new` | 用 `P_new` wrap | 必须完整初始化 |
+
+禁止以下状态进入 commit：
+
+```text
+K_new + old ciphertext
+P_new + 无法证明对应 K_old/K_new
+Unknown password + geometry changed + “Preserve”
+Share 的密码/FileKey 被自动复制给 Encrypt
+Encrypt 的密码/FileKey 被自动复制给 Share
+```
+
+### 12.10 prepare/commit 双层安全门禁
+
+后续实现时至少增加以下 fail-closed 检查：
+
+1. `PreserveOpaque`：目标 key material 必须与来源对应域逐字段一致，data extent 与格式化 write-set 零交集；
+2. `PreserveVerified`：已恢复 raw FileKey 的 CRC 必须通过，且目标 key material 与该 FileKey 一致；
+3. `RewrapVerified`：source password 已验证、raw FileKey 保持不变、target wrapper 校验通过、data extent 零写入；
+4. `Migrate`：来源加密域没有 verified source key 时禁止开始读取/迁移；
+5. `Rebuild`：所有需要新 FileKey 的物理加密目标必须存在完整 filesystem initialization plan；
+6. 任一区域从 Preserve 被用户勾选“格式化”后，必须显式转成 Rebuild，并重新计算目标 key material；
+7. commit 前再次验证“Preserve extents ∩ touched sectors = ∅”；
+8. commit 后 readback 验证每个 target key record、FileKeyCRC/wrap mode 和计划一致；
+9. rollback/snapshot 继续覆盖协议 touched sectors；涉及 data migration/rebuild 时按现有 transaction 架构扩展数据保护边界，不得降低 LBA3/system-disk/reopen identity 等现有 guard。
+
+### 12.11 必须新增的测试矩阵
+
+实现前先测试，不允许先改 writer。
+
+#### A. 密码域独立性
+
+mode0 至少覆盖四种组合：
+
+```text
+Share default PASS / Encrypt default PASS
+Share default PASS / Encrypt default FAIL
+Share default FAIL / Encrypt default PASS
+Share default FAIL / Encrypt default FAIL
+```
+
+并验证：
+
+- 一个域输入错误密码不会改变另一个域 action；
+- Share/Encrypt 可设置不同 target password；
+- 不会生成全局 password fallback；
+- Review 能分别显示两个域状态。
+
+#### B. Opaque Preserve
+
+至少验证：
+
+- 未知旧密码 + exact extent → 允许透传；
+- LBA7/LBA12 对应 key material 保持逐字段一致；
+- data extent 不进入 write-set；
+- 改 start/size 任一项 → Opaque Preserve 立即失效；
+- Opaque 状态下 UI/CLI 不允许修改 target password。
+
+#### C. Rewrap
+
+至少验证：
+
+- `P_old` 解出 `K_old`；
+- `P_new` 重新 wrap 后 raw FileKey 仍为 `K_old`；
+- ciphertext 完全不写；
+- 旧密码随后不能解开新 wrapper，新密码可以；
+- FileKeyCRC 始终对应同一 `K_old`。
+
+#### D. Rebuild
+
+至少验证：
+
+- Rebuild + format/init 缺失 → prepare 必须失败；
+- Rebuild + `K_new` + 完整 init → 允许；
+- 绝不允许“新 key record + 原密文 extent”。
+
+#### E. 25 个 source/target 组合
+
+对 `Plain/Mode0/Mode1/Mode2/Mode3` 建 table-driven 5×5 planner tests。每一格不要求只得到一个动作，而是验证**每个目标区域**的 canonical mapping/disposition。
+
+重点 golden：
+
+- 0→1：Encrypt exact 可 opaque，Combined 不可直接 Preserve；
+- 1→0：Encrypt exact 可 opaque，Combined 不可直接映射为 Share；
+- 0/1/2 之间 type4 只有全兼容才 Preserve；
+- 0↔3：Boot/Share 按全兼容条件 Preserve；
+- mode1 Combined 与 mode0/mode3 Share 永不直接 Preserve；
+- mode2 CompatibilityReserve canonical rebuild；
+- mode2 type4 ↔ mode3 type2 不可 opaque；
+- Plain 不产生来源 EDP key domain；
+- Mode1 Combined 物理明文规则不能被 key record/NeedEncrypt 误触发为扇区加密。
+
+### 12.12 分阶段实施顺序（后续独立开发）
+
+本章当前只记录计划；后续开新 worktree 时按以下顺序执行。
+
+#### Phase K0：现状审计与红测试
+
+- 重新基于当时最新 main 审计 `request.password`、`verified_sm4_file_key`、`TargetProvisionPlan`、prepare/commit、TUI；
+- 把当前“单密码同时承担 source/target”行为写成失败测试；
+- 建 5×5 conversion golden matrix；
+- 不改协议生成语义。
+
+#### Phase K1：KeyDomain / PasswordKnowledge 领域模型
+
+- 把来源密码、目标密码、raw FileKey、wrapped material 的职责拆开；
+- Share/Encrypt 独立；
+- Plain/CompatibilityReserve 明确为无用户密码域；
+- API 层禁止密码明文进入日志/序列化。
+
+#### Phase K2：逐域默认密码探测
+
+- canonical LBA12 完整验证；
+- 默认密码 PASS 自动预填；
+- FAIL 只标记 Unknown；
+- 用户输入旧密码可重新验证；
+- 添加 default/non-default 混合域回归。
+
+#### Phase K3：RegionMappingPlanner
+
+- source/target 统一 Region 模型；
+- 实现 PreserveOpaque / PreserveVerified / Rewrap / Rebuild / Drop；
+- `Migrate` 先作为显式 unsupported disposition，绝不静默降级；
+- 删除新增 mode-pair 特例的诱因，所有组合走同一 mapper。
+
+#### Phase K4：TUI/CLI Review
+
+- 每个 key domain 独立卡片/字段；
+- “默认密码已验证 / 尚未验证 / 用户已验证”状态清晰；
+- Unknown 可选择“直接透传”；
+- Opaque 时禁用目标密码；
+- Rebuild 显示数据丢失；
+- Review 逐域显示 FileKey 动作和 data write-set。
+
+#### Phase K5：prepare/commit 安全门禁
+
+- 修复所有可能产生 `K_new + old ciphertext` 的路径；
+- Rewrap 只改 wrapper；
+- Opaque key material 原样搬运；
+- preserved extent 零写入；
+- Rebuild 强制初始化；
+- readback 验证。
+
+#### Phase K6：可选数据迁移能力
+
+只有在 K0～K5 完整通过后才考虑：
+
+- 同盘不同 extent 的安全文件级迁移；
+- EDP→Plain 解密迁移；
+- Plain→EDP 导入；
+- type2/type4 语义改变时的数据迁移；
+- 空间不足、重叠、掉电/失败回滚方案。
+
+未完成 K6 前，所有需要 Migrate 的转换必须明确告诉用户“当前不能无损保留该区域”，由用户决定 Rebuild/Drop。
+
+#### Phase K7：Virtual-HIL
+
+覆盖五态矩阵的协议、key material、文件系统和挂载结果。至少验证：
+
+- unknown-password opaque 场景；
+- 双域不同密码；
+- change-password only；
+- exact preserve；
+- forced rebuild；
+- mode1 Combined 明文特殊规则；
+- mode2 reserve。
+
+#### Phase K8：真实 USB 验收
+
+按风险由低到高选择代表性转换，不一次性对 25 格全部写盘。每次必须：
+
+- 自动备份；
+- 整盘确认；
+- unmount/lock；
+- reopen identity；
+- atomic protocol write；
+- filesystem/data write；
+- readback；
+- rollback 证据；
+- 制盘后分别验证每个密码域实际可用。
+
+### 12.13 本章完成标准
+
+未来只有同时满足以下条件，才允许把本章从 PLAN 标成 COMPLETE：
+
+1. 全局单一 `request.password` 不再承担多个密码域；
+2. Share/Encrypt 等 key domain 可使用不同来源密码和不同目标密码；
+3. 默认密码逐域完整验证，PASS 才自动填入；
+4. Unknown 密码 + exact geometry 可以安全 Opaque Preserve；
+5. Opaque Preserve 不允许改密码且数据零写入；
+6. 改密码只 rewrap `K_old`，不重写 ciphertext；
+7. 所有 `K_new` 都有强制完整初始化门禁；
+8. 5×5 planner matrix 有自动化回归；
+9. mode1 Combined 物理明文和 mode2 CompatibilityReserve 特例未被破坏；
+10. LBA0～12/LCE golden tests 全绿；
+11. fast/full 门禁全绿；
+12. 代表性真实 USB 转换验收通过；
+13. 文档、TUI、CLI Review 与实际 planner 单一事实源一致。
+
+最终原则：**五种盘型只定义布局；区域语义决定能否保留；密码属于独立 key domain；不知道密码不等于必须破坏数据；改密码不等于换 FileKey；一旦换 FileKey 就必须重建对应数据区。**
