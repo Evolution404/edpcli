@@ -4182,13 +4182,15 @@ Tab:
 
 ### 13.33 Phase P8：清理与正式门禁
 
-**实施状态（2026-09-26）：P7/P8 IMPLEMENTED，等待 GitHub CI 正式门禁。**
+**实施状态（2026-09-26）：P7/P8 COMPLETE；第 13 章 P0～P8 COMPLETE。**
 
 - P7：Form 使用 Parameters + DiskLayout 两 Pane，宽屏同显、窄屏只显示 focused Pane；Review 使用 Summary + DiskLayout + Changes 三 Pane，Tab/Shift-Tab 与 Ctrl-w 空间 focus 统一，三 Pane 长内容均使用各自 vertical viewport。
 - Form 的 Insert/Space/f/a/d 只在 Parameters focused 时生效；DiskLayout focused 时字段 selection 不再被 j/k、h/l、Toggle 等输入误改。
 - Review 的 j/k、Ctrl-u/d、PageUp/Down、gg/G 全部按 focused Pane 滚动，Enter/e/Esc 保持原确认/导出/返回语义。
 - P8 已删除页面级 `detail_scroll`、NavigationFrame 的旧 detail scroll snapshot 与 `advanced_inspect_scroll_detail`；PaneViewport 成为唯一滚动事实源，并新增源码回归门禁。
 - Inspect footer 已从旧“j/k 选择 / h/l 树”文案改为 focused-Pane 语义；Sector Inspector 跨 sector 的旧 PageUp/PageDown 文案已清除。
+- GitHub 正式门禁（代码 head `1d2631e`）全部通过：Rust CI 的 macOS arm64/x86_64、Linux arm64/x86_64、Windows arm64/x86_64 六个平台均完成 `cargo fmt --check`、`python scripts/test-full.py --profile full`、Clippy `-D warnings` 与 release build；协议金标审计、dependency policy 均通过。Linux arm64 full gate 记录为 8 suites / 10 artifacts / 0 failures。
+- Virtual Disk HIL 4/4 通过：Linux arm64/x86_64 loop 与 Windows arm64/x86_64 VHD 的 raw-write / unmount-or-lock / restore 全绿。
 - 本阶段只重构 TUI 状态、渲染和键位路由；第 12 章仍为 PLAN ONLY，未修改 LBA0～12/LCE 协议语义和真实写盘安全链。
 
 清理：
