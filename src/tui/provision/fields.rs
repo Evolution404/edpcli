@@ -33,8 +33,14 @@ impl AppState {
             return (display_index < field_count).then_some(100 + display_index);
         }
         let mode = self.provision.kind.mode()?;
-        let mut slots = Vec::with_capacity(30);
-        slots.extend([3, 4, 5, 6, 7]);
+        let mut slots = Vec::with_capacity(34);
+        slots.extend([3, 4, 5, 6]);
+        if matches!(mode, 0 | 1 | 3) {
+            slots.extend([30, 31]);
+        }
+        if matches!(mode, 0..=2) {
+            slots.extend([32, 33]);
+        }
         if matches!(mode, 0 | 3) {
             slots.extend([0, 24]);
         }
@@ -140,12 +146,32 @@ impl AppState {
                 self.provision.form.label.as_str(),
                 false,
             ),
-            (
-                "初始密码".into(),
-                self.provision.form.password.as_str(),
-                true,
-            ),
         ]);
+        if matches!(mode, 0 | 1 | 3) {
+            let domain = if mode == 1 { "二合一区" } else { "交换区" };
+            out.push((
+                format!("{domain}来源密码（可空）"),
+                self.provision.form.share_source_password.as_str(),
+                true,
+            ));
+            out.push((
+                format!("{domain}目标密码"),
+                self.provision.form.share_target_password.as_str(),
+                true,
+            ));
+        }
+        if matches!(mode, 0..=2) {
+            out.push((
+                "保密区来源密码（可空）".into(),
+                self.provision.form.encrypt_source_password.as_str(),
+                true,
+            ));
+            out.push((
+                "保密区目标密码".into(),
+                self.provision.form.encrypt_target_password.as_str(),
+                true,
+            ));
+        }
         if matches!(mode, 0 | 3) {
             let exact =
                 self.provision.form.boot_input_mode == crate::provision::CapacityInputMode::Exact;
@@ -338,7 +364,6 @@ impl AppState {
             4 => Some(&mut self.provision.form.user),
             5 => Some(&mut self.provision.form.dept),
             6 => Some(&mut self.provision.form.label),
-            7 => Some(&mut self.provision.form.password),
             14 => Some(&mut self.provision.form.volume_label),
             15 => Some(&mut self.provision.form.share_label),
             16 => Some(&mut self.provision.form.encrypt_label),
@@ -347,6 +372,10 @@ impl AppState {
             26 => Some(&mut self.provision.form.encrypt_start_lba),
             28 => Some(&mut self.provision.form.max_share_password_errors),
             29 => Some(&mut self.provision.form.max_encrypt_password_errors),
+            30 => Some(&mut self.provision.form.share_source_password),
+            31 => Some(&mut self.provision.form.share_target_password),
+            32 => Some(&mut self.provision.form.encrypt_source_password),
+            33 => Some(&mut self.provision.form.encrypt_target_password),
             _ => None,
         }
     }
@@ -400,7 +429,6 @@ impl AppState {
             4 => Some(self.provision.form.user.as_str()),
             5 => Some(self.provision.form.dept.as_str()),
             6 => Some(self.provision.form.label.as_str()),
-            7 => Some(self.provision.form.password.as_str()),
             14 => Some(self.provision.form.volume_label.as_str()),
             15 => Some(self.provision.form.share_label.as_str()),
             16 => Some(self.provision.form.encrypt_label.as_str()),
@@ -409,6 +437,10 @@ impl AppState {
             26 => Some(self.provision.form.encrypt_start_lba.as_str()),
             28 => Some(self.provision.form.max_share_password_errors.as_str()),
             29 => Some(self.provision.form.max_encrypt_password_errors.as_str()),
+            30 => Some(self.provision.form.share_source_password.as_str()),
+            31 => Some(self.provision.form.share_target_password.as_str()),
+            32 => Some(self.provision.form.encrypt_source_password.as_str()),
+            33 => Some(self.provision.form.encrypt_target_password.as_str()),
             _ => None,
         }
     }
@@ -469,7 +501,8 @@ impl AppState {
         }
         match slot {
             0..=2 | 24..=26 => Some("分区布局"),
-            3..=7 => Some("身份信息"),
+            3..=6 => Some("身份信息"),
+            30..=33 => Some("密码域"),
             11..=20 => Some("格式化（可选）"),
             9 | 27..=29 => Some("密码策略"),
             _ => None,
@@ -487,7 +520,7 @@ impl AppState {
                 "身份信息" => 2,
                 "分区布局" if matches!(slot, 0..=2) => 2,
                 "分区布局" => 1,
-                "密码策略" => 2,
+                "密码策略" | "密码域" => 2,
                 "格式化（可选）" if slot == 17 => 1,
                 "格式化（可选）" if matches!(slot, 11..=13) => 2,
                 "格式化（可选）" => 1,
@@ -520,7 +553,8 @@ impl AppState {
         }
         match slot {
             0..=2 => Some("Space 切换 MiB / GiB / sector · f 填满".into()),
-            7 => Some("交换区和保密区的初始密码".into()),
+            30 | 32 => Some("来源密码可留空表示 Unknown；K2 将按域自动探测默认口令".into()),
+            31 | 33 => Some("目标密码只作用于当前分区密钥域，不会同步到其它域".into()),
             9 | 11..=13 | 18..=20 | 27 => Some("Space 切换".into()),
             24..=26 => Some("通常无需修改；固定分区边界时再调整".into()),
             28 | 29 => Some("范围 0–255".into()),
