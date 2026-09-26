@@ -182,7 +182,6 @@ pub struct AdvancedInspectState {
     pub stage: AdvancedInspectStage,
     pub result: Option<crate::application::inspect::AdvancedInspectWorkspace>,
     pub tree_selected: usize,
-    pub detail_scroll: usize,
     pub panel: AdvancedInspectPanel,
     pub pane_focus: crate::tui::pane::PaneFocus,
     pub expanded: std::collections::BTreeSet<String>,
@@ -399,9 +398,6 @@ impl AppState {
                 content_len,
                 visible_len,
             );
-            if pane == crate::tui::pane::PaneId::InspectDetail {
-                state.detail_scroll = state.pane_focus.viewport(pane).scroll_y.offset;
-            }
         }
     }
 
@@ -418,7 +414,6 @@ impl AppState {
             stage: AdvancedInspectStage::Running,
             result: None,
             tree_selected: 0,
-            detail_scroll: 0,
             panel: AdvancedInspectPanel::DiskLayout,
             pane_focus: crate::tui::pane::PaneFocus::inspect(),
             expanded,
@@ -479,7 +474,6 @@ impl AppState {
         };
         state.stage = AdvancedInspectStage::Browser;
         state.tree_selected = 0;
-        state.detail_scroll = 0;
         state.sector = None;
         state.sector_cache_order.clear();
         state.preview_attempted.clear();
@@ -706,7 +700,6 @@ impl AppState {
             state
                 .pane_focus
                 .focus(crate::tui::pane::PaneId::InspectTree);
-            state.detail_scroll = 0;
             state.prompt = Some(AdvancedInspectPrompt::Jump {
                 unit: AdvancedInspectJumpUnit::Lba,
                 input: String::new(),
@@ -726,7 +719,6 @@ impl AppState {
             state
                 .pane_focus
                 .focus(crate::tui::pane::PaneId::InspectTree);
-            state.detail_scroll = 0;
             state.prompt = Some(AdvancedInspectPrompt::Search {
                 input: String::new(),
             });
@@ -860,7 +852,6 @@ impl AppState {
             state
                 .pane_focus
                 .focus(crate::tui::pane::PaneId::InspectTree);
-            state.detail_scroll = 0;
             state.message = None;
         }
 
@@ -933,7 +924,6 @@ impl AppState {
         state
             .pane_focus
             .focus(crate::tui::pane::PaneId::InspectDetail);
-        state.detail_scroll = 0;
         Ok((!ready).then(|| (state.source.clone(), lba)))
     }
 
@@ -1043,7 +1033,6 @@ impl AppState {
                     state
                         .pane_focus
                         .focus(crate::tui::pane::PaneId::InspectTree);
-                    state.detail_scroll = 0;
                     state.message = None;
                 }
                 let rows = self.advanced_inspect_tree_rows();
@@ -1095,7 +1084,6 @@ impl AppState {
                     state
                         .pane_focus
                         .focus(crate::tui::pane::PaneId::InspectTree);
-                    state.detail_scroll = 0;
                     state.message = None;
                 }
                 Ok(())
@@ -1116,7 +1104,6 @@ impl AppState {
         } else {
             (state.tree_selected + delta as usize).min(count - 1)
         };
-        state.detail_scroll = 0;
         state.sector = None;
     }
 
@@ -1127,7 +1114,6 @@ impl AppState {
             .filter(|state| state.stage == AdvancedInspectStage::Browser)
         {
             state.tree_selected = 0;
-            state.detail_scroll = 0;
             state.sector = None;
         }
     }
@@ -1140,7 +1126,6 @@ impl AppState {
             .filter(|state| state.stage == AdvancedInspectStage::Browser)
         {
             state.tree_selected = count.saturating_sub(1);
-            state.detail_scroll = 0;
             state.sector = None;
         }
     }
@@ -1172,7 +1157,6 @@ impl AppState {
         };
         if let Some(state) = self.advanced_inspect.as_mut() {
             state.tree_selected = parent_index;
-            state.detail_scroll = 0;
             state.sector = None;
         }
     }
@@ -1210,7 +1194,6 @@ impl AppState {
         {
             if let Some(state) = self.advanced_inspect.as_mut() {
                 state.tree_selected = child_index;
-                state.detail_scroll = 0;
                 state.sector = None;
             }
         }
@@ -1235,7 +1218,6 @@ impl AppState {
             } => {
                 if let Some(state) = self.advanced_inspect.as_mut() {
                     state.lazy_offsets.insert(extent_id, offset);
-                    state.detail_scroll = 0;
                 }
                 let rows = self.advanced_inspect_tree_rows();
                 if let Some(target_index) = rows.iter().position(|row| row.id == target_id) {
@@ -1252,7 +1234,6 @@ impl AppState {
                     if !state.expanded.remove(&row.id) {
                         state.expanded.insert(row.id.clone());
                     }
-                    state.detail_scroll = 0;
                 }
                 let count = self.advanced_inspect_tree_rows().len();
                 if let Some(state) = self.advanced_inspect.as_mut() {
@@ -1296,7 +1277,6 @@ impl AppState {
             state
                 .pane_focus
                 .focus(crate::tui::pane::PaneId::InspectOverview);
-            state.detail_scroll = 0;
         }
     }
 
@@ -1327,12 +1307,11 @@ impl AppState {
         let field = self.advanced_inspect_selected_field()?;
         let lba = field.range.start / crate::common::SECTOR as u64;
         let cursor = (field.range.start % crate::common::SECTOR as u64) as usize;
-        let (panel, tree_selection, detail_scroll, pane_focus) = {
+        let (panel, tree_selection, pane_focus) = {
             let state = self.advanced_inspect.as_ref()?;
             (
                 state.panel,
                 state.tree_selected,
-                state.detail_scroll,
                 state.pane_focus.clone(),
             )
         };
@@ -1342,7 +1321,6 @@ impl AppState {
             item_count: self.item_count,
             panel: Some(panel),
             tree_selection,
-            detail_scroll,
             pane_focus: Some(pane_focus),
             table_scroll: None,
         });
@@ -1365,7 +1343,6 @@ impl AppState {
         state
             .pane_focus
             .focus(crate::tui::pane::PaneId::InspectDetail);
-        state.detail_scroll = 0;
         (!ready).then(|| (state.source.clone(), lba))
     }
 
@@ -1412,12 +1389,11 @@ impl AppState {
         &mut self,
     ) -> Option<(AdvancedInspectSource, u64)> {
         let lba = self.advanced_inspect_selected_sector_lba()?;
-        let (panel, tree_selection, detail_scroll, pane_focus) = {
+        let (panel, tree_selection, pane_focus) = {
             let state = self.advanced_inspect.as_ref()?;
             (
                 state.panel,
                 state.tree_selected,
-                state.detail_scroll,
                 state.pane_focus.clone(),
             )
         };
@@ -1427,7 +1403,6 @@ impl AppState {
             item_count: self.item_count,
             panel: Some(panel),
             tree_selection,
-            detail_scroll,
             pane_focus: Some(pane_focus),
             table_scroll: None,
         });
@@ -1450,7 +1425,6 @@ impl AppState {
         state
             .pane_focus
             .focus(crate::tui::pane::PaneId::InspectDetail);
-        state.detail_scroll = 0;
         (!ready).then(|| (state.source.clone(), lba))
     }
 
@@ -1759,7 +1733,6 @@ impl AppState {
             if let Some(frame) = self.navigation.pop() {
                 state.panel = frame.panel.unwrap_or(AdvancedInspectPanel::Tree);
                 state.tree_selected = frame.tree_selection;
-                state.detail_scroll = frame.detail_scroll;
                 if let Some(pane_focus) = frame.pane_focus {
                     state.pane_focus = pane_focus;
                     if let Some(panel) =
@@ -1772,18 +1745,6 @@ impl AppState {
             true
         } else {
             false
-        }
-    }
-
-    pub fn advanced_inspect_scroll_detail(&mut self, delta: isize) {
-        if let Some(state) = self.advanced_inspect.as_mut() {
-            if state.stage == AdvancedInspectStage::Browser {
-                state.detail_scroll = if delta < 0 {
-                    state.detail_scroll.saturating_sub(delta.unsigned_abs())
-                } else {
-                    state.detail_scroll.saturating_add(delta as usize)
-                };
-            }
         }
     }
 
