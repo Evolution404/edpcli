@@ -7,7 +7,9 @@
 pub mod backup;
 pub mod device;
 pub mod evidence;
+pub mod identity;
 pub mod inspect;
+pub mod inspect_summary;
 pub(crate) mod inspect_text;
 pub mod inspect_tree;
 pub mod provision;
@@ -70,6 +72,10 @@ pub struct BackupWorkspaceItem {
     pub path: std::path::PathBuf,
     pub file_name: String,
     pub display_time: String,
+    pub size_bytes: Option<u64>,
+    pub vid: Option<String>,
+    pub pid: Option<String>,
+    pub device_id: Option<String>,
     pub onlyid: Option<String>,
     pub user: Option<String>,
     pub dept: Option<String>,
@@ -116,6 +122,14 @@ pub fn scan_backup_workspace(root: &Path) -> Vec<BackupWorkspaceItem> {
                     .unwrap_or("<无效文件名>")
                     .to_string(),
                 display_time: crate::diskio::backup_display_time(&entry.path, entry.mtime),
+                size_bytes: entry
+                    .meta
+                    .as_ref()
+                    .and_then(|meta| meta.secs)
+                    .and_then(|sectors| sectors.checked_mul(crate::common::SECTOR as u64)),
+                vid: entry.meta.as_ref().map(|meta| meta.vid.clone()),
+                pid: entry.meta.as_ref().map(|meta| meta.pid.clone()),
+                device_id: entry.meta.as_ref().map(|meta| meta.device_id.clone()),
                 onlyid: entry.meta.as_ref().and_then(|meta| meta.onlyid.clone()),
                 user: ownership.as_ref().and_then(|value| value.user.clone()),
                 dept: ownership.as_ref().and_then(|value| value.dept.clone()),

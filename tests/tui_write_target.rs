@@ -40,6 +40,10 @@ fn backup(index: usize, name: &str) -> BackupWorkspaceItem {
         path: PathBuf::from(name),
         file_name: name.into(),
         display_time: "2026-09-19 06:00".into(),
+        size_bytes: Some(64_000_000_000),
+        vid: Some("1234".into()),
+        pid: Some("5678".into()),
+        device_id: Some("disk&ven_test&prod_test".into()),
         onlyid: Some("7001".into()),
         user: None,
         dept: None,
@@ -51,6 +55,93 @@ fn backup(index: usize, name: &str) -> BackupWorkspaceItem {
             "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef".into(),
         ),
     }
+}
+
+#[test]
+fn ch14_identity_projection_is_shared_and_unknown_kind_is_honest() {
+    use edpcli::application::identity::WorkspaceIdentity;
+
+    let device = device(6);
+    let backup = backup(1, "identity.edpb");
+    let device_cells = WorkspaceIdentity::from_device(&device).display_cells();
+    let backup_cells = WorkspaceIdentity::from_backup(&backup).display_cells();
+    assert_eq!(device_cells[0], backup_cells[0]);
+    assert_eq!(device_cells[1], backup_cells[1]);
+    assert_eq!(device_cells[2], backup_cells[2]);
+    let mut unknown = backup;
+    unknown.integrity_status = BackupIntegrityStatus::Invalid;
+    unknown.size_ok = false;
+    unknown.size_bytes = None;
+    unknown.vid = None;
+    unknown.pid = None;
+    unknown.device_id = None;
+    unknown.onlyid = None;
+    let cells = WorkspaceIdentity::from_backup(&unknown).display_cells();
+    assert_eq!(cells[0], "—");
+    assert_eq!(cells[1], "—");
+    assert_eq!(cells[2], "—");
+    assert_eq!(cells[3], "—");
+    assert_eq!(
+        cells[6], "—",
+        "invalid backup must not report Plain as known"
+    );
+}
+
+#[test]
+fn ch14_identity_search_matches_both_workspaces() {
+    for query in ["1234:5678", "test_test", "64.00gb", "7001"] {
+        let mut devices = AppState::new();
+        let mut row = device(6);
+        row.onlyid = Some("7001".into());
+        devices.replace_devices(vec![row]);
+        devices.navigate(NavCommand::Search, 20);
+        for ch in query.chars() {
+            devices.push_input_char(ch);
+        }
+        assert_eq!(devices.item_count(), 1, "device query {query}");
+
+        let mut backups = AppState::new();
+        backups.replace_backups(vec![backup(1, "identity.edpb")]);
+        backups.navigate(NavCommand::WorkspaceBackups, 20);
+        backups.navigate(NavCommand::Search, 20);
+        for ch in query.chars() {
+            backups.push_input_char(ch);
+        }
+        assert_eq!(backups.item_count(), 1, "backup query {query}");
+    }
+}
+
+#[test]
+fn ch14_table_projection_is_stable_across_animation_and_scroll() {
+    use edpcli::tui::table_layout::TableKind;
+
+    let mut state = AppState::new();
+    state.replace_devices(vec![device(6), device(7)]);
+    let generation = state
+        .table_view_data(TableKind::Devices)
+        .unwrap()
+        .generation;
+    let row_count = state
+        .table_view_data(TableKind::Devices)
+        .unwrap()
+        .rows
+        .len();
+    for _ in 0..10 {
+        state.advance_animation();
+        state.navigate(NavCommand::Down, 20);
+        state.scroll_table(TableKind::Devices, false);
+    }
+    let view = state.table_view_data(TableKind::Devices).unwrap();
+    assert_eq!(view.generation, generation);
+    assert_eq!(view.rows.len(), row_count);
+    state.replace_devices(vec![device(8)]);
+    assert!(
+        state
+            .table_view_data(TableKind::Devices)
+            .unwrap()
+            .generation
+            > generation
+    );
 }
 
 #[test]

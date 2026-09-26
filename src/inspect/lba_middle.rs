@@ -7,20 +7,24 @@ pub(super) fn render_lba5_8(
     fields: &mut Vec<SectorField>,
     notes: &mut Vec<String>,
     decoded: &mut Vec<u8>,
+    diagnostics: &mut Vec<InspectDiagnostic>,
 ) -> String {
     match lba {
         5 => {
             let view = lba5::parse_lba5(raw_sector);
-            fields.push(field(
-                0,
-                SECTOR,
-                "写保护探测 scratch 区",
-                format!(
-                    "内容本身不解析；opaque preserve；SHA-256={}",
-                    crate::sha256::sha256_hex(view.payload.bytes())
-                ),
-                FieldStyle::Flag,
-            ));
+            fields.push(
+                field(
+                    0,
+                    SECTOR,
+                    "写保护探测 scratch 区",
+                    format!(
+                        "内容本身不解析；opaque preserve；SHA-256={}",
+                        crate::sha256::sha256_hex(view.payload.bytes())
+                    ),
+                    FieldStyle::Flag,
+                )
+                .with_status(SectorFieldStatus::Preserved),
+            );
             notes.push("LBA5 内容不解析；EDP 只消费写回结果判断 ERROR_WRITE_PROTECT，扇区本身原样保留；当前样本可以全零，但全零不是协议要求。".into());
             "canonical protocol::lba5（写保护探测）".into()
         }
@@ -212,6 +216,10 @@ pub(super) fn render_lba5_8(
                 "canonical protocol::lba6 (SAFE6 rolling XOR)".into()
             }
             Err(error) => {
+                diagnostics.push(InspectDiagnostic::new(
+                    InspectDiagnosticCode::CanonicalParserRejected,
+                    format!("LBA6 canonical parser 拒绝: {error}"),
+                ));
                 notes.push(format!("canonical LBA6 parser 拒绝该扇区: {error}"));
                 "RAW（LBA6 canonical parser 未通过）".into()
             }
@@ -258,6 +266,10 @@ pub(super) fn render_lba5_8(
                         "canonical protocol::lba7 (rolling XOR)".into()
                     }
                     None => {
+                        diagnostics.push(InspectDiagnostic::new(
+                            InspectDiagnosticCode::AmbiguousProfile,
+                            "LBA7 entry-count/pass-info profile 未唯一确定",
+                        ));
                         notes.push(
                             "无法从已知 entry-count/pass-info profile 中唯一解析 LBA7；拒绝猜测。"
                                 .into(),
@@ -266,6 +278,10 @@ pub(super) fn render_lba5_8(
                     }
                 }
             } else {
+                diagnostics.push(InspectDiagnostic::new(
+                    InspectDiagnosticCode::MissingDeviceId,
+                    "缺 device_id，无法解 LBA7",
+                ));
                 "RAW（缺 device_id，无法解 LBA7）".into()
             }
         }
@@ -353,13 +369,16 @@ pub(super) fn render_lba5_8(
                             format!("0x{:04X}", view.elab_offset),
                             FieldStyle::Address,
                         ));
-                        fields.push(field(
-                            0x040,
-                            0x080,
-                            "reserved header",
-                            hex_bytes(&view.reserved_header),
-                            FieldStyle::Flag,
-                        ));
+                        fields.push(
+                            field(
+                                0x040,
+                                0x080,
+                                "reserved header",
+                                hex_bytes(&view.reserved_header),
+                                FieldStyle::Flag,
+                            )
+                            .with_status(SectorFieldStatus::Reserved),
+                        );
                         fields.push(elabel_field(0x080, &view.elabel_body));
                         if !view.encrypted_backing.is_empty() {
                             let start = 0x080 + view.elabel_body.len() + 1;
@@ -372,13 +391,16 @@ pub(super) fn render_lba5_8(
                             ));
                         }
                         if !view.tail_backing.is_empty() {
-                            fields.push(field(
-                                view.encrypted_len(),
-                                SECTOR,
-                                "raw tail backing",
-                                hex_bytes(&view.tail_backing),
-                                FieldStyle::Flag,
-                            ));
+                            fields.push(
+                                field(
+                                    view.encrypted_len(),
+                                    SECTOR,
+                                    "raw tail backing",
+                                    hex_bytes(&view.tail_backing),
+                                    FieldStyle::Flag,
+                                )
+                                .with_status(SectorFieldStatus::Preserved),
+                            );
                         }
                         notes.push(format!(
                             "profile 候选: UsbOnlyInfo=[{usb_candidates}] host-hardinfo=[{host_candidates}]；encrypted_len={}B",
@@ -387,11 +409,19 @@ pub(super) fn render_lba5_8(
                         format!("canonical protocol::lba8 A6B0 前 {}B", view.encrypted_len())
                     }
                     None => {
+                        diagnostics.push(InspectDiagnostic::new(
+                            InspectDiagnosticCode::AmbiguousProfile,
+                            "LBA8 UsbOnlyInfo/host-hardinfo profile 未唯一确定",
+                        ));
                         notes.push("LBA8 已解出候选但无法在已知 UsbOnlyInfo/host-hardinfo profile 中唯一归类；拒绝强猜。".into());
                         "RAW（LBA8 profile 未唯一确定）".into()
                     }
                 }
             } else {
+                diagnostics.push(InspectDiagnostic::new(
+                    InspectDiagnosticCode::MissingDeviceId,
+                    "缺 device_id，无法解 LBA8",
+                ));
                 "RAW（缺 device_id，无法解 LBA8）".into()
             }
         }

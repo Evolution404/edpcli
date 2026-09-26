@@ -118,6 +118,8 @@ pub struct AppState {
     workspace: Workspace,
     devices: Vec<crate::disk_scan::Row>,
     backups: Vec<crate::application::BackupWorkspaceItem>,
+    device_table_view: super::table_layout::TableViewData,
+    backup_table_view: super::table_layout::TableViewData,
     device_scan_pending: bool,
     backup_scan_pending: bool,
     selected: usize,
@@ -160,6 +162,8 @@ impl AppState {
             workspace: Workspace::Devices,
             devices: Vec::new(),
             backups: Vec::new(),
+            device_table_view: super::table_layout::TableViewData::default(),
+            backup_table_view: super::table_layout::TableViewData::default(),
             device_scan_pending: false,
             backup_scan_pending: false,
             selected: 0,
@@ -248,32 +252,31 @@ impl AppState {
     }
 
     fn device_matches_query(row: &crate::disk_scan::Row, query: &str) -> bool {
+        let identity = crate::application::identity::WorkspaceIdentity::from_device(row);
         let text = format!(
-            "disk{} {} {} {}:{} {} {} {} {} {}",
+            "disk{} {} {} {}",
             row.disk,
-            row.device_id.as_deref().unwrap_or_default(),
-            row.onlyid.as_deref().unwrap_or_default(),
-            row.vid,
-            row.pid,
-            row.user.as_deref().unwrap_or_default(),
-            row.dept.as_deref().unwrap_or_default(),
+            identity.search_text(),
             row.proto,
-            row.provision_kind.short_name(),
-            row.provision_kind.full_name(),
+            identity
+                .provision_kind
+                .map(|kind| kind.full_name())
+                .unwrap_or_default(),
         );
         text.to_ascii_lowercase().contains(query)
     }
 
     fn backup_matches_query(row: &crate::application::BackupWorkspaceItem, query: &str) -> bool {
+        let identity = crate::application::identity::WorkspaceIdentity::from_backup(row);
         let text = format!(
-            "{} {} {} {} {} {} {}",
+            "{} {} {} {}",
             row.file_name,
             row.display_time,
-            row.onlyid.as_deref().unwrap_or_default(),
-            row.user.as_deref().unwrap_or_default(),
-            row.dept.as_deref().unwrap_or_default(),
-            row.provision_kind.short_name(),
-            row.provision_kind.full_name(),
+            identity.search_text(),
+            identity
+                .provision_kind
+                .map(|kind| kind.full_name())
+                .unwrap_or_default(),
         );
         text.to_ascii_lowercase().contains(query)
     }
@@ -527,6 +530,10 @@ impl AppState {
             self.provision.target_disk = None;
         }
         self.devices = devices;
+        self.device_table_view = super::table_layout::device_table_view(
+            &self.devices,
+            self.device_table_view.generation.wrapping_add(1),
+        );
         self.device_scan_pending = false;
         if self.workspace == Workspace::Provision {
             if self.pinned_disk.is_none() {
@@ -557,6 +564,37 @@ impl AppState {
 
     pub fn backups(&self) -> &[crate::application::BackupWorkspaceItem] {
         &self.backups
+    }
+
+    pub fn table_view_data(
+        &self,
+        kind: super::table_layout::TableKind,
+    ) -> Option<&super::table_layout::TableViewData> {
+        match kind {
+            super::table_layout::TableKind::Devices => Some(&self.device_table_view),
+            super::table_layout::TableKind::Backups => Some(&self.backup_table_view),
+            _ => None,
+        }
+    }
+
+    pub fn device_source_index_at_visible(&self, position: usize) -> Option<usize> {
+        let index =
+            if self.workspace == Workspace::Devices && !self.active_search_query().is_empty() {
+                *self.search_matches.get(position)?
+            } else {
+                position
+            };
+        (index < self.devices.len()).then_some(index)
+    }
+
+    pub fn backup_source_index_at_visible(&self, position: usize) -> Option<usize> {
+        let index =
+            if self.workspace == Workspace::Backups && !self.active_search_query().is_empty() {
+                *self.search_matches.get(position)?
+            } else {
+                position
+            };
+        (index < self.backups.len()).then_some(index)
     }
 
     pub fn visible_device_indices(&self) -> Vec<usize> {
@@ -716,6 +754,10 @@ impl AppState {
             .then(|| self.selected_backup_path())
             .flatten();
         self.backups = backups;
+        self.backup_table_view = super::table_layout::backup_table_view(
+            &self.backups,
+            self.backup_table_view.generation.wrapping_add(1),
+        );
         let selectable = self
             .backups
             .iter()

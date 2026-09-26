@@ -67,8 +67,11 @@ fn item(lba: u64, decoded: bool) -> AdvancedInspectItem {
         decoded_sha256: decoded.then(|| format!("decoded-{lba}")),
         method: decoded.then(|| "test-decoder".into()),
         decode_error: (!decoded).then(|| "decoder unavailable".into()),
+        parse_state: edpcli::inspect::InspectParseState::Parsed,
+        diagnostics: Vec::new(),
         fields: if lba == 0 {
             vec![InspectField {
+                key: edpcli::inspect::InspectFieldKey::Synthetic,
                 range: AbsoluteByteRange {
                     start: 0,
                     end_exclusive: 2,
@@ -76,6 +79,8 @@ fn item(lba: u64, decoded: bool) -> AdvancedInspectItem {
                 field_type: InspectFieldType::Identity,
                 raw: vec![0x12, 0x01],
                 decoded: vec![0xA5, 0x01],
+                field_logical: None,
+                transform: None,
                 status: InspectFieldStatus::Known,
                 label: "KnownField".into(),
                 value: "typed-value".into(),
@@ -84,6 +89,7 @@ fn item(lba: u64, decoded: bool) -> AdvancedInspectItem {
                 children: vec![FieldChild {
                     label: "bit-child".into(),
                     value: "1".into(),
+                    relative_range: None,
                 }],
             }]
         } else {
@@ -123,9 +129,109 @@ fn select_protocol_lba0(state: &mut AppState) {
 }
 
 #[test]
+fn ch14_detail_rows_keep_evidence_and_select_byte_ranges() {
+    use edpcli::tui::pane::PaneId;
+
+    let mut sector = item(0, true);
+    sector.fields[0].children = vec![
+        FieldChild {
+            label: "with bytes".into(),
+            value: "child value".into(),
+            relative_range: Some((1, 2)),
+        },
+        FieldChild {
+            label: "semantic only".into(),
+            value: "derived".into(),
+            relative_range: None,
+        },
+    ];
+    let mut state = AppState::new();
+    assert!(state.begin_advanced_inspect(AdvancedInspectSource::Disk(6)));
+    state.advanced_inspect_finish(Ok(workspace(vec![sector])));
+    select_protocol_lba0(&mut state);
+    state.advanced_inspect_focus_pane(PaneId::InspectDetail);
+    let rows = state.advanced_inspect_detail_rows();
+    assert_eq!(rows.len(), 1, "children start collapsed");
+    assert!(rows[0].cells.iter().any(|cell| cell.contains("12 01")));
+    assert!(rows[0].cells.iter().any(|cell| cell.contains("A5 01")));
+    assert_eq!(rows[0].range.unwrap().start, 0);
+    state.advanced_inspect_detail_toggle_selected();
+    let rows = state.advanced_inspect_detail_rows();
+    assert_eq!(rows.len(), 3);
+    state.advanced_inspect_move_focused_vertical(1, 2, rows.len());
+    assert_eq!(state.pane_viewport(PaneId::InspectDetail).selected, Some(1));
+    assert_eq!(
+        state
+            .advanced_inspect_detail_selected_row()
+            .unwrap()
+            .range
+            .unwrap()
+            .start,
+        1
+    );
+    state.advanced_inspect_move_focused_vertical(1, 2, rows.len());
+    assert_eq!(
+        state.advanced_inspect_detail_selected_row().unwrap().range,
+        None
+    );
+    assert!(state.advanced_inspect_detail_open_selected().is_none());
+    assert!(state.advanced_inspect_detail_yank(true).is_none());
+    state.advanced_inspect_move_focused_vertical(-1, 2, rows.len());
+    assert!(state.advanced_inspect_detail_open_selected().is_none());
+    assert_eq!(state.advanced_inspect_sector().unwrap().cursor, 1);
+}
+
+#[test]
+fn ch14_inspect_tree_view_model_reuses_rows_until_revision_changes() {
+    let mut state = AppState::new();
+    assert!(state.begin_advanced_inspect(AdvancedInspectSource::Disk(6)));
+    state.advanced_inspect_finish(Ok(workspace(vec![item(0, true)])));
+    let first = state.advanced_inspect_tree_rows();
+    let second = state.advanced_inspect_tree_rows();
+    assert!(std::sync::Arc::ptr_eq(&first, &second));
+    assert_eq!(state.advanced_inspect_tree_index("device"), Some(0));
+    let protocol = first
+        .iter()
+        .position(|row| row.id.ends_with("/region.protocol"))
+        .unwrap();
+    state.advanced_inspect_move_tree(protocol as isize);
+    state.advanced_inspect_toggle_selected();
+    let expanded = state.advanced_inspect_tree_rows();
+    assert!(!std::sync::Arc::ptr_eq(&first, &expanded));
+    assert!(expanded.len() > first.len());
+    assert!(std::sync::Arc::ptr_eq(
+        &expanded,
+        &state.advanced_inspect_tree_rows()
+    ));
+    state.advanced_inspect_sector_finish(0, Ok(item(0, false)));
+    assert!(!std::sync::Arc::ptr_eq(
+        &expanded,
+        &state.advanced_inspect_tree_rows()
+    ));
+}
+
+#[test]
+fn ch14_tree_selection_resets_detail_row_and_scroll() {
+    use edpcli::tui::pane::PaneId;
+
+    let mut state = AppState::new();
+    assert!(state.begin_advanced_inspect(AdvancedInspectSource::Disk(6)));
+    state.advanced_inspect_finish(Ok(workspace(vec![item(0, true), item(1, true)])));
+    select_protocol_lba0(&mut state);
+    let viewport = state.pane_viewport_mut(PaneId::InspectDetail);
+    viewport.selected = Some(7);
+    viewport.scroll_y.offset = 7;
+    state.advanced_inspect_move_tree(1);
+    let viewport = state.pane_viewport(PaneId::InspectDetail);
+    assert_eq!(viewport.selected, Some(0));
+    assert_eq!(viewport.scroll_y.offset, 0);
+}
+
+#[test]
 fn selecting_lba12_shows_canonical_fields_before_enter() {
     let mut sector = item(12, true);
     sector.fields = vec![InspectField {
+        key: edpcli::inspect::InspectFieldKey::Synthetic,
         range: AbsoluteByteRange {
             start: 12 * 512 + 16,
             end_exclusive: 12 * 512 + 20,
@@ -133,6 +239,8 @@ fn selecting_lba12_shows_canonical_fields_before_enter() {
         field_type: InspectFieldType::Identity,
         raw: vec![2, 0, 0, 0],
         decoded: vec![2, 0, 0, 0],
+        field_logical: None,
+        transform: None,
         status: InspectFieldStatus::Known,
         label: "PartionType".into(),
         value: "type2".into(),
@@ -141,6 +249,7 @@ fn selecting_lba12_shows_canonical_fields_before_enter() {
         children: vec![FieldChild {
             label: "Start LBA".into(),
             value: "20480".into(),
+            relative_range: None,
         }],
     }];
     let mut state = AppState::new();
@@ -167,8 +276,92 @@ fn selecting_lba12_shows_canonical_fields_before_enter() {
         .collect::<String>();
     assert!(text.contains("PartionType"), "{text}");
     assert!(text.contains("type2"), "{text}");
+    assert!(!text.contains("Start LBA"), "children start collapsed");
+    state.advanced_inspect_focus_pane(edpcli::tui::pane::PaneId::InspectDetail);
+    state.advanced_inspect_detail_toggle_selected();
+    terminal.draw(|frame| render::draw(frame, &state)).unwrap();
+    let text = terminal
+        .backend()
+        .buffer()
+        .content()
+        .iter()
+        .map(|cell| cell.symbol())
+        .collect::<String>();
     assert!(text.contains("Start LBA"), "{text}");
+    state
+        .pane_viewport_mut(edpcli::tui::pane::PaneId::InspectDetail)
+        .scroll_x = 1;
+    terminal.draw(|frame| render::draw(frame, &state)).unwrap();
+    let text = terminal
+        .backend()
+        .buffer()
+        .content()
+        .iter()
+        .map(|cell| cell.symbol())
+        .collect::<String>();
     assert!(text.contains("20480"), "{text}");
+}
+
+#[test]
+fn ch14_single_sector_tree_rows_omit_redundant_closed_range() {
+    let mut state = AppState::new();
+    assert!(state.begin_advanced_inspect(AdvancedInspectSource::Disk(6)));
+    state.advanced_inspect_finish(Ok(workspace(vec![item(0, true)])));
+    select_protocol_lba0(&mut state);
+    let mut terminal = Terminal::new(TestBackend::new(160, 50)).unwrap();
+    terminal.draw(|frame| render::draw(frame, &state)).unwrap();
+    let text = terminal
+        .backend()
+        .buffer()
+        .content()
+        .iter()
+        .map(|cell| cell.symbol())
+        .collect::<String>();
+    assert!(!text.contains("LBA0 [0..0]"), "{text}");
+    assert!(!text.contains("LBA12 [12..12]"), "{text}");
+    assert!(
+        text.replace(' ', "").contains("EDP主协议区[0..12]"),
+        "{text}"
+    );
+}
+
+#[test]
+fn ch14_lba8_overview_shows_semantic_identity_without_generic_metadata_dump() {
+    let mut sector = item(8, true);
+    let mut usb = item(0, true).fields.remove(0);
+    usb.key = edpcli::inspect::InspectFieldKey::Lba8UsbOnlyInfo;
+    usb.label = "localized label".into();
+    usb.value = "140225993400000000".into();
+    let mut host = usb.clone();
+    host.key = edpcli::inspect::InspectFieldKey::Lba8HostHardinfo;
+    host.value = "0x00000000".into();
+    sector.fields = vec![usb, host];
+
+    let mut state = AppState::new();
+    assert!(state.begin_advanced_inspect(AdvancedInspectSource::Disk(6)));
+    state.advanced_inspect_finish(Ok(workspace(vec![sector])));
+    select_protocol_lba0(&mut state);
+    let rows = state.advanced_inspect_tree_rows();
+    let lba8 = rows
+        .iter()
+        .position(|row| row.id.ends_with("/sector.8"))
+        .unwrap();
+    let current = state.advanced_inspect().unwrap().tree_selected;
+    state.advanced_inspect_move_tree(lba8 as isize - current as isize);
+    let mut terminal = Terminal::new(TestBackend::new(160, 50)).unwrap();
+    terminal.draw(|frame| render::draw(frame, &state)).unwrap();
+    let text = terminal
+        .backend()
+        .buffer()
+        .content()
+        .iter()
+        .map(|cell| cell.symbol())
+        .collect::<String>()
+        .replace(' ', "");
+    assert!(text.contains("设备身份与电子标签"), "{text}");
+    assert!(text.contains("UsbOnlyInfo"), "{text}");
+    assert!(text.contains("HostHardinfo"), "{text}");
+    assert!(!text.contains("Sectorcount:"), "{text}");
 }
 
 #[test]
@@ -199,9 +392,78 @@ fn selecting_known_partition_sector_requests_read_only_preview() {
     let current = state.advanced_inspect().unwrap().tree_selected;
     state.advanced_inspect_move_tree(sector as isize - current as isize);
     assert_eq!(state.advanced_inspect_preview_request().unwrap().1, 2_048);
-    state.advanced_inspect_mark_preview_attempted(2_048);
+    state.advanced_inspect_mark_preview_pending(2_048);
     assert!(state.advanced_inspect_preview_request().is_none());
     assert!(state.advanced_inspect_sector().is_none());
+}
+
+#[test]
+fn ch14_failed_passive_preview_requires_explicit_retry_then_recovers() {
+    use edpcli::tui::state::PreviewLoadState;
+
+    let mut state = AppState::new();
+    assert!(state.begin_advanced_inspect(AdvancedInspectSource::Disk(6)));
+    state.advanced_inspect_finish(Ok(workspace_with_partition(Vec::new())));
+    let rows = state.advanced_inspect_tree_rows();
+    let partition = rows
+        .iter()
+        .position(|row| row.id.ends_with("/region.partition.0"))
+        .unwrap();
+    state.advanced_inspect_move_tree(partition as isize);
+    state.advanced_inspect_toggle_selected();
+    let rows = state.advanced_inspect_tree_rows();
+    let extent = rows
+        .iter()
+        .position(|row| row.id.ends_with("/region.partition.0.extent"))
+        .unwrap();
+    let current = state.advanced_inspect().unwrap().tree_selected;
+    state.advanced_inspect_move_tree(extent as isize - current as isize);
+    state.advanced_inspect_toggle_selected();
+    let rows = state.advanced_inspect_tree_rows();
+    let sector = rows
+        .iter()
+        .position(|row| row.id.ends_with("/sector.2048"))
+        .unwrap();
+    let current = state.advanced_inspect().unwrap().tree_selected;
+    state.advanced_inspect_move_tree(sector as isize - current as isize);
+
+    assert_eq!(state.advanced_inspect_preview_request().unwrap().1, 2_048);
+    state.advanced_inspect_mark_preview_pending(2_048);
+    assert_eq!(
+        state.advanced_inspect_preview_state(2_048),
+        PreviewLoadState::Pending { attempts: 1 }
+    );
+    state.advanced_inspect_sector_finish(2_048, Err("transient read".into()));
+    assert!(matches!(
+        state.advanced_inspect_preview_state(2_048),
+        PreviewLoadState::Failed { attempts: 1, .. }
+    ));
+    assert!(state.advanced_inspect_preview_request().is_none());
+    let mut terminal = Terminal::new(TestBackend::new(160, 50)).unwrap();
+    terminal.draw(|frame| render::draw(frame, &state)).unwrap();
+    let text = terminal
+        .backend()
+        .buffer()
+        .content()
+        .iter()
+        .map(|cell| cell.symbol())
+        .collect::<String>()
+        .replace(' ', "");
+    assert!(text.contains("读取失败"), "{text}");
+    assert!(text.contains("按r显式重试"), "{text}");
+    assert_eq!(
+        state.advanced_inspect_retry_selected_preview().unwrap().1,
+        2_048
+    );
+    assert_eq!(
+        state.advanced_inspect_preview_state(2_048),
+        PreviewLoadState::Pending { attempts: 2 }
+    );
+    state.advanced_inspect_sector_finish(2_048, Ok(item(2_048, true)));
+    assert_eq!(
+        state.advanced_inspect_preview_state(2_048),
+        PreviewLoadState::Ready
+    );
 }
 
 #[test]
@@ -265,6 +527,7 @@ fn detail_field_table_has_vertical_row_viewport_and_row_column_position() {
     let mut entry = item(0, true);
     entry.fields = (0..30)
         .map(|index| InspectField {
+            key: edpcli::inspect::InspectFieldKey::Synthetic,
             range: AbsoluteByteRange {
                 start: index,
                 end_exclusive: index + 1,
@@ -272,6 +535,8 @@ fn detail_field_table_has_vertical_row_viewport_and_row_column_position() {
             field_type: InspectFieldType::Identity,
             raw: vec![index as u8],
             decoded: vec![index as u8],
+            field_logical: None,
+            transform: None,
             status: InspectFieldStatus::Known,
             label: format!("Field{index:02}"),
             value: format!("value-{index:02}"),
@@ -488,6 +753,7 @@ fn sector_inspector_renders_32x16_offsets_ascii_typed_and_unknown_views() {
 fn field_to_hex_link_preserves_cross_sector_range_and_yank_register() {
     let mut first = item(0, true);
     let cross = InspectField {
+        key: edpcli::inspect::InspectFieldKey::Synthetic,
         range: AbsoluteByteRange {
             start: 0x1f0,
             end_exclusive: edpcli::common::SECTOR as u64 + 0x30,
@@ -495,6 +761,8 @@ fn field_to_hex_link_preserves_cross_sector_range_and_yank_register() {
         field_type: InspectFieldType::Identity,
         raw: (0..64).map(|value| value as u8).collect(),
         decoded: (0..64).map(|value| (value as u8) ^ 0x5a).collect(),
+        field_logical: None,
+        transform: None,
         status: InspectFieldStatus::Preserved,
         label: "CrossField".into(),
         value: "cross-value".into(),
@@ -503,6 +771,7 @@ fn field_to_hex_link_preserves_cross_sector_range_and_yank_register() {
         children: vec![FieldChild {
             label: "cross-child".into(),
             value: "kept".into(),
+            relative_range: None,
         }],
     };
     first.fields.push(cross.clone());
@@ -577,6 +846,7 @@ fn field_statuses_remain_distinct_and_unknown_byte_stays_unclassified() {
     ]
     .into_iter()
     .map(|(start, status, label)| InspectField {
+        key: edpcli::inspect::InspectFieldKey::Synthetic,
         range: AbsoluteByteRange {
             start,
             end_exclusive: start + 2,
@@ -584,6 +854,8 @@ fn field_statuses_remain_distinct_and_unknown_byte_stays_unclassified() {
         field_type: InspectFieldType::Flag,
         raw: vec![start as u8, 0],
         decoded: vec![start as u8, 0],
+        field_logical: None,
+        transform: None,
         status,
         label: label.into(),
         value: format!("value-{start:02X}"),
@@ -804,6 +1076,7 @@ fn structured_search_next_and_previous_cycle_all_cached_matches() {
     let mut first = item(0, true);
     let mut second = item(1, true);
     second.fields = vec![InspectField {
+        key: edpcli::inspect::InspectFieldKey::Synthetic,
         range: AbsoluteByteRange {
             start: edpcli::common::SECTOR as u64,
             end_exclusive: edpcli::common::SECTOR as u64 + 2,
@@ -811,6 +1084,8 @@ fn structured_search_next_and_previous_cycle_all_cached_matches() {
         field_type: InspectFieldType::Identity,
         raw: vec![0x12, 0x01],
         decoded: vec![0xA5, 0x01],
+        field_logical: None,
+        transform: None,
         status: InspectFieldStatus::Known,
         label: "KnownField".into(),
         value: "second-match".into(),

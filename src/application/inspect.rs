@@ -229,22 +229,26 @@ impl From<crate::inspect_adapter::FieldStyle> for InspectFieldType {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum InspectFieldStatus {
-    Known,
-    Unknown,
-    Reserved,
-    Preserved,
-}
+pub use crate::inspect_adapter::{
+    FieldTransform, InspectDiagnostic, InspectDiagnosticCode, InspectFieldKey, InspectParseState,
+    SectorFieldStatus as InspectFieldStatus,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InspectField {
+    pub key: InspectFieldKey,
     pub range: AbsoluteByteRange,
     pub field_type: InspectFieldType,
+    /// PhysicalRaw: bytes read from the source sector before sector decoding.
     pub raw: Vec<u8>,
+    /// SectorDecoded: bytes after the sector decoder, before field transforms.
     pub decoded: Vec<u8>,
+    /// FieldLogical: bytes after a proven field-level storage transform.
+    pub field_logical: Option<Vec<u8>>,
+    pub transform: Option<FieldTransform>,
     pub status: InspectFieldStatus,
     pub label: String,
+    /// SemanticValue: the canonical parser's typed value rendered for humans.
     pub value: String,
     pub style: crate::inspect_adapter::FieldStyle,
     pub group: Option<String>,
@@ -262,7 +266,8 @@ fn materialize_protocol_fields(
         .ok_or_else(|| InspectError::decode(format!("LBA{lba} 字段绝对字节偏移溢出")))?;
     fields
         .iter()
-        .map(|field| {
+        .enumerate()
+        .map(|(ordinal, field)| {
             if field.end < field.start || field.end > raw.len() || field.end > decoded.len() {
                 return Err(InspectError::decode(format!(
                     "LBA{lba} 字段 {} range +0x{:X}..+0x{:X} 越界",
@@ -276,6 +281,17 @@ fn materialize_protocol_fields(
                 InspectError::decode(format!("LBA{lba} 字段 {} 绝对终点溢出", field.label))
             })?;
             Ok(InspectField {
+                key: InspectFieldKey::protocol(
+                    lba,
+                    field.start,
+                    field.end,
+                    fields[..ordinal]
+                        .iter()
+                        .filter(|previous| {
+                            previous.start == field.start && previous.end == field.end
+                        })
+                        .count(),
+                ),
                 range: AbsoluteByteRange {
                     start,
                     end_exclusive,
@@ -283,7 +299,11 @@ fn materialize_protocol_fields(
                 field_type: field.style.into(),
                 raw: raw[field.start..field.end].to_vec(),
                 decoded: decoded[field.start..field.end].to_vec(),
-                status: InspectFieldStatus::Known,
+                field_logical: field
+                    .transform
+                    .and_then(|transform| transform.apply(&decoded[field.start..field.end])),
+                transform: field.transform,
+                status: field.status,
                 label: field.label.clone(),
                 value: field.value.clone(),
                 style: field.style,
@@ -305,6 +325,8 @@ pub struct AdvancedInspectItem {
     pub decoded_sha256: Option<String>,
     pub method: Option<String>,
     pub decode_error: Option<String>,
+    pub parse_state: InspectParseState,
+    pub diagnostics: Vec<InspectDiagnostic>,
     pub fields: Vec<InspectField>,
     pub notes: Vec<String>,
     pub meta_text: Option<String>,
@@ -716,6 +738,13 @@ fn run_advanced_source<R: SectorReader + ?Sized>(
             decoded_sha256: None,
             method: None,
             decode_error: None,
+            parse_state: protocol_view
+                .as_ref()
+                .map_or(InspectParseState::Unsupported, |view| view.parse_state),
+            diagnostics: protocol_view
+                .as_ref()
+                .map(|view| view.diagnostics.clone())
+                .unwrap_or_default(),
             fields,
             notes: protocol_view
                 .as_ref()
@@ -747,6 +776,11 @@ fn run_advanced_source<R: SectorReader + ?Sized>(
                     }
                     Err(error) if request.fail_soft_decode => {
                         item.decode_error = Some(error.to_string());
+                        item.parse_state = InspectParseState::Invalid;
+                        item.diagnostics.push(InspectDiagnostic::new(
+                            InspectDiagnosticCode::CanonicalParserRejected,
+                            error.to_string(),
+                        ));
                         item.method = Some("raw-only".into());
                     }
                     Err(error) => return Err(error),
@@ -897,6 +931,8 @@ mod advanced_tests {
             style: crate::inspect_adapter::FieldStyle::Identity,
             group: Some("group".into()),
             children: Vec::new(),
+            status: crate::inspect_adapter::SectorFieldStatus::Known,
+            transform: None,
         }];
         let materialized = materialize_protocol_fields(lba, &raw, &decoded, &fields).unwrap();
         assert_eq!(materialized.len(), 1);
@@ -909,6 +945,35 @@ mod advanced_tests {
         assert_eq!(field.field_type, InspectFieldType::Identity);
         assert_eq!(field.status, InspectFieldStatus::Known);
         assert_eq!(field.group.as_deref(), Some("group"));
+    }
+
+    #[test]
+    fn pass_info_field_keeps_all_four_byte_and_value_layers() {
+        let raw = vec![0u8; SECTOR];
+        let mut sector_decoded = raw.clone();
+        sector_decoded[0x126] = 0x77;
+        let fields = vec![crate::inspect_adapter::SectorField {
+            start: 0x126,
+            end: 0x127,
+            label: "保密区最大错误次数".into(),
+            value: "255".into(),
+            style: crate::inspect_adapter::FieldStyle::Flag,
+            group: Some("PassInfo".into()),
+            children: Vec::new(),
+            status: crate::inspect_adapter::SectorFieldStatus::Known,
+            transform: Some(FieldTransform::XorByte {
+                offset: 0,
+                mask: 0x88,
+            }),
+        }];
+        let materialized = materialize_protocol_fields(12, &raw, &sector_decoded, &fields)
+            .expect("valid one-byte field");
+        let field = &materialized[0];
+        assert_eq!(field.key, InspectFieldKey::Lba12MaxEncryptPasswordErrors);
+        assert_eq!(field.raw, [0x00]);
+        assert_eq!(field.decoded, [0x77]);
+        assert_eq!(field.field_logical.as_deref(), Some(&[0xff][..]));
+        assert_eq!(field.value, "255");
     }
 
     #[test]

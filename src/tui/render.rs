@@ -261,22 +261,7 @@ fn device_status(row: &crate::disk_scan::Row) -> String {
     } else if let Some(error) = &row.probe_error {
         format!("读取异常: {}", safe(error))
     } else {
-        row.provision_kind.full_name().into()
-    }
-}
-
-fn device_ven_prod(device_id: Option<&str>) -> String {
-    let mut ven = None;
-    let mut prod = None;
-    for part in device_id.unwrap_or_default().split('&') {
-        ven = ven.or_else(|| part.strip_prefix("ven_"));
-        prod = prod.or_else(|| part.strip_prefix("prod_"));
-    }
-    match (ven, prod) {
-        (Some(ven), Some(prod)) => safe(&format!("{ven}_{prod}")),
-        (Some(ven), None) => safe(ven),
-        (None, Some(prod)) => safe(prod),
-        _ => "—".into(),
+        "可用".into()
     }
 }
 

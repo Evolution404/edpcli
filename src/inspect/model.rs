@@ -20,12 +20,23 @@ pub struct SectorField {
     pub style: FieldStyle,
     pub group: Option<String>,
     pub children: Vec<FieldChild>,
+    pub status: SectorFieldStatus,
+    pub transform: Option<FieldTransform>,
+}
+
+impl SectorField {
+    pub fn with_status(mut self, status: SectorFieldStatus) -> Self {
+        self.status = status;
+        self
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FieldChild {
     pub label: String,
     pub value: String,
+    /// Relative to the parent field; absent when byte provenance is not established.
+    pub relative_range: Option<(usize, usize)>,
 }
 
 #[derive(Debug, Clone)]
@@ -36,6 +47,8 @@ pub struct SectorView {
     pub method: String,
     pub fields: Vec<SectorField>,
     pub notes: Vec<String>,
+    pub parse_state: InspectParseState,
+    pub diagnostics: Vec<InspectDiagnostic>,
 }
 
 pub(super) fn u32_at(b: &[u8], off: usize) -> Option<u32> {
@@ -57,6 +70,8 @@ pub(super) fn field(
         style,
         group: None,
         children: Vec::new(),
+        status: SectorFieldStatus::Known,
+        transform: None,
     }
 }
 
@@ -272,14 +287,19 @@ pub(super) fn profile_field(
 
 pub(super) fn pass_info_fields(base: usize, pass: &PassInfo, group: &str) -> Vec<SectorField> {
     let mut out = Vec::new();
-    out.push(grouped_field(
+    let mut version = grouped_field(
         base,
         base + 2,
         group,
         "版本",
         format!("0x{:04X}", pass.version),
         FieldStyle::Flag,
-    ));
+    );
+    version.transform = Some(FieldTransform::XorByte {
+        offset: 0,
+        mask: 0x88,
+    });
+    out.push(version);
     let values = [
         ("交换区强制改密", pass.force_change_share),
         ("交换区最大错误次数", pass.max_share_password_errors),
@@ -295,14 +315,21 @@ pub(super) fn pass_info_fields(base: usize, pass: &PassInfo, group: &str) -> Vec
         ("保密区备份提示周期", pass.encrypt_backup_prompt_period),
     ];
     for (index, (label, value)) in values.into_iter().enumerate() {
-        out.push(grouped_field(
+        let mut field = grouped_field(
             base + 2 + index,
             base + 3 + index,
             group,
             label,
             value.to_string(),
             FieldStyle::Flag,
-        ));
+        );
+        if matches!(index, 1 | 4) {
+            field.transform = Some(FieldTransform::XorByte {
+                offset: 0,
+                mask: 0x88,
+            });
+        }
+        out.push(field);
     }
     out
 }
@@ -321,10 +348,12 @@ pub(super) fn legacy_key_field(base: usize, group: String, entry: &EdpfEntry64) 
         FieldChild {
             label: "pwd_crc".into(),
             value: format!("0x{:08X}", entry.user_key_crc),
+            relative_range: Some((0, 4)),
         },
         FieldChild {
             label: "key_crc".into(),
             value: format!("0x{:08X}", entry.file_key_crc),
+            relative_range: Some((4, 8)),
         },
     ];
     if crc32_bare(known) == entry.user_key_crc {
@@ -337,6 +366,7 @@ pub(super) fn legacy_key_field(base: usize, group: String, entry: &EdpfEntry64) 
         children.push(FieldChild {
             label: "key8".into(),
             value: key8.iter().map(|byte| format!("{byte:02x}")).collect(),
+            relative_range: None,
         });
         children.push(FieldChild {
             label: "key8 CRC".into(),
@@ -345,11 +375,13 @@ pub(super) fn legacy_key_field(base: usize, group: String, entry: &EdpfEntry64) 
             } else {
                 "✗".into()
             },
+            relative_range: None,
         });
     } else {
         children.push(FieldChild {
             label: "raw".into(),
             value: hex_bytes(&entry.encrypted_file_key),
+            relative_range: Some((8, 16)),
         });
     }
     field_with_children(
@@ -382,11 +414,13 @@ pub(super) fn elabel_field(start: usize, body: &[u8]) -> SectorField {
                             value.to_string()
                         }
                     },
+                    relative_range: None,
                 }
             } else {
                 FieldChild {
                     label: "值".into(),
                     value: text_value(part),
+                    relative_range: None,
                 }
             }
         })
@@ -485,139 +519,5 @@ pub(super) fn edpf64_fields(base: usize, index: usize, entry: &EdpfEntry64) -> V
             FieldStyle::Size,
         ),
         legacy_key_field(base, group, entry),
-    ]
-}
-
-pub(super) fn edpf96_fields(base: usize, index: usize, entry: &EdpfEntry96) -> Vec<SectorField> {
-    let group = format!("Entry[{index}]");
-    vec![
-        grouped_field(
-            base,
-            base + 4,
-            group.clone(),
-            "EDPF magic",
-            "EDPF",
-            FieldStyle::Magic,
-        ),
-        grouped_field(
-            base + 0x04,
-            base + 0x08,
-            group.clone(),
-            "版本",
-            format!("0x{:08X}", entry.version),
-            FieldStyle::Flag,
-        ),
-        grouped_field(
-            base + 0x08,
-            base + 0x0c,
-            group.clone(),
-            "分区数量",
-            entry.partition_count.to_string(),
-            FieldStyle::Flag,
-        ),
-        grouped_field(
-            base + 0x0c,
-            base + 0x10,
-            group.clone(),
-            "类型",
-            format!(
-                "{} ({})",
-                ptype_name(entry.partition_type),
-                entry.partition_type
-            ),
-            FieldStyle::Flag,
-        ),
-        grouped_field(
-            base + 0x10,
-            base + 0x14,
-            group.clone(),
-            "NeedDisturb",
-            entry.need_disturb.to_string(),
-            FieldStyle::Flag,
-        ),
-        grouped_field(
-            base + 0x14,
-            base + 0x18,
-            group.clone(),
-            "NeedEncrypt",
-            entry.need_encrypt.to_string(),
-            FieldStyle::Flag,
-        ),
-        grouped_field(
-            base + 0x18,
-            base + 0x20,
-            group.clone(),
-            "起始 LBA",
-            entry.start_sector.to_string(),
-            FieldStyle::Address,
-        ),
-        grouped_field(
-            base + 0x20,
-            base + 0x28,
-            group.clone(),
-            "扇区字节",
-            entry.sector_size.to_string(),
-            FieldStyle::Size,
-        ),
-        grouped_field(
-            base + 0x28,
-            base + 0x30,
-            group.clone(),
-            "大小",
-            format!(
-                "{} B / {}",
-                entry.partition_size,
-                human_bytes(entry.partition_size)
-            ),
-            FieldStyle::Size,
-        ),
-        grouped_field(
-            base + 0x30,
-            base + 0x34,
-            group.clone(),
-            "UserKeyCRC",
-            format!("0x{:08X}", entry.user_key_crc),
-            FieldStyle::Checksum,
-        ),
-        grouped_field(
-            base + 0x34,
-            base + 0x38,
-            group.clone(),
-            "FileKeyCRC",
-            format!("0x{:08X}", entry.file_key_crc),
-            FieldStyle::Checksum,
-        ),
-        grouped_field(
-            base + 0x38,
-            base + 0x48,
-            group.clone(),
-            "加密 FileKey",
-            hex_bytes(&entry.encrypted_file_key),
-            FieldStyle::Identity,
-        ),
-        grouped_field(
-            base + 0x48,
-            base + 0x58,
-            group.clone(),
-            "兼容 Key",
-            hex_bytes(&entry.compatibility_key),
-            FieldStyle::Identity,
-        ),
-        grouped_field(
-            base + 0x58,
-            base + 0x59,
-            group.clone(),
-            "EncryptMode",
-            entry.encrypt_mode.to_string(),
-            FieldStyle::Flag,
-        ),
-        grouped_field(
-            base + 0x59,
-            base + 0x60,
-            group,
-            "保留字节",
-            hex_bytes(&entry.reserved),
-            FieldStyle::Flag,
-        ),
     ]
 }

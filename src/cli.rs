@@ -442,6 +442,23 @@ fn print_provision_summary(prepared: &crate::application::provision::PreparedPro
 fn provision_flow(runner: &SysRunner, action: ProvisionAction) -> i32 {
     match action {
         ProvisionAction::Plan(opts) => {
+            if let Some(disk) = opts.disk {
+                if let Err(error) = guard_usb_disk(runner, disk) {
+                    return finish(Err(error));
+                }
+            }
+            if !elevate::is_root() {
+                let mut prompt = StdPrompter;
+                let disk = match provision_resolve_disk(runner, opts.disk, &mut prompt) {
+                    Ok(value) => value,
+                    Err(error) => return finish(Err(error)),
+                };
+                let mut argv: Vec<String> = std::env::args().skip(1).collect();
+                DeviceSelector::new(opts.disk).pin_argv(&mut argv, disk);
+                elevate::ensure_elevated(&argv);
+                unreachable!();
+            }
+
             let mut prompt = StdPrompter;
             let disk = match provision_resolve_disk(runner, opts.disk, &mut prompt) {
                 Ok(value) => value,
@@ -538,8 +555,18 @@ fn provision_flow(runner: &SysRunner, action: ProvisionAction) -> i32 {
             if !confirmed {
                 return finish(Err(EdpCliError::new(EXIT_CANCELLED, "已取消(未写盘)")));
             }
-            match crate::application::provision::commit_provision_on_disk(runner, &prepared) {
-                Ok(crate::application::provision::ProvisionCommitOutcome::Official(report)) => {
+            let write = match crate::application::provision::commit_provision_with_backup_on_disk(
+                runner,
+                &prepared,
+                crate::application::resolve_backup_dir(None),
+                &mut prompt,
+            ) {
+                Ok(value) => value,
+                Err(error) => return finish(Err(error)),
+            };
+            println!("制盘前自动备份：{}", write.backup.path.display());
+            match write.commit {
+                crate::application::provision::ProvisionCommitOutcome::Official(report) => {
                     println!(
                         "{}",
                         crate::ui::green("制盘：成功，协议与几何读回校验通过。")
@@ -561,9 +588,9 @@ fn provision_flow(runner: &SysRunner, action: ProvisionAction) -> i32 {
                         EXIT_OK
                     }
                 }
-                Ok(crate::application::provision::ProvisionCommitOutcome::Plain {
+                crate::application::provision::ProvisionCommitOutcome::Plain {
                     partition_count,
-                }) => {
+                } => {
                     println!(
                         "{}",
                         crate::ui::green(&format!(
@@ -573,7 +600,6 @@ fn provision_flow(runner: &SysRunner, action: ProvisionAction) -> i32 {
                     );
                     EXIT_OK
                 }
-                Err(error) => finish(Err(error)),
             }
         }
     }
@@ -750,6 +776,14 @@ fn finish(r: EdpCliResult<i32>) -> i32 {
 mod tests {
     use super::*;
     use crate::sectors::EdpfPartition;
+
+    #[test]
+    fn finish_preserves_business_error_exit_code() {
+        assert_eq!(
+            finish(Err(EdpCliError::new(EXIT_IO, "expected failure"))),
+            EXIT_IO
+        );
+    }
 
     #[test]
     fn target_plan_summary_reports_exact_geometry_and_data_fate() {

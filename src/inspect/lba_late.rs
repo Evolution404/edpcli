@@ -1,14 +1,23 @@
 use super::*;
 
+pub(super) struct LbaLateContext<'a> {
+    pub meta: &'a InspectMeta,
+    pub protocol_image: Option<&'a [u8]>,
+}
+
 pub(super) fn render_lba9_12(
     lba: u32,
     raw_sector: &[u8; SECTOR],
-    meta: &InspectMeta,
-    protocol_image: Option<&[u8]>,
+    context: LbaLateContext<'_>,
     fields: &mut Vec<SectorField>,
     notes: &mut Vec<String>,
     decoded: &mut Vec<u8>,
+    diagnostics: &mut Vec<InspectDiagnostic>,
 ) -> String {
+    let LbaLateContext {
+        meta,
+        protocol_image,
+    } = context;
     match lba {
         9 => {
             if let Some((crc, _)) = crc_key(meta) {
@@ -19,6 +28,10 @@ pub(super) fn render_lba9_12(
                     .map(|view| (view.dept_profile(), view.has_long_user()))
                     .unwrap_or((DeptLayout::Short, false));
                 if companion.is_none() {
+                    diagnostics.push(InspectDiagnostic::new(
+                        InspectDiagnosticCode::MissingProtocolContext,
+                        "LBA9 缺 LBA6 上下文，使用单扇区兼容解析",
+                    ));
                     notes.push("未提供完整 LBA0–12 上下文；LBA9 使用 short/non-long-user 兼容解析，仅用于单扇区 API。CLI/TUI 会提供 LBA6 上下文。".into());
                 }
                 match lba9::parse_lba9(raw_sector, crc, dept_profile, long_user) {
@@ -201,23 +214,34 @@ pub(super) fn render_lba9_12(
                                     FieldStyle::Flag,
                                 ));
                             }
-                            lba9::UpperPayload::Unknown(bytes) => fields.push(field(
-                                0x100,
-                                0x200,
-                                "upper payload",
-                                format!("unknown backing {}", hex_bytes(bytes.bytes())),
-                                FieldStyle::Flag,
-                            )),
+                            lba9::UpperPayload::Unknown(bytes) => fields.push(
+                                field(
+                                    0x100,
+                                    0x200,
+                                    "upper payload",
+                                    format!("unknown backing {}", hex_bytes(bytes.bytes())),
+                                    FieldStyle::Flag,
+                                )
+                                .with_status(SectorFieldStatus::Unknown),
+                            ),
                         }
                         notes.push(format!("字段语义来自 protocol::lba9::parse_lba9；Dept profile={}；EETU 时间字段由运行时与 time(NULL) 比较，useCount=0xFFFFFFFF 表示无限；旧称 reverse[104] 已拆分为 reverse backing[102] + zero tail[2]，语义状态 COMPLETE。", dept_profile.as_str()));
                         "canonical protocol::lba9".into()
                     }
                     Err(error) => {
+                        diagnostics.push(InspectDiagnostic::new(
+                            InspectDiagnosticCode::CanonicalParserRejected,
+                            format!("LBA9 canonical parser 拒绝: {error}"),
+                        ));
                         notes.push(format!("canonical LBA9 parser 拒绝该扇区: {error}"));
                         "RAW（LBA9 canonical parser 未通过）".into()
                     }
                 }
             } else {
+                diagnostics.push(InspectDiagnostic::new(
+                    InspectDiagnosticCode::MissingDeviceId,
+                    "缺 device_id，无法解 LBA9",
+                ));
                 "RAW（缺 device_id，无法解 LBA9）".into()
             }
         }
@@ -237,13 +261,16 @@ pub(super) fn render_lba9_12(
                             "absent-zero",
                             FieldStyle::Flag,
                         ));
-                        fields.push(field(
-                            0x80,
-                            0x200,
-                            "preserve/ignore tail",
-                            "当前全零；协议不赋予 payload 语义",
-                            FieldStyle::Flag,
-                        ));
+                        fields.push(
+                            field(
+                                0x80,
+                                0x200,
+                                "preserve/ignore tail",
+                                "当前全零；协议不赋予 payload 语义",
+                                FieldStyle::Flag,
+                            )
+                            .with_status(SectorFieldStatus::Preserved),
+                        );
                         "canonical protocol::lba10 absent-zero".into()
                     }
                     Ok(lba10::Lba10View::Enabled {
@@ -285,17 +312,24 @@ pub(super) fn render_lba9_12(
                             hex_bytes(extension.bytes()),
                             FieldStyle::Flag,
                         ));
-                        fields.push(field(
-                            0x080,
-                            0x200,
-                            "preserve/ignore tail",
-                            hex_bytes(tail.bytes()),
-                            FieldStyle::Flag,
-                        ));
+                        fields.push(
+                            field(
+                                0x080,
+                                0x200,
+                                "preserve/ignore tail",
+                                hex_bytes(tail.bytes()),
+                                FieldStyle::Flag,
+                            )
+                            .with_status(SectorFieldStatus::Preserved),
+                        );
                         notes.push("EESI +0x04 最新语义为 UsbSuspensionWnd flag；仅前 0x80B 属于 EESI，后 0x180B 为 preserve/ignore backing；交换区/保密区卷标分别进入 type2/type4 SetVolumeLabelA。".into());
                         "canonical protocol::lba10 EESI 前 0x80B".into()
                     }
                     Err(error) => {
+                        diagnostics.push(InspectDiagnostic::new(
+                            InspectDiagnosticCode::CanonicalParserRejected,
+                            format!("LBA10 canonical parser 拒绝: {error}"),
+                        ));
                         notes.push(format!("canonical LBA10 parser 拒绝该扇区: {error}"));
                         "RAW（LBA10 canonical parser 未通过）".into()
                     }
@@ -304,6 +338,10 @@ pub(super) fn render_lba9_12(
                 fields.push(field(0, SECTOR, "LBA10", "absent-zero", FieldStyle::Flag));
                 "canonical LBA10 absent-zero（无需 device_id）".into()
             } else {
+                diagnostics.push(InspectDiagnostic::new(
+                    InspectDiagnosticCode::MissingDeviceId,
+                    "缺 device_id，无法解 LBA10",
+                ));
                 "RAW（缺 device_id，无法解 LBA10）".into()
             }
         }
@@ -330,7 +368,17 @@ pub(super) fn render_lba9_12(
                 notes.push(format!("capacity profile 候选={}；选中容量={}B。若 DiskSize 与 repair-CHS 数值相同，两者可同时通过但盘面语义等价。", profiles.iter().map(|p| p.as_str()).collect::<Vec<_>>().join(","), view.capacity_bytes));
                 "canonical protocol::lba11 (DRKB + PDKB)".into()
             }
-            None => "RAW（缺 VID/PID/容量或 LBA11 canonical parser 未通过）".into(),
+            None => {
+                diagnostics.push(InspectDiagnostic::new(
+                    if meta.vid.is_none() || meta.pid.is_none() || meta.size_bytes.is_none() {
+                        InspectDiagnosticCode::MissingGeometry
+                    } else {
+                        InspectDiagnosticCode::AmbiguousProfile
+                    },
+                    "LBA11 缺 VID/PID/容量，或 canonical profile 未唯一确定",
+                ));
+                "RAW（缺 VID/PID/容量或 LBA11 canonical parser 未通过）".into()
+            }
         },
         12 => {
             if let Some((crc, _)) = crc_key(meta) {
@@ -359,11 +407,19 @@ pub(super) fn render_lba9_12(
                         "canonical protocol::lba12 (A6B0 整扇 512B)".into()
                     }
                     None => {
+                        diagnostics.push(InspectDiagnostic::new(
+                            InspectDiagnosticCode::AmbiguousProfile,
+                            "LBA12 wrapped-key profile 未唯一确定",
+                        ));
                         notes.push("无法在 legacy-v0064/mode1/mode2/mode3 中解析 LBA12；拒绝猜测 wrapped-key profile。".into());
                         "RAW（LBA12 canonical parser 未通过）".into()
                     }
                 }
             } else {
+                diagnostics.push(InspectDiagnostic::new(
+                    InspectDiagnosticCode::MissingDeviceId,
+                    "缺 device_id，无法解 LBA12",
+                ));
                 "RAW（缺 device_id，无法解 LBA12）".into()
             }
         }

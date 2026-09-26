@@ -2,7 +2,145 @@ use crate::common;
 
 use common::*;
 use edpcli::crypto::{a7f0_full, crc32_bare, xor_rolling};
-use edpcli::inspect::{analyze_sector, render_fields, render_hex, FieldStyle, InspectMeta};
+use edpcli::inspect::{
+    analyze_sector, render_fields, render_hex, FieldStyle, FieldTransform, InspectDiagnosticCode,
+    InspectMeta, InspectParseState,
+};
+
+#[test]
+fn ch14_lba8_summary_uses_stable_field_keys_not_display_labels() {
+    use edpcli::application::inspect::{AbsoluteByteRange, InspectField, InspectFieldType};
+    use edpcli::application::inspect_summary::{summarize_node, InspectSummarySource};
+    use edpcli::application::inspect_tree::{InspectNodeKind, InspectNodeRange};
+    use edpcli::edpb::SemanticStatus;
+    use edpcli::inspect::{InspectFieldKey, SectorFieldStatus};
+
+    let fields = [
+        InspectField {
+            key: InspectFieldKey::Lba8UsbOnlyInfo,
+            range: AbsoluteByteRange {
+                start: 8 * 512 + 0x1e,
+                end_exclusive: 8 * 512 + 0x2e,
+            },
+            field_type: InspectFieldType::Identity,
+            raw: vec![0; 16],
+            decoded: vec![0; 16],
+            field_logical: None,
+            transform: None,
+            status: SectorFieldStatus::Known,
+            label: "renamed identity field".into(),
+            value: "140225993400000000".into(),
+            style: FieldStyle::Identity,
+            group: None,
+            children: Vec::new(),
+        },
+        InspectField {
+            key: InspectFieldKey::Lba8HostHardinfo,
+            range: AbsoluteByteRange {
+                start: 8 * 512 + 0x14,
+                end_exclusive: 8 * 512 + 0x18,
+            },
+            field_type: InspectFieldType::Identity,
+            raw: vec![0; 4],
+            decoded: vec![0; 4],
+            field_logical: None,
+            transform: None,
+            status: SectorFieldStatus::Known,
+            label: "renamed host field".into(),
+            value: "0x00000000".into(),
+            style: FieldStyle::Identity,
+            group: None,
+            children: Vec::new(),
+        },
+    ];
+    let summary = summarize_node(InspectSummarySource {
+        kind: InspectNodeKind::Sector,
+        label: "LBA8",
+        range: InspectNodeRange::sectors(8, 1),
+        decoder: Some(edpcli::application::inspect::InspectDecoderKind::Protocol),
+        status: SemanticStatus::Identified,
+        region_semantic: None,
+        fields: &fields,
+        parse_state: InspectParseState::Parsed,
+        diagnostics: &[],
+    });
+    assert!(summary.title.contains("设备身份"));
+    assert!(summary
+        .sections
+        .iter()
+        .flat_map(|section| &section.items)
+        .any(|item| { item.label == "UsbOnlyInfo" && item.value == "140225993400000000" }));
+    assert!(summary
+        .sections
+        .iter()
+        .flat_map(|section| &section.items)
+        .any(|item| { item.label == "HostHardinfo" && item.value == "0x00000000" }));
+    assert!(!summary
+        .sections
+        .iter()
+        .flat_map(|section| &section.items)
+        .any(|item| { item.label.contains("renamed") }));
+}
+
+#[test]
+fn ch14_missing_lba8_context_is_a_typed_diagnostic() {
+    let view = analyze_sector(8, &[0; 512], &InspectMeta::default());
+    assert_eq!(view.parse_state, InspectParseState::MissingContext);
+    assert!(view
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == InspectDiagnosticCode::MissingDeviceId));
+}
+
+#[test]
+fn ch14_short_sector_has_invalid_parse_state_without_guessing_fields() {
+    let view = analyze_sector(0, &[0; 511], &InspectMeta::default());
+    assert_eq!(view.parse_state, InspectParseState::Invalid);
+    assert!(view.fields.is_empty());
+    assert_eq!(view.diagnostics[0].code, InspectDiagnosticCode::ShortSector);
+}
+
+#[test]
+fn ch14_pass_info_exposes_exact_field_transform_provenance() {
+    let data = load_disk_image("netac").expect("netac fixture");
+    let view = analyze_sector(12, &data[12 * 512..13 * 512], &meta_for("netac"));
+    for offset in [0x120, 0x123, 0x126] {
+        let field = view
+            .fields
+            .iter()
+            .find(|field| field.start == offset)
+            .expect("PassInfo transformed field");
+        assert_eq!(
+            field.transform,
+            Some(FieldTransform::XorByte {
+                offset: 0,
+                mask: 0x88
+            })
+        );
+    }
+    assert!(view
+        .fields
+        .iter()
+        .find(|field| field.start == 0x124)
+        .unwrap()
+        .transform
+        .is_none());
+}
+
+#[test]
+fn ch14_field_statuses_are_produced_from_protocol_evidence() {
+    let data = load_disk_image("netac").expect("netac fixture");
+    let meta = meta_for("netac");
+    let lba5 = analyze_sector(5, &data[5 * 512..6 * 512], &meta);
+    assert_eq!(
+        lba5.fields[0].status,
+        edpcli::inspect::SectorFieldStatus::Preserved
+    );
+    let lba8 = analyze_sector(8, &data[8 * 512..9 * 512], &meta);
+    assert!(lba8.fields.iter().any(|field| {
+        field.start == 0x040 && field.status == edpcli::inspect::SectorFieldStatus::Reserved
+    }));
+}
 
 fn crc32_ieee_test(data: &[u8]) -> u32 {
     let mut crc = 0xffff_ffffu32;

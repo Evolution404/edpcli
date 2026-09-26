@@ -16,6 +16,10 @@ use crate::protocol::{
 
 #[path = "inspect/catalog.rs"]
 mod catalog;
+#[path = "inspect/edpf_fields.rs"]
+mod edpf_fields;
+#[path = "inspect/field_contract.rs"]
+mod field_contract;
 #[path = "inspect/lba_adapter.rs"]
 mod lba_adapter;
 #[path = "inspect/lba_early.rs"]
@@ -29,10 +33,15 @@ mod metadata;
 #[path = "inspect/model.rs"]
 mod model;
 
+pub use field_contract::{
+    FieldTransform, InspectDiagnostic, InspectDiagnosticCode, InspectFieldKey, InspectParseState,
+    SectorFieldStatus,
+};
 pub use lba_adapter::{analyze_sector, analyze_sector_with_context};
 pub use metadata::InspectMeta;
 pub use model::{FieldChild, FieldStyle, SectorField, SectorView};
 
+use edpf_fields::edpf96_fields;
 use metadata::*;
 use model::*;
 

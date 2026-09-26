@@ -719,10 +719,13 @@ Real USB acceptance
 ### 8.5 下一步执行顺序
 
 - Phase 8 已部分完成（2026-09-25）：真实 `/dev/disk4` 上 **mode0 → Plain** 已通过完整写盘验收。写前自动创建 EDPB 备份，随后走正式 `prepare_plain_provision()/commit_plain_provision()` application 安全链，结果为 `commit=PASS`；写后 LBA3 byte-for-byte preserve 通过，目标重新识别为 Plain。证据目录：`~/edpcli-phase8-hil/20260925_124458_disk4_plain`。
-- 尚未完成的真实写盘场景：**Plain → mode0、mode0 → mode1、mode1 → Plain、Plain 多分区**。当前 ChatGPT Mac 执行环境在第一项完成后开始统一拦截后续制盘链命令，因此这些场景不得写成已通过；需要在允许真实写盘的终端/执行环境继续。
-- Inspect 全盘结构化浏览器 I1～I9 的实现与真实只读数据链已完成；CLI 自身 raw-device sudo re-exec HIL 仍与执行环境权限限制分开记录。
+- 2026-09-26 实盘补测：同一 `/dev/disk4` 上 **mode0 → mode1** 已通过正式 transaction、协议/几何 readback、LBA3 preserve；原 type4 首扇区 SHA-256 写前写后一致，证明 `PreserveOpaque` data extent 0 写入；mode1 明文交换区被 macOS 识别为 exFAT，mount→文件写入/readback→unmount 通过。随后 **mode1 → Plain** 通过 MBR/filesystem readback，LBA3 继续 preserve、原 LCE 清零，Plain exFAT mount→文件写入/readback→unmount 通过。
+- 2026-09-26 已继续补齐旧 Phase 8 的最后两项：**Plain → mode0** 在真实 `/dev/disk4` 上按 mode0 三分区全量 Rebuild，Boot/Share/Encrypt 均完成协议、几何与文件系统读回；**Plain 多分区**使用 P1=`LBA2048, 1GiB, exFAT, DATA`、P2=`LBA2099200, fill, exFAT, TOOLS` 完成真实写盘，LBA3 写前写后 SHA-256 一致，macOS 分别挂载两个分区并完成文件写入/readback/unmount。至此旧 Phase 8 列出的真实 USB 场景全部已有实盘证据。
+- 2026-09-26 权限/身份链治理：CLI 自身 raw-device `inspect` sudo re-exec 已实盘通过；`provision plan` 已统一加入与 image/write 相同的 USB guard + 自动提权，普通用户进程在真实 Plain `/dev/disk4` 上可自动 sudo 后生成计划。Plain `backup create` 现可用硬件 `device_id` + VID/PID + 容量创建 Core EDPB，并只保存硬件序列号 SHA-256 绑定；真实 Plain 盘已生成 `_plain.edpb` 且容器校验通过。
+- Plain 恢复不降低旧身份门禁：LBA4 非零仍做原始 16B 精确终验；LBA4 为零时仅显式备份可进入，且必须同时通过序列号哈希、VID/PID、容量、硬件 `device_id` 候选，并在 unmount 后再次复核。旧的无硬件绑定 EDPB 在 Plain 状态继续 fail-closed。因此本轮测试开始前创建的旧 mode0 EDPB不能被新逻辑追溯补绑定，当前测试盘不通过绕过身份门禁强行恢复。
+- 最终提交后的 release 实盘闭环已补齐：在当前真实 Plain `/dev/disk4` 上重新创建带硬件绑定的 `_plain.edpb`，容器校验通过；随后用正式 `backup restore` 将该 LBA0～12 快照恢复到同一物理盘，CLI 自动提权、硬件绑定复核、整盘确认、unmount/lock、reopen 与原子写入均通过，最终报告读回校验通过。恢复前后 LBA0～12 SHA-256 均为 `a7e0feb78c861977e4ef53fdb0ee7170feec52f7f86d93d0ce76d42086097acc`，盘型仍为 Plain、分区布局未变化。
 
-1. 完成剩余 Phase 8 真实 USB 场景；
+1. Phase 8 真实 USB 场景已完成；后续新增实盘项统一归入第 12 章 K8 证据矩阵；
 2. 并行按第 9 节实施 Inspect 全盘结构化浏览器，但不得复制 CLI/TUI 两套解析后端。
 
 最终产品定义：**edpcli 制盘中心统一面向五种磁盘目标状态，其中 mode0～mode3 是官方 EDP 模式，Plain 是非 EDP 普通盘目标而不是 mode4。所有目标共用同一套选盘、表单、实时布局、Review 和安全事务基础；容量以 sector 为唯一精确真相，UI 提供 MiB/GiB/sector、`f` 填满、字段级输入约束和统一焦点视觉。Plain 复用现有制盘界面并支持1～4个 MBR 普通分区，不自动移动其它分区，不宣称安全擦除。**
@@ -3389,7 +3392,7 @@ K0 基线审计曾确认：
 
 #### Phase K8：真实 USB 验收
 
-**实施状态（2026-09-26）：PENDING。** 尚未执行代表性真实盘转换与逐域实际解锁验收；在取得自动备份、写盘、readback、rollback 与制盘后密码域可用性证据前，本章不得标 COMPLETE。
+**实施状态（2026-09-26）：PENDING（仅剩真实双域异密码/仅改密码 rewrap 证据）。** 当前同一真实 `/dev/disk4` 已完成：mode0→mode1 的 `PreserveOpaque` 数据零写入与 mode1 Combined 明文挂载；mode1→Plain；Plain→mode0 forced rebuild + `K_new` 完整文件系统初始化；mode0→mode0 `PreserveVerified` exact preserve；mode0→mode2 的 63-sector CompatibilityReserve 特例；Plain 双分区；默认密码下 Share(type2)/Encrypt(type4) 分别 FileKeyCRC=PASS 且真实数据起始扇区 SM4 解密后均通过严格 exFAT boot-sector 校验；真实介质故障注入 rollback 亦已通过。真实 USB 的“双域使用不同密码”和“password-only `RewrapVerified`（证明 `K_old` 不变且 ciphertext/data extent 零写入）”调用被当前执行安全层拦截，未取得实盘证据，因此 K8 与本章仍不得标 COMPLETE。
 
 按风险由低到高选择代表性转换，不一次性对 25 格全部写盘。每次必须：
 
@@ -3402,6 +3405,18 @@ K0 基线审计曾确认：
 - readback；
 - rollback 证据；
 - 制盘后分别验证每个密码域实际可用。
+
+2026-09-26 K8 实盘证据摘要：
+
+- **默认密码双域实际可用：PASS。** mode0 Share LBA20480：`FileKeyCRC=0x52737208 PASS`；Encrypt LBA13627392：`FileKeyCRC=0x60B50DDB PASS`；两者 raw 均为 SM4 mode2 密文，使用默认密码解封 FileKey 后均解密出有效 exFAT boot sector。
+- **exact preserve：PASS。** mode0→mode0 planner 对 Boot/Share/Encrypt 均给出 `PreserveVerified` 与 data extent 0 写入；Share/Encrypt 首扇区 SHA-256 写前写后完全一致，写后两个 FileKeyCRC 仍 PASS。
+- **forced rebuild：PASS。** Plain→mode0 对三分区均给出 Rebuild + `K_new` + 完整 filesystem initialization，正式写盘后协议/几何及三个文件系统 readback 全部通过。
+- **mode1 Combined / PreserveOpaque：PASS。** mode0→mode1 的真实 type4 数据首扇区 SHA-256 写前写后一致；mode1 明文交换区被 macOS 实际 mount/write/readback/unmount。
+- **mode2 CompatibilityReserve：PASS。** type1 精确为 LBA63..125 共 63 sectors，MBR entry type=0x0B；原 type4 Encrypt 首扇区 SHA-256 保持不变且仍可用默认密码解密为 exFAT。
+- **真实介质 rollback：PASS。** 专用 `examples/real_usb_rollback_hil.rs` 默认拒绝运行，只有显式 HIL 开关后才允许外接 USB；测试在经分区/盘尾/全零未分配区门禁确认后的 LBA1024..1026 注入第 2 次写失败，生产 `execute_write_transaction()` 返回 `EXIT_ROLLED_BACK`，独立重开 raw device 与外部 `dd + SHA-256` 均证明三个 touched sectors 完全恢复。
+- **Plain 双分区：PASS。** P1 DATA 1GiB + P2 TOOLS fill 均为 exFAT，LBA3 byte-for-byte preserve；macOS 对两个分区分别完成 mount/write/readback/unmount，最终 Plain `_plain.edpb` 再次创建并校验通过。
+- **制盘前强制自动备份安全链：代码门禁 PASS。** 本轮审计确认旧实现中 CLI `provision write` 可直接进入 commit、TUI 也允许跳过保存，备份并非 application 写盘链的强制步骤。现已统一为 `backup_create_on_disk → commit_provision_on_disk` 的 application 单一入口；备份失败时 commit 必须 0 次调用，CLI/TUI 均不可绕过。该项只表示代码与自动门禁已收口，不作为新的真实 USB 场景 PASS。
+- **仍缺：真实双域异密码 + password-only rewrap。** K7 Virtual-HIL 已覆盖该语义，但 K8 真实 USB CLI 调用在当前执行环境被安全层拦截；不得用变形命令绕过，也不得把虚拟盘证据冒充真实盘证据。
 
 ### 12.13 本章完成标准
 
@@ -4294,7 +4309,21 @@ python3 scripts/test-full.py --profile full
 
 ## 14. 后续计划：TUI 信息架构、磁盘布局与制盘可观测性收口（2026-09-26）
 
-> 状态：**PLAN ONLY / 持续收集**。本章用于当前计划分支继续收集 Inspect 细节问题；本章提交只允许补充调查结论、实现方案与回归门禁，不修改生产代码。后续用户提出的同类问题继续追加到本章，待问题清单确认后再单独进入实现分支。
+> 状态：**IMPLEMENTING**。PR #25 已合并为 `9206d8a`；实施分支从该最新 main 建立。以下 Q0～Q8 状态仅记录实施进度，唯一实施顺序仍以 14.11.12、14.12.13、14.13.11、14.14.6 为准。
+
+| 阶段 | 实施状态 | 验证记录 |
+| --- | --- | --- |
+| Q0 基线与失败测试 | COMPLETE | 基线 `9206d8a`；exFAT 998107136-sector round-trip、cluster limit/limit+1 与 Inspect/TUI 契约均已写成 ignored red tests，显式执行确认失败；Chapter 12 现有 key-domain 测试继续作为保护门禁。 |
+| Q1 Inspect 数据契约 | COMPLETE | 稳定 `InspectFieldKey`、PhysicalRaw/SectorDecoded/FieldLogical/SemanticValue、typed XOR provenance、parse state/diagnostic、真实字段 status 与 typed region semantic 已落地；Inspect/TUI/协议专项与 fast gate 通过。 |
+| Q2 Inspect topology + presentation | COMPLETE | 单扇区 Tree、盘尾连续互斥 primary spans、显式 preview retry、UI-neutral Summary/Overview、可选 Detail 证据表与 Field→Hex 已实现；Detail 行选择复用 PaneViewport，children 默认折叠且仅有 byte range 的子项可进入 Hex；InspectTreeViewModel 按 revision 缓存 rows/id index。 |
+| Q3 Device / Backup identity contract | PENDING | — |
+| Q4 DiskLayout / Provision presentation | PENDING | — |
+| Q5 Progress application core | PENDING | — |
+| Q6 Progress transport + TUI | PENDING | — |
+| Q7 Outcome + CLI | PENDING | — |
+| Q8 清理与最终门禁 | PENDING | — |
+
+Q0 的 `#[ignore]` 只标记预期失败的未来契约；对应功能落地的阶段必须移除 ignore 并令测试通过。Chapter 12 K6 Migrate 仍 DEFERRED/fail-closed，K8 真实 USB 仍 PENDING。
 
 ### 14.1 结构树单扇区节点去掉冗余 `[n..n]`
 
@@ -7458,4 +7487,3 @@ current main
 不要把旧 `plan/inspect-tree-decode-consistency-20260926` 当作实现基线，也不要在实现分支 cherry-pick 旧生产代码；旧分支只作为计划历史来源。
 
 第三轮审计结论：**计划需要更新，但主体 Q0～Q8 不需要推翻。真正变化的是：Chapter 12 已从“未来设计”变成“现有事实”，第 14 章必须直接复用并保护其 typed business model；同时 exFAT、progress transport、magic slot、DiskLayout 字符串语义等问题在当前 main 仍然存在，继续作为本次治理任务。**
-

@@ -1,41 +1,5 @@
 use super::*;
 
-fn device_table_values(row: &crate::disk_scan::Row) -> Vec<(String, Style)> {
-    vec![
-        (format!("disk{}", row.disk), accent()),
-        (crate::common::fmt_gb(row.size), Style::default()),
-        (
-            safe(&row.proto),
-            if row.proto == "USB" {
-                success()
-            } else {
-                warning()
-            },
-        ),
-        (
-            format!("{}:{}", safe(&row.vid), safe(&row.pid)),
-            secondary(),
-        ),
-        (device_ven_prod(row.device_id.as_deref()), Style::default()),
-        (
-            row.onlyid
-                .as_deref()
-                .map(safe)
-                .unwrap_or_else(|| "—".into()),
-            Style::default(),
-        ),
-        (
-            row.user.as_deref().map(safe).unwrap_or_else(|| "—".into()),
-            Style::default(),
-        ),
-        (
-            row.dept.as_deref().map(safe).unwrap_or_else(|| "—".into()),
-            Style::default(),
-        ),
-        (device_status(row), device_status_style(row)),
-    ]
-}
-
 pub(super) fn draw_devices(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState) {
     let (list_area, sidebar) = if area.width >= 150 {
         workspace_sidebar_layout(area)
@@ -92,40 +56,55 @@ pub(super) fn draw_devices(frame: &mut Frame, area: ratatui::layout::Rect, state
             inner,
         );
     } else {
-        use crate::tui::table_layout::{display_width, layout_for, truncate_cell, TableKind};
-        let headings = [
-            "设备", "容量", "总线", "VID:PID", "ven_prod", "onlyid", "姓名", "部门", "盘型",
-        ];
-        let mut content_widths = headings.map(display_width);
-        for row in state.devices() {
-            for (index, (value, _)) in device_table_values(row).iter().enumerate() {
-                content_widths[index] = content_widths[index].max(display_width(value));
-            }
-        }
+        use crate::tui::table_layout::{
+            layout_for, table_column_schema, truncate_cell, ColumnId, TableKind,
+        };
+        let columns = table_column_schema(TableKind::Devices).expect("device schema");
+        let headings = columns
+            .iter()
+            .map(|column| column.heading)
+            .collect::<Vec<_>>();
+        let view = state
+            .table_view_data(TableKind::Devices)
+            .expect("device view data");
         let layout = layout_for(TableKind::Devices);
         let viewport = layout.layout(
             list_area.width.saturating_sub(4),
-            &content_widths,
+            &view.content_widths,
             state.table_scroll_offset(TableKind::Devices),
         );
         let window = visible_window(state.selected(), visible_count, list_area.height);
         let window_start = window.start;
         let rows = window
-            .filter_map(|position| state.device_at_visible(position))
-            .map(|row| {
-                let values = device_table_values(row);
+            .filter_map(|position| state.device_source_index_at_visible(position))
+            .map(|index| {
+                let row = &state.devices()[index];
+                let values = &view.rows[index];
                 TableRow::new(
                     viewport
                         .columns
                         .iter()
                         .map(|column| {
-                            let (value, style) = &values[column.index];
+                            let value = &values[column.index];
+                            let style = match columns[column.index].id {
+                                ColumnId::Device | ColumnId::ProvisionKind => accent(),
+                                ColumnId::VidPid => secondary(),
+                                ColumnId::Bus => {
+                                    if row.proto == "USB" {
+                                        success()
+                                    } else {
+                                        warning()
+                                    }
+                                }
+                                ColumnId::State => device_status_style(row),
+                                _ => Style::default(),
+                            };
                             Cell::from(truncate_cell(
                                 value,
                                 usize::from(column.width),
                                 column.truncate_policy,
                             ))
-                            .style(*style)
+                            .style(style)
                         })
                         .collect::<Vec<_>>(),
                 )
@@ -165,37 +144,27 @@ pub(super) fn draw_devices(frame: &mut Frame, area: ratatui::layout::Rect, state
 
     if let Some((detail_area, animation_area)) = sidebar {
         let detail = if let Some(row) = state.selected_device() {
-            let onlyid = row.onlyid.as_deref().unwrap_or("—");
-            let device_id = row.device_id.as_deref().unwrap_or("—");
+            let identity = crate::application::identity::WorkspaceIdentity::from_device(row);
+            let cells = identity.display_cells();
+            let device_id = identity.device_id.as_deref().unwrap_or("—");
             let content_width = detail_area.width.saturating_sub(2) as usize;
             let mut lines = vec![
                 Line::from(vec![
                     Span::styled("盘型  ", muted()),
-                    Span::styled(
-                        device_status(row),
-                        device_status_style(row).add_modifier(Modifier::BOLD),
-                    ),
+                    Span::styled(safe(&cells[6]), accent().add_modifier(Modifier::BOLD)),
                 ]),
-                Line::from(format!(
-                    "设备  disk{}  ·  {}  ·  {}",
-                    row.disk,
-                    crate::common::fmt_gb(row.size),
-                    safe(&row.proto)
-                )),
-                Line::from(format!("VID:PID  {}:{}", safe(&row.vid), safe(&row.pid))),
-                Line::from(format!(
-                    "姓名  {}",
-                    row.user.as_deref().map(safe).unwrap_or_else(|| "—".into())
-                )),
-            ];
-            lines.extend(wrapped_field_lines(
-                "部门  ",
-                row.dept.as_deref().unwrap_or("—"),
-                content_width,
-            ));
-            lines.extend([
-                Line::from(format!("onlyid  {}", safe(onlyid))),
+                Line::from(format!("容量  {}", safe(&cells[0]))),
+                Line::from(format!("VID:PID  {}", safe(&cells[1]))),
+                Line::from(format!("型号  {}", safe(&cells[2]))),
                 Line::from(format!("device_id  {}", safe(device_id))),
+                Line::from(format!("onlyid  {}", safe(&cells[3]))),
+                Line::from(format!("姓名  {}", safe(&cells[4]))),
+            ];
+            lines.extend(wrapped_field_lines("部门  ", &cells[5], content_width));
+            lines.extend([
+                Line::from(format!("设备  disk{}", row.disk)),
+                Line::from(format!("总线  {}", safe(&row.proto))),
+                Line::from(format!("当前状态  {}", device_status(row))),
                 Line::from(format!("已有备份  {} 份", row.n_baks)),
                 Line::from(""),
                 Line::from(Span::styled(

@@ -1659,6 +1659,8 @@ fn advanced_sector_inspector_is_on_demand_bounded_and_fail_soft() {
                 "test".into()
             }),
             decode_error: decode_error.map(str::to_string),
+            parse_state: edpcli::inspect::InspectParseState::Parsed,
+            diagnostics: Vec::new(),
             fields: Vec::new(),
             notes: Vec::new(),
             meta_text: meta_text.map(str::to_string),

@@ -25,6 +25,20 @@ pub enum InspectNodeKind {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DiskRegionSemantic {
+    Protocol,
+    Lce,
+    Tail,
+    TailForensic,
+    TailMetadataMirror,
+    TailRestoreNode,
+    Partition { partition_type: u32 },
+    MbrPartition { partition_type: u8 },
+    Unknown,
+    Conflict,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct InspectNodeRange {
     pub start_lba: u64,
     pub sector_count: u64,
@@ -85,6 +99,7 @@ pub struct InspectNode {
     pub children: InspectChildren,
     pub decoder: Option<InspectDecoderKind>,
     pub status: SemanticStatus,
+    pub region_semantic: Option<DiskRegionSemantic>,
 }
 
 impl InspectNode {
@@ -223,12 +238,18 @@ fn lazy_extent(
     sector_count: u64,
     decoder: Option<InspectDecoderKind>,
     status: SemanticStatus,
-    kind: InspectNodeKind,
+    region_semantic: Option<DiskRegionSemantic>,
 ) -> InspectNode {
     InspectNode {
         id: id.into(),
         label: label.into(),
-        kind,
+        kind: match region_semantic {
+            Some(DiskRegionSemantic::Unknown) => InspectNodeKind::UnknownRange,
+            Some(
+                DiskRegionSemantic::Partition { .. } | DiskRegionSemantic::MbrPartition { .. },
+            ) => InspectNodeKind::Partition,
+            _ => InspectNodeKind::Extent,
+        },
         range: InspectNodeRange::sectors(start_lba, sector_count),
         children: InspectChildren::LazySectors {
             start_lba,
@@ -236,6 +257,7 @@ fn lazy_extent(
         },
         decoder,
         status,
+        region_semantic,
     }
 }
 
@@ -246,7 +268,7 @@ fn region_with_extent(
     sector_count: u64,
     decoder: Option<InspectDecoderKind>,
     status: SemanticStatus,
-    extent_kind: InspectNodeKind,
+    region_semantic: DiskRegionSemantic,
 ) -> InspectNode {
     let id = id.into();
     let extent = lazy_extent(
@@ -256,12 +278,12 @@ fn region_with_extent(
         sector_count,
         decoder,
         status,
-        extent_kind,
+        Some(region_semantic),
     );
     InspectNode {
         id,
         label: label.into(),
-        kind: if extent_kind == InspectNodeKind::UnknownRange {
+        kind: if region_semantic == DiskRegionSemantic::Unknown {
             InspectNodeKind::UnknownRange
         } else {
             InspectNodeKind::Region
@@ -270,6 +292,7 @@ fn region_with_extent(
         children: InspectChildren::Materialized(vec![extent]),
         decoder,
         status,
+        region_semantic: Some(region_semantic),
     }
 }
 
@@ -291,6 +314,7 @@ fn sector_stub(
             children: InspectChildren::None,
             decoder,
             status: SemanticStatus::Identified,
+            region_semantic: None,
         }])
     } else {
         InspectChildren::None
@@ -303,6 +327,7 @@ fn sector_stub(
         children,
         decoder,
         status,
+        region_semantic: None,
     }
 }
 
@@ -315,6 +340,7 @@ pub fn field_node(index: usize, field: &InspectField) -> InspectNode {
         children: InspectChildren::None,
         decoder: None,
         status: SemanticStatus::Identified,
+        region_semantic: None,
     }
 }
 
@@ -426,6 +452,7 @@ fn collapse_overlapping_regions(mut regions: Vec<InspectNode>) -> Vec<InspectNod
                 children: InspectChildren::Materialized(group),
                 decoder: None,
                 status: SemanticStatus::Unknown,
+                region_semantic: Some(DiskRegionSemantic::Conflict),
             }
         })
         .collect()
@@ -437,38 +464,66 @@ fn tail_region(total_sectors: u64) -> Option<InspectNode> {
         return None;
     }
     let tail_start = total_sectors - tail_count;
-    let mut children = vec![lazy_extent(
-        "region.tail.extent",
-        "盘尾取证窗口",
-        tail_start,
-        tail_count,
-        None,
-        SemanticStatus::Unknown,
-        InspectNodeKind::Extent,
-    )];
-
+    let mut special = Vec::new();
     if total_sectors >= TAIL_METADATA_MIRROR_OFFSET_SECTORS + TAIL_METADATA_MIRROR_SECTORS {
         let start = total_sectors - TAIL_METADATA_MIRROR_OFFSET_SECTORS;
-        children.push(lazy_extent(
-            "region.tail.metadata_mirror",
-            "盘尾历史 9 扇区镜像",
+        special.push((
             start,
             TAIL_METADATA_MIRROR_SECTORS,
-            None,
-            SemanticStatus::Identified,
-            InspectNodeKind::Extent,
+            "region.tail.metadata_mirror",
+            "盘尾历史 9 扇区镜像",
+            DiskRegionSemantic::TailMetadataMirror,
         ));
     }
     if total_sectors > TAIL_END4_MIRROR_OFFSET_SECTORS {
         let start = total_sectors - TAIL_END4_MIRROR_OFFSET_SECTORS;
-        children.push(lazy_extent(
-            "region.tail.restore_node_end4",
-            "盘尾 end-4 restore-node",
+        special.push((
             start,
             1,
+            "region.tail.restore_node_end4",
+            "盘尾 end-4 restore-node",
+            DiskRegionSemantic::TailRestoreNode,
+        ));
+    }
+    special.sort_by_key(|(start, ..)| *start);
+    let mut children = Vec::new();
+    let mut cursor = tail_start;
+    for (start, count, id, label, semantic) in special {
+        if start < cursor || start >= total_sectors {
+            continue;
+        }
+        if cursor < start {
+            children.push(lazy_extent(
+                format!("region.tail.unclassified.{}", children.len()),
+                "盘尾未分类",
+                cursor,
+                start - cursor,
+                None,
+                SemanticStatus::Unknown,
+                None,
+            ));
+        }
+        let count = count.min(total_sectors - start);
+        children.push(lazy_extent(
+            id,
+            label,
+            start,
+            count,
             None,
             SemanticStatus::Identified,
-            InspectNodeKind::Extent,
+            Some(semantic),
+        ));
+        cursor = start + count;
+    }
+    if cursor < total_sectors {
+        children.push(lazy_extent(
+            format!("region.tail.unclassified.{}", children.len()),
+            "盘尾未分类",
+            cursor,
+            total_sectors - cursor,
+            None,
+            SemanticStatus::Unknown,
+            None,
         ));
     }
 
@@ -480,6 +535,7 @@ fn tail_region(total_sectors: u64) -> Option<InspectNode> {
         children: InspectChildren::Materialized(children),
         decoder: None,
         status: SemanticStatus::Unknown,
+        region_semantic: Some(DiskRegionSemantic::Tail),
     })
 }
 
@@ -534,7 +590,7 @@ fn mbr_primary_regions(context: &InspectDiskContext) -> Vec<InspectNode> {
             sector_count,
             None,
             SemanticStatus::Identified,
-            InspectNodeKind::Partition,
+            DiskRegionSemantic::MbrPartition { partition_type },
         ));
     }
     out
@@ -553,7 +609,7 @@ pub fn build_inspect_topology(context: &InspectDiskContext) -> InspectTopology {
             count,
             Some(InspectDecoderKind::Protocol),
             SemanticStatus::Identified,
-            InspectNodeKind::Extent,
+            DiskRegionSemantic::Protocol,
         ));
         claimed.push((start, count));
     }
@@ -567,7 +623,7 @@ pub fn build_inspect_topology(context: &InspectDiskContext) -> InspectTopology {
                 count,
                 Some(InspectDecoderKind::Lce),
                 SemanticStatus::Identified,
-                InspectNodeKind::Extent,
+                DiskRegionSemantic::Lce,
             ));
             claimed.push((start, count));
         }
@@ -584,7 +640,9 @@ pub fn build_inspect_topology(context: &InspectDiskContext) -> InspectTopology {
                 count,
                 Some(InspectDecoderKind::Partition),
                 SemanticStatus::Identified,
-                InspectNodeKind::Partition,
+                DiskRegionSemantic::Partition {
+                    partition_type: partition.partition_type,
+                },
             ));
             claimed.push((start, count));
         }
@@ -609,7 +667,7 @@ pub fn build_inspect_topology(context: &InspectDiskContext) -> InspectTopology {
             count,
             None,
             SemanticStatus::Unknown,
-            InspectNodeKind::UnknownRange,
+            DiskRegionSemantic::Unknown,
         ));
     }
 
@@ -625,6 +683,7 @@ pub fn build_inspect_topology(context: &InspectDiskContext) -> InspectTopology {
             children: InspectChildren::Materialized(regions),
             decoder: None,
             status: SemanticStatus::Identified,
+            region_semantic: None,
         },
     }
 }
@@ -728,6 +787,44 @@ mod tests {
     }
 
     #[test]
+    fn tail_primary_extents_are_ordered_disjoint_and_cover_parent() {
+        let total = 15_728_640;
+        let tail = tail_region(total).expect("tail region");
+        let InspectChildren::Materialized(children) = tail.children else {
+            panic!("tail extents must be materialized");
+        };
+        let spans = children
+            .iter()
+            .map(|child| {
+                (
+                    child.range.start_lba,
+                    child.range.end_lba_exclusive(),
+                    child.region_semantic,
+                )
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            spans,
+            [
+                (15_726_592, 15_727_616, None),
+                (
+                    15_727_616,
+                    15_727_625,
+                    Some(DiskRegionSemantic::TailMetadataMirror),
+                ),
+                (15_727_625, 15_728_636, None),
+                (
+                    15_728_636,
+                    15_728_637,
+                    Some(DiskRegionSemantic::TailRestoreNode),
+                ),
+                (15_728_637, 15_728_640, None),
+            ]
+        );
+        assert!(spans.windows(2).all(|pair| pair[0].1 == pair[1].0));
+    }
+
+    #[test]
     fn topology_expresses_lce_partitions_and_unknown_gaps_without_eager_sectors() {
         let mut ctx = context(10_000);
         ctx.lce = Some(Lba7CompatibilityGeometry {
@@ -769,6 +866,35 @@ mod tests {
             vec![3_048, 3_049, 3_050]
         );
         assert!(page.iter().all(|node| node.kind == InspectNodeKind::Sector));
+    }
+
+    #[test]
+    fn region_semantics_do_not_depend_on_display_labels() {
+        let mut ctx = context(10_000);
+        ctx.partitions.push(partition(0, 2_048, 2_000, 2));
+        let mut topology = build_inspect_topology(&ctx);
+        let InspectChildren::Materialized(regions) = &mut topology.root.children else {
+            panic!("root regions must be materialized");
+        };
+        let protocol = regions
+            .iter_mut()
+            .find(|node| node.id == "region.protocol")
+            .unwrap();
+        protocol.label = "renamed".into();
+        assert_eq!(protocol.region_semantic, Some(DiskRegionSemantic::Protocol));
+        let partition = regions
+            .iter()
+            .find(|node| node.id == "region.partition.0")
+            .unwrap();
+        assert_eq!(
+            partition.region_semantic,
+            Some(DiskRegionSemantic::Partition { partition_type: 2 })
+        );
+        let tail = regions
+            .iter()
+            .find(|node| node.id == "region.tail")
+            .unwrap();
+        assert_eq!(tail.region_semantic, Some(DiskRegionSemantic::Tail));
     }
 
     #[test]
@@ -951,6 +1077,7 @@ mod tests {
     #[test]
     fn field_nodes_keep_cross_sector_absolute_ranges() {
         let field = InspectField {
+            key: super::super::inspect::InspectFieldKey::Synthetic,
             range: AbsoluteByteRange {
                 start: 100 * SECTOR as u64 + 0x1f0,
                 end_exclusive: 101 * SECTOR as u64 + 0x30,
@@ -958,6 +1085,8 @@ mod tests {
             field_type: super::super::inspect::InspectFieldType::Identity,
             raw: vec![0; 64],
             decoded: vec![0; 64],
+            field_logical: None,
+            transform: None,
             status: super::super::inspect::InspectFieldStatus::Known,
             label: "跨扇区字段".into(),
             value: "value".into(),
@@ -966,6 +1095,7 @@ mod tests {
             children: vec![FieldChild {
                 label: "child".into(),
                 value: "value".into(),
+                relative_range: None,
             }],
         };
         let node = field_node(0, &field);
