@@ -493,7 +493,7 @@ pub fn decode_sector(
     match decoder {
         InspectDecoderKind::Protocol => {
             let lba32 = u32::try_from(lba)
-            .map_err(|_| InspectError::out_of_range(format!("LBA{lba} 超出协议解析器范围")))?;
+                .map_err(|_| InspectError::out_of_range(format!("LBA{lba} 超出协议解析器范围")))?;
             let view = inspect::analyze_sector_with_context(
                 lba32,
                 raw,
@@ -549,7 +549,7 @@ pub fn sector_meta_text(
 
     if lba <= u64::from(crate::common::METADATA_LAST_LBA) {
         let lba32 = u32::try_from(lba)
-                .map_err(|_| InspectError::out_of_range(format!("LBA{lba} 超出协议解析器范围")))?;
+            .map_err(|_| InspectError::out_of_range(format!("LBA{lba} 超出协议解析器范围")))?;
         let view =
             inspect::analyze_sector_with_context(lba32, raw, meta, Some(&context.protocol_image));
         out.push_str(&format!("协议解码: {}\n", view.method));
