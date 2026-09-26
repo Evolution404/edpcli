@@ -35,6 +35,8 @@ impl SectorField {
 pub struct FieldChild {
     pub label: String,
     pub value: String,
+    /// Relative to the parent field; absent when byte provenance is not established.
+    pub relative_range: Option<(usize, usize)>,
 }
 
 #[derive(Debug, Clone)]
@@ -346,10 +348,12 @@ pub(super) fn legacy_key_field(base: usize, group: String, entry: &EdpfEntry64) 
         FieldChild {
             label: "pwd_crc".into(),
             value: format!("0x{:08X}", entry.user_key_crc),
+            relative_range: Some((0, 4)),
         },
         FieldChild {
             label: "key_crc".into(),
             value: format!("0x{:08X}", entry.file_key_crc),
+            relative_range: Some((4, 8)),
         },
     ];
     if crc32_bare(known) == entry.user_key_crc {
@@ -362,6 +366,7 @@ pub(super) fn legacy_key_field(base: usize, group: String, entry: &EdpfEntry64) 
         children.push(FieldChild {
             label: "key8".into(),
             value: key8.iter().map(|byte| format!("{byte:02x}")).collect(),
+            relative_range: None,
         });
         children.push(FieldChild {
             label: "key8 CRC".into(),
@@ -370,11 +375,13 @@ pub(super) fn legacy_key_field(base: usize, group: String, entry: &EdpfEntry64) 
             } else {
                 "✗".into()
             },
+            relative_range: None,
         });
     } else {
         children.push(FieldChild {
             label: "raw".into(),
             value: hex_bytes(&entry.encrypted_file_key),
+            relative_range: Some((8, 16)),
         });
     }
     field_with_children(
@@ -407,11 +414,13 @@ pub(super) fn elabel_field(start: usize, body: &[u8]) -> SectorField {
                             value.to_string()
                         }
                     },
+                    relative_range: None,
                 }
             } else {
                 FieldChild {
                     label: "值".into(),
                     value: text_value(part),
+                    relative_range: None,
                 }
             }
         })

@@ -73,9 +73,17 @@ pub fn layout_for(kind: TableKind) -> AdaptiveTableLayout {
             column(16, 35, 80, 30, 3, false),
         ],
         InspectFields => vec![
-            column(8, 18, 40, 100, 1, true),
-            column(8, 24, 80, 80, 3, false),
-            column(8, 18, 32, 40, 1, false),
+            column(7, 7, 12, 100, 1, true),
+            column(3, 4, 8, 95, 1, true),
+            column(8, 14, 28, 35, 1, false),
+            column(10, 24, 48, 90, 2, true),
+            column(10, 26, 64, 85, 3, false),
+            column(9, 24, 72, 40, 2, false),
+            column(9, 24, 72, 30, 2, false),
+            column(9, 24, 72, 25, 2, false),
+            column(8, 12, 18, 25, 1, false),
+            column(8, 12, 18, 70, 1, false),
+            column(10, 24, 40, 20, 1, false),
         ],
     };
     AdaptiveTableLayout::new(specs)

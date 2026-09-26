@@ -538,7 +538,12 @@ fn dispatch_tui_action(
 }
 
 fn open_advanced_inspect_selection(state: &mut AppState, tasks: &mut TaskHub) {
-    let request = if state.advanced_inspect_selected_sector_lba().is_some() {
+    let detail_selected = state.advanced_inspect_focused_pane()
+        == Some(crate::tui::pane::PaneId::InspectDetail)
+        && state.advanced_inspect_detail_selected_row().is_some();
+    let request = if detail_selected {
+        state.advanced_inspect_detail_open_selected()
+    } else if state.advanced_inspect_selected_sector_lba().is_some() {
         state.advanced_inspect_open_selected_sector()
     } else if state.advanced_inspect_selected_field().is_some() {
         state.advanced_inspect_open_selected_field()
@@ -1060,10 +1065,14 @@ fn run_loop(resume: Option<state::WriteIntent>) -> io::Result<LoopExit> {
                                         );
                                     }
                                     TuiAction::TableScrollLeft | TuiAction::TableScrollRight => {
-                                        state.scroll_table(
-                                            crate::tui::table_layout::TableKind::InspectFields,
-                                            action == TuiAction::TableScrollLeft,
+                                        let viewport = state.pane_viewport_mut(
+                                            crate::tui::pane::PaneId::InspectDetail,
                                         );
+                                        if action == TuiAction::TableScrollLeft {
+                                            viewport.scroll_x = viewport.scroll_x.saturating_sub(1);
+                                        } else {
+                                            viewport.scroll_x = viewport.scroll_x.saturating_add(1);
+                                        }
                                     }
                                     TuiAction::MoveLeft if role == keymap::WidgetRole::Tree => {
                                         state.advanced_inspect_collapse_or_parent();
@@ -1073,7 +1082,27 @@ fn run_loop(resume: Option<state::WriteIntent>) -> io::Result<LoopExit> {
                                     }
                                     TuiAction::Top => state.advanced_inspect_focused_top(),
                                     TuiAction::Bottom => state.advanced_inspect_focused_bottom(),
-                                    TuiAction::Open => state.advanced_inspect_toggle_selected(),
+                                    TuiAction::Open => {
+                                        if state.advanced_inspect_focused_pane()
+                                            == Some(crate::tui::pane::PaneId::InspectDetail)
+                                            && state
+                                                .advanced_inspect_detail_selected_row()
+                                                .is_some()
+                                        {
+                                            state.advanced_inspect_detail_toggle_selected();
+                                        } else {
+                                            state.advanced_inspect_toggle_selected();
+                                        }
+                                    }
+                                    TuiAction::Yank | TuiAction::YankRaw => {
+                                        if state.advanced_inspect_focused_pane()
+                                            == Some(crate::tui::pane::PaneId::InspectDetail)
+                                        {
+                                            let _ = state.advanced_inspect_detail_yank(
+                                                action == TuiAction::YankRaw,
+                                            );
+                                        }
+                                    }
                                     TuiAction::Refresh => {
                                         if let Some((source, lba)) =
                                             state.advanced_inspect_retry_selected_preview()

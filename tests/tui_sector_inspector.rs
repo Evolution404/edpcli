@@ -89,6 +89,7 @@ fn item(lba: u64, decoded: bool) -> AdvancedInspectItem {
                 children: vec![FieldChild {
                     label: "bit-child".into(),
                     value: "1".into(),
+                    relative_range: None,
                 }],
             }]
         } else {
@@ -128,6 +129,59 @@ fn select_protocol_lba0(state: &mut AppState) {
 }
 
 #[test]
+fn ch14_detail_rows_keep_evidence_and_select_byte_ranges() {
+    use edpcli::tui::pane::PaneId;
+
+    let mut sector = item(0, true);
+    sector.fields[0].children = vec![
+        FieldChild {
+            label: "with bytes".into(),
+            value: "child value".into(),
+            relative_range: Some((1, 2)),
+        },
+        FieldChild {
+            label: "semantic only".into(),
+            value: "derived".into(),
+            relative_range: None,
+        },
+    ];
+    let mut state = AppState::new();
+    assert!(state.begin_advanced_inspect(AdvancedInspectSource::Disk(6)));
+    state.advanced_inspect_finish(Ok(workspace(vec![sector])));
+    select_protocol_lba0(&mut state);
+    state.advanced_inspect_focus_pane(PaneId::InspectDetail);
+    let rows = state.advanced_inspect_detail_rows();
+    assert_eq!(rows.len(), 1, "children start collapsed");
+    assert!(rows[0].cells.iter().any(|cell| cell.contains("12 01")));
+    assert!(rows[0].cells.iter().any(|cell| cell.contains("A5 01")));
+    assert_eq!(rows[0].range.unwrap().start, 0);
+    state.advanced_inspect_detail_toggle_selected();
+    let rows = state.advanced_inspect_detail_rows();
+    assert_eq!(rows.len(), 3);
+    state.advanced_inspect_move_focused_vertical(1, 2, rows.len());
+    assert_eq!(state.pane_viewport(PaneId::InspectDetail).selected, Some(1));
+    assert_eq!(
+        state
+            .advanced_inspect_detail_selected_row()
+            .unwrap()
+            .range
+            .unwrap()
+            .start,
+        1
+    );
+    state.advanced_inspect_move_focused_vertical(1, 2, rows.len());
+    assert_eq!(
+        state.advanced_inspect_detail_selected_row().unwrap().range,
+        None
+    );
+    assert!(state.advanced_inspect_detail_open_selected().is_none());
+    assert!(state.advanced_inspect_detail_yank(true).is_none());
+    state.advanced_inspect_move_focused_vertical(-1, 2, rows.len());
+    assert!(state.advanced_inspect_detail_open_selected().is_none());
+    assert_eq!(state.advanced_inspect_sector().unwrap().cursor, 1);
+}
+
+#[test]
 fn selecting_lba12_shows_canonical_fields_before_enter() {
     let mut sector = item(12, true);
     sector.fields = vec![InspectField {
@@ -149,6 +203,7 @@ fn selecting_lba12_shows_canonical_fields_before_enter() {
         children: vec![FieldChild {
             label: "Start LBA".into(),
             value: "20480".into(),
+            relative_range: None,
         }],
     }];
     let mut state = AppState::new();
@@ -175,7 +230,29 @@ fn selecting_lba12_shows_canonical_fields_before_enter() {
         .collect::<String>();
     assert!(text.contains("PartionType"), "{text}");
     assert!(text.contains("type2"), "{text}");
+    assert!(!text.contains("Start LBA"), "children start collapsed");
+    state.advanced_inspect_focus_pane(edpcli::tui::pane::PaneId::InspectDetail);
+    state.advanced_inspect_detail_toggle_selected();
+    terminal.draw(|frame| render::draw(frame, &state)).unwrap();
+    let text = terminal
+        .backend()
+        .buffer()
+        .content()
+        .iter()
+        .map(|cell| cell.symbol())
+        .collect::<String>();
     assert!(text.contains("Start LBA"), "{text}");
+    state
+        .pane_viewport_mut(edpcli::tui::pane::PaneId::InspectDetail)
+        .scroll_x = 1;
+    terminal.draw(|frame| render::draw(frame, &state)).unwrap();
+    let text = terminal
+        .backend()
+        .buffer()
+        .content()
+        .iter()
+        .map(|cell| cell.symbol())
+        .collect::<String>();
     assert!(text.contains("20480"), "{text}");
 }
 
@@ -648,6 +725,7 @@ fn field_to_hex_link_preserves_cross_sector_range_and_yank_register() {
         children: vec![FieldChild {
             label: "cross-child".into(),
             value: "kept".into(),
+            relative_range: None,
         }],
     };
     first.fields.push(cross.clone());

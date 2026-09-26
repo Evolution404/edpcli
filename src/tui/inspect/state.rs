@@ -177,6 +177,36 @@ pub struct AdvancedInspectTreeRow {
     pub action: AdvancedInspectTreeAction,
 }
 
+pub const INSPECT_DETAIL_HEADINGS: [&str; 11] = [
+    "Offset",
+    "Len",
+    "Group",
+    "Field",
+    "Value",
+    "Raw",
+    "Decoded",
+    "Logical",
+    "Type",
+    "Status",
+    "Transform",
+];
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InspectDetailRow {
+    pub cells: [String; 11],
+    pub range: Option<crate::application::inspect::AbsoluteByteRange>,
+    pub field_index: usize,
+    pub child_index: Option<usize>,
+}
+
+fn inspect_hex(bytes: &[u8]) -> String {
+    bytes
+        .iter()
+        .map(|byte| format!("{byte:02X}"))
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub enum PreviewLoadState {
     #[default]
@@ -204,6 +234,7 @@ pub struct AdvancedInspectState {
     pub sector: Option<SectorInspectorState>,
     pub sector_cache_order: std::collections::VecDeque<u64>,
     pub preview_load: std::collections::BTreeMap<u64, PreviewLoadState>,
+    pub detail_expanded: std::collections::BTreeSet<(u64, usize)>,
     pub yank_register: Option<String>,
     pub prompt: Option<AdvancedInspectPrompt>,
     pub message: Option<String>,
@@ -286,6 +317,157 @@ impl AppState {
         }
     }
 
+    pub fn advanced_inspect_detail_rows(&self) -> Vec<InspectDetailRow> {
+        use crate::application::inspect::AbsoluteByteRange;
+        use crate::application::inspect_tree::InspectNodeKind;
+
+        let Some(state) = self.advanced_inspect.as_ref() else {
+            return Vec::new();
+        };
+        let rows = self.advanced_inspect_tree_rows();
+        let Some(selected) = rows.get(state.tree_selected) else {
+            return Vec::new();
+        };
+        if selected.kind != InspectNodeKind::Sector {
+            return Vec::new();
+        }
+        let lba = selected.range.start_lba;
+        let Some(item) = state
+            .result
+            .as_ref()
+            .and_then(|workspace| workspace.items.iter().find(|item| item.lba == lba))
+        else {
+            return Vec::new();
+        };
+        let mut projected = Vec::new();
+        for (field_index, field) in item.fields.iter().enumerate() {
+            let has_children = !field.children.is_empty();
+            let expanded = state.detail_expanded.contains(&(lba, field_index));
+            let marker = if !has_children {
+                ""
+            } else if expanded {
+                "▾ "
+            } else {
+                "▸ "
+            };
+            let sector_start = lba.saturating_mul(crate::common::SECTOR as u64);
+            let offset = field.range.start.saturating_sub(sector_start);
+            projected.push(InspectDetailRow {
+                cells: [
+                    format!("0x{offset:03X}"),
+                    field.range.len().to_string(),
+                    field.group.clone().unwrap_or_default(),
+                    format!("{marker}{}", field.label),
+                    field.value.clone(),
+                    inspect_hex(&field.raw),
+                    inspect_hex(&field.decoded),
+                    field
+                        .field_logical
+                        .as_deref()
+                        .map(inspect_hex)
+                        .unwrap_or_default(),
+                    format!("{:?}", field.field_type),
+                    format!("{:?}", field.status),
+                    field
+                        .transform
+                        .map(|transform| format!("{transform:?}"))
+                        .unwrap_or_default(),
+                ],
+                range: Some(field.range),
+                field_index,
+                child_index: None,
+            });
+            if expanded {
+                for (child_index, child) in field.children.iter().enumerate() {
+                    let relative = child.relative_range.filter(|(start, end)| {
+                        start < end && *end <= field.raw.len() && *end <= field.decoded.len()
+                    });
+                    let range = relative.and_then(|(start, end)| {
+                        Some(AbsoluteByteRange {
+                            start: field.range.start.checked_add(start as u64)?,
+                            end_exclusive: field.range.start.checked_add(end as u64)?,
+                        })
+                    });
+                    let (offset, len, raw, decoded) = if let Some((start, end)) = relative {
+                        (
+                            format!("0x{:03X}", offset.saturating_add(start as u64)),
+                            (end - start).to_string(),
+                            inspect_hex(&field.raw[start..end]),
+                            inspect_hex(&field.decoded[start..end]),
+                        )
+                    } else {
+                        (String::new(), String::new(), String::new(), String::new())
+                    };
+                    projected.push(InspectDetailRow {
+                        cells: [
+                            offset,
+                            len,
+                            field.group.clone().unwrap_or_default(),
+                            format!("  {}", child.label),
+                            child.value.clone(),
+                            raw,
+                            decoded,
+                            String::new(),
+                            String::new(),
+                            format!("{:?}", field.status),
+                            String::new(),
+                        ],
+                        range,
+                        field_index,
+                        child_index: Some(child_index),
+                    });
+                }
+            }
+        }
+        projected
+    }
+
+    pub fn advanced_inspect_detail_selected_row(&self) -> Option<InspectDetailRow> {
+        let index = self
+            .advanced_inspect
+            .as_ref()?
+            .pane_focus
+            .viewport(crate::tui::pane::PaneId::InspectDetail)
+            .selected
+            .unwrap_or(0);
+        self.advanced_inspect_detail_rows().get(index).cloned()
+    }
+
+    pub fn advanced_inspect_detail_toggle_selected(&mut self) {
+        let Some(row) = self.advanced_inspect_detail_selected_row() else {
+            return;
+        };
+        if row.child_index.is_some() {
+            return;
+        }
+        let Some(lba) = self.advanced_inspect_selected_sector_lba() else {
+            return;
+        };
+        let Some(state) = self.advanced_inspect.as_mut() else {
+            return;
+        };
+        if !state.detail_expanded.remove(&(lba, row.field_index)) {
+            state.detail_expanded.insert((lba, row.field_index));
+        }
+        let count = self.advanced_inspect_detail_rows().len();
+        if let Some(state) = self.advanced_inspect.as_mut() {
+            let viewport = state
+                .pane_focus
+                .viewport_mut(crate::tui::pane::PaneId::InspectDetail);
+            viewport.selected = Some(viewport.selected.unwrap_or(0).min(count.saturating_sub(1)));
+        }
+    }
+
+    pub fn advanced_inspect_detail_yank(&mut self, raw: bool) -> Option<String> {
+        let row = self.advanced_inspect_detail_selected_row()?;
+        if raw && row.range.is_none() {
+            return None;
+        }
+        let value = row.cells[if raw { 5 } else { 4 }].clone();
+        self.advanced_inspect.as_mut()?.yank_register = Some(value.clone());
+        Some(value)
+    }
+
     pub fn advanced_inspect_focused_content_len(&self) -> usize {
         use crate::application::inspect_tree::InspectNodeKind;
         use crate::tui::pane::PaneId;
@@ -315,6 +497,10 @@ impl AppState {
                 8 + usize::from(row.range.byte_range.is_some()) + usize::from(row.decoder.is_some())
             }
             PaneId::InspectDetail => {
+                let detail_count = self.advanced_inspect_detail_rows().len();
+                if detail_count > 0 {
+                    return detail_count;
+                }
                 let rows = self.advanced_inspect_tree_rows();
                 let Some(row) = rows.get(state.tree_selected) else {
                     return 1;
@@ -371,6 +557,12 @@ impl AppState {
         };
         if pane == crate::tui::pane::PaneId::InspectTree {
             self.advanced_inspect_tree_top();
+        } else if pane == crate::tui::pane::PaneId::InspectDetail
+            && !self.advanced_inspect_detail_rows().is_empty()
+        {
+            let viewport = self.pane_viewport_mut(pane);
+            viewport.selected = Some(0);
+            viewport.scroll_y.top();
         } else if let Some(state) = self.advanced_inspect.as_mut() {
             state.pane_focus.viewport_mut(pane).scroll_y.top();
         }
@@ -385,6 +577,14 @@ impl AppState {
             return;
         }
         let content_len = self.advanced_inspect_focused_content_len();
+        if pane == crate::tui::pane::PaneId::InspectDetail
+            && !self.advanced_inspect_detail_rows().is_empty()
+        {
+            let viewport = self.pane_viewport_mut(pane);
+            viewport.selected = Some(content_len.saturating_sub(1));
+            viewport.scroll_y.bottom(content_len, 1);
+            return;
+        }
         if let Some(state) = self.advanced_inspect.as_mut() {
             state
                 .pane_focus
@@ -406,6 +606,25 @@ impl AppState {
         if pane == crate::tui::pane::PaneId::InspectTree {
             self.advanced_inspect_move_tree(delta);
             return;
+        }
+        if pane == crate::tui::pane::PaneId::InspectDetail {
+            let rows = self.advanced_inspect_detail_rows();
+            if !rows.is_empty() {
+                let viewport = self.pane_viewport_mut(pane);
+                let current = viewport.selected.unwrap_or(0).min(rows.len() - 1);
+                let next = if delta < 0 {
+                    current.saturating_sub(delta.unsigned_abs())
+                } else {
+                    current.saturating_add(delta as usize).min(rows.len() - 1)
+                };
+                viewport.selected = Some(next);
+                if next < viewport.scroll_y.offset {
+                    viewport.scroll_y.offset = next;
+                } else if next >= viewport.scroll_y.offset.saturating_add(visible_len.max(1)) {
+                    viewport.scroll_y.offset = next + 1 - visible_len.max(1);
+                }
+                return;
+            }
         }
         if let Some(state) = self.advanced_inspect.as_mut() {
             state.pane_focus.viewport_mut(pane).scroll_y.move_lines(
@@ -436,6 +655,7 @@ impl AppState {
             sector: None,
             sector_cache_order: std::collections::VecDeque::new(),
             preview_load: std::collections::BTreeMap::new(),
+            detail_expanded: std::collections::BTreeSet::new(),
             yank_register: None,
             prompt: None,
             message: Some("正在后台读取协议上下文并建立全盘结构树…".into()),
@@ -492,6 +712,7 @@ impl AppState {
         state.sector = None;
         state.sector_cache_order.clear();
         state.preview_load.clear();
+        state.detail_expanded.clear();
         state.prompt = None;
         state.search_query.clear();
         state.search_matches.clear();
@@ -1322,8 +1543,36 @@ impl AppState {
 
     pub fn advanced_inspect_open_selected_field(&mut self) -> Option<(AdvancedInspectSource, u64)> {
         let field = self.advanced_inspect_selected_field()?;
-        let lba = field.range.start / crate::common::SECTOR as u64;
-        let cursor = (field.range.start % crate::common::SECTOR as u64) as usize;
+        self.open_inspect_field_at(field.clone(), field.range.start)
+    }
+
+    pub fn advanced_inspect_detail_open_selected(
+        &mut self,
+    ) -> Option<(AdvancedInspectSource, u64)> {
+        let row = self.advanced_inspect_detail_selected_row()?;
+        let range = row.range?;
+        let lba = self.advanced_inspect_selected_sector_lba()?;
+        let field = self
+            .advanced_inspect
+            .as_ref()?
+            .result
+            .as_ref()?
+            .items
+            .iter()
+            .find(|item| item.lba == lba)?
+            .fields
+            .get(row.field_index)?
+            .clone();
+        self.open_inspect_field_at(field, range.start)
+    }
+
+    fn open_inspect_field_at(
+        &mut self,
+        field: crate::application::inspect::InspectField,
+        absolute: u64,
+    ) -> Option<(AdvancedInspectSource, u64)> {
+        let lba = absolute / crate::common::SECTOR as u64;
+        let cursor = (absolute % crate::common::SECTOR as u64) as usize;
         let (panel, tree_selection, pane_focus) = {
             let state = self.advanced_inspect.as_ref()?;
             (state.panel, state.tree_selected, state.pane_focus.clone())

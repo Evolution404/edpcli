@@ -1095,6 +1095,7 @@ mod tests {
             children: vec![FieldChild {
                 label: "child".into(),
                 value: "value".into(),
+                relative_range: None,
             }],
         };
         let node = field_node(0, &field);
