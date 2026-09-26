@@ -54,5 +54,5 @@ fn backup_inspect_rejects_legacy_bin_images() {
     std::fs::write(&path, vec![0u8; METADATA_IMAGE_LEN + SECTOR]).unwrap();
 
     let err = load_backup_inspect(&path).expect_err("legacy .bin must be rejected");
-    assert!(err.contains(".edpb"), "{err}");
+    assert!(err.message().contains(".edpb"), "{err}");
 }
