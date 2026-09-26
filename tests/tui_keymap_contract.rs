@@ -238,12 +238,8 @@ fn normal_mode_keeps_inspect_and_backup_as_single_key_actions() {
         "fn dispatch_tui_action(",
         "fn open_advanced_inspect_selection(",
     );
-    assert!(!dispatch.contains(
-        "TuiAction::Plan if state.workspace() == state::Workspace::Devices"
-    ));
-    assert!(!dispatch.contains(
-        "TuiAction::Activate | TuiAction::Open => match state.workspace()"
-    ));
+    assert!(!dispatch.contains("TuiAction::Plan if state.workspace() == state::Workspace::Devices"));
+    assert!(!dispatch.contains("TuiAction::Activate | TuiAction::Open => match state.workspace()"));
     assert!(contains_tokens_in_order(
         dispatch,
         &[
