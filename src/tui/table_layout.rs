@@ -135,7 +135,7 @@ fn safe(value: &str) -> String {
 pub fn backup_health_text(backup: &crate::application::BackupWorkspaceItem) -> &'static str {
     if !backup.size_ok {
         "大小异常"
-    } else if backup.integrity_status == crate::diskio::BackupIntegrityStatus::Verified {
+    } else if backup.integrity_status == crate::application::BackupIntegrityStatus::Verified {
         "EDPB ✓"
     } else {
         "EDPB ✗"
