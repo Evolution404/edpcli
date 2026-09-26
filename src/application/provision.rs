@@ -392,6 +392,14 @@ pub enum ProvisionCommitOutcome {
     Plain { partition_count: usize },
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ProvisionKeyProbe {
+    pub source_kind: crate::provision::DiskProvisionKind,
+    pub share: Option<SourcePasswordKnowledge>,
+    pub encrypt: Option<SourcePasswordKnowledge>,
+}
+
+
 #[derive(Clone, Eq, PartialEq)]
 pub struct PreparedNewProvision {
     pub disk: u32,
@@ -574,7 +582,10 @@ pub use export::{
 };
 #[cfg(test)]
 use prepare::target_encrypt_capacity_override;
-pub use prepare::{prepare_plain_provision, prepare_provision, prepare_target_provision};
+pub use prepare::{
+    prepare_plain_provision, prepare_provision, prepare_target_provision,
+    probe_provision_key_domains_on_disk,
+};
 
 pub fn prepare_provision_on_disk(
     runner: &dyn CmdRunner,
