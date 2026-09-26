@@ -12,6 +12,7 @@ pub mod inspect;
 pub mod inspect_summary;
 pub(crate) mod inspect_text;
 pub mod inspect_tree;
+pub mod media_identity;
 pub mod provision;
 pub mod target_session;
 pub mod write;

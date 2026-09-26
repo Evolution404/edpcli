@@ -6,6 +6,8 @@ mod dead_code_guard;
 mod dev_format_hook;
 #[path = "documentation_layout.rs"]
 mod documentation_layout;
+#[path = "media_identity.rs"]
+mod media_identity;
 #[path = "provision_capability_parity.rs"]
 mod provision_capability_parity;
 #[path = "test_infrastructure.rs"]
