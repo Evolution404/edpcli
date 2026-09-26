@@ -20,6 +20,15 @@ pub struct SectorField {
     pub style: FieldStyle,
     pub group: Option<String>,
     pub children: Vec<FieldChild>,
+    pub status: SectorFieldStatus,
+    pub transform: Option<FieldTransform>,
+}
+
+impl SectorField {
+    pub fn with_status(mut self, status: SectorFieldStatus) -> Self {
+        self.status = status;
+        self
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -36,6 +45,8 @@ pub struct SectorView {
     pub method: String,
     pub fields: Vec<SectorField>,
     pub notes: Vec<String>,
+    pub parse_state: InspectParseState,
+    pub diagnostics: Vec<InspectDiagnostic>,
 }
 
 pub(super) fn u32_at(b: &[u8], off: usize) -> Option<u32> {
@@ -57,6 +68,8 @@ pub(super) fn field(
         style,
         group: None,
         children: Vec::new(),
+        status: SectorFieldStatus::Known,
+        transform: None,
     }
 }
 
@@ -272,14 +285,19 @@ pub(super) fn profile_field(
 
 pub(super) fn pass_info_fields(base: usize, pass: &PassInfo, group: &str) -> Vec<SectorField> {
     let mut out = Vec::new();
-    out.push(grouped_field(
+    let mut version = grouped_field(
         base,
         base + 2,
         group,
         "版本",
         format!("0x{:04X}", pass.version),
         FieldStyle::Flag,
-    ));
+    );
+    version.transform = Some(FieldTransform::XorByte {
+        offset: 0,
+        mask: 0x88,
+    });
+    out.push(version);
     let values = [
         ("交换区强制改密", pass.force_change_share),
         ("交换区最大错误次数", pass.max_share_password_errors),
@@ -295,14 +313,21 @@ pub(super) fn pass_info_fields(base: usize, pass: &PassInfo, group: &str) -> Vec
         ("保密区备份提示周期", pass.encrypt_backup_prompt_period),
     ];
     for (index, (label, value)) in values.into_iter().enumerate() {
-        out.push(grouped_field(
+        let mut field = grouped_field(
             base + 2 + index,
             base + 3 + index,
             group,
             label,
             value.to_string(),
             FieldStyle::Flag,
-        ));
+        );
+        if matches!(index, 1 | 4) {
+            field.transform = Some(FieldTransform::XorByte {
+                offset: 0,
+                mask: 0x88,
+            });
+        }
+        out.push(field);
     }
     out
 }

@@ -67,8 +67,11 @@ fn item(lba: u64, decoded: bool) -> AdvancedInspectItem {
         decoded_sha256: decoded.then(|| format!("decoded-{lba}")),
         method: decoded.then(|| "test-decoder".into()),
         decode_error: (!decoded).then(|| "decoder unavailable".into()),
+        parse_state: edpcli::inspect::InspectParseState::Parsed,
+        diagnostics: Vec::new(),
         fields: if lba == 0 {
             vec![InspectField {
+                key: edpcli::inspect::InspectFieldKey::Synthetic,
                 range: AbsoluteByteRange {
                     start: 0,
                     end_exclusive: 2,
@@ -76,6 +79,8 @@ fn item(lba: u64, decoded: bool) -> AdvancedInspectItem {
                 field_type: InspectFieldType::Identity,
                 raw: vec![0x12, 0x01],
                 decoded: vec![0xA5, 0x01],
+                field_logical: None,
+                transform: None,
                 status: InspectFieldStatus::Known,
                 label: "KnownField".into(),
                 value: "typed-value".into(),
@@ -126,6 +131,7 @@ fn select_protocol_lba0(state: &mut AppState) {
 fn selecting_lba12_shows_canonical_fields_before_enter() {
     let mut sector = item(12, true);
     sector.fields = vec![InspectField {
+        key: edpcli::inspect::InspectFieldKey::Synthetic,
         range: AbsoluteByteRange {
             start: 12 * 512 + 16,
             end_exclusive: 12 * 512 + 20,
@@ -133,6 +139,8 @@ fn selecting_lba12_shows_canonical_fields_before_enter() {
         field_type: InspectFieldType::Identity,
         raw: vec![2, 0, 0, 0],
         decoded: vec![2, 0, 0, 0],
+        field_logical: None,
+        transform: None,
         status: InspectFieldStatus::Known,
         label: "PartionType".into(),
         value: "type2".into(),
@@ -265,6 +273,7 @@ fn detail_field_table_has_vertical_row_viewport_and_row_column_position() {
     let mut entry = item(0, true);
     entry.fields = (0..30)
         .map(|index| InspectField {
+            key: edpcli::inspect::InspectFieldKey::Synthetic,
             range: AbsoluteByteRange {
                 start: index,
                 end_exclusive: index + 1,
@@ -272,6 +281,8 @@ fn detail_field_table_has_vertical_row_viewport_and_row_column_position() {
             field_type: InspectFieldType::Identity,
             raw: vec![index as u8],
             decoded: vec![index as u8],
+            field_logical: None,
+            transform: None,
             status: InspectFieldStatus::Known,
             label: format!("Field{index:02}"),
             value: format!("value-{index:02}"),
@@ -488,6 +499,7 @@ fn sector_inspector_renders_32x16_offsets_ascii_typed_and_unknown_views() {
 fn field_to_hex_link_preserves_cross_sector_range_and_yank_register() {
     let mut first = item(0, true);
     let cross = InspectField {
+        key: edpcli::inspect::InspectFieldKey::Synthetic,
         range: AbsoluteByteRange {
             start: 0x1f0,
             end_exclusive: edpcli::common::SECTOR as u64 + 0x30,
@@ -495,6 +507,8 @@ fn field_to_hex_link_preserves_cross_sector_range_and_yank_register() {
         field_type: InspectFieldType::Identity,
         raw: (0..64).map(|value| value as u8).collect(),
         decoded: (0..64).map(|value| (value as u8) ^ 0x5a).collect(),
+        field_logical: None,
+        transform: None,
         status: InspectFieldStatus::Preserved,
         label: "CrossField".into(),
         value: "cross-value".into(),
@@ -577,6 +591,7 @@ fn field_statuses_remain_distinct_and_unknown_byte_stays_unclassified() {
     ]
     .into_iter()
     .map(|(start, status, label)| InspectField {
+        key: edpcli::inspect::InspectFieldKey::Synthetic,
         range: AbsoluteByteRange {
             start,
             end_exclusive: start + 2,
@@ -584,6 +599,8 @@ fn field_statuses_remain_distinct_and_unknown_byte_stays_unclassified() {
         field_type: InspectFieldType::Flag,
         raw: vec![start as u8, 0],
         decoded: vec![start as u8, 0],
+        field_logical: None,
+        transform: None,
         status,
         label: label.into(),
         value: format!("value-{start:02X}"),
@@ -804,6 +821,7 @@ fn structured_search_next_and_previous_cycle_all_cached_matches() {
     let mut first = item(0, true);
     let mut second = item(1, true);
     second.fields = vec![InspectField {
+        key: edpcli::inspect::InspectFieldKey::Synthetic,
         range: AbsoluteByteRange {
             start: edpcli::common::SECTOR as u64,
             end_exclusive: edpcli::common::SECTOR as u64 + 2,
@@ -811,6 +829,8 @@ fn structured_search_next_and_previous_cycle_all_cached_matches() {
         field_type: InspectFieldType::Identity,
         raw: vec![0x12, 0x01],
         decoded: vec![0xA5, 0x01],
+        field_logical: None,
+        transform: None,
         status: InspectFieldStatus::Known,
         label: "KnownField".into(),
         value: "second-match".into(),

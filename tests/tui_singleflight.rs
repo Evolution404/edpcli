@@ -63,7 +63,6 @@ fn ch14_q0_renderers_do_not_infer_business_state_from_display_text() {
 }
 
 #[test]
-#[ignore = "Q0 red contract: enable after Q1 Inspect field semantics"]
 fn ch14_q0_inspect_fields_have_stable_keys_and_typed_transform() {
     let inspect = include_str!("../src/application/inspect.rs");
     assert!(inspect.contains("InspectFieldKey"));

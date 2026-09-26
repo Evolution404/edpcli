@@ -2,7 +2,70 @@ use crate::common;
 
 use common::*;
 use edpcli::crypto::{a7f0_full, crc32_bare, xor_rolling};
-use edpcli::inspect::{analyze_sector, render_fields, render_hex, FieldStyle, InspectMeta};
+use edpcli::inspect::{
+    analyze_sector, render_fields, render_hex, FieldStyle, FieldTransform, InspectDiagnosticCode,
+    InspectMeta, InspectParseState,
+};
+
+#[test]
+fn ch14_missing_lba8_context_is_a_typed_diagnostic() {
+    let view = analyze_sector(8, &[0; 512], &InspectMeta::default());
+    assert_eq!(view.parse_state, InspectParseState::MissingContext);
+    assert!(view
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == InspectDiagnosticCode::MissingDeviceId));
+}
+
+#[test]
+fn ch14_short_sector_has_invalid_parse_state_without_guessing_fields() {
+    let view = analyze_sector(0, &[0; 511], &InspectMeta::default());
+    assert_eq!(view.parse_state, InspectParseState::Invalid);
+    assert!(view.fields.is_empty());
+    assert_eq!(view.diagnostics[0].code, InspectDiagnosticCode::ShortSector);
+}
+
+#[test]
+fn ch14_pass_info_exposes_exact_field_transform_provenance() {
+    let data = load_disk_image("netac").expect("netac fixture");
+    let view = analyze_sector(12, &data[12 * 512..13 * 512], &meta_for("netac"));
+    for offset in [0x120, 0x123, 0x126] {
+        let field = view
+            .fields
+            .iter()
+            .find(|field| field.start == offset)
+            .expect("PassInfo transformed field");
+        assert_eq!(
+            field.transform,
+            Some(FieldTransform::XorByte {
+                offset: 0,
+                mask: 0x88
+            })
+        );
+    }
+    assert!(view
+        .fields
+        .iter()
+        .find(|field| field.start == 0x124)
+        .unwrap()
+        .transform
+        .is_none());
+}
+
+#[test]
+fn ch14_field_statuses_are_produced_from_protocol_evidence() {
+    let data = load_disk_image("netac").expect("netac fixture");
+    let meta = meta_for("netac");
+    let lba5 = analyze_sector(5, &data[5 * 512..6 * 512], &meta);
+    assert_eq!(
+        lba5.fields[0].status,
+        edpcli::inspect::SectorFieldStatus::Preserved
+    );
+    let lba8 = analyze_sector(8, &data[8 * 512..9 * 512], &meta);
+    assert!(lba8.fields.iter().any(|field| {
+        field.start == 0x040 && field.status == edpcli::inspect::SectorFieldStatus::Reserved
+    }));
+}
 
 fn crc32_ieee_test(data: &[u8]) -> u32 {
     let mut crc = 0xffff_ffffu32;

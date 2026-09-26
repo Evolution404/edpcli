@@ -7,6 +7,7 @@ pub(super) fn render_lba0_4(
     fields: &mut Vec<SectorField>,
     notes: &mut Vec<String>,
     decoded: &mut Vec<u8>,
+    diagnostics: &mut Vec<InspectDiagnostic>,
 ) -> String {
     match lba {
         0 => match lba0::parse_lba0(raw_sector) {
@@ -63,6 +64,10 @@ pub(super) fn render_lba0_4(
                 "canonical protocol::lba0".into()
             }
             Err(error) => {
+                diagnostics.push(InspectDiagnostic::new(
+                    InspectDiagnosticCode::CanonicalParserRejected,
+                    format!("LBA0 canonical parser 拒绝: {error}"),
+                ));
                 notes.push(format!("canonical LBA0 parser 拒绝该扇区: {error}"));
                 "RAW（LBA0 canonical parser 未通过）".into()
             }
@@ -171,6 +176,10 @@ pub(super) fn render_lba0_4(
                 "canonical protocol::lba1".into()
             }
             Err(error) => {
+                diagnostics.push(InspectDiagnostic::new(
+                    InspectDiagnosticCode::CanonicalParserRejected,
+                    format!("LBA1 canonical parser 拒绝: {error}"),
+                ));
                 notes.push(format!("canonical LBA1 parser 拒绝该扇区: {error}"));
                 "RAW（LBA1 canonical parser 未通过）".into()
             }
@@ -190,6 +199,10 @@ pub(super) fn render_lba0_4(
                         "LBA1 canonical profile",
                     ),
                     Err(error) => {
+                        diagnostics.push(InspectDiagnostic::new(
+                            InspectDiagnosticCode::MissingProtocolContext,
+                            format!("LBA1 上下文无法确定 GPT profile: {error}"),
+                        ));
                         notes.push(format!(
                             "LBA1 canonical parser 无法确定 GPT profile: {error}"
                         ));
@@ -197,6 +210,10 @@ pub(super) fn render_lba0_4(
                     }
                 }
             } else {
+                diagnostics.push(InspectDiagnostic::new(
+                    InspectDiagnosticCode::MissingProtocolContext,
+                    "LBA2 缺 LBA1 上下文，使用单扇区兼容 profile",
+                ));
                 notes.push(
                     "未提供完整 LBA0–12 上下文；LBA2 单扇区 API 仅以全零/非零选择兼容 profile，CLI/TUI 会以 LBA1 为权威。"
                         .into(),
@@ -297,6 +314,10 @@ pub(super) fn render_lba0_4(
                     "canonical protocol::lba2".into()
                 }
                 Err(error) => {
+                    diagnostics.push(InspectDiagnostic::new(
+                        InspectDiagnosticCode::CanonicalParserRejected,
+                        format!("LBA2 canonical parser 拒绝: {error}"),
+                    ));
                     notes.push(format!("canonical LBA2 parser 拒绝该扇区: {error}"));
                     "RAW（LBA2 canonical parser 未通过）".into()
                 }
@@ -423,6 +444,10 @@ pub(super) fn render_lba0_4(
                 )
             }
             Err(error) => {
+                diagnostics.push(InspectDiagnostic::new(
+                    InspectDiagnosticCode::CanonicalParserRejected,
+                    format!("LBA4 canonical parser 拒绝: {error}"),
+                ));
                 notes.push(format!("canonical LBA4 parser 拒绝该扇区: {error}"));
                 "RAW（LBA4 canonical parser 未通过）".into()
             }

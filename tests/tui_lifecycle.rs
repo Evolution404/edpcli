@@ -449,6 +449,8 @@ fn advanced_inspect_tree_browser_renders_and_navigates_across_terminal_sizes() {
             decoded_sha256: None,
             method: None,
             decode_error: None,
+            parse_state: edpcli::inspect::InspectParseState::Parsed,
+            diagnostics: Vec::new(),
             fields: Vec::new(),
             notes: Vec::new(),
             meta_text: Some(format!(

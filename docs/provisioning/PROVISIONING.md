@@ -4299,7 +4299,7 @@ python3 scripts/test-full.py --profile full
 | 阶段 | 实施状态 | 验证记录 |
 | --- | --- | --- |
 | Q0 基线与失败测试 | COMPLETE | 基线 `9206d8a`；exFAT 998107136-sector round-trip、cluster limit/limit+1 与 Inspect/TUI 契约均已写成 ignored red tests，显式执行确认失败；Chapter 12 现有 key-domain 测试继续作为保护门禁。 |
-| Q1 Inspect 数据契约 | PENDING | — |
+| Q1 Inspect 数据契约 | COMPLETE | 稳定 `InspectFieldKey`、PhysicalRaw/SectorDecoded/FieldLogical/SemanticValue、typed XOR provenance、parse state/diagnostic、真实字段 status 与 typed region semantic 已落地；Inspect/TUI/协议专项与 fast gate 通过。 |
 | Q2 Inspect topology + presentation | PENDING | — |
 | Q3 Device / Backup identity contract | PENDING | — |
 | Q4 DiskLayout / Provision presentation | PENDING | — |
