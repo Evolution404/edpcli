@@ -604,7 +604,7 @@ pub fn commit_provision_on_disk(
     commit_provision(runner, &mut dev, prepared)
 }
 
-use commit::validate_target_write_set;
+use commit::{validate_key_disposition_plan, validate_target_write_set};
 #[cfg(test)]
 use commit::{
     execute_partition_format, validate_preserve_source_snapshot, verify_format_hardware,
