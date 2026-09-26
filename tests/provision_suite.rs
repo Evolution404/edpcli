@@ -17,6 +17,8 @@ mod provision_fat16;
 mod provision_filesystem;
 #[path = "provision_generate.rs"]
 mod provision_generate;
+#[path = "provision_key_domain_plan.rs"]
+mod provision_key_domain_plan;
 #[path = "provision_key_material.rs"]
 mod provision_key_material;
 #[path = "provision_layout.rs"]
