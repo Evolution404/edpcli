@@ -4787,3 +4787,300 @@ I3c  Detail 增加 selected row、Field→Hex、children 折叠
 ```
 
 最终标准：**Overview 让用户 3 秒内看懂当前节点最重要的信息；Detail 能完整回答每个字段在哪里、是什么、原始字节如何、如何解码、证据状态如何；Hex 再负责逐字节核验。**
+
+### 14.8 设备列表与备份列表统一身份字段契约
+
+当前 Devices 与 Backups 两张表的信息层级不一致。设备列表已经显示：
+
+```text
+设备 | 容量 | 总线 | VID:PID | ven_prod | onlyid | 姓名 | 部门 | 盘型
+```
+
+备份列表却只有：
+
+```text
+选 | # | 时间 | 盘型 | 姓名 | 部门 | 健康
+```
+
+因此同一块盘从“设备”切到“备份”后，最重要的硬件身份信息消失，无法快速确认这份备份到底属于哪块物理盘。
+
+调查确认这不是备份格式缺数据：当前 `.edpb` manifest / `BackupMeta` 已经包含 `secs / vid / pid / device_id / onlyid`，Inspect 也已经能从 `BackupMeta` 构造 `VID/PID/size/onlyid`。真正的问题是 `scan_backup_workspace()` 构造 `BackupWorkspaceItem` 时只向 TUI 暴露了 `onlyid/user/dept/盘型/健康`，把 `vid/pid/secs/device_id` 丢在了 application row 之外。
+
+#### 14.8.1 定义共享 Identity Columns
+
+设备与备份不应各自发明一套列。定义一组**完全同名、同顺序、同格式化规则**的共享身份列：
+
+```text
+容量 | VID:PID | 型号 | onlyid | 姓名 | 部门 | 盘型
+```
+
+其中：
+
+- `容量`：统一按磁盘总容量显示，来源分别是 `Row.size` 与 `BackupMeta.secs * 512`；
+- `VID:PID`：统一 `vvvv:pppp` 表示；
+- `型号`：沿用当前 `device_ven_prod(device_id)` 的语义，但把面向用户的列名从实现味很重的 `ven_prod` 改成“型号”；
+- `onlyid`：大小写命名保持当前项目习惯，不改协议字段语义；
+- `姓名 / 部门`：都来自已解析 ownership；
+- `盘型`：严格只显示 `DiskProvisionKind`，不能再混入“读取异常/需要权限”等运行状态。
+
+共享列必须由一个 UI-neutral row/display adapter 或共享 formatter 产生，禁止 Devices/Backups 分别格式化 `VID:PID`、容量、型号、onlyid。
+
+#### 14.8.2 两张表的最终列顺序
+
+设备表建议改为：
+
+```text
+设备 | 容量 | VID:PID | 型号 | onlyid | 姓名 | 部门 | 盘型 | 总线 | 状态
+```
+
+备份表建议改为：
+
+```text
+选 | # | 时间 | 容量 | VID:PID | 型号 | onlyid | 姓名 | 部门 | 盘型 | 健康
+```
+
+这样中间这一段：
+
+```text
+容量 | VID:PID | 型号 | onlyid | 姓名 | 部门 | 盘型
+```
+
+在两个工作区中完全一致。
+
+设备专属列：
+
+```text
+设备      当前系统 disk 编号
+总线      USB / 其它总线
+状态      可用 / 需要管理员权限 / 读取异常 / 非 USB
+```
+
+备份专属列：
+
+```text
+选        批量选择
+#         全局备份编号
+时间      备份创建/命名时间
+健康      EDPB 校验状态 / 大小异常
+```
+
+“盘型”和“状态”必须拆开。当前设备表最后一列标题虽然叫“盘型”，但 `device_status()` 在异常时会返回“需要管理员权限”“读取异常”等运行状态，这会破坏两张表的字段一致性。后续应：
+
+```text
+盘型 = provision_kind.short_name/full_name
+状态 = probe/access/support status
+```
+
+备份同理：
+
+```text
+盘型 = provision_kind
+健康 = container integrity
+```
+
+#### 14.8.3 BackupWorkspaceItem 补齐身份字段，但不复制协议真相源
+
+`BackupWorkspaceItem` 后续至少需要暴露：
+
+```text
+size_bytes: Option<u64>
+vid: Option<String>
+pid: Option<String>
+device_id: Option<String>
+onlyid: Option<String>   # 已有
+```
+
+值直接来自已验证 `BackupMeta`：
+
+```text
+meta.secs       -> size_bytes = secs * 512（checked_mul）
+meta.vid        -> vid
+meta.pid        -> pid
+meta.device_id  -> device_id
+meta.onlyid     -> onlyid
+```
+
+不允许 TUI 自己重新打开 `.edpb` 或重新解析 manifest；备份扫描仍是唯一 read-side 数据入口。
+
+若未来进一步收敛，可以定义共享：
+
+```text
+WorkspaceIdentity {
+    size_bytes,
+    vid,
+    pid,
+    device_id,
+    onlyid,
+    user,
+    dept,
+    provision_kind,
+}
+```
+
+`Device Row` 与 `BackupWorkspaceItem` 各自提供这个 projection。这样“设备/备份字段统一”成为模型契约，而不是两个 renderer 恰好写了相同字符串。
+
+#### 14.8.4 缺失值必须诚实显示，不猜测
+
+对无法取得的数据统一显示：
+
+```text
+—
+```
+
+规则：
+
+- `meta == None` 的损坏/无法验证 `.edpb`：容量、VID/PID、型号、onlyid 都显示 `—`；
+- `secs == None`：容量显示 `—`，不能拿文件大小冒充磁盘容量；
+- `device_id` 缺失或无法提取 `ven_/prod_`：型号显示 `—`；
+- onlyid 未知：`—`；
+- VID 或 PID 单独缺失时整个 `VID:PID` 显示 `—`，不显示半截 `xxxx:`；
+- 禁止为了填表从文件名猜出一个“看起来合理”的值覆盖 manifest/verified metadata；
+- 健康异常的备份仍保留在列表中，并明确显示健康状态，不能因为身份字段缺失而从 UI 隐藏。
+
+旧文件名解析器可继续服务兼容/识别流程，但 TUI 身份信息的优先级必须是：
+
+```text
+verified EDPB manifest / canonical metadata
+> 已验证协议派生值
+> 缺失
+```
+
+不得把未经验证的文件名文本提升为与 manifest 同等级的事实。
+
+#### 14.8.5 两边详情侧栏也按同一顺序展示身份
+
+当前设备详情和备份详情顺序也不同。统一为：
+
+```text
+盘型
+容量
+VID:PID
+型号
+device_id
+onlyid
+姓名
+部门
+```
+
+然后追加来源特有信息：
+
+设备：
+
+```text
+设备 diskN
+总线
+当前状态
+已有备份 N 份
+```
+
+备份：
+
+```text
+备份时间
+健康
+文件名
+备份编号
+```
+
+这样用户从设备切换到备份，视觉位置不会重新学习。
+
+#### 14.8.6 自适应列宽与横向 viewport
+
+因为统一后备份表会从 7 列扩展到 11 列，不能试图在窄终端一次塞下所有列。
+
+建议优先级：
+
+```text
+最高固定：
+设备表：设备、盘型
+备份表：选、#、盘型
+
+高优先级：
+容量、VID:PID、onlyid
+
+中优先级：
+型号、姓名、健康/状态
+
+低优先级：
+部门、总线、时间（时间对备份仍需可横向访问）
+```
+
+但**列的逻辑顺序不可因宽度改变**；AdaptiveTable 只决定当前 viewport 看哪些列，不得重新排序。
+
+两张表的共享列必须使用同一 `AdaptiveColumnSpec`，例如共享一个：
+
+```text
+identity_column_specs()
+```
+
+Devices/Backups 再在前后组合自己的专属列。这样同一个“onlyid”不会在设备表宽 12、备份表宽 7，造成切换时抖动。
+
+#### 14.8.7 搜索字段同步统一
+
+当前备份搜索只覆盖 `file_name/time/onlyid/user/dept/盘型`，新增身份字段后必须同步加入：
+
+```text
+VID
+PID
+VID:PID
+型号/device_id
+容量文本
+onlyid
+姓名
+部门
+盘型
+文件名/时间（备份专属）
+```
+
+设备搜索同样使用共享 identity text formatter，再追加 `diskN/proto/status`。
+
+要求：同一个 VID/PID、onlyid、姓名或部门查询，在 Devices 与 Backups 标签中都能命中对应记录。
+
+#### 14.8.8 排序与“设备 ↔ 备份”关联
+
+本轮不强制增加交互式列排序，但要固定默认语义：
+
+- Devices 保持系统扫描稳定顺序/当前磁盘编号顺序；
+- Backups 保持当前“最新备份优先”；
+- 不因为列统一改变现有编号、选择、删除、恢复语义。
+
+后续可增加“查看该设备备份”快捷过滤，但必须基于稳定身份匹配，不应仅用 `diskN`。建议关联键优先级：
+
+```text
+exact device_id + VID + PID + capacity + onlyid（可用字段组合）
+```
+
+具体关联规则需另行设计，不能在本项中凭 UI 列值拼字符串作为设备身份。
+
+#### 14.8.9 回归门禁
+
+至少新增：
+
+1. Devices 与 Backups 的共享列名、相对顺序完全一致；
+2. 备份表显示容量、VID:PID、型号、onlyid；
+3. 备份容量严格来自 `total_sectors * 512`，checked overflow；
+4. BackupWorkspaceItem 不要求 renderer 重新读取文件；
+5. 设备/备份的 `VID:PID` formatter 为同一实现；
+6. 设备/备份的型号 formatter 为同一实现；
+7. 盘型列只包含 `DiskProvisionKind`，设备访问错误进入独立“状态”列；
+8. 无 metadata 的损坏备份显示 `—` 而不是猜值，并保留“EDPB ✗/大小异常”；
+9. 搜索 VID/PID、onlyid、姓名、部门时两个工作区行为一致；
+10. 120 列、80 列、窄屏下均可通过 `h/l` 访问所有列；
+11. 横向滚动不改变 row selection；
+12. Devices/Backups 共享列使用共享 column spec，源码门禁防止再次漂移；
+13. 详情侧栏身份字段顺序一致；
+14. 备份全局编号、时间倒序、批量选择、Inspect/Verify/Restore/Delete 行为不变；
+15. 设备扫描与备份扫描不增加额外同步 I/O。
+
+后续实现顺序增加：
+
+```text
+I2d  扩展 BackupWorkspaceItem，透传 size/VID/PID/device_id
+I2e  建共享 WorkspaceIdentity projection + formatter + shared column specs
+I3d  重排 Devices 表为“专属前缀 + 共享身份列 + 状态”
+I3e  扩展 Backups 表为“选/#/时间 + 共享身份列 + 健康”
+I3f  统一两侧详情 sidebar 与搜索索引
+I3g  增加宽度/横滚/缺字段/损坏备份回归测试
+```
+
+最终标准：**同一块盘在“设备”和“备份”两个标签里，容量、VID:PID、型号、onlyid、姓名、部门、盘型必须出现在相同顺序、使用相同格式；工作区只额外展示自己独有的运行状态或备份管理信息。**
