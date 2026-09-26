@@ -313,7 +313,10 @@ fn escape_never_requests_program_exit_even_during_critical_operation() {
 fn provision_label_defaults_to_jiangsu_safe6_and_remains_editable() {
     let mut form = ProvisionForm::default();
     assert_eq!(form.label, "江苏电力!SAFE6");
-    assert_eq!(form.password, "0000aaaa");
+    assert!(form.share_source_password.is_empty());
+    assert_eq!(form.share_target_password, "0000aaaa");
+    assert!(form.encrypt_source_password.is_empty());
+    assert_eq!(form.encrypt_target_password, "0000aaaa");
     assert_eq!(form.volume_label, "启动区");
     assert_eq!(form.boot_sectors, "20417");
     assert_eq!(form.encrypt_mib, "1024");
