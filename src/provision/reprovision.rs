@@ -909,6 +909,37 @@ impl DiskProvisionKind {
 }
 
 impl ParsedExistingProvision {
+    pub fn record_for_domain(
+        &self,
+        domain: super::KeyDomainRole,
+    ) -> Option<&ExistingPartitionRecord> {
+        self.profile
+            .partitions
+            .iter()
+            .position(|part| super::KeyDomainRole::from_partition_role(part.role) == Some(domain))
+            .map(|index| &self.records[index])
+    }
+
+    pub fn source_password_knowledge(
+        &self,
+        domain: super::KeyDomainRole,
+        user_password: Option<&[u8]>,
+    ) -> super::SourcePasswordKnowledge {
+        let Some(record) = self.record_for_domain(domain) else {
+            return super::SourcePasswordKnowledge::Unknown;
+        };
+        if record
+            .verified_sm4_file_key(super::DEFAULT_KEY_DOMAIN_PASSWORD)
+            .is_ok()
+        {
+            return super::SourcePasswordKnowledge::DefaultVerified;
+        }
+        if user_password.is_some_and(|password| record.verified_sm4_file_key(password).is_ok()) {
+            return super::SourcePasswordKnowledge::UserVerified;
+        }
+        super::SourcePasswordKnowledge::Unknown
+    }
+
     pub fn record(&self, role: PartitionRole) -> Option<&ExistingPartitionRecord> {
         self.profile
             .partitions
@@ -985,12 +1016,18 @@ impl TargetProvisionPlan {
                         let record = source.records[source_index];
                         let key_ok = if record.lba12.need_encrypt == 0 {
                             true
+                        } else if let Some(domain) =
+                            super::KeyDomainRole::from_partition_role(target.role)
+                        {
+                            !matches!(
+                                source.source_password_knowledge(
+                                    domain,
+                                    key_domains.source_password(target.role),
+                                ),
+                                super::SourcePasswordKnowledge::Unknown
+                            )
                         } else {
-                            key_domains
-                                .source_password(target.role)
-                                .is_some_and(|password| {
-                                    record.verified_sm4_file_key(password).is_ok()
-                                })
+                            false
                         };
                         if key_ok {
                             action = PartitionAction::PreserveExact;
