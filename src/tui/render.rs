@@ -11,8 +11,7 @@ use ratatui::{
 };
 
 use super::state::{
-    AppState, InputMode, ProvisionKind, ProvisionPrepared, ProvisionStage, WizardStage, Workspace,
-    WriteKind,
+    AppState, InputMode, ProvisionKind, ProvisionStage, WizardStage, Workspace, WriteKind,
 };
 use super::{animation, animation::CoreMode};
 
