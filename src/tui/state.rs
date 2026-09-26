@@ -821,6 +821,33 @@ impl AppState {
         }
     }
 
+    pub fn pane_viewport(&self, pane: crate::tui::pane::PaneId) -> &crate::tui::pane::PaneViewport {
+        if pane.is_inspect() {
+            self.advanced_inspect
+                .as_ref()
+                .expect("Inspect pane requested without Inspect state")
+                .pane_focus
+                .viewport(pane)
+        } else {
+            self.provision.pane_focus.viewport(pane)
+        }
+    }
+
+    pub fn pane_viewport_mut(
+        &mut self,
+        pane: crate::tui::pane::PaneId,
+    ) -> &mut crate::tui::pane::PaneViewport {
+        if pane.is_inspect() {
+            self.advanced_inspect
+                .as_mut()
+                .expect("Inspect pane requested without Inspect state")
+                .pane_focus
+                .viewport_mut(pane)
+        } else {
+            self.provision.pane_focus.viewport_mut(pane)
+        }
+    }
+
     pub fn push_navigation_frame(&mut self, location: NavigationLocation) {
         let table_kind = match location {
             NavigationLocation::Devices => Some(super::table_layout::TableKind::Devices),
@@ -829,6 +856,14 @@ impl AppState {
             NavigationLocation::Inspect | NavigationLocation::SectorInspector => None,
         };
         let table_scroll = table_kind.map(|kind| (kind, self.table_scroll_offset(kind)));
+        let pane_focus = match location {
+            NavigationLocation::Provision => Some(self.provision.pane_focus.clone()),
+            NavigationLocation::Inspect | NavigationLocation::SectorInspector => self
+                .advanced_inspect
+                .as_ref()
+                .map(|state| state.pane_focus.clone()),
+            NavigationLocation::Devices | NavigationLocation::Backups => None,
+        };
         self.navigation.push(NavigationFrame {
             location,
             selection: self.selected,
@@ -836,6 +871,7 @@ impl AppState {
             panel: None,
             tree_selection: 0,
             detail_scroll: 0,
+            pane_focus,
             table_scroll,
         });
     }
@@ -854,6 +890,11 @@ impl AppState {
             };
             self.switch_workspace(workspace);
             self.selected = frame.selection.min(self.item_count.saturating_sub(1));
+            if workspace == Workspace::Provision {
+                if let Some(pane_focus) = frame.pane_focus {
+                    self.provision.pane_focus = pane_focus;
+                }
+            }
             if let Some((kind, offset)) = frame.table_scroll {
                 self.horizontal_scroll
                     .entry(kind)

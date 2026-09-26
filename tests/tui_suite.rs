@@ -23,6 +23,8 @@ mod tui_keymap_contract;
 mod tui_lifecycle;
 #[path = "tui_nonblocking.rs"]
 mod tui_nonblocking;
+#[path = "tui_pane_contract.rs"]
+mod tui_pane_contract;
 #[path = "tui_search_command.rs"]
 mod tui_search_command;
 #[path = "tui_sector_inspector.rs"]

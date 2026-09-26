@@ -1,6 +1,7 @@
 //! Return targets and selection snapshots for nested TUI workspaces.
 
 use super::{AdvancedInspectPanel, Workspace};
+use crate::tui::pane::PaneFocus;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NavigationLocation {
@@ -31,7 +32,7 @@ impl NavigationLocation {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NavigationFrame {
     pub location: NavigationLocation,
     pub selection: usize,
@@ -39,6 +40,7 @@ pub struct NavigationFrame {
     pub panel: Option<AdvancedInspectPanel>,
     pub tree_selection: usize,
     pub detail_scroll: usize,
+    pub pane_focus: Option<PaneFocus>,
     pub table_scroll: Option<(super::super::table_layout::TableKind, usize)>,
 }
 

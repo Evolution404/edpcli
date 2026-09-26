@@ -222,9 +222,9 @@ fn inspect_subworkspace_cycle_preserves_sector_cursor_and_return_target() {
         "Esc 返回：Inspect"
     );
     for expected in [
+        AdvancedInspectPanel::DiskLayout,
         AdvancedInspectPanel::Tree,
         AdvancedInspectPanel::Overview,
-        AdvancedInspectPanel::Detail,
     ] {
         state.advanced_inspect_shift_panel(false);
         assert_eq!(state.advanced_inspect().unwrap().panel, expected);
@@ -233,7 +233,7 @@ fn inspect_subworkspace_cycle_preserves_sector_cursor_and_return_target() {
     state.advanced_inspect_shift_panel(true);
     assert_eq!(
         state.advanced_inspect().unwrap().panel,
-        AdvancedInspectPanel::Overview
+        AdvancedInspectPanel::Tree
     );
     let mut terminal = Terminal::new(TestBackend::new(60, 18)).unwrap();
     terminal.draw(|frame| render::draw(frame, &state)).unwrap();
@@ -250,7 +250,7 @@ fn inspect_subworkspace_cycle_preserves_sector_cursor_and_return_target() {
     assert!(state.advanced_inspect_close_sector());
     assert_eq!(
         state.advanced_inspect().unwrap().panel,
-        AdvancedInspectPanel::Tree
+        AdvancedInspectPanel::DiskLayout
     );
     assert_eq!(
         state.advanced_inspect_breadcrumb().unwrap().escape_hint(),

@@ -471,6 +471,7 @@ fn advanced_inspect_tree_browser_renders_and_navigates_across_terminal_sizes() {
         AdvancedInspectStage::Browser
     );
 
+    state.advanced_inspect_focus_pane(edpcli::tui::pane::PaneId::InspectTree);
     let backend = TestBackend::new(120, 32);
     let mut terminal = Terminal::new(backend).expect("test terminal");
     terminal.draw(|frame| render::draw(frame, &state)).unwrap();
@@ -538,21 +539,23 @@ fn advanced_inspect_tree_browser_renders_and_navigates_across_terminal_sizes() {
     let expanded_len = state.advanced_inspect_tree_rows().len();
     assert!(expanded_len > collapsed_len);
 
+    state.advanced_inspect_focus_pane(edpcli::tui::pane::PaneId::InspectDiskLayout);
     state.advanced_inspect_shift_panel(false);
     assert_eq!(
         state.advanced_inspect().unwrap().panel,
-        AdvancedInspectPanel::Overview
+        AdvancedInspectPanel::Tree
     );
     state.advanced_inspect_shift_panel(false);
     assert_eq!(
         state.advanced_inspect().unwrap().panel,
-        AdvancedInspectPanel::Detail
+        AdvancedInspectPanel::Overview
     );
     state.advanced_inspect_shift_panel(true);
     assert_eq!(
         state.advanced_inspect().unwrap().panel,
-        AdvancedInspectPanel::Overview
+        AdvancedInspectPanel::Tree
     );
+    state.advanced_inspect_shift_panel(false);
     state.advanced_inspect_shift_panel(false);
     state.advanced_inspect_scroll_detail(10);
     assert_eq!(state.advanced_inspect().unwrap().detail_scroll, 10);
@@ -583,10 +586,21 @@ fn advanced_inspect_tree_browser_renders_and_navigates_across_terminal_sizes() {
             })
             .map(|cell| cell.symbol())
             .collect::<String>();
-        assert!(
-            active_tab.replace(' ', "").contains("节点详情"),
-            "Detail focus must be visible in the shared Inspect tabs: {active_tab}"
+        assert_eq!(
+            state.advanced_inspect().unwrap().panel,
+            AdvancedInspectPanel::Detail
         );
+        if width >= 80 {
+            assert!(
+                active_tab.replace(' ', "").contains("节点详情"),
+                "Detail focus must be visible in the shared Inspect tabs: {active_tab}"
+            );
+        } else {
+            assert!(
+                !active_tab.trim().is_empty(),
+                "narrow Inspect tabs must still expose the active-tab style"
+            );
+        }
     }
 
     state.advanced_inspect_shift_panel(true);

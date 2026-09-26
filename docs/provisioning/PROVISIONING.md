@@ -4094,6 +4094,14 @@ Tab:
 - KeyMapper 按 Pane + WidgetRole 解释；
 - focus border 单一事实源。
 
+**实施状态（2026-09-26）：P0 COMPLETE，P1 COMPLETE。**
+
+- P0 已新增 `tests/tui_pane_contract.rs` 并纳入 `tui_suite`，锁定 Inspect 四 Pane 与 Provision Form 双 Pane 的 focused `j/k`、Tab 前后切换和 selection 不串扰；P0 首次运行按预期因 Pane 基础设施缺失失败，P1 完成后 6/6 转绿。
+- P1 已新增统一 `PaneId / PaneFocus / PaneViewport / VerticalViewport`，Inspect 使用 `DiskLayout / Tree / Overview / Detail` 四 Pane，Provision Form 使用 `Parameters / DiskLayout`，Review 预留 `Summary / DiskLayout / Changes`；`NavigationFrame` 可保存/恢复 Pane focus + viewport。
+- `Tab/Shift-Tab` 已按当前页面 Pane 顺序切换，`Ctrl-w h/j/k/l` 已接空间邻接 resolver；Inspect 与 Provision 的 `j/k` 已改为按 focused Pane 分发，Provision `DiskLayout` focused 时不会再修改 `field_selected`。
+- Pane 行为从 `provision/state.rs` 拆入 `provision/pane.rs`，保持 Provision orchestration 模块边界；正式 fast gate 热缓存复跑为 4 suites / 6 artifacts、0 failures、4.49s。首次冷缓存复跑所有 suite 也为 0 failures，仅因 50.12s 超过 45s timing budget 退出，未发现功能或架构回归。
+- 尚未实施 P2～P8；第 12 章继续保持 PLAN ONLY，未修改任何 LBA0～12/LCE 协议语义或写盘安全链。
+
 ### 13.27 Phase P2：Full-Disk DiskLayoutModel
 
 - 把 DiskLayoutModel contract 改为整盘连续覆盖；

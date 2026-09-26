@@ -8,6 +8,7 @@ pub mod command;
 pub mod disk_layout;
 pub mod event;
 pub mod keymap;
+pub mod pane;
 pub mod render;
 pub mod state;
 pub mod table_layout;
@@ -790,6 +791,8 @@ fn run_loop(resume: Option<state::WriteIntent>) -> io::Result<LoopExit> {
                                 continue;
                             }
                             AdvancedInspectStage::Browser => {
+                                let viewport_height =
+                                    session.terminal.size()?.height.saturating_sub(9) as usize;
                                 if let Some(prompt) = state.advanced_inspect_prompt() {
                                     let mode = if matches!(
                                         prompt,
@@ -996,8 +999,18 @@ fn run_loop(resume: Option<state::WriteIntent>) -> io::Result<LoopExit> {
                                             state.set_notice(message);
                                         }
                                     }
-                                    TuiAction::MoveUp => state.advanced_inspect_move_tree(-1),
-                                    TuiAction::MoveDown => state.advanced_inspect_move_tree(1),
+                                    TuiAction::MoveUp => state
+                                        .advanced_inspect_move_focused_vertical(
+                                            -1,
+                                            viewport_height,
+                                            usize::MAX,
+                                        ),
+                                    TuiAction::MoveDown => state
+                                        .advanced_inspect_move_focused_vertical(
+                                            1,
+                                            viewport_height,
+                                            usize::MAX,
+                                        ),
                                     TuiAction::TableScrollLeft | TuiAction::TableScrollRight => {
                                         state.scroll_table(
                                             crate::tui::table_layout::TableKind::InspectFields,
@@ -1016,33 +1029,39 @@ fn run_loop(resume: Option<state::WriteIntent>) -> io::Result<LoopExit> {
                                     TuiAction::Activate => {
                                         open_advanced_inspect_selection(&mut state, &mut tasks);
                                     }
-                                    TuiAction::PanelNext
-                                    | TuiAction::PanelRight
-                                    | TuiAction::PanelDown => {
+                                    TuiAction::PanelNext => {
                                         state.advanced_inspect_shift_panel(false);
                                     }
-                                    TuiAction::PanelPrevious
-                                    | TuiAction::PanelLeft
-                                    | TuiAction::PanelUp => {
+                                    TuiAction::PanelPrevious => {
                                         state.advanced_inspect_shift_panel(true);
                                     }
+                                    TuiAction::PanelLeft => {
+                                        state.advanced_inspect_spatial_focus(-1, 0);
+                                    }
+                                    TuiAction::PanelRight => {
+                                        state.advanced_inspect_spatial_focus(1, 0);
+                                    }
+                                    TuiAction::PanelUp => {
+                                        state.advanced_inspect_spatial_focus(0, -1);
+                                    }
+                                    TuiAction::PanelDown => {
+                                        state.advanced_inspect_spatial_focus(0, 1);
+                                    }
                                     TuiAction::HalfPageUp => {
-                                        if state.advanced_inspect().is_some_and(|advanced| {
-                                            advanced.panel == state::AdvancedInspectPanel::Tree
-                                        }) {
-                                            state.advanced_inspect_move_tree(-10);
-                                        } else {
-                                            state.advanced_inspect_scroll_detail(-10);
-                                        }
+                                        let delta = -((viewport_height / 2).max(1) as isize);
+                                        state.advanced_inspect_move_focused_vertical(
+                                            delta,
+                                            viewport_height,
+                                            usize::MAX,
+                                        );
                                     }
                                     TuiAction::HalfPageDown => {
-                                        if state.advanced_inspect().is_some_and(|advanced| {
-                                            advanced.panel == state::AdvancedInspectPanel::Tree
-                                        }) {
-                                            state.advanced_inspect_move_tree(10);
-                                        } else {
-                                            state.advanced_inspect_scroll_detail(10);
-                                        }
+                                        let delta = (viewport_height / 2).max(1) as isize;
+                                        state.advanced_inspect_move_focused_vertical(
+                                            delta,
+                                            viewport_height,
+                                            usize::MAX,
+                                        );
                                     }
                                     TuiAction::Back => {
                                         let _ = state.navigate(NavCommand::Escape, 1);
@@ -1221,8 +1240,24 @@ fn run_loop(resume: Option<state::WriteIntent>) -> io::Result<LoopExit> {
                                 }
                             }
                             ProvisionStage::Form => match action {
-                                TuiAction::MoveUp => state.provision_move_field(-1),
-                                TuiAction::MoveDown => state.provision_move_field(1),
+                                TuiAction::WorkspaceNext => state.provision_shift_pane(false),
+                                TuiAction::WorkspacePrevious => state.provision_shift_pane(true),
+                                TuiAction::PanelNext => state.provision_shift_pane(false),
+                                TuiAction::PanelPrevious => state.provision_shift_pane(true),
+                                TuiAction::PanelLeft => state.provision_spatial_focus(-1, 0),
+                                TuiAction::PanelRight => state.provision_spatial_focus(1, 0),
+                                TuiAction::PanelUp => state.provision_spatial_focus(0, -1),
+                                TuiAction::PanelDown => state.provision_spatial_focus(0, 1),
+                                TuiAction::MoveUp => state.provision_move_focused_vertical(
+                                    -1,
+                                    viewport_height,
+                                    usize::MAX,
+                                ),
+                                TuiAction::MoveDown => state.provision_move_focused_vertical(
+                                    1,
+                                    viewport_height,
+                                    usize::MAX,
+                                ),
                                 TuiAction::Top => {
                                     let count = state.provision_field_count();
                                     state.provision_move_field(-(count as isize));
@@ -1231,8 +1266,16 @@ fn run_loop(resume: Option<state::WriteIntent>) -> io::Result<LoopExit> {
                                     let count = state.provision_field_count();
                                     state.provision_move_field(count as isize);
                                 }
-                                TuiAction::HalfPageUp => state.provision_move_field(-5),
-                                TuiAction::HalfPageDown => state.provision_move_field(5),
+                                TuiAction::HalfPageUp => state.provision_move_focused_vertical(
+                                    -((viewport_height / 2).max(1) as isize),
+                                    viewport_height,
+                                    usize::MAX,
+                                ),
+                                TuiAction::HalfPageDown => state.provision_move_focused_vertical(
+                                    (viewport_height / 2).max(1) as isize,
+                                    viewport_height,
+                                    usize::MAX,
+                                ),
                                 TuiAction::MoveLeft | TuiAction::MoveRight | TuiAction::Toggle => {
                                     state.provision_toggle_selected_option();
                                 }

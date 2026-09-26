@@ -348,9 +348,10 @@ pub(super) fn draw_advanced_inspect(
             let selected_index = advanced.tree_selected.min(rows.len().saturating_sub(1));
             let selected_row = rows.get(selected_index);
             let panel_index = match advanced.panel {
-                AdvancedInspectPanel::Tree => 0,
-                AdvancedInspectPanel::Overview => 1,
-                AdvancedInspectPanel::Detail => 2,
+                AdvancedInspectPanel::DiskLayout => 0,
+                AdvancedInspectPanel::Tree => 1,
+                AdvancedInspectPanel::Overview => 2,
+                AdvancedInspectPanel::Detail => 3,
             };
             let disk_layout =
                 crate::tui::disk_layout::DiskLayoutModel::from_topology(&workspace.topology);
@@ -389,12 +390,21 @@ pub(super) fn draw_advanced_inspect(
             layout_lines.extend(disk_layout.legend_lines().into_iter().map(Line::from));
             frame.render_widget(
                 Paragraph::new(layout_lines)
-                    .block(Block::default().borders(Borders::ALL).title("磁盘布局"))
+                    .block(
+                        Block::default()
+                            .borders(Borders::ALL)
+                            .border_style(if advanced.panel == AdvancedInspectPanel::DiskLayout {
+                                focused_panel()
+                            } else {
+                                panel()
+                            })
+                            .title("磁盘布局"),
+                    )
                     .wrap(Wrap { trim: false }),
                 browser[1],
             );
             frame.render_widget(
-                Tabs::new(["结构树", "节点概览", "节点详情"])
+                Tabs::new(["磁盘布局", "结构树", "节点概览", "节点详情"])
                     .select(panel_index)
                     .style(tab())
                     .highlight_style(active_tab())
@@ -405,6 +415,7 @@ pub(super) fn draw_advanced_inspect(
             let compact = content_area.width < 92 || content_area.height < 14;
             let (tree_area, overview_area, detail_area) = if compact {
                 match advanced.panel {
+                    AdvancedInspectPanel::DiskLayout => (None, None, None),
                     AdvancedInspectPanel::Tree => (Some(content_area), None, None),
                     AdvancedInspectPanel::Overview => (None, Some(content_area), None),
                     AdvancedInspectPanel::Detail => (None, None, Some(content_area)),

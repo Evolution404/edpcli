@@ -84,6 +84,8 @@ mod fields;
 mod form;
 #[path = "layout.rs"]
 mod layout;
+#[path = "pane.rs"]
+mod pane;
 #[path = "plain_editor.rs"]
 mod plain_editor;
 #[path = "validation.rs"]
@@ -106,6 +108,7 @@ pub struct ProvisionState {
     pub confirmation: String,
     pub export_path: String,
     pub message: Option<String>,
+    pub pane_focus: crate::tui::pane::PaneFocus,
     pub(super) target_disk: Option<u32>,
     form_initialized_for: Option<(u32, u64, Option<String>, ProvisionKind)>,
 }
@@ -124,6 +127,7 @@ impl Default for ProvisionState {
             confirmation: String::new(),
             export_path: String::new(),
             message: None,
+            pane_focus: crate::tui::pane::PaneFocus::provision_form(),
             target_disk: None,
             form_initialized_for: None,
         }
@@ -262,6 +266,7 @@ impl AppState {
         self.provision.confirmation.clear();
         self.provision.message = None;
         self.provision.prepared = None;
+        self.provision.pane_focus = crate::tui::pane::PaneFocus::provision_form();
         let current_target = self
             .selected_device()
             .map(|row| (row.disk, row.size, row.device_id.clone(), kind));
