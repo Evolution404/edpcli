@@ -18,7 +18,7 @@ use edpcli::application::write::{backup_create_flow, restore_flow, Ctx};
 use edpcli::common::{EXIT_BACKUP, EXIT_CANCELLED, EXIT_OK, EXIT_TARGET, SECTOR};
 use edpcli::diskio::FileDev;
 use edpcli::diskio::SectorDev;
-use edpcli::edpb::{self, CoreCapture, MetadataCapture};
+use edpcli::edpb::{self, CoreCapture};
 use edpcli::sysinfo::CmdRunner;
 use sha2::{Digest, Sha256};
 
@@ -150,17 +150,8 @@ fn write_test_edpb_with_notes(
     if notes.is_empty() {
         edpb::write_core_backup(path, &capture).unwrap();
     } else {
-        edpb::write_metadata_backup(
-            path,
-            &MetadataCapture {
-                core: capture,
-                regions: Vec::new(),
-                extents: Vec::new(),
-                artifacts: Vec::new(),
-                notes,
-            },
-        )
-        .unwrap();
+        // Free-text identity evidence is valid only as a historical manifest-v1 fixture.
+        edpb::write_legacy_v1_core_backup_with_notes(path, &capture, &notes).unwrap();
     }
 }
 
@@ -340,12 +331,22 @@ fn edp_backup_records_hardware_serial_binding_when_available() {
 
     let report = backup_create_flow(6, &mut ctx(&runner, &mut prompt, &tmp.0), &mut dev).unwrap();
     let verified = edpb::verify_file(&report.path).unwrap();
+    let identity = edpb::canonical_media_identity(&verified.manifest).unwrap();
+    let expected = hardware_serial_note(serial)
+        .strip_prefix("hardware_serial_sha256=")
+        .unwrap()
+        .to_string();
 
+    assert_eq!(
+        identity.hardware.serial_sha256.as_deref(),
+        Some(expected.as_str())
+    );
     assert!(verified
         .manifest
         .provenance
         .notes
-        .contains(&hardware_serial_note(serial)));
+        .iter()
+        .all(|note| !note.starts_with("hardware_serial_sha256=")));
 }
 
 #[test]
@@ -666,6 +667,39 @@ fn restore_plain_lba4_zero_rejects_wrong_hardware_serial() {
 }
 
 #[test]
+fn standalone_plain_backup_without_usable_serial_remains_allowed_as_weak_identity() {
+    let Some(original) = load_disk_image("netac") else {
+        eprintln!("跳过: 真实备份不可用");
+        return;
+    };
+    let current = plain_metadata(original);
+    let runner = netac_runner(26);
+    let tmp = TmpDir::new("plain_backup_weak_identity");
+    let mut prompt = ScriptPrompter::yes();
+    let mut dev = SwapOnReopenDev::new(current.clone(), current);
+
+    let report = backup_create_flow(
+        26,
+        &mut Ctx {
+            runner: &runner,
+            clock: &FixedClockForCli,
+            prompt: &mut prompt,
+            backup_dir: tmp.0.join("bak"),
+        },
+        &mut dev,
+    )
+    .expect("read-only backup creation must not require a unique serial");
+
+    let verified = edpb::verify_file(&report.path).unwrap();
+    let json = serde_json::to_value(&verified.manifest).unwrap();
+    assert_eq!(json["identity"]["hardware"]["serial_quality"], "missing");
+    assert!(
+        json["identity"]["protocol"]["device_id"].is_null(),
+        "weak Plain backup still must not invent observed device_id"
+    );
+}
+
+#[test]
 fn plain_backup_uses_hardware_identity_and_serial_binding() {
     let Some(original) = load_disk_image("netac") else {
         eprintln!("跳过: 真实备份不可用");
@@ -700,11 +734,23 @@ fn plain_backup_uses_hardware_identity_and_serial_binding() {
         verified.manifest.device.device_id,
         "disk&ven_netac&prod_onlydisk&rev_1.00"
     );
+    let identity = edpb::canonical_media_identity(&verified.manifest).unwrap();
+    let expected = hardware_serial_note(serial)
+        .strip_prefix("hardware_serial_sha256=")
+        .unwrap()
+        .to_string();
+    assert_eq!(
+        identity.hardware.serial_sha256.as_deref(),
+        Some(expected.as_str())
+    );
+    assert_eq!(identity.protocol.device_id, None);
+    assert_eq!(identity.protocol.onlyid, None);
     assert!(verified
         .manifest
         .provenance
         .notes
-        .contains(&hardware_serial_note(serial)));
+        .iter()
+        .all(|note| !note.starts_with("hardware_serial_sha256=")));
 }
 
 #[test]

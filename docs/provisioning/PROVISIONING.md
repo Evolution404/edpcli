@@ -8566,6 +8566,8 @@ observe_media_identity_readonly(...)
 
 #### I3 — EDPB manifest v2 + v1 adapter
 
+**实施状态（2026-09-26）：COMPLETE。** 新 writer 已输出 `edpb.manifest.v2` typed `identity.hardware/protocol/derived`，Plain canonical protocol identity 保持 `device_id=None/onlyid=None`，USB serial 只持久化 SHA-256 + `SerialQuality`，不再写入新 `provenance.notes`。历史 v1 通过 adapter 继续可读：Plain 旧 `device.device_id` 只进入 `LegacyDerivedCandidate`，旧 `hardware_serial_sha256=...` 仅 legacy adapter 解析；typed/legacy 冲突 fail-closed，历史文件只读不改写。验证：`cargo test --test backup_suite` = 68/68；受影响 CLI backup/restore = 22/22；`cargo fmt --all -- --check` 与 `git diff --check` 通过。I5 的 EDP clone serial-conflict red test 仍作为后续 restore authorization 阶段门禁，不属于 I3 writer/adapter 完成条件。
+
 - 新 writer 输出 manifest v2；
 - v1 read adapter；
 - typed serial digest；

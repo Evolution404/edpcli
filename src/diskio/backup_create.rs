@@ -125,14 +125,20 @@ pub fn create_backup(
 pub fn create_plain_backup(
     facts: &DiskFacts,
     data: &[u8],
-    device_id: &str,
-    notes: &[String],
+    legacy_candidate: &str,
+    identity: &crate::application::media_identity::MediaIdentitySnapshot,
     bak_dir: &Path,
     clock: &dyn Clock,
 ) -> EdpCliResult<(PathBuf, bool)> {
-    let (path, is_nopwd, capture) =
-        prepare_backup_capture_with_state(facts, data, device_id, bak_dir, clock, Some("plain"))?;
-    crate::edpb::write_core_backup_with_notes(&path, &capture, notes)
+    let (path, is_nopwd, capture) = prepare_backup_capture_with_state(
+        facts,
+        data,
+        legacy_candidate,
+        bak_dir,
+        clock,
+        Some("plain"),
+    )?;
+    crate::edpb::write_core_backup_with_identity(&path, &capture, identity)
         .map_err(|error| EdpCliError::new(EXIT_BACKUP, format!("错误: {error}")))?;
     sync_dir(bak_dir)?;
     Ok((path, is_nopwd))
@@ -145,6 +151,7 @@ pub fn create_metadata_backup(
     data: &[u8],
     device_id: &str,
     metadata: crate::backup_metadata::MetadataAcquisition,
+    identity: &crate::application::media_identity::MediaIdentitySnapshot,
     bak_dir: &Path,
     clock: &dyn Clock,
 ) -> EdpCliResult<(PathBuf, bool)> {
@@ -156,7 +163,7 @@ pub fn create_metadata_backup(
         artifacts: metadata.artifacts,
         notes: metadata.notes,
     };
-    crate::edpb::write_metadata_backup(&path, &capture)
+    crate::edpb::write_metadata_backup_with_identity(&path, &capture, identity)
         .map_err(|error| EdpCliError::new(EXIT_BACKUP, format!("错误: {error}")))?;
     sync_dir(bak_dir)?;
     Ok((path, is_nopwd))
@@ -168,6 +175,7 @@ pub fn create_deep_backup(
     data: &[u8],
     device_id: &str,
     deep: crate::backup_metadata::MetadataAcquisition,
+    identity: &crate::application::media_identity::MediaIdentitySnapshot,
     bak_dir: &Path,
     clock: &dyn Clock,
 ) -> EdpCliResult<(PathBuf, bool)> {
@@ -179,7 +187,7 @@ pub fn create_deep_backup(
         artifacts: deep.artifacts,
         notes: deep.notes,
     };
-    crate::edpb::write_deep_backup(&path, &capture)
+    crate::edpb::write_deep_backup_with_identity(&path, &capture, identity)
         .map_err(|e| EdpCliError::new(EXIT_BACKUP, format!("错误: {e}")))?;
     sync_dir(bak_dir)?;
     Ok((path, is_nopwd))

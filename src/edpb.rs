@@ -80,6 +80,68 @@ pub struct DeviceIdentity {
     pub onlyid: Option<String>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ManifestSerialQuality {
+    Usable,
+    Suspicious,
+    Missing,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ManifestTransport {
+    Uas,
+    Bot,
+    Unknown,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ManifestProvisionKind {
+    Plain,
+    Mode0,
+    Mode1,
+    Mode2,
+    Mode3,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ManifestHardwareIdentity {
+    pub vid: Option<u16>,
+    pub pid: Option<u16>,
+    pub serial_sha256: Option<String>,
+    pub serial_quality: ManifestSerialQuality,
+    pub vendor: Option<String>,
+    pub product: Option<String>,
+    pub revision: Option<String>,
+    pub transport: Option<ManifestTransport>,
+    pub total_sectors: Option<u64>,
+    pub logical_sector_size: Option<u32>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ManifestProtocolIdentity {
+    pub device_id: Option<String>,
+    pub onlyid: Option<String>,
+    pub provision_kind: Option<ManifestProvisionKind>,
+    pub lba4_identity_digest: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct ManifestDerivedIdentity {
+    #[serde(default)]
+    pub device_id_candidates: Vec<String>,
+    pub legacy_derived_candidate: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ManifestIdentity {
+    pub hardware: ManifestHardwareIdentity,
+    pub protocol: ManifestProtocolIdentity,
+    pub derived: ManifestDerivedIdentity,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DeviceGeometry {
     pub logical_sector_size: u32,
@@ -154,6 +216,8 @@ pub struct Manifest {
     pub container_version: ContainerVersion,
     pub snapshot: SnapshotInfo,
     pub device: DeviceIdentity,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub identity: Option<ManifestIdentity>,
     pub geometry: DeviceGeometry,
     pub observation: Observation,
     pub regions: Vec<Region>,
@@ -299,12 +363,119 @@ fn make_footer(
     out
 }
 
-fn base_manifest(capture: &CoreCapture<'_>) -> Manifest {
+fn parse_hex_u16(value: &str) -> Option<u16> {
+    let value = value.trim().trim_start_matches("0x");
+    (value.len() <= 4)
+        .then(|| u16::from_str_radix(value, 16).ok())
+        .flatten()
+}
+
+fn manifest_serial_quality(
+    quality: crate::application::media_identity::SerialQuality,
+) -> ManifestSerialQuality {
+    use crate::application::media_identity::SerialQuality;
+    match quality {
+        SerialQuality::Usable => ManifestSerialQuality::Usable,
+        SerialQuality::Suspicious => ManifestSerialQuality::Suspicious,
+        SerialQuality::Missing => ManifestSerialQuality::Missing,
+    }
+}
+
+fn manifest_transport(value: crate::platform::NativeTransport) -> ManifestTransport {
+    match value {
+        crate::platform::NativeTransport::Uas => ManifestTransport::Uas,
+        crate::platform::NativeTransport::Bot => ManifestTransport::Bot,
+        crate::platform::NativeTransport::Unknown => ManifestTransport::Unknown,
+    }
+}
+
+fn manifest_provision_kind(value: crate::provision::DiskProvisionKind) -> ManifestProvisionKind {
+    match value {
+        crate::provision::DiskProvisionKind::Plain => ManifestProvisionKind::Plain,
+        crate::provision::DiskProvisionKind::Mode0 => ManifestProvisionKind::Mode0,
+        crate::provision::DiskProvisionKind::Mode1 => ManifestProvisionKind::Mode1,
+        crate::provision::DiskProvisionKind::Mode2 => ManifestProvisionKind::Mode2,
+        crate::provision::DiskProvisionKind::Mode3 => ManifestProvisionKind::Mode3,
+    }
+}
+
+pub fn manifest_identity_from_snapshot(
+    snapshot: &crate::application::media_identity::MediaIdentitySnapshot,
+) -> ManifestIdentity {
+    ManifestIdentity {
+        hardware: ManifestHardwareIdentity {
+            vid: snapshot.hardware.vid,
+            pid: snapshot.hardware.pid,
+            serial_sha256: snapshot.hardware.serial_sha256.clone(),
+            serial_quality: manifest_serial_quality(snapshot.hardware.serial_quality),
+            vendor: snapshot.hardware.vendor.clone(),
+            product: snapshot.hardware.product.clone(),
+            revision: snapshot.hardware.revision.clone(),
+            transport: snapshot.hardware.transport.map(manifest_transport),
+            total_sectors: snapshot.hardware.total_sectors,
+            logical_sector_size: snapshot.hardware.logical_sector_size,
+        },
+        protocol: ManifestProtocolIdentity {
+            device_id: snapshot.protocol.device_id.clone(),
+            onlyid: snapshot.protocol.onlyid.clone(),
+            provision_kind: snapshot
+                .protocol
+                .provision_kind
+                .map(manifest_provision_kind),
+            lba4_identity_digest: snapshot.protocol.lba4_identity_digest.clone(),
+        },
+        derived: ManifestDerivedIdentity {
+            device_id_candidates: snapshot.derived.device_id_candidates.clone(),
+            legacy_derived_candidate: snapshot.derived.legacy_derived_candidate.clone(),
+        },
+    }
+}
+
+fn inferred_manifest_identity(capture: &CoreCapture<'_>) -> ManifestIdentity {
+    let plain = capture.device_state.eq_ignore_ascii_case("plain");
+    ManifestIdentity {
+        hardware: ManifestHardwareIdentity {
+            vid: parse_hex_u16(&capture.vid),
+            pid: parse_hex_u16(&capture.pid),
+            serial_sha256: None,
+            serial_quality: ManifestSerialQuality::Missing,
+            vendor: None,
+            product: None,
+            revision: None,
+            transport: None,
+            total_sectors: capture.total_sectors,
+            logical_sector_size: Some(capture.logical_sector_size),
+        },
+        protocol: ManifestProtocolIdentity {
+            device_id: (!plain).then(|| capture.device_id.clone()),
+            onlyid: (!plain).then(|| capture.onlyid.clone()).flatten(),
+            provision_kind: plain.then_some(ManifestProvisionKind::Plain),
+            lba4_identity_digest: None,
+        },
+        derived: ManifestDerivedIdentity {
+            device_id_candidates: (!capture.device_id.is_empty())
+                .then(|| vec![capture.device_id.clone()])
+                .unwrap_or_default(),
+            legacy_derived_candidate: plain.then(|| capture.device_id.clone()),
+        },
+    }
+}
+
+fn base_manifest(
+    capture: &CoreCapture<'_>,
+    identity: Option<&crate::application::media_identity::MediaIdentitySnapshot>,
+    schema: &str,
+) -> Manifest {
     let capacity_bytes = capture
         .total_sectors
         .and_then(|sectors| sectors.checked_mul(capture.logical_sector_size as u64));
+    let typed_identity = (schema == "edpb.manifest.v2").then(|| {
+        identity
+            .map(manifest_identity_from_snapshot)
+            .unwrap_or_else(|| inferred_manifest_identity(capture))
+    });
     Manifest {
-        schema: "edpb.manifest.v1".into(),
+        schema: schema.into(),
         container_version: ContainerVersion {
             major: FORMAT_MAJOR,
             minor: FORMAT_MINOR,
@@ -321,6 +492,7 @@ fn base_manifest(capture: &CoreCapture<'_>) -> Manifest {
             device_id: capture.device_id.clone(),
             onlyid: capture.onlyid.clone(),
         },
+        identity: typed_identity,
         geometry: DeviceGeometry {
             logical_sector_size: capture.logical_sector_size,
             physical_sector_size: None,
@@ -380,6 +552,8 @@ fn write_container(
     extra_extents: &[Extent],
     extra_artifacts: &[ArtifactInput],
     extra_notes: &[String],
+    identity: Option<&crate::application::media_identity::MediaIdentitySnapshot>,
+    schema: &str,
 ) -> Result<Manifest, String> {
     validate_core_capture(capture)?;
     if path.extension().and_then(|v| v.to_str()) != Some(EXTENSION) {
@@ -400,7 +574,7 @@ fn write_container(
         file.write_all(&[0u8; HEADER_SIZE])
             .map_err(|e| format!("write EDPB header failed: {e}"))?;
 
-        let mut manifest = base_manifest(capture);
+        let mut manifest = base_manifest(capture, identity, schema);
         manifest.snapshot.capture_level = capture_level;
         manifest.regions.extend_from_slice(extra_regions);
         manifest.extents.extend_from_slice(extra_extents);
@@ -450,6 +624,7 @@ fn write_container(
         let manifest_offset = file
             .stream_position()
             .map_err(|e| format!("read EDPB write position failed: {e}"))?;
+        validate_manifest_graph(&manifest)?;
         let manifest_bytes = serde_json::to_vec_pretty(&manifest)
             .map_err(|e| format!("serialize EDPB manifest failed: {e}"))?;
         let manifest_sha = sha256_bytes(&manifest_bytes);
@@ -490,7 +665,35 @@ fn write_container(
 }
 
 pub fn write_core_backup(path: &Path, capture: &CoreCapture<'_>) -> Result<Manifest, String> {
-    write_container(path, capture, CaptureLevel::Core, &[], &[], &[], &[])
+    write_container(
+        path,
+        capture,
+        CaptureLevel::Core,
+        &[],
+        &[],
+        &[],
+        &[],
+        None,
+        "edpb.manifest.v2",
+    )
+}
+
+pub fn write_core_backup_with_identity(
+    path: &Path,
+    capture: &CoreCapture<'_>,
+    identity: &crate::application::media_identity::MediaIdentitySnapshot,
+) -> Result<Manifest, String> {
+    write_container(
+        path,
+        capture,
+        CaptureLevel::Core,
+        &[],
+        &[],
+        &[],
+        &[],
+        Some(identity),
+        "edpb.manifest.v2",
+    )
 }
 
 pub fn write_core_backup_with_notes(
@@ -498,7 +701,38 @@ pub fn write_core_backup_with_notes(
     capture: &CoreCapture<'_>,
     notes: &[String],
 ) -> Result<Manifest, String> {
-    write_container(path, capture, CaptureLevel::Core, &[], &[], &[], notes)
+    write_container(
+        path,
+        capture,
+        CaptureLevel::Core,
+        &[],
+        &[],
+        &[],
+        notes,
+        None,
+        "edpb.manifest.v2",
+    )
+}
+
+/// Explicit compatibility writer used only to construct/read historical v1 fixtures.
+/// Normal backup creation must use the v2 writers above.
+#[doc(hidden)]
+pub fn write_legacy_v1_core_backup_with_notes(
+    path: &Path,
+    capture: &CoreCapture<'_>,
+    notes: &[String],
+) -> Result<Manifest, String> {
+    write_container(
+        path,
+        capture,
+        CaptureLevel::Core,
+        &[],
+        &[],
+        &[],
+        notes,
+        None,
+        "edpb.manifest.v1",
+    )
 }
 
 pub fn write_metadata_backup(
@@ -513,11 +747,47 @@ pub fn write_metadata_backup(
         &capture.extents,
         &capture.artifacts,
         &capture.notes,
+        None,
+        "edpb.manifest.v2",
+    )
+}
+
+pub fn write_metadata_backup_with_identity(
+    path: &Path,
+    capture: &MetadataCapture<'_>,
+    identity: &crate::application::media_identity::MediaIdentitySnapshot,
+) -> Result<Manifest, String> {
+    write_container(
+        path,
+        &capture.core,
+        CaptureLevel::Metadata,
+        &capture.regions,
+        &capture.extents,
+        &capture.artifacts,
+        &capture.notes,
+        Some(identity),
+        "edpb.manifest.v2",
     )
 }
 
 /// Write the Metadata superset with Deep-derived artifacts into one container.
 pub fn write_deep_backup(path: &Path, capture: &MetadataCapture<'_>) -> Result<Manifest, String> {
+    write_deep_backup_with_optional_identity(path, capture, None)
+}
+
+pub fn write_deep_backup_with_identity(
+    path: &Path,
+    capture: &MetadataCapture<'_>,
+    identity: &crate::application::media_identity::MediaIdentitySnapshot,
+) -> Result<Manifest, String> {
+    write_deep_backup_with_optional_identity(path, capture, Some(identity))
+}
+
+fn write_deep_backup_with_optional_identity(
+    path: &Path,
+    capture: &MetadataCapture<'_>,
+    identity: Option<&crate::application::media_identity::MediaIdentitySnapshot>,
+) -> Result<Manifest, String> {
     if capture
         .artifacts
         .iter()
@@ -533,6 +803,8 @@ pub fn write_deep_backup(path: &Path, capture: &MetadataCapture<'_>) -> Result<M
         &capture.extents,
         &capture.artifacts,
         &capture.notes,
+        identity,
+        "edpb.manifest.v2",
     )
 }
 
@@ -545,13 +817,274 @@ fn read_exact_at(file: &mut File, offset: u64, len: usize) -> Result<Vec<u8>, St
     Ok(out)
 }
 
-fn validate_manifest_graph(manifest: &Manifest) -> Result<(), String> {
-    if manifest.schema != "edpb.manifest.v1" {
-        return Err(format!(
-            "unsupported EDPB manifest schema: {}",
-            manifest.schema
-        ));
+const LEGACY_HARDWARE_SERIAL_NOTE_PREFIX: &str = "hardware_serial_sha256=";
+
+fn valid_sha256_hex(value: &str) -> bool {
+    value.len() == 64 && value.bytes().all(|byte| byte.is_ascii_hexdigit())
+}
+
+fn legacy_hardware_serial_digest(manifest: &Manifest) -> Result<Option<String>, String> {
+    let mut values = manifest
+        .provenance
+        .notes
+        .iter()
+        .filter_map(|note| note.strip_prefix(LEGACY_HARDWARE_SERIAL_NOTE_PREFIX));
+    let Some(value) = values.next() else {
+        return Ok(None);
+    };
+    if values.next().is_some() || !valid_sha256_hex(value) {
+        return Err("EDPB legacy hardware serial binding is malformed or duplicated".into());
     }
+    Ok(Some(value.to_ascii_lowercase()))
+}
+
+fn canonical_serial_quality(
+    value: ManifestSerialQuality,
+) -> crate::application::media_identity::SerialQuality {
+    match value {
+        ManifestSerialQuality::Usable => crate::application::media_identity::SerialQuality::Usable,
+        ManifestSerialQuality::Suspicious => {
+            crate::application::media_identity::SerialQuality::Suspicious
+        }
+        ManifestSerialQuality::Missing => {
+            crate::application::media_identity::SerialQuality::Missing
+        }
+    }
+}
+
+fn canonical_transport(value: ManifestTransport) -> crate::platform::NativeTransport {
+    match value {
+        ManifestTransport::Uas => crate::platform::NativeTransport::Uas,
+        ManifestTransport::Bot => crate::platform::NativeTransport::Bot,
+        ManifestTransport::Unknown => crate::platform::NativeTransport::Unknown,
+    }
+}
+
+fn canonical_provision_kind(value: ManifestProvisionKind) -> crate::provision::DiskProvisionKind {
+    match value {
+        ManifestProvisionKind::Plain => crate::provision::DiskProvisionKind::Plain,
+        ManifestProvisionKind::Mode0 => crate::provision::DiskProvisionKind::Mode0,
+        ManifestProvisionKind::Mode1 => crate::provision::DiskProvisionKind::Mode1,
+        ManifestProvisionKind::Mode2 => crate::provision::DiskProvisionKind::Mode2,
+        ManifestProvisionKind::Mode3 => crate::provision::DiskProvisionKind::Mode3,
+    }
+}
+
+fn validate_manifest_identity(manifest: &Manifest) -> Result<(), String> {
+    match manifest.schema.as_str() {
+        "edpb.manifest.v1" => {
+            if manifest.identity.is_some() {
+                return Err("EDPB manifest v1 must not carry typed identity".into());
+            }
+            legacy_hardware_serial_digest(manifest)?;
+            Ok(())
+        }
+        "edpb.manifest.v2" => {
+            let identity = manifest
+                .identity
+                .as_ref()
+                .ok_or_else(|| "EDPB manifest v2 missing typed identity".to_string())?;
+
+            match identity.hardware.serial_quality {
+                ManifestSerialQuality::Missing => {
+                    if identity.hardware.serial_sha256.is_some() {
+                        return Err(
+                            "EDPB typed identity marks serial missing but stores a digest".into(),
+                        );
+                    }
+                }
+                ManifestSerialQuality::Usable | ManifestSerialQuality::Suspicious => {
+                    let digest = identity.hardware.serial_sha256.as_deref().ok_or_else(|| {
+                        "EDPB typed identity serial quality requires a digest".to_string()
+                    })?;
+                    if !valid_sha256_hex(digest) {
+                        return Err("EDPB typed hardware serial digest is malformed".into());
+                    }
+                }
+            }
+
+            if let Some(legacy_digest) = legacy_hardware_serial_digest(manifest)? {
+                if identity
+                    .hardware
+                    .serial_sha256
+                    .as_deref()
+                    .map(str::to_ascii_lowercase)
+                    .as_deref()
+                    != Some(legacy_digest.as_str())
+                {
+                    return Err(
+                        "EDPB typed identity conflicts with legacy hardware serial evidence".into(),
+                    );
+                }
+            }
+
+            if let Some(vid) = identity.hardware.vid {
+                if parse_hex_u16(&manifest.device.vid) != Some(vid) {
+                    return Err("EDPB typed VID conflicts with legacy device projection".into());
+                }
+            }
+            if let Some(pid) = identity.hardware.pid {
+                if parse_hex_u16(&manifest.device.pid) != Some(pid) {
+                    return Err("EDPB typed PID conflicts with legacy device projection".into());
+                }
+            }
+            if let Some(total) = identity.hardware.total_sectors {
+                if manifest.geometry.total_sectors != Some(total) {
+                    return Err("EDPB typed total_sectors conflicts with geometry".into());
+                }
+            }
+            if let Some(sector_size) = identity.hardware.logical_sector_size {
+                if manifest.geometry.logical_sector_size != sector_size {
+                    return Err("EDPB typed logical sector size conflicts with geometry".into());
+                }
+            }
+
+            let typed_plain =
+                identity.protocol.provision_kind == Some(ManifestProvisionKind::Plain);
+            if typed_plain {
+                if identity.protocol.device_id.is_some() || identity.protocol.onlyid.is_some() {
+                    return Err(
+                        "EDPB Plain typed protocol identity must not contain device_id/onlyid"
+                            .into(),
+                    );
+                }
+                if manifest.device.onlyid.is_some() {
+                    return Err("EDPB Plain legacy projection must not contain onlyid".into());
+                }
+                let projection_is_derived = identity.derived.legacy_derived_candidate.as_deref()
+                    == Some(manifest.device.device_id.as_str())
+                    || identity
+                        .derived
+                        .device_id_candidates
+                        .iter()
+                        .any(|candidate| candidate == &manifest.device.device_id);
+                if !projection_is_derived {
+                    return Err(
+                        "EDPB Plain legacy device_id must be classified as derived candidate"
+                            .into(),
+                    );
+                }
+            } else {
+                if let Some(device_id) = identity.protocol.device_id.as_deref() {
+                    if device_id != manifest.device.device_id {
+                        return Err(
+                            "EDPB typed device_id conflicts with legacy device projection".into(),
+                        );
+                    }
+                }
+                if let Some(onlyid) = identity.protocol.onlyid.as_deref() {
+                    if manifest.device.onlyid.as_deref() != Some(onlyid) {
+                        return Err(
+                            "EDPB typed onlyid conflicts with legacy device projection".into()
+                        );
+                    }
+                }
+            }
+            Ok(())
+        }
+        other => Err(format!("unsupported EDPB manifest schema: {other}")),
+    }
+}
+
+/// Convert either historical manifest v1 or typed manifest v2 into the canonical identity domain.
+///
+/// The only free-text serial parsing permitted by production code lives in this v1 adapter.
+pub fn canonical_media_identity(
+    manifest: &Manifest,
+) -> Result<crate::application::media_identity::MediaIdentitySnapshot, String> {
+    use crate::application::media_identity::{
+        DerivedProtocolEvidence, HardwareIdentityEvidence, IdentityObservation,
+        MediaIdentitySnapshot, ProtocolIdentityEvidence, SerialQuality,
+    };
+
+    validate_manifest_identity(manifest)?;
+
+    if manifest.schema == "edpb.manifest.v2" {
+        let identity = manifest
+            .identity
+            .as_ref()
+            .ok_or_else(|| "EDPB manifest v2 missing typed identity".to_string())?;
+        return Ok(MediaIdentitySnapshot {
+            hardware: HardwareIdentityEvidence {
+                vid: identity.hardware.vid,
+                pid: identity.hardware.pid,
+                serial_sha256: identity.hardware.serial_sha256.clone(),
+                serial_quality: canonical_serial_quality(identity.hardware.serial_quality),
+                vendor: identity.hardware.vendor.clone(),
+                product: identity.hardware.product.clone(),
+                revision: identity.hardware.revision.clone(),
+                transport: identity.hardware.transport.map(canonical_transport),
+                total_sectors: identity.hardware.total_sectors,
+                logical_sector_size: identity.hardware.logical_sector_size,
+            },
+            protocol: ProtocolIdentityEvidence {
+                device_id: identity.protocol.device_id.clone(),
+                onlyid: identity.protocol.onlyid.clone(),
+                provision_kind: identity
+                    .protocol
+                    .provision_kind
+                    .map(canonical_provision_kind),
+                lba4_identity_digest: identity.protocol.lba4_identity_digest.clone(),
+            },
+            derived: DerivedProtocolEvidence {
+                device_id_candidates: identity.derived.device_id_candidates.clone(),
+                legacy_derived_candidate: identity.derived.legacy_derived_candidate.clone(),
+            },
+            observation: IdentityObservation {
+                platform: Some(manifest.observation.platform.clone()),
+                disk_selector: manifest
+                    .observation
+                    .disk_number
+                    .map(|disk| format!("disk{disk}")),
+                captured_epoch: Some(manifest.snapshot.created_epoch),
+            },
+        });
+    }
+
+    let serial_sha256 = legacy_hardware_serial_digest(manifest)?;
+    let is_plain = manifest.snapshot.device_state.eq_ignore_ascii_case("plain");
+    Ok(MediaIdentitySnapshot {
+        hardware: HardwareIdentityEvidence {
+            vid: parse_hex_u16(&manifest.device.vid),
+            pid: parse_hex_u16(&manifest.device.pid),
+            serial_quality: if serial_sha256.is_some() {
+                SerialQuality::Usable
+            } else {
+                SerialQuality::Missing
+            },
+            serial_sha256,
+            vendor: None,
+            product: None,
+            revision: None,
+            transport: None,
+            total_sectors: manifest.geometry.total_sectors,
+            logical_sector_size: Some(manifest.geometry.logical_sector_size),
+        },
+        protocol: ProtocolIdentityEvidence {
+            device_id: (!is_plain).then(|| manifest.device.device_id.clone()),
+            onlyid: (!is_plain)
+                .then(|| manifest.device.onlyid.clone())
+                .flatten(),
+            provision_kind: is_plain.then_some(crate::provision::DiskProvisionKind::Plain),
+            lba4_identity_digest: None,
+        },
+        derived: DerivedProtocolEvidence {
+            device_id_candidates: Vec::new(),
+            legacy_derived_candidate: is_plain.then(|| manifest.device.device_id.clone()),
+        },
+        observation: IdentityObservation {
+            platform: Some(manifest.observation.platform.clone()),
+            disk_selector: manifest
+                .observation
+                .disk_number
+                .map(|disk| format!("disk{disk}")),
+            captured_epoch: Some(manifest.snapshot.created_epoch),
+        },
+    })
+}
+
+fn validate_manifest_graph(manifest: &Manifest) -> Result<(), String> {
+    validate_manifest_identity(manifest)?;
     if manifest.container_version.major != FORMAT_MAJOR {
         return Err(format!(
             "unsupported EDPB major version: {}",
