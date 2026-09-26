@@ -2800,7 +2800,7 @@ Tab/Shift-Tab 子工作区 · Enter Sector Inspector · Esc 返回 · q 退出
 
 ## 12. 后续计划：五状态互转、独立密码域与 FileKey 保留策略（2026-09-26）
 
-> 状态：**IN PROGRESS / 2026-09-26 开始实施**。基线为合入第 13 章后的 `main`（merge `90d0137`）。严格按 K0→K8 执行；K0 先审计和红测试，不修改协议 writer 语义。
+> 状态：**COMPLETE（2026-09-26，12.13 = 13/13 PASS）**。K0～K5、K7、K8 已完成；K6 `Migrate` 仍按设计 DEFERRED / fail-closed，不属于本章当前 13 条完成条件，也不得因本章 COMPLETE 而被视为已实现。
 
 本章补全 4.8/4.9 中尚未展开的五状态互转密码语义。核心变化不是增加 20 套 source→target 特例，而是把“盘型布局”“区域语义”“密码知识”“FileKey 处理”“数据处置”拆成正交轴，由统一 planner 对每个语义区域独立决策。
 
@@ -3392,7 +3392,7 @@ K0 基线审计曾确认：
 
 #### Phase K8：真实 USB 验收
 
-**实施状态（2026-09-26）：PENDING（仅剩真实双域异密码/仅改密码 rewrap 证据）。** 当前同一真实 `/dev/disk4` 已完成：mode0→mode1 的 `PreserveOpaque` 数据零写入与 mode1 Combined 明文挂载；mode1→Plain；Plain→mode0 forced rebuild + `K_new` 完整文件系统初始化；mode0→mode0 `PreserveVerified` exact preserve；mode0→mode2 的 63-sector CompatibilityReserve 特例；Plain 双分区；默认密码下 Share(type2)/Encrypt(type4) 分别 FileKeyCRC=PASS 且真实数据起始扇区 SM4 解密后均通过严格 exFAT boot-sector 校验；真实介质故障注入 rollback 亦已通过。真实 USB 的“双域使用不同密码”和“password-only `RewrapVerified`（证明 `K_old` 不变且 ciphertext/data extent 零写入）”调用被当前执行安全层拦截，未取得实盘证据，因此 K8 与本章仍不得标 COMPLETE。
+**实施状态（2026-09-26）：COMPLETE。** 同一真实 `/dev/disk4` 已完成代表性高风险闭环：mode0→mode1 `PreserveOpaque` 数据零写入与 mode1 Combined 明文挂载；mode1→Plain；Plain→mode0 forced rebuild + `K_new` 完整文件系统初始化；mode0→mode0 `PreserveVerified` exact preserve；mode0→mode2 的 63-sector CompatibilityReserve 特例；Plain 双分区；默认密码双域 FileKeyCRC/SM4/exFAT；真实介质确定性 rollback；以及最终补齐的“Share/Encrypt 双域异密码”和 password-only `RewrapVerified`。K8 所有要求均已取得真实介质证据。
 
 按风险由低到高选择代表性转换，不一次性对 25 格全部写盘。每次必须：
 
@@ -3416,7 +3416,9 @@ K0 基线审计曾确认：
 - **真实介质 rollback：PASS。** 专用 `examples/real_usb_rollback_hil.rs` 默认拒绝运行，只有显式 HIL 开关后才允许外接 USB；测试在经分区/盘尾/全零未分配区门禁确认后的 LBA1024..1026 注入第 2 次写失败，生产 `execute_write_transaction()` 返回 `EXIT_ROLLED_BACK`，独立重开 raw device 与外部 `dd + SHA-256` 均证明三个 touched sectors 完全恢复。
 - **Plain 双分区：PASS。** P1 DATA 1GiB + P2 TOOLS fill 均为 exFAT，LBA3 byte-for-byte preserve；macOS 对两个分区分别完成 mount/write/readback/unmount，最终 Plain `_plain.edpb` 再次创建并校验通过。
 - **制盘前强制自动备份安全链：代码门禁 PASS。** 本轮审计确认旧实现中 CLI `provision write` 可直接进入 commit、TUI 也允许跳过保存，备份并非 application 写盘链的强制步骤。现已统一为 `backup_create_on_disk → commit_provision_on_disk` 的 application 单一入口；备份失败时 commit 必须 0 次调用，CLI/TUI 均不可绕过。该项只表示代码与自动门禁已收口，不作为新的真实 USB 场景 PASS。
-- **仍缺：真实双域异密码 + password-only rewrap。** K7 Virtual-HIL 已覆盖该语义，但 K8 真实 USB CLI 调用在当前执行环境被安全层拦截；不得用变形命令绕过，也不得把虚拟盘证据冒充真实盘证据。
+- **真实双域异密码：PASS。** 专用 `examples/real_usb_password_hil.rs` 默认关闭并绑定 VID/PID、容量、`device_id`、硬件 serial SHA-256；测试密码由 helper 内部 CSPRNG 一次性生成，只在进程内存存在，既不进入 argv/env/日志/文件，也不输出，退出时清零。Plain→mode0 正式写盘先自动创建 `_plain_*.edpb`，随后 Share/Encrypt 使用不同密码分别完成 `UserVerified`、FileKeyCRC PASS、SM4 解密与严格 exFAT boot-sector 校验；互换密码均验证为 Unknown/fail-closed。Share 首扇区 SHA-256=`1fd24ad9e3469df8bf7902c01e04f670ff653feb201e9fc6b41edbb81da14562`；Encrypt=`745865daeb1c01cfea9d64d1f3c7908b7a4c785ee6f7b0a5078ee2184030a096`。
+- **password-only `RewrapVerified`：PASS。** 同几何 mode0→mode0 对 Share/Encrypt 均由 planner 给出 `PreserveExact + RewrapVerified`，filesystem format 全部关闭，计划 write-set 与两个 data extent 零交集；正式写盘前再次自动创建 EDPB。写后两域 raw `K_old` byte-for-byte 保持、LBA7/LBA12 wrapper 均改变、旧密码失效、新密码生效且新密码互换失败；上述 Share/Encrypt 数据首扇区 SHA-256 写前写后完全一致，证明 ciphertext/data extent 未重写。
+- **HIL 密码留存策略：PASS。** 最终验收使用的四个一次性密码从未持久化，helper 退出后已清零；因此当前真实盘虽为 mode0 且验收已闭环，但其当前双域测试密码按设计不可恢复。后续若还需对该盘做需要已知密码的 HIL，必须通过受控重建/恢复建立新的已知测试状态，不得猜测或绕过密码门禁。
 
 ### 12.13 本章完成标准
 
@@ -3435,6 +3437,8 @@ K0 基线审计曾确认：
 11. fast/full 门禁全绿；
 12. 代表性真实 USB 转换验收通过；
 13. 文档、TUI、CLI Review 与实际 planner 单一事实源一致。
+
+**2026-09-26 完成审计：13/13 PASS，Chapter 12 COMPLETE。** 已确认：源码不存在全局 `request.password`；`KeyDomainSecrets` 支持 Share/Encrypt 独立 source/target；逐域默认密码验证、Opaque Preserve、Opaque 禁改密码/数据零写入、Rewrap `K_old`、`K_new` 强制初始化均有自动门禁；`chapter_12_five_by_five_conversion_golden_is_complete` 明确验证 25/25 source×target golden cells；mode1 Combined、mode2 CompatibilityReserve、LBA0～12/LCE 金标、真实 USB K8、CLI/TUI/application 单一事实源均已有证据。最终正式 fast=`3 suites / 5 artifacts / 0 failures / 44.08s`；full=`8 suites / 10 artifacts + doctest / 0 failures / 49.11s`。K6 `Migrate` 不属于上述 13 条完成条件，继续 DEFERRED / fail-closed。
 
 最终原则：**五种盘型只定义布局；区域语义决定能否保留；密码属于独立 key domain；不知道密码不等于必须破坏数据；改密码不等于换 FileKey；一旦换 FileKey 就必须重建对应数据区。**
 
@@ -5820,7 +5824,7 @@ I3p  fake slow device + fixed clock + rollback + 宽度回归门禁
 
 本节是对 14.1～14.10 的实现前审计。**如本节与前文局部建议冲突，以本节为准。** 本轮只修正规划，不实现生产代码。
 
-本次重新基于 GitHub 当前 `main=26df947` 审计：第 13 章 P0～P8 仍为 COMPLETE；同时 PR #24 已合并，第 12 章已不再是纯计划——K0～K5、K7 已落地，K6 `Migrate` 仍 DEFERRED/fail-closed，K8 真实 USB 验收仍 PENDING。因此第 14 章必须建立在**现有 Pane/DiskLayout 基础设施 + 已实现的 Chapter 12 key-domain/RegionDisposition 模型**上，禁止再按旧基线重复设计。
+后续状态更新（2026-09-26）：第 13 章 P0～P8 仍为 COMPLETE；第 12 章已按 12.13 的 13 条标准完成并标记 COMPLETE，K6 `Migrate` 仍单独 DEFERRED/fail-closed。第 14 章继续建立在**现有 Pane/DiskLayout 基础设施 + 已实现的 Chapter 12 key-domain/RegionDisposition 模型**上，禁止再按旧基线重复设计。
 
 #### 14.11.1 问题一：第 14 章局部 Phase 编号已经失去全局顺序
 
@@ -6229,7 +6233,7 @@ Q5 -> Q6 -> Q7
 Q8 最后统一收口
 ```
 
-第 12 章当前状态是 **K0～K5、K7 COMPLETE；K6 Migrate DEFERRED；K8 真实 USB PENDING**。Q4 必须直接消费现有 RegionDisposition/KeyDomain，不重复实现密码域；Q5/Q6 的 progress/outcome 改造不得降低 Chapter 12 已落地的 Opaque/Verified/Rewrap/Rebuild、双域独立密码、secret redaction、prepare/commit 双层安全门禁。
+第 12 章当前状态是 **COMPLETE（12.13 = 13/13 PASS）；K6 Migrate 继续 DEFERRED / fail-closed**。Q4 必须直接消费现有 RegionDisposition/KeyDomain，不重复实现密码域；Q5/Q6 的 progress/outcome 改造不得降低 Chapter 12 已落地的 Opaque/Verified/Rewrap/Rebuild、双域独立密码、secret redaction、prepare/commit 双层安全门禁。
 
 #### 14.11.13 审计后的优先级
 

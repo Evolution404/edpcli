@@ -620,7 +620,7 @@ mod macos {
                     return Err(format!(
                         "{} 文件系统初始化失败: {}",
                         failed.role.label(),
-                        failed.result.as_ref().err().expect("checked error")
+                        failed.result.as_ref().expect_err("checked error")
                     ));
                 }
                 Ok(())
