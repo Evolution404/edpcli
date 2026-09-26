@@ -27,6 +27,8 @@ mod provision_layout;
 mod provision_lce;
 #[path = "provision_protocol_audit.rs"]
 mod provision_protocol_audit;
+#[path = "provision_region_mapping.rs"]
+mod provision_region_mapping;
 #[path = "provision_reprovision.rs"]
 mod provision_reprovision;
 #[path = "provision_transaction_write.rs"]
