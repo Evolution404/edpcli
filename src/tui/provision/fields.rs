@@ -148,7 +148,11 @@ impl AppState {
             ),
         ]);
         if matches!(mode, 0 | 1 | 3) {
-            let domain = if mode == 1 { "二合一区" } else { "交换区" };
+            let domain = if mode == 1 {
+                "二合一区"
+            } else {
+                "交换区"
+            };
             out.push((
                 format!("{domain}来源密码（可空）"),
                 self.provision.form.share_source_password.as_str(),
