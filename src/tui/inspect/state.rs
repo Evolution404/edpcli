@@ -199,12 +199,30 @@ pub struct InspectDetailRow {
     pub child_index: Option<usize>,
 }
 
+#[derive(Debug, Clone)]
+struct InspectTreeViewModel {
+    revision: u64,
+    rows: std::sync::Arc<Vec<AdvancedInspectTreeRow>>,
+    index: std::collections::HashMap<String, usize>,
+}
+
 fn inspect_hex(bytes: &[u8]) -> String {
     bytes
         .iter()
         .map(|byte| format!("{byte:02X}"))
         .collect::<Vec<_>>()
         .join(" ")
+}
+
+fn reset_inspect_selected_context(state: &mut AdvancedInspectState) {
+    use crate::tui::pane::PaneId;
+    for pane in [PaneId::InspectOverview, PaneId::InspectDetail] {
+        let viewport = state.pane_focus.viewport_mut(pane);
+        viewport.scroll_y.top();
+        if pane == PaneId::InspectDetail {
+            viewport.selected = Some(0);
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -235,6 +253,8 @@ pub struct AdvancedInspectState {
     pub sector_cache_order: std::collections::VecDeque<u64>,
     pub preview_load: std::collections::BTreeMap<u64, PreviewLoadState>,
     pub detail_expanded: std::collections::BTreeSet<(u64, usize)>,
+    tree_revision: u64,
+    tree_view_model: std::cell::RefCell<Option<InspectTreeViewModel>>,
     pub yank_register: Option<String>,
     pub prompt: Option<AdvancedInspectPrompt>,
     pub message: Option<String>,
@@ -656,6 +676,8 @@ impl AppState {
             sector_cache_order: std::collections::VecDeque::new(),
             preview_load: std::collections::BTreeMap::new(),
             detail_expanded: std::collections::BTreeSet::new(),
+            tree_revision: 0,
+            tree_view_model: std::cell::RefCell::new(None),
             yank_register: None,
             prompt: None,
             message: Some("正在后台读取协议上下文并建立全盘结构树…".into()),
@@ -709,10 +731,12 @@ impl AppState {
         };
         state.stage = AdvancedInspectStage::Browser;
         state.tree_selected = 0;
+        reset_inspect_selected_context(state);
         state.sector = None;
         state.sector_cache_order.clear();
         state.preview_load.clear();
         state.detail_expanded.clear();
+        state.tree_revision = state.tree_revision.wrapping_add(1);
         state.prompt = None;
         state.search_query.clear();
         state.search_matches.clear();
@@ -729,7 +753,7 @@ impl AppState {
         }
     }
 
-    pub fn advanced_inspect_tree_rows(&self) -> Vec<AdvancedInspectTreeRow> {
+    pub fn advanced_inspect_tree_rows(&self) -> std::sync::Arc<Vec<AdvancedInspectTreeRow>> {
         const SECTOR_PAGE: usize = 64;
 
         fn path_id(parent: Option<&str>, node_id: &str) -> String {
@@ -905,11 +929,16 @@ impl AppState {
         }
 
         let Some(state) = self.advanced_inspect.as_ref() else {
-            return Vec::new();
+            return std::sync::Arc::new(Vec::new());
         };
         let Some(workspace) = state.result.as_ref() else {
-            return Vec::new();
+            return std::sync::Arc::new(Vec::new());
         };
+        if let Some(model) = state.tree_view_model.borrow().as_ref() {
+            if model.revision == state.tree_revision {
+                return model.rows.clone();
+            }
+        }
         let mut rows = Vec::new();
         push_rows(
             &workspace.topology.root,
@@ -920,7 +949,30 @@ impl AppState {
             workspace,
             &mut rows,
         );
+        let index = rows
+            .iter()
+            .enumerate()
+            .map(|(index, row): (usize, &AdvancedInspectTreeRow)| (row.id.clone(), index))
+            .collect();
+        let rows = std::sync::Arc::new(rows);
+        *state.tree_view_model.borrow_mut() = Some(InspectTreeViewModel {
+            revision: state.tree_revision,
+            rows: rows.clone(),
+            index,
+        });
         rows
+    }
+
+    pub fn advanced_inspect_tree_index(&self, id: &str) -> Option<usize> {
+        let _ = self.advanced_inspect_tree_rows();
+        self.advanced_inspect
+            .as_ref()?
+            .tree_view_model
+            .borrow()
+            .as_ref()?
+            .index
+            .get(id)
+            .copied()
     }
 
     pub fn advanced_inspect_prompt(&self) -> Option<&AdvancedInspectPrompt> {
@@ -1085,6 +1137,7 @@ impl AppState {
         if let Some(state) = self.advanced_inspect.as_mut() {
             state.expanded.extend(row_path);
             state.lazy_offsets.insert(extent_id.clone(), page_offset);
+            state.tree_revision = state.tree_revision.wrapping_add(1);
             state.sector = None;
             state.panel = AdvancedInspectPanel::Tree;
             state
@@ -1094,13 +1147,12 @@ impl AppState {
         }
 
         let target_id = format!("{extent_id}/sector.{lba}");
-        let rows = self.advanced_inspect_tree_rows();
-        let target = rows
-            .iter()
-            .position(|row| row.id == target_id)
+        let target = self
+            .advanced_inspect_tree_index(&target_id)
             .ok_or_else(|| format!("LBA{lba} 已翻页但目标 Sector 未 materialize"))?;
         if let Some(state) = self.advanced_inspect.as_mut() {
             state.tree_selected = target;
+            reset_inspect_selected_context(state);
         }
         Ok(())
     }
@@ -1266,6 +1318,7 @@ impl AppState {
                             .take(node_path.len().saturating_sub(1))
                             .cloned(),
                     );
+                    state.tree_revision = state.tree_revision.wrapping_add(1);
                     state.sector = None;
                     state.panel = AdvancedInspectPanel::Tree;
                     state
@@ -1273,13 +1326,12 @@ impl AppState {
                         .focus(crate::tui::pane::PaneId::InspectTree);
                     state.message = None;
                 }
-                let rows = self.advanced_inspect_tree_rows();
-                let selected = rows
-                    .iter()
-                    .position(|row| row.id == target_id)
+                let selected = self
+                    .advanced_inspect_tree_index(&target_id)
                     .ok_or_else(|| "搜索命中节点未能在 Tree 中定位".to_string())?;
                 if let Some(state) = self.advanced_inspect.as_mut() {
                     state.tree_selected = selected;
+                    reset_inspect_selected_context(state);
                 }
                 Ok(())
             }
@@ -1310,14 +1362,14 @@ impl AppState {
                             state.expanded.insert(target_id.clone());
                         }
                     }
+                    state.tree_revision = state.tree_revision.wrapping_add(1);
                 }
-                let rows = self.advanced_inspect_tree_rows();
-                let selected = rows
-                    .iter()
-                    .position(|row| row.id == target_id)
+                let selected = self
+                    .advanced_inspect_tree_index(&target_id)
                     .ok_or_else(|| "搜索命中结构未能自动展开到目标节点".to_string())?;
                 if let Some(state) = self.advanced_inspect.as_mut() {
                     state.tree_selected = selected;
+                    reset_inspect_selected_context(state);
                     state.panel = AdvancedInspectPanel::Tree;
                     state
                         .pane_focus
@@ -1342,6 +1394,7 @@ impl AppState {
         } else {
             (state.tree_selected + delta as usize).min(count - 1)
         };
+        reset_inspect_selected_context(state);
         state.sector = None;
     }
 
@@ -1352,6 +1405,7 @@ impl AppState {
             .filter(|state| state.stage == AdvancedInspectStage::Browser)
         {
             state.tree_selected = 0;
+            reset_inspect_selected_context(state);
             state.sector = None;
         }
     }
@@ -1364,6 +1418,7 @@ impl AppState {
             .filter(|state| state.stage == AdvancedInspectStage::Browser)
         {
             state.tree_selected = count.saturating_sub(1);
+            reset_inspect_selected_context(state);
             state.sector = None;
         }
     }
@@ -1395,6 +1450,7 @@ impl AppState {
         };
         if let Some(state) = self.advanced_inspect.as_mut() {
             state.tree_selected = parent_index;
+            reset_inspect_selected_context(state);
             state.sector = None;
         }
     }
@@ -1432,6 +1488,7 @@ impl AppState {
         {
             if let Some(state) = self.advanced_inspect.as_mut() {
                 state.tree_selected = child_index;
+                reset_inspect_selected_context(state);
                 state.sector = None;
             }
         }
@@ -1456,11 +1513,12 @@ impl AppState {
             } => {
                 if let Some(state) = self.advanced_inspect.as_mut() {
                     state.lazy_offsets.insert(extent_id, offset);
+                    state.tree_revision = state.tree_revision.wrapping_add(1);
                 }
-                let rows = self.advanced_inspect_tree_rows();
-                if let Some(target_index) = rows.iter().position(|row| row.id == target_id) {
+                if let Some(target_index) = self.advanced_inspect_tree_index(&target_id) {
                     if let Some(state) = self.advanced_inspect.as_mut() {
                         state.tree_selected = target_index;
+                        reset_inspect_selected_context(state);
                     }
                 }
             }
@@ -1472,10 +1530,12 @@ impl AppState {
                     if !state.expanded.remove(&row.id) {
                         state.expanded.insert(row.id.clone());
                     }
+                    state.tree_revision = state.tree_revision.wrapping_add(1);
                 }
                 let count = self.advanced_inspect_tree_rows().len();
                 if let Some(state) = self.advanced_inspect.as_mut() {
                     state.tree_selected = state.tree_selected.min(count.saturating_sub(1));
+                    reset_inspect_selected_context(state);
                 }
             }
         }
@@ -1805,6 +1865,7 @@ impl AppState {
                             state.preview_load.remove(&evicted);
                         }
                     }
+                    state.tree_revision = state.tree_revision.wrapping_add(1);
                 }
                 if let Some(sector) = state.sector.as_mut().filter(|sector| sector.lba == lba) {
                     sector.pending = false;

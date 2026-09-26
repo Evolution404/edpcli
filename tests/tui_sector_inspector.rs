@@ -182,6 +182,52 @@ fn ch14_detail_rows_keep_evidence_and_select_byte_ranges() {
 }
 
 #[test]
+fn ch14_inspect_tree_view_model_reuses_rows_until_revision_changes() {
+    let mut state = AppState::new();
+    assert!(state.begin_advanced_inspect(AdvancedInspectSource::Disk(6)));
+    state.advanced_inspect_finish(Ok(workspace(vec![item(0, true)])));
+    let first = state.advanced_inspect_tree_rows();
+    let second = state.advanced_inspect_tree_rows();
+    assert!(std::sync::Arc::ptr_eq(&first, &second));
+    assert_eq!(state.advanced_inspect_tree_index("device"), Some(0));
+    let protocol = first
+        .iter()
+        .position(|row| row.id.ends_with("/region.protocol"))
+        .unwrap();
+    state.advanced_inspect_move_tree(protocol as isize);
+    state.advanced_inspect_toggle_selected();
+    let expanded = state.advanced_inspect_tree_rows();
+    assert!(!std::sync::Arc::ptr_eq(&first, &expanded));
+    assert!(expanded.len() > first.len());
+    assert!(std::sync::Arc::ptr_eq(
+        &expanded,
+        &state.advanced_inspect_tree_rows()
+    ));
+    state.advanced_inspect_sector_finish(0, Ok(item(0, false)));
+    assert!(!std::sync::Arc::ptr_eq(
+        &expanded,
+        &state.advanced_inspect_tree_rows()
+    ));
+}
+
+#[test]
+fn ch14_tree_selection_resets_detail_row_and_scroll() {
+    use edpcli::tui::pane::PaneId;
+
+    let mut state = AppState::new();
+    assert!(state.begin_advanced_inspect(AdvancedInspectSource::Disk(6)));
+    state.advanced_inspect_finish(Ok(workspace(vec![item(0, true), item(1, true)])));
+    select_protocol_lba0(&mut state);
+    let viewport = state.pane_viewport_mut(PaneId::InspectDetail);
+    viewport.selected = Some(7);
+    viewport.scroll_y.offset = 7;
+    state.advanced_inspect_move_tree(1);
+    let viewport = state.pane_viewport(PaneId::InspectDetail);
+    assert_eq!(viewport.selected, Some(0));
+    assert_eq!(viewport.scroll_y.offset, 0);
+}
+
+#[test]
 fn selecting_lba12_shows_canonical_fields_before_enter() {
     let mut sector = item(12, true);
     sector.fields = vec![InspectField {
