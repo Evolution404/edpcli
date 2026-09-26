@@ -14,6 +14,8 @@ const BUSINESS_SOURCES: &[&str] = &[
     "src/identify.rs",
     "src/inspect.rs",
     "src/inspect/model.rs",
+    "src/inspect/metadata.rs",
+    "src/inspect/catalog.rs",
     "src/inspect/lba_adapter.rs",
     "src/inspect/lba_early.rs",
     "src/inspect/lba_middle.rs",

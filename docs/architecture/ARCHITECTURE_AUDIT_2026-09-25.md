@@ -1200,6 +1200,15 @@ application 返回结构化 `ProvisionReport/BackupReport/InspectReport`，CLI/T
 - 范围函数仅接收只读扇区、元数据及可变展示缓冲；`protocol::*` 继续是协议真相源。`lba_adapter.rs` 为 **65 行**，三个范围模块分别为 **432 / 400 / 372 行**，均受架构规模门禁约束。
 - 检查源码契约和平台边界测试现覆盖所有范围模块；检查套件 **55/55**、架构测试、fast **43.17s / 0 失败**、full **32.34s / 0 失败**、全目标 Clippy、rustfmt 与 diff 检查通过。后续继续拆元数据与目录适配职责。
 
+## Phase D7-C3：检查元数据与备份目录适配拆分
+
+**COMPLETE；D7-C 继续。**
+
+- 新增 `src/inspect/metadata.rs`，集中承载检查来源身份、设备 CRC、onlyid 与 LBA7/8/11/12 语义推断的展示适配；新增 `src/inspect/catalog.rs`，只负责将备份目录元数据转换为检查来源身份。
+- `src/inspect/model.rs` 现在仅保留字段模型、文本解码与字段构造；备份目录类型不再进入字段模块。公开 `InspectMeta::from_backup_meta` 保持可用，协议推断继续委托 `protocol::semantic`。
+- `model.rs` 为 **623 行**、`metadata.rs` 为 **72 行**、`catalog.rs` 为 **14 行**；架构门禁限制三个模块的规模，并禁止字段模型重新引用磁盘目录类型。
+- 检查套件 **55/55** 与架构测试通过；fast **42.57s / 0 失败**、full **32.60s / 0 失败**、全目标 Clippy、rustfmt 与 diff 检查通过。后续补足展示依赖方向门禁。
+
 ---
 
 # 第八部分：完成标准

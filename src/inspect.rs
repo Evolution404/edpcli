@@ -7,7 +7,6 @@ use encoding_rs::GBK;
 
 use crate::common::SECTOR;
 use crate::crypto::{crc32_bare, lba6_checksum};
-use crate::diskio::BackupMeta;
 use crate::protocol::{
     edpf::{EdpfEntry64, EdpfEntry96, PassInfo},
     lba0, lba1, lba10, lba11, lba12, lba2, lba3, lba4, lba5, lba6, lba7, lba8, lba9,
@@ -17,17 +16,21 @@ use crate::protocol::{
     },
 };
 
+mod catalog;
 mod lba_adapter;
 mod lba_early;
 mod lba_late;
 mod lba_middle;
+mod metadata;
 mod model;
 mod render;
 
 pub use lba_adapter::{analyze_sector, analyze_sector_with_context};
-pub use model::{FieldChild, FieldStyle, InspectMeta, SectorField, SectorView};
+pub use metadata::InspectMeta;
+pub use model::{FieldChild, FieldStyle, SectorField, SectorView};
 pub use render::{overview_line, render_fields, render_hex};
 
+use metadata::*;
 use model::*;
 
 #[cfg(test)]

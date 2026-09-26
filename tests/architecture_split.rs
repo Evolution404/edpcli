@@ -82,6 +82,8 @@ fn large_modules_are_split_by_domain_boundary() {
         "src/tui/backups/render.rs",
         "src/tui/devices/render.rs",
         "src/inspect/model.rs",
+        "src/inspect/metadata.rs",
+        "src/inspect/catalog.rs",
         "src/inspect/lba_adapter.rs",
         "src/inspect/lba_early.rs",
         "src/inspect/lba_middle.rs",
@@ -97,7 +99,14 @@ fn large_modules_are_split_by_domain_boundary() {
     assert!(lines("src/tui/render.rs") < 1_500);
     assert!(lines("src/tui/task.rs") < 1_000);
     assert!(lines("src/inspect.rs") < 150);
-    assert!(lines("src/inspect/model.rs") < 800);
+    assert!(lines("src/inspect/model.rs") < 650);
+    assert!(lines("src/inspect/metadata.rs") < 150);
+    assert!(lines("src/inspect/catalog.rs") < 50);
+    let inspect_model =
+        fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("src/inspect/model.rs"))
+            .expect("read inspect field model");
+    assert!(!inspect_model.contains("crate::diskio"));
+    assert!(!inspect_model.contains("BackupMeta"));
     assert!(lines("src/inspect/lba_adapter.rs") < 100);
     for path in [
         "src/inspect/lba_early.rs",
