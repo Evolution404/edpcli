@@ -63,57 +63,45 @@ def announce_compiler_cache(env: dict[str, str]) -> None:
 
 CORE_FAST_SUITES = {"protocol_suite", "platform_suite", "repository_suite"}
 
-TEST_SOURCE_SUITES = {
-    "tests/cli_ux.rs": "cli_suite",
-    "tests/cli_v2_parser.rs": "cli_suite",
-    "tests/cli_v2_surface_guard.rs": "cli_suite",
-    "tests/cli_write_safety.rs": "cli_suite",
-    "tests/identify_list.rs": "cli_suite",
-    "tests/selectors.rs": "cli_suite",
-    "tests/backup.rs": "backup_suite",
-    "tests/backup_catalog.rs": "backup_suite",
-    "tests/backup_deep.rs": "backup_suite",
-    "tests/backup_metadata.rs": "backup_suite",
-    "tests/edpb.rs": "backup_suite",
-    "tests/inspect.rs": "inspect_suite",
-    "tests/inspect_cli.rs": "inspect_suite",
-    "tests/inspect_full_disk_acceptance.rs": "inspect_suite",
-    "tests/inspect_target.rs": "inspect_suite",
-    "tests/metainfo.rs": "inspect_suite",
-    "tests/sectors_readonly.rs": "inspect_suite",
-    "tests/crypto_prims.rs": "protocol_suite",
-    "tests/iir.rs": "protocol_suite",
-    "tests/lba7_compat.rs": "protocol_suite",
-    "tests/lba7_compatibility_ledger.rs": "protocol_suite",
-    "tests/protocol_byte_ledger.rs": "protocol_suite",
-    "tests/protocol_documentation_contract.rs": "protocol_suite",
-    "tests/protocol_field_catalog.rs": "protocol_suite",
-    "tests/protocol_field_guide.rs": "protocol_suite",
-    "tests/protocol_gold_crosscheck.rs": "protocol_suite",
-    "tests/protocol_image.rs": "protocol_suite",
-    "tests/protocol_runtime_dependency_gate.rs": "protocol_suite",
-    "tests/atomic_write.rs": "provision_suite",
-    "tests/plain_provision.rs": "provision_suite",
-    "tests/plain_virtual_hil.rs": "provision_suite",
-    "tests/provision_contract.rs": "provision_suite",
-    "tests/provision_fat16.rs": "provision_suite",
-    "tests/provision_filesystem.rs": "provision_suite",
-    "tests/provision_generate.rs": "provision_suite",
-    "tests/provision_key_material.rs": "provision_suite",
-    "tests/provision_layout.rs": "provision_suite",
-    "tests/provision_lce.rs": "provision_suite",
-    "tests/provision_protocol_audit.rs": "provision_suite",
-    "tests/provision_reprovision.rs": "provision_suite",
-    "tests/provision_transaction_write.rs": "provision_suite",
-    "tests/provision_validate.rs": "provision_suite",
-    "tests/provision_write_plan.rs": "provision_suite",
-    "tests/write_progress_events.rs": "provision_suite",
-    "tests/platform_boundary.rs": "platform_suite",
-    "tests/platform_cli_matrix.rs": "platform_suite",
-    "tests/dev_format_hook.rs": "repository_suite",
-    "tests/documentation_layout.rs": "repository_suite",
-    "tests/test_infrastructure.rs": "repository_suite",
-}
+def discover_test_source_suites() -> dict[str, str]:
+    """Derive top-level integration source ownership from the suite roots.
+
+    Suite roots are the canonical source of membership. Shared helper modules
+    under tests/common or tests/support are intentionally excluded because fast
+    selection operates on ordinary top-level tests/*.rs sources.
+    """
+    mapping: dict[str, str] = {}
+    prefix = '#[path = "'
+    suffix = '"]'
+
+    for suite in ALL_SUITES:
+        suite_root = ROOT / "tests" / f"{suite}.rs"
+        source = suite_root.read_text(encoding="utf-8")
+        for raw_line in source.splitlines():
+            line = raw_line.strip()
+            if not line.startswith(prefix) or not line.endswith(suffix):
+                continue
+            relative = line[len(prefix) : -len(suffix)]
+            relative_path = Path(relative)
+            if len(relative_path.parts) != 1 or relative_path.suffix != ".rs":
+                continue
+
+            source_path = (Path("tests") / relative_path).as_posix()
+            if not (ROOT / source_path).is_file():
+                raise RuntimeError(
+                    f"{suite_root.relative_to(ROOT)} references missing test source {source_path}"
+                )
+            previous = mapping.get(source_path)
+            if previous is not None:
+                raise RuntimeError(
+                    f"{source_path} is declared by multiple suites: {previous}, {suite}"
+                )
+            mapping[source_path] = suite
+
+    return mapping
+
+
+TEST_SOURCE_SUITES = discover_test_source_suites()
 
 
 @dataclass(frozen=True)

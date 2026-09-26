@@ -1120,6 +1120,16 @@ application 返回结构化 `ProvisionReport/BackupReport/InspectReport`，CLI/T
 - 最终 PR #18 head 的 Rust CI 六个平台（macOS arm64/x86_64、Linux arm64/x86_64、Windows arm64/x86_64）均通过 Rustfmt、正式 full、Clippy `-D warnings` 与 release build；checked-in protocol gold audit、dependency policy/cargo-deny 与四平台 Virtual Disk HIL 全部通过。
 - 本阶段未改变 LBA0～12/LCE 已闭环协议语义，也未降低 `system-disk guard`、`USB guard`、写前备份、`unmount/lock`、`reopen identity`、`atomic write`、`readback` 或 `rollback`。Virtual HIL 仍不替代真实 USB：Chapter 11 实盘只读检查验收与旧 Phase 8 真实 USB 破坏性写入 HIL 继续保持未最终验收状态。
 
+## Phase D7-A：fast runner 测试源归属完整性
+
+**COMPLETE。**
+
+- 审计发现 8 个正式 non-HIL suite root 实际包含 **75** 个顶层测试源，而 `scripts/test-full.py` 的手工 `TEST_SOURCE_SUITES` 只有 **49** 项，缺少 **26** 项；包括 `command_spec.rs`、`inspect_backup_workspace.rs`、repository suite 的多个契约测试以及整组 TUI 测试。此前这些文件依赖路径前缀 fallback 或核心 suite 兜底，存在新增测试后 fast selection 静默漂移的维护风险。
+- 删除 49 项手工映射事实源；新增 `discover_test_source_suites()`，直接从 8 个 suite root 的 `#[path = "..."]` 声明派生普通顶层 `tests/*.rs` → suite 映射。共享 `tests/common` / `tests/support` helper 不参与 fast selection，重复归属或 suite 引用不存在的顶层测试会立即失败。
+- `repository_suite` 新增归属完整性门禁：除 8 个 suite root 与两个显式 Virtual-HIL target 外，每个普通顶层 `tests/*.rs` 必须恰好属于一个 suite；suite 中的每个顶层引用也必须真实存在。以后新增测试文件若未接入 suite，fast/full 均会由 repository gate 明确失败，而不是静默退化。
+- 测试先行分两步提交：先增加 ownership/runner 契约门禁，再实现自动派生映射。最终 PR #19 head 六平台 Rustfmt/full/Clippy/release、checked-in protocol gold audit、dependency policy/cargo-deny 与四平台 Virtual Disk HIL 全部通过。
+- 本阶段只治理测试基础设施，不改变 LBA0～12/LCE 协议、Provision 业务语义或任何真实盘写入安全门槛。
+
 ---
 
 # 第八部分：完成标准
