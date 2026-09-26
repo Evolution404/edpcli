@@ -6,10 +6,12 @@
 
 use std::path::PathBuf;
 
+use sha2::{Digest, Sha256};
+
 use super::target_session::{ReadOnly, ReopenAndVerifyError, TargetSession};
 use crate::common::*;
 use crate::diskio::{self, raw_path, Clock, DiskFacts, SectorDev, SystemClock};
-use crate::identify::identify;
+use crate::identify::{generate_candidates, identify};
 use crate::selectors::{BackupSelector, DeviceSelector};
 use crate::sysinfo::{self, CmdRunner};
 
@@ -70,6 +72,95 @@ pub struct Ctx<'a> {
 
 fn err(code: i32, msg: impl Into<String>) -> EdpCliError {
     EdpCliError::new(code, msg)
+}
+
+const HARDWARE_SERIAL_NOTE_PREFIX: &str = "hardware_serial_sha256=";
+
+fn hardware_serial_digest(serial: &str) -> Option<String> {
+    let serial = serial.trim();
+    if serial.is_empty() {
+        return None;
+    }
+    Some(format!("{:x}", Sha256::digest(serial.as_bytes())))
+}
+
+fn hardware_serial_note(serial: &str) -> Option<String> {
+    hardware_serial_digest(serial).map(|digest| format!("{HARDWARE_SERIAL_NOTE_PREFIX}{digest}"))
+}
+
+fn manifest_hardware_serial_digest(manifest: &crate::edpb::Manifest) -> EdpCliResult<&str> {
+    let mut matches = manifest
+        .provenance
+        .notes
+        .iter()
+        .filter_map(|note| note.strip_prefix(HARDWARE_SERIAL_NOTE_PREFIX));
+    let Some(digest) = matches.next() else {
+        return Err(err(
+            EXIT_BACKUP,
+            "错误: 当前盘 LBA4 身份已清空，而该备份没有硬件序列号绑定；为避免误写到另一块同型号盘，拒绝还原",
+        ));
+    };
+    if matches.next().is_some()
+        || digest.len() != 64
+        || !digest.bytes().all(|byte| byte.is_ascii_hexdigit())
+    {
+        return Err(err(
+            EXIT_BACKUP,
+            "错误: EDPB 硬件序列号绑定损坏或存在冲突，拒绝还原",
+        ));
+    }
+    Ok(digest)
+}
+
+fn verify_hardware_bound_restore(
+    runner: &dyn CmdRunner,
+    disk: u32,
+    manifest: &crate::edpb::Manifest,
+) -> EdpCliResult<()> {
+    let expected_serial = manifest_hardware_serial_digest(manifest)?;
+    let current_serial = runner
+        .hardware_serial(disk)
+        .and_then(|serial| hardware_serial_digest(&serial))
+        .ok_or_else(|| {
+            err(
+                EXIT_BACKUP,
+                "错误: 当前盘 LBA4 身份已清空且无法读取 USB 硬件序列号，拒绝还原",
+            )
+        })?;
+    if current_serial != expected_serial {
+        return Err(err(
+            EXIT_BACKUP,
+            "错误: 当前 USB 硬件序列号与备份绑定不一致，拒绝还原",
+        ));
+    }
+
+    let (vid, pid) = sysinfo::usb_vid_pid(runner, disk);
+    if !vid.eq_ignore_ascii_case(&manifest.device.vid)
+        || !pid.eq_ignore_ascii_case(&manifest.device.pid)
+    {
+        return Err(err(
+            EXIT_BACKUP,
+            format!(
+                "错误: 当前 USB VID/PID {}:{} 与备份 {}:{} 不一致，拒绝还原",
+                vid, pid, manifest.device.vid, manifest.device.pid
+            ),
+        ));
+    }
+
+    let candidates = generate_candidates(runner, disk);
+    if !candidates
+        .iter()
+        .any(|candidate| candidate == &manifest.device.device_id)
+    {
+        return Err(err(
+            EXIT_BACKUP,
+            format!(
+                "错误: 当前 USB/SCSI 硬件身份不能生成备份 device_id={}，拒绝还原",
+                manifest.device.device_id
+            ),
+        ));
+    }
+    Ok(())
 }
 
 pub(crate) fn read_image(dev: &mut dyn SectorDev) -> EdpCliResult<Vec<u8>> {
@@ -236,51 +327,111 @@ pub fn backup_create_level_flow(
 ) -> EdpCliResult<BackupReport> {
     guard_usb_disk(ctx.runner, disk)?;
     let img = read_image(dev)?;
+    let total_sectors = sysinfo::disk_total_sectors(ctx.runner, disk)
+        .ok_or_else(|| err(EXIT_BACKUP, "错误: 无法获取磁盘总扇区数，无法创建备份"))?;
     let id = identify(ctx.runner, disk, &img[7 * SECTOR..8 * SECTOR]);
-    let device_id = id.device_id.ok_or_else(|| {
-        err(
-            EXIT_TARGET,
-            "错误: 无法识别 device_id(LBA7 两候选均未解出 EDPF)，拒绝创建无法归属的备份",
-        )
-    })?;
-    let (vid, pid) = sysinfo::usb_vid_pid(ctx.runner, disk);
-    let facts = DiskFacts {
-        disk,
-        total_sectors: sysinfo::disk_total_sectors(ctx.runner, disk),
-        vid,
-        pid,
-        label_id: diskio::lba4_label_id_from(&img[4 * SECTOR..5 * SECTOR]),
-    };
-    let total_sectors = facts.total_sectors.ok_or_else(|| {
-        err(
-            EXIT_BACKUP,
-            "错误: 无法获取磁盘总扇区数，无法创建 Metadata 级备份",
-        )
-    })?;
-    let acquire = if deep {
-        crate::backup_deep::acquire_deep
+    let serial_note = ctx
+        .runner
+        .hardware_serial(disk)
+        .and_then(|serial| hardware_serial_note(&serial));
+
+    let (path, is_nopwd) = if let Some(device_id) = id.device_id {
+        let (vid, pid) = sysinfo::usb_vid_pid(ctx.runner, disk);
+        let facts = DiskFacts {
+            disk,
+            total_sectors: Some(total_sectors),
+            vid,
+            pid,
+            label_id: diskio::lba4_label_id_from(&img[4 * SECTOR..5 * SECTOR]),
+        };
+        let acquire = if deep {
+            crate::backup_deep::acquire_deep
+        } else {
+            crate::backup_metadata::acquire_metadata
+        };
+        let mut metadata = acquire(dev, &img, &device_id, total_sectors).map_err(|message| {
+            err(
+                EXIT_BACKUP,
+                format!("错误: Metadata 级备份采集失败: {message}"),
+            )
+        })?;
+        if let Some(note) = serial_note {
+            metadata.notes.push(note);
+        }
+        let save = if deep {
+            diskio::create_deep_backup
+        } else {
+            diskio::create_metadata_backup
+        };
+        save(
+            &facts,
+            &img,
+            &device_id,
+            metadata,
+            &ctx.backup_dir,
+            ctx.clock,
+        )?
     } else {
-        crate::backup_metadata::acquire_metadata
+        if deep {
+            return Err(err(
+                EXIT_BACKUP,
+                "错误: Plain 盘没有 EDP 分区语义，--deep 备份不可用；请使用普通 backup create",
+            ));
+        }
+        let lba4_tag = diskio::lba4_tag16_from(&img[4 * SECTOR..5 * SECTOR])
+            .ok_or_else(|| err(EXIT_BACKUP, "错误: Plain 备份读取 LBA4 身份标签失败"))?;
+        if lba4_tag.iter().any(|&byte| byte != 0) {
+            return Err(err(
+                EXIT_BACKUP,
+                "错误: LBA7 无法识别但 LBA4 仍保留 EDP 协议身份；疑似协议损坏，拒绝误判为 Plain 备份",
+            ));
+        }
+        let device_id = generate_candidates(ctx.runner, disk)
+            .into_iter()
+            .next()
+            .ok_or_else(|| {
+                err(
+                    EXIT_BACKUP,
+                    "错误: 无法从 Plain 盘 USB/SCSI 硬件信息生成 device_id 候选",
+                )
+            })?;
+        if crate::provision::DiskProvisionKind::from_metadata(&img, &device_id)
+            != crate::provision::DiskProvisionKind::Plain
+        {
+            return Err(err(
+                EXIT_BACKUP,
+                "错误: LBA7 无法识别但当前介质仍呈现 EDP 模式，拒绝按 Plain 备份",
+            ));
+        }
+        let note = serial_note.ok_or_else(|| {
+            err(
+                EXIT_BACKUP,
+                "错误: Plain 盘缺少 LBA4 协议身份且无法读取 USB 硬件序列号，拒绝创建无法安全恢复的备份",
+            )
+        })?;
+        let (vid, pid) = sysinfo::usb_vid_pid(ctx.runner, disk);
+        if vid == "xxxx" || pid == "xxxx" {
+            return Err(err(
+                EXIT_BACKUP,
+                "错误: 无法读取 Plain 盘 USB VID/PID，拒绝创建无法安全归属的备份",
+            ));
+        }
+        let facts = DiskFacts {
+            disk,
+            total_sectors: Some(total_sectors),
+            vid,
+            pid,
+            label_id: None,
+        };
+        diskio::create_plain_backup(
+            &facts,
+            &img,
+            &device_id,
+            &[note],
+            &ctx.backup_dir,
+            ctx.clock,
+        )?
     };
-    let metadata = acquire(dev, &img, &device_id, total_sectors).map_err(|message| {
-        err(
-            EXIT_BACKUP,
-            format!("错误: Metadata 级备份采集失败: {message}"),
-        )
-    })?;
-    let save = if deep {
-        diskio::create_deep_backup
-    } else {
-        diskio::create_metadata_backup
-    };
-    let (path, is_nopwd) = save(
-        &facts,
-        &img,
-        &device_id,
-        metadata,
-        &ctx.backup_dir,
-        ctx.clock,
-    )?;
     let report = BackupReport { path, is_nopwd };
     ctx.prompt.write_event(WriteEvent::BackupCreated {
         path: report.path.clone(),
@@ -324,13 +475,6 @@ pub fn restore_flow(
     let label_id = diskio::lba4_label_id_from(lba4);
     let tag16 = diskio::lba4_tag16_from(lba4)
         .ok_or_else(|| err(EXIT_IO, "错误: LBA4 缺少 16B 身份标签"))?;
-    if tag16.iter().all(|&b| b == 0) {
-        return Err(err(
-            EXIT_BACKUP,
-            "错误: 当前盘 LBA4 身份标签为空，无法确认备份归属，拒绝还原",
-        ));
-    }
-
     let selector = BackupSelector::load(&ctx.backup_dir);
     let path: PathBuf = match (bin, label_id.as_deref()) {
         (Some(target), Some(onlyid)) => selector
@@ -432,20 +576,25 @@ pub fn restore_flow(
         digest: verified.file_sha256.clone(),
     });
 
-    // 同一物理盘终验仍以原始 LBA4 前 16B 为准；Manifest 不替代原始证据。
+    // 非零 LBA4 继续以原始 16B 协议身份终验；Plain/LBA4=0 仅允许走强硬件绑定终验。
     let backup_lba4 = &data[4 * SECTOR..5 * SECTOR];
     let backup_tag16 = diskio::lba4_tag16_from(backup_lba4)
         .ok_or_else(|| err(EXIT_BACKUP, "错误: 备份 LBA4 缺少 16B 身份标签"))?;
-    if tag16.iter().any(|&b| b != 0) && backup_tag16 != tag16 {
-        let current_id = label_id.as_deref().unwrap_or("未知");
-        let backup_id = diskio::lba4_label_id_from(backup_lba4).unwrap_or_else(|| "未知".into());
-        return Err(err(
-            EXIT_BACKUP,
-            format!(
-                "错误: 备份属于另一块盘(current onlyid={}, backup onlyid={})，拒绝还原",
-                current_id, backup_id
-            ),
-        ));
+    if tag16.iter().any(|&b| b != 0) {
+        if backup_tag16 != tag16 {
+            let current_id = label_id.as_deref().unwrap_or("未知");
+            let backup_id =
+                diskio::lba4_label_id_from(backup_lba4).unwrap_or_else(|| "未知".into());
+            return Err(err(
+                EXIT_BACKUP,
+                format!(
+                    "错误: 备份属于另一块盘(current onlyid={}, backup onlyid={})，拒绝还原",
+                    current_id, backup_id
+                ),
+            ));
+        }
+    } else {
+        verify_hardware_bound_restore(ctx.runner, disk, &verified.manifest)?;
     }
     let current_total_sectors = sysinfo::disk_total_sectors(ctx.runner, disk)
         .ok_or_else(|| err(EXIT_TARGET, "错误: 无法取得当前目标盘总扇区数，拒绝恢复"))?;
@@ -552,6 +701,9 @@ pub fn restore_flow(
     let target_session = target_session
         .prepare_write()
         .map_err(|e| err(EXIT_IO, format!("错误: 无法卸载 disk{}: {}", disk, e)))?;
+    if tag16.iter().all(|&byte| byte == 0) {
+        verify_hardware_bound_restore(ctx.runner, disk, &verified.manifest)?;
+    }
     let _target_session = target_session
         .reopen_and_verify(dev, OPEN_WAIT, |dev| verify_reopened_snapshot(dev, &img))
         .map_err(|error| match error {

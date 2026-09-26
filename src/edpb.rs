@@ -493,6 +493,14 @@ pub fn write_core_backup(path: &Path, capture: &CoreCapture<'_>) -> Result<Manif
     write_container(path, capture, CaptureLevel::Core, &[], &[], &[], &[])
 }
 
+pub fn write_core_backup_with_notes(
+    path: &Path,
+    capture: &CoreCapture<'_>,
+    notes: &[String],
+) -> Result<Manifest, String> {
+    write_container(path, capture, CaptureLevel::Core, &[], &[], &[], notes)
+}
+
 pub fn write_metadata_backup(
     path: &Path,
     capture: &MetadataCapture<'_>,
