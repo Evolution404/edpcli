@@ -5084,3 +5084,282 @@ I3g  增加宽度/横滚/缺字段/损坏备份回归测试
 ```
 
 最终标准：**同一块盘在“设备”和“备份”两个标签里，容量、VID:PID、型号、onlyid、姓名、部门、盘型必须出现在相同顺序、使用相同格式；工作区只额外展示自己独有的运行状态或备份管理信息。**
+
+### 14.9 磁盘布局信息重排：表格化对齐，分区处理状态置于视觉第一优先级
+
+当前制盘页的磁盘布局 Pane 存在两个可读性问题：
+
+1. `DiskLayoutModel::legend_lines()` 和 `provision_layout_editor_lines()` 大量使用 `·` 拼接信息，导致名称、LBA、容量、状态随着文本长度漂移，用户无法纵向比较；
+2. 三个业务分区最关键的“可保留 / 重建”被放在每行末尾且与其它普通文本同级，视觉权重过低。
+
+本项的目标不是增加更多文字，而是把已有信息重新分层：**磁盘几何用对齐列展示，分区动作单独成为固定状态列，并在选中分区详情中再次强调原因。**
+
+#### 14.9.1 顶部完整磁盘图例也取消 `·` 分隔
+
+当前类似：
+
+```text
+EDP 主协议区 [0..12] · 13 sectors · <0.01%
+交换区       [...]    · ... sectors · 86.52%
+```
+
+改为对齐列：
+
+```text
+区域                      LBA 范围                 扇区数        占比
+■ EDP 主协议区            [0..12]                       13      <0.01%
+■ 协议后保留区            [13..62]                      50      <0.01%
+■ 启动区                  [63..20479]                20417       0.13%
+■ 交换区                  [20480..13628690]       13608211      86.52%
+■ 保密区                  [13628691..15725842]      2097152      13.33%
+■ LCE                     [15725843..15725848]            6      <0.01%
+■ LCE 后保留区            [15725849..15726591]          743      <0.01%
+■ 盘尾区域                [15726592..15728639]         2048       0.01%
+```
+
+这部分仍由共享 `DiskLayoutModel` 提供，Inspect 与 Provision 继续同源；不能只在 Provision 私有实现。
+
+#### 14.9.2 制盘编辑区改成“磁盘摘要 + 分区处理表 + 当前分区详情”
+
+建议布局：
+
+```text
+磁盘
+设备        disk4
+总容量      7.50 GiB
+总扇区      15728640
+可分区      LBA 63–15725842
+已分配      7.50 GiB
+未分配      0 sector
+
+分区布局
+分区       LBA 范围                  容量          处理
+启动区     63–20479                  10.0 MiB       ✓ 候选保留
+交换区     20480–13628690            6.49 GiB       ✓ 候选保留
+保密区     13628691–15725842         1.00 GiB       ⚠ 需重建
+
+当前分区  保密区
+处理      ⚠ 需重建
+原因      容量/起点/物理加密属性与原分区不一致
+大小      1.00 GiB   (2097152 sector)
+最大可设  1.00 GiB   (2097152 sector)
+还能增加  0 sector
+限制      可分区末端 LBA 15725842；后续未锚定分区可自动后移
+
+✓ 布局无重叠、未越界
+```
+
+不再出现：
+
+```text
+启动区  LBA ... · 10.0 MiB · 可保留
+```
+
+这类“靠符号分词”的自由文本。
+
+#### 14.9.3 分区状态必须是独立、固定宽度、高权重列
+
+状态列固定在分区表最右侧，并且不参与普通 muted 文本风格。
+
+编辑阶段当前只完成 geometry/profile 候选判断，因此文案必须诚实区分“候选”与最终执行计划：
+
+```text
+✓ 候选保留    # geometry/profile 匹配，但最终 plan 尚未完成读盘校验
+⚠ 需重建      # 已知当前编辑目标不能 PreserveExact
+```
+
+进入 Review、`PartitionAction` 已经正式生成后再使用：
+
+```text
+✓ 保留        # PreserveExact
+⚠ 重建        # Rebuild
+```
+
+不能在编辑阶段提前把 `candidate == true` 写成最终“保留”，避免用户误以为已经完成 FileKey/readback 等最终安全判断。
+
+视觉规则：
+
+- `候选保留 / 保留`：`success` token + bold；
+- `需重建 / 重建`：`warning` token + bold；如果意味着已有数据必然不能原样保留，Review 中可升级为 `danger`；
+- 不使用高饱和整行背景色，避免破坏当前低饱和主题；
+- 状态只给状态单元格着色，不把整行涂绿/红；
+- 当前选中分区仍使用统一 selection 样式，状态颜色在 selected 状态下仍应可辨识。
+
+#### 14.9.4 “为什么重建”只在当前分区详情中展开
+
+表格主体只保持短状态：
+
+```text
+✓ 候选保留
+⚠ 需重建
+```
+
+当用户选中分区后，下方详情给出结构化原因。例如 PreserveExact 候选必须比较的现有条件：
+
+```text
+分区类型       一致 / 不一致
+起点 LBA       一致 / 已改变
+扇区数         一致 / 已改变
+物理加密状态   一致 / 已改变
+```
+
+可进一步归纳成一行用户文案：
+
+```text
+原因  起点已改变，因此不能原样保留原数据
+```
+
+具体 reason 必须来自 planner/profile comparison，不允许 renderer 猜原因。
+
+这样用户一眼先看动作，需要时再看证据，而不是每一行都塞成长句。
+
+#### 14.9.5 引入 typed layout rows，停止让 renderer 解析字符串前缀
+
+当前 `DiskLayoutPane.details: &[String]` 只能通过：
+
+```text
+starts_with('✗')
+starts_with('✓')
+starts_with("当前:")
+```
+
+判断颜色，这已经限制了结构化显示。
+
+建议把共享磁盘布局 Pane 改成 typed presentation model，例如：
+
+```text
+DiskLayoutPaneModel
+  summary_rows: Vec<KeyValueRow>
+  region_rows: Vec<DiskRegionRow>
+  partition_rows: Vec<PartitionLayoutRow>
+  selected_detail: Vec<KeyValueRow>
+  notices: Vec<NoticeRow>
+```
+
+其中：
+
+```text
+PartitionLayoutRow {
+    role,
+    start_lba,
+    end_lba,
+    sector_count,
+    size_text,
+    disposition,
+    reason,
+}
+
+PartitionDisposition {
+    PreserveCandidate,
+    RebuildRequired,
+    PreserveExact,
+    Rebuild,
+}
+```
+
+renderer 只根据 enum 选 theme token，不根据中文字符串决定业务含义。
+
+#### 14.9.6 对齐实现不要靠手工空格
+
+禁止通过：
+
+```text
+format!("{:<10} {:<24} ...")
+```
+
+硬编码 ASCII 宽度，因为中文、全角字符和终端 cell width 会导致再次错位。
+
+优先复用现有 `tui::table_layout`：
+
+```text
+TableKind::DiskRegions
+TableKind::ProvisionPartitions
+```
+
+通过 `unicode-width` 计算真实 cell width，和 Devices / Backups / InspectFields 使用同一套 `AdaptiveTableLayout`。
+
+建议逻辑列：
+
+```text
+DiskRegions:
+区域 | LBA 范围 | 扇区数 | 占比
+
+ProvisionPartitions:
+分区 | LBA 范围 | 容量 | 处理
+```
+
+`LBA 范围`、`扇区数`、`容量` 推荐右对齐数值视觉；如果现有 Table 不支持 cell alignment，可先统一左对齐但固定列宽，后续再补 numeric alignment，不能退回 `·` 分隔。
+
+#### 14.9.7 窄屏退化
+
+宽屏：完整四列表格。
+
+中等宽度：仍保持表格，但可以通过 `h/l` 横向 viewport 查看次要列；**“分区”和“处理”应 pinned**，确保用户始终能看到哪一行会保留、哪一行会重建。
+
+很窄终端不能把状态隐藏到横向页末。退化为每分区两行：
+
+```text
+启动区                         ✓ 候选保留
+LBA 63–20479      10.0 MiB
+
+交换区                         ✓ 候选保留
+LBA 20480–13628690  6.49 GiB
+
+保密区                         ⚠ 需重建
+LBA 13628691–15725842  1.00 GiB
+```
+
+仍然不用 `·`。
+
+#### 14.9.8 顶部摘要也改成 key/value 对齐
+
+截图中当前：
+
+```text
+disk4  整盘 7.50 GiB · 15728640 sector
+可分区 LBA ... · 7.50 GiB
+已分配 7.50 GiB · 未分配 0 sector
+```
+
+改成：
+
+```text
+设备      disk4
+整盘      7.50 GiB        15728640 sector
+可分区    LBA 63–15725842 7.50 GiB
+已分配    7.50 GiB
+未分配    0 sector
+```
+
+如果横向空间充足，也可采用双 key/value 栅格，但 label/value 的起点必须对齐，不使用点号当布局系统。
+
+#### 14.9.9 回归门禁
+
+至少新增：
+
+1. Provision 分区表固定存在 `分区 / LBA 范围 / 容量 / 处理` 四个逻辑列；
+2. 三个业务分区的 `处理` 状态始终可见，不因横向 viewport 被隐藏；
+3. 编辑阶段使用 `候选保留 / 需重建`，Review 阶段使用 `保留 / 重建`，状态语义不混淆；
+4. `PreserveExact` 与 `Rebuild` 的 Review UI 必须使用不同 semantic style；
+5. renderer 不再通过中文字符串前缀推断 disposition；
+6. layout/provision 主视图不再使用 `·` 作为字段布局分隔符；
+7. DiskLayout legend 改为对齐列，Inspect 与 Provision 共享；
+8. 中文分区名、超长 LBA、GiB/MiB 混合时列仍按 terminal cell width 对齐；
+9. 120/100/80/60 列宽均有 snapshot/contract 测试；
+10. 窄屏下每个分区状态仍在首行可见；
+11. 选中分区时详情区显示 disposition reason；
+12. 几何编辑后状态实时更新，但不触发额外磁盘 I/O；
+13. 当前分区容量限制、最大可设、还能增加、边界限制等现有信息不得丢失；
+14. `DiskLayoutModel` 的完整覆盖/无重叠语义和写盘 planner 不发生改变。
+
+后续实现顺序增加：
+
+```text
+I2f  定义 PartitionDisposition 与 typed DiskLayoutPane rows
+I3h  DiskLayout legend 改用共享自适应表格，移除 `·` 布局
+I3i  Provision 编辑区改为摘要 + 分区状态表 + 当前分区详情
+I3j  Review 复用同一 disposition renderer，显示最终 PreserveExact/Rebuild
+I3k  增加宽屏/窄屏/中文宽度/状态实时更新回归测试
+```
+
+最终标准：**用户不需要逐句阅读磁盘布局；扫一眼三行分区表，就能立即看出启动区、交换区、保密区分别是“候选保留/保留”还是“需重建/重建”，同时所有 LBA、容量、扇区数都纵向对齐可比较。**
