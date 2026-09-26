@@ -4409,3 +4409,90 @@ I6  跑 inspect/tui 专项、fast/full；只读真实盘验收，不触发写盘
 ```
 
 本章当前只记录计划。**不得在这个计划分支直接实现 I1～I6。**
+
+### 14.6 盘尾区域子节点必须按物理空间顺序、且不能用重叠兄弟节点表达
+
+当前截图中的盘尾树看起来“没有按顺序排列”，根因不是简单缺少 `sort_by(start_lba)`，而是 `tail_region()` 的建模方式本身存在层级问题。
+
+当前 `src/application/inspect_tree.rs::tail_region()` 先创建一个覆盖**完整 2048 扇区盘尾窗口**的子节点：
+
+```text
+盘尾取证窗口 [total-2048 .. total-1]
+```
+
+然后又把两个位于这个窗口内部的已知范围作为它的**兄弟节点**追加：
+
+```text
+盘尾历史 9 扇区镜像 [total-1024 .. total-1016]
+盘尾 end-4 restore-node [total-4 .. total-4]
+```
+
+因此三个 child 的 `start_lba` 实际已经是递增的，但第一个 child 覆盖了后两个 child。问题是**兄弟节点彼此重叠**，所以视觉上无法形成“从前到后”的物理磁盘序列。
+
+以当前截图 `total_sectors = 15728640` 为例：
+
+```text
+当前：
+盘尾取证窗口              [15726592..15728639]
+盘尾历史 9 扇区镜像       [15727616..15727624]   # 被上一行包含
+盘尾 end-4 restore-node   [15728636..15728636]   # 也被上一行包含
+```
+
+这不是理想的物理拓扑树。`盘尾取证窗口` 本质上是“盘尾区域为什么被采集”的**覆盖/证据概念**，不是应与内部特殊扇区并列的互斥 extent。
+
+目标 topology 应把同一层 child 规范化成**不重叠、按 LBA 连续排列**的物理区段，例如：
+
+```text
+盘尾区域 [15726592..15728639]
+  ├─ 盘尾未分类              [15726592..15727615]
+  ├─ 盘尾历史 9 扇区镜像     [15727616..15727624]
+  ├─ 盘尾未分类              [15727625..15728635]
+  ├─ 盘尾 end-4 restore-node [15728636]
+  └─ 盘尾未分类              [15728637..15728639]
+```
+
+`盘尾取证窗口 = 最后 2048 扇区` 这一事实仍需保留，但不再作为与内部 extents 重叠的 sibling。可采用以下任一等价设计，实施时优先选择模型最简洁的一种：
+
+1. `盘尾区域` 本身就是该 2048-sector forensic window，Overview/metadata 中注明“取证窗口”；或
+2. 在 `盘尾区域` 下增加一个非物理范围的 `Group/Structure` 说明“取证窗口”，但真正的物理 Extent children 仍必须互斥连续。
+
+关键约束：
+
+- **物理 Tree 的同级 Extent 必须按 `start_lba ASC`，且不得 overlap；**
+- 一个 sector 可以在语义分类 API 中同时属于多个角色，例如 `TailMetadataMirror + DeviceTailWindow`；这种多重 membership 可以继续由 `inspect_target::regions_for_lba()` 保留；
+- 但 Tree 的物理空间表示必须选一个 primary segmentation，次级“被某证据窗口覆盖”的关系通过 annotation/group/metadata 表达，不能制造重叠 sibling；
+- `盘尾历史 9 扇区镜像` 和 `end-4 restore-node` 的真实 LBA、协议意义、备份/恢复用途不变；
+- 不改变 `DEVICE_TAIL_WINDOW_SECTORS=2048`、`TAIL_METADATA_MIRROR_OFFSET_SECTORS=1024`、`TAIL_METADATA_MIRROR_SECTORS=9`、`TAIL_END4_MIRROR_OFFSET_SECTORS=4` 等已验证常量；
+- UI 仍使用闭区间显示，内部继续使用 `[start, end_exclusive)`。
+
+需要新增的 topology 不变量：
+
+```text
+对任何表示物理空间分割的 Materialized children：
+  child[i].start_lba <= child[i+1].start_lba
+  child[i].end_exclusive <= child[i+1].start_lba
+
+对要求完整覆盖 parent 的 Region：
+  first.start_lba == parent.start_lba
+  child[i].end_exclusive == child[i+1].start_lba
+  last.end_exclusive == parent.end_exclusive
+```
+
+盘尾专项回归至少覆盖：
+
+1. 15,728,640-sector 示例严格得到上述五段顺序；
+2. 9-sector mirror 前后 gap 边界无 off-by-one；
+3. `end-4` 后仍保留最后 3 个 sector 的未分类区段；
+4. 同级物理 children 无 overlap；
+5. 所有 child 合集完整覆盖盘尾 parent；
+6. `regions_for_lba()` 对镜像区/end-4 仍可同时返回 forensic tail membership，不因 Tree 去重丢失语义；
+7. `gl` 跳转、搜索、lazy sector materialization 仍能精确落到对应物理 span；
+8. 备份元数据中的 forensic-tail、historical mirror、restore-node evidence 不改变。
+
+因此该问题应作为后续实现中的独立步骤加入：
+
+```text
+I2a  重构 tail topology：将重叠 sibling extents 归一化为按 LBA 连续的 primary spans，保留 secondary evidence membership
+```
+
+它属于 Inspect topology/UI 表达修正，不涉及任何盘面协议或写盘行为。
