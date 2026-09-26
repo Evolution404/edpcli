@@ -27,10 +27,51 @@ impl AppState {
         }
     }
 
+    pub fn provision_focused_content_len(&self) -> usize {
+        use crate::tui::pane::PaneId;
+
+        match self.provision.pane_focus.focused() {
+            PaneId::ProvisionParameters => self.provision_field_count(),
+            PaneId::ProvisionDiskLayout => {
+                let model = self.provision_layout_model();
+                let details = self.provision_layout_editor_lines();
+                model.pane_line_count("summary", &details)
+            }
+            PaneId::ProvisionSummary => self.provision_review_summary_lines().len(),
+            PaneId::ProvisionChanges => self.provision_review_change_lines().len(),
+            _ => 0,
+        }
+    }
+
+    pub fn provision_focused_top(&mut self) {
+        let pane = self.provision.pane_focus.focused();
+        if pane == crate::tui::pane::PaneId::ProvisionParameters {
+            let count = self.provision_field_count();
+            self.provision_move_field(-(count as isize));
+        } else {
+            self.provision.pane_focus.viewport_mut(pane).scroll_y.top();
+        }
+    }
+
+    pub fn provision_focused_bottom(&mut self, _visible_len: usize) {
+        let pane = self.provision.pane_focus.focused();
+        if pane == crate::tui::pane::PaneId::ProvisionParameters {
+            let count = self.provision_field_count();
+            self.provision_move_field(count as isize);
+        } else {
+            let content_len = self.provision_focused_content_len();
+            self.provision
+                .pane_focus
+                .viewport_mut(pane)
+                .scroll_y
+                .bottom(content_len, 1);
+        }
+    }
+
     pub fn provision_move_focused_vertical(
         &mut self,
         delta: isize,
-        visible_len: usize,
+        _visible_len: usize,
         content_len: usize,
     ) {
         let pane = self.provision.pane_focus.focused();
@@ -41,7 +82,7 @@ impl AppState {
                 .pane_focus
                 .viewport_mut(pane)
                 .scroll_y
-                .move_lines(delta, content_len, visible_len);
+                .move_lines(delta, content_len, 1);
         }
     }
 }

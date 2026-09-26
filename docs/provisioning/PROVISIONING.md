@@ -4154,6 +4154,13 @@ Tab:
 - Help/footer/USAGE 同步；
 - raw/decode/mixed、byte cursor、解析逻辑不变。
 
+**实施状态（2026-09-26）：P6 COMPLETE。**
+
+- 新增 `SectorPrevious / SectorNext` action，Normal 模式使用 `[` / `]` 切换前后 sector；Insert 模式仍把方括号作为普通文本。
+- `PageUp/PageDown` 改为当前 sector 内 ±256B 整页移动，`Ctrl-u/Ctrl-d` 保持 ±128B 半页，均不再改变 LBA。
+- 原 `advanced_inspect_shift_sector()` 只由独立 sector action 调用；raw/decode/mixed、byte cursor、按需读取、single-flight 与 cache 行为未改。
+- Sector Inspector footer 与 `docs/user/USAGE.md` 已同步；专项门禁 3/3 通过。fast suites 全部 0 failures，冷编译仅因 50.30s 超过 45s timing budget，功能门禁无失败。
+
 ### 13.32 Phase P7：Provision 多 Pane
 
 - Form：Parameters + DiskLayout；
@@ -4164,6 +4171,15 @@ Tab:
 - Review 长内容全部可滚。
 
 ### 13.33 Phase P8：清理与正式门禁
+
+**实施状态（2026-09-26）：P7/P8 IMPLEMENTED，等待 GitHub CI 正式门禁。**
+
+- P7：Form 使用 Parameters + DiskLayout 两 Pane，宽屏同显、窄屏只显示 focused Pane；Review 使用 Summary + DiskLayout + Changes 三 Pane，Tab/Shift-Tab 与 Ctrl-w 空间 focus 统一，三 Pane 长内容均使用各自 vertical viewport。
+- Form 的 Insert/Space/f/a/d 只在 Parameters focused 时生效；DiskLayout focused 时字段 selection 不再被 j/k、h/l、Toggle 等输入误改。
+- Review 的 j/k、Ctrl-u/d、PageUp/Down、gg/G 全部按 focused Pane 滚动，Enter/e/Esc 保持原确认/导出/返回语义。
+- P8 已删除页面级 `detail_scroll`、NavigationFrame 的旧 detail scroll snapshot 与 `advanced_inspect_scroll_detail`；PaneViewport 成为唯一滚动事实源，并新增源码回归门禁。
+- Inspect footer 已从旧“j/k 选择 / h/l 树”文案改为 focused-Pane 语义；Sector Inspector 跨 sector 的旧 PageUp/PageDown 文案已清除。
+- 本阶段只重构 TUI 状态、渲染和键位路由；第 12 章仍为 PLAN ONLY，未修改 LBA0～12/LCE 协议语义和真实写盘安全链。
 
 清理：
 

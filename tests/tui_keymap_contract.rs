@@ -496,6 +496,7 @@ fn sector_inspector_dispatches_the_documented_vim_actions() {
     assert!(render.contains("0/$"));
     assert!(render.contains("gg/G"));
     assert!(render.contains("Ctrl-u/d"));
+    assert!(render.contains("[/]"));
     assert!(render.contains("/ n/N"));
 }
 
@@ -529,4 +530,16 @@ fn help_registry_is_the_same_metadata_source_for_core_and_inspect_hints() {
     assert!(INSPECT_HELP
         .iter()
         .any(|binding| binding.keys == "o" && binding.action == TuiAction::Open));
+}
+
+#[test]
+fn chapter_13_p8_removes_legacy_page_level_detail_scroll_state() {
+    let inspect = include_str!("../src/tui/inspect/state.rs");
+    let navigation = include_str!("../src/tui/navigation.rs");
+    let app_state = include_str!("../src/tui/state.rs");
+
+    assert!(!inspect.contains("detail_scroll"));
+    assert!(!inspect.contains("advanced_inspect_scroll_detail"));
+    assert!(!navigation.contains("detail_scroll"));
+    assert!(!app_state.contains("detail_scroll"));
 }

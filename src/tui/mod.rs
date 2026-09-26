@@ -1285,47 +1285,86 @@ fn run_loop(resume: Option<state::WriteIntent>) -> io::Result<LoopExit> {
                                 TuiAction::PanelRight => state.provision_spatial_focus(1, 0),
                                 TuiAction::PanelUp => state.provision_spatial_focus(0, -1),
                                 TuiAction::PanelDown => state.provision_spatial_focus(0, 1),
-                                TuiAction::MoveUp => state.provision_move_focused_vertical(
-                                    -1,
-                                    viewport_height,
-                                    usize::MAX,
-                                ),
-                                TuiAction::MoveDown => state.provision_move_focused_vertical(
-                                    1,
-                                    viewport_height,
-                                    usize::MAX,
-                                ),
-                                TuiAction::Top => {
-                                    let count = state.provision_field_count();
-                                    state.provision_move_field(-(count as isize));
+                                TuiAction::MoveUp => {
+                                    let content_len = state.provision_focused_content_len();
+                                    state.provision_move_focused_vertical(
+                                        -1,
+                                        viewport_height,
+                                        content_len,
+                                    );
                                 }
+                                TuiAction::MoveDown => {
+                                    let content_len = state.provision_focused_content_len();
+                                    state.provision_move_focused_vertical(
+                                        1,
+                                        viewport_height,
+                                        content_len,
+                                    );
+                                }
+                                TuiAction::Top => state.provision_focused_top(),
                                 TuiAction::Bottom => {
-                                    let count = state.provision_field_count();
-                                    state.provision_move_field(count as isize);
+                                    state.provision_focused_bottom(viewport_height);
                                 }
-                                TuiAction::HalfPageUp => state.provision_move_focused_vertical(
-                                    -((viewport_height / 2).max(1) as isize),
-                                    viewport_height,
-                                    usize::MAX,
-                                ),
-                                TuiAction::HalfPageDown => state.provision_move_focused_vertical(
-                                    (viewport_height / 2).max(1) as isize,
-                                    viewport_height,
-                                    usize::MAX,
-                                ),
-                                TuiAction::MoveLeft | TuiAction::MoveRight | TuiAction::Toggle => {
+                                TuiAction::HalfPageUp => {
+                                    let content_len = state.provision_focused_content_len();
+                                    state.provision_move_focused_vertical(
+                                        -((viewport_height / 2).max(1) as isize),
+                                        viewport_height,
+                                        content_len,
+                                    );
+                                }
+                                TuiAction::HalfPageDown => {
+                                    let content_len = state.provision_focused_content_len();
+                                    state.provision_move_focused_vertical(
+                                        (viewport_height / 2).max(1) as isize,
+                                        viewport_height,
+                                        content_len,
+                                    );
+                                }
+                                TuiAction::PageUp => {
+                                    let content_len = state.provision_focused_content_len();
+                                    state.provision_move_focused_vertical(
+                                        -(viewport_height.max(1) as isize),
+                                        viewport_height,
+                                        content_len,
+                                    );
+                                }
+                                TuiAction::PageDown => {
+                                    let content_len = state.provision_focused_content_len();
+                                    state.provision_move_focused_vertical(
+                                        viewport_height.max(1) as isize,
+                                        viewport_height,
+                                        content_len,
+                                    );
+                                }
+                                TuiAction::MoveLeft | TuiAction::MoveRight | TuiAction::Toggle
+                                    if state.provision_focused_pane()
+                                        == crate::tui::pane::PaneId::ProvisionParameters =>
+                                {
                                     state.provision_toggle_selected_option();
                                 }
-                                TuiAction::Insert => {
+                                TuiAction::Insert
+                                    if state.provision_focused_pane()
+                                        == crate::tui::pane::PaneId::ProvisionParameters =>
+                                {
                                     state.provision_begin_insert();
                                 }
-                                TuiAction::Fill => {
+                                TuiAction::Fill
+                                    if state.provision_focused_pane()
+                                        == crate::tui::pane::PaneId::ProvisionParameters =>
+                                {
                                     state.provision_fill_selected_capacity();
                                 }
-                                TuiAction::Add => {
+                                TuiAction::Add
+                                    if state.provision_focused_pane()
+                                        == crate::tui::pane::PaneId::ProvisionParameters =>
+                                {
                                     state.provision_plain_add_partition();
                                 }
-                                TuiAction::Delete => {
+                                TuiAction::Delete
+                                    if state.provision_focused_pane()
+                                        == crate::tui::pane::PaneId::ProvisionParameters =>
+                                {
                                     state.provision_plain_delete_selected_partition();
                                 }
                                 TuiAction::Activate => {
@@ -1347,6 +1386,66 @@ fn run_loop(resume: Option<state::WriteIntent>) -> io::Result<LoopExit> {
                                 }
                             }
                             ProvisionStage::Review => match action {
+                                TuiAction::WorkspaceNext => state.provision_shift_pane(false),
+                                TuiAction::WorkspacePrevious => state.provision_shift_pane(true),
+                                TuiAction::PanelNext => state.provision_shift_pane(false),
+                                TuiAction::PanelPrevious => state.provision_shift_pane(true),
+                                TuiAction::PanelLeft => state.provision_spatial_focus(-1, 0),
+                                TuiAction::PanelRight => state.provision_spatial_focus(1, 0),
+                                TuiAction::PanelUp => state.provision_spatial_focus(0, -1),
+                                TuiAction::PanelDown => state.provision_spatial_focus(0, 1),
+                                TuiAction::MoveUp => {
+                                    let content_len = state.provision_focused_content_len();
+                                    state.provision_move_focused_vertical(
+                                        -1,
+                                        viewport_height,
+                                        content_len,
+                                    );
+                                }
+                                TuiAction::MoveDown => {
+                                    let content_len = state.provision_focused_content_len();
+                                    state.provision_move_focused_vertical(
+                                        1,
+                                        viewport_height,
+                                        content_len,
+                                    );
+                                }
+                                TuiAction::Top => state.provision_focused_top(),
+                                TuiAction::Bottom => {
+                                    state.provision_focused_bottom(viewport_height);
+                                }
+                                TuiAction::HalfPageUp => {
+                                    let content_len = state.provision_focused_content_len();
+                                    state.provision_move_focused_vertical(
+                                        -((viewport_height / 2).max(1) as isize),
+                                        viewport_height,
+                                        content_len,
+                                    );
+                                }
+                                TuiAction::HalfPageDown => {
+                                    let content_len = state.provision_focused_content_len();
+                                    state.provision_move_focused_vertical(
+                                        (viewport_height / 2).max(1) as isize,
+                                        viewport_height,
+                                        content_len,
+                                    );
+                                }
+                                TuiAction::PageUp => {
+                                    let content_len = state.provision_focused_content_len();
+                                    state.provision_move_focused_vertical(
+                                        -(viewport_height.max(1) as isize),
+                                        viewport_height,
+                                        content_len,
+                                    );
+                                }
+                                TuiAction::PageDown => {
+                                    let content_len = state.provision_focused_content_len();
+                                    state.provision_move_focused_vertical(
+                                        viewport_height.max(1) as isize,
+                                        viewport_height,
+                                        content_len,
+                                    );
+                                }
                                 TuiAction::Activate => {
                                     state.provision_begin_confirm();
                                 }
