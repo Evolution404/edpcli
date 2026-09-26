@@ -212,7 +212,7 @@ fn metadata_capture_reads_complete_lba7_compatibility_extent_and_separate_tail_w
         .iter()
         .find(|artifact| artifact.id == "raw.lba7_compatibility")
         .expect("raw LBA7 compatibility extent artifact");
-    assert_eq!(raw_compat.restore_policy, RestorePolicy::EvidenceOnly);
+    assert_eq!(raw_compat.restore_policy, RestorePolicy::Restorable);
     assert_eq!(raw_compat.data, expected);
 
     let tail = acquired
@@ -368,7 +368,7 @@ fn metadata_capture_reads_partition_key_sectors_and_tail_evidence_without_writes
 }
 
 #[test]
-fn metadata_container_round_trips_all_evidence_and_marks_it_non_restorable() {
+fn metadata_container_only_marks_protocol_and_validated_lce_restorable() {
     let Some(image) = load_disk_image("netac") else {
         eprintln!("跳过: 真实协议夹具不可用");
         return;
@@ -400,12 +400,17 @@ fn metadata_container_round_trips_all_evidence_and_marks_it_non_restorable() {
         .find(|artifact| artifact.id == edpb::RAW_PROTOCOL_ARTIFACT_ID)
         .unwrap();
     assert_eq!(raw_protocol.restore_policy, RestorePolicy::Restorable);
-    assert!(verified
+    let restorable_ids = verified
         .manifest
         .artifacts
         .iter()
-        .filter(|artifact| artifact.id != edpb::RAW_PROTOCOL_ARTIFACT_ID)
-        .all(|artifact| artifact.restore_policy != RestorePolicy::Restorable));
+        .filter(|artifact| artifact.restore_policy == RestorePolicy::Restorable)
+        .map(|artifact| artifact.id.as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        restorable_ids,
+        vec![edpb::RAW_PROTOCOL_ARTIFACT_ID, "raw.lba7_compatibility"]
+    );
     assert_eq!(edpb::read_raw_protocol(&path).unwrap(), image);
 }
 

@@ -672,6 +672,18 @@ pub fn acquire_metadata(
                 compat.sector_count,
                 "lba7_compatibility_extent_ciphertext",
             )?;
+            // This extent is not merely forensic: LBA7 points to it as active protocol
+            // state, and official provisioning may rewrite it. Once the pointer geometry has
+            // passed parse_lba7_compatibility_geometry(), keep the exact ciphertext restorable
+            // so a Deep EDPB can roll the protocol back coherently with LBA0-12.
+            if raw.is_some() {
+                let artifact = out
+                    .artifacts
+                    .iter_mut()
+                    .find(|artifact| artifact.id == "raw.lba7_compatibility")
+                    .expect("captured compatibility artifact must exist");
+                artifact.restore_policy = RestorePolicy::Restorable;
+            }
             if let Some(expected) = compat.chs_expected_start_lba {
                 if expected != compat.start_lba {
                     out.issues.push(CaptureIssue {

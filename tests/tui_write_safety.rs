@@ -7,7 +7,7 @@ fn write_safety_primitives_live_only_in_application_service() {
         "prepare_write",
         "reopen_rdwr",
         "verify_reopened_snapshot",
-        "atomic_write_sectors",
+        "execute_write_transaction",
     ] {
         assert!(
             service.contains(required),
@@ -26,6 +26,10 @@ fn write_safety_primitives_live_only_in_application_service() {
             "CLI must consume the shared write service, found {forbidden}"
         );
     }
+    assert!(
+        !cli.contains("diskio::execute_write_transaction"),
+        "CLI must not bypass the shared application write service"
+    );
 
     let tui = include_str!("../src/tui/mod.rs");
     for forbidden in [
@@ -38,6 +42,10 @@ fn write_safety_primitives_live_only_in_application_service() {
             "TUI must consume the shared write service, found {forbidden}"
         );
     }
+    assert!(
+        !tui.contains("diskio::execute_write_transaction"),
+        "TUI must not bypass the shared application write service"
+    );
 }
 
 #[test]
