@@ -870,7 +870,6 @@ impl AppState {
             item_count: self.item_count,
             panel: None,
             tree_selection: 0,
-            detail_scroll: 0,
             pane_focus,
             table_scroll,
         });
