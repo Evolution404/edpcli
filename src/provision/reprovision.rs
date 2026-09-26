@@ -183,6 +183,33 @@ pub enum PartitionAction {
     Rebuild,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum RegionDisposition {
+    PreserveOpaque,
+    PreserveVerified,
+    RewrapVerified,
+    Migrate,
+    Rebuild,
+    Drop,
+}
+
+impl RegionDisposition {
+    pub const fn preserves_extent(self) -> bool {
+        matches!(
+            self,
+            Self::PreserveOpaque | Self::PreserveVerified | Self::RewrapVerified
+        )
+    }
+
+    pub const fn legacy_action(self) -> PartitionAction {
+        if self.preserves_extent() {
+            PartitionAction::PreserveExact
+        } else {
+            PartitionAction::Rebuild
+        }
+    }
+}
+
 /// Geometry alone is necessary but not sufficient for actual preservation. The
 /// writer must additionally require verified per-partition key material.
 pub fn decide_partition_action(
@@ -968,6 +995,7 @@ impl ParsedExistingProvision {
 pub struct TargetPartitionPlan {
     pub geometry: TargetPartitionGeometry,
     pub action: PartitionAction,
+    pub disposition: RegionDisposition,
     pub reason: String,
     /// Only present when a verified source key record belongs to this exact
     /// target geometry. The writer re-encodes it for the target slot.
@@ -1000,8 +1028,8 @@ impl TargetProvisionPlan {
                     "target partition type at slot {index} does not match official mode"
                 ));
             }
-            let mut action = PartitionAction::Rebuild;
-            let mut reason = "无兼容且已验证的来源分区；原数据不能原样保留".to_string();
+            let mut disposition = RegionDisposition::Rebuild;
+            let mut reason = "无全兼容来源分区；目标区域必须重建".to_string();
             let mut preserved_record = None;
             if let Some(source) = source {
                 if let Some((source_index, old)) = source
@@ -1014,39 +1042,64 @@ impl TargetProvisionPlan {
                     if decide_partition_action(Some(old), target) == PartitionAction::PreserveExact
                     {
                         let record = source.records[source_index];
-                        let key_ok = if record.lba12.need_encrypt == 0 {
-                            true
+                        disposition = if record.lba12.need_encrypt == 0 {
+                            RegionDisposition::PreserveVerified
                         } else if let Some(domain) =
                             super::KeyDomainRole::from_partition_role(target.role)
                         {
-                            !matches!(
-                                source.source_password_knowledge(
-                                    domain,
-                                    key_domains.source_password(target.role),
-                                ),
-                                super::SourcePasswordKnowledge::Unknown
-                            )
+                            let user_password = key_domains.source_password(target.role);
+                            match source.source_password_knowledge(domain, user_password) {
+                                super::SourcePasswordKnowledge::Unknown => {
+                                    RegionDisposition::PreserveOpaque
+                                }
+                                super::SourcePasswordKnowledge::DefaultVerified => {
+                                    if key_domains.target_password(target.role)
+                                        == Some(super::DEFAULT_KEY_DOMAIN_PASSWORD)
+                                    {
+                                        RegionDisposition::PreserveVerified
+                                    } else {
+                                        RegionDisposition::RewrapVerified
+                                    }
+                                }
+                                super::SourcePasswordKnowledge::UserVerified => {
+                                    if key_domains.target_password(target.role) == user_password {
+                                        RegionDisposition::PreserveVerified
+                                    } else {
+                                        RegionDisposition::RewrapVerified
+                                    }
+                                }
+                            }
                         } else {
-                            false
+                            RegionDisposition::Rebuild
                         };
-                        if key_ok {
-                            action = PartitionAction::PreserveExact;
-                            reason =
-                                "语义、精确几何、文件系统和密钥记录均已验证；数据区禁止写入".into();
+                        if disposition.preserves_extent() {
+                            reason = match disposition {
+                                RegionDisposition::PreserveOpaque => {
+                                    "物理/语义/几何/filesystem 全兼容；来源密码未知，原 key material 与密文区域必须原样透传"
+                                }
+                                RegionDisposition::PreserveVerified => {
+                                    "物理/语义/几何/filesystem 与来源密钥均已验证；原 FileKey 与 data extent 保持不变"
+                                }
+                                RegionDisposition::RewrapVerified => {
+                                    "来源 FileKey 已验证；目标密码变化，只允许重包 wrapper，data extent 保持零写入"
+                                }
+                                _ => unreachable!(),
+                            }
+                            .into();
                             preserved_record = Some(record);
-                        } else {
-                            reason = "原密码或 FileKey 无法验证；原数据不能原样保留".into();
                         }
                     } else {
                         reason =
-                            "语义、位置、大小、物理加密或文件系统与来源不一致；原数据不能原样保留"
+                            "语义、位置、大小、物理加密或文件系统与来源不一致；不能进入 Preserve family"
                                 .into();
                     }
                 }
             }
+            let action = disposition.legacy_action();
             partitions.push(TargetPartitionPlan {
                 geometry: *target,
                 action,
+                disposition,
                 reason,
                 preserved_record,
             });
