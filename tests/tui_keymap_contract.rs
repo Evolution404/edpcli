@@ -532,7 +532,6 @@ fn help_registry_is_the_same_metadata_source_for_core_and_inspect_hints() {
         .any(|binding| binding.keys == "o" && binding.action == TuiAction::Open));
 }
 
-
 #[test]
 fn chapter_13_p8_removes_legacy_page_level_detail_scroll_state() {
     let inspect = include_str!("../src/tui/inspect/state.rs");
