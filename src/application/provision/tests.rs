@@ -270,9 +270,9 @@ fn portable_test_temp_file_name_uses_safe_ascii_components() {
         .file_name()
         .and_then(|value| value.to_str())
         .expect("portable test temp path must have a UTF-8 file name");
-    assert!(name.bytes().all(|byte| {
-        byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.')
-    }));
+    assert!(name
+        .bytes()
+        .all(|byte| { byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.') }));
     assert!(!name.contains(':'));
 }
 
