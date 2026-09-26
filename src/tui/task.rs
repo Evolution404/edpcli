@@ -216,6 +216,10 @@ enum WorkerResult {
         operation_id: OperationId,
         result: Result<usize, String>,
     },
+    ProvisionKeyProbe {
+        generation: u64,
+        result: Result<crate::application::provision::ProvisionKeyProbe, String>,
+    },
     ProvisionPlan {
         generation: u64,
         result: Result<crate::tui::state::ProvisionPrepared, String>,
@@ -258,6 +262,8 @@ pub struct TaskUpdates {
     pub backup_batch_delete_execute: Option<(OperationId, Result<usize, String>)>,
     pub backup_prune_plan: Option<Result<crate::tui::state::BackupPrunePrepared, String>>,
     pub backup_prune_execute: Option<(OperationId, Result<usize, String>)>,
+    pub provision_key_probe:
+        Option<Result<crate::application::provision::ProvisionKeyProbe, String>>,
     pub provision_plan: Option<Result<crate::tui::state::ProvisionPrepared, String>>,
     pub provision_backup: Option<(OperationId, Result<(), String>)>,
     pub provision_progress: Option<(OperationId, String)>,
@@ -281,6 +287,7 @@ impl TaskUpdates {
             || self.backup_batch_delete_execute.is_some()
             || self.backup_prune_plan.is_some()
             || self.backup_prune_execute.is_some()
+            || self.provision_key_probe.is_some()
             || self.provision_plan.is_some()
             || self.provision_backup.is_some()
             || self.provision_progress.is_some()
@@ -307,6 +314,7 @@ pub struct TaskHub {
     advanced_inspect_slot: TaskSlot<()>,
     advanced_inspect_sector_slot: TaskSlot<()>,
     verify_slot: TaskSlot<(PathBuf, PathBuf)>,
+    provision_key_probe_slot: TaskSlot<()>,
     provision_slot: TaskSlot<()>,
     provision_export_slot: TaskSlot<()>,
     prune_slot: TaskSlot<()>,
@@ -333,6 +341,7 @@ impl TaskHub {
             advanced_inspect_slot: TaskSlot::new(),
             advanced_inspect_sector_slot: TaskSlot::new(),
             verify_slot: TaskSlot::new(),
+            provision_key_probe_slot: TaskSlot::new(),
             provision_slot: TaskSlot::new(),
             provision_export_slot: TaskSlot::new(),
             prune_slot: TaskSlot::new(),
@@ -565,6 +574,11 @@ impl TaskHub {
                 } => {
                     if self.finish_operation(operation_id) {
                         updates.backup_prune_execute = Some((operation_id, result));
+                    }
+                }
+                WorkerResult::ProvisionKeyProbe { generation, result } => {
+                    if self.provision_key_probe_slot.finish(generation) {
+                        updates.provision_key_probe = Some(result);
                     }
                 }
                 WorkerResult::ProvisionPlan { generation, result } => {
