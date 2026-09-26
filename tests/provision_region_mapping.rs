@@ -23,9 +23,7 @@ fn source(
             sector_count,
         },
         physical_crypto,
-        filesystem: FilesystemProfile::Known(
-            edpcli::provision::OfficialFilesystemFormat::ExFat,
-        ),
+        filesystem: FilesystemProfile::Known(edpcli::provision::OfficialFilesystemFormat::ExFat),
         key_profile: key_domain.map(|domain| RegionKeyProfile {
             domain,
             wrap_mode: Some(FileKeyWrapMode::Sm4),
@@ -49,9 +47,7 @@ fn target(
             sector_count,
         },
         physical_crypto,
-        filesystem: FilesystemProfile::Known(
-            edpcli::provision::OfficialFilesystemFormat::ExFat,
-        ),
+        filesystem: FilesystemProfile::Known(edpcli::provision::OfficialFilesystemFormat::ExFat),
         key_profile: key_domain.map(|domain| RegionKeyProfile {
             domain,
             wrap_mode: Some(FileKeyWrapMode::Sm4),
