@@ -36,6 +36,11 @@ pub enum InspectParseState {
 pub enum InspectFieldKey {
     Lba8UsbOnlyInfo,
     Lba8HostHardinfo,
+    Lba8Elabel,
+    Lba8ToolVersion,
+    Lba8LabVersion,
+    Lba8WriteTime,
+    Lba8LogicalLength,
     Lba12MaxSharePasswordErrors,
     Lba12MaxEncryptPasswordErrors,
     ProtocolOffset {
@@ -52,6 +57,11 @@ impl InspectFieldKey {
         match (lba, start, end) {
             (8, 0x014, 0x018) => Self::Lba8HostHardinfo,
             (8, 0x01e, 0x02e) => Self::Lba8UsbOnlyInfo,
+            (8, 0x080, _) => Self::Lba8Elabel,
+            (8, 0x008, 0x00c) => Self::Lba8ToolVersion,
+            (8, 0x00c, 0x010) => Self::Lba8LabVersion,
+            (8, 0x010, 0x014) => Self::Lba8WriteTime,
+            (8, 0x004, 0x008) => Self::Lba8LogicalLength,
             (12, 0x123, 0x124) => Self::Lba12MaxSharePasswordErrors,
             (12, 0x126, 0x127) => Self::Lba12MaxEncryptPasswordErrors,
             _ => Self::ProtocolOffset {

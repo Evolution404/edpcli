@@ -8,6 +8,81 @@ use edpcli::inspect::{
 };
 
 #[test]
+fn ch14_lba8_summary_uses_stable_field_keys_not_display_labels() {
+    use edpcli::application::inspect::{AbsoluteByteRange, InspectField, InspectFieldType};
+    use edpcli::application::inspect_summary::{summarize_node, InspectSummarySource};
+    use edpcli::application::inspect_tree::{InspectNodeKind, InspectNodeRange};
+    use edpcli::edpb::SemanticStatus;
+    use edpcli::inspect::{InspectFieldKey, SectorFieldStatus};
+
+    let fields = [
+        InspectField {
+            key: InspectFieldKey::Lba8UsbOnlyInfo,
+            range: AbsoluteByteRange {
+                start: 8 * 512 + 0x1e,
+                end_exclusive: 8 * 512 + 0x2e,
+            },
+            field_type: InspectFieldType::Identity,
+            raw: vec![0; 16],
+            decoded: vec![0; 16],
+            field_logical: None,
+            transform: None,
+            status: SectorFieldStatus::Known,
+            label: "renamed identity field".into(),
+            value: "140225993400000000".into(),
+            style: FieldStyle::Identity,
+            group: None,
+            children: Vec::new(),
+        },
+        InspectField {
+            key: InspectFieldKey::Lba8HostHardinfo,
+            range: AbsoluteByteRange {
+                start: 8 * 512 + 0x14,
+                end_exclusive: 8 * 512 + 0x18,
+            },
+            field_type: InspectFieldType::Identity,
+            raw: vec![0; 4],
+            decoded: vec![0; 4],
+            field_logical: None,
+            transform: None,
+            status: SectorFieldStatus::Known,
+            label: "renamed host field".into(),
+            value: "0x00000000".into(),
+            style: FieldStyle::Identity,
+            group: None,
+            children: Vec::new(),
+        },
+    ];
+    let summary = summarize_node(InspectSummarySource {
+        kind: InspectNodeKind::Sector,
+        label: "LBA8",
+        range: InspectNodeRange::sectors(8, 1),
+        decoder: Some(edpcli::application::inspect::InspectDecoderKind::Protocol),
+        status: SemanticStatus::Identified,
+        region_semantic: None,
+        fields: &fields,
+        parse_state: InspectParseState::Parsed,
+        diagnostics: &[],
+    });
+    assert!(summary.title.contains("设备身份"));
+    assert!(summary
+        .sections
+        .iter()
+        .flat_map(|section| &section.items)
+        .any(|item| { item.label == "UsbOnlyInfo" && item.value == "140225993400000000" }));
+    assert!(summary
+        .sections
+        .iter()
+        .flat_map(|section| &section.items)
+        .any(|item| { item.label == "HostHardinfo" && item.value == "0x00000000" }));
+    assert!(!summary
+        .sections
+        .iter()
+        .flat_map(|section| &section.items)
+        .any(|item| { item.label.contains("renamed") }));
+}
+
+#[test]
 fn ch14_missing_lba8_context_is_a_typed_diagnostic() {
     let view = analyze_sector(8, &[0; 512], &InspectMeta::default());
     assert_eq!(view.parse_state, InspectParseState::MissingContext);

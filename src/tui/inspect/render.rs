@@ -526,51 +526,81 @@ pub(super) fn draw_advanced_inspect(
             ])];
             let mut detail_lines = Vec::new();
             if let Some(row) = selected_row {
-                let kind = match row.kind {
-                    InspectNodeKind::Device => "Device",
-                    InspectNodeKind::Region => "Region",
-                    InspectNodeKind::Extent => "Extent",
-                    InspectNodeKind::Sector => "Sector",
-                    InspectNodeKind::Structure => "Structure",
-                    InspectNodeKind::Group => "Group",
-                    InspectNodeKind::Field => "Field",
-                    InspectNodeKind::Partition => "Partition",
-                    InspectNodeKind::UnknownRange => "UnknownRange",
+                let item = matches!(row.kind, InspectNodeKind::Sector | InspectNodeKind::Field)
+                    .then(|| {
+                        workspace
+                            .items
+                            .iter()
+                            .find(|item| item.lba == row.range.start_lba)
+                    })
+                    .flatten();
+                let fields: &[crate::application::inspect::InspectField] = match row.kind {
+                    InspectNodeKind::Sector => item.map_or(&[], |item| item.fields.as_slice()),
+                    InspectNodeKind::Field => item
+                        .and_then(|item| {
+                            item.fields.iter().find(|field| {
+                                row.range
+                                    .byte_range
+                                    .is_some_and(|range| range == field.range)
+                            })
+                        })
+                        .map_or(&[], std::slice::from_ref),
+                    _ => &[],
                 };
-                let status = match row.status {
-                    crate::edpb::SemanticStatus::Identified => "identified",
-                    crate::edpb::SemanticStatus::Unknown => "unknown",
-                };
-                overview_lines.extend([
-                    Line::from(""),
-                    Line::from(vec![
-                        Span::styled("节点  ", muted()),
-                        Span::styled(safe(&row.label), secondary().add_modifier(Modifier::BOLD)),
-                    ]),
-                    Line::from(format!("类型: {kind}")),
-                    Line::from(format!(
-                        "范围: {}",
-                        crate::application::inspect_tree::format_lba_closed_range(
-                            row.range.start_lba,
-                            row.range.end_lba_exclusive(),
-                        )
-                        .unwrap_or_else(|| "[空区间]".into())
-                    )),
-                    Line::from(format!("Sector count: {}", row.range.sector_count)),
-                    Line::from(format!(
-                        "大小: {} B",
-                        u128::from(row.range.sector_count) * crate::common::SECTOR as u128
-                    )),
-                    Line::from(format!("状态: {status}")),
-                ]);
-                if let Some(byte_range) = row.range.byte_range {
-                    overview_lines.push(Line::from(format!(
-                        "Byte: 0x{:X}..0x{:X}",
-                        byte_range.start, byte_range.end_exclusive
-                    )));
+                let summary = crate::application::inspect_summary::summarize_node(
+                    crate::application::inspect_summary::InspectSummarySource {
+                        kind: row.kind,
+                        label: &row.label,
+                        range: row.range,
+                        decoder: row.decoder,
+                        status: row.status,
+                        region_semantic: row.region_semantic,
+                        fields,
+                        parse_state: item.map_or(
+                            crate::application::inspect::InspectParseState::Parsed,
+                            |item| item.parse_state,
+                        ),
+                        diagnostics: item.map_or(&[], |item| item.diagnostics.as_slice()),
+                    },
+                );
+                overview_lines.push(Line::from(""));
+                overview_lines.push(Line::from(Span::styled(
+                    safe(&summary.title),
+                    secondary().add_modifier(Modifier::BOLD),
+                )));
+                overview_lines.push(Line::from(Span::styled(
+                    safe(&summary.subtitle),
+                    if summary.alerts.is_empty() {
+                        muted()
+                    } else {
+                        warning()
+                    },
+                )));
+                overview_lines.push(Line::from(Span::styled(safe(&summary.location), muted())));
+                for section in &summary.sections {
+                    overview_lines.push(Line::from(""));
+                    overview_lines.push(Line::from(Span::styled(safe(&section.title), accent())));
+                    let label_width = section
+                        .items
+                        .iter()
+                        .map(|item| crate::tui::table_layout::display_width(&item.label))
+                        .max()
+                        .unwrap_or(0);
+                    for item in &section.items {
+                        let padding = label_width
+                            .saturating_sub(crate::tui::table_layout::display_width(&item.label))
+                            + 2;
+                        overview_lines.push(Line::from(vec![
+                            Span::styled(
+                                format!("{}{}", safe(&item.label), " ".repeat(padding)),
+                                muted(),
+                            ),
+                            Span::raw(safe(&item.value)),
+                        ]));
+                    }
                 }
-                if let Some(decoder) = row.decoder {
-                    overview_lines.push(Line::from(format!("Decoder: {decoder:?}")));
+                for alert in &summary.alerts {
+                    overview_lines.push(Line::from(Span::styled(safe(&alert.message), warning())));
                 }
 
                 match row.kind {

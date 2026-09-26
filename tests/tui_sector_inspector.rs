@@ -203,6 +203,45 @@ fn ch14_single_sector_tree_rows_omit_redundant_closed_range() {
 }
 
 #[test]
+fn ch14_lba8_overview_shows_semantic_identity_without_generic_metadata_dump() {
+    let mut sector = item(8, true);
+    let mut usb = item(0, true).fields.remove(0);
+    usb.key = edpcli::inspect::InspectFieldKey::Lba8UsbOnlyInfo;
+    usb.label = "localized label".into();
+    usb.value = "140225993400000000".into();
+    let mut host = usb.clone();
+    host.key = edpcli::inspect::InspectFieldKey::Lba8HostHardinfo;
+    host.value = "0x00000000".into();
+    sector.fields = vec![usb, host];
+
+    let mut state = AppState::new();
+    assert!(state.begin_advanced_inspect(AdvancedInspectSource::Disk(6)));
+    state.advanced_inspect_finish(Ok(workspace(vec![sector])));
+    select_protocol_lba0(&mut state);
+    let rows = state.advanced_inspect_tree_rows();
+    let lba8 = rows
+        .iter()
+        .position(|row| row.id.ends_with("/sector.8"))
+        .unwrap();
+    let current = state.advanced_inspect().unwrap().tree_selected;
+    state.advanced_inspect_move_tree(lba8 as isize - current as isize);
+    let mut terminal = Terminal::new(TestBackend::new(160, 50)).unwrap();
+    terminal.draw(|frame| render::draw(frame, &state)).unwrap();
+    let text = terminal
+        .backend()
+        .buffer()
+        .content()
+        .iter()
+        .map(|cell| cell.symbol())
+        .collect::<String>()
+        .replace(' ', "");
+    assert!(text.contains("设备身份与电子标签"), "{text}");
+    assert!(text.contains("UsbOnlyInfo"), "{text}");
+    assert!(text.contains("HostHardinfo"), "{text}");
+    assert!(!text.contains("Sectorcount:"), "{text}");
+}
+
+#[test]
 fn selecting_known_partition_sector_requests_read_only_preview() {
     let mut state = AppState::new();
     assert!(state.begin_advanced_inspect(AdvancedInspectSource::Disk(6)));

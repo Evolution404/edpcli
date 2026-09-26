@@ -171,6 +171,7 @@ pub struct AdvancedInspectTreeRow {
     pub range: crate::application::inspect_tree::InspectNodeRange,
     pub decoder: Option<crate::application::inspect::InspectDecoderKind>,
     pub status: crate::edpb::SemanticStatus,
+    pub region_semantic: Option<crate::application::inspect_tree::DiskRegionSemantic>,
     pub expandable: bool,
     pub expanded: bool,
     pub action: AdvancedInspectTreeAction,
@@ -538,6 +539,7 @@ impl AppState {
                 range: spec.range,
                 decoder: spec.decoder,
                 status: spec.status,
+                region_semantic: None,
                 expandable: false,
                 expanded: false,
                 action: AdvancedInspectTreeAction::SetLazyOffset {
@@ -574,6 +576,7 @@ impl AppState {
                 range: node.range,
                 decoder: node.decoder,
                 status: node.status,
+                region_semantic: node.region_semantic,
                 expandable,
                 expanded: is_expanded,
                 action: AdvancedInspectTreeAction::None,
