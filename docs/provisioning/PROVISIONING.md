@@ -6860,3 +6860,362 @@ Q8  清理与门禁
 15. Q8 完成后不存在为了第 12 章已知 `Rewrap/Migrate/Drop` 扩展而必须推翻第 14 章 UI 基础设施的结构性障碍。
 
 第二轮审计后的治理目标从“把几个界面画得更清楚”提升为：**把 TUI 中仍然依赖数字 slot、中文文案、glyph、最后一条 message 的隐式协议全部替换为 typed contract；同时收口事件传输、视图缓存和模块 ownership。完成后，第 12 章可以在这些稳定接口上增加新的业务语义，而不需要再次重写表格、磁盘布局、进度系统和 Pane 交互。**
+
+### 14.13 exFAT 生成器 / 解析器能力闭环：禁止生成自己无法验证的文件系统
+
+本轮实际验收暴露一个需要纳入治理的生产级边界问题：Mode1 的启动/交换二合一区约 `487357 MiB`（`998107136 sectors`，约 `475.93 GiB`）选择 exFAT 时，计划生成阶段报错：
+
+```text
+exFAT cluster count exceeds edpcli validated parser range
+```
+
+根因已定位：
+
+```text
+src/provision/filesystem.rs::choose_cluster_shift()
+```
+
+当前仅按卷大小做固定分段：
+
+```text
+>= 64 GiB  -> cluster_shift = 7
+               128 sectors/cluster
+               64 KiB/cluster
+```
+
+在该约 `475.93 GiB` 分区上，`exfat_geometry()` 得到约 `7,797,235` clusters；但 formatter 随后又强制：
+
+```text
+cluster_count <= 4_194_304
+```
+
+而 `backup_deep/exfat.rs` 的 exFAT parser 也使用相同的 `4_194_304` clusters 验证预算。因此问题不是用户输入非法，也不是 exFAT 无法支持该容量，而是：
+
+> **formatter 的 cluster-size policy 可以构造出一个超出 edpcli 自己 parser 验证预算的 geometry。**
+
+这是 producer / consumer capability 不闭环，必须作为本章治理项修掉，而不是让用户缩小分区规避。
+
+#### 14.13.1 核心不变量：Producer output 必须落在 Consumer validated domain 内
+
+对 edpcli 自己生成的任意受支持文件系统镜像，必须满足：
+
+```text
+FormatterSupported(volume, options)
+        =>
+DeepParserAccepts(formatter_output)
+        &&
+ReadbackVerifierAccepts(formatter_output)
+```
+
+至少对 exFAT 明确为：
+
+```text
+build_exfat_sparse_image(...)
+  -> geometry.cluster_count <= EXFAT_MAX_VALIDATED_CLUSTERS
+  -> backup_deep::exfat parser 接受同一 boot geometry
+```
+
+如果 formatter 无法在当前验证能力内找到合法 geometry，则必须在**计划生成阶段**返回明确的“当前 edpcli 不支持该 geometry”错误，绝不能先构造一个自己后续无法验证的文件系统。
+
+该不变量以后同样适用于 FAT16/FAT32/NTFS：生成器的输出域不能大于 parser/readback verifier 的已验证输入域。
+
+#### 14.13.2 共享验证上限，删除 magic `4_194_304`
+
+当前 `4_194_304` 至少分别出现在：
+
+```text
+provision/filesystem.rs
+backup_deep/exfat.rs
+```
+
+本次治理将它提升为 UI-neutral / filesystem-domain 的共享 capability 常量或结构，例如：
+
+```rust
+ExFatValidatedLimits {
+    max_cluster_count,
+    min_cluster_shift,
+    max_cluster_shift,
+    ...
+}
+```
+
+或至少：
+
+```rust
+EXFAT_MAX_VALIDATED_CLUSTERS
+```
+
+要求：
+
+- formatter 与 parser 使用同一事实源；
+- 常量命名必须表达“edpcli 当前验证预算”，不能冒充 exFAT 规范本身的理论上限；
+- 如果未来 Deep parser 扩大预算，只修改 canonical capability 定义并跑 compatibility tests；
+- 禁止 generator/parser 两侧再次复制相同 magic number。
+
+#### 14.13.3 cluster size 选择改为 geometry-driven，而不是只看容量阈值
+
+`choose_cluster_shift(volume_sectors)` 不再只返回一个固定 shift。目标算法：
+
+```text
+1. 根据卷容量得到首选/最小候选 cluster shift；
+2. 计算 exfat_geometry(volume_sectors, shift)；
+3. 如果 geometry 合法且 cluster_count <= validated limit：接受；
+4. 否则增大 cluster shift，重新计算 geometry；
+5. 选择“满足所有验证约束的最小 cluster size”；
+6. 候选耗尽仍无法满足时，返回结构化 UnsupportedGeometry。
+```
+
+即：
+
+```text
+for shift in allowed_candidate_shifts:
+    geometry = exfat_geometry(volume, shift)?
+    if geometry.cluster_count <= validated_limit
+       && geometry satisfies formatter/parser invariants:
+        return geometry
+return UnsupportedGeometry
+```
+
+这样对本次约 `475.93 GiB` 的 case，64 KiB cluster 不满足预算时，会自动尝试更大的 cluster；例如 128 KiB cluster 的 cluster count 约减半，可落回当前 `4,194,304` 验证预算内。
+
+注意：
+
+- 不硬编码“475 GiB 就用 128 KiB”；必须由 geometry 计算决定；
+- 不把 cluster 数量压到预算以下作为唯一条件，还必须满足现有 FAT/heap/root/bitmap/upcase 等 geometry 不变量；
+- 选择策略应稳定、确定，同样输入产生同样 geometry；
+- UI 不让用户手工处理这个实现约束，除非未来明确增加高级 cluster-size override；本轮默认自动选安全 geometry。
+
+#### 14.13.4 把文件系统能力检查提前到计划验证
+
+当前错误虽然发生在“生成计划”阶段，方向是对的，但错误文案暴露了底层 parser budget，且用户不知道如何处理。
+
+本次治理增加 typed validation error，例如：
+
+```text
+FilesystemPlanError::UnsupportedGeometry {
+    filesystem,
+    volume_sectors,
+    attempted_cluster_sizes,
+    reason,
+}
+```
+
+正常情况下 adaptive geometry 应自动消除此类错误；真正无法支持时，TUI/CLI 映射为用户可执行的提示，例如：
+
+```text
+无法为当前分区生成受 edpcli 验证支持的 exFAT 布局。
+分区大小：475.93 GiB
+已尝试的簇大小：...
+请改用其它文件系统或调整分区大小。
+```
+
+不能再直接把：
+
+```text
+validated parser range
+```
+
+这类内部实现术语作为主要用户错误。
+
+#### 14.13.5 增加 formatter -> parser round-trip contract test
+
+这是防止同类问题再次出现的核心门禁。
+
+对每一个 edpcli 自己支持“创建 + 深度解析/读回”的文件系统，建立 contract：
+
+```text
+formatter(input)
+   ↓
+sparse image / virtual sector device
+   ↓
+canonical parser
+   ↓
+parser accepts + geometry matches formatter intent
+```
+
+exFAT 至少验证：
+
+```text
+VolumeLength
+FatOffset
+FatLength
+ClusterHeapOffset
+ClusterCount
+RootDirectoryCluster
+BytesPerSectorShift
+SectorsPerClusterShift
+NumberOfFats
+boot checksum
+```
+
+测试不能只断言“build 返回 Ok”；必须证明**生成结果能被自己的 consumer 重新读取**。
+
+如果 Deep parser 需要块设备接口，使用测试内的 sparse/fake SectorDev 映射 formatter 输出，不写真实盘。
+
+#### 14.13.6 exFAT 容量边界矩阵
+
+新增系统化容量矩阵，至少覆盖：
+
+```text
+小卷边界：
+  64 MiB 前后
+
+常见卷：
+  1 GiB
+  8 GiB
+  32 GiB
+  64 GiB 前后
+  128 GiB
+  256 GiB 前后
+
+当前 bug 区间：
+  300 GiB
+  475.93 GiB（本次真实回归样本）
+  512 GiB
+
+更大容量：
+  1 TiB
+  当前 edpcli 声明支持范围内的更大代表值
+```
+
+每一个样本检查：
+
+```text
+geometry succeeds 或返回明确 UnsupportedGeometry
+cluster_count <= validated limit（若 succeeds）
+cluster shift 在允许范围
+FAT/heap 不越界
+formatter -> parser round-trip PASS
+```
+
+尤其对 threshold 做 `boundary - 1 / boundary / boundary + 1`，防止容量分段出现 off-by-one。
+
+#### 14.13.7 cluster-budget 精确边界测试
+
+不能只按 GiB 测试，还要围绕真正的能力边界构造 case：
+
+```text
+cluster_count == 4_194_304       -> 必须接受
+cluster_count == 4_194_305       -> 当前 shift 必须被拒绝/自动升级 shift
+升级 shift 后重新进入预算         -> 必须接受
+所有允许 shift 均超预算/geometry 非法 -> 明确 UnsupportedGeometry
+```
+
+这些测试直接针对 capability invariant，比只测某几个容量更能防止以后修改 FAT offset/alignment 时重新越界。
+
+#### 14.13.8 property / sweep test：避免只修当前 476 GiB 一个点
+
+增加确定性的容量 sweep，不使用随机 flaky 测试。例如在声明支持范围内按：
+
+```text
+对数级代表容量
++ 所有 policy threshold 邻域
++ validated cluster limit 邻域
++ 若干固定 seed 的伪随机容量
+```
+
+循环验证：
+
+```text
+if formatter returns Ok(image):
+    assert parser accepts image
+    assert geometry is internally consistent
+```
+
+核心 property：
+
+```text
+不存在 formatter=Ok 但 canonical parser=Err 的容量点
+```
+
+如果测试成本较高，可把大 sweep 放 full profile；fast profile 保留关键边界 + 本次真实回归样本。
+
+#### 14.13.9 其它文件系统增加同类 capability contract
+
+本次 bug 虽然来自 exFAT，但门禁不能只修 exFAT。
+
+审计/测试 FAT16、FAT32、NTFS 的 formatter 和 parser/readback verifier，建立统一规则：
+
+```text
+Producer capability <= Consumer validated capability
+```
+
+至少增加：
+
+- 最小支持容量附近；
+- FAT 类型切换阈值附近；
+- 最大已验证 geometry 附近；
+- formatter 生成镜像后自身 parser/readback 可接受；
+- 超出预算时必须在写盘前失败。
+
+不要求本轮扩大所有 parser 的能力范围；重点是**不能生成自己不支持验证的输出**。
+
+#### 14.13.10 本次真实回归样本固定进测试资产
+
+加入一个不依赖真实 U 盘的 regression fixture：
+
+```text
+Mode1
+whole disk / layout representative of screenshot
+combined boot/share:
+  start = 63
+  sectors = 998107136
+filesystem = exFAT
+```
+
+验收：
+
+```text
+plan generation PASS
+selected exFAT geometry within validated budget
+formatter PASS
+canonical exFAT parser PASS
+不再出现 "exFAT cluster count exceeds edpcli validated parser range"
+```
+
+测试应直接使用 sector 数，不使用截图中的四舍五入 MiB 文本作为输入。
+
+#### 14.13.11 与 Q0～Q8 合并
+
+本项不新增平行阶段，纳入现有治理：
+
+```text
+Q0
+  + 先加入 475.93 GiB exFAT 失败回归测试
+  + cluster limit boundary tests
+  + formatter->parser contract failing test
+
+Q4
+  + Filesystem capability / validation error typed presentation
+  + 用户错误不直接暴露 parser budget 内部术语
+
+Q5 前的 filesystem-domain 子任务
+  + 共享 ExFatValidatedLimits
+  + geometry-driven cluster shift selection
+  + formatter/parser 共享 capability source
+
+Q8
+  + exFAT capacity matrix
+  + deterministic property/sweep test
+  + FAT16/FAT32/NTFS producer-consumer capability audit
+  + fast/full 分层门禁
+```
+
+实际执行顺序中，**exFAT formatter 修复必须在任何真实盘 Mode1 大容量制盘验收之前完成。**
+
+#### 14.13.12 完成标准
+
+本次治理增加以下硬门禁：
+
+1. `4_194_304` 不再在 exFAT formatter/parser 两侧重复定义；
+2. `choose_cluster_shift` 不再只凭容量阈值返回一个必然接受的固定结果；
+3. 本次 `998107136-sector` exFAT 回归样本可以成功生成受支持 geometry；
+4. formatter 成功的 exFAT 镜像必须能被 canonical exFAT parser 接受；
+5. `cluster_count == limit` 与 `limit + 1` 都有精确测试；
+6. 64 MiB、1 GiB、64 GiB、256 GiB 等策略边界前后都有测试；
+7. fast suite 至少覆盖关键边界与真实回归样本；full suite 覆盖 deterministic sweep；
+8. 不存在“formatter 返回 Ok，但自身 parser 因 geometry budget 拒绝”的已支持容量；
+9. 无法支持的 geometry 在写盘前失败，且 TUI/CLI 给出结构化、可操作错误；
+10. 其它受支持文件系统也建立 producer -> consumer compatibility contract，防止同类能力漂移。
+
+最终原则：**edpcli 只允许创建自己能够可靠解析、读回和验证的文件系统。formatter 与 parser 的能力边界必须来自同一个事实源，并由 round-trip + boundary + sweep tests 持续证明。**
