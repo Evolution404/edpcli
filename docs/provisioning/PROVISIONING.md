@@ -4496,3 +4496,294 @@ I2a  重构 tail topology：将重叠 sibling extents 归一化为按 LBA 连续
 ```
 
 它属于 Inspect topology/UI 表达修正，不涉及任何盘面协议或写盘行为。
+
+### 14.7 节点概览与节点详情重新分工：Overview 看结论，Detail 看证据
+
+当前两个 Pane 的信息架构不清晰：Overview 主要重复 `节点/类型/范围/Sector count/大小/状态/Decoder` 这类结构元数据，而 Sector 的真正语义字段几乎全部堆进 Detail。结果是用户选中 LBA8 后，第一眼看不到“这个扇区最重要的信息是什么”；Detail 又只有 `字段 / 值 / 分组` 三列，缺少 offset、长度、原始表示、状态等取证维度。
+
+目标原则：
+
+```text
+Overview = 回答“这是什么、是否正常、最重要的值是什么”
+Detail   = 回答“所有字段在哪里、占多少字节、原始/解码值是什么、证据状态是什么”
+Hex      = 回答“具体每个字节长什么样”
+```
+
+三层必须互补，不能重复堆同一批信息。
+
+#### 14.7.1 Overview 改为语义摘要，不再以通用元数据为主体
+
+Overview 首屏应优先容纳 3～6 个用户真正关心的语义结论，通用范围信息压成一行即可。
+
+统一结构建议：
+
+```text
+┌ 节点概览 · LBA8 ─────────────────────────────┐
+│ 设备身份与电子标签                           │
+│ ✓ 已识别 · canonical LBA8 · A6B0 prefix      │
+│ LBA 8 · 512 B · byte 0x1000..0x11FF          │
+│                                               │
+│ [身份]                                        │
+│ UsbOnlyInfo      140225993400000000            │
+│ HostHardinfo     0x00000000 · current-zero    │
+│                                               │
+│ [电子标签]                                    │
+│ <从 ELABEL children 提取的关键键值，最多若干> │
+│                                               │
+│ [版本 / 写入]                                 │
+│ Tool              01 00 00 01                 │
+│ Lab               0x00000222                  │
+│ writeTime         12345678                    │
+│                                               │
+│ [存储布局]                                    │
+│ logical 0x... B · encrypted prefix ... B      │
+│ raw tail ... B                                │
+│                                               │
+│ 无异常                                        │
+└───────────────────────────────────────────────┘
+```
+
+这里的重点不是固定这些具体排版字符，而是建立**信息优先级**：
+
+1. 第一行：用户可读的节点语义名，例如 `LBA8 · 设备身份与电子标签`，而不是只显示 `Sector`；
+2. 第二行：解析状态 + canonical decoder/profile，一眼确认“能不能信”；
+3. 第三行：LBA/范围/大小压缩成一行，不再占 5～7 行；
+4. 中间：按该节点语义选出的关键字段；
+5. 最后：异常、候选 profile、不确定性；正常的固定零/保留字段不要占 Overview 主体。
+
+Overview 的一条重要规则：**正常且固定的协议校验字段默认折叠成状态，不逐项展示。** 例如 LBA8 的 `LLGB magic`、`MacInfo=0`、`UsbOnlyInfo suffix=0`、`reserved header=0`、`ELABEL offset=0x80` 都属于完整 Detail 的证据，但正常时不应挤占 Overview；只有异常时才提升为警告。
+
+#### 14.7.2 LBA8 的建议摘要字段
+
+LBA8 当前 canonical parser 已提供足够数据，可直接建立高价值摘要，不需要 TUI 猜协议。
+
+一级摘要（默认始终展示）：
+
+```text
+语义             设备身份与电子标签
+解析状态         已识别 / 未唯一确定 / 缺 device_id
+UsbOnlyInfo      当前解析值 + profile
+HostHardinfo     0x........ + source/profile
+ELABEL           关键键值摘要，或“已解析 N 项”
+```
+
+二级摘要（空间足够时展示）：
+
+```text
+Tool version
+Lab version
+writeTime         只按当前已证实表示显示，不擅自转日期
+logical length
+A6B0 encrypted prefix length
+raw tail length
+```
+
+仅异常时展示：
+
+```text
+magic 不匹配
+UsbOnlyInfo profile 多候选
+host-hardinfo profile 多候选
+固定零字段出现非零
+ELABEL terminator/offset 异常
+其他 parser 拒绝原因
+```
+
+明确不应在 Overview 展开的内容：
+
+```text
+64B reserved header 的十六进制全文
+UsbOnlyInfo suffix 的16B零
+raw tail backing 全量 hex
+encrypted backing 全量 hex
+每个 ELABEL 子字段的完整列表
+```
+
+这些全部属于 Detail/Hex。
+
+#### 14.7.3 Detail 改成真正的“字段证据表”
+
+当前 Detail 只有：
+
+```text
+字段 | 值 | 分组
+```
+
+不足以承担“所有字段细节”的职责。目标表建议至少包含这些逻辑列：
+
+```text
+Offset | Len | Group | Field | Value | Raw/Stored | Type | Status
+```
+
+宽屏优先显示：
+
+```text
+Offset  Len   Field                    Value                  Status
+0x000   4     LLGB magic               LLGB                   Known
+0x004   4     logical length           ...                    Known
+0x008   4     tool version             01 00 00 01            Known
+0x00C   4     lab version              0x00000222             Known
+0x010   4     writeTime                ...                    Known
+0x014   4     HDSerialInfo/MyHardinfo  0x00000000             Known
+0x018   6     MacInfo                  00 00 00 00 00 00      Known
+0x01E   16    UsbOnlyInfo              ...                    Known
+...
+```
+
+通过 `h/l` 横向列 viewport 继续访问：
+
+```text
+Group
+Raw/Stored
+Decoded/logical
+Type
+Status
+Transform / provenance
+```
+
+这与 14.2～14.4 的多层 decode 计划统一：Detail 应明确区分 `stored/raw representation` 与 `logical value`，不能把两者塞进同一个“值”列。
+
+#### 14.7.4 Detail 从“滚动表”升级为“可选字段表”
+
+建议增加独立 `detail_selected_row`：
+
+```text
+j/k          选择上一/下一字段
+Ctrl-u/d     半页移动并保持选择
+PageUp/Down  整页
+ gg/G        首/末字段
+h/l          横向列 viewport
+Enter        打开 Sector Inspector，并定位/Pin 到该 Field 起始 byte
+o            展开/折叠当前字段 children（如 ELABEL 子项）
+y            复制 semantic value
+Y            复制 raw/stored bytes
+```
+
+这样 Detail 不只是“能滚到底”，而是一个真正可导航的字段检查器。选中行使用统一 selection token，不能只靠滚动位置猜当前字段。
+
+对于 `ELABEL` 这类有 children 的字段：
+
+```text
+▸ ELABEL
+```
+
+按 `o` 后：
+
+```text
+▾ ELABEL
+    KeyA    ValueA
+    KeyB    ValueB
+    ...
+```
+
+默认折叠，避免几十个子项淹没其它字段。
+
+#### 14.7.5 引入 UI-neutral 的 Summary 模型，禁止 renderer 按 LBA 写 if/else
+
+不能在 `render.rs` 中写：
+
+```text
+if lba == 8 { 显示 UsbOnlyInfo ... }
+```
+
+建议 application/inspect 层新增只读摘要 DTO，名称可实现时调整：
+
+```rust
+InspectNodeSummary {
+    title,
+    subtitle,
+    status,
+    location,
+    sections: Vec<SummarySection>,
+    alerts: Vec<SummaryAlert>,
+}
+
+SummarySection {
+    title,
+    items: Vec<SummaryItem>,
+}
+
+SummaryItem {
+    label,
+    value,
+    importance,
+    source_range,
+    status,
+}
+```
+
+由 canonical parser / inspect adapter 决定哪些字段是摘要字段；TUI renderer 只负责排版、颜色和 viewport。
+
+`importance` 至少可区分：
+
+```text
+Primary    首屏关键语义
+Secondary  空间足够时展示
+Diagnostic 只在异常或显式展开时展示
+```
+
+这样未来 LBA0～12、LCE、Partition、Region 都能各自提供摘要，但仍共享同一个 Overview renderer。
+
+#### 14.7.6 各节点类型的 Overview 语义
+
+不要只给 LBA8 特判，最终统一为：
+
+```text
+Device:
+  型号/容量/设备身份/当前盘型/协议识别状态
+
+Region / Extent:
+  语义角色/范围/大小/覆盖状态/关键子区域
+
+Partition:
+  type/起点/大小/文件系统/NeedEncrypt/物理明密文状态/FileKey 状态
+
+Sector:
+  本 LBA 的协议语义 + 关键字段 + decoder/profile + 异常
+
+Field:
+  字段语义值/范围/类型/状态/变换摘要
+
+UnknownRange:
+  范围/大小/为何未知/已有证据，禁止伪造摘要
+```
+
+#### 14.7.7 Overview 与 Detail 的视觉规则
+
+- Overview 使用“短 label + 对齐 value”的 key/value 版式，不用长篇 prose；
+- 每个 section 之间空一行或轻分隔，不使用大量高饱和颜色；
+- `Primary` 值用普通前景或轻 accent，状态/警告才使用 success/warning/error；
+- 固定正常值不反复绿色高亮，避免满屏“正常”造成噪音；
+- Detail 是密集表格，颜色只表达 status/type/selection，不给每列随机配色；
+- 长 value 必须截断并允许横向 viewport/Enter 深入，禁止把整行撑爆；
+- Overview/Detail 都继续拥有独立 vertical viewport，宽/窄屏状态不丢失。
+
+#### 14.7.8 回归门禁
+
+至少新增：
+
+1. 选中 LBA8 时 Overview 首屏必须出现 UsbOnlyInfo、HostHardinfo、解析/profile 状态；
+2. LBA8 正常固定零 reserved 字段不占 Overview 主体；
+3. profile 多候选或 parser 异常必须进入 Overview alerts；
+4. Overview 不复制完整 raw backing；
+5. Detail 必须包含所有 canonical `InspectField`，数量与模型一致；
+6. Detail 每个字段都能看到 offset + length；
+7. 有 stored/logical 两层表示的字段可分别查看；
+8. `j/k` 能选择所有 Detail 行且不会改变 Tree selection；
+9. `Enter` 从 Detail 选中字段精确进入 Sector Inspector 对应 byte；
+10. children 展开/折叠不会丢失父字段选择；
+11. resize 后 Overview scroll、Detail selection/scroll/column viewport 均保留；
+12. Overview 摘要生成位于 inspect/application 层，源码门禁禁止 `render.rs` 出现 LBA-specific 业务判断；
+13. LBA0～12/LCE canonical parser 与 golden tests 不改变。
+
+后续实现顺序增加：
+
+```text
+I2b  建 InspectNodeSummary / SummarySection / SummaryItem，只读语义摘要模型
+I2c  先为 LBA8 建 summary adapter 与失败测试，再覆盖其它 LBA/Partition/Region
+I3a  Overview renderer 改为统一 sectioned key/value dashboard
+I3b  Detail 增加 offset/len/stored/logical/type/status/provenance 列
+I3c  Detail 增加 selected row、Field→Hex、children 折叠
+```
+
+最终标准：**Overview 让用户 3 秒内看懂当前节点最重要的信息；Detail 能完整回答每个字段在哪里、是什么、原始字节如何、如何解码、证据状态如何；Hex 再负责逐字节核验。**
