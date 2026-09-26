@@ -220,6 +220,11 @@ enum WorkerResult {
         generation: u64,
         result: Result<crate::application::provision::ProvisionKeyProbe, String>,
     },
+    ProvisionKeyVerify {
+        generation: u64,
+        domain: crate::provision::KeyDomainRole,
+        result: Result<crate::provision::SourcePasswordKnowledge, String>,
+    },
     ProvisionPlan {
         generation: u64,
         result: Result<crate::tui::state::ProvisionPrepared, String>,
@@ -264,6 +269,10 @@ pub struct TaskUpdates {
     pub backup_prune_execute: Option<(OperationId, Result<usize, String>)>,
     pub provision_key_probe:
         Option<Result<crate::application::provision::ProvisionKeyProbe, String>>,
+    pub provision_key_verify: Option<(
+        crate::provision::KeyDomainRole,
+        Result<crate::provision::SourcePasswordKnowledge, String>,
+    )>,
     pub provision_plan: Option<Result<crate::tui::state::ProvisionPrepared, String>>,
     pub provision_backup: Option<(OperationId, Result<(), String>)>,
     pub provision_progress: Option<(OperationId, String)>,
@@ -288,6 +297,7 @@ impl TaskUpdates {
             || self.backup_prune_plan.is_some()
             || self.backup_prune_execute.is_some()
             || self.provision_key_probe.is_some()
+            || self.provision_key_verify.is_some()
             || self.provision_plan.is_some()
             || self.provision_backup.is_some()
             || self.provision_progress.is_some()
@@ -579,6 +589,15 @@ impl TaskHub {
                 WorkerResult::ProvisionKeyProbe { generation, result } => {
                     if self.provision_key_probe_slot.finish(generation) {
                         updates.provision_key_probe = Some(result);
+                    }
+                }
+                WorkerResult::ProvisionKeyVerify {
+                    generation,
+                    domain,
+                    result,
+                } => {
+                    if self.provision_key_probe_slot.finish(generation) {
+                        updates.provision_key_verify = Some((domain, result));
                     }
                 }
                 WorkerResult::ProvisionPlan { generation, result } => {

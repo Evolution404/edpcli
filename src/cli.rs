@@ -254,9 +254,9 @@ fn provision_resolve_disk(
 }
 
 fn target_plan_summary_lines(plan: &crate::provision::TargetProvisionPlan) -> Vec<String> {
-    use crate::provision::PartitionAction;
+    use crate::provision::{RegionDisposition, SourcePasswordKnowledge, TargetPasswordPolicy};
 
-    let mut lines = Vec::with_capacity(plan.partitions.len() + 1);
+    let mut lines = Vec::with_capacity(plan.partitions.len() * 2 + 1);
     for partition in &plan.partitions {
         let geometry = &partition.geometry;
         let end_lba = geometry
@@ -264,23 +264,47 @@ fn target_plan_summary_lines(plan: &crate::provision::TargetProvisionPlan) -> Ve
             .checked_add(geometry.sector_count)
             .and_then(|end| end.checked_sub(1))
             .unwrap_or(u64::MAX);
-        let fate = match partition.action {
-            PartitionAction::PreserveExact => {
-                "PreserveExact · 复用原 FileKey/LBA7/LBA12 key material · 不写数据区 · 原数据保留"
+        let fate = match partition.disposition {
+            RegionDisposition::PreserveOpaque => {
+                "PreserveOpaque · 原 key material 逐字段透传 · data extent 0 写入"
             }
-            PartitionAction::Rebuild => {
-                "Rebuild · 生成目标 key material/按选项重建文件系统 · 原数据不可原样保留"
+            RegionDisposition::PreserveVerified => {
+                "PreserveVerified · K_old/wrapper 保持 · data extent 0 写入"
             }
+            RegionDisposition::RewrapVerified => {
+                "RewrapVerified · K_old 保持 · 仅重包 wrapper · data extent 0 写入"
+            }
+            RegionDisposition::Migrate => "Migrate · 当前版本 unsupported",
+            RegionDisposition::Rebuild => {
+                "Rebuild · K_new + 完整 filesystem initialization · 原数据不可原样保留"
+            }
+            RegionDisposition::Drop => "Drop · 来源区域不进入目标",
+        };
+        let password = match partition.source_password_knowledge {
+            Some(SourcePasswordKnowledge::DefaultVerified) => "source=DefaultVerified",
+            Some(SourcePasswordKnowledge::UserVerified) => "source=UserVerified",
+            Some(SourcePasswordKnowledge::Unknown) => "source=Unknown",
+            None => "source=no-key-domain",
+        };
+        let target_policy = match partition.target_password_policy {
+            Some(TargetPasswordPolicy::PreserveOpaque) => "target=disabled(opaque)",
+            Some(TargetPasswordPolicy::ReuseVerified) => "target=reuse-verified",
+            Some(TargetPasswordPolicy::ReplaceVerified) => "target=replace/rewrap",
+            Some(TargetPasswordPolicy::InitializeNew) => "target=initialize-new",
+            None => "target=no-key-domain",
         };
         lines.push(format!(
-            "  {} type{} start={} end={} sectors={} · {} · {}",
+            "  {} type{} start={} end={} sectors={} · {}",
             geometry.role.label(),
             geometry.partition_type.raw(),
             geometry.start_lba,
             end_lba,
             geometry.sector_count,
-            fate,
-            partition.reason
+            fate
+        ));
+        lines.push(format!(
+            "    {} · {} · {}",
+            password, target_policy, partition.reason
         ));
     }
     lines.push(format!(
@@ -765,9 +789,9 @@ mod tests {
                         filesystem: Some(OfficialFilesystemFormat::ExFat),
                     },
                     action: PartitionAction::PreserveExact,
-                    disposition: RegionDisposition::PreserveVerified,
-                    source_password_knowledge: Some(SourcePasswordKnowledge::UserVerified),
-                    target_password_policy: Some(TargetPasswordPolicy::ReuseVerified),
+                    disposition: RegionDisposition::PreserveOpaque,
+                    source_password_knowledge: Some(SourcePasswordKnowledge::Unknown),
+                    target_password_policy: Some(TargetPasswordPolicy::PreserveOpaque),
                     reason: "exact source match".into(),
                     preserved_record: None,
                 },
@@ -785,9 +809,12 @@ mod tests {
         assert!(lines
             .iter()
             .any(|line| line.contains("start=1000 end=1199 sectors=200")));
-        assert!(lines.iter().any(|line| line.contains("PreserveExact")
-            && line.contains("复用原 FileKey/LBA7/LBA12 key material")
-            && line.contains("不写数据区")));
+        assert!(lines.iter().any(|line| line.contains("PreserveOpaque")
+            && line.contains("原 key material")
+            && line.contains("0 写入")));
+        assert!(lines.iter().any(
+            |line| line.contains("source=Unknown") && line.contains("target=disabled(opaque)")
+        ));
         assert!(lines
             .iter()
             .any(|line| line.contains("unallocated=737 sectors")));

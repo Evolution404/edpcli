@@ -474,9 +474,7 @@ pub fn prepare_target_provision(
                     .map_err(|message| err(EXIT_TARGET, message))?;
             }
             RegionDisposition::Rebuild => {
-                if part.geometry.physically_encrypted
-                    && KeyDomainRole::from_partition_role(part.geometry.role).is_some()
-                {
+                if KeyDomainRole::from_partition_role(part.geometry.role).is_some() {
                     let password = request
                         .key_domains
                         .target_password(part.geometry.role)
@@ -599,17 +597,75 @@ pub fn probe_provision_key_domains_on_disk(
             )
         })?;
     let source_kind = DiskProvisionKind::from_metadata(&source_metadata, &device_id);
-    let domain_status = |domain: KeyDomainRole| {
-        parsed.as_ref().and_then(|source| {
-            source
-                .record_for_domain(domain)
-                .map(|_| source.source_password_knowledge(domain, None))
-        })
+    let domain_probe = |domain: KeyDomainRole| {
+        parsed
+            .as_ref()
+            .and_then(|source| {
+                source
+                    .record_for_domain(domain)
+                    .map(|record| (source, record))
+            })
+            .map(|(source, record)| {
+                (
+                    Some(source.source_password_knowledge(domain, None)),
+                    record.lba12.need_encrypt != 0
+                        && FileKeyWrapMode::from_raw(record.lba12.encrypt_mode)
+                            == Some(FileKeyWrapMode::Sm4),
+                )
+            })
+            .unwrap_or((None, false))
     };
+    let (share, share_opaque_profile) = domain_probe(KeyDomainRole::Share);
+    let (encrypt, encrypt_opaque_profile) = domain_probe(KeyDomainRole::Encrypt);
     Ok(ProvisionKeyProbe {
         source_kind,
-        share: domain_status(KeyDomainRole::Share),
-        encrypt: domain_status(KeyDomainRole::Encrypt),
+        share,
+        share_opaque_profile,
+        encrypt,
+        encrypt_opaque_profile,
+    })
+}
+
+pub fn verify_provision_source_password_on_disk(
+    runner: &dyn CmdRunner,
+    disk: u32,
+    domain: KeyDomainRole,
+    password: &[u8],
+) -> EdpCliResult<SourcePasswordKnowledge> {
+    if password.is_empty() {
+        return Err(err(EXIT_TARGET, "错误: 来源密码不能为空"));
+    }
+    let target_session = TargetSession::<ReadOnly>::open_usb(runner, disk)?;
+    let total_sectors = target_session
+        .total_sectors()
+        .ok_or_else(|| err(EXIT_TARGET, "错误: 无法取得目标盘总扇区数"))?;
+    let probe = target_session
+        .hardware_probe()
+        .ok_or_else(|| err(EXIT_TARGET, "错误: 无法取得目标盘 USB/SCSI 硬件身份"))?;
+    let target = TargetIdentity::from_probe(&probe, total_sectors)
+        .map_err(|message| err(EXIT_TARGET, format!("错误: 目标硬件身份不完整: {message}")))?;
+    let mut dev = open_readonly_usb_disk(runner, disk)?;
+    let source_metadata = read_image(&mut dev)?;
+    let image = ProvisionImage::from_bytes(source_metadata)
+        .map_err(|message| err(EXIT_TARGET, format!("错误: 来源元数据长度无效: {message}")))?;
+    let source = parse_existing_provision(&image, target.device_id(), total_sectors)
+        .map_err(|message| {
+            err(
+                EXIT_TARGET,
+                format!("错误: 来源盘注册结构无法解析: {message}"),
+            )
+        })?
+        .ok_or_else(|| err(EXIT_TARGET, "错误: 当前来源盘没有可验证的 EDP key domain"))?;
+    let record = source
+        .record_for_domain(domain)
+        .ok_or_else(|| err(EXIT_TARGET, "错误: 当前来源模式不包含该密码域"))?;
+    record
+        .verified_sm4_file_key(password)
+        .map_err(|message| err(EXIT_TARGET, format!("错误: 来源密码验证失败: {message}")))?;
+    Ok(if password == DEFAULT_KEY_DOMAIN_PASSWORD {
+        SourcePasswordKnowledge::DefaultVerified
+    } else {
+        SourcePasswordKnowledge::UserVerified
     })
 }
 

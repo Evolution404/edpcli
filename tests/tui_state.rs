@@ -318,12 +318,14 @@ fn provision_label_defaults_to_jiangsu_safe6_and_remains_editable() {
         form.share_source_knowledge,
         edpcli::provision::SourcePasswordKnowledge::Unknown
     );
+    assert!(!form.share_opaque_profile);
     assert_eq!(form.share_target_password, "0000aaaa");
     assert!(form.encrypt_source_password.is_empty());
     assert_eq!(
         form.encrypt_source_knowledge,
         edpcli::provision::SourcePasswordKnowledge::Unknown
     );
+    assert!(!form.encrypt_opaque_profile);
     assert_eq!(form.encrypt_target_password, "0000aaaa");
     assert_eq!(form.volume_label, "启动区");
     assert_eq!(form.boot_sectors, "20417");
@@ -357,7 +359,9 @@ fn provision_key_probe_prefills_only_verified_default_domains() {
     state.provision_finish_key_probe(Ok(edpcli::application::provision::ProvisionKeyProbe {
         source_kind: edpcli::provision::DiskProvisionKind::Mode0,
         share: Some(edpcli::provision::SourcePasswordKnowledge::DefaultVerified),
+        share_opaque_profile: true,
         encrypt: Some(edpcli::provision::SourcePasswordKnowledge::Unknown),
+        encrypt_opaque_profile: true,
     }));
 
     assert_eq!(state.provision().form.share_source_password, "0000aaaa");
@@ -385,7 +389,9 @@ fn provision_key_probe_never_overwrites_user_entered_source_password() {
     state.provision_finish_key_probe(Ok(edpcli::application::provision::ProvisionKeyProbe {
         source_kind: edpcli::provision::DiskProvisionKind::Mode0,
         share: Some(edpcli::provision::SourcePasswordKnowledge::DefaultVerified),
+        share_opaque_profile: true,
         encrypt: None,
+        encrypt_opaque_profile: false,
     }));
 
     assert_eq!(
@@ -422,6 +428,97 @@ fn editing_source_password_invalidates_cached_verification_state() {
         state.provision().form.share_source_knowledge,
         edpcli::provision::SourcePasswordKnowledge::Unknown
     );
+}
+
+#[test]
+fn mode0_to_mode1_unknown_encrypt_disables_only_encrypt_target_password() {
+    use edpcli::provision::{DiskProvisionKind, SourcePasswordKnowledge};
+    use edpcli::sectors::EdpfPartition;
+
+    let mut row = device(64_000_000_000);
+    row.provision_kind = DiskProvisionKind::Mode0;
+    row.partitions = Some(vec![
+        EdpfPartition {
+            ptype: 1,
+            active: 1,
+            enc: 0,
+            start_lba: 63,
+            size_bytes: 20_417 * 512,
+        },
+        EdpfPartition {
+            ptype: 2,
+            active: 1,
+            enc: 1,
+            start_lba: 20_480,
+            size_bytes: 4_000_000 * 512,
+        },
+        EdpfPartition {
+            ptype: 4,
+            active: 1,
+            enc: 1,
+            start_lba: 4_020_480,
+            size_bytes: 2_097_153 * 512,
+        },
+    ]);
+
+    let mut state = AppState::new();
+    state.replace_devices(vec![row]);
+    state.navigate(NavCommand::WorkspaceProvision, 20);
+    state.provision_select_disk();
+    state.provision_skip_backup();
+    state.navigate(NavCommand::Down, 20);
+    assert_eq!(state.provision_begin_selected(), ProvisionKind::Mode1);
+    state.provision_finish_key_probe(Ok(edpcli::application::provision::ProvisionKeyProbe {
+        source_kind: DiskProvisionKind::Mode0,
+        share: Some(SourcePasswordKnowledge::Unknown),
+        share_opaque_profile: true,
+        encrypt: Some(SourcePasswordKnowledge::Unknown),
+        encrypt_opaque_profile: true,
+    }));
+
+    let fields = state.provision_visible_fields();
+    let share_target = fields
+        .iter()
+        .position(|(label, _, _)| label.contains("二合一区目标密码"))
+        .unwrap();
+    let encrypt_target = fields
+        .iter()
+        .position(|(label, _, _)| label == "保密区目标密码")
+        .unwrap();
+
+    assert_eq!(fields[share_target].1, "0000aaaa");
+    assert!(fields[share_target].2);
+    assert_eq!(fields[encrypt_target].1, "— PreserveOpaque 禁用");
+    assert!(!fields[encrypt_target].2);
+
+    state.provision_mut().field_selected = encrypt_target;
+    assert!(!state.provision_selected_field_is_editable());
+    state.provision_mut().field_selected = share_target;
+    assert!(state.provision_selected_field_is_editable());
+}
+
+#[test]
+fn source_password_verify_request_is_scoped_to_selected_domain() {
+    let mut state = AppState::new();
+    state.replace_devices(vec![device(64_000_000_000)]);
+    state.navigate(NavCommand::WorkspaceProvision, 20);
+    state.provision_select_disk();
+    state.provision_skip_backup();
+    state.provision_begin_selected();
+    state.provision_mut().form.encrypt_source_password = "EncryptOld1!".into();
+
+    let index = state
+        .provision_visible_fields()
+        .iter()
+        .position(|(label, _, _)| label.contains("保密区来源密码"))
+        .unwrap();
+    state.provision_mut().field_selected = index;
+    let request = state
+        .provision_source_password_verify_request()
+        .unwrap()
+        .unwrap();
+    assert_eq!(request.0, edpcli::provision::KeyDomainRole::Encrypt);
+    assert_eq!(request.1, "EncryptOld1!");
 }
 
 #[test]

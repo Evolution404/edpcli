@@ -558,6 +558,33 @@ fn open_advanced_inspect_selection(state: &mut AppState, tasks: &mut TaskHub) {
     }
 }
 
+fn start_provision_source_password_verify(state: &mut AppState, tasks: &mut TaskHub) {
+    let Some(disk) = state.selected_device_disk() else {
+        state.provision_mut().message = Some("目标 USB 已不存在，请返回设备页重新选择。".into());
+        return;
+    };
+    match state.provision_source_password_verify_request() {
+        Ok(Some((domain, password))) => {
+            state.provision_mut().message = Some(match domain {
+                crate::provision::KeyDomainRole::Share => "正在只读验证交换域来源密码…".into(),
+                crate::provision::KeyDomainRole::Encrypt => "正在只读验证保密域来源密码…".into(),
+            });
+            if let Err(message) =
+                tasks.request_provision_source_password_verify(disk, domain, password)
+            {
+                state.provision_finish_source_password_verify(domain, Err(message.to_string()));
+            }
+        }
+        Ok(None) => {
+            state.provision_mut().message =
+                Some("当前字段不是来源密码；v 仅验证来源密码域。".into());
+        }
+        Err(message) => {
+            state.provision_mut().message = Some(message);
+        }
+    }
+}
+
 fn start_provision_plan(state: &mut AppState, tasks: &mut TaskHub) {
     let Some(disk) = state.selected_device_disk() else {
         state.provision_mut().message = Some("目标 USB 已不存在，请返回设备页重新选择。".into());
@@ -704,6 +731,9 @@ fn run_loop(resume: Option<state::WriteIntent>) -> io::Result<LoopExit> {
             }
             if let Some(result) = updates.provision_key_probe {
                 state.provision_finish_key_probe(result);
+            }
+            if let Some((domain, result)) = updates.provision_key_verify {
+                state.provision_finish_source_password_verify(domain, result);
             }
             if let Some(result) = updates.provision_plan {
                 state.provision_finish_plan(result);
@@ -1380,6 +1410,12 @@ fn run_loop(resume: Option<state::WriteIntent>) -> io::Result<LoopExit> {
                                         == crate::tui::pane::PaneId::ProvisionParameters =>
                                 {
                                     state.provision_plain_delete_selected_partition();
+                                }
+                                TuiAction::ViewOrVerify
+                                    if state.provision_focused_pane()
+                                        == crate::tui::pane::PaneId::ProvisionParameters =>
+                                {
+                                    start_provision_source_password_verify(&mut state, &mut tasks);
                                 }
                                 TuiAction::Activate => {
                                     start_provision_plan(&mut state, &mut tasks);
