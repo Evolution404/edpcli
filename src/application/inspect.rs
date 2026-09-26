@@ -264,17 +264,21 @@ fn materialize_protocol_fields(
         .iter()
         .map(|field| {
             if field.end < field.start || field.end > raw.len() || field.end > decoded.len() {
-                return Err(format!(
+                return Err(InspectError::decode(format!(
                     "LBA{lba} 字段 {} range +0x{:X}..+0x{:X} 越界",
                     field.label, field.start, field.end
-                ));
+                )));
             }
             let start = base
                 .checked_add(field.start as u64)
-                .ok_or_else(|| format!("LBA{lba} 字段 {} 绝对起点溢出", field.label))?;
+                .ok_or_else(|| {
+                    InspectError::decode(format!("LBA{lba} 字段 {} 绝对起点溢出", field.label))
+                })?;
             let end_exclusive = base
                 .checked_add(field.end as u64)
-                .ok_or_else(|| format!("LBA{lba} 字段 {} 绝对终点溢出", field.label))?;
+                .ok_or_else(|| {
+                    InspectError::decode(format!("LBA{lba} 字段 {} 绝对终点溢出", field.label))
+                })?;
             Ok(InspectField {
                 range: AbsoluteByteRange {
                     start,
@@ -364,16 +368,16 @@ pub fn parse_advanced_lbas(spec: &str, count: &str) -> Result<Vec<u64>, InspectE
                 .and_then(|value| value.checked_add(1))
                 .ok_or_else(|| InspectError::invalid(format!("LBA 范围溢出: {token}")))?;
             if span > MAX_ADVANCED_INSPECT_SECTORS as u64 {
-                return Err(format!(
+                return Err(InspectError::invalid(format!(
                     "单个 LBA 范围最多包含 {MAX_ADVANCED_INSPECT_SECTORS} 个扇区"
-                ));
+                )));
             }
             for lba in start..=end {
                 if seen.insert(lba) {
                     if out.len() >= MAX_ADVANCED_INSPECT_SECTORS {
-                        return Err(format!(
+                        return Err(InspectError::invalid(format!(
                             "单次 Inspect 最多读取 {MAX_ADVANCED_INSPECT_SECTORS} 个扇区"
-                        ));
+                        )));
                     }
                     out.push(lba);
                 }
@@ -382,9 +386,9 @@ pub fn parse_advanced_lbas(spec: &str, count: &str) -> Result<Vec<u64>, InspectE
             let lba = parse_u64_decimal(token, "LBA")?;
             if seen.insert(lba) {
                 if out.len() >= MAX_ADVANCED_INSPECT_SECTORS {
-                    return Err(format!(
+                    return Err(InspectError::invalid(format!(
                         "单次 Inspect 最多读取 {MAX_ADVANCED_INSPECT_SECTORS} 个扇区"
-                    ));
+                    )));
                 }
                 out.push(lba);
             }
@@ -635,9 +639,9 @@ fn run_advanced_source<R: SectorReader + ?Sized>(
         request.lbas.clone()
     };
     if lbas.len() > MAX_ADVANCED_INSPECT_SECTORS {
-        return Err(format!(
+        return Err(InspectError::invalid(format!(
             "单次 Inspect 最多读取 {MAX_ADVANCED_INSPECT_SECTORS} 个扇区"
-        ));
+        )));
     }
 
     let mut items = Vec::with_capacity(lbas.len());
