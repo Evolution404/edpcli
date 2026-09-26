@@ -242,24 +242,32 @@ impl RegionMappingPlanner {
                     }),
                 }
             } else {
-                let migration = source.iter().copied().enumerate().find(|(index, source_region)| {
-                    !used_source[*index] && migration_candidate(source_region.role, target_region.role)
-                });
-                if let Some((source_index, _)) = migration {
-                    used_source[source_index] = true;
-                    mappings.push(RegionMapping {
-                        source_index: Some(source_index),
-                        target_index: Some(target_index),
-                        kind: RegionMappingKind::MigrateUnsupported,
-                        failure: Some(CompatibilityFailure::SemanticRole),
-                    });
-                } else {
+                let migrations = source
+                    .iter()
+                    .copied()
+                    .enumerate()
+                    .filter(|(_, source_region)| {
+                        migration_candidate(source_region.role, target_region.role)
+                    })
+                    .map(|(source_index, _)| source_index)
+                    .collect::<Vec<_>>();
+                if migrations.is_empty() {
                     mappings.push(RegionMapping {
                         source_index: None,
                         target_index: Some(target_index),
                         kind: RegionMappingKind::Rebuild,
                         failure: None,
                     });
+                } else {
+                    for source_index in migrations {
+                        used_source[source_index] = true;
+                        mappings.push(RegionMapping {
+                            source_index: Some(source_index),
+                            target_index: Some(target_index),
+                            kind: RegionMappingKind::MigrateUnsupported,
+                            failure: Some(CompatibilityFailure::SemanticRole),
+                        });
+                    }
                 }
             }
         }
