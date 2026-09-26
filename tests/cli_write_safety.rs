@@ -7,6 +7,7 @@
 
 use crate::common;
 
+use std::collections::HashMap;
 use std::fs;
 use std::process::Command;
 
@@ -676,6 +677,160 @@ fn restore_refuses_if_disk_identity_changes_after_reopen() {
         e.msg
     );
     assert_eq!(dev.writes, 0, "身份变化必须在第一笔写入前拦截");
+}
+
+struct RestorableSparseDev {
+    metadata: Vec<u8>,
+    sectors: HashMap<u32, Vec<u8>>,
+    writes: usize,
+}
+
+impl SectorDev for RestorableSparseDev {
+    fn read_sector(&mut self, lba: u32) -> std::io::Result<Vec<u8>> {
+        if lba < 13 {
+            let start = lba as usize * SECTOR;
+            return Ok(self.metadata[start..start + SECTOR].to_vec());
+        }
+        self.sectors.get(&lba).cloned().ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::UnexpectedEof,
+                format!("test sparse disk does not materialize LBA{lba}"),
+            )
+        })
+    }
+
+    fn write_sector(&mut self, lba: u32, data: &[u8]) -> std::io::Result<()> {
+        if data.len() != SECTOR {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "sector size mismatch",
+            ));
+        }
+        if lba < 13 {
+            let start = lba as usize * SECTOR;
+            self.metadata[start..start + SECTOR].copy_from_slice(data);
+        } else {
+            self.sectors.insert(lba, data.to_vec());
+        }
+        self.writes += 1;
+        Ok(())
+    }
+
+    fn reopen_rdwr(&mut self, _wait: std::time::Duration) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+#[test]
+fn restore_deep_edpb_restores_lba0_12_and_validated_lce_together() {
+    use edpcli::edpb::{
+        ArtifactCompleteness, ArtifactInput, Extent, MetadataCapture, Region, RestorePolicy,
+        SemanticStatus,
+    };
+
+    let Some(original) = load_disk_image("netac") else {
+        eprintln!("跳过: 真实备份不可用");
+        return;
+    };
+    let device_id = "disk&ven_netac&prod_onlydisk";
+    let total_sectors = 122_880_000u64;
+    let geometry = edpcli::backup_metadata::parse_lba7_compatibility_geometry(
+        &original,
+        device_id,
+        total_sectors,
+    )
+    .unwrap();
+
+    let mut lce_backup = Vec::with_capacity(geometry.sector_count as usize * SECTOR);
+    let mut current_lce = HashMap::new();
+    for offset in 0..geometry.sector_count {
+        let mut sector = vec![0u8; SECTOR];
+        for (index, byte) in sector.iter_mut().enumerate() {
+            *byte = ((offset as usize * 31 + index * 7 + 0x42) % 251) as u8;
+        }
+        lce_backup.extend_from_slice(&sector);
+        let lba = u32::try_from(geometry.start_lba + offset).unwrap();
+        let mut corrupt = sector;
+        corrupt[17] ^= 0x5a;
+        current_lce.insert(lba, corrupt);
+    }
+
+    let tmp = TmpDir::new("restore_lce");
+    let backup = tmp.0.join(
+        "disk6_122880000_vid0dd8_pid2005_disk&ven_netac&prod_onlydisk_onlyid1402259934_20260926_160000.edpb",
+    );
+    let capture = MetadataCapture {
+        core: CoreCapture {
+            snapshot_id: "restore-lce".into(),
+            created_epoch: 1_790_409_600,
+            disk_number: Some(6),
+            vid: "0dd8".into(),
+            pid: "2005".into(),
+            device_id: device_id.into(),
+            onlyid: edpcli::diskio::lba4_label_id_from(&original[4 * SECTOR..5 * SECTOR]),
+            total_sectors: Some(total_sectors),
+            logical_sector_size: SECTOR as u32,
+            edpcli_version: env!("CARGO_PKG_VERSION").into(),
+            device_state: "encrypted".into(),
+            lba0_12: &original,
+        },
+        regions: vec![Region {
+            id: "region.lba7_compatibility_extent".into(),
+            role: "lba7_legacy_partition_compatibility_extent".into(),
+            start_lba: Some(geometry.start_lba),
+            sector_count: Some(geometry.sector_count),
+            semantic_status: SemanticStatus::Identified,
+        }],
+        extents: vec![Extent {
+            id: "extent.lba7_compatibility".into(),
+            region_id: "region.lba7_compatibility_extent".into(),
+            start_lba: geometry.start_lba,
+            sector_count: geometry.sector_count,
+            purpose: "lba7_compatibility_extent_ciphertext".into(),
+        }],
+        artifacts: vec![ArtifactInput {
+            id: "raw.lba7_compatibility".into(),
+            kind: "raw_sectors".into(),
+            media_type: "application/octet-stream".into(),
+            source_extent_ids: vec!["extent.lba7_compatibility".into()],
+            derivation: None,
+            restore_policy: RestorePolicy::Restorable,
+            completeness: ArtifactCompleteness::Complete,
+            data: lce_backup.clone(),
+        }],
+        notes: vec![],
+    };
+    edpcli::edpb::write_metadata_backup(&backup, &capture).unwrap();
+
+    let runner = netac_runner(6);
+    let mut prompt = ScriptPrompter::yes();
+    let mut dev = RestorableSparseDev {
+        metadata: original.clone(),
+        sectors: current_lce,
+        writes: 0,
+    };
+    let code = restore_flow(
+        Some(backup.to_string_lossy().into_owned()),
+        6,
+        &mut ctx(&runner, &mut prompt, &tmp.0),
+        &mut dev,
+    )
+    .unwrap();
+    assert_eq!(code, EXIT_OK);
+    assert_eq!(dev.metadata, original);
+    assert_eq!(
+        dev.writes,
+        13 + geometry.sector_count as usize,
+        "one transaction must restore all 13 protocol sectors and all LCE sectors"
+    );
+    for offset in 0..geometry.sector_count {
+        let lba = u32::try_from(geometry.start_lba + offset).unwrap();
+        let start = offset as usize * SECTOR;
+        assert_eq!(
+            dev.sectors.get(&lba).unwrap(),
+            &lce_backup[start..start + SECTOR]
+        );
+    }
 }
 
 #[test]

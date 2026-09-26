@@ -165,13 +165,52 @@ impl AppState {
                         target_plan.unallocated_sectors
                     ));
                     for part in &target_plan.partitions {
-                        let action = match part.action {
-                            crate::provision::PartitionAction::PreserveExact => {
-                                "原数据可保留 · 复用原 FileKey · 不写数据区"
+                        let disposition = match part.disposition {
+                            crate::provision::RegionDisposition::PreserveOpaque => {
+                                "PreserveOpaque · 原 key material 原样透传 · data extent 0 写入"
                             }
-                            crate::provision::PartitionAction::Rebuild => {
-                                "将重建 · 原数据不可原样保留"
+                            crate::provision::RegionDisposition::PreserveVerified => {
+                                "PreserveVerified · K_old 保持 · wrapper 保持 · data extent 0 写入"
                             }
+                            crate::provision::RegionDisposition::RewrapVerified => {
+                                "RewrapVerified · K_old 保持 · 仅重包 wrapper · data extent 0 写入"
+                            }
+                            crate::provision::RegionDisposition::Migrate => {
+                                "Migrate · 当前阶段 unsupported，禁止静默降级"
+                            }
+                            crate::provision::RegionDisposition::Rebuild => {
+                                "Rebuild · K_new · 必须完整初始化文件系统"
+                            }
+                            crate::provision::RegionDisposition::Drop => {
+                                "Drop · 来源区域不进入目标"
+                            }
+                        };
+                        let password_knowledge = match part.source_password_knowledge {
+                            Some(crate::provision::SourcePasswordKnowledge::DefaultVerified) => {
+                                "默认密码已验证"
+                            }
+                            Some(crate::provision::SourcePasswordKnowledge::UserVerified) => {
+                                "用户旧密码已验证"
+                            }
+                            Some(crate::provision::SourcePasswordKnowledge::Unknown) => {
+                                "来源密码 Unknown"
+                            }
+                            None => "无用户密码域",
+                        };
+                        let target_policy = match part.target_password_policy {
+                            Some(crate::provision::TargetPasswordPolicy::PreserveOpaque) => {
+                                "目标密码禁用（Opaque）"
+                            }
+                            Some(crate::provision::TargetPasswordPolicy::ReuseVerified) => {
+                                "目标密码沿用已验证值"
+                            }
+                            Some(crate::provision::TargetPasswordPolicy::ReplaceVerified) => {
+                                "目标密码变更，仅允许 Rewrap"
+                            }
+                            Some(crate::provision::TargetPasswordPolicy::InitializeNew) => {
+                                "目标密码用于新 key material"
+                            }
+                            None => "无目标密码策略",
                         };
                         lines.push(format!(
                             "{} {} ({} sectors): {}",
@@ -187,7 +226,11 @@ impl AppState {
                                 })
                                 .unwrap_or_else(|| "[无效范围]".into()),
                             part.geometry.sector_count,
-                            action
+                            disposition
+                        ));
+                        lines.push(format!(
+                            "  密码状态: {} · {}",
+                            password_knowledge, target_policy
                         ));
                         lines.push(format!("  {}", part.reason));
                     }

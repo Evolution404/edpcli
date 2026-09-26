@@ -1,4 +1,5 @@
 use super::*;
+use crate::provision::DiskProvisionKind;
 
 fn confirmed_filesystem(
     boot: &[u8],
@@ -30,12 +31,30 @@ fn confirmed_filesystem(
     None
 }
 
+fn resolved_source_password<'a>(
+    source: &ParsedExistingProvision,
+    key_domains: &'a KeyDomainSecrets,
+    role: PartitionRole,
+) -> (SourcePasswordKnowledge, Option<&'a [u8]>) {
+    let Some(domain) = KeyDomainRole::from_partition_role(role) else {
+        return (SourcePasswordKnowledge::Unknown, None);
+    };
+    let user_password = key_domains.source_password(role);
+    let knowledge = source.source_password_knowledge(domain, user_password);
+    let password = match knowledge {
+        SourcePasswordKnowledge::DefaultVerified => Some(DEFAULT_KEY_DOMAIN_PASSWORD),
+        SourcePasswordKnowledge::UserVerified => user_password,
+        SourcePasswordKnowledge::Unknown => None,
+    };
+    (knowledge, password)
+}
+
 fn inspect_source_profile(
     dev: &mut dyn SectorDev,
     source_metadata: &[u8],
     device_id: &str,
     total_sectors: u64,
-    password: &[u8],
+    key_domains: &KeyDomainSecrets,
 ) -> EdpCliResult<Option<ParsedExistingProvision>> {
     let image = ProvisionImage::from_bytes(source_metadata.to_vec())
         .map_err(|message| err(EXIT_TARGET, format!("错误: 来源元数据长度无效: {message}")))?;
@@ -62,6 +81,10 @@ fn inspect_source_profile(
                 continue;
             }
             let plaintext = if part.physically_encrypted {
+                let (_, Some(password)) = resolved_source_password(source, key_domains, part.role)
+                else {
+                    continue;
+                };
                 let Ok(key) = source.records[index].verified_sm4_file_key(password) else {
                     continue;
                 };
@@ -148,7 +171,7 @@ pub fn prepare_target_provision(
         &source_metadata,
         &device_id,
         total_sectors,
-        request.password.as_bytes(),
+        &request.key_domains,
     )?;
     let source_identity = if source.is_some() {
         let base = crate::protocol::semantic::SemanticContext {
@@ -251,7 +274,7 @@ pub fn prepare_target_provision(
         selected_mode,
         &targets,
         compatibility.start_lba,
-        request.password.as_bytes(),
+        &request.key_domains,
     )
     .map_err(|message| {
         err(
@@ -260,12 +283,36 @@ pub fn prepare_target_provision(
         )
     })?;
     for part in &mut target_plan.partitions {
-        if request.format.choice(part.geometry.role).0
-            && part.action == PartitionAction::PreserveExact
-        {
+        if request.format.choice(part.geometry.role).0 && part.disposition.preserves_extent() {
             part.action = PartitionAction::Rebuild;
-            part.reason = "用户选择重新格式化；原数据不能原样保留".into();
+            part.disposition = RegionDisposition::Rebuild;
+            part.target_password_policy = KeyDomainRole::from_partition_role(part.geometry.role)
+                .map(|_| TargetPasswordPolicy::InitializeNew);
+            part.reason = "用户选择重新格式化；Preserve family 已显式转为 Rebuild".into();
             part.preserved_record = None;
+        }
+    }
+    for part in &target_plan.partitions {
+        if part.disposition == RegionDisposition::Migrate {
+            return Err(err(
+                EXIT_TARGET,
+                format!(
+                    "错误: {}需要数据迁移；K6 尚未实现，禁止静默降级",
+                    part.geometry.role.label()
+                ),
+            ));
+        }
+        if part.disposition == RegionDisposition::Rebuild
+            && part.geometry.role != PartitionRole::CompatibilityReserve
+            && !request.format.choice(part.geometry.role).0
+        {
+            return Err(err(
+                EXIT_TARGET,
+                format!(
+                    "错误: {}为 Rebuild，必须显式启用完整文件系统初始化；拒绝 K_new + old ciphertext",
+                    part.geometry.role.label()
+                ),
+            ));
         }
     }
     let source_onlyid = source.as_ref().and_then(|_| {
@@ -342,9 +389,9 @@ pub fn prepare_target_provision(
         selected_mode,
         sizes(request, selected_mode)?,
         compatibility,
-        wrap_legacy_lba7_file_key(request.password.as_bytes(), random_array::<8>()?),
+        wrap_legacy_lba7_file_key(DEFAULT_KEY_DOMAIN_PASSWORD, random_array::<8>()?),
         wrap_file_key(
-            request.password.as_bytes(),
+            DEFAULT_KEY_DOMAIN_PASSWORD,
             random_array::<16>()?,
             FileKeyWrapMode::Sm4,
         ),
@@ -355,41 +402,119 @@ pub fn prepare_target_provision(
     .map_err(|message| err(EXIT_TARGET, message))?;
     let mut file_keys = Vec::with_capacity(target_plan.partitions.len());
     for (index, part) in target_plan.partitions.iter().enumerate() {
-        if let Some(record) = part.preserved_record {
-            let key = if record.lba12.need_encrypt != 0 {
-                record
-                    .verified_sm4_file_key(request.password.as_bytes())
-                    .map_err(|message| {
+        match part.disposition {
+            RegionDisposition::PreserveOpaque | RegionDisposition::PreserveVerified => {
+                let record = part.preserved_record.ok_or_else(|| {
+                    err(
+                        EXIT_TARGET,
+                        format!(
+                            "错误: {}保留计划缺少来源 key record",
+                            part.geometry.role.label()
+                        ),
+                    )
+                })?;
+                file_keys.push([0; 16]);
+                if record.lba12.need_encrypt != 0 {
+                    plan = plan
+                        .with_partition_key_material(
+                            index,
+                            record.lba7_key_material(),
+                            record
+                                .lba12_key_material()
+                                .map_err(|message| err(EXIT_TARGET, message))?,
+                        )
+                        .map_err(|message| err(EXIT_TARGET, message))?;
+                }
+            }
+            RegionDisposition::RewrapVerified => {
+                let record = part.preserved_record.ok_or_else(|| {
+                    err(
+                        EXIT_TARGET,
+                        format!(
+                            "错误: {}Rewrap 计划缺少来源 key record",
+                            part.geometry.role.label()
+                        ),
+                    )
+                })?;
+                let source = source
+                    .as_ref()
+                    .ok_or_else(|| err(EXIT_TARGET, "错误: Rewrap 计划缺少来源注册信息"))?;
+                let (_, Some(source_password)) =
+                    resolved_source_password(source, &request.key_domains, part.geometry.role)
+                else {
+                    return Err(err(
+                        EXIT_TARGET,
+                        format!(
+                            "错误: {}Rewrap 需要已验证来源密码",
+                            part.geometry.role.label()
+                        ),
+                    ));
+                };
+                let target_password = request
+                    .key_domains
+                    .target_password(part.geometry.role)
+                    .ok_or_else(|| {
                         err(
                             EXIT_TARGET,
-                            format!("错误: 保留分区密钥无法验证: {message}"),
+                            format!("错误: {}Rewrap 需要目标密码", part.geometry.role.label()),
                         )
-                    })?
-            } else {
-                [0; 16]
-            };
-            file_keys.push(key);
-            if record.lba12.need_encrypt != 0 {
+                    })?;
+                let mut legacy_key =
+                    unwrap_legacy_lba7_file_key(source_password, record.lba7_key_material())
+                        .map_err(|message| err(EXIT_TARGET, message))?;
+                let file_key = record
+                    .verified_sm4_file_key(source_password)
+                    .map_err(|message| err(EXIT_TARGET, message))?;
+                let lba7_material = wrap_legacy_lba7_file_key(target_password, legacy_key);
+                legacy_key.fill(0);
+                let lba12_material = wrap_file_key(target_password, file_key, FileKeyWrapMode::Sm4);
+                file_keys.push(file_key);
                 plan = plan
-                    .with_partition_key_material(
-                        index,
-                        record.lba7_key_material(),
-                        record
-                            .lba12_key_material()
-                            .map_err(|message| err(EXIT_TARGET, message))?,
-                    )
+                    .with_partition_key_material(index, lba7_material, lba12_material)
                     .map_err(|message| err(EXIT_TARGET, message))?;
             }
-        } else {
-            let key = random_array::<16>()?;
-            file_keys.push(key);
-            plan = plan
-                .with_partition_key_material(
-                    index,
-                    wrap_legacy_lba7_file_key(request.password.as_bytes(), random_array::<8>()?),
-                    wrap_file_key(request.password.as_bytes(), key, FileKeyWrapMode::Sm4),
-                )
-                .map_err(|message| err(EXIT_TARGET, message))?;
+            RegionDisposition::Rebuild => {
+                if KeyDomainRole::from_partition_role(part.geometry.role).is_some() {
+                    let password = request
+                        .key_domains
+                        .target_password(part.geometry.role)
+                        .ok_or_else(|| {
+                            err(
+                                EXIT_TARGET,
+                                format!("错误: {}目标密码不能为空", part.geometry.role.label()),
+                            )
+                        })?;
+                    let key = random_array::<16>()?;
+                    file_keys.push(key);
+                    plan = plan
+                        .with_partition_key_material(
+                            index,
+                            wrap_legacy_lba7_file_key(password, random_array::<8>()?),
+                            wrap_file_key(password, key, FileKeyWrapMode::Sm4),
+                        )
+                        .map_err(|message| err(EXIT_TARGET, message))?;
+                } else {
+                    file_keys.push([0; 16]);
+                }
+            }
+            RegionDisposition::Migrate => {
+                return Err(err(
+                    EXIT_TARGET,
+                    format!(
+                        "错误: {}需要 Migrate，但当前版本未实现 K6",
+                        part.geometry.role.label()
+                    ),
+                ));
+            }
+            RegionDisposition::Drop => {
+                return Err(err(
+                    EXIT_TARGET,
+                    format!(
+                        "错误: 目标分区 {}不能使用 Drop disposition",
+                        part.geometry.role.label()
+                    ),
+                ));
+            }
         }
     }
     let format_options = request.format.clone();
@@ -425,6 +550,7 @@ pub fn prepare_target_provision(
                 format!("错误: 无法构造目标协议镜像: {message}"),
             )
         })?;
+    validate_key_disposition_plan(&target_plan, &plan, &format_targets)?;
     validate_target_write_set(&target_plan, &write_image.patch, &format_targets)?;
     Ok(PreparedNewProvision {
         disk,
@@ -442,6 +568,104 @@ pub fn prepare_target_provision(
         expected_serial,
         expected_probe: probe,
         expected_lba3: None,
+    })
+}
+
+pub fn probe_provision_key_domains_on_disk(
+    runner: &dyn CmdRunner,
+    disk: u32,
+) -> EdpCliResult<ProvisionKeyProbe> {
+    let target_session = TargetSession::<ReadOnly>::open_usb(runner, disk)?;
+    let total_sectors = target_session
+        .total_sectors()
+        .ok_or_else(|| err(EXIT_TARGET, "错误: 无法取得目标盘总扇区数"))?;
+    let probe = target_session
+        .hardware_probe()
+        .ok_or_else(|| err(EXIT_TARGET, "错误: 无法取得目标盘 USB/SCSI 硬件身份"))?;
+    let target = TargetIdentity::from_probe(&probe, total_sectors)
+        .map_err(|message| err(EXIT_TARGET, format!("错误: 目标硬件身份不完整: {message}")))?;
+    let device_id = target.device_id().to_string();
+    let mut dev = open_readonly_usb_disk(runner, disk)?;
+    let source_metadata = read_image(&mut dev)?;
+    let image = ProvisionImage::from_bytes(source_metadata.clone())
+        .map_err(|message| err(EXIT_TARGET, format!("错误: 来源元数据长度无效: {message}")))?;
+    let parsed =
+        parse_existing_provision(&image, &device_id, total_sectors).map_err(|message| {
+            err(
+                EXIT_TARGET,
+                format!("错误: 来源盘注册结构无法可靠解析: {message}"),
+            )
+        })?;
+    let source_kind = DiskProvisionKind::from_metadata(&source_metadata, &device_id);
+    let domain_probe = |domain: KeyDomainRole| {
+        parsed
+            .as_ref()
+            .and_then(|source| {
+                source
+                    .record_for_domain(domain)
+                    .map(|record| (source, record))
+            })
+            .map(|(source, record)| {
+                (
+                    Some(source.source_password_knowledge(domain, None)),
+                    record.lba12.need_encrypt != 0
+                        && FileKeyWrapMode::from_raw(record.lba12.encrypt_mode)
+                            == Some(FileKeyWrapMode::Sm4),
+                )
+            })
+            .unwrap_or((None, false))
+    };
+    let (share, share_opaque_profile) = domain_probe(KeyDomainRole::Share);
+    let (encrypt, encrypt_opaque_profile) = domain_probe(KeyDomainRole::Encrypt);
+    Ok(ProvisionKeyProbe {
+        source_kind,
+        share,
+        share_opaque_profile,
+        encrypt,
+        encrypt_opaque_profile,
+    })
+}
+
+pub fn verify_provision_source_password_on_disk(
+    runner: &dyn CmdRunner,
+    disk: u32,
+    domain: KeyDomainRole,
+    password: &[u8],
+) -> EdpCliResult<SourcePasswordKnowledge> {
+    if password.is_empty() {
+        return Err(err(EXIT_TARGET, "错误: 来源密码不能为空"));
+    }
+    let target_session = TargetSession::<ReadOnly>::open_usb(runner, disk)?;
+    let total_sectors = target_session
+        .total_sectors()
+        .ok_or_else(|| err(EXIT_TARGET, "错误: 无法取得目标盘总扇区数"))?;
+    let probe = target_session
+        .hardware_probe()
+        .ok_or_else(|| err(EXIT_TARGET, "错误: 无法取得目标盘 USB/SCSI 硬件身份"))?;
+    let target = TargetIdentity::from_probe(&probe, total_sectors)
+        .map_err(|message| err(EXIT_TARGET, format!("错误: 目标硬件身份不完整: {message}")))?;
+    let mut dev = open_readonly_usb_disk(runner, disk)?;
+    let source_metadata = read_image(&mut dev)?;
+    let image = ProvisionImage::from_bytes(source_metadata)
+        .map_err(|message| err(EXIT_TARGET, format!("错误: 来源元数据长度无效: {message}")))?;
+    let source = parse_existing_provision(&image, target.device_id(), total_sectors)
+        .map_err(|message| {
+            err(
+                EXIT_TARGET,
+                format!("错误: 来源盘注册结构无法解析: {message}"),
+            )
+        })?
+        .ok_or_else(|| err(EXIT_TARGET, "错误: 当前来源盘没有可验证的 EDP key domain"))?;
+    let record = source
+        .record_for_domain(domain)
+        .ok_or_else(|| err(EXIT_TARGET, "错误: 当前来源模式不包含该密码域"))?;
+    record
+        .verified_sm4_file_key(password)
+        .map_err(|message| err(EXIT_TARGET, format!("错误: 来源密码验证失败: {message}")))?;
+    Ok(if password == DEFAULT_KEY_DOMAIN_PASSWORD {
+        SourcePasswordKnowledge::DefaultVerified
+    } else {
+        SourcePasswordKnowledge::UserVerified
     })
 }
 

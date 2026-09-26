@@ -82,6 +82,8 @@ mod editor;
 mod fields;
 #[path = "form.rs"]
 mod form;
+#[path = "key_domains.rs"]
+mod key_domains;
 #[path = "layout.rs"]
 mod layout;
 #[path = "pane.rs"]
@@ -366,27 +368,6 @@ impl AppState {
         self.provision.stage = ProvisionStage::Form;
         self.provision_sync_cursor_to_end();
         kind
-    }
-
-    pub fn provision_set_planning(&mut self) {
-        self.provision.stage = ProvisionStage::Planning;
-        self.input_mode = InputMode::Normal;
-        self.provision.message = Some("正在只读检查目标并生成精确制盘计划…".into());
-    }
-
-    pub fn provision_finish_plan(&mut self, result: Result<ProvisionPrepared, String>) {
-        match result {
-            Ok(prepared) => {
-                self.provision.prepared = Some(prepared);
-                self.provision.stage = ProvisionStage::Review;
-                self.provision.pane_focus = crate::tui::pane::PaneFocus::provision_review();
-                self.provision.message = None;
-            }
-            Err(message) => {
-                self.provision.stage = ProvisionStage::Form;
-                self.provision.message = Some(message);
-            }
-        }
     }
 
     pub fn provision_begin_export(&mut self) {

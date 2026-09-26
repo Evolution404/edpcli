@@ -313,7 +313,20 @@ fn escape_never_requests_program_exit_even_during_critical_operation() {
 fn provision_label_defaults_to_jiangsu_safe6_and_remains_editable() {
     let mut form = ProvisionForm::default();
     assert_eq!(form.label, "江苏电力!SAFE6");
-    assert_eq!(form.password, "0000aaaa");
+    assert!(form.share_source_password.is_empty());
+    assert_eq!(
+        form.share_source_knowledge,
+        edpcli::provision::SourcePasswordKnowledge::Unknown
+    );
+    assert!(!form.share_opaque_profile);
+    assert_eq!(form.share_target_password, "0000aaaa");
+    assert!(form.encrypt_source_password.is_empty());
+    assert_eq!(
+        form.encrypt_source_knowledge,
+        edpcli::provision::SourcePasswordKnowledge::Unknown
+    );
+    assert!(!form.encrypt_opaque_profile);
+    assert_eq!(form.encrypt_target_password, "0000aaaa");
     assert_eq!(form.volume_label, "启动区");
     assert_eq!(form.boot_sectors, "20417");
     assert_eq!(form.encrypt_mib, "1024");
@@ -332,6 +345,180 @@ fn provision_label_defaults_to_jiangsu_safe6_and_remains_editable() {
     form.label_id = "123456789".into();
     assert_eq!(form.label, "自定义标签!SAFE6");
     assert_eq!(form.label_id, "123456789");
+}
+
+#[test]
+fn provision_key_probe_prefills_only_verified_default_domains() {
+    let mut state = AppState::new();
+    state.replace_devices(vec![device(64_000_000_000)]);
+    state.navigate(NavCommand::WorkspaceProvision, 20);
+    state.provision_select_disk();
+    state.provision_skip_backup();
+    state.provision_begin_selected();
+
+    state.provision_finish_key_probe(Ok(edpcli::application::provision::ProvisionKeyProbe {
+        source_kind: edpcli::provision::DiskProvisionKind::Mode0,
+        share: Some(edpcli::provision::SourcePasswordKnowledge::DefaultVerified),
+        share_opaque_profile: true,
+        encrypt: Some(edpcli::provision::SourcePasswordKnowledge::Unknown),
+        encrypt_opaque_profile: true,
+    }));
+
+    assert_eq!(state.provision().form.share_source_password, "0000aaaa");
+    assert_eq!(
+        state.provision().form.share_source_knowledge,
+        edpcli::provision::SourcePasswordKnowledge::DefaultVerified
+    );
+    assert!(state.provision().form.encrypt_source_password.is_empty());
+    assert_eq!(
+        state.provision().form.encrypt_source_knowledge,
+        edpcli::provision::SourcePasswordKnowledge::Unknown
+    );
+}
+
+#[test]
+fn provision_key_probe_never_overwrites_user_entered_source_password() {
+    let mut state = AppState::new();
+    state.replace_devices(vec![device(64_000_000_000)]);
+    state.navigate(NavCommand::WorkspaceProvision, 20);
+    state.provision_select_disk();
+    state.provision_skip_backup();
+    state.provision_begin_selected();
+    state.provision_mut().form.share_source_password = "ManualOldPass!".into();
+
+    state.provision_finish_key_probe(Ok(edpcli::application::provision::ProvisionKeyProbe {
+        source_kind: edpcli::provision::DiskProvisionKind::Mode0,
+        share: Some(edpcli::provision::SourcePasswordKnowledge::DefaultVerified),
+        share_opaque_profile: true,
+        encrypt: None,
+        encrypt_opaque_profile: false,
+    }));
+
+    assert_eq!(
+        state.provision().form.share_source_password,
+        "ManualOldPass!"
+    );
+    assert_eq!(
+        state.provision().form.share_source_knowledge,
+        edpcli::provision::SourcePasswordKnowledge::Unknown
+    );
+}
+
+#[test]
+fn editing_source_password_invalidates_cached_verification_state() {
+    let mut state = AppState::new();
+    state.replace_devices(vec![device(64_000_000_000)]);
+    state.navigate(NavCommand::WorkspaceProvision, 20);
+    state.provision_select_disk();
+    state.provision_skip_backup();
+    state.provision_begin_selected();
+    state.provision_mut().form.share_source_password = "0000aaaa".into();
+    state.provision_mut().form.share_source_knowledge =
+        edpcli::provision::SourcePasswordKnowledge::DefaultVerified;
+
+    let index = state
+        .provision_visible_fields()
+        .iter()
+        .position(|(label, _, _)| label.contains("交换区来源密码"))
+        .unwrap();
+    state.provision_mut().field_selected = index;
+    state.provision_push_char('x');
+
+    assert_eq!(
+        state.provision().form.share_source_knowledge,
+        edpcli::provision::SourcePasswordKnowledge::Unknown
+    );
+}
+
+#[test]
+fn mode0_to_mode1_unknown_encrypt_disables_only_encrypt_target_password() {
+    use edpcli::provision::{DiskProvisionKind, SourcePasswordKnowledge};
+    use edpcli::sectors::EdpfPartition;
+
+    let mut row = device(64_000_000_000);
+    row.provision_kind = DiskProvisionKind::Mode0;
+    row.partitions = Some(vec![
+        EdpfPartition {
+            ptype: 1,
+            active: 1,
+            enc: 0,
+            start_lba: 63,
+            size_bytes: 20_417 * 512,
+        },
+        EdpfPartition {
+            ptype: 2,
+            active: 1,
+            enc: 1,
+            start_lba: 20_480,
+            size_bytes: 4_000_000 * 512,
+        },
+        EdpfPartition {
+            ptype: 4,
+            active: 1,
+            enc: 1,
+            start_lba: 4_020_480,
+            size_bytes: 2_097_153 * 512,
+        },
+    ]);
+
+    let mut state = AppState::new();
+    state.replace_devices(vec![row]);
+    state.navigate(NavCommand::WorkspaceProvision, 20);
+    state.provision_select_disk();
+    state.provision_skip_backup();
+    state.navigate(NavCommand::Down, 20);
+    assert_eq!(state.provision_begin_selected(), ProvisionKind::Mode1);
+    state.provision_finish_key_probe(Ok(edpcli::application::provision::ProvisionKeyProbe {
+        source_kind: DiskProvisionKind::Mode0,
+        share: Some(SourcePasswordKnowledge::Unknown),
+        share_opaque_profile: true,
+        encrypt: Some(SourcePasswordKnowledge::Unknown),
+        encrypt_opaque_profile: true,
+    }));
+
+    let fields = state.provision_visible_fields();
+    let share_target = fields
+        .iter()
+        .position(|(label, _, _)| label.contains("二合一区目标密码"))
+        .unwrap();
+    let encrypt_target = fields
+        .iter()
+        .position(|(label, _, _)| label == "保密区目标密码")
+        .unwrap();
+
+    assert_eq!(fields[share_target].1, "0000aaaa");
+    assert!(fields[share_target].2);
+    assert_eq!(fields[encrypt_target].1, "— PreserveOpaque 禁用");
+    assert!(!fields[encrypt_target].2);
+
+    state.provision_mut().field_selected = encrypt_target;
+    assert!(!state.provision_selected_field_is_editable());
+    state.provision_mut().field_selected = share_target;
+    assert!(state.provision_selected_field_is_editable());
+}
+
+#[test]
+fn source_password_verify_request_is_scoped_to_selected_domain() {
+    let mut state = AppState::new();
+    state.replace_devices(vec![device(64_000_000_000)]);
+    state.navigate(NavCommand::WorkspaceProvision, 20);
+    state.provision_select_disk();
+    state.provision_skip_backup();
+    state.provision_begin_selected();
+    state.provision_mut().form.encrypt_source_password = "EncryptOld1!".into();
+
+    let index = state
+        .provision_visible_fields()
+        .iter()
+        .position(|(label, _, _)| label.contains("保密区来源密码"))
+        .unwrap();
+    state.provision_mut().field_selected = index;
+    let request = state
+        .provision_source_password_verify_request()
+        .unwrap()
+        .unwrap();
+    assert_eq!(request.0, edpcli::provision::KeyDomainRole::Encrypt);
+    assert_eq!(request.1, "EncryptOld1!");
 }
 
 #[test]
@@ -629,9 +816,9 @@ fn provision_capacity_hints_match_each_partition() {
         state.provision_field_hint(index).expect("partition hint")
     };
 
-    let boot = hint_for("启动区");
-    let share = hint_for("交换区");
-    let encrypt = hint_for("保密区");
+    let boot = hint_for("启动区容量");
+    let share = hint_for("交换区容量");
+    let encrypt = hint_for("保密区容量");
     assert_eq!(boot, "Space 切换 MiB / GiB / sector · f 填满");
     assert_eq!(share, boot);
     assert_eq!(encrypt, boot);
@@ -895,7 +1082,13 @@ fn provision_form_sections_are_compact_and_user_facing() {
     }
     assert_eq!(
         sections,
-        vec!["身份信息", "分区布局", "格式化（可选）", "密码策略"]
+        vec![
+            "身份信息",
+            "密码域",
+            "分区布局",
+            "格式化（可选）",
+            "密码策略",
+        ]
     );
 }
 

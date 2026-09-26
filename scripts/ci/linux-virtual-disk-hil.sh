@@ -40,12 +40,13 @@ echo "edpcli-virtual-hil" | sudo tee "$mount_dir/marker.txt" >/dev/null
 sudo sync
 
 export EDPCLI_VIRTUAL_DISK_PATH="$loop"
+export EDPCLI_VIRTUAL_DISK_SECTORS="$(sudo blockdev --getsz "$loop")"
 export CARGO_TARGET_DIR="${RUNNER_TEMP:-/tmp}/edpcli-virtual-hil-target"
 cargo_bin="$(command -v cargo)"
 
 # prepare_write 需要执行真实 umount2，因此让测试进程以 root 运行；测试入口本身只接受
 # /dev/loopN，无法被用于真实 USB/SATA/NVMe 设备。
-sudo --preserve-env=HOME,PATH,RUSTUP_HOME,CARGO_HOME,CARGO_TARGET_DIR,EDPCLI_VIRTUAL_DISK_PATH \
+sudo --preserve-env=HOME,PATH,RUSTUP_HOME,CARGO_HOME,CARGO_TARGET_DIR,EDPCLI_VIRTUAL_DISK_PATH,EDPCLI_VIRTUAL_DISK_SECTORS \
   "$cargo_bin" test --features ci-virtual-disk --test virtual_disk_hil -- --ignored --nocapture
 
 if mountpoint -q "$mount_dir"; then

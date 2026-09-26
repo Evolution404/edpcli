@@ -19,14 +19,16 @@ use crate::provision::{
     apply_target_geometry_overrides, build_empty_exfat, build_empty_fat16,
     build_official_partition_filesystem, build_official_provision_protocol_image,
     build_plain_provision_write_plan, parse_existing_provision, prefill_for_target_mode,
-    wrap_file_key, wrap_legacy_lba7_file_key, CapacityInput, CapacitySource, FileKeyWrapMode,
-    OfficialFilesystemFormat, OfficialPartitionFilesystems, OfficialPartitionMode,
-    OfficialPartitionSizes, OfficialProvisionPlan, OfficialProvisionWriteImage, OnlyId,
-    ParsedExistingProvision, PartitionAction, PartitionFilesystemImage, PartitionFormatTarget,
-    PartitionRole, PassInfoPolicy, PlainCleanupExtent, PlainPartitionSpec, PlainProvisionPlan,
+    unwrap_legacy_lba7_file_key, wrap_file_key, wrap_legacy_lba7_file_key, CapacityInput,
+    CapacitySource, FileKeyWrapMode, KeyDomainRole, KeyDomainSecrets, OfficialFilesystemFormat,
+    OfficialPartitionFilesystems, OfficialPartitionMode, OfficialPartitionSizes,
+    OfficialProvisionPlan, OfficialProvisionWriteImage, OnlyId, ParsedExistingProvision,
+    PartitionAction, PartitionFilesystemImage, PartitionFormatTarget, PartitionRole,
+    PassInfoPolicy, PlainCleanupExtent, PlainPartitionSpec, PlainProvisionPlan,
     PlainProvisionWritePlan, ProvisionEntropy, ProvisionImage, ProvisionMetadata, ProvisionProfile,
-    ProvisionSpec, ProvisionTarget, QuickCapacityUnit, SparseFilesystemImage,
-    TargetGeometryOverrides, TargetIdentity, TargetProvisionPlan, DEFAULT_MODE0_BOOT_SECTORS,
+    ProvisionSpec, ProvisionTarget, QuickCapacityUnit, RegionDisposition, SourcePasswordKnowledge,
+    SparseFilesystemImage, TargetGeometryOverrides, TargetIdentity, TargetPasswordPolicy,
+    TargetProvisionPlan, DEFAULT_KEY_DOMAIN_PASSWORD, DEFAULT_MODE0_BOOT_SECTORS,
 };
 use crate::sysinfo::{self, CmdRunner};
 use encoding_rs::GBK;
@@ -57,7 +59,7 @@ pub struct OfficialProvisionRequest {
     pub user: String,
     pub dept: String,
     pub label: String,
-    pub password: String,
+    pub key_domains: KeyDomainSecrets,
     pub volume_label: String,
     pub format: FormatOptions,
     pub force_change_password: Option<bool>,
@@ -387,6 +389,15 @@ pub enum ProvisionCommitOutcome {
     Plain { partition_count: usize },
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ProvisionKeyProbe {
+    pub source_kind: crate::provision::DiskProvisionKind,
+    pub share: Option<SourcePasswordKnowledge>,
+    pub share_opaque_profile: bool,
+    pub encrypt: Option<SourcePasswordKnowledge>,
+    pub encrypt_opaque_profile: bool,
+}
+
 #[derive(Clone, Eq, PartialEq)]
 pub struct PreparedNewProvision {
     pub disk: u32,
@@ -569,7 +580,10 @@ pub use export::{
 };
 #[cfg(test)]
 use prepare::target_encrypt_capacity_override;
-pub use prepare::{prepare_plain_provision, prepare_provision, prepare_target_provision};
+pub use prepare::{
+    prepare_plain_provision, prepare_provision, prepare_target_provision,
+    probe_provision_key_domains_on_disk, verify_provision_source_password_on_disk,
+};
 
 pub fn prepare_provision_on_disk(
     runner: &dyn CmdRunner,
@@ -588,12 +602,12 @@ pub fn commit_provision_on_disk(
     commit_provision(runner, &mut dev, prepared)
 }
 
-use commit::validate_target_write_set;
 #[cfg(test)]
 use commit::{
     execute_partition_format, validate_preserve_source_snapshot, verify_format_hardware,
     verify_protocol_readback,
 };
+use commit::{validate_key_disposition_plan, validate_target_write_set};
 
 #[cfg(test)]
 mod tests;

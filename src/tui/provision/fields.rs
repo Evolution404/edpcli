@@ -33,8 +33,14 @@ impl AppState {
             return (display_index < field_count).then_some(100 + display_index);
         }
         let mode = self.provision.kind.mode()?;
-        let mut slots = Vec::with_capacity(30);
-        slots.extend([3, 4, 5, 6, 7]);
+        let mut slots = Vec::with_capacity(34);
+        slots.extend([3, 4, 5, 6]);
+        if matches!(mode, 0 | 1 | 3) {
+            slots.extend([30, 31]);
+        }
+        if matches!(mode, 0..=2) {
+            slots.extend([32, 33]);
+        }
         if matches!(mode, 0 | 3) {
             slots.extend([0, 24]);
         }
@@ -127,6 +133,12 @@ impl AppState {
             Some(value) => value,
             None => return out,
         };
+        let knowledge_suffix =
+            |knowledge: crate::provision::SourcePasswordKnowledge| match knowledge {
+                crate::provision::SourcePasswordKnowledge::DefaultVerified => "✓ 默认已验证",
+                crate::provision::SourcePasswordKnowledge::UserVerified => "✓ 用户已验证",
+                crate::provision::SourcePasswordKnowledge::Unknown => "⚠ Unknown",
+            };
         out.extend([
             (
                 "标签标识".into(),
@@ -140,12 +152,54 @@ impl AppState {
                 self.provision.form.label.as_str(),
                 false,
             ),
-            (
-                "初始密码".into(),
-                self.provision.form.password.as_str(),
-                true,
-            ),
         ]);
+        if matches!(mode, 0 | 1 | 3) {
+            let domain = if mode == 1 {
+                "二合一区"
+            } else {
+                "交换区"
+            };
+            out.push((
+                format!(
+                    "{domain}来源密码（可空） {}",
+                    knowledge_suffix(self.provision.form.share_source_knowledge)
+                ),
+                self.provision.form.share_source_password.as_str(),
+                true,
+            ));
+            let share_opaque =
+                self.provision_domain_opaque_candidate(crate::provision::KeyDomainRole::Share);
+            out.push((
+                format!("{domain}目标密码"),
+                if share_opaque {
+                    "— PreserveOpaque 禁用"
+                } else {
+                    self.provision.form.share_target_password.as_str()
+                },
+                !share_opaque,
+            ));
+        }
+        if matches!(mode, 0..=2) {
+            out.push((
+                format!(
+                    "保密区来源密码（可空） {}",
+                    knowledge_suffix(self.provision.form.encrypt_source_knowledge)
+                ),
+                self.provision.form.encrypt_source_password.as_str(),
+                true,
+            ));
+            let encrypt_opaque =
+                self.provision_domain_opaque_candidate(crate::provision::KeyDomainRole::Encrypt);
+            out.push((
+                "保密区目标密码".into(),
+                if encrypt_opaque {
+                    "— PreserveOpaque 禁用"
+                } else {
+                    self.provision.form.encrypt_target_password.as_str()
+                },
+                !encrypt_opaque,
+            ));
+        }
         if matches!(mode, 0 | 3) {
             let exact =
                 self.provision.form.boot_input_mode == crate::provision::CapacityInputMode::Exact;
@@ -307,6 +361,10 @@ impl AppState {
                 _ => None,
             };
         }
+        let share_opaque =
+            self.provision_domain_opaque_candidate(crate::provision::KeyDomainRole::Share);
+        let encrypt_opaque =
+            self.provision_domain_opaque_candidate(crate::provision::KeyDomainRole::Encrypt);
         match slot {
             0 => Some(
                 if self.provision.form.boot_input_mode == crate::provision::CapacityInputMode::Exact
@@ -338,7 +396,6 @@ impl AppState {
             4 => Some(&mut self.provision.form.user),
             5 => Some(&mut self.provision.form.dept),
             6 => Some(&mut self.provision.form.label),
-            7 => Some(&mut self.provision.form.password),
             14 => Some(&mut self.provision.form.volume_label),
             15 => Some(&mut self.provision.form.share_label),
             16 => Some(&mut self.provision.form.encrypt_label),
@@ -347,6 +404,10 @@ impl AppState {
             26 => Some(&mut self.provision.form.encrypt_start_lba),
             28 => Some(&mut self.provision.form.max_share_password_errors),
             29 => Some(&mut self.provision.form.max_encrypt_password_errors),
+            30 => Some(&mut self.provision.form.share_source_password),
+            31 if !share_opaque => Some(&mut self.provision.form.share_target_password),
+            32 => Some(&mut self.provision.form.encrypt_source_password),
+            33 if !encrypt_opaque => Some(&mut self.provision.form.encrypt_target_password),
             _ => None,
         }
     }
@@ -369,6 +430,10 @@ impl AppState {
                 _ => None,
             };
         }
+        let share_opaque =
+            self.provision_domain_opaque_candidate(crate::provision::KeyDomainRole::Share);
+        let encrypt_opaque =
+            self.provision_domain_opaque_candidate(crate::provision::KeyDomainRole::Encrypt);
         match slot {
             0 => Some(
                 if self.provision.form.boot_input_mode == crate::provision::CapacityInputMode::Exact
@@ -400,7 +465,6 @@ impl AppState {
             4 => Some(self.provision.form.user.as_str()),
             5 => Some(self.provision.form.dept.as_str()),
             6 => Some(self.provision.form.label.as_str()),
-            7 => Some(self.provision.form.password.as_str()),
             14 => Some(self.provision.form.volume_label.as_str()),
             15 => Some(self.provision.form.share_label.as_str()),
             16 => Some(self.provision.form.encrypt_label.as_str()),
@@ -409,6 +473,10 @@ impl AppState {
             26 => Some(self.provision.form.encrypt_start_lba.as_str()),
             28 => Some(self.provision.form.max_share_password_errors.as_str()),
             29 => Some(self.provision.form.max_encrypt_password_errors.as_str()),
+            30 => Some(self.provision.form.share_source_password.as_str()),
+            31 if !share_opaque => Some(self.provision.form.share_target_password.as_str()),
+            32 => Some(self.provision.form.encrypt_source_password.as_str()),
+            33 if !encrypt_opaque => Some(self.provision.form.encrypt_target_password.as_str()),
             _ => None,
         }
     }
@@ -469,7 +537,8 @@ impl AppState {
         }
         match slot {
             0..=2 | 24..=26 => Some("分区布局"),
-            3..=7 => Some("身份信息"),
+            3..=6 => Some("身份信息"),
+            30..=33 => Some("密码域"),
             11..=20 => Some("格式化（可选）"),
             9 | 27..=29 => Some("密码策略"),
             _ => None,
@@ -487,7 +556,7 @@ impl AppState {
                 "身份信息" => 2,
                 "分区布局" if matches!(slot, 0..=2) => 2,
                 "分区布局" => 1,
-                "密码策略" => 2,
+                "密码策略" | "密码域" => 2,
                 "格式化（可选）" if slot == 17 => 1,
                 "格式化（可选）" if matches!(slot, 11..=13) => 2,
                 "格式化（可选）" => 1,
@@ -520,7 +589,22 @@ impl AppState {
         }
         match slot {
             0..=2 => Some("Space 切换 MiB / GiB / sector · f 填满".into()),
-            7 => Some("交换区和保密区的初始密码".into()),
+            30 | 32 => Some("来源密码可留空表示 Unknown · v 验证当前域旧密码".into()),
+            31 => Some(
+                if self.provision_domain_opaque_candidate(crate::provision::KeyDomainRole::Share) {
+                    "PreserveOpaque：目标密码禁用；先验证旧密码才能改密".into()
+                } else {
+                    "目标密码只作用于交换密钥域，不会同步到保密域".into()
+                },
+            ),
+            33 => Some(
+                if self.provision_domain_opaque_candidate(crate::provision::KeyDomainRole::Encrypt)
+                {
+                    "PreserveOpaque：目标密码禁用；先验证旧密码才能改密".into()
+                } else {
+                    "目标密码只作用于保密密钥域，不会同步到交换域".into()
+                },
+            ),
             9 | 11..=13 | 18..=20 | 27 => Some("Space 切换".into()),
             24..=26 => Some("通常无需修改；固定分区边界时再调整".into()),
             28 | 29 => Some("范围 0–255".into()),
@@ -598,6 +682,43 @@ impl AppState {
         }
     }
 
+    fn provision_mark_source_password_unverified(&mut self, slot: Option<usize>) {
+        match slot {
+            Some(30) => {
+                self.provision.form.share_source_knowledge =
+                    crate::provision::SourcePasswordKnowledge::Unknown;
+            }
+            Some(32) => {
+                self.provision.form.encrypt_source_knowledge =
+                    crate::provision::SourcePasswordKnowledge::Unknown;
+            }
+            _ => {}
+        }
+    }
+
+    pub fn provision_source_password_verify_request(
+        &self,
+    ) -> Result<Option<(crate::provision::KeyDomainRole, String)>, String> {
+        let Some(slot) = self.provision_field_slot(self.provision.field_selected) else {
+            return Ok(None);
+        };
+        let (domain, password) = match slot {
+            30 => (
+                crate::provision::KeyDomainRole::Share,
+                self.provision.form.share_source_password.as_str(),
+            ),
+            32 => (
+                crate::provision::KeyDomainRole::Encrypt,
+                self.provision.form.encrypt_source_password.as_str(),
+            ),
+            _ => return Ok(None),
+        };
+        if password.is_empty() {
+            return Err("请先输入当前域来源密码，再按 v 验证。".into());
+        }
+        Ok(Some((domain, password.to_string())))
+    }
+
     pub fn provision_push_char(&mut self, ch: char) {
         if ch.is_control() {
             return;
@@ -624,6 +745,7 @@ impl AppState {
             *field = candidate;
             self.provision.field_cursor = cursor + 1;
             self.provision_mark_capacity_edit(Some(slot));
+            self.provision_mark_source_password_unverified(Some(slot));
             self.provision.message = None;
         }
     }
@@ -641,6 +763,7 @@ impl AppState {
                 *field = chars.into_iter().collect();
                 self.provision.field_cursor = cursor - 1;
                 self.provision_mark_capacity_edit(slot);
+                self.provision_mark_source_password_unverified(slot);
                 self.provision.message = None;
             }
         }
@@ -655,6 +778,7 @@ impl AppState {
                 chars.remove(cursor);
                 *field = chars.into_iter().collect();
                 self.provision_mark_capacity_edit(slot);
+                self.provision_mark_source_password_unverified(slot);
                 self.provision.message = None;
             }
         }

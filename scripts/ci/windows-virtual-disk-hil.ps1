@@ -58,6 +58,7 @@ try {
     "edpcli-virtual-hil" | Set-Content -Encoding ascii $markerPath
 
     $env:EDPCLI_VIRTUAL_DISK_PATH = $rawPath
+    $env:EDPCLI_VIRTUAL_DISK_SECTORS = [string][uint64]($disk.Size / 512)
     $env:CARGO_TARGET_DIR = Join-Path $env:RUNNER_TEMP "edpcli-virtual-hil-target"
     cargo test --features ci-virtual-disk --test virtual_disk_hil -- --ignored --nocapture
     if ($LASTEXITCODE -ne 0) {

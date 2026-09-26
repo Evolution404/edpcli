@@ -609,14 +609,16 @@ fn deep_container_retains_metadata_and_never_makes_analysis_restorable() {
         verified.manifest.snapshot.capture_level,
         edpb::CaptureLevel::Deep
     );
+    let restorable = verified
+        .manifest
+        .artifacts
+        .iter()
+        .filter(|a| a.restore_policy == RestorePolicy::Restorable)
+        .map(|a| a.id.as_str())
+        .collect::<Vec<_>>();
     assert_eq!(
-        verified
-            .manifest
-            .artifacts
-            .iter()
-            .filter(|a| a.restore_policy == RestorePolicy::Restorable)
-            .count(),
-        1
+        restorable,
+        vec![edpb::RAW_PROTOCOL_ARTIFACT_ID, "raw.lba7_compatibility"]
     );
     assert_eq!(edpb::read_raw_protocol(&path).unwrap(), image);
     std::fs::remove_file(path).unwrap();

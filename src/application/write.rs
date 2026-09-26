@@ -4,7 +4,6 @@
 //! system-disk/USB whole-disk guard → selector pinning by callers →
 //! unmount/lock → reopen identity recheck → atomic write → sync/readback/rollback.
 
-use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use super::target_session::{ReadOnly, ReopenAndVerifyError, TargetSession};
@@ -448,6 +447,83 @@ pub fn restore_flow(
             ),
         ));
     }
+    let current_total_sectors = sysinfo::disk_total_sectors(ctx.runner, disk)
+        .ok_or_else(|| err(EXIT_TARGET, "错误: 无法取得当前目标盘总扇区数，拒绝恢复"))?;
+    if let Some(backup_total_sectors) = verified.manifest.geometry.total_sectors {
+        if backup_total_sectors != current_total_sectors {
+            return Err(err(
+                EXIT_TARGET,
+                format!(
+                    "错误: 备份容量 {} sectors 与当前盘 {} sectors 不一致，拒绝恢复",
+                    backup_total_sectors, current_total_sectors
+                ),
+            ));
+        }
+    }
+
+    // Deep EDPB may carry the active six-sector LBA7 compatibility extent.
+    // It is restorable only when its Manifest extent is bound back to the exact
+    // LBA7 pointer encoded in the same backup protocol image.
+    let restorable_lce = if let Some(artifact) = verified
+        .manifest
+        .artifacts
+        .iter()
+        .find(|artifact| artifact.id == "raw.lba7_compatibility")
+    {
+        if artifact.restore_policy == crate::edpb::RestorePolicy::Restorable {
+            if artifact.source_extent_ids.len() != 1 {
+                return Err(err(
+                    EXIT_BACKUP,
+                    "错误: EDPB LCE Artifact 必须且只能引用一个 Extent",
+                ));
+            }
+            let extent = verified
+                .manifest
+                .extents
+                .iter()
+                .find(|extent| extent.id == artifact.source_extent_ids[0])
+                .ok_or_else(|| err(EXIT_BACKUP, "错误: EDPB LCE Artifact 引用的 Extent 不存在"))?;
+            let backup_total = verified
+                .manifest
+                .geometry
+                .total_sectors
+                .ok_or_else(|| err(EXIT_BACKUP, "错误: 可恢复 LCE 的 EDPB 缺少总扇区数"))?;
+            let geometry = crate::backup_metadata::parse_lba7_compatibility_geometry(
+                &data,
+                &verified.manifest.device.device_id,
+                backup_total,
+            )
+            .map_err(|message| {
+                err(
+                    EXIT_BACKUP,
+                    format!("错误: 无法从备份 LBA7 复核 LCE 指针: {message}"),
+                )
+            })?;
+            if extent.start_lba != geometry.start_lba
+                || extent.sector_count != geometry.sector_count
+            {
+                return Err(err(
+                    EXIT_BACKUP,
+                    format!(
+                        "错误: EDPB LCE Extent 与备份 LBA7 指针不一致(manifest={}+{}, lba7={}+{})",
+                        extent.start_lba,
+                        extent.sector_count,
+                        geometry.start_lba,
+                        geometry.sector_count
+                    ),
+                ));
+            }
+            let bytes =
+                crate::edpb::read_artifact(&path, "raw.lba7_compatibility").map_err(|message| {
+                    err(EXIT_BACKUP, format!("错误: 读取 EDPB LCE 失败: {message}"))
+                })?;
+            Some((geometry, bytes))
+        } else {
+            None
+        }
+    } else {
+        None
+    };
     let tagged_nopwd = verified.manifest.snapshot.device_state == "passwordless";
     let nopwd_snap =
         tagged_nopwd || diskio::image_is_nopwd(&data, &verified.manifest.device.device_id);
@@ -462,9 +538,14 @@ pub fn restore_flow(
     }
     ctx.prompt
         .write_event(WriteEvent::RestoreTargetHeader { path: path.clone() });
+    let restore_scope = if restorable_lce.is_some() {
+        "LBA0-12 + LCE"
+    } else {
+        "LBA0-12"
+    };
     if !ctx
         .prompt
-        .confirm_write_yes(&format!("  → disk{} LBA0-12? 输入 YES: ", disk))
+        .confirm_write_yes(&format!("  → disk{} {}? 输入 YES: ", disk, restore_scope))
     {
         return Err(err(EXIT_CANCELLED, "已取消"));
     }
@@ -480,15 +561,69 @@ pub fn restore_flow(
             ),
             ReopenAndVerifyError::Verify(error) => error,
         })?;
-    let writes: BTreeMap<u32, Vec<u8>> = (0..METADATA_SECTOR_COUNT as u32)
-        .map(|lba| {
-            (
+    let mut transaction = diskio::WriteTransactionPlan::new(current_total_sectors);
+    if let Some((geometry, bytes)) = &restorable_lce {
+        let expected_len = usize::try_from(geometry.sector_count)
+            .ok()
+            .and_then(|count| count.checked_mul(SECTOR))
+            .ok_or_else(|| err(EXIT_BACKUP, "错误: LCE 恢复长度溢出"))?;
+        if bytes.len() != expected_len {
+            return Err(err(
+                EXIT_BACKUP,
+                format!(
+                    "错误: EDPB LCE 数据长度 {}B ≠ {}B",
+                    bytes.len(),
+                    expected_len
+                ),
+            ));
+        }
+        for offset in 0..geometry.sector_count {
+            let lba64 = geometry
+                .start_lba
+                .checked_add(offset)
+                .ok_or_else(|| err(EXIT_BACKUP, "错误: LCE 恢复 LBA 溢出"))?;
+            let lba = u32::try_from(lba64)
+                .map_err(|_| err(EXIT_BACKUP, "错误: LCE 恢复 LBA 超出当前写入器范围"))?;
+            let start = usize::try_from(offset)
+                .ok()
+                .and_then(|index| index.checked_mul(SECTOR))
+                .ok_or_else(|| err(EXIT_BACKUP, "错误: LCE 恢复字节偏移溢出"))?;
+            transaction
+                .insert(
+                    lba,
+                    bytes[start..start + SECTOR].to_vec(),
+                    diskio::SectorWriteStage::Data,
+                    "backup restore LCE",
+                )
+                .map_err(|message| {
+                    err(EXIT_BACKUP, format!("错误: LCE 恢复计划无效: {message}"))
+                })?;
+        }
+    }
+    for lba in 1..METADATA_SECTOR_COUNT as u32 {
+        transaction
+            .insert(
                 lba,
                 data[lba as usize * SECTOR..(lba as usize + 1) * SECTOR].to_vec(),
+                diskio::SectorWriteStage::Metadata,
+                "backup restore protocol",
             )
-        })
-        .collect();
-    diskio::atomic_write_sectors(dev, &writes)?;
+            .map_err(|message| {
+                err(
+                    EXIT_BACKUP,
+                    format!("错误: 协议恢复计划 LBA{lba} 无效: {message}"),
+                )
+            })?;
+    }
+    transaction
+        .insert(
+            0,
+            data[..SECTOR].to_vec(),
+            diskio::SectorWriteStage::Commit,
+            "backup restore MBR",
+        )
+        .map_err(|message| err(EXIT_BACKUP, format!("错误: MBR 恢复计划无效: {message}")))?;
+    diskio::execute_write_transaction(dev, &transaction)?;
     ctx.prompt.write_event(WriteEvent::RestoreWriteCompleted);
     Ok(EXIT_OK)
 }

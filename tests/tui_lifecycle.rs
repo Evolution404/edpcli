@@ -194,7 +194,7 @@ fn wide_provision_form_uses_two_columns_and_compact_partition_rows() {
     state.provision_mut().field_selected = encrypt;
 
     let width = 160u16;
-    let backend = TestBackend::new(width, 36);
+    let backend = TestBackend::new(width, 60);
     let mut terminal = Terminal::new(backend).expect("test terminal");
     terminal.draw(|frame| render::draw(frame, &state)).unwrap();
     let cells = terminal.backend().buffer().content();
@@ -246,6 +246,8 @@ fn wide_provision_form_uses_two_columns_and_compact_partition_rows() {
     };
     let identity_separator = internal_separator_x("标签标识");
     assert_eq!(identity_separator, internal_separator_x("部门"));
+    let key_domain_separator = internal_separator_x("交换区来源密码");
+    assert_eq!(key_domain_separator, internal_separator_x("交换区目标密码"));
     let layout_separator = internal_separator_x("启动区容量");
     assert_eq!(layout_separator, internal_separator_x("交换区容量"));
     assert_eq!(layout_separator, internal_separator_x("保密区容量"));
@@ -259,6 +261,7 @@ fn wide_provision_form_uses_two_columns_and_compact_partition_rows() {
     );
     let distinct = [
         identity_separator,
+        key_domain_separator,
         layout_separator,
         format_separator,
         password_separator,
@@ -397,7 +400,7 @@ fn empty_secret_field_renders_input_placeholder_instead_of_black_value() {
     state.provision_select_disk();
     state.provision_skip_backup();
     state.provision_begin_selected();
-    state.provision_mut().form.password.clear();
+    state.provision_mut().form.share_target_password.clear();
 
     let backend = TestBackend::new(100, 28);
     let mut terminal = Terminal::new(backend).expect("test terminal");

@@ -2797,7 +2797,7 @@ Tab/Shift-Tab 子工作区 · Enter Sector Inspector · Esc 返回 · q 退出
 
 ## 12. 后续计划：五状态互转、独立密码域与 FileKey 保留策略（2026-09-26）
 
-> 状态：**PLAN ONLY / 暂不实施**。本章用于后续独立开发阶段；当前 worktree 只固化设计，不修改生产代码、协议构造器、TUI 或写盘链。后续实现必须在当时最新 `main` 上重新核对本章与协议真相源，禁止直接把本章中的“建议类型名”当成已经实现的事实。
+> 状态：**IN PROGRESS / 2026-09-26 开始实施**。基线为合入第 13 章后的 `main`（merge `90d0137`）。严格按 K0→K8 执行；K0 先审计和红测试，不修改协议 writer 语义。
 
 本章补全 4.8/4.9 中尚未展开的五状态互转密码语义。核心变化不是增加 20 套 source→target 特例，而是把“盘型布局”“区域语义”“密码知识”“FileKey 处理”“数据处置”拆成正交轴，由统一 planner 对每个语义区域独立决策。
 
@@ -3290,7 +3290,7 @@ Share default FAIL / Encrypt default FAIL
 
 ### 12.12 分阶段实施顺序（后续独立开发）
 
-本章当前只记录计划；后续开新 worktree 时按以下顺序执行。
+**实施状态（2026-09-26）：K0～K5 COMPLETE；K6 NOT IMPLEMENTED（所有 Migrate 继续 fail-closed）；K7 COMPLETE；K8 PENDING。** 本章整体仍为 IN PROGRESS，只有代表性真实 USB 验收完成后才允许按 12.13 收口。
 
 #### Phase K0：现状审计与红测试
 
@@ -3299,7 +3299,19 @@ Share default FAIL / Encrypt default FAIL
 - 建 5×5 conversion golden matrix；
 - 不改协议生成语义。
 
+**K0 审计状态（2026-09-26）：COMPLETE。** 下面记录的是 K0 启动时基线问题；这些问题已在 K1～K5 中治理，不代表当前实现仍存在。
+
+K0 基线审计曾确认：
+- `ProvisionRequest` 仍只有一个全局 `password: String`；
+- `prepare` 同一个 `request.password` 同时用于来源探测、`TargetProvisionPlan::build`、来源 FileKey unwrap、LBA7/LBA12 新 key material 生成；
+- `TargetProvisionPlan` 当前只有 `PreserveExact / Rebuild`，且 encrypted exact extent 只有密码验证成功才允许 Preserve；未知密码会被直接降级 Rebuild；
+- TUI `ProvisionForm` 仍只有一个 `password` / “初始密码”字段，没有 Share/Encrypt 独立 source/target password；
+- 现有预填测试只覆盖 Plain→四官方模式 + 4×4 官方模式，即 20 格；第 12 章已新增独立 5×5（25 格）golden contract；
+- 已新增红测试：禁止全局单密码 API、要求四个独立 TUI 密码字段、要求 exact encrypted extent + unknown password 保持 opaque-preserve candidate。K0 不修改 writer。
+
 #### Phase K1：KeyDomain / PasswordKnowledge 领域模型
+
+**实施状态（2026-09-26）：COMPLETE。** 已落地 `KeyDomainRole / KeyDomainSecrets / SourcePasswordKnowledge / TargetPasswordPolicy / RegionDisposition`；Share/Encrypt source/target secret 独立，`ProvisionRequest` 不再存在全局 `password` fallback，secret Debug 输出保持 REDACTED。
 
 - 把来源密码、目标密码、raw FileKey、wrapped material 的职责拆开；
 - Share/Encrypt 独立；
@@ -3307,6 +3319,8 @@ Share default FAIL / Encrypt default FAIL
 - API 层禁止密码明文进入日志/序列化。
 
 #### Phase K2：逐域默认密码探测
+
+**实施状态（2026-09-26）：COMPLETE。** LBA12 canonical key record 按域验证；默认密码只有完整验证成功才标记 `DefaultVerified` 并预填，失败保持 `Unknown`；TUI 支持对当前选中域显式验证用户旧密码，Share/Encrypt 状态互不污染。
 
 - canonical LBA12 完整验证；
 - 默认密码 PASS 自动预填；
@@ -3316,12 +3330,16 @@ Share default FAIL / Encrypt default FAIL
 
 #### Phase K3：RegionMappingPlanner
 
+**实施状态（2026-09-26）：COMPLETE。** 已建立 source/target Region 模型和统一 mapper，覆盖 PreserveOpaque / PreserveVerified / RewrapVerified / Rebuild / Drop；需要迁移的映射明确为 `MigrateUnsupported`/`Migrate` 并在 prepare 阶段 fail-closed，未新增 20 套 mode-pair writer。
+
 - source/target 统一 Region 模型；
 - 实现 PreserveOpaque / PreserveVerified / Rewrap / Rebuild / Drop；
 - `Migrate` 先作为显式 unsupported disposition，绝不静默降级；
 - 删除新增 mode-pair 特例的诱因，所有组合走同一 mapper。
 
 #### Phase K4：TUI/CLI Review
+
+**实施状态（2026-09-26）：COMPLETE。** TUI/CLI 已使用独立密码域参数；来源密码状态、Opaque/Verified/Rewrap/Rebuild disposition 与 target password policy 可见；exact opaque candidate 会禁用目标密码，`v` 只验证当前来源密码域；Review/CLI 明确显示数据 fate 与密码状态。
 
 - 每个 key domain 独立卡片/字段；
 - “默认密码已验证 / 尚未验证 / 用户已验证”状态清晰；
@@ -3332,6 +3350,8 @@ Share default FAIL / Encrypt default FAIL
 
 #### Phase K5：prepare/commit 安全门禁
 
+**实施状态（2026-09-26）：COMPLETE。** prepare 与 commit 双层检查 disposition；Opaque 原 key material 透传且 preserved extent 禁写，Rewrap 复用 `K_old`，Rebuild 必须显式完整初始化，Migrate 未实现时拒绝执行；协议写入后继续执行 LBA0～12 readback。fast gate 6 suites / 8 artifacts 0 failures；full gate 8 suites / 10 artifacts + doctest 0 failures（25.98s）。
+
 - 修复所有可能产生 `K_new + old ciphertext` 的路径；
 - Rewrap 只改 wrapper；
 - Opaque key material 原样搬运；
@@ -3340,6 +3360,8 @@ Share default FAIL / Encrypt default FAIL
 - readback 验证。
 
 #### Phase K6：可选数据迁移能力
+
+**实施状态（2026-09-26）：NOT IMPLEMENTED / DEFERRED。** 当前任何需要 Migrate 的转换均明确拒绝，不允许静默退化成 Preserve/Rebuild；这符合 K0～K5 第一阶段的 fail-closed 约束。
 
 只有在 K0～K5 完整通过后才考虑：
 
@@ -3353,6 +3375,8 @@ Share default FAIL / Encrypt default FAIL
 
 #### Phase K7：Virtual-HIL
 
+**实施状态（2026-09-26）：COMPLETE。** 新增 Chapter 12 Virtual Disk HIL，在 disposable Linux loop / Windows VHD 上实际写入并读回 mode0 协议镜像，覆盖双域不同密码、unknown-password `PreserveOpaque`、exact `PreserveVerified`、仅改密码 `RewrapVerified`（验证 `K_old` 不变且 Encrypt data sector 0 写入）、geometry change forced rebuild、mode1 Combined 物理明文与 mode2 63-sector CompatibilityReserve。GitHub Actions run `36226417227` 的 Linux arm64/x86_64、Windows arm64/x86_64 四个平台 **4/4 全绿**；本机 Linux/Windows x86_64 交叉编译与 full gate 8 suites / 10 artifacts + doctest 亦为 0 failures。
+
 覆盖五态矩阵的协议、key material、文件系统和挂载结果。至少验证：
 
 - unknown-password opaque 场景；
@@ -3364,6 +3388,8 @@ Share default FAIL / Encrypt default FAIL
 - mode2 reserve。
 
 #### Phase K8：真实 USB 验收
+
+**实施状态（2026-09-26）：PENDING。** 尚未执行代表性真实盘转换与逐域实际解锁验收；在取得自动备份、写盘、readback、rollback 与制盘后密码域可用性证据前，本章不得标 COMPLETE。
 
 按风险由低到高选择代表性转换，不一次性对 25 格全部写盘。每次必须：
 

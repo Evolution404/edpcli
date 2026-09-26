@@ -183,6 +183,33 @@ pub enum PartitionAction {
     Rebuild,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum RegionDisposition {
+    PreserveOpaque,
+    PreserveVerified,
+    RewrapVerified,
+    Migrate,
+    Rebuild,
+    Drop,
+}
+
+impl RegionDisposition {
+    pub const fn preserves_extent(self) -> bool {
+        matches!(
+            self,
+            Self::PreserveOpaque | Self::PreserveVerified | Self::RewrapVerified
+        )
+    }
+
+    pub const fn legacy_action(self) -> PartitionAction {
+        if self.preserves_extent() {
+            PartitionAction::PreserveExact
+        } else {
+            PartitionAction::Rebuild
+        }
+    }
+}
+
 /// Geometry alone is necessary but not sufficient for actual preservation. The
 /// writer must additionally require verified per-partition key material.
 pub fn decide_partition_action(
@@ -909,6 +936,37 @@ impl DiskProvisionKind {
 }
 
 impl ParsedExistingProvision {
+    pub fn record_for_domain(
+        &self,
+        domain: super::KeyDomainRole,
+    ) -> Option<&ExistingPartitionRecord> {
+        self.profile
+            .partitions
+            .iter()
+            .position(|part| super::KeyDomainRole::from_partition_role(part.role) == Some(domain))
+            .map(|index| &self.records[index])
+    }
+
+    pub fn source_password_knowledge(
+        &self,
+        domain: super::KeyDomainRole,
+        user_password: Option<&[u8]>,
+    ) -> super::SourcePasswordKnowledge {
+        let Some(record) = self.record_for_domain(domain) else {
+            return super::SourcePasswordKnowledge::Unknown;
+        };
+        if record
+            .verified_sm4_file_key(super::DEFAULT_KEY_DOMAIN_PASSWORD)
+            .is_ok()
+        {
+            return super::SourcePasswordKnowledge::DefaultVerified;
+        }
+        if user_password.is_some_and(|password| record.verified_sm4_file_key(password).is_ok()) {
+            return super::SourcePasswordKnowledge::UserVerified;
+        }
+        super::SourcePasswordKnowledge::Unknown
+    }
+
     pub fn record(&self, role: PartitionRole) -> Option<&ExistingPartitionRecord> {
         self.profile
             .partitions
@@ -937,6 +995,9 @@ impl ParsedExistingProvision {
 pub struct TargetPartitionPlan {
     pub geometry: TargetPartitionGeometry,
     pub action: PartitionAction,
+    pub disposition: RegionDisposition,
+    pub source_password_knowledge: Option<super::SourcePasswordKnowledge>,
+    pub target_password_policy: Option<super::TargetPasswordPolicy>,
     pub reason: String,
     /// Only present when a verified source key record belongs to this exact
     /// target geometry. The writer re-encodes it for the target slot.
@@ -956,7 +1017,7 @@ impl TargetProvisionPlan {
         mode: OfficialPartitionMode,
         targets: &[TargetPartitionGeometry],
         usable_end_lba: u64,
-        password: &[u8],
+        key_domains: &super::KeyDomainSecrets,
     ) -> Result<Self, String> {
         if targets.len() != mode.partition_types().len() {
             return Err("target partition count does not match official mode".into());
@@ -969,8 +1030,11 @@ impl TargetProvisionPlan {
                     "target partition type at slot {index} does not match official mode"
                 ));
             }
-            let mut action = PartitionAction::Rebuild;
-            let mut reason = "无兼容且已验证的来源分区；原数据不能原样保留".to_string();
+            let mut disposition = RegionDisposition::Rebuild;
+            let mut source_password_knowledge = None;
+            let mut target_password_policy = super::KeyDomainRole::from_partition_role(target.role)
+                .map(|_| super::TargetPasswordPolicy::InitializeNew);
+            let mut reason = "无全兼容来源分区；目标区域必须重建".to_string();
             let mut preserved_record = None;
             if let Some(source) = source {
                 if let Some((source_index, old)) = source
@@ -980,32 +1044,98 @@ impl TargetProvisionPlan {
                     .enumerate()
                     .find(|(_, old)| old.role == target.role)
                 {
-                    if decide_partition_action(Some(old), target) == PartitionAction::PreserveExact
-                    {
-                        let record = source.records[source_index];
-                        let key_ok = if record.lba12.need_encrypt == 0 {
-                            true
+                    let record = source.records[source_index];
+                    let source_region = super::SourceRegion::from_existing(*old, record);
+                    let target_region = super::TargetRegion::from_target(*target);
+                    let domain = super::KeyDomainRole::from_partition_role(target.role);
+                    let user_password = key_domains.source_password(target.role);
+                    if record.lba12.need_encrypt != 0 {
+                        if let Some(domain) = domain {
+                            source_password_knowledge =
+                                Some(source.source_password_knowledge(domain, user_password));
+                        }
+                    }
+
+                    let strict_compatible =
+                        super::preserve_compatibility(source_region, target_region).is_ok();
+                    let opaque_compatible = record.lba12.need_encrypt != 0
+                        && source_password_knowledge
+                            == Some(super::SourcePasswordKnowledge::Unknown)
+                        && super::opaque_preserve_compatibility(source_region, target_region)
+                            .is_ok();
+
+                    if strict_compatible || opaque_compatible {
+                        disposition = if opaque_compatible && !strict_compatible {
+                            target_password_policy =
+                                Some(super::TargetPasswordPolicy::PreserveOpaque);
+                            RegionDisposition::PreserveOpaque
+                        } else if record.lba12.need_encrypt == 0 {
+                            RegionDisposition::PreserveVerified
                         } else {
-                            record.verified_sm4_file_key(password).is_ok()
+                            match source_password_knowledge
+                                .unwrap_or(super::SourcePasswordKnowledge::Unknown)
+                            {
+                                super::SourcePasswordKnowledge::Unknown => {
+                                    target_password_policy =
+                                        Some(super::TargetPasswordPolicy::PreserveOpaque);
+                                    RegionDisposition::PreserveOpaque
+                                }
+                                super::SourcePasswordKnowledge::DefaultVerified => {
+                                    if key_domains.target_password(target.role)
+                                        == Some(super::DEFAULT_KEY_DOMAIN_PASSWORD)
+                                    {
+                                        target_password_policy =
+                                            Some(super::TargetPasswordPolicy::ReuseVerified);
+                                        RegionDisposition::PreserveVerified
+                                    } else {
+                                        target_password_policy =
+                                            Some(super::TargetPasswordPolicy::ReplaceVerified);
+                                        RegionDisposition::RewrapVerified
+                                    }
+                                }
+                                super::SourcePasswordKnowledge::UserVerified => {
+                                    if key_domains.target_password(target.role) == user_password {
+                                        target_password_policy =
+                                            Some(super::TargetPasswordPolicy::ReuseVerified);
+                                        RegionDisposition::PreserveVerified
+                                    } else {
+                                        target_password_policy =
+                                            Some(super::TargetPasswordPolicy::ReplaceVerified);
+                                        RegionDisposition::RewrapVerified
+                                    }
+                                }
+                            }
                         };
-                        if key_ok {
-                            action = PartitionAction::PreserveExact;
-                            reason =
-                                "语义、精确几何、文件系统和密钥记录均已验证；数据区禁止写入".into();
+                        if disposition.preserves_extent() {
+                            reason = match disposition {
+                                RegionDisposition::PreserveOpaque => {
+                                    "role/type/extent/physical crypto/key profile 精确兼容；来源密码未知，文件系统不解读，原 key material 与密文区域逐字节透传"
+                                }
+                                RegionDisposition::PreserveVerified => {
+                                    "物理/语义/几何/filesystem 与来源密钥均已验证；原 FileKey 与 data extent 保持不变"
+                                }
+                                RegionDisposition::RewrapVerified => {
+                                    "来源 FileKey 已验证；目标密码变化，只允许重包 wrapper，data extent 保持零写入"
+                                }
+                                _ => unreachable!(),
+                            }
+                            .into();
                             preserved_record = Some(record);
-                        } else {
-                            reason = "原密码或 FileKey 无法验证；原数据不能原样保留".into();
                         }
                     } else {
                         reason =
-                            "语义、位置、大小、物理加密或文件系统与来源不一致；原数据不能原样保留"
+                            "语义、位置、大小、物理加密、文件系统或 key profile 与来源不兼容；不能进入 Preserve family"
                                 .into();
                     }
                 }
             }
+            let action = disposition.legacy_action();
             partitions.push(TargetPartitionPlan {
                 geometry: *target,
                 action,
+                disposition,
+                source_password_knowledge,
+                target_password_policy,
                 reason,
                 preserved_record,
             });

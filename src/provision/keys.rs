@@ -39,6 +39,31 @@ pub fn wrap_legacy_lba7_file_key(password: &[u8], file_key: [u8; 8]) -> LegacyLb
     }
 }
 
+pub fn unwrap_legacy_lba7_file_key(
+    password: &[u8],
+    material: LegacyLba7KeyMaterial,
+) -> Result<[u8; 8], String> {
+    if material.user_key_crc != crc32_bare(password) {
+        return Err("password does not match existing LBA7 key record".into());
+    }
+    let folded = legacy_password_fold32(password);
+    let mut file_key = [0u8; 8];
+    for (index, chunk) in material
+        .wrapped_file_key
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .enumerate()
+    {
+        let word = u32::from_le_bytes(*chunk) ^ folded;
+        file_key[index * 4..index * 4 + 4].copy_from_slice(&word.to_le_bytes());
+    }
+    if crc32_bare(&file_key) != material.file_key_crc {
+        return Err("existing LBA7 FileKeyCRC does not verify".into());
+    }
+    Ok(file_key)
+}
+
 fn legacy_password_fold32(password: &[u8]) -> u32 {
     let mut sum = 0u32;
     let (chunks, tail) = password.as_chunks::<4>();

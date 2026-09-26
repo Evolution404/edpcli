@@ -1,4 +1,4 @@
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct ProvisionForm {
     pub boot_input_mode: crate::provision::CapacityInputMode,
     pub share_input_mode: crate::provision::CapacityInputMode,
@@ -25,7 +25,14 @@ pub struct ProvisionForm {
     pub user: String,
     pub dept: String,
     pub label: String,
-    pub password: String,
+    pub share_source_password: String,
+    pub share_source_knowledge: crate::provision::SourcePasswordKnowledge,
+    pub share_opaque_profile: bool,
+    pub share_target_password: String,
+    pub encrypt_source_password: String,
+    pub encrypt_source_knowledge: crate::provision::SourcePasswordKnowledge,
+    pub encrypt_opaque_profile: bool,
+    pub encrypt_target_password: String,
     pub volume_label: String,
     pub format_boot: bool,
     pub format_share: bool,
@@ -39,6 +46,24 @@ pub struct ProvisionForm {
     pub cancel_password_complexity_check: bool,
     pub max_share_password_errors: String,
     pub max_encrypt_password_errors: String,
+}
+
+impl std::fmt::Debug for ProvisionForm {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("ProvisionForm")
+            .field("label_id", &self.label_id)
+            .field("user", &self.user)
+            .field("dept", &self.dept)
+            .field("label", &self.label)
+            .field("share_source_knowledge", &self.share_source_knowledge)
+            .field("share_source_password", &"[REDACTED]")
+            .field("share_target_password", &"[REDACTED]")
+            .field("encrypt_source_knowledge", &self.encrypt_source_knowledge)
+            .field("encrypt_source_password", &"[REDACTED]")
+            .field("encrypt_target_password", &"[REDACTED]")
+            .finish_non_exhaustive()
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -221,7 +246,14 @@ impl Default for ProvisionForm {
             user: String::new(),
             dept: String::new(),
             label: crate::provision::DEFAULT_SAFE6_LABEL.into(),
-            password: "0000aaaa".into(),
+            share_source_password: String::new(),
+            share_source_knowledge: crate::provision::SourcePasswordKnowledge::Unknown,
+            share_opaque_profile: false,
+            share_target_password: "0000aaaa".into(),
+            encrypt_source_password: String::new(),
+            encrypt_source_knowledge: crate::provision::SourcePasswordKnowledge::Unknown,
+            encrypt_opaque_profile: false,
+            encrypt_target_password: "0000aaaa".into(),
             volume_label: "启动区".into(),
             format_boot: false,
             format_share: false,

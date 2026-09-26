@@ -6,11 +6,13 @@
 
 mod filesystem;
 mod generate;
+mod key_domain;
 mod keys;
 mod layout;
 mod lce;
 mod plain;
 mod profile;
+mod region_mapping;
 mod reprovision;
 mod spec;
 mod validate;
@@ -22,9 +24,13 @@ pub use filesystem::{
     OfficialFilesystemFormat, PartitionFilesystemImage, SparseFilesystemImage,
 };
 pub use generate::{generate_image, generate_official_image, ProvisionEntropy};
+pub use key_domain::{
+    KeyDomainRole, KeyDomainSecretPair, KeyDomainSecrets, SecretBytes, SourcePasswordKnowledge,
+    TargetPasswordPolicy, DEFAULT_KEY_DOMAIN_PASSWORD,
+};
 pub use keys::{
-    wrap_file_key, wrap_legacy_lba7_file_key, FileKeyWrapMode, LegacyLba7KeyMaterial,
-    ProvisionKeyMaterial,
+    unwrap_legacy_lba7_file_key, wrap_file_key, wrap_legacy_lba7_file_key, FileKeyWrapMode,
+    LegacyLba7KeyMaterial, ProvisionKeyMaterial,
 };
 pub use layout::{
     build_official_partition_layout, official_format_targets,
@@ -42,13 +48,19 @@ pub use plain::{
     DEFAULT_PLAIN_START_LBA, MAX_PLAIN_PARTITIONS,
 };
 pub use profile::{PassInfoPolicy, ProvisionProfile, DEFAULT_SAFE6_LABEL};
+pub use region_mapping::{
+    migration_candidate, opaque_preserve_compatibility, preserve_compatibility,
+    CompatibilityFailure, Extent, FilesystemProfile, PhysicalCryptoProfile, RegionKeyProfile,
+    RegionMapping, RegionMappingKind, RegionMappingPlan, RegionMappingPlanner, SourceRegion,
+    TargetRegion,
+};
 pub use reprovision::{
     apply_target_geometry_overrides, decide_partition_action, parse_existing_provision,
     pass_info_policy_from_sectors, prefill_for_target_mode, validate_target_geometry,
     CapacityInput, CapacityInputMode, CapacitySource, DiskProvisionKind, ExistingPartition,
     ExistingPartitionRecord, ExistingProvisionProfile, ParsedExistingProvision, PartitionAction,
-    ProvisionPrefill, ProvisionTarget, QuickCapacityUnit, TargetGeometryOverrides,
-    TargetPartitionGeometry, TargetPartitionPlan, TargetProvisionPlan,
+    ProvisionPrefill, ProvisionTarget, QuickCapacityUnit, RegionDisposition,
+    TargetGeometryOverrides, TargetPartitionGeometry, TargetPartitionPlan, TargetProvisionPlan,
 };
 pub use spec::{OnlyId, ProvisionMetadata, ProvisionSpec, TargetIdentity};
 pub use validate::{
