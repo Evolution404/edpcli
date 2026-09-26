@@ -2,8 +2,12 @@ use edpcli::application::inspect::{AdvancedInspectMode, AdvancedInspectWorkspace
 use edpcli::inspect::InspectMeta;
 use edpcli::inspect_target::InspectDiskContext;
 use edpcli::tui::disk_layout::{DiskLayoutModel, DiskRegionKind};
-use edpcli::tui::pane::PaneId;
-use edpcli::tui::state::{AdvancedInspectSource, AppState, NavCommand, ProvisionKind};
+use edpcli::tui::pane::{PaneFocus, PaneId};
+use edpcli::tui::render;
+use edpcli::tui::state::{
+    AdvancedInspectSource, AppState, NavCommand, ProvisionKind, ProvisionStage,
+};
+use ratatui::{backend::TestBackend, Terminal};
 
 fn inspect_workspace() -> AdvancedInspectWorkspace {
     let context =
@@ -249,4 +253,90 @@ fn plain_provision_disk_layout_covers_mbr_free_and_partitions_to_last_sector() {
         .segments
         .iter()
         .any(|segment| segment.kind == DiskRegionKind::Plain));
+}
+
+
+fn render_text(state: &AppState, width: u16, height: u16) -> String {
+    let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+    terminal.draw(|frame| render::draw(frame, state)).unwrap();
+    terminal
+        .backend()
+        .buffer()
+        .content()
+        .iter()
+        .map(|cell| cell.symbol())
+        .collect::<String>()
+        .replace(' ', "")
+}
+
+#[test]
+fn provision_review_tab_cycle_and_vertical_scroll_are_pane_local() {
+    let mut state = provision_state();
+    state.provision_mut().stage = ProvisionStage::Review;
+    state.provision_mut().pane_focus = PaneFocus::provision_review();
+    let selected = state.provision().field_selected;
+
+    assert_eq!(state.provision_focused_pane(), PaneId::ProvisionSummary);
+    for expected in [
+        PaneId::ProvisionDiskLayout,
+        PaneId::ProvisionChanges,
+        PaneId::ProvisionSummary,
+    ] {
+        state.provision_shift_pane(false);
+        assert_eq!(state.provision_focused_pane(), expected);
+    }
+
+    for pane in [
+        PaneId::ProvisionSummary,
+        PaneId::ProvisionDiskLayout,
+        PaneId::ProvisionChanges,
+    ] {
+        state.provision_focus_pane(pane);
+        let before = state.pane_viewport(pane).scroll_y.offset;
+        state.provision_move_focused_vertical(1, 1, 100);
+        assert_eq!(state.provision().field_selected, selected, "{pane:?}");
+        assert_eq!(
+            state.pane_viewport(pane).scroll_y.offset,
+            before + 1,
+            "{pane:?}"
+        );
+    }
+}
+
+#[test]
+fn provision_form_narrow_renders_only_the_focused_pane() {
+    let mut state = provision_state();
+    state.provision_focus_pane(PaneId::ProvisionParameters);
+    let parameters = render_text(&state, 80, 24);
+    assert!(parameters.contains("参数"), "{parameters}");
+    assert!(!parameters.contains("磁盘布局"), "{parameters}");
+
+    state.provision_focus_pane(PaneId::ProvisionDiskLayout);
+    let layout = render_text(&state, 80, 24);
+    assert!(layout.contains("磁盘布局"), "{layout}");
+    assert!(!layout.contains("参数"), "{layout}");
+}
+
+#[test]
+fn provision_review_wide_has_three_panes_and_narrow_uses_focus() {
+    let mut state = provision_state();
+    state.provision_mut().stage = ProvisionStage::Review;
+    state.provision_mut().pane_focus = PaneFocus::provision_review();
+
+    let wide = render_text(&state, 160, 36);
+    assert!(wide.contains("计划摘要"), "{wide}");
+    assert!(wide.contains("磁盘布局"), "{wide}");
+    assert!(wide.contains("变更明细"), "{wide}");
+
+    state.provision_focus_pane(PaneId::ProvisionSummary);
+    let summary = render_text(&state, 80, 24);
+    assert!(summary.contains("计划摘要"), "{summary}");
+    assert!(!summary.contains("磁盘布局"), "{summary}");
+    assert!(!summary.contains("变更明细"), "{summary}");
+
+    state.provision_focus_pane(PaneId::ProvisionChanges);
+    let changes = render_text(&state, 80, 24);
+    assert!(changes.contains("变更明细"), "{changes}");
+    assert!(!changes.contains("计划摘要"), "{changes}");
+    assert!(!changes.contains("磁盘布局"), "{changes}");
 }
