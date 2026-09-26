@@ -35,7 +35,11 @@ impl std::fmt::Display for EvidenceError {
                 write!(formatter, "EDPB 校验失败 {}: {message}", path.display())
             }
             Self::BackupProtocolRead { path, message } => {
-                write!(formatter, "读取 EDPB LBA0-12 失败 {}: {message}", path.display())
+                write!(
+                    formatter,
+                    "读取 EDPB LBA0-12 失败 {}: {message}",
+                    path.display()
+                )
             }
             Self::BackupProtocolLength { actual } => write!(
                 formatter,
@@ -54,7 +58,10 @@ impl std::fmt::Display for EvidenceError {
                 write!(formatter, "无法只读打开 disk{disk}: {message}")
             }
             Self::DiskProtocolRead { disk, message } => {
-                write!(formatter, "读取 disk{disk} 协议上下文 LBA0-12 失败: {message}")
+                write!(
+                    formatter,
+                    "读取 disk{disk} 协议上下文 LBA0-12 失败: {message}"
+                )
             }
         }
     }
@@ -179,10 +186,11 @@ pub struct EvidenceSource {
 
 impl EvidenceSource {
     pub fn open_backup(path: &Path) -> Result<Self, EvidenceError> {
-        let verified = crate::edpb::verify_file(path).map_err(|error| EvidenceError::BackupVerify {
-            path: path.to_path_buf(),
-            message: error.to_string(),
-        })?;
+        let verified =
+            crate::edpb::verify_file(path).map_err(|error| EvidenceError::BackupVerify {
+                path: path.to_path_buf(),
+                message: error.to_string(),
+            })?;
         let protocol = crate::edpb::read_raw_protocol(path).map_err(|error| {
             EvidenceError::BackupProtocolRead {
                 path: path.to_path_buf(),
@@ -195,12 +203,11 @@ impl EvidenceSource {
             });
         }
         let manifest = verified.manifest;
-        let total_sectors = manifest
-            .geometry
-            .total_sectors
-            .ok_or_else(|| EvidenceError::BackupMissingGeometry {
+        let total_sectors = manifest.geometry.total_sectors.ok_or_else(|| {
+            EvidenceError::BackupMissingGeometry {
                 path: path.to_path_buf(),
-            })?;
+            }
+        })?;
         let identity = EvidenceIdentity {
             device_id: Some(manifest.device.device_id.clone()),
             vid: Some(manifest.device.vid.clone()),
@@ -233,12 +240,12 @@ impl EvidenceSource {
             disk,
             message: error.to_string(),
         })?;
-        let protocol = dev
-            .read_range(0, METADATA_SECTOR_COUNT)
-            .map_err(|error| EvidenceError::DiskProtocolRead {
+        let protocol = dev.read_range(0, METADATA_SECTOR_COUNT).map_err(|error| {
+            EvidenceError::DiskProtocolRead {
                 disk,
                 message: error.to_string(),
-            })?;
+            }
+        })?;
         debug_assert_eq!(protocol.len(), METADATA_IMAGE_LEN);
 
         let raw7 = &protocol[7 * SECTOR..8 * SECTOR];
