@@ -1109,6 +1109,17 @@ application 返回结构化 `ProvisionReport/BackupReport/InspectReport`，CLI/T
 - 源码扫描确认上述 CLI 直接裸盘依赖全部为 **0**；写盘事务内部的 `TargetSession`、USB/系统盘保护、写前备份、卸载/锁卷、重开身份复核、原子写、读回与回滚逻辑均未改变。
 - 定向 `backup_suite` **61/61**、`cli_suite` **63/63**、`provision_suite` **178/178**、`repository_suite` **31/31**，共 **333/333** 通过。
 
+## Phase D6：应用错误模型类型化
+
+**COMPLETE。**
+
+- `application::evidence` 新增 `EvidenceError`，将 EDPB 校验/协议读取/长度/geometry 与物理盘目标、geometry、只读打开、协议读取失败改为类型化错误，不再以裸 `String` 承担应用控制流。
+- `application::inspect` 新增 `InspectError` / `InspectErrorKind::{InvalidRequest, OutOfRange, Backup, Io, Decode, Target}`；LBA 请求解析、decoder、任意扇区读取、越界、导出等路径统一返回类型化错误。CLI 按 `InspectErrorKind` 映射退出码，禁止再通过本地化错误文本的 `message.contains(...)` 推断控制流。
+- 备份删除链新增 `DeletePlanError`、`DeleteExecuteError` 与 `BackupDeleteError`，测试直接断言错误 variant；TUI 只在 worker/消息边界调用 `.to_string()`，应用层保留结构化错误。
+- Windows 测试基础设施同步治理：Provision 稀疏镜像测试临时文件改用安全 ASCII stem + process id + atomic sequence，不再把包含 `::` 的 Rust test name 拼入文件名；`tui_keymap_contract` 改为函数/阶段区间内的关键 token 顺序契约，不再依赖 CRLF、缩进或 rustfmt 的多行布局。
+- 最终 PR #18 head 的 Rust CI 六个平台（macOS arm64/x86_64、Linux arm64/x86_64、Windows arm64/x86_64）均通过 Rustfmt、正式 full、Clippy `-D warnings` 与 release build；checked-in protocol gold audit、dependency policy/cargo-deny 与四平台 Virtual Disk HIL 全部通过。
+- 本阶段未改变 LBA0～12/LCE 已闭环协议语义，也未降低 system-disk guard、USB guard、写前备份、unmount/lock、reopen identity、atomic write、readback 或 rollback。Virtual HIL 仍不替代真实 USB：Chapter 11 实盘只读 Inspect acceptance 与旧 Phase 8 destructive real USB write HIL 继续保持未最终验收状态。
+
 ---
 
 # 第八部分：完成标准
