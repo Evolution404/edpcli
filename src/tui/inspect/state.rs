@@ -1309,11 +1309,7 @@ impl AppState {
         let cursor = (field.range.start % crate::common::SECTOR as u64) as usize;
         let (panel, tree_selection, pane_focus) = {
             let state = self.advanced_inspect.as_ref()?;
-            (
-                state.panel,
-                state.tree_selected,
-                state.pane_focus.clone(),
-            )
+            (state.panel, state.tree_selected, state.pane_focus.clone())
         };
         self.navigation.push(NavigationFrame {
             location: NavigationLocation::Inspect,
@@ -1391,11 +1387,7 @@ impl AppState {
         let lba = self.advanced_inspect_selected_sector_lba()?;
         let (panel, tree_selection, pane_focus) = {
             let state = self.advanced_inspect.as_ref()?;
-            (
-                state.panel,
-                state.tree_selected,
-                state.pane_focus.clone(),
-            )
+            (state.panel, state.tree_selected, state.pane_focus.clone())
         };
         self.navigation.push(NavigationFrame {
             location: NavigationLocation::Inspect,
