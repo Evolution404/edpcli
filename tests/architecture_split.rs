@@ -334,6 +334,8 @@ fn real_usb_password_hil_keeps_secrets_off_argv_and_is_default_off() {
         "guard_usb_disk",
         "commit_provision_with_backup_on_disk",
         "--stdin-secrets",
+        "--generate-secrets",
+        "getrandom::fill",
         "/dev/tty",
         "stty",
         "impl Drop for SecretBundle",

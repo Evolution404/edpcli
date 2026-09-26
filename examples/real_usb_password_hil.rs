@@ -53,6 +53,7 @@ mod macos {
         probe: bool,
         stage: Stage,
         stdin_secrets: bool,
+        generate_secrets: bool,
         expected_serial_sha256: Option<String>,
     }
 
@@ -151,6 +152,7 @@ mod macos {
         let mut probe = false;
         let mut stage = Stage::All;
         let mut stdin_secrets = false;
+        let mut generate_secrets = false;
         let mut expected_serial_sha256 = None;
         let mut args = env::args().skip(1);
         while let Some(arg) = args.next() {
@@ -165,6 +167,7 @@ mod macos {
                 }
                 "--probe" => probe = true,
                 "--stdin-secrets" => stdin_secrets = true,
+                "--generate-secrets" => generate_secrets = true,
                 "--stage" => {
                     stage = match args
                         .next()
@@ -186,11 +189,15 @@ mod macos {
                 other => return Err(format!("未知参数: {other}")),
             }
         }
+        if stdin_secrets && generate_secrets {
+            return Err("--stdin-secrets 与 --generate-secrets 不能同时使用".into());
+        }
         Ok(Args {
             disk: disk.ok_or_else(|| "必须显式指定 --disk N".to_string())?,
             probe,
             stage,
             stdin_secrets,
+            generate_secrets,
             expected_serial_sha256,
         })
     }
@@ -270,6 +277,30 @@ mod macos {
         Ok(secrets)
     }
 
+    fn generated_secret(marker: u8) -> Result<Vec<u8>, String> {
+        const ALPHABET: &[u8] = b"ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789";
+        let mut entropy = [0u8; 20];
+        getrandom::fill(&mut entropy)
+            .map_err(|error| format!("生成一次性 HIL 密码失败: {error}"))?;
+        let mut secret = Vec::with_capacity(25);
+        secret.extend_from_slice(&[b'A', b'a', b'7', b'!', marker]);
+        for byte in entropy {
+            secret.push(ALPHABET[byte as usize % ALPHABET.len()]);
+        }
+        Ok(secret)
+    }
+
+    fn generated_secret_bundle() -> Result<SecretBundle, String> {
+        let secrets = SecretBundle {
+            share_v1: generated_secret(b'Q')?,
+            encrypt_v1: generated_secret(b'R')?,
+            share_v2: generated_secret(b'S')?,
+            encrypt_v2: generated_secret(b'T')?,
+        };
+        secrets.validate()?;
+        Ok(secrets)
+    }
+
     fn read_tty_secret<R: BufRead, W: Write>(
         reader: &mut R,
         writer: &mut W,
@@ -293,7 +324,10 @@ mod macos {
         Ok(strip_line_end(line))
     }
 
-    fn read_secrets(stdin_secrets: bool) -> Result<SecretBundle, String> {
+    fn read_secrets(stdin_secrets: bool, generate_secrets: bool) -> Result<SecretBundle, String> {
+        if generate_secrets {
+            return generated_secret_bundle();
+        }
         if stdin_secrets {
             let stdin = io::stdin();
             return read_four_lines(&mut stdin.lock());
@@ -834,7 +868,7 @@ mod macos {
         })?;
         probe_target(&runner, args.disk, Some(expected_serial))?;
 
-        let secrets = read_secrets(args.stdin_secrets)?;
+        let secrets = read_secrets(args.stdin_secrets, args.generate_secrets)?;
         let before = match args.stage {
             Stage::All | Stage::Build => Some(build_distinct_password_mode0(
                 &runner,
