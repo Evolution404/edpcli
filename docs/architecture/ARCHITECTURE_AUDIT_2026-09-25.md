@@ -1113,7 +1113,7 @@ application 返回结构化 `ProvisionReport/BackupReport/InspectReport`，CLI/T
 
 **COMPLETE。**
 
-- `application::evidence` 新增 `EvidenceError`，将 EDPB 校验/协议读取/长度/geometry 与物理盘目标、geometry、只读打开、协议读取失败改为类型化错误，不再以裸 `String` 承担应用控制流。
+- `application::evidence` 新增 `EvidenceError`，将 EDPB 校验/协议读取/长度/几何信息与物理盘目标、几何信息、只读打开、协议读取失败改为类型化错误，不再以裸 `String` 承担应用控制流。
 - `application::inspect` 新增 `InspectError` / `InspectErrorKind::{InvalidRequest, OutOfRange, Backup, Io, Decode, Target}`；LBA 请求解析、decoder、任意扇区读取、越界、导出等路径统一返回类型化错误。CLI 按 `InspectErrorKind` 映射退出码，禁止再通过本地化错误文本的 `message.contains(...)` 推断控制流。
 - 备份删除链新增 `DeletePlanError`、`DeleteExecuteError` 与 `BackupDeleteError`，测试直接断言错误 variant；TUI 只在 worker/消息边界调用 `.to_string()`，应用层保留结构化错误。
 - Windows 测试基础设施同步治理：Provision 稀疏镜像测试临时文件改用安全 ASCII stem + process id + atomic sequence，不再把包含 `::` 的 Rust test name 拼入文件名；`tui_keymap_contract` 改为函数/阶段区间内的关键 token 顺序契约，不再依赖 CRLF、缩进或 rustfmt 的多行布局。
