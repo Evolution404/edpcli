@@ -74,6 +74,27 @@ fn ctrl(ch: char) -> KeyEvent {
     KeyEvent::new(KeyCode::Char(ch), KeyModifiers::CONTROL)
 }
 
+fn source_section<'a>(source: &'a str, start: &str, end: &str) -> &'a str {
+    let start_index = source
+        .find(start)
+        .unwrap_or_else(|| panic!("missing source section start: {start}"));
+    let tail = &source[start_index..];
+    let end_index = tail
+        .find(end)
+        .unwrap_or_else(|| panic!("missing source section end: {end}"));
+    &tail[..end_index]
+}
+
+fn contains_tokens_in_order(mut source: &str, tokens: &[&str]) -> bool {
+    for token in tokens {
+        let Some(index) = source.find(token) else {
+            return false;
+        };
+        source = &source[index + token.len()..];
+    }
+    true
+}
+
 #[test]
 fn normal_navigation_uses_vim_semantics_without_workspace_side_effects() {
     let mut open_mapper = KeyMapper::new();
@@ -212,17 +233,45 @@ fn normal_mode_keeps_inspect_and_backup_as_single_key_actions() {
     );
 
     let event_loop = include_str!("../src/tui/mod.rs");
-    assert!(
-        !event_loop.contains("TuiAction::Plan if state.workspace() == state::Workspace::Devices")
+    let dispatch = source_section(
+        event_loop,
+        "fn dispatch_tui_action(",
+        "fn open_advanced_inspect_selection(",
     );
-    assert!(
-        !event_loop.contains("TuiAction::Activate | TuiAction::Open => match state.workspace()")
-    );
-    assert!(event_loop.contains("TuiAction::Insert\n            if matches!(\n                state.workspace(),\n                state::Workspace::Devices | state::Workspace::Backups\n            )"));
-    assert!(event_loop.contains("TuiAction::BackupCreate\n            if matches!(\n                state.workspace(),\n                state::Workspace::Devices | state::Workspace::Backups\n            )"));
-    assert!(
-        event_loop.contains("TuiAction::Restore if state.workspace() == state::Workspace::Backups")
-    );
+    assert!(!dispatch.contains(
+        "TuiAction::Plan if state.workspace() == state::Workspace::Devices"
+    ));
+    assert!(!dispatch.contains(
+        "TuiAction::Activate | TuiAction::Open => match state.workspace()"
+    ));
+    assert!(contains_tokens_in_order(
+        dispatch,
+        &[
+            "TuiAction::Insert",
+            "if matches!(",
+            "state.workspace()",
+            "state::Workspace::Devices | state::Workspace::Backups",
+            "NavCommand::OpenInspect",
+        ],
+    ));
+    assert!(contains_tokens_in_order(
+        dispatch,
+        &[
+            "TuiAction::BackupCreate",
+            "if matches!(",
+            "state.workspace()",
+            "state::Workspace::Devices | state::Workspace::Backups",
+            "state.begin_backup_create_choice()",
+        ],
+    ));
+    assert!(contains_tokens_in_order(
+        dispatch,
+        &[
+            "TuiAction::Restore",
+            "state.workspace() == state::Workspace::Backups",
+            "NavCommand::BeginRestore",
+        ],
+    ));
 }
 
 #[test]
@@ -311,14 +360,28 @@ fn confirm_mode_has_uniform_yes_no_escape_contract_without_weakening_typed_yes()
 #[test]
 fn provision_form_enter_generates_plan_instead_of_editing_or_toggling() {
     let event_loop = include_str!("../src/tui/mod.rs");
-    assert!(
-        event_loop.contains(
-            "TuiAction::Activate => {\n                                    start_provision_plan"
-        ),
-        "Provision Form Enter/Activate must generate the plan"
+    let form = source_section(
+        event_loop,
+        "ProvisionStage::Form => match action {",
+        "ProvisionStage::Review =>",
     );
     assert!(
-        !event_loop.contains("TuiAction::Activate => {\n                                    if !state.provision_begin_insert()"),
+        contains_tokens_in_order(
+            form,
+            &[
+                "TuiAction::Insert",
+                "state.provision_begin_insert()",
+                "TuiAction::Activate",
+                "start_provision_plan(&mut state, &mut tasks)",
+            ],
+        ),
+        "Provision Form Insert must edit while Enter/Activate generates the plan"
+    );
+    assert!(
+        !contains_tokens_in_order(
+            form,
+            &["TuiAction::Activate", "state.provision_begin_insert()"],
+        ),
         "Provision Form Enter must not enter Insert mode or toggle checkbox state"
     );
 
