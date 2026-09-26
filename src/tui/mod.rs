@@ -1261,7 +1261,7 @@ fn run_loop(resume: Option<state::WriteIntent>) -> io::Result<LoopExit> {
                                                     tasks.request_provision_key_probe(disk)
                                                 {
                                                     state.provision_finish_key_probe(Err(
-                                                        message.to_string(),
+                                                        message.to_string()
                                                     ));
                                                 }
                                             }
