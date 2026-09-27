@@ -660,6 +660,14 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
             },
         }
     };
+    let status = if state.input_mode() == InputMode::Normal
+        && state.active_table_kind().is_some()
+        && !state.is_critical_operation()
+    {
+        format!("y 单元格 · Y 整行 · {status}")
+    } else {
+        status
+    };
     super::shell::footer(frame, chunks[usize::from(has_notice) + 3], &status);
     if let Some(message) = state.notice() {
         frame.render_widget(

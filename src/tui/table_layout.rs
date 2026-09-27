@@ -132,7 +132,9 @@ pub fn table_column_copyable(kind: TableKind, logical_column: usize) -> bool {
 }
 
 fn normalize_copied_cell(value: &str) -> String {
-    value.replace(['\t', '\r', '\n'], " ")
+    // Table view cells are sanitized before rendering, so normalize both raw C0
+    // separators and their visible control-picture forms for TSV payloads.
+    value.replace(['\t', '\r', '\n', '⇥', '␍', '␊'], " ")
 }
 
 pub fn copy_cell_value(

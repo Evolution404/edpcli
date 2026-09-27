@@ -14,6 +14,7 @@ pub mod pane;
 pub mod render;
 pub mod shell;
 pub mod state;
+mod table_dispatch;
 pub mod table_layout;
 pub mod task;
 pub mod theme;
@@ -33,6 +34,7 @@ use crate::common::{EXIT_IO, EXIT_OK, EXIT_USAGE};
 use dispatch::*;
 use event::KeyMapper;
 use state::{AppState, NavCommand, StateEffect};
+use table_dispatch::*;
 use task::TaskHub;
 
 const RESUME_KIND_FLAG: &str = "--_resume-kind";

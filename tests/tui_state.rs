@@ -1891,4 +1891,39 @@ fn table_copy_follows_logical_column_after_runtime_reorder() {
     let cells = row.split('\t').collect::<Vec<_>>();
     assert_eq!(cells[1], "输电运检中心");
     assert_eq!(cells.len(), 8);
+
+    assert!(state.move_table_column_edge_for_viewport(TableKind::Devices, true, 160, 30));
+    let last = state.table_copy_payload(TableKind::Devices, false).unwrap();
+    assert!(!last.is_empty());
+    assert!(state.move_table_column_edge_for_viewport(TableKind::Devices, false, 160, 30));
+    let first = state.table_copy_payload(TableKind::Devices, false).unwrap();
+    assert_ne!(first, last);
+}
+
+#[test]
+fn provision_select_and_menu_copy_use_active_column_and_current_order() {
+    use edpcli::tui::table_layout::TableKind;
+
+    let mut state = AppState::new();
+    state.replace_devices(vec![device(64_000_000_000)]);
+    state.navigate(NavCommand::WorkspaceProvision, 20);
+    let kind = TableKind::ProvisionDevices;
+    assert_eq!(state.active_table_kind(), Some(kind));
+    let first = state.table_copy_payload(kind, false).unwrap();
+    assert!(state.move_table_column_for_viewport(kind, false, 160, 30));
+    let second = state.table_copy_payload(kind, false).unwrap();
+    assert_ne!(first, second);
+    assert!(state.reorder_table_column_for_viewport(kind, true, 160, 30));
+    assert_eq!(state.table_copy_payload(kind, false).unwrap(), second);
+    let row = state.table_copy_payload(kind, true).unwrap();
+    assert_eq!(row.split('\t').next(), Some(second.as_str()));
+
+    assert_eq!(state.provision_select_disk(), Some(6));
+    let kind = TableKind::ProvisionMenu;
+    assert_eq!(state.active_table_kind(), Some(kind));
+    let first = state.table_copy_payload(kind, false).unwrap();
+    assert!(state.move_table_column_edge_for_viewport(kind, true, 160, 30));
+    let last = state.table_copy_payload(kind, false).unwrap();
+    assert_ne!(first, last);
+    assert!(state.table_copy_payload(kind, true).unwrap().contains('\t'));
 }

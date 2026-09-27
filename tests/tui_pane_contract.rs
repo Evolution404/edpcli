@@ -137,6 +137,21 @@ fn inspect_tab_cycle_is_tree_overview_detail_disk_layout() {
 }
 
 #[test]
+fn table_footer_advertises_cell_and_row_copy_across_workspaces() {
+    let mut devices = AppState::new();
+    devices.replace_devices(vec![device()]);
+    assert!(render_text(&devices, 240, 60).contains("y单元格·Y整行"));
+
+    devices.navigate(NavCommand::WorkspaceBackups, 20);
+    assert!(render_text(&devices, 240, 60).contains("y单元格·Y整行"));
+
+    devices.navigate(NavCommand::WorkspaceProvision, 20);
+    assert!(render_text(&devices, 240, 60).contains("y单元格·Y整行"));
+    assert_eq!(devices.provision_select_disk(), Some(6));
+    assert!(render_text(&devices, 240, 60).contains("y单元格·Y整行"));
+}
+
+#[test]
 fn inspect_tree_jk_changes_tree_selection_only() {
     let mut state = inspect_state();
     state.advanced_inspect_focus_pane(PaneId::InspectTree);

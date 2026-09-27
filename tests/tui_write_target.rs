@@ -420,3 +420,22 @@ fn backup_table_sort_preserves_selected_backup_reference() {
     assert!(state.clear_table_sort(TableKind::Backups));
     assert_eq!(state.selected_backup_path(), Some(PathBuf::from("two.bin")));
 }
+
+#[test]
+fn backup_copy_skips_control_column_and_normalizes_unicode_text() {
+    use edpcli::tui::table_layout::TableKind;
+
+    let mut item = backup(1, "中文🙂.edpb");
+    item.user = Some("张三\t测试\r\n🙂".into());
+    let mut state = AppState::new();
+    state.replace_backups(vec![item]);
+    state.navigate(NavCommand::WorkspaceBackups, 20);
+    let kind = TableKind::Backups;
+    assert_eq!(state.table_copy_payload(kind, false), None);
+    assert!(state.move_table_column_for_viewport(kind, false, 160, 30));
+    assert_eq!(state.table_copy_payload(kind, false).as_deref(), Some("1"));
+    let row = state.table_copy_payload(kind, true).unwrap();
+    assert_eq!(row.split('\t').count(), 11);
+    assert!(row.contains("张三 测试  🙂"));
+    assert!(!row.starts_with('✓'));
+}

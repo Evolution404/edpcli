@@ -8728,7 +8728,7 @@ Chapter 15 身份治理仍然是独立的 application/backup 安全治理；它�
 
 ## 16. 全应用 TUI 设计系统与信息架构升级（2026-09-27）
 
-> **状态：核心阶段 COMPLETE（2026-09-27，U0～U9）；扩展阶段 U10 COMPLETE，U12 / U11 待实施。** U0～U9 已完成全应用 UI 架构升级；2026-09-27 复审又发现 DiskLayout 展示层仍有少量页面私有逻辑，并新增“内置演示模式”和表格系统剪贴板可靠性治理需求，因此追加 U10 / U11 / U12。Chapter 12 K6 `Migrate` 继续保持 `DEFERRED / fail-closed`，与本章无关。
+> **状态：核心阶段 COMPLETE（2026-09-27，U0～U9）；扩展阶段 U10 / U12 COMPLETE，U11 待实施。** U0～U9 已完成全应用 UI 架构升级；2026-09-27 复审又发现 DiskLayout 展示层仍有少量页面私有逻辑，并新增“内置演示模式”和表格系统剪贴板可靠性治理需求，因此追加 U10 / U11 / U12。Chapter 12 K6 `Migrate` 继续保持 `DEFERRED / fail-closed`，与本章无关。
 
 ### 16.1 背景与目标
 
@@ -9554,7 +9554,7 @@ edpcli demo --list-scenes
 
 #### U12 — 表格 y/Y 系统剪贴板可靠性治理
 
-状态：PLANNED（2026-09-27 发现真实交互缺陷）。
+状态：COMPLETE（2026-09-27；注入式 backend、原生剪贴板、OSC52 分类和 fast/clippy gate 通过）。
 
 现状审计：
 
@@ -9592,6 +9592,8 @@ edpcli demo --list-scenes
 - macOS 原生 backend 成功与失败；
 - OSC52 fallback 不得误报 Confirmed；
 - 所有现有 Table 键位测试、fast/full/clippy/fmt/diff 门禁保持全绿。
+
+实现记录：`ClipboardService` 优先使用原生进程，macOS `pbcopy`、Linux `wl-copy` / `xclip` / `xsel`、Windows PowerShell 均只从 stdin 接收 payload 并检查退出状态。OSC52 只返回 `TerminalRequestSent`；UI 只有 `Confirmed` 才显示“已复制”。共享 Table dispatch 可注入 fake backend，控制列零调用。Devices、Backups、Provision Select/Menu、Inspect Fields 的 y/Y payload 与状态栏提示均有回归；macOS `pbcopy` / `pbpaste` 精确回读已在本机通过。复制 TSV 将原始 Tab/CR/LF 和显示层控制符统一为空格。
 
 详细设计与执行顺序见 16.17。
 
