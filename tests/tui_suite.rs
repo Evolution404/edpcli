@@ -3,6 +3,8 @@ pub mod common;
 
 #[path = "tui_animation.rs"]
 mod tui_animation;
+#[path = "tui_backup_coverage.rs"]
+mod tui_backup_coverage;
 #[path = "tui_backup_create.rs"]
 mod tui_backup_create;
 #[path = "tui_backup_delete_safety.rs"]

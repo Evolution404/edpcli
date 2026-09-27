@@ -23,6 +23,7 @@ pub enum ColumnId {
     Device,
     Selected,
     Index,
+    Name,
     Time,
     Capacity,
     VidPid,
@@ -83,14 +84,11 @@ pub fn table_column_schema(kind: TableKind) -> Option<Vec<TableColumnSpec>> {
             let mut columns = vec![
                 table_column(Selected, "选", column(3, 3, 4, 99, 1, true)),
                 table_column(Index, "#", column(3, 4, 6, 90, 1, true)),
+                table_column(Name, "名称", column(10, 23, 48, 96, 2, true)),
                 table_column(Time, "时间", column(12, 17, 20, 25, 1, false)),
             ];
             columns.extend(identity);
-            columns.push(table_column(
-                Health,
-                "健康",
-                column(8, 11, 15, 85, 1, false),
-            ));
+            columns.push(table_column(Health, "健康", column(8, 11, 15, 97, 1, true)));
             Some(columns)
         }
         _ => None,
@@ -198,6 +196,7 @@ pub fn backup_table_view(
                     safe(&match column.id {
                         ColumnId::Selected => String::new(),
                         ColumnId::Index => row.index.to_string(),
+                        ColumnId::Name => row.file_name.clone(),
                         ColumnId::Time => row.display_time.clone(),
                         ColumnId::Capacity => cells[0].clone(),
                         ColumnId::VidPid => cells[1].clone(),

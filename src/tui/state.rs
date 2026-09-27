@@ -1196,6 +1196,13 @@ impl AppState {
                     .focus(crate::tui::pane::PaneId::DevicesList);
                 return StateEffect::None;
             }
+            if self.workspace == Workspace::Backups
+                && self.backups_pane_focus.focused() != crate::tui::pane::PaneId::BackupsList
+            {
+                self.backups_pane_focus
+                    .focus(crate::tui::pane::PaneId::BackupsList);
+                return StateEffect::None;
+            }
             if self.wizard.is_some() {
                 self.wizard = None;
                 self.input_mode = InputMode::Normal;
@@ -1238,24 +1245,48 @@ impl AppState {
             NavCommand::WorkspaceBackups => self.switch_workspace(Workspace::Backups),
             NavCommand::WorkspaceProvision => self.switch_workspace(Workspace::Provision),
             NavCommand::Up => {
-                if self.workspace == Workspace::Devices
-                    && self.devices_focused_pane() != crate::tui::pane::PaneId::DevicesList
-                {
-                    let pane = self.devices_focused_pane();
+                let detail_pane = match self.workspace {
+                    Workspace::Devices
+                        if self.devices_focused_pane() != crate::tui::pane::PaneId::DevicesList =>
+                    {
+                        Some(self.devices_focused_pane())
+                    }
+                    Workspace::Backups
+                        if self.backups_focused_pane() != crate::tui::pane::PaneId::BackupsList =>
+                    {
+                        Some(self.backups_focused_pane())
+                    }
+                    _ => None,
+                };
+                if let Some(pane) = detail_pane {
                     self.pane_viewport_mut(pane).scroll_y.line_up();
                 } else {
                     self.selected = self.selected.saturating_sub(1);
                 }
             }
             NavCommand::Down => {
-                if self.workspace == Workspace::Devices
-                    && self.devices_focused_pane() != crate::tui::pane::PaneId::DevicesList
-                {
-                    let pane = self.devices_focused_pane();
-                    let content_len = if pane == crate::tui::pane::PaneId::DevicesStats {
-                        6
-                    } else {
-                        24
+                let detail_pane = match self.workspace {
+                    Workspace::Devices
+                        if self.devices_focused_pane() != crate::tui::pane::PaneId::DevicesList =>
+                    {
+                        Some(self.devices_focused_pane())
+                    }
+                    Workspace::Backups
+                        if self.backups_focused_pane() != crate::tui::pane::PaneId::BackupsList =>
+                    {
+                        Some(self.backups_focused_pane())
+                    }
+                    _ => None,
+                };
+                if let Some(pane) = detail_pane {
+                    let content_len = match pane {
+                        crate::tui::pane::PaneId::DevicesStats => 6,
+                        crate::tui::pane::PaneId::BackupCoverage => self
+                            .selected_backup()
+                            .and_then(|backup| backup.coverage.as_ref())
+                            .map(|coverage| coverage.regions.len() * 2 + 5)
+                            .unwrap_or(5),
+                        _ => 28,
                     };
                     self.pane_viewport_mut(pane)
                         .scroll_y

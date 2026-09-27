@@ -17,6 +17,7 @@ fn backup_table_values(
                 if checked { warning() } else { muted() },
             ),
             ColumnId::Index => (backup.index.to_string(), accent()),
+            ColumnId::Name => (safe(&backup.file_name), Style::default()),
             ColumnId::Time => (safe(&backup.display_time), Style::default()),
             ColumnId::Capacity => (safe(&cells[0]), Style::default()),
             ColumnId::VidPid => (safe(&cells[1]), secondary()),
@@ -88,189 +89,211 @@ pub(super) fn draw_backup_create_choice(
 }
 
 pub(super) fn draw_backups(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState) {
-    let (list_area, sidebar) = workspace_sidebar_layout(area);
-    let visible_count = state.visible_backup_count();
-    let total_count = state.backups().len();
-    let count_label = if state.workspace_filter_active() {
-        format!("{visible_count}/{total_count}")
+    use crate::tui::pane::PaneId;
+    use crate::tui::ui::ViewportClass;
+    let focused = state.backups_focused_pane();
+    let class = ViewportClass::for_width(area.width);
+    let (list_area, detail_area, coverage_area) = if class == ViewportClass::Compact {
+        match focused {
+            PaneId::BackupSummary => (None, Some(area), None),
+            PaneId::BackupCoverage => (None, None, Some(area)),
+            _ => (Some(area), None, None),
+        }
     } else {
-        total_count.to_string()
-    };
-    let backup_parts = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([Constraint::Length(3), Constraint::Min(4)])
-        .split(list_area);
-
-    let summary_parts = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([Constraint::Min(40), Constraint::Length(38)])
-        .split(backup_parts[0]);
-    frame.render_widget(
-        Paragraph::new(Line::from(vec![
-            Span::styled("总计 ", muted()),
-            Span::styled(state.backups().len().to_string(), accent()),
-            Span::styled("  ·  已选 ", muted()),
-            Span::styled(state.backup_selection_count().to_string(), warning()),
-        ]))
-        .block(Block::default().borders(Borders::ALL).title("备份概览")),
-        summary_parts[0],
-    );
-    let search_active = state.input_mode() == InputMode::Search;
-    let search_filtered = state.workspace_filter_active();
-    let search_text = if search_active {
-        format!("/{}▌", safe(state.input_buffer()))
-    } else if let Some(status) = state.search_status() {
-        status
-    } else {
-        "/ 搜索身份、容量、型号、文件名".to_string()
-    };
-    let search_style = if search_active {
-        accent()
-    } else if search_filtered {
-        secondary()
-    } else {
-        muted()
-    };
-    frame.render_widget(
-        Paragraph::new(search_text)
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .border_style(search_style)
-                    .title(if search_active {
-                        "搜索 · 实时过滤"
-                    } else {
-                        "搜索"
-                    }),
-            )
-            .style(search_style),
-        summary_parts[1],
-    );
-
-    let title = if state.backup_scan_pending() {
-        format!("备份列表 ({count_label}) · 扫描中…")
-    } else {
-        format!("备份列表 ({count_label})")
-    };
-
-    if visible_count == 0 {
-        let block = Block::default()
-            .borders(Borders::ALL)
-            .title(title)
-            .title_style(secondary());
-        let inner = block.inner(backup_parts[1]);
-        frame.render_widget(block, backup_parts[1]);
-        let (heading, message, hint) = if state.workspace_filter_active() {
-            (
-                "没有匹配记录",
-                "当前搜索条件没有匹配任何备份。",
-                "继续输入可实时更新；清空搜索词后恢复全部备份。",
-            )
+        let parts = Layout::vertical([Constraint::Percentage(56), Constraint::Min(8)]).split(area);
+        if class == ViewportClass::Standard {
+            if focused == PaneId::BackupCoverage {
+                (Some(parts[0]), None, Some(parts[1]))
+            } else {
+                (Some(parts[0]), Some(parts[1]), None)
+            }
         } else {
-            (
-                "暂无备份记录",
-                "先在“设备”页面选择目标 U 盘，然后按 b 创建只读备份。",
-                "备份创建完成后，这里会自动刷新。",
-            )
+            let bottom =
+                Layout::horizontal([Constraint::Percentage(50), Constraint::Percentage(50)])
+                    .split(parts[1]);
+            (Some(parts[0]), Some(bottom[0]), Some(bottom[1]))
+        }
+    };
+    if let Some(list_area) = list_area {
+        let visible_count = state.visible_backup_count();
+        let total_count = state.backups().len();
+        let count_label = if state.workspace_filter_active() {
+            format!("{visible_count}/{total_count}")
+        } else {
+            total_count.to_string()
+        };
+        let backup_parts = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Length(3), Constraint::Min(4)])
+            .split(list_area);
+
+        let summary_parts = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([Constraint::Min(40), Constraint::Length(38)])
+            .split(backup_parts[0]);
+        frame.render_widget(
+            Paragraph::new(Line::from(vec![
+                Span::styled("总计 ", muted()),
+                Span::styled(state.backups().len().to_string(), accent()),
+                Span::styled("  ·  已选 ", muted()),
+                Span::styled(state.backup_selection_count().to_string(), warning()),
+            ]))
+            .block(Block::default().borders(Borders::ALL).title("备份概览")),
+            summary_parts[0],
+        );
+        let search_active = state.input_mode() == InputMode::Search;
+        let search_filtered = state.workspace_filter_active();
+        let search_text = if search_active {
+            format!("/{}▌", safe(state.input_buffer()))
+        } else if let Some(status) = state.search_status() {
+            status
+        } else {
+            "/ 搜索身份、容量、型号、文件名".to_string()
+        };
+        let search_style = if search_active {
+            accent()
+        } else if search_filtered {
+            secondary()
+        } else {
+            muted()
         };
         frame.render_widget(
-            Paragraph::new(vec![
-                Line::from(Span::styled(
-                    heading,
-                    secondary().add_modifier(Modifier::BOLD),
-                )),
-                Line::from(""),
-                Line::from(message),
-                Line::from(hint),
-            ])
-            .alignment(Alignment::Center)
-            .wrap(Wrap { trim: true }),
-            inner,
-        );
-    } else {
-        use crate::tui::table_layout::{
-            display_width, layout_for, table_column_schema, truncate_cell, TableKind,
-        };
-        let columns = table_column_schema(TableKind::Backups).expect("backup schema");
-        let headings = columns
-            .iter()
-            .map(|column| column.heading)
-            .collect::<Vec<_>>();
-        let mut content_widths = headings
-            .iter()
-            .map(|heading| display_width(heading))
-            .collect::<Vec<_>>();
-        for backup in state.backups() {
-            for (index, (value, _)) in backup_table_values(backup, false, &columns)
-                .iter()
-                .enumerate()
-            {
-                content_widths[index] = content_widths[index].max(display_width(value));
-            }
-        }
-        let layout = layout_for(TableKind::Backups);
-        let viewport = layout.layout(
-            backup_parts[1].width.saturating_sub(4),
-            &content_widths,
-            state.table_scroll_offset(TableKind::Backups),
-        );
-        let window = visible_window(state.selected(), visible_count, backup_parts[1].height);
-        let window_start = window.start;
-        let rows = window
-            .filter_map(|position| state.backup_at_visible(position))
-            .map(|backup| {
-                let values =
-                    backup_table_values(backup, state.backup_is_selected(&backup.path), &columns);
-                TableRow::new(
-                    viewport
-                        .columns
-                        .iter()
-                        .map(|column| {
-                            let (value, style) = &values[column.index];
-                            Cell::from(truncate_cell(
-                                value,
-                                usize::from(column.width),
-                                column.truncate_policy,
-                            ))
-                            .style(*style)
-                        })
-                        .collect::<Vec<_>>(),
+            Paragraph::new(search_text)
+                .block(
+                    Block::default()
+                        .borders(Borders::ALL)
+                        .border_style(search_style)
+                        .title(if search_active {
+                            "搜索 · 实时过滤"
+                        } else {
+                            "搜索"
+                        }),
                 )
-            });
-        let header = TableRow::new(
-            viewport
-                .columns
-                .iter()
-                .map(|column| {
-                    truncate_cell(
-                        headings[column.index],
-                        usize::from(column.width),
-                        column.truncate_policy,
-                    )
-                })
-                .collect::<Vec<_>>(),
-        )
-        .style(accent());
-        let table = Table::new(rows, viewport.widths())
-            .header(header)
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .border_style(focused_panel())
-                    .title(format!(
-                        "{title} · h/l 横向滚动 · {}",
-                        viewport.position_label()
-                    ))
-                    .title_style(secondary()),
-            )
-            .row_highlight_style(selected())
-            .highlight_symbol("▌ ");
-        let mut table_state = TableState::default();
-        table_state.select(Some(state.selected().saturating_sub(window_start)));
-        frame.render_stateful_widget(table, backup_parts[1], &mut table_state);
-    }
+                .style(search_style),
+            summary_parts[1],
+        );
 
-    if let Some((detail_area, animation_area)) = sidebar {
+        let title = if state.backup_scan_pending() {
+            format!("备份列表 ({count_label}) · 扫描中…")
+        } else {
+            format!("备份列表 ({count_label})")
+        };
+
+        if visible_count == 0 {
+            let block = Block::default()
+                .borders(Borders::ALL)
+                .title(title)
+                .title_style(secondary());
+            let inner = block.inner(backup_parts[1]);
+            frame.render_widget(block, backup_parts[1]);
+            let (heading, message, hint) = if state.workspace_filter_active() {
+                (
+                    "没有匹配记录",
+                    "当前搜索条件没有匹配任何备份。",
+                    "继续输入可实时更新；清空搜索词后恢复全部备份。",
+                )
+            } else {
+                (
+                    "暂无备份记录",
+                    "先在“设备”页面选择目标 U 盘，然后按 b 创建只读备份。",
+                    "备份创建完成后，这里会自动刷新。",
+                )
+            };
+            frame.render_widget(
+                Paragraph::new(vec![
+                    Line::from(Span::styled(
+                        heading,
+                        secondary().add_modifier(Modifier::BOLD),
+                    )),
+                    Line::from(""),
+                    Line::from(message),
+                    Line::from(hint),
+                ])
+                .alignment(Alignment::Center)
+                .wrap(Wrap { trim: true }),
+                inner,
+            );
+        } else {
+            use crate::tui::table_layout::{
+                display_width, layout_for, table_column_schema, truncate_cell, TableKind,
+            };
+            let columns = table_column_schema(TableKind::Backups).expect("backup schema");
+            let headings = columns
+                .iter()
+                .map(|column| column.heading)
+                .collect::<Vec<_>>();
+            let mut content_widths = headings
+                .iter()
+                .map(|heading| display_width(heading))
+                .collect::<Vec<_>>();
+            for backup in state.backups() {
+                for (index, (value, _)) in backup_table_values(backup, false, &columns)
+                    .iter()
+                    .enumerate()
+                {
+                    content_widths[index] = content_widths[index].max(display_width(value));
+                }
+            }
+            let layout = layout_for(TableKind::Backups);
+            let viewport = layout.layout(
+                backup_parts[1].width.saturating_sub(4),
+                &content_widths,
+                state.table_scroll_offset(TableKind::Backups),
+            );
+            let window = visible_window(state.selected(), visible_count, backup_parts[1].height);
+            let window_start = window.start;
+            let rows = window
+                .filter_map(|position| state.backup_at_visible(position))
+                .map(|backup| {
+                    let values = backup_table_values(
+                        backup,
+                        state.backup_is_selected(&backup.path),
+                        &columns,
+                    );
+                    TableRow::new(
+                        viewport
+                            .columns
+                            .iter()
+                            .map(|column| {
+                                let (value, style) = &values[column.index];
+                                Cell::from(truncate_cell(
+                                    value,
+                                    usize::from(column.width),
+                                    column.truncate_policy,
+                                ))
+                                .style(*style)
+                            })
+                            .collect::<Vec<_>>(),
+                    )
+                });
+            let header = TableRow::new(
+                viewport
+                    .columns
+                    .iter()
+                    .map(|column| {
+                        truncate_cell(
+                            headings[column.index],
+                            usize::from(column.width),
+                            column.truncate_policy,
+                        )
+                    })
+                    .collect::<Vec<_>>(),
+            )
+            .style(accent());
+            let table_title = format!("{title} · h/l 横向滚动 · {}", viewport.position_label());
+            let table = crate::tui::ui::data_table(
+                &table_title,
+                header,
+                rows,
+                viewport.widths(),
+                state.backups_focused_pane() == crate::tui::pane::PaneId::BackupsList,
+            );
+            let mut table_state = TableState::default();
+            table_state.select(Some(state.selected().saturating_sub(window_start)));
+            frame.render_stateful_widget(table, backup_parts[1], &mut table_state);
+        }
+    }
+    if let Some(detail_area) = detail_area {
         let detail = if let Some(backup) = state.selected_backup() {
             let (health, health_style) = backup_health(backup);
             let identity = crate::application::identity::WorkspaceIdentity::from_backup_against(
@@ -279,7 +302,40 @@ pub(super) fn draw_backups(frame: &mut Frame, area: ratatui::layout::Rect, state
             );
             let cells = identity.display_cells();
             let content_width = detail_area.width.saturating_sub(2) as usize;
+            use crate::application::media_identity::MediaRelationship;
+            let (relation_label, relation_tone) =
+                match identity.canonical.as_ref().map(|value| value.relationship) {
+                    Some(MediaRelationship::SamePhysicalMedia) => {
+                        ("已确认 · 物理介质", crate::tui::ui::BadgeTone::Success)
+                    }
+                    Some(MediaRelationship::DifferentMedia) => {
+                        ("硬件冲突", crate::tui::ui::BadgeTone::Danger)
+                    }
+                    Some(
+                        MediaRelationship::SameEdpInstance
+                        | MediaRelationship::SameControlledLineage,
+                    ) => ("协议相关 · 物理未确认", crate::tui::ui::BadgeTone::Warning),
+                    Some(
+                        MediaRelationship::ProbableSameMedia
+                        | MediaRelationship::ModelOnlyMatch
+                        | MediaRelationship::Ambiguous,
+                    ) => (
+                        "可能相关 · 不可唯一确认",
+                        crate::tui::ui::BadgeTone::Warning,
+                    ),
+                    None => ("身份未验证", crate::tui::ui::BadgeTone::Neutral),
+                };
             let mut lines = vec![
+                crate::tui::ui::status_badge(relation_label, relation_tone),
+                Line::from(vec![
+                    Span::styled("健康  ", muted()),
+                    Span::styled(health, health_style.add_modifier(Modifier::BOLD)),
+                ]),
+                Line::from(Span::styled(
+                    "普通用户文件不保证完整备份；恢复前核对覆盖范围。",
+                    warning(),
+                )),
+                Line::from(""),
                 Line::from(vec![
                     Span::styled("盘型  ", muted()),
                     Span::styled(safe(&cells[6]), accent()),
@@ -307,12 +363,11 @@ pub(super) fn draw_backups(frame: &mut Frame, area: ratatui::layout::Rect, state
             lines.extend(wrapped_field_lines("部门  ", &cells[5], content_width));
             lines.extend([
                 Line::from(format!("备份时间  {}", safe(&backup.display_time))),
-                Line::from(vec![
-                    Span::styled("健康  ", muted()),
-                    Span::styled(health, health_style.add_modifier(Modifier::BOLD)),
-                ]),
                 Line::from(format!("备份编号  #{}", backup.index)),
             ]);
+            if let Some(sha) = &backup.content_sha256 {
+                lines.push(Line::from(format!("SHA-256  {}", safe(sha))));
+            }
             lines.extend(wrapped_field_lines(
                 "文件  ",
                 &backup.file_name,
@@ -320,7 +375,7 @@ pub(super) fn draw_backups(frame: &mut Frame, area: ratatui::layout::Rect, state
             ));
             lines.extend([
                 Line::from(""),
-                Line::from("提示：EDPB 保存协议与选定元数据范围，不保证包含普通分区全部用户文件。"),
+                Line::from("EDPB 保存协议与选定元数据范围，不保证包含普通分区全部用户文件。"),
                 Line::from(""),
                 Line::from(Span::styled(
                     "可用操作",
@@ -356,16 +411,103 @@ pub(super) fn draw_backups(frame: &mut Frame, area: ratatui::layout::Rect, state
                 Line::from("选择一条备份后，这里会显示身份、健康状态和安全操作。"),
             ])
         }
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .title("备份详情")
-                .title_style(secondary()),
-        )
+        .block(crate::tui::ui::card(
+            "备份详情",
+            focused == crate::tui::pane::PaneId::BackupSummary,
+        ))
+        .scroll((
+            state
+                .pane_viewport(crate::tui::pane::PaneId::BackupSummary)
+                .scroll_y
+                .offset
+                .min(u16::MAX as usize) as u16,
+            0,
+        ))
         .wrap(Wrap { trim: false });
         frame.render_widget(detail, detail_area);
-        draw_workspace_animation(frame, animation_area, state, "BACKUP WORKSPACE");
     }
+    if let Some(coverage_area) = coverage_area {
+        draw_backup_coverage(frame, coverage_area, state);
+    }
+}
+
+fn draw_backup_coverage(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState) {
+    let mut lines = Vec::new();
+    match state.selected_backup() {
+        Some(backup) => match backup.coverage.as_ref() {
+            Some(coverage) => {
+                lines.push(Line::from(format!(
+                    "{} 区域 · {} Extent · {} Artifact",
+                    coverage.regions.len(),
+                    coverage.extent_count,
+                    coverage.artifact_count
+                )));
+                for region in &coverage.regions {
+                    let label = match region.role.as_str() {
+                        "protocol" => "EDP 主协议区",
+                        "data" | "front" => "数据前部",
+                        "lce" => "LCE",
+                        "tail" => "盘尾",
+                        "filesystem" => "文件系统",
+                        _ => region.role.as_str(),
+                    };
+                    let (bar, count) = match region.total_sectors {
+                        Some(total) if total > 0 => {
+                            let cells = (region.captured_sectors.min(total).saturating_mul(10)
+                                / total) as usize;
+                            (
+                                format!("{}{}", "█".repeat(cells), "░".repeat(10 - cells)),
+                                format!("{}/{} sector", region.captured_sectors, total),
+                            )
+                        }
+                        _ => (
+                            "??????????".into(),
+                            format!("{} sector / 总量未知", region.captured_sectors),
+                        ),
+                    };
+                    let (status, tone) = match region.completeness {
+                        crate::edpb::ArtifactCompleteness::Complete => {
+                            ("完整", crate::tui::ui::BadgeTone::Success)
+                        }
+                        crate::edpb::ArtifactCompleteness::Partial => {
+                            ("部分", crate::tui::ui::BadgeTone::Warning)
+                        }
+                        crate::edpb::ArtifactCompleteness::NotCaptured => {
+                            ("未采集", crate::tui::ui::BadgeTone::Neutral)
+                        }
+                    };
+                    lines.push(Line::from(format!("{}  {}  {}", safe(label), bar, count)));
+                    lines.push(crate::tui::ui::status_badge(status, tone));
+                }
+            }
+            None => lines.push(Line::from("Manifest 覆盖范围不可用；备份完整性未确认。")),
+        },
+        None => lines.push(Line::from(
+            "选择一条备份查看 Region / Extent / Artifact 覆盖范围。",
+        )),
+    }
+    lines.push(Line::from(""));
+    lines.push(Line::from(Span::styled(
+        "普通用户文件不保证完整备份。",
+        warning(),
+    )));
+    frame.render_widget(
+        Paragraph::new(lines)
+            .block(crate::tui::ui::card(
+                "区域覆盖 · Manifest",
+                state.backups_focused_pane() == crate::tui::pane::PaneId::BackupCoverage,
+            ))
+            .scroll((
+                state
+                    .pane_viewport(crate::tui::pane::PaneId::BackupCoverage)
+                    .scroll_y
+                    .offset
+                    .min(u16::MAX as usize) as u16,
+                0,
+            ))
+            .wrap(Wrap { trim: false }),
+        area,
+    );
 }
 
 pub(super) fn draw_backup_delete(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState) {

@@ -337,6 +337,7 @@ mod tests {
             size_ok: true,
             lba8: None,
             content_sha256: None,
+            coverage: None,
         }
     }
 

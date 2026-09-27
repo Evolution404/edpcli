@@ -5,6 +5,7 @@
 //! safety policy.
 
 pub mod backup;
+pub mod backup_coverage;
 pub mod device;
 pub mod disk_layout;
 pub mod evidence;
@@ -89,6 +90,7 @@ pub struct BackupWorkspaceItem {
     pub integrity_status: BackupIntegrityStatus,
     pub size_ok: bool,
     pub content_sha256: Option<String>,
+    pub coverage: Option<backup_coverage::BackupCoverage>,
 }
 
 /// Load the canonical selector used by every backup frontend.
@@ -144,6 +146,7 @@ pub fn scan_backup_workspace(root: &Path) -> Vec<BackupWorkspaceItem> {
                 integrity_status: entry.integrity_status,
                 size_ok: entry.size_ok,
                 content_sha256: entry.content_sha256.clone(),
+                coverage: entry.coverage.clone(),
             }
         })
         .collect()

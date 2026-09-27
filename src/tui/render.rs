@@ -289,23 +289,6 @@ fn workspace_sidebar_layout(
     }
 }
 
-fn draw_workspace_animation(
-    frame: &mut Frame,
-    area: Option<ratatui::layout::Rect>,
-    state: &AppState,
-    activity: &'static str,
-) {
-    let Some(area) = area else {
-        return;
-    };
-    let mode = if state.active_scan_pending() {
-        CoreMode::Busy
-    } else {
-        CoreMode::Stable
-    };
-    animation::draw(frame, area, state.animation_frame(), mode, activity);
-}
-
 fn visible_window(selected: usize, total: usize, area_height: u16) -> std::ops::Range<usize> {
     let capacity = usize::from(area_height.saturating_sub(3)).max(1);
     let start = selected

@@ -9430,7 +9430,7 @@ Backup detail / coverage
 
 #### U6 — Backups Workspace
 
-状态：PENDING。
+状态：COMPLETE（2026-09-27）。备份列表接入共享 DataTable，名称与健康列在窄屏保留；宽屏按列表/详情/覆盖范围组织，Compact 可逐 Pane 下钻并用 Esc 返回。详情 Card 直接展示 canonical relationship，只有 `SamePhysicalMedia` 标记已确认，协议相关/弱匹配明确显示物理未确认；健康、SHA、用户文件限制前置。后台扫描从已验证 EDPB Manifest 投影 Region/Extent/Artifact 覆盖范围，renderer 只消费 typed 数据，重叠 Extent 按并集计数；大动画侧栏移除。现有创建/校验/恢复/删除动作和授权路径未改；TUI suite 222/222、Backup suite 70/70 通过。
 
 - 备份列表迁移；
 - 备份详情 Card；

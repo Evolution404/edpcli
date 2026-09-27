@@ -161,6 +161,8 @@ pub struct BackupEntry {
     pub lba8: Option<[u8; SECTOR]>,
     /// 扫描时实际 `.bin` 内容摘要；删除前用于确认同名文件未被替换/改写。
     pub content_sha256: Option<String>,
+    /// Typed region/extent/artifact coverage projected during the background scan.
+    pub coverage: Option<crate::application::backup_coverage::BackupCoverage>,
 }
 
 fn strip_numeric_suffix<'a>(s: &'a str, marker: &str) -> Option<(&'a str, String)> {
@@ -273,6 +275,9 @@ pub fn scan_backup_file(path: &Path) -> Option<BackupEntry> {
     let file_data = fs::read(path).ok();
     let content_sha256 = file_data.as_ref().map(|data| sha256_hex(data));
     let verified = crate::edpb::verify_file(path).ok();
+    let coverage = verified.as_ref().map(|container| {
+        crate::application::backup_coverage::BackupCoverage::from_manifest(&container.manifest)
+    });
     let raw = verified
         .as_ref()
         .and_then(|_| crate::edpb::read_raw_protocol(path).ok());
@@ -332,6 +337,7 @@ pub fn scan_backup_file(path: &Path) -> Option<BackupEntry> {
         size_ok,
         lba8,
         content_sha256,
+        coverage,
     })
 }
 

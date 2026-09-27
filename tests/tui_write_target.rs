@@ -57,6 +57,7 @@ fn backup(index: usize, name: &str) -> BackupWorkspaceItem {
         content_sha256: Some(
             "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef".into(),
         ),
+        coverage: None,
     }
 }
 

@@ -648,6 +648,7 @@ fn fake_entry(name: &str, onlyid: &str, mtime: i64, is_nopwd: bool) -> BackupEnt
         size_ok: true,
         lba8: None,
         content_sha256: None,
+        coverage: None,
     }
 }
 
