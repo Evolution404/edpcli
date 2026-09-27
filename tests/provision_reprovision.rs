@@ -1066,6 +1066,52 @@ fn moving_type4_from_slot_two_to_one_reencodes_headers_and_reuses_only_its_key_m
 }
 
 #[test]
+fn target_plan_surfaces_migration_sources_before_k6_execution_is_enabled() {
+    let (_, source_image, did) = generated_source(OfficialPartitionMode::DefaultThreePartition);
+    let source = parse_existing_provision(&source_image, &did, 16_777_216)
+        .unwrap()
+        .unwrap();
+    let prefill = prefill_for_target_mode(
+        Some(&source.profile),
+        OfficialPartitionMode::BootShareCombined,
+        16_000_000,
+        512,
+    )
+    .unwrap();
+    let targets = prefill.target_partitions(512).unwrap();
+    let plan = TargetProvisionPlan::build(
+        Some(&source),
+        OfficialPartitionMode::BootShareCombined,
+        &targets,
+        16_000_000,
+        &KeyDomainSecrets::default_targets(),
+    )
+    .unwrap();
+
+    let combined = plan
+        .partitions
+        .iter()
+        .find(|part| part.geometry.role == PartitionRole::BootShareCombined)
+        .expect("mode1 combined target");
+
+    assert_eq!(combined.disposition, RegionDisposition::Migrate);
+    assert_eq!(
+        combined.action,
+        PartitionAction::Rebuild,
+        "legacy action must stay fail-closed until K6 execution exists"
+    );
+    assert_eq!(
+        combined
+            .migration_sources
+            .iter()
+            .map(|source| (source.source_index, source.region.role))
+            .collect::<Vec<_>>(),
+        vec![(0, PartitionRole::Boot), (1, PartitionRole::Share)]
+    );
+    assert_eq!(combined.preserved_record, None);
+}
+
+#[test]
 fn target_plan_preserves_only_verified_matching_data() {
     let (_, source_image, did) = generated_source(OfficialPartitionMode::DefaultThreePartition);
     let mut source = parse_existing_provision(&source_image, &did, 16_777_216)
