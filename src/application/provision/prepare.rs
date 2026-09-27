@@ -998,7 +998,7 @@ pub fn prepare_plain_provision(
             dev,
             &existing,
             target_capacity,
-            &KeyDomainSecrets::default(),
+            &request.key_domains,
         )?
     };
 
