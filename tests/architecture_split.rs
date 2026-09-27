@@ -83,6 +83,7 @@ fn large_modules_are_split_by_domain_boundary() {
         "src/tui/backups/state.rs",
         "src/tui/backups/render.rs",
         "src/tui/devices/render.rs",
+        "src/tui/devices/state.rs",
         "src/tui/dispatch.rs",
         "src/tui/controller.rs",
         "src/inspect/model.rs",
@@ -645,6 +646,43 @@ fn domain_and_application_import_direction_is_guarded() {
         !validator.contains("crate::inspect"),
         "provision validator must not depend on inspect presentation"
     );
+}
+
+#[test]
+fn app_state_owns_devices_through_devices_substate() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let state = fs::read_to_string(root.join("src/tui/state.rs")).expect("read TUI state");
+    let devices =
+        fs::read_to_string(root.join("src/tui/devices/state.rs")).expect("read devices state");
+
+    assert!(state.contains("devices: DevicesState"));
+    assert!(state.contains("#[path = \"devices/state.rs\"]"));
+    for legacy_field in [
+        "devices: Vec<crate::disk_scan::Row>",
+        "device_table_view: super::table_layout::TableViewData",
+        "device_scan_pending: bool",
+        "devices_pane_focus: crate::tui::pane::PaneFocus",
+        "device_summary_selected: usize",
+        "device_summary_expanded: u8",
+    ] {
+        assert!(
+            !state.contains(legacy_field),
+            "device-owned field must live in DevicesState: {legacy_field}"
+        );
+    }
+    for owned_field in [
+        "rows: Vec<crate::disk_scan::Row>",
+        "table_view: super::super::table_layout::TableViewData",
+        "scan_pending: bool",
+        "pane_focus: crate::tui::pane::PaneFocus",
+        "summary_selected: usize",
+        "summary_expanded: u8",
+    ] {
+        assert!(
+            devices.contains(owned_field),
+            "DevicesState must own field: {owned_field}"
+        );
+    }
 }
 
 #[test]

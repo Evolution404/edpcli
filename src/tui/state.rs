@@ -5,6 +5,8 @@
 
 #[path = "backups/state.rs"]
 mod backups_state;
+#[path = "devices/state.rs"]
+mod devices_state;
 #[path = "inspect/state.rs"]
 mod inspect_state;
 #[path = "navigation.rs"]
@@ -13,6 +15,7 @@ mod navigation;
 mod provision_state;
 
 pub use backups_state::*;
+pub use devices_state::*;
 pub use inspect_state::*;
 pub use navigation::*;
 pub use provision_state::*;
@@ -168,12 +171,10 @@ pub struct BackupVerifyRunState {
 pub struct AppState {
     demo_mode: bool,
     workspace: Workspace,
-    devices: Vec<crate::disk_scan::Row>,
+    devices: DevicesState,
     backups: Vec<crate::application::BackupWorkspaceItem>,
     backup_verify_run: Option<BackupVerifyRunState>,
-    device_table_view: super::table_layout::TableViewData,
     backup_table_view: super::table_layout::TableViewData,
-    device_scan_pending: bool,
     backup_scan_pending: bool,
     selected: usize,
     item_count: usize,
@@ -189,9 +190,6 @@ pub struct AppState {
     provision: ProvisionState,
     pinned_disk: Option<u32>,
     advanced_inspect: Option<AdvancedInspectState>,
-    devices_pane_focus: crate::tui::pane::PaneFocus,
-    device_summary_selected: usize,
-    device_summary_expanded: u8,
     disk_layout_tail: super::disk_layout::TailExpansion,
     disk_layout_selected: usize,
     backups_pane_focus: crate::tui::pane::PaneFocus,
@@ -221,12 +219,10 @@ impl AppState {
         Self {
             demo_mode: false,
             workspace: Workspace::Devices,
-            devices: Vec::new(),
+            devices: DevicesState::default(),
             backups: Vec::new(),
             backup_verify_run: None,
-            device_table_view: super::table_layout::TableViewData::default(),
             backup_table_view: super::table_layout::TableViewData::default(),
-            device_scan_pending: false,
             backup_scan_pending: false,
             selected: 0,
             item_count: 0,
@@ -242,10 +238,6 @@ impl AppState {
             provision: ProvisionState::default(),
             pinned_disk: None,
             advanced_inspect: None,
-            devices_pane_focus: crate::tui::pane::PaneFocus::devices(),
-            device_summary_selected: 0,
-            device_summary_expanded: DeviceSummarySection::Identity.bit()
-                | DeviceSummarySection::Capacity.bit(),
             disk_layout_tail: super::disk_layout::TailExpansion::Collapsed,
             disk_layout_selected: 0,
             backups_pane_focus: crate::tui::pane::PaneFocus::backups(),
@@ -385,7 +377,7 @@ impl AppState {
 
         if query.is_empty() {
             let count = match self.workspace {
-                Workspace::Devices => self.devices.len(),
+                Workspace::Devices => self.devices.rows.len(),
                 Workspace::Inspect => 0,
                 Workspace::Backups => self.backups.len(),
                 Workspace::Provision => ProvisionKind::ALL.len(),
@@ -397,7 +389,7 @@ impl AppState {
 
         match self.workspace {
             Workspace::Devices => {
-                for (index, row) in self.devices.iter().enumerate() {
+                for (index, row) in self.devices.rows.iter().enumerate() {
                     if Self::device_matches_query(row, &query) {
                         self.search_matches.push(index);
                     }
@@ -594,11 +586,11 @@ impl AppState {
     }
 
     pub fn devices(&self) -> &[crate::disk_scan::Row] {
-        &self.devices
+        &self.devices.rows
     }
 
     pub const fn device_scan_pending(&self) -> bool {
-        self.device_scan_pending
+        self.devices.scan_pending
     }
 
     pub const fn backup_scan_pending(&self) -> bool {
@@ -607,7 +599,7 @@ impl AppState {
 
     pub const fn active_scan_pending(&self) -> bool {
         match self.workspace {
-            Workspace::Devices => self.device_scan_pending,
+            Workspace::Devices => self.devices.scan_pending,
             Workspace::Backups => self.backup_scan_pending,
             Workspace::Inspect => false,
             Workspace::Provision => false,
@@ -615,7 +607,7 @@ impl AppState {
     }
 
     pub fn set_device_scan_pending(&mut self, pending: bool) {
-        self.device_scan_pending = pending;
+        self.devices.scan_pending = pending;
     }
 
     pub fn replace_devices(&mut self, devices: Vec<crate::disk_scan::Row>) {
@@ -635,12 +627,12 @@ impl AppState {
         {
             self.provision.target_disk = None;
         }
-        self.devices = devices;
-        self.device_table_view = super::table_layout::device_table_view(
-            &self.devices,
-            self.device_table_view.generation.wrapping_add(1),
+        self.devices.rows = devices;
+        self.devices.table_view = super::table_layout::device_table_view(
+            &self.devices.rows,
+            self.devices.table_view.generation.wrapping_add(1),
         );
-        self.device_scan_pending = false;
+        self.devices.scan_pending = false;
         if self.workspace == Workspace::Provision {
             if self.pinned_disk.is_none() {
                 self.provision.stage = ProvisionStage::SelectDisk;
@@ -654,7 +646,7 @@ impl AppState {
         if self.workspace == Workspace::Devices {
             self.rebuild_workspace_filter();
             if let Some(disk) = selected_disk {
-                let source_index = self.devices.iter().position(|row| row.disk == disk);
+                let source_index = self.devices.rows.iter().position(|row| row.disk == disk);
                 self.selected = source_index
                     .and_then(|index| {
                         if self.workspace_filter_active() {
@@ -677,7 +669,7 @@ impl AppState {
         kind: super::table_layout::TableKind,
     ) -> Option<&super::table_layout::TableViewData> {
         match kind {
-            super::table_layout::TableKind::Devices => Some(&self.device_table_view),
+            super::table_layout::TableKind::Devices => Some(&self.devices.rows.table_view),
             super::table_layout::TableKind::Backups => Some(&self.backup_table_view),
             _ => None,
         }
@@ -696,9 +688,9 @@ impl AppState {
             if self.workspace == Workspace::Devices && !self.active_search_query().is_empty() {
                 self.search_matches.clone()
             } else {
-                (0..self.devices.len()).collect()
+                (0..self.devices.rows.len()).collect()
             };
-        self.device_table_view.sorted_indices(
+        self.devices.table_view.sorted_indices(
             indices,
             self.table_interaction(super::table_layout::TableKind::Devices),
         )
@@ -710,7 +702,7 @@ impl AppState {
 
     pub fn device_at_visible(&self, position: usize) -> Option<&crate::disk_scan::Row> {
         let index = self.device_source_index_at_visible(position)?;
-        self.devices.get(index)
+        self.devices.rows.get(index)
     }
 
     pub fn visible_backup_indices(&self) -> Vec<usize> {
@@ -746,11 +738,11 @@ impl AppState {
         match self.workspace {
             Workspace::Devices => {
                 let index = self.device_source_index_at_visible(self.selected)?;
-                self.devices.get(index)
+                self.devices.rows.get(index)
             }
             Workspace::Backups | Workspace::Provision | Workspace::Inspect => self
                 .pinned_disk
-                .and_then(|disk| self.devices.iter().find(|row| row.disk == disk)),
+                .and_then(|disk| self.devices.rows.iter().find(|row| row.disk == disk)),
         }
     }
 
@@ -769,8 +761,8 @@ impl AppState {
             .collect::<Vec<_>>();
         if let Some(sort) = self.table_sort(super::table_layout::TableKind::ProvisionDevices) {
             indices.sort_by(|left, right| {
-                let a = &self.devices[*left];
-                let b = &self.devices[*right];
+                let a = &self.devices.rows[*left];
+                let b = &self.devices.rows[*right];
                 let value = |row: &crate::disk_scan::Row| match sort.column {
                     0 => format!("disk{}", row.disk),
                     1 => row.size.to_string(),
@@ -796,12 +788,12 @@ impl AppState {
     fn provision_selectable_devices(&self) -> impl Iterator<Item = &crate::disk_scan::Row> {
         self.provision_selectable_device_indices()
             .into_iter()
-            .filter_map(|index| self.devices.get(index))
+            .filter_map(|index| self.devices.rows.get(index))
     }
 
     pub fn provision_device_at(&self, index: usize) -> Option<&crate::disk_scan::Row> {
         let source = *self.provision_selectable_device_indices().get(index)?;
-        self.devices.get(source)
+        self.devices.rows.get(source)
     }
 
     pub fn provision_menu_order(&self) -> Vec<usize> {
@@ -992,7 +984,7 @@ impl AppState {
             }
         }
         let count = match workspace {
-            Workspace::Devices => self.devices.len(),
+            Workspace::Devices => self.devices.rows.len(),
             Workspace::Backups => self.backups.len(),
             Workspace::Inspect => 0,
             Workspace::Provision => match self.provision.stage {
@@ -1096,7 +1088,7 @@ impl AppState {
         match kind {
             TableKind::Devices => {
                 let source = self.device_source_index_at_visible(self.selected)?;
-                self.device_table_view.rows.get(source).cloned()
+                self.devices.table_view.rows.get(source).cloned()
             }
             TableKind::Backups => {
                 let source = self.backup_source_index_at_visible(self.selected)?;
@@ -1204,7 +1196,7 @@ impl AppState {
         use super::table_layout::{display_width, TableKind};
 
         match kind {
-            TableKind::Devices => self.device_table_view.content_widths.clone(),
+            TableKind::Devices => self.devices.table_view.content_widths.clone(),
             TableKind::Backups => self.backup_table_view.content_widths.clone(),
             TableKind::ProvisionDevices => {
                 let headings = ["设备", "容量", "USB 身份", "盘型", "onlyid"];
@@ -1428,7 +1420,7 @@ impl AppState {
             if let Some(position) = self
                 .visible_device_indices()
                 .iter()
-                .position(|index| self.devices[*index].disk == disk)
+                .position(|index| self.devices.rows[*index].disk == disk)
             {
                 self.selected = position;
             }
@@ -1446,7 +1438,7 @@ impl AppState {
             if let Some(position) = self
                 .provision_selectable_device_indices()
                 .iter()
-                .position(|index| self.devices[*index].disk == disk)
+                .position(|index| self.devices.rows[*index].disk == disk)
             {
                 self.selected = position;
             }
@@ -1517,7 +1509,7 @@ impl AppState {
                 .pane_focus
                 .viewport(pane)
         } else if pane.is_devices() {
-            self.devices_pane_focus.viewport(pane)
+            self.devices.pane_focus.viewport(pane)
         } else if pane.is_backups() {
             self.backups_pane_focus.viewport(pane)
         } else {
@@ -1536,7 +1528,7 @@ impl AppState {
                 .pane_focus
                 .viewport_mut(pane)
         } else if pane.is_devices() {
-            self.devices_pane_focus.viewport_mut(pane)
+            self.devices.pane_focus.viewport_mut(pane)
         } else if pane.is_backups() {
             self.backups_pane_focus.viewport_mut(pane)
         } else {
@@ -1545,7 +1537,7 @@ impl AppState {
     }
 
     pub const fn devices_focused_pane(&self) -> crate::tui::pane::PaneId {
-        self.devices_pane_focus.focused()
+        self.devices.pane_focus.focused()
     }
 
     pub const fn backups_focused_pane(&self) -> crate::tui::pane::PaneId {
@@ -1554,7 +1546,7 @@ impl AppState {
 
     pub fn focus_devices_pane(&mut self, pane: crate::tui::pane::PaneId) {
         if pane.is_devices() {
-            self.devices_pane_focus.focus(pane);
+            self.devices.pane_focus.focus(pane);
         }
     }
 
@@ -1573,24 +1565,24 @@ impl AppState {
     }
 
     pub fn device_summary_section_expanded(&self, section: DeviceSummarySection) -> bool {
-        self.device_summary_expanded & section.bit() != 0
+        self.devices.summary_expanded & section.bit() != 0
     }
 
     pub fn device_summary_move_section(&mut self, delta: isize) {
         let max = DeviceSummarySection::ALL.len().saturating_sub(1);
-        self.device_summary_selected = if delta < 0 {
-            self.device_summary_selected
+        self.devices.summary_selected = if delta < 0 {
+            self.devices.summary_selected
                 .saturating_sub(delta.unsigned_abs())
         } else {
-            self.device_summary_selected
+            self.devices.summary_selected
                 .saturating_add(delta as usize)
                 .min(max)
         };
     }
 
     pub fn device_summary_toggle_selected_section(&mut self) {
-        let section = self.device_summary_selected_section();
-        self.device_summary_expanded ^= section.bit();
+        let section = self.devices.summary_selected_section();
+        self.devices.summary_expanded ^= section.bit();
     }
 
     pub fn disk_layout_tail_expansion(&self) -> super::disk_layout::TailExpansion {
@@ -1660,7 +1652,7 @@ impl AppState {
         use crate::tui::pane::PaneId;
         let (focus, next) = match self.workspace {
             Workspace::Devices => {
-                let focus = self.devices_pane_focus.focused();
+                let focus = self.devices.pane_focus.focused();
                 let next = match (focus, dx.signum(), dy.signum()) {
                     (PaneId::DevicesList, _, 1) => Some(PaneId::DevicesSummary),
                     (PaneId::DevicesSummary | PaneId::DevicesStats, _, -1) => {
@@ -1689,7 +1681,7 @@ impl AppState {
         };
         if let Some(next) = next {
             if focus.is_devices() {
-                self.devices_pane_focus.focus(next);
+                self.devices.pane_focus.focus(next);
             } else {
                 self.backups_pane_focus.focus(next);
             }
@@ -1710,7 +1702,7 @@ impl AppState {
                 .advanced_inspect
                 .as_ref()
                 .map(|state| state.pane_focus.clone()),
-            NavigationLocation::Devices => Some(self.devices_pane_focus.clone()),
+            NavigationLocation::Devices => Some(self.devices.pane_focus.clone()),
             NavigationLocation::Backups => Some(self.backups_pane_focus.clone()),
         };
         self.navigation.push(NavigationFrame {
@@ -1741,7 +1733,7 @@ impl AppState {
             self.selected = frame.selection.min(self.item_count.saturating_sub(1));
             if let Some(pane_focus) = frame.pane_focus {
                 match workspace {
-                    Workspace::Devices => self.devices_pane_focus = pane_focus,
+                    Workspace::Devices => self.devices.pane_focus = pane_focus,
                     Workspace::Backups => self.backups_pane_focus = pane_focus,
                     Workspace::Provision => self.provision.pane_focus = pane_focus,
                     Workspace::Inspect => {}
@@ -1877,9 +1869,9 @@ impl AppState {
                 return StateEffect::None;
             }
             if self.workspace == Workspace::Devices
-                && self.devices_pane_focus.focused() != crate::tui::pane::PaneId::DevicesList
+                && self.devices.pane_focus.focused() != crate::tui::pane::PaneId::DevicesList
             {
-                self.devices_pane_focus
+                self.devices.pane_focus
                     .focus(crate::tui::pane::PaneId::DevicesList);
                 return StateEffect::None;
             }

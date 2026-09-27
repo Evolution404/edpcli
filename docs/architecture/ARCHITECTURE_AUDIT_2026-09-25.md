@@ -1283,6 +1283,15 @@ application 返回结构化 `ProvisionReport/BackupReport/InspectReport`，CLI/T
 - 禁止继续通过大量分散 `impl AppState` 扩张工作区私有状态；
 - 搜索、输入提示、预览、树/详情、表单字段编辑等归各自子状态所有。
 
+#### D8-C1 实施状态（GitHub）
+
+**IN PROGRESS。**
+
+- 第一刀先收敛 Devices 独占状态：设备行、设备表视图、扫描状态、设备 Pane 焦点、摘要选择与展开位统一归 `DevicesState` 所有。
+- `AppState` 对外方法签名保持不变，只把内部直接字段访问改为 `devices.*` 子状态；不改变设备筛选、排序、选择、Inspect/Provision 目标固定或任何磁盘 I/O 语义。
+- 新增架构门禁，禁止上述 Devices 字段重新散落回 `AppState`。
+
+
 ### D8-D：TUI 大模块继续按职责拆分
 
 - D8-D1：拆分 `Inspect` 状态与渲染；
