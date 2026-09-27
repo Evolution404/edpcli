@@ -1109,6 +1109,25 @@ fn target_plan_surfaces_migration_sources_before_k6_execution_is_enabled() {
         vec![(0, PartitionRole::Boot), (1, PartitionRole::Share)]
     );
     assert_eq!(combined.preserved_record, None);
+
+    let mut plan = plan;
+    assert!(
+        plan.force_rebuild_for_format(PartitionRole::BootShareCombined),
+        "explicit filesystem initialization must allow the user to choose Rebuild"
+    );
+    let combined = plan
+        .partitions
+        .iter()
+        .find(|part| part.geometry.role == PartitionRole::BootShareCombined)
+        .unwrap();
+    assert_eq!(combined.disposition, RegionDisposition::Rebuild);
+    assert_eq!(combined.action, PartitionAction::Rebuild);
+    assert!(combined.migration_sources.is_empty());
+    assert_eq!(
+        combined.target_password_policy,
+        Some(edpcli::provision::TargetPasswordPolicy::InitializeNew)
+    );
+    assert!(combined.reason.contains("显式转为 Rebuild"));
 }
 
 #[test]
