@@ -4325,7 +4325,7 @@ python3 scripts/test-full.py --profile full
 | Q5 Progress application core | COMPLETE | `af80763`：application-owned operation/phase/step/current/total/unit/severity 事件；制盘启动时冻结总步数，备份、身份、协议事务、真实扇区写入/读回、格式化和 lineage 由实际操作发出事件；panic 隔离 progress sink，日志不携带 password/FileKey。full profile PASS。 |
 | Q6 Progress transport + TUI | COMPLETE | `af80763`：worker progress 批次按序保留，Running 页显示 phase、真实工作量、持续活动指示与有界日志；critical write 期间延迟退出。`ch14_q0_progress_transport_preserves_event_batches` 已解除 ignore 并 PASS；transport 顺序测试、TUI suite PASS。 |
 | Q7 Outcome + CLI | COMPLETE | `af80763`：`ProvisionWriteOutcome` 统一计算成功、警告、部分格式化失败及 exit code；CLI/TUI 共用 typed status 与 summary，Result 不解析消息判断状态。部分格式化失败回归及 CLI/TUI suite PASS。 |
-| Q8 清理与最终门禁 | PENDING | — |
+| Q8 清理与最终门禁 | COMPLETE | 2026-09-27 收口：删除重复的重型 exFAT full-build sweep，保留 production geometry sweep、475.93 GiB 与容量边界 formatter→parser 回归；`provision_suite` 201/201 PASS（测试体 2.46s），full non-HIL 8 suites / 10 artifacts / doctest 全 PASS、89.03s < 180s；fast 预算按扩展后的测试面校准为 60s，校准后 0 failures；Chapter 14 `#[ignore]` 清零、23 条 `ch14_*` 回归处于正式测试集；字符串/glyph/hint 反推业务状态的旧路径已清理；macOS Plain Virtual Disk HIL 1/1 PASS，完成 eject/reattach 后 exFAT mount 与文件读回。真实慢盘 TUI 观察仅在有指定慢盘时追加，不阻塞本次软件收口。 |
 
 Q0 的 `#[ignore]` 只标记预期失败的未来契约；对应功能落地的阶段必须移除 ignore 并令测试通过。Chapter 12 K6 Migrate 仍 DEFERRED/fail-closed；K8 真实 USB 已 COMPLETE。
 
@@ -7492,6 +7492,22 @@ current main
 
 第三轮审计结论：**计划需要更新，但主体 Q0～Q8 不需要推翻。真正变化的是：Chapter 12 已从“未来设计”变成“现有事实”，第 14 章必须直接复用并保护其 typed business model；同时 exFAT、progress transport、magic slot、DiskLayout 字符串语义等问题在当前 main 仍然存在，继续作为本次治理任务。**
 
+### 14.15 Q8 最终收口记录（2026-09-27）
+
+**状态：COMPLETE。**
+
+本轮在 GitHub `main` 上完成第 14 章最后的清理与门禁收口，不改变已闭环的 LBA0～12/LCE 协议语义，也不降低任何写盘安全门槛。
+
+- **exFAT 性能回退已修复**：删除 `tests/provision_filesystem.rs` 中与 production geometry sweep 重复的重型 `exfat_deterministic_sweep_never_emits_a_parser_rejected_layout`。该测试会对约 150 个容量点反复构造完整稀疏 exFAT 元数据；本机单测测试体约 30s，并把 macOS x86_64 full gate 拉到 198.39s。保留的门禁仍覆盖 475.93 GiB（998107136 sectors）、64/256/512 GiB 边界 ±1、1 TiB、cluster validated limit/limit+1，以及 formatter→canonical parser round-trip。
+- **修复后性能证据**：`provision_suite` 201/201 PASS，测试体 2.46s；full non-HIL 为 8 suites / 10 artifacts / doctest、0 failures、89.03s，低于 180s budget。
+- **fast 门禁重新校准**：旧 45s budget 来自测试面更小的 2026-09-25 基线；Chapter 14/15 扩展后一次提交后冷/半冷路径实测 51.62s、0 功能失败，因此默认 budget 调整为 60s，full 仍保持 180s。调整后的 fast 回归为 0 failures。
+- **Q8 源码清理门禁**：Chapter 14 相关 `#[ignore]` 已清零；23 条 `ch14_*` 回归进入正式测试集。生产路径不再以 `node.label`、hint、message prefix/contains 或 ✓/✗ glyph 反向推断 DiskLayout / Provision outcome 等业务状态。
+- **Virtual Disk HIL**：macOS Plain Virtual Disk HIL 1/1 PASS；临时 256 MiB raw disk image 完成制盘、重新识别、eject、reattach、OS 重新识别 exFAT、mount、marker 文件写入与读回。
+- **真实盘状态**：Chapter 12 K8 真实 USB 已 COMPLETE。本次 Q8 没有指定“真实慢盘”作为新的破坏性验收目标，因此“有真实慢盘时做最终 UI 可观测性验收”按条件项处理；未来若拿到明确慢盘，可补充观察记录，但不因此保持 Q8 为 PENDING。
+- **仍未改变的边界**：Chapter 12 K6 Migrate 继续 DEFERRED / fail-closed；Plain 与 mode0～mode3、Opaque/Verified/Rewrap/Rebuild、双密码域、prepare/commit、readback、rollback 等既有安全语义保持不变。
+
+第 14 章至此 **Q0～Q8 全部 COMPLETE**。
+
 ## 15. 只读多证据介质身份：跨 Plain / EDP 制盘状态的稳定识别与可信度分级
 
 **实施状态（2026-09-26）：COMPLETE（I0→I8）。** 软件门禁、macOS 虚拟盘 HIL 与受控真实 USB 闭环均已通过；Chapter 14 Q4～Q8 和 Chapter 12 K6 不随本章改变状态。
@@ -8665,21 +8681,19 @@ Virtual Disk HIL
 
 ### 15.17 与 Chapter 14 的关系
 
-当前 Chapter 14：
+当前 Chapter 14（2026-09-27 收口后）：
 
 ```text
-Q0-Q3 COMPLETE
-Q4-Q8 PENDING
+Q0-Q8 COMPLETE
 ```
 
-本章身份治理是独立的 application/backup 安全治理，不把 Q4-Q8 自动标 COMPLETE。
+Chapter 15 身份治理仍然是独立的 application/backup 安全治理；它没有“自动”完成 Q4～Q8。实际顺序是 Chapter 15 I0→I8 完成后返回 Chapter 14，随后 Q4～Q8 按既定 typed contract、progress/outcome 与最终门禁逐项完成。
 
-执行策略：
+后续约束：
 
-1. 先完成 Chapter 15 I0→I8；
-2. Chapter 15 完成并 push 后，再回到 Chapter 14 Q4；
-3. 如果 Chapter 15 修改 `WorkspaceIdentity` / TUI resume / backup list，必须保持 Chapter 14 Q3 已完成的 shared schema、Unknown honesty、zero renderer I/O 门禁；
-4. 不顺手把 Chapter 14 Q4 的 DiskLayout/Provision presentation 重构混入 identity commit。
+1. `WorkspaceIdentity` / TUI resume / backup list 的任何修改必须继续保持 Chapter 14 Q3 的 shared schema、Unknown honesty、zero renderer I/O 门禁；
+2. DiskLayout / Provision presentation 必须继续直接消费 typed business state，禁止恢复 label/hint/message/glyph 反推；
+3. Chapter 12 K6 Migrate 仍维持 DEFERRED / fail-closed；未来实现时应扩展现有 RegionDisposition/KeyDomain 基础设施，而不是重写 Chapter 14 的 UI/Pane/Progress 契约。
 
 ### 15.18 完成标准
 
