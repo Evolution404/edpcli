@@ -436,7 +436,13 @@ fn d0_current_device_summary_renders_capacity_layout_bar() {
     state.focus_devices_pane(PaneId::DevicesSummary);
     let text = render_text(&state, 160, 36);
     assert!(text.contains("SERIAL-D0-1234"), "{text}");
+    assert!(text.contains("身份依据"), "{text}");
+    assert!(!text.contains("物理介质一致"), "{text}");
     assert!(text.contains("容量布局"), "{text}");
+    assert!(
+        text.matches('━').count() >= 80,
+        "capacity bar should use the pane width: {text}"
+    );
     assert!(text.contains("启动区"), "{text}");
     assert!(text.contains("交换区"), "{text}");
     assert!(text.contains("保密区"), "{text}");

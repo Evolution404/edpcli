@@ -207,7 +207,7 @@ fn draw_device_summary(frame: &mut Frame, area: ratatui::layout::Rect, state: &A
         focused,
     );
     if state.device_summary_section_expanded(DeviceSummarySection::Identity) {
-        lines.push(field_line("介质识别", safe(identity.canonical_status())));
+        lines.push(field_line("身份依据", device_identity_basis(row)));
         lines.push(field_line(
             "onlyid",
             safe(identity.onlyid.as_deref().unwrap_or("—")),
@@ -232,7 +232,7 @@ fn draw_device_summary(frame: &mut Frame, area: ratatui::layout::Rect, state: &A
     );
     if state.device_summary_section_expanded(DeviceSummarySection::Capacity) {
         let model = device_layout_model(row);
-        let bar_width = usize::from(area.width.saturating_sub(8)).min(52);
+        let bar_width = usize::from(area.width.saturating_sub(6));
         lines.push(model.bar_line_with_label(bar_width, "  "));
         lines.push(field_line(
             "总容量",
@@ -398,13 +398,35 @@ fn device_layout_model(row: &crate::disk_scan::Row) -> crate::tui::disk_layout::
 }
 
 fn format_sector_size(sectors: u64) -> String {
-    let mib = sectors as f64 / 2048.0;
-    if mib >= 1024.0 {
-        format!("{:.2} GiB", mib / 1024.0)
-    } else if mib >= 1.0 {
-        format!("{mib:.1} MiB")
+    let bytes = sectors.saturating_mul(crate::common::SECTOR as u64);
+    if bytes >= 1_000_000_000 {
+        format!("{:.2} GB", bytes as f64 / 1_000_000_000.0)
+    } else if bytes >= 1_000_000 {
+        format!("{:.2} MB", bytes as f64 / 1_000_000.0)
+    } else if bytes >= 1_000 {
+        format!("{:.2} kB", bytes as f64 / 1_000.0)
     } else {
-        format!("{sectors} sector")
+        format!("{bytes} B")
+    }
+}
+
+fn device_identity_basis(row: &crate::disk_scan::Row) -> &'static str {
+    use crate::application::media_identity::SerialQuality;
+
+    match row
+        .identity_pin
+        .as_ref()
+        .map(|pin| pin.snapshot.hardware.serial_quality)
+    {
+        Some(SerialQuality::Usable) => "强 · 硬件序列号 + VID:PID + 容量",
+        Some(SerialQuality::Suspicious) => "中 · 序列号可疑，结合 VID:PID + 容量",
+        Some(SerialQuality::Missing) if row.device_id.is_some() && row.onlyid.is_some() => {
+            "中 · EDP device_id + onlyid + 硬件特征"
+        }
+        Some(SerialQuality::Missing) => "弱 · 仅硬件型号/容量等非唯一特征",
+        None if row.serial.is_some() => "待确认 · 已读取序列号，身份快照未建立",
+        None if row.device_id.is_some() || row.onlyid.is_some() => "待确认 · 仅协议身份可用",
+        None => "未建立可靠身份依据",
     }
 }
 
