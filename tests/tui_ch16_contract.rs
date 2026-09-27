@@ -90,7 +90,6 @@ fn lba8_state() -> AppState {
 }
 
 #[test]
-#[ignore = "U2: red AppShell contract"]
 fn ch16_shell_exposes_four_top_level_workspaces() {
     let lines = rendered_lines(&AppState::new(), 120, 36);
     let navigation = lines
@@ -105,6 +104,52 @@ fn ch16_shell_exposes_four_top_level_workspaces() {
             "missing {title} in {navigation}"
         );
     }
+}
+
+#[test]
+fn ch16_inspect_is_a_workspace_with_a_real_return_target() {
+    use edpcli::tui::state::{NavCommand, Workspace};
+
+    let mut state = AppState::new();
+    assert_eq!(
+        Workspace::ALL,
+        [
+            Workspace::Devices,
+            Workspace::Inspect,
+            Workspace::Provision,
+            Workspace::Backups
+        ]
+    );
+    assert!(state.begin_advanced_inspect(AdvancedInspectSource::Disk(6)));
+    assert_eq!(state.workspace(), Workspace::Inspect);
+    let lines = rendered_lines(&state, 120, 36).join("\n").replace(' ', "");
+    assert!(lines.contains("Inspect"));
+    state.advanced_inspect_finish(Err("test".into()));
+    state.navigate(NavCommand::Escape, 20);
+    assert_eq!(state.workspace(), Workspace::Devices);
+}
+
+#[test]
+fn ch16_devices_and_backups_have_independent_pane_focus_and_viewports() {
+    use edpcli::tui::pane::PaneId;
+
+    let mut state = AppState::new();
+    assert_eq!(state.devices_focused_pane(), PaneId::DevicesList);
+    assert_eq!(state.backups_focused_pane(), PaneId::BackupsList);
+    state.focus_devices_pane(PaneId::DevicesSummary);
+    state
+        .pane_viewport_mut(PaneId::DevicesSummary)
+        .scroll_y
+        .offset = 7;
+    state.focus_backups_pane(PaneId::BackupCoverage);
+    state.pane_viewport_mut(PaneId::BackupCoverage).scroll_x = 3;
+    assert_eq!(state.devices_focused_pane(), PaneId::DevicesSummary);
+    assert_eq!(state.backups_focused_pane(), PaneId::BackupCoverage);
+    assert_eq!(
+        state.pane_viewport(PaneId::DevicesSummary).scroll_y.offset,
+        7
+    );
+    assert_eq!(state.pane_viewport(PaneId::BackupCoverage).scroll_x, 3);
 }
 
 #[test]

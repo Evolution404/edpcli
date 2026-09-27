@@ -4,6 +4,12 @@ use std::collections::BTreeMap;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum PaneId {
+    DevicesList,
+    DevicesSummary,
+    DevicesStats,
+    BackupsList,
+    BackupSummary,
+    BackupCoverage,
     InspectDiskLayout,
     InspectTree,
     InspectOverview,
@@ -16,6 +22,10 @@ pub enum PaneId {
 }
 
 impl PaneId {
+    pub const DEVICES_ORDER: [Self; 3] =
+        [Self::DevicesList, Self::DevicesSummary, Self::DevicesStats];
+    pub const BACKUPS_ORDER: [Self; 3] =
+        [Self::BackupsList, Self::BackupSummary, Self::BackupCoverage];
     pub const INSPECT_ORDER: [Self; 4] = [
         Self::InspectDiskLayout,
         Self::InspectTree,
@@ -41,7 +51,28 @@ impl PaneId {
     }
 
     pub const fn is_provision(self) -> bool {
-        !self.is_inspect()
+        matches!(
+            self,
+            Self::ProvisionParameters
+                | Self::ProvisionDiskLayout
+                | Self::ProvisionSummary
+                | Self::ProvisionChanges
+                | Self::ProvisionRunLog
+        )
+    }
+
+    pub const fn is_devices(self) -> bool {
+        matches!(
+            self,
+            Self::DevicesList | Self::DevicesSummary | Self::DevicesStats
+        )
+    }
+
+    pub const fn is_backups(self) -> bool {
+        matches!(
+            self,
+            Self::BackupsList | Self::BackupSummary | Self::BackupCoverage
+        )
     }
 }
 
@@ -116,6 +147,14 @@ pub struct PaneFocus {
 }
 
 impl PaneFocus {
+    pub fn devices() -> Self {
+        Self::new(PaneId::DevicesList, PaneId::DEVICES_ORDER)
+    }
+
+    pub fn backups() -> Self {
+        Self::new(PaneId::BackupsList, PaneId::BACKUPS_ORDER)
+    }
+
     pub fn new(focused: PaneId, panes: impl IntoIterator<Item = PaneId>) -> Self {
         let mut viewports = BTreeMap::new();
         for pane in panes {

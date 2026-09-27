@@ -434,7 +434,7 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
     );
     let (core_mode, core_activity) = if state.is_critical_operation() {
         (CoreMode::Guard, "SAFE TRANSACTION")
-    } else if state.advanced_inspect().is_some() {
+    } else if state.workspace() == Workspace::Inspect && state.advanced_inspect().is_some() {
         (CoreMode::Busy, "全盘检查")
     } else if state.active_scan_pending() {
         (CoreMode::Busy, "BACKGROUND SCAN")
@@ -448,58 +448,25 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
     };
     let has_notice = state.notice().is_some();
     let mut constraints = vec![
-        Constraint::Length(3),
-        Constraint::Length(3),
-        Constraint::Min(4),
+        Constraint::Length(1),
+        Constraint::Length(1),
+        Constraint::Min(1),
     ];
     if has_notice {
-        constraints.push(Constraint::Length(3));
+        constraints.push(Constraint::Length(1));
     }
-    constraints.push(Constraint::Length(3));
+    constraints.push(Constraint::Length(1));
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints(constraints)
         .split(area);
 
-    let (input_mode_label, input_mode_style) = match state.input_mode() {
-        InputMode::Normal => ("NORMAL", muted()),
-        InputMode::Insert => ("INSERT", accent().add_modifier(Modifier::BOLD)),
-        InputMode::Search => ("SEARCH", secondary().add_modifier(Modifier::BOLD)),
-        InputMode::Command => ("COMMAND", secondary().add_modifier(Modifier::BOLD)),
-        InputMode::Confirm => ("CONFIRM", warning().add_modifier(Modifier::BOLD)),
-        InputMode::Help => ("HELP", muted().add_modifier(Modifier::BOLD)),
-    };
-    let title = Paragraph::new(Line::from(vec![
-        Span::styled("edpcli", accent()),
-        Span::styled(format!(" v{}", env!("CARGO_PKG_VERSION")), muted()),
-        Span::styled("  TUI", secondary().add_modifier(Modifier::BOLD)),
-        Span::styled(format!("  [{input_mode_label}]"), input_mode_style),
-        Span::styled("  ·  管理员模式", success()),
-        animation::compact_indicator(state.animation_frame(), core_mode),
-    ]))
-    .block(Block::default().borders(Borders::ALL).border_style(panel()));
-    frame.render_widget(title, chunks[0]);
-
-    let workspace_index = match state.workspace() {
-        Workspace::Devices | Workspace::Provision => 0,
-        Workspace::Backups => 1,
-    };
-    let workspace_tabs = Tabs::new(["设备", "备份"])
-        .select(workspace_index)
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .border_style(focused_panel())
-                .title("工作区"),
-        )
-        .style(tab())
-        .highlight_style(active_tab())
-        .divider(Span::styled(" │ ", muted()))
-        .padding("  ", "  ");
-    frame.render_widget(workspace_tabs, chunks[1]);
+    super::shell::header(frame, chunks[0], state, core_mode);
+    super::shell::navigation(frame, chunks[1], state.workspace());
 
     let body = chunks[2];
-    let overlay_active = state.advanced_inspect().is_some()
+    let overlay_active = (state.workspace() == Workspace::Inspect
+        && state.advanced_inspect().is_some())
         || state.backup_delete().is_some()
         || state.backup_batch_delete().is_some()
         || state.backup_create_choice().is_some()
@@ -517,7 +484,7 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
         (body, None)
     };
 
-    if state.advanced_inspect().is_some() {
+    if state.workspace() == Workspace::Inspect && state.advanced_inspect().is_some() {
         draw_advanced_inspect(frame, content_area, state);
     } else if state.backup_create_choice().is_some() {
         draw_backup_create_choice(frame, content_area, state);
@@ -565,6 +532,11 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
             }
             _ => match state.workspace() {
                 Workspace::Devices => draw_devices(frame, content_area, state),
+                Workspace::Inspect => frame.render_widget(
+                    Paragraph::new("Inspect：请在设备或备份页选定对象后按 i 进入。")
+                        .block(super::ui::panel("Inspect", true)),
+                    content_area,
+                ),
                 Workspace::Backups => draw_backups(frame, content_area, state),
                 Workspace::Provision => draw_provision(frame, content_area, state),
             },
@@ -670,6 +642,9 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
                     "Tab/Shift-Tab 标签 · r 刷新 · Esc 当前标签 · q 退出".to_string()
                 }
             }
+            Workspace::Inspect => {
+                "Inspect：j/k 当前 Pane · o 展开/折叠 · Enter 查看 · Esc 返回 · q 退出".to_string()
+            }
             Workspace::Backups => {
                 if state.selected_backup().is_some() {
                     let kind = crate::tui::table_layout::TableKind::Backups;
@@ -727,19 +702,10 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
             },
         }
     };
-    frame.render_widget(
-        Paragraph::new(safe(&status))
-            .block(Block::default().borders(Borders::ALL).border_style(panel())),
-        chunks[usize::from(has_notice) + 3],
-    );
+    super::shell::footer(frame, chunks[usize::from(has_notice) + 3], &status);
     if let Some(message) = state.notice() {
         frame.render_widget(
-            Paragraph::new(safe(message)).block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .border_style(warning())
-                    .title("提示"),
-            ),
+            super::ui::notice_banner(safe(message), super::ui::BannerTone::Warning),
             chunks[3],
         );
     }

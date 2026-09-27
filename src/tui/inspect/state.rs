@@ -661,6 +661,10 @@ impl AppState {
             return false;
         }
         self.push_navigation_frame(NavigationLocation::from_workspace(self.workspace));
+        if let AdvancedInspectSource::Disk(disk) = &source {
+            self.pinned_disk = Some(*disk);
+        }
+        self.workspace = crate::tui::state::Workspace::Inspect;
         let mut expanded = std::collections::BTreeSet::new();
         expanded.insert("device".to_string());
         self.advanced_inspect = Some(AdvancedInspectState {
@@ -2124,9 +2128,7 @@ impl AppState {
             .is_some_and(|state| state.stage != AdvancedInspectStage::Running)
         {
             self.advanced_inspect = None;
-            if let Some(frame) = self.navigation.pop() {
-                self.selected = frame.selection.min(self.item_count.saturating_sub(1));
-            }
+            self.restore_workspace_frame();
         }
     }
 }

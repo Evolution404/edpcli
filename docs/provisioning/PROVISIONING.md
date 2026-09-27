@@ -9379,7 +9379,7 @@ Backup detail / coverage
 
 #### U2 — AppShell / Workspace / Pane domain
 
-状态：PENDING。
+状态：COMPLETE（2026-09-27）。顶层 `Workspace::ALL` 正式为 Devices / Inspect / Provision / Backups；统一无大边框 Header、四 Workspace 导航、模式/CORE 指示与上下文 Footer 已接入。Inspect 打开时切换到真实 `Workspace::Inspect`，Esc 经 NavigationStack 返回来源；设备/备份各有独立 PaneFocus / PaneViewport。既有只读 Inspect worker 和业务 I/O 未改；TUI suite 与新增 Shell、Pane 契约通过。
 
 - Workspace 升级为 Devices / Inspect / Provision / Backups；
 - Header + top navigation + footer 统一；

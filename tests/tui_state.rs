@@ -281,7 +281,7 @@ fn provision_escape_walks_back_one_level_without_exiting() {
 }
 
 #[test]
-fn provision_flow_is_hidden_from_tab_cycle_and_explicit_reentry_preserves_state() {
+fn provision_flow_is_in_tab_cycle_and_explicit_reentry_preserves_state() {
     let mut state = AppState::new();
     state.replace_devices(vec![device(64_000_000_000)]);
     state.navigate(NavCommand::WorkspaceProvision, 20);
@@ -291,11 +291,11 @@ fn provision_flow_is_hidden_from_tab_cycle_and_explicit_reentry_preserves_state(
     assert_eq!(state.provision().stage, ProvisionStage::Form);
 
     state.navigate(NavCommand::NextWorkspace, 20);
-    assert_eq!(state.workspace(), Workspace::Devices);
-    state.navigate(NavCommand::PreviousWorkspace, 20);
     assert_eq!(state.workspace(), Workspace::Backups);
+    state.navigate(NavCommand::PreviousWorkspace, 20);
+    assert_eq!(state.workspace(), Workspace::Provision);
     state.navigate(NavCommand::NextWorkspace, 20);
-    assert_eq!(state.workspace(), Workspace::Devices);
+    assert_eq!(state.workspace(), Workspace::Backups);
     state.navigate(NavCommand::WorkspaceProvision, 20);
     assert_eq!(state.workspace(), Workspace::Provision);
     assert_eq!(state.provision().stage, ProvisionStage::Form);

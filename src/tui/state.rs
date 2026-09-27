@@ -58,8 +58,25 @@ pub struct WizardState {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Workspace {
     Devices,
-    Backups,
+    Inspect,
     Provision,
+    Backups,
+}
+
+impl Workspace {
+    pub const ALL: [Self; 4] = [Self::Devices, Self::Inspect, Self::Provision, Self::Backups];
+
+    pub fn shifted(self, reverse: bool) -> Self {
+        let index = Self::ALL
+            .iter()
+            .position(|value| *value == self)
+            .unwrap_or(0);
+        Self::ALL[if reverse {
+            (index + Self::ALL.len() - 1) % Self::ALL.len()
+        } else {
+            (index + 1) % Self::ALL.len()
+        }]
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -100,6 +117,7 @@ pub enum NavCommand {
     NextWorkspace,
     PreviousWorkspace,
     WorkspaceDevices,
+    WorkspaceInspect,
     WorkspaceBackups,
     WorkspaceProvision,
 }
@@ -133,6 +151,8 @@ pub struct AppState {
     provision: ProvisionState,
     pinned_disk: Option<u32>,
     advanced_inspect: Option<AdvancedInspectState>,
+    devices_pane_focus: crate::tui::pane::PaneFocus,
+    backups_pane_focus: crate::tui::pane::PaneFocus,
     navigation: NavigationStack,
     horizontal_scroll: std::collections::BTreeMap<
         super::table_layout::TableKind,
@@ -177,6 +197,8 @@ impl AppState {
             provision: ProvisionState::default(),
             pinned_disk: None,
             advanced_inspect: None,
+            devices_pane_focus: crate::tui::pane::PaneFocus::devices(),
+            backups_pane_focus: crate::tui::pane::PaneFocus::backups(),
             navigation: NavigationStack::default(),
             horizontal_scroll: std::collections::BTreeMap::new(),
             notice: None,
@@ -285,6 +307,7 @@ impl AppState {
         if query.is_empty() {
             let count = match self.workspace {
                 Workspace::Devices => self.devices.len(),
+                Workspace::Inspect => 0,
                 Workspace::Backups => self.backups.len(),
                 Workspace::Provision => ProvisionKind::ALL.len(),
             };
@@ -308,6 +331,7 @@ impl AppState {
                     }
                 }
             }
+            Workspace::Inspect => {}
             Workspace::Provision => {}
         }
         self.selected = 0;
@@ -506,6 +530,7 @@ impl AppState {
         match self.workspace {
             Workspace::Devices => self.device_scan_pending,
             Workspace::Backups => self.backup_scan_pending,
+            Workspace::Inspect => false,
             Workspace::Provision => false,
         }
     }
@@ -668,7 +693,7 @@ impl AppState {
                 };
                 self.devices.get(index)
             }
-            Workspace::Backups | Workspace::Provision => self
+            Workspace::Backups | Workspace::Provision | Workspace::Inspect => self
                 .pinned_disk
                 .and_then(|disk| self.devices.iter().find(|row| row.disk == disk)),
         }
@@ -796,7 +821,22 @@ impl AppState {
         if self.workspace == workspace {
             return;
         }
-        if self.workspace == Workspace::Devices && workspace == Workspace::Backups {
+        if self.workspace == Workspace::Inspect && workspace != Workspace::Inspect {
+            if self
+                .advanced_inspect
+                .as_ref()
+                .is_some_and(|state| state.stage == AdvancedInspectStage::Running)
+            {
+                self.set_notice("全盘检查正在后台读取结构，请等待完成。");
+                return;
+            }
+            if self.advanced_inspect.take().is_some() {
+                let _ = self.navigation.pop();
+            }
+        }
+        if self.workspace == Workspace::Devices
+            && matches!(workspace, Workspace::Backups | Workspace::Inspect)
+        {
             self.pinned_disk = self.selected_device().map(|row| row.disk);
         }
         if workspace == Workspace::Provision {
@@ -828,6 +868,7 @@ impl AppState {
         let count = match workspace {
             Workspace::Devices => self.devices.len(),
             Workspace::Backups => self.backups.len(),
+            Workspace::Inspect => 0,
             Workspace::Provision => match self.provision.stage {
                 ProvisionStage::SelectDisk => self.provision_selectable_devices().count(),
                 ProvisionStage::Menu => ProvisionKind::ALL.len(),
@@ -877,6 +918,10 @@ impl AppState {
                 .expect("Inspect pane requested without Inspect state")
                 .pane_focus
                 .viewport(pane)
+        } else if pane.is_devices() {
+            self.devices_pane_focus.viewport(pane)
+        } else if pane.is_backups() {
+            self.backups_pane_focus.viewport(pane)
         } else {
             self.provision.pane_focus.viewport(pane)
         }
@@ -892,8 +937,32 @@ impl AppState {
                 .expect("Inspect pane requested without Inspect state")
                 .pane_focus
                 .viewport_mut(pane)
+        } else if pane.is_devices() {
+            self.devices_pane_focus.viewport_mut(pane)
+        } else if pane.is_backups() {
+            self.backups_pane_focus.viewport_mut(pane)
         } else {
             self.provision.pane_focus.viewport_mut(pane)
+        }
+    }
+
+    pub const fn devices_focused_pane(&self) -> crate::tui::pane::PaneId {
+        self.devices_pane_focus.focused()
+    }
+
+    pub const fn backups_focused_pane(&self) -> crate::tui::pane::PaneId {
+        self.backups_pane_focus.focused()
+    }
+
+    pub fn focus_devices_pane(&mut self, pane: crate::tui::pane::PaneId) {
+        if pane.is_devices() {
+            self.devices_pane_focus.focus(pane);
+        }
+    }
+
+    pub fn focus_backups_pane(&mut self, pane: crate::tui::pane::PaneId) {
+        if pane.is_backups() {
+            self.backups_pane_focus.focus(pane);
         }
     }
 
@@ -911,7 +980,8 @@ impl AppState {
                 .advanced_inspect
                 .as_ref()
                 .map(|state| state.pane_focus.clone()),
-            NavigationLocation::Devices | NavigationLocation::Backups => None,
+            NavigationLocation::Devices => Some(self.devices_pane_focus.clone()),
+            NavigationLocation::Backups => Some(self.backups_pane_focus.clone()),
         };
         self.navigation.push(NavigationFrame {
             location,
@@ -934,13 +1004,17 @@ impl AppState {
                 NavigationLocation::Devices => Workspace::Devices,
                 NavigationLocation::Backups => Workspace::Backups,
                 NavigationLocation::Provision => Workspace::Provision,
-                NavigationLocation::Inspect | NavigationLocation::SectorInspector => return,
+                NavigationLocation::Inspect => Workspace::Inspect,
+                NavigationLocation::SectorInspector => return,
             };
             self.switch_workspace(workspace);
             self.selected = frame.selection.min(self.item_count.saturating_sub(1));
-            if workspace == Workspace::Provision {
-                if let Some(pane_focus) = frame.pane_focus {
-                    self.provision.pane_focus = pane_focus;
+            if let Some(pane_focus) = frame.pane_focus {
+                match workspace {
+                    Workspace::Devices => self.devices_pane_focus = pane_focus,
+                    Workspace::Backups => self.backups_pane_focus = pane_focus,
+                    Workspace::Provision => self.provision.pane_focus = pane_focus,
+                    Workspace::Inspect => {}
                 }
             }
             if let Some((kind, offset)) = frame.table_scroll {
@@ -1019,7 +1093,11 @@ impl AppState {
         }
 
         if command == NavCommand::Escape {
-            if let Some(advanced) = self.advanced_inspect.as_ref() {
+            if let Some(advanced) = self
+                .advanced_inspect
+                .as_ref()
+                .filter(|_| self.workspace == Workspace::Inspect)
+            {
                 if advanced.stage == AdvancedInspectStage::Running {
                     self.set_notice("全盘检查正在后台读取结构，请等待完成。");
                 } else if advanced.prompt.is_some() {
@@ -1089,22 +1167,13 @@ impl AppState {
 
         match command {
             NavCommand::NextWorkspace | NavCommand::PreviousWorkspace => {
-                self.switch_workspace(match self.workspace {
-                    Workspace::Devices if command == NavCommand::NextWorkspace => {
-                        Workspace::Backups
-                    }
-                    Workspace::Backups if command == NavCommand::NextWorkspace => {
-                        Workspace::Devices
-                    }
-                    Workspace::Provision if command == NavCommand::NextWorkspace => {
-                        Workspace::Devices
-                    }
-                    Workspace::Devices => Workspace::Backups,
-                    Workspace::Backups => Workspace::Devices,
-                    Workspace::Provision => Workspace::Backups,
-                });
+                self.switch_workspace(
+                    self.workspace
+                        .shifted(command == NavCommand::PreviousWorkspace),
+                );
             }
             NavCommand::WorkspaceDevices => self.switch_workspace(Workspace::Devices),
+            NavCommand::WorkspaceInspect => self.switch_workspace(Workspace::Inspect),
             NavCommand::WorkspaceBackups => self.switch_workspace(Workspace::Backups),
             NavCommand::WorkspaceProvision => self.switch_workspace(Workspace::Provision),
             NavCommand::Up => {

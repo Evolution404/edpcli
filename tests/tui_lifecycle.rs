@@ -138,9 +138,16 @@ fn transient_notice_has_its_own_area_and_expires() {
     let lines = rows
         .map(|row| row.iter().map(|cell| cell.symbol()).collect::<String>())
         .collect::<Vec<_>>();
-    assert!(lines[19].replace(' ', "").contains("批量选择"), "{lines:?}");
     assert!(
-        lines[22].replace(' ', "").contains("Tab/Shift-Tab标签"),
+        lines
+            .iter()
+            .any(|line| line.replace(' ', "").contains("批量选择")),
+        "{lines:?}"
+    );
+    assert!(
+        lines
+            .iter()
+            .any(|line| line.replace(' ', "").contains("Tab/Shift-Tab标签")),
         "{lines:?}"
     );
     std::thread::sleep(std::time::Duration::from_millis(4_050));
@@ -148,17 +155,22 @@ fn transient_notice_has_its_own_area_and_expires() {
 }
 
 #[test]
-fn two_tabs_cycle_and_provision_flow_renders_at_all_terminal_sizes() {
+fn four_workspaces_cycle_and_provision_flow_renders_at_all_terminal_sizes() {
     let mut state = AppState::new();
     state.replace_devices(vec![usb_device()]);
     assert_eq!(state.workspace(), Workspace::Devices);
     state.navigate(NavCommand::NextWorkspace, 20);
+    assert_eq!(state.workspace(), Workspace::Inspect);
+    state.navigate(NavCommand::NextWorkspace, 20);
+    assert_eq!(state.workspace(), Workspace::Provision);
+    state.navigate(NavCommand::NextWorkspace, 20);
+    assert_eq!(state.workspace(), Workspace::Backups);
+    state.navigate(NavCommand::PreviousWorkspace, 20);
+    assert_eq!(state.workspace(), Workspace::Provision);
+    state.navigate(NavCommand::NextWorkspace, 20);
     assert_eq!(state.workspace(), Workspace::Backups);
     state.navigate(NavCommand::NextWorkspace, 20);
     assert_eq!(state.workspace(), Workspace::Devices);
-    state.navigate(NavCommand::PreviousWorkspace, 20);
-    assert_eq!(state.workspace(), Workspace::Backups);
-    state.navigate(NavCommand::NextWorkspace, 20);
     assert_eq!(state.begin_provision_for_selected_device(), Ok(6));
     assert_eq!(state.workspace(), Workspace::Provision);
 

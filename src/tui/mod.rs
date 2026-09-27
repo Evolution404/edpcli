@@ -10,6 +10,7 @@ pub mod event;
 pub mod keymap;
 pub mod pane;
 pub mod render;
+pub mod shell;
 pub mod state;
 pub mod table_layout;
 pub mod task;
@@ -249,6 +250,7 @@ fn dispatch_nav_command(
                     tasks.request_device_scan(backup_dir.to_path_buf());
                     state.set_device_scan_pending(true);
                 }
+                state::Workspace::Inspect => {}
             }
             StateEffect::None
         }
@@ -260,6 +262,9 @@ fn dispatch_nav_command(
                 state::Workspace::Backups => state
                     .selected_backup_path()
                     .map(state::AdvancedInspectSource::Backup),
+                state::Workspace::Inspect => state
+                    .selected_device_disk()
+                    .map(state::AdvancedInspectSource::Disk),
             };
             if let Some(source) = source {
                 if state.begin_advanced_inspect(source) {
@@ -457,7 +462,9 @@ fn dispatch_tui_action(
             let kind = match state.workspace() {
                 state::Workspace::Devices => crate::tui::table_layout::TableKind::Devices,
                 state::Workspace::Backups => crate::tui::table_layout::TableKind::Backups,
-                state::Workspace::Provision => return StateEffect::None,
+                state::Workspace::Provision | state::Workspace::Inspect => {
+                    return StateEffect::None;
+                }
             };
             state.scroll_table(kind, action == TuiAction::TableScrollLeft);
             StateEffect::None
@@ -465,7 +472,7 @@ fn dispatch_tui_action(
         TuiAction::Insert
             if matches!(
                 state.workspace(),
-                state::Workspace::Devices | state::Workspace::Backups
+                state::Workspace::Devices | state::Workspace::Backups | state::Workspace::Inspect
             ) =>
         {
             dispatch_nav_command(
@@ -484,6 +491,13 @@ fn dispatch_tui_action(
                 StateEffect::None
             }
             state::Workspace::Backups => dispatch_nav_command(
+                state,
+                tasks,
+                NavCommand::OpenInspect,
+                backup_dir,
+                viewport_height,
+            ),
+            state::Workspace::Inspect => dispatch_nav_command(
                 state,
                 tasks,
                 NavCommand::OpenInspect,
@@ -814,7 +828,11 @@ fn run_loop(resume: Option<state::WriteIntent>) -> io::Result<LoopExit> {
                         }
                         continue;
                     }
-                    if let Some(stage) = state.advanced_inspect().map(|advanced| advanced.stage) {
+                    if let Some(stage) = state
+                        .advanced_inspect()
+                        .filter(|_| state.workspace() == state::Workspace::Inspect)
+                        .map(|advanced| advanced.stage)
+                    {
                         use state::AdvancedInspectStage;
                         match stage {
                             AdvancedInspectStage::Running => {

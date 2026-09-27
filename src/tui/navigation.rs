@@ -26,6 +26,7 @@ impl NavigationLocation {
     pub const fn from_workspace(workspace: Workspace) -> Self {
         match workspace {
             Workspace::Devices => Self::Devices,
+            Workspace::Inspect => Self::Inspect,
             Workspace::Backups => Self::Backups,
             Workspace::Provision => Self::Provision,
         }
