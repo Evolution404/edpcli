@@ -3364,7 +3364,7 @@ K0 基线审计曾确认：
 
 #### Phase K6：可选数据迁移能力
 
-**实施状态（2026-09-27）：IMPLEMENTATION COMPLETE；自动化验证 COMPLETE。** PR #34 `feat(provision): complete K6 lossless data migration` 已把 K6.1～K6.8 的代码路径接通。K6-specific 真实 USB 破坏性验收仍需在用户明确指定测试盘后单独执行；这不影响代码实现状态，但在取得真实盘证据前不得把“真实 USB K6 migration HIL”标记为 PASS。
+**实施状态（2026-09-27）：COMPLETE（实现、自动化与 K6-specific 真实 USB 验收均闭环）。** PR #34 `feat(provision): complete K6 lossless data migration` 已把 K6.1～K6.8 的代码路径接通，并在同一受控真实 USB 上取得 EDP→Plain→EDP 双向文件级迁移与逐文件 hash 证据。
 
 > **当前真相源：本节。** 文档后续章节中若仍出现“`K6 DEFERRED` / `Migrate fail-closed` / `未来实现 K6`”，且其上下文明确是 2026-09-26 或 PR #34 之前的阶段审计，则视为历史快照，不再代表当前实现状态。新的代码、UI、测试和后续计划必须以本节为准。
 
@@ -3392,7 +3392,16 @@ K6 当前安全语义：
 
 因此同盘 source/target extent 即使重叠，也不会边读源数据边覆盖源数据；所有需要迁移的 logical payload 必须在第一次破坏性写入前完成 staging。Unknown key material、无法解析的 filesystem、容量不足、路径冲突、unsupported target filesystem、越界 locator 等情况全部拒绝继续。
 
-**真实盘验收边界**：原 K8 的 2026-09-26 真实 USB 证据验证的是 K6 落地前的 Preserve/Rewrap/Rebuild/Plain 等安全链，继续有效；它不能自动充当新的 K6 文件级迁移真实盘证据。K6-specific 真实 USB acceptance 应另行记录 source files → migration → mount/readback/hash → rollback/restore 证据。
+**K6-specific 真实 USB acceptance（2026-09-27）：COMPLETE。** 验收继续绑定既有受控 `/dev/disk4`：aigo U335，VID:PID `3535:6300`，15,728,640 × 512B sectors，`device_id=disk&ven_aigo&prod_u335&rev_1100`，USB serial `E0277222DCC73AC8`。全过程未按盘号单独认盘，VID/PID、容量、device_id、serial/介质 lineage 均一致。
+
+- **源状态证据**：自动备份 `..._nopwd_20260927_145206.edpb` 显示写前为已识别 passwordless EDP，LBA12 type2 Share 从 LBA63 开始、type4 Encrypt 从 LBA13627392 开始；源交换区实际为可挂载 exFAT。
+- **源 payload 基线**：`files/` 共 3002 个文件、120,615,912 bytes。完整 manifest 聚合 SHA-256=`8687837a8727e6820fa14a3d1db33d330982037036662b1f742000a5a965e56d`。其中 3001 个用户文件共 120,611,816 bytes，聚合 SHA-256=`127998c5ebd6177391bc0c347d0f796be835ea32f9a8fa3d7c4ad11ba7379646`；另 1 个 macOS AppleDouble sidecar 为 4096 bytes，聚合 SHA-256=`ca6d9bf193da8cb0ae203afe548bd393fb7895df234f59d2106374c58d6df8c9`。主机 `/Users/zhangyuxi/unzip/files` 对 3001 个用户文件逐路径/大小/hash 与源 manifest 完全一致，作为独立 pristine baseline。
+- **中间 Plain 证据**：下一次 mandatory backup `..._plain_20260927_150316.edpb` 明确记录同一物理介质已处于 Plain，证明 EDP→Plain 的破坏性 K6 转换实际完成；该备份通过现有介质 lineage 归到同一盘。
+- **回到 EDP 证据**：随后同一介质完成 Plain→mode3，当前协议为 Boot type1 `LBA63..20479` + Share type2 `LBA20480..15725842`；deep read-only backup `..._20260927_152711.edpb` 已创建并 `backup verify` PASS。
+- **最终 payload readback**：新增只读 `examples/real_usb_k6_verify.rs`，固定 VID/PID/容量/device_id 门禁，仅 `FileDev::open_rdonly`，通过生产 `analyze_partition + stream_file_payload` 对隐藏 Share 解密/解析，不提供任何写接口。最终 Share 路径 `/EDP_COMBINED/files` 下 3001 个用户文件全部逐文件 size + SHA-256 PASS，bytes=`120611816`，aggregate=`127998c5ebd6177391bc0c347d0f796be835ea32f9a8fa3d7c4ad11ba7379646`；AppleDouble sidecar 单独逐字节 PASS，bytes=`4096`，aggregate=`ca6d9bf193da8cb0ae203afe548bd393fb7895df234f59d2106374c58d6df8c9`。最终再用完整 manifest 单次复跑得到 `files=3002 bytes=120615912 aggregate_sha256=8687837a8727e6820fa14a3d1db33d330982037036662b1f742000a5a965e56d`，与最初源盘完整基线精确一致，因此 3002/3002 源文件在 EDP→Plain→mode3 round-trip 后 byte-for-byte 保持。
+- **额外跨模式 preflight**：当前 mode3→mode2 完整只读 staging plan PASS：type1 CompatibilityReserve=`LBA63..125`，type4 Encrypt=`LBA126..15725842`，Share→Encrypt 明确为 `Migrate`，计划写入 389,867 sectors；mode3→Plain 完整只读 staging plan 亦 PASS，P1=`LBA2048..15728639` exFAT，计划写入 390,122 sectors。
+- **真实验收发现并修复的入口缺陷**：Plain target 原先错误拒绝 `--share-source-password/--encrypt-source-password`，真实盘 dry-run 首次触发该缺陷；提交 `1b0459d` 修复为 Plain 允许 source credential、仍拒绝 target credential，并加入 parser regression。
+- **rollback 边界**：K6 data write 已走同一 `WriteTransactionPlan`；K6 populated-filesystem rollback 自动回归与 Virtual Disk HIL 均 PASS，真实介质 transaction rollback 证据继续由 K8 的受控 failure-injection HIL 覆盖。此次 K6 round-trip 未通过人为再次注入故障破坏已验证数据，不重复制造无必要风险。
 
 #### Phase K7：Virtual-HIL
 
