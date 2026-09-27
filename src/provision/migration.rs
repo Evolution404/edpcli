@@ -53,20 +53,43 @@ pub struct MigrationManifest {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum MigrationPreflightError {
-    MissingInventory { source_index: usize },
-    SourceInventoryMismatch { source_index: usize },
+    MissingInventory {
+        source_index: usize,
+    },
+    SourceInventoryMismatch {
+        source_index: usize,
+    },
     TransformMismatch {
         source_index: usize,
         transform: MigrationTransform,
     },
-    InvalidPath { path: String },
-    TargetPathConflict { path: String },
-    MissingPayloadLocator { path: String },
-    LocatorLogicalSizeMismatch { path: String },
-    PayloadOutsideSource { path: String },
-    EntryBudgetExceeded { entries: usize, limit: usize },
-    StagingBudgetExceeded { required: u64, available: u64 },
-    TargetCapacityExceeded { required: u64, available: u64 },
+    InvalidPath {
+        path: String,
+    },
+    TargetPathConflict {
+        path: String,
+    },
+    MissingPayloadLocator {
+        path: String,
+    },
+    LocatorLogicalSizeMismatch {
+        path: String,
+    },
+    PayloadOutsideSource {
+        path: String,
+    },
+    EntryBudgetExceeded {
+        entries: usize,
+        limit: usize,
+    },
+    StagingBudgetExceeded {
+        required: u64,
+        available: u64,
+    },
+    TargetCapacityExceeded {
+        required: u64,
+        available: u64,
+    },
     ArithmeticOverflow,
 }
 
@@ -246,7 +269,11 @@ pub fn build_migration_manifest(
             let collision_key = path.trim_end_matches('/').to_lowercase();
             if let Some(previous) = occupied_paths.insert(collision_key, path.clone()) {
                 return Err(MigrationPreflightError::TargetPathConflict {
-                    path: if previous == path { path } else { format!("{previous} / {path}") },
+                    path: if previous == path {
+                        path
+                    } else {
+                        format!("{previous} / {path}")
+                    },
                 });
             }
 
