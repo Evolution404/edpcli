@@ -1,7 +1,7 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 
 use super::{
-    build_empty_exfat, build_empty_fat16, checksum32, exfat_boot_checksum, exfat_geometry,
+    build_empty_exfat, build_empty_fat16, exfat_boot_checksum, exfat_geometry,
     exfat_upcase_table, fat_chain, put_stream, put_u16, put_u32, put_u64, SparseFilesystemImage,
     SECTOR_SIZE,
 };
