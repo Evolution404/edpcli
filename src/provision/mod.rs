@@ -49,10 +49,10 @@ pub use plain::{
 };
 pub use profile::{PassInfoPolicy, ProvisionProfile, DEFAULT_SAFE6_LABEL};
 pub use region_mapping::{
-    migration_candidate, opaque_preserve_compatibility, preserve_compatibility,
-    CompatibilityFailure, Extent, FilesystemProfile, PhysicalCryptoProfile, RegionKeyProfile,
-    RegionMapping, RegionMappingKind, RegionMappingPlan, RegionMappingPlanner, SourceRegion,
-    TargetRegion,
+    migration_candidate, migration_transform, opaque_preserve_compatibility,
+    preserve_compatibility, CompatibilityFailure, Extent, FilesystemProfile, MigrationTransform,
+    PhysicalCryptoProfile, RegionKeyProfile, RegionMapping, RegionMappingKind, RegionMappingPlan,
+    RegionMappingPlanner, SourceRegion, TargetRegion,
 };
 pub use reprovision::{
     apply_target_geometry_overrides, decide_partition_action, parse_existing_provision,
