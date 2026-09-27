@@ -259,6 +259,8 @@ pub fn prepare_target_provision(
             )
         })?;
     let source_metadata = read_image(dev)?;
+    let source_kind =
+        crate::provision::DiskProvisionKind::from_metadata(&source_metadata, &device_id);
     let before_pin = MediaIdentityPin::new(
         media_identity_from_protocol_image(runner, disk, &source_metadata)?,
         &source_metadata,
@@ -379,6 +381,19 @@ pub fn prepare_target_provision(
             format!("错误: 无法生成统一目标制盘计划: {message}"),
         )
     })?;
+    let mut prepared_plain_import = None;
+    if source.is_none() && source_kind == crate::provision::DiskProvisionKind::Plain {
+        let import = super::migration::prepare_plain_to_official(dev, &target_plan)?;
+        let role = target_plan.partitions[import.target_index].geometry.role;
+        if !request.format.choice(role).0 {
+            let target = &mut target_plan.partitions[import.target_index];
+            target.disposition = RegionDisposition::Migrate;
+            target.action = RegionDisposition::Migrate.legacy_action();
+            target.migration_sources = import.sources;
+            target.reason = "K6 Plain→EDP 文件级无损导入".into();
+            prepared_plain_import = Some(import.prepared);
+        }
+    }
     let explicit_rebuild_roles = target_plan
         .partitions
         .iter()
@@ -425,12 +440,16 @@ pub fn prepare_target_provision(
             _ => {}
         }
     }
-    let prepared_migrations = super::migration::prepare_migrations(
-        dev,
-        source.as_ref(),
-        &target_plan,
-        &request.key_domains,
-    )?;
+    let prepared_migrations = if let Some(prepared) = prepared_plain_import {
+        vec![prepared]
+    } else {
+        super::migration::prepare_migrations(
+            dev,
+            source.as_ref(),
+            &target_plan,
+            &request.key_domains,
+        )?
+    };
     let source_onlyid = source.as_ref().and_then(|_| {
         source_metadata
             .get(4 * SECTOR..5 * SECTOR)
