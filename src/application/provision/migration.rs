@@ -25,6 +25,14 @@ struct MigrationPartitionReader<'a> {
     file_key: Option<[u8; 16]>,
 }
 
+impl Drop for MigrationPartitionReader<'_> {
+    fn drop(&mut self) {
+        if let Some(key) = self.file_key.as_mut() {
+            key.fill(0);
+        }
+    }
+}
+
 impl PartitionReader for MigrationPartitionReader<'_> {
     fn read_sector(&mut self, relative_lba: u64) -> std::io::Result<Vec<u8>> {
         use std::io::{Error, ErrorKind};
