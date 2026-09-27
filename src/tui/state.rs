@@ -639,77 +639,57 @@ impl AppState {
     }
 
     pub fn device_source_index_at_visible(&self, position: usize) -> Option<usize> {
-        let index =
-            if self.workspace == Workspace::Devices && !self.active_search_query().is_empty() {
-                *self.search_matches.get(position)?
-            } else {
-                position
-            };
-        (index < self.devices.len()).then_some(index)
+        self.visible_device_indices().get(position).copied()
     }
 
     pub fn backup_source_index_at_visible(&self, position: usize) -> Option<usize> {
-        let index =
-            if self.workspace == Workspace::Backups && !self.active_search_query().is_empty() {
-                *self.search_matches.get(position)?
-            } else {
-                position
-            };
-        (index < self.backups.len()).then_some(index)
+        self.visible_backup_indices().get(position).copied()
     }
 
     pub fn visible_device_indices(&self) -> Vec<usize> {
-        if self.workspace == Workspace::Devices && !self.active_search_query().is_empty() {
-            self.search_matches.clone()
-        } else {
-            (0..self.devices.len()).collect()
-        }
+        let indices =
+            if self.workspace == Workspace::Devices && !self.active_search_query().is_empty() {
+                self.search_matches.clone()
+            } else {
+                (0..self.devices.len()).collect()
+            };
+        self.device_table_view.sorted_indices(
+            indices,
+            self.table_interaction(super::table_layout::TableKind::Devices),
+        )
     }
 
     pub fn visible_device_count(&self) -> usize {
-        if self.workspace == Workspace::Devices && !self.active_search_query().is_empty() {
-            self.search_matches.len()
-        } else {
-            self.devices.len()
-        }
+        self.visible_device_indices().len()
     }
 
     pub fn device_at_visible(&self, position: usize) -> Option<&crate::disk_scan::Row> {
-        let index =
-            if self.workspace == Workspace::Devices && !self.active_search_query().is_empty() {
-                *self.search_matches.get(position)?
-            } else {
-                position
-            };
+        let index = self.device_source_index_at_visible(position)?;
         self.devices.get(index)
     }
 
     pub fn visible_backup_indices(&self) -> Vec<usize> {
-        if self.workspace == Workspace::Backups && !self.active_search_query().is_empty() {
-            self.search_matches.clone()
-        } else {
-            (0..self.backups.len()).collect()
-        }
+        let indices =
+            if self.workspace == Workspace::Backups && !self.active_search_query().is_empty() {
+                self.search_matches.clone()
+            } else {
+                (0..self.backups.len()).collect()
+            };
+        self.backup_table_view.sorted_indices(
+            indices,
+            self.table_interaction(super::table_layout::TableKind::Backups),
+        )
     }
 
     pub fn visible_backup_count(&self) -> usize {
-        if self.workspace == Workspace::Backups && !self.active_search_query().is_empty() {
-            self.search_matches.len()
-        } else {
-            self.backups.len()
-        }
+        self.visible_backup_indices().len()
     }
 
     pub fn backup_at_visible(
         &self,
         position: usize,
     ) -> Option<&crate::application::BackupWorkspaceItem> {
-        let index =
-            if self.workspace == Workspace::Backups && !self.active_search_query().is_empty() {
-                *self.search_matches.get(position)?
-            } else {
-                position
-            };
+        let index = self.backup_source_index_at_visible(position)?;
         self.backups.get(index)
     }
 
@@ -720,11 +700,7 @@ impl AppState {
     pub fn selected_device(&self) -> Option<&crate::disk_scan::Row> {
         match self.workspace {
             Workspace::Devices => {
-                let index = if self.workspace_filter_active() {
-                    *self.search_matches.get(self.selected)?
-                } else {
-                    self.selected
-                };
+                let index = self.device_source_index_at_visible(self.selected)?;
                 self.devices.get(index)
             }
             Workspace::Backups | Workspace::Provision | Workspace::Inspect => self
@@ -733,17 +709,99 @@ impl AppState {
         }
     }
 
+    fn provision_selectable_device_indices(&self) -> Vec<usize> {
+        let mut indices = self
+            .devices
+            .iter()
+            .enumerate()
+            .filter_map(|(index, row)| {
+                (row.proto == "USB"
+                    && !row.denied
+                    && row.probe_error.is_none()
+                    && row.confirmed_provision_kind().is_some())
+                .then_some(index)
+            })
+            .collect::<Vec<_>>();
+        if let Some(sort) = self.table_sort(super::table_layout::TableKind::ProvisionDevices) {
+            indices.sort_by(|left, right| {
+                let a = &self.devices[*left];
+                let b = &self.devices[*right];
+                let value = |row: &crate::disk_scan::Row| match sort.column {
+                    0 => format!("disk{}", row.disk),
+                    1 => row.size.to_string(),
+                    2 => format!("{}:{}", row.vid, row.pid),
+                    3 => row
+                        .confirmed_provision_kind()
+                        .map(|kind| kind.full_name().to_string())
+                        .unwrap_or_default(),
+                    4 => row.onlyid.clone().unwrap_or_default(),
+                    _ => String::new(),
+                };
+                let ordering = super::table_layout::smart_cell_cmp(&value(a), &value(b))
+                    .then_with(|| left.cmp(right));
+                match sort.direction {
+                    super::table_layout::SortDirection::Ascending => ordering,
+                    super::table_layout::SortDirection::Descending => ordering.reverse(),
+                }
+            });
+        }
+        indices
+    }
+
     fn provision_selectable_devices(&self) -> impl Iterator<Item = &crate::disk_scan::Row> {
-        self.devices.iter().filter(|row| {
-            row.proto == "USB"
-                && !row.denied
-                && row.probe_error.is_none()
-                && row.confirmed_provision_kind().is_some()
-        })
+        self.provision_selectable_device_indices()
+            .into_iter()
+            .filter_map(|index| self.devices.get(index))
     }
 
     pub fn provision_device_at(&self, index: usize) -> Option<&crate::disk_scan::Row> {
-        self.provision_selectable_devices().nth(index)
+        let source = *self.provision_selectable_device_indices().get(index)?;
+        self.devices.get(source)
+    }
+
+    pub fn provision_menu_order(&self) -> Vec<usize> {
+        let mut order = (0..ProvisionKind::ALL.len()).collect::<Vec<_>>();
+        if let Some(sort) = self.table_sort(super::table_layout::TableKind::ProvisionMenu) {
+            order.sort_by(|left, right| {
+                let value = |index: usize| {
+                    let kind = ProvisionKind::ALL[index];
+                    match sort.column {
+                        0 => index.to_string(),
+                        1 => kind.title().to_string(),
+                        2 => kind.description().to_string(),
+                        _ => String::new(),
+                    }
+                };
+                let ordering = super::table_layout::smart_cell_cmp(&value(*left), &value(*right))
+                    .then_with(|| left.cmp(right));
+                match sort.direction {
+                    super::table_layout::SortDirection::Ascending => ordering,
+                    super::table_layout::SortDirection::Descending => ordering.reverse(),
+                }
+            });
+        }
+        order
+    }
+
+    pub fn provision_kind_at_visible(&self, position: usize) -> Option<ProvisionKind> {
+        let actual = *self.provision_menu_order().get(position)?;
+        ProvisionKind::ALL.get(actual).copied()
+    }
+
+    pub fn provision_menu_source_index(&self, position: usize) -> Option<usize> {
+        self.provision_menu_order().get(position).copied()
+    }
+
+    pub fn provision_menu_source_index_or_default(&self, position: usize) -> usize {
+        self.provision_menu_source_index(position)
+            .unwrap_or(position)
+            .min(ProvisionKind::ALL.len() - 1)
+    }
+
+    pub fn provision_menu_visible_position(&self, source_index: usize) -> Option<usize> {
+        self.provision_menu_order()
+            .iter()
+            .position(|index| *index == source_index)
     }
 
     pub fn provision_select_disk(&mut self) -> Option<u32> {
@@ -805,11 +863,7 @@ impl AppState {
         if self.workspace != Workspace::Backups {
             return None;
         }
-        let index = if self.workspace_filter_active() {
-            *self.search_matches.get(self.selected)?
-        } else {
-            self.selected
-        };
+        let index = self.backup_source_index_at_visible(self.selected)?;
         self.backups.get(index)
     }
 
@@ -933,6 +987,159 @@ impl AppState {
         &self.navigation
     }
 
+    pub fn active_table_kind(&self) -> Option<super::table_layout::TableKind> {
+        use super::table_layout::TableKind;
+        use crate::tui::pane::PaneId;
+
+        match self.workspace {
+            Workspace::Devices if self.devices_focused_pane() == PaneId::DevicesList => {
+                Some(TableKind::Devices)
+            }
+            Workspace::Backups if self.backups_focused_pane() == PaneId::BackupsList => {
+                Some(TableKind::Backups)
+            }
+            Workspace::Provision => match self.provision.stage {
+                ProvisionStage::SelectDisk => Some(TableKind::ProvisionDevices),
+                ProvisionStage::Menu => Some(TableKind::ProvisionMenu),
+                _ => None,
+            },
+            Workspace::Inspect
+                if self.advanced_inspect_focused_pane() == Some(PaneId::InspectDetail)
+                    && !self.advanced_inspect_detail_rows().is_empty() =>
+            {
+                Some(TableKind::InspectFields)
+            }
+            _ => None,
+        }
+    }
+
+    pub fn table_interaction(
+        &self,
+        kind: super::table_layout::TableKind,
+    ) -> super::table_layout::TableInteractionState {
+        self.horizontal_scroll
+            .get(&kind)
+            .copied()
+            .unwrap_or_default()
+    }
+
+    pub fn table_active_column(&self, kind: super::table_layout::TableKind) -> usize {
+        self.table_interaction(kind).active_column()
+    }
+
+    pub fn table_sort(
+        &self,
+        kind: super::table_layout::TableKind,
+    ) -> Option<super::table_layout::TableSort> {
+        self.table_interaction(kind).sort()
+    }
+
+    pub fn move_table_column(
+        &mut self,
+        kind: super::table_layout::TableKind,
+        reverse: bool,
+    ) -> bool {
+        let layout = super::table_layout::layout_for(kind);
+        self.horizontal_scroll
+            .entry(kind)
+            .or_default()
+            .move_active(&layout, reverse)
+    }
+
+    pub fn toggle_table_sort(&mut self, kind: super::table_layout::TableKind) {
+        self.change_table_sort(kind, false);
+    }
+
+    pub fn clear_table_sort(&mut self, kind: super::table_layout::TableKind) -> bool {
+        self.change_table_sort(kind, true)
+    }
+
+    fn change_table_sort(&mut self, kind: super::table_layout::TableKind, clear: bool) -> bool {
+        let device_disk = (kind == super::table_layout::TableKind::Devices)
+            .then(|| self.selected_device().map(|row| row.disk))
+            .flatten();
+        let backup_path = (kind == super::table_layout::TableKind::Backups)
+            .then(|| self.selected_backup().map(|row| row.path.clone()))
+            .flatten();
+        let provision_disk = (kind == super::table_layout::TableKind::ProvisionDevices)
+            .then(|| self.provision_device_at(self.selected).map(|row| row.disk))
+            .flatten();
+        let provision_kind = (kind == super::table_layout::TableKind::ProvisionMenu)
+            .then(|| self.provision_kind_at_visible(self.selected))
+            .flatten();
+        let inspect_key = (kind == super::table_layout::TableKind::InspectFields)
+            .then(|| {
+                self.advanced_inspect_detail_selected_row()
+                    .map(|row| (row.field_index, row.child_index, row.range))
+            })
+            .flatten();
+
+        let interaction = self.horizontal_scroll.entry(kind).or_default();
+        let changed = if clear {
+            interaction.clear_sort()
+        } else {
+            interaction.toggle_sort();
+            true
+        };
+
+        if let Some(disk) = device_disk {
+            if let Some(position) = self
+                .visible_device_indices()
+                .iter()
+                .position(|index| self.devices[*index].disk == disk)
+            {
+                self.selected = position;
+            }
+        }
+        if let Some(path) = backup_path {
+            if let Some(position) = self
+                .visible_backup_indices()
+                .iter()
+                .position(|index| self.backups[*index].path == path)
+            {
+                self.selected = position;
+            }
+        }
+        if let Some(disk) = provision_disk {
+            if let Some(position) = self
+                .provision_selectable_device_indices()
+                .iter()
+                .position(|index| self.devices[*index].disk == disk)
+            {
+                self.selected = position;
+            }
+        }
+        if let Some(kind) = provision_kind {
+            if let Some(actual) = ProvisionKind::ALL
+                .iter()
+                .position(|candidate| *candidate == kind)
+            {
+                if let Some(position) = self
+                    .provision_menu_order()
+                    .iter()
+                    .position(|index| *index == actual)
+                {
+                    self.selected = position;
+                }
+            }
+        }
+        if let Some(key) = inspect_key {
+            let rows = self.advanced_inspect_detail_rows();
+            if let Some(position) = rows
+                .iter()
+                .position(|row| (row.field_index, row.child_index, row.range) == key)
+            {
+                if let Some(advanced) = self.advanced_inspect.as_mut() {
+                    advanced
+                        .pane_focus
+                        .viewport_mut(crate::tui::pane::PaneId::InspectDetail)
+                        .selected = Some(position);
+                }
+            }
+        }
+        changed
+    }
+
     pub fn table_scroll_offset(&self, kind: super::table_layout::TableKind) -> usize {
         self.horizontal_scroll
             .get(&kind)
@@ -943,12 +1150,10 @@ impl AppState {
 
     pub fn scroll_table(&mut self, kind: super::table_layout::TableKind, reverse: bool) -> bool {
         let layout = super::table_layout::layout_for(kind);
-        let scroll = self.horizontal_scroll.entry(kind).or_default();
-        if reverse {
-            scroll.left()
-        } else {
-            scroll.right(&layout)
-        }
+        self.horizontal_scroll
+            .entry(kind)
+            .or_default()
+            .scroll_viewport(&layout, reverse)
     }
 
     pub fn pane_viewport(&self, pane: crate::tui::pane::PaneId) -> &crate::tui::pane::PaneViewport {

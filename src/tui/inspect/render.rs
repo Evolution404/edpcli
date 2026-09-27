@@ -599,7 +599,8 @@ pub(super) fn draw_advanced_inspect(
                     .filter(|item| !item.fields.is_empty());
                 if let Some(item) = field_item {
                     use crate::tui::table_layout::{
-                        display_width, layout_for, truncate_cell, TableKind,
+                        display_width, layout_for, table_heading, table_position_label,
+                        truncate_cell, TableKind,
                     };
                     let headings = super::super::state::INSPECT_DETAIL_HEADINGS;
                     let values = state.advanced_inspect_detail_rows();
@@ -610,12 +611,12 @@ pub(super) fn draw_advanced_inspect(
                         }
                     }
                     let layout = layout_for(TableKind::InspectFields);
-                    let viewport = layout.layout(
+                    let interaction = state.table_interaction(TableKind::InspectFields);
+                    let viewport = layout.layout_with_active(
                         detail_area.width.saturating_sub(3),
                         &content_widths,
-                        state
-                            .pane_viewport(crate::tui::pane::PaneId::InspectDetail)
-                            .scroll_x,
+                        interaction.viewport_offset(),
+                        Some(interaction.active_column()),
                     );
                     let visible_rows = detail_area.height.saturating_sub(3).max(1) as usize;
                     let row_start = detail_offset.min(values.len().saturating_sub(1));
@@ -638,6 +639,13 @@ pub(super) fn draw_advanced_inspect(
                                             usize::from(column.width),
                                             column.truncate_policy,
                                         ))
+                                        .style(
+                                            if column.index == interaction.active_column() {
+                                                Modifier::BOLD.into()
+                                            } else {
+                                                Style::default()
+                                            },
+                                        )
                                     })
                                     .collect::<Vec<_>>(),
                             )
@@ -652,15 +660,26 @@ pub(super) fn draw_advanced_inspect(
                             .columns
                             .iter()
                             .map(|column| {
-                                truncate_cell(
+                                let label = table_heading(
                                     headings[column.index],
+                                    column.index,
+                                    interaction,
+                                );
+                                Cell::from(truncate_cell(
+                                    &label,
                                     usize::from(column.width),
                                     column.truncate_policy,
+                                ))
+                                .style(
+                                    if column.index == interaction.active_column() {
+                                        accent().add_modifier(Modifier::BOLD | Modifier::REVERSED)
+                                    } else {
+                                        secondary().add_modifier(Modifier::BOLD)
+                                    },
                                 )
                             })
                             .collect::<Vec<_>>(),
-                    )
-                    .style(accent());
+                    );
                     frame.render_widget(
                         Table::new(rows, viewport.widths()).header(header).block(
                             Block::default()
@@ -671,11 +690,11 @@ pub(super) fn draw_advanced_inspect(
                                     panel()
                                 })
                                 .title(format!(
-                                    "字段详情 · 行 {}–{} / {} · 列 {}",
+                                    "字段详情 · 行 {}–{} / {} · h/l 列 · H/L 视口 · s 排序 · S 默认 · {}",
                                     if values.is_empty() { 0 } else { row_start + 1 },
                                     row_end,
                                     values.len(),
-                                    viewport.position_label()
+                                    table_position_label(&layout, interaction)
                                 )),
                         ),
                         detail_area,

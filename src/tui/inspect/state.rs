@@ -446,6 +446,27 @@ impl AppState {
                 }
             }
         }
+        if let Some(sort) = self.table_sort(crate::tui::table_layout::TableKind::InspectFields) {
+            projected.sort_by(|left, right| {
+                let a = left
+                    .cells
+                    .get(sort.column)
+                    .map(String::as_str)
+                    .unwrap_or("");
+                let b = right
+                    .cells
+                    .get(sort.column)
+                    .map(String::as_str)
+                    .unwrap_or("");
+                let ordering = crate::tui::table_layout::smart_cell_cmp(a, b)
+                    .then_with(|| left.field_index.cmp(&right.field_index))
+                    .then_with(|| left.child_index.cmp(&right.child_index));
+                match sort.direction {
+                    crate::tui::table_layout::SortDirection::Ascending => ordering,
+                    crate::tui::table_layout::SortDirection::Descending => ordering.reverse(),
+                }
+            });
+        }
         projected
     }
 

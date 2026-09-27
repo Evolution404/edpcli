@@ -101,7 +101,8 @@ fn draw_device_list(frame: &mut Frame, list_area: ratatui::layout::Rect, state: 
     }
 
     use crate::tui::table_layout::{
-        layout_for, table_column_schema, truncate_cell, ColumnId, TableKind,
+        layout_for, table_column_schema, table_heading, table_position_label, truncate_cell,
+        ColumnId, TableKind,
     };
     let columns = table_column_schema(TableKind::Devices).expect("device schema");
     let headings = columns
@@ -112,10 +113,12 @@ fn draw_device_list(frame: &mut Frame, list_area: ratatui::layout::Rect, state: 
         .table_view_data(TableKind::Devices)
         .expect("device view data");
     let layout = layout_for(TableKind::Devices);
-    let viewport = layout.layout(
+    let interaction = state.table_interaction(TableKind::Devices);
+    let viewport = layout.layout_with_active(
         list_area.width.saturating_sub(4),
         &view.content_widths,
-        state.table_scroll_offset(TableKind::Devices),
+        interaction.viewport_offset(),
+        Some(interaction.active_column()),
     );
     let window = visible_window(state.selected(), visible_count, list_area.height);
     let window_start = window.start;
@@ -137,6 +140,11 @@ fn draw_device_list(frame: &mut Frame, list_area: ratatui::layout::Rect, state: 
                             ColumnId::Model => muted(),
                             _ => Style::default(),
                         };
+                        let style = if column.index == interaction.active_column() {
+                            style.add_modifier(Modifier::BOLD)
+                        } else {
+                            style
+                        };
                         Cell::from(truncate_cell(
                             value,
                             usize::from(column.width),
@@ -152,20 +160,25 @@ fn draw_device_list(frame: &mut Frame, list_area: ratatui::layout::Rect, state: 
             .columns
             .iter()
             .map(|column| {
-                truncate_cell(
-                    headings[column.index],
+                let label = table_heading(headings[column.index], column.index, interaction);
+                let style = if column.index == interaction.active_column() {
+                    accent().add_modifier(Modifier::BOLD | Modifier::REVERSED)
+                } else {
+                    secondary().add_modifier(Modifier::BOLD)
+                };
+                Cell::from(truncate_cell(
+                    &label,
                     usize::from(column.width),
                     column.truncate_policy,
-                )
+                ))
+                .style(style)
             })
             .collect::<Vec<_>>(),
-    )
-    .style(accent());
-    let table_title = if viewport.scrollable_columns == 0 {
-        title
-    } else {
-        format!("{title} · h/l 横向滚动 · {}", viewport.position_label())
-    };
+    );
+    let table_title = format!(
+        "{title} · h/l 列 · H/L 视口 · s 排序 · S 默认 · {}",
+        table_position_label(&layout, interaction)
+    );
     let table = crate::tui::ui::data_table(
         &table_title,
         header,
@@ -234,17 +247,11 @@ fn draw_device_summary(frame: &mut Frame, area: ratatui::layout::Rect, state: &A
         let model = device_layout_model(row);
         let bar_width = usize::from(area.width.saturating_sub(6));
         lines.push(model.bar_line_with_label(bar_width, "  "));
-        lines.push(field_line(
-            "总容量",
-            format_sector_size(row.size / crate::common::SECTOR as u64),
+        lines.extend(capacity_legend_lines(
+            &model,
+            &format_sector_size(row.size / crate::common::SECTOR as u64),
+            usize::from(area.width.saturating_sub(6)),
         ));
-        for segment in &model.segments {
-            lines.push(Line::from(vec![
-                Span::styled("  ■ ", theme::current().disk_region(segment.kind)),
-                Span::styled(crate::ui::pad_to(&segment.label, 16), muted()),
-                Span::raw(format_sector_size(segment.sector_count)),
-            ]));
-        }
         let layout_complete = match row.confirmed_provision_kind() {
             Some(crate::provision::DiskProvisionKind::Plain) => row.partition_table.is_some(),
             Some(_) => row.existing_profile_for_prefill().is_some(),
@@ -356,6 +363,100 @@ fn field_line(label: &'static str, value: impl Into<String>) -> Line<'static> {
         Span::styled(crate::ui::pad_to(label, 12), muted()),
         Span::raw(value.into()),
     ])
+}
+
+fn capacity_legend_lines(
+    model: &crate::tui::disk_layout::DiskLayoutModel,
+    total: &str,
+    width: usize,
+) -> Vec<Line<'static>> {
+    use crate::tui::table_layout::display_width;
+
+    #[derive(Clone)]
+    struct Entry {
+        kind: Option<crate::application::disk_layout::DiskRegionKind>,
+        text: String,
+    }
+
+    let mut entries = vec![Entry {
+        kind: None,
+        text: format!("总容量  {total}"),
+    }];
+    entries.extend(model.segments.iter().map(|segment| Entry {
+        kind: Some(segment.kind),
+        text: format!(
+            "{}  {}",
+            segment.label,
+            format_sector_size(segment.sector_count)
+        ),
+    }));
+
+    if entries.is_empty() {
+        return Vec::new();
+    }
+
+    let available = width.max(1);
+    let gap = 4usize;
+    let max_entry_width = entries
+        .iter()
+        .map(|entry| display_width(&entry.text) + usize::from(entry.kind.is_some()) * 2)
+        .max()
+        .unwrap_or(1)
+        .max(1);
+
+    let mut columns = entries.len().clamp(1, 4);
+    while columns > 1
+        && max_entry_width
+            .saturating_mul(columns)
+            .saturating_add(gap.saturating_mul(columns - 1))
+            > available
+    {
+        columns -= 1;
+    }
+    let cell_width = if columns == 1 {
+        available
+    } else {
+        available.saturating_sub(gap.saturating_mul(columns - 1)) / columns
+    }
+    .max(1);
+
+    let mut lines = Vec::new();
+    for chunk in entries.chunks(columns) {
+        let mut spans = vec![Span::raw("    ")];
+        for (position, entry) in chunk.iter().enumerate() {
+            if position > 0 {
+                spans.push(Span::raw(" ".repeat(gap)));
+            }
+            let prefix_width = if let Some(kind) = entry.kind {
+                spans.push(Span::styled("■ ", theme::current().disk_region(kind)));
+                2
+            } else {
+                0
+            };
+            let text_width = display_width(&entry.text);
+            let room = cell_width.saturating_sub(prefix_width);
+            let text = if text_width <= room {
+                entry.text.clone()
+            } else {
+                crate::tui::table_layout::truncate_cell(
+                    &entry.text,
+                    room,
+                    crate::tui::table_layout::TruncatePolicy::Clip,
+                )
+            };
+            let padded = crate::ui::pad_to(&text, room);
+            spans.push(Span::styled(
+                padded,
+                if entry.kind.is_some() {
+                    muted()
+                } else {
+                    Style::default()
+                },
+            ));
+        }
+        lines.push(Line::from(spans));
+    }
+    lines
 }
 
 fn device_layout_model(row: &crate::disk_scan::Row) -> crate::tui::disk_layout::DiskLayoutModel {

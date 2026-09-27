@@ -215,7 +215,8 @@ pub(super) fn draw_backups(frame: &mut Frame, area: ratatui::layout::Rect, state
             );
         } else {
             use crate::tui::table_layout::{
-                display_width, layout_for, table_column_schema, truncate_cell, TableKind,
+                display_width, layout_for, table_column_schema, table_heading,
+                table_position_label, truncate_cell, TableKind,
             };
             let columns = table_column_schema(TableKind::Backups).expect("backup schema");
             let headings = columns
@@ -235,10 +236,12 @@ pub(super) fn draw_backups(frame: &mut Frame, area: ratatui::layout::Rect, state
                 }
             }
             let layout = layout_for(TableKind::Backups);
-            let viewport = layout.layout(
+            let interaction = state.table_interaction(TableKind::Backups);
+            let viewport = layout.layout_with_active(
                 backup_parts[1].width.saturating_sub(4),
                 &content_widths,
-                state.table_scroll_offset(TableKind::Backups),
+                interaction.viewport_offset(),
+                Some(interaction.active_column()),
             );
             let window = visible_window(state.selected(), visible_count, backup_parts[1].height);
             let window_start = window.start;
@@ -261,7 +264,13 @@ pub(super) fn draw_backups(frame: &mut Frame, area: ratatui::layout::Rect, state
                                     usize::from(column.width),
                                     column.truncate_policy,
                                 ))
-                                .style(*style)
+                                .style(
+                                    if column.index == interaction.active_column() {
+                                        style.add_modifier(Modifier::BOLD)
+                                    } else {
+                                        *style
+                                    },
+                                )
                             })
                             .collect::<Vec<_>>(),
                     )
@@ -271,16 +280,26 @@ pub(super) fn draw_backups(frame: &mut Frame, area: ratatui::layout::Rect, state
                     .columns
                     .iter()
                     .map(|column| {
-                        truncate_cell(
-                            headings[column.index],
+                        let label =
+                            table_heading(headings[column.index], column.index, interaction);
+                        let style = if column.index == interaction.active_column() {
+                            accent().add_modifier(Modifier::BOLD | Modifier::REVERSED)
+                        } else {
+                            secondary().add_modifier(Modifier::BOLD)
+                        };
+                        Cell::from(truncate_cell(
+                            &label,
                             usize::from(column.width),
                             column.truncate_policy,
-                        )
+                        ))
+                        .style(style)
                     })
                     .collect::<Vec<_>>(),
-            )
-            .style(accent());
-            let table_title = format!("{title} · h/l 横向滚动 · {}", viewport.position_label());
+            );
+            let table_title = format!(
+                "{title} · h/l 列 · H/L 视口 · s 排序 · S 默认 · {}",
+                table_position_label(&layout, interaction)
+            );
             let table = crate::tui::ui::data_table(
                 &table_title,
                 header,

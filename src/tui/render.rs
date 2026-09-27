@@ -567,20 +567,41 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
             Workspace::Devices => {
                 if state.selected_device().is_some() {
                     let kind = crate::tui::table_layout::TableKind::Devices;
-                    let count = crate::tui::table_layout::layout_for(kind).scrollable_count();
-                    format!("Tab/Shift-Tab 工作区 · Ctrl-w w/W 切 Pane · j/k 当前 Pane · o 展开/折叠 · h/l 横向滚动 · {}/{} 列 · Enter 当前设备 · p 制盘 · i Inspect · b 备份 · Esc 返回 · q 退出", state.table_scroll_offset(kind) + 1, count)
+                    let total = crate::tui::table_layout::layout_for(kind).specs().len();
+                    format!(
+                        "Tab/Shift-Tab 工作区 · Ctrl-w w/W 切 Pane · j/k 行 · h/l 列 · H/L 视口 · s 排序 · S 默认排序 · {}/{} 列 · Enter 当前设备 · p 制盘 · i Inspect · b 备份 · Esc 返回 · q 退出",
+                        state.table_active_column(kind) + 1,
+                        total
+                    )
                 } else {
                     "Tab/Shift-Tab 工作区 · r 刷新 · q 退出".to_string()
                 }
             }
             Workspace::Inspect => {
-                "Inspect：j/k 当前 Pane · o 展开/折叠 · Enter 查看 · Esc 返回 · q 退出".to_string()
+                if state.active_table_kind()
+                    == Some(crate::tui::table_layout::TableKind::InspectFields)
+                {
+                    let kind = crate::tui::table_layout::TableKind::InspectFields;
+                    let total = crate::tui::table_layout::layout_for(kind).specs().len();
+                    format!(
+                        "Inspect 字段表：j/k 行 · h/l 列 · H/L 视口 · s 排序 · S 默认排序 · {}/{} 列 · o 展开/折叠 · Enter 查看 · Esc 返回 · q 退出",
+                        state.table_active_column(kind) + 1,
+                        total
+                    )
+                } else {
+                    "Inspect：j/k 当前 Pane · o 展开/折叠 · Enter 查看 · Esc 返回 · q 退出"
+                        .to_string()
+                }
             }
             Workspace::Backups => {
                 if state.selected_backup().is_some() {
                     let kind = crate::tui::table_layout::TableKind::Backups;
-                    let count = crate::tui::table_layout::layout_for(kind).scrollable_count();
-                    format!("Tab/Shift-Tab 标签 · j/k 移动 · h/l 横向滚动 · {}/{} 列 · Space 勾选 · Enter/i Inspect · b 新建 · v 校验 · R 恢复 · d 删除 · Esc 当前标签 · q 退出", state.table_scroll_offset(kind) + 1, count)
+                    let total = crate::tui::table_layout::layout_for(kind).specs().len();
+                    format!(
+                        "Tab/Shift-Tab 标签 · j/k 行 · h/l 列 · H/L 视口 · s 排序 · S 默认排序 · {}/{} 列 · Space 勾选 · Enter/i Inspect · b 新建 · v 校验 · R 恢复 · d 删除 · Esc 当前标签 · q 退出",
+                        state.table_active_column(kind) + 1,
+                        total
+                    )
                 } else {
                     "Tab/Shift-Tab 标签 · b 新建 · r 刷新 · Esc 当前标签 · q 退出".to_string()
                 }
@@ -588,14 +609,20 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
             Workspace::Provision => match state.provision().stage {
                 ProvisionStage::SelectDisk => {
                     let kind = crate::tui::table_layout::TableKind::ProvisionDevices;
-                    format!("制盘选盘：j/k 选择 · h/l 横向滚动 · {}/{} 列 · Enter 固定目标 · Esc 返回设备页", state.table_scroll_offset(kind) + 1, crate::tui::table_layout::layout_for(kind).scrollable_count())
+                    let total = crate::tui::table_layout::layout_for(kind).specs().len();
+                    format!(
+                        "制盘选盘：j/k 行 · h/l 列 · H/L 视口 · s 排序 · S 默认排序 · {}/{} 列 · Enter 固定目标 · Esc 返回设备页",
+                        state.table_active_column(kind) + 1,
+                        total
+                    )
                 }
                 ProvisionStage::Menu => {
                     let kind = crate::tui::table_layout::TableKind::ProvisionMenu;
+                    let total = crate::tui::table_layout::layout_for(kind).specs().len();
                     format!(
-                        "j/k 选择方案 · h/l 横向滚动 · {}/{} 列 · Enter 打开 · Esc 返回 · q 退出",
-                        state.table_scroll_offset(kind) + 1,
-                        crate::tui::table_layout::layout_for(kind).scrollable_count()
+                        "j/k 行 · h/l 列 · H/L 视口 · s 排序 · S 默认排序 · {}/{} 列 · Enter 打开 · Esc 返回 · q 退出",
+                        state.table_active_column(kind) + 1,
+                        total
                     )
                 }
                 ProvisionStage::Form if state.input_mode() == InputMode::Insert => {

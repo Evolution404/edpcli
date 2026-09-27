@@ -479,6 +479,13 @@ fn d0_current_device_summary_renders_capacity_layout_bar() {
     assert!(text.contains("交换区"), "{text}");
     assert!(text.contains("保密区"), "{text}");
     assert!(text.contains("━"), "{text}");
+    assert!(
+        text.lines().any(|line| {
+            let compact = line.replace(' ', "");
+            compact.contains("总容量") && compact.contains("EDP协议/保留")
+        }),
+        "wide capacity legend should place multiple cells on one aligned row: {text}"
+    );
 }
 
 #[test]

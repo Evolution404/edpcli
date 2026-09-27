@@ -2317,7 +2317,7 @@ Insert：
 7. Inspect 根结构树严格按物理 LBA 起点排序，Unknown 必须插回真实位置，不允许统一堆到末尾；
 8. Inspect 内 `Tab/Shift-Tab` 必须有效，循环切换“结构树 / 节点概览 / 节点详情”子工作区；
 9. 增加面包屑和明确的 `Esc 返回：<目标>` 提示，用户必须知道当前层级和返回目标；
-10. 所有 Table 使用统一自适应列宽算法，并支持 `h/l` 横向滚动；长“部门”等字段不能挤掉更重要的“盘型”等右侧列。
+10. 所有 Table 使用统一自适应列宽与交互状态：`j/k` 选行、`h/l` 激活列、`H/L` 横向视口、`s/S` 排序/默认顺序；激活的长“部门”等字段优先完整展开且不使用省略号。
 
 硬约束继续保持：
 
@@ -2613,14 +2613,14 @@ truncate_policy
 - Provision review/plan 中的真正 Table；
 - 后续新增表格必须复用同一算法。
 
-### 11.10 Table 的 h/l 横向滚动
+### 11.10 Table 的统一列焦点、横向视口与排序
 
 普通 Table context：
 
 - `h` = 向左滚；
 - `l` = 向右滚；
 - 滚动单位优先按“下一列边界/可读 viewport step”，不要每次只挪一个字符；
-- footer 显示当前位置，例如 `h/l 横向滚动 · 3/9 列`；
+- footer 显示当前位置与统一操作，例如 `h/l 列 · H/L 视口 · s 排序 · S 默认排序 · 3/9 列`；
 - 到最左/最右必须 clamp，不 wrap。
 
 上下文冲突按 widget role 解决：
@@ -2756,7 +2756,7 @@ Tab/Shift-Tab 子工作区 · Enter Sector Inspector · Esc 返回 · q 退出
 16. breadcrumb 与真实 NavigationStack/返回目标一致；
 17. Devices 长部门名时盘型仍可访问/显示；
 18. display width 正确处理中文、ASCII、emoji；
-19. 所有统一 Table 在窄屏可 h/l 横滚；
+19. 所有统一 Table 在窄屏使用 h/l 激活列、H/L 横向视口，并支持 s/S 排序/默认顺序；
 20. Tree h/l 仍折叠展开，不被 Table 横滚规则污染；
 21. Insert 中 h/l 是文本字符；
 22. 40×10、60×18、80×24、120×36、超宽终端无 panic/越界；
@@ -2778,7 +2778,7 @@ Tab/Shift-Tab 子工作区 · Enter Sector Inspector · Esc 返回 · q 退出
 7. Inspect Tab/Shift-Tab 可用且语义稳定；
 8. breadcrumb 与 Esc 返回行为严格一致；
 9. 所有表格使用统一自适应算法，长字段不会永久挤掉关键列；
-10. 表格 h/l 横滚、树 h/l 折叠、输入 h/l 文本三种 context 不冲突；
+10. 表格 h/l 列焦点/H/L 视口、树 h/l 层级操作、输入 h/l 文本三种 context 不冲突；
 11. 所有现行 Help/footer/USAGE/PROVISIONING 与实际键位一致；
 12. 专项、fast、full 全绿；
 13. 真实盘 Inspect 只读验收通过；
@@ -2789,7 +2789,7 @@ Tab/Shift-Tab 子工作区 · Enter Sector Inspector · Esc 返回 · q 退出
 
 **COMPLETE（2026-09-27）。U0～U7 实现与 11.14 的 15 项完成标准均已验收。**
 
-- U0～U6 的导航、区间格式、物理顺序拓扑、选中即解析、共享磁盘布局、检查子工作区、面包屑、自适应表格和横向滚动均已落地；U7 的旧快捷键/死代码清理、README/USAGE/Help/footer 同步也已完成。
+- U0～U6 的导航、区间格式、物理顺序拓扑、选中即解析、共享磁盘布局、检查子工作区、面包屑、自适应表格和统一列焦点/横向视口/排序均已落地；U7 的旧快捷键/死代码清理、README/USAGE/Help/footer 同步也已完成。
 - 专项门禁：`tui_suite` **161/161**、`inspect_suite` **55/55**、`provision_suite` **178/178**；`cargo fmt --all -- --check` 与 `git diff --check` 通过。
 - 正式快速门禁：4 suites / 6 artifacts，**0 failures，9.97s**；正式完整门禁：8 suites / 10 artifacts + doctest，**0 failures，31.99s**。
 - 代码提交 `af9abd9` 已推送至 `origin/main`；提交后工作区 clean，`HEAD == origin/main`。基于 clean HEAD 构建并安装的 macOS arm64 release 为 `edpcli 2.4.0`，构建产物与 `~/.local/bin/edpcli` SHA-256 均为 `90e2435499ae93da2835a5a04d0f5eb283788359a28dfc19ed8619d519e57674`。
@@ -3484,7 +3484,7 @@ K6 当前安全语义：
 
 1. **Inspect 的磁盘布局不是 Pane。** `AdvancedInspectPanel` 只有 `Tree / Overview / Detail`，但屏幕实际同时存在“磁盘布局 / 结构树 / 节点概览 / 节点详情”四块内容。磁盘布局有边框、有长内容，却没有 focus 和 viewport。
 2. **Inspect 的 `j/k` 仍是页面级 tree move。** 当前 Browser 中 `MoveUp/MoveDown` 直接移动 tree selection；切到 Overview/Detail 后，`j/k` 仍会影响 Tree，而不是当前窗口。
-3. **Detail 的纵向浏览不完整。** 纯文本 Detail 能用 `detail_scroll`，但 Sector 字段一旦渲染成 Table，目前只有 `h/l` 横向 column viewport，没有 vertical row viewport，长表下半部分无法访问。
+3. **Detail 的纵向浏览曾不完整。** 旧实现只有横向 column viewport；现行 Sector 字段 Table 已统一为 `j/k` 行、`h/l` 列、`H/L` 横向 viewport、`s/S` 排序，并保留 vertical row viewport。
 4. **Provision 的磁盘布局只覆盖可分区区间。** 官方模式 `provision_layout_model()` 从 `OFFICIAL_PARTITION_START_SECTOR = 63` 开始，并以 `usable_end_lba - 63` 作为总长度，因此没有显示 LBA0～62、LCE 后区域、盘尾等完整物理空间。
 
 本章目标不是继续给各页面补特殊键位，而是建立统一的：
@@ -3588,7 +3588,9 @@ Tree:
   h/l = 折叠/展开、父/子
 
 Table:
-  h/l = 横向 column viewport
+  h/l = 激活上一列/下一列
+  H/L = 横向 column viewport
+  s/S = 当前列排序/恢复默认顺序
 
 Input/Insert:
   ←/→ = 文本光标
@@ -3905,7 +3907,7 @@ gg/G
 Detail：
 
 - Paragraph：`j/k` 纵向 scroll；
-- Table：`j/k` row viewport，`h/l` column viewport；
+- Table：`j/k` row viewport，`h/l` column focus，`H/L` column viewport，`s/S` sort/default；
 - `Ctrl-u/d`、`PageUp/Down`、`gg/G` 都作用于当前 Detail 内容。
 
 ### 13.16 Detail Table 同时显示行、列位置
@@ -4077,7 +4079,7 @@ Table Pane：
 Inspect Detail Fields
 ```
 
-`j/k` 改 row cursor/viewport，`h/l` 改 column viewport。
+`j/k` 改 row cursor/viewport，`h/l` 改 column focus，`H/L` 改 column viewport，`s/S` 改排序/默认顺序。
 
 这样 KeyMapper 只需根据 Pane behavior 分发，不再理解每个页面的业务细节。
 
@@ -4113,7 +4115,7 @@ Preserve/Rebuild/New/Drop 用低干扰符号 + 文本，不改变区域主色：
 
 - 11.7 “Inspect 三个子工作区” → 四 Pane；
 - 11.11 顶部 DiskLayout 从只读固定块 → 可 focus Pane；
-- 11.10 Table 只强调 h/l 横滚 → 增加 vertical row viewport；
+- 11.10 Table 旧方案只强调横滚；现行已统一为 h/l 列焦点、H/L 横向视口、s/S 排序，并保留 vertical row viewport；
 - 页面级单一 `detail_scroll` → per-pane viewport；
 - Provision “实时布局”只读 render block → `ProvisionDiskLayout` Pane；
 - Sector Inspector `PageUp/PageDown = 前后 sector` → viewport 翻页；sector 使用独立 action。
@@ -4214,7 +4216,7 @@ Tab:
 - P2：`DiskLayoutModel` 已升级为 `[0..total_sectors)` 连续物理盘契约，新增 `DiskRegionKind` 与 `validate_complete/from_claims`；Inspect、官方 Provision、Plain 三类 adapter 均覆盖 LBA0 到最后 sector，并把 `Protocol / Reserved / Unknown / Free / LCE / Tail` 分离。新增 hole / overlap / last-sector 门禁。
 - P3：新增共享 `DiskLayoutPane` renderer，统一 summary、比例条、语义颜色、闭区间 range、百分比、legend、details、focus border 与 vertical viewport；Inspect/Provision 已删除各自的磁盘布局拼接路径，Provision 旧 `partition_style` helper 也已移除。
 - P4：Inspect 已成为 `DiskLayout / Tree / Overview / Detail` 四个真实 Pane；宽屏四 Pane 同显，窄屏只显示 focused Pane，Tab/Shift-Tab 与 `Ctrl-w h/j/k/l` 均使用统一 PaneFocus，focus/viewport 状态不依赖终端尺寸。
-- P5：Overview 与 Detail Paragraph 使用独立 `PaneViewport.scroll_y`；Detail 字段 Table 新增 vertical row viewport，并保留原有 h/l column viewport，标题显示 `行 start–end / total · 列 position`；`j/k`、`Ctrl-u/d`、`PageUp/Down`、`gg/G` 已按 focused Pane 分发并使用真实内容长度。30 行字段表回归可滚动到第 21 行且首行退出视图。
+- P5：Overview 与 Detail Paragraph 使用独立 `PaneViewport.scroll_y`；Detail 字段 Table 新增 vertical row viewport，并使用统一 h/l column focus + H/L column viewport + s/S sort，标题显示 `行 start–end / total · 列 position`；`j/k`、`Ctrl-u/d`、`PageUp/Down`、`gg/G` 已按 focused Pane 分发并使用真实内容长度。30 行字段表回归可滚动到第 21 行且首行退出视图。
 - 正式 `scripts/test-fast.sh`：4 suites / 6 artifacts，0 failures，13.17s；P2/P5 专项以及共享 renderer 的 Inspect/Provision 生命周期测试均通过。
 - 下一阶段仅进入 P6，不开始第 12 章。
 
@@ -4290,7 +4292,7 @@ python3 scripts/test-full.py --profile full
 6. DiskLayout focused 时 j/k 不改 tree selection；
 7. Tree focused 时 j/k 仍选节点；
 8. Tree h/l 仍折叠/展开；
-9. Detail Table h/l 横滚列；
+9. Detail Table 使用 h/l 激活列、H/L 横向视口、s/S 排序；
 10. Detail Table j/k 可访问所有行；
 11. Detail title 显示正确 row/column position；
 12. Overview 可访问末行；
@@ -4718,7 +4720,7 @@ Offset  Len   Field                    Value                  Status
 ...
 ```
 
-通过 `h/l` 横向列 viewport 继续访问：
+通过 `H/L` 横向列 viewport 继续访问；`h/l` 用于激活列：
 
 ```text
 Group
@@ -4740,7 +4742,9 @@ j/k          选择上一/下一字段
 Ctrl-u/d     半页移动并保持选择
 PageUp/Down  整页
  gg/G        首/末字段
-h/l          横向列 viewport
+h/l          激活上一列/下一列
+H/L          横向列 viewport
+s/S          当前列排序/恢复默认顺序
 Enter        打开 Sector Inspector，并定位/Pin 到该 Field 起始 byte
 o            展开/折叠当前字段 children（如 ELABEL 子项）
 y            复制 semantic value
@@ -5382,7 +5386,7 @@ ProvisionPartitions:
 
 宽屏：完整四列表格。
 
-中等宽度：仍保持表格，但可以通过 `h/l` 横向 viewport 查看次要列；**“分区”和“处理”应 pinned**，确保用户始终能看到哪一行会保留、哪一行会重建。
+中等宽度：仍保持表格，通过 `h/l` 激活目标列、`H/L` 横向 viewport 查看次要列；**“分区”和“处理”应 pinned**，确保用户始终能看到哪一行会保留、哪一行会重建。
 
 很窄终端不能把状态隐藏到横向页末。退化为每分区两行：
 
@@ -9468,7 +9472,7 @@ Backup detail / coverage
 
 #### U7 — 全应用响应式收口
 
-状态：COMPLETE（2026-09-27）。所有 TUI renderer 的宽度分支统一经 `ViewportClass`（Compact / Standard / Wide / UltraWide）决策，删除 70/80/96/100/108/118 等私有 width breakpoint；新增静态契约禁止 renderer 重新直接比较 `.width` 数字。既有 40x10、60x18、80x24、120x36、160x45、240x60 视觉与 no-panic 门禁、长部门/盘型优先级、CJK/emoji display width、横向滚动和终端文本安全测试继续通过；`tui_suite` 223/223 PASS。
+状态：COMPLETE（2026-09-27）。所有 TUI renderer 的宽度分支统一经 `ViewportClass`（Compact / Standard / Wide / UltraWide）决策，删除 70/80/96/100/108/118 等私有 width breakpoint；新增静态契约禁止 renderer 重新直接比较 `.width` 数字。既有 40x10、60x18、80x24、120x36、160x45、240x60 视觉与 no-panic 门禁、长部门/盘型优先级、CJK/emoji display width、统一表格列焦点/横向视口/排序和终端文本安全测试继续通过；当前 `tui_suite` 235/235 PASS。
 
 - 删除 renderer 内 magic width breakpoint；
 - 统一 Compact/Standard/Wide/UltraWide；

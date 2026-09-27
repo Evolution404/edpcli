@@ -259,7 +259,7 @@ impl AppState {
             if target_disk.is_some() {
                 self.provision.stage = ProvisionStage::Menu;
                 self.set_item_count(ProvisionKind::ALL.len());
-                self.selected = selected;
+                self.selected = self.provision_menu_visible_position(selected).unwrap_or(0);
             } else {
                 self.provision.stage = ProvisionStage::SelectDisk;
                 self.set_item_count(self.provision_selectable_devices().count());
@@ -269,7 +269,7 @@ impl AppState {
     }
 
     pub fn provision_begin_selected(&mut self) -> ProvisionKind {
-        let index = self.selected.min(ProvisionKind::ALL.len() - 1);
+        let index = self.provision_menu_source_index_or_default(self.selected);
         let kind = ProvisionKind::ALL[index];
         if self.selected_device().is_none() {
             self.provision.stage = ProvisionStage::SelectDisk;

@@ -1188,3 +1188,54 @@ fn narrow_sector_inspector_keeps_selected_byte_visible_without_mutating_cursor()
         "responsive rendering must not rewrite byte selection"
     );
 }
+
+#[test]
+fn inspect_field_table_sort_preserves_selected_field_identity() {
+    use edpcli::tui::{pane::PaneId, table_layout::TableKind};
+
+    let mut sector = item(0, true);
+    sector.fields[0].children = vec![
+        FieldChild {
+            label: "z-child".into(),
+            value: "z-value".into(),
+            relative_range: Some((1, 2)),
+        },
+        FieldChild {
+            label: "a-child".into(),
+            value: "a-value".into(),
+            relative_range: Some((0, 1)),
+        },
+    ];
+
+    let mut state = AppState::new();
+    assert!(state.begin_advanced_inspect(AdvancedInspectSource::Disk(6)));
+    state.advanced_inspect_finish(Ok(workspace(vec![sector])));
+    select_protocol_lba0(&mut state);
+    state.advanced_inspect_focus_pane(PaneId::InspectDetail);
+    state.advanced_inspect_detail_toggle_selected();
+
+    let rows = state.advanced_inspect_detail_rows();
+    assert_eq!(rows.len(), 3);
+    state.advanced_inspect_move_focused_vertical(1, 3, rows.len());
+    let before = state
+        .advanced_inspect_detail_selected_row()
+        .expect("selected field row");
+    let key = (before.field_index, before.child_index, before.range);
+
+    for _ in 0..3 {
+        assert!(state.move_table_column(TableKind::InspectFields, false));
+    }
+    assert_eq!(state.table_active_column(TableKind::InspectFields), 3);
+
+    state.toggle_table_sort(TableKind::InspectFields);
+    let after = state
+        .advanced_inspect_detail_selected_row()
+        .expect("selected row after ascending sort");
+    assert_eq!((after.field_index, after.child_index, after.range), key);
+
+    state.toggle_table_sort(TableKind::InspectFields);
+    let after = state
+        .advanced_inspect_detail_selected_row()
+        .expect("selected row after descending sort");
+    assert_eq!((after.field_index, after.child_index, after.range), key);
+}

@@ -1792,3 +1792,37 @@ fn advanced_sector_inspector_is_on_demand_bounded_and_fail_soft() {
         .collect::<Vec<_>>();
     assert_eq!(on_demand, vec![14, 15, 16, 17, 18]);
 }
+
+#[test]
+fn provision_menu_sort_preserves_selected_scheme_and_enter_target() {
+    use edpcli::tui::table_layout::TableKind;
+
+    let mut state = AppState::new();
+    state.replace_devices(vec![device(64_000_000_000)]);
+    state.navigate(NavCommand::WorkspaceProvision, 20);
+    assert_eq!(state.provision().stage, ProvisionStage::SelectDisk);
+    assert!(state.provision_select_disk().is_some());
+    assert_eq!(state.provision().stage, ProvisionStage::Menu);
+
+    state.navigate(NavCommand::Down, 20);
+    state.navigate(NavCommand::Down, 20);
+    let selected_kind = state
+        .provision_kind_at_visible(state.selected())
+        .expect("selected provision kind");
+
+    assert!(state.move_table_column(TableKind::ProvisionMenu, false));
+    assert_eq!(state.table_active_column(TableKind::ProvisionMenu), 1);
+
+    state.toggle_table_sort(TableKind::ProvisionMenu);
+    assert_eq!(
+        state.provision_kind_at_visible(state.selected()),
+        Some(selected_kind)
+    );
+    state.toggle_table_sort(TableKind::ProvisionMenu);
+    assert_eq!(
+        state.provision_kind_at_visible(state.selected()),
+        Some(selected_kind)
+    );
+
+    assert_eq!(state.provision_begin_selected(), selected_kind);
+}

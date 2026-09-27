@@ -396,3 +396,26 @@ fn d0_plain_disk_without_device_id_uses_canonical_plain_kind() {
         "a canonical Plain disk must not become unknown just because it has no EDP device_id"
     );
 }
+
+#[test]
+fn backup_table_sort_preserves_selected_backup_reference() {
+    use edpcli::tui::table_layout::TableKind;
+
+    let mut state = AppState::new();
+    state.replace_devices(vec![device(7)]);
+    state.replace_backups(vec![backup(1, "one.bin"), backup(2, "two.bin")]);
+    state.navigate(NavCommand::WorkspaceBackups, 20);
+    state.navigate(NavCommand::Down, 20);
+    assert_eq!(state.selected_backup_path(), Some(PathBuf::from("two.bin")));
+
+    assert!(state.move_table_column(TableKind::Backups, false)); // time
+    assert!(state.move_table_column(TableKind::Backups, false)); // name
+    assert_eq!(state.table_active_column(TableKind::Backups), 2);
+
+    state.toggle_table_sort(TableKind::Backups);
+    assert_eq!(state.selected_backup_path(), Some(PathBuf::from("two.bin")));
+    state.toggle_table_sort(TableKind::Backups);
+    assert_eq!(state.selected_backup_path(), Some(PathBuf::from("two.bin")));
+    assert!(state.clear_table_sort(TableKind::Backups));
+    assert_eq!(state.selected_backup_path(), Some(PathBuf::from("two.bin")));
+}

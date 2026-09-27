@@ -62,8 +62,12 @@ pub enum TuiAction {
     PanelRight,
     PanelNext,
     PanelPrevious,
+    TableColumnLeft,
+    TableColumnRight,
     TableScrollLeft,
     TableScrollRight,
+    TableSortToggle,
+    TableSortClear,
     Text(char),
     Backspace,
     DeleteChar,
@@ -109,6 +113,21 @@ pub const NORMAL_HELP: &[HelpBinding] = &[
         keys: "j/k",
         label: "Move",
         action: TuiAction::MoveDown,
+    },
+    HelpBinding {
+        keys: "h/l",
+        label: "表格：上一列 / 下一列",
+        action: TuiAction::TableColumnRight,
+    },
+    HelpBinding {
+        keys: "H/L",
+        label: "表格：横向视口",
+        action: TuiAction::TableScrollRight,
+    },
+    HelpBinding {
+        keys: "s/S",
+        label: "表格：排序 / 默认顺序",
+        action: TuiAction::TableSortToggle,
     },
     HelpBinding {
         keys: "Enter",
@@ -162,6 +181,11 @@ pub const INSPECT_HELP: &[HelpBinding] = &[
         keys: "h/l",
         label: "Fold",
         action: TuiAction::MoveLeft,
+    },
+    HelpBinding {
+        keys: "字段表 h/l · H/L · s/S",
+        label: "列 · 视口 · 排序",
+        action: TuiAction::TableColumnRight,
     },
     HelpBinding {
         keys: "Enter",
@@ -231,8 +255,8 @@ impl KeyMapper {
         let action = self.map(mode, event)?;
         if mode == InputMode::Normal && role == WidgetRole::Table {
             return Some(match action {
-                TuiAction::MoveLeft => TuiAction::TableScrollLeft,
-                TuiAction::MoveRight => TuiAction::TableScrollRight,
+                TuiAction::MoveLeft => TuiAction::TableColumnLeft,
+                TuiAction::MoveRight => TuiAction::TableColumnRight,
                 other => other,
             });
         }
@@ -318,6 +342,10 @@ impl KeyMapper {
             KeyCode::Char('k') | KeyCode::Up => Some(TuiAction::MoveUp),
             KeyCode::Char('h') | KeyCode::Left => Some(TuiAction::MoveLeft),
             KeyCode::Char('l') | KeyCode::Right => Some(TuiAction::MoveRight),
+            KeyCode::Char('H') => Some(TuiAction::TableScrollLeft),
+            KeyCode::Char('L') => Some(TuiAction::TableScrollRight),
+            KeyCode::Char('s') => Some(TuiAction::TableSortToggle),
+            KeyCode::Char('S') => Some(TuiAction::TableSortClear),
             KeyCode::Home => Some(TuiAction::Top),
             KeyCode::End | KeyCode::Char('G') => Some(TuiAction::Bottom),
             KeyCode::Enter => Some(TuiAction::Activate),

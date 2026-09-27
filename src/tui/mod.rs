@@ -665,14 +665,36 @@ fn run_loop(resume: Option<state::WriteIntent>) -> io::Result<LoopExit> {
                                             content_len,
                                         );
                                     }
-                                    TuiAction::TableScrollLeft | TuiAction::TableScrollRight => {
-                                        let viewport = state.pane_viewport_mut(
-                                            crate::tui::pane::PaneId::InspectDetail,
-                                        );
-                                        if action == TuiAction::TableScrollLeft {
-                                            viewport.scroll_x = viewport.scroll_x.saturating_sub(1);
-                                        } else {
-                                            viewport.scroll_x = viewport.scroll_x.saturating_add(1);
+                                    TuiAction::TableColumnLeft
+                                    | TuiAction::TableColumnRight
+                                    | TuiAction::TableScrollLeft
+                                    | TuiAction::TableScrollRight
+                                    | TuiAction::TableSortToggle
+                                    | TuiAction::TableSortClear
+                                        if role == keymap::WidgetRole::Table =>
+                                    {
+                                        let kind =
+                                            crate::tui::table_layout::TableKind::InspectFields;
+                                        match action {
+                                            TuiAction::TableColumnLeft => {
+                                                state.move_table_column(kind, true);
+                                            }
+                                            TuiAction::TableColumnRight => {
+                                                state.move_table_column(kind, false);
+                                            }
+                                            TuiAction::TableScrollLeft => {
+                                                state.scroll_table(kind, true);
+                                            }
+                                            TuiAction::TableScrollRight => {
+                                                state.scroll_table(kind, false);
+                                            }
+                                            TuiAction::TableSortToggle => {
+                                                state.toggle_table_sort(kind);
+                                            }
+                                            TuiAction::TableSortClear => {
+                                                state.clear_table_sort(kind);
+                                            }
+                                            _ => unreachable!(),
                                         }
                                     }
                                     TuiAction::MoveLeft if role == keymap::WidgetRole::Tree => {
@@ -841,7 +863,15 @@ fn run_loop(resume: Option<state::WriteIntent>) -> io::Result<LoopExit> {
 
                         if matches!(
                             action,
-                            TuiAction::Refresh | TuiAction::Help | TuiAction::Command
+                            TuiAction::Refresh
+                                | TuiAction::Help
+                                | TuiAction::Command
+                                | TuiAction::TableColumnLeft
+                                | TuiAction::TableColumnRight
+                                | TuiAction::TableScrollLeft
+                                | TuiAction::TableScrollRight
+                                | TuiAction::TableSortToggle
+                                | TuiAction::TableSortClear
                         ) {
                             match dispatch_tui_action(
                                 &mut state,
@@ -859,12 +889,6 @@ fn run_loop(resume: Option<state::WriteIntent>) -> io::Result<LoopExit> {
 
                         match state.provision().stage {
                             ProvisionStage::SelectDisk => match action {
-                                TuiAction::TableScrollLeft | TuiAction::TableScrollRight => {
-                                    state.scroll_table(
-                                        crate::tui::table_layout::TableKind::ProvisionDevices,
-                                        action == TuiAction::TableScrollLeft,
-                                    );
-                                }
                                 TuiAction::MoveUp => {
                                     let _ = state.navigate(NavCommand::Up, viewport_height);
                                 }
@@ -888,12 +912,6 @@ fn run_loop(resume: Option<state::WriteIntent>) -> io::Result<LoopExit> {
                                 _ => {}
                             },
                             ProvisionStage::Menu => match action {
-                                TuiAction::TableScrollLeft | TuiAction::TableScrollRight => {
-                                    state.scroll_table(
-                                        crate::tui::table_layout::TableKind::ProvisionMenu,
-                                        action == TuiAction::TableScrollLeft,
-                                    );
-                                }
                                 TuiAction::MoveUp => {
                                     let _ = state.navigate(NavCommand::Up, viewport_height);
                                 }

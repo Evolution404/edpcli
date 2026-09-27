@@ -158,7 +158,10 @@ pub(super) fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, sta
 
     match provision.stage {
         ProvisionStage::SelectDisk => {
-            use crate::tui::table_layout::{display_width, layout_for, truncate_cell, TableKind};
+            use crate::tui::table_layout::{
+                display_width, layout_for, table_heading, table_position_label, truncate_cell,
+                TableKind,
+            };
             let headings = ["设备", "容量", "USB 身份", "盘型", "onlyid"];
             let values = (0..state.item_count())
                 .filter_map(|index| {
@@ -181,10 +184,12 @@ pub(super) fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, sta
                 }
             }
             let layout = layout_for(TableKind::ProvisionDevices);
-            let viewport = layout.layout(
+            let interaction = state.table_interaction(TableKind::ProvisionDevices);
+            let viewport = layout.layout_with_active(
                 main_area.width.saturating_sub(4),
                 &content_widths,
-                state.table_scroll_offset(TableKind::ProvisionDevices),
+                interaction.viewport_offset(),
+                Some(interaction.active_column()),
             );
             let rows = (0..state.item_count()).filter_map(|index| {
                 let row = values.get(index)?;
@@ -198,23 +203,39 @@ pub(super) fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, sta
                                 usize::from(column.width),
                                 column.truncate_policy,
                             ))
+                            .style(
+                                if column.index == interaction.active_column() {
+                                    accent().add_modifier(Modifier::BOLD)
+                                } else {
+                                    Style::default()
+                                },
+                            )
                         })
                         .collect::<Vec<_>>(),
                 ))
             });
             let title = format!(
-                "制盘 · 先选择 USB 目标 · h/l 横向滚动 · {}",
-                viewport.position_label()
+                "制盘 · 先选择 USB 目标 · h/l 列 · H/L 视口 · s 排序 · S 默认 · {}",
+                table_position_label(&layout, interaction)
             );
             let header = TableRow::new(
                 viewport
                     .columns
                     .iter()
                     .map(|column| {
-                        truncate_cell(
-                            headings[column.index],
+                        let label =
+                            table_heading(headings[column.index], column.index, interaction);
+                        Cell::from(truncate_cell(
+                            &label,
                             usize::from(column.width),
                             column.truncate_policy,
+                        ))
+                        .style(
+                            if column.index == interaction.active_column() {
+                                accent().add_modifier(Modifier::BOLD | Modifier::REVERSED)
+                            } else {
+                                secondary().add_modifier(Modifier::BOLD)
+                            },
                         )
                     })
                     .collect::<Vec<_>>(),
@@ -227,7 +248,10 @@ pub(super) fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, sta
             frame.render_stateful_widget(table, main_area, &mut table_state);
         }
         ProvisionStage::Menu => {
-            use crate::tui::table_layout::{display_width, layout_for, truncate_cell, TableKind};
+            use crate::tui::table_layout::{
+                display_width, layout_for, table_heading, table_position_label, truncate_cell,
+                TableKind,
+            };
             let headings = ["#", "制盘方案", "布局 / 行为"];
             let mut content_widths = headings.map(display_width);
             for (index, kind) in ProvisionKind::ALL.into_iter().enumerate() {
@@ -243,48 +267,63 @@ pub(super) fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, sta
                 }
             }
             let layout = layout_for(TableKind::ProvisionMenu);
-            let viewport = layout.layout(
+            let interaction = state.table_interaction(TableKind::ProvisionMenu);
+            let viewport = layout.layout_with_active(
                 main_area.width.saturating_sub(4),
                 &content_widths,
-                state.table_scroll_offset(TableKind::ProvisionMenu),
+                interaction.viewport_offset(),
+                Some(interaction.active_column()),
             );
-            let rows = ProvisionKind::ALL
-                .into_iter()
-                .enumerate()
-                .map(|(index, kind)| {
-                    let values = [
-                        index.to_string(),
-                        kind.title().into(),
-                        kind.description().into(),
-                    ];
-                    TableRow::new(
-                        viewport
-                            .columns
-                            .iter()
-                            .map(|column| {
-                                Cell::from(truncate_cell(
-                                    &values[column.index],
-                                    usize::from(column.width),
-                                    column.truncate_policy,
-                                ))
-                                .style(provision_kind_style(kind))
-                            })
-                            .collect::<Vec<_>>(),
-                    )
-                });
+            let rows = state.provision_menu_order().into_iter().map(|index| {
+                let kind = ProvisionKind::ALL[index];
+                let values = [
+                    index.to_string(),
+                    kind.title().into(),
+                    kind.description().into(),
+                ];
+                TableRow::new(
+                    viewport
+                        .columns
+                        .iter()
+                        .map(|column| {
+                            Cell::from(truncate_cell(
+                                &values[column.index],
+                                usize::from(column.width),
+                                column.truncate_policy,
+                            ))
+                            .style(
+                                if column.index == interaction.active_column() {
+                                    provision_kind_style(kind).add_modifier(Modifier::BOLD)
+                                } else {
+                                    provision_kind_style(kind)
+                                },
+                            )
+                        })
+                        .collect::<Vec<_>>(),
+                )
+            });
             let title = format!(
-                "制盘中心 · 选择方案 · h/l 横向滚动 · {}",
-                viewport.position_label()
+                "制盘中心 · 选择方案 · h/l 列 · H/L 视口 · s 排序 · S 默认 · {}",
+                table_position_label(&layout, interaction)
             );
             let header = TableRow::new(
                 viewport
                     .columns
                     .iter()
                     .map(|column| {
-                        truncate_cell(
-                            headings[column.index],
+                        let label =
+                            table_heading(headings[column.index], column.index, interaction);
+                        Cell::from(truncate_cell(
+                            &label,
                             usize::from(column.width),
                             column.truncate_policy,
+                        ))
+                        .style(
+                            if column.index == interaction.active_column() {
+                                accent().add_modifier(Modifier::BOLD | Modifier::REVERSED)
+                            } else {
+                                secondary().add_modifier(Modifier::BOLD)
+                            },
                         )
                     })
                     .collect::<Vec<_>>(),

@@ -99,6 +99,148 @@ pub fn table_column_schema(kind: TableKind) -> Option<Vec<TableColumnSpec>> {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SortDirection {
+    Ascending,
+    Descending,
+}
+
+impl SortDirection {
+    pub const fn marker(self) -> &'static str {
+        match self {
+            Self::Ascending => "↑",
+            Self::Descending => "↓",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TableSort {
+    pub column: usize,
+    pub direction: SortDirection,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct TableInteractionState {
+    viewport_offset: usize,
+    active_column: usize,
+    sort: Option<TableSort>,
+}
+
+impl TableInteractionState {
+    pub const fn viewport_offset(self) -> usize {
+        self.viewport_offset
+    }
+
+    // Compatibility shims while callers migrate to the unified table interaction API.
+    pub const fn offset(self) -> usize {
+        self.viewport_offset()
+    }
+
+    pub fn set_offset(&mut self, offset: usize, layout: &AdaptiveTableLayout) {
+        self.set_viewport_offset(offset, layout);
+    }
+
+    pub fn left(&mut self) -> bool {
+        let next = self.viewport_offset.saturating_sub(1);
+        let changed = next != self.viewport_offset;
+        self.viewport_offset = next;
+        changed
+    }
+
+    pub fn right(&mut self, layout: &AdaptiveTableLayout) -> bool {
+        self.scroll_viewport(layout, false)
+    }
+
+    pub const fn active_column(self) -> usize {
+        self.active_column
+    }
+
+    pub const fn sort(self) -> Option<TableSort> {
+        self.sort
+    }
+
+    pub fn normalize(&mut self, layout: &AdaptiveTableLayout) {
+        let count = layout.specs().len();
+        self.active_column = self.active_column.min(count.saturating_sub(1));
+        self.viewport_offset = self
+            .viewport_offset
+            .min(layout.scrollable_count().saturating_sub(1));
+        if self.sort.is_some_and(|sort| sort.column >= count) {
+            self.sort = None;
+        }
+    }
+
+    pub fn set_viewport_offset(&mut self, offset: usize, layout: &AdaptiveTableLayout) {
+        self.viewport_offset = offset.min(layout.scrollable_count().saturating_sub(1));
+    }
+
+    pub fn move_active(&mut self, layout: &AdaptiveTableLayout, reverse: bool) -> bool {
+        self.normalize(layout);
+        let count = layout.specs().len();
+        if count == 0 {
+            return false;
+        }
+        let next = if reverse {
+            self.active_column.saturating_sub(1)
+        } else {
+            self.active_column.saturating_add(1).min(count - 1)
+        };
+        let changed = next != self.active_column;
+        self.active_column = next;
+
+        let scrollable = layout
+            .specs()
+            .iter()
+            .enumerate()
+            .filter_map(|(index, spec)| (!spec.pinned).then_some(index))
+            .collect::<Vec<_>>();
+        if let Some(position) = scrollable
+            .iter()
+            .position(|index| *index == self.active_column)
+        {
+            self.viewport_offset = position;
+        }
+        changed
+    }
+
+    pub fn scroll_viewport(&mut self, layout: &AdaptiveTableLayout, reverse: bool) -> bool {
+        self.normalize(layout);
+        let next = if reverse {
+            self.viewport_offset.saturating_sub(1)
+        } else {
+            self.viewport_offset
+                .saturating_add(1)
+                .min(layout.scrollable_count().saturating_sub(1))
+        };
+        let changed = next != self.viewport_offset;
+        self.viewport_offset = next;
+        changed
+    }
+
+    pub fn toggle_sort(&mut self) {
+        self.sort = Some(match self.sort {
+            Some(TableSort {
+                column,
+                direction: SortDirection::Ascending,
+            }) if column == self.active_column => TableSort {
+                column,
+                direction: SortDirection::Descending,
+            },
+            _ => TableSort {
+                column: self.active_column,
+                direction: SortDirection::Ascending,
+            },
+        });
+    }
+
+    pub fn clear_sort(&mut self) -> bool {
+        let changed = self.sort.is_some();
+        self.sort = None;
+        changed
+    }
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct TableViewData {
     pub generation: u64,
@@ -128,6 +270,97 @@ impl TableViewData {
             content_widths,
         }
     }
+
+    pub fn sorted_indices(
+        &self,
+        mut indices: Vec<usize>,
+        interaction: TableInteractionState,
+    ) -> Vec<usize> {
+        let Some(sort) = interaction.sort() else {
+            return indices;
+        };
+        indices.sort_by(|left, right| {
+            let a = self
+                .rows
+                .get(*left)
+                .and_then(|row| row.get(sort.column))
+                .map(String::as_str)
+                .unwrap_or("");
+            let b = self
+                .rows
+                .get(*right)
+                .and_then(|row| row.get(sort.column))
+                .map(String::as_str)
+                .unwrap_or("");
+            let ordering = smart_cell_cmp(a, b).then_with(|| left.cmp(right));
+            match sort.direction {
+                SortDirection::Ascending => ordering,
+                SortDirection::Descending => ordering.reverse(),
+            }
+        });
+        indices
+    }
+}
+
+fn semantic_rank(value: &str) -> Option<i64> {
+    let lower = value.to_ascii_lowercase();
+    if lower.contains("普通盘") || lower == "plain" {
+        Some(0)
+    } else if lower.contains("mode0") {
+        Some(10)
+    } else if lower.contains("mode1") {
+        Some(11)
+    } else if lower.contains("mode2") {
+        Some(12)
+    } else if lower.contains("mode3") {
+        Some(13)
+    } else if value.contains("可用") {
+        Some(20)
+    } else if value.contains("需权限") || value.contains("管理员权限") {
+        Some(21)
+    } else if value.contains("读取异常") {
+        Some(22)
+    } else if value.contains("非 USB") {
+        Some(23)
+    } else {
+        None
+    }
+}
+
+fn numeric_cell(value: &str) -> Option<f64> {
+    let trimmed = value.trim();
+    if let Some(rest) = trimmed.strip_prefix("disk") {
+        return rest.parse::<f64>().ok();
+    }
+    let number = trimmed
+        .chars()
+        .take_while(|ch| ch.is_ascii_digit() || *ch == '.' || *ch == '-')
+        .collect::<String>();
+    if number.is_empty() || number == "-" {
+        return None;
+    }
+    let mut value = number.parse::<f64>().ok()?;
+    let lower = trimmed.to_ascii_lowercase();
+    if lower.contains("tib") || lower.contains("tb") {
+        value *= 1_000_000_000_000.0;
+    } else if lower.contains("gib") || lower.contains("gb") {
+        value *= 1_000_000_000.0;
+    } else if lower.contains("mib") || lower.contains("mb") {
+        value *= 1_000_000.0;
+    } else if lower.contains("kib") || lower.contains("kb") {
+        value *= 1_000.0;
+    }
+    Some(value)
+}
+
+pub(crate) fn smart_cell_cmp(a: &str, b: &str) -> std::cmp::Ordering {
+    if let (Some(a), Some(b)) = (semantic_rank(a), semantic_rank(b)) {
+        return a.cmp(&b);
+    }
+    if let (Some(a), Some(b)) = (numeric_cell(a), numeric_cell(b)) {
+        return a.total_cmp(&b);
+    }
+    a.to_lowercase().cmp(&b.to_lowercase())
 }
 
 fn safe(value: &str) -> String {
@@ -348,6 +581,16 @@ impl AdaptiveTableLayout {
     }
 
     pub fn layout(&self, width: u16, content_widths: &[usize], scroll: usize) -> TableViewport {
+        self.layout_with_active(width, content_widths, scroll, None)
+    }
+
+    pub fn layout_with_active(
+        &self,
+        width: u16,
+        content_widths: &[usize],
+        scroll: usize,
+        active_column: Option<usize>,
+    ) -> TableViewport {
         if self.specs.is_empty() || width == 0 {
             return TableViewport {
                 columns: Vec::new(),
@@ -397,20 +640,67 @@ impl AdaptiveTableLayout {
                 break;
             }
         }
+        let active = active_column.filter(|index| *index < self.specs.len());
+        if let Some(active) = active {
+            if !selected.contains(&active) {
+                selected.push(active);
+            }
+        }
         if selected.is_empty() {
-            selected.push(0);
+            selected.push(active.unwrap_or(0));
         }
         selected.sort_unstable();
+        selected.dedup();
+
+        let active_required = |index: usize| {
+            if Some(index) == active {
+                content_widths
+                    .get(index)
+                    .copied()
+                    .unwrap_or(0)
+                    .max(usize::from(self.specs[index].min_width.max(1)))
+                    .max(1)
+                    .min(usize::from(width))
+            } else {
+                usize::from(self.specs[index].min_width.max(1))
+            }
+        };
+        while selected.len() > 1 {
+            let required = selected
+                .iter()
+                .map(|index| active_required(*index))
+                .sum::<usize>()
+                + selected.len().saturating_sub(1);
+            if required <= usize::from(width) {
+                break;
+            }
+            let removable = selected
+                .iter()
+                .enumerate()
+                .filter(|(_, index)| Some(**index) != active)
+                .min_by_key(|(_, index)| self.specs[**index].priority)
+                .map(|(position, _)| position);
+            let Some(removable) = removable else {
+                break;
+            };
+            selected.remove(removable);
+        }
+
         let spacing = selected.len().saturating_sub(1);
         let usable = usize::from(width).saturating_sub(spacing);
         let mut widths = selected
             .iter()
-            .map(|&index| usize::from(self.specs[index].min_width.max(1)))
+            .map(|&index| active_required(index))
             .collect::<Vec<_>>();
         if widths.iter().sum::<usize>() > usable {
             let mut excess = widths.iter().sum::<usize>() - usable;
             let mut order = (0..selected.len()).collect::<Vec<_>>();
-            order.sort_by_key(|&position| self.specs[selected[position]].priority);
+            order.sort_by_key(|&position| {
+                (
+                    Some(selected[position]) == active,
+                    self.specs[selected[position]].priority,
+                )
+            });
             for position in order {
                 let shrink = excess.min(widths[position].saturating_sub(1));
                 widths[position] -= shrink;
@@ -422,8 +712,12 @@ impl AdaptiveTableLayout {
         }
         let mut remaining = usable.saturating_sub(widths.iter().sum::<usize>());
         let mut priority_order = (0..selected.len()).collect::<Vec<_>>();
-        priority_order
-            .sort_by_key(|&position| std::cmp::Reverse(self.specs[selected[position]].priority));
+        priority_order.sort_by_key(|&position| {
+            (
+                Some(selected[position]) != active,
+                std::cmp::Reverse(self.specs[selected[position]].priority),
+            )
+        });
         for &position in &priority_order {
             let index = selected[position];
             let spec = self.specs[index];
@@ -458,7 +752,11 @@ impl AdaptiveTableLayout {
                 .map(|(index, width)| VisibleColumn {
                     index,
                     width: width.min(u16::MAX as usize) as u16,
-                    truncate_policy: self.specs[index].truncate_policy,
+                    truncate_policy: if Some(index) == active {
+                        TruncatePolicy::Clip
+                    } else {
+                        self.specs[index].truncate_policy
+                    },
                 })
                 .collect(),
             first_scrollable_column: offset,
@@ -467,35 +765,31 @@ impl AdaptiveTableLayout {
     }
 }
 
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
-pub struct HorizontalScrollState {
-    offset: usize,
+pub type HorizontalScrollState = TableInteractionState;
+
+pub fn table_heading(heading: &str, index: usize, interaction: TableInteractionState) -> String {
+    let marker = interaction
+        .sort()
+        .filter(|sort| sort.column == index)
+        .map(|sort| sort.direction.marker())
+        .unwrap_or("");
+    if marker.is_empty() {
+        heading.to_string()
+    } else {
+        format!("{heading} {marker}")
+    }
 }
 
-impl HorizontalScrollState {
-    pub const fn offset(self) -> usize {
-        self.offset
-    }
-
-    pub fn set_offset(&mut self, offset: usize, layout: &AdaptiveTableLayout) {
-        self.offset = offset.min(layout.scrollable_count().saturating_sub(1));
-    }
-
-    pub fn right(&mut self, layout: &AdaptiveTableLayout) -> bool {
-        let next = self
-            .offset
-            .saturating_add(1)
-            .min(layout.scrollable_count().saturating_sub(1));
-        let changed = next != self.offset;
-        self.offset = next;
-        changed
-    }
-
-    pub fn left(&mut self) -> bool {
-        let changed = self.offset > 0;
-        self.offset = self.offset.saturating_sub(1);
-        changed
-    }
+pub fn table_position_label(
+    layout: &AdaptiveTableLayout,
+    interaction: TableInteractionState,
+) -> String {
+    let total = layout.specs().len().max(1);
+    format!(
+        "当前列 {}/{}",
+        interaction.active_column().min(total - 1) + 1,
+        total
+    )
 }
 
 pub fn display_width(text: &str) -> usize {

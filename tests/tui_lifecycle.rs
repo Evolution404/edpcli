@@ -96,39 +96,60 @@ fn device_list_shows_model_and_identity_summary_and_enter_shortcut() {
 }
 
 #[test]
-fn long_department_keeps_disk_kind_visible_and_scrolls_by_column() {
+fn active_department_column_expands_fully_without_ellipsis_and_sort_keeps_disk_selection() {
     use edpcli::tui::table_layout::TableKind;
+
     let mut state = AppState::new();
-    let mut row = usb_device();
-    row.device_id = Some("disk&ven_test&prod_device".into());
-    row.dept = Some("输电运检中心非常非常长的部门名称第一分部".repeat(4));
-    state.replace_devices(vec![row]);
-    let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
+    let mut first = usb_device();
+    first.disk = 4;
+    first.dept = Some("江苏省电力有限公司/南京供电公司".into());
+    crate::common::confirm_row_identity(&mut first);
+
+    let mut second = usb_device();
+    second.disk = 5;
+    second.dept = Some("国网南京供电公司".into());
+    crate::common::confirm_row_identity(&mut second);
+
+    state.replace_devices(vec![first, second]);
+    state.navigate(NavCommand::Down, 20);
+    assert_eq!(state.selected_device_disk(), Some(5));
+
+    assert!(state.move_table_column(TableKind::Devices, false)); // 容量
+    assert!(state.move_table_column(TableKind::Devices, false)); // 部门
+    assert_eq!(state.table_active_column(TableKind::Devices), 2);
+
+    let mut terminal = Terminal::new(TestBackend::new(140, 24)).unwrap();
     terminal.draw(|frame| render::draw(frame, &state)).unwrap();
-    let compact = terminal
+    let text = terminal
         .backend()
         .buffer()
         .content()
-        .iter()
-        .map(|cell| cell.symbol())
-        .collect::<String>()
-        .replace(' ', "");
-    assert!(compact.contains("盘型"), "{compact}");
-    assert!(compact.contains("普通盘"), "{compact}");
-    assert!(compact.contains("h/l横向滚动"), "{compact}");
-    assert!(state.scroll_table(TableKind::Devices, false));
-    assert_eq!(state.table_scroll_offset(TableKind::Devices), 1);
-    terminal.draw(|frame| render::draw(frame, &state)).unwrap();
-    let compact = terminal
-        .backend()
-        .buffer()
-        .content()
-        .iter()
-        .map(|cell| cell.symbol())
-        .collect::<String>()
-        .replace(' ', "");
-    assert!(compact.contains("盘型"), "{compact}");
-    assert!(compact.contains("普通盘"), "{compact}");
+        .chunks(140)
+        .map(|row| row.iter().map(|cell| cell.symbol()).collect::<String>())
+        .collect::<Vec<_>>()
+        .join(
+            "
+",
+        );
+
+    let compact = text.replace(' ', "");
+    assert!(
+        compact.contains("江苏省电力有限公司/南京供电公司"),
+        "{text}"
+    );
+    assert!(
+        !compact.contains("江苏省电力有限公司/南京供电公…"),
+        "{text}"
+    );
+    assert!(compact.contains("h/l列"), "{text}");
+    assert!(compact.contains("H/L视口"), "{text}");
+
+    state.toggle_table_sort(TableKind::Devices);
+    assert_eq!(state.selected_device_disk(), Some(5));
+    state.toggle_table_sort(TableKind::Devices);
+    assert_eq!(state.selected_device_disk(), Some(5));
+    assert!(state.clear_table_sort(TableKind::Devices));
+    assert_eq!(state.selected_device_disk(), Some(5));
 }
 
 #[test]

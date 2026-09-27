@@ -234,25 +234,34 @@ pub(super) fn dispatch_tui_action(
     }
 
     match action {
-        TuiAction::TableScrollLeft | TuiAction::TableScrollRight => {
-            if state.workspace() == state::Workspace::Devices
-                && state.devices_focused_pane() != crate::tui::pane::PaneId::DevicesList
-            {
+        TuiAction::TableColumnLeft
+        | TuiAction::TableColumnRight
+        | TuiAction::TableScrollLeft
+        | TuiAction::TableScrollRight
+        | TuiAction::TableSortToggle
+        | TuiAction::TableSortClear => {
+            let Some(kind) = state.active_table_kind() else {
                 return StateEffect::None;
-            }
-            if state.workspace() == state::Workspace::Backups
-                && state.backups_focused_pane() != crate::tui::pane::PaneId::BackupsList
-            {
-                return StateEffect::None;
-            }
-            let kind = match state.workspace() {
-                state::Workspace::Devices => crate::tui::table_layout::TableKind::Devices,
-                state::Workspace::Backups => crate::tui::table_layout::TableKind::Backups,
-                state::Workspace::Provision | state::Workspace::Inspect => {
-                    return StateEffect::None;
-                }
             };
-            state.scroll_table(kind, action == TuiAction::TableScrollLeft);
+            match action {
+                TuiAction::TableColumnLeft => {
+                    state.move_table_column(kind, true);
+                }
+                TuiAction::TableColumnRight => {
+                    state.move_table_column(kind, false);
+                }
+                TuiAction::TableScrollLeft => {
+                    state.scroll_table(kind, true);
+                }
+                TuiAction::TableScrollRight => {
+                    state.scroll_table(kind, false);
+                }
+                TuiAction::TableSortToggle => state.toggle_table_sort(kind),
+                TuiAction::TableSortClear => {
+                    state.clear_table_sort(kind);
+                }
+                _ => unreachable!(),
+            }
             StateEffect::None
         }
         TuiAction::Insert

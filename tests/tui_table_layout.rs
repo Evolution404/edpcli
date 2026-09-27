@@ -1,6 +1,6 @@
 use edpcli::tui::table_layout::{
     display_width, identity_column_specs, table_column_schema, truncate_cell, AdaptiveColumnSpec,
-    AdaptiveTableLayout, ColumnId, HorizontalScrollState, TableKind, TruncatePolicy,
+    AdaptiveTableLayout, ColumnId, SortDirection, TableInteractionState, TableKind, TruncatePolicy,
 };
 
 #[test]
@@ -70,27 +70,98 @@ fn high_priority_disk_kind_survives_long_department_and_narrow_width() {
 }
 
 #[test]
-fn horizontal_scroll_steps_by_column_and_clamps_at_edges() {
+fn unified_table_state_separates_active_column_viewport_and_sort() {
     let layout = AdaptiveTableLayout::new(
         (0..9)
             .map(|index| spec(8, 10, 14, 50, index == 0))
             .collect(),
     );
-    let mut scroll = HorizontalScrollState::default();
-    let first = layout.layout(35, &[10; 9], scroll.offset());
-    assert_eq!(first.columns[0].index, 0);
-    assert!(scroll.right(&layout));
-    let second = layout.layout(35, &[10; 9], scroll.offset());
-    assert_ne!(first.columns[1].index, second.columns[1].index);
-    for _ in 0..20 {
-        scroll.right(&layout);
+    let mut state = TableInteractionState::default();
+
+    assert_eq!(state.active_column(), 0);
+    assert_eq!(state.viewport_offset(), 0);
+
+    assert!(state.move_active(&layout, false));
+    assert_eq!(state.active_column(), 1);
+    assert_eq!(state.viewport_offset(), 0);
+    assert!(state.move_active(&layout, false));
+    assert_eq!(state.active_column(), 2);
+    assert_eq!(state.viewport_offset(), 1);
+
+    let before = state.active_column();
+    assert!(state.scroll_viewport(&layout, false));
+    assert_eq!(state.active_column(), before);
+    assert_eq!(state.viewport_offset(), 2);
+
+    state.toggle_sort();
+    assert_eq!(state.sort().unwrap().column, before);
+    assert_eq!(state.sort().unwrap().direction, SortDirection::Ascending);
+    state.toggle_sort();
+    assert_eq!(state.sort().unwrap().direction, SortDirection::Descending);
+    assert!(state.clear_sort());
+    assert_eq!(state.sort(), None);
+}
+
+#[test]
+fn active_column_is_kept_visible_and_expands_without_ellipsis() {
+    let layout = AdaptiveTableLayout::new(vec![
+        spec(7, 9, 12, 100, true),
+        spec(8, 10, 12, 90, true),
+        spec(8, 16, 32, 80, true),
+        spec(6, 10, 18, 70, true),
+        spec(12, 22, 30, 95, true),
+    ]);
+    let content = [8, 10, 36, 10, 20];
+    let viewport = layout.layout_with_active(72, &content, 0, Some(2));
+    let dept = viewport
+        .columns
+        .iter()
+        .find(|column| column.index == 2)
+        .expect("active department column visible");
+    assert_eq!(usize::from(dept.width), 36);
+    assert_eq!(dept.truncate_policy, TruncatePolicy::Clip);
+    assert!(
+        viewport
+            .columns
+            .iter()
+            .map(|c| usize::from(c.width))
+            .sum::<usize>()
+            <= 72
+    );
+}
+
+#[test]
+fn every_interactive_table_renderer_uses_unified_active_column_layout() {
+    for (name, source, minimum) in [
+        (
+            "devices",
+            include_str!("../src/tui/devices/render.rs"),
+            1usize,
+        ),
+        (
+            "backups",
+            include_str!("../src/tui/backups/render.rs"),
+            1usize,
+        ),
+        (
+            "provision",
+            include_str!("../src/tui/provision/render.rs"),
+            2usize,
+        ),
+        (
+            "inspect",
+            include_str!("../src/tui/inspect/render.rs"),
+            1usize,
+        ),
+    ] {
+        let active_layouts = source.matches("layout_with_active(").count();
+        assert!(
+            active_layouts >= minimum,
+            "{name} must route every interactive table through layout_with_active; got {active_layouts}"
+        );
+        assert!(
+            source.contains("table_interaction("),
+            "{name} must consume the shared TableInteractionState"
+        );
     }
-    assert!(!scroll.right(&layout));
-    assert_eq!(scroll.offset(), 7);
-    assert!(scroll.left());
-    for _ in 0..20 {
-        scroll.left();
-    }
-    assert_eq!(scroll.offset(), 0);
-    assert!(!scroll.left());
 }

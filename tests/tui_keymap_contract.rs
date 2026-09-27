@@ -19,7 +19,7 @@ fn h_l_follow_widget_role_without_changing_insert_text() {
             WidgetRole::Table,
             key(KeyCode::Char('h'))
         ),
-        Some(TuiAction::TableScrollLeft)
+        Some(TuiAction::TableColumnLeft)
     );
     assert_eq!(
         mapper.map_for_role(
@@ -27,7 +27,7 @@ fn h_l_follow_widget_role_without_changing_insert_text() {
             WidgetRole::Table,
             key(KeyCode::Char('l'))
         ),
-        Some(TuiAction::TableScrollRight)
+        Some(TuiAction::TableColumnRight)
     );
     assert_eq!(
         mapper.map_for_role(InputMode::Normal, WidgetRole::Tree, key(KeyCode::Char('h'))),
@@ -52,6 +52,39 @@ fn h_l_follow_widget_role_without_changing_insert_text() {
             key(KeyCode::Char('l'))
         ),
         Some(TuiAction::Text('l'))
+    );
+
+    assert_eq!(
+        mapper.map_for_role(
+            InputMode::Normal,
+            WidgetRole::Table,
+            key(KeyCode::Char('H'))
+        ),
+        Some(TuiAction::TableScrollLeft)
+    );
+    assert_eq!(
+        mapper.map_for_role(
+            InputMode::Normal,
+            WidgetRole::Table,
+            key(KeyCode::Char('L'))
+        ),
+        Some(TuiAction::TableScrollRight)
+    );
+    assert_eq!(
+        mapper.map_for_role(
+            InputMode::Normal,
+            WidgetRole::Table,
+            key(KeyCode::Char('s'))
+        ),
+        Some(TuiAction::TableSortToggle)
+    );
+    assert_eq!(
+        mapper.map_for_role(
+            InputMode::Normal,
+            WidgetRole::Table,
+            key(KeyCode::Char('S'))
+        ),
+        Some(TuiAction::TableSortClear)
     );
 }
 
