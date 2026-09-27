@@ -213,6 +213,44 @@ fn provision_plain_is_a_typed_target_and_never_mode4() {
 }
 
 #[test]
+fn provision_plain_accepts_source_credentials_but_rejects_target_credentials() {
+    let parsed = parse_args(&args(&[
+        "provision",
+        "plan",
+        "--disk",
+        "4",
+        "--target",
+        "plain",
+        "--share-source-password",
+        "ShareSource1!",
+        "--encrypt-source-password",
+        "EncryptSource1!",
+    ]))
+    .expect("Plain K6 must accept EDP source credentials");
+    let Parsed::Provision(ProvisionAction::Plan(opts)) = parsed else {
+        panic!("expected provision plan");
+    };
+    assert_eq!(opts.share_source_password, "ShareSource1!");
+    assert_eq!(opts.encrypt_source_password, "EncryptSource1!");
+    assert!(opts.share_target_password.is_empty());
+    assert!(opts.encrypt_target_password.is_empty());
+
+    for invalid in ["--share-target-password", "--encrypt-target-password"] {
+        assert!(parse_args(&args(&[
+            "provision",
+            "plan",
+            "--disk",
+            "4",
+            "--target",
+            "plain",
+            invalid,
+            "TargetPass1!",
+        ]))
+        .is_err());
+    }
+}
+
+#[test]
 fn provision_label_prefills_from_target_unless_cli_overrides_it() {
     let base = [
         "provision",
