@@ -2,7 +2,26 @@ name: Virtual Disk HIL
 
 on:
   push:
+    paths:
+      - "src/**"
+      - "tests/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "rust-toolchain.toml"
+      - "scripts/ci/**"
+      - ".github/workflows/virtual-disk-hil.yml"
   pull_request:
+    paths:
+      - "src/**"
+      - "tests/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "rust-toolchain.toml"
+      - "scripts/ci/**"
+      - ".github/workflows/virtual-disk-hil.yml"
+  workflow_dispatch:
+  schedule:
+    - cron: "41 4 * * 3"
 
 permissions:
   contents: read
