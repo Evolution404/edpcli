@@ -89,6 +89,37 @@ pub(super) fn draw_backup_create_choice(
 }
 
 pub(super) fn draw_backups(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState) {
+    if let Some(run) = state.backup_verify_run() {
+        let mut lines = vec![
+            Line::from(Span::styled("备份校验进行中", accent())),
+            Line::from(format!("对象  {}", safe(&run.path.display().to_string()))),
+            Line::from(format!(
+                "当前阶段  {} · {} · {}/{}",
+                run.latest.phase.label(),
+                run.latest.step.label(),
+                run.latest.current,
+                run.latest.total
+            )),
+            Line::from(""),
+            Line::from(Span::styled("运行日志", secondary())),
+        ];
+        lines.extend(run.log.iter().map(|event| {
+            Line::from(safe(&format!(
+                "[{}/{}] {}  {}",
+                event.current,
+                event.total,
+                event.phase.label(),
+                event.detail.as_deref().unwrap_or(event.step.label())
+            )))
+        }));
+        frame.render_widget(
+            Paragraph::new(lines)
+                .block(crate::tui::ui::card("备份校验", true))
+                .wrap(Wrap { trim: false }),
+            area,
+        );
+        return;
+    }
     use crate::tui::pane::PaneId;
     use crate::tui::ui::ViewportClass;
     let focused = state.backups_focused_pane();

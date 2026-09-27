@@ -5,6 +5,29 @@ fn args(values: &[&str]) -> Vec<String> {
 }
 
 #[test]
+fn demo_command_parses_default_scene_and_listing() {
+    assert!(matches!(
+        parse_args(&args(&["demo"])).unwrap(),
+        Parsed::Demo {
+            scene: None,
+            list_scenes: false
+        }
+    ));
+    assert!(matches!(
+        parse_args(&args(&["demo", "--scene", "inspect-lba8"])).unwrap(),
+        Parsed::Demo { scene: Some(scene), list_scenes: false } if scene == "inspect-lba8"
+    ));
+    assert!(matches!(
+        parse_args(&args(&["demo", "--list-scenes"])).unwrap(),
+        Parsed::Demo {
+            scene: None,
+            list_scenes: true
+        }
+    ));
+    assert!(parse_args(&args(&["demo", "--scene"])).is_err());
+}
+
+#[test]
 fn bare_edpcli_defaults_to_list() {
     assert!(matches!(
         parse_args(&[]).expect("bare edpcli should parse"),

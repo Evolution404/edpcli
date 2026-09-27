@@ -115,7 +115,14 @@ pub fn run() -> i32 {
                 let topic = argv.first().map(String::as_str).filter(|cmd| {
                     matches!(
                         *cmd,
-                        "list" | "tui" | "info" | "backup" | "inspect" | "provision" | "completion"
+                        "list"
+                            | "tui"
+                            | "demo"
+                            | "info"
+                            | "backup"
+                            | "inspect"
+                            | "provision"
+                            | "completion"
                     )
                 });
                 print_help(topic);
@@ -150,6 +157,7 @@ pub fn run() -> i32 {
         }
         Parsed::List { backup_dir } => list_flow(&runner, backup_dir),
         Parsed::Tui => crate::tui::run(),
+        Parsed::Demo { scene, list_scenes } => crate::tui::demo::run(scene.as_deref(), list_scenes),
         Parsed::Backup {
             action,
             keep,

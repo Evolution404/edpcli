@@ -157,6 +157,7 @@ pub(super) fn dispatch_nav_command(
         NavCommand::VerifyBackup => {
             if let Some(path) = state.selected_backup_path() {
                 state.set_notice("正在后台校验当前备份…");
+                state.begin_backup_verify_run(path.clone());
                 tasks.request_backup_verify(path, backup_dir.to_path_buf());
             } else {
                 state.set_notice("当前没有可校验的备份。");

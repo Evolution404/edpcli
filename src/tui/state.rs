@@ -158,10 +158,19 @@ pub enum StateEffect {
     ExitDeferred,
 }
 
+#[derive(Debug, Clone)]
+pub struct BackupVerifyRunState {
+    pub path: std::path::PathBuf,
+    pub latest: crate::application::progress::ProgressEvent,
+    pub log: std::collections::VecDeque<crate::application::progress::ProgressEvent>,
+}
+
 pub struct AppState {
+    demo_mode: bool,
     workspace: Workspace,
     devices: Vec<crate::disk_scan::Row>,
     backups: Vec<crate::application::BackupWorkspaceItem>,
+    backup_verify_run: Option<BackupVerifyRunState>,
     device_table_view: super::table_layout::TableViewData,
     backup_table_view: super::table_layout::TableViewData,
     device_scan_pending: bool,
@@ -210,9 +219,11 @@ impl Default for AppState {
 impl AppState {
     pub fn new() -> Self {
         Self {
+            demo_mode: false,
             workspace: Workspace::Devices,
             devices: Vec::new(),
             backups: Vec::new(),
+            backup_verify_run: None,
             device_table_view: super::table_layout::TableViewData::default(),
             backup_table_view: super::table_layout::TableViewData::default(),
             device_scan_pending: false,
@@ -253,6 +264,34 @@ impl AppState {
 
     pub const fn animation_frame(&self) -> u64 {
         self.animation_frame
+    }
+
+    pub const fn is_demo(&self) -> bool {
+        self.demo_mode
+    }
+
+    pub fn backup_verify_run(&self) -> Option<&BackupVerifyRunState> {
+        self.backup_verify_run.as_ref()
+    }
+
+    pub fn set_backup_verify_run(&mut self, run: Option<BackupVerifyRunState>) {
+        self.backup_verify_run = run;
+    }
+
+    pub fn begin_backup_verify_run(&mut self, path: std::path::PathBuf) {
+        use crate::application::progress::{OperationKind, Phase, ProgressEvent, Step};
+        let mut event = ProgressEvent::new(Phase::Readback, Step::BackupVerification, 0, 1);
+        event.operation = OperationKind::Backup;
+        event.detail = Some("正在校验备份大小与 SHA-256".into());
+        self.backup_verify_run = Some(BackupVerifyRunState {
+            path,
+            latest: event.clone(),
+            log: std::collections::VecDeque::from([event]),
+        });
+    }
+
+    pub(crate) fn set_demo_mode(&mut self) {
+        self.demo_mode = true;
     }
 
     pub fn advance_animation(&mut self) {

@@ -6,9 +6,11 @@
 pub mod animation;
 pub mod clipboard;
 pub mod command;
+pub mod demo;
 pub mod disk_layout;
 mod dispatch;
 pub mod event;
+pub mod execution;
 pub mod keymap;
 pub mod pane;
 pub mod render;
@@ -294,6 +296,7 @@ fn run_loop(resume: Option<state::WriteIntent>) -> io::Result<LoopExit> {
                 }
             }
             if let Some((path, result)) = updates.backup_verify {
+                state.set_backup_verify_run(None);
                 match result {
                     Ok(()) => state.set_notice(format!(
                         "备份 {} 校验通过：大小与 SHA-256 正常。",

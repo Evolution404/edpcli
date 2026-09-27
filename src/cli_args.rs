@@ -146,6 +146,10 @@ pub enum Parsed {
         backup_dir: Option<String>,
     },
     Tui,
+    Demo {
+        scene: Option<String>,
+        list_scenes: bool,
+    },
     Backup {
         action: BackupAction,
         keep: usize,
@@ -1078,6 +1082,32 @@ pub fn parse_args(argv: &[String]) -> Result<Parsed, String> {
             }
             crate::tui::parse_resume_args(argv)?;
             Ok(Parsed::Tui)
+        }
+        "demo" => {
+            if rest.iter().any(|arg| arg == "-h" || arg == "--help") {
+                return Ok(Parsed::Help {
+                    topic: Some("demo".into()),
+                });
+            }
+            let mut scene = None;
+            let mut list_scenes = false;
+            let mut i = 0;
+            while i < rest.len() {
+                match rest[i].as_str() {
+                    "--scene" => {
+                        let value = take_value(&rest, &mut i, "--scene")?;
+                        set_once(&mut scene, value, "--scene")?;
+                    }
+                    "--list-scenes" if !list_scenes => list_scenes = true,
+                    "--list-scenes" => return Err("错误: --list-scenes 重复指定".into()),
+                    other => return Err(format!("错误: demo 不认识参数 {other}")),
+                }
+                i += 1;
+            }
+            if scene.is_some() && list_scenes {
+                return Err("错误: --scene 与 --list-scenes 不能同时使用".into());
+            }
+            Ok(Parsed::Demo { scene, list_scenes })
         }
         "list" => {
             if rest.iter().any(|a| a == "-h" || a == "--help") {

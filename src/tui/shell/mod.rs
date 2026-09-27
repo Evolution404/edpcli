@@ -32,7 +32,11 @@ pub fn header(frame: &mut Frame, area: Rect, state: &AppState, core_mode: CoreMo
                 theme.muted(),
             ),
             Span::styled(format!("  [{mode}]"), mode_style),
-            Span::styled("  ·  管理员模式", theme.success()),
+            if state.is_demo() {
+                Span::styled("  ·  演示模式 / 不访问真实介质", theme.warning())
+            } else {
+                Span::styled("  ·  管理员模式", theme.success())
+            },
             animation::compact_indicator(state.animation_frame(), core_mode),
         ]))
         .style(theme.surface()),

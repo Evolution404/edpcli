@@ -8728,7 +8728,7 @@ Chapter 15 身份治理仍然是独立的 application/backup 安全治理；它�
 
 ## 16. 全应用 TUI 设计系统与信息架构升级（2026-09-27）
 
-> **状态：核心阶段 COMPLETE（2026-09-27，U0～U9）；扩展阶段 U10 / U12 COMPLETE，U11 待实施。** U0～U9 已完成全应用 UI 架构升级；2026-09-27 复审又发现 DiskLayout 展示层仍有少量页面私有逻辑，并新增“内置演示模式”和表格系统剪贴板可靠性治理需求，因此追加 U10 / U11 / U12。Chapter 12 K6 `Migrate` 继续保持 `DEFERRED / fail-closed`，与本章无关。
+> **状态：COMPLETE（2026-09-27，U0～U12）。** U0～U9 已完成全应用 UI 架构升级；扩展阶段 U10 / U12 / U11 依次完成 DiskLayout 展示层收口、表格系统剪贴板可靠性治理和内置零真实 I/O 演示模式。Chapter 12 K6 `Migrate` 继续保持 `DEFERRED / fail-closed`，与本章无关。
 
 ### 16.1 背景与目标
 
@@ -9535,7 +9535,7 @@ TrueColor 与 fallback
 
 #### U11 — 内置演示模式
 
-状态：PLANNED（按 U10 → U12 → U11 顺序待实现）。
+状态：COMPLETE（2026-09-27；typed fixtures、确定性 timeline、零真实 I/O 策略、全场景响应式渲染与 full gate 通过）。
 
 目标是一条命令直接启动带完整演示数据的正式 TUI，无需插 U 盘、无需备份文件、无需管理员权限：
 
@@ -9551,6 +9551,8 @@ edpcli demo --list-scenes
 ```
 
 详细设计见 16.17。
+
+实现记录：新增 `edpcli demo`、`--scene` 与 `--list-scenes`，场景目录覆盖 Devices / Inspect / Provision / Backups 的主要页面及运行中、成功、警告、失败、空状态和错误状态。演示数据使用正式 `AppState`、canonical DiskLayout、typed Inspect、typed BackupCoverage 和正式 Provision/Backup progress 结构，不建立第二套 renderer；mode0、mode1、Plain、LBA8、E_LABEL 17 项、尾部展开、确认/可能相关备份及健康警告均有 fixture。演示循环不持有 TaskHub、runner、备份目录或提权入口，`ExecutionPolicy::DemoNoExternalIo` 对外部任务 fail-closed，演示表格复制也不写宿主剪贴板。24 个场景在 40x10、80x24、120x36、160x45、240x60 均通过 no-panic 渲染；`tui_suite` 262/262、fast 8 suites / 10 artifacts、full 8 suites / 10 artifacts + doctest 全绿。
 
 #### U12 — 表格 y/Y 系统剪贴板可靠性治理
 
@@ -9871,3 +9873,5 @@ U10 / U11 / U12 只有全部满足各自验收条件后，扩展阶段才允许�
 11. macOS 原生复制使用 `pbcopy` 并验证退出状态，OSC52 fallback 不误报确认成功；
 12. Confirm 模式 `y`、Inspect 非表格 yank 等既有语义不回退；
 13. 全部自动化门禁通过并提交、push。
+
+**2026-09-27 扩展阶段完成审计：U10 / U12 / U11 均 COMPLETE。** canonical 容量展示、可靠系统剪贴板和内置演示模式均已进入正式契约；正常 `edpcli tui` 继续使用真实数据源，演示模式不扫描真实设备、不读取真实备份目录、不执行 sudo/外部 shell/写盘任务。

@@ -1000,14 +1000,20 @@ fn draw_provision_running(frame: &mut Frame, area: ratatui::layout::Rect, state:
                 .work
                 .map(|work| format!("  {:?} {}/{}", work.phase, work.current, work.total))
                 .unwrap_or_default();
+            let message = event
+                .detail
+                .as_deref()
+                .map(|detail| format!("  {detail}"))
+                .unwrap_or_default();
             Line::from(safe(&format!(
-                "[{}/{}] {}  {}{}{}",
+                "[{}/{}] {}  {}{}{}{}",
                 event.current,
                 event.total,
                 event.phase.label(),
                 event.step.label(),
                 detail,
-                work
+                work,
+                message
             )))
         }));
     }

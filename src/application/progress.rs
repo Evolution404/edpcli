@@ -1,6 +1,8 @@
 //! Application-owned progress contract shared by provisioning, backup and restore.
 //! Counts describe completed work only; frontends must not manufacture percentages.
 
+pub use crate::diskio::{TransactionActivity, TransactionActivityPhase};
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum OperationKind {
     Provision,
@@ -84,7 +86,7 @@ pub struct ProgressEvent {
     pub current: u64,
     pub total: u64,
     pub unit: Unit,
-    pub work: Option<crate::diskio::TransactionActivity>,
+    pub work: Option<TransactionActivity>,
     pub detail: Option<String>,
     pub severity: Severity,
     pub emitted_at: std::time::Instant,

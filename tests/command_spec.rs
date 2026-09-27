@@ -19,6 +19,7 @@ fn command_schema_is_the_public_surface_catalog() {
         [
             "list",
             "tui",
+            "demo",
             "info",
             "backup",
             "provision",

@@ -1,0 +1,352 @@
+use crate::application::backup_coverage::{BackupCoverage, BackupCoverageRegion};
+use crate::application::media_identity::{
+    DerivedProtocolEvidence, HardwareIdentityEvidence, IdentityObservation, MediaIdentityPin,
+    MediaIdentitySnapshot, ProtocolIdentityEvidence, SerialQuality,
+};
+use crate::application::partition_table::{
+    PartitionSource, PartitionTableExtent, PartitionTableKind, PartitionTableSnapshot,
+    PhysicalPartition,
+};
+use crate::application::{BackupIntegrityStatus, BackupWorkspaceItem};
+use crate::backup_metadata::{Lba7CompatibilityGeometry, PartitionGeometry};
+use crate::common::{METADATA_IMAGE_LEN, SECTOR};
+use crate::disk_scan::Row;
+use crate::edpb::ArtifactCompleteness;
+use crate::provision::DiskProvisionKind;
+use crate::sectors::EdpfPartition;
+
+const TOTAL_SECTORS: u64 = 125_000_000;
+
+fn pin(row: &Row) -> MediaIdentityPin {
+    let serial = crate::application::media_identity::serial_digest_evidence(row.serial.as_deref());
+    let snapshot = MediaIdentitySnapshot {
+        hardware: HardwareIdentityEvidence {
+            vid: u16::from_str_radix(&row.vid, 16).ok(),
+            pid: u16::from_str_radix(&row.pid, 16).ok(),
+            serial_sha256: serial.sha256,
+            serial_quality: serial.quality,
+            vendor: Some("DEMO".into()),
+            product: Some(format!("Scene{}", row.disk)),
+            revision: Some("1.0".into()),
+            total_sectors: Some(TOTAL_SECTORS),
+            logical_sector_size: Some(SECTOR as u32),
+            ..HardwareIdentityEvidence::default()
+        },
+        protocol: ProtocolIdentityEvidence {
+            device_id: row.device_id.clone(),
+            onlyid: row.onlyid.clone(),
+            provision_kind: Some(row.provision_kind),
+            lba4_identity_digest: None,
+        },
+        derived: DerivedProtocolEvidence::default(),
+        observation: IdentityObservation::default(),
+    };
+    MediaIdentityPin::new(snapshot, &vec![0; METADATA_IMAGE_LEN])
+}
+
+pub(super) fn disk(disk: u32, kind: DiskProvisionKind) -> Row {
+    let edp = kind != DiskProvisionKind::Plain;
+    let partitions = match kind {
+        DiskProvisionKind::Mode0 => Some(vec![
+            EdpfPartition {
+                ptype: 1,
+                active: 1,
+                enc: 0,
+                start_lba: 63,
+                size_bytes: 20_417 * SECTOR as u64,
+            },
+            EdpfPartition {
+                ptype: 2,
+                active: 1,
+                enc: 1,
+                start_lba: 20_480,
+                size_bytes: 4_000_000 * SECTOR as u64,
+            },
+            EdpfPartition {
+                ptype: 4,
+                active: 1,
+                enc: 1,
+                start_lba: 4_020_480,
+                size_bytes: 2_097_153 * SECTOR as u64,
+            },
+        ]),
+        DiskProvisionKind::Mode1 => Some(vec![
+            EdpfPartition {
+                ptype: 2,
+                active: 1,
+                enc: 1,
+                start_lba: 63,
+                size_bytes: 4_000_000 * SECTOR as u64,
+            },
+            EdpfPartition {
+                ptype: 4,
+                active: 1,
+                enc: 1,
+                start_lba: 4_000_063,
+                size_bytes: 2_097_153 * SECTOR as u64,
+            },
+        ]),
+        _ => None,
+    };
+    let partition_table = (!edp).then_some(PartitionTableSnapshot {
+        kind: PartitionTableKind::Mbr,
+        partitions: vec![PhysicalPartition {
+            index: 1,
+            start_lba: 2_048,
+            sector_count: 80_000_000,
+            source: PartitionSource::Mbr {
+                partition_type: 0x07,
+                primary_slot: Some(1),
+            },
+            filesystem: Some("exFAT".into()),
+        }],
+        table_extents: vec![PartitionTableExtent {
+            label: "MBR".into(),
+            start_lba: 0,
+            sector_count: 1,
+        }],
+        issues: Vec::new(),
+    });
+    let lce = edp.then_some(Lba7CompatibilityGeometry {
+        start_lba: TOTAL_SECTORS - 2_000,
+        sector_count: 6,
+        lba7_pointer_entries: Vec::new(),
+        official_partition_mode: None,
+        chs_expected_start_lba: None,
+    });
+    let mut row = Row {
+        disk,
+        size: TOTAL_SECTORS * SECTOR as u64,
+        vid: "1234".into(),
+        pid: format!("{disk:04x}"),
+        proto: "USB".into(),
+        serial: Some(format!("DEMO-SERIAL-{disk}")),
+        device_id: edp.then(|| format!("demo&ven_edp&prod_scene{disk}")),
+        identity_pin: None,
+        onlyid: edp.then(|| format!("14022599{disk:02}")),
+        dept: Some("DEMO 输电运检中心与 Unicode 演示部门🙂".into()),
+        user: Some("DEMO 张三".into()),
+        label: Some("DEMO-SAFE6".into()),
+        force_change_password: Some(false),
+        cancel_password_complexity_check: Some(false),
+        max_share_password_errors: Some(5),
+        max_encrypt_password_errors: Some(5),
+        n_baks: 2,
+        n_possible_baks: 1,
+        denied: false,
+        probe_error: None,
+        provision_kind: kind,
+        partitions,
+        partition_table,
+        partition_table_error: None,
+        lce,
+    };
+    row.identity_pin = Some(pin(&row));
+    row
+}
+
+fn coverage() -> BackupCoverage {
+    BackupCoverage {
+        regions: vec![
+            BackupCoverageRegion {
+                id: "protocol".into(),
+                role: "EDP 主协议区".into(),
+                total_sectors: Some(13),
+                captured_sectors: 13,
+                artifact_count: 1,
+                completeness: ArtifactCompleteness::Complete,
+            },
+            BackupCoverageRegion {
+                id: "tail-mirror".into(),
+                role: "历史备份镜像".into(),
+                total_sectors: Some(9),
+                captured_sectors: 9,
+                artifact_count: 1,
+                completeness: ArtifactCompleteness::Complete,
+            },
+            BackupCoverageRegion {
+                id: "user-files".into(),
+                role: "普通用户文件".into(),
+                total_sectors: Some(2_048),
+                captured_sectors: 512,
+                artifact_count: 1,
+                completeness: ArtifactCompleteness::Partial,
+            },
+        ],
+        extent_count: 3,
+        artifact_count: 3,
+    }
+}
+
+pub(super) fn backup(
+    index: usize,
+    name: &str,
+    healthy: bool,
+    source: &Row,
+    physical_confirmed: bool,
+) -> BackupWorkspaceItem {
+    let mut identity = source
+        .identity_pin
+        .as_ref()
+        .expect("demo device identity pin")
+        .snapshot
+        .clone();
+    if !physical_confirmed {
+        identity.hardware.serial_sha256 = None;
+        identity.hardware.serial_quality = SerialQuality::Missing;
+    }
+    BackupWorkspaceItem {
+        index,
+        path: std::path::PathBuf::from(format!("DEMO/{name}")),
+        file_name: format!("DEMO-{name}"),
+        display_time: "2026-09-27 12:00".into(),
+        size_bytes: Some(TOTAL_SECTORS * SECTOR as u64),
+        vid: Some(source.vid.clone()),
+        pid: Some(source.pid.clone()),
+        device_id: source.device_id.clone(),
+        onlyid: source.onlyid.clone(),
+        identity: Some(identity),
+        user: Some("DEMO 张三".into()),
+        dept: Some("DEMO 输电运检中心".into()),
+        provision_kind: Some(DiskProvisionKind::Mode0),
+        integrity_status: if healthy {
+            BackupIntegrityStatus::Verified
+        } else {
+            BackupIntegrityStatus::Invalid
+        },
+        size_ok: healthy,
+        content_sha256: Some("0123456789abcdef".repeat(4)),
+        coverage: Some(coverage()),
+    }
+}
+
+pub(super) fn inspect_workspace(
+    row: &Row,
+) -> crate::application::inspect::AdvancedInspectWorkspace {
+    use crate::application::inspect::{
+        AbsoluteByteRange, AdvancedInspectItem, AdvancedInspectMode, AdvancedInspectWorkspace,
+        InspectField, InspectFieldStatus, InspectFieldType,
+    };
+    use crate::inspect::{InspectFieldKey, InspectParseState};
+    use crate::inspect_adapter::{FieldChild, FieldStyle};
+
+    let mut context = crate::inspect_target::InspectDiskContext::new_with_partition_table(
+        vec![0; METADATA_IMAGE_LEN],
+        row.device_id.clone(),
+        TOTAL_SECTORS,
+        Some(row.provision_kind),
+        row.partition_table.clone(),
+        None,
+    );
+    if let Some(parts) = &row.partitions {
+        context.partitions = parts
+            .iter()
+            .enumerate()
+            .map(|(index, part)| PartitionGeometry {
+                index,
+                partition_type: part.ptype,
+                partition_count: parts.len() as u32,
+                need_disturb: 0,
+                need_encrypt: part.enc,
+                start_sector: part.start_lba,
+                sector_size: SECTOR as u64,
+                partition_size: part.size_bytes,
+                sector_count: part.size_bytes / SECTOR as u64,
+                user_key_crc: 0,
+                file_key_crc: 0,
+                encrypt_mode: if part.enc == 0 { 0 } else { 2 },
+            })
+            .collect();
+    }
+    context.lce = row.lce.clone();
+    let disk_layout =
+        crate::application::disk_layout::DiskLayoutModel::canonical_inspect_context(&context).ok();
+    let fields = vec![
+        InspectField {
+            key: InspectFieldKey::Synthetic,
+            range: AbsoluteByteRange {
+                start: 8 * SECTOR as u64,
+                end_exclusive: 8 * SECTOR as u64 + 32,
+            },
+            field_type: InspectFieldType::Identity,
+            raw: vec![0x44; 32],
+            decoded: vec![0x44; 32],
+            field_logical: None,
+            transform: None,
+            status: InspectFieldStatus::Known,
+            label: "DEMO 部门 / 用户".into(),
+            value: "输电运检中心 · 张三🙂".into(),
+            style: FieldStyle::Identity,
+            group: Some("LBA8".into()),
+            children: Vec::new(),
+        },
+        InspectField {
+            key: InspectFieldKey::Lba8Elabel,
+            range: AbsoluteByteRange {
+                start: 8 * SECTOR as u64 + 32,
+                end_exclusive: 8 * SECTOR as u64 + 64,
+            },
+            field_type: InspectFieldType::Identity,
+            raw: vec![0x45; 32],
+            decoded: vec![0x45; 32],
+            field_logical: None,
+            transform: None,
+            status: InspectFieldStatus::Known,
+            label: "E_LABEL".into(),
+            value: "DEMO E_LABEL / 17 项".into(),
+            style: FieldStyle::Identity,
+            group: Some("LBA8".into()),
+            children: (1..=17)
+                .map(|index| FieldChild {
+                    label: format!("DEMO 字段 {index}"),
+                    value: format!("值 {index}"),
+                    relative_range: None,
+                })
+                .collect(),
+        },
+        InspectField {
+            key: InspectFieldKey::Synthetic,
+            range: AbsoluteByteRange {
+                start: 8 * SECTOR as u64 + 64,
+                end_exclusive: 8 * SECTOR as u64 + 68,
+            },
+            field_type: InspectFieldType::Identity,
+            raw: vec![0xff; 4],
+            decoded: vec![0xff; 4],
+            field_logical: None,
+            transform: None,
+            status: InspectFieldStatus::Unknown,
+            label: "DEMO warning / error 字段".into(),
+            value: "证据不足：模拟异常值".into(),
+            style: FieldStyle::Identity,
+            group: Some("LBA8".into()),
+            children: Vec::new(),
+        },
+    ];
+    let item = AdvancedInspectItem {
+        lba: 8,
+        regions: vec!["DEMO LBA8".into()],
+        raw: vec![0x44; SECTOR],
+        raw_sha256: "DEMO-RAW-SHA256".into(),
+        raw_nonzero: SECTOR,
+        decoded: Some(vec![0x45; SECTOR]),
+        decoded_sha256: Some("DEMO-DECODE-SHA256".into()),
+        method: Some("DEMO typed fixture".into()),
+        decode_error: None,
+        parse_state: InspectParseState::Parsed,
+        diagnostics: Vec::new(),
+        fields,
+        notes: vec!["DEMO 数据，不访问真实介质".into()],
+        meta_text: Some("DEMO LBA8 部门、用户与 E_LABEL".into()),
+    };
+    AdvancedInspectWorkspace {
+        source: format!("DEMO disk{}", row.disk),
+        meta: crate::inspect::InspectMeta::default(),
+        mode: AdvancedInspectMode::Meta,
+        items: vec![item],
+        export_dir: None,
+        topology: crate::application::inspect_tree::build_inspect_topology(&context),
+        disk_layout,
+        disk_layout_issue: None,
+    }
+}
