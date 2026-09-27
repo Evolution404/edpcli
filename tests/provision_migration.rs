@@ -214,10 +214,7 @@ impl PartitionReader for ImageReader<'_> {
     }
 }
 
-fn roundtrip_migrated_filesystem(
-    filesystem: OfficialFilesystemFormat,
-    volume_sectors: u64,
-) {
+fn roundtrip_migrated_filesystem(filesystem: OfficialFilesystemFormat, volume_sectors: u64) {
     let payload = (0..1_537)
         .map(|index| (index % 251) as u8)
         .collect::<Vec<_>>();
