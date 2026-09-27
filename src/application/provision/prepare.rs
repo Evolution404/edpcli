@@ -447,7 +447,7 @@ pub fn prepare_target_provision(
             dev,
             source.as_ref(),
             &target_plan,
-            &key_domains,
+            &request.key_domains,
         )?
     };
     let source_onlyid = source.as_ref().and_then(|_| {
@@ -1014,7 +1014,7 @@ fn prepare_plain_provision_with_key_domains(
             dev,
             &existing,
             target_capacity,
-            &request.key_domains,
+            key_domains,
         )?
     };
 
