@@ -146,6 +146,8 @@ fn fast_and_full_gate_entrypoints_are_repository_owned() {
     let full = read("scripts/test-full.py");
     assert!(fast.contains("test-full.py"));
     assert!(fast.contains("cargo clippy --all-targets --locked -- -D warnings"));
+    assert!(fast.contains("clippy skipped: no Rust/Cargo inputs changed"));
+    assert!(fast.contains("git diff-tree --no-commit-id --name-only -r HEAD"));
     assert!(full.contains("--message-format=json"));
     assert!(full.contains("ThreadPoolExecutor"));
     assert!(full.contains("duration"));
@@ -172,6 +174,38 @@ fn ci_and_agent_policy_use_the_full_runner_instead_of_all_targets_shell_chains()
     assert!(agents.contains("scripts/test-full.py"));
     assert!(agents.contains("120"));
     assert!(agents.contains("durable"));
+}
+
+#[test]
+fn daily_ci_splits_primary_runtime_coverage_from_secondary_arch_compile_coverage() {
+    let ci = read(".github/workflows/ci.yml");
+    assert!(ci.contains("quality-primary:"));
+    assert!(ci.contains("quality-secondary:"));
+    assert!(ci.contains("macos-arm64"));
+    assert!(ci.contains("linux-x86_64"));
+    assert!(ci.contains("windows-x86_64"));
+    assert!(ci.contains("macos-x86_64"));
+    assert!(ci.contains("linux-arm64"));
+    assert!(ci.contains("windows-arm64"));
+    assert_eq!(
+        ci.matches("name: Rustfmt").count(),
+        1,
+        "rustfmt must run once rather than once per platform"
+    );
+    assert!(ci.contains("cargo test --locked --no-run --all-targets"));
+    assert!(ci.contains("repository-audit:"));
+    assert!(ci.contains("classify changes"));
+}
+
+#[test]
+fn virtual_disk_hil_is_path_filtered_and_has_periodic_full_coverage() {
+    let hil = read(".github/workflows/virtual-disk-hil.yml");
+    assert!(hil.contains("paths:"));
+    assert!(hil.contains("- \"src/**\""));
+    assert!(hil.contains("- \"tests/**\""));
+    assert!(hil.contains("workflow_dispatch:"));
+    assert!(hil.contains("schedule:"));
+    assert!(hil.contains("cron:"));
 }
 
 #[test]
