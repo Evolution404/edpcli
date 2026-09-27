@@ -507,6 +507,39 @@ fn payload_stream_is_fragment_aware_budgeted_and_hashes_exact_logical_bytes() {
 }
 
 #[test]
+fn zero_length_payload_stream_reads_nothing_and_locator_is_not_serialized() {
+    use sha2::{Digest, Sha256};
+
+    let entry = FileEntry {
+        path: "/empty.txt".into(),
+        is_directory: false,
+        logical_size: 0,
+        allocated_size: Some(0),
+        mtime: None,
+        ctime: None,
+        attributes: 0x20,
+        payload_locator: Some(FilePayloadLocator {
+            logical_size: 0,
+            extents: vec![],
+        }),
+    };
+    let mut reader = SparseReader {
+        sectors: BTreeMap::new(),
+        reads: vec![],
+    };
+    let mut out = Vec::new();
+    let summary = stream_file_payload(&mut reader, &entry, 0, &mut out).unwrap();
+    assert_eq!(summary.logical_size, 0);
+    assert_eq!(summary.sectors_read, 0);
+    assert_eq!(summary.sha256, <[u8; 32]>::from(Sha256::digest([])));
+    assert!(out.is_empty());
+    assert!(reader.reads.is_empty());
+
+    let json = serde_json::to_value(&entry).unwrap();
+    assert!(json.get("payload_locator").is_none());
+}
+
+#[test]
 fn corrupt_exfat_metadata_fails_closed() {
     for mutation in 0..4 {
         let (p, mut reader, _, _) = exfat_fixture();
