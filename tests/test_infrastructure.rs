@@ -277,6 +277,9 @@ fn test_profile_benchmark_reuses_repository_runner_and_reports_distribution() {
 
     let workflow = read(".github/workflows/test-runner-benchmark.yml");
     assert!(workflow.contains("perf/test-runner-*"));
+    assert!(workflow.contains("linux-x86_64"));
+    assert!(workflow.contains("macos-arm64"));
+    assert!(workflow.contains("windows-x86_64"));
     assert!(workflow.contains("--workers 1 --test-threads 4"));
     assert!(workflow.contains("--workers 2 --test-threads 2"));
     assert!(workflow.contains("--workers 2 --test-threads 4"));
