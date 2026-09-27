@@ -182,7 +182,7 @@ fn ci_and_agent_policy_use_the_full_runner_instead_of_all_targets_shell_chains()
 
 #[test]
 fn daily_ci_splits_primary_runtime_coverage_from_secondary_arch_compile_coverage() {
-    let ci = read(".github/workflows/ci.yml");
+    let ci = read(".github/workflows/ci.yml").replace("\r\n", "\n");
     assert!(ci.contains("quality-primary:"));
     assert!(ci.contains("quality-secondary:"));
     assert!(ci.contains("macos-arm64"));
