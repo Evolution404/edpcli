@@ -52,6 +52,10 @@ pub enum TuiAction {
     WorkspaceNext,
     WorkspacePrevious,
     InspectJump,
+    InspectBusiness,
+    InspectRawFields,
+    InspectHex,
+    InspectDiskLayout,
     PanelLeft,
     PanelDown,
     PanelUp,
@@ -139,6 +143,11 @@ pub const NORMAL_HELP: &[HelpBinding] = &[
 ];
 
 pub const INSPECT_HELP: &[HelpBinding] = &[
+    HelpBinding {
+        keys: "1/2/3/4",
+        label: "业务字段/原始字段/Hex/全盘布局",
+        action: TuiAction::InspectBusiness,
+    },
     HelpBinding {
         keys: "Tab/Shift-Tab",
         label: "子工作区",
@@ -328,6 +337,10 @@ impl KeyMapper {
             KeyCode::Char('f') => Some(TuiAction::Fill),
             KeyCode::Char('e') => Some(TuiAction::Export),
             KeyCode::Char('v') => Some(TuiAction::ViewOrVerify),
+            KeyCode::Char('1') => Some(TuiAction::InspectBusiness),
+            KeyCode::Char('2') => Some(TuiAction::InspectRawFields),
+            KeyCode::Char('3') => Some(TuiAction::InspectHex),
+            KeyCode::Char('4') => Some(TuiAction::InspectDiskLayout),
             KeyCode::Char(' ') => Some(TuiAction::Toggle),
             KeyCode::Char('y') => Some(TuiAction::Yank),
             KeyCode::Char('Y') => Some(TuiAction::YankRaw),

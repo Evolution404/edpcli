@@ -508,11 +508,11 @@ fn inspect_subworkspace_cycle_preserves_sector_cursor_and_return_target() {
         .collect::<String>()
         .replace(' ', "");
     assert!(text.contains("Esc返回：Inspect"), "{text}");
-    assert!(text.contains("节点概览"), "{text}");
+    assert!(text.contains("对象快照"), "{text}");
     assert!(state.advanced_inspect_close_sector());
     assert_eq!(
         state.advanced_inspect().unwrap().panel,
-        AdvancedInspectPanel::DiskLayout
+        AdvancedInspectPanel::Tree
     );
     assert_eq!(
         state.advanced_inspect_breadcrumb().unwrap().escape_hint(),
@@ -571,7 +571,8 @@ fn detail_field_table_has_vertical_row_viewport_and_row_column_position() {
     assert!(text.contains("/30"), "{text}");
     assert!(text.contains("列"), "{text}");
     assert!(text.contains("Field20"), "{text}");
-    assert!(!text.contains("Field00"), "{text}");
+    let detail = text.split("字段详情").nth(1).expect("field detail pane");
+    assert!(!detail.contains("Field00"), "{detail}");
 }
 
 #[test]

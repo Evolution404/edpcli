@@ -76,17 +76,17 @@ fn plain_provision_state() -> AppState {
 }
 
 #[test]
-fn inspect_tab_cycle_is_disk_layout_tree_overview_detail() {
+fn inspect_tab_cycle_is_tree_overview_detail_disk_layout() {
     let mut state = inspect_state();
     assert_eq!(
         state.advanced_inspect_focused_pane(),
-        Some(PaneId::InspectDiskLayout)
+        Some(PaneId::InspectTree)
     );
     for expected in [
-        PaneId::InspectTree,
         PaneId::InspectOverview,
         PaneId::InspectDetail,
         PaneId::InspectDiskLayout,
+        PaneId::InspectTree,
     ] {
         state.advanced_inspect_shift_panel(false);
         assert_eq!(state.advanced_inspect_focused_pane(), Some(expected));
@@ -94,7 +94,7 @@ fn inspect_tab_cycle_is_disk_layout_tree_overview_detail() {
     state.advanced_inspect_shift_panel(true);
     assert_eq!(
         state.advanced_inspect_focused_pane(),
-        Some(PaneId::InspectDetail)
+        Some(PaneId::InspectDiskLayout)
     );
 }
 

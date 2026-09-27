@@ -27,8 +27,8 @@ fn lba8_state() -> AppState {
     let children = (0..17)
         .map(|index| FieldChild {
             label: match index {
-                0 => "部门".into(),
-                1 => "用户".into(),
+                0 => "Dept".into(),
+                1 => "User".into(),
                 _ => format!("字段 {}", index + 1),
             },
             value: match index {
@@ -63,7 +63,7 @@ fn lba8_state() -> AppState {
             field_logical: None,
             transform: None,
             status: InspectFieldStatus::Known,
-            label: "E_LABEL".into(),
+            label: "renamed raw field".into(),
             value: "verified".into(),
             style: FieldStyle::Identity,
             group: Some("LBA8".into()),
@@ -226,9 +226,8 @@ fn ch16_device_secondary_pane_remains_reachable_at_standard_width() {
 }
 
 #[test]
-#[ignore = "U4: red LBA8 snapshot contract"]
 fn ch16_lba8_first_screen_shows_verified_department_user_and_label() {
-    let lines = rendered_lines(&lba8_state(), 120, 36);
+    let lines = rendered_lines(&lba8_state(), 160, 45);
     let first_screen = lines.join("\n").replace(' ', "");
     for value in ["部门", "输电运检中心", "用户", "测试用户", "E_LABEL", "17"] {
         assert!(
@@ -236,10 +235,10 @@ fn ch16_lba8_first_screen_shows_verified_department_user_and_label() {
             "missing {value} in LBA8 first screen"
         );
     }
+    assert!(!first_screen.contains("EDPCORE·LIVE"));
 }
 
 #[test]
-#[ignore = "U4: red Enter/open contract"]
 fn ch16_enter_views_lba8_without_toggling_tree_expansion() {
     let mut state = lba8_state();
     let before = state.advanced_inspect_tree_rows();
@@ -249,6 +248,135 @@ fn ch16_enter_views_lba8_without_toggling_tree_expansion() {
     state.advanced_inspect_enter_selected();
     let after = state.advanced_inspect_tree_rows();
     assert_eq!(after[selected].expanded, expanded);
+}
+
+#[test]
+fn ch16_elabel_o_expands_all_seventeen_typed_children_and_enter_does_not() {
+    use edpcli::tui::pane::PaneId;
+
+    let mut state = lba8_state();
+    state.advanced_inspect_toggle_selected(); // LBA8 -> its fields
+    let rows = state.advanced_inspect_tree_rows();
+    let field_index = rows
+        .iter()
+        .position(|row| row.label == "E_LABEL [17]")
+        .expect("typed E_LABEL tree node");
+    let current = state.advanced_inspect().unwrap().tree_selected;
+    state.advanced_inspect_move_tree(field_index as isize - current as isize);
+    let rows = state.advanced_inspect_tree_rows();
+    let field_id = rows[field_index].id.clone();
+    assert!(rows[field_index].expandable);
+    state.advanced_inspect_enter_selected();
+    assert!(!state.advanced_inspect_tree_rows()[field_index].expanded);
+    state.advanced_inspect_focus_pane(PaneId::InspectTree);
+    state.advanced_inspect_toggle_selected(); // o on E_LABEL
+    let expanded = state.advanced_inspect_tree_rows();
+    assert_eq!(
+        expanded
+            .iter()
+            .filter(|row| row.id.starts_with(&format!("{field_id}/child.")))
+            .count(),
+        17
+    );
+    assert!(expanded
+        .iter()
+        .any(|row| row.label.contains("部门") && row.label.contains("输电运检中心")));
+    assert!(expanded
+        .iter()
+        .any(|row| row.label.contains("用户") && row.label.contains("测试用户")));
+    assert!(state.advanced_inspect_view_selected_field());
+    assert_eq!(state.advanced_inspect_detail_rows().len(), 1);
+    state.advanced_inspect_detail_toggle_selected(); // o in Fields Pane
+    assert_eq!(state.advanced_inspect_detail_rows().len(), 18);
+}
+
+#[test]
+fn ch16_inspect_defaults_to_compact_layout_strip_and_object_snapshot() {
+    let state = lba8_state();
+    let text = rendered_lines(&state, 120, 36).join("\n").replace(' ', "");
+    assert!(text.contains("磁盘概览"));
+    assert!(text.contains("对象快照"));
+    assert!(text.contains("部门输电运检中心"));
+    assert!(
+        !text.contains("LBA范围"),
+        "full disk layout displaced the snapshot"
+    );
+}
+
+#[test]
+fn ch16_inspect_field_evidence_keeps_every_typed_layer() {
+    let mut state = lba8_state();
+    state.advanced_inspect_toggle_selected();
+    let rows = state.advanced_inspect_tree_rows();
+    let field_index = rows
+        .iter()
+        .position(|row| row.label == "E_LABEL [17]")
+        .unwrap();
+    let current = state.advanced_inspect().unwrap().tree_selected;
+    state.advanced_inspect_move_tree(field_index as isize - current as isize);
+    let text = rendered_lines(&state, 240, 60).join("\n").replace(' ', "");
+    for value in [
+        "字段详情/Evidence",
+        "Value:",
+        "SourceLBA:",
+        "Group:",
+        "Offset:",
+        "Length:",
+        "Raw:",
+        "Decoded:",
+        "FieldLogical:",
+        "Transform:",
+        "Type:",
+        "Status:",
+    ] {
+        assert!(text.contains(value), "missing {value} in field evidence");
+    }
+}
+
+#[test]
+fn ch16_inspect_lba8_renders_at_all_required_sizes() {
+    let state = lba8_state();
+    for (width, height) in [
+        (40, 10),
+        (60, 18),
+        (80, 24),
+        (120, 36),
+        (160, 45),
+        (240, 60),
+    ] {
+        let text = rendered_lines(&state, width, height)
+            .join("\n")
+            .replace(' ', "");
+        assert!(
+            text.contains("Inspect"),
+            "missing workspace at {width}x{height}"
+        );
+    }
+}
+
+#[test]
+fn ch16_inspect_view_shortcuts_are_explicit() {
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    use edpcli::tui::{
+        keymap::{KeyMapper, TuiAction},
+        state::InputMode,
+    };
+
+    let mut mapper = KeyMapper::new();
+    for (digit, expected) in [
+        ('1', TuiAction::InspectBusiness),
+        ('2', TuiAction::InspectRawFields),
+        ('3', TuiAction::InspectHex),
+        ('4', TuiAction::InspectDiskLayout),
+    ] {
+        assert_eq!(
+            mapper.map(
+                InputMode::Normal,
+                KeyEvent::new(KeyCode::Char(digit), KeyModifiers::NONE)
+            ),
+            Some(expected)
+        );
+    }
 }
 
 #[test]

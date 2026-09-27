@@ -107,6 +107,18 @@ pub struct DiskLayoutPane<'a> {
 }
 
 impl DiskLayoutModel {
+    pub fn render_compact(&self, frame: &mut Frame<'_>, area: Rect, current_lba: Option<u64>) {
+        let title = match current_lba {
+            Some(lba) => format!("磁盘概览 · 当前 LBA{lba} · 全盘布局可下钻"),
+            None => "磁盘概览 · 全盘布局可下钻".into(),
+        };
+        frame.render_widget(
+            Paragraph::new(self.bar_line(area.width.saturating_sub(4) as usize))
+                .block(super::ui::panel(title, false)),
+            area,
+        );
+    }
+
     pub fn bar_line(&self, width: usize) -> Line<'static> {
         self.bar_line_with_label(width, "")
     }

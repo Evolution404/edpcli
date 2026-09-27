@@ -599,16 +599,23 @@ fn dispatch_tui_action(
     }
 }
 
-fn open_advanced_inspect_selection(state: &mut AppState, tasks: &mut TaskHub) {
+fn open_advanced_inspect_selection(state: &mut AppState, tasks: &mut TaskHub, force_hex: bool) {
     let detail_selected = state.advanced_inspect_focused_pane()
         == Some(crate::tui::pane::PaneId::InspectDetail)
         && state.advanced_inspect_detail_selected_row().is_some();
     let request = if detail_selected {
         state.advanced_inspect_detail_open_selected()
+    } else if force_hex && state.advanced_inspect_selected_field().is_some() {
+        state.advanced_inspect_open_selected_field()
     } else if state.advanced_inspect_selected_sector_lba().is_some() {
         state.advanced_inspect_open_selected_sector()
-    } else if state.advanced_inspect_selected_field().is_some() {
-        state.advanced_inspect_open_selected_field()
+    } else if let Some(field) = state.advanced_inspect_selected_field() {
+        if field.key == crate::inspect::InspectFieldKey::Lba8Elabel {
+            state.advanced_inspect_view_selected_field();
+        } else {
+            state.advanced_inspect_focus_pane(crate::tui::pane::PaneId::InspectDetail);
+        }
+        None
     } else {
         state.advanced_inspect_enter_selected();
         None
@@ -1176,7 +1183,39 @@ fn run_loop(resume: Option<state::WriteIntent>) -> io::Result<LoopExit> {
                                         }
                                     }
                                     TuiAction::Activate => {
-                                        open_advanced_inspect_selection(&mut state, &mut tasks);
+                                        open_advanced_inspect_selection(
+                                            &mut state, &mut tasks, false,
+                                        );
+                                    }
+                                    TuiAction::InspectBusiness => {
+                                        state.advanced_inspect_focus_pane(
+                                            crate::tui::pane::PaneId::InspectOverview,
+                                        );
+                                        state
+                                            .pane_viewport_mut(
+                                                crate::tui::pane::PaneId::InspectDetail,
+                                            )
+                                            .scroll_x = 0;
+                                    }
+                                    TuiAction::InspectRawFields => {
+                                        state.advanced_inspect_focus_pane(
+                                            crate::tui::pane::PaneId::InspectDetail,
+                                        );
+                                        state
+                                            .pane_viewport_mut(
+                                                crate::tui::pane::PaneId::InspectDetail,
+                                            )
+                                            .scroll_x = 2;
+                                    }
+                                    TuiAction::InspectHex => {
+                                        open_advanced_inspect_selection(
+                                            &mut state, &mut tasks, true,
+                                        );
+                                    }
+                                    TuiAction::InspectDiskLayout => {
+                                        state.advanced_inspect_focus_pane(
+                                            crate::tui::pane::PaneId::InspectDiskLayout,
+                                        );
                                     }
                                     TuiAction::PanelNext => {
                                         state.advanced_inspect_shift_panel(false);

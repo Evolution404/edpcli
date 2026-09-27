@@ -36,6 +36,7 @@ pub enum InspectParseState {
 pub enum InspectFieldKey {
     Lba8UsbOnlyInfo,
     Lba8HostHardinfo,
+    Lba8MacInfo,
     Lba8Elabel,
     Lba8ToolVersion,
     Lba8LabVersion,
@@ -56,6 +57,7 @@ impl InspectFieldKey {
     pub fn protocol(lba: u64, start: usize, end: usize, ordinal: usize) -> Self {
         match (lba, start, end) {
             (8, 0x014, 0x018) => Self::Lba8HostHardinfo,
+            (8, 0x018, 0x01e) => Self::Lba8MacInfo,
             (8, 0x01e, 0x02e) => Self::Lba8UsbOnlyInfo,
             (8, 0x080, _) => Self::Lba8Elabel,
             (8, 0x008, 0x00c) => Self::Lba8ToolVersion,

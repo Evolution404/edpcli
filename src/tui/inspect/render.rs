@@ -348,10 +348,9 @@ pub(super) fn draw_advanced_inspect(
             let selected_index = advanced.tree_selected.min(rows.len().saturating_sub(1));
             let selected_row = rows.get(selected_index);
             let panel_index = match advanced.panel {
-                AdvancedInspectPanel::DiskLayout => 0,
-                AdvancedInspectPanel::Tree => 1,
-                AdvancedInspectPanel::Overview => 2,
-                AdvancedInspectPanel::Detail => 3,
+                AdvancedInspectPanel::Tree | AdvancedInspectPanel::Overview => 0,
+                AdvancedInspectPanel::Detail => 1,
+                AdvancedInspectPanel::DiskLayout => 3,
             };
             let disk_layout =
                 crate::tui::disk_layout::DiskLayoutModel::from_topology(&workspace.topology);
@@ -365,7 +364,7 @@ pub(super) fn draw_advanced_inspect(
                 .split(area);
             draw_inspect_breadcrumb(frame, browser[0], state);
             frame.render_widget(
-                Tabs::new(["磁盘布局", "结构树", "节点概览", "节点详情"])
+                Tabs::new(["1 业务字段", "2 原始字段", "3 Hex", "4 全盘布局"])
                     .select(panel_index)
                     .style(tab())
                     .highlight_style(active_tab())
@@ -373,45 +372,59 @@ pub(super) fn draw_advanced_inspect(
                 browser[1],
             );
             let content_area = browser[2];
-            let compact = content_area.width < 92 || content_area.height < 14;
-            let (disk_layout_area, tree_area, overview_area, detail_area) = if compact {
-                match advanced.panel {
-                    AdvancedInspectPanel::DiskLayout => (Some(content_area), None, None, None),
-                    AdvancedInspectPanel::Tree => (None, Some(content_area), None, None),
-                    AdvancedInspectPanel::Overview => (None, None, Some(content_area), None),
-                    AdvancedInspectPanel::Detail => (None, None, None, Some(content_area)),
-                }
-            } else {
-                let vertical = Layout::default()
-                    .direction(Direction::Vertical)
-                    .constraints([Constraint::Percentage(36), Constraint::Percentage(64)])
-                    .split(content_area);
-                let lower = if content_area.width >= 140 {
-                    Layout::default()
-                        .direction(Direction::Horizontal)
-                        .constraints([
-                            Constraint::Percentage(42),
-                            Constraint::Percentage(27),
-                            Constraint::Percentage(31),
-                        ])
-                        .split(vertical[1])
+            let class = crate::tui::ui::ViewportClass::for_width(content_area.width);
+            let (disk_layout_area, compact_layout_area, tree_area, overview_area, detail_area) =
+                if advanced.panel == AdvancedInspectPanel::DiskLayout {
+                    (Some(content_area), None, None, None, None)
+                } else if class == crate::tui::ui::ViewportClass::Compact {
+                    match advanced.panel {
+                        AdvancedInspectPanel::Tree => {
+                            let parts = Layout::default()
+                                .direction(Direction::Vertical)
+                                .constraints([
+                                    Constraint::Percentage(60),
+                                    Constraint::Percentage(40),
+                                ])
+                                .split(content_area);
+                            (None, None, Some(parts[1]), Some(parts[0]), None)
+                        }
+                        AdvancedInspectPanel::Overview => {
+                            (None, None, None, Some(content_area), None)
+                        }
+                        AdvancedInspectPanel::Detail => {
+                            (None, None, None, None, Some(content_area))
+                        }
+                        AdvancedInspectPanel::DiskLayout => unreachable!(),
+                    }
                 } else {
-                    Layout::default()
-                        .direction(Direction::Horizontal)
+                    let vertical = Layout::default()
+                        .direction(Direction::Vertical)
                         .constraints([
-                            Constraint::Percentage(40),
-                            Constraint::Percentage(30),
-                            Constraint::Percentage(30),
+                            Constraint::Percentage(58),
+                            Constraint::Length(3),
+                            Constraint::Min(4),
                         ])
-                        .split(vertical[1])
+                        .split(content_area);
+                    let upper = Layout::default()
+                        .direction(Direction::Horizontal)
+                        .constraints([Constraint::Percentage(29), Constraint::Percentage(71)])
+                        .split(vertical[0]);
+                    (
+                        None,
+                        Some(vertical[1]),
+                        Some(upper[0]),
+                        Some(upper[1]),
+                        Some(vertical[2]),
+                    )
                 };
-                (
-                    Some(vertical[0]),
-                    Some(lower[0]),
-                    Some(lower[1]),
-                    Some(lower[2]),
-                )
-            };
+
+            if let Some(compact_area) = compact_layout_area {
+                disk_layout.render_compact(
+                    frame,
+                    compact_area,
+                    selected_row.map(|row| row.range.start_lba),
+                );
+            }
 
             if let Some(layout_area) = disk_layout_area {
                 let total = disk_layout.total_sectors;
@@ -489,6 +502,16 @@ pub(super) fn draw_advanced_inspect(
                         .unwrap_or_else(|| "[空区间]".into());
                         format!("{marker}{icon}{} {range}", safe(&row.label))
                     };
+                    let available = usize::from(tree_area.width)
+                        .saturating_sub(2)
+                        .saturating_sub(row.depth.saturating_mul(2))
+                        .saturating_sub(2)
+                        .saturating_sub(1);
+                    let content = crate::tui::table_layout::truncate_cell(
+                        &content,
+                        available,
+                        crate::tui::table_layout::TruncatePolicy::Ellipsis,
+                    );
                     let focused = tree_focus && index == selected_index;
                     Line::from(vec![
                         Span::raw(indent),
@@ -501,6 +524,7 @@ pub(super) fn draw_advanced_inspect(
                             },
                         ),
                         Span::styled(content, if focused { selected() } else { kind_style }),
+                        Span::raw(" "),
                     ])
                 });
                 frame.render_widget(
@@ -520,10 +544,7 @@ pub(super) fn draw_advanced_inspect(
                 );
             }
 
-            let mut overview_lines = vec![Line::from(vec![
-                Span::styled("来源  ", muted()),
-                Span::styled(safe(&workspace.source), accent()),
-            ])];
+            let mut overview_lines = Vec::new();
             let mut detail_lines = Vec::new();
             if let Some(row) = selected_row {
                 let item = matches!(row.kind, InspectNodeKind::Sector | InspectNodeKind::Field)
@@ -563,7 +584,6 @@ pub(super) fn draw_advanced_inspect(
                         diagnostics: item.map_or(&[], |item| item.diagnostics.as_slice()),
                     },
                 );
-                overview_lines.push(Line::from(""));
                 overview_lines.push(Line::from(Span::styled(
                     safe(&summary.title),
                     secondary().add_modifier(Modifier::BOLD),
@@ -602,6 +622,10 @@ pub(super) fn draw_advanced_inspect(
                 for alert in &summary.alerts {
                     overview_lines.push(Line::from(Span::styled(safe(&alert.message), warning())));
                 }
+                overview_lines.push(Line::from(vec![
+                    Span::styled("来源  ", muted()),
+                    Span::styled(safe(&workspace.source), muted()),
+                ]));
 
                 match row.kind {
                     InspectNodeKind::Sector => {
@@ -690,17 +714,44 @@ pub(super) fn draw_advanced_inspect(
                             )));
                             detail_lines.push(Line::from(format!("Value: {}", safe(&field.value))));
                             detail_lines.push(Line::from(format!(
+                                "Source LBA: {} · Group: {}",
+                                field.range.start_lba(),
+                                safe(field.group.as_deref().unwrap_or("—"))
+                            )));
+                            detail_lines.push(Line::from(format!(
+                                "Offset: 0x{:X} · Length: {} B",
+                                field.range.start,
+                                field.range.len()
+                            )));
+                            let hex = |bytes: &[u8]| {
+                                bytes
+                                    .iter()
+                                    .map(|byte| format!("{byte:02X}"))
+                                    .collect::<Vec<_>>()
+                                    .join(" ")
+                            };
+                            detail_lines.push(Line::from(format!("Raw: {}", hex(&field.raw))));
+                            detail_lines
+                                .push(Line::from(format!("Decoded: {}", hex(&field.decoded))));
+                            detail_lines.push(Line::from(format!(
+                                "FieldLogical: {}",
+                                field
+                                    .field_logical
+                                    .as_deref()
+                                    .map(hex)
+                                    .unwrap_or_else(|| "—".into())
+                            )));
+                            detail_lines.push(Line::from(format!(
+                                "Transform: {}",
+                                field
+                                    .transform
+                                    .map(|transform| format!("{transform:?}"))
+                                    .unwrap_or_else(|| "—".into())
+                            )));
+                            detail_lines.push(Line::from(format!(
                                 "Type: {:?}   Status: {:?}",
                                 field.field_type, field.status
                             )));
-                            let raw = field
-                                .raw
-                                .iter()
-                                .take(32)
-                                .map(|byte| format!("{byte:02X}"))
-                                .collect::<Vec<_>>()
-                                .join(" ");
-                            detail_lines.push(Line::from(format!("Raw: {raw}")));
                         } else {
                             detail_lines.push(Line::from("字段详情尚未 materialize。"));
                         }
@@ -767,7 +818,7 @@ pub(super) fn draw_advanced_inspect(
                                 } else {
                                     panel()
                                 })
-                                .title("节点概览"),
+                                .title("对象快照"),
                         )
                         .scroll((overview_scroll.min(u16::MAX as usize) as u16, 0))
                         .wrap(Wrap { trim: false }),
@@ -864,7 +915,7 @@ pub(super) fn draw_advanced_inspect(
                                     panel()
                                 })
                                 .title(format!(
-                                    "节点详情 · 行 {}–{} / {} · 列 {}",
+                                    "字段详情 · 行 {}–{} / {} · 列 {}",
                                     if values.is_empty() { 0 } else { row_start + 1 },
                                     row_end,
                                     values.len(),
@@ -885,7 +936,7 @@ pub(super) fn draw_advanced_inspect(
                                     } else {
                                         panel()
                                     })
-                                    .title("节点详情"),
+                                    .title("字段详情 / Evidence"),
                             )
                             .wrap(Wrap { trim: false })
                             .scroll((detail_scroll.min(u16::MAX as usize) as u16, 0)),

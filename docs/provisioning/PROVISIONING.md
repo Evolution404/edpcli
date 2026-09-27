@@ -9402,7 +9402,7 @@ Backup detail / coverage
 
 #### U4 — Inspect Workspace
 
-状态：PENDING。
+状态：COMPLETE（2026-09-27）。Inspect 以当前对象快照和 typed 字段树为首屏，LBA8 摘要直接投影部门、用户、E_LABEL 17 项及版本/宿主信息；`o` 展开 E_LABEL，Enter 查看详情且不改变展开状态。字段详情展示完整 evidence，默认磁盘布局为紧凑条并可切换全盘视图；raw/decode/meta、任意 sector、lazy extent、search/jump 保持可用。Inspect 不再占用大动画侧栏；TUI suite 216/216、Inspect suite 60/60 通过。
 
 - 对象优先布局；
 - LBA8 首屏直接展示部门/用户/E_LABEL；

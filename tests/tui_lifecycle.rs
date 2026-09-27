@@ -510,7 +510,7 @@ fn advanced_inspect_tree_browser_renders_and_navigates_across_terminal_sizes() {
         .map(|cell| cell.symbol())
         .collect::<String>();
     assert!(
-        active_tab.replace(' ', "").contains("结构树"),
+        active_tab.replace(' ', "").contains("1业务字段"),
         "active Inspect panel tab should use active-tab style: {active_tab}"
     );
     assert_eq!(
@@ -536,7 +536,8 @@ fn advanced_inspect_tree_browser_renders_and_navigates_across_terminal_sizes() {
         .expect("tree right border");
     assert!(
         border > last_highlighted + 1,
-        "selection should not extend to the panel border"
+        "selection should not extend to the panel border: highlighted={last_highlighted} border={border} row={}",
+        focus_row.iter().map(|cell| cell.symbol()).collect::<String>()
     );
     assert!(
         focus_row[last_highlighted + 1..border]
@@ -595,9 +596,12 @@ fn advanced_inspect_tree_browser_renders_and_navigates_across_terminal_sizes() {
             .map(|cell| cell.symbol())
             .collect::<String>();
         let compact = text.replace(' ', "");
-        assert!(compact.contains("结构树"), "{text}");
-        assert!(compact.contains("节点概览"), "{text}");
-        assert!(compact.contains("节点详情"), "{text}");
+        assert!(compact.contains("字段详情"), "{text}");
+        if width >= 80 {
+            assert!(compact.contains("结构树"), "{text}");
+            assert!(compact.contains("对象快照"), "{text}");
+            assert!(compact.contains("磁盘概览"), "{text}");
+        }
         let active_tab = terminal
             .backend()
             .buffer()
@@ -615,7 +619,7 @@ fn advanced_inspect_tree_browser_renders_and_navigates_across_terminal_sizes() {
         );
         if width >= 80 {
             assert!(
-                active_tab.replace(' ', "").contains("节点详情"),
+                active_tab.replace(' ', "").contains("2原始字段"),
                 "Detail focus must be visible in the shared Inspect tabs: {active_tab}"
             );
         } else {

@@ -377,7 +377,11 @@ impl AppState {
                     format!("0x{offset:03X}"),
                     field.range.len().to_string(),
                     field.group.clone().unwrap_or_default(),
-                    format!("{marker}{}", field.label),
+                    if field.key == crate::inspect::InspectFieldKey::Lba8Elabel {
+                        format!("{marker}E_LABEL [{}]", field.children.len())
+                    } else {
+                        format!("{marker}{}", field.label)
+                    },
                     field.value.clone(),
                     inspect_hex(&field.raw),
                     inspect_hex(&field.decoded),
@@ -672,7 +676,7 @@ impl AppState {
             stage: AdvancedInspectStage::Running,
             result: None,
             tree_selected: 0,
-            panel: AdvancedInspectPanel::DiskLayout,
+            panel: AdvancedInspectPanel::Tree,
             pane_focus: crate::tui::pane::PaneFocus::inspect(),
             expanded,
             lazy_offsets: std::collections::BTreeMap::new(),
@@ -1569,12 +1573,10 @@ impl AppState {
             .as_ref()
             .filter(|state| state.stage == AdvancedInspectStage::Browser)
             .map(|state| state.tree_selected);
-        let Some(row) = selected.and_then(|index| rows.get(index)) else {
+        if selected.and_then(|index| rows.get(index)).is_none() {
             return;
-        };
-        if row.expandable || row.action != AdvancedInspectTreeAction::None {
-            self.advanced_inspect_toggle_selected();
-        } else if let Some(state) = self.advanced_inspect.as_mut() {
+        }
+        if let Some(state) = self.advanced_inspect.as_mut() {
             state.panel = AdvancedInspectPanel::Overview;
             state
                 .pane_focus
@@ -1603,6 +1605,33 @@ impl AppState {
             .flat_map(|item| item.fields.iter())
             .find(|field| field.range == range)
             .cloned()
+    }
+
+    pub fn advanced_inspect_view_selected_field(&mut self) -> bool {
+        let Some(field) = self.advanced_inspect_selected_field() else {
+            return false;
+        };
+        let lba = field.range.start_lba();
+        if self.advanced_inspect_jump_lba(lba).is_err() {
+            return false;
+        }
+        let index = self
+            .advanced_inspect_detail_rows()
+            .iter()
+            .position(|row| row.range == Some(field.range) && row.child_index.is_none())
+            .unwrap_or(0);
+        if let Some(state) = self.advanced_inspect.as_mut() {
+            state.panel = AdvancedInspectPanel::Detail;
+            state
+                .pane_focus
+                .focus(crate::tui::pane::PaneId::InspectDetail);
+            let viewport = state
+                .pane_focus
+                .viewport_mut(crate::tui::pane::PaneId::InspectDetail);
+            viewport.selected = Some(index);
+            viewport.scroll_y.offset = index;
+        }
+        true
     }
 
     pub fn advanced_inspect_open_selected_field(&mut self) -> Option<(AdvancedInspectSource, u64)> {

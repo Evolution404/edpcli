@@ -465,9 +465,7 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
     super::shell::navigation(frame, chunks[1], state.workspace());
 
     let body = chunks[2];
-    let overlay_active = (state.workspace() == Workspace::Inspect
-        && state.advanced_inspect().is_some())
-        || state.backup_delete().is_some()
+    let overlay_active = state.backup_delete().is_some()
         || state.backup_batch_delete().is_some()
         || state.backup_create_choice().is_some()
         || state.backup_prune().is_some()
@@ -572,11 +570,11 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
                     .unwrap_or_else(|| "Esc 返回".into());
                 if let Some((query, index, total)) = state.advanced_inspect_search_status() {
                     format!(
-                        "Inspect：Tab/Shift-Tab Pane · Ctrl-w h/j/k/l focus · j/k 当前 Pane · Enter Sector Inspector · {escape} · q 退出 · 当前 {index}/{total}: {}",
+                        "Inspect：1/2/3/4 业务/原始/Hex/布局 · Ctrl-w h/j/k/l Pane · j/k 当前 Pane · o 展开/折叠 · Enter 查看 · {escape} · q 退出 · 当前 {index}/{total}: {}",
                         safe(query)
                     )
                 } else {
-                    format!("Inspect：Tab/Shift-Tab Pane · Ctrl-w h/j/k/l focus · j/k 当前 Pane · Ctrl-u/d/PgUp/PgDn 滚动 · gg/G 首尾 · Enter Sector Inspector · {escape} · q 退出")
+                    format!("Inspect：1/2/3/4 业务/原始/Hex/布局 · Ctrl-w h/j/k/l Pane · j/k 当前 Pane · o 展开/折叠 · Enter 查看 · {escape} · q 退出")
                 }
             }
         }

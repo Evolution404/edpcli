@@ -332,12 +332,47 @@ fn sector_stub(
 }
 
 pub fn field_node(index: usize, field: &InspectField) -> InspectNode {
+    let is_elabel = field.key == crate::inspect::InspectFieldKey::Lba8Elabel;
+    let children = if is_elabel {
+        field
+            .children
+            .iter()
+            .enumerate()
+            .map(|(child_index, child)| {
+                let label = match child.label.as_str() {
+                    "Dept" => "部门",
+                    "User" => "用户",
+                    other => other,
+                };
+                InspectNode {
+                    id: format!("child.{child_index}"),
+                    label: format!("{label}  {}", child.value),
+                    kind: InspectNodeKind::Field,
+                    range: InspectNodeRange::from_bytes(field.range),
+                    children: InspectChildren::None,
+                    decoder: None,
+                    status: SemanticStatus::Identified,
+                    region_semantic: None,
+                }
+            })
+            .collect::<Vec<_>>()
+    } else {
+        Vec::new()
+    };
     InspectNode {
         id: format!("field.{}.{}", field.range.start, index),
-        label: field.label.clone(),
+        label: if is_elabel {
+            format!("E_LABEL [{}]", field.children.len())
+        } else {
+            field.label.clone()
+        },
         kind: InspectNodeKind::Field,
         range: InspectNodeRange::from_bytes(field.range),
-        children: InspectChildren::None,
+        children: if children.is_empty() {
+            InspectChildren::None
+        } else {
+            InspectChildren::Materialized(children)
+        },
         decoder: None,
         status: SemanticStatus::Identified,
         region_semantic: None,

@@ -110,6 +110,36 @@ fn field_item(field: &InspectField, label: &str, importance: SummaryImportance) 
 
 fn lba8_sections(fields: &[InspectField]) -> Vec<SummarySection> {
     let find = |key| fields.iter().find(|field| field.key == key);
+    let mut sections = Vec::new();
+    if let Some(field) =
+        find(InspectFieldKey::Lba8Elabel).filter(|field| field.status == InspectFieldStatus::Known)
+    {
+        let mut ownership = Vec::new();
+        for (key, label) in [("Dept", "部门"), ("User", "用户")] {
+            if let Some(child) = field.children.iter().find(|child| child.label == key) {
+                ownership.push(SummaryItem {
+                    key: Some(field.key),
+                    label: label.into(),
+                    value: child.value.clone(),
+                    importance: SummaryImportance::Primary,
+                    source_range: Some(field.range),
+                    status: field.status,
+                });
+            }
+        }
+        ownership.push(SummaryItem {
+            key: Some(field.key),
+            label: "E_LABEL".into(),
+            value: format!("已解析 {} 项", field.children.len()),
+            importance: SummaryImportance::Primary,
+            source_range: Some(field.range),
+            status: field.status,
+        });
+        sections.push(SummarySection {
+            title: "归属与电子标签".into(),
+            items: ownership,
+        });
+    }
     let mut identity = Vec::new();
     if let Some(field) = find(InspectFieldKey::Lba8UsbOnlyInfo) {
         identity.push(field_item(field, "UsbOnlyInfo", SummaryImportance::Primary));
@@ -121,30 +151,19 @@ fn lba8_sections(fields: &[InspectField]) -> Vec<SummarySection> {
             SummaryImportance::Primary,
         ));
     }
-    let mut sections = Vec::new();
+    if let Some(field) = find(InspectFieldKey::Lba8MacInfo) {
+        identity.push(field_item(field, "MacInfo", SummaryImportance::Secondary));
+    }
     if !identity.is_empty() {
         sections.push(SummarySection {
-            title: "身份".into(),
+            title: "Profile / 宿主信息".into(),
             items: identity,
-        });
-    }
-    if let Some(field) = find(InspectFieldKey::Lba8Elabel) {
-        sections.push(SummarySection {
-            title: "电子标签".into(),
-            items: vec![SummaryItem {
-                key: Some(field.key),
-                label: "ELABEL".into(),
-                value: format!("已解析 {} 项", field.children.len()),
-                importance: SummaryImportance::Primary,
-                source_range: Some(field.range),
-                status: field.status,
-            }],
         });
     }
     let mut versions = Vec::new();
     for (key, label) in [
-        (InspectFieldKey::Lba8ToolVersion, "Tool"),
-        (InspectFieldKey::Lba8LabVersion, "Lab"),
+        (InspectFieldKey::Lba8ToolVersion, "Tool version"),
+        (InspectFieldKey::Lba8LabVersion, "Lab version"),
         (InspectFieldKey::Lba8WriteTime, "writeTime"),
         (InspectFieldKey::Lba8LogicalLength, "logical length"),
     ] {
