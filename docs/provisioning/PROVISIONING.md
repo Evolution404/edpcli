@@ -3293,7 +3293,7 @@ Share default FAIL / Encrypt default FAIL
 
 ### 12.12 分阶段实施顺序（后续独立开发）
 
-**实施状态（2026-09-26）：K0～K5 COMPLETE；K6 NOT IMPLEMENTED（所有 Migrate 继续 fail-closed）；K7 COMPLETE；K8 COMPLETE。** 代表性真实 USB 验收已完成，并已按 12.13 收口为 13/13 PASS。
+**实施状态（更新至 2026-09-27）：K0～K5 COMPLETE；K6.1 typed migration planning COMPLETE，K6 数据迁移执行仍 DEFERRED / fail-closed；K7 COMPLETE；K8 COMPLETE。** 代表性真实 USB 验收已完成，并已按 12.13 收口为 13/13 PASS。
 
 #### Phase K0：现状审计与红测试
 
@@ -3364,9 +3364,11 @@ K0 基线审计曾确认：
 
 #### Phase K6：可选数据迁移能力
 
-**实施状态（2026-09-26）：NOT IMPLEMENTED / DEFERRED。** 当前任何需要 Migrate 的转换均明确拒绝，不允许静默退化成 Preserve/Rebuild；这符合 K0～K5 第一阶段的 fail-closed 约束。
+**实施状态（更新至 2026-09-27）：PARTIAL。K6.1 typed migration planning COMPLETE；真实数据迁移执行仍 NOT IMPLEMENTED / DEFERRED。** `RegionMappingPlanner` 已正式接入 `TargetProvisionPlan`，需要跨语义区域迁移的目标会记录 typed `MigrationSource { source_index, region }` 并进入 `RegionDisposition::Migrate`；例如 mode0→mode1 的 combined 目标会明确记录 Boot + Share 两个来源。未显式选择格式化时，prepare/commit 继续 fail-closed 拒绝 Migrate；用户明确选择完整文件系统初始化时，domain plan 通过 `force_rebuild_for_format()` 把 Migrate/Preserve family 显式转换为 Rebuild，并清空 migration source，不允许静默降级。PR #30 合并为 `2de1ac5`；六平台 Rust CI 全绿，Virtual Disk HIL Linux arm64/x86_64 + Windows arm64/x86_64 **4/4 PASS**。
 
-只有在 K0～K5 完整通过后才考虑：
+K6.1 只建立“迁移需要什么来源、是否必须迁移、用户是否明确选择放弃迁移并重建”的单一事实源，**没有新增 migration writer，也没有扩大任何真实盘写入集合**。
+
+后续 K6 执行阶段才考虑：
 
 - 同盘不同 extent 的安全文件级迁移；
 - EDP→Plain 解密迁移；
