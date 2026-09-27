@@ -3,8 +3,7 @@ use edpcli::{
     provision::{
         CompatibilityFailure, Extent, FileKeyWrapMode, FilesystemProfile, KeyDomainRole,
         MigrationTransform, PartitionRole, PhysicalCryptoProfile, RegionKeyProfile,
-        RegionMappingKind,
-        RegionMappingPlanner, SourceRegion, TargetRegion,
+        RegionMappingKind, RegionMappingPlanner, SourceRegion, TargetRegion,
     },
 };
 

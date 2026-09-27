@@ -246,12 +246,8 @@ pub const fn migration_transform(
         (PartitionRole::BootShareCombined, PartitionRole::Share) => {
             Some(MigrationTransform::BootShareCombinedToShare)
         }
-        (PartitionRole::Encrypt, PartitionRole::Share) => {
-            Some(MigrationTransform::EncryptToShare)
-        }
-        (PartitionRole::Share, PartitionRole::Encrypt) => {
-            Some(MigrationTransform::ShareToEncrypt)
-        }
+        (PartitionRole::Encrypt, PartitionRole::Share) => Some(MigrationTransform::EncryptToShare),
+        (PartitionRole::Share, PartitionRole::Encrypt) => Some(MigrationTransform::ShareToEncrypt),
         _ => None,
     }
 }
