@@ -215,6 +215,9 @@ fn dependency_policy_is_pinned_and_automatically_refreshed() {
     let dependabot = read(".github/dependabot.yml");
 
     assert!(ci.contains("cargo install cargo-deny --locked --version 0.20.2"));
+    assert!(ci.contains("actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830"));
+    assert!(ci.contains("steps.cargo-deny-cache.outputs.cache-hit != 'true'"));
+    assert!(ci.contains("cargo-deny-\${{ runner.os }}-\${{ runner.arch }}-0.20.2"));
     assert!(ci.contains("cargo deny check"));
     assert!(deny.contains("[advisories]"));
     assert!(deny.contains("[licenses]"));
