@@ -2,7 +2,10 @@ use std::collections::BTreeMap;
 
 use crate::common::{METADATA_LAST_LBA, SECTOR};
 
-use super::{build_empty_exfat, build_empty_fat16, OfficialFilesystemFormat};
+use super::{
+    build_empty_exfat, build_empty_fat16, build_migrated_filesystem, MigrationStagedEntry,
+    OfficialFilesystemFormat,
+};
 
 pub const DEFAULT_PLAIN_START_LBA: u64 = 2048;
 pub const MAX_PLAIN_PARTITIONS: usize = 4;
@@ -343,6 +346,31 @@ pub fn build_plain_provision_write_plan(
     source_lce: Option<PlainCleanupExtent>,
     volume_serials: &[u32],
 ) -> Result<PlainProvisionWritePlan, String> {
+    build_plain_provision_write_plan_inner(plan, source_lce, volume_serials, None)
+}
+
+pub fn build_plain_migrated_provision_write_plan(
+    plan: &PlainProvisionPlan,
+    source_lce: Option<PlainCleanupExtent>,
+    volume_serials: &[u32],
+    migrations: &[Vec<MigrationStagedEntry>],
+) -> Result<PlainProvisionWritePlan, String> {
+    if migrations.len() != plan.partitions.len() {
+        return Err(format!(
+            "Plain K6 migration target count {} does not match partition count {}",
+            migrations.len(),
+            plan.partitions.len()
+        ));
+    }
+    build_plain_provision_write_plan_inner(plan, source_lce, volume_serials, Some(migrations))
+}
+
+fn build_plain_provision_write_plan_inner(
+    plan: &PlainProvisionPlan,
+    source_lce: Option<PlainCleanupExtent>,
+    volume_serials: &[u32],
+    migrations: Option<&[Vec<MigrationStagedEntry>]>,
+) -> Result<PlainProvisionWritePlan, String> {
     validate_plain_partitions(plan.total_sectors, &plan.partitions)?;
     if plan.total_sectors <= u64::from(METADATA_LAST_LBA) {
         return Err("普通盘目标太小，无法完整清理 LBA0-12 EDP 元数据".into());
@@ -409,7 +437,17 @@ pub fn build_plain_provision_write_plan(
         .zip(volume_serials.iter().copied())
         .enumerate()
     {
-        let image = plain_filesystem_image(partition, volume_serial)?;
+        let image = match migrations.and_then(|all| all.get(index)) {
+            Some(entries) if !entries.is_empty() => build_migrated_filesystem(
+                partition.filesystem,
+                partition.start_lba,
+                partition.sector_count,
+                volume_serial,
+                &partition.volume_label,
+                entries,
+            )?,
+            _ => plain_filesystem_image(partition, volume_serial)?,
+        };
         for (&relative_lba, sector) in image.sectors() {
             let lba = partition
                 .start_lba
