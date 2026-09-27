@@ -1,9 +1,8 @@
 use std::collections::BTreeSet;
 
 use super::{
-    build_empty_exfat, build_empty_fat16, exfat_boot_checksum, exfat_geometry,
-    exfat_upcase_table, fat_chain, put_stream, put_u16, put_u32, put_u64, SparseFilesystemImage,
-    SECTOR_SIZE,
+    build_empty_exfat, build_empty_fat16, exfat_boot_checksum, exfat_geometry, exfat_upcase_table,
+    fat_chain, put_stream, put_u16, put_u32, put_u64, SparseFilesystemImage, SECTOR_SIZE,
 };
 use crate::provision::{MigrationStagedEntry, OfficialFilesystemFormat};
 
@@ -102,7 +101,9 @@ fn fat_lfn_entries(name: &str, short: &[u8; 11]) -> Result<Vec<[u8; 32]>, String
     }
     let count = units.len() / 13;
     if count > 20 {
-        return Err(format!("FAT long filename requires too many entries: {name:?}"));
+        return Err(format!(
+            "FAT long filename requires too many entries: {name:?}"
+        ));
     }
     let checksum = short_checksum(short);
     let offsets = [1usize, 3, 5, 7, 9, 14, 16, 18, 20, 22, 24, 28, 30];
@@ -237,8 +238,12 @@ fn build_migrated_fat16(
     staged: &[MigrationStagedEntry],
 ) -> Result<SparseFilesystemImage, String> {
     validate_tree(staged)?;
-    let mut image =
-        build_empty_fat16(partition_offset, volume_sectors, volume_serial, volume_label)?;
+    let mut image = build_empty_fat16(
+        partition_offset,
+        volume_sectors,
+        volume_serial,
+        volume_label,
+    )?;
     let boot = image
         .sector_or_zero(0)
         .ok_or("FAT16 target has no boot sector")?;
@@ -301,8 +306,8 @@ fn build_migrated_fat16(
         });
     }
 
-    let fat_bytes_len = usize::try_from(fat_sectors * SECTOR_SIZE as u64)
-        .map_err(|_| "FAT16 FAT is too large")?;
+    let fat_bytes_len =
+        usize::try_from(fat_sectors * SECTOR_SIZE as u64).map_err(|_| "FAT16 FAT is too large")?;
     let mut fat = vec![0u8; fat_bytes_len];
     fat[..4].copy_from_slice(&[0xf8, 0xff, 0xff, 0xff]);
     for entry in &tree {
@@ -367,8 +372,7 @@ fn build_migrated_fat16(
             append_fat_named_entry(&mut bytes, alias_index, child)?;
             alias_index += 1;
         }
-        let capacity =
-            directory.cluster_count as u64 * sectors_per_cluster * SECTOR_SIZE as u64;
+        let capacity = directory.cluster_count as u64 * sectors_per_cluster * SECTOR_SIZE as u64;
         if bytes.len() as u64 > capacity {
             return Err(format!(
                 "migration directory {:?} exceeds allocated FAT16 clusters",
@@ -415,7 +419,10 @@ fn exfat_entry_set(
 ) -> Result<Vec<u8>, String> {
     let units = entry.name.encode_utf16().collect::<Vec<_>>();
     if units.is_empty() || units.len() > 255 {
-        return Err(format!("exFAT filename length is unsupported: {:?}", entry.name));
+        return Err(format!(
+            "exFAT filename length is unsupported: {:?}",
+            entry.name
+        ));
     }
     let filename_entries = units.len().div_ceil(15);
     let secondary_count = 1 + filename_entries;
@@ -468,8 +475,12 @@ fn build_migrated_exfat(
     staged: &[MigrationStagedEntry],
 ) -> Result<SparseFilesystemImage, String> {
     validate_tree(staged)?;
-    let mut image =
-        build_empty_exfat(partition_offset, volume_sectors, volume_serial, volume_label)?;
+    let mut image = build_empty_exfat(
+        partition_offset,
+        volume_sectors,
+        volume_serial,
+        volume_label,
+    )?;
     let mut boot = image
         .sector_or_zero(0)
         .ok_or("exFAT target has no boot sector")?;
@@ -510,7 +521,9 @@ fn build_migrated_exfat(
                 .ok_or("exFAT root size overflow")?;
         }
     }
-    root_needed = root_needed.checked_add(32).ok_or("exFAT root size overflow")?;
+    root_needed = root_needed
+        .checked_add(32)
+        .ok_or("exFAT root size overflow")?;
     let root_clusters = u32::try_from(root_needed.div_ceil(cluster_bytes).max(1))
         .map_err(|_| "exFAT root cluster count overflow")?;
     let root_extra = root_clusters.saturating_sub(1);
@@ -525,9 +538,8 @@ fn build_migrated_exfat(
             .filter_map(|candidate| {
                 let (candidate_parent, child_name) =
                     split_path(&candidate.path, candidate.is_directory).ok()?;
-                (candidate_parent == entry.path).then_some(
-                    ((2 + child_name.encode_utf16().count().div_ceil(15)) * 32) as u64,
-                )
+                (candidate_parent == entry.path)
+                    .then_some(((2 + child_name.encode_utf16().count().div_ceil(15)) * 32) as u64)
             })
             .try_fold(32u64, |sum, value| sum.checked_add(value))
             .ok_or("exFAT directory size overflow")?;
@@ -657,11 +669,7 @@ fn build_migrated_exfat(
             } else {
                 child.staged.data.len() as u64
             };
-            bytes.extend_from_slice(&exfat_entry_set(
-                child,
-                data_length,
-                child.first_cluster,
-            )?);
+            bytes.extend_from_slice(&exfat_entry_set(child, data_length, child.first_cluster)?);
         }
         bytes.extend_from_slice(&[0u8; 32]);
         write_cluster_bytes(
