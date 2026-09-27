@@ -71,9 +71,46 @@ pub struct BackupPruneState {
     pub message: Option<String>,
 }
 
+#[derive(Debug, Clone)]
+pub struct BackupVerifyRunState {
+    pub path: std::path::PathBuf,
+    pub latest: crate::application::progress::ProgressEvent,
+    pub log: std::collections::VecDeque<crate::application::progress::ProgressEvent>,
+}
+
+pub struct BackupsState {
+    pub(super) rows: Vec<crate::application::BackupWorkspaceItem>,
+    pub(super) verify_run: Option<BackupVerifyRunState>,
+    pub(super) table_view: super::super::table_layout::TableViewData,
+    pub(super) scan_pending: bool,
+    pub(super) delete: Option<BackupDeleteState>,
+    pub(super) batch_delete: Option<BackupBatchDeleteState>,
+    pub(super) selection: std::collections::BTreeSet<std::path::PathBuf>,
+    pub(super) create_choice: Option<BackupCreateChoiceState>,
+    pub(super) prune: Option<BackupPruneState>,
+    pub(super) pane_focus: crate::tui::pane::PaneFocus,
+}
+
+impl Default for BackupsState {
+    fn default() -> Self {
+        Self {
+            rows: Vec::new(),
+            verify_run: None,
+            table_view: super::super::table_layout::TableViewData::default(),
+            scan_pending: false,
+            delete: None,
+            batch_delete: None,
+            selection: std::collections::BTreeSet::new(),
+            create_choice: None,
+            prune: None,
+            pane_focus: crate::tui::pane::PaneFocus::backups(),
+        }
+    }
+}
+
 impl AppState {
     pub fn backup_create_choice(&self) -> Option<BackupCreateChoiceState> {
-        self.backup_create_choice
+        self.backups.create_choice
     }
 
     pub fn begin_backup_create_choice(&mut self) -> bool {
@@ -85,13 +122,13 @@ impl AppState {
             self.set_notice("创建备份需要先在设备页选定目标 U 盘，再进入备份页。");
             return false;
         }
-        self.backup_create_choice = Some(BackupCreateChoiceState { selected: 0 });
+        self.backups.create_choice = Some(BackupCreateChoiceState { selected: 0 });
         self.input_mode = InputMode::Normal;
         true
     }
 
     pub fn move_backup_create_choice(&mut self, delta: isize) {
-        let Some(choice) = self.backup_create_choice.as_mut() else {
+        let Some(choice) = self.backups.create_choice.as_mut() else {
             return;
         };
         choice.selected = if delta < 0 {
@@ -102,29 +139,29 @@ impl AppState {
     }
 
     pub fn take_backup_create_choice(&mut self) -> Option<BackupCreateChoice> {
-        self.backup_create_choice
+        self.backups.create_choice
             .take()
             .map(BackupCreateChoiceState::choice)
     }
 
     pub fn cancel_backup_create_choice(&mut self) {
-        self.backup_create_choice = None;
+        self.backups.create_choice = None;
     }
 
     pub fn backup_delete(&self) -> Option<&BackupDeleteState> {
-        self.backup_delete.as_ref()
+        self.backups.delete.as_ref()
     }
 
     pub fn backup_batch_delete(&self) -> Option<&BackupBatchDeleteState> {
-        self.backup_batch_delete.as_ref()
+        self.backups.batch_delete.as_ref()
     }
 
     pub fn backup_selection_count(&self) -> usize {
-        self.backup_selection.len()
+        self.backups.selection.len()
     }
 
     pub fn backup_is_selected(&self, path: &std::path::Path) -> bool {
-        self.backup_selection.contains(path)
+        self.backups.selection.contains(path)
     }
 
     pub fn toggle_selected_backup(&mut self) {
@@ -133,19 +170,19 @@ impl AppState {
             return;
         };
         debug_assert!(!expected_sha256.is_empty());
-        if !self.backup_selection.remove(&path) {
-            self.backup_selection.insert(path);
+        if !self.backups.selection.remove(&path) {
+            self.backups.selection.insert(path);
         }
         self.set_notice(format!(
             "批量删除已勾选 {} 份备份；空格继续选择，d 进入统一删除流程。",
-            self.backup_selection.len()
+            self.backups.selection.len()
         ));
     }
 
     pub fn selected_backup_batch_targets(&self) -> Vec<(std::path::PathBuf, String)> {
         self.backups
             .iter()
-            .filter(|row| self.backup_selection.contains(&row.path))
+            .filter(|row| self.backups.selection.contains(&row.path))
             .filter_map(|row| {
                 row.content_sha256
                     .as_ref()
@@ -155,7 +192,7 @@ impl AppState {
     }
 
     pub fn begin_backup_batch_delete(&mut self) -> Option<Vec<(std::path::PathBuf, String)>> {
-        if self.critical_operation || self.backup_batch_delete.is_some() {
+        if self.critical_operation || self.backups.batch_delete.is_some() {
             self.set_notice("已有关键操作或批量删除向导正在执行。");
             return None;
         }
@@ -165,7 +202,7 @@ impl AppState {
             return None;
         }
         self.input_mode = InputMode::Normal;
-        self.backup_batch_delete = Some(BackupBatchDeleteState {
+        self.backups.batch_delete = Some(BackupBatchDeleteState {
             stage: BackupBatchDeleteStage::Planning,
             prepared: None,
             confirmation: String::new(),
@@ -178,7 +215,7 @@ impl AppState {
         &mut self,
         result: Result<crate::application::backup::DeletePlan, String>,
     ) {
-        let Some(batch) = self.backup_batch_delete.as_mut() else {
+        let Some(batch) = self.backups.batch_delete.as_mut() else {
             return;
         };
         match result {
@@ -199,7 +236,7 @@ impl AppState {
     }
 
     pub fn backup_batch_delete_begin_confirm(&mut self) {
-        if let Some(batch) = self.backup_batch_delete.as_mut() {
+        if let Some(batch) = self.backups.batch_delete.as_mut() {
             if batch.stage == BackupBatchDeleteStage::Review {
                 batch.stage = BackupBatchDeleteStage::Confirm;
                 batch.confirmation.clear();
@@ -210,7 +247,7 @@ impl AppState {
     }
 
     pub fn backup_batch_delete_push_confirmation(&mut self, ch: char) {
-        if let Some(batch) = self.backup_batch_delete.as_mut() {
+        if let Some(batch) = self.backups.batch_delete.as_mut() {
             if batch.stage == BackupBatchDeleteStage::Confirm && batch.confirmation.len() < 16 {
                 batch.confirmation.push(ch);
                 batch.message = None;
@@ -219,7 +256,7 @@ impl AppState {
     }
 
     pub fn backup_batch_delete_backspace(&mut self) {
-        if let Some(batch) = self.backup_batch_delete.as_mut() {
+        if let Some(batch) = self.backups.batch_delete.as_mut() {
             if batch.stage == BackupBatchDeleteStage::Confirm {
                 batch.confirmation.pop();
                 batch.message = None;
@@ -230,7 +267,7 @@ impl AppState {
     pub fn backup_batch_delete_take_for_execute(
         &mut self,
     ) -> Option<crate::application::backup::DeletePlan> {
-        let batch = self.backup_batch_delete.as_mut()?;
+        let batch = self.backups.batch_delete.as_mut()?;
         if batch.stage != BackupBatchDeleteStage::Confirm {
             return None;
         }
@@ -249,7 +286,7 @@ impl AppState {
     pub fn backup_batch_delete_finish_execute(&mut self, result: Result<usize, String>) {
         self.critical_operation = false;
         let success = result.is_ok();
-        if let Some(batch) = self.backup_batch_delete.as_mut() {
+        if let Some(batch) = self.backups.batch_delete.as_mut() {
             batch.stage = BackupBatchDeleteStage::Result;
             batch.message = Some(match result {
                 Ok(count) => format!("批量删除完成：已安全删除 {count} 份备份。"),
@@ -257,31 +294,31 @@ impl AppState {
             });
         }
         if success {
-            self.backup_selection.clear();
+            self.backups.selection.clear();
         }
     }
 
     pub fn close_backup_batch_delete(&mut self) {
         if !self.critical_operation {
-            self.backup_batch_delete = None;
+            self.backups.batch_delete = None;
             self.input_mode = InputMode::Normal;
         }
     }
 
     pub fn backup_prune(&self) -> Option<&BackupPruneState> {
-        self.backup_prune.as_ref()
+        self.backups.prune.as_ref()
     }
 
     pub fn backup_prune_mut(&mut self) -> Option<&mut BackupPruneState> {
-        self.backup_prune.as_mut()
+        self.backups.prune.as_mut()
     }
 
     pub fn begin_backup_prune(&mut self) -> bool {
-        if self.critical_operation || self.backup_prune.is_some() {
+        if self.critical_operation || self.backups.prune.is_some() {
             return false;
         }
         self.input_mode = InputMode::Insert;
-        self.backup_prune = Some(BackupPruneState {
+        self.backups.prune = Some(BackupPruneState {
             stage: BackupPruneStage::Input,
             keep_input: "3".into(),
             prepared: None,
@@ -292,7 +329,7 @@ impl AppState {
     }
 
     pub fn backup_prune_push_digit(&mut self, ch: char) {
-        if let Some(prune) = self.backup_prune.as_mut() {
+        if let Some(prune) = self.backups.prune.as_mut() {
             if prune.stage == BackupPruneStage::Input
                 && ch.is_ascii_digit()
                 && prune.keep_input.len() < 6
@@ -304,7 +341,7 @@ impl AppState {
     }
 
     pub fn backup_prune_backspace(&mut self) {
-        if let Some(prune) = self.backup_prune.as_mut() {
+        if let Some(prune) = self.backups.prune.as_mut() {
             match prune.stage {
                 BackupPruneStage::Input => {
                     prune.keep_input.pop();
@@ -337,7 +374,7 @@ impl AppState {
     }
 
     pub fn backup_prune_finish_plan(&mut self, result: Result<BackupPrunePrepared, String>) {
-        let Some(prune) = self.backup_prune.as_mut() else {
+        let Some(prune) = self.backups.prune.as_mut() else {
             return;
         };
         match result {
@@ -362,7 +399,7 @@ impl AppState {
     }
 
     pub fn backup_prune_begin_confirm(&mut self) {
-        if let Some(prune) = self.backup_prune.as_mut() {
+        if let Some(prune) = self.backups.prune.as_mut() {
             if prune.stage == BackupPruneStage::Review {
                 prune.stage = BackupPruneStage::Confirm;
                 prune.confirmation.clear();
@@ -373,7 +410,7 @@ impl AppState {
     }
 
     pub fn backup_prune_push_confirmation(&mut self, ch: char) {
-        if let Some(prune) = self.backup_prune.as_mut() {
+        if let Some(prune) = self.backups.prune.as_mut() {
             if prune.stage == BackupPruneStage::Confirm && prune.confirmation.len() < 16 {
                 prune.confirmation.push(ch);
                 prune.message = None;
@@ -382,7 +419,7 @@ impl AppState {
     }
 
     pub fn backup_prune_take_for_execute(&mut self) -> Option<BackupPrunePrepared> {
-        let prune = self.backup_prune.as_mut()?;
+        let prune = self.backups.prune.as_mut()?;
         if prune.stage != BackupPruneStage::Confirm {
             return None;
         }
@@ -400,7 +437,7 @@ impl AppState {
 
     pub fn backup_prune_finish_execute(&mut self, result: Result<usize, String>) {
         self.critical_operation = false;
-        if let Some(prune) = self.backup_prune.as_mut() {
+        if let Some(prune) = self.backups.prune.as_mut() {
             prune.stage = BackupPruneStage::Result;
             prune.message = Some(match result {
                 Ok(count) => format!("清理完成：已安全删除 {count} 份旧备份。"),
@@ -411,7 +448,7 @@ impl AppState {
 
     pub fn close_backup_prune(&mut self) {
         if !self.critical_operation {
-            self.backup_prune = None;
+            self.backups.prune = None;
             self.input_mode = InputMode::Normal;
         }
     }
@@ -426,7 +463,7 @@ impl AppState {
             return false;
         }
         self.input_mode = InputMode::Confirm;
-        self.backup_delete = Some(BackupDeleteState {
+        self.backups.delete = Some(BackupDeleteState {
             stage: WizardStage::Confirm,
             path,
             expected_sha256,
@@ -437,7 +474,7 @@ impl AppState {
     }
 
     pub fn push_backup_delete_confirmation(&mut self, ch: char) {
-        if let Some(delete) = self.backup_delete.as_mut() {
+        if let Some(delete) = self.backups.delete.as_mut() {
             if delete.stage == WizardStage::Confirm && delete.confirmation.len() < 16 {
                 delete.confirmation.push(ch);
                 delete.message = None;
@@ -446,7 +483,7 @@ impl AppState {
     }
 
     pub fn backspace_backup_delete_confirmation(&mut self) {
-        if let Some(delete) = self.backup_delete.as_mut() {
+        if let Some(delete) = self.backups.delete.as_mut() {
             if delete.stage == WizardStage::Confirm {
                 delete.confirmation.pop();
                 delete.message = None;
@@ -455,7 +492,7 @@ impl AppState {
     }
 
     pub fn submit_backup_delete_confirmation(&mut self) -> Option<(std::path::PathBuf, String)> {
-        let delete = self.backup_delete.as_mut()?;
+        let delete = self.backups.delete.as_mut()?;
         if delete.stage != WizardStage::Confirm {
             return None;
         }
@@ -472,7 +509,7 @@ impl AppState {
 
     pub fn finish_backup_delete(&mut self, result: Result<(), String>) {
         self.critical_operation = false;
-        if let Some(delete) = self.backup_delete.as_mut() {
+        if let Some(delete) = self.backups.delete.as_mut() {
             delete.stage = WizardStage::Result;
             delete.message = Some(match result {
                 Ok(()) => "备份已删除；列表已刷新".to_string(),

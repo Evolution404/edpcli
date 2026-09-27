@@ -1291,6 +1291,10 @@ application 返回结构化 `ProvisionReport/BackupReport/InspectReport`，CLI/T
 - `AppState` 对外方法签名保持不变，只把内部直接字段访问改为 `devices.*` 子状态；不改变设备筛选、排序、选择、Inspect/Provision 目标固定或任何磁盘 I/O 语义。
 - 新增架构门禁，禁止上述 Devices 字段重新散落回 `AppState`。
 
+- D8-C2：备份列表、校验进度、表视图、扫描状态、删除/批删/清理向导、勾选集合与备份 Pane 焦点统一归 `BackupsState` 所有；`BackupVerifyRunState` 类型也移入备份状态模块。
+- `AppState` 继续保留原有公共方法作为门面，调用方无需感知所有权迁移；本阶段不改变备份格式、删除 SHA-256 固定、写前备份或任何真实写盘安全链。
+
+
 
 ### D8-D：TUI 大模块继续按职责拆分
 

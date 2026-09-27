@@ -161,38 +161,22 @@ pub enum StateEffect {
     ExitDeferred,
 }
 
-#[derive(Debug, Clone)]
-pub struct BackupVerifyRunState {
-    pub path: std::path::PathBuf,
-    pub latest: crate::application::progress::ProgressEvent,
-    pub log: std::collections::VecDeque<crate::application::progress::ProgressEvent>,
-}
-
 pub struct AppState {
     demo_mode: bool,
     workspace: Workspace,
     devices: DevicesState,
-    backups: Vec<crate::application::BackupWorkspaceItem>,
-    backup_verify_run: Option<BackupVerifyRunState>,
-    backup_table_view: super::table_layout::TableViewData,
-    backup_scan_pending: bool,
+    backups: BackupsState,
     selected: usize,
     item_count: usize,
     input_mode: InputMode,
     critical_operation: bool,
     exit_pending: bool,
     wizard: Option<WizardState>,
-    backup_delete: Option<BackupDeleteState>,
-    backup_batch_delete: Option<BackupBatchDeleteState>,
-    backup_selection: std::collections::BTreeSet<std::path::PathBuf>,
-    backup_create_choice: Option<BackupCreateChoiceState>,
-    backup_prune: Option<BackupPruneState>,
     provision: ProvisionState,
     pinned_disk: Option<u32>,
     advanced_inspect: Option<AdvancedInspectState>,
     disk_layout_tail: super::disk_layout::TailExpansion,
     disk_layout_selected: usize,
-    backups_pane_focus: crate::tui::pane::PaneFocus,
     navigation: NavigationStack,
     horizontal_scroll: std::collections::BTreeMap<
         super::table_layout::TableKind,
@@ -220,27 +204,18 @@ impl AppState {
             demo_mode: false,
             workspace: Workspace::Devices,
             devices: DevicesState::default(),
-            backups: Vec::new(),
-            backup_verify_run: None,
-            backup_table_view: super::table_layout::TableViewData::default(),
-            backup_scan_pending: false,
+            backups: BackupsState::default(),
             selected: 0,
             item_count: 0,
             input_mode: InputMode::Normal,
             critical_operation: false,
             exit_pending: false,
             wizard: None,
-            backup_delete: None,
-            backup_batch_delete: None,
-            backup_selection: std::collections::BTreeSet::new(),
-            backup_create_choice: None,
-            backup_prune: None,
             provision: ProvisionState::default(),
             pinned_disk: None,
             advanced_inspect: None,
             disk_layout_tail: super::disk_layout::TailExpansion::Collapsed,
             disk_layout_selected: 0,
-            backups_pane_focus: crate::tui::pane::PaneFocus::backups(),
             navigation: NavigationStack::default(),
             horizontal_scroll: std::collections::BTreeMap::new(),
             table_column_order: std::collections::BTreeMap::new(),
@@ -263,11 +238,11 @@ impl AppState {
     }
 
     pub fn backup_verify_run(&self) -> Option<&BackupVerifyRunState> {
-        self.backup_verify_run.as_ref()
+        self.backups.verify_run.as_ref()
     }
 
     pub fn set_backup_verify_run(&mut self, run: Option<BackupVerifyRunState>) {
-        self.backup_verify_run = run;
+        self.backups.verify_run = run;
     }
 
     pub fn begin_backup_verify_run(&mut self, path: std::path::PathBuf) {
@@ -275,7 +250,7 @@ impl AppState {
         let mut event = ProgressEvent::new(Phase::Readback, Step::BackupVerification, 0, 1);
         event.operation = OperationKind::Backup;
         event.detail = Some("正在校验备份大小与 SHA-256".into());
-        self.backup_verify_run = Some(BackupVerifyRunState {
+        self.backups.verify_run = Some(BackupVerifyRunState {
             path,
             latest: event.clone(),
             log: std::collections::VecDeque::from([event]),
@@ -379,7 +354,7 @@ impl AppState {
             let count = match self.workspace {
                 Workspace::Devices => self.devices.rows.len(),
                 Workspace::Inspect => 0,
-                Workspace::Backups => self.backups.len(),
+                Workspace::Backups => self.backups.rows.len(),
                 Workspace::Provision => ProvisionKind::ALL.len(),
             };
             self.selected = 0;
@@ -396,7 +371,7 @@ impl AppState {
                 }
             }
             Workspace::Backups => {
-                for (index, row) in self.backups.iter().enumerate() {
+                for (index, row) in self.backups.rows.iter().enumerate() {
                     if Self::backup_matches_query(row, &query) {
                         self.search_matches.push(index);
                     }
@@ -594,13 +569,13 @@ impl AppState {
     }
 
     pub const fn backup_scan_pending(&self) -> bool {
-        self.backup_scan_pending
+        self.backups.scan_pending
     }
 
     pub const fn active_scan_pending(&self) -> bool {
         match self.workspace {
             Workspace::Devices => self.devices.scan_pending,
-            Workspace::Backups => self.backup_scan_pending,
+            Workspace::Backups => self.backups.scan_pending,
             Workspace::Inspect => false,
             Workspace::Provision => false,
         }
@@ -661,7 +636,7 @@ impl AppState {
     }
 
     pub fn backups(&self) -> &[crate::application::BackupWorkspaceItem] {
-        &self.backups
+        &self.backups.rows
     }
 
     pub fn table_view_data(
@@ -670,7 +645,7 @@ impl AppState {
     ) -> Option<&super::table_layout::TableViewData> {
         match kind {
             super::table_layout::TableKind::Devices => Some(&self.devices.rows.table_view),
-            super::table_layout::TableKind::Backups => Some(&self.backup_table_view),
+            super::table_layout::TableKind::Backups => Some(&self.backups.table_view),
             _ => None,
         }
     }
@@ -710,9 +685,9 @@ impl AppState {
             if self.workspace == Workspace::Backups && !self.active_search_query().is_empty() {
                 self.search_matches.clone()
             } else {
-                (0..self.backups.len()).collect()
+                (0..self.backups.rows.len()).collect()
             };
-        self.backup_table_view.sorted_indices(
+        self.backups.table_view.sorted_indices(
             indices,
             self.table_interaction(super::table_layout::TableKind::Backups),
         )
@@ -727,7 +702,7 @@ impl AppState {
         position: usize,
     ) -> Option<&crate::application::BackupWorkspaceItem> {
         let index = self.backup_source_index_at_visible(position)?;
-        self.backups.get(index)
+        self.backups.rows.get(index)
     }
 
     pub fn workspace_filter_active(&self) -> bool {
@@ -901,7 +876,7 @@ impl AppState {
             return None;
         }
         let index = self.backup_source_index_at_visible(self.selected)?;
-        self.backups.get(index)
+        self.backups.rows.get(index)
     }
 
     pub fn selected_backup_delete_target(&self) -> Option<(std::path::PathBuf, String)> {
@@ -910,17 +885,17 @@ impl AppState {
     }
 
     pub fn set_backup_scan_pending(&mut self, pending: bool) {
-        self.backup_scan_pending = pending;
+        self.backups.scan_pending = pending;
     }
 
     pub fn replace_backups(&mut self, backups: Vec<crate::application::BackupWorkspaceItem>) {
         let selected_path = (self.workspace == Workspace::Backups)
             .then(|| self.selected_backup_path())
             .flatten();
-        self.backups = backups;
-        self.backup_table_view = super::table_layout::backup_table_view(
-            &self.backups,
-            self.backup_table_view.generation.wrapping_add(1),
+        self.backups.rows = backups;
+        self.backups.table_view = super::table_layout::backup_table_view(
+            &self.backups.rows,
+            self.backups.table_view.generation.wrapping_add(1),
         );
         let selectable = self
             .backups
@@ -928,13 +903,13 @@ impl AppState {
             .filter(|row| row.content_sha256.is_some())
             .map(|row| row.path.clone())
             .collect::<std::collections::BTreeSet<_>>();
-        self.backup_selection
+        self.backups.selection
             .retain(|path| selectable.contains(path));
-        self.backup_scan_pending = false;
+        self.backups.scan_pending = false;
         if self.workspace == Workspace::Backups {
             self.rebuild_workspace_filter();
             if let Some(path) = selected_path {
-                let source_index = self.backups.iter().position(|row| row.path == path);
+                let source_index = self.backups.rows.iter().position(|row| row.path == path);
                 self.selected = source_index
                     .and_then(|index| {
                         if self.workspace_filter_active() {
@@ -985,7 +960,7 @@ impl AppState {
         }
         let count = match workspace {
             Workspace::Devices => self.devices.rows.len(),
-            Workspace::Backups => self.backups.len(),
+            Workspace::Backups => self.backups.rows.len(),
             Workspace::Inspect => 0,
             Workspace::Provision => match self.provision.stage {
                 ProvisionStage::SelectDisk => self.provision_selectable_devices().count(),
@@ -1092,7 +1067,7 @@ impl AppState {
             }
             TableKind::Backups => {
                 let source = self.backup_source_index_at_visible(self.selected)?;
-                self.backup_table_view.rows.get(source).cloned()
+                self.backups.table_view.rows.get(source).cloned()
             }
             TableKind::ProvisionDevices => {
                 let row = self.provision_device_at(self.selected)?;
@@ -1197,7 +1172,7 @@ impl AppState {
 
         match kind {
             TableKind::Devices => self.devices.table_view.content_widths.clone(),
-            TableKind::Backups => self.backup_table_view.content_widths.clone(),
+            TableKind::Backups => self.backups.table_view.content_widths.clone(),
             TableKind::ProvisionDevices => {
                 let headings = ["设备", "容量", "USB 身份", "盘型", "onlyid"];
                 let mut widths = headings
@@ -1429,7 +1404,7 @@ impl AppState {
             if let Some(position) = self
                 .visible_backup_indices()
                 .iter()
-                .position(|index| self.backups[*index].path == path)
+                .position(|index| self.backups.rows[*index].path == path)
             {
                 self.selected = position;
             }
@@ -1511,7 +1486,7 @@ impl AppState {
         } else if pane.is_devices() {
             self.devices.pane_focus.viewport(pane)
         } else if pane.is_backups() {
-            self.backups_pane_focus.viewport(pane)
+            self.backups.pane_focus.viewport(pane)
         } else {
             self.provision.pane_focus.viewport(pane)
         }
@@ -1530,7 +1505,7 @@ impl AppState {
         } else if pane.is_devices() {
             self.devices.pane_focus.viewport_mut(pane)
         } else if pane.is_backups() {
-            self.backups_pane_focus.viewport_mut(pane)
+            self.backups.pane_focus.viewport_mut(pane)
         } else {
             self.provision.pane_focus.viewport_mut(pane)
         }
@@ -1541,7 +1516,7 @@ impl AppState {
     }
 
     pub const fn backups_focused_pane(&self) -> crate::tui::pane::PaneId {
-        self.backups_pane_focus.focused()
+        self.backups.pane_focus.focused()
     }
 
     pub fn focus_devices_pane(&mut self, pane: crate::tui::pane::PaneId) {
@@ -1644,7 +1619,7 @@ impl AppState {
 
     pub fn focus_backups_pane(&mut self, pane: crate::tui::pane::PaneId) {
         if pane.is_backups() {
-            self.backups_pane_focus.focus(pane);
+            self.backups.pane_focus.focus(pane);
         }
     }
 
@@ -1665,7 +1640,7 @@ impl AppState {
                 (focus, next)
             }
             Workspace::Backups => {
-                let focus = self.backups_pane_focus.focused();
+                let focus = self.backups.pane_focus.focused();
                 let next = match (focus, dx.signum(), dy.signum()) {
                     (PaneId::BackupsList, _, 1) => Some(PaneId::BackupSummary),
                     (PaneId::BackupSummary | PaneId::BackupCoverage, _, -1) => {
@@ -1683,7 +1658,7 @@ impl AppState {
             if focus.is_devices() {
                 self.devices.pane_focus.focus(next);
             } else {
-                self.backups_pane_focus.focus(next);
+                self.backups.pane_focus.focus(next);
             }
         }
     }
@@ -1703,7 +1678,7 @@ impl AppState {
                 .as_ref()
                 .map(|state| state.pane_focus.clone()),
             NavigationLocation::Devices => Some(self.devices.pane_focus.clone()),
-            NavigationLocation::Backups => Some(self.backups_pane_focus.clone()),
+            NavigationLocation::Backups => Some(self.backups.pane_focus.clone()),
         };
         self.navigation.push(NavigationFrame {
             location,
@@ -1734,7 +1709,7 @@ impl AppState {
             if let Some(pane_focus) = frame.pane_focus {
                 match workspace {
                     Workspace::Devices => self.devices.pane_focus = pane_focus,
-                    Workspace::Backups => self.backups_pane_focus = pane_focus,
+                    Workspace::Backups => self.backups.pane_focus = pane_focus,
                     Workspace::Provision => self.provision.pane_focus = pane_focus,
                     Workspace::Inspect => {}
                 }
@@ -1876,9 +1851,9 @@ impl AppState {
                 return StateEffect::None;
             }
             if self.workspace == Workspace::Backups
-                && self.backups_pane_focus.focused() != crate::tui::pane::PaneId::BackupsList
+                && self.backups.pane_focus.focused() != crate::tui::pane::PaneId::BackupsList
             {
-                self.backups_pane_focus
+                self.backups.pane_focus
                     .focus(crate::tui::pane::PaneId::BackupsList);
                 return StateEffect::None;
             }
@@ -1887,8 +1862,8 @@ impl AppState {
                 self.input_mode = InputMode::Normal;
                 return StateEffect::None;
             }
-            if self.backup_delete.is_some() {
-                self.backup_delete = None;
+            if self.backups.delete.is_some() {
+                self.backups.delete = None;
                 self.input_mode = InputMode::Normal;
                 return StateEffect::None;
             }

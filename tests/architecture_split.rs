@@ -686,6 +686,55 @@ fn app_state_owns_devices_through_devices_substate() {
 }
 
 #[test]
+fn app_state_owns_backups_through_backups_substate() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let state = fs::read_to_string(root.join("src/tui/state.rs")).expect("read TUI state");
+    let backups =
+        fs::read_to_string(root.join("src/tui/backups/state.rs")).expect("read backups state");
+
+    let app_state = state
+        .split("pub struct AppState {")
+        .nth(1)
+        .and_then(|tail| tail.split("impl Default for AppState").next())
+        .expect("AppState section");
+    assert!(app_state.contains("backups: BackupsState"));
+    for legacy_field in [
+        "backups: Vec<crate::application::BackupWorkspaceItem>",
+        "backup_verify_run: Option<BackupVerifyRunState>",
+        "backup_table_view: super::table_layout::TableViewData",
+        "backup_scan_pending: bool",
+        "backup_delete: Option<BackupDeleteState>",
+        "backup_batch_delete: Option<BackupBatchDeleteState>",
+        "backup_selection: std::collections::BTreeSet<std::path::PathBuf>",
+        "backup_create_choice: Option<BackupCreateChoiceState>",
+        "backup_prune: Option<BackupPruneState>",
+        "backups_pane_focus: crate::tui::pane::PaneFocus",
+    ] {
+        assert!(
+            !app_state.contains(legacy_field),
+            "backup-owned field must live in BackupsState: {legacy_field}"
+        );
+    }
+    for owned_field in [
+        "rows: Vec<crate::application::BackupWorkspaceItem>",
+        "verify_run: Option<BackupVerifyRunState>",
+        "table_view: super::super::table_layout::TableViewData",
+        "scan_pending: bool",
+        "delete: Option<BackupDeleteState>",
+        "batch_delete: Option<BackupBatchDeleteState>",
+        "selection: std::collections::BTreeSet<std::path::PathBuf>",
+        "create_choice: Option<BackupCreateChoiceState>",
+        "prune: Option<BackupPruneState>",
+        "pane_focus: crate::tui::pane::PaneFocus",
+    ] {
+        assert!(
+            backups.contains(owned_field),
+            "BackupsState must own field: {owned_field}"
+        );
+    }
+}
+
+#[test]
 fn production_and_demo_share_one_tui_action_controller() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let controller = fs::read_to_string(root.join("src/tui/controller.rs"))
