@@ -2,7 +2,8 @@ use edpcli::{
     protocol::edpf::EdpPartitionType,
     provision::{
         CompatibilityFailure, Extent, FileKeyWrapMode, FilesystemProfile, KeyDomainRole,
-        PartitionRole, PhysicalCryptoProfile, RegionKeyProfile, RegionMappingKind,
+        MigrationTransform, PartitionRole, PhysicalCryptoProfile, RegionKeyProfile,
+        RegionMappingKind,
         RegionMappingPlanner, SourceRegion, TargetRegion,
     },
 };
@@ -137,6 +138,16 @@ fn mode0_to_mode1_marks_boot_and_share_as_migrate_but_encrypt_as_preserve() {
         .iter()
         .all(|mapping| mapping.kind == RegionMappingKind::MigrateUnsupported));
     assert_eq!(
+        combined
+            .iter()
+            .map(|mapping| (mapping.source_index, mapping.migration_transform))
+            .collect::<Vec<_>>(),
+        vec![
+            (Some(0), Some(MigrationTransform::BootToBootShareCombined)),
+            (Some(1), Some(MigrationTransform::ShareToBootShareCombined)),
+        ]
+    );
+    assert_eq!(
         plan.mappings
             .iter()
             .find(|mapping| mapping.target_index == Some(1))
@@ -169,6 +180,9 @@ fn mode2_encrypt_to_mode3_share_is_never_an_opaque_preserve() {
         .mappings
         .iter()
         .any(|mapping| mapping.kind == RegionMappingKind::MigrateUnsupported));
+    assert!(plan.mappings.iter().any(|mapping| {
+        mapping.migration_transform == Some(MigrationTransform::EncryptToShare)
+    }));
     assert!(!plan
         .mappings
         .iter()
