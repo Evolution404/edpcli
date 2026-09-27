@@ -12,7 +12,6 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use crate::common::{
     EdpCliError, EdpCliResult, EXIT_BACKUP, EXIT_INTERMEDIATE, EXIT_IO, EXIT_ROLLED_BACK, SECTOR,
 };
-use crate::sectors::looks_nopwd;
 use crate::sha256::sha256_hex;
 
 mod backup_catalog;

@@ -41,7 +41,7 @@ pub struct ProvisionProfile {
 impl ProvisionProfile {
     pub fn canonical_v1() -> Self {
         Self {
-            id: "jiangsu-safe6-nopwd",
+            id: "jiangsu-safe6-v1",
             version: 1,
             glab: "322CA28A-D7D1448B-DCE2CED9",
             autonum: "YD000001",

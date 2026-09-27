@@ -9,7 +9,7 @@ official x86 machine code.
 
 The experiment is intentionally stronger than checking the two flag bytes: it
 requires the official writer to reproduce all 512 bytes of the checked-in
-authentic no-password SanDisk LBA4 exactly.  The caller-owned backing is first
+authentic mode1 SanDisk LBA4 exactly.  The caller-owned backing is first
 converted to the writer's pre-rolling representation; the 0x2F restore node is
 the official reader view with only bDataToServer/bConnetServer set to their
 producer-side zero values.  HSerial and the non-mirrored second onlyid are kept
@@ -74,7 +74,7 @@ def parse_args() -> argparse.Namespace:
         "--image",
         type=Path,
         default=Path(
-            "audit/protocol/gold/authentic-nopwd/sandisk_ultra_20260823_lba0_12.bin"
+            "audit/protocol/gold/authentic-mode1/sandisk_ultra_20260823_lba0_12.bin"
         ),
     )
     parser.add_argument(

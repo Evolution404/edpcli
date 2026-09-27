@@ -1051,7 +1051,6 @@ mod tests {
             n_possible_baks: 0,
             denied: false,
             probe_error: None,
-            is_nopwd: false,
             provision_kind: crate::provision::DiskProvisionKind::Plain,
             partitions: None,
         };
@@ -1299,7 +1298,6 @@ mod tests {
                 n_possible_baks: 0,
                 denied: false,
                 probe_error: None,
-                is_nopwd: false,
                 provision_kind: crate::provision::DiskProvisionKind::Plain,
                 partitions: None,
             },
@@ -1324,7 +1322,6 @@ mod tests {
                 n_possible_baks: 2,
                 denied: false,
                 probe_error: None,
-                is_nopwd: true,
                 provision_kind: crate::provision::DiskProvisionKind::Mode0,
                 partitions: Some(parts),
             },
@@ -1349,7 +1346,6 @@ mod tests {
                 n_possible_baks: 0,
                 denied: false,
                 probe_error: None,
-                is_nopwd: false,
                 provision_kind: crate::provision::DiskProvisionKind::Plain,
                 partitions: None,
             },
@@ -1430,28 +1426,19 @@ mod tests {
         );
         assert!(m.contains("disk4") && m.contains("64.00GB") && m.contains("0951:1666"));
 
-        let b = backup_menu_str(&[
-            ("2026-09-16 23:36".into(), true),
-            ("2026-08-27 22:25".into(), false),
-        ]);
-        assert!(
-            b.contains("编号") && b.contains("时间") && b.contains("状态"),
-            "{}",
-            b
-        );
+        let b = backup_menu_str(&["2026-09-16 23:36".into(), "2026-08-27 22:25".into()]);
+        assert!(b.contains("编号") && b.contains("时间"), "{}", b);
         assert!(
             b.lines()
                 .any(|line| line.contains("1") && line.contains("2026-09-16 23:36")),
             "{}",
             b
         );
-        assert!(b.contains("免密状态"));
         assert!(
             b.lines()
                 .any(|line| line.contains("2") && line.contains("2026-08-27 22:25")),
             "{}",
             b
         );
-        assert!(b.contains("加密原盘"));
     }
 }

@@ -104,9 +104,8 @@ fn scan_and_print_all_row_kinds() {
         out
     );
     assert!(out.contains("disk7") && out.contains("非 USB"), "{}", out);
-    // 原盘数据: 非免密 + EDPF 3 条(含 Boot/Share/Encrypt)
+    // 原盘数据: 非mode1 + EDPF 3 条(含 Boot/Share/Encrypt)
     let row6 = rows.iter().find(|r| r.disk == 6).unwrap();
-    assert!(!row6.is_nopwd);
     assert_eq!(row6.user.as_deref(), Some("宋旭琳"));
     assert_eq!(row6.label.as_deref(), Some("江苏电力!SAFE6"));
     assert_eq!(row6.force_change_password, Some(true));
@@ -132,8 +131,8 @@ fn scan_and_print_all_row_kinds() {
         "list 同一次设备扫描不应重复读取 LBA12"
     );
 
-    // 旧免密盘镜像应统一显示官方模式1盘型。
-    let (conv, _) = passwordless_image("netac").unwrap();
+    // 旧mode1 盘镜像应统一显示官方模式1盘型。
+    let (conv, _) = mode1_fixture_image("netac").unwrap();
     let converted_read_calls = std::cell::RefCell::new(Vec::<(u32, u32)>::new());
     let read_conv = |disk: u32, lba: u32| -> std::io::Result<Vec<u8>> {
         converted_read_calls.borrow_mut().push((disk, lba));
@@ -143,7 +142,6 @@ fn scan_and_print_all_row_kinds() {
     let out2 = print_disk_table(&rows2);
     assert!(out2.contains("mode1 · 二合一"), "{}", out2);
     let row6b = rows2.iter().find(|r| r.disk == 6).unwrap();
-    assert!(row6b.is_nopwd);
     assert_eq!(row6b.label.as_deref(), Some("江苏电力!SAFE6"));
     assert_eq!(row6b.force_change_password, Some(true));
     assert_eq!(row6b.partitions.as_ref().unwrap().len(), 2);
@@ -154,7 +152,7 @@ fn scan_and_print_all_row_kinds() {
             .filter(|&&(disk, lba)| disk == 6 && lba == 12)
             .count(),
         1,
-        "免密盘 list 扫描也不应为状态判断和分区展示重复读取 LBA12"
+        "mode1 盘 list 扫描也不应为状态判断和分区展示重复读取 LBA12"
     );
 
     // 读盘全被拒（权限不足）→ denied 降级行

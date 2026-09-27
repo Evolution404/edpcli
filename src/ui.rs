@@ -91,10 +91,6 @@ pub fn render_write_event(event: &crate::application::WriteEvent) -> String {
 
     match event {
         WriteEvent::BackupCreated { path } => format!("{}  {}\n", green("备份"), path.display()),
-        WriteEvent::BackupCreatedIsNopwd => format!(
-            "{}\n",
-            yellow("注意: 本份备份为【免密状态】快照 — 还原它不会回到加密原盘。")
-        ),
         WriteEvent::RestoreMatchesHeader {
             disk,
             onlyid,
@@ -103,31 +99,16 @@ pub fn render_write_event(event: &crate::application::WriteEvent) -> String {
         WriteEvent::RestoreMatchRow {
             index,
             time,
-            is_nopwd,
             file_name,
-        } => format!(
-            "  [{}] {}   {}   {}\n",
-            index,
-            time,
-            if *is_nopwd {
-                "免密状态"
-            } else {
-                "加密原盘"
-            },
-            file_name
-        ),
+        } => format!("  [{}] {}   {}\n", index, time, file_name),
         WriteEvent::RestoreSelectionRetry { message } => format!("{}\n", yellow(message)),
         WriteEvent::BackupShaVerified { digest } => {
             format!("{}  {}\n", green("SHA-256 校验通过"), digest)
         }
-        WriteEvent::RestoreSnapshotNopwdWarning => format!(
-            "{}\n",
-            yellow("注意: 该备份为【免密状态】快照 — 还原后仍是免密盘, 不会回到加密原盘。")
-        ),
         WriteEvent::RestoreDryRunNotice { path, disk } => format!(
             "{}\n",
             dim(&format!(
-                "[dry-run] 将还原 {} → disk{} LBA0-12 ({}B) — 未写入(免密快照不作还原)。",
+                "[dry-run] 将还原 {} → disk{} LBA0-12 ({}B) — 未写入。",
                 path.display(),
                 disk,
                 crate::common::METADATA_IMAGE_LEN
@@ -355,31 +336,19 @@ pub fn truncate_mid(s: &str, max: usize) -> String {
 }
 
 // CLI table renderers retained as presentation-only helpers. Application services never depend on CLI routing.
-/// restore 选单条目(时间已格式化 + 是否免密快照)。
-pub fn backup_menu_str(entries: &[(String, bool)]) -> String {
+/// restore 选单条目。
+pub fn backup_menu_str(entries: &[String]) -> String {
     let rows = entries
         .iter()
         .enumerate()
-        .map(|(i, (time, is_nopwd))| {
+        .map(|(i, time)| {
             vec![
                 crate::ui::TableCell::right((i + 1).to_string(), crate::ui::Tone::BoldCyan),
                 crate::ui::TableCell::left(time.clone(), crate::ui::Tone::Plain),
-                crate::ui::TableCell::left(
-                    if *is_nopwd {
-                        "免密状态"
-                    } else {
-                        "加密原盘"
-                    },
-                    if *is_nopwd {
-                        crate::ui::Tone::Green
-                    } else {
-                        crate::ui::Tone::Plain
-                    },
-                ),
             ]
         })
         .collect::<Vec<_>>();
-    crate::ui::render_table(&["编号", "时间", "状态"], &rows)
+    crate::ui::render_table(&["编号", "时间"], &rows)
 }
 
 /// 多 USB 盘选单。

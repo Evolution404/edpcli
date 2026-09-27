@@ -1,4 +1,4 @@
-//! 备份/还原体系测试: 历史命名解析、按盘匹配(LBA4 终验)、备份落盘、免密打标。
+//! 备份/还原体系测试：命名解析、按盘匹配、备份落盘与保留策略。
 //! 全部纯文件系统操作 + 注入 DiskFacts/FixedClock, 不碰真盘。
 
 use crate::common;
@@ -73,7 +73,6 @@ fn write_backup(dir: &std::path::Path, name: &str, data: &[u8]) -> std::path::Pa
     let p = dir.join(name);
     let meta = parse_backup_name(name).expect("测试 EDPB 文件名必须可解析");
     let onlyid = edpcli::diskio::lba4_label_id_from(&data[4 * SECTOR..5 * SECTOR]);
-    let is_nopwd = edpcli::diskio::image_is_nopwd(data, &meta.device_id);
     let capture = CoreCapture {
         snapshot_id: format!("test-{name}"),
         created_epoch: 1_789_000_000,
@@ -85,11 +84,7 @@ fn write_backup(dir: &std::path::Path, name: &str, data: &[u8]) -> std::path::Pa
         total_sectors: meta.secs,
         logical_sector_size: SECTOR as u32,
         edpcli_version: env!("CARGO_PKG_VERSION").into(),
-        device_state: if is_nopwd {
-            "passwordless".into()
-        } else {
-            "encrypted".into()
-        },
+        device_state: "edp".into(),
         lba0_12: data,
     };
     edpb::write_core_backup(&p, &capture).unwrap();
@@ -157,7 +152,7 @@ fn backup_written_as_single_edpb_with_internal_hashes_and_onlyid() {
         return;
     };
     let tmp = TmpDir::new("backup");
-    let (path, is_nopwd) = create_backup(
+    let path = create_backup(
         &netac_facts(),
         &data,
         "disk&ven_netac&prod_onlydisk",
@@ -167,8 +162,7 @@ fn backup_written_as_single_edpb_with_internal_hashes_and_onlyid() {
     .unwrap();
     let name = path.file_name().unwrap().to_string_lossy().into_owned();
     assert!(name.contains("_onlyid1402259934_"), "{}", name);
-    assert!(!is_nopwd); // 原盘备份不打 _nopwd
-    assert!(!name.contains("_nopwd"), "{}", name);
+    assert!(!name.contains("_mode1"), "{}", name);
     assert_eq!(edpb::read_raw_protocol(&path).unwrap(), data); // LBA0-12 全量
     let verified = edpb::verify_file(&path).unwrap();
     assert_eq!(
@@ -214,7 +208,7 @@ fn backup_filename_onlyid_is_derived_from_lba4_content() {
     let tmp = TmpDir::new("backup_content_onlyid");
     let mut facts = netac_facts();
     facts.label_id = Some("999999999".into());
-    let (path, _) = create_backup(
+    let path = create_backup(
         &facts,
         &data,
         "disk&ven_netac&prod_onlydisk",
@@ -317,7 +311,7 @@ fn creating_new_backup_does_not_rename_existing_history() {
     let legacy_sha256 = std::path::PathBuf::from(format!("{}.sha256", legacy.display()));
     fs::write(&legacy_sha256, format!("{}\n", sha256(&data))).unwrap();
 
-    let (new_path, _) = create_backup(
+    let new_path = create_backup(
         &netac_facts(),
         &data,
         "disk&ven_netac&prod_onlydisk",
@@ -342,7 +336,7 @@ fn backup_collision_never_overwrites_existing_file() {
         return;
     };
     let tmp = TmpDir::new("backup_collision");
-    let (path, _) = create_backup(
+    let path = create_backup(
         &netac_facts(),
         &original,
         "disk&ven_netac&prod_onlydisk",
@@ -371,81 +365,6 @@ fn backup_collision_never_overwrites_existing_file() {
     );
     assert_eq!(fs::read(&path).unwrap(), first, "同名备份绝不能被静默覆盖");
     assert!(edpb::verify_file(&path).is_ok());
-}
-
-#[test]
-fn backup_tagging_by_content() {
-    let Some((conv, did)) = passwordless_image("netac") else {
-        eprintln!("跳过: 真实备份不可用");
-        return;
-    };
-    let tmp = TmpDir::new("tagging");
-    // 免密状态镜像 → 文件名含 _nopwd + 返回标记
-    let (path, is_nopwd) = create_backup(&netac_facts(), &conv, &did, &tmp.0, &FixedClock).unwrap();
-    let name = path.file_name().unwrap().to_string_lossy().into_owned();
-    assert!(name.contains("_nopwd"), "{}", name);
-    assert!(is_nopwd);
-    let raw = edpb::read_raw_protocol(&path).unwrap();
-    assert!(edpcli::diskio::image_is_nopwd(&raw, &did));
-    assert!(!edpcli::diskio::image_is_nopwd(
-        &raw,
-        "disk&ven_bogus&prod_x"
-    ));
-}
-
-#[test]
-fn parse_backup_name_modern_nopwd_legacy_and_invalid() {
-    let modern = parse_backup_name(
-        "disk26_245760000_vid3535_pid6300_disk&ven_aigo&prod_u335&rev_pmap_onlyid1987718388_20260917_224100.edpb",
-    )
-    .unwrap();
-    assert_eq!(
-        modern,
-        BackupMeta {
-            disk: 26,
-            secs: Some(245760000),
-            vid: "3535".into(),
-            pid: "6300".into(),
-            device_id: "disk&ven_aigo&prod_u335&rev_pmap".into(),
-            onlyid: Some("1987718388".into()),
-            tagged_nopwd: false,
-            identity: None,
-        }
-    );
-
-    let nopwd = parse_backup_name(
-        "disk6_unknown_vid0dd8_pid2005_disk&ven_netac&prod_onlydisk_onlyid-1402259934_nopwd_20260910_172433.edpb",
-    )
-    .unwrap();
-    assert_eq!(nopwd.secs, None);
-    assert_eq!(nopwd.onlyid.as_deref(), Some("-1402259934"));
-    assert!(nopwd.tagged_nopwd);
-
-    // 无 onlyid 的历史命名仍可解析；scan 只在内存中从 LBA4 补齐。
-    let legacy = parse_backup_name(
-        "disk4_61440000_vid3535_pid6300_disk&ven_aigo&prod_u320_20260827_172228.edpb",
-    )
-    .unwrap();
-    assert_eq!(legacy.onlyid, None);
-    assert_eq!(legacy.device_id, "disk&ven_aigo&prod_u320");
-
-    let lid = parse_backup_name(
-        "disk6_122880000_vid0dd8_pid2005_disk&ven_netac&prod_onlydisk_lid1402259934_20250101_000000.edpb",
-    )
-    .unwrap();
-    assert_eq!(lid.onlyid.as_deref(), Some("1402259934"));
-    assert_eq!(lid.device_id, "disk&ven_netac&prod_onlydisk");
-
-    for bad in [
-        "other.edpb",
-        "diskx_61440000_vid3535_pid6300_disk&ven_aigo&prod_u320_20260827_172228.edpb",
-        "disk4_bad_vid3535_pid6300_disk&ven_aigo&prod_u320_20260827_172228.edpb",
-        "disk4_61440000_vidzzzz_pid6300_disk&ven_aigo&prod_u320_20260827_172228.edpb",
-        "disk4_61440000_vid3535_pid6300_not-a-device_20260827_172228.edpb",
-        "disk4_61440000_vid3535_pid6300_disk&ven_aigo&prod_u320_badtime.edpb",
-    ] {
-        assert!(parse_backup_name(bad).is_none(), "应拒绝: {bad}");
-    }
 }
 
 #[test]
@@ -490,7 +409,6 @@ fn scan_backup_dir_reports_edpb_integrity_and_ignores_legacy_bin() {
     let ok_e = by_path(&ok);
     assert_eq!(ok_e.integrity_status, BackupIntegrityStatus::Verified);
     assert!(ok_e.size_ok);
-    assert!(!ok_e.is_nopwd);
     assert!(ok_e.meta.is_some());
 
     let damaged_e = by_path(&damaged);
@@ -628,7 +546,7 @@ fn grouped_identity(onlyid: &str) -> MediaIdentitySnapshot {
     }
 }
 
-fn fake_entry(name: &str, onlyid: &str, mtime: i64, is_nopwd: bool) -> BackupEntry {
+fn fake_entry(name: &str, onlyid: &str, mtime: i64) -> BackupEntry {
     BackupEntry {
         meta: Some(BackupMeta {
             disk: 6,
@@ -637,12 +555,10 @@ fn fake_entry(name: &str, onlyid: &str, mtime: i64, is_nopwd: bool) -> BackupEnt
             pid: "2005".into(),
             device_id: "disk&ven_netac&prod_onlydisk".into(),
             onlyid: Some(onlyid.into()),
-            tagged_nopwd: is_nopwd,
             identity: Some(grouped_identity(onlyid)),
         }),
         path: std::path::PathBuf::from(name),
         mtime,
-        is_nopwd,
         provision_kind: edpcli::provision::DiskProvisionKind::Plain,
         integrity_status: BackupIntegrityStatus::Verified,
         size_ok: true,
@@ -653,34 +569,33 @@ fn fake_entry(name: &str, onlyid: &str, mtime: i64, is_nopwd: bool) -> BackupEnt
 }
 
 #[test]
-fn prune_policy_keeps_originals_latest_snapshots_and_last_backup() {
+fn prune_policy_keeps_latest_backups_and_last_backup() {
     let entries = vec![
-        fake_entry("a-original.edpb", "A", 1, false),
-        fake_entry("a-n1.edpb", "A", 10, true),
-        fake_entry("a-n2.edpb", "A", 20, true),
-        fake_entry("a-n3.edpb", "A", 30, true),
-        fake_entry("b-n1.edpb", "B", 10, true),
-        fake_entry("b-n2.edpb", "B", 20, true),
-        fake_entry("b-n3.edpb", "B", 30, true),
+        fake_entry("a-original.edpb", "A", 1),
+        fake_entry("a-n1.edpb", "A", 10),
+        fake_entry("a-n2.edpb", "A", 20),
+        fake_entry("a-n3.edpb", "A", 30),
+        fake_entry("b-n1.edpb", "B", 10),
+        fake_entry("b-n2.edpb", "B", 20),
+        fake_entry("b-n3.edpb", "B", 30),
     ];
 
     let keep2: Vec<String> = prune_candidates(&entries, 2)
         .into_iter()
         .map(|p| p.to_string_lossy().into_owned())
         .collect();
-    assert_eq!(keep2, vec!["a-n1.edpb", "b-n1.edpb"]);
+    assert_eq!(keep2, vec!["a-original.edpb", "a-n1.edpb", "b-n1.edpb"]);
 
     let keep0: Vec<String> = prune_candidates(&entries, 0)
         .into_iter()
         .map(|p| p.to_string_lossy().into_owned())
         .collect();
-    // A 有原盘，可清光免密快照；B 没原盘，最老两份可删但最新一份强制保留。
     assert_eq!(
         keep0,
         vec![
+            "a-original.edpb",
             "a-n1.edpb",
             "a-n2.edpb",
-            "a-n3.edpb",
             "b-n1.edpb",
             "b-n2.edpb"
         ]
@@ -691,22 +606,19 @@ fn prune_policy_keeps_originals_latest_snapshots_and_last_backup() {
 fn prune_uses_backup_name_time_before_filesystem_mtime() {
     let entries = vec![
         fake_entry(
-            "disk6_122880000_vid0dd8_pid2005_disk&ven_netac&prod_onlydisk_onlyidA_nopwd_20260910_120000.edpb",
+            "disk6_122880000_vid0dd8_pid2005_disk&ven_netac&prod_onlydisk_onlyidA_20260910_120000.edpb",
             "A",
             300,
-            true,
         ),
         fake_entry(
-            "disk6_122880000_vid0dd8_pid2005_disk&ven_netac&prod_onlydisk_onlyidA_nopwd_20260911_120000.edpb",
+            "disk6_122880000_vid0dd8_pid2005_disk&ven_netac&prod_onlydisk_onlyidA_20260911_120000.edpb",
             "A",
             200,
-            true,
         ),
         fake_entry(
-            "disk6_122880000_vid0dd8_pid2005_disk&ven_netac&prod_onlydisk_onlyidA_nopwd_20260912_120000.edpb",
+            "disk6_122880000_vid0dd8_pid2005_disk&ven_netac&prod_onlydisk_onlyidA_20260912_120000.edpb",
             "A",
             100,
-            true,
         ),
     ];
 
@@ -725,7 +637,7 @@ fn verify_and_prune_preview_exit_contract() {
         eprintln!("跳过: 真实备份不可用");
         return;
     };
-    let Some((converted, _)) = passwordless_image("netac") else {
+    let Some((mode1, _)) = mode1_fixture_image("netac") else {
         eprintln!("跳过: 真实备份不可用");
         return;
     };
@@ -737,12 +649,12 @@ fn verify_and_prune_preview_exit_contract() {
     );
     for (i, ts) in ["170001", "170002", "170003"].iter().enumerate() {
         let name = format!(
-            "disk6_122880000_vid0dd8_pid2005_disk&ven_netac&prod_onlydisk_onlyid1402259934_nopwd_20260910_{ts}.edpb"
+            "disk6_122880000_vid0dd8_pid2005_disk&ven_netac&prod_onlydisk_onlyid1402259934_20260910_{ts}.edpb"
         );
-        let p = write_backup(&tmp.0, &name, &converted);
+        let p = write_backup(&tmp.0, &name, &mode1);
         // 在不引入 filetime 依赖的前提下，文件名只用于断言预览不删除；策略本身的 mtime
         // 排序由上面的纯函数用例覆盖。
-        assert!(p.exists(), "snapshot {i}");
+        assert!(p.exists(), "mode1 backup {i}");
     }
 
     assert_eq!(backup_verify(&tmp.0, None), 0);
@@ -1050,56 +962,4 @@ fn batch_delete_plan_pins_each_path_and_sha_before_execution() {
     assert!(!first.exists());
     assert!(!second.exists());
     assert!(keep.exists(), "批量删除仍必须保留同盘至少一份备份");
-}
-
-#[test]
-fn prune_plan_composition_deletes_only_snapshots_beyond_keep() {
-    let Some(original) = load_disk_image("netac") else {
-        eprintln!("跳过: 真实备份不可用");
-        return;
-    };
-    let Some((converted, _)) = passwordless_image("netac") else {
-        eprintln!("跳过: 真实备份不可用");
-        return;
-    };
-    let tmp = TmpDir::new("prune_service");
-    write_backup(&tmp.0, SHARED_GROUP_A, &original);
-    for ts in ["170001", "170002", "170003"] {
-        let name = format!(
-            "disk6_122880000_vid0dd8_pid2005_disk&ven_netac&prod_onlydisk_onlyid1402259934_nopwd_20260910_{ts}.edpb"
-        );
-        write_backup(&tmp.0, &name, &converted);
-    }
-
-    let session = edpcli::application::backup::DeleteSession::open(&tmp.0);
-    let plan = session.plan_prune(0).expect("原盘在场, keep=0 可清光快照");
-    assert_eq!(plan.targets.len(), 3);
-    let stats = plan.prune_stats.as_ref().expect("plan_prune 携带统计");
-    assert_eq!(stats.originals, 1);
-    assert_eq!(stats.retained_snapshots, 0);
-    for (_, result) in session.execute(&plan) {
-        assert_eq!(result, Ok(()), "逐条执行不得阻断后续");
-    }
-    assert!(tmp.0.join(SHARED_GROUP_A).exists(), "加密原盘永不自动删除");
-    for ts in ["170001", "170002", "170003"] {
-        assert!(!tmp
-            .0
-            .join(format!(
-                "disk6_122880000_vid0dd8_pid2005_disk&ven_netac&prod_onlydisk_onlyid1402259934_nopwd_20260910_{ts}.edpb"
-            ))
-            .exists());
-    }
-
-    // 无原盘的组即使 keep=0 也强制保留最新一份(prune_candidates 的 keep.max(1))。
-    let lone = TmpDir::new("prune_service_lone");
-    write_backup(
-        &lone.0,
-        "disk6_122880000_vid0dd8_pid2005_disk&ven_netac&prod_onlydisk_onlyid9999999999_nopwd_20260910_170000.edpb",
-        &converted,
-    );
-    let session = edpcli::application::backup::DeleteSession::open(&lone.0);
-    let plan = session
-        .plan_prune(0)
-        .expect("无原盘组强制保留, 不触发底线拒绝");
-    assert!(plan.targets.is_empty());
 }

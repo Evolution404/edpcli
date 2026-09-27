@@ -32,7 +32,6 @@ pub enum WriteEvent {
     BackupCreated {
         path: PathBuf,
     },
-    BackupCreatedIsNopwd,
     RestoreMatchesHeader {
         disk: u32,
         onlyid: String,
@@ -41,7 +40,6 @@ pub enum WriteEvent {
     RestoreMatchRow {
         index: usize,
         time: String,
-        is_nopwd: bool,
         file_name: String,
     },
     RestoreSelectionRetry {
@@ -50,7 +48,6 @@ pub enum WriteEvent {
     BackupShaVerified {
         digest: String,
     },
-    RestoreSnapshotNopwdWarning,
     RestoreDryRunNotice {
         path: PathBuf,
         disk: u32,
@@ -64,7 +61,6 @@ pub enum WriteEvent {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BackupReport {
     pub path: PathBuf,
-    pub is_nopwd: bool,
 }
 
 pub struct Ctx<'a> {
@@ -347,7 +343,7 @@ pub fn backup_create_level_flow(
         .total_sectors
         .ok_or_else(|| err(EXIT_BACKUP, "错误: 无法获取磁盘总扇区数，无法创建备份"))?;
 
-    let (path, is_nopwd) = if let Some(device_id) = identity.protocol.device_id.clone() {
+    let path = if let Some(device_id) = identity.protocol.device_id.clone() {
         if identity.protocol.provision_kind.is_none() {
             return Err(err(
                 EXIT_BACKUP,
@@ -446,13 +442,10 @@ pub fn backup_create_level_flow(
             ctx.clock,
         )?
     };
-    let report = BackupReport { path, is_nopwd };
+    let report = BackupReport { path };
     ctx.prompt.write_event(WriteEvent::BackupCreated {
         path: report.path.clone(),
     });
-    if report.is_nopwd {
-        ctx.prompt.write_event(WriteEvent::BackupCreatedIsNopwd);
-    }
     Ok(report)
 }
 
@@ -549,7 +542,6 @@ pub fn restore_flow(
                 ctx.prompt.write_event(WriteEvent::RestoreMatchRow {
                     index: *index,
                     time: diskio::backup_display_time(&entry.path, entry.mtime),
-                    is_nopwd: entry.is_nopwd,
                     file_name: entry
                         .path
                         .file_name()
@@ -693,18 +685,6 @@ pub fn restore_flow(
     } else {
         None
     };
-    let tagged_nopwd = verified.manifest.snapshot.device_state == "passwordless";
-    let nopwd_snap =
-        tagged_nopwd || diskio::image_is_nopwd(&data, &verified.manifest.device.device_id);
-    if nopwd_snap {
-        ctx.prompt
-            .write_event(WriteEvent::RestoreSnapshotNopwdWarning);
-        ctx.prompt.write_event(WriteEvent::RestoreDryRunNotice {
-            path: path.clone(),
-            disk,
-        });
-        return Ok(EXIT_OK);
-    }
     ctx.prompt
         .write_event(WriteEvent::RestoreTargetHeader { path: path.clone() });
     let restore_scope = if restorable_lce.is_some() {

@@ -689,7 +689,9 @@ mod tests {
         let mut hub = TaskHub::new();
         let operation_id = hub.begin_operation().unwrap();
         for event in [
-            crate::application::WriteEvent::BackupCreatedIsNopwd,
+            crate::application::WriteEvent::BackupCreated {
+                path: std::path::PathBuf::from("a.edpb"),
+            },
             crate::application::WriteEvent::RestoreWriteCompleted,
         ] {
             hub.tx
@@ -703,7 +705,7 @@ mod tests {
         assert_eq!(updates.write_progress.len(), 2);
         assert!(matches!(
             updates.write_progress[0].1,
-            crate::application::WriteEvent::BackupCreatedIsNopwd
+            crate::application::WriteEvent::BackupCreated { .. }
         ));
         assert!(matches!(
             updates.write_progress[1].1,

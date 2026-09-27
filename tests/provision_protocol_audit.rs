@@ -47,7 +47,7 @@ const NETAC_EESI_META: &str = include_str!(
 const NETAC_EESI_PROVENANCE: &str =
     include_str!("../audit/protocol/physical-evidence/eesi/README.md");
 const SANDISK_AUTHENTIC_NOPASS_LBA7_HEX: &str =
-    include_str!("fixtures/protocol_evidence/sandisk_ultra_authentic_no_password_lba7.hex");
+    include_str!("fixtures/protocol_evidence/sandisk_ultra_authentic_mode1_lba7.hex");
 const SANDISK_AUTHENTIC_NOPASS_DEVICE_ID: &str = "disk&ven_sandisk&prod_ultra&rev_1.00";
 const LEXAR_JOIN59_LBA6_HEX: &str =
     include_str!("fixtures/protocol_evidence/lexar_join59_lba6.hex");
@@ -80,9 +80,6 @@ const AIGO_L8302_NETAC_LBA0_PREFIX_HEX: &str =
 
 fn parse_reference_backup_name(name: &str) -> Option<BackupMeta> {
     let meta = gold_name::parse_gold_name(name)?;
-    if meta.tagged_nopwd {
-        return None;
-    }
     Some(meta)
 }
 
@@ -384,7 +381,7 @@ const LEXAR: &str =
     "disk4_243625984_vid21c4_pid0cd1_disk&ven_lexar&prod_usb_flash_drive_onlyid3164177653_20260827_221910.bin";
 
 #[test]
-fn authentic_no_password_lba7_is_a_real_two_entry_profile_not_a_generated_reference() {
+fn authentic_mode1_lba7_is_a_real_two_entry_profile_not_a_generated_reference() {
     let raw = decode_hex_fixture(SANDISK_AUTHENTIC_NOPASS_LBA7_HEX);
     assert_eq!(raw.len(), SECTOR);
 
@@ -493,10 +490,10 @@ fn lba7_need_disturb_is_not_a_partition_type_invariant() {
 
     let raw = decode_hex_fixture(SANDISK_AUTHENTIC_NOPASS_LBA7_HEX);
     let crc = crc32_bare(SANDISK_AUTHENTIC_NOPASS_DEVICE_ID.as_bytes());
-    let no_password_lba7 = xor_rolling(&raw, (crc & 0xffff) ^ (crc >> 16));
-    assert_eq!(u32_le(&no_password_lba7, 0x40 + 0x0c), 4);
+    let mode1_lba7 = xor_rolling(&raw, (crc & 0xffff) ^ (crc >> 16));
+    assert_eq!(u32_le(&mode1_lba7, 0x40 + 0x0c), 4);
     assert_eq!(
-        u32_le(&no_password_lba7, 0x40 + 0x10),
+        u32_le(&mode1_lba7, 0x40 + 0x10),
         1,
         "authentic two-entry type4 profile must remain positive"
     );
@@ -1692,8 +1689,7 @@ fn lba4_strict_progress_matches_non_overlapping_detail_ranges() {
 
 #[test]
 fn lba0_bootstrap_body_closes_all_three_profile_invariant_zero_bytes() {
-    const LEGACY: &str =
-        "disk26_245760000_vid3535_pid6300_disk&ven_aigo&prod_u335&rev_pmap_onlyid1987718388_nopwd_20260916_233626.bin";
+    const LEGACY: &str = "mode1/aigo_u335_20260916_lba0_12.bin";
     const ISOLATED_INVARIANT_ZERO: [usize; 9] = [
         0x0e1, 0x0e8, 0x101, 0x103, 0x10b, 0x10d, 0x124, 0x143, 0x162,
     ];
@@ -2447,29 +2443,28 @@ fn lba4_nonzero_bdatatoserver_reader_profile_is_the_high_entropy_zero_lba9_gener
 }
 
 #[test]
-fn lba4_old_server_flag_profile_survives_nopwd_conversion_bit_exact() {
+fn lba4_old_server_flag_profile_survives_mode1_reprovision_bit_exact() {
     const ORIGINAL: &str =
         "disk4_245760000_vid3535_pid6300_disk&ven_aigo&prod_u335&rev_pmap_onlyid1987718388_20260827_191701.bin";
-    const NOPWD: &str =
-        "disk26_245760000_vid3535_pid6300_disk&ven_aigo&prod_u335&rev_pmap_onlyid1987718388_nopwd_20260916_233626.bin";
+    const MODE1: &str = "mode1/aigo_u335_20260916_lba0_12.bin";
 
     let original = load(ORIGINAL);
-    let nopwd = load(NOPWD);
+    let mode1 = load(MODE1);
 
     assert_eq!(
         sector(&original, 4),
-        sector(&nopwd, 4),
-        "no-password conversion must preserve the old LBA4 restore node bit-for-bit"
+        sector(&mode1, 4),
+        "mode1 reprovision must preserve the old LBA4 restore node bit-for-bit"
     );
     assert_ne!(
         sector(&original, 0),
-        sector(&nopwd, 0),
-        "fixtures must remain distinct pre/post-conversion captures"
+        sector(&mode1, 0),
+        "fixtures must remain distinct source/mode1 captures"
     );
     assert_ne!(
         sector(&original, 12),
-        sector(&nopwd, 12),
-        "the no-password conversion must still show its expected metadata rewrite elsewhere"
+        sector(&mode1, 12),
+        "the mode1 reprovision must still show its expected metadata rewrite elsewhere"
     );
 }
 

@@ -160,11 +160,11 @@ fn new_plain_manifest_never_promotes_legacy_candidate_to_observed_device_id() {
 }
 
 #[test]
-fn v1_encrypted_and_passwordless_backups_remain_readable() {
+fn v1_encrypted_and_mode1_backups_remain_readable() {
     let tmp = TempDir::new("edpb_v1_edp");
     let data = vec![0x39; 13 * 512];
 
-    for state in ["encrypted", "passwordless"] {
+    for state in ["encrypted", "mode1"] {
         let path = tmp.0.join(format!("{state}.edpb"));
         let mut legacy = capture(&data);
         legacy.device_state = state.into();

@@ -1,4 +1,4 @@
-//! 测试公用: 真实协议夹具定位、金标(与 Python 版逐字一致)、临时目录、免密盘镜像合成。
+//! 测试公用: 真实协议夹具定位、金标(与 Python 版逐字一致)、临时目录、mode1 盘镜像合成。
 //! 每个集成测试文件各自引入本模块, 未被该文件用到的项不算死代码。
 #![allow(dead_code)]
 
@@ -65,9 +65,9 @@ pub fn read_fn_of(
     move |lba| Ok(data[lba as usize * SECTOR..(lba as usize + 1) * SECTOR].to_vec())
 }
 
-/// 用当前正式 provisioning builder 合成一张结构完整的 mode1 免密元数据镜像。
-/// 这类样本供识别/备份测试使用，不再依赖已废弃的离线转换业务。
-pub fn passwordless_image(key: &str) -> Option<(Vec<u8>, String)> {
+/// 用当前正式 provisioning builder 合成一张结构完整的 mode1 元数据镜像。
+/// 这类样本供 mode1 协议识别、备份与恢复测试使用。
+pub fn mode1_fixture_image(key: &str) -> Option<(Vec<u8>, String)> {
     let (vid, pid, total_sectors, transport, vendor, product, revision, onlyid) = match key {
         "netac" => (
             0x0dd8,

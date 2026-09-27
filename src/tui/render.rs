@@ -277,7 +277,7 @@ fn draw_command_palette(frame: &mut Frame, area: ratatui::layout::Rect, state: &
     let commands = [
         "devices  切到设备",
         "backups  切到备份",
-        "provision 制盘/免密改造",
+        "provision 制盘",
         "inspect  全盘结构树 / Sector Inspector",
         "restore  Restore 安全向导",
         "backup-create  备份当前设备",

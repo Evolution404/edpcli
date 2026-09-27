@@ -7,7 +7,7 @@ use std::collections::BTreeMap;
 use std::io;
 use std::path::Path;
 
-use crate::common::{fmt_gb, group_digits, EdpCliError, EXIT_IO, SECTOR};
+use crate::common::{fmt_gb, group_digits, SECTOR};
 use crate::diskio::{self, find_backups};
 use crate::identify::identify;
 use crate::metainfo;
@@ -15,7 +15,7 @@ use crate::protocol::semantic::SemanticContext;
 use crate::provision::{
     DiskProvisionKind, ExistingPartition, ExistingProvisionProfile, PartitionRole,
 };
-use crate::sectors::{looks_nopwd, parse_lba12, EdpfPartition};
+use crate::sectors::{parse_lba12, EdpfPartition};
 use crate::sysinfo::{self, CmdRunner};
 
 pub struct Row {
@@ -41,7 +41,6 @@ pub struct Row {
     pub n_possible_baks: usize,
     pub denied: bool,
     pub probe_error: Option<String>,
-    pub is_nopwd: bool,
     pub provision_kind: DiskProvisionKind,
     pub partitions: Option<Vec<EdpfPartition>>,
 }
@@ -95,7 +94,7 @@ impl Row {
     }
 }
 
-/// 外接盘一览数据: 编号/容量/接口; USB 盘再尽力识别 cems 身份、免密状态、
+/// 外接盘一览数据: 编号/容量/接口; USB 盘再尽力识别 cems 身份、
 /// EDPF 分区与备份份数。权限不足和读取异常分开记录。
 pub fn scan_disks(
     runner: &dyn CmdRunner,
@@ -125,7 +124,6 @@ pub fn scan_disks(
             n_possible_baks: 0,
             denied: false,
             probe_error: None,
-            is_nopwd: false,
             provision_kind: DiskProvisionKind::Plain,
             partitions: None,
         };
@@ -172,11 +170,6 @@ pub fn scan_disks(
                             row.label = ownership.label;
                         }
                     }
-                    let read = |lba: u32| {
-                        read_exact(lba)
-                            .map_err(|e| EdpCliError::new(EXIT_IO, format!("错误: {}", e)))
-                    };
-                    row.is_nopwd = looks_nopwd(&read, did).map_err(|e| io::Error::other(e.msg))?;
                     let lba12 = read_exact(12)?;
                     row.provision_kind = DiskProvisionKind::from_sectors(&lba7, &lba12, did);
                     row.partitions = parse_lba12(&lba12, did);

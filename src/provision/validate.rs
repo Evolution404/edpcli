@@ -9,7 +9,6 @@ use crate::protocol::{
     lba4,
     semantic::{self, SemanticContext},
 };
-use crate::sectors::looks_nopwd;
 
 use super::{
     OfficialPartitionGeometry, OfficialPartitionMode, OfficialProvisionPlan, ProvisionImage,
@@ -25,7 +24,6 @@ pub struct ProvisionValidation {
     profile_id: String,
     device_id: String,
     onlyid: String,
-    is_nopwd: bool,
 }
 
 impl ProvisionValidation {
@@ -39,10 +37,6 @@ impl ProvisionValidation {
 
     pub fn onlyid(&self) -> &str {
         &self.onlyid
-    }
-
-    pub fn is_nopwd(&self) -> bool {
-        self.is_nopwd
     }
 }
 
@@ -76,22 +70,6 @@ impl ProvisionValidator {
         validate_lba11(spec, sector(bytes, 11), &context)?;
         validate_lba12(spec, sector(bytes, 12))?;
 
-        let snapshot = |lba: u32| -> crate::common::EdpCliResult<Vec<u8>> {
-            checked_sector(bytes, lba as usize)
-                .map(|sector| sector.to_vec())
-                .ok_or_else(|| {
-                    crate::common::EdpCliError::new(
-                        crate::common::EXIT_TARGET,
-                        "LBA 不在制盘镜像内",
-                    )
-                })
-        };
-        let is_nopwd = looks_nopwd(&snapshot, spec.target().device_id())
-            .map_err(|err| format!("nopwd validation failed: {}", err.msg))?;
-        if !is_nopwd {
-            return Err("generated image does not satisfy existing nopwd detector".into());
-        }
-
         let summary = summarize(&context, |lba| {
             checked_sector(bytes, lba as usize)
                 .map(|sector| sector.to_vec())
@@ -104,15 +82,11 @@ impl ProvisionValidator {
         if summary.pdkb_device_id.as_deref() != Some(spec.target().device_id()) {
             return Err("metainfo PDKB device_id does not match target device_id".into());
         }
-        if summary.is_nopwd != Some(true) {
-            return Err("metainfo does not report nopwd=true".into());
-        }
 
         Ok(ProvisionValidation {
             profile_id: spec.profile().id().to_string(),
             device_id: spec.target().device_id().to_string(),
             onlyid: spec.metadata().onlyid().text().to_string(),
-            is_nopwd,
         })
     }
 }

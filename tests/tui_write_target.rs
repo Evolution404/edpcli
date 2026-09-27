@@ -31,7 +31,6 @@ fn device(disk: u32) -> Row {
         n_possible_baks: 0,
         denied: false,
         probe_error: None,
-        is_nopwd: false,
         provision_kind: edpcli::provision::DiskProvisionKind::Plain,
         partitions: None,
     }
@@ -51,7 +50,6 @@ fn backup(index: usize, name: &str) -> BackupWorkspaceItem {
         identity: None,
         user: None,
         dept: None,
-        is_nopwd: false,
         provision_kind: edpcli::provision::DiskProvisionKind::Plain,
         integrity_status: BackupIntegrityStatus::Verified,
         size_ok: true,
@@ -358,4 +356,39 @@ fn switching_to_backups_pins_the_real_device_selected_through_a_filter() {
 
     state.navigate(NavCommand::WorkspaceBackups, 20);
     assert_eq!(state.selected_device_disk(), Some(7));
+}
+
+#[test]
+fn d0_plain_disk_without_device_id_uses_canonical_plain_kind() {
+    use edpcli::application::identity::WorkspaceIdentity;
+    use edpcli::application::media_identity::{
+        DerivedProtocolEvidence, HardwareIdentityEvidence, IdentityObservation, MediaIdentityPin,
+        MediaIdentitySnapshot,
+    };
+    use edpcli::provision::DiskProvisionKind;
+
+    let mut row = device(4);
+    row.device_id = None;
+    row.onlyid = None;
+    row.provision_kind = DiskProvisionKind::Plain;
+    let snapshot = MediaIdentitySnapshot::plain(
+        HardwareIdentityEvidence {
+            vid: Some(0x3535),
+            pid: Some(0x6300),
+            total_sectors: Some(row.size / 512),
+            logical_sector_size: Some(512),
+            ..HardwareIdentityEvidence::default()
+        },
+        DerivedProtocolEvidence::default(),
+        IdentityObservation::default(),
+    );
+    row.identity_pin = Some(MediaIdentityPin::new(snapshot, &[0; 13 * 512]));
+
+    let identity = WorkspaceIdentity::from_device(&row);
+    assert_eq!(identity.provision_kind, Some(DiskProvisionKind::Plain));
+    assert_eq!(
+        identity.display_cells()[6],
+        "普通盘",
+        "a canonical Plain disk must not become unknown just because it has no EDP device_id"
+    );
 }

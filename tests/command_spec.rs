@@ -98,6 +98,6 @@ fn help_and_completion_consume_command_schema() {
 
 #[test]
 fn product_descriptions_no_longer_advertise_offline_convert() {
-    assert!(!source("Cargo.toml").contains("免密转换"));
-    assert!(!source("src/lib.rs").contains("免密转换"));
+    assert!(!source("Cargo.toml").contains("mode1 重制"));
+    assert!(!source("src/lib.rs").contains("mode1 重制"));
 }

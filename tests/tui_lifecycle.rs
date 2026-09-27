@@ -29,7 +29,6 @@ fn usb_device() -> edpcli::disk_scan::Row {
         n_possible_baks: 0,
         denied: false,
         probe_error: None,
-        is_nopwd: false,
         provision_kind: edpcli::provision::DiskProvisionKind::Plain,
         partitions: None,
     }

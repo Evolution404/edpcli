@@ -672,11 +672,11 @@ pub(super) fn draw_backup_prune(frame: &mut Frame, area: ratatui::layout::Rect, 
             if let Some(prepared) = prune.prepared.as_ref() {
                 lines.extend([
                     Line::from(format!("keep-N: {}", prepared.keep)),
-                    Line::from(format!("原盘备份: {} 份", prepared.originals)),
+                    Line::from(format!("受管备份: {} 份", prepared.managed_backups)),
                     Line::from(format!(
                         "计划删除: {} 份   清理后快照: {} 份",
                         prepared.plan.targets.len(),
-                        prepared.retained_snapshots
+                        prepared.retained_backups
                     )),
                     Line::from(""),
                     Line::from(Span::styled(
@@ -750,30 +750,14 @@ pub(super) fn write_progress_text(event: &crate::application::WriteEvent) -> Str
                 .map(|name| name.to_string_lossy().into_owned())
                 .unwrap_or_else(|| path.to_string_lossy().into_owned())
         ),
-        WriteEvent::BackupCreatedIsNopwd => {
-            "本份备份为免密状态快照（还原不会回到加密原盘）".to_string()
-        }
         WriteEvent::RestoreMatchesHeader { onlyid, count, .. } => {
             format!("onlyid={onlyid} 匹配 {count} 个备份")
         }
-        WriteEvent::RestoreMatchRow {
-            index,
-            time,
-            is_nopwd,
-            ..
-        } => format!(
-            "[{index}] {time} {}",
-            if *is_nopwd {
-                "免密状态"
-            } else {
-                "加密原盘"
-            }
-        ),
+        WriteEvent::RestoreMatchRow { index, time, .. } => {
+            format!("[{index}] {time}")
+        }
         WriteEvent::RestoreSelectionRetry { message } => message.clone(),
         WriteEvent::BackupShaVerified { .. } => "备份 SHA-256 校验通过".to_string(),
-        WriteEvent::RestoreSnapshotNopwdWarning => {
-            "该备份为免密状态快照；dry-run 不作还原".to_string()
-        }
         WriteEvent::RestoreDryRunNotice { .. } => "[dry-run] 还原预览完成，未写入".to_string(),
         WriteEvent::RestoreTargetHeader { path } => format!(
             "还原目标已确认：{}",

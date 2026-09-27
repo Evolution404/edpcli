@@ -12,20 +12,20 @@
 
 某些协议配置类型需要特定用途物理正例来闭环，但不应改变通用统计集。这类证据放在 `audit/protocol/physical-evidence/`，必须进入清单、按摘要固定并由定向回归测试覆盖；除非通用统计集政策本身发生变化，否则不得并入 `gold_samples.tsv`。
 
-基线脚本对样本集漂移采用无法确认即拒绝继续：新的非 `_nopwd_` 备份不会被静默纳入或忽略，必须先人工审计，并把来源及摘要显式加入 `gold_samples.tsv`。
+基线脚本对样本集漂移采用无法确认即拒绝继续：新的非 `_mode1_` 备份不会被静默纳入或忽略，必须先人工审计，并把来源及摘要显式加入 `gold_samples.tsv`。
 
 ## 金标数据与来源
 
 通用统计集的协议金标字节集位于已经提交的 `audit/protocol/gold/`：
 
 1. `audit/protocol/gold/strict-encrypted/`：恰好 19 份 SHA-256 唯一的 6656 字节原始代真实设备镜像。
-2. `audit/protocol/gold/authentic-nopwd/`：1 份 6656 字节真实 SanDisk Ultra 免密盘采集，仅包含 LBA0-LBA12。
+2. `audit/protocol/gold/authentic-mode1/`：1 份 6656 字节真实 SanDisk Ultra mode1 盘采集，仅包含 LBA0-LBA12。
 
 另有一份 EESI 启用的 Netac 正向采集保存在 `audit/protocol/physical-evidence/eesi/`。它是字段级物理参考，不是第 21 个统计集成员；这样既保留 19+1 的跨配置类型统计口径，又允许 LBA10 的启用配置类型满足真实设备证据门禁。
 
 清单中每一行都必须具有唯一 SHA-256。完整 6656 字节完全相同的重复只读采集必须去重，禁止重新作为独立金标样本加入。
 
-原始采集来源仍记录为：加密样本的 `~/.edpcli-backup`，以及 SanDisk 样本的 `~/Desktop/u_disk/analyze/disk_data/no_password_disk4/raw/LBA0_13_concat.bin`。这些主机本地路径只保留来源信息，不再是 `audit_baseline.py` 的运行依赖。原始 SanDisk 文件还包含 LBA13，但仓库中的金标镜像有意截断为 6656 字节。
+原始采集来源仍记录为：加密样本的 `~/.edpcli-backup`，以及 SanDisk 样本的 `~/Desktop/u_disk/analyze/disk_data/sandisk_mode1_capture/raw/LBA0_13_concat.bin`。这些主机本地路径只保留来源信息，不再是 `audit_baseline.py` 的运行依赖。原始 SanDisk 文件还包含 LBA13，但仓库中的金标镜像有意截断为 6656 字节。
 
 旧的 `/private/tmp/audit22` 测试框架曾把第三份 SanDisk EESI 采集混入样本集。其源码/可执行文件摘要仍在清单中保留作为来源记录，但对应样本集定义已经废弃。当前 `scripts/protocol/audit_baseline.py` 在仓库内按新的两类来源政策复现有价值的统计集行为，不再依赖 `/private/tmp`。
 

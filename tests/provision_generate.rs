@@ -6,7 +6,6 @@ use edpcli::provision::{
     generate_image, OnlyId, PassInfoPolicy, ProvisionEntropy, ProvisionMetadata, ProvisionProfile,
     ProvisionSpec, TargetIdentity,
 };
-use edpcli::sectors::looks_nopwd;
 
 fn spec(onlyid: &str) -> ProvisionSpec {
     spec_with_force_change(onlyid, false)
@@ -107,7 +106,7 @@ fn generated_pass_info_carries_all_user_configurable_policy_fields() {
 }
 
 #[test]
-fn generated_image_is_structurally_complete_nopwd_metadata() {
+fn generated_image_is_structurally_complete_metadata() {
     let spec = spec("1402259934");
     let image = generate_image(&spec, &entropy()).unwrap();
     let bytes = image.as_bytes();
@@ -247,11 +246,6 @@ fn generated_image_is_structurally_complete_nopwd_metadata() {
     let crc = crc32_bare(spec.target().device_id().as_bytes());
     let expected_tail = a7f0_full(&[0u8; 144], &crc.to_le_bytes(), 0x170);
     assert_eq!(&sector(bytes, 12)[0x170..], expected_tail.as_slice());
-
-    let read = |lba: u32| -> edpcli::common::EdpCliResult<Vec<u8>> {
-        Ok(sector(bytes, lba as usize).to_vec())
-    };
-    assert!(looks_nopwd(&read, spec.target().device_id()).unwrap());
 }
 
 #[test]

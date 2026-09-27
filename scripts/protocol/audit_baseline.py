@@ -58,7 +58,7 @@ def load_gold(
 
     out: list[tuple[dict[str, str], bytes, Path]] = []
     for row in manifest:
-        if row["profile"] not in {"strict-encrypted", "authentic-nopwd"}:
+        if row["profile"] not in {"strict-encrypted", "authentic-mode1"}:
             raise ValueError(f"unknown gold profile: {row['profile']}")
 
         path = repo_root / row["repo_path"]
@@ -120,14 +120,14 @@ def lba3_shape(raw: bytes) -> dict[str, object]:
 def audit(gold: list[tuple[dict[str, str], bytes, Path]]) -> dict[str, object]:
     eesi_physical, eesi_meta = load_eesi_physical()
     strict = [item for item in gold if item[0]["profile"] == "strict-encrypted"]
-    nopwd = [item for item in gold if item[0]["profile"] == "authentic-nopwd"]
+    mode1 = [item for item in gold if item[0]["profile"] == "authentic-mode1"]
     digests = [item[0]["sha256"] for item in gold]
     if len(digests) != len(set(digests)):
         raise ValueError("checked-in gold set contains duplicate SHA-256 images")
     if len(strict) != 19:
         raise ValueError(f"strict encrypted gold population must be 19, got {len(strict)}")
-    if len(nopwd) != 1:
-        raise ValueError(f"authentic no-password gold population must be 1, got {len(nopwd)}")
+    if len(mode1) != 1:
+        raise ValueError(f"authentic mode1 gold population must be 1, got {len(mode1)}")
 
     lba10_nonzero: list[str] = []
     lba3_profiles: dict[str, dict[str, object]] = {}
@@ -159,7 +159,7 @@ def audit(gold: list[tuple[dict[str, str], bytes, Path]]) -> dict[str, object]:
         "image_bytes": IMAGE_LEN,
         "unique_image_count": len(gold),
         "strict_encrypted_count": len(strict),
-        "authentic_nopwd_count": len(nopwd),
+        "authentic_mode1_count": len(mode1),
         "lba10": {
             "general_census_all_zero": True,
             "zero_sector_sha256": EMPTY_SECTOR_SHA256,

@@ -69,10 +69,7 @@ fn mandatory_backup_must_match_prepared_canonical_pin() {
     .unwrap();
     let verified = crate::edpb::verify_file(&path).unwrap();
     let identity = crate::edpb::canonical_media_identity(&verified.manifest).unwrap();
-    let report = super::super::write::BackupReport {
-        path,
-        is_nopwd: false,
-    };
+    let report = super::super::write::BackupReport { path };
     let pin = MediaIdentityPin::new(identity.clone(), &image);
     assert_eq!(
         verify_mandatory_backup_pin(&report, &pin).unwrap(),
@@ -138,7 +135,6 @@ fn mandatory_backup_success_runs_commit_after_backup() {
             order.borrow_mut().push("backup");
             Ok(super::super::write::BackupReport {
                 path: std::path::PathBuf::from("test.edpb"),
-                is_nopwd: false,
             })
         },
         || {
@@ -159,7 +155,6 @@ fn mandatory_backup_success_runs_commit_after_backup() {
 fn typed_execution_status_is_shared_across_cli_and_tui() {
     let backup = super::super::write::BackupReport {
         path: std::path::PathBuf::from("test.edpb"),
-        is_nopwd: false,
     };
     let mut outcome = ProvisionWriteOutcome {
         backup,

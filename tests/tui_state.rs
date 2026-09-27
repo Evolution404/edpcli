@@ -51,7 +51,6 @@ fn device(size: u64) -> edpcli::disk_scan::Row {
         n_possible_baks: 0,
         denied: false,
         probe_error: None,
-        is_nopwd: false,
         provision_kind: edpcli::provision::DiskProvisionKind::Plain,
         partitions: None,
     }
@@ -95,14 +94,16 @@ fn ch14_write_progress_batch_reaches_tui_state_without_losing_milestones() {
     }
     assert!(state.submit_wizard_confirmation().is_some());
     for event in [
-        WriteEvent::BackupCreatedIsNopwd,
+        WriteEvent::BackupCreated {
+            path: std::path::PathBuf::from("a.edpb"),
+        },
         WriteEvent::RestoreWriteCompleted,
     ] {
         state.set_write_progress(event);
     }
     let log = &state.wizard().unwrap().progress_log;
     assert_eq!(log.len(), 2);
-    assert!(matches!(log[0], WriteEvent::BackupCreatedIsNopwd));
+    assert!(matches!(log[0], WriteEvent::BackupCreated { .. }));
     assert!(matches!(log[1], WriteEvent::RestoreWriteCompleted));
 }
 

@@ -47,7 +47,6 @@ pub struct MetaInfoSummary {
     pub safe6_register: Option<String>,
     pub safe6_checksum: Option<String>,
     pub pdkb_device_id: Option<String>,
-    pub is_nopwd: Option<bool>,
     pub partitions: Vec<PartitionInfo>,
 }
 
@@ -162,19 +161,6 @@ where
             .map(partition_info),
     );
 
-    let is_nopwd = base.device_id.as_deref().and_then(|device_id| {
-        let snapshot = |lba| match lba {
-            0 => Ok(raw0.clone()),
-            6 => Ok(raw6.clone()),
-            12 => Ok(raw12.clone()),
-            _ => Err(crate::common::EdpCliError::new(
-                crate::common::EXIT_IO,
-                format!("错误: info 免密判断不应读取 LBA{lba}"),
-            )),
-        };
-        crate::sectors::looks_nopwd(&snapshot, device_id).ok()
-    });
-
     Ok(MetaInfoSummary {
         is_plain: false,
         onlyid,
@@ -209,7 +195,6 @@ where
             }
         }),
         pdkb_device_id: semantic::pdkb_device_id(&raw11, &base),
-        is_nopwd,
         partitions: partition_rows,
     })
 }
@@ -354,14 +339,6 @@ pub fn render_with_source(summary: &MetaInfoSummary, source: Option<&str>) -> St
         &mut out,
         "EDP/cems",
         summary.device_id.as_ref().map(|_| "已识别"),
-        crate::ui::green,
-    );
-    row(
-        &mut out,
-        "免密",
-        summary
-            .is_nopwd
-            .map(|value| if value { "是" } else { "否" }),
         crate::ui::green,
     );
     row(

@@ -124,7 +124,7 @@ atomic write、sync/readback 或 rollback；终端 I/O 失败时也会先恢复�
 
 - 固定读取 LBA0-12，共 6656B；
 - 使用相同的 onlyid、device_id、VID/PID、容量元数据；
-- 使用相同命名和 `_nopwd` 状态标记；
+- 使用相同命名和 `_mode1` 状态标记；
 - 写出相同 SHA-256 sidecar；
 - 使用 create-new 防覆盖、fsync 和目录持久化；
 - 独立备份路径只读 U 盘，不卸载、不锁卷、不 reopen 为读写、不写任何扇区。

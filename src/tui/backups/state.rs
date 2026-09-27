@@ -59,8 +59,8 @@ pub enum BackupPruneStage {
 pub struct BackupPrunePrepared {
     pub plan: crate::application::backup::DeletePlan,
     pub keep: usize,
-    pub originals: usize,
-    pub retained_snapshots: usize,
+    pub managed_backups: usize,
+    pub retained_backups: usize,
 }
 
 pub struct BackupPruneState {

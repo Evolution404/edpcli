@@ -18,7 +18,7 @@
 
 该模块禁止打开设备、执行系统命令或提权。硬件发现和真实写盘属于应用层/平台层。
 
-当前 `ProvisionProfile::canonical_v1()` 的配置类型 ID 为 `jiangsu-safe6-nopwd`。当前构造器生成 LBA0、4、6、7、8、11、12，并由 `ProvisionValidator` 做离线一致性验证。
+当前 `ProvisionProfile::canonical_v1()` 的配置类型 ID 为 `jiangsu-safe6-mode1`。当前构造器生成 LBA0、4、6、7、8、11、12，并由 `ProvisionValidator` 做离线一致性验证。
 
 现有 `generate_image()` 继续保留标准 v1 二合一兼容输出；新增 `generate_official_image()` + `OfficialProvisionPlan` 已能纯内存生成四种官方分区模式的 LBA0/LBA7/LBA12，并由独立 `OfficialProvisionValidator` 反向校验 MBR、EDPF 类型/标志、逻辑几何与 LCE。LBA12 当前封装密钥轴已独立实现为 `ProvisionKeyMaterial`：mode1=A7F0、mode2=SM4-ECB、mode3=AES-128-ECB，三种输出均与官方虚拟写入端逐字节夹具一致；`0000aaaa` 的 v0x0206 隐式有效密码替换也已编码。LBA7 旧版 8B 封装密钥则独立建模为 `LegacyLba7KeyMaterial`，按 `fold32(password)` 对两个 32 位半字异或封装，真实 Netac 原盘向量已逐字节回归；LBA7 与 LBA12 的明文文件密钥来源仍作为两个独立输入，不建立未经证明的派生关系。
 
@@ -49,7 +49,7 @@
 
 `exfat` 路线已实现为稀疏元数据构造器，只生成启动区、FAT、分配位图、大小写表和根目录等必要扇区。现有深度解析器可完整反向解析；另外已用 `hdiutil` 临时虚拟块设备做本机硬件在环验证，系统原生识别为 `ExFAT`、成功挂载并完成文件写回/读回，验证过程只使用 `/tmp` 虚拟镜像，没有访问物理 U 盘。
 
-四模式物理文件系统规则当前固定为：模式0 `[明文 type1, 加密 type2, 加密 type4]`；模式1 `[明文 type2, 加密 type4]`；模式2 的 `0x7E00` type1 仅为兼容保留项、不创建文件系统，type4 加密；模式3 `[明文 type1, 加密 type2]`。其中模式1 的 type2 虽然 `NeedEncrypt=1`，但 MBR 直接暴露路径已经由真实免密 SanDisk 验证为物理明文，不能机械按该标志加密。当前跨平台数据区写入只对已验证的 `mode2` 扇区级 `SM4-ECB` 路线开放，其他封装模式无法确认时拒绝继续。
+四模式物理文件系统规则当前固定为：模式0 `[明文 type1, 加密 type2, 加密 type4]`；模式1 `[明文 type2, 加密 type4]`；模式2 的 `0x7E00` type1 仅为兼容保留项、不创建文件系统，type4 加密；模式3 `[明文 type1, 加密 type2]`。其中模式1 的 type2 虽然 `NeedEncrypt=1`，但 MBR 直接暴露路径已经由真实mode1 SanDisk 验证为物理明文，不能机械按该标志加密。当前跨平台数据区写入只对已验证的 `mode2` 扇区级 `SM4-ECB` 路线开放，其他封装模式无法确认时拒绝继续。
 
 LBA7 旧表中条目0 与后续条目的几何规则不同；后续条目可保留各自 `PartionType` 并共同指向 LCE（LBA7 兼容扩展区）。因此制盘功能不得把 LCE 当成 type4 专属区域。详细证据见 [`../protocol/LCE.md`](../protocol/LCE.md)。
 
@@ -152,7 +152,7 @@ TargetProvisionPlan
 
 ### 4.1.1 统一“盘型”命名与展示
 
-设备页、备份页、制盘页统一使用**盘型**描述当前盘/备份对应的 EDP 制盘类型，不再把“免密状态 / 加密原盘”作为主分类。五种盘型固定为：
+设备页、备份页、制盘页统一使用**盘型**描述当前盘/备份对应的 EDP 制盘类型，不再把“mode1 / 加密原盘”作为主分类。五种盘型固定为：
 
 | 盘型枚举 | UI 完整名称 | UI 短名称 |
 | --- | --- | --- |
@@ -174,7 +174,7 @@ enum DiskProvisionKind {
 }
 ```
 
-其中 `Plain` 表示普通、非 EDP mode0/1/2/3 的磁盘状态。它既是设备分类之一，也是新的“恢复普通盘”目标状态，但**不是 mode4，也不是第五个官方 EDP 模式**。盘型与“是否存在备份”“备份创建时间”“是否是某次历史快照”是不同维度，禁止继续用“免密快照/加密原盘”混合作为盘型。
+其中 `Plain` 表示普通、非 EDP mode0/1/2/3 的磁盘状态。它既是设备分类之一，也是新的“恢复普通盘”目标状态，但**不是 mode4，也不是第五个官方 EDP 模式**。盘型与“是否存在备份”“备份创建时间”“是否是某次历史快照”是不同维度，禁止继续用“mode1 备份/加密原盘”混合作为盘型。
 
 设备页的每个 USB 设备必须显示盘型；备份页每条备份也必须通过备份中的协议镜像识别并显示盘型。空间不足时用短名称，详情区显示完整官方名称。
 
@@ -409,7 +409,7 @@ Rebuild
 → 安全事务写盘
 ```
 
-设备页、备份页、制盘页统一显示 `DiskProvisionKind::{Plain,Mode0,Mode1,Mode2,Mode3}`；旧“免密状态/加密原盘/cems·免密”不得继续作为主分类。
+设备页、备份页、制盘页统一显示 `DiskProvisionKind::{Plain,Mode0,Mode1,Mode2,Mode3}`；旧“mode1/加密原盘/cems·mode1”不得继续作为主分类。
 
 ### 4.11 统一 TUI 表单与视觉规范
 
@@ -700,7 +700,7 @@ Real USB acceptance
 - Phase 6 已完成：新增目标无关 `WriteTransactionPlan` / `SectorWriteStage` / `execute_write_transaction()`；唯一事务执行器统一负责写前 sync、snapshot 全部 touched sectors、Data→Metadata→Commit 排序、exact readback、失败后 exact rollback。旧 `atomic_write_sectors` 与 official writer 均迁移到该核心，删除两套重复 snapshot/readback/rollback；`PlainProvisionWritePlan` 可无歧义映射到同一事务模型，MBR=Commit、EDP metadata cleanup=Metadata、filesystem/LCE cleanup=Data。
 - Phase 7 已完成：新增默认可运行的 `plain_virtual_hil`，覆盖1～4分区、显式 gap、非2048起点、统一事务写入、LBA3 preserve、LCE cleanup、MBR entries、exFAT analyzer 与 post-write `Plain` 识别；新增 macOS disposable raw-disk HIL，只有 WholeDisk+Virtual+Disk Image 才允许进入测试写链，实际完成 raw image 制盘→eject/reattach→OS 识别 exFAT→mount→create/readback file→unmount。现有 Linux/Windows loop/VHD HIL 继续保留。
 - Plain 产品写入链已启用：TUI Plain Form 不再在 `AppState` 本地伪造只读 Review，而是通过 TaskHub 调用 application `prepare_plain_provision()`，固定 USB hardware probe/容量/LBA3，并从同一 LBA0～12 快照按 LBA7 实际 entry pointer 解析来源 LCE；Review→YES→critical worker 调用 `commit_plain_provision()`，复用 system/USB guard、unmount/lock、reopen、probe/容量/LBA3 复核和统一 transaction，写后再次验证 MBR/LBA3/Plain 分类。
-- 原先依赖旧 `sectors::convert` 合成免密盘的测试夹具已迁移到正式 `provision::generate_image()`，识别/备份测试继续覆盖 mode1 免密样本；
+- 原先依赖旧 `sectors::convert` 合成mode1 盘的测试夹具已迁移到正式 `provision::generate_image()`，识别/备份测试继续覆盖 mode1 mode1 样本；
 - `src/sectors.rs` 现在只保留只读盘状态识别与 LBA12 EDPF 解析，元数据写入只有 `provision` 一套正式实现。
 
 ### 8.4 Phase 1～7 验证结果
@@ -3394,7 +3394,7 @@ K6 当前安全语义：
 
 **K6-specific 真实 USB acceptance（2026-09-27）：COMPLETE。** 验收继续绑定既有受控 `/dev/disk4`：aigo U335，VID:PID `3535:6300`，15,728,640 × 512B sectors，`device_id=disk&ven_aigo&prod_u335&rev_1100`，USB serial `E0277222DCC73AC8`。全过程未按盘号单独认盘，VID/PID、容量、device_id、serial/介质 lineage 均一致。
 
-- **源状态证据**：自动备份 `..._nopwd_20260927_145206.edpb` 显示写前为已识别 passwordless EDP，LBA12 type2 Share 从 LBA63 开始、type4 Encrypt 从 LBA13627392 开始；源交换区实际为可挂载 exFAT。
+- **源状态证据**：自动备份 `..._mode1_20260927_145206.edpb` 显示写前为已识别 mode1 EDP，LBA12 type2 Share 从 LBA63 开始、type4 Encrypt 从 LBA13627392 开始；源交换区实际为可挂载 exFAT。
 - **源 payload 基线**：`files/` 共 3002 个文件、120,615,912 bytes。完整 manifest 聚合 SHA-256=`8687837a8727e6820fa14a3d1db33d330982037036662b1f742000a5a965e56d`。其中 3001 个用户文件共 120,611,816 bytes，聚合 SHA-256=`127998c5ebd6177391bc0c347d0f796be835ea32f9a8fa3d7c4ad11ba7379646`；另 1 个 macOS AppleDouble sidecar 为 4096 bytes，聚合 SHA-256=`ca6d9bf193da8cb0ae203afe548bd393fb7895df234f59d2106374c58d6df8c9`。主机 `/Users/zhangyuxi/unzip/files` 对 3001 个用户文件逐路径/大小/hash 与源 manifest 完全一致，作为独立 pristine baseline。
 - **中间 Plain 证据**：下一次 mandatory backup `..._plain_20260927_150316.edpb` 明确记录同一物理介质已处于 Plain，证明 EDP→Plain 的破坏性 K6 转换实际完成；该备份通过现有介质 lineage 归到同一盘。
 - **回到 EDP 证据**：随后同一介质完成 Plain→mode3，当前协议为 Boot type1 `LBA63..20479` + Share type2 `LBA20480..15725842`；deep read-only backup `..._20260927_152711.edpb` 已创建并 `backup verify` PASS。
@@ -8138,7 +8138,7 @@ PersistedDerivedEvidence {
 新增兼容测试：
 
 - v1 encrypted；
-- v1 passwordless；
+- v1 mode1；
 - v1 Plain + legacy candidate；
 - v1 serial note；
 - v2 EDP；
@@ -8492,7 +8492,7 @@ IdentityMatchSummary
 #### 15.15.2 EDPB compatibility
 
 - v1 EDP；
-- v1 passwordless；
+- v1 mode1；
 - v1 Plain legacy candidate；
 - v1 serial note；
 - v2 EDP；

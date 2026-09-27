@@ -100,11 +100,10 @@ impl WorkspaceIdentity {
             onlyid: row.onlyid.clone(),
             user: row.user.clone(),
             dept: row.dept.clone(),
-            provision_kind: (row.proto == "USB"
-                && !row.denied
-                && row.probe_error.is_none()
-                && row.device_id.is_some())
-            .then_some(row.provision_kind),
+            provision_kind: row
+                .identity_pin
+                .as_ref()
+                .and_then(|pin| pin.snapshot.protocol.provision_kind),
             canonical: row
                 .identity_pin
                 .as_ref()

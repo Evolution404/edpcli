@@ -40,18 +40,6 @@ pub fn lba4_tag16_from(raw: &[u8]) -> Option<[u8; 16]> {
     raw.get(..16)?.try_into().ok()
 }
 
-/// 已在内存中的 LBA0-12 镜像是否为免密状态。
-/// 供扫描、restore、备份创建共用，避免上层重复构造扇区闭包或二次读文件。
-pub fn image_is_nopwd(data: &[u8], device_id: &str) -> bool {
-    if data.len() < crate::common::METADATA_IMAGE_LEN {
-        return false;
-    }
-    let read = |lba: u32| -> EdpCliResult<Vec<u8>> {
-        Ok(data[lba as usize * SECTOR..(lba as usize + 1) * SECTOR].to_vec())
-    };
-    looks_nopwd(&read, device_id).unwrap_or(false)
-}
-
 pub fn ts_suffix_pos(name: &str) -> Option<usize> {
     // 新备份只认 .edpb；旧 .bin 不进入正式运行时解析路径。
     if !name.ends_with(".edpb") {
@@ -138,7 +126,6 @@ pub struct BackupMeta {
     pub pid: String,
     pub device_id: String,
     pub onlyid: Option<String>,
-    pub tagged_nopwd: bool,
     pub identity: Option<crate::application::media_identity::MediaIdentitySnapshot>,
 }
 
@@ -153,7 +140,6 @@ pub struct BackupEntry {
     pub meta: Option<BackupMeta>,
     pub path: PathBuf,
     pub mtime: i64,
-    pub is_nopwd: bool,
     pub provision_kind: crate::provision::DiskProvisionKind,
     pub integrity_status: BackupIntegrityStatus,
     pub size_ok: bool,
@@ -216,11 +202,7 @@ pub fn parse_backup_name(name: &str) -> Option<BackupMeta> {
         return None;
     }
 
-    let mut tail = &after_pid[device_pos + 1..];
-    let tagged_nopwd = tail.ends_with("_nopwd");
-    if tagged_nopwd {
-        tail = &tail[..tail.len() - "_nopwd".len()];
-    }
+    let tail = &after_pid[device_pos + 1..];
     let (device_id, onlyid) = match strip_numeric_suffix(tail, "_onlyid") {
         Some((did, id)) => (did, Some(id)),
         None => match strip_numeric_suffix(tail, "_lid") {
@@ -239,7 +221,6 @@ pub fn parse_backup_name(name: &str) -> Option<BackupMeta> {
         pid: pid.to_string(),
         device_id: device_id.to_string(),
         onlyid,
-        tagged_nopwd,
         identity: None,
     })
 }
@@ -300,7 +281,6 @@ pub fn scan_backup_file(path: &Path) -> Option<BackupEntry> {
             pid: manifest.device.pid.clone(),
             device_id: manifest.device.device_id.clone(),
             onlyid: manifest.device.onlyid.clone(),
-            tagged_nopwd: manifest.snapshot.device_state == "passwordless",
             identity: Some(identity),
         })
     });
@@ -317,10 +297,6 @@ pub fn scan_backup_file(path: &Path) -> Option<BackupEntry> {
     } else {
         BackupIntegrityStatus::Invalid
     };
-    let is_nopwd = match (&meta, &raw) {
-        (Some(meta), Some(data)) => image_is_nopwd(data, &meta.device_id),
-        _ => false,
-    };
     let provision_kind = match (&meta, &raw) {
         (Some(meta), Some(data)) => {
             crate::provision::DiskProvisionKind::from_metadata(data, &meta.device_id)
@@ -331,7 +307,6 @@ pub fn scan_backup_file(path: &Path) -> Option<BackupEntry> {
         meta,
         path: path.to_path_buf(),
         mtime: mtime_epoch(path),
-        is_nopwd,
         provision_kind,
         integrity_status,
         size_ok,
@@ -397,11 +372,10 @@ pub fn backup_group_key(entry: &BackupEntry) -> Option<String> {
     }
 }
 
-/// `backup prune` 的纯策略层：
-/// - 加密原盘备份从不成为候选；
-/// - 每盘只对已按内容确认的免密快照按备份文件名时间新→旧保留 `keep` 份；
-///   仅旧命名无法解析时间时才回退文件系统 mtime；
-/// - 若该盘组没有任何加密原盘备份，则至少保留最新 1 份快照，防止清到零份。
+/// backup prune 的纯策略层：
+/// - 每个 canonical identity 组按备份文件名时间新→旧保留 keep 份；
+/// - 仅旧命名无法解析时间时才回退文件系统 mtime；
+/// - 无论 keep 是否为 0，每组至少保留最新 1 份，防止清到零份。
 pub fn prune_candidates(entries: &[BackupEntry], keep: usize) -> Vec<PathBuf> {
     let mut groups: BTreeMap<String, Vec<&BackupEntry>> = BTreeMap::new();
     for entry in entries {
@@ -411,15 +385,12 @@ pub fn prune_candidates(entries: &[BackupEntry], keep: usize) -> Vec<PathBuf> {
     }
 
     let mut out = Vec::new();
-    for group in groups.values() {
-        let has_original = group.iter().any(|e| !e.is_nopwd);
-        let mut snaps: Vec<&BackupEntry> = group.iter().copied().filter(|e| e.is_nopwd).collect();
-        snaps.sort_by(|a, b| cmp_backup_newest_first(a, b));
-        let preserve = if has_original { keep } else { keep.max(1) };
-        let mut deletable: Vec<&BackupEntry> = snaps.into_iter().skip(preserve).collect();
-        // 候选清单按最旧→较新展示/删除，便于人工核对；保留判定仍严格按最新优先。
+    for group in groups.values_mut() {
+        group.sort_by(|a, b| cmp_backup_newest_first(a, b));
+        let preserve = keep.max(1);
+        let mut deletable: Vec<&BackupEntry> = group.iter().copied().skip(preserve).collect();
         deletable.reverse();
-        out.extend(deletable.into_iter().map(|e| e.path.clone()));
+        out.extend(deletable.into_iter().map(|entry| entry.path.clone()));
     }
     out
 }

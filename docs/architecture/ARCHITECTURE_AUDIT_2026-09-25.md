@@ -624,9 +624,9 @@ protocol -> inspect presentation -> metainfo/provision validator
 
 只有 `tests/backup.rs` 直接调用。正式 catalog 已从 EDPB/raw protocol 取得 onlyid。删除 convenience API，并让测试验证正式 catalog。
 
-### 18.4 `diskio::backup_is_nopwd()`
+### 18.4 `diskio::backup_is_mode1()`
 
-只有 tests 调用；生产使用 `image_is_nopwd()` / catalog。删除路径 wrapper。
+只有 tests 调用；生产使用 `image_is_mode1()` / catalog。删除路径 wrapper。
 
 ### 18.5 `application::provision::prepare_new_provision()`
 
@@ -669,7 +669,7 @@ protocol -> inspect presentation -> metainfo/provision validator
 - `legacy` MBR snapshot/underlay
 - `legacy` wrapped key
 - historical protocol `profile` axes
-- 对真实旧盘/真实免密盘的 parser
+- 对真实旧盘/真实mode1 盘的 parser
 
 它们仍用于真实设备识别、协议闭环、`Inspect`、backup `metadata`、reprovision、`validator`。
 
@@ -702,9 +702,9 @@ protocol -> inspect presentation -> metainfo/provision validator
 
 重构时必须同步更新。
 
-## 23. 产品描述仍写“免密转换”
+## 23. 产品描述仍写“mode1 重制”
 
-`Cargo.toml` 和 `src/lib.rs` 仍有“备份、恢复与免密转换”，但 Offline Convert 产品能力已删除。
+`Cargo.toml` 和 `src/lib.rs` 仍有“备份、恢复与mode1 重制”，但 Offline Convert 产品能力已删除。
 
 建议改为：
 
@@ -885,8 +885,8 @@ application 返回结构化 `ProvisionReport/BackupReport/InspectReport`，CLI/T
 - 全局 `usage_text` 与 topic help 的命令/动作清单改由 `CommandSpec` 渲染；parser 继续独立承担值解析、互斥关系和安全语义校验。
 - zsh/bash/fish 三种 Shell 补全均从同一命令目录注入顶层命令、各子动作与选项；R1 新增的 `--target`、`--partition` 已进入补全。
 - completion 中已完全删除旧 `convert` 动作；顶层补全补齐 `tui`，并新增 schema/surface 门禁防止用户命令面再次漂移。
-- `Cargo.toml` 与 `src/lib.rs` 产品描述从旧“免密转换”更新为“安全制盘”。
-- R2 完整 CLI suite **63/63** 通过；completion 源码中 `convert`、旧硬编码顶层命令串与产品描述“免密转换”扫描均为 0。
+- `Cargo.toml` 与 `src/lib.rs` 产品描述从旧“mode1 重制”更新为“安全制盘”。
+- R2 完整 CLI suite **63/63** 通过；completion 源码中 `convert`、旧硬编码顶层命令串与产品描述“mode1 重制”扫描均为 0。
 - R2 fast 门禁 **6.08s / 0 failures**，full 门禁 **5.68s / 0 failures**；8 个非 HIL suite 与 doctest 全绿。
 
 ## Phase R3：删除明确死代码和旧产品兼容
@@ -896,7 +896,7 @@ application 返回结构化 `ProvisionReport/BackupReport/InspectReport`，CLI/T
 - wildcard_match
 - read_lba_file
 - backup_label_id
-- backup_is_nopwd
+- backup_is_mode1
 - prepare_new_provision
 - force_change_password_from_sectors
 - `stale` convert completion
@@ -907,11 +907,11 @@ application 返回结构化 `ProvisionReport/BackupReport/InspectReport`，CLI/T
 
 **COMPLETE。**
 
-- 删除无业务调用、仅由自测维持的 `wildcard_match`、`read_lba_file`、`backup_label_id`、`backup_is_nopwd`、`prepare_new_provision`、`force_change_password_from_sectors`，并清理对应辅助函数、导出与自测。
+- 删除无业务调用、仅由自测维持的 `wildcard_match`、`read_lba_file`、`backup_label_id`、`backup_is_mode1`、`prepare_new_provision`、`force_change_password_from_sectors`，并清理对应辅助函数、导出与自测。
 - 删除旧备份 SHA-256 旁挂文件读取入口 `sha256_sidecar_path/read_backup_sha256`；当前备份扫描、校验、删除与恢复统一依赖自包含 EDPB 容器及其内容摘要。
 - 删除旧 `.bin`→EDPB 的写入/迁移入口 `write_legacy_migrated_backup` 以及仅服务该入口的写入分支；正式运行时只扫描 `.edpb`。
 - 保留 `CaptureLevel::LegacyMigrated` 作为已经迁移成 EDPB 的历史清单反序列化值，并新增测试锁定这一只读兼容边界；真实 LBA0～12/LCE 协议兼容代码未删除。
-- 备份与 EDPB 测试改为直接覆盖仍在使用的 `read_raw_protocol`、`lba4_label_id_from`、`image_is_nopwd` 等底层能力，不再通过已删除包装层自证存在。
+- 备份与 EDPB 测试改为直接覆盖仍在使用的 `read_raw_protocol`、`lba4_label_id_from`、`image_is_mode1` 等底层能力，不再通过已删除包装层自证存在。
 - R3 定向验证 **239/239** 通过；上述高置信旧入口在 `src` 中扫描均为 0。
 - R3 full 门禁 **24.58s / 0 failures**；重新编译后的首轮 fast 为 **48.61s**，随后暖缓存 fast **2.01s / 0 failures**，满足日常 `<45s` 目标。
 
@@ -994,7 +994,7 @@ application 返回结构化 `ProvisionReport/BackupReport/InspectReport`，CLI/T
 
 - `WriteEvent` 保持为应用层的结构化进度事件，但 ANSI、颜色和 CLI 文本渲染已迁出应用层，由 `ui::render_write_event` 统一负责；`application` 不再写标准输出或依赖 `crate::ui`。
 - CLI 的 `StdPrompter` 显式渲染事件，TUI worker 继续直接转发 `WriteEvent`；确认提示保留业务文本，并由 CLI 在前端恢复原有加粗样式。
-- 新增 `BackupReport { path, is_nopwd }`，替代备份应用服务的匿名 `(PathBuf, bool)` 返回值；制盘已有 `ProvisionCommitReport/Outcome`，检查已有 `AdvancedInspectWorkspace`，跨前端结果边界均使用具名类型。
+- 新增 `BackupReport { path, is_mode1 }`，替代备份应用服务的匿名 `(PathBuf, bool)` 返回值；制盘已有 `ProvisionCommitReport/Outcome`，检查已有 `AdvancedInspectWorkspace`，跨前端结果边界均使用具名类型。
 - 新增架构门禁，禁止 `application/write.rs` 重新依赖 `crate::ui` 或文本事件渲染，并禁止应用根模块直接向标准输出写入。
 - 事件文本/ANSI 黄金基线与事件序列 **3/3**、CLI **63/63**、制盘 **176/176**、备份 **61/61**、TUI **132/132** 全绿；正式 `fast` **35.33s / 0 失败**。
 

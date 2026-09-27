@@ -116,7 +116,7 @@
 | 演进类型 | ProducerChanged |
 | 写入端证据 | S-WIN-CURRENT |
 | 消费端证据 | S-WIN-CURRENT |
-| 物理证据 | P-GOLD-ENC;P-GOLD-NOPWD |
+| 物理证据 | P-GOLD-ENC;P-GOLD-MODE1 |
 | 实现来源 | 选择器来源与 盘面 闭环分开。 |
 | 语义状态 | COMPLETE |
 | 实现状态 | COMPLETE |
@@ -162,7 +162,7 @@
 | 演进类型 | Stable |
 | 写入端证据 | S-WIN-CURRENT;S-NETAC-MBR |
 | 消费端证据 | S-WIN-CURRENT |
-| 物理证据 | P-GOLD-ENC;P-GOLD-NOPWD |
+| 物理证据 | P-GOLD-ENC;P-GOLD-MODE1 |
 | 实现来源 | 标准 COMPLETE 语义；来源边界继续保留记录。 |
 | 语义状态 | COMPLETE |
 | 实现状态 | COMPLETE |
@@ -323,7 +323,7 @@
 | 演进类型 | Stable |
 | 写入端证据 | S-WIN-CURRENT;S-NETAC-MBR |
 | 消费端证据 | S-REPAIR-CURRENT |
-| 物理证据 | P-GOLD-ENC;P-GOLD-NOPWD |
+| 物理证据 | P-GOLD-ENC;P-GOLD-MODE1 |
 | 实现来源 | 标准 COMPLETE 语义；来源边界继续保留记录。 |
 | 语义状态 | COMPLETE |
 | 实现状态 | COMPLETE |
@@ -769,7 +769,7 @@
 | 演进类型 | Stable |
 | 写入端证据 | S-WIN-CURRENT;S-WIN-191141 |
 | 消费端证据 | S-WIN-CURRENT;S-LINUX-DWARF |
-| 物理证据 | P-GOLD-ENC;P-GOLD-NOPWD |
+| 物理证据 | P-GOLD-ENC;P-GOLD-MODE1 |
 | 实现来源 | 标准 COMPLETE 语义；来源边界继续保留记录。 |
 | 语义状态 | COMPLETE |
 | 实现状态 | COMPLETE |
@@ -792,7 +792,7 @@
 | 演进类型 | EncodingChanged |
 | 写入端证据 | S-WIN-CURRENT;S-WIN-191141;V-LBA4-V19 |
 | 消费端证据 | S-WIN-CURRENT;S-LINUX-DWARF;S-REPAIR-2021 |
-| 物理证据 | P-GOLD-ENC;P-GOLD-NOPWD |
+| 物理证据 | P-GOLD-ENC;P-GOLD-MODE1 |
 | 实现来源 | 编码可与写入端 覆盖项 独立组合。 |
 | 语义状态 | COMPLETE |
 | 实现状态 | COMPLETE |
@@ -815,7 +815,7 @@
 | 演进类型 | EncodingChanged |
 | 写入端证据 | S-WIN-CURRENT;S-WIN-191141;V-LBA4-V19 |
 | 消费端证据 | S-WIN-CURRENT;S-LINUX-DWARF;S-REPAIR-2021 |
-| 物理证据 | P-GOLD-ENC;P-GOLD-NOPWD |
+| 物理证据 | P-GOLD-ENC;P-GOLD-MODE1 |
 | 实现来源 | 编码可与写入端 覆盖项 独立组合。 |
 | 语义状态 | COMPLETE |
 | 实现状态 | COMPLETE |
@@ -884,7 +884,7 @@
 | 演进类型 | EncodingChanged |
 | 写入端证据 | S-WIN-CURRENT;S-WIN-191141;V-LBA4-V19 |
 | 消费端证据 | S-WIN-CURRENT;S-LINUX-DWARF;S-REPAIR-2021 |
-| 物理证据 | P-GOLD-ENC;P-GOLD-NOPWD |
+| 物理证据 | P-GOLD-ENC;P-GOLD-MODE1 |
 | 实现来源 | 编码可与写入端 覆盖项 独立组合。 |
 | 语义状态 | COMPLETE |
 | 实现状态 | COMPLETE |
@@ -907,7 +907,7 @@
 | 演进类型 | EncodingChanged |
 | 写入端证据 | S-WIN-CURRENT;S-WIN-191141;V-LBA4-V19 |
 | 消费端证据 | S-WIN-CURRENT;S-LINUX-DWARF;S-REPAIR-2021 |
-| 物理证据 | P-GOLD-ENC;P-GOLD-NOPWD |
+| 物理证据 | P-GOLD-ENC;P-GOLD-MODE1 |
 | 实现来源 | 编码可与写入端 覆盖项 独立组合。 |
 | 语义状态 | COMPLETE |
 | 实现状态 | COMPLETE |
@@ -930,7 +930,7 @@
 | 演进类型 | ProducerChanged |
 | 写入端证据 | S-WIN-CURRENT;S-WIN-191141;V-LBA4-V19 |
 | 消费端证据 | S-WIN-191141;S-BUS-2020 |
-| 物理证据 | P-GOLD-ENC;P-GOLD-NOPWD |
+| 物理证据 | P-GOLD-ENC;P-GOLD-MODE1 |
 | 实现来源 | 不臆造调用方的值生成算法。 |
 | 语义状态 | COMPLETE |
 | 实现状态 | COMPLETE |
@@ -953,7 +953,7 @@
 | 演进类型 | ProducerChanged |
 | 写入端证据 | S-WIN-CURRENT;S-WIN-191141;V-LBA4-V19 |
 | 消费端证据 | S-WIN-191141;S-BUS-2020 |
-| 物理证据 | P-GOLD-ENC;P-GOLD-NOPWD |
+| 物理证据 | P-GOLD-ENC;P-GOLD-MODE1 |
 | 实现来源 | 不臆造调用方的值生成算法。 |
 | 语义状态 | COMPLETE |
 | 实现状态 | COMPLETE |
@@ -976,7 +976,7 @@
 | 演进类型 | EncodingChanged |
 | 写入端证据 | S-WIN-CURRENT;S-WIN-191141;V-LBA4-V19 |
 | 消费端证据 | S-WIN-CURRENT;S-LINUX-DWARF;S-REPAIR-2021 |
-| 物理证据 | P-GOLD-ENC;P-GOLD-NOPWD |
+| 物理证据 | P-GOLD-ENC;P-GOLD-MODE1 |
 | 实现来源 | 编码可与写入端 覆盖项 独立组合。 |
 | 语义状态 | COMPLETE |
 | 实现状态 | COMPLETE |
@@ -999,7 +999,7 @@
 | 演进类型 | EncodingChanged |
 | 写入端证据 | S-WIN-CURRENT;S-WIN-191141;V-LBA4-V19 |
 | 消费端证据 | S-WIN-CURRENT;S-LINUX-DWARF;S-REPAIR-2021 |
-| 物理证据 | P-GOLD-ENC;P-GOLD-NOPWD |
+| 物理证据 | P-GOLD-ENC;P-GOLD-MODE1 |
 | 实现来源 | 编码可与写入端 覆盖项 独立组合。 |
 | 语义状态 | COMPLETE |
 | 实现状态 | COMPLETE |
@@ -1022,7 +1022,7 @@
 | 演进类型 | EncodingChanged |
 | 写入端证据 | S-WIN-CURRENT;S-WIN-191141;V-LBA4-V19 |
 | 消费端证据 | S-WIN-CURRENT;S-LINUX-DWARF;S-REPAIR-2021 |
-| 物理证据 | P-GOLD-ENC;P-GOLD-NOPWD |
+| 物理证据 | P-GOLD-ENC;P-GOLD-MODE1 |
 | 实现来源 | 编码可与写入端 覆盖项 独立组合。 |
 | 语义状态 | COMPLETE |
 | 实现状态 | COMPLETE |
@@ -1045,7 +1045,7 @@
 | 演进类型 | EncodingChanged |
 | 写入端证据 | S-WIN-CURRENT;S-WIN-191141;V-LBA4-V19 |
 | 消费端证据 | S-WIN-CURRENT;S-LINUX-DWARF;S-REPAIR-2021 |
-| 物理证据 | P-GOLD-ENC;P-GOLD-NOPWD |
+| 物理证据 | P-GOLD-ENC;P-GOLD-MODE1 |
 | 实现来源 | 编码可与写入端 覆盖项 独立组合。 |
 | 语义状态 | COMPLETE |
 | 实现状态 | COMPLETE |
@@ -1114,7 +1114,7 @@
 | 演进类型 | EncodingChanged |
 | 写入端证据 | S-WIN-CURRENT;S-WIN-191141;V-LBA4-V19 |
 | 消费端证据 | S-WIN-CURRENT;S-LINUX-DWARF;S-REPAIR-2021 |
-| 物理证据 | P-GOLD-ENC;P-GOLD-NOPWD |
+| 物理证据 | P-GOLD-ENC;P-GOLD-MODE1 |
 | 实现来源 | 编码可与写入端 覆盖项 独立组合。 |
 | 语义状态 | COMPLETE |
 | 实现状态 | COMPLETE |
@@ -1137,7 +1137,7 @@
 | 演进类型 | EncodingChanged |
 | 写入端证据 | S-WIN-CURRENT;S-WIN-191141;V-LBA4-V19 |
 | 消费端证据 | S-WIN-CURRENT;S-LINUX-DWARF;S-REPAIR-2021 |
-| 物理证据 | P-GOLD-ENC;P-GOLD-NOPWD |
+| 物理证据 | P-GOLD-ENC;P-GOLD-MODE1 |
 | 实现来源 | 编码可与写入端 覆盖项 独立组合。 |
 | 语义状态 | COMPLETE |
 | 实现状态 | COMPLETE |
@@ -1160,7 +1160,7 @@
 | 演进类型 | EncodingChanged |
 | 写入端证据 | S-WIN-CURRENT;S-WIN-191141;V-LBA4-V19 |
 | 消费端证据 | S-WIN-CURRENT;S-LINUX-DWARF;S-REPAIR-2021 |
-| 物理证据 | P-GOLD-ENC;P-GOLD-NOPWD |
+| 物理证据 | P-GOLD-ENC;P-GOLD-MODE1 |
 | 实现来源 | 编码可与写入端 覆盖项 独立组合。 |
 | 语义状态 | COMPLETE |
 | 实现状态 | COMPLETE |
@@ -1183,7 +1183,7 @@
 | 演进类型 | EncodingChanged |
 | 写入端证据 | S-WIN-CURRENT;S-WIN-191141;V-LBA4-V19 |
 | 消费端证据 | S-WIN-CURRENT;S-LINUX-DWARF;S-REPAIR-2021 |
-| 物理证据 | P-GOLD-ENC;P-GOLD-NOPWD |
+| 物理证据 | P-GOLD-ENC;P-GOLD-MODE1 |
 | 实现来源 | 编码可与写入端 覆盖项 独立组合。 |
 | 语义状态 | COMPLETE |
 | 实现状态 | COMPLETE |
@@ -1206,7 +1206,7 @@
 | 演进类型 | EncodingChanged |
 | 写入端证据 | S-WIN-CURRENT;S-WIN-191141;V-LBA4-V19 |
 | 消费端证据 | S-WIN-CURRENT;S-LINUX-DWARF;S-REPAIR-2021 |
-| 物理证据 | P-GOLD-ENC;P-GOLD-NOPWD |
+| 物理证据 | P-GOLD-ENC;P-GOLD-MODE1 |
 | 实现来源 | 编码可与写入端 覆盖项 独立组合。 |
 | 语义状态 | COMPLETE |
 | 实现状态 | COMPLETE |
@@ -1229,7 +1229,7 @@
 | 演进类型 | EncodingChanged |
 | 写入端证据 | S-WIN-CURRENT;S-WIN-191141;V-LBA4-V19 |
 | 消费端证据 | S-WIN-CURRENT;S-LINUX-DWARF;S-REPAIR-2021 |
-| 物理证据 | P-GOLD-ENC;P-GOLD-NOPWD |
+| 物理证据 | P-GOLD-ENC;P-GOLD-MODE1 |
 | 实现来源 | 编码可与写入端 覆盖项 独立组合。 |
 | 语义状态 | COMPLETE |
 | 实现状态 | COMPLETE |
@@ -1252,7 +1252,7 @@
 | 演进类型 | EncodingChanged |
 | 写入端证据 | S-WIN-CURRENT;S-WIN-191141;V-LBA4-V19 |
 | 消费端证据 | S-WIN-CURRENT;S-LINUX-DWARF;S-REPAIR-2021 |
-| 物理证据 | P-GOLD-ENC;P-GOLD-NOPWD |
+| 物理证据 | P-GOLD-ENC;P-GOLD-MODE1 |
 | 实现来源 | 编码可与写入端 覆盖项 独立组合。 |
 | 语义状态 | COMPLETE |
 | 实现状态 | COMPLETE |
@@ -1275,7 +1275,7 @@
 | 演进类型 | EncodingChanged |
 | 写入端证据 | S-WIN-CURRENT;S-WIN-191141;V-LBA4-V19 |
 | 消费端证据 | S-WIN-CURRENT;S-LINUX-DWARF;S-REPAIR-2021 |
-| 物理证据 | P-GOLD-ENC;P-GOLD-NOPWD |
+| 物理证据 | P-GOLD-ENC;P-GOLD-MODE1 |
 | 实现来源 | 编码可与写入端 覆盖项 独立组合。 |
 | 语义状态 | COMPLETE |
 | 实现状态 | COMPLETE |
@@ -1298,7 +1298,7 @@
 | 演进类型 | EncodingChanged |
 | 写入端证据 | S-WIN-CURRENT;S-WIN-191141;V-LBA4-V19 |
 | 消费端证据 | S-WIN-CURRENT;S-LINUX-DWARF;S-REPAIR-2021 |
-| 物理证据 | P-GOLD-ENC;P-GOLD-NOPWD |
+| 物理证据 | P-GOLD-ENC;P-GOLD-MODE1 |
 | 实现来源 | 编码可与写入端 覆盖项 独立组合。 |
 | 语义状态 | COMPLETE |
 | 实现状态 | COMPLETE |
@@ -1321,7 +1321,7 @@
 | 演进类型 | EncodingChanged |
 | 写入端证据 | S-WIN-CURRENT;S-WIN-191141;V-LBA4-V19 |
 | 消费端证据 | S-WIN-CURRENT;S-LINUX-DWARF;S-REPAIR-2021 |
-| 物理证据 | P-GOLD-ENC;P-GOLD-NOPWD |
+| 物理证据 | P-GOLD-ENC;P-GOLD-MODE1 |
 | 实现来源 | 编码可与写入端 覆盖项 独立组合。 |
 | 语义状态 | COMPLETE |
 | 实现状态 | COMPLETE |
@@ -1344,7 +1344,7 @@
 | 演进类型 | EncodingChanged |
 | 写入端证据 | S-WIN-CURRENT;S-WIN-191141;V-LBA4-V19 |
 | 消费端证据 | S-WIN-CURRENT;S-LINUX-DWARF;S-REPAIR-2021 |
-| 物理证据 | P-GOLD-ENC;P-GOLD-NOPWD |
+| 物理证据 | P-GOLD-ENC;P-GOLD-MODE1 |
 | 实现来源 | 编码可与写入端 覆盖项 独立组合。 |
 | 语义状态 | COMPLETE |
 | 实现状态 | COMPLETE |
@@ -1367,7 +1367,7 @@
 | 演进类型 | EncodingChanged |
 | 写入端证据 | S-WIN-CURRENT;S-WIN-191141;V-LBA4-V19 |
 | 消费端证据 | S-WIN-CURRENT;S-LINUX-DWARF;S-REPAIR-2021 |
-| 物理证据 | P-GOLD-ENC;P-GOLD-NOPWD |
+| 物理证据 | P-GOLD-ENC;P-GOLD-MODE1 |
 | 实现来源 | 编码可与写入端 覆盖项 独立组合。 |
 | 语义状态 | COMPLETE |
 | 实现状态 | COMPLETE |
@@ -1390,7 +1390,7 @@
 | 演进类型 | EncodingChanged |
 | 写入端证据 | S-WIN-CURRENT;S-WIN-191141;V-LBA4-V19 |
 | 消费端证据 | S-WIN-CURRENT;S-LINUX-DWARF;S-REPAIR-2021 |
-| 物理证据 | P-GOLD-ENC;P-GOLD-NOPWD |
+| 物理证据 | P-GOLD-ENC;P-GOLD-MODE1 |
 | 实现来源 | 编码可与写入端 覆盖项 独立组合。 |
 | 语义状态 | COMPLETE |
 | 实现状态 | COMPLETE |
@@ -1413,7 +1413,7 @@
 | 演进类型 | EncodingChanged |
 | 写入端证据 | S-WIN-CURRENT;S-WIN-191141;V-LBA4-V19 |
 | 消费端证据 | S-WIN-CURRENT;S-LINUX-DWARF;S-REPAIR-2021 |
-| 物理证据 | P-GOLD-ENC;P-GOLD-NOPWD |
+| 物理证据 | P-GOLD-ENC;P-GOLD-MODE1 |
 | 实现来源 | 编码可与写入端 覆盖项 独立组合。 |
 | 语义状态 | COMPLETE |
 | 实现状态 | COMPLETE |
@@ -1436,7 +1436,7 @@
 | 演进类型 | EncodingChanged |
 | 写入端证据 | S-WIN-CURRENT;S-WIN-191141;V-LBA4-V19 |
 | 消费端证据 | S-WIN-CURRENT;S-LINUX-DWARF;S-REPAIR-2021 |
-| 物理证据 | P-GOLD-ENC;P-GOLD-NOPWD |
+| 物理证据 | P-GOLD-ENC;P-GOLD-MODE1 |
 | 实现来源 | 编码可与写入端 覆盖项 独立组合。 |
 | 语义状态 | COMPLETE |
 | 实现状态 | COMPLETE |
@@ -1459,7 +1459,7 @@
 | 演进类型 | EncodingChanged |
 | 写入端证据 | S-WIN-CURRENT;S-WIN-191141;V-LBA4-V19 |
 | 消费端证据 | S-WIN-CURRENT;S-LINUX-DWARF;S-REPAIR-2021 |
-| 物理证据 | P-GOLD-ENC;P-GOLD-NOPWD |
+| 物理证据 | P-GOLD-ENC;P-GOLD-MODE1 |
 | 实现来源 | 编码可与写入端 覆盖项 独立组合。 |
 | 语义状态 | COMPLETE |
 | 实现状态 | COMPLETE |
@@ -1801,7 +1801,7 @@
 | 演进类型 | Stable |
 | 写入端证据 | S-WIN-CURRENT;S-LINUX-DWARF |
 | 消费端证据 | S-WIN-CURRENT;S-LINUX-DWARF |
-| 物理证据 | P-GOLD-ENC;P-GOLD-NOPWD |
+| 物理证据 | P-GOLD-ENC;P-GOLD-MODE1 |
 | 实现来源 | 标准 COMPLETE 语义；来源边界继续保留记录。 |
 | 语义状态 | COMPLETE |
 | 实现状态 | COMPLETE |
@@ -1824,7 +1824,7 @@
 | 演进类型 | Stable |
 | 写入端证据 | S-WIN-CURRENT;S-LINUX-DWARF |
 | 消费端证据 | S-WIN-CURRENT;S-LINUX-DWARF |
-| 物理证据 | P-GOLD-ENC;P-GOLD-NOPWD |
+| 物理证据 | P-GOLD-ENC;P-GOLD-MODE1 |
 | 实现来源 | 标准 COMPLETE 语义；来源边界继续保留记录。 |
 | 语义状态 | COMPLETE |
 | 实现状态 | COMPLETE |
@@ -1847,7 +1847,7 @@
 | 演进类型 | Stable |
 | 写入端证据 | S-WIN-CURRENT;S-LINUX-DWARF |
 | 消费端证据 | S-WIN-CURRENT;S-LINUX-DWARF |
-| 物理证据 | P-GOLD-ENC;P-GOLD-NOPWD |
+| 物理证据 | P-GOLD-ENC;P-GOLD-MODE1 |
 | 实现来源 | 标准 COMPLETE 语义；来源边界继续保留记录。 |
 | 语义状态 | COMPLETE |
 | 实现状态 | COMPLETE |
@@ -1870,7 +1870,7 @@
 | 演进类型 | Stable |
 | 写入端证据 | S-WIN-CURRENT;S-LINUX-DWARF |
 | 消费端证据 | S-WIN-CURRENT;S-LINUX-DWARF |
-| 物理证据 | P-GOLD-ENC;P-GOLD-NOPWD |
+| 物理证据 | P-GOLD-ENC;P-GOLD-MODE1 |
 | 实现来源 | 标准 COMPLETE 语义；来源边界继续保留记录。 |
 | 语义状态 | COMPLETE |
 | 实现状态 | COMPLETE |
@@ -1893,7 +1893,7 @@
 | 演进类型 | Stable |
 | 写入端证据 | S-WIN-CURRENT;S-LINUX-DWARF |
 | 消费端证据 | S-WIN-CURRENT;S-LINUX-DWARF |
-| 物理证据 | P-GOLD-ENC;P-GOLD-NOPWD |
+| 物理证据 | P-GOLD-ENC;P-GOLD-MODE1 |
 | 实现来源 | 标准 COMPLETE 语义；来源边界继续保留记录。 |
 | 语义状态 | COMPLETE |
 | 实现状态 | COMPLETE |
@@ -1916,7 +1916,7 @@
 | 演进类型 | Stable |
 | 写入端证据 | S-WIN-CURRENT;S-LINUX-DWARF |
 | 消费端证据 | S-WIN-CURRENT;S-LINUX-DWARF |
-| 物理证据 | P-GOLD-ENC;P-GOLD-NOPWD |
+| 物理证据 | P-GOLD-ENC;P-GOLD-MODE1 |
 | 实现来源 | 标准 COMPLETE 语义；来源边界继续保留记录。 |
 | 语义状态 | COMPLETE |
 | 实现状态 | COMPLETE |
@@ -1939,7 +1939,7 @@
 | 演进类型 | Stable |
 | 写入端证据 | S-WIN-CURRENT;S-LINUX-DWARF |
 | 消费端证据 | S-WIN-CURRENT;S-LINUX-DWARF |
-| 物理证据 | P-GOLD-ENC;P-GOLD-NOPWD |
+| 物理证据 | P-GOLD-ENC;P-GOLD-MODE1 |
 | 实现来源 | 标准 COMPLETE 语义；来源边界继续保留记录。 |
 | 语义状态 | COMPLETE |
 | 实现状态 | COMPLETE |
@@ -1962,7 +1962,7 @@
 | 演进类型 | Stable |
 | 写入端证据 | S-WIN-CURRENT;S-LINUX-DWARF |
 | 消费端证据 | S-WIN-CURRENT;S-LINUX-DWARF |
-| 物理证据 | P-GOLD-ENC;P-GOLD-NOPWD |
+| 物理证据 | P-GOLD-ENC;P-GOLD-MODE1 |
 | 实现来源 | 标准 COMPLETE 语义；来源边界继续保留记录。 |
 | 语义状态 | COMPLETE |
 | 实现状态 | COMPLETE |
@@ -1985,7 +1985,7 @@
 | 演进类型 | Stable |
 | 写入端证据 | S-WIN-CURRENT;S-LINUX-DWARF |
 | 消费端证据 | S-WIN-CURRENT;S-LINUX-DWARF |
-| 物理证据 | P-GOLD-ENC;P-GOLD-NOPWD |
+| 物理证据 | P-GOLD-ENC;P-GOLD-MODE1 |
 | 实现来源 | 标准 COMPLETE 语义；来源边界继续保留记录。 |
 | 语义状态 | COMPLETE |
 | 实现状态 | COMPLETE |
@@ -2008,7 +2008,7 @@
 | 演进类型 | Stable |
 | 写入端证据 | S-WIN-CURRENT;S-LINUX-DWARF |
 | 消费端证据 | S-WIN-CURRENT;S-LINUX-DWARF |
-| 物理证据 | P-GOLD-ENC;P-GOLD-NOPWD |
+| 物理证据 | P-GOLD-ENC;P-GOLD-MODE1 |
 | 实现来源 | 标准 COMPLETE 语义；来源边界继续保留记录。 |
 | 语义状态 | COMPLETE |
 | 实现状态 | COMPLETE |
@@ -2031,7 +2031,7 @@
 | 演进类型 | Stable |
 | 写入端证据 | S-WIN-CURRENT;S-LINUX-DWARF |
 | 消费端证据 | S-WIN-CURRENT;S-LINUX-DWARF |
-| 物理证据 | P-GOLD-ENC;P-GOLD-NOPWD |
+| 物理证据 | P-GOLD-ENC;P-GOLD-MODE1 |
 | 实现来源 | 标准 COMPLETE 语义；来源边界继续保留记录。 |
 | 语义状态 | COMPLETE |
 | 实现状态 | COMPLETE |
@@ -2054,7 +2054,7 @@
 | 演进类型 | Stable |
 | 写入端证据 | S-WIN-CURRENT;S-LINUX-DWARF |
 | 消费端证据 | S-WIN-CURRENT;S-LINUX-DWARF |
-| 物理证据 | P-GOLD-ENC;P-GOLD-NOPWD |
+| 物理证据 | P-GOLD-ENC;P-GOLD-MODE1 |
 | 实现来源 | 标准 COMPLETE 语义；来源边界继续保留记录。 |
 | 语义状态 | COMPLETE |
 | 实现状态 | COMPLETE |
@@ -2077,7 +2077,7 @@
 | 演进类型 | Stable |
 | 写入端证据 | S-WIN-CURRENT;S-LINUX-DWARF |
 | 消费端证据 | S-WIN-CURRENT;S-LINUX-DWARF |
-| 物理证据 | P-GOLD-ENC;P-GOLD-NOPWD |
+| 物理证据 | P-GOLD-ENC;P-GOLD-MODE1 |
 | 实现来源 | 标准 COMPLETE 语义；来源边界继续保留记录。 |
 | 语义状态 | COMPLETE |
 | 实现状态 | COMPLETE |
@@ -2100,7 +2100,7 @@
 | 演进类型 | Stable |
 | 写入端证据 | S-WIN-CURRENT;S-LINUX-DWARF |
 | 消费端证据 | S-WIN-CURRENT;S-LINUX-DWARF |
-| 物理证据 | P-GOLD-ENC;P-GOLD-NOPWD |
+| 物理证据 | P-GOLD-ENC;P-GOLD-MODE1 |
 | 实现来源 | 标准 COMPLETE 语义；来源边界继续保留记录。 |
 | 语义状态 | COMPLETE |
 | 实现状态 | COMPLETE |
@@ -2123,7 +2123,7 @@
 | 演进类型 | Stable |
 | 写入端证据 | S-WIN-CURRENT;S-LINUX-DWARF |
 | 消费端证据 | S-WIN-CURRENT;S-LINUX-DWARF |
-| 物理证据 | P-GOLD-ENC;P-GOLD-NOPWD |
+| 物理证据 | P-GOLD-ENC;P-GOLD-MODE1 |
 | 实现来源 | 标准 COMPLETE 语义；来源边界继续保留记录。 |
 | 语义状态 | COMPLETE |
 | 实现状态 | COMPLETE |
@@ -2169,7 +2169,7 @@
 | 演进类型 | OwnershipChanged |
 | 写入端证据 | S-WIN-CURRENT;S-WIN-191141-LBA6;S-MBR-SNAPSHOT-SEMANTIC |
 | 消费端证据 | S-WIN-CURRENT;S-WIN-191141-LBA6;S-MBR-SNAPSHOT-SEMANTIC |
-| 物理证据 | P-GOLD-ENC;P-GOLD-NOPWD;P-EESI-NETAC |
+| 物理证据 | P-GOLD-ENC;P-GOLD-MODE1;P-EESI-NETAC |
 | 实现来源 | 历史非零选择器仅属于来源信息。 |
 | 语义状态 | COMPLETE |
 | 实现状态 | COMPLETE |
@@ -2192,7 +2192,7 @@
 | 演进类型 | Stable |
 | 写入端证据 | S-WIN-CURRENT;S-LINUX-DWARF |
 | 消费端证据 | S-WIN-CURRENT;S-LINUX-DWARF |
-| 物理证据 | P-GOLD-ENC;P-GOLD-NOPWD |
+| 物理证据 | P-GOLD-ENC;P-GOLD-MODE1 |
 | 实现来源 | 标准 COMPLETE 语义；来源边界继续保留记录。 |
 | 语义状态 | COMPLETE |
 | 实现状态 | COMPLETE |
@@ -2215,7 +2215,7 @@
 | 演进类型 | Stable |
 | 写入端证据 | S-WIN-CURRENT;S-LINUX-DWARF |
 | 消费端证据 | S-WIN-CURRENT;S-LINUX-DWARF |
-| 物理证据 | P-GOLD-ENC;P-GOLD-NOPWD |
+| 物理证据 | P-GOLD-ENC;P-GOLD-MODE1 |
 | 实现来源 | 标准 COMPLETE 语义；来源边界继续保留记录。 |
 | 语义状态 | COMPLETE |
 | 实现状态 | COMPLETE |
@@ -2238,7 +2238,7 @@
 | 演进类型 | Stable |
 | 写入端证据 | S-WIN-CURRENT;S-LINUX-DWARF |
 | 消费端证据 | S-WIN-CURRENT;S-LINUX-DWARF |
-| 物理证据 | P-GOLD-ENC;P-GOLD-NOPWD |
+| 物理证据 | P-GOLD-ENC;P-GOLD-MODE1 |
 | 实现来源 | 标准 COMPLETE 语义；来源边界继续保留记录。 |
 | 语义状态 | COMPLETE |
 | 实现状态 | COMPLETE |
@@ -2261,7 +2261,7 @@
 | 演进类型 | Stable |
 | 写入端证据 | S-WIN-CURRENT;S-LINUX-DWARF |
 | 消费端证据 | S-WIN-CURRENT;S-LINUX-DWARF |
-| 物理证据 | P-GOLD-ENC;P-GOLD-NOPWD |
+| 物理证据 | P-GOLD-ENC;P-GOLD-MODE1 |
 | 实现来源 | 标准 COMPLETE 语义；来源边界继续保留记录。 |
 | 语义状态 | COMPLETE |
 | 实现状态 | COMPLETE |
@@ -2343,7 +2343,7 @@
 | 演进类型 | Stable |
 | 写入端证据 | S-WIN-CURRENT;S-LINUX-DWARF |
 | 消费端证据 | S-WIN-CURRENT;S-LINUX-DWARF |
-| 物理证据 | P-GOLD-ENC;P-GOLD-NOPWD |
+| 物理证据 | P-GOLD-ENC;P-GOLD-MODE1 |
 | 实现来源 | 标准 COMPLETE 语义；来源边界继续保留记录。 |
 | 语义状态 | COMPLETE |
 | 实现状态 | COMPLETE |
@@ -2366,7 +2366,7 @@
 | 演进类型 | AddedRemoved |
 | 写入端证据 | S-WIN-CURRENT;S-LINUX-DWARF |
 | 消费端证据 | S-WIN-CURRENT;S-LINUX-DWARF |
-| 物理证据 | P-GOLD-ENC;P-GOLD-NOPWD |
+| 物理证据 | P-GOLD-ENC;P-GOLD-MODE1 |
 | 实现来源 | 条目数量与 密码信息 版本相互独立。 |
 | 语义状态 | COMPLETE |
 | 实现状态 | COMPLETE |
@@ -2389,7 +2389,7 @@
 | 演进类型 | AddedRemoved |
 | 写入端证据 | S-WIN-CURRENT;S-LINUX-DWARF |
 | 消费端证据 | S-WIN-CURRENT;S-LINUX-DWARF |
-| 物理证据 | P-GOLD-ENC;P-GOLD-NOPWD |
+| 物理证据 | P-GOLD-ENC;P-GOLD-MODE1 |
 | 实现来源 | 条目数量与 密码信息 版本相互独立。 |
 | 语义状态 | COMPLETE |
 | 实现状态 | COMPLETE |
@@ -2412,7 +2412,7 @@
 | 演进类型 | ProducerChanged |
 | 写入端证据 | S-WIN-CURRENT;S-LINUX-DWARF |
 | 消费端证据 | S-WIN-CURRENT;S-LINUX-DWARF |
-| 物理证据 | P-GOLD-ENC;P-GOLD-NOPWD |
+| 物理证据 | P-GOLD-ENC;P-GOLD-MODE1 |
 | 实现来源 | 与条目数量相互独立。 |
 | 语义状态 | COMPLETE |
 | 实现状态 | COMPLETE |
@@ -2435,7 +2435,7 @@
 | 演进类型 | ProducerChanged |
 | 写入端证据 | S-WIN-CURRENT;S-LINUX-DWARF |
 | 消费端证据 | S-WIN-CURRENT;S-LINUX-DWARF |
-| 物理证据 | P-GOLD-ENC;P-GOLD-NOPWD |
+| 物理证据 | P-GOLD-ENC;P-GOLD-MODE1 |
 | 实现来源 | 与条目数量相互独立。 |
 | 语义状态 | COMPLETE |
 | 实现状态 | COMPLETE |
@@ -2458,7 +2458,7 @@
 | 演进类型 | Stable |
 | 写入端证据 | S-WIN-CURRENT;S-LINUX-DWARF |
 | 消费端证据 | S-WIN-CURRENT;S-LINUX-DWARF |
-| 物理证据 | P-GOLD-ENC;P-GOLD-NOPWD |
+| 物理证据 | P-GOLD-ENC;P-GOLD-MODE1 |
 | 实现来源 | 标准 COMPLETE 语义；来源边界继续保留记录。 |
 | 语义状态 | COMPLETE |
 | 实现状态 | COMPLETE |
@@ -2473,8 +2473,8 @@
 
 | 状态 | 角色 | 完整轴范围（可跨 LBA） | 演进类型 | 差异说明 | 证据 |
 | --- | --- | --- | --- | --- | --- |
-| two-entry | owner | 7:080-0bf | AddedRemoved | 第三个打包旧版 EDPF 条目可独立缺失或存在。 | S-WIN-CURRENT;P-GOLD-ENC;P-GOLD-NOPWD |
-| three-entry | owner | 7:080-0bf | AddedRemoved | 第三个打包旧版 EDPF 条目可独立缺失或存在。 | S-WIN-CURRENT;P-GOLD-ENC;P-GOLD-NOPWD |
+| two-entry | owner | 7:080-0bf | AddedRemoved | 第三个打包旧版 EDPF 条目可独立缺失或存在。 | S-WIN-CURRENT;P-GOLD-ENC;P-GOLD-MODE1 |
+| three-entry | owner | 7:080-0bf | AddedRemoved | 第三个打包旧版 EDPF 条目可独立缺失或存在。 | S-WIN-CURRENT;P-GOLD-ENC;P-GOLD-MODE1 |
 
 | 区域（含首尾） | two-entry | three-entry |
 | --- | --- | --- |
@@ -2558,7 +2558,7 @@
 | 演进类型 | Stable |
 | 写入端证据 | S-WIN-CURRENT;S-LINUX-DWARF |
 | 消费端证据 | S-WIN-CURRENT;S-LINUX-DWARF |
-| 物理证据 | P-GOLD-ENC;P-GOLD-NOPWD |
+| 物理证据 | P-GOLD-ENC;P-GOLD-MODE1 |
 | 实现来源 | 标准 COMPLETE 语义；来源边界继续保留记录。 |
 | 语义状态 | COMPLETE |
 | 实现状态 | COMPLETE |
@@ -2581,7 +2581,7 @@
 | 演进类型 | Stable |
 | 写入端证据 | S-WIN-CURRENT;S-LINUX-DWARF |
 | 消费端证据 | S-WIN-CURRENT;S-LINUX-DWARF |
-| 物理证据 | P-GOLD-ENC;P-GOLD-NOPWD |
+| 物理证据 | P-GOLD-ENC;P-GOLD-MODE1 |
 | 实现来源 | 标准 COMPLETE 语义；来源边界继续保留记录。 |
 | 语义状态 | COMPLETE |
 | 实现状态 | COMPLETE |
@@ -2604,7 +2604,7 @@
 | 演进类型 | Stable |
 | 写入端证据 | S-WIN-CURRENT;S-LINUX-DWARF |
 | 消费端证据 | S-WIN-CURRENT;S-LINUX-DWARF |
-| 物理证据 | P-GOLD-ENC;P-GOLD-NOPWD |
+| 物理证据 | P-GOLD-ENC;P-GOLD-MODE1 |
 | 实现来源 | 标准 COMPLETE 语义；来源边界继续保留记录。 |
 | 语义状态 | COMPLETE |
 | 实现状态 | COMPLETE |
@@ -2627,7 +2627,7 @@
 | 演进类型 | Stable |
 | 写入端证据 | S-WIN-CURRENT;S-LINUX-DWARF |
 | 消费端证据 | S-WIN-CURRENT;S-LINUX-DWARF |
-| 物理证据 | P-GOLD-ENC;P-GOLD-NOPWD |
+| 物理证据 | P-GOLD-ENC;P-GOLD-MODE1 |
 | 实现来源 | 标准 COMPLETE 语义；来源边界继续保留记录。 |
 | 语义状态 | COMPLETE |
 | 实现状态 | COMPLETE |
@@ -2650,7 +2650,7 @@
 | 演进类型 | Stable |
 | 写入端证据 | S-WIN-CURRENT;S-LINUX-DWARF |
 | 消费端证据 | S-WIN-CURRENT;S-LINUX-DWARF |
-| 物理证据 | P-GOLD-ENC;P-GOLD-NOPWD |
+| 物理证据 | P-GOLD-ENC;P-GOLD-MODE1 |
 | 实现来源 | 标准 COMPLETE 语义；来源边界继续保留记录。 |
 | 语义状态 | COMPLETE |
 | 实现状态 | COMPLETE |
@@ -2719,7 +2719,7 @@
 | 演进类型 | Stable |
 | 写入端证据 | S-WIN-CURRENT;S-LINUX-DWARF |
 | 消费端证据 | S-WIN-CURRENT;S-LINUX-DWARF |
-| 物理证据 | P-GOLD-ENC;P-GOLD-NOPWD |
+| 物理证据 | P-GOLD-ENC;P-GOLD-MODE1 |
 | 实现来源 | 标准 COMPLETE 语义；来源边界继续保留记录。 |
 | 语义状态 | COMPLETE |
 | 实现状态 | COMPLETE |
@@ -2742,7 +2742,7 @@
 | 演进类型 | Stable |
 | 写入端证据 | S-WIN-CURRENT;S-LINUX-DWARF |
 | 消费端证据 | S-WIN-CURRENT;S-LINUX-DWARF |
-| 物理证据 | P-GOLD-ENC;P-GOLD-NOPWD |
+| 物理证据 | P-GOLD-ENC;P-GOLD-MODE1 |
 | 实现来源 | 标准 COMPLETE 语义；来源边界继续保留记录。 |
 | 语义状态 | COMPLETE |
 | 实现状态 | COMPLETE |
@@ -2834,7 +2834,7 @@
 | 演进类型 | Stable |
 | 写入端证据 | S-WIN-CURRENT;S-LINUX-DWARF |
 | 消费端证据 | S-WIN-CURRENT;S-LINUX-DWARF |
-| 物理证据 | P-GOLD-ENC;P-GOLD-NOPWD |
+| 物理证据 | P-GOLD-ENC;P-GOLD-MODE1 |
 | 实现来源 | 标准 COMPLETE 语义；来源边界继续保留记录。 |
 | 语义状态 | COMPLETE |
 | 实现状态 | COMPLETE |
@@ -2857,7 +2857,7 @@
 | 演进类型 | Stable |
 | 写入端证据 | S-WIN-CURRENT;S-LINUX-DWARF |
 | 消费端证据 | S-WIN-CURRENT;S-LINUX-DWARF |
-| 物理证据 | P-GOLD-ENC;P-GOLD-NOPWD |
+| 物理证据 | P-GOLD-ENC;P-GOLD-MODE1 |
 | 实现来源 | 标准 COMPLETE 语义；来源边界继续保留记录。 |
 | 语义状态 | COMPLETE |
 | 实现状态 | COMPLETE |
@@ -2880,7 +2880,7 @@
 | 演进类型 | Stable |
 | 写入端证据 | S-WIN-CURRENT;S-LINUX-DWARF |
 | 消费端证据 | S-WIN-CURRENT;S-LINUX-DWARF |
-| 物理证据 | P-GOLD-ENC;P-GOLD-NOPWD |
+| 物理证据 | P-GOLD-ENC;P-GOLD-MODE1 |
 | 实现来源 | 标准 COMPLETE 语义；来源边界继续保留记录。 |
 | 语义状态 | COMPLETE |
 | 实现状态 | COMPLETE |
@@ -2903,7 +2903,7 @@
 | 演进类型 | Stable |
 | 写入端证据 | S-WIN-CURRENT;S-LINUX-DWARF |
 | 消费端证据 | S-WIN-CURRENT;S-LINUX-DWARF |
-| 物理证据 | P-GOLD-ENC;P-GOLD-NOPWD |
+| 物理证据 | P-GOLD-ENC;P-GOLD-MODE1 |
 | 实现来源 | 标准 COMPLETE 语义；来源边界继续保留记录。 |
 | 语义状态 | COMPLETE |
 | 实现状态 | COMPLETE |
@@ -3399,7 +3399,7 @@
 | 演进类型 | AddedRemoved |
 | 写入端证据 | S-EESI-361018 |
 | 消费端证据 | S-EESI-361018 |
-| 物理证据 | P-GOLD-ENC;P-GOLD-NOPWD |
+| 物理证据 | P-GOLD-ENC;P-GOLD-MODE1 |
 | 实现来源 | 通用样本集覆盖缺失状态。 |
 | 语义状态 | COMPLETE |
 | 实现状态 | COMPLETE |
@@ -3896,7 +3896,7 @@
 | 演进类型 | EncodingChanged |
 | 写入端证据 | S-WIN-CURRENT;S-LINUX-DWARF;V-LBA12 |
 | 消费端证据 | S-WIN-CURRENT;S-LINUX-DWARF |
-| 物理证据 | P-GOLD-ENC;P-GOLD-NOPWD |
+| 物理证据 | P-GOLD-ENC;P-GOLD-MODE1 |
 | 实现来源 | 模式1/模式3 的正例明确保持为虚拟证据。 |
 | 语义状态 | COMPLETE |
 | 实现状态 | COMPLETE |
@@ -3988,7 +3988,7 @@
 | 演进类型 | EncodingChanged |
 | 写入端证据 | S-WIN-CURRENT;S-LINUX-DWARF;V-LBA12 |
 | 消费端证据 | S-WIN-CURRENT;S-LINUX-DWARF |
-| 物理证据 | P-GOLD-ENC;P-GOLD-NOPWD |
+| 物理证据 | P-GOLD-ENC;P-GOLD-MODE1 |
 | 实现来源 | 密码信息 位于连续的扇区加密流内。 |
 | 语义状态 | COMPLETE |
 | 实现状态 | COMPLETE |
@@ -4080,7 +4080,7 @@
 | 演进类型 | EncodingChanged |
 | 写入端证据 | S-WIN-CURRENT;S-LINUX-DWARF;V-LBA12 |
 | 消费端证据 | S-WIN-CURRENT;S-LINUX-DWARF |
-| 物理证据 | P-GOLD-ENC;P-GOLD-NOPWD |
+| 物理证据 | P-GOLD-ENC;P-GOLD-MODE1 |
 | 实现来源 | 尾部始终加密，不是原始明文。 |
 | 语义状态 | COMPLETE |
 | 实现状态 | COMPLETE |
@@ -4120,7 +4120,7 @@
 | --- | --- | --- | --- | --- | --- |
 | legacy-v0064 | owner | 12:000-1ff | EncodingChanged | LBA12 封装密钥 mode 与所有其他 配置类型 轴相互独立。 | S-WIN-CURRENT;S-LINUX-DWARF |
 | mode1 | owner | 12:000-1ff | EncodingChanged | LBA12 封装密钥 mode 与所有其他 配置类型 轴相互独立。 | S-WIN-CURRENT;S-LINUX-DWARF;V-LBA12 |
-| mode2 | owner | 12:000-1ff | EncodingChanged | LBA12 封装密钥 mode 与所有其他 配置类型 轴相互独立。 | S-WIN-CURRENT;S-LINUX-DWARF;V-LBA12;P-GOLD-ENC;P-GOLD-NOPWD |
+| mode2 | owner | 12:000-1ff | EncodingChanged | LBA12 封装密钥 mode 与所有其他 配置类型 轴相互独立。 | S-WIN-CURRENT;S-LINUX-DWARF;V-LBA12;P-GOLD-ENC;P-GOLD-MODE1 |
 | mode3 | owner | 12:000-1ff | EncodingChanged | LBA12 封装密钥 mode 与所有其他 配置类型 轴相互独立。 | S-WIN-CURRENT;S-LINUX-DWARF;V-LBA12 |
 
 | 区域（含首尾） | legacy-v0064 | mode1 | mode2 | mode3 |

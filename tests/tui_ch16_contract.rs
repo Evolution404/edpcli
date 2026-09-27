@@ -111,7 +111,6 @@ fn device() -> edpcli::disk_scan::Row {
         n_possible_baks: 1,
         denied: false,
         probe_error: None,
-        is_nopwd: false,
         provision_kind: edpcli::provision::DiskProvisionKind::Mode0,
         partitions: None,
     }

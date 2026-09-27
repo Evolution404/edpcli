@@ -13,7 +13,6 @@ fn removed_dead_and_legacy_write_helpers_do_not_return() {
         "fn wildcard_match(",
         "fn read_lba_file(",
         "fn backup_label_id(",
-        "fn backup_is_nopwd(",
         "fn sha256_sidecar_path(",
         "fn read_backup_sha256(",
     ] {

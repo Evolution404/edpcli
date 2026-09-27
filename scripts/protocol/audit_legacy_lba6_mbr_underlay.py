@@ -34,10 +34,10 @@ NETAC_PATH = Path(
 )
 NETAC_SHA256 = "3c7e795b1b7110e9866dd31f44ba6e7c5e02ff77a1f70a8b11fcdcaf181fbf39"
 
-AUTHENTIC_NOPWD_PATH = Path(
-    "audit/protocol/gold/authentic-nopwd/sandisk_ultra_20260823_lba0_12.bin"
+AUTHENTIC_MODE1_PATH = Path(
+    "audit/protocol/gold/authentic-mode1/sandisk_ultra_20260823_lba0_12.bin"
 )
-AUTHENTIC_NOPWD_SHA256 = (
+AUTHENTIC_MODE1_SHA256 = (
     "d6a935525b9e7bba9926a5ee1e2a74996d2aaf93bc6291723eaaedcff679a258"
 )
 
@@ -146,7 +146,7 @@ def main() -> None:
     require_sha(AIGO_PATH, AIGO_SHA256)
     require_sha(SANDISK_LBA6_PATH, SANDISK_LBA6_SHA256)
     require_sha(NETAC_PATH, NETAC_SHA256)
-    require_sha(AUTHENTIC_NOPWD_PATH, AUTHENTIC_NOPWD_SHA256)
+    require_sha(AUTHENTIC_MODE1_PATH, AUTHENTIC_MODE1_SHA256)
 
     aigo_image = AIGO_PATH.read_bytes()
     if len(aigo_image) != 13 * SECTOR:
@@ -160,15 +160,15 @@ def main() -> None:
         raise SystemExit(f"{NETAC_PATH}: expected 6656 bytes")
     netac_plain = lba6_decode(netac_image[6 * SECTOR : 7 * SECTOR])
 
-    nopwd_image = AUTHENTIC_NOPWD_PATH.read_bytes()
-    if len(nopwd_image) != 13 * SECTOR:
-        raise SystemExit(f"{AUTHENTIC_NOPWD_PATH}: expected 6656 bytes")
-    nopwd_plain = lba6_decode(nopwd_image[6 * SECTOR : 7 * SECTOR])
+    mode1_image = AUTHENTIC_MODE1_PATH.read_bytes()
+    if len(mode1_image) != 13 * SECTOR:
+        raise SystemExit(f"{AUTHENTIC_MODE1_PATH}: expected 6656 bytes")
+    mode1_plain = lba6_decode(mode1_image[6 * SECTOR : 7 * SECTOR])
 
     aigo_entry = aigo_plain[0x1DE:0x1EE]
     sandisk_entry = sandisk_plain[0x1DE:0x1EE]
     netac_entry = netac_plain[0x1DE:0x1EE]
-    nopwd_entry = nopwd_plain[0x1DE:0x1EE]
+    mode1_entry = mode1_plain[0x1DE:0x1EE]
 
     if aigo_entry != EXPECTED_AIGO_ENTRY:
         raise SystemExit(f"Aigo legacy MBR entry drifted: {aigo_entry.hex()}")
@@ -176,9 +176,9 @@ def main() -> None:
         raise SystemExit(f"SanDisk original legacy MBR entry drifted: {sandisk_entry.hex()}")
     if netac_entry != EXPECTED_NETAC_ENTRY:
         raise SystemExit(f"Netac legacy MBR entry drifted: {netac_entry.hex()}")
-    if any(nopwd_entry):
+    if any(mode1_entry):
         raise SystemExit(
-            "authentic no-password SanDisk must remain a distinct zero-underlay profile"
+            "authentic mode1 SanDisk must remain a distinct zero-underlay profile"
         )
 
     aigo = parse_entry(aigo_entry)
@@ -212,7 +212,7 @@ def main() -> None:
             "aigo_sha256": AIGO_SHA256,
             "sandisk_lba6_fixture_sha256": SANDISK_LBA6_SHA256,
             "netac_sha256": NETAC_SHA256,
-            "authentic_nopwd_sha256": AUTHENTIC_NOPWD_SHA256,
+            "authentic_mode1_sha256": AUTHENTIC_MODE1_SHA256,
         },
         "lba6_entry3_underlay": {
             "offset": "0x1DE..0x1ED",
@@ -220,7 +220,7 @@ def main() -> None:
             "aigo": aigo,
             "sandisk_original": sandisk,
             "netac": netac,
-            "authentic_nopwd_hex": nopwd_entry.hex(),
+            "authentic_mode1_hex": mode1_entry.hex(),
             "shared_first_8_bytes_hex": aigo_entry[:8].hex(),
             "surviving_14_byte_formula": "c1ff07efffff || LE32(type4_start_lba) || LE32(type4_size_bytes/512)",
             "disk_specific_geometry_bytes": {
@@ -234,7 +234,7 @@ def main() -> None:
             "16-byte MBR partition entry under the LBA6 BeiZhu overlay: boot/CHS/type "
             "bytes are identical while start-LBA/sector-count bytes vary with the disk; "
             "the surviving 14 bytes are deterministic partition-geometry material, and "
-            "the authentic no-password SanDisk is a separate zero-underlay profile"
+            "the authentic mode1 SanDisk is a separate zero-underlay profile"
         ),
         "claim_boundary": (
             "this closes the physical byte shape and deterministic snapshot semantics; "

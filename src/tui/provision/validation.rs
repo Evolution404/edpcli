@@ -297,7 +297,7 @@ impl AppState {
             .provision
             .kind
             .mode()
-            .ok_or_else(|| "免密改造不使用新盘表单".to_string())?;
+            .ok_or_else(|| "当前流程不使用新盘表单".to_string())?;
         let parse_sectors = |value: &str, label: &str| -> Result<u64, String> {
             value
                 .parse::<u64>()

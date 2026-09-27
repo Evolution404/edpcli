@@ -20,8 +20,8 @@ pub struct DeleteSession {
 
 /// prune 预览统计；delete 路径不填。
 pub struct PruneStats {
-    pub originals: usize,
-    pub retained_snapshots: usize,
+    pub managed_backups: usize,
+    pub retained_backups: usize,
 }
 
 /// 固定快照的删除计划。targets 为确认前克隆的条目(含 content_sha256)，
@@ -189,19 +189,15 @@ impl DeleteSession {
             })
             .collect::<Option<Vec<_>>>()
             .unwrap_or_default();
-        let originals = all
+        let managed_backups = all
             .iter()
-            .filter(|entry| entry.meta.is_some() && !entry.is_nopwd)
-            .count();
-        let snapshots = all
-            .iter()
-            .filter(|entry| entry.meta.is_some() && entry.is_nopwd)
+            .filter(|entry| diskio::backup_group_key(entry).is_some())
             .count();
         let plan = DeletePlan {
             targets,
             prune_stats: Some(PruneStats {
-                originals,
-                retained_snapshots: snapshots.saturating_sub(candidate_paths.len()),
+                managed_backups,
+                retained_backups: managed_backups.saturating_sub(candidate_paths.len()),
             }),
         };
         enforce_retention_floor(self.entries(), &plan.targets)?;
@@ -317,7 +313,7 @@ mod tests {
         }
     }
 
-    fn entry(name: &str, onlyid: &str, is_nopwd: bool) -> BackupEntry {
+    fn entry(name: &str, onlyid: &str) -> BackupEntry {
         BackupEntry {
             meta: Some(BackupMeta {
                 disk: 6,
@@ -326,12 +322,10 @@ mod tests {
                 pid: "2005".into(),
                 device_id: "disk&ven_netac&prod_onlydisk".into(),
                 onlyid: Some(onlyid.into()),
-                tagged_nopwd: is_nopwd,
                 identity: Some(identity(onlyid)),
             }),
             path: PathBuf::from(name),
             mtime: 1,
-            is_nopwd,
             provision_kind: crate::provision::DiskProvisionKind::Plain,
             integrity_status: BackupIntegrityStatus::Verified,
             size_ok: true,
@@ -350,14 +344,14 @@ mod tests {
 
     #[test]
     fn retention_floor_refuses_emptying_any_group() {
-        // A 组: 加密原盘 + 2 快照; B 组: 2 快照; C 组: 仅 1 份。
+        // A 组 3 份；B 组 2 份；C 组 1 份。
         let all = vec![
-            entry("a-orig.bin", "A", false),
-            entry("a-n1.bin", "A", true),
-            entry("a-n2.bin", "A", true),
-            entry("b-n1.bin", "B", true),
-            entry("b-n2.bin", "B", true),
-            entry("c-1.bin", "C", true),
+            entry("a-orig.bin", "A"),
+            entry("a-n1.bin", "A"),
+            entry("a-n2.bin", "A"),
+            entry("b-n1.bin", "B"),
+            entry("b-n2.bin", "B"),
+            entry("c-1.bin", "C"),
         ];
         // 组内仅剩 1 份: 单删拒绝(旧 TUI 单删视角)。
         assert!(floor_err(&all, &[all[5].clone()]));
@@ -372,7 +366,7 @@ mod tests {
         // 跨组子集: 每组都不清零则允许。
         assert!(!floor_err(&all, &[all[1].clone(), all[3].clone()]));
         // 目标不在扫描集合(理论上不发生)不误伤其他组。
-        assert!(!floor_err(&all, &[entry("ghost.bin", "Z", true)]));
+        assert!(!floor_err(&all, &[entry("ghost.bin", "Z")]));
     }
 
     #[test]

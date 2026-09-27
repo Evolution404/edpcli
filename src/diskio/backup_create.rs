@@ -36,7 +36,7 @@ fn prepare_backup_capture<'a>(
     device_id: &str,
     bak_dir: &Path,
     clock: &dyn Clock,
-) -> EdpCliResult<(PathBuf, bool, crate::edpb::CoreCapture<'a>)> {
+) -> EdpCliResult<(PathBuf, crate::edpb::CoreCapture<'a>)> {
     prepare_backup_capture_with_state(facts, data, device_id, bak_dir, clock, None)
 }
 
@@ -47,7 +47,7 @@ fn prepare_backup_capture_with_state<'a>(
     bak_dir: &Path,
     clock: &dyn Clock,
     device_state: Option<&str>,
-) -> EdpCliResult<(PathBuf, bool, crate::edpb::CoreCapture<'a>)> {
+) -> EdpCliResult<(PathBuf, crate::edpb::CoreCapture<'a>)> {
     validate_backup_device_id(device_id)?;
     if data.len() != crate::common::METADATA_IMAGE_LEN {
         return Err(EdpCliError::new(
@@ -71,16 +71,14 @@ fn prepare_backup_capture_with_state<'a>(
         .as_ref()
         .map(|value| format!("_onlyid{}", value))
         .unwrap_or_default();
-    let is_nopwd = device_state.is_none() && image_is_nopwd(data, device_id);
     let file_identity = if device_state == Some("plain") {
         "plain"
     } else {
         device_id
     };
-    let state_part = if is_nopwd { "_nopwd" } else { "" };
     let base = format!(
-        "disk{}_{}_vid{}_pid{}_{}{}{}_{}",
-        facts.disk, secs, facts.vid, facts.pid, file_identity, onlyid_part, state_part, ts
+        "disk{}_{}_vid{}_pid{}_{}{}_{}",
+        facts.disk, secs, facts.vid, facts.pid, file_identity, onlyid_part, ts
     );
     let path = bak_dir.join(format!("{}.edpb", base));
     let capture = crate::edpb::CoreCapture {
@@ -94,17 +92,12 @@ fn prepare_backup_capture_with_state<'a>(
         total_sectors: facts.total_sectors,
         logical_sector_size: SECTOR as u32,
         edpcli_version: env!("CARGO_PKG_VERSION").to_string(),
-        device_state: device_state.map(str::to_string).unwrap_or_else(|| {
-            if is_nopwd {
-                "passwordless"
-            } else {
-                "encrypted"
-            }
-            .into()
-        }),
+        device_state: device_state
+            .map(str::to_string)
+            .unwrap_or_else(|| "edp".into()),
         lba0_12: data,
     };
-    Ok((path, is_nopwd, capture))
+    Ok((path, capture))
 }
 
 /// 创建自包含 EDPB Core 备份。
@@ -115,12 +108,12 @@ pub fn create_backup(
     device_id: &str,
     bak_dir: &Path,
     clock: &dyn Clock,
-) -> EdpCliResult<(PathBuf, bool)> {
-    let (path, is_nopwd, capture) = prepare_backup_capture(facts, data, device_id, bak_dir, clock)?;
+) -> EdpCliResult<PathBuf> {
+    let (path, capture) = prepare_backup_capture(facts, data, device_id, bak_dir, clock)?;
     crate::edpb::write_core_backup(&path, &capture)
         .map_err(|error| EdpCliError::new(EXIT_BACKUP, format!("错误: {error}")))?;
     sync_dir(bak_dir)?;
-    Ok((path, is_nopwd))
+    Ok(path)
 }
 
 pub fn create_plain_backup(
@@ -130,8 +123,8 @@ pub fn create_plain_backup(
     identity: &crate::application::media_identity::MediaIdentitySnapshot,
     bak_dir: &Path,
     clock: &dyn Clock,
-) -> EdpCliResult<(PathBuf, bool)> {
-    let (path, is_nopwd, capture) = prepare_backup_capture_with_state(
+) -> EdpCliResult<PathBuf> {
+    let (path, capture) = prepare_backup_capture_with_state(
         facts,
         data,
         legacy_candidate,
@@ -142,7 +135,7 @@ pub fn create_plain_backup(
     crate::edpb::write_core_backup_with_identity(&path, &capture, identity)
         .map_err(|error| EdpCliError::new(EXIT_BACKUP, format!("错误: {error}")))?;
     sync_dir(bak_dir)?;
-    Ok((path, is_nopwd))
+    Ok(path)
 }
 
 /// 创建默认的 Metadata 级 EDPB 备份。
@@ -155,8 +148,8 @@ pub fn create_metadata_backup(
     identity: &crate::application::media_identity::MediaIdentitySnapshot,
     bak_dir: &Path,
     clock: &dyn Clock,
-) -> EdpCliResult<(PathBuf, bool)> {
-    let (path, is_nopwd, core) = prepare_backup_capture(facts, data, device_id, bak_dir, clock)?;
+) -> EdpCliResult<PathBuf> {
+    let (path, core) = prepare_backup_capture(facts, data, device_id, bak_dir, clock)?;
     let capture = crate::edpb::MetadataCapture {
         core,
         regions: metadata.regions,
@@ -167,7 +160,7 @@ pub fn create_metadata_backup(
     crate::edpb::write_metadata_backup_with_identity(&path, &capture, identity)
         .map_err(|error| EdpCliError::new(EXIT_BACKUP, format!("错误: {error}")))?;
     sync_dir(bak_dir)?;
-    Ok((path, is_nopwd))
+    Ok(path)
 }
 
 /// Save an acquired Deep superset; this writes only the destination container.
@@ -179,8 +172,8 @@ pub fn create_deep_backup(
     identity: &crate::application::media_identity::MediaIdentitySnapshot,
     bak_dir: &Path,
     clock: &dyn Clock,
-) -> EdpCliResult<(PathBuf, bool)> {
-    let (path, is_nopwd, core) = prepare_backup_capture(facts, data, device_id, bak_dir, clock)?;
+) -> EdpCliResult<PathBuf> {
+    let (path, core) = prepare_backup_capture(facts, data, device_id, bak_dir, clock)?;
     let capture = crate::edpb::MetadataCapture {
         core,
         regions: deep.regions,
@@ -191,7 +184,7 @@ pub fn create_deep_backup(
     crate::edpb::write_deep_backup_with_identity(&path, &capture, identity)
         .map_err(|e| EdpCliError::new(EXIT_BACKUP, format!("错误: {e}")))?;
     sync_dir(bak_dir)?;
-    Ok((path, is_nopwd))
+    Ok(path)
 }
 
 pub fn mtime_epoch(path: &Path) -> i64 {

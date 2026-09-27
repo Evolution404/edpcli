@@ -24,8 +24,8 @@
     ],
     "prior_art_name": "a6b0_decrypt_block / a7f0_encrypt_block in analyze/last/decrypt_tail.py; COMPREHENSIVE_ANALYSIS_20260611.md labels the family A6B0/A7F0"
   },
-  "key_matrix_sandisk_nopwd": {
-    "ciphertext": "audit/protocol/lba7_compatibility/live_captures/sandisk_nopwd_20260923/lba7_compat_extent.bin",
+  "key_matrix_sandisk_mode1": {
+    "ciphertext": "audit/protocol/lba7_compatibility/live_captures/sandisk_mode1_20260923/lba7_compat_extent.bin",
     "candidates": [
       {"key": "unwrapped key8 24a4cfbdc9bf4101 (len 8)", "roundtrip": true, "entropy_bits_per_byte": 7.935, "magics_found": 0},
       {"key": "wrapped8 b5355e2c582ed090 (len 8)", "roundtrip": true, "entropy_bits_per_byte": 7.928, "magics_found": 0},
@@ -42,7 +42,7 @@
       "lexar_disk1 gold fbf45d47...",
       "aigo_disk2 three_disks 996d238a...",
       "sandisk_disk3 three_disks e51e95db...",
-      "sandisk_nopwd live aaeffbba..."
+      "sandisk_mode1 live aaeffbba..."
     ],
     "within_capture_repeated_16b_blocks": "0 of 192 blocks repeat in any capture",
     "cross_capture_shared_16b_blocks": "0 shared blocks between any pair, same-position or anywhere",
@@ -69,7 +69,7 @@
   "proves": [
     "The legacy driver 8-byte-key transform sub_13160/sub_13450 is the same cipher family as the A6B0/A7F0 transform documented from EdpEDiskCtrl.dll: key table EDPSECDISK200709, AES-128 structure, per-block counter tweak.",
     "The transform is offset-tweaked rather than CBC-chained, so correct LBA7 legacy compatibility extent decryption requires the counter seed of the real mount I/O, not an IV.",
-    "Six additional key candidates fail to expose structure in the no-password SanDisk LBA7 legacy compatibility extent under the exact driver semantics.",
+    "Six additional key candidates fail to expose structure in the mode1 SanDisk LBA7 legacy compatibility extent under the exact driver semantics.",
     "The four physical LBA7 legacy compatibility extent captures share no block-level or positional byte structure, ruling out a cross-disk shared key with shared plaintext template.",
     "The EDPSECDISK marker provides a cheap cross-binary search key and surfaces the Linux client as an unscreened code path."
   ],

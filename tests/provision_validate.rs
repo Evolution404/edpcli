@@ -35,10 +35,9 @@ fn validator_accepts_generated_image_and_reports_identity() {
     let spec = spec();
     let image = generate_image(&spec, &entropy()).unwrap();
     let report = ProvisionValidator::validate(&spec, &image).unwrap();
-    assert_eq!(report.profile_id(), "jiangsu-safe6-nopwd");
+    assert_eq!(report.profile_id(), "jiangsu-safe6-v1");
     assert_eq!(report.device_id(), spec.target().device_id());
     assert_eq!(report.onlyid(), "1402259934");
-    assert!(report.is_nopwd());
 }
 
 #[test]

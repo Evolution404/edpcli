@@ -37,7 +37,7 @@
 4. edpcli 制盘可以生成；
 5. 只有写入端没有读取端；
 6. 只有读取端、没有写入端/真实盘面正例、也没有满足上述“双一方消费端唯一逆映射”历史门槛；
-7. 免密转换结果、自生成盘或实验盘与预期一致。
+7. mode1 重制结果、自生成盘或实验盘与预期一致。
 
 ### 1.1 实盘证据规则
 
@@ -46,23 +46,23 @@
 
 - `audit/protocol/gold/strict-encrypted/`：19 份 SHA-256 唯一的 6656B 严格
   原始代际加密原盘 LBA0-LBA12；
-- `audit/protocol/gold/authentic-nopwd/`：1 份 6656B 的 SanDisk Ultra 真实免密盘
-  LBA0-LBA12，只读采集，作为免密行为/配置类型的唯一金标。
+- `audit/protocol/gold/authentic-mode1/`：1 份 6656B 的 SanDisk Ultra 真实 mode1 盘
+  LBA0-LBA12，只读采集，作为mode1行为/配置类型的唯一金标。
 
 少数配置类型需要独立的特定用途真实设备正向，但不应改变通用统计集人口定义。这类证据统一放在 `audit/protocol/physical-evidence/`，必须有独立来源、SHA-256、只读采集边界和定向回归测试。例如 LBA10 EESI 启用配置类型的 `P-EESI-NETAC` 就属于这一类；它可以关闭对应配置类型的物理正向缺口，但不会被计成通用统计集的“第21份样本”。
 
 原始采集来源仍分别保留为 `/Users/zhangyuxi/.edpcli-backup` 与
-`/Users/zhangyuxi/Desktop/u_disk/analyze/disk_data/no_password_disk4`，但这两个目录已不再
-是审计运行依赖。其中 `.edpcli-backup` 的 `_nopwd_` 文件是 edpcli 自制免密盘，只能
-用于产品回归，**没有协议参考价值**，不得与真实免密金标混用。
-`nopwd_tool/backup`、`utils/backup`、散落的历史快照以及仓库裁剪夹具均不得再作为
+`/Users/zhangyuxi/Desktop/u_disk/analyze/disk_data/sandisk_mode1_capture`，但这两个目录已不再
+是审计运行依赖。其中 `.edpcli-backup` 的 `_mode1_` 文件是 edpcli 自制mode1 盘，只能
+用于产品回归，**没有协议参考价值**，不得与真实mode1金标混用。
+`mode1_tool/backup`、`utils/backup`、散落的历史快照以及仓库裁剪夹具均不得再作为
 金标统计来源。仓库 `tests/fixtures/protocol` 只保留从金标提取的 CI 回归子集；附录中
 残留的 22/57/58 份历史统计集仅记录当时研究过程，不能覆盖本节口径，也不能独立
 支撑完全闭环。标准账本中涉及真实盘的结论必须能回到上述 19+1 通用统计集
 或清单跟踪 的特定用途物理证据；否则不得把普通历史快照、
 实验盘或临时目录样本冒充物理正向闭环。
 
-**禁止把免密转换盘、自生成盘、文件名带 `_nopwd` 的夹具、或内容已经呈现自制免密
+**禁止把mode1 重制盘、自生成盘、文件名带 `_mode1` 的夹具、或内容已经呈现自制mode1
 状态的备份作为“原始写入端协议”证据。**
 **金标按完整 6656B SHA-256 去重；字节完全相同的重复只读采集只保留一份，不得按
 独立真实盘重复计权。**
@@ -72,7 +72,7 @@
 为防止“文档结论已更新、临时测试框架 / 样本口径仍停留在旧阶段”，仓库新增
 `audit/protocol/` 作为本文的机器可校验伴随账本，而不是第二份真相源：
 
-- `gold_samples.tsv`：冻结当前19份唯一严格加密原盘 + 1份真实免密盘 LBA0-LBA12
+- `gold_samples.tsv`：冻结当前19份唯一严格加密原盘 + 1份真实 mode1 盘 LBA0-LBA12
   的来源名、仓库相对路径、长度和 SHA-256；`audit/protocol/gold/` 保存对应完整
   6656B 字节，因此基线审计从干净克隆即可直接重放；
 - `evidence_manifest.tsv`：把物理 / 虚拟 / 静态三类证据分开记录，固定
@@ -131,9 +131,9 @@ EESI 正例的明文布局一致。结合两套官方 EESI 写入端/消费端�
 
 历史写入端的获取目标也已从“未知中间代”收紧到可复核的本机运行基线。`Product_audit` 与 `VUpdateReplace.log` 已证明 2025-05-13 部署了 CEMS 基础版本 `8.1.2502.2116`，且其更新树包含 `ydcc/cemsusbregsiter.dll(.zip)`；新增审计 `VUpdateService.log`（SHA-256=`5ec3b53e34573646b29dde6cee5595fccb527c385f0b0f571d7b8b74ebf8c517`）进一步证明，在 2026-04-30 升级发生前，更新服务仍将本机 `LocalVersionBase` 报告为 `8.1.2502.2116`，之后才看到 `ServiceVersionBase=8.1.2604.0917`，并对新版 `ydcc/cemsusbregsiter.dll.zip` 逐文件下载、校验 CRC/大小。这说明 2025 代际是升级前实际运行的 CEMSUsbRegsiter 家族候选，而非单纯历史数据库记录。后续 `audit_ydcc_2025_runtime_fingerprint.py` 已从替换日志恢复旧 `cemsusbregsiter.dll` MD5=`02F8CD326E8CBDA04F17B6235BDF268D`；`audit_current_busmanage_dept_forwarding.py` 又恢复同代被删除的 `usbtoolbusmanage.dll` MD5=`FC29B1C96E48F4F82EA6D641362B3364`，并固定当前 BusManage 的 Dept 转发：请求 `+0x80` 以 `wcsncpy(...,0xBC)` 完整进入写入端 interface，当前 CEMSUsbRegsiter 再把同一字段复制到 `UsbLabelParam+0x40`、容量=`0xBC`。这直接排除当前 BusManage 在写入端前人为制造 Dept[59]=NUL / 59B join；缺失 join59 写入端应继续在旧 CEMSUsbRegsiter 序列化器或同接口旧实现中寻找。由于 2025 两个 DLL 的旧字节仍未恢复，这些证据只收紧 join59/旧版 MBR 写入端的获取目标，不改变 `LBA6+0x03F/+0x1E0..+0x1ED` 与 `LBA9+0x080..+0x0FF` 的部分闭环状态。
 
-#### 真实免密 SanDisk LBA4：盘面 / 读取端 / 写入端三层必须分开
+#### 真实mode1 SanDisk LBA4：盘面 / 读取端 / 写入端三层必须分开
 
-仓库真实免密金标 SHA-256=`d6a935525b9e7bba9926a5ee1e2a74996d2aaf93bc6291723eaaedcff679a258`
+仓库真实mode1金标 SHA-256=`d6a935525b9e7bba9926a5ee1e2a74996d2aaf93bc6291723eaaedcff679a258`
 的 LBA4，已与原始 `raw/LBA04.bin` 及 concat 对应扇区逐字节比对一致：
 
 - 主 onlyid=`794661040`，滚动后 `OnlyIdXor8` 保护值正确；
@@ -160,7 +160,7 @@ EESI 正例的明文布局一致。结合两套官方 EESI 写入端/消费端�
   “第二!=主/HSerial!=0 就一定采用普通滚动标志表示”的旧分类器；
 - 当前官方读取端 `ReadSector4/sub_10015090` 已由仓库
   `scripts/protocol/probe_lba4_reader.py` 在 Unicorn 隔离内存中直接执行。探测固定
-  上述当前 DLL 哈希与真实免密金标哈希，实际覆盖函数 RVA
+  上述当前 DLL 哈希与真实mode1金标哈希，实际覆盖函数 RVA
   `0x15090..0x15295`，只桩函数分配器/MSVC 字符串/`atoi`/安全 Cookie 运行库边界，
   无未映射/异常，返回0并得到 onlyid=`794661040`、正确保护值、
   第二=`0x4A32BA39`、非零 HSerial、`LLGB`、版本=1、元组=`08040c01`、
@@ -188,7 +188,7 @@ EESI 正例的明文布局一致。结合两套官方 EESI 写入端/消费端�
 写入端仍未取得；在该家族中读取端视图才对应节点标志。仅凭盘面与身份字段，
 目前不能无歧义选择两种家族。
 
-真实免密 SanDisk 的 `00 00 -> D4 D9` 现在不再只是“与异或后家族相容”：上述
+真实mode1 SanDisk 的 `00 00 -> D4 D9` 现在不再只是“与异或后家族相容”：上述
 v19 虚拟 execution 已证明，在保留其非镜像第二 ID 与非零 HSerial 的条件下，
 **写入端节点标志=`00 00` 可以由官方历史写入端精确重建整扇真实盘面镜像**。
 但仍不能声称它一定由 v19.11.4.1 生成：已取得的 paired 2020 BusManage 会把 HSerial
@@ -209,7 +209,7 @@ LBA4-LBA12**，`RewriteSafe6BakLabel@0x100094E0` 反向整块备份；其独立 
 按写入端/表示/消费端生命周期分别记账：`bDataToServer@+0x045` 仍有
 真实 `0B` 读取端配置类型，保持部分闭环；`bConnetServer@+0x046` 的已取得当前
 Windows/Linux 与 v19.11.4.1 constructors 都全零初始化且无赋值，历史滚动形式
-实盘的正式读取端视图为0，真实免密 SanDisk 又已由 v19 官方写入端以
+实盘的正式读取端视图为0，真实mode1 SanDisk 又已由 v19 官方写入端以
 写入端侧全零精确重建整扇，而所有已审读取端/恢复上层均无该字节的值相关
 业务分支。因此 `+0x046` 重新闭合为 **写入端侧未启用全零兼容字节，
 完全闭环**。这里完全闭环不等于“读取端总返回0”，也不宣称已知道 SanDisk 当年的
@@ -550,7 +550,7 @@ tagEdpPartionRestorInfoNode @ edpdiskglobal.h:220, sizeof=0x2F
 因此后续追原始全零历史写入端时，**禁止**再用 OnllyID2Nd/HSerialCRC 代际形态作为
 短/完整表示的选择条件；真实选择条件仍未定位。
 
-新增真实免密 SanDisk 又给出决定性反例：第二=`0x4A32BA39`、HSerial非零，
+新增真实mode1 SanDisk 又给出决定性反例：第二=`0x4A32BA39`、HSerial非零，
 但物理标志=`00 00`，当前官方读取端输出=`D4 D9`。所以此前两个极端模型
 以及身份分类器都不成立：既不能把通用滚动结果对所有盘都当
 写入端标志，也不能把物理字节对所有盘都当写入端标志，更不能用
@@ -583,7 +583,7 @@ flag display = { reader byte, physical wire byte, producer=requires writer prove
   `OnlyIdXor8` 保护值，没有单字节标志补丁或值相关分支。
 
 这段历史阶段判断已被后续证据取代：`+0x45` 现已由 v19 官方写入端的调用方负责注入实验、严格 Aigo 滚动解码=`0B` 与跨代负向消费端闭合为 **完全闭环**；`+0x46` 则由当前 Windows/Linux + v19.11.4.1 直接写入端全零、
-历史滚动形式读取端为零、真实免密物理盘面=`00`、v19 精确 512B 虚拟
+历史滚动形式读取端为零、真实mode1物理盘面=`00`、v19 精确 512B 虚拟
 写入端 reconstruction、跨代读取端/修复负向消费端一起闭合为
 **完全闭环**。其中 `+0x46` 的字段语义是写入端侧未启用全零兼容
 字节；官方读取端对异或后盘面可返回非零变换后字节（真实样本即 `D9`），
@@ -695,17 +695,17 @@ DWARF 中恢复出的原始声明文件/行号与本地函数地址：
 <!-- FIELD_LEDGER_BEGIN -->
 | LBA | 范围 | 状态 | 字段/区域 | 写入端证据 | 消费端证据 | 实盘验证 | 当前结论 |
 |---|---|---|---|---|---|---|---|
-| LBA0 | 0x000–0x17A excluding 0x0E1/0x0E8/0x101/0x103/0x10B/0x10D/0x124/0x143/0x162 | COMPLETE | 配置类型级 MBR 引导代码数据块 / 缺失全零配置类型 | 当前 `CUsbRegsiter::RegsiterUsb` 在最终13扇区 `WriteSectorData` 前无条件 `memset(LBA0+0x000,0,0x190)`，形成显式全零缺失配置类型；同一一方 binary 的 `UsbMainBSec@0x100E7220` 提供完整旧版引导代码，且 `UnRegsiterUsb` 有模板直接写回 LBA0 的路径；Netac 配置类型由 `Netac_USB_API.dll` 1.3.1.16（SHA-256 `b12a249a...`）`sub_10003880` 从 `0x1014BA58` 以 `rep movsd, ECX=0x80` 精确复制512B模板再重建分区项。两份静态写入端的前400B已提交为洁净克隆测试夹具 `official_usb_main_bsec_lba0_prefix.hex` / `official_netac_mbr_lba0_prefix.hex`；Netac静态证据登记为 `S-NETAC-MBR`，两份前缀 SHA-256分别为 `4eeee8d52f8b58d9a1fa35b63a14c8c5dba1b2717eaa44e6fb1ff0327ccbe5ed` / `00863071fd5db2f4ef7734d384dc46e07d9c423ed59c69407597590b89aa13ec` | 两种非零状态都是完整、可自洽的16 位 MBR 引导代码负载：旧版 `UsbMainBSec` 的指令/消息链和 Netac 模板的独立引导代码已静态核对；当前全零配置类型表示该引导代码缺失，EDP 对前400B只按可清除/可替换不透明引导代码处理，不存在另一个值相关 EDP 消费端 | 现行20份通用统计集被严格穷尽为 **8×全零 + 11×UsbMainBSec + 1×Netac**，不存在第四种前400B 盘面状态；真实免密 SanDisk仍属于 UsbMainBSec。两个非零物理前缀均与对应一方静态模板逐字节相等 | 字段语义按配置类型级数据块闭合：每一种已观测盘面状态都有写入端、消费端/缺失行为和物理证据。历史上游格式化器选择器仍是部署/调用链来源的开放问题，但它只选择三个已知写入端状态之一，不再构成这370B的字节语义缺口；未来第四种配置类型必须重新开账 |
+| LBA0 | 0x000–0x17A excluding 0x0E1/0x0E8/0x101/0x103/0x10B/0x10D/0x124/0x143/0x162 | COMPLETE | 配置类型级 MBR 引导代码数据块 / 缺失全零配置类型 | 当前 `CUsbRegsiter::RegsiterUsb` 在最终13扇区 `WriteSectorData` 前无条件 `memset(LBA0+0x000,0,0x190)`，形成显式全零缺失配置类型；同一一方 binary 的 `UsbMainBSec@0x100E7220` 提供完整旧版引导代码，且 `UnRegsiterUsb` 有模板直接写回 LBA0 的路径；Netac 配置类型由 `Netac_USB_API.dll` 1.3.1.16（SHA-256 `b12a249a...`）`sub_10003880` 从 `0x1014BA58` 以 `rep movsd, ECX=0x80` 精确复制512B模板再重建分区项。两份静态写入端的前400B已提交为洁净克隆测试夹具 `official_usb_main_bsec_lba0_prefix.hex` / `official_netac_mbr_lba0_prefix.hex`；Netac静态证据登记为 `S-NETAC-MBR`，两份前缀 SHA-256分别为 `4eeee8d52f8b58d9a1fa35b63a14c8c5dba1b2717eaa44e6fb1ff0327ccbe5ed` / `00863071fd5db2f4ef7734d384dc46e07d9c423ed59c69407597590b89aa13ec` | 两种非零状态都是完整、可自洽的16 位 MBR 引导代码负载：旧版 `UsbMainBSec` 的指令/消息链和 Netac 模板的独立引导代码已静态核对；当前全零配置类型表示该引导代码缺失，EDP 对前400B只按可清除/可替换不透明引导代码处理，不存在另一个值相关 EDP 消费端 | 现行20份通用统计集被严格穷尽为 **8×全零 + 11×UsbMainBSec + 1×Netac**，不存在第四种前400B 盘面状态；真实mode1 SanDisk仍属于 UsbMainBSec。两个非零物理前缀均与对应一方静态模板逐字节相等 | 字段语义按配置类型级数据块闭合：每一种已观测盘面状态都有写入端、消费端/缺失行为和物理证据。历史上游格式化器选择器仍是部署/调用链来源的开放问题，但它只选择三个已知写入端状态之一，不再构成这370B的字节语义缺口；未来第四种配置类型必须重新开账 |
 | LBA0 | 0x0E1/0x0E8/0x101/0x103/0x10B/0x10D/0x124 | COMPLETE | 七个跨配置类型不变的全零指令操作数字节 | 当前 SAFE6 显式清零全部七字节; 旧版 `UsbMainBSec` 将它们固定为可执行指令中的零操作数：三个 `mov dl,[bp+0]` 位移 (+0x0E1/+0x0E8/+0x124), 三个 `push 0` 立即数 (+0x101/+0x103/+0x10B), 以及 `push 0x7C00` 的低字节 (+0x10D); Aigo/Netac 模板在全部七个偏移处都是全零填充 | 旧版 16 位引导代码会执行相应指令，因此每个零字节都参与已解码操作数; Netac 引导代码的代码/消息在这些偏移之前结束，且没有对这些位置的引用; 当前 EDP 清零且不解析该引导代码 | 已提交的当前全零 + 旧版测试夹具以及专用 Aigo/Netac 前缀证据，在这七个精确偏移处全部为零; 回归测试锁定这些指令字节窗口 | 配置类型选择会改变周边代码，但不能改变这七个物理字节; 它们逐配置类型的写入端/消费端行为已闭环 |
 | LBA0 | 0x143/0x162 | COMPLETE | 第一/第二条旧版 MBR 错误消息的 NUL 终止符 / 其他配置类型的全零填充 | 当前 SAFE6 将两字节清零; 旧版 `UsbMainBSec` 在 +0x12C..+0x142 保存 `Invalid partition table`，随后在 +0x143 写 NUL；在 +0x144..+0x161 保存 `Error loading operating system`，随后在 +0x162 写 NUL; Aigo/Netac 模板在这两个偏移处均为全零填充 | 旧版打印循环通过既有消息指针路径把这些 NUL 作为 C 字符串终止符消费; Netac 使用更早位置的消息副本，不引用这些偏移; 当前 EDP 清零后没有引导代码消费端 | 全部已提交当前全零/旧版测试夹具以及专用 Aigo/Netac 前缀证据都保持这两个字节为零; 回归测试检查精确字符串和终止符 | 这 2B 是跨配置类型不变的物理零值；旧版字符串语义和其他配置类型的填充语义均已完整解释 |
 | LBA0 | 0x17B | COMPLETE | 第三条旧版 MBR 错误消息的 NUL 终止符 / 其他配置类型的全零填充 | 当前 SAFE6 写入端显式清零到 +0x18F; 旧版 `UsbMainBSec` 在 +0x163..+0x17A 固定保存 `Missing operating system`，随后在 +0x17B 写 NUL; Aigo/Netac 内嵌 MBR 模板在该偏移本来就是零 | 旧版重定位引导代码的打印循环在第三条错误字符串后的 NUL 处终止; Netac 引导代码的三条消息位于 +0x08B/+0x0A3/+0x0C2（最后一个 NUL 在 +0x0DA），因此不会读取 +0x17B; 当前 EDP 清零后没有引导代码消费端 | 已提交当前全零 + 旧版测试夹具以及专用 Aigo L8302 Netac 前缀证据在 +0x17B 都为零 | 配置类型选择不能改变该字节：它在旧版中是消息终止符，在其他已知写入端家族中是全零填充 |
 | LBA0 | 0x17C–0x18F | COMPLETE | 跨配置类型固定全零引导代码尾部填充 | 当前 SAFE6 写入端显式清零这 20B; 旧版 `UsbMainBSec` 在第三条消息终止符后立即使用全零填充; Aigo/Netac 内嵌模板在这里同样为零 | 旧版 16 位引导代码在最后一条消息之后没有任何数据/代码引用指向 +0x17C..+0x18F; Netac 引导代码会重定位代码，但最后一条消息在 +0x0DA 结束，没有代码/数据引用指向该尾部; 当前 EDP 不解析该区域 | 已提交当前全零 + 旧版测试夹具以及 `aigo_l8302_netac_lba0_prefix.hex` 都保留 20B 全零; 三个已知物理配置类型逐字节一致 | 写入端所有权、消费端/引用负边界和所有已知真实设备配置类型共同把这 20B 闭环为固定全零引导代码填充; 未来未知配置类型仍必须兼容处理，不能盲目清洗 |
-| LBA0 | 0x190–0x19F | COMPLETE | 跨配置类型无所有者原样保留 / 历史全零兼容区域 | 当前 SAFE6 `RegsiterUsb` 最终只清 `+0x000..+0x18F`，因此本16B保持读取前保留底层字节；Linux `BuildSector0@diskfile.cpp:625` 只重建 `+0x1BE` MBR 条目，不写本区；旧版 `UsbMainBSec` 本16B固定为零；Netac `sub_10003880` 整扇复制的 Aigo 写入端模板在本16B同样为零 | 16 位 `UsbMainBSec` 引导代码的直接数据引用落在 `+0x1B5/+0x1B6/+0x1B7` 和分区表/签名，不读取本区；当前注册/准入与 `UDiskLabelRepair::ReCreate0Sector/sub_10003960` 均不解释本16B，修复新建只清前0x190和分区表，保持本区无所有者 | 严格22份原始参考本16B 22/22 全零；扩展 `nopwd_tool/backup + utils/backup` 共57份完整历史快照也 57/57 全零；既有 `lba0_bootstrap_profiles_are_zero_or_the_official_usb_main_bsec_prefix` 门禁锁定已提交原始样本 | 完全闭环表示跨已知配置类型的**无业务负载 / 原样保留现有**生命周期闭合，而不是规定未来盘面必须为零；遇到未知非零值应兼容保留 |
+| LBA0 | 0x190–0x19F | COMPLETE | 跨配置类型无所有者原样保留 / 历史全零兼容区域 | 当前 SAFE6 `RegsiterUsb` 最终只清 `+0x000..+0x18F`，因此本16B保持读取前保留底层字节；Linux `BuildSector0@diskfile.cpp:625` 只重建 `+0x1BE` MBR 条目，不写本区；旧版 `UsbMainBSec` 本16B固定为零；Netac `sub_10003880` 整扇复制的 Aigo 写入端模板在本16B同样为零 | 16 位 `UsbMainBSec` 引导代码的直接数据引用落在 `+0x1B5/+0x1B6/+0x1B7` 和分区表/签名，不读取本区；当前注册/准入与 `UDiskLabelRepair::ReCreate0Sector/sub_10003960` 均不解释本16B，修复新建只清前0x190和分区表，保持本区无所有者 | 严格22份原始参考本16B 22/22 全零；扩展 `mode1_tool/backup + utils/backup` 共57份完整历史快照也 57/57 全零；既有 `lba0_bootstrap_profiles_are_zero_or_the_official_usb_main_bsec_prefix` 门禁锁定已提交原始样本 | 完全闭环表示跨已知配置类型的**无业务负载 / 原样保留现有**生命周期闭合，而不是规定未来盘面必须为零；遇到未知非零值应兼容保留 |
 | LBA0 | 0x1A0–0x1A3 | COMPLETE | 可选 SAFE1 / 旧版 `SectorSize` 兼容覆盖项 | Windows `BuildSector0/sub_10013F10@0x10013FB6` 在 **SAFE1** 分支明确把 `m_nSectorSize` 写到 `+0x1A0`；`UsbMainBSec` 完整模板同样携带512。Aigo/Netac `sub_10003880` 的整扇 MBR 模板在该槽显式为0；当前 SAFE6 不调用 `BuildSector0` 而原样保留现有保留底层字节，Linux `BuildSector0@diskfile.cpp:625` 只用 `m_nSectorSize` 计算分区扇区数量、不序列化该槽 | 旧版 16 位引导代码不读取该槽；当前 `CEMSUsbRegsiter.dll` 全模块对 `+0x1A0` 的唯一扇区数据访问就是上述写入端存储，另一个 `push 0x1A0` 只是临时 `memset` 长度；`UDiskLabelRepair` 没有盘面 `+0x1A0` 读点，Linux 没有 `ReadSector0` 消费端；`EdpEDiskCtrl` 的 `+0x1A0` 命中已逐项确认是虚表/对象偏移而非 LBA0 数据 | 严格22份原始盘仅0/512双态；已提交测试夹具同时保留0和512。扩展只读历史扫描中，47份相同旧版引导代码快照分为10×0、37×512；把 SectorSize、磁盘签名、分区表三个独立变量归一化后47/47整个LBA0 SHA-256均为 `2c8877b90c5d42d73f17c511ef5984efc8135543bda0746ef54f347320d78e8f`，证明该DWORD只是独立可选覆盖项 | 512表示 SAFE1/旧版写入端填充的扇区大小兼容元数据；0表示该覆盖项缺失/无所有者，后续 SAFE6 只透明保留。写入端/原样保留、负向消费端、0/512 双真实配置类型与物理独立性均闭合，4B 升完全闭环；不要求未来未知值被清洗 |
 | LBA0 | 0x1A4–0x1B4 | COMPLETE | 跨配置类型无所有者原样保留 / 历史全零兼容区域 | 与 `+0x190..+0x19F` 相同：当前 SAFE6 不覆盖、Linux BuildSector0 不写；旧版 `UsbMainBSec` 与 Aigo/Netac整扇模板均在本17B生成零 | 16 位 MBR 引导代码不读取本区；当前 EDP 准入、分区修复与 `ReCreate0Sector` 都只处理其它明确区域，不赋予本17B语义 | 严格22份 22/22 全零；扩展57份完整历史快照 57/57 全零；已提交原始门禁已有精确零断言 | 17B 的跨配置类型无所有者/原样保留、负向消费端与真实盘已闭合；未来非零兼容值必须原样保留，不得机械清零 |
 | LBA0 | 0x1B5–0x1B7 | COMPLETE | **LBA0 旧版 MBR 消息指针字节** | 官方 `UsbMainBSec@0x100E7220` 固定为 `2C 44 63`；`sub_10013FD0`/旧模板写路径整扇复制该模板 | 模板先把 `+0x1B..` 搬到 `0x061B` 后执行；运行时 `mov al,[0x07B5/0x07B6/0x07B7]` 分别组成 `SI=0x072C/0x0744/0x0763`，指向原模板 `+0x12C/+0x144/+0x163` 三条错误消息 | 22盘严格统计：14/22=`2C 44 63`，8/22=`00 00 00`，无第三种值；CI夹具同时保留两种配置类型 | 三字节是旧版 MBR 错误消息指针低字节；零态表示该旧版尾部未存在/已清空，不再当“未知随机尾巴” |
 | LBA0 | 0x1B8–0x1BB | COMPLETE | 标准 Windows MBR 磁盘签名 | `CreateDiskMbr` 取 `GetSystemTimePreciseAsFileTime`（回退 `GetSystemTimeAsFileTime`）→ FILETIME 转 Unix 秒 → 低32位填 `CREATE_DISK_MBR.Signature` → `IOCTL_DISK_CREATE_DISK`；Windows `DRIVE_LAYOUT_INFORMATION_MBR.Signature` 正式定义该 DWORD 为唯一标识 MBR 磁盘的驱动器签名 | Windows `IOCTL_DISK_GET_DRIVE_LAYOUT_EX` 将该值作为 `DRIVE_LAYOUT_INFORMATION_EX.Mbr.Signature` 返回。当前 `CEMSUsbRegsiter.dll::fcn.10046320` 的唯一 `0x70050` 调用已逐指令复核：返回缓冲区只比较 `+0x04 PartitionCount==1` 与 `+0x00 PartitionStyle==MBR`，不读取 `+0x08 Mbr.Signature`，证明 EDP 对该标准字段没有附加业务语义 | 22/22非零，19个值；同一 onlyid 的重复备份保持不变，按LE解释与历史初始化日期吻合；筛选后的协议测试夹具又锁定签名非零且至少存在两个不同真实值 | 写入端、Windows 标准消费端/字段语义、EDP 负向语义消费端与真实盘变化均闭合；4B 升完全闭环，不能把“EDP 不读取”误当成字段语义未知 |
-| LBA0 | 0x1BC–0x1BD | COMPLETE | 标准 MBR 保留 / 无所有者兼容字 | 当前 SAFE6 `RegsiterUsb` 只清 `+0x000..+0x18F` 并在 `+0x1BE` 起重建分区表，因此这2B保持读取前保留底层字节；Linux `BuildSector0@diskfile.cpp:625` 同样不写本槽；旧版 `UsbMainBSec` 与 Aigo/Netac 整扇模板都在此显式携带 `00 00` | 16 位 `UsbMainBSec` 引导代码的已确认尾部引用不包含 `+0x1BC/+0x1BD`；当前注册/准入、`UDiskLabelRepair::ReCreate0Sector` 与已审 `IOCTL_DISK_GET_DRIVE_LAYOUT_EX` 路径均不把这2B作为业务字段读取，分区语义从 `+0x1BE` 开始 | 严格22份原始参考 22/22=`00 00`；扩展 `nopwd_tool/backup + utils/backup` 的57份完整历史快照同样 57/57=`00 00`，且相邻磁盘签名明确多值，排除“整段尾部碰巧固定”的误判 | 2B 的跨已知配置类型写入端/原样保留生命周期、负语义消费端与实盘均闭合；完全闭环表示该保留字当前无业务负载，未来未知非零值应兼容原样保留，不得机械清零 |
+| LBA0 | 0x1BC–0x1BD | COMPLETE | 标准 MBR 保留 / 无所有者兼容字 | 当前 SAFE6 `RegsiterUsb` 只清 `+0x000..+0x18F` 并在 `+0x1BE` 起重建分区表，因此这2B保持读取前保留底层字节；Linux `BuildSector0@diskfile.cpp:625` 同样不写本槽；旧版 `UsbMainBSec` 与 Aigo/Netac 整扇模板都在此显式携带 `00 00` | 16 位 `UsbMainBSec` 引导代码的已确认尾部引用不包含 `+0x1BC/+0x1BD`；当前注册/准入、`UDiskLabelRepair::ReCreate0Sector` 与已审 `IOCTL_DISK_GET_DRIVE_LAYOUT_EX` 路径均不把这2B作为业务字段读取，分区语义从 `+0x1BE` 开始 | 严格22份原始参考 22/22=`00 00`；扩展 `mode1_tool/backup + utils/backup` 的57份完整历史快照同样 57/57=`00 00`，且相邻磁盘签名明确多值，排除“整段尾部碰巧固定”的误判 | 2B 的跨已知配置类型写入端/原样保留生命周期、负语义消费端与实盘均闭合；完全闭环表示该保留字当前无业务负载，未来未知非零值应兼容原样保留，不得机械清零 |
 | LBA0 | 0x1BE–0x1FD | COMPLETE | 4×MBR 分区条目 | `UsbMainBSec` 模板；SAPF 恢复项也直接写回此处 | `UDiskLabelRepair.dll::Repair0Sector` 直接恢复该 64B 区域 | 22/22 可按标准 MBR 解码 | 分区表边界和消费闭合 |
 | LBA0 | 0x1FE–0x1FF | COMPLETE | MBR 55AA | 官方模板直接写 `55 AA` | MBR 校验/修复链检查签名 | 22/22 | 完成 |
 | LBA1 | 0x000–0x1FF | COMPLETE | 可选 GPT 主头 / 缺失配置类型扇区 | Linux官方 `CLabelManage::BuildSector1_Gpt@0x1FDAA` 原生构造完整512B `GPT_Header`：模板先完整覆盖512B，动态写备份/last-usable/磁盘 GUID/表 CRC/头 CRC；`+0x5C..+0x1FF` 由模板明确为零 | Windows 当前 `IsAllowRegisterCommonLabel/sub_1002AB70` 在 protective MBR 命中后，以 sector_size 跳到 LBA1 并检查 `EFI PART` 与 `header_lba==1`；本轮把官方 Linux 构造器输出直接喂给该 Windows 消费端，原生返回 `2=GPT` | 22/22 物理原始样本与扩展3896候选均为缺失 GPT 全零配置类型；另新增 **官方二进制虚拟写入端** 正向测试夹具：2GiB/512B配置下 `EFI PART`, 版本=0x10000, 头大小=92, 备份=4194303, 第一/last usable=34/4194270, 表 LBA=2, 128×128B；独立 IEEE CRC32 同时命中头 CRC `0xA4B46C72` 与16KiB 数组 CRC `0xD32CFEA7`；CI锁定 | 两种生命周期均闭合：非GPT时 保护性 MBR 门禁不进入LBA1语义，当前样本为零；GPT时一方写入端完整拥有512B并被独立 Windows 一方消费端正向识别。虚拟测试夹具不冒充物理采集 |
@@ -716,14 +716,14 @@ DWARF 中恢复出的原始声明文件/行号与本地函数地址：
 | LBA4 | 0x000–0x017 | COMPLETE | `$$$onlyid$$$` 清零头 | 当前注册写入端根据主 onlyid 格式化 | 识别/解码链从此恢复 onlyid | 22/22 | 完成 |
 | LBA4 | 0x018–0x01B | COMPLETE | OnlyIdXor8 | 当前写入端: `main_onlyid ^ 0x88888888` | 恢复信息读取该字段 | 22盘当前/旧版可解 | 完成 |
 | LBA4 | 0x01C–0x01F | COMPLETE | `OnllyID2Nd` = 备份/激活加密密钥种子 | **当前写入端**：Windows `RegsiterUsb@0x1003BBD1..0x1003BBD7` 直接执行 `node+0x04 = object+0x698`，即复用本次注册主 onlyid。**旧版写入端**现已从官方归档 `CEMSUsbRegsiter.dll` v19.11.4.1（MD5 `783d01f19e998a514834bc5e5f4249ad`）恢复：SAFE6 `virtual_56@0x1000CC50` 清零0x2F 恢复节点后调用 `fcn.100058E0`；该函数 `CoCreateGuid()` 生成16B GUID，初始化协议 CRC 表，以初值0逐字节计算同款反射形式 `CRC32_bare`，返回DWORD；`0x1000D122` 将结果精确写入 `node+0x04`。因此早期配置类型是“**独立 GUID-CRC 密钥**”，当前配置类型改为“**复用主 GUID-CRC onlyid**” | 有效消费端已闭合为完整往返验证：`GetUpLoadInformation/sub_10039C30` 以 `restore_node+0x04` 为4B 种子加密 LLGB+EDPF 备份数据块；`ActiveNormalUDev -> sub_1003CEB0` 取同一种子解密激活/恢复数据块，校验 `LLGB` 后恢复 LBA8/LBA12。两辅助函数的16B 密钥材料均为 `key4[i mod 4] XOR "EDPSECDISK200709"[i]`，随后走同一密钥序列、互为加密/解密块变换 | 严格当前配置类型 `OnllyID2Nd==main onlyid && HSerialCRC=0`；旧版配置类型 `OnllyID2Nd!=main`。可复核旧版第二密钥不等于本设备/全集主 onlyid；已提交 NETAC_A/NETAC_B/LEXAR 精确锁定 `44D9CE02/028EFFD3/7647B1EF`，并新增门禁证明它们也不退化为 `CRC32(device_id)`、MBR 磁盘签名或 `MyHardinfo`；同一主的重复捕获第二密钥保持稳定，符合“制标时生成后持久化”的随机密钥生命周期 | 4B 的正式边界、当前/旧版双写入端、随机生成算法、双向密码学消费端和真实配置类型均闭合；不同代际只改变种子来源，不改变备份/激活密钥语义，升级完全闭环 |
-| LBA4 | 0x020–0x033 | COMPLETE | 调用方负责 `HSerialCRC[5]` / `HDOnlySerial[5]` 身份向量 | 当前 Windows PE `RegsiterUsb@0x1003BBF0..0x1003BC79` 精确把 `object+0x558/+55C/+560/+564/+568` 写入 `node+0x08..+0x1B`；`this+0x2E0` 已闭合为内嵌 `UsbLabelParam`，故这些地址正是 `HDOnlySerial[5]@+0x278`。当前 Windows 两层参数构造以及 Linux 调用方均不提供这20B，所以当前配置类型为全零/缺失。历史 v19.11.4.1 `ISUdiskRegsiterObj::virtual_8@0x1000B9C0` 则把旧版 ABI `request+0x150..+0x160` 五个DWORD逐项原样复制到对象 HSerial 槽，SAFE6 再原样放入恢复节点。`scripts/protocol/probe_lba4_v19_writer.py` 固定 v19 DLL/金标 SHA，保留真实免密 SanDisk 的真实非零20B HSerial 输入，原生执行 `fcn.10006090` 后输出 LBA4 SHA-256=`c2662856...`，512/512与物理金标完全一致 | **历史恢复节点读取端/激活消费端** 已闭合为结构性保留 / 语义忽略：2020 `ActiveNormalUDev` 经虚表 `+0x2C` 进入 `ReadUsbHserialsInfo@0x100054A0`，依次从 LBA4、disk_end-4 扇区、disk_end-0x80000 三个镜像读取并滚动解码完整0x2F 节点；三套读取端只比较 `OnlyIdXor8`。随后虚表 `+0x44` `RestoreRegsiterUsb` 只取 `node+0x04 OnllyID2Nd` 作为恢复数据块密钥，不读取 `+0x08..+0x1B` 的五DWORD值。`EDP_DeviceNumber/EDP_DiskNumber` 是读取端成功后另行返回的单DWORD 标量，ABI直接排除它与HSerial五槽等价 | 严格22份覆盖14份固定 `1D29,7B,4DD,79,7C`、6份全零、2份高熵，且真实免密 SanDisk 的非零20B已由一方 v19 写入端在不修改该向量的条件下逐比特精确重建整扇 | 字段级生命周期按调用方负责身份向量闭合：正式字段边界、当前缺失全零配置类型、旧版调用方注入 ABI、官方写入端传输、三镜像读取端、负语义消费端和多种真实非零配置类型均已确定。更早调用方为什么/如何计算五个DWORD仍是值的代际来源开放问题，类似其它调用方负责身份材料，不再构成这20B盘面语义缺口；不得把 DeviceNumber/DiskNumber 猜成该算法 |
+| LBA4 | 0x020–0x033 | COMPLETE | 调用方负责 `HSerialCRC[5]` / `HDOnlySerial[5]` 身份向量 | 当前 Windows PE `RegsiterUsb@0x1003BBF0..0x1003BC79` 精确把 `object+0x558/+55C/+560/+564/+568` 写入 `node+0x08..+0x1B`；`this+0x2E0` 已闭合为内嵌 `UsbLabelParam`，故这些地址正是 `HDOnlySerial[5]@+0x278`。当前 Windows 两层参数构造以及 Linux 调用方均不提供这20B，所以当前配置类型为全零/缺失。历史 v19.11.4.1 `ISUdiskRegsiterObj::virtual_8@0x1000B9C0` 则把旧版 ABI `request+0x150..+0x160` 五个DWORD逐项原样复制到对象 HSerial 槽，SAFE6 再原样放入恢复节点。`scripts/protocol/probe_lba4_v19_writer.py` 固定 v19 DLL/金标 SHA，保留真实mode1 SanDisk 的真实非零20B HSerial 输入，原生执行 `fcn.10006090` 后输出 LBA4 SHA-256=`c2662856...`，512/512与物理金标完全一致 | **历史恢复节点读取端/激活消费端** 已闭合为结构性保留 / 语义忽略：2020 `ActiveNormalUDev` 经虚表 `+0x2C` 进入 `ReadUsbHserialsInfo@0x100054A0`，依次从 LBA4、disk_end-4 扇区、disk_end-0x80000 三个镜像读取并滚动解码完整0x2F 节点；三套读取端只比较 `OnlyIdXor8`。随后虚表 `+0x44` `RestoreRegsiterUsb` 只取 `node+0x04 OnllyID2Nd` 作为恢复数据块密钥，不读取 `+0x08..+0x1B` 的五DWORD值。`EDP_DeviceNumber/EDP_DiskNumber` 是读取端成功后另行返回的单DWORD 标量，ABI直接排除它与HSerial五槽等价 | 严格22份覆盖14份固定 `1D29,7B,4DD,79,7C`、6份全零、2份高熵，且真实mode1 SanDisk 的非零20B已由一方 v19 写入端在不修改该向量的条件下逐比特精确重建整扇 | 字段级生命周期按调用方负责身份向量闭合：正式字段边界、当前缺失全零配置类型、旧版调用方注入 ABI、官方写入端传输、三镜像读取端、负语义消费端和多种真实非零配置类型均已确定。更早调用方为什么/如何计算五个DWORD仍是值的代际来源开放问题，类似其它调用方负责身份材料，不再构成这20B盘面语义缺口；不得把 DeviceNumber/DiskNumber 猜成该算法 |
 | LBA4 | 0x034 | COMPLETE | 固定恢复节点 `SingleUsbFlg` 元数据 = 0 | 当前 Windows 恢复节点写入端清零节点后显式保持/写入 `SingleUsbFlg=0`；Linux 官方节点 ABI确认该字节的结构位置 | Windows/Linux `ReadSector4` 都对完整0x2F 恢复节点做滚动解码后结构性返回；除 `OnlyIdXor8` 外不对该字节做值相关分支，因此是结构性保留 / 语义忽略元数据 | 已提交原始测试夹具全量门禁 + 22份严格原始样本均为0，跨当前/旧版身份配置类型无反例 | 写入端、正式字段边界、结构消费端、负语义消费端与跨代实盘一致，1B 完全闭环；不是运行时开关 |
 | LBA4 | 0x035–0x038 | COMPLETE | `MyHardinfo` = 已观察镜像于 LBA8 `HDSerialInfo` | 当前 SAFE6 `RegsiterUsb` 对完整0x2F 节点清零且不覆盖 `node+0x1D..20`，因此当前写入端=0。历史官方 `CEMSUsbRegsiter.dll` v19.11.4.1（MD5 `783d01f19e998a514834bc5e5f4249ad`）SAFE6 `virtual_56` 在 `0x1000D189` 调 `UsbTools.dll` ordinal4=`EDP_DiskNumber`，返回0才回退 ordinal3=`EDP_DeviceNumber`，并在 `0x1000D19B` 把结果直接写到 `node+0x1D MyHardinfo`；同一二进制 LBA8 写入端 `sub_10007DF0@0x10007E82..` 独立调用同一 ordinal4/3 并把结果写入 `HDSerialInfo`，从写入端机制解释跨LBA镜像 | 历史三套LBA4 读取端完整结构返回节点但只比较OnlyIdXor8；2020 `ReadUsbHserialsInfo -> RestoreRegsiterUsb` 链又证明恢复端只消费 `node+0x04`，不读取 `MyHardinfo`。因此 LBA4 副本是结构性保留 / 语义忽略兼容元数据 | 严格原始样本逐盘 **22/22 `MyHardinfo == LBA8.HDSerialInfo`**，同时保留当前 `0->0` 和旧版非零 `A017AD78/A68BAE08/8B4613F5/2AB0E33C`；该值不等于设备 ID CRC或MBR 签名 | 字段级生命周期现已闭合：当前全零与旧版主机身份写入端家族、LBA4/LBA8 独立镜像写点、22/22 物理镜像、跨不同目标U盘复用同一主机身份信息 值以及负语义消费端共同限定了本 DWORD。v19 的相邻 `UsbOnlyInfo` 与严格旧版不同只证明另一个16B字段存在代际分叉，不再作为本字段阻塞项；精确制造可执行文件未定位不影响该4B含义闭环 |
 | LBA4 | 0x039–0x03C | COMPLETE | 固定恢复节点 `NewLabFlag = LLGB` | 当前 Windows 机器码在节点清零后显式写 `LLGB`；Linux DWARF恢复正式字段与偏移 | Windows/Linux 读取端解码并结构性返回完整节点，不对该字段做独立行为判断 | 已提交原始测试夹具全量门禁 + 严格 22/22 均为 `LLGB`，跨当前/旧版配置类型一致 | 固定写入端元数据 + 结构性保留/语义忽略 + 真实设备配置类型闭合，4B 完全闭环 |
 | LBA4 | 0x03D–0x040 | COMPLETE | 固定恢复节点 `Version = 1` | 当前 Windows 写入端显式写 DWORD 1 到恢复节点版本；Linux ABI给出字段边界 | Windows/Linux 读取端把版本随完整节点返回，当前没有值相关准入/行为分支 | 已提交原始测试夹具全量门禁 + 严格 22/22 均为1 | 当前已知协议代际中的固定恢复节点版本元数据生命周期闭合，4B 完全闭环；未来新版本非1时应按新配置类型处理而非强制改写 |
 | LBA4 | 0x041–0x044 | COMPLETE | 固定恢复节点扇区元组 `08 04 0C 01` | 当前 Windows 写入端在节点构造阶段显式写四个扇区字节 `08 04 0C 01` | Windows/Linux 读取端随完整恢复节点结构返回这些字节，但当前没有独立值相关分支 | 已提交原始测试夹具全量门禁 + 严格 22/22 均为 `08 04 0C 01`，跨当前/旧版配置类型一致 | 写入端、结构边界、负语义消费端与真实盘全部闭合，4B 完全闭环；按固定兼容元数据建模 |
-| LBA4 | 0x045 | COMPLETE | 调用方负责 `bDataToServer` 兼容字节；盘面表示随写入端家族变化 | 当前 Windows/Linux 与历史 v19.11.4.1 `fcn.10006090` 都把完整0x2F 节点作为输入；v19 写入端在完整滚动后执行 `node+0x2D -> wire+0x45` 异或后存储。扩展后的 `probe_lba4_v19_writer.py --node-flags 0b00` 原生执行官方机器码，除 `+0x45: 00->0B` 外 512B 无任何变化，证明该字节是透明调用方负责输入而非写入端内部派生 | Windows/Linux ReadSector4 滚动后结构性返回完整节点；2021 修复读取端同样完整复制节点且只校验OnlyIdXor8。ActiveNormalUDev/RestoreRegsiterUsb只消费OnllyID2Nd，GetUpLoadInformation虽携带节点但本DLL没有 `+0x2D` 值相关读取；Linux DWARF中该节点只进入BuildSector4/ReadSector4。因此已覆盖消费端对该字节是结构性保留 / 语义忽略 | 严格 Aigo U335 `onlyid=1987718388` 的物理标志=`64 7A`；按正式滚动精确得到逻辑节点标志=`0B 00`，其中对应密钥字节为 `6F/7A`，即 `64^6F=0B`、`7A^7A=00`。同盘免密转换前后LBA4 512/512不变，排除转换工具生成该值；其它严格/异或后配置类型与真实 SanDisk 又覆盖全零/非零读取端视图 | 字段生命周期按调用方负责兼容元数据闭合：逻辑值由上游调用者选择，写入端只透明序列化，读取端/恢复无隐藏派生或值相关语义。更早普通滚动制造可执行文件未取得只影响盘面表示来源，不再构成本1B盘面语义缺口；不得把物理盘面字节直接当逻辑标志 |
-| LBA4 | 0x046 | COMPLETE | `bConnetServer` 写入端侧未启用全零兼容标志；读取端视图随盘面表示可非零 | 当前 Windows/Linux 与 v19.11.4.1 写入端都在滚动后异或后覆盖节点+0x2E；这些 SAFE6 节点构造器均全零初始化且无后续标志存储，所以直接写入端侧=0。新增 `scripts/protocol/probe_lba4_v19_writer.py` 保留真实免密 SanDisk 的第二=`0x4A32BA39`/非零 HSerial，只将节点标志设为`00 00`，内存后端原生执行 v19 `fcn.10006090` 后唯一一次 LBA4 写入与真实扇区512/512完全一致，SHA-256=`c26628566108031f439f999a46858476414ec8e7d1030a8293c9df0c463ad5d8` | Windows/Linux ReadSector4统一滚动并返回该字节而不修正；当前读取端探测对真实免密盘得到`D9`，证明读取端视图不是写入端值。2021 历史 `UDiskLabelRepair::fcn.10006DA0` 独立执行同款滚动、完整复制0x2F 节点且只校验OnlyIdXor8；其修复/备份路径整块复制9扇区，不单独修改标志；ActiveNormalUDev/GetUpLoadInformation等已审上层无该字节值相关业务分支 | 严格加密历史滚动形式样本的正式读取端视图本字节为0；真实免密金标 SHA-256 `d6a935...` 为物理盘面=`00`、读取端=`D9`，且 v19 官方写入端以写入端节点字节=0 精确重建整扇 | 生命周期按“写入端侧全零 + 表示相关 读取端变换”闭合；完全闭环不意味着读取端必为0，也不声称 v19 是该物理盘当年的精确制造可执行文件。精确来源仍属于 HSerial 上游等其它字段的调查范围，不再构成本1B语义缺口 |
+| LBA4 | 0x045 | COMPLETE | 调用方负责 `bDataToServer` 兼容字节；盘面表示随写入端家族变化 | 当前 Windows/Linux 与历史 v19.11.4.1 `fcn.10006090` 都把完整0x2F 节点作为输入；v19 写入端在完整滚动后执行 `node+0x2D -> wire+0x45` 异或后存储。扩展后的 `probe_lba4_v19_writer.py --node-flags 0b00` 原生执行官方机器码，除 `+0x45: 00->0B` 外 512B 无任何变化，证明该字节是透明调用方负责输入而非写入端内部派生 | Windows/Linux ReadSector4 滚动后结构性返回完整节点；2021 修复读取端同样完整复制节点且只校验OnlyIdXor8。ActiveNormalUDev/RestoreRegsiterUsb只消费OnllyID2Nd，GetUpLoadInformation虽携带节点但本DLL没有 `+0x2D` 值相关读取；Linux DWARF中该节点只进入BuildSector4/ReadSector4。因此已覆盖消费端对该字节是结构性保留 / 语义忽略 | 严格 Aigo U335 `onlyid=1987718388` 的物理标志=`64 7A`；按正式滚动精确得到逻辑节点标志=`0B 00`，其中对应密钥字节为 `6F/7A`，即 `64^6F=0B`、`7A^7A=00`。同盘mode1 重制前后LBA4 512/512不变，排除转换工具生成该值；其它严格/异或后配置类型与真实 SanDisk 又覆盖全零/非零读取端视图 | 字段生命周期按调用方负责兼容元数据闭合：逻辑值由上游调用者选择，写入端只透明序列化，读取端/恢复无隐藏派生或值相关语义。更早普通滚动制造可执行文件未取得只影响盘面表示来源，不再构成本1B盘面语义缺口；不得把物理盘面字节直接当逻辑标志 |
+| LBA4 | 0x046 | COMPLETE | `bConnetServer` 写入端侧未启用全零兼容标志；读取端视图随盘面表示可非零 | 当前 Windows/Linux 与 v19.11.4.1 写入端都在滚动后异或后覆盖节点+0x2E；这些 SAFE6 节点构造器均全零初始化且无后续标志存储，所以直接写入端侧=0。新增 `scripts/protocol/probe_lba4_v19_writer.py` 保留真实mode1 SanDisk 的第二=`0x4A32BA39`/非零 HSerial，只将节点标志设为`00 00`，内存后端原生执行 v19 `fcn.10006090` 后唯一一次 LBA4 写入与真实扇区512/512完全一致，SHA-256=`c26628566108031f439f999a46858476414ec8e7d1030a8293c9df0c463ad5d8` | Windows/Linux ReadSector4统一滚动并返回该字节而不修正；当前读取端探测对真实 mode1 盘得到`D9`，证明读取端视图不是写入端值。2021 历史 `UDiskLabelRepair::fcn.10006DA0` 独立执行同款滚动、完整复制0x2F 节点且只校验OnlyIdXor8；其修复/备份路径整块复制9扇区，不单独修改标志；ActiveNormalUDev/GetUpLoadInformation等已审上层无该字节值相关业务分支 | 严格加密历史滚动形式样本的正式读取端视图本字节为0；真实mode1金标 SHA-256 `d6a935...` 为物理盘面=`00`、读取端=`D9`，且 v19 官方写入端以写入端节点字节=0 精确重建整扇 | 生命周期按“写入端侧全零 + 表示相关 读取端变换”闭合；完全闭环不意味着读取端必为0，也不声称 v19 是该物理盘当年的精确制造可执行文件。精确来源仍属于 HSerial 上游等其它字段的调查范围，不再构成本1B语义缺口 |
 | LBA4 | 0x047–0x1FB | COMPLETE | **无所有者保留底层字节 / 表示载体**；原始原样保留与滚动变换后两种盘面表示 | Windows 当前 `sub_10014550` 与 Linux `BuildSector4@diskfile.cpp:741` 都只拥有0x2F 恢复节点。非空节点分支随后把滚动 XOR 覆盖到 `+0x18..+0x1FF`，因此对这437B只是**可逆变换既有保留底层字节**；Windows `arg0==NULL` 分支则完全跳过节点复制/滚动，对该区逐字节原样保留。两端都没有独立业务字段存储。隔离 Unicorn 直接执行官方 Windows 写入端：预填437B=`0xA5` 时，完整分支原始字节改变但独立滚动解码后437/437恢复 `0xA5`；NULL 分支437/437保持原始 `0xA5` | Windows `ReadSector4/sub_10015090` 与 Linux `ReadSector4@diskfile.cpp:957` 都会为恢复节点识别需要而滚动处理整段，但最终只返回 `decoded+0x18` 的0x2F 节点并校验 `OnlyIdXor8`，不暴露/解释 `+0x47..+0x1FB`。同一官方 Windows 读取端对上述非零完整测试夹具动态执行成功，返回主 onlyid、LLGB、版本=1，而437B不进入输出 | 严格 22份仍保留18份原始全零与4份滚动全零物理表示；新增一方虚拟写入端测试夹具又证明保留底层字节可合法为任意非零值并在完整/null 两分支分别“变换/原样保留”。CI `official_virtual_lba4_backing_is_unowned_and_representation_only` 锁定非零正例 | 437B 的含义不是“应该为零但最初写入端未找到”，而是**没有业务负载的调用方/现有保留底层字节**。其完整生命周期已由原样保留/可逆变换写入端、负语义消费端、真实双表示和任意非零一方正例闭合；与 LBA5 不透明原样保留区采用同一完全闭环口径。历史原始全零最初来源不再是语义阻塞项，未来未知非零保留底层字节必须保留/变换而不得清洗 |
 | LBA4 | 0x1FC–0x1FF | COMPLETE | 尾部 LLGB | 当前写入端继续滚动密钥序列写 LLGB | 读取端作为尾锚点校验 | 22盘可验证 | 完成 |
 | LBA5 | 0x000–0x1FF | COMPLETE | 不透明原样保留 / 写保护探测临时扇区 | `CUsbRegsiter::RegsiterUsb` 先读取既有 LBA0–12；后续构造器只重建其它明确扇区，LBA5 不被覆盖，最终随13扇区整体写回；即写入端语义是原样保留现有字节 | 两版 `EdpDiskCtrl` 的唯一 `base+5` 原始扇区消费端都是：读取整扇→原样写回同一扇区→仅检查 `WriteFile` 是否以 `ERROR_WRITE_PROTECT(0x13)` 失败；`UserLogin` 据此进入只读使用状态，完全不解析内容 | 22/22原始参考整扇512B全零，SHA-256均为 `076a27c79e5ace2a3d47f9dd2e83e4ff6ea8872b3c2218f66c92b89b55f36560`；7份原始CI夹具继续锁定 | 完全闭环表示“整区用途和无负载语义闭合”；全零只是当前实盘状态，不是协议规定，非零内容也应原样保留 |
@@ -740,19 +740,19 @@ DWARF 中恢复出的原始声明文件/行号与本地函数地址：
 | LBA6 | 0x188–0x1BF | COMPLETE | `m_usbLabel[64]` 前 56B 物理槽，包括无语义的 NUL 后保留底层字节 | Linux DWARF 明确固定 `UsbLabelParam/UsbWriteParam.m_usbLabel@+0x218`; `UsbWriteParam(UsbLabelParam&)@0x1C362` 使用内建 `strcpy_s(...,64,...)`，且该复制构造函数**不会**先 memset 0x299B 目标对象. 内建 `strcpy_s@0x1B9B0` 在复制首个 NUL 后立即返回，因此目标中 NUL 后字节保留此前底层内容. Windows `sub_10013FD0` / Linux `BuildSector6` 随后固定复制该数组前 0x38=56B 到 `out+0x188` | Linux `ReadSector6@0x1E84B..` 从对应位置构造 C++ 字符串 `decoded+0x188` 并写回 `UsbLabelParam.m_usbLabel[64]`; Windows 读取端同构. `BuildSector8` 把相同逻辑值序列化为 ELABEL `Label=`; LBA6 校验和覆盖该 56B 槽的每个物理字节 | 已提交原始样本都解码为相同业务值 `江苏电力!SAFE6`, 但其 NUL 后字节形成**至少 3 种不同且全部非零的保留底层字节配置类型**; 回归测试 `lba6_owner_office_and_label_slots_have_official_fixed_storage_boundaries` 锁定该事实. LBA6 C 字符串与 LBA8 `Label=` 在每份已提交原始样本中保持相等 | 完整 56B 行为已闭环：前缀是 C 字符串，NUL 后字节是从 64B 源数组复制来的**写入端未初始化保留底层字节**，不是隐藏字段或固定填充. 未来非零保留底层字节属于合法兼容数据；标准新盘制盘可以确定性清零并重新计算校验和 |
 | LBA6 | 0x1C0–0x1C8 | COMPLETE | `m_usbGSerial` 的配置类型独立 C 字符串前缀 / 终止符位置 | 当前 Windows/Linux `BuildSector6` 都先清16B 临时，再从 `UsbWriteParam.m_usbGSerial` 固定复制前15B；已知短/长配置类型到 byte8 为止始终仍属于字符串本体：短为 `322CA28A\0`，长为 `322CA28A-` | Windows/Linux `ReadSector6` 从 `+0x1C0` 按 C 字符串解释；只有首个NUL之后才进入保留底层字节 | 严格 22盘：16份短=`322CA28A`、6份长=`322CA28A-D7D144`；完整历史去重统计集另复核20个前部，前8B 20/20=`322CA28A`，byte8 仅出现 `00` 或 `2D('-')`。旧版 MBR 底层内容存续字节从短 NUL 之后才开始 | 已知代际分叉不触及前9B的字段归属；9B从部分闭环升完全闭环 |
 | LBA6 | 0x1C9–0x1CE | COMPLETE | GSerial 动态字符串尾部 / 调用方负责 NUL 后保留底层字节 | 当前 Windows/Linux 写入端对16B 临时清零后，固定从来源 `m_usbGSerial[0..14]` 复制15B；因此长配置类型时本6B可继续属于字符串正文，短配置类型时则只是来源 NUL 后保留底层字节。一方 Windows `BuildSector6` 虚拟执行把短 GSerial 的来源保留底层字节人为设为 `A5×6`，盘面逐字节保留，证明构造器不赋予第二字段语义 | Windows/Linux 读取端从 `+0x1C0` 仅按 C 字符串消费到首个NUL；短配置类型的本6B完全不参与业务解析，长配置类型则作为同一 GSerial 字符串尾部被正常消费 | 严格/当前/旧版实盘同时覆盖短/长；两份旧版中这些 NUL 后字节恰带旧 MBR 几何残值，只说明历史来源保留底层字节来源。新增官方虚拟测试夹具证明任意非零保留底层字节可合法往返验证到盘面 | 动态边界、写入端所有权、C 字符串消费端与非零保留底层字节正向证据均闭合；旧版 MBR残值不再被误当独立字段。6B从部分闭环升完全闭环 |
-| LBA6 | 0x1CF | COMPLETE | `m_usbGSerial[15]` 专用全零终止字节 | Windows/Linux `BuildSector6` 都先把16B临时槽清零，只从来源 `m_usbGSerial` 固定复制前15B，因此 byte15 不受来源 NUL 后保留底层字节影响，始终保留显式零 | Windows/Linux `ReadSector6` 从 `+0x1C0` 按 C 字符串读取；当15B业务字符串占满前15B时该字节提供终止NUL，短串时仍只是固定槽尾零 | 已提交当前/旧版测试夹具全部为0；另对 `nopwd_tool/backup` 22份历史前部用 SAFE6 校验和过滤后 22/22 有效且 `+0x1CF=0` | 写入端所有权、C 字符串消费端、跨当前/旧版历史实盘均无分叉；1B从部分闭环升完全闭环 |
+| LBA6 | 0x1CF | COMPLETE | `m_usbGSerial[15]` 专用全零终止字节 | Windows/Linux `BuildSector6` 都先把16B临时槽清零，只从来源 `m_usbGSerial` 固定复制前15B，因此 byte15 不受来源 NUL 后保留底层字节影响，始终保留显式零 | Windows/Linux `ReadSector6` 从 `+0x1C0` 按 C 字符串读取；当15B业务字符串占满前15B时该字节提供终止NUL，短串时仍只是固定槽尾零 | 已提交当前/旧版测试夹具全部为0；另对 `mode1_tool/backup` 22份历史前部用 SAFE6 校验和过滤后 22/22 有效且 `+0x1CF=0` | 写入端所有权、C 字符串消费端、跨当前/旧版历史实盘均无分叉；1B从部分闭环升完全闭环 |
 | LBA6 | 0x1D0 | COMPLETE | `BeiZhu` C 字符串首字节 / 空串 NUL | 当前 Windows/Linux 写入端从 BeiZhu 输入槽复制前15B到零化临时；读取端从 `+0x1D0` 按 C 字符串读回。无论配置类型是空串还是 GBK“普通”，首字节都仍属于字符串本体（空串时就是终止NUL） | Windows/Linux 读取端以 C 字符串解释，不存在首字节的仅底层内容分支 | 严格 22盘：20份首字节=00（空），2份首字节=C6（GBK“普通”首字节）；旧 MBR 底层内容在“普通”NUL之后才暴露 | 配置类型独立字符串边界闭合，1B升完全闭环 |
 | LBA6 | 0x1D1–0x1DE | COMPLETE | BeiZhu 动态字符串尾部 / 调用方负责 NUL 后保留底层字节 | 当前 Windows/Linux 写入端同样只复制来源 BeiZhu 前15B到零化临时：非空配置类型中首个NUL前属于同一 BeiZhu 字符串，空/短配置类型中其余字节只是来源保留底层字节。一方 Windows `BuildSector6` 虚拟执行把空 BeiZhu 的来源 `+1..14` 人为填成 `5A×14`，输出逐字节保留 | Windows/Linux 读取端只按 C 字符串消费到首个NUL，绝不解释 NUL 后保留底层字节；旧版“普通”配置类型的 MBR几何残值位于NUL之后，因此同样不进入业务语义 | 22盘含20空+2个GBK“普通”，并有8/22 NUL 后非零；两份旧版保留底层字节与旧 MBR 快照连续。官方虚拟测试夹具又证明任意 `5A×14` 保留底层字节合法存在而不改变空字符串语义 | 与标签/办公固定槽同类：正文与保留底层字节由首NUL动态分界，保留底层字节是调用方负责兼容字节而非隐藏字段。14B从部分闭环升完全闭环 |
 | LBA6 | 0x1DF | COMPLETE | `BeiZhu[15]` 专用全零终止字节 | 当前 Windows/Linux `BuildSector6` 对16B临时槽先清零、只复制来源 BeiZhu 前15B；历史 v19 也已补齐上游约束：`object+0x2620` 在全部可执行文件交叉引用中只有 `0x1000B219` 的写入端调用方读取和 `0x1000CCEF` 的唯一写入，后者明确执行 `strcpy_s(dest=object+0x2620, cap=0x10, source=object+0x2478)`。随后调用方先零化32B arg8，再以容量=32 从这个容量=16 对象字段复制，因此有效写入端最多15B正文+NUL，byte15 必为0 | 读取端从 `+0x1D0` 按 C 字符串消费；该字节是当前与 v19 两代合法写入端的固定安全终止NUL | 已提交当前/旧版测试夹具全部为0；扩展22份校验和有效历史前部同样22/22 `+0x1DF=0` | 上游容量=16 机器码直接消除了“v19 容量=32 可能让正文占据 byte15”的歧义；跨配置类型写入端/消费端/实盘完整闭合 |
-| LBA6 | 0x1E0–0x1ED | COMPLETE | v19 BeiZhu 容量-32 C 字符串槽 NUL 后模板保留底层字节 / 旧版 MBR 条目3 快照片段 | 当前 Windows/Linux `BuildSector6` 的较新 ABI 只显式拥有到 `+0x1DF`；历史 v19.11.4.1 则把 `+0x1D0` 建模为 **容量=32 的 BeiZhu C 字符串槽**：`fcn.10006370@0x10006648..0x10006656` 对 `sector+0x1D0` 调 `strcpy_s(cap=0x20, caller arg8)`。其真实调用方 `0x1000B16C..0x1000B226` 先把完整32B局部清零，再从 `object+0x2620` 以 `strcpy_s(cap=0x20)` 填入 BeiZhu；进一步枚举全部可执行文件 `object+0x2620` 交叉引用只得到 `0x1000B219`（此处读取）与 `0x1000CCEF`（唯一写入），唯一写入在 `0x1000CCE8..0x1000CCF8` 明确执行 `strcpy_s(dest=object+0x2620, cap=0x10, source=object+0x2478)`。所以 v19 的合法源字段最多15B正文+NUL，32B arg8 的索引15 必为NUL、索引16..31保持先前零化；v19 `UsbMainBSec@0x101BA790` 的 `+0x1D0..+0x1F3` 也全部为0。因此该代写入端对本14B明确只能生成0，而不是主动生成 MBR 字段。旧版 Aigo+SanDisk+Netac 三个独立已提交配置类型则精确保留旧 MBR 条目3 字节[2..15]：起点 CHS尾、`type=0x07`、终点 CHS、start_lba、sector_count | v19 `ReadSector6@0x10006E07..0x10006E16` 从解码后 `+0x1D0` 调同一 `strcpy_s` 返回调用方 arg8，容量同为32，只消费到首个NUL。六个已恢复调用方分三组：第一组 arg8 局部除初始化/两次读取端传参外无后续引用；第二组成功路径解析的是另一 `esp+0x18` 字符串，不读取 arg8 的稳定 `esp+0x38` 输出槽；第三组 arg8 局部 `-0x64` 的唯一后续值使用是再经 `strcpy_s(cap=16)` 写入对象+0x140。因此 NUL 后 `+0x10..+0x1D` 没有 cmp/测试/哈希/分支/字段提取业务消费 | 20/22 严格历史为零；2/22 非零且类型/起点/数量与各自 LBA12 type4 精确对应；另一个独立来源已审计 `P-EESI-NETAC` 也为非零快照。`scripts/protocol/audit_legacy_lba6_mbr_underlay.py` 固定 Aigo、SanDisk、Netac 三种不同几何，三者启动/CHS/类型前8B一致，start_lba/sector_count 后8B随盘变化；`tests/provision_protocol_audit.rs` 进一步按各自设备 ID 解密 LBA12，并逐字锁定存活14B公式 `C1 FF 07 EF FF FF || LE32(type4 StartSector) || LE32(type4 PartionSize/512)`。真实免密 SanDisk 同一底层内容为16B全零；`scripts/protocol/audit_v19_lba6_beizhu_slot.py` 固定 v19 DLL SHA 并重放全零写入端/模板、读取端与调用方使用约束 | 消费端边界现已闭合，旧“v19 覆盖项不触及本14B”陈述已纠正；机器码证据继续**排除 v19.11.4.1 作为非零快照写入端**：已固定 v19 写入端/模板只能生成 NUL 后全零。`scripts/protocol/audit_netac_mbr_entry_boundary.py` 也排除当前 Netac 1.3.1.16 FormatExA 为历史非零来源。与此同时三种独立已提交非零几何都满足同一标准 MBR 条目3 / LBA12 type4 确定公式，全零配置类型又由当前/v19 一方写入端与物理盘独立覆盖，读取端对本段无独立业务消费。因此盘面字节含义、配置类型行为和标准新写规则已经唯一闭合，升级完全闭环；精确历史复制点/配置类型选择器继续作为实现/制造来源开放问题，不再冒充字节语义阻塞项 |
-| LBA6 | 0x1EE–0x1EF | COMPLETE | 全零兼容尾部 / MBR 条目4 未使用前缀 | 当前 `UsbMainBSec` 对第4条条目的状态/起点头部为0且当前 BuildSector6不覆盖；v19 虽把 `+0x1D0..+0x1EF` 作为容量=32 BeiZhu目标槽，但其上游 `object+0x2620` 唯一写入是容量=16 C 字符串，调用方又先零化完整32B arg8，因此来源 NUL 后的 index30/31 必保持0；旧版 MBR 快照跨到 entry4 后实盘也为 `00 00` | ReadSector6只按 C 字符串消费至NUL，对这2B无独立值相关业务读取 | 已提交当前/旧版测试夹具均为0；扩展 `nopwd_tool/backup` 22份全部校验和有效，22/22 `+0x1EE..+0x1EF=00 00` | 当前/v19 写入端、旧版快照配置类型、负向消费端和全历史实证均无分叉；v19 容量=32 本身不再构成该2B边界歧义 |
+| LBA6 | 0x1E0–0x1ED | COMPLETE | v19 BeiZhu 容量-32 C 字符串槽 NUL 后模板保留底层字节 / 旧版 MBR 条目3 快照片段 | 当前 Windows/Linux `BuildSector6` 的较新 ABI 只显式拥有到 `+0x1DF`；历史 v19.11.4.1 则把 `+0x1D0` 建模为 **容量=32 的 BeiZhu C 字符串槽**：`fcn.10006370@0x10006648..0x10006656` 对 `sector+0x1D0` 调 `strcpy_s(cap=0x20, caller arg8)`。其真实调用方 `0x1000B16C..0x1000B226` 先把完整32B局部清零，再从 `object+0x2620` 以 `strcpy_s(cap=0x20)` 填入 BeiZhu；进一步枚举全部可执行文件 `object+0x2620` 交叉引用只得到 `0x1000B219`（此处读取）与 `0x1000CCEF`（唯一写入），唯一写入在 `0x1000CCE8..0x1000CCF8` 明确执行 `strcpy_s(dest=object+0x2620, cap=0x10, source=object+0x2478)`。所以 v19 的合法源字段最多15B正文+NUL，32B arg8 的索引15 必为NUL、索引16..31保持先前零化；v19 `UsbMainBSec@0x101BA790` 的 `+0x1D0..+0x1F3` 也全部为0。因此该代写入端对本14B明确只能生成0，而不是主动生成 MBR 字段。旧版 Aigo+SanDisk+Netac 三个独立已提交配置类型则精确保留旧 MBR 条目3 字节[2..15]：起点 CHS尾、`type=0x07`、终点 CHS、start_lba、sector_count | v19 `ReadSector6@0x10006E07..0x10006E16` 从解码后 `+0x1D0` 调同一 `strcpy_s` 返回调用方 arg8，容量同为32，只消费到首个NUL。六个已恢复调用方分三组：第一组 arg8 局部除初始化/两次读取端传参外无后续引用；第二组成功路径解析的是另一 `esp+0x18` 字符串，不读取 arg8 的稳定 `esp+0x38` 输出槽；第三组 arg8 局部 `-0x64` 的唯一后续值使用是再经 `strcpy_s(cap=16)` 写入对象+0x140。因此 NUL 后 `+0x10..+0x1D` 没有 cmp/测试/哈希/分支/字段提取业务消费 | 20/22 严格历史为零；2/22 非零且类型/起点/数量与各自 LBA12 type4 精确对应；另一个独立来源已审计 `P-EESI-NETAC` 也为非零快照。`scripts/protocol/audit_legacy_lba6_mbr_underlay.py` 固定 Aigo、SanDisk、Netac 三种不同几何，三者启动/CHS/类型前8B一致，start_lba/sector_count 后8B随盘变化；`tests/provision_protocol_audit.rs` 进一步按各自设备 ID 解密 LBA12，并逐字锁定存活14B公式 `C1 FF 07 EF FF FF || LE32(type4 StartSector) || LE32(type4 PartionSize/512)`。真实mode1 SanDisk 同一底层内容为16B全零；`scripts/protocol/audit_v19_lba6_beizhu_slot.py` 固定 v19 DLL SHA 并重放全零写入端/模板、读取端与调用方使用约束 | 消费端边界现已闭合，旧“v19 覆盖项不触及本14B”陈述已纠正；机器码证据继续**排除 v19.11.4.1 作为非零快照写入端**：已固定 v19 写入端/模板只能生成 NUL 后全零。`scripts/protocol/audit_netac_mbr_entry_boundary.py` 也排除当前 Netac 1.3.1.16 FormatExA 为历史非零来源。与此同时三种独立已提交非零几何都满足同一标准 MBR 条目3 / LBA12 type4 确定公式，全零配置类型又由当前/v19 一方写入端与物理盘独立覆盖，读取端对本段无独立业务消费。因此盘面字节含义、配置类型行为和标准新写规则已经唯一闭合，升级完全闭环；精确历史复制点/配置类型选择器继续作为实现/制造来源开放问题，不再冒充字节语义阻塞项 |
+| LBA6 | 0x1EE–0x1EF | COMPLETE | 全零兼容尾部 / MBR 条目4 未使用前缀 | 当前 `UsbMainBSec` 对第4条条目的状态/起点头部为0且当前 BuildSector6不覆盖；v19 虽把 `+0x1D0..+0x1EF` 作为容量=32 BeiZhu目标槽，但其上游 `object+0x2620` 唯一写入是容量=16 C 字符串，调用方又先零化完整32B arg8，因此来源 NUL 后的 index30/31 必保持0；旧版 MBR 快照跨到 entry4 后实盘也为 `00 00` | ReadSector6只按 C 字符串消费至NUL，对这2B无独立值相关业务读取 | 已提交当前/旧版测试夹具均为0；扩展 `mode1_tool/backup` 22份全部校验和有效，22/22 `+0x1EE..+0x1EF=00 00` | 当前/v19 写入端、旧版快照配置类型、负向消费端和全历史实证均无分叉；v19 容量=32 本身不再构成该2B边界歧义 |
 | LBA6 | 0x1F0–0x1F3 | COMPLETE | 只写 `!SAFE` 标签代际元数据 (`m_encrypt`) | DWARF 正式定位 `UsbWriteParam.m_encrypt@+0x258`；Windows `RegsiterUsb` 对注册字符串执行5字节 `!SAFE` 匹配，相等/不等分支在 `0x1003BA94/0x1003BAC7` 分别写1/0，随后立即传给 BuildSector6；Windows/Linux BuildSector6 都把该布尔值扩成 DWORD 写 `+0x1F0` | 读取侧正式 `UsbLabelParam` 结构没有 `m_encrypt` 成员；Linux ReadSector6 不返回它。Windows `CheckLabel/sub_100152A0` 校验前508B 校验和后显式解析其它字段，但不读取 `+0x1F0`；已扫运行时无值相关消费端。因此消费语义是校验和覆盖 / 语义忽略，而非运行时加密开关 | 已提交严格原始样本 22/22=1；独立 SanDisk 原始 LBA6 同样=1；CI `lba6_m_encrypt_is_the_observed_write_only_safe_label_metadata` 锁定 | 写入端的0/1规则、正式字段名、负语义消费端、校验和所有权与真实盘均闭合。完全闭环不表示恒为1；非 `!SAFE` 写入端可合法写0 |
 | LBA6 | 0x1F4–0x1FB | COMPLETE | UsbMainBSec 静态全零尾部 校验和前 | Windows/Linux BuildSector6 都由 `UsbMainBSec` 初始化，字段覆盖项最后只写到 `+0x1F3`，故8B保持模板零 | 两端 ReadSector6 的校验和覆盖到 `+0x1FB`；字段解析器无独立读取 | 严格22份22/22解密为8B零，官方模板同样为零；CI含独立SanDisk锁定 | 显式模板全零写入端 + 校验和消费端 +实盘，8B 完全闭环 |
 | LBA6 | 0x1FC–0x1FF | COMPLETE | SAFE6 校验和 | 写入端对前508B计算校验和 | 读取端/检查校验 | 22/22 校验通过 | 完成 |
-| LBA7 | 0x000–0x0BF | COMPLETE | 3×64B 紧凑布局旧版 EDPF 表 | Windows `CUsbRegsiter::CreatePartitions` 以紧凑布局 `0x40` 步长构造最多3条旧版条目；`edpediskctrl.dll::sub_100125B0` 将运行时 `0x60` 条目反向映射回紧凑布局旧版表，`SavePartionSector/sub_10028580 -> sub_10010FC0` 负责整表写回。标志、版本、PartionCount、PartionType、NeedDisturb、NeedEncrypt、StartSector、SectorSize、PartionSize、UserKeyCRC、FileKeyCRC 与旧版 wrapped8 的逐字段写入端生命周期均已在下方/详细审计独立闭合 | `ReadPartionInfoExEx/sub_10010B40`、旧版→新版转换器、`NewCheckDisTurbUsb(*)`、登录/挂载/改密与文件密钥 CRC 链按字段消费；版本与条目1/2 NeedDisturb 已由结构性保留 + 负向语义消费端闭合，wrapped8 已由解包+CRC 有效消费端闭合 | 22份严格原始样本全部按0x40 步长合法；另有独立真实免密 SanDisk 两条目配置类型。版本、NeedDisturb 按位置配置类型、wrapped8 正向解包/CRC 等均有已提交回归门禁 | 此行为**总括行**：192B 的逐字段证据已全部闭合，最终严格计数为192/192 完全闭环；Linux 自然对齐 `0x48` ABI只用于字段名/结构交叉，不得覆盖 Windows 物理偏移 |
-| LBA7 | 每条条目 +0x004–+0x007 | COMPLETE | 条目内 `Version` 兼容元数据 | `CreatePartitions` 先清零3×0x40 紧凑布局旧版表，三条都没有 `+0x04` 覆盖写，因此当前写入端为0；Windows `0x40->0x60` 与 `0x60->0x40` 转换器均逐条结构保留该DWORD | 两版 `vrvaud_c` 对完整0xC0 紧凑布局表的行为交叉引用均不读取三条版本；协议代际由14B 密码信息版本决定。Linux 对应旧版→新版转换器也只结构搬运；`CDiskReader::GetTagPartitionInfo/DecryptFileKey/CheckFileKeyCrc/ReadFileSysSector0/DecryptFileSysSector0` 的真实消费字段分别集中在标志/PartionType/UserKeyCRC、StartSector、FileKeyCRC、封装密钥、EncryptMode，均不读取条目版本 | 已提交原始测试夹具 + 独立真实免密 SanDisk 的全部有效 LBA7 条目均 `Version=0`；扩展只读历史去重扫描仍无非零反例 | 不是保留，也不是 PartionCount；闭合的是“正式 ABI 兼容元数据，当前写入端=0、转换器结构性保留、运行时负向语义消费端”的完整生命周期，3×4B=12B 完全闭环 |
-| LBA7 | 条目0 +0x010–+0x013 | COMPLETE | 条目0 `NeedDisturb` MBR 扰动/去扰门禁 | Windows `CreatePartitions` 对条目0 显式写入调用者传入的 `NeedDisturb=1`；旧版/新版 ABI 转换器双向保留该DWORD | 两版 Windows `vrvaud_c` 的 `NewCheckDisTurbUsb(*)` 直接检查紧凑布局条目0 `NeedDisturb@+0x10 != 0`；`SetProtect` 在该检查链后调用 `sub_1006ff80 -> sub_1006e580`，把 LBA0 `+0x1BE..+0x1FD` 的64B MBR表替换为静态扰动表；`UnsetProtect -> sub_1006ffd0 -> sub_1006e9b0` 则从 LBA2 读整扇恢复到 LBA0 并刷新磁盘属性 | 严格22份原始真实设备：22/22 条目0 `NeedDisturb=1`；另有真实免密 SanDisk 两条目配置类型同样条目0=1 | 字段不是泛化“防篡改”位，而是驱动侧是否进入系统可见 MBR 分区表扰动/去扰流程的门控；静态扰动表只有一条类型=0x04、start_lba=66、sector_count=1 的占位条目。条目1/条目2 的同名字段仍未找到独立消费端 |
-| LBA7 | 条目1/条目2 +0x010–+0x013 | COMPLETE | 按位置 `NeedDisturb` 兼容元数据 | 当前 `CreatePartitions` 的调用参数固定为1：条目0/条目1 显式写1，条目2无覆盖写而继承整表清零0；Windows 旧版/新版转换器双向结构保留该DWORD | 两版 `vrvaud_c` 的行为读取只命中条目0 `NeedDisturb`；条目1/条目2 没有条件分支或参数映射。Linux 对应旧版→新版转换器保留字段，但 `CDiskReader` 文件系统检查链不读 NeedDisturb | 已提交原始测试夹具全量门禁按**位置**锁定三条目 `(1,1,0)` 与两条目 `(1,1)`；独立真实免密 SanDisk 的 type4 位于条目1 且值为1，证明该字段不是 `PartionType -> NeedDisturb` 恒等式；扩展历史扫描没有第三种按位置配置类型 | 8B 闭合为当前写入端按位置兼容配置类型 + 结构性保留 + 跨平台负语义消费端；完全闭环不把条目1/2 解释成条目0 的 MBR 扰动行为，也不禁止未来其它写入端配置类型 |
+| LBA7 | 0x000–0x0BF | COMPLETE | 3×64B 紧凑布局旧版 EDPF 表 | Windows `CUsbRegsiter::CreatePartitions` 以紧凑布局 `0x40` 步长构造最多3条旧版条目；`edpediskctrl.dll::sub_100125B0` 将运行时 `0x60` 条目反向映射回紧凑布局旧版表，`SavePartionSector/sub_10028580 -> sub_10010FC0` 负责整表写回。标志、版本、PartionCount、PartionType、NeedDisturb、NeedEncrypt、StartSector、SectorSize、PartionSize、UserKeyCRC、FileKeyCRC 与旧版 wrapped8 的逐字段写入端生命周期均已在下方/详细审计独立闭合 | `ReadPartionInfoExEx/sub_10010B40`、旧版→新版转换器、`NewCheckDisTurbUsb(*)`、登录/挂载/改密与文件密钥 CRC 链按字段消费；版本与条目1/2 NeedDisturb 已由结构性保留 + 负向语义消费端闭合，wrapped8 已由解包+CRC 有效消费端闭合 | 22份严格原始样本全部按0x40 步长合法；另有独立真实mode1 SanDisk 两条目配置类型。版本、NeedDisturb 按位置配置类型、wrapped8 正向解包/CRC 等均有已提交回归门禁 | 此行为**总括行**：192B 的逐字段证据已全部闭合，最终严格计数为192/192 完全闭环；Linux 自然对齐 `0x48` ABI只用于字段名/结构交叉，不得覆盖 Windows 物理偏移 |
+| LBA7 | 每条条目 +0x004–+0x007 | COMPLETE | 条目内 `Version` 兼容元数据 | `CreatePartitions` 先清零3×0x40 紧凑布局旧版表，三条都没有 `+0x04` 覆盖写，因此当前写入端为0；Windows `0x40->0x60` 与 `0x60->0x40` 转换器均逐条结构保留该DWORD | 两版 `vrvaud_c` 对完整0xC0 紧凑布局表的行为交叉引用均不读取三条版本；协议代际由14B 密码信息版本决定。Linux 对应旧版→新版转换器也只结构搬运；`CDiskReader::GetTagPartitionInfo/DecryptFileKey/CheckFileKeyCrc/ReadFileSysSector0/DecryptFileSysSector0` 的真实消费字段分别集中在标志/PartionType/UserKeyCRC、StartSector、FileKeyCRC、封装密钥、EncryptMode，均不读取条目版本 | 已提交原始测试夹具 + 独立真实mode1 SanDisk 的全部有效 LBA7 条目均 `Version=0`；扩展只读历史去重扫描仍无非零反例 | 不是保留，也不是 PartionCount；闭合的是“正式 ABI 兼容元数据，当前写入端=0、转换器结构性保留、运行时负向语义消费端”的完整生命周期，3×4B=12B 完全闭环 |
+| LBA7 | 条目0 +0x010–+0x013 | COMPLETE | 条目0 `NeedDisturb` MBR 扰动/去扰门禁 | Windows `CreatePartitions` 对条目0 显式写入调用者传入的 `NeedDisturb=1`；旧版/新版 ABI 转换器双向保留该DWORD | 两版 Windows `vrvaud_c` 的 `NewCheckDisTurbUsb(*)` 直接检查紧凑布局条目0 `NeedDisturb@+0x10 != 0`；`SetProtect` 在该检查链后调用 `sub_1006ff80 -> sub_1006e580`，把 LBA0 `+0x1BE..+0x1FD` 的64B MBR表替换为静态扰动表；`UnsetProtect -> sub_1006ffd0 -> sub_1006e9b0` 则从 LBA2 读整扇恢复到 LBA0 并刷新磁盘属性 | 严格22份原始真实设备：22/22 条目0 `NeedDisturb=1`；另有真实mode1 SanDisk 两条目配置类型同样条目0=1 | 字段不是泛化“防篡改”位，而是驱动侧是否进入系统可见 MBR 分区表扰动/去扰流程的门控；静态扰动表只有一条类型=0x04、start_lba=66、sector_count=1 的占位条目。条目1/条目2 的同名字段仍未找到独立消费端 |
+| LBA7 | 条目1/条目2 +0x010–+0x013 | COMPLETE | 按位置 `NeedDisturb` 兼容元数据 | 当前 `CreatePartitions` 的调用参数固定为1：条目0/条目1 显式写1，条目2无覆盖写而继承整表清零0；Windows 旧版/新版转换器双向结构保留该DWORD | 两版 `vrvaud_c` 的行为读取只命中条目0 `NeedDisturb`；条目1/条目2 没有条件分支或参数映射。Linux 对应旧版→新版转换器保留字段，但 `CDiskReader` 文件系统检查链不读 NeedDisturb | 已提交原始测试夹具全量门禁按**位置**锁定三条目 `(1,1,0)` 与两条目 `(1,1)`；独立真实mode1 SanDisk 的 type4 位于条目1 且值为1，证明该字段不是 `PartionType -> NeedDisturb` 恒等式；扩展历史扫描没有第三种按位置配置类型 | 8B 闭合为当前写入端按位置兼容配置类型 + 结构性保留 + 跨平台负语义消费端；完全闭环不把条目1/2 解释成条目0 的 MBR 扰动行为，也不禁止未来其它写入端配置类型 |
 | LBA7 | 每条条目 +0x038–+0x03F | COMPLETE | 8B 旧版封装文件密钥 | Windows `sub_10028DB0` 以 `fold32(password)` 对两个32位半字做对称 XOR 包装；`sub_100125B0` 映射回旧版 0x40 条目；`SavePartionSector/sub_10028580 -> sub_10010FC0` 写 LBA7 | `sub_10026050` 对 v0x0064 固定解包8B，随后以 `sub_10038840` 计算 CRC32 并比较同条目 `FileKeyCRC(+0x34)`；改密后反向重包 | 22份原始真实设备中全部28条非零 type2/type4 旧版条目独立复算 28/28 PASS；默认 `fold32("0000aaaa")=0x91919191` | **LBA7 v0x0064 打包旧版文件密钥封装** 已闭合；FileKeyCRC 4B此前已经计入完全闭环，本轮仅新增3×8B=24B，禁止重复计数 |
 | LBA7 | 0x0CA | COMPLETE | 密码信息 `bNoUsbChkPasSafe` / 官方 UI“取消密码复杂性验证” | `cemssafeudisklabeltool.exe`：`sub_4650a0` 以 `this+0x14` 为 `Ui_writeLabel` 基址；`Ui+0xE4=pwdComplexityCheckBox`，`retranslateUi/sub_487660` 的源字符串 `VA 0x4B5AD4` 精确为“取消密码复杂性验证”；`sub_466eb0` 调 `QAbstractButton::isChecked()` 原样写 `request+0x48`；`sub_42e8e0` 再原样写 `LabelInfo+0x7EC`。既有 Windows `WriteNormalULabel -> CreatePartitions` 链把 `UsbWriteParam+0x7EC` 写入 `PassInfo+0x0A` | 独立 Linux 官方 `checkdiskback::Update_EDPEDISKSHOWPARAM@0x406B70` 直接执行 `cmp byte [pass+0x0A],1; setne showparam+0x03`，随后 `CreateSafe6TmpPolicyFile@0x407D50` 将结果纳入 CRC/加密 SAFE6 策略；独立 `EdpEDiskBack::Safe6PolicyFile::GetSafe6Policy@0x4100B0` 与 `linuxedpedisk::Safe6PolicyFile::GetSafe6Policy@0x41EAA0` 解密并恢复该策略/运行时参数 | 严格22份原始盘：18×0、4×1；22/22 LBA7/LBA12 同盘取值一致；CI `pass_info_no_usb_safe_flag_varies_and_matches_between_lba7_and_lba12` 锁定0/1双值与跨扇区一致性 | **语义方向已由官方 UI 闭合**：未勾选=0；勾选“取消密码复杂性验证”=1；值在 UI→请求→LabelInfo→PassInfo 链不取反。保留 ABI 原名 `bNoUsbChkPasSafe`，人类可读语义解释为“取消/跳过密码复杂性验证” |
 | LBA7 | 0x0CC–0x0CD | COMPLETE | 未启用密码信息 `ShareBackuppromptPeriod / EncryptBackuppromptPeriod` 兼容字节 | Linux DWARF `edpdiskglobal.h:164/165` 明确给出两个独立 `BYTE` 字段，物理偏移 `+0x0C/+0x0D`；当前 `CreatePartitions/sub_1003DB50` 在 `0x1003DC16..0x1003DC26` 显式清零完整14B 密码信息，后续存储只到 `+0x0A`，因此当前写入端为0/0 | 四个不同哈希/代际的 `EdpEDiskCtrl` 读取端均把完整14B 密码信息结构复制到输出；已复核成功尾部只对 `Version(+0)`、共享重试 `(+3)`、加密重试 `(+6)` 做 XOR/值处理，`+0x0C/+0x0D` 只结构性保留。Linux 检查器同样保存完整14B但无这2B业务读取；两代 `vrvaud_c::BackupPromptInfo/BackupStartTime/BackupEndTime` 已证明是独立策略/字符串/DWORD 链，与密码信息无数据流 | 已提交原始样本的 LBA7/LBA12 两份副本逐盘0/0且一致；全目录去重扫描19个真实 LBA7 密文配置类型（覆盖密码信息 v0x0064 与 v0x0206）仍19/19=0/0 | 闭合语义是“正式命名但在已覆盖实现中未启用的兼容字节”：写入端=0、读取端结构性保留/负向语义消费端、跨代/跨LBA实盘一致。完全闭环不声称其历史设计单位是小时/天；未来非零配置类型必须保留并扩展，不得机械清零 |
@@ -788,7 +788,7 @@ DWARF 中恢复出的原始声明文件/行号与本地函数地址：
 | LBA10 | 0x008–0x017 | COMPLETE | 共享/type2 卷标 | `SetEdpEdiskSetInfo` 原样复制调用者结构前0x80并加密写入；默认读取端初始化为GBK“交换区” | `CEdpDiskControl::UserLogin` 将该槽赋给本地字符串；type2分支传给 `SetVolumeLabelA` | 来源已审计 Netac 写入前采集解出固定16B槽 `bdbbbbbbc7f8...` = GBK“交换区” | 16B边界、写入端、业务消费端与正向真实盘值闭合 |
 | LBA10 | 0x018–0x027 | COMPLETE | 加密/type4 卷标 | 同上；默认读取端初始化为GBK“保密区” | `UserLogin` type4分支传给 `SetVolumeLabelA` | 来源已审计 Netac 写入前采集解出固定16B槽 `b1a3c3dcc7f8...` = GBK“保密区” | 16B边界、写入端、业务消费端与正向真实盘值闭合 |
 | LBA10 | 0x028–0x07F | COMPLETE | EESI 调用方负责的兼容扩展 | 两个独立 EESI `EdpEDiskCtrl` 构建的读取/集合证明完整0x80B 结构性往返验证；当前官方 UI 配置类型对这88B写零 | 当前 callers不读取这88B；更老两代无EESI接口 | 来源已审计 Netac EESI 启用采集与独立旧 SanDisk 正例均为88B全零 | 生命周期边界已闭合：调用方可往返验证扩展字节，当前官方调用方写零且业务消费端不解释；完全闭环不表示未来扩展必须恒零 |
-| LBA10 | 0x080–0x1FF | COMPLETE | 跨代无所有者、原样保留/忽略的物理尾部 | 两个独立 EESI 构建的设置函数只覆盖前0x80B并原样回写后0x180B；旧两代没有该尾部写入端 | 读取函数只解密/返回前0x80B，所有已审消费端均忽略后384B | 仓库现行20份唯一金标（19加密+1真实免密）均为384B零；官方写入端的原样保留行为独立闭合 | 完全闭环表示该384B不属于EESI 负载且必须原样保留，不表示协议要求恒零 |
+| LBA10 | 0x080–0x1FF | COMPLETE | 跨代无所有者、原样保留/忽略的物理尾部 | 两个独立 EESI 构建的设置函数只覆盖前0x80B并原样回写后0x180B；旧两代没有该尾部写入端 | 读取函数只解密/返回前0x80B，所有已审消费端均忽略后384B | 仓库现行20份唯一金标（19加密+1真实mode1）均为384B零；官方写入端的原样保留行为独立闭合 | 完全闭环表示该384B不属于EESI 负载且必须原样保留，不表示协议要求恒零 |
 | LBA11 | 0x000–0x003 | COMPLETE | DRKB 魔数 | `CDataSecrity::RandBuffer256` 先写 DRKB | `ReadSector11` 首先校验 DRKB | 22/22 | 完成 |
 | LBA11 | 0x004–0x0FF | COMPLETE | random252 | `RandBuffer256`: `srand(time(NULL)); rand()%255` 共252B | `DataEncrypt/DataDecrypt` 将整个 DRKB块纳入 CRC32 密钥输入 | 22/22；均无0xFF；7 CI夹具回归 | 每字节都是密钥扰动材料，来源和消费闭合 |
 | LBA11 | 0x100–0x103 | COMPLETE | PDKB 魔数（解密后） | `BuildSector11` 构造 PDKB 明文 | `ReadSector11` 解密后必须校验 PDKB | 22/22 | 完成 |
@@ -800,7 +800,7 @@ DWARF 中恢复出的原始声明文件/行号与本地函数地址：
 | LBA12 | 每条条目 +0x038–+0x047 | COMPLETE | 封装文件密钥材料 | 当前写入端的三条可达分支已经闭合：模式1 `sub_10001190`=A7F0、模式2 `sub_100036E0/sub_10011010`=SM4-ECB、模式3 `sub_1000FC10`=AES-128-ECB；密钥均来自 `MD5(effective_password)`，模式字节写入 `+0x58` | Windows `UserLogin/sub_10028AB0` 对1/2/3分别解包并统一做 FileKeyCRC；模式3 CRC失败还有按模式1重试的历史兼容；Linux当前检查器明确消费模式1/2 | 22盘44条加密真实设备条目全部模式2；隔离执行官方 `CreatePartitions` 又得到模式1/2/3三份确定性512B LBA12正向测试夹具：密码 `ProofPass1!` 三种16B 封装密钥分别经 A6B0、独立标准SM4-ECB、独立标准AES-128-ECB恢复同一 `147196f5a2ec7912edf13f75d766cb42`，三者CRC均=`0xFF4C1D36`且等于盘内 FileKeyCRC；CI锁定 | **一方运行时正向盘面闭环**：没有把虚拟测试夹具冒充物理采集；但官方写入端原生执行、UI→加密→模式可达链、独立读取端往返验证与既有真实设备模式2共同消除了该16B的语义不确定性，因此3×16B从部分闭环升完全闭环 |
 | LBA12 | 每条条目 +0x048–+0x057 | COMPLETE | `EncryptFileKey32[16]` 跨代兼容槽 | Windows `CreatePartitions` 对3×96B先 `memset(0,0x120)`；当前紧凑布局写入端后续只写 16B 封装密钥 `+0x38..47` 与模式 `+0x58`，所以该16B保持显式零。旧72B `tagEdpPartionInfo` **根本没有**该槽；Linux 检查器的旧版→新版 `GetPartionFromOld` 也只把旧8B 密钥搬到自然对齐 `+0x40`，不填自然对齐 `+0x50 EncryptFileKey32[16]` | 104B 检查器 DWARF正式命名 `EncryptFileKey32[16]@+0x50`，但 `DecryptFileKey/CheckFileKeyCrc/ReadFileSysSector0/DecryptFileSysSector0` 都不读取它；紧凑布局 `libedpedisk.so` 会在按值构造时结构缓存完整96B，但严格按 `PartitionHeader` 符号边界审计，映射到对象 `+0x88/+0x90` 的两个QWORD只在构造器写入，后续没有值相关读取；正对照封装密钥起点对象 `+0x78` 被 SMS4/AES128/OldEdp 解密实际消费。Windows UserLogin/改密同样只消费 `+0x38..47/+0x58` | 严格22份原始盘全部现存 EDPF 条目共66条，`+0x48..57` **66/66全零**；CI `lba12_encrypt_file_key32_compatibility_slots_are_zero_in_original_entries` 锁定 | **LBA12 EncryptFileKey32 兼容槽结构缓存 / 负语义消费端闭环**：旧ABI无槽、新ABI正式保留名字、当前写入端显式零、跨Windows/Linux只结构搬运不参与算法、原始实盘全零。完全闭环表示“兼容槽生命周期/无当前业务语义”闭合，不把它误称保留，也不禁止未来其它ABI结构性携带非零值 |
 | LBA12 | 每条条目 +0x059–+0x05F | COMPLETE | 紧凑布局 `Reserved[7]` | Windows `CreatePartitions` 对3×96B先 `memset(0,0x120)`，后续只写至 +0x58；Linux DWARF正式字段名 `Reserved[7]` | Windows UserLogin/改密只消费 16B 封装密钥与 +0x58；Linux 解密/改密同样不消费保留 | 22盘66/66 条目全零；CI原始夹具锁定 | **LBA12 打包 `Reserved[7]` 写入端/负消费端闭环**；与前面的 `EncryptFileKey32[16]` 兼容槽分开建模 |
-| LBA12 | 0x12A | COMPLETE | 密码信息 `bNoUsbChkPasSafe` / 官方 UI“取消密码复杂性验证” | 与 LBA7 共用同一制标输入链：`pwdComplexityCheckBox.isChecked()` -> `request+0x48` -> `LabelInfo+0x7EC` -> `UsbWriteParam+0x7EC` -> `CreatePartitions` -> `PassInfo+0x0A`；LBA12 构造器保存同一密码信息字节 | `checkdiskback::Update_EDPEDISKSHOWPARAM@0x406B70` 直接比较该字段并生成 SAFE6 显示策略字节 +3；策略经 `CreateSafe6TmpPolicyFile` 加密后被 `EdpEDiskBack` 与 `linuxedpedisk` 两套 `Safe6PolicyFile::GetSafe6Policy` 恢复 | 严格22份18×0+4×1，且22/22与同盘 LBA7 +0x0A相同；CI锁定双值/一致性 | 1B 完全闭环；**1=官方 UI 勾选“取消密码复杂性验证”**，0=未勾选；不再使用含糊“免密安全策略”解释 |
+| LBA12 | 0x12A | COMPLETE | 密码信息 `bNoUsbChkPasSafe` / 官方 UI“取消密码复杂性验证” | 与 LBA7 共用同一制标输入链：`pwdComplexityCheckBox.isChecked()` -> `request+0x48` -> `LabelInfo+0x7EC` -> `UsbWriteParam+0x7EC` -> `CreatePartitions` -> `PassInfo+0x0A`；LBA12 构造器保存同一密码信息字节 | `checkdiskback::Update_EDPEDISKSHOWPARAM@0x406B70` 直接比较该字段并生成 SAFE6 显示策略字节 +3；策略经 `CreateSafe6TmpPolicyFile` 加密后被 `EdpEDiskBack` 与 `linuxedpedisk` 两套 `Safe6PolicyFile::GetSafe6Policy` 恢复 | 严格22份18×0+4×1，且22/22与同盘 LBA7 +0x0A相同；CI锁定双值/一致性 | 1B 完全闭环；**1=官方 UI 勾选“取消密码复杂性验证”**，0=未勾选；不再使用含糊“mode1安全策略”解释 |
 | LBA12 | 0x12C–0x12D | COMPLETE | 未启用密码信息 `ShareBackuppromptPeriod / EncryptBackuppromptPeriod` 兼容字节 | 与 LBA7 共用同一个当前密码信息写入端：完整14B先清零，写 LBA12 前只把版本切换为 `0x0206`，两个周期字节保持0/0；DWARF 正式字段定义同样适用 | Windows 旧版/当前读取端对完整14B结构复制但不消费最后2B；Linux 检查器保存整个密码信息，但实际解密/文件系统检查不读取这两个字段；独立 `vrvaud_c` 备份策略链已排除 | 已提交测试夹具逐盘与 LBA7 两字节一致且均0；历史去重配置类型跨 v0x0064/v0x0206 未见非零 | 与 LBA7 同一未启用兼容字段生命周期闭合；2B 升完全闭环，不推导未实现的时间单位 |
 | LBA12 | 0x12E–0x16F | COMPLETE | 表后全零初始化填充 | 写入端整块零初始化且不覆写 | 主读取端不消费该区 | 22/22解密为零 | 写入端+负向消费端+实盘闭合 |
 | LBA12 | 0x170–0x1FF | COMPLETE | 表后全零初始化填充 / 连续密文尾部 | Windows 当前 `sub_10014F30` 分配 `sector_size+1` 后整块清零，v0x206 只复制 `0x120+0x0E=0x12E` 结构字节，随后加密整扇；Linux `BuildSector12` 同样先把 `sector_size+1` 全零再只复制表/表尾并整扇加密 | Windows `sub_100160B0` 固定解密0x200B，但只复制 `0x120+0x0E` 返回；Linux主读取端同样只解释表/表尾，不消费表后区 | 严格22份 + 独立SanDisk 解密后 `0x12E..0x1FF` 全零；既有连续密文门禁同时证明 `0x170..` 不是原始尾 | 与 `0x12E..0x16F` 同属一个表后全零填充区；此前部分闭环行是主表陈旧状态，总进度表早已把这144B计入 LBA12 的393B 完全闭环，因此本次只纠账、不重复增加总数 |
@@ -848,7 +848,7 @@ LBA4-LBA12 与尾部镜像间复制9扇区，同样没有把 LBA3 纳入修复�
   - 其它字节为零；
 - 同 VID/PID 的另一份 Kingston 原始盘 LBA3 仍为全零。
 
-本轮又把范围扩到 `nopwd_tool/backup` 与 `utils/backup` 两个目录的60份 `.bin`
+本轮又把范围扩到 `mode1_tool/backup` 与 `utils/backup` 两个目录的60份 `.bin`
 历史/真实快照做只读统计集；该扩展集合包含历史/转换状态，只用于配置类型发现，
 不改变上述22份严格代际参考的计数。非零 LBA3 只有3份，并形成
 **两个不同的 MP 负载配置类型**：2026-08-03 两份逐字节相同的 Kingston 快照
@@ -1723,9 +1723,9 @@ Windows physical LBA7 packed entry (stride=0x40)
   密码信息。CI 原始夹具另外锁死 `0x40` 三条条目与 `+0xC0` 表尾。
 
 这里的“22份”继续特指**原始生成协议参考集**。另有
-`/Users/zhangyuxi/Desktop/u_disk/analyze/disk_data/no_password_disk4`：
-它是 2026-08-23 从真实 SanDisk Ultra 免密码 U 盘只读采集的设备快照，
-不是 edpcli 自生成/免密转换产物。本轮把它作为独立第23份真实行为/配置类型
+`/Users/zhangyuxi/Desktop/u_disk/analyze/disk_data/sandisk_mode1_capture`：
+它是 2026-08-23 从真实 SanDisk Ultra mode1 U 盘只读采集的设备快照，
+不是 edpcli 自生成/mode1 重制产物。本轮把它作为独立第23份真实行为/配置类型
 样本纳入复核，但不拿它替代22份原始生成参考。该盘 LBA7 明确为：
 
 ```text
@@ -1737,10 +1737,10 @@ pass-info Version=0x0064
 因此真实产品确实存在两条条目的 LBA7 配置类型；此前22份参考中的 Netac
 `onlyid=949028302 @ 17:24:33` 仍因同 onlyid 前后只有 LBA7 被改动而作为
 该扇区的局部实验态降权，但不能再把“LBA7=2”本身视为实验态特征。
-此外，`no_password_disk4/info/disk4_info.json` 中旧解析结果
+此外，`sandisk_mode1_capture/info/disk4_info.json` 中旧解析结果
 `"ver": 2` 是把 `PartionCount@+0x08` 错标成版本；按物理紧凑布局 ABI
 重新解码后两个条目的 `Version@+0x04` 都为0。仓库
-`protocol_evidence/sandisk_ultra_authentic_no_password_lba7.hex` 回归门禁
+`protocol_evidence/sandisk_ultra_authentic_mode1_lba7.hex` 回归门禁
 专门拦截这类字段错位。该新增样本不改变当前完全闭环/部分闭环字节计数。
 
 Linux 写入端/读取端原源码位置：
@@ -1759,7 +1759,7 @@ Windows 当前写入端：
 
 ### 5.9 官方“启动区与交换区二合一”制盘链：UI → 请求 → EDPF → MBR → FormatDisk
 
-本轮继续从一方制标程序反向追踪真实免密码 SanDisk 的来源，已经把
+本轮继续从一方制标程序反向追踪真实 mode1 SanDisk 的来源，已经把
 “启动区与交换区二合一”从产品 UI 一直闭合到物理 MBR。这里要特别区分：
 
 - **产品术语**：“启动区与交换区二合一”；
@@ -1897,8 +1897,8 @@ part=3:
     entry1 = type2
 ```
 
-因此真实免密码 SanDisk 的 `PartionCount=2 + type2/type4` 已不再只是
-“看起来像某种免密配置类型”，而是和一方 `part=1` 构造分支逐项一致。
+因此真实 mode1 SanDisk 的 `PartionCount=2 + type2/type4` 已不再只是
+“看起来像某种mode1配置类型”，而是和一方 `part=1` 构造分支逐项一致。
 
 #### 5.9.4 当前 CreatePartitions 几何：条目0 从 LBA63 开始，type4 紧随其后
 
@@ -1966,7 +1966,7 @@ bootAndExchangePartRadio
         -> OS native filesystem mount
 ```
 
-这解释了真实免密码盘为什么无需先走
+这解释了真实 mode1 盘为什么无需先走
 `EdpEDisk.exe -> UserLogin -> unwrap file key -> EdpMountFile` 才能访问前部卷。
 
 同时必须保留一个容易误判的事实：真实 SanDisk 的 type2
@@ -2020,7 +2020,7 @@ C6 F4 B6 AF C7 F8 -> “启动区”
 对当前挂载/实际分区几何，应优先服从已经由 Windows/Linux 消费端闭合的
 LBA12 96B 紧凑布局运行时表；LBA7 继续按旧版 ABI/配置类型单独解释。
 
-综合本轮证据，真实免密码 SanDisk 的官方制盘原理可以收敛为：
+综合本轮证据，真实 mode1 SanDisk 的官方制盘原理可以收敛为：
 
 ```text
 官方 UI part=1
@@ -2076,7 +2076,7 @@ memset(old_table, 0, 3 * 0x40)
 \`\`\`
 
 这与原始三分区实盘的 \`1/1/0\` 完全一致，也解释了为何不能把 NeedDisturb
-理解成 \`PartionType\` 的函数：新增真实免密 SanDisk 的两条表中，
+理解成 \`PartionType\` 的函数：新增真实mode1 SanDisk 的两条表中，
 type4 位于条目1，因此其 NeedDisturb=1；标准三分区 type4 位于条目2，
 NeedDisturb=0。回归测试
 \`lba7_need_disturb_is_not_a_partition_type_invariant\`
@@ -2104,7 +2104,7 @@ NeedDisturb=0。回归测试
 - 旧 Windows \`EdpEDiskCtrl\` 读取旧版 LBA7 后，实际协议代际仍由
   14B 密码信息版本决定，不依赖条目 \`Version@+0x04\`。
 
-实盘方面，已提交原始测试夹具的全部有效条目与新增真实免密 SanDisk
+实盘方面，已提交原始测试夹具的全部有效条目与新增真实mode1 SanDisk
 两条条目均为 \`Version@+0x04=0\`；扩展只读历史扫描也没有发现非零版本。
 NeedDisturb 则稳定按**位置配置类型**出现：
 
@@ -2573,7 +2573,7 @@ LBA6 滚动密钥解出 `m_crcUsbID[0]@+0x100`；该 DWORD 就是
 
 `tests/provision_protocol_audit.rs` 必须持续验证仓库中的真实原盘夹具：
 
-- 只统计非免密夹具；
+- 只统计非mode1夹具；
 - LBA11 必须是 DRKB；
 - random252 不得出现写入端不可能产生的 `0xFF`；
 - 使用 ASCII VID/PID；
@@ -2639,7 +2639,7 @@ LBA0–LBA12 当前语义覆盖已经是 **6656/6656B 完全闭环**。后续工
 > `STRICT_PROGRESS` 与字段账本。
 
 日期：2026-09-19
-范围：旧审计集合共 23 份前部快照，但其中混入免密/实验态，不能再统称“23 份真实原盘”。当前生成协议参考集改为 22 份只读样本：`nopwd_tool/backup` 中 21 份非免密完整备份 + 1 份独立 SanDisk 原始加密盘；仓库保留 7 份裁剪后的原始 LBA0–12 协议夹具。全程只读，不对物理原始磁盘写入。
+范围：旧审计集合共 23 份前部快照，但其中混入mode1/实验态，不能再统称“23 份真实原盘”。当前生成协议参考集改为 22 份只读样本：`mode1_tool/backup` 中 21 份非mode1完整备份 + 1 份独立 SanDisk 原始加密盘；仓库保留 7 份裁剪后的原始 LBA0–12 协议夹具。全程只读，不对物理原始磁盘写入。
 
 ### 结论
 
@@ -2668,8 +2668,8 @@ LBA0–LBA12 当前语义覆盖已经是 **6656/6656B 完全闭环**。后续工
    - User / Dept 是动态业务字段。
    - Autonum 在历史样本存在不同世代，因此作为配置类型字段处理，不从供体复制。
 
-5. LBA9 在历史原盘存在 EETU/SAPF 与全零两种合法形态；现有 apply 的最终免密形态会清零 LBA9。
-   - 新盘制盘的第一阶段目标与现有免密产品形态一致，标准配置类型采用全零 LBA9。
+5. LBA9 在历史原盘存在 EETU/SAPF 与全零两种合法形态；现有 apply 的最终mode1形态会清零 LBA9。
+   - 新盘制盘的第一阶段目标与现有mode1产品形态一致，标准配置类型采用全零 LBA9。
    - 不尝试复制厂商/旧版本 SAPF 的未知附加字段。
 
 6. LBA6、LBA7、LBA8、LBA11、LBA12 已有解码器可作为基础验证器，但本轮审计发现现有解码器有数处结构解释错误，必须修正后才能作为逐字节 oracle。
@@ -2683,7 +2683,7 @@ LBA0–LBA12 当前语义覆盖已经是 **6656/6656B 完全闭环**。后续工
 
 以下结论不是直接采信 `u_disk` 文档，而是先用历史真实前部镜像重新独立复算，再把关键变体裁剪为当前仓库中的 LBA0–12 协议夹具；`u_disk` 只作为候选结论和反编译入口。
 
-**证据口径更新（2026-09-19）：`nopwd_tool/backup` 中由 edpcli/旧工具执行免密转换后产生的快照只能用于产品回归，禁止作为“原始加密标签如何生成”的证据。其中 Aigo U335 `onlyid=2071754312 @ 12:09:32` 已由 MBR/LBA6/LBA7/LBA12 内容确认是转换后的免密状态，因此当前“原始生成协议”参考集仍使用其余 21 份非转换完整备份，再补入独立 SanDisk 原始加密盘，共 22 份。另一方面，`/Users/zhangyuxi/Desktop/u_disk/analyze/disk_data/no_password_disk4` 是 2026-08-23 从真实 SanDisk Ultra 免密码 U 盘只读采集的原始设备快照，不是 edpcli 自生成/转换盘；它作为独立的第 23 份**真实设备行为/配置类型证据**纳入 LBA7 等观测，但不替代 22 份“原始生成参考”去证明加密制盘写入端语义。已知局部实验态仍按 LBA 单独降权。仓库 `tests/provision_protocol_audit.rs` 对转换盘继续显式排除，并把该真实免密盘的 LBA7 单独放在 `protocol_evidence` 下，不让它进入原始生成参考循环。**
+**证据口径更新（2026-09-19）：`mode1_tool/backup` 中由 edpcli/旧工具执行 mode1 重制后产生的快照只能用于产品回归，禁止作为“原始加密标签如何生成”的证据。其中 Aigo U335 `onlyid=2071754312 @ 12:09:32` 已由 MBR/LBA6/LBA7/LBA12 内容确认是重制后的 mode1，因此当前“原始生成协议”参考集仍使用其余 21 份非重制完整备份，再补入独立 SanDisk 原始加密盘，共 22 份。另一方面，`/Users/zhangyuxi/Desktop/u_disk/analyze/disk_data/sandisk_mode1_capture` 是 2026-08-23 从真实 SanDisk Ultra mode1 U 盘只读采集的原始设备快照，不是 edpcli 自生成/转换盘；它作为独立的第 23 份**真实设备行为/配置类型证据**纳入 LBA7 等观测，但不替代 22 份“原始生成参考”去证明加密制盘写入端语义。已知局部实验态仍按 LBA 单独降权。仓库 `tests/provision_protocol_audit.rs` 对重制盘继续显式排除，并把该真实 mode1 盘的 LBA7 单独放在 `protocol_evidence` 下，不让它进入原始生成参考循环。**
 
 #### LBA3：EDP 原样保留现有，厂商 MP 语义仍未闭合
 
@@ -2713,7 +2713,7 @@ LBA3 负载消费端。这只能证明 EDP 当前组件**不解释**该扇区，
   `+0x1F0..1FF="this is mp mark\\0"`；
 - 同 VID/PID 的另一 Kingston 原盘整扇全零。
 
-随后对 `nopwd_tool/backup` 与 `utils/backup` 两个历史备份目录共60份 `.bin`
+随后对 `mode1_tool/backup` 与 `utils/backup` 两个历史备份目录共60份 `.bin`
 做只读扩展扫描；该扩展集合包含历史/转换状态，只用于配置类型统计集，不改变22份
 严格原始代际参考的计数。非零 LBA3 只有3份，并精确归成两类：
 
@@ -2921,7 +2921,7 @@ older 物理 samples 与普通滚动表示相容，但精确写入端仍缺。
 - 2/22 旧版身份配置（Aigo rev_pmap + SanDisk）：
   物理非零，通用=`0B 00`。
 
-真实免密 SanDisk 进一步给出身份分类器的直接反例：第二=`0x4A32BA39`、
+真实mode1 SanDisk 进一步给出身份分类器的直接反例：第二=`0x4A32BA39`、
 HSerial非零，盘面=`00 00`，当前官方读取端=`D4 D9`。仓库
 `scripts/protocol/probe_lba4_reader.py` 固定 DLL SHA-256
 `122b30301a7d23590f69313063414518f2b60d8535a57ee5d5a585a0c6b4c6eb` 与金标 SHA-256
@@ -2960,7 +2960,7 @@ K0=`0xBFED`，两个标志位置的滚动密钥字节分别=`D4/D9`，因此盘�
   制造可执行文件仍未知，但只影响表示来源；
 - `bConnetServer @ +0x46`：当前 Windows/Linux 与 v19.11.4.1 SAFE6 节点构造器
   都由全零初始化保持该字节=0；历史滚动形式加密原始样本的正式读取端
-  视图同样为0。更关键的是 `scripts/protocol/probe_lba4_v19_writer.py` 保留真实免密
+  视图同样为0。更关键的是 `scripts/protocol/probe_lba4_v19_writer.py` 保留真实mode1
   SanDisk 的第二=`0x4A32BA39` 与非零 HSerial，只把节点标志设为`00 00`，在
   内存后端 I/O 中原生执行 v19 `fcn.10006090`，最终输出与真实 LBA4 **512/512
   完全一致**、SHA-256=`c26628566108031f439f999a46858476414ec8e7d1030a8293c9df0c463ad5d8`，
@@ -3007,7 +3007,7 @@ Linux DWARF 同时恢复 `diskfile.h::UsbLabelParam`：`+0x278..+0x28B = HDOnlyS
 
 因此 `OnllyID2Nd` 应按行为命名为 **备份/激活加密密钥种子**；“第二ID”
 只是历史结构名。当前写入端把主 onlyid 直接复用为该种子；旧版配置类型则保存
-独立种子。对 `nopwd_tool/backup` 可由文件名提供主 onlyid 的22份历史捕获重算后，
+独立种子。对 `mode1_tool/backup` 可由文件名提供主 onlyid 的22份历史捕获重算后，
 15份旧版中 **15/15 第二密钥都不等于本设备组或全语料任何主 onlyid**；相同
 主 onlyid 的重复捕获又保持第二密钥稳定，排除“上一次主 onlyid”解释。已提交
 三份旧版测试夹具进一步锁定：NETAC_A=`44D9CE02`、NETAC_B=`028EFFD3`、
@@ -3103,8 +3103,8 @@ CRC32_bare 得到的32 位随机密钥**。当前写入端则取消第二次随�
 - **16/22**：`OnllyID2Nd != main_onlyid`，同时 `HSerialCRC[5] != 0`；
 - 两个条件在当前 22 份原始生成参考上是 **22/22 双向等价**，没有交叉反例。
 
-这里特别排除了 `nopwd_tool/backup` 中未带 `_nopwd_` 名称、但内容已经确认
-属于免密转换态的 Aigo `onlyid=2071754312 @ 20260828_120932`，并补回独立
+这里特别排除了 `mode1_tool/backup` 中未带 `_mode1_` 名称、但内容已经确认
+属于mode1 重制态的 Aigo `onlyid=2071754312 @ 20260828_120932`，并补回独立
 SanDisk 原始加密盘；如果直接扫备份目录会得到错误的 7/15 计数。
 
 这进一步说明 `OnllyID2Nd` 与 `HSerialCRC[5]` 至少属于同一代
@@ -3225,12 +3225,12 @@ LBA6 扩展区非零，并且是严格参考中的唯一 CHS MBR 配置类型。
 缺失写入端的代际范围，但在取得那个写入端前，仍禁止把 `0B` 自行解释成某个
 业务枚举值。
 
-同一物理 Aigo U335 / 同一 `onlyid=1987718388` 还有一份 2026-09-16 免密转换后快照。
+同一物理 Aigo U335 / 同一 `onlyid=1987718388` 还有一份 2026-09-16 mode1 重制后快照。
 与 2026-08-27 原始加密备份逐扇区比较时，LBA0/LBA6/LBA7/LBA11/LBA12 均发生变化，
 但 **LBA4 512/512 字节完全一致**（两份 LBA4 SHA-256 均为
 `aad70723b3c1...`）。因此 `reader=0B 00`、高熵 HSerial 和 `MyHardinfo=8B4613F5`
-都明确早于免密转换并被转换路径原样保留；不能再把这个标志配置类型解释为 nopwd 工具的
-派生结果。回归 `lba4_old_server_flag_profile_survives_nopwd_conversion_bit_exact` 固定该纵向证据。
+都明确早于mode1 重制并被转换路径原样保留；不能再把这个标志配置类型解释为 mode1 工具的
+派生结果。回归 `lba4_old_server_flag_profile_survives_mode1_conversion_bit_exact` 固定该纵向证据。
 
 Linux DWARF 还把该节点的静态使用面收窄：`LPEDP_PARTION_RESTORINFO_NODE`
 在 `libcemsfilesyscheck.so` 这个编译单元中只作为 `BuildSector4@diskfile.cpp:740` 与
@@ -3648,7 +3648,7 @@ v19/当前写入端都只能给出全零配置类型。生成该动态旧版 MBR
 `+0x1C0..0x1CF` 与 `+0x1D0..0x1DF` 从完全闭环回退为部分闭环。
 这是证据标准收紧后的纠错，不是协议理解退步；两段的 C 字符串业务语义仍然成立。
 
-因此旧免密转换器里的 `0x1CA=128480`、`0x1D4..0x1EC=0`
+因此旧mode1 重制器里的 `0x1CA=128480`、`0x1D4..0x1EC=0`
 只能保留为**历史兼容补丁 recipe**，不能再进入新盘制盘的协议模型。
 新盘标准配置类型现在按当前写入端边界确定性生成：
 `GSerial="322CA28A" + NUL + zero tail`、空 BeiZhu、`0x1E0..0x1EF=0`、
@@ -4007,7 +4007,7 @@ LBA12，不读取 LBA6。
     **原样保留现有物理字节**；
 - 真实样本的有效长度覆盖 `0x148 / 0x154 / 0x16b / 0x17a / 0x17c / 0x17e / 0x181 / 0x183` 等多种值，实际加密前缀可为 0x150、0x160、0x170、0x180、0x190。
 - 独立 SanDisk 原始加密盘此前曾被误判为“非 LLGB”：根因是使用了
-  `disk&ven_sandisk&prod_ultra&rev_1.00` 这一另一份免密/历史样本的短 device_id。
+  `disk&ven_sandisk&prod_ultra&rev_1.00` 这一另一份mode1/历史样本的短 device_id。
   该原盘自己的 LBA7 只有在
   `disk&ven_sandisk&prod_ultra_usb_3.0&rev_1.00` 下才能恢复 EDPF；
   同一权威 device_id 解 LBA8 后得到标准 `LLGB`，`+0x04=0x15E`。
@@ -4562,8 +4562,8 @@ LBA8 由 **476 完全闭环 / 36 部分闭环** 提升到 **492 完全闭环 / 2
 - LBA7（0x40 步长）和 LBA12（0x60 步长）均逐样本验证：`u32@entry0+0x08 == 实际连续 EDPF entry 数量`。
 - 当前 22 份参考样本：LBA12 为 22/22 三条；LBA7 为 21 份三条、1 份两条。
 - 在这 22 份“原始生成参考”内部，唯一 LBA7=2 的样本仍是 Netac `onlyid=949028302 @ 17:24:33`；与同 onlyid 的 17:23:49 / 17:24:20 对比，仅 LBA7 发生变化，其余 LBA0–12 一致，因此该扇区继续按局部实验/中间态降权。排除它后，原始 LBA7 参考是 21/21 三条。
-- 新纳入的独立真实免密 SanDisk Ultra 则给出**第二个、且是真实在用的两条条目配置类型**：条目0=type2、条目1=type4，二者 `NeedDisturb=1`、`NeedEncrypt=1`，`PartionCount=2`。这证明“两条 LBA7”本身不能再被描述成只可能是实验态；它只说明 Netac 那一份不能用于反推原始三分区写入端。
-- 对该真实免密盘重新按紧凑布局 0x40 ABI 逐字段解码时，两个条目的 `Version@+0x04` 都是 **0**；目录中旧 `disk4_info.json` 的 `"ver": 2` 来自历史解析器把 `PartionCount@+0x08` 错当成版本，现已由回归门禁明确拦截。
+- 新纳入的独立真实mode1 SanDisk Ultra 则给出**第二个、且是真实在用的两条条目配置类型**：条目0=type2、条目1=type4，二者 `NeedDisturb=1`、`NeedEncrypt=1`，`PartionCount=2`。这证明“两条 LBA7”本身不能再被描述成只可能是实验态；它只说明 Netac 那一份不能用于反推原始三分区写入端。
+- 对该真实 mode1 盘重新按紧凑布局 0x40 ABI 逐字段解码时，两个条目的 `Version@+0x04` 都是 **0**；目录中旧 `disk4_info.json` 的 `"ver": 2` 来自历史解析器把 `PartionCount@+0x08` 错当成版本，现已由回归门禁明确拦截。
 - 因此 `+0x08` 必须命名为 `partition_count` / `PartionCount`；表格式代际不能再从该字段推断。
 
 #### LBA7 打包 64 字节 ABI 与 Linux 自然对齐 72 字节 ABI
@@ -4592,10 +4592,10 @@ LBA7，确认同名 `tagEdpPartionInfo` 存在不能混用的 ABI：
 - 因此 Linux 72B 自然对齐 ABI 只可用于字段名/源码来源参考，不能直接作为
   Windows 实盘 LBA7 物理偏移。
 
-独立真实免密 SanDisk Ultra 也按同一设备 ID CRC/滚动异或重新解密，
+独立真实mode1 SanDisk Ultra 也按同一设备 ID CRC/滚动异或重新解密，
 得到 2×0x40 连续 EDPF、合法 `+0xC0` 密码信息（版本=0x0064），并且
 两个条目的 `Version@+0x04=0`。仓库新增
-`tests/fixtures/protocol_evidence/sandisk_ultra_authentic_no_password_lba7.hex`
+`tests/fixtures/protocol_evidence/sandisk_ultra_authentic_mode1_lba7.hex`
 与定向测试固定这一事实。该样本增加的是“真实配置类型行为”覆盖，不改变
 22份原始生成参考集的计数，也不单凭样本值把版本/NeedDisturb 升级为完全闭环。
 
@@ -4620,7 +4620,7 @@ LBA7，确认同名 `tagEdpPartionInfo` 存在不能混用的 ABI：
 - 条目2 没有对应覆盖写，因此继承整表清零值 \`0\`。
 
 这解释了当前三分区配置类型的 \`1/1/0\`，但也证明它不是按 PartionType
-定义的恒等规则。新纳入的真实免密 SanDisk 是两条条目：
+定义的恒等规则。新纳入的真实mode1 SanDisk 是两条条目：
 type2/条目0 NeedDisturb=1，type4/条目1 NeedDisturb=1；而标准三分区原盘的
 type4/条目2 NeedDisturb=0。仓库新增
 \`lba7_need_disturb_is_not_a_partition_type_invariant\` 门禁，禁止以后把
@@ -4652,7 +4652,7 @@ type4/条目2 NeedDisturb=0。仓库新增
 14B 密码信息版本决定/被上层固定为 \`0x64\`，并未发现条目
 \`Version@+0x04\` 用作版本选择。
 
-实盘复核：已提交原始测试夹具的全部有效 EDPF 条目与新增真实免密
+实盘复核：已提交原始测试夹具的全部有效 EDPF 条目与新增真实mode1
 SanDisk 两条条目的 \`Version@+0x04\` 全部为0；扩展只读历史去重扫描同样
 没有非零版本。NeedDisturb 则稳定出现三条目 `(1,1,0)` 与两条目 `(1,1)`
 两种按位置配置类型，没有第三种组合。
@@ -4845,7 +4845,7 @@ Windows `edpediskctrl.dll::sub_10010FC0` 是紧凑布局 LBA7 的直接写回写
   - 启动 = 1；
   - 共享 = 1；
   - 加密 = 0；
-- 排除 edpcli 自生成的 `_nopwd_` 备份后，当前真实参考样本全部与该写入端配置类型一致：
+- 排除 edpcli 自生成的 `_mode1_` 备份后，当前真实参考样本全部与该写入端配置类型一致：
   type1=1、type2=1、type4=0；
 - 这说明“真实参考集 + 当前 Windows 写入端”目前没有冲突，但仍不能把它升级成
   `PartionType -> NeedDisturb` 的协议恒等式；
@@ -4925,7 +4925,7 @@ Windows `ChangePwd/sub_10026050` 进一步证明：
   是注册/制标请求中的显式1B配置输入，不是未初始化噪声或尾部填充；
 - 同一个当前 CreatePartitions 首次建表路径对 `tail+0x0C/+0x0D`
   没有任何覆盖写；二者直接继承 14B 全零初始化。**这一阶段**结合22份原始参考与
-  新增真实免密 SanDisk 都为0，只能确认当前写入端的零来源，尚不足以升级；
+  新增真实mode1 SanDisk 都为0，只能确认当前写入端的零来源，尚不足以升级；
   后续已补齐四代 Windows 读取端、Linux 结构性保留、独立策略排除和
   扩展历史配置类型证据，最终按未启用兼容字段生命周期完全闭环，
   见本节后续更新；
@@ -4993,7 +4993,7 @@ Windows `ChangePwd/sub_10026050` 进一步证明：
   2026-09-24 的官方 UI 生产端证据解除：该字节就是
   `pwdComplexityCheckBox` 的“取消密码复杂性验证”勾选状态，且 UI 到
   `PassInfo+0x0A` 的已确认链路没有取反。后续文档与检查输出均应使用这一
-  明确语义，不再称作泛化的“免密安全策略”。
+  明确语义，不再称作泛化的“mode1安全策略”。
 
 本轮又补做了**跨版本 Windows 消费端审计**，结果进一步收紧而没有升完全闭环：
 
@@ -5394,7 +5394,7 @@ Linux 当前 `libcemsfilesyscheck.so::fileKey_Decrypt` 构建只显式实现
 - 模式3 正向样本：**0**。
 
 为排除“旧备份里其实已有正例但因设备 ID 缺失而被漏解”的可能，先前已对
-`utils/backup` 与 `nopwd_tool/backup` 做过基于文件名/`.meta.json` 身份的复核。
+`utils/backup` 与 `mode1_tool/backup` 做过基于文件名/`.meta.json` 身份的复核。
 本轮进一步取消这个依赖：对 `/Users/zhangyuxi/Desktop/u_disk` 下所有大小至少13扇区、
 不超过1GiB的文件做只读统计集，共扫描 **3896** 个候选。每个候选先用固定 LBA6
 滚动密钥解出 `LBA6+0x100 m_crcUsbID[0]`；这个 DWORD 本身就是
@@ -6042,7 +6042,7 @@ memset(metadata + LBA0 + 0x000, 0, 0x190)
 4eeee8d52f8b58d9a1fa35b63a14c8c5dba1b2717eaa44e6fb1ff0327ccbe5ed
 ```
 
-21份非转换 `nopwd_tool/backup` 原始完整快照重新聚类后，前400B只有三类：
+21份非转换 `mode1_tool/backup` 原始完整快照重新聚类后，前400B只有三类：
 
 - 多份旧版原盘与上述 `UsbMainBSec` 前400B **逐字节完全一致**；
 - 多份当前原盘为完整全零[400]；
@@ -6099,7 +6099,7 @@ Linux `CLabelManage::BuildSector0@0x1C8CC, diskfile.cpp:625` 独立证明同一�
 路径同样只清前0x190和`+0x1BE`分区表，证明这33B不属于修复负载。
 
 实盘方面，严格22份原始参考的两段33B均22/22全零；进一步只读扫描
-`nopwd_tool/backup + utils/backup` 的57份完整历史快照仍为57/57全零。相邻
+`mode1_tool/backup + utils/backup` 的57份完整历史快照仍为57/57全零。相邻
 SectorSize 则明确出现双配置类型：扩展57份为34×512、23×0，证明不能把整个尾部
 机械叫做全零填充。
 
@@ -6374,7 +6374,7 @@ EDP 负语义消费端和真实盘均已齐全。
 不是 LBA0 暂存缓冲区。
 
 历史实盘进一步证明 0/512 不是两个引导代码配置类型，而只是同一引导代码上的
-独立覆盖项。对 `nopwd_tool/backup + utils/backup` 当前可用完整历史快照重新聚类，
+独立覆盖项。对 `mode1_tool/backup + utils/backup` 当前可用完整历史快照重新聚类，
 其中 **47份**具有完全相同的官方旧版 `UsbMainBSec` 前400B：
 
 - 10份 `SectorSize=0`；

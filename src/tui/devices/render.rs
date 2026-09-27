@@ -299,10 +299,6 @@ fn draw_device_summary(frame: &mut Frame, area: ratatui::layout::Rect, state: &A
     if state.device_summary_section_expanded(DeviceSummarySection::Protocol) {
         lines.push(field_line("盘型", safe(&cells[6])));
         lines.push(field_line(
-            "免密状态",
-            if row.is_nopwd { "是" } else { "否" },
-        ));
-        lines.push(field_line(
             "分区记录",
             row.partitions
                 .as_ref()
