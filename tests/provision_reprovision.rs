@@ -8,12 +8,12 @@ use edpcli::{
         parse_existing_provision, prefill_for_target_mode, wrap_file_key,
         wrap_legacy_lba7_file_key, CapacityInput, CapacityInputMode, CapacitySource,
         DiskProvisionKind, ExistingPartition, ExistingProvisionProfile, FileKeyWrapMode,
-        KeyDomainRole, KeyDomainSecretPair, KeyDomainSecrets, OfficialFilesystemFormat,
-        OfficialPartitionMode, OfficialPartitionSizes, OfficialProvisionPlan, OnlyId,
-        PartitionAction, PartitionRole, PassInfoPolicy, ProvisionEntropy, ProvisionMetadata,
-        ProvisionProfile, ProvisionSpec, ProvisionTarget, QuickCapacityUnit, RegionDisposition,
-        SourcePasswordKnowledge, TargetGeometryOverrides, TargetIdentity, TargetProvisionPlan,
-        OFFICIAL_PARTITION_START_SECTOR,
+        KeyDomainRole, KeyDomainSecretPair, KeyDomainSecrets, MigrationTransform,
+        OfficialFilesystemFormat, OfficialPartitionMode, OfficialPartitionSizes,
+        OfficialProvisionPlan, OnlyId, PartitionAction, PartitionRole, PassInfoPolicy,
+        ProvisionEntropy, ProvisionMetadata, ProvisionProfile, ProvisionSpec, ProvisionTarget,
+        QuickCapacityUnit, RegionDisposition, SourcePasswordKnowledge, TargetGeometryOverrides,
+        TargetIdentity, TargetProvisionPlan, OFFICIAL_PARTITION_START_SECTOR,
     },
 };
 
@@ -1104,9 +1104,20 @@ fn target_plan_surfaces_migration_sources_before_k6_execution_is_enabled() {
         combined
             .migration_sources
             .iter()
-            .map(|source| (source.source_index, source.region.role))
+            .map(|source| (source.source_index, source.region.role, source.transform))
             .collect::<Vec<_>>(),
-        vec![(0, PartitionRole::Boot), (1, PartitionRole::Share)]
+        vec![
+            (
+                0,
+                PartitionRole::Boot,
+                MigrationTransform::BootToBootShareCombined,
+            ),
+            (
+                1,
+                PartitionRole::Share,
+                MigrationTransform::ShareToBootShareCombined,
+            ),
+        ]
     );
     assert_eq!(combined.preserved_record, None);
 

@@ -219,16 +219,41 @@ pub fn preserve_compatibility(
     Ok(())
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum MigrationTransform {
+    BootToBootShareCombined,
+    ShareToBootShareCombined,
+    BootShareCombinedToBoot,
+    BootShareCombinedToShare,
+    EncryptToShare,
+    ShareToEncrypt,
+}
+
+pub const fn migration_transform(
+    source: PartitionRole,
+    target: PartitionRole,
+) -> Option<MigrationTransform> {
+    match (source, target) {
+        (PartitionRole::Boot, PartitionRole::BootShareCombined) => {
+            Some(MigrationTransform::BootToBootShareCombined)
+        }
+        (PartitionRole::Share, PartitionRole::BootShareCombined) => {
+            Some(MigrationTransform::ShareToBootShareCombined)
+        }
+        (PartitionRole::BootShareCombined, PartitionRole::Boot) => {
+            Some(MigrationTransform::BootShareCombinedToBoot)
+        }
+        (PartitionRole::BootShareCombined, PartitionRole::Share) => {
+            Some(MigrationTransform::BootShareCombinedToShare)
+        }
+        (PartitionRole::Encrypt, PartitionRole::Share) => Some(MigrationTransform::EncryptToShare),
+        (PartitionRole::Share, PartitionRole::Encrypt) => Some(MigrationTransform::ShareToEncrypt),
+        _ => None,
+    }
+}
+
 pub const fn migration_candidate(source: PartitionRole, target: PartitionRole) -> bool {
-    matches!(
-        (source, target),
-        (PartitionRole::Boot, PartitionRole::BootShareCombined)
-            | (PartitionRole::Share, PartitionRole::BootShareCombined)
-            | (PartitionRole::BootShareCombined, PartitionRole::Boot)
-            | (PartitionRole::BootShareCombined, PartitionRole::Share)
-            | (PartitionRole::Encrypt, PartitionRole::Share)
-            | (PartitionRole::Share, PartitionRole::Encrypt)
-    )
+    migration_transform(source, target).is_some()
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -244,6 +269,7 @@ pub struct RegionMapping {
     pub source_index: Option<usize>,
     pub target_index: Option<usize>,
     pub kind: RegionMappingKind,
+    pub migration_transform: Option<MigrationTransform>,
     pub failure: Option<CompatibilityFailure>,
 }
 
@@ -272,12 +298,14 @@ impl RegionMappingPlanner {
                         source_index: Some(source_index),
                         target_index: Some(target_index),
                         kind: RegionMappingKind::PreserveCandidate,
+                        migration_transform: None,
                         failure: None,
                     }),
                     Err(failure) => mappings.push(RegionMapping {
                         source_index: Some(source_index),
                         target_index: Some(target_index),
                         kind: RegionMappingKind::Rebuild,
+                        migration_transform: None,
                         failure: Some(failure),
                     }),
                 }
@@ -286,25 +314,27 @@ impl RegionMappingPlanner {
                     .iter()
                     .copied()
                     .enumerate()
-                    .filter(|(_, source_region)| {
-                        migration_candidate(source_region.role, target_region.role)
+                    .filter_map(|(source_index, source_region)| {
+                        migration_transform(source_region.role, target_region.role)
+                            .map(|transform| (source_index, transform))
                     })
-                    .map(|(source_index, _)| source_index)
                     .collect::<Vec<_>>();
                 if migrations.is_empty() {
                     mappings.push(RegionMapping {
                         source_index: None,
                         target_index: Some(target_index),
                         kind: RegionMappingKind::Rebuild,
+                        migration_transform: None,
                         failure: None,
                     });
                 } else {
-                    for source_index in migrations {
+                    for (source_index, transform) in migrations {
                         used_source[source_index] = true;
                         mappings.push(RegionMapping {
                             source_index: Some(source_index),
                             target_index: Some(target_index),
                             kind: RegionMappingKind::MigrateUnsupported,
+                            migration_transform: Some(transform),
                             failure: Some(CompatibilityFailure::SemanticRole),
                         });
                     }
@@ -318,6 +348,7 @@ impl RegionMappingPlanner {
                     source_index: Some(source_index),
                     target_index: None,
                     kind: RegionMappingKind::Drop,
+                    migration_transform: None,
                     failure: None,
                 });
             }

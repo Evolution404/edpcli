@@ -8,8 +8,8 @@ use crate::{
 };
 
 use super::{
-    OfficialFilesystemFormat, OfficialPartitionMode, PartitionRole, PassInfoPolicy,
-    RegionMappingKind, RegionMappingPlanner, SourceRegion, TargetRegion,
+    MigrationTransform, OfficialFilesystemFormat, OfficialPartitionMode, PartitionRole,
+    PassInfoPolicy, RegionMappingKind, RegionMappingPlanner, SourceRegion, TargetRegion,
     DEFAULT_MODE0_BOOT_SECTORS, OFFICIAL_PARTITION_START_SECTOR,
     WHOLE_DISK_ENCRYPTED_COMPAT_BOOT_BYTES,
 };
@@ -996,6 +996,7 @@ impl ParsedExistingProvision {
 pub struct MigrationSource {
     pub source_index: usize,
     pub region: SourceRegion,
+    pub transform: MigrationTransform,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -1079,10 +1080,12 @@ impl TargetProvisionPlan {
                         })
                         .filter_map(|mapping| {
                             let source_index = mapping.source_index?;
+                            let transform = mapping.migration_transform?;
                             source_regions.get(source_index).copied().map(|region| {
                                 MigrationSource {
                                     source_index,
                                     region,
+                                    transform,
                                 }
                             })
                         })
