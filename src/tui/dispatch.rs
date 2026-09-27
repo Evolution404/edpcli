@@ -445,9 +445,23 @@ pub(super) fn start_provision_plan(state: &mut AppState, tasks: &mut TaskHub) {
     };
     let request = if state.provision().kind == state::ProvisionKind::Plain {
         match state.provision_plain_plan() {
-            Ok(plan) => crate::application::provision::ProvisionRequest::Plain(
-                crate::application::provision::PlainProvisionRequest::from_plan(&plan),
-            ),
+            Ok(plan) => {
+                let mut request =
+                    crate::application::provision::PlainProvisionRequest::from_plan(&plan);
+                request.key_domains = crate::provision::KeyDomainSecrets::new(
+                    crate::provision::KeyDomainSecretPair::new(
+                        (!state.provision().form.share_source_password.is_empty())
+                            .then_some(state.provision().form.share_source_password.as_bytes()),
+                        None::<&[u8]>,
+                    ),
+                    crate::provision::KeyDomainSecretPair::new(
+                        (!state.provision().form.encrypt_source_password.is_empty())
+                            .then_some(state.provision().form.encrypt_source_password.as_bytes()),
+                        None::<&[u8]>,
+                    ),
+                );
+                crate::application::provision::ProvisionRequest::Plain(request)
+            }
             Err(message) => {
                 state.provision_mut().message = Some(message);
                 return;
