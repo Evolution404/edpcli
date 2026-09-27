@@ -81,7 +81,10 @@ fn plaintext_metadata_does_not_claim_a_complete_inventory() {
     );
 }
 
-use edpcli::backup_deep::{analyze_partition, PartitionReader};
+use edpcli::backup_deep::{
+    analyze_partition, stream_file_payload, FileEntry, FilePayloadExtent, FilePayloadLocator,
+    PartitionReader,
+};
 use std::{collections::BTreeMap, io};
 
 struct SparseReader {
@@ -382,6 +385,158 @@ fn exfat_inventory_reads_metadata_but_never_ordinary_file_payloads() {
             "ordinary file payload LBA {lba} was read"
         );
     }
+}
+
+#[test]
+fn fat_and_exfat_inventory_records_payload_locators_without_reading_payloads() {
+    for fat32 in [false, true] {
+        let (p, mut reader, data) = fat_fixture(fat32);
+        let report = analyze_partition(&p, &mut reader);
+        assert_eq!(report.status, AnalysisStatus::Parsed, "{}", report.reason);
+        let entries = report.entries.unwrap();
+        let foo = entries
+            .iter()
+            .find(|entry| entry.path == "/foo.txt")
+            .unwrap();
+        let bar = entries
+            .iter()
+            .find(|entry| entry.path == "/dir/bar.bin")
+            .unwrap();
+        let dir = entries.iter().find(|entry| entry.path == "/dir/").unwrap();
+        assert_eq!(
+            foo.payload_locator.as_ref().unwrap().extents,
+            vec![FilePayloadExtent {
+                start_lba: data + 1,
+                sector_count: 1,
+            }]
+        );
+        assert_eq!(
+            bar.payload_locator.as_ref().unwrap().extents,
+            vec![FilePayloadExtent {
+                start_lba: data + 3,
+                sector_count: 1,
+            }]
+        );
+        assert!(dir.payload_locator.is_none());
+        assert!(!reader.reads.contains(&(data + 1)));
+        assert!(!reader.reads.contains(&(data + 3)));
+    }
+
+    let (p, mut reader, _dir_lba, forbidden) = exfat_fixture();
+    let report = analyze_partition(&p, &mut reader);
+    assert_eq!(report.status, AnalysisStatus::Parsed, "{}", report.reason);
+    let entries = report.entries.unwrap();
+    let foo = entries
+        .iter()
+        .find(|entry| entry.path == "/foo.txt")
+        .unwrap();
+    let bar = entries
+        .iter()
+        .find(|entry| entry.path == "/dir/bar.bin")
+        .unwrap();
+    assert_eq!(
+        foo.payload_locator.as_ref().unwrap().extents,
+        vec![FilePayloadExtent {
+            start_lba: forbidden[0],
+            sector_count: 1,
+        }]
+    );
+    assert_eq!(
+        bar.payload_locator.as_ref().unwrap().extents,
+        vec![FilePayloadExtent {
+            start_lba: forbidden[1],
+            sector_count: 1,
+        }]
+    );
+    for lba in forbidden {
+        assert!(!reader.reads.contains(&lba));
+    }
+}
+
+#[test]
+fn payload_stream_is_fragment_aware_budgeted_and_hashes_exact_logical_bytes() {
+    use sha2::{Digest, Sha256};
+
+    let mut reader = SparseReader {
+        sectors: BTreeMap::from([(40, vec![b'A'; 512]), (55, vec![b'B'; 512])]),
+        reads: vec![],
+    };
+    let entry = FileEntry {
+        path: "/fragment.bin".into(),
+        is_directory: false,
+        logical_size: 600,
+        allocated_size: Some(1024),
+        mtime: None,
+        ctime: None,
+        attributes: 0x20,
+        payload_locator: Some(FilePayloadLocator {
+            logical_size: 600,
+            extents: vec![
+                FilePayloadExtent {
+                    start_lba: 40,
+                    sector_count: 1,
+                },
+                FilePayloadExtent {
+                    start_lba: 55,
+                    sector_count: 1,
+                },
+            ],
+        }),
+    };
+
+    let reads_before = reader.reads.len();
+    let mut rejected = Vec::new();
+    let error = stream_file_payload(&mut reader, &entry, 599, &mut rejected).unwrap_err();
+    assert!(error.contains("budget"));
+    assert_eq!(
+        reader.reads.len(),
+        reads_before,
+        "budget failure must happen before I/O"
+    );
+
+    let mut out = Vec::new();
+    let summary = stream_file_payload(&mut reader, &entry, 600, &mut out).unwrap();
+    assert_eq!(summary.logical_size, 600);
+    assert_eq!(summary.sectors_read, 2);
+    assert_eq!(out.len(), 600);
+    assert!(out[..512].iter().all(|byte| *byte == b'A'));
+    assert!(out[512..].iter().all(|byte| *byte == b'B'));
+    let expected: [u8; 32] = Sha256::digest(&out).into();
+    assert_eq!(summary.sha256, expected);
+    assert_eq!(reader.reads, vec![40, 55]);
+}
+
+#[test]
+fn zero_length_payload_stream_reads_nothing_and_locator_is_not_serialized() {
+    use sha2::{Digest, Sha256};
+
+    let entry = FileEntry {
+        path: "/empty.txt".into(),
+        is_directory: false,
+        logical_size: 0,
+        allocated_size: Some(0),
+        mtime: None,
+        ctime: None,
+        attributes: 0x20,
+        payload_locator: Some(FilePayloadLocator {
+            logical_size: 0,
+            extents: vec![],
+        }),
+    };
+    let mut reader = SparseReader {
+        sectors: BTreeMap::new(),
+        reads: vec![],
+    };
+    let mut out = Vec::new();
+    let summary = stream_file_payload(&mut reader, &entry, 0, &mut out).unwrap();
+    assert_eq!(summary.logical_size, 0);
+    assert_eq!(summary.sectors_read, 0);
+    assert_eq!(summary.sha256, <[u8; 32]>::from(Sha256::digest([])));
+    assert!(out.is_empty());
+    assert!(reader.reads.is_empty());
+
+    let json = serde_json::to_value(&entry).unwrap();
+    assert!(json.get("payload_locator").is_none());
 }
 
 #[test]

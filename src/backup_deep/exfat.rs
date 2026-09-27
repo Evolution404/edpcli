@@ -1,6 +1,6 @@
 //! exFAT allocation metadata and directory inventory; ordinary file payloads
 //! are never read.
-use super::{FileEntry, PartitionReader};
+use super::{payload_locator_from_cluster_lbas, FileEntry, PartitionReader};
 use std::collections::{BTreeSet, VecDeque};
 
 pub(super) struct Inventory {
@@ -296,6 +296,7 @@ fn parse_file_set(bytes: &[u8]) -> Result<StreamRecord, String> {
             mtime: timestamp(u32le(bytes, 12), bytes[21]),
             ctime: timestamp(u32le(bytes, 8), bytes[20]),
             attributes: attributes as u32,
+            payload_locator: None,
         },
         first_cluster,
         data_length,
@@ -413,6 +414,7 @@ pub(super) fn parse(
         mtime: None,
         ctime: None,
         attributes: 0x10,
+        payload_locator: None,
     }];
     let mut paths = BTreeSet::from([String::from("/")]);
     let mut bitmap_candidates = Vec::new();
@@ -514,6 +516,16 @@ pub(super) fn parse(
                     }
                     if record.entry.is_directory {
                         pending.push_back((full, stream_clusters));
+                    } else {
+                        let cluster_starts = stream_clusters
+                            .iter()
+                            .map(|&cluster| geometry.cluster_lba(cluster))
+                            .collect::<Result<Vec<_>, _>>()?;
+                        record.entry.payload_locator = Some(payload_locator_from_cluster_lbas(
+                            record.entry.logical_size,
+                            geometry.sectors_per_cluster,
+                            &cluster_starts,
+                        )?);
                     }
                     entries.push(record.entry);
                     offset += set_len;
