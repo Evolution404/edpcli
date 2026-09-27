@@ -150,6 +150,10 @@ fn fast_and_full_gate_entrypoints_are_repository_owned() {
     assert!(fast.contains("git diff-tree --no-commit-id --name-only -r HEAD"));
     assert!(full.contains("--message-format=json"));
     assert!(full.contains("ThreadPoolExecutor"));
+    assert!(full.contains("EDPCLI_TEST_THREADS"));
+    assert!(full.contains("--test-threads"));
+    assert!(full.contains("[parallelism]"));
+    assert!(full.contains("max_test_threads"));
     assert!(full.contains("duration"));
 }
 
@@ -254,8 +258,18 @@ fn test_profile_benchmark_reuses_repository_runner_and_reports_distribution() {
     assert!(benchmark.contains("ROOT / \"scripts\""));
     assert!(benchmark.contains("statistics.median"));
     assert!(benchmark.contains("--repeat"));
+    assert!(benchmark.contains("--workers"));
+    assert!(benchmark.contains("--test-threads"));
     assert!(benchmark.contains("--json"));
     assert!(benchmark.contains("[benchmark]"));
+
+    let workflow = read(".github/workflows/test-runner-benchmark.yml");
+    assert!(workflow.contains("perf/test-runner-*"));
+    assert!(workflow.contains("--workers 1 --test-threads 4"));
+    assert!(workflow.contains("--workers 2 --test-threads 2"));
+    assert!(workflow.contains("--workers 2 --test-threads 4"));
+    assert!(workflow.contains("--workers 4 --test-threads 1"));
+    assert!(workflow.contains("--workers 4 --test-threads 2"));
 }
 
 #[test]

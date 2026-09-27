@@ -21,8 +21,22 @@ SUMMARY_RE = re.compile(
 )
 
 
-def run_sample(profile: str, index: int) -> dict[str, float | int | str]:
-    command = [sys.executable, str(RUNNER), "--profile", profile]
+def run_sample(
+    profile: str,
+    index: int,
+    workers: int,
+    test_threads: int,
+) -> dict[str, float | int | str]:
+    command = [
+        sys.executable,
+        str(RUNNER),
+        "--profile",
+        profile,
+        "--workers",
+        str(workers),
+        "--test-threads",
+        str(test_threads),
+    ]
     print(
         f"[benchmark] profile={profile} sample={index} command={' '.join(command)}",
         flush=True,
@@ -58,6 +72,8 @@ def run_sample(profile: str, index: int) -> dict[str, float | int | str]:
         "wall_seconds": round(wall_seconds, 3),
         "suites": int(match.group("suites")),
         "artifacts": int(match.group("artifacts")),
+        "workers": workers,
+        "test_threads": test_threads,
     }
 
 
@@ -85,6 +101,8 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--profile", choices=("fast", "full", "both"), default="both")
     parser.add_argument("--repeat", type=int, default=3)
+    parser.add_argument("--workers", type=int, default=2)
+    parser.add_argument("--test-threads", type=int, default=4)
     parser.add_argument("--json", type=Path)
     return parser.parse_args()
 
@@ -93,13 +111,30 @@ def main() -> int:
     args = parse_args()
     if args.repeat < 1 or args.repeat > 20:
         raise SystemExit("--repeat must be between 1 and 20")
+    if args.workers < 1 or args.workers > 8:
+        raise SystemExit("--workers must be between 1 and 8")
+    if args.test_threads < 1 or args.test_threads > 16:
+        raise SystemExit("--test-threads must be between 1 and 16")
 
     profiles = ("fast", "full") if args.profile == "both" else (args.profile,)
-    report: dict[str, object] = {"repeat": args.repeat, "profiles": {}}
+    report: dict[str, object] = {
+        "repeat": args.repeat,
+        "workers": args.workers,
+        "test_threads": args.test_threads,
+        "profiles": {},
+    }
 
     try:
         for profile in profiles:
-            samples = [run_sample(profile, index) for index in range(1, args.repeat + 1)]
+            samples = [
+                run_sample(
+                    profile,
+                    index,
+                    args.workers,
+                    args.test_threads,
+                )
+                for index in range(1, args.repeat + 1)
+            ]
             report["profiles"][profile] = summarize(profile, samples)
     except RuntimeError as error:
         print(f"[benchmark] FAIL: {error}", file=sys.stderr)

@@ -278,11 +278,15 @@ def cargo_compile(suites: list[str], env: dict[str, str]) -> list[TestArtifact]:
     return list(artifacts.values())
 
 
-def run_artifact(artifact: TestArtifact, timeout: int) -> TestResult:
+def run_artifact(artifact: TestArtifact, timeout: int, test_threads: int) -> TestResult:
     started = time.monotonic()
     try:
         completed = subprocess.run(
-            [str(artifact.executable), "--quiet", "--test-threads=4"],
+            [
+                str(artifact.executable),
+                "--quiet",
+                f"--test-threads={test_threads}",
+            ],
             cwd=ROOT,
             text=True,
             encoding="utf-8",
@@ -317,12 +321,15 @@ def run_artifact(artifact: TestArtifact, timeout: int) -> TestResult:
 
 
 def run_artifacts(
-    artifacts: list[TestArtifact], workers: int, timeout: int
+    artifacts: list[TestArtifact],
+    workers: int,
+    timeout: int,
+    test_threads: int,
 ) -> list[TestResult]:
     results: list[TestResult] = []
     with ThreadPoolExecutor(max_workers=workers) as executor:
         futures = {
-            executor.submit(run_artifact, artifact, timeout): artifact
+            executor.submit(run_artifact, artifact, timeout, test_threads): artifact
             for artifact in artifacts
         }
         for future in as_completed(futures):
@@ -379,6 +386,12 @@ def parse_args() -> argparse.Namespace:
         default=int(os.environ.get("EDPCLI_TEST_WORKERS", "2")),
     )
     parser.add_argument(
+        "--test-threads",
+        type=int,
+        default=int(os.environ.get("EDPCLI_TEST_THREADS", "4")),
+        help="Rust test threads per test binary (env: EDPCLI_TEST_THREADS)",
+    )
+    parser.add_argument(
         "--timeout",
         type=int,
         default=int(os.environ.get("EDPCLI_TEST_BINARY_TIMEOUT_SECS", "180")),
@@ -398,6 +411,8 @@ def main() -> int:
     args = parse_args()
     if args.workers < 1 or args.workers > 8:
         raise SystemExit("--workers must be between 1 and 8")
+    if args.test_threads < 1 or args.test_threads > 16:
+        raise SystemExit("--test-threads must be between 1 and 16")
     if args.timeout < 1:
         raise SystemExit("--timeout must be positive")
     if args.max_seconds is not None and args.max_seconds <= 0:
@@ -405,6 +420,14 @@ def main() -> int:
 
     env = compiler_env()
     announce_compiler_cache(env)
+    cpu_count = max(1, os.cpu_count() or 1)
+    print(
+        "[parallelism] "
+        f"cpu_count={cpu_count} workers={args.workers} "
+        f"test_threads={args.test_threads} "
+        f"max_test_threads={args.workers * args.test_threads}",
+        flush=True,
+    )
 
     if args.suite:
         suites = sorted(set(args.suite), key=ALL_SUITES.index)
@@ -425,7 +448,12 @@ def main() -> int:
         print(f"[FAIL] {error}", file=sys.stderr)
         return 1
 
-    results = run_artifacts(artifacts, args.workers, args.timeout)
+    results = run_artifacts(
+        artifacts,
+        args.workers,
+        args.timeout,
+        args.test_threads,
+    )
     if args.profile == "full":
         doctest = run_doctests(env)
         results.append(doctest)

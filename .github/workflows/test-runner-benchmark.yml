@@ -1,0 +1,56 @@
+name: Test Runner Benchmark
+
+on:
+  push:
+    branches:
+      - "perf/test-runner-*"
+    paths:
+      - "scripts/test-full.py"
+      - "scripts/test-benchmark.py"
+      - "tests/test_infrastructure.rs"
+      - ".github/workflows/test-runner-benchmark.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  linux-x86_64:
+    name: Linux x86_64 parallelism matrix
+    runs-on: ubuntu-24.04
+    env:
+      SCCACHE_GHA_ENABLED: "true"
+      RUSTC_WRAPPER: "sccache"
+      CARGO_INCREMENTAL: "0"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install pinned Rust
+        uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87
+        with:
+          toolchain: 1.98.1
+      - name: Install compiler cache
+        uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
+        with:
+          version: "v0.17.0"
+      - name: Warm test artifacts
+        run: python scripts/test-full.py --profile full --workers 2 --test-threads 4
+      - name: Benchmark parallelism configurations
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p benchmark-out
+          python scripts/test-benchmark.py --profile full --repeat 2 --workers 1 --test-threads 4 --json benchmark-out/1x4.json
+          python scripts/test-benchmark.py --profile full --repeat 2 --workers 2 --test-threads 2 --json benchmark-out/2x2.json
+          python scripts/test-benchmark.py --profile full --repeat 2 --workers 2 --test-threads 4 --json benchmark-out/2x4.json
+          python scripts/test-benchmark.py --profile full --repeat 2 --workers 4 --test-threads 1 --json benchmark-out/4x1.json
+          python scripts/test-benchmark.py --profile full --repeat 2 --workers 4 --test-threads 2 --json benchmark-out/4x2.json
+      - name: Upload benchmark reports
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: test-runner-parallelism-linux-x86_64
+          path: benchmark-out/*.json
+          if-no-files-found: error
