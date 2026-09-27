@@ -3655,142 +3655,135 @@ sector_count > 0
 
 内部统一使用 `[start, end_exclusive)`；UI 统一显示闭区间 `[start..end]`，禁止 renderer 自己重复算范围。
 
-### 13.7 RegionKind 与 RegionState 分离
+### 13.7 物理区域语义与制盘处理状态严格分离
 
-颜色表达“区域是什么”，操作状态表达“这个区域会怎么处理”，两者不能混在一个枚举里。
+颜色只表达“这个物理区域是什么”，制盘状态只表达“目标计划准备如何处理它”，两者不得混进同一个枚举或通过颜色互相反推。
 
-建议语义：
-
-```rust
-enum DiskRegionKind {
-    Protocol,
-    Reserved,
-    Unknown,
-    Plain,
-    Boot,
-    Share,
-    Combined,
-    Encrypt,
-    Compatibility,
-    Lce,
-    Tail,
-}
-
-enum DiskRegionState {
-    Existing,
-    Preserved,
-    Rebuilt,
-    New,
-    Free,
-    Dropped,
-}
-```
-
-例如“保密区 + Rebuild”仍然使用保密区颜色，只额外显示 `Rebuild` 状态；不能因为要重建就换成另一种区域颜色。
-
-### 13.8 Unknown / Reserved / Free / Tail 严格区分
-
-全盘视图至少区分：
+当前 canonical layout 的叶子区域以已验证证据为准，核心语义包括：
 
 ```text
-Unknown
-= Inspect 当前无法确定语义
-
-Reserved
-= canonical target 明确要求保留、不允许用户分配
-
-Free
-= planner 明确允许分区占用
-
-Tail
-= 盘尾保护区域
-
 Protocol
-= EDP 协议区域
+Metadata
+Plain / Boot / Share / Combined / Encrypt / Compatibility
+Free
+Lce
+BackupMirror
+RestoreNode
 ```
 
-因此 Provision 不得把“不是用户分区”的所有 gap 都叫“空闲”。
+其中：
 
-例如 `[13..62]`：
+- `Free` 在容量布局中表示“没有被已确认结构占用的物理补集”，UI 统一显示“空闲区域”；
+- `Lce`、`BackupMirror`、`RestoreNode` 都是有明确物理范围的真实子段；
+- `Tail` 只允许作为从 LCE 起点到盘尾的展示分组，不是额外占用 sectors 的叶子区域；
+- `Unknown` 只用于证据不足、损坏或冲突的失败状态，不允许拿来填满一个看似完整的有效容量条；
+- `Reserved` 如因历史兼容仍保留枚举，不得继续承担“所有 gap 的默认分类”。
 
-- Inspect 可显示“未知区域”；
-- canonical Provision 可显示“保留区域 · 不写入”；
-- 只有 planner 明确可分配的范围才能标记为 `Free`。
-
-### 13.9 Provision 必须从 LBA0 显示到最后一个 sector
-
-所有目标模式都改为完整物理盘视图，而不是只显示 LBA63 之后的可分区区间。
-
-mode0 示例应按顺序覆盖：
+制盘处理状态继续独立，例如：
 
 ```text
-EDP 主协议区        [0..12]
-保留/未知区域       [13..62]
-启动区              [63..20479]
-交换区              [...]
-保密区              [...]
-LCE                 [...]
-LCE 后保留/未知区    [...]
-盘尾区域            [last-2047..last]
+Existing
+Preserved
+Rebuilt
+New
+Dropped
+Allocatable
+Protected
 ```
 
-具体边界只能来自 canonical planner / protocol geometry，禁止 TUI 猜测。
+例如“保密区 + Rebuilt”仍然使用保密区语义色，只额外展示“重建”；“空闲区域”也不等于“可分配”，只有 planner 明确允许使用时才标记 `Allocatable`。
 
-mode1 / mode2 / mode3 同样必须完整覆盖 `[0..total_sectors-1]`。
+### 13.8 canonical gap、可分配状态、证据不足三者分离
 
-Plain 使用自己的完整磁盘模型，不硬套 EDP 标签；可以是 MBR/保留区、普通分区、Free/Reserved 等，但仍必须从 0 连续到 last sector。
+统一规则：
 
-### 13.10 抽取共享 DiskLayoutPane
+1. 先收集所有有证据的物理 extent；
+2. 按 `start_lba` 排序并验证无 overlap；
+3. 任意相邻 extent 之间的补集自动生成“空闲区域”；
+4. 空闲区域可以出现在 Protocol 与第一个 Partition 之间、Partition 之间、Partition 与 LCE 之间，以及尾部已知结构之间；
+5. planner 是否允许占用该空闲区域由独立处理状态决定，不能从 `Free` 名称直接推断；
+6. 如果证据不足以构造可靠全盘布局，返回“布局不可用”，不得生成 `Unknown` 容量段伪装成完整结果。
 
-Inspect 与 Provision 不再各自拼：
+因此 `[13..62]` 不再根据位置猜成“协议保留区”；若没有其它已确认结构占用，它就是“空闲区域”。
+
+### 13.9 EDP 与 Plain 共用完整物理盘契约
+
+所有模式都必须从 LBA0 连续覆盖到最后一个 sector，且底层分段无 hole、无 overlap。
+
+EDP 示例：
 
 ```text
-bar_line
-legend
-layout_lines
-Paragraph
+EDP 主协议区
+空闲区域
+启动区
+交换区
+空闲区域
+保密区
+空闲区域
+尾部区域
+  ├─ LCE
+  ├─ 空闲区域
+  ├─ 历史 9-sector 备份镜像
+  ├─ 空闲区域
+  ├─ 历史恢复节点
+  └─ 空闲区域
 ```
 
-而是共享一个 Pane renderer。
-
-建议模型：
-
-```rust
-struct DiskLayoutPaneModel {
-    title: String,
-    disk_label: String,
-    total_sectors: u64,
-    total_bytes: u64,
-    regions: Vec<DiskLayoutRegion>,
-    status_line: Option<String>,
-}
-```
-
-统一显示：
-
-1. 整盘摘要；
-2. `[0..last_sector]`；
-3. 比例条；
-4. 色标；
-5. 按 LBA 排序的区域明细；
-6. range / sectors / size / percent；
-7. 可选 Preserve / Rebuild / New / Drop 等状态；
-8. coverage 验证结果。
-
-Inspect、Provision Form、Provision Review 只负责生成不同 model：
+尾部区域的起点严格来自已验证 LBA7 LCE 指针：
 
 ```text
-Inspect:
-  current / observed
-
-Provision Form:
-  target / planned
-
-Provision Review:
-  current + target / before + after
+Tail.start = LCE.start_lba
+Tail.end   = total_sectors
 ```
 
-renderer、比例算法、颜色、legend、range formatter 必须共用。
+禁止恢复固定“最后若干 sectors 即尾部”的规则。
+
+Plain 盘使用同一套完整布局算法，但证据来源改为真实 MBR/GPT：
+
+```text
+MBR/GPT 元数据
+空闲区域
+普通分区
+空闲区域
+普通分区
+...
+```
+
+Plain 没有 LCE 时绝不生成 EDP 尾部区域。
+
+### 13.10 共享 DiskLayout 展示模型
+
+Devices、Inspect、Provision 必须消费同一个 sector-exact `DiskLayoutModel`，页面差异只存在于展示精度和附加状态，不允许重新识别或重新切分物理范围。
+
+统一展示档位建议固定为：
+
+```text
+CompactHuman
+  - Devices 等摘要页
+  - 人类可读容量单位
+  - 顶层尾部区域默认折叠
+
+DetailedExact
+  - Inspect 全盘布局
+  - 显示精确 LBA / sectors / bytes
+  - `o` 展开或折叠尾部区域
+
+EditorExact
+  - Provision Form / Review
+  - 与 DetailedExact 使用相同物理分段
+  - 额外展示 Preserve / Rebuild / New / Drop / Allocatable 等计划状态
+```
+
+三个档位必须共享：
+
+- 比例条分配算法；
+- 区域颜色；
+- range formatter；
+- sector 数；
+- group 边界；
+- legend/grid 排版基础组件。
+
+Devices 不得长期保留私有 `capacity_legend_lines()`；Inspect/Provision 也不得自行把 canonical leaves 重新拼成另一套容量模型。
 
 ### 13.11 DiskLayoutPane 自己拥有 vertical viewport
 
@@ -8735,7 +8728,7 @@ Chapter 15 身份治理仍然是独立的 application/backup 安全治理；它�
 
 ## 16. 全应用 TUI 设计系统与信息架构升级（2026-09-27）
 
-> **状态：COMPLETE（2026-09-27，U0～U9）**。本章在 Chapter 10～15 已完成成果上完成全应用 UI 架构升级；Chapter 12 K6 `Migrate` 仍保持 `DEFERRED / fail-closed`，与本章无关。
+> **状态：核心阶段 COMPLETE（2026-09-27，U0～U9）；扩展阶段 U10～U11 已立项、尚未实施。** U0～U9 已完成全应用 UI 架构升级；2026-09-27 复审又发现 DiskLayout 展示层仍有少量页面私有逻辑，并新增“内置演示模式”需求，因此追加 U10 / U11。Chapter 12 K6 `Migrate` 继续保持 `DEFERRED / fail-closed`，与本章无关。
 
 ### 16.1 背景与目标
 
@@ -9016,6 +9009,7 @@ Wide/UltraWide 目标：
 - 默认业务布局删除大 animation sidebar；
 - Compact 下 Enter 进入设备详情，不得直接丢弃详情；
 - 空状态、扫描、错误统一组件化。
+- 当前设备容量布局必须直接消费 canonical `DiskLayoutModel`；摘要只改变容量单位精度，不允许私有识别或重新切段。
 
 ### 16.8 Inspect Workspace（核心）
 
@@ -9120,16 +9114,32 @@ Type
 Status
 ```
 
-#### 16.8.5 DiskLayout 两级 renderer
+#### 16.8.5 DiskLayout 统一展示层
 
-保留同一个 `DiskLayoutModel`：
+底层继续只保留一个 sector-exact `DiskLayoutModel`。展示层按用途切换精度，但不得改变分段结果：
 
 ```text
-DiskLayoutCompact   // 默认上下文条，约 3-4 行
-DiskLayoutDetailed  // 全盘详细视图
+CompactHuman
+DetailedExact
+EditorExact
 ```
 
-默认 Inspect 不再让完整 DiskLayout 占据主要首屏。
+Inspect 默认使用紧凑上下文条；进入全盘布局后使用精确模式。EDP 的“尾部区域”是 LCE 起点到盘尾的可折叠 group，`o` 必须在 DiskLayout Pane 内统一展开/折叠其 children；Enter 只查看当前区域详情，不改变展开状态。
+
+展开后的尾部必须按真实物理顺序显示：
+
+```text
+LCE
+空闲区域
+历史 9-sector 备份镜像
+空闲区域
+历史恢复节点
+空闲区域
+```
+
+Plain 不生成 EDP 尾部 group。
+
+Devices / Inspect / Provision 的比例条、色标、range、group、最小可见 segment 和 legend/grid 排版必须来自共享组件。任何页面不得再复制独立容量 legend 或从 Inspect topology 反推另一份容量模型。
 
 ### 16.9 Provision Workspace
 
@@ -9150,6 +9160,7 @@ Form 要求继续保持：
 - MiB/GiB/sector 内部仍精确保存 sector；
 - `f` fill remainder；
 - group 内部对齐，不跨 group 强制对齐。
+- Provision DiskLayout 必须与 Devices / Inspect 共用 canonical 分段与尾部 group，只增加计划处理状态；编辑器可显示到 sector，但不得自行改变边界。
 
 Review 保留 typed Summary / DiskLayout / Changes，但改为统一 StatusBadge：
 
@@ -9339,7 +9350,12 @@ Backup detail / coverage
 9. Compact 不静默丢失核心信息；
 10. ANSI fallback 可读；
 11. renderer zero I/O；
-12. destructive write safety tests 全部保持绿。
+12. destructive write safety tests 全部保持绿；
+13. 同一 fixture 在 Devices / Inspect / Provision 的 canonical sector 边界逐项一致；
+14. 有效布局无 `Unknown`、无 hole、无 overlap，所有 gap 显示“空闲区域”；
+15. EDP 尾部 group 起点严格等于 LCE，Plain 不生成 EDP 尾部 group；
+16. `o` 在 DiskLayout Pane 展开/折叠尾部时不改变底层 sector 分段；
+17. CompactHuman / DetailedExact / EditorExact 只改变展示精度和附加状态。
 
 ### 16.14 静态架构门禁
 
@@ -9356,7 +9372,12 @@ Backup detail / coverage
 9. animation sidebar 不得挤压业务 Workspace；
 10. renderer 不得执行 disk/backup/identity read；
 11. DiskLayout 必须继续消费 application-owned typed model；
-12. Provision/Restore 安全门禁不得因 UI 重构被删除或旁路。
+12. Provision/Restore 安全门禁不得因 UI 重构被删除或旁路；
+13. Devices / Inspect / Provision 不得新增页面私有 DiskLayout 识别器或容量切段器；
+14. Devices 私有容量 legend 必须迁入共享 DiskLayout 展示组件；
+15. 固定长度盘尾窗口逻辑不得重新出现；尾部 group 只能由已验证 LCE 起点建立；
+16. `from_topology()` / `from_claims()` 这类旧转换入口若无生产调用，应删除或降为测试辅助，不能重新成为正式容量事实源；
+17. 演示模式实现不得在 renderer 中加入 demo 专用业务分支。
 
 ### 16.15 实施顺序：U0 → U9
 
@@ -9380,7 +9401,7 @@ Backup detail / coverage
 - 新建 `ui/` 公共组件；
 - 建立 `ViewportClass`；
 - 建立 Panel/Card/Badge/Table/KeyHints/Banner；
-- 先迁移最小 demo/测试，不改变业务 Workspace。
+- 先迁移最小组件样例/测试，不改变业务 Workspace。
 
 #### U2 — AppShell / Workspace / Pane domain
 
@@ -9493,9 +9514,44 @@ TrueColor 与 fallback
 
 纯 presentation 不要求为了 UI 验收执行破坏性真实 USB 写盘；若任何改动触及 write path / authorization / disk I/O，必须按既有 HIL 安全规则重新验收。
 
-### 16.16 完成标准
+#### U10 — DiskLayout 展示层最终收口
 
-只有以下全部满足，Chapter 16 才能标记 COMPLETE：
+状态：PLANNED（2026-09-27 复审新增）。
+
+本阶段不改变已经完成的 canonical sector 识别，只治理展示层剩余分叉：
+
+1. 建立共享 `DiskLayoutPresentation` / group 展开状态；
+2. Devices、Inspect、Provision 全部从同一 canonical model 投影；
+3. Devices 删除私有 `capacity_legend_lines()`；
+4. CompactHuman / DetailedExact / EditorExact 使用同一 bar、颜色、range、legend/grid；
+5. EDP 尾部区域默认折叠，`o` 在当前 DiskLayout Pane 展开/折叠；
+6. Plain 不生成 EDP 尾部 group；
+7. 清理无生产调用的旧 `from_topology()` / `from_claims()` 路径，避免未来重新分叉；
+8. 不改变 LBA7/LBA12 解析、制盘 planner、写盘安全链。
+
+验收：同一测试盘在三个 Workspace 的 sector 边界完全一致，只允许容量单位、精度和计划状态不同。
+
+#### U11 — 内置演示模式
+
+状态：PLANNED（只写计划，本轮不实现）。
+
+目标是一条命令直接启动带完整演示数据的正式 TUI，无需插 U 盘、无需备份文件、无需管理员权限：
+
+```text
+edpcli demo
+```
+
+同时支持直接进入指定场景：
+
+```text
+edpcli demo --scene <scene>
+edpcli demo --list-scenes
+```
+
+详细设计见 16.17。
+### 16.16 核心阶段完成标准（U0～U9）
+
+以下 26 条是 U0～U9 核心阶段的完成标准；该核心阶段已经完成。U10～U11 作为后续扩展单独验收，不反向篡改历史完成证据：
 
 1. Devices / Inspect / Provision / Backups 是一致的 AppShell Workspace；
 2. Inspect 不再以视觉 overlay 套娃方式存在；
@@ -9524,8 +9580,215 @@ TrueColor 与 fallback
 25. 文档不再存在把已完成旧章节写成 IMPLEMENTING/PENDING 的矛盾状态；
 26. 工作区 clean，全部提交已 push 到远程。
 
-**2026-09-27 完成审计：26/26 PASS，Chapter 16 COMPLETE。** U0～U9 均已完成；响应式断点、Design System、四 Workspace AppShell、Inspect/Provision/Backups typed presentation、旧 sidebar 清理与 renderer/state/dispatch 职责拆分均有正式静态或行为门禁。最终提交推送后保持 `main == origin/main` 与 clean worktree。Chapter 11 的独立真实盘全盘 Inspect 只读专项验收、Chapter 12 K6 `Migrate` 延后能力仍按各自章节状态管理，不反向影响 Chapter 16 完成状态。
+**2026-09-27 核心完成审计：26/26 PASS，U0～U9 COMPLETE。** U0～U9 均已完成；响应式断点、Design System、四 Workspace AppShell、Inspect/Provision/Backups typed presentation、旧 sidebar 清理与 renderer/state/dispatch 职责拆分均有正式静态或行为门禁。最终提交推送后保持 `main == origin/main` 与 clean worktree。Chapter 11 的独立真实盘全盘 Inspect 只读专项验收、Chapter 12 K6 `Migrate` 延后能力仍按各自章节状态管理，不反向影响 Chapter 16 完成状态。
 
 最终验收原则：
 
 > **新版 edpcli TUI 不是“换了一套 cyan 颜色”，而是建立统一的终端应用设计系统：导航层级一致、当前对象优先、状态语义明确、结构可下钻、响应式稳定、业务模型与 renderer 解耦，同时完全保留既有协议事实与破坏性写盘安全边界。**
+### 16.17 扩展阶段计划：统一容量展示与内置演示
+
+#### 16.17.1 U10 先于 U11
+
+演示模式会暴露所有页面和中间状态，因此必须先完成 DiskLayout 展示层收口，再建立演示夹具。禁止为了 demo 固化当前页面私有逻辑。
+
+执行顺序：
+
+```text
+U10 共享 DiskLayout 展示层
+  ↓
+U11 演示状态与场景目录
+  ↓
+演示尺寸/交互/零 I/O 门禁
+```
+
+#### 16.17.2 演示模式产品入口
+
+默认：
+
+```text
+edpcli demo
+```
+
+行为：
+
+- 直接进入正式 AppShell；
+- Devices / Inspect / Provision / Backups 都有演示数据；
+- 可使用现有 Tab、Pane、Vim 键位正常导航；
+- Header 必须持续显示“演示模式 / 不访问真实介质”；
+- 不要求 sudo，不触发自动提权；
+- 不扫描 `/dev`、不读取真实备份目录、不打开 raw disk、不执行真实删除/验证/恢复/制盘；
+- 退出后不产生任何持久化介质副作用。
+
+`--scene` 只负责选择初始状态，不能启动另一套 renderer。
+
+#### 16.17.3 场景目录
+
+至少覆盖以下正式页面与关键状态：
+
+```text
+overview
+devices
+device-edp
+device-plain
+
+inspect-lba8
+inspect-elabel-expanded
+inspect-disk-layout
+inspect-tail-expanded
+inspect-sector-raw
+inspect-sector-decode
+inspect-sector-meta
+
+provision-select
+provision-form
+provision-review
+provision-running
+provision-result-success
+provision-result-warning
+provision-result-failure
+
+backups
+backup-detail
+backup-coverage
+backup-verify-running
+
+empty-state
+error-state
+```
+
+`edpcli demo` 默认不要求用户记场景名；所有主要 Workspace 必须能通过正常键位浏览。`--scene` 主要用于 UI 调试、截图和回归定位。
+
+#### 16.17.4 演示数据必须使用正式 typed model
+
+禁止为演示维护第二套 renderer 或第二套字段语义。正确方向：
+
+```text
+DemoCatalog
+  ↓
+DemoFixture / DemoScenario
+  ↓
+正式 AppState / typed workspace model
+  ↓
+正式 renderer
+```
+
+演示数据至少包含：
+
+- 一个 EDP mode0；
+- 一个 EDP mode1 或其它官方模式；
+- 一个 Plain 盘；
+- canonical DiskLayout 的 Protocol / Metadata / Partition / 空闲区域 / Tail group；
+- LBA8 部门、用户、E_LABEL 17 项；
+- 正常与异常字段状态；
+- 多条备份，覆盖 confirmed / possible / health warning；
+- 制盘 Form / Review / Running / Result 的 typed 状态；
+- 足够长的名称、部门、路径、中文和 Unicode，用于横向滚动与响应式验收。
+
+所有演示值必须显式带 DEMO 语义，不得伪装成当前真实设备或真实备份。
+
+#### 16.17.5 演示进度与运行日志
+
+`provision-running`、`backup-verify-running` 等状态不能依赖真实 worker。
+
+建立可确定重放的演示时间线：
+
+```text
+DemoTimeline
+  ├─ progress events
+  ├─ current phase
+  ├─ current step
+  ├─ sector activity
+  ├─ log entries
+  └─ final outcome
+```
+
+这些事件必须复用正式的 progress/outcome typed 数据结构。测试可以冻结在固定 tick；交互演示可以按 TUI animation tick 自动前进、暂停或循环。
+
+禁止通过 sleep + 随机数制造不可重复的测试状态。
+
+#### 16.17.6 零真实 I/O 是硬安全边界
+
+不要在每个 `request_*` 中零散插入 `if demo`。
+
+应在任务执行边界建立单一策略，例如：
+
+```text
+ExecutionPolicy
+  Live
+  DemoNoExternalIo
+```
+
+所有会访问外部世界的任务必须经过统一 gate，包括：
+
+- device scan；
+- backup directory scan；
+- raw sector read；
+- backup create / verify / delete / prune / restore；
+- provision planning 中需要真实盘的探测；
+- provision commit / export；
+- sudo / privilege escalation；
+- shell / diskutil 等平台命令。
+
+演示模式下，UI 动作只允许：
+
+1. 在已有演示状态间导航；
+2. 推进合成 timeline；
+3. 打开确认框后显示“演示模式不会执行真实操作”；
+4. 修改内存中的演示表单字段。
+
+任何路径都不得把演示 disk、路径或身份数据传入真实 application I/O service。
+
+#### 16.17.7 与真实 TUI 的隔离
+
+演示模式不得改变普通启动语义：
+
+```text
+edpcli
+edpcli tui
+```
+
+继续走真实数据源。
+
+演示模式的夹具、时间线和场景目录建议集中在：
+
+```text
+src/tui/demo/
+```
+
+但 renderer、Theme、Pane、DiskLayout、表格、Inspect、Provision、Backups 组件仍使用生产模块。
+
+正常运行时不得自动加载 demo fixture。
+
+#### 16.17.8 演示模式门禁
+
+至少增加：
+
+1. `edpcli demo`、`--scene`、`--list-scenes` CLI 契约；
+2. 默认 demo 启动无需 root；
+3. 每个场景都能构造合法 `AppState`；
+4. 40x10、80x24、120x36、160x45、240x60 全场景 no-panic；
+5. Devices / Inspect / Provision / Backups 均有可见非空演示数据；
+6. Provision Running 的进度、阶段、步骤、日志、安全提示同时可见；
+7. Tail group collapsed/expanded 两种演示都存在；
+8. Plain 场景绝不出现 EDP Tail；
+9. demo 状态下所有外部任务请求都被统一策略拒绝；
+10. 测试替身确认零 raw disk open、零备份目录访问、零 sudo、零外部 shell；
+11. demo fixture 不进入真实设备/备份扫描结果；
+12. renderer 源码不存在 demo 专用业务分支；
+13. 正常 `edpcli tui` 的现有安全/功能回归全部保持绿；
+14. fast/full/clippy/fmt/diff 门禁全部通过。
+
+#### 16.17.9 扩展阶段完成条件
+
+U10 / U11 只有同时满足以下条件才允许标记 COMPLETE：
+
+1. Devices / Inspect / Provision 的容量分段来源完全一致；
+2. 三种展示精度只影响格式，不改变 sector 边界；
+3. Tail group 可用 `o` 统一展开/折叠；
+4. 页面私有容量 legend/比例算法已删除；
+5. 有效 canonical layout 不出现 `Unknown`、hole 或 overlap；
+6. `edpcli demo` 一条命令可浏览所有主要 Workspace；
+7. 所有关键中间态都有正式 typed 演示场景；
+8. demo 零真实 I/O、零提权；
+9. demo 与正常模式 renderer 共用；
+10. 全部自动化门禁通过并提交、push。
