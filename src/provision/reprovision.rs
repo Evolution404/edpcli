@@ -9,6 +9,7 @@ use crate::{
 
 use super::{
     OfficialFilesystemFormat, OfficialPartitionMode, PartitionRole, PassInfoPolicy,
+    RegionMappingKind, RegionMappingPlanner, SourceRegion, TargetRegion,
     DEFAULT_MODE0_BOOT_SECTORS, OFFICIAL_PARTITION_START_SECTOR,
     WHOLE_DISK_ENCRYPTED_COMPAT_BOOT_BYTES,
 };
@@ -991,6 +992,12 @@ impl ParsedExistingProvision {
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct MigrationSource {
+    pub source_index: usize,
+    pub region: SourceRegion,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct TargetPartitionPlan {
     pub geometry: TargetPartitionGeometry,
@@ -999,6 +1006,9 @@ pub struct TargetPartitionPlan {
     pub source_password_knowledge: Option<super::SourcePasswordKnowledge>,
     pub target_password_policy: Option<super::TargetPasswordPolicy>,
     pub reason: String,
+    /// Source regions that require file-level/data migration into this target.
+    /// The execution layer remains fail-closed until K6 migration is implemented.
+    pub migration_sources: Vec<MigrationSource>,
     /// Only present when a verified source key record belongs to this exact
     /// target geometry. The writer re-encodes it for the target slot.
     pub preserved_record: Option<ExistingPartitionRecord>,
@@ -1023,6 +1033,28 @@ impl TargetProvisionPlan {
             return Err("target partition count does not match official mode".into());
         }
         let gap = validate_target_geometry(targets, usable_end_lba)?;
+        let migration_plan = if let Some(source) = source {
+            if source.profile.partitions.len() != source.records.len() {
+                return Err("source partition/record count mismatch".into());
+            }
+            let source_regions = source
+                .profile
+                .partitions
+                .iter()
+                .copied()
+                .zip(source.records.iter().copied())
+                .map(|(partition, record)| SourceRegion::from_existing(partition, record))
+                .collect::<Vec<_>>();
+            let target_regions = targets
+                .iter()
+                .copied()
+                .map(TargetRegion::from_target)
+                .collect::<Vec<_>>();
+            let plan = RegionMappingPlanner::map(&source_regions, &target_regions);
+            Some((source_regions, plan))
+        } else {
+            None
+        };
         let mut partitions = Vec::with_capacity(targets.len());
         for (index, target) in targets.iter().enumerate() {
             if target.partition_type != mode.partition_types()[index] {
@@ -1036,6 +1068,28 @@ impl TargetProvisionPlan {
                 .map(|_| super::TargetPasswordPolicy::InitializeNew);
             let mut reason = "无全兼容来源分区；目标区域必须重建".to_string();
             let mut preserved_record = None;
+            let migration_sources = migration_plan
+                .as_ref()
+                .map(|(source_regions, plan)| {
+                    plan.mappings
+                        .iter()
+                        .filter(|mapping| {
+                            mapping.target_index == Some(index)
+                                && mapping.kind == RegionMappingKind::MigrateUnsupported
+                        })
+                        .filter_map(|mapping| {
+                            let source_index = mapping.source_index?;
+                            source_regions
+                                .get(source_index)
+                                .copied()
+                                .map(|region| MigrationSource {
+                                    source_index,
+                                    region,
+                                })
+                        })
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
             if let Some(source) = source {
                 if let Some((source_index, old)) = source
                     .profile
@@ -1129,6 +1183,22 @@ impl TargetProvisionPlan {
                     }
                 }
             }
+            if !migration_sources.is_empty() {
+                let sources = migration_sources
+                    .iter()
+                    .map(|source| source.region.role.label())
+                    .collect::<Vec<_>>()
+                    .join(" + ");
+                disposition = RegionDisposition::Migrate;
+                source_password_knowledge = None;
+                target_password_policy = super::KeyDomainRole::from_partition_role(target.role)
+                    .map(|_| super::TargetPasswordPolicy::InitializeNew);
+                preserved_record = None;
+                reason = format!(
+                    "来源区域 {sources} 到目标 {} 需要 K6 数据迁移；执行层仍保持 fail-closed",
+                    target.role.label()
+                );
+            }
             let action = disposition.legacy_action();
             partitions.push(TargetPartitionPlan {
                 geometry: *target,
@@ -1137,6 +1207,7 @@ impl TargetProvisionPlan {
                 source_password_knowledge,
                 target_password_policy,
                 reason,
+                migration_sources,
                 preserved_record,
             });
         }
