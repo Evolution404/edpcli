@@ -10,6 +10,7 @@ mod key_domain;
 mod keys;
 mod layout;
 mod lce;
+mod migration;
 mod plain;
 mod profile;
 mod region_mapping;
@@ -41,6 +42,11 @@ pub use layout::{
     OFFICIAL_PARTITION_START_SECTOR, WHOLE_DISK_ENCRYPTED_COMPAT_BOOT_BYTES,
 };
 pub use lce::{build_lce_ciphertext, lce_plaintext};
+pub use migration::{
+    build_migration_manifest, finalize_staged_entry, MigrationBudgets, MigrationInventory,
+    MigrationManifest, MigrationManifestEntry, MigrationPreflightError, MigrationStagedEntry,
+    MAX_MIGRATION_ENTRIES,
+};
 pub use plain::{
     build_plain_provision_write_plan, max_plain_sector_count, plain_gaps,
     validate_plain_partitions, PlainCleanupExtent, PlainGap, PlainPartitionSpec,
