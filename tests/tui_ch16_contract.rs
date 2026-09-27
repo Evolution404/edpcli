@@ -501,6 +501,7 @@ fn ch16_renderers_use_only_central_responsive_breakpoints() {
         "src/tui/disk_layout.rs",
         "src/tui/devices/render.rs",
         "src/tui/inspect/render.rs",
+        "src/tui/inspect/sector_render.rs",
         "src/tui/provision/render.rs",
         "src/tui/backups/render.rs",
     ] {
@@ -517,6 +518,29 @@ fn ch16_renderers_use_only_central_responsive_breakpoints() {
             );
         }
     }
+}
+
+#[test]
+fn ch16_business_layouts_do_not_use_legacy_animation_or_workspace_sidebars() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let shell =
+        std::fs::read_to_string(root.join("src/tui/render.rs")).expect("top-level renderer");
+    let provision = std::fs::read_to_string(root.join("src/tui/provision/render.rs"))
+        .expect("provision renderer");
+    for forbidden in [
+        "animation_area",
+        "animation::draw(",
+        "workspace_sidebar_layout",
+    ] {
+        assert!(
+            !shell.contains(forbidden),
+            "top-level business renderer still contains legacy sidebar token {forbidden}"
+        );
+    }
+    assert!(
+        !provision.contains("workspace_sidebar_layout"),
+        "Provision must own its responsive context layout instead of using the legacy workspace sidebar helper"
+    );
 }
 
 #[test]

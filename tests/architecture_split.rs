@@ -77,10 +77,13 @@ fn large_modules_are_split_by_domain_boundary() {
         "src/tui/provision/render.rs",
         "src/tui/provision/task.rs",
         "src/tui/inspect/state.rs",
+        "src/tui/inspect/sector_state.rs",
         "src/tui/inspect/render.rs",
+        "src/tui/inspect/sector_render.rs",
         "src/tui/backups/state.rs",
         "src/tui/backups/render.rs",
         "src/tui/devices/render.rs",
+        "src/tui/dispatch.rs",
         "src/inspect/model.rs",
         "src/inspect_adapter.rs",
         "src/application/inspect_text.rs",
@@ -100,6 +103,30 @@ fn large_modules_are_split_by_domain_boundary() {
     assert!(lines("src/tui/state.rs") < 3_500);
     assert!(lines("src/tui/render.rs") < 1_500);
     assert!(lines("src/tui/task.rs") < 1_000);
+    assert!(
+        lines("src/tui/mod.rs") < 1_800,
+        "TUI module root must remain lifecycle-oriented; action dispatch belongs in dispatch.rs"
+    );
+    assert!(
+        lines("src/tui/dispatch.rs") < 600,
+        "TUI dispatch module must stay responsibility-bounded"
+    );
+    assert!(
+        lines("src/tui/inspect/state.rs") < 1_900,
+        "Inspect workspace state must not absorb Sector Inspector state again"
+    );
+    assert!(
+        lines("src/tui/inspect/sector_state.rs") < 450,
+        "Sector Inspector state must stay responsibility-bounded"
+    );
+    assert!(
+        lines("src/tui/inspect/render.rs") < 750,
+        "Inspect workspace renderer must not absorb Sector Inspector rendering again"
+    );
+    assert!(
+        lines("src/tui/inspect/sector_render.rs") < 350,
+        "Sector Inspector renderer must stay responsibility-bounded"
+    );
     assert!(lines("src/inspect.rs") < 150);
     assert!(lines("src/inspect_adapter.rs") < 150);
     assert!(lines("src/application/inspect_text.rs") < 260);

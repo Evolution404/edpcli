@@ -10,10 +10,10 @@ use ratatui::{
     Frame,
 };
 
+use super::animation::CoreMode;
 use super::state::{
     AppState, InputMode, ProvisionKind, ProvisionStage, WizardStage, Workspace, WriteKind,
 };
-use super::{animation, animation::CoreMode};
 
 #[path = "backups/render.rs"]
 mod backups_render;
@@ -265,35 +265,6 @@ fn device_status(row: &crate::disk_scan::Row) -> String {
     }
 }
 
-fn workspace_sidebar_layout(
-    area: ratatui::layout::Rect,
-) -> (
-    ratatui::layout::Rect,
-    Option<(ratatui::layout::Rect, Option<ratatui::layout::Rect>)>,
-) {
-    let class = super::ui::ViewportClass::for_width(area.width);
-    if !matches!(
-        class,
-        super::ui::ViewportClass::Wide | super::ui::ViewportClass::UltraWide
-    ) || area.height < 12
-    {
-        return (area, None);
-    }
-    let columns = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([Constraint::Min(68), Constraint::Length(40)])
-        .split(area);
-    if columns[1].height >= 18 {
-        let sidebar = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([Constraint::Min(8), Constraint::Length(10)])
-            .split(columns[1]);
-        (columns[0], Some((sidebar[0], Some(sidebar[1]))))
-    } else {
-        (columns[0], Some((columns[1], None)))
-    }
-}
-
 fn visible_window(selected: usize, total: usize, area_height: u16) -> std::ops::Range<usize> {
     let capacity = usize::from(area_height.saturating_sub(3)).max(1);
     let start = selected
@@ -420,19 +391,17 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
         Block::default().style(super::theme::current().background()),
         area,
     );
-    let (core_mode, core_activity) = if state.is_critical_operation() {
-        (CoreMode::Guard, "SAFE TRANSACTION")
-    } else if state.workspace() == Workspace::Inspect && state.advanced_inspect().is_some() {
-        (CoreMode::Busy, "全盘检查")
-    } else if state.active_scan_pending() {
-        (CoreMode::Busy, "BACKGROUND SCAN")
-    } else if state.wizard().is_some()
+    let core_mode = if state.is_critical_operation() {
+        CoreMode::Guard
+    } else if (state.workspace() == Workspace::Inspect && state.advanced_inspect().is_some())
+        || state.active_scan_pending()
+        || state.wizard().is_some()
         || (state.workspace() == Workspace::Provision
             && state.provision().stage != ProvisionStage::Menu)
     {
-        (CoreMode::Busy, "USER FLOW")
+        CoreMode::Busy
     } else {
-        (CoreMode::Stable, "INTERACTIVE")
+        CoreMode::Stable
     };
     let has_notice = state.notice().is_some();
     let mut constraints = vec![
@@ -452,29 +421,7 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
     super::shell::header(frame, chunks[0], state, core_mode);
     super::shell::navigation(frame, chunks[1], state.workspace());
 
-    let body = chunks[2];
-    let overlay_active = state.backup_delete().is_some()
-        || state.backup_batch_delete().is_some()
-        || state.backup_create_choice().is_some()
-        || state.backup_prune().is_some()
-        || state.wizard().is_some()
-        || matches!(state.input_mode(), InputMode::Command | InputMode::Help);
-    let body_class = super::ui::ViewportClass::for_width(body.width);
-    let (content_area, animation_area) = if overlay_active
-        && matches!(
-            body_class,
-            super::ui::ViewportClass::Wide | super::ui::ViewportClass::UltraWide
-        )
-        && body.height >= 14
-    {
-        let parts = Layout::default()
-            .direction(Direction::Horizontal)
-            .constraints([Constraint::Min(82), Constraint::Length(30)])
-            .split(body);
-        (parts[0], Some(parts[1]))
-    } else {
-        (body, None)
-    };
+    let content_area = chunks[2];
 
     if state.workspace() == Workspace::Inspect && state.advanced_inspect().is_some() {
         draw_advanced_inspect(frame, content_area, state);
@@ -533,16 +480,6 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
                 Workspace::Provision => draw_provision(frame, content_area, state),
             },
         }
-    }
-
-    if let Some(animation_area) = animation_area {
-        animation::draw(
-            frame,
-            animation_area,
-            state.animation_frame(),
-            core_mode,
-            core_activity,
-        );
     }
 
     let status = if state.is_critical_operation() && state.backup_delete().is_some() {

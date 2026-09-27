@@ -9451,7 +9451,7 @@ Backup detail / coverage
 
 #### U8 — 组件迁移与技术债删除
 
-状态：PENDING。
+状态：COMPLETE（2026-09-27）。已删除顶层业务区固定 30 列大动画侧栏与 `workspace_sidebar_layout` 旧通用布局，Header 仅保留紧凑 CORE 状态指示；Provision 改为自行拥有响应式目标/安全上下文布局。Inspect 将 Sector Inspector 渲染与状态分别拆入 `sector_render.rs`（258 行）和 `sector_state.rs`（339 行），主 `render.rs` / `state.rs` 收敛为 705 / 1830 行；TUI 根模块把导航、备份、Inspect、Provision 高层动作分发拆入 `dispatch.rs`（471 行），`mod.rs` 收敛为 1749 行。新增模块存在性与规模门禁、禁止旧侧栏重新出现的 Chapter 16 静态契约，并更新源码位置型 Keymap/动画契约；旧 overlay-only Inspect 路径已无生产引用。`tui_suite` 224/224、`repository_suite` 58/58 PASS。
 
 - 删除废弃 Block/style/layout helper；
 - 删除旧 animation sidebar 业务布局；

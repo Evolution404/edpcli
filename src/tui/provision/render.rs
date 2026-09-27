@@ -4,6 +4,34 @@ use crate::tui::state::{ProvisionReviewRowKind, ProvisionReviewTone};
 
 const INPUT_EDITING_SLACK: usize = 2;
 
+fn provision_content_layout(
+    area: ratatui::layout::Rect,
+    stage: ProvisionStage,
+) -> (
+    ratatui::layout::Rect,
+    Option<(ratatui::layout::Rect, Option<ratatui::layout::Rect>)>,
+) {
+    if stage == ProvisionStage::Running {
+        return (area, None);
+    }
+    let class = crate::tui::ui::ViewportClass::for_width(area.width);
+    if !matches!(
+        class,
+        crate::tui::ui::ViewportClass::Wide | crate::tui::ui::ViewportClass::UltraWide
+    ) || area.height < 12
+    {
+        return (area, None);
+    }
+    let columns = Layout::horizontal([Constraint::Min(68), Constraint::Length(40)]).split(area);
+    if columns[1].height >= 18 {
+        let context =
+            Layout::vertical([Constraint::Min(8), Constraint::Length(10)]).split(columns[1]);
+        (columns[0], Some((context[0], Some(context[1]))))
+    } else {
+        (columns[0], Some((columns[1], None)))
+    }
+}
+
 fn draw_provision_stepper(frame: &mut Frame, area: ratatui::layout::Rect, stage: ProvisionStage) {
     let current = match stage {
         ProvisionStage::SelectDisk => 0,
@@ -57,11 +85,7 @@ pub(super) fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, sta
     let provision = state.provision();
     let sections = Layout::vertical([Constraint::Length(1), Constraint::Min(1)]).split(area);
     draw_provision_stepper(frame, sections[0], provision.stage);
-    let (main_area, sidebar) = if provision.stage == ProvisionStage::Running {
-        (sections[1], None)
-    } else {
-        workspace_sidebar_layout(sections[1])
-    };
+    let (main_area, sidebar) = provision_content_layout(sections[1], provision.stage);
 
     let target_lines = if let Some(row) = if provision.stage == ProvisionStage::SelectDisk {
         state.provision_device_at(state.selected())

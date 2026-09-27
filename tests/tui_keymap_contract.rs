@@ -235,11 +235,11 @@ fn normal_mode_keeps_inspect_and_backup_as_single_key_actions() {
         Some(TuiAction::Restore)
     );
 
-    let event_loop = include_str!("../src/tui/mod.rs");
+    let dispatch_source = include_str!("../src/tui/dispatch.rs");
     let dispatch = source_section(
-        event_loop,
-        "fn dispatch_tui_action(",
-        "fn open_advanced_inspect_selection(",
+        dispatch_source,
+        "pub(super) fn dispatch_tui_action(",
+        "pub(super) fn open_advanced_inspect_selection(",
     );
     assert!(!dispatch.contains("TuiAction::Plan if state.workspace() == state::Workspace::Devices"));
     assert!(!dispatch.contains("TuiAction::Activate | TuiAction::Open => match state.workspace()"));
@@ -402,9 +402,9 @@ fn user_visible_inspect_hints_point_to_full_disk_tree_entry() {
     assert!(devices.contains("Span::styled(\"Enter\", accent())"));
     assert!(!devices.contains("gi"));
 
-    let event_loop = include_str!("../src/tui/mod.rs");
-    assert!(event_loop.contains("NavCommand::OpenInspect =>"));
-    assert!(!event_loop.contains("OpenAdvancedInspect"));
+    let dispatch = include_str!("../src/tui/dispatch.rs");
+    assert!(dispatch.contains("NavCommand::OpenInspect =>"));
+    assert!(!dispatch.contains("OpenAdvancedInspect"));
 }
 
 #[test]
@@ -495,7 +495,7 @@ fn sector_inspector_dispatches_the_documented_vim_actions() {
             "Sector Inspector event loop missing {action}"
         );
     }
-    let render = include_str!("../src/tui/inspect/render.rs");
+    let render = include_str!("../src/tui/inspect/sector_render.rs");
     assert!(render.contains("0/$"));
     assert!(render.contains("gg/G"));
     assert!(render.contains("Ctrl-u/d"));
