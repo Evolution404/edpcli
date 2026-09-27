@@ -201,6 +201,11 @@ fn daily_ci_splits_primary_runtime_coverage_from_secondary_arch_compile_coverage
     assert!(!ci.contains("cargo build --release --locked"));
     assert!(ci.contains("repository-audit:"));
     assert!(ci.contains("classify changes"));
+    assert!(ci.contains("label: macos-arm64\n            workers: 4\n            test_threads: 2"));
+    assert!(ci.contains("label: linux-x86_64\n            workers: 4\n            test_threads: 2"));
+    assert!(ci.contains("label: windows-x86_64\n            workers: 2\n            test_threads: 4"));
+    assert!(ci.contains("EDPCLI_TEST_WORKERS: ${{ matrix.workers }}"));
+    assert!(ci.contains("EDPCLI_TEST_THREADS: ${{ matrix.test_threads }}"));
 }
 
 #[test]

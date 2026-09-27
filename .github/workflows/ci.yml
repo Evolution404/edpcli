@@ -150,10 +150,16 @@ jobs:
         include:
           - os: macos-15
             label: macos-arm64
+            workers: 4
+            test_threads: 2
           - os: ubuntu-24.04
             label: linux-x86_64
+            workers: 4
+            test_threads: 2
           - os: windows-2025
             label: windows-x86_64
+            workers: 2
+            test_threads: 4
     runs-on: ${{ matrix.os }}
     env:
       SCCACHE_GHA_ENABLED: "true"
@@ -161,6 +167,8 @@ jobs:
       CARGO_INCREMENTAL: "0"
       CARGO_PROFILE_DEV_DEBUG: "0"
       CARGO_PROFILE_TEST_DEBUG: "0"
+      EDPCLI_TEST_WORKERS: ${{ matrix.workers }}
+      EDPCLI_TEST_THREADS: ${{ matrix.test_threads }}
       EDPCLI_TEST_MAX_SECONDS: "180"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
