@@ -215,8 +215,8 @@ pub(super) fn draw_backups(frame: &mut Frame, area: ratatui::layout::Rect, state
             );
         } else {
             use crate::tui::table_layout::{
-                display_width, table_column_schema, table_heading, table_position_label,
-                visible_cell, TableKind,
+                display_width, render_table_scrollbars, table_column_schema, table_heading,
+                table_position_label, visible_cell, TableKind,
             };
             let columns = table_column_schema(TableKind::Backups).expect("backup schema");
             let headings = columns
@@ -247,6 +247,7 @@ pub(super) fn draw_backups(frame: &mut Frame, area: ratatui::layout::Rect, state
             );
             let window = visible_window(state.selected(), visible_count, backup_parts[1].height);
             let window_start = window.start;
+            let window_len = window.len();
             let rows = window
                 .filter_map(|position| state.backup_at_visible(position))
                 .map(|backup| {
@@ -303,6 +304,14 @@ pub(super) fn draw_backups(frame: &mut Frame, area: ratatui::layout::Rect, state
             let mut table_state = TableState::default();
             table_state.select(Some(state.selected().saturating_sub(window_start)));
             frame.render_stateful_widget(table, backup_parts[1], &mut table_state);
+            render_table_scrollbars(
+                frame,
+                backup_parts[1],
+                &viewport,
+                visible_count,
+                window_start,
+                window_len,
+            );
         }
     }
     if let Some(detail_area) = detail_area {

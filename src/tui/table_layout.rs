@@ -769,17 +769,68 @@ pub fn table_heading(heading: &str, index: usize, interaction: TableInteractionS
 pub fn table_position_label(
     layout: &AdaptiveTableLayout,
     interaction: TableInteractionState,
-    viewport: &TableViewport,
+    _viewport: &TableViewport,
 ) -> String {
     let total = layout.specs().len().max(1);
-    let max_scroll = viewport.total_width.saturating_sub(viewport.viewport_width);
     format!(
-        "当前列 {}/{} · 横向 {}/{}",
+        "当前列 {}/{}",
         interaction.active_column().min(total - 1) + 1,
-        total,
-        viewport.scroll_x,
-        max_scroll
+        total
     )
+}
+
+pub fn table_scrollbar_visibility(
+    viewport: &TableViewport,
+    row_total: usize,
+    row_visible: usize,
+) -> (bool, bool) {
+    (
+        viewport.total_width > viewport.viewport_width,
+        row_visible > 0 && row_total > row_visible,
+    )
+}
+
+pub fn render_table_scrollbars(
+    frame: &mut ratatui::Frame<'_>,
+    area: ratatui::layout::Rect,
+    viewport: &TableViewport,
+    row_total: usize,
+    row_start: usize,
+    row_visible: usize,
+) {
+    use ratatui::{
+        layout::Margin,
+        widgets::{Scrollbar, ScrollbarOrientation, ScrollbarState},
+    };
+
+    let (horizontal, vertical) = table_scrollbar_visibility(viewport, row_total, row_visible);
+    if horizontal && area.width > 2 && area.height > 1 {
+        let mut state = ScrollbarState::new(viewport.total_width)
+            .position(viewport.scroll_x)
+            .viewport_content_length(viewport.viewport_width);
+        let scrollbar = Scrollbar::new(ScrollbarOrientation::HorizontalBottom)
+            .thumb_symbol("━")
+            .track_symbol(Some("─"))
+            .begin_symbol(None)
+            .end_symbol(None)
+            .thumb_style(crate::tui::theme::current().accent())
+            .track_style(crate::tui::theme::current().muted());
+        frame.render_stateful_widget(scrollbar, area.inner(Margin::new(1, 0)), &mut state);
+    }
+
+    if vertical && area.height > 2 && area.width > 1 {
+        let mut state = ScrollbarState::new(row_total)
+            .position(row_start)
+            .viewport_content_length(row_visible);
+        let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
+            .thumb_symbol("┃")
+            .track_symbol(Some("│"))
+            .begin_symbol(None)
+            .end_symbol(None)
+            .thumb_style(crate::tui::theme::current().accent())
+            .track_style(crate::tui::theme::current().muted());
+        frame.render_stateful_widget(scrollbar, area.inner(Margin::new(0, 1)), &mut state);
+    }
 }
 
 pub fn display_width(text: &str) -> usize {

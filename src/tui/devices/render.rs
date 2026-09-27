@@ -101,7 +101,8 @@ fn draw_device_list(frame: &mut Frame, list_area: ratatui::layout::Rect, state: 
     }
 
     use crate::tui::table_layout::{
-        table_column_schema, table_heading, table_position_label, visible_cell, ColumnId, TableKind,
+        render_table_scrollbars, table_column_schema, table_heading, table_position_label,
+        visible_cell, ColumnId, TableKind,
     };
     let columns = table_column_schema(TableKind::Devices).expect("device schema");
     let headings = columns
@@ -123,6 +124,7 @@ fn draw_device_list(frame: &mut Frame, list_area: ratatui::layout::Rect, state: 
     );
     let window = visible_window(state.selected(), visible_count, list_area.height);
     let window_start = window.start;
+    let window_len = window.len();
     let rows = window
         .filter_map(|position| state.device_source_index_at_visible(position))
         .map(|index| {
@@ -182,6 +184,14 @@ fn draw_device_list(frame: &mut Frame, list_area: ratatui::layout::Rect, state: 
     let mut table_state = TableState::default();
     table_state.select(Some(state.selected().saturating_sub(window_start)));
     frame.render_stateful_widget(table, list_area, &mut table_state);
+    render_table_scrollbars(
+        frame,
+        list_area,
+        &viewport,
+        visible_count,
+        window_start,
+        window_len,
+    );
 }
 
 fn draw_device_summary(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState) {

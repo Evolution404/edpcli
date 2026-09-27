@@ -1,6 +1,8 @@
 use edpcli::tui::table_layout::{
-    display_width, identity_column_specs, table_column_schema, truncate_cell, AdaptiveColumnSpec,
-    AdaptiveTableLayout, ColumnId, SortDirection, TableInteractionState, TableKind, TruncatePolicy,
+    display_width, identity_column_specs, render_table_scrollbars, table_column_schema,
+    table_position_label, table_scrollbar_visibility, truncate_cell, AdaptiveColumnSpec,
+    AdaptiveTableLayout, ColumnId, SortDirection, TableInteractionState, TableKind, TableViewport,
+    TruncatePolicy,
 };
 
 #[test]
@@ -290,5 +292,73 @@ fn every_interactive_table_renderer_uses_unified_active_column_layout() {
                 && source.contains("table_visual_widths("),
             "{name} must project the whole table through the shared runtime column order"
         );
+        assert!(
+            source.matches("render_table_scrollbars(").count() >= minimum,
+            "{name} must render shared horizontal/vertical table scrollbars for every interactive table"
+        );
     }
+}
+
+#[test]
+fn table_scrollbars_appear_only_for_real_horizontal_and_vertical_overflow() {
+    let viewport = TableViewport {
+        columns: Vec::new(),
+        scroll_x: 6,
+        total_width: 120,
+        viewport_width: 40,
+    };
+    assert_eq!(table_scrollbar_visibility(&viewport, 100, 12), (true, true));
+    assert_eq!(table_scrollbar_visibility(&viewport, 12, 12), (true, false));
+
+    let fitted = TableViewport {
+        columns: Vec::new(),
+        scroll_x: 0,
+        total_width: 40,
+        viewport_width: 40,
+    };
+    assert_eq!(table_scrollbar_visibility(&fitted, 100, 12), (false, true));
+    assert_eq!(table_scrollbar_visibility(&fitted, 12, 12), (false, false));
+}
+
+#[test]
+fn table_position_label_no_longer_exposes_numeric_horizontal_offset() {
+    let layout =
+        AdaptiveTableLayout::new(vec![spec(8, 12, 20, 50, false), spec(8, 12, 20, 50, false)]);
+    let mut interaction = TableInteractionState::default();
+    assert!(interaction.move_active(&layout, &[20, 20], 20, false));
+    let viewport = layout.layout_with_active(20, &[20, 20], 7, Some(interaction.active_column()));
+    let label = table_position_label(&layout, interaction, &viewport);
+    assert_eq!(label, "当前列 2/2");
+    assert!(!label.contains("横向"));
+}
+
+#[test]
+fn shared_scrollbar_renderer_draws_horizontal_and_vertical_thumbs() {
+    use ratatui::{backend::TestBackend, Terminal};
+
+    let viewport = TableViewport {
+        columns: Vec::new(),
+        scroll_x: 20,
+        total_width: 120,
+        viewport_width: 30,
+    };
+    let mut terminal = Terminal::new(TestBackend::new(40, 10)).unwrap();
+    terminal
+        .draw(|frame| {
+            render_table_scrollbars(frame, frame.area(), &viewport, 100, 25, 6);
+        })
+        .unwrap();
+
+    let buffer = terminal.backend().buffer();
+    let text = buffer
+        .content()
+        .chunks(40)
+        .map(|row| row.iter().map(|cell| cell.symbol()).collect::<String>())
+        .collect::<Vec<_>>()
+        .join(
+            "
+",
+        );
+    assert!(text.contains('━'), "{text}");
+    assert!(text.contains('┃'), "{text}");
 }

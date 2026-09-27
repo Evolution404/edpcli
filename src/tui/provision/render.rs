@@ -159,7 +159,8 @@ pub(super) fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, sta
     match provision.stage {
         ProvisionStage::SelectDisk => {
             use crate::tui::table_layout::{
-                display_width, table_heading, table_position_label, visible_cell, TableKind,
+                display_width, render_table_scrollbars, table_heading, table_position_label,
+                visible_cell, TableKind,
             };
             let headings = ["设备", "容量", "USB 身份", "盘型", "onlyid"];
             let values = (0..state.item_count())
@@ -193,7 +194,11 @@ pub(super) fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, sta
                 interaction.viewport_offset(),
                 Some(interaction.active_column()),
             );
-            let rows = (0..state.item_count()).filter_map(|index| {
+            let row_total = values.len();
+            let window = visible_window(state.selected(), row_total, main_area.height);
+            let row_start = window.start;
+            let row_visible = window.len();
+            let rows = window.filter_map(|index| {
                 let row = values.get(index)?;
                 Some(TableRow::new(
                     viewport
@@ -235,14 +240,23 @@ pub(super) fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, sta
             );
             let table = crate::tui::ui::data_table(&title, header, rows, viewport.widths(), true);
             let mut table_state = ratatui::widgets::TableState::default();
-            if state.item_count() > 0 {
-                table_state.select(Some(state.selected()));
+            if row_total > 0 {
+                table_state.select(Some(state.selected().saturating_sub(row_start)));
             }
             frame.render_stateful_widget(table, main_area, &mut table_state);
+            render_table_scrollbars(
+                frame,
+                main_area,
+                &viewport,
+                row_total,
+                row_start,
+                row_visible,
+            );
         }
         ProvisionStage::Menu => {
             use crate::tui::table_layout::{
-                display_width, table_heading, table_position_label, visible_cell, TableKind,
+                display_width, render_table_scrollbars, table_heading, table_position_label,
+                visible_cell, TableKind,
             };
             let headings = ["#", "制盘方案", "布局 / 行为"];
             let mut content_widths = headings.map(display_width);
@@ -269,30 +283,41 @@ pub(super) fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, sta
                 interaction.viewport_offset(),
                 Some(interaction.active_column()),
             );
-            let rows = state.provision_menu_order().into_iter().map(|index| {
-                let kind = ProvisionKind::ALL[index];
-                let values = [
-                    index.to_string(),
-                    kind.title().into(),
-                    kind.description().into(),
-                ];
-                TableRow::new(
-                    viewport
-                        .columns
-                        .iter()
-                        .map(|column| {
-                            let logical = order[column.index];
-                            Cell::from(visible_cell(&values[logical], column)).style(
-                                if column.index == interaction.active_column() {
-                                    provision_kind_style(kind).add_modifier(Modifier::BOLD)
-                                } else {
-                                    provision_kind_style(kind)
-                                },
-                            )
-                        })
-                        .collect::<Vec<_>>(),
-                )
-            });
+            let menu_order = state.provision_menu_order();
+            let row_total = menu_order.len();
+            let window = visible_window(
+                state.selected(),
+                row_total,
+                main_area.height.saturating_sub(1),
+            );
+            let row_start = window.start;
+            let row_visible = window.len();
+            let rows = window
+                .filter_map(|position| menu_order.get(position).copied())
+                .map(|index| {
+                    let kind = ProvisionKind::ALL[index];
+                    let values = [
+                        index.to_string(),
+                        kind.title().into(),
+                        kind.description().into(),
+                    ];
+                    TableRow::new(
+                        viewport
+                            .columns
+                            .iter()
+                            .map(|column| {
+                                let logical = order[column.index];
+                                Cell::from(visible_cell(&values[logical], column)).style(
+                                    if column.index == interaction.active_column() {
+                                        provision_kind_style(kind).add_modifier(Modifier::BOLD)
+                                    } else {
+                                        provision_kind_style(kind)
+                                    },
+                                )
+                            })
+                            .collect::<Vec<_>>(),
+                    )
+                });
             let title = format!(
                 "制盘中心 · 选择方案 · h/l 激活 · </> 移列 · 0/$ 首尾列 · H/L 视口 · s 排序 · S 默认 · {}",
                 table_position_label(&layout, interaction, &viewport)
@@ -320,8 +345,16 @@ pub(super) fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, sta
             .bottom_margin(1);
             let table = crate::tui::ui::data_table(&title, header, rows, viewport.widths(), true);
             let mut table_state = TableState::default();
-            table_state.select(Some(state.selected()));
+            table_state.select(Some(state.selected().saturating_sub(row_start)));
             frame.render_stateful_widget(table, main_area, &mut table_state);
+            render_table_scrollbars(
+                frame,
+                main_area,
+                &viewport,
+                row_total,
+                row_start,
+                row_visible,
+            );
         }
         ProvisionStage::Form => {
             let class = crate::tui::ui::ViewportClass::for_width(main_area.width);

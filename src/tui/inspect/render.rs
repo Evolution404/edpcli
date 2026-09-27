@@ -599,7 +599,8 @@ pub(super) fn draw_advanced_inspect(
                     .filter(|item| !item.fields.is_empty());
                 if let Some(item) = field_item {
                     use crate::tui::table_layout::{
-                        display_width, table_heading, table_position_label, visible_cell, TableKind,
+                        display_width, render_table_scrollbars, table_heading,
+                        table_position_label, visible_cell, TableKind,
                     };
                     let headings = super::super::state::INSPECT_DETAIL_HEADINGS;
                     let values = state.advanced_inspect_detail_rows();
@@ -657,11 +658,8 @@ pub(super) fn draw_advanced_inspect(
                             .columns
                             .iter()
                             .map(|column| {
-                                let label = table_heading(
-                                    headings[column.index],
-                                    column.index,
-                                    interaction,
-                                );
+                                let logical = order[column.index];
+                                let label = table_heading(headings[logical], logical, interaction);
                                 Cell::from(visible_cell(&label, column)).style(
                                     if column.index == interaction.active_column() {
                                         accent().add_modifier(Modifier::BOLD | Modifier::REVERSED)
@@ -690,6 +688,14 @@ pub(super) fn draw_advanced_inspect(
                                 )),
                         ),
                         detail_area,
+                    );
+                    render_table_scrollbars(
+                        frame,
+                        detail_area,
+                        &viewport,
+                        values.len(),
+                        row_start,
+                        row_end.saturating_sub(row_start),
                     );
                 } else {
                     let detail_scroll = detail_offset.min(detail_lines.len().saturating_sub(1));

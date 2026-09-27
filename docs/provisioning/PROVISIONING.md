@@ -2318,6 +2318,7 @@ Insert：
 8. Inspect 内 `Tab/Shift-Tab` 必须有效，循环切换“结构树 / 节点概览 / 节点详情”子工作区；
 9. 增加面包屑和明确的 `Esc 返回：<目标>` 提示，用户必须知道当前层级和返回目标；
 10. 所有 Table 使用统一自适应列宽与交互状态：`j/k` 选行、`h/l` 激活列、`</>` 移动整列、`0/$` 首尾列、`H/L` 2-cell 横向视口、`s/S` 排序/默认顺序；激活的长“部门”等字段优先完整展开且不使用省略号。
+11. 所有 Table 统一显示 overflow scrollbar：横向溢出时底边显示 cell 级横向滚动条，纵向溢出时右边显示 row-window 竖向滚动条；无溢出时自动隐藏，禁止再用“横向 x/x”数字代替滚动条。
 
 硬约束继续保持：
 
@@ -9474,7 +9475,7 @@ Backup detail / coverage
 
 #### U7 — 全应用响应式收口
 
-状态：COMPLETE（2026-09-27）。所有 TUI renderer 的宽度分支统一经 `ViewportClass`（Compact / Standard / Wide / UltraWide）决策，删除 70/80/96/100/108/118 等私有 width breakpoint；新增静态契约禁止 renderer 重新直接比较 `.width` 数字。既有 40x10、60x18、80x24、120x36、160x45、240x60 视觉与 no-panic 门禁、长部门/盘型优先级、CJK/emoji display width、统一表格列焦点/横向视口/排序和终端文本安全测试继续通过；当前 `tui_suite` 238/238 PASS。
+状态：COMPLETE（2026-09-27）。所有 TUI renderer 的宽度分支统一经 `ViewportClass`（Compact / Standard / Wide / UltraWide）决策，删除 70/80/96/100/108/118 等私有 width breakpoint；新增静态契约禁止 renderer 重新直接比较 `.width` 数字。既有 40x10、60x18、80x24、120x36、160x45、240x60 视觉与 no-panic 门禁、长部门/盘型优先级、CJK/emoji display width、统一表格列焦点/横向视口/排序和终端文本安全测试继续通过；当前 `tui_suite` 241/241 PASS。
 
 - 删除 renderer 内 magic width breakpoint；
 - 统一 Compact/Standard/Wide/UltraWide；
