@@ -1079,13 +1079,12 @@ impl TargetProvisionPlan {
                         })
                         .filter_map(|mapping| {
                             let source_index = mapping.source_index?;
-                            source_regions
-                                .get(source_index)
-                                .copied()
-                                .map(|region| MigrationSource {
+                            source_regions.get(source_index).copied().map(|region| {
+                                MigrationSource {
                                     source_index,
                                     region,
-                                })
+                                }
+                            })
                         })
                         .collect::<Vec<_>>()
                 })
