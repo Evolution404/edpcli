@@ -86,6 +86,22 @@ fn h_l_follow_widget_role_without_changing_insert_text() {
         ),
         Some(TuiAction::TableSortClear)
     );
+    assert_eq!(
+        mapper.map_for_role(
+            InputMode::Normal,
+            WidgetRole::Table,
+            key(KeyCode::Char('0'))
+        ),
+        Some(TuiAction::TableColumnFirst)
+    );
+    assert_eq!(
+        mapper.map_for_role(
+            InputMode::Normal,
+            WidgetRole::Table,
+            key(KeyCode::Char('$'))
+        ),
+        Some(TuiAction::TableColumnLast)
+    );
 }
 
 #[test]

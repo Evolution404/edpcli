@@ -124,7 +124,12 @@ fn compact_backup_detail_and_coverage_remain_reachable_and_escape_returns() {
     let mut state = state();
     let list = text(&state, 40, 10).replace(' ', "");
     assert!(list.contains("名称"));
-    assert!(list.contains("健康"));
+
+    use edpcli::tui::table_layout::TableKind;
+    assert!(state.move_table_column_edge_for_viewport(TableKind::Backups, true, 40, 10,));
+    let last_columns = text(&state, 40, 10).replace(' ', "");
+    assert!(last_columns.contains("健康"), "{last_columns}");
+
     state.focus_backups_pane(PaneId::BackupSummary);
     let detail = text(&state, 40, 10).replace(' ', "");
     assert!(detail.contains("健康"));

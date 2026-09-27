@@ -64,6 +64,8 @@ pub enum TuiAction {
     PanelPrevious,
     TableColumnLeft,
     TableColumnRight,
+    TableColumnFirst,
+    TableColumnLast,
     TableScrollLeft,
     TableScrollRight,
     TableSortToggle,
@@ -125,6 +127,11 @@ pub const NORMAL_HELP: &[HelpBinding] = &[
         action: TuiAction::TableScrollRight,
     },
     HelpBinding {
+        keys: "0/$",
+        label: "表格：第一列 / 最后一列",
+        action: TuiAction::TableColumnFirst,
+    },
+    HelpBinding {
         keys: "s/S",
         label: "表格：排序 / 默认顺序",
         action: TuiAction::TableSortToggle,
@@ -183,7 +190,7 @@ pub const INSPECT_HELP: &[HelpBinding] = &[
         action: TuiAction::MoveLeft,
     },
     HelpBinding {
-        keys: "字段表 h/l · H/L · s/S",
+        keys: "字段表 h/l · H/L · 0/$ · s/S",
         label: "列 · 视口 · 排序",
         action: TuiAction::TableColumnRight,
     },
@@ -257,6 +264,8 @@ impl KeyMapper {
             return Some(match action {
                 TuiAction::MoveLeft => TuiAction::TableColumnLeft,
                 TuiAction::MoveRight => TuiAction::TableColumnRight,
+                TuiAction::RowStart => TuiAction::TableColumnFirst,
+                TuiAction::RowEnd => TuiAction::TableColumnLast,
                 other => other,
             });
         }

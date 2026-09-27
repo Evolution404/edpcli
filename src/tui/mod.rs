@@ -667,35 +667,21 @@ fn run_loop(resume: Option<state::WriteIntent>) -> io::Result<LoopExit> {
                                     }
                                     TuiAction::TableColumnLeft
                                     | TuiAction::TableColumnRight
+                                    | TuiAction::TableColumnFirst
+                                    | TuiAction::TableColumnLast
                                     | TuiAction::TableScrollLeft
                                     | TuiAction::TableScrollRight
                                     | TuiAction::TableSortToggle
                                     | TuiAction::TableSortClear
                                         if role == keymap::WidgetRole::Table =>
                                     {
-                                        let kind =
-                                            crate::tui::table_layout::TableKind::InspectFields;
-                                        match action {
-                                            TuiAction::TableColumnLeft => {
-                                                state.move_table_column(kind, true);
-                                            }
-                                            TuiAction::TableColumnRight => {
-                                                state.move_table_column(kind, false);
-                                            }
-                                            TuiAction::TableScrollLeft => {
-                                                state.scroll_table(kind, true);
-                                            }
-                                            TuiAction::TableScrollRight => {
-                                                state.scroll_table(kind, false);
-                                            }
-                                            TuiAction::TableSortToggle => {
-                                                state.toggle_table_sort(kind);
-                                            }
-                                            TuiAction::TableSortClear => {
-                                                state.clear_table_sort(kind);
-                                            }
-                                            _ => unreachable!(),
-                                        }
+                                        let size = session.terminal.size()?;
+                                        let _ = dispatch_table_action(
+                                            &mut state,
+                                            action,
+                                            size.height as usize,
+                                            size.width,
+                                        );
                                     }
                                     TuiAction::MoveLeft if role == keymap::WidgetRole::Tree => {
                                         state.advanced_inspect_collapse_or_parent();
@@ -868,6 +854,8 @@ fn run_loop(resume: Option<state::WriteIntent>) -> io::Result<LoopExit> {
                                 | TuiAction::Command
                                 | TuiAction::TableColumnLeft
                                 | TuiAction::TableColumnRight
+                                | TuiAction::TableColumnFirst
+                                | TuiAction::TableColumnLast
                                 | TuiAction::TableScrollLeft
                                 | TuiAction::TableScrollRight
                                 | TuiAction::TableSortToggle

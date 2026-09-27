@@ -101,7 +101,7 @@ fn draw_device_list(frame: &mut Frame, list_area: ratatui::layout::Rect, state: 
     }
 
     use crate::tui::table_layout::{
-        layout_for, table_column_schema, table_heading, table_position_label, truncate_cell,
+        layout_for, table_column_schema, table_heading, table_position_label, visible_cell,
         ColumnId, TableKind,
     };
     let columns = table_column_schema(TableKind::Devices).expect("device schema");
@@ -145,12 +145,7 @@ fn draw_device_list(frame: &mut Frame, list_area: ratatui::layout::Rect, state: 
                         } else {
                             style
                         };
-                        Cell::from(truncate_cell(
-                            value,
-                            usize::from(column.width),
-                            column.truncate_policy,
-                        ))
-                        .style(style)
+                        Cell::from(visible_cell(value, column)).style(style)
                     })
                     .collect::<Vec<_>>(),
             )
@@ -166,18 +161,13 @@ fn draw_device_list(frame: &mut Frame, list_area: ratatui::layout::Rect, state: 
                 } else {
                     secondary().add_modifier(Modifier::BOLD)
                 };
-                Cell::from(truncate_cell(
-                    &label,
-                    usize::from(column.width),
-                    column.truncate_policy,
-                ))
-                .style(style)
+                Cell::from(visible_cell(&label, column)).style(style)
             })
             .collect::<Vec<_>>(),
     );
     let table_title = format!(
-        "{title} · h/l 列 · H/L 视口 · s 排序 · S 默认 · {}",
-        table_position_label(&layout, interaction)
+        "{title} · h/l 列 · 0/$ 首尾列 · H/L 视口 · s 排序 · S 默认 · {}",
+        table_position_label(&layout, interaction, &viewport)
     );
     let table = crate::tui::ui::data_table(
         &table_title,

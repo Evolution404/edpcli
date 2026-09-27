@@ -216,7 +216,7 @@ pub(super) fn draw_backups(frame: &mut Frame, area: ratatui::layout::Rect, state
         } else {
             use crate::tui::table_layout::{
                 display_width, layout_for, table_column_schema, table_heading,
-                table_position_label, truncate_cell, TableKind,
+                table_position_label, visible_cell, TableKind,
             };
             let columns = table_column_schema(TableKind::Backups).expect("backup schema");
             let headings = columns
@@ -259,12 +259,7 @@ pub(super) fn draw_backups(frame: &mut Frame, area: ratatui::layout::Rect, state
                             .iter()
                             .map(|column| {
                                 let (value, style) = &values[column.index];
-                                Cell::from(truncate_cell(
-                                    value,
-                                    usize::from(column.width),
-                                    column.truncate_policy,
-                                ))
-                                .style(
+                                Cell::from(visible_cell(value, column)).style(
                                     if column.index == interaction.active_column() {
                                         style.add_modifier(Modifier::BOLD)
                                     } else {
@@ -287,18 +282,13 @@ pub(super) fn draw_backups(frame: &mut Frame, area: ratatui::layout::Rect, state
                         } else {
                             secondary().add_modifier(Modifier::BOLD)
                         };
-                        Cell::from(truncate_cell(
-                            &label,
-                            usize::from(column.width),
-                            column.truncate_policy,
-                        ))
-                        .style(style)
+                        Cell::from(visible_cell(&label, column)).style(style)
                     })
                     .collect::<Vec<_>>(),
             );
             let table_title = format!(
-                "{title} · h/l 列 · H/L 视口 · s 排序 · S 默认 · {}",
-                table_position_label(&layout, interaction)
+                "{title} · h/l 列 · 0/$ 首尾列 · H/L 视口 · s 排序 · S 默认 · {}",
+                table_position_label(&layout, interaction, &viewport)
             );
             let table = crate::tui::ui::data_table(
                 &table_title,

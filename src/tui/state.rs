@@ -1027,6 +1027,129 @@ impl AppState {
         self.table_interaction(kind).active_column()
     }
 
+    fn table_content_widths(&self, kind: super::table_layout::TableKind) -> Vec<usize> {
+        use super::table_layout::{display_width, TableKind};
+
+        match kind {
+            TableKind::Devices => self.device_table_view.content_widths.clone(),
+            TableKind::Backups => self.backup_table_view.content_widths.clone(),
+            TableKind::ProvisionDevices => {
+                let headings = ["设备", "容量", "USB 身份", "盘型", "onlyid"];
+                let mut widths = headings
+                    .iter()
+                    .map(|value| display_width(value))
+                    .collect::<Vec<_>>();
+                for row in self.provision_selectable_devices() {
+                    let values = [
+                        format!("disk{}", row.disk),
+                        format!("{:.2} GiB", row.size as f64 / 1_073_741_824.0),
+                        format!("{}:{}", row.vid, row.pid),
+                        row.confirmed_provision_kind()
+                            .map(|kind| kind.full_name().to_string())
+                            .unwrap_or_else(|| "未知 / 未确认".into()),
+                        row.onlyid.clone().unwrap_or_else(|| "—".into()),
+                    ];
+                    for (index, value) in values.iter().enumerate() {
+                        widths[index] = widths[index].max(display_width(value));
+                    }
+                }
+                widths
+            }
+            TableKind::ProvisionMenu => {
+                let headings = ["#", "制盘方案", "布局 / 行为"];
+                let mut widths = headings
+                    .iter()
+                    .map(|value| display_width(value))
+                    .collect::<Vec<_>>();
+                for (index, kind) in ProvisionKind::ALL.into_iter().enumerate() {
+                    let values = [
+                        index.to_string(),
+                        kind.title().to_string(),
+                        kind.description().to_string(),
+                    ];
+                    for (column, value) in values.iter().enumerate() {
+                        widths[column] = widths[column].max(display_width(value));
+                    }
+                }
+                widths
+            }
+            TableKind::InspectFields => {
+                let mut widths = INSPECT_DETAIL_HEADINGS
+                    .iter()
+                    .map(|value| display_width(value))
+                    .collect::<Vec<_>>();
+                for row in self.advanced_inspect_detail_rows() {
+                    for (index, value) in row.cells.iter().enumerate() {
+                        widths[index] = widths[index].max(display_width(value));
+                    }
+                }
+                widths
+            }
+        }
+    }
+
+    fn table_viewport_width(
+        &self,
+        kind: super::table_layout::TableKind,
+        terminal_width: u16,
+        terminal_height: usize,
+    ) -> u16 {
+        use super::table_layout::TableKind;
+        match kind {
+            TableKind::Devices | TableKind::Backups => terminal_width.saturating_sub(4),
+            TableKind::InspectFields => terminal_width.saturating_sub(3),
+            TableKind::ProvisionDevices | TableKind::ProvisionMenu => {
+                let class = crate::tui::ui::ViewportClass::for_width(terminal_width);
+                let content_height = terminal_height.saturating_sub(5);
+                let main_width = if matches!(
+                    class,
+                    crate::tui::ui::ViewportClass::Wide | crate::tui::ui::ViewportClass::UltraWide
+                ) && content_height >= 12
+                {
+                    terminal_width.saturating_sub(40)
+                } else {
+                    terminal_width
+                };
+                main_width.saturating_sub(4)
+            }
+        }
+        .max(1)
+    }
+
+    pub fn move_table_column_for_viewport(
+        &mut self,
+        kind: super::table_layout::TableKind,
+        reverse: bool,
+        terminal_width: u16,
+        terminal_height: usize,
+    ) -> bool {
+        let layout = super::table_layout::layout_for(kind);
+        let widths = self.table_content_widths(kind);
+        let viewport_width = self.table_viewport_width(kind, terminal_width, terminal_height);
+        self.horizontal_scroll.entry(kind).or_default().move_active(
+            &layout,
+            &widths,
+            viewport_width,
+            reverse,
+        )
+    }
+
+    pub fn move_table_column_edge_for_viewport(
+        &mut self,
+        kind: super::table_layout::TableKind,
+        last: bool,
+        terminal_width: u16,
+        terminal_height: usize,
+    ) -> bool {
+        let layout = super::table_layout::layout_for(kind);
+        let widths = self.table_content_widths(kind);
+        let viewport_width = self.table_viewport_width(kind, terminal_width, terminal_height);
+        self.horizontal_scroll
+            .entry(kind)
+            .or_default()
+            .move_active_edge(&layout, &widths, viewport_width, last)
+    }
+
     pub fn table_sort(
         &self,
         kind: super::table_layout::TableKind,
@@ -1040,10 +1163,13 @@ impl AppState {
         reverse: bool,
     ) -> bool {
         let layout = super::table_layout::layout_for(kind);
-        self.horizontal_scroll
-            .entry(kind)
-            .or_default()
-            .move_active(&layout, reverse)
+        let widths = self.table_content_widths(kind);
+        self.horizontal_scroll.entry(kind).or_default().move_active(
+            &layout,
+            &widths,
+            u16::MAX,
+            reverse,
+        )
     }
 
     pub fn toggle_table_sort(&mut self, kind: super::table_layout::TableKind) {
@@ -1149,11 +1275,23 @@ impl AppState {
     }
 
     pub fn scroll_table(&mut self, kind: super::table_layout::TableKind, reverse: bool) -> bool {
+        self.scroll_table_for_viewport(kind, reverse, 80, 24)
+    }
+
+    pub fn scroll_table_for_viewport(
+        &mut self,
+        kind: super::table_layout::TableKind,
+        reverse: bool,
+        terminal_width: u16,
+        terminal_height: usize,
+    ) -> bool {
         let layout = super::table_layout::layout_for(kind);
+        let widths = self.table_content_widths(kind);
+        let viewport_width = self.table_viewport_width(kind, terminal_width, terminal_height);
         self.horizontal_scroll
             .entry(kind)
             .or_default()
-            .scroll_viewport(&layout, reverse)
+            .scroll_viewport(&layout, &widths, viewport_width, reverse)
     }
 
     pub fn pane_viewport(&self, pane: crate::tui::pane::PaneId) -> &crate::tui::pane::PaneViewport {

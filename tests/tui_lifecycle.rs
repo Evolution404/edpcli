@@ -74,7 +74,7 @@ fn device_list_shows_model_and_identity_summary_and_enter_shortcut() {
     row.device_id = Some("disk&ven_aigo&prod_u335".into());
     row.onlyid = Some("1987718388".into());
     state.replace_devices(vec![row]);
-    let backend = TestBackend::new(130, 28);
+    let backend = TestBackend::new(180, 28);
     let mut terminal = Terminal::new(backend).unwrap();
     terminal.draw(|frame| render::draw(frame, &state)).unwrap();
     let text = terminal

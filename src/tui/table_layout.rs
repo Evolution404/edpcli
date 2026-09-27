@@ -122,34 +122,22 @@ pub struct TableSort {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct TableInteractionState {
-    viewport_offset: usize,
+    scroll_x: usize,
     active_column: usize,
     sort: Option<TableSort>,
 }
 
 impl TableInteractionState {
     pub const fn viewport_offset(self) -> usize {
-        self.viewport_offset
+        self.scroll_x
     }
 
-    // Compatibility shims while callers migrate to the unified table interaction API.
     pub const fn offset(self) -> usize {
-        self.viewport_offset()
+        self.scroll_x
     }
 
-    pub fn set_offset(&mut self, offset: usize, layout: &AdaptiveTableLayout) {
-        self.set_viewport_offset(offset, layout);
-    }
-
-    pub fn left(&mut self) -> bool {
-        let next = self.viewport_offset.saturating_sub(1);
-        let changed = next != self.viewport_offset;
-        self.viewport_offset = next;
-        changed
-    }
-
-    pub fn right(&mut self, layout: &AdaptiveTableLayout) -> bool {
-        self.scroll_viewport(layout, false)
+    pub fn set_offset(&mut self, offset: usize, _layout: &AdaptiveTableLayout) {
+        self.scroll_x = offset;
     }
 
     pub const fn active_column(self) -> usize {
@@ -160,23 +148,22 @@ impl TableInteractionState {
         self.sort
     }
 
-    pub fn normalize(&mut self, layout: &AdaptiveTableLayout) {
+    fn normalize_columns(&mut self, layout: &AdaptiveTableLayout) {
         let count = layout.specs().len();
         self.active_column = self.active_column.min(count.saturating_sub(1));
-        self.viewport_offset = self
-            .viewport_offset
-            .min(layout.scrollable_count().saturating_sub(1));
         if self.sort.is_some_and(|sort| sort.column >= count) {
             self.sort = None;
         }
     }
 
-    pub fn set_viewport_offset(&mut self, offset: usize, layout: &AdaptiveTableLayout) {
-        self.viewport_offset = offset.min(layout.scrollable_count().saturating_sub(1));
-    }
-
-    pub fn move_active(&mut self, layout: &AdaptiveTableLayout, reverse: bool) -> bool {
-        self.normalize(layout);
+    pub fn move_active(
+        &mut self,
+        layout: &AdaptiveTableLayout,
+        content_widths: &[usize],
+        viewport_width: u16,
+        reverse: bool,
+    ) -> bool {
+        self.normalize_columns(layout);
         let count = layout.specs().len();
         if count == 0 {
             return false;
@@ -187,34 +174,77 @@ impl TableInteractionState {
             self.active_column.saturating_add(1).min(count - 1)
         };
         let changed = next != self.active_column;
-        self.active_column = next;
-
-        let scrollable = layout
-            .specs()
-            .iter()
-            .enumerate()
-            .filter_map(|(index, spec)| (!spec.pinned).then_some(index))
-            .collect::<Vec<_>>();
-        if let Some(position) = scrollable
-            .iter()
-            .position(|index| *index == self.active_column)
-        {
-            self.viewport_offset = position;
+        if !changed {
+            return false;
         }
+        self.active_column = next;
+        self.ensure_active_visible(layout, content_widths, viewport_width, reverse);
+        true
+    }
+
+    pub fn move_active_edge(
+        &mut self,
+        layout: &AdaptiveTableLayout,
+        content_widths: &[usize],
+        viewport_width: u16,
+        last: bool,
+    ) -> bool {
+        self.normalize_columns(layout);
+        let count = layout.specs().len();
+        if count == 0 {
+            return false;
+        }
+        let next = if last { count - 1 } else { 0 };
+        let changed = next != self.active_column;
+        self.active_column = next;
+        self.ensure_active_visible(layout, content_widths, viewport_width, !last);
         changed
     }
 
-    pub fn scroll_viewport(&mut self, layout: &AdaptiveTableLayout, reverse: bool) -> bool {
-        self.normalize(layout);
+    fn ensure_active_visible(
+        &mut self,
+        layout: &AdaptiveTableLayout,
+        content_widths: &[usize],
+        viewport_width: u16,
+        reverse: bool,
+    ) {
+        let viewport_width = usize::from(viewport_width.max(1));
+        let (start, end) =
+            layout.column_span(content_widths, Some(self.active_column), self.active_column);
+        let current_end = self.scroll_x.saturating_add(viewport_width);
+        if start < self.scroll_x {
+            self.scroll_x = start;
+        } else if end > current_end {
+            self.scroll_x = if end.saturating_sub(start) > viewport_width && reverse {
+                start
+            } else {
+                end.saturating_sub(viewport_width)
+            };
+        }
+        self.scroll_x = self.scroll_x.min(layout.max_scroll(
+            content_widths,
+            Some(self.active_column),
+            viewport_width as u16,
+        ));
+    }
+
+    pub fn scroll_viewport(
+        &mut self,
+        layout: &AdaptiveTableLayout,
+        content_widths: &[usize],
+        viewport_width: u16,
+        reverse: bool,
+    ) -> bool {
+        self.normalize_columns(layout);
+        let max_scroll =
+            layout.max_scroll(content_widths, Some(self.active_column), viewport_width);
         let next = if reverse {
-            self.viewport_offset.saturating_sub(1)
+            self.scroll_x.saturating_sub(2)
         } else {
-            self.viewport_offset
-                .saturating_add(1)
-                .min(layout.scrollable_count().saturating_sub(1))
+            self.scroll_x.saturating_add(2).min(max_scroll)
         };
-        let changed = next != self.viewport_offset;
-        self.viewport_offset = next;
+        let changed = next != self.scroll_x;
+        self.scroll_x = next;
         changed
     }
 
@@ -524,14 +554,17 @@ pub struct AdaptiveColumnSpec {
 pub struct VisibleColumn {
     pub index: usize,
     pub width: u16,
+    pub full_width: usize,
+    pub clip_left: usize,
     pub truncate_policy: TruncatePolicy,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TableViewport {
     pub columns: Vec<VisibleColumn>,
-    pub first_scrollable_column: usize,
-    pub scrollable_columns: usize,
+    pub scroll_x: usize,
+    pub total_width: usize,
+    pub viewport_width: usize,
 }
 
 impl TableViewport {
@@ -543,15 +576,12 @@ impl TableViewport {
     }
 
     pub fn position_label(&self) -> String {
-        if self.scrollable_columns == 0 {
-            "1/1 列".into()
-        } else {
-            format!(
-                "{}/{} 列",
-                self.first_scrollable_column + 1,
-                self.scrollable_columns
-            )
-        }
+        let max_scroll = self.total_width.saturating_sub(self.viewport_width);
+        format!(
+            "横向 {}/{}",
+            self.scroll_x.min(max_scroll) + usize::from(max_scroll > 0),
+            max_scroll.max(1)
+        )
     }
 
     pub fn project<T: Clone>(&self, values: &[T]) -> Vec<T> {
@@ -577,7 +607,59 @@ impl AdaptiveTableLayout {
     }
 
     pub fn scrollable_count(&self) -> usize {
-        self.specs.iter().filter(|spec| !spec.pinned).count()
+        self.specs.len()
+    }
+
+    fn natural_widths(&self, content_widths: &[usize], active_column: Option<usize>) -> Vec<usize> {
+        self.specs
+            .iter()
+            .enumerate()
+            .map(|(index, spec)| {
+                let content = content_widths.get(index).copied().unwrap_or(0);
+                let base = content
+                    .max(usize::from(spec.preferred_width))
+                    .max(usize::from(spec.min_width.max(1)));
+                if Some(index) == active_column {
+                    base
+                } else {
+                    base.min(usize::from(spec.max_width.max(spec.min_width)))
+                }
+            })
+            .collect()
+    }
+
+    pub fn total_width(&self, content_widths: &[usize], active_column: Option<usize>) -> usize {
+        let widths = self.natural_widths(content_widths, active_column);
+        widths.iter().sum::<usize>() + widths.len().saturating_sub(1)
+    }
+
+    pub fn max_scroll(
+        &self,
+        content_widths: &[usize],
+        active_column: Option<usize>,
+        viewport_width: u16,
+    ) -> usize {
+        self.total_width(content_widths, active_column)
+            .saturating_sub(usize::from(viewport_width))
+    }
+
+    pub fn column_span(
+        &self,
+        content_widths: &[usize],
+        active_column: Option<usize>,
+        index: usize,
+    ) -> (usize, usize) {
+        let widths = self.natural_widths(content_widths, active_column);
+        let index = index.min(widths.len().saturating_sub(1));
+        let start = widths
+            .iter()
+            .take(index)
+            .sum::<usize>()
+            .saturating_add(index);
+        (
+            start,
+            start.saturating_add(widths.get(index).copied().unwrap_or(0)),
+        )
     }
 
     pub fn layout(&self, width: u16, content_widths: &[usize], scroll: usize) -> TableViewport {
@@ -588,179 +670,54 @@ impl AdaptiveTableLayout {
         &self,
         width: u16,
         content_widths: &[usize],
-        scroll: usize,
+        scroll_x: usize,
         active_column: Option<usize>,
     ) -> TableViewport {
-        if self.specs.is_empty() || width == 0 {
+        let viewport_width = usize::from(width);
+        if self.specs.is_empty() || viewport_width == 0 {
             return TableViewport {
                 columns: Vec::new(),
-                first_scrollable_column: 0,
-                scrollable_columns: self.scrollable_count(),
+                scroll_x: 0,
+                total_width: 0,
+                viewport_width,
             };
         }
-        let scrollable = self
-            .specs
-            .iter()
-            .enumerate()
-            .filter_map(|(index, spec)| (!spec.pinned).then_some(index))
-            .collect::<Vec<_>>();
-        let offset = scroll.min(scrollable.len().saturating_sub(1));
-        let mut selected = self
-            .specs
-            .iter()
-            .enumerate()
-            .filter_map(|(index, spec)| spec.pinned.then_some(index))
-            .collect::<Vec<_>>();
-        let min_sum = |indices: &[usize]| {
-            indices
-                .iter()
-                .map(|&index| usize::from(self.specs[index].min_width.max(1)))
-                .sum::<usize>()
-                + indices.len().saturating_sub(1)
-        };
-        while min_sum(&selected) > usize::from(width) && selected.len() > 1 {
-            let removable = selected
-                .iter()
-                .enumerate()
-                .filter(|(_, index)| **index != 0)
-                .min_by_key(|(_, index)| self.specs[**index].priority)
-                .map(|(position, _)| position)
-                .unwrap_or(selected.len() - 1);
-            selected.remove(removable);
-        }
-        for &index in scrollable.iter().skip(offset) {
-            let mut candidate = selected.clone();
-            candidate.push(index);
-            if min_sum(&candidate) <= usize::from(width) {
-                selected.push(index);
-            } else if selected.is_empty() {
-                selected.push(index);
-                break;
-            } else {
-                break;
-            }
-        }
-        let active = active_column.filter(|index| *index < self.specs.len());
-        if let Some(active) = active {
-            if !selected.contains(&active) {
-                selected.push(active);
-            }
-        }
-        if selected.is_empty() {
-            selected.push(active.unwrap_or(0));
-        }
-        selected.sort_unstable();
-        selected.dedup();
 
-        let active_required = |index: usize| {
-            if Some(index) == active {
-                content_widths
-                    .get(index)
-                    .copied()
-                    .unwrap_or(0)
-                    .max(usize::from(self.specs[index].min_width.max(1)))
-                    .max(1)
-                    .min(usize::from(width))
-            } else {
-                usize::from(self.specs[index].min_width.max(1))
-            }
-        };
-        while selected.len() > 1 {
-            let required = selected
-                .iter()
-                .map(|index| active_required(*index))
-                .sum::<usize>()
-                + selected.len().saturating_sub(1);
-            if required <= usize::from(width) {
-                break;
-            }
-            let removable = selected
-                .iter()
-                .enumerate()
-                .filter(|(_, index)| Some(**index) != active)
-                .min_by_key(|(_, index)| self.specs[**index].priority)
-                .map(|(position, _)| position);
-            let Some(removable) = removable else {
-                break;
-            };
-            selected.remove(removable);
-        }
+        let widths = self.natural_widths(content_widths, active_column);
+        let total_width = widths.iter().sum::<usize>() + widths.len().saturating_sub(1);
+        let scroll_x = scroll_x.min(total_width.saturating_sub(viewport_width));
+        let viewport_end = scroll_x.saturating_add(viewport_width);
 
-        let spacing = selected.len().saturating_sub(1);
-        let usable = usize::from(width).saturating_sub(spacing);
-        let mut widths = selected
-            .iter()
-            .map(|&index| active_required(index))
-            .collect::<Vec<_>>();
-        if widths.iter().sum::<usize>() > usable {
-            let mut excess = widths.iter().sum::<usize>() - usable;
-            let mut order = (0..selected.len()).collect::<Vec<_>>();
-            order.sort_by_key(|&position| {
-                (
-                    Some(selected[position]) == active,
-                    self.specs[selected[position]].priority,
-                )
-            });
-            for position in order {
-                let shrink = excess.min(widths[position].saturating_sub(1));
-                widths[position] -= shrink;
-                excess -= shrink;
-                if excess == 0 {
-                    break;
-                }
-            }
-        }
-        let mut remaining = usable.saturating_sub(widths.iter().sum::<usize>());
-        let mut priority_order = (0..selected.len()).collect::<Vec<_>>();
-        priority_order.sort_by_key(|&position| {
-            (
-                Some(selected[position]) != active,
-                std::cmp::Reverse(self.specs[selected[position]].priority),
-            )
-        });
-        for &position in &priority_order {
-            let index = selected[position];
-            let spec = self.specs[index];
-            let preferred = usize::from(spec.preferred_width)
-                .max(content_widths.get(index).copied().unwrap_or(0))
-                .min(usize::from(spec.max_width.max(spec.min_width)));
-            let add = remaining.min(preferred.saturating_sub(widths[position]));
-            widths[position] += add;
-            remaining -= add;
-        }
-        while remaining > 0 {
-            let mut progressed = false;
-            for &position in &priority_order {
-                let spec = self.specs[selected[position]];
-                for _ in 0..spec.weight.max(1) {
-                    if remaining == 0 || widths[position] >= usize::from(spec.max_width) {
-                        break;
-                    }
-                    widths[position] += 1;
-                    remaining -= 1;
-                    progressed = true;
-                }
-            }
-            if !progressed {
-                break;
-            }
-        }
-        TableViewport {
-            columns: selected
-                .into_iter()
-                .zip(widths)
-                .map(|(index, width)| VisibleColumn {
+        let mut columns = Vec::new();
+        let mut start = 0usize;
+        for (index, full_width) in widths.iter().copied().enumerate() {
+            let end = start.saturating_add(full_width);
+            let visible_start = start.max(scroll_x);
+            let visible_end = end.min(viewport_end);
+            if visible_start < visible_end {
+                columns.push(VisibleColumn {
                     index,
-                    width: width.min(u16::MAX as usize) as u16,
-                    truncate_policy: if Some(index) == active {
+                    width: (visible_end - visible_start).min(u16::MAX as usize) as u16,
+                    full_width,
+                    clip_left: visible_start.saturating_sub(start),
+                    truncate_policy: if Some(index) == active_column {
                         TruncatePolicy::Clip
                     } else {
                         self.specs[index].truncate_policy
                     },
-                })
-                .collect(),
-            first_scrollable_column: offset,
-            scrollable_columns: scrollable.len(),
+                });
+            }
+            start = end.saturating_add(1);
+            if start >= viewport_end {
+                break;
+            }
+        }
+
+        TableViewport {
+            columns,
+            scroll_x,
+            total_width,
+            viewport_width,
         }
     }
 }
@@ -783,17 +740,55 @@ pub fn table_heading(heading: &str, index: usize, interaction: TableInteractionS
 pub fn table_position_label(
     layout: &AdaptiveTableLayout,
     interaction: TableInteractionState,
+    viewport: &TableViewport,
 ) -> String {
     let total = layout.specs().len().max(1);
+    let max_scroll = viewport.total_width.saturating_sub(viewport.viewport_width);
     format!(
-        "当前列 {}/{}",
+        "当前列 {}/{} · 横向 {}/{}",
         interaction.active_column().min(total - 1) + 1,
-        total
+        total,
+        viewport.scroll_x,
+        max_scroll
     )
 }
 
 pub fn display_width(text: &str) -> usize {
     UnicodeWidthStr::width(text)
+}
+
+pub fn visible_cell(text: &str, column: &VisibleColumn) -> String {
+    let base = truncate_cell(text, column.full_width, column.truncate_policy);
+    slice_display_cells(&base, column.clip_left, usize::from(column.width))
+}
+
+fn slice_display_cells(text: &str, start: usize, width: usize) -> String {
+    if width == 0 {
+        return String::new();
+    }
+    let end = start.saturating_add(width);
+    let mut out = String::new();
+    let mut position = 0usize;
+    for grapheme in UnicodeSegmentation::graphemes(text, true) {
+        let cells = display_width(grapheme);
+        let grapheme_start = position;
+        let grapheme_end = position.saturating_add(cells);
+        position = grapheme_end;
+        if grapheme_end <= start {
+            continue;
+        }
+        if grapheme_start >= end {
+            break;
+        }
+        if grapheme_start >= start && grapheme_end <= end {
+            out.push_str(grapheme);
+        } else {
+            let overlap_start = grapheme_start.max(start);
+            let overlap_end = grapheme_end.min(end);
+            out.push_str(&" ".repeat(overlap_end.saturating_sub(overlap_start)));
+        }
+    }
+    out
 }
 
 pub fn truncate_cell(text: &str, width: usize, policy: TruncatePolicy) -> String {

@@ -569,7 +569,7 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
                     let kind = crate::tui::table_layout::TableKind::Devices;
                     let total = crate::tui::table_layout::layout_for(kind).specs().len();
                     format!(
-                        "Tab/Shift-Tab 工作区 · Ctrl-w w/W 切 Pane · j/k 行 · h/l 列 · H/L 视口 · s 排序 · S 默认排序 · {}/{} 列 · Enter 当前设备 · p 制盘 · i Inspect · b 备份 · Esc 返回 · q 退出",
+                        "Tab/Shift-Tab 工作区 · Ctrl-w w/W 切 Pane · j/k 行 · h/l 列 · 0/$ 首尾列 · H/L 视口 · s 排序 · S 默认排序 · {}/{} 列 · Enter 当前设备 · p 制盘 · i Inspect · b 备份 · Esc 返回 · q 退出",
                         state.table_active_column(kind) + 1,
                         total
                     )
@@ -584,7 +584,7 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
                     let kind = crate::tui::table_layout::TableKind::InspectFields;
                     let total = crate::tui::table_layout::layout_for(kind).specs().len();
                     format!(
-                        "Inspect 字段表：j/k 行 · h/l 列 · H/L 视口 · s 排序 · S 默认排序 · {}/{} 列 · o 展开/折叠 · Enter 查看 · Esc 返回 · q 退出",
+                        "Inspect 字段表：j/k 行 · h/l 列 · 0/$ 首尾列 · H/L 视口 · s 排序 · S 默认排序 · {}/{} 列 · o 展开/折叠 · Enter 查看 · Esc 返回 · q 退出",
                         state.table_active_column(kind) + 1,
                         total
                     )
@@ -598,7 +598,7 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
                     let kind = crate::tui::table_layout::TableKind::Backups;
                     let total = crate::tui::table_layout::layout_for(kind).specs().len();
                     format!(
-                        "Tab/Shift-Tab 标签 · j/k 行 · h/l 列 · H/L 视口 · s 排序 · S 默认排序 · {}/{} 列 · Space 勾选 · Enter/i Inspect · b 新建 · v 校验 · R 恢复 · d 删除 · Esc 当前标签 · q 退出",
+                        "Tab/Shift-Tab 标签 · j/k 行 · h/l 列 · 0/$ 首尾列 · H/L 视口 · s 排序 · S 默认排序 · {}/{} 列 · Space 勾选 · Enter/i Inspect · b 新建 · v 校验 · R 恢复 · d 删除 · Esc 当前标签 · q 退出",
                         state.table_active_column(kind) + 1,
                         total
                     )
@@ -611,7 +611,7 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
                     let kind = crate::tui::table_layout::TableKind::ProvisionDevices;
                     let total = crate::tui::table_layout::layout_for(kind).specs().len();
                     format!(
-                        "制盘选盘：j/k 行 · h/l 列 · H/L 视口 · s 排序 · S 默认排序 · {}/{} 列 · Enter 固定目标 · Esc 返回设备页",
+                        "制盘选盘：j/k 行 · h/l 列 · 0/$ 首尾列 · H/L 视口 · s 排序 · S 默认排序 · {}/{} 列 · Enter 固定目标 · Esc 返回设备页",
                         state.table_active_column(kind) + 1,
                         total
                     )
@@ -620,7 +620,7 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
                     let kind = crate::tui::table_layout::TableKind::ProvisionMenu;
                     let total = crate::tui::table_layout::layout_for(kind).specs().len();
                     format!(
-                        "j/k 行 · h/l 列 · H/L 视口 · s 排序 · S 默认排序 · {}/{} 列 · Enter 打开 · Esc 返回 · q 退出",
+                        "j/k 行 · h/l 列 · 0/$ 首尾列 · H/L 视口 · s 排序 · S 默认排序 · {}/{} 列 · Enter 打开 · Esc 返回 · q 退出",
                         state.table_active_column(kind) + 1,
                         total
                     )

@@ -219,6 +219,45 @@ pub(super) fn keymap_action_to_nav(action: keymap::TuiAction) -> Option<NavComma
     })
 }
 
+pub(super) fn dispatch_table_action(
+    state: &mut AppState,
+    action: keymap::TuiAction,
+    viewport_height: usize,
+    viewport_width: u16,
+) -> bool {
+    use keymap::TuiAction;
+
+    let Some(kind) = state.active_table_kind() else {
+        return false;
+    };
+    match action {
+        TuiAction::TableColumnLeft => {
+            state.move_table_column_for_viewport(kind, true, viewport_width, viewport_height);
+        }
+        TuiAction::TableColumnRight => {
+            state.move_table_column_for_viewport(kind, false, viewport_width, viewport_height);
+        }
+        TuiAction::TableColumnFirst => {
+            state.move_table_column_edge_for_viewport(kind, false, viewport_width, viewport_height);
+        }
+        TuiAction::TableColumnLast => {
+            state.move_table_column_edge_for_viewport(kind, true, viewport_width, viewport_height);
+        }
+        TuiAction::TableScrollLeft => {
+            state.scroll_table_for_viewport(kind, true, viewport_width, viewport_height);
+        }
+        TuiAction::TableScrollRight => {
+            state.scroll_table_for_viewport(kind, false, viewport_width, viewport_height);
+        }
+        TuiAction::TableSortToggle => state.toggle_table_sort(kind),
+        TuiAction::TableSortClear => {
+            state.clear_table_sort(kind);
+        }
+        _ => return false,
+    }
+    true
+}
+
 pub(super) fn dispatch_tui_action(
     state: &mut AppState,
     tasks: &mut TaskHub,
@@ -236,32 +275,13 @@ pub(super) fn dispatch_tui_action(
     match action {
         TuiAction::TableColumnLeft
         | TuiAction::TableColumnRight
+        | TuiAction::TableColumnFirst
+        | TuiAction::TableColumnLast
         | TuiAction::TableScrollLeft
         | TuiAction::TableScrollRight
         | TuiAction::TableSortToggle
         | TuiAction::TableSortClear => {
-            let Some(kind) = state.active_table_kind() else {
-                return StateEffect::None;
-            };
-            match action {
-                TuiAction::TableColumnLeft => {
-                    state.move_table_column(kind, true);
-                }
-                TuiAction::TableColumnRight => {
-                    state.move_table_column(kind, false);
-                }
-                TuiAction::TableScrollLeft => {
-                    state.scroll_table(kind, true);
-                }
-                TuiAction::TableScrollRight => {
-                    state.scroll_table(kind, false);
-                }
-                TuiAction::TableSortToggle => state.toggle_table_sort(kind),
-                TuiAction::TableSortClear => {
-                    state.clear_table_sort(kind);
-                }
-                _ => unreachable!(),
-            }
+            let _ = dispatch_table_action(state, action, viewport_height, viewport_width);
             StateEffect::None
         }
         TuiAction::Insert

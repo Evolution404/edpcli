@@ -2620,7 +2620,7 @@ truncate_policy
 - `h` = 向左滚；
 - `l` = 向右滚；
 - 滚动单位优先按“下一列边界/可读 viewport step”，不要每次只挪一个字符；
-- footer 显示当前位置与统一操作，例如 `h/l 列 · H/L 视口 · s 排序 · S 默认排序 · 3/9 列`；
+- footer 显示当前位置与统一操作，例如 `h/l 列 · 0/$ 首尾列 · H/L 视口 · s 排序 · S 默认排序 · 3/9 列`；
 - 到最左/最右必须 clamp，不 wrap。
 
 上下文冲突按 widget role 解决：
@@ -9472,7 +9472,7 @@ Backup detail / coverage
 
 #### U7 — 全应用响应式收口
 
-状态：COMPLETE（2026-09-27）。所有 TUI renderer 的宽度分支统一经 `ViewportClass`（Compact / Standard / Wide / UltraWide）决策，删除 70/80/96/100/108/118 等私有 width breakpoint；新增静态契约禁止 renderer 重新直接比较 `.width` 数字。既有 40x10、60x18、80x24、120x36、160x45、240x60 视觉与 no-panic 门禁、长部门/盘型优先级、CJK/emoji display width、统一表格列焦点/横向视口/排序和终端文本安全测试继续通过；当前 `tui_suite` 235/235 PASS。
+状态：COMPLETE（2026-09-27）。所有 TUI renderer 的宽度分支统一经 `ViewportClass`（Compact / Standard / Wide / UltraWide）决策，删除 70/80/96/100/108/118 等私有 width breakpoint；新增静态契约禁止 renderer 重新直接比较 `.width` 数字。既有 40x10、60x18、80x24、120x36、160x45、240x60 视觉与 no-panic 门禁、长部门/盘型优先级、CJK/emoji display width、统一表格列焦点/横向视口/排序和终端文本安全测试继续通过；当前 `tui_suite` 236/236 PASS。
 
 - 删除 renderer 内 magic width breakpoint；
 - 统一 Compact/Standard/Wide/UltraWide；

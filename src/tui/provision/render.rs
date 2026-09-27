@@ -159,7 +159,7 @@ pub(super) fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, sta
     match provision.stage {
         ProvisionStage::SelectDisk => {
             use crate::tui::table_layout::{
-                display_width, layout_for, table_heading, table_position_label, truncate_cell,
+                display_width, layout_for, table_heading, table_position_label, visible_cell,
                 TableKind,
             };
             let headings = ["设备", "容量", "USB 身份", "盘型", "onlyid"];
@@ -198,12 +198,7 @@ pub(super) fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, sta
                         .columns
                         .iter()
                         .map(|column| {
-                            Cell::from(truncate_cell(
-                                &row[column.index],
-                                usize::from(column.width),
-                                column.truncate_policy,
-                            ))
-                            .style(
+                            Cell::from(visible_cell(&row[column.index], column)).style(
                                 if column.index == interaction.active_column() {
                                     accent().add_modifier(Modifier::BOLD)
                                 } else {
@@ -215,8 +210,8 @@ pub(super) fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, sta
                 ))
             });
             let title = format!(
-                "制盘 · 先选择 USB 目标 · h/l 列 · H/L 视口 · s 排序 · S 默认 · {}",
-                table_position_label(&layout, interaction)
+                "制盘 · 先选择 USB 目标 · h/l 列 · 0/$ 首尾列 · H/L 视口 · s 排序 · S 默认 · {}",
+                table_position_label(&layout, interaction, &viewport)
             );
             let header = TableRow::new(
                 viewport
@@ -225,12 +220,7 @@ pub(super) fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, sta
                     .map(|column| {
                         let label =
                             table_heading(headings[column.index], column.index, interaction);
-                        Cell::from(truncate_cell(
-                            &label,
-                            usize::from(column.width),
-                            column.truncate_policy,
-                        ))
-                        .style(
+                        Cell::from(visible_cell(&label, column)).style(
                             if column.index == interaction.active_column() {
                                 accent().add_modifier(Modifier::BOLD | Modifier::REVERSED)
                             } else {
@@ -249,7 +239,7 @@ pub(super) fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, sta
         }
         ProvisionStage::Menu => {
             use crate::tui::table_layout::{
-                display_width, layout_for, table_heading, table_position_label, truncate_cell,
+                display_width, layout_for, table_heading, table_position_label, visible_cell,
                 TableKind,
             };
             let headings = ["#", "制盘方案", "布局 / 行为"];
@@ -286,12 +276,7 @@ pub(super) fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, sta
                         .columns
                         .iter()
                         .map(|column| {
-                            Cell::from(truncate_cell(
-                                &values[column.index],
-                                usize::from(column.width),
-                                column.truncate_policy,
-                            ))
-                            .style(
+                            Cell::from(visible_cell(&values[column.index], column)).style(
                                 if column.index == interaction.active_column() {
                                     provision_kind_style(kind).add_modifier(Modifier::BOLD)
                                 } else {
@@ -303,8 +288,8 @@ pub(super) fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, sta
                 )
             });
             let title = format!(
-                "制盘中心 · 选择方案 · h/l 列 · H/L 视口 · s 排序 · S 默认 · {}",
-                table_position_label(&layout, interaction)
+                "制盘中心 · 选择方案 · h/l 列 · 0/$ 首尾列 · H/L 视口 · s 排序 · S 默认 · {}",
+                table_position_label(&layout, interaction, &viewport)
             );
             let header = TableRow::new(
                 viewport
@@ -313,12 +298,7 @@ pub(super) fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, sta
                     .map(|column| {
                         let label =
                             table_heading(headings[column.index], column.index, interaction);
-                        Cell::from(truncate_cell(
-                            &label,
-                            usize::from(column.width),
-                            column.truncate_policy,
-                        ))
-                        .style(
+                        Cell::from(visible_cell(&label, column)).style(
                             if column.index == interaction.active_column() {
                                 accent().add_modifier(Modifier::BOLD | Modifier::REVERSED)
                             } else {
