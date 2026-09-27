@@ -3444,7 +3444,7 @@ K0 基线审计曾确认：
 
 ## 13. 后续计划：统一 Pane 架构与全盘 DiskLayout（2026-09-26）
 
-> 状态：**PLAN ONLY / 暂不实施**。本章只固化后续 TUI 重构方案，不在当前提交中修改生产代码。本章与第 10、11 章共同构成 TUI 设计约束；如有冲突，以本章对“窗口焦点、窗口滚动、Inspect 四 Pane、Provision 多 Pane、全盘 DiskLayout”的规则为准。
+> 状态：**COMPLETE（2026-09-26，P0～P8）**。本章最初用于固化 TUI Pane / 全盘 DiskLayout 重构方案，现已全部实施完成；以下内容保留为设计约束与实施记录。本章与第 10、11 章共同构成 TUI 设计约束；如有冲突，以本章对“窗口焦点、窗口滚动、Inspect 四 Pane、Provision 多 Pane、全盘 DiskLayout”的规则为准。
 
 ### 13.1 当前结构性问题
 
@@ -4145,7 +4145,7 @@ Tab:
 - P1 已新增统一 `PaneId / PaneFocus / PaneViewport / VerticalViewport`，Inspect 使用 `DiskLayout / Tree / Overview / Detail` 四 Pane，Provision Form 使用 `Parameters / DiskLayout`，Review 预留 `Summary / DiskLayout / Changes`；`NavigationFrame` 可保存/恢复 Pane focus + viewport。
 - `Tab/Shift-Tab` 已按当前页面 Pane 顺序切换，`Ctrl-w h/j/k/l` 已接空间邻接 resolver；Inspect 与 Provision 的 `j/k` 已改为按 focused Pane 分发，Provision `DiskLayout` focused 时不会再修改 `field_selected`。
 - Pane 行为从 `provision/state.rs` 拆入 `provision/pane.rs`，保持 Provision orchestration 模块边界；正式 fast gate 热缓存复跑为 4 suites / 6 artifacts、0 failures、4.49s。首次冷缓存复跑所有 suite 也为 0 failures，仅因 50.12s 超过 45s timing budget 退出，未发现功能或架构回归。
-- 第 12 章继续保持 PLAN ONLY；本章实现始终未修改任何 LBA0～12/LCE 协议语义或写盘安全链。
+- 本阶段执行时第 12 章仍处于 PLAN ONLY；第 12 章后续已独立完成。本阶段始终未修改任何 LBA0～12/LCE 协议语义或写盘安全链。
 
 ### 13.27 Phase P2：Full-Disk DiskLayoutModel
 
@@ -4226,7 +4226,7 @@ Tab:
 - Inspect footer 已从旧“j/k 选择 / h/l 树”文案改为 focused-Pane 语义；Sector Inspector 跨 sector 的旧 PageUp/PageDown 文案已清除。
 - GitHub 正式门禁（代码 head `1d2631e`）全部通过：Rust CI 的 macOS arm64/x86_64、Linux arm64/x86_64、Windows arm64/x86_64 六个平台均完成 `cargo fmt --check`、`python scripts/test-full.py --profile full`、Clippy `-D warnings` 与 release build；协议金标审计、dependency policy 均通过。Linux arm64 full gate 记录为 8 suites / 10 artifacts / 0 failures。
 - Virtual Disk HIL 4/4 通过：Linux arm64/x86_64 loop 与 Windows arm64/x86_64 VHD 的 raw-write / unmount-or-lock / restore 全绿。
-- 本阶段只重构 TUI 状态、渲染和键位路由；第 12 章仍为 PLAN ONLY，未修改 LBA0～12/LCE 协议语义和真实写盘安全链。
+- 本阶段只重构 TUI 状态、渲染和键位路由；执行当时第 12 章仍为 PLAN ONLY，后续已独立完成；本阶段未修改 LBA0～12/LCE 协议语义和真实写盘安全链。
 
 清理：
 
@@ -8730,7 +8730,7 @@ Chapter 15 身份治理仍然是独立的 application/backup 安全治理；它�
 
 ## 16. 全应用 TUI 设计系统与信息架构升级（2026-09-27）
 
-> **状态：PLANNED / NOT STARTED。** 本章是在 Chapter 10～15 已完成成果上的下一轮 UI 架构升级。不得把本章的 PENDING 状态反向解释为旧章节未完成。Chapter 12 K6 `Migrate` 仍保持 `DEFERRED / fail-closed`，与本章无关。
+> **状态：COMPLETE（2026-09-27，U0～U9）**。本章在 Chapter 10～15 已完成成果上完成全应用 UI 架构升级；Chapter 12 K6 `Migrate` 仍保持 `DEFERRED / fail-closed`，与本章无关。
 
 ### 16.1 背景与目标
 
@@ -9462,7 +9462,7 @@ Backup detail / coverage
 
 #### U9 — 最终验收与发布基线
 
-状态：PENDING。
+状态：COMPLETE（2026-09-27）。最终 `cargo fmt --all -- --check` 与 `git diff --check` 通过；U8 后 fast gate 为 4 suites / 6 artifacts / 0 failures / 58.37s，正式 full gate 为 8 suites / 10 artifacts + doctest / 0 failures / 83.96s，`tui_suite` 224/224、`repository_suite` 58/58。真实 macOS 伪终端只读验收覆盖 80x24 Devices/Inspect、`gl8` 跳转 LBA8、E_LABEL 17 项及 `o` 展开，120x36 Provision Form/Backups 与 ANSI16 fallback，160x45 大尺寸重绘无 panic；TrueColor 路径亦以真实终端启动并完成 Devices/Inspect 导航。Review/Running 的 presentation 继续由正式 TUI 契约覆盖，本轮没有为视觉验收触发真实写盘。U7/U8 未修改 write path、authorization 或 disk I/O，因此按本章规则不重复执行破坏性 USB HIL。
 
 必须完成：
 
@@ -9518,6 +9518,8 @@ TrueColor 与 fallback
 24. 旧重复 renderer/layout/style 技术债已删除；
 25. 文档不再存在把已完成旧章节写成 IMPLEMENTING/PENDING 的矛盾状态；
 26. 工作区 clean，全部提交已 push 到远程。
+
+**2026-09-27 完成审计：26/26 PASS，Chapter 16 COMPLETE。** U0～U9 均已完成；响应式断点、Design System、四 Workspace AppShell、Inspect/Provision/Backups typed presentation、旧 sidebar 清理与 renderer/state/dispatch 职责拆分均有正式静态或行为门禁。最终提交推送后保持 `main == origin/main` 与 clean worktree。Chapter 11 的独立真实盘全盘 Inspect 只读专项验收、Chapter 12 K6 `Migrate` 延后能力仍按各自章节状态管理，不反向影响 Chapter 16 完成状态。
 
 最终验收原则：
 
