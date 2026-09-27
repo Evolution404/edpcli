@@ -10,17 +10,19 @@ use std::io::{Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use crate::backup_deep::{analyze_partition, AnalysisStatus, PartitionReader};
+use crate::backup_deep::{analyze_partition, stream_file_payload, AnalysisStatus, PartitionReader};
 use crate::backup_metadata::{parse_lba7_compatibility_geometry, PartitionGeometry};
 use crate::common::{EdpCliError, EdpCliResult, EXIT_IO, EXIT_OK, EXIT_TARGET, SECTOR};
 use crate::diskio::{self, SectorDev};
 use crate::protocol::lba7_compat::locate_lba7_compatibility_extent_from_verified_usb_capacity;
 use crate::provision::{
     apply_target_geometry_overrides, build_empty_exfat, build_empty_fat16,
-    build_official_partition_filesystem, build_official_provision_protocol_image,
+    build_migrated_filesystem, build_official_partition_filesystem,
+    build_official_provision_protocol_image,
     build_plain_provision_write_plan, parse_existing_provision, prefill_for_target_mode,
     unwrap_legacy_lba7_file_key, wrap_file_key, wrap_legacy_lba7_file_key, CapacityInput,
-    CapacitySource, FileKeyWrapMode, KeyDomainRole, KeyDomainSecrets, OfficialFilesystemFormat,
+    CapacitySource, encrypt_sparse_mode2, FileKeyWrapMode, KeyDomainRole, KeyDomainSecrets,
+    OfficialFilesystemFormat,
     OfficialPartitionFilesystems, OfficialPartitionMode, OfficialPartitionSizes,
     OfficialProvisionPlan, OfficialProvisionWriteImage, OnlyId, ParsedExistingProvision,
     PartitionAction, PartitionFilesystemImage, PartitionFormatTarget, PartitionRole,
@@ -703,6 +705,7 @@ fn sizes(
 mod commit;
 mod export;
 mod identity_lineage;
+mod migration;
 mod prepare;
 
 pub use commit::{
