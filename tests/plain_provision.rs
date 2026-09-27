@@ -201,7 +201,6 @@ fn plain_mbr_contains_all_primary_partition_entries() {
     }
 }
 
-
 struct PlainWriteReader<'a> {
     write: &'a PlainProvisionWritePlan,
     start_lba: u64,
