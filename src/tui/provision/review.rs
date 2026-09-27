@@ -118,9 +118,9 @@ impl AppState {
                                 "重新封装",
                             ),
                             RegionDisposition::Migrate => (
-                                "Migrate 不支持，禁止执行",
-                                ProvisionReviewTone::Warning,
-                                "禁止",
+                                "文件级 staging 后迁移到目标文件系统",
+                                ProvisionReviewTone::Success,
+                                "迁移",
                             ),
                             RegionDisposition::Rebuild => {
                                 ("重建并初始化文件系统", ProvisionReviewTone::Warning, "重建")
@@ -369,7 +369,7 @@ impl AppState {
                                 "RewrapVerified · K_old 保持 · 仅重包 wrapper · data extent 0 写入"
                             }
                             crate::provision::RegionDisposition::Migrate => {
-                                "Migrate · 当前阶段 unsupported，禁止静默降级"
+                                "Migrate · staging 完整源文件 · K_new · 原子写入/读回/回滚"
                             }
                             crate::provision::RegionDisposition::Rebuild => {
                                 "Rebuild · K_new · 必须完整初始化文件系统"
