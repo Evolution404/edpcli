@@ -394,6 +394,43 @@ fn real_usb_password_hil_keeps_secrets_off_argv_and_is_default_off() {
 }
 
 #[test]
+fn real_usb_k6_verify_is_read_only_and_identity_bound() {
+    let source = fs::read_to_string(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/real_usb_k6_verify.rs"),
+    )
+    .expect("real USB K6 verifier must exist");
+
+    for required in [
+        "EXPECTED_VID",
+        "EXPECTED_PID",
+        "EXPECTED_TOTAL_SECTORS",
+        "EXPECTED_DEVICE_ID",
+        "guard_usb_disk",
+        "FileDev::open_rdonly",
+        "stream_file_payload",
+        "DEFAULT_KEY_DOMAIN_PASSWORD",
+        "aggregate_sha256",
+    ] {
+        assert!(
+            source.contains(required),
+            "missing K6 verifier safety token: {required}"
+        );
+    }
+    for forbidden in [
+        "open_rdwr",
+        "write_sector(",
+        "execute_write_transaction",
+        "atomic_write",
+        "Command::new",
+    ] {
+        assert!(
+            !source.contains(forbidden),
+            "K6 verifier must stay read-only: found {forbidden}"
+        );
+    }
+}
+
+#[test]
 fn inspect_cli_uses_typed_application_error_kinds() {
     let source =
         fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("src/inspect_cli.rs"))
@@ -674,5 +711,8 @@ fn chapter_15_identity_write_boundaries_remain_separate() {
     assert!(prepare.contains("RegionDisposition::Migrate =>"));
     assert!(commit.contains("RegionDisposition::Migrate =>"));
     assert!(prepare.contains("K6"));
-    assert!(commit.contains("unsupported"));
+    assert!(prepare.contains("prepare_migrations"));
+    assert!(prepare.contains("build_migrated_filesystem"));
+    assert!(!commit.contains("Migrate 当前 unsupported"));
+    assert!(commit.contains("Migrate 写集合缺少目标文件系统引导扇区"));
 }

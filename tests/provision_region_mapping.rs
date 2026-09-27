@@ -135,7 +135,7 @@ fn mode0_to_mode1_marks_boot_and_share_as_migrate_but_encrypt_as_preserve() {
     assert_eq!(combined.len(), 2);
     assert!(combined
         .iter()
-        .all(|mapping| mapping.kind == RegionMappingKind::MigrateUnsupported));
+        .all(|mapping| mapping.kind == RegionMappingKind::Migrate));
     assert_eq!(
         combined
             .iter()
@@ -178,7 +178,7 @@ fn mode2_encrypt_to_mode3_share_is_never_an_opaque_preserve() {
     assert!(plan
         .mappings
         .iter()
-        .any(|mapping| mapping.kind == RegionMappingKind::MigrateUnsupported));
+        .any(|mapping| mapping.kind == RegionMappingKind::Migrate));
     assert!(plan.mappings.iter().any(|mapping| {
         mapping.migration_transform == Some(MigrationTransform::EncryptToShare)
     }));

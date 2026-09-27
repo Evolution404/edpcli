@@ -191,6 +191,18 @@ fn provision_request(opts: &ProvisionNewOpts) -> crate::application::provision::
             crate::application::provision::ProvisionRequest::Plain(
                 crate::application::provision::PlainProvisionRequest {
                     partitions: opts.plain_partitions.clone(),
+                    key_domains: crate::provision::KeyDomainSecrets::new(
+                        crate::provision::KeyDomainSecretPair::new(
+                            (!opts.share_source_password.is_empty())
+                                .then_some(opts.share_source_password.as_bytes()),
+                            None::<&[u8]>,
+                        ),
+                        crate::provision::KeyDomainSecretPair::new(
+                            (!opts.encrypt_source_password.is_empty())
+                                .then_some(opts.encrypt_source_password.as_bytes()),
+                            None::<&[u8]>,
+                        ),
+                    ),
                 },
             )
         }
@@ -274,7 +286,9 @@ fn target_plan_summary_lines(plan: &crate::provision::TargetProvisionPlan) -> Ve
             RegionDisposition::RewrapVerified => {
                 "RewrapVerified · K_old 保持 · 仅重包 wrapper · data extent 0 写入"
             }
-            RegionDisposition::Migrate => "Migrate · 当前版本 unsupported",
+            RegionDisposition::Migrate => {
+                "Migrate · 文件级 staging + 目标文件系统重建 · 原子写入/readback/rollback"
+            }
             RegionDisposition::Rebuild => {
                 "Rebuild · K_new + 完整 filesystem initialization · 原数据不可原样保留"
             }

@@ -227,6 +227,8 @@ pub enum MigrationTransform {
     BootShareCombinedToShare,
     EncryptToShare,
     ShareToEncrypt,
+    PlainToEdp,
+    EdpToPlain,
 }
 
 pub const fn migration_transform(
@@ -261,7 +263,7 @@ pub enum RegionMappingKind {
     PreserveCandidate,
     Rebuild,
     Drop,
-    MigrateUnsupported,
+    Migrate,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -333,7 +335,7 @@ impl RegionMappingPlanner {
                         mappings.push(RegionMapping {
                             source_index: Some(source_index),
                             target_index: Some(target_index),
-                            kind: RegionMappingKind::MigrateUnsupported,
+                            kind: RegionMappingKind::Migrate,
                             migration_transform: Some(transform),
                             failure: Some(CompatibilityFailure::SemanticRole),
                         });

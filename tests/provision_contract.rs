@@ -45,6 +45,7 @@ fn plain_request_resolves_mib_gib_fill_and_keeps_explicit_gaps() {
                 volume_label: "TOOLS".into(),
             },
         ],
+        key_domains: Default::default(),
     };
     let plan = request.resolve(100_000).unwrap();
     assert_eq!(plan.partitions[0].sector_count, 32_768);
@@ -61,6 +62,7 @@ fn plain_request_resolves_mib_gib_fill_and_keeps_explicit_gaps() {
             filesystem: edpcli::provision::OfficialFilesystemFormat::ExFat,
             volume_label: "BIG".into(),
         }],
+        key_domains: Default::default(),
     };
     assert_eq!(
         gib.resolve(3_000_000).unwrap().partitions[0].sector_count,

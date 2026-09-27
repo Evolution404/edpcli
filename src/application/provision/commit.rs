@@ -511,13 +511,35 @@ pub(super) fn validate_key_disposition_plan(
                 }
             }
             RegionDisposition::Migrate => {
-                return Err(err(
-                    EXIT_TARGET,
-                    format!(
-                        "错误: {} Migrate 当前 unsupported，拒绝 commit",
-                        part.geometry.role.label()
-                    ),
-                ));
+                if part.migration_sources.is_empty() {
+                    return Err(err(
+                        EXIT_TARGET,
+                        format!(
+                            "错误: {} Migrate 缺少 typed migration source",
+                            part.geometry.role.label()
+                        ),
+                    ));
+                }
+                if selected_format {
+                    return Err(err(
+                        EXIT_TARGET,
+                        format!(
+                            "错误: {} Migrate 不能再执行独立格式化阶段",
+                            part.geometry.role.label()
+                        ),
+                    ));
+                }
+                if KeyDomainRole::from_partition_role(part.geometry.role).is_some()
+                    && plan.partition_lba12_material[index].is_none()
+                {
+                    return Err(err(
+                        EXIT_TARGET,
+                        format!(
+                            "错误: {} Migrate 缺少新的目标 FileKey material",
+                            part.geometry.role.label()
+                        ),
+                    ));
+                }
             }
             RegionDisposition::Drop => {
                 return Err(err(
@@ -566,6 +588,35 @@ pub(super) fn validate_target_write_set(
         part.action == PartitionAction::PreserveExact && part.preserved_record.is_none()
     }) {
         return Err(err(EXIT_TARGET, "错误: 保留分区缺少原 key material"));
+    }
+    for part in target_plan
+        .partitions
+        .iter()
+        .filter(|part| part.disposition == RegionDisposition::Migrate)
+    {
+        let start = u32::try_from(part.geometry.start_lba)
+            .map_err(|_| err(EXIT_TARGET, "错误: K6 目标起点 LBA 溢出"))?;
+        if !patch.contains_key(&start) {
+            return Err(err(
+                EXIT_TARGET,
+                format!(
+                    "错误: {} Migrate 写集合缺少目标文件系统引导扇区",
+                    part.geometry.role.label()
+                ),
+            ));
+        }
+        if formats
+            .iter()
+            .any(|choice| choice.target.role == part.geometry.role && choice.selected)
+        {
+            return Err(err(
+                EXIT_TARGET,
+                format!(
+                    "错误: {} Migrate 与格式化写集合冲突",
+                    part.geometry.role.label()
+                ),
+            ));
+        }
     }
     Ok(())
 }

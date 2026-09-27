@@ -1066,7 +1066,7 @@ fn moving_type4_from_slot_two_to_one_reencodes_headers_and_reuses_only_its_key_m
 }
 
 #[test]
-fn target_plan_surfaces_migration_sources_before_k6_execution_is_enabled() {
+fn target_plan_surfaces_migration_sources_for_k6_execution() {
     let (_, source_image, did) = generated_source(OfficialPartitionMode::DefaultThreePartition);
     let source = parse_existing_provision(&source_image, &did, 16_777_216)
         .unwrap()
@@ -1098,7 +1098,7 @@ fn target_plan_surfaces_migration_sources_before_k6_execution_is_enabled() {
     assert_eq!(
         combined.action,
         PartitionAction::Rebuild,
-        "legacy action must stay fail-closed until K6 execution exists"
+        "legacy two-state action remains Rebuild while typed disposition carries K6 Migrate"
     );
     assert_eq!(
         combined

@@ -10,6 +10,7 @@ mod key_domain;
 mod keys;
 mod layout;
 mod lce;
+mod migration;
 mod plain;
 mod profile;
 mod region_mapping;
@@ -19,9 +20,10 @@ mod validate;
 mod write_plan;
 
 pub use filesystem::{
-    build_empty_exfat, build_empty_fat16, build_official_exfat_partition,
-    build_official_exfat_partitions, build_official_partition_filesystem, encrypt_sparse_mode2,
-    FilesystemPlanError, OfficialFilesystemFormat, PartitionFilesystemImage, SparseFilesystemImage,
+    build_empty_exfat, build_empty_fat16, build_migrated_filesystem,
+    build_official_exfat_partition, build_official_exfat_partitions,
+    build_official_partition_filesystem, encrypt_sparse_mode2, FilesystemPlanError,
+    OfficialFilesystemFormat, PartitionFilesystemImage, SparseFilesystemImage,
 };
 pub use generate::{generate_image, generate_official_image, ProvisionEntropy};
 pub use key_domain::{
@@ -41,11 +43,16 @@ pub use layout::{
     OFFICIAL_PARTITION_START_SECTOR, WHOLE_DISK_ENCRYPTED_COMPAT_BOOT_BYTES,
 };
 pub use lce::{build_lce_ciphertext, lce_plaintext};
+pub use migration::{
+    build_migration_manifest, finalize_staged_entry, MigrationBudgets, MigrationInventory,
+    MigrationManifest, MigrationManifestEntry, MigrationPreflightError, MigrationStagedEntry,
+    MAX_MIGRATION_ENTRIES,
+};
 pub use plain::{
-    build_plain_provision_write_plan, max_plain_sector_count, plain_gaps,
-    validate_plain_partitions, PlainCleanupExtent, PlainGap, PlainPartitionSpec,
-    PlainProvisionPlan, PlainProvisionWritePlan, PlainSectorOwner, PlainSectorWrite,
-    DEFAULT_PLAIN_START_LBA, MAX_PLAIN_PARTITIONS,
+    build_plain_migrated_provision_write_plan, build_plain_provision_write_plan,
+    max_plain_sector_count, plain_gaps, validate_plain_partitions, PlainCleanupExtent, PlainGap,
+    PlainPartitionSpec, PlainProvisionPlan, PlainProvisionWritePlan, PlainSectorOwner,
+    PlainSectorWrite, DEFAULT_PLAIN_START_LBA, MAX_PLAIN_PARTITIONS,
 };
 pub use profile::{PassInfoPolicy, ProvisionProfile, DEFAULT_SAFE6_LABEL};
 pub use region_mapping::{

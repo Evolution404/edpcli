@@ -1,7 +1,12 @@
-use edpcli::provision::{
-    build_plain_provision_write_plan, max_plain_sector_count, OfficialFilesystemFormat,
-    PlainCleanupExtent, PlainPartitionSpec, PlainProvisionPlan, PlainSectorOwner,
-    DEFAULT_PLAIN_START_LBA,
+use edpcli::{
+    backup_deep::{analyze_partition, stream_file_payload, AnalysisStatus, PartitionReader},
+    backup_metadata::PartitionGeometry,
+    provision::{
+        build_plain_migrated_provision_write_plan, build_plain_provision_write_plan,
+        max_plain_sector_count, MigrationStagedEntry, MigrationTransform, OfficialFilesystemFormat,
+        PlainCleanupExtent, PlainPartitionSpec, PlainProvisionPlan, PlainProvisionWritePlan,
+        PlainSectorOwner, DEFAULT_PLAIN_START_LBA,
+    },
 };
 
 fn part(start_lba: u64, sector_count: u64) -> PlainPartitionSpec {
@@ -194,4 +199,102 @@ fn plain_mbr_contains_all_primary_partition_entries() {
             expected.1
         );
     }
+}
+
+struct PlainWriteReader<'a> {
+    write: &'a PlainProvisionWritePlan,
+    start_lba: u64,
+}
+
+impl PartitionReader for PlainWriteReader<'_> {
+    fn read_sector(&mut self, relative_lba: u64) -> std::io::Result<Vec<u8>> {
+        let absolute = self
+            .start_lba
+            .checked_add(relative_lba)
+            .and_then(|lba| u32::try_from(lba).ok())
+            .ok_or_else(|| std::io::Error::other("plain migration LBA overflow"))?;
+        Ok(self
+            .write
+            .writes
+            .get(&absolute)
+            .map(|sector| sector.bytes.to_vec())
+            .unwrap_or_else(|| vec![0; 512]))
+    }
+}
+
+#[test]
+fn plain_k6_writer_populates_files_and_preserves_atomic_write_ownership() {
+    let plan = PlainProvisionPlan::new(300_000, vec![part(2_048, 200_000)]).unwrap();
+    let payload = b"k6-edp-to-plain-payload".repeat(80);
+    let migrations = vec![vec![
+        MigrationStagedEntry {
+            source_index: 0,
+            transform: MigrationTransform::EdpToPlain,
+            path: "/EDP_SHARE/".into(),
+            is_directory: true,
+            data: Vec::new(),
+            attributes: 0x10,
+            mtime: None,
+            ctime: None,
+        },
+        MigrationStagedEntry {
+            source_index: 0,
+            transform: MigrationTransform::EdpToPlain,
+            path: "/EDP_SHARE/data.bin".into(),
+            is_directory: false,
+            data: payload.clone(),
+            attributes: 0x20,
+            mtime: None,
+            ctime: None,
+        },
+    ]];
+    let write = build_plain_migrated_provision_write_plan(
+        &plan,
+        Some(PlainCleanupExtent::new(250_000, 6)),
+        &[0x1234_5678],
+        &migrations,
+    )
+    .unwrap();
+
+    assert!(write
+        .writes
+        .values()
+        .any(|sector| { sector.owner == PlainSectorOwner::Filesystem { partition_index: 0 } }));
+
+    let partition = &plan.partitions[0];
+    let geometry = PartitionGeometry {
+        index: 0,
+        partition_type: 0x07,
+        partition_count: 1,
+        need_disturb: 0,
+        need_encrypt: 0,
+        start_sector: partition.start_lba,
+        sector_size: 512,
+        partition_size: partition.sector_count * 512,
+        sector_count: partition.sector_count,
+        user_key_crc: 0,
+        file_key_crc: 0,
+        encrypt_mode: 0,
+    };
+    let mut reader = PlainWriteReader {
+        write: &write,
+        start_lba: partition.start_lba,
+    };
+    let report = analyze_partition(&geometry, &mut reader);
+    assert_eq!(report.status, AnalysisStatus::Parsed, "{}", report.reason);
+    let entry = report
+        .entries
+        .as_ref()
+        .unwrap()
+        .iter()
+        .find(|entry| entry.path == "/EDP_SHARE/data.bin")
+        .unwrap()
+        .clone();
+    let mut reader = PlainWriteReader {
+        write: &write,
+        start_lba: partition.start_lba,
+    };
+    let mut actual = Vec::new();
+    stream_file_payload(&mut reader, &entry, payload.len() as u64, &mut actual).unwrap();
+    assert_eq!(actual, payload);
 }

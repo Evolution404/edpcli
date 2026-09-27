@@ -25,6 +25,8 @@ mod provision_key_material;
 mod provision_layout;
 #[path = "provision_lce.rs"]
 mod provision_lce;
+#[path = "provision_migration.rs"]
+mod provision_migration;
 #[path = "provision_protocol_audit.rs"]
 mod provision_protocol_audit;
 #[path = "provision_region_mapping.rs"]
