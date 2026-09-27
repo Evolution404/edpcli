@@ -927,13 +927,7 @@ pub fn prepare_plain_provision(
     plan: PlainProvisionPlan,
     dev: &mut dyn SectorDev,
 ) -> EdpCliResult<PreparedPlainProvision> {
-    prepare_plain_provision_with_key_domains(
-        runner,
-        disk,
-        plan,
-        &KeyDomainSecrets::default(),
-        dev,
-    )
+    prepare_plain_provision_with_key_domains(runner, disk, plan, &KeyDomainSecrets::default(), dev)
 }
 
 fn prepare_plain_provision_with_key_domains(
@@ -1010,12 +1004,7 @@ fn prepare_plain_provision_with_key_domains(
             .sector_count
             .checked_mul(SECTOR as u64)
             .ok_or_else(|| err(EXIT_TARGET, "错误: Plain P1 容量溢出"))?;
-        super::migration::prepare_existing_to_plain(
-            dev,
-            &existing,
-            target_capacity,
-            key_domains,
-        )?
+        super::migration::prepare_existing_to_plain(dev, &existing, target_capacity, key_domains)?
     };
 
     let mut volume_serials = Vec::with_capacity(plan.partitions.len());
