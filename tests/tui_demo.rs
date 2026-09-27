@@ -230,7 +230,6 @@ fn demo_loop_has_no_external_task_service_or_process_entry_point() {
             "elevate::",
             "diskutil",
             "copy_osc52_to",
-            "ClipboardService",
         ] {
             assert!(!source.contains(forbidden), "{forbidden}");
         }

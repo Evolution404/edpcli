@@ -191,14 +191,6 @@ pub fn run(scene: Option<&str>, list_scenes: bool) -> i32 {
     )
 }
 
-struct DemoClipboard;
-
-impl crate::tui::clipboard::ClipboardBackend for DemoClipboard {
-    fn copy(&mut self, _content: &str) -> crate::tui::clipboard::ClipboardOutcome {
-        crate::tui::clipboard::ClipboardOutcome::Unsupported
-    }
-}
-
 /// This loop deliberately owns no TaskHub, runner, backup directory, or elevation path.
 /// Every scene is built from typed in-memory state and drawn by the production renderer.
 pub(super) fn run_interactive(scene: &str) -> i32 {
@@ -271,6 +263,7 @@ pub(super) fn run_interactive(scene: &str) -> i32 {
             action,
             size.map_or(120, |size| size.width),
             size.map_or(24, |size| size.height),
+            &mut super::clipboard::ClipboardService,
         ) {
             break;
         }
@@ -316,6 +309,7 @@ fn handle_action(
     action: super::keymap::TuiAction,
     width: u16,
     height: u16,
+    clipboard: &mut dyn super::clipboard::ClipboardBackend,
 ) -> bool {
     use super::keymap::TuiAction;
     use crate::tui::state::Workspace;
@@ -377,11 +371,7 @@ fn handle_action(
         | TuiAction::TableCopyCell
         | TuiAction::TableCopyRow => {
             let _ = super::table_dispatch::dispatch_table_action_with_clipboard(
-                state,
-                action,
-                viewport,
-                width,
-                &mut DemoClipboard,
+                state, action, viewport, width, clipboard,
             );
         }
         TuiAction::Open => {
@@ -463,5 +453,46 @@ fn open_cached_inspect_selection(state: &mut AppState) {
     };
     if let Some((_source, lba)) = request {
         state.advanced_inspect_sector_finish(lba, Err("演示模式不会读取真实扇区".into()));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::tui::clipboard::{ClipboardBackend, ClipboardOutcome};
+    use crate::tui::keymap::TuiAction;
+
+    #[derive(Default)]
+    struct CapturingClipboard(Vec<String>);
+
+    impl ClipboardBackend for CapturingClipboard {
+        fn copy(&mut self, content: &str) -> ClipboardOutcome {
+            self.0.push(content.into());
+            ClipboardOutcome::Confirmed
+        }
+    }
+
+    #[test]
+    fn demo_table_actions_forward_cell_and_row_to_shared_clipboard() {
+        let mut state = build_scene("devices").unwrap();
+        let mut clipboard = CapturingClipboard::default();
+        assert!(!handle_action(
+            &mut state,
+            TuiAction::TableCopyCell,
+            120,
+            36,
+            &mut clipboard,
+        ));
+        assert!(!handle_action(
+            &mut state,
+            TuiAction::TableCopyRow,
+            120,
+            36,
+            &mut clipboard,
+        ));
+        assert_eq!(clipboard.0.len(), 2);
+        assert_eq!(clipboard.0[0], "disk6");
+        assert!(clipboard.0[1].contains("DEMO"));
+        assert_eq!(clipboard.0[1].split('\t').count(), 8);
     }
 }

@@ -9552,7 +9552,7 @@ edpcli demo --list-scenes
 
 详细设计见 16.17。
 
-实现记录：新增 `edpcli demo`、`--scene` 与 `--list-scenes`，场景目录覆盖 Devices / Inspect / Backups / Provision 的主要页面及运行中、成功、警告、失败、空状态和错误状态。演示数据使用正式 `AppState`、canonical DiskLayout、typed Inspect、typed BackupCoverage 和正式 Provision/Backup progress 结构，不建立第二套 renderer；mode0、mode1、Plain、LBA8、E_LABEL 17 项、尾部展开、确认/可能相关备份及健康警告均有 fixture。演示循环不持有 TaskHub、runner、备份目录或提权入口，`ExecutionPolicy::DemoNoExternalIo` 对外部任务 fail-closed，演示表格复制也不写宿主剪贴板。25 个场景在 40x10、80x24、120x36、160x45、240x60 均通过 no-panic 渲染；其中 `provision-running-long` 提供 45 个确定性慢盘进度事件；`tui_suite` 266/266、fast 8 suites / 10 artifacts、full 8 suites / 10 artifacts + doctest 全绿。
+实现记录：新增 `edpcli demo`、`--scene` 与 `--list-scenes`，场景目录覆盖 Devices / Inspect / Backups / Provision 的主要页面及运行中、成功、警告、失败、空状态和错误状态。演示数据使用正式 `AppState`、canonical DiskLayout、typed Inspect、typed BackupCoverage 和正式 Provision/Backup progress 结构，不建立第二套 renderer；mode0、mode1、Plain、LBA8、E_LABEL 17 项、尾部展开、确认/可能相关备份及健康警告均有 fixture。演示循环不持有 TaskHub、runner、备份目录或提权入口，`ExecutionPolicy::DemoNoExternalIo` 对设备、备份和写盘外部任务 fail-closed；演示表格 `y/Y` 复用共享 ClipboardService，仅复制 DEMO 文本。25 个场景在 40x10、80x24、120x36、160x45、240x60 均通过 no-panic 渲染；其中 `provision-running-long` 提供 45 个确定性慢盘进度事件。
 
 #### U12 — 表格 y/Y 系统剪贴板可靠性治理
 
