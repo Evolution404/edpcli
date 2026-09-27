@@ -25,6 +25,7 @@ pub const SCENES: &[&str] = &[
     "provision-form",
     "provision-review",
     "provision-running",
+    "provision-running-long",
     "provision-result-success",
     "provision-result-warning",
     "provision-result-failure",
@@ -96,7 +97,7 @@ pub fn build_scene(scene: &str) -> Result<AppState, String> {
             state.provision_mut().stage = match name {
                 "provision-form" => ProvisionStage::Form,
                 "provision-review" => ProvisionStage::Review,
-                "provision-running" => ProvisionStage::Running,
+                "provision-running" | "provision-running-long" => ProvisionStage::Running,
                 _ => ProvisionStage::Result,
             };
             let stage = state.provision().stage;
@@ -117,7 +118,13 @@ pub fn build_scene(scene: &str) -> Result<AppState, String> {
                     Some(crate::application::provision::ProvisionExecutionStatus::FatalFailure);
             }
             state.provision_mut().message = Some("演示模式不会执行真实操作".into());
-            if matches!(stage, ProvisionStage::Running | ProvisionStage::Result) {
+            if name == "provision-running-long" {
+                let tick = timeline::DemoTimeline::LONG_INITIAL_TICK;
+                state.provision_mut().run = Some(timeline::DemoTimeline::long_at_tick(
+                    tick,
+                    std::time::Instant::now() - Duration::from_secs(tick as u64),
+                ));
+            } else if matches!(stage, ProvisionStage::Running | ProvisionStage::Result) {
                 let tick = if stage == ProvisionStage::Running {
                     3
                 } else {
@@ -214,7 +221,12 @@ pub(super) fn run_interactive(scene: &str) -> i32 {
         }
     };
     let mut keys = super::KeyMapper::new();
-    let timeline_base = std::time::Instant::now() - Duration::from_secs(10);
+    let timeline_base = std::time::Instant::now()
+        - Duration::from_secs(if scene == "provision-running-long" {
+            timeline::DemoTimeline::LONG_INITIAL_TICK as u64
+        } else {
+            10
+        });
     loop {
         if let Err(error) = session
             .terminal
@@ -272,6 +284,11 @@ fn advance_scene_timeline(state: &mut AppState, scene: &str, base: std::time::In
         "provision-running" => {
             let tick = (3 + step) % (timeline::DemoTimeline::LAST_TICK + 1);
             state.provision_mut().run = Some(timeline::DemoTimeline::at_tick(tick, base));
+        }
+        "provision-running-long" => {
+            let tick = (timeline::DemoTimeline::LONG_INITIAL_TICK + step)
+                .min(timeline::DemoTimeline::LONG_LAST_TICK);
+            state.provision_mut().run = Some(timeline::DemoTimeline::long_at_tick(tick, base));
         }
         "backup-verify-running" => {
             let tick = step % (timeline::DemoTimeline::BACKUP_LAST_TICK + 1);

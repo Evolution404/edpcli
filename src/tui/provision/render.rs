@@ -905,8 +905,13 @@ fn draw_provision_running(frame: &mut Frame, area: ratatui::layout::Rect, state:
         .unwrap_or_else(|| "等待进度事件".into());
     let phase = latest.map(|event| event.phase.label()).unwrap_or("准备中");
     let step = latest
-        .map(|event| event.step.label())
-        .unwrap_or("等待第一步");
+        .map(|event| match event.step {
+            crate::application::progress::Step::PartitionFormat(role) => {
+                format!("{} · {}", event.step.label(), role.label())
+            }
+            _ => event.step.label().to_string(),
+        })
+        .unwrap_or_else(|| "等待第一步".into());
     if area.height < 18 {
         let lines = [
             Line::from(format!("总体进度  {progress}")),
@@ -968,9 +973,13 @@ fn draw_provision_running(frame: &mut Frame, area: ratatui::layout::Rect, state:
     );
     let mut step_lines = vec![Line::from(format!("当前步骤  {step}"))];
     if let Some(work) = latest.and_then(|event| event.work) {
+        let percent = work.current.saturating_mul(100) / work.total.max(1);
         step_lines.push(Line::from(format!(
-            "扇区活动  {}/{}",
-            work.current, work.total
+            "扇区活动  {}  {}/{} · {}%",
+            transaction_activity_label(work.phase),
+            work.current,
+            work.total,
+            percent
         )));
     }
     frame.render_widget(
@@ -998,7 +1007,16 @@ fn draw_provision_running(frame: &mut Frame, area: ratatui::layout::Rect, state:
             };
             let work = event
                 .work
-                .map(|work| format!("  {:?} {}/{}", work.phase, work.current, work.total))
+                .map(|work| {
+                    let percent = work.current.saturating_mul(100) / work.total.max(1);
+                    format!(
+                        "  {} {}/{} · {}%",
+                        transaction_activity_label(work.phase),
+                        work.current,
+                        work.total,
+                        percent
+                    )
+                })
                 .unwrap_or_default();
             let message = event
                 .detail
@@ -1032,4 +1050,19 @@ fn draw_provision_running(frame: &mut Frame, area: ratatui::layout::Rect, state:
             .block(crate::tui::ui::card("安全提示", false)),
         areas[3],
     );
+}
+
+fn transaction_activity_label(
+    phase: crate::application::progress::TransactionActivityPhase,
+) -> &'static str {
+    use crate::application::progress::TransactionActivityPhase;
+    match phase {
+        TransactionActivityPhase::Mirror => "镜像",
+        TransactionActivityPhase::Write => "写入",
+        TransactionActivityPhase::Readback => "读回",
+        TransactionActivityPhase::RollbackWrite => "回滚写入",
+        TransactionActivityPhase::RollbackReadback => "回滚读回",
+        TransactionActivityPhase::FormatWrite => "格式化写入",
+        TransactionActivityPhase::FormatReadback => "格式化读回",
+    }
 }

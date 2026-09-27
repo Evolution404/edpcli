@@ -106,6 +106,66 @@ fn demo_timeline_is_deterministic_at_a_frozen_tick() {
 }
 
 #[test]
+fn long_provision_demo_exercises_slow_protocol_and_partition_progress() {
+    use edpcli::application::progress::{Step, TransactionActivityPhase};
+    use edpcli::provision::PartitionRole;
+
+    assert!(demo::SCENES.contains(&"provision-running-long"));
+    let base = std::time::Instant::now();
+    let run = demo::timeline::DemoTimeline::long_at_tick(
+        demo::timeline::DemoTimeline::LONG_LAST_TICK,
+        base,
+    );
+    assert!(run.log.len() >= 40);
+    assert!(run.log.iter().any(|event| {
+        event.step == Step::ProtocolWrite
+            && event.work.is_some_and(|work| {
+                work.phase == TransactionActivityPhase::Write
+                    && work.current > 0
+                    && work.current < work.total
+            })
+    }));
+    for role in [
+        PartitionRole::Boot,
+        PartitionRole::Share,
+        PartitionRole::Encrypt,
+    ] {
+        assert!(run.log.iter().any(|event| {
+            event.step == Step::PartitionFormat(role)
+                && event
+                    .work
+                    .is_some_and(|work| work.phase == TransactionActivityPhase::FormatWrite)
+        }));
+        assert!(run.log.iter().any(|event| {
+            event.step == Step::PartitionFormat(role)
+                && event
+                    .work
+                    .is_some_and(|work| work.phase == TransactionActivityPhase::FormatReadback)
+        }));
+    }
+    assert!(run
+        .log
+        .iter()
+        .filter_map(|event| event.detail.as_deref())
+        .any(|detail| detail.contains("DEMO 慢盘")));
+}
+
+#[test]
+fn long_provision_scene_opens_running_page_with_nested_activity_visible() {
+    let state = demo::build_scene("provision-running-long").unwrap();
+    assert_eq!(
+        state.provision().stage,
+        edpcli::tui::state::ProvisionStage::Running
+    );
+    let run = state.provision().run.as_ref().expect("long demo progress");
+    assert!(run.log.len() > 5);
+    let screen = screen_text("provision-running-long").replace(' ', "");
+    for expected in ["扇区活动", "DEMO慢盘", "%", "运行日志"] {
+        assert!(screen.contains(expected), "{expected}");
+    }
+}
+
+#[test]
 fn demo_scenes_show_real_workspace_content_and_safety_header() {
     for scene in ["devices", "inspect-lba8", "provision-running", "backups"] {
         let screen = screen_text(scene);
