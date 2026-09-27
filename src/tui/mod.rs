@@ -450,6 +450,7 @@ fn dispatch_tui_action(
     action: keymap::TuiAction,
     backup_dir: &std::path::Path,
     viewport_height: usize,
+    viewport_width: u16,
 ) -> StateEffect {
     use keymap::TuiAction;
 
@@ -459,6 +460,16 @@ fn dispatch_tui_action(
 
     match action {
         TuiAction::TableScrollLeft | TuiAction::TableScrollRight => {
+            if state.workspace() == state::Workspace::Devices
+                && state.devices_focused_pane() != crate::tui::pane::PaneId::DevicesList
+            {
+                return StateEffect::None;
+            }
+            if state.workspace() == state::Workspace::Backups
+                && state.backups_focused_pane() != crate::tui::pane::PaneId::BackupsList
+            {
+                return StateEffect::None;
+            }
             let kind = match state.workspace() {
                 state::Workspace::Devices => crate::tui::table_layout::TableKind::Devices,
                 state::Workspace::Backups => crate::tui::table_layout::TableKind::Backups,
@@ -485,7 +496,7 @@ fn dispatch_tui_action(
         }
         TuiAction::Activate => match state.workspace() {
             state::Workspace::Devices => {
-                if let Err(message) = state.begin_provision_for_selected_device() {
+                if let Err(message) = state.activate_device_for_viewport(viewport_width) {
                     state.set_notice(message);
                 }
                 StateEffect::None
@@ -506,6 +517,21 @@ fn dispatch_tui_action(
             ),
             state::Workspace::Provision => StateEffect::None,
         },
+        TuiAction::Provision if state.workspace() == state::Workspace::Devices => {
+            if let Err(message) = state.begin_provision_for_selected_device() {
+                state.set_notice(message);
+            }
+            StateEffect::None
+        }
+        TuiAction::Open if state.workspace() == state::Workspace::Devices => {
+            let next = if state.devices_focused_pane() == crate::tui::pane::PaneId::DevicesList {
+                crate::tui::pane::PaneId::DevicesSummary
+            } else {
+                crate::tui::pane::PaneId::DevicesList
+            };
+            state.focus_devices_pane(next);
+            StateEffect::None
+        }
         TuiAction::Toggle if state.workspace() == state::Workspace::Backups => {
             dispatch_nav_command(
                 state,
@@ -549,6 +575,25 @@ fn dispatch_tui_action(
                 backup_dir,
                 viewport_height,
             )
+        }
+        TuiAction::PanelLeft
+        | TuiAction::PanelRight
+        | TuiAction::PanelUp
+        | TuiAction::PanelDown
+            if matches!(
+                state.workspace(),
+                state::Workspace::Devices | state::Workspace::Backups
+            ) =>
+        {
+            let (dx, dy) = match action {
+                TuiAction::PanelLeft => (-1, 0),
+                TuiAction::PanelRight => (1, 0),
+                TuiAction::PanelUp => (0, -1),
+                TuiAction::PanelDown => (0, 1),
+                _ => unreachable!(),
+            };
+            state.spatial_workspace_focus(dx, dy);
+            StateEffect::None
         }
         _ => StateEffect::None,
     }
@@ -1229,6 +1274,7 @@ fn run_loop(resume: Option<state::WriteIntent>) -> io::Result<LoopExit> {
                                 action,
                                 &backup_dir,
                                 viewport_height,
+                                session.terminal.size()?.width,
                             ) {
                                 StateEffect::ExitRequested => break,
                                 StateEffect::ExitDeferred | StateEffect::None => {}
@@ -1591,6 +1637,7 @@ fn run_loop(resume: Option<state::WriteIntent>) -> io::Result<LoopExit> {
                                     action,
                                     &backup_dir,
                                     viewport_height,
+                                    session.terminal.size()?.width,
                                 ) {
                                     StateEffect::ExitRequested => break,
                                     StateEffect::ExitDeferred | StateEffect::None => {}
@@ -2021,6 +2068,7 @@ fn run_loop(resume: Option<state::WriteIntent>) -> io::Result<LoopExit> {
                             action,
                             &backup_dir,
                             viewport_height,
+                            session.terminal.size()?.width,
                         ) {
                             StateEffect::ExitRequested => break,
                             StateEffect::ExitDeferred | StateEffect::None => {}

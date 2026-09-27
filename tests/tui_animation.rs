@@ -29,12 +29,12 @@ fn animation_tick_is_state_only_and_monotonic() {
 }
 
 #[test]
-fn wide_tui_keeps_live_core_visible_during_normal_navigation() {
+fn wide_devices_keep_only_compact_core_indicator_during_normal_navigation() {
     let state = AppState::new();
     let text = render_text(&state, 160, 30);
-    assert!(text.contains("EDP CORE · LIVE"), "{text}");
-    assert!(text.contains("STABILITY // STABLE"), "{text}");
-    assert!(text.contains("SECTOR VIEW // LBA 00-12"), "{text}");
+    assert!(text.contains("CORE ◇ STABLE"), "{text}");
+    assert!(!text.contains("EDP CORE · LIVE"), "{text}");
+    assert!(text.replace(' ', "").contains("总体统计"), "{text}");
 }
 
 #[test]

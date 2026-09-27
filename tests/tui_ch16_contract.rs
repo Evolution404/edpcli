@@ -89,6 +89,33 @@ fn lba8_state() -> AppState {
     state
 }
 
+fn device() -> edpcli::disk_scan::Row {
+    edpcli::disk_scan::Row {
+        disk: 6,
+        size: 64_000_000_000,
+        vid: "1234".into(),
+        pid: "5678".into(),
+        proto: "USB".into(),
+        device_id: Some("disk&ven_demo&prod_u335".into()),
+        identity_pin: None,
+        onlyid: Some("ABCDEF0123456789".into()),
+        dept: Some("输电运检中心".into()),
+        user: Some("张三".into()),
+        label: None,
+        force_change_password: None,
+        cancel_password_complexity_check: None,
+        max_share_password_errors: None,
+        max_encrypt_password_errors: None,
+        n_baks: 3,
+        n_possible_baks: 1,
+        denied: false,
+        probe_error: None,
+        is_nopwd: false,
+        provision_kind: edpcli::provision::DiskProvisionKind::Mode0,
+        partitions: None,
+    }
+}
+
 #[test]
 fn ch16_shell_exposes_four_top_level_workspaces() {
     let lines = rendered_lines(&AppState::new(), 120, 36);
@@ -150,6 +177,52 @@ fn ch16_devices_and_backups_have_independent_pane_focus_and_viewports() {
         7
     );
     assert_eq!(state.pane_viewport(PaneId::BackupCoverage).scroll_x, 3);
+}
+
+#[test]
+fn ch16_devices_wide_shows_current_identity_stats_and_no_animation_sidebar() {
+    let mut state = AppState::new();
+    state.replace_devices(vec![device()]);
+    let text = rendered_lines(&state, 160, 45).join("\n").replace(' ', "");
+    for value in [
+        "设备列表",
+        "当前设备disk6",
+        "张三",
+        "输电运检中心",
+        "总体统计",
+        "已确认备份3",
+    ] {
+        assert!(text.contains(value), "missing {value}");
+    }
+    assert!(!text.contains("EDPCORE·LIVE"));
+}
+
+#[test]
+fn ch16_devices_compact_enter_opens_detail_and_escape_returns_to_list() {
+    use edpcli::tui::{pane::PaneId, state::NavCommand};
+
+    let mut state = AppState::new();
+    state.replace_devices(vec![device()]);
+    assert_eq!(state.activate_device_for_viewport(40).unwrap(), None);
+    assert_eq!(state.devices_focused_pane(), PaneId::DevicesSummary);
+    let text = rendered_lines(&state, 40, 10).join("\n").replace(' ', "");
+    for value in ["当前设备disk6", "用户张三", "部门输电运检中心"] {
+        assert!(text.contains(value), "missing {value} at 40x10");
+    }
+    state.navigate(NavCommand::Escape, 7);
+    assert_eq!(state.devices_focused_pane(), PaneId::DevicesList);
+}
+
+#[test]
+fn ch16_device_secondary_pane_remains_reachable_at_standard_width() {
+    use edpcli::tui::pane::PaneId;
+
+    let mut state = AppState::new();
+    state.replace_devices(vec![device()]);
+    state.focus_devices_pane(PaneId::DevicesStats);
+    let text = rendered_lines(&state, 100, 30).join("\n").replace(' ', "");
+    assert!(text.contains("总体统计"));
+    assert!(text.contains("可能相关备份1"));
 }
 
 #[test]

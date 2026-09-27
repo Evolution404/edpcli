@@ -147,7 +147,7 @@ fn transient_notice_has_its_own_area_and_expires() {
     assert!(
         lines
             .iter()
-            .any(|line| line.replace(' ', "").contains("Tab/Shift-Tab标签")),
+            .any(|line| line.replace(' ', "").contains("Tab/Shift-Tab工作区")),
         "{lines:?}"
     );
     std::thread::sleep(std::time::Duration::from_millis(4_050));

@@ -61,7 +61,7 @@ fn chapter_11_single_key_actions_and_exit_contract() {
     for (code, expected) in [
         (KeyCode::Char('b'), Some(TuiAction::BackupCreate)),
         (KeyCode::Char('a'), Some(TuiAction::Add)),
-        (KeyCode::Char('p'), None),
+        (KeyCode::Char('p'), Some(TuiAction::Provision)),
         (KeyCode::Char('w'), None),
         (KeyCode::Char('q'), Some(TuiAction::Quit)),
         (KeyCode::Esc, Some(TuiAction::Back)),
@@ -218,7 +218,10 @@ fn tab_switches_top_level_tabs_and_ctrl_w_owns_panel_navigation() {
 #[test]
 fn normal_mode_keeps_inspect_and_backup_as_single_key_actions() {
     let mut mapper = KeyMapper::new();
-    assert_eq!(mapper.map(InputMode::Normal, key(KeyCode::Char('p'))), None);
+    assert_eq!(
+        mapper.map(InputMode::Normal, key(KeyCode::Char('p'))),
+        Some(TuiAction::Provision)
+    );
     assert_eq!(
         mapper.map(InputMode::Normal, key(KeyCode::Char('i'))),
         Some(TuiAction::Insert)

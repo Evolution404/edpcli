@@ -9390,7 +9390,7 @@ Backup detail / coverage
 
 #### U3 — Devices Workspace
 
-状态：PENDING。
+状态：COMPLETE（2026-09-27）。设备列表接入统一 DataTable；当前设备与总体统计使用 Card，canonical identity/status 与用户/部门优先显示。默认设备页移除大动画侧栏；Compact Enter 打开设备详情、Esc 返回列表，`p` 仍可明确进入制盘；Standard 可通过 PaneFocus 切换详情/统计，Wide 同时显示。40x10、100x30、160x45 视觉结构契约及设备/TUI 回归通过。
 
 - 设备列表迁移到新 DataTable；
 - 当前设备 Card；

@@ -36,6 +36,7 @@ pub enum TuiAction {
     Delete,
     Add,
     BackupCreate,
+    Provision,
     Restore,
     Fill,
     Export,
@@ -119,6 +120,11 @@ pub const NORMAL_HELP: &[HelpBinding] = &[
         keys: "r",
         label: "Refresh",
         action: TuiAction::Refresh,
+    },
+    HelpBinding {
+        keys: "p",
+        label: "Provision",
+        action: TuiAction::Provision,
     },
     HelpBinding {
         keys: "Tab/Shift-Tab",
@@ -317,6 +323,7 @@ impl KeyMapper {
             KeyCode::Char('d') => Some(TuiAction::Delete),
             KeyCode::Char('a') => Some(TuiAction::Add),
             KeyCode::Char('b') => Some(TuiAction::BackupCreate),
+            KeyCode::Char('p') => Some(TuiAction::Provision),
             KeyCode::Char('R') => Some(TuiAction::Restore),
             KeyCode::Char('f') => Some(TuiAction::Fill),
             KeyCode::Char('e') => Some(TuiAction::Export),

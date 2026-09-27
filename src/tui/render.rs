@@ -637,9 +637,17 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
                 if state.selected_device().is_some() {
                     let kind = crate::tui::table_layout::TableKind::Devices;
                     let count = crate::tui::table_layout::layout_for(kind).scrollable_count();
-                    format!("Tab/Shift-Tab 标签 · j/k 移动 · h/l 横向滚动 · {}/{} 列 · Enter 制盘 · i Inspect · b 新建备份 · Esc 当前标签 · q 退出", state.table_scroll_offset(kind) + 1, count)
+                    let enter = if super::ui::ViewportClass::for_width(area.width)
+                        == super::ui::ViewportClass::Compact
+                        && state.devices_focused_pane() == crate::tui::pane::PaneId::DevicesList
+                    {
+                        "Enter 详情"
+                    } else {
+                        "Enter 制盘"
+                    };
+                    format!("Tab/Shift-Tab 工作区 · Ctrl-w 切 Pane · j/k 当前 Pane · h/l 横向滚动 · {}/{} 列 · {enter} · p 制盘 · i Inspect · b 备份 · Esc 返回 · q 退出", state.table_scroll_offset(kind) + 1, count)
                 } else {
-                    "Tab/Shift-Tab 标签 · r 刷新 · Esc 当前标签 · q 退出".to_string()
+                    "Tab/Shift-Tab 工作区 · r 刷新 · q 退出".to_string()
                 }
             }
             Workspace::Inspect => {
