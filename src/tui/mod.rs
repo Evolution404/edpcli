@@ -14,6 +14,7 @@ pub mod state;
 pub mod table_layout;
 pub mod task;
 pub mod theme;
+pub mod ui;
 
 use std::io::{self, IsTerminal, Stdout};
 use std::time::{Duration, Instant};

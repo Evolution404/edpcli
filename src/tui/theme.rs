@@ -16,10 +16,14 @@ pub enum ThemeMode {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Palette {
+    pub canvas: Color,
     pub background: Color,
     pub surface: Color,
+    pub surface_raised: Color,
     pub surface_active: Color,
     pub selection: Color,
+    pub border_subtle: Color,
+    pub border_strong: Color,
     pub border: Color,
     pub border_focus: Color,
     pub text_primary: Color,
@@ -62,10 +66,14 @@ impl Theme {
         Self {
             mode: ThemeMode::TrueColorDark,
             palette: Palette {
+                canvas: Color::Rgb(0x07, 0x11, 0x1A),
                 background: Color::Rgb(0x11, 0x16, 0x1C),
                 surface: Color::Rgb(0x17, 0x1D, 0x24),
+                surface_raised: Color::Rgb(0x0E, 0x1C, 0x27),
                 surface_active: Color::Rgb(0x1D, 0x25, 0x30),
                 selection: Color::Rgb(0x26, 0x34, 0x42),
+                border_subtle: Color::Rgb(0x29, 0x3A, 0x47),
+                border_strong: Color::Rgb(0x4A, 0x6B, 0x7C),
                 border: Color::Rgb(0x30, 0x39, 0x45),
                 border_focus: Color::Rgb(0x58, 0x75, 0x8D),
                 text_primary: Color::Rgb(0xD7, 0xDC, 0xE2),
@@ -95,10 +103,14 @@ impl Theme {
         Self {
             mode: ThemeMode::Ansi256Dark,
             palette: Palette {
+                canvas: Color::Indexed(233),
                 background: Color::Indexed(234),
                 surface: Color::Indexed(235),
+                surface_raised: Color::Indexed(236),
                 surface_active: Color::Indexed(236),
                 selection: Color::Indexed(238),
+                border_subtle: Color::Indexed(238),
+                border_strong: Color::Indexed(67),
                 border: Color::Indexed(239),
                 border_focus: Color::Indexed(67),
                 text_primary: Color::Indexed(253),
@@ -128,10 +140,14 @@ impl Theme {
         Self {
             mode: ThemeMode::Ansi16,
             palette: Palette {
+                canvas: Color::Black,
                 background: Color::Black,
                 surface: Color::Black,
+                surface_raised: Color::DarkGray,
                 surface_active: Color::DarkGray,
                 selection: Color::DarkGray,
+                border_subtle: Color::DarkGray,
+                border_strong: Color::Blue,
                 border: Color::DarkGray,
                 border_focus: Color::Blue,
                 text_primary: Color::Gray,
@@ -204,6 +220,26 @@ impl Theme {
         Style::default()
             .fg(self.palette.text_primary)
             .bg(self.palette.background)
+    }
+
+    pub fn canvas(self) -> Style {
+        Style::default()
+            .fg(self.palette.text_primary)
+            .bg(self.palette.canvas)
+    }
+
+    pub fn raised_surface(self) -> Style {
+        Style::default()
+            .fg(self.palette.text_primary)
+            .bg(self.palette.surface_raised)
+    }
+
+    pub fn subtle_border(self) -> Style {
+        Style::default().fg(self.palette.border_subtle)
+    }
+
+    pub fn strong_border(self) -> Style {
+        Style::default().fg(self.palette.border_strong)
     }
 
     pub fn surface(self) -> Style {

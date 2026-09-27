@@ -134,12 +134,74 @@ fn ch16_enter_views_lba8_without_toggling_tree_expansion() {
 }
 
 #[test]
-#[ignore = "U1/U7: red centralized responsive contract"]
 fn ch16_responsive_breakpoints_have_one_source() {
+    use edpcli::tui::ui::ViewportClass;
+
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
     let source = std::fs::read_to_string(root.join("src/tui/ui/responsive.rs"))
         .expect("central responsive module");
     for token in ["Compact", "Standard", "Wide", "UltraWide"] {
         assert!(source.contains(token), "missing viewport class {token}");
+    }
+    for (width, class) in [
+        (40, ViewportClass::Compact),
+        (79, ViewportClass::Compact),
+        (80, ViewportClass::Standard),
+        (119, ViewportClass::Standard),
+        (120, ViewportClass::Wide),
+        (159, ViewportClass::Wide),
+        (160, ViewportClass::UltraWide),
+        (240, ViewportClass::UltraWide),
+    ] {
+        assert_eq!(ViewportClass::for_width(width), class, "width={width}");
+    }
+}
+
+#[test]
+fn ch16_design_primitives_share_theme_and_render_at_compact_size() {
+    use edpcli::tui::ui::{
+        card, data_table, key_hints, notice_banner, panel, status_badge, BadgeTone, BannerTone,
+    };
+    use ratatui::{
+        layout::Constraint,
+        text::Line,
+        widgets::{Paragraph, Row},
+    };
+
+    let mut terminal = Terminal::new(TestBackend::new(40, 10)).unwrap();
+    terminal
+        .draw(|frame| {
+            frame.render_widget(
+                Paragraph::new(status_badge("正常", BadgeTone::Success)).block(card("设备", true)),
+                ratatui::layout::Rect::new(0, 0, 20, 4),
+            );
+            frame.render_widget(
+                data_table(
+                    "列表",
+                    Row::new(["名称"]),
+                    [Row::new(["disk4"])],
+                    [Constraint::Min(1)],
+                    false,
+                ),
+                ratatui::layout::Rect::new(20, 0, 20, 4),
+            );
+            frame.render_widget(
+                notice_banner(Line::from("扫描完成"), BannerTone::Info),
+                ratatui::layout::Rect::new(0, 4, 40, 1),
+            );
+            frame.render_widget(
+                Paragraph::new(key_hints(&[("r", "刷新"), ("?", "帮助")]))
+                    .block(panel("操作", false)),
+                ratatui::layout::Rect::new(0, 5, 40, 4),
+            );
+        })
+        .unwrap();
+    let text = (0..10)
+        .flat_map(|y| (0..40).map(move |x| (x, y)))
+        .map(|position| terminal.backend().buffer()[position].symbol().to_owned())
+        .collect::<String>()
+        .replace(' ', "");
+    for value in ["设备", "正常", "disk4", "扫描完成", "刷新"] {
+        assert!(text.contains(value), "missing {value}");
     }
 }

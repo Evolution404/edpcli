@@ -9369,7 +9369,7 @@ Backup detail / coverage
 
 #### U1 — Design System + Responsive primitives
 
-状态：PENDING。
+状态：COMPLETE（2026-09-27）。新增语义 canvas / raised surface / border token 与三种颜色深度映射；`src/tui/ui/` 提供 Panel、Card、StatusBadge、DataTable、KeyHints、NoticeBanner；`ViewportClass` 在 `responsive.rs` 单点定义 80/120/160 阈值。组件 40x10 smoke test、边界分类、既有 Theme contract 均通过，业务 Workspace 尚未迁移。
 
 - 扩展 Theme semantic tokens；
 - 新建 `ui/` 公共组件；
