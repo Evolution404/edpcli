@@ -1076,7 +1076,7 @@ impl TargetProvisionPlan {
                         .iter()
                         .filter(|mapping| {
                             mapping.target_index == Some(index)
-                                && mapping.kind == RegionMappingKind::MigrateUnsupported
+                                && mapping.kind == RegionMappingKind::Migrate
                         })
                         .filter_map(|mapping| {
                             let source_index = mapping.source_index?;

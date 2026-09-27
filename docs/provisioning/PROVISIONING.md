@@ -3353,7 +3353,7 @@ K0 基线审计曾确认：
 
 #### Phase K5：prepare/commit 安全门禁
 
-**实施状态（2026-09-26）：COMPLETE。** prepare 与 commit 双层检查 disposition；Opaque 原 key material 透传且 preserved extent 禁写，Rewrap 复用 `K_old`，Rebuild 必须显式完整初始化，Migrate 未实现时拒绝执行；协议写入后继续执行 LBA0～12 readback。fast gate 6 suites / 8 artifacts 0 failures；full gate 8 suites / 10 artifacts + doctest 0 failures（25.98s）。
+**实施状态（2026-09-26）：COMPLETE。** prepare 与 commit 双层检查 disposition；Opaque 原 key material 透传且 preserved extent 禁写，Rewrap 复用 `K_old`，Rebuild 必须显式完整初始化；当时 K6 尚未落地，所以 Migrate 在 K5 边界 fail-closed。**该句只描述 K5 收口时状态；2026-09-27 的 K6 实现已在下节接管 Migrate。** 协议写入后继续执行 LBA0～12 readback。fast gate 6 suites / 8 artifacts 0 failures；full gate 8 suites / 10 artifacts + doctest 0 failures（25.98s）。
 
 - 修复所有可能产生 `K_new + old ciphertext` 的路径；
 - Rewrap 只改 wrapper；
@@ -3364,23 +3364,35 @@ K0 基线审计曾确认：
 
 #### Phase K6：可选数据迁移能力
 
-**实施状态（更新至 2026-09-27）：PARTIAL。K6.1～K6.3 COMPLETE；真实数据迁移 writer 仍 NOT IMPLEMENTED / DEFERRED。**
+**实施状态（2026-09-27）：IMPLEMENTATION COMPLETE；自动化验证 COMPLETE。** PR #34 `feat(provision): complete K6 lossless data migration` 已把 K6.1～K6.8 的代码路径接通。K6-specific 真实 USB 破坏性验收仍需在用户明确指定测试盘后单独执行；这不影响代码实现状态，但在取得真实盘证据前不得把“真实 USB K6 migration HIL”标记为 PASS。
 
-- **K6.1 typed migration planning COMPLETE**：`RegionMappingPlanner` 已正式接入 `TargetProvisionPlan`，跨语义目标记录 typed `MigrationSource { source_index, region }` 并进入 `RegionDisposition::Migrate`；mode0→mode1 combined 会明确记录 Boot + Share 来源。未显式选择格式化时 prepare/commit 继续 fail-closed；用户明确选择完整文件系统初始化时，`force_rebuild_for_format()` 才允许显式转为 Rebuild。PR #30 合并为 `2de1ac5`。
-- **K6.2 typed migration transforms COMPLETE**：迁移来源进一步携带 `MigrationTransform`，覆盖 `BootToBootShareCombined / ShareToBootShareCombined / BootShareCombinedToBoot / BootShareCombinedToShare / EncryptToShare / ShareToEncrypt`，后续 executor 不再根据 role 组合重新猜测语义。PR #32 合并为 `112be90`；六平台 Rust CI 全绿，Virtual Disk HIL **4/4 PASS**。
-- **K6.3 read-only payload locator/stream COMPLETE**：FAT16/FAT32/exFAT inventory 在解析 cluster chain 时只记录 partition-relative `FilePayloadLocator`，默认 inventory 仍保持普通文件 payload **零读取**；只有显式调用 `stream_file_payload()` 才按 `logical_size + max_bytes` 预算读取碎片化 extent，并计算 exact logical bytes 的 SHA-256。预算不足在 I/O 前 fail-closed；0 字节文件零 I/O；locator 使用 `serde(skip)`，不改变现有 Deep inventory/备份序列化格式。`backup_suite` **73/73 PASS**，本地 fast 4 suites / 6 artifacts 0 failures（13.67s），full 8 suites / 10 artifacts + doctest 0 failures（26.74s）；PR #33 合并为 `ff1320a`，六平台 Rust CI 全绿，Virtual Disk HIL **4/4 PASS**。
+> **当前真相源：本节。** 文档后续章节中若仍出现“`K6 DEFERRED` / `Migrate fail-closed` / `未来实现 K6`”，且其上下文明确是 2026-09-26 或 PR #34 之前的阶段审计，则视为历史快照，不再代表当前实现状态。新的代码、UI、测试和后续计划必须以本节为准。
 
-K6.1～K6.3 只完成“识别迁移语义 → 精确描述来源 → 安全读取并校验来源文件 payload”的只读链路，**没有新增 migration writer，也没有扩大任何真实盘写入集合**。
+- **K6.1 typed migration planning COMPLETE**：`RegionMappingPlanner` 接入 `TargetProvisionPlan`，跨语义目标记录 typed `MigrationSource { source_index, region, transform }` 并进入 `RegionDisposition::Migrate`。mode0→mode1 combined 明确记录 Boot + Share 两个来源；planner 映射种类已由旧名 `MigrateUnsupported` 收敛为 `Migrate`。
+- **K6.2 typed migration transforms COMPLETE**：覆盖 `BootToBootShareCombined / ShareToBootShareCombined / BootShareCombinedToBoot / BootShareCombinedToShare / EncryptToShare / ShareToEncrypt`，并为 application 层 Plain 双向迁移增加 `PlainToEdp / EdpToPlain`。executor 不再根据 role 组合重新猜语义。
+- **K6.3 payload locator/stream COMPLETE**：FAT16/FAT32/exFAT inventory 在解析 cluster chain 时记录 partition-relative `FilePayloadLocator`；`stream_file_payload()` 按 logical bytes + budget 读取碎片 extent，并计算 exact logical bytes SHA-256。普通 Deep inventory 默认仍不读取文件 payload，locator 使用 `serde(skip)`，不改变备份序列化格式。
+- **K6.4 manifest / preflight COMPLETE**：新增 typed `MigrationInventory / MigrationBudgets / MigrationManifest / MigrationManifestEntry / MigrationPreflightError`。写盘前检查来源 inventory 一致性、transform 一致性、路径规范化、大小写路径冲突、文件缺失 locator、locator 越界、logical size、entry count、staging/target 容量及整数溢出；任一失败均在写盘前 fail-closed。
+- **K6.5 staging COMPLETE**：EDP 来源先解析完整文件系统，再按 locator 把文件完整 staging；物理加密区只允许在 source password knowledge 为 `DefaultVerified/UserVerified` 且 FileKey CRC/SM4 验证成功后解密读取，Unknown 密码拒绝迁移。Plain 来源先验证 MBR 分区边界/重叠并完整解析文件系统；多个 Plain 分区导入 EDP 时使用 `/P<n>/` 前缀避免冲突，多个 EDP role 导出 Plain 时使用 `/EDP_BOOT/ /EDP_SHARE/ /EDP_ENCRYPT/ /EDP_COMBINED/` 前缀。
+- **K6.6 populated filesystem writer COMPLETE**：first-party FAT16/exFAT writer 可从 staged tree 生成包含目录、Unicode/长文件名和真实 file payload 的目标文件系统，重建 FAT/cluster allocation、exFAT bitmap/upcase/root/entry-set/boot checksum；生成后立即通过 canonical `analyze_partition + stream_file_payload` 做语义与逐字节 payload readback。目标 FAT32/NTFS writer 仍不在 portable provision writer 支持范围内，必须在写盘前显式拒绝，禁止静默降级。
+- **K6.7 transactional commit / rollback COMPLETE**：Official K6 data sectors 与 LBA0～12 metadata 进入现有 `atomic_write_official_provision_sectors_observed()`，由 `WriteTransactionPlan` 按 Data → Metadata → MBR Commit 排序；事务在写前镜像全部 touched sectors，写后逐扇 readback，失败自动 exact rollback 并再次验证。Plain K6 通过 `WriteTransactionPlan::from_plain_provision()` 走同一事务引擎。PreserveOpaque / PreserveVerified / RewrapVerified 的 preserved extent 零写入规则未放宽，metadata-only `atomic_write_sectors()` 的 LBA0～12 限制也未放宽。
+- **K6.8 automated validation COMPLETE**：新增 manifest/preflight、FAT16/exFAT populated round-trip、Plain K6 round-trip、K6 official transaction rollback、Virtual Disk HIL populated filesystem raw-write/readback/restore。2026-09-27 本机 fast gate 为 **4 suites / 6 artifacts / 0 failures**，full gate 为 **8 suites / 10 artifacts + doctest / 0 failures**；PR #34 的 GitHub Rust CI 与 Virtual Disk HIL 在 K6 transaction 修复提交 `4ffbe5b` 上均已通过，最终 PR HEAD 仍必须保持这些门禁全绿。
 
-后续 K6 writer 阶段才考虑：
+K6 当前安全语义：
 
-- 同盘不同 extent 的安全文件级迁移；
-- EDP→Plain 解密迁移；
-- Plain→EDP 导入；
-- type2/type4 语义改变时的数据迁移；
-- 空间不足、重叠、掉电/失败回滚方案。
+```text
+完整读取/验证来源
+  -> typed manifest/preflight
+  -> 全量 staging（写盘前完成）
+  -> 构造目标 filesystem + semantic readback
+  -> mandatory backup / lock / reopen identity
+  -> Data -> Metadata -> MBR transactional write
+  -> exact readback
+  -> failure => exact touched-set rollback
+```
 
-未完成 K6 前，所有需要 Migrate 的转换必须明确告诉用户“当前不能无损保留该区域”，由用户决定 Rebuild/Drop。
+因此同盘 source/target extent 即使重叠，也不会边读源数据边覆盖源数据；所有需要迁移的 logical payload 必须在第一次破坏性写入前完成 staging。Unknown key material、无法解析的 filesystem、容量不足、路径冲突、unsupported target filesystem、越界 locator 等情况全部拒绝继续。
+
+**真实盘验收边界**：原 K8 的 2026-09-26 真实 USB 证据验证的是 K6 落地前的 Preserve/Rewrap/Rebuild/Plain 等安全链，继续有效；它不能自动充当新的 K6 文件级迁移真实盘证据。K6-specific 真实 USB acceptance 应另行记录 source files → migration → mount/readback/hash → rollback/restore 证据。
 
 #### Phase K7：Virtual-HIL
 
