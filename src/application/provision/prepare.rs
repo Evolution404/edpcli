@@ -1011,12 +1011,7 @@ pub fn prepare_plain_provision(
     } else {
         let mut migrations = vec![Vec::new(); plan.partitions.len()];
         migrations[0] = staged_to_plain;
-        build_plain_migrated_provision_write_plan(
-            &plan,
-            source_lce,
-            &volume_serials,
-            &migrations,
-        )
+        build_plain_migrated_provision_write_plan(&plan, source_lce, &volume_serials, &migrations)
     }
     .map_err(|message| {
         err(
