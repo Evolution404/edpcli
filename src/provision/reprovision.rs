@@ -1217,6 +1217,32 @@ impl TargetProvisionPlan {
         })
     }
 
+    pub fn force_rebuild_for_format(&mut self, role: PartitionRole) -> bool {
+        let Some(part) = self
+            .partitions
+            .iter_mut()
+            .find(|part| part.geometry.role == role)
+        else {
+            return false;
+        };
+        if !part.disposition.preserves_extent() && part.disposition != RegionDisposition::Migrate {
+            return false;
+        }
+        let previous = part.disposition;
+        part.action = PartitionAction::Rebuild;
+        part.disposition = RegionDisposition::Rebuild;
+        part.target_password_policy = super::KeyDomainRole::from_partition_role(role)
+            .map(|_| super::TargetPasswordPolicy::InitializeNew);
+        part.preserved_record = None;
+        part.migration_sources.clear();
+        part.reason = if previous == RegionDisposition::Migrate {
+            "用户选择重新格式化；Migrate 已显式转为 Rebuild".into()
+        } else {
+            "用户选择重新格式化；Preserve family 已显式转为 Rebuild".into()
+        };
+        true
+    }
+
     pub fn preserved_extents(&self) -> impl Iterator<Item = (u64, u64)> + '_ {
         self.partitions
             .iter()
