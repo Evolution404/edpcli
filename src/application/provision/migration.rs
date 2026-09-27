@@ -4,7 +4,7 @@ use crate::backup_deep::{
 };
 use crate::provision::{
     build_migration_manifest, finalize_staged_entry, MigrationBudgets, MigrationInventory,
-    MigrationStagedEntry, PhysicalCryptoProfile, SourceRegion,
+    MigrationStagedEntry, SourceRegion,
 };
 
 #[derive(Clone, Debug, Eq, PartialEq)]
