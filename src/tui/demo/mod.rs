@@ -249,22 +249,31 @@ pub(super) fn run_interactive(scene: &str) -> i32 {
         let super::ct_event::Event::Key(key) = event else {
             continue;
         };
-        let role = if state.active_table_kind().is_some() {
-            super::keymap::WidgetRole::Table
-        } else {
-            super::keymap::WidgetRole::Other
-        };
+        let role = super::controller::active_widget_role(&state);
         let Some(action) = keys.map_for_role(state.input_mode(), role, key) else {
             continue;
         };
         let size = session.terminal.size().ok();
-        if handle_action(
+        let width = size.map_or(120, |size| size.width);
+        let height = size.map_or(24, |size| size.height);
+        let viewport = usize::from(height.saturating_sub(8)).max(1);
+        let outcome = super::controller::dispatch_action(
             &mut state,
             action,
-            size.map_or(120, |size| size.width),
-            size.map_or(24, |size| size.height),
+            role,
+            viewport,
+            width,
             &mut super::clipboard::ClipboardService,
-        ) {
+        );
+        if !outcome.handled {
+            continue;
+        }
+        let mut effect = outcome.effect;
+        if let Some(request) = outcome.request {
+            effect = execute_demo_request(&mut state, request, viewport);
+        }
+        hydrate_inspect(&mut state);
+        if effect == crate::tui::state::StateEffect::ExitRequested {
             break;
         }
     }
@@ -304,140 +313,40 @@ fn hydrate_inspect(state: &mut AppState) {
     }
 }
 
-fn handle_action(
+fn execute_demo_request(
     state: &mut AppState,
-    action: super::keymap::TuiAction,
-    width: u16,
-    height: u16,
-    clipboard: &mut dyn super::clipboard::ClipboardBackend,
-) -> bool {
-    use super::keymap::TuiAction;
-    use crate::tui::state::Workspace;
-
-    let viewport = usize::from(height.saturating_sub(8)).max(1);
-    match action {
-        TuiAction::Quit => return true,
-        TuiAction::WorkspaceNext | TuiAction::WorkspacePrevious => {
-            let command = if action == TuiAction::WorkspaceNext {
-                NavCommand::NextWorkspace
-            } else {
-                NavCommand::PreviousWorkspace
-            };
-            state.navigate(command, viewport);
+    request: super::controller::ActionRequest,
+    viewport: usize,
+) -> crate::tui::state::StateEffect {
+    match request {
+        super::controller::ActionRequest::Navigate(NavCommand::OpenInspect) => {
+            let effect = state.navigate(NavCommand::WorkspaceInspect, viewport);
             hydrate_inspect(state);
+            effect
         }
-        TuiAction::MoveUp | TuiAction::MoveDown => {
-            let delta = if action == TuiAction::MoveUp { -1 } else { 1 };
-            if state.workspace() == Workspace::Inspect {
-                let count = state.advanced_inspect_focused_content_len();
-                state.advanced_inspect_move_focused_vertical(delta, viewport, count);
-            } else if state.workspace() == Workspace::Provision
-                && matches!(
-                    state.provision().stage,
-                    ProvisionStage::Form | ProvisionStage::Review
-                )
-            {
-                let count = state.provision_focused_content_len();
-                state.provision_move_focused_vertical(delta, viewport, count);
-            } else {
-                state.navigate(
-                    if delta < 0 {
-                        NavCommand::Up
-                    } else {
-                        NavCommand::Down
-                    },
-                    viewport,
-                );
-            }
+        super::controller::ActionRequest::Navigate(_) => {
+            state.set_notice("演示模式不会执行真实外部操作");
+            crate::tui::state::StateEffect::None
         }
-        TuiAction::MoveLeft if state.workspace() == Workspace::Inspect => {
-            state.advanced_inspect_collapse_or_parent();
+        super::controller::ActionRequest::InspectSelection { .. } => {
+            open_cached_inspect_selection(state);
+            crate::tui::state::StateEffect::None
         }
-        TuiAction::MoveRight if state.workspace() == Workspace::Inspect => {
-            state.advanced_inspect_expand_or_child();
+        super::controller::ActionRequest::InspectPreview { lba, .. } => {
+            state.advanced_inspect_sector_finish(lba, Err("演示模式不会读取真实扇区".into()));
+            crate::tui::state::StateEffect::None
         }
-        TuiAction::Top if state.workspace() == Workspace::Inspect => {
-            state.advanced_inspect_focused_top();
+        super::controller::ActionRequest::ProvisionKeyProbe { .. } => {
+            state.provision_mut().message =
+                Some("演示模式使用固定制盘夹具，不探测真实介质密钥。".into());
+            crate::tui::state::StateEffect::None
         }
-        TuiAction::Bottom if state.workspace() == Workspace::Inspect => {
-            state.advanced_inspect_focused_bottom();
+        super::controller::ActionRequest::ProvisionSourcePasswordVerify
+        | super::controller::ActionRequest::ProvisionPlan => {
+            state.set_notice("演示模式不会启动真实后台任务");
+            crate::tui::state::StateEffect::None
         }
-        TuiAction::TableColumnLeft
-        | TuiAction::TableColumnRight
-        | TuiAction::TableMoveColumnLeft
-        | TuiAction::TableMoveColumnRight
-        | TuiAction::TableColumnFirst
-        | TuiAction::TableColumnLast
-        | TuiAction::TableCopyCell
-        | TuiAction::TableCopyRow => {
-            let _ = super::table_dispatch::dispatch_table_action_with_clipboard(
-                state, action, viewport, width, clipboard,
-            );
-        }
-        TuiAction::Open => {
-            if state.advanced_inspect_focused_pane() == Some(PaneId::InspectDiskLayout)
-                || (state.workspace() == Workspace::Provision
-                    && state.provision_focused_pane() == PaneId::ProvisionDiskLayout)
-            {
-                state.toggle_disk_layout_tail();
-            } else if state.workspace() == Workspace::Inspect {
-                super::dispatch::open_inspect_selection(state);
-            }
-        }
-        TuiAction::Activate => match state.workspace() {
-            Workspace::Devices => {
-                let _ = state.activate_device_for_viewport(width);
-            }
-            Workspace::Inspect => {
-                if state.advanced_inspect_focused_pane() == Some(PaneId::InspectDiskLayout) {
-                    super::dispatch::show_inspect_layout_detail(state);
-                } else {
-                    open_cached_inspect_selection(state);
-                }
-            }
-            Workspace::Provision => match state.provision().stage {
-                ProvisionStage::SelectDisk => {
-                    state.provision_select_disk();
-                }
-                ProvisionStage::Menu => {
-                    state.provision_begin_selected();
-                }
-                _ => state.set_notice("演示模式不会执行真实操作"),
-            },
-            Workspace::Backups => state.focus_backups_pane(PaneId::BackupSummary),
-        },
-        TuiAction::PanelNext => match state.workspace() {
-            Workspace::Inspect => state.advanced_inspect_shift_panel(false),
-            Workspace::Provision => state.provision_shift_pane(false),
-            Workspace::Devices => state.shift_workspace_pane(false),
-            Workspace::Backups => state.shift_workspace_pane(false),
-        },
-        TuiAction::PanelPrevious => match state.workspace() {
-            Workspace::Inspect => state.advanced_inspect_shift_panel(true),
-            Workspace::Provision => state.provision_shift_pane(true),
-            Workspace::Devices | Workspace::Backups => state.shift_workspace_pane(true),
-        },
-        TuiAction::Yank | TuiAction::YankRaw if state.workspace() == Workspace::Inspect => {
-            if state.advanced_inspect_focused_pane() == Some(PaneId::InspectDetail) {
-                let _ = state.advanced_inspect_detail_yank(action == TuiAction::YankRaw);
-            }
-        }
-        TuiAction::Provision => {
-            state.navigate(NavCommand::WorkspaceProvision, viewport);
-        }
-        TuiAction::Back => {
-            state.navigate(NavCommand::Escape, viewport);
-            hydrate_inspect(state);
-        }
-        TuiAction::BackupCreate
-        | TuiAction::Restore
-        | TuiAction::Delete
-        | TuiAction::ViewOrVerify
-        | TuiAction::Export
-        | TuiAction::Refresh => state.set_notice("演示模式不会执行真实操作"),
-        _ => {}
     }
-    false
 }
 
 fn open_cached_inspect_selection(state: &mut AppState) {
@@ -476,20 +385,24 @@ mod tests {
     fn demo_table_actions_forward_cell_and_row_to_shared_clipboard() {
         let mut state = build_scene("devices").unwrap();
         let mut clipboard = CapturingClipboard::default();
-        assert!(!handle_action(
+        let cell = super::super::controller::dispatch_action(
             &mut state,
             TuiAction::TableCopyCell,
+            super::super::keymap::WidgetRole::Table,
+            28,
             120,
-            36,
             &mut clipboard,
-        ));
-        assert!(!handle_action(
+        );
+        assert!(cell.handled);
+        let row = super::super::controller::dispatch_action(
             &mut state,
             TuiAction::TableCopyRow,
+            super::super::keymap::WidgetRole::Table,
+            28,
             120,
-            36,
             &mut clipboard,
-        ));
+        );
+        assert!(row.handled);
         assert_eq!(clipboard.0.len(), 2);
         assert_eq!(clipboard.0[0], "disk6");
         assert!(clipboard.0[1].contains("DEMO"));

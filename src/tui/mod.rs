@@ -6,6 +6,7 @@
 pub mod animation;
 pub mod clipboard;
 pub mod command;
+mod controller;
 pub mod demo;
 pub mod disk_layout;
 mod dispatch;
@@ -36,7 +37,6 @@ use crate::common::{EXIT_IO, EXIT_OK, EXIT_USAGE};
 use dispatch::*;
 use event::KeyMapper;
 use state::{AppState, NavCommand, StateEffect};
-use table_dispatch::*;
 use task::TaskHub;
 
 const RESUME_KIND_FLAG: &str = "--_resume-kind";
@@ -436,8 +436,6 @@ fn run_loop(resume: Option<state::WriteIntent>) -> io::Result<LoopExit> {
                                 continue;
                             }
                             AdvancedInspectStage::Browser => {
-                                let viewport_height =
-                                    session.terminal.size()?.height.saturating_sub(9) as usize;
                                 if let Some(prompt) = state.advanced_inspect_prompt() {
                                     let mode = if matches!(
                                         prompt,
@@ -608,230 +606,25 @@ fn run_loop(resume: Option<state::WriteIntent>) -> io::Result<LoopExit> {
                                     continue;
                                 }
 
-                                let role = if state.advanced_inspect().is_some_and(|advanced| {
-                                    advanced.panel == state::AdvancedInspectPanel::Tree
-                                }) {
-                                    keymap::WidgetRole::Tree
-                                } else if state.advanced_inspect().is_some_and(|advanced| {
-                                    advanced.panel == state::AdvancedInspectPanel::Detail
-                                        && state.advanced_inspect_selected_sector_lba().is_some_and(
-                                            |lba| {
-                                                advanced.result.as_ref().is_some_and(|workspace| {
-                                                    workspace.items.iter().any(|item| {
-                                                        item.lba == lba && !item.fields.is_empty()
-                                                    })
-                                                })
-                                            },
-                                        )
-                                }) {
-                                    keymap::WidgetRole::Table
-                                } else {
-                                    keymap::WidgetRole::Other
-                                };
+                                let role = controller::active_widget_role(&state);
                                 let Some(action) =
                                     keys.map_for_role(state::InputMode::Normal, role, key)
                                 else {
                                     continue;
                                 };
-                                use keymap::TuiAction;
-                                match action {
-                                    TuiAction::WorkspaceNext => {
-                                        let _ = state.navigate(NavCommand::NextWorkspace, 1);
-                                    }
-                                    TuiAction::WorkspacePrevious => {
-                                        let _ = state.navigate(NavCommand::PreviousWorkspace, 1);
-                                    }
-                                    TuiAction::InspectJump => {
-                                        state.advanced_inspect_begin_jump();
-                                    }
-                                    TuiAction::Search => {
-                                        state.advanced_inspect_begin_search();
-                                    }
-                                    TuiAction::NextMatch | TuiAction::PreviousMatch => {
-                                        if let Err(message) = state.advanced_inspect_search_next(
-                                            action == TuiAction::PreviousMatch,
-                                        ) {
-                                            state.set_notice(message);
-                                        }
-                                    }
-                                    TuiAction::MoveUp => {
-                                        let content_len =
-                                            state.advanced_inspect_focused_content_len();
-                                        state.advanced_inspect_move_focused_vertical(
-                                            -1,
-                                            1,
-                                            content_len,
-                                        );
-                                    }
-                                    TuiAction::MoveDown => {
-                                        let content_len =
-                                            state.advanced_inspect_focused_content_len();
-                                        state.advanced_inspect_move_focused_vertical(
-                                            1,
-                                            1,
-                                            content_len,
-                                        );
-                                    }
-                                    TuiAction::TableColumnLeft
-                                    | TuiAction::TableColumnRight
-                                    | TuiAction::TableMoveColumnLeft
-                                    | TuiAction::TableMoveColumnRight
-                                    | TuiAction::TableColumnFirst
-                                    | TuiAction::TableColumnLast
-                                    | TuiAction::TableScrollLeft
-                                    | TuiAction::TableScrollRight
-                                    | TuiAction::TableSortToggle
-                                    | TuiAction::TableSortClear
-                                    | TuiAction::TableCopyCell
-                                    | TuiAction::TableCopyRow
-                                        if role == keymap::WidgetRole::Table =>
-                                    {
-                                        let size = session.terminal.size()?;
-                                        let _ = dispatch_table_action(
-                                            &mut state,
-                                            action,
-                                            size.height as usize,
-                                            size.width,
-                                        );
-                                    }
-                                    TuiAction::MoveLeft if role == keymap::WidgetRole::Tree => {
-                                        state.advanced_inspect_collapse_or_parent();
-                                    }
-                                    TuiAction::MoveRight if role == keymap::WidgetRole::Tree => {
-                                        state.advanced_inspect_expand_or_child();
-                                    }
-                                    TuiAction::Top => state.advanced_inspect_focused_top(),
-                                    TuiAction::Bottom => state.advanced_inspect_focused_bottom(),
-                                    TuiAction::Open => {
-                                        dispatch::open_inspect_selection(&mut state);
-                                    }
-                                    TuiAction::Yank | TuiAction::YankRaw => {
-                                        if state.advanced_inspect_focused_pane()
-                                            == Some(crate::tui::pane::PaneId::InspectDetail)
-                                        {
-                                            let _ = state.advanced_inspect_detail_yank(
-                                                action == TuiAction::YankRaw,
-                                            );
-                                        }
-                                    }
-                                    TuiAction::Refresh => {
-                                        if let Some((source, lba)) =
-                                            state.advanced_inspect_retry_selected_preview()
-                                        {
-                                            if let Err(message) =
-                                                tasks.request_advanced_inspect_preview(source, lba)
-                                            {
-                                                state.advanced_inspect_sector_finish(
-                                                    lba,
-                                                    Err(message.to_string()),
-                                                );
-                                            }
-                                        }
-                                    }
-                                    TuiAction::Activate => {
-                                        if state.advanced_inspect_focused_pane()
-                                            == Some(crate::tui::pane::PaneId::InspectDiskLayout)
-                                        {
-                                            dispatch::show_inspect_layout_detail(&mut state);
-                                        } else {
-                                            open_advanced_inspect_selection(
-                                                &mut state, &mut tasks, false,
-                                            );
-                                        }
-                                    }
-                                    TuiAction::InspectBusiness => {
-                                        state.advanced_inspect_focus_pane(
-                                            crate::tui::pane::PaneId::InspectOverview,
-                                        );
-                                        state
-                                            .pane_viewport_mut(
-                                                crate::tui::pane::PaneId::InspectDetail,
-                                            )
-                                            .scroll_x = 0;
-                                    }
-                                    TuiAction::InspectRawFields => {
-                                        state.advanced_inspect_focus_pane(
-                                            crate::tui::pane::PaneId::InspectDetail,
-                                        );
-                                        state
-                                            .pane_viewport_mut(
-                                                crate::tui::pane::PaneId::InspectDetail,
-                                            )
-                                            .scroll_x = 2;
-                                    }
-                                    TuiAction::InspectHex => {
-                                        open_advanced_inspect_selection(
-                                            &mut state, &mut tasks, true,
-                                        );
-                                    }
-                                    TuiAction::InspectDiskLayout => {
-                                        state.advanced_inspect_focus_pane(
-                                            crate::tui::pane::PaneId::InspectDiskLayout,
-                                        );
-                                    }
-                                    TuiAction::PanelNext => {
-                                        state.advanced_inspect_shift_panel(false);
-                                    }
-                                    TuiAction::PanelPrevious => {
-                                        state.advanced_inspect_shift_panel(true);
-                                    }
-                                    TuiAction::PanelLeft => {
-                                        state.advanced_inspect_spatial_focus(-1, 0);
-                                    }
-                                    TuiAction::PanelRight => {
-                                        state.advanced_inspect_spatial_focus(1, 0);
-                                    }
-                                    TuiAction::PanelUp => {
-                                        state.advanced_inspect_spatial_focus(0, -1);
-                                    }
-                                    TuiAction::PanelDown => {
-                                        state.advanced_inspect_spatial_focus(0, 1);
-                                    }
-                                    TuiAction::HalfPageUp => {
-                                        let delta = -((viewport_height / 2).max(1) as isize);
-                                        let content_len =
-                                            state.advanced_inspect_focused_content_len();
-                                        state.advanced_inspect_move_focused_vertical(
-                                            delta,
-                                            1,
-                                            content_len,
-                                        );
-                                    }
-                                    TuiAction::HalfPageDown => {
-                                        let delta = (viewport_height / 2).max(1) as isize;
-                                        let content_len =
-                                            state.advanced_inspect_focused_content_len();
-                                        state.advanced_inspect_move_focused_vertical(
-                                            delta,
-                                            1,
-                                            content_len,
-                                        );
-                                    }
-                                    TuiAction::PageUp => {
-                                        let content_len =
-                                            state.advanced_inspect_focused_content_len();
-                                        state.advanced_inspect_move_focused_vertical(
-                                            -(viewport_height.max(1) as isize),
-                                            1,
-                                            content_len,
-                                        );
-                                    }
-                                    TuiAction::PageDown => {
-                                        let content_len =
-                                            state.advanced_inspect_focused_content_len();
-                                        state.advanced_inspect_move_focused_vertical(
-                                            viewport_height.max(1) as isize,
-                                            1,
-                                            content_len,
-                                        );
-                                    }
-                                    TuiAction::Back => {
-                                        let _ = state.navigate(NavCommand::Escape, 1);
-                                    }
-                                    TuiAction::Help => {
-                                        let _ = state.navigate(NavCommand::Help, 1);
-                                    }
-                                    _ => {}
+                                let size = session.terminal.size()?;
+                                let viewport_height = size.height.saturating_sub(9) as usize;
+                                match dispatch_tui_action(
+                                    &mut state,
+                                    &mut tasks,
+                                    action,
+                                    role,
+                                    &backup_dir,
+                                    viewport_height,
+                                    size.width,
+                                ) {
+                                    StateEffect::ExitRequested => break,
+                                    StateEffect::ExitDeferred | StateEffect::None => {}
                                 }
                                 continue;
                             }
@@ -841,14 +634,7 @@ fn run_loop(resume: Option<state::WriteIntent>) -> io::Result<LoopExit> {
                         use keymap::TuiAction;
                         use state::ProvisionStage;
 
-                        let role = if matches!(
-                            state.provision().stage,
-                            ProvisionStage::SelectDisk | ProvisionStage::Menu
-                        ) {
-                            keymap::WidgetRole::Table
-                        } else {
-                            keymap::WidgetRole::Other
-                        };
+                        let role = controller::active_widget_role(&state);
                         let Some(action) = keys.map_for_role(state.input_mode(), role, key) else {
                             continue;
                         };
@@ -879,6 +665,7 @@ fn run_loop(resume: Option<state::WriteIntent>) -> io::Result<LoopExit> {
                                 &mut state,
                                 &mut tasks,
                                 action,
+                                role,
                                 &backup_dir,
                                 viewport_height,
                                 session.terminal.size()?.width,
@@ -890,67 +677,20 @@ fn run_loop(resume: Option<state::WriteIntent>) -> io::Result<LoopExit> {
                         }
 
                         match state.provision().stage {
-                            ProvisionStage::SelectDisk => match action {
-                                TuiAction::MoveUp => {
-                                    let _ = state.navigate(NavCommand::Up, viewport_height);
+                            ProvisionStage::SelectDisk | ProvisionStage::Menu => {
+                                match dispatch_tui_action(
+                                    &mut state,
+                                    &mut tasks,
+                                    action,
+                                    role,
+                                    &backup_dir,
+                                    viewport_height,
+                                    session.terminal.size()?.width,
+                                ) {
+                                    StateEffect::ExitRequested => break,
+                                    StateEffect::ExitDeferred | StateEffect::None => {}
                                 }
-                                TuiAction::MoveDown => {
-                                    let _ = state.navigate(NavCommand::Down, viewport_height);
-                                }
-                                TuiAction::Top => {
-                                    let _ = state.navigate(NavCommand::Top, viewport_height);
-                                }
-                                TuiAction::Bottom => {
-                                    let _ = state.navigate(NavCommand::Bottom, viewport_height);
-                                }
-                                TuiAction::Activate => {
-                                    if state.provision_select_disk().is_none() {
-                                        state.set_notice("请选择可读取的 USB 整盘目标。");
-                                    }
-                                }
-                                TuiAction::Back => {
-                                    let _ = state.navigate(NavCommand::Escape, viewport_height);
-                                }
-                                _ => {}
-                            },
-                            ProvisionStage::Menu => match action {
-                                TuiAction::MoveUp => {
-                                    let _ = state.navigate(NavCommand::Up, viewport_height);
-                                }
-                                TuiAction::MoveDown => {
-                                    let _ = state.navigate(NavCommand::Down, viewport_height);
-                                }
-                                TuiAction::Top => {
-                                    let _ = state.navigate(NavCommand::Top, viewport_height);
-                                }
-                                TuiAction::Bottom => {
-                                    let _ = state.navigate(NavCommand::Bottom, viewport_height);
-                                }
-                                TuiAction::Activate => {
-                                    if state.selected_device_disk().is_none() {
-                                        state.set_notice(
-                                            "物理制盘需要先在制盘页明确选择 USB 目标。",
-                                        );
-                                    } else {
-                                        let kind = state.provision_begin_selected();
-                                        if kind != state::ProvisionKind::Plain {
-                                            if let Some(disk) = state.selected_device_disk() {
-                                                if let Err(message) =
-                                                    tasks.request_provision_key_probe(disk)
-                                                {
-                                                    state.provision_finish_key_probe(Err(
-                                                        message.to_string()
-                                                    ));
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                                TuiAction::Back => {
-                                    let _ = state.navigate(NavCommand::Escape, viewport_height);
-                                }
-                                _ => {}
-                            },
+                            }
                             ProvisionStage::Form
                                 if state.input_mode() == state::InputMode::Insert =>
                             {
@@ -968,211 +708,39 @@ fn run_loop(resume: Option<state::WriteIntent>) -> io::Result<LoopExit> {
                                     _ => {}
                                 }
                             }
-                            ProvisionStage::Form => match action {
-                                TuiAction::Open
-                                    if state.provision_focused_pane()
-                                        == crate::tui::pane::PaneId::ProvisionDiskLayout =>
-                                {
-                                    state.toggle_disk_layout_tail();
+                            ProvisionStage::Form => {
+                                match dispatch_tui_action(
+                                    &mut state,
+                                    &mut tasks,
+                                    action,
+                                    role,
+                                    &backup_dir,
+                                    viewport_height,
+                                    session.terminal.size()?.width,
+                                ) {
+                                    StateEffect::ExitRequested => break,
+                                    StateEffect::ExitDeferred | StateEffect::None => {}
                                 }
-                                TuiAction::PanelNext => state.provision_shift_pane(false),
-                                TuiAction::PanelPrevious => state.provision_shift_pane(true),
-                                TuiAction::PanelLeft => state.provision_spatial_focus(-1, 0),
-                                TuiAction::PanelRight => state.provision_spatial_focus(1, 0),
-                                TuiAction::PanelUp => state.provision_spatial_focus(0, -1),
-                                TuiAction::PanelDown => state.provision_spatial_focus(0, 1),
-                                TuiAction::MoveUp => {
-                                    let content_len = state.provision_focused_content_len();
-                                    state.provision_move_focused_vertical(
-                                        -1,
-                                        viewport_height,
-                                        content_len,
-                                    );
-                                }
-                                TuiAction::MoveDown => {
-                                    let content_len = state.provision_focused_content_len();
-                                    state.provision_move_focused_vertical(
-                                        1,
-                                        viewport_height,
-                                        content_len,
-                                    );
-                                }
-                                TuiAction::Top => state.provision_focused_top(),
-                                TuiAction::Bottom => {
-                                    state.provision_focused_bottom(viewport_height);
-                                }
-                                TuiAction::HalfPageUp => {
-                                    let content_len = state.provision_focused_content_len();
-                                    state.provision_move_focused_vertical(
-                                        -((viewport_height / 2).max(1) as isize),
-                                        viewport_height,
-                                        content_len,
-                                    );
-                                }
-                                TuiAction::HalfPageDown => {
-                                    let content_len = state.provision_focused_content_len();
-                                    state.provision_move_focused_vertical(
-                                        (viewport_height / 2).max(1) as isize,
-                                        viewport_height,
-                                        content_len,
-                                    );
-                                }
-                                TuiAction::PageUp => {
-                                    let content_len = state.provision_focused_content_len();
-                                    state.provision_move_focused_vertical(
-                                        -(viewport_height.max(1) as isize),
-                                        viewport_height,
-                                        content_len,
-                                    );
-                                }
-                                TuiAction::PageDown => {
-                                    let content_len = state.provision_focused_content_len();
-                                    state.provision_move_focused_vertical(
-                                        viewport_height.max(1) as isize,
-                                        viewport_height,
-                                        content_len,
-                                    );
-                                }
-                                TuiAction::MoveLeft | TuiAction::MoveRight | TuiAction::Toggle
-                                    if state.provision_focused_pane()
-                                        == crate::tui::pane::PaneId::ProvisionParameters =>
-                                {
-                                    state.provision_toggle_selected_option();
-                                }
-                                TuiAction::Insert
-                                    if state.provision_focused_pane()
-                                        == crate::tui::pane::PaneId::ProvisionParameters =>
-                                {
-                                    state.provision_begin_insert();
-                                }
-                                TuiAction::Fill
-                                    if state.provision_focused_pane()
-                                        == crate::tui::pane::PaneId::ProvisionParameters =>
-                                {
-                                    state.provision_fill_selected_capacity();
-                                }
-                                TuiAction::Add
-                                    if state.provision_focused_pane()
-                                        == crate::tui::pane::PaneId::ProvisionParameters =>
-                                {
-                                    state.provision_plain_add_partition();
-                                }
-                                TuiAction::Delete
-                                    if state.provision_focused_pane()
-                                        == crate::tui::pane::PaneId::ProvisionParameters =>
-                                {
-                                    state.provision_plain_delete_selected_partition();
-                                }
-                                TuiAction::ViewOrVerify
-                                    if state.provision_focused_pane()
-                                        == crate::tui::pane::PaneId::ProvisionParameters =>
-                                {
-                                    start_provision_source_password_verify(&mut state, &mut tasks);
-                                }
-                                TuiAction::Activate => {
-                                    if state.provision_focused_pane()
-                                        == crate::tui::pane::PaneId::ProvisionDiskLayout
-                                    {
-                                        dispatch::show_provision_layout_detail(&mut state);
-                                    } else {
-                                        start_provision_plan(&mut state, &mut tasks);
-                                    }
-                                }
-                                TuiAction::Export => {
-                                    state.set_notice(
-                                        "请先按 Enter 生成只读计划，再从计划页导出镜像。",
-                                    );
-                                }
-                                TuiAction::Back => {
-                                    let _ = state.navigate(NavCommand::Escape, viewport_height);
-                                }
-                                _ => {}
-                            },
+                            }
                             ProvisionStage::Planning => {
                                 if action == TuiAction::Back {
                                     state.set_notice("制盘计划正在后台生成，请等待完成。");
                                 }
                             }
-                            ProvisionStage::Review => match action {
-                                TuiAction::Open
-                                    if state.provision_focused_pane()
-                                        == crate::tui::pane::PaneId::ProvisionDiskLayout =>
-                                {
-                                    state.toggle_disk_layout_tail();
+                            ProvisionStage::Review => {
+                                match dispatch_tui_action(
+                                    &mut state,
+                                    &mut tasks,
+                                    action,
+                                    role,
+                                    &backup_dir,
+                                    viewport_height,
+                                    session.terminal.size()?.width,
+                                ) {
+                                    StateEffect::ExitRequested => break,
+                                    StateEffect::ExitDeferred | StateEffect::None => {}
                                 }
-                                TuiAction::PanelNext => state.provision_shift_pane(false),
-                                TuiAction::PanelPrevious => state.provision_shift_pane(true),
-                                TuiAction::PanelLeft => state.provision_spatial_focus(-1, 0),
-                                TuiAction::PanelRight => state.provision_spatial_focus(1, 0),
-                                TuiAction::PanelUp => state.provision_spatial_focus(0, -1),
-                                TuiAction::PanelDown => state.provision_spatial_focus(0, 1),
-                                TuiAction::MoveUp => {
-                                    let content_len = state.provision_focused_content_len();
-                                    state.provision_move_focused_vertical(
-                                        -1,
-                                        viewport_height,
-                                        content_len,
-                                    );
-                                }
-                                TuiAction::MoveDown => {
-                                    let content_len = state.provision_focused_content_len();
-                                    state.provision_move_focused_vertical(
-                                        1,
-                                        viewport_height,
-                                        content_len,
-                                    );
-                                }
-                                TuiAction::Top => state.provision_focused_top(),
-                                TuiAction::Bottom => {
-                                    state.provision_focused_bottom(viewport_height);
-                                }
-                                TuiAction::HalfPageUp => {
-                                    let content_len = state.provision_focused_content_len();
-                                    state.provision_move_focused_vertical(
-                                        -((viewport_height / 2).max(1) as isize),
-                                        viewport_height,
-                                        content_len,
-                                    );
-                                }
-                                TuiAction::HalfPageDown => {
-                                    let content_len = state.provision_focused_content_len();
-                                    state.provision_move_focused_vertical(
-                                        (viewport_height / 2).max(1) as isize,
-                                        viewport_height,
-                                        content_len,
-                                    );
-                                }
-                                TuiAction::PageUp => {
-                                    let content_len = state.provision_focused_content_len();
-                                    state.provision_move_focused_vertical(
-                                        -(viewport_height.max(1) as isize),
-                                        viewport_height,
-                                        content_len,
-                                    );
-                                }
-                                TuiAction::PageDown => {
-                                    let content_len = state.provision_focused_content_len();
-                                    state.provision_move_focused_vertical(
-                                        viewport_height.max(1) as isize,
-                                        viewport_height,
-                                        content_len,
-                                    );
-                                }
-                                TuiAction::Activate => {
-                                    if state.provision_focused_pane()
-                                        == crate::tui::pane::PaneId::ProvisionDiskLayout
-                                    {
-                                        dispatch::show_provision_layout_detail(&mut state);
-                                    } else {
-                                        state.provision_begin_confirm();
-                                    }
-                                }
-                                TuiAction::Export => state.provision_begin_export(),
-                                TuiAction::Back => {
-                                    let _ = state.navigate(NavCommand::Escape, viewport_height);
-                                }
-                                _ => {}
-                            },
+                            }
                             ProvisionStage::ExportPath => match action {
                                 TuiAction::Text(ch) => state.provision_export_push_char(ch),
                                 TuiAction::Backspace => state.provision_export_backspace(),
@@ -1250,6 +818,7 @@ fn run_loop(resume: Option<state::WriteIntent>) -> io::Result<LoopExit> {
                                     &mut state,
                                     &mut tasks,
                                     action,
+                                    role,
                                     &backup_dir,
                                     viewport_height,
                                     session.terminal.size()?.width,
@@ -1681,6 +1250,7 @@ fn run_loop(resume: Option<state::WriteIntent>) -> io::Result<LoopExit> {
                             &mut state,
                             &mut tasks,
                             action,
+                            keymap::WidgetRole::Table,
                             &backup_dir,
                             viewport_height,
                             session.terminal.size()?.width,

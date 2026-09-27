@@ -377,40 +377,33 @@ fn normal_mode_keeps_inspect_and_backup_as_single_key_actions() {
         Some(TuiAction::Restore)
     );
 
-    let dispatch_source = include_str!("../src/tui/dispatch.rs");
-    let dispatch = source_section(
-        dispatch_source,
-        "pub(super) fn dispatch_tui_action(",
-        "pub(super) fn open_advanced_inspect_selection(",
+    let controller = include_str!("../src/tui/controller.rs");
+    assert!(!controller.contains("TuiAction::Plan if state.workspace() == Workspace::Devices"));
+    assert!(
+        !controller.contains("TuiAction::Activate | TuiAction::Open => match state.workspace()")
     );
-    assert!(!dispatch.contains("TuiAction::Plan if state.workspace() == state::Workspace::Devices"));
-    assert!(!dispatch.contains("TuiAction::Activate | TuiAction::Open => match state.workspace()"));
     assert!(contains_tokens_in_order(
-        dispatch,
+        controller,
         &[
             "TuiAction::Insert",
-            "if matches!(",
-            "state.workspace()",
-            "state::Workspace::Devices | state::Workspace::Backups",
-            "NavCommand::OpenInspect",
+            "if matches!(state.workspace(), Workspace::Devices | Workspace::Backups)",
+            "ActionRequest::Navigate(NavCommand::OpenInspect)",
         ],
     ));
     assert!(contains_tokens_in_order(
-        dispatch,
+        controller,
         &[
             "TuiAction::BackupCreate",
-            "if matches!(",
-            "state.workspace()",
-            "state::Workspace::Devices | state::Workspace::Backups",
+            "if matches!(state.workspace(), Workspace::Devices | Workspace::Backups)",
             "state.begin_backup_create_choice()",
         ],
     ));
     assert!(contains_tokens_in_order(
-        dispatch,
+        controller,
         &[
             "TuiAction::Restore",
-            "state.workspace() == state::Workspace::Backups",
-            "NavCommand::BeginRestore",
+            "state.workspace() == Workspace::Backups",
+            "ActionRequest::Navigate(NavCommand::BeginRestore)",
         ],
     ));
 }
@@ -500,10 +493,10 @@ fn confirm_mode_has_uniform_yes_no_escape_contract_without_weakening_typed_yes()
 
 #[test]
 fn provision_form_enter_generates_plan_instead_of_editing_or_toggling() {
-    let event_loop = include_str!("../src/tui/mod.rs");
+    let controller = include_str!("../src/tui/controller.rs");
     let form = source_section(
-        event_loop,
-        "ProvisionStage::Form => match action {",
+        controller,
+        "ProvisionStage::Form if state.input_mode()",
         "ProvisionStage::Review =>",
     );
     assert!(
@@ -513,7 +506,7 @@ fn provision_form_enter_generates_plan_instead_of_editing_or_toggling() {
                 "TuiAction::Insert",
                 "state.provision_begin_insert()",
                 "TuiAction::Activate",
-                "start_provision_plan(&mut state, &mut tasks)",
+                "ActionRequest::ProvisionPlan",
             ],
         ),
         "Provision Form Insert must edit while Enter/Activate generates the plan"
@@ -524,6 +517,17 @@ fn provision_form_enter_generates_plan_instead_of_editing_or_toggling() {
             &["TuiAction::Activate", "state.provision_begin_insert()"],
         ),
         "Provision Form Enter must not enter Insert mode or toggle checkbox state"
+    );
+    let production = include_str!("../src/tui/dispatch.rs");
+    assert!(
+        contains_tokens_in_order(
+            production,
+            &[
+                "ActionRequest::ProvisionPlan",
+                "start_provision_plan(state, tasks)",
+            ],
+        ),
+        "Provision Form plan request must execute through the production task adapter"
     );
 
     let render = include_str!("../src/tui/render.rs");

@@ -1265,6 +1265,18 @@ application 返回结构化 `ProvisionReport/BackupReport/InspectReport`，CLI/T
 - 外部副作用通过执行策略区分真实模式与演示模式；演示模式对真实介质、提权和写盘保持拒绝执行；
 - 表格、`Tab`、`Pane`、`Inspect`、`Provision` 导航及复制行为只能有一个状态转换事实源。
 
+#### D8-B 实施状态（2026-09-28）
+
+**COMPLETE。**
+
+- 新增 `src/tui/controller.rs`，生产 `TUI` 与演示模式从控件角色识别开始共用同一 `TuiAction` 状态转换入口；演示模式原独立 `handle_action` 已删除。
+- `controller` 只修改纯 `TUI` 状态并返回类型化 `ActionRequest`；生产适配器把请求交给现有 `TaskHub`/`application` 服务，演示适配器只使用内存夹具或明确拒绝真实外部操作，因此没有把真实磁盘、提权或写盘入口带入演示循环。
+- `Inspect` 浏览器以及 `Provision` 的 `SelectDisk/Menu/Form/Review` 动作分派已从 `tui/mod.rs` 收敛到 `controller`；表格复制继续注入统一剪贴板接口，`Tab/Pane/Inspect/Provision` 导航不再由演示模式维护第二套解释。
+- `tui/mod.rs` 从本阶段开始前的 **1789 行降至 1359 行**，`dispatch.rs` 收敛至 **373 行**；`controller` 当前 **696 行**并新增 **<750 行**硬门禁，避免新事实源再次无界膨胀。
+- `TUI` **266/266**、架构门禁 **20/20**、`cargo check --all-targets --locked`、`cargo clippy --all-targets --locked -- -D warnings`、快速门禁 **4 suites / 6 artifacts / 0 failures**、完整门禁 **8 suites / 10 artifacts + doctest / 0 failures** 全部通过。
+- 本阶段没有改变任何制盘请求、真实写盘任务、安全确认、LBA0～12/LCE、四模式、K6 或媒体身份判定语义。
+
+
 ### D8-C：拆分 `AppState` 所有权
 
 - `AppState` 收敛为全局壳层状态与 `Devices`、`Inspect`、`Backups`、`Provision` 四个工作区子状态；

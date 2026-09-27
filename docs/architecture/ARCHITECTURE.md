@@ -7,7 +7,7 @@
 `CLI / TUI -> application/service -> domain + provision + protocol + backup -> platform + disk I/O`
 
 - `src/cli*.rs`：CLI 参数解析与文本入口；公开命令目录统一由 `src/command_spec.rs` 描述，并供 help/completion 共用。
-- `src/tui/`：交互式前端；制盘、检查、备份、设备工作区分别维护状态/渲染/任务逻辑，不直接实现裸盘安全策略。
+- `src/tui/`：交互式前端；`controller` 统一解释生产与演示模式的 `TuiAction` 和当前控件角色，真实外部副作用由生产任务适配器执行，演示模式只能消费内存夹具；制盘、检查、备份、设备工作区不直接实现裸盘安全策略。
 - `src/application/`：CLI/TUI 共用应用服务；制盘按 `prepare/commit/export` 分离，`TargetSession` 统一写盘状态转换，`EvidenceSource` 统一物理盘/EDPB 只读证据入口。
 - `src/media_identity.rs`、`src/partition_table.rs`、`src/disk_layout.rs`、`src/backup_coverage.rs`：UI-neutral 领域/读模型与纯算法；`application` 仅保留兼容 re-export 和 use-case 编排，`diskio`/`edpb`/`disk_scan` 不得反向依赖 application。
 - `src/media_identity_observer.rs`：只读身份观察服务，可读取协议镜像和硬件探测但没有任何写盘状态转换入口。

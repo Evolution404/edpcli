@@ -1,34 +1,5 @@
 use super::*;
 
-pub(super) fn show_inspect_layout_detail(state: &mut AppState) {
-    let detail = state
-        .advanced_inspect()
-        .and_then(|advanced| advanced.result.as_ref())
-        .and_then(|workspace| workspace.disk_layout.as_ref())
-        .and_then(|model| state.disk_layout_detail(model));
-    if let Some(detail) = detail {
-        state.set_notice(detail);
-    }
-}
-
-pub(super) fn open_inspect_selection(state: &mut AppState) {
-    use crate::tui::pane::PaneId;
-    match state.advanced_inspect_focused_pane() {
-        Some(PaneId::InspectDiskLayout) => state.toggle_disk_layout_tail(),
-        Some(PaneId::InspectDetail) if state.advanced_inspect_detail_selected_row().is_some() => {
-            state.advanced_inspect_detail_toggle_selected();
-        }
-        _ => state.advanced_inspect_toggle_selected(),
-    }
-}
-
-pub(super) fn show_provision_layout_detail(state: &mut AppState) {
-    let model = state.provision_layout_model();
-    if let Some(detail) = state.disk_layout_detail(&model) {
-        state.set_notice(detail);
-    }
-}
-
 pub(super) fn dispatch_nav_command(
     state: &mut AppState,
     tasks: &mut TaskHub,
@@ -225,182 +196,69 @@ pub(super) fn palette_action_to_nav(action: command::PaletteAction) -> NavComman
     }
 }
 
-pub(super) fn keymap_action_to_nav(action: keymap::TuiAction) -> Option<NavCommand> {
-    use keymap::TuiAction;
-
-    Some(match action {
-        TuiAction::MoveUp => NavCommand::Up,
-        TuiAction::MoveDown => NavCommand::Down,
-        TuiAction::Top => NavCommand::Top,
-        TuiAction::Bottom => NavCommand::Bottom,
-        TuiAction::HalfPageUp => NavCommand::HalfPageUp,
-        TuiAction::HalfPageDown => NavCommand::HalfPageDown,
-        TuiAction::Back => NavCommand::Escape,
-        TuiAction::Quit => NavCommand::Quit,
-        TuiAction::Help => NavCommand::Help,
-        TuiAction::Search => NavCommand::Search,
-        TuiAction::NextMatch => NavCommand::NextMatch,
-        TuiAction::PreviousMatch => NavCommand::PreviousMatch,
-        TuiAction::Command => NavCommand::CommandPalette,
-        TuiAction::Refresh => NavCommand::Refresh,
-        TuiAction::WorkspaceNext => NavCommand::NextWorkspace,
-        TuiAction::WorkspacePrevious => NavCommand::PreviousWorkspace,
-        _ => return None,
-    })
-}
-
 pub(super) fn dispatch_tui_action(
     state: &mut AppState,
     tasks: &mut TaskHub,
     action: keymap::TuiAction,
+    role: keymap::WidgetRole,
     backup_dir: &std::path::Path,
     viewport_height: usize,
     viewport_width: u16,
 ) -> StateEffect {
-    use keymap::TuiAction;
-
-    if let Some(command) = keymap_action_to_nav(action) {
-        return dispatch_nav_command(state, tasks, command, backup_dir, viewport_height);
+    let mut clipboard = clipboard::ClipboardService;
+    let outcome = controller::dispatch_action(
+        state,
+        action,
+        role,
+        viewport_height,
+        viewport_width,
+        &mut clipboard,
+    );
+    if !outcome.handled {
+        return StateEffect::None;
     }
+    let mut effect = outcome.effect;
+    if let Some(request) = outcome.request {
+        effect = execute_action_request(state, tasks, request, backup_dir, viewport_height);
+    }
+    effect
+}
 
-    match action {
-        TuiAction::TableColumnLeft
-        | TuiAction::TableColumnRight
-        | TuiAction::TableMoveColumnLeft
-        | TuiAction::TableMoveColumnRight
-        | TuiAction::TableColumnFirst
-        | TuiAction::TableColumnLast
-        | TuiAction::TableScrollLeft
-        | TuiAction::TableScrollRight
-        | TuiAction::TableSortToggle
-        | TuiAction::TableSortClear
-        | TuiAction::TableCopyCell
-        | TuiAction::TableCopyRow => {
-            let _ = dispatch_table_action(state, action, viewport_height, viewport_width);
-            StateEffect::None
-        }
-        TuiAction::Insert
-            if matches!(
-                state.workspace(),
-                state::Workspace::Devices | state::Workspace::Backups | state::Workspace::Inspect
-            ) =>
-        {
-            dispatch_nav_command(
-                state,
-                tasks,
-                NavCommand::OpenInspect,
-                backup_dir,
-                viewport_height,
-            )
-        }
-        TuiAction::Activate => match state.workspace() {
-            state::Workspace::Devices => {
-                if let Err(message) = state.activate_device_for_viewport(viewport_width) {
-                    state.set_notice(message);
-                }
-                StateEffect::None
-            }
-            state::Workspace::Backups => dispatch_nav_command(
-                state,
-                tasks,
-                NavCommand::OpenInspect,
-                backup_dir,
-                viewport_height,
-            ),
-            state::Workspace::Inspect => dispatch_nav_command(
-                state,
-                tasks,
-                NavCommand::OpenInspect,
-                backup_dir,
-                viewport_height,
-            ),
-            state::Workspace::Provision => StateEffect::None,
-        },
-        TuiAction::Provision if state.workspace() == state::Workspace::Devices => {
-            if let Err(message) = state.begin_provision_for_selected_device() {
-                state.set_notice(message);
-            }
-            StateEffect::None
-        }
-        TuiAction::Open if state.workspace() == state::Workspace::Devices => {
-            if state.devices_focused_pane() == crate::tui::pane::PaneId::DevicesSummary {
-                state.device_summary_toggle_selected_section();
-            }
-            StateEffect::None
-        }
-        TuiAction::Toggle if state.workspace() == state::Workspace::Backups => {
-            dispatch_nav_command(
-                state,
-                tasks,
-                NavCommand::ToggleBackupSelection,
-                backup_dir,
-                viewport_height,
-            )
-        }
-        TuiAction::ViewOrVerify if state.workspace() == state::Workspace::Backups => {
-            dispatch_nav_command(
-                state,
-                tasks,
-                NavCommand::VerifyBackup,
-                backup_dir,
-                viewport_height,
-            )
-        }
-        TuiAction::Delete if state.workspace() == state::Workspace::Backups => {
-            let command = if state.backup_selection_count() > 0 {
-                NavCommand::BeginBackupBatchDelete
-            } else {
-                NavCommand::BeginBackupDelete
-            };
+fn execute_action_request(
+    state: &mut AppState,
+    tasks: &mut TaskHub,
+    request: controller::ActionRequest,
+    backup_dir: &std::path::Path,
+    viewport_height: usize,
+) -> StateEffect {
+    match request {
+        controller::ActionRequest::Navigate(command) => {
             dispatch_nav_command(state, tasks, command, backup_dir, viewport_height)
         }
-        TuiAction::BackupCreate
-            if matches!(
-                state.workspace(),
-                state::Workspace::Devices | state::Workspace::Backups
-            ) =>
-        {
-            state.begin_backup_create_choice();
+        controller::ActionRequest::InspectSelection { force_hex } => {
+            open_advanced_inspect_selection(state, tasks, force_hex);
             StateEffect::None
         }
-        TuiAction::Restore if state.workspace() == state::Workspace::Backups => {
-            dispatch_nav_command(
-                state,
-                tasks,
-                NavCommand::BeginRestore,
-                backup_dir,
-                viewport_height,
-            )
-        }
-        TuiAction::PanelNext | TuiAction::PanelPrevious
-            if matches!(
-                state.workspace(),
-                state::Workspace::Devices | state::Workspace::Backups
-            ) =>
-        {
-            state.shift_workspace_pane(action == TuiAction::PanelPrevious);
+        controller::ActionRequest::InspectPreview { source, lba } => {
+            if let Err(message) = tasks.request_advanced_inspect_preview(source, lba) {
+                state.advanced_inspect_sector_finish(lba, Err(message.to_string()));
+            }
             StateEffect::None
         }
-        TuiAction::PanelLeft
-        | TuiAction::PanelRight
-        | TuiAction::PanelUp
-        | TuiAction::PanelDown
-            if matches!(
-                state.workspace(),
-                state::Workspace::Devices | state::Workspace::Backups
-            ) =>
-        {
-            let (dx, dy) = match action {
-                TuiAction::PanelLeft => (-1, 0),
-                TuiAction::PanelRight => (1, 0),
-                TuiAction::PanelUp => (0, -1),
-                TuiAction::PanelDown => (0, 1),
-                _ => unreachable!(),
-            };
-            state.spatial_workspace_focus(dx, dy);
+        controller::ActionRequest::ProvisionKeyProbe { disk } => {
+            if let Err(message) = tasks.request_provision_key_probe(disk) {
+                state.provision_finish_key_probe(Err(message.to_string()));
+            }
             StateEffect::None
         }
-        _ => StateEffect::None,
+        controller::ActionRequest::ProvisionSourcePasswordVerify => {
+            start_provision_source_password_verify(state, tasks);
+            StateEffect::None
+        }
+        controller::ActionRequest::ProvisionPlan => {
+            start_provision_plan(state, tasks);
+            StateEffect::None
+        }
     }
 }
 

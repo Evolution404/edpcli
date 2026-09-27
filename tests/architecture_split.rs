@@ -84,6 +84,7 @@ fn large_modules_are_split_by_domain_boundary() {
         "src/tui/backups/render.rs",
         "src/tui/devices/render.rs",
         "src/tui/dispatch.rs",
+        "src/tui/controller.rs",
         "src/inspect/model.rs",
         "src/inspect_adapter.rs",
         "src/application/inspect_text.rs",
@@ -110,6 +111,10 @@ fn large_modules_are_split_by_domain_boundary() {
     assert!(
         lines("src/tui/dispatch.rs") < 600,
         "TUI dispatch module must stay responsibility-bounded"
+    );
+    assert!(
+        lines("src/tui/controller.rs") < 750,
+        "shared TUI action controller must stay responsibility-bounded"
     );
     assert!(
         lines("src/tui/inspect/state.rs") < 1_900,
@@ -639,6 +644,24 @@ fn domain_and_application_import_direction_is_guarded() {
     assert!(
         !validator.contains("crate::inspect"),
         "provision validator must not depend on inspect presentation"
+    );
+}
+
+#[test]
+fn production_and_demo_share_one_tui_action_controller() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let controller = fs::read_to_string(root.join("src/tui/controller.rs"))
+        .expect("read shared TUI action controller");
+    let dispatch =
+        fs::read_to_string(root.join("src/tui/dispatch.rs")).expect("read production TUI dispatch");
+    let demo = fs::read_to_string(root.join("src/tui/demo/mod.rs")).expect("read demo TUI loop");
+
+    assert!(controller.contains("pub(super) fn dispatch_action"));
+    assert!(dispatch.contains("controller::dispatch_action"));
+    assert!(demo.contains("controller::dispatch_action"));
+    assert!(
+        !demo.contains("fn handle_action("),
+        "demo must not maintain a second TUI action router"
     );
 }
 

@@ -2,21 +2,6 @@
 
 use super::*;
 
-pub(super) fn dispatch_table_action(
-    state: &mut AppState,
-    action: keymap::TuiAction,
-    viewport_height: usize,
-    viewport_width: u16,
-) -> bool {
-    dispatch_table_action_with_clipboard(
-        state,
-        action,
-        viewport_height,
-        viewport_width,
-        &mut clipboard::ClipboardService,
-    )
-}
-
 pub(super) fn dispatch_table_action_with_clipboard(
     state: &mut AppState,
     action: keymap::TuiAction,
