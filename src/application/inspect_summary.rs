@@ -65,28 +65,47 @@ pub struct InspectSummarySource<'a> {
 
 fn title(source: &InspectSummarySource<'_>) -> String {
     if source.kind == InspectNodeKind::Sector {
-        let meaning = match source.range.start_lba {
-            0 => "主引导记录",
-            1 => "GPT/兼容结构",
-            2 => "分区兼容结构",
-            3 => "制造商私有元数据",
-            4 => "设备 onlyid",
-            5 => "写保护探测区",
-            6 => "设备标签与归属",
-            7 => "分区表与密码策略",
-            8 => "设备身份与电子标签",
-            9 => "归属与扩展元数据",
-            10 => "EESI 兼容结构",
-            11 => "设备身份与容量",
-            12 => "密钥记录与密码策略",
-            _ => "扇区证据",
+        let meaning = match source.region_semantic {
+            Some(DiskRegionSemantic::PartitionTable) => "分区表结构",
+            Some(DiskRegionSemantic::PlainPartition) => "普通分区数据",
+            Some(DiskRegionSemantic::Unallocated) => "未分配空间",
+            Some(DiskRegionSemantic::Lce) => "LCE 兼容区",
+            Some(DiskRegionSemantic::Tail) => "盘尾取证区域",
+            Some(DiskRegionSemantic::TailForensic) => "盘尾取证数据",
+            Some(DiskRegionSemantic::TailMetadataMirror) => "盘尾历史镜像",
+            Some(DiskRegionSemantic::TailRestoreNode) => "盘尾恢复节点",
+            Some(
+                DiskRegionSemantic::Partition { .. } | DiskRegionSemantic::MbrPartition { .. },
+            ) => "EDP 分区数据",
+            Some(DiskRegionSemantic::Unknown) => "未知扇区",
+            Some(DiskRegionSemantic::Protocol) | None => match source.range.start_lba {
+                0 => "主引导记录",
+                1 => "GPT/兼容结构",
+                2 => "分区兼容结构",
+                3 => "制造商私有元数据",
+                4 => "设备 onlyid",
+                5 => "写保护探测区",
+                6 => "设备标签与归属",
+                7 => "分区表与密码策略",
+                8 => "设备身份与电子标签",
+                9 => "归属与扩展元数据",
+                10 => "EESI 兼容结构",
+                11 => "设备身份与容量",
+                12 => "密钥记录与密码策略",
+                _ => "扇区证据",
+            },
+            Some(DiskRegionSemantic::Conflict) => "重叠证据",
         };
         return format!("{} · {meaning}", source.label);
     }
     match source.region_semantic {
         Some(DiskRegionSemantic::Protocol) => "EDP 主协议区".into(),
+        Some(DiskRegionSemantic::PartitionTable) => "分区表结构".into(),
+        Some(DiskRegionSemantic::PlainPartition) => format!("{} · 普通分区", source.label),
+        Some(DiskRegionSemantic::Unallocated) => "未分配空间".into(),
         Some(DiskRegionSemantic::Lce) => "LCE 兼容区".into(),
         Some(DiskRegionSemantic::Tail) => "盘尾取证区域".into(),
+        Some(DiskRegionSemantic::TailForensic) => "盘尾取证数据".into(),
         Some(DiskRegionSemantic::TailMetadataMirror) => "盘尾历史镜像".into(),
         Some(DiskRegionSemantic::TailRestoreNode) => "盘尾恢复节点".into(),
         Some(DiskRegionSemantic::Partition { .. } | DiskRegionSemantic::MbrPartition { .. }) => {

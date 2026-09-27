@@ -282,3 +282,53 @@ pub fn set_mtime(path: &std::path::Path, epoch: i64) {
     f.set_times(std::fs::FileTimes::new().set_modified(t))
         .unwrap();
 }
+
+/// Upgrade a hand-written test row to the same canonical media-identity shape
+/// that production device scanning provides.
+pub fn confirm_row_identity(row: &mut edpcli::disk_scan::Row) {
+    use edpcli::application::media_identity::{
+        DerivedProtocolEvidence, HardwareIdentityEvidence, IdentityObservation, MediaIdentityPin,
+        MediaIdentitySnapshot, ProtocolIdentityEvidence,
+    };
+
+    let hardware = HardwareIdentityEvidence {
+        total_sectors: Some(row.size / edpcli::common::SECTOR as u64),
+        logical_sector_size: Some(edpcli::common::SECTOR as u32),
+        ..HardwareIdentityEvidence::default()
+    };
+    let snapshot = if row.provision_kind == edpcli::provision::DiskProvisionKind::Plain {
+        MediaIdentitySnapshot::plain(
+            hardware,
+            DerivedProtocolEvidence::default(),
+            IdentityObservation::default(),
+        )
+    } else {
+        MediaIdentitySnapshot {
+            hardware,
+            protocol: ProtocolIdentityEvidence {
+                device_id: row.device_id.clone(),
+                onlyid: row.onlyid.clone(),
+                provision_kind: Some(row.provision_kind),
+                lba4_identity_digest: None,
+            },
+            derived: DerivedProtocolEvidence::default(),
+            observation: IdentityObservation::default(),
+        }
+    };
+    row.identity_pin = Some(MediaIdentityPin::new(
+        snapshot,
+        &vec![0; edpcli::common::METADATA_IMAGE_LEN],
+    ));
+}
+
+/// Explicit EDP inspect context for TUI tests that exercise the protocol tree.
+pub fn edp_inspect_context(total_sectors: u64) -> edpcli::inspect_target::InspectDiskContext {
+    edpcli::inspect_target::InspectDiskContext::new_with_partition_table(
+        vec![0; edpcli::common::METADATA_IMAGE_LEN],
+        Some("disk&ven_test&prod_test".into()),
+        total_sectors,
+        Some(edpcli::provision::DiskProvisionKind::Mode0),
+        None,
+        None,
+    )
+}

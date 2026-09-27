@@ -734,9 +734,12 @@ impl AppState {
     }
 
     fn provision_selectable_devices(&self) -> impl Iterator<Item = &crate::disk_scan::Row> {
-        self.devices
-            .iter()
-            .filter(|row| row.proto == "USB" && !row.denied && row.probe_error.is_none())
+        self.devices.iter().filter(|row| {
+            row.proto == "USB"
+                && !row.denied
+                && row.probe_error.is_none()
+                && row.confirmed_provision_kind().is_some()
+        })
     }
 
     pub fn provision_device_at(&self, index: usize) -> Option<&crate::disk_scan::Row> {
@@ -771,6 +774,9 @@ impl AppState {
             .ok_or_else(|| "请先选择目标 USB 盘。".to_string())?;
         if row.proto != "USB" || row.denied || row.probe_error.is_some() {
             return Err("制盘需要可读取的 USB 整盘目标。".into());
+        }
+        if row.confirmed_provision_kind().is_none() {
+            return Err("当前盘型未确认；为避免把未知/损坏介质误当普通盘，拒绝进入制盘。".into());
         }
         let disk = row.disk;
         self.push_navigation_frame(NavigationLocation::Devices);

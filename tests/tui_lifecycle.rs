@@ -8,7 +8,7 @@ use edpcli::tui::{
 use ratatui::{backend::TestBackend, style::Modifier, Terminal};
 
 fn usb_device() -> edpcli::disk_scan::Row {
-    edpcli::disk_scan::Row {
+    let mut row = edpcli::disk_scan::Row {
         disk: 6,
         size: 64_000_000_000,
         vid: "0dd8".into(),
@@ -31,7 +31,11 @@ fn usb_device() -> edpcli::disk_scan::Row {
         probe_error: None,
         provision_kind: edpcli::provision::DiskProvisionKind::Plain,
         partitions: None,
-    }
+        partition_table: None,
+        partition_table_error: None,
+    };
+    crate::common::confirm_row_identity(&mut row);
+    row
 }
 
 #[test]
@@ -476,11 +480,7 @@ fn advanced_inspect_tree_browser_renders_and_navigates_across_terminal_sizes() {
         items,
         export_dir: None,
         topology: edpcli::application::inspect_tree::build_inspect_topology(
-            &edpcli::inspect_target::InspectDiskContext::new(
-                vec![0; edpcli::common::METADATA_IMAGE_LEN],
-                None,
-                24_025_029,
-            ),
+            &crate::common::edp_inspect_context(24_025_029),
         ),
     }));
     assert_eq!(

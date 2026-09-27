@@ -1,5 +1,4 @@
 use super::*;
-use crate::provision::DiskProvisionKind;
 
 fn confirmed_filesystem(
     boot: &[u8],
@@ -259,12 +258,14 @@ pub fn prepare_target_provision(
             )
         })?;
     let source_metadata = read_image(dev)?;
-    let source_kind =
-        crate::provision::DiskProvisionKind::from_metadata(&source_metadata, &device_id);
-    let before_pin = MediaIdentityPin::new(
-        media_identity_from_protocol_image(runner, disk, &source_metadata)?,
-        &source_metadata,
-    );
+    let source_identity = media_identity_from_protocol_image(runner, disk, &source_metadata)?;
+    let source_kind = source_identity.protocol.provision_kind.ok_or_else(|| {
+        err(
+            EXIT_TARGET,
+            "错误: 来源盘型未确认；拒绝把未知/损坏介质按 Plain 或 EDP 继续制盘",
+        )
+    })?;
+    let before_pin = MediaIdentityPin::new(source_identity, &source_metadata);
     let source = inspect_source_profile(
         dev,
         &source_metadata,
@@ -821,7 +822,11 @@ pub fn probe_provision_key_domains_on_disk(
                 format!("错误: 来源盘注册结构无法可靠解析: {message}"),
             )
         })?;
-    let source_kind = DiskProvisionKind::from_metadata(&source_metadata, &device_id);
+    let source_identity = media_identity_from_protocol_image(runner, disk, &source_metadata)?;
+    let source_kind = source_identity
+        .protocol
+        .provision_kind
+        .ok_or_else(|| err(EXIT_TARGET, "错误: 来源盘型未确认；拒绝继续探测密码域"))?;
     let domain_probe = |domain: KeyDomainRole| {
         parsed
             .as_ref()
@@ -958,13 +963,14 @@ fn prepare_plain_provision_with_key_domains(
     let device_id = target.device_id().to_string();
 
     let source_metadata = read_image(dev)?;
-    let before_pin = MediaIdentityPin::new(
-        media_identity_from_protocol_image(runner, disk, &source_metadata)?,
-        &source_metadata,
-    );
-    let lba7 = &source_metadata[7 * SECTOR..8 * SECTOR];
-    let lba12 = &source_metadata[12 * SECTOR..13 * SECTOR];
-    let source_kind = crate::provision::DiskProvisionKind::from_sectors(lba7, lba12, &device_id);
+    let source_identity = media_identity_from_protocol_image(runner, disk, &source_metadata)?;
+    let source_kind = source_identity.protocol.provision_kind.ok_or_else(|| {
+        err(
+            EXIT_TARGET,
+            "错误: 来源盘型未确认；拒绝把未知/损坏介质恢复为 Plain",
+        )
+    })?;
+    let before_pin = MediaIdentityPin::new(source_identity, &source_metadata);
     let source_lce =
         if source_kind == crate::provision::DiskProvisionKind::Plain {
             None

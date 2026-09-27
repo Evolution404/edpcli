@@ -75,7 +75,10 @@ fn selected_lbas(opts: &InspectOpts) -> Vec<u64> {
     }
 }
 
-fn print_inspect_meta(meta: &InspectMeta) {
+fn print_inspect_meta(
+    meta: &InspectMeta,
+    topology: &crate::application::inspect_tree::InspectTopology,
+) {
     let mut parts = Vec::new();
     if let Some(id) = &meta.onlyid {
         parts.push(format!("onlyid={id}"));
@@ -89,12 +92,38 @@ fn print_inspect_meta(meta: &InspectMeta) {
     if !parts.is_empty() {
         println!("{}  {}", crate::ui::bold("设备"), parts.join(" · "));
     }
-    if let Some(did) = &meta.device_id {
+    let (is_plain, has_edp_protocol) = match &topology.root.children {
+        crate::application::inspect_tree::InspectChildren::Materialized(children) => (
+            children.iter().any(|node| {
+                matches!(
+                    node.region_semantic,
+                    Some(
+                        crate::application::inspect_tree::DiskRegionSemantic::PartitionTable
+                            | crate::application::inspect_tree::DiskRegionSemantic::PlainPartition
+                            | crate::application::inspect_tree::DiskRegionSemantic::Unallocated
+                    )
+                )
+            }),
+            children.iter().any(|node| {
+                node.region_semantic
+                    == Some(crate::application::inspect_tree::DiskRegionSemantic::Protocol)
+            }),
+        ),
+        _ => (false, false),
+    };
+    if is_plain {
+        println!("{}  普通盘（device_id 不适用）", crate::ui::bold("盘型"));
+    } else if let Some(did) = &meta.device_id {
         println!("{}  {}", crate::ui::bold("device_id"), did);
+    } else if has_edp_protocol {
+        println!(
+            "{}",
+            crate::ui::yellow("EDP device_id 未识别：相关加密字段只能显示 RAW；可用 --id 手动指定")
+        );
     } else {
         println!(
             "{}",
-            crate::ui::yellow("device_id 未识别：LBA7/8/9/12 只能显示 RAW；可用 --id 手动指定")
+            crate::ui::yellow("盘型未确认：不假定为普通盘或 EDP 盘")
         );
     }
 }
@@ -126,7 +155,7 @@ fn inspect_error_code(error: &InspectError) -> i32 {
 
 fn render_workspace(workspace: &AdvancedInspectWorkspace) -> i32 {
     println!("{}  {}", crate::ui::bold("来源"), workspace.source);
-    print_inspect_meta(&workspace.meta);
+    print_inspect_meta(&workspace.meta, &workspace.topology);
     println!("{}  {}", crate::ui::bold("模式"), workspace.mode.label());
 
     for item in &workspace.items {

@@ -111,7 +111,8 @@ fn run_case(partitions: Vec<PlainPartitionSpec>) {
     let lba12 = disk.read_sector(12).unwrap();
     assert_eq!(
         DiskProvisionKind::from_sectors(&lba7, &lba12, "virtual-device"),
-        DiskProvisionKind::Plain
+        None,
+        "EDP detector must not classify a Plain disk as an EDP mode"
     );
 
     let mbr = disk.read_sector(0).unwrap();

@@ -1,6 +1,5 @@
 use edpcli::application::inspect::{AdvancedInspectMode, AdvancedInspectWorkspace};
 use edpcli::inspect::InspectMeta;
-use edpcli::inspect_target::InspectDiskContext;
 use edpcli::tui::disk_layout::{DiskLayoutModel, DiskRegionKind};
 use edpcli::tui::pane::{PaneFocus, PaneId};
 use edpcli::tui::render;
@@ -10,8 +9,7 @@ use edpcli::tui::state::{
 use ratatui::{backend::TestBackend, Terminal};
 
 fn inspect_workspace() -> AdvancedInspectWorkspace {
-    let context =
-        InspectDiskContext::new(vec![0; edpcli::common::METADATA_IMAGE_LEN], None, 16_384);
+    let context = crate::common::edp_inspect_context(16_384);
     AdvancedInspectWorkspace {
         source: "pane-contract".into(),
         meta: InspectMeta::default(),
@@ -23,7 +21,7 @@ fn inspect_workspace() -> AdvancedInspectWorkspace {
 }
 
 fn device() -> edpcli::disk_scan::Row {
-    edpcli::disk_scan::Row {
+    let mut row = edpcli::disk_scan::Row {
         disk: 6,
         size: 64_000_000_000,
         vid: "1234".into(),
@@ -46,7 +44,41 @@ fn device() -> edpcli::disk_scan::Row {
         probe_error: None,
         provision_kind: edpcli::provision::DiskProvisionKind::Plain,
         partitions: None,
-    }
+        partition_table: None,
+        partition_table_error: None,
+    };
+    confirm_kind(&mut row, edpcli::provision::DiskProvisionKind::Plain);
+    row
+}
+
+fn confirm_kind(row: &mut edpcli::disk_scan::Row, kind: edpcli::provision::DiskProvisionKind) {
+    use edpcli::application::media_identity::{
+        DerivedProtocolEvidence, HardwareIdentityEvidence, IdentityObservation, MediaIdentityPin,
+        MediaIdentitySnapshot, ProtocolIdentityEvidence,
+    };
+    let snapshot = MediaIdentitySnapshot {
+        hardware: HardwareIdentityEvidence {
+            total_sectors: Some(row.size / 512),
+            logical_sector_size: Some(512),
+            ..HardwareIdentityEvidence::default()
+        },
+        protocol: ProtocolIdentityEvidence {
+            device_id: (kind != edpcli::provision::DiskProvisionKind::Plain)
+                .then(|| row.device_id.clone())
+                .flatten(),
+            onlyid: (kind != edpcli::provision::DiskProvisionKind::Plain)
+                .then(|| row.onlyid.clone())
+                .flatten(),
+            provision_kind: Some(kind),
+            lba4_identity_digest: None,
+        },
+        derived: DerivedProtocolEvidence::default(),
+        observation: IdentityObservation::default(),
+    };
+    row.identity_pin = Some(MediaIdentityPin::new(
+        snapshot,
+        &vec![0; edpcli::common::METADATA_IMAGE_LEN],
+    ));
 }
 
 fn inspect_state() -> AppState {
@@ -406,6 +438,7 @@ fn d0_current_device_summary_renders_capacity_layout_bar() {
 
     let mut row = device();
     row.provision_kind = edpcli::provision::DiskProvisionKind::Mode0;
+    confirm_kind(&mut row, edpcli::provision::DiskProvisionKind::Mode0);
     row.partitions = Some(vec![
         EdpfPartition {
             ptype: 1,
@@ -446,4 +479,52 @@ fn d0_current_device_summary_renders_capacity_layout_bar() {
     assert!(text.contains("交换区"), "{text}");
     assert!(text.contains("保密区"), "{text}");
     assert!(text.contains("━"), "{text}");
+}
+
+#[test]
+fn d0_plain_mbr_layout_uses_real_partition_table_without_unknown_disk_body() {
+    use edpcli::application::partition_table::{
+        PartitionSource, PartitionTableExtent, PartitionTableKind, PartitionTableSnapshot,
+        PhysicalPartition,
+    };
+
+    let total_sectors = 15_728_640u64;
+    let mut row = device();
+    row.disk = 4;
+    row.size = total_sectors * 512;
+    row.device_id = None;
+    row.onlyid = None;
+    row.provision_kind = edpcli::provision::DiskProvisionKind::Plain;
+    confirm_kind(&mut row, edpcli::provision::DiskProvisionKind::Plain);
+    row.partition_table = Some(PartitionTableSnapshot {
+        kind: PartitionTableKind::Mbr,
+        partitions: vec![PhysicalPartition {
+            index: 1,
+            start_lba: 2048,
+            sector_count: 15_726_592,
+            source: PartitionSource::Mbr {
+                partition_type: 0x07,
+                primary_slot: Some(1),
+            },
+            filesystem: Some("exFAT".into()),
+        }],
+        table_extents: vec![PartitionTableExtent {
+            label: "MBR 分区表".into(),
+            start_lba: 0,
+            sector_count: 1,
+        }],
+        issues: Vec::new(),
+    });
+
+    let mut state = AppState::new();
+    state.replace_devices(vec![row]);
+    state.focus_devices_pane(PaneId::DevicesSummary);
+    let text = render_text(&state, 180, 42);
+
+    assert!(text.contains("MBR分区表"), "{text}");
+    assert!(text.contains("未分配空间"), "{text}");
+    assert!(text.contains("P1exFAT"), "{text}");
+    assert!(!text.contains("布局未完整读取"), "{text}");
+    assert!(!text.contains("EDP协议/保留"), "{text}");
+    assert!(!text.contains("未知区域8.05GB"), "{text}");
 }

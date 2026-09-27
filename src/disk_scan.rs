@@ -43,13 +43,21 @@ pub struct Row {
     pub probe_error: Option<String>,
     pub provision_kind: DiskProvisionKind,
     pub partitions: Option<Vec<EdpfPartition>>,
+    pub partition_table: Option<crate::application::partition_table::PartitionTableSnapshot>,
+    pub partition_table_error: Option<String>,
 }
 
 impl Row {
     /// UI-only prefill from the scan cache. The physical preparation path reads
     /// and validates the source metadata again before allowing PreserveExact.
+    pub fn confirmed_provision_kind(&self) -> Option<DiskProvisionKind> {
+        self.identity_pin
+            .as_ref()
+            .and_then(|pin| pin.snapshot.protocol.provision_kind)
+    }
+
     pub fn existing_profile_for_prefill(&self) -> Option<ExistingProvisionProfile> {
-        let mode = self.provision_kind.official_mode()?;
+        let mode = self.confirmed_provision_kind()?.official_mode()?;
         let parts = self.partitions.as_ref()?;
         if parts.len() != mode.partition_types().len() {
             return None;
@@ -126,6 +134,8 @@ pub fn scan_disks(
             probe_error: None,
             provision_kind: DiskProvisionKind::Plain,
             partitions: None,
+            partition_table: None,
+            partition_table_error: None,
         };
         if d.proto == "USB" {
             let probe = (|| -> io::Result<()> {
@@ -171,9 +181,9 @@ pub fn scan_disks(
                         }
                     }
                     let lba12 = read_exact(12)?;
-                    row.provision_kind = DiskProvisionKind::from_sectors(&lba7, &lba12, did);
-                    row.partitions = parse_lba12(&lba12, did);
-                    if row.provision_kind != DiskProvisionKind::Plain {
+                    if let Some(kind) = DiskProvisionKind::from_sectors(&lba7, &lba12, did) {
+                        row.provision_kind = kind;
+                        row.partitions = parse_lba12(&lba12, did);
                         let lba6 = read_exact(6)?;
                         row.label =
                             metainfo::safe6_label_from_lba6(&lba6, &meta).or(row.label.take());
@@ -196,6 +206,38 @@ pub fn scan_disks(
                 let identity = crate::application::media_identity_observer::
                     media_identity_from_protocol_image(runner, d.n, &protocol_image)
                     .map_err(|error| io::Error::other(error.msg))?;
+
+                if identity.protocol.provision_kind == Some(DiskProvisionKind::Plain) {
+                    let total_sectors = d.size / SECTOR as u64;
+                    match crate::application::partition_table::read_partition_table(
+                        total_sectors,
+                        |lba| {
+                            let lba = u32::try_from(lba)
+                                .map_err(|_| format!("LBA{lba} 超出当前扫描器 u32 范围"))?;
+                            read_exact(lba).map_err(|error| error.to_string())
+                        },
+                    ) {
+                        Ok(mut table) => {
+                            for partition in &mut table.partitions {
+                                let Ok(start) = u32::try_from(partition.start_lba) else {
+                                    continue;
+                                };
+                                let Ok(boot) = read_exact(start) else {
+                                    continue;
+                                };
+                                partition.filesystem =
+                                    crate::inspect_target::detect_plain_filesystem(
+                                        partition.sector_count,
+                                        &boot,
+                                    )
+                                    .map(|filesystem| filesystem.label().to_string());
+                            }
+                            row.partition_table = Some(table);
+                        }
+                        Err(error) => row.partition_table_error = Some(error),
+                    }
+                }
+
                 let matches = find_backups(backup_dir, &identity);
                 row.identity_pin = Some(crate::application::media_identity::MediaIdentityPin::new(
                     identity,
@@ -235,15 +277,17 @@ pub fn print_disk_table(rows: &[Row]) -> String {
                 ("需管理员权限才能识别".to_string(), Tone::Dim)
             } else if let Some(error) = &row.probe_error {
                 (format!("读取异常: {}", error), Tone::Yellow)
-            } else {
+            } else if let Some(kind) = row.confirmed_provision_kind() {
                 (
-                    row.provision_kind.short_name().to_string(),
-                    if row.provision_kind == DiskProvisionKind::Plain {
+                    kind.short_name().to_string(),
+                    if kind == DiskProvisionKind::Plain {
                         Tone::Dim
                     } else {
                         Tone::Green
                     },
                 )
+            } else {
+                ("未知 / 未确认".to_string(), Tone::Yellow)
             };
             vec![
                 TableCell::left(format!("disk{}", row.disk), Tone::Bold),

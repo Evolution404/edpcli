@@ -54,7 +54,7 @@ fn macos_plain_virtual_disk_provisions_and_reidentifies() {
     let lba12 = dev.read_sector(12).expect("read LBA12");
     assert_eq!(
         DiskProvisionKind::from_sectors(&lba7, &lba12, "macos-virtual-hil"),
-        DiskProvisionKind::Plain
+        None
     );
     let mbr = dev.read_sector(0).expect("read MBR");
     assert_eq!(&mbr[510..512], &[0x55, 0xaa]);

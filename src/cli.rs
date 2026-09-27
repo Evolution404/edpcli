@@ -1053,6 +1053,8 @@ mod tests {
             probe_error: None,
             provision_kind: crate::provision::DiskProvisionKind::Plain,
             partitions: None,
+            partition_table: None,
+            partition_table_error: None,
         };
         assert!(!list_needs_elevation(
             std::slice::from_ref(&base),
@@ -1276,7 +1278,7 @@ mod tests {
                 size_bytes: 3_143_761_920,
             },
         ];
-        let rows = vec![
+        let mut rows = vec![
             Row {
                 disk: 4,
                 size: 64_000_000_000,
@@ -1300,6 +1302,8 @@ mod tests {
                 probe_error: None,
                 provision_kind: crate::provision::DiskProvisionKind::Plain,
                 partitions: None,
+                partition_table: None,
+                partition_table_error: None,
             },
             Row {
                 disk: 6,
@@ -1324,6 +1328,8 @@ mod tests {
                 probe_error: None,
                 provision_kind: crate::provision::DiskProvisionKind::Mode0,
                 partitions: Some(parts),
+                partition_table: None,
+                partition_table_error: None,
             },
             Row {
                 disk: 7,
@@ -1348,8 +1354,44 @@ mod tests {
                 probe_error: None,
                 provision_kind: crate::provision::DiskProvisionKind::Plain,
                 partitions: None,
+                partition_table: None,
+                partition_table_error: None,
             },
         ];
+        for row in rows.iter_mut().filter(|row| row.proto == "USB") {
+            use crate::application::media_identity::{
+                DerivedProtocolEvidence, HardwareIdentityEvidence, IdentityObservation,
+                MediaIdentityPin, MediaIdentitySnapshot, ProtocolIdentityEvidence,
+            };
+            let hardware = HardwareIdentityEvidence {
+                total_sectors: Some(row.size / crate::common::SECTOR as u64),
+                logical_sector_size: Some(crate::common::SECTOR as u32),
+                ..HardwareIdentityEvidence::default()
+            };
+            let snapshot = if row.provision_kind == crate::provision::DiskProvisionKind::Plain {
+                MediaIdentitySnapshot::plain(
+                    hardware,
+                    DerivedProtocolEvidence::default(),
+                    IdentityObservation::default(),
+                )
+            } else {
+                MediaIdentitySnapshot {
+                    hardware,
+                    protocol: ProtocolIdentityEvidence {
+                        device_id: row.device_id.clone(),
+                        onlyid: row.onlyid.clone(),
+                        provision_kind: Some(row.provision_kind),
+                        lba4_identity_digest: None,
+                    },
+                    derived: DerivedProtocolEvidence::default(),
+                    observation: IdentityObservation::default(),
+                }
+            };
+            row.identity_pin = Some(MediaIdentityPin::new(
+                snapshot,
+                &vec![0; crate::common::METADATA_IMAGE_LEN],
+            ));
+        }
         let out = print_disk_table(&rows);
         let lines: Vec<&str> = out.lines().collect();
         assert_eq!(lines[0], "外接盘 3 个:");

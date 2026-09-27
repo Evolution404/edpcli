@@ -30,7 +30,7 @@ fn chapter_11_provision_escape_restores_device_selection() {
 }
 
 fn device(size: u64) -> edpcli::disk_scan::Row {
-    edpcli::disk_scan::Row {
+    let mut row = edpcli::disk_scan::Row {
         disk: 6,
         size,
         vid: "1234".into(),
@@ -53,7 +53,11 @@ fn device(size: u64) -> edpcli::disk_scan::Row {
         probe_error: None,
         provision_kind: edpcli::provision::DiskProvisionKind::Plain,
         partitions: None,
-    }
+        partition_table: None,
+        partition_table_error: None,
+    };
+    crate::common::confirm_row_identity(&mut row);
+    row
 }
 
 #[test]
@@ -113,6 +117,7 @@ fn registered_mode0_to_mode1_form_keeps_exact_encrypt_geometry() {
     use edpcli::sectors::EdpfPartition;
     let mut row = device(64_000_000_000);
     row.provision_kind = DiskProvisionKind::Mode0;
+    crate::common::confirm_row_identity(&mut row);
     row.partitions = Some(vec![
         EdpfPartition {
             ptype: 1,
@@ -160,6 +165,7 @@ fn registered_identity_prefills_custom_label_and_force_policy_but_remains_editab
 
     let mut row = device(64_000_000_000);
     row.provision_kind = DiskProvisionKind::Mode0;
+    crate::common::confirm_row_identity(&mut row);
     row.label = Some("来源自定义!SAFE6".into());
     row.force_change_password = Some(true);
     row.cancel_password_complexity_check = Some(true);
@@ -462,6 +468,7 @@ fn mode0_to_mode1_unknown_encrypt_disables_only_encrypt_target_password() {
 
     let mut row = device(64_000_000_000);
     row.provision_kind = DiskProvisionKind::Mode0;
+    crate::common::confirm_row_identity(&mut row);
     row.partitions = Some(vec![
         EdpfPartition {
             ptype: 1,
@@ -1234,6 +1241,7 @@ fn registered_mode0_to_mode1_preview_keeps_encrypt_anchor_and_blocks_overlap() {
     let encrypt_start = 4_020_480u64;
     let mut row = device(64_000_000_000);
     row.provision_kind = DiskProvisionKind::Mode0;
+    crate::common::confirm_row_identity(&mut row);
     row.partitions = Some(vec![
         EdpfPartition {
             ptype: 1,
@@ -1535,11 +1543,9 @@ fn advanced_inspect_lazy_sector_window_is_bounded_and_pageable() {
     use edpcli::application::inspect_tree::InspectNodeKind;
     use edpcli::backup_metadata::PartitionGeometry;
     use edpcli::inspect::InspectMeta;
-    use edpcli::inspect_target::InspectDiskContext;
     use edpcli::tui::state::AdvancedInspectSource;
 
-    let mut context =
-        InspectDiskContext::new(vec![0; edpcli::common::METADATA_IMAGE_LEN], None, 10_000);
+    let mut context = crate::common::edp_inspect_context(10_000);
     context.partitions.push(PartitionGeometry {
         index: 0,
         partition_type: 2,
@@ -1640,7 +1646,6 @@ fn advanced_sector_inspector_is_on_demand_bounded_and_fail_soft() {
     };
     use edpcli::application::inspect_tree::InspectNodeKind;
     use edpcli::inspect::InspectMeta;
-    use edpcli::inspect_target::InspectDiskContext;
     use edpcli::tui::state::{AdvancedInspectSource, SectorInspectMode};
 
     fn item(
@@ -1671,7 +1676,7 @@ fn advanced_sector_inspector_is_on_demand_bounded_and_fail_soft() {
         }
     }
 
-    let context = InspectDiskContext::new(vec![0; edpcli::common::METADATA_IMAGE_LEN], None, 5_000);
+    let context = crate::common::edp_inspect_context(5_000);
     let mut state = AppState::new();
     assert!(state.begin_advanced_inspect(AdvancedInspectSource::Disk(9)));
     state.advanced_inspect_finish(Ok(AdvancedInspectWorkspace {

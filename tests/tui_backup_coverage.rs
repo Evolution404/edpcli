@@ -80,7 +80,7 @@ fn state() -> AppState {
         identity: None,
         user: Some("张三".into()),
         dept: Some("输电运检中心".into()),
-        provision_kind: edpcli::provision::DiskProvisionKind::Mode0,
+        provision_kind: Some(edpcli::provision::DiskProvisionKind::Mode0),
         integrity_status: edpcli::diskio::BackupIntegrityStatus::Verified,
         size_ok: true,
         content_sha256: Some("a".repeat(64)),

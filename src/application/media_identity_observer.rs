@@ -156,8 +156,7 @@ pub fn media_identity_from_protocol_image(
     };
 
     let snapshot = if let Some(device_id) = identified.device_id {
-        let detected = DiskProvisionKind::from_metadata(protocol_image, &device_id);
-        let provision_kind = (detected != DiskProvisionKind::Plain).then_some(detected);
+        let provision_kind = DiskProvisionKind::from_metadata(protocol_image, &device_id);
         MediaIdentitySnapshot {
             hardware,
             protocol: ProtocolIdentityEvidence {
@@ -169,7 +168,14 @@ pub fn media_identity_from_protocol_image(
             derived,
             observation,
         }
-    } else if lba4.iter().all(|byte| *byte == 0) {
+    } else if onlyid.is_none()
+        && total_sectors.is_some_and(|total| {
+            crate::application::partition_table::confirmed_plain_protocol_prefix(
+                protocol_image,
+                total,
+            )
+        })
+    {
         MediaIdentitySnapshot::plain(hardware, derived, observation)
     } else {
         MediaIdentitySnapshot {

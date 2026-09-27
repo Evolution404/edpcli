@@ -4,7 +4,6 @@ use edpcli::application::inspect::{
 };
 use edpcli::backup_metadata::PartitionGeometry;
 use edpcli::inspect::{FieldChild, FieldStyle, InspectMeta};
-use edpcli::inspect_target::InspectDiskContext;
 use edpcli::tui::{
     render,
     state::{AdvancedInspectSource, AppState, SectorInspectMode},
@@ -12,7 +11,7 @@ use edpcli::tui::{
 use ratatui::{backend::TestBackend, Terminal};
 
 fn workspace(items: Vec<AdvancedInspectItem>) -> AdvancedInspectWorkspace {
-    let context = InspectDiskContext::new(vec![0; edpcli::common::METADATA_IMAGE_LEN], None, 4_096);
+    let context = crate::common::edp_inspect_context(4_096);
     AdvancedInspectWorkspace {
         source: "test-disk".into(),
         meta: InspectMeta::default(),
@@ -24,8 +23,7 @@ fn workspace(items: Vec<AdvancedInspectItem>) -> AdvancedInspectWorkspace {
 }
 
 fn workspace_with_partition(items: Vec<AdvancedInspectItem>) -> AdvancedInspectWorkspace {
-    let mut context =
-        InspectDiskContext::new(vec![0; edpcli::common::METADATA_IMAGE_LEN], None, 10_000);
+    let mut context = crate::common::edp_inspect_context(10_000);
     context.partitions.push(PartitionGeometry {
         index: 0,
         partition_type: 2,

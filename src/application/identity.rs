@@ -123,7 +123,8 @@ impl WorkspaceIdentity {
             provision_kind: (backup.integrity_status
                 == crate::diskio::BackupIntegrityStatus::Verified
                 && backup.size_ok)
-                .then_some(backup.provision_kind),
+                .then_some(backup.provision_kind)
+                .flatten(),
             canonical: backup
                 .identity
                 .as_ref()

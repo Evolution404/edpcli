@@ -966,7 +966,7 @@ fn existing_profile_decodes_all_four_modes_and_keeps_partition_owned_key_fields(
         let (_, image, did) = generated_source(mode);
         assert_eq!(
             DiskProvisionKind::from_metadata(image.as_bytes(), &did),
-            DiskProvisionKind::from_mode(mode)
+            Some(DiskProvisionKind::from_mode(mode))
         );
         let parsed = parse_existing_provision(&image, &did, 16_777_216)
             .unwrap()
@@ -990,7 +990,7 @@ fn existing_profile_decodes_all_four_modes_and_keeps_partition_owned_key_fields(
             .is_none());
         assert_eq!(
             DiskProvisionKind::from_metadata(image.as_bytes(), "wrong-device"),
-            DiskProvisionKind::Plain
+            None
         );
     }
 }

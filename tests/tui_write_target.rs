@@ -10,7 +10,7 @@ use edpcli::tui::{
 use ratatui::{backend::TestBackend, Terminal};
 
 fn device(disk: u32) -> Row {
-    Row {
+    let mut row = Row {
         disk,
         size: 64_000_000_000,
         vid: "1234".into(),
@@ -33,7 +33,11 @@ fn device(disk: u32) -> Row {
         probe_error: None,
         provision_kind: edpcli::provision::DiskProvisionKind::Plain,
         partitions: None,
-    }
+        partition_table: None,
+        partition_table_error: None,
+    };
+    crate::common::confirm_row_identity(&mut row);
+    row
 }
 
 fn backup(index: usize, name: &str) -> BackupWorkspaceItem {
@@ -50,7 +54,7 @@ fn backup(index: usize, name: &str) -> BackupWorkspaceItem {
         identity: None,
         user: None,
         dept: None,
-        provision_kind: edpcli::provision::DiskProvisionKind::Plain,
+        provision_kind: Some(edpcli::provision::DiskProvisionKind::Plain),
         integrity_status: BackupIntegrityStatus::Verified,
         size_ok: true,
         content_sha256: Some(

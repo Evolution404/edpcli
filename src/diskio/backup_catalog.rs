@@ -140,7 +140,7 @@ pub struct BackupEntry {
     pub meta: Option<BackupMeta>,
     pub path: PathBuf,
     pub mtime: i64,
-    pub provision_kind: crate::provision::DiskProvisionKind,
+    pub provision_kind: Option<crate::provision::DiskProvisionKind>,
     pub integrity_status: BackupIntegrityStatus,
     pub size_ok: bool,
     /// 扫描时缓存的 LBA8 原始 512B；用于列表/元信息展示，避免随后再次打开同一备份。
@@ -266,12 +266,20 @@ pub fn scan_backup_file(path: &Path) -> Option<BackupEntry> {
         let manifest = &container.manifest;
         let mut identity = crate::edpb::canonical_media_identity(manifest).ok()?;
         if identity.protocol.provision_kind.is_none() {
-            if let (Some(device_id), Some(raw)) =
-                (identity.protocol.device_id.as_deref(), raw.as_ref())
-            {
-                identity.protocol.provision_kind = Some(
-                    crate::provision::DiskProvisionKind::from_metadata(raw, device_id),
-                );
+            if let Some(raw) = raw.as_ref() {
+                if let Some(device_id) = identity.protocol.device_id.as_deref() {
+                    identity.protocol.provision_kind =
+                        crate::provision::DiskProvisionKind::from_metadata(raw, device_id);
+                } else if identity.protocol.onlyid.is_none() {
+                    let total_sectors = manifest.geometry.total_sectors.unwrap_or(0);
+                    if crate::application::partition_table::confirmed_plain_protocol_prefix(
+                        raw,
+                        total_sectors,
+                    ) {
+                        identity.protocol.provision_kind =
+                            Some(crate::provision::DiskProvisionKind::Plain);
+                    }
+                }
             }
         }
         Some(BackupMeta {
@@ -297,12 +305,10 @@ pub fn scan_backup_file(path: &Path) -> Option<BackupEntry> {
     } else {
         BackupIntegrityStatus::Invalid
     };
-    let provision_kind = match (&meta, &raw) {
-        (Some(meta), Some(data)) => {
-            crate::provision::DiskProvisionKind::from_metadata(data, &meta.device_id)
-        }
-        _ => crate::provision::DiskProvisionKind::Plain,
-    };
+    let provision_kind = meta
+        .as_ref()
+        .and_then(|meta| meta.identity.as_ref())
+        .and_then(|identity| identity.protocol.provision_kind);
     Some(BackupEntry {
         meta,
         path: path.to_path_buf(),

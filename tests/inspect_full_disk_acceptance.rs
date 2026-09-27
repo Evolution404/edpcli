@@ -143,15 +143,33 @@ fn plain_mbr_partition_is_browsable_and_lce_absence_is_explicit() {
     assert!(context.lce.is_none());
     assert!(context.partitions.is_empty());
 
+    assert_eq!(
+        context.provision_kind,
+        Some(edpcli::provision::DiskProvisionKind::Plain)
+    );
+    assert!(context.partition_table.is_some());
+
     let topology = build_inspect_topology(&context);
     assert!(topology
         .regions_for_lba(900_000)
         .iter()
-        .any(|node| node.id == "region.mbr_partition.0"));
+        .any(|node| node.id == "region.plain_partition.1"));
     assert!(topology
-        .regions_for_lba(900_000)
+        .regions_for_lba(1)
         .iter()
-        .all(|node| node.id != "region.lce"));
+        .any(|node| node.id.starts_with("region.unallocated.")));
+    let root_ids = match &topology.root.children {
+        edpcli::application::inspect_tree::InspectChildren::Materialized(children) => children
+            .iter()
+            .map(|node| node.id.as_str())
+            .collect::<Vec<_>>(),
+        _ => panic!("plain root must be materialized"),
+    };
+    assert!(root_ids.iter().all(|id| {
+        !id.starts_with("region.protocol")
+            && !id.starts_with("region.lce")
+            && !id.starts_with("region.tail")
+    }));
 
     let mut state = AppState::new();
     assert!(state.begin_advanced_inspect(AdvancedInspectSource::Disk(99)));

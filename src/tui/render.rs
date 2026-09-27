@@ -246,10 +246,12 @@ fn device_status_style(row: &crate::disk_scan::Row) -> Style {
         warning()
     } else if row.probe_error.is_some() {
         danger()
-    } else if row.provision_kind == crate::provision::DiskProvisionKind::Plain {
-        muted()
     } else {
-        accent()
+        match row.confirmed_provision_kind() {
+            Some(crate::provision::DiskProvisionKind::Plain) => muted(),
+            Some(_) => accent(),
+            None => warning(),
+        }
     }
 }
 

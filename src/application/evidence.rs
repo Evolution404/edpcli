@@ -11,8 +11,7 @@ use std::path::{Path, PathBuf};
 use crate::common::{METADATA_IMAGE_LEN, METADATA_SECTOR_COUNT, SECTOR};
 use crate::diskio::{self, FileDev};
 use crate::edpb::Manifest;
-use crate::identify::identify;
-use crate::sysinfo::{self, CmdRunner};
+use crate::sysinfo::CmdRunner;
 
 use super::target_session::{ReadOnly, TargetSession};
 
@@ -107,6 +106,7 @@ pub struct EvidenceIdentity {
     pub pid: Option<String>,
     pub size_bytes: Option<u64>,
     pub onlyid: Option<String>,
+    pub provision_kind: Option<crate::provision::DiskProvisionKind>,
 }
 
 struct BackupSectorReader {
@@ -215,12 +215,32 @@ impl EvidenceSource {
                 path: path.to_path_buf(),
             }
         })?;
+        let canonical = crate::edpb::canonical_media_identity(&manifest).map_err(|message| {
+            EvidenceError::BackupVerify {
+                path: path.to_path_buf(),
+                message,
+            }
+        })?;
+        let fallback_kind = canonical.protocol.provision_kind.or_else(|| {
+            match canonical.protocol.device_id.as_deref() {
+                Some(device_id) => {
+                    crate::provision::DiskProvisionKind::from_metadata(&protocol, device_id)
+                }
+                None => (canonical.protocol.onlyid.is_none()
+                    && crate::application::partition_table::confirmed_plain_protocol_prefix(
+                        &protocol,
+                        total_sectors,
+                    ))
+                .then_some(crate::provision::DiskProvisionKind::Plain),
+            }
+        });
         let identity = EvidenceIdentity {
-            device_id: Some(manifest.device.device_id.clone()),
-            vid: Some(manifest.device.vid.clone()),
-            pid: Some(manifest.device.pid.clone()),
+            device_id: canonical.protocol.device_id.clone(),
+            vid: canonical.hardware.vid.map(|value| format!("{value:04x}")),
+            pid: canonical.hardware.pid.map(|value| format!("{value:04x}")),
             size_bytes: manifest.geometry.capacity_bytes,
-            onlyid: manifest.device.onlyid.clone(),
+            onlyid: canonical.protocol.onlyid.clone(),
+            provision_kind: fallback_kind,
         };
         Ok(Self {
             source_label: path.display().to_string(),
@@ -255,15 +275,18 @@ impl EvidenceSource {
         })?;
         debug_assert_eq!(protocol.len(), METADATA_IMAGE_LEN);
 
-        let raw7 = &protocol[7 * SECTOR..8 * SECTOR];
-        let id = identify(runner, disk, raw7).device_id;
-        let (vid, pid) = sysinfo::usb_vid_pid(runner, disk);
+        let canonical =
+            crate::application::media_identity_observer::media_identity_from_protocol_image(
+                runner, disk, &protocol,
+            )
+            .map_err(|error| EvidenceError::Target(error.msg))?;
         let identity = EvidenceIdentity {
-            device_id: id,
-            vid: (vid != "xxxx").then_some(vid),
-            pid: (pid != "xxxx").then_some(pid),
+            device_id: canonical.protocol.device_id.clone(),
+            vid: canonical.hardware.vid.map(|value| format!("{value:04x}")),
+            pid: canonical.hardware.pid.map(|value| format!("{value:04x}")),
             size_bytes: total_sectors.checked_mul(SECTOR as u64),
-            onlyid: diskio::lba4_label_id_from(&protocol[4 * SECTOR..5 * SECTOR]),
+            onlyid: canonical.protocol.onlyid.clone(),
+            provision_kind: canonical.protocol.provision_kind,
         };
         Ok(Self {
             source_label: format!("物理盘 disk{disk} ({path})"),

@@ -93,9 +93,9 @@ pub(super) fn commit_plain_provision_with_progress(
         .read_sector(12)
         .map_err(|error| err(EXIT_IO, format!("错误: Plain 写后读取 LBA12 失败: {error}")))?;
     if crate::provision::DiskProvisionKind::from_sectors(&lba7, &lba12, &prepared.device_id)
-        != crate::provision::DiskProvisionKind::Plain
+        .is_some()
     {
-        return Err(err(EXIT_IO, "错误: Plain 写后重新识别仍为 EDP 模式"));
+        return Err(err(EXIT_IO, "错误: Plain 写后仍检测到合法 EDP 模式"));
     }
     progress(Phase::Readback, Step::ProtocolReadback, None);
     Ok(())

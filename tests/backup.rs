@@ -59,9 +59,7 @@ fn current_identity(data: &[u8], device_id: &str) -> MediaIdentitySnapshot {
         protocol: ProtocolIdentityEvidence {
             device_id: Some(device_id.to_string()),
             onlyid: edpcli::diskio::lba4_label_id_from(&data[4 * SECTOR..5 * SECTOR]),
-            provision_kind: Some(edpcli::provision::DiskProvisionKind::from_metadata(
-                data, device_id,
-            )),
+            provision_kind: edpcli::provision::DiskProvisionKind::from_metadata(data, device_id),
             lba4_identity_digest: None,
         },
         derived: DerivedProtocolEvidence::default(),
@@ -410,16 +408,19 @@ fn scan_backup_dir_reports_edpb_integrity_and_ignores_legacy_bin() {
     assert_eq!(ok_e.integrity_status, BackupIntegrityStatus::Verified);
     assert!(ok_e.size_ok);
     assert!(ok_e.meta.is_some());
+    assert!(ok_e.provision_kind.is_some());
 
     let damaged_e = by_path(&damaged);
     assert_eq!(damaged_e.integrity_status, BackupIntegrityStatus::Invalid);
     assert!(!damaged_e.size_ok);
     assert!(damaged_e.meta.is_none());
+    assert_eq!(damaged_e.provision_kind, None, "损坏备份不得回退成普通盘");
 
     let invalid_e = by_path(&invalid);
     assert_eq!(invalid_e.integrity_status, BackupIntegrityStatus::Invalid);
     assert!(!invalid_e.size_ok);
     assert!(invalid_e.meta.is_none());
+    assert_eq!(invalid_e.provision_kind, None, "无法验证的备份盘型必须未知");
 }
 
 #[test]
@@ -559,7 +560,7 @@ fn fake_entry(name: &str, onlyid: &str, mtime: i64) -> BackupEntry {
         }),
         path: std::path::PathBuf::from(name),
         mtime,
-        provision_kind: edpcli::provision::DiskProvisionKind::Plain,
+        provision_kind: Some(edpcli::provision::DiskProvisionKind::Plain),
         integrity_status: BackupIntegrityStatus::Verified,
         size_ok: true,
         lba8: None,

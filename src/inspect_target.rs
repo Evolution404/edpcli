@@ -17,6 +17,16 @@ pub enum SectorRegion {
     Protocol {
         lba: u64,
     },
+    PartitionTable {
+        label: String,
+        start_lba: u64,
+    },
+    PlainPartition {
+        index: usize,
+        label: String,
+        relative_lba: u64,
+    },
+    Unallocated,
     Lce {
         start_lba: u64,
         index: u64,
@@ -42,6 +52,13 @@ impl SectorRegion {
     pub fn label(&self) -> String {
         match self {
             Self::Protocol { lba } => format!("EDP 主协议区 LBA{lba}"),
+            Self::PartitionTable { label, .. } => label.clone(),
+            Self::PlainPartition {
+                index,
+                label,
+                relative_lba,
+            } => format!("普通分区 P{index} {label} +{relative_lba}"),
+            Self::Unallocated => "未分配空间".into(),
             Self::Lce { index, .. } => format!("LCE +{index}/6"),
             Self::Partition {
                 index,
@@ -263,11 +280,31 @@ fn detect_filesystem_boot(
     None
 }
 
+pub fn detect_plain_filesystem(sector_count: u64, boot: &[u8]) -> Option<FilesystemBootKind> {
+    let partition = PartitionGeometry {
+        index: 0,
+        partition_type: 0,
+        partition_count: 1,
+        need_disturb: 0,
+        need_encrypt: 0,
+        start_sector: 0,
+        sector_size: SECTOR as u64,
+        partition_size: sector_count.saturating_mul(SECTOR as u64),
+        sector_count,
+        user_key_crc: 0,
+        file_key_crc: 0,
+        encrypt_mode: 0,
+    };
+    detect_filesystem_boot(&partition, boot)
+}
+
 #[derive(Clone, Debug)]
 pub struct InspectDiskContext {
     pub protocol_image: Vec<u8>,
     pub device_id: Option<String>,
     pub total_sectors: u64,
+    pub provision_kind: Option<crate::provision::DiskProvisionKind>,
+    pub partition_table: Option<crate::application::partition_table::PartitionTableSnapshot>,
     pub partitions: Vec<PartitionGeometry>,
     pub lce: Option<Lba7CompatibilityGeometry>,
     pub context_issues: Vec<String>,
@@ -275,29 +312,98 @@ pub struct InspectDiskContext {
 
 impl InspectDiskContext {
     pub fn new(protocol_image: Vec<u8>, device_id: Option<String>, total_sectors: u64) -> Self {
+        let provision_kind = match device_id.as_deref() {
+            Some(did) => crate::provision::DiskProvisionKind::from_metadata(&protocol_image, did),
+            None => {
+                let onlyid = protocol_image
+                    .get(4 * SECTOR..5 * SECTOR)
+                    .and_then(crate::diskio::lba4_label_id_from);
+                (onlyid.is_none()
+                    && crate::application::partition_table::confirmed_plain_protocol_prefix(
+                        &protocol_image,
+                        total_sectors,
+                    ))
+                .then_some(crate::provision::DiskProvisionKind::Plain)
+            }
+        };
+        let partition_table = if provision_kind == Some(crate::provision::DiskProvisionKind::Plain)
+        {
+            crate::application::partition_table::read_partition_table(total_sectors, |lba| {
+                let start = usize::try_from(lba)
+                    .ok()
+                    .and_then(|value| value.checked_mul(SECTOR))
+                    .ok_or_else(|| format!("LBA{lba} 偏移溢出"))?;
+                protocol_image
+                    .get(start..start + SECTOR)
+                    .map(|sector| sector.to_vec())
+                    .ok_or_else(|| format!("LBA{lba} 不在当前 LBA0-12 上下文中"))
+            })
+            .ok()
+        } else {
+            None
+        };
+        Self::new_with_partition_table(
+            protocol_image,
+            device_id,
+            total_sectors,
+            provision_kind,
+            partition_table,
+            None,
+        )
+    }
+
+    pub fn new_with_partition_table(
+        protocol_image: Vec<u8>,
+        device_id: Option<String>,
+        total_sectors: u64,
+        provision_kind: Option<crate::provision::DiskProvisionKind>,
+        partition_table: Option<crate::application::partition_table::PartitionTableSnapshot>,
+        partition_table_issue: Option<String>,
+    ) -> Self {
         let mut partitions = Vec::new();
         let mut lce = None;
         let mut context_issues = Vec::new();
-        if let Some(did) = device_id.as_deref() {
-            match parse_partition_geometry(&protocol_image, did, total_sectors) {
-                Ok(value) => partitions = value,
-                Err(error) => context_issues.push(format!("LBA12 分区几何不可用: {error}")),
+
+        if provision_kind == Some(crate::provision::DiskProvisionKind::Plain) {
+            if let Some(issue) = partition_table_issue {
+                context_issues.push(format!("普通盘分区表不可用: {issue}"));
             }
-            match parse_lba7_compatibility_geometry(&protocol_image, did, total_sectors) {
-                Ok(value) => lce = Some(value),
-                Err(error) => context_issues.push(format!("LCE 几何不可用: {error}")),
+        } else if provision_kind.is_some() || device_id.is_some() {
+            if let Some(did) = device_id.as_deref() {
+                match parse_partition_geometry(&protocol_image, did, total_sectors) {
+                    Ok(value) => partitions = value,
+                    Err(error) => context_issues.push(format!("LBA12 分区几何不可用: {error}")),
+                }
+                match parse_lba7_compatibility_geometry(&protocol_image, did, total_sectors) {
+                    Ok(value) => lce = Some(value),
+                    Err(error) => context_issues.push(format!("LCE 几何不可用: {error}")),
+                }
+            } else {
+                context_issues.push("EDP 盘缺少 device_id，无法解析 LBA7/LBA12 区域几何".into());
             }
         } else {
-            context_issues.push("缺少 device_id，无法解析 LBA7/LBA12 区域几何".into());
+            context_issues.push("盘型未确认；仅提供 RAW/已验证分区表证据".into());
         }
+
         Self {
             protocol_image,
             device_id,
             total_sectors,
+            provision_kind,
+            partition_table,
             partitions,
             lce,
             context_issues,
         }
+    }
+
+    pub fn is_plain(&self) -> bool {
+        self.provision_kind == Some(crate::provision::DiskProvisionKind::Plain)
+    }
+
+    pub fn has_edp_protocol(&self) -> bool {
+        self.provision_kind
+            .is_some_and(|kind| kind != crate::provision::DiskProvisionKind::Plain)
     }
 
     pub fn validate_lba(&self, lba: u64) -> Result<(), String> {
@@ -313,7 +419,41 @@ impl InspectDiskContext {
 
     pub fn regions(&self, lba: u64) -> Vec<SectorRegion> {
         let mut out = Vec::new();
-        if lba <= u64::from(METADATA_LAST_LBA) {
+
+        if self.is_plain() {
+            if let Some(table) = &self.partition_table {
+                for extent in &table.table_extents {
+                    if lba >= extent.start_lba
+                        && lba < extent.start_lba.saturating_add(extent.sector_count)
+                    {
+                        out.push(SectorRegion::PartitionTable {
+                            label: extent.label.clone(),
+                            start_lba: extent.start_lba,
+                        });
+                    }
+                }
+                if let Some(partition) = table.partition_for_lba(lba) {
+                    out.push(SectorRegion::PlainPartition {
+                        index: partition.index,
+                        label: partition
+                            .filesystem
+                            .clone()
+                            .unwrap_or_else(|| partition.type_label()),
+                        relative_lba: lba - partition.start_lba,
+                    });
+                }
+            }
+            if out.is_empty() {
+                out.push(if self.partition_table.is_some() {
+                    SectorRegion::Unallocated
+                } else {
+                    SectorRegion::Unknown
+                });
+            }
+            return out;
+        }
+
+        if self.has_edp_protocol() && lba <= u64::from(METADATA_LAST_LBA) {
             out.push(SectorRegion::Protocol { lba });
         }
 
@@ -343,14 +483,15 @@ impl InspectDiskContext {
             }
         }
 
-        if self.total_sectors >= TAIL_METADATA_MIRROR_OFFSET_SECTORS {
+        if self.has_edp_protocol() && self.total_sectors >= TAIL_METADATA_MIRROR_OFFSET_SECTORS {
             let start = self.total_sectors - TAIL_METADATA_MIRROR_OFFSET_SECTORS;
             if lba >= start && lba < start + TAIL_METADATA_MIRROR_SECTORS {
                 out.push(SectorRegion::TailMetadataMirror { index: lba - start });
             }
         }
 
-        if self.total_sectors > TAIL_END4_MIRROR_OFFSET_SECTORS
+        if self.has_edp_protocol()
+            && self.total_sectors > TAIL_END4_MIRROR_OFFSET_SECTORS
             && lba == self.total_sectors - TAIL_END4_MIRROR_OFFSET_SECTORS
         {
             out.push(SectorRegion::RestoreNodeEnd4);
@@ -358,7 +499,7 @@ impl InspectDiskContext {
 
         let tail_count = self.total_sectors.min(DEVICE_TAIL_WINDOW_SECTORS);
         let tail_start = self.total_sectors - tail_count;
-        if lba >= tail_start {
+        if self.has_edp_protocol() && lba >= tail_start {
             out.push(SectorRegion::DeviceTailWindow {
                 relative_lba: lba - tail_start,
             });
@@ -378,6 +519,29 @@ impl InspectDiskContext {
                         .start_sector
                         .saturating_add(partition.sector_count)
         })
+    }
+
+    pub fn plain_partition_for_lba(
+        &self,
+        lba: u64,
+    ) -> Option<&crate::application::partition_table::PhysicalPartition> {
+        self.partition_table
+            .as_ref()
+            .and_then(|table| table.partition_for_lba(lba))
+    }
+
+    pub fn partition_start_for_lba(&self, lba: u64) -> Option<u64> {
+        if self.is_plain() {
+            self.plain_partition_for_lba(lba)
+                .map(|partition| partition.start_lba)
+        } else {
+            self.partition_for_lba(lba)
+                .map(|partition| partition.start_sector)
+        }
+    }
+
+    pub fn has_partition_for_lba(&self, lba: u64) -> bool {
+        self.partition_start_for_lba(lba).is_some()
     }
 
     pub fn partition_mbr_exposure(&self, partition: &PartitionGeometry) -> String {
@@ -487,6 +651,39 @@ impl InspectDiskContext {
             return Err(format!("LBA{lba} 长度 {}B，不是 512B", raw.len()));
         }
 
+        if self.is_plain() {
+            if let Some(partition) = self.plain_partition_for_lba(lba) {
+                let boot = if lba == partition.start_lba {
+                    raw
+                } else {
+                    partition_boot_raw.ok_or_else(|| {
+                        format!(
+                            "普通分区 P{} 缺少起始 LBA{} 证据，无法验证文件系统；decode fail-closed",
+                            partition.index, partition.start_lba
+                        )
+                    })?
+                };
+                let filesystem = detect_plain_filesystem(partition.sector_count, boot)
+                    .ok_or_else(|| {
+                        format!(
+                            "普通分区 P{} 起始扇区未通过 FAT/exFAT/NTFS 严格校验；decode fail-closed",
+                            partition.index
+                        )
+                    })?;
+                return Ok((
+                    raw.to_vec(),
+                    format!(
+                        "普通分区 P{}：物理明文 {}，严格 boot-sector 校验通过；decode=raw",
+                        partition.index,
+                        filesystem.label()
+                    ),
+                ));
+            }
+            return Err(format!(
+                "LBA{lba} 不属于普通盘已识别分区；raw 可读，decode 拒绝猜测"
+            ));
+        }
+
         if let Some(lce) = &self.lce {
             if lba >= lce.start_lba && lba < lce.start_lba + lce.sector_count {
                 let physical_offset = lba
@@ -563,8 +760,8 @@ impl InspectDiskContext {
 
     pub fn decode_non_protocol(&self, lba: u64, raw: &[u8]) -> Result<(Vec<u8>, String), String> {
         let boot = self
-            .partition_for_lba(lba)
-            .and_then(|partition| (partition.start_sector == lba).then_some(raw));
+            .partition_start_for_lba(lba)
+            .and_then(|start| (start == lba).then_some(raw));
         self.decode_non_protocol_with_boot(lba, raw, boot)
     }
 }
@@ -574,16 +771,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn unknown_context_still_classifies_protocol_and_tail() {
+    fn unknown_context_does_not_invent_edp_protocol_or_tail() {
         let context = InspectDiskContext::new(vec![0; 13 * SECTOR], None, 4096);
-        assert_eq!(
-            context.regions(7).first(),
-            Some(&SectorRegion::Protocol { lba: 7 })
-        );
-        assert!(context
-            .regions(4095)
-            .iter()
-            .any(|region| matches!(region, SectorRegion::DeviceTailWindow { .. })));
+        assert_eq!(context.provision_kind, None);
+        assert_eq!(context.regions(7), vec![SectorRegion::Unknown]);
+        assert_eq!(context.regions(4095), vec![SectorRegion::Unknown]);
         assert!(context.validate_lba(4096).is_err());
     }
 }

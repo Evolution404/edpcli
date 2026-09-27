@@ -210,7 +210,7 @@ fn ownership_uses_lba8_cached_during_catalog_scan() {
     assert_eq!(ownership.user.as_deref(), Some("宋旭琳"));
 }
 #[test]
-fn september_10_netac_backup_with_conflicting_edpf_tables_is_plain() {
+fn september_10_netac_backup_with_conflicting_edpf_tables_is_unknown_to_edp_detector() {
     let mode0 = std::fs::read(concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/backup/disk6_122880000_vid0dd8_pid2005_disk&ven_netac&prod_onlydisk_onlyid949028302_20260910_172420.bin"
@@ -218,7 +218,7 @@ fn september_10_netac_backup_with_conflicting_edpf_tables_is_plain() {
     .expect("recorded backup image");
     assert_eq!(
         edpcli::provision::DiskProvisionKind::from_metadata(&mode0, "disk&ven_netac&prod_onlydisk"),
-        edpcli::provision::DiskProvisionKind::Mode0
+        Some(edpcli::provision::DiskProvisionKind::Mode0)
     );
     let conflicting = std::fs::read(concat!(
         env!("CARGO_MANIFEST_DIR"),
@@ -230,6 +230,6 @@ fn september_10_netac_backup_with_conflicting_edpf_tables_is_plain() {
             &conflicting,
             "disk&ven_netac&prod_onlydisk"
         ),
-        edpcli::provision::DiskProvisionKind::Plain
+        None
     );
 }

@@ -45,7 +45,10 @@ fn backup_capacity(meta: &BackupMeta) -> String {
 }
 
 fn backup_kind(entry: &BackupEntry) -> &'static str {
-    entry.provision_kind.short_name()
+    entry
+        .provision_kind
+        .map(|kind| kind.short_name())
+        .unwrap_or("未知 / 未确认")
 }
 
 fn backup_health(entry: &BackupEntry) -> String {

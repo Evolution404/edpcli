@@ -873,46 +873,49 @@ impl DiskProvisionKind {
         }
     }
 
-    pub fn from_metadata(image: &[u8], device_id: &str) -> Self {
-        let Some(lba7) = image.get(7 * SECTOR..8 * SECTOR) else {
-            return Self::Plain;
-        };
-        let Some(lba12) = image.get(12 * SECTOR..13 * SECTOR) else {
-            return Self::Plain;
-        };
+    /// Detect an official EDP mode from LBA7/LBA12 metadata.
+    ///
+    /// This detector deliberately never returns Plain: failure to recognize a
+    /// valid official EDP profile is None. Plain media must be confirmed by
+    /// the independent physical partition-table classifier.
+    pub fn from_metadata(image: &[u8], device_id: &str) -> Option<Self> {
+        let lba7 = image.get(7 * SECTOR..8 * SECTOR)?;
+        let lba12 = image.get(12 * SECTOR..13 * SECTOR)?;
         Self::from_sectors(lba7, lba12, device_id)
     }
 
-    pub fn from_sectors(lba7: &[u8], lba12: &[u8], device_id: &str) -> Self {
+    /// Detect an official EDP mode from exactly one LBA7 and one LBA12 sector.
+    ///
+    /// Returns None for malformed, conflicting, unsupported, or non-EDP
+    /// metadata. Plain is not an EDP decode result.
+    pub fn from_sectors(lba7: &[u8], lba12: &[u8], device_id: &str) -> Option<Self> {
         if lba7.len() != SECTOR || lba12.len() != SECTOR || device_id.is_empty() {
-            return Self::Plain;
+            return None;
         }
         let crc = crc32_bare(device_id.as_bytes());
         let decoded7 = xor_rolling(lba7, (crc & 0xffff) ^ (crc >> 16));
         let decoded12 = a6b0_full(lba12, &crc.to_le_bytes(), 0);
         if decoded7.get(..4) != Some(b"EDPF") || decoded12.get(..4) != Some(b"EDPF") {
-            return Self::Plain;
+            return None;
         }
         let count = u32::from_le_bytes(decoded12[8..12].try_into().unwrap()) as usize;
         if !(2..=3).contains(&count) {
-            return Self::Plain;
+            return None;
         }
         let mut types = Vec::with_capacity(count);
         for index in 0..count {
-            let Ok(e7) = EdpfEntry64::parse(
+            let e7 = EdpfEntry64::parse(
                 decoded7[index * 0x40..(index + 1) * 0x40]
                     .try_into()
                     .unwrap(),
-            ) else {
-                return Self::Plain;
-            };
-            let Ok(e12) = EdpfEntry96::parse(
+            )
+            .ok()?;
+            let e12 = EdpfEntry96::parse(
                 decoded12[index * 0x60..(index + 1) * 0x60]
                     .try_into()
                     .unwrap(),
-            ) else {
-                return Self::Plain;
-            };
+            )
+            .ok()?;
             if e7.partition_count as usize != count
                 || e12.partition_count as usize != count
                 || e7.partition_type != e12.partition_type
@@ -921,18 +924,16 @@ impl DiskProvisionKind {
                 || e12.partition_size == 0
                 || !e12.partition_size.is_multiple_of(512)
             {
-                return Self::Plain;
+                return None;
             }
             if index == 0
                 && (e7.start_sector != e12.start_sector || e7.partition_size != e12.partition_size)
             {
-                return Self::Plain;
+                return None;
             }
             types.push(e12.partition_type);
         }
-        OfficialPartitionMode::from_partition_types(&types)
-            .map(Self::from_mode)
-            .unwrap_or(Self::Plain)
+        OfficialPartitionMode::from_partition_types(&types).map(Self::from_mode)
     }
 }
 

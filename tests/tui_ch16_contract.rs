@@ -3,7 +3,6 @@ use edpcli::application::inspect::{
     InspectField, InspectFieldStatus, InspectFieldType,
 };
 use edpcli::inspect::{FieldChild, FieldStyle, InspectFieldKey, InspectMeta, InspectParseState};
-use edpcli::inspect_target::InspectDiskContext;
 use edpcli::tui::{
     render,
     state::{AdvancedInspectSource, AppState},
@@ -72,8 +71,7 @@ fn lba8_state() -> AppState {
         notes: Vec::new(),
         meta_text: None,
     };
-    let context =
-        InspectDiskContext::new(vec![0; edpcli::common::METADATA_IMAGE_LEN], None, 16_384);
+    let context = crate::common::edp_inspect_context(16_384);
     let workspace = AdvancedInspectWorkspace {
         source: "chapter-16-fixture".into(),
         meta: InspectMeta::default(),
@@ -90,7 +88,7 @@ fn lba8_state() -> AppState {
 }
 
 fn device() -> edpcli::disk_scan::Row {
-    edpcli::disk_scan::Row {
+    let mut row = edpcli::disk_scan::Row {
         disk: 6,
         size: 64_000_000_000,
         vid: "1234".into(),
@@ -113,7 +111,11 @@ fn device() -> edpcli::disk_scan::Row {
         probe_error: None,
         provision_kind: edpcli::provision::DiskProvisionKind::Mode0,
         partitions: None,
-    }
+        partition_table: None,
+        partition_table_error: None,
+    };
+    crate::common::confirm_row_identity(&mut row);
+    row
 }
 
 fn provision_state() -> AppState {

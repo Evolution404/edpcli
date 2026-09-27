@@ -108,7 +108,12 @@ pub(super) fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, sta
             ]),
             Line::from(vec![
                 Span::styled("盘型  ", muted()),
-                Span::styled(row.provision_kind.full_name(), device_status_style(row)),
+                Span::styled(
+                    row.confirmed_provision_kind()
+                        .map(|kind| kind.full_name())
+                        .unwrap_or("未知 / 未确认"),
+                    device_status_style(row),
+                ),
             ]),
             Line::from(vec![
                 Span::styled("标签  ", muted()),
@@ -162,7 +167,9 @@ pub(super) fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, sta
                         format!("disk{}", row.disk),
                         format!("{:.2} GiB", row.size as f64 / 1_073_741_824.0),
                         format!("{}:{}", safe(&row.vid), safe(&row.pid)),
-                        row.provision_kind.full_name().to_string(),
+                        row.confirmed_provision_kind()
+                            .map(|kind| kind.full_name().to_string())
+                            .unwrap_or_else(|| "未知 / 未确认".into()),
                         safe(row.onlyid.as_deref().unwrap_or("—")),
                     ])
                 })

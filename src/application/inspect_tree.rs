@@ -27,6 +27,9 @@ pub enum InspectNodeKind {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DiskRegionSemantic {
     Protocol,
+    PartitionTable,
+    PlainPartition,
+    Unallocated,
     Lce,
     Tail,
     TailForensic,
@@ -118,7 +121,9 @@ impl InspectNode {
         (0..count)
             .map(|index| {
                 let lba = start_lba + offset + index;
-                sector_stub(lba, self.decoder, self.status)
+                let mut node = sector_stub(lba, self.decoder, self.status);
+                node.region_semantic = self.region_semantic;
+                node
             })
             .collect()
     }
@@ -636,17 +641,92 @@ pub fn build_inspect_topology(context: &InspectDiskContext) -> InspectTopology {
     let mut regions = Vec::new();
     let mut claimed = Vec::new();
 
-    if let Some((start, count)) = clip_range(0, 13, total) {
-        regions.push(region_with_extent(
-            "region.protocol",
-            "EDP 主协议区",
-            start,
-            count,
-            Some(InspectDecoderKind::Protocol),
-            SemanticStatus::Identified,
-            DiskRegionSemantic::Protocol,
-        ));
-        claimed.push((start, count));
+    if context.is_plain() {
+        if let Some(table) = &context.partition_table {
+            for (index, extent) in table.table_extents.iter().enumerate() {
+                if let Some((start, count)) =
+                    clip_range(extent.start_lba, extent.sector_count, total)
+                {
+                    regions.push(region_with_extent(
+                        format!("region.partition_table.{index}"),
+                        extent.label.clone(),
+                        start,
+                        count,
+                        None,
+                        SemanticStatus::Identified,
+                        DiskRegionSemantic::PartitionTable,
+                    ));
+                    claimed.push((start, count));
+                }
+            }
+            for partition in &table.partitions {
+                if let Some((start, count)) =
+                    clip_range(partition.start_lba, partition.sector_count, total)
+                {
+                    regions.push(region_with_extent(
+                        format!("region.plain_partition.{}", partition.index),
+                        partition.display_label(),
+                        start,
+                        count,
+                        Some(InspectDecoderKind::Partition),
+                        SemanticStatus::Identified,
+                        DiskRegionSemantic::PlainPartition,
+                    ));
+                    claimed.push((start, count));
+                }
+            }
+
+            let claimed = merged_claimed_ranges(claimed, total);
+            for (index, (start, count)) in unknown_gaps(&claimed, total).into_iter().enumerate() {
+                regions.push(region_with_extent(
+                    format!("region.unallocated.{index}"),
+                    "未分配空间",
+                    start,
+                    count,
+                    None,
+                    SemanticStatus::Identified,
+                    DiskRegionSemantic::Unallocated,
+                ));
+            }
+        } else {
+            regions.push(region_with_extent(
+                "region.unknown.0",
+                "分区布局未知",
+                0,
+                total,
+                None,
+                SemanticStatus::Unknown,
+                DiskRegionSemantic::Unknown,
+            ));
+        }
+        regions.sort_by_key(|region| region.range.start_lba);
+        return InspectTopology {
+            root: InspectNode {
+                id: "device".into(),
+                label: "整盘".into(),
+                kind: InspectNodeKind::Device,
+                range: InspectNodeRange::sectors(0, total),
+                children: InspectChildren::Materialized(regions),
+                decoder: None,
+                status: SemanticStatus::Identified,
+                region_semantic: None,
+            },
+        };
+    }
+
+    if context.has_edp_protocol() {
+        if let Some((start, count)) = clip_range(0, 13, total) {
+            regions.push(region_with_extent(
+                "region.protocol",
+                "EDP 主协议区",
+                start,
+                count,
+                Some(InspectDecoderKind::Protocol),
+                SemanticStatus::Identified,
+                DiskRegionSemantic::Protocol,
+            ));
+            claimed.push((start, count));
+        }
     }
 
     if let Some(lce) = context.lce.as_ref() {
@@ -683,14 +763,16 @@ pub fn build_inspect_topology(context: &InspectDiskContext) -> InspectTopology {
         }
     }
 
-    for region in mbr_primary_regions(context) {
-        claimed.push((region.range.start_lba, region.range.sector_count));
-        regions.push(region);
-    }
+    if context.has_edp_protocol() {
+        for region in mbr_primary_regions(context) {
+            claimed.push((region.range.start_lba, region.range.sector_count));
+            regions.push(region);
+        }
 
-    if let Some(tail) = tail_region(total) {
-        claimed.push((tail.range.start_lba, tail.range.sector_count));
-        regions.push(tail);
+        if let Some(tail) = tail_region(total) {
+            claimed.push((tail.range.start_lba, tail.range.sector_count));
+            regions.push(tail);
+        }
     }
 
     let claimed = merged_claimed_ranges(claimed, total);
@@ -792,8 +874,10 @@ mod tests {
     fn context(total: u64) -> InspectDiskContext {
         InspectDiskContext {
             protocol_image: vec![0; METADATA_IMAGE_LEN],
-            device_id: None,
+            device_id: Some("disk&ven_test&prod_test".into()),
             total_sectors: total,
+            provision_kind: Some(crate::provision::DiskProvisionKind::Mode0),
+            partition_table: None,
             partitions: Vec::new(),
             lce: None,
             context_issues: Vec::new(),

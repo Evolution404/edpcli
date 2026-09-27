@@ -860,7 +860,11 @@ fn corrupt_edp_with_nonzero_lba4_never_falls_back_to_plain_backup() {
     .unwrap_err();
 
     assert_eq!(error.code, EXIT_BACKUP);
-    assert!(error.msg.contains("LBA4") && error.msg.contains("EDP"));
+    assert!(
+        error.msg.contains("EDP 协议身份") && error.msg.contains("拒绝误判为 Plain"),
+        "{}",
+        error.msg
+    );
 }
 
 #[test]

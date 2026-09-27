@@ -245,11 +245,18 @@ fn draw_device_summary(frame: &mut Frame, area: ratatui::layout::Rect, state: &A
                 Span::raw(format_sector_size(segment.sector_count)),
             ]));
         }
-        if row.existing_profile_for_prefill().is_none() {
-            lines.push(Line::from(Span::styled(
-                "  布局未完整读取；进度条中的未知区域不推断为空闲空间",
-                warning(),
-            )));
+        let layout_complete = match row.confirmed_provision_kind() {
+            Some(crate::provision::DiskProvisionKind::Plain) => row.partition_table.is_some(),
+            Some(_) => row.existing_profile_for_prefill().is_some(),
+            None => false,
+        };
+        if !layout_complete {
+            let message = row
+                .partition_table_error
+                .as_deref()
+                .map(|error| format!("  分区表读取失败：{}", safe(error)))
+                .unwrap_or_else(|| "  布局未完整读取；未知区域不推断为空闲空间".to_string());
+            lines.push(Line::from(Span::styled(message, warning())));
         }
     }
 
@@ -353,15 +360,28 @@ fn field_line(label: &'static str, value: impl Into<String>) -> Line<'static> {
 
 fn device_layout_model(row: &crate::disk_scan::Row) -> crate::tui::disk_layout::DiskLayoutModel {
     use crate::application::disk_layout::{DiskLayoutSegment, DiskRegionKind};
-    use crate::provision::PartitionRole;
+    use crate::provision::{DiskProvisionKind, PartitionRole};
 
     let total_sectors = row.size / crate::common::SECTOR as u64;
-    let mut claims = Vec::<DiskLayoutSegment>::new();
 
+    if row.confirmed_provision_kind() == Some(DiskProvisionKind::Plain) {
+        let context = crate::inspect_target::InspectDiskContext::new_with_partition_table(
+            vec![0; crate::common::METADATA_IMAGE_LEN],
+            None,
+            total_sectors,
+            Some(DiskProvisionKind::Plain),
+            row.partition_table.clone(),
+            row.partition_table_error.clone(),
+        );
+        let topology = crate::application::inspect_tree::build_inspect_topology(&context);
+        return crate::tui::disk_layout::DiskLayoutModel::from_topology(&topology);
+    }
+
+    let mut claims = Vec::<DiskLayoutSegment>::new();
     let reserved = total_sectors.min(crate::provision::OFFICIAL_PARTITION_START_SECTOR);
     if reserved > 0 {
         claims.push(DiskLayoutSegment {
-            label: "协议/保留".into(),
+            label: "EDP 协议/保留".into(),
             start_lba: 0,
             sector_count: reserved,
             kind: DiskRegionKind::Reserved,
@@ -435,11 +455,16 @@ fn draw_device_stats(frame: &mut Frame, area: ratatui::layout::Rect, state: &App
     let needs_attention = devices.len().saturating_sub(available);
     let edp = devices
         .iter()
-        .filter(|row| row.provision_kind != crate::provision::DiskProvisionKind::Plain)
+        .filter(|row| {
+            row.confirmed_provision_kind()
+                .is_some_and(|kind| kind != crate::provision::DiskProvisionKind::Plain)
+        })
         .count();
     let plain = devices
         .iter()
-        .filter(|row| row.provision_kind == crate::provision::DiskProvisionKind::Plain)
+        .filter(|row| {
+            row.confirmed_provision_kind() == Some(crate::provision::DiskProvisionKind::Plain)
+        })
         .count();
     let denied = devices.iter().filter(|row| row.denied).count();
     let read_errors = devices

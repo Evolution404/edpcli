@@ -326,7 +326,7 @@ mod tests {
             }),
             path: PathBuf::from(name),
             mtime: 1,
-            provision_kind: crate::provision::DiskProvisionKind::Plain,
+            provision_kind: Some(crate::provision::DiskProvisionKind::Plain),
             integrity_status: BackupIntegrityStatus::Verified,
             size_ok: true,
             lba8: None,

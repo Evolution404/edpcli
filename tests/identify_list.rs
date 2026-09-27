@@ -86,12 +86,33 @@ fn scan_and_print_all_row_kinds() {
     );
     let runner = FakeRunner { canned: m };
 
+    let mut plain = vec![0u8; 13 * SECTOR];
+    let plain_total_sectors = 64_000_000_000u64 / SECTOR as u64;
+    let entry = 0x1be;
+    plain[entry + 4] = 0x07;
+    plain[entry + 8..entry + 12].copy_from_slice(&2048u32.to_le_bytes());
+    plain[entry + 12..entry + 16].copy_from_slice(
+        &u32::try_from(plain_total_sectors - 2048)
+            .unwrap()
+            .to_le_bytes(),
+    );
+    plain[510..512].copy_from_slice(&[0x55, 0xaa]);
+
     let read_calls = std::cell::RefCell::new(Vec::<(u32, u32)>::new());
     let read_ok = |disk: u32, lba: u32| -> std::io::Result<Vec<u8>> {
         read_calls.borrow_mut().push((disk, lba));
-        // disk6 读 netac 夹具; disk4 也读 netac(ioreg 是 Bogus → 识别不出, 与数据无关)
-        let _ = disk;
-        Ok(netac[lba as usize * SECTOR..(lba as usize + 1) * SECTOR].to_vec())
+        let source = if disk == 4 {
+            plain.as_slice()
+        } else {
+            netac.as_slice()
+        };
+        let start = lba as usize * SECTOR;
+        let end = start + SECTOR;
+        if let Some(bytes) = source.get(start..end) {
+            Ok(bytes.to_vec())
+        } else {
+            Ok(vec![0; SECTOR])
+        }
     };
     let bak = TmpDir::new("scan_bak");
     let rows = scan_disks(&runner, &bak.0, &read_ok);
@@ -136,7 +157,18 @@ fn scan_and_print_all_row_kinds() {
     let converted_read_calls = std::cell::RefCell::new(Vec::<(u32, u32)>::new());
     let read_conv = |disk: u32, lba: u32| -> std::io::Result<Vec<u8>> {
         converted_read_calls.borrow_mut().push((disk, lba));
-        Ok(conv[lba as usize * SECTOR..(lba as usize + 1) * SECTOR].to_vec())
+        let source = if disk == 4 {
+            plain.as_slice()
+        } else {
+            conv.as_slice()
+        };
+        let start = lba as usize * SECTOR;
+        let end = start + SECTOR;
+        if let Some(bytes) = source.get(start..end) {
+            Ok(bytes.to_vec())
+        } else {
+            Ok(vec![0; SECTOR])
+        }
     };
     let rows2 = scan_disks(&runner, &bak.0, &read_conv);
     let out2 = print_disk_table(&rows2);

@@ -64,6 +64,9 @@ impl DiskRegionKind {
     fn from_region_semantic(semantic: DiskRegionSemantic) -> Self {
         match semantic {
             DiskRegionSemantic::Protocol => Self::Protocol,
+            DiskRegionSemantic::PartitionTable => Self::Reserved,
+            DiskRegionSemantic::PlainPartition => Self::Plain,
+            DiskRegionSemantic::Unallocated => Self::Free,
             DiskRegionSemantic::Lce => Self::Lce,
             DiskRegionSemantic::Tail
             | DiskRegionSemantic::TailForensic
@@ -270,7 +273,7 @@ impl DiskLayoutModel {
     }
 
     pub fn bar(&self, width: usize) -> Vec<DiskRegionKind> {
-        let width = width.clamp(8, 96);
+        let width = width.clamp(8, 512);
         if self.segments.is_empty() {
             return vec![DiskRegionKind::Free; width];
         }

@@ -399,9 +399,15 @@ fn elevation_pin_contains_only_digest_and_rejects_reopened_clone() {
 struct ObservationRunner;
 
 impl CmdRunner for ObservationRunner {
-    fn check_output(&self, _cmd: &[&str], _timeout: Duration) -> io::Result<String> {
+    fn check_output(&self, cmd: &[&str], _timeout: Duration) -> io::Result<String> {
+        if cmd == ["diskutil", "info", "-plist", "disk6"] {
+            return Ok(
+                r#"<plist version="1.0"><dict><key>DiskSize</key><integer>64000000000</integer></dict></plist>"#
+                    .into(),
+            );
+        }
         Err(io::Error::other(
-            "platform geometry unavailable in unit fixture",
+            "platform query unavailable in unit fixture",
         ))
     }
 
@@ -432,8 +438,16 @@ struct ReadOnlyAuditDev {
 
 impl ReadOnlyAuditDev {
     fn plain() -> Self {
+        let mut image = vec![0u8; 13 * 512];
+        let total_sectors = 64_000_000_000u64 / 512;
+        let entry = 0x1be;
+        image[entry + 4] = 0x07;
+        image[entry + 8..entry + 12].copy_from_slice(&2048u32.to_le_bytes());
+        image[entry + 12..entry + 16]
+            .copy_from_slice(&u32::try_from(total_sectors - 2048).unwrap().to_le_bytes());
+        image[510..512].copy_from_slice(&[0x55, 0xaa]);
         Self {
-            image: vec![0u8; 13 * 512],
+            image,
             reads: 0,
             writes: 0,
             reopens: 0,

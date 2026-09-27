@@ -16,6 +16,7 @@ pub(crate) mod inspect_text;
 pub mod inspect_tree;
 pub mod media_identity;
 pub mod media_identity_observer;
+pub mod partition_table;
 pub mod progress;
 pub mod provision;
 pub mod target_session;
@@ -85,7 +86,7 @@ pub struct BackupWorkspaceItem {
     pub identity: Option<crate::application::media_identity::MediaIdentitySnapshot>,
     pub user: Option<String>,
     pub dept: Option<String>,
-    pub provision_kind: crate::provision::DiskProvisionKind,
+    pub provision_kind: Option<crate::provision::DiskProvisionKind>,
     pub integrity_status: BackupIntegrityStatus,
     pub size_ok: bool,
     pub content_sha256: Option<String>,

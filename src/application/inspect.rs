@@ -121,12 +121,14 @@ pub const DECODER_REGISTRY: &[InspectDecoderKind] = &[
 impl InspectDecoderKind {
     fn matches(self, context: &crate::inspect_target::InspectDiskContext, lba: u64) -> bool {
         match self {
-            Self::Protocol => lba <= u64::from(crate::common::METADATA_LAST_LBA),
+            Self::Protocol => {
+                context.has_edp_protocol() && lba <= u64::from(crate::common::METADATA_LAST_LBA)
+            }
             Self::Lce => context.lce.as_ref().is_some_and(|extent| {
                 lba >= extent.start_lba
                     && lba < extent.start_lba.saturating_add(extent.sector_count)
             }),
-            Self::Partition => context.partition_for_lba(lba).is_some(),
+            Self::Partition => context.has_partition_for_lba(lba),
         }
     }
 }
@@ -569,19 +571,59 @@ pub fn sector_meta_text(
         out.push_str("重叠区域: 无\n");
     }
 
-    if lba <= u64::from(crate::common::METADATA_LAST_LBA) {
+    if context.has_edp_protocol() && lba <= u64::from(crate::common::METADATA_LAST_LBA) {
         let lba32 = u32::try_from(lba)
             .map_err(|_| InspectError::out_of_range(format!("LBA{lba} 超出协议解析器范围")))?;
         let view =
             inspect::analyze_sector_with_context(lba32, raw, meta, Some(&context.protocol_image));
-        out.push_str(&format!("协议解码: {}\n", view.method));
+        out.push_str(&format!(
+            "协议解码: {}
+",
+            view.method
+        ));
         out.push_str(&super::inspect_text::render_fields(&view));
         for note in &view.notes {
-            out.push_str(&format!("  └─ {note}\n"));
+            out.push_str(&format!(
+                "  └─ {note}
+"
+            ));
         }
+    } else if context.is_plain() && lba == 0 {
+        let view = inspect::analyze_mbr_sector(raw);
+        out.push_str(&format!(
+            "分区表解码: {}
+",
+            view.method
+        ));
+        out.push_str(&super::inspect_text::render_fields(&view));
     }
 
-    if let Some(partition) = context.partition_for_lba(lba) {
+    if let Some(partition) = context.plain_partition_for_lba(lba) {
+        out.push_str(&format!(
+            "普通分区: P{} {} relative_lba={} start={} sectors={}
+",
+            partition.index,
+            partition.type_label(),
+            lba - partition.start_lba,
+            partition.start_lba,
+            partition.sector_count,
+        ));
+        let filesystem = partition_boot_raw
+            .and_then(|boot| {
+                crate::inspect_target::detect_plain_filesystem(partition.sector_count, boot)
+            })
+            .map(|filesystem| filesystem.label().to_string())
+            .or_else(|| partition.filesystem.clone());
+        out.push_str(&format!(
+            "文件系统识别: {}
+",
+            filesystem.unwrap_or_else(|| "未确认".into())
+        ));
+        out.push_str(
+            "加密配置: 不适用（普通盘）
+",
+        );
+    } else if let Some(partition) = context.partition_for_lba(lba) {
         out.push_str(&format!(
             "分区: index={} type={} relative_lba={} start={} sectors={}\n",
             partition.index,
@@ -680,24 +722,22 @@ fn run_advanced_source<R: SectorReader + ?Sized>(
         let mut partition_boot = None;
         let mut partition_boot_issue = None;
         if request.mode != AdvancedInspectMode::Raw {
-            if let Some(partition) = context.partition_for_lba(lba) {
-                if partition.start_sector == lba {
+            if let Some(partition_start) = context.partition_start_for_lba(lba) {
+                if partition_start == lba {
                     partition_boot = Some(raw.clone());
                 } else {
-                    match reader.read_sector(partition.start_sector) {
+                    match reader.read_sector(partition_start) {
                         Ok(boot) if boot.len() == SECTOR => partition_boot = Some(boot),
                         Ok(boot) => {
                             partition_boot_issue = Some(format!(
                                 "分区起始 LBA{} 只读取到 {}B",
-                                partition.start_sector,
+                                partition_start,
                                 boot.len()
                             ));
                         }
                         Err(error) => {
-                            partition_boot_issue = Some(format!(
-                                "无法读取分区起始 LBA{}: {error}",
-                                partition.start_sector
-                            ));
+                            partition_boot_issue =
+                                Some(format!("无法读取分区起始 LBA{}: {error}", partition_start));
                         }
                     }
                 }
@@ -711,7 +751,9 @@ fn run_advanced_source<R: SectorReader + ?Sized>(
             .collect::<Vec<_>>();
         let raw_sha256 = crate::sha256::sha256_hex(&raw);
         let raw_nonzero = raw.iter().filter(|&&byte| byte != 0).count();
-        let protocol_view = if lba <= u64::from(crate::common::METADATA_LAST_LBA) {
+        let protocol_view = if context.has_edp_protocol()
+            && lba <= u64::from(crate::common::METADATA_LAST_LBA)
+        {
             let lba32 = u32::try_from(lba)
                 .map_err(|_| InspectError::out_of_range(format!("LBA{lba} 超出协议解析器范围")))?;
             Some(inspect::analyze_sector_with_context(
@@ -720,6 +762,8 @@ fn run_advanced_source<R: SectorReader + ?Sized>(
                 &meta,
                 Some(&context.protocol_image),
             ))
+        } else if context.is_plain() && lba == 0 {
+            Some(inspect::analyze_mbr_sector(&raw))
         } else {
             None
         };
@@ -830,10 +874,37 @@ fn run_evidence_source(
     if let Some(device_id) = request.device_id_override.as_ref() {
         meta.device_id = Some(device_id.clone());
     }
-    let context = crate::inspect_target::InspectDiskContext::new(
+    let provision_kind = identity.provision_kind;
+    let (partition_table, partition_table_issue) =
+        if provision_kind == Some(crate::provision::DiskProvisionKind::Plain) {
+            match crate::application::partition_table::read_partition_table(
+                evidence.total_sectors(),
+                |lba| evidence.read_sector(lba).map_err(|error| error.to_string()),
+            ) {
+                Ok(mut table) => {
+                    for partition in &mut table.partitions {
+                        if let Ok(boot) = evidence.read_sector(partition.start_lba) {
+                            partition.filesystem = crate::inspect_target::detect_plain_filesystem(
+                                partition.sector_count,
+                                &boot,
+                            )
+                            .map(|filesystem| filesystem.label().to_string());
+                        }
+                    }
+                    (Some(table), None)
+                }
+                Err(error) => (None, Some(error)),
+            }
+        } else {
+            (None, None)
+        };
+    let context = crate::inspect_target::InspectDiskContext::new_with_partition_table(
         evidence.protocol().to_vec(),
         meta.device_id.clone(),
         evidence.total_sectors(),
+        provision_kind,
+        partition_table,
+        partition_table_issue,
     );
     let source = evidence.source_label().to_string();
     run_advanced_source(source, meta, context, request, &mut evidence)
@@ -892,8 +963,14 @@ mod advanced_tests {
 
     #[test]
     fn decoder_registry_fails_closed_outside_registered_regions() {
-        let context =
-            crate::inspect_target::InspectDiskContext::new(vec![0; METADATA_IMAGE_LEN], None, 4096);
+        let context = crate::inspect_target::InspectDiskContext::new_with_partition_table(
+            vec![0; METADATA_IMAGE_LEN],
+            Some("disk&ven_test&prod_test".into()),
+            4096,
+            Some(crate::provision::DiskProvisionKind::Mode0),
+            None,
+            None,
+        );
         let meta = InspectMeta::default();
         assert_eq!(DECODER_REGISTRY[0], InspectDecoderKind::Protocol);
         let (_, method) = decode_sector(&context, &meta, 0, &[0; SECTOR], None).unwrap();
