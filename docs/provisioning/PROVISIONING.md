@@ -3293,7 +3293,7 @@ Share default FAIL / Encrypt default FAIL
 
 ### 12.12 分阶段实施顺序（后续独立开发）
 
-**实施状态（更新至 2026-09-27）：K0～K5 COMPLETE；K6.1 typed migration planning COMPLETE，K6 数据迁移执行仍 DEFERRED / fail-closed；K7 COMPLETE；K8 COMPLETE。** 代表性真实 USB 验收已完成，并已按 12.13 收口为 13/13 PASS。
+**实施状态（更新至 2026-09-27）：K0～K5 COMPLETE；K6.1 typed migration planning、K6.2 typed migration transforms、K6.3 read-only payload locator/stream 均 COMPLETE；真实数据迁移 writer 仍 DEFERRED / fail-closed；K7 COMPLETE；K8 COMPLETE。** 代表性真实 USB 验收已完成，并已按 12.13 收口为 13/13 PASS。
 
 #### Phase K0：现状审计与红测试
 
@@ -3364,11 +3364,15 @@ K0 基线审计曾确认：
 
 #### Phase K6：可选数据迁移能力
 
-**实施状态（更新至 2026-09-27）：PARTIAL。K6.1 typed migration planning COMPLETE；真实数据迁移执行仍 NOT IMPLEMENTED / DEFERRED。** `RegionMappingPlanner` 已正式接入 `TargetProvisionPlan`，需要跨语义区域迁移的目标会记录 typed `MigrationSource { source_index, region }` 并进入 `RegionDisposition::Migrate`；例如 mode0→mode1 的 combined 目标会明确记录 Boot + Share 两个来源。未显式选择格式化时，prepare/commit 继续 fail-closed 拒绝 Migrate；用户明确选择完整文件系统初始化时，domain plan 通过 `force_rebuild_for_format()` 把 Migrate/Preserve family 显式转换为 Rebuild，并清空 migration source，不允许静默降级。PR #30 合并为 `2de1ac5`；六平台 Rust CI 全绿，Virtual Disk HIL Linux arm64/x86_64 + Windows arm64/x86_64 **4/4 PASS**。
+**实施状态（更新至 2026-09-27）：PARTIAL。K6.1～K6.3 COMPLETE；真实数据迁移 writer 仍 NOT IMPLEMENTED / DEFERRED。**
 
-K6.1 只建立“迁移需要什么来源、是否必须迁移、用户是否明确选择放弃迁移并重建”的单一事实源，**没有新增 migration writer，也没有扩大任何真实盘写入集合**。
+- **K6.1 typed migration planning COMPLETE**：`RegionMappingPlanner` 已正式接入 `TargetProvisionPlan`，跨语义目标记录 typed `MigrationSource { source_index, region }` 并进入 `RegionDisposition::Migrate`；mode0→mode1 combined 会明确记录 Boot + Share 来源。未显式选择格式化时 prepare/commit 继续 fail-closed；用户明确选择完整文件系统初始化时，`force_rebuild_for_format()` 才允许显式转为 Rebuild。PR #30 合并为 `2de1ac5`。
+- **K6.2 typed migration transforms COMPLETE**：迁移来源进一步携带 `MigrationTransform`，覆盖 `BootToBootShareCombined / ShareToBootShareCombined / BootShareCombinedToBoot / BootShareCombinedToShare / EncryptToShare / ShareToEncrypt`，后续 executor 不再根据 role 组合重新猜测语义。PR #32 合并为 `112be90`；六平台 Rust CI 全绿，Virtual Disk HIL **4/4 PASS**。
+- **K6.3 read-only payload locator/stream COMPLETE**：FAT16/FAT32/exFAT inventory 在解析 cluster chain 时只记录 partition-relative `FilePayloadLocator`，默认 inventory 仍保持普通文件 payload **零读取**；只有显式调用 `stream_file_payload()` 才按 `logical_size + max_bytes` 预算读取碎片化 extent，并计算 exact logical bytes 的 SHA-256。预算不足在 I/O 前 fail-closed；0 字节文件零 I/O；locator 使用 `serde(skip)`，不改变现有 Deep inventory/备份序列化格式。`backup_suite` **73/73 PASS**，本地 fast 4 suites / 6 artifacts 0 failures（13.67s），full 8 suites / 10 artifacts + doctest 0 failures（26.74s）；PR #33 合并为 `ff1320a`，六平台 Rust CI 全绿，Virtual Disk HIL **4/4 PASS**。
 
-后续 K6 执行阶段才考虑：
+K6.1～K6.3 只完成“识别迁移语义 → 精确描述来源 → 安全读取并校验来源文件 payload”的只读链路，**没有新增 migration writer，也没有扩大任何真实盘写入集合**。
+
+后续 K6 writer 阶段才考虑：
 
 - 同盘不同 extent 的安全文件级迁移；
 - EDP→Plain 解密迁移；
