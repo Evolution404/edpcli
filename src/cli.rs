@@ -191,6 +191,18 @@ fn provision_request(opts: &ProvisionNewOpts) -> crate::application::provision::
             crate::application::provision::ProvisionRequest::Plain(
                 crate::application::provision::PlainProvisionRequest {
                     partitions: opts.plain_partitions.clone(),
+                    key_domains: crate::provision::KeyDomainSecrets::new(
+                        crate::provision::KeyDomainSecretPair::new(
+                            (!opts.share_source_password.is_empty())
+                                .then_some(opts.share_source_password.as_bytes()),
+                            None::<&[u8]>,
+                        ),
+                        crate::provision::KeyDomainSecretPair::new(
+                            (!opts.encrypt_source_password.is_empty())
+                                .then_some(opts.encrypt_source_password.as_bytes()),
+                            None::<&[u8]>,
+                        ),
+                    ),
                 },
             )
         }
