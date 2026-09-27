@@ -107,6 +107,9 @@ pub struct PlainPartitionRequest {
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct PlainProvisionRequest {
     pub partitions: Vec<PlainPartitionRequest>,
+    /// Source-only credentials used when an existing EDP disk is migrated to Plain.
+    /// KeyDomainSecrets keeps Debug output redacted and zeroes secret buffers on drop.
+    pub key_domains: KeyDomainSecrets,
 }
 
 impl PlainProvisionRequest {
@@ -122,6 +125,7 @@ impl PlainProvisionRequest {
                     volume_label: partition.volume_label.clone(),
                 })
                 .collect(),
+            key_domains: KeyDomainSecrets::default(),
         }
     }
 
