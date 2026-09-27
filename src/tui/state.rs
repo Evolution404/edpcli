@@ -189,6 +189,7 @@ pub struct AppState {
         super::table_layout::TableKind,
         super::table_layout::HorizontalScrollState,
     >,
+    table_column_order: std::collections::BTreeMap<super::table_layout::TableKind, Vec<usize>>,
     notice: Option<String>,
     notice_at: Option<std::time::Instant>,
     input_buffer: String,
@@ -235,6 +236,7 @@ impl AppState {
             backups_pane_focus: crate::tui::pane::PaneFocus::backups(),
             navigation: NavigationStack::default(),
             horizontal_scroll: std::collections::BTreeMap::new(),
+            table_column_order: std::collections::BTreeMap::new(),
             notice: None,
             notice_at: None,
             input_buffer: String::new(),
@@ -1027,6 +1029,78 @@ impl AppState {
         self.table_interaction(kind).active_column()
     }
 
+    pub fn table_column_order(&self, kind: super::table_layout::TableKind) -> Vec<usize> {
+        let count = super::table_layout::layout_for(kind).specs().len();
+        self.table_column_order
+            .get(&kind)
+            .filter(|order| {
+                order.len() == count && {
+                    let mut sorted = (*order).clone();
+                    sorted.sort_unstable();
+                    sorted == (0..count).collect::<Vec<_>>()
+                }
+            })
+            .cloned()
+            .unwrap_or_else(|| (0..count).collect())
+    }
+
+    pub fn table_logical_column(
+        &self,
+        kind: super::table_layout::TableKind,
+        visual_column: usize,
+    ) -> usize {
+        let order = self.table_column_order(kind);
+        order
+            .get(visual_column)
+            .copied()
+            .unwrap_or_else(|| visual_column.min(order.len().saturating_sub(1)))
+    }
+
+    pub fn table_visual_layout(
+        &self,
+        kind: super::table_layout::TableKind,
+    ) -> super::table_layout::AdaptiveTableLayout {
+        let base = super::table_layout::layout_for(kind);
+        let order = self.table_column_order(kind);
+        super::table_layout::AdaptiveTableLayout::new(
+            order
+                .into_iter()
+                .filter_map(|logical| base.specs().get(logical).copied())
+                .collect(),
+        )
+    }
+
+    pub fn table_visual_widths(
+        &self,
+        kind: super::table_layout::TableKind,
+        logical_widths: &[usize],
+    ) -> Vec<usize> {
+        self.table_column_order(kind)
+            .into_iter()
+            .map(|logical| logical_widths.get(logical).copied().unwrap_or(0))
+            .collect()
+    }
+
+    fn ensure_table_column_order(
+        &mut self,
+        kind: super::table_layout::TableKind,
+    ) -> &mut Vec<usize> {
+        let count = super::table_layout::layout_for(kind).specs().len();
+        let order = self
+            .table_column_order
+            .entry(kind)
+            .or_insert_with(|| (0..count).collect());
+        let valid = order.len() == count && {
+            let mut sorted = order.clone();
+            sorted.sort_unstable();
+            sorted == (0..count).collect::<Vec<_>>()
+        };
+        if !valid {
+            *order = (0..count).collect();
+        }
+        order
+    }
+
     fn table_content_widths(&self, kind: super::table_layout::TableKind) -> Vec<usize> {
         use super::table_layout::{display_width, TableKind};
 
@@ -1116,6 +1190,51 @@ impl AppState {
         .max(1)
     }
 
+    fn table_visual_geometry(
+        &self,
+        kind: super::table_layout::TableKind,
+    ) -> (super::table_layout::AdaptiveTableLayout, Vec<usize>) {
+        let logical_widths = self.table_content_widths(kind);
+        (
+            self.table_visual_layout(kind),
+            self.table_visual_widths(kind, &logical_widths),
+        )
+    }
+
+    pub fn reorder_table_column_for_viewport(
+        &mut self,
+        kind: super::table_layout::TableKind,
+        reverse: bool,
+        terminal_width: u16,
+        terminal_height: usize,
+    ) -> bool {
+        let active = self.table_interaction(kind).active_column();
+        let count = super::table_layout::layout_for(kind).specs().len();
+        if count == 0 {
+            return false;
+        }
+        let target = if reverse {
+            active.saturating_sub(1)
+        } else {
+            active.saturating_add(1).min(count - 1)
+        };
+        if target == active {
+            return false;
+        }
+
+        {
+            let order = self.ensure_table_column_order(kind);
+            order.swap(active, target);
+        }
+
+        let (layout, widths) = self.table_visual_geometry(kind);
+        let viewport_width = self.table_viewport_width(kind, terminal_width, terminal_height);
+        let interaction = self.horizontal_scroll.entry(kind).or_default();
+        interaction.set_active_column(target);
+        interaction.ensure_active_visible_for_layout(&layout, &widths, viewport_width, reverse);
+        true
+    }
+
     pub fn move_table_column_for_viewport(
         &mut self,
         kind: super::table_layout::TableKind,
@@ -1123,8 +1242,7 @@ impl AppState {
         terminal_width: u16,
         terminal_height: usize,
     ) -> bool {
-        let layout = super::table_layout::layout_for(kind);
-        let widths = self.table_content_widths(kind);
+        let (layout, widths) = self.table_visual_geometry(kind);
         let viewport_width = self.table_viewport_width(kind, terminal_width, terminal_height);
         self.horizontal_scroll.entry(kind).or_default().move_active(
             &layout,
@@ -1141,8 +1259,7 @@ impl AppState {
         terminal_width: u16,
         terminal_height: usize,
     ) -> bool {
-        let layout = super::table_layout::layout_for(kind);
-        let widths = self.table_content_widths(kind);
+        let (layout, widths) = self.table_visual_geometry(kind);
         let viewport_width = self.table_viewport_width(kind, terminal_width, terminal_height);
         self.horizontal_scroll
             .entry(kind)
@@ -1162,8 +1279,7 @@ impl AppState {
         kind: super::table_layout::TableKind,
         reverse: bool,
     ) -> bool {
-        let layout = super::table_layout::layout_for(kind);
-        let widths = self.table_content_widths(kind);
+        let (layout, widths) = self.table_visual_geometry(kind);
         self.horizontal_scroll.entry(kind).or_default().move_active(
             &layout,
             &widths,
@@ -1200,11 +1316,12 @@ impl AppState {
             })
             .flatten();
 
+        let logical_column = self.table_logical_column(kind, self.table_active_column(kind));
         let interaction = self.horizontal_scroll.entry(kind).or_default();
         let changed = if clear {
             interaction.clear_sort()
         } else {
-            interaction.toggle_sort();
+            interaction.toggle_sort_for(logical_column);
             true
         };
 
@@ -1285,8 +1402,7 @@ impl AppState {
         terminal_width: u16,
         terminal_height: usize,
     ) -> bool {
-        let layout = super::table_layout::layout_for(kind);
-        let widths = self.table_content_widths(kind);
+        let (layout, widths) = self.table_visual_geometry(kind);
         let viewport_width = self.table_viewport_width(kind, terminal_width, terminal_height);
         self.horizontal_scroll
             .entry(kind)

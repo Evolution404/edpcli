@@ -64,6 +64,8 @@ pub enum TuiAction {
     PanelPrevious,
     TableColumnLeft,
     TableColumnRight,
+    TableMoveColumnLeft,
+    TableMoveColumnRight,
     TableColumnFirst,
     TableColumnLast,
     TableScrollLeft,
@@ -120,6 +122,11 @@ pub const NORMAL_HELP: &[HelpBinding] = &[
         keys: "h/l",
         label: "表格：上一列 / 下一列",
         action: TuiAction::TableColumnRight,
+    },
+    HelpBinding {
+        keys: "</>",
+        label: "表格：左移 / 右移当前整列",
+        action: TuiAction::TableMoveColumnRight,
     },
     HelpBinding {
         keys: "H/L",
@@ -190,7 +197,7 @@ pub const INSPECT_HELP: &[HelpBinding] = &[
         action: TuiAction::MoveLeft,
     },
     HelpBinding {
-        keys: "字段表 h/l · H/L · 0/$ · s/S",
+        keys: "字段表 h/l · </> · H/L · 0/$ · s/S",
         label: "列 · 视口 · 排序",
         action: TuiAction::TableColumnRight,
     },
@@ -259,6 +266,17 @@ impl KeyMapper {
         role: WidgetRole,
         event: KeyEvent,
     ) -> Option<TuiAction> {
+        if mode == InputMode::Normal && role == WidgetRole::Table {
+            let table_action = match event.code {
+                KeyCode::Char('<') => Some(TuiAction::TableMoveColumnLeft),
+                KeyCode::Char('>') => Some(TuiAction::TableMoveColumnRight),
+                _ => None,
+            };
+            if table_action.is_some() {
+                self.clear_pending();
+                return table_action;
+            }
+        }
         let action = self.map(mode, event)?;
         if mode == InputMode::Normal && role == WidgetRole::Table {
             return Some(match action {

@@ -30,6 +30,22 @@ fn h_l_follow_widget_role_without_changing_insert_text() {
         Some(TuiAction::TableColumnRight)
     );
     assert_eq!(
+        mapper.map_for_role(
+            InputMode::Normal,
+            WidgetRole::Table,
+            key(KeyCode::Char('<'))
+        ),
+        Some(TuiAction::TableMoveColumnLeft)
+    );
+    assert_eq!(
+        mapper.map_for_role(
+            InputMode::Normal,
+            WidgetRole::Table,
+            key(KeyCode::Char('>'))
+        ),
+        Some(TuiAction::TableMoveColumnRight)
+    );
+    assert_eq!(
         mapper.map_for_role(InputMode::Normal, WidgetRole::Tree, key(KeyCode::Char('h'))),
         Some(TuiAction::MoveLeft)
     );

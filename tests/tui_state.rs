@@ -1826,3 +1826,43 @@ fn provision_menu_sort_preserves_selected_scheme_and_enter_target() {
 
     assert_eq!(state.provision_begin_selected(), selected_kind);
 }
+
+#[test]
+fn every_table_kind_supports_shared_whole_column_reordering() {
+    use edpcli::tui::table_layout::{layout_for, TableKind};
+
+    for kind in [
+        TableKind::Devices,
+        TableKind::Backups,
+        TableKind::ProvisionDevices,
+        TableKind::ProvisionMenu,
+        TableKind::InspectFields,
+    ] {
+        let mut state = AppState::new();
+        let count = layout_for(kind).specs().len();
+        let original = (0..count).collect::<Vec<_>>();
+        assert_eq!(state.table_column_order(kind), original);
+
+        assert!(
+            state.move_table_column_for_viewport(kind, false, 160, 30),
+            "{kind:?}: h/l should move active column to visual position 1"
+        );
+        assert_eq!(state.table_column_order(kind), original);
+
+        assert!(
+            state.reorder_table_column_for_viewport(kind, true, 160, 30),
+            "{kind:?}: < should swap the whole active column left"
+        );
+        let mut expected = original.clone();
+        expected.swap(0, 1);
+        assert_eq!(state.table_column_order(kind), expected);
+        assert_eq!(state.table_active_column(kind), 0);
+
+        assert!(
+            state.reorder_table_column_for_viewport(kind, false, 160, 30),
+            "{kind:?}: > should swap the whole active column right"
+        );
+        assert_eq!(state.table_column_order(kind), original);
+        assert_eq!(state.table_active_column(kind), 1);
+    }
+}

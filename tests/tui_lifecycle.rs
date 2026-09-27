@@ -141,7 +141,7 @@ fn active_department_column_expands_fully_without_ellipsis_and_sort_keeps_disk_s
         !compact.contains("江苏省电力有限公司/南京供电公…"),
         "{text}"
     );
-    assert!(compact.contains("h/l列"), "{text}");
+    assert!(compact.contains("h/l激活"), "{text}");
     assert!(compact.contains("H/L视口"), "{text}");
 
     state.toggle_table_sort(TableKind::Devices);
@@ -150,6 +150,50 @@ fn active_department_column_expands_fully_without_ellipsis_and_sort_keeps_disk_s
     assert_eq!(state.selected_device_disk(), Some(5));
     assert!(state.clear_table_sort(TableKind::Devices));
     assert_eq!(state.selected_device_disk(), Some(5));
+}
+
+#[test]
+fn table_column_reorder_moves_whole_column_without_changing_h_l_or_sort_identity() {
+    use edpcli::tui::table_layout::TableKind;
+
+    let mut state = AppState::new();
+    let mut row = usb_device();
+    row.dept = Some("江苏省电力有限公司/南京供电公司".into());
+    crate::common::confirm_row_identity(&mut row);
+    state.replace_devices(vec![row]);
+
+    let original = state.table_column_order(TableKind::Devices);
+    assert_eq!(original, (0..8).collect::<Vec<_>>());
+
+    // h/l keeps its existing meaning: change active column only.
+    assert!(state.move_table_column(TableKind::Devices, false)); // 容量
+    assert!(state.move_table_column(TableKind::Devices, false)); // 部门
+    assert_eq!(state.table_active_column(TableKind::Devices), 2);
+    assert_eq!(state.table_column_order(TableKind::Devices), original);
+
+    // Sort binds to the logical Department column (2).
+    state.toggle_table_sort(TableKind::Devices);
+    assert_eq!(state.table_sort(TableKind::Devices).unwrap().column, 2);
+
+    // '<' semantics: move the whole active Department column left.
+    assert!(state.reorder_table_column_for_viewport(TableKind::Devices, true, 140, 24));
+    assert_eq!(state.table_active_column(TableKind::Devices), 1);
+    assert_eq!(
+        state.table_column_order(TableKind::Devices),
+        vec![0, 2, 1, 3, 4, 5, 6, 7]
+    );
+    assert_eq!(
+        state.table_sort(TableKind::Devices).unwrap().column,
+        2,
+        "sort must travel with the logical Department column"
+    );
+    assert_eq!(state.table_logical_column(TableKind::Devices, 1), 2);
+
+    // '>' moves the same whole column back to its original place.
+    assert!(state.reorder_table_column_for_viewport(TableKind::Devices, false, 140, 24));
+    assert_eq!(state.table_active_column(TableKind::Devices), 2);
+    assert_eq!(state.table_column_order(TableKind::Devices), original);
+    assert_eq!(state.table_sort(TableKind::Devices).unwrap().column, 2);
 }
 
 #[test]

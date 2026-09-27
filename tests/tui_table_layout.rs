@@ -243,5 +243,11 @@ fn every_interactive_table_renderer_uses_unified_active_column_layout() {
             source.contains("table_interaction("),
             "{name} must consume the shared TableInteractionState"
         );
+        assert!(
+            source.contains("table_column_order(")
+                && source.contains("table_visual_layout(")
+                && source.contains("table_visual_widths("),
+            "{name} must project the whole table through the shared runtime column order"
+        );
     }
 }

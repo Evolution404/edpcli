@@ -667,6 +667,8 @@ fn run_loop(resume: Option<state::WriteIntent>) -> io::Result<LoopExit> {
                                     }
                                     TuiAction::TableColumnLeft
                                     | TuiAction::TableColumnRight
+                                    | TuiAction::TableMoveColumnLeft
+                                    | TuiAction::TableMoveColumnRight
                                     | TuiAction::TableColumnFirst
                                     | TuiAction::TableColumnLast
                                     | TuiAction::TableScrollLeft
@@ -854,6 +856,8 @@ fn run_loop(resume: Option<state::WriteIntent>) -> io::Result<LoopExit> {
                                 | TuiAction::Command
                                 | TuiAction::TableColumnLeft
                                 | TuiAction::TableColumnRight
+                                | TuiAction::TableMoveColumnLeft
+                                | TuiAction::TableMoveColumnRight
                                 | TuiAction::TableColumnFirst
                                 | TuiAction::TableColumnLast
                                 | TuiAction::TableScrollLeft

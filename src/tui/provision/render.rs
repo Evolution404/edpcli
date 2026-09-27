@@ -159,8 +159,7 @@ pub(super) fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, sta
     match provision.stage {
         ProvisionStage::SelectDisk => {
             use crate::tui::table_layout::{
-                display_width, layout_for, table_heading, table_position_label, visible_cell,
-                TableKind,
+                display_width, table_heading, table_position_label, visible_cell, TableKind,
             };
             let headings = ["设备", "容量", "USB 身份", "盘型", "onlyid"];
             let values = (0..state.item_count())
@@ -183,11 +182,14 @@ pub(super) fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, sta
                     content_widths[index] = content_widths[index].max(display_width(value));
                 }
             }
-            let layout = layout_for(TableKind::ProvisionDevices);
+            let order = state.table_column_order(TableKind::ProvisionDevices);
+            let layout = state.table_visual_layout(TableKind::ProvisionDevices);
+            let visual_widths =
+                state.table_visual_widths(TableKind::ProvisionDevices, &content_widths);
             let interaction = state.table_interaction(TableKind::ProvisionDevices);
             let viewport = layout.layout_with_active(
                 main_area.width.saturating_sub(4),
-                &content_widths,
+                &visual_widths,
                 interaction.viewport_offset(),
                 Some(interaction.active_column()),
             );
@@ -198,7 +200,8 @@ pub(super) fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, sta
                         .columns
                         .iter()
                         .map(|column| {
-                            Cell::from(visible_cell(&row[column.index], column)).style(
+                            let logical = order[column.index];
+                            Cell::from(visible_cell(&row[logical], column)).style(
                                 if column.index == interaction.active_column() {
                                     accent().add_modifier(Modifier::BOLD)
                                 } else {
@@ -210,7 +213,7 @@ pub(super) fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, sta
                 ))
             });
             let title = format!(
-                "制盘 · 先选择 USB 目标 · h/l 列 · 0/$ 首尾列 · H/L 视口 · s 排序 · S 默认 · {}",
+                "制盘 · 先选择 USB 目标 · h/l 激活 · </> 移列 · 0/$ 首尾列 · H/L 视口 · s 排序 · S 默认 · {}",
                 table_position_label(&layout, interaction, &viewport)
             );
             let header = TableRow::new(
@@ -218,8 +221,8 @@ pub(super) fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, sta
                     .columns
                     .iter()
                     .map(|column| {
-                        let label =
-                            table_heading(headings[column.index], column.index, interaction);
+                        let logical = order[column.index];
+                        let label = table_heading(headings[logical], logical, interaction);
                         Cell::from(visible_cell(&label, column)).style(
                             if column.index == interaction.active_column() {
                                 accent().add_modifier(Modifier::BOLD | Modifier::REVERSED)
@@ -239,8 +242,7 @@ pub(super) fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, sta
         }
         ProvisionStage::Menu => {
             use crate::tui::table_layout::{
-                display_width, layout_for, table_heading, table_position_label, visible_cell,
-                TableKind,
+                display_width, table_heading, table_position_label, visible_cell, TableKind,
             };
             let headings = ["#", "制盘方案", "布局 / 行为"];
             let mut content_widths = headings.map(display_width);
@@ -256,11 +258,14 @@ pub(super) fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, sta
                     content_widths[column] = content_widths[column].max(display_width(value));
                 }
             }
-            let layout = layout_for(TableKind::ProvisionMenu);
+            let order = state.table_column_order(TableKind::ProvisionMenu);
+            let layout = state.table_visual_layout(TableKind::ProvisionMenu);
+            let visual_widths =
+                state.table_visual_widths(TableKind::ProvisionMenu, &content_widths);
             let interaction = state.table_interaction(TableKind::ProvisionMenu);
             let viewport = layout.layout_with_active(
                 main_area.width.saturating_sub(4),
-                &content_widths,
+                &visual_widths,
                 interaction.viewport_offset(),
                 Some(interaction.active_column()),
             );
@@ -276,7 +281,8 @@ pub(super) fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, sta
                         .columns
                         .iter()
                         .map(|column| {
-                            Cell::from(visible_cell(&values[column.index], column)).style(
+                            let logical = order[column.index];
+                            Cell::from(visible_cell(&values[logical], column)).style(
                                 if column.index == interaction.active_column() {
                                     provision_kind_style(kind).add_modifier(Modifier::BOLD)
                                 } else {
@@ -288,7 +294,7 @@ pub(super) fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, sta
                 )
             });
             let title = format!(
-                "制盘中心 · 选择方案 · h/l 列 · 0/$ 首尾列 · H/L 视口 · s 排序 · S 默认 · {}",
+                "制盘中心 · 选择方案 · h/l 激活 · </> 移列 · 0/$ 首尾列 · H/L 视口 · s 排序 · S 默认 · {}",
                 table_position_label(&layout, interaction, &viewport)
             );
             let header = TableRow::new(
@@ -296,8 +302,11 @@ pub(super) fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, sta
                     .columns
                     .iter()
                     .map(|column| {
-                        let label =
-                            table_heading(headings[column.index], column.index, interaction);
+                        let label = table_heading(
+                            headings[order[column.index]],
+                            order[column.index],
+                            interaction,
+                        );
                         Cell::from(visible_cell(&label, column)).style(
                             if column.index == interaction.active_column() {
                                 accent().add_modifier(Modifier::BOLD | Modifier::REVERSED)

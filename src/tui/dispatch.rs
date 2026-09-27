@@ -237,6 +237,12 @@ pub(super) fn dispatch_table_action(
         TuiAction::TableColumnRight => {
             state.move_table_column_for_viewport(kind, false, viewport_width, viewport_height);
         }
+        TuiAction::TableMoveColumnLeft => {
+            state.reorder_table_column_for_viewport(kind, true, viewport_width, viewport_height);
+        }
+        TuiAction::TableMoveColumnRight => {
+            state.reorder_table_column_for_viewport(kind, false, viewport_width, viewport_height);
+        }
         TuiAction::TableColumnFirst => {
             state.move_table_column_edge_for_viewport(kind, false, viewport_width, viewport_height);
         }
@@ -275,6 +281,8 @@ pub(super) fn dispatch_tui_action(
     match action {
         TuiAction::TableColumnLeft
         | TuiAction::TableColumnRight
+        | TuiAction::TableMoveColumnLeft
+        | TuiAction::TableMoveColumnRight
         | TuiAction::TableColumnFirst
         | TuiAction::TableColumnLast
         | TuiAction::TableScrollLeft

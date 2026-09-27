@@ -215,8 +215,8 @@ pub(super) fn draw_backups(frame: &mut Frame, area: ratatui::layout::Rect, state
             );
         } else {
             use crate::tui::table_layout::{
-                display_width, layout_for, table_column_schema, table_heading,
-                table_position_label, visible_cell, TableKind,
+                display_width, table_column_schema, table_heading, table_position_label,
+                visible_cell, TableKind,
             };
             let columns = table_column_schema(TableKind::Backups).expect("backup schema");
             let headings = columns
@@ -235,11 +235,13 @@ pub(super) fn draw_backups(frame: &mut Frame, area: ratatui::layout::Rect, state
                     content_widths[index] = content_widths[index].max(display_width(value));
                 }
             }
-            let layout = layout_for(TableKind::Backups);
+            let order = state.table_column_order(TableKind::Backups);
+            let layout = state.table_visual_layout(TableKind::Backups);
+            let visual_widths = state.table_visual_widths(TableKind::Backups, &content_widths);
             let interaction = state.table_interaction(TableKind::Backups);
             let viewport = layout.layout_with_active(
                 backup_parts[1].width.saturating_sub(4),
-                &content_widths,
+                &visual_widths,
                 interaction.viewport_offset(),
                 Some(interaction.active_column()),
             );
@@ -258,7 +260,8 @@ pub(super) fn draw_backups(frame: &mut Frame, area: ratatui::layout::Rect, state
                             .columns
                             .iter()
                             .map(|column| {
-                                let (value, style) = &values[column.index];
+                                let logical = order[column.index];
+                                let (value, style) = &values[logical];
                                 Cell::from(visible_cell(value, column)).style(
                                     if column.index == interaction.active_column() {
                                         style.add_modifier(Modifier::BOLD)
@@ -275,8 +278,8 @@ pub(super) fn draw_backups(frame: &mut Frame, area: ratatui::layout::Rect, state
                     .columns
                     .iter()
                     .map(|column| {
-                        let label =
-                            table_heading(headings[column.index], column.index, interaction);
+                        let logical = order[column.index];
+                        let label = table_heading(headings[logical], logical, interaction);
                         let style = if column.index == interaction.active_column() {
                             accent().add_modifier(Modifier::BOLD | Modifier::REVERSED)
                         } else {
@@ -287,7 +290,7 @@ pub(super) fn draw_backups(frame: &mut Frame, area: ratatui::layout::Rect, state
                     .collect::<Vec<_>>(),
             );
             let table_title = format!(
-                "{title} · h/l 列 · 0/$ 首尾列 · H/L 视口 · s 排序 · S 默认 · {}",
+                "{title} · h/l 激活 · </> 移列 · 0/$ 首尾列 · H/L 视口 · s 排序 · S 默认 · {}",
                 table_position_label(&layout, interaction, &viewport)
             );
             let table = crate::tui::ui::data_table(

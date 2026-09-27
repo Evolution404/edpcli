@@ -599,8 +599,7 @@ pub(super) fn draw_advanced_inspect(
                     .filter(|item| !item.fields.is_empty());
                 if let Some(item) = field_item {
                     use crate::tui::table_layout::{
-                        display_width, layout_for, table_heading, table_position_label,
-                        visible_cell, TableKind,
+                        display_width, table_heading, table_position_label, visible_cell, TableKind,
                     };
                     let headings = super::super::state::INSPECT_DETAIL_HEADINGS;
                     let values = state.advanced_inspect_detail_rows();
@@ -610,11 +609,14 @@ pub(super) fn draw_advanced_inspect(
                             content_widths[index] = content_widths[index].max(display_width(value));
                         }
                     }
-                    let layout = layout_for(TableKind::InspectFields);
+                    let order = state.table_column_order(TableKind::InspectFields);
+                    let layout = state.table_visual_layout(TableKind::InspectFields);
+                    let visual_widths =
+                        state.table_visual_widths(TableKind::InspectFields, &content_widths);
                     let interaction = state.table_interaction(TableKind::InspectFields);
                     let viewport = layout.layout_with_active(
                         detail_area.width.saturating_sub(3),
-                        &content_widths,
+                        &visual_widths,
                         interaction.viewport_offset(),
                         Some(interaction.active_column()),
                     );
@@ -634,17 +636,13 @@ pub(super) fn draw_advanced_inspect(
                                     .columns
                                     .iter()
                                     .map(|column| {
-                                        Cell::from(visible_cell(
-                                            &safe(&row.cells[column.index]),
-                                            column,
-                                        ))
-                                        .style(
-                                            if column.index == interaction.active_column() {
+                                        let logical = order[column.index];
+                                        Cell::from(visible_cell(&safe(&row.cells[logical]), column))
+                                            .style(if column.index == interaction.active_column() {
                                                 Modifier::BOLD.into()
                                             } else {
                                                 Style::default()
-                                            },
-                                        )
+                                            })
                                     })
                                     .collect::<Vec<_>>(),
                             )
@@ -684,7 +682,7 @@ pub(super) fn draw_advanced_inspect(
                                     panel()
                                 })
                                 .title(format!(
-                                    "字段详情 · 行 {}–{} / {} · h/l 列 · 0/$ 首尾列 · H/L 视口 · s 排序 · S 默认 · {}",
+                                    "字段详情 · 行 {}–{} / {} · h/l 激活 · </> 移列 · 0/$ 首尾列 · H/L 视口 · s 排序 · S 默认 · {}",
                                     if values.is_empty() { 0 } else { row_start + 1 },
                                     row_end,
                                     values.len(),

@@ -248,20 +248,38 @@ impl TableInteractionState {
         changed
     }
 
-    pub fn toggle_sort(&mut self) {
+    pub fn toggle_sort_for(&mut self, logical_column: usize) {
         self.sort = Some(match self.sort {
             Some(TableSort {
                 column,
                 direction: SortDirection::Ascending,
-            }) if column == self.active_column => TableSort {
+            }) if column == logical_column => TableSort {
                 column,
                 direction: SortDirection::Descending,
             },
             _ => TableSort {
-                column: self.active_column,
+                column: logical_column,
                 direction: SortDirection::Ascending,
             },
         });
+    }
+
+    pub fn toggle_sort(&mut self) {
+        self.toggle_sort_for(self.active_column);
+    }
+
+    pub fn set_active_column(&mut self, column: usize) {
+        self.active_column = column;
+    }
+
+    pub fn ensure_active_visible_for_layout(
+        &mut self,
+        layout: &AdaptiveTableLayout,
+        content_widths: &[usize],
+        viewport_width: u16,
+        reverse: bool,
+    ) {
+        self.ensure_active_visible(layout, content_widths, viewport_width, reverse);
     }
 
     pub fn clear_sort(&mut self) -> bool {
