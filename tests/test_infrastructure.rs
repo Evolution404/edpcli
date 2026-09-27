@@ -251,6 +251,16 @@ fn compiler_cache_is_optional_locally_and_pinned_in_ci() {
     assert!(ci.contains("SCCACHE_GHA_ENABLED: \"true\""));
     assert!(ci.contains("RUSTC_WRAPPER: \"sccache\""));
     assert!(ci.contains("CARGO_INCREMENTAL: \"0\""));
+    assert_eq!(
+        ci.matches("CARGO_PROFILE_DEV_DEBUG: \"0\"").count(),
+        3,
+        "repository-audit plus both daily quality matrices should disable CI-only dev debug info"
+    );
+    assert_eq!(
+        ci.matches("CARGO_PROFILE_TEST_DEBUG: \"0\"").count(),
+        3,
+        "repository-audit plus both daily quality matrices should disable CI-only test debug info"
+    );
 }
 
 #[test]
