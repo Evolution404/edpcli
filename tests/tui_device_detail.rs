@@ -8,6 +8,7 @@ fn device() -> Row {
         vid: "1234".into(),
         pid: "5678".into(),
         proto: "USB".into(),
+        serial: Some("SERIAL-TEST-0001".into()),
         device_id: Some("disk&ven_demo&prod_u335".into()),
         identity_pin: None,
         onlyid: Some("ABCDEF0123456789".into()),
@@ -42,7 +43,7 @@ fn selected_device_is_exposed_for_dashboard_detail_panel() {
 #[test]
 fn device_dashboard_renders_identity_detail_fields() {
     let render = include_str!("../src/tui/devices/render.rs");
-    for field in ["onlyid", "device_id", "容量布局", "备份关系"] {
+    for field in ["onlyid", "device_id", "序列号", "容量布局", "备份关系"] {
         assert!(
             render.contains(field),
             "device detail panel must render {field}"

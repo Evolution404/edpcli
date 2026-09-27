@@ -24,6 +24,8 @@ pub struct Row {
     pub vid: String,
     pub pid: String,
     pub proto: String,
+    /// Raw hardware serial for the current scan session only. Do not persist this field.
+    pub serial: Option<String>,
     pub device_id: Option<String>,
     /// Read-only canonical snapshot pinned to the protocol image seen by this scan.
     pub identity_pin: Option<crate::application::media_identity::MediaIdentityPin>,
@@ -108,6 +110,7 @@ pub fn scan_disks(
             vid: d.vid.clone(),
             pid: d.pid.clone(),
             proto: d.proto.clone(),
+            serial: runner.hardware_serial(d.n),
             device_id: None,
             identity_pin: None,
             onlyid: None,

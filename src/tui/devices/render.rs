@@ -216,6 +216,10 @@ fn draw_device_summary(frame: &mut Frame, area: ratatui::layout::Rect, state: &A
             "device_id",
             safe(identity.device_id.as_deref().unwrap_or("—")),
         ));
+        lines.push(field_line(
+            "序列号",
+            safe(row.serial.as_deref().unwrap_or("—")),
+        ));
         lines.push(field_line("VID:PID", safe(&cells[1])));
     }
 

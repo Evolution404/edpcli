@@ -29,6 +29,7 @@ fn device() -> edpcli::disk_scan::Row {
         vid: "1234".into(),
         pid: "5678".into(),
         proto: "USB".into(),
+        serial: Some("SERIAL-D0-1234".into()),
         device_id: Some("disk&ven_test&prod_test".into()),
         identity_pin: None,
         onlyid: Some("1402259934".into()),
@@ -434,6 +435,7 @@ fn d0_current_device_summary_renders_capacity_layout_bar() {
     state.replace_devices(vec![row]);
     state.focus_devices_pane(PaneId::DevicesSummary);
     let text = render_text(&state, 160, 36);
+    assert!(text.contains("SERIAL-D0-1234"), "{text}");
     assert!(text.contains("容量布局"), "{text}");
     assert!(text.contains("启动区"), "{text}");
     assert!(text.contains("交换区"), "{text}");

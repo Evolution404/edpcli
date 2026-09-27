@@ -96,6 +96,7 @@ fn device() -> edpcli::disk_scan::Row {
         vid: "1234".into(),
         pid: "5678".into(),
         proto: "USB".into(),
+        serial: None,
         device_id: Some("disk&ven_demo&prod_u335".into()),
         identity_pin: None,
         onlyid: Some("ABCDEF0123456789".into()),
