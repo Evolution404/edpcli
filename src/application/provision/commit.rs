@@ -605,9 +605,10 @@ pub(super) fn validate_target_write_set(
                 ),
             ));
         }
-        if formats.iter().any(|choice| {
-            choice.target.role == part.geometry.role && choice.selected
-        }) {
+        if formats
+            .iter()
+            .any(|choice| choice.target.role == part.geometry.role && choice.selected)
+        {
             return Err(err(
                 EXIT_TARGET,
                 format!(
