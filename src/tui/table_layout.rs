@@ -34,6 +34,7 @@ pub enum ColumnId {
     ProvisionKind,
     Bus,
     State,
+    Backups,
     Health,
 }
 
@@ -73,13 +74,16 @@ pub fn table_column_schema(kind: TableKind) -> Option<Vec<TableColumnSpec>> {
     use ColumnId::*;
     let identity = identity_column_specs();
     match kind {
-        TableKind::Devices => {
-            let mut columns = vec![table_column(Device, "设备", column(7, 9, 12, 100, 1, true))];
-            columns.extend(identity);
-            columns.push(table_column(Bus, "总线", column(4, 5, 7, 30, 1, false)));
-            columns.push(table_column(State, "状态", column(12, 18, 30, 98, 1, true)));
-            Some(columns)
-        }
+        TableKind::Devices => Some(vec![
+            table_column(Device, "设备", column(7, 9, 12, 100, 1, true)),
+            table_column(Capacity, "容量", column(8, 9, 12, 96, 1, true)),
+            table_column(Dept, "部门", column(8, 16, 32, 94, 2, true)),
+            table_column(User, "姓名", column(6, 10, 18, 93, 1, true)),
+            table_column(ProvisionKind, "盘型", column(12, 22, 30, 98, 2, true)),
+            table_column(State, "状态", column(8, 12, 18, 97, 1, true)),
+            table_column(Backups, "备份", column(4, 6, 8, 70, 1, false)),
+            table_column(Model, "型号", column(10, 18, 32, 45, 2, false)),
+        ]),
         TableKind::Backups => {
             let mut columns = vec![
                 table_column(Selected, "选", column(3, 3, 4, 99, 1, true)),
@@ -162,15 +166,16 @@ pub fn device_table_view(rows: &[crate::disk_scan::Row], generation: u64) -> Tab
                         ColumnId::Bus => row.proto.clone(),
                         ColumnId::State => {
                             if row.proto != "USB" {
-                                "非 USB / 不支持".into()
+                                "非 USB".into()
                             } else if row.denied {
-                                "需要管理员权限".into()
-                            } else if let Some(error) = &row.probe_error {
-                                format!("读取异常: {error}")
+                                "需权限".into()
+                            } else if row.probe_error.is_some() {
+                                "读取异常".into()
                             } else {
                                 "可用".into()
                             }
                         }
+                        ColumnId::Backups => row.n_baks.to_string(),
                         _ => unreachable!("device schema"),
                     })
                 })

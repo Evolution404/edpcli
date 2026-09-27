@@ -4,15 +4,20 @@ use edpcli::tui::table_layout::{
 };
 
 #[test]
-fn ch14_identity_column_schema_is_identical_between_workspaces() {
+fn d0_device_schema_is_task_specific_while_backup_identity_schema_stays_shared() {
     let shared = identity_column_specs();
     let devices = table_column_schema(TableKind::Devices).unwrap();
     let backups = table_column_schema(TableKind::Backups).unwrap();
-    assert_eq!(devices.len(), 10);
+
+    assert_eq!(
+        devices
+            .iter()
+            .map(|column| column.heading)
+            .collect::<Vec<_>>(),
+        vec!["设备", "容量", "部门", "姓名", "盘型", "状态", "备份", "型号"]
+    );
     assert_eq!(backups.len(), 12);
-    assert_eq!(devices[1..8], shared);
     assert_eq!(backups[4..11], shared);
-    assert_eq!(devices[7].id, ColumnId::ProvisionKind);
     assert_eq!(backups[10].id, ColumnId::ProvisionKind);
     assert_eq!(backups[2].id, ColumnId::Name);
 }

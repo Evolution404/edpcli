@@ -64,7 +64,7 @@ fn redraw_handles_small_and_large_terminal_sizes_without_panicking() {
 }
 
 #[test]
-fn device_list_shows_model_and_onlyid_and_enter_shortcut() {
+fn device_list_shows_model_and_identity_summary_and_enter_shortcut() {
     let mut state = AppState::new();
     let mut row = usb_device();
     row.device_id = Some("disk&ven_aigo&prod_u335".into());
@@ -83,7 +83,7 @@ fn device_list_shows_model_and_onlyid_and_enter_shortcut() {
     assert!(text.replace(' ', "").contains("型号"), "{text}");
     assert!(text.contains("aigo_u335"), "{text}");
     assert!(text.contains("1987718388"), "{text}");
-    assert!(text.replace(' ', "").contains("Enter制盘"), "{text}");
+    assert!(text.replace(' ', "").contains("Enter当前设备"), "{text}");
     assert!(
         text.contains("▌"),
         "focused device row must render ▌: {text}"

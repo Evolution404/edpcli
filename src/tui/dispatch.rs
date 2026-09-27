@@ -299,12 +299,9 @@ pub(super) fn dispatch_tui_action(
             StateEffect::None
         }
         TuiAction::Open if state.workspace() == state::Workspace::Devices => {
-            let next = if state.devices_focused_pane() == crate::tui::pane::PaneId::DevicesList {
-                crate::tui::pane::PaneId::DevicesSummary
-            } else {
-                crate::tui::pane::PaneId::DevicesList
-            };
-            state.focus_devices_pane(next);
+            if state.devices_focused_pane() == crate::tui::pane::PaneId::DevicesSummary {
+                state.device_summary_toggle_selected_section();
+            }
             StateEffect::None
         }
         TuiAction::Toggle if state.workspace() == state::Workspace::Backups => {
@@ -350,6 +347,15 @@ pub(super) fn dispatch_tui_action(
                 backup_dir,
                 viewport_height,
             )
+        }
+        TuiAction::PanelNext | TuiAction::PanelPrevious
+            if matches!(
+                state.workspace(),
+                state::Workspace::Devices | state::Workspace::Backups
+            ) =>
+        {
+            state.shift_workspace_pane(action == TuiAction::PanelPrevious);
+            StateEffect::None
         }
         TuiAction::PanelLeft
         | TuiAction::PanelRight

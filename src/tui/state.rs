@@ -90,6 +90,35 @@ pub enum InputMode {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DeviceSummarySection {
+    Identity,
+    Capacity,
+    Status,
+    Backups,
+    Protocol,
+}
+
+impl DeviceSummarySection {
+    pub const ALL: [Self; 5] = [
+        Self::Identity,
+        Self::Capacity,
+        Self::Status,
+        Self::Backups,
+        Self::Protocol,
+    ];
+
+    const fn bit(self) -> u8 {
+        match self {
+            Self::Identity => 1 << 0,
+            Self::Capacity => 1 << 1,
+            Self::Status => 1 << 2,
+            Self::Backups => 1 << 3,
+            Self::Protocol => 1 << 4,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NavCommand {
     Up,
     Down,
@@ -152,6 +181,8 @@ pub struct AppState {
     pinned_disk: Option<u32>,
     advanced_inspect: Option<AdvancedInspectState>,
     devices_pane_focus: crate::tui::pane::PaneFocus,
+    device_summary_selected: usize,
+    device_summary_expanded: u8,
     backups_pane_focus: crate::tui::pane::PaneFocus,
     navigation: NavigationStack,
     horizontal_scroll: std::collections::BTreeMap<
@@ -198,6 +229,9 @@ impl AppState {
             pinned_disk: None,
             advanced_inspect: None,
             devices_pane_focus: crate::tui::pane::PaneFocus::devices(),
+            device_summary_selected: 0,
+            device_summary_expanded: DeviceSummarySection::Identity.bit()
+                | DeviceSummarySection::Capacity.bit(),
             backups_pane_focus: crate::tui::pane::PaneFocus::backups(),
             navigation: NavigationStack::default(),
             horizontal_scroll: std::collections::BTreeMap::new(),
@@ -960,17 +994,50 @@ impl AppState {
         }
     }
 
-    pub fn activate_device_for_viewport(&mut self, width: u16) -> Result<Option<u32>, String> {
-        if crate::tui::ui::ViewportClass::for_width(width) == crate::tui::ui::ViewportClass::Compact
-            && self.devices_focused_pane() == crate::tui::pane::PaneId::DevicesList
-        {
-            if self.selected_device().is_none() {
-                return Err("请先选择设备。".into());
-            }
-            self.focus_devices_pane(crate::tui::pane::PaneId::DevicesSummary);
-            Ok(None)
+    pub fn activate_device_for_viewport(&mut self, _width: u16) -> Result<Option<u32>, String> {
+        if self.selected_device().is_none() {
+            return Err("请先选择设备。".into());
+        }
+        self.focus_devices_pane(crate::tui::pane::PaneId::DevicesSummary);
+        Ok(None)
+    }
+
+    pub fn device_summary_selected_section(&self) -> DeviceSummarySection {
+        DeviceSummarySection::ALL[self
+            .device_summary_selected
+            .min(DeviceSummarySection::ALL.len() - 1)]
+    }
+
+    pub fn device_summary_section_expanded(&self, section: DeviceSummarySection) -> bool {
+        self.device_summary_expanded & section.bit() != 0
+    }
+
+    pub fn device_summary_move_section(&mut self, delta: isize) {
+        let max = DeviceSummarySection::ALL.len().saturating_sub(1);
+        self.device_summary_selected = if delta < 0 {
+            self.device_summary_selected
+                .saturating_sub(delta.unsigned_abs())
         } else {
-            self.begin_provision_for_selected_device().map(Some)
+            self.device_summary_selected
+                .saturating_add(delta as usize)
+                .min(max)
+        };
+    }
+
+    pub fn device_summary_toggle_selected_section(&mut self) {
+        let section = self.device_summary_selected_section();
+        self.device_summary_expanded ^= section.bit();
+    }
+
+    pub fn shift_workspace_pane(&mut self, reverse: bool) {
+        match self.workspace {
+            Workspace::Devices => self
+                .devices_pane_focus
+                .cycle(&crate::tui::pane::PaneId::DEVICES_ORDER, reverse),
+            Workspace::Backups => self
+                .backups_pane_focus
+                .cycle(&crate::tui::pane::PaneId::BACKUPS_ORDER, reverse),
+            Workspace::Inspect | Workspace::Provision => {}
         }
     }
 
@@ -1245,54 +1312,70 @@ impl AppState {
             NavCommand::WorkspaceBackups => self.switch_workspace(Workspace::Backups),
             NavCommand::WorkspaceProvision => self.switch_workspace(Workspace::Provision),
             NavCommand::Up => {
-                let detail_pane = match self.workspace {
-                    Workspace::Devices
-                        if self.devices_focused_pane() != crate::tui::pane::PaneId::DevicesList =>
-                    {
-                        Some(self.devices_focused_pane())
-                    }
-                    Workspace::Backups
-                        if self.backups_focused_pane() != crate::tui::pane::PaneId::BackupsList =>
-                    {
-                        Some(self.backups_focused_pane())
-                    }
-                    _ => None,
-                };
-                if let Some(pane) = detail_pane {
-                    self.pane_viewport_mut(pane).scroll_y.line_up();
+                if self.workspace == Workspace::Devices
+                    && self.devices_focused_pane() == crate::tui::pane::PaneId::DevicesSummary
+                {
+                    self.device_summary_move_section(-1);
                 } else {
-                    self.selected = self.selected.saturating_sub(1);
+                    let detail_pane = match self.workspace {
+                        Workspace::Devices
+                            if self.devices_focused_pane()
+                                != crate::tui::pane::PaneId::DevicesList =>
+                        {
+                            Some(self.devices_focused_pane())
+                        }
+                        Workspace::Backups
+                            if self.backups_focused_pane()
+                                != crate::tui::pane::PaneId::BackupsList =>
+                        {
+                            Some(self.backups_focused_pane())
+                        }
+                        _ => None,
+                    };
+                    if let Some(pane) = detail_pane {
+                        self.pane_viewport_mut(pane).scroll_y.line_up();
+                    } else {
+                        self.selected = self.selected.saturating_sub(1);
+                    }
                 }
             }
             NavCommand::Down => {
-                let detail_pane = match self.workspace {
-                    Workspace::Devices
-                        if self.devices_focused_pane() != crate::tui::pane::PaneId::DevicesList =>
-                    {
-                        Some(self.devices_focused_pane())
-                    }
-                    Workspace::Backups
-                        if self.backups_focused_pane() != crate::tui::pane::PaneId::BackupsList =>
-                    {
-                        Some(self.backups_focused_pane())
-                    }
-                    _ => None,
-                };
-                if let Some(pane) = detail_pane {
-                    let content_len = match pane {
-                        crate::tui::pane::PaneId::DevicesStats => 6,
-                        crate::tui::pane::PaneId::BackupCoverage => self
-                            .selected_backup()
-                            .and_then(|backup| backup.coverage.as_ref())
-                            .map(|coverage| coverage.regions.len() * 2 + 5)
-                            .unwrap_or(5),
-                        _ => 28,
+                if self.workspace == Workspace::Devices
+                    && self.devices_focused_pane() == crate::tui::pane::PaneId::DevicesSummary
+                {
+                    self.device_summary_move_section(1);
+                } else {
+                    let detail_pane = match self.workspace {
+                        Workspace::Devices
+                            if self.devices_focused_pane()
+                                != crate::tui::pane::PaneId::DevicesList =>
+                        {
+                            Some(self.devices_focused_pane())
+                        }
+                        Workspace::Backups
+                            if self.backups_focused_pane()
+                                != crate::tui::pane::PaneId::BackupsList =>
+                        {
+                            Some(self.backups_focused_pane())
+                        }
+                        _ => None,
                     };
-                    self.pane_viewport_mut(pane)
-                        .scroll_y
-                        .line_down(content_len, viewport_height);
-                } else if self.item_count > 0 {
-                    self.selected = (self.selected + 1).min(self.item_count - 1);
+                    if let Some(pane) = detail_pane {
+                        let content_len = match pane {
+                            crate::tui::pane::PaneId::DevicesStats => 11,
+                            crate::tui::pane::PaneId::BackupCoverage => self
+                                .selected_backup()
+                                .and_then(|backup| backup.coverage.as_ref())
+                                .map(|coverage| coverage.regions.len() * 2 + 5)
+                                .unwrap_or(5),
+                            _ => 28,
+                        };
+                        self.pane_viewport_mut(pane)
+                            .scroll_y
+                            .line_down(content_len, viewport_height);
+                    } else if self.item_count > 0 {
+                        self.selected = (self.selected + 1).min(self.item_count - 1);
+                    }
                 }
             }
             NavCommand::Top => self.selected = 0,

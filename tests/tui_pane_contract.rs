@@ -339,3 +339,104 @@ fn provision_review_wide_has_three_panes_and_narrow_uses_focus() {
     assert!(!changes.contains("计划摘要"), "{changes}");
     assert!(!changes.contains("磁盘布局"), "{changes}");
 }
+
+#[test]
+fn d0_device_table_uses_user_approved_column_order() {
+    use edpcli::tui::table_layout::{table_column_schema, TableKind};
+    let headings = table_column_schema(TableKind::Devices)
+        .unwrap()
+        .into_iter()
+        .map(|column| column.heading)
+        .collect::<Vec<_>>();
+    assert_eq!(
+        headings,
+        vec!["设备", "容量", "部门", "姓名", "盘型", "状态", "备份", "型号"]
+    );
+}
+
+#[test]
+fn d0_device_summary_sections_are_interactive_and_default_identity_capacity_open() {
+    use edpcli::tui::state::DeviceSummarySection;
+
+    let mut state = AppState::new();
+    state.replace_devices(vec![device()]);
+    state.focus_devices_pane(PaneId::DevicesSummary);
+
+    assert_eq!(
+        state.device_summary_selected_section(),
+        DeviceSummarySection::Identity
+    );
+    assert!(state.device_summary_section_expanded(DeviceSummarySection::Identity));
+    assert!(state.device_summary_section_expanded(DeviceSummarySection::Capacity));
+    assert!(!state.device_summary_section_expanded(DeviceSummarySection::Status));
+
+    state.device_summary_move_section(1);
+    assert_eq!(
+        state.device_summary_selected_section(),
+        DeviceSummarySection::Capacity
+    );
+    state.device_summary_toggle_selected_section();
+    assert!(!state.device_summary_section_expanded(DeviceSummarySection::Capacity));
+}
+
+#[test]
+fn d0_three_pane_focus_cycle_never_changes_selected_device() {
+    let mut state = AppState::new();
+    let first = device();
+    let mut second = device();
+    second.disk = 7;
+    state.replace_devices(vec![first, second]);
+    state.navigate(NavCommand::Down, 20);
+    assert_eq!(state.selected_device_disk(), Some(7));
+
+    for expected in [
+        PaneId::DevicesSummary,
+        PaneId::DevicesStats,
+        PaneId::DevicesList,
+    ] {
+        state.shift_workspace_pane(false);
+        assert_eq!(state.devices_focused_pane(), expected);
+        assert_eq!(state.selected_device_disk(), Some(7));
+    }
+}
+
+#[test]
+fn d0_current_device_summary_renders_capacity_layout_bar() {
+    use edpcli::sectors::EdpfPartition;
+
+    let mut row = device();
+    row.provision_kind = edpcli::provision::DiskProvisionKind::Mode0;
+    row.partitions = Some(vec![
+        EdpfPartition {
+            ptype: 1,
+            active: 1,
+            enc: 0,
+            start_lba: 63,
+            size_bytes: 20_417 * 512,
+        },
+        EdpfPartition {
+            ptype: 2,
+            active: 1,
+            enc: 1,
+            start_lba: 20_480,
+            size_bytes: 80_000_000,
+        },
+        EdpfPartition {
+            ptype: 4,
+            active: 1,
+            enc: 1,
+            start_lba: 176_730,
+            size_bytes: 120_000_000,
+        },
+    ]);
+
+    let mut state = AppState::new();
+    state.replace_devices(vec![row]);
+    state.focus_devices_pane(PaneId::DevicesSummary);
+    let text = render_text(&state, 160, 36);
+    assert!(text.contains("容量布局"), "{text}");
+    assert!(text.contains("启动区"), "{text}");
+    assert!(text.contains("交换区"), "{text}");
+    assert!(text.contains("保密区"), "{text}");
+    assert!(text.contains("━"), "{text}");
+}

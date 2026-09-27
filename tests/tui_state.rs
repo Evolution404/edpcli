@@ -15,12 +15,17 @@ fn chapter_11_provision_escape_restores_device_selection() {
     assert_eq!(state.selected_device_disk(), Some(7));
     state.scroll_table(TableKind::Devices, false);
     state.scroll_table(TableKind::Devices, false);
+    let expected_scroll = state.table_scroll_offset(TableKind::Devices);
+    assert!(expected_scroll > 0);
     state.begin_provision_for_selected_device().unwrap();
     assert_eq!(state.navigation().depth(), 1);
     assert_eq!(state.navigate(NavCommand::Escape, 20), StateEffect::None);
     assert_eq!(state.workspace(), Workspace::Devices);
     assert_eq!(state.selected_device_disk(), Some(7));
-    assert_eq!(state.table_scroll_offset(TableKind::Devices), 2);
+    assert_eq!(
+        state.table_scroll_offset(TableKind::Devices),
+        expected_scroll
+    );
     assert_eq!(state.navigation().depth(), 0);
 }
 

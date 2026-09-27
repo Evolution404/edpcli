@@ -34,7 +34,7 @@ fn wide_devices_keep_only_compact_core_indicator_during_normal_navigation() {
     let text = render_text(&state, 160, 30);
     assert!(text.contains("CORE ◇ STABLE"), "{text}");
     assert!(!text.contains("EDP CORE · LIVE"), "{text}");
-    assert!(text.replace(' ', "").contains("总体统计"), "{text}");
+    assert!(text.replace(' ', "").contains("设备状态"), "{text}");
 }
 
 #[test]

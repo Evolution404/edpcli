@@ -275,11 +275,11 @@ fn ch16_devices_wide_shows_current_identity_stats_and_no_animation_sidebar() {
     let text = rendered_lines(&state, 160, 45).join("\n").replace(' ', "");
     for value in [
         "设备列表",
-        "当前设备disk6",
+        "当前设备·disk6",
         "张三",
         "输电运检中心",
-        "总体统计",
-        "已确认备份3",
+        "容量布局",
+        "设备状态",
     ] {
         assert!(text.contains(value), "missing {value}");
     }
@@ -295,7 +295,7 @@ fn ch16_devices_compact_enter_opens_detail_and_escape_returns_to_list() {
     assert_eq!(state.activate_device_for_viewport(40).unwrap(), None);
     assert_eq!(state.devices_focused_pane(), PaneId::DevicesSummary);
     let text = rendered_lines(&state, 40, 10).join("\n").replace(' ', "");
-    for value in ["当前设备disk6", "用户张三", "部门输电运检中心"] {
+    for value in ["当前设备·disk6", "身份信息", "onlyid"] {
         assert!(text.contains(value), "missing {value} at 40x10");
     }
     state.navigate(NavCommand::Escape, 7);
@@ -310,8 +310,8 @@ fn ch16_device_secondary_pane_remains_reachable_at_standard_width() {
     state.replace_devices(vec![device()]);
     state.focus_devices_pane(PaneId::DevicesStats);
     let text = rendered_lines(&state, 100, 30).join("\n").replace(' ', "");
-    assert!(text.contains("总体统计"));
-    assert!(text.contains("可能相关备份1"));
+    assert!(text.contains("设备状态"));
+    assert!(text.contains("总设备1"));
 }
 
 #[test]

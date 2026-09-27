@@ -397,10 +397,10 @@ fn provision_form_enter_generates_plan_instead_of_editing_or_toggling() {
 
 #[test]
 fn user_visible_inspect_hints_point_to_full_disk_tree_entry() {
-    let devices = include_str!("../src/tui/devices/render.rs");
-    assert!(devices.contains("Span::styled(\"i\", accent())"));
-    assert!(devices.contains("Span::styled(\"Enter\", accent())"));
-    assert!(!devices.contains("gi"));
+    let shell = include_str!("../src/tui/render.rs");
+    assert!(shell.contains("i Inspect"));
+    assert!(shell.contains("Enter 当前设备"));
+    assert!(!shell.contains("gi Inspect"));
 
     let dispatch = include_str!("../src/tui/dispatch.rs");
     assert!(dispatch.contains("NavCommand::OpenInspect =>"));

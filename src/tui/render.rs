@@ -451,7 +451,7 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
                     "顶层 Tab/Shift-Tab 设备↔备份 · Inspect 内 Tab/Shift-Tab 切结构树/概览/详情 · Ctrl-w 面板别名",
                 ));
                 help_lines.push(Line::from(
-                    "设备: Enter 制盘 · i Inspect · b 新建备份 · 备份: Enter/i Inspect · b 新建 · v 校验 · R 恢复 · d 删除",
+                    "设备: Enter 当前设备 · p 制盘 · i Inspect · b 新建备份 · Ctrl-w w/W 切 Pane · 当前设备内 j/k 选分组、o 展开/折叠 · 备份: Enter/i Inspect · b 新建 · v 校验 · R 恢复 · d 删除",
                 ));
                 help_lines.push(Line::from(
                     "Inspect: / 搜索 · n/N 匹配 · gl 跳转 · Sector 0/$、gg/G、v",
@@ -566,15 +566,7 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
                 if state.selected_device().is_some() {
                     let kind = crate::tui::table_layout::TableKind::Devices;
                     let count = crate::tui::table_layout::layout_for(kind).scrollable_count();
-                    let enter = if super::ui::ViewportClass::for_width(area.width)
-                        == super::ui::ViewportClass::Compact
-                        && state.devices_focused_pane() == crate::tui::pane::PaneId::DevicesList
-                    {
-                        "Enter 详情"
-                    } else {
-                        "Enter 制盘"
-                    };
-                    format!("Tab/Shift-Tab 工作区 · Ctrl-w 切 Pane · j/k 当前 Pane · h/l 横向滚动 · {}/{} 列 · {enter} · p 制盘 · i Inspect · b 备份 · Esc 返回 · q 退出", state.table_scroll_offset(kind) + 1, count)
+                    format!("Tab/Shift-Tab 工作区 · Ctrl-w w/W 切 Pane · j/k 当前 Pane · o 展开/折叠 · h/l 横向滚动 · {}/{} 列 · Enter 当前设备 · p 制盘 · i Inspect · b 备份 · Esc 返回 · q 退出", state.table_scroll_offset(kind) + 1, count)
                 } else {
                     "Tab/Shift-Tab 工作区 · r 刷新 · q 退出".to_string()
                 }
