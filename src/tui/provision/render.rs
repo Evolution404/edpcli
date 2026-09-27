@@ -4,9 +4,64 @@ use crate::tui::state::{ProvisionReviewRowKind, ProvisionReviewTone};
 
 const INPUT_EDITING_SLACK: usize = 2;
 
+fn draw_provision_stepper(frame: &mut Frame, area: ratatui::layout::Rect, stage: ProvisionStage) {
+    let current = match stage {
+        ProvisionStage::SelectDisk => 0,
+        ProvisionStage::Menu | ProvisionStage::Form => 1,
+        ProvisionStage::Planning => 2,
+        ProvisionStage::Review
+        | ProvisionStage::ExportPath
+        | ProvisionStage::Exporting
+        | ProvisionStage::Confirm => 3,
+        ProvisionStage::Running => 4,
+        ProvisionStage::Result => 5,
+    };
+    let names = [
+        "选择设备",
+        "制盘配置",
+        "分区预览",
+        "计划确认",
+        "执行",
+        "完成",
+    ];
+    let class = crate::tui::ui::ViewportClass::for_width(area.width);
+    let line = if class == crate::tui::ui::ViewportClass::Compact {
+        Line::from(format!("{}/6  {}", current + 1, names[current]))
+    } else {
+        Line::from(
+            names
+                .into_iter()
+                .enumerate()
+                .flat_map(|(index, name)| {
+                    let tone = if index == current {
+                        accent()
+                    } else if index < current {
+                        success()
+                    } else {
+                        muted()
+                    };
+                    let mut spans = Vec::new();
+                    if index > 0 {
+                        spans.push(Span::styled(" ─ ", muted()));
+                    }
+                    spans.push(Span::styled(format!("{} {name}", index + 1), tone));
+                    spans
+                })
+                .collect::<Vec<_>>(),
+        )
+    };
+    frame.render_widget(Paragraph::new(line), area);
+}
+
 pub(super) fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState) {
     let provision = state.provision();
-    let (main_area, sidebar) = workspace_sidebar_layout(area);
+    let sections = Layout::vertical([Constraint::Length(1), Constraint::Min(1)]).split(area);
+    draw_provision_stepper(frame, sections[0], provision.stage);
+    let (main_area, sidebar) = if provision.stage == ProvisionStage::Running {
+        (sections[1], None)
+    } else {
+        workspace_sidebar_layout(sections[1])
+    };
 
     let target_lines = if let Some(row) = if provision.stage == ProvisionStage::SelectDisk {
         state.provision_device_at(state.selected())
@@ -50,12 +105,7 @@ pub(super) fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, sta
     if let Some((side_top, side_bottom)) = sidebar {
         frame.render_widget(
             Paragraph::new(target_lines)
-                .block(
-                    Block::default()
-                        .borders(Borders::ALL)
-                        .title("固定目标")
-                        .title_style(accent()),
-                )
+                .block(crate::tui::ui::card("固定目标", false))
                 .wrap(Wrap { trim: true }),
             side_top,
         );
@@ -70,12 +120,7 @@ pub(super) fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, sta
                     Line::from("• 协议写入失败回滚；格式化失败保留制盘"),
                     Line::from("• 保留分区保持原位置与密钥材料"),
                 ])
-                .block(
-                    Block::default()
-                        .borders(Borders::ALL)
-                        .border_style(warning())
-                        .title("写盘保护"),
-                )
+                .block(crate::tui::ui::card("写盘保护", false))
                 .wrap(Wrap { trim: true }),
                 side_bottom,
             );
@@ -126,29 +171,24 @@ pub(super) fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, sta
                         .collect::<Vec<_>>(),
                 ))
             });
-            let table = Table::new(rows, viewport.widths())
-                .header(
-                    TableRow::new(
-                        viewport
-                            .columns
-                            .iter()
-                            .map(|column| {
-                                truncate_cell(
-                                    headings[column.index],
-                                    usize::from(column.width),
-                                    column.truncate_policy,
-                                )
-                            })
-                            .collect::<Vec<_>>(),
-                    )
-                    .style(accent()),
-                )
-                .block(Block::default().borders(Borders::ALL).title(format!(
-                    "制盘 · 先选择 USB 目标 · h/l 横向滚动 · {}",
-                    viewport.position_label()
-                )))
-                .row_highlight_style(selected())
-                .highlight_symbol("▌ ");
+            let title = format!(
+                "制盘 · 先选择 USB 目标 · h/l 横向滚动 · {}",
+                viewport.position_label()
+            );
+            let header = TableRow::new(
+                viewport
+                    .columns
+                    .iter()
+                    .map(|column| {
+                        truncate_cell(
+                            headings[column.index],
+                            usize::from(column.width),
+                            column.truncate_policy,
+                        )
+                    })
+                    .collect::<Vec<_>>(),
+            );
+            let table = crate::tui::ui::data_table(&title, header, rows, viewport.widths(), true);
             let mut table_state = ratatui::widgets::TableState::default();
             if state.item_count() > 0 {
                 table_state.select(Some(state.selected()));
@@ -201,36 +241,25 @@ pub(super) fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, sta
                             .collect::<Vec<_>>(),
                     )
                 });
-            let table = Table::new(rows, viewport.widths())
-                .header(
-                    TableRow::new(
-                        viewport
-                            .columns
-                            .iter()
-                            .map(|column| {
-                                truncate_cell(
-                                    headings[column.index],
-                                    usize::from(column.width),
-                                    column.truncate_policy,
-                                )
-                            })
-                            .collect::<Vec<_>>(),
-                    )
-                    .style(accent())
-                    .bottom_margin(1),
-                )
-                .block(
-                    Block::default()
-                        .borders(Borders::ALL)
-                        .border_style(focused_panel())
-                        .title(format!(
-                            "制盘中心 · 选择方案 · h/l 横向滚动 · {}",
-                            viewport.position_label()
-                        ))
-                        .title_style(secondary()),
-                )
-                .row_highlight_style(selected())
-                .highlight_symbol("▌ ");
+            let title = format!(
+                "制盘中心 · 选择方案 · h/l 横向滚动 · {}",
+                viewport.position_label()
+            );
+            let header = TableRow::new(
+                viewport
+                    .columns
+                    .iter()
+                    .map(|column| {
+                        truncate_cell(
+                            headings[column.index],
+                            usize::from(column.width),
+                            column.truncate_policy,
+                        )
+                    })
+                    .collect::<Vec<_>>(),
+            )
+            .bottom_margin(1);
+            let table = crate::tui::ui::data_table(&title, header, rows, viewport.widths(), true);
             let mut table_state = TableState::default();
             table_state.select(Some(state.selected()));
             frame.render_stateful_widget(table, main_area, &mut table_state);
@@ -425,19 +454,10 @@ pub(super) fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, sta
             if let Some(form_area) = form_area {
                 frame.render_widget(
                     Paragraph::new(form_lines)
-                        .block(
-                            Block::default()
-                                .borders(Borders::ALL)
-                                .border_style(
-                                    if focused_pane == crate::tui::pane::PaneId::ProvisionParameters
-                                    {
-                                        focused_panel()
-                                    } else {
-                                        panel()
-                                    },
-                                )
-                                .title("参数"),
-                        )
+                        .block(crate::tui::ui::card(
+                            "参数",
+                            focused_pane == crate::tui::pane::PaneId::ProvisionParameters,
+                        ))
                         .scroll((scroll as u16, 0))
                         .wrap(Wrap { trim: false }),
                     form_area,
@@ -534,18 +554,10 @@ pub(super) fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, sta
                     .min(lines.len().saturating_sub(1));
                 frame.render_widget(
                     Paragraph::new(lines)
-                        .block(
-                            Block::default()
-                                .borders(Borders::ALL)
-                                .border_style(
-                                    if focused_pane == crate::tui::pane::PaneId::ProvisionSummary {
-                                        focused_panel()
-                                    } else {
-                                        panel()
-                                    },
-                                )
-                                .title("计划摘要"),
-                        )
+                        .block(crate::tui::ui::card(
+                            "计划摘要",
+                            focused_pane == crate::tui::pane::PaneId::ProvisionSummary,
+                        ))
                         .scroll((scroll.min(u16::MAX as usize) as u16, 0))
                         .wrap(Wrap { trim: false }),
                     summary_area,
@@ -586,7 +598,19 @@ pub(super) fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, sta
                             ProvisionReviewTone::Success => success(),
                             ProvisionReviewTone::Warning => warning(),
                         };
-                        Line::from(Span::styled(safe(&row.text), style))
+                        let mut line = Line::from(Span::styled(safe(&row.text), style));
+                        if let Some(label) = row.badge {
+                            let tone = match row.tone {
+                                ProvisionReviewTone::Success => crate::tui::ui::BadgeTone::Success,
+                                ProvisionReviewTone::Warning => crate::tui::ui::BadgeTone::Warning,
+                                ProvisionReviewTone::Accent => crate::tui::ui::BadgeTone::Accent,
+                                ProvisionReviewTone::Muted => crate::tui::ui::BadgeTone::Neutral,
+                            };
+                            let mut badge = crate::tui::ui::status_badge(label, tone);
+                            line.spans.insert(0, Span::raw(" "));
+                            line.spans.splice(0..0, badge.spans.drain(..));
+                        }
+                        line
                     })
                     .collect::<Vec<_>>();
                 let scroll = state
@@ -596,18 +620,10 @@ pub(super) fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, sta
                     .min(lines.len().saturating_sub(1));
                 frame.render_widget(
                     Paragraph::new(lines)
-                        .block(
-                            Block::default()
-                                .borders(Borders::ALL)
-                                .border_style(
-                                    if focused_pane == crate::tui::pane::PaneId::ProvisionChanges {
-                                        focused_panel()
-                                    } else {
-                                        panel()
-                                    },
-                                )
-                                .title("变更明细"),
-                        )
+                        .block(crate::tui::ui::card(
+                            "变更明细",
+                            focused_pane == crate::tui::pane::PaneId::ProvisionChanges,
+                        ))
                         .scroll((scroll.min(u16::MAX as usize) as u16, 0))
                         .wrap(Wrap { trim: false }),
                     changes_area,
@@ -686,92 +702,7 @@ pub(super) fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, sta
             );
         }
         ProvisionStage::Running => {
-            let mut lines = vec![Line::from(Span::styled(
-                format!(
-                    "{}  安全事务执行中",
-                    ["◐", "◓", "◑", "◒"][(state.animation_frame() % 4) as usize]
-                ),
-                warning(),
-            ))];
-            if let Some(run) = &provision.run {
-                let now = std::time::Instant::now();
-                lines.push(Line::from(format!(
-                    "已运行 {} 秒  上次活动 {} 秒前",
-                    now.duration_since(run.started_at).as_secs(),
-                    now.duration_since(run.last_activity_at).as_secs(),
-                )));
-                if let Some(event) = &run.latest {
-                    lines.push(Line::from(format!("当前阶段  {}", event.phase.label())));
-                    lines.push(Line::from(format!(
-                        "总体进度  {}/{} 步",
-                        event.current, event.total
-                    )));
-                    lines.push(Line::from(format!("当前步骤  {}", event.step.label())));
-                    if let Some(work) = event.work {
-                        lines.push(Line::from(format!(
-                            "扇区活动  {:?} {}/{}",
-                            work.phase, work.current, work.total
-                        )));
-                    }
-                }
-                lines.push(Line::from(""));
-                lines.push(Line::from(Span::styled(
-                    "运行日志  j/k 滚动 · G 跟随末尾",
-                    accent(),
-                )));
-                let viewport = provision
-                    .pane_focus
-                    .viewport(crate::tui::pane::PaneId::ProvisionRunLog);
-                let available = main_area.height.saturating_sub(12) as usize;
-                let log_offset = if viewport.selected.is_none() {
-                    run.log.len().saturating_sub(available)
-                } else {
-                    viewport.scroll_y.offset
-                };
-                lines.extend(
-                    run.log
-                        .iter()
-                        .skip(log_offset)
-                        .take(available)
-                        .map(|event| {
-                            let detail = match event.step {
-                                crate::application::progress::Step::PartitionFormat(role) => {
-                                    format!(" {}", role.label())
-                                }
-                                _ => String::new(),
-                            };
-                            let work = event
-                                .work
-                                .map(|work| {
-                                    format!("  {:?} {}/{}", work.phase, work.current, work.total)
-                                })
-                                .unwrap_or_default();
-                            Line::from(safe(&format!(
-                                "[{}/{}] {}  {}{}{}",
-                                event.current,
-                                event.total,
-                                event.phase.label(),
-                                event.step.label(),
-                                detail,
-                                work
-                            )))
-                        }),
-                );
-            }
-            lines.push(Line::from(""));
-            lines.push(Line::from(Span::styled(
-                "q / Esc / Ctrl-C 不会中断介质事务；退出请求只会在安全检查点生效。",
-                danger(),
-            )));
-            frame.render_widget(
-                Paragraph::new(lines).alignment(Alignment::Center).block(
-                    Block::default()
-                        .borders(Borders::ALL)
-                        .border_style(warning())
-                        .title("事务执行"),
-                ),
-                main_area,
-            );
+            draw_provision_running(frame, main_area, state);
         }
         ProvisionStage::Result => {
             use crate::application::provision::ProvisionExecutionStatus as Status;
@@ -786,8 +717,15 @@ pub(super) fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, sta
                 Some(Status::PartialFormatFailure) => "部分完成：格式化失败",
                 Some(Status::FatalFailure) | None => "制盘失败",
             };
+            let badge_tone = match provision.result_status {
+                Some(Status::Success) => crate::tui::ui::BadgeTone::Success,
+                Some(Status::CompletedWithWarnings | Status::PartialFormatFailure) => {
+                    crate::tui::ui::BadgeTone::Warning
+                }
+                Some(Status::FatalFailure) | None => crate::tui::ui::BadgeTone::Danger,
+            };
             let mut lines = vec![
-                Line::from(Span::styled(result_title, result_style)),
+                crate::tui::ui::status_badge(result_title, badge_tone),
                 Line::from(""),
             ];
             lines.extend(
@@ -837,14 +775,149 @@ pub(super) fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, sta
                 accent(),
             )));
             frame.render_widget(
-                Paragraph::new(lines).alignment(Alignment::Center).block(
-                    Block::default()
-                        .borders(Borders::ALL)
-                        .border_style(result_style)
-                        .title("结果"),
-                ),
+                Paragraph::new(lines)
+                    .alignment(Alignment::Center)
+                    .block(crate::tui::ui::card("制盘结果", true).border_style(result_style)),
                 main_area,
             );
         }
     }
+}
+
+fn draw_provision_running(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState) {
+    let run = state.provision().run.as_ref();
+    let latest = run.and_then(|run| run.latest.as_ref());
+    let progress = latest
+        .map(|event| {
+            format!(
+                "{}/{} 步 · {}%",
+                event.current,
+                event.total,
+                event.current.saturating_mul(100) / event.total
+            )
+        })
+        .unwrap_or_else(|| "等待进度事件".into());
+    let phase = latest.map(|event| event.phase.label()).unwrap_or("准备中");
+    let step = latest
+        .map(|event| event.step.label())
+        .unwrap_or("等待第一步");
+    if area.height < 18 {
+        let lines = [
+            Line::from(format!("总体进度  {progress}")),
+            Line::from(format!("当前阶段  {phase}")),
+            Line::from(format!("当前步骤  {step}")),
+            Line::from("运行日志  详见较高窗口"),
+            Line::from("安全提示  退出请求仅在安全检查点生效"),
+        ];
+        frame.render_widget(
+            Paragraph::new(lines.to_vec()).block(crate::tui::ui::card("安全事务执行中", true)),
+            area,
+        );
+        return;
+    }
+
+    let areas = Layout::vertical([
+        Constraint::Length(5),
+        Constraint::Length(4),
+        Constraint::Min(4),
+        Constraint::Length(3),
+    ])
+    .split(area);
+    let now = std::time::Instant::now();
+    let elapsed = run
+        .map(|run| now.duration_since(run.started_at).as_secs())
+        .unwrap_or(0);
+    let activity = run
+        .map(|run| now.duration_since(run.last_activity_at).as_secs())
+        .unwrap_or(0);
+    frame.render_widget(
+        Paragraph::new(vec![
+            Line::from(format!("总体进度  {progress}")),
+            Line::from(format!(
+                "运行时间  {elapsed} 秒    最近活动  {activity} 秒前"
+            )),
+        ])
+        .block(crate::tui::ui::card("安全事务执行中", true)),
+        areas[0],
+    );
+    if let Some(event) = latest {
+        let gauge_area = ratatui::layout::Rect {
+            x: areas[0].x.saturating_add(2),
+            y: areas[0].y.saturating_add(3),
+            width: areas[0].width.saturating_sub(4),
+            height: 1,
+        };
+        frame.render_widget(
+            ratatui::widgets::Gauge::default()
+                .ratio(event.current as f64 / event.total as f64)
+                .gauge_style(accent()),
+            gauge_area,
+        );
+    }
+    let middle = Layout::horizontal([Constraint::Percentage(50), Constraint::Percentage(50)])
+        .split(areas[1]);
+    frame.render_widget(
+        Paragraph::new(format!("当前阶段  {phase}")).block(crate::tui::ui::card("当前阶段", false)),
+        middle[0],
+    );
+    let mut step_lines = vec![Line::from(format!("当前步骤  {step}"))];
+    if let Some(work) = latest.and_then(|event| event.work) {
+        step_lines.push(Line::from(format!(
+            "扇区活动  {}/{}",
+            work.current, work.total
+        )));
+    }
+    frame.render_widget(
+        Paragraph::new(step_lines).block(crate::tui::ui::card("当前任务", false)),
+        middle[1],
+    );
+    let mut log_lines = Vec::new();
+    if let Some(run) = run {
+        let viewport = state
+            .provision()
+            .pane_focus
+            .viewport(crate::tui::pane::PaneId::ProvisionRunLog);
+        let available = usize::from(areas[2].height.saturating_sub(2));
+        let offset = if viewport.selected.is_none() {
+            run.log.len().saturating_sub(available)
+        } else {
+            viewport.scroll_y.offset
+        };
+        log_lines.extend(run.log.iter().skip(offset).take(available).map(|event| {
+            let detail = match event.step {
+                crate::application::progress::Step::PartitionFormat(role) => {
+                    format!(" {}", role.label())
+                }
+                _ => String::new(),
+            };
+            let work = event
+                .work
+                .map(|work| format!("  {:?} {}/{}", work.phase, work.current, work.total))
+                .unwrap_or_default();
+            Line::from(safe(&format!(
+                "[{}/{}] {}  {}{}{}",
+                event.current,
+                event.total,
+                event.phase.label(),
+                event.step.label(),
+                detail,
+                work
+            )))
+        }));
+    }
+    if log_lines.is_empty() {
+        log_lines.push(Line::from("等待进度事件"));
+    }
+    frame.render_widget(
+        Paragraph::new(log_lines).block(crate::tui::ui::card(
+            "运行日志 · j/k 滚动 · G 跟随末尾",
+            true,
+        )),
+        areas[2],
+    );
+    frame.render_widget(
+        Paragraph::new("q / Esc / Ctrl-C 退出请求只在安全检查点生效；介质事务继续受保护。")
+            .block(crate::tui::ui::card("安全提示", false)),
+        areas[3],
+    );
 }

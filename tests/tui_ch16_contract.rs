@@ -116,6 +116,95 @@ fn device() -> edpcli::disk_scan::Row {
     }
 }
 
+fn provision_state() -> AppState {
+    use edpcli::tui::state::NavCommand;
+    let mut state = AppState::new();
+    state.replace_devices(vec![device()]);
+    state.navigate(NavCommand::WorkspaceProvision, 20);
+    assert_eq!(state.provision_select_disk(), Some(6));
+    state.provision_begin_selected();
+    state
+}
+
+#[test]
+fn ch16_provision_has_shared_stepper_and_card_surfaces() {
+    let state = provision_state();
+    let text = rendered_lines(&state, 160, 45).join("\n").replace(' ', "");
+    for value in [
+        "选择设备",
+        "制盘配置",
+        "分区预览",
+        "计划确认",
+        "执行",
+        "完成",
+    ] {
+        assert!(text.contains(value), "missing {value}");
+    }
+    assert!(text.contains("固定目标"));
+}
+
+#[test]
+fn ch16_provision_running_separates_progress_phase_step_log_and_safety() {
+    use edpcli::application::progress::{Phase, ProgressEvent, Step};
+    use edpcli::tui::state::ProvisionStage;
+    let mut state = provision_state();
+    state.provision_mut().stage = ProvisionStage::Running;
+    state.provision_mut().pane_focus = edpcli::tui::pane::PaneFocus::provision_running();
+    let now = std::time::Instant::now();
+    state.provision_mut().run = Some(edpcli::tui::state::ProvisionRunState {
+        started_at: now,
+        last_activity_at: now,
+        latest: None,
+        log: std::collections::VecDeque::new(),
+    });
+    state.provision_push_progress(ProgressEvent::new(
+        Phase::Transaction,
+        Step::ProtocolReadback,
+        7,
+        10,
+    ));
+    let text = rendered_lines(&state, 160, 45).join("\n").replace(' ', "");
+    for value in [
+        "总体进度",
+        "70%",
+        "当前阶段",
+        "事务写入",
+        "当前步骤",
+        "协议读回校验",
+        "运行日志",
+        "安全提示",
+    ] {
+        assert!(text.contains(value), "missing {value}");
+    }
+    for (width, height) in [(40, 10), (80, 24), (120, 36), (240, 60)] {
+        let compact = rendered_lines(&state, width, height)
+            .join("\n")
+            .replace(' ', "");
+        assert!(
+            compact.contains("安全事务"),
+            "running fallback missing at {width}x{height}"
+        );
+    }
+}
+
+#[test]
+fn ch16_provision_result_uses_typed_outcome_badges() {
+    use edpcli::application::provision::ProvisionExecutionStatus as Status;
+    use edpcli::tui::state::ProvisionStage;
+    let mut state = provision_state();
+    state.provision_mut().stage = ProvisionStage::Result;
+    for (status, label) in [
+        (Status::Success, "[制盘成功]"),
+        (Status::CompletedWithWarnings, "[制盘完成，存在警告]"),
+        (Status::PartialFormatFailure, "[部分完成：格式化失败]"),
+        (Status::FatalFailure, "[制盘失败]"),
+    ] {
+        state.provision_mut().result_status = Some(status);
+        let text = rendered_lines(&state, 120, 36).join("\n").replace(' ', "");
+        assert!(text.contains(label), "missing {label}");
+    }
+}
+
 #[test]
 fn ch16_shell_exposes_four_top_level_workspaces() {
     let lines = rendered_lines(&AppState::new(), 120, 36);

@@ -9418,7 +9418,7 @@ Backup detail / coverage
 
 #### U5 — Provision Workspace
 
-状态：PENDING。
+状态：COMPLETE（2026-09-27）。SelectDisk/Menu 使用共享 DataTable，表单与计划摘要/变更明细使用 Card；六步 stepper 覆盖既有 typed `ProvisionStage`。Review 的保留/重建/重新封装/删除/禁止徽标直接来自 `RegionDisposition`，结果徽标来自 `ProvisionExecutionStatus`。Running 按真实进度事件拆为总体进度、当前阶段、当前步骤/扇区活动、独立可滚动日志和安全提示，40x10 有紧凑降级。未修改写盘服务与授权链；TUI suite 219/219 通过。
 
 - stepper；
 - SelectDisk / Menu / Form 统一视觉；

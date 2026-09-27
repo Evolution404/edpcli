@@ -143,7 +143,7 @@ impl Theme {
                 canvas: Color::Black,
                 background: Color::Black,
                 surface: Color::Black,
-                surface_raised: Color::DarkGray,
+                surface_raised: Color::Black,
                 surface_active: Color::DarkGray,
                 selection: Color::DarkGray,
                 border_subtle: Color::DarkGray,

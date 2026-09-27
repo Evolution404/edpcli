@@ -22,6 +22,7 @@ pub(crate) struct ProvisionReviewRow {
     pub kind: ProvisionReviewRowKind,
     pub tone: ProvisionReviewTone,
     pub text: String,
+    pub badge: Option<&'static str>,
 }
 
 impl ProvisionReviewRow {
@@ -34,7 +35,13 @@ impl ProvisionReviewRow {
             kind,
             tone,
             text: text.into(),
+            badge: None,
         }
+    }
+
+    fn with_badge(mut self, badge: &'static str) -> Self {
+        self.badge = Some(badge);
+        self
     }
 }
 
@@ -96,37 +103,45 @@ impl AppState {
                 }
                 if let Some(plan) = &prepared.target_plan {
                     for part in &plan.partitions {
-                        let (action, tone) = match part.disposition {
+                        let (action, tone, badge) = match part.disposition {
                             RegionDisposition::PreserveOpaque => (
                                 "保留（Opaque，原 key material）",
                                 ProvisionReviewTone::Success,
+                                "保留",
                             ),
                             RegionDisposition::PreserveVerified => {
-                                ("保留（已验证）", ProvisionReviewTone::Success)
+                                ("保留（已验证）", ProvisionReviewTone::Success, "保留")
                             }
-                            RegionDisposition::RewrapVerified => {
-                                ("仅重包 wrapper；数据保持", ProvisionReviewTone::Success)
-                            }
-                            RegionDisposition::Migrate => {
-                                ("Migrate 不支持，禁止执行", ProvisionReviewTone::Warning)
-                            }
+                            RegionDisposition::RewrapVerified => (
+                                "仅重包 wrapper；数据保持",
+                                ProvisionReviewTone::Success,
+                                "重新封装",
+                            ),
+                            RegionDisposition::Migrate => (
+                                "Migrate 不支持，禁止执行",
+                                ProvisionReviewTone::Warning,
+                                "禁止",
+                            ),
                             RegionDisposition::Rebuild => {
-                                ("重建并初始化文件系统", ProvisionReviewTone::Warning)
+                                ("重建并初始化文件系统", ProvisionReviewTone::Warning, "重建")
                             }
                             RegionDisposition::Drop => {
-                                ("丢弃来源区域", ProvisionReviewTone::Warning)
+                                ("丢弃来源区域", ProvisionReviewTone::Warning, "删除")
                             }
                         };
-                        rows.push(ProvisionReviewRow::new(
-                            ProvisionReviewRowKind::Change,
-                            tone,
-                            format!(
-                                "{}  {}  {} sector",
-                                part.geometry.role.label(),
-                                action,
-                                part.geometry.sector_count
-                            ),
-                        ));
+                        rows.push(
+                            ProvisionReviewRow::new(
+                                ProvisionReviewRowKind::Change,
+                                tone,
+                                format!(
+                                    "{}  {}  {} sector",
+                                    part.geometry.role.label(),
+                                    action,
+                                    part.geometry.sector_count
+                                ),
+                            )
+                            .with_badge(badge),
+                        );
                         rows.push(ProvisionReviewRow::new(
                             ProvisionReviewRowKind::KeyValue,
                             ProvisionReviewTone::Muted,
@@ -149,17 +164,20 @@ impl AppState {
             }
             Some(ProvisionPrepared::Plain(prepared)) => {
                 for (index, part) in prepared.plan.partitions.iter().enumerate() {
-                    rows.push(ProvisionReviewRow::new(
-                        ProvisionReviewRowKind::Change,
-                        ProvisionReviewTone::Warning,
-                        format!(
-                            "P{}  LBA {}–{}  {} sector  重建",
-                            index + 1,
-                            part.start_lba,
-                            part.end_lba().unwrap_or(part.start_lba),
-                            part.sector_count
-                        ),
-                    ));
+                    rows.push(
+                        ProvisionReviewRow::new(
+                            ProvisionReviewRowKind::Change,
+                            ProvisionReviewTone::Warning,
+                            format!(
+                                "P{}  LBA {}–{}  {} sector  重建",
+                                index + 1,
+                                part.start_lba,
+                                part.end_lba().unwrap_or(part.start_lba),
+                                part.sector_count
+                            ),
+                        )
+                        .with_badge("重建"),
+                    );
                 }
                 rows.push(ProvisionReviewRow::new(
                     ProvisionReviewRowKind::Notice,
