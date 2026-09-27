@@ -2787,14 +2787,14 @@ Tab/Shift-Tab 子工作区 · Enter Sector Inspector · Esc 返回 · q 退出
 
 ### 11.15 实施状态（2026-09-25）
 
-**U0～U7 实现已完成，但本章暂不标记 COMPLETE。**
+**COMPLETE（2026-09-27）。U0～U7 实现与 11.14 的 15 项完成标准均已验收。**
 
 - U0～U6 的导航、区间格式、物理顺序拓扑、选中即解析、共享磁盘布局、检查子工作区、面包屑、自适应表格和横向滚动均已落地；U7 的旧快捷键/死代码清理、README/USAGE/Help/footer 同步也已完成。
 - 专项门禁：`tui_suite` **161/161**、`inspect_suite` **55/55**、`provision_suite` **178/178**；`cargo fmt --all -- --check` 与 `git diff --check` 通过。
 - 正式快速门禁：4 suites / 6 artifacts，**0 failures，9.97s**；正式完整门禁：8 suites / 10 artifacts + doctest，**0 failures，31.99s**。
 - 代码提交 `af9abd9` 已推送至 `origin/main`；提交后工作区 clean，`HEAD == origin/main`。基于 clean HEAD 构建并安装的 macOS arm64 release 为 `edpcli 2.4.0`，构建产物与 `~/.local/bin/edpcli` SHA-256 均为 `90e2435499ae93da2835a5a04d0f5eb283788359a28dfc19ed8619d519e57674`。
 - 已检测到真实外接物理盘 `/dev/disk4`（8.1 GB）。全盘检查只读命令能够正确进入管理员权限请求边界；本轮通过 macOS `SecurityAgent` 发起原生授权后等待 300 秒未获用户确认并超时退出，因此**未执行裸盘读取，也未发生任何写盘**。
-- 因此 11.14 第 13 项“真实盘全盘检查只读验收通过”当前仍为 **未验收**。在该项实际成功前，本章不得写成 COMPLETE；其余完成标准均已达到或已具自动门禁证据。
+- 2026-09-27 补齐第 13 项直接产品入口验收：在真实 macOS 伪终端中以当前 `edpcli 2.4.0` TUI 打开真实 `/dev/disk4`（15,728,640 sectors），进入统一 Inspect；`gl8` 成功定位 LBA8 并显示 E_LABEL 17 项，`o` 展开结构树；随后 `gl15728639` 跳转到最后一个 sector，Enter 打开 `Sector Inspector`，显示 `LBA15728639 / Mixed`、绝对字节偏移 `0x0001DFFFFE00` 与原始 `0x00`，无已知字段时明确显示 `Unknown byte`。该过程只走只读 raw-device / decoder 路径，未执行 provision、restore、unmount 或任何 sector write。至此 11.14 第 13 项由未验收转为 PASS；其余 1～12、14～15 已有上述自动门禁、clean/push 与 release/install SHA-256 证据，Chapter 11 正式 COMPLETE。
 
 最终产品原则：**顶层标签简单、常用动作单键、q 退出/Esc 返回语义固定；Inspect 首屏就是可读的磁盘空间图和协议解析器，而不是一个必须继续钻取才能理解的数据树；所有表格和布局由共享基础设施统一计算，避免同类 UI 在不同页面重复漂移。**
 
