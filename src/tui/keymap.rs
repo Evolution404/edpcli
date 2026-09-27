@@ -72,6 +72,8 @@ pub enum TuiAction {
     TableScrollRight,
     TableSortToggle,
     TableSortClear,
+    TableCopyCell,
+    TableCopyRow,
     Text(char),
     Backspace,
     DeleteChar,
@@ -144,6 +146,11 @@ pub const NORMAL_HELP: &[HelpBinding] = &[
         action: TuiAction::TableSortToggle,
     },
     HelpBinding {
+        keys: "y/Y",
+        label: "表格：复制单元格 / 整行",
+        action: TuiAction::TableCopyCell,
+    },
+    HelpBinding {
         keys: "Enter",
         label: "Open",
         action: TuiAction::Activate,
@@ -197,8 +204,8 @@ pub const INSPECT_HELP: &[HelpBinding] = &[
         action: TuiAction::MoveLeft,
     },
     HelpBinding {
-        keys: "字段表 h/l · </> · H/L · 0/$ · s/S",
-        label: "列 · 视口 · 排序",
+        keys: "字段表 h/l · </> · H/L · 0/$ · s/S · y/Y",
+        label: "列 · 视口 · 排序 · 复制",
         action: TuiAction::TableColumnRight,
     },
     HelpBinding {
@@ -284,6 +291,8 @@ impl KeyMapper {
                 TuiAction::MoveRight => TuiAction::TableColumnRight,
                 TuiAction::RowStart => TuiAction::TableColumnFirst,
                 TuiAction::RowEnd => TuiAction::TableColumnLast,
+                TuiAction::Yank => TuiAction::TableCopyCell,
+                TuiAction::YankRaw => TuiAction::TableCopyRow,
                 other => other,
             });
         }

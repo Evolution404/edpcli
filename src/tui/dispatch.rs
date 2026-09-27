@@ -259,6 +259,25 @@ pub(super) fn dispatch_table_action(
         TuiAction::TableSortClear => {
             state.clear_table_sort(kind);
         }
+        TuiAction::TableCopyCell | TuiAction::TableCopyRow => {
+            let whole_row = action == TuiAction::TableCopyRow;
+            if !whole_row {
+                let logical = state.table_logical_column(kind, state.table_active_column(kind));
+                if !crate::tui::table_layout::table_column_copyable(kind, logical) {
+                    state.set_notice("当前列是界面控制列，不复制。");
+                    return true;
+                }
+            }
+            let Some(payload) = state.table_copy_payload(kind, whole_row) else {
+                state.set_notice("当前没有可复制的数据。");
+                return true;
+            };
+            match crate::tui::clipboard::copy_text(&payload) {
+                Ok(()) if whole_row => state.set_notice("已复制当前整行。"),
+                Ok(()) => state.set_notice("已复制当前单元格。"),
+                Err(error) => state.set_notice(format!("复制失败：{error}")),
+            }
+        }
         _ => return false,
     }
     true
@@ -288,7 +307,9 @@ pub(super) fn dispatch_tui_action(
         | TuiAction::TableScrollLeft
         | TuiAction::TableScrollRight
         | TuiAction::TableSortToggle
-        | TuiAction::TableSortClear => {
+        | TuiAction::TableSortClear
+        | TuiAction::TableCopyCell
+        | TuiAction::TableCopyRow => {
             let _ = dispatch_table_action(state, action, viewport_height, viewport_width);
             StateEffect::None
         }

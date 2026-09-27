@@ -1866,3 +1866,39 @@ fn every_table_kind_supports_shared_whole_column_reordering() {
         assert_eq!(state.table_active_column(kind), 1);
     }
 }
+
+#[test]
+fn table_copy_follows_logical_column_after_runtime_reorder() {
+    use edpcli::tui::table_layout::TableKind;
+
+    let mut state = AppState::new();
+    state.replace_devices(vec![device(64_000_000_000)]);
+
+    assert!(state.move_table_column_for_viewport(TableKind::Devices, false, 160, 30));
+    assert!(state.move_table_column_for_viewport(TableKind::Devices, false, 160, 30));
+    assert_eq!(state.table_active_column(TableKind::Devices), 2);
+    assert_eq!(
+        state
+            .table_copy_payload(TableKind::Devices, false)
+            .as_deref(),
+        Some("输电运检中心")
+    );
+
+    assert!(state.reorder_table_column_for_viewport(TableKind::Devices, true, 160, 30));
+    assert_eq!(state.table_active_column(TableKind::Devices), 1);
+    assert_eq!(state.table_logical_column(TableKind::Devices, 1), 2);
+    assert_eq!(
+        state
+            .table_copy_payload(TableKind::Devices, false)
+            .as_deref(),
+        Some("输电运检中心"),
+        "cell copy must remain bound to Department after whole-column reorder"
+    );
+
+    let row = state
+        .table_copy_payload(TableKind::Devices, true)
+        .expect("copy whole device row");
+    let cells = row.split('\t').collect::<Vec<_>>();
+    assert_eq!(cells[1], "输电运检中心");
+    assert_eq!(cells.len(), 8);
+}

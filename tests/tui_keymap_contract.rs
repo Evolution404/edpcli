@@ -281,6 +281,43 @@ fn tab_switches_top_level_tabs_and_ctrl_w_owns_panel_navigation() {
 }
 
 #[test]
+fn table_role_maps_y_to_cell_copy_and_shift_y_to_row_copy() {
+    let mut mapper = KeyMapper::new();
+    assert_eq!(
+        mapper.map_for_role(
+            InputMode::Normal,
+            WidgetRole::Table,
+            key(KeyCode::Char('y'))
+        ),
+        Some(TuiAction::TableCopyCell)
+    );
+    assert_eq!(
+        mapper.map_for_role(
+            InputMode::Normal,
+            WidgetRole::Table,
+            key(KeyCode::Char('Y'))
+        ),
+        Some(TuiAction::TableCopyRow)
+    );
+    assert_eq!(
+        mapper.map_for_role(
+            InputMode::Normal,
+            WidgetRole::Other,
+            key(KeyCode::Char('y'))
+        ),
+        Some(TuiAction::Yank)
+    );
+    assert_eq!(
+        mapper.map_for_role(
+            InputMode::Normal,
+            WidgetRole::Other,
+            key(KeyCode::Char('Y'))
+        ),
+        Some(TuiAction::YankRaw)
+    );
+}
+
+#[test]
 fn normal_mode_keeps_inspect_and_backup_as_single_key_actions() {
     let mut mapper = KeyMapper::new();
     assert_eq!(

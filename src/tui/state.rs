@@ -1056,6 +1056,75 @@ impl AppState {
             .unwrap_or_else(|| visual_column.min(order.len().saturating_sub(1)))
     }
 
+    fn table_selected_row_values(
+        &self,
+        kind: super::table_layout::TableKind,
+    ) -> Option<Vec<String>> {
+        use super::table_layout::TableKind;
+
+        let sanitize = |value: String| crate::ui::sanitize_terminal_text(&value);
+        match kind {
+            TableKind::Devices => {
+                let source = self.device_source_index_at_visible(self.selected)?;
+                self.device_table_view.rows.get(source).cloned()
+            }
+            TableKind::Backups => {
+                let source = self.backup_source_index_at_visible(self.selected)?;
+                self.backup_table_view.rows.get(source).cloned()
+            }
+            TableKind::ProvisionDevices => {
+                let row = self.provision_device_at(self.selected)?;
+                Some(
+                    vec![
+                        format!("disk{}", row.disk),
+                        format!("{:.2} GiB", row.size as f64 / 1_073_741_824.0),
+                        format!("{}:{}", row.vid, row.pid),
+                        row.confirmed_provision_kind()
+                            .map(|kind| kind.full_name().to_string())
+                            .unwrap_or_else(|| "未知 / 未确认".into()),
+                        row.onlyid.clone().unwrap_or_else(|| "—".into()),
+                    ]
+                    .into_iter()
+                    .map(sanitize)
+                    .collect(),
+                )
+            }
+            TableKind::ProvisionMenu => {
+                let source = *self.provision_menu_order().get(self.selected)?;
+                let kind = ProvisionKind::ALL.get(source).copied()?;
+                Some(
+                    vec![
+                        source.to_string(),
+                        kind.title().to_string(),
+                        kind.description().to_string(),
+                    ]
+                    .into_iter()
+                    .map(sanitize)
+                    .collect(),
+                )
+            }
+            TableKind::InspectFields => {
+                let row = self.advanced_inspect_detail_selected_row()?;
+                Some(row.cells.iter().cloned().map(sanitize).collect::<Vec<_>>())
+            }
+        }
+    }
+
+    pub fn table_copy_payload(
+        &self,
+        kind: super::table_layout::TableKind,
+        whole_row: bool,
+    ) -> Option<String> {
+        let values = self.table_selected_row_values(kind)?;
+        let order = self.table_column_order(kind);
+        if whole_row {
+            Some(super::table_layout::copy_row_values(kind, &order, &values))
+        } else {
+            let logical = self.table_logical_column(kind, self.table_active_column(kind));
+            super::table_layout::copy_cell_value(kind, logical, &values)
+        }
+    }
+
     pub fn table_visual_layout(
         &self,
         kind: super::table_layout::TableKind,

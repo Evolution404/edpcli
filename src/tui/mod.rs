@@ -4,6 +4,7 @@
 //! event dispatch and rendering.
 
 pub mod animation;
+pub mod clipboard;
 pub mod command;
 pub mod disk_layout;
 mod dispatch;
@@ -675,6 +676,8 @@ fn run_loop(resume: Option<state::WriteIntent>) -> io::Result<LoopExit> {
                                     | TuiAction::TableScrollRight
                                     | TuiAction::TableSortToggle
                                     | TuiAction::TableSortClear
+                                    | TuiAction::TableCopyCell
+                                    | TuiAction::TableCopyRow
                                         if role == keymap::WidgetRole::Table =>
                                     {
                                         let size = session.terminal.size()?;
@@ -864,6 +867,8 @@ fn run_loop(resume: Option<state::WriteIntent>) -> io::Result<LoopExit> {
                                 | TuiAction::TableScrollRight
                                 | TuiAction::TableSortToggle
                                 | TuiAction::TableSortClear
+                                | TuiAction::TableCopyCell
+                                | TuiAction::TableCopyRow
                         ) {
                             match dispatch_tui_action(
                                 &mut state,

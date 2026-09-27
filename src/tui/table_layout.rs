@@ -43,6 +43,7 @@ pub struct TableColumnSpec {
     pub id: ColumnId,
     pub heading: &'static str,
     pub layout: AdaptiveColumnSpec,
+    pub copyable: bool,
 }
 
 fn table_column(
@@ -54,6 +55,20 @@ fn table_column(
         id,
         heading,
         layout,
+        copyable: true,
+    }
+}
+
+fn table_control_column(
+    id: ColumnId,
+    heading: &'static str,
+    layout: AdaptiveColumnSpec,
+) -> TableColumnSpec {
+    TableColumnSpec {
+        id,
+        heading,
+        layout,
+        copyable: false,
     }
 }
 
@@ -92,7 +107,7 @@ pub fn table_column_schema(kind: TableKind) -> Option<Vec<TableColumnSpec>> {
                     .expect("backup identity column")
             };
             Some(vec![
-                table_column(Selected, "选", column(3, 3, 4, 99, 1, true)),
+                table_control_column(Selected, "选", column(3, 3, 4, 99, 1, true)),
                 table_column(Index, "序号", column(4, 6, 8, 90, 1, true)),
                 table_column(Time, "时间", column(12, 17, 20, 25, 1, false)),
                 identity_column(Capacity),
@@ -108,6 +123,38 @@ pub fn table_column_schema(kind: TableKind) -> Option<Vec<TableColumnSpec>> {
         }
         _ => None,
     }
+}
+
+pub fn table_column_copyable(kind: TableKind, logical_column: usize) -> bool {
+    table_column_schema(kind)
+        .and_then(|columns| columns.get(logical_column).copied())
+        .is_none_or(|column| column.copyable)
+}
+
+fn normalize_copied_cell(value: &str) -> String {
+    value.replace(['\t', '\r', '\n'], " ")
+}
+
+pub fn copy_cell_value(
+    kind: TableKind,
+    logical_column: usize,
+    values: &[String],
+) -> Option<String> {
+    table_column_copyable(kind, logical_column)
+        .then(|| values.get(logical_column))
+        .flatten()
+        .map(|value| normalize_copied_cell(value))
+}
+
+pub fn copy_row_values(kind: TableKind, order: &[usize], values: &[String]) -> String {
+    order
+        .iter()
+        .copied()
+        .filter(|logical| table_column_copyable(kind, *logical))
+        .filter_map(|logical| values.get(logical))
+        .map(|value| normalize_copied_cell(value))
+        .collect::<Vec<_>>()
+        .join("\t")
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -805,7 +852,11 @@ pub fn render_table_scrollbars(
 
     let (horizontal, vertical) = table_scrollbar_visibility(viewport, row_total, row_visible);
     if horizontal && area.width > 2 && area.height > 1 {
-        let mut state = ScrollbarState::new(viewport.total_width)
+        let horizontal_positions = viewport
+            .total_width
+            .saturating_sub(viewport.viewport_width)
+            .saturating_add(1);
+        let mut state = ScrollbarState::new(horizontal_positions)
             .position(viewport.scroll_x)
             .viewport_content_length(viewport.viewport_width);
         let scrollbar = Scrollbar::new(ScrollbarOrientation::HorizontalBottom)
@@ -819,7 +870,8 @@ pub fn render_table_scrollbars(
     }
 
     if vertical && area.height > 2 && area.width > 1 {
-        let mut state = ScrollbarState::new(row_total)
+        let vertical_positions = row_total.saturating_sub(row_visible).saturating_add(1);
+        let mut state = ScrollbarState::new(vertical_positions)
             .position(row_start)
             .viewport_content_length(row_visible);
         let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)

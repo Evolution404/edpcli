@@ -46,6 +46,37 @@ fn d0_device_schema_is_task_specific_and_backup_default_order_is_exact() {
             ColumnId::Name,
         ]
     );
+    assert!(
+        !backups[0].copyable,
+        "backup selection is UI control state and must not enter copied data"
+    );
+    assert!(
+        backups.iter().skip(1).all(|column| column.copyable),
+        "business-data columns remain copyable"
+    );
+
+    let values = vec![
+        "✓".into(),
+        "1".into(),
+        "2026-09-27 20:45".into(),
+        "8.1 GB".into(),
+        "输电运检中心".into(),
+        "张三".into(),
+        "Model".into(),
+        "mode1".into(),
+        "EDPB ✓".into(),
+        "3535:6300".into(),
+        "1234".into(),
+        "backup.edpb".into(),
+    ];
+    assert_eq!(
+        edpcli::tui::table_layout::copy_row_values(
+            TableKind::Backups,
+            &(0..values.len()).collect::<Vec<_>>(),
+            &values,
+        ),
+        "1\t2026-09-27 20:45\t8.1 GB\t输电运检中心\t张三\tModel\tmode1\tEDPB ✓\t3535:6300\t1234\tbackup.edpb"
+    );
 
     for id in [
         ColumnId::Capacity,
@@ -361,4 +392,34 @@ fn shared_scrollbar_renderer_draws_horizontal_and_vertical_thumbs() {
         );
     assert!(text.contains('━'), "{text}");
     assert!(text.contains('┃'), "{text}");
+}
+
+#[test]
+fn scrollbars_reach_the_track_end_at_maximum_offsets() {
+    use ratatui::{backend::TestBackend, Terminal};
+
+    let viewport = TableViewport {
+        columns: Vec::new(),
+        scroll_x: 90,
+        total_width: 120,
+        viewport_width: 30,
+    };
+    let mut terminal = Terminal::new(TestBackend::new(40, 10)).unwrap();
+    terminal
+        .draw(|frame| {
+            render_table_scrollbars(frame, frame.area(), &viewport, 100, 94, 6);
+        })
+        .unwrap();
+
+    let buffer = terminal.backend().buffer();
+    assert_eq!(
+        buffer[(38, 9)].symbol(),
+        "━",
+        "horizontal thumb must touch the right end when scroll_x == max_scroll"
+    );
+    assert_eq!(
+        buffer[(39, 8)].symbol(),
+        "┃",
+        "vertical thumb must touch the bottom when row_start == max_row_start"
+    );
 }
