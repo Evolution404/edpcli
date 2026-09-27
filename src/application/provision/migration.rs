@@ -4,7 +4,8 @@ use crate::backup_deep::{
 };
 use crate::provision::{
     build_migration_manifest, finalize_staged_entry, MigrationBudgets, MigrationInventory,
-    MigrationStagedEntry, SourceRegion,
+    Extent, FilesystemProfile, MigrationManifestEntry, MigrationSource, MigrationStagedEntry,
+    MigrationTransform, PhysicalCryptoProfile, SourceRegion,
 };
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -245,6 +246,374 @@ fn stage_manifest_entry(
     }
     finalize_staged_entry(manifest, bytes)
         .map_err(|message| err(EXIT_TARGET, format!("错误: {message}")))
+}
+
+
+#[derive(Clone, Debug)]
+pub(super) struct PlainImportPlan {
+    pub target_index: usize,
+    pub sources: Vec<MigrationSource>,
+    pub prepared: PreparedMigrationTarget,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct PlainSourcePartition {
+    index: usize,
+    partition_type: u8,
+    start_lba: u64,
+    sector_count: u64,
+}
+
+fn parse_plain_mbr(dev: &mut dyn SectorDev) -> EdpCliResult<Vec<PlainSourcePartition>> {
+    let sector = dev.read_sector(0).map_err(|error| {
+        err(
+            EXIT_TARGET,
+            format!("错误: K6 Plain 来源 MBR 读取失败: {error}"),
+        )
+    })?;
+    if sector.len() != SECTOR || sector[510..512] != [0x55, 0xaa] {
+        return Err(err(EXIT_TARGET, "错误: K6 Plain 来源没有有效 MBR 签名"));
+    }
+    let mut partitions = Vec::new();
+    for index in 0..4 {
+        let at = 0x1be + index * 16;
+        let partition_type = sector[at + 4];
+        let start_lba =
+            u32::from_le_bytes(sector[at + 8..at + 12].try_into().unwrap()) as u64;
+        let sector_count =
+            u32::from_le_bytes(sector[at + 12..at + 16].try_into().unwrap()) as u64;
+        if partition_type == 0 || sector_count == 0 {
+            continue;
+        }
+        if start_lba == 0 {
+            return Err(err(
+                EXIT_TARGET,
+                format!("错误: K6 Plain P{} 非法占用 LBA0", index + 1),
+            ));
+        }
+        start_lba.checked_add(sector_count).ok_or_else(|| {
+            err(
+                EXIT_TARGET,
+                format!("错误: K6 Plain P{} 范围溢出", index + 1),
+            )
+        })?;
+        partitions.push(PlainSourcePartition {
+            index,
+            partition_type,
+            start_lba,
+            sector_count,
+        });
+    }
+    if partitions.is_empty() {
+        return Err(err(EXIT_TARGET, "错误: K6 Plain 来源没有可迁移的 MBR 分区"));
+    }
+    partitions.sort_by_key(|partition| partition.start_lba);
+    for pair in partitions.windows(2) {
+        if pair[0].start_lba + pair[0].sector_count > pair[1].start_lba {
+            return Err(err(EXIT_TARGET, "错误: K6 Plain 来源 MBR 分区互相重叠"));
+        }
+    }
+    Ok(partitions)
+}
+
+fn analyze_plain_partition(
+    dev: &mut dyn SectorDev,
+    source: PlainSourcePartition,
+    role: PartitionRole,
+) -> EdpCliResult<(SourceRegion, Vec<FileEntry>)> {
+    let region = SourceRegion {
+        role,
+        partition_type: source.partition_type as u32,
+        extent: Extent {
+            start_lba: source.start_lba,
+            sector_count: source.sector_count,
+        },
+        physical_crypto: PhysicalCryptoProfile::Plain,
+        filesystem: FilesystemProfile::Unknown,
+        key_profile: None,
+    };
+    let mut reader = MigrationPartitionReader {
+        dev,
+        start_lba: source.start_lba,
+        sector_count: source.sector_count,
+        file_key: None,
+    };
+    let geometry = source_geometry(region, source.index)?;
+    let report = analyze_partition(&geometry, &mut reader);
+    if report.status != AnalysisStatus::Parsed {
+        return Err(err(
+            EXIT_TARGET,
+            format!(
+                "错误: K6 Plain P{} 文件系统无法完整解析: {}",
+                source.index + 1,
+                report.reason
+            ),
+        ));
+    }
+    Ok((
+        SourceRegion {
+            filesystem: report
+                .filesystem
+                .as_deref()
+                .and_then(|name| match name {
+                    "fat16" => Some(OfficialFilesystemFormat::Fat16),
+                    "fat32" => Some(OfficialFilesystemFormat::Fat32),
+                    "exfat" => Some(OfficialFilesystemFormat::ExFat),
+                    "ntfs" => Some(OfficialFilesystemFormat::Ntfs),
+                    _ => None,
+                })
+                .map(FilesystemProfile::Known)
+                .unwrap_or(FilesystemProfile::Unknown),
+            ..region
+        },
+        report.entries.unwrap_or_default(),
+    ))
+}
+
+fn stage_plain_file(
+    dev: &mut dyn SectorDev,
+    source: PlainSourcePartition,
+    entry: &FileEntry,
+    target_path: String,
+) -> EdpCliResult<MigrationStagedEntry> {
+    if entry.is_directory {
+        return Ok(MigrationStagedEntry {
+            source_index: source.index,
+            transform: MigrationTransform::PlainToEdp,
+            path: target_path,
+            is_directory: true,
+            data: Vec::new(),
+            attributes: entry.attributes,
+            mtime: entry.mtime.clone(),
+            ctime: entry.ctime.clone(),
+        });
+    }
+    let mut reader = MigrationPartitionReader {
+        dev,
+        start_lba: source.start_lba,
+        sector_count: source.sector_count,
+        file_key: None,
+    };
+    let capacity = usize::try_from(entry.logical_size)
+        .map_err(|_| err(EXIT_TARGET, "错误: K6 Plain 文件太大，无法 staging"))?;
+    let mut data = Vec::new();
+    data.try_reserve_exact(capacity)
+        .map_err(|_| err(EXIT_TARGET, "错误: K6 Plain 文件 staging 内存预留失败"))?;
+    stream_file_payload(&mut reader, entry, entry.logical_size, &mut data).map_err(|message| {
+        err(
+            EXIT_TARGET,
+            format!("错误: K6 Plain 文件 {:?} staging 失败: {message}", entry.path),
+        )
+    })?;
+    Ok(MigrationStagedEntry {
+        source_index: source.index,
+        transform: MigrationTransform::PlainToEdp,
+        path: target_path,
+        is_directory: false,
+        data,
+        attributes: entry.attributes,
+        mtime: entry.mtime.clone(),
+        ctime: entry.ctime.clone(),
+    })
+}
+
+pub(super) fn prepare_plain_to_official(
+    dev: &mut dyn SectorDev,
+    target_plan: &TargetProvisionPlan,
+) -> EdpCliResult<PlainImportPlan> {
+    let target_index = [
+        PartitionRole::Share,
+        PartitionRole::BootShareCombined,
+        PartitionRole::Encrypt,
+        PartitionRole::Boot,
+    ]
+    .into_iter()
+    .find_map(|role| {
+        target_plan
+            .partitions
+            .iter()
+            .position(|part| part.geometry.role == role && part.geometry.filesystem.is_some())
+    })
+    .ok_or_else(|| err(EXIT_TARGET, "错误: K6 Plain→EDP 没有可接收文件的目标分区"))?;
+    let target = &target_plan.partitions[target_index];
+    let plain_parts = parse_plain_mbr(dev)?;
+    let multiple = plain_parts.len() > 1;
+    let mut sources = Vec::with_capacity(plain_parts.len());
+    let mut staged = Vec::new();
+    let mut total_logical_bytes = 0u64;
+    let mut file_count = 0u64;
+    let mut directory_count = 0u64;
+    let mut paths = std::collections::BTreeSet::new();
+
+    for plain in plain_parts {
+        let (region, entries) = analyze_plain_partition(dev, plain, target.geometry.role)?;
+        sources.push(MigrationSource {
+            source_index: plain.index,
+            region,
+            transform: MigrationTransform::PlainToEdp,
+        });
+        let prefix = multiple.then(|| format!("/P{}/", plain.index + 1));
+        if let Some(prefix) = &prefix {
+            paths.insert(prefix.trim_end_matches('/').to_lowercase());
+            staged.push(MigrationStagedEntry {
+                source_index: plain.index,
+                transform: MigrationTransform::PlainToEdp,
+                path: prefix.clone(),
+                is_directory: true,
+                data: Vec::new(),
+                attributes: 0x10,
+                mtime: None,
+                ctime: None,
+            });
+            directory_count += 1;
+        }
+        for entry in entries.iter().filter(|entry| entry.path != "/") {
+            let target_path = match &prefix {
+                Some(prefix) => format!(
+                    "{}{}",
+                    prefix,
+                    entry.path.trim_start_matches('/')
+                ),
+                None => entry.path.clone(),
+            };
+            let key = target_path.trim_end_matches('/').to_lowercase();
+            if !paths.insert(key) {
+                return Err(err(
+                    EXIT_TARGET,
+                    format!("错误: K6 Plain→EDP 目标路径冲突: {target_path:?}"),
+                ));
+            }
+            let staged_entry = stage_plain_file(dev, plain, entry, target_path)?;
+            if staged_entry.is_directory {
+                directory_count += 1;
+            } else {
+                file_count += 1;
+                total_logical_bytes = total_logical_bytes
+                    .checked_add(staged_entry.data.len() as u64)
+                    .ok_or_else(|| err(EXIT_TARGET, "错误: K6 Plain→EDP 文件总量溢出"))?;
+            }
+            staged.push(staged_entry);
+        }
+    }
+    let target_bytes = target
+        .geometry
+        .sector_count
+        .checked_mul(SECTOR as u64)
+        .ok_or_else(|| err(EXIT_TARGET, "错误: K6 Plain→EDP 目标容量溢出"))?;
+    if total_logical_bytes > target_bytes {
+        return Err(err(
+            EXIT_TARGET,
+            format!(
+                "错误: K6 Plain→EDP 文件总量 {total_logical_bytes} 超过目标容量 {target_bytes}"
+            ),
+        ));
+    }
+    Ok(PlainImportPlan {
+        target_index,
+        sources,
+        prepared: PreparedMigrationTarget {
+            target_index,
+            role: target.geometry.role,
+            entries: staged,
+            total_logical_bytes,
+            file_count,
+            directory_count,
+        },
+    })
+}
+
+fn role_prefix(role: PartitionRole) -> &'static str {
+    match role {
+        PartitionRole::Boot => "EDP_BOOT",
+        PartitionRole::Share => "EDP_SHARE",
+        PartitionRole::Encrypt => "EDP_ENCRYPT",
+        PartitionRole::BootShareCombined => "EDP_COMBINED",
+        PartitionRole::CompatibilityReserve => "EDP_COMPAT",
+    }
+}
+
+pub(super) fn prepare_existing_to_plain(
+    dev: &mut dyn SectorDev,
+    source: &ParsedExistingProvision,
+    target_capacity_bytes: u64,
+    key_domains: &KeyDomainSecrets,
+) -> EdpCliResult<Vec<MigrationStagedEntry>> {
+    let source_indices = source
+        .profile
+        .partitions
+        .iter()
+        .enumerate()
+        .filter(|(_, part)| part.role != PartitionRole::CompatibilityReserve)
+        .map(|(index, _)| index)
+        .collect::<Vec<_>>();
+    let multiple = source_indices.len() > 1;
+    let mut staged = Vec::new();
+    let mut total = 0u64;
+    let mut paths = std::collections::BTreeSet::new();
+
+    for source_index in source_indices {
+        let partition = source.profile.partitions[source_index];
+        let record = source.records[source_index];
+        let region = SourceRegion::from_existing(partition, record);
+        let inventory = inventory_source(dev, source, source_index, region, key_domains)?;
+        let prefix = multiple.then(|| format!("/{}/", role_prefix(region.role)));
+        if let Some(prefix) = &prefix {
+            paths.insert(prefix.trim_end_matches('/').to_lowercase());
+            staged.push(MigrationStagedEntry {
+                source_index,
+                transform: MigrationTransform::EdpToPlain,
+                path: prefix.clone(),
+                is_directory: true,
+                data: Vec::new(),
+                attributes: 0x10,
+                mtime: None,
+                ctime: None,
+            });
+        }
+        for entry in inventory.entries.iter().filter(|entry| entry.path != "/") {
+            let path = match &prefix {
+                Some(prefix) => format!(
+                    "{}{}",
+                    prefix,
+                    entry.path.trim_start_matches('/')
+                ),
+                None => entry.path.clone(),
+            };
+            let key = path.trim_end_matches('/').to_lowercase();
+            if !paths.insert(key) {
+                return Err(err(
+                    EXIT_TARGET,
+                    format!("错误: K6 EDP→Plain 目标路径冲突: {path:?}"),
+                ));
+            }
+            let manifest = MigrationManifestEntry {
+                source_index,
+                source_region: region,
+                transform: MigrationTransform::EdpToPlain,
+                path,
+                is_directory: entry.is_directory,
+                logical_size: entry.logical_size,
+                attributes: entry.attributes,
+                mtime: entry.mtime.clone(),
+                ctime: entry.ctime.clone(),
+                payload_locator: entry.payload_locator.clone(),
+            };
+            let staged_entry = stage_manifest_entry(dev, source, key_domains, &manifest)?;
+            if !staged_entry.is_directory {
+                total = total
+                    .checked_add(staged_entry.data.len() as u64)
+                    .ok_or_else(|| err(EXIT_TARGET, "错误: K6 EDP→Plain 文件总量溢出"))?;
+            }
+            staged.push(staged_entry);
+        }
+    }
+    if total > target_capacity_bytes {
+        return Err(err(
+            EXIT_TARGET,
+            format!("错误: K6 EDP→Plain 文件总量 {total} 超过目标容量 {target_capacity_bytes}"),
+        ));
+    }
+    Ok(staged)
 }
 
 pub(super) fn prepare_migrations(
