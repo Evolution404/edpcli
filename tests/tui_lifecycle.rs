@@ -217,7 +217,7 @@ fn transient_notice_has_its_own_area_and_expires() {
     assert!(
         lines
             .iter()
-            .any(|line| line.replace(' ', "").contains("Tab/Shift-Tab工作区")),
+            .any(|line| line.replace(' ', "").contains("Tab/Shift-Tab或gt/gT标签")),
         "{lines:?}"
     );
     std::thread::sleep(std::time::Duration::from_millis(4_050));
@@ -232,13 +232,13 @@ fn four_workspaces_cycle_and_provision_flow_renders_at_all_terminal_sizes() {
     state.navigate(NavCommand::NextWorkspace, 20);
     assert_eq!(state.workspace(), Workspace::Inspect);
     state.navigate(NavCommand::NextWorkspace, 20);
-    assert_eq!(state.workspace(), Workspace::Provision);
-    state.navigate(NavCommand::NextWorkspace, 20);
     assert_eq!(state.workspace(), Workspace::Backups);
+    state.navigate(NavCommand::NextWorkspace, 20);
+    assert_eq!(state.workspace(), Workspace::Provision);
     state.navigate(NavCommand::PreviousWorkspace, 20);
-    assert_eq!(state.workspace(), Workspace::Provision);
-    state.navigate(NavCommand::NextWorkspace, 20);
     assert_eq!(state.workspace(), Workspace::Backups);
+    state.navigate(NavCommand::NextWorkspace, 20);
+    assert_eq!(state.workspace(), Workspace::Provision);
     state.navigate(NavCommand::NextWorkspace, 20);
     assert_eq!(state.workspace(), Workspace::Devices);
     assert_eq!(state.begin_provision_for_selected_device(), Ok(6));

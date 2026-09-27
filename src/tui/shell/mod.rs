@@ -47,11 +47,7 @@ pub fn header(frame: &mut Frame, area: Rect, state: &AppState, core_mode: CoreMo
 pub fn navigation(frame: &mut Frame, area: Rect, workspace: Workspace) {
     let theme = theme::current();
     let class = ui::ViewportClass::for_width(area.width);
-    let labels = if class == ui::ViewportClass::Compact {
-        ["设备", "检查", "制盘", "备份"]
-    } else {
-        ["设备", "Inspect", "制盘", "备份"]
-    };
+    let labels = ["设备", "检查", "备份", "制盘"];
     let index = Workspace::ALL
         .iter()
         .position(|candidate| *candidate == workspace)

@@ -29,11 +29,11 @@ fn workspace_navigation_uses_explicit_next_previous_commands() {
     state.navigate(NavCommand::NextWorkspace, 20);
     assert_eq!(state.workspace(), Workspace::Inspect);
     state.navigate(NavCommand::NextWorkspace, 20);
-    assert_eq!(state.workspace(), Workspace::Provision);
-    state.navigate(NavCommand::NextWorkspace, 20);
     assert_eq!(state.workspace(), Workspace::Backups);
-    state.navigate(NavCommand::PreviousWorkspace, 20);
+    state.navigate(NavCommand::NextWorkspace, 20);
     assert_eq!(state.workspace(), Workspace::Provision);
+    state.navigate(NavCommand::PreviousWorkspace, 20);
+    assert_eq!(state.workspace(), Workspace::Backups);
     state.navigate(NavCommand::PreviousWorkspace, 20);
     assert_eq!(state.workspace(), Workspace::Inspect);
     state.navigate(NavCommand::PreviousWorkspace, 20);
@@ -68,11 +68,13 @@ fn workspace_tabs_are_always_visible_and_active_page_is_highlighted() {
 
     state.navigate(NavCommand::NextWorkspace, 20);
     let active = active_tab_text(&state);
-    assert!(active.contains("Inspect"), "{active}");
-    state.navigate(NavCommand::NextWorkspace, 20);
+    assert!(active.contains('检'), "{active}");
     state.navigate(NavCommand::NextWorkspace, 20);
     let active = active_tab_text(&state);
     assert!(active.contains('份'), "{active}");
+    state.navigate(NavCommand::NextWorkspace, 20);
+    let active = active_tab_text(&state);
+    assert!(active.contains('制'), "{active}");
 }
 
 #[test]

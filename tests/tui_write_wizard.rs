@@ -66,7 +66,7 @@ fn finishing_write_clears_critical_state_only_after_result_is_recorded() {
 }
 
 #[test]
-fn running_operation_rejects_new_wizards_and_all_navigation() {
+fn running_operation_rejects_new_wizards_but_allows_read_only_workspace_navigation() {
     let mut state = AppState::new();
     assert!(state.begin_write_wizard(WriteKind::BackupCreate, 6, None));
     for ch in ['Y', 'E', 'S'] {
@@ -83,6 +83,7 @@ fn running_operation_rejects_new_wizards_and_all_navigation() {
         state.navigate(NavCommand::WorkspaceBackups, 20),
         StateEffect::None
     );
+    assert_eq!(state.workspace(), edpcli::tui::state::Workspace::Backups);
     assert_eq!(state.wizard().expect("original running wizard").disk, 6);
 
     assert_eq!(

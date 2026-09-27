@@ -506,10 +506,11 @@ fn run_loop(resume: Option<state::WriteIntent>) -> io::Result<LoopExit> {
                                     use keymap::TuiAction;
                                     match action {
                                         TuiAction::WorkspaceNext => {
-                                            state.advanced_inspect_shift_panel(false);
+                                            let _ = state.navigate(NavCommand::NextWorkspace, 1);
                                         }
                                         TuiAction::WorkspacePrevious => {
-                                            state.advanced_inspect_shift_panel(true);
+                                            let _ =
+                                                state.navigate(NavCommand::PreviousWorkspace, 1);
                                         }
                                         TuiAction::MoveLeft => {
                                             state.advanced_inspect_sector_move_cursor(-1);
@@ -635,10 +636,10 @@ fn run_loop(resume: Option<state::WriteIntent>) -> io::Result<LoopExit> {
                                 use keymap::TuiAction;
                                 match action {
                                     TuiAction::WorkspaceNext => {
-                                        state.advanced_inspect_shift_panel(false);
+                                        let _ = state.navigate(NavCommand::NextWorkspace, 1);
                                     }
                                     TuiAction::WorkspacePrevious => {
-                                        state.advanced_inspect_shift_panel(true);
+                                        let _ = state.navigate(NavCommand::PreviousWorkspace, 1);
                                     }
                                     TuiAction::InspectJump => {
                                         state.advanced_inspect_begin_jump();
@@ -871,6 +872,8 @@ fn run_loop(resume: Option<state::WriteIntent>) -> io::Result<LoopExit> {
                                 | TuiAction::TableSortClear
                                 | TuiAction::TableCopyCell
                                 | TuiAction::TableCopyRow
+                                | TuiAction::WorkspaceNext
+                                | TuiAction::WorkspacePrevious
                         ) {
                             match dispatch_tui_action(
                                 &mut state,
@@ -972,8 +975,6 @@ fn run_loop(resume: Option<state::WriteIntent>) -> io::Result<LoopExit> {
                                 {
                                     state.toggle_disk_layout_tail();
                                 }
-                                TuiAction::WorkspaceNext => state.provision_shift_pane(false),
-                                TuiAction::WorkspacePrevious => state.provision_shift_pane(true),
                                 TuiAction::PanelNext => state.provision_shift_pane(false),
                                 TuiAction::PanelPrevious => state.provision_shift_pane(true),
                                 TuiAction::PanelLeft => state.provision_spatial_focus(-1, 0),
@@ -1099,8 +1100,6 @@ fn run_loop(resume: Option<state::WriteIntent>) -> io::Result<LoopExit> {
                                 {
                                     state.toggle_disk_layout_tail();
                                 }
-                                TuiAction::WorkspaceNext => state.provision_shift_pane(false),
-                                TuiAction::WorkspacePrevious => state.provision_shift_pane(true),
                                 TuiAction::PanelNext => state.provision_shift_pane(false),
                                 TuiAction::PanelPrevious => state.provision_shift_pane(true),
                                 TuiAction::PanelLeft => state.provision_spatial_focus(-1, 0),

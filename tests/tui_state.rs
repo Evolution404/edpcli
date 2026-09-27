@@ -305,11 +305,11 @@ fn provision_flow_is_in_tab_cycle_and_explicit_reentry_preserves_state() {
     assert_eq!(state.provision().stage, ProvisionStage::Form);
 
     state.navigate(NavCommand::NextWorkspace, 20);
-    assert_eq!(state.workspace(), Workspace::Backups);
+    assert_eq!(state.workspace(), Workspace::Devices);
     state.navigate(NavCommand::PreviousWorkspace, 20);
     assert_eq!(state.workspace(), Workspace::Provision);
     state.navigate(NavCommand::NextWorkspace, 20);
-    assert_eq!(state.workspace(), Workspace::Backups);
+    assert_eq!(state.workspace(), Workspace::Devices);
     state.navigate(NavCommand::WorkspaceProvision, 20);
     assert_eq!(state.workspace(), Workspace::Provision);
     assert_eq!(state.provision().stage, ProvisionStage::Form);
@@ -325,6 +325,30 @@ fn provision_flow_is_in_tab_cycle_and_explicit_reentry_preserves_state() {
     assert_eq!(state.provision().stage, ProvisionStage::Form);
     assert_eq!(state.selected_device_disk(), Some(6));
     assert_eq!(state.provision().form.label, "保持当前制盘状态!SAFE6");
+}
+
+#[test]
+fn critical_provision_keeps_workspace_tabs_navigable_but_blocks_other_commands() {
+    let mut state = AppState::new();
+    state.navigate(NavCommand::WorkspaceProvision, 20);
+    state.set_critical_operation(true);
+
+    assert_eq!(
+        state.navigate(NavCommand::NextWorkspace, 20),
+        StateEffect::None
+    );
+    assert_eq!(state.workspace(), Workspace::Devices);
+    assert_eq!(
+        state.navigate(NavCommand::PreviousWorkspace, 20),
+        StateEffect::None
+    );
+    assert_eq!(state.workspace(), Workspace::Provision);
+
+    assert_eq!(state.navigate(NavCommand::Down, 20), StateEffect::None);
+    assert_eq!(
+        state.notice(),
+        Some("关键操作仍在执行，完成前不能执行该命令或启动其他任务。")
+    );
 }
 
 #[test]

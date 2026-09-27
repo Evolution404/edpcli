@@ -2304,7 +2304,7 @@ Insert：
 
 ### 11.1 背景与覆盖关系
 
-本章来自 2026-09-25 实机验收反馈，目标不是继续修补单个快捷键或单个渲染问题，而是一次性收口 **导航语义、Inspect 信息架构、磁盘布局表达、区间显示和表格布局**。本章实施完成后，凡与第 10 章快捷键/Panel 规则冲突的地方，**以本章为最终产品定义**；第 10 章保留为上一轮已完成重构的历史记录。
+本章来自 2026-09-25 实机验收反馈，目标不是继续修补单个快捷键或单个渲染问题，而是一次性收口 **导航语义、Inspect 信息架构、磁盘布局表达、区间显示和表格布局**。本章保留为当时的历史实施记录；**当前导航契约以 Chapter 16 最新完成状态为准**，尤其是顶层四标签和 Tab/Ctrl-w 的职责分离。
 
 本轮必须解决以下十项用户验收问题：
 
@@ -2315,7 +2315,7 @@ Insert：
 5. Inspect 选中 LBA12 等已知节点时，详情区立即显示该节点的结构化解析数据，而不是只显示 SHA-256 再要求 Enter；
 6. Inspect 顶部直接显示当前磁盘布局、各区域比例和布局条，并与 Provision 共用同一视觉/计算模型；
 7. Inspect 根结构树严格按物理 LBA 起点排序，Unknown 必须插回真实位置，不允许统一堆到末尾；
-8. Inspect 内 `Tab/Shift-Tab` 必须有效，循环切换“结构树 / 节点概览 / 节点详情”子工作区；
+8. 当前最终契约中 `Tab/Shift-Tab` 始终切换顶层标签；Inspect 内部 Pane 使用 `Ctrl-w h/j/k/l/w/W` 切换；
 9. 增加面包屑和明确的 `Esc 返回：<目标>` 提示，用户必须知道当前层级和返回目标；
 10. 所有 Table 使用统一自适应列宽与交互状态：`j/k` 选行、`h/l` 激活列、`</>` 移动整列、`0/$` 首尾列、`H/L` 2-cell 横向视口、`s/S` 排序/默认顺序；激活的长“部门”等字段优先完整展开且不使用省略号。
 11. 所有 Table 统一显示 overflow scrollbar：横向溢出时底边显示 cell 级横向滚动条，纵向溢出时右边显示 row-window 竖向滚动条；无溢出时自动隐藏，禁止再用“横向 x/x”数字代替滚动条。
@@ -2332,16 +2332,16 @@ Insert：
 
 #### 11.2.1 顶层标签
 
-顶层只有两个真实标签：
+当前最终顶层为四个真实标签：
 
 ```text
-Devices  |  Backups
+设备  |  检查  |  备份  |  制盘
 ```
 
-Provision 和 Inspect 都是从当前对象进入的子工作区，不属于顶层 Tab。
+内部实现对应 `Devices / Inspect / Backups / Provision`，显示名称全部中文。
 
-- 顶层 Devices/Backups：`Tab` = 下一个标签，`Shift-Tab` = 上一个标签；两个标签循环切换；
-- 进入 Inspect 后：`Tab/Shift-Tab` 不离开 Inspect，而是切 Inspect 内部子工作区，见 11.7；
+- 所有 Normal 顶层 Workspace：`Tab` / `gt` = 下一个标签，`Shift-Tab` / `gT` = 上一个标签；四个标签循环切换；
+- Inspect / Provision 内部 Pane：`Ctrl-w w/W` 前后切换，`Ctrl-w h/j/k/l` 空间切换；不得复用 Tab；
 - 进入其它 modal/Confirm/Input 时，由当前模式优先消费键盘，不能误触顶层切换。
 
 #### 11.2.2 单键动作
@@ -2365,7 +2365,7 @@ Provision 和 Inspect 都是从当前对象进入的子工作区，不属于顶�
 
 - `p=Provision`；
 - `a=Backup`；
-- `gt/gT/gd/gb/gp/gi`；
+- `gd/gb/gp/gi`；
 - 任何与以上动作重复的第二套用户可见快捷键。
 
 Provision Form：
@@ -2520,16 +2520,16 @@ Inspect 保留三个并列子工作区：
 结构树  |  节点概览  |  节点详情
 ```
 
-最终键位：
+最终键位（由 Chapter 16 收口后的现行契约）：
 
-- Inspect 内 `Tab`：结构树 → 节点概览 → 节点详情 → 结构树；
-- `Shift-Tab`：反向循环；
-- 宽屏：三栏可同时存在，Tab 只改变 focus/highlight；
-- 窄屏：允许只渲染当前 focus 子工作区，因此 Tab 变成实际视图切换；
-- `Ctrl-w h/j/k/l/w/W` 可继续作为高级 Panel focus alias，但不能让 Tab 在 Inspect 中失效；
-- 退出 Inspect 只能用 Esc 返回来源或 q 全局退出，Tab 不能跳回 Devices/Backups。
+- `Tab` / `gt`：切换到下一个顶层标签；
+- `Shift-Tab` / `gT`：切换到上一个顶层标签；
+- Inspect 内结构树 / 概览 / 详情等 Pane 只使用 `Ctrl-w h/j/k/l/w/W` 切换；
+- 宽屏可同时显示多 Pane，Ctrl-w 只改变 focus/highlight；
+- 窄屏允许只渲染当前 focus Pane，Ctrl-w 因而成为实际视图切换；
+- Tab 离开 Inspect 时保留当前检查状态，切回后继续；Esc 才关闭当前 Inspect 层并返回来源。
 
-这条规则覆盖第 10 章“Tab 只切顶层、Panel 只用 Ctrl-w”的旧规则：**顶层页面 Tab 切顶层标签；Inspect 内 Tab 切 Inspect 子工作区，按当前 navigation context 解释。**
+因此不存在“同一个 Tab 在不同 Workspace 里含义不同”的上下文重载。
 
 ### 11.8 Inspect 选中节点即显示结构化解析
 
@@ -2656,7 +2656,7 @@ KeyMapper 需要能够结合当前 widget/context role 分发，不允许重新�
 │ 未知 [...]           │                      │                      │
 │ LCE [...]            │                      │                      │
 └───────────────────────────────────────────────────────────────────┘
-Tab/Shift-Tab 子工作区 · Enter Sector Inspector · Esc 返回 · q 退出
+Tab/Shift-Tab 或 gt/gT 顶层标签 · Ctrl-w 切 Pane · Enter Sector Inspector · Esc 返回 · q 退出
 ```
 
 窄屏目标：
@@ -2676,7 +2676,7 @@ Tab/Shift-Tab 子工作区 · Enter Sector Inspector · Esc 返回 · q 退出
 - Devices `Enter` = Provision，`p` 不再触发 Provision；
 - `q` 是全局退出意图，Esc 只返回上一级；
 - range formatter 只输出一个闭区间；
-- Inspect Tab/Shift-Tab 子工作区循环；
+- Inspect Ctrl-w Pane 循环；Tab/Shift-Tab 与 gt/gT 保持全局顶层标签切换；
 - topology root 物理顺序；
 - LBA12 selection 自动出现结构化详情；
 - AdaptiveTableLayout 的 CJK/窄屏/优先级；
@@ -2742,7 +2742,7 @@ Tab/Shift-Tab 子工作区 · Enter Sector Inspector · Esc 返回 · q 退出
 1. Devices：Enter Provision、`i` Inspect、`b` Backup；
 2. `p` 在 Devices 不再触发 Provision；
 3. `a` 不再触发 Backup；
-4. Backups：Enter/i Inspect、b Backup、v Verify、R Restore、d Delete；
+4. 备份：Enter/i 检查、b 新建备份、v 校验、R 恢复、d 删除；
 5. q 在非 critical 状态触发全局 ExitRequested，Esc 不退出 App；
 6. critical write 状态下 q 不绕过 transaction safety；
 7. `[start..end_exclusive)` 内部转换到 `[start..end]` UI 无 off-by-one；
@@ -8791,8 +8791,8 @@ Chapter 15 身份治理仍然是独立的 application/backup 安全治理；它�
 ```text
 Devices
 Inspect
-Provision
 Backups
+Provision
 ```
 
 建议 domain：
@@ -8801,8 +8801,8 @@ Backups
 enum Workspace {
     Devices,
     Inspect,
-    Provision,
     Backups,
+    Provision,
 }
 ```
 
@@ -8820,7 +8820,7 @@ Inspect 不再作为覆盖在其它 Workspace 上的视觉 overlay。内部迁�
 
 ```text
 ┌ edpcli v2.4.0  TUI  [NORMAL] · 管理员模式 · CORE ● ACTIVE ┐
-│ 设备   Inspect   制盘   备份                         ? 帮助 │
+│ 设备   检查   备份   制盘                            ? 帮助 │
 ├───────────────────────────────────────────────────────────┤
 │ Workspace body                                            │
 ├───────────────────────────────────────────────────────────┤
@@ -9361,7 +9361,7 @@ Backup detail / coverage
 
 升级完成后增加 repository guards：
 
-1. Workspace 必须包含 Devices / Inspect / Provision / Backups；
+1. Workspace 必须包含 Devices / Inspect / Backups / Provision；
 2. Inspect 不再依赖“其它 Workspace + overlay 才能存在”的视觉入口；
 3. 新 renderer 不得出现直接 `Color::*`；
 4. Theme token 只能由 `theme.rs` 定义；
@@ -9405,9 +9405,9 @@ Backup detail / coverage
 
 #### U2 — AppShell / Workspace / Pane domain
 
-状态：COMPLETE（2026-09-27）。顶层 `Workspace::ALL` 正式为 Devices / Inspect / Provision / Backups；统一无大边框 Header、四 Workspace 导航、模式/CORE 指示与上下文 Footer 已接入。Inspect 打开时切换到真实 `Workspace::Inspect`，Esc 经 NavigationStack 返回来源；设备/备份各有独立 PaneFocus / PaneViewport。既有只读 Inspect worker 和业务 I/O 未改；TUI suite 与新增 Shell、Pane 契约通过。
+状态：COMPLETE（2026-09-27，后续导航复核已收口）。顶层 `Workspace::ALL` 正式为 Devices / Inspect / Backups / Provision，对应中文标签“设备 / 检查 / 备份 / 制盘”；`Tab/Shift-Tab` 与 `gt/gT` 只负责顶层标签，`Ctrl-w h/j/k/l/w/W` 只负责 Workspace 内 Pane。Inspect 打开时切换到真实 `Workspace::Inspect`，顶层切换会保留检查状态，Esc 经 NavigationStack 返回来源；关键写盘期间允许只读切换顶层标签，但其它命令继续 fail-closed。统一无大边框 Header、四 Workspace 导航、模式/CORE 指示与上下文 Footer 已接入；既有只读 Inspect worker 和业务 I/O 未改。
 
-- Workspace 升级为 Devices / Inspect / Provision / Backups；
+- Workspace 升级为 Devices / Inspect / Backups / Provision；
 - Header + top navigation + footer 统一；
 - Inspect 迁移为真实 Workspace；
 - 扩展 Devices/Backups PaneId；
@@ -9552,7 +9552,7 @@ edpcli demo --list-scenes
 
 详细设计见 16.17。
 
-实现记录：新增 `edpcli demo`、`--scene` 与 `--list-scenes`，场景目录覆盖 Devices / Inspect / Provision / Backups 的主要页面及运行中、成功、警告、失败、空状态和错误状态。演示数据使用正式 `AppState`、canonical DiskLayout、typed Inspect、typed BackupCoverage 和正式 Provision/Backup progress 结构，不建立第二套 renderer；mode0、mode1、Plain、LBA8、E_LABEL 17 项、尾部展开、确认/可能相关备份及健康警告均有 fixture。演示循环不持有 TaskHub、runner、备份目录或提权入口，`ExecutionPolicy::DemoNoExternalIo` 对外部任务 fail-closed，演示表格复制也不写宿主剪贴板。24 个场景在 40x10、80x24、120x36、160x45、240x60 均通过 no-panic 渲染；`tui_suite` 262/262、fast 8 suites / 10 artifacts、full 8 suites / 10 artifacts + doctest 全绿。
+实现记录：新增 `edpcli demo`、`--scene` 与 `--list-scenes`，场景目录覆盖 Devices / Inspect / Backups / Provision 的主要页面及运行中、成功、警告、失败、空状态和错误状态。演示数据使用正式 `AppState`、canonical DiskLayout、typed Inspect、typed BackupCoverage 和正式 Provision/Backup progress 结构，不建立第二套 renderer；mode0、mode1、Plain、LBA8、E_LABEL 17 项、尾部展开、确认/可能相关备份及健康警告均有 fixture。演示循环不持有 TaskHub、runner、备份目录或提权入口，`ExecutionPolicy::DemoNoExternalIo` 对外部任务 fail-closed，演示表格复制也不写宿主剪贴板。24 个场景在 40x10、80x24、120x36、160x45、240x60 均通过 no-panic 渲染；`tui_suite` 262/262、fast 8 suites / 10 artifacts、full 8 suites / 10 artifacts + doctest 全绿。
 
 #### U12 — 表格 y/Y 系统剪贴板可靠性治理
 
@@ -9603,7 +9603,7 @@ edpcli demo --list-scenes
 
 以下 26 条是 U0～U9 核心阶段的完成标准；该核心阶段已经完成。U10～U12 作为后续扩展单独验收，不反向篡改历史完成证据：
 
-1. Devices / Inspect / Provision / Backups 是一致的 AppShell Workspace；
+1. Devices / Inspect / Backups / Provision 是一致的 AppShell Workspace；
 2. Inspect 不再以视觉 overlay 套娃方式存在；
 3. 全应用使用统一 Design System；
 4. renderer 中没有新的直接颜色或随意 style 分叉；
@@ -9690,7 +9690,7 @@ edpcli demo
 行为：
 
 - 直接进入正式 AppShell；
-- Devices / Inspect / Provision / Backups 都有演示数据；
+- Devices / Inspect / Backups / Provision 都有演示数据；
 - 可使用现有 Tab、Pane、Vim 键位正常导航；
 - Header 必须持续显示“演示模式 / 不访问真实介质”；
 - 不要求 sudo，不触发自动提权；
@@ -9845,7 +9845,7 @@ src/tui/demo/
 2. 默认 demo 启动无需 root；
 3. 每个场景都能构造合法 `AppState`；
 4. 40x10、80x24、120x36、160x45、240x60 全场景 no-panic；
-5. Devices / Inspect / Provision / Backups 均有可见非空演示数据；
+5. Devices / Inspect / Backups / Provision 均有可见非空演示数据；
 6. Provision Running 的进度、阶段、步骤、日志、安全提示同时可见；
 7. Tail group collapsed/expanded 两种演示都存在；
 8. Plain 场景绝不出现 EDP Tail；

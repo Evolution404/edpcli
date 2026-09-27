@@ -219,12 +219,16 @@ fn ch16_shell_exposes_four_top_level_workspaces() {
         .cloned()
         .collect::<String>()
         .replace(' ', "");
-    for title in ["设备", "Inspect", "制盘", "备份"] {
+    let mut positions = Vec::new();
+    for title in ["设备", "检查", "备份", "制盘"] {
         assert!(
             navigation.contains(title),
             "missing {title} in {navigation}"
         );
+        positions.push(navigation.find(title).unwrap());
     }
+    assert!(positions.windows(2).all(|pair| pair[0] < pair[1]));
+    assert!(!navigation.contains("Inspect"));
 }
 
 #[test]
@@ -237,15 +241,21 @@ fn ch16_inspect_is_a_workspace_with_a_real_return_target() {
         [
             Workspace::Devices,
             Workspace::Inspect,
-            Workspace::Provision,
-            Workspace::Backups
+            Workspace::Backups,
+            Workspace::Provision
         ]
     );
     assert!(state.begin_advanced_inspect(AdvancedInspectSource::Disk(6)));
     assert_eq!(state.workspace(), Workspace::Inspect);
     let lines = rendered_lines(&state, 120, 36).join("\n").replace(' ', "");
-    assert!(lines.contains("Inspect"));
+    assert!(lines.contains("检查"));
     state.advanced_inspect_finish(Err("test".into()));
+    state.navigate(NavCommand::NextWorkspace, 20);
+    assert_eq!(state.workspace(), Workspace::Backups);
+    assert!(state.advanced_inspect().is_some());
+    state.navigate(NavCommand::PreviousWorkspace, 20);
+    assert_eq!(state.workspace(), Workspace::Inspect);
+    assert!(state.advanced_inspect().is_some());
     state.navigate(NavCommand::Escape, 20);
     assert_eq!(state.workspace(), Workspace::Devices);
 }
@@ -442,7 +452,7 @@ fn ch16_inspect_lba8_renders_at_all_required_sizes() {
             .join("\n")
             .replace(' ', "");
         assert!(
-            text.contains("Inspect"),
+            text.contains("检查"),
             "missing workspace at {width}x{height}"
         );
     }

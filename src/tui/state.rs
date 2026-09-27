@@ -59,12 +59,12 @@ pub struct WizardState {
 pub enum Workspace {
     Devices,
     Inspect,
-    Provision,
     Backups,
+    Provision,
 }
 
 impl Workspace {
-    pub const ALL: [Self; 4] = [Self::Devices, Self::Inspect, Self::Provision, Self::Backups];
+    pub const ALL: [Self; 4] = [Self::Devices, Self::Inspect, Self::Backups, Self::Provision];
 
     pub fn shifted(self, reverse: bool) -> Self {
         let index = Self::ALL
@@ -960,19 +960,6 @@ impl AppState {
         if self.workspace == workspace {
             return;
         }
-        if self.workspace == Workspace::Inspect && workspace != Workspace::Inspect {
-            if self
-                .advanced_inspect
-                .as_ref()
-                .is_some_and(|state| state.stage == AdvancedInspectStage::Running)
-            {
-                self.set_notice("全盘检查正在后台读取结构，请等待完成。");
-                return;
-            }
-            if self.advanced_inspect.take().is_some() {
-                let _ = self.navigation.pop();
-            }
-        }
         if self.workspace == Workspace::Devices
             && matches!(workspace, Workspace::Backups | Workspace::Inspect)
         {
@@ -1816,6 +1803,17 @@ impl AppState {
         if !self.critical_operation {
             return None;
         }
+        if matches!(
+            command,
+            NavCommand::NextWorkspace
+                | NavCommand::PreviousWorkspace
+                | NavCommand::WorkspaceDevices
+                | NavCommand::WorkspaceInspect
+                | NavCommand::WorkspaceBackups
+                | NavCommand::WorkspaceProvision
+        ) {
+            return None;
+        }
         if command == NavCommand::Quit {
             self.exit_pending = true;
             Some(StateEffect::ExitDeferred)
@@ -1825,7 +1823,7 @@ impl AppState {
             );
             Some(StateEffect::None)
         } else {
-            self.set_notice("关键操作仍在执行，完成前不能切换页面或启动其他任务。".to_string());
+            self.set_notice("关键操作仍在执行，完成前不能执行该命令或启动其他任务。".to_string());
             Some(StateEffect::None)
         }
     }

@@ -171,8 +171,8 @@ pub const NORMAL_HELP: &[HelpBinding] = &[
         action: TuiAction::Provision,
     },
     HelpBinding {
-        keys: "Tab/Shift-Tab",
-        label: "Tabs",
+        keys: "Tab/Shift-Tab · gt/gT",
+        label: "切换顶层标签",
         action: TuiAction::WorkspaceNext,
     },
     HelpBinding {
@@ -189,8 +189,8 @@ pub const INSPECT_HELP: &[HelpBinding] = &[
         action: TuiAction::InspectBusiness,
     },
     HelpBinding {
-        keys: "Tab/Shift-Tab",
-        label: "子工作区",
+        keys: "Tab/Shift-Tab · gt/gT",
+        label: "切换顶层标签",
         action: TuiAction::WorkspaceNext,
     },
     HelpBinding {
@@ -334,6 +334,8 @@ impl KeyMapper {
                 PendingPrefix::G => match event.code {
                     KeyCode::Char('g') => Some(TuiAction::Top),
                     KeyCode::Char('l') => Some(TuiAction::InspectJump),
+                    KeyCode::Char('t') => Some(TuiAction::WorkspaceNext),
+                    KeyCode::Char('T') => Some(TuiAction::WorkspacePrevious),
                     _ => None,
                 },
                 PendingPrefix::CtrlW => match event.code {

@@ -450,13 +450,13 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
                         .map(|binding| Line::from(format!("{}  {}", binding.keys, binding.label))),
                 );
                 help_lines.push(Line::from(
-                    "顶层 Tab/Shift-Tab 设备↔备份 · Inspect 内 Tab/Shift-Tab 切结构树/概览/详情 · Ctrl-w 面板别名",
+                    "顶层标签：设备 → 检查 → 备份 → 制盘 · Tab/Shift-Tab 或 gt/gT 切换 · Ctrl-w h/j/k/l/w/W 切内部 Pane",
                 ));
                 help_lines.push(Line::from(
-                    "设备: Enter 当前设备 · p 制盘 · i Inspect · b 新建备份 · Ctrl-w w/W 切 Pane · 当前设备内 j/k 选分组、o 展开/折叠 · 备份: Enter/i Inspect · b 新建 · v 校验 · R 恢复 · d 删除",
+                    "设备: Enter 当前设备 · p 制盘 · i 检查 · b 新建备份 · Ctrl-w w/W 切 Pane · 当前设备内 j/k 选分组、o 展开/折叠 · 备份: Enter/i 检查 · b 新建 · v 校验 · R 恢复 · d 删除",
                 ));
                 help_lines.push(Line::from(
-                    "Inspect: / 搜索 · n/N 匹配 · gl 跳转 · Sector 0/$、gg/G、v",
+                    "检查: / 搜索 · n/N 匹配 · gl 跳转 · Sector 0/$、gg/G、v",
                 ));
                 help_lines.push(Line::from(
                     "制盘: Normal 下 i 编辑、Enter 生成计划；Insert 下 Enter/Esc 完成编辑；物理写盘保持精确输入 YES 的安全确认",
@@ -474,8 +474,8 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
             _ => match state.workspace() {
                 Workspace::Devices => draw_devices(frame, content_area, state),
                 Workspace::Inspect => frame.render_widget(
-                    Paragraph::new("Inspect：请在设备或备份页选定对象后按 i 进入。")
-                        .block(super::ui::panel("Inspect", true)),
+                    Paragraph::new("检查：请在设备或备份页选定对象后按 i 进入。")
+                        .block(super::ui::panel("检查", true)),
                     content_area,
                 ),
                 Workspace::Backups => draw_backups(frame, content_area, state),
@@ -503,11 +503,11 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
                     .unwrap_or_else(|| "Esc 返回".into());
                 if let Some((query, index, total)) = state.advanced_inspect_search_status() {
                     format!(
-                        "Inspect：1/2/3/4 业务/原始/Hex/布局 · Ctrl-w h/j/k/l Pane · j/k 当前 Pane · o 展开/折叠 · Enter 查看 · {escape} · q 退出 · 当前 {index}/{total}: {}",
+                        "检查：1/2/3/4 业务/原始/Hex/布局 · Tab/Shift-Tab 或 gt/gT 切顶层标签 · Ctrl-w h/j/k/l Pane · j/k 当前 Pane · o 展开/折叠 · Enter 查看 · {escape} · q 退出 · 当前 {index}/{total}: {}",
                         safe(query)
                     )
                 } else {
-                    format!("Inspect：1/2/3/4 业务/原始/Hex/布局 · Ctrl-w h/j/k/l Pane · j/k 当前 Pane · o 展开/折叠 · Enter 查看 · {escape} · q 退出")
+                    format!("检查：1/2/3/4 业务/原始/Hex/布局 · Tab/Shift-Tab 或 gt/gT 切顶层标签 · Ctrl-w h/j/k/l Pane · j/k 当前 Pane · o 展开/折叠 · Enter 查看 · {escape} · q 退出")
                 }
             }
         }
@@ -569,12 +569,12 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
                     let kind = crate::tui::table_layout::TableKind::Devices;
                     let total = crate::tui::table_layout::layout_for(kind).specs().len();
                     format!(
-                        "Tab/Shift-Tab 工作区 · Ctrl-w w/W 切 Pane · j/k 行 · h/l 激活 · </> 移列 · 0/$ 首尾列 · H/L 视口 · s 排序 · S 默认排序 · {}/{} 列 · Enter 当前设备 · p 制盘 · i Inspect · b 备份 · Esc 返回 · q 退出",
+                        "Tab/Shift-Tab 或 gt/gT 标签 · Ctrl-w w/W 切 Pane · j/k 行 · h/l 激活 · </> 移列 · 0/$ 首尾列 · H/L 视口 · s 排序 · S 默认排序 · {}/{} 列 · Enter 当前设备 · p 制盘 · i 检查 · b 备份 · Esc 返回 · q 退出",
                         state.table_active_column(kind) + 1,
                         total
                     )
                 } else {
-                    "Tab/Shift-Tab 工作区 · r 刷新 · q 退出".to_string()
+                    "Tab/Shift-Tab 或 gt/gT 标签 · r 刷新 · q 退出".to_string()
                 }
             }
             Workspace::Inspect => {
@@ -584,12 +584,12 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
                     let kind = crate::tui::table_layout::TableKind::InspectFields;
                     let total = crate::tui::table_layout::layout_for(kind).specs().len();
                     format!(
-                        "Inspect 字段表：j/k 行 · h/l 激活 · </> 移列 · 0/$ 首尾列 · H/L 视口 · s 排序 · S 默认排序 · {}/{} 列 · o 展开/折叠 · Enter 查看 · Esc 返回 · q 退出",
+                        "检查字段表：Tab/Shift-Tab 或 gt/gT 标签 · j/k 行 · h/l 激活 · </> 移列 · 0/$ 首尾列 · H/L 视口 · s 排序 · S 默认排序 · {}/{} 列 · o 展开/折叠 · Enter 查看 · Esc 返回 · q 退出",
                         state.table_active_column(kind) + 1,
                         total
                     )
                 } else {
-                    "Inspect：j/k 当前 Pane · o 展开/折叠 · Enter 查看 · Esc 返回 · q 退出"
+                    "检查：Tab/Shift-Tab 或 gt/gT 标签 · j/k 当前 Pane · Ctrl-w 切 Pane · o 展开/折叠 · Enter 查看 · Esc 返回 · q 退出"
                         .to_string()
                 }
             }
@@ -598,15 +598,17 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
                     let kind = crate::tui::table_layout::TableKind::Backups;
                     let total = crate::tui::table_layout::layout_for(kind).specs().len();
                     format!(
-                        "Tab/Shift-Tab 标签 · j/k 行 · h/l 激活 · </> 移列 · 0/$ 首尾列 · H/L 视口 · s 排序 · S 默认排序 · {}/{} 列 · Space 勾选 · Enter/i Inspect · b 新建 · v 校验 · R 恢复 · d 删除 · Esc 当前标签 · q 退出",
+                        "Tab/Shift-Tab 或 gt/gT 标签 · j/k 行 · h/l 激活 · </> 移列 · 0/$ 首尾列 · H/L 视口 · s 排序 · S 默认排序 · {}/{} 列 · Space 勾选 · Enter/i 检查 · b 新建 · v 校验 · R 恢复 · d 删除 · Esc 当前标签 · q 退出",
                         state.table_active_column(kind) + 1,
                         total
                     )
                 } else {
-                    "Tab/Shift-Tab 标签 · b 新建 · r 刷新 · Esc 当前标签 · q 退出".to_string()
+                    "Tab/Shift-Tab 或 gt/gT 标签 · b 新建 · r 刷新 · Esc 当前标签 · q 退出"
+                        .to_string()
                 }
             }
-            Workspace::Provision => match state.provision().stage {
+            Workspace::Provision => {
+                let provision_status = match state.provision().stage {
                 ProvisionStage::SelectDisk => {
                     let kind = crate::tui::table_layout::TableKind::ProvisionDevices;
                     let total = crate::tui::table_layout::layout_for(kind).specs().len();
@@ -657,7 +659,13 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
                     "安全事务执行中；Esc 不退出，q / Ctrl-C 的退出请求延迟到安全检查点".to_string()
                 }
                 ProvisionStage::Result => "Enter / Esc 返回制盘中心".to_string(),
-            },
+                };
+                if state.input_mode() == InputMode::Normal {
+                    format!("Tab/Shift-Tab 或 gt/gT 标签 · {provision_status}")
+                } else {
+                    provision_status
+                }
+            }
         }
     };
     let status = if state.input_mode() == InputMode::Normal

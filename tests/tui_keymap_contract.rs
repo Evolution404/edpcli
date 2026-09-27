@@ -200,9 +200,14 @@ fn normal_navigation_uses_vim_semantics_without_workspace_side_effects() {
 }
 
 #[test]
-fn g_prefix_is_reserved_for_vim_top_and_inspect_jump_only() {
+fn g_prefix_keeps_vim_navigation_and_adds_standard_tab_switching() {
     let mut mapper = KeyMapper::new();
-    for (second, expected) in [('g', TuiAction::Top), ('l', TuiAction::InspectJump)] {
+    for (second, expected) in [
+        ('g', TuiAction::Top),
+        ('l', TuiAction::InspectJump),
+        ('t', TuiAction::WorkspaceNext),
+        ('T', TuiAction::WorkspacePrevious),
+    ] {
         assert_eq!(mapper.map(InputMode::Normal, key(KeyCode::Char('g'))), None);
         assert_eq!(
             mapper.map(InputMode::Normal, key(KeyCode::Char(second))),
@@ -210,12 +215,12 @@ fn g_prefix_is_reserved_for_vim_top_and_inspect_jump_only() {
             "g{second}"
         );
     }
-    for second in ['t', 'T', 'd', 'b', 'p', 'i'] {
+    for second in ['d', 'b', 'p', 'i'] {
         assert_eq!(mapper.map(InputMode::Normal, key(KeyCode::Char('g'))), None);
         assert_eq!(
             mapper.map(InputMode::Normal, key(KeyCode::Char(second))),
             None,
-            "g{second} must not remain a workspace/function shortcut"
+            "g{second} must not become an unrelated function shortcut"
         );
     }
 }
@@ -277,6 +282,41 @@ fn tab_switches_top_level_tabs_and_ctrl_w_owns_panel_navigation() {
             KeyEvent::new(KeyCode::BackTab, KeyModifiers::SHIFT)
         ),
         Some(TuiAction::WorkspacePrevious)
+    );
+    assert_eq!(mapper.map(InputMode::Normal, key(KeyCode::Char('g'))), None);
+    assert_eq!(
+        mapper.map(InputMode::Normal, key(KeyCode::Char('t'))),
+        Some(TuiAction::WorkspaceNext)
+    );
+    assert_eq!(mapper.map(InputMode::Normal, key(KeyCode::Char('g'))), None);
+    assert_eq!(
+        mapper.map(InputMode::Normal, key(KeyCode::Char('T'))),
+        Some(TuiAction::WorkspacePrevious)
+    );
+}
+
+#[test]
+fn top_level_workspace_actions_are_never_reused_for_local_pane_switching() {
+    let source = include_str!("../src/tui/mod.rs");
+    assert!(
+        !source.contains("TuiAction::WorkspaceNext => state.provision_shift_pane(false)"),
+        "Tab must not be captured by Provision pane navigation"
+    );
+    assert!(
+        !source.contains("TuiAction::WorkspacePrevious => state.provision_shift_pane(true)"),
+        "Shift-Tab must not be captured by Provision pane navigation"
+    );
+    assert!(
+        !source.contains(
+            "TuiAction::WorkspaceNext => {\n                                            state.advanced_inspect_shift_panel(false);"
+        ),
+        "Tab must not be captured by Inspect pane navigation"
+    );
+    assert!(
+        !source.contains(
+            "TuiAction::WorkspacePrevious => {\n                                            state.advanced_inspect_shift_panel(true);"
+        ),
+        "Shift-Tab must not be captured by Inspect pane navigation"
     );
 }
 
@@ -500,8 +540,9 @@ fn provision_form_enter_generates_plan_instead_of_editing_or_toggling() {
 #[test]
 fn user_visible_inspect_hints_point_to_full_disk_tree_entry() {
     let shell = include_str!("../src/tui/render.rs");
-    assert!(shell.contains("i Inspect"));
+    assert!(shell.contains("i 检查"));
     assert!(shell.contains("Enter 当前设备"));
+    assert!(!shell.contains("i Inspect"));
     assert!(!shell.contains("gi Inspect"));
 
     let dispatch = include_str!("../src/tui/dispatch.rs");
@@ -624,7 +665,14 @@ fn help_registry_is_the_same_metadata_source_for_core_and_inspect_hints() {
         .iter()
         .any(|binding| binding.keys == "r" && binding.action == TuiAction::Refresh));
     assert!(NORMAL_HELP.iter().any(|binding| {
-        binding.keys == "Tab/Shift-Tab" && binding.action == TuiAction::WorkspaceNext
+        binding.keys == "Tab/Shift-Tab · gt/gT"
+            && binding.label == "切换顶层标签"
+            && binding.action == TuiAction::WorkspaceNext
+    }));
+    assert!(INSPECT_HELP.iter().any(|binding| {
+        binding.keys == "Tab/Shift-Tab · gt/gT"
+            && binding.label == "切换顶层标签"
+            && binding.action == TuiAction::WorkspaceNext
     }));
     assert!(INSPECT_HELP
         .iter()

@@ -83,7 +83,7 @@ fn backup_page_exposes_the_complete_management_shortcuts() {
         "d 删除",
         "R 恢复",
         "b 新建",
-        "i Inspect",
+        "i 检查",
         "Space 勾选",
     ] {
         assert!(
