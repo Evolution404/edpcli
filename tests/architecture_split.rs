@@ -643,6 +643,24 @@ fn domain_and_application_import_direction_is_guarded() {
 }
 
 #[test]
+fn infrastructure_does_not_depend_on_application_layer() {
+    let mut infrastructure = rust_sources_under("src/diskio");
+    for path in ["src/edpb.rs", "src/disk_scan.rs"] {
+        infrastructure.push(Path::new(env!("CARGO_MANIFEST_DIR")).join(path));
+    }
+    assert_sources_exclude(infrastructure, &["crate::application"]);
+    for path in [
+        "src/media_identity.rs",
+        "src/media_identity_observer.rs",
+        "src/partition_table.rs",
+        "src/backup_coverage.rs",
+        "src/disk_layout.rs",
+    ] {
+        assert_sources_exclude(rust_sources_under(path), &["crate::application"]);
+    }
+}
+
+#[test]
 fn chapter_15_identity_write_boundaries_remain_separate() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let source = |path: &str| {
@@ -650,8 +668,8 @@ fn chapter_15_identity_write_boundaries_remain_separate() {
     };
     let restore = source("src/application/write.rs");
     let selector = source("src/selectors.rs");
-    let observer = source("src/application/media_identity_observer.rs");
-    let matcher = source("src/application/media_identity.rs");
+    let observer = source("src/media_identity_observer.rs");
+    let matcher = source("src/media_identity.rs");
     let edpb = source("src/edpb.rs");
     let backup_writer = source("src/diskio/backup_create.rs");
     let lineage = source("src/application/provision/identity_lineage.rs");

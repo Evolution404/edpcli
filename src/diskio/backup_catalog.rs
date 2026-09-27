@@ -126,7 +126,7 @@ pub struct BackupMeta {
     pub pid: String,
     pub device_id: String,
     pub onlyid: Option<String>,
-    pub identity: Option<crate::application::media_identity::MediaIdentitySnapshot>,
+    pub identity: Option<crate::media_identity::MediaIdentitySnapshot>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -148,7 +148,7 @@ pub struct BackupEntry {
     /// 扫描时实际 `.bin` 内容摘要；删除前用于确认同名文件未被替换/改写。
     pub content_sha256: Option<String>,
     /// Typed region/extent/artifact coverage projected during the background scan.
-    pub coverage: Option<crate::application::backup_coverage::BackupCoverage>,
+    pub coverage: Option<crate::backup_coverage::BackupCoverage>,
 }
 
 fn strip_numeric_suffix<'a>(s: &'a str, marker: &str) -> Option<(&'a str, String)> {
@@ -257,7 +257,7 @@ pub fn scan_backup_file(path: &Path) -> Option<BackupEntry> {
     let content_sha256 = file_data.as_ref().map(|data| sha256_hex(data));
     let verified = crate::edpb::verify_file(path).ok();
     let coverage = verified.as_ref().map(|container| {
-        crate::application::backup_coverage::BackupCoverage::from_manifest(&container.manifest)
+        crate::backup_coverage::BackupCoverage::from_manifest(&container.manifest)
     });
     let raw = verified
         .as_ref()
@@ -272,10 +272,7 @@ pub fn scan_backup_file(path: &Path) -> Option<BackupEntry> {
                         crate::provision::DiskProvisionKind::from_metadata(raw, device_id);
                 } else if identity.protocol.onlyid.is_none() {
                     let total_sectors = manifest.geometry.total_sectors.unwrap_or(0);
-                    if crate::application::partition_table::confirmed_plain_protocol_prefix(
-                        raw,
-                        total_sectors,
-                    ) {
+                    if crate::partition_table::confirmed_plain_protocol_prefix(raw, total_sectors) {
                         identity.protocol.provision_kind =
                             Some(crate::provision::DiskProvisionKind::Plain);
                     }
@@ -361,7 +358,7 @@ pub fn scan_backup_names(dir: &Path) -> Vec<PathBuf> {
 /// device_id + onlyid pair (EDP instance). Model/capacity-only evidence and filename-derived
 /// metadata never form an automatic deletion group.
 pub fn backup_group_key(entry: &BackupEntry) -> Option<String> {
-    use crate::application::media_identity::SerialQuality;
+    use crate::media_identity::SerialQuality;
 
     let identity = entry.meta.as_ref()?.identity.as_ref()?;
     if identity.hardware.serial_quality == SerialQuality::Usable {

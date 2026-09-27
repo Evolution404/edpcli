@@ -4,11 +4,13 @@
 
 ## 分层
 
-`CLI / TUI -> application/service -> provision + protocol + backup -> platform + disk I/O`
+`CLI / TUI -> application/service -> domain + provision + protocol + backup -> platform + disk I/O`
 
 - `src/cli*.rs`：CLI 参数解析与文本入口；公开命令目录统一由 `src/command_spec.rs` 描述，并供 help/completion 共用。
 - `src/tui/`：交互式前端；制盘、检查、备份、设备工作区分别维护状态/渲染/任务逻辑，不直接实现裸盘安全策略。
 - `src/application/`：CLI/TUI 共用应用服务；制盘按 `prepare/commit/export` 分离，`TargetSession` 统一写盘状态转换，`EvidenceSource` 统一物理盘/EDPB 只读证据入口。
+- `src/media_identity.rs`、`src/partition_table.rs`、`src/disk_layout.rs`、`src/backup_coverage.rs`：UI-neutral 领域/读模型与纯算法；`application` 仅保留兼容 re-export 和 use-case 编排，`diskio`/`edpb`/`disk_scan` 不得反向依赖 application。
+- `src/media_identity_observer.rs`：只读身份观察服务，可读取协议镜像和硬件探测但没有任何写盘状态转换入口。
 - `src/provision/`：纯内存制盘领域模型与验证器；Plain 与官方 mode0～3 都通过统一 `ProvisionRequest` 进入应用层。
 - `src/protocol/`：LBA0～12、IIR、LCE 的类型化协议模型；`protocol::semantic` 提供跨业务语义，不包含 UI 字段名、颜色或渲染结构。
 - `src/diskio/`：块设备、写事务、备份配置、备份目录和备份创建按职责拆分。

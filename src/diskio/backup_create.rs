@@ -120,7 +120,7 @@ pub fn create_plain_backup(
     facts: &DiskFacts,
     data: &[u8],
     legacy_candidate: &str,
-    identity: &crate::application::media_identity::MediaIdentitySnapshot,
+    identity: &crate::media_identity::MediaIdentitySnapshot,
     bak_dir: &Path,
     clock: &dyn Clock,
 ) -> EdpCliResult<PathBuf> {
@@ -145,7 +145,7 @@ pub fn create_metadata_backup(
     data: &[u8],
     device_id: &str,
     metadata: crate::backup_metadata::MetadataAcquisition,
-    identity: &crate::application::media_identity::MediaIdentitySnapshot,
+    identity: &crate::media_identity::MediaIdentitySnapshot,
     bak_dir: &Path,
     clock: &dyn Clock,
 ) -> EdpCliResult<PathBuf> {
@@ -169,7 +169,7 @@ pub fn create_deep_backup(
     data: &[u8],
     device_id: &str,
     deep: crate::backup_metadata::MetadataAcquisition,
-    identity: &crate::application::media_identity::MediaIdentitySnapshot,
+    identity: &crate::media_identity::MediaIdentitySnapshot,
     bak_dir: &Path,
     clock: &dyn Clock,
 ) -> EdpCliResult<PathBuf> {
@@ -208,11 +208,9 @@ pub struct BackupMatches {
 /// must never be silently promoted to ownership or destructive authorization.
 pub fn find_backups(
     bak_dir: &Path,
-    current: &crate::application::media_identity::MediaIdentitySnapshot,
+    current: &crate::media_identity::MediaIdentitySnapshot,
 ) -> BackupMatches {
-    use crate::application::media_identity::{
-        match_media_identity, BackupAffinity, BackupAffinityPolicy,
-    };
+    use crate::media_identity::{match_media_identity, BackupAffinity, BackupAffinityPolicy};
 
     let mut matches = BackupMatches::default();
     for entry in scan_backup_dir(bak_dir) {

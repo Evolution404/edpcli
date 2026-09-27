@@ -370,10 +370,8 @@ fn parse_hex_u16(value: &str) -> Option<u16> {
         .flatten()
 }
 
-fn manifest_serial_quality(
-    quality: crate::application::media_identity::SerialQuality,
-) -> ManifestSerialQuality {
-    use crate::application::media_identity::SerialQuality;
+fn manifest_serial_quality(quality: crate::media_identity::SerialQuality) -> ManifestSerialQuality {
+    use crate::media_identity::SerialQuality;
     match quality {
         SerialQuality::Usable => ManifestSerialQuality::Usable,
         SerialQuality::Suspicious => ManifestSerialQuality::Suspicious,
@@ -400,7 +398,7 @@ fn manifest_provision_kind(value: crate::provision::DiskProvisionKind) -> Manife
 }
 
 pub fn manifest_identity_from_snapshot(
-    snapshot: &crate::application::media_identity::MediaIdentitySnapshot,
+    snapshot: &crate::media_identity::MediaIdentitySnapshot,
 ) -> ManifestIdentity {
     ManifestIdentity {
         hardware: ManifestHardwareIdentity {
@@ -465,7 +463,7 @@ fn inferred_manifest_identity(capture: &CoreCapture<'_>) -> ManifestIdentity {
 
 fn base_manifest(
     capture: &CoreCapture<'_>,
-    identity: Option<&crate::application::media_identity::MediaIdentitySnapshot>,
+    identity: Option<&crate::media_identity::MediaIdentitySnapshot>,
     schema: &str,
 ) -> Manifest {
     let capacity_bytes = capture
@@ -556,7 +554,7 @@ fn write_container(
     extra_extents: &[Extent],
     extra_artifacts: &[ArtifactInput],
     extra_notes: &[String],
-    identity: Option<&crate::application::media_identity::MediaIdentitySnapshot>,
+    identity: Option<&crate::media_identity::MediaIdentitySnapshot>,
     schema: &str,
 ) -> Result<Manifest, String> {
     validate_core_capture(capture)?;
@@ -685,7 +683,7 @@ pub fn write_core_backup(path: &Path, capture: &CoreCapture<'_>) -> Result<Manif
 pub fn write_core_backup_with_identity(
     path: &Path,
     capture: &CoreCapture<'_>,
-    identity: &crate::application::media_identity::MediaIdentitySnapshot,
+    identity: &crate::media_identity::MediaIdentitySnapshot,
 ) -> Result<Manifest, String> {
     write_container(
         path,
@@ -759,7 +757,7 @@ pub fn write_metadata_backup(
 pub fn write_metadata_backup_with_identity(
     path: &Path,
     capture: &MetadataCapture<'_>,
-    identity: &crate::application::media_identity::MediaIdentitySnapshot,
+    identity: &crate::media_identity::MediaIdentitySnapshot,
 ) -> Result<Manifest, String> {
     write_container(
         path,
@@ -782,7 +780,7 @@ pub fn write_deep_backup(path: &Path, capture: &MetadataCapture<'_>) -> Result<M
 pub fn write_deep_backup_with_identity(
     path: &Path,
     capture: &MetadataCapture<'_>,
-    identity: &crate::application::media_identity::MediaIdentitySnapshot,
+    identity: &crate::media_identity::MediaIdentitySnapshot,
 ) -> Result<Manifest, String> {
     write_deep_backup_with_optional_identity(path, capture, Some(identity))
 }
@@ -790,7 +788,7 @@ pub fn write_deep_backup_with_identity(
 fn write_deep_backup_with_optional_identity(
     path: &Path,
     capture: &MetadataCapture<'_>,
-    identity: Option<&crate::application::media_identity::MediaIdentitySnapshot>,
+    identity: Option<&crate::media_identity::MediaIdentitySnapshot>,
 ) -> Result<Manifest, String> {
     if capture
         .artifacts
@@ -842,17 +840,11 @@ fn legacy_hardware_serial_digest(manifest: &Manifest) -> Result<Option<String>, 
     Ok(Some(value.to_ascii_lowercase()))
 }
 
-fn canonical_serial_quality(
-    value: ManifestSerialQuality,
-) -> crate::application::media_identity::SerialQuality {
+fn canonical_serial_quality(value: ManifestSerialQuality) -> crate::media_identity::SerialQuality {
     match value {
-        ManifestSerialQuality::Usable => crate::application::media_identity::SerialQuality::Usable,
-        ManifestSerialQuality::Suspicious => {
-            crate::application::media_identity::SerialQuality::Suspicious
-        }
-        ManifestSerialQuality::Missing => {
-            crate::application::media_identity::SerialQuality::Missing
-        }
+        ManifestSerialQuality::Usable => crate::media_identity::SerialQuality::Usable,
+        ManifestSerialQuality::Suspicious => crate::media_identity::SerialQuality::Suspicious,
+        ManifestSerialQuality::Missing => crate::media_identity::SerialQuality::Missing,
     }
 }
 
@@ -995,8 +987,8 @@ fn validate_manifest_identity(manifest: &Manifest) -> Result<(), String> {
 /// The only free-text serial parsing permitted by production code lives in this v1 adapter.
 pub fn canonical_media_identity(
     manifest: &Manifest,
-) -> Result<crate::application::media_identity::MediaIdentitySnapshot, String> {
-    use crate::application::media_identity::{
+) -> Result<crate::media_identity::MediaIdentitySnapshot, String> {
+    use crate::media_identity::{
         DerivedProtocolEvidence, HardwareIdentityEvidence, IdentityObservation,
         MediaIdentitySnapshot, ProtocolIdentityEvidence, SerialQuality,
     };

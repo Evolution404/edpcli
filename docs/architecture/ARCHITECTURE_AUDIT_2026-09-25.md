@@ -1236,6 +1236,68 @@ application 返回结构化 `ProvisionReport/BackupReport/InspectReport`，CLI/T
 - `protocol::types` 的字节序辅助函数由 `[u8; 512]` 协议扇区及固定大小的规范字段切片调用；`inspect_target` 的启动扇区字段读取受 512B 长度门禁保护，MBR 读取由 `get(..512)` 保护；`backup_metadata` 的 `expect` 在 13 扇区长度门禁和最多三个 EDPF 条目上界之后，属于固定长度内部不变量。对应协议、检查器与备份回归测试保留。
 - D7-D 定向测试、仓库架构门禁、fast **5.15s / 0 失败**、full **7.67s / 0 失败**、全目标 Clippy、rustfmt 与 diff 检查通过。该阶段未更改 LBA0～12/LCE 的协议语义或真实盘写入门槛。
 
+## Phase D8：第二轮架构治理（2026-09-28）
+
+本阶段处理 D0～D7 完成后新增功能继续增长形成的结构性技术债，不重新执行已经完成的旧阶段。
+
+### D8-A：消除基础设施层反向依赖 `application`
+
+- 把媒体身份、分区表、备份覆盖、磁盘布局等纯模型/纯算法下沉到与界面无关的领域层；
+- `diskio`、`edpb`、`disk_scan` 不得再依赖 `crate::application`；
+- `application` 保留面向现有调用方的兼容再导出与业务用例门面，避免一次性破坏公开接口；
+- 只读身份观察器从 `application` 私有实现中解耦，使底层扫描可复用但仍不具备写盘能力；
+- 增加递归架构门禁，防止反向依赖重新出现。
+
+#### D8-A 实施状态（2026-09-28）
+
+**COMPLETE。**
+
+- 媒体身份、分区表、备份覆盖、磁盘布局和只读身份观察器已从 `application` 实现目录下沉为 crate 级界面无关模块；原 `application::*` 路径保留为薄再导出门面，现有调用方无需同步重写。
+- `diskio`、`edpb`、`disk_scan` 以及新下沉的领域/只读模块中已无 `crate::application` 反向依赖；新增架构门禁先以旧结构失败，再在迁移后通过。
+- 删除 `DiskLayoutModel` 仅供旧拓扑兼容测试使用的 `from_claims/from_topology` 路径，生产规范布局继续只使用“证据不足即拒绝”的 `canonical_*` 构造器。
+- 定向架构门禁 **19/19**、`cargo check --all-targets --locked`、fast **8 suites / 10 artifacts / 0 failures**、full **8 suites / 10 artifacts + doctest / 0 failures** 全部通过。
+- 本阶段只调整模块所有权和依赖方向，没有修改 LBA0～12/LCE、四模式、K6、媒体身份判定或任何写盘安全门槛。
+
+### D8-B：统一生产 `TUI` 与演示模式的动作控制器
+
+- 终端键盘事件仍先映射为统一 `TuiAction`；
+- 生产 `TUI` 与演示模式必须共用唯一动作控制器，不再分别维护完整动作分派；
+- 外部副作用通过执行策略区分真实模式与演示模式；演示模式对真实介质、提权和写盘保持拒绝执行；
+- 表格、`Tab`、`Pane`、`Inspect`、`Provision` 导航及复制行为只能有一个状态转换事实源。
+
+### D8-C：拆分 `AppState` 所有权
+
+- `AppState` 收敛为全局壳层状态与 `Devices`、`Inspect`、`Backups`、`Provision` 四个工作区子状态；
+- 禁止继续通过大量分散 `impl AppState` 扩张工作区私有状态；
+- 搜索、输入提示、预览、树/详情、表单字段编辑等归各自子状态所有。
+
+### D8-D：TUI 大模块继续按职责拆分
+
+- D8-D1：拆分 `Inspect` 状态与渲染；
+- D8-D2：拆分 `Provision` 字段模式、展示、编辑与密码验证；
+- D8-D3：`tui/mod.rs` 收敛为终端生命周期与事件循环，不再理解工作区业务阶段。
+
+### D8-E：第二批领域/入口模块化
+
+- D8-E1：`CLI` 参数解析与命令处理按领域拆分；
+- D8-E2：`application` 检查与拓扑拆成模型、解码、来源、导出与服务模块；
+- D8-E3：`provision/reprovision` 拆成解析、预填、几何、处置与计划模块；
+- D8-E4：`EDPB` 拆成模式定义、编解码、读取、写入、校验与历史兼容模块。
+
+### D8-F：架构门禁升级
+
+- 增加完整依赖方向检查；
+- 对接近硬行数上限的模块增加软预算预警，不提高既有硬上限；
+- 架构门禁继续保证 `protocol`/`provision` 不反向依赖展示层或 `application`。
+
+### D8-G：公共接口面收敛
+
+- 审计 `lib.rs` 顶层公开模块；
+- 内部实现默认 `pub(crate)`，仅稳定业务接口保持公开；
+- 不因模块整理破坏 `CLI`/`TUI` 当前能力和已有测试契约。
+
+D8 全阶段冻结以下语义：LBA0～12/LCE、四模式、K6、LBA10 尾随 384B、LBA13 不使用、媒体身份判定、`TargetSession`/`EvidenceSource` 以及系统盘保护、USB 整盘确认、写前备份、锁卷、重新打开身份复核、原子写、读回、回滚。真实历史协议和 `EDPB` 历史读取兼容不得因命名含 `legacy` 被删除。
+
 ---
 
 # 第八部分：完成标准

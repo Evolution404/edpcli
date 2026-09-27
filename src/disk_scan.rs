@@ -28,7 +28,7 @@ pub struct Row {
     pub serial: Option<String>,
     pub device_id: Option<String>,
     /// Read-only canonical snapshot pinned to the protocol image seen by this scan.
-    pub identity_pin: Option<crate::application::media_identity::MediaIdentityPin>,
+    pub identity_pin: Option<crate::media_identity::MediaIdentityPin>,
     pub onlyid: Option<String>,
     pub dept: Option<String>,
     pub user: Option<String>,
@@ -43,7 +43,7 @@ pub struct Row {
     pub probe_error: Option<String>,
     pub provision_kind: DiskProvisionKind,
     pub partitions: Option<Vec<EdpfPartition>>,
-    pub partition_table: Option<crate::application::partition_table::PartitionTableSnapshot>,
+    pub partition_table: Option<crate::partition_table::PartitionTableSnapshot>,
     /// Validated LBA7-pointed legacy compatibility extent for the current scan.
     pub lce: Option<crate::backup_metadata::Lba7CompatibilityGeometry>,
     pub partition_table_error: Option<String>,
@@ -89,10 +89,8 @@ impl Row {
         })
     }
 
-    pub fn canonical_layout(
-        &self,
-    ) -> Result<crate::application::disk_layout::DiskLayoutModel, String> {
-        use crate::application::disk_layout::{DiskLayoutModel, DiskLayoutSegment, DiskRegionKind};
+    pub fn canonical_layout(&self) -> Result<crate::disk_layout::DiskLayoutModel, String> {
+        use crate::disk_layout::{DiskLayoutModel, DiskLayoutSegment, DiskRegionKind};
 
         let total_sectors = self.size / SECTOR as u64;
         match self.confirmed_provision_kind() {
@@ -236,9 +234,12 @@ pub fn scan_disks(
                 for lba in 0..crate::common::METADATA_SECTOR_COUNT as u32 {
                     protocol_image.extend_from_slice(&read_exact(lba)?);
                 }
-                let identity = crate::application::media_identity_observer::
-                    media_identity_from_protocol_image(runner, d.n, &protocol_image)
-                    .map_err(|error| io::Error::other(error.msg))?;
+                let identity = crate::media_identity_observer::media_identity_from_protocol_image(
+                    runner,
+                    d.n,
+                    &protocol_image,
+                )
+                .map_err(|error| io::Error::other(error.msg))?;
                 let total_sectors = d.size / SECTOR as u64;
                 if identity.protocol.provision_kind != Some(DiskProvisionKind::Plain) {
                     if let Some(device_id) = identity.protocol.device_id.as_deref() {
@@ -252,14 +253,11 @@ pub fn scan_disks(
                 }
 
                 if identity.protocol.provision_kind == Some(DiskProvisionKind::Plain) {
-                    match crate::application::partition_table::read_partition_table(
-                        total_sectors,
-                        |lba| {
-                            let lba = u32::try_from(lba)
-                                .map_err(|_| format!("LBA{lba} 超出当前扫描器 u32 范围"))?;
-                            read_exact(lba).map_err(|error| error.to_string())
-                        },
-                    ) {
+                    match crate::partition_table::read_partition_table(total_sectors, |lba| {
+                        let lba = u32::try_from(lba)
+                            .map_err(|_| format!("LBA{lba} 超出当前扫描器 u32 范围"))?;
+                        read_exact(lba).map_err(|error| error.to_string())
+                    }) {
                         Ok(mut table) => {
                             for partition in &mut table.partitions {
                                 let Ok(start) = u32::try_from(partition.start_lba) else {
@@ -282,7 +280,7 @@ pub fn scan_disks(
                 }
 
                 let matches = find_backups(backup_dir, &identity);
-                row.identity_pin = Some(crate::application::media_identity::MediaIdentityPin::new(
+                row.identity_pin = Some(crate::media_identity::MediaIdentityPin::new(
                     identity,
                     &protocol_image,
                 ));
