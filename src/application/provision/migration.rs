@@ -46,8 +46,9 @@ impl PartitionReader for MigrationPartitionReader<'_> {
             ));
         }
         match self.file_key {
-            Some(key) => crate::backup_deep::keys::decrypt_mode2(&raw, &key)
-                .map_err(std::io::Error::other),
+            Some(key) => {
+                crate::backup_deep::keys::decrypt_mode2(&raw, &key).map_err(std::io::Error::other)
+            }
             None => Ok(raw),
         }
     }
@@ -98,7 +99,10 @@ fn source_file_key(
         .map_err(|message| {
             err(
                 EXIT_TARGET,
-                format!("错误: {} K6 来源 FileKey 验证失败: {message}", part.role.label()),
+                format!(
+                    "错误: {} K6 来源 FileKey 验证失败: {message}",
+                    part.role.label()
+                ),
             )
         })
 }
@@ -232,7 +236,8 @@ fn stage_manifest_entry(
     if let Some(key) = key.as_mut() {
         key.fill(0);
     }
-    if summary.logical_size != manifest.logical_size || bytes.len() as u64 != manifest.logical_size {
+    if summary.logical_size != manifest.logical_size || bytes.len() as u64 != manifest.logical_size
+    {
         return Err(err(
             EXIT_TARGET,
             format!("错误: K6 文件 {:?} staging 长度校验失败", manifest.path),
@@ -292,10 +297,7 @@ pub(super) fn prepare_migrations(
                     .ok_or_else(|| {
                         err(
                             EXIT_TARGET,
-                            format!(
-                                "错误: K6 来源 {} inventory 缺失",
-                                migration.source_index
-                            ),
+                            format!("错误: K6 来源 {} inventory 缺失", migration.source_index),
                         )
                     })
             })
