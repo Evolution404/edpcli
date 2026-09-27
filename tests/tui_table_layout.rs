@@ -4,7 +4,7 @@ use edpcli::tui::table_layout::{
 };
 
 #[test]
-fn d0_device_schema_is_task_specific_while_backup_identity_schema_stays_shared() {
+fn d0_device_schema_is_task_specific_and_backup_default_order_is_exact() {
     let shared = identity_column_specs();
     let devices = table_column_schema(TableKind::Devices).unwrap();
     let backups = table_column_schema(TableKind::Backups).unwrap();
@@ -16,10 +16,51 @@ fn d0_device_schema_is_task_specific_while_backup_identity_schema_stays_shared()
             .collect::<Vec<_>>(),
         vec!["设备", "容量", "部门", "姓名", "盘型", "状态", "备份", "型号"]
     );
-    assert_eq!(backups.len(), 12);
-    assert_eq!(backups[4..11], shared);
-    assert_eq!(backups[10].id, ColumnId::ProvisionKind);
-    assert_eq!(backups[2].id, ColumnId::Name);
+
+    assert_eq!(
+        backups
+            .iter()
+            .map(|column| column.heading)
+            .collect::<Vec<_>>(),
+        vec![
+            "选", "序号", "时间", "容量", "部门", "姓名", "型号", "盘型", "健康", "VID:PID",
+            "onlyid", "名称",
+        ]
+    );
+    assert_eq!(
+        backups.iter().map(|column| column.id).collect::<Vec<_>>(),
+        vec![
+            ColumnId::Selected,
+            ColumnId::Index,
+            ColumnId::Time,
+            ColumnId::Capacity,
+            ColumnId::Dept,
+            ColumnId::User,
+            ColumnId::Model,
+            ColumnId::ProvisionKind,
+            ColumnId::Health,
+            ColumnId::VidPid,
+            ColumnId::Onlyid,
+            ColumnId::Name,
+        ]
+    );
+
+    for id in [
+        ColumnId::Capacity,
+        ColumnId::Dept,
+        ColumnId::User,
+        ColumnId::Model,
+        ColumnId::ProvisionKind,
+        ColumnId::VidPid,
+        ColumnId::Onlyid,
+    ] {
+        let backup_column = backups.iter().find(|column| column.id == id).unwrap();
+        let shared_column = shared.iter().find(|column| column.id == id).unwrap();
+        assert_eq!(
+            backup_column, shared_column,
+            "backup identity column {id:?} must reuse the shared definition"
+        );
+    }
 }
 
 fn spec(min: u16, preferred: u16, max: u16, priority: u8, pinned: bool) -> AdaptiveColumnSpec {

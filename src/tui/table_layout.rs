@@ -85,15 +85,26 @@ pub fn table_column_schema(kind: TableKind) -> Option<Vec<TableColumnSpec>> {
             table_column(Model, "型号", column(10, 18, 32, 45, 2, false)),
         ]),
         TableKind::Backups => {
-            let mut columns = vec![
+            let identity_column = |id| {
+                *identity
+                    .iter()
+                    .find(|column| column.id == id)
+                    .expect("backup identity column")
+            };
+            Some(vec![
                 table_column(Selected, "选", column(3, 3, 4, 99, 1, true)),
-                table_column(Index, "#", column(3, 4, 6, 90, 1, true)),
-                table_column(Name, "名称", column(10, 23, 48, 96, 2, true)),
+                table_column(Index, "序号", column(4, 6, 8, 90, 1, true)),
                 table_column(Time, "时间", column(12, 17, 20, 25, 1, false)),
-            ];
-            columns.extend(identity);
-            columns.push(table_column(Health, "健康", column(8, 11, 15, 97, 1, true)));
-            Some(columns)
+                identity_column(Capacity),
+                identity_column(Dept),
+                identity_column(User),
+                identity_column(Model),
+                identity_column(ProvisionKind),
+                table_column(Health, "健康", column(8, 11, 15, 97, 1, true)),
+                identity_column(VidPid),
+                identity_column(Onlyid),
+                table_column(Name, "名称", column(10, 23, 48, 96, 2, true)),
+            ])
         }
         _ => None,
     }
