@@ -50,10 +50,9 @@ pub use migration::{
 };
 pub use plain::{
     build_plain_migrated_provision_write_plan, build_plain_provision_write_plan,
-    max_plain_sector_count, plain_gaps,
-    validate_plain_partitions, PlainCleanupExtent, PlainGap, PlainPartitionSpec,
-    PlainProvisionPlan, PlainProvisionWritePlan, PlainSectorOwner, PlainSectorWrite,
-    DEFAULT_PLAIN_START_LBA, MAX_PLAIN_PARTITIONS,
+    max_plain_sector_count, plain_gaps, validate_plain_partitions, PlainCleanupExtent, PlainGap,
+    PlainPartitionSpec, PlainProvisionPlan, PlainProvisionWritePlan, PlainSectorOwner,
+    PlainSectorWrite, DEFAULT_PLAIN_START_LBA, MAX_PLAIN_PARTITIONS,
 };
 pub use profile::{PassInfoPolicy, ProvisionProfile, DEFAULT_SAFE6_LABEL};
 pub use region_mapping::{
