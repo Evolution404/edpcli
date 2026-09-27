@@ -7510,7 +7510,7 @@ current main
 
 ## 15. 只读多证据介质身份：跨 Plain / EDP 制盘状态的稳定识别与可信度分级
 
-**实施状态（2026-09-26）：COMPLETE（I0→I8）。** 软件门禁、macOS 虚拟盘 HIL 与受控真实 USB 闭环均已通过；Chapter 14 Q4～Q8 和 Chapter 12 K6 不随本章改变状态。
+**实施状态（2026-09-26）：COMPLETE（I0→I8）。** 软件门禁、macOS 虚拟盘 HIL 与受控真实 USB 闭环均已通过。该结论在 Chapter 15 收口当时不自动改变 Chapter 14 Q4～Q8 或 Chapter 12 K6 的状态；随后 Chapter 14 已于 2026-09-27 独立完成 Q4～Q8，K6 仍维持 DEFERRED / fail-closed。
 
 ### 15.1 目标与不可违反的边界
 
