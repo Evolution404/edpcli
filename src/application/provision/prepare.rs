@@ -192,7 +192,10 @@ fn verify_migration_image(
     let parsed = report.entries.ok_or_else(|| {
         err(
             EXIT_TARGET,
-            format!("错误: {} K6 目标文件系统缺少文件清单", migration.role.label()),
+            format!(
+                "错误: {} K6 目标文件系统缺少文件清单",
+                migration.role.label()
+            ),
         )
     })?;
     for staged in migration.entries.iter().filter(|entry| !entry.is_directory) {
@@ -737,7 +740,11 @@ pub fn prepare_target_provision(
                 .checked_add(relative_lba)
                 .and_then(|lba| u32::try_from(lba).ok())
                 .ok_or_else(|| err(EXIT_TARGET, "错误: K6 目标写入 LBA 溢出"))?;
-            if write_image.patch.insert(absolute, sector.to_vec()).is_some() {
+            if write_image
+                .patch
+                .insert(absolute, sector.to_vec())
+                .is_some()
+            {
                 return Err(err(
                     EXIT_TARGET,
                     format!("错误: K6 目标 LBA{absolute} 与既有写集合重叠"),
