@@ -794,6 +794,7 @@ mod tests {
                     source_password_knowledge: None,
                     target_password_policy: Some(TargetPasswordPolicy::InitializeNew),
                     reason: "geometry changed".into(),
+                    migration_sources: vec![],
                     preserved_record: None,
                 },
                 TargetPartitionPlan {
@@ -810,6 +811,7 @@ mod tests {
                     source_password_knowledge: Some(SourcePasswordKnowledge::Unknown),
                     target_password_policy: Some(TargetPasswordPolicy::PreserveOpaque),
                     reason: "exact source match".into(),
+                    migration_sources: vec![],
                     preserved_record: None,
                 },
             ],

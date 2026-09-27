@@ -58,8 +58,8 @@ pub use reprovision::{
     apply_target_geometry_overrides, decide_partition_action, parse_existing_provision,
     pass_info_policy_from_sectors, prefill_for_target_mode, validate_target_geometry,
     CapacityInput, CapacityInputMode, CapacitySource, DiskProvisionKind, ExistingPartition,
-    ExistingPartitionRecord, ExistingProvisionProfile, ParsedExistingProvision, PartitionAction,
-    ProvisionPrefill, ProvisionTarget, QuickCapacityUnit, RegionDisposition,
+    ExistingPartitionRecord, ExistingProvisionProfile, MigrationSource, ParsedExistingProvision,
+    PartitionAction, ProvisionPrefill, ProvisionTarget, QuickCapacityUnit, RegionDisposition,
     TargetGeometryOverrides, TargetPartitionGeometry, TargetPartitionPlan, TargetProvisionPlan,
 };
 pub use spec::{OnlyId, ProvisionMetadata, ProvisionSpec, TargetIdentity};

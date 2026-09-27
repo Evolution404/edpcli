@@ -286,15 +286,14 @@ pub fn prepare_target_provision(
             format!("错误: 无法生成统一目标制盘计划: {message}"),
         )
     })?;
-    for part in &mut target_plan.partitions {
-        if request.format.choice(part.geometry.role).0 && part.disposition.preserves_extent() {
-            part.action = PartitionAction::Rebuild;
-            part.disposition = RegionDisposition::Rebuild;
-            part.target_password_policy = KeyDomainRole::from_partition_role(part.geometry.role)
-                .map(|_| TargetPasswordPolicy::InitializeNew);
-            part.reason = "用户选择重新格式化；Preserve family 已显式转为 Rebuild".into();
-            part.preserved_record = None;
-        }
+    let explicit_rebuild_roles = target_plan
+        .partitions
+        .iter()
+        .filter(|part| request.format.choice(part.geometry.role).0)
+        .map(|part| part.geometry.role)
+        .collect::<Vec<_>>();
+    for role in explicit_rebuild_roles {
+        target_plan.force_rebuild_for_format(role);
     }
     for part in &target_plan.partitions {
         if part.disposition == RegionDisposition::Migrate {
