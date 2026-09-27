@@ -286,7 +286,9 @@ fn target_plan_summary_lines(plan: &crate::provision::TargetProvisionPlan) -> Ve
             RegionDisposition::RewrapVerified => {
                 "RewrapVerified · K_old 保持 · 仅重包 wrapper · data extent 0 写入"
             }
-            RegionDisposition::Migrate => "Migrate · 当前版本 unsupported",
+            RegionDisposition::Migrate => {
+                "Migrate · 文件级 staging + 目标文件系统重建 · 原子写入/readback/rollback"
+            }
             RegionDisposition::Rebuild => {
                 "Rebuild · K_new + 完整 filesystem initialization · 原数据不可原样保留"
             }
