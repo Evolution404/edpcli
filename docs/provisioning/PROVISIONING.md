@@ -8728,7 +8728,7 @@ Chapter 15 身份治理仍然是独立的 application/backup 安全治理；它�
 
 ## 16. 全应用 TUI 设计系统与信息架构升级（2026-09-27）
 
-> **状态：核心阶段 COMPLETE（2026-09-27，U0～U9）；扩展阶段 U10～U11 已立项、尚未实施。** U0～U9 已完成全应用 UI 架构升级；2026-09-27 复审又发现 DiskLayout 展示层仍有少量页面私有逻辑，并新增“内置演示模式”需求，因此追加 U10 / U11。Chapter 12 K6 `Migrate` 继续保持 `DEFERRED / fail-closed`，与本章无关。
+> **状态：核心阶段 COMPLETE（2026-09-27，U0～U9）；扩展阶段 U10～U12 已立项、尚未实施。** U0～U9 已完成全应用 UI 架构升级；2026-09-27 复审又发现 DiskLayout 展示层仍有少量页面私有逻辑，并新增“内置演示模式”和表格系统剪贴板可靠性治理需求，因此追加 U10 / U11 / U12。Chapter 12 K6 `Migrate` 继续保持 `DEFERRED / fail-closed`，与本章无关。
 
 ### 16.1 背景与目标
 
@@ -9549,9 +9549,53 @@ edpcli demo --list-scenes
 ```
 
 详细设计见 16.17。
+
+#### U12 — 表格 y/Y 系统剪贴板可靠性治理
+
+状态：PLANNED（2026-09-27 发现真实交互缺陷）。
+
+现状审计：
+
+- `y` 在 Table 中已经正确映射为 `TableCopyCell`；
+- `Y` 已正确映射为 `TableCopyRow`；
+- 当前激活列、视觉列到逻辑列映射以及整列重排后的复制 payload 已有测试；
+- 备份表“选”等 `copyable=false` 控制列按设计不可复制；
+- 真正缺陷位于 `src/tui/clipboard.rs`：当前只向 stdout 写 Crossterm OSC52；
+- `execute!()` 返回成功只代表控制序列写入 stdout 成功，不代表终端模拟器、tmux 或宿主系统真的接受并写入剪贴板，因此 UI 可能误报“已复制”。
+
+目标：
+
+1. `y` 复制当前激活逻辑单元格；
+2. `Y` 复制当前整行，按当前运行时列顺序输出 TSV，并跳过 `copyable=false` 控制列；
+3. macOS 本机优先使用原生 `pbcopy`，内容只通过 stdin 传入，禁止拼 shell 字符串；
+4. Linux 按可用性选择原生剪贴板后端，例如 Wayland `wl-copy`、X11 `xclip` / `xsel`，找不到原生后端时才考虑 OSC52；
+5. Windows 使用可确认退出状态的系统剪贴板路径；
+6. OSC52 只能作为终端 fallback，不能再把“成功写出控制序列”描述成“系统剪贴板已确认写入”；
+7. Clipboard backend 返回 typed outcome，至少区分 `Confirmed / TerminalRequestSent / Unsupported / Failed`；
+8. UI 提示必须和 outcome 一致：Confirmed 才显示“已复制”，OSC52 只显示“已发送终端剪贴板请求；是否生效取决于终端支持”；
+9. 所有 Table 继续走统一 `dispatch_table_action()`，禁止 Devices / Backups / Provision / Inspect 各自实现复制；
+10. 状态栏/快捷键帮助在表格上下文中明确显示 `y 单元格 · Y 整行`；
+11. 不改变 Confirm 模式中 `y=确认` 的既有语义；
+12. 不改变普通 Inspect sector/details 已有的 yank 语义，只有进入共享 Table role 时才映射到表格复制；
+13. Clipboard backend 必须可注入/可替换，自动化测试不得依赖开发机真实剪贴板；
+14. macOS 可增加受控集成验收：用 `pbcopy` 写入后通过 `pbpaste` 验证实际内容，但该检查不得成为非 macOS CI 的硬依赖。
+
+验收至少覆盖：
+
+- Devices、Backups、Provision Select、Provision Menu、Inspect Fields 的 `y` 与 `Y`；
+- `<` / `>` 调整列顺序后 `y/Y` 仍绑定正确逻辑列和当前运行时顺序；
+- `h/l` 改激活列、`0/$` 跳到首尾列后复制正确；
+- `copyable=false` 控制列提示“不复制”，且不得污染系统剪贴板；
+- 中文、Unicode、空格、Tab/换行规范化；
+- macOS 原生 backend 成功与失败；
+- OSC52 fallback 不得误报 Confirmed；
+- 所有现有 Table 键位测试、fast/full/clippy/fmt/diff 门禁保持全绿。
+
+详细设计与执行顺序见 16.17。
+
 ### 16.16 核心阶段完成标准（U0～U9）
 
-以下 26 条是 U0～U9 核心阶段的完成标准；该核心阶段已经完成。U10～U11 作为后续扩展单独验收，不反向篡改历史完成证据：
+以下 26 条是 U0～U9 核心阶段的完成标准；该核心阶段已经完成。U10～U12 作为后续扩展单独验收，不反向篡改历史完成证据：
 
 1. Devices / Inspect / Provision / Backups 是一致的 AppShell Workspace；
 2. Inspect 不再以视觉 overlay 套娃方式存在；
@@ -9587,21 +9631,49 @@ edpcli demo --list-scenes
 > **新版 edpcli TUI 不是“换了一套 cyan 颜色”，而是建立统一的终端应用设计系统：导航层级一致、当前对象优先、状态语义明确、结构可下钻、响应式稳定、业务模型与 renderer 解耦，同时完全保留既有协议事实与破坏性写盘安全边界。**
 ### 16.17 扩展阶段计划：统一容量展示与内置演示
 
-#### 16.17.1 U10 先于 U11
+#### 16.17.1 扩展阶段执行顺序
 
-演示模式会暴露所有页面和中间状态，因此必须先完成 DiskLayout 展示层收口，再建立演示夹具。禁止为了 demo 固化当前页面私有逻辑。
+先完成 DiskLayout 展示层收口，再修复全局表格剪贴板可靠性，最后建立演示夹具。演示模式会暴露所有页面和中间状态，禁止为了演示固化当前页面私有逻辑；剪贴板属于全局基础交互，也必须先于演示场景验收收口。
 
 执行顺序：
 
 ```text
 U10 共享 DiskLayout 展示层
   ↓
+U12 系统剪贴板可靠性治理
+  ↓
 U11 演示状态与场景目录
   ↓
 演示尺寸/交互/零 I/O 门禁
 ```
 
-#### 16.17.2 演示模式产品入口
+#### 16.17.2 U12 Clipboard backend 设计
+
+表格复制只负责产生 payload，真正写入剪贴板由独立 backend 完成：
+
+```text
+Table action
+  ↓
+table_copy_payload()
+  ↓
+ClipboardService
+  ├─ macOS Native: pbcopy
+  ├─ Linux Native: wl-copy / xclip / xsel
+  ├─ Windows Native
+  └─ OSC52 fallback
+```
+
+要求：
+
+- 原生 backend 必须直接 spawn 可执行文件并通过 stdin 写内容，禁止 shell 插值；
+- backend 选择、能力探测、结果分类集中在 `tui/clipboard` 或更合适的单一模块；
+- `Confirmed` 只允许由能够检查真实进程退出状态的后端返回；
+- OSC52 不具备宿主确认能力，只能返回 `TerminalRequestSent`；
+- 测试使用注入式 fake backend 捕获 payload 与调用次数，不访问开发机真实剪贴板；
+- renderer 继续 zero I/O；复制动作仍由 dispatch 层执行；
+- 表格 schema 的 `copyable` 仍是唯一控制列复制规则。
+
+#### 16.17.3 演示模式产品入口
 
 默认：
 
@@ -9621,7 +9693,7 @@ edpcli demo
 
 `--scene` 只负责选择初始状态，不能启动另一套 renderer。
 
-#### 16.17.3 场景目录
+#### 16.17.4 场景目录
 
 至少覆盖以下正式页面与关键状态：
 
@@ -9658,7 +9730,7 @@ error-state
 
 `edpcli demo` 默认不要求用户记场景名；所有主要 Workspace 必须能通过正常键位浏览。`--scene` 主要用于 UI 调试、截图和回归定位。
 
-#### 16.17.4 演示数据必须使用正式 typed model
+#### 16.17.5 演示数据必须使用正式 typed model
 
 禁止为演示维护第二套 renderer 或第二套字段语义。正确方向：
 
@@ -9686,7 +9758,7 @@ DemoFixture / DemoScenario
 
 所有演示值必须显式带 DEMO 语义，不得伪装成当前真实设备或真实备份。
 
-#### 16.17.5 演示进度与运行日志
+#### 16.17.6 演示进度与运行日志
 
 `provision-running`、`backup-verify-running` 等状态不能依赖真实 worker。
 
@@ -9706,7 +9778,7 @@ DemoTimeline
 
 禁止通过 sleep + 随机数制造不可重复的测试状态。
 
-#### 16.17.6 零真实 I/O 是硬安全边界
+#### 16.17.7 零真实 I/O 是硬安全边界
 
 不要在每个 `request_*` 中零散插入 `if demo`。
 
@@ -9738,7 +9810,7 @@ ExecutionPolicy
 
 任何路径都不得把演示 disk、路径或身份数据传入真实 application I/O service。
 
-#### 16.17.7 与真实 TUI 的隔离
+#### 16.17.8 与真实 TUI 的隔离
 
 演示模式不得改变普通启动语义：
 
@@ -9759,7 +9831,7 @@ src/tui/demo/
 
 正常运行时不得自动加载 demo fixture。
 
-#### 16.17.8 演示模式门禁
+#### 16.17.9 演示模式门禁
 
 至少增加：
 
@@ -9778,9 +9850,9 @@ src/tui/demo/
 13. 正常 `edpcli tui` 的现有安全/功能回归全部保持绿；
 14. fast/full/clippy/fmt/diff 门禁全部通过。
 
-#### 16.17.9 扩展阶段完成条件
+#### 16.17.10 扩展阶段完成条件
 
-U10 / U11 只有同时满足以下条件才允许标记 COMPLETE：
+U10 / U11 / U12 只有全部满足各自验收条件后，扩展阶段才允许标记 COMPLETE：
 
 1. Devices / Inspect / Provision 的容量分段来源完全一致；
 2. 三种展示精度只影响格式，不改变 sector 边界；
@@ -9791,4 +9863,7 @@ U10 / U11 只有同时满足以下条件才允许标记 COMPLETE：
 7. 所有关键中间态都有正式 typed 演示场景；
 8. demo 零真实 I/O、零提权；
 9. demo 与正常模式 renderer 共用；
-10. 全部自动化门禁通过并提交、push。
+10. `y/Y` 在所有共享表格中通过同一 Clipboard backend 正确复制；
+11. macOS 原生复制使用 `pbcopy` 并验证退出状态，OSC52 fallback 不误报确认成功；
+12. Confirm 模式 `y`、Inspect 非表格 yank 等既有语义不回退；
+13. 全部自动化门禁通过并提交、push。
