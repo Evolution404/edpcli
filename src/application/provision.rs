@@ -18,7 +18,8 @@ use crate::protocol::lba7_compat::locate_lba7_compatibility_extent_from_verified
 use crate::provision::{
     apply_target_geometry_overrides, build_empty_exfat, build_empty_fat16,
     build_migrated_filesystem, build_official_partition_filesystem,
-    build_official_provision_protocol_image, build_plain_provision_write_plan,
+    build_official_provision_protocol_image, build_plain_migrated_provision_write_plan,
+    build_plain_provision_write_plan,
     encrypt_sparse_mode2, parse_existing_provision, prefill_for_target_mode,
     unwrap_legacy_lba7_file_key, wrap_file_key, wrap_legacy_lba7_file_key, CapacityInput,
     CapacitySource, FileKeyWrapMode, KeyDomainRole, KeyDomainSecrets, OfficialFilesystemFormat,
