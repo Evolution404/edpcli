@@ -4313,7 +4313,7 @@ python3 scripts/test-full.py --profile full
 
 ## 14. 后续计划：TUI 信息架构、磁盘布局与制盘可观测性收口（2026-09-26）
 
-> 状态：**IMPLEMENTING**。PR #25 已合并为 `9206d8a`；实施分支从该最新 main 建立。以下 Q0～Q8 状态仅记录实施进度，唯一实施顺序仍以 14.11.12、14.12.13、14.13.11、14.14.6 为准。
+> 状态：**COMPLETE（2026-09-27，Q0～Q8）**。PR #25 已合并为 `9206d8a`；以下 Q0～Q8 表格保留实施记录，最终验收见本章后续收口记录。Chapter 12 K6 `Migrate` 继续 DEFERRED / fail-closed。
 
 | 阶段 | 实施状态 | 验证记录 |
 | --- | --- | --- |
@@ -4327,7 +4327,7 @@ python3 scripts/test-full.py --profile full
 | Q7 Outcome + CLI | COMPLETE | `af80763`：`ProvisionWriteOutcome` 统一计算成功、警告、部分格式化失败及 exit code；CLI/TUI 共用 typed status 与 summary，Result 不解析消息判断状态。部分格式化失败回归及 CLI/TUI suite PASS。 |
 | Q8 清理与最终门禁 | COMPLETE | 2026-09-27 收口：删除重复的重型 exFAT full-build sweep，保留 production geometry sweep、475.93 GiB 与容量边界 formatter→parser 回归；`provision_suite` 201/201 PASS（测试体 2.46s），full non-HIL 8 suites / 10 artifacts / doctest 全 PASS、89.03s < 180s；fast 预算按扩展后的测试面校准为 60s，校准后 0 failures；Chapter 14 `#[ignore]` 清零、23 条 `ch14_*` 回归处于正式测试集；字符串/glyph/hint 反推业务状态的旧路径已清理；macOS Plain Virtual Disk HIL 1/1 PASS，完成 eject/reattach 后 exFAT mount 与文件读回。真实慢盘 TUI 观察仅在有指定慢盘时追加，不阻塞本次软件收口。 |
 
-Q0 的 `#[ignore]` 只标记预期失败的未来契约；对应功能落地的阶段必须移除 ignore 并令测试通过。Chapter 12 K6 Migrate 仍 DEFERRED/fail-closed；K8 真实 USB 已 COMPLETE。
+Q0 当时的 `#[ignore]` 只用于固定预期失败的未来契约；Q8 已解除全部 Chapter 14 ignore 并令测试通过。Chapter 12 K6 Migrate 仍 DEFERRED/fail-closed；K8 真实 USB 已 COMPLETE。
 
 ### 14.1 结构树单扇区节点去掉冗余 `[n..n]`
 
@@ -9359,7 +9359,7 @@ Backup detail / coverage
 
 #### U0 — 基线与失败测试
 
-状态：PENDING。
+状态：COMPLETE（2026-09-27）。`main == origin/main == 4b67d06`、工作区 clean；既有 `tui_suite` 201/201 PASS。新增 Chapter 16 四项 ignored red contracts，并显式执行确认 4/4 FAIL：四 Workspace Shell 缺失、LBA8 首屏缺部门、Enter 错误展开、统一 responsive 模块不存在。生产 renderer 尚未修改；Chapter 14 陈旧 IMPLEMENTING 文案已收口。
 
 - 核对 main / origin/main / status / log；
 - 运行现有 TUI 门禁；

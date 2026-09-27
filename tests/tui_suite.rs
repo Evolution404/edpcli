@@ -11,6 +11,8 @@ mod tui_backup_delete_safety;
 mod tui_backup_management;
 #[path = "tui_backup_workspace.rs"]
 mod tui_backup_workspace;
+#[path = "tui_ch16_contract.rs"]
+mod tui_ch16_contract;
 #[path = "tui_contract.rs"]
 mod tui_contract;
 #[path = "tui_device_detail.rs"]
