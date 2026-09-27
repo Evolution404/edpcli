@@ -42,7 +42,8 @@ pub fn header(frame: &mut Frame, area: Rect, state: &AppState, core_mode: CoreMo
 
 pub fn navigation(frame: &mut Frame, area: Rect, workspace: Workspace) {
     let theme = theme::current();
-    let labels = if ui::ViewportClass::for_width(area.width) == ui::ViewportClass::Compact {
+    let class = ui::ViewportClass::for_width(area.width);
+    let labels = if class == ui::ViewportClass::Compact {
         ["设备", "检查", "制盘", "备份"]
     } else {
         ["设备", "Inspect", "制盘", "备份"]
@@ -60,7 +61,7 @@ pub fn navigation(frame: &mut Frame, area: Rect, workspace: Workspace) {
             .padding("  ", "  "),
         area,
     );
-    if area.width >= 70 {
+    if class != ui::ViewportClass::Compact {
         let help = Rect::new(area.right().saturating_sub(8), area.y, 8, area.height);
         frame.render_widget(Paragraph::new("? 帮助").style(theme.muted()), help);
     }

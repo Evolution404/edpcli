@@ -3,7 +3,7 @@
 //! 本模块只表达磁盘结构与 lazy children，不保存 TUI 展开/焦点等界面状态。
 //! 大范围 sector 通过 `LazySectors` 延迟 materialize，避免按磁盘容量分配节点。
 
-use super::inspect::{AbsoluteByteRange, InspectDecoderKind, InspectField};
+use super::inspect::{AbsoluteByteRange, InspectDecoderKind, InspectField, InspectFieldKey};
 use crate::backup_metadata::{
     DEVICE_TAIL_WINDOW_SECTORS, TAIL_END4_MIRROR_OFFSET_SECTORS,
     TAIL_METADATA_MIRROR_OFFSET_SECTORS, TAIL_METADATA_MIRROR_SECTORS,
@@ -332,7 +332,7 @@ fn sector_stub(
 }
 
 pub fn field_node(index: usize, field: &InspectField) -> InspectNode {
-    let is_elabel = field.key == crate::inspect::InspectFieldKey::Lba8Elabel;
+    let is_elabel = field.key == InspectFieldKey::Lba8Elabel;
     let children = if is_elabel {
         field
             .children

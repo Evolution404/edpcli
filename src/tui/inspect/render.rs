@@ -90,7 +90,11 @@ fn draw_sector_inspector(frame: &mut Frame, area: ratatui::layout::Rect, state: 
         vertical[0],
     );
 
-    let main = if area.width >= 100 {
+    let class = crate::tui::ui::ViewportClass::for_width(area.width);
+    let main = if matches!(
+        class,
+        crate::tui::ui::ViewportClass::Wide | crate::tui::ui::ViewportClass::UltraWide
+    ) {
         let parts = Layout::default()
             .direction(Direction::Horizontal)
             .constraints([Constraint::Percentage(72), Constraint::Percentage(28)])

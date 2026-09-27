@@ -493,6 +493,33 @@ fn ch16_responsive_breakpoints_have_one_source() {
 }
 
 #[test]
+fn ch16_renderers_use_only_central_responsive_breakpoints() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    for path in [
+        "src/tui/render.rs",
+        "src/tui/shell/mod.rs",
+        "src/tui/disk_layout.rs",
+        "src/tui/devices/render.rs",
+        "src/tui/inspect/render.rs",
+        "src/tui/provision/render.rs",
+        "src/tui/backups/render.rs",
+    ] {
+        let source = std::fs::read_to_string(root.join(path))
+            .unwrap_or_else(|error| panic!("read {path}: {error}"));
+        for (index, line) in source.lines().enumerate() {
+            assert!(
+                ![".width <", ".width >", ".width <=", ".width >="]
+                    .iter()
+                    .any(|needle| line.contains(needle)),
+                "{path}:{} contains a private responsive breakpoint: {}",
+                index + 1,
+                line.trim()
+            );
+        }
+    }
+}
+
+#[test]
 fn ch16_design_primitives_share_theme_and_render_at_compact_size() {
     use edpcli::tui::ui::{
         card, data_table, key_hints, notice_banner, panel, status_badge, BadgeTone, BannerTone,

@@ -271,7 +271,12 @@ fn workspace_sidebar_layout(
     ratatui::layout::Rect,
     Option<(ratatui::layout::Rect, Option<ratatui::layout::Rect>)>,
 ) {
-    if area.width < 108 || area.height < 12 {
+    let class = super::ui::ViewportClass::for_width(area.width);
+    if !matches!(
+        class,
+        super::ui::ViewportClass::Wide | super::ui::ViewportClass::UltraWide
+    ) || area.height < 12
+    {
         return (area, None);
     }
     let columns = Layout::default()
@@ -454,7 +459,13 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
         || state.backup_prune().is_some()
         || state.wizard().is_some()
         || matches!(state.input_mode(), InputMode::Command | InputMode::Help);
-    let (content_area, animation_area) = if overlay_active && body.width >= 118 && body.height >= 14
+    let body_class = super::ui::ViewportClass::for_width(body.width);
+    let (content_area, animation_area) = if overlay_active
+        && matches!(
+            body_class,
+            super::ui::ViewportClass::Wide | super::ui::ViewportClass::UltraWide
+        )
+        && body.height >= 14
     {
         let parts = Layout::default()
             .direction(Direction::Horizontal)

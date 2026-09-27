@@ -265,7 +265,11 @@ pub(super) fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, sta
             frame.render_stateful_widget(table, main_area, &mut table_state);
         }
         ProvisionStage::Form => {
-            let wide = main_area.width >= 96;
+            let class = crate::tui::ui::ViewportClass::for_width(main_area.width);
+            let wide = matches!(
+                class,
+                crate::tui::ui::ViewportClass::Wide | crate::tui::ui::ViewportClass::UltraWide
+            );
             let focused_pane = state.provision_focused_pane();
             let (form_area, layout_area) = if wide {
                 let areas =
@@ -513,7 +517,11 @@ pub(super) fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, sta
         }
         ProvisionStage::Review => {
             let focused_pane = state.provision_focused_pane();
-            let wide = main_area.width >= 108;
+            let class = crate::tui::ui::ViewportClass::for_width(main_area.width);
+            let wide = matches!(
+                class,
+                crate::tui::ui::ViewportClass::Wide | crate::tui::ui::ViewportClass::UltraWide
+            );
             let (summary_area, layout_area, changes_area) = if wide {
                 let areas = Layout::horizontal([
                     Constraint::Percentage(30),

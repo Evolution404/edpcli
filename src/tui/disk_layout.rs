@@ -179,6 +179,8 @@ impl DiskLayoutModel {
 
     pub fn render_pane(&self, frame: &mut Frame<'_>, area: Rect, pane: DiskLayoutPane<'_>) {
         let theme = super::theme::current();
+        let compact =
+            super::ui::ViewportClass::for_width(area.width) == super::ui::ViewportClass::Compact;
         let mut lines = Vec::<Line<'static>>::new();
         if !pane.summary.is_empty() {
             lines.push(Line::from(Span::styled(
@@ -189,7 +191,7 @@ impl DiskLayoutModel {
         lines.push(self.bar_line(area.width.saturating_sub(4) as usize));
         if !self.segments.is_empty() {
             lines.push(Line::from(""));
-            if area.width >= 80 {
+            if !compact {
                 lines.push(Line::from(Span::styled(
                     format!(
                         "{}  {}  {}  {}",
@@ -203,7 +205,7 @@ impl DiskLayoutModel {
             }
         }
         for (segment, text) in self.segments.iter().zip(self.legend_lines()) {
-            if area.width < 80 {
+            if compact {
                 lines.push(Line::from(vec![
                     Span::styled("■ ", theme.disk_region(segment.kind)),
                     Span::styled(segment.label.clone(), theme.muted()),
@@ -232,7 +234,7 @@ impl DiskLayoutModel {
                 DiskLayoutDetailTone::Danger => theme.danger(),
             };
             if let Some([name, range, capacity, status]) = &detail.columns {
-                if area.width < 80 {
+                if compact {
                     lines.push(Line::from(vec![
                         Span::styled(crate::ui::pad_to(name, 18), theme.muted()),
                         Span::styled(status.clone(), style),

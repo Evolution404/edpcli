@@ -9441,7 +9441,7 @@ Backup detail / coverage
 
 #### U7 — 全应用响应式收口
 
-状态：PENDING。
+状态：COMPLETE（2026-09-27）。所有 TUI renderer 的宽度分支统一经 `ViewportClass`（Compact / Standard / Wide / UltraWide）决策，删除 70/80/96/100/108/118 等私有 width breakpoint；新增静态契约禁止 renderer 重新直接比较 `.width` 数字。既有 40x10、60x18、80x24、120x36、160x45、240x60 视觉与 no-panic 门禁、长部门/盘型优先级、CJK/emoji display width、横向滚动和终端文本安全测试继续通过；`tui_suite` 223/223 PASS。
 
 - 删除 renderer 内 magic width breakpoint；
 - 统一 Compact/Standard/Wide/UltraWide；
