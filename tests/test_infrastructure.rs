@@ -193,6 +193,8 @@ fn daily_ci_splits_primary_runtime_coverage_from_secondary_arch_compile_coverage
         "rustfmt must run once rather than once per platform"
     );
     assert!(ci.contains("cargo test --locked --no-run --all-targets"));
+    assert!(ci.contains("cargo check --release --all-targets --locked"));
+    assert!(!ci.contains("cargo build --release --locked"));
     assert!(ci.contains("repository-audit:"));
     assert!(ci.contains("classify changes"));
 }
