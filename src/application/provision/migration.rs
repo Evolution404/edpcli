@@ -3,8 +3,8 @@ use crate::backup_deep::{
     analyze_partition, stream_file_payload, AnalysisStatus, FileEntry, PartitionReader,
 };
 use crate::provision::{
-    build_migration_manifest, finalize_staged_entry, MigrationBudgets, MigrationInventory,
-    Extent, FilesystemProfile, MigrationManifestEntry, MigrationSource, MigrationStagedEntry,
+    build_migration_manifest, finalize_staged_entry, Extent, FilesystemProfile, MigrationBudgets,
+    MigrationInventory, MigrationManifestEntry, MigrationSource, MigrationStagedEntry,
     MigrationTransform, PhysicalCryptoProfile, SourceRegion,
 };
 
@@ -248,7 +248,6 @@ fn stage_manifest_entry(
         .map_err(|message| err(EXIT_TARGET, format!("错误: {message}")))
 }
 
-
 #[derive(Clone, Debug)]
 pub(super) struct PlainImportPlan {
     pub target_index: usize,
@@ -278,10 +277,8 @@ fn parse_plain_mbr(dev: &mut dyn SectorDev) -> EdpCliResult<Vec<PlainSourceParti
     for index in 0..4 {
         let at = 0x1be + index * 16;
         let partition_type = sector[at + 4];
-        let start_lba =
-            u32::from_le_bytes(sector[at + 8..at + 12].try_into().unwrap()) as u64;
-        let sector_count =
-            u32::from_le_bytes(sector[at + 12..at + 16].try_into().unwrap()) as u64;
+        let start_lba = u32::from_le_bytes(sector[at + 8..at + 12].try_into().unwrap()) as u64;
+        let sector_count = u32::from_le_bytes(sector[at + 12..at + 16].try_into().unwrap()) as u64;
         if partition_type == 0 || sector_count == 0 {
             continue;
         }
@@ -402,7 +399,10 @@ fn stage_plain_file(
     stream_file_payload(&mut reader, entry, entry.logical_size, &mut data).map_err(|message| {
         err(
             EXIT_TARGET,
-            format!("错误: K6 Plain 文件 {:?} staging 失败: {message}", entry.path),
+            format!(
+                "错误: K6 Plain 文件 {:?} staging 失败: {message}",
+                entry.path
+            ),
         )
     })?;
     Ok(MigrationStagedEntry {
@@ -469,11 +469,7 @@ pub(super) fn prepare_plain_to_official(
         }
         for entry in entries.iter().filter(|entry| entry.path != "/") {
             let target_path = match &prefix {
-                Some(prefix) => format!(
-                    "{}{}",
-                    prefix,
-                    entry.path.trim_start_matches('/')
-                ),
+                Some(prefix) => format!("{}{}", prefix, entry.path.trim_start_matches('/')),
                 None => entry.path.clone(),
             };
             let key = target_path.trim_end_matches('/').to_lowercase();
@@ -572,11 +568,7 @@ pub(super) fn prepare_existing_to_plain(
         }
         for entry in inventory.entries.iter().filter(|entry| entry.path != "/") {
             let path = match &prefix {
-                Some(prefix) => format!(
-                    "{}{}",
-                    prefix,
-                    entry.path.trim_start_matches('/')
-                ),
+                Some(prefix) => format!("{}{}", prefix, entry.path.trim_start_matches('/')),
                 None => entry.path.clone(),
             };
             let key = path.trim_end_matches('/').to_lowercase();
