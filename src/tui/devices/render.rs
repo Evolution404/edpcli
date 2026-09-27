@@ -1,5 +1,5 @@
 use super::*;
-use crate::tui::{pane::PaneId, state::DeviceSummarySection, theme, ui::ViewportClass};
+use crate::tui::{pane::PaneId, state::DeviceSummarySection, ui::ViewportClass};
 
 pub(super) fn draw_devices(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState) {
     let class = ViewportClass::for_width(area.width);
@@ -249,14 +249,14 @@ fn draw_device_summary(frame: &mut Frame, area: ratatui::layout::Rect, state: &A
     if state.device_summary_section_expanded(DeviceSummarySection::Capacity) {
         match row.canonical_layout() {
             Ok(model) => {
-                let compact = model.collapsed_tail_model();
+                let presentation = crate::tui::disk_layout::DiskLayoutPresentation::new(
+                    &model,
+                    crate::tui::disk_layout::DiskLayoutProfile::CompactHuman,
+                    state.disk_layout_tail_expansion(),
+                );
                 let bar_width = usize::from(area.width.saturating_sub(6));
-                lines.push(compact.bar_line_with_label(bar_width, "  "));
-                lines.extend(capacity_legend_lines(
-                    &compact,
-                    &format_sector_size(row.size / crate::common::SECTOR as u64),
-                    usize::from(area.width.saturating_sub(6)),
-                ));
+                lines.push(presentation.bar_line_with_label(bar_width, "  "));
+                lines.extend(presentation.compact_grid_lines(bar_width));
                 if model.tail_group().is_some() {
                     lines.push(Line::from(Span::styled(
                         "    尾部区域详情可在 Inspect 全盘布局中按 o 展开",
@@ -367,113 +367,6 @@ fn field_line(label: &'static str, value: impl Into<String>) -> Line<'static> {
         Span::styled(crate::ui::pad_to(label, 12), muted()),
         Span::raw(value.into()),
     ])
-}
-
-fn capacity_legend_lines(
-    model: &crate::tui::disk_layout::DiskLayoutModel,
-    total: &str,
-    width: usize,
-) -> Vec<Line<'static>> {
-    use crate::tui::table_layout::display_width;
-
-    #[derive(Clone)]
-    struct Entry {
-        kind: Option<crate::application::disk_layout::DiskRegionKind>,
-        text: String,
-    }
-
-    let mut entries = vec![Entry {
-        kind: None,
-        text: format!("总容量  {total}"),
-    }];
-    entries.extend(model.segments.iter().map(|segment| Entry {
-        kind: Some(segment.kind),
-        text: format!(
-            "{}  {}",
-            segment.label,
-            format_sector_size(segment.sector_count)
-        ),
-    }));
-
-    if entries.is_empty() {
-        return Vec::new();
-    }
-
-    let available = width.max(1);
-    let gap = 4usize;
-    let max_entry_width = entries
-        .iter()
-        .map(|entry| display_width(&entry.text) + usize::from(entry.kind.is_some()) * 2)
-        .max()
-        .unwrap_or(1)
-        .max(1);
-
-    let mut columns = entries.len().clamp(1, 4);
-    while columns > 1
-        && max_entry_width
-            .saturating_mul(columns)
-            .saturating_add(gap.saturating_mul(columns - 1))
-            > available
-    {
-        columns -= 1;
-    }
-    let cell_width = if columns == 1 {
-        available
-    } else {
-        available.saturating_sub(gap.saturating_mul(columns - 1)) / columns
-    }
-    .max(1);
-
-    let mut lines = Vec::new();
-    for chunk in entries.chunks(columns) {
-        let mut spans = vec![Span::raw("    ")];
-        for (position, entry) in chunk.iter().enumerate() {
-            if position > 0 {
-                spans.push(Span::raw(" ".repeat(gap)));
-            }
-            let prefix_width = if let Some(kind) = entry.kind {
-                spans.push(Span::styled("■ ", theme::current().disk_region(kind)));
-                2
-            } else {
-                0
-            };
-            let text_width = display_width(&entry.text);
-            let room = cell_width.saturating_sub(prefix_width);
-            let text = if text_width <= room {
-                entry.text.clone()
-            } else {
-                crate::tui::table_layout::truncate_cell(
-                    &entry.text,
-                    room,
-                    crate::tui::table_layout::TruncatePolicy::Clip,
-                )
-            };
-            let padded = crate::ui::pad_to(&text, room);
-            spans.push(Span::styled(
-                padded,
-                if entry.kind.is_some() {
-                    muted()
-                } else {
-                    Style::default()
-                },
-            ));
-        }
-        lines.push(Line::from(spans));
-    }
-    lines
-}
-
-fn format_sector_size(sectors: u64) -> String {
-    let bytes = sectors.saturating_mul(crate::common::SECTOR as u64);
-    if bytes >= 1_000_000_000 {
-        format!("{:.2} GB", bytes as f64 / 1_000_000_000.0)
-    } else if bytes >= 1_000_000 {
-        format!("{:.2} MB", bytes as f64 / 1_000_000.0)
-    } else if bytes >= 1_000 {
-        format!("{:.2} kB", bytes as f64 / 1_000.0)
-    } else {
-        format!("{bytes} B")
-    }
 }
 
 fn device_identity_basis(row: &crate::disk_scan::Row) -> &'static str {

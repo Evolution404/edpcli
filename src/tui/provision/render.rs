@@ -561,7 +561,7 @@ pub(super) fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, sta
             }
 
             if let Some(layout_area) = layout_area {
-                let layout_model = state.provision_layout_model().collapsed_tail_model();
+                let layout_model = state.provision_layout_model();
                 let layout_details = state.provision_layout_editor_details();
                 let layout_summary = format!(
                     "{} · {} sectors",
@@ -580,6 +580,9 @@ pub(super) fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, sta
                             .pane_viewport(crate::tui::pane::PaneId::ProvisionDiskLayout)
                             .scroll_y
                             .offset,
+                        profile: crate::tui::disk_layout::DiskLayoutProfile::EditorExact,
+                        tail: state.disk_layout_tail_expansion(),
+                        selected_segment: state.disk_layout_selected(),
                     },
                 );
             }
@@ -665,7 +668,7 @@ pub(super) fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, sta
             }
 
             if let Some(layout_area) = layout_area {
-                let layout_model = state.provision_layout_model().collapsed_tail_model();
+                let layout_model = state.provision_layout_model();
                 let layout_summary = format!(
                     "{} · {} sectors",
                     provision.kind.title(),
@@ -683,6 +686,9 @@ pub(super) fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, sta
                             .pane_viewport(crate::tui::pane::PaneId::ProvisionDiskLayout)
                             .scroll_y
                             .offset,
+                        profile: crate::tui::disk_layout::DiskLayoutProfile::EditorExact,
+                        tail: state.disk_layout_tail_expansion(),
+                        selected_segment: state.disk_layout_selected(),
                     },
                 );
             }

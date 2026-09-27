@@ -697,16 +697,7 @@ fn run_loop(resume: Option<state::WriteIntent>) -> io::Result<LoopExit> {
                                     TuiAction::Top => state.advanced_inspect_focused_top(),
                                     TuiAction::Bottom => state.advanced_inspect_focused_bottom(),
                                     TuiAction::Open => {
-                                        if state.advanced_inspect_focused_pane()
-                                            == Some(crate::tui::pane::PaneId::InspectDetail)
-                                            && state
-                                                .advanced_inspect_detail_selected_row()
-                                                .is_some()
-                                        {
-                                            state.advanced_inspect_detail_toggle_selected();
-                                        } else {
-                                            state.advanced_inspect_toggle_selected();
-                                        }
+                                        dispatch::open_inspect_selection(&mut state);
                                     }
                                     TuiAction::Yank | TuiAction::YankRaw => {
                                         if state.advanced_inspect_focused_pane()
@@ -732,9 +723,15 @@ fn run_loop(resume: Option<state::WriteIntent>) -> io::Result<LoopExit> {
                                         }
                                     }
                                     TuiAction::Activate => {
-                                        open_advanced_inspect_selection(
-                                            &mut state, &mut tasks, false,
-                                        );
+                                        if state.advanced_inspect_focused_pane()
+                                            == Some(crate::tui::pane::PaneId::InspectDiskLayout)
+                                        {
+                                            dispatch::show_inspect_layout_detail(&mut state);
+                                        } else {
+                                            open_advanced_inspect_selection(
+                                                &mut state, &mut tasks, false,
+                                            );
+                                        }
                                     }
                                     TuiAction::InspectBusiness => {
                                         state.advanced_inspect_focus_pane(
@@ -964,6 +961,12 @@ fn run_loop(resume: Option<state::WriteIntent>) -> io::Result<LoopExit> {
                                 }
                             }
                             ProvisionStage::Form => match action {
+                                TuiAction::Open
+                                    if state.provision_focused_pane()
+                                        == crate::tui::pane::PaneId::ProvisionDiskLayout =>
+                                {
+                                    state.toggle_disk_layout_tail();
+                                }
                                 TuiAction::WorkspaceNext => state.provision_shift_pane(false),
                                 TuiAction::WorkspacePrevious => state.provision_shift_pane(true),
                                 TuiAction::PanelNext => state.provision_shift_pane(false),
@@ -1061,7 +1064,13 @@ fn run_loop(resume: Option<state::WriteIntent>) -> io::Result<LoopExit> {
                                     start_provision_source_password_verify(&mut state, &mut tasks);
                                 }
                                 TuiAction::Activate => {
-                                    start_provision_plan(&mut state, &mut tasks);
+                                    if state.provision_focused_pane()
+                                        == crate::tui::pane::PaneId::ProvisionDiskLayout
+                                    {
+                                        dispatch::show_provision_layout_detail(&mut state);
+                                    } else {
+                                        start_provision_plan(&mut state, &mut tasks);
+                                    }
                                 }
                                 TuiAction::Export => {
                                     state.set_notice(
@@ -1079,6 +1088,12 @@ fn run_loop(resume: Option<state::WriteIntent>) -> io::Result<LoopExit> {
                                 }
                             }
                             ProvisionStage::Review => match action {
+                                TuiAction::Open
+                                    if state.provision_focused_pane()
+                                        == crate::tui::pane::PaneId::ProvisionDiskLayout =>
+                                {
+                                    state.toggle_disk_layout_tail();
+                                }
                                 TuiAction::WorkspaceNext => state.provision_shift_pane(false),
                                 TuiAction::WorkspacePrevious => state.provision_shift_pane(true),
                                 TuiAction::PanelNext => state.provision_shift_pane(false),
@@ -1140,7 +1155,13 @@ fn run_loop(resume: Option<state::WriteIntent>) -> io::Result<LoopExit> {
                                     );
                                 }
                                 TuiAction::Activate => {
-                                    state.provision_begin_confirm();
+                                    if state.provision_focused_pane()
+                                        == crate::tui::pane::PaneId::ProvisionDiskLayout
+                                    {
+                                        dispatch::show_provision_layout_detail(&mut state);
+                                    } else {
+                                        state.provision_begin_confirm();
+                                    }
                                 }
                                 TuiAction::Export => state.provision_begin_export(),
                                 TuiAction::Back => {

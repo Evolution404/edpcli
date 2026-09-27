@@ -11,6 +11,221 @@ use super::state::ProvisionBarKind;
 
 pub use crate::application::disk_layout::{DiskLayoutModel, DiskLayoutSegment, DiskRegionKind};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DiskLayoutProfile {
+    CompactHuman,
+    DetailedExact,
+    EditorExact,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum TailExpansion {
+    #[default]
+    Collapsed,
+    Expanded,
+}
+
+impl TailExpansion {
+    pub fn toggle(&mut self) {
+        *self = match self {
+            Self::Collapsed => Self::Expanded,
+            Self::Expanded => Self::Collapsed,
+        };
+    }
+}
+
+/// A view over one canonical physical layout. Profiles only change its formatting.
+pub struct DiskLayoutPresentation<'a> {
+    model: &'a DiskLayoutModel,
+    profile: DiskLayoutProfile,
+    tail: TailExpansion,
+}
+
+impl<'a> DiskLayoutPresentation<'a> {
+    pub fn new(
+        model: &'a DiskLayoutModel,
+        profile: DiskLayoutProfile,
+        tail: TailExpansion,
+    ) -> Self {
+        Self {
+            model,
+            profile,
+            tail,
+        }
+    }
+
+    pub fn visible_model(&self) -> DiskLayoutModel {
+        match self.tail {
+            TailExpansion::Collapsed => self.model.collapsed_tail_model(),
+            TailExpansion::Expanded => self.model.clone(),
+        }
+    }
+
+    pub fn bar_line(&self, width: usize) -> Line<'static> {
+        self.visible_model().bar_line(width)
+    }
+
+    pub fn bar_line_with_label(&self, width: usize, label: &'static str) -> Line<'static> {
+        self.visible_model().bar_line_with_label(width, label)
+    }
+
+    pub fn legend_lines(&self) -> Vec<String> {
+        let visible = self.visible_model();
+        let tail_start = if self.tail == TailExpansion::Expanded {
+            self.model.tail_group().map(|tail| tail.start_lba)
+        } else {
+            None
+        };
+        visible
+            .segments
+            .iter()
+            .map(|segment| {
+                let label = if tail_start.is_some_and(|start| segment.start_lba >= start) {
+                    let branch = if segment.end_exclusive().ok() == Some(visible.total_sectors) {
+                        "└─"
+                    } else {
+                        "├─"
+                    };
+                    format!("{branch} {}", segment.label)
+                } else {
+                    segment.label.clone()
+                };
+                let capacity = match self.profile {
+                    DiskLayoutProfile::CompactHuman => format_sector_size(segment.sector_count),
+                    DiskLayoutProfile::DetailedExact | DiskLayoutProfile::EditorExact => {
+                        format!(
+                            "{} sectors / {} bytes",
+                            segment.sector_count,
+                            segment
+                                .sector_count
+                                .saturating_mul(crate::common::SECTOR as u64)
+                        )
+                    }
+                };
+                format!(
+                    "{}  {}  {}  {}",
+                    crate::ui::pad_to(&label, 18),
+                    crate::ui::pad_to(&segment.closed_range(), 24),
+                    crate::ui::pad_to(&capacity, 28),
+                    percentage(segment.sector_count, visible.total_sectors)
+                )
+            })
+            .collect()
+    }
+
+    pub fn compact_grid_lines(&self, width: usize) -> Vec<Line<'static>> {
+        use crate::tui::table_layout::display_width;
+
+        let visible = self.visible_model();
+        let mut entries = vec![(
+            None,
+            format!("总容量  {}", format_sector_size(visible.total_sectors)),
+        )];
+        entries.extend(visible.segments.iter().map(|segment| {
+            (
+                Some(segment.kind),
+                format!(
+                    "{}  {}",
+                    segment.label,
+                    format_sector_size(segment.sector_count)
+                ),
+            )
+        }));
+        let available = width.max(1);
+        let gap = 4usize;
+        let max_entry_width = entries
+            .iter()
+            .map(|(kind, text)| display_width(text) + usize::from(kind.is_some()) * 2)
+            .max()
+            .unwrap_or(1)
+            .max(1);
+        let mut columns = entries.len().clamp(1, 4);
+        while columns > 1
+            && max_entry_width
+                .saturating_mul(columns)
+                .saturating_add(gap.saturating_mul(columns - 1))
+                > available
+        {
+            columns -= 1;
+        }
+        let cell_width = if columns == 1 {
+            available
+        } else {
+            available.saturating_sub(gap.saturating_mul(columns - 1)) / columns
+        }
+        .max(1);
+        entries
+            .chunks(columns)
+            .map(|chunk| {
+                let mut spans = vec![Span::raw("    ")];
+                for (position, (kind, text)) in chunk.iter().enumerate() {
+                    if position > 0 {
+                        spans.push(Span::raw(" ".repeat(gap)));
+                    }
+                    let prefix_width = if let Some(kind) = kind {
+                        spans.push(Span::styled(
+                            "■ ",
+                            super::theme::current().disk_region(*kind),
+                        ));
+                        2
+                    } else {
+                        0
+                    };
+                    let room = cell_width.saturating_sub(prefix_width);
+                    let text = if display_width(text) <= room {
+                        text.clone()
+                    } else {
+                        crate::tui::table_layout::truncate_cell(
+                            text,
+                            room,
+                            crate::tui::table_layout::TruncatePolicy::Clip,
+                        )
+                    };
+                    spans.push(Span::styled(
+                        crate::ui::pad_to(&text, room),
+                        if kind.is_some() {
+                            super::theme::current().muted()
+                        } else {
+                            ratatui::style::Style::default()
+                        },
+                    ));
+                }
+                Line::from(spans)
+            })
+            .collect()
+    }
+
+    pub fn pane_line_count(&self, summary: &str, details: &[DiskLayoutDetail]) -> usize {
+        self.visible_model().pane_line_count(summary, details)
+            + usize::from(self.tail == TailExpansion::Expanded && self.model.tail_group().is_some())
+    }
+}
+
+fn percentage(sectors: u64, total: u64) -> String {
+    if total == 0 {
+        return "0.00%".into();
+    }
+    let ratio = sectors as f64 * 100.0 / total as f64;
+    if ratio > 0.0 && ratio < 0.01 {
+        "<0.01%".into()
+    } else {
+        format!("{ratio:.2}%")
+    }
+}
+
+fn format_sector_size(sectors: u64) -> String {
+    let bytes = sectors.saturating_mul(crate::common::SECTOR as u64);
+    if bytes >= 1_000_000_000 {
+        format!("{:.2} GB", bytes as f64 / 1_000_000_000.0)
+    } else if bytes >= 1_000_000 {
+        format!("{:.2} MB", bytes as f64 / 1_000_000.0)
+    } else if bytes >= 1_000 {
+        format!("{:.2} kB", bytes as f64 / 1_000.0)
+    } else {
+        format!("{bytes} B")
+    }
+}
+
 impl DiskRegionKind {
     pub const fn visual_kind(self) -> ProvisionBarKind {
         match self {
@@ -108,6 +323,9 @@ pub struct DiskLayoutPane<'a> {
     pub details: &'a [DiskLayoutDetail],
     pub focused: bool,
     pub scroll_y: usize,
+    pub profile: DiskLayoutProfile,
+    pub tail: TailExpansion,
+    pub selected_segment: usize,
 }
 
 impl DiskLayoutModel {
@@ -117,8 +335,15 @@ impl DiskLayoutModel {
             None => "磁盘概览 · 全盘布局可下钻".into(),
         };
         frame.render_widget(
-            Paragraph::new(self.bar_line(area.width.saturating_sub(4) as usize))
-                .block(super::ui::panel(title, false)),
+            Paragraph::new(
+                DiskLayoutPresentation::new(
+                    self,
+                    DiskLayoutProfile::CompactHuman,
+                    TailExpansion::Collapsed,
+                )
+                .bar_line(area.width.saturating_sub(4) as usize),
+            )
+            .block(super::ui::panel(title, false)),
             area,
         );
     }
@@ -148,28 +373,12 @@ impl DiskLayoutModel {
     }
 
     pub fn legend_lines(&self) -> Vec<String> {
-        self.segments
-            .iter()
-            .map(|segment| {
-                let percent = if self.total_sectors == 0 {
-                    "0.00%".into()
-                } else {
-                    let ratio = segment.sector_count as f64 * 100.0 / self.total_sectors as f64;
-                    if ratio > 0.0 && ratio < 0.01 {
-                        "<0.01%".into()
-                    } else {
-                        format!("{ratio:.2}%")
-                    }
-                };
-                format!(
-                    "{}  {}  {}  {}",
-                    crate::ui::pad_to(&segment.label, 18),
-                    crate::ui::pad_to(&segment.closed_range(), 24),
-                    crate::ui::pad_to(&format!("{} sectors", segment.sector_count), 18),
-                    percent
-                )
-            })
-            .collect()
+        DiskLayoutPresentation::new(
+            self,
+            DiskLayoutProfile::DetailedExact,
+            TailExpansion::Expanded,
+        )
+        .legend_lines()
     }
 
     pub fn pane_line_count(&self, summary: &str, details: &[DiskLayoutDetail]) -> usize {
@@ -182,6 +391,8 @@ impl DiskLayoutModel {
     }
 
     pub fn render_pane(&self, frame: &mut Frame<'_>, area: Rect, pane: DiskLayoutPane<'_>) {
+        let presentation = DiskLayoutPresentation::new(self, pane.profile, pane.tail);
+        let visible = presentation.visible_model();
         let theme = super::theme::current();
         let compact =
             super::ui::ViewportClass::for_width(area.width) == super::ui::ViewportClass::Compact;
@@ -192,8 +403,8 @@ impl DiskLayoutModel {
                 theme.secondary_text(),
             )));
         }
-        lines.push(self.bar_line(area.width.saturating_sub(4) as usize));
-        if !self.segments.is_empty() {
+        lines.push(presentation.bar_line(area.width.saturating_sub(4) as usize));
+        if !visible.segments.is_empty() {
             lines.push(Line::from(""));
             if !compact {
                 lines.push(Line::from(Span::styled(
@@ -208,11 +419,40 @@ impl DiskLayoutModel {
                 )));
             }
         }
-        for (segment, text) in self.segments.iter().zip(self.legend_lines()) {
+        for (index, (segment, text)) in visible
+            .segments
+            .iter()
+            .zip(presentation.legend_lines())
+            .enumerate()
+        {
+            if pane.tail == TailExpansion::Expanded
+                && self
+                    .tail_group()
+                    .is_some_and(|tail| tail.start_lba == segment.start_lba)
+            {
+                lines.push(Line::from(Span::styled("尾部区域", theme.secondary_text())));
+            }
             if compact {
+                let label = if pane.tail == TailExpansion::Expanded
+                    && self
+                        .tail_group()
+                        .is_some_and(|tail| segment.start_lba >= tail.start_lba)
+                {
+                    format!("├─ {}", segment.label)
+                } else {
+                    segment.label.clone()
+                };
                 lines.push(Line::from(vec![
+                    Span::styled(
+                        if pane.focused && index == pane.selected_segment {
+                            "▌"
+                        } else {
+                            " "
+                        },
+                        theme.accent(),
+                    ),
                     Span::styled("■ ", theme.disk_region(segment.kind)),
-                    Span::styled(segment.label.clone(), theme.muted()),
+                    Span::styled(label, theme.muted()),
                 ]));
                 lines.push(Line::from(format!(
                     "  {}  {} sector",
@@ -221,6 +461,14 @@ impl DiskLayoutModel {
                 )));
             } else {
                 lines.push(Line::from(vec![
+                    Span::styled(
+                        if pane.focused && index == pane.selected_segment {
+                            "▌"
+                        } else {
+                            " "
+                        },
+                        theme.accent(),
+                    ),
                     Span::styled("■ ", theme.disk_region(segment.kind)),
                     Span::styled(text, theme.muted()),
                 ]));
@@ -311,6 +559,9 @@ mod tests {
                             details: &details,
                             focused: true,
                             scroll_y: 0,
+                            profile: DiskLayoutProfile::DetailedExact,
+                            tail: TailExpansion::Collapsed,
+                            selected_segment: 0,
                         },
                     );
                 })

@@ -1,5 +1,6 @@
 //! UI-neutral whole-disk layout model shared by Inspect and Provision frontends.
 
+#[cfg(test)]
 use crate::application::inspect_tree::{
     DiskRegionSemantic, InspectChildren, InspectNode, InspectTopology,
 };
@@ -52,6 +53,7 @@ impl DiskRegionKind {
         }
     }
 
+    #[cfg(test)]
     const fn priority(self) -> u8 {
         match self {
             Self::Protocol => 120,
@@ -77,6 +79,7 @@ impl DiskRegionKind {
         }
     }
 
+    #[cfg(test)]
     fn from_protocol_partition_type(partition_type: u32) -> Self {
         match EdpPartitionType::from_raw(partition_type) {
             Some(EdpPartitionType::Boot) => Self::Boot,
@@ -86,6 +89,7 @@ impl DiskRegionKind {
         }
     }
 
+    #[cfg(test)]
     fn from_region_semantic(semantic: DiskRegionSemantic) -> Self {
         match semantic {
             DiskRegionSemantic::Protocol => Self::Protocol,
@@ -217,6 +221,9 @@ impl DiskLayoutModel {
 
         known.sort_by_key(|segment| segment.start_lba);
         for segment in &known {
+            if segment.kind == DiskRegionKind::Unknown {
+                return Err(format!("{} has unknown physical ownership", segment.label));
+            }
             if segment.sector_count == 0 {
                 return Err(format!("{} has zero sectors", segment.label));
             }
@@ -413,6 +420,9 @@ impl DiskLayoutModel {
         Self::new(self.total_sectors, segments)
     }
 
+    /// Legacy topology projection kept only for unit compatibility tests.
+    /// Production layouts must use `canonical_*` constructors and fail closed.
+    #[cfg(test)]
     pub fn from_claims(
         total_sectors: u64,
         claims: Vec<DiskLayoutSegment>,
@@ -478,6 +488,9 @@ impl DiskLayoutModel {
         model
     }
 
+    /// Legacy topology projection kept only for unit compatibility tests.
+    /// It is not a physical layout fact source.
+    #[cfg(test)]
     pub fn from_topology(topology: &InspectTopology) -> Self {
         fn collect(node: &InspectNode, claims: &mut Vec<DiskLayoutSegment>) {
             if node.region_semantic == Some(DiskRegionSemantic::Conflict) {

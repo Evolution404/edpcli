@@ -237,6 +237,40 @@ fn assert_complete_layout(model: &DiskLayoutModel) {
 }
 
 #[test]
+fn same_edp_fixture_has_identical_devices_inspect_and_provision_source_geometry() {
+    let context = crate::common::edp_inspect_context(2_000_000);
+    let mut row = device();
+    row.size = context.total_sectors * edpcli::common::SECTOR as u64;
+    row.provision_kind = edpcli::provision::DiskProvisionKind::Mode0;
+    confirm_kind(&mut row, edpcli::provision::DiskProvisionKind::Mode0);
+    row.partitions = Some(
+        context
+            .partitions
+            .iter()
+            .map(|part| edpcli::sectors::EdpfPartition {
+                ptype: part.partition_type,
+                active: 1,
+                enc: u32::from(part.partition_type != 1),
+                start_lba: part.start_sector,
+                size_bytes: part.sector_count * edpcli::common::SECTOR as u64,
+            })
+            .collect(),
+    );
+    row.lce = context.lce.clone();
+    let device_layout = row.canonical_layout().unwrap();
+    let inspect_layout = DiskLayoutModel::canonical_inspect_context(&context).unwrap();
+    assert_eq!(device_layout, inspect_layout);
+
+    let mut state = AppState::new();
+    state.replace_devices(vec![row]);
+    state.navigate(NavCommand::WorkspaceProvision, 20);
+    assert_eq!(state.provision_select_disk(), Some(6));
+    let provision_source = state.selected_device().unwrap().canonical_layout().unwrap();
+    assert_eq!(provision_source, inspect_layout);
+    assert_complete_layout(&provision_source);
+}
+
+#[test]
 fn inspect_disk_layout_is_complete_and_semantically_distinct() {
     let workspace = inspect_workspace();
     let model = workspace.disk_layout.as_ref().unwrap();
@@ -252,6 +286,38 @@ fn inspect_disk_layout_is_complete_and_semantically_distinct() {
     assert!(kinds.contains(&DiskRegionKind::BackupMirror));
     assert!(kinds.contains(&DiskRegionKind::RestoreNode));
     assert!(!kinds.contains(&DiskRegionKind::Unknown));
+}
+
+#[test]
+fn provision_disk_layout_tail_starts_collapsed_and_expands_without_changing_geometry() {
+    let mut state = provision_state();
+    state.provision_focus_pane(PaneId::ProvisionDiskLayout);
+    let canonical = state.provision_layout_model();
+    assert_eq!(
+        state.disk_layout_tail_expansion(),
+        edpcli::tui::disk_layout::TailExpansion::Collapsed
+    );
+    let collapsed = render_text(&state, 160, 45);
+    assert!(collapsed.contains("尾部区域"));
+    assert!(!collapsed.contains("restore-node"));
+    state.toggle_disk_layout_tail();
+    let expanded = render_text(&state, 160, 45);
+    assert!(expanded.contains("restore-node"));
+    assert!(state
+        .disk_layout_detail(&canonical)
+        .unwrap()
+        .contains("EDP 主协议区"));
+    state.disk_layout_move_selection(1, canonical.segments.len());
+    assert!(state
+        .disk_layout_detail(&canonical)
+        .unwrap()
+        .contains("空闲区域"));
+    assert_eq!(state.provision_layout_model().segments, canonical.segments);
+    state.toggle_disk_layout_tail();
+    assert_eq!(
+        state.disk_layout_tail_expansion(),
+        edpcli::tui::disk_layout::TailExpansion::Collapsed
+    );
 }
 
 #[test]

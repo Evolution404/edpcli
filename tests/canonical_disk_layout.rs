@@ -3,6 +3,7 @@ use edpcli::application::partition_table::{
     PartitionSource, PartitionTableExtent, PartitionTableKind, PartitionTableSnapshot,
     PhysicalPartition,
 };
+use edpcli::tui::disk_layout::{DiskLayoutPresentation, DiskLayoutProfile, TailExpansion};
 
 fn segment(
     label: &str,
@@ -121,4 +122,65 @@ fn canonical_layout_rejects_overlapping_physical_ownership() {
     )
     .unwrap_err();
     assert!(error.contains("overlap"), "{error}");
+}
+
+#[test]
+fn canonical_layout_rejects_unknown_physical_ownership() {
+    let error = DiskLayoutModel::canonical_from_known(
+        100,
+        vec![segment("unverified", 0, 100, DiskRegionKind::Unknown)],
+    )
+    .unwrap_err();
+    assert!(error.contains("unknown physical ownership"), "{error}");
+}
+
+#[test]
+fn presentation_profiles_preserve_canonical_geometry_and_tail_expansion() {
+    let model = DiskLayoutModel::canonical_edp(
+        10_000,
+        vec![segment("交换区", 63, 5_937, DiskRegionKind::Share)],
+        6_000,
+        6,
+    )
+    .unwrap();
+    let canonical = model.segments.clone();
+
+    for profile in [
+        DiskLayoutProfile::CompactHuman,
+        DiskLayoutProfile::DetailedExact,
+        DiskLayoutProfile::EditorExact,
+    ] {
+        let collapsed = DiskLayoutPresentation::new(&model, profile, TailExpansion::Collapsed);
+        let visible = collapsed.visible_model();
+        visible.validate_complete().unwrap();
+        assert_eq!(visible.segments.last().unwrap().kind, DiskRegionKind::Tail);
+        assert_eq!(visible.segments.last().unwrap().start_lba, 6_000);
+
+        let expanded = DiskLayoutPresentation::new(&model, profile, TailExpansion::Expanded);
+        assert_eq!(expanded.visible_model().segments, canonical);
+        assert!(expanded
+            .legend_lines()
+            .iter()
+            .any(|line| line.contains("restore-node")));
+    }
+    assert_eq!(model.segments, canonical);
+}
+
+#[test]
+fn plain_presentation_never_invents_edp_tail() {
+    let model = DiskLayoutModel::canonical_plain_plan(
+        10_000,
+        vec![segment("普通分区", 2_048, 5_000, DiskRegionKind::Plain)],
+    )
+    .unwrap();
+    for expansion in [TailExpansion::Collapsed, TailExpansion::Expanded] {
+        let visible =
+            DiskLayoutPresentation::new(&model, DiskLayoutProfile::DetailedExact, expansion)
+                .visible_model();
+        assert_eq!(visible.segments, model.segments);
+        assert!(!visible
+            .segments
+            .iter()
+            .any(|segment| segment.kind == DiskRegionKind::Tail));
+    }
 }

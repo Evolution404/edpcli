@@ -1,5 +1,34 @@
 use super::*;
 
+pub(super) fn show_inspect_layout_detail(state: &mut AppState) {
+    let detail = state
+        .advanced_inspect()
+        .and_then(|advanced| advanced.result.as_ref())
+        .and_then(|workspace| workspace.disk_layout.as_ref())
+        .and_then(|model| state.disk_layout_detail(model));
+    if let Some(detail) = detail {
+        state.set_notice(detail);
+    }
+}
+
+pub(super) fn open_inspect_selection(state: &mut AppState) {
+    use crate::tui::pane::PaneId;
+    match state.advanced_inspect_focused_pane() {
+        Some(PaneId::InspectDiskLayout) => state.toggle_disk_layout_tail(),
+        Some(PaneId::InspectDetail) if state.advanced_inspect_detail_selected_row().is_some() => {
+            state.advanced_inspect_detail_toggle_selected();
+        }
+        _ => state.advanced_inspect_toggle_selected(),
+    }
+}
+
+pub(super) fn show_provision_layout_detail(state: &mut AppState) {
+    let model = state.provision_layout_model();
+    if let Some(detail) = state.disk_layout_detail(&model) {
+        state.set_notice(detail);
+    }
+}
+
 pub(super) fn dispatch_nav_command(
     state: &mut AppState,
     tasks: &mut TaskHub,

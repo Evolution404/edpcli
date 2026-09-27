@@ -8728,7 +8728,7 @@ Chapter 15 身份治理仍然是独立的 application/backup 安全治理；它�
 
 ## 16. 全应用 TUI 设计系统与信息架构升级（2026-09-27）
 
-> **状态：核心阶段 COMPLETE（2026-09-27，U0～U9）；扩展阶段 U10～U12 已立项、尚未实施。** U0～U9 已完成全应用 UI 架构升级；2026-09-27 复审又发现 DiskLayout 展示层仍有少量页面私有逻辑，并新增“内置演示模式”和表格系统剪贴板可靠性治理需求，因此追加 U10 / U11 / U12。Chapter 12 K6 `Migrate` 继续保持 `DEFERRED / fail-closed`，与本章无关。
+> **状态：核心阶段 COMPLETE（2026-09-27，U0～U9）；扩展阶段 U10 COMPLETE，U12 / U11 待实施。** U0～U9 已完成全应用 UI 架构升级；2026-09-27 复审又发现 DiskLayout 展示层仍有少量页面私有逻辑，并新增“内置演示模式”和表格系统剪贴板可靠性治理需求，因此追加 U10 / U11 / U12。Chapter 12 K6 `Migrate` 继续保持 `DEFERRED / fail-closed`，与本章无关。
 
 ### 16.1 背景与目标
 
@@ -9516,7 +9516,7 @@ TrueColor 与 fallback
 
 #### U10 — DiskLayout 展示层最终收口
 
-状态：PLANNED（2026-09-27 复审新增）。
+状态：COMPLETE（2026-09-27；canonical、Pane 与 fast gate 通过）。
 
 本阶段不改变已经完成的 canonical sector 识别，只治理展示层剩余分叉：
 
@@ -9531,9 +9531,11 @@ TrueColor 与 fallback
 
 验收：同一测试盘在三个 Workspace 的 sector 边界完全一致，只允许容量单位、精度和计划状态不同。
 
+实现记录：`DiskLayoutPresentation` 统一 CompactHuman / DetailedExact / EditorExact 的 bar、颜色、范围、占比与 legend/grid；Devices、Inspect 和 Provision 均投影同一 canonical model。尾部区域默认折叠，Inspect/Provision 磁盘布局 Pane 以 `o` 切换、Enter 查看当前区域的精确范围；展开时 LCE 到盘尾 children 逐段显示。`from_topology()` / `from_claims()` 仅保留为单元测试兼容辅助。跨页面同一 EDP 夹具及 Plain 无 Tail、无 Unknown/洞/重叠的回归已通过；`scripts/test-fast.sh` 全绿。
+
 #### U11 — 内置演示模式
 
-状态：PLANNED（只写计划，本轮不实现）。
+状态：PLANNED（按 U10 → U12 → U11 顺序待实现）。
 
 目标是一条命令直接启动带完整演示数据的正式 TUI，无需插 U 盘、无需备份文件、无需管理员权限：
 

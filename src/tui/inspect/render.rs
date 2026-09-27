@@ -207,6 +207,9 @@ pub(super) fn draw_advanced_inspect(
                                 .pane_viewport(crate::tui::pane::PaneId::InspectDiskLayout)
                                 .scroll_y
                                 .offset,
+                            profile: crate::tui::disk_layout::DiskLayoutProfile::DetailedExact,
+                            tail: state.disk_layout_tail_expansion(),
+                            selected_segment: state.disk_layout_selected(),
                         },
                     );
                 } else {

@@ -183,6 +183,8 @@ pub struct AppState {
     devices_pane_focus: crate::tui::pane::PaneFocus,
     device_summary_selected: usize,
     device_summary_expanded: u8,
+    disk_layout_tail: super::disk_layout::TailExpansion,
+    disk_layout_selected: usize,
     backups_pane_focus: crate::tui::pane::PaneFocus,
     navigation: NavigationStack,
     horizontal_scroll: std::collections::BTreeMap<
@@ -233,6 +235,8 @@ impl AppState {
             device_summary_selected: 0,
             device_summary_expanded: DeviceSummarySection::Identity.bit()
                 | DeviceSummarySection::Capacity.bit(),
+            disk_layout_tail: super::disk_layout::TailExpansion::Collapsed,
+            disk_layout_selected: 0,
             backups_pane_focus: crate::tui::pane::PaneFocus::backups(),
             navigation: NavigationStack::default(),
             horizontal_scroll: std::collections::BTreeMap::new(),
@@ -1561,6 +1565,51 @@ impl AppState {
     pub fn device_summary_toggle_selected_section(&mut self) {
         let section = self.device_summary_selected_section();
         self.device_summary_expanded ^= section.bit();
+    }
+
+    pub fn disk_layout_tail_expansion(&self) -> super::disk_layout::TailExpansion {
+        self.disk_layout_tail
+    }
+
+    pub fn toggle_disk_layout_tail(&mut self) {
+        self.disk_layout_tail.toggle();
+        self.disk_layout_selected = 0;
+    }
+
+    pub fn disk_layout_selected(&self) -> usize {
+        self.disk_layout_selected
+    }
+
+    pub fn disk_layout_move_selection(&mut self, delta: isize, count: usize) {
+        self.disk_layout_selected = if delta < 0 {
+            self.disk_layout_selected
+                .saturating_sub(delta.unsigned_abs())
+        } else {
+            self.disk_layout_selected.saturating_add(delta as usize)
+        }
+        .min(count.saturating_sub(1));
+    }
+
+    pub fn disk_layout_detail(
+        &self,
+        model: &super::disk_layout::DiskLayoutModel,
+    ) -> Option<String> {
+        let presentation = super::disk_layout::DiskLayoutPresentation::new(
+            model,
+            super::disk_layout::DiskLayoutProfile::DetailedExact,
+            self.disk_layout_tail,
+        );
+        let visible = presentation.visible_model();
+        let segment = visible.segments.get(self.disk_layout_selected)?;
+        Some(format!(
+            "{} · {} · {} sectors · {} bytes",
+            segment.label,
+            segment.closed_range(),
+            segment.sector_count,
+            segment
+                .sector_count
+                .saturating_mul(crate::common::SECTOR as u64)
+        ))
     }
 
     pub fn shift_workspace_pane(&mut self, reverse: bool) {

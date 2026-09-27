@@ -33,9 +33,14 @@ impl AppState {
         match self.provision.pane_focus.focused() {
             PaneId::ProvisionParameters => self.provision_field_count(),
             PaneId::ProvisionDiskLayout => {
-                let model = self.provision_layout_model().collapsed_tail_model();
+                let model = self.provision_layout_model();
                 let details = self.provision_layout_editor_details();
-                model.pane_line_count("summary", &details)
+                crate::tui::disk_layout::DiskLayoutPresentation::new(
+                    &model,
+                    crate::tui::disk_layout::DiskLayoutProfile::EditorExact,
+                    self.disk_layout_tail_expansion(),
+                )
+                .pane_line_count("summary", &details)
             }
             PaneId::ProvisionSummary => self.provision_review_summary_lines().len(),
             PaneId::ProvisionChanges => self.provision_review_change_lines().len(),
@@ -49,6 +54,9 @@ impl AppState {
             let count = self.provision_field_count();
             self.provision_move_field(-(count as isize));
         } else {
+            if pane == crate::tui::pane::PaneId::ProvisionDiskLayout {
+                self.disk_layout_move_selection(-(self.disk_layout_selected() as isize), 1);
+            }
             self.provision.pane_focus.viewport_mut(pane).scroll_y.top();
         }
     }
@@ -59,6 +67,10 @@ impl AppState {
             let count = self.provision_field_count();
             self.provision_move_field(count as isize);
         } else {
+            if pane == crate::tui::pane::PaneId::ProvisionDiskLayout {
+                let count = self.provision_layout_model().segments.len();
+                self.disk_layout_move_selection(count as isize, count);
+            }
             let content_len = self.provision_focused_content_len();
             self.provision
                 .pane_focus
@@ -78,6 +90,18 @@ impl AppState {
         if pane == crate::tui::pane::PaneId::ProvisionParameters {
             self.provision_move_field(delta);
         } else {
+            if pane == crate::tui::pane::PaneId::ProvisionDiskLayout {
+                let model = self.provision_layout_model();
+                let count = crate::tui::disk_layout::DiskLayoutPresentation::new(
+                    &model,
+                    crate::tui::disk_layout::DiskLayoutProfile::EditorExact,
+                    self.disk_layout_tail_expansion(),
+                )
+                .visible_model()
+                .segments
+                .len();
+                self.disk_layout_move_selection(delta, count);
+            }
             self.provision
                 .pane_focus
                 .viewport_mut(pane)
