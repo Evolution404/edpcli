@@ -973,18 +973,57 @@ pub fn prepare_plain_provision(
             ))
         };
 
+    let staged_to_plain = if source_kind == crate::provision::DiskProvisionKind::Plain {
+        Vec::new()
+    } else {
+        let image = ProvisionImage::from_bytes(source_metadata.clone()).map_err(|message| {
+            err(
+                EXIT_TARGET,
+                format!("错误: EDP→Plain 来源协议镜像无效: {message}"),
+            )
+        })?;
+        let existing = parse_existing_provision(&image, &device_id, total_sectors)
+            .map_err(|message| {
+                err(
+                    EXIT_TARGET,
+                    format!("错误: EDP→Plain 来源注册结构无法解析: {message}"),
+                )
+            })?
+            .ok_or_else(|| err(EXIT_TARGET, "错误: EDP→Plain 缺少来源注册结构"))?;
+        let target_capacity = plan.partitions[0]
+            .sector_count
+            .checked_mul(SECTOR as u64)
+            .ok_or_else(|| err(EXIT_TARGET, "错误: Plain P1 容量溢出"))?;
+        super::migration::prepare_existing_to_plain(
+            dev,
+            &existing,
+            target_capacity,
+            &KeyDomainSecrets::default(),
+        )?
+    };
+
     let mut volume_serials = Vec::with_capacity(plan.partitions.len());
     for _ in &plan.partitions {
         volume_serials.push(u32::from_le_bytes(random_array::<4>()?));
     }
-    let write_plan = build_plain_provision_write_plan(&plan, source_lce, &volume_serials).map_err(
-        |message| {
-            err(
-                EXIT_TARGET,
-                format!("错误: 无法构造 Plain 写盘计划: {message}"),
-            )
-        },
-    )?;
+    let write_plan = if staged_to_plain.is_empty() {
+        build_plain_provision_write_plan(&plan, source_lce, &volume_serials)
+    } else {
+        let mut migrations = vec![Vec::new(); plan.partitions.len()];
+        migrations[0] = staged_to_plain;
+        build_plain_migrated_provision_write_plan(
+            &plan,
+            source_lce,
+            &volume_serials,
+            &migrations,
+        )
+    }
+    .map_err(|message| {
+        err(
+            EXIT_TARGET,
+            format!("错误: 无法构造 Plain 写盘计划: {message}"),
+        )
+    })?;
 
     Ok(PreparedPlainProvision {
         disk,
