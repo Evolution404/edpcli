@@ -1008,7 +1008,7 @@ pub struct TargetPartitionPlan {
     pub target_password_policy: Option<super::TargetPasswordPolicy>,
     pub reason: String,
     /// Source regions that require file-level/data migration into this target.
-    /// The execution layer remains fail-closed until K6 migration is implemented.
+    /// Execution remains fail-closed unless application preflight/staging completes.
     pub migration_sources: Vec<MigrationSource>,
     /// Only present when a verified source key record belongs to this exact
     /// target geometry. The writer re-encodes it for the target slot.
@@ -1197,7 +1197,7 @@ impl TargetProvisionPlan {
                     .map(|_| super::TargetPasswordPolicy::InitializeNew);
                 preserved_record = None;
                 reason = format!(
-                    "来源区域 {sources} 到目标 {} 需要 K6 数据迁移；执行层仍保持 fail-closed",
+                    "来源区域 {sources} 到目标 {} 使用 K6 文件级 staging/migration",
                     target.role.label()
                 );
             }
