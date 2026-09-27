@@ -447,7 +447,7 @@ pub fn prepare_target_provision(
             dev,
             source.as_ref(),
             &target_plan,
-            &request.key_domains,
+            &key_domains,
         )?
     };
     let source_onlyid = source.as_ref().and_then(|_| {
@@ -915,7 +915,7 @@ pub fn prepare_provision(
                     format!("错误: 无法构造 Plain 分区计划: {message}"),
                 )
             })?;
-            prepare_plain_provision(runner, disk, plan, dev)
+            prepare_plain_provision_with_key_domains(runner, disk, plan, &request.key_domains, dev)
                 .map(|prepared| PreparedProvision::Plain(Box::new(prepared)))
         }
     }
@@ -925,6 +925,22 @@ pub fn prepare_plain_provision(
     runner: &dyn CmdRunner,
     disk: u32,
     plan: PlainProvisionPlan,
+    dev: &mut dyn SectorDev,
+) -> EdpCliResult<PreparedPlainProvision> {
+    prepare_plain_provision_with_key_domains(
+        runner,
+        disk,
+        plan,
+        &KeyDomainSecrets::default(),
+        dev,
+    )
+}
+
+fn prepare_plain_provision_with_key_domains(
+    runner: &dyn CmdRunner,
+    disk: u32,
+    plan: PlainProvisionPlan,
+    key_domains: &KeyDomainSecrets,
     dev: &mut dyn SectorDev,
 ) -> EdpCliResult<PreparedPlainProvision> {
     let target_session = TargetSession::<ReadOnly>::open_usb(runner, disk)?;
