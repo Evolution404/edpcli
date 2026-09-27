@@ -247,26 +247,27 @@ fn draw_device_summary(frame: &mut Frame, area: ratatui::layout::Rect, state: &A
         focused,
     );
     if state.device_summary_section_expanded(DeviceSummarySection::Capacity) {
-        let model = device_layout_model(row);
-        let bar_width = usize::from(area.width.saturating_sub(6));
-        lines.push(model.bar_line_with_label(bar_width, "  "));
-        lines.extend(capacity_legend_lines(
-            &model,
-            &format_sector_size(row.size / crate::common::SECTOR as u64),
-            usize::from(area.width.saturating_sub(6)),
-        ));
-        let layout_complete = match row.confirmed_provision_kind() {
-            Some(crate::provision::DiskProvisionKind::Plain) => row.partition_table.is_some(),
-            Some(_) => row.existing_profile_for_prefill().is_some(),
-            None => false,
-        };
-        if !layout_complete {
-            let message = row
-                .partition_table_error
-                .as_deref()
-                .map(|error| format!("  分区表读取失败：{}", safe(error)))
-                .unwrap_or_else(|| "  布局未完整读取；未知区域不推断为空闲空间".to_string());
-            lines.push(Line::from(Span::styled(message, warning())));
+        match row.canonical_layout() {
+            Ok(model) => {
+                let compact = model.collapsed_tail_model();
+                let bar_width = usize::from(area.width.saturating_sub(6));
+                lines.push(compact.bar_line_with_label(bar_width, "  "));
+                lines.extend(capacity_legend_lines(
+                    &compact,
+                    &format_sector_size(row.size / crate::common::SECTOR as u64),
+                    usize::from(area.width.saturating_sub(6)),
+                ));
+                if model.tail_group().is_some() {
+                    lines.push(Line::from(Span::styled(
+                        "    尾部区域详情可在 Inspect 全盘布局中按 o 展开",
+                        muted(),
+                    )));
+                }
+            }
+            Err(error) => lines.push(Line::from(Span::styled(
+                format!("  无法建立可靠容量布局：{}", safe(&error)),
+                warning(),
+            ))),
         }
     }
 
@@ -460,61 +461,6 @@ fn capacity_legend_lines(
         lines.push(Line::from(spans));
     }
     lines
-}
-
-fn device_layout_model(row: &crate::disk_scan::Row) -> crate::tui::disk_layout::DiskLayoutModel {
-    use crate::application::disk_layout::{DiskLayoutSegment, DiskRegionKind};
-    use crate::provision::{DiskProvisionKind, PartitionRole};
-
-    let total_sectors = row.size / crate::common::SECTOR as u64;
-
-    if row.confirmed_provision_kind() == Some(DiskProvisionKind::Plain) {
-        let context = crate::inspect_target::InspectDiskContext::new_with_partition_table(
-            vec![0; crate::common::METADATA_IMAGE_LEN],
-            None,
-            total_sectors,
-            Some(DiskProvisionKind::Plain),
-            row.partition_table.clone(),
-            row.partition_table_error.clone(),
-        );
-        let topology = crate::application::inspect_tree::build_inspect_topology(&context);
-        return crate::tui::disk_layout::DiskLayoutModel::from_topology(&topology);
-    }
-
-    let mut claims = Vec::<DiskLayoutSegment>::new();
-    let reserved = total_sectors.min(crate::provision::OFFICIAL_PARTITION_START_SECTOR);
-    if reserved > 0 {
-        claims.push(DiskLayoutSegment {
-            label: "EDP 协议/保留".into(),
-            start_lba: 0,
-            sector_count: reserved,
-            kind: DiskRegionKind::Reserved,
-        });
-    }
-
-    if let Some(profile) = row.existing_profile_for_prefill() {
-        for partition in profile.partitions {
-            let kind = match partition.role {
-                PartitionRole::Boot => DiskRegionKind::Boot,
-                PartitionRole::Share => DiskRegionKind::Share,
-                PartitionRole::Encrypt => DiskRegionKind::Encrypt,
-                PartitionRole::BootShareCombined => DiskRegionKind::Combined,
-                PartitionRole::CompatibilityReserve => DiskRegionKind::Compatibility,
-            };
-            claims.push(DiskLayoutSegment {
-                label: partition.role.label().into(),
-                start_lba: partition.start_lba,
-                sector_count: partition.sector_count,
-                kind,
-            });
-        }
-    }
-
-    crate::tui::disk_layout::DiskLayoutModel::from_claims(
-        total_sectors,
-        claims,
-        DiskRegionKind::Unknown,
-    )
 }
 
 fn format_sector_size(sectors: u64) -> String {

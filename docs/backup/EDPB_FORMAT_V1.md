@@ -284,7 +284,7 @@ v1 当前只写 `codec=none`。未来可以增加压缩编码，而不改变外�
 
 原始密文 `Artifact` 与解密后的派生 `Artifact` 必须分别保存。
 
-## 11. LCE 与设备尾部取证窗口
+## 11. LCE 与已识别盘尾结构
 
 LCE（LBA7 兼容扩展区）是旧版 `EDP_PARTION_INFO` 表中后续条目使用的固定 6 扇区（3072B）兼容物理块，不是泛指盘尾窗口，也不是 type4 专属区域。官方写入端已证明：后续条目保留各自的 `PartionType`，但会被写成同一个 `0xC00` 兼容几何，因此 type2/type4 同址不能解释为逻辑分区别名。
 
@@ -305,15 +305,13 @@ CHS 公式 `(total_sectors // 16065) * 16065 - 1792` 仅用于一致性交叉验
 
 IIR 是另一独立协议对象，不得绑定到 LCE。
 
-最后 2048 扇区的广义取证窗口是另一独立 `Region`：
+盘尾只采集当前已有明确位置与语义证据的结构，不再定义固定长度的泛化尾部窗口：
 
-- `Region id = region.device_tail_window`
-- `role = forensic_tail_window`
-- `Artifact id = raw.device_tail_window`
-- `semantic_status = unknown`
-- `restore_policy = evidence_only`
+- `total_sectors - 1024` 起连续 9 sectors：历史 LBA4/LBA12 备份镜像；
+- `total_sectors - 4` 的 1 sector：历史恢复节点；
+- 两者分别作为独立物理 `Region/Extent/Artifact` 保存，未识别的相邻空间不得伪装成协议结构。
 
-LCE 和设备尾部窗口即使物理范围发生重叠，也必须保持不同语义。
+容量布局中的“尾部区域”是从已验证 LBA7 LCE 起点到物理盘末尾的复合展示层；其子段由 LCE、上述已识别备份结构以及它们之间的物理空闲补集组成。该分组不额外占用 sectors，也不得制造重叠。
 
 ## 12. 完整性规则
 

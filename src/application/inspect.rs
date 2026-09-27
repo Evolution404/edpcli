@@ -342,6 +342,8 @@ pub struct AdvancedInspectWorkspace {
     pub items: Vec<AdvancedInspectItem>,
     pub export_dir: Option<std::path::PathBuf>,
     pub topology: super::inspect_tree::InspectTopology,
+    pub disk_layout: Option<super::disk_layout::DiskLayoutModel>,
+    pub disk_layout_issue: Option<String>,
 }
 
 fn parse_u64_decimal(value: &str, label: &str) -> Result<u64, InspectError> {
@@ -848,6 +850,11 @@ fn run_advanced_source<R: SectorReader + ?Sized>(
         items.push(item);
     }
 
+    let (disk_layout, disk_layout_issue) =
+        match super::disk_layout::DiskLayoutModel::canonical_inspect_context(&context) {
+            Ok(layout) => (Some(layout), None),
+            Err(error) => (None, Some(error)),
+        };
     let topology = super::inspect_tree::build_inspect_topology(&context);
     Ok(AdvancedInspectWorkspace {
         source,
@@ -856,6 +863,8 @@ fn run_advanced_source<R: SectorReader + ?Sized>(
         items,
         export_dir: request.export_dir.clone(),
         topology,
+        disk_layout,
+        disk_layout_issue,
     })
 }
 

@@ -9,7 +9,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use common::load_disk_image;
 use edpcli::backup_metadata::{
     acquire_metadata, parse_lba7_compatibility_geometry, parse_partition_geometry, FilesystemKind,
-    DEVICE_TAIL_WINDOW_SECTORS, LBA7_COMPAT_EXTENT_SECTORS, PARTITION_PREFIX_SECTORS,
+    LBA7_COMPAT_EXTENT_SECTORS, PARTITION_PREFIX_SECTORS,
 };
 use edpcli::common::SECTOR;
 use edpcli::crypto::{crc32_bare, xor_rolling};
@@ -183,7 +183,7 @@ fn authentic_lexar_lba7_points_to_six_sector_compatibility_extent() {
 }
 
 #[test]
-fn metadata_capture_reads_complete_lba7_compatibility_extent_and_separate_tail_window() {
+fn metadata_capture_reads_complete_lba7_compatibility_extent_without_magic_tail_window() {
     let Some(image) = load_disk_image("lexar") else {
         eprintln!("跳过: 真实 Lexar 协议夹具不可用");
         return;
@@ -214,24 +214,6 @@ fn metadata_capture_reads_complete_lba7_compatibility_extent_and_separate_tail_w
         .expect("raw LBA7 compatibility extent artifact");
     assert_eq!(raw_compat.restore_policy, RestorePolicy::Restorable);
     assert_eq!(raw_compat.data, expected);
-
-    let tail = acquired
-        .regions
-        .iter()
-        .find(|region| region.id == "region.device_tail_window")
-        .expect("device tail forensic window");
-    assert_eq!(tail.semantic_status, SemanticStatus::Unknown);
-    assert_eq!(tail.sector_count, Some(DEVICE_TAIL_WINDOW_SECTORS));
-    assert_eq!(
-        tail.start_lba,
-        Some(LEXAR_TOTAL_SECTORS - DEVICE_TAIL_WINDOW_SECTORS)
-    );
-    assert_ne!(tail.start_lba, compat.start_lba);
-    assert!(acquired
-        .artifacts
-        .iter()
-        .any(|artifact| artifact.id == "raw.device_tail_window"
-            && artifact.restore_policy == RestorePolicy::EvidenceOnly));
 
     let layout = acquired
         .artifacts
@@ -318,22 +300,6 @@ fn metadata_capture_reads_partition_key_sectors_and_tail_evidence_without_writes
     assert_eq!(dev.writes, 0);
     assert!(!dev.reads.is_empty());
 
-    let tail = acquired
-        .regions
-        .iter()
-        .find(|region| region.id == "region.device_tail_window")
-        .expect("device tail forensic window");
-    assert_eq!(tail.semantic_status, SemanticStatus::Unknown);
-    assert_eq!(tail.sector_count, Some(DEVICE_TAIL_WINDOW_SECTORS));
-    assert_eq!(
-        tail.start_lba,
-        Some(NETAC_TOTAL_SECTORS - DEVICE_TAIL_WINDOW_SECTORS)
-    );
-    assert!(acquired
-        .artifacts
-        .iter()
-        .any(|artifact| artifact.id == "raw.device_tail_window"
-            && artifact.restore_policy == RestorePolicy::EvidenceOnly));
     assert!(acquired
         .artifacts
         .iter()

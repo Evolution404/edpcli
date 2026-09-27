@@ -44,6 +44,8 @@ pub struct Row {
     pub provision_kind: DiskProvisionKind,
     pub partitions: Option<Vec<EdpfPartition>>,
     pub partition_table: Option<crate::application::partition_table::PartitionTableSnapshot>,
+    /// Validated LBA7-pointed legacy compatibility extent for the current scan.
+    pub lce: Option<crate::backup_metadata::Lba7CompatibilityGeometry>,
     pub partition_table_error: Option<String>,
 }
 
@@ -71,21 +73,7 @@ impl Row {
             {
                 return None;
             }
-            let role = match (mode, index) {
-                (crate::provision::OfficialPartitionMode::WholeDiskEncrypted, 0) => {
-                    PartitionRole::CompatibilityReserve
-                }
-                (crate::provision::OfficialPartitionMode::BootShareCombined, 0) => {
-                    PartitionRole::BootShareCombined
-                }
-                (_, 0) => PartitionRole::Boot,
-                (
-                    crate::provision::OfficialPartitionMode::DefaultThreePartition
-                    | crate::provision::OfficialPartitionMode::IntranetExtranetDualPartition,
-                    1,
-                ) => PartitionRole::Share,
-                _ => PartitionRole::Encrypt,
-            };
+            let role = crate::provision::official_partition_role(mode, index, partition_type);
             partitions.push(ExistingPartition {
                 role,
                 partition_type,
@@ -99,6 +87,50 @@ impl Row {
             source_mode: mode,
             partitions,
         })
+    }
+
+    pub fn canonical_layout(
+        &self,
+    ) -> Result<crate::application::disk_layout::DiskLayoutModel, String> {
+        use crate::application::disk_layout::{DiskLayoutModel, DiskLayoutSegment, DiskRegionKind};
+
+        let total_sectors = self.size / SECTOR as u64;
+        match self.confirmed_provision_kind() {
+            Some(DiskProvisionKind::Plain) => {
+                let table = self.partition_table.as_ref().ok_or_else(|| {
+                    self.partition_table_error
+                        .clone()
+                        .unwrap_or_else(|| "普通盘分区表尚未完整读取".into())
+                })?;
+                DiskLayoutModel::canonical_plain(total_sectors, table)
+            }
+            Some(_) => {
+                let profile = self
+                    .existing_profile_for_prefill()
+                    .ok_or_else(|| "EDP 分区几何尚未完整确认".to_string())?;
+                let lce = self
+                    .lce
+                    .as_ref()
+                    .ok_or_else(|| "LBA7 LCE 几何尚未确认".to_string())?;
+                let partitions = profile
+                    .partitions
+                    .into_iter()
+                    .map(|partition| DiskLayoutSegment {
+                        label: partition.role.label().into(),
+                        start_lba: partition.start_lba,
+                        sector_count: partition.sector_count,
+                        kind: DiskRegionKind::from_partition_role(partition.role),
+                    })
+                    .collect();
+                DiskLayoutModel::canonical_edp(
+                    total_sectors,
+                    partitions,
+                    lce.start_lba,
+                    lce.sector_count,
+                )
+            }
+            None => Err("介质类型尚未确认，无法建立可靠容量布局".into()),
+        }
     }
 }
 
@@ -135,6 +167,7 @@ pub fn scan_disks(
             provision_kind: DiskProvisionKind::Plain,
             partitions: None,
             partition_table: None,
+            lce: None,
             partition_table_error: None,
         };
         if d.proto == "USB" {
@@ -206,9 +239,19 @@ pub fn scan_disks(
                 let identity = crate::application::media_identity_observer::
                     media_identity_from_protocol_image(runner, d.n, &protocol_image)
                     .map_err(|error| io::Error::other(error.msg))?;
+                let total_sectors = d.size / SECTOR as u64;
+                if identity.protocol.provision_kind != Some(DiskProvisionKind::Plain) {
+                    if let Some(device_id) = identity.protocol.device_id.as_deref() {
+                        row.lce = crate::backup_metadata::parse_lba7_compatibility_geometry(
+                            &protocol_image,
+                            device_id,
+                            total_sectors,
+                        )
+                        .ok();
+                    }
+                }
 
                 if identity.protocol.provision_kind == Some(DiskProvisionKind::Plain) {
-                    let total_sectors = d.size / SECTOR as u64;
                     match crate::application::partition_table::read_partition_table(
                         total_sectors,
                         |lba| {

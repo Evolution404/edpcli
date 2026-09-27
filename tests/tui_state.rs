@@ -55,6 +55,7 @@ fn device(size: u64) -> edpcli::disk_scan::Row {
         partitions: None,
         partition_table: None,
         partition_table_error: None,
+        lce: None,
     };
     crate::common::confirm_row_identity(&mut row);
     row
@@ -1541,25 +1542,10 @@ fn empty_lists_never_underflow_selection() {
 fn advanced_inspect_lazy_sector_window_is_bounded_and_pageable() {
     use edpcli::application::inspect::{AdvancedInspectMode, AdvancedInspectWorkspace};
     use edpcli::application::inspect_tree::InspectNodeKind;
-    use edpcli::backup_metadata::PartitionGeometry;
     use edpcli::inspect::InspectMeta;
     use edpcli::tui::state::AdvancedInspectSource;
 
-    let mut context = crate::common::edp_inspect_context(10_000);
-    context.partitions.push(PartitionGeometry {
-        index: 0,
-        partition_type: 2,
-        partition_count: 1,
-        need_disturb: 0,
-        need_encrypt: 0,
-        start_sector: 2_048,
-        sector_size: edpcli::common::SECTOR as u64,
-        partition_size: 200 * edpcli::common::SECTOR as u64,
-        sector_count: 200,
-        user_key_crc: 0,
-        file_key_crc: 0,
-        encrypt_mode: 0,
-    });
+    let context = crate::common::edp_inspect_context(10_000);
 
     let mut state = AppState::new();
     assert!(state.begin_advanced_inspect(AdvancedInspectSource::Disk(6)));
@@ -1570,12 +1556,14 @@ fn advanced_inspect_lazy_sector_window_is_bounded_and_pageable() {
         items: Vec::new(),
         export_dir: None,
         topology: edpcli::application::inspect_tree::build_inspect_topology(&context),
+        disk_layout: None,
+        disk_layout_issue: None,
     }));
 
     let rows = state.advanced_inspect_tree_rows();
     let partition_index = rows
         .iter()
-        .position(|row| row.id.ends_with("/region.partition.0"))
+        .position(|row| row.id.ends_with("/region.partition.1"))
         .expect("partition region");
     state.advanced_inspect_move_tree(partition_index as isize);
     state.advanced_inspect_toggle_selected();
@@ -1583,7 +1571,7 @@ fn advanced_inspect_lazy_sector_window_is_bounded_and_pageable() {
     let rows = state.advanced_inspect_tree_rows();
     let extent_index = rows
         .iter()
-        .position(|row| row.id.ends_with("/region.partition.0.extent"))
+        .position(|row| row.id.ends_with("/region.partition.1.extent"))
         .expect("partition extent");
     let current = state.advanced_inspect().unwrap().tree_selected;
     state.advanced_inspect_move_tree(extent_index as isize - current as isize);
@@ -1686,6 +1674,8 @@ fn advanced_sector_inspector_is_on_demand_bounded_and_fail_soft() {
         items: vec![item(0, None, None, Some("meta-lba0"))],
         export_dir: None,
         topology: edpcli::application::inspect_tree::build_inspect_topology(&context),
+        disk_layout: None,
+        disk_layout_issue: None,
     }));
 
     let rows = state.advanced_inspect_tree_rows();

@@ -341,7 +341,9 @@ impl Theme {
     pub fn disk_region(self, kind: DiskRegionKind) -> Style {
         let color = match kind {
             DiskRegionKind::Protocol => self.palette.accent,
-            DiskRegionKind::Reserved => self.palette.partition_compatibility,
+            DiskRegionKind::Metadata | DiskRegionKind::Reserved => {
+                self.palette.partition_compatibility
+            }
             DiskRegionKind::Unknown => self.palette.text_muted,
             DiskRegionKind::Free => self.palette.partition_free,
             DiskRegionKind::Plain => self.palette.partition_plain,
@@ -349,8 +351,8 @@ impl Theme {
             DiskRegionKind::Share | DiskRegionKind::Combined => self.palette.partition_share,
             DiskRegionKind::Encrypt => self.palette.partition_encrypt,
             DiskRegionKind::Compatibility => self.palette.partition_compatibility,
-            DiskRegionKind::Lce => self.palette.violet,
-            DiskRegionKind::Tail => self.palette.accent_soft,
+            DiskRegionKind::Lce | DiskRegionKind::BackupMirror => self.palette.violet,
+            DiskRegionKind::RestoreNode | DiskRegionKind::Tail => self.palette.accent_soft,
         };
         Style::default().fg(color)
     }

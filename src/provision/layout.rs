@@ -296,6 +296,24 @@ impl PartitionRole {
     }
 }
 
+pub const fn official_partition_role(
+    mode: OfficialPartitionMode,
+    index: usize,
+    partition_type: EdpPartitionType,
+) -> PartitionRole {
+    match (mode, index, partition_type) {
+        (OfficialPartitionMode::WholeDiskEncrypted, 0, EdpPartitionType::Boot) => {
+            PartitionRole::CompatibilityReserve
+        }
+        (OfficialPartitionMode::BootShareCombined, 0, EdpPartitionType::Share) => {
+            PartitionRole::BootShareCombined
+        }
+        (_, _, EdpPartitionType::Boot) => PartitionRole::Boot,
+        (_, _, EdpPartitionType::Share) => PartitionRole::Share,
+        (_, _, EdpPartitionType::Encrypt) => PartitionRole::Encrypt,
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct PartitionFormatTarget {
     pub role: PartitionRole,
@@ -354,17 +372,7 @@ fn format_targets_for_geometry(
         .into_iter()
         .enumerate()
         .map(|(index, geometry)| {
-            let role = match (mode, index, geometry.partition_type) {
-                (OfficialPartitionMode::WholeDiskEncrypted, 0, EdpPartitionType::Boot) => {
-                    PartitionRole::CompatibilityReserve
-                }
-                (OfficialPartitionMode::BootShareCombined, 0, EdpPartitionType::Share) => {
-                    PartitionRole::BootShareCombined
-                }
-                (_, _, EdpPartitionType::Boot) => PartitionRole::Boot,
-                (_, _, EdpPartitionType::Share) => PartitionRole::Share,
-                (_, _, EdpPartitionType::Encrypt) => PartitionRole::Encrypt,
-            };
+            let role = official_partition_role(mode, index, geometry.partition_type);
             PartitionFormatTarget {
                 role,
                 geometry,

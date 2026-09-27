@@ -6,8 +6,8 @@
 use crate::backup_deep::keys;
 use crate::backup_metadata::{
     parse_lba7_compatibility_geometry, parse_partition_geometry, Lba7CompatibilityGeometry,
-    PartitionGeometry, DEVICE_TAIL_WINDOW_SECTORS, TAIL_END4_MIRROR_OFFSET_SECTORS,
-    TAIL_METADATA_MIRROR_OFFSET_SECTORS, TAIL_METADATA_MIRROR_SECTORS,
+    PartitionGeometry, TAIL_END4_MIRROR_OFFSET_SECTORS, TAIL_METADATA_MIRROR_OFFSET_SECTORS,
+    TAIL_METADATA_MIRROR_SECTORS,
 };
 use crate::common::{METADATA_LAST_LBA, SECTOR};
 use crate::crypto::a6b0_full_offset;
@@ -42,9 +42,6 @@ pub enum SectorRegion {
         index: u64,
     },
     RestoreNodeEnd4,
-    DeviceTailWindow {
-        relative_lba: u64,
-    },
     Unknown,
 }
 
@@ -68,9 +65,6 @@ impl SectorRegion {
             } => format!("分区[{index}] type{partition_type} +{relative_lba}"),
             Self::TailMetadataMirror { index } => format!("盘尾历史 9 扇区镜像 +{index}/9"),
             Self::RestoreNodeEnd4 => "盘尾 end-4 restore-node".into(),
-            Self::DeviceTailWindow { relative_lba } => {
-                format!("盘尾 2048 扇区取证窗口 +{relative_lba}")
-            }
             Self::Unknown => "未知物理扇区".into(),
         }
     }
@@ -495,14 +489,6 @@ impl InspectDiskContext {
             && lba == self.total_sectors - TAIL_END4_MIRROR_OFFSET_SECTORS
         {
             out.push(SectorRegion::RestoreNodeEnd4);
-        }
-
-        let tail_count = self.total_sectors.min(DEVICE_TAIL_WINDOW_SECTORS);
-        let tail_start = self.total_sectors - tail_count;
-        if self.has_edp_protocol() && lba >= tail_start {
-            out.push(SectorRegion::DeviceTailWindow {
-                relative_lba: lba - tail_start,
-            });
         }
 
         if out.is_empty() {

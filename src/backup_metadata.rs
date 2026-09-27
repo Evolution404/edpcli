@@ -2,8 +2,7 @@
 //!
 //! This module never writes the source device. It derives partition geometry
 //! from the current LBA12 EDPF table, captures bounded filesystem metadata
-//! extents, and preserves the known/unknown tail areas as evidence-only
-//! artifacts.
+//! extents, and preserves identified historical tail backup structures.
 
 use serde::Serialize;
 
@@ -20,7 +19,6 @@ use crate::protocol::{
 
 pub const PARTITION_PREFIX_SECTORS: u64 = 64;
 pub const PARTITION_SUFFIX_SECTORS: u64 = 8;
-pub const DEVICE_TAIL_WINDOW_SECTORS: u64 = 2048;
 pub const LBA7_COMPAT_EXTENT_SECTORS: u64 = 6;
 pub const LBA7_COMPAT_EXTENT_BYTES: u64 = LBA7_COMPAT_EXTENT_SECTORS * SECTOR as u64;
 pub const LBA7_COMPAT_CHS_TRACK_SECTORS: u64 = 16_065;
@@ -745,27 +743,6 @@ pub fn acquire_metadata(
         }
     }
 
-    let tail_count = total_sectors.min(DEVICE_TAIL_WINDOW_SECTORS);
-    let tail_start = total_sectors - tail_count;
-    let tail_region = "region.device_tail_window";
-    out.regions.push(Region {
-        id: tail_region.into(),
-        role: "forensic_tail_window".into(),
-        start_lba: Some(tail_start),
-        sector_count: Some(tail_count),
-        semantic_status: SemanticStatus::Unknown,
-    });
-    let _ = add_raw_extent(
-        &mut out,
-        dev,
-        tail_region,
-        "extent.device_tail_window".into(),
-        "raw.device_tail_window".into(),
-        tail_start,
-        tail_count,
-        "forensic_tail_evidence_window",
-    )?;
-
     if total_sectors >= TAIL_METADATA_MIRROR_OFFSET_SECTORS + TAIL_METADATA_MIRROR_SECTORS {
         let mirror_start = total_sectors - TAIL_METADATA_MIRROR_OFFSET_SECTORS;
         let region_id = "region.tail.metadata_mirror_512k";
@@ -811,11 +788,11 @@ pub fn acquire_metadata(
     }
 
     out.notes.push(format!(
-        "metadata capture policy: partition prefix={} sectors, suffix={} sectors, device tail window={} sectors",
-        PARTITION_PREFIX_SECTORS, PARTITION_SUFFIX_SECTORS, tail_count
+        "metadata capture policy: partition prefix={} sectors, suffix={} sectors",
+        PARTITION_PREFIX_SECTORS, PARTITION_SUFFIX_SECTORS
     ));
     out.notes.push(
-        "LBA7 compatibility extent is the LBA7-pointed six-sector compatibility block; device tail window is separate forensic evidence"
+        "LBA7 compatibility extent and identified historical tail mirrors are captured as independent physical extents"
             .into(),
     );
     if !out.issues.is_empty() {

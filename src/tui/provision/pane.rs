@@ -33,7 +33,7 @@ impl AppState {
         match self.provision.pane_focus.focused() {
             PaneId::ProvisionParameters => self.provision_field_count(),
             PaneId::ProvisionDiskLayout => {
-                let model = self.provision_layout_model();
+                let model = self.provision_layout_model().collapsed_tail_model();
                 let details = self.provision_layout_editor_details();
                 model.pane_line_count("summary", &details)
             }

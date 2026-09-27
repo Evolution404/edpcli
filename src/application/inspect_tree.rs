@@ -4,10 +4,6 @@
 //! 大范围 sector 通过 `LazySectors` 延迟 materialize，避免按磁盘容量分配节点。
 
 use super::inspect::{AbsoluteByteRange, InspectDecoderKind, InspectField, InspectFieldKey};
-use crate::backup_metadata::{
-    DEVICE_TAIL_WINDOW_SECTORS, TAIL_END4_MIRROR_OFFSET_SECTORS,
-    TAIL_METADATA_MIRROR_OFFSET_SECTORS, TAIL_METADATA_MIRROR_SECTORS,
-};
 use crate::edpb::SemanticStatus;
 use crate::inspect_target::InspectDiskContext;
 
@@ -32,7 +28,6 @@ pub enum DiskRegionSemantic {
     Unallocated,
     Lce,
     Tail,
-    TailForensic,
     TailMetadataMirror,
     TailRestoreNode,
     Partition { partition_type: u32 },
@@ -455,343 +450,9 @@ fn unknown_gaps(claimed: &[(u64, u64)], total: u64) -> Vec<(u64, u64)> {
     out
 }
 
-fn collapse_overlapping_regions(mut regions: Vec<InspectNode>) -> Vec<InspectNode> {
-    regions.sort_by_key(|region| region.range.start_lba);
-    let mut groups: Vec<Vec<InspectNode>> = Vec::new();
-    for region in regions {
-        if let Some(group) = groups.last_mut() {
-            let group_end = group
-                .iter()
-                .map(|member| member.range.end_lba_exclusive())
-                .max()
-                .unwrap_or(0);
-            if region.range.start_lba < group_end {
-                group.push(region);
-                continue;
-            }
-        }
-        groups.push(vec![region]);
-    }
-    groups
-        .into_iter()
-        .map(|mut group| {
-            if group.len() == 1 {
-                return group.pop().expect("one region");
-            }
-            let start = group[0].range.start_lba;
-            let end = group
-                .iter()
-                .map(|member| member.range.end_lba_exclusive())
-                .max()
-                .expect("overlap group");
-            InspectNode {
-                id: format!("region.conflict.{start}"),
-                label: "重叠证据".into(),
-                kind: InspectNodeKind::Region,
-                range: InspectNodeRange::sectors(start, end - start),
-                children: InspectChildren::Materialized(group),
-                decoder: None,
-                status: SemanticStatus::Unknown,
-                region_semantic: Some(DiskRegionSemantic::Conflict),
-            }
-        })
-        .collect()
-}
-
-fn tail_region(total_sectors: u64) -> Option<InspectNode> {
-    let tail_count = total_sectors.min(DEVICE_TAIL_WINDOW_SECTORS);
-    if tail_count == 0 {
-        return None;
-    }
-    let tail_start = total_sectors - tail_count;
-    let mut special = Vec::new();
-    if total_sectors >= TAIL_METADATA_MIRROR_OFFSET_SECTORS + TAIL_METADATA_MIRROR_SECTORS {
-        let start = total_sectors - TAIL_METADATA_MIRROR_OFFSET_SECTORS;
-        special.push((
-            start,
-            TAIL_METADATA_MIRROR_SECTORS,
-            "region.tail.metadata_mirror",
-            "盘尾历史 9 扇区镜像",
-            DiskRegionSemantic::TailMetadataMirror,
-        ));
-    }
-    if total_sectors > TAIL_END4_MIRROR_OFFSET_SECTORS {
-        let start = total_sectors - TAIL_END4_MIRROR_OFFSET_SECTORS;
-        special.push((
-            start,
-            1,
-            "region.tail.restore_node_end4",
-            "盘尾 end-4 restore-node",
-            DiskRegionSemantic::TailRestoreNode,
-        ));
-    }
-    special.sort_by_key(|(start, ..)| *start);
-    let mut children = Vec::new();
-    let mut cursor = tail_start;
-    for (start, count, id, label, semantic) in special {
-        if start < cursor || start >= total_sectors {
-            continue;
-        }
-        if cursor < start {
-            children.push(lazy_extent(
-                format!("region.tail.unclassified.{}", children.len()),
-                "盘尾未分类",
-                cursor,
-                start - cursor,
-                None,
-                SemanticStatus::Unknown,
-                None,
-            ));
-        }
-        let count = count.min(total_sectors - start);
-        children.push(lazy_extent(
-            id,
-            label,
-            start,
-            count,
-            None,
-            SemanticStatus::Identified,
-            Some(semantic),
-        ));
-        cursor = start + count;
-    }
-    if cursor < total_sectors {
-        children.push(lazy_extent(
-            format!("region.tail.unclassified.{}", children.len()),
-            "盘尾未分类",
-            cursor,
-            total_sectors - cursor,
-            None,
-            SemanticStatus::Unknown,
-            None,
-        ));
-    }
-
-    Some(InspectNode {
-        id: "region.tail".into(),
-        label: "盘尾区域".into(),
-        kind: InspectNodeKind::Region,
-        range: InspectNodeRange::sectors(tail_start, tail_count),
-        children: InspectChildren::Materialized(children),
-        decoder: None,
-        status: SemanticStatus::Unknown,
-        region_semantic: Some(DiskRegionSemantic::Tail),
-    })
-}
-
-fn mbr_primary_regions(context: &InspectDiskContext) -> Vec<InspectNode> {
-    let Some(mbr) = context.protocol_image.get(..crate::common::SECTOR) else {
-        return Vec::new();
-    };
-    if mbr.get(510..512) != Some(&[0x55, 0xaa]) {
-        return Vec::new();
-    }
-
-    let mut out = Vec::new();
-    for slot in 0..4usize {
-        let offset = 0x1be + slot * 16;
-        let partition_type = mbr[offset + 4];
-        let Some(start_bytes) = mbr
-            .get(offset + 8..offset + 12)
-            .and_then(|bytes| bytes.try_into().ok())
-        else {
-            continue;
-        };
-        let Some(count_bytes) = mbr
-            .get(offset + 12..offset + 16)
-            .and_then(|bytes| bytes.try_into().ok())
-        else {
-            continue;
-        };
-        let start_lba = u32::from_le_bytes(start_bytes) as u64;
-        let sector_count = u32::from_le_bytes(count_bytes) as u64;
-        if partition_type == 0 || start_lba == 0 || sector_count == 0 {
-            continue;
-        }
-        let Some(end_lba) = start_lba.checked_add(sector_count) else {
-            continue;
-        };
-        if end_lba > context.total_sectors {
-            continue;
-        }
-        if context.partitions.iter().any(|partition| {
-            partition.start_sector == start_lba && partition.sector_count == sector_count
-        }) {
-            continue;
-        }
-
-        out.push(region_with_extent(
-            format!("region.mbr_partition.{slot}"),
-            format!(
-                "MBR P{} type=0x{partition_type:02X}",
-                slot.saturating_add(1)
-            ),
-            start_lba,
-            sector_count,
-            None,
-            SemanticStatus::Identified,
-            DiskRegionSemantic::MbrPartition { partition_type },
-        ));
-    }
-    out
-}
-
 pub fn build_inspect_topology(context: &InspectDiskContext) -> InspectTopology {
     let total = context.total_sectors;
-    let mut regions = Vec::new();
-    let mut claimed = Vec::new();
-
-    if context.is_plain() {
-        if let Some(table) = &context.partition_table {
-            for (index, extent) in table.table_extents.iter().enumerate() {
-                if let Some((start, count)) =
-                    clip_range(extent.start_lba, extent.sector_count, total)
-                {
-                    regions.push(region_with_extent(
-                        format!("region.partition_table.{index}"),
-                        extent.label.clone(),
-                        start,
-                        count,
-                        None,
-                        SemanticStatus::Identified,
-                        DiskRegionSemantic::PartitionTable,
-                    ));
-                    claimed.push((start, count));
-                }
-            }
-            for partition in &table.partitions {
-                if let Some((start, count)) =
-                    clip_range(partition.start_lba, partition.sector_count, total)
-                {
-                    regions.push(region_with_extent(
-                        format!("region.plain_partition.{}", partition.index),
-                        partition.display_label(),
-                        start,
-                        count,
-                        Some(InspectDecoderKind::Partition),
-                        SemanticStatus::Identified,
-                        DiskRegionSemantic::PlainPartition,
-                    ));
-                    claimed.push((start, count));
-                }
-            }
-
-            let claimed = merged_claimed_ranges(claimed, total);
-            for (index, (start, count)) in unknown_gaps(&claimed, total).into_iter().enumerate() {
-                regions.push(region_with_extent(
-                    format!("region.unallocated.{index}"),
-                    "未分配空间",
-                    start,
-                    count,
-                    None,
-                    SemanticStatus::Identified,
-                    DiskRegionSemantic::Unallocated,
-                ));
-            }
-        } else {
-            regions.push(region_with_extent(
-                "region.unknown.0",
-                "分区布局未知",
-                0,
-                total,
-                None,
-                SemanticStatus::Unknown,
-                DiskRegionSemantic::Unknown,
-            ));
-        }
-        regions.sort_by_key(|region| region.range.start_lba);
-        return InspectTopology {
-            root: InspectNode {
-                id: "device".into(),
-                label: "整盘".into(),
-                kind: InspectNodeKind::Device,
-                range: InspectNodeRange::sectors(0, total),
-                children: InspectChildren::Materialized(regions),
-                decoder: None,
-                status: SemanticStatus::Identified,
-                region_semantic: None,
-            },
-        };
-    }
-
-    if context.has_edp_protocol() {
-        if let Some((start, count)) = clip_range(0, 13, total) {
-            regions.push(region_with_extent(
-                "region.protocol",
-                "EDP 主协议区",
-                start,
-                count,
-                Some(InspectDecoderKind::Protocol),
-                SemanticStatus::Identified,
-                DiskRegionSemantic::Protocol,
-            ));
-            claimed.push((start, count));
-        }
-    }
-
-    if let Some(lce) = context.lce.as_ref() {
-        if let Some((start, count)) = clip_range(lce.start_lba, lce.sector_count, total) {
-            regions.push(region_with_extent(
-                "region.lce",
-                "LCE legacy compatibility extent",
-                start,
-                count,
-                Some(InspectDecoderKind::Lce),
-                SemanticStatus::Identified,
-                DiskRegionSemantic::Lce,
-            ));
-            claimed.push((start, count));
-        }
-    }
-
-    for partition in &context.partitions {
-        if let Some((start, count)) =
-            clip_range(partition.start_sector, partition.sector_count, total)
-        {
-            regions.push(region_with_extent(
-                format!("region.partition.{}", partition.index),
-                format!("分区[{}] type{}", partition.index, partition.partition_type),
-                start,
-                count,
-                Some(InspectDecoderKind::Partition),
-                SemanticStatus::Identified,
-                DiskRegionSemantic::Partition {
-                    partition_type: partition.partition_type,
-                },
-            ));
-            claimed.push((start, count));
-        }
-    }
-
-    if context.has_edp_protocol() {
-        for region in mbr_primary_regions(context) {
-            claimed.push((region.range.start_lba, region.range.sector_count));
-            regions.push(region);
-        }
-
-        if let Some(tail) = tail_region(total) {
-            claimed.push((tail.range.start_lba, tail.range.sector_count));
-            regions.push(tail);
-        }
-    }
-
-    let claimed = merged_claimed_ranges(claimed, total);
-    for (index, (start, count)) in unknown_gaps(&claimed, total).into_iter().enumerate() {
-        regions.push(region_with_extent(
-            format!("region.unknown.{index}"),
-            "未知区域",
-            start,
-            count,
-            None,
-            SemanticStatus::Unknown,
-            DiskRegionSemantic::Unknown,
-        ));
-    }
-
-    let mut regions = collapse_overlapping_regions(regions);
-    regions.sort_by_key(|region| region.range.start_lba);
-
-    InspectTopology {
+    let root = |regions: Vec<InspectNode>| InspectTopology {
         root: InspectNode {
             id: "device".into(),
             label: "整盘".into(),
@@ -802,7 +463,205 @@ pub fn build_inspect_topology(context: &InspectDiskContext) -> InspectTopology {
             status: SemanticStatus::Identified,
             region_semantic: None,
         },
+    };
+
+    if context.is_plain() {
+        let Some(table) = &context.partition_table else {
+            return root(vec![region_with_extent(
+                "region.unknown.0",
+                "分区布局不可用",
+                0,
+                total,
+                None,
+                SemanticStatus::Unknown,
+                DiskRegionSemantic::Unknown,
+            )]);
+        };
+
+        let mut regions = Vec::new();
+        let mut claimed = Vec::new();
+        for (index, extent) in table.table_extents.iter().enumerate() {
+            if let Some((start, count)) = clip_range(extent.start_lba, extent.sector_count, total) {
+                regions.push(region_with_extent(
+                    format!("region.partition_table.{index}"),
+                    extent.label.clone(),
+                    start,
+                    count,
+                    None,
+                    SemanticStatus::Identified,
+                    DiskRegionSemantic::PartitionTable,
+                ));
+                claimed.push((start, count));
+            }
+        }
+        for partition in &table.partitions {
+            if let Some((start, count)) =
+                clip_range(partition.start_lba, partition.sector_count, total)
+            {
+                regions.push(region_with_extent(
+                    format!("region.plain_partition.{}", partition.index),
+                    partition.display_label(),
+                    start,
+                    count,
+                    Some(InspectDecoderKind::Partition),
+                    SemanticStatus::Identified,
+                    DiskRegionSemantic::PlainPartition,
+                ));
+                claimed.push((start, count));
+            }
+        }
+        let claimed = merged_claimed_ranges(claimed, total);
+        for (index, (start, count)) in unknown_gaps(&claimed, total).into_iter().enumerate() {
+            regions.push(region_with_extent(
+                format!("region.unallocated.{index}"),
+                "空闲区域",
+                start,
+                count,
+                None,
+                SemanticStatus::Identified,
+                DiskRegionSemantic::Unallocated,
+            ));
+        }
+        regions.sort_by_key(|region| region.range.start_lba);
+        return root(regions);
     }
+
+    let Ok(model) =
+        crate::application::disk_layout::DiskLayoutModel::canonical_inspect_context(context)
+    else {
+        return root(vec![region_with_extent(
+            "region.unknown.0",
+            "布局证据不足",
+            0,
+            total,
+            None,
+            SemanticStatus::Unknown,
+            DiskRegionSemantic::Unknown,
+        )]);
+    };
+
+    fn properties(
+        context: &InspectDiskContext,
+        segment: &crate::application::disk_layout::DiskLayoutSegment,
+    ) -> (Option<InspectDecoderKind>, DiskRegionSemantic) {
+        use crate::application::disk_layout::DiskRegionKind;
+        match segment.kind {
+            DiskRegionKind::Protocol => (
+                Some(InspectDecoderKind::Protocol),
+                DiskRegionSemantic::Protocol,
+            ),
+            DiskRegionKind::Free => (None, DiskRegionSemantic::Unallocated),
+            DiskRegionKind::Lce => (Some(InspectDecoderKind::Lce), DiskRegionSemantic::Lce),
+            DiskRegionKind::BackupMirror => (None, DiskRegionSemantic::TailMetadataMirror),
+            DiskRegionKind::RestoreNode => (None, DiskRegionSemantic::TailRestoreNode),
+            DiskRegionKind::Boot
+            | DiskRegionKind::Share
+            | DiskRegionKind::Combined
+            | DiskRegionKind::Encrypt
+            | DiskRegionKind::Compatibility => {
+                let partition_type = context
+                    .partitions
+                    .iter()
+                    .find(|partition| {
+                        partition.start_sector == segment.start_lba
+                            && partition.sector_count == segment.sector_count
+                    })
+                    .map_or(0, |partition| partition.partition_type);
+                (
+                    Some(InspectDecoderKind::Partition),
+                    DiskRegionSemantic::Partition { partition_type },
+                )
+            }
+            _ => (None, DiskRegionSemantic::Unknown),
+        }
+    }
+
+    let mut regions = Vec::new();
+    let mut free_index = 0usize;
+    let tail_start = model.tail_group().map(|tail| tail.start_lba);
+    for segment in &model.segments {
+        if tail_start.is_some_and(|start| segment.start_lba >= start) {
+            break;
+        }
+        let (decoder, semantic) = properties(context, segment);
+        let id = match segment.kind {
+            crate::application::disk_layout::DiskRegionKind::Protocol => "region.protocol".into(),
+            crate::application::disk_layout::DiskRegionKind::Free => {
+                let id = format!("region.unallocated.{free_index}");
+                free_index += 1;
+                id
+            }
+            crate::application::disk_layout::DiskRegionKind::Boot
+            | crate::application::disk_layout::DiskRegionKind::Share
+            | crate::application::disk_layout::DiskRegionKind::Combined
+            | crate::application::disk_layout::DiskRegionKind::Encrypt
+            | crate::application::disk_layout::DiskRegionKind::Compatibility => {
+                let index = context
+                    .partitions
+                    .iter()
+                    .position(|partition| {
+                        partition.start_sector == segment.start_lba
+                            && partition.sector_count == segment.sector_count
+                    })
+                    .expect("canonical partition must come from inspect context");
+                format!("region.partition.{index}")
+            }
+            _ => format!("region.extent.{}", segment.start_lba),
+        };
+        regions.push(region_with_extent(
+            id,
+            segment.label.clone(),
+            segment.start_lba,
+            segment.sector_count,
+            decoder,
+            SemanticStatus::Identified,
+            semantic,
+        ));
+    }
+
+    if let Some(tail) = model.tail_group() {
+        let children = tail
+            .children
+            .iter()
+            .enumerate()
+            .map(|(index, segment)| {
+                use crate::application::disk_layout::DiskRegionKind;
+                let (decoder, semantic) = properties(context, segment);
+                let id = match segment.kind {
+                    DiskRegionKind::Lce => "region.lce".into(),
+                    DiskRegionKind::BackupMirror => "region.tail.metadata_mirror".into(),
+                    DiskRegionKind::RestoreNode => "region.tail.restore_node_end4".into(),
+                    DiskRegionKind::Free => format!("region.tail.free.{index}"),
+                    _ => format!("region.tail.extent.{index}"),
+                };
+                lazy_extent(
+                    id,
+                    segment.label.clone(),
+                    segment.start_lba,
+                    segment.sector_count,
+                    decoder,
+                    SemanticStatus::Identified,
+                    Some(semantic),
+                )
+            })
+            .collect();
+        regions.push(InspectNode {
+            id: "region.tail".into(),
+            label: "尾部区域".into(),
+            kind: InspectNodeKind::Region,
+            range: InspectNodeRange::sectors(
+                tail.start_lba,
+                tail.end_exclusive.saturating_sub(tail.start_lba),
+            ),
+            children: InspectChildren::Materialized(children),
+            decoder: None,
+            status: SemanticStatus::Identified,
+            region_semantic: Some(DiskRegionSemantic::Tail),
+        });
+    }
+
+    regions.sort_by_key(|region| region.range.start_lba);
+    root(regions)
 }
 
 pub fn find_sector_structured_path(
@@ -850,6 +709,10 @@ pub fn find_sector_structured_paths(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::application::partition_table::{
+        PartitionSource, PartitionTableExtent, PartitionTableKind, PartitionTableSnapshot,
+        PhysicalPartition,
+    };
     use crate::backup_metadata::{Lba7CompatibilityGeometry, PartitionGeometry};
     use crate::common::{METADATA_IMAGE_LEN, SECTOR};
     use crate::inspect_adapter::{FieldChild, FieldStyle};
@@ -872,175 +735,163 @@ mod tests {
     }
 
     fn context(total: u64) -> InspectDiskContext {
+        let lce_start = total.saturating_sub(2_000);
         InspectDiskContext {
             protocol_image: vec![0; METADATA_IMAGE_LEN],
             device_id: Some("disk&ven_test&prod_test".into()),
             total_sectors: total,
             provision_kind: Some(crate::provision::DiskProvisionKind::Mode0),
             partition_table: None,
-            partitions: Vec::new(),
-            lce: None,
+            partitions: vec![
+                partition(0, 63, 37, 1),
+                partition(1, 100, 900, 2),
+                partition(2, 1_000, 1_000, 4),
+            ],
+            lce: Some(Lba7CompatibilityGeometry {
+                start_lba: lce_start,
+                sector_count: 6,
+                lba7_pointer_entries: Vec::new(),
+                official_partition_mode: None,
+                chs_expected_start_lba: None,
+            }),
             context_issues: Vec::new(),
         }
     }
 
     #[test]
-    fn topology_covers_protocol_tail_and_unknown_complement() {
+    fn topology_uses_canonical_protocol_free_partitions_and_tail() {
         let topology = build_inspect_topology(&context(5_000));
         assert_eq!(topology.root.range, InspectNodeRange::sectors(0, 5_000));
         assert_eq!(
             topology
                 .primary_region_for_lba(0)
-                .map(|node| node.id.as_str()),
-            Some("region.protocol")
+                .and_then(|node| node.region_semantic),
+            Some(DiskRegionSemantic::Protocol)
         );
-        assert!(topology
-            .primary_region_for_lba(100)
-            .is_some_and(|node| node.id.starts_with("region.unknown.")));
+        assert_eq!(
+            topology
+                .primary_region_for_lba(30)
+                .and_then(|node| node.region_semantic),
+            Some(DiskRegionSemantic::Unallocated)
+        );
+        assert_eq!(
+            topology
+                .primary_region_for_lba(150)
+                .and_then(|node| node.region_semantic),
+            Some(DiskRegionSemantic::Partition { partition_type: 2 })
+        );
         assert_eq!(
             topology
                 .primary_region_for_lba(4_999)
-                .map(|node| node.id.as_str()),
-            Some("region.tail")
+                .and_then(|node| node.region_semantic),
+            Some(DiskRegionSemantic::Tail)
         );
     }
 
     #[test]
-    fn tail_primary_extents_are_ordered_disjoint_and_cover_parent() {
+    fn tail_starts_at_lce_and_children_are_ordered_disjoint_and_complete() {
         let total = 15_728_640;
-        let tail = tail_region(total).expect("tail region");
-        let InspectChildren::Materialized(children) = tail.children else {
+        let ctx = context(total);
+        let lce_start = ctx.lce.as_ref().unwrap().start_lba;
+        let topology = build_inspect_topology(&ctx);
+        let tail = topology
+            .primary_region_for_lba(total - 1)
+            .expect("tail region");
+        assert_eq!(tail.id, "region.tail");
+        assert_eq!(tail.range.start_lba, lce_start);
+        let InspectChildren::Materialized(children) = &tail.children else {
             panic!("tail extents must be materialized");
         };
-        let spans = children
-            .iter()
-            .map(|child| {
-                (
-                    child.range.start_lba,
-                    child.range.end_lba_exclusive(),
-                    child.region_semantic,
-                )
-            })
-            .collect::<Vec<_>>();
         assert_eq!(
-            spans,
-            [
-                (15_726_592, 15_727_616, None),
-                (
-                    15_727_616,
-                    15_727_625,
-                    Some(DiskRegionSemantic::TailMetadataMirror),
-                ),
-                (15_727_625, 15_728_636, None),
-                (
-                    15_728_636,
-                    15_728_637,
-                    Some(DiskRegionSemantic::TailRestoreNode),
-                ),
-                (15_728_637, 15_728_640, None),
-            ]
+            children.first().and_then(|child| child.region_semantic),
+            Some(DiskRegionSemantic::Lce)
         );
-        assert!(spans.windows(2).all(|pair| pair[0].1 == pair[1].0));
+        assert_eq!(children.first().unwrap().range.sector_count, 6);
+        assert!(children.iter().any(|child| {
+            child.region_semantic == Some(DiskRegionSemantic::TailMetadataMirror)
+                && child.range.start_lba == total - 1024
+                && child.range.sector_count == 9
+        }));
+        assert!(children.iter().any(|child| {
+            child.region_semantic == Some(DiskRegionSemantic::TailRestoreNode)
+                && child.range.start_lba == total - 4
+                && child.range.sector_count == 1
+        }));
+        assert!(children
+            .windows(2)
+            .all(|pair| pair[0].range.end_lba_exclusive() == pair[1].range.start_lba));
+        assert_eq!(
+            children.first().unwrap().range.start_lba,
+            tail.range.start_lba
+        );
+        assert_eq!(children.last().unwrap().range.end_lba_exclusive(), total);
     }
 
     #[test]
-    fn topology_expresses_lce_partitions_and_unknown_gaps_without_eager_sectors() {
-        let mut ctx = context(10_000);
-        ctx.lce = Some(Lba7CompatibilityGeometry {
-            start_lba: 1_500,
-            sector_count: 6,
-            lba7_pointer_entries: Vec::new(),
-            official_partition_mode: None,
-            chs_expected_start_lba: None,
-        });
-        ctx.partitions.push(partition(0, 2_048, 2_000, 2));
-        let topology = build_inspect_topology(&ctx);
-
-        assert_eq!(
-            topology
-                .primary_region_for_lba(1_502)
-                .map(|node| node.id.as_str()),
-            Some("region.lce")
-        );
-        assert_eq!(
-            topology
-                .primary_region_for_lba(2_100)
-                .map(|node| node.id.as_str()),
-            Some("region.partition.0")
-        );
-
+    fn topology_partition_is_lazy_and_free_gaps_are_explicit() {
+        let topology = build_inspect_topology(&context(10_000));
         let partition_region = topology
-            .regions_for_lba(2_100)
+            .regions_for_lba(150)
             .into_iter()
-            .find(|node| node.id == "region.partition.0")
+            .find(|node| {
+                matches!(
+                    node.region_semantic,
+                    Some(DiskRegionSemantic::Partition { partition_type: 2 })
+                )
+            })
             .unwrap();
         let InspectChildren::Materialized(extents) = &partition_region.children else {
             panic!("partition region must own one extent");
         };
-        let page = extents[0].materialize_sector_page(1_000, 3);
+        let page = extents[0].materialize_sector_page(10, 3);
         assert_eq!(
             page.iter()
                 .map(|node| node.range.start_lba)
                 .collect::<Vec<_>>(),
-            vec![3_048, 3_049, 3_050]
+            vec![110, 111, 112]
         );
-        assert!(page.iter().all(|node| node.kind == InspectNodeKind::Sector));
+        assert_eq!(
+            topology
+                .primary_region_for_lba(2_500)
+                .and_then(|node| node.region_semantic),
+            Some(DiskRegionSemantic::Unallocated)
+        );
     }
 
     #[test]
     fn region_semantics_do_not_depend_on_display_labels() {
-        let mut ctx = context(10_000);
-        ctx.partitions.push(partition(0, 2_048, 2_000, 2));
-        let mut topology = build_inspect_topology(&ctx);
+        let mut topology = build_inspect_topology(&context(10_000));
         let InspectChildren::Materialized(regions) = &mut topology.root.children else {
             panic!("root regions must be materialized");
         };
         let protocol = regions
             .iter_mut()
-            .find(|node| node.id == "region.protocol")
+            .find(|node| node.region_semantic == Some(DiskRegionSemantic::Protocol))
             .unwrap();
         protocol.label = "renamed".into();
         assert_eq!(protocol.region_semantic, Some(DiskRegionSemantic::Protocol));
-        let partition = regions
+        assert!(regions.iter().any(|node| {
+            node.region_semantic == Some(DiskRegionSemantic::Partition { partition_type: 2 })
+        }));
+        assert!(regions
             .iter()
-            .find(|node| node.id == "region.partition.0")
-            .unwrap();
-        assert_eq!(
-            partition.region_semantic,
-            Some(DiskRegionSemantic::Partition { partition_type: 2 })
-        );
-        let tail = regions
-            .iter()
-            .find(|node| node.id == "region.tail")
-            .unwrap();
-        assert_eq!(tail.region_semantic, Some(DiskRegionSemantic::Tail));
+            .any(|node| node.region_semantic == Some(DiskRegionSemantic::Tail)));
     }
 
     #[test]
-    fn root_regions_follow_physical_lba_order_with_unknown_gaps() {
-        let mut ctx = context(10_000);
-        ctx.lce = Some(Lba7CompatibilityGeometry {
-            start_lba: 4_500,
-            sector_count: 6,
-            lba7_pointer_entries: Vec::new(),
-            official_partition_mode: None,
-            chs_expected_start_lba: None,
-        });
-        ctx.partitions.push(partition(0, 2_048, 2_000, 2));
-        let topology = build_inspect_topology(&ctx);
+    fn root_regions_follow_physical_lba_order_without_unknown_gaps() {
+        let topology = build_inspect_topology(&context(10_000));
         let InspectChildren::Materialized(regions) = topology.root.children else {
             panic!("root regions must be materialized");
         };
         assert!(regions
             .windows(2)
-            .all(|pair| { pair[0].range.end_lba_exclusive() <= pair[1].range.start_lba }));
-        let positions = regions
+            .all(|pair| pair[0].range.end_lba_exclusive() == pair[1].range.start_lba));
+        assert!(regions
             .iter()
-            .map(|node| node.range.start_lba)
-            .collect::<Vec<_>>();
-        assert_eq!(positions, vec![0, 13, 2_048, 4_048, 4_500, 4_506, 7_952]);
-        assert_eq!(regions[3].kind, InspectNodeKind::UnknownRange);
-        assert_eq!(regions[5].kind, InspectNodeKind::UnknownRange);
+            .all(|region| region.region_semantic != Some(DiskRegionSemantic::Unknown)));
+        assert_eq!(regions.first().unwrap().range.start_lba, 0);
+        assert_eq!(regions.last().unwrap().range.end_lba_exclusive(), 10_000);
     }
 
     #[test]
@@ -1057,111 +908,70 @@ mod tests {
     }
 
     #[test]
-    fn overlapping_known_evidence_is_explicit_and_root_remains_non_overlapping() {
+    fn overlapping_known_evidence_fails_closed_instead_of_creating_overlap() {
         let mut ctx = context(10_000);
-        ctx.partitions.push(partition(0, 2_048, 2_000, 2));
-        ctx.lce = Some(Lba7CompatibilityGeometry {
-            start_lba: 3_000,
-            sector_count: 6,
-            lba7_pointer_entries: Vec::new(),
-            official_partition_mode: None,
-            chs_expected_start_lba: None,
-        });
+        ctx.lce.as_mut().unwrap().start_lba = 1_500;
         let topology = build_inspect_topology(&ctx);
         let InspectChildren::Materialized(regions) = topology.root.children else {
             panic!("root regions must be materialized");
         };
-        assert!(regions
-            .windows(2)
-            .all(|pair| pair[0].range.end_lba_exclusive() <= pair[1].range.start_lba));
-        let conflict = regions
-            .iter()
-            .find(|region| region.label == "重叠证据")
-            .unwrap();
-        assert_eq!(conflict.range, InspectNodeRange::sectors(2_048, 2_000));
-        let InspectChildren::Materialized(evidence) = &conflict.children else {
-            panic!("conflict must retain original evidence");
-        };
-        assert!(evidence.iter().any(|node| node.id == "region.lce"));
-        assert!(evidence.iter().any(|node| node.id == "region.partition.0"));
+        assert_eq!(regions.len(), 1);
+        assert_eq!(regions[0].label, "布局证据不足");
+        assert_eq!(
+            regions[0].region_semantic,
+            Some(DiskRegionSemantic::Unknown)
+        );
     }
 
     #[test]
-    fn plain_mbr_primary_partition_becomes_lazy_partition_region() {
+    fn plain_partition_table_uses_metadata_partition_and_free_segments() {
         let mut ctx = context(20_000);
-        let mbr = &mut ctx.protocol_image[..SECTOR];
-        let entry = 0x1be;
-        mbr[entry + 4] = 0x07;
-        mbr[entry + 8..entry + 12].copy_from_slice(&2_048u32.to_le_bytes());
-        mbr[entry + 12..entry + 16].copy_from_slice(&10_000u32.to_le_bytes());
-        mbr[510..512].copy_from_slice(&[0x55, 0xaa]);
-
-        let topology = build_inspect_topology(&ctx);
-        let region = topology
-            .regions_for_lba(3_000)
-            .into_iter()
-            .find(|node| node.id == "region.mbr_partition.0")
-            .expect("plain MBR partition must be a first-class region");
-        assert_eq!(region.range, InspectNodeRange::sectors(2_048, 10_000));
-        assert!(region.label.contains("MBR P1"));
-        assert_eq!(region.decoder, None);
-
-        let InspectChildren::Materialized(children) = &region.children else {
-            panic!("MBR partition must own one lazy extent");
-        };
-        assert!(matches!(
-            children[0].children,
-            InspectChildren::LazySectors {
+        ctx.provision_kind = Some(crate::provision::DiskProvisionKind::Plain);
+        ctx.device_id = None;
+        ctx.partitions.clear();
+        ctx.lce = None;
+        ctx.partition_table = Some(PartitionTableSnapshot {
+            kind: PartitionTableKind::Mbr,
+            partitions: vec![PhysicalPartition {
+                index: 1,
                 start_lba: 2_048,
-                sector_count: 10_000
-            }
-        ));
-    }
-
-    #[test]
-    fn mbr_partition_matching_edp_geometry_is_not_duplicated() {
-        let mut ctx = context(20_000);
-        ctx.partitions.push(partition(0, 2_048, 10_000, 2));
-        let mbr = &mut ctx.protocol_image[..SECTOR];
-        let entry = 0x1be;
-        mbr[entry + 4] = 0x07;
-        mbr[entry + 8..entry + 12].copy_from_slice(&2_048u32.to_le_bytes());
-        mbr[entry + 12..entry + 16].copy_from_slice(&10_000u32.to_le_bytes());
-        mbr[510..512].copy_from_slice(&[0x55, 0xaa]);
-
+                sector_count: 10_000,
+                source: PartitionSource::Mbr {
+                    partition_type: 0x07,
+                    primary_slot: Some(1),
+                },
+                filesystem: Some("exFAT".into()),
+            }],
+            table_extents: vec![PartitionTableExtent {
+                label: "MBR".into(),
+                start_lba: 0,
+                sector_count: 1,
+            }],
+            issues: Vec::new(),
+        });
         let topology = build_inspect_topology(&ctx);
-        let regions = topology.regions_for_lba(3_000);
-        assert!(regions.iter().any(|node| node.id == "region.partition.0"));
-        assert!(
-            regions
-                .iter()
-                .all(|node| !node.id.starts_with("region.mbr_partition.")),
-            "official EDP partition and its MBR exposure must not produce duplicate regions"
-        );
-    }
-
-    #[test]
-    fn malformed_mbr_primary_partition_does_not_claim_disk_space() {
-        let mut ctx = context(20_000);
-        let mbr = &mut ctx.protocol_image[..SECTOR];
-        let entry = 0x1be;
-        mbr[entry + 4] = 0x07;
-        mbr[entry + 8..entry + 12].copy_from_slice(&19_000u32.to_le_bytes());
-        mbr[entry + 12..entry + 16].copy_from_slice(&2_000u32.to_le_bytes());
-        mbr[510..512].copy_from_slice(&[0x55, 0xaa]);
-
-        let topology = build_inspect_topology(&ctx);
-        assert!(
+        assert_eq!(
             topology
-                .regions_for_lba(19_500)
-                .iter()
-                .all(|node| !node.id.starts_with("region.mbr_partition.")),
-            "out-of-range MBR geometry must fail closed instead of being silently clipped"
+                .primary_region_for_lba(0)
+                .and_then(|node| node.region_semantic),
+            Some(DiskRegionSemantic::PartitionTable)
+        );
+        assert_eq!(
+            topology
+                .primary_region_for_lba(1_000)
+                .and_then(|node| node.region_semantic),
+            Some(DiskRegionSemantic::Unallocated)
+        );
+        assert_eq!(
+            topology
+                .primary_region_for_lba(3_000)
+                .and_then(|node| node.region_semantic),
+            Some(DiskRegionSemantic::PlainPartition)
         );
     }
 
     #[test]
-    fn tail_mirror_and_end4_are_nested_under_tail_region() {
+    fn tail_mirror_and_end4_are_nested_under_lce_anchored_tail_region() {
         let topology = build_inspect_topology(&context(10_000));
         let tail = topology.primary_region_for_lba(9_999).unwrap();
         assert_eq!(tail.id, "region.tail");
@@ -1170,10 +980,10 @@ mod tests {
         };
         assert!(children
             .iter()
-            .any(|node| node.id == "region.tail.metadata_mirror"));
+            .any(|node| node.region_semantic == Some(DiskRegionSemantic::TailMetadataMirror)));
         assert!(children
             .iter()
-            .any(|node| node.id == "region.tail.restore_node_end4"));
+            .any(|node| node.region_semantic == Some(DiskRegionSemantic::TailRestoreNode)));
     }
 
     #[test]

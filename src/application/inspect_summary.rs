@@ -68,10 +68,9 @@ fn title(source: &InspectSummarySource<'_>) -> String {
         let meaning = match source.region_semantic {
             Some(DiskRegionSemantic::PartitionTable) => "分区表结构",
             Some(DiskRegionSemantic::PlainPartition) => "普通分区数据",
-            Some(DiskRegionSemantic::Unallocated) => "未分配空间",
+            Some(DiskRegionSemantic::Unallocated) => "空闲区域",
             Some(DiskRegionSemantic::Lce) => "LCE 兼容区",
-            Some(DiskRegionSemantic::Tail) => "盘尾取证区域",
-            Some(DiskRegionSemantic::TailForensic) => "盘尾取证数据",
+            Some(DiskRegionSemantic::Tail) => "尾部区域",
             Some(DiskRegionSemantic::TailMetadataMirror) => "盘尾历史镜像",
             Some(DiskRegionSemantic::TailRestoreNode) => "盘尾恢复节点",
             Some(
@@ -102,10 +101,9 @@ fn title(source: &InspectSummarySource<'_>) -> String {
         Some(DiskRegionSemantic::Protocol) => "EDP 主协议区".into(),
         Some(DiskRegionSemantic::PartitionTable) => "分区表结构".into(),
         Some(DiskRegionSemantic::PlainPartition) => format!("{} · 普通分区", source.label),
-        Some(DiskRegionSemantic::Unallocated) => "未分配空间".into(),
+        Some(DiskRegionSemantic::Unallocated) => "空闲区域".into(),
         Some(DiskRegionSemantic::Lce) => "LCE 兼容区".into(),
-        Some(DiskRegionSemantic::Tail) => "盘尾取证区域".into(),
-        Some(DiskRegionSemantic::TailForensic) => "盘尾取证数据".into(),
+        Some(DiskRegionSemantic::Tail) => "尾部区域".into(),
         Some(DiskRegionSemantic::TailMetadataMirror) => "盘尾历史镜像".into(),
         Some(DiskRegionSemantic::TailRestoreNode) => "盘尾恢复节点".into(),
         Some(DiskRegionSemantic::Partition { .. } | DiskRegionSemantic::MbrPartition { .. }) => {
@@ -248,7 +246,7 @@ pub fn summarize_node(source: InspectSummarySource<'_>) -> InspectNodeSummary {
             Some(DiskRegionSemantic::MbrPartition { partition_type }) => {
                 format!("MBR type=0x{partition_type:02X}")
             }
-            Some(DiskRegionSemantic::Tail) => "最后 2048 扇区取证窗口".into(),
+            Some(DiskRegionSemantic::Tail) => "LCE 起始至盘尾的复合区域".into(),
             Some(DiskRegionSemantic::Unknown) => "尚无可验证的协议分类".into(),
             _ => match source.status {
                 SemanticStatus::Identified => "已识别物理范围".into(),

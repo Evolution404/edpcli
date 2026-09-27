@@ -441,7 +441,7 @@ edpcli inspect decode backup.edpb --lba 240250283 --export ./inspect-out
 - 检查分区内非起始 LBA 时，会先读取同一分区起始扇区作为物理状态证据；离线 EDPB 若没有采集该起始扇区则 `decode` fail-closed；
 - 当前自动 FileKey 解封只对已经验证的默认密码配置开放；非默认密码、未知加密模式或 raw/decoded 两边都不能确认时会明确拒绝 decode；
 - 未知厂商区或没有经过验证的算法只允许 `raw`/`meta`，`decode` 会 fail-closed；
-- 区域可以重叠，例如 LCE 同时可能位于盘尾取证窗口，`meta` 会同时列出；
+- 容量布局使用统一、互斥的物理分段；EDP 尾部区域从已验证 LCE 起点到盘尾，并可展开查看 LCE、空闲区、历史镜像与历史恢复节点；
 - EDPB 离线检查可读取容器中已采集的原始扇区范围；没有采集到的 LBA 会明确报告不存在；
 - `--export` 按模式分别导出 `LBA<n>_raw.*`、`LBA<n>_decoded.*` 或 `LBA<n>_meta.txt`；
 - 离线文件无法自动确定 device_id 时可显式 `--id`。

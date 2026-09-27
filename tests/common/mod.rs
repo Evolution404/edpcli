@@ -323,12 +323,41 @@ pub fn confirm_row_identity(row: &mut edpcli::disk_scan::Row) {
 
 /// Explicit EDP inspect context for TUI tests that exercise the protocol tree.
 pub fn edp_inspect_context(total_sectors: u64) -> edpcli::inspect_target::InspectDiskContext {
-    edpcli::inspect_target::InspectDiskContext::new_with_partition_table(
+    use edpcli::backup_metadata::{Lba7CompatibilityGeometry, PartitionGeometry};
+
+    let mut context = edpcli::inspect_target::InspectDiskContext::new_with_partition_table(
         vec![0; edpcli::common::METADATA_IMAGE_LEN],
         Some("disk&ven_test&prod_test".into()),
         total_sectors,
         Some(edpcli::provision::DiskProvisionKind::Mode0),
         None,
         None,
-    )
+    );
+    let partition = |index, partition_type, start_sector, sector_count| PartitionGeometry {
+        index,
+        partition_type,
+        partition_count: 3,
+        need_disturb: 0,
+        need_encrypt: u32::from(partition_type != 1),
+        start_sector,
+        sector_size: edpcli::common::SECTOR as u64,
+        partition_size: sector_count * edpcli::common::SECTOR as u64,
+        sector_count,
+        user_key_crc: 0,
+        file_key_crc: 0,
+        encrypt_mode: if partition_type == 1 { 0 } else { 2 },
+    };
+    context.partitions = vec![
+        partition(0, 1, 63, 37),
+        partition(1, 2, 2_048, 200),
+        partition(2, 4, 2_300, 200),
+    ];
+    context.lce = Some(Lba7CompatibilityGeometry {
+        start_lba: total_sectors.saturating_sub(1_500),
+        sector_count: 6,
+        lba7_pointer_entries: Vec::new(),
+        official_partition_mode: None,
+        chs_expected_start_lba: None,
+    });
+    context
 }

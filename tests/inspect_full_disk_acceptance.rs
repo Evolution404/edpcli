@@ -67,6 +67,8 @@ fn workspace(context: &InspectDiskContext) -> AdvancedInspectWorkspace {
         items: Vec::new(),
         export_dir: None,
         topology: build_inspect_topology(context),
+        disk_layout: None,
+        disk_layout_issue: None,
     }
 }
 
@@ -104,12 +106,19 @@ fn all_four_official_modes_keep_lce_and_logical_partitions_in_one_full_disk_topo
                 partition.index
             );
         }
+        assert_eq!(
+            topology
+                .primary_region_for_lba(lce.start_lba)
+                .map(|node| node.id.as_str()),
+            Some("region.tail"),
+            "{mode:?} LCE must be contained by the tail group"
+        );
         assert!(
             topology
-                .regions_for_lba(lce.start_lba)
+                .find_label_paths("LCE")
                 .iter()
-                .any(|node| node.id == "region.lce"),
-            "{mode:?} missing LCE"
+                .any(|path| path.iter().any(|id| id == "region.lce")),
+            "{mode:?} missing nested LCE"
         );
         assert!(
             topology

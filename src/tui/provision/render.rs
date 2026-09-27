@@ -561,7 +561,7 @@ pub(super) fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, sta
             }
 
             if let Some(layout_area) = layout_area {
-                let layout_model = state.provision_layout_model();
+                let layout_model = state.provision_layout_model().collapsed_tail_model();
                 let layout_details = state.provision_layout_editor_details();
                 let layout_summary = format!(
                     "{} · {} sectors",
@@ -665,7 +665,7 @@ pub(super) fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, sta
             }
 
             if let Some(layout_area) = layout_area {
-                let layout_model = state.provision_layout_model();
+                let layout_model = state.provision_layout_model().collapsed_tail_model();
                 let layout_summary = format!(
                     "{} · {} sectors",
                     provision.kind.title(),

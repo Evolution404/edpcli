@@ -35,6 +35,7 @@ fn device(disk: u32) -> Row {
         partitions: None,
         partition_table: None,
         partition_table_error: None,
+        lce: None,
     };
     crate::common::confirm_row_identity(&mut row);
     row

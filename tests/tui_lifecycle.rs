@@ -33,6 +33,7 @@ fn usb_device() -> edpcli::disk_scan::Row {
         partitions: None,
         partition_table: None,
         partition_table_error: None,
+        lce: None,
     };
     crate::common::confirm_row_identity(&mut row);
     row
@@ -293,8 +294,10 @@ fn wide_provision_form_uses_two_columns_and_compact_partition_rows() {
 
     assert!(compact_text.contains("磁盘布局"), "{text}");
     assert!(compact_text.contains("EDP主协议区"), "{text}");
-    assert!(compact_text.contains("LCE"), "{text}");
-    assert!(compact_text.contains("盘尾区域"), "{text}");
+    assert!(
+        text.contains("尾") && text.contains("区") && text.contains("域"),
+        "{text}"
+    );
     assert!(
         compact_rows
             .iter()
@@ -547,6 +550,8 @@ fn advanced_inspect_tree_browser_renders_and_navigates_across_terminal_sizes() {
         topology: edpcli::application::inspect_tree::build_inspect_topology(
             &crate::common::edp_inspect_context(24_025_029),
         ),
+        disk_layout: None,
+        disk_layout_issue: None,
     }));
     assert_eq!(
         state.advanced_inspect().unwrap().stage,

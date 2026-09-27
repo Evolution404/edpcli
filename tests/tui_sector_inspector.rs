@@ -2,7 +2,6 @@ use edpcli::application::inspect::{
     AbsoluteByteRange, AdvancedInspectItem, AdvancedInspectMode, AdvancedInspectWorkspace,
     InspectField, InspectFieldStatus, InspectFieldType,
 };
-use edpcli::backup_metadata::PartitionGeometry;
 use edpcli::inspect::{FieldChild, FieldStyle, InspectMeta};
 use edpcli::tui::{
     render,
@@ -19,25 +18,13 @@ fn workspace(items: Vec<AdvancedInspectItem>) -> AdvancedInspectWorkspace {
         items,
         export_dir: None,
         topology: edpcli::application::inspect_tree::build_inspect_topology(&context),
+        disk_layout: None,
+        disk_layout_issue: None,
     }
 }
 
 fn workspace_with_partition(items: Vec<AdvancedInspectItem>) -> AdvancedInspectWorkspace {
-    let mut context = crate::common::edp_inspect_context(10_000);
-    context.partitions.push(PartitionGeometry {
-        index: 0,
-        partition_type: 2,
-        partition_count: 1,
-        need_disturb: 0,
-        need_encrypt: 0,
-        start_sector: 2_048,
-        sector_size: edpcli::common::SECTOR as u64,
-        partition_size: 300 * edpcli::common::SECTOR as u64,
-        sector_count: 300,
-        user_key_crc: 0,
-        file_key_crc: 0,
-        encrypt_mode: 0,
-    });
+    let context = crate::common::edp_inspect_context(10_000);
     AdvancedInspectWorkspace {
         source: "partitioned-test-disk".into(),
         meta: InspectMeta::default(),
@@ -45,6 +32,8 @@ fn workspace_with_partition(items: Vec<AdvancedInspectItem>) -> AdvancedInspectW
         items,
         export_dir: None,
         topology: edpcli::application::inspect_tree::build_inspect_topology(&context),
+        disk_layout: None,
+        disk_layout_issue: None,
     }
 }
 
@@ -370,14 +359,14 @@ fn selecting_known_partition_sector_requests_read_only_preview() {
     let rows = state.advanced_inspect_tree_rows();
     let region = rows
         .iter()
-        .position(|row| row.id.ends_with("/region.partition.0"))
+        .position(|row| row.id.ends_with("/region.partition.1"))
         .unwrap();
     state.advanced_inspect_move_tree(region as isize);
     state.advanced_inspect_toggle_selected();
     let rows = state.advanced_inspect_tree_rows();
     let extent = rows
         .iter()
-        .position(|row| row.id.ends_with("/region.partition.0.extent"))
+        .position(|row| row.id.ends_with("/region.partition.1.extent"))
         .unwrap();
     let current = state.advanced_inspect().unwrap().tree_selected;
     state.advanced_inspect_move_tree(extent as isize - current as isize);
@@ -405,14 +394,14 @@ fn ch14_failed_passive_preview_requires_explicit_retry_then_recovers() {
     let rows = state.advanced_inspect_tree_rows();
     let partition = rows
         .iter()
-        .position(|row| row.id.ends_with("/region.partition.0"))
+        .position(|row| row.id.ends_with("/region.partition.1"))
         .unwrap();
     state.advanced_inspect_move_tree(partition as isize);
     state.advanced_inspect_toggle_selected();
     let rows = state.advanced_inspect_tree_rows();
     let extent = rows
         .iter()
-        .position(|row| row.id.ends_with("/region.partition.0.extent"))
+        .position(|row| row.id.ends_with("/region.partition.1.extent"))
         .unwrap();
     let current = state.advanced_inspect().unwrap().tree_selected;
     state.advanced_inspect_move_tree(extent as isize - current as isize);

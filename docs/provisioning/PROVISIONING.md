@@ -1541,8 +1541,8 @@ o 展开  Enter查看  gl 跳转  / 搜索  Tab面板  ? 帮助
 - Phase I1 审计已完成：CLI 已支持任意 `u64` LBA/range/count，TUI 全盘 Inspect backend 也具备任意合法 LBA 读取能力；确认历史主要双轨来自旧 `InspectWorkspace` 固定 LBA0～12 路径，以及 CLI/TUI 各自维护的 protocol/non-protocol decode 与 meta 决策。
 - Phase I2 已完成：application 层统一 `SectorReader` / checked range reader、`Protocol / LCE / Partition` decoder registry、`decode_sector()` / `sector_meta_text()`；CLI `raw/decode/meta` 已删除自己的 EDPB/物理盘 reader、partition boot 读取、decode/meta/export 循环，只负责来源选择、参数转换和渲染统一 `AdvancedInspectWorkspace`。旧 `InspectWorkspace` 已删除；TUI 现行产品只暴露一个 Inspect，全盘树直接复用该 backend。
 - 统一 Field 模型已落地：协议 parser 原有字段语义不改，由 application materialize 为绝对 `[start,end_exclusive)` byte range、Field type、raw bytes、decoded bytes、status、label/value/group/children；range 模型从第一版即可无损表达跨 sector 字段，unknown/reserved/preserved 状态枚举已预留，当前已验证协议字段标记为 Known。
-- Phase I3 已完成模型层：新增 UI-neutral 的 `InspectTopology / InspectNode / InspectNodeRange / InspectChildren`，形成 Device → Region → Extent → lazy Sector → Field 结构；LBA0～12、LCE、各 partition/data、盘尾取证窗口、盘尾 9-sector mirror、end-4 restore-node 与 unknown complement 均可表达。LBA0 sector stub 显式包含 MBR partition-table Structure；任意 LBA 可映射到一个或多个所属 Region。
-- 大 Region/Partition/unknown range 不生成全量 Sector vector，只保存 `LazySectors { start_lba, sector_count }`，按 offset+limit materialize sector page；tail mirror/end-4 嵌套在 tail region 内，避免顶层重复区域。拓扑复用 EDPB 的 `SemanticStatus`，但不把 TUI 展开/焦点状态塞入备份领域模型。
+- Phase I3 已完成模型层：新增 UI-neutral 的 `InspectTopology / InspectNode / InspectNodeRange / InspectChildren`，形成 Device → Region → Extent → lazy Sector → Field 结构；LBA0～12、LCE、各 partition/data、盘尾 9-sector mirror、end-4 历史恢复节点与物理空闲补集均可表达。LBA0 sector stub 显式包含 MBR partition-table Structure；任意合法 LBA 可定位到唯一 primary 物理分段。
+- 大 Region/Partition/空闲 range 不生成全量 Sector vector，只保存 `LazySectors { start_lba, sector_count }`，按 offset+limit materialize sector page；EDP 尾部从 LCE 起点形成父 group，mirror/end-4 与空闲补集作为连续互斥 children，避免顶层重复区域。拓扑复用 EDPB 的 `SemanticStatus`，但不把 TUI 展开/焦点状态塞入备份领域模型。
 - `AdvancedInspectWorkspace` 已直接携带同源 topology，因此 CLI/TUI 后续不需要重新推导磁盘区域。I3 定向门禁：tree 5/5、application inspect 11/11、CLI 6/6、TUI workspace 5/5、TUI lifecycle 13/13，`cargo check --all-targets` 与 `git diff --check` 通过。
 - Phase I4 已完成：旧“高级检查参数表单 → 平铺 LBA 结果”双轨已删除，选择物理盘/EDPB 后直接后台建立 topology 并进入统一 Browser。宽屏采用 Tree / Overview / Detail 三栏，中等宽度为左树 + 右侧上下两栏，窄屏复用同一 Browser 状态纵向排列，不维护第二套窄屏状态机。
 - 树交互已落地：`j/k` 与上下键移动，`h/l` 收起/展开，`o` 切换折叠，Enter 查看/进入，`gl` 跳转，`/` 搜索、`n/N` 循环匹配，Tab 正向 Tree→Overview→Detail、Shift+Tab 反向切换，Esc 返回；selection 通过 `visible_window()` 始终保持在可视窗口内。旧 `AdvancedInspectStage::Form/Result`、`AdvancedInspectForm`、旧 result navigation 与参数表单文案均已清零。
@@ -4502,64 +4502,40 @@ I6  跑 inspect/tui 专项、fast/full；只读真实盘验收，不触发写盘
 
 本章当前只记录计划。**不得在这个计划分支直接实现 I1～I6。**
 
-### 14.6 盘尾区域子节点必须按物理空间顺序、且不能用重叠兄弟节点表达
+### 14.6 尾部区域从 LCE 起始，子节点按物理空间连续互斥
 
-当前截图中的盘尾树看起来“没有按顺序排列”，根因不是简单缺少 `sort_by(start_lba)`，而是 `tail_region()` 的建模方式本身存在层级问题。
+尾部区域不使用固定长度窗口。对已确认 EDP 盘：
 
-当前 `src/application/inspect_tree.rs::tail_region()` 先创建一个覆盖**完整 2048 扇区盘尾窗口**的子节点：
+~~~text
+Tail.start = validated LBA7 LCE.start_lba
+Tail.end   = total_sectors
+~~~
 
-```text
-盘尾取证窗口 [total-2048 .. total-1]
-```
+尾部父节点只是层级分组，不额外占用物理空间。其 children 由 sector-exact canonical layout 产生：
 
-然后又把两个位于这个窗口内部的已知范围作为它的**兄弟节点**追加：
+~~~text
+尾部区域 [LCE.start..last]
+  ├─ LCE
+  ├─ 空闲区域
+  ├─ 历史 9-sector 备份镜像 [total-1024 .. total-1016]
+  ├─ 空闲区域
+  ├─ 历史恢复节点           [total-4]
+  └─ 空闲区域
+~~~
 
-```text
-盘尾历史 9 扇区镜像 [total-1024 .. total-1016]
-盘尾 end-4 restore-node [total-4 .. total-4]
-```
-
-因此三个 child 的 `start_lba` 实际已经是递增的，但第一个 child 覆盖了后两个 child。问题是**兄弟节点彼此重叠**，所以视觉上无法形成“从前到后”的物理磁盘序列。
-
-以当前截图 `total_sectors = 15728640` 为例：
-
-```text
-当前：
-盘尾取证窗口              [15726592..15728639]
-盘尾历史 9 扇区镜像       [15727616..15727624]   # 被上一行包含
-盘尾 end-4 restore-node   [15728636..15728636]   # 也被上一行包含
-```
-
-这不是理想的物理拓扑树。`盘尾取证窗口` 本质上是“盘尾区域为什么被采集”的**覆盖/证据概念**，不是应与内部特殊扇区并列的互斥 extent。
-
-目标 topology 应把同一层 child 规范化成**不重叠、按 LBA 连续排列**的物理区段，例如：
-
-```text
-盘尾区域 [15726592..15728639]
-  ├─ 盘尾未分类              [15726592..15727615]
-  ├─ 盘尾历史 9 扇区镜像     [15727616..15727624]
-  ├─ 盘尾未分类              [15727625..15728635]
-  ├─ 盘尾 end-4 restore-node [15728636]
-  └─ 盘尾未分类              [15728637..15728639]
-```
-
-`盘尾取证窗口 = 最后 2048 扇区` 这一事实仍需保留，但不再作为与内部 extents 重叠的 sibling。可采用以下任一等价设计，实施时优先选择模型最简洁的一种：
-
-1. `盘尾区域` 本身就是该 2048-sector forensic window，Overview/metadata 中注明“取证窗口”；或
-2. 在 `盘尾区域` 下增加一个非物理范围的 `Group/Structure` 说明“取证窗口”，但真正的物理 Extent children 仍必须互斥连续。
+LCE 位置必须来自已验证 LBA7 指针；CHS/容量计算只可用于一致性交叉验证。普通盘没有 LCE，因此不生成 EDP 尾部 group。
 
 关键约束：
 
-- **物理 Tree 的同级 Extent 必须按 `start_lba ASC`，且不得 overlap；**
-- 一个 sector 可以在语义分类 API 中同时属于多个角色，例如 `TailMetadataMirror + DeviceTailWindow`；这种多重 membership 可以继续由 `inspect_target::regions_for_lba()` 保留；
-- 但 Tree 的物理空间表示必须选一个 primary segmentation，次级“被某证据窗口覆盖”的关系通过 annotation/group/metadata 表达，不能制造重叠 sibling；
-- `盘尾历史 9 扇区镜像` 和 `end-4 restore-node` 的真实 LBA、协议意义、备份/恢复用途不变；
-- 不改变 `DEVICE_TAIL_WINDOW_SECTORS=2048`、`TAIL_METADATA_MIRROR_OFFSET_SECTORS=1024`、`TAIL_METADATA_MIRROR_SECTORS=9`、`TAIL_END4_MIRROR_OFFSET_SECTORS=4` 等已验证常量；
-- UI 仍使用闭区间显示，内部继续使用 `[start, end_exclusive)`。
+- 物理 Tree 的同级 Extent 必须按 start_lba ASC，且不得 overlap；
+- canonical capacity segments 必须完整覆盖 [0..total_sectors)，所有没有被已确认结构占用的补集统一为“空闲区域”；
+- 盘尾历史 9 扇区镜像和 end-4 历史恢复节点的真实 LBA、协议意义、备份/恢复用途不变；
+- 保留 TAIL_METADATA_MIRROR_OFFSET_SECTORS=1024、TAIL_METADATA_MIRROR_SECTORS=9、TAIL_END4_MIRROR_OFFSET_SECTORS=4 等已验证常量；
+- UI 仍使用闭区间显示，内部继续使用 [start, end_exclusive)。
 
-需要新增的 topology 不变量：
+topology 不变量：
 
-```text
+~~~text
 对任何表示物理空间分割的 Materialized children：
   child[i].start_lba <= child[i+1].start_lba
   child[i].end_exclusive <= child[i+1].start_lba
@@ -4568,26 +4544,23 @@ I6  跑 inspect/tui 专项、fast/full；只读真实盘验收，不触发写盘
   first.start_lba == parent.start_lba
   child[i].end_exclusive == child[i+1].start_lba
   last.end_exclusive == parent.end_exclusive
-```
+~~~
 
-盘尾专项回归至少覆盖：
+专项回归至少覆盖：
 
-1. 15,728,640-sector 示例严格得到上述五段顺序；
+1. 尾部父节点起点严格等于 LCE 起点；
 2. 9-sector mirror 前后 gap 边界无 off-by-one；
-3. `end-4` 后仍保留最后 3 个 sector 的未分类区段；
+3. end-4 后仍保留最后 3 个 sector 的空闲区段；
 4. 同级物理 children 无 overlap；
-5. 所有 child 合集完整覆盖盘尾 parent；
-6. `regions_for_lba()` 对镜像区/end-4 仍可同时返回 forensic tail membership，不因 Tree 去重丢失语义；
-7. `gl` 跳转、搜索、lazy sector materialization 仍能精确落到对应物理 span；
-8. 备份元数据中的 forensic-tail、historical mirror、restore-node evidence 不改变。
+5. 所有 child 合集完整覆盖尾部 parent；
+6. gl 跳转、搜索、lazy sector materialization 仍能精确落到对应物理 span；
+7. 备份元数据中的 LCE、历史镜像、历史恢复节点证据与统一布局边界一致。
 
-因此该问题应作为后续实现中的独立步骤加入：
+~~~text
+I2a  重构 tail topology：以 LCE 为尾部起点，由 canonical layout 产生连续互斥的物理 children
+~~~
 
-```text
-I2a  重构 tail topology：将重叠 sibling extents 归一化为按 LBA 连续的 primary spans，保留 secondary evidence membership
-```
-
-它属于 Inspect topology/UI 表达修正，不涉及任何盘面协议或写盘行为。
+它属于共享磁盘布局模型与 Inspect topology 的一致性修正，不涉及任何盘面协议或写盘行为。
 
 ### 14.7 节点概览与节点详情重新分工：Overview 看结论，Detail 看证据
 
@@ -5203,16 +5176,14 @@ EDP 主协议区 [0..12] · 13 sectors · <0.01%
 ```text
 区域                      LBA 范围                 扇区数        占比
 ■ EDP 主协议区            [0..12]                       13      <0.01%
-■ 协议后保留区            [13..62]                      50      <0.01%
+■ 空闲区域                [13..62]                      50      <0.01%
 ■ 启动区                  [63..20479]                20417       0.13%
 ■ 交换区                  [20480..13628690]       13608211      86.52%
 ■ 保密区                  [13628691..15725842]      2097152      13.33%
-■ LCE                     [15725843..15725848]            6      <0.01%
-■ LCE 后保留区            [15725849..15726591]          743      <0.01%
-■ 盘尾区域                [15726592..15728639]         2048       0.01%
+▶ 尾部区域                [15725843..15728639]         2797       0.02%
 ```
 
-这部分仍由共享 `DiskLayoutModel` 提供，Inspect 与 Provision 继续同源；不能只在 Provision 私有实现。
+展开尾部区域后，才显示 LCE、空闲区域、历史 9-sector 备份镜像、历史恢复节点等精确子段。这部分仍由共享 DiskLayoutModel 提供，Devices、Inspect 与 Provision 必须同源；不能在页面私有实现。
 
 #### 14.9.2 制盘编辑区改成“磁盘摘要 + 分区处理表 + 当前分区详情”
 
@@ -6182,7 +6153,7 @@ ProvisionIdentification::Unknown
 
 1. **容量格式统一范围要明确**：Devices/Backups 身份表共享 `common::fmt_gb` 或一个新的统一 formatter，保证同一块盘两张表完全相同；Provision 几何编辑可以继续用 MiB/GiB + sector，因为那是精确布局语境。不要一张身份表写 `8.00GB`、另一张写 `7.45GiB`。
 2. **窄屏 pinned 列不能只靠当前 AdaptiveTableLayout**：现实现极窄时会移除除第 0 列外的 pinned column，因此 14.9 的“处理状态永远可见”必须通过明确 breakpoint 切换到两行 card layout，而不是假设 pinned 永不消失。
-3. **Tail topology 与 DiskLayout 分开验收**：Tree 的 tail children 改成互斥 primary spans 后，完整磁盘比例条仍应把最后 2048 sectors 视为 Tail 语义覆盖；新增测试防止 tree 修复意外改变 DiskLayout 颜色/占比。
+3. **Tail topology 与 DiskLayout 同源验收**：Tree 与完整磁盘比例条必须共用 canonical segments；尾部父组从 LCE 起始，children 连续互斥，不能由 UI 另算边界。
 4. **Overview 生成不得触发新 I/O**：Summary 必须只消费当前 workspace/item/parser 已有结果，切 Tree selection 不能重新打开备份或物理盘。
 5. **Backup 身份扩列不得增加 I/O**：14.8 已写原则，再加性能门禁：一次 backup scan 后 renderer/search/sidebar 只能读 `BackupWorkspaceItem`；用测试 spy/计数器锁死“render 不读文件”。
 6. **Running Result 增加阶段耗时摘要**：除实时日志外，完成页列出各阶段 duration，能直接看出慢盘到底慢在 unmount、sync、写、readback 还是 format。
@@ -9230,7 +9201,7 @@ SafetyBanner
 │ device / model / capacity  │ │ data/front     ███               │
 │ device_id / onlyid         │ │ LCE            █                 │
 │ user / department          │ │ tail           ██                │
-│ relationship/confidence    │ │ last 2048      ██                │
+│ relationship/confidence    │ │ mirror/restore ██                │
 │ SHA / health               │ │ filesystem     ...               │
 └─────────────────────────────┘ └──────────────────────────────────┘
 ```

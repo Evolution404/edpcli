@@ -1055,6 +1055,7 @@ mod tests {
             partitions: None,
             partition_table: None,
             partition_table_error: None,
+            lce: None,
         };
         assert!(!list_needs_elevation(
             std::slice::from_ref(&base),
@@ -1304,6 +1305,7 @@ mod tests {
                 partitions: None,
                 partition_table: None,
                 partition_table_error: None,
+                lce: None,
             },
             Row {
                 disk: 6,
@@ -1330,6 +1332,7 @@ mod tests {
                 partitions: Some(parts),
                 partition_table: None,
                 partition_table_error: None,
+                lce: None,
             },
             Row {
                 disk: 7,
@@ -1356,6 +1359,7 @@ mod tests {
                 partitions: None,
                 partition_table: None,
                 partition_table_error: None,
+                lce: None,
             },
         ];
         for row in rows.iter_mut().filter(|row| row.proto == "USB") {

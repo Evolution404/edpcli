@@ -10,6 +10,9 @@ use ratatui::{backend::TestBackend, Terminal};
 
 fn inspect_workspace() -> AdvancedInspectWorkspace {
     let context = crate::common::edp_inspect_context(16_384);
+    let disk_layout =
+        edpcli::application::disk_layout::DiskLayoutModel::canonical_inspect_context(&context)
+            .unwrap();
     AdvancedInspectWorkspace {
         source: "pane-contract".into(),
         meta: InspectMeta::default(),
@@ -17,6 +20,8 @@ fn inspect_workspace() -> AdvancedInspectWorkspace {
         items: Vec::new(),
         export_dir: None,
         topology: edpcli::application::inspect_tree::build_inspect_topology(&context),
+        disk_layout: Some(disk_layout),
+        disk_layout_issue: None,
     }
 }
 
@@ -46,6 +51,7 @@ fn device() -> edpcli::disk_scan::Row {
         partitions: None,
         partition_table: None,
         partition_table_error: None,
+        lce: None,
     };
     confirm_kind(&mut row, edpcli::provision::DiskProvisionKind::Plain);
     row
@@ -233,16 +239,19 @@ fn assert_complete_layout(model: &DiskLayoutModel) {
 #[test]
 fn inspect_disk_layout_is_complete_and_semantically_distinct() {
     let workspace = inspect_workspace();
-    let model = DiskLayoutModel::from_topology(&workspace.topology);
-    assert_complete_layout(&model);
+    let model = workspace.disk_layout.as_ref().unwrap();
+    assert_complete_layout(model);
     let kinds = model
         .segments
         .iter()
         .map(|segment| segment.kind)
         .collect::<Vec<_>>();
     assert!(kinds.contains(&DiskRegionKind::Protocol));
-    assert!(kinds.contains(&DiskRegionKind::Unknown));
-    assert!(kinds.contains(&DiskRegionKind::Tail));
+    assert!(kinds.contains(&DiskRegionKind::Free));
+    assert!(kinds.contains(&DiskRegionKind::Lce));
+    assert!(kinds.contains(&DiskRegionKind::BackupMirror));
+    assert!(kinds.contains(&DiskRegionKind::RestoreNode));
+    assert!(!kinds.contains(&DiskRegionKind::Unknown));
 }
 
 #[test]
@@ -260,9 +269,10 @@ fn official_provision_disk_layout_covers_the_whole_physical_disk() {
         .map(|segment| segment.kind)
         .collect::<Vec<_>>();
     assert!(kinds.contains(&DiskRegionKind::Protocol));
-    assert!(kinds.contains(&DiskRegionKind::Reserved));
+    assert!(kinds.contains(&DiskRegionKind::Free));
     assert!(kinds.contains(&DiskRegionKind::Lce));
-    assert!(kinds.contains(&DiskRegionKind::Tail));
+    assert!(kinds.contains(&DiskRegionKind::BackupMirror));
+    assert!(kinds.contains(&DiskRegionKind::RestoreNode));
 }
 
 #[test]
@@ -274,7 +284,7 @@ fn plain_provision_disk_layout_covers_mbr_free_and_partitions_to_last_sector() {
         model.total_sectors,
         device().size / edpcli::common::SECTOR as u64
     );
-    assert_eq!(model.segments[0].kind, DiskRegionKind::Reserved);
+    assert_eq!(model.segments[0].kind, DiskRegionKind::Metadata);
     assert_eq!(model.segments[0].start_lba, 0);
     assert_eq!(model.segments[0].sector_count, 1);
     assert!(model
@@ -462,6 +472,14 @@ fn d0_current_device_summary_renders_capacity_layout_bar() {
             size_bytes: 120_000_000,
         },
     ]);
+    let total_sectors = row.size / edpcli::common::SECTOR as u64;
+    row.lce = Some(edpcli::backup_metadata::Lba7CompatibilityGeometry {
+        start_lba: total_sectors - 2_000,
+        sector_count: 6,
+        lba7_pointer_entries: Vec::new(),
+        official_partition_mode: None,
+        chs_expected_start_lba: None,
+    });
 
     let mut state = AppState::new();
     state.replace_devices(vec![row]);
@@ -482,7 +500,7 @@ fn d0_current_device_summary_renders_capacity_layout_bar() {
     assert!(
         text.lines().any(|line| {
             let compact = line.replace(' ', "");
-            compact.contains("总容量") && compact.contains("EDP协议/保留")
+            compact.contains("总容量") && compact.contains("EDP主协议区")
         }),
         "wide capacity legend should place multiple cells on one aligned row: {text}"
     );
@@ -529,9 +547,9 @@ fn d0_plain_mbr_layout_uses_real_partition_table_without_unknown_disk_body() {
     let text = render_text(&state, 180, 42);
 
     assert!(text.contains("MBR分区表"), "{text}");
-    assert!(text.contains("未分配空间"), "{text}");
+    assert!(text.contains("空闲区域"), "{text}");
     assert!(text.contains("P1exFAT"), "{text}");
     assert!(!text.contains("布局未完整读取"), "{text}");
-    assert!(!text.contains("EDP协议/保留"), "{text}");
+    assert!(!text.contains("EDP主协议区"), "{text}");
     assert!(!text.contains("未知区域8.05GB"), "{text}");
 }

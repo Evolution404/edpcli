@@ -3,11 +3,19 @@
 use crate::application::inspect_tree::{
     DiskRegionSemantic, InspectChildren, InspectNode, InspectTopology,
 };
+use crate::application::partition_table::PartitionTableSnapshot;
+use crate::backup_metadata::{
+    TAIL_END4_MIRROR_OFFSET_SECTORS, TAIL_METADATA_MIRROR_OFFSET_SECTORS,
+    TAIL_METADATA_MIRROR_SECTORS,
+};
+use crate::inspect_target::InspectDiskContext;
 use crate::protocol::edpf::EdpPartitionType;
+use crate::provision::PartitionRole;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum DiskRegionKind {
     Protocol,
+    Metadata,
     Reserved,
     Unknown,
     Free,
@@ -18,6 +26,8 @@ pub enum DiskRegionKind {
     Encrypt,
     Compatibility,
     Lce,
+    BackupMirror,
+    RestoreNode,
     Tail,
 }
 
@@ -25,9 +35,10 @@ impl DiskRegionKind {
     pub const fn label(self) -> &'static str {
         match self {
             Self::Protocol => "EDP 协议区",
+            Self::Metadata => "元数据",
             Self::Reserved => "保留区域",
             Self::Unknown => "未知区域",
-            Self::Free => "空闲",
+            Self::Free => "空闲区域",
             Self::Plain => "普通分区",
             Self::Boot => "启动区",
             Self::Share => "交换区",
@@ -35,7 +46,9 @@ impl DiskRegionKind {
             Self::Encrypt => "保密区",
             Self::Compatibility => "兼容保留区",
             Self::Lce => "LCE",
-            Self::Tail => "盘尾区域",
+            Self::BackupMirror => "历史备份镜像",
+            Self::RestoreNode => "restore-node",
+            Self::Tail => "尾部区域",
         }
     }
 
@@ -43,12 +56,24 @@ impl DiskRegionKind {
         match self {
             Self::Protocol => 120,
             Self::Lce => 115,
+            Self::BackupMirror | Self::RestoreNode => 114,
             Self::Boot | Self::Share | Self::Combined | Self::Encrypt | Self::Plain => 110,
             Self::Compatibility => 105,
             Self::Tail => 100,
+            Self::Metadata => 95,
             Self::Reserved => 90,
             Self::Free => 80,
             Self::Unknown => 10,
+        }
+    }
+
+    pub const fn from_partition_role(role: PartitionRole) -> Self {
+        match role {
+            PartitionRole::Boot => Self::Boot,
+            PartitionRole::Share => Self::Share,
+            PartitionRole::BootShareCombined => Self::Combined,
+            PartitionRole::Encrypt => Self::Encrypt,
+            PartitionRole::CompatibilityReserve => Self::Compatibility,
         }
     }
 
@@ -64,14 +89,13 @@ impl DiskRegionKind {
     fn from_region_semantic(semantic: DiskRegionSemantic) -> Self {
         match semantic {
             DiskRegionSemantic::Protocol => Self::Protocol,
-            DiskRegionSemantic::PartitionTable => Self::Reserved,
+            DiskRegionSemantic::PartitionTable => Self::Metadata,
             DiskRegionSemantic::PlainPartition => Self::Plain,
             DiskRegionSemantic::Unallocated => Self::Free,
             DiskRegionSemantic::Lce => Self::Lce,
-            DiskRegionSemantic::Tail
-            | DiskRegionSemantic::TailForensic
-            | DiskRegionSemantic::TailMetadataMirror
-            | DiskRegionSemantic::TailRestoreNode => Self::Tail,
+            DiskRegionSemantic::Tail => Self::Tail,
+            DiskRegionSemantic::TailMetadataMirror => Self::BackupMirror,
+            DiskRegionSemantic::TailRestoreNode => Self::RestoreNode,
             DiskRegionSemantic::Partition { partition_type } => {
                 Self::from_protocol_partition_type(partition_type)
             }
@@ -93,6 +117,13 @@ pub struct DiskLayoutSegment {
     pub start_lba: u64,
     pub sector_count: u64,
     pub kind: DiskRegionKind,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct DiskLayoutTailGroup<'a> {
+    pub start_lba: u64,
+    pub end_exclusive: u64,
+    pub children: &'a [DiskLayoutSegment],
 }
 
 impl DiskLayoutSegment {
@@ -170,6 +201,216 @@ impl DiskLayoutModel {
             ));
         }
         Ok(())
+    }
+
+    pub fn canonical_from_known(
+        total_sectors: u64,
+        mut known: Vec<DiskLayoutSegment>,
+    ) -> Result<Self, String> {
+        if total_sectors == 0 {
+            return if known.is_empty() {
+                Ok(Self::new(0, Vec::new()))
+            } else {
+                Err("zero-sector disk cannot contain physical extents".into())
+            };
+        }
+
+        known.sort_by_key(|segment| segment.start_lba);
+        for segment in &known {
+            if segment.sector_count == 0 {
+                return Err(format!("{} has zero sectors", segment.label));
+            }
+            if segment.start_lba >= total_sectors || segment.end_exclusive()? > total_sectors {
+                return Err(format!("{} exceeds physical disk", segment.label));
+            }
+        }
+        for pair in known.windows(2) {
+            if pair[0].end_exclusive()? > pair[1].start_lba {
+                return Err(format!(
+                    "disk layout overlap at LBA{} between {} and {}",
+                    pair[1].start_lba, pair[0].label, pair[1].label
+                ));
+            }
+        }
+
+        let mut segments = Vec::with_capacity(known.len().saturating_mul(2).saturating_add(1));
+        let mut cursor = 0u64;
+        for segment in known {
+            if cursor < segment.start_lba {
+                segments.push(DiskLayoutSegment {
+                    label: "空闲区域".into(),
+                    start_lba: cursor,
+                    sector_count: segment.start_lba - cursor,
+                    kind: DiskRegionKind::Free,
+                });
+            }
+            cursor = segment.end_exclusive()?;
+            segments.push(segment);
+        }
+        if cursor < total_sectors {
+            segments.push(DiskLayoutSegment {
+                label: "空闲区域".into(),
+                start_lba: cursor,
+                sector_count: total_sectors - cursor,
+                kind: DiskRegionKind::Free,
+            });
+        }
+
+        let model = Self::new(total_sectors, segments);
+        model.validate_complete()?;
+        Ok(model)
+    }
+
+    pub fn canonical_edp(
+        total_sectors: u64,
+        mut partitions: Vec<DiskLayoutSegment>,
+        lce_start_lba: u64,
+        lce_sector_count: u64,
+    ) -> Result<Self, String> {
+        if total_sectors < 13 {
+            return Err("EDP disk is shorter than LBA0-12 protocol area".into());
+        }
+        let mut known = Vec::with_capacity(partitions.len().saturating_add(4));
+        known.push(DiskLayoutSegment {
+            label: "EDP 主协议区".into(),
+            start_lba: 0,
+            sector_count: 13,
+            kind: DiskRegionKind::Protocol,
+        });
+        known.append(&mut partitions);
+        known.push(DiskLayoutSegment {
+            label: "LCE".into(),
+            start_lba: lce_start_lba,
+            sector_count: lce_sector_count,
+            kind: DiskRegionKind::Lce,
+        });
+        if total_sectors >= TAIL_METADATA_MIRROR_OFFSET_SECTORS + TAIL_METADATA_MIRROR_SECTORS {
+            known.push(DiskLayoutSegment {
+                label: "历史备份镜像".into(),
+                start_lba: total_sectors - TAIL_METADATA_MIRROR_OFFSET_SECTORS,
+                sector_count: TAIL_METADATA_MIRROR_SECTORS,
+                kind: DiskRegionKind::BackupMirror,
+            });
+        }
+        if total_sectors > TAIL_END4_MIRROR_OFFSET_SECTORS {
+            known.push(DiskLayoutSegment {
+                label: "restore-node".into(),
+                start_lba: total_sectors - TAIL_END4_MIRROR_OFFSET_SECTORS,
+                sector_count: 1,
+                kind: DiskRegionKind::RestoreNode,
+            });
+        }
+        Self::canonical_from_known(total_sectors, known)
+    }
+
+    pub fn canonical_inspect_context(context: &InspectDiskContext) -> Result<Self, String> {
+        if context.is_plain() {
+            let table = context
+                .partition_table
+                .as_ref()
+                .ok_or_else(|| "普通盘分区表尚未完整读取".to_string())?;
+            return Self::canonical_plain(context.total_sectors, table);
+        }
+
+        let mode = context
+            .provision_kind
+            .and_then(|kind| kind.official_mode())
+            .ok_or_else(|| "EDP 盘型尚未确认".to_string())?;
+        if context.partitions.len() != mode.partition_types().len() {
+            return Err("LBA12 分区数量与已确认模式不一致".into());
+        }
+        let mut partitions = Vec::with_capacity(context.partitions.len());
+        for (index, partition) in context.partitions.iter().enumerate() {
+            let partition_type = EdpPartitionType::from_raw(partition.partition_type)
+                .ok_or_else(|| format!("LBA12 entry{index} 分区类型未知"))?;
+            if partition_type != mode.partition_types()[index] {
+                return Err(format!("LBA12 entry{index} 分区类型与已确认模式不一致"));
+            }
+            let role = crate::provision::official_partition_role(mode, index, partition_type);
+            partitions.push(DiskLayoutSegment {
+                label: role.label().into(),
+                start_lba: partition.start_sector,
+                sector_count: partition.sector_count,
+                kind: DiskRegionKind::from_partition_role(role),
+            });
+        }
+        let lce = context
+            .lce
+            .as_ref()
+            .ok_or_else(|| "LBA7 LCE 几何尚未确认".to_string())?;
+        Self::canonical_edp(
+            context.total_sectors,
+            partitions,
+            lce.start_lba,
+            lce.sector_count,
+        )
+    }
+
+    pub fn canonical_plain(
+        total_sectors: u64,
+        table: &PartitionTableSnapshot,
+    ) -> Result<Self, String> {
+        let mut known = Vec::with_capacity(table.table_extents.len() + table.partitions.len());
+        known.extend(table.table_extents.iter().map(|extent| DiskLayoutSegment {
+            label: extent.label.clone(),
+            start_lba: extent.start_lba,
+            sector_count: extent.sector_count,
+            kind: DiskRegionKind::Metadata,
+        }));
+        known.extend(table.partitions.iter().map(|partition| DiskLayoutSegment {
+            label: partition.display_label(),
+            start_lba: partition.start_lba,
+            sector_count: partition.sector_count,
+            kind: DiskRegionKind::Plain,
+        }));
+        Self::canonical_from_known(total_sectors, known)
+    }
+
+    pub fn canonical_plain_plan(
+        total_sectors: u64,
+        mut partitions: Vec<DiskLayoutSegment>,
+    ) -> Result<Self, String> {
+        let mut known = Vec::with_capacity(partitions.len().saturating_add(1));
+        known.push(DiskLayoutSegment {
+            label: "MBR".into(),
+            start_lba: 0,
+            sector_count: 1,
+            kind: DiskRegionKind::Metadata,
+        });
+        known.append(&mut partitions);
+        Self::canonical_from_known(total_sectors, known)
+    }
+
+    pub fn tail_group(&self) -> Option<DiskLayoutTailGroup<'_>> {
+        let index = self
+            .segments
+            .iter()
+            .position(|segment| segment.kind == DiskRegionKind::Lce)?;
+        let children = &self.segments[index..];
+        Some(DiskLayoutTailGroup {
+            start_lba: children.first()?.start_lba,
+            end_exclusive: self.total_sectors,
+            children,
+        })
+    }
+
+    pub fn collapsed_tail_model(&self) -> Self {
+        let Some(tail) = self.tail_group() else {
+            return self.clone();
+        };
+        let mut segments = self
+            .segments
+            .iter()
+            .take_while(|segment| segment.start_lba < tail.start_lba)
+            .cloned()
+            .collect::<Vec<_>>();
+        segments.push(DiskLayoutSegment {
+            label: "尾部区域".into(),
+            start_lba: tail.start_lba,
+            sector_count: tail.end_exclusive - tail.start_lba,
+            kind: DiskRegionKind::Tail,
+        });
+        Self::new(self.total_sectors, segments)
     }
 
     pub fn from_claims(

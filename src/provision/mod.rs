@@ -36,7 +36,7 @@ pub use keys::{
 };
 pub use layout::{
     build_official_partition_layout, official_format_targets,
-    official_format_targets_with_filesystems, official_mbr_partition_type,
+    official_format_targets_with_filesystems, official_mbr_partition_type, official_partition_role,
     physical_partition_encryption, visible_mbr_partition_type, OfficialPartitionFilesystems,
     OfficialPartitionGeometry, OfficialPartitionMode, OfficialPartitionSizes,
     OfficialProvisionPlan, PartitionFormatTarget, PartitionRole, DEFAULT_MODE0_BOOT_SECTORS,

@@ -79,6 +79,8 @@ fn lba8_state() -> AppState {
         items: vec![sector],
         export_dir: None,
         topology: edpcli::application::inspect_tree::build_inspect_topology(&context),
+        disk_layout: None,
+        disk_layout_issue: None,
     };
     let mut state = AppState::new();
     assert!(state.begin_advanced_inspect(AdvancedInspectSource::Disk(6)));
@@ -113,6 +115,7 @@ fn device() -> edpcli::disk_scan::Row {
         partitions: None,
         partition_table: None,
         partition_table_error: None,
+        lce: None,
     };
     crate::common::confirm_row_identity(&mut row);
     row

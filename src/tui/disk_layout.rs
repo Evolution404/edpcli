@@ -17,9 +17,13 @@ impl DiskRegionKind {
             Self::Protocol | Self::Boot => ProvisionBarKind::Boot,
             Self::Share | Self::Combined => ProvisionBarKind::Share,
             Self::Encrypt => ProvisionBarKind::Encrypt,
-            Self::Compatibility | Self::Reserved | Self::Lce | Self::Tail => {
-                ProvisionBarKind::Compatibility
-            }
+            Self::Metadata
+            | Self::Compatibility
+            | Self::Reserved
+            | Self::Lce
+            | Self::BackupMirror
+            | Self::RestoreNode
+            | Self::Tail => ProvisionBarKind::Compatibility,
             Self::Plain => ProvisionBarKind::Plain,
             Self::Free | Self::Unknown => ProvisionBarKind::Free,
         }
@@ -274,8 +278,6 @@ impl DiskLayoutModel {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::backup_metadata::Lba7CompatibilityGeometry;
-    use crate::inspect_target::InspectDiskContext;
     use ratatui::{backend::TestBackend, Terminal};
 
     #[test]
@@ -412,24 +414,39 @@ mod tests {
     }
 
     #[test]
-    fn inspect_topology_and_provision_share_the_same_bar_allocation() {
-        let mut context =
-            InspectDiskContext::new(vec![0; crate::common::METADATA_IMAGE_LEN], None, 10_000);
-        context.lce = Some(Lba7CompatibilityGeometry {
-            start_lba: 6_000,
-            sector_count: 6,
-            lba7_pointer_entries: Vec::new(),
-            official_partition_mode: None,
-            chs_expected_start_lba: None,
-        });
-        let topology = crate::application::inspect_tree::build_inspect_topology(&context);
-        let model = DiskLayoutModel::from_topology(&topology);
+    fn canonical_layout_bar_preserves_lce_and_complete_coverage() {
+        let model = DiskLayoutModel::canonical_edp(
+            10_000,
+            vec![
+                DiskLayoutSegment {
+                    label: "启动区".into(),
+                    start_lba: 63,
+                    sector_count: 37,
+                    kind: DiskRegionKind::Boot,
+                },
+                DiskLayoutSegment {
+                    label: "交换区".into(),
+                    start_lba: 100,
+                    sector_count: 4_900,
+                    kind: DiskRegionKind::Share,
+                },
+                DiskLayoutSegment {
+                    label: "保密区".into(),
+                    start_lba: 5_000,
+                    sector_count: 1_000,
+                    kind: DiskRegionKind::Encrypt,
+                },
+            ],
+            6_000,
+            6,
+        )
+        .unwrap();
         assert_eq!(model.total_sectors, 10_000);
         assert_eq!(
             model
                 .segments
                 .iter()
-                .find(|segment| segment.label.starts_with("LCE"))
+                .find(|segment| segment.kind == DiskRegionKind::Lce)
                 .unwrap()
                 .sector_count,
             6
@@ -442,6 +459,14 @@ mod tests {
                 .map(|segment| segment.sector_count)
                 .sum::<u64>(),
             10_000
+        );
+        assert_eq!(
+            model
+                .collapsed_tail_model()
+                .segments
+                .last()
+                .map(|segment| segment.kind),
+            Some(DiskRegionKind::Tail)
         );
     }
 }

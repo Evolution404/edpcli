@@ -533,8 +533,10 @@ impl AppState {
                 .result
                 .as_ref()
                 .map(|workspace| {
-                    crate::tui::disk_layout::DiskLayoutModel::from_topology(&workspace.topology)
-                        .pane_line_count("summary", &[])
+                    workspace
+                        .disk_layout
+                        .as_ref()
+                        .map_or(2, |layout| layout.pane_line_count("summary", &[]))
                 })
                 .unwrap_or(0),
             PaneId::InspectOverview => {

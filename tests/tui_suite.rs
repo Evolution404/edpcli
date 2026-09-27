@@ -1,6 +1,9 @@
 #[path = "common/mod.rs"]
 pub mod common;
 
+#[path = "canonical_disk_layout.rs"]
+mod canonical_disk_layout;
+
 #[path = "tui_animation.rs"]
 mod tui_animation;
 #[path = "tui_backup_coverage.rs"]
