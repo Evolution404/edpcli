@@ -12,17 +12,19 @@ use edpcli::backup_deep::{
 };
 use edpcli::backup_metadata::PartitionGeometry;
 use edpcli::common::{METADATA_SECTOR_COUNT, SECTOR};
-use edpcli::diskio::{atomic_write_sectors, FileDev, SectorDev};
+use edpcli::diskio::{
+    atomic_write_sectors, execute_write_transaction, FileDev, SectorDev, SectorWriteStage,
+    WriteTransactionPlan,
+};
 use edpcli::platform::{HardwareProbe, InquiryInfo, NativeTransport};
 use edpcli::protocol::lba7_compat::locate_lba7_compatibility_extent_from_verified_usb_capacity;
 use edpcli::provision::{
     build_migrated_filesystem, generate_official_image, parse_existing_provision,
-    prefill_for_target_mode,
-    unwrap_legacy_lba7_file_key, wrap_file_key, wrap_legacy_lba7_file_key, FileKeyWrapMode,
-    KeyDomainRole, KeyDomainSecretPair, KeyDomainSecrets, OfficialFilesystemFormat,
-    OfficialPartitionMode, OfficialPartitionSizes, OfficialProvisionPlan, OnlyId, PartitionAction,
-    PartitionRole, ProvisionEntropy, ProvisionImage, ProvisionMetadata, ProvisionProfile,
-    MigrationStagedEntry, MigrationTransform, ProvisionSpec, RegionDisposition,
+    prefill_for_target_mode, unwrap_legacy_lba7_file_key, wrap_file_key, wrap_legacy_lba7_file_key,
+    FileKeyWrapMode, KeyDomainRole, KeyDomainSecretPair, KeyDomainSecrets, MigrationStagedEntry,
+    MigrationTransform, OfficialFilesystemFormat, OfficialPartitionMode, OfficialPartitionSizes,
+    OfficialProvisionPlan, OnlyId, PartitionAction, PartitionRole, ProvisionEntropy,
+    ProvisionImage, ProvisionMetadata, ProvisionProfile, ProvisionSpec, RegionDisposition,
     SourcePasswordKnowledge, TargetIdentity, TargetProvisionPlan,
 };
 
@@ -487,7 +489,19 @@ fn raw_virtual_disk_atomic_roundtrip_and_restore() {
         );
         k6_patch.insert(absolute, sector.to_vec());
     }
-    atomic_write_sectors(&mut dev, &k6_patch).expect("write K6 populated filesystem to virtual disk");
+    let mut k6_transaction = WriteTransactionPlan::new(total_sectors);
+    for (&lba, data) in &k6_patch {
+        k6_transaction
+            .insert(
+                lba,
+                data.clone(),
+                SectorWriteStage::Data,
+                "K6 migration HIL",
+            )
+            .expect("plan K6 data write");
+    }
+    execute_write_transaction(&mut dev, &k6_transaction)
+        .expect("write K6 populated filesystem to virtual disk");
     for (&lba, expected) in &k6_patch {
         assert_eq!(
             dev.read_sector(lba).unwrap(),
@@ -533,7 +547,18 @@ fn raw_virtual_disk_atomic_roundtrip_and_restore() {
     stream_file_payload(&mut reader, &entry, payload.len() as u64, &mut readback)
         .expect("K6 HIL stream migrated payload");
     assert_eq!(readback, payload, "K6 HIL logical payload mismatch");
-    atomic_write_sectors(&mut dev, &k6_before).expect("restore K6 HIL touched sectors");
+    let mut k6_restore = WriteTransactionPlan::new(total_sectors);
+    for (&lba, data) in &k6_before {
+        k6_restore
+            .insert(
+                lba,
+                data.clone(),
+                SectorWriteStage::Data,
+                "K6 migration HIL restore",
+            )
+            .expect("plan K6 restore write");
+    }
+    execute_write_transaction(&mut dev, &k6_restore).expect("restore K6 HIL touched sectors");
     for (&lba, expected) in &k6_before {
         assert_eq!(
             dev.read_sector(lba).unwrap(),

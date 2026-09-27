@@ -641,7 +641,9 @@ pub(super) fn prepare_migrations(
     let mut inventory_cache = std::collections::BTreeMap::<usize, MigrationInventory>::new();
     for (_, target) in &migrate_targets {
         for migration in &target.migration_sources {
-            if !inventory_cache.contains_key(&migration.source_index) {
+            if let std::collections::btree_map::Entry::Vacant(entry) =
+                inventory_cache.entry(migration.source_index)
+            {
                 let inventory = inventory_source(
                     dev,
                     source,
@@ -649,7 +651,7 @@ pub(super) fn prepare_migrations(
                     migration.region,
                     key_domains,
                 )?;
-                inventory_cache.insert(migration.source_index, inventory);
+                entry.insert(inventory);
             }
         }
     }

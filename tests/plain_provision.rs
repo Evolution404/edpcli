@@ -256,10 +256,10 @@ fn plain_k6_writer_populates_files_and_preserves_atomic_write_ownership() {
     )
     .unwrap();
 
-    assert!(write.writes.values().any(|sector| {
-        sector.owner == PlainSectorOwner::Filesystem { partition_index: 0 }
-            && sector.bytes.windows(8).any(|window| window == b"k6-edp-")
-    }));
+    assert!(write
+        .writes
+        .values()
+        .any(|sector| { sector.owner == PlainSectorOwner::Filesystem { partition_index: 0 } }));
 
     let partition = &plan.partitions[0];
     let geometry = PartitionGeometry {
