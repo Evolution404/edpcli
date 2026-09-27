@@ -208,7 +208,9 @@ fn virtual_disk_hil_is_path_filtered_and_has_periodic_full_coverage() {
     let hil = read(".github/workflows/virtual-disk-hil.yml");
     assert!(hil.contains("paths:"));
     assert!(hil.contains("- \"src/**\""));
-    assert!(hil.contains("- \"tests/**\""));
+    assert!(!hil.contains("- \"tests/**\""));
+    assert!(hil.contains("- \"tests/virtual_disk_hil.rs\""));
+    assert!(hil.contains("- \"tests/plain_macos_virtual_hil.rs\""));
     assert!(hil.contains("workflow_dispatch:"));
     assert!(hil.contains("schedule:"));
     assert!(hil.contains("cron:"));
