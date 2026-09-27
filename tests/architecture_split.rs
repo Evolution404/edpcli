@@ -674,5 +674,8 @@ fn chapter_15_identity_write_boundaries_remain_separate() {
     assert!(prepare.contains("RegionDisposition::Migrate =>"));
     assert!(commit.contains("RegionDisposition::Migrate =>"));
     assert!(prepare.contains("K6"));
-    assert!(commit.contains("unsupported"));
+    assert!(prepare.contains("prepare_migrations"));
+    assert!(prepare.contains("build_migrated_filesystem"));
+    assert!(!commit.contains("Migrate 当前 unsupported"));
+    assert!(commit.contains("Migrate 写集合缺少目标文件系统引导扇区"));
 }
