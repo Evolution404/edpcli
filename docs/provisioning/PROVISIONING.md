@@ -8727,3 +8727,798 @@ Chapter 15 身份治理仍然是独立的 application/backup 安全治理；它�
 最终原则：
 
 > **edpcli 不制造不存在的“绝对唯一 ID”。它只读采集硬件证据、EDP 协议证据、当前状态证据，并利用主机侧受控 lineage 建立可解释的介质关系和可信等级；归组可以使用多证据推断，破坏性写盘仍必须走独立且更严格的安全授权链。**
+
+## 16. 全应用 TUI 设计系统与信息架构升级（2026-09-27）
+
+> **状态：PLANNED / NOT STARTED。** 本章是在 Chapter 10～15 已完成成果上的下一轮 UI 架构升级。不得把本章的 PENDING 状态反向解释为旧章节未完成。Chapter 12 K6 `Migrate` 仍保持 `DEFERRED / fail-closed`，与本章无关。
+
+### 16.1 背景与目标
+
+2026-09-27 实机复核确认：当前 TUI 已经具备 TrueColor 主题、统一 Vim keymap、`PaneFocus / PaneViewport`、统一 `DiskLayoutModel`、typed Inspect summary、typed Provision progress/outcome 等基础，但整个应用仍缺少统一的 **Design System + App Shell + Workspace 信息层级**。
+
+当前主要问题：
+
+1. 顶层 `Workspace` 只有 `Devices / Backups / Provision`，Inspect 仍以 `advanced_inspect` overlay 存在；
+2. 顶层 Tabs 只有“设备 / 备份”，Provision 被视觉上归在“设备”，Inspect 又叠加在当前页面上；
+3. 颜色虽然集中到 `theme.rs`，但 renderer 仍大量直接构造 `Block / Paragraph / Table / Layout`，缺少统一组件语言；
+4. Devices / Backups / Inspect / Provision 各自定义响应式阈值，存在大量分散 breakpoint；
+5. Inspect 宽屏同时展示 DiskLayout + Tree + Overview + Detail，当前对象与全盘信息争抢首屏；
+6. LBA8 typed semantic summary 已存在，但“部门 / 用户 / E_LABEL 17 项”等高价值信息没有成为视觉中心；
+7. 大面积 CORE ASCII animation 会占用业务宽度；
+8. Provision Running 仍主要靠单个 Paragraph 堆叠进度、步骤和日志；
+9. Devices / Backups 尚未进入统一 `PaneId / PaneFocus` 体系；
+10. 当前测试对键位、Pane、安全链、尺寸已有覆盖，但缺少跨 Workspace 的视觉结构契约。
+
+最终产品原则：
+
+> **当前用户选中的对象永远是页面视觉中心；系统信息退居上下文，原始证据按需下钻。**
+
+因此必须满足：
+
+```text
+选中设备      -> 首先看到设备身份、状态、用户/部门、可用操作
+选中 LBA8     -> 首先看到部门、用户、E_LABEL、版本与宿主信息
+选中 E_LABEL  -> 首先看到 17 项结构化详情
+选中字段      -> 首先看到 Value / Raw / Decoded / Transform / Range
+正在制盘      -> 首先看到总进度、当前阶段、当前步骤、日志与安全状态
+选中备份      -> 首先看到备份身份、健康、覆盖范围与恢复限制
+```
+
+### 16.2 不可破坏的既有基线
+
+本章只做 presentation / navigation 架构升级，以下内容全部视为已完成且不可回退：
+
+1. LBA0～12 / LCE 现有协议结论；
+2. LBA13 不使用；
+3. LBA10 trailing 384B 为 cross-generation unowned preserve/ignore，不得改成 padding；
+4. Chapter 12 五模式 typed key-domain / region disposition 语义；
+5. K6 `Migrate` 继续 DEFERRED / fail-closed；
+6. Chapter 13 `PaneFocus / PaneViewport / DiskLayoutModel`；
+7. Chapter 14 typed renderer / progress / outcome / zero text-inference；
+8. Chapter 15 canonical media identity / restore authorization / lineage；
+9. CLI/TUI 功能一致性；
+10. system disk protection、USB 整盘确认、写前备份、unmount/lock、reopen identity verify、atomic write、readback、rollback；
+11. `q` 全局退出、`Esc` 返回上一级；
+12. TrueColor + ANSI256 + ANSI16 fallback；
+13. renderer 不得新增设备/备份/identity I/O；
+14. `DiskLayoutModel` / application typed summary / progress/outcome 继续作为单一事实源；
+15. renderer 禁止根据 label/hint/message/glyph 反推业务状态。
+
+### 16.3 目标 App Shell
+
+#### 16.3.1 顶层 Workspace
+
+最终顶层 Workspace：
+
+```text
+Devices
+Inspect
+Provision
+Backups
+```
+
+建议 domain：
+
+```rust
+enum Workspace {
+    Devices,
+    Inspect,
+    Provision,
+    Backups,
+}
+```
+
+Inspect 不再作为覆盖在其它 Workspace 上的视觉 overlay。内部迁移期允许复用 `AdvancedInspectState`，但 Shell / navigation / breadcrumb 必须把 Inspect 当作真实顶层 Workspace。
+
+不得为了效果图虚构尚不存在的全局 Logs / Settings domain：
+
+- Logs 只有建立 application-owned typed event model 后才能成为 Workspace；
+- Settings 只有存在 typed config + persistence + tests 后才能加入 Shell；
+- 第一阶段右上角只保留真实的 `? 帮助`。
+
+#### 16.3.2 统一 Shell
+
+目标：
+
+```text
+┌ edpcli v2.4.0  TUI  [NORMAL] · 管理员模式 · CORE ● ACTIVE ┐
+│ 设备   Inspect   制盘   备份                         ? 帮助 │
+├───────────────────────────────────────────────────────────┤
+│ Workspace body                                            │
+├───────────────────────────────────────────────────────────┤
+│ context-aware key hints                                   │
+└───────────────────────────────────────────────────────────┘
+```
+
+要求：
+
+- Header 不再重复制造大面积边框；
+- 当前 Workspace 高亮一眼可见；
+- InputMode 继续显示 NORMAL / INSERT / SEARCH / COMMAND / CONFIRM / HELP；
+- CORE 只保留 compact indicator；
+- footer 根据当前 Workspace / Pane / mode 动态显示真正可用的快捷键；
+- notice / warning 统一使用 Banner。
+
+### 16.4 Design System
+
+新增统一组件层：
+
+```text
+src/tui/ui/
+├── mod.rs
+├── app_shell.rs
+├── panel.rs
+├── card.rs
+├── badge.rs
+├── status.rs
+├── section.rs
+├── table.rs
+├── tabs.rs
+├── breadcrumb.rs
+├── key_hints.rs
+├── metric.rs
+├── empty_state.rs
+├── banner.rs
+└── responsive.rs
+```
+
+Theme 从“颜色集合”升级为语义 token，至少包括：
+
+```text
+canvas
+surface
+surface_raised
+surface_active
+selection
+border_subtle
+border_strong
+border_focus
+text_primary
+text_secondary
+text_muted
+accent
+accent_soft
+success
+warning
+danger
+violet
+```
+
+TrueColor 目标为深色低亮背景 + cyan 主强调 + 低饱和状态色。参考值可在实现阶段根据终端实测微调：
+
+```text
+canvas          #07111A
+surface         #0B1721
+surface_raised  #0E1C27
+surface_active  #112533
+selection       #123044
+accent          #42C8F5
+accent_soft     #55A8C5
+success         #48D597
+warning         #E7B75A
+danger          #E27474
+violet          #A78BDA
+```
+
+至少抽象：
+
+```text
+AppShell
+Panel
+Card
+StatusBadge
+SectionHeader
+DataTable
+ObjectHeader
+Breadcrumb
+Metric
+KeyHints
+EmptyState
+NoticeBanner
+ProgressCard
+```
+
+迁移完成后，Workspace renderer 不得继续无约束复制 `Block::default().borders(...).title(...)` 组合。
+
+### 16.5 响应式布局统一
+
+新增统一：
+
+```rust
+enum ViewportClass {
+    Compact,   // < 80
+    Standard,  // 80..119
+    Wide,      // 120..159
+    UltraWide, // >= 160
+}
+```
+
+最终 breakpoint 必须由 `responsive.rs` 单点定义，renderer 不再散落 magic width。
+
+行为：
+
+- Compact：单 Pane / 当前对象优先；
+- Standard：主内容 + 次级信息；
+- Wide：主内容 + 详情；
+- UltraWide：主内容 + 详情 + 诊断/统计；
+- 信息不能因宽度不足静默消失，只能切换视图或下钻；
+- 40x10 继续 no-panic，并显示明确 compact fallback。
+
+### 16.6 Pane 模型扩展
+
+建议扩展：
+
+```text
+DevicesList
+DevicesSummary
+DevicesStats
+
+BackupsList
+BackupSummary
+BackupCoverage
+
+InspectNavigation
+InspectSnapshot
+InspectDiagnostics
+InspectFields
+InspectDiskLayout
+
+ProvisionDevice
+ProvisionParameters
+ProvisionDiskLayout
+ProvisionSummary
+ProvisionChanges
+ProvisionRunLog
+```
+
+要求：
+
+- 全 Workspace 使用统一 `PaneFocus / PaneViewport`；
+- `Ctrl-w h/j/k/l` 继续统一切 Pane；
+- `j/k` 只作用于当前 Pane；
+- 横向滚动只作用于当前表格；
+- 响应式切换不能丢 selection / scroll / focus。
+
+### 16.7 Devices Workspace
+
+设备页从“单表格 + 超宽 sidebar + animation”升级为对象管理页。
+
+Wide/UltraWide 目标：
+
+```text
+设备列表
+────────────────────────────────────────────────────────────
+#  设备   型号              容量     接口   盘型/模式   健康
+1  disk4  SanDisk Ultra     7.50G    USB    mode0       ● 正常
+2  disk5  Samsung ...       512G     USB    Plain       ● 正常
+
+┌ 当前设备 disk4 ───────────────┐ ┌ 总体统计 ───────────────┐
+│ 型号       ...                │ │ 已检测设备          5   │
+│ 容量       ...                │ │ EDP 设备            2   │
+│ VID:PID    ...                │ │ Plain               3   │
+│ device_id ...                │ │ 已确认备份          5   │
+│ onlyid     ...                │ │ 可能相关备份        0   │
+│ 用户       ...                │ │ 健康异常            0   │
+│ 部门       ...                │ │                        │
+└───────────────────────────────┘ └────────────────────────┘
+```
+
+要求：
+
+- 继续使用 shared identity schema；
+- `device_id` 仍为 EDP 协议术语；
+- relationship/confidence 可见，不显示 raw serial；
+- 默认业务布局删除大 animation sidebar；
+- Compact 下 Enter 进入设备详情，不得直接丢弃详情；
+- 空状态、扫描、错误统一组件化。
+
+### 16.8 Inspect Workspace（核心）
+
+#### 16.8.1 信息层级
+
+从“四块平铺”改为：
+
+```text
+Navigation -> Object Snapshot -> Fields -> Raw Evidence
+```
+
+Wide 目标：
+
+```text
+┌ 导航 ─────────────┐ ┌ 当前对象快照 ───────────────────┐ ┌ 诊断 ───────┐
+│ tree              │ │ high-value semantic fields      │ │ parser/status│
+└───────────────────┘ └──────────────────────────────────┘ └─────────────┘
+
+┌ 磁盘迷你布局 ────────────────────────────────────────────────────────┐
+│ [protocol][type1][type2................][type4][LCE][tail] ↑ current │
+└──────────────────────────────────────────────────────────────────────┘
+
+[业务字段] [原始字段] [Hex] [全盘布局]
+┌ 当前对象数据表 / evidence ───────────────────────────────────────────┐
+└──────────────────────────────────────────────────────────────────────┘
+```
+
+#### 16.8.2 LBA8 专属摘要
+
+继续扩展 `application/inspect_summary.rs` 的 typed projection，禁止 renderer 硬编码语义。
+
+LBA8 首屏必须优先展示：
+
+```text
+用途 / 识别状态
+部门
+用户
+E_LABEL（17 项）
+Profile / UsbOnlyInfo
+Tool version
+Lab version
+writeTime
+HostHardInfo
+MacInfo（如有）
+logical length
+```
+
+部门/用户必须来自已验证 `E_LABEL` child / typed field projection，不得从渲染文本反推。
+
+#### 16.8.3 E_LABEL 结构化展开
+
+```text
+▾ LBA8
+  ▾ E_LABEL [17]
+      部门          <value>
+      用户          <value>
+      ...
+      第 17 项       <value>
+```
+
+**全应用强制键义：**
+
+```text
+o       = open / close，展开或折叠
+Enter   = 查看 / 进入当前对象详情，不负责改变展开状态
+Esc     = 返回上一级
+j / k   = 当前 Pane 上下移动
+h / l   = 当前上下文左右导航
+/       = 搜索
+n / N   = 下一个 / 上一个匹配
+y       = 复制解析值
+Y       = 复制 raw
+q       = 全局退出
+```
+
+禁止 E_LABEL 使用另一套快捷键；禁止 Enter 再承担 expand/collapse。
+
+现有 `InspectField.children`、`detail_expanded` 可复用，但必须统一投影到新 tree / field view。
+
+#### 16.8.4 对象快照 / 字段详情
+
+旧“节点概览 / 节点详情”改为：
+
+```text
+对象快照：回答“这是什么、最重要的数据是什么、是否正常”
+字段详情：回答“来自哪里、offset/len/raw/decoded/logical/transform/status 是什么”
+```
+
+字段详情完整展示 typed evidence：
+
+```text
+Field
+Value
+Source LBA / Group
+Offset
+Length
+Raw
+Decoded
+FieldLogical
+Transform
+Type
+Status
+```
+
+#### 16.8.5 DiskLayout 两级 renderer
+
+保留同一个 `DiskLayoutModel`：
+
+```text
+DiskLayoutCompact   // 默认上下文条，约 3-4 行
+DiskLayoutDetailed  // 全盘详细视图
+```
+
+默认 Inspect 不再让完整 DiskLayout 占据主要首屏。
+
+### 16.9 Provision Workspace
+
+保留现有 typed `ProvisionStage` 状态机，不重写业务流程。
+
+引入统一 stepper：
+
+```text
+① 选择设备 ─ ② 制盘配置 ─ ③ 分区预览 ─ ④ 计划确认 ─ ⑤ 执行 ─ ⑥ 完成
+```
+
+Form 要求继续保持：
+
+- label 不高亮；
+- 只高亮 input value；
+- 数字输入限制；
+- 左右箭头在输入框内移动 cursor；
+- MiB/GiB/sector 内部仍精确保存 sector；
+- `f` fill remainder；
+- group 内部对齐，不跨 group 强制对齐。
+
+Review 保留 typed Summary / DiskLayout / Changes，但改为统一 StatusBadge：
+
+```text
+[保留] [重建] [重新封装] [删除] [禁止]
+```
+
+Running 从单一大 Paragraph 拆成：
+
+```text
+ProgressCard
+CurrentPhaseCard
+CurrentStepCard
+WorkProgress
+RunLogPane
+SafetyBanner
+```
+
+目标：
+
+```text
+安全事务执行中
+总体进度  ███████████████░░░  78%
+当前阶段  协议写入
+当前步骤  readback
+扇区活动  1536 / 2048
+运行时间  12.4 s
+最近活动  0.2 s
+
+运行日志
+09:32:11  backup     完成
+09:32:12  unmount    完成
+09:32:13  protocol   正在写入
+```
+
+`q / Esc / Ctrl-C` 不得破坏正在进行的安全介质事务，只能在安全检查点生效。
+
+### 16.10 Backups Workspace
+
+升级为“介质快照与覆盖范围管理”：
+
+```text
+备份列表                                      [创建] [验证] [刷新]
+#  名称              设备    容量    时间       完整性
+1  disk4_...         disk4   7.5G    ...        ● 正常
+
+┌ 备份详情 ───────────────────┐ ┌ 区域覆盖 ───────────────────────┐
+│ canonical identity         │ │ EDP 主协议区   █████             │
+│ device / model / capacity  │ │ data/front     ███               │
+│ device_id / onlyid         │ │ LCE            █                 │
+│ user / department          │ │ tail           ██                │
+│ relationship/confidence    │ │ last 2048      ██                │
+│ SHA / health               │ │ filesystem     ...               │
+└─────────────────────────────┘ └──────────────────────────────────┘
+```
+
+要求：
+
+- confirmed / possible 必须继续分开；
+- weak identity 不能伪装成 confirmed；
+- Region / Extent / Artifact coverage 必须来自 typed manifest；
+- 普通用户文件未完整备份时继续明确提示；
+- Restore/Delete/Create/Verify 继续现有安全链；
+- Compact 下不能丢 backup health / restore limitation。
+
+### 16.11 Animation / Logs / Settings
+
+Animation：
+
+- 保留 animation engine 与 `compact_indicator()`；
+- 默认业务 Workspace 不再分配固定 30 列大动画侧栏；
+- 大动画只允许用于空状态、等待扫描、欢迎/完成等不与业务数据竞争的场景；
+- Header 保留 `CORE ● ACTIVE / ◈ BUSY / ◆ SAFE`。
+
+Logs：
+
+- 当前只有局部 provision/write progress log；
+- 本章不虚构全局日志页；
+- 未来必须先建立 application-owned typed event/log model。
+
+Settings：
+
+- 本章不新增假设置页面；
+- 未来必须基于真实 typed config + persistence + tests。
+
+### 16.12 代码组织目标
+
+```text
+src/tui/
+├── shell/
+│   ├── mod.rs
+│   ├── header.rs
+│   ├── navigation.rs
+│   └── footer.rs
+├── ui/
+│   ├── panel.rs
+│   ├── card.rs
+│   ├── badge.rs
+│   ├── table.rs
+│   ├── tabs.rs
+│   ├── breadcrumb.rs
+│   ├── key_hints.rs
+│   ├── metric.rs
+│   ├── empty_state.rs
+│   ├── banner.rs
+│   └── responsive.rs
+├── workspaces/
+│   ├── devices/
+│   ├── inspect/
+│   ├── provision/
+│   └── backups/
+├── theme.rs
+├── keymap.rs
+├── pane.rs
+└── disk_layout.rs
+```
+
+禁止一次性大爆炸重写。旧 module 允许通过 adapter 分阶段迁移，确认无引用后再删除。
+
+### 16.13 测试与回归门禁
+
+继续复用现有强门禁：
+
+- `tui_state`
+- `tui_sector_inspector`
+- `tui_lifecycle`
+- `tui_keymap_contract`
+- `tui_pane_contract`
+- `tui_theme_contract`
+- `tui_table_layout`
+- `tui_write_safety`
+- backup/provision/inspect 相关 suites
+
+现有 Inspect 尺寸：
+
+```text
+40x10
+60x18
+80x24
+120x36
+240x60
+```
+
+必须保留。
+
+新增视觉结构契约，至少覆盖：
+
+```text
+AppShell
+Devices list + selected detail
+Inspect LBA8
+Inspect E_LABEL collapsed
+Inspect E_LABEL expanded 17 items
+Inspect field evidence
+Inspect Compact DiskLayout
+Inspect Detailed DiskLayout
+Provision SelectDisk
+Provision Form
+Provision Review
+Provision Running
+Provision Result
+Backups list
+Backup detail / coverage
+```
+
+主要尺寸：
+
+```text
+80x24
+120x36
+160x45
+240x60
+```
+
+另保留 40x10 no-panic gate。
+
+测试至少断言：
+
+1. 核心业务字段首屏可见；
+2. 当前对象标题唯一；
+3. focus marker 全屏唯一；
+4. `o` 展开后 child 数量/字段可见；
+5. `Enter` 不改变 expand state；
+6. `Esc` 返回目标正确；
+7. footer 不溢出；
+8. border 不重叠；
+9. Compact 不静默丢失核心信息；
+10. ANSI fallback 可读；
+11. renderer zero I/O；
+12. destructive write safety tests 全部保持绿。
+
+### 16.14 静态架构门禁
+
+升级完成后增加 repository guards：
+
+1. Workspace 必须包含 Devices / Inspect / Provision / Backups；
+2. Inspect 不再依赖“其它 Workspace + overlay 才能存在”的视觉入口；
+3. 新 renderer 不得出现直接 `Color::*`；
+4. Theme token 只能由 `theme.rs` 定义；
+5. breakpoint 只能由 `responsive.rs` 定义；
+6. Workspace renderer 不得自行新增业务状态推断；
+7. `o` 必须映射唯一 open/close 语义；
+8. Enter 不得用于 E_LABEL expand/collapse；
+9. animation sidebar 不得挤压业务 Workspace；
+10. renderer 不得执行 disk/backup/identity read；
+11. DiskLayout 必须继续消费 application-owned typed model；
+12. Provision/Restore 安全门禁不得因 UI 重构被删除或旁路。
+
+### 16.15 实施顺序：U0 → U9
+
+严格按以下顺序执行，**测试先行、小步提交、及时 push**。
+
+#### U0 — 基线与失败测试
+
+状态：PENDING。
+
+- 核对 main / origin/main / status / log；
+- 运行现有 TUI 门禁；
+- 为 AppShell、LBA8 首屏、E_LABEL `o` 展开、Enter 不展开、响应式 layout 写 red tests；
+- 收口 Chapter 14 残留 `IMPLEMENTING` 等陈旧状态文字；
+- 不改生产 renderer 前先固定失败证据。
+
+#### U1 — Design System + Responsive primitives
+
+状态：PENDING。
+
+- 扩展 Theme semantic tokens；
+- 新建 `ui/` 公共组件；
+- 建立 `ViewportClass`；
+- 建立 Panel/Card/Badge/Table/KeyHints/Banner；
+- 先迁移最小 demo/测试，不改变业务 Workspace。
+
+#### U2 — AppShell / Workspace / Pane domain
+
+状态：PENDING。
+
+- Workspace 升级为 Devices / Inspect / Provision / Backups；
+- Header + top navigation + footer 统一；
+- Inspect 迁移为真实 Workspace；
+- 扩展 Devices/Backups PaneId；
+- 保持 NavigationStack / Esc return target；
+- 不改变任何业务 I/O。
+
+#### U3 — Devices Workspace
+
+状态：PENDING。
+
+- 设备列表迁移到新 DataTable；
+- 当前设备 Card；
+- 总体统计 Card；
+- canonical identity/status badges；
+- 删除默认 animation sidebar；
+- Compact detail 下钻；
+- Device tests 全绿后进入 U4。
+
+#### U4 — Inspect Workspace
+
+状态：PENDING。
+
+- 对象优先布局；
+- LBA8 首屏直接展示部门/用户/E_LABEL；
+- application summary typed projection 补全部门/用户；
+- E_LABEL 17 child 结构化展开；
+- `o` 唯一展开/折叠；
+- Enter 只查看/进入；
+- 对象快照 / 字段详情职责分离；
+- Compact / Detailed DiskLayout；
+- 业务字段 / 原始字段 / Hex / 全盘布局切换；
+- 保留 raw/decode/meta、任意 sector、lazy extent、search/jump；
+- Inspect 尺寸门禁 + typed evidence tests 全绿。
+
+#### U5 — Provision Workspace
+
+状态：PENDING。
+
+- stepper；
+- SelectDisk / Menu / Form 统一视觉；
+- 表单与布局 Card 化；
+- Review typed status badges；
+- Running 拆成 progress/current task/log/safety；
+- Result 统一成功/警告/失败结构；
+- 不改变写盘安全链、进度事件或 outcome 语义。
+
+#### U6 — Backups Workspace
+
+状态：PENDING。
+
+- 备份列表迁移；
+- 备份详情 Card；
+- typed coverage visualization；
+- confirmed/possible/weak identity 展示；
+- Verify/Restore/Delete/Create 操作统一；
+- 不改变 restore authorization。
+
+#### U7 — 全应用响应式收口
+
+状态：PENDING。
+
+- 删除 renderer 内 magic width breakpoint；
+- 统一 Compact/Standard/Wide/UltraWide；
+- 40x10 到 240x60 全门禁；
+- 长 device_id/onlyid/path/label/UTF-8/CJK 做截断与横向滚动验证；
+- 不允许核心字段无提示消失。
+
+#### U8 — 组件迁移与技术债删除
+
+状态：PENDING。
+
+- 删除废弃 Block/style/layout helper；
+- 删除旧 animation sidebar 业务布局；
+- 删除旧 overlay-only Inspect shell；
+- 拆分过大的 `render.rs / mod.rs / inspect state/render` 职责；
+- 保留确有业务意义的兼容逻辑，不因 legacy 命名误删真实协议行为；
+- 新增静态架构门禁。
+
+#### U9 — 最终验收与发布基线
+
+状态：PENDING。
+
+必须完成：
+
+```text
+cargo fmt --all -- --check
+git diff --check
+scripts/test-fast.sh
+python3 scripts/test-full.py --profile full
+全部受影响 TUI 专项
+Virtual Disk HIL（仅在受影响路径需要时）
+```
+
+真实终端人工验收：
+
+```text
+Devices
+Inspect LBA8 / E_LABEL
+Provision Form / Review / Running
+Backups
+80x24 / 120x36 / 大尺寸窗口
+TrueColor 与 fallback
+```
+
+纯 presentation 不要求为了 UI 验收执行破坏性真实 USB 写盘；若任何改动触及 write path / authorization / disk I/O，必须按既有 HIL 安全规则重新验收。
+
+### 16.16 完成标准
+
+只有以下全部满足，Chapter 16 才能标记 COMPLETE：
+
+1. Devices / Inspect / Provision / Backups 是一致的 AppShell Workspace；
+2. Inspect 不再以视觉 overlay 套娃方式存在；
+3. 全应用使用统一 Design System；
+4. renderer 中没有新的直接颜色或随意 style 分叉；
+5. responsive breakpoint 有单一事实源；
+6. Devices / Backups 进入统一 PaneFocus；
+7. LBA8 首屏直接可见部门、用户、E_LABEL；
+8. E_LABEL 17 项能用 `o` 展开/折叠；
+9. Enter 不再改变 E_LABEL expand state；
+10. 字段详情完整显示 typed evidence；
+11. 默认 Inspect 不再让完整 DiskLayout 抢占主要首屏；
+12. Provision Running 有明确进度、阶段、步骤、日志、安全提示；
+13. Backup coverage 可视化来自 typed manifest；
+14. 大 animation panel 不再挤占默认业务 Workspace；
+15. Compact/Standard/Wide/UltraWide 都可用；
+16. 40x10 极限尺寸不 panic；
+17. 关键字段不会因窗口变窄静默消失；
+18. `q / Esc / j/k / h/l / o / Enter / / / n/N / y/Y / Ctrl-w*` 语义一致；
+19. CLI/TUI 功能与安全语义没有分叉；
+20. renderer 继续 zero I/O；
+21. Chapter 12～15 typed business/safety contracts 无回退；
+22. fmt/fast/full/受影响专项全部通过；
+23. 必要的 Virtual Disk HIL 通过；
+24. 旧重复 renderer/layout/style 技术债已删除；
+25. 文档不再存在把已完成旧章节写成 IMPLEMENTING/PENDING 的矛盾状态；
+26. 工作区 clean，全部提交已 push 到远程。
+
+最终验收原则：
+
+> **新版 edpcli TUI 不是“换了一套 cyan 颜色”，而是建立统一的终端应用设计系统：导航层级一致、当前对象优先、状态语义明确、结构可下钻、响应式稳定、业务模型与 renderer 解耦，同时完全保留既有协议事实与破坏性写盘安全边界。**
