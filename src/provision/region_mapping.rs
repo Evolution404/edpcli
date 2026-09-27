@@ -227,6 +227,8 @@ pub enum MigrationTransform {
     BootShareCombinedToShare,
     EncryptToShare,
     ShareToEncrypt,
+    PlainToEdp,
+    EdpToPlain,
 }
 
 pub const fn migration_transform(
