@@ -459,11 +459,11 @@ edpcli backup verify
 
 `backup create --deep` 不再创建新的深度备份。兼容策略：
 
-1. TUI 移除 Deep 入口；
+1. TUI 移除 `Deep` 入口；
 2. CLI `--deep` 进入弃用阶段，明确提示备份已统一为元数据备份；
-3. 不允许把 `--deep` 静默映射为另一种语义后仍显示为 Deep；
+3. 不允许把 `--deep` 静默映射为另一种语义后仍显示为 `Deep`；
 4. 历史 `capture_level=deep` EDPB 继续支持 `list / verify / info / inspect`；
-5. 历史 Deep 容器中的目录/统计派生数据只作为兼容只读信息，新的 restore 不依赖这些派生数据。
+5. 历史 `Deep` 容器中的目录/统计派生数据只作为兼容只读信息，新的 `restore` 不依赖这些派生数据。
 
 ### 18.4 新备份保存内容
 
@@ -471,14 +471,14 @@ edpcli backup verify
 
 所有新元数据备份至少保存：
 
-- typed media identity：VID / PID、USB serial 原始字符串和 `SerialQuality`、vendor / product / revision、transport；
+- typed media identity：VID / PID、USB serial 原始字符串和 `SerialQuality`、vendor / `product` / revision、`transport`；
 - 设备几何：`logical_sector_size`、可选 `physical_sector_size`、`total_sectors`、`capacity_bytes`；
 - 采集平台、时间、edpcli 版本；
 - 磁盘分区方案；
 - 每个分区的序号、`start_lba`、`sector_count`、partition type / role；
 - 可识别时保存 `filesystem_hint` 和 `volume_label_hint`，仅用于恢复后的格式化建议。
 
-USB 序列号在新 manifest 中**直接保存原始字符串，不做 SHA-256 哈希**。`SerialQuality` 继续用于区分 `Usable / Suspicious / Missing`；当质量为 `Missing` 时 `serial = null`。恢复授权优先比较可用序列号的直接值，不能再依赖不可逆摘要。历史 v1/v2 中已有 `serial_sha256` 继续只读兼容，但新 v3 不再写 `serial_sha256`。
+USB 序列号在新 `manifest` 中**直接保存原始字符串，不做 SHA-256 哈希**。`SerialQuality` 继续用于区分 `Usable / Suspicious / Missing`；当质量为 `Missing` 时 `serial = null`。恢复授权优先比较可用序列号的直接值，不能再依赖不可逆摘要。历史 v1/v2 中已有 `serial_sha256` 继续只读兼容，但新 v3 不再写 `serial_sha256`。
 
 原始扇区和派生描述必须继续分层：可恢复的原始协议/分区表字节是事实源，`filesystem_hint` 只能作为提示，不能反向生成协议字节。
 
@@ -528,18 +528,18 @@ EDP 元数据备份**不要求知道用户密码**。备份阶段不提示密码
 
 - 普通文件系统 boot region；
 - FAT16/FAT32 FAT；
-- exFAT FAT / Allocation Bitmap / Upcase Table；
+- exFAT 的 FAT、分配位图和大小写转换表；
 - NTFS MFT / Bitmap；
 - 文件系统目录元数据；
 - 文件名、路径、时间戳列表；
-- 用户文件 payload；
+- 用户文件 `payload`；
 - 空闲区、slack、删除文件残留。
 
 `DEEP_BACKUP_V1.md` 中的目录遍历、文件数量、空间统计等能力不再属于新的默认备份主路径。
 
-### 18.6 EDPB manifest 演进
+### 18.6 EDPB `manifest` 演进
 
-外层 EDPB 容器二进制格式继续保持 v1；新的 writer 建议升级为 `edpb.manifest.v3`，明确新的恢复契约，避免旧程序把新备份误解成旧的“恢复 LBA0～12”语义。
+外层 EDPB 容器二进制格式继续保持 v1；新的 `writer` 建议升级为 `edpb.manifest.v3`，明确新的恢复契约，避免旧程序把新备份误解成旧的“恢复 LBA0～12”语义。
 
 v3 至少新增：
 
@@ -572,17 +572,17 @@ partitions[]:
 
 兼容要求：
 
-- 新 writer 只写 manifest v3；
+- 新 `writer` 只写 `manifest` v3；
 - v3 直接保存 `identity.hardware.serial`；不生成新的 `serial_sha256`；
-- reader 继续读取 v1 / v2；
+- `reader` 继续读取 v1 / v2；
 - v1 / v2 不得被伪装成 v3；
 - 旧 `core` Plain 备份在 UI 中显示为“旧版核心元数据”，不能显示成“完整元数据备份”；
-- 历史 Deep 容器继续保留原始 `capture_level`；
+- 历史 `Deep` 容器继续保留原始 `capture_level`；
 - 旧文件不就地修改。
 
 ### 18.7 恢复主流程
 
-新的 restore 分为两个独立阶段：
+新的 `restore` 分为两个独立阶段：
 
 ```text
 A. 元数据恢复
@@ -596,8 +596,8 @@ A 成功后，即使用户取消 B，也必须报告“元数据恢复成功”�
 恢复前继续执行当前严格安全链：
 
 1. 验证 EDPB 完整性；
-2. canonical media identity 判断备份与目标盘关系；
-3. usable serial、VID/PID、geometry 硬冲突必须拒绝；
+2. `canonical` media identity 判断备份与目标盘关系；
+3. usable serial、VID/PID、`geometry` 硬冲突必须拒绝；
 4. 精确检查总扇区数和逻辑扇区大小；
 5. 用户确认；
 6. 卸载/锁定前再次检查；
@@ -728,7 +728,7 @@ UI 示例：
 
 ### 18.12 清空并重建加密分区
 
-这是恢复后的独立破坏性操作，不属于 restore。
+这是恢复后的独立破坏性操作，不属于 `restore`。
 
 只有用户主动选择“清空并重建加密分区”才进入该流程。必须再次明确提示：
 
@@ -762,7 +762,7 @@ UI 示例：
 
 #### 18.13.1 备份页
 
-新备份只显示“元数据备份”。历史文件可显示“旧版核心元数据 / 历史 Metadata / 历史 Deep”，这些标签只描述来源，不代表新产品有多个备份等级。
+新备份只显示“元数据备份”。历史文件可显示“旧版核心元数据 / 历史 `Metadata` / 历史 `Deep`”，这些标签只描述来源，不代表新产品有多个备份等级。
 
 备份详情固定显示：
 
@@ -851,22 +851,22 @@ PartitionFormatRequest
 EncryptedPartitionReinitializeRequest
 ```
 
-恢复服务只返回已写回的 metadata artifact、读回结果、fresh identity、分区列表和后续状态。前端不得根据错误字符串猜测 `NeedsFormat / PasswordRequired`。
+恢复服务只返回已写回的 `metadata` `artifact`、读回结果、fresh identity、分区列表和后续状态。前端不得根据错误字符串猜测 `NeedsFormat / PasswordRequired`。
 
 ### 18.16 安全边界
 
 以下边界保持硬门槛：
 
-1. `backup restore` 仍要求强物理身份和精确 geometry；
+1. `backup restore` 仍要求强物理身份和精确 `geometry`；
 2. protocol identity 不能覆盖 serial/VID/PID hard conflict；
-3. explicit backup path 不能绕过 restore authorization；
+3. explicit backup path 不能绕过 `restore` authorization；
 4. reopen 后必须 fresh observe；
-5. restore 只写 manifest 声明 `restorable` 的 metadata artifact；
-6. 分区格式化必须在 restore transaction 完成以后单独开始；
+5. `restore` 只写 `manifest` 声明 `restorable` 的 `metadata` `artifact`；
+6. 分区格式化必须在 `restore` transaction 完成以后单独开始；
 7. EDP 加密格式化必须先验证 FileKey；
 8. FileKey 无法验证时禁止试探性写入；
 9. 加密重建必须新密码二次输入并生成全新 FileKey；
-10. post-restore format/reinitialize 失败不得回滚已经成功并读回验证的 metadata restore；
+10. post-`restore` format/reinitialize 失败不得回滚已经成功并读回验证的 `metadata` `restore`；
 11. format/reinitialize 自己仍需原子写和读回安全门槛；
 12. 系统盘保护、USB 目标固定、sudo 边界继续沿用现有实现。
 
@@ -878,67 +878,67 @@ EncryptedPartitionReinitializeRequest
 
 **实施状态（2026-09-28）：COMPLETE。** 已增加 disk5 根因夹具，固定“恢复 MBR/分区起点后，LBA2048 文件系统仍可能无效”的事实；CLI/TUI 完成事件改为“元数据恢复成功 + 文件系统未恢复”，不再提示“拔出重插”；制盘 mandatory backup 的 application 顺序测试确认备份完成后才进入 commit/`LockAndReopen`。Focused `tui_suite chapter_18_b0` 3/3 PASS，`cargo fmt --all`、`git diff --check` PASS。
 
-- 固定 disk5 Plain → EDP → restore 后 MBR 正确但文件系统不可挂载的真实场景；
-- restore 完成事件不能再声称卷已经可用；
+- 固定 disk5 Plain → EDP → `restore` 后 MBR 正确但文件系统不可挂载的真实场景；
+- `restore` 完成事件不能再声称卷已经可用；
 - 制盘前 backup 必须发生在 `LockAndReopen` 前；
 - 备份失败必须 0 destructive writes。
 
-**B1 — Manifest v3 / typed restore contract**
+**B1 — `Manifest` v3 / typed `restore` contract**
 
-**实施状态（2026-09-28）：COMPLETE。** 新 writer 已切换到 `edpb.manifest.v3`，写入 `backup_purpose=metadata_only`、typed `restore_contract` 与 partition typed 容器；v3 `identity.hardware.serial` 保存可用 USB serial 原始字符串且不生成/持久化新的 `serial_sha256`。运行时 raw serial 仅保留于内存并从通用 serde/Debug 中隐藏，避免进入 elevation argv/lineage/log；restore identity matcher 直接比较 v3 usable raw serial，v1/v2 继续只读兼容历史 digest。v1/v2 明确拒绝 v3 contract/partition 字段，v3 明确拒绝 legacy serial digest，防止 schema 伪装。Focused tests：EDPB 71/71、media identity 16/16、CLI write safety 31/31 PASS；raw-serial mismatch / VID:PID / geometry / reopen-swap 等 0-write 授权测试保持通过。
+**实施状态（2026-09-28）：COMPLETE。** 新 `writer` 已切换到 `edpb.manifest.v3`，写入 `backup_purpose=metadata_only`、typed `restore_contract` 与 partition typed 容器；v3 `identity.hardware.serial` 保存可用 USB serial 原始字符串且不生成/持久化新的 `serial_sha256`。运行时 raw serial 仅保留于内存并从通用 serde/Debug 中隐藏，避免进入 elevation argv/lineage/log；`restore` identity matcher 直接比较 v3 usable raw serial，v1/v2 继续只读兼容历史 digest。v1/v2 明确拒绝 v3 contract/partition 字段，v3 明确拒绝 `legacy` serial digest，防止 schema 伪装。Focused tests：EDPB 71/71、media identity 16/16、CLI write safety 31/31 PASS；raw-serial mismatch / VID:PID / `geometry` / reopen-swap 等 0-write 授权测试保持通过。
 
 - 增加 `edpb.manifest.v3`；
-- 新 writer 只创建 `metadata_only`；
-- 保持 v1/v2 reader compatibility；
-- 增加 partition typed metadata 和 restore contract；
+- 新 `writer` 只创建 `metadata_only`；
+- 保持 v1/v2 `reader` compatibility；
+- 增加 partition typed `metadata` 和 `restore` contract；
 - 增加旧备份 UI 分类。
 
-**B2 — Plain metadata capture**
+**B2 — Plain `metadata` `capture`**
 
-**实施状态（2026-09-28）：COMPLETE。** Plain 新建备份已切换为 Metadata 级 v3：MBR 仅保存原始 LBA0 + typed partition entries；GPT 保存 protective MBR、主 header/entry array、备份 entry array/header，并在采集时校验主/备 header CRC、partition-array CRC、disk GUID 与 geometry 一致性。采集器不会读取分区起点的 exFAT/FAT/NTFS boot region，也不会保存 FAT/bitmap/root directory/user payload；v3 Plain validator 明确禁止固定 LBA0～12 protocol artifact 混入。Focused tests：B2 MBR/GPT 2/2、实际 Plain `backup create` 1/1、完整 `backup_suite` 73/73 PASS。
+**实施状态（2026-09-28）：COMPLETE。** Plain 新建备份已切换为 `Metadata` 级 v3：MBR 仅保存原始 LBA0 + typed partition entries；GPT 保存 protective MBR、主 header/entry array、备份 entry array/header，并在采集时校验主/备 header CRC、partition-array CRC、disk GUID 与 `geometry` 一致性。采集器不会读取分区起点的 exFAT/FAT/NTFS boot region，也不会保存 FAT/bitmap/root directory/user `payload`；v3 Plain `validator` 明确禁止固定 LBA0～12 protocol `artifact` 混入。Focused tests：B2 MBR/GPT 2/2、实际 Plain `backup create` 1/1、完整 `backup_suite` 73/73 PASS。
 
-- MBR typed capture；
-- GPT 主/备表 capture；
-- filesystem/label 仅作 hint；
+- MBR typed `capture`；
+- GPT 主/备表 `capture`；
+- `filesystem`/label 仅作 hint；
 - 删除“Plain 核心备份等于完整恢复”的产品假设。
 
-**B3 — EDP metadata capture 收敛**
+**B3 — EDP `metadata` `capture` 收敛**
 
-**实施状态（2026-09-28）：COMPLETE。** 新默认 EDP Metadata 采集不再读取 partition prefix/suffix、filesystem boot、filesystem key sectors 或目录/文件分析证据；typed partition geometry 从已确认 EDPF/LBA12 结构生成，LBA0～12 继续作为原始协议事实源（其中包含 PassInfo/NeedEncrypt/EncryptMode/UserKeyCRC/FileKeyCRC/wrapped FileKey/历史 key material），无需密码或 FileKey unwrap 即可备份。LBA7 指针指向的 6-sector LCE 与已确认的盘尾 metadata mirror / restore node 保留原始字节并标为 Restorable。旧 Deep 所需 filesystem evidence 已移动到 Deep 专用兼容采集 helper，新默认路径不依赖它。Focused tests：B3 1/1、Deep 兼容 1/1、实际 EDP `backup create` 1/1；完整 `backup_suite` 74/74 PASS。
+**实施状态（2026-09-28）：COMPLETE。** 新默认 EDP `Metadata` 采集不再读取 partition prefix/suffix、`filesystem` boot、`filesystem` key sectors 或目录/文件分析证据；typed partition `geometry` 从已确认 EDPF/LBA12 结构生成，LBA0～12 继续作为原始协议事实源（其中包含 PassInfo/NeedEncrypt/EncryptMode/UserKeyCRC/FileKeyCRC/wrapped FileKey/历史 key material），无需密码或 FileKey unwrap 即可备份。LBA7 指针指向的 6-sector LCE 与已确认的盘尾 `metadata` mirror / `restore` node 保留原始字节并标为 Restorable。旧 `Deep` 所需 `filesystem` evidence 已移动到 `Deep` 专用兼容采集 helper，新默认路径不依赖它。Focused tests：B3 1/1、`Deep` 兼容 1/1、实际 EDP `backup create` 1/1；完整 `backup_suite` 74/74 PASS。
 
 - LBA0～12；
 - LCE；
 - 已识别尾部协议对象；
-- key records / PassInfo 继续以原始协议 Artifact 为事实源；
+- key records / PassInfo 继续以原始协议 `Artifact` 为事实源；
 - backup 不请求密码；
-- 新默认路径不依赖 deep filesystem analyzer。
+- 新默认路径不依赖 `deep` `filesystem` analyzer。
 
-**B4 — Metadata restore**
+**B4 — `Metadata` `restore`**
 
-**实施状态（2026-09-28）：COMPLETE。** Restore planner 已改为从已验证 EDPB 中枚举 `RestorePolicy::Restorable` 的 raw-sector Artifact，逐 Extent 生成 typed `WriteTransactionPlan`；LBA0 仍为最后提交的 `Commit`，其余元数据经同一 atomic write/sync/readback/rollback 事务执行。v3 Plain 不再要求不存在的固定 LBA0～12 protocol Artifact，可恢复 MBR/GPT 分区元数据；EDP/historical v1/v2 继续恢复 LBA0～12，并对 LCE 与备份 LBA7 指针复核，同时恢复已确认的两类盘尾结构。强物理身份、精确 geometry、prepare/unmount/lock、reopen fresh identity recheck 均未降低；Plain backup 缺 onlyid 时恢复到同一块已制成 EDP 的物理盘继续允许。Focused：v3 Plain 1/1；EDP protocol+LCE+tail 1/1；CLI 写安全 32/32 PASS。
+**实施状态（2026-09-28）：COMPLETE。** `Restore` planner 已改为从已验证 EDPB 中枚举 `RestorePolicy::Restorable` 的 raw-sector `Artifact`，逐 `Extent` 生成 typed `WriteTransactionPlan`；LBA0 仍为最后提交的 `Commit`，其余元数据经同一 atomic write/sync/readback/rollback 事务执行。v3 Plain 不再要求不存在的固定 LBA0～12 protocol `Artifact`，可恢复 MBR/GPT 分区元数据；EDP/historical v1/v2 继续恢复 LBA0～12，并对 LCE 与备份 LBA7 指针复核，同时恢复已确认的两类盘尾结构。强物理身份、精确 `geometry`、prepare/unmount/lock、reopen fresh identity recheck 均未降低；Plain backup 缺 onlyid 时恢复到同一块已制成 EDP 的物理盘继续允许。Focused：v3 Plain 1/1；EDP protocol+LCE+tail 1/1；CLI 写安全 32/32 PASS。
 
-- 按盘型生成 metadata-only `WriteTransactionPlan`；
+- 按盘型生成 `metadata`-only `WriteTransactionPlan`；
 - Plain MBR/GPT；
 - EDP protocol + restorable protocol extents；
-- restore 完成事件改为 metadata 语义；
+- `restore` 完成事件改为 `metadata` 语义；
 - 真实 disk5 回归。
 
-**B5 — Post-restore assessment**
+**B5 — Post-`restore` assessment**
 
-**实施状态（2026-09-28）：COMPLETE。** 新增 application-owned `PostRestorePartitionState`、`PostRestoreAssessment`、`MetadataBackupReport`、`MetadataRestoreReport`、`PartitionFormatRequest`、`EncryptedPartitionReinitializeRequest`。恢复事务成功后立即进入只读 assessment；assessment 失败只降级为 typed `Unsupported`/issue，不会反转 metadata restore success。Plain 严格校验 boot sector 后区分 `Usable / NeedsFormat`；EDP 明文同样只读判断，加密域在默认密码可验证时检查 FileKeyCRC/解密 boot，否则明确 `PasswordRequired`，key record/FileKeyCRC 异常为 `CryptoMetadataInvalid`。CLI/TUI 通过 typed `WriteEvent::PostRestoreAssessment` 消费状态，不解析错误字符串。Focused tests：B5 状态矩阵 5/5、CLI write safety 32/32、B0 3/3、Clippy `-D warnings` PASS。
+**实施状态（2026-09-28）：COMPLETE。** 新增 application-owned `PostRestorePartitionState`、`PostRestoreAssessment`、`MetadataBackupReport`、`MetadataRestoreReport`、`PartitionFormatRequest`、`EncryptedPartitionReinitializeRequest`。恢复事务成功后立即进入只读 assessment；assessment 失败只降级为 typed `Unsupported`/`issue`，不会反转 `metadata` `restore` `success`。Plain 严格校验 boot sector 后区分 `Usable / NeedsFormat`；EDP 明文同样只读判断，加密域在默认密码可验证时检查 FileKeyCRC/解密 boot，否则明确 `PasswordRequired`，key record/FileKeyCRC 异常为 `CryptoMetadataInvalid`。CLI/TUI 通过 typed `WriteEvent::PostRestoreAssessment` 消费状态，不解析错误字符串。Focused tests：B5 状态矩阵 5/5、CLI write safety 32/32、B0 3/3、Clippy `-D warnings` PASS。
 
 - 实现 `Usable / NeedsFormat / PasswordRequired / CryptoMetadataInvalid / Unsupported`；
 - 全部只读，不写盘。
 
 **B6 — 格式化引导**
 
-**实施状态（2026-09-28）：COMPLETE。** 新增显式 `PartitionFormatRequest` / `PostRestoreFormatResult`，只有 assessment 为 `NeedsFormat` 的目标分区才能进入格式化；构造 assessment/request 本身不会写盘。Plain 与 EDP 明文分区均复用 provision 的 `build_empty_fat16/build_empty_exfat`，并抽取共享 sparse-filesystem write/sync/readback executor，原 provision 格式化路径也改为调用同一执行器，未引入第二套 FAT/exFAT writer。无 filesystem hint 时必须由调用方显式选择已验证格式；当前 portable writer 对 FAT32/NTFS 继续 fail-closed。格式化结果按分区返回，格式化失败不会修改已经成功的 `MetadataRestoreReport`。Focused tests：B6 3/3、provision formatter 18/18、Clippy `-D warnings` PASS。
+**实施状态（2026-09-28）：COMPLETE。** 新增显式 `PartitionFormatRequest` / `PostRestoreFormatResult`，只有 assessment 为 `NeedsFormat` 的目标分区才能进入格式化；构造 assessment/request 本身不会写盘。Plain 与 EDP 明文分区均复用 provision 的 `build_empty_fat16/build_empty_exfat`，并抽取共享 sparse-`filesystem` write/sync/readback executor，原 provision 格式化路径也改为调用同一执行器，未引入第二套 FAT/exFAT `writer`。无 `filesystem` hint 时必须由调用方显式选择已验证格式；当前 portable `writer` 对 FAT32/NTFS 继续 fail-closed。格式化结果按分区返回，格式化失败不会修改已经成功的 `MetadataRestoreReport`。Focused tests：B6 3/3、provision `formatter` 18/18、Clippy `-D warnings` PASS。
 
 - Plain / EDP 明文分区；
 - 复用现有格式化器；
 - 用户逐分区确认；
-- 无可靠 filesystem hint 时由用户选择；
-- format 结果与 restore 结果分离。
+- 无可靠 `filesystem` hint 时由用户选择；
+- format 结果与 `restore` 结果分离。
 
 **B7 — EDP 密钥域恢复后处理**
 
@@ -952,18 +952,18 @@ EncryptedPartitionReinitializeRequest
 
 - 新密码双输入；
 - 新 FileKey；
-- 重写对应 key-domain metadata；
+- 重写对应 key-domain `metadata`；
 - 新空文件系统；
 - 读回验证；
 - 独立破坏性确认。
 
 **B9 — CLI/TUI 清理**
 
-- 移除 TUI Deep；
+- 移除 TUI `Deep`；
 - CLI `--deep` 弃用；
 - 更新备份页、恢复完成页、`?` 帮助；
 - 制盘进度改“制盘前元数据备份”；
-- 删除新产品路径中已经没有用途的 deep 入口和文案，但保留历史 EDPB 读取兼容。
+- 删除新产品路径中已经没有用途的 `deep` 入口和文案，但保留历史 EDPB 读取兼容。
 
 **B10 — 文档收口**
 
@@ -983,10 +983,10 @@ EncryptedPartitionReinitializeRequest
 - EDP 密码未知仍能备份；
 - corrupt protocol fail closed；
 - backup 路径不写目标盘；
-- 不读取用户文件 payload；
+- 不读取用户文件 `payload`；
 - 不遍历目录；
 - 新 EDPB 明确 `metadata_only`。
-- v3 EDPB 直接保存可用 USB serial，verify/readback 后值与采集时一致；
+- v3 EDPB 直接保存可用 USB serial，`verify`/readback 后值与采集时一致；
 - v3 不产生 `serial_sha256`；
 - v1/v2 的历史 `serial_sha256` 仍能读取和用于兼容匹配。
 
@@ -994,11 +994,11 @@ EncryptedPartitionReinitializeRequest
 
 - Plain 元数据恢复后分区几何一致；
 - Plain 无文件系统时返回 `NeedsFormat`；
-- 元数据恢复成功但格式化取消，restore 仍为 success；
-- wrong serial / wrong VID:PID / wrong geometry 全部 0 writes；
+- 元数据恢复成功但格式化取消，`restore` 仍为 `success`；
+- wrong serial / wrong VID:PID / wrong `geometry` 全部 0 writes；
 - reopen swap 继续拒绝；
 - EDP 协议原始字节读回一致；
-- EDP 密码未知不阻止 metadata restore。
+- EDP 密码未知不阻止 `metadata` `restore`。
 
 **加密后处理**
 
@@ -1045,12 +1045,12 @@ EDP metadata backup
 1. 用户只需要理解一种“元数据备份”；
 2. 新 backup 不采集目录和用户文件；
 3. 不知道 EDP 密码也能完整创建元数据备份；
-4. restore 文案不再暗示文件系统或用户数据已恢复；
+4. `restore` 文案不再暗示文件系统或用户数据已恢复；
 5. Plain 恢复后若没有文件系统，明确进入 `NeedsFormat`；
 6. EDP 加密区无法验证密钥时给出明确原因，不自动格式化；
 7. “清空并重建加密分区”必须要求新密码双输入；
 8. 制盘前强制备份仍发生在任何破坏性写入之前；
-9. 所有 restore authorization / reopen / transaction / readback 安全门槛保持；
+9. 所有 `restore` authorization / reopen / transaction / readback 安全门槛保持；
 10. v1/v2 历史 EDPB 仍可读；
 11. 新 v3 EDPB 直接保存 USB serial，不再哈希；
 12. disk5 真实回归闭环；
