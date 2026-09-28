@@ -1285,7 +1285,7 @@ application 返回结构化 `ProvisionReport/BackupReport/InspectReport`，CLI/T
 
 #### D8-C1 实施状态（GitHub）
 
-**IN PROGRESS。**
+**COMPLETE；D8-C 后续继续。**
 
 - 第一刀先收敛设备工作区独占状态：设备行、设备表视图、扫描状态、设备窗格焦点、摘要选择与展开位统一归 `DevicesState` 所有。
 - `AppState` 对外方法签名保持不变，只把内部直接字段访问改为 `devices.*` 子状态；不改变设备筛选、排序、选择、检查/制盘目标固定或任何磁盘输入输出语义。
@@ -1468,7 +1468,37 @@ D8 全阶段冻结以下语义：LBA0～12/LCE、四模式、K6、LBA10 尾随 3
 16. `ARCHITECTURE.md` 与实现一致；
 17. Cargo/lib 产品描述不再称 Offline Convert 为现有能力；
 18. fmt/diff/fast/full/Virtual-HIL 全绿；
-19. Phase 8 剩余真实 USB 验收另行继续，架构重构不得降低写盘安全门槛。
+19. Phase 8 / Chapter 12 K8 的真实 USB 验收已有独立真实介质证据；D8 不新增破坏性真实 USB 写盘要求，且架构重构不得降低写盘安全门槛。
+
+### D8 最终收口审计（2026-09-28）
+
+**COMPLETE，19/19 PASS。** 本节按当前代码、正式门禁与 `docs/provisioning/PROVISIONING.md` 的最新状态逐条复核；历史阶段文字不覆盖较新的事实源。
+
+| # | 结果 | 最终证据 |
+|---:|:---:|---|
+| 1 | PASS | TUI `ProvisionKind::ALL` 固定为 mode0～mode3 + Plain，并统一映射到领域 `ProvisionTarget`；CLI `--target` 同样只解析这五种目标并按同一 `ProvisionTarget` 构造请求。 |
+| 2 | PASS | `ProvisionTarget::{Plain, Official(...)}` 保持正交；回归测试锁定 Plain 的 `official_mode()` / `mode_number()` 均为 `None`，官方模式号仅为 0～3。 |
+| 3 | PASS | `command_spec` 继续同时驱动 parser/help/completion；`tests/command_spec.rs` 锁定三者使用同一目录。 |
+| 4 | PASS | Provision action 目录仅为 `plan/image/write`，`convert` 被回归测试明确排除；Offline Convert 仅在历史/删除说明中出现，不再是用户能力。 |
+| 5 | PASS | 正式 runner 已聚合为 **8 suites / 10 artifacts**，不再回到历史约 70 个 integration crate 的运行方式。 |
+| 6 | PASS | 同一 D8 工作区 `scripts/test-fast.sh` 为 **8 suites / 10 artifacts / 0 failures**；正式 fast runner 的预算门禁保持启用，未出现预算失败。 |
+| 7 | PASS | full 使用仓库 `scripts/test-full.py` 的持久任务/明确超时模型，不依赖单次 120 秒同步 shell 调用。 |
+| 8 | PASS | 本次 full 实测 **8 suites / 10 artifacts + doctest / 0 failures**，最终 exit code **0**，总运行约 **8.84s**。 |
+| 9 | PASS | `AppState` 当前且仅持有 `ShellState + DevicesState + InspectState + BackupsState + ProvisionState`；Inspect/Provision 状态与 renderer 已按职责拆分。 |
+| 10 | PASS | `application/provision` 的 prepare/commit/export 等边界继续独立；Official/Plain 通过统一领域目标进入应用服务。 |
+| 11 | PASS | `diskio` 明确拆为 `device`、`transaction`、`backup_config`、`backup_catalog`、`backup_create`，块 I/O 与备份目录/配置没有回并。 |
+| 12 | PASS | 架构门禁继续要求 provision validator 不依赖 `crate::inspect`；`metainfo` 当前也无 `crate::inspect` presentation 依赖。 |
+| 13 | PASS | 已确认的旧产品入口/重复实现已按 D0～D8 清理；全目标 Clippy `-D warnings` 本次 PASS，未发现需要借 D8 再做的高置信死代码清理。 |
+| 14 | PASS | 正式备份运行时只认 `.edpb`；`edpb.rs` 明确 legacy `.bin` 不作为 runtime input，`backup_catalog` 也拒绝把旧 `.bin` 当正式备份链。Inspect 导出/测试夹具中的 `.bin` 不属于旧备份迁移写入链。 |
+| 15 | PASS | `src/edpb/legacy.rs` 与 `LegacyMigrated` 语义仍存在，架构门禁继续锁定真实历史读取兼容；没有因 `legacy` 命名删除协议事实。 |
+| 16 | PASS | `ARCHITECTURE.md` 已同步当前 application、diskio、EDPB、TUI 与 `lib.rs` 公开边界，和本次代码结构一致。 |
+| 17 | PASS | `Cargo.toml` / `src/lib.rs` 当前产品描述不再宣传 Offline Convert；用户文档仅说明该能力已删除。 |
+| 18 | PASS | D8-G 最终 `clippy/fmt/diff/full` 全绿；此前 fast 全绿；macOS Plain disposable raw-image **Virtual-HIL 1/1 PASS**。 |
+| 19 | PASS | 当前 `PROVISIONING.md` 已明确旧 Phase 8 真实 USB 场景 COMPLETE，Chapter 12 K8 也 COMPLETE 且有真实介质证据；本次 D8 只运行 Virtual-HIL，没有伪造或替代既有真实 USB 证据，也没有降低任何写盘安全门槛。 |
+
+技术债复审结论：**未发现需要自动开启下一轮大重构的确凿新技术债。** 当前 soft-budget 告警仍只作为观察项；`tui/provision/state.rs` 457/470、`cli_args/provision.rs` 655/700、`tui/inspect/state.rs` 628/700 等模块虽然接近各自预算/上限，但现有职责边界清楚、无反向依赖、无重复事实源、无 hard-limit failure。`tui/controller.rs` 696 行仍集中承担统一 action controller 职责，当前没有证据支持仅因行数继续拆分。
+
+真实 USB 状态复审结论：**旧 Phase 8 与 Chapter 12 K8 当前均无独立未完成项。** 后续若因新的 write-path / authorization / disk-I/O 改动触发新的真实介质验收，应按对应新变更重新执行；“有指定真实慢盘时补充 UI 可观测性观察”属于条件性增强，不是 Phase 8/K8 的未完成阻塞项。
 
 ---
 
@@ -1486,6 +1516,6 @@ D8 全阶段冻结以下语义：LBA0～12/LCE、四模式、K6、LBA10 尾随 3
 - 不复制新的 CLI/TUI `writer`/backend；
 - 每次删除 API 前先全仓检索；
 - 所有 write path 保持 USB/system-disk guard、backup、reopen identity、transaction/readback/rollback；
-- 不把 Phase 8 未完成的真实 USB 场景写成通过。
+- 不用 Virtual-HIL 冒充真实 USB 证据；Phase 8/K8 当前 COMPLETE 仅引用既有真实介质验收记录，本轮 D8 不新增破坏性真实 USB 写盘。
 
 本报告是本轮架构审计和实施计划的事实源；执行中发现现实代码变化时，应更新本报告的实施状态，不另建平行计划。
