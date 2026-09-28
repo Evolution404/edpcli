@@ -110,7 +110,7 @@ fn selected_device_identity_is_rechecked_before_the_operation_starts() {
 }
 
 #[test]
-fn plain_identity_recheck_accepts_exact_hardware_candidate_only_when_lba4_is_zero() {
+fn plain_identity_recheck_accepts_zero_lba4_and_rejects_explicit_edp_onlyid() {
     use edpcli::platform::{HardwareProbe, InquiryInfo, NativeTransport};
     use edpcli::sysinfo::CmdRunner;
     use std::time::Duration;
@@ -159,14 +159,83 @@ fn plain_identity_recheck_accepts_exact_hardware_candidate_only_when_lba4_is_zer
         .expect("zero-LBA4 Plain media should bind to exact hardware-derived device_id");
 
     let mut damaged = PlainDev { lba4: vec![0; 512] };
-    damaged.lba4[0] = 1;
+    damaged.lba4[..9].copy_from_slice(b"$$$123$$$");
     let error = verify_expected_identity(&runner, 4, None, Some(expected), &mut damaged)
-        .expect_err("nonzero LBA4 must block Plain hardware fallback");
+        .expect_err("explicit EDP onlyid must block Plain hardware fallback");
     assert!(
-        error.msg.contains("LBA4") || error.msg.contains("变化"),
+        error.msg.contains("onlyid") || error.msg.contains("LBA4"),
         "{}",
         error.msg
     );
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn plain_identity_recheck_accepts_whole_disk_ntfs_with_nonzero_lba4_code() {
+    use edpcli::platform::{HardwareProbe, InquiryInfo, NativeTransport};
+    use edpcli::sysinfo::CmdRunner;
+    use std::time::Duration;
+
+    struct MacPlainRunner;
+    impl CmdRunner for MacPlainRunner {
+        fn check_output(&self, cmd: &[&str], _timeout: Duration) -> io::Result<String> {
+            if cmd == ["diskutil", "info", "-plist", "disk4"] {
+                return Ok(
+                    "<plist version=\"1.0\"><dict><key>IOKitSize</key><integer>15502147584</integer><key>Size</key><integer>15502147584</integer><key>TotalSize</key><integer>15502143488</integer></dict></plist>"
+                        .into(),
+                );
+            }
+            Err(io::Error::other("unexpected command"))
+        }
+
+        fn hardware_probe(&self, _disk: u32) -> Option<HardwareProbe> {
+            Some(HardwareProbe {
+                vid: Some(0x3535),
+                pid: Some(0x6300),
+                transport: NativeTransport::Bot,
+                inquiry: Some(InquiryInfo {
+                    vendor: "aigo".into(),
+                    product: "U335".into(),
+                    revision: "1100".into(),
+                }),
+            })
+        }
+    }
+
+    struct ImageDev(Vec<u8>);
+    impl SectorDev for ImageDev {
+        fn read_sector(&mut self, lba: u32) -> io::Result<Vec<u8>> {
+            let start = lba as usize * 512;
+            Ok(self.0[start..start + 512].to_vec())
+        }
+
+        fn write_sector(&mut self, _lba: u32, _data: &[u8]) -> io::Result<()> {
+            unreachable!("identity verification is read-only")
+        }
+    }
+
+    let total = 30_277_632u64;
+    let mut image = vec![0u8; 13 * 512];
+    {
+        let boot = &mut image[..512];
+        boot[..3].copy_from_slice(&[0xeb, 0x52, 0x90]);
+        boot[3..11].copy_from_slice(b"NTFS    ");
+        boot[11..13].copy_from_slice(&512u16.to_le_bytes());
+        boot[13] = 8;
+        boot[21] = 0xf8;
+        boot[40..48].copy_from_slice(&(total - 1).to_le_bytes());
+        boot[48..56].copy_from_slice(&4u64.to_le_bytes());
+        boot[56..64].copy_from_slice(&8u64.to_le_bytes());
+        boot[510..512].copy_from_slice(&[0x55, 0xaa]);
+    }
+    image[4 * 512..4 * 512 + 16].copy_from_slice(&[
+        0x66, 0x61, 0x90, 0x1f, 0x07, 0xc3, 0x06, 0x1e, 0x66, 0x60, 0x66, 0xb8, 1, 0, 0, 0,
+    ]);
+
+    let runner = MacPlainRunner;
+    let expected = "disk&ven_aigo&prod_u335&rev_1100";
+    verify_expected_identity(&runner, 4, None, Some(expected), &mut ImageDev(image))
+        .expect("strict whole-disk NTFS Plain evidence should allow nonzero LBA4 boot code");
 }
 
 use crate::common;

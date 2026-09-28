@@ -197,6 +197,15 @@ pub(crate) fn verify_reopened_snapshot(
 /// selected operation. The write flow still performs its existing fresh
 /// snapshot and post-reopen checks; this closes the earlier selection/confirmation
 /// window where another USB device could take the same platform disk number.
+fn protocol_image_confirms_plain(protocol_image: &[u8], total_sectors: u64) -> bool {
+    if protocol_image.len() != METADATA_IMAGE_LEN {
+        return false;
+    }
+    let lba4 = &protocol_image[4 * SECTOR..5 * SECTOR];
+    diskio::lba4_label_id_from(lba4).is_none()
+        && crate::partition_table::confirmed_plain_protocol_prefix(protocol_image, total_sectors)
+}
+
 pub fn verify_expected_identity(
     runner: &dyn CmdRunner,
     disk: u32,
@@ -246,10 +255,11 @@ pub fn verify_expected_identity(
                 ));
             }
         } else {
-            // Plain media intentionally has no EDPF identity in LBA7. Only
-            // permit the hardware-derived fallback when LBA4 is also fully
-            // cleared; a nonzero LBA4 with unreadable LBA7 is treated as
-            // suspected damaged EDP metadata and remains fail-closed.
+            // Plain whole-disk FAT/exFAT/NTFS media may legitimately carry
+            // filesystem boot code in LBA4/LBA7. Nonzero bytes alone are not
+            // EDP evidence. Preserve fail-closed behavior by requiring the
+            // same positive Plain proof used by the canonical media observer
+            // whenever LBA4's identity-tag bytes are nonzero.
             let lba4 = dev.read_sector(4).map_err(|error| {
                 err(
                     EXIT_IO,
@@ -267,11 +277,26 @@ pub fn verify_expected_identity(
             }
             let tag = diskio::lba4_tag16_from(&lba4)
                 .ok_or_else(|| err(EXIT_IO, "错误: Plain 身份复核无法读取 LBA4 身份标签"))?;
-            if tag.iter().any(|&byte| byte != 0) {
+            if diskio::lba4_label_id_from(&lba4).is_some() {
                 return Err(err(
                     EXIT_TARGET,
-                    "错误: LBA7 无法识别但 LBA4 仍非零；疑似损坏 EDP，拒绝按 Plain 硬件身份继续",
+                    "错误: LBA7 无法识别但 LBA4 仍含有效 EDP onlyid；疑似损坏 EDP，拒绝按 Plain 硬件身份继续",
                 ));
+            }
+            if tag.iter().any(|&byte| byte != 0) {
+                let image = read_image(dev)?;
+                let total_sectors = sysinfo::disk_total_sectors(runner, disk).ok_or_else(|| {
+                    err(
+                        EXIT_TARGET,
+                        "错误: Plain 身份复核无法取得物理总扇区数，拒绝按硬件身份继续",
+                    )
+                })?;
+                if !protocol_image_confirms_plain(&image, total_sectors) {
+                    return Err(err(
+                        EXIT_TARGET,
+                        "错误: LBA7 无法识别且 LBA4 非零，同时缺少可验证 Plain 正向证据；疑似损坏 EDP，拒绝继续",
+                    ));
+                }
             }
             if !generate_candidates(runner, disk)
                 .iter()
@@ -859,6 +884,39 @@ mod tests {
         let error = read_image(&mut ShortSectorDev).unwrap_err();
         assert_eq!(error.code, EXIT_IO);
         assert!(error.msg.contains("512B"), "{}", error.msg);
+    }
+
+    fn ntfs_plain_protocol_image(total_sectors: u64) -> Vec<u8> {
+        let mut image = vec![0u8; METADATA_IMAGE_LEN];
+        let boot = &mut image[..SECTOR];
+        boot[..3].copy_from_slice(&[0xeb, 0x52, 0x90]);
+        boot[3..11].copy_from_slice(b"NTFS    ");
+        boot[11..13].copy_from_slice(&(SECTOR as u16).to_le_bytes());
+        boot[13] = 8;
+        boot[21] = 0xf8;
+        boot[40..48].copy_from_slice(&(total_sectors - 1).to_le_bytes());
+        boot[48..56].copy_from_slice(&4u64.to_le_bytes());
+        boot[56..64].copy_from_slice(&8u64.to_le_bytes());
+        boot[510..512].copy_from_slice(&[0x55, 0xaa]);
+        image
+    }
+
+    #[test]
+    fn plain_confirmation_allows_nonzero_lba4_filesystem_code() {
+        let total = 30_277_632u64;
+        let mut image = ntfs_plain_protocol_image(total);
+        image[4 * SECTOR..4 * SECTOR + 16].copy_from_slice(&[
+            0x66, 0x61, 0x90, 0x1f, 0x07, 0xc3, 0x06, 0x1e, 0x66, 0x60, 0x66, 0xb8, 1, 0, 0, 0,
+        ]);
+        assert!(protocol_image_confirms_plain(&image, total));
+    }
+
+    #[test]
+    fn plain_confirmation_rejects_edp_onlyid_even_with_valid_filesystem_boot() {
+        let total = 30_277_632u64;
+        let mut image = ntfs_plain_protocol_image(total);
+        image[4 * SECTOR..4 * SECTOR + 9].copy_from_slice(b"$$$123$$$");
+        assert!(!protocol_image_confirms_plain(&image, total));
     }
 
     struct PatternSectorDev;
