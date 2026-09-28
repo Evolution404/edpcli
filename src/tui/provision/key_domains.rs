@@ -105,7 +105,7 @@ impl AppState {
 
     pub fn provision_set_planning(&mut self) {
         self.provision.stage = ProvisionStage::Planning;
-        self.input_mode = InputMode::Normal;
+        self.shell.input_mode = InputMode::Normal;
         self.provision.message = Some("正在只读检查目标并生成精确制盘计划…".into());
     }
 

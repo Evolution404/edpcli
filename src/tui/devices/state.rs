@@ -1,6 +1,5 @@
 use super::*;
 
-#[derive(Debug, Clone)]
 pub struct DevicesState {
     pub(super) rows: Vec<crate::disk_scan::Row>,
     pub(super) table_view: super::super::table_layout::TableViewData,

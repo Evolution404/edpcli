@@ -11,17 +11,17 @@ mod devices_state;
 mod inspect_state;
 #[path = "navigation.rs"]
 mod navigation;
-#[path = "shell/state.rs"]
-mod shell_state;
 #[path = "provision/state.rs"]
 mod provision_state;
+#[path = "shell/state.rs"]
+mod shell_state;
 
 pub use backups_state::*;
 pub use devices_state::*;
 pub use inspect_state::*;
 pub use navigation::*;
-pub use shell_state::*;
 pub use provision_state::*;
+pub use shell_state::*;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WriteKind {
@@ -230,8 +230,10 @@ impl AppState {
     }
 
     pub fn push_input_char(&mut self, ch: char) {
-        if matches!(self.shell.input_mode, InputMode::Search | InputMode::Command)
-            && self.shell.input_buffer.chars().count() < 256
+        if matches!(
+            self.shell.input_mode,
+            InputMode::Search | InputMode::Command
+        ) && self.shell.input_buffer.chars().count() < 256
             && !ch.is_control()
         {
             self.shell.input_buffer.push(ch);
@@ -242,7 +244,10 @@ impl AppState {
     }
 
     pub fn backspace_input(&mut self) {
-        if matches!(self.shell.input_mode, InputMode::Search | InputMode::Command) {
+        if matches!(
+            self.shell.input_mode,
+            InputMode::Search | InputMode::Command
+        ) {
             self.shell.input_buffer.pop();
             if self.shell.input_mode == InputMode::Search {
                 self.rebuild_workspace_filter();
@@ -360,7 +365,7 @@ impl AppState {
     }
 
     fn cycle_search(&mut self, reverse: bool) {
-        if self.shell.search_matches.is_empty() || !self.shell.workspace_filter_active() {
+        if self.shell.search_matches.is_empty() || !self.workspace_filter_active() {
             return;
         }
         self.shell.selected = if reverse {
@@ -387,7 +392,8 @@ impl AppState {
     }
 
     pub fn notice(&self) -> Option<&str> {
-        self.shell.notice_at
+        self.shell
+            .notice_at
             .filter(|at| at.elapsed() < std::time::Duration::from_secs(4))
             .and(self.shell.notice.as_deref())
     }
@@ -550,6 +556,7 @@ impl AppState {
             .then(|| self.selected_device_disk())
             .flatten();
         if self
+            .shell
             .pinned_disk
             .is_some_and(|disk| !devices.iter().any(|row| row.disk == disk))
         {
@@ -584,8 +591,11 @@ impl AppState {
                 let source_index = self.devices.rows.iter().position(|row| row.disk == disk);
                 self.shell.selected = source_index
                     .and_then(|index| {
-                        if self.shell.workspace_filter_active() {
-                            self.shell.search_matches.iter().position(|value| *value == index)
+                        if self.workspace_filter_active() {
+                            self.shell
+                                .search_matches
+                                .iter()
+                                .position(|value| *value == index)
                         } else {
                             Some(index)
                         }
@@ -604,7 +614,7 @@ impl AppState {
         kind: super::table_layout::TableKind,
     ) -> Option<&super::table_layout::TableViewData> {
         match kind {
-            super::table_layout::TableKind::Devices => Some(&self.devices.rows.table_view),
+            super::table_layout::TableKind::Devices => Some(&self.devices.table_view),
             super::table_layout::TableKind::Backups => Some(&self.backups.table_view),
             _ => None,
         }
@@ -619,12 +629,13 @@ impl AppState {
     }
 
     pub fn visible_device_indices(&self) -> Vec<usize> {
-        let indices =
-            if self.shell.workspace == Workspace::Devices && !self.active_search_query().is_empty() {
-                self.shell.search_matches.clone()
-            } else {
-                (0..self.devices.rows.len()).collect()
-            };
+        let indices = if self.shell.workspace == Workspace::Devices
+            && !self.active_search_query().is_empty()
+        {
+            self.shell.search_matches.clone()
+        } else {
+            (0..self.devices.rows.len()).collect()
+        };
         self.devices.table_view.sorted_indices(
             indices,
             self.table_interaction(super::table_layout::TableKind::Devices),
@@ -641,12 +652,13 @@ impl AppState {
     }
 
     pub fn visible_backup_indices(&self) -> Vec<usize> {
-        let indices =
-            if self.shell.workspace == Workspace::Backups && !self.active_search_query().is_empty() {
-                self.shell.search_matches.clone()
-            } else {
-                (0..self.backups.rows.len()).collect()
-            };
+        let indices = if self.shell.workspace == Workspace::Backups
+            && !self.active_search_query().is_empty()
+        {
+            self.shell.search_matches.clone()
+        } else {
+            (0..self.backups.rows.len()).collect()
+        };
         self.backups.table_view.sorted_indices(
             indices,
             self.table_interaction(super::table_layout::TableKind::Backups),
@@ -676,6 +688,7 @@ impl AppState {
                 self.devices.rows.get(index)
             }
             Workspace::Backups | Workspace::Provision | Workspace::Inspect => self
+                .shell
                 .pinned_disk
                 .and_then(|disk| self.devices.rows.iter().find(|row| row.disk == disk)),
         }
@@ -684,6 +697,7 @@ impl AppState {
     fn provision_selectable_device_indices(&self) -> Vec<usize> {
         let mut indices = self
             .devices
+            .rows
             .iter()
             .enumerate()
             .filter_map(|(index, row)| {
@@ -859,11 +873,13 @@ impl AppState {
         );
         let selectable = self
             .backups
+            .rows
             .iter()
             .filter(|row| row.content_sha256.is_some())
             .map(|row| row.path.clone())
             .collect::<std::collections::BTreeSet<_>>();
-        self.backups.selection
+        self.backups
+            .selection
             .retain(|path| selectable.contains(path));
         self.backups.scan_pending = false;
         if self.shell.workspace == Workspace::Backups {
@@ -872,8 +888,11 @@ impl AppState {
                 let source_index = self.backups.rows.iter().position(|row| row.path == path);
                 self.shell.selected = source_index
                     .and_then(|index| {
-                        if self.shell.workspace_filter_active() {
-                            self.shell.search_matches.iter().position(|value| *value == index)
+                        if self.workspace_filter_active() {
+                            self.shell
+                                .search_matches
+                                .iter()
+                                .position(|value| *value == index)
                         } else {
                             Some(index)
                         }
@@ -913,6 +932,7 @@ impl AppState {
             if let Some(disk) = self.provision.target_disk {
                 self.shell.selected = self
                     .devices
+                    .rows
                     .iter()
                     .position(|row| row.disk == disk)
                     .unwrap_or(0);
@@ -963,8 +983,8 @@ impl AppState {
                 _ => None,
             },
             Workspace::Inspect
-                if self.inspect.advanced_focused_pane() == Some(PaneId::InspectDetail)
-                    && !self.inspect.advanced_detail_rows().is_empty() =>
+                if self.advanced_inspect_focused_pane() == Some(PaneId::InspectDetail)
+                    && !self.advanced_inspect_detail_rows().is_empty() =>
             {
                 Some(TableKind::InspectFields)
             }
@@ -976,7 +996,8 @@ impl AppState {
         &self,
         kind: super::table_layout::TableKind,
     ) -> super::table_layout::TableInteractionState {
-        self.shell.horizontal_scroll
+        self.shell
+            .horizontal_scroll
             .get(&kind)
             .copied()
             .unwrap_or_default()
@@ -988,7 +1009,8 @@ impl AppState {
 
     pub fn table_column_order(&self, kind: super::table_layout::TableKind) -> Vec<usize> {
         let count = super::table_layout::layout_for(kind).specs().len();
-        self.shell.table_column_order
+        self.shell
+            .table_column_order
             .get(&kind)
             .filter(|order| {
                 order.len() == count && {
@@ -1061,7 +1083,7 @@ impl AppState {
                 )
             }
             TableKind::InspectFields => {
-                let row = self.inspect.advanced_detail_selected_row()?;
+                let row = self.advanced_inspect_detail_selected_row()?;
                 Some(row.cells.iter().cloned().map(sanitize).collect::<Vec<_>>())
             }
         }
@@ -1113,6 +1135,7 @@ impl AppState {
     ) -> &mut Vec<usize> {
         let count = super::table_layout::layout_for(kind).specs().len();
         let order = self
+            .shell
             .table_column_order
             .entry(kind)
             .or_insert_with(|| (0..count).collect());
@@ -1178,7 +1201,7 @@ impl AppState {
                     .iter()
                     .map(|value| display_width(value))
                     .collect::<Vec<_>>();
-                for row in self.inspect.advanced_detail_rows() {
+                for row in self.advanced_inspect_detail_rows() {
                     for (index, value) in row.cells.iter().enumerate() {
                         widths[index] = widths[index].max(display_width(value));
                     }
@@ -1270,12 +1293,11 @@ impl AppState {
     ) -> bool {
         let (layout, widths) = self.table_visual_geometry(kind);
         let viewport_width = self.table_viewport_width(kind, terminal_width, terminal_height);
-        self.shell.horizontal_scroll.entry(kind).or_default().move_active(
-            &layout,
-            &widths,
-            viewport_width,
-            reverse,
-        )
+        self.shell
+            .horizontal_scroll
+            .entry(kind)
+            .or_default()
+            .move_active(&layout, &widths, viewport_width, reverse)
     }
 
     pub fn move_table_column_edge_for_viewport(
@@ -1287,7 +1309,8 @@ impl AppState {
     ) -> bool {
         let (layout, widths) = self.table_visual_geometry(kind);
         let viewport_width = self.table_viewport_width(kind, terminal_width, terminal_height);
-        self.shell.horizontal_scroll
+        self.shell
+            .horizontal_scroll
             .entry(kind)
             .or_default()
             .move_active_edge(&layout, &widths, viewport_width, last)
@@ -1306,12 +1329,11 @@ impl AppState {
         reverse: bool,
     ) -> bool {
         let (layout, widths) = self.table_visual_geometry(kind);
-        self.shell.horizontal_scroll.entry(kind).or_default().move_active(
-            &layout,
-            &widths,
-            u16::MAX,
-            reverse,
-        )
+        self.shell
+            .horizontal_scroll
+            .entry(kind)
+            .or_default()
+            .move_active(&layout, &widths, u16::MAX, reverse)
     }
 
     pub fn toggle_table_sort(&mut self, kind: super::table_layout::TableKind) {
@@ -1330,14 +1352,17 @@ impl AppState {
             .then(|| self.selected_backup().map(|row| row.path.clone()))
             .flatten();
         let provision_disk = (kind == super::table_layout::TableKind::ProvisionDevices)
-            .then(|| self.provision_device_at(self.shell.selected).map(|row| row.disk))
+            .then(|| {
+                self.provision_device_at(self.shell.selected)
+                    .map(|row| row.disk)
+            })
             .flatten();
         let provision_kind = (kind == super::table_layout::TableKind::ProvisionMenu)
             .then(|| self.provision_kind_at_visible(self.shell.selected))
             .flatten();
         let inspect_key = (kind == super::table_layout::TableKind::InspectFields)
             .then(|| {
-                self.inspect.advanced_detail_selected_row()
+                self.advanced_inspect_detail_selected_row()
                     .map(|row| (row.field_index, row.child_index, row.range))
             })
             .flatten();
@@ -1393,7 +1418,7 @@ impl AppState {
             }
         }
         if let Some(key) = inspect_key {
-            let rows = self.inspect.advanced_detail_rows();
+            let rows = self.advanced_inspect_detail_rows();
             if let Some(position) = rows
                 .iter()
                 .position(|row| (row.field_index, row.child_index, row.range) == key)
@@ -1410,7 +1435,8 @@ impl AppState {
     }
 
     pub fn table_scroll_offset(&self, kind: super::table_layout::TableKind) -> usize {
-        self.shell.horizontal_scroll
+        self.shell
+            .horizontal_scroll
             .get(&kind)
             .copied()
             .unwrap_or_default()
@@ -1430,7 +1456,8 @@ impl AppState {
     ) -> bool {
         let (layout, widths) = self.table_visual_geometry(kind);
         let viewport_width = self.table_viewport_width(kind, terminal_width, terminal_height);
-        self.shell.horizontal_scroll
+        self.shell
+            .horizontal_scroll
             .entry(kind)
             .or_default()
             .scroll_viewport(&layout, &widths, viewport_width, reverse)
@@ -1438,7 +1465,8 @@ impl AppState {
 
     pub fn pane_viewport(&self, pane: crate::tui::pane::PaneId) -> &crate::tui::pane::PaneViewport {
         if pane.is_inspect() {
-            self.inspect.advanced
+            self.inspect
+                .advanced
                 .as_ref()
                 .expect("Inspect pane requested without Inspect state")
                 .pane_focus
@@ -1457,7 +1485,8 @@ impl AppState {
         pane: crate::tui::pane::PaneId,
     ) -> &mut crate::tui::pane::PaneViewport {
         if pane.is_inspect() {
-            self.inspect.advanced
+            self.inspect
+                .advanced
                 .as_mut()
                 .expect("Inspect pane requested without Inspect state")
                 .pane_focus
@@ -1495,7 +1524,8 @@ impl AppState {
 
     pub fn device_summary_selected_section(&self) -> DeviceSummarySection {
         DeviceSummarySection::ALL[self
-            .device_summary_selected
+            .devices
+            .summary_selected
             .min(DeviceSummarySection::ALL.len() - 1)]
     }
 
@@ -1506,17 +1536,19 @@ impl AppState {
     pub fn device_summary_move_section(&mut self, delta: isize) {
         let max = DeviceSummarySection::ALL.len().saturating_sub(1);
         self.devices.summary_selected = if delta < 0 {
-            self.devices.summary_selected
+            self.devices
+                .summary_selected
                 .saturating_sub(delta.unsigned_abs())
         } else {
-            self.devices.summary_selected
+            self.devices
+                .summary_selected
                 .saturating_add(delta as usize)
                 .min(max)
         };
     }
 
     pub fn device_summary_toggle_selected_section(&mut self) {
-        let section = self.devices.summary_selected_section();
+        let section = self.device_summary_selected_section();
         self.devices.summary_expanded ^= section.bit();
     }
 
@@ -1535,10 +1567,13 @@ impl AppState {
 
     pub fn disk_layout_move_selection(&mut self, delta: isize, count: usize) {
         self.shell.disk_layout_selected = if delta < 0 {
-            self.shell.disk_layout_selected
+            self.shell
+                .disk_layout_selected
                 .saturating_sub(delta.unsigned_abs())
         } else {
-            self.shell.disk_layout_selected.saturating_add(delta as usize)
+            self.shell
+                .disk_layout_selected
+                .saturating_add(delta as usize)
         }
         .min(count.saturating_sub(1));
     }
@@ -1568,10 +1603,12 @@ impl AppState {
     pub fn shift_workspace_pane(&mut self, reverse: bool) {
         match self.shell.workspace {
             Workspace::Devices => self
-                .devices_pane_focus
+                .devices
+                .pane_focus
                 .cycle(&crate::tui::pane::PaneId::DEVICES_ORDER, reverse),
             Workspace::Backups => self
-                .backups_pane_focus
+                .backups
+                .pane_focus
                 .cycle(&crate::tui::pane::PaneId::BACKUPS_ORDER, reverse),
             Workspace::Inspect | Workspace::Provision => {}
         }
@@ -1634,7 +1671,8 @@ impl AppState {
         let pane_focus = match location {
             NavigationLocation::Provision => Some(self.provision.pane_focus.clone()),
             NavigationLocation::Inspect | NavigationLocation::SectorInspector => self
-                .advanced_inspect
+                .inspect
+                .advanced
                 .as_ref()
                 .map(|state| state.pane_focus.clone()),
             NavigationLocation::Devices => Some(self.devices.pane_focus.clone()),
@@ -1675,7 +1713,8 @@ impl AppState {
                 }
             }
             if let Some((kind, offset)) = frame.table_scroll {
-                self.shell.horizontal_scroll
+                self.shell
+                    .horizontal_scroll
                     .entry(kind)
                     .or_default()
                     .set_offset(offset, &super::table_layout::layout_for(kind));
@@ -1762,15 +1801,16 @@ impl AppState {
 
         if command == NavCommand::Escape {
             if let Some(advanced) = self
-                .advanced_inspect
+                .inspect
+                .advanced
                 .as_ref()
                 .filter(|_| self.shell.workspace == Workspace::Inspect)
             {
                 if advanced.stage == AdvancedInspectStage::Running {
                     self.set_notice("全盘检查正在后台读取结构，请等待完成。");
                 } else if advanced.prompt.is_some() {
-                    self.inspect.advanced_cancel_prompt();
-                } else if !self.inspect.advanced_close_sector() {
+                    self.advanced_inspect_cancel_prompt();
+                } else if !self.advanced_inspect_close_sector() {
                     self.close_advanced_inspect();
                 }
                 return StateEffect::None;
@@ -1806,14 +1846,16 @@ impl AppState {
             if self.shell.workspace == Workspace::Devices
                 && self.devices.pane_focus.focused() != crate::tui::pane::PaneId::DevicesList
             {
-                self.devices.pane_focus
+                self.devices
+                    .pane_focus
                     .focus(crate::tui::pane::PaneId::DevicesList);
                 return StateEffect::None;
             }
             if self.shell.workspace == Workspace::Backups
                 && self.backups.pane_focus.focused() != crate::tui::pane::PaneId::BackupsList
             {
-                self.backups.pane_focus
+                self.backups
+                    .pane_focus
                     .focus(crate::tui::pane::PaneId::BackupsList);
                 return StateEffect::None;
             }
@@ -1850,7 +1892,8 @@ impl AppState {
         match command {
             NavCommand::NextWorkspace | NavCommand::PreviousWorkspace => {
                 self.switch_workspace(
-                    self.shell.workspace
+                    self.shell
+                        .workspace
                         .shifted(command == NavCommand::PreviousWorkspace),
                 );
             }
@@ -1921,7 +1964,8 @@ impl AppState {
                             .scroll_y
                             .line_down(content_len, viewport_height);
                     } else if self.shell.item_count > 0 {
-                        self.shell.selected = (self.shell.selected + 1).min(self.shell.item_count - 1);
+                        self.shell.selected =
+                            (self.shell.selected + 1).min(self.shell.item_count - 1);
                     }
                 }
             }
@@ -1932,7 +1976,11 @@ impl AppState {
             NavCommand::HalfPageDown => {
                 if self.shell.item_count > 0 {
                     let delta = (viewport_height / 2).max(1);
-                    self.shell.selected = self.shell.selected.saturating_add(delta).min(self.shell.item_count - 1);
+                    self.shell.selected = self
+                        .shell
+                        .selected
+                        .saturating_add(delta)
+                        .min(self.shell.item_count - 1);
                 }
             }
             NavCommand::HalfPageUp => {

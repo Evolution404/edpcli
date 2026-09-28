@@ -564,7 +564,8 @@ fn legacy_flat_inspect_state_worker_and_renderer_are_removed() {
 
     assert!(!state.contains("inspect_data:"));
     assert!(!state.contains("inspect_pending:"));
-    assert!(!inspect_state.contains("struct InspectState"));
+    assert!(inspect_state.contains("pub struct InspectState"));
+    assert!(inspect_state.contains("advanced: Option<AdvancedInspectState>"));
     assert!(!task.contains("WorkerResult::Inspect"));
     assert!(!task.contains("InspectRequest"));
     assert!(!inspect_task.contains("request_inspect_disk"));

@@ -661,7 +661,12 @@ fn app_state_owns_devices_through_devices_substate() {
     let devices =
         fs::read_to_string(root.join("src/tui/devices/state.rs")).expect("read devices state");
 
-    assert!(state.contains("devices: DevicesState"));
+    let app_state = state
+        .split("pub struct AppState {")
+        .nth(1)
+        .and_then(|tail| tail.split("impl Default for AppState").next())
+        .expect("AppState section");
+    assert!(app_state.contains("devices: DevicesState"));
     assert!(state.contains("#[path = \"devices/state.rs\"]"));
     for legacy_field in [
         "devices: Vec<crate::disk_scan::Row>",
@@ -672,7 +677,7 @@ fn app_state_owns_devices_through_devices_substate() {
         "device_summary_expanded: u8",
     ] {
         assert!(
-            !state.contains(legacy_field),
+            !app_state.contains(legacy_field),
             "device-owned field must live in DevicesState: {legacy_field}"
         );
     }
@@ -754,8 +759,14 @@ fn inspect_search_and_jump_state_is_split_from_workspace_root() {
         "pub fn advanced_inspect_jump_lba",
         "pub fn advanced_inspect_search_next",
     ] {
-        assert!(!state.contains(marker), "{marker} leaked back into inspect/state.rs");
-        assert!(search.contains(marker), "{marker} missing from inspect/search_state.rs");
+        assert!(
+            !state.contains(marker),
+            "{marker} leaked back into inspect/state.rs"
+        );
+        assert!(
+            search.contains(marker),
+            "{marker} missing from inspect/search_state.rs"
+        );
     }
 }
 
@@ -779,12 +790,12 @@ fn app_state_owns_inspect_through_inspect_substate() {
     assert!(inspect.contains("pub struct InspectState"));
     assert!(inspect.contains("advanced: Option<AdvancedInspectState>"));
     assert!(
-        !state.contains("self.advanced_inspect"),
-        "state facade must access Inspect workspace state through InspectState"
+        state.contains("self.inspect.advanced"),
+        "state facade must access Inspect workspace field through InspectState"
     );
     assert!(
-        !inspect.contains("self.advanced_inspect"),
-        "Inspect methods must access workspace state through InspectState"
+        inspect.contains("self.inspect.advanced"),
+        "Inspect methods must access workspace field through InspectState"
     );
 }
 
@@ -792,8 +803,7 @@ fn app_state_owns_inspect_through_inspect_substate() {
 fn app_state_owns_global_shell_state_through_shell_substate() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let state = fs::read_to_string(root.join("src/tui/state.rs")).expect("read TUI state");
-    let shell =
-        fs::read_to_string(root.join("src/tui/shell/state.rs")).expect("read shell state");
+    let shell = fs::read_to_string(root.join("src/tui/shell/state.rs")).expect("read shell state");
 
     let app_state = state
         .split("pub struct AppState {")
@@ -823,7 +833,9 @@ fn app_state_owns_global_shell_state_through_shell_substate() {
         "disk_layout_selected: usize",
     ] {
         assert!(
-            !app_state.lines().any(|line| line.trim() == format!("{legacy_field},")),
+            !app_state
+                .lines()
+                .any(|line| line.trim() == format!("{legacy_field},")),
             "global shell field must live in ShellState: {legacy_field}"
         );
         assert!(

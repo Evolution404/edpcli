@@ -13,7 +13,7 @@ pub struct BackupCreateChoiceState {
 
 impl BackupCreateChoiceState {
     pub const fn choice(self) -> BackupCreateChoice {
-        if self.shell.selected == 0 {
+        if self.selected == 0 {
             BackupCreateChoice::Metadata
         } else {
             BackupCreateChoice::Deep
@@ -139,7 +139,8 @@ impl AppState {
     }
 
     pub fn take_backup_create_choice(&mut self) -> Option<BackupCreateChoice> {
-        self.backups.create_choice
+        self.backups
+            .create_choice
             .take()
             .map(BackupCreateChoiceState::choice)
     }
@@ -181,6 +182,7 @@ impl AppState {
 
     pub fn selected_backup_batch_targets(&self) -> Vec<(std::path::PathBuf, String)> {
         self.backups
+            .rows
             .iter()
             .filter(|row| self.backups.selection.contains(&row.path))
             .filter_map(|row| {
@@ -358,7 +360,8 @@ impl AppState {
 
     pub fn backup_prune_start_plan(&mut self) -> Result<usize, String> {
         let prune = self
-            .backup_prune
+            .backups
+            .prune
             .as_mut()
             .ok_or_else(|| "清理向导未打开".to_string())?;
         let keep = prune

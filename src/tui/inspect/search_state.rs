@@ -46,71 +46,6 @@ fn inspect_row_path(node_path: &[String]) -> Vec<String> {
     rows
 }
 
-#[derive(Debug, Clone)]
-pub struct SectorInspectorState {
-    pub lba: u64,
-    pub mode: SectorInspectMode,
-    pub cursor: usize,
-    pub pending: bool,
-    pub error: Option<String>,
-    pub field_expanded: bool,
-    pub pinned_field: Option<crate::application::inspect::InspectField>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum AdvancedInspectTreeAction {
-    None,
-    SetLazyOffset {
-        extent_id: String,
-        offset: u64,
-        target_id: String,
-    },
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct AdvancedInspectTreeRow {
-    pub id: String,
-    pub label: String,
-    pub depth: usize,
-    pub kind: crate::application::inspect_tree::InspectNodeKind,
-    pub range: crate::application::inspect_tree::InspectNodeRange,
-    pub decoder: Option<crate::application::inspect::InspectDecoderKind>,
-    pub status: crate::edpb::SemanticStatus,
-    pub region_semantic: Option<crate::application::inspect_tree::DiskRegionSemantic>,
-    pub expandable: bool,
-    pub expanded: bool,
-    pub action: AdvancedInspectTreeAction,
-}
-
-pub const INSPECT_DETAIL_HEADINGS: [&str; 11] = [
-    "Offset",
-    "Len",
-    "Group",
-    "Field",
-    "Value",
-    "Raw",
-    "Decoded",
-    "Logical",
-    "Type",
-    "Status",
-    "Transform",
-];
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct InspectDetailRow {
-    pub cells: [String; 11],
-    pub range: Option<crate::application::inspect::AbsoluteByteRange>,
-    pub field_index: usize,
-    pub child_index: Option<usize>,
-}
-
-#[derive(Debug, Clone)]
-struct InspectTreeViewModel {
-    revision: u64,
-    rows: std::sync::Arc<Vec<AdvancedInspectTreeRow>>,
-    index: std::collections::HashMap<String, usize>,
-}
-
 impl AppState {
     pub fn advanced_inspect_prompt(&self) -> Option<&AdvancedInspectPrompt> {
         self.inspect.advanced.as_ref()?.prompt.as_ref()
@@ -118,7 +53,8 @@ impl AppState {
 
     pub fn advanced_inspect_begin_jump(&mut self) {
         if let Some(state) = self
-            .advanced_inspect
+            .inspect
+            .advanced
             .as_mut()
             .filter(|state| state.stage == AdvancedInspectStage::Browser)
         {
@@ -137,7 +73,8 @@ impl AppState {
 
     pub fn advanced_inspect_begin_search(&mut self) {
         if let Some(state) = self
-            .advanced_inspect
+            .inspect
+            .advanced
             .as_mut()
             .filter(|state| state.stage == AdvancedInspectStage::Browser)
         {
@@ -161,7 +98,8 @@ impl AppState {
 
     pub fn advanced_inspect_prompt_push(&mut self, ch: char) {
         let Some(prompt) = self
-            .advanced_inspect
+            .inspect
+            .advanced
             .as_mut()
             .and_then(|state| state.prompt.as_mut())
         else {
@@ -176,7 +114,8 @@ impl AppState {
 
     pub fn advanced_inspect_prompt_backspace(&mut self) {
         let Some(prompt) = self
-            .advanced_inspect
+            .inspect
+            .advanced
             .as_mut()
             .and_then(|state| state.prompt.as_mut())
         else {
@@ -191,7 +130,8 @@ impl AppState {
 
     pub fn advanced_inspect_toggle_jump_unit(&mut self) {
         let Some(AdvancedInspectPrompt::Jump { unit, .. }) = self
-            .advanced_inspect
+            .inspect
+            .advanced
             .as_mut()
             .and_then(|state| state.prompt.as_mut())
         else {
@@ -207,7 +147,8 @@ impl AppState {
         &mut self,
     ) -> Result<Option<(AdvancedInspectSource, u64)>, String> {
         let prompt = self
-            .advanced_inspect
+            .inspect
+            .advanced
             .as_ref()
             .and_then(|state| state.prompt.clone())
             .ok_or_else(|| "Inspect 输入面板未打开".to_string())?;
@@ -217,16 +158,16 @@ impl AppState {
                 let value = parse_inspect_jump_number(&input)?;
                 match unit {
                     AdvancedInspectJumpUnit::Lba => {
-                        self.inspect.advanced_jump_lba(value)?;
+                        self.advanced_inspect_jump_lba(value)?;
                         None
                     }
                     AdvancedInspectJumpUnit::ByteOffset => {
-                        self.inspect.advanced_jump_byte_offset(value)?
+                        self.advanced_inspect_jump_byte_offset(value)?
                     }
                 }
             }
             AdvancedInspectPrompt::Search { input } => {
-                self.inspect.advanced_search(&input)?;
+                self.advanced_inspect_search(&input)?;
                 None
             }
         };
@@ -242,7 +183,8 @@ impl AppState {
 
         let location = {
             let state = self
-                .advanced_inspect
+                .inspect
+                .advanced
                 .as_ref()
                 .filter(|state| state.stage == AdvancedInspectStage::Browser)
                 .ok_or_else(|| "全盘检查未处于 Browser 状态".to_string())?;
@@ -299,7 +241,8 @@ impl AppState {
         offset: u64,
     ) -> Result<Option<(AdvancedInspectSource, u64)>, String> {
         let total_sectors = self
-            .advanced_inspect
+            .inspect
+            .advanced
             .as_ref()
             .filter(|state| state.stage == AdvancedInspectStage::Browser)
             .and_then(|state| state.result.as_ref())
@@ -316,8 +259,8 @@ impl AppState {
 
         let lba = offset / crate::common::SECTOR as u64;
         let cursor = (offset % crate::common::SECTOR as u64) as usize;
-        self.inspect.advanced_jump_lba(lba)?;
-        self.inspect.advanced_open_sector_at(lba, cursor)
+        self.advanced_inspect_jump_lba(lba)?;
+        self.advanced_inspect_open_sector_at(lba, cursor)
     }
 
     fn advanced_inspect_open_sector_at(
@@ -329,7 +272,8 @@ impl AppState {
             return Err(format!("sector-relative byte {cursor} 越界"));
         }
         let state = self
-            .advanced_inspect
+            .inspect
+            .advanced
             .as_mut()
             .filter(|state| state.stage == AdvancedInspectStage::Browser)
             .ok_or_else(|| "全盘检查未处于 Browser 状态".to_string())?;
@@ -362,7 +306,8 @@ impl AppState {
 
         let matches = {
             let state = self
-                .advanced_inspect
+                .inspect
+                .advanced
                 .as_ref()
                 .filter(|state| state.stage == AdvancedInspectStage::Browser)
                 .ok_or_else(|| "全盘检查未处于 Browser 状态".to_string())?;
@@ -404,13 +349,14 @@ impl AppState {
             state.search_matches = matches;
             state.search_cursor = 0;
         }
-        self.inspect.advanced_focus_search_target(first)
+        self.advanced_inspect_focus_search_target(first)
     }
 
     pub fn advanced_inspect_search_next(&mut self, reverse: bool) -> Result<(), String> {
         let target = {
             let state = self
-                .advanced_inspect
+                .inspect
+                .advanced
                 .as_mut()
                 .filter(|state| state.stage == AdvancedInspectStage::Browser)
                 .ok_or_else(|| "全盘检查未处于 Browser 状态".to_string())?;
@@ -425,7 +371,7 @@ impl AppState {
             };
             state.search_matches[state.search_cursor].clone()
         };
-        self.inspect.advanced_focus_search_target(target)
+        self.advanced_inspect_focus_search_target(target)
     }
 
     pub fn advanced_inspect_search_status(&self) -> Option<(&str, usize, usize)> {
@@ -473,11 +419,12 @@ impl AppState {
                 Ok(())
             }
             AdvancedInspectSearchTarget::CachedSector { lba, relative_path } => {
-                self.inspect.advanced_jump_lba(lba)?;
-                let rows = self.inspect.advanced_tree_rows();
+                self.advanced_inspect_jump_lba(lba)?;
+                let rows = self.advanced_inspect_tree_rows();
                 let base_id = rows
                     .get(
-                        self.inspect.advanced
+                        self.inspect
+                            .advanced
                             .as_ref()
                             .map(|state| state.tree_selected)
                             .unwrap_or(0),
@@ -517,5 +464,4 @@ impl AppState {
             }
         }
     }
-
 }

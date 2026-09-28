@@ -1287,28 +1287,28 @@ application 返回结构化 `ProvisionReport/BackupReport/InspectReport`，CLI/T
 
 **IN PROGRESS。**
 
-- 第一刀先收敛 Devices 独占状态：设备行、设备表视图、扫描状态、设备 Pane 焦点、摘要选择与展开位统一归 `DevicesState` 所有。
-- `AppState` 对外方法签名保持不变，只把内部直接字段访问改为 `devices.*` 子状态；不改变设备筛选、排序、选择、Inspect/Provision 目标固定或任何磁盘 I/O 语义。
-- 新增架构门禁，禁止上述 Devices 字段重新散落回 `AppState`。
+- 第一刀先收敛设备工作区独占状态：设备行、设备表视图、扫描状态、设备窗格焦点、摘要选择与展开位统一归 `DevicesState` 所有。
+- `AppState` 对外方法签名保持不变，只把内部直接字段访问改为 `devices.*` 子状态；不改变设备筛选、排序、选择、检查/制盘目标固定或任何磁盘输入输出语义。
+- 新增架构门禁，禁止上述设备工作区字段重新散落回 `AppState`。
 
-- D8-C2：备份列表、校验进度、表视图、扫描状态、删除/批删/清理向导、勾选集合与备份 Pane 焦点统一归 `BackupsState` 所有；`BackupVerifyRunState` 类型也移入备份状态模块。
+- D8-C2：备份列表、校验进度、表视图、扫描状态、删除/批删/清理向导、勾选集合与备份窗格焦点统一归 `BackupsState` 所有；`BackupVerifyRunState` 类型也移入备份状态模块。
 - `AppState` 继续保留原有公共方法作为门面，调用方无需感知所有权迁移；本阶段不改变备份格式、删除 SHA-256 固定、写前备份或任何真实写盘安全链。
 
-- D8-C3：`AdvancedInspectState` 不再作为 `AppState` 直属字段，改由 `InspectState` 持有；检查树、Pane、搜索、prompt、预览缓存、Sector Inspector 等现有状态继续封装在 `AdvancedInspectState` 内。
-- 现有 `advanced_inspect_*` 公共方法全部保留，只把内部访问路径统一为 `inspect.advanced`；跨工作区的 `pinned_disk`、NavigationStack 与共享 DiskLayout 展示状态暂不强行归入 Inspect，避免错误所有权。
+- D8-C3：`AdvancedInspectState` 不再作为 `AppState` 直属字段，改由 `InspectState` 持有；检查树、窗格、搜索、输入提示、预览缓存、扇区检查器等现有状态继续封装在 `AdvancedInspectState` 内。
+- 现有 `advanced_inspect_*` 公共方法全部保留，只把内部访问路径统一为 `inspect.advanced`；跨工作区的 `pinned_disk`、`NavigationStack` 与共享磁盘布局展示状态暂不强行归入检查工作区，避免错误所有权。
 - 新增架构门禁，禁止 `advanced_inspect` 根状态重新散落回 `AppState`。
 
 - D8-C4：`ProvisionState` 已由 D7 系列治理形成独立工作区所有权，本轮不重复迁移；继续保持 `AppState.provision: ProvisionState`。
-- D8-C5.1：新增 `ShellState`，第一批收敛演示标记、当前顶层 Workspace、关键操作门禁、退出挂起、NavigationStack、通知状态与动画帧；这些字段不再直属 `AppState`。
+- D8-C5.1：新增 `ShellState`，第一批收敛演示标记、当前顶层工作区、关键操作门禁、退出挂起、`NavigationStack`、通知状态与动画帧；这些字段不再直属 `AppState`。
 - D8-C5.2：选择索引、条目总数、输入模式、搜索/命令输入缓冲、搜索结果与搜索游标已进一步归 `ShellState` 所有；替换仅针对字段访问边界，不改变 `selected_device()` / `selected_backup()` 等现有门面方法。
-- D8-C5.3：全局写操作向导、跨工作区 `pinned_disk`、共享 DiskLayout 展示状态、表格横向视口与列顺序全部归入 `ShellState`；这些只是 UI/协调状态迁移，不改变真实写任务、身份复核或写盘安全链。
-- **D8-C COMPLETE。** `AppState` 现在被架构门禁锁定为且仅为 `ShellState + DevicesState + InspectState + BackupsState + ProvisionState` 五个所有权根；后续新增 workspace 私有字段不得重新散落到 `AppState`。
+- D8-C5.3：全局写操作向导、跨工作区 `pinned_disk`、共享磁盘布局展示状态、表格横向视口与列顺序全部归入 `ShellState`；这些只是界面/协调状态迁移，不改变真实写任务、身份复核或写盘安全链。
+- **D8-C 已完成。** `AppState` 现在被架构门禁锁定为且仅为 `ShellState + DevicesState + InspectState + BackupsState + ProvisionState` 五个所有权根；后续新增工作区私有字段不得重新散落到 `AppState`。
 
-#### D8-D1.1：Inspect 搜索/跳转状态拆分
+#### D8-D1.1：检查工作区搜索/跳转状态拆分
 
-- 新增 `src/tui/inspect/search_state.rs`，集中承载 Jump prompt、LBA/byte offset 跳转、搜索命中构建、n/N 循环与搜索目标定位；原公开 `advanced_inspect_*` 方法签名保持不变。
+- 新增 `src/tui/inspect/search_state.rs`，集中承载跳转输入提示、LBA/字节偏移跳转、搜索命中构建、`n/N` 循环与搜索目标定位；原公开 `advanced_inspect_*` 方法签名保持不变。
 - `AdvancedInspectSearchTarget` 与数值解析/路径构造辅助函数一起迁入搜索模块，`AdvancedInspectState` 只通过私有字段持有搜索结果。
-- `inspect/state.rs` 不再承担搜索/跳转实现，硬上限从 **1900** 收紧至 **1500**；新搜索模块硬上限 **550**。本阶段不改变树模型、Sector Inspector、协议解析或任何 I/O。
+- `inspect/state.rs` 不再承担搜索/跳转实现，硬上限从 **1900** 收紧至 **1500**；新搜索模块硬上限 **550**。本阶段不改变树模型、扇区检查器、协议解析或任何输入输出。
 
 
 

@@ -19,7 +19,8 @@ impl AppState {
 
     pub fn advanced_inspect_mark_decode_pending(&mut self, lba: u64, pending: bool) {
         if let Some(sector) = self
-            .advanced_inspect
+            .inspect
+            .advanced
             .as_mut()
             .and_then(|advanced| advanced.sector.as_mut())
             .filter(|sector| sector.lba == lba)
@@ -121,7 +122,8 @@ impl AppState {
 
     pub fn advanced_inspect_sector_set_cursor(&mut self, cursor: usize) {
         let Some(sector) = self
-            .advanced_inspect
+            .inspect
+            .advanced
             .as_mut()
             .and_then(|state| state.sector.as_mut())
         else {
@@ -133,38 +135,39 @@ impl AppState {
     }
 
     pub fn advanced_inspect_sector_row_start(&mut self) {
-        if let Some(cursor) = self.inspect.advanced_sector().map(|sector| sector.cursor) {
-            self.inspect.advanced_sector_set_cursor((cursor / 16) * 16);
+        if let Some(cursor) = self.advanced_inspect_sector().map(|sector| sector.cursor) {
+            self.advanced_inspect_sector_set_cursor((cursor / 16) * 16);
         }
     }
 
     pub fn advanced_inspect_sector_row_end(&mut self) {
-        if let Some(cursor) = self.inspect.advanced_sector().map(|sector| sector.cursor) {
-            self.inspect.advanced_sector_set_cursor(
+        if let Some(cursor) = self.advanced_inspect_sector().map(|sector| sector.cursor) {
+            self.advanced_inspect_sector_set_cursor(
                 ((cursor / 16) * 16 + 15).min(crate::common::SECTOR - 1),
             );
         }
     }
 
     pub fn advanced_inspect_sector_top(&mut self) {
-        self.inspect.advanced_sector_set_cursor(0);
+        self.advanced_inspect_sector_set_cursor(0);
     }
 
     pub fn advanced_inspect_sector_bottom(&mut self) {
-        self.inspect.advanced_sector_set_cursor(crate::common::SECTOR - 1);
+        self.advanced_inspect_sector_set_cursor(crate::common::SECTOR - 1);
     }
 
     pub fn advanced_inspect_sector_half_page(&mut self, up: bool) {
-        self.inspect.advanced_sector_move_cursor(if up { -128 } else { 128 });
+        self.advanced_inspect_sector_move_cursor(if up { -128 } else { 128 });
     }
 
     pub fn advanced_inspect_sector_page(&mut self, up: bool) {
-        self.inspect.advanced_sector_move_cursor(if up { -256 } else { 256 });
+        self.advanced_inspect_sector_move_cursor(if up { -256 } else { 256 });
     }
 
     pub fn advanced_inspect_sector_move_cursor(&mut self, delta: isize) {
         let Some(sector) = self
-            .advanced_inspect
+            .inspect
+            .advanced
             .as_mut()
             .and_then(|state| state.sector.as_mut())
         else {
@@ -211,9 +214,9 @@ impl AppState {
     }
 
     pub fn advanced_inspect_sector_yank(&mut self, raw_range: bool) -> Option<String> {
-        let field = self.inspect.advanced_sector_active_field();
-        let byte = self.inspect.advanced_sector_item().and_then(|item| {
-            let cursor = self.inspect.advanced_sector()?.cursor;
+        let field = self.advanced_inspect_sector_active_field();
+        let byte = self.advanced_inspect_sector_item().and_then(|item| {
+            let cursor = self.advanced_inspect_sector()?.cursor;
             item.raw.get(cursor).copied()
         });
         let value = match (raw_range, field) {
@@ -238,7 +241,8 @@ impl AppState {
 
     pub fn advanced_inspect_sector_set_mode(&mut self, mode: SectorInspectMode) {
         if let Some(sector) = self
-            .advanced_inspect
+            .inspect
+            .advanced
             .as_mut()
             .and_then(|state| state.sector.as_mut())
         {
@@ -248,7 +252,8 @@ impl AppState {
 
     pub fn advanced_inspect_sector_cycle_mode(&mut self) {
         let Some(sector) = self
-            .advanced_inspect
+            .inspect
+            .advanced
             .as_mut()
             .and_then(|state| state.sector.as_mut())
         else {
@@ -263,7 +268,8 @@ impl AppState {
 
     pub fn advanced_inspect_sector_toggle_field(&mut self) {
         if let Some(sector) = self
-            .advanced_inspect
+            .inspect
+            .advanced
             .as_mut()
             .and_then(|state| state.sector.as_mut())
         {
