@@ -167,18 +167,9 @@ pub enum StateEffect {
 pub struct AppState {
     shell: ShellState,
     devices: DevicesState,
-    backups: BackupsState,
-    wizard: Option<WizardState>,
-    provision: ProvisionState,
-    pinned_disk: Option<u32>,
     inspect: InspectState,
-    disk_layout_tail: super::disk_layout::TailExpansion,
-    disk_layout_selected: usize,
-    horizontal_scroll: std::collections::BTreeMap<
-        super::table_layout::TableKind,
-        super::table_layout::HorizontalScrollState,
-    >,
-    table_column_order: std::collections::BTreeMap<super::table_layout::TableKind, Vec<usize>>,
+    backups: BackupsState,
+    provision: ProvisionState,
 }
 
 impl Default for AppState {
@@ -192,15 +183,9 @@ impl AppState {
         Self {
             shell: ShellState::default(),
             devices: DevicesState::default(),
-            backups: BackupsState::default(),
-            wizard: None,
-            provision: ProvisionState::default(),
-            pinned_disk: None,
             inspect: InspectState::default(),
-            disk_layout_tail: super::disk_layout::TailExpansion::Collapsed,
-            disk_layout_selected: 0,
-            horizontal_scroll: std::collections::BTreeMap::new(),
-            table_column_order: std::collections::BTreeMap::new(),
+            backups: BackupsState::default(),
+            provision: ProvisionState::default(),
         }
     }
 
@@ -418,7 +403,7 @@ impl AppState {
     }
 
     pub fn wizard(&self) -> Option<&WizardState> {
-        self.wizard.as_ref()
+        self.shell.wizard.as_ref()
     }
 
     pub fn begin_write_wizard(
@@ -442,7 +427,7 @@ impl AppState {
             return false;
         }
         self.shell.input_mode = InputMode::Confirm;
-        self.wizard = Some(WizardState {
+        self.shell.wizard = Some(WizardState {
             stage: WizardStage::Confirm,
             kind,
             disk,
@@ -457,7 +442,7 @@ impl AppState {
     }
 
     pub fn push_wizard_confirmation(&mut self, ch: char) {
-        if let Some(wizard) = self.wizard.as_mut() {
+        if let Some(wizard) = self.shell.wizard.as_mut() {
             if wizard.stage == WizardStage::Confirm && wizard.confirmation.len() < 16 {
                 wizard.confirmation.push(ch);
                 wizard.message = None;
@@ -466,7 +451,7 @@ impl AppState {
     }
 
     pub fn backspace_wizard_confirmation(&mut self) {
-        if let Some(wizard) = self.wizard.as_mut() {
+        if let Some(wizard) = self.shell.wizard.as_mut() {
             if wizard.stage == WizardStage::Confirm {
                 wizard.confirmation.pop();
                 wizard.message = None;
@@ -475,14 +460,14 @@ impl AppState {
     }
 
     pub fn clear_wizard_confirmation(&mut self) {
-        if let Some(wizard) = self.wizard.as_mut() {
+        if let Some(wizard) = self.shell.wizard.as_mut() {
             wizard.confirmation.clear();
             wizard.message = None;
         }
     }
 
     pub fn submit_wizard_confirmation(&mut self) -> Option<WriteIntent> {
-        let wizard = self.wizard.as_mut()?;
+        let wizard = self.shell.wizard.as_mut()?;
         if wizard.stage != WizardStage::Confirm {
             return None;
         }
@@ -504,7 +489,7 @@ impl AppState {
     }
 
     pub fn set_write_progress(&mut self, event: crate::application::WriteEvent) {
-        if let Some(wizard) = self.wizard.as_mut() {
+        if let Some(wizard) = self.shell.wizard.as_mut() {
             if wizard.stage == WizardStage::Running {
                 wizard.progress = Some(event.clone());
                 if wizard.progress_log.len() == 200 {
@@ -517,7 +502,7 @@ impl AppState {
 
     pub fn finish_write(&mut self, result: Result<(), String>) {
         self.shell.critical_operation = false;
-        if let Some(wizard) = self.wizard.as_mut() {
+        if let Some(wizard) = self.shell.wizard.as_mut() {
             wizard.stage = WizardStage::Result;
             wizard.progress = None;
             wizard.message = Some(match result {
@@ -568,7 +553,7 @@ impl AppState {
             .pinned_disk
             .is_some_and(|disk| !devices.iter().any(|row| row.disk == disk))
         {
-            self.pinned_disk = None;
+            self.shell.pinned_disk = None;
         }
         if self
             .provision
@@ -584,11 +569,11 @@ impl AppState {
         );
         self.devices.scan_pending = false;
         if self.shell.workspace == Workspace::Provision {
-            if self.pinned_disk.is_none() {
+            if self.shell.pinned_disk.is_none() {
                 self.provision.stage = ProvisionStage::SelectDisk;
                 self.set_item_count(self.provision_selectable_devices().count());
             } else if self.selected_device().is_none() {
-                self.pinned_disk = None;
+                self.shell.pinned_disk = None;
                 self.provision.stage = ProvisionStage::SelectDisk;
                 self.set_item_count(self.provision_selectable_devices().count());
             }
@@ -798,7 +783,7 @@ impl AppState {
             return None;
         }
         let disk = self.provision_device_at(self.shell.selected)?.disk;
-        self.pinned_disk = Some(disk);
+        self.shell.pinned_disk = Some(disk);
         self.provision.target_disk = Some(disk);
         self.provision.stage = ProvisionStage::Menu;
         self.provision.message = None;
@@ -827,7 +812,7 @@ impl AppState {
         self.push_navigation_frame(NavigationLocation::Devices);
         self.provision.target_disk = Some(disk);
         self.switch_workspace(Workspace::Provision);
-        self.pinned_disk = Some(disk);
+        self.shell.pinned_disk = Some(disk);
         self.provision.stage = ProvisionStage::Menu;
         self.provision.message = None;
         self.shell.selected = self
@@ -905,13 +890,13 @@ impl AppState {
         if self.shell.workspace == Workspace::Devices
             && matches!(workspace, Workspace::Backups | Workspace::Inspect)
         {
-            self.pinned_disk = self.selected_device().map(|row| row.disk);
+            self.shell.pinned_disk = self.selected_device().map(|row| row.disk);
         }
         if workspace == Workspace::Provision {
             if let Some(disk) = self.provision.target_disk {
-                self.pinned_disk = Some(disk);
+                self.shell.pinned_disk = Some(disk);
             } else {
-                self.pinned_disk = None;
+                self.shell.pinned_disk = None;
                 self.provision.stage = ProvisionStage::SelectDisk;
                 self.provision.message = None;
             }
@@ -991,7 +976,7 @@ impl AppState {
         &self,
         kind: super::table_layout::TableKind,
     ) -> super::table_layout::TableInteractionState {
-        self.horizontal_scroll
+        self.shell.horizontal_scroll
             .get(&kind)
             .copied()
             .unwrap_or_default()
@@ -1003,7 +988,7 @@ impl AppState {
 
     pub fn table_column_order(&self, kind: super::table_layout::TableKind) -> Vec<usize> {
         let count = super::table_layout::layout_for(kind).specs().len();
-        self.table_column_order
+        self.shell.table_column_order
             .get(&kind)
             .filter(|order| {
                 order.len() == count && {
@@ -1270,7 +1255,7 @@ impl AppState {
 
         let (layout, widths) = self.table_visual_geometry(kind);
         let viewport_width = self.table_viewport_width(kind, terminal_width, terminal_height);
-        let interaction = self.horizontal_scroll.entry(kind).or_default();
+        let interaction = self.shell.horizontal_scroll.entry(kind).or_default();
         interaction.set_active_column(target);
         interaction.ensure_active_visible_for_layout(&layout, &widths, viewport_width, reverse);
         true
@@ -1285,7 +1270,7 @@ impl AppState {
     ) -> bool {
         let (layout, widths) = self.table_visual_geometry(kind);
         let viewport_width = self.table_viewport_width(kind, terminal_width, terminal_height);
-        self.horizontal_scroll.entry(kind).or_default().move_active(
+        self.shell.horizontal_scroll.entry(kind).or_default().move_active(
             &layout,
             &widths,
             viewport_width,
@@ -1302,7 +1287,7 @@ impl AppState {
     ) -> bool {
         let (layout, widths) = self.table_visual_geometry(kind);
         let viewport_width = self.table_viewport_width(kind, terminal_width, terminal_height);
-        self.horizontal_scroll
+        self.shell.horizontal_scroll
             .entry(kind)
             .or_default()
             .move_active_edge(&layout, &widths, viewport_width, last)
@@ -1321,7 +1306,7 @@ impl AppState {
         reverse: bool,
     ) -> bool {
         let (layout, widths) = self.table_visual_geometry(kind);
-        self.horizontal_scroll.entry(kind).or_default().move_active(
+        self.shell.horizontal_scroll.entry(kind).or_default().move_active(
             &layout,
             &widths,
             u16::MAX,
@@ -1358,7 +1343,7 @@ impl AppState {
             .flatten();
 
         let logical_column = self.table_logical_column(kind, self.table_active_column(kind));
-        let interaction = self.horizontal_scroll.entry(kind).or_default();
+        let interaction = self.shell.horizontal_scroll.entry(kind).or_default();
         let changed = if clear {
             interaction.clear_sort()
         } else {
@@ -1425,7 +1410,7 @@ impl AppState {
     }
 
     pub fn table_scroll_offset(&self, kind: super::table_layout::TableKind) -> usize {
-        self.horizontal_scroll
+        self.shell.horizontal_scroll
             .get(&kind)
             .copied()
             .unwrap_or_default()
@@ -1445,7 +1430,7 @@ impl AppState {
     ) -> bool {
         let (layout, widths) = self.table_visual_geometry(kind);
         let viewport_width = self.table_viewport_width(kind, terminal_width, terminal_height);
-        self.horizontal_scroll
+        self.shell.horizontal_scroll
             .entry(kind)
             .or_default()
             .scroll_viewport(&layout, &widths, viewport_width, reverse)
@@ -1536,24 +1521,24 @@ impl AppState {
     }
 
     pub fn disk_layout_tail_expansion(&self) -> super::disk_layout::TailExpansion {
-        self.disk_layout_tail
+        self.shell.disk_layout_tail
     }
 
     pub fn toggle_disk_layout_tail(&mut self) {
-        self.disk_layout_tail.toggle();
-        self.disk_layout_selected = 0;
+        self.shell.disk_layout_tail.toggle();
+        self.shell.disk_layout_selected = 0;
     }
 
     pub fn disk_layout_selected(&self) -> usize {
-        self.disk_layout_selected
+        self.shell.disk_layout_selected
     }
 
     pub fn disk_layout_move_selection(&mut self, delta: isize, count: usize) {
-        self.disk_layout_selected = if delta < 0 {
-            self.disk_layout_selected
+        self.shell.disk_layout_selected = if delta < 0 {
+            self.shell.disk_layout_selected
                 .saturating_sub(delta.unsigned_abs())
         } else {
-            self.disk_layout_selected.saturating_add(delta as usize)
+            self.shell.disk_layout_selected.saturating_add(delta as usize)
         }
         .min(count.saturating_sub(1));
     }
@@ -1565,10 +1550,10 @@ impl AppState {
         let presentation = super::disk_layout::DiskLayoutPresentation::new(
             model,
             super::disk_layout::DiskLayoutProfile::DetailedExact,
-            self.disk_layout_tail,
+            self.shell.disk_layout_tail,
         );
         let visible = presentation.visible_model();
-        let segment = visible.segments.get(self.disk_layout_selected)?;
+        let segment = visible.segments.get(self.shell.disk_layout_selected)?;
         Some(format!(
             "{} · {} · {} sectors · {} bytes",
             segment.label,
@@ -1690,7 +1675,7 @@ impl AppState {
                 }
             }
             if let Some((kind, offset)) = frame.table_scroll {
-                self.horizontal_scroll
+                self.shell.horizontal_scroll
                     .entry(kind)
                     .or_default()
                     .set_offset(offset, &super::table_layout::layout_for(kind));
@@ -1832,8 +1817,8 @@ impl AppState {
                     .focus(crate::tui::pane::PaneId::BackupsList);
                 return StateEffect::None;
             }
-            if self.wizard.is_some() {
-                self.wizard = None;
+            if self.shell.wizard.is_some() {
+                self.shell.wizard = None;
                 self.shell.input_mode = InputMode::Normal;
                 return StateEffect::None;
             }

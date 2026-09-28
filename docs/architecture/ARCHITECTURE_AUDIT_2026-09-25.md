@@ -1301,7 +1301,9 @@ application 返回结构化 `ProvisionReport/BackupReport/InspectReport`，CLI/T
 - D8-C4：`ProvisionState` 已由 D7 系列治理形成独立工作区所有权，本轮不重复迁移；继续保持 `AppState.provision: ProvisionState`。
 - D8-C5.1：新增 `ShellState`，第一批收敛演示标记、当前顶层 Workspace、关键操作门禁、退出挂起、NavigationStack、通知状态与动画帧；这些字段不再直属 `AppState`。
 - D8-C5.2：选择索引、条目总数、输入模式、搜索/命令输入缓冲、搜索结果与搜索游标已进一步归 `ShellState` 所有；替换仅针对字段访问边界，不改变 `selected_device()` / `selected_backup()` 等现有门面方法。
-- 表格横向视口、列顺序、共享 DiskLayout 展示状态、全局写操作向导和跨工作区 `pinned_disk` 仍保留在 `AppState`，下一小步再按职责判断归属。
+- D8-C5.3：全局写操作向导、跨工作区 `pinned_disk`、共享 DiskLayout 展示状态、表格横向视口与列顺序全部归入 `ShellState`；这些只是 UI/协调状态迁移，不改变真实写任务、身份复核或写盘安全链。
+- **D8-C COMPLETE。** `AppState` 现在被架构门禁锁定为且仅为 `ShellState + DevicesState + InspectState + BackupsState + ProvisionState` 五个所有权根；后续新增 workspace 私有字段不得重新散落到 `AppState`。
+
 
 
 

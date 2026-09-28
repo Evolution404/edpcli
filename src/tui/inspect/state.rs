@@ -719,7 +719,7 @@ impl AppState {
         }
         self.push_navigation_frame(NavigationLocation::from_workspace(self.shell.workspace));
         if let AdvancedInspectSource::Disk(disk) = &source {
-            self.pinned_disk = Some(*disk);
+            self.shell.pinned_disk = Some(*disk);
         }
         self.shell.workspace = crate::tui::state::Workspace::Inspect;
         let mut expanded = std::collections::BTreeSet::new();

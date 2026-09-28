@@ -114,7 +114,7 @@ impl AppState {
     }
 
     pub fn begin_backup_create_choice(&mut self) -> bool {
-        if self.shell.critical_operation || self.wizard.is_some() {
+        if self.shell.critical_operation || self.shell.wizard.is_some() {
             self.set_notice("已有关键操作或向导正在执行。");
             return false;
         }

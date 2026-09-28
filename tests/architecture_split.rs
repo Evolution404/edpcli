@@ -792,6 +792,10 @@ fn app_state_owns_global_shell_state_through_shell_substate() {
         "search_query: String",
         "search_matches: Vec<usize>",
         "search_cursor: usize",
+        "wizard: Option<WizardState>",
+        "pinned_disk: Option<u32>",
+        "disk_layout_tail: crate::tui::disk_layout::TailExpansion",
+        "disk_layout_selected: usize",
     ] {
         assert!(
             !app_state.lines().any(|line| line.trim() == format!("{legacy_field},")),
@@ -802,6 +806,32 @@ fn app_state_owns_global_shell_state_through_shell_substate() {
             "ShellState must own global field: {legacy_field}"
         );
     }
+}
+
+#[test]
+fn app_state_is_only_shell_plus_four_workspace_states() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let state = fs::read_to_string(root.join("src/tui/state.rs")).expect("read TUI state");
+    let app_state = state
+        .split("pub struct AppState {")
+        .nth(1)
+        .and_then(|tail| tail.split('}').next())
+        .expect("AppState body");
+    let fields = app_state
+        .lines()
+        .map(str::trim)
+        .filter(|line| line.contains(':') && line.ends_with(','))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        fields,
+        [
+            "shell: ShellState,",
+            "devices: DevicesState,",
+            "inspect: InspectState,",
+            "backups: BackupsState,",
+            "provision: ProvisionState,",
+        ]
+    );
 }
 
 #[test]

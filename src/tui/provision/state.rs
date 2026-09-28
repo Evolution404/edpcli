@@ -254,7 +254,7 @@ impl AppState {
         self.provision.menu_selected = selected;
         self.provision.kind = ProvisionKind::ALL[selected];
         self.provision.target_disk = target_disk;
-        self.pinned_disk = target_disk;
+        self.shell.pinned_disk = target_disk;
         if self.shell.workspace == Workspace::Provision {
             if target_disk.is_some() {
                 self.provision.stage = ProvisionStage::Menu;

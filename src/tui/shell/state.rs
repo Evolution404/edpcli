@@ -17,6 +17,16 @@ pub struct ShellState {
     pub(super) search_query: String,
     pub(super) search_matches: Vec<usize>,
     pub(super) search_cursor: usize,
+    pub(super) wizard: Option<WizardState>,
+    pub(super) pinned_disk: Option<u32>,
+    pub(super) disk_layout_tail: crate::tui::disk_layout::TailExpansion,
+    pub(super) disk_layout_selected: usize,
+    pub(super) horizontal_scroll: std::collections::BTreeMap<
+        crate::tui::table_layout::TableKind,
+        crate::tui::table_layout::HorizontalScrollState,
+    >,
+    pub(super) table_column_order:
+        std::collections::BTreeMap<crate::tui::table_layout::TableKind, Vec<usize>>,
 }
 
 impl Default for ShellState {
@@ -37,6 +47,12 @@ impl Default for ShellState {
             search_query: String::new(),
             search_matches: Vec::new(),
             search_cursor: 0,
+            wizard: None,
+            pinned_disk: None,
+            disk_layout_tail: crate::tui::disk_layout::TailExpansion::Collapsed,
+            disk_layout_selected: 0,
+            horizontal_scroll: std::collections::BTreeMap::new(),
+            table_column_order: std::collections::BTreeMap::new(),
         }
     }
 }
