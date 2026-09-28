@@ -591,6 +591,7 @@ fn d0_current_device_summary_renders_capacity_layout_bar() {
     let mut state = AppState::new();
     state.replace_devices(vec![row]);
     state.focus_devices_pane(PaneId::DevicesTree);
+    state.navigate(NavCommand::Down, 12);
     let text = render_text(&state, 160, 36);
     assert!(text.contains("SERIAL-D0-1234"), "{text}");
     assert!(text.contains("身份依据"), "{text}");
@@ -665,11 +666,14 @@ fn d0_plain_mbr_layout_uses_real_partition_table_without_unknown_disk_body() {
 fn device_workbench_panes_are_list_tree_detail() {
     let mut state = AppState::new();
     state.replace_devices(vec![device()]);
-    assert_eq!(PaneId::DEVICES_ORDER, [
-        PaneId::DevicesList,
-        PaneId::DevicesTree,
-        PaneId::DevicesDetail,
-    ]);
+    assert_eq!(
+        PaneId::DEVICES_ORDER,
+        [
+            PaneId::DevicesList,
+            PaneId::DevicesTree,
+            PaneId::DevicesDetail,
+        ]
+    );
     assert_eq!(state.devices_focused_pane(), PaneId::DevicesList);
     state.shift_workspace_pane(false);
     assert_eq!(state.devices_focused_pane(), PaneId::DevicesTree);

@@ -1587,20 +1587,22 @@ impl AppState {
                         });
                         if is_tail && expanded(DeviceInfoNodeKey::TailGroup) {
                             if let Some(tail) = model.tail_group() {
-                                rows.extend(tail.children.iter().map(|child| DeviceInfoTreeNode {
-                                    key: DeviceInfoNodeKey::LayoutSegment {
-                                        start_lba: child.start_lba,
-                                        kind: child.kind,
-                                    },
-                                    depth: 2,
-                                    label: child.label.clone(),
-                                    value: Some(size_text(
-                                        child
-                                            .sector_count
-                                            .saturating_mul(crate::common::SECTOR as u64),
-                                    )),
-                                    expandable: false,
-                                    expanded: false,
+                                rows.extend(tail.children.iter().map(|child| {
+                                    DeviceInfoTreeNode {
+                                        key: DeviceInfoNodeKey::LayoutSegment {
+                                            start_lba: child.start_lba,
+                                            kind: child.kind,
+                                        },
+                                        depth: 2,
+                                        label: child.label.clone(),
+                                        value: Some(size_text(
+                                            child
+                                                .sector_count
+                                                .saturating_mul(crate::common::SECTOR as u64),
+                                        )),
+                                        expandable: false,
+                                        expanded: false,
+                                    }
                                 }));
                             }
                         }
@@ -1663,7 +1665,10 @@ impl AppState {
 
     pub fn device_info_toggle_selected(&mut self) {
         let key = self.devices.info_selected;
-        if !matches!(key, DeviceInfoNodeKey::Capacity | DeviceInfoNodeKey::TailGroup) {
+        if !matches!(
+            key,
+            DeviceInfoNodeKey::Capacity | DeviceInfoNodeKey::TailGroup
+        ) {
             return;
         }
         if !self.devices.info_expanded.remove(&key) {

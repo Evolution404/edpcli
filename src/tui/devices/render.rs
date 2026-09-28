@@ -231,7 +231,11 @@ fn device_tree_line(
     let active = row.key == selected;
     let marker = if focused && active { "▌" } else { " " };
     let disclosure = if row.expandable {
-        if row.expanded { "▾" } else { "▸" }
+        if row.expanded {
+            "▾"
+        } else {
+            "▸"
+        }
     } else {
         " "
     };
@@ -261,8 +265,7 @@ fn draw_device_detail(frame: &mut Frame, area: ratatui::layout::Rect, state: &Ap
     let focused = state.devices_focused_pane() == PaneId::DevicesDetail;
     let Some(row) = state.selected_device() else {
         frame.render_widget(
-            Paragraph::new("选择设备后显示详情。")
-                .block(crate::tui::ui::card("设备详情", focused)),
+            Paragraph::new("选择设备后显示详情。").block(crate::tui::ui::card("设备详情", focused)),
             area,
         );
         return;
@@ -410,12 +413,14 @@ fn tail_detail_lines(row: &crate::disk_scan::Row) -> Vec<Line<'static>> {
         return vec![Line::from("当前介质没有独立尾部区域。")];
     };
     let mut lines = vec![
-        field_line("LBA 范围", format!("[{}..{}]", tail.start_lba, tail.end_exclusive - 1)),
+        field_line(
+            "LBA 范围",
+            format!("[{}..{}]", tail.start_lba, tail.end_exclusive - 1),
+        ),
         field_line(
             "容量",
             format_bytes(
-                (tail.end_exclusive - tail.start_lba)
-                    .saturating_mul(crate::common::SECTOR as u64),
+                (tail.end_exclusive - tail.start_lba).saturating_mul(crate::common::SECTOR as u64),
             ),
         ),
         Line::from(""),
@@ -505,10 +510,7 @@ fn status_detail_lines(row: &crate::disk_scan::Row) -> Vec<Line<'static>> {
                 "证据不足"
             },
         ),
-        field_line(
-            "身份依据",
-            device_identity_basis(row),
-        ),
+        field_line("身份依据", device_identity_basis(row)),
         field_line("确认备份", format!("{} 份", row.n_baks)),
         field_line("可能相关", format!("{} 份", row.n_possible_baks)),
     ];
@@ -555,7 +557,11 @@ fn protocol_detail_lines(row: &crate::disk_scan::Row) -> Vec<Line<'static>> {
         ),
         field_line(
             "LCE",
-            if row.lce.is_some() { "已确认" } else { "未确认" },
+            if row.lce.is_some() {
+                "已确认"
+            } else {
+                "未确认"
+            },
         ),
         field_line("部门", safe(row.dept.as_deref().unwrap_or("—"))),
         field_line("姓名", safe(row.user.as_deref().unwrap_or("—"))),

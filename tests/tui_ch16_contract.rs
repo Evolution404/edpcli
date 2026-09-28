@@ -268,18 +268,12 @@ fn ch16_devices_and_backups_have_independent_pane_focus_and_viewports() {
     assert_eq!(state.devices_focused_pane(), PaneId::DevicesList);
     assert_eq!(state.backups_focused_pane(), PaneId::BackupsList);
     state.focus_devices_pane(PaneId::DevicesTree);
-    state
-        .pane_viewport_mut(PaneId::DevicesTree)
-        .scroll_y
-        .offset = 7;
+    state.pane_viewport_mut(PaneId::DevicesTree).scroll_y.offset = 7;
     state.focus_backups_pane(PaneId::BackupCoverage);
     state.pane_viewport_mut(PaneId::BackupCoverage).scroll_x = 3;
     assert_eq!(state.devices_focused_pane(), PaneId::DevicesTree);
     assert_eq!(state.backups_focused_pane(), PaneId::BackupCoverage);
-    assert_eq!(
-        state.pane_viewport(PaneId::DevicesTree).scroll_y.offset,
-        7
-    );
+    assert_eq!(state.pane_viewport(PaneId::DevicesTree).scroll_y.offset, 7);
     assert_eq!(state.pane_viewport(PaneId::BackupCoverage).scroll_x, 3);
 }
 

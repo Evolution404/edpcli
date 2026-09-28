@@ -13,7 +13,7 @@
 1. 上半区：设备列表，用于发现、筛选、比较和选择设备。
 2. 下半区：选中设备的工作台，采用“左侧设备信息树 + 右侧上下文详情”的 Master/Detail 结构。
 
-设备工作台必须在不进入 Inspect 的情况下，让用户直接看到并理解：
+设备工作台必须在不进入深度检查页面的情况下，让用户直接看到并理解：
 
 - 身份信息；
 - 容量布局；
@@ -21,11 +21,11 @@
 - 当前设备相关备份；
 - 协议摘要。
 
-Inspect 仅保留为深入查看扇区、Hex、字段和已验证解码结构的入口。
+深度检查页面仅保留为深入查看扇区、十六进制、字段和已验证解码结构的入口。
 
 ## 2. 明确不做
 
-本轮是纯 TUI 信息架构与 presentation/state 重构。禁止改变：
+本轮是纯 TUI 信息架构与展示/状态重构。禁止改变：
 
 - LBA0～12 / LCE 协议语义；
 - mode0～mode3 与 Plain 语义；
@@ -44,7 +44,7 @@ Inspect 仅保留为深入查看扇区、Hex、字段和已验证解码结构的
 - reopen identity verification；
 - atomic write / readback / rollback。
 
-Renderer 不允许增加磁盘 I/O、文件系统扫描或备份目录遍历。所有展示只能消费现有 state/application/domain 数据。
+渲染层不允许增加磁盘 I/O、文件系统扫描或备份目录遍历。所有展示只能消费现有状态/应用/领域数据。
 
 ## 3. 顶层导航不变
 
@@ -60,7 +60,7 @@ Renderer 不允许增加磁盘 I/O、文件系统扫描或备份目录遍历。�
 - 设备页内部 Pane 使用 `Ctrl-w h/j/k/l/w/W`；
 - `j/k` 只解释为当前焦点 Pane 内的移动/滚动；
 - `o` 只用于树节点展开/折叠；
-- `i` 进入 Inspect；
+- `i` 进入深度检查；
 - `p` 制盘；
 - `b` 创建当前设备备份；
 - `r` 刷新；
@@ -225,7 +225,7 @@ struct DeviceInfoTreeNode {
 }
 ```
 
-State 至少维护：
+状态至少维护：
 
 - selected node key；
 - expanded node set；
@@ -246,7 +246,7 @@ State 至少维护：
 - disk；
 - model；
 - protocol/bus；
-- physical capacity；
+- 物理容量；
 - VID:PID；
 - serial；
 - onlyid；
@@ -313,9 +313,9 @@ State 至少维护：
 - raw access 是否可用；
 - EDP/Plain 是否已确认；
 - identity evidence；
-- partition geometry；
-- LCE geometry；
-- canonical layout 是否完整；
+- 分区几何；
+- LCE 几何；
+- 规范化布局是否完整；
 - backup relation count；
 - probe error / denied reason。
 
@@ -334,7 +334,7 @@ State 至少维护：
 
 则第一阶段先显示计数和状态，不允许 Renderer 临时遍历备份目录。
 
-只有已有 backup catalog/state 能提供具体条目时，才展示条目表。
+只有已有备份目录/状态能提供具体条目时，才展示条目表。
 
 ## 12. 协议摘要详情
 
@@ -347,7 +347,7 @@ State 至少维护：
 - LCE 是否可确认；
 - department / user / label / onlyid 等已经扫描出的关键协议信息。
 
-完整字段/raw/Hex 始终通过 `i` 进入 Inspect。
+完整字段/原始数据/十六进制始终通过 `i` 进入深度检查。
 
 ## 13. Presentation / Renderer 分层
 
@@ -368,12 +368,12 @@ src/tui/devices/
 
 职责：
 
-- `presentation.rs`：真实 domain/state -> UI presentation model；
+- `presentation.rs`：真实领域/状态 -> UI 展示模型；
 - `list_render.rs`：设备表；
 - `tree_render.rs`：左树；
 - `detail_render.rs`：右侧详情；
 - `render.rs`：仅做响应式布局与组合；
-- `state.rs`：Tree selection/expanded/pane state。
+- `state.rs`：树选择/展开/窗格状态。
 
 Renderer 不做业务 I/O。
 
@@ -383,8 +383,8 @@ Renderer 不做业务 I/O。
 
 - 当前 Pane：focused border；
 - 当前 Tree node：`▌` + accent；
-- disk region：继续复用 `DiskRegionKind` semantic colors；
-- PASS/Warning/Error：复用现有 semantic theme；
+- 磁盘区域：继续复用 `DiskRegionKind` 语义颜色；
+- 通过/警告/错误：复用现有语义主题；
 - 避免大面积高饱和 reversed background；
 - 不引入另一套私有颜色。
 
@@ -413,7 +413,7 @@ Renderer 不做业务 I/O。
 
 业务动作仍基于当前设备：
 
-- `i` Inspect；
+- `i` 深度检查；
 - `p` Provision；
 - `b` Backup；
 - `r` Refresh。
@@ -430,7 +430,7 @@ Renderer 不做业务 I/O。
 6. Capacity `o` 当前页展开；
 7. TailGroup `o` 当前页展开；
 8. segment 几何与 `canonical_layout()` 完全一致；
-9. canonical layout 失败只显示原因，不猜布局；
+9. 规范化布局失败只显示原因，不猜布局；
 10. Tree `j/k` 不滚 Detail；
 11. Detail `j/k` 不改 Tree selection；
 12. `Tab` 仍只切一级 Tab；
@@ -446,8 +446,8 @@ Renderer 不做业务 I/O。
 ### P0 — 契约测试
 先写失败测试锁定新 Pane、无冗余标题、Tree/Detail 语义和 Tab 不跨层。
 
-### P1 — Tree domain/state
-实现 `DeviceInfoNodeKey`、expanded state、stable selection 与设备切换回退。
+### P1 — 树领域/状态
+实现 `DeviceInfoNodeKey`、展开状态、稳定选择与设备切换回退。
 
 ### P2 — Pane 架构
 把 `DevicesSummary/DevicesStats` 迁移为 `DevicesTree/DevicesDetail`。
@@ -462,10 +462,10 @@ Renderer 不做业务 I/O。
 接入 `row.canonical_layout()`；实现全盘 bar、segment table、区域详情和 TailGroup 当前页展开。
 
 ### P6 — Backups
-接入已有 backup state/catalog 能提供的当前设备关联信息；没有条目证据时只显示真实计数。
+接入已有备份状态/目录能提供的当前设备关联信息；没有条目证据时只显示真实计数。
 
 ### P7 — Protocol
-实现轻量协议摘要，完整解析继续留给 Inspect。
+实现轻量协议摘要，完整解析继续留给深度检查。
 
 ### P8 — Responsive
 收口 Wide/Medium/Compact。
@@ -483,7 +483,7 @@ GitHub CI/远端可执行门禁先跑；恢复 Mac 后再执行本机 release in
 - 设备页已从 flat summary 改为 List + Tree + Detail；
 - 无冗余“当前设备”标题/快速摘要；
 - Identity/Capacity/Status/Backups/Protocol 五类信息都在当前设备页可访问；
-- Capacity/Tail 在当前页面直接展开，不要求先进入 Inspect；
+- Capacity/Tail 在当前页面直接展开，不要求先进入深度检查；
 - 动态布局全部来自 `DiskLayoutModel`；
 - Wide/Medium/Compact 都可用；
 - 快捷键遵守当前全局导航契约；

@@ -46,11 +46,14 @@ fn selected_device_is_exposed_for_dashboard_detail_panel() {
 
 #[test]
 fn device_dashboard_renders_identity_detail_fields() {
-    let render = include_str!("../src/tui/devices/render.rs");
+    let source = concat!(
+        include_str!("../src/tui/devices/render.rs"),
+        include_str!("../src/tui/state.rs")
+    );
     for field in ["onlyid", "device_id", "序列号", "容量布局", "备份关系"] {
         assert!(
-            render.contains(field),
-            "device detail panel must render {field}"
+            source.contains(field),
+            "device workbench must expose {field}"
         );
     }
 }
