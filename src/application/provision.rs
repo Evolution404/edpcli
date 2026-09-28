@@ -775,6 +775,7 @@ where
 fn verify_mandatory_backup_pin(
     report: &super::write::BackupReport,
     pin: &MediaIdentityPin,
+    source_metadata: &[u8],
 ) -> EdpCliResult<String> {
     let verified = crate::edpb::verify_file(&report.path).map_err(|message| {
         err(
@@ -789,18 +790,36 @@ fn verify_mandatory_backup_pin(
                 format!("错误: 强制备份 canonical identity 无效: {message}"),
             )
         })?;
-    let raw = crate::edpb::read_raw_protocol(&report.path).map_err(|message| {
-        err(
-            EXIT_TARGET,
-            format!("错误: 强制备份来源快照不可读: {message}"),
-        )
-    })?;
-    pin.verify(&identity, &raw).map_err(|conflict| {
+    pin.verify(&identity, source_metadata).map_err(|conflict| {
         err(
             EXIT_TARGET,
             format!("错误: 强制备份与制盘准备阶段介质身份不一致: {conflict:?}"),
         )
     })?;
+    let artifact_id = if report.edp_protocol_saved {
+        crate::edpb::RAW_PROTOCOL_ARTIFACT_ID
+    } else {
+        "raw.plain.partition_table.0"
+    };
+    let raw = crate::edpb::read_artifact(&report.path, artifact_id).map_err(|message| {
+        err(
+            EXIT_TARGET,
+            format!("错误: 强制备份来源快照不可读: {message}"),
+        )
+    })?;
+    let expected = if report.edp_protocol_saved {
+        source_metadata
+    } else {
+        source_metadata
+            .get(..SECTOR)
+            .ok_or_else(|| err(EXIT_TARGET, "错误: 制盘准备阶段 Plain MBR 快照长度异常"))?
+    };
+    if raw != expected {
+        return Err(err(
+            EXIT_TARGET,
+            "错误: 强制备份元数据与制盘准备阶段快照不一致",
+        ));
+    }
     Ok(verified.file_sha256)
 }
 
@@ -912,7 +931,8 @@ pub fn commit_provision_with_backup_on_disk_with_progress(
         sink,
         ProgressEvent::new(Phase::Backup, Step::MandatoryBackup, current, total),
     );
-    let backup_sha256 = verify_mandatory_backup_pin(&backup, prepared.before_pin())?;
+    let backup_sha256 =
+        verify_mandatory_backup_pin(&backup, prepared.before_pin(), prepared.source_metadata()?)?;
     current += 1;
     emit_isolated(
         sink,

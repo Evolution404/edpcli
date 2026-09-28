@@ -76,16 +76,111 @@ fn mandatory_backup_must_match_prepared_canonical_pin() {
     };
     let pin = MediaIdentityPin::new(identity.clone(), &image);
     assert_eq!(
-        verify_mandatory_backup_pin(&report, &pin).unwrap(),
+        verify_mandatory_backup_pin(&report, &pin, &image).unwrap(),
         verified.file_sha256
     );
     let mut conflicting = identity;
     conflicting.hardware.serial_quality = super::super::media_identity::SerialQuality::Usable;
     conflicting.hardware.serial_sha256 = Some("a".repeat(64));
     let pin = MediaIdentityPin::new(conflicting, &image);
-    let error = verify_mandatory_backup_pin(&report, &pin).unwrap_err();
+    let error = verify_mandatory_backup_pin(&report, &pin, &image).unwrap_err();
     assert_eq!(error.code, EXIT_TARGET);
     assert!(error.msg.contains("SerialChangedOrLost"), "{}", error.msg);
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn mandatory_plain_backup_verifies_mbr_without_edp_protocol_artifact() {
+    use crate::edpb::{
+        ArtifactCompleteness, ArtifactInput, CoreCapture, Extent, ManifestPartition,
+        MetadataCapture, Region, RestorePolicy, SemanticStatus,
+    };
+
+    let root = std::env::temp_dir().join(format!(
+        "edpcli-plain-backup-pin-{}-{}",
+        std::process::id(),
+        TEST_TEMP_FILE_SEQUENCE.fetch_add(1, Ordering::Relaxed)
+    ));
+    std::fs::create_dir_all(&root).unwrap();
+    let path = root.join("plain.edpb");
+    let mut image = vec![0; 13 * SECTOR];
+    image[510..512].copy_from_slice(&[0x55, 0xaa]);
+    image[0] = 0x42;
+    image[450] = 0x07;
+    image[454..458].copy_from_slice(&2048u32.to_le_bytes());
+    image[458..462].copy_from_slice(&100_000u32.to_le_bytes());
+    let capture = MetadataCapture {
+        core: CoreCapture {
+            snapshot_id: "plain-pin-test".into(),
+            created_epoch: 1_789_603_200,
+            disk_number: Some(4),
+            vid: "3535".into(),
+            pid: "6300".into(),
+            device_id: "disk&ven_aigo&prod_u335".into(),
+            onlyid: None,
+            total_sectors: Some(1_000_000),
+            logical_sector_size: SECTOR as u32,
+            edpcli_version: env!("CARGO_PKG_VERSION").into(),
+            device_state: "plain".into(),
+            lba0_12: &image,
+        },
+        partitions: vec![ManifestPartition {
+            index: 1,
+            role: None,
+            partition_type: Some("mbr:07".into()),
+            start_lba: 2048,
+            sector_count: 100_000,
+            filesystem_hint: None,
+            volume_label_hint: None,
+        }],
+        regions: vec![Region {
+            id: "region.plain.partition_table".into(),
+            role: "plain_partition_table".into(),
+            start_lba: None,
+            sector_count: None,
+            semantic_status: SemanticStatus::Identified,
+        }],
+        extents: vec![Extent {
+            id: "extent.plain.partition_table.0".into(),
+            region_id: "region.plain.partition_table".into(),
+            start_lba: 0,
+            sector_count: 1,
+            purpose: "mbr".into(),
+        }],
+        artifacts: vec![ArtifactInput {
+            id: "raw.plain.partition_table.0".into(),
+            kind: "raw_sectors".into(),
+            media_type: "application/octet-stream".into(),
+            source_extent_ids: vec!["extent.plain.partition_table.0".into()],
+            derivation: None,
+            restore_policy: RestorePolicy::Restorable,
+            completeness: ArtifactCompleteness::Complete,
+            data: image[..SECTOR].to_vec(),
+        }],
+        notes: vec![],
+    };
+    crate::edpb::write_metadata_backup(&path, &capture).unwrap();
+    let verified = crate::edpb::verify_file(&path).unwrap();
+    let identity = crate::edpb::canonical_media_identity(&verified.manifest).unwrap();
+    let report = super::super::write::BackupReport {
+        path,
+        partition_count: 1,
+        edp_protocol_saved: false,
+    };
+    let pin = MediaIdentityPin::new(identity, &image);
+    assert_eq!(
+        verify_mandatory_backup_pin(&report, &pin, &image).unwrap(),
+        verified.file_sha256
+    );
+    let mut changed_image = image.clone();
+    changed_image[0] ^= 1;
+    let changed_pin = MediaIdentityPin::new(pin.snapshot.clone(), &changed_image);
+    assert!(
+        verify_mandatory_backup_pin(&report, &changed_pin, &changed_image)
+            .unwrap_err()
+            .msg
+            .contains("快照不一致")
+    );
     std::fs::remove_dir_all(root).unwrap();
 }
 
