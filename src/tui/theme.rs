@@ -510,7 +510,7 @@ impl Theme {
         let foreground = if active {
             self.disk_region_active_color(kind)
         } else {
-            self.palette.border_subtle
+            self.disk_region_color(kind)
         };
         let style = Style::default().fg(foreground);
         if active {
@@ -651,8 +651,12 @@ mod tests {
             DiskRegionKind::Share,
             DiskRegionKind::Encrypt,
         ] {
+            let normal = theme.disk_region_fill(kind, false);
+            let normal_outline = theme.disk_region_outline(kind, false);
             let active = theme.disk_region_fill(kind, true);
             let outline = theme.disk_region_outline(kind, true);
+            assert_eq!(normal_outline.bg, None);
+            assert_eq!(normal_outline.fg, normal.fg);
             assert_eq!(outline.bg, None);
             assert_eq!(outline.fg, active.fg);
             assert_ne!(outline.fg, Some(theme.palette.accent));

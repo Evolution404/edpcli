@@ -548,8 +548,8 @@ fn disk_map_internal_boundary_span(
 
     if right_active && !left_active {
         let background = theme
-            .disk_region_fill(left.kind, left_active)
-            .bg
+            .disk_region_outline(left.kind, left_active)
+            .fg
             .unwrap_or(theme.palette().background);
         Span::styled(
             border.vertical_left,
@@ -557,8 +557,8 @@ fn disk_map_internal_boundary_span(
         )
     } else {
         let background = theme
-            .disk_region_fill(right.kind, right_active)
-            .bg
+            .disk_region_outline(right.kind, right_active)
+            .fg
             .unwrap_or(theme.palette().background);
         Span::styled(
             border.vertical_right,

@@ -646,6 +646,19 @@ P18 实机复核继续暴露终端 cell 的物理限制：普通 box-drawing 边
 
 P19 已完成：容量地图专项 4/4、`tui_suite` 285/285、fast 4 个测试套件/6 个产物/0 失败、Clippy `-D warnings`、full 8 个测试套件/10 个产物加 doctest 均通过。
 
+### P20 — 半单元格边框继承分区语义色
+
+P19 实机复核发现 QuadrantInside 的几何已经正确，但普通边框仍沿用了旧的统一 `border_subtle` 蓝灰色，造成绿色/紫色分区内部与外框颜色语义不一致。P20 统一边框颜色来源：
+
+- 普通分区边框前景色 = 对应 `DiskRegionKind` 的普通语义前景色；
+- 激活分区边框前景色 = 对应 `DiskRegionKind` 的激活语义前景色；
+- 上/下半格边框、左右外边界都遵守同一语义色规则；
+- 分区共享 `▐/▌` 边界不再使用一侧填充背景代替边框色，而是前景/背景分别取左右两侧的语义边框色；
+- 因此绿色 Share/Combined 使用绿色边框，紫色 Encrypt 使用紫色边框，Protocol/Tail/Compatibility 等均保持各自色系；
+- 不使用全局强调色或统一中性边框覆盖分区语义。
+
+P20 已完成：专项语义色契约通过，`tui_suite` 285/285、fast 4 个测试套件/6 个产物/0 失败、Clippy `-D warnings`、full 8 个测试套件/10 个产物加 doctest 均通过。
+
 ## 18. 完成标准
 
 只有同时满足以下条件，才可标记 COMPLETE：

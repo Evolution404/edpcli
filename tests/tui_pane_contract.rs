@@ -1307,8 +1307,8 @@ fn device_capacity_map_uses_quadrant_inside_half_cells_without_gap_or_spill() {
         "shared boundaries must use explicit half-cell foreground/background composition"
     );
     assert!(
-        presentation.contains("disk_region_fill(right.kind, right_active)")
-            && presentation.contains("disk_region_fill(left.kind, left_active)"),
-        "shared half-cell background must come from the adjacent partition fill"
+        presentation.contains("disk_region_outline(right.kind, right_active)")
+            && presentation.contains("disk_region_outline(left.kind, left_active)"),
+        "shared half-cell foreground/background must come from the adjacent partition semantic border colors"
     );
 }
