@@ -1,6 +1,10 @@
 use super::*;
 
-pub(super) fn draw_device_list(frame: &mut Frame, list_area: ratatui::layout::Rect, state: &AppState) {
+pub(super) fn draw_device_list(
+    frame: &mut Frame,
+    list_area: ratatui::layout::Rect,
+    state: &AppState,
+) {
     let visible_count = state.visible_device_count();
     let total_count = state.devices().len();
     let count_label = if state.workspace_filter_active() {
@@ -150,4 +154,3 @@ pub(super) fn draw_device_list(frame: &mut Frame, list_area: ratatui::layout::Re
         window_len,
     );
 }
-

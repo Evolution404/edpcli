@@ -47,4 +47,3 @@ pub(super) fn draw_devices(frame: &mut Frame, area: ratatui::layout::Rect, state
     draw_device_tree(frame, workbench[0], state);
     draw_device_detail(frame, workbench[1], state);
 }
-

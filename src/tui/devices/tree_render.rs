@@ -67,4 +67,3 @@ fn device_tree_line(
     }
     Line::from(spans)
 }
-
