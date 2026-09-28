@@ -8,11 +8,11 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use common::load_disk_image;
 use edpcli::backup_metadata::{
-    acquire_metadata, parse_lba7_compatibility_geometry, parse_partition_geometry, FilesystemKind,
-    LBA7_COMPAT_EXTENT_SECTORS, PARTITION_PREFIX_SECTORS,
+    acquire_metadata, acquire_plain_metadata, parse_lba7_compatibility_geometry,
+    parse_partition_geometry, FilesystemKind, LBA7_COMPAT_EXTENT_SECTORS, PARTITION_PREFIX_SECTORS,
 };
 use edpcli::common::SECTOR;
-use edpcli::crypto::{crc32_bare, xor_rolling};
+use edpcli::crypto::{a6b0_full, a7f0_full, crc32_bare, xor_rolling};
 use edpcli::diskio::SectorDev;
 use edpcli::edpb::{
     self, CaptureLevel, CoreCapture, MetadataCapture, RestorePolicy, SemanticStatus,
@@ -94,6 +94,43 @@ fn ntfs_boot(mft_lcn: u64, mftmirr_lcn: u64) -> Vec<u8> {
     boot
 }
 
+fn strict_ntfs_boot(sector_count: u64) -> Vec<u8> {
+    let mut boot = vec![0u8; SECTOR];
+    boot[0..3].copy_from_slice(&[0xeb, 0x52, 0x90]);
+    boot[3..11].copy_from_slice(b"NTFS    ");
+    boot[11..13].copy_from_slice(&(SECTOR as u16).to_le_bytes());
+    boot[13] = 8;
+    boot[21] = 0xf8;
+    boot[40..48].copy_from_slice(&sector_count.to_le_bytes());
+    boot[48..56].copy_from_slice(&4u64.to_le_bytes());
+    boot[56..64].copy_from_slice(&8u64.to_le_bytes());
+    boot[510..512].copy_from_slice(&[0x55, 0xaa]);
+    boot
+}
+
+fn mutate_lba12_u32(
+    image: &[u8],
+    device_id: &str,
+    entry: usize,
+    field_offset: usize,
+    value: u32,
+) -> Vec<u8> {
+    let mut out = image.to_vec();
+    let crc = crc32_bare(device_id.as_bytes()).to_le_bytes();
+    let mut plain = a6b0_full(&out[12 * SECTOR..13 * SECTOR], &crc, 0);
+    let offset = entry * 0x60 + field_offset;
+    plain[offset..offset + 4].copy_from_slice(&value.to_le_bytes());
+    out[12 * SECTOR..13 * SECTOR].copy_from_slice(&a7f0_full(&plain, &crc, 0));
+    out
+}
+
+fn insert_protocol(dev: &mut ReadOnlySparseDev, image: &[u8]) {
+    for lba in 0..13u64 {
+        let start = lba as usize * SECTOR;
+        dev.insert(lba, image[start..start + SECTOR].to_vec());
+    }
+}
+
 fn patterned_sector(byte: u8) -> Vec<u8> {
     vec![byte; SECTOR]
 }
@@ -127,6 +164,133 @@ fn core<'a>(image: &'a [u8]) -> CoreCapture<'a> {
         device_state: "encrypted".into(),
         lba0_12: image,
     }
+}
+
+fn test_mbr(partition_type: u8, start_lba: u32, sector_count: u32) -> Vec<u8> {
+    let mut raw = vec![0u8; SECTOR];
+    raw[446 + 4] = partition_type;
+    raw[446 + 8..446 + 12].copy_from_slice(&start_lba.to_le_bytes());
+    raw[446 + 12..446 + 16].copy_from_slice(&sector_count.to_le_bytes());
+    raw[510..512].copy_from_slice(&[0x55, 0xaa]);
+    raw
+}
+
+fn test_crc32_ieee(data: &[u8]) -> u32 {
+    let mut crc = 0xffff_ffffu32;
+    for byte in data {
+        crc ^= u32::from(*byte);
+        for _ in 0..8 {
+            crc = if crc & 1 != 0 {
+                (crc >> 1) ^ 0xedb8_8320
+            } else {
+                crc >> 1
+            };
+        }
+    }
+    !crc
+}
+
+fn test_gpt_header(
+    current_lba: u64,
+    backup_lba: u64,
+    entries_lba: u64,
+    total: u64,
+    entries_crc: u32,
+) -> Vec<u8> {
+    let mut raw = vec![0u8; SECTOR];
+    raw[..8].copy_from_slice(b"EFI PART");
+    raw[8..12].copy_from_slice(&0x0001_0000u32.to_le_bytes());
+    raw[12..16].copy_from_slice(&92u32.to_le_bytes());
+    raw[24..32].copy_from_slice(&current_lba.to_le_bytes());
+    raw[32..40].copy_from_slice(&backup_lba.to_le_bytes());
+    raw[40..48].copy_from_slice(&34u64.to_le_bytes());
+    raw[48..56].copy_from_slice(&(total - 34).to_le_bytes());
+    raw[56..72].copy_from_slice(&[0x44; 16]);
+    raw[72..80].copy_from_slice(&entries_lba.to_le_bytes());
+    raw[80..84].copy_from_slice(&4u32.to_le_bytes());
+    raw[84..88].copy_from_slice(&128u32.to_le_bytes());
+    raw[88..92].copy_from_slice(&entries_crc.to_le_bytes());
+    let crc = test_crc32_ieee(&raw[..92]);
+    raw[16..20].copy_from_slice(&crc.to_le_bytes());
+    raw
+}
+
+#[test]
+fn chapter_18_b2_plain_mbr_capture_reads_only_partition_metadata() {
+    let total = 100_000u64;
+    let mut dev = ReadOnlySparseDev::new();
+    dev.insert(0, test_mbr(0x07, 2_048, 50_000));
+    let mut exfat = patterned_sector(0xEE);
+    exfat[3..11].copy_from_slice(b"EXFAT   ");
+    dev.insert(2_048, exfat);
+
+    let capture = acquire_plain_metadata(&mut dev, total).unwrap();
+
+    assert_eq!(dev.writes, 0);
+    assert!(
+        !dev.reads.contains(&2_048),
+        "filesystem boot sector must not be read"
+    );
+    assert_eq!(capture.partitions.len(), 1);
+    assert_eq!(capture.partitions[0].start_lba, 2_048);
+    assert_eq!(capture.partitions[0].sector_count, 50_000);
+    assert_eq!(capture.artifacts.len(), 1);
+    assert_eq!(
+        capture.artifacts[0].restore_policy,
+        RestorePolicy::Restorable
+    );
+    assert_eq!(capture.artifacts[0].data, dev.sectors[&0]);
+    assert!(capture
+        .artifacts
+        .iter()
+        .all(|artifact| !artifact.id.contains("filesystem")));
+}
+
+#[test]
+fn chapter_18_b2_plain_gpt_capture_requires_primary_and_backup_metadata_only() {
+    let total = 100_000u64;
+    let mut entries = vec![0u8; SECTOR];
+    entries[..16].copy_from_slice(&[
+        0xa2, 0xa0, 0xd0, 0xeb, 0xe5, 0xb9, 0x33, 0x44, 0x87, 0xc0, 0x68, 0xb6, 0xb7, 0x26, 0x99,
+        0xc7,
+    ]);
+    entries[16..32].copy_from_slice(&[0x11; 16]);
+    entries[32..40].copy_from_slice(&2_048u64.to_le_bytes());
+    entries[40..48].copy_from_slice(&80_000u64.to_le_bytes());
+    let entries_crc = test_crc32_ieee(&entries);
+
+    let mut dev = ReadOnlySparseDev::new();
+    dev.insert(0, test_mbr(0xee, 1, (total - 1) as u32));
+    dev.insert(1, test_gpt_header(1, total - 1, 2, total, entries_crc));
+    dev.insert(2, entries.clone());
+    dev.insert(total - 2, entries.clone());
+    dev.insert(
+        total - 1,
+        test_gpt_header(total - 1, 1, total - 2, total, entries_crc),
+    );
+    let mut exfat = patterned_sector(0xEE);
+    exfat[3..11].copy_from_slice(b"EXFAT   ");
+    dev.insert(2_048, exfat);
+
+    let capture = acquire_plain_metadata(&mut dev, total).unwrap();
+
+    assert_eq!(dev.writes, 0);
+    assert!(
+        !dev.reads.contains(&2_048),
+        "filesystem boot sector must not be read"
+    );
+    assert_eq!(capture.partitions.len(), 1);
+    assert_eq!(capture.artifacts.len(), 5);
+    for lba in [0u32, 1, 2, (total - 2) as u32, (total - 1) as u32] {
+        assert!(
+            dev.reads.contains(&lba),
+            "missing GPT metadata read at LBA{lba}"
+        );
+    }
+    assert!(capture
+        .artifacts
+        .iter()
+        .all(|artifact| artifact.restore_policy == RestorePolicy::Restorable));
 }
 
 #[test]
@@ -280,7 +444,250 @@ fn lba7_compatibility_pointer_remains_authoritative_when_chs_cross_check_differs
 }
 
 #[test]
-fn metadata_capture_reads_partition_key_sectors_and_tail_evidence_without_writes() {
+fn chapter_18_b5_plain_invalid_boot_is_typed_needs_format_without_writes() {
+    use edpcli::application::post_restore::{
+        assess_partitions_readonly, PostRestorePartitionState,
+    };
+    use edpcli::edpb::ManifestPartition;
+
+    let mut dev = ReadOnlySparseDev::new();
+    dev.insert(2_048, vec![0u8; SECTOR]);
+    let partitions = vec![ManifestPartition {
+        index: 1,
+        role: Some("mbr_primary".into()),
+        partition_type: Some("mbr:0x07".into()),
+        start_lba: 2_048,
+        sector_count: 50_000,
+        filesystem_hint: Some("exfat".into()),
+        volume_label_hint: None,
+    }];
+
+    let assessment =
+        assess_partitions_readonly(&mut dev, "plain", "", 100_000, &partitions).unwrap();
+
+    assert_eq!(dev.writes, 0);
+    assert_eq!(assessment.partitions.len(), 1);
+    assert_eq!(
+        assessment.partitions[0].state,
+        PostRestorePartitionState::NeedsFormat
+    );
+    assert_eq!(
+        assessment.partitions[0].filesystem_hint.as_deref(),
+        Some("exfat")
+    );
+}
+
+#[test]
+fn chapter_18_b5_plain_valid_boot_is_typed_usable_without_writes() {
+    use edpcli::application::post_restore::{
+        assess_partitions_readonly, PostRestorePartitionState,
+    };
+    use edpcli::edpb::ManifestPartition;
+
+    let mut dev = ReadOnlySparseDev::new();
+    dev.insert(2_048, strict_ntfs_boot(50_000));
+    let partitions = vec![ManifestPartition {
+        index: 1,
+        role: Some("mbr_primary".into()),
+        partition_type: Some("mbr:0x07".into()),
+        start_lba: 2_048,
+        sector_count: 50_000,
+        filesystem_hint: Some("ntfs".into()),
+        volume_label_hint: None,
+    }];
+
+    let assessment =
+        assess_partitions_readonly(&mut dev, "plain", "", 100_000, &partitions).unwrap();
+
+    assert_eq!(dev.writes, 0);
+    assert_eq!(
+        assessment.partitions[0].state,
+        PostRestorePartitionState::Usable
+    );
+    assert_eq!(
+        assessment.partitions[0]
+            .detected_filesystem
+            .map(|value| value.label()),
+        Some("NTFS")
+    );
+}
+
+#[test]
+fn chapter_18_b5_edp_nondefault_password_is_typed_password_required() {
+    use edpcli::application::post_restore::{
+        assess_partitions_readonly, PostRestorePartitionState,
+    };
+
+    let Some(image) = load_disk_image("lexar") else {
+        eprintln!("跳过: Lexar 协议夹具不可用");
+        return;
+    };
+    let geometry = parse_partition_geometry(&image, LEXAR_DEVICE_ID, LEXAR_TOTAL_SECTORS).unwrap();
+    let encrypted_index = geometry
+        .iter()
+        .position(|partition| partition.need_encrypt != 0)
+        .expect("Lexar fixture must contain encrypted partition");
+    let mutated = mutate_lba12_u32(
+        &image,
+        LEXAR_DEVICE_ID,
+        encrypted_index,
+        0x30,
+        crc32_bare(b"original-password"),
+    );
+    let acquisition = acquire_metadata(
+        &mut ReadOnlySparseDev::new(),
+        &mutated,
+        LEXAR_DEVICE_ID,
+        LEXAR_TOTAL_SECTORS,
+    )
+    .unwrap();
+    let mut dev = ReadOnlySparseDev::new();
+    insert_protocol(&mut dev, &mutated);
+
+    let assessment = assess_partitions_readonly(
+        &mut dev,
+        "edp",
+        LEXAR_DEVICE_ID,
+        LEXAR_TOTAL_SECTORS,
+        &acquisition.partitions,
+    )
+    .unwrap();
+
+    assert_eq!(dev.writes, 0);
+    let encrypted_start = geometry[encrypted_index].start_sector;
+    let encrypted = assessment
+        .partitions
+        .iter()
+        .find(|partition| partition.start_lba == encrypted_start)
+        .expect("encrypted partition assessment");
+    assert_eq!(encrypted.state, PostRestorePartitionState::PasswordRequired);
+}
+
+#[test]
+fn chapter_18_b5_edp_bad_file_key_crc_is_typed_crypto_metadata_invalid() {
+    use edpcli::application::post_restore::{
+        assess_partitions_readonly, PostRestorePartitionState,
+    };
+
+    let Some(image) = load_disk_image("lexar") else {
+        eprintln!("跳过: Lexar 协议夹具不可用");
+        return;
+    };
+    let geometry = parse_partition_geometry(&image, LEXAR_DEVICE_ID, LEXAR_TOTAL_SECTORS).unwrap();
+    let encrypted_index = geometry
+        .iter()
+        .position(|partition| partition.need_encrypt != 0)
+        .expect("Lexar fixture must contain encrypted partition");
+    let bad_crc = geometry[encrypted_index].file_key_crc ^ 1;
+    let mutated = mutate_lba12_u32(&image, LEXAR_DEVICE_ID, encrypted_index, 0x34, bad_crc);
+    let acquisition = acquire_metadata(
+        &mut ReadOnlySparseDev::new(),
+        &mutated,
+        LEXAR_DEVICE_ID,
+        LEXAR_TOTAL_SECTORS,
+    )
+    .unwrap();
+    let mut dev = ReadOnlySparseDev::new();
+    insert_protocol(&mut dev, &mutated);
+
+    let assessment = assess_partitions_readonly(
+        &mut dev,
+        "edp",
+        LEXAR_DEVICE_ID,
+        LEXAR_TOTAL_SECTORS,
+        &acquisition.partitions,
+    )
+    .unwrap();
+
+    let encrypted_start = geometry[encrypted_index].start_sector;
+    let encrypted = assessment
+        .partitions
+        .iter()
+        .find(|partition| partition.start_lba == encrypted_start)
+        .expect("encrypted partition assessment");
+    assert_eq!(
+        encrypted.state,
+        PostRestorePartitionState::CryptoMetadataInvalid
+    );
+}
+
+#[test]
+fn chapter_18_b5_edp_without_device_id_is_typed_unsupported() {
+    use edpcli::application::post_restore::{
+        assess_partitions_readonly, PostRestorePartitionState,
+    };
+    use edpcli::edpb::ManifestPartition;
+
+    let partitions = vec![ManifestPartition {
+        index: 1,
+        role: Some("encrypt".into()),
+        partition_type: Some("edp:4".into()),
+        start_lba: 20_417,
+        sector_count: 100_000,
+        filesystem_hint: None,
+        volume_label_hint: None,
+    }];
+    let mut dev = ReadOnlySparseDev::new();
+    let assessment = assess_partitions_readonly(&mut dev, "edp", "", 200_000, &partitions).unwrap();
+
+    assert_eq!(dev.writes, 0);
+    assert_eq!(
+        assessment.partitions[0].state,
+        PostRestorePartitionState::Unsupported
+    );
+}
+
+#[test]
+fn chapter_18_b3_edp_metadata_capture_excludes_filesystem_and_keeps_protocol_extents() {
+    let Some(image) = load_disk_image("netac") else {
+        eprintln!("跳过: 真实协议夹具不可用");
+        return;
+    };
+    let partitions =
+        parse_partition_geometry(&image, NETAC_DEVICE_ID, NETAC_TOTAL_SECTORS).unwrap();
+    let sample_partition = &partitions[0];
+
+    let mut dev = ReadOnlySparseDev::new();
+    dev.insert(sample_partition.start_sector, ntfs_boot(4, 8));
+
+    let acquired =
+        acquire_metadata(&mut dev, &image, NETAC_DEVICE_ID, NETAC_TOTAL_SECTORS).unwrap();
+
+    assert_eq!(dev.writes, 0);
+    assert!(
+        !dev.reads
+            .contains(&u32::try_from(sample_partition.start_sector).unwrap()),
+        "default EDP metadata backup must not read partition filesystem boot sectors"
+    );
+    assert_eq!(acquired.partitions.len(), partitions.len());
+    assert!(acquired.artifacts.iter().all(|artifact| {
+        !artifact.id.contains("filesystem")
+            && !artifact.id.contains("prefix")
+            && !artifact.id.contains("suffix")
+            && !artifact.id.contains("fskey")
+            && !artifact.kind.contains("filesystem")
+    }));
+
+    for id in [
+        "raw.lba7_compatibility",
+        "raw.tail.metadata_mirror_512k",
+        "raw.tail.restore_node_end4",
+    ] {
+        let artifact = acquired
+            .artifacts
+            .iter()
+            .find(|artifact| artifact.id == id)
+            .unwrap_or_else(|| panic!("missing protocol/recovery artifact {id}"));
+        assert_eq!(
+            artifact.restore_policy,
+            RestorePolicy::Restorable,
+            "{id} must remain exact restorable protocol/recovery metadata"
+        );
+    }
+}
+
+#[test]
+fn legacy_deep_filesystem_evidence_is_only_read_when_explicitly_requested() {
     let Some(image) = load_disk_image("netac") else {
         eprintln!("跳过: 真实协议夹具不可用");
         return;
@@ -298,7 +705,19 @@ fn metadata_capture_reads_partition_key_sectors_and_tail_evidence_without_writes
     let acquired =
         acquire_metadata(&mut dev, &image, NETAC_DEVICE_ID, NETAC_TOTAL_SECTORS).unwrap();
     assert_eq!(dev.writes, 0);
-    assert!(!dev.reads.is_empty());
+    assert!(
+        !dev.reads
+            .contains(&u32::try_from(fs_partition.start_sector).unwrap()),
+        "metadata-only path must not read the filesystem"
+    );
+    let deep =
+        edpcli::backup_deep::acquire_deep(&mut dev, &image, NETAC_DEVICE_ID, NETAC_TOTAL_SECTORS)
+            .unwrap();
+    assert!(
+        dev.reads
+            .contains(&u32::try_from(fs_partition.start_sector).unwrap()),
+        "explicit Deep compatibility capture may read filesystem evidence"
+    );
 
     assert!(acquired
         .artifacts
@@ -309,7 +728,7 @@ fn metadata_capture_reads_partition_key_sectors_and_tail_evidence_without_writes
         .iter()
         .any(|artifact| artifact.id == "raw.tail.restore_node_end4"));
 
-    let prefix = acquired
+    let prefix = deep
         .extents
         .iter()
         .find(|extent| {
@@ -321,7 +740,7 @@ fn metadata_capture_reads_partition_key_sectors_and_tail_evidence_without_writes
         prefix.sector_count,
         fs_partition.sector_count.min(PARTITION_PREFIX_SECTORS)
     );
-    let probe_artifact = acquired
+    let probe_artifact = deep
         .artifacts
         .iter()
         .find(|artifact| {
@@ -346,6 +765,7 @@ fn metadata_container_only_marks_protocol_and_validated_lce_restorable() {
     let path = tmp.0.join("metadata.edpb");
     let capture = MetadataCapture {
         core: core(&image),
+        partitions: acquisition.partitions,
         regions: acquisition.regions,
         extents: acquisition.extents,
         artifacts: acquisition.artifacts,
@@ -375,7 +795,12 @@ fn metadata_container_only_marks_protocol_and_validated_lce_restorable() {
         .collect::<Vec<_>>();
     assert_eq!(
         restorable_ids,
-        vec![edpb::RAW_PROTOCOL_ARTIFACT_ID, "raw.lba7_compatibility"]
+        vec![
+            edpb::RAW_PROTOCOL_ARTIFACT_ID,
+            "raw.lba7_compatibility",
+            "raw.tail.metadata_mirror_512k",
+            "raw.tail.restore_node_end4",
+        ]
     );
     assert_eq!(edpb::read_raw_protocol(&path).unwrap(), image);
 }
@@ -393,6 +818,7 @@ fn metadata_container_detects_corruption_in_non_protocol_artifact() {
     let path = tmp.0.join("metadata.edpb");
     let capture = MetadataCapture {
         core: core(&image),
+        partitions: acquisition.partitions,
         regions: acquisition.regions,
         extents: acquisition.extents,
         artifacts: acquisition.artifacts,

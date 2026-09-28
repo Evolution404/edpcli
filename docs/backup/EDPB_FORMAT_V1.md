@@ -925,6 +925,8 @@ EncryptedPartitionReinitializeRequest
 
 **B5 — Post-restore assessment**
 
+**实施状态（2026-09-28）：COMPLETE。** 新增 application-owned `PostRestorePartitionState`、`PostRestoreAssessment`、`MetadataBackupReport`、`MetadataRestoreReport`、`PartitionFormatRequest`、`EncryptedPartitionReinitializeRequest`。恢复事务成功后立即进入只读 assessment；assessment 失败只降级为 typed `Unsupported`/issue，不会反转 metadata restore success。Plain 严格校验 boot sector 后区分 `Usable / NeedsFormat`；EDP 明文同样只读判断，加密域在默认密码可验证时检查 FileKeyCRC/解密 boot，否则明确 `PasswordRequired`，key record/FileKeyCRC 异常为 `CryptoMetadataInvalid`。CLI/TUI 通过 typed `WriteEvent::PostRestoreAssessment` 消费状态，不解析错误字符串。Focused tests：B5 状态矩阵 5/5、CLI write safety 32/32、B0 3/3、Clippy `-D warnings` PASS。
+
 - 实现 `Usable / NeedsFormat / PasswordRequired / CryptoMetadataInvalid / Unsupported`；
 - 全部只读，不写盘。
 

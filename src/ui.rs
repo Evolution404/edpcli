@@ -126,6 +126,24 @@ pub fn render_write_event(event: &crate::application::WriteEvent) -> String {
                 yellow("文件系统未恢复；部分分区可能需要格式化。")
             )
         }
+        WriteEvent::PostRestoreAssessment { assessment } => {
+            use crate::application::post_restore::PostRestorePartitionState;
+            let mut out = String::new();
+            for partition in &assessment.partitions {
+                let state = match partition.state {
+                    PostRestorePartitionState::Usable => "可用",
+                    PostRestorePartitionState::NeedsFormat => "需要格式化",
+                    PostRestorePartitionState::PasswordRequired => "需要原密码",
+                    PostRestorePartitionState::CryptoMetadataInvalid => "加密元数据异常",
+                    PostRestorePartitionState::Unsupported => "无法可靠判断",
+                };
+                out.push_str(&format!("分区 {}  {}\n", partition.index, state));
+            }
+            if assessment.partitions.is_empty() {
+                out.push_str("恢复后状态：无法可靠判断\n");
+            }
+            out
+        }
     }
 }
 

@@ -820,5 +820,32 @@ pub(super) fn write_progress_text(event: &crate::application::WriteEvent) -> Str
         WriteEvent::RestoreWriteCompleted => {
             "元数据恢复成功；文件系统未恢复，部分分区可能需要格式化".to_string()
         }
+        WriteEvent::PostRestoreAssessment { assessment } => {
+            use crate::application::post_restore::PostRestorePartitionState;
+            let needs_format = assessment
+                .partitions
+                .iter()
+                .filter(|partition| partition.state == PostRestorePartitionState::NeedsFormat)
+                .count();
+            let password_required = assessment
+                .partitions
+                .iter()
+                .filter(|partition| partition.state == PostRestorePartitionState::PasswordRequired)
+                .count();
+            let invalid = assessment
+                .partitions
+                .iter()
+                .filter(|partition| {
+                    partition.state == PostRestorePartitionState::CryptoMetadataInvalid
+                })
+                .count();
+            format!(
+                "恢复后检查：{} 个分区；需格式化 {}；需原密码 {}；加密元数据异常 {}",
+                assessment.partitions.len(),
+                needs_format,
+                password_required,
+                invalid
+            )
+        }
     }
 }

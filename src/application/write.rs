@@ -56,6 +56,9 @@ pub enum WriteEvent {
         path: PathBuf,
     },
     RestoreWriteCompleted,
+    PostRestoreAssessment {
+        assessment: super::post_restore::PostRestoreAssessment,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -918,6 +921,21 @@ pub fn restore_flow(
         })?;
     diskio::execute_write_transaction(dev, &transaction)?;
     ctx.prompt.write_event(WriteEvent::RestoreWriteCompleted);
+    let assessment = super::post_restore::assess_partitions_readonly(
+        dev,
+        &verified.manifest.snapshot.device_state,
+        &verified.manifest.device.device_id,
+        current_total_sectors,
+        &verified.manifest.partitions,
+    )
+    .unwrap_or_else(|error| {
+        super::post_restore::PostRestoreAssessment::unsupported(
+            &verified.manifest.partitions,
+            format!("恢复后只读检查失败: {error}"),
+        )
+    });
+    ctx.prompt
+        .write_event(WriteEvent::PostRestoreAssessment { assessment });
     Ok(EXIT_OK)
 }
 

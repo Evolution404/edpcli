@@ -17,6 +17,7 @@ pub mod inspect_tree;
 pub mod media_identity;
 pub mod media_identity_observer;
 pub mod partition_table;
+pub mod post_restore;
 pub mod progress;
 pub mod provision;
 pub mod target_session;
