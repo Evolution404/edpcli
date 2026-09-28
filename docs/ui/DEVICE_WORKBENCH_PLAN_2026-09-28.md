@@ -579,7 +579,7 @@ P14 已完成：专项回归通过，`tui_suite` 281/281 通过，快速门禁 4
 - 极小区域内部继续允许完全留空，但背景必须铺满其真实可视格子，不再需要字符占位；
 - 回归门禁锁定：设备容量地图必须使用中央 `disk_region_fill`，且不得使用通用 selection 背景。
 
-Mac 当前离线，本阶段只在 GitHub 远端开发；以跨平台 CI 和 Virtual Disk HIL 作为当前验证依据，待 Mac 恢复后再执行本机 release 安装和实机视觉复核。
+P15 远端实现与验证已完成：提交 `9ce4ec121f07ab331e067ce615e5558773e24fa4` 的 Rust CI（run `36383562895`）跨 Linux/macOS/Windows 全部通过；Virtual Disk HIL（run `36383562856`）4/4 通过。Mac 当前离线，因此本阶段未执行本机 release 安装；待 Mac 恢复后只需拉取最新分支、重新编译安装并进行实机视觉复核。
 
 ## 18. 完成标准
 
