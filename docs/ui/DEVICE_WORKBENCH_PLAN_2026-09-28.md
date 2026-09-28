@@ -1,0 +1,491 @@
+# 设备工作台重构计划（2026-09-28）
+
+状态：IN PROGRESS  
+实施分支：`feat/device-workbench-20260928`  
+基线：`82234bea2b58db1dc3025f27e157d0c9fac27382`
+
+## 1. 目标
+
+把“设备”一级 Tab 重构为一个完整设备工作台。页面只保留一个“当前设备”来源：**设备列表中的高亮行**。下方不再重复“当前设备 · diskX”、mode、容量、VID:PID、onlyid、备份数等快速摘要条。
+
+最终页面分两层：
+
+1. 上半区：设备列表，用于发现、筛选、比较和选择设备。
+2. 下半区：选中设备的工作台，采用“左侧设备信息树 + 右侧上下文详情”的 Master/Detail 结构。
+
+设备工作台必须在不进入 Inspect 的情况下，让用户直接看到并理解：
+
+- 身份信息；
+- 容量布局；
+- 状态与诊断；
+- 当前设备相关备份；
+- 协议摘要。
+
+Inspect 仅保留为深入查看扇区、Hex、字段和已验证解码结构的入口。
+
+## 2. 明确不做
+
+本轮是纯 TUI 信息架构与 presentation/state 重构。禁止改变：
+
+- LBA0～12 / LCE 协议语义；
+- mode0～mode3 与 Plain 语义；
+- K6；
+- LBA10 trailing 384B；
+- device_id / onlyid；
+- media identity；
+- EDPB；
+- 分区几何推导规则；
+- 备份格式；
+- 制盘事务和所有安全门槛；
+- system disk guard；
+- whole-USB confirmation；
+- mandatory pre-write backup；
+- unmount / lock；
+- reopen identity verification；
+- atomic write / readback / rollback。
+
+Renderer 不允许增加磁盘 I/O、文件系统扫描或备份目录遍历。所有展示只能消费现有 state/application/domain 数据。
+
+## 3. 顶层导航不变
+
+一级 Tab 仍只有：
+
+```text
+设备 | 备份
+```
+
+规则：
+
+- 一级 `Tab/Shift-Tab`、`gt/gT`：只切“设备/备份”；
+- 设备页内部 Pane 使用 `Ctrl-w h/j/k/l/w/W`；
+- `j/k` 只解释为当前焦点 Pane 内的移动/滚动；
+- `o` 只用于树节点展开/折叠；
+- `i` 进入 Inspect；
+- `p` 制盘；
+- `b` 创建当前设备备份；
+- `r` 刷新；
+- `q` 全局退出。
+
+本轮不得重新改变刚收口的 Tab 层级规则。
+
+## 4. 最终页面信息架构
+
+### 4.1 Wide
+
+```text
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ 设备列表                                                                    │
+│ > disk4 ...                                                                 │
+│   disk5 ...                                                                 │
+├───────────────────────┬─────────────────────────────────────────────────────┤
+│ 设备信息树            │ 当前节点详情                                        │
+│                       │                                                     │
+│   身份信息            │                                                     │
+│ ▾ 容量布局            │                                                     │
+│   ├ EDP 主协议区      │                                                     │
+│   ├ 空闲区域          │                                                     │
+│   ├ 启动/交换区       │                                                     │
+│   ├ 保密区            │                                                     │
+│   ▸ 尾部区域          │                                                     │
+│   状态与诊断          │                                                     │
+│   备份关系            │                                                     │
+│   协议摘要            │                                                     │
+└───────────────────────┴─────────────────────────────────────────────────────┘
+```
+
+禁止出现：
+
+```text
+当前设备 · disk4
+EDP mode1 · 健康 · 8.05 GB · VID:PID ... · onlyid ... · 备份 5
+```
+
+因为设备列表高亮行已是唯一当前设备来源。
+
+### 4.2 Medium
+
+- 设备列表约 42% 高度；
+- 下部工作台约 58% 高度；
+- Tree 约 35%，Detail 约 65%；
+- Detail 中原本双栏的信息卡自动改为纵向布局。
+
+### 4.3 Compact
+
+一次只渲染一个设备 Pane：
+
+```text
+DevicesList -> DevicesTree -> DevicesDetail
+```
+
+由 `Ctrl-w` 导航，selection、展开状态、详情滚动不得丢失。
+
+## 5. Pane 架构
+
+淘汰：
+
+```text
+DevicesList
+DevicesSummary
+DevicesStats
+```
+
+改为：
+
+```text
+DevicesList
+DevicesTree
+DevicesDetail
+```
+
+含义：
+
+- `DevicesList`：设备表；
+- `DevicesTree`：设备信息树；
+- `DevicesDetail`：右侧上下文详情。
+
+`DevicesStats` 不再作为独立 Pane，相关信息并入“状态与诊断”。
+
+## 6. 设备信息树
+
+固定一级节点：
+
+```text
+Identity
+Capacity
+Status
+Backups
+Protocol
+```
+
+只有真正有子节点的节点显示 `▸/▾`。
+
+容量布局展开时动态生成子节点：
+
+```text
+容量布局
+├─ EDP 主协议区
+├─ 空闲区域
+├─ 启动/交换区
+├─ 保密区
+└─ 尾部区域
+```
+
+尾部区域继续展开：
+
+```text
+尾部区域
+├─ LCE
+├─ 空闲/保留区域
+├─ 历史备份镜像
+└─ restore-node
+```
+
+动态节点必须由 `DiskLayoutModel` 生成，不允许在 Devices 页面重新推导分区几何。
+
+## 7. 状态模型
+
+旧模型：
+
+```rust
+summary_selected: usize
+summary_expanded: u8
+```
+
+不能继续作为新版树的主状态。
+
+新增语义键，例如：
+
+```rust
+enum DeviceInfoNodeKey {
+    Identity,
+    Capacity,
+    LayoutSegment {
+        start_lba: u64,
+        kind: DiskRegionKind,
+    },
+    TailGroup,
+    Status,
+    Backups,
+    Protocol,
+}
+```
+
+Tree presentation 使用稳定语义 key，不依赖“第几行”。
+
+建议 presentation node：
+
+```rust
+struct DeviceInfoTreeNode {
+    key: DeviceInfoNodeKey,
+    depth: u8,
+    label: String,
+    value: Option<String>,
+    expandable: bool,
+    expanded: bool,
+}
+```
+
+State 至少维护：
+
+- selected node key；
+- expanded node set；
+- Devices pane focus；
+- DevicesDetail viewport。
+
+切换设备时：
+
+- 能在新设备找到同一语义节点，则保持；
+- 动态 LayoutSegment 在新盘不存在时回退到 Capacity；
+- Detail scroll 回顶部；
+- 不允许留下悬空 index。
+
+## 8. 身份信息详情
+
+右侧至少显示：
+
+- disk；
+- model；
+- protocol/bus；
+- physical capacity；
+- VID:PID；
+- serial；
+- onlyid；
+- device_id；
+- department；
+- user/name；
+- confirmed provision kind；
+- 身份可靠度；
+- 身份依据。
+
+身份可靠度必须复用现有 media identity / identity pin 的真实结论，不新建第二套判定。
+
+## 9. 容量布局详情
+
+### 9.1 Capacity 根节点
+
+直接显示：
+
+- 全盘比例条；
+- legend；
+- 区域表：
+  - 区域；
+  - LBA 闭区间；
+  - sector count；
+  - human capacity；
+  - percentage；
+  - 状态/类型。
+
+删除现有：
+
+```text
+尾部区域详情可在 Inspect 全盘布局中按 o 展开
+```
+
+尾部必须在当前设备页面直接展开。
+
+### 9.2 LayoutSegment
+
+选中任一 segment 时右侧显示：
+
+- label；
+- kind；
+- start LBA；
+- end LBA；
+- sector count；
+- capacity；
+- percentage；
+- 当前 segment 在全盘 bar 中的位置；
+- 只有已有证据的 protocol/partition role/file-system 等附加字段。
+
+没有证据的内容不得猜测。
+
+### 9.3 TailGroup
+
+选中 TailGroup 时显示其覆盖范围、总容量和 children 表。
+
+选择 child（LCE / BackupMirror / RestoreNode / Free 等）时，显示该 child 的真实几何信息。
+
+## 10. 状态与诊断详情
+
+只展示当前扫描阶段真实可知的信息，例如：
+
+- USB / 外接设备状态；
+- raw access 是否可用；
+- EDP/Plain 是否已确认；
+- identity evidence；
+- partition geometry；
+- LCE geometry；
+- canonical layout 是否完整；
+- backup relation count；
+- probe error / denied reason。
+
+禁止在这里声称只有制盘事务中才成立的 readback、rollback 等结果。
+
+## 11. 备份关系详情
+
+设备页只显示**当前选中设备相关的备份**。
+
+备份一级 Tab 继续负责“全局所有备份”。
+
+如果 AppState 目前只有：
+
+- confirmed count；
+- possible count；
+
+则第一阶段先显示计数和状态，不允许 Renderer 临时遍历备份目录。
+
+只有已有 backup catalog/state 能提供具体条目时，才展示条目表。
+
+## 12. 协议摘要详情
+
+只展示帮助用户快速判断设备的业务摘要，例如：
+
+- EDP / Plain；
+- official mode；
+- LBA0～12 是否可确认；
+- partition count；
+- LCE 是否可确认；
+- department / user / label / onlyid 等已经扫描出的关键协议信息。
+
+完整字段/raw/Hex 始终通过 `i` 进入 Inspect。
+
+## 13. Presentation / Renderer 分层
+
+本轮不要继续膨胀 `src/tui/devices/render.rs`。
+
+目标结构：
+
+```text
+src/tui/devices/
+├── mod.rs
+├── state.rs
+├── presentation.rs
+├── render.rs
+├── list_render.rs
+├── tree_render.rs
+└── detail_render.rs
+```
+
+职责：
+
+- `presentation.rs`：真实 domain/state -> UI presentation model；
+- `list_render.rs`：设备表；
+- `tree_render.rs`：左树；
+- `detail_render.rs`：右侧详情；
+- `render.rs`：仅做响应式布局与组合；
+- `state.rs`：Tree selection/expanded/pane state。
+
+Renderer 不做业务 I/O。
+
+## 14. 视觉规则
+
+继续使用现有低饱和 TrueColor Theme。
+
+- 当前 Pane：focused border；
+- 当前 Tree node：`▌` + accent；
+- disk region：继续复用 `DiskRegionKind` semantic colors；
+- PASS/Warning/Error：复用现有 semantic theme；
+- 避免大面积高饱和 reversed background；
+- 不引入另一套私有颜色。
+
+## 15. 交互
+
+### DevicesList
+
+- `j/k`：换设备；
+- 表格 `h/l, </>, 0/$, H/L, s/S` 保持当前统一契约；
+- `Enter`：focus 到 DevicesTree；
+- `Ctrl-w`：Pane 导航。
+
+### DevicesTree
+
+- `j/k`：移动可见节点；
+- `o`：展开/折叠；
+- `Enter`：focus 到 DevicesDetail；
+- `Ctrl-w`：Pane 导航；
+- `Esc`：优先返回 DevicesList focus。
+
+### DevicesDetail
+
+- `j/k`：滚详情；
+- `gg/G`、`Ctrl-u/Ctrl-d`：视口导航；
+- `Esc`：返回 DevicesTree focus。
+
+业务动作仍基于当前设备：
+
+- `i` Inspect；
+- `p` Provision；
+- `b` Backup；
+- `r` Refresh。
+
+## 16. 测试门禁
+
+必须新增正式回归：
+
+1. 一级 Tab 仍只有 Devices/Backups；
+2. 设备页不存在冗余“当前设备 · diskX”标题；
+3. 不存在额外快速摘要条；
+4. Pane 顺序为 DevicesList/DevicesTree/DevicesDetail；
+5. 设备高亮变化会更新 Tree/Detail；
+6. Capacity `o` 当前页展开；
+7. TailGroup `o` 当前页展开；
+8. segment 几何与 `canonical_layout()` 完全一致；
+9. canonical layout 失败只显示原因，不猜布局；
+10. Tree `j/k` 不滚 Detail；
+11. Detail `j/k` 不改 Tree selection；
+12. `Tab` 仍只切一级 Tab；
+13. `Ctrl-w` 只切设备内部 Pane；
+14. `i/p/b` 保持原业务入口；
+15. 切换不同设备时动态 node selection 安全回退；
+16. Compact 模式 Pane 切换不丢 selection / expanded / viewport；
+17. Devices renderer 不新增 disk/file I/O；
+18. 协议/写盘安全契约保持不变。
+
+## 17. 实施阶段
+
+### P0 — 契约测试
+先写失败测试锁定新 Pane、无冗余标题、Tree/Detail 语义和 Tab 不跨层。
+
+### P1 — Tree domain/state
+实现 `DeviceInfoNodeKey`、expanded state、stable selection 与设备切换回退。
+
+### P2 — Pane 架构
+把 `DevicesSummary/DevicesStats` 迁移为 `DevicesTree/DevicesDetail`。
+
+### P3 — 页面骨架
+实现设备列表 + 下方 Tree/Detail 响应式骨架，删除“当前设备”标题和摘要条。
+
+### P4 — Identity + Status
+先实现身份和状态详情，验证 Master/Detail 基础架构。
+
+### P5 — Capacity
+接入 `row.canonical_layout()`；实现全盘 bar、segment table、区域详情和 TailGroup 当前页展开。
+
+### P6 — Backups
+接入已有 backup state/catalog 能提供的当前设备关联信息；没有条目证据时只显示真实计数。
+
+### P7 — Protocol
+实现轻量协议摘要，完整解析继续留给 Inspect。
+
+### P8 — Responsive
+收口 Wide/Medium/Compact。
+
+### P9 — Help/docs
+同步 footer、`?` help、当前计划状态。
+
+### P10 — Validation
+GitHub CI/远端可执行门禁先跑；恢复 Mac 后再执行本机 release install 和真实终端人工验收。Mac 不可用于本阶段远端实现。
+
+## 18. 完成标准
+
+只有同时满足以下条件，才可标记 COMPLETE：
+
+- 设备页已从 flat summary 改为 List + Tree + Detail；
+- 无冗余“当前设备”标题/快速摘要；
+- Identity/Capacity/Status/Backups/Protocol 五类信息都在当前设备页可访问；
+- Capacity/Tail 在当前页面直接展开，不要求先进入 Inspect；
+- 动态布局全部来自 `DiskLayoutModel`；
+- Wide/Medium/Compact 都可用；
+- 快捷键遵守当前全局导航契约；
+- 测试和 CI 通过；
+- 没有改变任何协议/写盘安全语义。
