@@ -12,6 +12,28 @@ fn fixture_pin() -> MediaIdentityPin {
 }
 
 #[test]
+fn media_pin_accepts_v3_raw_serial_and_rejects_changed_serial() {
+    use super::super::media_identity::{serial_digest_evidence, SerialQuality};
+    let image = vec![0; 13 * SECTOR];
+    let mut observed = super::super::media_identity::MediaIdentitySnapshot::default();
+    observed.hardware.serial = Some("HIKSEMI-TEST-001".into());
+    observed.hardware.serial_quality = SerialQuality::Usable;
+    let mut prepared = observed.clone();
+    prepared.hardware.serial_sha256 =
+        serial_digest_evidence(prepared.hardware.serial.as_deref()).sha256;
+    let pin = MediaIdentityPin::new(prepared, &image);
+    pin.verify(&observed, &image).unwrap();
+    super::super::media_identity::MediaIdentityResumePin::from_pin(&pin)
+        .verify(&observed, &image)
+        .unwrap();
+    observed.hardware.serial = Some("HIKSEMI-TEST-002".into());
+    assert_eq!(
+        pin.verify(&observed, &image),
+        Err(super::super::media_identity::MediaIdentityPinConflict::SerialChangedOrLost)
+    );
+}
+
+#[test]
 fn host_lineage_record_is_immutable_and_stays_under_backup_dir() {
     let root = std::env::temp_dir().join(format!(
         "edpcli-lineage-{}-{}",

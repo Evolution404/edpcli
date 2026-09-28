@@ -198,7 +198,7 @@ impl MediaIdentityResumePin {
     ) -> Result<(), MediaIdentityPinConflict> {
         if self.serial_quality == SerialQuality::Usable
             && (observed.hardware.serial_quality != SerialQuality::Usable
-                || self.serial_sha256 != observed.hardware.serial_sha256)
+                || self.serial_sha256 != serial_digest_for_pin(&observed.hardware))
         {
             return Err(MediaIdentityPinConflict::SerialChangedOrLost);
         }
@@ -235,7 +235,8 @@ impl MediaIdentityPin {
     ) -> Result<(), MediaIdentityPinConflict> {
         if self.snapshot.hardware.serial_quality == SerialQuality::Usable
             && (observed.hardware.serial_quality != SerialQuality::Usable
-                || self.snapshot.hardware.serial_sha256 != observed.hardware.serial_sha256)
+                || serial_digest_for_pin(&self.snapshot.hardware)
+                    != serial_digest_for_pin(&observed.hardware))
         {
             return Err(MediaIdentityPinConflict::SerialChangedOrLost);
         }
@@ -254,6 +255,13 @@ impl MediaIdentityPin {
         }
         Ok(())
     }
+}
+
+fn serial_digest_for_pin(hardware: &HardwareIdentityEvidence) -> Option<String> {
+    hardware
+        .serial_sha256
+        .clone()
+        .or_else(|| serial_digest_evidence(hardware.serial.as_deref()).sha256)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
