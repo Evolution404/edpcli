@@ -17,7 +17,10 @@ use edpcli::diskio::{
     create_backup, find_backups, parse_backup_name, prune_candidates, scan_backup_dir, BackupEntry,
     BackupIntegrityStatus, BackupMeta, DiskFacts,
 };
-use edpcli::edpb::{self, CoreCapture};
+use edpcli::edpb::{
+    self, ArtifactCompleteness, ArtifactInput, CoreCapture, Extent, ManifestPartition,
+    MetadataCapture, Region, RestorePolicy, SemanticStatus,
+};
 
 struct FixedClock;
 impl Clock for FixedClock {
@@ -88,6 +91,70 @@ fn write_backup(dir: &std::path::Path, name: &str, data: &[u8]) -> std::path::Pa
     };
     edpb::write_core_backup(&p, &capture).unwrap();
     p
+}
+
+fn write_plain_metadata_v3(
+    dir: &std::path::Path,
+    name: &str,
+    total_sectors: u64,
+) -> std::path::PathBuf {
+    let path = dir.join(name);
+    let legacy_projection = "disk&ven_test&prod_plain";
+    let protocol_placeholder = vec![0u8; METADATA_IMAGE_LEN];
+    let region_id = "region.partition_table.mbr".to_string();
+    let extent_id = "extent.partition_table.mbr".to_string();
+    let capture = MetadataCapture {
+        core: CoreCapture {
+            snapshot_id: format!("plain-{name}"),
+            created_epoch: 1_789_000_100,
+            disk_number: Some(5),
+            vid: "2bdf".into(),
+            pid: "0300".into(),
+            device_id: legacy_projection.into(),
+            onlyid: None,
+            total_sectors: Some(total_sectors),
+            logical_sector_size: SECTOR as u32,
+            edpcli_version: env!("CARGO_PKG_VERSION").into(),
+            device_state: "plain".into(),
+            lba0_12: &protocol_placeholder,
+        },
+        partitions: vec![ManifestPartition {
+            index: 1,
+            role: Some("mbr_primary".into()),
+            partition_type: Some("mbr:0x07".into()),
+            start_lba: 2_048,
+            sector_count: total_sectors - 2_048,
+            filesystem_hint: Some("exfat".into()),
+            volume_label_hint: None,
+        }],
+        regions: vec![Region {
+            id: region_id.clone(),
+            role: "partition_table".into(),
+            start_lba: Some(0),
+            sector_count: Some(1),
+            semantic_status: SemanticStatus::Identified,
+        }],
+        extents: vec![Extent {
+            id: extent_id.clone(),
+            region_id,
+            start_lba: 0,
+            sector_count: 1,
+            purpose: "mbr_partition_table".into(),
+        }],
+        artifacts: vec![ArtifactInput {
+            id: "raw.partition_table.mbr".into(),
+            kind: "raw_sectors".into(),
+            media_type: "application/octet-stream".into(),
+            source_extent_ids: vec![extent_id],
+            derivation: None,
+            restore_policy: RestorePolicy::Restorable,
+            completeness: ArtifactCompleteness::Complete,
+            data: vec![0u8; SECTOR],
+        }],
+        notes: Vec::new(),
+    };
+    edpb::write_metadata_backup(&path, &capture).unwrap();
+    path
 }
 
 #[test]
@@ -364,6 +431,48 @@ fn backup_collision_never_overwrites_existing_file() {
     );
     assert_eq!(fs::read(&path).unwrap(), first, "同名备份绝不能被静默覆盖");
     assert!(edpb::verify_file(&path).is_ok());
+}
+
+#[test]
+fn plain_v3_metadata_without_protocol_core_is_healthy_and_keeps_plain_kind() {
+    let tmp = TmpDir::new("plain_v3_catalog");
+    let total_sectors = 245_760_000u64;
+    let path = write_plain_metadata_v3(
+        &tmp.0,
+        "disk5_245760000_vid2bdf_pid0300_disk&ven_test&prod_plain_20260929_073100.edpb",
+        total_sectors,
+    );
+
+    let verified = edpb::verify_file(&path).expect("Plain v3 metadata container must verify");
+    assert_eq!(verified.manifest.schema, "edpb.manifest.v3");
+    assert_eq!(verified.manifest.snapshot.device_state, "plain");
+    assert!(
+        edpb::read_raw_protocol(&path).is_err(),
+        "Plain v3 metadata intentionally has no fixed LBA0-12 protocol artifact"
+    );
+
+    let entries = scan_backup_dir(&tmp.0);
+    let entry = entries
+        .iter()
+        .find(|entry| entry.path == path)
+        .expect("catalog entry");
+    assert!(
+        entry.size_ok,
+        "valid Plain v3 metadata must not be marked as 大小异常 merely because protocol core is absent"
+    );
+    assert_eq!(entry.integrity_status, BackupIntegrityStatus::Verified);
+    assert_eq!(
+        entry.provision_kind,
+        Some(edpcli::provision::DiskProvisionKind::Plain)
+    );
+
+    let rows = edpcli::application::scan_backup_workspace(&tmp.0);
+    let identity = edpcli::application::identity::WorkspaceIdentity::from_backup(&rows[0]);
+    assert_eq!(
+        identity.provision_kind,
+        Some(edpcli::provision::DiskProvisionKind::Plain),
+        "verified Plain v3 row must show 普通盘"
+    );
 }
 
 #[test]

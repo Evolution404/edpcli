@@ -293,10 +293,21 @@ pub fn scan_backup_file(path: &Path) -> Option<BackupEntry> {
         data.get(8 * SECTOR..9 * SECTOR)
             .and_then(|bytes| bytes.try_into().ok())
     });
-    let size_ok = raw
-        .as_ref()
-        .map(|data| data.len() == crate::common::METADATA_IMAGE_LEN)
-        .unwrap_or(false);
+    // Historical/Core/EDP metadata containers require the fixed LBA0-12
+    // protocol artifact. Plain v3 metadata deliberately does not store that
+    // protocol core; its raw partition-table artifacts are validated by
+    // verify_file()/validate_manifest_graph instead. Do not classify that
+    // intentional omission as a size error.
+    let size_ok = verified.as_ref().is_some_and(|container| {
+        let manifest = &container.manifest;
+        let plain_metadata_v3 = manifest.schema == "edpb.manifest.v3"
+            && manifest.snapshot.device_state.eq_ignore_ascii_case("plain")
+            && manifest.snapshot.capture_level == crate::edpb::CaptureLevel::Metadata;
+        plain_metadata_v3
+            || raw
+                .as_ref()
+                .is_some_and(|data| data.len() == crate::common::METADATA_IMAGE_LEN)
+    });
     let integrity_status = if verified.is_some() && size_ok {
         BackupIntegrityStatus::Verified
     } else {
