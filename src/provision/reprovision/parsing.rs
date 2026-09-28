@@ -243,3 +243,56 @@ pub fn parse_existing_provision(
         force_change_password,
     }))
 }
+
+/// Replace one encrypted partition's key records without regenerating its
+/// geometry, PassInfo, or any other protocol bytes.
+pub fn rekey_existing_partition_image(
+    image: &super::super::ProvisionImage,
+    device_id: &str,
+    total_sectors: u64,
+    partition_index: u32,
+    legacy: super::super::LegacyLba7KeyMaterial,
+    current: super::super::ProvisionKeyMaterial,
+) -> Result<super::super::ProvisionImage, String> {
+    if current.encrypt_mode != super::super::FileKeyWrapMode::Sm4 {
+        return Err("reinitialize requires the verified SM4 data profile".into());
+    }
+    let parsed = parse_existing_provision(image, device_id, total_sectors)?
+        .ok_or("target has no EDP partition records")?;
+    let index = partition_index
+        .checked_sub(1)
+        .and_then(|index| usize::try_from(index).ok())
+        .ok_or("invalid EDP partition index")?;
+    let record = parsed.records.get(index).ok_or("EDP partition not found")?;
+    if record.lba12.need_encrypt == 0 || !parsed.profile.partitions[index].physically_encrypted {
+        return Err("selected partition is not an encrypted data partition".into());
+    }
+    let crc = crc32_bare(device_id.as_bytes());
+    let mut bytes = image.as_bytes().to_vec();
+    let mut plain7 = xor_rolling(&bytes[7 * SECTOR..8 * SECTOR], (crc & 0xffff) ^ (crc >> 16));
+    let mut plain12 = a6b0_full(&bytes[12 * SECTOR..13 * SECTOR], &crc.to_le_bytes(), 0);
+    let base7 = index * 0x40;
+    let base12 = index * 0x60;
+    plain7[base7 + 0x30..base7 + 0x40].copy_from_slice(&legacy.packed16());
+    plain12[base12 + 0x30..base12 + 0x48].copy_from_slice(&current.packed24());
+    plain12[base12 + 0x58] = current.encrypt_mode.raw();
+    bytes[7 * SECTOR..8 * SECTOR]
+        .copy_from_slice(&xor_rolling(&plain7, (crc & 0xffff) ^ (crc >> 16)));
+    bytes[12 * SECTOR..13 * SECTOR].copy_from_slice(&crate::crypto::a7f0_full(
+        &plain12,
+        &crc.to_le_bytes(),
+        0,
+    ));
+    let updated = super::super::ProvisionImage::from_bytes(bytes)?;
+    let verified = parse_existing_provision(&updated, device_id, total_sectors)?
+        .ok_or("rekeyed EDP image has no partition records")?;
+    if verified.profile != parsed.profile || verified.records.len() != parsed.records.len() {
+        return Err("rekey changed partition geometry or role".into());
+    }
+    for (slot, (before, after)) in parsed.records.iter().zip(&verified.records).enumerate() {
+        if slot != index && before != after {
+            return Err("rekey changed another partition record".into());
+        }
+    }
+    Ok(updated)
+}

@@ -2,6 +2,24 @@ use super::*;
 use crate::sectors::EdpfPartition;
 
 #[test]
+fn yes_flag_does_not_bypass_independent_key_domain_confirmation() {
+    struct Reject;
+    impl Prompter for Reject {
+        fn prompt_line(&mut self, _message: &str) -> String {
+            String::new()
+        }
+
+        fn confirm_yes(&mut self, _message: &str) -> bool {
+            false
+        }
+    }
+
+    let mut prompt = AlwaysYes(Reject);
+    assert!(prompt.confirm_write_yes("ordinary write"));
+    assert!(!prompt.confirm_reinitialize_yes("replace encrypted key domain"));
+}
+
+#[test]
 fn finish_preserves_business_error_exit_code() {
     assert_eq!(
         finish(Err(EdpCliError::new(EXIT_IO, "expected failure"))),

@@ -17,10 +17,15 @@ use crate::provision::{
 };
 
 mod format_operation;
+mod reinitialize;
 pub use format_operation::format_partition_after_restore_on_disk;
 pub use format_operation::format_partition_on_disk;
 pub use format_operation::{
     format_encrypted_partition_after_restore_on_disk, format_encrypted_partition_on_disk,
+};
+pub use reinitialize::{
+    reinitialize_encrypted_partition_after_restore_on_disk,
+    reinitialize_encrypted_partition_on_disk, EncryptedPartitionReinitializeResult,
 };
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -131,6 +136,32 @@ pub struct EncryptedPartitionReinitializeRequest {
     new_password: SecretBytes,
 }
 
+pub(crate) fn build_empty_partition_image(
+    partition: &ManifestPartition,
+    filesystem: OfficialFilesystemFormat,
+    volume_label: &str,
+    volume_serial: u32,
+) -> Result<crate::provision::SparseFilesystemImage, String> {
+    match filesystem {
+        OfficialFilesystemFormat::Fat16 => build_empty_fat16(
+            partition.start_lba,
+            partition.sector_count,
+            volume_serial,
+            volume_label,
+        ),
+        OfficialFilesystemFormat::ExFat => build_empty_exfat(
+            partition.start_lba,
+            partition.sector_count,
+            volume_serial,
+            volume_label,
+        ),
+        OfficialFilesystemFormat::Fat32 | OfficialFilesystemFormat::Ntfs => Err(format!(
+            "portable filesystem writer does not yet implement {}",
+            filesystem.config_token()
+        )),
+    }
+}
+
 impl EncryptedPartitionReinitializeRequest {
     pub fn new(
         partition_index: u32,
@@ -190,25 +221,9 @@ pub(crate) fn format_partition_after_restore(
         {
             return Err("恢复后评估分区几何与格式化目标不一致".into());
         }
-        let plain_image = match request.filesystem {
-            OfficialFilesystemFormat::Fat16 => build_empty_fat16(
-                partition.start_lba,
-                partition.sector_count,
-                volume_serial,
-                volume_label,
-            ),
-            OfficialFilesystemFormat::ExFat => build_empty_exfat(
-                partition.start_lba,
-                partition.sector_count,
-                volume_serial,
-                volume_label,
-            ),
-            OfficialFilesystemFormat::Fat32 | OfficialFilesystemFormat::Ntfs => Err(format!(
-                "portable filesystem writer does not yet implement {}",
-                request.filesystem.config_token()
-            )),
-        }
-        .map_err(|error| format!("格式化镜像生成失败: {error}"))?;
+        let plain_image =
+            build_empty_partition_image(partition, request.filesystem, volume_label, volume_serial)
+                .map_err(|error| format!("格式化镜像生成失败: {error}"))?;
         if plain_image
             .sectors()
             .keys()

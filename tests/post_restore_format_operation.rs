@@ -24,6 +24,7 @@ struct SparseFormatDev {
     syncs: usize,
     swap_on_reopen: bool,
     fail_write: bool,
+    fail_write_once_after: Option<usize>,
 }
 
 impl SparseFormatDev {
@@ -42,6 +43,7 @@ impl SparseFormatDev {
             syncs: 0,
             swap_on_reopen: false,
             fail_write: false,
+            fail_write_once_after: None,
         }
     }
 }
@@ -58,6 +60,13 @@ impl SectorDev for SparseFormatDev {
     fn write_sector(&mut self, lba: u32, bytes: &[u8]) -> io::Result<()> {
         if self.fail_write {
             return Err(io::Error::other("injected format failure"));
+        }
+        if self
+            .fail_write_once_after
+            .is_some_and(|after| self.writes.len() >= after)
+        {
+            self.fail_write_once_after = None;
+            return Err(io::Error::other("injected one-shot write failure"));
         }
         self.writes.push(lba);
         self.sectors.insert(lba, bytes.to_vec());
@@ -625,4 +634,176 @@ fn corrupted_file_key_crc_is_typed_and_has_zero_writes() {
         ))
     );
     assert!(dev.writes.is_empty());
+}
+
+fn reinitialize_request() -> edpcli::application::post_restore::EncryptedPartitionReinitializeRequest
+{
+    edpcli::application::post_restore::EncryptedPartitionReinitializeRequest::new(
+        3,
+        b"FreshPass1!",
+        b"FreshPass1!",
+    )
+    .unwrap()
+}
+
+fn run_reinitialize(
+    runner: &common::FakeRunner,
+    dev: &mut SparseFormatDev,
+    confirm: bool,
+    outcome: &MetadataRestoreOutcome,
+) -> edpcli::application::post_restore::EncryptedPartitionReinitializeResult {
+    edpcli::application::post_restore::reinitialize_encrypted_partition_on_disk(
+        runner,
+        6,
+        dev,
+        &mut Confirm(confirm),
+        outcome.format_target_pin.as_ref().unwrap(),
+        outcome,
+        &reinitialize_request(),
+        OfficialFilesystemFormat::ExFat,
+        "保密区",
+        0x1234_5678,
+    )
+}
+
+#[test]
+fn reinitialize_requires_new_password_twice_and_a_distinct_password() {
+    use edpcli::application::post_restore::EncryptedPartitionReinitializeRequest;
+    assert!(EncryptedPartitionReinitializeRequest::new(3, b"", b"").is_err());
+    assert!(EncryptedPartitionReinitializeRequest::new(3, b"one", b"two").is_err());
+    let (runner, mut dev, outcome, _) = encrypted_mode0_fixture();
+    let same =
+        EncryptedPartitionReinitializeRequest::new(3, b"EncryptPass1!", b"EncryptPass1!").unwrap();
+    let result = edpcli::application::post_restore::reinitialize_encrypted_partition_on_disk(
+        &runner,
+        6,
+        &mut dev,
+        &mut Confirm(true),
+        outcome.format_target_pin.as_ref().unwrap(),
+        &outcome,
+        &same,
+        OfficialFilesystemFormat::ExFat,
+        "保密区",
+        0x1234_5678,
+    );
+    assert!(result.result.is_err());
+    assert!(dev.writes.is_empty());
+}
+
+#[test]
+fn reinitialize_safety_checks_prevent_all_writes() {
+    let (runner, mut dev, outcome, _) = encrypted_mode0_fixture();
+    assert!(run_reinitialize(&runner, &mut dev, false, &outcome)
+        .result
+        .is_err());
+    assert!(dev.writes.is_empty());
+
+    let (runner, mut dev, mut outcome, _) = encrypted_mode0_fixture();
+    outcome.format_target_pin.as_mut().unwrap().vid = Some(0xffff);
+    assert!(run_reinitialize(&runner, &mut dev, true, &outcome)
+        .result
+        .is_err());
+    assert!(dev.writes.is_empty());
+
+    let (runner, mut dev, mut outcome, _) = encrypted_mode0_fixture();
+    outcome.partitions[2].sector_count += 1;
+    assert!(run_reinitialize(&runner, &mut dev, true, &outcome)
+        .result
+        .is_err());
+    assert!(dev.writes.is_empty());
+
+    let (runner, mut dev, outcome, _) = encrypted_mode0_fixture();
+    dev.swap_on_reopen = true;
+    assert!(run_reinitialize(&runner, &mut dev, true, &outcome)
+        .result
+        .is_err());
+    assert!(dev.writes.is_empty());
+}
+
+#[test]
+fn reinitialize_replaces_only_selected_key_domain_and_filesystem() {
+    use edpcli::application::post_restore::assess_partitions_with_password_readonly;
+    use edpcli::provision::{parse_existing_provision, ProvisionImage};
+
+    let (runner, mut dev, outcome, protocol) = encrypted_mode0_fixture();
+    let before = parse_existing_provision(
+        &ProvisionImage::from_bytes(protocol.clone()).unwrap(),
+        &outcome.device_id,
+        outcome.total_sectors,
+    )
+    .unwrap()
+    .unwrap();
+    let target = &outcome.partitions[2];
+    let result = run_reinitialize(&runner, &mut dev, true, &outcome);
+    assert!(result.result.is_ok(), "{:?}", result.result);
+    assert!(outcome.report.metadata_restored && outcome.report.readback_verified);
+    assert!(dev.writes.iter().all(|lba| {
+        *lba == 7
+            || *lba == 12
+            || (target.start_lba..target.start_lba + target.sector_count).contains(&u64::from(*lba))
+    }));
+    for lba in 0..13usize {
+        if lba != 7 && lba != 12 {
+            assert_eq!(
+                dev.sectors.get(&(lba as u32)).unwrap(),
+                &protocol[lba * SECTOR..(lba + 1) * SECTOR]
+            );
+        }
+    }
+    let mut updated_protocol = protocol;
+    for lba in [7usize, 12] {
+        updated_protocol[lba * SECTOR..(lba + 1) * SECTOR]
+            .copy_from_slice(dev.sectors.get(&(lba as u32)).unwrap());
+    }
+    let after = parse_existing_provision(
+        &ProvisionImage::from_bytes(updated_protocol).unwrap(),
+        &outcome.device_id,
+        outcome.total_sectors,
+    )
+    .unwrap()
+    .unwrap();
+    assert_eq!(before.profile, after.profile);
+    assert_eq!(before.records[0..2], after.records[0..2]);
+    assert!(after.records[2]
+        .verified_file_key(Some(b"EncryptPass1!"))
+        .is_err());
+    assert!(after.records[2]
+        .verified_file_key(Some(b"FreshPass1!"))
+        .is_ok());
+    let assessed = assess_partitions_with_password_readonly(
+        &mut dev,
+        "edp",
+        &outcome.device_id,
+        outcome.total_sectors,
+        &outcome.partitions,
+        3,
+        b"FreshPass1!",
+    )
+    .unwrap();
+    assert_eq!(
+        assessed.partitions[2].state,
+        PostRestorePartitionState::Usable
+    );
+}
+
+#[test]
+fn reinitialize_failure_does_not_change_metadata_restore_report() {
+    let (runner, mut dev, outcome, protocol) = encrypted_mode0_fixture();
+    dev.fail_write_once_after = Some(2);
+    assert!(run_reinitialize(&runner, &mut dev, true, &outcome)
+        .result
+        .is_err());
+    assert!(outcome.report.metadata_restored && outcome.report.readback_verified);
+    for lba in 0..13usize {
+        assert_eq!(
+            dev.sectors.get(&(lba as u32)).unwrap(),
+            &protocol[lba * SECTOR..(lba + 1) * SECTOR]
+        );
+    }
+    assert_eq!(
+        dev.sectors
+            .get(&(outcome.partitions[2].start_lba as u32))
+            .unwrap(),
+        &vec![0u8; SECTOR]
+    );
 }

@@ -53,6 +53,9 @@ pub trait Prompter {
     fn confirm_write_yes(&mut self, msg: &str) -> bool {
         self.confirm_yes(msg)
     }
+    fn confirm_reinitialize_yes(&mut self, msg: &str) -> bool {
+        self.confirm_write_yes(msg)
+    }
 
     /// UI-neutral typed progress event. Frontends decide how to render or store it.
     fn write_event(&mut self, _event: WriteEvent) {}

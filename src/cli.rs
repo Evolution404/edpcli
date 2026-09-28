@@ -151,6 +151,9 @@ impl<P: Prompter> Prompter for AlwaysYes<P> {
     fn confirm_write_yes(&mut self, _msg: &str) -> bool {
         true
     }
+    fn confirm_reinitialize_yes(&mut self, msg: &str) -> bool {
+        self.0.confirm_reinitialize_yes(msg)
+    }
     fn write_event(&mut self, event: crate::application::WriteEvent) {
         self.0.write_event(event);
     }

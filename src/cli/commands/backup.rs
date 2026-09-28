@@ -128,7 +128,7 @@ pub(in crate::cli) fn real_flow(
         Err(error) => return finish(Err(error)),
     };
     loop {
-        let choice = prompter.prompt_line("选择要格式化的 NeedsFormat 分区编号（回车结束）: ");
+        let choice = prompter.prompt_line("选择要处理的分区编号（回车结束）: ");
         let choice = choice.trim();
         if choice.is_empty() {
             break;
@@ -146,12 +146,42 @@ pub(in crate::cli) fn real_flow(
             eprintln!("恢复后评估中没有分区 {index}");
             continue;
         };
-        if !matches!(
-            partition.state,
-            crate::application::post_restore::PostRestorePartitionState::NeedsFormat
-                | crate::application::post_restore::PostRestorePartitionState::PasswordRequired
-        ) {
+        if !partition.requires_original_key
+            && partition.state
+                != crate::application::post_restore::PostRestorePartitionState::NeedsFormat
+        {
             eprintln!("分区 {index} 当前不能安全格式化");
+            continue;
+        }
+        let reinitialize = if partition.requires_original_key {
+            match prompter
+                .prompt_line(
+                    "加密分区处理方式：original 沿用原密钥 / reinitialize 清空并重建 / 回车跳过: ",
+                )
+                .trim()
+                .to_ascii_lowercase()
+                .as_str()
+            {
+                "original" => false,
+                "reinitialize" => true,
+                "" => continue,
+                other => {
+                    eprintln!("未知处理方式: {other}");
+                    continue;
+                }
+            }
+        } else {
+            false
+        };
+        if !reinitialize
+            && partition.requires_original_key
+            && !matches!(
+                partition.state,
+                crate::application::post_restore::PostRestorePartitionState::NeedsFormat
+                    | crate::application::post_restore::PostRestorePartitionState::PasswordRequired
+            )
+        {
+            eprintln!("分区 {index} 当前不能安全沿用原密钥格式化");
             continue;
         }
         let filesystem = prompter.prompt_line("选择空文件系统 fat16 / exfat（回车跳过）: ");
@@ -174,7 +204,37 @@ pub(in crate::cli) fn real_flow(
             .find(|candidate| candidate.index == index)
             .and_then(|candidate| candidate.volume_label_hint.as_deref())
             .unwrap_or("恢复卷");
-        if partition.requires_original_key {
+        if reinitialize {
+            let new_password = prompter.prompt_secret("新密码（输入时不回显，回车取消）: ");
+            let confirmation = prompter.prompt_secret("确认新密码（输入时不回显）: ");
+            let reinitialize_request =
+                match crate::application::post_restore::EncryptedPartitionReinitializeRequest::new(
+                    index,
+                    new_password.as_bytes(),
+                    confirmation.as_bytes(),
+                ) {
+                    Ok(request) => request,
+                    Err(message) => {
+                        eprintln!("分区 {index} 未进入重建: {message}");
+                        continue;
+                    }
+                };
+            let result = crate::application::post_restore::reinitialize_encrypted_partition_after_restore_on_disk(
+                runner,
+                n,
+                prompter,
+                &outcome,
+                &reinitialize_request,
+                filesystem,
+                label,
+            );
+            match result.result {
+                Ok(()) => println!("分区 {index} 已使用新密码和新 FileKey 重建；读回验证通过"),
+                Err(message) => eprintln!("分区 {index} 清空重建失败: {message}"),
+            }
+            // The restored-protocol resume pin predates the new key records.
+            break;
+        } else if partition.requires_original_key {
             let password = if partition.state
                 == crate::application::post_restore::PostRestorePartitionState::PasswordRequired
             {

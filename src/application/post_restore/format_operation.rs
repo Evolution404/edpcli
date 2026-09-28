@@ -8,7 +8,7 @@ use crate::common::{EdpCliError, EdpCliResult, EXIT_IO, EXIT_TARGET};
 use crate::sysinfo::{self, CmdRunner};
 use std::time::Duration;
 
-const REOPEN_WAIT: Duration = Duration::from_secs(10);
+pub(super) const REOPEN_WAIT: Duration = Duration::from_secs(10);
 
 pub fn format_partition_after_restore_on_disk(
     runner: &dyn CmdRunner,
@@ -166,18 +166,24 @@ pub fn format_encrypted_partition_after_restore_on_disk(
     }
 }
 
-fn failure(message: impl Into<String>) -> EdpCliError {
+pub(super) fn failure(message: impl Into<String>) -> EdpCliError {
     EdpCliError::new(EXIT_TARGET, message)
 }
 
-fn verify_current_target(
+pub(super) enum KeyCheck<'a> {
+    Plain,
+    Existing(&'a [u8; 16]),
+    Reinitialize,
+}
+
+pub(super) fn verify_current_target(
     runner: &dyn CmdRunner,
     disk: u32,
     dev: &mut dyn SectorDev,
     expected: &MediaIdentityResumePin,
     outcome: &MetadataRestoreOutcome,
     partition: &ManifestPartition,
-    file_key: Option<&[u8; 16]>,
+    key_check: KeyCheck<'_>,
 ) -> EdpCliResult<()> {
     let total_sectors = outcome.total_sectors;
     let observed = crate::application::media_identity_observer::observe_media_identity_readonly(
@@ -202,7 +208,7 @@ fn verify_current_target(
     }
 
     if outcome.device_state.eq_ignore_ascii_case("plain") {
-        if file_key.is_some() {
+        if !matches!(key_check, KeyCheck::Plain) {
             return Err(failure("Plain 分区不能使用加密密钥格式化"));
         }
         let table = crate::partition_table::read_partition_table(total_sectors, |lba| {
@@ -241,15 +247,24 @@ fn verify_current_target(
         {
             return Err(failure("当前 EDP 分区几何与所选目标不一致"));
         }
-        if record.lba12.need_encrypt != 0 {
-            let key = file_key.ok_or_else(|| failure("加密分区禁止明文格式化"))?;
-            if record.lba12.encrypt_mode != FileKeyWrapMode::Sm4.raw()
-                || crate::crypto::crc32_bare(key) != record.lba12.file_key_crc
-            {
-                return Err(failure("当前密钥域与已验证原 FileKey 不一致"));
+        match key_check {
+            KeyCheck::Reinitialize => {
+                if record.lba12.need_encrypt == 0 || !current.physically_encrypted {
+                    return Err(failure("所选目标不是 EDP 加密数据分区"));
+                }
             }
-        } else if file_key.is_some() {
-            return Err(failure("明文分区不能使用加密密钥格式化"));
+            KeyCheck::Existing(key) => {
+                if record.lba12.need_encrypt == 0
+                    || record.lba12.encrypt_mode != FileKeyWrapMode::Sm4.raw()
+                    || crate::crypto::crc32_bare(key) != record.lba12.file_key_crc
+                {
+                    return Err(failure("当前密钥域与已验证原 FileKey 不一致"));
+                }
+            }
+            KeyCheck::Plain if record.lba12.need_encrypt != 0 => {
+                return Err(failure("加密分区禁止明文格式化"));
+            }
+            KeyCheck::Plain => {}
         }
     }
     Ok(())
@@ -336,7 +351,7 @@ fn format_partition_on_disk_with_key(
             expected,
             outcome,
             partition,
-            original_key.map(|(_, key)| key),
+            original_key.map_or(KeyCheck::Plain, |(_, key)| KeyCheck::Existing(key)),
         )?;
         let assess = |dev: &mut dyn SectorDev| match original_key {
             Some((password, _)) => assess_partitions_with_password_readonly(
@@ -386,7 +401,7 @@ fn format_partition_on_disk_with_key(
                     expected,
                     outcome,
                     partition,
-                    original_key.map(|(_, key)| key),
+                    original_key.map_or(KeyCheck::Plain, |(_, key)| KeyCheck::Existing(key)),
                 )?;
                 let reopened = assess(dev).map_err(failure)?;
                 if !reopened.partitions.iter().any(|candidate| {
