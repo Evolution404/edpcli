@@ -1,7 +1,5 @@
 //! Ratatui rendering for the top-level shell.
 
-use std::collections::HashMap;
-
 use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout},
     style::{Modifier, Style},

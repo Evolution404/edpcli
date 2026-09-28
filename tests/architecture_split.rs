@@ -79,6 +79,10 @@ fn large_modules_are_split_by_domain_boundary() {
         "src/tui/provision/layout.rs",
         "src/tui/provision/editor.rs",
         "src/tui/provision/render.rs",
+        "src/tui/provision/selection_render.rs",
+        "src/tui/provision/form_render.rs",
+        "src/tui/provision/review_render.rs",
+        "src/tui/provision/running_render.rs",
         "src/tui/provision/task.rs",
         "src/tui/inspect/state.rs",
         "src/tui/inspect/search_state.rs",
@@ -223,6 +227,14 @@ fn large_modules_are_split_by_domain_boundary() {
     assert!(lines("src/tui/provision/field_input.rs") < 250);
     assert!(lines("src/tui/provision/password_verification.rs") < 200);
     assert!(lines("src/tui/provision/key_domains.rs") < 80);
+    assert!(
+        lines("src/tui/provision/render.rs") < 400,
+        "Provision root renderer must stay layout/orchestration-oriented"
+    );
+    assert!(lines("src/tui/provision/selection_render.rs") < 260);
+    assert!(lines("src/tui/provision/form_render.rs") < 300);
+    assert!(lines("src/tui/provision/review_render.rs") < 170);
+    assert!(lines("src/tui/provision/running_render.rs") < 210);
     let field_source = fs::read_to_string(
         Path::new(env!("CARGO_MANIFEST_DIR")).join("src/tui/provision/fields.rs"),
     )
@@ -795,6 +807,24 @@ fn inspect_tree_and_detail_renderers_are_split_from_workspace_root() {
     assert!(tree.contains("fn draw_inspect_tree_pane"));
     assert!(!render.contains("fn draw_inspect_object_panes"));
     assert!(detail.contains("fn draw_inspect_object_panes"));
+}
+
+#[test]
+fn provision_stage_renderers_are_split_from_workspace_root() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let render = fs::read_to_string(root.join("src/tui/provision/render.rs"))
+        .expect("read provision renderer");
+    for (path, marker) in [
+        ("selection_render.rs", "fn draw_provision_selection"),
+        ("form_render.rs", "fn draw_provision_form"),
+        ("review_render.rs", "fn draw_provision_review"),
+        ("running_render.rs", "fn draw_provision_running"),
+    ] {
+        let source = fs::read_to_string(root.join("src/tui/provision").join(path))
+            .unwrap_or_else(|error| panic!("read {path}: {error}"));
+        assert!(source.contains(marker), "{path} must own {marker}");
+        assert!(!render.contains(marker), "{marker} leaked into render.rs");
+    }
 }
 
 #[test]

@@ -1371,6 +1371,14 @@ application 返回结构化 `ProvisionReport/BackupReport/InspectReport`，CLI/T
 - 测试先行的架构门禁先因新模块缺失失败，搬迁后架构 **29/29**、TUI **266/266**、Provision **208/208** 通过；更严格的规模和入口归属门禁阻止字段状态回迁。
 - `cargo check --all-targets --locked`、全目标 Clippy、fast **4 suites / 6 artifacts / 0 failures**、full **8 suites / 10 artifacts + doctest / 0 failures** 均通过；本阶段不改制盘请求、协议或真实写盘安全链。
 
+#### D8-D2.2：制盘阶段渲染拆分
+
+**COMPLETE；待提交后复审 D8-D2。** 目标盘与方案选择表格迁至 `selection_render.rs`，配置表单与布局预览迁至 `form_render.rs`，计划摘要与变更详情迁至 `review_render.rs`，执行进度与事务活动迁至 `running_render.rs`。`provision/render.rs` 仅保留工作区容器、固定目标提示和简短阶段视图的调度。
+
+- 根渲染模块 **355 行**、选择渲染 **211 行**、表单渲染 **236 行**、复核渲染 **134 行**、运行渲染 **182 行**；架构门禁分别为 **<400 / <260 / <300 / <170 / <210 行**，并锁定阶段绘制入口的所有权。
+- 所有原有表格列顺序、表单编辑光标、Pane 布局、滚动和写盘进度文案保持不变；交互表格的源码契约改为检查新的选择渲染模块。
+- `cargo check --all-targets --locked`、架构 **30/30**、TUI **266/266**、全目标 Clippy、fast **4 suites / 6 artifacts / 0 failures**、full **8 suites / 10 artifacts + doctest / 0 failures** 与 diff 检查通过。
+
 ### D8-E：第二批领域/入口模块化
 
 - D8-E1：`CLI` 参数解析与命令处理按领域拆分；
