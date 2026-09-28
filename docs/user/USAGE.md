@@ -222,8 +222,8 @@ Plain 的 `plan/image/write` 与 TUI 使用同一套 application 制盘事务：
 Plain 镜像同样保留目标盘原始 LBA3。
 
 
-CLI 未指定 `--password` 时使用 `0000aaaa`，未指定 `--volume-label` 时使用“启动区”。
-两项都可以显式覆盖。
+CLI 未指定 `--share-target-password` / `--encrypt-target-password` 时，各目标密码域使用
+`0000aaaa`；未指定 `--volume-label` 时使用“启动区”。这些值都可以显式覆盖。
 
 模式 0 的启动区按扇区精确建模：默认从 LBA63 开始占用 **20417 扇区**，因此下一分区
 从 LBA20480 开始。TUI 直接显示并允许编辑“启动区扇区”；CLI 可用
@@ -251,7 +251,8 @@ edpcli provision image --disk 4 --target mode1 \
   --share-mib 1024 --encrypt-mib 2048 \
   --label-id 1402259934 --user USER06 \
   --dept '江苏省电力有限公司' --label '江苏电力!SAFE6' \
-  --password '你的密码' --out ./edp-mode1.img
+  --share-target-password '你的交换区密码' \
+  --encrypt-target-password '你的保密区密码' --out ./edp-mode1.img
 ```
 
 真实制盘把 `plan` 改为 `write`。该操作是破坏性的：程序会固定目标 USB 整盘、容量和
@@ -336,7 +337,7 @@ edpcli backup restore --disk 4
 
 恢复成功表示分区结构及适用的 EDP 协议元数据已写回并验证，不表示文件系统或用户数据已恢复。恢复后只读检查各分区，分别显示可用、需要格式化、需要原密码、加密元数据异常或暂不支持。评估失败也不会抹去已成功的元数据恢复结果。
 
-CLI 默认不会自动格式化。用户可在恢复后的交互步骤中逐分区选择 FAT16/exFAT 空文件系统，并再次确认。加密分区可用原密码验证旧 FileKey 后沿用原密钥域；若选择 `reinitialize`，必须输入新密码两次、独立确认清空重建，然后生成新的 FileKey 和密钥记录。`--yes` 不能跳过这次重建确认。后续格式化或重建失败不会反转已验证的元数据恢复报告。当前 portable 写盘器不支持 FAT32/NTFS。
+CLI 默认不会自动格式化。用户可在恢复后的交互步骤中逐分区选择 FAT16/exFAT 空文件系统，并再次确认。加密分区可用原密码验证旧 FileKey 后沿用原密钥域；若选择 `reinitialize`，必须输入新密码两次、独立确认清空重建，然后生成新的 FileKey 和密钥记录。`--yes` 不能跳过单独的格式化确认或清空重建确认。后续格式化或重建失败不会反转已验证的元数据恢复报告。当前 portable 写盘器不支持 FAT32/NTFS。
 
 历史 v1/v2 EDPB 继续按原 schema 读取；缺少强物理身份所需证据时会拒绝危险恢复，不能仅凭容量或同型号 VID/PID 放行。
 

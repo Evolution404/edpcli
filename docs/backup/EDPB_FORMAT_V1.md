@@ -864,6 +864,13 @@ EDP metadata backup
 → 输入正确原密码后可格式化
 ```
 
+**2026-09-29 HIKSEMI 实盘验收记录。** 同一块 `/dev/disk5` USB 盘（125829120000 B、
+245760000 个 512 B 扇区）完成了两条闭环：
+
+- Plain P1 从 LBA2048 到盘尾，制盘、v3 `metadata_only` 备份、EDP mode0 制盘及 Plain 元数据恢复均成功，恢复工件读回通过。第一次恢复评估为 `Usable`，因为原 exFAT boot 区未被新布局覆盖；清除该测试卷主、备 boot 区后再次恢复，明确评估为 `NeedsFormat`。跳过格式化时元数据恢复仍成功；单独选择 P1、输入 `YES` 格式化后，读回及重新评估通过，macOS 挂载了新的 exFAT 卷。
+- EDP mode0 的三分区几何为 type1 `63+20417`、type2 `20480+131072`、type4 `151552+262144`。使用非默认测试密码重建后，在不知道原密码的情况下完成 v3 元数据备份；改为 Plain 布局再恢复，协议与几何读回通过，两个加密分区显示 `PasswordRequired`。保密区原文件系统仍完整时，正确密码使其变为 `Usable`，格式化被拒绝；清除该测试分区 boot 区后，再次恢复并用正确原密码单独确认格式化，读回通过。
+- 验收结束后将 disk5 重制为 Plain 空 exFAT 卷并在 macOS 挂载。验收备份保存于 `/Users/zhangyuxi/Desktop/edpcli-hil-20260929-disk5/`；本地运行记录为 `audit/ai-progress/20260929-031246-manual.log`。
+
 ### 18.19 验收标准
 
 本轮重构只有同时满足以下条件才能宣布完成：
