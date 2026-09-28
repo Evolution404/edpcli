@@ -2,10 +2,15 @@ use edpcli::crypto::{a7f0_full, crc32_bare};
 use edpcli::inspect::{analyze_sector, InspectMeta};
 use edpcli::metainfo::ownership_from_lba8;
 use edpcli::platform::{HardwareProbe, InquiryInfo, NativeTransport};
+use edpcli::protocol::{
+    lba6::parse_lba6,
+    lba9::{parse_lba9, reconstruct_dept, reconstruct_user},
+};
 use edpcli::provision::{
     generate_image, OnlyId, PassInfoPolicy, ProvisionEntropy, ProvisionMetadata, ProvisionProfile,
     ProvisionSpec, TargetIdentity,
 };
+use encoding_rs::GBK;
 
 fn spec(onlyid: &str) -> ProvisionSpec {
     spec_with_force_change(onlyid, false)
@@ -26,6 +31,7 @@ fn spec_with_policy(onlyid: &str, policy: PassInfoPolicy) -> ProvisionSpec {
         vid: Some(0x0dd8),
         pid: Some(0x2005),
         transport: NativeTransport::Uas,
+        windows_pnp_instance_id: None,
         inquiry: Some(InquiryInfo {
             vendor: "Netac".into(),
             product: "OnlyDisk".into(),
@@ -53,6 +59,7 @@ fn target() -> TargetIdentity {
         vid: Some(0x0dd8),
         pid: Some(0x2005),
         transport: NativeTransport::Uas,
+        windows_pnp_instance_id: None,
         inquiry: Some(InquiryInfo {
             vendor: "Netac".into(),
             product: "OnlyDisk".into(),
@@ -297,6 +304,92 @@ fn lba8_writer_length_excludes_nul_but_encrypts_the_following_block() {
         "0x180..0x18F must be ciphertext, not physical zero padding"
     );
     assert!(raw[0x190..].iter().all(|byte| *byte == 0));
+}
+
+#[test]
+fn one_byte_user_is_valid_and_round_trips_through_safe6() {
+    let metadata = ProvisionMetadata::new(
+        OnlyId::parse("1402259934").unwrap(),
+        "1",
+        "部门",
+        "江苏电力!SAFE6",
+    )
+    .unwrap();
+    let spec = ProvisionSpec::new(target(), metadata, ProvisionProfile::canonical_v1()).unwrap();
+    let image = generate_image(&spec, &entropy()).unwrap();
+    let raw6: &[u8; 512] = sector(image.as_bytes(), 6).try_into().unwrap();
+    let raw9: &[u8; 512] = sector(image.as_bytes(), 9).try_into().unwrap();
+    let six = parse_lba6(raw6).unwrap();
+    let nine = parse_lba9(
+        raw9,
+        six.device_crc,
+        six.dept_profile(),
+        six.has_long_user(),
+    )
+    .unwrap();
+    assert_eq!(reconstruct_user(&six, &nine).unwrap(), b"1");
+    assert!(!six.has_long_user());
+}
+
+#[test]
+fn current_writer_long_dept_uses_join60_and_lba9_continuation() {
+    let dept = "江苏省电力有限公司/盐城供电公司/盐城市建湖区/建湖供电公司/建湖输变电运检中心";
+    let (dept_gbk, _, errors) = GBK.encode(dept);
+    assert!(!errors);
+    assert_eq!(
+        dept_gbk.len(),
+        76,
+        "fixture must exercise the observed join60 profile"
+    );
+
+    let metadata = ProvisionMetadata::new(
+        OnlyId::parse("1402259934").unwrap(),
+        "沈浩",
+        dept,
+        "江苏电力!SAFE6",
+    )
+    .unwrap();
+    let spec = ProvisionSpec::new(target(), metadata, ProvisionProfile::canonical_v1()).unwrap();
+    let image = generate_image(&spec, &entropy()).unwrap();
+    let raw6: &[u8; 512] = sector(image.as_bytes(), 6).try_into().unwrap();
+    let raw9: &[u8; 512] = sector(image.as_bytes(), 9).try_into().unwrap();
+    let six = parse_lba6(raw6).unwrap();
+    assert_eq!(
+        six.dept_profile(),
+        edpcli::protocol::profile::DeptLayout::Join60
+    );
+    let nine = parse_lba9(
+        raw9,
+        six.device_crc,
+        six.dept_profile(),
+        six.has_long_user(),
+    )
+    .unwrap();
+    assert_eq!(reconstruct_dept(&six, &nine).unwrap(), dept_gbk.as_ref());
+    assert_eq!(&raw9[0x80..0x80 + 16], &dept_gbk[60..]);
+    assert_eq!(raw9[0x80 + 16], 0);
+}
+
+#[test]
+fn current_writer_max_long_user_uses_full_lba9_continuation_slot() {
+    let user = "U".repeat(155);
+    let metadata = ProvisionMetadata::new(
+        OnlyId::parse("1402259934").unwrap(),
+        &user,
+        "部门",
+        "江苏电力!SAFE6",
+    )
+    .unwrap();
+    let spec = ProvisionSpec::new(target(), metadata, ProvisionProfile::canonical_v1()).unwrap();
+    let image = generate_image(&spec, &entropy()).unwrap();
+    let raw6: &[u8; 512] = sector(image.as_bytes(), 6).try_into().unwrap();
+    let raw9: &[u8; 512] = sector(image.as_bytes(), 9).try_into().unwrap();
+    let six = parse_lba6(raw6).unwrap();
+    assert!(six.has_long_user());
+    let nine = parse_lba9(raw9, six.device_crc, six.dept_profile(), true).unwrap();
+    assert_eq!(reconstruct_user(&six, &nine).unwrap(), user.as_bytes());
+    assert_eq!(&raw9[0x100..0x17f], &user.as_bytes()[28..]);
+    assert_eq!(raw9[0x17f], 0);
 }
 
 #[test]

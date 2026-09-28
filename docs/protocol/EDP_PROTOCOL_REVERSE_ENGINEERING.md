@@ -3291,7 +3291,7 @@ Linux DWARF 还把该节点的静态使用面收窄：`LPEDP_PARTION_RESTORINFO_
 - 只有恢复节点读取端成功后，`virtual_44@0x100055A2..0x100055BD` 才分别调用
   `UsbTools.dll` ordinal3=`EDP_DeviceNumber` 与 ordinal4=`EDP_DiskNumber`，并把两个
   返回值分别写入**第二、第三个 4B 输出指针**。因此旧 ABI 明确是
-  `restore-node[0x2F] + DeviceNumber DWORD + DiskNumber DWORD` 三条独立输出通道，
+  `盘尾恢复节点[0x2F] + DeviceNumber DWORD + DiskNumber DWORD` 三条独立输出通道，
   而不是“DeviceNumber 直接填 HSerial[5]”。
 - 2020 `busManage` 成功后没有消费那两个主机身份 DWORD；它只把第一项
   0x2F 字节节点传给同一接口的 `vtable+0x44`。在 v19.11.4.1 虚表中该槽精确映射
@@ -4403,6 +4403,86 @@ LBA8 由 **476 完全闭环 / 36 部分闭环** 提升到 **492 完全闭环 / 2
      `sub_10014720(BuildSector11)`。
   当前写入端从 IOCTL 的 `DiskSize` 到 LBA11 KDF 输入之间没有任何
   `255*63*512` 取整。
+
+**当前 Windows 正常注册路径的 `device_id` 来源也已追到系统枚举层。** 当前
+`CEMSUsbRegsiter.dll`（SHA-256=`122b30301a7d23590f69313063414518f2b60d8535a57ee5d5a585a0c6b4c6eb`）
+不是先取独立 SCSI 供应商/产品字段再自行拼 `disk&ven_...&prod_...`，而是：
+
+1. `sub_100186C0` 用 `SetupDiGetClassDevsW / SetupDiEnumDeviceInterfaces /
+   SetupDiGetDeviceInterfaceDetailW` 枚举 `GUID_DEVINTERFACE_DISK`；同时经
+   `CM_Get_Device_IDA` 与 `CM_Get_Parent` 取得子设备和父 USB 的 Windows PnP
+   InstanceId。该函数还会调用 `IOCTL_STORAGE_QUERY_PROPERTY(0x2D1400)` 读取
+   `STORAGE_DEVICE_DESCRIPTOR` 的供应商/产品字符串，但当前 `device_id`
+   生成链并不在这里把这两个字符串重新拼接；
+2. `sub_10019270` 从选中磁盘的 PnP InstanceId 中按反斜杠分段，提取中间的
+   `Disk&Ven_...&Prod_...` 身份段并做 ASCII 小写标准化。`USBSTOR\\` 路径另有
+   去掉末尾 `&...` 后缀的短身份分支；对象中仍同时保留源/完整身份材料，因此
+   不应把该分支泛化成“所有历史 BOT 盘永远没有 Rev”；
+3. `sub_100196D0` 把选中磁盘对象复制到 `CUsbRegsiter+0x808`。注册前初始化
+   `0x100393C1..0x10039457` 再取得其 `+0x50` 身份字符串，统一小写并写入
+   `CUsbRegsiter+0x5D4/+0x5BC/+0x5EC`；
+4. `RegsiterUsb@0x1003B5E0..0x1003B605` 取 `this+0x5EC.c_str()` 作为
+   `sub_10013D20(CLabelManage)` 的 `pUID` 参数；`sub_10013D20@0x10013D62`
+   保存到 `CLabelManage+0x20`，随后对该完整字符串做 CRC32 写入 `+0x44`。
+   因而同一 Windows PnP 身份继续成为 LBA6 CRC、LBA7/LBA8/LBA12 密钥根，
+   并由 `BuildSector11` 写入 PDKB 的 `device_id` 字符串。
+
+读取端提供了独立交叉证据。当前 `ydcc/EdpEDiskCtrl.dll`
+（SHA-256=`5be85c0f85dc65dd8f89e59a78f584a8325e5208441fc461e2a612501a5b3e08`）
+的 `sub_10031230` 同样按反斜杠解析 Windows PnP InstanceId，但显式保留两套值：
+完整中间段被保存为 `unique_identifier`，而 `USBSTOR\\` 前缀时会把最后一个 `&...`
+后缀裁掉后另存 `unique_identifier_short`；非 USBSTOR 时短值与完整值相同。其调用方
+分别把两者保存到全局 `0x1008FD88 / 0x1008FE90`，二进制日志字符串也直接命名为
+`unique_identifier=` / `unique_identifier_short=`，后续盘标识解密与兼容路径均引用
+这两套身份。因此当前写入端在 USBSTOR 路径选择短值作为规范写入值，而读取端
+同时保留完整值/短值两候选用于跨代兼容；这比“BOT 固定带 `Rev`、UAS 固定不带 `Rev`”
+更接近官方实现边界。
+
+这条机器码链中**没有发现 `Ven_` 或 `Prod_` 内容为空就拒绝注册的检查，也没有发现
+产品字段为空时回退 USB 产品字符串的 CEMS 层分支**。换言之，当前官方程序
+信任 Windows PnP/存储栈已经生成的身份字符串，再做分段和标准化；它与 edpcli 当前
+`TargetIdentity::from_probe` 的“独立 SCSI 供应商/产品任一为空即拒绝”策略
+并不等价。Windows 官方文档也明确说明 USBSTOR 的存储身份由 SCSI 查询数据中的
+8字符供应商、16字符产品、4字符修订号派生，因此平台实际生成的 InstanceId
+才是复刻 Windows 行为的直接事实源。
+
+对于当前 macOS `disk5`（HIKSEMI，UAS，SCSI 产品标识为空），这只能
+证明 macOS IOKit 的产品字段为空；**在没有把同一物理盘接入 Windows 并抓取其
+PnP InstanceId 前，不能声称官方 Windows 最终一定写出某个具体 `device_id`**。但已经
+可以确定：若 Windows 给 CEMS 的中间身份段本身含空 `Prod_`，当前 CEMS 代码不会因
+该空字段主动拒绝，也没有上述 USB 产品名称回退逻辑。
+
+### Windows PnP InstanceId 复刻模型（2026-09-28）
+
+微软公开文档进一步确认了复刻边界：`USBSTOR.SYS` 为 USB 大容量存储 PDO 生成的
+标识符直接派生自 SCSI 查询数据的固定宽度供应商/产品/修订号字段；Windows 的
+`STORAGE_DEVICE_DESCRIPTOR` 也明确允许这些标识不存在，此时对应偏移量为0。
+因此 `Ven_`/`Prod_` 为空是 Windows 存储身份模型允许的状态，不能由 edpcli 自行用
+USB 产品字符串补全后冒充 Windows 真值。微软公开故障记录中也能
+观察到 `USBSTOR\\Disk&Ven_&Prod_&Rev_\\...` 与
+`SCSI\\Disk&Ven_&Prod_...\\...` 这类空字段实例路径。
+
+实现据此调整为两层：
+
+- Windows 原生：`HardwareProbe.windows_pnp_instance_id` 直接保存 SetupAPI/ConfigMgr
+  枚举到的磁盘 PnP InstanceId，制盘时优先以该字符串为事实源；
+- macOS/Linux 兼容复刻：只在没有 Windows 原生 InstanceId 时，根据 SCSI 查询数据与
+  传输类型构造 CEMS 所需的 Windows 磁盘身份段。BOT 构造
+  `USBSTOR\\Disk&Ven_<vendor>&Prod_<product>&Rev_<revision>`；UAS 构造
+  `SCSI\\Disk&Ven_<vendor>&Prod_<product>`。该复刻只生成 CEMS 消费所需的
+  枚举器 + 中间身份段，不虚构 Windows 实例路径最后的设备实例后缀。
+
+随后统一执行已逆向闭合的 CEMS 规则：提取第二段、ASCII 小写；`USBSTOR` 当前写入
+路径使用去掉最后一个 `&...` 后缀的短值，非 `USBSTOR` 使用完整中间段。读取端
+仍保留完整值/短值双候选，避免破坏历史带 `&rev_` 的盘。空供应商/产品/修订号
+不再作为独立拒绝条件；真正的安全门槛仍是 USB VID/PID、可确定传输类型，
+以及能够得到原生或复刻的 Windows PnP 身份。
+
+当前 `disk5` 的 macOS 实测输入为 UAS、供应商=`HIKSEMI`、产品=`""`、
+修订号=`1.00`，因此复刻路径得到 `SCSI\\Disk&Ven_HIKSEMI&Prod_`，当前 CEMS 写入
+`device_id=disk&ven_hiksemi&prod_`。只读 `provision plan` 已越过原先的
+`empty vendor/product identity` 身份错误，并进入后续文件系统初始化门槛；显式启用
+三个目标分区格式化后能完整生成只读制盘计划。
 - 历史兼容公式本身也已经从“疑似 CHS 辅助函数”升级为**官方命名证据**：
   Linux `libcemsfilesyscheck.so` 带 DWARF 的
   `CDisk::GetWindowsDiskSizeFromLinux(unsigned long long&) @0x186D0`

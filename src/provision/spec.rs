@@ -1,6 +1,6 @@
 use encoding_rs::GBK;
 
-use crate::identify::{build_device_id, Transport};
+use crate::identify::windows_pnp_identity_from_probe;
 use crate::platform::{HardwareProbe, NativeTransport};
 
 use super::ProvisionProfile;
@@ -76,29 +76,8 @@ impl TargetIdentity {
         }
         let vid = probe.vid.ok_or("hardware probe is missing USB VID")?;
         let pid = probe.pid.ok_or("hardware probe is missing USB PID")?;
-        let inquiry = probe
-            .inquiry
-            .as_ref()
-            .ok_or("hardware probe is missing SCSI inquiry identity")?;
-        if inquiry.vendor.trim().is_empty() || inquiry.product.trim().is_empty() {
-            return Err("hardware probe has empty vendor/product identity".into());
-        }
-        let transport = match probe.transport {
-            NativeTransport::Uas => Transport::Uas,
-            NativeTransport::Bot if !inquiry.revision.trim().is_empty() => Transport::Bot,
-            NativeTransport::Bot => {
-                return Err("BOT hardware probe is missing revision identity".into())
-            }
-            NativeTransport::Unknown => {
-                return Err("hardware transport is unknown; refusing to invent device_id".into())
-            }
-        };
-        let device_id = build_device_id(
-            &inquiry.vendor,
-            &inquiry.product,
-            &inquiry.revision,
-            transport,
-        );
+        let pnp_identity = windows_pnp_identity_from_probe(probe)?;
+        let device_id = pnp_identity.write_device_id;
         if device_id.is_empty() || device_id.len() > 128 {
             return Err("derived device_id is empty or too long".into());
         }
@@ -148,6 +127,9 @@ pub struct ProvisionMetadata {
     label: String,
 }
 
+const MAX_USER_GBK_BYTES: usize = 155;
+const MAX_DEPT_GBK_BYTES: usize = 187;
+
 fn validate_gbk_field(name: &str, value: &str, max_bytes: usize) -> Result<(), String> {
     if value.is_empty() {
         return Err(format!("{name} must not be empty"));
@@ -178,8 +160,12 @@ impl ProvisionMetadata {
         let user = user.into();
         let dept = dept.into();
         let label = label.into();
-        validate_gbk_field("User", &user, 31)?;
-        validate_gbk_field("Dept", &dept, 63)?;
+        // Current first-party SAFE6 writer stores User in a 156-byte source
+        // array (155 bytes + NUL) and Dept in a 188-byte source array
+        // (187 bytes + NUL). Values that exceed the inline LBA6 slots continue
+        // in LBA9; rejecting them here would diverge from the official writer.
+        validate_gbk_field("User", &user, MAX_USER_GBK_BYTES)?;
+        validate_gbk_field("Dept", &dept, MAX_DEPT_GBK_BYTES)?;
         validate_gbk_field("Label", &label, 31)?;
         Ok(Self {
             onlyid,

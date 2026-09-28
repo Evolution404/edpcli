@@ -716,6 +716,7 @@ fn generated_mode0_with_domain_passwords(
         vid: Some(0x0dd8),
         pid: Some(0x2005),
         transport: NativeTransport::Uas,
+        windows_pnp_instance_id: None,
         inquiry: Some(InquiryInfo {
             vendor: "Netac".into(),
             product: "OnlyDisk".into(),
@@ -844,6 +845,7 @@ fn generated_source_with_policy(
         vid: Some(0x0dd8),
         pid: Some(0x2005),
         transport: NativeTransport::Uas,
+        windows_pnp_instance_id: None,
         inquiry: Some(InquiryInfo {
             vendor: "Netac".into(),
             product: "OnlyDisk".into(),

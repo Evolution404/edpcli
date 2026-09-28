@@ -162,6 +162,7 @@ fn summarize_nodes(nodes: &[NodeSnapshot]) -> HardwareProbe {
         vid,
         pid,
         transport,
+        windows_pnp_instance_id: None,
         inquiry,
     }
 }

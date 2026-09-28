@@ -9,6 +9,7 @@ fn spec() -> ProvisionSpec {
         vid: Some(0x0dd8),
         pid: Some(0x2005),
         transport: NativeTransport::Uas,
+        windows_pnp_instance_id: None,
         inquiry: Some(InquiryInfo {
             vendor: "Netac".into(),
             product: "OnlyDisk".into(),
@@ -96,6 +97,7 @@ fn validator_rejects_image_for_different_hardware_identity() {
         vid: Some(0x21c4),
         pid: Some(0x0cd1),
         transport: NativeTransport::Uas,
+        windows_pnp_instance_id: None,
         inquiry: Some(InquiryInfo {
             vendor: "Lexar".into(),
             product: "USB Flash Drive".into(),

@@ -81,7 +81,7 @@ def parse_args() -> argparse.Namespace:
         "--node-flags",
         default="0000",
         help=(
-            "two producer-side restore-node flag bytes as four hex digits; "
+            "盘尾恢复节点的两个 producer-side flag bytes，以四位十六进制输入； "
             "default 0000 retains the exact authentic-SanDisk reconstruction"
         ),
     )

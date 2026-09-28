@@ -82,6 +82,7 @@ pub struct WorkspaceIdentity {
     pub vid: Option<String>,
     pub pid: Option<String>,
     pub device_id: Option<String>,
+    pub hardware_model: Option<String>,
     pub onlyid: Option<String>,
     pub user: Option<String>,
     pub dept: Option<String>,
@@ -97,6 +98,7 @@ impl WorkspaceIdentity {
             vid: Some(row.vid.clone()),
             pid: Some(row.pid.clone()),
             device_id: row.device_id.clone(),
+            hardware_model: row.hardware_model.clone(),
             onlyid: row.onlyid.clone(),
             user: row.user.clone(),
             dept: row.dept.clone(),
@@ -117,6 +119,7 @@ impl WorkspaceIdentity {
             vid: backup.vid.clone(),
             pid: backup.pid.clone(),
             device_id: backup.device_id.clone(),
+            hardware_model: None,
             onlyid: backup.onlyid.clone(),
             user: backup.user.clone(),
             dept: backup.dept.clone(),
@@ -172,22 +175,25 @@ impl WorkspaceIdentity {
     }
 
     pub fn model(&self) -> String {
-        let Some(device_id) = self.device_id.as_deref() else {
-            return "—".into();
-        };
-        let mut ven = None;
-        let mut prod = None;
-        for part in device_id.split('&') {
-            ven = ven.or_else(|| part.strip_prefix("ven_"));
-            prod = prod.or_else(|| part.strip_prefix("prod_"));
+        if let Some(device_id) = self.device_id.as_deref() {
+            let mut ven = None;
+            let mut prod = None;
+            for part in device_id.split('&') {
+                ven = ven.or_else(|| part.strip_prefix("ven_"));
+                prod = prod.or_else(|| part.strip_prefix("prod_"));
+            }
+            if let (Some(ven), Some(prod)) = (
+                ven.filter(|v| !v.is_empty()),
+                prod.filter(|v| !v.is_empty()),
+            ) {
+                return format!("{ven}_{prod}");
+            }
         }
-        match (
-            ven.filter(|v| !v.is_empty()),
-            prod.filter(|v| !v.is_empty()),
-        ) {
-            (Some(ven), Some(prod)) => format!("{ven}_{prod}"),
-            _ => "—".into(),
-        }
+        self.hardware_model
+            .as_deref()
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or("—")
+            .to_string()
     }
 
     pub fn display_cells(&self) -> [String; 7] {
@@ -216,8 +222,49 @@ impl WorkspaceIdentity {
     pub fn search_text(&self) -> String {
         let mut values = self.display_cells().to_vec();
         values.push(self.device_id.clone().unwrap_or_default());
+        values.push(self.hardware_model.clone().unwrap_or_default());
         values.push(self.vid.clone().unwrap_or_default());
         values.push(self.pid.clone().unwrap_or_default());
         values.join(" ")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn identity(device_id: Option<&str>, hardware_model: Option<&str>) -> WorkspaceIdentity {
+        WorkspaceIdentity {
+            size_bytes: None,
+            vid: None,
+            pid: None,
+            device_id: device_id.map(str::to_string),
+            hardware_model: hardware_model.map(str::to_string),
+            onlyid: None,
+            user: None,
+            dept: None,
+            provision_kind: None,
+            canonical: None,
+        }
+    }
+
+    #[test]
+    fn plain_media_model_falls_back_to_native_hardware_inquiry() {
+        assert_eq!(
+            identity(None, Some("SanDisk Ultra USB 3.0")).model(),
+            "SanDisk Ultra USB 3.0"
+        );
+    }
+
+    #[test]
+    fn protocol_device_id_model_keeps_precedence_when_available() {
+        assert_eq!(
+            identity(
+                Some("disk&ven_sandisk&prod_extreme"),
+                Some("SanDisk Native Product")
+            )
+            .model(),
+            "sandisk_extreme"
+        );
     }
 }

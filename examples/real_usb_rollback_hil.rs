@@ -191,7 +191,7 @@ mod macos {
                 if total_before > TAIL_END4_MIRROR_OFFSET_SECTORS
                     && lba == total_before - TAIL_END4_MIRROR_OFFSET_SECTORS
                 {
-                    return Err(format!("LBA{lba} 落在 restore-node 内，拒绝故障注入"));
+                    return Err(format!("LBA{lba} 落在盘尾恢复节点内，拒绝故障注入"));
                 }
             }
             if let Some(partition) = partitions.iter().find(|partition| {

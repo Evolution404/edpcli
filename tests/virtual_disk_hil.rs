@@ -84,6 +84,7 @@ fn hil_mode0_fixture(total_sectors: u64) -> (ProvisionSpec, ProvisionImage, Stri
         vid: Some(0x0dd8),
         pid: Some(0x2005),
         transport: NativeTransport::Uas,
+        windows_pnp_instance_id: None,
         inquiry: Some(InquiryInfo {
             vendor: "EDPCLI".into(),
             product: "Chapter12VHIL".into(),

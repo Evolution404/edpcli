@@ -12,6 +12,7 @@ fn probe(transport: NativeTransport) -> HardwareProbe {
         vid: Some(0x0dd8),
         pid: Some(0x2005),
         transport,
+        windows_pnp_instance_id: None,
         inquiry: Some(InquiryInfo {
             vendor: "Netac  ".into(),
             product: "OnlyDisk".into(),
@@ -105,7 +106,43 @@ fn target_identity_is_derived_from_complete_hardware_probe() {
     assert_eq!(uas.total_sectors(), 122_880_000);
 
     let bot = TargetIdentity::from_probe(&probe(NativeTransport::Bot), 122_880_000).unwrap();
-    assert_eq!(bot.device_id(), "disk&ven_netac&prod_onlydisk&rev_1.00");
+    assert_eq!(bot.device_id(), "disk&ven_netac&prod_onlydisk");
+}
+
+#[test]
+fn target_identity_replicates_windows_empty_product_instead_of_rejecting_it() {
+    let probe = HardwareProbe {
+        vid: Some(0x2bdf),
+        pid: Some(0x0300),
+        transport: NativeTransport::Uas,
+        windows_pnp_instance_id: None,
+        inquiry: Some(InquiryInfo {
+            vendor: "HIKSEMI".into(),
+            product: "".into(),
+            revision: "1.00".into(),
+        }),
+    };
+    let target = TargetIdentity::from_probe(&probe, 976_773_168).unwrap();
+    assert_eq!(target.device_id(), "disk&ven_hiksemi&prod_");
+}
+
+#[test]
+fn native_windows_pnp_instance_id_takes_precedence_over_reconstruction() {
+    let probe = HardwareProbe {
+        vid: Some(0x0781),
+        pid: Some(0x5583),
+        transport: NativeTransport::Bot,
+        windows_pnp_instance_id: Some(
+            r"USBSTOR\Disk&Ven_SanDisk&Prod_Ultra_USB_3.0&Rev_1.00\SERIAL&0".into(),
+        ),
+        inquiry: Some(InquiryInfo {
+            vendor: "WRONG".into(),
+            product: "WRONG".into(),
+            revision: "WRONG".into(),
+        }),
+    };
+    let target = TargetIdentity::from_probe(&probe, 122_880_000).unwrap();
+    assert_eq!(target.device_id(), "disk&ven_sandisk&prod_ultra_usb_3.0");
 }
 
 #[test]
@@ -133,7 +170,12 @@ fn target_identity_fails_closed_when_probe_is_ambiguous() {
         .unwrap()
         .revision
         .clear();
-    assert!(TargetIdentity::from_probe(&bot_without_revision, 122_880_000).is_err());
+    let bot_without_revision =
+        TargetIdentity::from_probe(&bot_without_revision, 122_880_000).unwrap();
+    assert_eq!(
+        bot_without_revision.device_id(),
+        "disk&ven_netac&prod_onlydisk"
+    );
 }
 
 #[test]
@@ -165,6 +207,15 @@ fn metadata_rejects_empty_or_unrepresentable_text() {
         ProvisionMetadata::new(onlyid, "🙂", "部门", "标签").is_err(),
         "metadata must be losslessly representable in GBK"
     );
+}
+
+#[test]
+fn metadata_limits_match_official_safe6_source_arrays() {
+    let onlyid = OnlyId::parse("1").unwrap();
+    assert!(ProvisionMetadata::new(onlyid.clone(), "U".repeat(155), "D", "标签").is_ok());
+    assert!(ProvisionMetadata::new(onlyid.clone(), "U".repeat(156), "D", "标签").is_err());
+    assert!(ProvisionMetadata::new(onlyid.clone(), "U", "D".repeat(187), "标签").is_ok());
+    assert!(ProvisionMetadata::new(onlyid, "U", "D".repeat(188), "标签").is_err());
 }
 
 #[test]

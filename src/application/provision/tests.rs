@@ -252,6 +252,7 @@ fn manufacturer_lba3_is_copied_verbatim_into_the_write_plan() {
         vid: Some(0x0dd8),
         pid: Some(0x2005),
         transport: crate::platform::NativeTransport::Uas,
+        windows_pnp_instance_id: None,
         inquiry: None,
     };
     let mut prepared = PreparedNewProvision {
@@ -328,6 +329,7 @@ fn plain_prewrite_snapshot_rejects_stale_lba7_metadata() {
         vid: Some(0x3535),
         pid: Some(0x6300),
         transport: crate::platform::NativeTransport::Uas,
+        windows_pnp_instance_id: None,
         inquiry: None,
     };
     let mut source_metadata = vec![0u8; 13 * SECTOR];
@@ -485,6 +487,7 @@ fn sparse_export_includes_selected_format_images() {
         vid: Some(0x3535),
         pid: Some(0x6300),
         transport: crate::platform::NativeTransport::Uas,
+        windows_pnp_instance_id: None,
         inquiry: None,
     };
     let prepared = PreparedNewProvision {
@@ -530,6 +533,7 @@ fn format_hardware_gate_rejects_changed_serial_probe_capacity_and_device_id() {
         vid: Some(0x3535),
         pid: Some(0x6300),
         transport: crate::platform::NativeTransport::Uas,
+        windows_pnp_instance_id: None,
         inquiry: Some(crate::platform::InquiryInfo {
             vendor: "aigo".into(),
             product: "U335".into(),
@@ -574,6 +578,7 @@ fn protocol_readback_gate_rejects_changed_onlyid_and_layout() {
         vid: Some(0x0dd8),
         pid: Some(0x2005),
         transport: crate::platform::NativeTransport::Uas,
+        windows_pnp_instance_id: None,
         inquiry: Some(crate::platform::InquiryInfo {
             vendor: "Netac".into(),
             product: "OnlyDisk".into(),

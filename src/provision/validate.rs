@@ -65,6 +65,7 @@ impl ProvisionValidator {
         let context = semantic_context(spec);
         validate_lba4(spec, sector(bytes, 4))?;
         validate_lba6(spec, sector(bytes, 6))?;
+        validate_lba9(spec, sector(bytes, 9))?;
         validate_lba7(spec, sector(bytes, 7))?;
         validate_lba8(spec, sector(bytes, 8), &context)?;
         validate_lba11(spec, sector(bytes, 11), &context)?;
@@ -135,7 +136,7 @@ fn validate_reserved(bytes: &[u8]) -> Result<(), String> {
     // uses that opaque sector only for a read/same-bytes-write write-protection
     // probe. A fresh generated image starts from zero, so canonical LBA5=0 is
     // still intentional here.
-    for lba in [1usize, 2, 3, 5, 9, 10] {
+    for lba in [1usize, 2, 3, 5, 10] {
         if sector(bytes, lba).iter().any(|byte| *byte != 0) {
             return Err(format!("LBA{lba} violates canonical zero-sector policy"));
         }
@@ -196,7 +197,7 @@ fn validate_lba4(spec: &ProvisionSpec, raw: &[u8]) -> Result<(), String> {
         .reader
         .bytes()
         .get(0x18..0x47)
-        .ok_or("LBA4 decoded restore-node range missing")?
+        .ok_or("LBA4 解码后的盘尾恢复节点范围缺失")?
         .to_vec();
     // The official reader leaves the post-XOR server-flag stores in its rolling
     // view. Provision validation needs the current writer's producer semantics,
@@ -205,7 +206,7 @@ fn validate_lba4(spec: &ProvisionSpec, raw: &[u8]) -> Result<(), String> {
     producer_node[0x2d] = raw[0x45];
     producer_node[0x2e] = raw[0x46];
     if producer_node != expected_node {
-        return Err("LBA4 current-writer restore-node profile mismatch".into());
+        return Err("LBA4 当前写入器盘尾恢复节点配置不匹配".into());
     }
     if view.reader.bytes().get(0x1fc..0x200) != Some(b"LLGB") {
         return Err("LBA4 trailing LLGB marker mismatch".into());
@@ -234,20 +235,52 @@ fn gbk(value: &str) -> Result<Vec<u8>, String> {
     Ok(bytes.into_owned())
 }
 
-fn expected_lba6_plain(spec: &ProvisionSpec) -> Result<[u8; SECTOR], String> {
+fn expected_lba6_lba9(spec: &ProvisionSpec) -> Result<([u8; SECTOR], [u8; SECTOR]), String> {
+    const LONG_MARKER: &[u8; 4] = b"*^$@";
+    const DEPT_INLINE: usize = 60;
+    const USER_INLINE: usize = 28;
+
     let mut expected = spec.profile().safe6_template();
+    let mut lba9 = [0u8; SECTOR];
     let dept = gbk(spec.metadata().dept())?;
     let user = gbk(spec.metadata().user())?;
-    if !(4..=6).contains(&user.len()) {
-        return Err("User does not fit canonical v1 SAFE6 profile".into());
-    }
+
     expected[..0x40].fill(0);
-    expected[..dept.len()].copy_from_slice(&dept);
-    expected[dept.len()] = 0;
-    expected[0x55..0x58].copy_from_slice(&[0x73, 0x2a, 0xfe]);
-    expected[0x50..0x50 + user.len()].copy_from_slice(&user);
-    expected[0x50 + user.len()] = 0;
-    expected[0x70..0x78].copy_from_slice(spec.profile().autonum().as_bytes());
+    if dept.len() <= 63 {
+        expected[..dept.len()].copy_from_slice(&dept);
+        expected[dept.len()] = 0;
+    } else {
+        let continuation = &dept[DEPT_INLINE..];
+        if continuation.len() >= 128 {
+            return Err("Dept does not fit official LBA6+LBA9 continuation profile".into());
+        }
+        expected[..4].copy_from_slice(LONG_MARKER);
+        expected[4..0x40].copy_from_slice(&dept[..DEPT_INLINE]);
+        lba9[0x80..0x80 + continuation.len()].copy_from_slice(continuation);
+        lba9[0x80 + continuation.len()] = 0;
+    }
+
+    expected[0x50..0x70].fill(0);
+    if user.len() < 32 {
+        expected[0x50..0x50 + user.len()].copy_from_slice(&user);
+        expected[0x50 + user.len()] = 0;
+    } else {
+        let continuation = &user[USER_INLINE..];
+        if continuation.len() >= 128 {
+            return Err("User does not fit official LBA6+LBA9 continuation profile".into());
+        }
+        expected[0x50..0x54].copy_from_slice(LONG_MARKER);
+        expected[0x54..0x70].copy_from_slice(&user[..USER_INLINE]);
+        lba9[0x100..0x100 + continuation.len()].copy_from_slice(continuation);
+        lba9[0x100 + continuation.len()] = 0;
+    }
+
+    let autonum = spec.profile().autonum().as_bytes();
+    if autonum.len() > 15 {
+        return Err("SAFE6 Autonum exceeds 15-byte on-disk slot".into());
+    }
+    expected[0x70..0x80].fill(0);
+    expected[0x70..0x70 + autonum.len()].copy_from_slice(autonum);
     let crc = crc32_bare(spec.target().device_id().as_bytes());
     expected[0x100..0x104].copy_from_slice(&crc.to_le_bytes());
     expected[0x104..0x108].copy_from_slice(&crc.wrapping_shl(1).to_le_bytes());
@@ -263,18 +296,26 @@ fn expected_lba6_plain(spec: &ProvisionSpec) -> Result<[u8; SECTOR], String> {
     expected[0x1e0..0x1f0].fill(0);
     expected[0x1f0..0x1f4]
         .copy_from_slice(&u32::from(spec.profile().safe6_encrypt()).to_le_bytes());
-    Ok(expected)
+    Ok((expected, lba9))
 }
 
 fn validate_lba6(spec: &ProvisionSpec, raw: &[u8]) -> Result<(), String> {
     let decoded = lba6_decode(raw);
-    let expected = expected_lba6_plain(spec)?;
+    let (expected, _) = expected_lba6_lba9(spec)?;
     if decoded[..0x1fc] != expected[..0x1fc] {
         return Err("LBA6 SAFE6 plaintext/profile mismatch".into());
     }
     let checksum = lba6_checksum(&raw[..0x1fc]);
     if raw[0x1fc..0x200] != checksum.to_le_bytes() {
         return Err("LBA6 checksum mismatch".into());
+    }
+    Ok(())
+}
+
+fn validate_lba9(spec: &ProvisionSpec, raw: &[u8]) -> Result<(), String> {
+    let (_, expected) = expected_lba6_lba9(spec)?;
+    if raw != expected {
+        return Err("LBA9 SAFE6 metadata continuation/profile mismatch".into());
     }
     Ok(())
 }
@@ -486,6 +527,7 @@ impl OfficialProvisionValidator {
         let context = semantic_context(spec);
         validate_lba4(spec, sector(bytes, 4))?;
         validate_lba6(spec, sector(bytes, 6))?;
+        validate_lba9(spec, sector(bytes, 9))?;
         validate_lba8(spec, sector(bytes, 8), &context)?;
         validate_lba11(spec, sector(bytes, 11), &context)?;
 

@@ -421,6 +421,7 @@ mod tests {
                     vid: Some(0x3535),
                     pid: Some(0x6300),
                     transport: NativeTransport::Uas,
+                    windows_pnp_instance_id: None,
                     inquiry: None,
                 })
             }
@@ -449,6 +450,7 @@ mod tests {
                     vid: Some(disk as u16),
                     pid: Some(0x2005),
                     transport: NativeTransport::Bot,
+                    windows_pnp_instance_id: None,
                     inquiry: None,
                 })
             }

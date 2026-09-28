@@ -105,6 +105,7 @@ pub fn mode1_fixture_image(key: &str) -> Option<(Vec<u8>, String)> {
         vid: Some(vid),
         pid: Some(pid),
         transport,
+        windows_pnp_instance_id: None,
         inquiry: Some(InquiryInfo {
             vendor: vendor.into(),
             product: product.into(),

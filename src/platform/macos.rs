@@ -290,6 +290,7 @@ pub(super) fn fallback_hardware_probe(runner: &dyn CmdRunner, disk: u32) -> Opti
             vid,
             pid,
             transport,
+            windows_pnp_instance_id: None,
             inquiry,
         })
 }

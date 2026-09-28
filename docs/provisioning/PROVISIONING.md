@@ -18,7 +18,9 @@
 
 该模块禁止打开设备、执行系统命令或提权。硬件发现和真实写盘属于应用层/平台层。
 
-当前 `ProvisionProfile::canonical_v1()` 的配置类型 ID 为 `jiangsu-safe6-mode1`。当前构造器生成 LBA0、4、6、7、8、11、12，并由 `ProvisionValidator` 做离线一致性验证。
+当前 `ProvisionProfile::canonical_v1()` 的配置类型 ID 为 `jiangsu-safe6-v1`。当前构造器生成 LBA0、4、6、7、8、9、11、12，并由 `ProvisionValidator` 做离线一致性验证。LBA9 不再被错误视为新盘恒零：当前官方写入端在 Dept/User 超过 LBA6 内联槽时分别使用 `LBA9+0x080` / `LBA9+0x100` 续写。
+
+SAFE6 元数据长度门槛按当前官方写入端源数组和 LBA9 续段容量实现：User 最大 155 GBK bytes，`<32B` 直接写 LBA6 `+0x50`，`>=32B` 写 `*^$@ + User[0..28)` 并从 LBA9 `+0x100` 续写；Dept 最大 187 GBK bytes，`<=63B` 直接写 LBA6 `+0x00`，`>=64B` 使用当前 writer 的 join60（`*^$@ + Dept[0..60)`，LBA9 `+0x080` 从 Dept[60] 续写）。短 User 不再保留错误的 `4..=6B` 限制，1B 用户名是合法输入。Autonum 也按官方 16B C 字符串槽处理为最多15B，而不是错误地强制恰好8B。历史 join59 仅作为读取兼容配置类型，不由当前新盘 writer 生成。
 
 现有 `generate_image()` 继续保留标准 v1 二合一兼容输出；新增 `generate_official_image()` + `OfficialProvisionPlan` 已能纯内存生成四种官方分区模式的 LBA0/LBA7/LBA12，并由独立 `OfficialProvisionValidator` 反向校验 MBR、EDPF 类型/标志、逻辑几何与 LCE。LBA12 当前封装密钥轴已独立实现为 `ProvisionKeyMaterial`：mode1=A7F0、mode2=SM4-ECB、mode3=AES-128-ECB，三种输出均与官方虚拟写入端逐字节夹具一致；`0000aaaa` 的 v0x0206 隐式有效密码替换也已编码。LBA7 旧版 8B 封装密钥则独立建模为 `LegacyLba7KeyMaterial`，按 `fold32(password)` 对两个 32 位半字异或封装，真实 Netac 原盘向量已逐字节回归；LBA7 与 LBA12 的明文文件密钥来源仍作为两个独立输入，不建立未经证明的派生关系。
 
