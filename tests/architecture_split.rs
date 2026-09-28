@@ -395,6 +395,29 @@ fn application_inspect_is_split_by_read_responsibility() {
 }
 
 #[test]
+fn reprovision_domain_is_split_by_responsibility() {
+    for path in [
+        "src/provision/reprovision/model.rs",
+        "src/provision/reprovision/parsing.rs",
+        "src/provision/reprovision/prefill.rs",
+        "src/provision/reprovision/geometry.rs",
+        "src/provision/reprovision/disposition.rs",
+        "src/provision/reprovision/plan.rs",
+    ] {
+        exists(path);
+    }
+    assert!(lines("src/provision/reprovision.rs") < 100);
+    assert!(lines("src/provision/reprovision/plan.rs") < 400);
+    let root = fs::read_to_string(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("src/provision/reprovision.rs"),
+    )
+    .expect("read reprovision root");
+    assert!(!root.contains("fn parse_existing_provision("));
+    assert!(!root.contains("fn prefill_for_target_mode("));
+    assert!(!root.contains("fn decide_partition_action("));
+}
+
+#[test]
 fn workspace_modules_do_not_import_platform_or_diskio_directly() {
     for path in [
         "src/tui/provision/state.rs",
