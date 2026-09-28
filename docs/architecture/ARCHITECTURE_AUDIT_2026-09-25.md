@@ -1322,6 +1322,14 @@ application 返回结构化 `ProvisionReport/BackupReport/InspectReport`，CLI/T
 - `AdvancedInspectTreeRow` 与 `AdvancedInspectTreeAction` 继续由检查状态门面重新导出，渲染层与测试调用路径保持不变；树选中上下文复位辅助函数仅以父模块可见形式暴露。
 - `inspect/state.rs` 已进一步降至约 **628 行**，硬上限 **700**；树状态模块约 **434 行**，硬上限 **600**。本阶段不修改拓扑构造语义、协议解析、搜索、详情或磁盘输入输出。
 
+#### D8-D1.4：检查工作区渲染拆分
+
+**COMPLETE。** 测试先行门禁首先因树与详情渲染模块缺失出现预期失败，随后将原有结构树绘制迁入 `src/tui/inspect/tree_render.rs`，将对象快照、字段详情文本与字段表格绘制迁入 `src/tui/inspect/detail_render.rs`。`src/tui/inspect/render.rs` 只保留工作区加载状态、布局、磁盘概览及子渲染器编排；原有扇区检查器渲染保持独立。
+
+- `render.rs` 为 **267 行**、`tree_render.rs` 为 **93 行**、`detail_render.rs` 为 **428 行**、`sector_render.rs` 为 **258 行**；架构门禁分别锁定为 **<400 / <180 / <500 / <350 行**，并约束树与详情绘制入口不回迁。
+- 代码只搬迁绘制逻辑，保留结构树顺序、对象快照、字段表列宽和滚动、焦点样式、提示文字与 Pane 布局；不修改协议、介质身份、备份格式或写盘安全链。
+- `cargo check --all-targets --locked`、架构门禁 **29/29**、TUI **266/266**、全目标 Clippy、fast **4 suites / 6 artifacts / 0 failures**、full **8 suites / 10 artifacts + doctest / 0 failures** 与 diff 检查通过。字段表源码契约已跟随绘制入口迁至详情渲染模块。
+
 
 
 

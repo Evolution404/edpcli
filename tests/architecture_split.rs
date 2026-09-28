@@ -82,6 +82,8 @@ fn large_modules_are_split_by_domain_boundary() {
         "src/tui/inspect/tree_state.rs",
         "src/tui/inspect/sector_state.rs",
         "src/tui/inspect/render.rs",
+        "src/tui/inspect/tree_render.rs",
+        "src/tui/inspect/detail_render.rs",
         "src/tui/inspect/sector_render.rs",
         "src/tui/backups/state.rs",
         "src/tui/backups/render.rs",
@@ -141,8 +143,16 @@ fn large_modules_are_split_by_domain_boundary() {
         "Sector Inspector state must stay responsibility-bounded"
     );
     assert!(
-        lines("src/tui/inspect/render.rs") < 750,
-        "Inspect workspace renderer must not absorb Sector Inspector rendering again"
+        lines("src/tui/inspect/render.rs") < 400,
+        "Inspect workspace renderer must stay layout/orchestration-oriented"
+    );
+    assert!(
+        lines("src/tui/inspect/tree_render.rs") < 180,
+        "Inspect tree renderer must stay responsibility-bounded"
+    );
+    assert!(
+        lines("src/tui/inspect/detail_render.rs") < 500,
+        "Inspect detail renderer must stay responsibility-bounded"
     );
     assert!(
         lines("src/tui/inspect/sector_render.rs") < 350,
@@ -753,6 +763,22 @@ fn app_state_owns_backups_through_backups_substate() {
             "BackupsState must own field: {owned_field}"
         );
     }
+}
+
+#[test]
+fn inspect_tree_and_detail_renderers_are_split_from_workspace_root() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let render =
+        fs::read_to_string(root.join("src/tui/inspect/render.rs")).expect("read inspect renderer");
+    let tree = fs::read_to_string(root.join("src/tui/inspect/tree_render.rs"))
+        .expect("read inspect tree renderer");
+    let detail = fs::read_to_string(root.join("src/tui/inspect/detail_render.rs"))
+        .expect("read inspect detail renderer");
+
+    assert!(!render.contains("fn draw_inspect_tree_pane"));
+    assert!(tree.contains("fn draw_inspect_tree_pane"));
+    assert!(!render.contains("fn draw_inspect_object_panes"));
+    assert!(detail.contains("fn draw_inspect_object_panes"));
 }
 
 #[test]
