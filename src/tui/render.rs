@@ -451,7 +451,7 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
                     "顶层标签：设备 ↔ 备份 · 一级 Tab/Shift-Tab 或 gt/gT 切换 · 二级 Tab/Shift-Tab 切当前页焦点 · Esc 返回上一层",
                 ));
                 help_lines.push(Line::from(
-                    "设备: Enter 从列表进入信息树/从树进入详情 · Ctrl-w 切 Pane · 树内 j/k 选择、o 展开 · 详情内 j/k 滚动 · p 制盘 · i 检查 · b 备份 · 备份页: Enter/i 检查 · v 校验 · R 恢复 · d 删除",
+                    "设备: Enter 从列表进入信息树/从树进入详情 · Ctrl-w 切 Pane · 树内 j/k 选择、gg/G 首尾、o 展开 · 详情内 j/k 滚动、gg/G 顶底 · p 制盘 · i 检查 · b 备份 · 备份页: Enter/i 检查 · v 校验 · R 恢复 · d 删除",
                 ));
                 help_lines.push(Line::from(
                     "检查: / 搜索 · n/N 匹配 · gl 跳转 · Sector 0/$、gg/G、v",
@@ -575,7 +575,7 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
                         )
                     }
                     PaneId::DevicesTree => {
-                        "Ctrl-w 切 Pane · j/k 选择节点 · o 展开/折叠 · Enter 详情 · i 检查 · p 制盘 · b 备份 · Esc 设备列表 · q 退出"
+                        "Ctrl-w 切 Pane · j/k 选择节点 · gg/G 首尾节点 · o 展开/折叠 · Enter 详情 · i 检查 · p 制盘 · b 备份 · Esc 设备列表 · q 退出"
                             .to_string()
                     }
                     PaneId::DevicesDetail => {

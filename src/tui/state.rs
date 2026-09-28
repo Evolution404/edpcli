@@ -1654,6 +1654,25 @@ impl AppState {
             .selected = Some(next);
     }
 
+    pub fn device_info_jump_tree(&mut self, to_end: bool) {
+        let rows = self.device_info_tree_rows();
+        if rows.is_empty() {
+            return;
+        }
+        let index = if to_end { rows.len() - 1 } else { 0 };
+        self.devices.info_selected = rows[index].key;
+        let viewport = self
+            .devices
+            .pane_focus
+            .viewport_mut(crate::tui::pane::PaneId::DevicesTree);
+        viewport.selected = Some(index);
+        if to_end {
+            viewport.scroll_y.offset = index;
+        } else {
+            viewport.scroll_y.top();
+        }
+    }
+
     pub fn device_info_toggle_selected(&mut self) {
         let key = self.device_info_selected_key();
         self.devices.info_selected = key;
@@ -1685,14 +1704,14 @@ impl AppState {
             DeviceInfoNodeKey::Capacity => self
                 .selected_device()
                 .and_then(|row| row.canonical_layout().ok())
-                .map(|model| model.collapsed_tail_model().segments.len() + 9)
+                .map(|model| model.collapsed_tail_model().segments.len() + 11)
                 .unwrap_or(3),
             DeviceInfoNodeKey::TailGroup => self
                 .selected_device()
                 .and_then(|row| row.canonical_layout().ok())
-                .and_then(|model| model.tail_group().map(|tail| tail.children.len() + 4))
+                .and_then(|model| model.tail_group().map(|tail| tail.children.len() + 13))
                 .unwrap_or(3),
-            DeviceInfoNodeKey::LayoutSegment { .. } => 10,
+            DeviceInfoNodeKey::LayoutSegment { .. } => 18,
             DeviceInfoNodeKey::Status => 10,
             DeviceInfoNodeKey::Backups => 5,
             DeviceInfoNodeKey::Protocol => 10,
@@ -2132,6 +2151,18 @@ impl AppState {
                         }
                     }
                 }
+            }
+            NavCommand::Top
+                if self.shell.workspace == Workspace::Devices
+                    && self.devices_focused_pane() == crate::tui::pane::PaneId::DevicesTree =>
+            {
+                self.device_info_jump_tree(false);
+            }
+            NavCommand::Bottom
+                if self.shell.workspace == Workspace::Devices
+                    && self.devices_focused_pane() == crate::tui::pane::PaneId::DevicesTree =>
+            {
+                self.device_info_jump_tree(true);
             }
             NavCommand::Top
                 if self.shell.workspace == Workspace::Devices

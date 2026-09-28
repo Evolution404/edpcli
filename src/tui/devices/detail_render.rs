@@ -18,7 +18,7 @@ pub(super) fn draw_device_detail(frame: &mut Frame, area: ratatui::layout::Rect,
         .find(|node| node.key == key)
         .map(|node| node.label)
         .unwrap_or_else(|| "设备详情".into());
-    let lines = device_detail_lines(state, row, key, area.width.saturating_sub(4) as usize);
+    let lines = device_detail_lines(row, key, area.width.saturating_sub(4) as usize);
     frame.render_widget(
         Paragraph::new(lines)
             .block(crate::tui::ui::card(title.as_str(), focused))

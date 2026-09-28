@@ -457,6 +457,19 @@ fn render_text(state: &AppState, width: u16, height: u16) -> String {
         .replace(' ', "")
 }
 
+fn render_lines(state: &AppState, width: u16, height: u16) -> Vec<String> {
+    let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+    terminal.draw(|frame| render::draw(frame, state)).unwrap();
+    let buffer = terminal.backend().buffer();
+    (0..height)
+        .map(|y| {
+            (0..width)
+                .map(|x| buffer[(x, y)].symbol())
+                .collect::<String>()
+        })
+        .collect()
+}
+
 #[test]
 fn provision_review_tab_cycle_and_vertical_scroll_are_pane_local() {
     let mut state = provision_state();
@@ -596,7 +609,7 @@ fn d0_three_pane_focus_cycle_never_changes_selected_device() {
 }
 
 #[test]
-fn d0_current_device_summary_renders_capacity_layout_bar() {
+fn d0_current_device_capacity_uses_thick_full_disk_map() {
     let row = edp_device_with_layout();
 
     let mut state = AppState::new();
@@ -605,21 +618,16 @@ fn d0_current_device_summary_renders_capacity_layout_bar() {
     state.navigate(NavCommand::Down, 12);
     let text = render_text(&state, 160, 36);
     assert!(text.contains("容量布局"), "{text}");
+    assert!(text.contains("全盘容量地图"), "{text}");
     assert!(!text.contains("当前设备·disk6"), "{text}");
-    assert!(
-        text.matches('━').count() >= 80,
-        "capacity bar should use the pane width: {text}"
-    );
+    assert!(text.contains('┌') && text.contains('┬'), "{text}");
+    assert!(text.contains('└') && text.contains('┴'), "{text}");
     assert!(text.contains("启动区"), "{text}");
     assert!(text.contains("交换区"), "{text}");
     assert!(text.contains("保密区"), "{text}");
-    assert!(text.contains("━"), "{text}");
     assert!(
-        text.lines().any(|line| {
-            let compact = line.replace(' ', "");
-            compact.contains("总容量") && compact.contains("EDP主协议区")
-        }),
-        "wide capacity legend should place multiple cells on one aligned row: {text}"
+        text.contains("视觉宽度为极小区域保留最小可见宽度"),
+        "{text}"
     );
 }
 
@@ -810,5 +818,207 @@ fn device_tree_selection_is_semantic_and_detail_has_independent_scroll() {
     assert_eq!(
         state.pane_viewport(PaneId::DevicesDetail).scroll_y.offset,
         1
+    );
+}
+
+#[test]
+fn device_tree_gg_and_g_jump_to_first_and_last_visible_nodes() {
+    use edpcli::tui::state::DeviceInfoNodeKey;
+
+    let mut state = AppState::new();
+    state.replace_devices(vec![edp_device_with_layout()]);
+    state.focus_devices_pane(PaneId::DevicesTree);
+    state.device_info_move_tree(3);
+    assert_ne!(
+        state.device_info_selected_key(),
+        DeviceInfoNodeKey::Identity
+    );
+
+    state.navigate(NavCommand::Top, 12);
+    assert_eq!(
+        state.device_info_selected_key(),
+        DeviceInfoNodeKey::Identity
+    );
+
+    let last = state
+        .device_info_tree_rows()
+        .last()
+        .expect("device info tree has rows")
+        .key;
+    state.navigate(NavCommand::Bottom, 12);
+    assert_eq!(state.device_info_selected_key(), last);
+    assert_eq!(last, DeviceInfoNodeKey::Protocol);
+}
+
+#[test]
+fn device_capacity_map_stays_visible_and_tracks_selected_region() {
+    use edpcli::application::disk_layout::DiskRegionKind;
+    use edpcli::tui::state::DeviceInfoNodeKey;
+
+    let mut state = AppState::new();
+    state.replace_devices(vec![edp_device_with_layout()]);
+    state.focus_devices_pane(PaneId::DevicesTree);
+
+    let select = |state: &mut AppState, target: DeviceInfoNodeKey| {
+        let index = state
+            .device_info_tree_rows()
+            .iter()
+            .position(|row| row.key == target)
+            .expect("target is visible");
+        state.navigate(NavCommand::Top, 20);
+        state.device_info_move_tree(index as isize);
+        assert_eq!(state.device_info_selected_key(), target);
+    };
+
+    select(&mut state, DeviceInfoNodeKey::Capacity);
+    let capacity = render_lines(&state, 180, 46);
+    let capacity_text = capacity.join("\n");
+    let compact_capacity = capacity_text.replace(' ', "");
+    assert!(compact_capacity.contains("全盘容量地图"), "{capacity_text}");
+    assert!(capacity_text.contains('┌') && capacity_text.contains('└'));
+    assert!(!include_str!("../src/tui/devices/presentation.rs").contains("尾部区域可直接"));
+
+    let boot = state
+        .device_info_tree_rows()
+        .iter()
+        .find_map(|row| match row.key {
+            DeviceInfoNodeKey::LayoutSegment { start_lba, kind }
+                if kind == DiskRegionKind::Boot =>
+            {
+                Some(DeviceInfoNodeKey::LayoutSegment { start_lba, kind })
+            }
+            _ => None,
+        })
+        .expect("boot segment");
+    select(&mut state, boot);
+    let boot_lines = render_lines(&state, 180, 46);
+    let boot_marker = boot_lines
+        .iter()
+        .find(|line| line.contains('▲'))
+        .expect("boot map marker");
+    let boot_col = boot_marker.find('▲').expect("boot marker column");
+    assert!(boot_lines
+        .join("\n")
+        .replace(' ', "")
+        .contains("当前区域：启动区"));
+
+    let encrypt = state
+        .device_info_tree_rows()
+        .iter()
+        .find_map(|row| match row.key {
+            DeviceInfoNodeKey::LayoutSegment { start_lba, kind }
+                if kind == DiskRegionKind::Encrypt =>
+            {
+                Some(DeviceInfoNodeKey::LayoutSegment { start_lba, kind })
+            }
+            _ => None,
+        })
+        .expect("encrypt segment");
+    select(&mut state, encrypt);
+    let encrypt_lines = render_lines(&state, 180, 46);
+    let encrypt_marker = encrypt_lines
+        .iter()
+        .find(|line| line.contains('▲'))
+        .expect("encrypt map marker");
+    let encrypt_col = encrypt_marker.find('▲').expect("encrypt marker column");
+    assert!(encrypt_lines
+        .join("\n")
+        .replace(' ', "")
+        .contains("当前区域：保密区"));
+    assert!(
+        encrypt_col > boot_col,
+        "selected marker must move right with the later disk region: boot={boot_col}, encrypt={encrypt_col}"
+    );
+}
+
+#[test]
+fn device_tail_children_keep_the_same_full_disk_map_and_move_marker_inside_tail() {
+    use edpcli::application::disk_layout::DiskRegionKind;
+    use edpcli::tui::state::DeviceInfoNodeKey;
+
+    let mut state = AppState::new();
+    state.replace_devices(vec![edp_device_with_layout()]);
+    state.focus_devices_pane(PaneId::DevicesTree);
+
+    let tail_index = state
+        .device_info_tree_rows()
+        .iter()
+        .position(|row| row.key == DeviceInfoNodeKey::TailGroup)
+        .expect("tail group visible");
+    state.navigate(NavCommand::Top, 20);
+    state.device_info_move_tree(tail_index as isize);
+    state.device_info_toggle_selected();
+
+    let tail_lines = render_lines(&state, 180, 46);
+    let tail_border = tail_lines
+        .iter()
+        .find(|line| line.contains('┌') && line.contains('┬'))
+        .expect("tail map border")
+        .clone();
+    let tail_marker = tail_lines
+        .iter()
+        .find(|line| line.contains('▲'))
+        .and_then(|line| line.find('▲'))
+        .expect("tail marker");
+
+    let lce = state
+        .device_info_tree_rows()
+        .iter()
+        .find_map(|row| match row.key {
+            DeviceInfoNodeKey::LayoutSegment { start_lba, kind } if kind == DiskRegionKind::Lce => {
+                Some(DeviceInfoNodeKey::LayoutSegment { start_lba, kind })
+            }
+            _ => None,
+        })
+        .expect("LCE child");
+    let lce_index = state
+        .device_info_tree_rows()
+        .iter()
+        .position(|row| row.key == lce)
+        .expect("LCE child visible");
+    state.navigate(NavCommand::Top, 20);
+    state.device_info_move_tree(lce_index as isize);
+
+    let lce_lines = render_lines(&state, 180, 46);
+    let lce_border = lce_lines
+        .iter()
+        .find(|line| line.contains('┌') && line.contains('┬'))
+        .expect("LCE map border");
+    let lce_marker = lce_lines
+        .iter()
+        .find(|line| line.contains('▲'))
+        .and_then(|line| line.find('▲'))
+        .expect("LCE marker");
+
+    assert_eq!(
+        &tail_border, lce_border,
+        "tail drill-down must keep one map"
+    );
+    assert!(lce_lines
+        .join("\n")
+        .replace(' ', "")
+        .contains("当前区域：LCE"));
+    assert!(
+        lce_marker <= tail_marker,
+        "LCE starts near the beginning of the aggregate tail: lce={lce_marker}, tail={tail_marker}"
+    );
+}
+
+#[test]
+fn device_capacity_map_uses_a_three_row_region_band() {
+    let mut state = AppState::new();
+    state.replace_devices(vec![edp_device_with_layout()]);
+    state.focus_devices_pane(PaneId::DevicesTree);
+    state.navigate(NavCommand::Down, 20);
+
+    let lines = render_lines(&state, 180, 46);
+    let top = lines
+        .iter()
+        .position(|line| line.contains('┌') && line.contains('┬'))
+        .expect("disk map top border");
+    assert!(lines[top + 1].contains('│'), "map middle row missing");
+    assert!(
+        lines[top + 2].contains('└') && lines[top + 2].contains('┴'),
+        "map bottom border missing"
     );
 }

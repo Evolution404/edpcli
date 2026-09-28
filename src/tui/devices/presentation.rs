@@ -2,17 +2,16 @@ use super::*;
 use crate::tui::state::DeviceInfoNodeKey;
 
 pub(super) fn device_detail_lines(
-    state: &AppState,
     row: &crate::disk_scan::Row,
     key: DeviceInfoNodeKey,
     width: usize,
 ) -> Vec<Line<'static>> {
     match key {
         DeviceInfoNodeKey::Identity => identity_detail_lines(row),
-        DeviceInfoNodeKey::Capacity => capacity_detail_lines(state, row, width),
-        DeviceInfoNodeKey::TailGroup => tail_detail_lines(row),
+        DeviceInfoNodeKey::Capacity => capacity_detail_lines(row, key, width),
+        DeviceInfoNodeKey::TailGroup => tail_detail_lines(row, key, width),
         DeviceInfoNodeKey::LayoutSegment { start_lba, kind } => {
-            segment_detail_lines(row, start_lba, kind)
+            segment_detail_lines(row, key, start_lba, kind, width)
         }
         DeviceInfoNodeKey::Status => status_detail_lines(row),
         DeviceInfoNodeKey::Backups => backup_detail_lines(row),
@@ -48,8 +47,8 @@ fn identity_detail_lines(row: &crate::disk_scan::Row) -> Vec<Line<'static>> {
 }
 
 fn capacity_detail_lines(
-    state: &AppState,
     row: &crate::disk_scan::Row,
+    key: DeviceInfoNodeKey,
     width: usize,
 ) -> Vec<Line<'static>> {
     let Ok(model) = row.canonical_layout() else {
@@ -63,16 +62,7 @@ fn capacity_detail_lines(
         ))];
     };
     let collapsed = model.collapsed_tail_model();
-    let presentation = crate::tui::disk_layout::DiskLayoutPresentation::new(
-        &collapsed,
-        crate::tui::disk_layout::DiskLayoutProfile::CompactHuman,
-        crate::tui::disk_layout::TailExpansion::Collapsed,
-    );
-    let mut lines = vec![
-        section_line("全盘布局"),
-        presentation.bar_line(width.max(8)),
-    ];
-    lines.extend(presentation.compact_grid_lines(width.max(8)));
+    let mut lines = capacity_map_lines(&model, key, width);
     lines.push(Line::from(""));
     lines.push(section_line("区域列表"));
     lines.push(Line::from(Span::styled(
@@ -101,28 +91,23 @@ fn capacity_detail_lines(
             percentage(segment.sector_count, model.total_sectors)
         )));
     }
-    if state
-        .device_info_tree_rows()
-        .iter()
-        .any(|node| node.key == DeviceInfoNodeKey::TailGroup)
-    {
-        lines.push(Line::from(""));
-        lines.push(Line::from(Span::styled(
-            "尾部区域可直接在左侧按 o 展开，不需要进入深度检查。",
-            muted(),
-        )));
-    }
     lines
 }
 
-fn tail_detail_lines(row: &crate::disk_scan::Row) -> Vec<Line<'static>> {
+fn tail_detail_lines(
+    row: &crate::disk_scan::Row,
+    key: DeviceInfoNodeKey,
+    width: usize,
+) -> Vec<Line<'static>> {
     let Ok(model) = row.canonical_layout() else {
         return vec![Line::from(Span::styled("尾部布局证据不足", warning()))];
     };
     let Some(tail) = model.tail_group() else {
         return vec![Line::from("当前介质没有独立尾部区域。")];
     };
-    let mut lines = vec![
+    let mut lines = capacity_map_lines(&model, key, width);
+    lines.push(Line::from(""));
+    lines.extend([
         field_line(
             "LBA 范围",
             format!("[{}..{}]", tail.start_lba, tail.end_exclusive - 1),
@@ -135,7 +120,7 @@ fn tail_detail_lines(row: &crate::disk_scan::Row) -> Vec<Line<'static>> {
         ),
         Line::from(""),
         section_line("尾部结构"),
-    ];
+    ]);
     for child in tail.children {
         lines.push(Line::from(format!(
             "{}  {}  {}",
@@ -153,8 +138,10 @@ fn tail_detail_lines(row: &crate::disk_scan::Row) -> Vec<Line<'static>> {
 
 fn segment_detail_lines(
     row: &crate::disk_scan::Row,
+    key: DeviceInfoNodeKey,
     start_lba: u64,
     kind: crate::disk_layout::DiskRegionKind,
+    width: usize,
 ) -> Vec<Line<'static>> {
     let Ok(model) = row.canonical_layout() else {
         return vec![Line::from(Span::styled("区域布局证据不足", warning()))];
@@ -169,7 +156,9 @@ fn segment_detail_lines(
             warning(),
         ))];
     };
-    vec![
+    let mut lines = capacity_map_lines(&model, key, width);
+    lines.push(Line::from(""));
+    lines.extend([
         field_line("区域类型", segment.kind.label()),
         field_line("LBA 范围", segment.closed_range()),
         field_line("起始 LBA", segment.start_lba.to_string()),
@@ -199,7 +188,302 @@ fn segment_detail_lines(
             "需要逐扇区、十六进制或字段证据时按 i 进入深度检查。",
             muted(),
         )),
-    ]
+    ]);
+    lines
+}
+
+fn capacity_map_lines(
+    model: &crate::tui::disk_layout::DiskLayoutModel,
+    key: DeviceInfoNodeKey,
+    width: usize,
+) -> Vec<Line<'static>> {
+    let active = active_capacity_extent(model, key);
+    let visual = model.collapsed_tail_model();
+    let segment_count = visual.segments.len().max(1);
+    let band_width = width.max(24);
+    let separators = segment_count.saturating_add(1);
+    let cell_budget = band_width.saturating_sub(separators).max(segment_count);
+    let allocations = disk_map_allocations(&visual, cell_budget);
+    let map_width = allocations.iter().sum::<usize>() + separators;
+
+    let last_lba = model.total_sectors.saturating_sub(1);
+    let left = "LBA 0".to_string();
+    let right = format!(
+        "LBA {last_lba} · {}",
+        format_bytes(
+            model
+                .total_sectors
+                .saturating_mul(crate::common::SECTOR as u64)
+        )
+    );
+    let coordinate_gap = map_width
+        .saturating_sub(crate::tui::table_layout::display_width(&left))
+        .saturating_sub(crate::tui::table_layout::display_width(&right));
+
+    let mut lines = vec![
+        section_line("全盘容量地图"),
+        Line::from(vec![
+            Span::styled(left, muted()),
+            Span::raw(" ".repeat(coordinate_gap)),
+            Span::styled(right, muted()),
+        ]),
+        disk_map_border_line(&visual, &allocations, active.as_ref(), true),
+        disk_map_body_line(&visual, &allocations, active.as_ref()),
+        disk_map_border_line(&visual, &allocations, active.as_ref(), false),
+    ];
+
+    if let Some(active) = active.as_ref() {
+        let marker = disk_map_marker_column(&visual, &allocations, active);
+        lines.push(Line::from(vec![
+            Span::raw(" ".repeat(marker)),
+            Span::styled("▲", accent()),
+        ]));
+        lines.push(Line::from(Span::styled(
+            format!(
+                "当前区域：{} · LBA [{}..{}] · {} · {}",
+                active.label,
+                active.start_lba,
+                active.end_exclusive.saturating_sub(1),
+                format_bytes(
+                    active
+                        .end_exclusive
+                        .saturating_sub(active.start_lba)
+                        .saturating_mul(crate::common::SECTOR as u64)
+                ),
+                percentage(
+                    active.end_exclusive.saturating_sub(active.start_lba),
+                    model.total_sectors
+                )
+            ),
+            accent(),
+        )));
+    } else {
+        lines.push(Line::from(""));
+        lines.push(Line::from(Span::styled(
+            format!(
+                "当前：全盘布局 · {} · {} sectors",
+                format_bytes(
+                    model
+                        .total_sectors
+                        .saturating_mul(crate::common::SECTOR as u64)
+                ),
+                model.total_sectors
+            ),
+            secondary(),
+        )));
+    }
+    lines.push(Line::from(Span::styled(
+        "视觉宽度为极小区域保留最小可见宽度；LBA、容量与占比保持真实。",
+        muted(),
+    )));
+    lines
+}
+
+#[derive(Debug, Clone)]
+struct ActiveCapacityExtent {
+    start_lba: u64,
+    end_exclusive: u64,
+    label: String,
+}
+
+fn active_capacity_extent(
+    model: &crate::tui::disk_layout::DiskLayoutModel,
+    key: DeviceInfoNodeKey,
+) -> Option<ActiveCapacityExtent> {
+    match key {
+        DeviceInfoNodeKey::TailGroup => model.tail_group().map(|tail| ActiveCapacityExtent {
+            start_lba: tail.start_lba,
+            end_exclusive: tail.end_exclusive,
+            label: "尾部区域".into(),
+        }),
+        DeviceInfoNodeKey::LayoutSegment { start_lba, kind } => model
+            .segments
+            .iter()
+            .find(|segment| segment.start_lba == start_lba && segment.kind == kind)
+            .and_then(|segment| {
+                segment
+                    .end_exclusive()
+                    .ok()
+                    .map(|end_exclusive| ActiveCapacityExtent {
+                        start_lba: segment.start_lba,
+                        end_exclusive,
+                        label: segment.label.clone(),
+                    })
+            }),
+        _ => None,
+    }
+}
+
+fn disk_map_allocations(
+    model: &crate::tui::disk_layout::DiskLayoutModel,
+    cell_budget: usize,
+) -> Vec<usize> {
+    let count = model.segments.len();
+    if count == 0 {
+        return Vec::new();
+    }
+    let min_width: usize = if cell_budget >= count.saturating_mul(3) {
+        3
+    } else if cell_budget >= count.saturating_mul(2) {
+        2
+    } else {
+        1
+    };
+    let mut allocations = vec![min_width; count];
+    let remaining = cell_budget.saturating_sub(min_width.saturating_mul(count));
+    if remaining == 0 {
+        return allocations;
+    }
+
+    let total = model
+        .segments
+        .iter()
+        .map(|segment| u128::from(segment.sector_count))
+        .sum::<u128>()
+        .max(1);
+    let mut assigned = 0usize;
+    let mut remainders = Vec::with_capacity(count);
+    for (index, segment) in model.segments.iter().enumerate() {
+        let scaled = u128::from(segment.sector_count) * remaining as u128;
+        let extra = (scaled / total) as usize;
+        allocations[index] += extra;
+        assigned += extra;
+        remainders.push((scaled % total, index));
+    }
+    remainders.sort_by(|left, right| right.0.cmp(&left.0).then_with(|| left.1.cmp(&right.1)));
+    for (_, index) in remainders
+        .into_iter()
+        .take(remaining.saturating_sub(assigned))
+    {
+        allocations[index] += 1;
+    }
+    allocations
+}
+
+fn disk_map_border_line(
+    model: &crate::tui::disk_layout::DiskLayoutModel,
+    allocations: &[usize],
+    active: Option<&ActiveCapacityExtent>,
+    top: bool,
+) -> Line<'static> {
+    let mut spans = vec![Span::styled(if top { "┌" } else { "└" }, muted())];
+    for (index, (segment, width)) in model
+        .segments
+        .iter()
+        .zip(allocations.iter().copied())
+        .enumerate()
+    {
+        spans.push(Span::styled(
+            "─".repeat(width),
+            disk_map_segment_style(segment, active),
+        ));
+        let edge = if index + 1 == model.segments.len() {
+            if top {
+                "┐"
+            } else {
+                "┘"
+            }
+        } else if top {
+            "┬"
+        } else {
+            "┴"
+        };
+        spans.push(Span::styled(edge, muted()));
+    }
+    Line::from(spans)
+}
+
+fn disk_map_body_line(
+    model: &crate::tui::disk_layout::DiskLayoutModel,
+    allocations: &[usize],
+    active: Option<&ActiveCapacityExtent>,
+) -> Line<'static> {
+    let mut spans = vec![Span::styled("│", muted())];
+    for (segment, width) in model.segments.iter().zip(allocations.iter().copied()) {
+        let is_active = capacity_segment_active(segment, active);
+        let label = if is_active {
+            format!("●{}", segment.label)
+        } else {
+            segment.label.clone()
+        };
+        spans.push(Span::styled(
+            center_disk_map_label(&label, width),
+            disk_map_segment_style(segment, active),
+        ));
+        spans.push(Span::styled("│", muted()));
+    }
+    Line::from(spans)
+}
+
+fn disk_map_segment_style(
+    segment: &crate::tui::disk_layout::DiskLayoutSegment,
+    active: Option<&ActiveCapacityExtent>,
+) -> ratatui::style::Style {
+    let theme = crate::tui::theme::current();
+    let style = theme.disk_region(segment.kind);
+    if capacity_segment_active(segment, active) {
+        style
+            .bg(theme.palette().selection)
+            .add_modifier(ratatui::style::Modifier::BOLD)
+    } else {
+        style
+    }
+}
+
+fn capacity_segment_active(
+    segment: &crate::tui::disk_layout::DiskLayoutSegment,
+    active: Option<&ActiveCapacityExtent>,
+) -> bool {
+    let Some(active) = active else {
+        return false;
+    };
+    segment
+        .end_exclusive()
+        .ok()
+        .is_some_and(|end| segment.start_lba < active.end_exclusive && end > active.start_lba)
+}
+
+fn center_disk_map_label(label: &str, width: usize) -> String {
+    if width == 0 {
+        return String::new();
+    }
+    let clipped = crate::tui::table_layout::truncate_cell(
+        label,
+        width,
+        crate::tui::table_layout::TruncatePolicy::Clip,
+    );
+    let used = crate::tui::table_layout::display_width(&clipped);
+    let left = width.saturating_sub(used) / 2;
+    let right = width.saturating_sub(used).saturating_sub(left);
+    format!("{}{}{}", " ".repeat(left), clipped, " ".repeat(right))
+}
+
+fn disk_map_marker_column(
+    model: &crate::tui::disk_layout::DiskLayoutModel,
+    allocations: &[usize],
+    active: &ActiveCapacityExtent,
+) -> usize {
+    let active_mid =
+        u128::from(active.start_lba).saturating_add(u128::from(active.end_exclusive)) / 2;
+    let mut cursor = 1usize;
+    for (segment, width) in model.segments.iter().zip(allocations.iter().copied()) {
+        let Ok(segment_end) = segment.end_exclusive() else {
+            cursor = cursor.saturating_add(width).saturating_add(1);
+            continue;
+        };
+        if segment.start_lba < active.end_exclusive && segment_end > active.start_lba {
+            let segment_start = u128::from(segment.start_lba);
+            let segment_len = u128::from(segment.sector_count).max(1);
+            let relative = active_mid
+                .clamp(segment_start, u128::from(segment_end).saturating_sub(1))
+                .saturating_sub(segment_start);
+            let offset = ((relative.saturating_mul(width as u128)) / segment_len)
+                .min(width.saturating_sub(1) as u128) as usize;
+            return cursor.saturating_add(offset);
+        }
+        cursor = cursor.saturating_add(width).saturating_add(1);
+    }
+    0
 }
 
 fn status_detail_lines(row: &crate::disk_scan::Row) -> Vec<Line<'static>> {
