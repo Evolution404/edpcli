@@ -1047,11 +1047,20 @@ fn device_capacity_map_uses_axis_thick_band_and_selection_card() {
 }
 
 #[test]
-fn device_capacity_map_active_region_uses_terminal_native_outline_not_selection_fill() {
+fn device_capacity_map_uses_semantic_fill_and_keeps_selection_out_of_the_map() {
     let source = include_str!("../src/tui/devices/presentation.rs");
+    let theme = include_str!("../src/tui/theme.rs");
     assert!(
-        !source.contains(".bg(theme.palette().selection)"),
-        "disk map active region must not use a large selection background"
+        !source.contains("palette().selection"),
+        "disk map must not reuse the generic selection background"
+    );
+    assert!(
+        source.contains("disk_region_fill(segment.kind, is_active)"),
+        "disk map content cells must use the centralized semantic fill"
+    );
+    assert!(
+        theme.contains("pub fn disk_region_fill"),
+        "semantic disk backgrounds must live in the centralized theme"
     );
     for glyph in ["━", "┃"] {
         assert!(

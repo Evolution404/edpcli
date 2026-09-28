@@ -634,24 +634,18 @@ fn disk_map_segment_style(
     segment: &crate::tui::disk_layout::DiskLayoutSegment,
     active: Option<&ActiveCapacityExtent>,
 ) -> ratatui::style::Style {
-    let theme = crate::tui::theme::current();
-    if capacity_segment_active(segment, active) {
-        ratatui::style::Style::default()
-            .fg(theme.palette().accent)
-            .add_modifier(ratatui::style::Modifier::BOLD)
-    } else {
-        theme.disk_region(segment.kind)
-    }
+    let is_active = capacity_segment_active(segment, active);
+    crate::tui::theme::current().disk_region_fill(segment.kind, is_active)
 }
 
 fn disk_map_border_style(
-    segment: &crate::tui::disk_layout::DiskLayoutSegment,
+    _segment: &crate::tui::disk_layout::DiskLayoutSegment,
     is_active: bool,
 ) -> ratatui::style::Style {
     if is_active {
         crate::tui::theme::current().accent()
     } else {
-        crate::tui::theme::current().disk_region(segment.kind)
+        crate::tui::theme::current().subtle_border()
     }
 }
 

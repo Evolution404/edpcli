@@ -338,8 +338,8 @@ impl Theme {
         Style::default().fg(color)
     }
 
-    pub fn disk_region(self, kind: DiskRegionKind) -> Style {
-        let color = match kind {
+    fn disk_region_color(self, kind: DiskRegionKind) -> Color {
+        match kind {
             DiskRegionKind::Protocol => self.palette.accent,
             DiskRegionKind::Metadata | DiskRegionKind::Reserved => {
                 self.palette.partition_compatibility
@@ -353,8 +353,111 @@ impl Theme {
             DiskRegionKind::Compatibility => self.palette.partition_compatibility,
             DiskRegionKind::Lce | DiskRegionKind::BackupMirror => self.palette.violet,
             DiskRegionKind::RestoreNode | DiskRegionKind::Tail => self.palette.accent_soft,
+        }
+    }
+
+    pub fn disk_region(self, kind: DiskRegionKind) -> Style {
+        Style::default().fg(self.disk_region_color(kind))
+    }
+
+    pub fn disk_region_fill(self, kind: DiskRegionKind, active: bool) -> Style {
+        let background = match self.mode {
+            ThemeMode::TrueColorDark => match (kind, active) {
+                (DiskRegionKind::Protocol, false) => Color::Rgb(0x0B, 0x26, 0x32),
+                (DiskRegionKind::Protocol, true) => Color::Rgb(0x10, 0x35, 0x40),
+                (
+                    DiskRegionKind::Metadata
+                    | DiskRegionKind::Reserved
+                    | DiskRegionKind::Compatibility,
+                    false,
+                ) => Color::Rgb(0x2A, 0x25, 0x18),
+                (
+                    DiskRegionKind::Metadata
+                    | DiskRegionKind::Reserved
+                    | DiskRegionKind::Compatibility,
+                    true,
+                ) => Color::Rgb(0x39, 0x31, 0x20),
+                (DiskRegionKind::Unknown, false) => Color::Rgb(0x15, 0x1C, 0x23),
+                (DiskRegionKind::Unknown, true) => Color::Rgb(0x1E, 0x28, 0x31),
+                (DiskRegionKind::Free, false) => Color::Rgb(0x13, 0x1B, 0x22),
+                (DiskRegionKind::Free, true) => Color::Rgb(0x1B, 0x26, 0x2F),
+                (DiskRegionKind::Plain, false) => Color::Rgb(0x12, 0x22, 0x31),
+                (DiskRegionKind::Plain, true) => Color::Rgb(0x19, 0x30, 0x43),
+                (DiskRegionKind::Boot, false) => Color::Rgb(0x0F, 0x29, 0x28),
+                (DiskRegionKind::Boot, true) => Color::Rgb(0x16, 0x3A, 0x32),
+                (DiskRegionKind::Share | DiskRegionKind::Combined, false) => {
+                    Color::Rgb(0x14, 0x28, 0x20)
+                }
+                (DiskRegionKind::Share | DiskRegionKind::Combined, true) => {
+                    Color::Rgb(0x1B, 0x37, 0x29)
+                }
+                (DiskRegionKind::Encrypt, false) => Color::Rgb(0x25, 0x1D, 0x31),
+                (DiskRegionKind::Encrypt, true) => Color::Rgb(0x34, 0x27, 0x42),
+                (DiskRegionKind::Lce | DiskRegionKind::BackupMirror, false) => {
+                    Color::Rgb(0x25, 0x1E, 0x31)
+                }
+                (DiskRegionKind::Lce | DiskRegionKind::BackupMirror, true) => {
+                    Color::Rgb(0x34, 0x29, 0x43)
+                }
+                (DiskRegionKind::RestoreNode | DiskRegionKind::Tail, false) => {
+                    Color::Rgb(0x10, 0x24, 0x34)
+                }
+                (DiskRegionKind::RestoreNode | DiskRegionKind::Tail, true) => {
+                    Color::Rgb(0x17, 0x33, 0x46)
+                }
+            },
+            ThemeMode::Ansi256Dark => {
+                let index = match (kind, active) {
+                    (DiskRegionKind::Protocol, false) => 23,
+                    (DiskRegionKind::Protocol, true) => 30,
+                    (
+                        DiskRegionKind::Metadata
+                        | DiskRegionKind::Reserved
+                        | DiskRegionKind::Compatibility,
+                        false,
+                    ) => 58,
+                    (
+                        DiskRegionKind::Metadata
+                        | DiskRegionKind::Reserved
+                        | DiskRegionKind::Compatibility,
+                        true,
+                    ) => 94,
+                    (DiskRegionKind::Unknown | DiskRegionKind::Free, false) => 235,
+                    (DiskRegionKind::Unknown | DiskRegionKind::Free, true) => 237,
+                    (DiskRegionKind::Plain, false) => 17,
+                    (DiskRegionKind::Plain, true) => 24,
+                    (DiskRegionKind::Boot, false) => 22,
+                    (DiskRegionKind::Boot, true) => 29,
+                    (DiskRegionKind::Share | DiskRegionKind::Combined, false) => 22,
+                    (DiskRegionKind::Share | DiskRegionKind::Combined, true) => 28,
+                    (DiskRegionKind::Encrypt, false) => 53,
+                    (DiskRegionKind::Encrypt, true) => 60,
+                    (DiskRegionKind::Lce | DiskRegionKind::BackupMirror, false) => 53,
+                    (DiskRegionKind::Lce | DiskRegionKind::BackupMirror, true) => 60,
+                    (DiskRegionKind::RestoreNode | DiskRegionKind::Tail, false) => 17,
+                    (DiskRegionKind::RestoreNode | DiskRegionKind::Tail, true) => 24,
+                };
+                Color::Indexed(index)
+            }
+            ThemeMode::Ansi16 => {
+                if active {
+                    Color::DarkGray
+                } else {
+                    Color::Black
+                }
+            }
         };
-        Style::default().fg(color)
+        let foreground = if active {
+            self.palette.accent
+        } else {
+            self.disk_region_color(kind)
+        };
+        let style = Style::default().fg(foreground).bg(background);
+        if active {
+            style.add_modifier(Modifier::BOLD)
+        } else {
+            style
+        }
     }
 
     pub fn provision_kind(self, kind: ProvisionKind) -> Style {
