@@ -504,28 +504,38 @@ fn d0_device_table_uses_user_approved_column_order() {
 }
 
 #[test]
-fn d0_device_summary_sections_are_interactive_and_default_identity_capacity_open() {
-    use edpcli::tui::state::DeviceSummarySection;
+fn d0_device_info_tree_is_semantic_and_capacity_is_expandable_in_place() {
+    use edpcli::tui::state::DeviceInfoNodeKey;
 
     let mut state = AppState::new();
     state.replace_devices(vec![device()]);
     state.focus_devices_pane(PaneId::DevicesTree);
 
     assert_eq!(
-        state.device_summary_selected_section(),
-        DeviceSummarySection::Identity
+        state.device_info_selected_key(),
+        DeviceInfoNodeKey::Identity
     );
-    assert!(state.device_summary_section_expanded(DeviceSummarySection::Identity));
-    assert!(state.device_summary_section_expanded(DeviceSummarySection::Capacity));
-    assert!(!state.device_summary_section_expanded(DeviceSummarySection::Status));
+    assert!(
+        state
+            .device_info_tree_rows()
+            .iter()
+            .find(|row| row.key == DeviceInfoNodeKey::Capacity)
+            .is_some_and(|row| row.expanded)
+    );
 
-    state.device_summary_move_section(1);
+    state.device_info_move_tree(1);
     assert_eq!(
-        state.device_summary_selected_section(),
-        DeviceSummarySection::Capacity
+        state.device_info_selected_key(),
+        DeviceInfoNodeKey::Capacity
     );
-    state.device_summary_toggle_selected_section();
-    assert!(!state.device_summary_section_expanded(DeviceSummarySection::Capacity));
+    state.device_info_toggle_selected();
+    assert!(
+        state
+            .device_info_tree_rows()
+            .iter()
+            .find(|row| row.key == DeviceInfoNodeKey::Capacity)
+            .is_some_and(|row| !row.expanded)
+    );
 }
 
 #[test]
