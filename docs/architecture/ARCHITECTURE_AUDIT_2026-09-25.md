@@ -1363,6 +1363,14 @@ application 返回结构化 `ProvisionReport/BackupReport/InspectReport`，CLI/T
 - D8-D2：拆分 `Provision` 字段模式、展示、编辑与密码验证；
 - D8-D3：`tui/mod.rs` 收敛为终端生命周期与事件循环，不再理解工作区业务阶段。
 
+#### D8-D2.1：制盘字段状态拆分
+
+**COMPLETE；D8-D2 继续。** 字段标识、分组与能力描述迁至 `field_model.rs`；字段标签、可见值、紧凑分组和提示迁至 `field_presentation.rs`；光标、输入策略和字符编辑迁至 `field_input.rs`；来源密码只读探测、验证请求与结果、编辑后失效状态迁至 `password_verification.rs`。原 `AppState` 公共方法和密码域独立语义保持不变。
+
+- `state.rs` **457 行**、`fields.rs` **307 行**、`field_model.rs` **72 行**、`field_presentation.rs` **361 行**、`field_input.rs` **191 行**、`password_verification.rs` **150 行**；`key_domains.rs` 仅保留计划阶段转换，**45 行**。
+- 测试先行的架构门禁先因新模块缺失失败，搬迁后架构 **29/29**、TUI **266/266**、Provision **208/208** 通过；更严格的规模和入口归属门禁阻止字段状态回迁。
+- `cargo check --all-targets --locked`、全目标 Clippy、fast **4 suites / 6 artifacts / 0 failures**、full **8 suites / 10 artifacts + doctest / 0 failures** 均通过；本阶段不改制盘请求、协议或真实写盘安全链。
+
 ### D8-E：第二批领域/入口模块化
 
 - D8-E1：`CLI` 参数解析与命令处理按领域拆分；

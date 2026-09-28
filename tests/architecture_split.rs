@@ -71,6 +71,10 @@ fn large_modules_are_split_by_domain_boundary() {
         "src/tui/provision/form.rs",
         "src/tui/provision/plain_editor.rs",
         "src/tui/provision/fields.rs",
+        "src/tui/provision/field_model.rs",
+        "src/tui/provision/field_presentation.rs",
+        "src/tui/provision/field_input.rs",
+        "src/tui/provision/password_verification.rs",
         "src/tui/provision/validation.rs",
         "src/tui/provision/layout.rs",
         "src/tui/provision/editor.rs",
@@ -182,7 +186,7 @@ fn large_modules_are_split_by_domain_boundary() {
     }
     assert!(lines("src/inspect/render.rs") < 400);
     assert!(
-        lines("src/tui/provision/state.rs") < 520,
+        lines("src/tui/provision/state.rs") < 470,
         "Provision orchestration state must not absorb form/capacity/plain model again"
     );
     assert!(
@@ -211,9 +215,14 @@ fn large_modules_are_split_by_domain_boundary() {
         "Provision validation adapter must not duplicate canonical protocol or domain parsers"
     );
     assert!(
-        lines("src/tui/provision/fields.rs") < 900,
+        lines("src/tui/provision/fields.rs") < 350,
         "Provision field navigation and input editing must stay responsibility-bounded"
     );
+    assert!(lines("src/tui/provision/field_model.rs") < 120);
+    assert!(lines("src/tui/provision/field_presentation.rs") < 420);
+    assert!(lines("src/tui/provision/field_input.rs") < 250);
+    assert!(lines("src/tui/provision/password_verification.rs") < 200);
+    assert!(lines("src/tui/provision/key_domains.rs") < 80);
     let field_source = fs::read_to_string(
         Path::new(env!("CARGO_MANIFEST_DIR")).join("src/tui/provision/fields.rs"),
     )
@@ -222,10 +231,14 @@ fn large_modules_are_split_by_domain_boundary() {
         Path::new(env!("CARGO_MANIFEST_DIR")).join("src/tui/provision/state.rs"),
     )
     .expect("read provision orchestration state");
+    let input_source = fs::read_to_string(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("src/tui/provision/field_input.rs"),
+    )
+    .expect("read provision field input module");
     for name in ["provision_push_char", "provision_delete_char"] {
         assert!(
-            field_source.contains(name),
-            "fields module is missing {name}"
+            input_source.contains(name),
+            "field input module is missing {name}"
         );
         assert!(
             !orchestration_source.contains(&format!("fn {name}(")),
@@ -240,6 +253,9 @@ fn large_modules_are_split_by_domain_boundary() {
         !field_source.contains("provision_field_slot"),
         "fields module must not reintroduce numeric field slots"
     );
+    assert!(!field_source.contains("fn provision_visible_fields("));
+    assert!(!field_source.contains("fn provision_push_char("));
+    assert!(!field_source.contains("fn provision_source_password_verify_request("));
     assert!(
         lines("src/tui/provision/form.rs") < 650,
         "Provision form model must stay responsibility-bounded"
