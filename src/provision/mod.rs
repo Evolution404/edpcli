@@ -31,8 +31,8 @@ pub use key_domain::{
     TargetPasswordPolicy, DEFAULT_KEY_DOMAIN_PASSWORD,
 };
 pub use keys::{
-    unwrap_legacy_lba7_file_key, wrap_file_key, wrap_legacy_lba7_file_key, FileKeyWrapMode,
-    LegacyLba7KeyMaterial, ProvisionKeyMaterial,
+    unwrap_file_key, unwrap_legacy_lba7_file_key, wrap_file_key, wrap_legacy_lba7_file_key,
+    ExistingFileKeyError, FileKeyWrapMode, LegacyLba7KeyMaterial, ProvisionKeyMaterial,
 };
 pub use layout::{
     build_official_partition_layout, official_format_targets,

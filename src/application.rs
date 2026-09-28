@@ -37,6 +37,18 @@ use crate::sysinfo::{CmdRunner, ReadProbeCache};
 /// Frontend interaction boundary shared by CLI selectors and write services.
 pub trait Prompter {
     fn prompt_line(&mut self, msg: &str) -> String;
+    fn prompt_secret(&mut self, msg: &str) -> crate::provision::SecretBytes {
+        let mut input = self.prompt_line(msg).into_bytes();
+        while input
+            .last()
+            .is_some_and(|byte| matches!(byte, b'\r' | b'\n'))
+        {
+            input.pop();
+        }
+        let secret = crate::provision::SecretBytes::new(&input);
+        input.fill(0);
+        secret
+    }
     fn confirm_yes(&mut self, msg: &str) -> bool;
     fn confirm_write_yes(&mut self, msg: &str) -> bool {
         self.confirm_yes(msg)

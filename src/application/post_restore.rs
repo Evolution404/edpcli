@@ -1,23 +1,27 @@
 //! Typed, UI-neutral post-restore assessment and follow-up requests.
 //!
 //! Metadata restore success is independent from filesystem usability. This
-//! module performs read-only assessment only; it never formats or writes media.
+//! Assessment is read-only; explicit follow-up format operations use the separate
+//! write authorization chain in `format_operation`.
 
 use std::path::PathBuf;
 
-use crate::backup_deep::keys::{decrypt_mode2, DefaultFileKeyError};
+use crate::backup_deep::keys::decrypt_mode2;
 use crate::common::SECTOR;
 use crate::diskio::SectorDev;
 use crate::edpb::ManifestPartition;
 use crate::inspect_target::{detect_plain_filesystem, FilesystemBootKind};
 use crate::provision::{
-    build_empty_exfat, build_empty_fat16, parse_existing_provision, FileKeyWrapMode,
-    OfficialFilesystemFormat, ProvisionImage, SecretBytes,
+    build_empty_exfat, build_empty_fat16, encrypt_sparse_mode2, parse_existing_provision,
+    ExistingFileKeyError, FileKeyWrapMode, OfficialFilesystemFormat, ProvisionImage, SecretBytes,
 };
 
 mod format_operation;
 pub use format_operation::format_partition_after_restore_on_disk;
 pub use format_operation::format_partition_on_disk;
+pub use format_operation::{
+    format_encrypted_partition_after_restore_on_disk, format_encrypted_partition_on_disk,
+};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct MetadataBackupReport {
@@ -61,6 +65,7 @@ pub struct PostRestorePartition {
     pub sector_count: u64,
     pub filesystem_hint: Option<String>,
     pub detected_filesystem: Option<FilesystemBootKind>,
+    pub requires_original_key: bool,
     pub state: PostRestorePartitionState,
     pub detail: String,
 }
@@ -84,6 +89,7 @@ impl PostRestoreAssessment {
                     sector_count: partition.sector_count,
                     filesystem_hint: partition.filesystem_hint.clone(),
                     detected_filesystem: None,
+                    requires_original_key: false,
                     state: PostRestorePartitionState::Unsupported,
                     detail: message.clone(),
                 })
@@ -104,6 +110,19 @@ pub struct PostRestoreFormatResult {
     pub partition_index: u32,
     pub filesystem: OfficialFilesystemFormat,
     pub result: Result<(), String>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum EncryptedPostRestoreError {
+    FileKey(ExistingFileKeyError),
+    Operation(String),
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct EncryptedPostRestoreFormatResult {
+    pub partition_index: u32,
+    pub filesystem: OfficialFilesystemFormat,
+    pub result: Result<(), EncryptedPostRestoreError>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -144,6 +163,7 @@ pub(crate) fn format_partition_after_restore(
     request: &PartitionFormatRequest,
     volume_label: &str,
     volume_serial: u32,
+    file_key: Option<&[u8; 16]>,
 ) -> PostRestoreFormatResult {
     let result = (|| {
         if request.partition_index != partition.index {
@@ -170,7 +190,7 @@ pub(crate) fn format_partition_after_restore(
         {
             return Err("恢复后评估分区几何与格式化目标不一致".into());
         }
-        let image = match request.filesystem {
+        let plain_image = match request.filesystem {
             OfficialFilesystemFormat::Fat16 => build_empty_fat16(
                 partition.start_lba,
                 partition.sector_count,
@@ -189,13 +209,18 @@ pub(crate) fn format_partition_after_restore(
             )),
         }
         .map_err(|error| format!("格式化镜像生成失败: {error}"))?;
-        if image
+        if plain_image
             .sectors()
             .keys()
             .any(|relative| *relative >= partition.sector_count)
         {
             return Err("格式化镜像写入范围超出所选分区".into());
         }
+        let image = if let Some(file_key) = file_key {
+            encrypt_sparse_mode2(&plain_image, file_key)
+        } else {
+            plain_image
+        };
         super::filesystem_format::write_sparse_filesystem_image(
             dev,
             partition.start_lba,
@@ -204,7 +229,12 @@ pub(crate) fn format_partition_after_restore(
         )
         .map_err(|error| error.msg)?;
         let boot = read_sector(dev, partition.start_lba)?;
-        let detected = detect_plain_filesystem(partition.sector_count, &boot)
+        let plain_boot = if let Some(file_key) = file_key {
+            decrypt_mode2(&boot, file_key)?
+        } else {
+            boot
+        };
+        let detected = detect_plain_filesystem(partition.sector_count, &plain_boot)
             .ok_or_else(|| "格式化后文件系统 boot sector 未通过严格校验".to_string())?;
         let expected = match request.filesystem {
             OfficialFilesystemFormat::Fat16 => FilesystemBootKind::Fat16,
@@ -267,6 +297,7 @@ fn plain_partition(
             sector_count: partition.sector_count,
             filesystem_hint: partition.filesystem_hint.clone(),
             detected_filesystem: None,
+            requires_original_key: false,
             state: PostRestorePartitionState::Unsupported,
             detail: "分区几何超出目标介质范围".into(),
         };
@@ -282,6 +313,7 @@ fn plain_partition(
                 sector_count: partition.sector_count,
                 filesystem_hint: partition.filesystem_hint.clone(),
                 detected_filesystem: detected,
+                requires_original_key: false,
                 state: if detected.is_some() {
                     PostRestorePartitionState::Usable
                 } else {
@@ -301,6 +333,7 @@ fn plain_partition(
             sector_count: partition.sector_count,
             filesystem_hint: partition.filesystem_hint.clone(),
             detected_filesystem: None,
+            requires_original_key: false,
             state: PostRestorePartitionState::Unsupported,
             detail: error,
         },
@@ -308,17 +341,20 @@ fn plain_partition(
 }
 
 fn edp_crypto_state(
-    protocol_image: &[u8],
-    device_id: &str,
     record: crate::provision::ExistingPartitionRecord,
-    index: usize,
     boot: &[u8],
     sector_count: u64,
+    password: Option<&[u8]>,
 ) -> (
     PostRestorePartitionState,
     Option<FilesystemBootKind>,
     String,
 ) {
+    let password_source = if password.is_some() {
+        "原密码"
+    } else {
+        "默认密码"
+    };
     if record.lba12.need_encrypt == 0 {
         let detected = detect_plain_filesystem(sector_count, boot);
         return if let Some(filesystem) = detected {
@@ -336,65 +372,55 @@ fn edp_crypto_state(
         };
     }
 
-    if FileKeyWrapMode::from_raw(record.lba12.encrypt_mode).is_none() {
-        return (
-            PostRestorePartitionState::CryptoMetadataInvalid,
-            None,
-            format!("未知 EncryptMode={}", record.lba12.encrypt_mode),
-        );
-    }
-
-    if record.lba12.encrypt_mode != FileKeyWrapMode::Sm4.raw() {
-        return (
-            PostRestorePartitionState::PasswordRequired,
-            None,
-            "加密域存在；需要原密码验证并 unwrap 原 FileKey".into(),
-        );
-    }
-
-    match crate::backup_deep::keys::default_file_key_checked(protocol_image, device_id, index) {
-        Ok(file_key) => match decrypt_mode2(boot, &file_key) {
-            Ok(plain_boot) => {
-                let detected = detect_plain_filesystem(sector_count, &plain_boot);
-                if let Some(filesystem) = detected {
-                    (
-                        PostRestorePartitionState::Usable,
-                        Some(filesystem),
-                        "默认密码与 FileKeyCRC 均验证通过，解密后文件系统可用".into(),
-                    )
-                } else {
-                    (
-                        PostRestorePartitionState::NeedsFormat,
-                        None,
-                        "原密钥域验证通过，但解密后没有可验证文件系统".into(),
-                    )
+    match record.verified_file_key(Some(password.unwrap_or(b"0000aaaa"))) {
+        Ok(file_key) if record.lba12.encrypt_mode == FileKeyWrapMode::Sm4.raw() => {
+            match decrypt_mode2(boot, &file_key) {
+                Ok(plain_boot) => {
+                    let detected = detect_plain_filesystem(sector_count, &plain_boot);
+                    if let Some(filesystem) = detected {
+                        (
+                            PostRestorePartitionState::Usable,
+                            Some(filesystem),
+                            format!(
+                                "{password_source}与 FileKeyCRC 均验证通过，解密后文件系统可用"
+                            ),
+                        )
+                    } else {
+                        (
+                            PostRestorePartitionState::NeedsFormat,
+                            None,
+                            "原密钥域验证通过，但解密后没有可验证文件系统".into(),
+                        )
+                    }
                 }
+                Err(error) => (
+                    PostRestorePartitionState::CryptoMetadataInvalid,
+                    None,
+                    format!("已验证 FileKey 但解密 boot sector 失败: {error}"),
+                ),
             }
-            Err(error) => (
-                PostRestorePartitionState::CryptoMetadataInvalid,
-                None,
-                format!("已验证 FileKey 但解密 boot sector 失败: {error}"),
-            ),
-        },
-        Err(DefaultFileKeyError::NotDefaultPassword) => (
+        }
+        Ok(_) => (
+            PostRestorePartitionState::Unsupported,
+            None,
+            "原 FileKey 已验证，但当前版本不能验证此 EncryptMode 的文件系统 boot".into(),
+        ),
+        Err(ExistingFileKeyError::PasswordMismatch | ExistingFileKeyError::PasswordRequired) => (
             PostRestorePartitionState::PasswordRequired,
             None,
-            "默认密码不匹配；需要原密码".into(),
+            format!("{password_source}不匹配；需要原密码"),
         ),
-        Err(DefaultFileKeyError::FileKeyCrcMismatch) => (
+        Err(ExistingFileKeyError::FileKeyCrcMismatch) => (
             PostRestorePartitionState::CryptoMetadataInvalid,
             None,
-            "默认密码路径 unwrap 后 FileKeyCRC 不匹配".into(),
+            format!("{password_source}路径 unwrap 后 FileKeyCRC 不匹配"),
         ),
-        Err(DefaultFileKeyError::NotEncryptedMode2) => (
-            PostRestorePartitionState::PasswordRequired,
-            None,
-            "加密域存在；需要原密码验证".into(),
-        ),
-        Err(error) => (
+        Err(
+            ExistingFileKeyError::UnsupportedEncryptMode | ExistingFileKeyError::MalformedKeyRecord,
+        ) => (
             PostRestorePartitionState::CryptoMetadataInvalid,
             None,
-            format!("加密元数据异常: {error}"),
+            "加密元数据异常".into(),
         ),
     }
 }
@@ -405,6 +431,43 @@ pub fn assess_partitions_readonly(
     device_id: &str,
     total_sectors: u64,
     partitions: &[ManifestPartition],
+) -> Result<PostRestoreAssessment, String> {
+    assess_partitions_impl(
+        dev,
+        device_state,
+        device_id,
+        total_sectors,
+        partitions,
+        None,
+    )
+}
+
+pub fn assess_partitions_with_password_readonly(
+    dev: &mut dyn SectorDev,
+    device_state: &str,
+    device_id: &str,
+    total_sectors: u64,
+    partitions: &[ManifestPartition],
+    partition_index: u32,
+    password: &[u8],
+) -> Result<PostRestoreAssessment, String> {
+    assess_partitions_impl(
+        dev,
+        device_state,
+        device_id,
+        total_sectors,
+        partitions,
+        Some((partition_index, password)),
+    )
+}
+
+fn assess_partitions_impl(
+    dev: &mut dyn SectorDev,
+    device_state: &str,
+    device_id: &str,
+    total_sectors: u64,
+    partitions: &[ManifestPartition],
+    selected_password: Option<(u32, &[u8])>,
 ) -> Result<PostRestoreAssessment, String> {
     if device_state.eq_ignore_ascii_case("plain") {
         return Ok(PostRestoreAssessment {
@@ -427,6 +490,7 @@ pub fn assess_partitions_readonly(
                     sector_count: partition.sector_count,
                     filesystem_hint: partition.filesystem_hint.clone(),
                     detected_filesystem: None,
+                    requires_original_key: false,
                     state: PostRestorePartitionState::Unsupported,
                     detail: "缺少 device_id，不能可靠解码 EDP 元数据".into(),
                 })
@@ -450,6 +514,7 @@ pub fn assess_partitions_readonly(
                         sector_count: partition.sector_count,
                         filesystem_hint: partition.filesystem_hint.clone(),
                         detected_filesystem: None,
+                        requires_original_key: false,
                         state: PostRestorePartitionState::CryptoMetadataInvalid,
                         detail: "EDP backup 恢复后未发现成对有效的 LBA7/LBA12 EDPF".into(),
                     })
@@ -468,6 +533,7 @@ pub fn assess_partitions_readonly(
                         sector_count: partition.sector_count,
                         filesystem_hint: partition.filesystem_hint.clone(),
                         detected_filesystem: None,
+                        requires_original_key: false,
                         state: PostRestorePartitionState::CryptoMetadataInvalid,
                         detail: error.clone(),
                     })
@@ -498,20 +564,19 @@ pub fn assess_partitions_readonly(
                     sector_count: partition.sector_count,
                     filesystem_hint: manifest.and_then(|value| value.filesystem_hint.clone()),
                     detected_filesystem: None,
+                    requires_original_key: record.lba12.need_encrypt != 0,
                     state: PostRestorePartitionState::Unsupported,
                     detail: error,
                 });
                 continue;
             }
         };
-        let (state, detected_filesystem, detail) = edp_crypto_state(
-            &raw_protocol,
-            device_id,
-            record,
-            index,
-            &boot,
-            partition.sector_count,
-        );
+        let partition_index = manifest.map_or((index + 1) as u32, |value| value.index);
+        let password = selected_password
+            .filter(|(selected, _)| *selected == partition_index)
+            .map(|(_, password)| password);
+        let (state, detected_filesystem, detail) =
+            edp_crypto_state(record, &boot, partition.sector_count, password);
         assessment.partitions.push(PostRestorePartition {
             index: manifest.map_or((index + 1) as u32, |value| value.index),
             role: manifest.and_then(|value| value.role.clone()),
@@ -519,6 +584,7 @@ pub fn assess_partitions_readonly(
             sector_count: partition.sector_count,
             filesystem_hint: manifest.and_then(|value| value.filesystem_hint.clone()),
             detected_filesystem,
+            requires_original_key: record.lba12.need_encrypt != 0,
             state,
             detail,
         });

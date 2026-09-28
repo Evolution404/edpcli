@@ -19,7 +19,7 @@ pub fn format_partition_after_restore_on_disk(
     volume_label: &str,
 ) -> PostRestoreFormatResult {
     let volume_serial = crate::diskio::Clock::now_epoch(&crate::diskio::SystemClock) as u32;
-    let result = (|| {
+    let result = (|| -> EdpCliResult<()> {
         let expected = outcome
             .format_target_pin
             .as_ref()
@@ -46,6 +46,126 @@ pub fn format_partition_after_restore_on_disk(
     }
 }
 
+fn verified_original_file_key<'a>(
+    dev: &mut dyn SectorDev,
+    outcome: &MetadataRestoreOutcome,
+    partition_index: u32,
+    password: Option<&'a [u8]>,
+) -> Result<(&'a [u8], [u8; 16]), ExistingFileKeyError> {
+    let protocol =
+        read_protocol_image(dev).map_err(|_| ExistingFileKeyError::MalformedKeyRecord)?;
+    let image = ProvisionImage::from_bytes(protocol)
+        .map_err(|_| ExistingFileKeyError::MalformedKeyRecord)?;
+    let parsed = parse_existing_provision(&image, &outcome.device_id, outcome.total_sectors)
+        .map_err(|_| ExistingFileKeyError::MalformedKeyRecord)?
+        .ok_or(ExistingFileKeyError::MalformedKeyRecord)?;
+    let index = partition_index
+        .checked_sub(1)
+        .and_then(|index| usize::try_from(index).ok())
+        .ok_or(ExistingFileKeyError::MalformedKeyRecord)?;
+    let record = parsed
+        .records
+        .get(index)
+        .ok_or(ExistingFileKeyError::MalformedKeyRecord)?;
+    if record.lba12.need_encrypt == 0 {
+        return Err(ExistingFileKeyError::MalformedKeyRecord);
+    }
+    if record.lba12.encrypt_mode != FileKeyWrapMode::Sm4.raw() {
+        return Err(ExistingFileKeyError::UnsupportedEncryptMode);
+    }
+    const DEFAULT: &[u8] = b"0000aaaa";
+    match record.verified_file_key(Some(DEFAULT)) {
+        Ok(key) => Ok((DEFAULT, key)),
+        Err(ExistingFileKeyError::PasswordMismatch) => {
+            let password = password
+                .filter(|password| !password.is_empty())
+                .ok_or(ExistingFileKeyError::PasswordRequired)?;
+            record
+                .verified_file_key(Some(password))
+                .map(|key| (password, key))
+        }
+        Err(error) => Err(error),
+    }
+}
+
+/// Format an encrypted partition with its verified original password and FileKey.
+/// No protocol key record is rewritten.
+#[allow(clippy::too_many_arguments)]
+pub fn format_encrypted_partition_on_disk(
+    runner: &dyn CmdRunner,
+    disk: u32,
+    dev: &mut dyn SectorDev,
+    prompt: &mut dyn Prompter,
+    expected: &MediaIdentityResumePin,
+    outcome: &MetadataRestoreOutcome,
+    request: &PartitionFormatRequest,
+    password: Option<&[u8]>,
+    volume_label: &str,
+    volume_serial: u32,
+) -> EncryptedPostRestoreFormatResult {
+    let result = match verified_original_file_key(dev, outcome, request.partition_index, password) {
+        Ok((original_password, key)) => format_partition_on_disk_with_key(
+            runner,
+            disk,
+            dev,
+            prompt,
+            expected,
+            outcome,
+            request,
+            volume_label,
+            volume_serial,
+            Some((original_password, &key)),
+        )
+        .result
+        .map_err(EncryptedPostRestoreError::Operation),
+        Err(error) => Err(EncryptedPostRestoreError::FileKey(error)),
+    };
+    EncryptedPostRestoreFormatResult {
+        partition_index: request.partition_index,
+        filesystem: request.filesystem,
+        result,
+    }
+}
+
+pub fn format_encrypted_partition_after_restore_on_disk(
+    runner: &dyn CmdRunner,
+    disk: u32,
+    prompt: &mut dyn Prompter,
+    outcome: &MetadataRestoreOutcome,
+    request: &PartitionFormatRequest,
+    password: Option<&[u8]>,
+    volume_label: &str,
+) -> EncryptedPostRestoreFormatResult {
+    let result = (|| -> EdpCliResult<Result<(), EncryptedPostRestoreError>> {
+        let expected = outcome
+            .format_target_pin
+            .as_ref()
+            .ok_or_else(|| failure("元数据恢复后未能固定目标介质身份，禁止格式化"))?;
+        let mut dev = crate::application::device::open_readonly_usb_disk(runner, disk)?;
+        Ok(format_encrypted_partition_on_disk(
+            runner,
+            disk,
+            &mut dev,
+            prompt,
+            expected,
+            outcome,
+            request,
+            password,
+            volume_label,
+            crate::diskio::Clock::now_epoch(&crate::diskio::SystemClock) as u32,
+        )
+        .result)
+    })();
+    EncryptedPostRestoreFormatResult {
+        partition_index: request.partition_index,
+        filesystem: request.filesystem,
+        result: match result {
+            Ok(result) => result,
+            Err(error) => Err(EncryptedPostRestoreError::Operation(error.msg)),
+        },
+    }
+}
+
 fn failure(message: impl Into<String>) -> EdpCliError {
     EdpCliError::new(EXIT_TARGET, message)
 }
@@ -57,6 +177,7 @@ fn verify_current_target(
     expected: &MediaIdentityResumePin,
     outcome: &MetadataRestoreOutcome,
     partition: &ManifestPartition,
+    file_key: Option<&[u8; 16]>,
 ) -> EdpCliResult<()> {
     let total_sectors = outcome.total_sectors;
     let observed = crate::application::media_identity_observer::observe_media_identity_readonly(
@@ -81,6 +202,9 @@ fn verify_current_target(
     }
 
     if outcome.device_state.eq_ignore_ascii_case("plain") {
+        if file_key.is_some() {
+            return Err(failure("Plain 分区不能使用加密密钥格式化"));
+        }
         let table = crate::partition_table::read_partition_table(total_sectors, |lba| {
             read_sector(dev, lba)
         })
@@ -118,7 +242,14 @@ fn verify_current_target(
             return Err(failure("当前 EDP 分区几何与所选目标不一致"));
         }
         if record.lba12.need_encrypt != 0 {
-            return Err(failure("加密分区必须经原密钥域后处理，禁止明文格式化"));
+            let key = file_key.ok_or_else(|| failure("加密分区禁止明文格式化"))?;
+            if record.lba12.encrypt_mode != FileKeyWrapMode::Sm4.raw()
+                || crate::crypto::crc32_bare(key) != record.lba12.file_key_crc
+            {
+                return Err(failure("当前密钥域与已验证原 FileKey 不一致"));
+            }
+        } else if file_key.is_some() {
+            return Err(failure("明文分区不能使用加密密钥格式化"));
         }
     }
     Ok(())
@@ -138,6 +269,33 @@ pub fn format_partition_on_disk(
     volume_label: &str,
     volume_serial: u32,
 ) -> PostRestoreFormatResult {
+    format_partition_on_disk_with_key(
+        runner,
+        disk,
+        dev,
+        prompt,
+        expected,
+        outcome,
+        request,
+        volume_label,
+        volume_serial,
+        None,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn format_partition_on_disk_with_key(
+    runner: &dyn CmdRunner,
+    disk: u32,
+    dev: &mut dyn SectorDev,
+    prompt: &mut dyn Prompter,
+    expected: &MediaIdentityResumePin,
+    outcome: &MetadataRestoreOutcome,
+    request: &PartitionFormatRequest,
+    volume_label: &str,
+    volume_serial: u32,
+    original_key: Option<(&[u8], &[u8; 16])>,
+) -> PostRestoreFormatResult {
     let result = (|| -> EdpCliResult<()> {
         if !outcome.report.metadata_restored || !outcome.report.readback_verified {
             return Err(failure("元数据恢复尚未成功且读回验证，禁止后续格式化"));
@@ -156,22 +314,49 @@ pub fn format_partition_on_disk(
             .iter()
             .find(|candidate| candidate.index == request.partition_index)
             .ok_or_else(|| failure("所选分区没有恢复后评估"))?;
-        if assessed.state != PostRestorePartitionState::NeedsFormat
+        let eligible = match original_key {
+            Some(_) => matches!(
+                assessed.state,
+                PostRestorePartitionState::NeedsFormat
+                    | PostRestorePartitionState::PasswordRequired
+            ),
+            None => assessed.state == PostRestorePartitionState::NeedsFormat,
+        };
+        if !eligible
             || assessed.start_lba != partition.start_lba
             || assessed.sector_count != partition.sector_count
         {
             return Err(failure("所选分区不是匹配的 NeedsFormat 分区"));
         }
         let session = TargetSession::<ReadOnly>::open_usb(runner, disk)?;
-        verify_current_target(runner, disk, dev, expected, outcome, partition)?;
-        let fresh_assessment = assess_partitions_readonly(
+        verify_current_target(
+            runner,
+            disk,
             dev,
-            &outcome.device_state,
-            &outcome.device_id,
-            outcome.total_sectors,
-            &outcome.partitions,
-        )
-        .map_err(failure)?;
+            expected,
+            outcome,
+            partition,
+            original_key.map(|(_, key)| key),
+        )?;
+        let assess = |dev: &mut dyn SectorDev| match original_key {
+            Some((password, _)) => assess_partitions_with_password_readonly(
+                dev,
+                &outcome.device_state,
+                &outcome.device_id,
+                outcome.total_sectors,
+                &outcome.partitions,
+                request.partition_index,
+                password,
+            ),
+            None => assess_partitions_readonly(
+                dev,
+                &outcome.device_state,
+                &outcome.device_id,
+                outcome.total_sectors,
+                &outcome.partitions,
+            ),
+        };
+        let fresh_assessment = assess(dev).map_err(failure)?;
         if !fresh_assessment.partitions.iter().any(|candidate| {
             candidate.index == request.partition_index
                 && candidate.start_lba == partition.start_lba
@@ -194,15 +379,16 @@ pub fn format_partition_on_disk(
         })?;
         let _session = session
             .reopen_and_verify(dev, REOPEN_WAIT, |dev| {
-                verify_current_target(runner, disk, dev, expected, outcome, partition)?;
-                let reopened = assess_partitions_readonly(
+                verify_current_target(
+                    runner,
+                    disk,
                     dev,
-                    &outcome.device_state,
-                    &outcome.device_id,
-                    outcome.total_sectors,
-                    &outcome.partitions,
-                )
-                .map_err(failure)?;
+                    expected,
+                    outcome,
+                    partition,
+                    original_key.map(|(_, key)| key),
+                )?;
+                let reopened = assess(dev).map_err(failure)?;
                 if !reopened.partitions.iter().any(|candidate| {
                     candidate.index == request.partition_index
                         && candidate.start_lba == partition.start_lba
@@ -226,16 +412,10 @@ pub fn format_partition_on_disk(
             request,
             volume_label,
             volume_serial,
+            original_key.map(|(_, key)| key),
         );
         format.result.map_err(failure)?;
-        let after = assess_partitions_readonly(
-            dev,
-            &outcome.device_state,
-            &outcome.device_id,
-            outcome.total_sectors,
-            &outcome.partitions,
-        )
-        .map_err(failure)?;
+        let after = assess(dev).map_err(failure)?;
         if !after.partitions.iter().any(|candidate| {
             candidate.index == request.partition_index
                 && candidate.start_lba == partition.start_lba

@@ -35,21 +35,29 @@ impl ExistingPartitionRecord {
         {
             return Err("existing partition does not use the verified SM4 key profile".into());
         }
-        if self.lba12.user_key_crc != crc32_bare(password) {
-            return Err("password does not match existing partition key record".into());
+        self.verified_file_key(Some(password))
+            .map_err(|error| error.to_string())
+    }
+
+    pub fn verified_file_key(
+        self,
+        password: Option<&[u8]>,
+    ) -> Result<[u8; 16], super::super::ExistingFileKeyError> {
+        use super::super::ExistingFileKeyError;
+        if self.lba12.need_encrypt == 0 {
+            return Err(ExistingFileKeyError::MalformedKeyRecord);
         }
-        let effective_password: &[u8] = if password == b"0000aaaa" {
-            b"LtSWi[2f)j"
-        } else {
-            password
-        };
-        let digest = super::super::keys::md5_digest(effective_password);
-        let key =
-            crate::backup_deep::keys::sm4_decrypt_block(&self.lba12.encrypted_file_key, &digest);
-        if crc32_bare(&key) != self.lba12.file_key_crc {
-            return Err("existing FileKeyCRC does not verify".into());
-        }
-        Ok(key)
+        let mode = super::super::FileKeyWrapMode::from_raw(self.lba12.encrypt_mode)
+            .ok_or(ExistingFileKeyError::UnsupportedEncryptMode)?;
+        super::super::keys::unwrap_file_key(
+            password,
+            super::super::ProvisionKeyMaterial {
+                user_key_crc: self.lba12.user_key_crc,
+                file_key_crc: self.lba12.file_key_crc,
+                wrapped_file_key: self.lba12.encrypted_file_key,
+                encrypt_mode: mode,
+            },
+        )
     }
 }
 

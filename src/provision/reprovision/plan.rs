@@ -23,12 +23,12 @@ impl ParsedExistingProvision {
             return super::super::SourcePasswordKnowledge::Unknown;
         };
         if record
-            .verified_sm4_file_key(super::super::DEFAULT_KEY_DOMAIN_PASSWORD)
+            .verified_file_key(Some(super::super::DEFAULT_KEY_DOMAIN_PASSWORD))
             .is_ok()
         {
             return super::super::SourcePasswordKnowledge::DefaultVerified;
         }
-        if user_password.is_some_and(|password| record.verified_sm4_file_key(password).is_ok()) {
+        if user_password.is_some_and(|password| record.verified_file_key(Some(password)).is_ok()) {
             return super::super::SourcePasswordKnowledge::UserVerified;
         }
         super::super::SourcePasswordKnowledge::Unknown

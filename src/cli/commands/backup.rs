@@ -146,10 +146,12 @@ pub(in crate::cli) fn real_flow(
             eprintln!("恢复后评估中没有分区 {index}");
             continue;
         };
-        if partition.state
-            != crate::application::post_restore::PostRestorePartitionState::NeedsFormat
-        {
-            eprintln!("分区 {index} 当前不是 NeedsFormat，拒绝格式化");
+        if !matches!(
+            partition.state,
+            crate::application::post_restore::PostRestorePartitionState::NeedsFormat
+                | crate::application::post_restore::PostRestorePartitionState::PasswordRequired
+        ) {
+            eprintln!("分区 {index} 当前不能安全格式化");
             continue;
         }
         let filesystem = prompter.prompt_line("选择空文件系统 fat16 / exfat（回车跳过）: ");
@@ -172,12 +174,43 @@ pub(in crate::cli) fn real_flow(
             .find(|candidate| candidate.index == index)
             .and_then(|candidate| candidate.volume_label_hint.as_deref())
             .unwrap_or("恢复卷");
-        let result = crate::application::post_restore::format_partition_after_restore_on_disk(
-            runner, n, prompter, &outcome, &request, label,
-        );
-        match result.result {
-            Ok(()) => println!("分区 {index} 格式化成功，读回与重新评估均通过"),
-            Err(message) => eprintln!("分区 {index} 格式化失败: {message}"),
+        if partition.requires_original_key {
+            let password = if partition.state
+                == crate::application::post_restore::PostRestorePartitionState::PasswordRequired
+            {
+                Some(prompter.prompt_secret("输入原密码（输入时不回显，回车取消）: "))
+            } else {
+                None
+            };
+            let result =
+                crate::application::post_restore::format_encrypted_partition_after_restore_on_disk(
+                    runner,
+                    n,
+                    prompter,
+                    &outcome,
+                    &request,
+                    password
+                        .as_ref()
+                        .map(crate::provision::SecretBytes::as_bytes),
+                    label,
+                );
+            match result.result {
+                Ok(()) => println!("分区 {index} 使用原密钥域格式化成功，读回验证通过"),
+                Err(crate::application::post_restore::EncryptedPostRestoreError::FileKey(
+                    error,
+                )) => eprintln!("分区 {index} 原密钥验证失败: {error}"),
+                Err(crate::application::post_restore::EncryptedPostRestoreError::Operation(
+                    message,
+                )) => eprintln!("分区 {index} 格式化失败: {message}"),
+            }
+        } else {
+            let result = crate::application::post_restore::format_partition_after_restore_on_disk(
+                runner, n, prompter, &outcome, &request, label,
+            );
+            match result.result {
+                Ok(()) => println!("分区 {index} 格式化成功，读回与重新评估均通过"),
+                Err(message) => eprintln!("分区 {index} 格式化失败: {message}"),
+            }
         }
     }
     EXIT_OK
