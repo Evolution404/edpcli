@@ -41,11 +41,29 @@ pub(super) fn manifest_provision_kind(
 pub fn manifest_identity_from_snapshot(
     snapshot: &crate::media_identity::MediaIdentitySnapshot,
 ) -> ManifestIdentity {
+    manifest_identity_from_snapshot_for_schema(snapshot, false)
+}
+
+pub(super) fn manifest_identity_from_snapshot_v2(
+    snapshot: &crate::media_identity::MediaIdentitySnapshot,
+) -> ManifestIdentity {
+    manifest_identity_from_snapshot_for_schema(snapshot, true)
+}
+
+fn manifest_identity_from_snapshot_for_schema(
+    snapshot: &crate::media_identity::MediaIdentitySnapshot,
+    legacy_v2: bool,
+) -> ManifestIdentity {
     ManifestIdentity {
         hardware: ManifestHardwareIdentity {
             vid: snapshot.hardware.vid,
             pid: snapshot.hardware.pid,
-            serial_sha256: snapshot.hardware.serial_sha256.clone(),
+            serial: (!legacy_v2)
+                .then(|| snapshot.hardware.serial.clone())
+                .flatten(),
+            serial_sha256: legacy_v2
+                .then(|| snapshot.hardware.serial_sha256.clone())
+                .flatten(),
             serial_quality: manifest_serial_quality(snapshot.hardware.serial_quality),
             vendor: snapshot.hardware.vendor.clone(),
             product: snapshot.hardware.product.clone(),
@@ -76,6 +94,7 @@ pub(super) fn inferred_manifest_identity(capture: &CoreCapture<'_>) -> ManifestI
         hardware: ManifestHardwareIdentity {
             vid: parse_hex_u16(&capture.vid),
             pid: parse_hex_u16(&capture.pid),
+            serial: None,
             serial_sha256: None,
             serial_quality: ManifestSerialQuality::Missing,
             vendor: None,
@@ -132,6 +151,68 @@ pub(super) fn canonical_provision_kind(
     }
 }
 
+fn validate_typed_identity_projection(
+    manifest: &Manifest,
+    identity: &ManifestIdentity,
+) -> Result<(), String> {
+    if let Some(vid) = identity.hardware.vid {
+        if parse_hex_u16(&manifest.device.vid) != Some(vid) {
+            return Err("EDPB typed VID conflicts with legacy device projection".into());
+        }
+    }
+    if let Some(pid) = identity.hardware.pid {
+        if parse_hex_u16(&manifest.device.pid) != Some(pid) {
+            return Err("EDPB typed PID conflicts with legacy device projection".into());
+        }
+    }
+    if let Some(total) = identity.hardware.total_sectors {
+        if manifest.geometry.total_sectors != Some(total) {
+            return Err("EDPB typed total_sectors conflicts with geometry".into());
+        }
+    }
+    if let Some(sector_size) = identity.hardware.logical_sector_size {
+        if manifest.geometry.logical_sector_size != sector_size {
+            return Err("EDPB typed logical sector size conflicts with geometry".into());
+        }
+    }
+
+    let typed_plain = identity.protocol.provision_kind == Some(ManifestProvisionKind::Plain);
+    if typed_plain {
+        if identity.protocol.device_id.is_some() || identity.protocol.onlyid.is_some() {
+            return Err(
+                "EDPB Plain typed protocol identity must not contain device_id/onlyid".into(),
+            );
+        }
+        if manifest.device.onlyid.is_some() {
+            return Err("EDPB Plain legacy projection must not contain onlyid".into());
+        }
+        let projection_is_derived = identity.derived.legacy_derived_candidate.as_deref()
+            == Some(manifest.device.device_id.as_str())
+            || identity
+                .derived
+                .device_id_candidates
+                .iter()
+                .any(|candidate| candidate == &manifest.device.device_id);
+        if !projection_is_derived {
+            return Err(
+                "EDPB Plain legacy device_id must be classified as derived candidate".into(),
+            );
+        }
+    } else {
+        if let Some(device_id) = identity.protocol.device_id.as_deref() {
+            if device_id != manifest.device.device_id {
+                return Err("EDPB typed device_id conflicts with legacy device projection".into());
+            }
+        }
+        if let Some(onlyid) = identity.protocol.onlyid.as_deref() {
+            if manifest.device.onlyid.as_deref() != Some(onlyid) {
+                return Err("EDPB typed onlyid conflicts with legacy device projection".into());
+            }
+        }
+    }
+    Ok(())
+}
+
 pub(super) fn validate_manifest_identity(manifest: &Manifest) -> Result<(), String> {
     match manifest.schema.as_str() {
         "edpb.manifest.v1" => {
@@ -146,7 +227,9 @@ pub(super) fn validate_manifest_identity(manifest: &Manifest) -> Result<(), Stri
                 .identity
                 .as_ref()
                 .ok_or_else(|| "EDPB manifest v2 missing typed identity".to_string())?;
-
+            if identity.hardware.serial.is_some() {
+                return Err("EDPB manifest v2 must not carry a raw USB serial".into());
+            }
             match identity.hardware.serial_quality {
                 ManifestSerialQuality::Missing => {
                     if identity.hardware.serial_sha256.is_some() {
@@ -164,7 +247,6 @@ pub(super) fn validate_manifest_identity(manifest: &Manifest) -> Result<(), Stri
                     }
                 }
             }
-
             if let Some(legacy_digest) = legacy_hardware_serial_digest(manifest)? {
                 if identity
                     .hardware
@@ -179,78 +261,46 @@ pub(super) fn validate_manifest_identity(manifest: &Manifest) -> Result<(), Stri
                     );
                 }
             }
-
-            if let Some(vid) = identity.hardware.vid {
-                if parse_hex_u16(&manifest.device.vid) != Some(vid) {
-                    return Err("EDPB typed VID conflicts with legacy device projection".into());
-                }
+            validate_typed_identity_projection(manifest, identity)
+        }
+        "edpb.manifest.v3" => {
+            let identity = manifest
+                .identity
+                .as_ref()
+                .ok_or_else(|| "EDPB manifest v3 missing typed identity".to_string())?;
+            if identity.hardware.serial_sha256.is_some() {
+                return Err("EDPB manifest v3 must not carry serial_sha256".into());
             }
-            if let Some(pid) = identity.hardware.pid {
-                if parse_hex_u16(&manifest.device.pid) != Some(pid) {
-                    return Err("EDPB typed PID conflicts with legacy device projection".into());
-                }
+            if legacy_hardware_serial_digest(manifest)?.is_some() {
+                return Err("EDPB manifest v3 must not carry legacy serial digest notes".into());
             }
-            if let Some(total) = identity.hardware.total_sectors {
-                if manifest.geometry.total_sectors != Some(total) {
-                    return Err("EDPB typed total_sectors conflicts with geometry".into());
-                }
-            }
-            if let Some(sector_size) = identity.hardware.logical_sector_size {
-                if manifest.geometry.logical_sector_size != sector_size {
-                    return Err("EDPB typed logical sector size conflicts with geometry".into());
-                }
-            }
-
-            let typed_plain =
-                identity.protocol.provision_kind == Some(ManifestProvisionKind::Plain);
-            if typed_plain {
-                if identity.protocol.device_id.is_some() || identity.protocol.onlyid.is_some() {
-                    return Err(
-                        "EDPB Plain typed protocol identity must not contain device_id/onlyid"
-                            .into(),
-                    );
-                }
-                if manifest.device.onlyid.is_some() {
-                    return Err("EDPB Plain legacy projection must not contain onlyid".into());
-                }
-                let projection_is_derived = identity.derived.legacy_derived_candidate.as_deref()
-                    == Some(manifest.device.device_id.as_str())
-                    || identity
-                        .derived
-                        .device_id_candidates
-                        .iter()
-                        .any(|candidate| candidate == &manifest.device.device_id);
-                if !projection_is_derived {
-                    return Err(
-                        "EDPB Plain legacy device_id must be classified as derived candidate"
-                            .into(),
-                    );
-                }
-            } else {
-                if let Some(device_id) = identity.protocol.device_id.as_deref() {
-                    if device_id != manifest.device.device_id {
+            match identity.hardware.serial_quality {
+                ManifestSerialQuality::Missing => {
+                    if identity.hardware.serial.is_some() {
                         return Err(
-                            "EDPB typed device_id conflicts with legacy device projection".into(),
+                            "EDPB v3 marks USB serial missing but stores a raw value".into()
                         );
                     }
                 }
-                if let Some(onlyid) = identity.protocol.onlyid.as_deref() {
-                    if manifest.device.onlyid.as_deref() != Some(onlyid) {
-                        return Err(
-                            "EDPB typed onlyid conflicts with legacy device projection".into()
-                        );
+                ManifestSerialQuality::Usable | ManifestSerialQuality::Suspicious => {
+                    let serial = identity.hardware.serial.as_deref().ok_or_else(|| {
+                        "EDPB v3 serial quality requires a raw USB serial".to_string()
+                    })?;
+                    if serial.is_empty() {
+                        return Err("EDPB v3 raw USB serial must not be empty".into());
                     }
                 }
             }
-            Ok(())
+            validate_typed_identity_projection(manifest, identity)
         }
         other => Err(format!("unsupported EDPB manifest schema: {other}")),
     }
 }
 
-/// Convert either historical manifest v1 or typed manifest v2 into the canonical identity domain.
+/// Convert historical manifest v1/v2 or current manifest v3 into canonical identity.
 ///
-/// The only free-text serial parsing permitted by production code lives in this v1 adapter.
+/// Free-text serial-digest parsing is confined to the historical v1 adapter. Manifest v3 carries
+/// the reviewed raw serial field explicitly and never synthesizes a new persisted digest.
 pub fn canonical_media_identity(
     manifest: &Manifest,
 ) -> Result<crate::media_identity::MediaIdentitySnapshot, String> {
@@ -261,16 +311,25 @@ pub fn canonical_media_identity(
 
     validate_manifest_identity(manifest)?;
 
-    if manifest.schema == "edpb.manifest.v2" {
+    if matches!(
+        manifest.schema.as_str(),
+        "edpb.manifest.v2" | "edpb.manifest.v3"
+    ) {
         let identity = manifest
             .identity
             .as_ref()
-            .ok_or_else(|| "EDPB manifest v2 missing typed identity".to_string())?;
+            .ok_or_else(|| format!("{} missing typed identity", manifest.schema))?;
+        let manifest_v3 = manifest.schema == "edpb.manifest.v3";
         return Ok(MediaIdentitySnapshot {
             hardware: HardwareIdentityEvidence {
                 vid: identity.hardware.vid,
                 pid: identity.hardware.pid,
-                serial_sha256: identity.hardware.serial_sha256.clone(),
+                serial: manifest_v3
+                    .then(|| identity.hardware.serial.clone())
+                    .flatten(),
+                serial_sha256: (!manifest_v3)
+                    .then(|| identity.hardware.serial_sha256.clone())
+                    .flatten(),
                 serial_quality: canonical_serial_quality(identity.hardware.serial_quality),
                 vendor: identity.hardware.vendor.clone(),
                 product: identity.hardware.product.clone(),
@@ -309,6 +368,7 @@ pub fn canonical_media_identity(
         hardware: HardwareIdentityEvidence {
             vid: parse_hex_u16(&manifest.device.vid),
             pid: parse_hex_u16(&manifest.device.pid),
+            serial: None,
             serial_quality: if serial_sha256.is_some() {
                 SerialQuality::Usable
             } else {

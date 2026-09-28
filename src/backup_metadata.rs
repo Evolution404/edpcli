@@ -10,8 +10,10 @@ use crate::common::SECTOR;
 use crate::crypto::{a6b0_full, crc32_bare, xor_rolling};
 use crate::diskio::SectorDev;
 use crate::edpb::{
-    ArtifactCompleteness, ArtifactInput, Derivation, Extent, Region, RestorePolicy, SemanticStatus,
+    ArtifactCompleteness, ArtifactInput, Derivation, Extent, ManifestPartition, Region,
+    RestorePolicy, SemanticStatus,
 };
+use crate::partition_table::{PartitionSource, PartitionTableKind};
 use crate::protocol::{
     edpf::{EdpPartitionType, EdpfEntry64, EdpfEntry96},
     lba7::Lba7PartitionMode,
@@ -81,6 +83,7 @@ pub struct FilesystemProbe {
 
 #[derive(Clone, Debug, Default)]
 pub struct MetadataAcquisition {
+    pub partitions: Vec<ManifestPartition>,
     pub regions: Vec<Region>,
     pub extents: Vec<Extent>,
     pub artifacts: Vec<ArtifactInput>,
@@ -547,6 +550,305 @@ fn add_key_sector(
     Ok(())
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct PlainGptHeader {
+    current_lba: u64,
+    backup_lba: u64,
+    first_usable_lba: u64,
+    last_usable_lba: u64,
+    disk_guid: [u8; 16],
+    partition_entries_lba: u64,
+    entry_count: u32,
+    entry_size: u32,
+    partition_array_crc32: u32,
+}
+
+fn parse_plain_gpt_header(raw: &[u8], expected_current_lba: u64) -> Result<PlainGptHeader, String> {
+    if raw.len() != SECTOR || raw.get(..8) != Some(b"EFI PART") {
+        return Err(format!(
+            "GPT header LBA{expected_current_lba} signature/length invalid"
+        ));
+    }
+    let header_size = u32le(raw, 12).ok_or_else(|| "GPT header_size missing".to_string())? as usize;
+    if !(92..=SECTOR).contains(&header_size) {
+        return Err(format!(
+            "GPT header LBA{expected_current_lba} header_size invalid"
+        ));
+    }
+    let stored_crc = u32le(raw, 16).ok_or_else(|| "GPT header_crc32 missing".to_string())?;
+    let mut crc_bytes = raw[..header_size].to_vec();
+    crc_bytes[16..20].fill(0);
+    if crate::protocol::lba1::crc32_ieee(&crc_bytes) != stored_crc {
+        return Err(format!("GPT header LBA{expected_current_lba} CRC mismatch"));
+    }
+    let current_lba = u64le(raw, 24).ok_or_else(|| "GPT current_lba missing".to_string())?;
+    if current_lba != expected_current_lba {
+        return Err(format!(
+            "GPT header current_lba={current_lba}, expected {expected_current_lba}"
+        ));
+    }
+    Ok(PlainGptHeader {
+        current_lba,
+        backup_lba: u64le(raw, 32).ok_or_else(|| "GPT backup_lba missing".to_string())?,
+        first_usable_lba: u64le(raw, 40)
+            .ok_or_else(|| "GPT first_usable_lba missing".to_string())?,
+        last_usable_lba: u64le(raw, 48).ok_or_else(|| "GPT last_usable_lba missing".to_string())?,
+        disk_guid: raw[56..72]
+            .try_into()
+            .map_err(|_| "GPT disk_guid missing".to_string())?,
+        partition_entries_lba: u64le(raw, 72)
+            .ok_or_else(|| "GPT partition_entries_lba missing".to_string())?,
+        entry_count: u32le(raw, 80).ok_or_else(|| "GPT entry_count missing".to_string())?,
+        entry_size: u32le(raw, 84).ok_or_else(|| "GPT entry_size missing".to_string())?,
+        partition_array_crc32: u32le(raw, 88)
+            .ok_or_else(|| "GPT partition_array_crc32 missing".to_string())?,
+    })
+}
+
+fn validate_plain_gpt_mirror(dev: &mut dyn SectorDev, total_sectors: u64) -> Result<(), String> {
+    if total_sectors < 4 {
+        return Err("GPT source disk is too small".into());
+    }
+    let primary_raw = read_extent(dev, 1, 1)?;
+    let primary = parse_plain_gpt_header(&primary_raw, 1)?;
+    if primary.backup_lba != total_sectors - 1 {
+        return Err(format!(
+            "GPT primary backup_lba={} conflicts with disk geometry {}",
+            primary.backup_lba,
+            total_sectors - 1
+        ));
+    }
+    let entry_bytes = usize::try_from(primary.entry_count)
+        .ok()
+        .and_then(|count| count.checked_mul(primary.entry_size as usize))
+        .ok_or_else(|| "GPT entry array length overflow".to_string())?;
+    if entry_bytes == 0 || primary.entry_size != 128 {
+        return Err("GPT entry array geometry unsupported".into());
+    }
+    let entry_sectors = entry_bytes.div_ceil(SECTOR) as u64;
+    let mut primary_entries = read_extent(dev, primary.partition_entries_lba, entry_sectors)?;
+    primary_entries.truncate(entry_bytes);
+    if crate::protocol::lba1::crc32_ieee(&primary_entries) != primary.partition_array_crc32 {
+        return Err("GPT primary partition array CRC mismatch".into());
+    }
+
+    let backup_raw = read_extent(dev, primary.backup_lba, 1)?;
+    let backup = parse_plain_gpt_header(&backup_raw, primary.backup_lba)?;
+    if backup.backup_lba != primary.current_lba
+        || backup.first_usable_lba != primary.first_usable_lba
+        || backup.last_usable_lba != primary.last_usable_lba
+        || backup.disk_guid != primary.disk_guid
+        || backup.entry_count != primary.entry_count
+        || backup.entry_size != primary.entry_size
+        || backup.partition_array_crc32 != primary.partition_array_crc32
+    {
+        return Err("GPT backup header geometry/CRC contract conflicts with primary".into());
+    }
+    if backup.partition_entries_lba + entry_sectors != backup.current_lba {
+        return Err("GPT backup partition array is not adjacent to backup header".into());
+    }
+    let mut backup_entries = read_extent(dev, backup.partition_entries_lba, entry_sectors)?;
+    backup_entries.truncate(entry_bytes);
+    if crate::protocol::lba1::crc32_ieee(&backup_entries) != backup.partition_array_crc32 {
+        return Err("GPT backup partition array CRC mismatch".into());
+    }
+    if backup_entries != primary_entries {
+        return Err("GPT primary and backup partition arrays differ".into());
+    }
+    Ok(())
+}
+
+fn manifest_partition_from_plain(
+    partition: &crate::partition_table::PhysicalPartition,
+) -> ManifestPartition {
+    let (role, partition_type, volume_label_hint) = match &partition.source {
+        PartitionSource::Mbr {
+            partition_type,
+            primary_slot,
+        } => (
+            Some(if primary_slot.is_some() {
+                "mbr_primary".to_string()
+            } else {
+                "mbr_logical".to_string()
+            }),
+            Some(format!("mbr:0x{partition_type:02X}")),
+            None,
+        ),
+        PartitionSource::Gpt { type_guid, .. } => (
+            Some("gpt_partition".to_string()),
+            Some(format!(
+                "gpt:{}",
+                type_guid
+                    .iter()
+                    .map(|byte| format!("{byte:02x}"))
+                    .collect::<String>()
+            )),
+            None,
+        ),
+    };
+    ManifestPartition {
+        index: partition.index as u32,
+        role,
+        partition_type,
+        start_lba: partition.start_lba,
+        sector_count: partition.sector_count,
+        filesystem_hint: partition.filesystem.clone(),
+        volume_label_hint,
+    }
+}
+
+pub fn acquire_plain_metadata(
+    dev: &mut dyn SectorDev,
+    total_sectors: u64,
+) -> Result<MetadataAcquisition, String> {
+    let table = crate::partition_table::read_partition_table(total_sectors, |lba| {
+        let lba = u32::try_from(lba)
+            .map_err(|_| format!("partition-table LBA{lba} exceeds SectorDev u32 range"))?;
+        dev.read_sector(lba)
+            .map_err(|error| format!("read partition-table LBA{lba} failed: {error}"))
+    })?;
+    if table.kind == PartitionTableKind::Gpt {
+        validate_plain_gpt_mirror(dev, total_sectors)?;
+    }
+
+    let mut out = MetadataAcquisition {
+        partitions: table
+            .partitions
+            .iter()
+            .map(manifest_partition_from_plain)
+            .collect(),
+        ..MetadataAcquisition::default()
+    };
+    let region_id = "region.plain.partition_table";
+    out.regions.push(Region {
+        id: region_id.into(),
+        role: "plain_partition_table".into(),
+        start_lba: None,
+        sector_count: None,
+        semantic_status: SemanticStatus::Identified,
+    });
+    for (index, extent) in table.table_extents.iter().enumerate() {
+        let data = read_extent(dev, extent.start_lba, extent.sector_count)?;
+        let extent_id = format!("extent.plain.partition_table.{index}");
+        out.extents.push(Extent {
+            id: extent_id.clone(),
+            region_id: region_id.into(),
+            start_lba: extent.start_lba,
+            sector_count: extent.sector_count,
+            purpose: extent.label.clone(),
+        });
+        out.artifacts.push(ArtifactInput {
+            id: format!("raw.plain.partition_table.{index}"),
+            kind: "raw_sectors".into(),
+            media_type: "application/octet-stream".into(),
+            source_extent_ids: vec![extent_id],
+            derivation: None,
+            restore_policy: RestorePolicy::Restorable,
+            completeness: ArtifactCompleteness::Complete,
+            data,
+        });
+    }
+    out.notes.push(match table.kind {
+        PartitionTableKind::Mbr => "Plain MBR metadata only; filesystem/user data excluded".into(),
+        PartitionTableKind::Gpt => {
+            "Plain GPT primary/backup metadata only; filesystem/user data excluded".into()
+        }
+    });
+    Ok(out)
+}
+
+fn manifest_partition_from_edp(partition: &PartitionGeometry) -> ManifestPartition {
+    let role = match partition.partition_type {
+        1 => "boot",
+        2 => "share",
+        4 => "encrypt",
+        _ => "unknown",
+    };
+    ManifestPartition {
+        index: (partition.index + 1) as u32,
+        role: Some(role.into()),
+        partition_type: Some(format!("edp:{}", partition.partition_type)),
+        start_lba: partition.start_sector,
+        sector_count: partition.sector_count,
+        filesystem_hint: None,
+        volume_label_hint: None,
+    }
+}
+
+pub(crate) fn append_legacy_deep_filesystem_evidence(
+    out: &mut MetadataAcquisition,
+    dev: &mut dyn SectorDev,
+    partitions: &[PartitionGeometry],
+) -> Result<(), String> {
+    for partition in partitions {
+        let region_id = format!(
+            "region.partition.{}.type{}",
+            partition.index, partition.partition_type
+        );
+        let prefix_count = partition.sector_count.min(PARTITION_PREFIX_SECTORS);
+        let prefix_start = partition.start_sector;
+        let prefix_extent_id = extent_id(partition.index, "prefix");
+        let prefix_artifact_id = artifact_id(partition.index, "prefix");
+        let prefix = add_raw_extent(
+            out,
+            dev,
+            &region_id,
+            prefix_extent_id.clone(),
+            prefix_artifact_id.clone(),
+            prefix_start,
+            prefix_count,
+            "partition_metadata_prefix",
+        )?;
+
+        if partition.sector_count > prefix_count {
+            let suffix_count = PARTITION_SUFFIX_SECTORS.min(partition.sector_count - prefix_count);
+            if suffix_count > 0 {
+                let suffix_start = partition.start_sector + partition.sector_count - suffix_count;
+                let _ = add_raw_extent(
+                    out,
+                    dev,
+                    &region_id,
+                    extent_id(partition.index, "suffix"),
+                    artifact_id(partition.index, "suffix"),
+                    suffix_start,
+                    suffix_count,
+                    "partition_metadata_suffix",
+                )?;
+            }
+        }
+
+        let probe = probe_filesystem(partition, prefix.as_deref().unwrap_or(&[]));
+        let mut seen = std::collections::BTreeSet::new();
+        for (ordinal, lba) in probe
+            .key_lbas
+            .iter()
+            .copied()
+            .filter(|lba| seen.insert(*lba))
+            .enumerate()
+        {
+            add_key_sector(out, dev, partition, &region_id, ordinal, lba)?;
+        }
+        if prefix.is_some() {
+            let probe_json = serde_json::to_vec_pretty(&probe)
+                .map_err(|e| format!("serialize filesystem probe failed: {e}"))?;
+            out.artifacts.push(ArtifactInput {
+                id: format!("derived.partition.{}.filesystem_probe", partition.index),
+                kind: "filesystem_probe".into(),
+                media_type: "application/json".into(),
+                source_extent_ids: vec![prefix_extent_id],
+                derivation: Some(Derivation {
+                    method: "filesystem_boot_probe_v1".into(),
+                    source_artifact_ids: vec![prefix_artifact_id],
+                }),
+                restore_policy: RestorePolicy::DerivedOnly,
+                completeness: ArtifactCompleteness::Complete,
+                data: probe_json,
+            });
+        }
+    }
+    Ok(())
+}
+
 pub fn acquire_metadata(
     dev: &mut dyn SectorDev,
     lba0_12: &[u8],
@@ -581,73 +883,13 @@ pub fn acquire_metadata(
             partition.index, partition.partition_type
         );
         out.regions.push(Region {
-            id: region_id.clone(),
+            id: region_id,
             role: format!("partition.type{}", partition.partition_type),
             start_lba: Some(partition.start_sector),
             sector_count: Some(partition.sector_count),
             semantic_status: SemanticStatus::Identified,
         });
-
-        let prefix_count = partition.sector_count.min(PARTITION_PREFIX_SECTORS);
-        let prefix_start = partition.start_sector;
-        let prefix_extent_id = extent_id(partition.index, "prefix");
-        let prefix_artifact_id = artifact_id(partition.index, "prefix");
-        let prefix = add_raw_extent(
-            &mut out,
-            dev,
-            &region_id,
-            prefix_extent_id.clone(),
-            prefix_artifact_id.clone(),
-            prefix_start,
-            prefix_count,
-            "partition_metadata_prefix",
-        )?;
-
-        if partition.sector_count > prefix_count {
-            let suffix_count = PARTITION_SUFFIX_SECTORS.min(partition.sector_count - prefix_count);
-            if suffix_count > 0 {
-                let suffix_start = partition.start_sector + partition.sector_count - suffix_count;
-                let _ = add_raw_extent(
-                    &mut out,
-                    dev,
-                    &region_id,
-                    extent_id(partition.index, "suffix"),
-                    artifact_id(partition.index, "suffix"),
-                    suffix_start,
-                    suffix_count,
-                    "partition_metadata_suffix",
-                )?;
-            }
-        }
-
-        let probe = probe_filesystem(partition, prefix.as_deref().unwrap_or(&[]));
-        let mut seen = std::collections::BTreeSet::new();
-        for (ordinal, lba) in probe
-            .key_lbas
-            .iter()
-            .copied()
-            .filter(|lba| seen.insert(*lba))
-            .enumerate()
-        {
-            add_key_sector(&mut out, dev, partition, &region_id, ordinal, lba)?;
-        }
-        if prefix.is_some() {
-            let probe_json = serde_json::to_vec_pretty(&probe)
-                .map_err(|e| format!("serialize filesystem probe failed: {e}"))?;
-            out.artifacts.push(ArtifactInput {
-                id: format!("derived.partition.{}.filesystem_probe", partition.index),
-                kind: "filesystem_probe".into(),
-                media_type: "application/json".into(),
-                source_extent_ids: vec![prefix_extent_id],
-                derivation: Some(Derivation {
-                    method: "filesystem_boot_probe_v1".into(),
-                    source_artifact_ids: vec![prefix_artifact_id],
-                }),
-                restore_policy: RestorePolicy::DerivedOnly,
-                completeness: ArtifactCompleteness::Complete,
-                data: probe_json,
-            });
-        }
+        out.partitions.push(manifest_partition_from_edp(partition));
     }
 
     match parse_lba7_compatibility_geometry(lba0_12, device_id, total_sectors) {
@@ -753,7 +995,7 @@ pub fn acquire_metadata(
             sector_count: Some(TAIL_METADATA_MIRROR_SECTORS),
             semantic_status: SemanticStatus::Identified,
         });
-        let _ = add_raw_extent(
+        let raw = add_raw_extent(
             &mut out,
             dev,
             region_id,
@@ -763,6 +1005,13 @@ pub fn acquire_metadata(
             TAIL_METADATA_MIRROR_SECTORS,
             "historical_lba4_lba12_mirror",
         )?;
+        if raw.is_some() {
+            out.artifacts
+                .iter_mut()
+                .find(|artifact| artifact.id == "raw.tail.metadata_mirror_512k")
+                .expect("captured tail metadata mirror artifact")
+                .restore_policy = RestorePolicy::Restorable;
+        }
     }
 
     if total_sectors > TAIL_END4_MIRROR_OFFSET_SECTORS {
@@ -775,7 +1024,7 @@ pub fn acquire_metadata(
             sector_count: Some(1),
             semantic_status: SemanticStatus::Identified,
         });
-        let _ = add_raw_extent(
+        let raw = add_raw_extent(
             &mut out,
             dev,
             region_id,
@@ -785,14 +1034,20 @@ pub fn acquire_metadata(
             1,
             "historical_restore_node_mirror",
         )?;
+        if raw.is_some() {
+            out.artifacts
+                .iter_mut()
+                .find(|artifact| artifact.id == "raw.tail.restore_node_end4")
+                .expect("captured tail restore-node artifact")
+                .restore_policy = RestorePolicy::Restorable;
+        }
     }
 
-    out.notes.push(format!(
-        "metadata capture policy: partition prefix={} sectors, suffix={} sectors",
-        PARTITION_PREFIX_SECTORS, PARTITION_SUFFIX_SECTORS
-    ));
     out.notes.push(
-        "LBA7 compatibility extent and identified historical tail mirrors are captured as independent physical extents"
+        "EDP metadata-only capture: filesystem boot/FAT/directory/user payload excluded".into(),
+    );
+    out.notes.push(
+        "LBA7 compatibility extent and identified historical tail recovery structures are captured as independent restorable protocol extents"
             .into(),
     );
     if !out.issues.is_empty() {

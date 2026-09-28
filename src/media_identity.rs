@@ -23,11 +23,15 @@ pub struct SerialDigestEvidence {
     pub quality: SerialQuality,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HardwareIdentityEvidence {
     pub vid: Option<u16>,
     pub pid: Option<u16>,
-    /// SHA-256 of the normalized serial. Raw serials must never be stored here.
+    /// Raw USB serial is retained only in memory so manifest v3 can persist it explicitly.
+    /// Generic snapshot serialization (including elevation argv/lineage) must never carry it.
+    #[serde(skip_serializing, skip_deserializing, default)]
+    pub serial: Option<String>,
+    /// Legacy/runtime digest used for v1/v2 compatibility and non-secret resume pins.
     pub serial_sha256: Option<String>,
     pub serial_quality: SerialQuality,
     pub vendor: Option<String>,
@@ -38,11 +42,30 @@ pub struct HardwareIdentityEvidence {
     pub logical_sector_size: Option<u32>,
 }
 
+impl std::fmt::Debug for HardwareIdentityEvidence {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("HardwareIdentityEvidence")
+            .field("vid", &self.vid)
+            .field("pid", &self.pid)
+            .field("serial", &self.serial.as_ref().map(|_| "<redacted>"))
+            .field("serial_sha256", &self.serial_sha256)
+            .field("serial_quality", &self.serial_quality)
+            .field("vendor", &self.vendor)
+            .field("product", &self.product)
+            .field("revision", &self.revision)
+            .field("transport", &self.transport)
+            .field("total_sectors", &self.total_sectors)
+            .field("logical_sector_size", &self.logical_sector_size)
+            .finish()
+    }
+}
+
 impl Default for HardwareIdentityEvidence {
     fn default() -> Self {
         Self {
             vid: None,
             pid: None,
+            serial: None,
             serial_sha256: None,
             serial_quality: SerialQuality::Missing,
             vendor: None,
@@ -369,6 +392,39 @@ pub enum RestoreAuthorizationDecision {
     Reject(RestoreRejection),
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum UsableSerialComparison {
+    RawMatch,
+    RawMismatch,
+    LegacyDigestMatch,
+    LegacyDigestMismatch,
+    Missing,
+}
+
+fn compare_usable_serials(
+    a: &HardwareIdentityEvidence,
+    b: &HardwareIdentityEvidence,
+) -> UsableSerialComparison {
+    if a.serial_quality != SerialQuality::Usable || b.serial_quality != SerialQuality::Usable {
+        return UsableSerialComparison::Missing;
+    }
+    if let (Some(left), Some(right)) = (a.serial.as_deref(), b.serial.as_deref()) {
+        return if left == right {
+            UsableSerialComparison::RawMatch
+        } else {
+            UsableSerialComparison::RawMismatch
+        };
+    }
+    if let (Some(left), Some(right)) = (a.serial_sha256.as_deref(), b.serial_sha256.as_deref()) {
+        return if left == right {
+            UsableSerialComparison::LegacyDigestMatch
+        } else {
+            UsableSerialComparison::LegacyDigestMismatch
+        };
+    }
+    UsableSerialComparison::Missing
+}
+
 /// Destructive restore requires matching, usable hardware evidence and exact geometry.
 /// Protocol identity and controlled lineage are independent evidence, never write grants.
 pub struct RestoreAuthorizationPolicy;
@@ -430,19 +486,19 @@ impl RestoreAuthorizationPolicy {
         if identity_match.relationship == MediaRelationship::DifferentMedia {
             return Reject(RestoreRejection::DifferentMedia);
         }
+        let serial_comparison = compare_usable_serials(&backup.hardware, &target.hardware);
         if backup.hardware.vid.is_none()
             || backup.hardware.pid.is_none()
             || backup.hardware.vid != target.hardware.vid
             || backup.hardware.pid != target.hardware.pid
-            || backup.hardware.serial_quality != SerialQuality::Usable
-            || target.hardware.serial_quality != SerialQuality::Usable
-            || backup.hardware.serial_sha256.is_none()
-            || target.hardware.serial_sha256.is_none()
+            || matches!(serial_comparison, UsableSerialComparison::Missing)
         {
             return Reject(RestoreRejection::WeakHardwareBinding);
         }
-        if backup.hardware.serial_sha256 != target.hardware.serial_sha256
-            || identity_match.relationship != MediaRelationship::SamePhysicalMedia
+        if !matches!(
+            serial_comparison,
+            UsableSerialComparison::RawMatch | UsableSerialComparison::LegacyDigestMatch
+        ) || identity_match.relationship != MediaRelationship::SamePhysicalMedia
         {
             return Reject(RestoreRejection::InsufficientPhysicalEvidence);
         }
@@ -561,34 +617,44 @@ pub fn match_media_identity(
     let mut evidence = Vec::new();
     let mut conflicts = Vec::new();
 
-    let usable_serials = a.hardware.serial_quality == SerialQuality::Usable
-        && b.hardware.serial_quality == SerialQuality::Usable
-        && a.hardware.serial_sha256.is_some()
-        && b.hardware.serial_sha256.is_some();
-    let serial_match = usable_serials
-        && a.hardware.serial_sha256.as_deref() == b.hardware.serial_sha256.as_deref();
-    let serial_mismatch = usable_serials && !serial_match;
+    let serial_comparison = compare_usable_serials(&a.hardware, &b.hardware);
+    let serial_match = matches!(
+        serial_comparison,
+        UsableSerialComparison::RawMatch | UsableSerialComparison::LegacyDigestMatch
+    );
+    let serial_mismatch = matches!(
+        serial_comparison,
+        UsableSerialComparison::RawMismatch | UsableSerialComparison::LegacyDigestMismatch
+    );
 
     if serial_mismatch {
+        let explanation = match serial_comparison {
+            UsableSerialComparison::RawMismatch => "usable raw USB serials differ",
+            _ => "usable legacy USB serial digests differ",
+        };
         push_evidence(
             &mut evidence,
             IdentityEvidenceKind::UsbSerialDigest,
             IdentityEvidenceOutcome::Conflict,
             IdentityEvidenceStrength::Hard,
-            "usable USB serial digests differ",
+            explanation,
         );
         conflicts.push(IdentityConflict {
             kind: IdentityConflictKind::UsableSerialMismatch,
             severity: IdentityConflictSeverity::PhysicalHard,
-            explanation: "usable USB serial digest mismatch".into(),
+            explanation: explanation.into(),
         });
     } else if serial_match {
+        let explanation = match serial_comparison {
+            UsableSerialComparison::RawMatch => "usable raw USB serials match",
+            _ => "usable legacy USB serial digests match",
+        };
         push_evidence(
             &mut evidence,
             IdentityEvidenceKind::UsbSerialDigest,
             IdentityEvidenceOutcome::Match,
             IdentityEvidenceStrength::Hard,
-            "usable USB serial digests match",
+            explanation,
         );
     } else {
         push_evidence(
@@ -679,7 +745,7 @@ pub fn match_media_identity(
             kind: IdentityConflictKind::SerialCollisionSuspected,
             severity: IdentityConflictSeverity::Ambiguous,
             explanation:
-                "matching serial digest conflicts with media geometry; possible serial collision"
+                "matching usable serial conflicts with media geometry; possible serial collision"
                     .into(),
         });
         return IdentityMatch {

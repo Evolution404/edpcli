@@ -120,6 +120,7 @@ pub fn create_plain_backup(
     facts: &DiskFacts,
     data: &[u8],
     legacy_candidate: &str,
+    metadata: crate::backup_metadata::MetadataAcquisition,
     identity: &crate::media_identity::MediaIdentitySnapshot,
     bak_dir: &Path,
     clock: &dyn Clock,
@@ -132,7 +133,15 @@ pub fn create_plain_backup(
         clock,
         Some("plain"),
     )?;
-    crate::edpb::write_core_backup_with_identity(&path, &capture, identity)
+    let capture = crate::edpb::MetadataCapture {
+        core: capture,
+        partitions: metadata.partitions,
+        regions: metadata.regions,
+        extents: metadata.extents,
+        artifacts: metadata.artifacts,
+        notes: metadata.notes,
+    };
+    crate::edpb::write_metadata_backup_with_identity(&path, &capture, identity)
         .map_err(|error| EdpCliError::new(EXIT_BACKUP, format!("错误: {error}")))?;
     sync_dir(bak_dir)?;
     Ok(path)
@@ -152,6 +161,7 @@ pub fn create_metadata_backup(
     let (path, core) = prepare_backup_capture(facts, data, device_id, bak_dir, clock)?;
     let capture = crate::edpb::MetadataCapture {
         core,
+        partitions: metadata.partitions,
         regions: metadata.regions,
         extents: metadata.extents,
         artifacts: metadata.artifacts,
@@ -176,6 +186,7 @@ pub fn create_deep_backup(
     let (path, core) = prepare_backup_capture(facts, data, device_id, bak_dir, clock)?;
     let capture = crate::edpb::MetadataCapture {
         core,
+        partitions: deep.partitions,
         regions: deep.regions,
         extents: deep.extents,
         artifacts: deep.artifacts,

@@ -1,7 +1,7 @@
 use super::*;
 
 /// Explicit compatibility writer used only to construct/read historical v1 fixtures.
-/// Normal backup creation must use the v2 writers above.
+/// Normal backup creation must use the current v3 writers.
 #[doc(hidden)]
 pub fn write_legacy_v1_core_backup_with_notes(
     path: &Path,
@@ -12,6 +12,7 @@ pub fn write_legacy_v1_core_backup_with_notes(
         path,
         capture,
         CaptureLevel::Core,
+        &[],
         &[],
         &[],
         &[],

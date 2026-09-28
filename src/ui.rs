@@ -120,7 +120,11 @@ pub fn render_write_event(event: &crate::application::WriteEvent) -> String {
             truncate_mid(&path.display().to_string(), 64)
         ),
         WriteEvent::RestoreWriteCompleted => {
-            format!("{}\n", green("已还原, 读回校验通过。请拔出重插。"))
+            format!(
+                "{}\n{}\n",
+                green("元数据恢复成功，读回校验通过。"),
+                yellow("文件系统未恢复；部分分区可能需要格式化。")
+            )
         }
     }
 }

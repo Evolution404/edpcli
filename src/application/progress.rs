@@ -52,7 +52,7 @@ pub enum Step {
 impl Step {
     pub const fn label(self) -> &'static str {
         match self {
-            Self::MandatoryBackup => "制盘前备份",
+            Self::MandatoryBackup => "制盘前元数据备份",
             Self::BackupVerification => "备份身份校验",
             Self::LockAndReopen => "锁定并重开设备",
             Self::ProtocolWrite => "协议事务写盘",

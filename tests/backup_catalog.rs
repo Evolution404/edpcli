@@ -41,6 +41,7 @@ fn identity(
         hardware: HardwareIdentityEvidence {
             vid: Some(0x0dd8),
             pid: Some(0x2005),
+            serial: None,
             serial_sha256: serial.map(str::to_string),
             serial_quality: if serial.is_some() {
                 SerialQuality::Usable

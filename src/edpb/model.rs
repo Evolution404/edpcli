@@ -41,6 +41,44 @@ pub enum RestorePolicy {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+pub enum BackupPurpose {
+    MetadataOnly,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RestoreContract {
+    pub restores_partition_structure: bool,
+    pub restores_edp_protocol: bool,
+    pub restores_filesystem: bool,
+    pub restores_user_data: bool,
+    pub post_restore_assessment_required: bool,
+}
+
+impl RestoreContract {
+    pub fn metadata_only(restores_edp_protocol: bool) -> Self {
+        Self {
+            restores_partition_structure: true,
+            restores_edp_protocol,
+            restores_filesystem: false,
+            restores_user_data: false,
+            post_restore_assessment_required: true,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ManifestPartition {
+    pub index: u32,
+    pub role: Option<String>,
+    pub partition_type: Option<String>,
+    pub start_lba: u64,
+    pub sector_count: u64,
+    pub filesystem_hint: Option<String>,
+    pub volume_label_hint: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum ArtifactCompleteness {
     Complete,
     Partial,
@@ -99,6 +137,9 @@ pub enum ManifestProvisionKind {
 pub struct ManifestHardwareIdentity {
     pub vid: Option<u16>,
     pub pid: Option<u16>,
+    #[serde(default)]
+    pub serial: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub serial_sha256: Option<String>,
     pub serial_quality: ManifestSerialQuality,
     pub vendor: Option<String>,
@@ -204,11 +245,17 @@ pub struct Manifest {
     pub schema: String,
     pub container_version: ContainerVersion,
     pub snapshot: SnapshotInfo,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub backup_purpose: Option<BackupPurpose>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub restore_contract: Option<RestoreContract>,
     pub device: DeviceIdentity,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub identity: Option<ManifestIdentity>,
     pub geometry: DeviceGeometry,
     pub observation: Observation,
+    #[serde(default)]
+    pub partitions: Vec<ManifestPartition>,
     pub regions: Vec<Region>,
     pub extents: Vec<Extent>,
     pub artifacts: Vec<Artifact>,
@@ -246,6 +293,7 @@ pub struct ArtifactInput {
 #[derive(Debug, Clone)]
 pub struct MetadataCapture<'a> {
     pub core: CoreCapture<'a>,
+    pub partitions: Vec<ManifestPartition>,
     pub regions: Vec<Region>,
     pub extents: Vec<Extent>,
     pub artifacts: Vec<ArtifactInput>,

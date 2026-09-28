@@ -470,6 +470,7 @@ pub fn acquire_deep(
     let mut out = crate::backup_metadata::acquire_metadata(dev, lba0_12, device_id, total_sectors)?;
     let partitions =
         crate::backup_metadata::parse_partition_geometry(lba0_12, device_id, total_sectors)?;
+    crate::backup_metadata::append_legacy_deep_filesystem_evidence(&mut out, dev, &partitions)?;
     for p in partitions
         .iter()
         .filter(|p| matches!(p.partition_type, 2 | 4))

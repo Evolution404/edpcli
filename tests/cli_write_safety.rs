@@ -204,6 +204,7 @@ impl CmdRunner for ProbeRunner {
             vid: Some(self.vid),
             pid: Some(self.pid),
             transport: edpcli::platform::NativeTransport::Uas,
+            windows_pnp_instance_id: None,
             inquiry: Some(edpcli::platform::InquiryInfo {
                 vendor: "Netac".into(),
                 product: "OnlyDisk".into(),
@@ -376,6 +377,20 @@ fn backup_create_is_read_only_and_verifiable() {
         manual_verified.manifest.snapshot.capture_level,
         edpcli::edpb::CaptureLevel::Metadata
     );
+    assert!(
+        !manual_verified.manifest.partitions.is_empty(),
+        "EDP metadata backup must carry typed partition geometry"
+    );
+    assert!(
+        manual_verified.manifest.artifacts.iter().all(|artifact| {
+            !artifact.id.contains("filesystem")
+                && !artifact.id.contains("prefix")
+                && !artifact.id.contains("suffix")
+                && !artifact.id.contains("fskey")
+                && !artifact.kind.contains("filesystem")
+        }),
+        "normal EDP metadata backup must not depend on filesystem/Deep evidence"
+    );
     assert!(manual_verified
         .manifest
         .artifacts
@@ -403,16 +418,11 @@ fn edp_backup_records_hardware_serial_binding_when_available() {
 
     let report = backup_create_flow(6, &mut ctx(&runner, &mut prompt, &tmp.0), &mut dev).unwrap();
     let verified = edpb::verify_file(&report.path).unwrap();
+    assert_eq!(verified.manifest.schema, "edpb.manifest.v3");
     let identity = edpb::canonical_media_identity(&verified.manifest).unwrap();
-    let expected = hardware_serial_note(serial)
-        .strip_prefix("hardware_serial_sha256=")
-        .unwrap()
-        .to_string();
 
-    assert_eq!(
-        identity.hardware.serial_sha256.as_deref(),
-        Some(expected.as_str())
-    );
+    assert_eq!(identity.hardware.serial.as_deref(), Some(serial));
+    assert_eq!(identity.hardware.serial_sha256, None);
     assert!(verified
         .manifest
         .provenance
@@ -662,7 +672,7 @@ fn restore_v1_and_v2_canonical_identity_share_hard_conflict_authorization() {
         device_state: "edp".into(),
         lba0_12: &original,
     };
-    edpb::write_core_backup_with_identity(&v2, &capture, &identity).unwrap();
+    edpb::write_legacy_v2_core_backup_with_identity(&v2, &capture, &identity).unwrap();
     assert_eq!(
         edpb::verify_file(&v1).unwrap().manifest.schema,
         "edpb.manifest.v1"
@@ -1034,21 +1044,41 @@ fn plain_backup_uses_hardware_identity_and_serial_binding() {
     );
 
     assert_eq!(verified.manifest.snapshot.device_state, "plain");
+    assert_eq!(
+        verified.manifest.snapshot.capture_level,
+        edpb::CaptureLevel::Metadata
+    );
+    assert!(
+        !verified.manifest.partitions.is_empty(),
+        "Plain v3 backup must carry typed partition metadata"
+    );
+    assert!(
+        verified
+            .manifest
+            .artifacts
+            .iter()
+            .all(|artifact| artifact.id != edpb::RAW_PROTOCOL_ARTIFACT_ID),
+        "Plain v3 backup must not persist fixed LBA0-12 as protocol"
+    );
+    assert!(
+        verified.manifest.artifacts.iter().all(|artifact| {
+            artifact.restore_policy == edpb::RestorePolicy::Restorable
+                && artifact.kind == "raw_sectors"
+                && !artifact.id.contains("filesystem")
+                && !artifact.id.contains("directory")
+        }),
+        "Plain v3 backup may contain only restorable partition-table raw metadata"
+    );
     assert_eq!(verified.manifest.device.vid, "0dd8");
     assert_eq!(verified.manifest.device.pid, "2005");
     assert_eq!(
         verified.manifest.device.device_id,
         "disk&ven_netac&prod_onlydisk&rev_1.00"
     );
+    assert_eq!(verified.manifest.schema, "edpb.manifest.v3");
     let identity = edpb::canonical_media_identity(&verified.manifest).unwrap();
-    let expected = hardware_serial_note(serial)
-        .strip_prefix("hardware_serial_sha256=")
-        .unwrap()
-        .to_string();
-    assert_eq!(
-        identity.hardware.serial_sha256.as_deref(),
-        Some(expected.as_str())
-    );
+    assert_eq!(identity.hardware.serial.as_deref(), Some(serial));
+    assert_eq!(identity.hardware.serial_sha256, None);
     assert_eq!(identity.protocol.device_id, None);
     assert_eq!(identity.protocol.onlyid, None);
     assert!(verified
@@ -1057,6 +1087,85 @@ fn plain_backup_uses_hardware_identity_and_serial_binding() {
         .notes
         .iter()
         .all(|note| !note.starts_with("hardware_serial_sha256=")));
+}
+
+#[test]
+fn chapter_18_b4_plain_v3_restore_writes_partition_metadata_without_protocol_core() {
+    let Some(original_edp) = load_disk_image("netac") else {
+        eprintln!("跳过: 真实备份不可用");
+        return;
+    };
+    let serial = "NETAC-HIL-SERIAL-001";
+    let runner = netac_serial_runner(26, serial);
+    let tmp = TmpDir::new("chapter18_b4_plain_restore");
+    let backup_dir = tmp.0.join("bak");
+
+    let mut plain = plain_metadata(original_edp.clone());
+    plain[446 + 4] = 0x07;
+    plain[446 + 8..446 + 12].copy_from_slice(&2_048u32.to_le_bytes());
+    plain[446 + 12..446 + 16].copy_from_slice(&100_000u32.to_le_bytes());
+    plain[510..512].copy_from_slice(&[0x55, 0xaa]);
+
+    let source_path = tmp.0.join("plain.img");
+    fs::write(&source_path, &plain).unwrap();
+    let mut source_dev = FileDev::open_rdonly(source_path.to_str().unwrap()).unwrap();
+    let mut backup_prompt = ScriptPrompter::yes();
+    let report = backup_create_flow(
+        26,
+        &mut Ctx {
+            runner: &runner,
+            clock: &FixedClockForCli,
+            prompt: &mut backup_prompt,
+            backup_dir: backup_dir.clone(),
+        },
+        &mut source_dev,
+    )
+    .unwrap();
+    let verified = edpb::verify_file(&report.path).unwrap();
+    assert_eq!(verified.manifest.schema, "edpb.manifest.v3");
+    assert!(verified
+        .manifest
+        .artifacts
+        .iter()
+        .all(|artifact| artifact.id != edpb::RAW_PROTOCOL_ARTIFACT_ID));
+
+    let target_path = tmp.0.join("target.img");
+    fs::write(&target_path, &original_edp).unwrap();
+    let mut target_dev = FileDev::open_rdwr(
+        target_path.to_str().unwrap(),
+        std::time::Duration::from_secs(1),
+    )
+    .unwrap();
+    let mut restore_prompt = ScriptPrompter::yes();
+    let code = restore_flow(
+        Some(report.path.to_string_lossy().into_owned()),
+        26,
+        &mut Ctx {
+            runner: &runner,
+            clock: &FixedClockForCli,
+            prompt: &mut restore_prompt,
+            backup_dir,
+        },
+        &mut target_dev,
+    )
+    .unwrap();
+
+    assert_eq!(code, EXIT_OK);
+    let restored = fs::read(&target_path).unwrap();
+    assert_eq!(
+        &restored[..SECTOR],
+        &plain[..SECTOR],
+        "MBR must be restored"
+    );
+    assert_eq!(
+        &restored[SECTOR..13 * SECTOR],
+        &original_edp[SECTOR..13 * SECTOR],
+        "Plain metadata restore must not manufacture or overwrite filesystem/protocol sectors"
+    );
+    assert_eq!(
+        u32::from_le_bytes(restored[454..458].try_into().unwrap()),
+        2_048
+    );
 }
 
 #[test]
@@ -1386,6 +1495,23 @@ fn restore_deep_edpb_restores_lba0_12_and_validated_lce_together() {
         corrupt[17] ^= 0x5a;
         current_lce.insert(lba, corrupt);
     }
+    let tail_mirror_start =
+        total_sectors - edpcli::backup_metadata::TAIL_METADATA_MIRROR_OFFSET_SECTORS;
+    let tail_restore_start =
+        total_sectors - edpcli::backup_metadata::TAIL_END4_MIRROR_OFFSET_SECTORS;
+    let tail_mirror_backup =
+        vec![0xA5; edpcli::backup_metadata::TAIL_METADATA_MIRROR_SECTORS as usize * SECTOR];
+    let tail_restore_backup = vec![0x5A; SECTOR];
+    for offset in 0..edpcli::backup_metadata::TAIL_METADATA_MIRROR_SECTORS {
+        current_lce.insert(
+            u32::try_from(tail_mirror_start + offset).unwrap(),
+            vec![0x11; SECTOR],
+        );
+    }
+    current_lce.insert(
+        u32::try_from(tail_restore_start).unwrap(),
+        vec![0x22; SECTOR],
+    );
 
     let tmp = TmpDir::new("restore_lce");
     let backup = tmp.0.join(
@@ -1406,30 +1532,85 @@ fn restore_deep_edpb_restores_lba0_12_and_validated_lce_together() {
             device_state: "edp".into(),
             lba0_12: &original,
         },
-        regions: vec![Region {
-            id: "region.lba7_compatibility_extent".into(),
-            role: "lba7_legacy_partition_compatibility_extent".into(),
-            start_lba: Some(geometry.start_lba),
-            sector_count: Some(geometry.sector_count),
-            semantic_status: SemanticStatus::Identified,
-        }],
-        extents: vec![Extent {
-            id: "extent.lba7_compatibility".into(),
-            region_id: "region.lba7_compatibility_extent".into(),
-            start_lba: geometry.start_lba,
-            sector_count: geometry.sector_count,
-            purpose: "lba7_compatibility_extent_ciphertext".into(),
-        }],
-        artifacts: vec![ArtifactInput {
-            id: "raw.lba7_compatibility".into(),
-            kind: "raw_sectors".into(),
-            media_type: "application/octet-stream".into(),
-            source_extent_ids: vec!["extent.lba7_compatibility".into()],
-            derivation: None,
-            restore_policy: RestorePolicy::Restorable,
-            completeness: ArtifactCompleteness::Complete,
-            data: lce_backup.clone(),
-        }],
+        partitions: Vec::new(),
+        regions: vec![
+            Region {
+                id: "region.lba7_compatibility_extent".into(),
+                role: "lba7_legacy_partition_compatibility_extent".into(),
+                start_lba: Some(geometry.start_lba),
+                sector_count: Some(geometry.sector_count),
+                semantic_status: SemanticStatus::Identified,
+            },
+            Region {
+                id: "region.tail.metadata_mirror_512k".into(),
+                role: "lba4_lba12_backup_mirror".into(),
+                start_lba: Some(tail_mirror_start),
+                sector_count: Some(edpcli::backup_metadata::TAIL_METADATA_MIRROR_SECTORS),
+                semantic_status: SemanticStatus::Identified,
+            },
+            Region {
+                id: "region.tail.restore_node_end4".into(),
+                role: "historical_restore_node_mirror".into(),
+                start_lba: Some(tail_restore_start),
+                sector_count: Some(1),
+                semantic_status: SemanticStatus::Identified,
+            },
+        ],
+        extents: vec![
+            Extent {
+                id: "extent.lba7_compatibility".into(),
+                region_id: "region.lba7_compatibility_extent".into(),
+                start_lba: geometry.start_lba,
+                sector_count: geometry.sector_count,
+                purpose: "lba7_compatibility_extent_ciphertext".into(),
+            },
+            Extent {
+                id: "extent.tail.metadata_mirror_512k".into(),
+                region_id: "region.tail.metadata_mirror_512k".into(),
+                start_lba: tail_mirror_start,
+                sector_count: edpcli::backup_metadata::TAIL_METADATA_MIRROR_SECTORS,
+                purpose: "historical_lba4_lba12_mirror".into(),
+            },
+            Extent {
+                id: "extent.tail.restore_node_end4".into(),
+                region_id: "region.tail.restore_node_end4".into(),
+                start_lba: tail_restore_start,
+                sector_count: 1,
+                purpose: "historical_restore_node_mirror".into(),
+            },
+        ],
+        artifacts: vec![
+            ArtifactInput {
+                id: "raw.lba7_compatibility".into(),
+                kind: "raw_sectors".into(),
+                media_type: "application/octet-stream".into(),
+                source_extent_ids: vec!["extent.lba7_compatibility".into()],
+                derivation: None,
+                restore_policy: RestorePolicy::Restorable,
+                completeness: ArtifactCompleteness::Complete,
+                data: lce_backup.clone(),
+            },
+            ArtifactInput {
+                id: "raw.tail.metadata_mirror_512k".into(),
+                kind: "raw_sectors".into(),
+                media_type: "application/octet-stream".into(),
+                source_extent_ids: vec!["extent.tail.metadata_mirror_512k".into()],
+                derivation: None,
+                restore_policy: RestorePolicy::Restorable,
+                completeness: ArtifactCompleteness::Complete,
+                data: tail_mirror_backup.clone(),
+            },
+            ArtifactInput {
+                id: "raw.tail.restore_node_end4".into(),
+                kind: "raw_sectors".into(),
+                media_type: "application/octet-stream".into(),
+                source_extent_ids: vec!["extent.tail.restore_node_end4".into()],
+                derivation: None,
+                restore_policy: RestorePolicy::Restorable,
+                completeness: ArtifactCompleteness::Complete,
+                data: tail_restore_backup.clone(),
+            },
+        ],
         notes: vec![],
     };
     let runner = netac_serial_runner(6, "NETAC-HIL-SERIAL-001");
@@ -1456,8 +1637,10 @@ fn restore_deep_edpb_restores_lba0_12_and_validated_lce_together() {
     assert_eq!(dev.metadata, original);
     assert_eq!(
         dev.writes,
-        13 + geometry.sector_count as usize,
-        "one transaction must restore all 13 protocol sectors and all LCE sectors"
+        13 + geometry.sector_count as usize
+            + edpcli::backup_metadata::TAIL_METADATA_MIRROR_SECTORS as usize
+            + 1,
+        "one transaction must restore protocol, LCE and confirmed tail metadata"
     );
     for offset in 0..geometry.sector_count {
         let lba = u32::try_from(geometry.start_lba + offset).unwrap();
@@ -1467,6 +1650,20 @@ fn restore_deep_edpb_restores_lba0_12_and_validated_lce_together() {
             &lce_backup[start..start + SECTOR]
         );
     }
+    for offset in 0..edpcli::backup_metadata::TAIL_METADATA_MIRROR_SECTORS {
+        let lba = u32::try_from(tail_mirror_start + offset).unwrap();
+        let start = offset as usize * SECTOR;
+        assert_eq!(
+            dev.sectors.get(&lba).unwrap(),
+            &tail_mirror_backup[start..start + SECTOR]
+        );
+    }
+    assert_eq!(
+        dev.sectors
+            .get(&u32::try_from(tail_restore_start).unwrap())
+            .unwrap(),
+        &tail_restore_backup
+    );
 }
 
 #[test]

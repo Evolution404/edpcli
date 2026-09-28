@@ -817,6 +817,8 @@ pub(super) fn write_progress_text(event: &crate::application::WriteEvent) -> Str
                 .map(|name| name.to_string_lossy().into_owned())
                 .unwrap_or_else(|| path.to_string_lossy().into_owned())
         ),
-        WriteEvent::RestoreWriteCompleted => "已还原，读回校验通过；请拔出重插".to_string(),
+        WriteEvent::RestoreWriteCompleted => {
+            "元数据恢复成功；文件系统未恢复，部分分区可能需要格式化".to_string()
+        }
     }
 }

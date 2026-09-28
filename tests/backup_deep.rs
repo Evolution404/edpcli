@@ -753,6 +753,7 @@ fn deep_container_retains_metadata_and_never_makes_analysis_restorable() {
             device_state: "encrypted".into(),
             lba0_12: image,
         },
+        partitions: deep.partitions,
         regions: deep.regions,
         extents: deep.extents,
         artifacts: deep.artifacts,
@@ -773,7 +774,12 @@ fn deep_container_retains_metadata_and_never_makes_analysis_restorable() {
         .collect::<Vec<_>>();
     assert_eq!(
         restorable,
-        vec![edpb::RAW_PROTOCOL_ARTIFACT_ID, "raw.lba7_compatibility"]
+        vec![
+            edpb::RAW_PROTOCOL_ARTIFACT_ID,
+            "raw.lba7_compatibility",
+            "raw.tail.metadata_mirror_512k",
+            "raw.tail.restore_node_end4",
+        ]
     );
     assert_eq!(edpb::read_raw_protocol(&path).unwrap(), image);
     std::fs::remove_file(path).unwrap();

@@ -1346,7 +1346,8 @@ fn chapter_15_identity_write_boundaries_remain_separate() {
     assert!(!edpb_writer.contains("hardware_serial_sha256="));
     assert!(!backup_writer.contains("hardware_serial_sha256="));
     assert!(edpb_legacy.contains("fn legacy_hardware_serial_digest("));
-    assert!(edpb_writer.contains("edpb.manifest.v2"));
+    assert!(edpb_writer.contains("edpb.manifest.v3"));
+    assert!(edpb_writer.contains("write_legacy_v2_core_backup_with_identity"));
 
     for forbidden in ["prepare_write(", "reopen_rdwr(", "write_sector("] {
         assert!(

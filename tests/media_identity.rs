@@ -15,10 +15,12 @@ use edpcli::provision::DiskProvisionKind;
 use edpcli::sysinfo::CmdRunner;
 
 fn hardware(serial: Option<&str>, vid: u16, pid: u16, sectors: u64) -> HardwareIdentityEvidence {
+    let raw_serial = serial.map(str::to_string);
     let serial = serial_digest_evidence(serial);
     HardwareIdentityEvidence {
         vid: Some(vid),
         pid: Some(pid),
+        serial: raw_serial,
         serial_sha256: serial.sha256,
         serial_quality: serial.quality,
         vendor: Some("AIGO".into()),
@@ -80,7 +82,7 @@ fn same_usable_serial_plain_to_edp_is_physical_strong() {
         DiskProvisionKind::Plain,
     );
     let edp = snapshot(
-        hardware(Some(" SERIAL-001 "), 0x1234, 0x5678, 1_000_000),
+        hardware(Some("SERIAL-001"), 0x1234, 0x5678, 1_000_000),
         Some("disk&ven_aigo&prod_u335"),
         Some("42"),
         DiskProvisionKind::Mode0,
@@ -416,6 +418,7 @@ impl CmdRunner for ObservationRunner {
             vid: Some(0x3535),
             pid: Some(0x6300),
             transport: NativeTransport::Uas,
+            windows_pnp_instance_id: None,
             inquiry: Some(InquiryInfo {
                 vendor: "AIGO".into(),
                 product: "U335".into(),
@@ -517,7 +520,16 @@ fn readonly_observation_never_writes_and_classifies_plain_with_fixture_geometry(
         SerialQuality::Usable
     );
     assert!(observed.snapshot.hardware.serial_sha256.is_some());
+    assert_eq!(
+        observed.snapshot.hardware.serial.as_deref(),
+        Some("RAW-SERIAL-MUST-NOT-ESCAPE")
+    );
 
+    let serialized = serde_json::to_string(&observed.snapshot).unwrap();
+    assert!(
+        !serialized.contains("RAW-SERIAL-MUST-NOT-ESCAPE"),
+        "raw USB serial must not enter generic snapshot serialization"
+    );
     let debug = format!("{:?}", observed.snapshot);
     assert!(
         !debug.contains("RAW-SERIAL-MUST-NOT-ESCAPE"),

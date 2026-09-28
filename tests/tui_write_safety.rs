@@ -60,6 +60,85 @@ fn provision_tui_has_one_mandatory_backup_path_and_no_optional_prebackup_worker(
 }
 
 #[test]
+fn chapter_18_b0_metadata_restore_and_prebackup_wording_are_locked() {
+    let cli_ui = include_str!("../src/ui.rs");
+    let tui_backup = include_str!("../src/tui/backups/render.rs");
+    let progress = include_str!("../src/application/progress.rs");
+
+    for source in [cli_ui, tui_backup] {
+        assert!(
+            !source.contains("请拔出重插"),
+            "metadata restore must not imply that the filesystem is usable after restore"
+        );
+        assert!(
+            source.contains("元数据恢复"),
+            "restore completion must explicitly use metadata-restore semantics"
+        );
+    }
+    assert!(
+        progress.contains("Self::MandatoryBackup => \"制盘前元数据备份\""),
+        "provision progress must describe the mandatory backup as metadata-only"
+    );
+}
+
+#[test]
+fn chapter_18_b0_mandatory_backup_precedes_lock_and_reopen() {
+    let provision = include_str!("../src/application/provision.rs");
+    let commit = include_str!("../src/application/provision/commit.rs");
+    let chain = provision
+        .split("pub fn commit_provision_with_backup_on_disk_with_progress(")
+        .nth(1)
+        .expect("mandatory backup application chain");
+    let backup = chain
+        .find("backup_create_on_disk(")
+        .expect("mandatory metadata backup");
+    let enter_commit = chain
+        .find("commit_provision_on_disk_with_progress(")
+        .expect("provision commit");
+    assert!(
+        backup < enter_commit,
+        "backup must finish before commit begins"
+    );
+    assert!(
+        commit.contains("progress(Phase::Identity, Step::LockAndReopen, None);"),
+        "commit must retain the typed LockAndReopen boundary"
+    );
+}
+
+#[test]
+fn chapter_18_b0_disk5_fixture_freezes_metadata_only_restore_root_cause() {
+    const SECTOR: usize = 512;
+    const ORIGINAL_START: u32 = 2_048;
+    const EDP_LEFTOVER_START: usize = 63;
+
+    let mut backup_lba0_12 = vec![0u8; 13 * SECTOR];
+    let entry = &mut backup_lba0_12[446..462];
+    entry[4] = 0x07;
+    entry[8..12].copy_from_slice(&ORIGINAL_START.to_le_bytes());
+    entry[12..16].copy_from_slice(&100_000u32.to_le_bytes());
+    backup_lba0_12[510..512].copy_from_slice(&[0x55, 0xaa]);
+
+    let mut after_edp = vec![0u8; (ORIGINAL_START as usize + 16) * SECTOR];
+    after_edp[EDP_LEFTOVER_START * SECTOR + 3..EDP_LEFTOVER_START * SECTOR + 11]
+        .copy_from_slice(b"EXFAT   ");
+    after_edp[..13 * SECTOR].copy_from_slice(&backup_lba0_12);
+
+    let restored_start =
+        u32::from_le_bytes(after_edp[454..458].try_into().expect("MBR start-LBA field"));
+    assert_eq!(restored_start, ORIGINAL_START);
+    assert_eq!(
+        &after_edp[EDP_LEFTOVER_START * SECTOR + 3..EDP_LEFTOVER_START * SECTOR + 11],
+        b"EXFAT   ",
+        "intervening EDP filesystem evidence remains at LBA63"
+    );
+    assert_ne!(
+        &after_edp[ORIGINAL_START as usize * SECTOR + 3..ORIGINAL_START as usize * SECTOR + 11],
+        b"EXFAT   ",
+        "restoring partition metadata does not restore the LBA2048 filesystem"
+    );
+}
+
+#[test]
 fn critical_exit_contract_covers_ctrl_c_through_quit_intent() {
     let keymap = include_str!("../src/tui/keymap.rs");
     let state = include_str!("../src/tui/state.rs");
@@ -126,6 +205,7 @@ fn plain_identity_recheck_accepts_zero_lba4_and_rejects_explicit_edp_onlyid() {
                 vid: Some(0x3535),
                 pid: Some(0x6300),
                 transport: NativeTransport::Bot,
+                windows_pnp_instance_id: None,
                 inquiry: Some(InquiryInfo {
                     vendor: "aigo".into(),
                     product: "U335".into(),
@@ -193,6 +273,7 @@ fn plain_identity_recheck_accepts_whole_disk_ntfs_with_nonzero_lba4_code() {
                 vid: Some(0x3535),
                 pid: Some(0x6300),
                 transport: NativeTransport::Bot,
+                windows_pnp_instance_id: None,
                 inquiry: Some(InquiryInfo {
                     vendor: "aigo".into(),
                     product: "U335".into(),

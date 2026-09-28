@@ -138,6 +138,7 @@ fn captured_partition_edpb(deep: bool) -> Option<(TmpDir, PathBuf, u64)> {
             device_state: "inspect-fixture".into(),
             lba0_12: &data,
         },
+        partitions: Vec::new(),
         regions: vec![
             Region {
                 id: region_id.clone(),

@@ -113,12 +113,16 @@ pub fn media_identity_from_protocol_image(
     let lba7 = &protocol_image[7 * SECTOR..8 * SECTOR];
 
     let probe = merged_hardware_probe(runner, disk);
-    let serial = runner.hardware_serial(disk);
-    let serial = serial_digest_evidence(serial.as_deref());
+    let raw_serial = runner.hardware_serial(disk);
+    let serial = serial_digest_evidence(raw_serial.as_deref());
+    let retained_raw_serial = (serial.quality != super::media_identity::SerialQuality::Missing)
+        .then_some(raw_serial)
+        .flatten();
     let total_sectors = sysinfo::disk_total_sectors(runner, disk);
     let hardware = HardwareIdentityEvidence {
         vid: probe.as_ref().and_then(|value| value.vid),
         pid: probe.as_ref().and_then(|value| value.pid),
+        serial: retained_raw_serial,
         serial_sha256: serial.sha256,
         serial_quality: serial.quality,
         vendor: probe
@@ -192,8 +196,8 @@ pub fn media_identity_from_protocol_image(
 
 /// Observe media identity using only read/probe operations.
 ///
-/// Raw USB serial text exists only long enough to normalize/hash it. It is not retained in the
-/// returned snapshot or protocol image.
+/// Raw USB serial text is retained only in the in-memory snapshot so manifest v3 can persist the
+/// reviewed identity field. Snapshot serialization and Debug output redact/omit the raw value.
 pub fn observe_media_identity_readonly(
     runner: &dyn CmdRunner,
     disk: u32,

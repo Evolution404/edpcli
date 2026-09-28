@@ -47,6 +47,7 @@ fn current_identity(data: &[u8], device_id: &str) -> MediaIdentitySnapshot {
         hardware: HardwareIdentityEvidence {
             vid: Some(0x0dd8),
             pid: Some(0x2005),
+            serial: None,
             serial_sha256: None,
             serial_quality: SerialQuality::Missing,
             vendor: None,
