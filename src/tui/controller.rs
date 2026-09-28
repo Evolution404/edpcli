@@ -643,8 +643,12 @@ pub(super) fn dispatch_action(
         }
         TuiAction::Activate => match state.workspace() {
             Workspace::Devices => {
-                if let Err(message) = state.activate_device_for_viewport(viewport_width) {
-                    state.set_notice(message);
+                if state.devices_focused_pane() == PaneId::DevicesTree {
+                    state.device_info_focus_detail();
+                } else if state.devices_focused_pane() == PaneId::DevicesList {
+                    if let Err(message) = state.activate_device_for_viewport(viewport_width) {
+                        state.set_notice(message);
+                    }
                 }
                 ActionOutcome::handled()
             }
@@ -660,8 +664,8 @@ pub(super) fn dispatch_action(
             ActionOutcome::handled()
         }
         TuiAction::Open if state.workspace() == Workspace::Devices => {
-            if state.devices_focused_pane() == PaneId::DevicesSummary {
-                state.device_summary_toggle_selected_section();
+            if state.devices_focused_pane() == PaneId::DevicesTree {
+                state.device_info_toggle_selected();
             }
             ActionOutcome::handled()
         }

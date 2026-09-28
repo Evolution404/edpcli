@@ -509,7 +509,7 @@ fn d0_device_summary_sections_are_interactive_and_default_identity_capacity_open
 
     let mut state = AppState::new();
     state.replace_devices(vec![device()]);
-    state.focus_devices_pane(PaneId::DevicesSummary);
+    state.focus_devices_pane(PaneId::DevicesTree);
 
     assert_eq!(
         state.device_summary_selected_section(),
@@ -539,8 +539,8 @@ fn d0_three_pane_focus_cycle_never_changes_selected_device() {
     assert_eq!(state.selected_device_disk(), Some(7));
 
     for expected in [
-        PaneId::DevicesSummary,
-        PaneId::DevicesStats,
+        PaneId::DevicesTree,
+        PaneId::DevicesDetail,
         PaneId::DevicesList,
     ] {
         state.shift_workspace_pane(false);
@@ -590,7 +590,7 @@ fn d0_current_device_summary_renders_capacity_layout_bar() {
 
     let mut state = AppState::new();
     state.replace_devices(vec![row]);
-    state.focus_devices_pane(PaneId::DevicesSummary);
+    state.focus_devices_pane(PaneId::DevicesTree);
     let text = render_text(&state, 160, 36);
     assert!(text.contains("SERIAL-D0-1234"), "{text}");
     assert!(text.contains("身份依据"), "{text}");
@@ -650,7 +650,7 @@ fn d0_plain_mbr_layout_uses_real_partition_table_without_unknown_disk_body() {
 
     let mut state = AppState::new();
     state.replace_devices(vec![row]);
-    state.focus_devices_pane(PaneId::DevicesSummary);
+    state.focus_devices_pane(PaneId::DevicesTree);
     let text = render_text(&state, 180, 42);
 
     assert!(text.contains("MBR分区表"), "{text}");
@@ -659,4 +659,46 @@ fn d0_plain_mbr_layout_uses_real_partition_table_without_unknown_disk_body() {
     assert!(!text.contains("布局未完整读取"), "{text}");
     assert!(!text.contains("EDP主协议区"), "{text}");
     assert!(!text.contains("未知区域8.05GB"), "{text}");
+}
+
+#[test]
+fn device_workbench_panes_are_list_tree_detail() {
+    let mut state = AppState::new();
+    state.replace_devices(vec![device()]);
+    assert_eq!(PaneId::DEVICES_ORDER, [
+        PaneId::DevicesList,
+        PaneId::DevicesTree,
+        PaneId::DevicesDetail,
+    ]);
+    assert_eq!(state.devices_focused_pane(), PaneId::DevicesList);
+    state.shift_workspace_pane(false);
+    assert_eq!(state.devices_focused_pane(), PaneId::DevicesTree);
+    state.shift_workspace_pane(false);
+    assert_eq!(state.devices_focused_pane(), PaneId::DevicesDetail);
+    state.shift_workspace_pane(false);
+    assert_eq!(state.devices_focused_pane(), PaneId::DevicesList);
+}
+
+#[test]
+fn device_tree_selection_is_semantic_and_detail_has_independent_scroll() {
+    let mut state = AppState::new();
+    state.replace_devices(vec![device()]);
+    state.focus_devices_pane(PaneId::DevicesTree);
+    assert_eq!(
+        state.device_info_selected_key(),
+        edpcli::tui::state::DeviceInfoNodeKey::Identity
+    );
+    state.navigate(NavCommand::Down, 8);
+    assert_eq!(
+        state.device_info_selected_key(),
+        edpcli::tui::state::DeviceInfoNodeKey::Capacity
+    );
+    let selected = state.device_info_selected_key();
+    state.device_info_focus_detail();
+    state.navigate(NavCommand::Down, 8);
+    assert_eq!(state.device_info_selected_key(), selected);
+    assert_eq!(
+        state.pane_viewport(PaneId::DevicesDetail).scroll_y.offset,
+        1
+    );
 }

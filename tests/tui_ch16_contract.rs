@@ -267,66 +267,75 @@ fn ch16_devices_and_backups_have_independent_pane_focus_and_viewports() {
     let mut state = AppState::new();
     assert_eq!(state.devices_focused_pane(), PaneId::DevicesList);
     assert_eq!(state.backups_focused_pane(), PaneId::BackupsList);
-    state.focus_devices_pane(PaneId::DevicesSummary);
+    state.focus_devices_pane(PaneId::DevicesTree);
     state
-        .pane_viewport_mut(PaneId::DevicesSummary)
+        .pane_viewport_mut(PaneId::DevicesTree)
         .scroll_y
         .offset = 7;
     state.focus_backups_pane(PaneId::BackupCoverage);
     state.pane_viewport_mut(PaneId::BackupCoverage).scroll_x = 3;
-    assert_eq!(state.devices_focused_pane(), PaneId::DevicesSummary);
+    assert_eq!(state.devices_focused_pane(), PaneId::DevicesTree);
     assert_eq!(state.backups_focused_pane(), PaneId::BackupCoverage);
     assert_eq!(
-        state.pane_viewport(PaneId::DevicesSummary).scroll_y.offset,
+        state.pane_viewport(PaneId::DevicesTree).scroll_y.offset,
         7
     );
     assert_eq!(state.pane_viewport(PaneId::BackupCoverage).scroll_x, 3);
 }
 
 #[test]
-fn ch16_devices_wide_shows_current_identity_stats_and_no_animation_sidebar() {
+fn ch16_devices_wide_is_list_plus_tree_plus_detail_without_redundant_current_device_banner() {
     let mut state = AppState::new();
     state.replace_devices(vec![device()]);
     let text = rendered_lines(&state, 160, 45).join("\n").replace(' ', "");
     for value in [
         "设备列表",
-        "当前设备·disk6",
-        "张三",
-        "输电运检中心",
+        "设备信息",
+        "身份信息",
         "容量布局",
-        "设备状态",
+        "状态与诊断",
+        "备份关系",
+        "协议摘要",
+        "onlyid",
     ] {
         assert!(text.contains(value), "missing {value}");
     }
+    assert!(!text.contains("当前设备·disk6"));
     assert!(!text.contains("EDPCORE·LIVE"));
 }
 
 #[test]
-fn ch16_devices_compact_enter_opens_detail_and_escape_returns_to_list() {
+fn ch16_devices_compact_enter_opens_tree_then_detail_and_escape_walks_back() {
     use edpcli::tui::{pane::PaneId, state::NavCommand};
 
     let mut state = AppState::new();
     state.replace_devices(vec![device()]);
     assert_eq!(state.activate_device_for_viewport(40).unwrap(), None);
-    assert_eq!(state.devices_focused_pane(), PaneId::DevicesSummary);
+    assert_eq!(state.devices_focused_pane(), PaneId::DevicesTree);
     let text = rendered_lines(&state, 40, 10).join("\n").replace(' ', "");
-    for value in ["当前设备·disk6", "身份信息", "onlyid"] {
+    for value in ["设备信息", "身份信息", "容量布局"] {
         assert!(text.contains(value), "missing {value} at 40x10");
     }
+    assert!(!text.contains("当前设备·disk6"));
+    state.device_info_focus_detail();
+    assert_eq!(state.devices_focused_pane(), PaneId::DevicesDetail);
+    state.navigate(NavCommand::Escape, 7);
+    assert_eq!(state.devices_focused_pane(), PaneId::DevicesTree);
     state.navigate(NavCommand::Escape, 7);
     assert_eq!(state.devices_focused_pane(), PaneId::DevicesList);
 }
 
 #[test]
-fn ch16_device_secondary_pane_remains_reachable_at_standard_width() {
+fn ch16_device_detail_pane_remains_reachable_at_standard_width() {
     use edpcli::tui::pane::PaneId;
 
     let mut state = AppState::new();
     state.replace_devices(vec![device()]);
-    state.focus_devices_pane(PaneId::DevicesStats);
+    state.focus_devices_pane(PaneId::DevicesDetail);
     let text = rendered_lines(&state, 100, 30).join("\n").replace(' ', "");
-    assert!(text.contains("设备状态"));
-    assert!(text.contains("总设备1"));
+    assert!(text.contains("身份信息"));
+    assert!(text.contains("device_id"));
+    assert!(!text.contains("总设备1"));
 }
 
 #[test]

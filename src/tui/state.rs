@@ -1518,8 +1518,168 @@ impl AppState {
         if self.selected_device().is_none() {
             return Err("请先选择设备。".into());
         }
-        self.focus_devices_pane(crate::tui::pane::PaneId::DevicesSummary);
+        self.focus_devices_pane(crate::tui::pane::PaneId::DevicesTree);
         Ok(None)
+    }
+
+    pub fn device_info_selected_key(&self) -> DeviceInfoNodeKey {
+        self.devices.info_selected
+    }
+
+    pub fn device_info_tree_rows(&self) -> Vec<DeviceInfoTreeNode> {
+        fn size_text(bytes: u64) -> String {
+            if bytes >= 1_000_000_000 {
+                format!("{:.2} GB", bytes as f64 / 1_000_000_000.0)
+            } else if bytes >= 1_000_000 {
+                format!("{:.2} MB", bytes as f64 / 1_000_000.0)
+            } else if bytes >= 1_000 {
+                format!("{:.2} kB", bytes as f64 / 1_000.0)
+            } else {
+                format!("{bytes} B")
+            }
+        }
+
+        let expanded = |key| self.devices.info_expanded.contains(&key);
+        let mut rows = vec![
+            DeviceInfoTreeNode {
+                key: DeviceInfoNodeKey::Identity,
+                depth: 0,
+                label: "身份信息".into(),
+                value: None,
+                expandable: false,
+                expanded: false,
+            },
+            DeviceInfoTreeNode {
+                key: DeviceInfoNodeKey::Capacity,
+                depth: 0,
+                label: "容量布局".into(),
+                value: self.selected_device().map(|row| size_text(row.size)),
+                expandable: true,
+                expanded: expanded(DeviceInfoNodeKey::Capacity),
+            },
+        ];
+
+        if expanded(DeviceInfoNodeKey::Capacity) {
+            if let Some(row) = self.selected_device() {
+                if let Ok(model) = row.canonical_layout() {
+                    let collapsed = model.collapsed_tail_model();
+                    for segment in &collapsed.segments {
+                        let is_tail = segment.kind == crate::disk_layout::DiskRegionKind::Tail;
+                        let key = if is_tail {
+                            DeviceInfoNodeKey::TailGroup
+                        } else {
+                            DeviceInfoNodeKey::LayoutSegment {
+                                start_lba: segment.start_lba,
+                                kind: segment.kind,
+                            }
+                        };
+                        rows.push(DeviceInfoTreeNode {
+                            key,
+                            depth: 1,
+                            label: segment.label.clone(),
+                            value: Some(size_text(
+                                segment
+                                    .sector_count
+                                    .saturating_mul(crate::common::SECTOR as u64),
+                            )),
+                            expandable: is_tail && model.tail_group().is_some(),
+                            expanded: is_tail && expanded(DeviceInfoNodeKey::TailGroup),
+                        });
+                        if is_tail && expanded(DeviceInfoNodeKey::TailGroup) {
+                            if let Some(tail) = model.tail_group() {
+                                rows.extend(tail.children.iter().map(|child| DeviceInfoTreeNode {
+                                    key: DeviceInfoNodeKey::LayoutSegment {
+                                        start_lba: child.start_lba,
+                                        kind: child.kind,
+                                    },
+                                    depth: 2,
+                                    label: child.label.clone(),
+                                    value: Some(size_text(
+                                        child
+                                            .sector_count
+                                            .saturating_mul(crate::common::SECTOR as u64),
+                                    )),
+                                    expandable: false,
+                                    expanded: false,
+                                }));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        rows.extend([
+            DeviceInfoTreeNode {
+                key: DeviceInfoNodeKey::Status,
+                depth: 0,
+                label: "状态与诊断".into(),
+                value: None,
+                expandable: false,
+                expanded: false,
+            },
+            DeviceInfoTreeNode {
+                key: DeviceInfoNodeKey::Backups,
+                depth: 0,
+                label: "备份关系".into(),
+                value: self
+                    .selected_device()
+                    .map(|row| format!("{} 份", row.n_baks)),
+                expandable: false,
+                expanded: false,
+            },
+            DeviceInfoTreeNode {
+                key: DeviceInfoNodeKey::Protocol,
+                depth: 0,
+                label: "协议摘要".into(),
+                value: None,
+                expandable: false,
+                expanded: false,
+            },
+        ]);
+        rows
+    }
+
+    pub fn device_info_move_tree(&mut self, delta: isize) {
+        let rows = self.device_info_tree_rows();
+        if rows.is_empty() {
+            return;
+        }
+        let current = rows
+            .iter()
+            .position(|row| row.key == self.devices.info_selected)
+            .unwrap_or(0);
+        let next = if delta < 0 {
+            current.saturating_sub(delta.unsigned_abs())
+        } else {
+            current.saturating_add(delta as usize).min(rows.len() - 1)
+        };
+        self.devices.info_selected = rows[next].key;
+        self.devices
+            .pane_focus
+            .viewport_mut(crate::tui::pane::PaneId::DevicesTree)
+            .selected = Some(next);
+    }
+
+    pub fn device_info_toggle_selected(&mut self) {
+        let key = self.devices.info_selected;
+        if !matches!(key, DeviceInfoNodeKey::Capacity | DeviceInfoNodeKey::TailGroup) {
+            return;
+        }
+        if !self.devices.info_expanded.remove(&key) {
+            self.devices.info_expanded.insert(key);
+        }
+        let rows = self.device_info_tree_rows();
+        if !rows.iter().any(|row| row.key == self.devices.info_selected) {
+            self.devices.info_selected = DeviceInfoNodeKey::Capacity;
+        }
+    }
+
+    pub fn device_info_focus_detail(&mut self) {
+        self.focus_devices_pane(crate::tui::pane::PaneId::DevicesDetail);
+        self.pane_viewport_mut(crate::tui::pane::PaneId::DevicesDetail)
+            .scroll_y
+            .top();
     }
 
     pub fn device_summary_selected_section(&self) -> DeviceSummarySection {
@@ -1626,12 +1786,12 @@ impl AppState {
             Workspace::Devices => {
                 let focus = self.devices.pane_focus.focused();
                 let next = match (focus, dx.signum(), dy.signum()) {
-                    (PaneId::DevicesList, _, 1) => Some(PaneId::DevicesSummary),
-                    (PaneId::DevicesSummary | PaneId::DevicesStats, _, -1) => {
+                    (PaneId::DevicesList, _, 1) => Some(PaneId::DevicesTree),
+                    (PaneId::DevicesTree | PaneId::DevicesDetail, _, -1) => {
                         Some(PaneId::DevicesList)
                     }
-                    (PaneId::DevicesSummary, 1, _) => Some(PaneId::DevicesStats),
-                    (PaneId::DevicesStats, -1, _) => Some(PaneId::DevicesSummary),
+                    (PaneId::DevicesTree, 1, _) => Some(PaneId::DevicesDetail),
+                    (PaneId::DevicesDetail, -1, _) => Some(PaneId::DevicesTree),
                     _ => None,
                 };
                 (focus, next)
@@ -1843,13 +2003,22 @@ impl AppState {
                 }
                 return StateEffect::None;
             }
-            if self.shell.workspace == Workspace::Devices
-                && self.devices.pane_focus.focused() != crate::tui::pane::PaneId::DevicesList
-            {
-                self.devices
-                    .pane_focus
-                    .focus(crate::tui::pane::PaneId::DevicesList);
-                return StateEffect::None;
+            if self.shell.workspace == Workspace::Devices {
+                match self.devices.pane_focus.focused() {
+                    crate::tui::pane::PaneId::DevicesDetail => {
+                        self.devices
+                            .pane_focus
+                            .focus(crate::tui::pane::PaneId::DevicesTree);
+                        return StateEffect::None;
+                    }
+                    crate::tui::pane::PaneId::DevicesTree => {
+                        self.devices
+                            .pane_focus
+                            .focus(crate::tui::pane::PaneId::DevicesList);
+                        return StateEffect::None;
+                    }
+                    _ => {}
+                }
             }
             if self.shell.workspace == Workspace::Backups
                 && self.backups.pane_focus.focused() != crate::tui::pane::PaneId::BackupsList
@@ -1903,9 +2072,9 @@ impl AppState {
             NavCommand::WorkspaceProvision => self.switch_workspace(Workspace::Provision),
             NavCommand::Up => {
                 if self.shell.workspace == Workspace::Devices
-                    && self.devices_focused_pane() == crate::tui::pane::PaneId::DevicesSummary
+                    && self.devices_focused_pane() == crate::tui::pane::PaneId::DevicesTree
                 {
-                    self.device_summary_move_section(-1);
+                    self.device_info_move_tree(-1);
                 } else {
                     let detail_pane = match self.shell.workspace {
                         Workspace::Devices
@@ -1931,9 +2100,9 @@ impl AppState {
             }
             NavCommand::Down => {
                 if self.shell.workspace == Workspace::Devices
-                    && self.devices_focused_pane() == crate::tui::pane::PaneId::DevicesSummary
+                    && self.devices_focused_pane() == crate::tui::pane::PaneId::DevicesTree
                 {
-                    self.device_summary_move_section(1);
+                    self.device_info_move_tree(1);
                 } else {
                     let detail_pane = match self.shell.workspace {
                         Workspace::Devices
@@ -1952,7 +2121,7 @@ impl AppState {
                     };
                     if let Some(pane) = detail_pane {
                         let content_len = match pane {
-                            crate::tui::pane::PaneId::DevicesStats => 11,
+                            crate::tui::pane::PaneId::DevicesDetail => 11,
                             crate::tui::pane::PaneId::BackupCoverage => self
                                 .selected_backup()
                                 .and_then(|backup| backup.coverage.as_ref())

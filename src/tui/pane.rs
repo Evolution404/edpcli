@@ -5,8 +5,8 @@ use std::collections::BTreeMap;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum PaneId {
     DevicesList,
-    DevicesSummary,
-    DevicesStats,
+    DevicesTree,
+    DevicesDetail,
     BackupsList,
     BackupSummary,
     BackupCoverage,
@@ -23,7 +23,7 @@ pub enum PaneId {
 
 impl PaneId {
     pub const DEVICES_ORDER: [Self; 3] =
-        [Self::DevicesList, Self::DevicesSummary, Self::DevicesStats];
+        [Self::DevicesList, Self::DevicesTree, Self::DevicesDetail];
     pub const BACKUPS_ORDER: [Self; 3] =
         [Self::BackupsList, Self::BackupSummary, Self::BackupCoverage];
     pub const INSPECT_ORDER: [Self; 4] = [
@@ -64,7 +64,7 @@ impl PaneId {
     pub const fn is_devices(self) -> bool {
         matches!(
             self,
-            Self::DevicesList | Self::DevicesSummary | Self::DevicesStats
+            Self::DevicesList | Self::DevicesTree | Self::DevicesDetail
         )
     }
 
