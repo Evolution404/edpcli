@@ -23,19 +23,19 @@ fn legacy_horizontal_workspace_navigation_is_removed_from_state_commands() {
 }
 
 #[test]
-fn workspace_navigation_uses_explicit_next_previous_commands() {
+fn top_level_workspace_navigation_cycles_devices_and_backups_only() {
     let mut state = AppState::new();
+    assert_eq!(
+        Workspace::TOP_LEVEL,
+        [Workspace::Devices, Workspace::Backups]
+    );
     assert_eq!(state.workspace(), Workspace::Devices);
     state.navigate(NavCommand::NextWorkspace, 20);
-    assert_eq!(state.workspace(), Workspace::Inspect);
-    state.navigate(NavCommand::NextWorkspace, 20);
     assert_eq!(state.workspace(), Workspace::Backups);
     state.navigate(NavCommand::NextWorkspace, 20);
-    assert_eq!(state.workspace(), Workspace::Provision);
+    assert_eq!(state.workspace(), Workspace::Devices);
     state.navigate(NavCommand::PreviousWorkspace, 20);
     assert_eq!(state.workspace(), Workspace::Backups);
-    state.navigate(NavCommand::PreviousWorkspace, 20);
-    assert_eq!(state.workspace(), Workspace::Inspect);
     state.navigate(NavCommand::PreviousWorkspace, 20);
     assert_eq!(state.workspace(), Workspace::Devices);
 }
@@ -61,20 +61,41 @@ fn active_tab_text(state: &AppState) -> String {
 }
 
 #[test]
-fn workspace_tabs_are_always_visible_and_active_page_is_highlighted() {
+fn top_level_tabs_are_always_visible_and_active_page_is_highlighted() {
     let mut state = AppState::new();
     let active = active_tab_text(&state);
     assert!(active.contains('设'), "{active}");
 
     state.navigate(NavCommand::NextWorkspace, 20);
     let active = active_tab_text(&state);
-    assert!(active.contains('检'), "{active}");
-    state.navigate(NavCommand::NextWorkspace, 20);
-    let active = active_tab_text(&state);
     assert!(active.contains('份'), "{active}");
     state.navigate(NavCommand::NextWorkspace, 20);
     let active = active_tab_text(&state);
-    assert!(active.contains('制'), "{active}");
+    assert!(active.contains('设'), "{active}");
+}
+
+#[test]
+fn nested_workflows_keep_their_parent_top_level_tab_highlighted() {
+    use edpcli::tui::state::AdvancedInspectSource;
+
+    let mut provision = AppState::new();
+    provision.navigate(NavCommand::WorkspaceProvision, 20);
+    assert_eq!(provision.workspace(), Workspace::Provision);
+    let active = active_tab_text(&provision);
+    assert!(active.contains('设'), "{active}");
+    assert!(!active.contains('份'), "{active}");
+
+    let mut backup_inspect = AppState::new();
+    backup_inspect.navigate(NavCommand::WorkspaceBackups, 20);
+    assert!(
+        backup_inspect.begin_advanced_inspect(AdvancedInspectSource::Backup(
+            std::path::PathBuf::from("demo.edpb")
+        ))
+    );
+    assert_eq!(backup_inspect.workspace(), Workspace::Inspect);
+    let active = active_tab_text(&backup_inspect);
+    assert!(active.contains('份'), "{active}");
+    assert!(!active.contains('设'), "{active}");
 }
 
 #[test]

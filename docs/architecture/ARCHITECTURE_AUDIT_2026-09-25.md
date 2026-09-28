@@ -1484,12 +1484,12 @@ D8 全阶段冻结以下语义：LBA0～12/LCE、四模式、K6、LBA10 尾随 3
 | 6 | PASS | 同一 D8 工作区 `scripts/test-fast.sh` 为 **8 suites / 10 artifacts / 0 failures**；正式 fast runner 的预算门禁保持启用，未出现预算失败。 |
 | 7 | PASS | full 使用仓库 `scripts/test-full.py` 的持久任务/明确超时模型，不依赖单次 120 秒同步 shell 调用。 |
 | 8 | PASS | 本次 full 实测 **8 suites / 10 artifacts + doctest / 0 failures**，最终 exit code **0**，总运行约 **8.84s**。 |
-| 9 | PASS | `AppState` 当前且仅持有 `ShellState + DevicesState + InspectState + BackupsState + ProvisionState`；Inspect/Provision 状态与 renderer 已按职责拆分。 |
+| 9 | PASS | `AppState` 当前且仅持有 `ShellState + DevicesState + InspectState + BackupsState + ProvisionState`；检查/制盘状态与渲染层已按职责拆分。 |
 | 10 | PASS | `application/provision` 的 prepare/commit/export 等边界继续独立；Official/Plain 通过统一领域目标进入应用服务。 |
 | 11 | PASS | `diskio` 明确拆为 `device`、`transaction`、`backup_config`、`backup_catalog`、`backup_create`，块 I/O 与备份目录/配置没有回并。 |
-| 12 | PASS | 架构门禁继续要求 provision validator 不依赖 `crate::inspect`；`metainfo` 当前也无 `crate::inspect` presentation 依赖。 |
+| 12 | PASS | 架构门禁继续要求制盘校验器不依赖 `crate::inspect`；`metainfo` 当前也无 `crate::inspect` 展示层依赖。 |
 | 13 | PASS | 已确认的旧产品入口/重复实现已按 D0～D8 清理；全目标 Clippy `-D warnings` 本次 PASS，未发现需要借 D8 再做的高置信死代码清理。 |
-| 14 | PASS | 正式备份运行时只认 `.edpb`；`edpb.rs` 明确 legacy `.bin` 不作为 runtime input，`backup_catalog` 也拒绝把旧 `.bin` 当正式备份链。Inspect 导出/测试夹具中的 `.bin` 不属于旧备份迁移写入链。 |
+| 14 | PASS | 正式备份运行时只认 `.edpb`；`edpb.rs` 明确历史 `.bin` 不作为运行时输入，`backup_catalog` 也拒绝把旧 `.bin` 当正式备份链。检查导出/测试夹具中的 `.bin` 不属于旧备份迁移写入链。 |
 | 15 | PASS | `src/edpb/legacy.rs` 与 `LegacyMigrated` 语义仍存在，架构门禁继续锁定真实历史读取兼容；没有因 `legacy` 命名删除协议事实。 |
 | 16 | PASS | `ARCHITECTURE.md` 已同步当前 application、diskio、EDPB、TUI 与 `lib.rs` 公开边界，和本次代码结构一致。 |
 | 17 | PASS | `Cargo.toml` / `src/lib.rs` 当前产品描述不再宣传 Offline Convert；用户文档仅说明该能力已删除。 |

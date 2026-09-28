@@ -571,10 +571,35 @@ pub(super) fn dispatch_action(
     viewport_width: u16,
     clipboard: &mut dyn ClipboardBackend,
 ) -> ActionOutcome {
+    if matches!(action, TuiAction::FocusNext | TuiAction::FocusPrevious) {
+        let reverse = action == TuiAction::FocusPrevious;
+        return match state.workspace() {
+            Workspace::Devices | Workspace::Backups => {
+                let command = if reverse {
+                    NavCommand::PreviousWorkspace
+                } else {
+                    NavCommand::NextWorkspace
+                };
+                ActionOutcome::effect(state.navigate(command, viewport_height))
+            }
+            Workspace::Inspect => {
+                state.advanced_inspect_shift_panel(reverse);
+                ActionOutcome::handled()
+            }
+            Workspace::Provision => {
+                state.provision_tab_focus(reverse);
+                ActionOutcome::handled()
+            }
+        };
+    }
+
     if matches!(
         action,
         TuiAction::WorkspaceNext | TuiAction::WorkspacePrevious
     ) {
+        if !matches!(state.workspace(), Workspace::Devices | Workspace::Backups) {
+            return ActionOutcome::handled();
+        }
         let command = if action == TuiAction::WorkspaceNext {
             NavCommand::NextWorkspace
         } else {

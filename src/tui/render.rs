@@ -419,7 +419,7 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
         .split(area);
 
     super::shell::header(frame, chunks[0], state, core_mode);
-    super::shell::navigation(frame, chunks[1], state.workspace());
+    super::shell::navigation(frame, chunks[1], state);
 
     let content_area = chunks[2];
 
@@ -448,7 +448,7 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
                         .map(|binding| Line::from(format!("{}  {}", binding.keys, binding.label))),
                 );
                 help_lines.push(Line::from(
-                    "顶层标签：设备 → 检查 → 备份 → 制盘 · Tab/Shift-Tab 或 gt/gT 切换 · Ctrl-w h/j/k/l/w/W 切内部 Pane",
+                    "顶层标签：设备 ↔ 备份 · 一级 Tab/Shift-Tab 或 gt/gT 切换 · 二级 Tab/Shift-Tab 切当前页焦点 · Esc 返回上一层",
                 ));
                 help_lines.push(Line::from(
                     "设备: Enter 当前设备 · p 制盘 · i 检查 · b 新建备份 · Ctrl-w w/W 切 Pane · 当前设备内 j/k 选分组、o 展开/折叠 · 备份: Enter/i 检查 · b 新建 · v 校验 · R 恢复 · d 删除",
@@ -457,7 +457,7 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
                     "检查: / 搜索 · n/N 匹配 · gl 跳转 · Sector 0/$、gg/G、v",
                 ));
                 help_lines.push(Line::from(
-                    "制盘: Normal 下 i 编辑、Enter 生成计划；Insert 下 Enter/Esc 完成编辑；物理写盘保持精确输入 YES 的安全确认",
+                    "制盘: Normal 下 i 编辑、Enter 生成计划；Insert 下 Tab/Shift-Tab 完成编辑并移焦点，Enter/Esc 完成编辑；物理写盘保持精确输入 YES 的安全确认",
                 ));
                 let help = Paragraph::new(help_lines)
                     .block(
@@ -501,11 +501,11 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
                     .unwrap_or_else(|| "Esc 返回".into());
                 if let Some((query, index, total)) = state.advanced_inspect_search_status() {
                     format!(
-                        "检查：1/2/3/4 业务/原始/Hex/布局 · Tab/Shift-Tab 或 gt/gT 切顶层标签 · Ctrl-w h/j/k/l Pane · j/k 当前 Pane · o 展开/折叠 · Enter 查看 · {escape} · q 退出 · 当前 {index}/{total}: {}",
+                        "检查：1/2/3/4 业务/原始/Hex/布局 · Tab/Shift-Tab 切 Pane · Ctrl-w h/j/k/l Pane · j/k 当前 Pane · o 展开/折叠 · Enter 查看 · {escape} · q 退出 · 当前 {index}/{total}: {}",
                         safe(query)
                     )
                 } else {
-                    format!("检查：1/2/3/4 业务/原始/Hex/布局 · Tab/Shift-Tab 或 gt/gT 切顶层标签 · Ctrl-w h/j/k/l Pane · j/k 当前 Pane · o 展开/折叠 · Enter 查看 · {escape} · q 退出")
+                    format!("检查：1/2/3/4 业务/原始/Hex/布局 · Tab/Shift-Tab 切 Pane · Ctrl-w h/j/k/l Pane · j/k 当前 Pane · o 展开/折叠 · Enter 查看 · {escape} · q 退出")
                 }
             }
         }
@@ -582,12 +582,12 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
                     let kind = crate::tui::table_layout::TableKind::InspectFields;
                     let total = crate::tui::table_layout::layout_for(kind).specs().len();
                     format!(
-                        "检查字段表：Tab/Shift-Tab 或 gt/gT 标签 · j/k 行 · h/l 激活 · </> 移列 · 0/$ 首尾列 · H/L 视口 · s 排序 · S 默认排序 · {}/{} 列 · o 展开/折叠 · Enter 查看 · Esc 返回 · q 退出",
+                        "检查字段表：Tab/Shift-Tab 切 Pane · j/k 行 · h/l 激活 · </> 移列 · 0/$ 首尾列 · H/L 视口 · s 排序 · S 默认排序 · {}/{} 列 · o 展开/折叠 · Enter 查看 · Esc 返回 · q 退出",
                         state.table_active_column(kind) + 1,
                         total
                     )
                 } else {
-                    "检查：Tab/Shift-Tab 或 gt/gT 标签 · j/k 当前 Pane · Ctrl-w 切 Pane · o 展开/折叠 · Enter 查看 · Esc 返回 · q 退出"
+                    "检查：Tab/Shift-Tab 切 Pane · j/k 当前 Pane · Ctrl-w 切 Pane · o 展开/折叠 · Enter 查看 · Esc 返回 · q 退出"
                         .to_string()
                 }
             }
@@ -626,7 +626,7 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
                     )
                 }
                 ProvisionStage::Form if state.input_mode() == InputMode::Insert => {
-                    "INSERT · ←/→ 光标 · Home/End 首尾 · 输入/Backspace 编辑 · Enter/Esc 完成编辑"
+                    "INSERT · ←/→ 光标 · Home/End 首尾 · 输入/Backspace 编辑 · Tab/Shift-Tab 完成并移焦点 · Enter/Esc 完成编辑"
                         .to_string()
                 }
                 ProvisionStage::Form if state.provision_selected_field_is_editable() => {
@@ -638,15 +638,15 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
                     } else {
                         ""
                     };
-                    format!("NORMAL · j/k 字段 · i 编辑{unit_key} · Enter 生成计划 · Esc 返回")
+                    format!("NORMAL · Tab/Shift-Tab 字段/布局焦点 · j/k 字段 · i 编辑{unit_key} · Enter 生成计划 · Esc 返回")
                 }
                 ProvisionStage::Form => {
-                    "NORMAL · j/k 字段 · i 编辑 · h/l 或 Space 切换 · Enter 生成计划 · Esc 返回"
+                    "NORMAL · Tab/Shift-Tab 字段/布局焦点 · j/k 字段 · i 编辑 · h/l 或 Space 切换 · Enter 生成计划 · Esc 返回"
                         .to_string()
                 }
                 ProvisionStage::Planning => "正在生成只读计划…".to_string(),
                 ProvisionStage::Review => {
-                    "Enter 最终确认  ·  e 导出镜像  ·  Esc 返回修改".to_string()
+                    "Tab/Shift-Tab 切 Pane  ·  Enter 最终确认  ·  e 导出镜像  ·  Esc 返回修改".to_string()
                 }
                 ProvisionStage::ExportPath => {
                     "输入导出路径  ·  Enter 导出  ·  Esc 返回计划".to_string()
@@ -658,11 +658,7 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
                 }
                 ProvisionStage::Result => "Enter / Esc 返回制盘中心".to_string(),
                 };
-                if state.input_mode() == InputMode::Normal {
-                    format!("Tab/Shift-Tab 或 gt/gT 标签 · {provision_status}")
-                } else {
-                    provision_status
-                }
+                provision_status
             }
         }
     };

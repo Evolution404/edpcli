@@ -35,9 +35,17 @@ pub(super) fn handle_provision_key(
                 | TuiAction::TableSortClear
                 | TuiAction::TableCopyCell
                 | TuiAction::TableCopyRow
+                | TuiAction::FocusNext
+                | TuiAction::FocusPrevious
                 | TuiAction::WorkspaceNext
                 | TuiAction::WorkspacePrevious
         ) {
+            if matches!(action, TuiAction::FocusNext | TuiAction::FocusPrevious)
+                && state.provision().stage == ProvisionStage::Form
+                && state.input_mode() == state::InputMode::Insert
+            {
+                state.provision_end_insert();
+            }
             match dispatch_tui_action(
                 state,
                 tasks,

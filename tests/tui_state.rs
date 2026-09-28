@@ -295,7 +295,7 @@ fn provision_escape_walks_back_one_level_without_exiting() {
 }
 
 #[test]
-fn provision_flow_is_in_tab_cycle_and_explicit_reentry_preserves_state() {
+fn provision_flow_is_nested_and_explicit_reentry_preserves_state() {
     let mut state = AppState::new();
     state.replace_devices(vec![device(64_000_000_000)]);
     state.navigate(NavCommand::WorkspaceProvision, 20);
@@ -305,10 +305,14 @@ fn provision_flow_is_in_tab_cycle_and_explicit_reentry_preserves_state() {
     assert_eq!(state.provision().stage, ProvisionStage::Form);
 
     state.navigate(NavCommand::NextWorkspace, 20);
-    assert_eq!(state.workspace(), Workspace::Devices);
+    assert_eq!(state.workspace(), Workspace::Provision);
     state.navigate(NavCommand::PreviousWorkspace, 20);
     assert_eq!(state.workspace(), Workspace::Provision);
+    state.navigate(NavCommand::WorkspaceDevices, 20);
+    assert_eq!(state.workspace(), Workspace::Devices);
     state.navigate(NavCommand::NextWorkspace, 20);
+    assert_eq!(state.workspace(), Workspace::Backups);
+    state.navigate(NavCommand::PreviousWorkspace, 20);
     assert_eq!(state.workspace(), Workspace::Devices);
     state.navigate(NavCommand::WorkspaceProvision, 20);
     assert_eq!(state.workspace(), Workspace::Provision);
@@ -328,7 +332,7 @@ fn provision_flow_is_in_tab_cycle_and_explicit_reentry_preserves_state() {
 }
 
 #[test]
-fn critical_provision_keeps_workspace_tabs_navigable_but_blocks_other_commands() {
+fn critical_provision_cannot_leave_nested_workflow_and_blocks_other_commands() {
     let mut state = AppState::new();
     state.navigate(NavCommand::WorkspaceProvision, 20);
     state.set_critical_operation(true);
@@ -337,7 +341,7 @@ fn critical_provision_keeps_workspace_tabs_navigable_but_blocks_other_commands()
         state.navigate(NavCommand::NextWorkspace, 20),
         StateEffect::None
     );
-    assert_eq!(state.workspace(), Workspace::Devices);
+    assert_eq!(state.workspace(), Workspace::Provision);
     assert_eq!(
         state.navigate(NavCommand::PreviousWorkspace, 20),
         StateEffect::None

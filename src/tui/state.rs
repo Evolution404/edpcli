@@ -71,16 +71,16 @@ pub enum Workspace {
 
 impl Workspace {
     pub const ALL: [Self; 4] = [Self::Devices, Self::Inspect, Self::Backups, Self::Provision];
+    pub const TOP_LEVEL: [Self; 2] = [Self::Devices, Self::Backups];
 
     pub fn shifted(self, reverse: bool) -> Self {
-        let index = Self::ALL
-            .iter()
-            .position(|value| *value == self)
-            .unwrap_or(0);
-        Self::ALL[if reverse {
-            (index + Self::ALL.len() - 1) % Self::ALL.len()
+        let Some(index) = Self::TOP_LEVEL.iter().position(|value| *value == self) else {
+            return self;
+        };
+        Self::TOP_LEVEL[if reverse {
+            (index + Self::TOP_LEVEL.len() - 1) % Self::TOP_LEVEL.len()
         } else {
-            (index + 1) % Self::ALL.len()
+            (index + 1) % Self::TOP_LEVEL.len()
         }]
     }
 }

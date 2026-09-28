@@ -44,13 +44,21 @@ pub fn header(frame: &mut Frame, area: Rect, state: &AppState, core_mode: CoreMo
     );
 }
 
-pub fn navigation(frame: &mut Frame, area: Rect, workspace: Workspace) {
+pub fn navigation(frame: &mut Frame, area: Rect, state: &AppState) {
     let theme = theme::current();
     let class = ui::ViewportClass::for_width(area.width);
-    let labels = ["设备", "检查", "备份", "制盘"];
-    let index = Workspace::ALL
+    let labels = ["设备", "备份"];
+    let active = match state.workspace() {
+        Workspace::Devices | Workspace::Provision => Workspace::Devices,
+        Workspace::Backups => Workspace::Backups,
+        Workspace::Inspect => match state.advanced_inspect().map(|inspect| &inspect.source) {
+            Some(crate::tui::state::AdvancedInspectSource::Backup(_)) => Workspace::Backups,
+            _ => Workspace::Devices,
+        },
+    };
+    let index = Workspace::TOP_LEVEL
         .iter()
-        .position(|candidate| *candidate == workspace)
+        .position(|candidate| *candidate == active)
         .unwrap_or(0);
     frame.render_widget(
         Tabs::new(labels)

@@ -225,21 +225,17 @@ fn transient_notice_has_its_own_area_and_expires() {
 }
 
 #[test]
-fn four_workspaces_cycle_and_provision_flow_renders_at_all_terminal_sizes() {
+fn two_top_level_tabs_and_nested_provision_render_at_all_terminal_sizes() {
     let mut state = AppState::new();
     state.replace_devices(vec![usb_device()]);
+    assert_eq!(
+        Workspace::TOP_LEVEL,
+        [Workspace::Devices, Workspace::Backups]
+    );
     assert_eq!(state.workspace(), Workspace::Devices);
     state.navigate(NavCommand::NextWorkspace, 20);
-    assert_eq!(state.workspace(), Workspace::Inspect);
-    state.navigate(NavCommand::NextWorkspace, 20);
     assert_eq!(state.workspace(), Workspace::Backups);
-    state.navigate(NavCommand::NextWorkspace, 20);
-    assert_eq!(state.workspace(), Workspace::Provision);
     state.navigate(NavCommand::PreviousWorkspace, 20);
-    assert_eq!(state.workspace(), Workspace::Backups);
-    state.navigate(NavCommand::NextWorkspace, 20);
-    assert_eq!(state.workspace(), Workspace::Provision);
-    state.navigate(NavCommand::NextWorkspace, 20);
     assert_eq!(state.workspace(), Workspace::Devices);
     assert_eq!(state.begin_provision_for_selected_device(), Ok(6));
     assert_eq!(state.workspace(), Workspace::Provision);

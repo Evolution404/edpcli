@@ -258,7 +258,7 @@ fn single_g_invalid_or_timed_out_prefix_never_executes_jump() {
 }
 
 #[test]
-fn tab_switches_top_level_tabs_and_ctrl_w_owns_panel_navigation() {
+fn tab_is_context_focus_and_gt_owns_top_level_switching() {
     let mut mapper = KeyMapper::new();
     for (second, expected) in [
         (KeyCode::Char('h'), TuiAction::PanelLeft),
@@ -274,14 +274,14 @@ fn tab_switches_top_level_tabs_and_ctrl_w_owns_panel_navigation() {
 
     assert_eq!(
         mapper.map(InputMode::Normal, key(KeyCode::Tab)),
-        Some(TuiAction::WorkspaceNext)
+        Some(TuiAction::FocusNext)
     );
     assert_eq!(
         mapper.map(
             InputMode::Normal,
             KeyEvent::new(KeyCode::BackTab, KeyModifiers::SHIFT)
         ),
-        Some(TuiAction::WorkspacePrevious)
+        Some(TuiAction::FocusPrevious)
     );
     assert_eq!(mapper.map(InputMode::Normal, key(KeyCode::Char('g'))), None);
     assert_eq!(
@@ -296,31 +296,14 @@ fn tab_switches_top_level_tabs_and_ctrl_w_owns_panel_navigation() {
 }
 
 #[test]
-fn top_level_workspace_actions_are_never_reused_for_local_pane_switching() {
-    let source = concat!(
-        include_str!("../src/tui/runtime_input/inspect.rs"),
-        include_str!("../src/tui/runtime_input/provision.rs"),
-    );
-    assert!(
-        !source.contains("TuiAction::WorkspaceNext => state.provision_shift_pane(false)"),
-        "Tab must not be captured by Provision pane navigation"
-    );
-    assert!(
-        !source.contains("TuiAction::WorkspacePrevious => state.provision_shift_pane(true)"),
-        "Shift-Tab must not be captured by Provision pane navigation"
-    );
-    assert!(
-        !source.contains(
-            "TuiAction::WorkspaceNext => {\n                                            state.advanced_inspect_shift_panel(false);"
-        ),
-        "Tab must not be captured by Inspect pane navigation"
-    );
-    assert!(
-        !source.contains(
-            "TuiAction::WorkspacePrevious => {\n                                            state.advanced_inspect_shift_panel(true);"
-        ),
-        "Shift-Tab must not be captured by Inspect pane navigation"
-    );
+fn tab_focus_actions_are_distinct_from_top_level_workspace_actions() {
+    assert_ne!(TuiAction::FocusNext, TuiAction::WorkspaceNext);
+    assert_ne!(TuiAction::FocusPrevious, TuiAction::WorkspacePrevious);
+
+    let inspect = include_str!("../src/tui/runtime_input/inspect.rs");
+    let provision = include_str!("../src/tui/runtime_input/provision.rs");
+    assert!(inspect.contains("TuiAction::FocusNext"));
+    assert!(provision.contains("TuiAction::FocusNext"));
 }
 
 #[test]
@@ -445,7 +428,17 @@ fn insert_mode_treats_vim_action_letters_as_text_and_arrows_as_cursor_motion() {
         mapper.map(InputMode::Insert, key(KeyCode::End)),
         Some(TuiAction::CursorEnd)
     );
-    assert_eq!(mapper.map(InputMode::Insert, key(KeyCode::Tab)), None);
+    assert_eq!(
+        mapper.map(InputMode::Insert, key(KeyCode::Tab)),
+        Some(TuiAction::FocusNext)
+    );
+    assert_eq!(
+        mapper.map(
+            InputMode::Insert,
+            KeyEvent::new(KeyCode::BackTab, KeyModifiers::SHIFT)
+        ),
+        Some(TuiAction::FocusPrevious)
+    );
 }
 
 #[test]
@@ -681,15 +674,21 @@ fn help_registry_is_the_same_metadata_source_for_core_and_inspect_hints() {
         .iter()
         .any(|binding| binding.keys == "r" && binding.action == TuiAction::Refresh));
     assert!(NORMAL_HELP.iter().any(|binding| {
-        binding.keys == "Tab/Shift-Tab · gt/gT"
+        binding.keys == "Tab/Shift-Tab"
+            && binding.label == "当前层级焦点 / 顶层标签"
+            && binding.action == TuiAction::FocusNext
+    }));
+    assert!(NORMAL_HELP.iter().any(|binding| {
+        binding.keys == "gt/gT"
             && binding.label == "切换顶层标签"
             && binding.action == TuiAction::WorkspaceNext
     }));
     assert!(INSPECT_HELP.iter().any(|binding| {
-        binding.keys == "Tab/Shift-Tab · gt/gT"
-            && binding.label == "切换顶层标签"
-            && binding.action == TuiAction::WorkspaceNext
+        binding.keys == "Tab/Shift-Tab"
+            && binding.label == "切换当前页 Pane"
+            && binding.action == TuiAction::FocusNext
     }));
+    assert!(!INSPECT_HELP.iter().any(|binding| binding.keys == "gt/gT"));
     assert!(INSPECT_HELP
         .iter()
         .any(|binding| binding.keys == "gl" && binding.action == TuiAction::InspectJump));

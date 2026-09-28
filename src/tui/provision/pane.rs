@@ -19,6 +19,42 @@ impl AppState {
         self.provision.pane_focus.cycle(order, reverse);
     }
 
+    pub fn provision_tab_focus(&mut self, reverse: bool) {
+        use crate::tui::pane::PaneId;
+
+        match self.provision.stage {
+            ProvisionStage::Form => {
+                let count = self.provision_field_count();
+                if count == 0 {
+                    return;
+                }
+                match self.provision.pane_focus.focused() {
+                    PaneId::ProvisionParameters if reverse => {
+                        if self.provision.field_selected > 0 {
+                            self.provision_move_field(-1);
+                        } else {
+                            self.provision.pane_focus.focus(PaneId::ProvisionDiskLayout);
+                        }
+                    }
+                    PaneId::ProvisionParameters => {
+                        if self.provision.field_selected + 1 < count {
+                            self.provision_move_field(1);
+                        } else {
+                            self.provision.pane_focus.focus(PaneId::ProvisionDiskLayout);
+                        }
+                    }
+                    PaneId::ProvisionDiskLayout => {
+                        self.provision.pane_focus.focus(PaneId::ProvisionParameters);
+                        self.provision.field_selected = if reverse { count - 1 } else { 0 };
+                    }
+                    _ => {}
+                }
+            }
+            ProvisionStage::Review => self.provision_shift_pane(reverse),
+            _ => {}
+        }
+    }
+
     pub fn provision_spatial_focus(&mut self, dx: i8, dy: i8) {
         if self.provision.stage == ProvisionStage::Review {
             self.provision.pane_focus.spatial_provision_review(dx, dy);

@@ -219,23 +219,23 @@ fn ch16_shell_exposes_four_top_level_workspaces() {
         .cloned()
         .collect::<String>()
         .replace(' ', "");
-    let mut positions = Vec::new();
-    for title in ["设备", "检查", "备份", "制盘"] {
-        assert!(
-            navigation.contains(title),
-            "missing {title} in {navigation}"
-        );
-        positions.push(navigation.find(title).unwrap());
-    }
-    assert!(positions.windows(2).all(|pair| pair[0] < pair[1]));
+    let device = navigation.find("设备").expect("missing 设备 tab");
+    let backups = navigation.find("备份").expect("missing 备份 tab");
+    assert!(device < backups);
+    assert!(!navigation.contains("检查"));
+    assert!(!navigation.contains("制盘"));
     assert!(!navigation.contains("Inspect"));
 }
 
 #[test]
-fn ch16_inspect_is_a_workspace_with_a_real_return_target() {
+fn ch16_inspect_is_nested_and_top_level_switching_cannot_leave_it() {
     use edpcli::tui::state::{NavCommand, Workspace};
 
     let mut state = AppState::new();
+    assert_eq!(
+        Workspace::TOP_LEVEL,
+        [Workspace::Devices, Workspace::Backups]
+    );
     assert_eq!(
         Workspace::ALL,
         [
@@ -251,7 +251,7 @@ fn ch16_inspect_is_a_workspace_with_a_real_return_target() {
     assert!(lines.contains("检查"));
     state.advanced_inspect_finish(Err("test".into()));
     state.navigate(NavCommand::NextWorkspace, 20);
-    assert_eq!(state.workspace(), Workspace::Backups);
+    assert_eq!(state.workspace(), Workspace::Inspect);
     assert!(state.advanced_inspect().is_some());
     state.navigate(NavCommand::PreviousWorkspace, 20);
     assert_eq!(state.workspace(), Workspace::Inspect);

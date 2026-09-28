@@ -49,6 +49,8 @@ pub enum TuiAction {
     SectorNext,
     RowStart,
     RowEnd,
+    FocusNext,
+    FocusPrevious,
     WorkspaceNext,
     WorkspacePrevious,
     InspectJump,
@@ -171,7 +173,12 @@ pub const NORMAL_HELP: &[HelpBinding] = &[
         action: TuiAction::Provision,
     },
     HelpBinding {
-        keys: "Tab/Shift-Tab · gt/gT",
+        keys: "Tab/Shift-Tab",
+        label: "当前层级焦点 / 顶层标签",
+        action: TuiAction::FocusNext,
+    },
+    HelpBinding {
+        keys: "gt/gT",
         label: "切换顶层标签",
         action: TuiAction::WorkspaceNext,
     },
@@ -189,9 +196,9 @@ pub const INSPECT_HELP: &[HelpBinding] = &[
         action: TuiAction::InspectBusiness,
     },
     HelpBinding {
-        keys: "Tab/Shift-Tab · gt/gT",
-        label: "切换顶层标签",
-        action: TuiAction::WorkspaceNext,
+        keys: "Tab/Shift-Tab",
+        label: "切换当前页 Pane",
+        action: TuiAction::FocusNext,
     },
     HelpBinding {
         keys: "j/k",
@@ -374,8 +381,8 @@ impl KeyMapper {
                 });
                 None
             }
-            KeyCode::Tab => Some(TuiAction::WorkspaceNext),
-            KeyCode::BackTab => Some(TuiAction::WorkspacePrevious),
+            KeyCode::Tab => Some(TuiAction::FocusNext),
+            KeyCode::BackTab => Some(TuiAction::FocusPrevious),
             KeyCode::Char('j') | KeyCode::Down => Some(TuiAction::MoveDown),
             KeyCode::Char('k') | KeyCode::Up => Some(TuiAction::MoveUp),
             KeyCode::Char('h') | KeyCode::Left => Some(TuiAction::MoveLeft),
@@ -426,6 +433,8 @@ impl KeyMapper {
         match event.code {
             KeyCode::Esc => Some(TuiAction::Back),
             KeyCode::Enter => Some(TuiAction::Submit),
+            KeyCode::Tab => Some(TuiAction::FocusNext),
+            KeyCode::BackTab => Some(TuiAction::FocusPrevious),
             KeyCode::Left => Some(TuiAction::CursorLeft),
             KeyCode::Right => Some(TuiAction::CursorRight),
             KeyCode::Home => Some(TuiAction::CursorHome),

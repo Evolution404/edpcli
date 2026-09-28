@@ -234,6 +234,32 @@ fn provision_form_tab_changes_focus_without_changing_field_selection() {
     assert_eq!(state.provision().field_selected, selected);
 }
 
+#[test]
+fn provision_context_tab_walks_fields_then_layout_and_wraps() {
+    let mut state = provision_state();
+    let count = state.provision_visible_fields().len();
+    assert!(count > 1);
+    assert_eq!(state.provision_focused_pane(), PaneId::ProvisionParameters);
+    assert_eq!(state.provision().field_selected, 0);
+
+    for expected in 1..count {
+        state.provision_tab_focus(false);
+        assert_eq!(state.provision_focused_pane(), PaneId::ProvisionParameters);
+        assert_eq!(state.provision().field_selected, expected);
+    }
+    state.provision_tab_focus(false);
+    assert_eq!(state.provision_focused_pane(), PaneId::ProvisionDiskLayout);
+    state.provision_tab_focus(false);
+    assert_eq!(state.provision_focused_pane(), PaneId::ProvisionParameters);
+    assert_eq!(state.provision().field_selected, 0);
+
+    state.provision_tab_focus(true);
+    assert_eq!(state.provision_focused_pane(), PaneId::ProvisionDiskLayout);
+    state.provision_tab_focus(true);
+    assert_eq!(state.provision_focused_pane(), PaneId::ProvisionParameters);
+    assert_eq!(state.provision().field_selected, count - 1);
+}
+
 fn assert_complete_layout(model: &DiskLayoutModel) {
     assert!(model.total_sectors > 0);
     assert_eq!(model.segments.first().unwrap().start_lba, 0);
