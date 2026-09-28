@@ -990,8 +990,8 @@ fn app_state_owns_devices_through_devices_substate() {
         "table_view: super::super::table_layout::TableViewData",
         "scan_pending: bool",
         "pane_focus: crate::tui::pane::PaneFocus",
-        "summary_selected: usize",
-        "summary_expanded: u8",
+        "info_selected: DeviceInfoNodeKey",
+        "info_expanded: BTreeSet<DeviceInfoNodeKey>",
     ] {
         assert!(
             devices.contains(owned_field),

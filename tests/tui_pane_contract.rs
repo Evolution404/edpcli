@@ -799,7 +799,7 @@ fn device_tree_selection_is_semantic_and_detail_has_independent_scroll() {
     );
     let selected = state.device_info_selected_key();
     state.device_info_focus_detail();
-    state.navigate(NavCommand::Down, 8);
+    state.navigate(NavCommand::Down, 2);
     assert_eq!(state.device_info_selected_key(), selected);
     assert_eq!(
         state.pane_viewport(PaneId::DevicesDetail).scroll_y.offset,

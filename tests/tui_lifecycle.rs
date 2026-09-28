@@ -88,7 +88,8 @@ fn device_list_shows_model_and_identity_summary_and_enter_shortcut() {
     assert!(text.replace(' ', "").contains("型号"), "{text}");
     assert!(text.contains("aigo_u335"), "{text}");
     assert!(text.contains("1987718388"), "{text}");
-    assert!(text.replace(' ', "").contains("Enter当前设备"), "{text}");
+    assert!(text.replace(' ', "").contains("Enter设备信息"), "{text}");
+    assert!(!text.replace(' ', "").contains("当前设备·"), "{text}");
     assert!(
         text.contains("▌"),
         "focused device row must render ▌: {text}"
