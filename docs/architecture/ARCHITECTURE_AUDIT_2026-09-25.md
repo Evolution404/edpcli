@@ -1330,6 +1330,24 @@ application 返回结构化 `ProvisionReport/BackupReport/InspectReport`，CLI/T
 - 代码只搬迁绘制逻辑，保留结构树顺序、对象快照、字段表列宽和滚动、焦点样式、提示文字与 Pane 布局；不修改协议、介质身份、备份格式或写盘安全链。
 - `cargo check --all-targets --locked`、架构门禁 **29/29**、TUI **266/266**、全目标 Clippy、fast **4 suites / 6 artifacts / 0 failures**、full **8 suites / 10 artifacts + doctest / 0 failures** 与 diff 检查通过。字段表源码契约已跟随绘制入口迁至详情渲染模块。
 
+#### D8-D1：检查工作区状态与渲染复审
+
+**COMPLETE。** 在 D8-D1.4 提交后复审九个模块：
+
+| 模块 | 行数 / 硬上限 | 当前职责 |
+|---|---:|---|
+| `inspect/state.rs` | 628 / <700 | 工作区生命周期、来源、Pane 焦点、预览协调 |
+| `inspect/tree_state.rs` | 434 / <600 | 树行模型、惰性分页、展开与导航 |
+| `inspect/detail_state.rs` | 403 / <500 | 字段表投影、详情展开与 Pane 垂直导航 |
+| `inspect/search_state.rs` | 467 / <550 | 跳转输入、结构化搜索与命中定位 |
+| `inspect/sector_state.rs` | 345 / <450 | 扇区检查器光标、模式、字段与读取状态 |
+| `inspect/render.rs` | 267 / <400 | 工作区布局、磁盘概览与子渲染器编排 |
+| `inspect/tree_render.rs` | 93 / <180 | 结构树绘制 |
+| `inspect/detail_render.rs` | 428 / <500 | 对象快照与字段详情绘制 |
+| `inspect/sector_render.rs` | 258 / <350 | 扇区检查器绘制 |
+
+上述职责无须在 D8-D1 内继续拆分；后续阶段另行推进。
+
 
 
 
