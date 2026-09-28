@@ -1136,3 +1136,126 @@ fn device_capacity_active_region_has_complete_heavy_outline() {
         );
     }
 }
+
+#[test]
+fn device_capacity_active_region_keeps_original_label_without_dot_prefix() {
+    use edpcli::tui::state::DeviceInfoNodeKey;
+
+    let mut state = AppState::new();
+    state.replace_devices(vec![edp_device_with_layout()]);
+    state.focus_devices_pane(PaneId::DevicesTree);
+
+    let target_index = state
+        .device_info_tree_rows()
+        .iter()
+        .position(|row| {
+            matches!(row.key, DeviceInfoNodeKey::LayoutSegment { .. }) && row.depth == 1
+        })
+        .expect("top-level layout segment");
+    state.navigate(NavCommand::Top, 20);
+    state.device_info_move_tree(target_index as isize);
+
+    assert!(
+        !include_str!("../src/tui/devices/presentation.rs")
+            .contains("format!(\"● {}\", segment.label)"),
+        "active capacity region must not rewrite the partition label"
+    );
+    let lines = render_lines(&state, 180, 46);
+    let top = lines
+        .iter()
+        .position(|line| line.contains('┏') || (line.contains('╭') && line.contains('┬')))
+        .expect("disk map top border");
+    assert!(
+        !lines[top + 1].contains('●'),
+        "active map label must not be rewritten with a dot prefix: {}",
+        lines[top + 1]
+    );
+}
+
+#[test]
+fn device_capacity_tree_and_region_list_use_partition_semantic_colors() {
+    let mut state = AppState::new();
+    state.replace_devices(vec![edp_device_with_layout()]);
+    state.focus_devices_pane(PaneId::DevicesTree);
+    state.navigate(NavCommand::Top, 20);
+    state.device_info_move_tree(1);
+    state.device_info_toggle_selected();
+
+    let mut terminal = Terminal::new(TestBackend::new(200, 60)).unwrap();
+    terminal.draw(|frame| render::draw(frame, &state)).unwrap();
+    let buffer = terminal.backend().buffer();
+    let palette = edpcli::tui::theme::current().palette();
+
+    let boot_colored = buffer
+        .content()
+        .iter()
+        .filter(|cell| cell.symbol() == "启" && cell.style().fg == Some(palette.partition_boot))
+        .count();
+    let share_colored = buffer
+        .content()
+        .iter()
+        .filter(|cell| cell.symbol() == "交" && cell.style().fg == Some(palette.partition_share))
+        .count();
+    let encrypt_colored = buffer
+        .content()
+        .iter()
+        .filter(|cell| cell.symbol() == "保" && cell.style().fg == Some(palette.partition_encrypt))
+        .count();
+
+    let tree_source = include_str!("../src/tui/devices/tree_render.rs");
+    assert!(
+        tree_source.contains("DeviceInfoNodeKey::LayoutSegment { kind, .. }")
+            && tree_source.contains("disk_region(kind)"),
+        "device capacity tree children must derive their text color from DiskRegionKind"
+    );
+    let presentation_source = include_str!("../src/tui/devices/presentation.rs");
+    assert!(
+        presentation_source.contains("disk_region(segment.kind)"),
+        "capacity region list rows must derive their text color from DiskRegionKind"
+    );
+    assert!(
+        boot_colored >= 1,
+        "启动区 should render with boot semantic color; got {boot_colored}"
+    );
+    assert!(
+        share_colored >= 1,
+        "交换区 should render with share semantic color; got {share_colored}"
+    );
+    assert!(
+        encrypt_colored >= 1,
+        "保密区 should render with encrypt semantic color; got {encrypt_colored}"
+    );
+}
+
+#[test]
+fn device_capacity_map_border_cells_inherit_region_backgrounds_without_gap() {
+    use edpcli::tui::disk_layout::DiskRegionKind;
+    use edpcli::tui::theme::Theme;
+
+    let theme = Theme::truecolor_dark();
+    for kind in [
+        DiskRegionKind::Boot,
+        DiskRegionKind::Share,
+        DiskRegionKind::Encrypt,
+        DiskRegionKind::Tail,
+    ] {
+        for active in [false, true] {
+            let fill = theme.disk_region_fill(kind, active);
+            let outline = theme.disk_region_outline(kind, active);
+            assert_eq!(
+                outline.bg, fill.bg,
+                "border cells must inherit the same background as the region body: {kind:?} active={active}"
+            );
+        }
+    }
+
+    let presentation = include_str!("../src/tui/devices/presentation.rs");
+    assert!(
+        presentation.contains("disk_region_outline(segment.kind, is_active)"),
+        "segment border must use the centralized region outline style"
+    );
+    assert!(
+        presentation.contains("disk_region_outline(owner.kind, owner_active)"),
+        "shared boundary must inherit the owning region background"
+    );
+}

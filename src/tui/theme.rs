@@ -84,13 +84,13 @@ impl Theme {
                 success: Color::Rgb(0x7F, 0xA6, 0x8A),
                 warning: Color::Rgb(0xB4, 0x9A, 0x68),
                 danger: Color::Rgb(0xB7, 0x7C, 0x7C),
-                violet: Color::Rgb(0x96, 0x87, 0xA8),
-                partition_plain: Color::Rgb(0x76, 0x93, 0xAE),
-                partition_boot: Color::Rgb(0x6E, 0x9C, 0xA5),
-                partition_share: Color::Rgb(0x78, 0x97, 0x82),
-                partition_encrypt: Color::Rgb(0x8F, 0x81, 0x9E),
-                partition_compatibility: Color::Rgb(0xA0, 0x8D, 0x68),
-                partition_free: Color::Rgb(0x46, 0x51, 0x5C),
+                violet: Color::Rgb(0xA6, 0x8B, 0xC7),
+                partition_plain: Color::Rgb(0x6F, 0xA8, 0xDC),
+                partition_boot: Color::Rgb(0x63, 0xC7, 0xBE),
+                partition_share: Color::Rgb(0x78, 0xBE, 0x7E),
+                partition_encrypt: Color::Rgb(0xB1, 0x8A, 0xCB),
+                partition_compatibility: Color::Rgb(0xD0, 0xAA, 0x62),
+                partition_free: Color::Rgb(0x6C, 0x78, 0x84),
                 animation_dim: Color::Rgb(0x46, 0x51, 0x5C),
                 animation_accent: Color::Rgb(0x6F, 0x91, 0xA5),
                 animation_core: Color::Rgb(0x8C, 0xB1, 0xC3),
@@ -360,50 +360,96 @@ impl Theme {
         Style::default().fg(self.disk_region_color(kind))
     }
 
+    fn disk_region_active_color(self, kind: DiskRegionKind) -> Color {
+        match self.mode {
+            ThemeMode::TrueColorDark => match kind {
+                DiskRegionKind::Protocol => Color::Rgb(0x8E, 0xD5, 0xE7),
+                DiskRegionKind::Metadata
+                | DiskRegionKind::Reserved
+                | DiskRegionKind::Compatibility => Color::Rgb(0xE2, 0xC1, 0x7C),
+                DiskRegionKind::Unknown => Color::Rgb(0x9A, 0xA6, 0xB2),
+                DiskRegionKind::Free => Color::Rgb(0x8A, 0x98, 0xA5),
+                DiskRegionKind::Plain => Color::Rgb(0x89, 0xBD, 0xEA),
+                DiskRegionKind::Boot => Color::Rgb(0x86, 0xDD, 0xD1),
+                DiskRegionKind::Share | DiskRegionKind::Combined => Color::Rgb(0x98, 0xD6, 0x9C),
+                DiskRegionKind::Encrypt => Color::Rgb(0xCA, 0xA6, 0xDE),
+                DiskRegionKind::Lce | DiskRegionKind::BackupMirror => Color::Rgb(0xC1, 0xA7, 0xDC),
+                DiskRegionKind::RestoreNode | DiskRegionKind::Tail => Color::Rgb(0x83, 0xB7, 0xDB),
+            },
+            ThemeMode::Ansi256Dark => match kind {
+                DiskRegionKind::Protocol => Color::Indexed(117),
+                DiskRegionKind::Metadata
+                | DiskRegionKind::Reserved
+                | DiskRegionKind::Compatibility => Color::Indexed(180),
+                DiskRegionKind::Unknown | DiskRegionKind::Free => Color::Indexed(250),
+                DiskRegionKind::Plain => Color::Indexed(111),
+                DiskRegionKind::Boot => Color::Indexed(116),
+                DiskRegionKind::Share | DiskRegionKind::Combined => Color::Indexed(151),
+                DiskRegionKind::Encrypt => Color::Indexed(183),
+                DiskRegionKind::Lce | DiskRegionKind::BackupMirror => Color::Indexed(183),
+                DiskRegionKind::RestoreNode | DiskRegionKind::Tail => Color::Indexed(110),
+            },
+            ThemeMode::Ansi16 => match kind {
+                DiskRegionKind::Protocol | DiskRegionKind::Boot => Color::Cyan,
+                DiskRegionKind::Metadata
+                | DiskRegionKind::Reserved
+                | DiskRegionKind::Compatibility => Color::Yellow,
+                DiskRegionKind::Unknown | DiskRegionKind::Free => Color::Gray,
+                DiskRegionKind::Plain | DiskRegionKind::RestoreNode | DiskRegionKind::Tail => {
+                    Color::Blue
+                }
+                DiskRegionKind::Share | DiskRegionKind::Combined => Color::Green,
+                DiskRegionKind::Encrypt | DiskRegionKind::Lce | DiskRegionKind::BackupMirror => {
+                    Color::Magenta
+                }
+            },
+        }
+    }
+
     pub fn disk_region_fill(self, kind: DiskRegionKind, active: bool) -> Style {
         let background = match self.mode {
             ThemeMode::TrueColorDark => match (kind, active) {
-                (DiskRegionKind::Protocol, false) => Color::Rgb(0x0B, 0x26, 0x32),
-                (DiskRegionKind::Protocol, true) => Color::Rgb(0x10, 0x35, 0x40),
+                (DiskRegionKind::Protocol, false) => Color::Rgb(0x0D, 0x2C, 0x38),
+                (DiskRegionKind::Protocol, true) => Color::Rgb(0x12, 0x3C, 0x4A),
                 (
                     DiskRegionKind::Metadata
                     | DiskRegionKind::Reserved
                     | DiskRegionKind::Compatibility,
                     false,
-                ) => Color::Rgb(0x2A, 0x25, 0x18),
+                ) => Color::Rgb(0x33, 0x2A, 0x17),
                 (
                     DiskRegionKind::Metadata
                     | DiskRegionKind::Reserved
                     | DiskRegionKind::Compatibility,
                     true,
-                ) => Color::Rgb(0x39, 0x31, 0x20),
-                (DiskRegionKind::Unknown, false) => Color::Rgb(0x15, 0x1C, 0x23),
-                (DiskRegionKind::Unknown, true) => Color::Rgb(0x1E, 0x28, 0x31),
-                (DiskRegionKind::Free, false) => Color::Rgb(0x13, 0x1B, 0x22),
-                (DiskRegionKind::Free, true) => Color::Rgb(0x1B, 0x26, 0x2F),
-                (DiskRegionKind::Plain, false) => Color::Rgb(0x12, 0x22, 0x31),
-                (DiskRegionKind::Plain, true) => Color::Rgb(0x19, 0x30, 0x43),
-                (DiskRegionKind::Boot, false) => Color::Rgb(0x0F, 0x29, 0x28),
-                (DiskRegionKind::Boot, true) => Color::Rgb(0x16, 0x3A, 0x32),
+                ) => Color::Rgb(0x49, 0x3B, 0x20),
+                (DiskRegionKind::Unknown, false) => Color::Rgb(0x1B, 0x20, 0x28),
+                (DiskRegionKind::Unknown, true) => Color::Rgb(0x27, 0x2F, 0x38),
+                (DiskRegionKind::Free, false) => Color::Rgb(0x1A, 0x20, 0x26),
+                (DiskRegionKind::Free, true) => Color::Rgb(0x25, 0x2E, 0x36),
+                (DiskRegionKind::Plain, false) => Color::Rgb(0x12, 0x28, 0x3A),
+                (DiskRegionKind::Plain, true) => Color::Rgb(0x19, 0x38, 0x4F),
+                (DiskRegionKind::Boot, false) => Color::Rgb(0x0F, 0x30, 0x2E),
+                (DiskRegionKind::Boot, true) => Color::Rgb(0x15, 0x45, 0x3F),
                 (DiskRegionKind::Share | DiskRegionKind::Combined, false) => {
-                    Color::Rgb(0x14, 0x28, 0x20)
+                    Color::Rgb(0x17, 0x30, 0x20)
                 }
                 (DiskRegionKind::Share | DiskRegionKind::Combined, true) => {
-                    Color::Rgb(0x1B, 0x37, 0x29)
+                    Color::Rgb(0x20, 0x45, 0x2B)
                 }
-                (DiskRegionKind::Encrypt, false) => Color::Rgb(0x25, 0x1D, 0x31),
-                (DiskRegionKind::Encrypt, true) => Color::Rgb(0x34, 0x27, 0x42),
+                (DiskRegionKind::Encrypt, false) => Color::Rgb(0x2D, 0x22, 0x3B),
+                (DiskRegionKind::Encrypt, true) => Color::Rgb(0x41, 0x2F, 0x54),
                 (DiskRegionKind::Lce | DiskRegionKind::BackupMirror, false) => {
-                    Color::Rgb(0x25, 0x1E, 0x31)
+                    Color::Rgb(0x2A, 0x22, 0x38)
                 }
                 (DiskRegionKind::Lce | DiskRegionKind::BackupMirror, true) => {
-                    Color::Rgb(0x34, 0x29, 0x43)
+                    Color::Rgb(0x3C, 0x30, 0x4E)
                 }
                 (DiskRegionKind::RestoreNode | DiskRegionKind::Tail, false) => {
-                    Color::Rgb(0x10, 0x24, 0x34)
+                    Color::Rgb(0x13, 0x2B, 0x3E)
                 }
                 (DiskRegionKind::RestoreNode | DiskRegionKind::Tail, true) => {
-                    Color::Rgb(0x17, 0x33, 0x46)
+                    Color::Rgb(0x1B, 0x3B, 0x53)
                 }
             },
             ThemeMode::Ansi256Dark => {
@@ -448,7 +494,7 @@ impl Theme {
             }
         };
         let foreground = if active {
-            self.palette.accent
+            self.disk_region_active_color(kind)
         } else {
             self.disk_region_color(kind)
         };
@@ -458,6 +504,15 @@ impl Theme {
         } else {
             style
         }
+    }
+
+    pub fn disk_region_outline(self, kind: DiskRegionKind, active: bool) -> Style {
+        let foreground = if active {
+            self.disk_region_active_color(kind)
+        } else {
+            self.palette.border_subtle
+        };
+        self.disk_region_fill(kind, active).fg(foreground)
     }
 
     pub fn provision_kind(self, kind: ProvisionKind) -> Style {
@@ -509,16 +564,16 @@ mod tests {
         assert_eq!(palette.success, Color::Rgb(0x7F, 0xA6, 0x8A));
         assert_eq!(palette.warning, Color::Rgb(0xB4, 0x9A, 0x68));
         assert_eq!(palette.danger, Color::Rgb(0xB7, 0x7C, 0x7C));
-        assert_eq!(palette.violet, Color::Rgb(0x96, 0x87, 0xA8));
-        assert_eq!(palette.partition_plain, Color::Rgb(0x76, 0x93, 0xAE));
-        assert_eq!(palette.partition_boot, Color::Rgb(0x6E, 0x9C, 0xA5));
-        assert_eq!(palette.partition_share, Color::Rgb(0x78, 0x97, 0x82));
-        assert_eq!(palette.partition_encrypt, Color::Rgb(0x8F, 0x81, 0x9E));
+        assert_eq!(palette.violet, Color::Rgb(0xA6, 0x8B, 0xC7));
+        assert_eq!(palette.partition_plain, Color::Rgb(0x6F, 0xA8, 0xDC));
+        assert_eq!(palette.partition_boot, Color::Rgb(0x63, 0xC7, 0xBE));
+        assert_eq!(palette.partition_share, Color::Rgb(0x78, 0xBE, 0x7E));
+        assert_eq!(palette.partition_encrypt, Color::Rgb(0xB1, 0x8A, 0xCB));
         assert_eq!(
             palette.partition_compatibility,
-            Color::Rgb(0xA0, 0x8D, 0x68)
+            Color::Rgb(0xD0, 0xAA, 0x62)
         );
-        assert_eq!(palette.partition_free, Color::Rgb(0x46, 0x51, 0x5C));
+        assert_eq!(palette.partition_free, Color::Rgb(0x6C, 0x78, 0x84));
         assert_eq!(palette.animation_dim, Color::Rgb(0x46, 0x51, 0x5C));
         assert_eq!(palette.animation_accent, Color::Rgb(0x6F, 0x91, 0xA5));
         assert_eq!(palette.animation_core, Color::Rgb(0x8C, 0xB1, 0xC3));
@@ -566,5 +621,36 @@ mod tests {
         assert_ne!(theme.selection().bg, Some(theme.palette.accent));
         assert_ne!(theme.panel().fg, theme.focused_panel().fg);
         assert_ne!(theme.input().bg, theme.input_focused().bg);
+    }
+
+    #[test]
+    fn disk_regions_keep_their_own_hue_when_active() {
+        let theme = Theme::truecolor_dark();
+        let boot = theme.disk_region_fill(DiskRegionKind::Boot, false);
+        let boot_active = theme.disk_region_fill(DiskRegionKind::Boot, true);
+        let share = theme.disk_region_fill(DiskRegionKind::Share, false);
+        let share_active = theme.disk_region_fill(DiskRegionKind::Share, true);
+        let encrypt = theme.disk_region_fill(DiskRegionKind::Encrypt, false);
+        let encrypt_active = theme.disk_region_fill(DiskRegionKind::Encrypt, true);
+
+        assert_ne!(boot.bg, boot_active.bg);
+        assert_ne!(share.bg, share_active.bg);
+        assert_ne!(encrypt.bg, encrypt_active.bg);
+        assert_ne!(boot.bg, share.bg);
+        assert_ne!(share.bg, encrypt.bg);
+        assert_ne!(boot_active.bg, share_active.bg);
+        assert_ne!(share_active.bg, encrypt_active.bg);
+
+        for kind in [
+            DiskRegionKind::Boot,
+            DiskRegionKind::Share,
+            DiskRegionKind::Encrypt,
+        ] {
+            let active = theme.disk_region_fill(kind, true);
+            let outline = theme.disk_region_outline(kind, true);
+            assert_eq!(outline.bg, active.bg);
+            assert_eq!(outline.fg, active.fg);
+            assert_ne!(outline.fg, Some(theme.palette.accent));
+        }
     }
 }

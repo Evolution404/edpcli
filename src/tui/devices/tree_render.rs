@@ -71,9 +71,19 @@ fn device_tree_line(
         1 => "├─ ",
         _ => "  ├─ ",
     };
-    let style = if active { accent() } else { secondary() };
+    let region_style = match row.key {
+        DeviceInfoNodeKey::LayoutSegment { kind, .. } => {
+            Some(crate::tui::theme::current().disk_region(kind))
+        }
+        DeviceInfoNodeKey::TailGroup => Some(
+            crate::tui::theme::current().disk_region(crate::tui::disk_layout::DiskRegionKind::Tail),
+        ),
+        _ => None,
+    };
+    let style = region_style.unwrap_or_else(|| if active { accent() } else { secondary() });
+    let marker_style = if active { accent() } else { style };
     let mut spans = vec![
-        Span::styled(marker, style),
+        Span::styled(marker, marker_style),
         Span::raw(" "),
         Span::raw("  ".repeat(row.depth as usize)),
         Span::styled(disclosure, style),
@@ -83,7 +93,10 @@ fn device_tree_line(
     ];
     if let Some(value) = &row.value {
         spans.push(Span::raw("  "));
-        spans.push(Span::styled(value.clone(), muted()));
+        spans.push(Span::styled(
+            value.clone(),
+            region_style.unwrap_or_else(muted),
+        ));
     }
     Line::from(spans)
 }

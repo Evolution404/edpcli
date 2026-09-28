@@ -76,19 +76,22 @@ fn capacity_detail_lines(
         secondary(),
     )));
     for segment in &collapsed.segments {
-        lines.push(Line::from(format!(
-            "{}  {}  {}  {}",
-            crate::ui::pad_to(&segment.label, 18),
-            crate::ui::pad_to(&segment.closed_range(), 24),
-            crate::ui::pad_to(
-                &format_bytes(
-                    segment
-                        .sector_count
-                        .saturating_mul(crate::common::SECTOR as u64),
+        lines.push(Line::from(Span::styled(
+            format!(
+                "{}  {}  {}  {}",
+                crate::ui::pad_to(&segment.label, 18),
+                crate::ui::pad_to(&segment.closed_range(), 24),
+                crate::ui::pad_to(
+                    &format_bytes(
+                        segment
+                            .sector_count
+                            .saturating_mul(crate::common::SECTOR as u64),
+                    ),
+                    14,
                 ),
-                14,
+                percentage(segment.sector_count, model.total_sectors)
             ),
-            percentage(segment.sector_count, model.total_sectors)
+            crate::tui::theme::current().disk_region(segment.kind),
         )));
     }
     lines
@@ -469,7 +472,7 @@ fn disk_map_border_line(
         } else {
             "╰"
         },
-        disk_map_boundary_style(first_active),
+        disk_map_boundary_style(None, model.segments.first(), active),
     )];
 
     for (index, (segment, width)) in model
@@ -493,7 +496,6 @@ fn disk_map_border_line(
             .segments
             .get(index + 1)
             .is_some_and(|next| capacity_segment_active(next, active));
-        let edge_active = is_active || next_active;
         let edge = if index + 1 == model.segments.len() {
             if is_active {
                 if top {
@@ -518,7 +520,10 @@ fn disk_map_border_line(
                 (false, false, false) => "┴",
             }
         };
-        spans.push(Span::styled(edge, disk_map_boundary_style(edge_active)));
+        spans.push(Span::styled(
+            edge,
+            disk_map_boundary_style(Some(segment), model.segments.get(index + 1), active),
+        ));
     }
     Line::from(spans)
 }
@@ -551,7 +556,7 @@ fn disk_map_content_line(
         .is_some_and(|segment| capacity_segment_active(segment, active));
     let mut spans = vec![Span::styled(
         if first_active { "┃" } else { "│" },
-        disk_map_boundary_style(first_active),
+        disk_map_boundary_style(None, model.segments.first(), active),
     )];
 
     for (index, (segment, width)) in model
@@ -562,7 +567,7 @@ fn disk_map_content_line(
     {
         let is_active = capacity_segment_active(segment, active);
         let text = if label_row {
-            disk_map_segment_label(segment, width, is_active)
+            disk_map_segment_label(segment, width)
         } else {
             disk_map_segment_value(segment, width, model.total_sectors)
         };
@@ -578,7 +583,7 @@ fn disk_map_content_line(
         let edge_active = is_active || next_active;
         spans.push(Span::styled(
             if edge_active { "┃" } else { "│" },
-            disk_map_boundary_style(edge_active),
+            disk_map_boundary_style(Some(segment), model.segments.get(index + 1), active),
         ));
     }
     Line::from(spans)
@@ -587,18 +592,9 @@ fn disk_map_content_line(
 fn disk_map_segment_label(
     segment: &crate::tui::disk_layout::DiskLayoutSegment,
     width: usize,
-    is_active: bool,
 ) -> String {
     if width == 0 {
         return String::new();
-    }
-    let preferred = if is_active {
-        format!("● {}", segment.label)
-    } else {
-        segment.label.clone()
-    };
-    if crate::tui::table_layout::display_width(&preferred) <= width {
-        return preferred;
     }
     if crate::tui::table_layout::display_width(&segment.label) <= width {
         return segment.label.clone();
@@ -639,22 +635,32 @@ fn disk_map_segment_style(
 }
 
 fn disk_map_border_style(
-    _segment: &crate::tui::disk_layout::DiskLayoutSegment,
+    segment: &crate::tui::disk_layout::DiskLayoutSegment,
     is_active: bool,
 ) -> ratatui::style::Style {
-    if is_active {
-        crate::tui::theme::current().accent()
-    } else {
-        crate::tui::theme::current().subtle_border()
-    }
+    crate::tui::theme::current().disk_region_outline(segment.kind, is_active)
 }
 
-fn disk_map_boundary_style(is_active: bool) -> ratatui::style::Style {
-    if is_active {
-        crate::tui::theme::current().accent()
+fn disk_map_boundary_style(
+    left: Option<&crate::tui::disk_layout::DiskLayoutSegment>,
+    right: Option<&crate::tui::disk_layout::DiskLayoutSegment>,
+    active: Option<&ActiveCapacityExtent>,
+) -> ratatui::style::Style {
+    let left_active = left.is_some_and(|segment| capacity_segment_active(segment, active));
+    let right_active = right.is_some_and(|segment| capacity_segment_active(segment, active));
+    let (owner, owner_active) = if left_active {
+        (left, true)
+    } else if right_active {
+        (right, true)
+    } else if left.is_some() {
+        (left, false)
     } else {
-        muted()
-    }
+        (right, false)
+    };
+    let Some(owner) = owner else {
+        return muted();
+    };
+    crate::tui::theme::current().disk_region_outline(owner.kind, owner_active)
 }
 
 fn capacity_segment_active(

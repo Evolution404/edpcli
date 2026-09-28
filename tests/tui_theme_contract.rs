@@ -39,16 +39,16 @@ fn chapter_ten_truecolor_palette_is_exact() {
     assert_eq!(palette.success, Color::Rgb(0x7F, 0xA6, 0x8A));
     assert_eq!(palette.warning, Color::Rgb(0xB4, 0x9A, 0x68));
     assert_eq!(palette.danger, Color::Rgb(0xB7, 0x7C, 0x7C));
-    assert_eq!(palette.violet, Color::Rgb(0x96, 0x87, 0xA8));
-    assert_eq!(palette.partition_plain, Color::Rgb(0x76, 0x93, 0xAE));
-    assert_eq!(palette.partition_boot, Color::Rgb(0x6E, 0x9C, 0xA5));
-    assert_eq!(palette.partition_share, Color::Rgb(0x78, 0x97, 0x82));
-    assert_eq!(palette.partition_encrypt, Color::Rgb(0x8F, 0x81, 0x9E));
+    assert_eq!(palette.violet, Color::Rgb(0xA6, 0x8B, 0xC7));
+    assert_eq!(palette.partition_plain, Color::Rgb(0x6F, 0xA8, 0xDC));
+    assert_eq!(palette.partition_boot, Color::Rgb(0x63, 0xC7, 0xBE));
+    assert_eq!(palette.partition_share, Color::Rgb(0x78, 0xBE, 0x7E));
+    assert_eq!(palette.partition_encrypt, Color::Rgb(0xB1, 0x8A, 0xCB));
     assert_eq!(
         palette.partition_compatibility,
-        Color::Rgb(0xA0, 0x8D, 0x68)
+        Color::Rgb(0xD0, 0xAA, 0x62)
     );
-    assert_eq!(palette.partition_free, Color::Rgb(0x46, 0x51, 0x5C));
+    assert_eq!(palette.partition_free, Color::Rgb(0x6C, 0x78, 0x84));
     assert_eq!(palette.animation_dim, Color::Rgb(0x46, 0x51, 0x5C));
     assert_eq!(palette.animation_accent, Color::Rgb(0x6F, 0x91, 0xA5));
     assert_eq!(palette.animation_core, Color::Rgb(0x8C, 0xB1, 0xC3));
