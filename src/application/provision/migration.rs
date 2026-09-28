@@ -271,15 +271,32 @@ struct PlainSourcePartition {
     sector_count: u64,
 }
 
-fn parse_plain_mbr(dev: &mut dyn SectorDev) -> EdpCliResult<Vec<PlainSourcePartition>> {
+fn parse_plain_source(
+    dev: &mut dyn SectorDev,
+    total_sectors: u64,
+) -> EdpCliResult<Vec<PlainSourcePartition>> {
     let sector = dev.read_sector(0).map_err(|error| {
         err(
             EXIT_TARGET,
             format!("错误: K6 Plain 来源 MBR 读取失败: {error}"),
         )
     })?;
-    if sector.len() != SECTOR || sector[510..512] != [0x55, 0xaa] {
-        return Err(err(EXIT_TARGET, "错误: K6 Plain 来源没有有效 MBR 签名"));
+    if sector.len() != SECTOR {
+        return Err(err(EXIT_TARGET, "错误: K6 Plain 来源 LBA0 长度异常"));
+    }
+    if crate::inspect_target::detect_plain_filesystem(total_sectors, &sector).is_some() {
+        return Ok(vec![PlainSourcePartition {
+            index: 0,
+            partition_type: 0,
+            start_lba: 0,
+            sector_count: total_sectors,
+        }]);
+    }
+    if sector[510..512] != [0x55, 0xaa] {
+        return Err(err(
+            EXIT_TARGET,
+            "错误: K6 Plain 来源既不是可验证 whole-disk 文件系统，也没有有效 MBR 签名",
+        ));
     }
     let mut partitions = Vec::new();
     for index in 0..4 {
@@ -425,11 +442,8 @@ fn stage_plain_file(
     })
 }
 
-pub(super) fn prepare_plain_to_official(
-    dev: &mut dyn SectorDev,
-    target_plan: &TargetProvisionPlan,
-) -> EdpCliResult<PlainImportPlan> {
-    let target_index = [
+pub(super) fn plain_import_target_index(target_plan: &TargetProvisionPlan) -> EdpCliResult<usize> {
+    [
         PartitionRole::Share,
         PartitionRole::BootShareCombined,
         PartitionRole::Encrypt,
@@ -442,9 +456,17 @@ pub(super) fn prepare_plain_to_official(
             .iter()
             .position(|part| part.geometry.role == role && part.geometry.filesystem.is_some())
     })
-    .ok_or_else(|| err(EXIT_TARGET, "错误: K6 Plain→EDP 没有可接收文件的目标分区"))?;
+    .ok_or_else(|| err(EXIT_TARGET, "错误: K6 Plain→EDP 没有可接收文件的目标分区"))
+}
+
+pub(super) fn prepare_plain_to_official(
+    dev: &mut dyn SectorDev,
+    target_plan: &TargetProvisionPlan,
+    total_sectors: u64,
+) -> EdpCliResult<PlainImportPlan> {
+    let target_index = plain_import_target_index(target_plan)?;
     let target = &target_plan.partitions[target_index];
-    let plain_parts = parse_plain_mbr(dev)?;
+    let plain_parts = parse_plain_source(dev, total_sectors)?;
     let multiple = plain_parts.len() > 1;
     let mut sources = Vec::with_capacity(plain_parts.len());
     let mut staged = Vec::new();
@@ -712,4 +734,60 @@ pub(super) fn prepare_migrations(
         });
     }
     Ok(prepared)
+}
+
+#[cfg(test)]
+mod plain_source_tests {
+    use super::*;
+
+    struct Lba0Dev(Vec<u8>);
+
+    impl SectorDev for Lba0Dev {
+        fn read_sector(&mut self, lba: u32) -> std::io::Result<Vec<u8>> {
+            if lba == 0 {
+                Ok(self.0.clone())
+            } else {
+                Ok(vec![0; SECTOR])
+            }
+        }
+
+        fn write_sector(&mut self, _lba: u32, _data: &[u8]) -> std::io::Result<()> {
+            Err(std::io::Error::other("read-only test device"))
+        }
+    }
+
+    fn ntfs_superfloppy_boot(total_sectors: u64) -> Vec<u8> {
+        let mut boot = vec![0u8; SECTOR];
+        boot[..3].copy_from_slice(&[0xeb, 0x52, 0x90]);
+        boot[3..11].copy_from_slice(b"NTFS    ");
+        boot[11..13].copy_from_slice(&(SECTOR as u16).to_le_bytes());
+        boot[13] = 8;
+        boot[21] = 0xf8;
+        boot[40..48].copy_from_slice(&(total_sectors - 1).to_le_bytes());
+        boot[48..56].copy_from_slice(&4u64.to_le_bytes());
+        boot[56..64].copy_from_slice(&8u64.to_le_bytes());
+        boot[510..512].copy_from_slice(&[0x55, 0xaa]);
+        boot
+    }
+
+    #[test]
+    fn plain_source_accepts_whole_disk_ntfs_without_fake_mbr_partition() {
+        let total = 30_277_632u64;
+        let mut dev = Lba0Dev(ntfs_superfloppy_boot(total));
+        let parts = parse_plain_source(&mut dev, total).unwrap();
+        assert_eq!(parts.len(), 1);
+        assert_eq!(parts[0].index, 0);
+        assert_eq!(parts[0].partition_type, 0);
+        assert_eq!(parts[0].start_lba, 0);
+        assert_eq!(parts[0].sector_count, total);
+    }
+
+    #[test]
+    fn plain_source_does_not_promote_arbitrary_signed_sector_to_superfloppy() {
+        let total = 30_277_632u64;
+        let mut sector = vec![0x5a; SECTOR];
+        sector[510..512].copy_from_slice(&[0x55, 0xaa]);
+        let mut dev = Lba0Dev(sector);
+        assert!(parse_plain_source(&mut dev, total).is_err());
+    }
 }

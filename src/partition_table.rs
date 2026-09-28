@@ -464,6 +464,13 @@ pub fn confirmed_plain_protocol_prefix(protocol_image: &[u8], total: u64) -> boo
         Ok(value) => value,
         Err(_) => return false,
     };
+    // Some ordinary removable media are formatted as a whole-disk
+    // filesystem ("superfloppy") with no MBR/GPT partition table. Accept
+    // those only when the existing strict FAT/exFAT/NTFS boot-sector
+    // validator confirms LBA0 against the physical whole-disk geometry.
+    if crate::inspect_target::detect_plain_filesystem(total, raw0).is_some() {
+        return true;
+    }
     let Ok(mbr) = lba0::parse_lba0(raw0) else {
         return false;
     };
@@ -522,6 +529,30 @@ mod tests {
         // is gated by the caller's absence of EDP device_id evidence.
         image[7 * SECTOR] = 1;
         assert!(confirmed_plain_protocol_prefix(&image, 12_048));
+    }
+
+    #[test]
+    fn plain_prefix_accepts_strict_whole_disk_ntfs_superfloppy() {
+        let total = 30_277_632u64;
+        let mut image = vec![0u8; 13 * SECTOR];
+        let boot = &mut image[..SECTOR];
+        boot[..3].copy_from_slice(&[0xeb, 0x52, 0x90]);
+        boot[3..11].copy_from_slice(b"NTFS    ");
+        boot[11..13].copy_from_slice(&(SECTOR as u16).to_le_bytes());
+        boot[13] = 8;
+        boot[21] = 0xf8;
+        boot[40..48].copy_from_slice(&(total - 1).to_le_bytes());
+        boot[48..56].copy_from_slice(&4u64.to_le_bytes());
+        boot[56..64].copy_from_slice(&8u64.to_le_bytes());
+        // The legacy partition-entry byte range is boot code on a
+        // superfloppy; make it explicitly non-empty so this regression
+        // cannot accidentally pass through the MBR path.
+        boot[0x1c2] = 0x99;
+        boot[0x1c6..0x1ca].copy_from_slice(&u32::MAX.to_le_bytes());
+        boot[0x1ca..0x1ce].copy_from_slice(&u32::MAX.to_le_bytes());
+        boot[510..512].copy_from_slice(&[0x55, 0xaa]);
+
+        assert!(confirmed_plain_protocol_prefix(&image, total));
     }
 
     #[test]

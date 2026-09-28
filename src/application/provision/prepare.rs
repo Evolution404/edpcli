@@ -384,9 +384,11 @@ pub fn prepare_target_provision(
     })?;
     let mut prepared_plain_import = None;
     if source.is_none() && source_kind == crate::provision::DiskProvisionKind::Plain {
-        let import = super::migration::prepare_plain_to_official(dev, &target_plan)?;
-        let role = target_plan.partitions[import.target_index].geometry.role;
+        let target_index = super::migration::plain_import_target_index(&target_plan)?;
+        let role = target_plan.partitions[target_index].geometry.role;
         if !request.format.choice(role).0 {
+            let import =
+                super::migration::prepare_plain_to_official(dev, &target_plan, total_sectors)?;
             let target = &mut target_plan.partitions[import.target_index];
             target.disposition = RegionDisposition::Migrate;
             target.action = RegionDisposition::Migrate.legacy_action();

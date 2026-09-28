@@ -581,6 +581,28 @@ P14 已完成：专项回归通过，`tui_suite` 281/281 通过，快速门禁 4
 
 P15 远端实现与验证已完成：提交 `9ce4ec121f07ab331e067ce615e5558773e24fa4` 的 Rust CI（run `36383562895`）跨 Linux/macOS/Windows 全部通过；Virtual Disk HIL（run `36383562856`）4/4 通过。Mac 当前离线，因此本阶段未执行本机 release 安装；待 Mac 恢复后只需拉取最新分支、重新编译安装并进行实机视觉复核。
 
+### P16 — whole-disk 普通盘识别与制盘预检
+
+实机验收发现 Kingston DataTraveler 3.0（`disk4`，15.5 GB）是合法的 whole-disk NTFS / superfloppy：文件系统直接从 LBA0 开始，没有 MBR/GPT 分区表。旧逻辑只把有效 MBR/GPT 当作 Plain 正向证据，因此被错误标成“盘型未确认”。本阶段按 fail-closed 原则补齐：
+
+- Plain 正向识别新增 whole-disk FAT/exFAT/NTFS 路径，但必须通过现有严格 boot-sector 校验；随机数据、只有 `55 AA`、EDP 身份残留都不能因此降级为 Plain；
+- EDP 识别失败仍不等于 Plain；只有 `device_id=None`、`onlyid=None` 且分区表或 whole-disk 文件系统具有正向证据时才确认；
+- 修复 macOS `diskutil info -plist` 整盘容量真相源：优先 `IOKitSize → DiskSize → Size`，`TotalSize` 只作兼容兜底，避免把文件系统卷容量误当物理介质容量；
+- 设备枚举和身份观察器统一使用同一物理容量规则；
+- K6 Plain 来源解析支持 whole-disk 文件系统作为单一来源范围；
+- Plain→EDP 如果目标接收分区被用户明确选择格式化/重建，则跳过无意义的源文件迁移；如果用户要求保留文件，则继续执行严格迁移预检；
+- 当前 NTFS 文件清单迁移尚未实现，因此默认“不格式化/保留”会明确 fail-closed；不会为了允许制盘而静默丢弃 NTFS 文件；
+- 对 `mode1` 完全重建，实盘只读 `provision plan` 已验证 `--format-share --format-encrypt` 可以生成完整计划；未执行任何真实写盘。
+
+实盘只读证据：
+
+- `disk4`：USB `0951:1666`，物理容量 `30277632 * 512B`；
+- NTFS boot sector 声明 `30277631` 个文件系统扇区，严格 NTFS 校验通过；
+- `device_id=None`、`onlyid=None`；
+- 修复后 `edpcli list` 显示 `disk4 ... 普通盘`；
+- 修复后 `mode1 --format-share --format-encrypt` 只读计划成功，默认保留路径因 NTFS inventory 未实现而安全拒绝；
+- 本机 fast：8 个测试套件/10 个产物/0 失败；Clippy `-D warnings` 通过；full：8 个测试套件/10 个产物加 doctest/0 失败。
+
 ## 18. 完成标准
 
 只有同时满足以下条件，才可标记 COMPLETE：
