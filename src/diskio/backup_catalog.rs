@@ -165,7 +165,8 @@ fn strip_numeric_suffix<'a>(s: &'a str, marker: &str) -> Option<(&'a str, String
     Some((&s[..pos], value.to_string()))
 }
 
-/// 解析本工具备份文件名。device_id 自身含 `&` / `_`，因此不能按 `_` 粗暴 split；
+/// 解析本工具备份文件名。EDP 备份身份段为 device_id；Plain v3 使用显式 `plain`
+/// 占位，避免把派生 device_id candidate 冒充成已观测 EDP device_id。
 /// 固定锚点只使用 disk/secs/vid/pid 与尾部时间戳/状态/onlyid。
 pub fn parse_backup_name(name: &str) -> Option<BackupMeta> {
     let ts_pos = ts_suffix_pos(name)?;
@@ -210,7 +211,7 @@ pub fn parse_backup_name(name: &str) -> Option<BackupMeta> {
             None => (tail, None),
         },
     };
-    if !device_id.starts_with("disk&ven_") {
+    if device_id != "plain" && !device_id.starts_with("disk&ven_") {
         return None;
     }
 
@@ -365,14 +366,20 @@ pub fn scan_backup_names(dir: &Path) -> Vec<PathBuf> {
 
 /// Automatic prune grouping requires strong canonical identity evidence.
 ///
-/// Prefer usable USB serial digest (physical media). Without it, require an observed EDP
-/// device_id + onlyid pair (EDP instance). Model/capacity-only evidence and filename-derived
-/// metadata never form an automatic deletion group.
+/// Prefer usable USB serial evidence (physical media). v3 carries the reviewed raw serial;
+/// v1/v2 retain the historical digest. Without either, require an observed EDP device_id + onlyid
+/// pair (EDP instance). Model/capacity-only evidence and filename-derived metadata never form an
+/// automatic deletion group.
 pub fn backup_group_key(entry: &BackupEntry) -> Option<String> {
     use crate::media_identity::SerialQuality;
 
     let identity = entry.meta.as_ref()?.identity.as_ref()?;
     if identity.hardware.serial_quality == SerialQuality::Usable {
+        if let Some(serial) = identity.hardware.serial.as_deref() {
+            // The digest is ephemeral grouping material only. It is never written back into a
+            // v3 manifest or canonical identity as serial_sha256.
+            return Some(format!("serial:{}", sha256_hex(serial.as_bytes())));
+        }
         if let Some(serial) = identity.hardware.serial_sha256.as_deref() {
             return Some(format!("serial:{serial}"));
         }
@@ -384,6 +391,21 @@ pub fn backup_group_key(entry: &BackupEntry) -> Option<String> {
         (Some(device_id), Some(onlyid)) => Some(format!("edp:{device_id}:{onlyid}")),
         _ => None,
     }
+}
+
+/// Non-destructive list grouping is intentionally broader than prune grouping.
+///
+/// A healthy verified EDPB with weak identity (for example Plain without a usable USB serial) is
+/// still a tool-owned backup and must be displayed normally. Such an entry receives a unique
+/// singleton key here; this does not grant prune or destructive-write authority.
+pub fn backup_list_group_key(entry: &BackupEntry) -> Option<String> {
+    if let Some(key) = backup_group_key(entry) {
+        return Some(format!("identity:{key}"));
+    }
+    (entry.integrity_status == BackupIntegrityStatus::Verified
+        && entry.size_ok
+        && entry.meta.is_some())
+    .then(|| format!("entry:{}", entry.path.to_string_lossy()))
 }
 
 /// backup prune 的纯策略层：

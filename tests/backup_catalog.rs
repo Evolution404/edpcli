@@ -137,6 +137,46 @@ fn backup_affinity_policy_confirms_a_b_c_and_keeps_d_possible_only() {
 }
 
 #[test]
+fn v3_raw_serial_can_form_strong_group_without_persisted_serial_digest() {
+    use edpcli::diskio::{backup_group_key, BackupEntry, BackupIntegrityStatus, BackupMeta};
+
+    let mut first = identity(None, None, None, DiskProvisionKind::Plain);
+    first.hardware.serial = Some("RAW-SERIAL-123".into());
+    first.hardware.serial_quality = SerialQuality::Usable;
+    first.hardware.serial_sha256 = None;
+    let mut second = first.clone();
+
+    let make_entry = |path: &str, snapshot: MediaIdentitySnapshot| BackupEntry {
+        meta: Some(BackupMeta {
+            disk: 5,
+            secs: Some(245_760_000),
+            vid: "2bdf".into(),
+            pid: "0300".into(),
+            device_id: "disk&ven_test&prod_plain".into(),
+            onlyid: None,
+            identity: Some(snapshot),
+        }),
+        path: path.into(),
+        mtime: 0,
+        provision_kind: Some(DiskProvisionKind::Plain),
+        integrity_status: BackupIntegrityStatus::Verified,
+        size_ok: true,
+        lba8: None,
+        content_sha256: None,
+        coverage: None,
+    };
+
+    let a = make_entry("a.edpb", first);
+    let b = make_entry("b.edpb", second.clone());
+    assert_eq!(backup_group_key(&a), backup_group_key(&b));
+    assert!(backup_group_key(&a).is_some());
+
+    second.hardware.serial = Some("RAW-SERIAL-OTHER".into());
+    let c = make_entry("c.edpb", second);
+    assert_ne!(backup_group_key(&a), backup_group_key(&c));
+}
+
+#[test]
 fn scanned_verified_backup_exposes_canonical_identity_projection() {
     let Some((_tmp, catalog)) = copied_catalog() else {
         return;

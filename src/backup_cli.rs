@@ -150,7 +150,7 @@ pub fn backup_list(backup_dir: &Path) -> i32 {
     let mut groups: BTreeMap<String, Vec<&BackupEntry>> = BTreeMap::new();
     let mut unknown = Vec::new();
     for entry in selected {
-        if let Some(key) = diskio::backup_group_key(entry) {
+        if let Some(key) = diskio::backup_list_group_key(entry) {
             groups.entry(key).or_default().push(entry);
         } else {
             unknown.push(entry);

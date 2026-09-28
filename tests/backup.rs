@@ -434,12 +434,24 @@ fn backup_collision_never_overwrites_existing_file() {
 }
 
 #[test]
+fn current_plain_backup_filename_is_a_supported_tool_name() {
+    let name = "disk5_245760000_vid2bdf_pid0300_plain_20260929_073104.edpb";
+    let meta = parse_backup_name(name).expect("current Plain writer filename must be parseable");
+    assert_eq!(meta.disk, 5);
+    assert_eq!(meta.secs, Some(245_760_000));
+    assert_eq!(meta.vid, "2bdf");
+    assert_eq!(meta.pid, "0300");
+    assert_eq!(meta.device_id, "plain");
+    assert_eq!(meta.onlyid, None);
+}
+
+#[test]
 fn plain_v3_metadata_without_protocol_core_is_healthy_and_keeps_plain_kind() {
     let tmp = TmpDir::new("plain_v3_catalog");
     let total_sectors = 245_760_000u64;
     let path = write_plain_metadata_v3(
         &tmp.0,
-        "disk5_245760000_vid2bdf_pid0300_disk&ven_test&prod_plain_20260929_073100.edpb",
+        "disk5_245760000_vid2bdf_pid0300_plain_20260929_073100.edpb",
         total_sectors,
     );
 
@@ -472,6 +484,14 @@ fn plain_v3_metadata_without_protocol_core_is_healthy_and_keeps_plain_kind() {
         identity.provision_kind,
         Some(edpcli::provision::DiskProvisionKind::Plain),
         "verified Plain v3 row must show 普通盘"
+    );
+    assert!(
+        edpcli::diskio::backup_group_key(entry).is_none(),
+        "weak Plain identity must remain excluded from destructive prune grouping"
+    );
+    assert!(
+        edpcli::diskio::backup_list_group_key(entry).is_some(),
+        "healthy tool-owned Plain v3 must still be recognized by non-destructive list grouping"
     );
 }
 
