@@ -319,7 +319,7 @@ impl AppState {
             return false;
         };
         if state.sector.take().is_some() {
-            if let Some(frame) = self.navigation.pop() {
+            if let Some(frame) = self.shell.navigation.pop() {
                 state.panel = frame.panel.unwrap_or(AdvancedInspectPanel::Tree);
                 state.tree_selected = frame.tree_selection;
                 if let Some(pane_focus) = frame.pane_focus {

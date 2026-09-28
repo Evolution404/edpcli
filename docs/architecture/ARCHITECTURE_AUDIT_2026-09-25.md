@@ -1298,6 +1298,11 @@ application 返回结构化 `ProvisionReport/BackupReport/InspectReport`，CLI/T
 - 现有 `advanced_inspect_*` 公共方法全部保留，只把内部访问路径统一为 `inspect.advanced`；跨工作区的 `pinned_disk`、NavigationStack 与共享 DiskLayout 展示状态暂不强行归入 Inspect，避免错误所有权。
 - 新增架构门禁，禁止 `advanced_inspect` 根状态重新散落回 `AppState`。
 
+- D8-C4：`ProvisionState` 已由 D7 系列治理形成独立工作区所有权，本轮不重复迁移；继续保持 `AppState.provision: ProvisionState`。
+- D8-C5.1：新增 `ShellState`，第一批收敛演示标记、当前顶层 Workspace、关键操作门禁、退出挂起、NavigationStack、通知状态与动画帧；这些字段不再直属 `AppState`。
+- 选择索引、搜索输入、表格横向视口与共享 DiskLayout 展示状态引用面更广，留到后续小步迁移；当前不通过一次性机械替换扩大 GitHub-only 风险。
+
+
 
 
 

@@ -114,7 +114,7 @@ impl AppState {
     }
 
     pub fn begin_backup_create_choice(&mut self) -> bool {
-        if self.critical_operation || self.wizard.is_some() {
+        if self.shell.critical_operation || self.wizard.is_some() {
             self.set_notice("已有关键操作或向导正在执行。");
             return false;
         }
@@ -192,7 +192,7 @@ impl AppState {
     }
 
     pub fn begin_backup_batch_delete(&mut self) -> Option<Vec<(std::path::PathBuf, String)>> {
-        if self.critical_operation || self.backups.batch_delete.is_some() {
+        if self.shell.critical_operation || self.backups.batch_delete.is_some() {
             self.set_notice("已有关键操作或批量删除向导正在执行。");
             return None;
         }
@@ -279,12 +279,12 @@ impl AppState {
         batch.stage = BackupBatchDeleteStage::Running;
         batch.message = Some("正在按固定计划逐条复核并删除…".into());
         self.input_mode = InputMode::Normal;
-        self.critical_operation = true;
+        self.shell.critical_operation = true;
         Some(plan)
     }
 
     pub fn backup_batch_delete_finish_execute(&mut self, result: Result<usize, String>) {
-        self.critical_operation = false;
+        self.shell.critical_operation = false;
         let success = result.is_ok();
         if let Some(batch) = self.backups.batch_delete.as_mut() {
             batch.stage = BackupBatchDeleteStage::Result;
@@ -299,7 +299,7 @@ impl AppState {
     }
 
     pub fn close_backup_batch_delete(&mut self) {
-        if !self.critical_operation {
+        if !self.shell.critical_operation {
             self.backups.batch_delete = None;
             self.input_mode = InputMode::Normal;
         }
@@ -314,7 +314,7 @@ impl AppState {
     }
 
     pub fn begin_backup_prune(&mut self) -> bool {
-        if self.critical_operation || self.backups.prune.is_some() {
+        if self.shell.critical_operation || self.backups.prune.is_some() {
             return false;
         }
         self.input_mode = InputMode::Insert;
@@ -431,12 +431,12 @@ impl AppState {
         prune.stage = BackupPruneStage::Running;
         prune.message = Some("正在逐条复核摘要并清理固定候选…".into());
         self.input_mode = InputMode::Normal;
-        self.critical_operation = true;
+        self.shell.critical_operation = true;
         Some(prepared)
     }
 
     pub fn backup_prune_finish_execute(&mut self, result: Result<usize, String>) {
-        self.critical_operation = false;
+        self.shell.critical_operation = false;
         if let Some(prune) = self.backups.prune.as_mut() {
             prune.stage = BackupPruneStage::Result;
             prune.message = Some(match result {
@@ -447,7 +447,7 @@ impl AppState {
     }
 
     pub fn close_backup_prune(&mut self) {
-        if !self.critical_operation {
+        if !self.shell.critical_operation {
             self.backups.prune = None;
             self.input_mode = InputMode::Normal;
         }
@@ -458,7 +458,7 @@ impl AppState {
         path: std::path::PathBuf,
         expected_sha256: String,
     ) -> bool {
-        if self.critical_operation {
+        if self.shell.critical_operation {
             self.set_notice("关键操作仍在执行，完成前不能启动其他任务。".to_string());
             return false;
         }
@@ -503,12 +503,12 @@ impl AppState {
         delete.stage = WizardStage::Running;
         delete.message = Some("正在复核文件内容并删除备份…".to_string());
         self.input_mode = InputMode::Normal;
-        self.critical_operation = true;
+        self.shell.critical_operation = true;
         Some((delete.path.clone(), delete.expected_sha256.clone()))
     }
 
     pub fn finish_backup_delete(&mut self, result: Result<(), String>) {
-        self.critical_operation = false;
+        self.shell.critical_operation = false;
         if let Some(delete) = self.backups.delete.as_mut() {
             delete.stage = WizardStage::Result;
             delete.message = Some(match result {
@@ -519,7 +519,7 @@ impl AppState {
     }
 
     pub const fn workspace(&self) -> Workspace {
-        self.workspace
+        self.shell.workspace
     }
 
     pub const fn provision(&self) -> &ProvisionState {

@@ -226,7 +226,7 @@ impl AppState {
     }
 
     pub fn provision_begin_insert(&mut self) -> bool {
-        if self.workspace != Workspace::Provision
+        if self.shell.workspace != Workspace::Provision
             || self.provision.stage != ProvisionStage::Form
             || !self.provision_selected_field_is_editable()
         {
@@ -255,7 +255,7 @@ impl AppState {
         self.provision.kind = ProvisionKind::ALL[selected];
         self.provision.target_disk = target_disk;
         self.pinned_disk = target_disk;
-        if self.workspace == Workspace::Provision {
+        if self.shell.workspace == Workspace::Provision {
             if target_disk.is_some() {
                 self.provision.stage = ProvisionStage::Menu;
                 self.set_item_count(ProvisionKind::ALL.len());
@@ -491,7 +491,7 @@ impl AppState {
         self.provision.result_status = None;
         self.provision.run = Some(ProvisionRunState::new());
         self.provision.pane_focus = crate::tui::pane::PaneFocus::provision_running();
-        self.critical_operation = true;
+        self.shell.critical_operation = true;
         Some(prepared)
     }
 
@@ -499,7 +499,7 @@ impl AppState {
         &mut self,
         result: Result<crate::application::provision::ProvisionWriteOutcome, String>,
     ) {
-        self.critical_operation = false;
+        self.shell.critical_operation = false;
         self.provision.stage = ProvisionStage::Result;
         self.input_mode = InputMode::Normal;
         match result {

@@ -304,7 +304,7 @@ impl AppState {
         }
         Some(BreadcrumbModel {
             path,
-            back_target: self.navigation.back_target(),
+            back_target: self.shell.navigation.back_target(),
         })
     }
 
@@ -713,15 +713,15 @@ impl AppState {
     }
 
     pub fn begin_advanced_inspect(&mut self, source: AdvancedInspectSource) -> bool {
-        if self.critical_operation {
+        if self.shell.critical_operation {
             self.set_notice("关键操作仍在执行，完成前不能启动全盘检查。");
             return false;
         }
-        self.push_navigation_frame(NavigationLocation::from_workspace(self.workspace));
+        self.push_navigation_frame(NavigationLocation::from_workspace(self.shell.workspace));
         if let AdvancedInspectSource::Disk(disk) = &source {
             self.pinned_disk = Some(*disk);
         }
-        self.workspace = crate::tui::state::Workspace::Inspect;
+        self.shell.workspace = crate::tui::state::Workspace::Inspect;
         let mut expanded = std::collections::BTreeSet::new();
         expanded.insert("device".to_string());
         self.inspect.advanced = Some(AdvancedInspectState {
@@ -1723,7 +1723,7 @@ impl AppState {
             let state = self.inspect.advanced.as_ref()?;
             (state.panel, state.tree_selected, state.pane_focus.clone())
         };
-        self.navigation.push(NavigationFrame {
+        self.shell.navigation.push(NavigationFrame {
             location: NavigationLocation::Inspect,
             selection: self.selected,
             item_count: self.item_count,
@@ -1836,7 +1836,7 @@ impl AppState {
             let state = self.inspect.advanced.as_ref()?;
             (state.panel, state.tree_selected, state.pane_focus.clone())
         };
-        self.navigation.push(NavigationFrame {
+        self.shell.navigation.push(NavigationFrame {
             location: NavigationLocation::Inspect,
             selection: self.selected,
             item_count: self.item_count,

@@ -11,6 +11,8 @@ mod devices_state;
 mod inspect_state;
 #[path = "navigation.rs"]
 mod navigation;
+#[path = "shell/state.rs"]
+mod shell_state;
 #[path = "provision/state.rs"]
 mod provision_state;
 
@@ -18,6 +20,7 @@ pub use backups_state::*;
 pub use devices_state::*;
 pub use inspect_state::*;
 pub use navigation::*;
+pub use shell_state::*;
 pub use provision_state::*;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -162,34 +165,27 @@ pub enum StateEffect {
 }
 
 pub struct AppState {
-    demo_mode: bool,
-    workspace: Workspace,
+    shell: ShellState,
     devices: DevicesState,
     backups: BackupsState,
     selected: usize,
     item_count: usize,
     input_mode: InputMode,
-    critical_operation: bool,
-    exit_pending: bool,
     wizard: Option<WizardState>,
     provision: ProvisionState,
     pinned_disk: Option<u32>,
     inspect: InspectState,
     disk_layout_tail: super::disk_layout::TailExpansion,
     disk_layout_selected: usize,
-    navigation: NavigationStack,
     horizontal_scroll: std::collections::BTreeMap<
         super::table_layout::TableKind,
         super::table_layout::HorizontalScrollState,
     >,
     table_column_order: std::collections::BTreeMap<super::table_layout::TableKind, Vec<usize>>,
-    notice: Option<String>,
-    notice_at: Option<std::time::Instant>,
     input_buffer: String,
     search_query: String,
     search_matches: Vec<usize>,
     search_cursor: usize,
-    animation_frame: u64,
 }
 
 impl Default for AppState {
@@ -201,40 +197,33 @@ impl Default for AppState {
 impl AppState {
     pub fn new() -> Self {
         Self {
-            demo_mode: false,
-            workspace: Workspace::Devices,
+            shell: ShellState::default(),
             devices: DevicesState::default(),
             backups: BackupsState::default(),
             selected: 0,
             item_count: 0,
             input_mode: InputMode::Normal,
-            critical_operation: false,
-            exit_pending: false,
             wizard: None,
             provision: ProvisionState::default(),
             pinned_disk: None,
             inspect: InspectState::default(),
             disk_layout_tail: super::disk_layout::TailExpansion::Collapsed,
             disk_layout_selected: 0,
-            navigation: NavigationStack::default(),
             horizontal_scroll: std::collections::BTreeMap::new(),
             table_column_order: std::collections::BTreeMap::new(),
-            notice: None,
-            notice_at: None,
             input_buffer: String::new(),
             search_query: String::new(),
             search_matches: Vec::new(),
             search_cursor: 0,
-            animation_frame: 0,
         }
     }
 
     pub const fn animation_frame(&self) -> u64 {
-        self.animation_frame
+        self.shell.animation_frame
     }
 
     pub const fn is_demo(&self) -> bool {
-        self.demo_mode
+        self.shell.demo_mode
     }
 
     pub fn backup_verify_run(&self) -> Option<&BackupVerifyRunState> {
@@ -258,11 +247,11 @@ impl AppState {
     }
 
     pub(crate) fn set_demo_mode(&mut self) {
-        self.demo_mode = true;
+        self.shell.demo_mode = true;
     }
 
     pub fn advance_animation(&mut self) {
-        self.animation_frame = self.animation_frame.wrapping_add(1);
+        self.shell.animation_frame = self.shell.animation_frame.wrapping_add(1);
     }
 
     pub fn input_buffer(&self) -> &str {
@@ -351,7 +340,7 @@ impl AppState {
         self.clear_search_matches();
 
         if query.is_empty() {
-            let count = match self.workspace {
+            let count = match self.shell.workspace {
                 Workspace::Devices => self.devices.rows.len(),
                 Workspace::Inspect => 0,
                 Workspace::Backups => self.backups.rows.len(),
@@ -362,7 +351,7 @@ impl AppState {
             return;
         }
 
-        match self.workspace {
+        match self.shell.workspace {
             Workspace::Devices => {
                 for (index, row) in self.devices.rows.iter().enumerate() {
                     if Self::device_matches_query(row, &query) {
@@ -400,7 +389,7 @@ impl AppState {
     }
 
     fn cycle_search(&mut self, reverse: bool) {
-        if self.search_matches.is_empty() || !self.workspace_filter_active() {
+        if self.search_matches.is_empty() || !self.shell.workspace_filter_active() {
             return;
         }
         self.selected = if reverse {
@@ -427,19 +416,19 @@ impl AppState {
     }
 
     pub fn notice(&self) -> Option<&str> {
-        self.notice_at
+        self.shell.notice_at
             .filter(|at| at.elapsed() < std::time::Duration::from_secs(4))
-            .and(self.notice.as_deref())
+            .and(self.shell.notice.as_deref())
     }
 
     pub fn set_notice(&mut self, message: impl Into<String>) {
-        self.notice = Some(message.into());
-        self.notice_at = Some(std::time::Instant::now());
+        self.shell.notice = Some(message.into());
+        self.shell.notice_at = Some(std::time::Instant::now());
     }
 
     pub fn clear_notice(&mut self) {
-        self.notice = None;
-        self.notice_at = None;
+        self.shell.notice = None;
+        self.shell.notice_at = None;
     }
 
     pub fn wizard(&self) -> Option<&WizardState> {
@@ -462,7 +451,7 @@ impl AppState {
         backup: Option<std::path::PathBuf>,
         expected_identity: Option<ExpectedIdentity>,
     ) -> bool {
-        if self.critical_operation {
+        if self.shell.critical_operation {
             self.set_notice("关键操作仍在执行，完成前不能启动其他任务。".to_string());
             return false;
         }
@@ -524,7 +513,7 @@ impl AppState {
         wizard.stage = WizardStage::Running;
         wizard.message = Some("关键写盘阶段进行中，不可中断".to_string());
         self.input_mode = InputMode::Normal;
-        self.critical_operation = true;
+        self.shell.critical_operation = true;
         Some(intent)
     }
 
@@ -541,7 +530,7 @@ impl AppState {
     }
 
     pub fn finish_write(&mut self, result: Result<(), String>) {
-        self.critical_operation = false;
+        self.shell.critical_operation = false;
         if let Some(wizard) = self.wizard.as_mut() {
             wizard.stage = WizardStage::Result;
             wizard.progress = None;
@@ -573,7 +562,7 @@ impl AppState {
     }
 
     pub const fn active_scan_pending(&self) -> bool {
-        match self.workspace {
+        match self.shell.workspace {
             Workspace::Devices => self.devices.scan_pending,
             Workspace::Backups => self.backups.scan_pending,
             Workspace::Inspect => false,
@@ -586,7 +575,7 @@ impl AppState {
     }
 
     pub fn replace_devices(&mut self, devices: Vec<crate::disk_scan::Row>) {
-        let selected_disk = (self.workspace == Workspace::Devices)
+        let selected_disk = (self.shell.workspace == Workspace::Devices)
             .then(|| self.selected_device_disk())
             .flatten();
         if self
@@ -608,7 +597,7 @@ impl AppState {
             self.devices.table_view.generation.wrapping_add(1),
         );
         self.devices.scan_pending = false;
-        if self.workspace == Workspace::Provision {
+        if self.shell.workspace == Workspace::Provision {
             if self.pinned_disk.is_none() {
                 self.provision.stage = ProvisionStage::SelectDisk;
                 self.set_item_count(self.provision_selectable_devices().count());
@@ -618,13 +607,13 @@ impl AppState {
                 self.set_item_count(self.provision_selectable_devices().count());
             }
         }
-        if self.workspace == Workspace::Devices {
+        if self.shell.workspace == Workspace::Devices {
             self.rebuild_workspace_filter();
             if let Some(disk) = selected_disk {
                 let source_index = self.devices.rows.iter().position(|row| row.disk == disk);
                 self.selected = source_index
                     .and_then(|index| {
-                        if self.workspace_filter_active() {
+                        if self.shell.workspace_filter_active() {
                             self.search_matches.iter().position(|value| *value == index)
                         } else {
                             Some(index)
@@ -660,7 +649,7 @@ impl AppState {
 
     pub fn visible_device_indices(&self) -> Vec<usize> {
         let indices =
-            if self.workspace == Workspace::Devices && !self.active_search_query().is_empty() {
+            if self.shell.workspace == Workspace::Devices && !self.active_search_query().is_empty() {
                 self.search_matches.clone()
             } else {
                 (0..self.devices.rows.len()).collect()
@@ -682,7 +671,7 @@ impl AppState {
 
     pub fn visible_backup_indices(&self) -> Vec<usize> {
         let indices =
-            if self.workspace == Workspace::Backups && !self.active_search_query().is_empty() {
+            if self.shell.workspace == Workspace::Backups && !self.active_search_query().is_empty() {
                 self.search_matches.clone()
             } else {
                 (0..self.backups.rows.len()).collect()
@@ -710,7 +699,7 @@ impl AppState {
     }
 
     pub fn selected_device(&self) -> Option<&crate::disk_scan::Row> {
-        match self.workspace {
+        match self.shell.workspace {
             Workspace::Devices => {
                 let index = self.device_source_index_at_visible(self.selected)?;
                 self.devices.rows.get(index)
@@ -817,7 +806,7 @@ impl AppState {
     }
 
     pub fn provision_select_disk(&mut self) -> Option<u32> {
-        if self.workspace != Workspace::Provision
+        if self.shell.workspace != Workspace::Provision
             || self.provision.stage != ProvisionStage::SelectDisk
         {
             return None;
@@ -836,7 +825,7 @@ impl AppState {
     }
 
     pub fn begin_provision_for_selected_device(&mut self) -> Result<u32, String> {
-        if self.workspace != Workspace::Devices {
+        if self.shell.workspace != Workspace::Devices {
             return Err("请先在设备页选择目标 USB 盘。".into());
         }
         let row = self
@@ -872,7 +861,7 @@ impl AppState {
     }
 
     pub fn selected_backup(&self) -> Option<&crate::application::BackupWorkspaceItem> {
-        if self.workspace != Workspace::Backups {
+        if self.shell.workspace != Workspace::Backups {
             return None;
         }
         let index = self.backup_source_index_at_visible(self.selected)?;
@@ -889,7 +878,7 @@ impl AppState {
     }
 
     pub fn replace_backups(&mut self, backups: Vec<crate::application::BackupWorkspaceItem>) {
-        let selected_path = (self.workspace == Workspace::Backups)
+        let selected_path = (self.shell.workspace == Workspace::Backups)
             .then(|| self.selected_backup_path())
             .flatten();
         self.backups.rows = backups;
@@ -906,13 +895,13 @@ impl AppState {
         self.backups.selection
             .retain(|path| selectable.contains(path));
         self.backups.scan_pending = false;
-        if self.workspace == Workspace::Backups {
+        if self.shell.workspace == Workspace::Backups {
             self.rebuild_workspace_filter();
             if let Some(path) = selected_path {
                 let source_index = self.backups.rows.iter().position(|row| row.path == path);
                 self.selected = source_index
                     .and_then(|index| {
-                        if self.workspace_filter_active() {
+                        if self.shell.workspace_filter_active() {
                             self.search_matches.iter().position(|value| *value == index)
                         } else {
                             Some(index)
@@ -924,10 +913,10 @@ impl AppState {
     }
 
     fn switch_workspace(&mut self, workspace: Workspace) {
-        if self.workspace == workspace {
+        if self.shell.workspace == workspace {
             return;
         }
-        if self.workspace == Workspace::Devices
+        if self.shell.workspace == Workspace::Devices
             && matches!(workspace, Workspace::Backups | Workspace::Inspect)
         {
             self.pinned_disk = self.selected_device().map(|row| row.disk);
@@ -947,7 +936,7 @@ impl AppState {
         if self.input_mode == InputMode::Search {
             self.input_mode = InputMode::Normal;
         }
-        self.workspace = workspace;
+        self.shell.workspace = workspace;
         self.selected = 0;
         if workspace == Workspace::Devices {
             if let Some(disk) = self.provision.target_disk {
@@ -983,14 +972,14 @@ impl AppState {
     }
 
     pub fn navigation(&self) -> &NavigationStack {
-        &self.navigation
+        &self.shell.navigation
     }
 
     pub fn active_table_kind(&self) -> Option<super::table_layout::TableKind> {
         use super::table_layout::TableKind;
         use crate::tui::pane::PaneId;
 
-        match self.workspace {
+        match self.shell.workspace {
             Workspace::Devices if self.devices_focused_pane() == PaneId::DevicesList => {
                 Some(TableKind::Devices)
             }
@@ -1606,7 +1595,7 @@ impl AppState {
     }
 
     pub fn shift_workspace_pane(&mut self, reverse: bool) {
-        match self.workspace {
+        match self.shell.workspace {
             Workspace::Devices => self
                 .devices_pane_focus
                 .cycle(&crate::tui::pane::PaneId::DEVICES_ORDER, reverse),
@@ -1625,7 +1614,7 @@ impl AppState {
 
     pub fn spatial_workspace_focus(&mut self, dx: i8, dy: i8) {
         use crate::tui::pane::PaneId;
-        let (focus, next) = match self.workspace {
+        let (focus, next) = match self.shell.workspace {
             Workspace::Devices => {
                 let focus = self.devices.pane_focus.focused();
                 let next = match (focus, dx.signum(), dy.signum()) {
@@ -1680,7 +1669,7 @@ impl AppState {
             NavigationLocation::Devices => Some(self.devices.pane_focus.clone()),
             NavigationLocation::Backups => Some(self.backups.pane_focus.clone()),
         };
-        self.navigation.push(NavigationFrame {
+        self.shell.navigation.push(NavigationFrame {
             location,
             selection: self.selected,
             item_count: self.item_count,
@@ -1692,7 +1681,7 @@ impl AppState {
     }
 
     pub fn pop_navigation_frame(&mut self) -> Option<NavigationFrame> {
-        self.navigation.pop()
+        self.shell.navigation.pop()
     }
 
     fn restore_workspace_frame(&mut self) {
@@ -1734,11 +1723,11 @@ impl AppState {
     }
 
     pub const fn is_critical_operation(&self) -> bool {
-        self.critical_operation
+        self.shell.critical_operation
     }
 
     pub const fn exit_pending(&self) -> bool {
-        self.exit_pending
+        self.shell.exit_pending
     }
 
     pub fn set_item_count(&mut self, item_count: usize) {
@@ -1751,12 +1740,12 @@ impl AppState {
     }
 
     pub fn set_critical_operation(&mut self, critical: bool) {
-        self.critical_operation = critical;
+        self.shell.critical_operation = critical;
     }
 
     pub fn take_deferred_exit(&mut self) -> StateEffect {
-        if !self.critical_operation && self.exit_pending {
-            self.exit_pending = false;
+        if !self.shell.critical_operation && self.shell.exit_pending {
+            self.shell.exit_pending = false;
             StateEffect::ExitRequested
         } else {
             StateEffect::None
@@ -1767,7 +1756,7 @@ impl AppState {
     /// critical worker owns the operation slot. Every command entry point (keys,
     /// command palette and direct dispatch) must pass through this guard.
     pub fn guard_critical_command(&mut self, command: NavCommand) -> Option<StateEffect> {
-        if !self.critical_operation {
+        if !self.shell.critical_operation {
             return None;
         }
         if matches!(
@@ -1782,7 +1771,7 @@ impl AppState {
             return None;
         }
         if command == NavCommand::Quit {
-            self.exit_pending = true;
+            self.shell.exit_pending = true;
             Some(StateEffect::ExitDeferred)
         } else if command == NavCommand::Escape {
             self.set_notice(
@@ -1804,7 +1793,7 @@ impl AppState {
             if let Some(advanced) = self
                 .advanced_inspect
                 .as_ref()
-                .filter(|_| self.workspace == Workspace::Inspect)
+                .filter(|_| self.shell.workspace == Workspace::Inspect)
             {
                 if advanced.stage == AdvancedInspectStage::Running {
                     self.set_notice("全盘检查正在后台读取结构，请等待完成。");
@@ -1815,7 +1804,7 @@ impl AppState {
                 }
                 return StateEffect::None;
             }
-            if self.workspace == Workspace::Provision {
+            if self.shell.workspace == Workspace::Provision {
                 match self.provision.stage {
                     ProvisionStage::SelectDisk | ProvisionStage::Menu => {
                         self.restore_workspace_frame();
@@ -1843,14 +1832,14 @@ impl AppState {
                 }
                 return StateEffect::None;
             }
-            if self.workspace == Workspace::Devices
+            if self.shell.workspace == Workspace::Devices
                 && self.devices.pane_focus.focused() != crate::tui::pane::PaneId::DevicesList
             {
                 self.devices.pane_focus
                     .focus(crate::tui::pane::PaneId::DevicesList);
                 return StateEffect::None;
             }
-            if self.workspace == Workspace::Backups
+            if self.shell.workspace == Workspace::Backups
                 && self.backups.pane_focus.focused() != crate::tui::pane::PaneId::BackupsList
             {
                 self.backups.pane_focus
@@ -1890,7 +1879,7 @@ impl AppState {
         match command {
             NavCommand::NextWorkspace | NavCommand::PreviousWorkspace => {
                 self.switch_workspace(
-                    self.workspace
+                    self.shell.workspace
                         .shifted(command == NavCommand::PreviousWorkspace),
                 );
             }
@@ -1899,12 +1888,12 @@ impl AppState {
             NavCommand::WorkspaceBackups => self.switch_workspace(Workspace::Backups),
             NavCommand::WorkspaceProvision => self.switch_workspace(Workspace::Provision),
             NavCommand::Up => {
-                if self.workspace == Workspace::Devices
+                if self.shell.workspace == Workspace::Devices
                     && self.devices_focused_pane() == crate::tui::pane::PaneId::DevicesSummary
                 {
                     self.device_summary_move_section(-1);
                 } else {
-                    let detail_pane = match self.workspace {
+                    let detail_pane = match self.shell.workspace {
                         Workspace::Devices
                             if self.devices_focused_pane()
                                 != crate::tui::pane::PaneId::DevicesList =>
@@ -1927,12 +1916,12 @@ impl AppState {
                 }
             }
             NavCommand::Down => {
-                if self.workspace == Workspace::Devices
+                if self.shell.workspace == Workspace::Devices
                     && self.devices_focused_pane() == crate::tui::pane::PaneId::DevicesSummary
                 {
                     self.device_summary_move_section(1);
                 } else {
-                    let detail_pane = match self.workspace {
+                    let detail_pane = match self.shell.workspace {
                         Workspace::Devices
                             if self.devices_focused_pane()
                                 != crate::tui::pane::PaneId::DevicesList =>

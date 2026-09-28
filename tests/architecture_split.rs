@@ -764,6 +764,40 @@ fn app_state_owns_inspect_through_inspect_substate() {
 }
 
 #[test]
+fn app_state_owns_global_shell_state_through_shell_substate() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let state = fs::read_to_string(root.join("src/tui/state.rs")).expect("read TUI state");
+    let shell =
+        fs::read_to_string(root.join("src/tui/shell/state.rs")).expect("read shell state");
+
+    let app_state = state
+        .split("pub struct AppState {")
+        .nth(1)
+        .and_then(|tail| tail.split("impl Default for AppState").next())
+        .expect("AppState section");
+    assert!(app_state.contains("shell: ShellState"));
+    for legacy_field in [
+        "demo_mode: bool",
+        "workspace: Workspace",
+        "critical_operation: bool",
+        "exit_pending: bool",
+        "navigation: NavigationStack",
+        "notice: Option<String>",
+        "notice_at: Option<std::time::Instant>",
+        "animation_frame: u64",
+    ] {
+        assert!(
+            !app_state.contains(legacy_field),
+            "global shell field must live in ShellState: {legacy_field}"
+        );
+        assert!(
+            shell.contains(legacy_field),
+            "ShellState must own global field: {legacy_field}"
+        );
+    }
+}
+
+#[test]
 fn production_and_demo_share_one_tui_action_controller() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let controller = fs::read_to_string(root.join("src/tui/controller.rs"))
