@@ -10,7 +10,7 @@
 
 - `src/cli*.rs`：CLI 参数解析与文本入口；公开命令目录统一由 `src/command_spec.rs` 描述，并供 help/completion 共用。
 - `src/tui/`：交互式前端；`controller` 统一解释生产与演示模式的 `TuiAction` 和当前控件角色，真实外部副作用由生产任务适配器执行，演示模式只能消费内存夹具；制盘、检查、备份、设备工作区不直接实现裸盘安全策略。
-- `src/application/`：CLI/TUI 共用应用服务；制盘按 `prepare/commit/export` 分离，`TargetSession` 统一写盘状态转换，`EvidenceSource` 统一物理盘/EDPB 只读证据入口。
+- `src/application/`：CLI/TUI 共用应用服务；制盘按 `prepare/commit/export` 分离，`TargetSession` 统一写盘状态转换，`EvidenceSource` 统一物理盘/EDPB 只读证据入口；`post_restore` 分别处理只读评估、分区格式化和加密分区重建。
 - `src/media_identity.rs`、`src/partition_table.rs`、`src/disk_layout.rs`、`src/backup_coverage.rs`：UI-neutral 领域/读模型与纯算法；`application` 仅保留兼容 re-export 和 use-case 编排，`diskio`/`edpb`/`disk_scan` 不得反向依赖 application。
 - `src/media_identity_observer.rs`：只读身份观察服务，可读取协议镜像和硬件探测但没有任何写盘状态转换入口。
 - `src/provision/`：纯内存制盘领域模型与验证器；Plain 与官方 mode0～3 都通过统一 `ProvisionRequest` 进入应用层。
@@ -22,11 +22,11 @@
 
 ## 读写边界
 
-只读路径使用只读设备句柄；`list/info/inspect/backup create/deep` 不进入写盘准备流程。真实写盘必须经 `TargetSession<ReadOnly> -> TargetSession<PreparedWrite> -> TargetSession<WriteLocked>` 显式状态转换，并保持系统盘保护、USB 整盘确认、写前备份、卸载/锁卷、重新打开后的身份复核、原子写、同步/读回、失败回滚。
+只读路径使用只读设备句柄；`list/info/inspect/backup create` 不进入写盘准备流程。真实写盘必须经 `TargetSession<ReadOnly> -> TargetSession<PreparedWrite> -> TargetSession<WriteLocked>` 显式状态转换，并保持系统盘保护、USB 整盘确认、卸载/锁卷、重新打开后的身份复核、同步/读回、失败回滚。制盘在写盘前强制创建元数据备份；恢复后的格式化和密钥域重建是恢复事务之外的独立授权操作。
 
 CLI 与 TUI 的制盘能力共用同一 `ProvisionRequest::{Official, Plain}` 和 prepare/commit 服务。Plain 是普通 MBR 磁盘目标，不属于官方 mode 编号，也不得映射为 mode4。
 
-应用层通过 `WriteEvent`、`BackupReport`、制盘报告和检查工作区返回结构化结果；ANSI/CLI 文本渲染位于前端层。TUI 后台任务只传递结构化结果，不直接向终端写输出；进入关键写入阶段后，退出请求延迟到安全收尾完成。
+应用层通过 `WriteEvent`、`MetadataBackupReport`、`MetadataRestoreOutcome`、`PostRestoreAssessment`、制盘报告和检查工作区返回结构化结果；ANSI/CLI 文本渲染位于前端层。元数据恢复报告只记录写入和读回，分区可用性与后续操作结果分别表达。TUI 后台任务只传递结构化结果，不直接向终端写输出；进入关键写入阶段后，退出请求延迟到安全收尾完成。
 
 ## 协议与语义事实源
 
@@ -38,7 +38,7 @@ LBA0～12 的类型化解析器、配置类型轴和跨 LBA 语义位于 `src/pr
 
 当前正式备份格式是自包含、自校验 `.edpb`。运行时不再读取或生成旧 `.bin/.md5/.sha256` 备份链；已经迁移成 EDPB 的历史快照仍可按 `LegacyMigrated` 清单语义只读解析。
 
-元数据备份保存 LBA0～12 和必要证据区；深度备份在此基础上通过 `PartitionReader` 只读获取文件系统元数据。当前 FAT16/FAT32/exFAT 可生成目录清单；无法确认的格式采用“无法确认即拒绝继续”的安全策略。
+新建备份统一使用 v3 `metadata_only` 合约。Plain MBR/GPT 保存分区表原始元数据和类型化几何；EDP 保存 LBA0～12、LBA7 指向的 LCE 与已确认盘尾协议对象。新路径不采集文件系统、目录或用户文件；可用 USB 序列号原文保存在 v3 容器中，历史 v1/v2 序列号摘要保持读取兼容。历史 `Deep` 仅保留 CLI 弃用入口和 EDPB 读取/分析兼容。元数据恢复只写回 `restorable` 原始工件并返回类型化报告；后续评估、格式化与密钥域重建分别走独立服务与安全链。
 
 ## 制盘架构
 

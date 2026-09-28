@@ -119,7 +119,7 @@ TUI 顶部使用统一工作区导航，并以 类 Vim 的 tab/window/navigation
 | `n / N` | 下一个 / 上一个搜索匹配 |
 | `:` | 打开任务型命令面板，不执行 shell |
 | `r` | 刷新当前工作区 |
-| `b` | 设备页或备份页新建备份，并选择元数据备份 / 深度备份 |
+| `b` | 设备页或设备页或备份页新建元数据备份 |
 | `Enter` | 设备页进入制盘；备份页进入全盘检查；制盘 Form 的 Normal 模式生成只读计划，Insert 模式完成字段编辑；检查中的扇区节点打开扇区检查器 |
 | `i` | 设备页/备份页进入全盘检查；制盘 Normal 模式下编辑当前可编辑字段 |
 | `R` | 备份页进入恢复安全向导，不绕过既有确认与写盘安全链 |
@@ -146,7 +146,7 @@ TUI 全盘检查顶部显示整盘布局条和精确图例，根结构树按物�
 硬件身份绑定的稀疏镜像，真实写盘仍需再次输入 `YES`。模式1若识别到目标盘已经是模式0，会自动改用保留重制计划：原 type4 的起点、大小和密钥材料保持不变，type2 从 LBA63 扩满到原 type4 之前；不会再出现单独的改造入口。
 
 命令面板支持 `:devices`、`:backups`、`:provision`、`:inspect`、
-`:backup-create`、`:backup-deep`、`:backup-verify`、`:backup-delete`、`:batch-delete`、`:backup-prune`、
+`:backup-create`、`:backup-verify`、`:backup-delete`、`:batch-delete`、`:backup-prune`、
 `:restore`、`:refresh`、`:help`、`:q`。输入永远不会传给系统命令解释器。
 
 TUI 只有一个用户可见的检查入口：`:inspect`、设备/备份页 `i` 以及备份页 Enter 都进入同一个**全盘结构树**。树可展开“设备 → 区域 → 范围 → 扇区 → 字段”，`o`/`h`/`l` 折叠展开，`gl` 跳转任意 LBA/绝对字节偏移，`/` 搜索结构化节点或已缓存字段/值，`n/N` 在全部匹配间循环；扇区检查器支持 `0/$` 行首尾、`gg/G` 扇区首尾、`Ctrl-u/Ctrl-d` 半页、`PageUp/PageDown` 在当前 sector 内整页移动、`[`/`]` 切换前后 sector、`v` 切换原始/解码/混合，以及 `Space/o` 展开字段/位。
@@ -165,7 +165,7 @@ onlyid/device_id；先只读预览；精确输入 `YES` 后才进入关键事务
 ```bash
 edpcli info
 edpcli info --disk 4
-edpcli info backup.bin
+edpcli info backup.edpb
 ```
 
 `info` 的来源选择规则：
@@ -279,14 +279,14 @@ edpcli backup create --disk 4
 edpcli backup list
 edpcli backup restore
 edpcli backup restore 2 --disk 4
-edpcli backup restore backup.bin --disk 4
+edpcli backup restore backup.edpb --disk 4
 edpcli backup verify
 edpcli backup verify 2
-edpcli backup verify backup.bin
+edpcli backup verify backup.edpb
 edpcli backup delete
 edpcli backup delete 2
 edpcli backup delete 2,4,5
-edpcli backup delete backup.bin
+edpcli backup delete backup.edpb
 edpcli backup prune
 edpcli backup prune --keep 3
 edpcli backup prune --keep 3 --yes
@@ -294,26 +294,13 @@ edpcli backup prune --keep 3 --yes
 
 ## 3. `backup create`：立即备份当前 U 盘
 
-`backup create` 是纯只读介质流程。多盘时使用和其他物理盘命令相同的
-`DeviceSelector`；读取裸盘需要权限时由 CLI 自己提权并固定平台原生目标选择器。
+`backup create` 只读源盘，默认创建一种 `metadata_only` EDPB。多盘时使用统一的目标选择器；需要裸盘权限时，CLI 会固定所选物理盘再提权。TUI 创建页显示保存范围：物理身份与几何、分区结构、适用时的 EDP 协议；文件系统、目录和用户文件均不包含。
 
-已注册 EDP 盘继续创建元数据级或深度级 EDPB；当 LBA7/LBA4 已被 Plain 制盘清理时，普通
-`backup create` 改为创建核心级 EDPB，并从 USB/SCSI 硬件信息生成 `device_id`。Plain 盘必须
-能读取稳定的硬件序列号；备份只保存其 SHA-256 绑定，不把明文序列号写进容器。Plain 不具备
-EDP 分区语义，因此 `backup create --deep` 会明确拒绝，而不会伪造深度备份结果。
+Plain MBR 盘保存原始 LBA0 与分区几何；Plain GPT 盘保存 protective MBR、主备 GPT header 和 entry array，并验证主备 CRC 与几何。EDP 盘保存原始 LBA0～12、LBA7 指向的 LCE，以及已识别盘尾协议对象。EDP 备份不要求知道分区密码。
 
-它与写前备份共用同一套 EDPB 写入和持久化约束：
+v3 容器在可用时保存 USB 硬件序列号原文，并保存 VID/PID、总扇区数和逻辑扇区大小；旧 v1/v2 的序列号摘要仍可读取。备份在容器内校验每个工件和清单，使用仅新建方式避免覆盖，并同步文件和目录。独立备份不卸载、不锁定、不以读写方式重开，也不修改 U 盘。
 
-- 输入固定为 LBA0-12，`13 * 512 = 6656B`；
-- onlyid 从备份自身 LBA4 重新解析；Plain 允许 onlyid 为空；
-- 相同 device_id / VID / PID / 容量元数据；
-- EDP 盘在可取得硬件序列号时也写入不可逆的序列号哈希绑定，供后续 EDP→Plain 后恢复终验；
-- 文件名按状态使用 `_mode1` 或 `_plain` 标记；
-- EDPB 容器内工件与文件级 SHA-256 完整性校验；
-- 相同仅新建方式防覆盖；
-- 相同 `fsync` 与目录持久化。
-
-独立备份不会调用写盘准备/卸载/锁定，不会重新打开为读写，不会修改 U 盘。
+`--deep` 已弃用，仅用于历史只读文件系统分析兼容；新产品默认备份及 TUI 均只提供元数据备份。
 
 ## 4. 备份列表和全局编号
 
@@ -341,29 +328,17 @@ User。备份健康检查包含固定大小和 EDPB 容器完整性校验。
 ```bash
 edpcli backup restore
 edpcli backup restore 2
-edpcli backup restore backup.bin
+edpcli backup restore backup.edpb --disk 4
 edpcli backup restore --disk 4
 ```
 
-无备份参数时：
+恢复先选择目标 U 盘与备份，校验 EDPB 清单、工件和物理身份，再核对精确扇区大小与总几何。显式文件路径和全局编号都不能绕过目标盘授权。完成卸载锁卷和重新打开后，还会重新观察目标身份与分区几何，随后仅写回声明可恢复的元数据工件，执行同步、读回与失败回滚。
 
-1. 自动选择或交互选择目标 U 盘；
-2. 读取当前盘 LBA4 身份；
-3. 只显示属于当前盘的备份；
-4. 用户选择；
-5. 校验 6656B 大小、SHA-256 与 LBA4 身份；
-6. 用户确认；
-7. 卸载/锁卷、reopen 复核后执行原子恢复。
+恢复成功表示分区结构及适用的 EDP 协议元数据已写回并验证，不表示文件系统或用户数据已恢复。恢复后只读检查各分区，分别显示可用、需要格式化、需要原密码、加密元数据异常或暂不支持。评估失败也不会抹去已成功的元数据恢复结果。
 
-数字目标先经过统一 `BackupSelector`；若全局编号指向其他物理盘，恢复会拒绝。
-当前 LBA4 身份非零时，显式文件也不能绕过原有 16B LBA4 身份终验。
+CLI 默认不会自动格式化。用户可在恢复后的交互步骤中逐分区选择 FAT16/exFAT 空文件系统，并再次确认。加密分区可用原密码验证旧 FileKey 后沿用原密钥域；若选择 `reinitialize`，必须输入新密码两次、独立确认清空重建，然后生成新的 FileKey 和密钥记录。`--yes` 不能跳过这次重建确认。后续格式化或重建失败不会反转已验证的元数据恢复报告。当前 portable 写盘器不支持 FAT32/NTFS。
 
-若当前盘已经被转换为 Plain、LBA4 身份为零，则只允许**显式指定备份**进入恢复，并要求该
-EDPB 带有新版本写入的硬件序列号 SHA-256 绑定；程序同时复核序列号哈希、VID/PID、容量和
-当前 USB/SCSI 硬件能够生成的 `device_id` 候选，并在 unmount/lock 后、reopen 写入前再次复核。
-旧 EDPB 若没有这项硬件绑定会继续 fail-closed，绝不会仅凭容量或同型号 VID/PID 放行。
-
-mode1 备份会明确提示，并保持既有防误恢复语义。
+历史 v1/v2 EDPB 继续按原 schema 读取；缺少强物理身份所需证据时会拒绝危险恢复，不能仅凭容量或同型号 VID/PID 放行。
 
 ## 6. 校验、删除和策略清理
 
@@ -372,7 +347,7 @@ mode1 备份会明确提示，并保持既有防误恢复语义。
 ```bash
 edpcli backup verify
 edpcli backup verify 2
-edpcli backup verify backup.bin
+edpcli backup verify backup.edpb
 ```
 
 无参数校验全部；数字按全局编号选择；文件名或备份目录内路径精确选择。大小异常、SHA-256

@@ -30,7 +30,7 @@ EDPB 是 edpcli 的单文件设备备份容器，扩展名为 `.edpb`。
 - `partition.type2`
 - `partition.type4`
 - `lba7_compatibility_extent`
-- `device.tail_window`
+- `device.tail_metadata_mirror` / `device.tail_restore_node`
 - `vendor.unknown.N`
 
 `Region` 描述“这是什么区域”，不表示该区域被全量读取。
@@ -124,271 +124,81 @@ v1 当前只写 `codec=none`。未来可以增加压缩编码，而不改变外�
 
 ## 7. 清单
 
-清单 schema 名为 `edpb.manifest.v1`。
+新建备份使用 `edpb.manifest.v3`，`backup_purpose=metadata_only`，`capture_level=metadata`。读取器继续接受历史 v1/v2 清单；历史 `core`、`deep` 和 `legacy_migrated` 是来源分类，不是新建备份的产品等级。v1/v2 不能伪装成 v3 合约。
 
-### 7.1 快照
+### 7.1 快照与恢复合约
 
-必须记录：
-
-- `snapshot_id`
-- `created_epoch`
-- `capture_level`
-- `device_state`
-
-`capture_level`：
-
-- `core`
-- `metadata`
-- `deep`
-- `legacy_migrated`
+`snapshot` 记录 `snapshot_id`、`created_epoch`、`capture_level` 和 `device_state`。v3 的 `restore_contract` 明确表示恢复分区结构、按盘型恢复 EDP 协议、不恢复文件系统、不恢复用户数据，并要求恢复后只读评估。`partitions` 逐项记录索引、角色、分区类型、精确起点与扇区数；文件系统和卷标字段只是提示，不能替代盘面验证。
 
 ### 7.2 设备身份
 
-必须记录：
+`identity.hardware` 保存可用的 VID/PID、USB 序列号原文、序列号质量、厂商/产品/修订、传输方式及硬件几何。v3 不生成或持久化新的 `serial_sha256`；v1/v2 中已有的历史摘要仍可读取并用于兼容匹配。序列号原文仅在备份容器和必要的内存身份对象中使用，不能写入普通日志或提权参数。`identity.protocol` 保存可验证的 `device_id`、`onlyid`、制盘类型和 LBA4 身份摘要；文件名与系统临时 `diskN` 均不构成可信身份。
 
-- `VID`
-- `PID`
-- `device_id`
-- `onlyid`
+### 7.3 几何与观测
 
-这些字段位于容器内部，文件名不参与可信身份判断。
+`geometry` 记录逻辑扇区大小、可知时的物理扇区大小、总扇区数和容量。`observation` 记录本次盘号、平台和程序版本。恢复前后均以当前物理盘重新观测的几何为准。
 
-### 7.3 几何
+### 7.4 `Region`、`Extent`、`Artifact`
 
-记录：
+`Region` 描述物理区域和已识别/未知语义；`Extent` 使用起点、扇区数和用途引用存在的 `Region`；`Artifact` 使用来源 `Extent`、派生关系、完整性、存储位置和 SHA-256 描述容器负载。`restore_policy=restorable` 才能进入恢复写盘计划；`evidence_only` 与 `derived_only` 不得由普通恢复自动写回。未知字节可以保留为证据，但不得伪造结构语义。
 
-- `logical_sector_size`
-- `physical_sector_size`（可未知）
-- `total_sectors`
-- `capacity_bytes`
+## 8. 新建元数据备份的固定范围
 
-### 7.4 本次观测
+Plain MBR 盘保存原始 LBA0 和类型化分区几何；Plain GPT 盘保存 protective MBR、主 header/entry array、备份 entry array/header，并校验主备 header CRC、分区数组 CRC、disk GUID 与几何一致性。Plain 不要求也不保存 EDP LBA0～12 协议工件。
 
-记录：
+EDP 盘保存原始 LBA0～12、由 LBA7 指针确认的 6 扇区 LCE，以及已识别的盘尾历史镜像与恢复节点。LBA0～12 内的 PassInfo、NeedEncrypt、EncryptMode、wrapped FileKey 与 CRC 保持原始字节；创建备份不要求用户密码，也不解包 FileKey。
 
-- `disk_number`
-- `platform`
-- `edpcli_version`
+新建元数据备份不读取或保存数据分区文件系统引导扇区、FAT、分配位图、目录或普通文件负载。不能把 `filesystem_hint` 当作文件系统已备份的证据。
 
-`diskN` 只代表本次系统枚举，不是稳定设备身份。
+## 9. 元数据采集与缺失处理
 
-### 7.5 `Region`
+采集器只读访问源盘，并从已验证的 MBR/GPT 或 EDPF/LBA12 结构生成类型化分区几何。读取的原始 `Artifact` 必须有完整范围、字节长度和哈希；已识别但读取失败的范围必须记录采集问题，不能用零字节冒充成功。恢复计划只使用已验证且声明可恢复的原始扇区工件。
 
-每项至少包含：
+制盘前强制备份与手工 `backup create` 使用同一元数据语义；备份创建、容器校验和目标身份确认成功以后，制盘才允许进入卸载锁卷与写盘阶段。
 
-- `id`
-- `role`
-- `start_lba`，可未知
-- `sector_count`，可未知
-- `semantic_status`
+## 10. 历史深度分析
 
-`semantic_status`：
-
-- `identified`
-- `unknown`
-
-未知区域允许完整保存原始字节，但不得伪造含义。
-
-### 7.6 `Extent`
-
-每项包含：
-
-- `id`
-- `region_id`
-- `start_lba`
-- `sector_count`
-- `purpose`
-
-`Extent` 必须引用存在的 `Region`。
-
-### 7.7 `Artifact`
-
-每项包含：
-
-- `id`
-- `kind`
-- `media_type`
-- `source_extent_ids`
-- `derivation`
-- `restore_policy`
-- `completeness`
-- `storage`
-
-`restore_policy`：
-
-- `restorable`：允许显式恢复流程使用
-- `evidence_only`：只用于证据和分析，默认禁止写回
-- `derived_only`：派生结果，禁止写回
-
-`completeness`：
-
-- `complete`
-- `partial`
-- `not_captured`
-
-`storage` 包含：
-
-- `frame_offset`
-- `data_offset`
-- `stored_length`
-- `original_length`
-- `codec`
-- `sha256`
-
-## 8. 核心级强制内容
-
-所有原生创建的 EDPB 至少必须包含：
-
-- `Region: region.protocol`
-- `Extent: extent.protocol.lba0_12`
-- `start_lba = 0`
-- `sector_count = 13`
-- `Artifact: raw.protocol.lba0_12`
-- 原始长度 = `13 * logical_sector_size`
-- `restore_policy = restorable`
-
-恢复时必须读取 `raw.protocol.lba0_12` 的原始负载。
-
-严禁从解析 JSON 重新拼装 LBA0-LBA12 后写盘。
-
-## 9. 元数据级规划
-
-元数据级在核心之上增加关键盘面证据，目标包括：
-
-- type1/type2/type4 的几何信息
-- 各数据分区文件系统头和必要元数据 `Extent`
-- FAT / allocation bitmap / 根目录等关键元数据
-- LCE
-- 设备尾部窗口
-- 未来发现的其他未知 `Region`
-
-元数据不要求复制整个数据分区。
-
-正常的 `backup create` 和 `apply` 写前自动备份默认创建元数据级 EDPB。
-如果某个元数据 `Extent` 无法读取，备份不得用零字节冒充成功采集：
-成功读取的 `Extent` 正常保存，失败范围记录到
-`derived.capture_issues` 结构化 `Artifact` 中，容器仍可保存并通过完整性校验。
-
-## 10. 深度级规划
-
-深度在元数据之上增加可派生信息：
-
-- 可用时的解密视图
-- 文件系统类型
-- 总空间、已用空间、空闲空间
-- 文件数量、目录数量
-- 完整文件列表
-- 文件属性、大小、时间、可选哈希
-
-深度默认不备份所有用户文件内容。
-
-原始密文 `Artifact` 与解密后的派生 `Artifact` 必须分别保存。
+旧版 `capture_level=deep` 仍可读；CLI `--deep` 已弃用，仅保留历史只读分析兼容，TUI 不再提供新建深度备份。其文件系统元数据与派生清单规则见 [DEEP_BACKUP_V1.md](DEEP_BACKUP_V1.md)。历史深度工件不改变新建备份只保存元数据的产品定义，也不使用户文件负载自动成为可恢复内容。
 
 ## 11. LCE 与已识别盘尾结构
 
-LCE（LBA7 兼容扩展区）是旧版 `EDP_PARTION_INFO` 表中后续条目使用的固定 6 扇区（3072B）兼容物理块，不是泛指盘尾窗口，也不是 type4 专属区域。官方写入端已证明：后续条目保留各自的 `PartionType`，但会被写成同一个 `0xC00` 兼容几何，因此 type2/type4 同址不能解释为逻辑分区别名。
+LCE 是 LBA7 后续条目指向的固定 6 扇区兼容物理块。LBA7 指针是位置事实源；CHS 公式只作一致性交叉验证。type2/type4 可指向同一物理 LCE，但仍保留各自逻辑角色。新 v3 EDP 元数据备份把原始 LCE 标记为可恢复，恢复前复核 LBA7 指针和清单范围。
 
-元数据级必须优先使用 LBA7 盘内指针确定 LCE：
-
-- `Region id = region.lba7_compatibility_extent`
-- `role = lba7_legacy_partition_compatibility_extent`
-- `sector_count = 6`
-- `Artifact id = raw.lba7_compatibility`
-- `restore_policy = evidence_only`
-- `semantic_status = identified`
-
-CHS 公式 `(total_sectors // 16065) * 16065 - 1792` 仅用于一致性交叉验证。若 CHS 计算结果与 LBA7 指针不一致，必须记录结构化采集问题，并继续以 LBA7 指针为事实源，不得静默改写起点。
-
-当前物理负载已闭环为固定 FAT16 兼容镜像，并有独立 EDPSECDISK 变换证据。逻辑 `PartionType` 与该物理负载必须分层表示：同一 LCE 可由 type2 或 type4 条目指向。
-
-`derived.lba7_compatibility.layout` 描述 3072B 物理扩展区、实际指向它的 LBA7 条目/类型、官方模式以及已验证盘面语义；派生结果不得替代 `raw.lba7_compatibility` 原始字节。
-
-IIR 是另一独立协议对象，不得绑定到 LCE。
-
-盘尾只采集当前已有明确位置与语义证据的结构，不再定义固定长度的泛化尾部窗口：
-
-- `total_sectors - 1024` 起连续 9 sectors：历史 LBA4/LBA12 备份镜像；
-- `total_sectors - 4` 的 1 sector：历史恢复节点；
-- 两者分别作为独立物理 `Region/Extent/Artifact` 保存，未识别的相邻空间不得伪装成协议结构。
-
-容量布局中的“尾部区域”是从已验证 LBA7 LCE 起点到物理盘末尾的复合展示层；其子段由 LCE、上述已识别备份结构以及它们之间的物理空闲补集组成。该分组不额外占用 sectors，也不得制造重叠。
+盘尾仅保存已确认位置和语义的两个独立对象：`total_sectors - 1024` 起连续 9 扇区的历史 LBA4/LBA12 镜像，以及 `total_sectors - 4` 的单扇区历史恢复节点。新 v3 EDP 将二者作为可恢复原始协议工件。相邻未知空间不能伪装成协议结构；IIR 也不能与 LCE 混同。
 
 ## 12. 完整性规则
 
-EDPB 校验必须至少检查：
+校验器检查固定头/尾版本与长度、清单定位和 SHA-256、引用图、块边界与编码、每个负载的 SHA-256、存储范围不重叠，以及 v3 的备份目的、恢复合约和分区几何。Plain 必须符合 MBR/GPT 工件规则；EDP 必须符合 LBA0～12、LCE 与已识别盘尾规则。旧版容器使用各自 schema 的校验条件，不能通过伪装字段绕过 v3 约束。
 
-1. 固定头魔数/版本/长度
-2. 固定尾魔数/版本/文件长度
-3. 固定头与固定尾的清单定位信息一致
-4. 清单 SHA-256
-5. `Region`/`Extent`/`Artifact` 引用图
-6. 块魔数/版本/编码方式
-7. 块偏移和长度边界
-8. 每个 `Artifact` 负载 SHA-256
-9. 必需核心 `Artifact` 存在且长度正确
-10. 不允许 `Artifact storage` 非法重叠
+容器校验成功不代表目标可写；恢复还要独立验证备份与当前物理盘身份、精确扇区大小和总几何。
 
-清单中的身份字段还应与原始 LBA0-LBA12 能验证的字段做交叉一致性检查。
+## 13. 恢复与后续操作安全
 
-## 13. 恢复安全
+恢复按 `restore_policy=restorable` 的原始扇区 `Artifact` 生成事务计划。Plain 写回分区表元数据；EDP 写回 LBA0～12、确认的 LCE 和盘尾协议对象。LBA0 最后提交，事务同步、逐扇区读回，失败时回滚。显式备份路径不能绕过强物理身份和精确几何；卸载锁盘后重新打开并再次观察身份与盘面。
 
-EDPB 是备份容器，不代表每个 `Artifact` 都可恢复。
+元数据恢复成功仅表示元数据事务及读回成功。恢复后的只读评估单独区分 `Usable`、`NeedsFormat`、`PasswordRequired`、`CryptoMetadataInvalid` 与 `Unsupported`。评估或后续格式化失败不能反转已验证的元数据恢复结果；元数据备份不保证原文件系统或用户数据可挂载。
 
-只有 `restore_policy=restorable` 的 `Artifact` 才能进入写盘计划。
-
-`evidence_only` 和 `derived_only` 不得被普通恢复流程自动写回。
-
-LCE、未知尾部区域和未知厂商区默认 `evidence_only`。
-
-恢复到物理盘前仍必须执行现有的目标盘身份复核、重新打开后复核、原子写、同步/读回/回滚安全链。
+格式化需要用户逐分区选择并独立确认，应用层再次核对身份和几何；只写所选分区。加密分区沿用原密钥域时必须先验证密码、wrapped FileKey 与 FileKeyCRC。清空并重建加密分区另需新密码双输入、独立破坏性确认、全新 FileKey 与 LBA7/LBA12 记录，并通过事务读回及新密码验证；`--yes` 不跳过该确认。当前真实文件系统写入只开放已验证的 FAT16/exFAT 和 SM4 加密路径。
 
 ## 14. 单文件要求
 
-EDPB 不生成 `.sha256` 旁挂文件。
-
-所有完整性信息都在 `.edpb` 内部。
-
-用户重命名 `.edpb` 不影响设备身份、校验、列表归组和恢复判断。
+EDPB 不生成 `.sha256` 旁挂文件；完整性信息在 `.edpb` 内部。用户重命名文件不改变容器内的身份、校验和恢复授权。
 
 ## 15. 旧 `.bin` 规则
 
-正式运行时：
-
-- `backup list` 不列出 `.bin`
-- `backup verify` 不接受 `.bin`
-- `backup restore` 不接受 `.bin`
-- `info/inspect` 不把 `.bin` 当备份源
-
-旧 `.bin` 仅由一次性迁移工具读取。
-
-迁移后的容器使用 `capture_level=legacy_migrated`，并明确标记原文件中不存在的分区元数据、尾部区域、文件系统统计和文件列表为 `not_captured`。
-
-迁移过程中不得猜测或填零冒充真实采集数据。
+正式运行时，`backup list/verify/restore` 与 `info/inspect` 均不把旧 `.bin` 当作 EDPB。旧 `.bin` 只由一次性迁移工具读取。迁移结果使用 `capture_level=legacy_migrated`，不存在的分区、盘尾、文件系统统计和文件列表必须标记 `not_captured`，不能猜测或填零冒充真实采集。
 
 ## 16. 一次性本机迁移验收
 
-新格式实现完成后，对本机旧备份执行一次性迁移：
+历史 `.bin` 迁移须校验旧文件和旁挂校验值，逐字节保存 6656B LBA0～12，填入可验证的身份，明确标记缺失字段，并对新 EDPB 完整校验。记录旧/新文件映射和 SHA-256；全部验证成功前不得删除旧文件。正式运行代码不依赖该迁移工具。
 
-1. 扫描现有 `.bin` 和其历史旁挂文件。
-2. 校验历史文件。
-3. 把 6656B 原始 LBA0-LBA12 逐字节写入 EDPB 原始 `Artifact`。
-4. 从可验证来源填入设备身份。
-5. 缺失的新字段标记 `not_captured`。
-6. 对新 EDPB 重新执行完整校验。
-7. 输出旧文件到新文件的映射、旧 SHA-256、新 EDPB SHA-256 和成功/失败统计。
-8. 全部验证成功前不得删除旧文件。
+## 17. 深度分析兼容状态
 
-正式发行代码不依赖该迁移器。
+[DEEP_BACKUP_V1.md](DEEP_BACKUP_V1.md) 记录历史深度采集、只读文件系统分析和离线重放的边界。该能力仅作兼容/分析使用；新备份入口只有元数据备份，历史 v1/v2/深度 EDPB 仍可由读取器按各自清单结构校验。
 
-## 17. 深度 v1 实现
+## 18. 元数据备份重构实施记录与约束
 
-`backup create --deep` 保存元数据的超集，并使用 `capture_level=deep`。
-
-FAT16/FAT32 目录清单、状态/null 语义、证据分层、资源限制，以及当前 exFAT/NTFS/解密边界均由 [DEEP_BACKUP_V1.md](DEEP_BACKUP_V1.md) 规定。自动写前备份仍保持元数据级。
-
-## 18. 元数据备份重构提案（待审核，未实施）
-
-> 本节是 2026-09-28 提出的产品/架构重构方案，**当前尚未实施**。在本节进入实现并完成测试、验收之前，现行行为仍以第 1～17 节和当前代码为准。本节审核通过后，再同步修改前文当前规范、用户手册和实现代码，避免把计划误写成现状。
+> 本节保留 2026-09-28 起的需求、实施顺序和验收记录。第 1～17 节描述当前格式与行为；本节各阶段以对应实施状态为准。真实盘验收仍按 18.18～18.19 单独执行。
 
 ### 18.1 重构目标
 
@@ -423,16 +233,16 @@ backup restore = 恢复磁盘/EDP 元数据
 
 ### 18.2 已验证问题与重构原因
 
-2026-09-28 对真实 `disk5` 的 Plain → EDP → Plain 恢复实验已经证明当前 UI/恢复语义存在误导：
+2026-09-28 对真实 `disk5` 的 Plain → EDP → Plain 恢复实验证明旧版 UI/恢复语义存在误导：
 
 - 原 Plain MBR 指向 `LBA2048`；
-- 当前 Plain EDPB 只采集 `LBA0～12`；
+- 当时的 Plain EDPB 只采集 `LBA0～12`；
 - 制盘后，原 `LBA2048` 文件系统已不存在；
-- `backup restore` 只恢复 `LBA0～12`，因此 MBR 再次指向 `LBA2048`，但该位置没有有效 exFAT；
+- 当时的 `backup restore` 只恢复 `LBA0～12`，因此 MBR 再次指向 `LBA2048`，但该位置没有有效 exFAT；
 - `diskutil` 仍能看到分区，`fsck_exfat` 报主/备用 boot region 无效，卷不能挂载；
 - 原 EDP 制盘阶段创建的 exFAT 仍残留在 `LBA63`，但恢复后的 MBR 不再指向它。
 
-因此当前“恢复成功，请拔出重插”是不准确的。重构后必须区分：
+因此旧提示“恢复成功，请拔出重插”不准确。当前实现区分：
 
 - **元数据恢复成功**；
 - **文件系统是否可用**；
@@ -457,10 +267,10 @@ edpcli backup list
 edpcli backup verify
 ```
 
-`backup create --deep` 不再创建新的深度备份。兼容策略：
+新产品默认入口只创建元数据备份；历史分析兼容策略：
 
 1. TUI 移除 `Deep` 入口；
-2. CLI `--deep` 进入弃用阶段，明确提示备份已统一为元数据备份；
+2. CLI `--deep` 已标为弃用，但暂保留旧的只读深度采集路径；
 3. 不允许把 `--deep` 静默映射为另一种语义后仍显示为 `Deep`；
 4. 历史 `capture_level=deep` EDPB 继续支持 `list / verify / info / inspect`；
 5. 历史 `Deep` 容器中的目录/统计派生数据只作为兼容只读信息，新的 `restore` 不依赖这些派生数据。
@@ -872,7 +682,7 @@ EncryptedPartitionReinitializeRequest
 
 ### 18.17 实施顺序 B0 → B10
 
-审核通过后严格按阶段实施，测试先行，小步提交。
+B0～B10 按阶段实施并小步提交；以下保留每阶段的验收证据。
 
 **B0 — 冻结真实故障回归**
 
@@ -978,6 +788,8 @@ EncryptedPartitionReinitializeRequest
 - 删除新产品路径中已经没有用途的 `deep` 入口和文案，但保留历史 EDPB 读取兼容。
 
 **B10 — 文档收口**
+
+**实施状态（2026-09-29）：COMPLETE。** 第 7～17 节已按 v3 元数据备份、Plain/EDP 不同采集范围、独立后处理与历史兼容重写；用户手册、架构文档同步更新，深度分析文档标为历史兼容。第 18 节保留实施记录，真实盘验收仍需按 18.18～18.19 单独执行。
 
 - 重写本文件第 7～17 节为新当前行为；
 - 更新 `docs/user/USAGE.md`；
