@@ -77,6 +77,7 @@ fn large_modules_are_split_by_domain_boundary() {
         "src/tui/provision/render.rs",
         "src/tui/provision/task.rs",
         "src/tui/inspect/state.rs",
+        "src/tui/inspect/search_state.rs",
         "src/tui/inspect/sector_state.rs",
         "src/tui/inspect/render.rs",
         "src/tui/inspect/sector_render.rs",
@@ -118,8 +119,12 @@ fn large_modules_are_split_by_domain_boundary() {
         "shared TUI action controller must stay responsibility-bounded"
     );
     assert!(
-        lines("src/tui/inspect/state.rs") < 1_900,
-        "Inspect workspace state must not absorb Sector Inspector state again"
+        lines("src/tui/inspect/state.rs") < 1_500,
+        "Inspect workspace state must stay orchestration-oriented"
+    );
+    assert!(
+        lines("src/tui/inspect/search_state.rs") < 550,
+        "Inspect search/jump state must stay responsibility-bounded"
     );
     assert!(
         lines("src/tui/inspect/sector_state.rs") < 450,
@@ -274,6 +279,7 @@ fn workspace_modules_do_not_import_platform_or_diskio_directly() {
         "src/tui/provision/state.rs",
         "src/tui/provision/render.rs",
         "src/tui/inspect/state.rs",
+        "src/tui/inspect/search_state.rs",
         "src/tui/inspect/render.rs",
         "src/tui/backups/state.rs",
         "src/tui/backups/render.rs",
@@ -731,6 +737,25 @@ fn app_state_owns_backups_through_backups_substate() {
             backups.contains(owned_field),
             "BackupsState must own field: {owned_field}"
         );
+    }
+}
+
+#[test]
+fn inspect_search_and_jump_state_is_split_from_workspace_root() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let state =
+        fs::read_to_string(root.join("src/tui/inspect/state.rs")).expect("read inspect state");
+    let search = fs::read_to_string(root.join("src/tui/inspect/search_state.rs"))
+        .expect("read inspect search state");
+
+    for marker in [
+        "pub fn advanced_inspect_begin_jump",
+        "pub fn advanced_inspect_begin_search",
+        "pub fn advanced_inspect_jump_lba",
+        "pub fn advanced_inspect_search_next",
+    ] {
+        assert!(!state.contains(marker), "{marker} leaked back into inspect/state.rs");
+        assert!(search.contains(marker), "{marker} missing from inspect/search_state.rs");
     }
 }
 

@@ -1304,6 +1304,13 @@ application 返回结构化 `ProvisionReport/BackupReport/InspectReport`，CLI/T
 - D8-C5.3：全局写操作向导、跨工作区 `pinned_disk`、共享 DiskLayout 展示状态、表格横向视口与列顺序全部归入 `ShellState`；这些只是 UI/协调状态迁移，不改变真实写任务、身份复核或写盘安全链。
 - **D8-C COMPLETE。** `AppState` 现在被架构门禁锁定为且仅为 `ShellState + DevicesState + InspectState + BackupsState + ProvisionState` 五个所有权根；后续新增 workspace 私有字段不得重新散落到 `AppState`。
 
+#### D8-D1.1：Inspect 搜索/跳转状态拆分
+
+- 新增 `src/tui/inspect/search_state.rs`，集中承载 Jump prompt、LBA/byte offset 跳转、搜索命中构建、n/N 循环与搜索目标定位；原公开 `advanced_inspect_*` 方法签名保持不变。
+- `AdvancedInspectSearchTarget` 与数值解析/路径构造辅助函数一起迁入搜索模块，`AdvancedInspectState` 只通过私有字段持有搜索结果。
+- `inspect/state.rs` 不再承担搜索/跳转实现，硬上限从 **1900** 收紧至 **1500**；新搜索模块硬上限 **550**。本阶段不改变树模型、Sector Inspector、协议解析或任何 I/O。
+
+
 
 
 
