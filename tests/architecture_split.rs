@@ -370,6 +370,31 @@ fn cli_entry_is_split_by_command_domain() {
 }
 
 #[test]
+fn application_inspect_is_split_by_read_responsibility() {
+    for path in [
+        "src/application/inspect/model.rs",
+        "src/application/inspect/request.rs",
+        "src/application/inspect/decode.rs",
+        "src/application/inspect/source.rs",
+        "src/application/inspect/export.rs",
+        "src/application/inspect/service.rs",
+        "src/application/inspect_tree/model.rs",
+        "src/application/inspect_tree/build.rs",
+        "src/application/inspect_tree/search.rs",
+    ] {
+        exists(path);
+    }
+    assert!(lines("src/application/inspect.rs") < 160);
+    assert!(lines("src/application/inspect_tree.rs") < 80);
+    let inspect = fs::read_to_string(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("src/application/inspect.rs"),
+    )
+    .expect("read inspect service root");
+    assert!(!inspect.contains("fn run_advanced_source("));
+    assert!(!inspect.contains("fn sector_meta_text("));
+}
+
+#[test]
 fn workspace_modules_do_not_import_platform_or_diskio_directly() {
     for path in [
         "src/tui/provision/state.rs",
@@ -695,9 +720,18 @@ fn raw_write_flows_use_target_session_for_safety_transition() {
 fn inspect_disk_and_backup_sources_use_evidence_source() {
     exists("src/application/evidence.rs");
     let source = fs::read_to_string(
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("src/application/inspect.rs"),
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("src/application/inspect/service.rs"),
     )
-    .expect("read application inspect");
+    .expect("read application inspect service");
+    assert_sources_exclude(
+        rust_sources_under("src/application/inspect"),
+        &[
+            "struct AdvancedBackupReader",
+            "crate::edpb::verify_file",
+            "crate::edpb::read_raw_protocol",
+            "FileDev::open_rdonly",
+        ],
+    );
 
     for forbidden in [
         "struct AdvancedBackupReader",

@@ -1412,6 +1412,10 @@ application 返回结构化 `ProvisionReport/BackupReport/InspectReport`，CLI/T
 
 **COMPLETE。** `cli_args.rs` 保留公开参数类型、帮助文本、通用旗标工具与顶层分派；制盘、检查、信息和备份参数分别在 `cli_args/` 子模块解析。`cli.rs` 保留终端入口、提示器、提权参数桥接及结果出口；制盘、备份和设备列表命令处理迁入 `cli/commands/`，原 CLI 单元测试迁入 `cli/tests.rs`。参数错误文字、命令顺序、提权与应用服务调用保持不变。架构门禁先因目标模块缺失失败，拆分后通过；fast 门禁通过。
 
+#### D8-E2：检查应用服务与拓扑拆分
+
+**COMPLETE。** `application/inspect.rs` 收敛为错误类型与兼容导出；`inspect/` 中模型、请求范围解析、扇区解码、来源读取、导出和服务入口分别归属独立模块。`application/inspect_tree.rs` 收敛为兼容导出；拓扑模型、构建和结构化搜索分别位于 `inspect_tree/`。保留原公开类型与函数路径，原单元测试在相同模块层级的测试文件中运行。架构门禁先因目标模块缺失失败，拆分后通过；fast 门禁通过。
+
 ### D8-F：架构门禁升级
 
 - 增加完整依赖方向检查；
