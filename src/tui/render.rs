@@ -451,7 +451,7 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
                     "顶层标签：设备 ↔ 备份 · 一级 Tab/Shift-Tab 或 gt/gT 切换 · 二级 Tab/Shift-Tab 切当前页焦点 · Esc 返回上一层",
                 ));
                 help_lines.push(Line::from(
-                    "设备: Enter 当前设备 · p 制盘 · i 检查 · b 新建备份 · Ctrl-w w/W 切 Pane · 当前设备内 j/k 选分组、o 展开/折叠 · 备份: Enter/i 检查 · b 新建 · v 校验 · R 恢复 · d 删除",
+                    "设备: Enter 从列表进入信息树/从树进入详情 · Ctrl-w 切 Pane · 树内 j/k 选择、o 展开 · 详情内 j/k 滚动 · p 制盘 · i 检查 · b 备份 · 备份页: Enter/i 检查 · v 校验 · R 恢复 · d 删除",
                 ));
                 help_lines.push(Line::from(
                     "检查: / 搜索 · n/N 匹配 · gl 跳转 · Sector 0/$、gg/G、v",
@@ -563,16 +563,26 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
     } else {
         match state.workspace() {
             Workspace::Devices => {
-                if state.selected_device().is_some() {
-                    let kind = crate::tui::table_layout::TableKind::Devices;
-                    let total = crate::tui::table_layout::layout_for(kind).specs().len();
-                    format!(
-                        "Tab/Shift-Tab 或 gt/gT 标签 · Ctrl-w w/W 切 Pane · j/k 行 · h/l 激活 · </> 移列 · 0/$ 首尾列 · H/L 视口 · s 排序 · S 默认排序 · {}/{} 列 · Enter 当前设备 · p 制盘 · i 检查 · b 备份 · Esc 返回 · q 退出",
-                        state.table_active_column(kind) + 1,
-                        total
-                    )
-                } else {
-                    "Tab/Shift-Tab 或 gt/gT 标签 · r 刷新 · q 退出".to_string()
+                use crate::tui::pane::PaneId;
+                match state.devices_focused_pane() {
+                    PaneId::DevicesList if state.selected_device().is_some() => {
+                        let kind = crate::tui::table_layout::TableKind::Devices;
+                        let total = crate::tui::table_layout::layout_for(kind).specs().len();
+                        format!(
+                            "Tab/Shift-Tab 或 gt/gT 标签 · Ctrl-w 切 Pane · j/k 行 · h/l 激活 · </> 移列 · 0/$ 首尾列 · H/L 视口 · s/S 排序 · {}/{} 列 · Enter 设备信息 · p 制盘 · i 检查 · b 备份 · q 退出",
+                            state.table_active_column(kind) + 1,
+                            total
+                        )
+                    }
+                    PaneId::DevicesTree => {
+                        "Ctrl-w 切 Pane · j/k 选择节点 · o 展开/折叠 · Enter 详情 · i 检查 · p 制盘 · b 备份 · Esc 设备列表 · q 退出"
+                            .to_string()
+                    }
+                    PaneId::DevicesDetail => {
+                        "Ctrl-w 切 Pane · j/k 滚动 · gg/G 顶部/底部 · Ctrl-u/Ctrl-d 半页 · i 检查 · p 制盘 · b 备份 · Esc 信息树 · q 退出"
+                            .to_string()
+                    }
+                    _ => "Tab/Shift-Tab 或 gt/gT 标签 · r 刷新 · q 退出".to_string(),
                 }
             }
             Workspace::Inspect => {

@@ -398,7 +398,7 @@ fn capacity_detail_lines(
     {
         lines.push(Line::from(""));
         lines.push(Line::from(Span::styled(
-            "尾部区域可直接在左侧按 o 展开，不需要进入 Inspect。",
+            "尾部区域可直接在左侧按 o 展开，不需要进入深度检查。",
             muted(),
         )));
     }
@@ -486,7 +486,7 @@ fn segment_detail_lines(
         ),
         Line::from(""),
         Line::from(Span::styled(
-            "需要逐扇区、Hex 或字段证据时按 i 进入 Inspect。",
+            "需要逐扇区、十六进制或字段证据时按 i 进入深度检查。",
             muted(),
         )),
     ]
@@ -569,7 +569,7 @@ fn protocol_detail_lines(row: &crate::disk_scan::Row) -> Vec<Line<'static>> {
         field_line("onlyid", safe(row.onlyid.as_deref().unwrap_or("—"))),
         Line::from(""),
         Line::from(Span::styled(
-            "完整 LBA0～12 / LCE / raw / 字段解析请按 i 进入 Inspect。",
+            "完整 LBA0～12 / LCE / 原始数据 / 字段解析请按 i 进入深度检查。",
             muted(),
         )),
     ]

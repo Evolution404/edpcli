@@ -32,10 +32,6 @@ pub struct DevicesState {
     pub(super) pane_focus: crate::tui::pane::PaneFocus,
     pub(super) info_selected: DeviceInfoNodeKey,
     pub(super) info_expanded: BTreeSet<DeviceInfoNodeKey>,
-    // Transitional compatibility for the old flat summary contract. Remove after the
-    // remaining legacy summary helpers/tests have migrated to DeviceInfoNodeKey.
-    pub(super) summary_selected: usize,
-    pub(super) summary_expanded: u8,
 }
 
 impl Default for DevicesState {
@@ -49,9 +45,6 @@ impl Default for DevicesState {
             pane_focus: crate::tui::pane::PaneFocus::devices(),
             info_selected: DeviceInfoNodeKey::Identity,
             info_expanded,
-            summary_selected: 0,
-            summary_expanded: DeviceSummarySection::Identity.bit()
-                | DeviceSummarySection::Capacity.bit(),
         }
     }
 }

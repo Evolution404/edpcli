@@ -96,35 +96,6 @@ pub enum InputMode {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum DeviceSummarySection {
-    Identity,
-    Capacity,
-    Status,
-    Backups,
-    Protocol,
-}
-
-impl DeviceSummarySection {
-    pub const ALL: [Self; 5] = [
-        Self::Identity,
-        Self::Capacity,
-        Self::Status,
-        Self::Backups,
-        Self::Protocol,
-    ];
-
-    const fn bit(self) -> u8 {
-        match self {
-            Self::Identity => 1 << 0,
-            Self::Capacity => 1 << 1,
-            Self::Status => 1 << 2,
-            Self::Backups => 1 << 3,
-            Self::Protocol => 1 << 4,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NavCommand {
     Up,
     Down,
@@ -379,6 +350,9 @@ impl AppState {
         };
         self.shell.search_cursor = self.shell.selected;
         self.activate_search_match(self.shell.search_cursor);
+        if self.shell.workspace == Workspace::Devices {
+            self.reconcile_device_info_selection();
+        }
     }
 
     pub fn search_status(&self) -> Option<String> {
@@ -602,6 +576,7 @@ impl AppState {
                     })
                     .unwrap_or(0);
             }
+            self.reconcile_device_info_selection();
         }
     }
 
@@ -1523,7 +1498,25 @@ impl AppState {
     }
 
     pub fn device_info_selected_key(&self) -> DeviceInfoNodeKey {
-        self.devices.info_selected
+        let selected = self.devices.info_selected;
+        if self
+            .device_info_tree_rows()
+            .iter()
+            .any(|row| row.key == selected)
+        {
+            selected
+        } else {
+            DeviceInfoNodeKey::Capacity
+        }
+    }
+
+    fn reconcile_device_info_selection(&mut self) {
+        self.devices.info_selected = self.device_info_selected_key();
+        self.devices
+            .pane_focus
+            .viewport_mut(crate::tui::pane::PaneId::DevicesDetail)
+            .scroll_y
+            .top();
     }
 
     pub fn device_info_tree_rows(&self) -> Vec<DeviceInfoTreeNode> {
@@ -1647,9 +1640,10 @@ impl AppState {
         if rows.is_empty() {
             return;
         }
+        let selected = self.device_info_selected_key();
         let current = rows
             .iter()
-            .position(|row| row.key == self.devices.info_selected)
+            .position(|row| row.key == selected)
             .unwrap_or(0);
         let next = if delta < 0 {
             current.saturating_sub(delta.unsigned_abs())
@@ -1664,7 +1658,8 @@ impl AppState {
     }
 
     pub fn device_info_toggle_selected(&mut self) {
-        let key = self.devices.info_selected;
+        let key = self.device_info_selected_key();
+        self.devices.info_selected = key;
         if !matches!(
             key,
             DeviceInfoNodeKey::Capacity | DeviceInfoNodeKey::TailGroup
@@ -1687,34 +1682,24 @@ impl AppState {
             .top();
     }
 
-    pub fn device_summary_selected_section(&self) -> DeviceSummarySection {
-        DeviceSummarySection::ALL[self
-            .devices
-            .summary_selected
-            .min(DeviceSummarySection::ALL.len() - 1)]
-    }
-
-    pub fn device_summary_section_expanded(&self, section: DeviceSummarySection) -> bool {
-        self.devices.summary_expanded & section.bit() != 0
-    }
-
-    pub fn device_summary_move_section(&mut self, delta: isize) {
-        let max = DeviceSummarySection::ALL.len().saturating_sub(1);
-        self.devices.summary_selected = if delta < 0 {
-            self.devices
-                .summary_selected
-                .saturating_sub(delta.unsigned_abs())
-        } else {
-            self.devices
-                .summary_selected
-                .saturating_add(delta as usize)
-                .min(max)
-        };
-    }
-
-    pub fn device_summary_toggle_selected_section(&mut self) {
-        let section = self.device_summary_selected_section();
-        self.devices.summary_expanded ^= section.bit();
+    fn device_info_detail_line_count(&self) -> usize {
+        match self.device_info_selected_key() {
+            DeviceInfoNodeKey::Identity => 17,
+            DeviceInfoNodeKey::Capacity => self
+                .selected_device()
+                .and_then(|row| row.canonical_layout().ok())
+                .map(|model| model.collapsed_tail_model().segments.len() + 9)
+                .unwrap_or(3),
+            DeviceInfoNodeKey::TailGroup => self
+                .selected_device()
+                .and_then(|row| row.canonical_layout().ok())
+                .and_then(|model| model.tail_group().map(|tail| tail.children.len() + 4))
+                .unwrap_or(3),
+            DeviceInfoNodeKey::LayoutSegment { .. } => 10,
+            DeviceInfoNodeKey::Status => 10,
+            DeviceInfoNodeKey::Backups => 5,
+            DeviceInfoNodeKey::Protocol => 10,
+        }
     }
 
     pub fn disk_layout_tail_expansion(&self) -> super::disk_layout::TailExpansion {
@@ -2100,6 +2085,9 @@ impl AppState {
                         self.pane_viewport_mut(pane).scroll_y.line_up();
                     } else {
                         self.shell.selected = self.shell.selected.saturating_sub(1);
+                        if self.shell.workspace == Workspace::Devices {
+                            self.reconcile_device_info_selection();
+                        }
                     }
                 }
             }
@@ -2126,7 +2114,9 @@ impl AppState {
                     };
                     if let Some(pane) = detail_pane {
                         let content_len = match pane {
-                            crate::tui::pane::PaneId::DevicesDetail => 11,
+                            crate::tui::pane::PaneId::DevicesDetail => {
+                                self.device_info_detail_line_count()
+                            }
                             crate::tui::pane::PaneId::BackupCoverage => self
                                 .selected_backup()
                                 .and_then(|backup| backup.coverage.as_ref())
@@ -2140,12 +2130,61 @@ impl AppState {
                     } else if self.shell.item_count > 0 {
                         self.shell.selected =
                             (self.shell.selected + 1).min(self.shell.item_count - 1);
+                        if self.shell.workspace == Workspace::Devices {
+                            self.reconcile_device_info_selection();
+                        }
                     }
                 }
             }
-            NavCommand::Top => self.shell.selected = 0,
+            NavCommand::Top
+                if self.shell.workspace == Workspace::Devices
+                    && self.devices_focused_pane()
+                        == crate::tui::pane::PaneId::DevicesDetail =>
+            {
+                self.pane_viewport_mut(crate::tui::pane::PaneId::DevicesDetail)
+                    .scroll_y
+                    .top();
+            }
+            NavCommand::Bottom
+                if self.shell.workspace == Workspace::Devices
+                    && self.devices_focused_pane()
+                        == crate::tui::pane::PaneId::DevicesDetail =>
+            {
+                let content_len = self.device_info_detail_line_count();
+                self.pane_viewport_mut(crate::tui::pane::PaneId::DevicesDetail)
+                    .scroll_y
+                    .bottom(content_len, viewport_height);
+            }
+            NavCommand::HalfPageDown
+                if self.shell.workspace == Workspace::Devices
+                    && self.devices_focused_pane()
+                        == crate::tui::pane::PaneId::DevicesDetail =>
+            {
+                let content_len = self.device_info_detail_line_count();
+                self.pane_viewport_mut(crate::tui::pane::PaneId::DevicesDetail)
+                    .scroll_y
+                    .half_page_down(content_len, viewport_height);
+            }
+            NavCommand::HalfPageUp
+                if self.shell.workspace == Workspace::Devices
+                    && self.devices_focused_pane()
+                        == crate::tui::pane::PaneId::DevicesDetail =>
+            {
+                self.pane_viewport_mut(crate::tui::pane::PaneId::DevicesDetail)
+                    .scroll_y
+                    .half_page_up(viewport_height);
+            }
+            NavCommand::Top => {
+                self.shell.selected = 0;
+                if self.shell.workspace == Workspace::Devices {
+                    self.reconcile_device_info_selection();
+                }
+            }
             NavCommand::Bottom => {
                 self.shell.selected = self.shell.item_count.saturating_sub(1);
+                if self.shell.workspace == Workspace::Devices {
+                    self.reconcile_device_info_selection();
+                }
             }
             NavCommand::HalfPageDown => {
                 if self.shell.item_count > 0 {
@@ -2155,11 +2194,17 @@ impl AppState {
                         .selected
                         .saturating_add(delta)
                         .min(self.shell.item_count - 1);
+                    if self.shell.workspace == Workspace::Devices {
+                        self.reconcile_device_info_selection();
+                    }
                 }
             }
             NavCommand::HalfPageUp => {
                 let delta = (viewport_height / 2).max(1);
                 self.shell.selected = self.shell.selected.saturating_sub(delta);
+                if self.shell.workspace == Workspace::Devices {
+                    self.reconcile_device_info_selection();
+                }
             }
             NavCommand::Search => {
                 self.shell.input_buffer = self.shell.search_query.clone();
