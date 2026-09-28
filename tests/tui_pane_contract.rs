@@ -127,7 +127,6 @@ fn edp_device_with_layout() -> edpcli::disk_scan::Row {
     row
 }
 
-
 fn inspect_state() -> AppState {
     let mut state = AppState::new();
     assert!(state.begin_advanced_inspect(AdvancedInspectSource::Disk(6)));
@@ -556,13 +555,11 @@ fn d0_device_info_tree_is_semantic_and_capacity_is_expandable_in_place() {
         state.device_info_selected_key(),
         DeviceInfoNodeKey::Identity
     );
-    assert!(
-        state
-            .device_info_tree_rows()
-            .iter()
-            .find(|row| row.key == DeviceInfoNodeKey::Capacity)
-            .is_some_and(|row| row.expanded)
-    );
+    assert!(state
+        .device_info_tree_rows()
+        .iter()
+        .find(|row| row.key == DeviceInfoNodeKey::Capacity)
+        .is_some_and(|row| row.expanded));
 
     state.device_info_move_tree(1);
     assert_eq!(
@@ -570,13 +567,11 @@ fn d0_device_info_tree_is_semantic_and_capacity_is_expandable_in_place() {
         DeviceInfoNodeKey::Capacity
     );
     state.device_info_toggle_selected();
-    assert!(
-        state
-            .device_info_tree_rows()
-            .iter()
-            .find(|row| row.key == DeviceInfoNodeKey::Capacity)
-            .is_some_and(|row| !row.expanded)
-    );
+    assert!(state
+        .device_info_tree_rows()
+        .iter()
+        .find(|row| row.key == DeviceInfoNodeKey::Capacity)
+        .is_some_and(|row| !row.expanded));
 }
 
 #[test]
