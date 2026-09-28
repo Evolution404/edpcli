@@ -78,6 +78,7 @@ fn large_modules_are_split_by_domain_boundary() {
         "src/tui/provision/task.rs",
         "src/tui/inspect/state.rs",
         "src/tui/inspect/search_state.rs",
+        "src/tui/inspect/detail_state.rs",
         "src/tui/inspect/sector_state.rs",
         "src/tui/inspect/render.rs",
         "src/tui/inspect/sector_render.rs",
@@ -119,12 +120,16 @@ fn large_modules_are_split_by_domain_boundary() {
         "shared TUI action controller must stay responsibility-bounded"
     );
     assert!(
-        lines("src/tui/inspect/state.rs") < 1_500,
+        lines("src/tui/inspect/state.rs") < 1_100,
         "Inspect workspace state must stay orchestration-oriented"
     );
     assert!(
         lines("src/tui/inspect/search_state.rs") < 550,
         "Inspect search/jump state must stay responsibility-bounded"
+    );
+    assert!(
+        lines("src/tui/inspect/detail_state.rs") < 500,
+        "Inspect detail/pane state must stay responsibility-bounded"
     );
     assert!(
         lines("src/tui/inspect/sector_state.rs") < 450,
@@ -741,6 +746,31 @@ fn app_state_owns_backups_through_backups_substate() {
         assert!(
             backups.contains(owned_field),
             "BackupsState must own field: {owned_field}"
+        );
+    }
+}
+
+#[test]
+fn inspect_detail_and_pane_state_is_split_from_workspace_root() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let state =
+        fs::read_to_string(root.join("src/tui/inspect/state.rs")).expect("read inspect state");
+    let detail = fs::read_to_string(root.join("src/tui/inspect/detail_state.rs"))
+        .expect("read inspect detail state");
+
+    for marker in [
+        "pub fn advanced_inspect_detail_rows",
+        "pub fn advanced_inspect_detail_toggle_selected",
+        "pub fn advanced_inspect_focused_content_len",
+        "pub fn advanced_inspect_move_focused_vertical",
+    ] {
+        assert!(
+            !state.contains(marker),
+            "{marker} leaked back into inspect/state.rs"
+        );
+        assert!(
+            detail.contains(marker),
+            "{marker} missing from inspect/detail_state.rs"
         );
     }
 }

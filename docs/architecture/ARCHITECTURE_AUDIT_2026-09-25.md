@@ -1310,6 +1310,13 @@ application 返回结构化 `ProvisionReport/BackupReport/InspectReport`，CLI/T
 - `AdvancedInspectSearchTarget` 与数值解析/路径构造辅助函数一起迁入搜索模块，`AdvancedInspectState` 只通过私有字段持有搜索结果。
 - `inspect/state.rs` 不再承担搜索/跳转实现，硬上限从 **1900** 收紧至 **1500**；新搜索模块硬上限 **550**。本阶段不改变树模型、扇区检查器、协议解析或任何输入输出。
 
+#### D8-D1.2：检查详情与窗格状态拆分
+
+- 新增 `src/tui/inspect/detail_state.rs`，集中承载详情字段表投影、详情行展开/复制，以及当前检查窗格的内容长度、顶部/底部和垂直滚动状态转换。
+- `INSPECT_DETAIL_HEADINGS`、`InspectDetailRow` 与十六进制字段展示辅助函数随详情职责迁移，并由检查状态门面重新导出，现有渲染和表格调用接口不变。
+- `inspect/state.rs` 已降至约 **1055 行**，硬上限进一步收紧至 **1100**；详情状态模块约 **403 行**，硬上限 **500**。本阶段不改变检查树语义、搜索/跳转、扇区检查器或任何输入输出。
+
+
 
 
 
