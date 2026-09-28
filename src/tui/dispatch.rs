@@ -103,28 +103,6 @@ pub(super) fn dispatch_nav_command(
             }
             StateEffect::None
         }
-        NavCommand::BeginBackupCreateDeep => {
-            if let Some(row) = state.selected_device() {
-                let disk = row.disk;
-                let identity = row
-                    .identity_pin
-                    .as_ref()
-                    .map(state::ExpectedIdentity::from_pin);
-                if let Some(identity) = identity {
-                    state.begin_write_wizard_for_identity(
-                        state::WriteKind::BackupCreateDeep,
-                        disk,
-                        None,
-                        Some(identity),
-                    );
-                } else {
-                    state.set_notice("目标介质身份尚未完成只读采集，请刷新设备后重试。");
-                }
-            } else {
-                state.set_notice("深度备份需要先在设备页选定 U 盘。");
-            }
-            StateEffect::None
-        }
         NavCommand::VerifyBackup => {
             if let Some(path) = state.selected_backup_path() {
                 state.set_notice("正在后台校验当前备份…");
@@ -185,7 +163,6 @@ pub(super) fn palette_action_to_nav(action: command::PaletteAction) -> NavComman
         command::PaletteAction::Inspect => NavCommand::OpenInspect,
         command::PaletteAction::Restore => NavCommand::BeginRestore,
         command::PaletteAction::BackupCreate => NavCommand::BeginBackupCreate,
-        command::PaletteAction::BackupCreateDeep => NavCommand::BeginBackupCreateDeep,
         command::PaletteAction::BackupVerify => NavCommand::VerifyBackup,
         command::PaletteAction::BackupDelete => NavCommand::BeginBackupDelete,
         command::PaletteAction::BackupBatchDelete => NavCommand::BeginBackupBatchDelete,

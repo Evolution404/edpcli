@@ -239,7 +239,7 @@ fn print_topic_help(topic: &str) {
             println!("--lba 支持 7,12,240250283 或 240250283-240250288；--count 仅能与单个起始 LBA 同用。");
         }
         "backup" => {
-            println!("create 可加 --deep 执行只读文件系统分析；backup 无动作时等价于 list。");
+            println!("create 默认创建元数据备份；--deep 已弃用，仅保留历史分析兼容。backup 无动作时等价于 list。");
         }
         "provision" => {
             println!("目标: --target mode0|mode1|mode2|mode3|plain");

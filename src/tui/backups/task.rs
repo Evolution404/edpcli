@@ -270,7 +270,7 @@ impl TaskHub {
                     backup_dir,
                     &mut prompt,
                     expected,
-                    intent.kind == crate::tui::state::WriteKind::BackupCreateDeep,
+                    false,
                 )
                 .map(|_| ())
                 .map_err(|error| error.msg)

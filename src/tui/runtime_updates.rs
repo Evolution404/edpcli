@@ -26,12 +26,9 @@ pub(super) fn apply_task_updates(
     }
     if let Some((_operation_id, result)) = updates.write {
         let refresh_backups = result.is_ok()
-            && state.wizard().is_some_and(|wizard| {
-                matches!(
-                    wizard.kind,
-                    state::WriteKind::BackupCreate | state::WriteKind::BackupCreateDeep
-                )
-            });
+            && state
+                .wizard()
+                .is_some_and(|wizard| matches!(wizard.kind, state::WriteKind::BackupCreate));
         state.finish_write(result);
         if refresh_backups {
             tasks.request_backup_scan(backup_dir.to_path_buf());

@@ -61,9 +61,6 @@ impl TaskHub {
                         crate::tui::state::WriteKind::BackupCreate => {
                             Err("错误: backup create 必须走只读备份 worker".to_string())
                         }
-                        crate::tui::state::WriteKind::BackupCreateDeep => {
-                            Err("错误: deep backup 必须走只读备份 worker".to_string())
-                        }
                     }
                 })();
                 result

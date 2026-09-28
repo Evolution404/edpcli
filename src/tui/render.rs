@@ -284,7 +284,6 @@ fn draw_command_palette(frame: &mut Frame, area: ratatui::layout::Rect, state: &
         "backup-verify  校验当前备份",
         "backup-delete  删除当前备份",
         "batch-delete  删除空格勾选的多份备份",
-        "backup-deep    深度备份当前设备",
         "backup-prune   keep-N 清理旧备份",
         "refresh  刷新当前工作区",
         "help     帮助",
@@ -314,7 +313,6 @@ fn draw_wizard(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState)
     let operation = match wizard.kind {
         WriteKind::Restore => "Restore 备份还原",
         WriteKind::BackupCreate => "Create Backup 只读备份",
-        WriteKind::BackupCreateDeep => "Deep Backup 深度备份",
     };
     let mut lines = vec![
         Line::from(Span::styled(
@@ -332,9 +330,6 @@ fn draw_wizard(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState)
     lines.push(Line::from(match wizard.kind {
         WriteKind::BackupCreate => {
             "只读链：系统盘/USB整盘检查 → selector pinning → 读取协议/分区元数据/盘尾证据 → 单文件 Metadata EDPB 内部校验 → fsync；不会卸载或写 U 盘"
-        }
-        WriteKind::BackupCreateDeep => {
-            "只读链：完整读取可验证分区/文件系统证据并写入 Deep EDPB；耗时更长，但不会卸载或写 U 盘"
         }
         WriteKind::Restore => {
             "安全链：系统盘/USB整盘检查 → selector pinning → 写前保护 → 卸载/锁卷 → reopen复核 → atomic write → sync/readback/rollback"
@@ -371,6 +366,33 @@ fn draw_wizard(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState)
             lines.push(Line::from("操作已到达安全结束点；Esc 返回。"));
             if let Some(message) = &wizard.message {
                 lines.push(Line::from(safe(message)));
+            }
+            if wizard.kind == WriteKind::Restore {
+                if let Some(crate::application::WriteEvent::PostRestoreAssessment { assessment }) =
+                    wizard.progress_log.iter().rev().find(|event| {
+                        matches!(
+                            event,
+                            crate::application::WriteEvent::PostRestoreAssessment { .. }
+                        )
+                    })
+                {
+                    lines.push(Line::from("该备份不包含文件系统和用户数据。"));
+                    lines.push(Line::from("恢复后分区状态"));
+                    for partition in &assessment.partitions {
+                        let state = match partition.state {
+                            crate::application::post_restore::PostRestorePartitionState::Usable => "可用",
+                            crate::application::post_restore::PostRestorePartitionState::NeedsFormat => "需要格式化",
+                            crate::application::post_restore::PostRestorePartitionState::PasswordRequired => "需要原密码",
+                            crate::application::post_restore::PostRestorePartitionState::CryptoMetadataInvalid => "加密元数据异常",
+                            crate::application::post_restore::PostRestorePartitionState::Unsupported => "暂不支持评估",
+                        };
+                        lines.push(Line::from(format!(
+                            "  分区 {}  LBA{} + {}  {}",
+                            partition.index, partition.start_lba, partition.sector_count, state
+                        )));
+                    }
+                    lines.push(Line::from("后续格式化或重建请使用 CLI 独立确认。"));
+                }
             }
             for event in wizard.progress_log.iter().rev().take(6).rev() {
                 lines.push(Line::from(safe(&write_progress_text(event))));

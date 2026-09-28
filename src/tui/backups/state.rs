@@ -1,25 +1,7 @@
 use super::*;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum BackupCreateChoice {
-    Metadata,
-    Deep,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct BackupCreateChoiceState {
-    pub selected: usize,
-}
-
-impl BackupCreateChoiceState {
-    pub const fn choice(self) -> BackupCreateChoice {
-        if self.selected == 0 {
-            BackupCreateChoice::Metadata
-        } else {
-            BackupCreateChoice::Deep
-        }
-    }
-}
+pub struct BackupCreateChoiceState;
 
 #[derive(Debug, Clone)]
 pub struct BackupDeleteState {
@@ -122,27 +104,13 @@ impl AppState {
             self.set_notice("创建备份需要先在设备页选定目标 U 盘，再进入备份页。");
             return false;
         }
-        self.backups.create_choice = Some(BackupCreateChoiceState { selected: 0 });
+        self.backups.create_choice = Some(BackupCreateChoiceState);
         self.shell.input_mode = InputMode::Normal;
         true
     }
 
-    pub fn move_backup_create_choice(&mut self, delta: isize) {
-        let Some(choice) = self.backups.create_choice.as_mut() else {
-            return;
-        };
-        choice.selected = if delta < 0 {
-            choice.selected.saturating_sub(delta.unsigned_abs())
-        } else {
-            choice.selected.saturating_add(delta as usize).min(1)
-        };
-    }
-
-    pub fn take_backup_create_choice(&mut self) -> Option<BackupCreateChoice> {
-        self.backups
-            .create_choice
-            .take()
-            .map(BackupCreateChoiceState::choice)
+    pub fn take_backup_create_choice(&mut self) -> bool {
+        self.backups.create_choice.take().is_some()
     }
 
     pub fn cancel_backup_create_choice(&mut self) {

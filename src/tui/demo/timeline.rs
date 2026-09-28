@@ -23,7 +23,7 @@ impl DemoTimeline {
                 Phase::Backup,
                 Step::MandatoryBackup,
                 None,
-                "DEMO 制盘前备份已准备",
+                "DEMO 制盘前元数据备份已准备",
             ),
             (
                 Phase::Identity,
@@ -123,14 +123,14 @@ impl DemoTimeline {
             Step::MandatoryBackup,
             0,
             None,
-            "DEMO 慢盘：正在创建制盘前备份".into(),
+            "DEMO 慢盘：正在创建制盘前元数据备份".into(),
         );
         push(
             Phase::Backup,
             Step::MandatoryBackup,
             1,
             None,
-            "DEMO 慢盘：制盘前备份已落盘并 fsync".into(),
+            "DEMO 慢盘：制盘前元数据备份已落盘并 fsync".into(),
         );
         push(
             Phase::Identity,

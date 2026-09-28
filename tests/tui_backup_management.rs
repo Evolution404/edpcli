@@ -50,10 +50,11 @@ fn backup_workspace_uses_one_create_modal_and_only_keeps_explicit_single_key_act
 
     let render = include_str!("../src/tui/backups/render.rs");
     assert!(state.contains("begin_backup_create_choice"));
-    assert!(state.contains("BackupCreateChoice::Metadata"));
-    assert!(state.contains("BackupCreateChoice::Deep"));
-    assert!(render.contains("(\"Metadata\","));
-    assert!(render.contains("(\"Deep\","));
+    assert!(state.contains("pub struct BackupCreateChoiceState;"));
+    assert!(!state.contains("BackupCreateChoice::Deep"));
+    assert!(render.contains("创建元数据备份"));
+    assert!(render.contains("✗ 用户文件"));
+    assert!(!render.contains("进一步采集可验证分区/文件系统证据"));
 }
 
 #[test]

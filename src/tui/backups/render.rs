@@ -37,38 +37,23 @@ pub(super) fn draw_backup_create_choice(
     area: ratatui::layout::Rect,
     state: &AppState,
 ) {
-    let Some(choice) = state.backup_create_choice() else {
+    let Some(_choice) = state.backup_create_choice() else {
         return;
     };
-    let options = [
-        ("Metadata", "协议/分区元数据与盘尾证据，速度快"),
-        ("Deep", "进一步采集可验证分区/文件系统证据，耗时更长"),
-    ];
     let mut lines = vec![
-        Line::from(Span::styled("创建备份", accent())),
+        Line::from(Span::styled("创建元数据备份", accent())),
         Line::from(""),
+        Line::from("恢复内容"),
+        Line::from("  ✓ 物理身份/几何"),
+        Line::from("  ✓ 分区结构"),
+        Line::from("  ✓ EDP 协议（如适用）"),
+        Line::from("  ✗ 文件系统"),
+        Line::from("  ✗ 目录"),
+        Line::from("  ✗ 用户文件"),
     ];
-    for (index, (name, description)) in options.into_iter().enumerate() {
-        let active = index == choice.selected;
-        lines.push(Line::from(vec![
-            Span::styled(
-                if active { "▌ " } else { "  " },
-                if active {
-                    selection_marker()
-                } else {
-                    Style::default()
-                },
-            ),
-            Span::styled(name, if active { selected() } else { Style::default() }),
-            Span::raw("  "),
-            Span::styled(description, muted()),
-        ]));
-    }
     lines.extend([
         Line::from(""),
         Line::from(vec![
-            Span::styled("j/k", accent()),
-            Span::raw(" 选择   "),
             Span::styled("Enter/o", success()),
             Span::raw(" 确认   "),
             Span::styled("Esc/q", warning()),
@@ -81,7 +66,7 @@ pub(super) fn draw_backup_create_choice(
                 Block::default()
                     .borders(Borders::ALL)
                     .border_style(focused_panel())
-                    .title("备份类型"),
+                    .title("元数据备份"),
             )
             .wrap(Wrap { trim: true }),
         area,

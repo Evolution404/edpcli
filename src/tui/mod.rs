@@ -58,7 +58,6 @@ pub fn resume_argv(intent: &state::WriteIntent) -> Vec<String> {
         match intent.kind {
             state::WriteKind::Restore => "restore".to_string(),
             state::WriteKind::BackupCreate => "backup-create".to_string(),
-            state::WriteKind::BackupCreateDeep => "backup-create-deep".to_string(),
         },
         RESUME_DISK_FLAG.to_string(),
         crate::application::pin_disk_selector(intent.disk),
@@ -109,7 +108,6 @@ pub fn parse_resume_args(argv: &[String]) -> Result<Option<state::WriteIntent>, 
                 kind = Some(match value.as_str() {
                     "restore" => state::WriteKind::Restore,
                     "backup-create" => state::WriteKind::BackupCreate,
-                    "backup-create-deep" => state::WriteKind::BackupCreateDeep,
                     _ => return Err(format!("错误: 非法 TUI resume kind: {value}")),
                 });
             }
@@ -152,7 +150,7 @@ pub fn parse_resume_args(argv: &[String]) -> Result<Option<state::WriteIntent>, 
     let identity_pin =
         identity_pin.ok_or_else(|| format!("错误: TUI resume 缺少 {RESUME_IDENTITY_PIN_FLAG}"))?;
     match kind {
-        state::WriteKind::BackupCreate | state::WriteKind::BackupCreateDeep if backup.is_some() => {
+        state::WriteKind::BackupCreate if backup.is_some() => {
             Err("错误: 非 Restore resume 不允许携带备份路径".into())
         }
         state::WriteKind::Restore if backup.is_none() => {

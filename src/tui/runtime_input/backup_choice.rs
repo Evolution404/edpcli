@@ -11,23 +11,13 @@ pub(super) fn handle_backup_choice_key(
     if state.backup_create_choice().is_some() {
         if let Some(action) = keys.map(state::InputMode::Normal, key) {
             match action {
-                keymap::TuiAction::MoveUp => {
-                    state.move_backup_create_choice(-1);
-                }
-                keymap::TuiAction::MoveDown => {
-                    state.move_backup_create_choice(1);
-                }
                 keymap::TuiAction::Activate => {
-                    if let Some(choice) = state.take_backup_create_choice() {
-                        let command = match choice {
-                            state::BackupCreateChoice::Metadata => NavCommand::BeginBackupCreate,
-                            state::BackupCreateChoice::Deep => NavCommand::BeginBackupCreateDeep,
-                        };
+                    if state.take_backup_create_choice() {
                         let viewport_height = terminal_size.height.saturating_sub(9) as usize;
                         let _ = dispatch_nav_command(
                             state,
                             tasks,
-                            command,
+                            NavCommand::BeginBackupCreate,
                             backup_dir,
                             viewport_height,
                         );

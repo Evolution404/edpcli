@@ -74,11 +74,7 @@ pub(super) fn handle_backup_wizard_key(
                                 if !crate::elevate::is_root() {
                                     return Some(KeyOutcome::Elevate(intent));
                                 }
-                                if matches!(
-                                    intent.kind,
-                                    state::WriteKind::BackupCreate
-                                        | state::WriteKind::BackupCreateDeep
-                                ) {
+                                if intent.kind == state::WriteKind::BackupCreate {
                                     if let Err(message) = tasks
                                         .request_backup_create(intent, backup_dir.to_path_buf())
                                     {

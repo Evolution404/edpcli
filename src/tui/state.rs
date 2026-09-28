@@ -27,7 +27,6 @@ pub use shell_state::*;
 pub enum WriteKind {
     Restore,
     BackupCreate,
-    BackupCreateDeep,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -113,7 +112,6 @@ pub enum NavCommand {
     Refresh,
     BeginRestore,
     BeginBackupCreate,
-    BeginBackupCreateDeep,
     BeginBackupDelete,
     ToggleBackupSelection,
     BeginBackupBatchDelete,
@@ -486,12 +484,7 @@ impl AppState {
             wizard.stage = WizardStage::Result;
             wizard.progress = None;
             wizard.message = Some(match result {
-                Ok(())
-                    if matches!(
-                        wizard.kind,
-                        WriteKind::BackupCreate | WriteKind::BackupCreateDeep
-                    ) =>
-                {
+                Ok(()) if wizard.kind == WriteKind::BackupCreate => {
                     "备份创建完成；备份列表已刷新".to_string()
                 }
                 Ok(()) => "操作完成，安全链全部通过".to_string(),
@@ -2255,7 +2248,6 @@ impl AppState {
             NavCommand::Refresh
             | NavCommand::BeginRestore
             | NavCommand::BeginBackupCreate
-            | NavCommand::BeginBackupCreateDeep
             | NavCommand::BeginBackupDelete
             | NavCommand::ToggleBackupSelection
             | NavCommand::BeginBackupBatchDelete
