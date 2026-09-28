@@ -1430,6 +1430,8 @@ application 返回结构化 `ProvisionReport/BackupReport/InspectReport`，CLI/T
 - 对接近硬行数上限的模块增加软预算预警，不提高既有硬上限；
 - 架构门禁继续保证 `protocol`/`provision` 不反向依赖展示层或 `application`。
 
+**COMPLETE。** 架构门禁覆盖协议、制盘、平台、磁盘 I/O、备份容器及只读领域文件对上层应用与展示层的依赖方向，也覆盖应用层对 CLI/TUI/终端展示层的依赖方向。测试先因 `inspect_target` 的 application 兼容门面引用失败，随后发现设备扫描混入 CLI 表格渲染及应用检查文本混入 ANSI 样式。分区表引用改为底层事实源；表格渲染移至 `disk_scan_render.rs`；显示宽度原语下沉至 `text_width.rs`，检查字段文本由应用层的无色结构化排版与前端着色适配共同完成。软预算按既有硬上限的 80% 输出预警，硬上限保持不变。
+
 ### D8-G：公共接口面收敛
 
 - 审计 `lib.rs` 顶层公开模块；

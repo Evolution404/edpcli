@@ -56,6 +56,91 @@ fn assert_sources_exclude(paths: impl IntoIterator<Item = PathBuf>, forbidden: &
     }
 }
 
+fn near_hard_limit(actual: usize, hard_limit: usize) -> bool {
+    actual.saturating_mul(5) >= hard_limit.saturating_mul(4)
+}
+
+#[test]
+fn soft_size_budget_warns_before_existing_hard_limits() {
+    assert!(!near_hard_limit(79, 100));
+    assert!(near_hard_limit(80, 100));
+    for (path, hard_limit) in [
+        ("src/tui/mod.rs", 500),
+        ("src/tui/inspect/state.rs", 700),
+        ("src/tui/inspect/search_state.rs", 550),
+        ("src/tui/inspect/detail_render.rs", 500),
+        ("src/tui/provision/state.rs", 470),
+        ("src/tui/provision/field_presentation.rs", 420),
+        ("src/cli_args.rs", 550),
+        ("src/cli.rs", 350),
+        ("src/cli_args/provision.rs", 700),
+        ("src/application/inspect_tree/build.rs", 500),
+        ("src/provision/reprovision/plan.rs", 400),
+        ("src/edpb/identity.rs", 400),
+    ] {
+        let actual = lines(path);
+        assert!(
+            actual < hard_limit,
+            "{path} exceeds hard limit {hard_limit}"
+        );
+        if near_hard_limit(actual, hard_limit) {
+            eprintln!("[architecture soft budget] {path}: {actual}/{hard_limit} lines");
+        }
+    }
+}
+
+#[test]
+fn complete_dependency_direction_is_guarded() {
+    exists("src/disk_scan_render.rs");
+    exists("src/text_width.rs");
+    let lower_layer_forbidden = [
+        "crate::application",
+        "crate::tui",
+        "crate::cli",
+        "crate::ui",
+        "crate::inspect_cli",
+        "crate::metainfo_cli",
+        "crate::inspect_adapter",
+        "ratatui",
+        "crossterm",
+    ];
+    for directory in [
+        "src/protocol",
+        "src/provision",
+        "src/platform",
+        "src/diskio",
+        "src/edpb",
+    ] {
+        assert_sources_exclude(rust_sources_under(directory), &lower_layer_forbidden);
+    }
+    for path in [
+        "src/media_identity.rs",
+        "src/media_identity_observer.rs",
+        "src/partition_table.rs",
+        "src/backup_coverage.rs",
+        "src/disk_layout.rs",
+        "src/inspect_target.rs",
+        "src/backup_metadata.rs",
+        "src/backup_deep.rs",
+        "src/backup_catalog.rs",
+        "src/disk_scan.rs",
+    ] {
+        assert_sources_exclude(rust_sources_under(path), &lower_layer_forbidden);
+    }
+    let application_forbidden = [
+        "crate::tui",
+        "crate::cli",
+        "crate::ui",
+        "crate::inspect_cli",
+        "crate::metainfo_cli",
+        "ratatui",
+        "crossterm",
+    ];
+    let mut application = rust_sources_under("src/application");
+    application.extend(rust_sources_under("src/application.rs"));
+    assert_sources_exclude(application, &application_forbidden);
+}
+
 #[test]
 fn large_modules_are_split_by_domain_boundary() {
     for path in [

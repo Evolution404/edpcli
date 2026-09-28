@@ -79,7 +79,8 @@ impl<P: Prompter> Prompter for AlwaysYes<P> {
 // ══════════════════════════════════════════════════════════════════
 // 3. 外接盘一览
 // ══════════════════════════════════════════════════════════════════
-pub use crate::disk_scan::{print_disk_table, scan_disks, Row};
+pub use crate::disk_scan::{scan_disks, Row};
+pub use crate::disk_scan_render::print_disk_table;
 
 // ══════════════════════════════════════════════════════════════════
 // 7. 入口

@@ -298,7 +298,7 @@ pub struct InspectDiskContext {
     pub device_id: Option<String>,
     pub total_sectors: u64,
     pub provision_kind: Option<crate::provision::DiskProvisionKind>,
-    pub partition_table: Option<crate::application::partition_table::PartitionTableSnapshot>,
+    pub partition_table: Option<crate::partition_table::PartitionTableSnapshot>,
     pub partitions: Vec<PartitionGeometry>,
     pub lce: Option<Lba7CompatibilityGeometry>,
     pub context_issues: Vec<String>,
@@ -313,7 +313,7 @@ impl InspectDiskContext {
                     .get(4 * SECTOR..5 * SECTOR)
                     .and_then(crate::diskio::lba4_label_id_from);
                 (onlyid.is_none()
-                    && crate::application::partition_table::confirmed_plain_protocol_prefix(
+                    && crate::partition_table::confirmed_plain_protocol_prefix(
                         &protocol_image,
                         total_sectors,
                     ))
@@ -322,7 +322,7 @@ impl InspectDiskContext {
         };
         let partition_table = if provision_kind == Some(crate::provision::DiskProvisionKind::Plain)
         {
-            crate::application::partition_table::read_partition_table(total_sectors, |lba| {
+            crate::partition_table::read_partition_table(total_sectors, |lba| {
                 let start = usize::try_from(lba)
                     .ok()
                     .and_then(|value| value.checked_mul(SECTOR))
@@ -351,7 +351,7 @@ impl InspectDiskContext {
         device_id: Option<String>,
         total_sectors: u64,
         provision_kind: Option<crate::provision::DiskProvisionKind>,
-        partition_table: Option<crate::application::partition_table::PartitionTableSnapshot>,
+        partition_table: Option<crate::partition_table::PartitionTableSnapshot>,
         partition_table_issue: Option<String>,
     ) -> Self {
         let mut partitions = Vec::new();
@@ -510,7 +510,7 @@ impl InspectDiskContext {
     pub fn plain_partition_for_lba(
         &self,
         lba: u64,
-    ) -> Option<&crate::application::partition_table::PhysicalPartition> {
+    ) -> Option<&crate::partition_table::PhysicalPartition> {
         self.partition_table
             .as_ref()
             .and_then(|table| table.partition_for_lba(lba))

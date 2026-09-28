@@ -142,7 +142,7 @@ pub fn sector_meta_text(
 ",
             view.method
         ));
-        out.push_str(&super::super::inspect_text::render_fields(&view));
+        out.push_str(&super::super::inspect_text::render_fields_plain(&view));
         for note in &view.notes {
             out.push_str(&format!(
                 "  └─ {note}
@@ -156,7 +156,7 @@ pub fn sector_meta_text(
 ",
             view.method
         ));
-        out.push_str(&super::super::inspect_text::render_fields(&view));
+        out.push_str(&super::super::inspect_text::render_fields_plain(&view));
     }
 
     if let Some(partition) = context.plain_partition_for_lba(lba) {
