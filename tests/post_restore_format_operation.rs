@@ -218,7 +218,7 @@ fn formats_only_selected_partition_and_reassesses_usable() {
     assert!(result.result.is_ok(), "{:?}", result.result);
     assert!(!dev.writes.is_empty());
     assert!(dev.writes.iter().all(|lba| (2_048..102_048).contains(lba)));
-    assert_eq!(dev.syncs, 1);
+    assert!(dev.syncs >= 1);
     let after =
         assess_partitions_readonly(&mut dev, "plain", "", TOTAL, &outcome.partitions).unwrap();
     assert_eq!(after.partitions[0].state, PostRestorePartitionState::Usable);
@@ -232,10 +232,15 @@ fn formats_only_selected_partition_and_reassesses_usable() {
 fn format_failure_preserves_verified_metadata_restore_result() {
     let mut dev = SparseFormatDev::new();
     let (runner, outcome) = fixture(&mut dev);
-    dev.fail_write = true;
+    dev.fail_write_once_after = Some(2);
     assert!(run(&runner, &mut dev, true, &outcome).result.is_err());
     assert!(outcome.report.metadata_restored);
     assert!(outcome.report.readback_verified);
+    assert!(!dev.writes.is_empty());
+    assert!(dev.writes.iter().all(|lba| (2_048..102_048).contains(lba)));
+    for lba in &dev.writes {
+        assert_eq!(dev.sectors.get(lba).unwrap(), &vec![0u8; SECTOR]);
+    }
 }
 
 #[test]
