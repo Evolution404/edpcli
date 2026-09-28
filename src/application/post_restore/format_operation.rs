@@ -380,7 +380,7 @@ fn format_partition_on_disk_with_key(
         }) {
             return Err(failure("当前分区状态已变化，不再允许格式化"));
         }
-        if !prompt.confirm_write_yes(&format!(
+        if !prompt.confirm_post_restore_format_yes(&format!(
             "单独确认格式化 disk{disk} 分区 {} (LBA{} + {} sectors) 为 {}；输入 YES: ",
             partition.index,
             partition.start_lba,

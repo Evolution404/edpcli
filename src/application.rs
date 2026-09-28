@@ -53,6 +53,9 @@ pub trait Prompter {
     fn confirm_write_yes(&mut self, msg: &str) -> bool {
         self.confirm_yes(msg)
     }
+    fn confirm_post_restore_format_yes(&mut self, msg: &str) -> bool {
+        self.confirm_write_yes(msg)
+    }
     fn confirm_reinitialize_yes(&mut self, msg: &str) -> bool {
         self.confirm_write_yes(msg)
     }

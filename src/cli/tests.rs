@@ -16,6 +16,7 @@ fn yes_flag_does_not_bypass_independent_key_domain_confirmation() {
 
     let mut prompt = AlwaysYes(Reject);
     assert!(prompt.confirm_write_yes("ordinary write"));
+    assert!(!prompt.confirm_post_restore_format_yes("format restored partition"));
     assert!(!prompt.confirm_reinitialize_yes("replace encrypted key domain"));
 }
 

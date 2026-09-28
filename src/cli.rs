@@ -151,6 +151,9 @@ impl<P: Prompter> Prompter for AlwaysYes<P> {
     fn confirm_write_yes(&mut self, _msg: &str) -> bool {
         true
     }
+    fn confirm_post_restore_format_yes(&mut self, msg: &str) -> bool {
+        self.0.confirm_write_yes(msg)
+    }
     fn confirm_reinitialize_yes(&mut self, msg: &str) -> bool {
         self.0.confirm_reinitialize_yes(msg)
     }
