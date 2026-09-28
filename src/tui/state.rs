@@ -168,9 +168,6 @@ pub struct AppState {
     shell: ShellState,
     devices: DevicesState,
     backups: BackupsState,
-    selected: usize,
-    item_count: usize,
-    input_mode: InputMode,
     wizard: Option<WizardState>,
     provision: ProvisionState,
     pinned_disk: Option<u32>,
@@ -182,10 +179,6 @@ pub struct AppState {
         super::table_layout::HorizontalScrollState,
     >,
     table_column_order: std::collections::BTreeMap<super::table_layout::TableKind, Vec<usize>>,
-    input_buffer: String,
-    search_query: String,
-    search_matches: Vec<usize>,
-    search_cursor: usize,
 }
 
 impl Default for AppState {
@@ -200,9 +193,6 @@ impl AppState {
             shell: ShellState::default(),
             devices: DevicesState::default(),
             backups: BackupsState::default(),
-            selected: 0,
-            item_count: 0,
-            input_mode: InputMode::Normal,
             wizard: None,
             provision: ProvisionState::default(),
             pinned_disk: None,
@@ -211,10 +201,6 @@ impl AppState {
             disk_layout_selected: 0,
             horizontal_scroll: std::collections::BTreeMap::new(),
             table_column_order: std::collections::BTreeMap::new(),
-            input_buffer: String::new(),
-            search_query: String::new(),
-            search_matches: Vec::new(),
-            search_cursor: 0,
         }
     }
 
@@ -255,53 +241,53 @@ impl AppState {
     }
 
     pub fn input_buffer(&self) -> &str {
-        &self.input_buffer
+        &self.shell.input_buffer
     }
 
     pub fn push_input_char(&mut self, ch: char) {
-        if matches!(self.input_mode, InputMode::Search | InputMode::Command)
-            && self.input_buffer.chars().count() < 256
+        if matches!(self.shell.input_mode, InputMode::Search | InputMode::Command)
+            && self.shell.input_buffer.chars().count() < 256
             && !ch.is_control()
         {
-            self.input_buffer.push(ch);
-            if self.input_mode == InputMode::Search {
+            self.shell.input_buffer.push(ch);
+            if self.shell.input_mode == InputMode::Search {
                 self.rebuild_workspace_filter();
             }
         }
     }
 
     pub fn backspace_input(&mut self) {
-        if matches!(self.input_mode, InputMode::Search | InputMode::Command) {
-            self.input_buffer.pop();
-            if self.input_mode == InputMode::Search {
+        if matches!(self.shell.input_mode, InputMode::Search | InputMode::Command) {
+            self.shell.input_buffer.pop();
+            if self.shell.input_mode == InputMode::Search {
                 self.rebuild_workspace_filter();
             }
         }
     }
 
     pub fn take_input(&mut self) -> String {
-        std::mem::take(&mut self.input_buffer)
+        std::mem::take(&mut self.shell.input_buffer)
     }
 
     pub fn cancel_input(&mut self) {
-        let was_search = self.input_mode == InputMode::Search;
-        self.input_buffer.clear();
-        self.input_mode = InputMode::Normal;
+        let was_search = self.shell.input_mode == InputMode::Search;
+        self.shell.input_buffer.clear();
+        self.shell.input_mode = InputMode::Normal;
         if was_search {
             self.rebuild_workspace_filter();
         }
     }
 
     fn clear_search_matches(&mut self) {
-        self.search_matches.clear();
-        self.search_cursor = 0;
+        self.shell.search_matches.clear();
+        self.shell.search_cursor = 0;
     }
 
     fn active_search_query(&self) -> &str {
-        if self.input_mode == InputMode::Search {
-            self.input_buffer.trim()
+        if self.shell.input_mode == InputMode::Search {
+            self.shell.input_buffer.trim()
         } else {
-            self.search_query.as_str()
+            self.shell.search_query.as_str()
         }
     }
 
@@ -346,7 +332,7 @@ impl AppState {
                 Workspace::Backups => self.backups.rows.len(),
                 Workspace::Provision => ProvisionKind::ALL.len(),
             };
-            self.selected = 0;
+            self.shell.selected = 0;
             self.set_item_count(count);
             return;
         }
@@ -355,62 +341,62 @@ impl AppState {
             Workspace::Devices => {
                 for (index, row) in self.devices.rows.iter().enumerate() {
                     if Self::device_matches_query(row, &query) {
-                        self.search_matches.push(index);
+                        self.shell.search_matches.push(index);
                     }
                 }
             }
             Workspace::Backups => {
                 for (index, row) in self.backups.rows.iter().enumerate() {
                     if Self::backup_matches_query(row, &query) {
-                        self.search_matches.push(index);
+                        self.shell.search_matches.push(index);
                     }
                 }
             }
             Workspace::Inspect => {}
             Workspace::Provision => {}
         }
-        self.selected = 0;
-        self.set_item_count(self.search_matches.len());
+        self.shell.selected = 0;
+        self.set_item_count(self.shell.search_matches.len());
     }
 
     fn activate_search_match(&mut self, match_index: usize) {
-        if self.search_matches.get(match_index).is_none() {
+        if self.shell.search_matches.get(match_index).is_none() {
             return;
         }
-        self.selected = match_index.min(self.item_count.saturating_sub(1));
+        self.shell.selected = match_index.min(self.shell.item_count.saturating_sub(1));
     }
 
     pub fn submit_search(&mut self) -> usize {
-        self.search_query = self.input_buffer.trim().to_ascii_lowercase();
-        self.input_buffer.clear();
-        self.input_mode = InputMode::Normal;
+        self.shell.search_query = self.shell.input_buffer.trim().to_ascii_lowercase();
+        self.shell.input_buffer.clear();
+        self.shell.input_mode = InputMode::Normal;
         self.rebuild_workspace_filter();
-        self.search_matches.len()
+        self.shell.search_matches.len()
     }
 
     fn cycle_search(&mut self, reverse: bool) {
-        if self.search_matches.is_empty() || !self.shell.workspace_filter_active() {
+        if self.shell.search_matches.is_empty() || !self.shell.workspace_filter_active() {
             return;
         }
-        self.selected = if reverse {
-            if self.selected == 0 {
-                self.item_count.saturating_sub(1)
+        self.shell.selected = if reverse {
+            if self.shell.selected == 0 {
+                self.shell.item_count.saturating_sub(1)
             } else {
-                self.selected - 1
+                self.shell.selected - 1
             }
         } else {
-            (self.selected + 1) % self.item_count.max(1)
+            (self.shell.selected + 1) % self.shell.item_count.max(1)
         };
-        self.search_cursor = self.selected;
-        self.activate_search_match(self.search_cursor);
+        self.shell.search_cursor = self.shell.selected;
+        self.activate_search_match(self.shell.search_cursor);
     }
 
     pub fn search_status(&self) -> Option<String> {
-        (!self.search_query.is_empty()).then(|| {
+        (!self.shell.search_query.is_empty()).then(|| {
             format!(
                 "/{}  {} 条结果",
-                self.search_query,
-                self.search_matches.len()
+                self.shell.search_query,
+                self.shell.search_matches.len()
             )
         })
     }
@@ -455,7 +441,7 @@ impl AppState {
             self.set_notice("关键操作仍在执行，完成前不能启动其他任务。".to_string());
             return false;
         }
-        self.input_mode = InputMode::Confirm;
+        self.shell.input_mode = InputMode::Confirm;
         self.wizard = Some(WizardState {
             stage: WizardStage::Confirm,
             kind,
@@ -512,7 +498,7 @@ impl AppState {
         };
         wizard.stage = WizardStage::Running;
         wizard.message = Some("关键写盘阶段进行中，不可中断".to_string());
-        self.input_mode = InputMode::Normal;
+        self.shell.input_mode = InputMode::Normal;
         self.shell.critical_operation = true;
         Some(intent)
     }
@@ -611,10 +597,10 @@ impl AppState {
             self.rebuild_workspace_filter();
             if let Some(disk) = selected_disk {
                 let source_index = self.devices.rows.iter().position(|row| row.disk == disk);
-                self.selected = source_index
+                self.shell.selected = source_index
                     .and_then(|index| {
                         if self.shell.workspace_filter_active() {
-                            self.search_matches.iter().position(|value| *value == index)
+                            self.shell.search_matches.iter().position(|value| *value == index)
                         } else {
                             Some(index)
                         }
@@ -650,7 +636,7 @@ impl AppState {
     pub fn visible_device_indices(&self) -> Vec<usize> {
         let indices =
             if self.shell.workspace == Workspace::Devices && !self.active_search_query().is_empty() {
-                self.search_matches.clone()
+                self.shell.search_matches.clone()
             } else {
                 (0..self.devices.rows.len()).collect()
             };
@@ -672,7 +658,7 @@ impl AppState {
     pub fn visible_backup_indices(&self) -> Vec<usize> {
         let indices =
             if self.shell.workspace == Workspace::Backups && !self.active_search_query().is_empty() {
-                self.search_matches.clone()
+                self.shell.search_matches.clone()
             } else {
                 (0..self.backups.rows.len()).collect()
             };
@@ -701,7 +687,7 @@ impl AppState {
     pub fn selected_device(&self) -> Option<&crate::disk_scan::Row> {
         match self.shell.workspace {
             Workspace::Devices => {
-                let index = self.device_source_index_at_visible(self.selected)?;
+                let index = self.device_source_index_at_visible(self.shell.selected)?;
                 self.devices.rows.get(index)
             }
             Workspace::Backups | Workspace::Provision | Workspace::Inspect => self
@@ -811,12 +797,12 @@ impl AppState {
         {
             return None;
         }
-        let disk = self.provision_device_at(self.selected)?.disk;
+        let disk = self.provision_device_at(self.shell.selected)?.disk;
         self.pinned_disk = Some(disk);
         self.provision.target_disk = Some(disk);
         self.provision.stage = ProvisionStage::Menu;
         self.provision.message = None;
-        self.selected = self
+        self.shell.selected = self
             .provision
             .menu_selected
             .min(ProvisionKind::ALL.len().saturating_sub(1));
@@ -844,7 +830,7 @@ impl AppState {
         self.pinned_disk = Some(disk);
         self.provision.stage = ProvisionStage::Menu;
         self.provision.message = None;
-        self.selected = self
+        self.shell.selected = self
             .provision
             .menu_selected
             .min(ProvisionKind::ALL.len().saturating_sub(1));
@@ -864,7 +850,7 @@ impl AppState {
         if self.shell.workspace != Workspace::Backups {
             return None;
         }
-        let index = self.backup_source_index_at_visible(self.selected)?;
+        let index = self.backup_source_index_at_visible(self.shell.selected)?;
         self.backups.rows.get(index)
     }
 
@@ -899,10 +885,10 @@ impl AppState {
             self.rebuild_workspace_filter();
             if let Some(path) = selected_path {
                 let source_index = self.backups.rows.iter().position(|row| row.path == path);
-                self.selected = source_index
+                self.shell.selected = source_index
                     .and_then(|index| {
                         if self.shell.workspace_filter_active() {
-                            self.search_matches.iter().position(|value| *value == index)
+                            self.shell.search_matches.iter().position(|value| *value == index)
                         } else {
                             Some(index)
                         }
@@ -931,16 +917,16 @@ impl AppState {
             }
         }
         self.clear_search_matches();
-        self.search_query.clear();
-        self.input_buffer.clear();
-        if self.input_mode == InputMode::Search {
-            self.input_mode = InputMode::Normal;
+        self.shell.search_query.clear();
+        self.shell.input_buffer.clear();
+        if self.shell.input_mode == InputMode::Search {
+            self.shell.input_mode = InputMode::Normal;
         }
         self.shell.workspace = workspace;
-        self.selected = 0;
+        self.shell.selected = 0;
         if workspace == Workspace::Devices {
             if let Some(disk) = self.provision.target_disk {
-                self.selected = self
+                self.shell.selected = self
                     .devices
                     .iter()
                     .position(|row| row.disk == disk)
@@ -968,7 +954,7 @@ impl AppState {
     }
 
     pub const fn selected(&self) -> usize {
-        self.selected
+        self.shell.selected
     }
 
     pub fn navigation(&self) -> &NavigationStack {
@@ -1051,15 +1037,15 @@ impl AppState {
         let sanitize = |value: String| crate::ui::sanitize_terminal_text(&value);
         match kind {
             TableKind::Devices => {
-                let source = self.device_source_index_at_visible(self.selected)?;
+                let source = self.device_source_index_at_visible(self.shell.selected)?;
                 self.devices.table_view.rows.get(source).cloned()
             }
             TableKind::Backups => {
-                let source = self.backup_source_index_at_visible(self.selected)?;
+                let source = self.backup_source_index_at_visible(self.shell.selected)?;
                 self.backups.table_view.rows.get(source).cloned()
             }
             TableKind::ProvisionDevices => {
-                let row = self.provision_device_at(self.selected)?;
+                let row = self.provision_device_at(self.shell.selected)?;
                 Some(
                     vec![
                         format!("disk{}", row.disk),
@@ -1076,7 +1062,7 @@ impl AppState {
                 )
             }
             TableKind::ProvisionMenu => {
-                let source = *self.provision_menu_order().get(self.selected)?;
+                let source = *self.provision_menu_order().get(self.shell.selected)?;
                 let kind = ProvisionKind::ALL.get(source).copied()?;
                 Some(
                     vec![
@@ -1359,10 +1345,10 @@ impl AppState {
             .then(|| self.selected_backup().map(|row| row.path.clone()))
             .flatten();
         let provision_disk = (kind == super::table_layout::TableKind::ProvisionDevices)
-            .then(|| self.provision_device_at(self.selected).map(|row| row.disk))
+            .then(|| self.provision_device_at(self.shell.selected).map(|row| row.disk))
             .flatten();
         let provision_kind = (kind == super::table_layout::TableKind::ProvisionMenu)
-            .then(|| self.provision_kind_at_visible(self.selected))
+            .then(|| self.provision_kind_at_visible(self.shell.selected))
             .flatten();
         let inspect_key = (kind == super::table_layout::TableKind::InspectFields)
             .then(|| {
@@ -1386,7 +1372,7 @@ impl AppState {
                 .iter()
                 .position(|index| self.devices.rows[*index].disk == disk)
             {
-                self.selected = position;
+                self.shell.selected = position;
             }
         }
         if let Some(path) = backup_path {
@@ -1395,7 +1381,7 @@ impl AppState {
                 .iter()
                 .position(|index| self.backups.rows[*index].path == path)
             {
-                self.selected = position;
+                self.shell.selected = position;
             }
         }
         if let Some(disk) = provision_disk {
@@ -1404,7 +1390,7 @@ impl AppState {
                 .iter()
                 .position(|index| self.devices.rows[*index].disk == disk)
             {
-                self.selected = position;
+                self.shell.selected = position;
             }
         }
         if let Some(kind) = provision_kind {
@@ -1417,7 +1403,7 @@ impl AppState {
                     .iter()
                     .position(|index| *index == actual)
                 {
-                    self.selected = position;
+                    self.shell.selected = position;
                 }
             }
         }
@@ -1671,8 +1657,8 @@ impl AppState {
         };
         self.shell.navigation.push(NavigationFrame {
             location,
-            selection: self.selected,
-            item_count: self.item_count,
+            selection: self.shell.selected,
+            item_count: self.shell.item_count,
             panel: None,
             tree_selection: 0,
             pane_focus,
@@ -1694,7 +1680,7 @@ impl AppState {
                 NavigationLocation::SectorInspector => return,
             };
             self.switch_workspace(workspace);
-            self.selected = frame.selection.min(self.item_count.saturating_sub(1));
+            self.shell.selected = frame.selection.min(self.shell.item_count.saturating_sub(1));
             if let Some(pane_focus) = frame.pane_focus {
                 match workspace {
                     Workspace::Devices => self.devices.pane_focus = pane_focus,
@@ -1715,11 +1701,11 @@ impl AppState {
     }
 
     pub const fn item_count(&self) -> usize {
-        self.item_count
+        self.shell.item_count
     }
 
     pub const fn input_mode(&self) -> InputMode {
-        self.input_mode
+        self.shell.input_mode
     }
 
     pub const fn is_critical_operation(&self) -> bool {
@@ -1731,11 +1717,11 @@ impl AppState {
     }
 
     pub fn set_item_count(&mut self, item_count: usize) {
-        self.item_count = item_count;
+        self.shell.item_count = item_count;
         if item_count == 0 {
-            self.selected = 0;
+            self.shell.selected = 0;
         } else {
-            self.selected = self.selected.min(item_count - 1);
+            self.shell.selected = self.shell.selected.min(item_count - 1);
         }
     }
 
@@ -1848,15 +1834,15 @@ impl AppState {
             }
             if self.wizard.is_some() {
                 self.wizard = None;
-                self.input_mode = InputMode::Normal;
+                self.shell.input_mode = InputMode::Normal;
                 return StateEffect::None;
             }
             if self.backups.delete.is_some() {
                 self.backups.delete = None;
-                self.input_mode = InputMode::Normal;
+                self.shell.input_mode = InputMode::Normal;
                 return StateEffect::None;
             }
-            if self.input_mode != InputMode::Normal {
+            if self.shell.input_mode != InputMode::Normal {
                 self.cancel_input();
                 return StateEffect::None;
             }
@@ -1911,7 +1897,7 @@ impl AppState {
                     if let Some(pane) = detail_pane {
                         self.pane_viewport_mut(pane).scroll_y.line_up();
                     } else {
-                        self.selected = self.selected.saturating_sub(1);
+                        self.shell.selected = self.shell.selected.saturating_sub(1);
                     }
                 }
             }
@@ -1949,34 +1935,34 @@ impl AppState {
                         self.pane_viewport_mut(pane)
                             .scroll_y
                             .line_down(content_len, viewport_height);
-                    } else if self.item_count > 0 {
-                        self.selected = (self.selected + 1).min(self.item_count - 1);
+                    } else if self.shell.item_count > 0 {
+                        self.shell.selected = (self.shell.selected + 1).min(self.shell.item_count - 1);
                     }
                 }
             }
-            NavCommand::Top => self.selected = 0,
+            NavCommand::Top => self.shell.selected = 0,
             NavCommand::Bottom => {
-                self.selected = self.item_count.saturating_sub(1);
+                self.shell.selected = self.shell.item_count.saturating_sub(1);
             }
             NavCommand::HalfPageDown => {
-                if self.item_count > 0 {
+                if self.shell.item_count > 0 {
                     let delta = (viewport_height / 2).max(1);
-                    self.selected = self.selected.saturating_add(delta).min(self.item_count - 1);
+                    self.shell.selected = self.shell.selected.saturating_add(delta).min(self.shell.item_count - 1);
                 }
             }
             NavCommand::HalfPageUp => {
                 let delta = (viewport_height / 2).max(1);
-                self.selected = self.selected.saturating_sub(delta);
+                self.shell.selected = self.shell.selected.saturating_sub(delta);
             }
             NavCommand::Search => {
-                self.input_buffer = self.search_query.clone();
-                self.input_mode = InputMode::Search;
+                self.shell.input_buffer = self.shell.search_query.clone();
+                self.shell.input_mode = InputMode::Search;
             }
             NavCommand::CommandPalette => {
-                self.input_buffer.clear();
-                self.input_mode = InputMode::Command;
+                self.shell.input_buffer.clear();
+                self.shell.input_mode = InputMode::Command;
             }
-            NavCommand::Help => self.input_mode = InputMode::Help,
+            NavCommand::Help => self.shell.input_mode = InputMode::Help,
             NavCommand::Refresh
             | NavCommand::BeginRestore
             | NavCommand::BeginBackupCreate

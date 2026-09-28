@@ -785,9 +785,16 @@ fn app_state_owns_global_shell_state_through_shell_substate() {
         "notice: Option<String>",
         "notice_at: Option<std::time::Instant>",
         "animation_frame: u64",
+        "selected: usize",
+        "item_count: usize",
+        "input_mode: InputMode",
+        "input_buffer: String",
+        "search_query: String",
+        "search_matches: Vec<usize>",
+        "search_cursor: usize",
     ] {
         assert!(
-            !app_state.contains(legacy_field),
+            !app_state.lines().any(|line| line.trim() == format!("{legacy_field},")),
             "global shell field must live in ShellState: {legacy_field}"
         );
         assert!(

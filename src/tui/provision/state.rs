@@ -232,19 +232,19 @@ impl AppState {
         {
             return false;
         }
-        self.input_mode = InputMode::Insert;
+        self.shell.input_mode = InputMode::Insert;
         self.provision_sync_cursor_to_end();
         true
     }
 
     pub fn provision_end_insert(&mut self) {
-        if self.input_mode == InputMode::Insert {
-            self.input_mode = InputMode::Normal;
+        if self.shell.input_mode == InputMode::Insert {
+            self.shell.input_mode = InputMode::Normal;
         }
     }
 
     pub fn provision_reset(&mut self) {
-        self.input_mode = InputMode::Normal;
+        self.shell.input_mode = InputMode::Normal;
         let selected = self
             .provision
             .menu_selected
@@ -259,17 +259,17 @@ impl AppState {
             if target_disk.is_some() {
                 self.provision.stage = ProvisionStage::Menu;
                 self.set_item_count(ProvisionKind::ALL.len());
-                self.selected = self.provision_menu_visible_position(selected).unwrap_or(0);
+                self.shell.selected = self.provision_menu_visible_position(selected).unwrap_or(0);
             } else {
                 self.provision.stage = ProvisionStage::SelectDisk;
                 self.set_item_count(self.provision_selectable_devices().count());
-                self.selected = 0;
+                self.shell.selected = 0;
             }
         }
     }
 
     pub fn provision_begin_selected(&mut self) -> ProvisionKind {
-        let index = self.provision_menu_source_index_or_default(self.selected);
+        let index = self.provision_menu_source_index_or_default(self.shell.selected);
         let kind = ProvisionKind::ALL[index];
         if self.selected_device().is_none() {
             self.provision.stage = ProvisionStage::SelectDisk;
@@ -393,7 +393,7 @@ impl AppState {
             None => "./edp-plain.img".into(),
         };
         self.provision.stage = ProvisionStage::ExportPath;
-        self.input_mode = InputMode::Insert;
+        self.shell.input_mode = InputMode::Insert;
         self.provision.message = None;
     }
 
@@ -437,7 +437,7 @@ impl AppState {
 
     pub fn provision_finish_export(&mut self, result: Result<std::path::PathBuf, String>) {
         self.provision.stage = ProvisionStage::Review;
-        self.input_mode = InputMode::Normal;
+        self.shell.input_mode = InputMode::Normal;
         self.provision.message = Some(match result {
             Ok(path) => format!("镜像导出完成：{}", path.display()),
             Err(message) => message,
@@ -448,14 +448,14 @@ impl AppState {
         if self.provision.stage == ProvisionStage::ExportPath {
             self.provision.stage = ProvisionStage::Review;
             self.provision.message = None;
-            self.input_mode = InputMode::Normal;
+            self.shell.input_mode = InputMode::Normal;
         }
     }
 
     pub fn provision_begin_confirm(&mut self) {
         if self.provision.prepared.is_some() {
             self.provision.stage = ProvisionStage::Confirm;
-            self.input_mode = InputMode::Confirm;
+            self.shell.input_mode = InputMode::Confirm;
             self.provision.confirmation.clear();
             self.provision.message = None;
         }
@@ -486,7 +486,7 @@ impl AppState {
         }
         let prepared = self.provision.prepared.take()?;
         self.provision.stage = ProvisionStage::Running;
-        self.input_mode = InputMode::Normal;
+        self.shell.input_mode = InputMode::Normal;
         self.provision.message = Some("事务写盘进行中；退出请求会延迟到安全检查点".into());
         self.provision.result_status = None;
         self.provision.run = Some(ProvisionRunState::new());
@@ -501,7 +501,7 @@ impl AppState {
     ) {
         self.shell.critical_operation = false;
         self.provision.stage = ProvisionStage::Result;
-        self.input_mode = InputMode::Normal;
+        self.shell.input_mode = InputMode::Normal;
         match result {
             Ok(outcome) => {
                 self.provision.result_status = Some(outcome.execution_status());

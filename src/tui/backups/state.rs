@@ -13,7 +13,7 @@ pub struct BackupCreateChoiceState {
 
 impl BackupCreateChoiceState {
     pub const fn choice(self) -> BackupCreateChoice {
-        if self.selected == 0 {
+        if self.shell.selected == 0 {
             BackupCreateChoice::Metadata
         } else {
             BackupCreateChoice::Deep
@@ -123,7 +123,7 @@ impl AppState {
             return false;
         }
         self.backups.create_choice = Some(BackupCreateChoiceState { selected: 0 });
-        self.input_mode = InputMode::Normal;
+        self.shell.input_mode = InputMode::Normal;
         true
     }
 
@@ -201,7 +201,7 @@ impl AppState {
             self.set_notice("先在备份页按空格勾选至少一份备份。");
             return None;
         }
-        self.input_mode = InputMode::Normal;
+        self.shell.input_mode = InputMode::Normal;
         self.backups.batch_delete = Some(BackupBatchDeleteState {
             stage: BackupBatchDeleteStage::Planning,
             prepared: None,
@@ -241,7 +241,7 @@ impl AppState {
                 batch.stage = BackupBatchDeleteStage::Confirm;
                 batch.confirmation.clear();
                 batch.message = None;
-                self.input_mode = InputMode::Confirm;
+                self.shell.input_mode = InputMode::Confirm;
             }
         }
     }
@@ -278,7 +278,7 @@ impl AppState {
         let plan = batch.prepared.take()?;
         batch.stage = BackupBatchDeleteStage::Running;
         batch.message = Some("正在按固定计划逐条复核并删除…".into());
-        self.input_mode = InputMode::Normal;
+        self.shell.input_mode = InputMode::Normal;
         self.shell.critical_operation = true;
         Some(plan)
     }
@@ -301,7 +301,7 @@ impl AppState {
     pub fn close_backup_batch_delete(&mut self) {
         if !self.shell.critical_operation {
             self.backups.batch_delete = None;
-            self.input_mode = InputMode::Normal;
+            self.shell.input_mode = InputMode::Normal;
         }
     }
 
@@ -317,7 +317,7 @@ impl AppState {
         if self.shell.critical_operation || self.backups.prune.is_some() {
             return false;
         }
-        self.input_mode = InputMode::Insert;
+        self.shell.input_mode = InputMode::Insert;
         self.backups.prune = Some(BackupPruneState {
             stage: BackupPruneStage::Input,
             keep_input: "3".into(),
@@ -369,7 +369,7 @@ impl AppState {
             .ok_or_else(|| "保留份数必须为大于 0 的整数".to_string())?;
         prune.stage = BackupPruneStage::Planning;
         prune.message = Some("正在后台扫描备份并生成固定清理计划…".into());
-        self.input_mode = InputMode::Normal;
+        self.shell.input_mode = InputMode::Normal;
         Ok(keep)
     }
 
@@ -382,18 +382,18 @@ impl AppState {
                 prune.prepared = Some(prepared);
                 prune.stage = BackupPruneStage::Result;
                 prune.message = Some("无需清理：当前备份已经满足保留策略。".into());
-                self.input_mode = InputMode::Normal;
+                self.shell.input_mode = InputMode::Normal;
             }
             Ok(prepared) => {
                 prune.prepared = Some(prepared);
                 prune.stage = BackupPruneStage::Review;
                 prune.message = None;
-                self.input_mode = InputMode::Normal;
+                self.shell.input_mode = InputMode::Normal;
             }
             Err(message) => {
                 prune.stage = BackupPruneStage::Input;
                 prune.message = Some(message);
-                self.input_mode = InputMode::Insert;
+                self.shell.input_mode = InputMode::Insert;
             }
         }
     }
@@ -404,7 +404,7 @@ impl AppState {
                 prune.stage = BackupPruneStage::Confirm;
                 prune.confirmation.clear();
                 prune.message = None;
-                self.input_mode = InputMode::Confirm;
+                self.shell.input_mode = InputMode::Confirm;
             }
         }
     }
@@ -430,7 +430,7 @@ impl AppState {
         let prepared = prune.prepared.take()?;
         prune.stage = BackupPruneStage::Running;
         prune.message = Some("正在逐条复核摘要并清理固定候选…".into());
-        self.input_mode = InputMode::Normal;
+        self.shell.input_mode = InputMode::Normal;
         self.shell.critical_operation = true;
         Some(prepared)
     }
@@ -449,7 +449,7 @@ impl AppState {
     pub fn close_backup_prune(&mut self) {
         if !self.shell.critical_operation {
             self.backups.prune = None;
-            self.input_mode = InputMode::Normal;
+            self.shell.input_mode = InputMode::Normal;
         }
     }
 
@@ -462,7 +462,7 @@ impl AppState {
             self.set_notice("关键操作仍在执行，完成前不能启动其他任务。".to_string());
             return false;
         }
-        self.input_mode = InputMode::Confirm;
+        self.shell.input_mode = InputMode::Confirm;
         self.backups.delete = Some(BackupDeleteState {
             stage: WizardStage::Confirm,
             path,
@@ -502,7 +502,7 @@ impl AppState {
         }
         delete.stage = WizardStage::Running;
         delete.message = Some("正在复核文件内容并删除备份…".to_string());
-        self.input_mode = InputMode::Normal;
+        self.shell.input_mode = InputMode::Normal;
         self.shell.critical_operation = true;
         Some((delete.path.clone(), delete.expected_sha256.clone()))
     }

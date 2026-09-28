@@ -746,7 +746,7 @@ impl AppState {
             search_matches: Vec::new(),
             search_cursor: 0,
         });
-        self.input_mode = InputMode::Normal;
+        self.shell.input_mode = InputMode::Normal;
         true
     }
 
@@ -1725,8 +1725,8 @@ impl AppState {
         };
         self.shell.navigation.push(NavigationFrame {
             location: NavigationLocation::Inspect,
-            selection: self.selected,
-            item_count: self.item_count,
+            selection: self.shell.selected,
+            item_count: self.shell.item_count,
             panel: Some(panel),
             tree_selection,
             pane_focus: Some(pane_focus),
@@ -1838,8 +1838,8 @@ impl AppState {
         };
         self.shell.navigation.push(NavigationFrame {
             location: NavigationLocation::Inspect,
-            selection: self.selected,
-            item_count: self.item_count,
+            selection: self.shell.selected,
+            item_count: self.shell.item_count,
             panel: Some(panel),
             tree_selection,
             pane_focus: Some(pane_focus),
