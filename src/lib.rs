@@ -34,6 +34,7 @@ pub mod metainfo;
 pub(crate) mod metainfo_cli;
 pub(crate) mod partition_table;
 pub mod platform;
+#[cfg(target_os = "macos")]
 pub(crate) mod plist;
 pub mod protocol;
 pub mod provision;
