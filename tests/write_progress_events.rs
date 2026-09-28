@@ -170,8 +170,7 @@ impl edpcli::sysinfo::CmdRunner for SerialRunner {
 #[cfg(target_os = "macos")]
 fn backup_create_and_restore_event_sequence() {
     use crate::common::*;
-    use edpcli::application::write::{backup_create_flow, restore_flow, Ctx};
-    use edpcli::common::EXIT_OK;
+    use edpcli::application::write::{backup_create_flow, restore_flow_typed, Ctx};
     use edpcli::diskio::FileDev;
 
     let Some((conv, _did)) = mode1_fixture_image("netac") else {
@@ -200,6 +199,8 @@ fn backup_create_and_restore_event_sequence() {
         backup_dir: bak.clone(),
     };
     let created = backup_create_flow(6, &mut ctx, &mut dev).unwrap();
+    assert!(created.edp_protocol_saved);
+    assert!(created.partition_count > 0);
     let tags: Vec<&str> = create_prompt.events.iter().map(tag).collect();
     assert_eq!(tags, vec!["backup-created"], "{:?}", create_prompt.events);
 
@@ -210,14 +211,19 @@ fn backup_create_and_restore_event_sequence() {
         prompt: &mut restore_prompt,
         backup_dir: bak,
     };
-    let code = restore_flow(
+    let report = restore_flow_typed(
         Some(created.path.to_string_lossy().into_owned()),
         6,
         &mut ctx,
         &mut dev,
     )
     .unwrap();
-    assert_eq!(code, EXIT_OK);
+    assert!(report.report.metadata_restored);
+    assert!(report.report.readback_verified);
+    assert_eq!(
+        report.report.restored_artifact_ids,
+        vec!["raw.protocol.lba0_12"]
+    );
     let tags: Vec<&str> = restore_prompt.events.iter().map(tag).collect();
     assert_eq!(
         tags,

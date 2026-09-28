@@ -930,6 +930,8 @@ EncryptedPartitionReinitializeRequest
 - 实现 `Usable / NeedsFormat / PasswordRequired / CryptoMetadataInvalid / Unsupported`；
 - 全部只读，不写盘。
 
+后续审计补齐生产返回值：创建备份时返回含分区数和协议区保存标记的 `MetadataBackupReport`；元数据恢复主服务返回 `MetadataRestoreOutcome`，其中 `MetadataRestoreReport` 只记录事务写入与读回验证，恢复后评估另列。旧 CLI 整数退出码仅作外层适配。
+
 **B6 — 格式化引导**
 
 **实施状态（2026-09-28）：COMPLETE。** 新增显式 `PartitionFormatRequest` / `PostRestoreFormatResult`，只有 assessment 为 `NeedsFormat` 的目标分区才能进入格式化；构造 assessment/request 本身不会写盘。Plain 与 EDP 明文分区均复用 provision 的 `build_empty_fat16/build_empty_exfat`，并抽取共享 sparse-`filesystem` write/sync/readback executor，原 provision 格式化路径也改为调用同一执行器，未引入第二套 FAT/exFAT `writer`。无 `filesystem` hint 时必须由调用方显式选择已验证格式；当前 portable `writer` 对 FAT32/NTFS 继续 fail-closed。格式化结果按分区返回，格式化失败不会修改已经成功的 `MetadataRestoreReport`。Focused tests：B6 3/3、provision `formatter` 18/18、Clippy `-D warnings` PASS。
@@ -939,6 +941,8 @@ EncryptedPartitionReinitializeRequest
 - 用户逐分区确认；
 - 无可靠 `filesystem` hint 时由用户选择；
 - format 结果与 `restore` 结果分离。
+
+后续审计补齐独立生产入口：CLI 恢复后由用户输入分区编号与空文件系统类型，再单独确认。应用层在卸载锁盘前和重开后复核固定介质身份、精确磁盘几何及所选分区几何；只写该分区，随后同步、读回并重新评估为 `Usable`。加密分区继续拒绝明文格式化，等待 B7 原密钥域路径。新的安全测试覆盖取消、状态不符、身份冲突、几何冲突、重开换盘、仅所选分区写入、写入失败与成功后的重新评估。
 
 **B7 — EDP 密钥域恢复后处理**
 

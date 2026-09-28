@@ -121,6 +121,64 @@ pub(in crate::cli) fn real_flow(
             }
         },
     };
-    let r = crate::application::write::restore_on_disk(runner, bin, n, bak, prompter, None, None);
-    finish(r)
+    let outcome = match crate::application::write::restore_on_disk_typed(
+        runner, bin, n, bak, prompter, None, None,
+    ) {
+        Ok(outcome) => outcome,
+        Err(error) => return finish(Err(error)),
+    };
+    loop {
+        let choice = prompter.prompt_line("选择要格式化的 NeedsFormat 分区编号（回车结束）: ");
+        let choice = choice.trim();
+        if choice.is_empty() {
+            break;
+        }
+        let Ok(index) = choice.parse::<u32>() else {
+            eprintln!("分区编号无效: {choice}");
+            continue;
+        };
+        let Some(partition) = outcome
+            .assessment
+            .partitions
+            .iter()
+            .find(|partition| partition.index == index)
+        else {
+            eprintln!("恢复后评估中没有分区 {index}");
+            continue;
+        };
+        if partition.state
+            != crate::application::post_restore::PostRestorePartitionState::NeedsFormat
+        {
+            eprintln!("分区 {index} 当前不是 NeedsFormat，拒绝格式化");
+            continue;
+        }
+        let filesystem = prompter.prompt_line("选择空文件系统 fat16 / exfat（回车跳过）: ");
+        let filesystem = match filesystem.trim().to_ascii_lowercase().as_str() {
+            "fat16" => crate::provision::OfficialFilesystemFormat::Fat16,
+            "exfat" => crate::provision::OfficialFilesystemFormat::ExFat,
+            "" => continue,
+            other => {
+                eprintln!("当前 portable writer 不支持 {other}");
+                continue;
+            }
+        };
+        let request = crate::application::post_restore::PartitionFormatRequest {
+            partition_index: index,
+            filesystem,
+        };
+        let label = outcome
+            .partitions
+            .iter()
+            .find(|candidate| candidate.index == index)
+            .and_then(|candidate| candidate.volume_label_hint.as_deref())
+            .unwrap_or("恢复卷");
+        let result = crate::application::post_restore::format_partition_after_restore_on_disk(
+            runner, n, prompter, &outcome, &request, label,
+        );
+        match result.result {
+            Ok(()) => println!("分区 {index} 格式化成功，读回与重新评估均通过"),
+            Err(message) => eprintln!("分区 {index} 格式化失败: {message}"),
+        }
+    }
+    EXIT_OK
 }

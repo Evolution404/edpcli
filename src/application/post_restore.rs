@@ -15,6 +15,10 @@ use crate::provision::{
     OfficialFilesystemFormat, ProvisionImage, SecretBytes,
 };
 
+mod format_operation;
+pub use format_operation::format_partition_after_restore_on_disk;
+pub use format_operation::format_partition_on_disk;
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct MetadataBackupReport {
     pub path: PathBuf,
@@ -27,6 +31,17 @@ pub struct MetadataRestoreReport {
     pub metadata_restored: bool,
     pub readback_verified: bool,
     pub restored_artifact_ids: Vec<String>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct MetadataRestoreOutcome {
+    pub report: MetadataRestoreReport,
+    pub assessment: PostRestoreAssessment,
+    pub partitions: Vec<ManifestPartition>,
+    pub device_state: String,
+    pub device_id: String,
+    pub total_sectors: u64,
+    pub format_target_pin: Option<crate::media_identity::MediaIdentityResumePin>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -122,7 +137,7 @@ impl EncryptedPartitionReinitializeRequest {
     }
 }
 
-pub fn format_partition_after_restore(
+pub(crate) fn format_partition_after_restore(
     dev: &mut dyn SectorDev,
     assessment: &PostRestoreAssessment,
     partition: &ManifestPartition,
@@ -145,6 +160,16 @@ pub fn format_partition_after_restore(
                 "分区当前状态为 {state:?}，只有 NeedsFormat 可进入明文格式化"
             ));
         }
+        let assessed = assessment
+            .partitions
+            .iter()
+            .find(|candidate| candidate.index == partition.index)
+            .expect("state lookup succeeded");
+        if assessed.start_lba != partition.start_lba
+            || assessed.sector_count != partition.sector_count
+        {
+            return Err("恢复后评估分区几何与格式化目标不一致".into());
+        }
         let image = match request.filesystem {
             OfficialFilesystemFormat::Fat16 => build_empty_fat16(
                 partition.start_lba,
@@ -164,6 +189,13 @@ pub fn format_partition_after_restore(
             )),
         }
         .map_err(|error| format!("格式化镜像生成失败: {error}"))?;
+        if image
+            .sectors()
+            .keys()
+            .any(|relative| *relative >= partition.sector_count)
+        {
+            return Err("格式化镜像写入范围超出所选分区".into());
+        }
         super::filesystem_format::write_sparse_filesystem_image(
             dev,
             partition.start_lba,

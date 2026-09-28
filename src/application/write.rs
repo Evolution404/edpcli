@@ -61,10 +61,7 @@ pub enum WriteEvent {
     },
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct BackupReport {
-    pub path: PathBuf,
-}
+pub type BackupReport = super::post_restore::MetadataBackupReport;
 
 pub struct Ctx<'a> {
     pub runner: &'a dyn CmdRunner,
@@ -718,7 +715,21 @@ pub fn backup_create_level_flow(
             ctx.clock,
         )?
     };
-    let report = BackupReport { path };
+    let verified = crate::edpb::verify_file(&path).map_err(|message| {
+        err(
+            EXIT_BACKUP,
+            format!("错误: 新创建的 EDPB 未通过完整性检查: {message}"),
+        )
+    })?;
+    let report = BackupReport {
+        path,
+        partition_count: verified.manifest.partitions.len(),
+        edp_protocol_saved: verified
+            .manifest
+            .artifacts
+            .iter()
+            .any(|artifact| artifact.id == crate::edpb::RAW_PROTOCOL_ARTIFACT_ID),
+    };
     ctx.prompt.write_event(WriteEvent::BackupCreated {
         path: report.path.clone(),
     });
@@ -771,6 +782,17 @@ pub fn restore_flow(
     ctx: &mut Ctx,
     dev: &mut dyn SectorDev,
 ) -> EdpCliResult<i32> {
+    restore_flow_typed(bin, disk, ctx, dev).map(|_| EXIT_OK)
+}
+
+/// Restore only the metadata transaction and return its verified result.
+/// The subsequent read-only assessment is reported independently via WriteEvent.
+pub fn restore_flow_typed(
+    bin: Option<String>,
+    disk: u32,
+    ctx: &mut Ctx,
+    dev: &mut dyn SectorDev,
+) -> EdpCliResult<super::post_restore::MetadataRestoreOutcome> {
     let target_session = TargetSession::<ReadOnly>::open_usb(ctx.runner, disk)?;
     let img = read_image(dev)?;
     let lba4 = &img[4 * SECTOR..5 * SECTOR];
@@ -920,7 +942,28 @@ pub fn restore_flow(
             ReopenAndVerifyError::Verify(error) => error,
         })?;
     diskio::execute_write_transaction(dev, &transaction)?;
+    let report = super::post_restore::MetadataRestoreReport {
+        metadata_restored: true,
+        readback_verified: true,
+        restored_artifact_ids: verified
+            .manifest
+            .artifacts
+            .iter()
+            .filter(|artifact| artifact.restore_policy == crate::edpb::RestorePolicy::Restorable)
+            .map(|artifact| artifact.id.clone())
+            .collect(),
+    };
     ctx.prompt.write_event(WriteEvent::RestoreWriteCompleted);
+    let format_target_pin =
+        super::media_identity_observer::observe_media_identity_readonly(ctx.runner, disk, dev)
+            .ok()
+            .map(|observed| {
+                let pin = crate::media_identity::MediaIdentityPin::new(
+                    observed.snapshot,
+                    &observed.protocol_image,
+                );
+                MediaIdentityResumePin::from_pin(&pin)
+            });
     let assessment = super::post_restore::assess_partitions_readonly(
         dev,
         &verified.manifest.snapshot.device_state,
@@ -934,9 +977,38 @@ pub fn restore_flow(
             format!("恢复后只读检查失败: {error}"),
         )
     });
-    ctx.prompt
-        .write_event(WriteEvent::PostRestoreAssessment { assessment });
-    Ok(EXIT_OK)
+    ctx.prompt.write_event(WriteEvent::PostRestoreAssessment {
+        assessment: assessment.clone(),
+    });
+    Ok(super::post_restore::MetadataRestoreOutcome {
+        report,
+        assessment,
+        partitions: verified.manifest.partitions.clone(),
+        device_state: verified.manifest.snapshot.device_state.clone(),
+        device_id: verified.manifest.device.device_id.clone(),
+        total_sectors: current_total_sectors,
+        format_target_pin,
+    })
+}
+
+pub fn restore_on_disk_typed(
+    runner: &dyn CmdRunner,
+    bin: Option<String>,
+    disk: u32,
+    backup_dir: PathBuf,
+    prompt: &mut dyn Prompter,
+    expected_onlyid: Option<&str>,
+    expected_device_id: Option<&str>,
+) -> EdpCliResult<super::post_restore::MetadataRestoreOutcome> {
+    let mut dev = open_readonly_usb_disk(runner, disk)?;
+    verify_expected_identity(runner, disk, expected_onlyid, expected_device_id, &mut dev)?;
+    let mut ctx = Ctx {
+        runner,
+        clock: &SystemClock,
+        prompt,
+        backup_dir,
+    };
+    restore_flow_typed(bin, disk, &mut ctx, &mut dev)
 }
 
 pub fn restore_on_disk(
@@ -948,15 +1020,16 @@ pub fn restore_on_disk(
     expected_onlyid: Option<&str>,
     expected_device_id: Option<&str>,
 ) -> EdpCliResult<i32> {
-    let mut dev = open_readonly_usb_disk(runner, disk)?;
-    verify_expected_identity(runner, disk, expected_onlyid, expected_device_id, &mut dev)?;
-    let mut ctx = Ctx {
+    restore_on_disk_typed(
         runner,
-        clock: &SystemClock,
-        prompt,
+        bin,
+        disk,
         backup_dir,
-    };
-    restore_flow(bin, disk, &mut ctx, &mut dev)
+        prompt,
+        expected_onlyid,
+        expected_device_id,
+    )
+    .map(|_| EXIT_OK)
 }
 
 pub fn restore_on_disk_with_pin(
