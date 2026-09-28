@@ -266,9 +266,14 @@ pub struct AdvancedInspectState {
     search_cursor: usize,
 }
 
+#[derive(Debug, Clone, Default)]
+pub struct InspectState {
+    pub(super) advanced: Option<AdvancedInspectState>,
+}
+
 impl AppState {
     pub fn advanced_inspect_breadcrumb(&self) -> Option<BreadcrumbModel> {
-        let advanced = self.advanced_inspect.as_ref()?;
+        let advanced = self.inspect.advanced.as_ref()?;
         let source = match &advanced.source {
             AdvancedInspectSource::Disk(disk) => vec!["设备".into(), format!("disk{disk}")],
             AdvancedInspectSource::Backup(path) => vec![
@@ -285,7 +290,7 @@ impl AppState {
             .advanced_inspect_tree_rows()
             .get(advanced.tree_selected)
         {
-            let rows = self.advanced_inspect_tree_rows();
+            let rows = self.inspect.advanced_tree_rows();
             let ids = row.id.split('/').collect::<Vec<_>>();
             for prefix_len in 2..=ids.len() {
                 let id = ids[..prefix_len].join("/");
@@ -304,11 +309,11 @@ impl AppState {
     }
 
     pub fn advanced_inspect(&self) -> Option<&AdvancedInspectState> {
-        self.advanced_inspect.as_ref()
+        self.inspect.advanced.as_ref()
     }
 
     pub fn advanced_inspect_focused_pane(&self) -> Option<crate::tui::pane::PaneId> {
-        self.advanced_inspect
+        self.inspect.advanced
             .as_ref()
             .map(|state| state.pane_focus.focused())
     }
@@ -344,10 +349,10 @@ impl AppState {
         use crate::application::inspect::AbsoluteByteRange;
         use crate::application::inspect_tree::InspectNodeKind;
 
-        let Some(state) = self.advanced_inspect.as_ref() else {
+        let Some(state) = self.inspect.advanced.as_ref() else {
             return Vec::new();
         };
-        let rows = self.advanced_inspect_tree_rows();
+        let rows = self.inspect.advanced_tree_rows();
         let Some(selected) = rows.get(state.tree_selected) else {
             return Vec::new();
         };
@@ -478,27 +483,27 @@ impl AppState {
             .viewport(crate::tui::pane::PaneId::InspectDetail)
             .selected
             .unwrap_or(0);
-        self.advanced_inspect_detail_rows().get(index).cloned()
+        self.inspect.advanced_detail_rows().get(index).cloned()
     }
 
     pub fn advanced_inspect_detail_toggle_selected(&mut self) {
-        let Some(row) = self.advanced_inspect_detail_selected_row() else {
+        let Some(row) = self.inspect.advanced_detail_selected_row() else {
             return;
         };
         if row.child_index.is_some() {
             return;
         }
-        let Some(lba) = self.advanced_inspect_selected_sector_lba() else {
+        let Some(lba) = self.inspect.advanced_selected_sector_lba() else {
             return;
         };
-        let Some(state) = self.advanced_inspect.as_mut() else {
+        let Some(state) = self.inspect.advanced.as_mut() else {
             return;
         };
         if !state.detail_expanded.remove(&(lba, row.field_index)) {
             state.detail_expanded.insert((lba, row.field_index));
         }
-        let count = self.advanced_inspect_detail_rows().len();
-        if let Some(state) = self.advanced_inspect.as_mut() {
+        let count = self.inspect.advanced_detail_rows().len();
+        if let Some(state) = self.inspect.advanced.as_mut() {
             let viewport = state
                 .pane_focus
                 .viewport_mut(crate::tui::pane::PaneId::InspectDetail);
@@ -507,12 +512,12 @@ impl AppState {
     }
 
     pub fn advanced_inspect_detail_yank(&mut self, raw: bool) -> Option<String> {
-        let row = self.advanced_inspect_detail_selected_row()?;
+        let row = self.inspect.advanced_detail_selected_row()?;
         if raw && row.range.is_none() {
             return None;
         }
         let value = row.cells[if raw { 5 } else { 4 }].clone();
-        self.advanced_inspect.as_mut()?.yank_register = Some(value.clone());
+        self.inspect.advanced.as_mut()?.yank_register = Some(value.clone());
         Some(value)
     }
 
@@ -528,7 +533,7 @@ impl AppState {
             return 0;
         };
         match state.pane_focus.focused() {
-            PaneId::InspectTree => self.advanced_inspect_tree_rows().len(),
+            PaneId::InspectTree => self.inspect.advanced_tree_rows().len(),
             PaneId::InspectDiskLayout => state
                 .result
                 .as_ref()
@@ -544,18 +549,18 @@ impl AppState {
                 })
                 .unwrap_or(0),
             PaneId::InspectOverview => {
-                let rows = self.advanced_inspect_tree_rows();
+                let rows = self.inspect.advanced_tree_rows();
                 let Some(row) = rows.get(state.tree_selected) else {
                     return 2;
                 };
                 8 + usize::from(row.range.byte_range.is_some()) + usize::from(row.decoder.is_some())
             }
             PaneId::InspectDetail => {
-                let detail_count = self.advanced_inspect_detail_rows().len();
+                let detail_count = self.inspect.advanced_detail_rows().len();
                 if detail_count > 0 {
                     return detail_count;
                 }
-                let rows = self.advanced_inspect_tree_rows();
+                let rows = self.inspect.advanced_tree_rows();
                 let Some(row) = rows.get(state.tree_selected) else {
                     return 1;
                 };
@@ -584,7 +589,7 @@ impl AppState {
                         })
                         .unwrap_or(2),
                     InspectNodeKind::Field => {
-                        if self.advanced_inspect_selected_field().is_some() {
+                        if self.inspect.advanced_selected_field().is_some() {
                             4
                         } else {
                             1
@@ -606,40 +611,40 @@ impl AppState {
     }
 
     pub fn advanced_inspect_focused_top(&mut self) {
-        let Some(pane) = self.advanced_inspect_focused_pane() else {
+        let Some(pane) = self.inspect.advanced_focused_pane() else {
             return;
         };
         if pane == crate::tui::pane::PaneId::InspectTree {
-            self.advanced_inspect_tree_top();
+            self.inspect.advanced_tree_top();
         } else if pane == crate::tui::pane::PaneId::InspectDetail
-            && !self.advanced_inspect_detail_rows().is_empty()
+            && !self.inspect.advanced_detail_rows().is_empty()
         {
             let viewport = self.pane_viewport_mut(pane);
             viewport.selected = Some(0);
             viewport.scroll_y.top();
-        } else if let Some(state) = self.advanced_inspect.as_mut() {
+        } else if let Some(state) = self.inspect.advanced.as_mut() {
             state.pane_focus.viewport_mut(pane).scroll_y.top();
         }
     }
 
     pub fn advanced_inspect_focused_bottom(&mut self) {
-        let Some(pane) = self.advanced_inspect_focused_pane() else {
+        let Some(pane) = self.inspect.advanced_focused_pane() else {
             return;
         };
         if pane == crate::tui::pane::PaneId::InspectTree {
-            self.advanced_inspect_tree_bottom();
+            self.inspect.advanced_tree_bottom();
             return;
         }
-        let content_len = self.advanced_inspect_focused_content_len();
+        let content_len = self.inspect.advanced_focused_content_len();
         if pane == crate::tui::pane::PaneId::InspectDetail
-            && !self.advanced_inspect_detail_rows().is_empty()
+            && !self.inspect.advanced_detail_rows().is_empty()
         {
             let viewport = self.pane_viewport_mut(pane);
             viewport.selected = Some(content_len.saturating_sub(1));
             viewport.scroll_y.bottom(content_len, 1);
             return;
         }
-        if let Some(state) = self.advanced_inspect.as_mut() {
+        if let Some(state) = self.inspect.advanced.as_mut() {
             state
                 .pane_focus
                 .viewport_mut(pane)
@@ -654,15 +659,15 @@ impl AppState {
         visible_len: usize,
         content_len: usize,
     ) {
-        let Some(pane) = self.advanced_inspect_focused_pane() else {
+        let Some(pane) = self.inspect.advanced_focused_pane() else {
             return;
         };
         if pane == crate::tui::pane::PaneId::InspectTree {
-            self.advanced_inspect_move_tree(delta);
+            self.inspect.advanced_move_tree(delta);
             return;
         }
         if pane == crate::tui::pane::PaneId::InspectDetail {
-            let rows = self.advanced_inspect_detail_rows();
+            let rows = self.inspect.advanced_detail_rows();
             if !rows.is_empty() {
                 let viewport = self.pane_viewport_mut(pane);
                 let current = viewport.selected.unwrap_or(0).min(rows.len() - 1);
@@ -698,7 +703,7 @@ impl AppState {
                 .unwrap_or(0);
             self.disk_layout_move_selection(delta, count);
         }
-        if let Some(state) = self.advanced_inspect.as_mut() {
+        if let Some(state) = self.inspect.advanced.as_mut() {
             state.pane_focus.viewport_mut(pane).scroll_y.move_lines(
                 delta,
                 content_len,
@@ -719,7 +724,7 @@ impl AppState {
         self.workspace = crate::tui::state::Workspace::Inspect;
         let mut expanded = std::collections::BTreeSet::new();
         expanded.insert("device".to_string());
-        self.advanced_inspect = Some(AdvancedInspectState {
+        self.inspect.advanced = Some(AdvancedInspectState {
             source,
             stage: AdvancedInspectStage::Running,
             result: None,
@@ -782,7 +787,7 @@ impl AppState {
         &mut self,
         result: Result<crate::application::inspect::AdvancedInspectWorkspace, String>,
     ) {
-        let Some(state) = self.advanced_inspect.as_mut() else {
+        let Some(state) = self.inspect.advanced.as_mut() else {
             return;
         };
         state.stage = AdvancedInspectStage::Browser;
@@ -984,7 +989,7 @@ impl AppState {
             }
         }
 
-        let Some(state) = self.advanced_inspect.as_ref() else {
+        let Some(state) = self.inspect.advanced.as_ref() else {
             return std::sync::Arc::new(Vec::new());
         };
         let Some(workspace) = state.result.as_ref() else {
@@ -1020,8 +1025,8 @@ impl AppState {
     }
 
     pub fn advanced_inspect_tree_index(&self, id: &str) -> Option<usize> {
-        let _ = self.advanced_inspect_tree_rows();
-        self.advanced_inspect
+        let _ = self.inspect.advanced_tree_rows();
+        self.inspect.advanced
             .as_ref()?
             .tree_view_model
             .borrow()
@@ -1032,7 +1037,7 @@ impl AppState {
     }
 
     pub fn advanced_inspect_prompt(&self) -> Option<&AdvancedInspectPrompt> {
-        self.advanced_inspect.as_ref()?.prompt.as_ref()
+        self.inspect.advanced.as_ref()?.prompt.as_ref()
     }
 
     pub fn advanced_inspect_begin_jump(&mut self) {
@@ -1073,7 +1078,7 @@ impl AppState {
     }
 
     pub fn advanced_inspect_cancel_prompt(&mut self) {
-        if let Some(state) = self.advanced_inspect.as_mut() {
+        if let Some(state) = self.inspect.advanced.as_mut() {
             state.prompt = None;
         }
     }
@@ -1136,21 +1141,21 @@ impl AppState {
                 let value = parse_inspect_jump_number(&input)?;
                 match unit {
                     AdvancedInspectJumpUnit::Lba => {
-                        self.advanced_inspect_jump_lba(value)?;
+                        self.inspect.advanced_jump_lba(value)?;
                         None
                     }
                     AdvancedInspectJumpUnit::ByteOffset => {
-                        self.advanced_inspect_jump_byte_offset(value)?
+                        self.inspect.advanced_jump_byte_offset(value)?
                     }
                 }
             }
             AdvancedInspectPrompt::Search { input } => {
-                self.advanced_inspect_search(&input)?;
+                self.inspect.advanced_search(&input)?;
                 None
             }
         };
 
-        if let Some(state) = self.advanced_inspect.as_mut() {
+        if let Some(state) = self.inspect.advanced.as_mut() {
             state.prompt = None;
         }
         Ok(request)
@@ -1190,7 +1195,7 @@ impl AppState {
             .cloned()
             .ok_or_else(|| format!("LBA{lba} 的 extent 路径为空"))?;
         let page_offset = relative / SECTOR_PAGE * SECTOR_PAGE;
-        if let Some(state) = self.advanced_inspect.as_mut() {
+        if let Some(state) = self.inspect.advanced.as_mut() {
             state.expanded.extend(row_path);
             state.lazy_offsets.insert(extent_id.clone(), page_offset);
             state.tree_revision = state.tree_revision.wrapping_add(1);
@@ -1206,7 +1211,7 @@ impl AppState {
         let target = self
             .advanced_inspect_tree_index(&target_id)
             .ok_or_else(|| format!("LBA{lba} 已翻页但目标 Sector 未 materialize"))?;
-        if let Some(state) = self.advanced_inspect.as_mut() {
+        if let Some(state) = self.inspect.advanced.as_mut() {
             state.tree_selected = target;
             reset_inspect_selected_context(state);
         }
@@ -1235,8 +1240,8 @@ impl AppState {
 
         let lba = offset / crate::common::SECTOR as u64;
         let cursor = (offset % crate::common::SECTOR as u64) as usize;
-        self.advanced_inspect_jump_lba(lba)?;
-        self.advanced_inspect_open_sector_at(lba, cursor)
+        self.inspect.advanced_jump_lba(lba)?;
+        self.inspect.advanced_open_sector_at(lba, cursor)
     }
 
     fn advanced_inspect_open_sector_at(
@@ -1318,12 +1323,12 @@ impl AppState {
             return Err(format!("未找到结构化匹配: {query}"));
         }
         let first = matches[0].clone();
-        if let Some(state) = self.advanced_inspect.as_mut() {
+        if let Some(state) = self.inspect.advanced.as_mut() {
             state.search_query = query.to_string();
             state.search_matches = matches;
             state.search_cursor = 0;
         }
-        self.advanced_inspect_focus_search_target(first)
+        self.inspect.advanced_focus_search_target(first)
     }
 
     pub fn advanced_inspect_search_next(&mut self, reverse: bool) -> Result<(), String> {
@@ -1344,11 +1349,11 @@ impl AppState {
             };
             state.search_matches[state.search_cursor].clone()
         };
-        self.advanced_inspect_focus_search_target(target)
+        self.inspect.advanced_focus_search_target(target)
     }
 
     pub fn advanced_inspect_search_status(&self) -> Option<(&str, usize, usize)> {
-        let state = self.advanced_inspect.as_ref()?;
+        let state = self.inspect.advanced.as_ref()?;
         if state.search_matches.is_empty() {
             return None;
         }
@@ -1367,7 +1372,7 @@ impl AppState {
             AdvancedInspectSearchTarget::Topology(node_path) => {
                 let row_path = inspect_row_path(&node_path);
                 let target_id = row_path.last().cloned().unwrap_or_default();
-                if let Some(state) = self.advanced_inspect.as_mut() {
+                if let Some(state) = self.inspect.advanced.as_mut() {
                     state.expanded.extend(
                         row_path
                             .iter()
@@ -1385,18 +1390,18 @@ impl AppState {
                 let selected = self
                     .advanced_inspect_tree_index(&target_id)
                     .ok_or_else(|| "搜索命中节点未能在 Tree 中定位".to_string())?;
-                if let Some(state) = self.advanced_inspect.as_mut() {
+                if let Some(state) = self.inspect.advanced.as_mut() {
                     state.tree_selected = selected;
                     reset_inspect_selected_context(state);
                 }
                 Ok(())
             }
             AdvancedInspectSearchTarget::CachedSector { lba, relative_path } => {
-                self.advanced_inspect_jump_lba(lba)?;
-                let rows = self.advanced_inspect_tree_rows();
+                self.inspect.advanced_jump_lba(lba)?;
+                let rows = self.inspect.advanced_tree_rows();
                 let base_id = rows
                     .get(
-                        self.advanced_inspect
+                        self.inspect.advanced
                             .as_ref()
                             .map(|state| state.tree_selected)
                             .unwrap_or(0),
@@ -1408,7 +1413,7 @@ impl AppState {
                     .ok_or_else(|| format!("LBA{lba} Sector 定位失败"))?;
 
                 let mut target_id = base_id.clone();
-                if let Some(state) = self.advanced_inspect.as_mut() {
+                if let Some(state) = self.inspect.advanced.as_mut() {
                     if relative_path.len() > 1 {
                         state.expanded.insert(base_id.clone());
                     }
@@ -1423,7 +1428,7 @@ impl AppState {
                 let selected = self
                     .advanced_inspect_tree_index(&target_id)
                     .ok_or_else(|| "搜索命中结构未能自动展开到目标节点".to_string())?;
-                if let Some(state) = self.advanced_inspect.as_mut() {
+                if let Some(state) = self.inspect.advanced.as_mut() {
                     state.tree_selected = selected;
                     reset_inspect_selected_context(state);
                     state.panel = AdvancedInspectPanel::Tree;
@@ -1438,8 +1443,8 @@ impl AppState {
     }
 
     pub fn advanced_inspect_move_tree(&mut self, delta: isize) {
-        let count = self.advanced_inspect_tree_rows().len();
-        let Some(state) = self.advanced_inspect.as_mut() else {
+        let count = self.inspect.advanced_tree_rows().len();
+        let Some(state) = self.inspect.advanced.as_mut() else {
             return;
         };
         if state.stage != AdvancedInspectStage::Browser || count == 0 {
@@ -1467,7 +1472,7 @@ impl AppState {
     }
 
     pub fn advanced_inspect_tree_bottom(&mut self) {
-        let count = self.advanced_inspect_tree_rows().len();
+        let count = self.inspect.advanced_tree_rows().len();
         if let Some(state) = self
             .advanced_inspect
             .as_mut()
@@ -1480,7 +1485,7 @@ impl AppState {
     }
 
     pub fn advanced_inspect_collapse_or_parent(&mut self) {
-        let rows = self.advanced_inspect_tree_rows();
+        let rows = self.inspect.advanced_tree_rows();
         let Some(selected) = self
             .advanced_inspect
             .as_ref()
@@ -1494,7 +1499,7 @@ impl AppState {
         };
 
         if row.expandable && row.expanded {
-            self.advanced_inspect_toggle_selected();
+            self.inspect.advanced_toggle_selected();
             return;
         }
 
@@ -1504,7 +1509,7 @@ impl AppState {
         else {
             return;
         };
-        if let Some(state) = self.advanced_inspect.as_mut() {
+        if let Some(state) = self.inspect.advanced.as_mut() {
             state.tree_selected = parent_index;
             reset_inspect_selected_context(state);
             state.sector = None;
@@ -1512,7 +1517,7 @@ impl AppState {
     }
 
     pub fn advanced_inspect_expand_or_child(&mut self) {
-        let rows = self.advanced_inspect_tree_rows();
+        let rows = self.inspect.advanced_tree_rows();
         let Some(selected) = self
             .advanced_inspect
             .as_ref()
@@ -1526,11 +1531,11 @@ impl AppState {
         };
 
         if row.expandable && !row.expanded {
-            self.advanced_inspect_toggle_selected();
+            self.inspect.advanced_toggle_selected();
             return;
         }
 
-        let refreshed = self.advanced_inspect_tree_rows();
+        let refreshed = self.inspect.advanced_tree_rows();
         let Some(row) = refreshed.get(selected) else {
             return;
         };
@@ -1542,7 +1547,7 @@ impl AppState {
             .find(|(_, candidate)| candidate.depth == row.depth + 1)
             .map(|(index, _)| index)
         {
-            if let Some(state) = self.advanced_inspect.as_mut() {
+            if let Some(state) = self.inspect.advanced.as_mut() {
                 state.tree_selected = child_index;
                 reset_inspect_selected_context(state);
                 state.sector = None;
@@ -1551,7 +1556,7 @@ impl AppState {
     }
 
     pub fn advanced_inspect_toggle_selected(&mut self) {
-        let rows = self.advanced_inspect_tree_rows();
+        let rows = self.inspect.advanced_tree_rows();
         let selected = self
             .advanced_inspect
             .as_ref()
@@ -1567,12 +1572,12 @@ impl AppState {
                 offset,
                 target_id,
             } => {
-                if let Some(state) = self.advanced_inspect.as_mut() {
+                if let Some(state) = self.inspect.advanced.as_mut() {
                     state.lazy_offsets.insert(extent_id, offset);
                     state.tree_revision = state.tree_revision.wrapping_add(1);
                 }
-                if let Some(target_index) = self.advanced_inspect_tree_index(&target_id) {
-                    if let Some(state) = self.advanced_inspect.as_mut() {
+                if let Some(target_index) = self.inspect.advanced_tree_index(&target_id) {
+                    if let Some(state) = self.inspect.advanced.as_mut() {
                         state.tree_selected = target_index;
                         reset_inspect_selected_context(state);
                     }
@@ -1582,14 +1587,14 @@ impl AppState {
                 if !row.expandable {
                     return;
                 }
-                if let Some(state) = self.advanced_inspect.as_mut() {
+                if let Some(state) = self.inspect.advanced.as_mut() {
                     if !state.expanded.remove(&row.id) {
                         state.expanded.insert(row.id.clone());
                     }
                     state.tree_revision = state.tree_revision.wrapping_add(1);
                 }
-                let count = self.advanced_inspect_tree_rows().len();
-                if let Some(state) = self.advanced_inspect.as_mut() {
+                let count = self.inspect.advanced_tree_rows().len();
+                if let Some(state) = self.inspect.advanced.as_mut() {
                     state.tree_selected = state.tree_selected.min(count.saturating_sub(1));
                     reset_inspect_selected_context(state);
                 }
@@ -1615,7 +1620,7 @@ impl AppState {
     pub fn advanced_inspect_enter_selected(&mut self) {
         // Sector rows are opened by `advanced_inspect_open_selected_sector()`
         // so the event loop can schedule the read without putting I/O in state.
-        let rows = self.advanced_inspect_tree_rows();
+        let rows = self.inspect.advanced_tree_rows();
         let selected = self
             .advanced_inspect
             .as_ref()
@@ -1624,7 +1629,7 @@ impl AppState {
         if selected.and_then(|index| rows.get(index)).is_none() {
             return;
         }
-        if let Some(state) = self.advanced_inspect.as_mut() {
+        if let Some(state) = self.inspect.advanced.as_mut() {
             state.panel = AdvancedInspectPanel::Overview;
             state
                 .pane_focus
@@ -1639,7 +1644,7 @@ impl AppState {
             .advanced_inspect
             .as_ref()
             .filter(|state| state.stage == AdvancedInspectStage::Browser)?;
-        let rows = self.advanced_inspect_tree_rows();
+        let rows = self.inspect.advanced_tree_rows();
         let row = rows.get(state.tree_selected)?;
         if row.kind != crate::application::inspect_tree::InspectNodeKind::Field {
             return None;
@@ -1656,11 +1661,11 @@ impl AppState {
     }
 
     pub fn advanced_inspect_view_selected_field(&mut self) -> bool {
-        let Some(field) = self.advanced_inspect_selected_field() else {
+        let Some(field) = self.inspect.advanced_selected_field() else {
             return false;
         };
         let lba = field.range.start_lba();
-        if self.advanced_inspect_jump_lba(lba).is_err() {
+        if self.inspect.advanced_jump_lba(lba).is_err() {
             return false;
         }
         let index = self
@@ -1668,7 +1673,7 @@ impl AppState {
             .iter()
             .position(|row| row.range == Some(field.range) && row.child_index.is_none())
             .unwrap_or(0);
-        if let Some(state) = self.advanced_inspect.as_mut() {
+        if let Some(state) = self.inspect.advanced.as_mut() {
             state.panel = AdvancedInspectPanel::Detail;
             state
                 .pane_focus
@@ -1683,16 +1688,16 @@ impl AppState {
     }
 
     pub fn advanced_inspect_open_selected_field(&mut self) -> Option<(AdvancedInspectSource, u64)> {
-        let field = self.advanced_inspect_selected_field()?;
+        let field = self.inspect.advanced_selected_field()?;
         self.open_inspect_field_at(field.clone(), field.range.start)
     }
 
     pub fn advanced_inspect_detail_open_selected(
         &mut self,
     ) -> Option<(AdvancedInspectSource, u64)> {
-        let row = self.advanced_inspect_detail_selected_row()?;
+        let row = self.inspect.advanced_detail_selected_row()?;
         let range = row.range?;
-        let lba = self.advanced_inspect_selected_sector_lba()?;
+        let lba = self.inspect.advanced_selected_sector_lba()?;
         let field = self
             .advanced_inspect
             .as_ref()?
@@ -1715,7 +1720,7 @@ impl AppState {
         let lba = absolute / crate::common::SECTOR as u64;
         let cursor = (absolute % crate::common::SECTOR as u64) as usize;
         let (panel, tree_selection, pane_focus) = {
-            let state = self.advanced_inspect.as_ref()?;
+            let state = self.inspect.advanced.as_ref()?;
             (state.panel, state.tree_selected, state.pane_focus.clone())
         };
         self.navigation.push(NavigationFrame {
@@ -1727,7 +1732,7 @@ impl AppState {
             pane_focus: Some(pane_focus),
             table_scroll: None,
         });
-        let state = self.advanced_inspect.as_mut()?;
+        let state = self.inspect.advanced.as_mut()?;
         let ready = state.result.as_ref().is_some_and(|workspace| {
             workspace.items.iter().any(|item| {
                 item.lba == lba && (item.decoded.is_some() || item.decode_error.is_some())
@@ -1754,18 +1759,18 @@ impl AppState {
             .advanced_inspect
             .as_ref()
             .filter(|state| state.stage == AdvancedInspectStage::Browser)?;
-        let rows = self.advanced_inspect_tree_rows();
+        let rows = self.inspect.advanced_tree_rows();
         let row = rows.get(state.tree_selected)?;
         (row.kind == crate::application::inspect_tree::InspectNodeKind::Sector)
             .then_some(row.range.start_lba)
     }
 
     pub fn advanced_inspect_preview_request(&self) -> Option<(AdvancedInspectSource, u64)> {
-        let advanced = self.advanced_inspect.as_ref()?;
+        let advanced = self.inspect.advanced.as_ref()?;
         if advanced.stage != AdvancedInspectStage::Browser || advanced.sector.is_some() {
             return None;
         }
-        let rows = self.advanced_inspect_tree_rows();
+        let rows = self.inspect.advanced_tree_rows();
         let row = rows.get(advanced.tree_selected)?;
         if row.kind != crate::application::inspect_tree::InspectNodeKind::Sector
             || row.status != crate::edpb::SemanticStatus::Identified
@@ -1786,7 +1791,7 @@ impl AppState {
     }
 
     pub fn advanced_inspect_preview_state(&self, lba: u64) -> PreviewLoadState {
-        self.advanced_inspect
+        self.inspect.advanced
             .as_ref()
             .and_then(|advanced| advanced.preview_load.get(&lba))
             .cloned()
@@ -1794,7 +1799,7 @@ impl AppState {
     }
 
     pub fn advanced_inspect_mark_preview_pending(&mut self, lba: u64) {
-        if let Some(advanced) = self.advanced_inspect.as_mut() {
+        if let Some(advanced) = self.inspect.advanced.as_mut() {
             let attempts = match advanced.preview_load.get(&lba) {
                 Some(
                     PreviewLoadState::Pending { attempts }
@@ -1811,24 +1816,24 @@ impl AppState {
     pub fn advanced_inspect_retry_selected_preview(
         &mut self,
     ) -> Option<(AdvancedInspectSource, u64)> {
-        let lba = self.advanced_inspect_selected_sector_lba()?;
-        let source = self.advanced_inspect.as_ref()?.source.clone();
+        let lba = self.inspect.advanced_selected_sector_lba()?;
+        let source = self.inspect.advanced.as_ref()?.source.clone();
         if !matches!(
-            self.advanced_inspect_preview_state(lba),
+            self.inspect.advanced_preview_state(lba),
             PreviewLoadState::Failed { .. }
         ) {
             return None;
         }
-        self.advanced_inspect_mark_preview_pending(lba);
+        self.inspect.advanced_mark_preview_pending(lba);
         Some((source, lba))
     }
 
     pub fn advanced_inspect_open_selected_sector(
         &mut self,
     ) -> Option<(AdvancedInspectSource, u64)> {
-        let lba = self.advanced_inspect_selected_sector_lba()?;
+        let lba = self.inspect.advanced_selected_sector_lba()?;
         let (panel, tree_selection, pane_focus) = {
-            let state = self.advanced_inspect.as_ref()?;
+            let state = self.inspect.advanced.as_ref()?;
             (state.panel, state.tree_selected, state.pane_focus.clone())
         };
         self.navigation.push(NavigationFrame {
@@ -1840,7 +1845,7 @@ impl AppState {
             pane_focus: Some(pane_focus),
             table_scroll: None,
         });
-        let state = self.advanced_inspect.as_mut()?;
+        let state = self.inspect.advanced.as_mut()?;
         let ready = state.result.as_ref().is_some_and(|workspace| {
             workspace.items.iter().any(|item| {
                 item.lba == lba && (item.decoded.is_some() || item.decode_error.is_some())
@@ -1868,7 +1873,7 @@ impl AppState {
             .as_ref()
             .is_some_and(|state| state.stage != AdvancedInspectStage::Running)
         {
-            self.advanced_inspect = None;
+            self.inspect.advanced = None;
             self.restore_workspace_frame();
         }
     }

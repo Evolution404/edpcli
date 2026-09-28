@@ -735,6 +735,35 @@ fn app_state_owns_backups_through_backups_substate() {
 }
 
 #[test]
+fn app_state_owns_inspect_through_inspect_substate() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let state = fs::read_to_string(root.join("src/tui/state.rs")).expect("read TUI state");
+    let inspect =
+        fs::read_to_string(root.join("src/tui/inspect/state.rs")).expect("read inspect state");
+
+    let app_state = state
+        .split("pub struct AppState {")
+        .nth(1)
+        .and_then(|tail| tail.split("impl Default for AppState").next())
+        .expect("AppState section");
+    assert!(app_state.contains("inspect: InspectState"));
+    assert!(
+        !app_state.contains("advanced_inspect: Option<AdvancedInspectState>"),
+        "Inspect workspace root state must not live directly in AppState"
+    );
+    assert!(inspect.contains("pub struct InspectState"));
+    assert!(inspect.contains("advanced: Option<AdvancedInspectState>"));
+    assert!(
+        !state.contains("self.advanced_inspect"),
+        "state facade must access Inspect workspace state through InspectState"
+    );
+    assert!(
+        !inspect.contains("self.advanced_inspect"),
+        "Inspect methods must access workspace state through InspectState"
+    );
+}
+
+#[test]
 fn production_and_demo_share_one_tui_action_controller() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let controller = fs::read_to_string(root.join("src/tui/controller.rs"))

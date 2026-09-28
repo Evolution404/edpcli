@@ -1294,6 +1294,11 @@ application 返回结构化 `ProvisionReport/BackupReport/InspectReport`，CLI/T
 - D8-C2：备份列表、校验进度、表视图、扫描状态、删除/批删/清理向导、勾选集合与备份 Pane 焦点统一归 `BackupsState` 所有；`BackupVerifyRunState` 类型也移入备份状态模块。
 - `AppState` 继续保留原有公共方法作为门面，调用方无需感知所有权迁移；本阶段不改变备份格式、删除 SHA-256 固定、写前备份或任何真实写盘安全链。
 
+- D8-C3：`AdvancedInspectState` 不再作为 `AppState` 直属字段，改由 `InspectState` 持有；检查树、Pane、搜索、prompt、预览缓存、Sector Inspector 等现有状态继续封装在 `AdvancedInspectState` 内。
+- 现有 `advanced_inspect_*` 公共方法全部保留，只把内部访问路径统一为 `inspect.advanced`；跨工作区的 `pinned_disk`、NavigationStack 与共享 DiskLayout 展示状态暂不强行归入 Inspect，避免错误所有权。
+- 新增架构门禁，禁止 `advanced_inspect` 根状态重新散落回 `AppState`。
+
+
 
 
 ### D8-D：TUI 大模块继续按职责拆分

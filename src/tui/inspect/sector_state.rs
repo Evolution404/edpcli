@@ -2,11 +2,11 @@ use super::*;
 
 impl AppState {
     pub fn advanced_inspect_sector(&self) -> Option<&SectorInspectorState> {
-        self.advanced_inspect.as_ref()?.sector.as_ref()
+        self.inspect.advanced.as_ref()?.sector.as_ref()
     }
 
     pub fn advanced_inspect_decode_request(&self) -> Option<(AdvancedInspectSource, u64)> {
-        let advanced = self.advanced_inspect.as_ref()?;
+        let advanced = self.inspect.advanced.as_ref()?;
         let sector = advanced.sector.as_ref()?;
         if sector.pending || sector.error.is_some() {
             return None;
@@ -34,7 +34,7 @@ impl AppState {
     pub fn advanced_inspect_sector_item(
         &self,
     ) -> Option<&crate::application::inspect::AdvancedInspectItem> {
-        let state = self.advanced_inspect.as_ref()?;
+        let state = self.inspect.advanced.as_ref()?;
         let sector = state.sector.as_ref()?;
         state
             .result
@@ -49,7 +49,7 @@ impl AppState {
         lba: u64,
         result: Result<crate::application::inspect::AdvancedInspectItem, String>,
     ) {
-        let Some(state) = self.advanced_inspect.as_mut() else {
+        let Some(state) = self.inspect.advanced.as_mut() else {
             return;
         };
         match result {
@@ -133,33 +133,33 @@ impl AppState {
     }
 
     pub fn advanced_inspect_sector_row_start(&mut self) {
-        if let Some(cursor) = self.advanced_inspect_sector().map(|sector| sector.cursor) {
-            self.advanced_inspect_sector_set_cursor((cursor / 16) * 16);
+        if let Some(cursor) = self.inspect.advanced_sector().map(|sector| sector.cursor) {
+            self.inspect.advanced_sector_set_cursor((cursor / 16) * 16);
         }
     }
 
     pub fn advanced_inspect_sector_row_end(&mut self) {
-        if let Some(cursor) = self.advanced_inspect_sector().map(|sector| sector.cursor) {
-            self.advanced_inspect_sector_set_cursor(
+        if let Some(cursor) = self.inspect.advanced_sector().map(|sector| sector.cursor) {
+            self.inspect.advanced_sector_set_cursor(
                 ((cursor / 16) * 16 + 15).min(crate::common::SECTOR - 1),
             );
         }
     }
 
     pub fn advanced_inspect_sector_top(&mut self) {
-        self.advanced_inspect_sector_set_cursor(0);
+        self.inspect.advanced_sector_set_cursor(0);
     }
 
     pub fn advanced_inspect_sector_bottom(&mut self) {
-        self.advanced_inspect_sector_set_cursor(crate::common::SECTOR - 1);
+        self.inspect.advanced_sector_set_cursor(crate::common::SECTOR - 1);
     }
 
     pub fn advanced_inspect_sector_half_page(&mut self, up: bool) {
-        self.advanced_inspect_sector_move_cursor(if up { -128 } else { 128 });
+        self.inspect.advanced_sector_move_cursor(if up { -128 } else { 128 });
     }
 
     pub fn advanced_inspect_sector_page(&mut self, up: bool) {
-        self.advanced_inspect_sector_move_cursor(if up { -256 } else { 256 });
+        self.inspect.advanced_sector_move_cursor(if up { -256 } else { 256 });
     }
 
     pub fn advanced_inspect_sector_move_cursor(&mut self, delta: isize) {
@@ -185,7 +185,7 @@ impl AppState {
     pub fn advanced_inspect_sector_active_field(
         &self,
     ) -> Option<crate::application::inspect::InspectField> {
-        let state = self.advanced_inspect.as_ref()?;
+        let state = self.inspect.advanced.as_ref()?;
         let sector = state.sector.as_ref()?;
         let absolute = sector
             .lba
@@ -211,9 +211,9 @@ impl AppState {
     }
 
     pub fn advanced_inspect_sector_yank(&mut self, raw_range: bool) -> Option<String> {
-        let field = self.advanced_inspect_sector_active_field();
-        let byte = self.advanced_inspect_sector_item().and_then(|item| {
-            let cursor = self.advanced_inspect_sector()?.cursor;
+        let field = self.inspect.advanced_sector_active_field();
+        let byte = self.inspect.advanced_sector_item().and_then(|item| {
+            let cursor = self.inspect.advanced_sector()?.cursor;
             item.raw.get(cursor).copied()
         });
         let value = match (raw_range, field) {
@@ -226,14 +226,14 @@ impl AppState {
             (false, Some(field)) => format!("{} = {}", field.label, field.value),
             (_, None) => format!("0x{:02X}", byte?),
         };
-        if let Some(state) = self.advanced_inspect.as_mut() {
+        if let Some(state) = self.inspect.advanced.as_mut() {
             state.yank_register = Some(value.clone());
         }
         Some(value)
     }
 
     pub fn advanced_inspect_yank_register(&self) -> Option<&str> {
-        self.advanced_inspect.as_ref()?.yank_register.as_deref()
+        self.inspect.advanced.as_ref()?.yank_register.as_deref()
     }
 
     pub fn advanced_inspect_sector_set_mode(&mut self, mode: SectorInspectMode) {
@@ -275,7 +275,7 @@ impl AppState {
         &mut self,
         delta: i64,
     ) -> Option<(AdvancedInspectSource, u64)> {
-        let state = self.advanced_inspect.as_mut()?;
+        let state = self.inspect.advanced.as_mut()?;
         let sector = state.sector.as_mut()?;
         let total = state.result.as_ref()?.topology.root.range.sector_count;
         if total == 0 {
@@ -315,7 +315,7 @@ impl AppState {
     }
 
     pub fn advanced_inspect_close_sector(&mut self) -> bool {
-        let Some(state) = self.advanced_inspect.as_mut() else {
+        let Some(state) = self.inspect.advanced.as_mut() else {
             return false;
         };
         if state.sector.take().is_some() {

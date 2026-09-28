@@ -174,7 +174,7 @@ pub struct AppState {
     wizard: Option<WizardState>,
     provision: ProvisionState,
     pinned_disk: Option<u32>,
-    advanced_inspect: Option<AdvancedInspectState>,
+    inspect: InspectState,
     disk_layout_tail: super::disk_layout::TailExpansion,
     disk_layout_selected: usize,
     navigation: NavigationStack,
@@ -213,7 +213,7 @@ impl AppState {
             wizard: None,
             provision: ProvisionState::default(),
             pinned_disk: None,
-            advanced_inspect: None,
+            inspect: InspectState::default(),
             disk_layout_tail: super::disk_layout::TailExpansion::Collapsed,
             disk_layout_selected: 0,
             navigation: NavigationStack::default(),
@@ -1003,8 +1003,8 @@ impl AppState {
                 _ => None,
             },
             Workspace::Inspect
-                if self.advanced_inspect_focused_pane() == Some(PaneId::InspectDetail)
-                    && !self.advanced_inspect_detail_rows().is_empty() =>
+                if self.inspect.advanced_focused_pane() == Some(PaneId::InspectDetail)
+                    && !self.inspect.advanced_detail_rows().is_empty() =>
             {
                 Some(TableKind::InspectFields)
             }
@@ -1101,7 +1101,7 @@ impl AppState {
                 )
             }
             TableKind::InspectFields => {
-                let row = self.advanced_inspect_detail_selected_row()?;
+                let row = self.inspect.advanced_detail_selected_row()?;
                 Some(row.cells.iter().cloned().map(sanitize).collect::<Vec<_>>())
             }
         }
@@ -1218,7 +1218,7 @@ impl AppState {
                     .iter()
                     .map(|value| display_width(value))
                     .collect::<Vec<_>>();
-                for row in self.advanced_inspect_detail_rows() {
+                for row in self.inspect.advanced_detail_rows() {
                     for (index, value) in row.cells.iter().enumerate() {
                         widths[index] = widths[index].max(display_width(value));
                     }
@@ -1377,7 +1377,7 @@ impl AppState {
             .flatten();
         let inspect_key = (kind == super::table_layout::TableKind::InspectFields)
             .then(|| {
-                self.advanced_inspect_detail_selected_row()
+                self.inspect.advanced_detail_selected_row()
                     .map(|row| (row.field_index, row.child_index, row.range))
             })
             .flatten();
@@ -1433,12 +1433,12 @@ impl AppState {
             }
         }
         if let Some(key) = inspect_key {
-            let rows = self.advanced_inspect_detail_rows();
+            let rows = self.inspect.advanced_detail_rows();
             if let Some(position) = rows
                 .iter()
                 .position(|row| (row.field_index, row.child_index, row.range) == key)
             {
-                if let Some(advanced) = self.advanced_inspect.as_mut() {
+                if let Some(advanced) = self.inspect.advanced.as_mut() {
                     advanced
                         .pane_focus
                         .viewport_mut(crate::tui::pane::PaneId::InspectDetail)
@@ -1478,7 +1478,7 @@ impl AppState {
 
     pub fn pane_viewport(&self, pane: crate::tui::pane::PaneId) -> &crate::tui::pane::PaneViewport {
         if pane.is_inspect() {
-            self.advanced_inspect
+            self.inspect.advanced
                 .as_ref()
                 .expect("Inspect pane requested without Inspect state")
                 .pane_focus
@@ -1497,7 +1497,7 @@ impl AppState {
         pane: crate::tui::pane::PaneId,
     ) -> &mut crate::tui::pane::PaneViewport {
         if pane.is_inspect() {
-            self.advanced_inspect
+            self.inspect.advanced
                 .as_mut()
                 .expect("Inspect pane requested without Inspect state")
                 .pane_focus
@@ -1809,8 +1809,8 @@ impl AppState {
                 if advanced.stage == AdvancedInspectStage::Running {
                     self.set_notice("全盘检查正在后台读取结构，请等待完成。");
                 } else if advanced.prompt.is_some() {
-                    self.advanced_inspect_cancel_prompt();
-                } else if !self.advanced_inspect_close_sector() {
+                    self.inspect.advanced_cancel_prompt();
+                } else if !self.inspect.advanced_close_sector() {
                     self.close_advanced_inspect();
                 }
                 return StateEffect::None;
